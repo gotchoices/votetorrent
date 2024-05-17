@@ -4,17 +4,18 @@ Crowd voting protocol and reference application.
 ## Glossary of Terms:
 
 * Authority - the entity or system attempting to solicit a vote
-* Solicitation - a declaration of a voting event, including the candidacy, cut-off times, and associated rules
+* Solicitation - declaration of a pending voting event, containing the roles to be filled and deadlines
+* Election - a declaration of a voting event, including the candidacy, cut-off times, and associated rules
 * Registration - list of eligible voters, compiled by the authority and made available to stakeholders
 * Stakeholders - the authority, usually the voters, and any other parties who are privy to the voter registration and vote outcome
-* Outcome - the result of a given vote (solicitation)
+* Outcome - the result of a given election
 * DHT/Kademlia - Distributed Hash Table used to communicate and transact on a peer-to-peer basis
 
 
 ## Requirements:
 
 * The authority solicits the vote, candidates, and the timeframe
-* The list of eligible voters could be fixed at solicitation, or grow until closing
+* The list of eligible voters could be fixed at start of election, or grow until closing
 * Authority may have private information on voters, but always discloses hash of private information in public information
 * The stakeholders have voter list, but only public information
 * Voter can vote without the authority or public knowing for which candidate
@@ -40,9 +41,11 @@ Crowd voting protocol and reference application.
         * Could be a meta-DHT that facilitates finding authorities and vote specific DHTs
     * CID (hash) on DHT is based on voter’s public key
     * Voter may join DHT to receive updates from authority, or may participate from notifications
-* Authority issues vote solicitation: 
-    * Includes public key, candidate list, URL(s), time frames, and voter roll (including public keys for each voter) if registration is fixed
-    * Authority signs solicitation digest
+* Authority issues solicitation:
+    * Includes public key, authority signature, description, slot list, deadlines, rules
+* Authority issues election: 
+    * Includes public key, solicitation signature, candidate list, URL(s), time frames, and voter roll (including public keys for each voter) if registration is fixed
+    * Authority signs election digest
         * Pushes onto the DHT; or
         * Makes available in API
         * …sends in notification
