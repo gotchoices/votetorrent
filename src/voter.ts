@@ -1,11 +1,13 @@
+import { DeviceSignature } from "./device-signature";
+
 export interface VoterDigest {
     solicitationDigest: string,
-    registrationKey: string,
+    rollKey: string,
 }
 
 export interface Voter {
-    registrationKey: string,
-    signature: string,
-    attestationSignature?: string,   // Device OS signature of signature
-    biometricSignature?: string,     // Enclave signature of VoterDigest
+    /** Roll entry key for the registered voter */
+    rollKey: string,
+    /** Voter's signature of the election, signed against rollKey */
+    signature: DeviceSignature,
 }

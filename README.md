@@ -42,7 +42,7 @@ Crowd voting protocol and reference application.
     * CID (hash) on DHT is based on voter’s public key
     * Voter may join DHT to receive updates from authority, or may participate from notifications
 * Authority issues solicitation:
-    * Includes public key, authority signature, description, slot list, deadlines, rules
+    * Includes public key, authority signature, description, question list, deadlines, rules
 * Authority issues election: 
     * Includes public key, solicitation signature, candidate list, URL(s), time frames, and voter roll (including public keys for each voter) if registration is fixed
     * Authority signs election digest
@@ -50,13 +50,13 @@ Crowd voting protocol and reference application.
         * Makes available in API
         * …sends in notification
 * Voter votes:
-    * Voter randomly generates a _vote identifier_, which is held privately by voter to verify presence of vote in solicitation results
-    * Voter generates a _vote entry_, consisting of (before encryption using solicitation’s public key):
-        * Selection choice (vote proper)
-        * Vote identifier
-    * Voter generates a _voter entry_ consisting of (before encryption using solicitation’s public key):
+    * Voter randomly generates a _vote nonce, which is held privately by voter to verify presence of vote in election results
+    * Voter generates a _vote entry_, consisting of (before encryption using election’s public key):
+        * Answers (vote proper)
+        * Vote nonce
+    * Voter generates a _voter entry_ consisting of (before encryption using election's public key):
         * Public registration identity (including public key)
-        * Signed solicitation, signed again using voter’s public key
+        * Signed election, signed again using voter’s public key
         * Additional information:
             * Location
             * Biometric key
@@ -76,9 +76,10 @@ Crowd voting protocol and reference application.
         * If block contains any voters who have already voted, the entire block is rejected and members should retry with a fresh set of peers (with duplicate whispered to peers)
     * Authority unencrypts the voter and vote lists from each block and appends them to the final tally in further scrambled order
 * Polling closes:
-    * Final solicitation result contains: list of voters (public info + signature of solicitation); list of votes (votes and identifiers)
-    * Voters and votes are sorted by voter ID and vote identifier respectively
-    * Within closing time frame, authority signs the solicitation result digest
+    * Final election result contains: list of voters (public info + signature of election); list of votes (votes and identifiers)
+    * Voters and votes are sorted by voter key and vote nonce respectively
+    * Within closing time frame, authority signs the election result digest
+    * Authority get's one or more time authority signatures
 * Peer validation process: 
     * Signed results sent out to DHT; participating peers verify:
         * Results were published in time
@@ -89,14 +90,14 @@ Crowd voting protocol and reference application.
         * Receipt given
         * Evidence of other peers not succeeding
     * Validation request broadcast peer-to-peer
-    * Blockchain containing validations/exceptions generated for the solicitation
+    * Blockchain containing validations/exceptions generated for the election
     * If this phase is used, validation can be used to bring the spread within the error margin
 
 
 ## Attack Vectors & Limits
 
 * Invalid voter (someone not registered) tries to participate.  May be included in blocks causing them to be rejected.
-    * Mitigation: Subset of peers can consult registration list before agreeing to block - could be downloaded with solicitation, stored on a blockchain or accessed via API
+    * Mitigation: Subset of peers can consult registration list before agreeing to block - could be downloaded with election, stored on a blockchain or accessed via API
     * Mitigation: If peers receive block failure for unregistered voter that they bother to verify, could add the physical (IP address) information about such parties to the exception list in the validation phase.
 * Attacker manages to negotiate into multiple blocks.  E.g. None of the original peers are around later.  Block is rejected with “duplicate voter”.
     * Mitigation: Peers can renegotiate new blocks.  This occurs during resolution phase, so there should be plenty of peers
@@ -121,7 +122,8 @@ Crowd voting protocol and reference application.
     * Registrations list - self serve
     * Administer registration
     * Administer solicitation
-    * Solicitations
+    * Administer election
+    * Elections
         * Status - current and archive
             * Phase - registration - registrations
             * Phase - voting - registrations
@@ -133,14 +135,15 @@ Crowd voting protocol and reference application.
         * Get registrant - public
         * Post solicitation
         * Get solicitation(s)
-        * Get solicitation status
-        * Get solicitation results
+        * Promote solicitation to election
+        * Get election status
+        * Get election results
         * Post block
     * Database
 * Device Frontend - React native?
     * Entry
         * Registration deep link
-        * Solicitation deep link
+        * Election deep link
         * General introduction
     * Register
         * Enter required demographics
@@ -154,8 +157,8 @@ Crowd voting protocol and reference application.
     * Authorities
         * Get from local list
     * Authority
-        * Show solicitations from authority
-    * Solicitation
+        * Show elections from authority
+    * Election
         * Display terms, timetables, etc.
         * Show whether signature is valid
         * Vote:
@@ -171,8 +174,8 @@ Crowd voting protocol and reference application.
 * Device Backend - Ecmascript module
     * Local database
     * Add registration (authority)
-    * Update solicitations (& check time sync)
-    * Get solicitation
+    * Update elections (& check time sync)
+    * Get election
         * Validate
     * Prepare vote and voter entries
     * Voting state machine - DHT
@@ -185,7 +188,7 @@ Crowd voting protocol and reference application.
         * Validating
         * Validated
         * Failed
-    * Get solicitation results
+    * Get election results
     * Get validation info
 
 
