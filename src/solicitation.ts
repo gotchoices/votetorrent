@@ -1,4 +1,4 @@
-export type Deadline = 'signatures' | 'voteStart' | 'resolution' | 'reporting' | 'validation' | 'close';
+export type Deadline = 'signatures' | 'voting' | 'resolution' | 'reporting' | 'validation' | 'close';
 
 export interface Slot {
     /** Identifier representing the slot*/
