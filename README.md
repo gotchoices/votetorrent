@@ -1,6 +1,8 @@
 #VoteTorrent
 Crowd voting protocol and reference application.
 
+See [End-user Frequently Asked Questions](doc/user-faq.md)
+
 ## Glossary of Terms:
 
 * Authority - the entity or system attempting to solicit a vote
