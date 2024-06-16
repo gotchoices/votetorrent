@@ -1,6 +1,8 @@
 #VoteTorrent
 Crowd voting protocol and reference application.
 
+See [End-user Frequently Asked Questions](doc/user-faq.md)
+
 ## Glossary of Terms:
 
 * Authority - the entity or system attempting to solicit a vote
@@ -10,6 +12,8 @@ Crowd voting protocol and reference application.
 * Stakeholders - the authority, usually the voters, and any other parties who are privy to the voter registration and vote outcome
 * Outcome - the result of a given election
 * DHT/Kademlia - Distributed Hash Table used to communicate and transact on a peer-to-peer basis
+* Block - batch of voters and votes, with scrambled ordering so votes aren't related to voters
+* Pool - set of participants who are attempting to form a block
 
 
 ## Requirements:
@@ -50,7 +54,7 @@ Crowd voting protocol and reference application.
         * Makes available in API
         * …sends in notification
 * Voter votes:
-    * Voter randomly generates a _vote nonce, which is held privately by voter to verify presence of vote in election results
+    * Voter randomly generates a _vote nonce_, which is held privately by voter to verify presence of vote in election results
     * Voter generates a _vote entry_, consisting of (before encryption using election’s public key):
         * Answers (vote proper)
         * Vote nonce
@@ -67,12 +71,11 @@ Crowd voting protocol and reference application.
         * Voter negotiates with a pool of peers to form a vote block, containing:
             * Randomly ordered list of voter entries
             * Randomly ordered list of vote entries
-        * Peers whisper about who has already been negotiated into a block - prevents peer from being included in multiple blocks
         * Negotiation scrambles the order of vote and voter lists as it is built, to minimize peers who know which vote entry goes with which voter entry
 * Polling resolution opens:
-    * Pools (block participants) send vote blocks to authority
-        * Any and all pool members can send to the authority (with randomized time delay)
-        * Authority responds with a receipt, which is distributed back to pool members
+    * Block members send vote blocks to authority
+        * Any and all block members can send to the authority (with randomized time delay)
+        * Authority responds with a receipt, which is distributed back to block members
         * If block contains any voters who have already voted, the entire block is rejected and members should retry with a fresh set of peers (with duplicate whispered to peers)
     * Authority unencrypts the voter and vote lists from each block and appends them to the final tally in further scrambled order
 * Polling closes:
@@ -93,6 +96,94 @@ Crowd voting protocol and reference application.
     * Blockchain containing validations/exceptions generated for the election
     * If this phase is used, validation can be used to bring the spread within the error margin
 
+## Block Negotiation
+
+The voting app should join the DHT in the background, and remain as an active node while the user is voting or otherwise utilizing the app.  This improves the ratio of DHT participants who are officiating independently in block formation and makes the DHT more stable.
+
+Blocks are negotiated as follows, from the perspective of a given node:
+
+* When the node is ready to vote, it sends a `Pool Inquiry` message to nearby peers containing:
+  * Voter CID
+  * Election ID
+  * Expiration? - if included, this should be treated as relative and time sync should be tracked to peers
+* The node waits for at least a few peers to respond for up to a certain timeout period (adding some randomization).
+* The peers will either:
+  * Note your inquiry and return no knowledge of a pool forming; or,
+  * Return information on known pools
+* Peer responses should include a blacklist of CIDs with mis/mal behavior - a single-source shouldn't be considered definitive for blacklisting
+* If known pools are returned:
+  * Potential pools are filtered based on the blacklist, matching election, and other requirements, then prioritized based on a score derived from:
+    * Expiration
+    * Member count vs. capacity
+    * Proximity
+  * Starting from the highest priority, the node attempts to join a pool:
+    * A `Join Pool` request message is sent to the pool coordinator.
+    * If a `Confirm Join` response is received back, including a nonce, an updated descriptor of the pool, and a time-sync:
+      * Update and validate descriptor - doesn't exceed acceptable number members or expiration (accounting for time-sync)
+      * Update internal record of pending pool
+      * Respond with a `Confirmed` message if validation passes, or `Cancel` message otherwise
+    * If a `Failed` response is received, or a timeout is reached, advances to the next step
+  * If all joins failed or were filtered out:
+    * If significant time has elapsed, go back to `Pool Inquiry` and try again
+    * If little time has elapsed, behave as though no pools were returned
+* If no known pools are returned, initiate a pool:
+  * Generate a pool header, including:
+    * ID
+    * Expiration
+    * Max capacity
+    * Node's address as coordinator
+  * Advertise the node's forming pool:
+    * Send `Pool Forming` to N~n~ (number of peers in the negative direction), N~p~ (number in positive direction) peers
+    * At sub-intervals of the total expiration period, increase N~n~ and N~p~ and message to the delta peers
+    * If a peer replies that one or more other pools are already forming:
+      * Stop expanding in that direction
+      * If nearing expiration and small number in pool:
+        * Send a `Pool Inquiry` message to competing pool coordinators for updated pool status to see if merging makes sense
+        * Merge into another pool if:
+          * There is time remaining in both pools for this node's pool members to switch over
+          * Combined member count from both pools is well below other pools limit
+          * Other pool has significantly more members
+        * If merging:
+          *  Send a `Pool Redirect` message to this node's pool members, indicating that this pool is closed and the rank ordered other pools to try
+          *  Send a `Pool Redirect` message to all peers who were previously notified of this pool's formation
+          *  Attempt to join other pool, starting with highest ranked
+  * While within the capacity limit and expiration period:
+    * If a `Join Pool` request is received:
+      * If valid (CID not on black-list):
+        * Respond with `Confirming` message containing a nonce; this confirms that the joining member can actually be reached at the advertised address
+        * If `Confirmed` message received within timeout period:
+          * CID and physical address added to pool
+          * Updated pool whispered to peers
+        * If timeout or `Cancel` received, whisper warning message to peers about the CID - too many warnings, CID goes on blacklist
+      * Otherwise, if invalid:
+        * Respond with `Reject`
+        * Whisper a warning - too many warnings, CID goes on blacklist
+  * If capacity or expiration reached
+    * If no nodes have joined, go back to `Pool Inquiry` and retry, or if the resolution phase is nearly elapsed, self-complete the block and submit it
+    * If other nodes have joined:
+      * Form a Proposed Block:
+        * ID (carry forward the pool ID)
+        * Member CIDs [include ?]
+        * Expiration
+      * Populate the block:
+        * Send `Block Populate` message to each member
+        * Receive `Block Entry` response messages from members, including vote and voter entries
+        * At expiration, or receipt of all responses, sign the block:
+          * Scramble vote and voter entries independently
+          * Form a Signing Block:
+            * ID (carried forward)
+            * Included Member CIDs - members from whom we received entries
+            * Scrambled aggregate vote and voter entries
+            * Expiration (new)
+          * Send `Block Sign` message to each member (including those we didn't receive entries from)
+          * Receive `Block Signature` responses messages from included members, containing independent signatures on the Signing Block's digest
+          * If all signatures are received in time:
+            * Send `Block Complete` message to each member (included or not)
+            * Whisper `Block Complete` to peers
+            * Attempt to post block is scheduled for randomized time early in resolution phase
+        * Expired and no entries received:
+          * Send and whisper `Block Abandon` to members and peers
+          * Go back to `Pool Inquiry` state and retry
 
 ## Attack Vectors & Limits
 
