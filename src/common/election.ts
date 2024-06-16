@@ -36,12 +36,12 @@ export interface Election {
     /** Public key */
     key: string,
 
-    /** Signature of the associated solicitation */
+    /** Authority's signature of the associated solicitation */
     solicitationSignature: string,
 
     /** Options to be voted on */
     questions: Question[],
 
-    /** Authority's signature of election digest */
+    /** Authority's signature of this election digest */
     signature: string,
 }
