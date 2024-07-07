@@ -9,14 +9,24 @@ header {
     background-color: #1e3a5f; /* Dark blue background */
     color: white;
     padding: 1rem;
-    text-align: center;
     display: flex;
-    flex-direction: column;
     align-items: center;
+    flex-wrap: wrap;
+}
+
+.logo {
+    height: 12em;
+    margin-right: 20px;
+    flex-shrink: 0;
+}
+
+.header-title {
+    text-align: left;
+    flex: 1;
 }
 
 .logo img {
-    max-width: 100px; /* Adjust size as needed */
+    max-width: 100px;
     margin-bottom: 10px;
 }
 
@@ -43,6 +53,43 @@ nav ul li a:hover {
 
 main {
     padding: 2rem;
+    min-height: calc(100vh - 160px); /* Adjust the height based on header and footer height */
+}
+
+@media (max-width: 764px) {
+    header {
+        flex-direction: row;
+        justify-content: space-between;
+        align-items: center;
+    }
+
+    .logo {
+        height: 6em;
+        margin-bottom: 0;
+    }
+
+    .header-title {
+        text-align: left;
+        flex: 1;
+    }
+
+    nav ul {
+        justify-content: center;
+    }
+
+    nav ul li {
+        display: inline;
+        margin: 0 5px;
+    }
+
+    main {
+        padding-bottom: 6rem; /* Ensure space for the footer */
+        margin-bottom: 0;
+    }
+
+    footer {
+        padding: 0.5rem;
+    }
 }
 
 footer {
@@ -50,7 +97,6 @@ footer {
     color: white;
     text-align: center;
     padding: 1rem;
-    position: fixed;
     width: 100%;
     bottom: 0;
 }
