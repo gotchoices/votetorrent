@@ -1,47 +1,38 @@
-export interface Option {
-    /** The option code */
+export type Deadline = 'signatures' | 'voting' | 'resolution' | 'reporting' | 'validation' | 'close';
+
+export interface Slot {
+    /** Identifier representing the slot*/
     code: string,
-
-    /** The option description */
+    /** Markdown describing the position, role, or question to be filled by the eventual election */
     description: string,
-
-    /** Details about the option */
-    details?: string,
-
-    /** Additional information link */
-    infoURL?: string,
+    /** The type of election to be held for this slot */
+    type: 'single' | 'multiple' | 'ranked' | 'approval' | 'scored',
 }
 
-export interface Question {
-    /** The slot code on the solicitation describing the position, role, or question filled by this question */
-    slotCode: string,
+export interface ElectionDetails {
+    /** The description/name of the election */
+    description: string,
 
-    /** Markdown instructions for this question. */
+    /** The question slots fulfilled by the eventual election */
+    slots: Slot[],
+
+    /** Unix timestamps corresponding to each deadline */
+    deadlines: Map<Deadline, number>,
+
+    /** Rules for the pending election */
+    rules: Map<string, string>,
+
+    /** Markdown instructions for the election. */
     instructions: string,
-
-    /** The options to be selected from - must have at least one entry to associate with the answer*/
-    options: Option[],
-
-    /** Type of question (default 'select') */
-    type: 'select' | 'rank' | 'approve' | 'score' | 'text',
-
-    /** maximum number of options to select (default 1) */
-    number?: number,
-
-    /** Preserve the order of the options (default false) */
-    ordered?: boolean,
 }
 
 export interface Election {
-    /** Public key */
-    key: string,
+    /** Hash key (of details) and identifier for election */
+    cid: string,
 
-    /** Authority's signature of the associated solicitation */
-    solicitationSignature: string,
+    /** Details about the election */
+    details: ElectionDetails,
 
-    /** Options to be voted on */
-    questions: Question[],
-
-    /** Authority's signature of this election digest */
+    /** Authority's signature of election detail digest */
     signature: string,
 }

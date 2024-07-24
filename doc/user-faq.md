@@ -12,7 +12,7 @@
 
 **Q:** Why use P2P for voting?
 
-**A:** This technology allows voters to pool their votes together (anonymously) and submit votes in scrambled blocks.  The votes are encrypted so other voters don't know what their peers voted for, and the scrambling of the blocks prevents the authority from knowing who voted for whom.
+**A:** This technology allows voters to self-organize and pool their votes together (anonymously) and submit votes in scrambled blocks.  The votes are encrypted so other voters don't know what their peers voted for, and the scrambling of the blocks prevents the authority from knowing who voted for whom.
 
 -----
 

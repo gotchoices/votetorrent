@@ -1,16 +1,17 @@
-import { RegistrantDetails, TraceFunc, RegistrationSubmission } from "../common";
+import { RegistrantDetails, TraceFunc, RegistrationInitiation } from "../common";
+import { AuthorityEngineStore } from ".";
 
-export class AuthorityEngine {
+export class RegistrationEngine {
     constructor(
         private readonly store: AuthorityEngineStore,
         private readonly trace?: TraceFunc
     ) { }
 
-    async beginRegistration(): Promise<RegistrationSubmission> {
+    async beginRegistration(): Promise<RegistrationInitiation> {
         this.trace?.("beginRegistration", "starting registration process");
-        const submission: RegistrationSubmission = {
+        const submission: RegistrationInitiation = {
             registrantCid: generateCid(),
-            nonce: crypto.randomBytes(16).toString("hex"),
+            nonce: crypto.randomBytes(16).toString("base64"),
             requirements: await this.store.loadSubmissionRequirements(),
         };
         await this.store.saveRegistrantSubmission(submission);
@@ -21,8 +22,18 @@ export class AuthorityEngine {
     async register(registrant: RegistrantDetails) {
         this.trace?.("register", `registrant: ${JSON.stringify(registrant)}`);
         // re-load submission
+        const submission = await this.store.loadRegistrantSubmission(registrant.registrantCid);
+
+        // validate attestation and other details
         // validate against submission
+				// acquire timestamp from TSA
         // store rejection or acceptance
         // return result
+    }
+
+    async getRegistrantPublic(registrantCid: string): Promise<RegistrantDetails> {
+    }
+
+    async getRegistrantPrivate(registrantCid: string, userCid: string): Promise<RegistrantDetails> {
     }
 }

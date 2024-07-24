@@ -13,6 +13,8 @@ export interface Identification {
 export interface RegistrantDetails {
     registrantCid: string,
 
+		timestamps: AuthorizedTimestamp[],
+
     attestation?: DeviceAttestation,
 
     identities?: Record<string, string>,
@@ -48,4 +50,10 @@ export interface RegistrantDetails {
 
     /** Secured signature from the device */
     signature: string,              // Base64-encoded signature of the authority's digest and the registrant details
+}
+
+export interface Registrant {
+		details: RegistrantDetails,
+
+		timestamps: AuthorizedTimestamp[],
 }
