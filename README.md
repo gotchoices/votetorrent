@@ -6,8 +6,8 @@ See [End-user Frequently Asked Questions](doc/user-faq.md)
 ## Glossary of Terms:
 
 * Authority - the entity or system attempting to solicit a vote
-* Solicitation - declaration of a pending voting event, containing the roles to be filled and deadlines
-* Election - a declaration of a voting event, including the candidacy, cut-off times, and associated rules
+* Election - declaration of a pending voting event, containing the roles to be filled, cut-off times, and associated rules
+* Confirmed Election - a declaration of a ready election, including the specific candidacies.  This is candidacy definition added to the election.
 * Registration - list of eligible voters, compiled by the authority and made available to stakeholders
 * Stakeholders - the authority, usually the voters, and any other parties who are privy to the voter registration and vote outcome
 * Outcome - the result of a given election
@@ -45,10 +45,10 @@ See [End-user Frequently Asked Questions](doc/user-faq.md)
         * Could be a meta-DHT that facilitates finding authorities and vote specific DHTs
     * CID (hash) on DHT is based on voter’s public key
     * Voter may join DHT to receive updates from authority, or may participate from notifications
-* Authority issues solicitation:
+* Authority issues election:
     * Includes public key, authority signature, description, question list, deadlines, rules
 * Authority issues election: 
-    * Includes public key, solicitation signature, candidate list, URL(s), time frames, and voter roll (including public keys for each voter) if registration is fixed
+    * Includes public key, election signature, candidate list, URL(s), time frames, and voter roll (including public keys for each voter) if registration is fixed
     * Authority signs election digest
         * Pushes onto the DHT; or
         * Makes available in API
@@ -58,6 +58,7 @@ See [End-user Frequently Asked Questions](doc/user-faq.md)
     * Voter generates a _vote entry_, consisting of (before encryption using election’s public key):
         * Answers (vote proper)
         * Vote nonce
+    * Voter generates some small number of dummy vote entries, containing no answers and a blank nonce
     * Voter generates a _voter entry_ consisting of (before encryption using election's public key):
         * Public registration identity (including public key)
         * Signed election, signed again using voter’s public key
@@ -68,15 +69,22 @@ See [End-user Frequently Asked Questions](doc/user-faq.md)
             * App Identifier
     * Block negotiation - nature of a Kademlia DHT is that neighbors depend on timing; peers congregate naturally with other similarly timed voters; neighborhood contracts to scale to heavy volumes:
         * Using CID this voter joins the DHT
-        * Voter negotiates with a pool of peers to form a vote block, containing:
+        * Voter negotiates with a pool of peers to form a vote block, through a block coordinator (see Block Negotiation), containing:
             * Randomly ordered list of voter entries
             * Randomly ordered list of vote entries
-        * Negotiation scrambles the order of vote and voter lists as it is built, to minimize peers who know which vote entry goes with which voter entry
+        * The coordinator scrambles the order of vote and voter lists as it is built, to minimize peers who know which vote entry goes with which voter entry
 * Polling resolution opens:
     * Block members send vote blocks to authority
         * Any and all block members can send to the authority (with randomized time delay)
         * Authority responds with a receipt, which is distributed back to block members
-        * If block contains any voters who have already voted, the entire block is rejected and members should retry with a fresh set of peers (with duplicate whispered to peers)
+        * If block contains any voters who have already voted:
+          * Entire block is rejected (failure receipt)
+          * Authority receipt includes list of duplicates - these are whispered to peers
+          * Members retry with same coordinator (if not excluded) and peers (excluding duplicating peer(s))
+        * If block contains an unequal number of voters and real votes:
+          * Entire block is rejected (failure receipt)
+          * Authority receipt includes list of real vote indexes - coordinator whispers the offending (inclusion of other than 1 vote / voter) peer to peers
+          * Members retry with a fresh set of peers (excluding culprits)
     * Authority unencrypts the voter and vote lists from each block and appends them to the final tally in further scrambled order
 * Polling closes:
     * Final election result contains: list of voters (public info + signature of election); list of votes (votes and identifiers)
@@ -212,8 +220,8 @@ Blocks are negotiated as follows, from the perspective of a given node:
     * Home page & static content
     * Registrations list - self serve
     * Administer registration
-    * Administer solicitation
     * Administer election
+    * Administer confirmed election
     * Elections
         * Status - current and archive
             * Phase - registration - registrations
@@ -224,11 +232,11 @@ Blocks are negotiated as follows, from the perspective of a given node:
     * APIs - each returning time information:
         * Post registrant
         * Get registrant - public
-        * Post solicitation
-        * Get solicitation(s)
-        * Promote solicitation to election
-        * Get election status
-        * Get election results
+        * Post election
+        * Get elections(s)
+        * Promote election to confirmed
+        * Get confirmed status
+        * Get confirmed results
         * Post block
     * Database
 * Device Frontend - React native?
