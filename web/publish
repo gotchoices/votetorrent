@@ -1,0 +1,27 @@
+#!/bin/sh
+function xmit {
+  echo "Transmit cmd: scp $2 root@gotchoices.org:/var/www/votetorrent.org"
+  scp $2 root@gotchoices.org:/var/www/votetorrent.org/$1
+}
+
+if [ "$1" = "images" ]; then
+    files="images/*"
+elif [ "$1" = "html" ]; then
+    files="*.html"
+elif [ "$1" = "main" ]; then
+    files="*.html styles.css script.js"
+elif [ "$1" != "" ]; then
+    files=$*
+else
+    files="*.html styles.css script.js images/*"
+fi
+
+for file in $files; do
+echo "File: $file"
+    ddir=$(dirname $file)
+
+    while ! xmit $ddir $file; do
+      echo "Transmit failed on file: $file, Retrying"
+      sleep 1
+    done
+done

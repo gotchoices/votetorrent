@@ -1,0 +1,51 @@
+I'm developing open source software called votetorrent that allows groups
+of people to vote in any kind of poll and/or election.
+
+An introduction to the system is found here:
+  https://github.com/gotchoices/votetorrent/blob/master/README.md
+
+and an addition FAQ is here:
+  https://github.com/gotchoices/votetorrent/blob/master/doc/user-faq.md
+
+I'd like to write an article based on the bullet points below.  The purpose
+of the article is to convince the reader that:
+- such a system is needed; and
+- this particular implementation can be trusted
+
+Idea points (in no particular organizational order):
+- Voters have low confidence that elections are fair and impartial
+- It seems a bit of a conflict of interest for government officials to
+  conduct an election fairly if it might result in them losing.
+- Ideally elections would be conducted by the community rather than the
+  governnment officials who themselves are running for re-election.
+- But it is difficult to have the community conduct an election because
+  they are usually not organized except by way of their government.
+- When more than two candidates run in an election, a winner might
+  be elected with only a plurality.  In this case, a runoff election
+  would be ideal but is rarely practical.  If elections could be
+  conducted electronically where each voter participates by using their
+  mobile phone, runoff elections would now be feasible.
+- Runoff elections are preferrable because the winner will always be
+  elected with more than 50% of the vote.
+- It is difficult for people to trust in-person voting because their
+  ballot just goes into a box and they have no way to verify that it
+  has actually been counted correctly.
+- Current mail-in voting is subject to fraud since anyone can fill
+  out a ballot and send it in.
+- With either in-person or mail-in voting, the voter has no way to
+  verify that his vote has been counted.
+- With mail-in voting, one's vote is not truly secret since those
+  opening the ballots can see who sent in each ballot.
+- Current peer-to-peer networking and cryptograph technology enables
+  us to conduct a vote largely coordinated by the community.  This
+  is the purpose of votetorrent.
+- The government (the authority) needs only to publish the parameters
+  of the election and certify the results.  
+- Each voter can verify that their vote has been properly counted.
+- Everyone can see who voted, but not how they voted.
+- Much of the potential for fraud or incompetence on the part of
+  those conducting the election is removed.
+- Votetorrent saves huge amounts of money in comparison to past and
+  current methods.
+- Votetorrent saves huge amounts of volunteer manpower compared to
+  past and current methods.
