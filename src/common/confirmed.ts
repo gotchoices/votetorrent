@@ -1,47 +1,53 @@
 export interface Option {
-    /** The option code */
-    code: string,
+	/** The option code */
+	code: string,
 
-    /** The option description */
-    description: string,
+	/** The option description */
+	description: string,
 
-    /** Details about the option */
-    details?: string,
+	/** Details about the option */
+	details?: string,
 
-    /** Additional information link */
-    infoURL?: string,
+	/** Additional information link */
+	infoURL?: string,
+
+	/** Additional information data */
+	infoCID?: string,
 }
 
 export interface Question {
-    /** The slot code on the election describing the position, role, or question filled by this question */
-    slotCode: string,
+	/** The slot code on the election describing the position, role, or question filled by this question */
+	slotCode: string,
 
-    /** Markdown instructions for this question. */
-    instructions: string,
+	/** Markdown instructions for this question. */
+	instructions: string,
 
-    /** The options to be selected from - must have at least one entry to associate with the answer*/
-    options: Option[],
+	/** The options to be selected from or ranked - must have at least one entry for a select or rank question */
+	options: Option[],
 
-    /** Type of question (default 'select') */
-    type: 'select' | 'rank' | 'approve' | 'score' | 'text',
+	/** Type of question (default 'select')	*/
+	type: 'select' | 'rank' | 'score' | 'text',
 
-    /** maximum number of options to select (default 1) */
-    number?: number,
+	/** minimum and maximum number of options to select from or rank (default 1 and 1) */
+	optionRange?: { min: number, max: number },
 
-    /** Preserve the order of the options (default false) */
-    ordered?: boolean,
+	/** The range and step of scores that can be given */
+	scoreRange?: { min: number, max: number, step: number },
+
+	/** Preserve the order of the options (default false) */
+	ordered?: boolean,
 }
 
 export interface ConfirmedElection {
-    /** Hash key (of electionCid and questions) and identifier for confirmed election */
-    cid: string,
+	/** Hash key (of electionCid and questions) and identifier for confirmed election */
+	cid: string,
 
-    /** CID of the associated election */
-    electionCid: string,
+	/** CID of the associated election */
+	electionCid: string,
 
-    /** Options to be voted on */
-    questions: Question[],
+	/** Options to be voted on */
+	questions: Question[],
 
-    /** Authority's signature of this digest */
-    signature: string,
+	/** Authority's signature of this digest */
+	signature: string,
 }
