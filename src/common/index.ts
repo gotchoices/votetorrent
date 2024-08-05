@@ -6,6 +6,7 @@ export * from "./device-attestation.js";
 export * from "./device-signature.js";
 export * from "./election.js";
 export * from "./pool.js";
+export * from "./question.js";
 export * from "./receipt.js";
 export * from "./registrant.js";
 export * from "./registration-initiation.js";

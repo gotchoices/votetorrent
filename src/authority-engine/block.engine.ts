@@ -90,7 +90,7 @@ export class BlockEngine {
 		}
 
 		// Validate that votes are valid (answers are valid and match questions)
-		const slotCodes = new Map(confirmed.questions.map(q => [q.slotCode, q]));
+		const slotCodes = new Map(confirmed.questions.map(q => [q.code, q]));
 		const invalidVotes = votes
 			.map((entry, index) => ({ index, entry }))
 			.filter(v => v.entry.isReal)
@@ -110,19 +110,23 @@ export class BlockEngine {
 
 		// Check for duplicate votes within the block
 		const orderedVotes = realVotes.map((v, i) => ({ index: i, vote: v }));
-		const dupVotes = orderedVotes
+		const dupBatchVotes = orderedVotes
 			.filter(e => orderedVotes.some(v => v.index !== e.index && v.vote.nonce === e.vote.nonce))
 			.map(e => e.index);
+		if (dupBatchVotes.length) {
+			throw { receipt: await this.generateReceipt(block.cid, "invalid", "Duplicate batch nonces", { voteIndexes: dupBatchVotes }) };
+		}
+
+		// Validate that votes are unique (by nonce)
+		const preexistingVotes = await this.store.loadVotesByNonce(block.confirmedCid, realVotes.map(v => v.nonce));
+		const dupVotes = preexistingVotes.map((v, i) => v ? i : undefined).filter(Boolean) as number[];
 		if (dupVotes.length) {
 			throw { receipt: await this.generateReceipt(block.cid, "invalid", "Duplicate nonces", { voteIndexes: dupVotes }) };
 		}
 
-		// Validate that votes are unique (by nonce)
-		const redundantVotes = await this.store.loadVotesByNonce(block.confirmedCid, realVotes.map(v => v.nonce));
-		const dupNonces = redundantVotes.map((v, i) => v ? i : undefined).filter(Boolean) as number[];
-		if (dupNonces.length) {
-			throw { receipt: await this.generateReceipt(block.cid, "invalid", "Duplicate nonces", { voteIndexes: dupNonces }) };
-		}
+		const applicableQuestions = confirmed.questions.filter(q => (q.registrantConditions ?? []).every(c =>
+			// Evaluate the javascript expression in c against the registrant
+		 ))
 	}
 
 	private async validateVoters(voters: Voter[], confirmedDigest: Uint8Array, block: Block) {
