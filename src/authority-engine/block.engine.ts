@@ -1,13 +1,16 @@
 import { AuthorityEngineStore } from ".";
-import { Answer, AuthorizedTimestamp, Block, ConfirmedElection, Question, Receipt, TraceFunc, Vote, Voter } from "../common";
+import { Answer, AuthorizedTimestamp, Block, Ballot, Question, Receipt, TraceFunc, Vote, Voter } from "../common";
 import { Asymmetric, AsymmetricVault, base64ToArray } from "chipcryptbase";
 import { TimestampService } from "../common/timestamp-service";
 import { createHash } from "crypto";
 import { Rule, RuleResponse, RuleSet } from "../common/rule";
 
+type VoterWithKey = { registrantKey: string; voter: Voter };
+type VoteWithNonce = { nonce: string; vote: Vote };
+
 interface ProcessResult {
 	receipt: Receipt;
-	result?: { voters: Voter[], votes: Vote[] }
+	result?: { voters: Record<string, Voter>, votes: Record<string, Vote> }
 }
 
 export class BlockEngine {
@@ -31,9 +34,9 @@ export class BlockEngine {
 
 		if (result.receipt.result === "accepted") {
 			const { voters, votes } = result.result!;
-			await this.store.saveVotesAndReceipt(block.cid, block.confirmedCid, voters, votes, result.receipt);
+			await this.store.saveVotesAndReceipt(block.cid, block.ballotCid, voters, votes, result.receipt);
 		} else {
-			await this.store.saveBlockReceipt(block.cid, block.confirmedCid, result.receipt);
+			await this.store.saveBlockReceipt(block.cid, block.ballotCid, result.receipt);
 		}
 
 		return result.receipt;
@@ -43,128 +46,138 @@ export class BlockEngine {
 		try {
 			// TODO: validate block cid (hashes votes & voters)
 
-			let voters: Voter[];
 			// Decrypt voters
-			try {
-				voters = await Promise.all(
-					block.voters.map(async voter => JSON.parse(await this.vault.decrypt(voter)) as Voter)
-				);
-			} catch (error) {
-				return { receipt: await this.generateReceipt(block.cid, "invalid", error) };
+			const voterResults = await Promise.all(
+				Object.entries(block.voters).map(async ([registrantKey, voter]) => {
+					try {
+						return { registrantKey, voter: JSON.parse(await this.vault.decrypt(voter)) as Voter };
+					} catch (error) {
+						return { registrantKey, error };
+					}
+				})
+			);
+
+			const erroringKeys = voterResults
+				.filter(result => 'error' in result)
+				.map(result => result.registrantKey);
+
+			if (erroringKeys.length > 0) {
+				return { receipt: await this.generateReceipt(block.cid, "invalid", "Error decrypting voters", { registrantKeys: erroringKeys }) };
 			}
 
+			const voters = voterResults.filter((r): r is VoterWithKey => 'voter' in r);
+
 			// Load election
-			const confirmed = await this.store.loadConfirmed(block.confirmedCid);
+			const confirmed = await this.store.loadBallot(block.ballotCid);
 			const confirmedDigest = this.asymmetric.generateDigest(JSON.stringify(confirmed));
 
 			await this.validateVoters(voters, confirmedDigest, block);
 
 			// Decrypt and deserialize votes in similar manner as voters
-			let votes: { vote: Vote, isReal: boolean }[];
-			try {
-				votes = await Promise.all(
-					block.votes.map(async encrypted => {
+			const votesAndErrors = await Promise.all(
+				Object.entries(block.votes).map(async ([nonce, encrypted]) => {
+					try {
 						const vote = JSON.parse(await this.vault.decrypt(encrypted)) as Vote;
-						return ({ vote, isReal: isRealVote(vote) });
-					}));
-			} catch (error) {
-				return { receipt: await this.generateReceipt(block.cid, "invalid", error) };
+						return { nonce, vote, isReal: isRealVote({ nonce, vote }) };
+					} catch (error) {
+						return { nonce, error };
+					}
+				})
+			);
+
+			const errorNonces = votesAndErrors.filter(result => 'error' in result).map(result => result.nonce);
+			if (errorNonces.length > 0) {
+				return { receipt: await this.generateReceipt(block.cid, "invalid", "Error decrypting votes", { errorNonces }) };
 			}
 
-			const realVotes = votes.filter(v => v.isReal).map(v => v.vote);
+			const votes = votesAndErrors.filter((v): v is { nonce: string; vote: Vote; isReal: boolean; } => 'vote' in v);
+
+			const realVotes = votes.filter(v => v.isReal) as VoteWithNonce[];
 
 			await this.validateVotes(realVotes, voters, votes, block, confirmed);
 
 			// Success
-			return { receipt: await this.generateReceipt(block.cid, "success"), result: { voters, votes: realVotes } };
+			return { receipt: await this.generateReceipt(block.cid, "success"),
+				result: {
+					voters: Object.fromEntries(voters.map(v => [v.registrantKey, v.voter])),
+					votes: Object.fromEntries(votes.map(v => [v.nonce, v.vote]))
+				}
+			};
 		} catch (error) {
 			return { receipt: (error as any)['receipt'] ?? await this.generateReceipt(block.cid, "error", error) };
 		}
 	}
 
-	private async validateVotes(realVotes: Vote[], voters: Voter[], votes: { vote: Vote; isReal: boolean; }[], block: Block, confirmed: ConfirmedElection) {
+	private async validateVotes(realVotes: VoteWithNonce[], voters: VoterWithKey[], votes: VoteWithNonce[], block: Block, ballot: Ballot) {
 		// Validate that the number of real votes is equal to the number of voters
 		if (realVotes.length !== voters.length) {
-			const realVoteIndexes = votes.reduce((acc, v, i) => v.isReal ? [...acc, i] : acc, [] as number[]);
-			throw { receipt: await this.generateReceipt(block.cid, "invalid", "Number of real votes does not match number of voters", { realVoteIndexes }) };
+			const realVoteNonces = realVotes.map(v => v.nonce);
+			throw { receipt: await this.generateReceipt(block.cid, "invalid", "Number of real votes does not match number of voters", { realVoteNonces }) };
 		}
 
 		// Validate that votes are valid (answers are valid and match questions)
-		const slotCodes = new Map(confirmed.questions.map(q => [q.code, q]));
-		const invalidVotes = votes
-			.map((entry, index) => ({ index, entry }))
-			.filter(v => v.entry.isReal)
-			.map(v => {
+		const slotCodes = new Map(ballot.questions.map(q => [q.code, q]));
+		const invalidVotes = realVotes
+			.map(vote => {
 				try {
-					return { index: v.index, results: this.validateVote(v.entry.vote, confirmed, slotCodes) };
+					return { nonce: vote.nonce, results: this.checkVote(vote, ballot, slotCodes) };
 				} catch {
-				}})
-			.filter(Boolean) as { index: number, results: string }[];
+					return undefined;
+				}
+			})
+			.filter(Boolean) as { nonce: string, results: string }[];
+
 		if (invalidVotes.length) {
 			throw {
 				receipt: await this.generateReceipt(block.cid, "invalid",
-					invalidVotes.map(v => `${v.index}: ${v.results}`).join('; '),
-					{ voteIndexes: invalidVotes.map(v => v.index) })
+					invalidVotes.map(v => `${v.nonce}: ${v.results}`).join('; '),
+					{ voteNonces: invalidVotes.map(v => v.nonce) })
 			};
 		}
 
-		// Check for duplicate votes within the block
-		const orderedVotes = realVotes.map((v, i) => ({ index: i, vote: v }));
-		const dupBatchVotes = orderedVotes
-			.filter(e => orderedVotes.some(v => v.index !== e.index && v.vote.nonce === e.vote.nonce))
-			.map(e => e.index);
-		if (dupBatchVotes.length) {
-			throw { receipt: await this.generateReceipt(block.cid, "invalid", "Duplicate batch nonces", { voteIndexes: dupBatchVotes }) };
-		}
-
 		// Validate that votes are unique (by nonce)
-		const preexistingVotes = await this.store.loadVotesByNonce(block.confirmedCid, realVotes.map(v => v.nonce));
-		const dupVotes = preexistingVotes.map((v, i) => v ? i : undefined).filter(Boolean) as number[];
+		const preexistingVotes = await this.store.loadVotesByNonce(block.ballotCid, realVotes.map(v => v.nonce));
+		const dupVotes = Object.entries(preexistingVotes).map(([nonce, v]) => v ? nonce : undefined).filter(Boolean) as string[];
 		if (dupVotes.length) {
-			throw { receipt: await this.generateReceipt(block.cid, "invalid", "Duplicate nonces", { voteIndexes: dupVotes }) };
+			throw { receipt: await this.generateReceipt(block.cid, "invalid", "Duplicate nonces", { voteNonces: dupVotes }) };
 		}
-
-		const applicableQuestions = confirmed.questions.filter(q => (q.registrantConditions ?? []).every(c =>
-			// Evaluate the javascript expression in c against the registrant
-		 ))
 	}
 
-	private async validateVoters(voters: Voter[], confirmedDigest: Uint8Array, block: Block) {
+	private async validateVoters(voters: VoterWithKey[], confirmedDigest: Uint8Array, block: Block) {
 		// Validate that voters' signatures are valid for their respective keys
 		const invalidVoters = (await Promise.all(
-			voters.map(async voter => {
+			voters.map(async ({ registrantKey, voter }) => {
 				const valid = await this.asymmetric.verifyDigest(
-					base64ToArray(voter.registrantKey),
+					base64ToArray(registrantKey),
 					confirmedDigest,
 					base64ToArray(voter.signature.signature)
 				);
-				return valid ? null : voter.registrantKey;
+				return valid ? null : registrantKey;
 			})
 		)).filter(key => Boolean(key)) as string[];
 		if (invalidVoters.length) {
-			throw { receipt: await this.generateReceipt(block.cid, "invalid", null, { resultCids: invalidVoters }) };
+			throw { receipt: await this.generateReceipt(block.cid, "invalid", null, { registrantKeys: invalidVoters }) };
 		}
 
 		// Validate that none of the voters have voted before
-		const votersByKey = await this.store.loadVotersByKey(block.confirmedCid, voters.map(voter => voter.registrantKey));
-		const dupVoters = votersByKey.filter(Boolean).map(v => v?.registrantKey);
+		const votersByKey = await this.store.loadVotersByKey(block.ballotCid, voters.map(v => v.registrantKey));
+		const dupVoters = Object.keys(votersByKey).filter(key => votersByKey[key]);
 		if (dupVoters.length) {
-			// TODO: convert these registrant keys to CIDs
-			throw { receipt: await this.generateReceipt(block.cid, "duplicate", null, { resultCids: dupVoters }) };
+			throw { receipt: await this.generateReceipt(block.cid, "duplicate", null, { registrantKeys: dupVoters }) };
 		}
 	}
 
-	private validateVote(vote: Vote, confirmed: ConfirmedElection, slotCodes: Map<string, Question>) {
+	private checkVote({ vote, nonce }: VoteWithNonce, confirmed: Ballot, slotCodes: Map<string, Question>) {
 		// Validate: no duplicate answers (for the same slot code)
 		if (vote.answers.length !== new Set(vote.answers.map(a => a.slotCode)).size) {
-			throw "Multiple answers";
+			return 'Duplicate answers';
 		}
 
 		// Validate: all answers are valid
 		const invalidAnswers = vote.answers.map(a => {
 			const question = slotCodes.get(a.slotCode);
-			if (!question) return `${a.slotCode}: Invalid slot code`;
-			const result = this.validateAnswer(a, question);
+			if (!question) return `Invalid slot code: ${a.slotCode}`;
+			const result = this.checkAnswer(a, question);
 			if (result) return `${a.slotCode}: ${result}`;
 		});
 		if (invalidAnswers.length) {
@@ -172,14 +185,14 @@ export class BlockEngine {
 		}
 
 		// Validate: nonce
-		if (typeof vote.nonce !== 'string' || vote.nonce.length < 16) {
+		if (typeof nonce !== 'string' || nonce.length < 16) {
 			return 'Invalid nonce';
 		}
 
 		return '';
 	}
 
-	private validateAnswer(answer: Answer, question: Question): string {
+	private checkAnswer(answer: Answer, question: Question): string {
 		switch (question.type) {
 			case 'select': {	// Example: "values": { "<option code>": true, "<option code>": true, ... }
 				// Proper range of options selected
@@ -236,8 +249,8 @@ export class BlockEngine {
 }
 
 /** A vote is only considered real if it has at least one answer and a nonce */
-function isRealVote(vote: Vote): boolean {
-	return Boolean(vote.answers) && vote.answers.length > 0 && Boolean(vote.nonce);
+function isRealVote({ nonce, vote }: VoteWithNonce): boolean {
+	return Boolean(vote.answers) && vote.answers.length > 0 && Boolean(nonce);
 }
 
 function between(value: number, min: number, max: number): boolean {

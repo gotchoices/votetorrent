@@ -11,11 +11,18 @@ export interface Identification {
 }
 
 export interface RegistrantDetails {
-    registrantCid: string,
+		/** Hash key (of body) and identifier for registrant details */
+    cid: string,
+
+		/** Voter ID - same for public and private records */
+		id: string,
 
 		timestamps: AuthorizedTimestamp[],
 
     attestation?: DeviceAttestation,
+
+    /** Secured signature from the device */
+    signature?: DeviceSignature,
 
     identities?: Record<string, string>,
 
@@ -47,13 +54,39 @@ export interface RegistrantDetails {
     affiliations?: Record<string, string>,   // e.g. "Party": "Republican"
 
     groupings?: Record<string, string>,      // e.g. "Precinct": "1234", "District": "5"
-
-    /** Secured signature from the device */
-    signature: string,              // Base64-encoded signature of the authority's digest and the registrant details
 }
 
 export interface Registrant {
-		details: RegistrantDetails,
+		/** Voter ID - is a public key and also in public and private records for hashing */
+		key: string,
 
-		timestamps: AuthorizedTimestamp[],
+		publicKey: string,
+
+		/** The revision number for the current (latest) revision */
+		currentRevision: number,
+}
+
+export interface RegistrantRevision {
+		cid: string,
+
+		replacesCid: string | undefined,
+
+		registrantKey: string,
+
+		/** Monotonically increasing revision number (starting at 1) */
+		revision: number,
+
+		/** The visibility of the registrant - determines what information is in the public and private records */
+		visibility: "public" | "private" | "restricted",
+
+		public: RegistrantDetails,
+
+		/** Private portion of the registrant - Encrypted RegistrantDetails */
+		private: string,
+
+		/** Authority's signature of public details */
+		publicSignature: string,
+
+		/** Authority's signature of private details */
+		privateSignature: string,
 }

@@ -1,11 +1,14 @@
 import { Question } from "./question"
 
-export interface ConfirmedElection {
-	/** Hash key (of electionCid and questions) and identifier for confirmed election */
+export interface Ballot {
+	/** Hash key and identifier for ballot */
 	cid: string,
 
 	/** CID of the associated election */
 	electionCid: string,
+
+	/** The associated authority */
+	authorityCid: string,
 
 	/** Options to be voted on */
 	questions: Question[],
@@ -13,3 +16,5 @@ export interface ConfirmedElection {
 	/** Authority's signature of this digest */
 	signature: string,
 }
+
+// TODO: ballot revisions

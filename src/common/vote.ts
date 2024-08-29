@@ -14,5 +14,4 @@ export interface Answer {
 
 export interface Vote {
     answers: Answer[],
-    nonce: string,
 }

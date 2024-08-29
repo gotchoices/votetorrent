@@ -5,10 +5,13 @@ See [End-user Frequently Asked Questions](doc/user-faq.md)
 
 ## Glossary of Terms:
 
-* Authority - the entity or system attempting to solicit a vote
-* Election - declaration of a pending voting event, containing the roles to be filled, cut-off times, and associated rules
-* Confirmed Election - a declaration of a ready election, including the specific candidacies.  This is candidacy definition added to the election.
-* Registration - list of eligible voters, compiled by the authority and made available to stakeholders
+* Authority - district or entity involved in the voting process
+  * Election Authority - the authority describing the overall event and timetable
+  * Registration Authority - an authority charged with tracking registered voters
+  * Ballot Authority - an authority (district typically) with a specific ballot type to be voted on in an election 
+* Election - declaration of a pending voting event, containing the cut-off times, and associated rules
+* Ballot - a declaration of a specific questionnaire pertaining to a Ballot Authority and Election.
+* Registration - list of eligible voters, maintained by an authority or peer to peer network, consisting of a private portion and a public portion, the latter of which is made available to stakeholders
 * Stakeholders - the authority, usually the voters, and any other parties who are privy to the voter registration and vote outcome
 * Outcome - the result of a given election
 * DHT/Kademlia - Distributed Hash Table used to communicate and transact on a peer-to-peer basis
@@ -18,8 +21,9 @@ See [End-user Frequently Asked Questions](doc/user-faq.md)
 
 ## Requirements:
 
-* The authority solicits the vote, candidates, and the timeframe
+* The election authority solicits the vote with timeframes
 * The list of eligible voters could be fixed at start of election, or grow until closing
+* District authorities publish ballots 
 * Authority may have private information on voters, but always discloses hash of private information in public information
 * The stakeholders have voter list, but only public information
 * Voter can vote without the authority or public knowing for which candidate
@@ -94,9 +98,14 @@ See [End-user Frequently Asked Questions](doc/user-faq.md)
 * Peer validation process: 
     * Signed results sent out to DHT; participating peers verify:
         * Results were published in time
+        * Timestamps are within the voting period
         * My vote was included
         * My voter was included and the signature valid
         * Count of voters matches count of votes
+        * Optional whole-result validation rules:
+          * All voter signatures are valid
+          * All voter's match valid registrants
+          * Equal number of voters and votes
     * Failed verifications could add
         * Receipt given
         * Evidence of other peers not succeeding
@@ -193,8 +202,45 @@ Blocks are negotiated as follows, from the perspective of a given node:
           * Send and whisper `Block Abandon` to members and peers
           * Go back to `Pool Inquiry` state and retry
 
+## Validation Process
+
+
+## Runoff Elections
+
+Runoff elections are a crucial mechanism to ensure fair and accurate results in cases where the initial election outcome is uncertain or contested. The following describes the generation of runoffs and the rules governing them:
+
+1. Runoff Trigger Conditions:
+   a. Discrepancy Margin: If the number of disputed votes (peers with receipt but voter and/or voter not included in the final tally) exceeds the spread between the top candidates, a runoff is assumed.
+   b. Voter Accessibility Issues: If a significant portion (defined as a ratio) of voters report inability to access the voting system, a runoff is assumed. This is determined by the rules configured in the ElectionRevision record, which define a threshold of accessibility issues.  Any claim of unreachability should be verified by subsequent validators, and can be negated with evidence (presentation of voter record)
+   c. Close Results: If the margin of victory is within a predefined threshold (e.g., 1% of total votes), a runoff may be automatically triggered.
+
+2. Runoff Rules:
+   a. Timing: Runoffs are scheduled at a predefined interval after the initial election, as specified in the ElectionRevision interface.
+   b. Participants: Only the top two candidates from the initial election participate in the runoff, unless the election rules specify otherwise.
+   c. Voter Eligibility: All voters eligible in the initial election are eligible to participate in the runoff.
+
+3. Validation Chain:
+   a. Result Hash: The validation chain must include a hash of the election results. All participants and validators must report relative to this hash to ensure consistency.
+   b. Block Inclusion: The authority must provide cryptographic proof of inclusion for all received blocks in the final tally.
+   c. Timestamping: External timestamping of received blocks is required to prevent retroactive exclusion.
+
+4. Dispute Resolution:
+   a. Objective Disputes: Disagreements on voter signatures, voter-to-registrant matching, or vote counts can be resolved objectively by referring to the hashed result.
+   b. Subjective Issues: Voter-reported accessibility problems are tracked and, if exceeding a threshold, may trigger a runoff.
+
+5. Anti-Manipulation Measures:
+   a. Peer Validation: A diverse set of peers must validate the results to prevent coordinated false reporting.
+   b. Escalation Process: Disputes that cannot be resolved through peer validation are escalated to a predefined arbitration process.
+
+6. Transparency Requirements:
+   a. Public Auditing: The authority must provide a public, auditable log of all received blocks and their inclusion in the final tally.
+   b. Multiple Result Prevention: The authority is required to commit to a single result hash, preventing the publication of multiple, disagreeing results.
+
+These rules aim to balance the need for definitive results with the importance of addressing legitimate concerns about election integrity. They provide a structured approach to handling disputes and ensuring that runoffs are triggered only when necessary to maintain the fairness and accuracy of the election process.
+
 ## Attack Vectors & Limits
 
+* There is no way for peers to verify the claim of a missing vote record by another peer.  Even if the peer discloses their vote nonce, there is not way for other peers, without the authority's private key and without being in that voter's block pool, to verify the claim.
 * Invalid voter (someone not registered) tries to participate.  May be included in blocks causing them to be rejected.
     * Mitigation: Subset of peers can consult registration list before agreeing to block - could be downloaded with election, stored on a blockchain or accessed via API
     * Mitigation: If peers receive block failure for unregistered voter that they bother to verify, could add the physical (IP address) information about such parties to the exception list in the validation phase.

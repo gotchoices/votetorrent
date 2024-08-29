@@ -1,12 +1,12 @@
-import { Block, ConfirmedElection, Receipt, RegistrationInitiation, Vote, Voter } from "../common";
+import { Block, Ballot, Receipt, RegistrationInitiation, Vote, Voter } from "../common";
 
 export interface AuthorityEngineStore {
-	loadVotesByNonce(confirmedCid: string, nonces: string[]): Promise<(Vote | undefined)[]>;
+	loadVotesByNonce(ballotCid: string, nonces: string[]): Promise<Record<string, (Vote | undefined)>>;
 	loadBlock(cid: string): Promise<{ block: Block, receipt: Receipt }>;
-	loadVotersByKey(confirmedCid: string, registrantKeys: string[]): Promise<(Voter | undefined)[]>;
-	loadConfirmed(confirmedCid: string): Promise<ConfirmedElection>;
+	loadVotersByKey(ballotCid: string, registrantKeys: string[]): Promise<Record<string, (Voter | undefined)>>;
+	loadBallot(ballotCid: string): Promise<Ballot>;
 	loadSubmissionRequirements(): Promise<string[]>;
 	saveRegistrantSubmission(submission: RegistrationInitiation): Promise<void>;
-	saveBlockReceipt(cid: string, confirmedCid: string, receipt: Receipt): Promise<void>;
-	saveVotesAndReceipt(cid: string, confirmedCid: string, voters: Voter[], votes: Vote[], receipt: Receipt): Promise<void>;
+	saveVotesAndReceipt(cid: string, ballotCid: string, voters: Record<string, Voter>, votes: Record<string, Vote>, receipt: Receipt): Promise<void>;
+	saveBlockReceipt(cid: string, ballotCid: string, receipt: Receipt): Promise<void>;
 }

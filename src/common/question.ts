@@ -56,7 +56,4 @@ export interface Question {
 
 	/** Required.  Default: true. */
 	required?: boolean;
-
-	/** Expressions evaluated against registrant, all of which must be true (not just truthy) in order for this question to apply for the registrant */
-	registrantConditions?: string[];
 }

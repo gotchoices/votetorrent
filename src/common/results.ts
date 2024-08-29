@@ -2,28 +2,19 @@ import { AuthorizedTimestamp } from "./authorized-timestamp";
 import { Vote } from "./vote";
 import { Voter } from "./voter";
 
-// TODO: should this contain a tally?
-
 export interface Result {
-    /** Signature of election, for which this is the result */
-    electionSignature: string,
-    /** Unencrypted votes, sorted by nonce */
-    votes: Vote[],
-    /** Unencrypted voters, sorted by key */
-    voters: Voter[],
+		/** Cid of the result - hash of entire result */
+		cid: string,
+    /** Cid of the ballot, for which this is the result */
+    ballotCid: string,
+    /** Unencrypted votes, by nonce */
+    votes: Record<string, Vote>,
+    /** Unencrypted voters, by registrant key */
+    voters: Record<string, Voter>,
     /** All peer blocks that were accepted */
     blockCids: string[],
-    /** Authority's signature of the result */
+    /** Authority's signature of ballotCid, votes, voters, and blockCids */
     signature: string,
-}
-
-export interface TimestampedResult {
-    resultSignature: string,
+    /** Timestamped result - hash of ballotCid, votes, voters, blockCids, and signature */
     timestamps: AuthorizedTimestamp[],
-}
-
-export interface FinalResult {
-    resultSignature: string,
-    /** Authority's signature timestamped result */
-    signature: string,
 }
