@@ -3,7 +3,7 @@ export interface Option {
 	code: string;
 
 	/** The option description */
-	description: string;
+	title: string;
 
 	/** Details about the option */
 	details?: string;
@@ -11,16 +11,25 @@ export interface Option {
 	/** Additional information link */
 	infoURL?: string;
 
-	/** Additional information data */
-	infoCID?: string;
+	/** URL for image */
+	imageURL?: string;
+
+	/** CID for image */
+	imageCID?: string;
+
+	/** URL for video */
+	videoURL?: string;
+
+	/** CID for video */
+	videoCID?: string;
 }
 
 export interface Question {
 	/** The slot code on the election describing the position, role, or question filled by this question */
 	code: string;
 
-	/** Markdown describing the position, role, or question to be filled by the eventual election */
-	description: string;
+	/** Description of the position, role, or question to be filled by the eventual election */
+	title: string;
 
 	/** Markdown instructions for this question. */
 	instructions: string;

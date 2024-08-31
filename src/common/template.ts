@@ -1,7 +1,7 @@
 import { Question } from "./question"
 
-export interface Ballot {
-	/** Hash key and identifier for ballot */
+export interface Template {
+	/** Hash key and identifier for ballot - hash includes questions deeply */
 	cid: string,
 
 	/** CID of the associated election */

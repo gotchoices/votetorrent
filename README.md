@@ -8,9 +8,10 @@ See [End-user Frequently Asked Questions](doc/user-faq.md)
 * Authority - district or entity involved in the voting process
   * Election Authority - the authority describing the overall event and timetable
   * Registration Authority - an authority charged with tracking registered voters
-  * Ballot Authority - an authority (district typically) with a specific ballot type to be voted on in an election 
+  * Ballot Authority - an authority (district typically) with a specific ballot template to be voted on in an election 
+  * Certification Authority - an authority that certifies the result of each ballot question per election
 * Election - declaration of a pending voting event, containing the cut-off times, and associated rules
-* Ballot - a declaration of a specific questionnaire pertaining to a Ballot Authority and Election.
+* Ballot Template - a declaration of a specific questionnaire pertaining to a Ballot Authority and Election.
 * Registration - list of eligible voters, maintained by an authority or peer to peer network, consisting of a private portion and a public portion, the latter of which is made available to stakeholders
 * Stakeholders - the authority, usually the voters, and any other parties who are privy to the voter registration and vote outcome
 * Outcome - the result of a given election
@@ -23,7 +24,7 @@ See [End-user Frequently Asked Questions](doc/user-faq.md)
 
 * The election authority solicits the vote with timeframes
 * The list of eligible voters could be fixed at start of election, or grow until closing
-* District authorities publish ballots 
+* District authorities publish ballot templates
 * Authority may have private information on voters, but always discloses hash of private information in public information
 * The stakeholders have voter list, but only public information
 * Voter can vote without the authority or public knowing for which candidate

@@ -1,12 +1,10 @@
 import { AuthorityEngineStore } from ".";
-import { Answer, AuthorizedTimestamp, Block, Ballot, Question, Receipt, TraceFunc, Vote, Voter } from "../common";
+import { Answer, Block, Template, Question, Receipt, TraceFunc, Vote, Voter } from "../common";
 import { Asymmetric, AsymmetricVault, base64ToArray } from "chipcryptbase";
 import { TimestampService } from "../common/timestamp-service";
 import { createHash } from "crypto";
-import { Rule, RuleResponse, RuleSet } from "../common/rule";
-
-type VoterWithKey = { registrantKey: string; voter: Voter };
-type VoteWithNonce = { nonce: string; vote: Vote };
+import { VoterWithKey } from "../common/voter";
+import { VoteWithNonce } from "../common/vote";
 
 interface ProcessResult {
 	receipt: Receipt;
@@ -108,7 +106,7 @@ export class BlockEngine {
 		}
 	}
 
-	private async validateVotes(realVotes: VoteWithNonce[], voters: VoterWithKey[], votes: VoteWithNonce[], block: Block, ballot: Ballot) {
+	private async validateVotes(realVotes: VoteWithNonce[], voters: VoterWithKey[], votes: VoteWithNonce[], block: Block, ballot: Template) {
 		// Validate that the number of real votes is equal to the number of voters
 		if (realVotes.length !== voters.length) {
 			const realVoteNonces = realVotes.map(v => v.nonce);
@@ -167,7 +165,7 @@ export class BlockEngine {
 		}
 	}
 
-	private checkVote({ vote, nonce }: VoteWithNonce, confirmed: Ballot, slotCodes: Map<string, Question>) {
+	private checkVote({ vote, nonce }: VoteWithNonce, confirmed: Template, slotCodes: Map<string, Question>) {
 		// Validate: no duplicate answers (for the same slot code)
 		if (vote.answers.length !== new Set(vote.answers.map(a => a.slotCode)).size) {
 			return 'Duplicate answers';
@@ -193,30 +191,40 @@ export class BlockEngine {
 	}
 
 	private checkAnswer(answer: Answer, question: Question): string {
+		// Ensure that answer.values exists
+		if (!answer.values) {
+			return 'Missing answer values';
+		}
+
 		switch (question.type) {
-			case 'select': {	// Example: "values": { "<option code>": true, "<option code>": true, ... }
+			case 'select': {	// Example: "values": ["<option code>", "<option code>"]
+				// Answer must be an array of option codes
+				if (!Array.isArray(answer.values)) {
+					return 'Invalid selection value';
+				}
 				// Proper range of options selected
-				if (question.optionRange && !between(Object.keys(answer.values).length, question.optionRange.min, question.optionRange.max)) {
+				if (question.optionRange && !between(answer.values.length, question.optionRange.min, question.optionRange.max)) {
 					return `Between ${question.optionRange.min} and ${question.optionRange.max} selections allowed`;
 				}
 				// All keys must be valid option codes and all values must be "true"
-				const invalidValues = Object.entries(answer.values).filter(([key]) => !question.options.some(o => o.code === key) || answer.values[key] !== true);
+				const invalidValues = answer.values.filter(code => !question.options.some(o => o.code === code));
 				if (invalidValues.length) {
-					return `Invalid selection: ${invalidValues.map(([key]) => key).join(', ')}`;
+					return `Invalid selection: ${invalidValues.join(', ')}`;
 				}
 			} break;
-			case 'rank': {	// Example: "values": { "<option code>": 0, "<option code>": 1, ... }
+			case 'rank': {	// Example: "values": ["<option code>", "<option code>", ...]
+				// Answer must be an array of option codes
+				if (!Array.isArray(answer.values)) {
+					return 'Invalid selection value';
+				}
 				// Proper range of options ranked
-				if (question.optionRange && !between(Object.keys(answer.values).length, question.optionRange.min, question.optionRange.max)) {
+				if (question.optionRange && !between(answer.values.length, question.optionRange.min, question.optionRange.max)) {
 					return `Between ${question.optionRange.min} and ${question.optionRange.max} ranked options allowed`;
 				}
-				// All keys must be valid option codes and values must be monotonically increasing sequence from 0 to n-1
-				const uniqueValues = new Set(Object.values(answer.values));
-				const answerCount = Object.keys(answer.values).length;
-				for (let i = 0; i < answerCount; i++) {
-					if (!uniqueValues.has(i)) {
-						return `Missing rank sequence ${i}`;
-					}
+				// All keys must be valid option codes
+				const uniqueValues = new Set(answer.values);
+				if (uniqueValues.size !== answer.values.length) {
+					return 'Duplicate ranked options';
 				}
 			} break;
 			case 'score': {	// Example: "values": { "<option code>": 0.2, "<option code>": 0.75, ... }
@@ -228,10 +236,10 @@ export class BlockEngine {
 					return `Invalid score: ${invalidValues.map(([key]) => key).join(', ')}`;
 				}
 			} break;
-			case 'text': {	// Example: "values": { "<option code>": "<text>", ... }
-				const invalidValues = Object.entries(answer.values).filter(([key, value]) => !question.options.some(o => o.code === key) || typeof value !== 'string');
-				if (invalidValues.length) {
-					return `Invalid text values: ${invalidValues.map(([key]) => key).join(', ')}`;
+			case 'text': {	// Example: "values": "<text>"
+				// Answer must be a string
+				if (typeof answer.values !== 'string') {
+					return `Invalid text value: ${answer.values}`;
 				}
 			} break;
 		}

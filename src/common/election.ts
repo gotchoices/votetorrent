@@ -1,6 +1,6 @@
 import { Question } from "./question";
 
-export type Deadline = 'signatures' | 'voting' | 'resolution' | 'reporting' | 'validation' | 'close';
+export type Event = 'signatures due' | 'registration ends' | 'ballots final' | 'voting starts' | 'tallying starts' | 'validation' | 'certification starts' | 'closed';
 
 export interface Election {
 	cid: string,
@@ -10,17 +10,19 @@ export interface Election {
 	/** The title of the election */
 	title: string,
 
-	sponsorAuthorityCid: string,
+	/** The cid of the election authority */
+	authorityCid: string,
 }
 
 export interface ElectionRevision {
 	/** Hash key (of body) and identifier for election */
 	cid: string,
 
-	replacesCid?: string,
-
 	/** The monotonically increasing sequence number of the revision */
 	revision: number,
+
+	/** The date/time of the revision */
+	revisionDate: number,
 
 	/** Tags describing and grouping the election.  e.g. ["general"] or ["democrat", "primary"] */
 	tags: string[],
@@ -32,16 +34,17 @@ export interface ElectionRevision {
 	date: number,
 
 	/** Unix timestamps corresponding to each deadline - these are in milliseconds and are relative to the election date */
-	deadlines: Record<Deadline, number>,
+	timeline: Record<Event, number>,
 
-	/** The interval at which runoff elections are triggered if the rules indicate no clear winner, in milliseconds */
-	runoffInterval?: number,
+	// TODO: runoff elections
+	// /** The interval at which runoff elections are triggered if the rules indicate no clear winner, in milliseconds */
+	// runoffInterval?: number,
 
-	// TODO: rule definition for when to trigger a runoff - this is a measure of confidence based on the validation phase - if the validation discrepancy is greater than the spread between the top candidates, then a runoff is triggered
-	rules: {
-		/** The ratio of passing whole result validations (validating entire results) to failed ones */
-		wholeResultRatio: number,
-	}
+	// // rule definition for when to trigger a runoff - this is a measure of confidence based on the validation phase - if the validation discrepancy is greater than the spread between the top candidates, then a runoff is triggered
+	// rules: {
+	// 	/** The ratio of passing whole result validations (validating entire results) to failed ones */
+	// 	wholeResultRatio: number,
+	// }
 
 	/** The timestamp authorities that are used to timestamp the election */
 	timestampAuthorities: { url: string }[];

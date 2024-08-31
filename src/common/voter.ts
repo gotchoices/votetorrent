@@ -10,3 +10,5 @@ export interface Voter {
     /** Voter's signature of the ballotCid and this record*/
     signature: DeviceSignature,
 }
+
+export type VoterWithKey = { registrantKey: string; voter: Voter; };
