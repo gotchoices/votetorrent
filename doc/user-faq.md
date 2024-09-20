@@ -12,19 +12,31 @@
 
 **Q:** Why use P2P for voting?
 
-**A:** This technology allows voters to pool their votes together (anonymously) and submit votes in scrambled blocks.  The votes are encrypted so other voters don't know what their peers voted for, and the scrambling of the blocks prevents the authority from knowing who voted for whom.
+**A:** This technology allows voters to self-organize and pool their votes together (anonymously) and submit votes in scrambled blocks.  The votes are encrypted and scrambled so other peers, the authority, any other observers don't know how each voter voted.
 
 -----
 
 **Q:** How is this transparent, when everything is encrypted?
 
-**A:** Each vote has a secret key that the voter's app generates.  The resulting votes are all made public, and each voter can verify that the secret key is in the set of votes and that the associated vote matches the voter's selection.  The voter can also verify that the voter's record is included.  Anyone can also audit that there are exactly as many votes as voters, and that all voter records are in the registered voter set.
+**A:** Each vote has a secret code that the voter's app generates.  When all the election votes are made visible, each voter can verify that the secret code is in the set of votes and that the associated vote matches the voter's selections.  The voter also verifies that the voter's record, indicating that he or she voted, is included.  Anyone can check that all votes are appropriately signed, only registered voters voted, and that there are exactly as many votes as voters.
 
 -----
 
-**Q:** What if the authority is unresponsive during voting, or incorrectly manages the votes?
+**Q:** What keeps observers from being able to determine which way the result is going, before the election is finalized?
 
-**A:** After votes are submitted, there is a period of verification performed by the peer to peer network.  Disenfranchised voters, validation errors, and any other inconsistencies are amalgamated (with supporting evidence) to produce a P2P confidence report associated with the vote.
+**A:** The vote and voter contents are encrypted using a compound key held by a set of parties, disclosed in the terms of the elections.  It takes a certain number of private keys, held by these parties, in order to be able to decrypt the results of the election, so no single party can prematurely reveal the election results until the agreed upon time window.
+
+-----
+
+**Q:** What if the private keys for the election are leaked or lost?
+
+**A:** Election keys are meant to be held by multiple parties, but they neutral parties, or those with opposing stakes in the election outcome. If an election key is leaked, and an observer or peer comes in contact with it, the released key along with a signed timestamp can be immediately captured as an anomaly for the validation report.  Even still, only if the required number of disclosed keys is reached can the election results be prematurely decrypted.  If keys are lost, the election can still be completed so long as the required number of disclosed keys is met.
+
+-----
+
+**Q:** What if a voter is unable to reach peers or parts of the network, and is unable to submit a vote, or if the authority doesn't release their keys?
+
+**A:** After votes are submitted, there is a period of validation performed by the peer to peer network.  Disenfranchised voters, validation errors, and any other inconsistencies are amalgamated (with supporting evidence) to produce a P2P confidence report associated with the vote.
 
 -----
 
@@ -36,28 +48,22 @@
 
 **Q:** Will the authority get my biometrics?
 
-**A:** No.  The biometrics are used locally on the device to authorize a tamper-proof chip called a Trusted Platform Module (TPM) or Secure Enclave.  This module holds a private key in the device's hardware, which is used to digitally sign the vote.  Only the digital signature, is sent to the authority.  The authority, and others who are auditing the election, can verify that only you could have produced the digital signature.
+**A:** No.  The biometrics are used locally within the device to interface with a tamper-proof chip called a Trusted Platform Module (TPM) or Secure Enclave.  This module holds a private key in the device's hardware, which is used to digitally sign the vote.  Even the device's operating system does not have access to the private key.  Only the digital signature, is sent to the authority.  The authority, and others who are auditing the election, can verify that only that device could have produced the digital signature.
 
 -----
 
-**Q:** Can't someone just hack the app and vote for me, or change my vote?
+**Q:** Can't someone just hack the app and vote in my stead, or change my vote?
 
-**A:** No.  Your vote is only valid when signed using your private key, contained within the hardware enclave.  Even with your biometrics, the enclave will not give the device or its user the private key, it will only apply a signature for you that is unique to some content (e.g. the vote).  A hacker would have to manipulate the biometric hardware on the device, which is difficult to do on a small scale, let alone a large scale.
+**A:** No.  Your vote is only valid when signed using your private key, contained within your phone's hardware.  Even if someone stole your fingerprint, for instance, they would not be able to sign your vote because they do not have your private key.  A hacker would have to fake or manipulate the biometric hardware on your device.  Doing this on a large scale is difficult, and doing so would violate all sorts of security assumptions being used by banks and other security sensitive organizations.
 
 -----
 
 **Q:** Can my peers know how I voted?
 
-**A:** No.  Your vote and voter entries are encrypted so that only the authority can decipher them, and are presented to peers in scrambled order.  The final block of votes and voters are further scrambled before submitting the block to the authority.  At best, the authority can only determine a probability of your vote being something based on the number of votes in a given block.
-
------
-
-**Q:** What if the authority's private key were leaked or stolen?
-
-**A:** The worst case for this scenario would be that, if the submitted blocks could also be intercepted, an analyst could determine, based on the size and vote distribution of each block, a statistical likelihood of each voter having voted a certain way.  If the key were leaked back to voters, this would be a way for the voter, within the participated in block, to make this same probabilistic analysis for their peers.
+**A:** Generally no.  Your vote and voter entries are encrypted and scrambled with others in such a way that even your peers do not know which vote record goes with your voter record.  Only when the designated parties release their public keys, will observers be able to decipher the scrambled order votes.  At best, peers and observers can only determine a probability of your vote being something based on those votes in the block.  Only if all votes within a given block are the same, can a particular way of voting be ascertained for a voter.
 
 -----
 
 **Q:** Can a peer mess up a block and keep voters in that block from voting?
 
-**A:** Only for a moment.  A voter can, for instance, submit a duplicate vote, which will cause the entire block to be rejected.  But the app will simply and automatically re-form a new block for the voters, excluding the duplicate or problematic voter, and re-submit.  Peer failure activity is "whispered" between peers, so bad actors are eventually black-listed.
+**A:** Only for a moment.  A voter can, for instance, submit a duplicate vote, which will cause the entire block to be invalid.  But the app will simply and automatically re-form a new block for the voters, excluding the duplicate or problematic voter, and re-submit it.  Peer failure activity is "whispered" between peers, so bad actors are eventually black-listed.

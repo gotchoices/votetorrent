@@ -1,13 +1,14 @@
 import { DeviceSignature } from "./device-signature";
 
-export interface VoterDigest {
-    solicitationDigest: string,
-    rollKey: string,
-}
-
 export interface Voter {
-    /** Roll entry key for the registered voter */
-    rollKey: string,
-    /** Voter's signature of the election, signed against rollKey */
+    /** Cid of the public registration record */
+    publicCid: string,
+
+		/** Cid of the private registration record */
+		privateCid: string,
+
+    /** Voter's signature of the templateCid and this record*/
     signature: DeviceSignature,
 }
+
+export type VoterWithKey = { registrantKey: string; voter: Voter; };

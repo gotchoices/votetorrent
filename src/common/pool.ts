@@ -2,12 +2,14 @@ export interface PoolHeader {
     /** CID of the peer formed pool */
     cid: string,
 
+		/** CID of the associated election */
+		electionCid: string,
+
     /** CID of the pool coordinator */
     coordinatorCid: string,
 
     /** Multiaddr of the pool coordinator */
     coordinatorMultiaddr: string,
-
     /** Expiration timestamp relative to the coordinator */
     expiration: number,
 
@@ -27,6 +29,9 @@ export interface PoolSummary {
 export interface PoolMember {
     /** CID of the member */
     cid: string,
+
+    /** Public key of the member used in signature */
+    key: string,
 
     /** Multiaddr of the member */
     multiaddr: string,
