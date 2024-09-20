@@ -7,16 +7,55 @@ export interface Authority {
 
 		/** Official, legal name */
     name: string,
+}
 
-		/** Registered domain name of the authority */
-    domainName: string,
+export interface AuthorityInfrastructure {
+	/** CID of the authority */
+	authorityCid: string,
 
-		/** URL of the REST API */
-    apiAddress: string,
+	/** Expiration date of this record */
+	expires: number,
 
-		/** Bootstrap multiaddress of peer 2 peer network */
-		p2pAddress: string,
+	/** Registered domain name of the authority */
+	domainName: string,
 
-		/** Authority's signature of digest */
-    signature: string,
+	/** URL of the REST API */
+	apiAddress: string,
+
+	/** Bootstrap multiaddresses of peer 2 peer network */
+	p2pAddresses: string[],
+
+	/** The administrations signature of this record */
+	signature: string,
+}
+
+export interface Administrator {
+	/** CID of the administrator */
+	cid: string,
+
+	/** Name of the administrator */
+	name: string,
+
+	/** Public key of the administrator */
+	key: string,
+}
+
+export interface Administration {
+	/** CID of this administration */
+	cid: string,
+
+	/** CID of the authority */
+	authorityCid: string,
+
+	/** The combined public key of the administrators */
+	key: string,
+
+	/** The administrators */
+	administrators: Administrator[],
+
+	/** Expiration date of this administration record */
+	expires: number,
+
+	/** The administrator's signature of this record */
+	signature: string,
 }

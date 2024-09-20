@@ -10,11 +10,26 @@ export interface Template {
 	/** The associated authority */
 	authorityCid: string,
 
-	/** Options to be voted on */
-	questions: Question[],
-
 	/** Authority's signature of this digest */
 	signature: string,
 }
 
-// TODO: ballot revisions
+export interface TemplateRevision {
+	/** CID of the template revision */
+	cid: string,
+
+	/** CID of the template */
+	templateCid: string,
+
+	/** The monotonically increasing sequence number of the revision */
+	revision: number,
+
+	/** CIDs of certifiers - if other than authority's administrator(s) */
+	certifiers?: string[],
+
+	/** Options to be voted on */
+	questions: Question[],
+
+	/** Authority's signature of this revision */
+	signature: string,
+}

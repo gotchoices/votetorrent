@@ -7,7 +7,7 @@ export interface Voter {
 		/** Cid of the private registration record */
 		privateCid: string,
 
-    /** Voter's signature of the ballotCid and this record*/
+    /** Voter's signature of the templateCid and this record*/
     signature: DeviceSignature,
 }
 
