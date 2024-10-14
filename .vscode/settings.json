@@ -1,7 +1,11 @@
 {
     "cSpell.words": [
+        "archivers",
         "Kademlia",
         "keyholder",
-        "keyholders"
-    ]
+        "keyholders",
+        "keyspace",
+        "multiaddress"
+    ],
+    "svg.preview.background": "custom"
 }
