@@ -1,13 +1,5 @@
 # VoteTorrent Technical Architecture
 
-## Matchmaking
-
-VoteTorrent's peer-to-peer network employs a rendezvous-based matchmaking system to efficiently connect peers for various tasks, regardless of network size or task popularity. The core concept involves nodes meeting at localized rendezvous points, with rendezvous keys derived from a combination of local node address information and task-specific hashes. Peers can adjust the specificity of these keys based on their local Kademlia bucket distribution and network conditions, allowing for adaptive control over the search and matchmaking process.
-
-The matchmaking process differs for active matchers and waiting workers. Active matchers generate rendezvous keys, publish their intent, search for matches, and adjust key specificity as needed to find suitable peers quickly. Workers, on the other hand, register their availability with longer Time-To-Live (TTL) values and wait for work assignments, adjusting their specificity to balance the load at rendezvous points. This flexible system can handle various scenarios, from sparse networks with few interested peers to dense networks with many participants, by dynamically adjusting the rendezvous key specificity to optimize peer discovery and work distribution.
-
-For details, see [matchmaking](./doc/matchmaking.md).
-
 ## Storage
 
 VoteTorrent uses **Arachnode**, a storage system that organizes storage nodes into concentric rings, with each ring representing progressively finer partitions of the keyspace. The outermost ring, called Ring Zulu, handles transactions and dynamic ranges based on an overlap factor rather than specific partition boundaries. Storage nodes in the innermost ring, Ring 0, store the entire keyspace, while nodes in outer rings manage smaller, more specific portions of the keyspace as they move outward. This design allows nodes to adjust their range responsibility based on storage capacity, dynamically shifting to more granular rings when needed.
@@ -38,6 +30,14 @@ Conflict and failure handling are integral to the robustness of this design. In 
 
 For details, see [transactions](./doc/transactions.md).
 
+## Matchmaking
+
+VoteTorrent's peer-to-peer network employs a rendezvous-based matchmaking system to efficiently connect peers for various tasks, regardless of network size or task popularity. The core concept involves nodes meeting at localized rendezvous points, with rendezvous keys derived from a combination of local node address information and task-specific hashes. Peers can adjust the specificity of these keys based on their local Kademlia bucket distribution and network conditions, allowing for adaptive control over the search and matchmaking process.
+
+The matchmaking process differs for active matchers and waiting workers. Active matchers generate rendezvous keys, publish their intent, search for matches, and adjust key specificity as needed to find suitable peers quickly. Workers, on the other hand, register their availability with longer Time-To-Live (TTL) values and wait for work assignments, adjusting their specificity to balance the load at rendezvous points. This flexible system can handle various scenarios, from sparse networks with few interested peers to dense networks with many participants, by dynamically adjusting the rendezvous key specificity to optimize peer discovery and work distribution.
+
+For details, see [matchmaking](./doc/matchmaking.md).
+
 ## Collections
 
 For details, see [collections](./doc/collections.md).
@@ -47,41 +47,6 @@ For details, see [collections](./doc/collections.md).
 The apps should join the DHT networks in the background, and remain as an active node during the active election period.
 
 Blocks are negotiated as follows, from the perspective of a given node:
-
-### Pair finding
-* A pairing public/private key pair is generated, with the private key kept accessible (not locked in hardware vault)
-* A clock delta is established relative to an NTP server - this allows us to estimate latency from peers in one hop
-* Subscribe to an Election Network pub-sub topic based on the template CID, and a 'seeding' token.
-  * Initially the pairing token is based on several of the most significant digits of a hash of the registrantKey (Q: good to have this content based, but not sure if we can do that quite yet) 
-* Upon joining the topic, send an `present` message to the topic, with our Peer ID, adjusted time, and multiaddress
-* Wait for at least an accumulation time (if accumulation count messages arrive), and at most a timeout period, for topic messages from other peers
-* For each `present` message received from the pubsub, send a `greet` message, directly to the least n latent peers, with our Peer ID, time, multiaddress, and pairing public key
-* If we receive a `greet` message: 
-  * If its apparent latency is less than any of the peers we have encountered, respond with a `pair` message containing:
-    * Our voter and vote records completely encrypted using the combined public key of both nodes
-    * The pairing public key
-  * Otherwise respond with a `reject` message
-* If our outgoing `greet` message(s) timeout or are rejected, go to the next n latent peers and repeat
-* If we receive a `pair` message, we should check that it's round-trip latency reasonably matches the estimated one hop latency, if so, and we have accepted no other pairings, the pairing is complete and we proceed to the next step, otherwise we respond with a `reject` message
-* Keep track of rejected peers, and if we get to a latency that would make the rejected peer the least latent, attempt a `greet` again
-* If we encounter no other peers after the maximum timeout period, continue "listening" on this topic, but subscribe to the next most general topic pairing token, announce our presence, and repeat
-  * A `greet` message from a more specific topic node should supersede a lower response time (up to some limit) 
-* If we get to the root token (empty), and the voting period is elapsing, we must form a unitary block and submit it
-
-### Seeding
-At the end of pair finding, one node should have the encrypted vote and voter records from the other node, as well as the pairing public key of the other node.  We'll call this node the pair coordinator.
-
-* The coordinator will completely encrypt its own voter and vote records and form a "seed", with the combined voter and vote records in scrambled order relative to each other.  Note that the vote and voter records contain a visible nonce and registrantKey and an encrypted content portion, so this encryption hides those visible values.
-* In a manner similar to pair finding, the coordinator attempts to find either a 3rd peer or another coordinator node to form a "pool".
-  * The `present` and `greet` messages are sent as above
-  * Rather than sending a `pair` message, however, a `pool` message is sent containing the seed, the coordinator's private key, and the non-coordinator's public key and multiaddress
-  * If we, as a node, receive a `pool` message, we should:
-    * Send a `confirm` message to the non-coordinator peer indicated in the message, containing the non-coordinator's public key
-    * Wait for a `received` message from the non-coordinator peer containing the non-coordinator's private key
-    * Decrypt the seed using the non-coordinator and coordinator's combined private keys
-    * Combine the voter and vote records from the seed with our own voter and vote records, scrambling the order of each list independently, forming a pool
-    * We become the pool coordinator, and we inform all contributing peers that they are in the pool
-    * If we don't receive an `ack` message from one or more peers within a timeout period, we revert to our previous state and `inform` all contributing peers that we did
 
 ### Pool Merging
 * As pool coordinator, we subscribe to an election network pub-sub topic based on the template CID, a 'pooling' token, and the hash of the pool
