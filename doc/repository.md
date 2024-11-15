@@ -10,7 +10,7 @@ The system provides four core primitives:
 - `getRevision(blockId)`: Fetch the latest revision number of the given block.
 - `get(blockId, revision)`: Fetch the block with the latest revision that is at most the given revision.
 - `put(blockId, revision, block)`: Update the given block conditionally based on its current revision.
-- `delete(blockId)`: Mark the block for eventual deletion.
+- `delete(blockId, revision)`: Mark the block for eventual deletion.
 
 ## Primitives Description
 

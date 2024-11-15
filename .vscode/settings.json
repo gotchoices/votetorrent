@@ -1,11 +1,21 @@
 {
-    "cSpell.words": [
-        "archivers",
-        "Kademlia",
-        "keyholder",
-        "keyholders",
-        "keyspace",
-        "multiaddress"
-    ],
-    "svg.preview.background": "custom"
+	"plantuml.exportOutDir": "doc/figures",
+	"plantuml.diagramsRoot": "doc/figures",
+	"plantuml.exportFormat": "png",
+	"plantuml.exportIncludeFolderHeirarchy": false,
+	"plantuml.exportSubFolder": false,
+	"cSpell.words": [
+		"archivers",
+		"checkpointed",
+		"Kademlia",
+		"keyholder",
+		"keyholders",
+		"keyspace",
+		"libp",
+		"multiaddress",
+		"pushable",
+		"Trxes",
+		"uncheckpointed"
+	],
+	"svg.preview.background": "custom"
 }

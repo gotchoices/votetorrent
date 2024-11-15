@@ -52,10 +52,10 @@ The core idea is to have nodes "meet" at as local as possible rendezvous points.
    - Follow the steps in **Generating Rendezvous Keys**.
 
 2. **Publish Matchmaking Intent**:
-   - Use a `PUT` operation to store your availability or matchmaking intent at the rendezvous key in the DHT.
+   - Use a `provide` operation to store your availability or matchmaking intent at the rendezvous key in the DHT.
 
 3. **Search for Matches**:
-   - Perform a `GET` operation at the rendezvous key to retrieve other peers' matchmaking intents.
+   - Perform a `findProviders` operation at the rendezvous key to retrieve other peers' matchmaking intents.
 
 4. **Evaluate Matches**:
    - If sufficient matches are found, proceed to establish connections.
