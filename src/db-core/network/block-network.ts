@@ -1,5 +1,4 @@
-import { BlockTrxRef, BlockTrxStatus, BlockTrx, StaleFailure, CommitSuccess, PendResult, CommitResult } from "./transaction.js";
-import { BlockGet, GetBlockResult } from "./index.js";
+import { BlockGet, GetBlockResult, BlockTrxRef, BlockTrxStatus, PendResult, CommitResult, BlockTrxRequest } from "../index.js";
 
 export type BlockNetwork = {
 	/** Get blocks by their IDs and versions or a specific transaction
@@ -17,7 +16,7 @@ export type BlockNetwork = {
 		- If the transaction targets the correct version, the call succeeds, unless failIfPending and there are any pending transactions - the caller may choose to wait for pending transactions to clear rather than risk racing with them
 		- If the transaction targets an older version, the call fails, and the caller must resync using the missing transactions
 	 */
-	pend(blockTrx: BlockTrx, options: { pending: 'return' | 'fail' }): Promise<PendResult>;
+	pend(blockTrx: BlockTrxRequest, options: { pending: 'return' | 'fail' }): Promise<PendResult>;
 
 	/** Cancel a pending transaction
 		- If the given transaction ID is pending, it is canceled

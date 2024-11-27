@@ -1,7 +1,7 @@
 import { pipe } from 'it-pipe';
 import { encode as lpEncode, decode as lpDecode } from 'it-length-prefixed';
 import { pushable } from 'it-pushable';
-import { KeyNetwork, Repo, BlockGet, GetBlockResult, Mutations, PendSuccess, StaleFailure, BlockTrxRef, CommitSuccess, MessageOptions, CommitResult } from '../db-core/index.js';
+import { KeyNetwork, Repo, BlockGet, GetBlockResult, Transform, PendSuccess, StaleFailure, BlockTrxRef, CommitSuccess, MessageOptions, CommitResult } from '../db-core/index.js';
 import { RepoMessage } from './repo-protocol.js';
 import { PeerId } from '@libp2p/interface';
 import { first } from './it-utility.js';
@@ -24,9 +24,9 @@ export class RepoClient implements Repo {
 		);
 	}
 
-	async pend(mutations: Mutations, options: MessageOptions): Promise<PendSuccess | StaleFailure> {
+	async pend(transform: Transform, options: MessageOptions): Promise<PendSuccess | StaleFailure> {
 		return this.processMessage<PendSuccess | StaleFailure>(
-			[{ pend: mutations }],
+			[{ pend: transform }],
 			options
 		);
 	}

@@ -1,12 +1,4 @@
-import { IBlock, BlockId, BlockOperations } from "./structs.js";
-
-export type TransactionId = string;
-
-export type Mutations = {
-	inserts: IBlock[];
-	updates: Map<BlockId, BlockOperations>;
-	deletes: BlockId[];
-};
+import { BlockId, IBlock, TransactionId, Transform } from "../index.js";
 
 export type BlockTrxRef = {
 	blockIds: BlockId[];
@@ -15,7 +7,10 @@ export type BlockTrxRef = {
 
 export type BlockTrx = {
 	transactionId: TransactionId;
-	mutations: Mutations;
+	transform: Transform;
+};
+
+export type BlockTrxRequest = BlockTrx & {
 	expiration: number;
 };
 
@@ -48,15 +43,15 @@ export type CommitSuccess = {
 	conditions: Condition[];
 };
 
-export type BlockGet = {
-	blockId: BlockId;
-	transactionId?: TransactionId;
+export type BlockTrxContext = {
+	transactionIds?: TransactionId[];
 	collectionRev?: number;
 };
+
+export type BlockGet = {
+	blockId: BlockId;
+} & BlockTrxContext;
 
 export type GetBlockResult = {
 	block: IBlock;
-	transactionId?: TransactionId;
-	collectionRev?: number;
-};
-
+} & BlockTrxContext;

@@ -8,7 +8,7 @@ node "Log Block 3" as LogBlock3
 
 CollectionHeaderBlock --> LogBlock3 : tail
 CollectionHeaderBlock --> LogBlock1 : head
-LogBlock1 <- LogBlock2 : prior
-LogBlock2 <- LogBlock3 : prior
+LogBlock1 <- LogBlock2 : next
+LogBlock2 <- LogBlock3 : next
 
 @enduml

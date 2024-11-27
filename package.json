@@ -29,7 +29,7 @@
   "author": "Nathan Allan",
   "license": "MIT",
   "devDependencies": {
-    "@types/node": "^22.8.2",
+    "@types/node": "^22.9.0",
     "@types/jest": "^29.5.14",
     "@typescript-eslint/eslint-plugin": "^8.12.1",
     "@typescript-eslint/parser": "^8.12.1",
@@ -49,6 +49,9 @@
     "it-length-prefixed": "^9.1.0",
 		"it-all": "^3.0.6",
 		"it-foreach": "^2.1.1",
+		"it-map": "^3.1.1",
+		"it-filter": "^3.1.1",
+		"uint8arrays": "^5.1.0",
     "uint8arraylist": "^2.4.8"
   }
 }

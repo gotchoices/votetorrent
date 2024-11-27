@@ -1,8 +1,9 @@
 import { PeerId } from "@libp2p/interface";
-import { BlockGet, BlockTrx, BlockTrxRef, BlockTrxStatus, CommitSuccess, IBlock, BlockNetwork as IBlockNetwork, PendSuccess, StaleFailure, KeyNetwork, BlockId, GetBlockResult, blockIdsForMutation, Mutations, emptyMutations, mutationsForBlockId, mergeMutations, Repo, TransactionId, PendResult, CommitResult, Condition } from "../db-core/index.js";
+import { BlockGet, BlockTrx, BlockTrxRef, BlockTrxStatus, CommitSuccess, IBlock, BlockNetwork as IBlockNetwork, PendSuccess, StaleFailure, KeyNetwork, BlockId, GetBlockResult, blockIdsForTransform, Transform, emptyTransform, transformForBlockId, mergeTransforms, Repo, TransactionId, PendResult, CommitResult, Condition, BlockTrxRequest, concatTransforms } from "../db-core/index.js";
 import { RepoClient } from "./repo-client.js";
-import forEach from "it-foreach";
 import { Pending } from "./pending.js";
+import map from "it-map";
+import { blockIdToBytes } from "./helpers.js";
 
 type CoordinatorGets = {
 	peerId: PeerId;
@@ -44,61 +45,78 @@ export class BlockNetwork implements IBlockNetwork {
 
 	async get(blockGets: BlockGet[]): Promise<GetBlockResult[]> {
 		// Group by block id
-		const distinctBlockIds = new Map(blockGets.map(bg => [bg.blockId.toString(), bg] as const));
+		const distinctBlockIds = new Map(blockGets.map(bg => [bg.blockId, bg] as const));
 
-		// Find coordinator for each key
-		const infoByBlockId = await Promise.all(Array.from(distinctBlockIds.entries())
-			.map(async ([bidStr, bg]) => [bidStr, { blockId: bg.blockId, peerId: await this.keyNetwork.findCoordinator(bg.blockId) }] as const));
-		const infoByBlockIdMap = new Map(infoByBlockId);
-
-		// Make a map of distinct coordinators and their associated blocks
-		const coordinators = infoByBlockId.reduce((acc, [bidStr, info]) => {
-			const peerId_str = info.peerId.toString();
-			const coordinator = acc.get(peerId_str) ?? { peerId: info.peerId, blockGets: [] };
-			coordinator.blockGets.push(...blockGets.filter(bg => bg.blockId === info.blockId));
-			acc.set(peerId_str, coordinator);
-			return acc;
-		}, new Map<string, CoordinatorGets>());
+		const batches = await this.batchesForPayload<BlockGet[], GetBlockResult[]>(
+			Array.from(map(distinctBlockIds.values(), bg => bg.blockId)),
+			blockGets,
+			(gets, blockId, mergeWithGets) => [...(mergeWithGets ?? []), ...gets.filter(g => g.blockId === blockId)],
+			[]
+		);
 
 		const expiration = Date.now() + this.timeoutMs;
 
-		await Promise.all(Array.from(coordinators.values()).map(async coordinator => {
-			// Dial coordinator
-			coordinator.repoClient = RepoClient.create(coordinator.peerId, this.keyNetwork);
-			// Send get request
-			coordinator.results = await coordinator.repoClient.get(coordinator.blockGets, { expiration });
-			// TODO: if something goes wrong, try to find a new coordinator (retry without cache)
-		}));
+		let error: Error | undefined;
+		try {
+			await this.processBatches(
+				batches,
+				(repo, batch) => repo.get(batch.payload, { expiration }),
+				batch => batch.payload.map(bg => bg.blockId),
+				(gets, blockId, mergeWithGets) => [...(mergeWithGets ?? []), ...gets.filter(g => g.blockId === blockId)],
+				expiration
+			);
+		} catch (e) {
+			error = e as Error;
+		}
 
-		// Collect replies back into get order
-		return blockGets.map(bg => {
-			const coordinator = coordinators.get(infoByBlockIdMap.get(bg.blockId.toString())!.peerId.toString())!;
-			const index = coordinator.blockGets.findIndex(r => r.blockId === bg.blockId);
-			return coordinator.results![index];
-		});
+		// Only throw if we had actual failures and no successful retries
+		if (!everyBatch(batches, b => b.request?.isResponse as boolean)) {
+			error = Error(`Some peers did not complete: ${Array.from(incompleteBatches(batches)).map(b => b.peerId).join(", ")}`);
+		}
+
+		if (error) {
+			throw error;
+		}
+
+		// Cache the completed batches that had actual responses (not just coordinator not found)
+		const completedBatches = Array.from(allBatches(batches, b => b.request?.isResponse as boolean && b.request!.response!.length > 0));
+
+		// Create a lookup map from successful responses only
+		const blockResultMap = new Map(
+			completedBatches
+				.flatMap(batch =>
+					batch.request!.response!.map((result, index) => [
+						batch.payload[index].blockId,
+						result
+					])
+				)
+		);
+
+		// Use the map for faster lookups
+		return blockGets.map(bg => blockResultMap.get(bg.blockId)!);
 	}
 
 	async getStatus(blockTrxes: BlockTrxRef[]): Promise<BlockTrxStatus[]> {
 		throw new Error("Method not implemented.");
 	}
 
-	async pend(blockTrx: BlockTrx, options: { pending: "return" | "fail"; }): Promise<PendResult> {
-		const mutationsForBlock = (payload: Mutations, blockId: Uint8Array, mergeWithPayload: Mutations | undefined): Mutations => {
-			const filteredMutations = mutationsForBlockId(payload, blockId);
-			return mergeWithPayload ? mergeMutations(mergeWithPayload, filteredMutations) : filteredMutations;
+	async pend(blockTrx: BlockTrxRequest, options: { pending: "return" | "fail"; }): Promise<PendResult> {
+		const transformForBlock = (payload: Transform, blockId: BlockId, mergeWithPayload: Transform | undefined): Transform => {
+			const filteredTransform = transformForBlockId(payload, blockId);
+			return mergeWithPayload ? mergeTransforms(mergeWithPayload, filteredTransform) : filteredTransform;
 		};
-		const blockIds = blockIdsForMutation(blockTrx.mutations);
-		const batches = await this.batchesForPayload<Mutations, PendResult>(blockIds, blockTrx.mutations, mutationsForBlock, []);
+		const blockIds = blockIdsForTransform(blockTrx.transform);
+		const batches = await this.batchesForPayload<Transform, PendResult>(blockIds, blockTrx.transform, transformForBlock, []);
 		const expiration = Date.now() + this.timeoutMs;
 
 		let error: Error | undefined;
 		try {
 			// Process all batches, noting all outstanding peers
-			await this.processBatches<Mutations, PendResult>(
+			await this.processBatches<Transform, PendResult>(
 				batches,
 				(repo, batch) => repo.pend(batch.payload, { expiration }),
-				batch => blockIdsForMutation(batch.payload),
-				mutationsForBlock,
+				batch => blockIdsForTransform(batch.payload),
+				transformForBlock,
 				expiration
 			);
 		} catch (e) {
@@ -125,7 +143,7 @@ export class BlockNetwork implements IBlockNetwork {
 			success: true,
 			trxRef: {
 				transactionId: blockTrx.transactionId,
-				blockIds: blockIdsForMutation(blockTrx.mutations)
+				blockIds: blockIdsForTransform(blockTrx.transform)
 			}
 		};
 	}
@@ -137,7 +155,7 @@ export class BlockNetwork implements IBlockNetwork {
 			mergeBlocks,
 			[]
 		);
-		const expiration = Date.now() + this.timeoutMs;
+		const expiration = Date.now() + this.abortOrCancelTimeoutMs;
 		await this.processBatches(
 			batches,
 			(repo, batch) => repo.cancel({ transactionId: trxRef.transactionId, blockIds: batch.payload }, { expiration }),
@@ -189,8 +207,21 @@ export class BlockNetwork implements IBlockNetwork {
 		};
 	}
 
-	abort(trxRef: BlockTrxRef): Promise<void> {
-		throw new Error("Method not implemented.");
+	async abort(trxRef: BlockTrxRef): Promise<void> {
+		const batches = await this.batchesForPayload<BlockId[], void>(
+			trxRef.blockIds,
+			trxRef.blockIds,
+			mergeBlocks,
+			[]
+		);
+		const expiration = Date.now() + this.abortOrCancelTimeoutMs;
+		await this.processBatches(
+			batches,
+			(repo, batch) => repo.abort({ transactionId: trxRef.transactionId, blockIds: batch.payload }, { expiration }),
+			batch => batch.payload,
+			mergeBlocks,
+			expiration
+		);
 	}
 
 	private async processBatches<TPayload, TResponse>(
@@ -234,7 +265,7 @@ export class BlockNetwork implements IBlockNetwork {
 		// Find coordinator for each key
 		const blockIdPeerId = await Promise.all(
 			Array.from(distinctBlockIds).map(async (bid) =>
-				[bid, await this.keyNetwork.findCoordinator(bid, { excludedPeers })] as const
+				[bid, await this.keyNetwork.findCoordinator(blockIdToBytes(bid), { excludedPeers })] as const
 			)
 		);
 
@@ -299,15 +330,16 @@ function *allBatches<TPayload, TResponse>(batches: CoordinatorBatch<TPayload, TR
 	}
 }
 
-function mergeBlocks(payload: Uint8Array[], blockId: Uint8Array, mergeWithPayload: Uint8Array[] | undefined): Uint8Array[] {
+function mergeBlocks(payload: BlockId[], blockId: BlockId, mergeWithPayload: BlockId[] | undefined): BlockId[] {
 	return [...(mergeWithPayload ?? []), blockId];
 }
 
 function distinctConditions(conditions: Condition[]): Condition[] {
-	return [...new Map(conditions.map(c => [c.blockId.toString() + c.transactionId.toString(), c])).values()];
+	return [...new Map(conditions.map(c => [c.blockId + '-' + c.transactionId, c])).values()];
 }
 
 function distinctBlockTrx(blockTrxes: BlockTrx[]): BlockTrx[] {
-	return [...new Map(blockTrxes.map(t => [t.transactionId.toString() + t.mutations.toString(), t])).values()];
+	const grouped = Object.groupBy(blockTrxes, ({ transactionId }) => transactionId);
+	return Object.entries(grouped).map(([transactionId, trxes]) => ({ transactionId, transform: concatTransforms(trxes!.map(t => t.transform)) }));
 }
 

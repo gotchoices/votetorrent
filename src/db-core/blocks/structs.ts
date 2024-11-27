@@ -1,4 +1,4 @@
-export type BlockId = Uint8Array;
+export type BlockId = string;	// base32 encoded
 export type BlockType = string;	// Generally a short code
 
 export type BlockHeader = {

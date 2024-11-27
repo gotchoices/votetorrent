@@ -53,7 +53,7 @@ While the system may experience transient hotspots at the log tail block and pot
   * Load new logical log entries from the tail block
   * Starting from unmodified cached blocks, play the read logical log entries, capturing physical changes in "unchanged" blocks
   * Note any conflicts from the loaded logical log entries, from our list - affect our list if necessary
-  * Play our logical log entries, capturing physical changes as changed blocks and mutations
+  * Play our logical log entries, capturing physical changes as changed blocks and transforms
 
 ### Log
 
@@ -71,7 +71,7 @@ The transaction log is a linked list of blocks, each containing a set of logical
   - [**New Tail**]: only present if the tail block was full
     - **Block ID**: The ID of the new tail block for the collection
     - **Header ID**: The ID of the updated header block for the collection
-  - **Mutations**: The set of physical mutations to the blocks in this collection - tail block mutation includes the logical changes
+  - **Transform**: The set of physical mutations to the blocks in this collection - tail block transform includes the logical changes
 - **Timestamp**: The time when the transaction was submitted - based on the client's clock - will be validated for reasonableness - will be made >= prior transaction's timestamp
 - **Signatures**: Cryptographic signatures from participating nodes to ensure the integrity and authenticity of the transaction.
 
@@ -115,11 +115,11 @@ The transaction log is a linked list of blocks, each containing a set of logical
 #### Block Repository:
 - **Pending**: list of:
   - **Transaction ID**: Used to identify the transaction while pending
-  - **Mutations**: The set of physical mutations to this block
+  - **Transform**: The set of physical mutations to this block
   - **Expiration**: A time after which the transaction becomes in-doubt; this block should proactively determine resolution at this point
 - **Revisions**: list of:
   - **LSN**: The LSN of this version
-  - **Mutations**: The set of physical mutations represented by this revision
+  - **Transform**: The set of physical mutations represented by this revision
   - [**Block**]: Materialized block for this revision - always present for current version
   - [**Expiration**]: The time after which this revision is eligible for garbage collection - never present for current version
   - **Conditions**: list of zero or more:
@@ -133,7 +133,7 @@ The transaction log is a linked list of blocks, each containing a set of logical
 #### Block Transaction:
 - **Block ID**: The ID of the block
 - **Transaction ID**: The ID of the transaction - shared across blocks and collections
-- **Mutations**: The set of physical mutations to the block
+- **Transform**: The set of physical mutations to the block
 - **Expiration**: A time after which the transaction becomes in-doubt; any involved node should proactively determine resolution at this point
 
 #### Block Repository Interface
@@ -165,10 +165,11 @@ The transaction log is a linked list of blocks, each containing a set of logical
 - Block header
 - Block body
 
-#### Mutations
+#### Transform
+- Set of block inserts, updates, and deletes
 
 #### Overall Transaction
--Set of block mutations
+-Set of block transforms
 
 The logical structure of a transaction can be represented as follows:
 
