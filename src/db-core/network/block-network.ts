@@ -24,8 +24,8 @@ export type BlockNetwork = {
 	cancel(trxRef: BlockTrxRef): Promise<void>;
 
 	/** Commit a pending transaction
-		- If the transaction references the current version, the pending transaction is conditionally committed
-		- The returned conditions are those uncommitted inherited from older transaction(s) - if any of those are aborted, this transaction will implicitly be aborted
+		- If the transaction references the current version, the pending transaction is committed
+		- If the returned fails, the transforms necessary to update all overlapping blocks are returned
 		- If the transaction mentions other collections, those are assumed conditions - returned conditions only list inherited conditions
 	 */
 	commit(tailId: BlockId, trxRef: BlockTrxRef): Promise<CommitResult>;

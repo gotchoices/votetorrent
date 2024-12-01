@@ -1,6 +1,6 @@
 import { Log, Cache, IBlock, Action, ActionType, ActionHandler, Atomic, BlockId, Tracker, BlockNetwork, ActionEntry, blockIdsForTransform, copyTransform, applyTransformToStore } from "../index.js";
 import { NetworkSource } from "../network/network-source.js";
-import { CollectionHeaderBlock } from "./index.js";
+import { CollectionHeaderBlock, CollectionId } from "./index.js";
 
 export type CollectionInitOptions<TAction> = {
 	modules: Record<ActionType, ActionHandler<TAction>>;
@@ -11,7 +11,7 @@ export class Collection<TAction> {
 	private readonly pending: Action<TAction>[] = [];
 
 	protected constructor(
-		private readonly id: BlockId,
+		private readonly id: CollectionId,
 		private readonly network: BlockNetwork,
 		private readonly logId: BlockId,
 		private readonly handlers: Record<ActionType, ActionHandler<TAction>>,
@@ -21,7 +21,7 @@ export class Collection<TAction> {
 	) {
 	}
 
-	static async createOrOpen<TAction>(network: BlockNetwork, id: BlockId, init: CollectionInitOptions<TAction>) {
+	static async createOrOpen<TAction>(network: BlockNetwork, id: CollectionId, init: CollectionInitOptions<TAction>) {
 		// Start with a context that has an infinite revision number to ensure that we always fetch the latest log information
 		const source = new NetworkSource(id, network, { rev: Number.POSITIVE_INFINITY });
 		const tracker = new Tracker(source);

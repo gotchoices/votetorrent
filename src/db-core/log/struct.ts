@@ -1,4 +1,4 @@
-import { BlockId, TransactionId } from "../index.js";
+import { BlockId, CollectionId, TransactionId } from "../index.js";
 
 /** A log entry - either an action or a checkpoint */
 export type LogEntry<TAction> = {
@@ -17,12 +17,14 @@ export type ActionEntry<TAction> = {
 	readonly actions: TAction[];
 	/** Block ids affected by the transaction - includes the log related blocks */
 	blockIds: BlockId[]; // NOTE: not readonly because it is updated after being generated
+	/** Other collection ids affected by the transaction */
+	collectionIds: CollectionId[];
 };
 
 /** A checkpoint entry restates the currently uncheckpointed transactions */
 export type CheckpointEntry = {
-	/** The current set of outstanding transaction ids
-	 * - actions implicitly increase the set of outstanding Ids
+	/** The current set of pending transaction ids
+	 * - actions implicitly increase the set of pending Ids
 	 * - this restates the entire current set
 	 * - missing from the set are the implicitly checkpointed ones */
 	readonly pendingIds: TransactionId[];

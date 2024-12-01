@@ -1,4 +1,4 @@
-import { BlockId, IBlock, TransactionId, Transform } from "../index.js";
+import { CollectionId, BlockId, IBlock, TransactionId, Transform } from "../index.js";
 
 export type BlockTrxRef = {
 	blockIds: BlockId[];
@@ -35,6 +35,8 @@ export type CommitResult = CommitSuccess | StaleFailure;
 
 export type CommitSuccess = {
 	success: true;
+	/** If present, the identified collection acts as the coordinator for the multi-collection transaction */
+	coordinatorId?: CollectionId;
 };
 
 export type BlockTrxContext = {
