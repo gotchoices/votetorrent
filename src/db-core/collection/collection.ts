@@ -92,6 +92,7 @@ export class Collection<TAction> {
 		this.source.trxContext = latest.context;
 	}
 
+	/** Push our pending actions to the network */
 	async sync() {
 		// Create a snapshot tracker for the transaction, so that we can ditch the log changes if we have to retry the transaction
 		const transactionId = crypto.randomUUID();
@@ -120,6 +121,8 @@ export class Collection<TAction> {
 				break;
 			}
 		}
+		this.pending.length = 0;
+		this.tracker.reset();
 	}
 
 	async updateAndSync() {
