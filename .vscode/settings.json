@@ -13,6 +13,7 @@
 		"keyspace",
 		"libp",
 		"multiaddress",
+		"pendings",
 		"pushable",
 		"Trxes",
 		"uncheckpointed"

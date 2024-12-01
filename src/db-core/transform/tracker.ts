@@ -1,24 +1,20 @@
-import { IBlock, BlockId, BlockStore as IBlockStore, BlockHeader, BlockOperation, BlockType, Transform, applyOperation, emptyTransform, BlockSource as IBlockSource, blockIdsForTransform } from "../index.js";
+import { IBlock, BlockId, BlockStore as IBlockStore, BlockHeader, BlockOperation, BlockType, applyOperation, emptyTransform, BlockSource as IBlockSource, blockIdsForTransform, copyTransform, BlockTrx } from "../index.js";
 import { ensured } from "../../db-p2p/helpers.js";
 
 export class Tracker<T extends IBlock> implements IBlockStore<T> {
-	transform = emptyTransform();
-	cache = new Map<BlockId, T>();
-
 	constructor(
-		readonly source: IBlockSource<T>,
+		private readonly source: IBlockSource<T>,
+		/** The collected set of transformations to be applied. Treat as immutable */
+		public transform = emptyTransform(),
 	) { }
 
 	async tryGet(id: BlockId): Promise<T | undefined> {
-		let block = this.cache.get(id);
-		if (!block) {
-			block = await this.source.tryGet(id);
-			if (block) {
-				const ops = this.transform.updates[id] ?? [];
-				ops.forEach(op => applyOperation(block!, op));
-			}
+		const block = await this.source.tryGet(id);
+		if (block) {
+			const ops = this.transform.updates[id] ?? [];
+			ops.forEach(op => applyOperation(block!, op));
 		}
-		return structuredClone(block);
+		return block;
 	}
 
 	generateId(): BlockId {
@@ -30,35 +26,36 @@ export class Tracker<T extends IBlock> implements IBlockStore<T> {
 	}
 
 	insert(block: T) {
-		const clone = structuredClone(block);
-		this.cache.set(block.block.id, clone);
-		this.transform.inserts[block.block.id] = clone;
+		this.transform.inserts[block.block.id] = block;
 		this.transform.deletes.delete(block.block.id);
 	}
 
 	update(blockId: BlockId, op: BlockOperation) {
-		const block = this.cache.get(blockId);
-		if (block) {
-			applyOperation(block, op);
+		const inserted = this.transform.inserts[blockId];
+		if (inserted) {
+			applyOperation(inserted, op);
+		} else {
+			ensured(this.transform.updates, blockId, () => []).push(op);
 		}
-		ensured(this.transform.updates, blockId, () => []).push(op);
 	}
 
 	delete(blockId: BlockId) {
 		delete this.transform.inserts[blockId];
 		delete this.transform.updates[blockId];
 		this.transform.deletes.add(blockId);
-		this.cache.delete(blockId);
 	}
 
-	reset() {
+	reset(newTransform = emptyTransform()) {
 		const oldTransform = this.transform;
-		this.transform = emptyTransform();
-		this.cache.clear();
+		this.transform = newTransform;
 		return oldTransform;
 	}
 
-	getBlockIds(): BlockId[] {
+	transformedBlockIds(): BlockId[] {
 		return blockIdsForTransform(this.transform);
+	}
+
+	conflicts(blockIds: Set<BlockId>) {
+		return this.transformedBlockIds().filter(id => blockIds.has(id));
 	}
 }

@@ -33,19 +33,15 @@ export type PendResult = PendSuccess | StaleFailure;
 
 export type CommitResult = CommitSuccess | StaleFailure;
 
-export type Condition = {
-	blockId: BlockId;
-	transactionId: TransactionId;
-};
-
 export type CommitSuccess = {
 	success: true;
-	conditions: Condition[];
 };
 
 export type BlockTrxContext = {
-	transactionIds?: TransactionId[];
-	collectionRev?: number;
+	/** Set of transactions to explicitly include - may not be checkpointed yet, but are committed */
+	pendingIds?: TransactionId[];
+	/** Revision number of the collection */
+	rev: number;
 };
 
 export type BlockGet = {

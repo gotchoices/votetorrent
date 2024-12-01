@@ -45,13 +45,6 @@ export class RepoClient implements Repo {
 		);
 	}
 
-	async abort(trxRef: BlockTrxRef, options: MessageOptions): Promise<void> {
-		return this.processMessage<void>(
-			[{ abort: trxRef }],
-			options
-		);
-	}
-
 	private async processMessage<T>(
 		operations: RepoMessage['operations'],
 		options: MessageOptions

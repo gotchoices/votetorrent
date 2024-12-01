@@ -10,5 +10,5 @@ export type Action<T> = {
 	data: T;
 };
 
-export type ActionHandler<T> = (action: Action<T>, store: BlockStore<IBlock>, transactionId: TransactionId) => Promise<void>;
+export type ActionHandler<T> = (action: Action<T>, store: BlockStore<IBlock>) => Promise<void>;
 

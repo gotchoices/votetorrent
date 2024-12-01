@@ -1,9 +1,7 @@
 import { PeerId } from "@libp2p/interface";
-import { BlockGet, BlockTrx, BlockTrxRef, BlockTrxStatus, CommitSuccess, IBlock, BlockNetwork as IBlockNetwork, PendSuccess, StaleFailure, KeyNetwork, BlockId, GetBlockResult, blockIdsForTransform, Transform, emptyTransform, transformForBlockId, mergeTransforms, Repo, TransactionId, PendResult, CommitResult, Condition, BlockTrxRequest, concatTransforms } from "../db-core/index.js";
-import { RepoClient } from "./repo-client.js";
-import { Pending } from "./pending.js";
+import { BlockGet, BlockTrx, BlockTrxRef, BlockTrxStatus, CommitSuccess, IBlock, BlockNetwork as IBlockNetwork, PendSuccess, StaleFailure, KeyNetwork, BlockId, GetBlockResult, blockIdsForTransform, Transform, emptyTransform, transformForBlockId, mergeTransforms, Repo, TransactionId, PendResult, CommitResult, BlockTrxRequest, concatTransforms } from "../db-core/index.js";
+import { RepoClient, Pending, blockIdToBytes } from "./index.js";
 import map from "it-map";
-import { blockIdToBytes } from "./helpers.js";
 
 type CoordinatorGets = {
 	peerId: PeerId;
@@ -128,7 +126,7 @@ export class BlockNetwork implements IBlockNetwork {
 		}
 
 		if (error) { // If any failures, cancel all pending transactions as background microtask
-			Promise.resolve().then(() => this.abortOrCancelBatch(batches, { blockIds, transactionId: blockTrx.transactionId }, 'cancel'));
+			Promise.resolve().then(() => this.cancelBatch(batches, { blockIds, transactionId: blockTrx.transactionId }));
 			const stale = Array.from(allBatches(batches, b => b.request?.isResponse as boolean && !b.request!.response!.success));
 			if (stale.length > 0) {	// Any active stale failures should preempt reporting connection or other potential transient errors (we have information)
 				return { missing: stale.flatMap(b => (b.request!.response! as StaleFailure).missing), success: false };
@@ -165,19 +163,42 @@ export class BlockNetwork implements IBlockNetwork {
 		);
 	}
 
-	async commit(trxRef: BlockTrxRef): Promise<CommitResult> {
-		const batches = await this.batchesForPayload<BlockId[], CommitResult>(
-			trxRef.blockIds,
-			trxRef.blockIds,
-			mergeBlocks,
-			[]
-		);
+	async commit(tailId: BlockId, trxRef: BlockTrxRef): Promise<CommitResult> {
+		// Commit the tail block
+		const { batches: tailBatches, error: tailError } = await this.processBlocks([tailId], trxRef.transactionId);
+		if (tailError) {
+			// Cancel all pending transactions as background microtask
+			Promise.resolve().then(() => this.cancel({ blockIds: [...trxRef.blockIds, tailId], transactionId: trxRef.transactionId }));
+			// Collect and return any active stale failures
+			const stale = Array.from(allBatches(tailBatches, b => b.request?.isResponse as boolean && !b.request!.response!.success));
+			if (stale.length > 0) {
+				return { missing: distinctBlockTrx(stale.flatMap(b => (b.request!.response! as StaleFailure).missing)), success: false as const };
+			}
+			throw tailError;
+		}
+
+		// Commit all remaining block ids
+		const { batches, error } = await this.processBlocks(trxRef.blockIds.filter(bid => bid !== tailId), trxRef.transactionId);
+		if (error) {
+			// Errors should not happen once the tail is committed
+			// TODO: log failure
+			// TODO: reproduce the original transaction for tell the failed blocks to force commit
+			// TODO: remove this throw
+			throw error;
+		}
+
+		return { success: true };
+	}
+
+	/** Attempts to commit a set of blocks, and handles failures and errors */
+	private async processBlocks(blockIds: BlockId[], transactionId: TransactionId) {
 		const expiration = Date.now() + this.timeoutMs;
+		const batches = await this.batchesForPayload<BlockId[], CommitResult>(blockIds, blockIds, mergeBlocks, []);
 		let error: Error | undefined;
 		try {
 			await this.processBatches(
 				batches,
-				(repo, batch) => repo.commit({ transactionId: trxRef.transactionId, blockIds: batch.payload }, { expiration }),
+				(repo, batch) => repo.commit({ transactionId, blockIds: batch.payload }, { expiration }),
 				batch => batch.payload,
 				mergeBlocks,
 				expiration
@@ -189,41 +210,16 @@ export class BlockNetwork implements IBlockNetwork {
 		if (!everyBatch(batches, b => b.request?.isResponse as boolean && b.request!.response!.success)) {
 			error = Error(`Some peers did not complete: ${Array.from(incompleteBatches(batches)).map(b => b.peerId).join(", ")}`);
 		}
+		return { batches, error };
+	};
 
-		if (error) { // If any failures, abort all pending transactions as background microtask
-			Promise.resolve().then(() => this.abortOrCancelBatch(batches, trxRef, 'abort'));
-			const stale = Array.from(allBatches(batches, b => b.request?.isResponse as boolean && !b.request!.response!.success));
-			if (stale.length > 0) {	// Any active stale failures should preempt reporting connection or other potential transient errors (we have information)
-				return { missing: distinctBlockTrx(stale.flatMap(b => (b.request!.response! as StaleFailure).missing)), success: false };
-			}
-			throw error;	// No stale failures, report the original error
-		}
-
-		// Collect replies back into result structure
-		const completed = Array.from(allBatches(batches, b => b.request?.isResponse as boolean && b.request!.response!.success));
-		return {
-			conditions: distinctConditions(completed.flatMap(b => (b.request!.response! as CommitSuccess).conditions)),
-			success: true,
-		};
-	}
-
-	async abort(trxRef: BlockTrxRef): Promise<void> {
-		const batches = await this.batchesForPayload<BlockId[], void>(
-			trxRef.blockIds,
-			trxRef.blockIds,
-			mergeBlocks,
-			[]
-		);
-		const expiration = Date.now() + this.abortOrCancelTimeoutMs;
-		await this.processBatches(
-			batches,
-			(repo, batch) => repo.abort({ transactionId: trxRef.transactionId, blockIds: batch.payload }, { expiration }),
-			batch => batch.payload,
-			mergeBlocks,
-			expiration
-		);
-	}
-
+	/** Processes a set of batches, retrying any failures until success or expiration
+	 * @param batches - The batches to process - each represents a group of blocks centered on a coordinating peer
+	 * @param process - The function to call for a given batch
+	 * @param getBlockIds - The function to call to get the block ids for a given batch
+	 * @param getBlockPayload - The function to call to get the payload given a parent payload and block id, and optionally merge with an existing payload
+	 * @param expiration - The expiration time for the operation
+	*/
 	private async processBatches<TPayload, TResponse>(
 		batches: CoordinatorBatch<TPayload, TResponse>[],
 		process: (repo: Repo, batch: CoordinatorBatch<TPayload, TResponse>) => Promise<TResponse>,
@@ -253,6 +249,7 @@ export class BlockNetwork implements IBlockNetwork {
 		}));
 	}
 
+	/** Creates batches for a given payload, grouped by the coordinating peer for each block id */
 	private async batchesForPayload<TPayload, TResponse>(
 		blockIds: BlockId[],
 		payload: TPayload,
@@ -273,10 +270,10 @@ export class BlockNetwork implements IBlockNetwork {
 		return makeBatchesByPeer<TPayload, TResponse>(blockIdPeerId, payload, getBlockPayload);
 	}
 
-	private async abortOrCancelBatch<TPayload, TResponse>(
+	/** Cancels a pending transaction by canceling all blocks associated with the transaction, including failed peers */
+	private async cancelBatch<TPayload, TResponse>(
 		batches: CoordinatorBatch<TPayload, TResponse>[],
 		trxRef: BlockTrxRef,
-		operation: 'abort' | 'cancel'
 	) {
 		const expiration = Date.now() + this.abortOrCancelTimeoutMs;
 		const operationBatches = makeBatchesByPeer(
@@ -287,9 +284,7 @@ export class BlockNetwork implements IBlockNetwork {
 		);
 		await this.processBatches(
 			operationBatches,
-			(repo, batch) => operation === 'abort'
-				? repo.abort({ transactionId: trxRef.transactionId, blockIds: batch.payload })
-				: repo.cancel({ transactionId: trxRef.transactionId, blockIds: batch.payload }),
+			(repo, batch) => repo.cancel({ transactionId: trxRef.transactionId, blockIds: batch.payload }),
 			batch => batch.payload,
 			mergeBlocks,
 			expiration
@@ -297,6 +292,7 @@ export class BlockNetwork implements IBlockNetwork {
 	}
 }
 
+/** Creates batches for a given payload, grouped by the coordinating peer for each block id */
 function makeBatchesByPeer<TPayload, TResponse>(
 	blockPeers: (readonly [BlockId, PeerId])[],
 	payload: TPayload,
@@ -312,6 +308,7 @@ function makeBatchesByPeer<TPayload, TResponse>(
 	return Array.from(groups.values());
 }
 
+/** Iterates over all batches that have not completed, whether subsumed or not */
 function *incompleteBatches<TPayload, TResponse>(batches: CoordinatorBatch<TPayload, TResponse>[]): IterableIterator<CoordinatorBatch<TPayload, TResponse>> {
 	for (const batch of batches) {
 		if (!batch.request || !batch.request.isResponse) yield batch;
@@ -319,10 +316,12 @@ function *incompleteBatches<TPayload, TResponse>(batches: CoordinatorBatch<TPayl
 	}
 }
 
+/** Checks if all completed batches (ignoring failures) satisfy a predicate */
 function everyBatch<TPayload, TResponse>(batches: CoordinatorBatch<TPayload, TResponse>[], predicate: (batch: CoordinatorBatch<TPayload, TResponse>) => boolean): boolean {
 	return batches.every(b => (b.subsumedBy && everyBatch(b.subsumedBy, predicate)) ||predicate(b));
 }
 
+/** Iterates over all batches that satisfy an optional predicate, whether subsumed or not */
 function *allBatches<TPayload, TResponse>(batches: CoordinatorBatch<TPayload, TResponse>[], predicate?: (batch: CoordinatorBatch<TPayload, TResponse>) => boolean): IterableIterator<CoordinatorBatch<TPayload, TResponse>> {
 	for (const batch of batches) {
 		if (!predicate || predicate(batch)) yield batch;
@@ -330,16 +329,13 @@ function *allBatches<TPayload, TResponse>(batches: CoordinatorBatch<TPayload, TR
 	}
 }
 
+/** Returns a new blockId list payload with the given block id appended */
 function mergeBlocks(payload: BlockId[], blockId: BlockId, mergeWithPayload: BlockId[] | undefined): BlockId[] {
 	return [...(mergeWithPayload ?? []), blockId];
 }
 
-function distinctConditions(conditions: Condition[]): Condition[] {
-	return [...new Map(conditions.map(c => [c.blockId + '-' + c.transactionId, c])).values()];
-}
-
+/** Returns a new set of block trxes grouped by transaction id and concatenated transforms */
 function distinctBlockTrx(blockTrxes: BlockTrx[]): BlockTrx[] {
 	const grouped = Object.groupBy(blockTrxes, ({ transactionId }) => transactionId);
-	return Object.entries(grouped).map(([transactionId, trxes]) => ({ transactionId, transform: concatTransforms(trxes!.map(t => t.transform)) }));
+	return Object.entries(grouped).map(([transactionId, trxes]) => ({ transactionId, transform: concatTransforms(trxes!.map(t => t.transform)) } as BlockTrx));
 }
-

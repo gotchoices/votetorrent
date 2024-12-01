@@ -1,4 +1,4 @@
-import { BlockGet, GetBlockResult, BlockTrxRef, BlockTrxStatus, PendResult, CommitResult, BlockTrxRequest } from "../index.js";
+import { BlockGet, GetBlockResult, BlockTrxRef, BlockTrxStatus, PendResult, CommitResult, BlockTrxRequest, BlockId } from "../index.js";
 
 export type BlockNetwork = {
 	/** Get blocks by their IDs and versions or a specific transaction
@@ -28,10 +28,5 @@ export type BlockNetwork = {
 		- The returned conditions are those uncommitted inherited from older transaction(s) - if any of those are aborted, this transaction will implicitly be aborted
 		- If the transaction mentions other collections, those are assumed conditions - returned conditions only list inherited conditions
 	 */
-	commit(trxRef: BlockTrxRef): Promise<CommitResult>;
-
-	/** Abort an uncheckpointed transaction
-		- Aborts the transaction on all blocks
-	 */
-	abort(trxRef: BlockTrxRef): Promise<void>;
+	commit(tailId: BlockId, trxRef: BlockTrxRef): Promise<CommitResult>;
 }

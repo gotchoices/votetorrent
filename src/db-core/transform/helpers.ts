@@ -1,10 +1,21 @@
 import { BlockId, BlockOperation, BlockStore, IBlock, Transform } from "../index.js";
 
+/** Mutates the given block with the given operation */
 export function applyOperation(block: IBlock, [entity, index, deleteCount, inserted]: BlockOperation) {
 	if (Array.isArray(inserted)) {
     (block as unknown as any)[entity].splice(index, deleteCount, ...inserted);
 	} else {
 		(block as unknown as any)[entity] = inserted;
+	}
+}
+
+/** Returns a copy of the block with the given operation applied */
+export function withOperation(block: IBlock, [entity, index, deleteCount, inserted]: BlockOperation) {
+	if (Array.isArray(inserted)) {
+		const source = (block as any)[entity];
+		return { ...block, [entity]: [...source.slice(0, index), ...inserted, ...source.slice(index + deleteCount)] };
+	} else {
+		return { ...block, [entity]: inserted };
 	}
 }
 
@@ -15,8 +26,13 @@ export function blockIdsForTransform(transform: Transform | undefined) {
 			: [...new Set([...Object.keys(transform.inserts), ...Object.keys(transform.updates), ...transform.deletes])];
 }
 
+/** Returns an empty transform */
 export function emptyTransform(): Transform {
 	return { inserts: {}, updates: {}, deletes: new Set() };
+}
+
+export function copyTransform(transform: Transform): Transform {
+	return { inserts: { ...transform.inserts }, updates: { ...transform.updates }, deletes: new Set(transform.deletes) };
 }
 
 export function mergeTransforms(a: Transform, b: Transform): Transform {

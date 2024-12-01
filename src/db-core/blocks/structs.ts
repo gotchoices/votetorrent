@@ -4,8 +4,10 @@ export type BlockType = string;	// Generally a short code
 export type BlockHeader = {
 	id: BlockId;  // Domain wide block identifier
 	type: BlockType;
+	collectionId: BlockId;
 }
 
+/** A simple block with only a header (called "block").  Blocks should be treated as immutable */
 export type IBlock = {
 	block: BlockHeader;
 }

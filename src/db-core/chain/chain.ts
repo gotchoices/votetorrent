@@ -72,6 +72,8 @@ export class Chain<TEntry> {
 		}
 
 		trx.commit();
+
+		return { tail /*: structuredClone(tail) */ }; // not going to incur the cost of deep cloning, but don't mutate
 	}
 
 	/**
@@ -133,7 +135,7 @@ export class Chain<TEntry> {
 		const trx = new Atomic(this.store);
 
 		const header = await this.getHeader();
-		const oldHead = await trx.tryGet(header.headId) as ChainDataBlock<TEntry>
+		const oldHead = await this.getHead(header);
 		let head = oldHead;
 		const result = [];
 
@@ -164,12 +166,26 @@ export class Chain<TEntry> {
 		return result;
 	}
 
-	protected async getTail(header?: ChainHeaderBlock) {
+	async getTail(header?: ChainHeaderBlock) {
 		const actualHeader = header ?? await this.getHeader();
-		return await this.store.tryGet(actualHeader.tailId) as ChainDataBlock<TEntry>;
+		let tail = await this.store.tryGet(actualHeader.tailId) as ChainDataBlock<TEntry>;
+		// Possible that the block has filled between reading the header and reading the block... follow priorId links to find true end
+		while (tail.priorId) {
+			tail = await this.store.tryGet(tail.priorId) as ChainDataBlock<TEntry>;
+		}
+		return tail;
 	}
 
-	private async getHeader() {
+	async getHead(header?: ChainHeaderBlock) {
+		const actualHeader = header ?? await this.getHeader();
+		let head = await this.store.tryGet(actualHeader.headId) as ChainDataBlock<TEntry>;
+		while (head.nextId) {
+			head = await this.store.tryGet(head.nextId) as ChainDataBlock<TEntry>;
+		}
+		return head;
+	}
+
+	async getHeader() {
 		return await this.store.tryGet(this.id) as ChainHeaderBlock;
 	}
 }

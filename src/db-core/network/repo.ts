@@ -1,4 +1,4 @@
-import { BlockGet, BlockTrxRef, CommitResult, GetBlockResult, Transform, PendResult } from "./index.js";
+import { BlockGet, BlockTrxRef, CommitResult, GetBlockResult, Transform, PendResult, BlockId } from "../index.js";
 
 export type MessageOptions = {
 	expiration: number;
@@ -10,5 +10,4 @@ export type Repo = {
 	pend(transform: Transform, options?: MessageOptions): Promise<PendResult>;
 	cancel(trxRef: BlockTrxRef, options?: MessageOptions): Promise<void>;
 	commit(trxRef: BlockTrxRef, options?: MessageOptions): Promise<CommitResult>;
-	abort(trxRef: BlockTrxRef, options?: MessageOptions): Promise<void>;
 }
