@@ -1,6 +1,6 @@
 export * from "./authority.js";
 export * from "./authorized-timestamp.js";
-export * from "./block.js";
+export * from "./vote-block.js";
 export * from "./template.js";
 export * from "./device-attestation.js";
 export * from "./device-signature.js";

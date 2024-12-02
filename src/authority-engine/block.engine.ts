@@ -1,5 +1,5 @@
 import { AuthorityEngineStore } from ".";
-import { Answer, Block, Template, Question, Receipt, TraceFunc, Vote, Voter } from "../common";
+import { Answer, VoteBlock, Template, Question, Receipt, TraceFunc, Vote, Voter } from "../common";
 import { Asymmetric, AsymmetricVault, base64ToArray } from "chipcryptbase";
 import { TimestampService } from "../common/timestamp-service";
 import { createHash } from "crypto";
@@ -20,7 +20,7 @@ export class BlockEngine {
 		private readonly trace?: TraceFunc
 	) { }
 
-	async submit(block: Block): Promise<Receipt> {
+	async submit(block: VoteBlock): Promise<Receipt> {
 		this.trace?.("submit", `block: ${JSON.stringify(block)}`);
 
 		const processedBlock = await this.store.loadBlock(block.cid);	// Not in try...catch because we shouldn't return a receipt if this stage doesn't work (so that the same CID always results in the same receipt)
@@ -40,7 +40,7 @@ export class BlockEngine {
 		return result.receipt;
 	}
 
-	private async process(block: Block): Promise<ProcessResult> {
+	private async process(block: VoteBlock): Promise<ProcessResult> {
 		try {
 			// TODO: validate block cid (hashes votes & voters)
 
@@ -67,6 +67,7 @@ export class BlockEngine {
 
 			// Load election
 			const confirmed = await this.store.loadBallot(block.ballotCid);
+			// TODO: stable stringify
 			const confirmedDigest = this.asymmetric.generateDigest(JSON.stringify(confirmed));
 
 			await this.validateVoters(voters, confirmedDigest, block);
@@ -106,7 +107,7 @@ export class BlockEngine {
 		}
 	}
 
-	private async validateVotes(realVotes: VoteWithNonce[], voters: VoterWithKey[], votes: VoteWithNonce[], block: Block, ballot: Template) {
+	private async validateVotes(realVotes: VoteWithNonce[], voters: VoterWithKey[], votes: VoteWithNonce[], block: VoteBlock, ballot: Template) {
 		// Validate that the number of real votes is equal to the number of voters
 		if (realVotes.length !== voters.length) {
 			const realVoteNonces = realVotes.map(v => v.nonce);
@@ -141,7 +142,7 @@ export class BlockEngine {
 		}
 	}
 
-	private async validateVoters(voters: VoterWithKey[], confirmedDigest: Uint8Array, block: Block) {
+	private async validateVoters(voters: VoterWithKey[], confirmedDigest: Uint8Array, block: VoteBlock) {
 		// Validate that voters' signatures are valid for their respective keys
 		const invalidVoters = (await Promise.all(
 			voters.map(async ({ registrantKey, voter }) => {

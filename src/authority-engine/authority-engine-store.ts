@@ -1,8 +1,8 @@
-import { Block, Template, Receipt, RegistrationInitiation, Vote, Voter } from "../common";
+import { VoteBlock, Template, Receipt, RegistrationInitiation, Vote, Voter } from "../common";
 
 export interface AuthorityEngineStore {
 	loadVotesByNonce(ballotCid: string, nonces: string[]): Promise<Record<string, (Vote | undefined)>>;
-	loadBlock(cid: string): Promise<{ block: Block, receipt: Receipt }>;
+	loadBlock(cid: string): Promise<{ block: VoteBlock, receipt: Receipt }>;
 	loadVotersByKey(ballotCid: string, registrantKeys: string[]): Promise<Record<string, (Voter | undefined)>>;
 	loadBallot(ballotCid: string): Promise<Template>;
 	loadSubmissionRequirements(): Promise<string[]>;

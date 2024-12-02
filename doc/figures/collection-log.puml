@@ -1,0 +1,14 @@
+@startuml
+
+node "Collection Header Block" as CollectionHeaderBlock
+
+node "Log Block 1" as LogBlock1
+node "Log Block 2" as LogBlock2
+node "Log Block 3" as LogBlock3
+
+CollectionHeaderBlock --> LogBlock3 : tail
+CollectionHeaderBlock --> LogBlock1 : head
+LogBlock1 <- LogBlock2 : next
+LogBlock2 <- LogBlock3 : next
+
+@enduml
