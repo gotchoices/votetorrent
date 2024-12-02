@@ -63,8 +63,8 @@ export function applyTransformToStore<T extends IBlock>(transform: Transform, st
 		store.insert(block as T);
 	}
 	for (const [blockId, operations] of Object.entries(transform.updates)) {
-		for (const operation of operations) {
-			store.update(blockId, operation);
+		for (const op of operations) {
+			store.update(blockId, op);
 		}
 	}
 }

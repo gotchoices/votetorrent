@@ -129,7 +129,10 @@ export class BlockNetwork implements IBlockNetwork {
 			Promise.resolve().then(() => this.cancelBatch(batches, { blockIds, transactionId: blockTrx.transactionId }));
 			const stale = Array.from(allBatches(batches, b => b.request?.isResponse as boolean && !b.request!.response!.success));
 			if (stale.length > 0) {	// Any active stale failures should preempt reporting connection or other potential transient errors (we have information)
-				return { missing: stale.flatMap(b => (b.request!.response! as StaleFailure).missing), success: false };
+				return {
+					success: false,
+					missing: distinctBlockTrx(stale.flatMap(b => (b.request!.response! as StaleFailure).missing)),
+				};
 			}
 			throw error;	// No stale failures, report the original error
 		}
@@ -137,8 +140,8 @@ export class BlockNetwork implements IBlockNetwork {
 		// Collect replies back into result structure
 		const completed = Array.from(allBatches(batches, b => b.request?.isResponse as boolean && b.request!.response!.success));
 		return {
-			pending: completed.flatMap(b => (b.request!.response! as PendSuccess).pending),
 			success: true,
+			pending: distinctBlockTrx(completed.flatMap(b => (b.request!.response! as PendSuccess).pending)),
 			trxRef: {
 				transactionId: blockTrx.transactionId,
 				blockIds: blockIdsForTransform(blockTrx.transform)

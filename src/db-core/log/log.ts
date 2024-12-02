@@ -1,4 +1,5 @@
-import { Chain, LogEntry, BlockStore, IBlock, BlockId, TransactionId, LogHeaderBlockType, LogDataBlockType, ChainInitOptions, BlockTrxContext, ChainDataBlock, ActionEntry } from "../index.js";
+import { Chain, BlockStore, IBlock, BlockId, TransactionId, BlockTrxContext, ChainDataBlock, CollectionId } from "../index.js";
+import { LogEntry, ActionEntry, LogDataBlockType, LogHeaderBlockType } from "./index.js";
 
 export class Log<TAction> {
 	protected constructor(
@@ -18,8 +19,15 @@ export class Log<TAction> {
 	}
 
 	/** Adds a new entry to the log. */
-	async add(actions: TAction[], transactionId: TransactionId, blockIds: BlockId[] = [], timestamp: number = Date.now()) {
-		const entry = { actions, timestamp, transactionId, blockIds };
+	async addActions(actions: TAction[], transactionId: TransactionId, rev: number, blockIds: BlockId[] = [], collectionIds: CollectionId[] = [], timestamp: number = Date.now()) {
+		const entry = { timestamp, action: { transactionId, rev, actions, blockIds, collectionIds } };
+		const addResult = await this.chain.add(entry);
+		return { entry, tailId: addResult.tail.block.id };
+	}
+
+	/** Adds a checkpoint to the log. */
+	async addCheckpoint(pendingIds: TransactionId[], timestamp: number = Date.now()) {
+		const entry = { timestamp, checkpoint: { pendingIds } };
 		const addResult = await this.chain.add(entry);
 		return { entry, tailId: addResult.tail.block.id };
 	}

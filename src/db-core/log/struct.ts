@@ -18,7 +18,7 @@ export type ActionEntry<TAction> = {
 	/** Block ids affected by the transaction - includes the log related blocks */
 	blockIds: BlockId[]; // NOTE: not readonly because it is updated after being generated
 	/** Other collection ids affected by the transaction */
-	collectionIds: CollectionId[];
+	collectionIds?: CollectionId[];
 };
 
 /** A checkpoint entry restates the currently uncheckpointed transactions */

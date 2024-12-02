@@ -20,12 +20,15 @@ export type BlockTrxStatus = BlockTrxRef & {
 
 export type PendSuccess = {
 	success: true;
+	/** List of already pending transactions that were found on blocks touched by this pend */
 	pending: BlockTrx[];
+	/** The transactionId and affected blocks */
 	trxRef: BlockTrxRef;
 };
 
 export type StaleFailure = {
 	success: false;
+	/** List of transactions that have already been committed and are newer than our known revision */
 	missing: BlockTrx[];
 };
 
