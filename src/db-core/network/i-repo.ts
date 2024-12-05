@@ -5,7 +5,7 @@ export type MessageOptions = {
 	signal?: AbortSignal;
 }
 
-export type Repo = {
+export type IRepo = {
 	get(blockGets: BlockGet[], options?: MessageOptions): Promise<GetBlockResult[]>;
 	pend(request: PendRequest, options?: MessageOptions): Promise<PendResult>;
 	cancel(trxRef: TrxBlocks, options?: MessageOptions): Promise<void>;

@@ -1,19 +1,30 @@
 import { pipe } from 'it-pipe'
 import { decode as lpDecode, encode as lpEncode } from 'it-length-prefixed'
-import { type Startable, type Logger, serviceSymbol, serviceDependencies, start, stop } from '@libp2p/interface'
-import type { IncomingStreamData, Components } from '@libp2p/interface-internal'
+import { type Startable, type Logger } from '@libp2p/interface'
+import type { IncomingStreamData } from '@libp2p/interface-internal'
 import { RepoMessage } from '../db-core/network/repo-protocol.js'
-import { Repo } from '../db-core/index.js'
+import { Repo } from './index.js'
+import { ICluster } from '../db-core/cluster/i-cluster.js'
+
+// Define Components interface
+interface BaseComponents {
+  logger: { forComponent: (name: string) => Logger }
+  registrar: {
+    handle: (protocol: string, handler: (data: IncomingStreamData) => void, options: any) => Promise<void>
+    unhandle: (protocol: string) => Promise<void>
+  }
+}
+
+export interface RepoServiceComponents extends BaseComponents {
+  repo: Repo
+  cluster: ICluster
+}
 
 export interface RepoServiceInit {
   protocol?: string
   maxInboundStreams?: number
   maxOutboundStreams?: number
   logPrefix?: string
-}
-
-export interface RepoServiceComponents extends Components {
-  repo: Repo
 }
 
 /**
@@ -25,9 +36,11 @@ export class RepoService implements Startable {
   private readonly maxOutboundStreams: number
   private readonly log: Logger
   private readonly repo: Repo
+  private readonly components: RepoServiceComponents
   private running: boolean
 
   constructor(components: RepoServiceComponents, init: RepoServiceInit = {}) {
+    this.components = components
     this.protocol = init.protocol ?? '/db-p2p-repo/1.0.0'
     this.maxInboundStreams = init.maxInboundStreams ?? 32
     this.maxOutboundStreams = init.maxOutboundStreams ?? 64
@@ -37,8 +50,6 @@ export class RepoService implements Startable {
   }
 
   readonly [Symbol.toStringTag] = '@libp2p/repo-service'
-  readonly [serviceSymbol] = true
-  readonly [serviceDependencies] = []
 
   /**
    * Start the service

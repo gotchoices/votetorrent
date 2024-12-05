@@ -1,5 +1,5 @@
 import { PeerId } from "@libp2p/interface";
-import { BlockGet, TrxTransform, TrxBlocks, BlockTrxStatus, IBlockNetwork, PendSuccess, StaleFailure, IKeyNetwork, BlockId, GetBlockResult, blockIdsForTransform, Transform, transformForBlockId, mergeTransforms, Repo, TrxId, PendResult, CommitResult, PendRequest, concatTransforms } from "../db-core/index.js";
+import { BlockGet, TrxTransform, TrxBlocks, BlockTrxStatus, IBlockNetwork, PendSuccess, StaleFailure, IKeyNetwork, BlockId, GetBlockResult, blockIdsForTransform, Transform, transformForBlockId, mergeTransforms, IRepo, TrxId, PendResult, CommitResult, PendRequest, concatTransforms } from "../db-core/index.js";
 import { RepoClient, Pending, blockIdToBytes } from "./index.js";
 import map from "it-map";
 
@@ -7,7 +7,7 @@ type CoordinatorBatch<TPayload, TResponse> = {
 	peerId: PeerId;
 	blockId: BlockId;
 	payload: TPayload;
-	repo?: Repo;
+	repo?: IRepo;
 	request?: Pending<TResponse>;
 	/** Whether this batch has been subsumed by other successful batches */
 	subsumedBy?: CoordinatorBatch<TPayload, TResponse>[];
@@ -218,7 +218,7 @@ export class BlockNetwork implements IBlockNetwork {
 	*/
 	private async processBatches<TPayload, TResponse>(
 		batches: CoordinatorBatch<TPayload, TResponse>[],
-		process: (repo: Repo, batch: CoordinatorBatch<TPayload, TResponse>) => Promise<TResponse>,
+		process: (repo: IRepo, batch: CoordinatorBatch<TPayload, TResponse>) => Promise<TResponse>,
 		getBlockIds: (batch: CoordinatorBatch<TPayload, TResponse>) => BlockId[],
 		getBlockPayload: (payload: TPayload, blockId: BlockId, mergeWithPayload: TPayload | undefined) => TPayload,
 		expiration: number

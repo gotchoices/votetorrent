@@ -4,4 +4,5 @@ export * from "./it-utility.js";
 export * from "./key-network.js";
 export * from "./pending.js";
 export * from "./repo-client.js";
-export * from "../db-core/network/repo-protocol.js";
+export * from "./repo-service.js";
+export * from "./repo.js";
