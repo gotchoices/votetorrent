@@ -4,6 +4,7 @@ import { EntriesPerBlock, ChainDataBlockType, ChainHeaderBlockType, ChainDataBlo
 export type ChainInitOptions<TEntry> = {
 	createDataBlock?: () => Partial<ChainDataBlock<TEntry>>;
 	createHeaderBlock?: (id?: BlockId) => Partial<ChainHeaderBlock>;
+	blockAdded?: (newTail: ChainDataBlock<TEntry>, oldTail: ChainDataBlock<TEntry> | undefined) => void;
 }
 
 export type ChainCreateOptions<TEntry> = ChainInitOptions<TEntry> & {
@@ -63,6 +64,7 @@ export class Chain<TEntry> {
 			} as ChainDataBlock<TEntry>;
 			trx.insert(newTail);
 			apply(trx, tail, ['priorId', 0, 0, newTail.block.id]);
+			this.options?.blockAdded?.(newTail, oldTail);
 			tail = newTail;
 			entries = entries.slice(newTail.entries.length);
 		}
@@ -170,7 +172,7 @@ export class Chain<TEntry> {
 		const actualHeader = header ?? await this.getHeader();
 		let tail = await this.store.tryGet(actualHeader.tailId) as ChainDataBlock<TEntry>;
 		// Possible that the block has filled between reading the header and reading the block... follow priorId links to find true end
-		while (tail.priorId) {
+		while (tail?.priorId) {
 			tail = await this.store.tryGet(tail.priorId) as ChainDataBlock<TEntry>;
 		}
 		return tail;

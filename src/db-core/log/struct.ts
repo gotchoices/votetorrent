@@ -1,4 +1,4 @@
-import { BlockId, CollectionId, TransactionId } from "../index.js";
+import { BlockId, CollectionId, TrxId } from "../index.js";
 
 /** A log entry - either an action or a checkpoint */
 export type LogEntry<TAction> = {
@@ -10,7 +10,7 @@ export type LogEntry<TAction> = {
 /** An action entry represents a unit of work that is atomic */
 export type ActionEntry<TAction> = {
 	/** Generated unique identifier for the transaction */
-	readonly transactionId: TransactionId;
+	readonly transactionId: TrxId;
 	/** Revision number - monotonically increasing from the prior action's rev.  Starts at 1. */
 	readonly rev: number;
 	/** Actions to be applied */
@@ -27,7 +27,7 @@ export type CheckpointEntry = {
 	 * - actions implicitly increase the set of pending Ids
 	 * - this restates the entire current set
 	 * - missing from the set are the implicitly checkpointed ones */
-	readonly pendingIds: TransactionId[];
+	readonly pendingIds: TrxId[];
 };
 
 export const LogDataBlockType = "LGD";

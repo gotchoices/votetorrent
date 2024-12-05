@@ -1,20 +1,20 @@
-import { Log, CacheStore, IBlock, Action, ActionType, ActionHandler, Atomic, BlockId, Tracker, BlockNetwork, ActionEntry, blockIdsForTransform, copyTransform, applyTransformToStore, CacheSource } from "../index.js";
+import { Log, CacheStore, IBlock, Action, ActionType, ActionHandler, Atomic, BlockId, Tracker, IBlockNetwork, ActionEntry, blockIdsForTransform, copyTransform, applyTransformToStore, CacheSource, BlockStore } from "../index.js";
 import { NetworkSource } from "../network/network-source.js";
-import { CollectionHeaderBlock, CollectionId } from "./index.js";
+import { CollectionHeaderBlock, CollectionId, ICollection } from "./index.js";
 
 export type CollectionInitOptions<TAction> = {
 	modules: Record<ActionType, ActionHandler<TAction>>;
-	createHeaderBlock: (id: BlockId) => CollectionHeaderBlock;
+	createHeaderBlock: (id: BlockId, store: BlockStore<IBlock>) => IBlock;
 }
 
-export class Collection<TAction> {
+export class Collection<TAction> implements ICollection<TAction> {
 	private readonly pending: Action<TAction>[] = [];
 	private cache: CacheStore<IBlock>;
 
 	protected constructor(
-		private readonly id: CollectionId,
-		private readonly network: BlockNetwork,
-		private readonly logId: BlockId,
+		public readonly id: CollectionId,
+		public readonly network: IBlockNetwork,
+		public readonly logId: BlockId,
 		private readonly handlers: Record<ActionType, ActionHandler<TAction>>,
 		private readonly source: NetworkSource<IBlock>,
 		private readonly sourceCache: CacheSource<IBlock>,
@@ -23,7 +23,7 @@ export class Collection<TAction> {
 		this.cache = new CacheStore(tracker);
 	}
 
-	static async createOrOpen<TAction>(network: BlockNetwork, id: CollectionId, init: CollectionInitOptions<TAction>) {
+	static async createOrOpen<TAction>(network: IBlockNetwork, id: CollectionId, init: CollectionInitOptions<TAction>) {
 		// Start with a context that has an infinite revision number to ensure that we always fetch the latest log information
 		const source = new NetworkSource(id, network, { rev: Number.POSITIVE_INFINITY });
 		const sourceCache = new CacheSource(source);
@@ -38,7 +38,7 @@ export class Collection<TAction> {
 			source.trxContext = { rev: 0 };
 			logId = source.generateId();
 			const newHeader = {
-				...init.createHeaderBlock(id),
+				...init.createHeaderBlock(id, tracker),
 				logId,
 			};
 			await Log.create<Action<TAction>>(tracker, logId);
@@ -107,7 +107,7 @@ export class Collection<TAction> {
 			const newRev = this.source.trxContext.rev + 1;
 			const addResult = await log.addActions(this.pending, transactionId, newRev);
 			// HACK: Adding to the log affects the transaction's blocks - patch the final set of blocks affected by the transaction
-			addResult.entry.action.blockIds = tracker.transformedBlockIds();
+			addResult.entry.action!.blockIds = tracker.transformedBlockIds();
 
 			// Commit the transaction to the network
 			const staleFailure = await this.source.transact(tracker.transform, transactionId, addResult.tailId);
@@ -135,6 +135,15 @@ export class Collection<TAction> {
 		// TODO: introduce timer and potentially change stats to determine when to sync, rather than always syncing
 		await this.update();
 		await this.sync();
+	}
+
+	async *selectLog(reverse = false): AsyncIterableIterator<Action<TAction>> {
+		const log = Log.open<Action<TAction>>(this.cache, this.logId);
+		for await (const entry of log.select(reverse)) {
+			if (entry.action) {
+				yield* entry.action.actions;
+			}
+		}
 	}
 
 	private async replayActions() {

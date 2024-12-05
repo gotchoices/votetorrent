@@ -1,19 +1,19 @@
 import { pipe } from 'it-pipe';
 import { encode as lpEncode, decode as lpDecode } from 'it-length-prefixed';
 import { pushable } from 'it-pushable';
-import { KeyNetwork, Repo, BlockGet, GetBlockResult, Transform, PendSuccess, StaleFailure, BlockTrxRef, CommitSuccess, MessageOptions, CommitResult } from '../db-core/index.js';
-import { RepoMessage } from './repo-protocol.js';
+import { IKeyNetwork, Repo, BlockGet, GetBlockResult, Transform, PendSuccess, StaleFailure, TrxBlocks, CommitSuccess, MessageOptions, CommitResult, PendRequest } from '../db-core/index.js';
+import { RepoMessage } from '../db-core/network/repo-protocol.js';
 import { PeerId } from '@libp2p/interface';
 import { first } from './it-utility.js';
 
 export class RepoClient implements Repo {
 	private constructor(
 		private readonly peerId: PeerId,
-		private readonly keyNetwork: KeyNetwork,
+		private readonly keyNetwork: IKeyNetwork,
 	) { }
 
 	/** Create a new client instance */
-	public static create(peerId: PeerId, keyNetwork: KeyNetwork): RepoClient {
+	public static create(peerId: PeerId, keyNetwork: IKeyNetwork): RepoClient {
 		return new RepoClient(peerId, keyNetwork);
 	}
 
@@ -24,21 +24,21 @@ export class RepoClient implements Repo {
 		);
 	}
 
-	async pend(transform: Transform, options: MessageOptions): Promise<PendSuccess | StaleFailure> {
+	async pend(request: PendRequest, options: MessageOptions): Promise<PendSuccess | StaleFailure> {
 		return this.processMessage<PendSuccess | StaleFailure>(
-			[{ pend: transform }],
+			[{ pend: request }],
 			options
 		);
 	}
 
-	async cancel(trxRef: BlockTrxRef, options: MessageOptions): Promise<void> {
+	async cancel(trxRef: TrxBlocks, options: MessageOptions): Promise<void> {
 		return this.processMessage<void>(
 			[{ cancel: trxRef }],
 			options
 		);
 	}
 
-	async commit(trxRef: BlockTrxRef, options: MessageOptions): Promise<CommitResult> {
+	async commit(trxRef: TrxBlocks, options: MessageOptions): Promise<CommitResult> {
 		return this.processMessage<CommitResult>(
 			[{ commit: trxRef }],
 			options
@@ -56,7 +56,7 @@ export class RepoClient implements Repo {
 
 		const stream = await this.keyNetwork.dialProtocol(
 			this.peerId,
-			'/repo-protocol/1.0.0',
+			'/db-p2p-repo/1.0.0',
 			{ signal: options?.signal }
 		);
 

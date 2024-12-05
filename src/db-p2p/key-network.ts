@@ -1,5 +1,5 @@
 import { Libp2p, PeerId, Stream } from "@libp2p/interface";
-import { FindCoordinatorOptions, KeyNetwork as IKeyNetwork } from "../db-core/key-network.js";
+import { FindCoordinatorOptions, IKeyNetwork } from "../db-core/network/i-key-network.js";
 import { first } from "./it-utility.js";
 
 export class KeyNetwork implements IKeyNetwork {

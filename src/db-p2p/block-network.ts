@@ -1,14 +1,7 @@
 import { PeerId } from "@libp2p/interface";
-import { BlockGet, BlockTrx, BlockTrxRef, BlockTrxStatus, CommitSuccess, IBlock, BlockNetwork as IBlockNetwork, PendSuccess, StaleFailure, KeyNetwork, BlockId, GetBlockResult, blockIdsForTransform, Transform, emptyTransform, transformForBlockId, mergeTransforms, Repo, TransactionId, PendResult, CommitResult, BlockTrxRequest, concatTransforms } from "../db-core/index.js";
+import { BlockGet, TrxTransform, TrxBlocks, BlockTrxStatus, IBlockNetwork, PendSuccess, StaleFailure, IKeyNetwork, BlockId, GetBlockResult, blockIdsForTransform, Transform, transformForBlockId, mergeTransforms, Repo, TrxId, PendResult, CommitResult, PendRequest, concatTransforms } from "../db-core/index.js";
 import { RepoClient, Pending, blockIdToBytes } from "./index.js";
 import map from "it-map";
-
-type CoordinatorGets = {
-	peerId: PeerId;
-	blockGets: BlockGet[];
-	repoClient?: RepoClient;
-	results?: GetBlockResult[];
-}
 
 type CoordinatorBatch<TPayload, TResponse> = {
 	peerId: PeerId;
@@ -25,11 +18,11 @@ type CoordinatorBatch<TPayload, TResponse> = {
 type BlockNetworkInit = {
 	timeoutMs: number;
 	abortOrCancelTimeoutMs: number;
-	keyNetwork: KeyNetwork;
+	keyNetwork: IKeyNetwork;
 }
 
 export class BlockNetwork implements IBlockNetwork {
-	private readonly keyNetwork: KeyNetwork;
+	private readonly keyNetwork: IKeyNetwork;
 	private readonly timeoutMs: number;
 	private readonly abortOrCancelTimeoutMs: number;
 
@@ -94,11 +87,11 @@ export class BlockNetwork implements IBlockNetwork {
 		return blockGets.map(bg => blockResultMap.get(bg.blockId)!);
 	}
 
-	async getStatus(blockTrxes: BlockTrxRef[]): Promise<BlockTrxStatus[]> {
+	async getStatus(blockTrxes: TrxBlocks[]): Promise<BlockTrxStatus[]> {
 		throw new Error("Method not implemented.");
 	}
 
-	async pend(blockTrx: BlockTrxRequest, options: { pending: "return" | "fail"; }): Promise<PendResult> {
+	async pend(blockTrx: PendRequest): Promise<PendResult> {
 		const transformForBlock = (payload: Transform, blockId: BlockId, mergeWithPayload: Transform | undefined): Transform => {
 			const filteredTransform = transformForBlockId(payload, blockId);
 			return mergeWithPayload ? mergeTransforms(mergeWithPayload, filteredTransform) : filteredTransform;
@@ -112,7 +105,7 @@ export class BlockNetwork implements IBlockNetwork {
 			// Process all batches, noting all outstanding peers
 			await this.processBatches<Transform, PendResult>(
 				batches,
-				(repo, batch) => repo.pend(batch.payload, { expiration }),
+				(repo, batch) => repo.pend({ ...blockTrx, transform: batch.payload }, { expiration }),
 				batch => blockIdsForTransform(batch.payload),
 				transformForBlock,
 				expiration
@@ -126,7 +119,7 @@ export class BlockNetwork implements IBlockNetwork {
 		}
 
 		if (error) { // If any failures, cancel all pending transactions as background microtask
-			Promise.resolve().then(() => this.cancelBatch(batches, { blockIds, transactionId: blockTrx.transactionId }));
+			Promise.resolve().then(() => this.cancelBatch(batches, { blockIds, trxId: blockTrx.trxId }));
 			const stale = Array.from(allBatches(batches, b => b.request?.isResponse as boolean && !b.request!.response!.success));
 			if (stale.length > 0) {	// Any active stale failures should preempt reporting connection or other potential transient errors (we have information)
 				return {
@@ -143,13 +136,13 @@ export class BlockNetwork implements IBlockNetwork {
 			success: true,
 			pending: distinctBlockTrx(completed.flatMap(b => (b.request!.response! as PendSuccess).pending)),
 			trxRef: {
-				transactionId: blockTrx.transactionId,
+				trxId: blockTrx.trxId,
 				blockIds: blockIdsForTransform(blockTrx.transform)
 			}
 		};
 	}
 
-	async cancel(trxRef: BlockTrxRef): Promise<void> {
+	async cancel(trxRef: TrxBlocks): Promise<void> {
 		const batches = await this.batchesForPayload<BlockId[], void>(
 			trxRef.blockIds,
 			trxRef.blockIds,
@@ -159,19 +152,19 @@ export class BlockNetwork implements IBlockNetwork {
 		const expiration = Date.now() + this.abortOrCancelTimeoutMs;
 		await this.processBatches(
 			batches,
-			(repo, batch) => repo.cancel({ transactionId: trxRef.transactionId, blockIds: batch.payload }, { expiration }),
+			(repo, batch) => repo.cancel({ trxId: trxRef.trxId, blockIds: batch.payload }, { expiration }),
 			batch => batch.payload,
 			mergeBlocks,
 			expiration
 		);
 	}
 
-	async commit(tailId: BlockId, trxRef: BlockTrxRef): Promise<CommitResult> {
+	async commit(tailId: BlockId, trxRef: TrxBlocks): Promise<CommitResult> {
 		// Commit the tail block
-		const { batches: tailBatches, error: tailError } = await this.processBlocks([tailId], trxRef.transactionId);
+		const { batches: tailBatches, error: tailError } = await this.processBlocks([tailId], trxRef.trxId);
 		if (tailError) {
 			// Cancel all pending transactions as background microtask
-			Promise.resolve().then(() => this.cancel({ blockIds: [...trxRef.blockIds, tailId], transactionId: trxRef.transactionId }));
+			Promise.resolve().then(() => this.cancel({ blockIds: [...trxRef.blockIds, tailId], trxId: trxRef.trxId }));
 			// Collect and return any active stale failures
 			const stale = Array.from(allBatches(tailBatches, b => b.request?.isResponse as boolean && !b.request!.response!.success));
 			if (stale.length > 0) {
@@ -181,7 +174,7 @@ export class BlockNetwork implements IBlockNetwork {
 		}
 
 		// Commit all remaining block ids
-		const { batches, error } = await this.processBlocks(trxRef.blockIds.filter(bid => bid !== tailId), trxRef.transactionId);
+		const { batches, error } = await this.processBlocks(trxRef.blockIds.filter(bid => bid !== tailId), trxRef.trxId);
 		if (error) {
 			// Errors should not happen once the tail is committed
 			// TODO: log failure
@@ -194,14 +187,14 @@ export class BlockNetwork implements IBlockNetwork {
 	}
 
 	/** Attempts to commit a set of blocks, and handles failures and errors */
-	private async processBlocks(blockIds: BlockId[], transactionId: TransactionId) {
+	private async processBlocks(blockIds: BlockId[], transactionId: TrxId) {
 		const expiration = Date.now() + this.timeoutMs;
 		const batches = await this.batchesForPayload<BlockId[], CommitResult>(blockIds, blockIds, mergeBlocks, []);
 		let error: Error | undefined;
 		try {
 			await this.processBatches(
 				batches,
-				(repo, batch) => repo.commit({ transactionId, blockIds: batch.payload }, { expiration }),
+				(repo, batch) => repo.commit({ trxId: transactionId, blockIds: batch.payload }, { expiration }),
 				batch => batch.payload,
 				mergeBlocks,
 				expiration
@@ -276,7 +269,7 @@ export class BlockNetwork implements IBlockNetwork {
 	/** Cancels a pending transaction by canceling all blocks associated with the transaction, including failed peers */
 	private async cancelBatch<TPayload, TResponse>(
 		batches: CoordinatorBatch<TPayload, TResponse>[],
-		trxRef: BlockTrxRef,
+		trxRef: TrxBlocks,
 	) {
 		const expiration = Date.now() + this.abortOrCancelTimeoutMs;
 		const operationBatches = makeBatchesByPeer(
@@ -287,7 +280,7 @@ export class BlockNetwork implements IBlockNetwork {
 		);
 		await this.processBatches(
 			operationBatches,
-			(repo, batch) => repo.cancel({ transactionId: trxRef.transactionId, blockIds: batch.payload }),
+			(repo, batch) => repo.cancel({ trxId: trxRef.trxId, blockIds: batch.payload }),
 			batch => batch.payload,
 			mergeBlocks,
 			expiration
@@ -338,7 +331,7 @@ function mergeBlocks(payload: BlockId[], blockId: BlockId, mergeWithPayload: Blo
 }
 
 /** Returns a new set of block trxes grouped by transaction id and concatenated transforms */
-function distinctBlockTrx(blockTrxes: BlockTrx[]): BlockTrx[] {
-	const grouped = Object.groupBy(blockTrxes, ({ transactionId }) => transactionId);
-	return Object.entries(grouped).map(([transactionId, trxes]) => ({ transactionId, transform: concatTransforms(trxes!.map(t => t.transform)) } as BlockTrx));
+function distinctBlockTrx(blockTrxes: TrxTransform[]): TrxTransform[] {
+	const grouped = Object.groupBy(blockTrxes, ({ trxId: transactionId }) => transactionId);
+	return Object.entries(grouped).map(([transactionId, trxes]) => ({ trxId: transactionId, transform: concatTransforms(trxes!.map(t => t.transform)) } as TrxTransform));
 }

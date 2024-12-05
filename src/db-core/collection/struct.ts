@@ -10,3 +10,8 @@ export type CollectionHeaderBlock = IBlock & {
 	};
 	logId: BlockId;
 };
+
+export interface ICollection<TAction> {
+	update(): Promise<void>;
+	sync(): Promise<void>;
+}

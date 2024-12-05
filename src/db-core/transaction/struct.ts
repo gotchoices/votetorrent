@@ -1,7 +1,7 @@
 import { UUID } from "crypto";
 import { BlockStore, IBlock } from "../index.js";
 
-export type TransactionId = UUID;
+export type TrxId = UUID;
 
 export type ActionType = string;
 
