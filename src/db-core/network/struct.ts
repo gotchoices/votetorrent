@@ -35,6 +35,10 @@ export type StaleFailure = {
 
 export type PendResult = PendSuccess | StaleFailure;
 
+export type CommitRequest = TrxBlocks & {
+	expectedRev: number;
+};
+
 export type CommitResult = CommitSuccess | StaleFailure;
 
 export type CommitSuccess = {
@@ -45,15 +49,18 @@ export type CommitSuccess = {
 
 export type BlockTrxContext = {
 	/** Set of transactions to explicitly include - may not be checkpointed yet, but are committed */
-	pendingIds?: TrxId[];
+	trxId: TrxId;
 	/** Revision number of the collection */
-	rev: number;
+	rev?: number;
 };
 
 export type BlockGet = {
 	blockId: BlockId;
-} & BlockTrxContext;
+	context: BlockTrxContext;
+	hist?: BlockTrxContext[];
+};
 
 export type GetBlockResult = {
-	block: IBlock;
-} & BlockTrxContext;
+	block?: IBlock;
+	context: BlockTrxContext;
+};

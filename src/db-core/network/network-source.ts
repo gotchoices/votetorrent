@@ -24,9 +24,9 @@ export class NetworkSource<TBlock extends IBlock> implements BlockSource<TBlock>
 	async tryGet(id: BlockId): Promise<TBlock | undefined> {
 		const result = await this.network.get([{ blockId: id, ...this.trxContext }]);
 		if (result) {
-			const { pendingIds, rev } = result[0]!;
+			const { trxId: pendingIds, rev } = result[0]!;
 			if (rev > this.trxContext.rev) {
-				this.trxContext = { pendingIds, rev };
+				this.trxContext = { trxId: pendingIds, rev };
 			}
 		}
 		return result[0]?.block as TBlock | undefined;

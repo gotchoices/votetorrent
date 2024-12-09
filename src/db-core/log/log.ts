@@ -47,16 +47,16 @@ export class Log<TAction> {
 
 		const checkpoint = await this.findCheckpoint(tail);
 		if (!checkpoint) {
-			return { pendingIds: [], rev: 0 };
+			return { trxId: [], rev: 0 };
 		}
 
 		// Find the first action entry prior to the checkpoint
 		const action = await this.findAction(checkpoint);
 		if (!action) {
-			return { pendingIds: checkpoint.pendings, rev: 0 };
+			return { trxId: checkpoint.pendings, rev: 0 };
 		}
 
-		return { pendingIds: checkpoint.pendings, rev: action.rev };
+		return { trxId: checkpoint.pendings, rev: action.rev };
 	}
 
 	/** Gets the actions from startRev, to latest in the log. */
@@ -66,12 +66,12 @@ export class Log<TAction> {
 
 		const checkpoint = await this.findCheckpoint(tail);
 		if (!checkpoint) {
-			return { context: { pendingIds: [], rev: 0 }, entries: [] };
+			return { context: { trxId: [], rev: 0 }, entries: [] };
 		}
 
 		const action = await this.findAction(checkpoint);
 		if (!action || action.rev <= startRev) {
-			return { context: { pendingIds: checkpoint.pendings, rev: action?.rev ?? 0 }, entries: [] };
+			return { context: { trxId: checkpoint.pendings, rev: action?.rev ?? 0 }, entries: [] };
 		}
 
 		let block = action.block;
@@ -82,13 +82,13 @@ export class Log<TAction> {
 			const startIndex = leading.findLastIndex(e => e.action && e.action.rev <= startRev);
 			deltas.push(...leading.slice(startIndex >= 0 ? startIndex + 1 : 0).filter(e => e.action).map(e => e.action!));
 			if (startIndex >= 0) {
-				return { context: { pendingIds: checkpoint.pendings, rev: action.rev }, entries: deltas.reverse() };
+				return { context: { trxId: checkpoint.pendings, rev: action.rev }, entries: deltas.reverse() };
 			}
 			if (block.nextId) {
 				block = await this.store.tryGet(block.nextId) as LogBlock<TAction>;
 				endIndex = block.entries.length;
 			} else {
-				return { context: { pendingIds: checkpoint.pendings, rev: action.rev }, entries: deltas.reverse() };
+				return { context: { trxId: checkpoint.pendings, rev: action.rev }, entries: deltas.reverse() };
 			}
 		}
 	}

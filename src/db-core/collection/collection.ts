@@ -124,7 +124,7 @@ export class Collection<TAction> implements ICollection<TAction> {
 				this.sourceCache.transformCache(this.tracker.reset());
 				this.source.trxContext = {
 					rev: newRev,
-					pendingIds: [...this.source.trxContext.pendingIds ?? [], transactionId]
+					trxId: [...this.source.trxContext.trxId ?? [], transactionId]
 				};
 				break;
 			}
