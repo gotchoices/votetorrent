@@ -1,7 +1,7 @@
 
-export interface RegistrationSubmission {
+export interface RegistrationInitiation {
     registrantCid: string;
     nonce: string;
-    /** Set of RegistrantDetails members that are required. */
+    /** Set of Registrant members that are required. */
     requirements: string[]; // e.g. ["names.first", "attestation", "email"]
 }

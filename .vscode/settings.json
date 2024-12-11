@@ -1,0 +1,22 @@
+{
+	"plantuml.exportOutDir": "doc/figures",
+	"plantuml.diagramsRoot": "doc/figures",
+	"plantuml.exportFormat": "png",
+	"plantuml.exportIncludeFolderHeirarchy": false,
+	"plantuml.exportSubFolder": false,
+	"cSpell.words": [
+		"archivers",
+		"checkpointed",
+		"Kademlia",
+		"keyholder",
+		"keyholders",
+		"keyspace",
+		"libp",
+		"multiaddress",
+		"pendings",
+		"pushable",
+		"Trxes",
+		"uncheckpointed"
+	],
+	"svg.preview.background": "custom"
+}

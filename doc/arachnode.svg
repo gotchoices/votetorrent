@@ -1,0 +1,254 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="800" viewBox="0 0 800 800">
+    <defs>
+        <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="0" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" />
+        </marker>
+    </defs>
+
+    <!-- Outer Transaction Ring (Ring Zulu) -->
+		<circle cx="400" cy="400" r="350" fill="none" stroke="#4A50F2" stroke-width="2"/>
+
+    <!-- Transaction Nodes -->
+    <g id="transaction-nodes">
+        <!-- 32 transaction nodes will be placed here -->
+    </g>
+    <script type="text/javascript">
+        <![CDATA[
+				{
+					const transactionNodes = document.getElementById('transaction-nodes');
+					for (var i = 0; i < 32; i++) {
+							const angle = i * (360 / 32);
+							const x = 400 + 350 * Math.cos(angle * Math.PI / 180);
+							const y = 400 + 350 * Math.sin(angle * Math.PI / 180);
+							const node = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+							node.setAttribute("cx", x);
+							node.setAttribute("cy", y);
+							node.setAttribute("r", "7");
+							node.setAttribute("fill", "#4A90E2");
+							transactionNodes.appendChild(node);
+					}
+				}
+        ]]>
+    </script>
+
+    <!-- Middle Storage Ring -->
+    <g id="middle-ring-segments">
+        <script type="text/javascript">
+            <![CDATA[
+            const middleRingSegments = document.getElementById('middle-ring-segments');
+            const colors = ['#FF6B6B', '#663B3B'];
+            const radius = 250;
+            const centerX = 400;
+            const centerY = 400;
+            const segments = 8;
+
+            for (var i = 0; i < segments; i++) {
+                const startAngle = i * (2 * Math.PI / segments);
+                const endAngle = (i + 1) * (2 * Math.PI / segments);
+
+                const startX = centerX + radius * Math.cos(startAngle);
+                const startY = centerY + radius * Math.sin(startAngle);
+                const endX = centerX + radius * Math.cos(endAngle);
+                const endY = centerY + radius * Math.sin(endAngle);
+
+                const largeArcFlag = endAngle - startAngle <= Math.PI ? "0" : "1";
+
+                const pathData = [
+                    "M", startX, startY,
+                    "A", radius, radius, 0, largeArcFlag, 1, endX, endY
+                ].join(" ");
+
+                const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+                path.setAttribute("d", pathData);
+                path.setAttribute("fill", "none");
+                path.setAttribute("stroke", colors[i % 2]);
+                path.setAttribute("stroke-width", i % 2 ? "2" : "5");
+
+                middleRingSegments.appendChild(path);
+            }
+            ]]>
+        </script>
+    </g>
+
+    <!-- Middle Storage Nodes -->
+    <g id="middle-storage-nodes">
+        <!-- 16 storage nodes will be placed here -->
+    </g>
+    <script type="text/javascript">
+        <![CDATA[
+				{
+					const middleStorageNodes = document.getElementById('middle-storage-nodes');
+					for (var i = 0; i < 13; i++) {
+							const angle = i * (360 / 13);
+							const x = 400 + 250 * Math.cos(angle * Math.PI / 180);
+							const y = 400 + 250 * Math.sin(angle * Math.PI / 180);
+							const node = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+							node.setAttribute("cx", x);
+							node.setAttribute("cy", y);
+							node.setAttribute("r", "7");
+							node.setAttribute("fill", "#FF6B6B");
+							middleStorageNodes.appendChild(node);
+					}
+				}
+        ]]>
+    </script>
+
+    <!-- Inner Storage Ring -->
+    <g id="inner-ring-segments">
+        <script type="text/javascript">
+            <![CDATA[
+						{
+							const innerRingSegments = document.getElementById('inner-ring-segments');
+							const colors = ['#50C878', '#3B6644'];
+							const radius = 150;
+							const centerX = 400;
+							const centerY = 400;
+							const segments = 4;
+
+							for (var i = 0; i < segments; i++) {
+									const startAngle = i * (2 * Math.PI / segments);
+									const endAngle = (i + 1) * (2 * Math.PI / segments);
+
+									const startX = centerX + radius * Math.cos(startAngle);
+									const startY = centerY + radius * Math.sin(startAngle);
+									const endX = centerX + radius * Math.cos(endAngle);
+									const endY = centerY + radius * Math.sin(endAngle);
+
+									const largeArcFlag = endAngle - startAngle <= Math.PI ? "0" : "1";
+
+									const pathData = [
+											"M", startX, startY,
+											"A", radius, radius, 0, largeArcFlag, 1, endX, endY
+									].join(" ");
+
+									const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+									path.setAttribute("d", pathData);
+									path.setAttribute("fill", "none");
+									path.setAttribute("stroke", colors[i % 2]);
+									path.setAttribute("stroke-width", i % 2 ? "2" : "5");
+
+									innerRingSegments.appendChild(path);
+							}
+						}
+            ]]>
+        </script>
+    </g>
+
+    <!-- Inner Storage Nodes -->
+    <g id="inner-storage-nodes">
+        <!-- 8 storage nodes will be placed here -->
+    </g>
+    <script type="text/javascript">
+        <![CDATA[
+				{
+					const innerStorageNodes = document.getElementById('inner-storage-nodes');
+					const nNodes = 9;
+					for (var i = 0; i < nNodes; i++) {
+							const angle = i * (360 / nNodes);
+							const x = 400 + 150 * Math.cos(angle * Math.PI / 180);
+							const y = 400 + 150 * Math.sin(angle * Math.PI / 180);
+							const node = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+							node.setAttribute("cx", x);
+							node.setAttribute("cy", y);
+							node.setAttribute("r", "7");
+							node.setAttribute("fill", "#50C878");
+							innerStorageNodes.appendChild(node);
+					}
+				}
+        ]]>
+    </script>
+
+    <!-- Connections between rings -->
+    <g id="connections">
+        <script type="text/javascript">
+            <![CDATA[
+            const connections = document.getElementById('connections');
+            const transactionNodes = document.getElementById('transaction-nodes').children;
+            const middleStorageNodes = document.getElementById('middle-storage-nodes').children;
+            const innerStorageNodes = document.getElementById('inner-storage-nodes').children;
+
+            // Connect transaction nodes to middle storage nodes
+            for (var i = 0; i < transactionNodes.length; i++) {
+                const tx = parseFloat(transactionNodes[i].getAttribute('cx'));
+                const ty = parseFloat(transactionNodes[i].getAttribute('cy'));
+
+                // Calculate distances to all middle storage nodes
+                var distances = [];
+                for (var j = 0; j < middleStorageNodes.length; j++) {
+                    const sx = parseFloat(middleStorageNodes[j].getAttribute('cx'));
+                    const sy = parseFloat(middleStorageNodes[j].getAttribute('cy'));
+                    const distance = Math.sqrt(Math.pow(tx - sx, 2) + Math.pow(ty - sy, 2));
+                    distances.push({index: j, distance: distance});
+                }
+
+                // Sort distances and get the nearest 3
+                distances.sort((a, b) => a.distance - b.distance);
+                for (var k = 0; k < 3; k++) {
+                    const nearestNode = middleStorageNodes[distances[k].index];
+                    const sx = parseFloat(nearestNode.getAttribute('cx'));
+                    const sy = parseFloat(nearestNode.getAttribute('cy'));
+
+                    const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+                    line.setAttribute('x1', tx);
+                    line.setAttribute('y1', ty);
+                    line.setAttribute('x2', sx);
+                    line.setAttribute('y2', sy);
+                    line.setAttribute('stroke', '#999');
+                    line.setAttribute('stroke-width', '1');
+                    //line.setAttribute('marker-end', 'url(#arrowhead)');
+                    connections.appendChild(line);
+                }
+            }
+
+            // Connect middle storage nodes to inner storage nodes
+            for (var i = 0; i < middleStorageNodes.length; i++) {
+                const mx = parseFloat(middleStorageNodes[i].getAttribute('cx'));
+                const my = parseFloat(middleStorageNodes[i].getAttribute('cy'));
+
+                // Calculate distances to all inner storage nodes
+                const distances = [];
+                for (var j = 0; j < innerStorageNodes.length; j++) {
+                    var ix = parseFloat(innerStorageNodes[j].getAttribute('cx'));
+                    var iy = parseFloat(innerStorageNodes[j].getAttribute('cy'));
+                    var distance = Math.sqrt(Math.pow(mx - ix, 2) + Math.pow(my - iy, 2));
+                    distances.push({index: j, distance: distance});
+                }
+
+                // Sort distances and get the nearest 2
+                distances.sort((a, b) => a.distance - b.distance);
+                for (var k = 0; k < 3; k++) {
+                    const nearestNode = innerStorageNodes[distances[k].index];
+                    const ix = parseFloat(nearestNode.getAttribute('cx'));
+                    const iy = parseFloat(nearestNode.getAttribute('cy'));
+
+                    const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+                    line.setAttribute('x1', mx);
+                    line.setAttribute('y1', my);
+                    line.setAttribute('x2', ix);
+                    line.setAttribute('y2', iy);
+                    line.setAttribute('stroke', '#999');
+                    line.setAttribute('stroke-width', '1');
+                    //line.setAttribute('marker-end', 'url(#arrowhead)');
+                    connections.appendChild(line);
+                }
+            }
+            ]]>
+        </script>
+    </g>
+
+    <!-- Labels -->
+    <text x="400" y="20" text-anchor="middle" font-family="Arial, sans-serif" font-size="16">Arachnode Storage Network</text>
+    <text x="400" y="520" text-anchor="middle" font-family="Arial, sans-serif" font-size="16">Inner Storage Ring</text>
+    <text x="400" y="630" text-anchor="middle" font-family="Arial, sans-serif" font-size="16">Middle Storage Ring</text>
+    <text x="400" y="730" text-anchor="middle" font-family="Arial, sans-serif" font-size="16">Ring Zulu (Transaction Ring)</text>
+
+    <!-- Legend -->
+    <g transform="translate(20, 20)">
+        <circle cx="10" cy="10" r="5" fill="#4A90E2"/>
+        <text x="25" y="15" font-family="Arial, sans-serif" font-size="14">Transaction Node</text>
+        <circle cx="10" cy="35" r="5" fill="#FF6B6B"/>
+        <text x="25" y="40" font-family="Arial, sans-serif" font-size="14">Middle Storage Node</text>
+        <circle cx="10" cy="60" r="5" fill="#50C878"/>
+        <text x="25" y="65" font-family="Arial, sans-serif" font-size="14">Inner Storage Node</text>
+    </g>
+</svg>

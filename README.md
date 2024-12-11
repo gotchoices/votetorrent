@@ -1,192 +1,281 @@
-#VoteTorrent
+# VoteTorrent
 Crowd voting protocol and reference application.
 
 See [End-user Frequently Asked Questions](doc/user-faq.md)
 
-## Glossary of Terms:
+See [Figma Wireframes](https://www.figma.com/proto/egzbAF1w71hJVPxLQEfZKL/Mobile-App?node-id=53-865&t=b6kRPTs8TXLtsWgk-1)
 
-* Authority - the entity or system attempting to solicit a vote
-* Solicitation - declaration of a pending voting event, containing the roles to be filled and deadlines
-* Election - a declaration of a voting event, including the candidacy, cut-off times, and associated rules
-* Registration - list of eligible voters, compiled by the authority and made available to stakeholders
-* Stakeholders - the authority, usually the voters, and any other parties who are privy to the voter registration and vote outcome
-* Outcome - the result of a given election
-* DHT/Kademlia - Distributed Hash Table used to communicate and transact on a peer-to-peer basis
-* Block - batch of voters and votes, with scrambled ordering so votes aren't related to voters
-* Pool - set of participants who are attempting to form a block
+See [TechnicalArchitecture](doc/architecture.md)
+## Glossary of Terms
 
+* **Administrator** - a person who, in combination with the other administrators, is authorized to act on behalf of an authority.
+* **Authority** - district or entity involved in the voting process
+  * **Election Authority** - the authority describing the overall event and timetable
+  * **Registration Authority** - an authority charged with tracking registered voters
+  * **Ballot Authority** - a district level authority with a specific ballot template to be voted on in an election 
+  * **Certification Authority** - an authority that certifies the result of each ballot question per election
+* **Ballot Template** - a declaration of a specific questionnaire pertaining to a Ballot Authority and Election.
+* **Block** - batch of voters and votes, with scrambled ordering so votes aren't related to voters.  Has been hashed and uniqueness validated.
+* **DHT/Kademlia** - Distributed Hash Table - network used to communicate and transact on a peer-to-peer basis (no central server)
+* **District** - a geographic area represented by a Ballot Authority
+* **Election** - declaration of a pending voting event, containing the cut-off times, and associated rules
+* **Outcome** - the tallied results of a given ballot within an election
+* **Pool** - a forming block - not fully mature
+* **Registration** - list of eligible voters, maintained by an authority or peer to peer network
+* **Stakeholders** - the authority, usually the voters, and any other parties who are privy to the voter registration and vote outcome
+* **Seed** - an initial block of three anonymously formed voters/votes
+* **Timestamp Authority** - a trusted third party that provides a timestamp
 
-## Requirements:
+## Overall Requirements
 
-* The authority solicits the vote, candidates, and the timeframe
-* The list of eligible voters could be fixed at start of election, or grow until closing
-* Authority may have private information on voters, but always discloses hash of private information in public information
-* The stakeholders have voter list, but only public information
-* Voter can vote without the authority or public knowing for which candidate
-* Voter can verify presence and correctness of vote
+* Election authority can advertise and revise election including timeframes and keyholders
+* The list of registered voters could be fixed at start of election, or grow until closing
+* District authorities can publish and revise ballot templates
+* Registrant maintains a public and private key - private key is optimally held in a hardware vault
+* Registrant has both public and private attributes, neither of which can be tampered with without detection
+* Authority may retain actual private information on voters, but any tampering will change the hash and be detected
+* The stakeholders can see public portion of voter registration
+* Voter can vote without the authority, peers, or any other party knowing for which candidate
+* Revealing election results requires all election keyholders to publish their election keys at the appointed timeframe
+* Voter can verify presence and correctness of his or her vote
 * Stakeholders can verify that only eligible voters voted
 * Stakeholders can verify the final tally
-* Within the closing time frame, the authority signs the vote in a tamper resistant manner
 * Stakeholders can tell which voters voted, but not what the individual vote was
 * No party should be able to vote on behalf of the voter - there may be restrictions on how far this is possible
-* Results should not be visible to the authority or stakeholders until resolution opens at the end of the voting period
+* All voters may participate in validation of election results, and such validation results are made available to stakeholders
 
+## Systems
 
-## Design
+* **Directory Network ("Directory")**
+  * Architecture: Peer-to-peer network based on Kademlia DHT
+  * Scope: Global
+  * Stores: authority records, including election network references
+  * Timeline: records maintained long-term - changes occasionally as geographic election districts change
+  * Node types: Transaction only (mobile app on mobile network or limited storage), Storage (server or cloud service - long term storage)
+* **Election Network**
+  * Architecture: Peer-to-peer network based on Kademlia DHT
+  * Scope: Election wide (e.g. per state)
+  * Directly Stores: election related records
+  * Timeline: records maintained during election period - archivers may keep records longer
+  * Node types: Transaction only, Storage
+* **Voter mobile app**
+  * User: voters
+  * Connects to: Directory and Election Network
+  * Facilitates: registration, voting, validation, and viewing results
+* **Authority mobile app**
+  * User: election administrators
+  * Connects to: Directory and Election Network
+  * Facilitates: creation and revisioning of elections, ballot templates, authority administration, and keyholding
+* **Private registration database (optional)**
+  * User: election authority
+  * Facilitates: storage of private registration information
+  * Facilitates: validation that private CID matches stored information
+  * Interface: Rest API
 
-* Voters register with authority:
-    * Voter provides a public key (private kept safe in key vault) - voter may be allowed to add entropy to randomness
-        * Show visualization of physical key based on number
-    * Voter submits required public and private information
-    * Voter receives or otherwise knows public key of authority (authority’s ID)
-    * Authority gives access information for DHT
-        * These could be sought out independently (e.g. well known voting network); or
-        * Authority could operate at least one relay server
-        * Could be a meta-DHT that facilitates finding authorities and vote specific DHTs
-    * CID (hash) on DHT is based on voter’s public key
-    * Voter may join DHT to receive updates from authority, or may participate from notifications
-* Authority issues solicitation:
-    * Includes public key, authority signature, description, question list, deadlines, rules
-* Authority issues election: 
-    * Includes public key, solicitation signature, candidate list, URL(s), time frames, and voter roll (including public keys for each voter) if registration is fixed
-    * Authority signs election digest
-        * Pushes onto the DHT; or
-        * Makes available in API
-        * …sends in notification
-* Voter votes:
-    * Voter randomly generates a _vote nonce_, which is held privately by voter to verify presence of vote in election results
-    * Voter generates a _vote entry_, consisting of (before encryption using election’s public key):
-        * Answers (vote proper)
-        * Vote nonce
-    * Voter generates a _voter entry_ consisting of (before encryption using election's public key):
-        * Public registration identity (including public key)
-        * Signed election, signed again using voter’s public key
-        * Additional information:
-            * Location
-            * Biometric key
-            * Device ID
-            * App Identifier
-    * Block negotiation - nature of a Kademlia DHT is that neighbors depend on timing; peers congregate naturally with other similarly timed voters; neighborhood contracts to scale to heavy volumes:
-        * Using CID this voter joins the DHT
-        * Voter negotiates with a pool of peers to form a vote block, containing:
-            * Randomly ordered list of voter entries
-            * Randomly ordered list of vote entries
-        * Negotiation scrambles the order of vote and voter lists as it is built, to minimize peers who know which vote entry goes with which voter entry
-* Polling resolution opens:
-    * Block members send vote blocks to authority
-        * Any and all block members can send to the authority (with randomized time delay)
-        * Authority responds with a receipt, which is distributed back to block members
-        * If block contains any voters who have already voted, the entire block is rejected and members should retry with a fresh set of peers (with duplicate whispered to peers)
-    * Authority unencrypts the voter and vote lists from each block and appends them to the final tally in further scrambled order
-* Polling closes:
-    * Final election result contains: list of voters (public info + signature of election); list of votes (votes and identifiers)
-    * Voters and votes are sorted by voter key and vote nonce respectively
-    * Within closing time frame, authority signs the election result digest
-    * Authority get's one or more time authority signatures
-* Peer validation process: 
-    * Signed results sent out to DHT; participating peers verify:
-        * Results were published in time
-        * My vote was included
-        * My voter was included and the signature valid
-        * Count of voters matches count of votes
-    * Failed verifications could add
-        * Receipt given
-        * Evidence of other peers not succeeding
-    * Validation request broadcast peer-to-peer
-    * Blockchain containing validations/exceptions generated for the election
-    * If this phase is used, validation can be used to bring the spread within the error margin
+#### Node Types:
+  * **Transaction** - mobile app on mobile network or limited storage
+    * User: voter
+    * Facilitates:
+      * Registration
+      * Voting
+      * Validation
+      * Viewing results
+  * **Storage** - server or cloud service - long term storage capable
+    * User: press, municipalities, etc.
+    * Facilitates:
+      * Bootstrap - stable entry points for the network
+      * Public addresses - incoming connections from mobile apps and NAT traversal
+      * Stability and robustness of the DHT
+      * Archival of election results
 
-## Block Negotiation
+## Processes
 
-The voting app should join the DHT in the background, and remain as an active node while the user is voting or otherwise utilizing the app.  This improves the ratio of DHT participants who are officiating independently in block formation and makes the DHT more stable.
+### Voters register
+  * Voter receives or finds registration authority
+    * Receives - could come from a QR, NFC, deep-link, or:
+    * Finds - global Directory Network facilitates finding authorities and Election Networks:
+      * The user's location is retrieved from the device
+      * Authorities are enumerated from the Directory
+        * The user's location is encoded as a [geohash](https://en.wikipedia.org/wiki/Geohash) in order to search for relevant authorities
+          * A simultaneous search is done for the geohash at each level of precision
+        * The list of content addresses is retrieved from the Directory, deduplicated (taking newest), and authority records are read from Authority Collection
+        * The authority data in each document contains precise GeoJson geometry for each district; only those containing the user's location are kept
+      * Authority records are verified based on their CA certificates
+  * Voter generates key pair:
+    * Biometrics used to generate key pair in hardware vault
+    * Private key never leaves device
+    * Can be shown QR visualization of public key - can optionally print for easier recovery
+    * Voter may be allowed to add entropy to randomness
+  * Voter submits required public information
+    * Option: submitted to authority for signature; alternative is only self-signature
+    * Voter uses Matchmaking to ask for workers to transact the registration onto the Election Network
+      * Matchmaking of `registration` topic is used to form a transactor squad, consisting of a critical number of workers
+      * Each worker validates the registration record:
+        * Signature Verification: Ensures the record was signed by the peer claiming to register, or if authority's policy dictates, by the authority itself
+        * Structure and Content Validation: Checks that all required fields are present and correctly formatted
+        * Optional Checks: Additional validations like checking against a blacklist or verifying resource availability
+        * CRDT G-Set (Grow-only Set) is used to ensure that each worker's copy of the registration list is updated with the new registration
+    * Registration is published to public registration on IPFS and transacted onto the registration Merkle tree
+      * Q: How is this Merkle tree construction coordinated
+    * A notification is made on a `registration` topic, which all parties who care about long-term persistence of registration (e.g. the authority) listen on
+      * Any such party can pin those CIDs in IPFS to ensure long-term persistence
+    * Optional: video interview including questions and presentation of documents
+  * Voter submits required private information
+    * Goes to authority only, who signs it and gives the voter a signature and CID (voter can also independently verify CID hash)
+  * Authority could should operate at least one bootstrap / peer processing server
 
-Blocks are negotiated as follows, from the perspective of a given node:
+### Authority creates an election
+  * Records created in Authority App
+    * Immutable part includes revision cut-off date, timestamp authorities, core date, and title
+    * Revisable part includes keyholders, timeline, and instructions
+  * Signed by authority's administrators
+  * Election is published:
+    * Authority publishes a pub-sub topic for announcing new and modified elections
+    * Election is published to the DHT
+      * Q: IPFS or just a published topic on the Election Network?
 
-* When the node is ready to vote, it sends a `Pool Inquiry` message to nearby peers containing:
-  * Voter CID
-  * Election ID
-  * Expiration? - if included, this should be treated as relative and time sync should be tracked to peers
-* The node waits for at least a few peers to respond for up to a certain timeout period (adding some randomization).
-* The peers will either:
-  * Note your inquiry and return no knowledge of a pool forming; or,
-  * Return information on known pools
-* Peer responses should include a blacklist of CIDs with mis/mal behavior - a single-source shouldn't be considered definitive for blacklisting
-* If known pools are returned:
-  * Potential pools are filtered based on the blacklist, matching election, and other requirements, then prioritized based on a score derived from:
-    * Expiration
-    * Member count vs. capacity
-    * Proximity
-  * Starting from the highest priority, the node attempts to join a pool:
-    * A `Join Pool` request message is sent to the pool coordinator.
-    * If a `Confirm Join` response is received back, including a nonce, an updated descriptor of the pool, and a time-sync:
-      * Update and validate descriptor - doesn't exceed acceptable number members or expiration (accounting for time-sync)
-      * Update internal record of pending pool
-      * Respond with a `Confirmed` message if validation passes, or `Cancel` message otherwise
-    * If a `Failed` response is received, or a timeout is reached, advances to the next step
-  * If all joins failed or were filtered out:
-    * If significant time has elapsed, go back to `Pool Inquiry` and try again
-    * If little time has elapsed, behave as though no pools were returned
-* If no known pools are returned, initiate a pool:
-  * Generate a pool header, including:
-    * ID
-    * Expiration
-    * Max capacity
-    * Node's address as coordinator
-  * Advertise the node's forming pool:
-    * Send `Pool Forming` to N~n~ (number of peers in the negative direction), N~p~ (number in positive direction) peers
-    * At sub-intervals of the total expiration period, increase N~n~ and N~p~ and message to the delta peers
-    * If a peer replies that one or more other pools are already forming:
-      * Stop expanding in that direction
-      * If nearing expiration and small number in pool:
-        * Send a `Pool Inquiry` message to competing pool coordinators for updated pool status to see if merging makes sense
-        * Merge into another pool if:
-          * There is time remaining in both pools for this node's pool members to switch over
-          * Combined member count from both pools is well below other pools limit
-          * Other pool has significantly more members
-        * If merging:
-          *  Send a `Pool Redirect` message to this node's pool members, indicating that this pool is closed and the rank ordered other pools to try
-          *  Send a `Pool Redirect` message to all peers who were previously notified of this pool's formation
-          *  Attempt to join other pool, starting with highest ranked
-  * While within the capacity limit and expiration period:
-    * If a `Join Pool` request is received:
-      * If valid (CID not on black-list):
-        * Respond with `Confirming` message containing a nonce; this confirms that the joining member can actually be reached at the advertised address
-        * If `Confirmed` message received within timeout period:
-          * CID and physical address added to pool
-          * Updated pool whispered to peers
-        * If timeout or `Cancel` received, whisper warning message to peers about the CID - too many warnings, CID goes on blacklist
-      * Otherwise, if invalid:
-        * Respond with `Reject`
-        * Whisper a warning - too many warnings, CID goes on blacklist
-  * If capacity or expiration reached
-    * If no nodes have joined, go back to `Pool Inquiry` and retry, or if the resolution phase is nearly elapsed, self-complete the block and submit it
-    * If other nodes have joined:
-      * Form a Proposed Block:
-        * ID (carry forward the pool ID)
-        * Member CIDs [include ?]
-        * Expiration
-      * Populate the block:
-        * Send `Block Populate` message to each member
-        * Receive `Block Entry` response messages from members, including vote and voter entries
-        * At expiration, or receipt of all responses, sign the block:
-          * Scramble vote and voter entries independently
-          * Form a Signing Block:
-            * ID (carried forward)
-            * Included Member CIDs - members from whom we received entries
-            * Scrambled aggregate vote and voter entries
-            * Expiration (new)
-          * Send `Block Sign` message to each member (including those we didn't receive entries from)
-          * Receive `Block Signature` responses messages from included members, containing independent signatures on the Signing Block's digest
-          * If all signatures are received in time:
-            * Send `Block Complete` message to each member (included or not)
-            * Whisper `Block Complete` to peers
-            * Attempt to post block is scheduled for randomized time early in resolution phase
-        * Expired and no entries received:
-          * Send and whisper `Block Abandon` to members and peers
-          * Go back to `Pool Inquiry` state and retry
+### Authority invites keyholders
+  * Invitation includes election record and fellow invitees, as well as an expiration date
+  * Announced via pub-sub topic on Election Network, and deep-link can be sent via traditional channels (e.g. email)
+  * Typically, a keyholder will not use a personal device for this duty, but rather will use a dedicated device which is then stored in a secure location
+  * Using the Authority App, the keyholder accepts by:
+    * Generating an election specific key pair (private key may not be held in hardware vault because it must be releasable)
+    * Election private key is encrypted using biometric-backed, in-hardware registration private key - unencrypted key not persisted
+    * The encrypted private key is stored on the device
+    * Keyholder record is signed using the registrant's private key
+    * Keyholder record is published to the Election Network
+
+### The election is revised
+  * At the end of the keyholder acceptance period, there is a keyholder revision period, during which the election is revised to include the accepted keyholder records.
+  * Additional revisions may be made up to the statically stated deadline
+  * Using the authority app, an administrator constructs a revision record
+    * Revisions must bear independent timestamps from TSAs declared in the immutable election record - this proves that the revision occurred before the deadline
+    * Creator signs it, and sends to other administrators for signature.
+      * Q: How is this communicated and stored?
+    * Election revision is signed by other authority's administrator(s)
+  * Once fully signed, revision is published to the Election Network via a pub-sub topic, and is updated in the Election Network
+
+### Voter votes
+  * Election app checks that a vote hasn't already been submitted by the user's registrationKey
+    * If it has, the app has lost it's state or the voter's private key has been compromised.  The app should load the voter record and update (and persist) it's local state.  Without the nonce, the vote record cannot be retrieved - perhaps the user is allowed to manually enter their nonce for retrieval.
+  * App shows an election level combined ballot, made from district-level ballot templates
+  * For each district-level ballot, app randomly generates a _vote nonce_
+  * User inputs selections, with dependent questions appearing or disappearing based on user's selections
+  * Review
+    * User reviews their selections and can revise them before submitting
+    * The user is shown the vote nonces and are allowed to copy them and add entropy to them
+  * User submits vote:
+    * Answers are split on a per-district basis - match ballot templates
+    * The vote and voter records (including nonces) are persisted locally and held privately by voter.  Nonce allows voter to verify presence of vote in election results
+    * The app displays progress (per-district)
+    * App generates a _vote entry_, consisting of:
+      * Answers (vote proper)
+      * Vote nonce
+    * App generates a _voter entry_ consisting of:
+      * Public registrant key
+      * Public and private registrant CIDs
+      * Optional information:
+        * Location
+        * Device ID
+        * Device attestation
+      * Registrant's signature of the entry and the template's CID
+    * Block negotiation begins - see Block Negotiation below
+
+### Vote hashing
+  * Immediately following voting, there is a brief accruing period during which votes may no longer be submitted, the time is allowed for transactions to settle
+  * After the accruing period, the votes are hashed into a Merkle tree, which forms a single, deterministic accounting of all blocks
+  * Q: How is this coordinated?
+  * Q: Where is this stored and cached?
+
+### Election unlocked
+  * If any private keys held by a keyholder are released prior to the Releasing Keys portion of the election, a validation record is created by that party, capturing the private key and the timestamp, and is submitted as part of election validation
+  * During the Releasing Keys portion of the election, each of the keyholders must publish his or her private election key
+    * Using the Authority App, the keyholder uses biometrics to unlock the private key they hold
+    * The private key is then published to the Election Network along with timestamp(s) from TSA(s)
+
+### Election tallied
+  * With all keyholders private keys released, the vote and voter records within each block are all decryptable by anyone, using the combination private keys
+  * Nodes coordinate to create a tally tree, corresponding to the Merkle tree of hashes of the blocks, but including a histogram of results at each level
+  * Each node of the built tree should be signed by the nodes that created it, and be timestamped by TSAs
+  * Q: How is this coordinated?
+  * Q: Where is this stored and cached?
+  * The root entry of the Tally tree is published as the raw outcome for the election
+  * Q: What happens if there are a very large number of different answers (e.g. text answers, write-ins with variations)
+  * Q: How does the completion of tree formation get turned reliably into a single pub-sub notification?
+
+### Validation
+  * Each voter should, but is not required to, participate in slice level verification
+  * A subset of nodes (e.g. media and election authorities) should do more comprehensive validation
+  * Slice level validation includes:
+    * My vote entry is in an included block and is unaltered
+    * My voter entry is in the same included block, and the signature valid
+    * The block is unaltered (hash matches)
+    * The block is included in branches through the root of the Tally tree, and each such node is consistent
+    * Problems getting connected or participating in the Election Network - even transient connection problems should be reported for statistical purposes
+    * Q: Any other validation checks without more global data?
+  * Comprehensive validation includes:
+    * Validate every block:
+      * Count of voters matches count of votes
+      * Voter signatures are valid
+      * Votes are valid: can be unencrypted and answers valid
+    * Validate every Tally and Merkle tree node: histograms and hashes are correct
+    * All records from authorities are properly signed and timed appropriately
+  * Both successful and failed validations are added to a build report that is built and stored on the Election Network.  Any failed validation should include whatever proof can be given
+  * The built report should suggest an error margin for the election, as well as provide other statistical information
+  * Q: How is this built and stored?
+
+### Certification
+  * Based on the validation report and tally results, each ballot authority publishes a certification of the election outcome
+  * Using the Authority App, a positive or negative certification record is generated and signed by the administrator(s)
+  * The certification is pushed via pubsub and stored on the Election Network
+  * Q: How specifically is this built and stored?
+
+...
+
+## Validation Process
+
+* Note that a late block should only constitute a validation failure if it was submitted with sufficient time to complete.
+* Validation anomaly records may include a premature disclosure of an election private key, signed with a TSA to prove early release.
+* Election revisions match
+* Keys were released, and in time
+* Authorities may wish to host a number of probe transaction nodes to ensure that their notification duties (e.g. revisions, and signature release) are properly received.
+
+## Runoff Elections
+
+Runoff elections are a crucial mechanism to ensure fair and accurate results in cases where the initial election outcome is uncertain or contested. The following describes the generation of runoffs and the rules governing them:
+
+1. Runoff Trigger Conditions:
+   a. Discrepancy Margin: If the number of disputed votes (peers with receipt but voter and/or voter not included in the final tally) exceeds the spread between the top candidates, a runoff is assumed.
+   b. Voter Accessibility Issues: If a significant portion (defined as a ratio) of voters report inability to access the voting system, a runoff is assumed. This is determined by the rules configured in the ElectionRevision record, which define a threshold of accessibility issues.  Any claim of unreachability should be verified by subsequent validators, and can be negated with evidence (presentation of voter record)
+   c. Close Results: If the margin of victory is within a predefined threshold (e.g., 1% of total votes), a runoff may be automatically triggered.
+
+2. Runoff Rules:
+   a. Timing: Runoffs are scheduled at a predefined interval after the initial election, as specified in the ElectionRevision interface.
+   b. Participants: Only the top two candidates from the initial election participate in the runoff, unless the election rules specify otherwise.
+   c. Voter Eligibility: All voters eligible in the initial election are eligible to participate in the runoff.
+
+3. Validation Chain:
+   a. Result Hash: The validation chain must include a hash of the election results. All participants and validators must report relative to this hash to ensure consistency.
+   b. Block Inclusion: The authority must provide cryptographic proof of inclusion for all received blocks in the final tally.
+   c. Timestamping: External timestamping of received blocks is required to prevent retroactive exclusion.
+
+4. Dispute Resolution:
+   a. Objective Disputes: Disagreements on voter signatures, voter-to-registrant matching, or vote counts can be resolved objectively by referring to the hashed result.
+   b. Subjective Issues: Voter-reported accessibility problems are tracked and, if exceeding a threshold, may trigger a runoff.
+
+5. Anti-Manipulation Measures:
+   a. Peer Validation: A diverse set of peers must validate the results to prevent coordinated false reporting.
+   b. Escalation Process: Disputes that cannot be resolved through peer validation are escalated to a predefined arbitration process.
+
+6. Transparency Requirements:
+   a. Public Auditing: The authority must provide a public, auditable log of all received blocks and their inclusion in the final tally.
+   b. Multiple Result Prevention: The authority is required to commit to a single result hash, preventing the publication of multiple, disagreeing results.
+
+These rules aim to balance the need for definitive results with the importance of addressing legitimate concerns about election integrity. They provide a structured approach to handling disputes and ensuring that runoffs are triggered only when necessary to maintain the fairness and accuracy of the election process.
 
 ## Attack Vectors & Limits
 
+* There is no way for peers to verify the claim of a missing vote record by another peer.  Even if the peer discloses their vote nonce, there is not way for other peers, without the authority's private key and without being in that voter's block pool, to verify the claim.
 * Invalid voter (someone not registered) tries to participate.  May be included in blocks causing them to be rejected.
     * Mitigation: Subset of peers can consult registration list before agreeing to block - could be downloaded with election, stored on a blockchain or accessed via API
     * Mitigation: If peers receive block failure for unregistered voter that they bother to verify, could add the physical (IP address) information about such parties to the exception list in the validation phase.
@@ -212,8 +301,8 @@ Blocks are negotiated as follows, from the perspective of a given node:
     * Home page & static content
     * Registrations list - self serve
     * Administer registration
-    * Administer solicitation
     * Administer election
+    * Administer confirmed election
     * Elections
         * Status - current and archive
             * Phase - registration - registrations
@@ -224,11 +313,11 @@ Blocks are negotiated as follows, from the perspective of a given node:
     * APIs - each returning time information:
         * Post registrant
         * Get registrant - public
-        * Post solicitation
-        * Get solicitation(s)
-        * Promote solicitation to election
-        * Get election status
-        * Get election results
+        * Post election
+        * Get elections(s)
+        * Promote election to confirmed
+        * Get confirmed status
+        * Get confirmed results
         * Post block
     * Database
 * Device Frontend - React native?
