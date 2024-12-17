@@ -6,7 +6,7 @@ VoteTorrent uses **Arachnode**, a storage system that organizes storage nodes in
 
 Nodes in Arachnode maintain references to neighboring nodes within their ring and across adjacent inner and outer rings to facilitate data propagation and retrieval. As storage capacity reaches its limit, a node moves outward, adjusting its range and offloading excess data to nodes in the inner rings. This self-organizing system balances load across the rings, with global demand monitored through overlap factor sampling. This adaptive structure provides scalable, efficient storage management, with nodes dynamically adjusting their participation in rings to meet the system’s overall storage and processing needs.
 
-For details, see [Arachnode](./doc/arachnode.md).
+For details, see [Arachnode](./arachnode.md).
 
 ## Repository
 
@@ -20,7 +20,7 @@ Revisions facilitate optimistic concurrency control, preventing data loss during
 
 The repository also employs lifetime policies for efficient data management. Older versions of blocks are retained for a limited duration defined by a Time-To-Live (TTL), after which they may be garbage collected, while the latest version is always available. Revisions of deleted blocks are similarly managed, remaining available for a limited time before permanent removal. This approach allows for rollback and data recovery options while maintaining efficiency in storage management.
 
-For details, see [repository](./doc/repository.md).
+For details, see [repository](./repository.md).
 
 ## Transactions
 
@@ -28,7 +28,7 @@ Repository actions are executed for the client using a distributed transaction p
 
 Conflict and failure handling are integral to the robustness of this design. In case of conflicts, clients must retry operations after refreshing the latest state of the block, with nodes detecting conflicting modifications to ensure consistency. If a coordinating node fails during a transaction, the client can try again with a new coordinator to complete or roll back the transaction. To handle situations where nodes or clients do not receive transaction outcomes before a TTL expires, nodes will attempt cooperative communication to determine the result, while clients reconnect to the closest available node to query for the transaction status. This design emphasizes decentralized control, robustness to adversarial behavior, and mechanisms for retrying or coordinating failed transactions to ensure data integrity and consistency in the distributed network.
 
-For details, see [transactions](./doc/transactions.md).
+For details, see [transactions](./transactions.md).
 
 ## Matchmaking
 
@@ -36,11 +36,11 @@ VoteTorrent's peer-to-peer network employs a rendezvous-based matchmaking system
 
 The matchmaking process differs for active matchers and waiting workers. Active matchers generate rendezvous keys, publish their intent, search for matches, and adjust key specificity as needed to find suitable peers quickly. Workers, on the other hand, register their availability with longer Time-To-Live (TTL) values and wait for work assignments, adjusting their specificity to balance the load at rendezvous points. This flexible system can handle various scenarios, from sparse networks with few interested peers to dense networks with many participants, by dynamically adjusting the rendezvous key specificity to optimize peer discovery and work distribution.
 
-For details, see [matchmaking](./doc/matchmaking.md).
+For details, see [matchmaking](./matchmaking.md).
 
 ## Collections
 
-For details, see [collections](./doc/collections.md).
+For details, see [collections](./collections.md).
 
 ## Block Negotiation
 
