@@ -332,6 +332,13 @@ function mergeBlocks(payload: BlockId[], blockId: BlockId, mergeWithPayload: Blo
 
 /** Returns a new set of block trxes grouped by transaction id and concatenated transforms */
 function distinctBlockTrx(blockTrxes: TrxTransform[]): TrxTransform[] {
-	const grouped = Object.groupBy(blockTrxes, ({ trxId: transactionId }) => transactionId);
-	return Object.entries(grouped).map(([transactionId, trxes]) => ({ trxId: transactionId, transform: concatTransforms(trxes!.map(t => t.transform)) } as TrxTransform));
+	// TODO: use Object.groupBy when more widely supported
+	// const grouped = Object.groupBy(blockTrxes, ({ trxId: transactionId }) => transactionId);
+	const grouped = blockTrxes.reduce((acc, trx) => {
+		(acc[trx.trxId] = acc[trx.trxId] || []).push(trx);
+		return acc;
+	}, {} as Record<string, TrxTransform[]>);
+
+	return Object.entries(grouped).map(([trxId, trxes]) =>
+		({ trxId, transform: concatTransforms(trxes.map(t => t.transform)) } as TrxTransform));
 }

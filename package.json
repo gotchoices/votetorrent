@@ -13,6 +13,7 @@
     "test": "npm run test --workspaces"
   },
   "devDependencies": {
+    "@types/node": "^22.10.2",
     "aegir": "^45.0.8"
   }
 }

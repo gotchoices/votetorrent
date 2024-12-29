@@ -6,87 +6,28 @@ See [End-user Frequently Asked Questions](doc/user-faq.md)
 See [Figma Wireframes](https://www.figma.com/proto/egzbAF1w71hJVPxLQEfZKL/Mobile-App?node-id=53-865&t=b6kRPTs8TXLtsWgk-1)
 
 See [TechnicalArchitecture](doc/architecture.md)
-## Glossary of Terms
 
-* **Administrator** - a person who, in combination with the other administrators, is authorized to act on behalf of an authority.
-* **Authority** - district or entity involved in the voting process
-  * **Election Authority** - the authority describing the overall event and timetable
-  * **Registration Authority** - an authority charged with tracking registered voters
-  * **Ballot Authority** - a district level authority with a specific ballot template to be voted on in an election 
-  * **Certification Authority** - an authority that certifies the result of each ballot question per election
-* **Ballot Template** - a declaration of a specific questionnaire pertaining to a Ballot Authority and Election.
-* **Block** - batch of voters and votes, with scrambled ordering so votes aren't related to voters.  Has been hashed and uniqueness validated.
-* **DHT/Kademlia** - Distributed Hash Table - network used to communicate and transact on a peer-to-peer basis (no central server)
-* **District** - a geographic area represented by a Ballot Authority
-* **Election** - declaration of a pending voting event, containing the cut-off times, and associated rules
-* **Outcome** - the tallied results of a given ballot within an election
-* **Pool** - a forming block - not fully mature
-* **Registration** - list of eligible voters, maintained by an authority or peer to peer network
-* **Stakeholders** - the authority, usually the voters, and any other parties who are privy to the voter registration and vote outcome
-* **Seed** - an initial block of three anonymously formed voters/votes
-* **Timestamp Authority** - a trusted third party that provides a timestamp
+## How to use:
 
-## Overall Requirements
+### Host a stand-alone node
 
-* Election authority can advertise and revise election including timeframes and keyholders
-* The list of registered voters could be fixed at start of election, or grow until closing
-* District authorities can publish and revise ballot templates
-* Registrant maintains a public and private key - private key is optimally held in a hardware vault
-* Registrant has both public and private attributes, neither of which can be tampered with without detection
-* Authority may retain actual private information on voters, but any tampering will change the hash and be detected
-* The stakeholders can see public portion of voter registration
-* Voter can vote without the authority, peers, or any other party knowing for which candidate
-* Revealing election results requires all election keyholders to publish their election keys at the appointed timeframe
-* Voter can verify presence and correctness of his or her vote
-* Stakeholders can verify that only eligible voters voted
-* Stakeholders can verify the final tally
-* Stakeholders can tell which voters voted, but not what the individual vote was
-* No party should be able to vote on behalf of the voter - there may be restrictions on how far this is possible
-* All voters may participate in validation of election results, and such validation results are made available to stakeholders
-
-## Systems
-
-* **Directory Network ("Directory")**
-  * Architecture: Peer-to-peer network based on Kademlia DHT
-  * Scope: Global
-  * Stores: authority records, including election network references
-  * Timeline: records maintained long-term - changes occasionally as geographic election districts change
-  * Node types: Transaction only (mobile app on mobile network or limited storage), Storage (server or cloud service - long term storage)
-* **Election Network**
-  * Architecture: Peer-to-peer network based on Kademlia DHT
-  * Scope: Election wide (e.g. per state)
-  * Directly Stores: election related records
-  * Timeline: records maintained during election period - archivers may keep records longer
-  * Node types: Transaction only, Storage
-* **Voter mobile app**
-  * User: voters
-  * Connects to: Directory and Election Network
-  * Facilitates: registration, voting, validation, and viewing results
-* **Authority mobile app**
-  * User: election administrators
-  * Connects to: Directory and Election Network
-  * Facilitates: creation and revisioning of elections, ballot templates, authority administration, and keyholding
-* **Private registration database (optional)**
-  * User: election authority
-  * Facilitates: storage of private registration information
-  * Facilitates: validation that private CID matches stored information
-  * Interface: Rest API
-
-#### Node Types:
-  * **Transaction** - mobile app on mobile network or limited storage
-    * User: voter
-    * Facilitates:
+Stand-alone nodes can be hosted on any platform supporting Node.js.  A node can be configured as either of the following:
+  * **Transaction** - limited storage
+    * Facilitates data storage and matchmaking operations, such as:
       * Registration
       * Voting
       * Validation
-      * Viewing results
   * **Storage** - server or cloud service - long term storage capable
     * User: press, municipalities, etc.
     * Facilitates:
-      * Bootstrap - stable entry points for the network
-      * Public addresses - incoming connections from mobile apps and NAT traversal
-      * Stability and robustness of the DHT
+      * Stability and robustness of storage
       * Archival of election results
+
+Whether transactional or storage, a stand-alone node can optionally serve as a:
+  * Public IP/DNS address - incoming connections from mobile apps and NAT traversal
+  * Bootstrap - stable entry points for the network
+
+## **Note, all of the following is old and needs to be updated**
 
 ## Processes
 
