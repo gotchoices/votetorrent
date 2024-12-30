@@ -2,77 +2,106 @@
 
 ## Overview
 
-This document outlines the design for a Block Repository that provides efficient access to versioned data. The system manages blocks of data with versioning capabilities, allowing users to retrieve the latest or specific versions of a block, update a block conditionally based on its current version, and mark blocks for eventual deletion. The primary use cases for this system include maintaining a historical record of changes, handling concurrent updates, and ensuring consistency of stored blocks.
+This document outlines the design for a Block Repository that provides efficient access to versioned data. The system manages blocks of data with versioning capabilities, allowing users to retrieve blocks at specific versions, update blocks conditionally, and mark blocks for eventual deletion.
 
-This is the API used within Arachnode for versioned block storage.
+The system provides these core operations through the IBlockNetwork interface:
+- `get(blockGets[])`: Fetch blocks by their IDs and versions or specific transactions
+- `getStatus(trxRefs[])`: Get statuses of block transactions
+- `pend(blockTrx)`: Post a transaction for a set of blocks
+- `cancel(trxRef)`: Cancel a pending transaction
+- `commit(tailId, trxRef)`: Commit a pending transaction
 
-The system provides four core primitives:
-- `getRevision(blockId)`: Fetch the latest revision number of the given block.
-- `get(blockId, revision)`: Fetch the block with the latest revision that is at most the given revision.
-- `put(blockId, revision, block)`: Update the given block conditionally based on its current revision.
-- `delete(blockId, revision)`: Mark the block for eventual deletion.
+## Operations Description
 
-## Primitives Description
+### 1. `get(blockGets[])`
 
-### 1. `getRevision(blockId)`
+- **Purpose**: Fetch blocks by their IDs and versions or a specific transaction
+- **Input**: Array of `BlockGet` objects containing:
+  - `blockId` - A unique identifier for the block
+  - `context` - Optional transaction context specifying either a revision or pending transaction
+- **Output**: Array of `GetBlockResult` objects containing:
+  - `block` - The block data
+  - `state` - Current block state including latest revision or deletion status
+- **Behavior**: 
+  - If no context is provided, returns the latest version
+  - If a revision is specified, returns the block at that revision
+  - If a transaction ID is specified, returns the block with pending changes applied
+  - Fails if requesting a deleted block with pending transaction
 
-- **Purpose**: Retrieve the latest revision number, and block hash of the block associated with the provided blockId.
-- **Input**: `blockId` - A unique identifier for the block.
-- **Output**: The latest revision number, and block hash of the block.
+### 2. `pend(blockTrx)`
 
-### 2. `get(blockId, revision)`
+- **Purpose**: Post a transaction for a set of blocks
+- **Input**: `PendRequest` containing:
+  - `transform` - The changes to apply
+  - `trxId` - Transaction identifier
+  - `pending` - How to handle existing pending transactions
+- **Output**: `PendResult` indicating success or failure with pending transaction information
+- **Behavior**:
+  - Creates metadata for new blocks if needed
+  - Can fail if pending='fail' and other transactions are pending
+  - Saves block-specific transforms for each affected block
 
-- **Purpose**: Fetch the block with the latest revision that is equal to or less than the provided revision number. The revision can be set to infinity to fetch the latest version.
+### 3. `cancel(trxRef)`
+
+- **Purpose**: Cancel a pending transaction
+- **Input**: `TrxBlocks` containing block IDs and transaction ID
+- **Behavior**: Removes the pending transaction from all specified blocks
+
+### 4. `commit(tailId, trxRef)`
+
+- **Purpose**: Commit a pending transaction
 - **Input**:
-  - `blockId` - A unique identifier for the block.
-  - `revision` - The maximum revision number that can be returned.
-- **Output**: The block data, including hash, and the revision number.
-- **Behavior**: If the `revision` provided is greater than the latest revision of the block, the latest available block is returned. If no block exists for the given blockId, an error or null response is returned.
-- **Note**: Older versions of blocks are subject to lifetime policies and may become unavailable after a defined Time-To-Live (TTL). The latest version should always be available unless the block was deleted and the revision expired..
+  - `tailId` - Block ID
+  - `trxRef` - Transaction reference
+- **Output**: `CommitResult` indicating success or missing transactions needed
+- **Behavior**:
+  - Verifies expected revision matches current state
+  - Updates block metadata and revision
+  - Promotes pending transaction to committed state
+  - Handles block deletion if specified in transform
 
-### 3. `put(blockId, revision, block)`
+## Block States and Versioning
 
-- **Purpose**: Attempt to update a block conditionally based on its current revision number.
-- **Input**:
-  - `blockId` - A unique identifier for the block.
-  - `revision` - Must either a) match the current latest revision, or b) match the prior revision if the block's hash is correct.
-  - `block` - The new data to store.
-- **Output**: If successful, returns confirmation of the update including the new revision number. If the update fails (i.e., the current revision number does not match the provided revision, or the block's hash does not match the expected hash), it returns the latest block and its revision number.
-- **Behavior**: The update is only applied if the provided `revision` matches the current latest revision and all validations succeed. This ensures that updates are not overwritten in the presence of concurrent modifications, providing optimistic concurrency control.  The prior revision is allowed in order to attempt retries for in-doubt transactions.
+Blocks maintain the following state information:
+- Latest revision number
+- Deletion status (if applicable)
+- Pending transactions
+- Materialized versions at specific revisions
 
-### 4. `delete(blockId, revision)`
+The system uses a materialization strategy where:
+- Blocks can be materialized at any revision by applying transforms sequentially
+- Materialized versions are cached to improve performance
+- Pending transactions can be applied on top of any materialized version
 
-- **Purpose**: Mark a block for eventual deletion.
-- **Input**:
-  - `blockId` - A unique identifier for the block.
-  - `revision` - Must either a) match the current latest revision, or b) match the prior revision if the block was already deleted.
-- **Output**: Confirmation that the block has been marked for deletion.
-- **Behavior**: The block is marked for deletion, and it's revision is incremented, but the block is not immediately removed. The system may eventually perform garbage collection to permanently delete the block once all revisions are expired. Revisions of deleted blocks remain available, subject to the same lifetime collection policies as non-latest versions, ensuring that both deleted and older versions of blocks can be retained for a limited time before removal.  The prior revision is allowed in order to attempt retries for in-doubt transactions.
+## Transaction Processing
 
-## Concurrency and Consistency
+Transactions go through the following lifecycle:
+1. **Pending**: Posted via `pend()` but not yet committed
+2. **Committed**: Applied to blocks and assigned a revision number
+3. **Materialized**: Full block state computed and cached at specific revisions
 
-## Lifetime Management
+The system supports:
+- Optimistic concurrency through revision checking
+- Transaction conflict detection
+- Block restoration through callback mechanism
+- Materialization caching for performance
 
-The Block Repository uses lifetime policies to manage the retention of older versions of blocks. These policies ensure that:
+## Block Lifecycle
 
-- **Older Versions**: Older versions of blocks are retained for a limited duration, defined by a Time-To-Live (TTL) parameter. Once the TTL expires, these versions may be subject to garbage collection and could become unavailable.
-- **Latest Version**: The latest version of a block is always retained and remains accessible to clients.
-- **Deleted Blocks**: Revisions of deleted blocks remain available for a period governed by the same TTL policies applied to non-latest versions, allowing for rollback or data recovery before permanent removal.
+1. **Creation**: Blocks are created through insert transforms
+2. **Updates**: Applied through pending and committed transactions
+3. **Deletion**: Marked via delete transform, maintaining revision history
+4. **Restoration**: Possible through the restore callback mechanism
 
-The garbage collection process ensures that blocks marked for deletion or expired versions are eventually purged, maintaining the efficiency and performance of the storage system.
+## Implementation Notes
 
-The system uses optimistic concurrency control to handle concurrent modifications to blocks. The `put` operation requires the caller to provide the expected current revision of the block, ensuring that updates are only applied if no other updates have occurred in the meantime. If the revision does not match, the operation fails, and the client is informed of the latest revision and block content. This approach prevents data loss due to race conditions and provides a clear mechanism for clients to resolve conflicts.
+The system is implemented with these key components:
+- `StorageRepo`: Main implementation of the repository operations
+- `IBlockStorage`: Interface for block storage operations
+- `RestoreCallback`: Optional mechanism for block restoration
 
-## Deletion Policy
-
-Blocks are marked for eventual deletion through the `delete(blockId)` primitive. The actual removal of the block is handled by a background garbage collection process, ensuring that deleted data can still be accessed for a short period if necessary. This policy supports:
-- **Eventual Consistency**: Data marked for deletion remains available for a limited time, allowing the system to propagate the deletion mark across all replicas.
-- **Recovery**: In the case that a `put` operation is made to a deleted block, the block is effectively restored, since the latest revision is active.
-
-## Example Workflow
-
-1. **Initial Storage**: A client adds a block with blockId `A` using `put(A, 0, blockData)`.
-2. **Fetching the Latest Version**: Another client calls `getRevision(A)` and receives revision `1`.
-3. **Conditional Update**: The first client attempts to update the block by calling `put(A, 1, updatedBlockData)`. If the revision matches, the update succeeds.
-4. **Conflict Handling**: If a second client has concurrently updated the block, the first client's `put` call will fail, and they will receive the latest block and revision to reconcile changes.
-5. **Mark for Deletion**: Once no longer needed, a client calls `delete(A)` to mark the block for removal. The system eventually removes the block through a background process.
+The storage layer maintains separate stores for:
+- Block metadata
+- Revisions
+- Transactions (both pending and committed)
+- Materialized block versions

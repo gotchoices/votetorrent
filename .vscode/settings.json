@@ -12,9 +12,11 @@
 		"keyholders",
 		"keyspace",
 		"libp",
+		"multiaddr",
 		"multiaddress",
 		"pendings",
 		"pushable",
+		"Startable",
 		"Trxes",
 		"uncheckpointed"
 	],
