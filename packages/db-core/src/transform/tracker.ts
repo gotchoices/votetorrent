@@ -26,8 +26,8 @@ export class Tracker<T extends IBlock> implements IBlockStore<T> {
 	}
 
 	insert(block: T) {
-		this.transform.inserts[block.block.id] = block;
-		this.transform.deletes.delete(block.block.id);
+		this.transform.inserts[block.header.id] = block;
+		this.transform.deletes.delete(block.header.id);
 	}
 
 	update(blockId: BlockId, op: BlockOperation) {

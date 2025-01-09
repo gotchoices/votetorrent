@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { Chain, BlockStore, IBlock, BlockId, TrxId, BlockTrxContext, ChainDataBlock, CollectionId } from "../index.js";
+import { Chain, BlockStore, IBlock, BlockId, TrxId, ChainDataBlock, CollectionId, ChainPath, entryAt, TrxRev, TrxContext, ChainInitOptions } from "../index.js";
 import { LogEntry, ActionEntry, LogDataBlockType, LogHeaderBlockType } from "./index.js";
 
 export type LogBlock<TAction> = ChainDataBlock<LogEntry<TAction>>
@@ -11,142 +11,117 @@ export type LogBlock<TAction> = ChainDataBlock<LogEntry<TAction>>
 export class Log<TAction> {
 	protected constructor(
 		private readonly chain: Chain<LogEntry<TAction>>,
-		private readonly store: BlockStore<IBlock>,
 	) {
+	}
+
+	get id() {
+		return this.chain.id;
 	}
 
 	/** Opens a presumably existing log. */
 	static open<TAction>(store: BlockStore<IBlock>, id: BlockId) {
-		return new Log<TAction>(new Chain(store, id, Log.getChainOptions(store)), store);
+		return new Log<TAction>(new Chain(store, id, Log.getChainOptions(store)));
 	}
 
 	/** Creates a new log. */
 	static async create<TAction>(store: BlockStore<IBlock>, newId?: BlockId) {
-		return new Log<TAction>(await Chain.create<LogEntry<TAction>>(store, { ...Log.getChainOptions(store), newId }), store);
+		return new Log<TAction>(await Chain.create<LogEntry<TAction>>(store, { ...Log.getChainOptions(store), newId }));
 	}
 
 	/** Adds a new entry to the log. */
 	async addActions(actions: TAction[], transactionId: TrxId, rev: number, blockIds: BlockId[] = [], collectionIds: CollectionId[] = [], timestamp: number = Date.now()) {
-		const entry = { timestamp, action: { transactionId, rev, actions, blockIds, collectionIds } } as LogEntry<TAction>;
-		const addResult = await this.chain.add(entry);
-		return { entry, tailId: addResult.tail.block.id };
+		const entry = { timestamp, rev, action: { trxId: transactionId, actions, blockIds, collectionIds } } as LogEntry<TAction>;
+		const tailPath = await this.chain.add(entry);
+		return { entry, tailPath };
 	}
 
 	/** Adds a checkpoint to the log. */
-	async addCheckpoint(pendingIds: TrxId[], timestamp: number = Date.now()) {
-		const entry = { timestamp, checkpoint: { pendingIds } };
-		const addResult = await this.chain.add(entry);
-		return { entry, tailId: addResult.tail.block.id };
+	async addCheckpoint(pendings: TrxRev[], rev: number, timestamp: number = Date.now()) {
+		const entry = { timestamp, rev, checkpoint: { pendings } };
+		const tailPath = await this.chain.add(entry);
+		return { entry, tailPath };
 	}
 
 	/** Gets the transaction context of the log. */
-	async getTrxContext(): Promise<BlockTrxContext[] | undefined> {
-		// Scan from the head until the first checkpoint is found
-		const header = await this.chain.getHeader();
-		const tail = await this.chain.getTail(header);
-
-		const checkpoint = await this.findCheckpoint(tail);
-		if (!checkpoint) {
-			return undefined;
-		}
-
-		// Find the first action entry prior to the checkpoint
-		const action = await this.findAction(checkpoint);
-		if (!action) {
-			return checkpoint.pendings.map(trxId => ({ trxId, rev: 0 }));
-		}
-
-		return checkpoint.pendings.map(trxId => ({ trxId, rev: action.rev }));
+	async getTrxContext(): Promise<TrxContext | undefined> {
+		const checkpoint = await this.findCheckpoint(await this.chain.getTail());
+		return {
+			committed:
+				checkpoint
+					? [...checkpoint.pendings, ...await this.pendingFrom(checkpoint.path)]
+					: [],
+			rev: checkpoint?.path ? entryAt<LogEntry<TAction>>(checkpoint.path)!.rev : 0,
+		};
 	}
 
-	/** Gets the actions from startRev, to latest in the log. */
-	async getFrom(startRev: number): Promise<{ context: BlockTrxContext | undefined, entries: ActionEntry<TAction>[] }> {
-		const header = await this.chain.getHeader();
-		const tail = await this.chain.getTail(header);
-
-		const checkpoint = await this.findCheckpoint(tail);
-		if (!checkpoint) {
-			return { context: undefined, entries: [] };
-		}
-
-		const action = await this.findAction(checkpoint);
-		if (!action || action.rev <= startRev) {
-			return { context: { trxId: checkpoint.pendings, rev: action?.rev ?? 0 }, entries: [] };
-		}
-
-		let block = action.block;
-		let endIndex = action.index + 1;	// inclusive
-		const deltas: ActionEntry<TAction>[] = [];
-		while (true) {
-			const leading = block.entries.slice(0, endIndex);
-			const startIndex = leading.findLastIndex(e => e.action && e.action.rev <= startRev);
-			deltas.push(...leading.slice(startIndex >= 0 ? startIndex + 1 : 0).filter(e => e.action).map(e => e.action!));
-			if (startIndex >= 0) {
-				return { context: { trxId: checkpoint.pendings, rev: action.rev }, entries: deltas.reverse() };
+	/** Gets the actions from startRev (exclusive), to latest in the log. */
+	async getFrom(startRev: number): Promise<{ context: TrxContext | undefined, entries: ActionEntry<TAction>[] }> {
+		const entries: ActionEntry<TAction>[] = [];
+		const pendings: TrxRev[] = [];
+		let rev: number | undefined;
+		let checkpointPath: ChainPath<LogEntry<TAction>> | undefined;
+		// Step through collecting both pending and entries until a checkpoint is found
+		for await (const path of this.chain.select(await this.chain.getTail())) {
+			const entry = entryAt<LogEntry<TAction>>(path)!;
+			rev = rev ?? entry.rev;
+			if (entry.checkpoint) {
+				checkpointPath = path;
+				pendings.unshift(...entry.checkpoint.pendings);
+				break;
 			}
-			if (block.nextId) {
-				block = await this.store.tryGet(block.nextId) as LogBlock<TAction>;
-				endIndex = block.entries.length;
-			} else {
-				return { context: { trxId: checkpoint.pendings, rev: action.rev }, entries: deltas.reverse() };
-			}
+			pendings.unshift({ trxId: entry.action!.trxId, rev: entry.rev });
+			if (entry.rev > startRev) {
+				entries.unshift(entry.action!);
+			}	// Can't stop at rev, because we need to collect all pending actions for the context
 		}
-	}
-
-	getId() {
-		return this.chain.id;
-	}
-
-	/** Finds the most recent checkpoint in the log, starting from the given block. */
-	private async findCheckpoint(block: LogBlock<TAction>) {
-		const pendings = new Set<TrxId>();
-		while (true) {
-			const index = block.entries.findLastIndex(e => e.checkpoint);
-			if (index >= 0) {
-				block.entries[index].checkpoint!.pendingIds.forEach(pendings.add.bind(pendings));
-				block.entries.slice(index + 1).forEach(e => pendings.add(e.action!.transactionId));
-				return { block, index, pendings: Array.from(pendings) };
-			} else {	// Navigate to the next block
-				if (block.nextId) {
-					block = await this.store.tryGet(block.nextId) as LogBlock<TAction>;
+		// Continue stepping past the checkpoint until the given rev is reached
+		if (checkpointPath) {
+			for await (const path of this.chain.select(checkpointPath)) {
+				const entry = entryAt<LogEntry<TAction>>(path)!;
+				if (entry.rev > startRev) {
+					if (entry.action) {
+						entries.unshift(entry.action!);
+					}
 				} else {
-					return undefined;
+					break;
 				}
 			}
 		}
+		return { context: rev ? { committed: pendings, rev } : undefined, entries };
 	}
 
-	/** Finds the first action entry prior to the given checkpoint. */
-	private async findAction(checkpoint: { block: LogBlock<TAction>, index: number }) {
-		let block = checkpoint.block;
-		let endIndex = checkpoint.index;
-		while (true) {
-			const index = block.entries.slice(0, endIndex).findLastIndex(e => e.action);
-			if (index >= 0) {
-				return { block, index, rev: block.entries[index].action!.rev };
-			}
-			if (block.nextId) {
-				block = await this.store.tryGet(block.nextId) as LogBlock<TAction>;
-				endIndex = block.entries.length;
-			} else {
-				return undefined;
-			}
+	/** Enumerates log entries from the given starting path or end if undefined, in reverse order if specified. */
+	async *select(starting?: ChainPath<LogEntry<TAction>>, reverse = false) {
+		for await (const path of this.chain.select(starting, reverse)) {
+			yield entryAt<LogEntry<TAction>>(path)!;
 		}
 	}
 
-	async *select(reverse = false): AsyncIterableIterator<LogEntry<TAction>> {
-		const header = await this.chain.getHeader();
-		let block: LogBlock<TAction> | undefined
-			= reverse ? await this.chain.getTail(header) : await this.chain.getHead(header);
-
-		while (block) {
-			for (const entry of reverse ? block.entries.reverse() : block.entries) {
-				yield entry;
+	/** Returns the set of pending transactions in the most recent checkpoint, at or preceding the given path. */
+	private async findCheckpoint(starting: ChainPath<LogEntry<TAction>>) {
+		let lastPath: ChainPath<LogEntry<TAction>> | undefined;
+		let rev: number | undefined;
+		for await (const path of this.chain.select(starting)) {
+			const entry = entryAt<LogEntry<TAction>>(path)!;
+			rev = rev ?? entry.rev;
+			if (entry.checkpoint) {
+				return { path, pendings: entry.checkpoint.pendings, rev };
 			}
-			block = reverse
-				? block.nextId ? await this.store.tryGet(block.nextId) as LogBlock<TAction> : undefined
-				: block.priorId ? await this.store.tryGet(block.priorId) as LogBlock<TAction> : undefined;
+			lastPath = path;
 		}
+		return lastPath ? { path: lastPath, pendings: [], rev } : undefined;
+	}
+
+	/** Returns the set of pending transactions following, the given checkpoint path. */
+	private async pendingFrom(starting: ChainPath<LogEntry<TAction>>) {
+		const pendings: TrxRev[] = [];
+		for await (const actionPath of this.chain.select(starting, false)) {
+			const entry = entryAt<LogEntry<TAction>>(actionPath);
+			if (entry?.action) {
+				pendings.push({ trxId: entry.action.trxId, rev: entry.rev });
+			}
+		}
+		return pendings;
 	}
 
 	private static getChainOptions<TAction>(store: BlockStore<IBlock>) {
@@ -158,6 +133,6 @@ export class Log<TAction> {
 					newTail.nextHash = createHash('sha256').update(JSON.stringify(oldTail)).digest('base64url');
 				}
 			},
-		};
+		} as ChainInitOptions<LogEntry<TAction>>;
 	}
 }

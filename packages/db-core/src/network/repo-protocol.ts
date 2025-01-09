@@ -1,6 +1,11 @@
-import { BlockGet, TrxBlocks, Transform, PendRequest } from "../index.js";
+import { TrxBlocks, PendRequest, CommitRequest, BlockGets } from "../index.js";
 
 export type RepoMessage = {
-	operations: [{ get: BlockGet[] } | { pend: PendRequest } | { cancel: TrxBlocks } | { commit: TrxBlocks }],
+	operations: [
+		{ get: BlockGets } |
+		{ pend: PendRequest } |
+		{ cancel: { trxRef: TrxBlocks } } |
+		{ commit: CommitRequest }
+	],
 	expiration?: number,
 };

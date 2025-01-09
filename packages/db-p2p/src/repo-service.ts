@@ -109,7 +109,7 @@ export class RepoService implements Startable {
                 expiration: message.expiration
               })
             } else if ('cancel' in operation) {
-              response = await this.repo.cancel(operation.cancel, {
+              response = await this.repo.cancel(operation.cancel.trxRef, {
                 expiration: message.expiration
               })
             } else if ('commit' in operation) {

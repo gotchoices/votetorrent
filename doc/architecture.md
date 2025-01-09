@@ -20,6 +20,8 @@
 
 ## Subsystems
 
+![Subsystems](figures/subsystems.png)
+
 * **Directory Network ("Directory")**
   * Architecture: Peer-to-peer network based on Kademlia DHT
   * Scope: Global
@@ -67,31 +69,11 @@ The matchmaking process differs for active matchers and waiting workers. Active 
 
 For details, see [matchmaking](matchmaking.md).
 
-## Block Negotiation
+## Election Logic
 
-The apps should join the DHT networks in the background, and remain as an active node during the active election period.
+Election structures are stored using the Optimystic distributed database system.  Vote blocks are appended to the vote tree collection, and a pointer to the block is noted in the registration tree collection.  Vote block formation is coordinated using the Matchmaking system.  Once the voting period is over, the vote collection is hashed.
 
-Blocks are negotiated as follows, from the perspective of a given node:
-
-### Pool Merging
-* As pool coordinator, we subscribe to an election network pub-sub topic based on the template CID, a 'pooling' token, and the hash of the pool
-* Similar to pairing, we start with a more specific token of the pool hash and move to a more general one, announce our presence, and try to find other pool coordinators
-* `present` messages in this topic include the current pool size, and the pool coordinator's multiaddress
-* `greet` messages include reciprocal size information, followed by a `merge` message
-* At completion of each merge, all contributing peers are `inform`ed of the new pool size and the pool coordinator's multiaddress
-  * Any nodes not acknowledging cause the merge to be reverted, with follow up `inform` messages going to all members - including information about which peer(s) did not acknowledge
-  * Q: Perhaps nodes should track pool and seed revisions, and potentially drop repeat offenders.  Should this also be whispered?  Announced via pubsub?
-* If pool size reaches a capacity margin, or the period is ending, the pool coordinator sends a `form` message to all contributors to announce block formation
-  * This message includes a CID, representing the hash of the records portion of the block
-  * All peers should check that:
-    * The CID is correct
-    * The records include their unaltered vote and voter records
-    * There are an equal number of voter and vote records
-    * Q: Should peers check for voter uniqueness, or should this be left solely to transaction validation when incorporating blocks
-
-## Block transaction
-
-Blocks are transacted into the Election Network's database when all registrant records have been updated to point to the block's CID, and all transaction voters have signed their commitment.
+See [Election Logic](election.md) for details on the election processes.
 
 ## Glossary of Terms
 
@@ -112,3 +94,8 @@ Blocks are transacted into the Election Network's database when all registrant r
 * **Stakeholders** - the authority, usually the voters, and any other parties who are privy to the voter registration and vote outcome
 * **Seed** - an initial block of three anonymously formed voters/votes
 * **Timestamp Authority** - a trusted third party that provides a timestamp
+
+## General Notes:
+
+* Standard JSON format for all major objects
+* Markdown for content embeddings

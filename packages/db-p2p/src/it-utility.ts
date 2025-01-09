@@ -13,10 +13,10 @@ export async function first<T>(
 	}
 }
 
-export async function asyncIteratorToArray<T>(iter: AsyncIterableIterator<T>) {
-	const result = [];
-	for await (const entry of iter) {
-		result.push(entry);
+export async function asyncIteratorToArray<T>(iterator: AsyncIterable<T>): Promise<T[]> {
+	const result: T[] = [];
+	for await (const item of iterator) {
+		result.push(item);
 	}
 	return result;
 }

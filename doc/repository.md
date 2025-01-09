@@ -4,14 +4,27 @@
 
 This document outlines the design for a Block Repository that provides efficient access to versioned data. The system manages blocks of data with versioning capabilities, allowing users to retrieve blocks at specific versions, update blocks conditionally, and mark blocks for eventual deletion.
 
-The system provides these core operations through the IBlockNetwork interface:
+The system provides these core operations through the `IBlockNetwork` interface:
 - `get(blockGets[])`: Fetch blocks by their IDs and versions or specific transactions
 - `getStatus(trxRefs[])`: Get statuses of block transactions
 - `pend(blockTrx)`: Post a transaction for a set of blocks
 - `cancel(trxRef)`: Cancel a pending transaction
 - `commit(tailId, trxRef)`: Commit a pending transaction
 
-## Operations Description
+## Clusters
+
+The Block Repository is designed around peer proximity in the DHT network.  Each peer is responsible for at least transactional (short term) storage of blocks in the address proximity, thus a given Block's storage is distributed across multiple peers (the "cluster").  When performing operations on a cluster, a client will choose a "coordinator" peer, which may be arbitrarily chosen, or chosen based on past performance or ID proximity.  The coordinator is responsible for coordinating the operation across the cluster, for the given transaction.
+
+Here is how a transaction proceeds for a given cluster:
+1. The coordinator receives the mutation (e.g. pend, commit, cancel), validates it, puts it in a record with a TTL, signs its own promise on it, then sends it in parallel to all other peers in the cluster.
+2. If the coordinator receives a promise from the necessary number of peers, it, in parallel, responds with success to the client, and propagates the record with its own signed completion to the other peers in the cluster. 
+
+* If the coordinator does not receive a promise from the necessary number of peers, before the TTL expires, or it receives failures, is signs as a failure and returns failures to the client.
+* If the client looses connection to the coordinator, it can retry with a new coordinator.
+* Peers will not sign their promise on a transaction that contradicts a previous transaction until the prior transaction is known to have failed or succeeded.  If a new coordinator is chosen, it will have to confirm consensus on the prior attempt before proceeding.
+* If Peers receive invalid requests from other peers, they will whisper with the other peers to exclude the invalid peer from the cluster in the future.
+
+## Repository Operations Description
 
 ### 1. `get(blockGets[])`
 
@@ -60,9 +73,11 @@ The system provides these core operations through the IBlockNetwork interface:
   - Promotes pending transaction to committed state
   - Handles block deletion if specified in transform
 
-## Block States and Versioning
+## Block Storage Repository
 
-Blocks maintain the following state information:
+![Block Storage Repository](figures/storage-repo.svg)
+
+Block Storage Repository nodes maintain the following state information:
 - Latest revision number
 - Deletion status (if applicable)
 - Pending transactions
@@ -88,10 +103,13 @@ The system supports:
 
 ## Block Lifecycle
 
-1. **Creation**: Blocks are created through insert transforms
-2. **Updates**: Applied through pending and committed transactions
-3. **Deletion**: Marked via delete transform, maintaining revision history
-4. **Restoration**: Possible through the restore callback mechanism
+* **Creation**: Blocks are created through insert transforms
+* **Updates**: Applied through pending and committed transactions
+* **Deletion**: Marked via delete transform, maintaining revision history
+
+Revisions within a block also have a lifecycle:
+* **Archival**: Older revisions Blocks are archived based on resource pressure, access recency/frequency, or other criteria
+* **Restoration**: Previous versions can be restored from archival storage as needed
 
 ## Implementation Notes
 
@@ -101,7 +119,7 @@ The system is implemented with these key components:
 - `RestoreCallback`: Optional mechanism for block restoration
 
 The storage layer maintains separate stores for:
-- Block metadata
+- Block metadata (e.g. latest revision, deletion status)
 - Revisions
 - Transactions (both pending and committed)
 - Materialized block versions

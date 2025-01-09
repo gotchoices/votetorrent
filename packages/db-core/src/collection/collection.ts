@@ -1,4 +1,4 @@
-import { Log, CacheStore, IBlock, Action, ActionType, ActionHandler, Atomic, BlockId, Tracker, IBlockNetwork, ActionEntry, blockIdsForTransform, copyTransform, applyTransformToStore, CacheSource, BlockStore, BlockTrxContext } from "../index.js";
+import { Log, CacheStore, IBlock, Action, ActionType, ActionHandler, Atomic, BlockId, Tracker, IBlockNetwork, ActionEntry, copyTransform, CacheSource, BlockStore } from "../index.js";
 import { NetworkSource } from "../network/network-source.js";
 import { CollectionHeaderBlock, CollectionId, ICollection } from "./index.js";
 
@@ -110,7 +110,7 @@ export class Collection<TAction> implements ICollection<TAction> {
 			addResult.entry.action!.blockIds = tracker.transformedBlockIds();
 
 			// Commit the transaction to the network
-			const staleFailure = await this.source.transact(tracker.transform, trxId, addResult.tailId);
+			const staleFailure = await this.source.transact(tracker.transform, trxId, addResult.tailPath.block.header.id);
 			if (staleFailure) {
 				// Apply the block changes to the source cache
 				for (const trx of staleFailure.missing) {
@@ -136,7 +136,7 @@ export class Collection<TAction> implements ICollection<TAction> {
 
 	async *selectLog(reverse = false): AsyncIterableIterator<Action<TAction>> {
 		const log = Log.open<Action<TAction>>(this.cache, this.logId);
-		for await (const entry of log.select(reverse)) {
+		for await (const entry of log.select(undefined, reverse)) {
 			if (entry.action) {
 				yield* entry.action.actions;
 			}

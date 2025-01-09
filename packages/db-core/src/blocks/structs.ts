@@ -7,9 +7,9 @@ export type BlockHeader = {
 	collectionId: BlockId;
 }
 
-/** A simple block with only a header (called "block").  Blocks should be treated as immutable */
+/** A simple block with only a header.  Blocks should be treated as immutable */
 export type IBlock = {
-	block: BlockHeader;
+	header: BlockHeader;
 }
 
 export type BlockOperation = [entity: string, index: number, deleteCount: number, inserted: unknown[] | unknown]

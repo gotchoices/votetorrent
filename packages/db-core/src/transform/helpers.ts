@@ -1,4 +1,4 @@
-import { BlockId, BlockOperation, BlockStore, IBlock, Transform } from "../index.js";
+import { BlockId, BlockOperation, BlockOperations, BlockStore, IBlock, Transform } from "../index.js";
 
 /** Mutates the given block with the given operation */
 export function applyOperation(block: IBlock, [entity, index, deleteCount, inserted]: BlockOperation) {
@@ -6,6 +6,13 @@ export function applyOperation(block: IBlock, [entity, index, deleteCount, inser
     (block as unknown as any)[entity].splice(index, deleteCount, ...inserted);
 	} else {
 		(block as unknown as any)[entity] = inserted;
+	}
+}
+
+/** Mutates the given block with the given set of operations */
+export function applyOperations(block: IBlock, operations: BlockOperations) {
+	for (const op of operations) {
+		applyOperation(block, op);
 	}
 }
 

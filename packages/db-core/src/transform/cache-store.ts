@@ -9,7 +9,7 @@ export class CacheStore<T extends IBlock> extends CacheSource<T> implements Bloc
 	}
 
 	insert(block: T) {
-		this.cache.set(block.block.id, block);
+		this.cache.set(block.header.id, block);
 		this.source.insert(block);
 	}
 
