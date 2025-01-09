@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="500" height="200" xmlns="http://www.w3.org/2000/svg">
+    <!-- Header Row -->
+    <rect x="10" y="10" width="150" height="30" fill="#f0f0f0" stroke="black"/>
+    <text x="85" y="30" text-anchor="middle">Revision</text>
+
+    <rect x="160" y="10" width="150" height="30" fill="#f0f0f0" stroke="black"/>
+    <text x="235" y="30" text-anchor="middle">Transaction</text>
+
+    <rect x="310" y="10" width="150" height="30" fill="#f0f0f0" stroke="black"/>
+    <text x="385" y="30" text-anchor="middle">Materialized Block</text>
+
+    <!-- Data Rows -->
+    <!-- Row 1 -->
+    <rect x="10" y="40" width="150" height="30" fill="white" stroke="black"/>
+    <text x="85" y="60" text-anchor="middle">1</text>
+
+    <rect x="160" y="40" width="150" height="30" fill="white" stroke="black"/>
+    <text x="235" y="60" text-anchor="middle">trx-001</text>
+
+    <rect x="310" y="40" width="150" height="30" fill="white" stroke="black"/>
+    <text x="385" y="60" text-anchor="middle">Block@1</text>
+
+    <!-- Row 2 -->
+    <rect x="10" y="70" width="150" height="30" fill="white" stroke="black"/>
+    <text x="85" y="90" text-anchor="middle">5</text>
+
+    <rect x="160" y="70" width="150" height="30" fill="white" stroke="black"/>
+    <text x="235" y="90" text-anchor="middle">trx-005</text>
+
+    <rect x="310" y="70" width="150" height="30" fill="white" stroke="black"/>
+
+    <!-- Row 3 -->
+    <rect x="10" y="100" width="150" height="30" fill="white" stroke="black"/>
+    <text x="85" y="120" text-anchor="middle">12</text>
+
+    <rect x="160" y="100" width="150" height="30" fill="white" stroke="black"/>
+    <text x="235" y="120" text-anchor="middle">trx-012</text>
+
+    <rect x="310" y="100" width="150" height="30" fill="white" stroke="black"/>
+
+    <!-- Row 4 -->
+    <rect x="10" y="130" width="150" height="30" fill="white" stroke="black"/>
+    <text x="85" y="150" text-anchor="middle">15</text>
+
+    <rect x="160" y="130" width="150" height="30" fill="white" stroke="black"/>
+    <text x="235" y="150" text-anchor="middle">trx-015</text>
+
+    <rect x="310" y="130" width="150" height="30" fill="white" stroke="black"/>
+    <text x="385" y="150" text-anchor="middle">Block@15</text>
+
+    <!-- Row 5 -->
+    <rect x="10" y="160" width="150" height="30" fill="white" stroke="black"/>
+    <text x="85" y="180" text-anchor="middle">&lt;pending&gt;</text>
+
+    <rect x="160" y="160" width="150" height="30" fill="white" stroke="black"/>
+    <text x="235" y="180" text-anchor="middle">trx-020</text>
+
+    <rect x="310" y="160" width="150" height="30" fill="white" stroke="black"/>
+</svg>

@@ -159,9 +159,9 @@ export class BlockNetwork implements IBlockNetwork {
 		);
 	}
 
-	async commit(tailId: BlockId, trxRef: TrxBlocks): Promise<CommitResult> {
+	async commit(tailId: BlockId, trxRef: TrxBlocks, rev: number): Promise<CommitResult> {
 		// Commit the tail block
-		const { batches: tailBatches, error: tailError } = await this.processBlocks([tailId], trxRef.trxId);
+		const { batches: tailBatches, error: tailError } = await this.commitBlocks([tailId], trxRef.trxId, rev);
 		if (tailError) {
 			// Cancel all pending transactions as background microtask
 			Promise.resolve().then(() => this.cancel({ blockIds: [...trxRef.blockIds, tailId], trxId: trxRef.trxId }));
@@ -174,7 +174,7 @@ export class BlockNetwork implements IBlockNetwork {
 		}
 
 		// Commit all remaining block ids
-		const { batches, error } = await this.processBlocks(trxRef.blockIds.filter(bid => bid !== tailId), trxRef.trxId);
+		const { batches, error } = await this.commitBlocks(trxRef.blockIds.filter(bid => bid !== tailId), trxRef.trxId, rev);
 		if (error) {
 			// Errors should not happen once the tail is committed
 			// TODO: log failure
@@ -187,14 +187,14 @@ export class BlockNetwork implements IBlockNetwork {
 	}
 
 	/** Attempts to commit a set of blocks, and handles failures and errors */
-	private async processBlocks(blockIds: BlockId[], transactionId: TrxId) {
+	private async commitBlocks(blockIds: BlockId[], transactionId: TrxId, rev: number) {
 		const expiration = Date.now() + this.timeoutMs;
 		const batches = await this.batchesForPayload<BlockId[], CommitResult>(blockIds, blockIds, mergeBlocks, []);
 		let error: Error | undefined;
 		try {
 			await this.processBatches(
 				batches,
-				(repo, batch) => repo.commit({ trxId: transactionId, blockIds: batch.payload }, { expiration }),
+				(repo, batch) => repo.commit({ trxId: transactionId, blockIds: batch.payload }, rev, { expiration }),
 				batch => batch.payload,
 				mergeBlocks,
 				expiration

@@ -1,0 +1,21 @@
+@startuml
+
+' Define components
+component "Directory Network" as dir
+
+component "Election Network" as election
+
+component "Voter Mobile App" as voter
+component "Authority Mobile App" as authority
+database "Private Registration DB\n(Optional)" as privateDb
+
+' Define relationships
+voter --> dir : connects
+voter --> election : connects
+voter ..> privateDb : connects
+
+authority --> dir : connects
+authority --> election : connects
+authority ..> privateDb : manages
+
+@enduml

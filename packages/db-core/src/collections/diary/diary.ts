@@ -17,7 +17,7 @@ export class Diary<TEntry> {
 							}
             },
             createHeaderBlock: (id: BlockId, store: BlockStore<IBlock>) => ({
-                block: store.createBlockHeader(DiaryHeaderBlockType, id)
+                header: store.createBlockHeader(DiaryHeaderBlockType, id)
             })
         };
 

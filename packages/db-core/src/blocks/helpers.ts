@@ -9,5 +9,5 @@ export async function get<T extends IBlock>(store: BlockStore<T>, id: BlockId): 
 
 export function apply<T extends IBlock>(store: BlockStore<T>, block: IBlock, op: BlockOperation) {
 	applyOperation(block, op);
-	store.update(block.block.id, op);
+	store.update(block.header.id, op);
 }

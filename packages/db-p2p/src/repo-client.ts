@@ -1,10 +1,6 @@
-import { pipe } from 'it-pipe';
-import { encode as lpEncode, decode as lpDecode } from 'it-length-prefixed';
-import { pushable } from 'it-pushable';
-import { IKeyNetwork, IRepo, BlockGet, GetBlockResult, Transform, PendSuccess, StaleFailure, TrxBlocks, CommitSuccess, MessageOptions, CommitResult, PendRequest } from '../../db-core/src/index.js';
+import { IKeyNetwork, IRepo, GetBlockResult, PendSuccess, StaleFailure, TrxBlocks, CommitSuccess, MessageOptions, CommitResult, PendRequest, CommitRequest, BlockGets } from '../../db-core/src/index.js';
 import { RepoMessage } from '../../db-core/src/network/repo-protocol.js';
 import { PeerId } from '@libp2p/interface';
-import { first } from './it-utility.js';
 import { ProtocolClient } from './protocol-client.js';
 
 export class RepoClient extends ProtocolClient implements IRepo {
@@ -17,9 +13,9 @@ export class RepoClient extends ProtocolClient implements IRepo {
 		return new RepoClient(peerId, keyNetwork);
 	}
 
-	async get(gets: BlockGet[], options: MessageOptions): Promise<GetBlockResult[]> {
+	async get(blockGets: BlockGets, options: MessageOptions): Promise<GetBlockResult[]> {
 		return this.processRepoMessage<GetBlockResult[]>(
-			[{ get: gets }],
+			[{ get: blockGets }],
 			options
 		);
 	}
@@ -33,14 +29,14 @@ export class RepoClient extends ProtocolClient implements IRepo {
 
 	async cancel(trxRef: TrxBlocks, options: MessageOptions): Promise<void> {
 		return this.processRepoMessage<void>(
-			[{ cancel: trxRef }],
+			[{ cancel: { trxRef } }],
 			options
 		);
 	}
 
-	async commit(trxRef: TrxBlocks, options: MessageOptions): Promise<CommitResult> {
+	async commit(request: CommitRequest, options: MessageOptions): Promise<CommitResult> {
 		return this.processRepoMessage<CommitResult>(
-			[{ commit: trxRef }],
+			[{ commit: request }],
 			options
 		);
 	}

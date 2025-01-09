@@ -21,7 +21,7 @@ export class Repo implements IRepo {
 		throw new Error("Not implemented");
 	}
 
-	async commit(trxRef: TrxBlocks, options?: MessageOptions): Promise<CommitResult> {
+	async commit(trxRef: TrxBlocks, rev: number, options?: MessageOptions): Promise<CommitResult> {
 		throw new Error("Not implemented");
 	}
 }

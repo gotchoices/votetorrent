@@ -1,0 +1,44 @@
+@startuml
+
+' Define components
+component "Logical Actions" as logical
+component "Transaction Log" as log
+component "Block Transforms" as transforms
+component "Block Storage" as storage
+database "Archive Storage\n(Arachnode)" as archive
+
+' Define relationships
+logical --> log : "Appends to"
+logical --> transforms : "Translates to"
+log --> storage : "Stored as\nlinked blocks"
+transforms --> storage : "Updates"
+storage ..> archive : "Sweeps to"
+
+note right of logical
+  Actions applied to collection's
+  logical structure (e.g. tree)
+end note
+
+note right of log
+  Chain of blocks containing
+  transaction entries
+end note
+
+note right of transforms
+  Physical mutations
+  to blocks
+end note
+
+note right of storage
+  Distributed block storage
+  with revisions & pending
+  transforms
+end note
+
+note right of archive
+  Long-term storage in
+  concentric rings
+end note
+
+
+@enduml

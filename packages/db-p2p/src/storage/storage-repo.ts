@@ -1,9 +1,11 @@
-import { IRepo, MessageOptions, applyOperation, BlockGet, BlockId, blockIdsForTransform, BlockTrxContext, CommitRequest, CommitResult, GetBlockResult, IBlock, PendRequest, PendResult, Transform, TrxBlocks, TrxId, transformForBlockId, BlockTrxState, BlockTrxRev } from "../../../db-core/src/index.js";
-import { BlockRestoration, IBlockStorage, RestoreCallback } from "./struct.js";
+import { IRepo, MessageOptions, applyOperation, BlockGet, BlockId, blockIdsForTransform, CommitRequest, CommitResult, GetBlockResult, IBlock, PendRequest, PendResult, Transform, TrxBlocks, TrxId, transformForBlockId, BlockTrxState, TrxRev, TrxContext, BlockGets, TrxTransform, applyOperations, TrxPending } from "../../../db-core/src/index.js";
+import { recordEmpty } from "../helpers.js";
+import { asyncIteratorToArray, first } from "../it-utility.js";
+import { BlockMetadata, BlockArchive, IBlockStorage, RestoreCallback, RevisionRange, ArchiveRevisions } from "./struct.js";
 
 type BlockWithTrxRev = {
 	block?: IBlock;
-	trxRev: BlockTrxRev;
+	trxRev: TrxRev;
 }
 
 export class StorageRepo implements IRepo {
@@ -18,69 +20,88 @@ export class StorageRepo implements IRepo {
 		this.restoreCallback = options?.restoreCallback;
 	}
 
-	async get(blockGets: BlockGet[], options?: MessageOptions): Promise<GetBlockResult[]> {
-		return Promise.all(blockGets.map(async get => {
-			let result: GetBlockResult;
+	async get({ blockIds, context }: BlockGets, options?: MessageOptions): Promise<GetBlockResult[]> {
+		return Promise.all(blockIds.map(async (blockId) => {
+			let status = await this.getStatus(blockId);
+			if (!status) {	// Restore block if not present
+				const restored = await this.restoreBlock(blockId, context?.rev);
+				if (!restored) {
+					throw new Error(`Block ${blockId}${context ? ` revision ${context.rev}` : ''} not found`);
+				}
+				status = await this.getStatus(blockId);
+			}
 
-			if (!get.context) { // Get latest
-				result = await this.getLatestBlock(get.blockId);
-			} else {
-				const blockForTrx = await this.storage.getMaterializedBlock(get.blockId, get.context.trxId);
-				if (blockForTrx) {
-					// Already materialized
-					result = { block: blockForTrx, state: await this.getLatestState(get.blockId, get.context) };
-				} else if (get.context.rev !== undefined) {
-					// Possible we don't know about the commit, check in pending
-					const pending = await this.storage.getPendingTransaction(get.blockId, get.context.trxId);
+			// Ensure that all outstanding transactions in the context are committed
+			if (context) {
+				const missing = status!.state.latest
+					? context.committed.filter(c => c.rev > status!.state.latest!.rev)
+					: context.committed;
+				for (const { trxId } of missing.toSorted((a, b) => a.rev - b.rev)) {
+					const pending = await this.storage.getPendingTransaction(blockId, trxId);
 					if (pending) {
-						const commitResult = await this.commit({ blockIds: [get.blockId], trxId: get.context.trxId, expectedRev: get.context.rev });
-						if (!commitResult.success) {
-							throw new Error(`Inconsistent commit. Transaction ${get.context.trxId} for block ${get.blockId} expected rev ${get.context.rev} but commits ahead: ${commitResult.missing.map(m => m.trxId).join(', ')}`);
-						}
+						await this.internalCommit(blockId, trxId, status!.meta);
+						status = await this.getStatus(blockId);
 					}
-					// Get specific revision
-					const blockRev = await this.getOrMaterialize(get.blockId, get.context.rev);
-					result = { block: blockRev.block, state: await this.getLatestState(get.blockId, get.context) };
-				} else {
-					// Get pending transaction
-					result = await this.getLatestWithPending(get.blockId, get.context.trxId);
 				}
 			}
 
-			return result;
+			const blockRev = await this.getOrRestore(status!.meta, blockId, context?.rev);
+
+			// Include pending transaction if requested
+			if (context?.trxId !== undefined) {
+				const fromPending = await this.storage.getPendingTransaction(blockId, context.trxId);
+				if (!fromPending) {
+					throw new Error(`Pending transaction ${context.trxId} not found`);
+				}
+				const block = applyTransform(blockRev.block, fromPending.transform);
+				return { block, state: status!.state };
+			}
+
+			return { block: blockRev.block, state: status!.state };
 		}));
 	}
 
 	async pend(request: PendRequest, options?: MessageOptions): Promise<PendResult> {
 		const blockIds = blockIdsForTransform(request.transform);
+		const pendings: TrxPending[] = [];
 
+		// First handle any pending transactions
+		for (const blockId of blockIds) {
+			// Check existing pending transactions
+			const pending = await asyncIteratorToArray(this.storage.listPendingTransactions(blockId));
+			if (pending.length > 0) {
+				if (request.pending === 'f') {
+					return { success: false, pending: pending.map(trxId => ({ blockId, trxId })) };
+				} else if (request.pending === 'r') {
+					return { success: false, pending: await Promise.all(pending.map(async trxId => ({
+						blockId,
+						trxId,
+						transform: (await this.storage.getPendingTransaction(blockId, trxId))?.transform
+					}))) };
+				} else {
+					pendings.push(...pending.map(trxId => ({ blockId, trxId } as TrxPending)));
+				}
+			}
+		}
+
+		// Save pending transaction for each block
 		for (const blockId of blockIds) {
 			// For new blocks, create metadata
 			if (request.transform.inserts[blockId]) {
-				await this.storage.saveMetadata(blockId, { latestRev: 0 });
+				if (!await this.storage.getMetadata(blockId)) {
+					await this.storage.saveMetadata(blockId, { latest: undefined, ranges: [[0] as RevisionRange] });
+				}
+			} else {
+				// Save block-specific portion of transform
+				const blockTransform = transformForBlockId(request.transform, blockId);
+				await this.storage.savePendingTransaction(blockId, request.trxId, blockTransform);
 			}
-
-			// Check existing pending transactions
-			const pending = await this.storage.getAllPendingTransactions(blockId);
-			if (request.pending === 'fail' && pending.size > 0) {
-				return {
-					success: false,
-					missing: Array.from(pending.values())
-				};
-			}
-
-			// Save block-specific transform
-			const blockTransform = transformForBlockId(request.transform, blockId);
-			await this.storage.savePendingTransaction(blockId, request.trxId, blockTransform);
 		}
 
 		return {
 			success: true,
-			pending: [], // TODO: Return actual pending transactions
-			trxRef: {
-				blockIds,
-				trxId: request.trxId
-			}
+			pending: pendings,
+			trxRef: { blockIds, trxId: request.trxId }
 		};
 	}
 
@@ -97,6 +118,18 @@ export class StorageRepo implements IRepo {
 				throw new Error(`Block ${blockId} not found`);
 			}
 
+			if (meta.latestRev > request.rev) {
+				const trxRevs = await this.storage.listRevisionRange(blockId, request.rev + 1, meta.latestRev);
+				return {
+					success: false,
+					missing: trxRevs.map(async ({ trxId, rev }) => ({
+						trxId,
+						rev,
+						transform: (await this.getOrRestore(blockId, rev))?.
+					}))
+				};
+			}
+
 			// Check if we missed any revisions
 			if (meta.latestRev !== request.expectedRev) {
 				// TODO: Implement recovery of missing revisions from peers
@@ -105,21 +138,7 @@ export class StorageRepo implements IRepo {
 
 			try {
 				// Read the pending transform
-				const pendingTrx = await this.storage.getPendingTransaction(blockId, request.trxId);
-				if (!pendingTrx) {
-					throw new Error(`Pending transaction ${request.trxId} not found for block ${blockId}`);
-				}
-
-				// Update metadata
-				meta.latestRev++;
-				if (pendingTrx.transform.deletes.has(blockId)) {
-					meta.deleted = { trxId: request.trxId, rev: meta.latestRev };
-				}
-				await this.storage.saveMetadata(blockId, meta);
-
-				// Save revision and promote the pending transaction
-				await this.storage.saveRevision(blockId, meta.latestRev, request.trxId);
-				await this.storage.promotePendingTransaction(blockId, request.trxId);
+				await this.internalCommit(blockId, request.trxId, meta);
 
 			} catch (err) {
 				return {
@@ -134,165 +153,212 @@ export class StorageRepo implements IRepo {
 		};
 	}
 
-	private async restoreBlock(blockId: string, rev?: number): Promise<BlockRestoration | undefined> {
+	private async internalCommit(blockId: string, trxId: TrxId, meta: BlockMetadata) {
+		const pendingTrx = await this.storage.getPendingTransaction(blockId, trxId);
+		if (!pendingTrx) {
+			throw new Error(`Pending transaction ${trxId} not found for block ${blockId}`);
+		}
+
+		// Get the prior latest block so we can keep the latest block materialized
+		const block = meta.latest ? await this.getOrRestore(meta, blockId, meta.latest.rev) : undefined;
+
+		// Update metadata
+		const newRev = (meta.latest?.rev ?? 0) + 1;
+		meta.latest = { trxId, rev: newRev };
+		await this.storage.saveMetadata(blockId, meta);
+
+		// Apply transformations
+		if (block?.block && Object.hasOwn(pendingTrx.transform.updates, blockId)) {
+			applyOperations(block.block, pendingTrx.transform.updates[blockId]);
+			await this.storage.saveMaterializedBlock(blockId, trxId, block.block);
+		} else if (Object.hasOwn(pendingTrx.transform.inserts, blockId)) {
+			await this.storage.saveMaterializedBlock(blockId, trxId, pendingTrx.transform.inserts[blockId]);
+		} else if (pendingTrx.transform.deletes.has(blockId)) {
+			await this.storage.saveMaterializedBlock(blockId, trxId, undefined);
+		}
+
+		// Save revision and promote the pending transaction
+		await this.storage.saveRevision(blockId, newRev, trxId);
+		await this.storage.promotePendingTransaction(blockId, trxId);
+	}
+
+	/** Attempts to restore the given block revision, or the latest if rev is undefined.
+	 * If the block is not present, also restores the latest.
+	 * @returns The restored block archive that contains the requested revision (or latest), or undefined if no restore callback is provided
+	 */
+	private async restoreBlock(blockId: string, rev?: number): Promise<BlockArchive | undefined> {
 		if (!this.restoreCallback) {
 			return undefined;
 		}
 		const restored = await this.restoreCallback(blockId, rev);
 		if (restored) {
-			// Process revisions in order to ensure proper materialization chain
-			const revisions = Object.entries(restored.revisions)
-				.map(([rev, data]) => ({ rev: Number(rev), data }))
-				.sort((a, b) => a.rev - b.rev);
-
-			// Ensure the oldest revision has a materialization
-			if (!revisions[0].data.block) {
-				throw new Error(`Restored block ${blockId} missing materialization for oldest revision ${revisions[0].rev}`);
+			let meta = await this.storage.getMetadata(blockId);
+			if (!meta) {	// No repository - make one
+				// If the restored range is open-ended, restore the latest
+				let latestRestored: BlockArchive;
+				if (restored.range[1]) {
+					latestRestored = (await this.restoreCallback(blockId))!;
+					await this.saveRestored(blockId, latestRestored);
+				} else {
+					latestRestored = restored;
+				}
+				if (recordEmpty(latestRestored.revisions)) {	// No revisions at all
+					meta = { ranges: [latestRestored.range], latest: undefined };
+				} else {
+					const [revMax, { trx: { trxId } }] = maxRev(latestRestored.revisions);
+					meta = { ranges: [latestRestored.range], latest: { trxId, rev: revMax } as TrxRev};
+				}
+			} else {
+				// Add the explicit range from restoration
+				meta.ranges.unshift(restored.range);
+				// Sort and merge overlapping ranges
+				meta.ranges = mergeRanges(meta.ranges);
+				// Update latest if necessary - this should never happen but in the event that a restored block has a newer revision than our latest, use it
+				if (!recordEmpty(restored.revisions)) {
+					const [revMax, { trx: { trxId } }] = maxRev(restored.revisions);
+					meta.latest = meta.latest && meta.latest.rev > revMax
+						? meta.latest : { trxId, rev: revMax };
+				}
 			}
+			await this.storage.saveMetadata(blockId, meta);
 
-			// Save all revisions, transactions, and materializations
-			for (const { rev, data } of revisions) {
-				await Promise.all([
-					this.storage.saveRevision(blockId, rev, data.trx.trxId),
-					this.storage.saveTransaction(blockId, data.trx.trxId, data.trx),
-					data.block ? this.storage.saveMaterializedBlock(blockId, data.trx.trxId, data.block) : Promise.resolve()
-				]);
-			}
+			// Convert revisions to array
+			await this.saveRestored(blockId, restored);
 			return restored;
 		}
 	}
 
-	private async getLatestBlock(blockId: BlockId): Promise<GetBlockResult> {
-		const state = await this.getLatestState(blockId, undefined);
-		if (state.deleted) {
-			return { block: undefined, state };
+	private async saveRestored(blockId: string, restored: BlockArchive) {
+		const revisions = Object.entries(restored.revisions)
+			.map(([rev, data]) => ({ rev: Number(rev), data }));
+
+		// Save all revisions, transactions, and materializations
+		for (const { rev, data: { trx, block } } of revisions) {
+			await Promise.all([
+				this.storage.saveRevision(blockId, rev, trx.trxId),
+				this.storage.saveTransaction(blockId, trx.trxId, trx),
+				block ? this.storage.saveMaterializedBlock(blockId, trx.trxId, block) : Promise.resolve()
+			]);
 		}
-		const blockRev = await this.getOrMaterialize(blockId, state.latest!.rev);
-		return { block: blockRev.block, state };
 	}
 
-	private async getLatestWithPending(blockId: BlockId, trxId: TrxId): Promise<GetBlockResult> {
-		const result = await this.getLatestBlock(blockId);
-		if (result.state.deleted) {
-			throw new Error(`Block ${blockId} deleted`);
-		}
-
-		const fromPending = await this.storage.getPendingTransaction(blockId, trxId);
-		if (!fromPending) {
-			throw new Error(`Pending transaction ${trxId} not found`);
-		}
-
-		const block = applyTransform(result.block, fromPending.transform);
-		return { block, state: { ...result.state, pendingTrxId: trxId } };
-	}
-
-	private async getOrRestore(blockId: BlockId, rev: number): Promise<BlockWithTrxRev | undefined> {
-		const trxId = await this.storage.getRevision(blockId, rev);
-		if (!trxId) {
+	private async getOrRestore(meta: BlockMetadata, blockId: BlockId, rev?: number): Promise<BlockWithTrxRev> {
+		// Is the rev in a present range?
+		if (rev !== undefined && !inRanges(rev, meta.ranges)) {
 			const restored = await this.restoreBlock(blockId, rev);
 			if (!restored) {
 				throw new Error(`Block ${blockId} revision ${rev} not found`);
 			}
-			const restoredRev = Object.entries(restored.revisions)
-				.map(([r, data]) => ({ rev: Number(r), data }))
-				.filter(r => r.rev <= rev)
-				.sort((a, b) => b.rev - a.rev)[0];
+			this.saveRestored(blockId, restored);
+		}
+		const targetRev = rev ?? meta.latest?.rev ?? 0;
+		return await this.materializeBlock(blockId, targetRev);
+	}
 
-			if (restoredRev?.data.block) {
-				return {
-					block: restoredRev.data.block,
-					trxRev: { trxId: restoredRev.data.trx.trxId, rev: restoredRev.rev }
-				};
-			}
+	private async getStatus(blockId: string): Promise<{ state: BlockTrxState, meta: BlockMetadata } | undefined> {
+		const meta = await this.storage.getMetadata(blockId);
+		if (!meta) {
 			return undefined;
 		}
 
-		const block = await this.storage.getMaterializedBlock(blockId, trxId);
-		return block ? { block, trxRev: { trxId, rev } } : undefined;
-	}
-
-	private async getOrMaterialize(blockId: BlockId, rev: number): Promise<BlockWithTrxRev> {
-		const result = await this.getOrRestore(blockId, rev);
-		if (!result) {
-			return await this.materializeBlock(blockId, rev);
-		}
-		return result;
-	}
-
-	private async getLatestState(blockId: string, context: BlockTrxContext | undefined): Promise<BlockTrxState> {
-		const meta = await this.storage.getMetadata(blockId);
-		if (!meta) {
-			throw new Error(`Block ${blockId} not found`);
-		}
-
-		const trxId = await this.storage.getRevision(blockId, meta.latestRev);
-		if (!trxId) {
-			throw new Error(`Missing revision entry (${meta.latestRev}) for block ${blockId}`);
-		}
-
-		return {
-			...(meta.deleted ? { deleted: meta.deleted } : { latest: { trxId, rev: meta.latestRev } }),
-			...(context && context.rev === undefined ? { pendingTrxId: context.trxId } : {})
-		};
+		const pendings = await asyncIteratorToArray(this.storage.listPendingTransactions(blockId));
+		return { state: { latest: meta.latest, pendings }, meta };
 	}
 
 	private async materializeBlock(blockId: string, targetRev: number): Promise<BlockWithTrxRev> {
-		// Find all available revisions up to target
-		const meta = await this.storage.getMetadata(blockId);
-		if (!meta) {
-			throw new Error(`Block ${blockId} not found`);
-		}
-
-		let currentRev = 1;
 		let block: IBlock | undefined;
-		let latestTrxId: TrxId | undefined;
+		let materializedTrxRev: TrxRev | undefined;
+		const transactions: TrxRev[] = [];
 
-		while (currentRev <= targetRev) {
-			const trxId = await this.storage.getRevision(blockId, currentRev);
-			if (!trxId) {
-				throw new Error(`Missing revision ${currentRev} for block ${blockId}`);
-			}
-
-			// Try to get materialized block first
-			const materializedBlock = await this.storage.getMaterializedBlock(blockId, trxId);
+		// Find the materialized block
+		for await (const trxRev of this.storage.listRevisions(blockId, targetRev, 1)) {
+			const materializedBlock = await this.storage.getMaterializedBlock(blockId, trxRev.trxId);
 			if (materializedBlock) {
 				block = materializedBlock;
+				materializedTrxRev = trxRev;
+				break;
 			} else {
-				// Apply transform
-				const trx = await this.storage.getTransaction(blockId, trxId);
-				if (!trx) {
-					throw new Error(`Missing transaction ${trxId} for block ${blockId}`);
-				}
-				block = applyTransform(block, trx.transform);
+				transactions.push(trxRev);
 			}
-
-			latestTrxId = trxId;
-			currentRev++;
 		}
 
-		if (!block || !latestTrxId) {
-			throw new Error(`Failed to materialize block ${blockId} at revision ${targetRev}`);
+		if (!block || !materializedTrxRev) {
+			throw new Error(`Failed to find materialized block ${blockId} for revision ${targetRev}`);
 		}
 
-		// Save the final materialization
-		await this.storage.saveMaterializedBlock(blockId, latestTrxId, block);
-		return { block, trxRev: { trxId: latestTrxId, rev: targetRev } };
+		// Apply transforms in reverse order
+		for (let i = transactions.length - 1; i >= 0; --i) {
+			const { trxId } = transactions[i];
+			const trx = await this.storage.getTransaction(blockId, trxId);
+			if (!trx) {
+				throw new Error(`Missing transaction ${trxId} for block ${blockId}`);
+			}
+			block = applyTransform(block, trx.transform);
+		}
+
+		if (transactions.length) {	// Save materialization closest to targetRev and return it
+			await this.storage.saveMaterializedBlock(blockId, transactions[0].trxId, block!);
+			return { block, trxRev: transactions[0] };
+		}
+		// Found materialization is closest to targetRev
+		return { block, trxRev: materializedTrxRev };
 	}
 }
 
+/** Applies a transform to the given block, or if no block is passed, will take the first inserted block in the transform if there is one */
 function applyTransform(block: IBlock | undefined, transform: Transform): IBlock | undefined {
 	if (Object.keys(transform.inserts).length) {
 		block = Object.values(transform.inserts).at(0)!;
 	}
-	if (block) {
-		for (const operations of Object.values(transform.updates)) {
-			for (const op of operations) {
-				applyOperation(block, op);
-			}
-		}
+	if (block && Object.hasOwn(transform.updates, block.header.id)) {
+		applyOperations(block, transform.updates[block.header.id]);
 	}
-	if (transform.deletes.size) {
+	if (block && transform.deletes.has(block.header.id)) {
 		return undefined;
 	}
 	return block;
 }
+
+// Helper function to merge overlapping ranges
+function mergeRanges(ranges: RevisionRange[]): RevisionRange[] {
+	if (ranges.length <= 1) return ranges;
+
+	ranges.sort((a, b) => a[0] - b[0]);
+	const merged: RevisionRange[] = [ranges[0]];
+
+	for (const range of ranges.slice(1)) {
+		const last = merged[merged.length - 1];
+		// If last range is open-ended, it consumes all following ranges
+		if (last[1] === undefined) {
+			continue;
+		}
+		// If this range starts at or before last range's end (exclusive)
+		if (range[0] <= last[1]) {
+			// If this range is open-ended, make last range open-ended
+			if (range[1] === undefined) {
+				last[1] = undefined;
+			} else {
+				last[1] = Math.max(last[1], range[1]);
+			}
+		} else {
+			merged.push(range);
+		}
+	}
+
+	return merged;
+}
+
+function maxRev<T>(revisions: Record<number, T>): readonly [number, T] {
+	return Object.entries(revisions).map(([rev, data]) => [Number(rev), data] as const)
+		.reduce((a, b) => (a[0] > b[0] ? a : b), [0, undefined] as [number, T]);
+}
+
+function inRanges(rev: number, ranges: RevisionRange[]): boolean {
+	for (const range of ranges) {
+		if (rev >= range[0] && (range[1] === undefined || rev < range[1])) {
+			return true;
+		}
+	}
+	return false;
+}
+

@@ -13,14 +13,17 @@ The system may experience hotspots at the log tail block, but the tail is transi
 #### Single collection transactions:
 * Each collection maintains log of logical transactions, each with:
   * revision, transaction ID, block IDs, logical actions
-* Logical log stored physically in linked list of blocks
-* Collection header block references head and tail block IDs
-* Blocks (including log blocks) represented by the associated collection's transaction ID - can read from previous revision back to history TTL
-* Phase 1 - Propagate: `pend()`s are posted to all affected blocks (w/ TTLs) - these don't update the revision
-* Phase 2 - Commit: Transaction is appended to tail, obtaining a new revision
-* Phase 3 - Checkpoint: All affected blocks' revisions are updated - checkpoint record appended to tail block when complete
-* Before reading from collection, obtain revision, as well as outstanding transaction IDs between checkpoint (exclusive) and latest revision (inclusive) from tail block
-* Explicitly mention uncheckpointed transaction IDs when reading from block storage - ensures read includes uncheckpointed transactions, and reminds them to checkpoint them
+* Logical log stored physically as linked list of blocks
+* Log header block references head and tail block IDs
+* Blocks each versioned by associated transaction ID and revision number - can read from previous revision back to history TTL
+* Phase 1 - Pend: `pend()`s are posted to all affected blocks (w/ TTLs) - these don't update the revision
+* Phase 2 - Commit: Transaction is appended to tail of the log, obtaining a new revision
+* Phase 3 - Propagate: All affected blocks' revisions are updated
+* Phase 4 - Checkpoint: Checkpoint record appended to tail block as propagation completes
+* Before reading from collection, obtain outstanding transaction ID and revisions stated by checkpoint and intervening transactions
+* Explicitly mention uncheckpointed and uncommited transactions when reading from block storage 
+  - ensures read includes uncheckpointed and uncommitted transactions
+  - reinforces commits (in case committer fails to propagate)
 
 #### Cross-collection transactions:
 * Proceeds as in single collection transaction, except that:
@@ -30,14 +33,14 @@ The system may experience hotspots at the log tail block, but the tail is transi
 
 ## Collections
 
-A collection is the fundamental unit of data storage in Optimystic.  It consists of a transaction log, as well as a type-specific structure, such as a tree.  It also represents the fundamental unit of transaction processing, though cross-collection transactions are also possible.
+A collection is the fundamental unit of data storage in Optimystic.  It consists of a transaction log, as well as a type-specific structure, such as a tree, all build on top of block storage.  It also represents the smallest scope of transaction processing.
 
 Types of collections include:
 * **Diary** - an append-only list of entries
 * **Tree** - a dictionary or index like structure that stores entries in terms of a key based order
   * **Hashed Tree** - a tree where each node contains a hash of its children or entries (Merkle tree)
 
-Each collection has a unique identifier, and is distributed across the network using transacted block storage.
+Each collection has a unique identifier, which is a reference to a block ID containing the collection's header.
 
 ## Block Storage
 
@@ -76,7 +79,7 @@ The transaction log is physically represented as a linked list of blocks, each c
 To apply a transaction to the network:
 1. The client sends `pend()` requests to all involved blocks, containing the block transforms.  This allows the transform payload to be communicated to all involved blocks, prior to commitment.
 2. The client specifically attempts to `commit()` the request to the tail block of the transaction log.  Successful commits to this block represent the "tip of the spear" for the transaction - if this commit succeeds, the transaction will ultimately succeed.
-3. The client pushes the commit to the remaining involved blocks.
+3. The client propagates the commit to the remaining involved blocks.
 4. Once commit confirmation is received for all involved blocks, a checkpoint entry is appended to the transaction log.
 
 Prior to checkpointing, the transaction is still complete, but client's must not assume that all block storage repositories have received the commit, so any `get()` requests should include the transaction ID / revision information, so that the storage repository will a) be informed of the commit; and b) be sure to retrieve the committed revision.

@@ -1,10 +1,12 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { BlockId, IBlock, Transform, TrxId, TrxTransform } from "../../../db-core/src/index.js";
+import { BlockId, IBlock, Transform, TrxId, TrxRev, TrxTransform } from "../../../db-core/src/index.js";
 import { BlockMetadata, IBlockStorage } from "./struct.js";
 
 export class FileBlockStorage implements IBlockStorage {
-	constructor(private readonly basePath: string) { }
+	constructor(private readonly basePath: string) {
+		// TODO: use https://www.npmjs.com/package/proper-lockfile to take a lock on the basePath, also introduce explicit dispose pattern
+	 }
 
 	async getMetadata(blockId: BlockId): Promise<BlockMetadata | undefined> {
 		return this.readIfExists<BlockMetadata>(this.getMetadataPath(blockId));
@@ -47,34 +49,30 @@ export class FileBlockStorage implements IBlockStorage {
 			});
 	}
 
-	async getAllPendingTransactions(blockId: BlockId): Promise<Map<TrxId, TrxTransform>> {
-		const pending = new Map<TrxId, TrxTransform>();
+	async *listPendingTransactions(blockId: BlockId): AsyncIterable<TrxId> {
 		const pendingPath = path.join(this.getBlockPath(blockId), 'pend');
 
-		return fs.readdir(pendingPath)
-			.then(async files => {
-				for (const file of files) {
-					if (file.endsWith('.json')) {
-						const rawTrxId = file.slice(0, -5);
-						if (/^[\w\d]+-[\w\d]+-[\w\d]+-[\w\d]+-[\w\d]+$/.test(rawTrxId)) {
-							const trxId = rawTrxId as TrxId;
-							const pendingTrx = await this.getPendingTransaction(blockId, trxId);
-							if (pendingTrx) {
-								pending.set(trxId, pendingTrx);
-							}
-						}
-					}
-				}
-				return pending;
-			})
-			.catch(() => {
-				// Directory doesn't exist yet, return empty map
-				return pending;
-			});
+		const files = await fs.readdir(pendingPath).catch(() => [] as string[]);
+		for (const file of files) {
+			if (!file.endsWith('.json')) continue;
+			const rawTrxId = file.slice(0, -5);
+			if (!/^[\w\d]+-[\w\d]+-[\w\d]+-[\w\d]+-[\w\d]+$/.test(rawTrxId)) continue;
+			yield rawTrxId as TrxId;
+		}
 	}
 
 	async getTransaction(blockId: BlockId, trxId: TrxId): Promise<TrxTransform | undefined> {
 		return this.readIfExists<TrxTransform>(this.getTrxPath(blockId, trxId));
+	}
+
+	async *listRevisions(blockId: BlockId, startRev: number, endRev: number): AsyncIterable<TrxRev> {
+		// TODO: Optimize this for sparse revs
+		for (let rev = startRev; startRev <= endRev ? rev <= endRev : rev >= endRev; startRev <= endRev ? ++rev : --rev) {
+			const trxId = await this.getRevision(blockId, rev);
+			if (trxId) {
+				yield { trxId, rev };
+			}
+		}
 	}
 
 	async saveTransaction(blockId: BlockId, trxId: TrxId, transform: TrxTransform): Promise<void> {
@@ -88,10 +86,10 @@ export class FileBlockStorage implements IBlockStorage {
 		return this.readIfExists<IBlock>(this.getMaterializedPath(blockId, trxId));
 	}
 
-	async saveMaterializedBlock(blockId: BlockId, trxId: TrxId, block: IBlock): Promise<void> {
+	async saveMaterializedBlock(blockId: BlockId, trxId: TrxId, block?: IBlock): Promise<void> {
 		await this.ensureAndWriteFile(
 			this.getMaterializedPath(blockId, trxId),
-			JSON.stringify(block)
+			block ? JSON.stringify(block) : ''
 		);
 	}
 
