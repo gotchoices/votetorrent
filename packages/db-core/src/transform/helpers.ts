@@ -1,4 +1,4 @@
-import { BlockId, BlockOperation, BlockOperations, BlockStore, IBlock, Transform } from "../index.js";
+import { BlockId, BlockOperation, BlockOperations, BlockStore, IBlock, Transform, Transforms } from "../index.js";
 
 /** Mutates the given block with the given operation */
 export function applyOperation(block: IBlock, [entity, index, deleteCount, inserted]: BlockOperation) {
@@ -27,22 +27,22 @@ export function withOperation(block: IBlock, [entity, index, deleteCount, insert
 }
 
 /** The set of distinct block ids affected by the transform */
-export function blockIdsForTransform(transform: Transform | undefined) {
+export function blockIdsForTransform(transform: Transforms | undefined) {
 	return !transform
 			? []
 			: [...new Set([...Object.keys(transform.inserts), ...Object.keys(transform.updates), ...transform.deletes])];
 }
 
 /** Returns an empty transform */
-export function emptyTransform(): Transform {
+export function emptyTransforms(): Transforms {
 	return { inserts: {}, updates: {}, deletes: new Set() };
 }
 
-export function copyTransform(transform: Transform): Transform {
+export function copyTransforms(transform: Transforms): Transforms {
 	return { inserts: { ...transform.inserts }, updates: { ...transform.updates }, deletes: new Set(transform.deletes) };
 }
 
-export function mergeTransforms(a: Transform, b: Transform): Transform {
+export function mergeTransforms(a: Transforms, b: Transforms): Transforms {
 	return {
 		inserts: { ...a.inserts, ...b.inserts },
 		updates: { ...a.updates, ...b.updates },
@@ -50,19 +50,27 @@ export function mergeTransforms(a: Transform, b: Transform): Transform {
 	};
 }
 
-export function concatTransforms(transform: Transform[]): Transform {
-	return transform.reduce((acc, m) => mergeTransforms(acc, m), emptyTransform());
+export function concatTransforms(...transforms: Transforms[]): Transforms {
+	return transforms.reduce((acc, m) => mergeTransforms(acc, m), emptyTransforms());
 }
 
-export function transformForBlockId(transform: Transform, blockId: BlockId): Transform {
+export function transformForBlockId(transform: Transforms, blockId: BlockId): Transform {
 	return {
-		inserts: blockId in transform.inserts ? { [blockId]: transform.inserts[blockId] } : {},
-		updates: blockId in transform.updates ? { [blockId]: transform.updates[blockId] } : {},
-		deletes: transform.deletes.has(blockId) ? new Set([blockId]) : new Set()
+		...(blockId in transform.inserts ? { insert: transform.inserts[blockId] } : {}),
+		...(blockId in transform.updates ? { updates: transform.updates[blockId] } : {}),
+		...(blockId in transform.deletes ? { delete: true } : {})
 	};
 }
 
-export function applyTransformToStore<T extends IBlock>(transform: Transform, store: BlockStore<T>) {
+export function transformsFromTransform(transform: Transform, blockId: BlockId): Transforms {
+	return {
+		...(transform.insert ? { inserts: { [blockId]: transform.insert } } : { inserts: {} }),
+		...(transform.updates ? { updates: { [blockId]: transform.updates } } : { updates: {} }),
+		...(transform.delete ? { deletes: new Set([blockId]) } : { deletes: new Set() })
+	};
+}
+
+export function applyTransformToStore<T extends IBlock>(transform: Transforms, store: BlockStore<T>) {
 	for (const blockId of transform.deletes) {
 		store.delete(blockId);
 	}
@@ -76,3 +84,25 @@ export function applyTransformToStore<T extends IBlock>(transform: Transform, st
 	}
 }
 
+/** Applies a transform to the given block */
+export function applyTransform(block: IBlock | undefined, transform: Transform): IBlock | undefined {
+	if (transform.insert) {
+		block = transform.insert;
+	}
+	if (block && transform.updates) {
+		applyOperations(block, transform.updates);
+	}
+	if (transform.delete) {
+		return undefined;
+	}
+	return block;
+}
+
+/** Concatenates a transform to the given transforms */
+export function concatTransform(transforms: Transforms, blockId: BlockId, transform: Transform): Transforms {
+	return {
+		inserts: { ...transforms.inserts, ...(transform.insert ? { [blockId]: transform.insert } : {}) },
+		updates: { ...transforms.updates, ...(transform.updates ? { [blockId]: transform.updates } : {}) },
+		deletes: new Set([...transforms.deletes, ...(transform.delete ? [blockId] : [])])
+	};
+}

@@ -1,4 +1,4 @@
-import { TrxBlocks, CommitResult, GetBlockResult, PendResult, PendRequest, CommitRequest, BlockGets } from "../index.js";
+import { TrxBlocks, CommitResult, GetBlockResults, PendResult, PendRequest, CommitRequest, BlockGets } from "../index.js";
 
 export type MessageOptions = {
 	expiration: number;
@@ -6,7 +6,7 @@ export type MessageOptions = {
 }
 
 export type IRepo = {
-	get(blockGets: BlockGets, options?: MessageOptions): Promise<GetBlockResult[]>;
+	get(blockGets: BlockGets, options?: MessageOptions): Promise<GetBlockResults>;
 	pend(request: PendRequest, options?: MessageOptions): Promise<PendResult>;
 	cancel(trxRef: TrxBlocks, options?: MessageOptions): Promise<void>;
 	commit(request: CommitRequest, options?: MessageOptions): Promise<CommitResult>;

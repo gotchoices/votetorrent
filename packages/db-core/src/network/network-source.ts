@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { IBlock, BlockType, BlockId, BlockHeader, BlockSource, IBlockNetwork, Transform, TrxId, StaleFailure, TrxContext } from "../index.js";
+import { IBlock, BlockType, BlockId, BlockHeader, BlockSource, IBlockNetwork, Transforms, TrxId, StaleFailure, TrxContext } from "../index.js";
 
 export class NetworkSource<TBlock extends IBlock> implements BlockSource<TBlock> {
 	constructor(
@@ -32,8 +32,8 @@ export class NetworkSource<TBlock extends IBlock> implements BlockSource<TBlock>
 		}
 	}
 
-	async transact(transform: Transform, trxId: TrxId, rev: number, tailId: BlockId): Promise<undefined | StaleFailure> {
-		const pendResult = await this.network.pend({ transform, trxId, pending: 'f' });
+	async transact(transform: Transforms, trxId: TrxId, rev: number, tailId: BlockId): Promise<undefined | StaleFailure> {
+		const pendResult = await this.network.pend({ transforms: transform, trxId, pending: 'f' });
 		if (!pendResult.success) {
 			return pendResult;
 		}

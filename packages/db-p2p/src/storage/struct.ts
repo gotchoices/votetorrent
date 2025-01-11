@@ -1,4 +1,4 @@
-import { BlockId, IBlock, Transform, TrxId, TrxRev, TrxTransform } from "../../../db-core/src/index.js";
+import { BlockId, IBlock, Transform, Transforms, TrxId, TrxRev, TrxTransform, TrxTransforms } from "../../../db-core/src/index.js";
 
 export type RevisionRange = [
 	/** Inclusive start */
@@ -23,7 +23,7 @@ export type BlockArchive = {
 	/** Explicit range covered by this archive since revisions may be sparse */
 	range: RevisionRange;
 	/** Pending transactions - present if this range is open-ended */
-	pending?: Record<TrxId, TrxTransform>;
+	pending?: Record<TrxId, TrxTransforms>;
 }
 
 /** Should return a BlockRepo with the given rev (materialized) if given,
@@ -39,17 +39,17 @@ export interface IBlockStorage {
 	// Revision operations
 	getRevision(blockId: BlockId, rev: number): Promise<TrxId | undefined>;
 	saveRevision(blockId: BlockId, rev: number, trxId: TrxId): Promise<void>;
-	/** List revisions in ascending or descending order, depending on startRev and endRev */
+	/** List revisions in ascending or descending order, depending on startRev and endRev - startRev and endRev are inclusive */
 	listRevisions(blockId: BlockId, startRev: number, endRev: number): AsyncIterable<TrxRev>;
 
 	// Transaction operations
-	getPendingTransaction(blockId: BlockId, trxId: TrxId): Promise<TrxTransform | undefined>;
+	getPendingTransaction(blockId: BlockId, trxId: TrxId): Promise<Transform | undefined>;
 	savePendingTransaction(blockId: BlockId, trxId: TrxId, transform: Transform): Promise<void>;
 	deletePendingTransaction(blockId: BlockId, trxId: TrxId): Promise<void>;
 	listPendingTransactions(blockId: BlockId): AsyncIterable<TrxId>;
 
-	getTransaction(blockId: BlockId, trxId: TrxId): Promise<TrxTransform | undefined>;
-	saveTransaction(blockId: BlockId, trxId: TrxId, transform: TrxTransform): Promise<void>;
+	getTransaction(blockId: BlockId, trxId: TrxId): Promise<Transform | undefined>;
+	saveTransaction(blockId: BlockId, trxId: TrxId, transform: Transform): Promise<void>;
 
 	// Block materialization operations
 	getMaterializedBlock(blockId: BlockId, trxId: TrxId): Promise<IBlock | undefined>;

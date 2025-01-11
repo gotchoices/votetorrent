@@ -9,4 +9,4 @@ export * from "./network/index.js";
 export * from "./utility/nameof.js";
 export * from "./transaction/index.js";
 export * from "./transform/index.js";
-
+export * from "./utility/groupby.js";

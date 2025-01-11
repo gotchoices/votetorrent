@@ -1,6 +1,6 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { BlockId, IBlock, Transform, TrxId, TrxRev, TrxTransform } from "../../../db-core/src/index.js";
+import { BlockId, IBlock, Transform, Transforms, TrxId, TrxRev, TrxTransforms } from "../../../db-core/src/index.js";
 import { BlockMetadata, IBlockStorage } from "./struct.js";
 
 export class FileBlockStorage implements IBlockStorage {
@@ -30,8 +30,8 @@ export class FileBlockStorage implements IBlockStorage {
 		);
 	}
 
-	async getPendingTransaction(blockId: BlockId, trxId: TrxId): Promise<TrxTransform | undefined> {
-		return this.readIfExists<TrxTransform>(this.getPendingTrxPath(blockId, trxId));
+	async getPendingTransaction(blockId: BlockId, trxId: TrxId): Promise<Transform | undefined> {
+		return this.readIfExists<Transform>(this.getPendingTrxPath(blockId, trxId));
 	}
 
 	async savePendingTransaction(blockId: BlockId, trxId: TrxId, transform: Transform): Promise<void> {
@@ -61,8 +61,8 @@ export class FileBlockStorage implements IBlockStorage {
 		}
 	}
 
-	async getTransaction(blockId: BlockId, trxId: TrxId): Promise<TrxTransform | undefined> {
-		return this.readIfExists<TrxTransform>(this.getTrxPath(blockId, trxId));
+	async getTransaction(blockId: BlockId, trxId: TrxId): Promise<Transform | undefined> {
+		return this.readIfExists<Transform>(this.getTrxPath(blockId, trxId));
 	}
 
 	async *listRevisions(blockId: BlockId, startRev: number, endRev: number): AsyncIterable<TrxRev> {
@@ -75,7 +75,7 @@ export class FileBlockStorage implements IBlockStorage {
 		}
 	}
 
-	async saveTransaction(blockId: BlockId, trxId: TrxId, transform: TrxTransform): Promise<void> {
+	async saveTransaction(blockId: BlockId, trxId: TrxId, transform: Transform): Promise<void> {
 		await this.ensureAndWriteFile(
 			this.getTrxPath(blockId, trxId),
 			JSON.stringify(transform)
@@ -87,10 +87,17 @@ export class FileBlockStorage implements IBlockStorage {
 	}
 
 	async saveMaterializedBlock(blockId: BlockId, trxId: TrxId, block?: IBlock): Promise<void> {
-		await this.ensureAndWriteFile(
-			this.getMaterializedPath(blockId, trxId),
-			block ? JSON.stringify(block) : ''
-		);
+		if (block) {
+			await this.ensureAndWriteFile(
+				this.getMaterializedPath(blockId, trxId),
+				JSON.stringify(block)
+			);
+		} else {
+			await fs.unlink(this.getMaterializedPath(blockId, trxId))
+				.catch(() => {
+					// Ignore if file doesn't exist
+				});
+		}
 	}
 
 	async promotePendingTransaction(blockId: BlockId, trxId: TrxId): Promise<void> {

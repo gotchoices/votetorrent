@@ -1,4 +1,4 @@
-import { IKeyNetwork, IRepo, GetBlockResult, PendSuccess, StaleFailure, TrxBlocks, CommitSuccess, MessageOptions, CommitResult, PendRequest, CommitRequest, BlockGets } from '../../db-core/src/index.js';
+import { IKeyNetwork, IRepo, GetBlockResults, PendSuccess, StaleFailure, TrxBlocks, CommitSuccess, MessageOptions, CommitResult, PendRequest, CommitRequest, BlockGets } from '../../db-core/src/index.js';
 import { RepoMessage } from '../../db-core/src/network/repo-protocol.js';
 import { PeerId } from '@libp2p/interface';
 import { ProtocolClient } from './protocol-client.js';
@@ -13,8 +13,8 @@ export class RepoClient extends ProtocolClient implements IRepo {
 		return new RepoClient(peerId, keyNetwork);
 	}
 
-	async get(blockGets: BlockGets, options: MessageOptions): Promise<GetBlockResult[]> {
-		return this.processRepoMessage<GetBlockResult[]>(
+	async get(blockGets: BlockGets, options: MessageOptions): Promise<GetBlockResults> {
+		return this.processRepoMessage<GetBlockResults>(
 			[{ get: blockGets }],
 			options
 		);

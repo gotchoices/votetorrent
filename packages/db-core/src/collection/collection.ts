@@ -1,4 +1,4 @@
-import { Log, CacheStore, IBlock, Action, ActionType, ActionHandler, Atomic, BlockId, Tracker, IBlockNetwork, ActionEntry, copyTransform, CacheSource, BlockStore } from "../index.js";
+import { Log, CacheStore, IBlock, Action, ActionType, ActionHandler, Atomic, BlockId, Tracker, IBlockNetwork, ActionEntry, copyTransforms, CacheSource, BlockStore } from "../index.js";
 import { NetworkSource } from "../network/network-source.js";
 import { CollectionHeaderBlock, CollectionId, ICollection } from "./index.js";
 
@@ -98,7 +98,7 @@ export class Collection<TAction> implements ICollection<TAction> {
 
 		while (true) {
 			// Create a snapshot tracker for the transaction, so that we can ditch the log changes if we have to retry the transaction
-			const snapshot = copyTransform(this.tracker.transform);
+			const snapshot = copyTransforms(this.tracker.transform);
 			const tracker = new Tracker(this.sourceCache, snapshot);
 			const cache = new CacheStore(tracker);
 
@@ -110,11 +110,11 @@ export class Collection<TAction> implements ICollection<TAction> {
 			addResult.entry.action!.blockIds = tracker.transformedBlockIds();
 
 			// Commit the transaction to the network
-			const staleFailure = await this.source.transact(tracker.transform, trxId, addResult.tailPath.block.header.id);
+			const staleFailure = await this.source.transact(tracker.transform, trxId, newRev, addResult.tailPath.block.header.id);
 			if (staleFailure) {
 				// Apply the block changes to the source cache
 				for (const trx of staleFailure.missing) {
-					this.sourceCache.transformCache(trx.transform);
+					this.sourceCache.transformCache(trx.transforms);
 				}
 				await this.replayActions();
 				this.source.trxContext = await log.getTrxContext();

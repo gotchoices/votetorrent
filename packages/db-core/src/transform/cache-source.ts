@@ -1,4 +1,4 @@
-import { IBlock, BlockHeader, BlockId, BlockSource, BlockType, Transform, applyOperation } from "../index.js";
+import { IBlock, BlockHeader, BlockId, BlockSource, BlockType, Transforms, applyOperation } from "../index.js";
 
 export class CacheSource<T extends IBlock> implements BlockSource<T> {
 	protected cache = new Map<BlockId, T>();
@@ -34,7 +34,7 @@ export class CacheSource<T extends IBlock> implements BlockSource<T> {
 	}
 
 	/** Mutates the cache without affecting the source */
-	transformCache(transform: Transform) {
+	transformCache(transform: Transforms) {
 		for (const blockId of transform.deletes) {
 			this.cache.delete(blockId);
 		}

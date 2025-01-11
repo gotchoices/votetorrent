@@ -1,6 +1,6 @@
 import { PeerId } from "@libp2p/interface";
-import { BlockGet, TrxTransform, TrxBlocks, BlockTrxStatus, IBlockNetwork, PendSuccess, StaleFailure, IKeyNetwork, BlockId, GetBlockResult, blockIdsForTransform, Transform, transformForBlockId, mergeTransforms, IRepo, TrxId, PendResult, CommitResult, PendRequest, concatTransforms } from "../../db-core/src/index.js";
-import { RepoClient, Pending, blockIdToBytes } from "./index.js";
+import { TrxTransforms, TrxBlocks, BlockTrxStatus, IBlockNetwork, PendSuccess, StaleFailure, IKeyNetwork, BlockId, GetBlockResults, blockIdsForTransform, Transforms, transformForBlockId, mergeTransforms, IRepo, TrxId, PendResult, CommitResult, PendRequest, concatTransforms, groupBy, BlockGets, concatTransform, transformsFromTransform, TrxPending } from "../../db-core/src/index.js";
+import { RepoClient, Pending, blockIdToBytes, recordEmpty } from "./index.js";
 import map from "it-map";
 
 type CoordinatorBatch<TPayload, TResponse> = {
@@ -34,14 +34,14 @@ export class BlockNetwork implements IBlockNetwork {
 		this.abortOrCancelTimeoutMs = init.abortOrCancelTimeoutMs;
 	}
 
-	async get(blockGets: BlockGet[]): Promise<GetBlockResult[]> {
+	async get(blockGets: BlockGets): Promise<GetBlockResults> {
 		// Group by block id
-		const distinctBlockIds = new Map(blockGets.map(bg => [bg.blockId, bg] as const));
+		const distinctBlockIds = Array.from(new Set(blockGets.blockIds));
 
-		const batches = await this.batchesForPayload<BlockGet[], GetBlockResult[]>(
-			Array.from(map(distinctBlockIds.values(), bg => bg.blockId)),
-			blockGets,
-			(gets, blockId, mergeWithGets) => [...(mergeWithGets ?? []), ...gets.filter(g => g.blockId === blockId)],
+		const batches = await this.batchesForPayload<BlockId[], GetBlockResults>(
+			distinctBlockIds,
+			distinctBlockIds,
+			(gets, blockId, mergeWithGets) => [...(mergeWithGets ?? []), ...gets.filter(bid => bid === blockId)],
 			[]
 		);
 
@@ -51,9 +51,9 @@ export class BlockNetwork implements IBlockNetwork {
 		try {
 			await this.processBatches(
 				batches,
-				(repo, batch) => repo.get(batch.payload, { expiration }),
-				batch => batch.payload.map(bg => bg.blockId),
-				(gets, blockId, mergeWithGets) => [...(mergeWithGets ?? []), ...gets.filter(g => g.blockId === blockId)],
+				(repo, batch) => repo.get({ blockIds: batch.payload, context: blockGets.context }, { expiration }),
+				batch => batch.payload,
+				(gets, blockId, mergeWithGets) => [...(mergeWithGets ?? []), ...gets.filter(bid => bid === blockId)],
 				expiration
 			);
 		} catch (e) {
@@ -70,21 +70,18 @@ export class BlockNetwork implements IBlockNetwork {
 		}
 
 		// Cache the completed batches that had actual responses (not just coordinator not found)
-		const completedBatches = Array.from(allBatches(batches, b => b.request?.isResponse as boolean && b.request!.response!.length > 0));
+		const completedBatches = Array.from(allBatches(batches, b => b.request?.isResponse as boolean && !recordEmpty(b.request!.response!)));
 
 		// Create a lookup map from successful responses only
-		const blockResultMap = new Map(
+		return Object.fromEntries(
 			completedBatches
-				.flatMap(batch =>
-					batch.request!.response!.map((result, index) => [
-						batch.payload[index].blockId,
+				.flatMap((batch) =>
+					Object.entries(batch.request!.response!).map(([blockId, result]) => [
+						blockId,
 						result
 					])
 				)
-		);
-
-		// Use the map for faster lookups
-		return blockGets.map(bg => blockResultMap.get(bg.blockId)!);
+		) as GetBlockResults;
 	}
 
 	async getStatus(blockTrxes: TrxBlocks[]): Promise<BlockTrxStatus[]> {
@@ -92,20 +89,22 @@ export class BlockNetwork implements IBlockNetwork {
 	}
 
 	async pend(blockTrx: PendRequest): Promise<PendResult> {
-		const transformForBlock = (payload: Transform, blockId: BlockId, mergeWithPayload: Transform | undefined): Transform => {
+		const transformForBlock = (payload: Transforms, blockId: BlockId, mergeWithPayload: Transforms | undefined): Transforms => {
 			const filteredTransform = transformForBlockId(payload, blockId);
-			return mergeWithPayload ? mergeTransforms(mergeWithPayload, filteredTransform) : filteredTransform;
+			return mergeWithPayload
+				? concatTransform(mergeWithPayload, blockId, filteredTransform)
+				: transformsFromTransform(filteredTransform, blockId);
 		};
-		const blockIds = blockIdsForTransform(blockTrx.transform);
-		const batches = await this.batchesForPayload<Transform, PendResult>(blockIds, blockTrx.transform, transformForBlock, []);
+		const blockIds = blockIdsForTransform(blockTrx.transforms);
+		const batches = await this.batchesForPayload<Transforms, PendResult>(blockIds, blockTrx.transforms, transformForBlock, []);
 		const expiration = Date.now() + this.timeoutMs;
 
 		let error: Error | undefined;
 		try {
 			// Process all batches, noting all outstanding peers
-			await this.processBatches<Transform, PendResult>(
+			await this.processBatches<Transforms, PendResult>(
 				batches,
-				(repo, batch) => repo.pend({ ...blockTrx, transform: batch.payload }, { expiration }),
+				(repo, batch) => repo.pend({ ...blockTrx, transforms: batch.payload }, { expiration }),
 				batch => blockIdsForTransform(batch.payload),
 				transformForBlock,
 				expiration
@@ -124,7 +123,7 @@ export class BlockNetwork implements IBlockNetwork {
 			if (stale.length > 0) {	// Any active stale failures should preempt reporting connection or other potential transient errors (we have information)
 				return {
 					success: false,
-					missing: distinctBlockTrx(stale.flatMap(b => (b.request!.response! as StaleFailure).missing)),
+					missing: distinctBlockTrxTransforms(stale.flatMap(b => (b.request!.response! as StaleFailure).missing).filter((x): x is TrxTransforms => x !== undefined)),
 				};
 			}
 			throw error;	// No stale failures, report the original error
@@ -134,11 +133,8 @@ export class BlockNetwork implements IBlockNetwork {
 		const completed = Array.from(allBatches(batches, b => b.request?.isResponse as boolean && b.request!.response!.success));
 		return {
 			success: true,
-			pending: distinctBlockTrx(completed.flatMap(b => (b.request!.response! as PendSuccess).pending)),
-			trxRef: {
-				trxId: blockTrx.trxId,
-				blockIds: blockIdsForTransform(blockTrx.transform)
-			}
+			pending: completed.flatMap(b => (b.request!.response! as PendSuccess).pending),
+			blockIds: blockIdsForTransform(blockTrx.transforms)
 		};
 	}
 
@@ -168,7 +164,7 @@ export class BlockNetwork implements IBlockNetwork {
 			// Collect and return any active stale failures
 			const stale = Array.from(allBatches(tailBatches, b => b.request?.isResponse as boolean && !b.request!.response!.success));
 			if (stale.length > 0) {
-				return { missing: distinctBlockTrx(stale.flatMap(b => (b.request!.response! as StaleFailure).missing)), success: false as const };
+				return { missing: distinctBlockTrxTransforms(stale.flatMap(b => (b.request!.response! as StaleFailure).missing!)), success: false as const };
 			}
 			throw tailError;
 		}
@@ -194,7 +190,7 @@ export class BlockNetwork implements IBlockNetwork {
 		try {
 			await this.processBatches(
 				batches,
-				(repo, batch) => repo.commit({ trxId: transactionId, blockIds: batch.payload }, rev, { expiration }),
+				(repo, batch) => repo.commit({ trxId: transactionId, blockIds: batch.payload, rev }, { expiration }),
 				batch => batch.payload,
 				mergeBlocks,
 				expiration
@@ -330,15 +326,10 @@ function mergeBlocks(payload: BlockId[], blockId: BlockId, mergeWithPayload: Blo
 	return [...(mergeWithPayload ?? []), blockId];
 }
 
-/** Returns a new set of block trxes grouped by transaction id and concatenated transforms */
-function distinctBlockTrx(blockTrxes: TrxTransform[]): TrxTransform[] {
-	// TODO: use Object.groupBy when more widely supported
-	// const grouped = Object.groupBy(blockTrxes, ({ trxId: transactionId }) => transactionId);
-	const grouped = blockTrxes.reduce((acc, trx) => {
-		(acc[trx.trxId] = acc[trx.trxId] || []).push(trx);
-		return acc;
-	}, {} as Record<string, TrxTransform[]>);
-
+/** Returns the block trxes grouped by transaction id and concatenated transforms */
+function distinctBlockTrxTransforms(blockTrxes: TrxTransforms[]): TrxTransforms[] {
+	const grouped = groupBy(blockTrxes, ({ trxId }) => trxId);
 	return Object.entries(grouped).map(([trxId, trxes]) =>
-		({ trxId, transform: concatTransforms(trxes.map(t => t.transform)) } as TrxTransform));
+		({ trxId, transforms: concatTransforms(...trxes.map(t => t.transforms)) } as TrxTransforms));
 }
+

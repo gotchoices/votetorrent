@@ -1,4 +1,4 @@
-import { BlockGet, GetBlockResult, TrxBlocks, BlockTrxStatus, PendResult, CommitResult, PendRequest, BlockId, CommitRequest } from "../index.js";
+import { GetBlockResults, TrxBlocks, BlockTrxStatus, PendResult, CommitResult, PendRequest, BlockId, CommitRequest, BlockGets } from "../index.js";
 
 export type IBlockNetwork = {
 	/** Get blocks by their IDs and versions or a specific transaction
@@ -6,7 +6,7 @@ export type IBlockNetwork = {
 		- If the transaction targets the correct version, the call succeeds, unless failIfPending and there are any pending transactions - the caller may choose to wait for pending transactions to clear rather than risk racing with them
 		- If the transaction targets an older version, the call fails, and the caller must resync using the missing transactions
 	 */
-	get(blockGets: BlockGet[]): Promise<GetBlockResult[]>;
+	get(blockGets: BlockGets): Promise<GetBlockResults>;
 
 	/** Get statuses of block transactions */
 	getStatus(trxRefs: TrxBlocks[]): Promise<BlockTrxStatus[]>;
@@ -28,5 +28,5 @@ export type IBlockNetwork = {
 		- If the returned fails, the transforms necessary to update all overlapping blocks are returned
 		- If the transaction mentions other collections, those are assumed conditions - returned conditions only list inherited conditions
 	 */
-	commit(tailId: BlockId, request: CommitRequest): Promise<CommitResult>;
+	commit(tailId: BlockId, request: CommitRequest, rev: number): Promise<CommitResult>;
 }

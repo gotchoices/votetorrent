@@ -1,9 +1,15 @@
-import { CollectionId, BlockId, IBlock, TrxId, Transform } from "../index.js";
+import { CollectionId, BlockId, IBlock, TrxId, Transforms, Transform } from "../index.js";
 import { TrxContext, TrxRev } from "../transaction/struct.js";
 
 export type TrxBlocks = {
 	blockIds: BlockId[];
 	trxId: TrxId;
+};
+
+export type TrxTransforms = {
+	trxId: TrxId;
+	rev?: number;
+	transforms: Transforms;
 };
 
 export type TrxTransform = {
@@ -18,7 +24,7 @@ export type TrxPending = {
 	transform?: Transform;
 };
 
-export type PendRequest = TrxTransform & {
+export type PendRequest = TrxTransforms & {
 	/** What to do if there are any pending transactions.
 	 * 'c' is continue normally,
 	 * 'f' is fail, returning the pending TrxIds,
@@ -34,14 +40,16 @@ export type PendSuccess = {
 	success: true;
 	/** List of already pending transactions that were found on blocks touched by this pend */
 	pending: TrxPending[];
-	/** The transactionId and affected blocks */
-	trxRef: TrxBlocks;
+	/** The affected blocks */
+	blockIds: BlockId[];
 };
 
 export type StaleFailure = {
 	success: false;
+	/** The reason for the failure */
+	reason?: string;
 	/** List of transactions that have already been committed and are newer than our known revision */
-	missing?: TrxTransform[];
+	missing?: TrxTransforms[];
 	/** List of transactions that are pending on the blocks touched by this pend */
 	pending?: TrxPending[];
 };
@@ -49,6 +57,7 @@ export type StaleFailure = {
 export type PendResult = PendSuccess | StaleFailure;
 
 export type CommitRequest = TrxBlocks & {
+	/** The new revision for the committed transaction */
 	rev: number;
 };
 
@@ -78,3 +87,5 @@ export type GetBlockResult = {
 	/** The latest and pending states of the repo that retrieved the block */
 	state: BlockTrxState;
 };
+
+export type GetBlockResults = Record<BlockId, GetBlockResult>;

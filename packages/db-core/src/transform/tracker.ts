@@ -1,11 +1,11 @@
-import { IBlock, BlockId, BlockStore as IBlockStore, BlockHeader, BlockOperation, BlockType, applyOperation, emptyTransform, BlockSource as IBlockSource, blockIdsForTransform, copyTransform, TrxTransform } from "../index.js";
+import { IBlock, BlockId, BlockStore as IBlockStore, BlockHeader, BlockOperation, BlockType, applyOperation, emptyTransforms, BlockSource as IBlockSource, blockIdsForTransform, copyTransforms, TrxTransforms } from "../index.js";
 import { ensured } from "../../db-p2p/src/helpers.js";
 
 export class Tracker<T extends IBlock> implements IBlockStore<T> {
 	constructor(
 		private readonly source: IBlockSource<T>,
 		/** The collected set of transformations to be applied. Treat as immutable */
-		public transform = emptyTransform(),
+		public transform = emptyTransforms(),
 	) { }
 
 	async tryGet(id: BlockId): Promise<T | undefined> {
@@ -45,7 +45,7 @@ export class Tracker<T extends IBlock> implements IBlockStore<T> {
 		this.transform.deletes.add(blockId);
 	}
 
-	reset(newTransform = emptyTransform()) {
+	reset(newTransform = emptyTransforms()) {
 		const oldTransform = this.transform;
 		this.transform = newTransform;
 		return oldTransform;
