@@ -1,9 +1,10 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { BlockId, IBlock, Transform, Transforms, TrxId, TrxRev, TrxTransforms } from "../../../db-core/src/index.js";
-import { BlockMetadata, IBlockStorage } from "./struct.js";
+import { BlockMetadata } from "./struct.js";
+import { IRawStorage } from "./i-raw-storage.js";
 
-export class FileBlockStorage implements IBlockStorage {
+export class FileRawStorage implements IRawStorage {
 	constructor(private readonly basePath: string) {
 		// TODO: use https://www.npmjs.com/package/proper-lockfile to take a lock on the basePath, also introduce explicit dispose pattern
 	 }
