@@ -4,7 +4,8 @@ import { type Startable, type Logger } from '@libp2p/interface'
 import type { IncomingStreamData } from '@libp2p/interface-internal'
 import { RepoMessage } from '../../db-core/src/network/repo-protocol.js'
 import { Repo } from './index.js'
-import { ICluster } from '../../db-core/cluster/i-cluster.js'
+import type { Uint8ArrayList } from 'uint8arraylist'
+import { ICluster } from '../../db-core/src/cluster/i-cluster.js'
 
 // Define Components interface
 interface BaseComponents {
@@ -86,42 +87,44 @@ export class RepoService implements Startable {
     const { stream, connection } = data
     const peerId = connection.remotePeer
 
+		const processStream = async function* (this: RepoService, source: AsyncIterable<Uint8ArrayList>) {
+			for await (const msg of source) {
+				// Decode the message
+				const decoded = new TextDecoder().decode(msg.subarray())
+				const message = JSON.parse(decoded) as RepoMessage
+
+				// Process each operation
+				const operation = message.operations[0]
+				let response: any
+
+				if ('get' in operation) {
+					response = await this.repo.get(operation.get, {
+						expiration: message.expiration
+					})
+				} else if ('pend' in operation) {
+					response = await this.repo.pend(operation.pend, {
+						expiration: message.expiration
+					})
+				} else if ('cancel' in operation) {
+					response = await this.repo.cancel(operation.cancel.trxRef, {
+						expiration: message.expiration
+					})
+				} else if ('commit' in operation) {
+					response = await this.repo.commit(operation.commit, {
+						expiration: message.expiration
+					})
+				}
+
+				// Encode and yield the response
+				yield new TextEncoder().encode(JSON.stringify(response))
+			}
+		}
+
     Promise.resolve().then(async () => {
       await pipe(
         stream,
         (source) => lpDecode(source),
-        async function* (source) {
-          for await (const msg of source) {
-            // Decode the message
-            const decoded = new TextDecoder().decode(msg.subarray())
-            const message = JSON.parse(decoded) as RepoMessage
-
-            // Process each operation
-            const operation = message.operations[0]
-            let response: any
-
-            if ('get' in operation) {
-              response = await this.repo.get(operation.get, {
-                expiration: message.expiration
-              })
-            } else if ('pend' in operation) {
-              response = await this.repo.pend(operation.pend, {
-                expiration: message.expiration
-              })
-            } else if ('cancel' in operation) {
-              response = await this.repo.cancel(operation.cancel.trxRef, {
-                expiration: message.expiration
-              })
-            } else if ('commit' in operation) {
-              response = await this.repo.commit(operation.commit, {
-                expiration: message.expiration
-              })
-            }
-
-            // Encode and yield the response
-            yield new TextEncoder().encode(JSON.stringify(response))
-          }
-        }.bind(this),
+        processStream.bind(this),
         (source) => lpEncode(source),
         stream
       )

@@ -1,2 +1,3 @@
+export * from "./chain-blocks.js";
 export * from "./chain.js";
-export * from "./struct.js";
+

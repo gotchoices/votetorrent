@@ -1,7 +1,7 @@
 import { TrxBlocks, CommitResult, GetBlockResults, PendResult, PendRequest, CommitRequest, BlockGets } from "../index.js";
 
 export type MessageOptions = {
-	expiration: number;
+	expiration?: number;
 	signal?: AbortSignal;
 }
 

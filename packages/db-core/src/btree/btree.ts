@@ -40,7 +40,7 @@ export class BTree<TKey, TEntry> {
 		return newLeafNode(store, []);
 	}
 
-	static createBTree<TKey, TEntry>(
+	static create<TKey, TEntry>(
 		store: BlockStore<ITreeNode | TreeBlock>,
 		createTrunk: getTrunkFunc,
 		keyFromEntry = (entry: TEntry) => entry as unknown as TKey,

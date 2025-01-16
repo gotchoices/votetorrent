@@ -1,5 +1,4 @@
-import { IBlock, BlockId, BlockStore as IBlockStore, BlockHeader, BlockOperation, BlockType, applyOperation, emptyTransforms, BlockSource as IBlockSource, blockIdsForTransform, copyTransforms, TrxTransforms } from "../index.js";
-import { ensured } from "../../db-p2p/src/helpers.js";
+import { IBlock, BlockId, BlockStore as IBlockStore, BlockHeader, BlockOperation, BlockType, applyOperation, emptyTransforms, BlockSource as IBlockSource, blockIdsForTransform, copyTransforms, TrxTransforms, ensured } from "../index.js";
 
 export class Tracker<T extends IBlock> implements IBlockStore<T> {
 	constructor(

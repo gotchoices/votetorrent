@@ -22,12 +22,11 @@ export class NetworkSource<TBlock extends IBlock> implements BlockSource<TBlock>
 	}
 
 	async tryGet(id: BlockId): Promise<TBlock | undefined> {
-		const result = await this.network.get([{ blockId: id, context: this.trxContext }]);
+		const result = await this.network.get({ blockIds: [id], context: this.trxContext });
 		if (result) {
-			const { block, state } = result[0]!;
-			// TODO: do something if the state reports the block was deleted
+			const { block, state } = result[id]!;
 			// TODO: if the state reports that there is a pending transaction, record this so that we are sure to update before syncing
-			this.trxContext = state..latest;
+			//state.pendings
 			return block as TBlock;
 		}
 	}
@@ -37,7 +36,7 @@ export class NetworkSource<TBlock extends IBlock> implements BlockSource<TBlock>
 		if (!pendResult.success) {
 			return pendResult;
 		}
-		const commitResult = await this.network.commit(tailId, { blockIds: pendResult.trxRef.blockIds, trxId, rev });
+		const commitResult = await this.network.commit(tailId, { blockIds: pendResult.blockIds, trxId, rev });
 		if (!commitResult.success) {
 			return commitResult;
 		}

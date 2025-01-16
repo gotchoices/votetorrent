@@ -9,7 +9,7 @@ export type CollectionInitOptions<TAction> = {
 
 export class Collection<TAction> implements ICollection<TAction> {
 	private readonly pending: Action<TAction>[] = [];
-	private cache: CacheStore<IBlock>;
+	public readonly cache: CacheStore<IBlock>;
 
 	protected constructor(
 		public readonly id: CollectionId,
@@ -19,6 +19,7 @@ export class Collection<TAction> implements ICollection<TAction> {
 		private readonly source: NetworkSource<IBlock>,
 		private readonly sourceCache: CacheSource<IBlock>,
 		private readonly tracker: Tracker<IBlock>,
+		public readonly isNew: boolean,
 	) {
 		this.cache = new CacheStore(tracker);
 	}
@@ -30,11 +31,12 @@ export class Collection<TAction> implements ICollection<TAction> {
 		const tracker = new Tracker(sourceCache);
 		const header = await source.tryGet(id) as CollectionHeaderBlock | undefined;
 		let logId: BlockId;
-		if (header) {
+		let isNew = false;
+		if (header) {	// Collection already exists
 			logId = header.logId;
 			const log = Log.open<Action<TAction>>(tracker, logId);
 			source.trxContext = await log.getTrxContext();
-		} else {
+		} else {	// Collection does not exist
 			source.trxContext = undefined;
 			logId = source.generateId();
 			const newHeader = {
@@ -43,9 +45,10 @@ export class Collection<TAction> implements ICollection<TAction> {
 			};
 			await Log.create<Action<TAction>>(tracker, logId);
 			tracker.insert(newHeader);
+			isNew = true;
 		}
 
-		return new Collection(id, network, logId, init.modules, source, sourceCache, tracker);
+		return new Collection(id, network, logId, init.modules, source, sourceCache, tracker, isNew);
 	}
 
 	async transact(...actions: Action<TAction>[]) {
@@ -107,13 +110,13 @@ export class Collection<TAction> implements ICollection<TAction> {
 			const newRev = (this.source.trxContext?.rev ?? 0) + 1;
 			const addResult = await log.addActions(this.pending, trxId, newRev);
 			// HACK: Adding to the log affects the transaction's blocks - patch the final set of blocks affected by the transaction
-			addResult.entry.action!.blockIds = tracker.transformedBlockIds();
+			addResult.entry.action!.blockIds = [...tracker.transformedBlockIds(), ...this.tracker.transformedBlockIds()];
 
 			// Commit the transaction to the network
 			const staleFailure = await this.source.transact(tracker.transform, trxId, newRev, addResult.tailPath.block.header.id);
 			if (staleFailure) {
 				// Apply the block changes to the source cache
-				for (const trx of staleFailure.missing) {
+				for (const trx of staleFailure.missing ?? []) {
 					this.sourceCache.transformCache(trx.transforms);
 				}
 				await this.replayActions();
@@ -122,7 +125,9 @@ export class Collection<TAction> implements ICollection<TAction> {
 				this.cache.clear();
 				this.pending.length = 0;
 				this.sourceCache.transformCache(this.tracker.reset());
-				this.source.trxContext = { rev: newRev, trxId };
+				this.source.trxContext = this.source.trxContext
+					? { committed: [...this.source.trxContext.committed, { trxId, rev: newRev }], rev: newRev }
+					: { committed: [{ trxId, rev: newRev }], rev: newRev };
 				break;
 			}
 		}

@@ -172,9 +172,9 @@ export class BlockNetwork implements IBlockNetwork {
 		// Commit all remaining block ids
 		const { batches, error } = await this.commitBlocks(trxRef.blockIds.filter(bid => bid !== tailId), trxRef.trxId, rev);
 		if (error) {
-			// Errors should not happen once the tail is committed
+			// Errors must recover once the tail is committed
 			// TODO: log failure
-			// TODO: reproduce the original transaction for tell the failed blocks to force commit
+			// TODO: reproduce the original transaction and tell the failed blocks to force commit
 			// TODO: remove this throw
 			throw error;
 		}

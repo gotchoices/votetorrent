@@ -11,6 +11,6 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["src/**/*"],
+  "include": ["src/**/*", "../db-core/src/utility/ensured.ts"],
   "exclude": ["node_modules", "dist", "**/*.test.ts", "**/tests/**"]
 }

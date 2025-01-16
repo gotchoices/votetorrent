@@ -1,4 +1,4 @@
-import { BlockGet, PendRequest, TrxBlocks, IRepo, MessageOptions, CommitResult, GetBlockResults, PendResult } from "../../db-core/src/index.js";
+import { PendRequest, TrxBlocks, IRepo, MessageOptions, CommitResult, GetBlockResults, PendResult, BlockGets, CommitRequest } from "../../db-core/src/index.js";
 import { KeyNetwork } from "./key-network.js";
 
 /** Cluster coordination repo - uses local store, as well as distributes changes to other nodes using cluster consensus. */
@@ -9,7 +9,7 @@ export class Repo implements IRepo {
 	) {
 	}
 
-	async get(blockGets: BlockGet[], options?: MessageOptions): Promise<GetBlockResults[]> {
+	async get(blockGets: BlockGets, options?: MessageOptions): Promise<GetBlockResults> {
 		throw new Error("Not implemented");
 	}
 
@@ -21,7 +21,7 @@ export class Repo implements IRepo {
 		throw new Error("Not implemented");
 	}
 
-	async commit(trxRef: TrxBlocks, rev: number, options?: MessageOptions): Promise<CommitResult> {
+	async commit(request: CommitRequest, options?: MessageOptions): Promise<CommitResult> {
 		throw new Error("Not implemented");
 	}
 }

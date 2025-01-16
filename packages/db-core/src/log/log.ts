@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { Chain, BlockStore, IBlock, BlockId, TrxId, ChainDataBlock, CollectionId, ChainPath, entryAt, TrxRev, TrxContext, ChainInitOptions } from "../index.js";
+import { Chain, BlockStore, IBlock, BlockId, TrxId, CollectionId, ChainPath, entryAt, TrxRev, TrxContext, ChainInitOptions, ChainDataBlock } from "../index.js";
 import { LogEntry, ActionEntry, LogDataBlockType, LogHeaderBlockType } from "./index.js";
 
 export type LogBlock<TAction> = ChainDataBlock<LogEntry<TAction>>

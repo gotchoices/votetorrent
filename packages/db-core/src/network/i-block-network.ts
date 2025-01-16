@@ -28,5 +28,5 @@ export type IBlockNetwork = {
 		- If the returned fails, the transforms necessary to update all overlapping blocks are returned
 		- If the transaction mentions other collections, those are assumed conditions - returned conditions only list inherited conditions
 	 */
-	commit(tailId: BlockId, request: CommitRequest, rev: number): Promise<CommitResult>;
+	commit(tailId: BlockId, request: CommitRequest): Promise<CommitResult>;
 }

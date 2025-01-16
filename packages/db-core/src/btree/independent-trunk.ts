@@ -32,8 +32,7 @@ export class IndependentTrunk implements ITreeTrunk {
 	}
 
 	async get(): Promise<ITreeNode> {
-		const block = await get(this.store, this.treeId);
-		return await get(this.store, block.rootId);
+		return await get(this.store, await this.getId());
 	}
 
 	async set(node: ITreeNode): Promise<void> {
