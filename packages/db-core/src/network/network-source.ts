@@ -1,5 +1,6 @@
-import crypto from 'crypto';
-import { IBlock, BlockType, BlockId, BlockHeader, BlockSource, IBlockNetwork, Transforms, TrxId, StaleFailure, TrxContext } from "../index.js";
+import { randomBytes } from '@libp2p/crypto'
+import { toString as uint8ArrayToString } from 'uint8arrays/to-string'
+import type { IBlock, BlockId, BlockHeader, IBlockNetwork, TrxId, StaleFailure, TrxContext, BlockType, BlockSource, Transforms } from "../index.js";
 
 export class NetworkSource<TBlock extends IBlock> implements BlockSource<TBlock> {
 	constructor(
@@ -18,7 +19,7 @@ export class NetworkSource<TBlock extends IBlock> implements BlockSource<TBlock>
 
 	generateId(): BlockId {
 		// 256-bits to fully utilize DHT address space
-		return crypto.randomBytes(32).toString('base64url');
+		return uint8ArrayToString(randomBytes(32), 'base64url')
 	}
 
 	async tryGet(id: BlockId): Promise<TBlock | undefined> {

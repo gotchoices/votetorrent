@@ -1,4 +1,5 @@
-import { IBlock, BlockId, BlockStore as IBlockStore, BlockHeader, BlockOperation, BlockType, applyOperation, emptyTransforms, BlockSource as IBlockSource, blockIdsForTransform, copyTransforms, TrxTransforms, ensured } from "../index.js";
+import type { IBlock, BlockId, BlockStore as IBlockStore, BlockHeader, BlockOperation, BlockType, BlockSource as IBlockSource } from "../index.js";
+import { applyOperation, emptyTransforms, blockIdsForTransform, copyTransforms, ensured } from "../index.js";
 
 export class Tracker<T extends IBlock> implements IBlockStore<T> {
 	constructor(

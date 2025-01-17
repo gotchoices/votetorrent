@@ -1,4 +1,4 @@
-import { RepoMessage } from "../network/repo-protocol.js";
+import type { RepoMessage } from "../network/repo-protocol.js";
 
 export type Signature = {
 	type: 'approve' | 'reject';

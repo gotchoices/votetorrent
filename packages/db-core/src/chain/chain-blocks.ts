@@ -1,5 +1,5 @@
-import { IBlock, BlockId, registerBlockType } from "../blocks";
-import { nameof } from "../utility/nameof";
+import { type IBlock, type BlockId, registerBlockType } from "../blocks/index.js";
+import { nameof } from "../utility/nameof.js";
 
 export type ChainDataBlock<TEntry> = IBlock & {
 	entries: TEntry[];

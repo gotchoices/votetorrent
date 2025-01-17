@@ -1,4 +1,4 @@
-import { BlockType } from ".";
+import type { BlockType } from ".";
 
 const blockTypes = new Map<BlockType, string>();
 

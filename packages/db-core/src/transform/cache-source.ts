@@ -1,4 +1,5 @@
-import { IBlock, BlockHeader, BlockId, BlockSource, BlockType, Transforms, applyOperation } from "../index.js";
+import type { IBlock, BlockHeader, BlockId, BlockSource, BlockType, Transforms } from "../index.js";
+import { applyOperation } from "../index.js";
 
 export class CacheSource<T extends IBlock> implements BlockSource<T> {
 	protected cache = new Map<BlockId, T>();

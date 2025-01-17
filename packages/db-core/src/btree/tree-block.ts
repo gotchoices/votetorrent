@@ -1,4 +1,5 @@
-import { BlockHeader, BlockId, IBlock, registerBlockType } from "../blocks";
+import type { BlockId, IBlock } from "../blocks";
+import { registerBlockType } from "../blocks";
 import { nameof } from "../utility/nameof";
 
 export const TreeRootBlockType = registerBlockType("TR", "TreeRoot");

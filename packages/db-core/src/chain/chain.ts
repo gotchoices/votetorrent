@@ -1,5 +1,7 @@
-import { Atomic, BlockStore, apply, BlockId, IBlock, BlockType } from "../index.js";
-import { ChainDataBlockType, ChainHeaderBlockType, ChainDataBlock, ChainHeaderBlock } from "./chain-blocks.js";
+import { Atomic, type BlockStore, type BlockId, type IBlock } from "../index.js";
+import { ChainDataBlockType, ChainHeaderBlockType } from "./chain-blocks.js";
+import type { ChainDataBlock, ChainHeaderBlock } from "./chain-blocks.js";
+import { apply } from "../blocks/index.js";
 
 export const EntriesPerBlock = 32;
 
@@ -12,7 +14,7 @@ export type ChainPath<TEntry> = {
 export type ChainInitOptions<TEntry> = {
 	createDataBlock?: () => Partial<ChainDataBlock<TEntry>>;
 	createHeaderBlock?: (id?: BlockId) => Partial<ChainHeaderBlock>;
-	blockAdded?: (newTail: ChainDataBlock<TEntry>, oldTail: ChainDataBlock<TEntry> | undefined) => void;
+	blockAdded?: (newTail: ChainDataBlock<TEntry>, oldTail: ChainDataBlock<TEntry> | undefined) => Promise<void>;
 }
 
 export type ChainCreateOptions<TEntry> = ChainInitOptions<TEntry> & {
@@ -72,7 +74,7 @@ export class Chain<TEntry> {
 			} as ChainDataBlock<TEntry>;
 			trx.insert(newTail);
 			apply(trx, tail, ['priorId', 0, 0, newTail.header.id]);
-			this.options?.blockAdded?.(newTail, oldTail);
+			await this.options?.blockAdded?.(newTail, oldTail);
 			tail = newTail;
 			entries = entries.slice(newTail.entries.length);
 		}

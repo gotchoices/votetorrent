@@ -1,4 +1,4 @@
-import { TrxBlocks, PendRequest, CommitRequest, BlockGets } from "../index.js";
+import type { TrxBlocks, PendRequest, CommitRequest, BlockGets } from "../index.js";
 
 export type RepoMessage = {
 	operations: [

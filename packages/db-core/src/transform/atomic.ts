@@ -1,5 +1,5 @@
 import { Tracker } from "./tracker.js";
-import { BlockStore, IBlock } from "../index.js";
+import type { IBlock, BlockStore } from "../index.js";
 import { applyTransformToStore } from "./helpers.js";
 
 export class Atomic<TBlock extends IBlock> extends Tracker<TBlock> {

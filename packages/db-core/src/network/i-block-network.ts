@@ -1,4 +1,4 @@
-import { GetBlockResults, TrxBlocks, BlockTrxStatus, PendResult, CommitResult, PendRequest, BlockId, CommitRequest, BlockGets } from "../index.js";
+import type { GetBlockResults, TrxBlocks, BlockTrxStatus, PendResult, CommitResult, PendRequest, BlockId, CommitRequest, BlockGets } from "../index.js";
 
 export type IBlockNetwork = {
 	/** Get blocks by their IDs and versions or a specific transaction

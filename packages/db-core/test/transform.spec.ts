@@ -1,17 +1,7 @@
 import { expect } from 'aegir/chai'
-import { BlockId, BlockOperation, IBlock, BlockType, Transform } from '../index.js'
-import { Tracker } from '../transform/tracker.js'
-import {
-  applyOperation,
-  withOperation,
-  blockIdsForTransform,
-  emptyTransform,
-  copyTransform,
-  mergeTransforms,
-  concatTransforms,
-  transformForBlockId,
-  applyTransformToStore
-} from '../transform/helpers.js'
+import type { BlockId, BlockOperation, IBlock, BlockType, Transforms } from '../src/index.js'
+import { Tracker } from '../src/transform/tracker.js'
+import { applyOperation, withOperation, blockIdsForTransform, emptyTransforms, mergeTransforms, concatTransforms, transformForBlockId } from '../src/index.js'
 
 interface TestBlock extends IBlock {
   data: string
@@ -30,7 +20,7 @@ describe('Transform functionality', () => {
     }
 
     testBlock = {
-      block: {
+      header: {
         id: 'test-id' as BlockId,
         type: 'test' as BlockType
       },
@@ -42,7 +32,7 @@ describe('Transform functionality', () => {
   describe('Tracker', () => {
     it('should track inserts correctly', async () => {
       const tracker = new Tracker(mockSource)
-      const newBlock = { ...testBlock, block: { ...testBlock.block, id: 'new-id' as BlockId } }
+      const newBlock = { ...testBlock, header: { ...testBlock.header, id: 'new-id' as BlockId } }
 
       tracker.insert(newBlock)
       expect(tracker.transform.inserts['new-id']).to.deep.equal(newBlock)
@@ -70,9 +60,9 @@ describe('Transform functionality', () => {
       const tracker = new Tracker(mockSource)
       tracker.insert(testBlock)
 
-      const oldTransform = tracker.reset()
-      expect(oldTransform.inserts['test-id']).to.deep.equal(testBlock)
-      expect(tracker.transform).to.deep.equal(emptyTransform())
+      const oldTransforms = tracker.reset()
+      expect(oldTransforms.inserts['test-id']).to.deep.equal(testBlock)
+      expect(tracker.transform).to.deep.equal(emptyTransforms())
     })
   })
 
@@ -102,7 +92,7 @@ describe('Transform functionality', () => {
     })
 
     it('should get block ids for transform', () => {
-      const transform: Transform = {
+      const transform: Transforms = {
         inserts: { 'id1': testBlock },
         updates: { 'id2': [] },
         deletes: new Set(['id3'])
@@ -113,13 +103,13 @@ describe('Transform functionality', () => {
     })
 
     it('should merge transforms correctly', () => {
-      const transform1: Transform = {
+      const transform1: Transforms = {
         inserts: { 'id1': testBlock },
         updates: {},
         deletes: new Set()
       }
 
-      const transform2: Transform = {
+      const transform2: Transforms = {
         inserts: { 'id2': testBlock },
         updates: {},
         deletes: new Set(['id3'])
@@ -131,7 +121,7 @@ describe('Transform functionality', () => {
     })
 
     it('should concatenate multiple transforms', () => {
-      const transforms: Transform[] = [
+      const transforms: Transforms[] = [
         {
           inserts: { 'id1': testBlock },
           updates: {},
@@ -144,23 +134,23 @@ describe('Transform functionality', () => {
         }
       ]
 
-      const concatenated = concatTransforms(transforms)
+      const concatenated = concatTransforms(...transforms)
       expect(concatenated.inserts).to.have.keys(['id1', 'id2'])
       expect(concatenated.deletes.has('id3')).to.be.true
     })
 
     it('should create transform for specific block id', () => {
-      const transform: Transform = {
+      const transform: Transforms = {
         inserts: { 'id1': testBlock, 'id2': testBlock },
         updates: { 'id1': [], 'id3': [] },
         deletes: new Set(['id1', 'id4'])
       }
 
       const blockTransform = transformForBlockId(transform, 'id1' as BlockId)
-      expect(blockTransform.inserts).to.have.key('id1')
-      expect(blockTransform.updates).to.have.key('id1')
-      expect(blockTransform.deletes.has('id1')).to.be.true
-      expect(Object.keys(blockTransform.inserts).length).to.equal(1)
+      expect(blockTransform.insert).to.exist
+			expect(blockTransform.insert).to.deep.equal(testBlock)
+      expect(blockTransform.updates).to.exist
+      expect(blockTransform.delete).to.be.true
     })
   })
 })

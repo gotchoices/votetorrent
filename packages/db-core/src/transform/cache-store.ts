@@ -1,4 +1,5 @@
-import { IBlock, BlockId, BlockStore, BlockOperation, applyOperation } from "../index.js";
+import type { IBlock, BlockId, BlockOperation, BlockStore } from "../index.js";
+import { applyOperation } from "../index.js";
 import { CacheSource } from "./index.js";
 
 export class CacheStore<T extends IBlock> extends CacheSource<T> implements BlockStore<T> {

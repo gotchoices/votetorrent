@@ -1,5 +1,6 @@
-import { Collection, CollectionInitOptions, CollectionId } from "../../collection/index.js";
-import { IBlockNetwork, Log, Action, BlockId, CacheStore, Tracker, BlockStore, IBlock } from "../../index.js";
+import { Collection } from "../../collection/index.js";
+import type { CollectionInitOptions, CollectionId } from "../../collection/index.js";
+import type { IBlockNetwork, Action, BlockId, BlockStore, IBlock } from "../../index.js";
 import { DiaryHeaderBlockType } from "./index.js";
 
 export class Diary<TEntry> {

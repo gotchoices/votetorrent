@@ -1,5 +1,6 @@
-import { UUID } from "crypto";
-import { BlockStore, IBlock } from "../index.js";
+import type { UUID } from "crypto";
+import type { BlockStore } from "../index.js";
+import type { IBlock } from "../index.js";
 
 export type TrxId = UUID;
 

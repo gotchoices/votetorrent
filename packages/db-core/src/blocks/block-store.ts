@@ -1,4 +1,4 @@
-import { IBlock, BlockType, BlockId, BlockHeader, BlockOperation } from "./index.js";
+import type { BlockType, IBlock, BlockId, BlockHeader, BlockOperation } from "./index.js";
 
 export type BlockSource<T extends IBlock> = {
 	createBlockHeader(type: BlockType, newId?: BlockId): BlockHeader;

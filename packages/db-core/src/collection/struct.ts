@@ -1,4 +1,4 @@
-import { IBlock, BlockId } from "../index.js";
+import type { IBlock, BlockId } from "../index.js";
 
 export type CollectionId = BlockId;
 

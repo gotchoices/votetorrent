@@ -1,6 +1,7 @@
-import { Log, CacheStore, IBlock, Action, ActionType, ActionHandler, Atomic, BlockId, Tracker, IBlockNetwork, ActionEntry, copyTransforms, CacheSource, BlockStore } from "../index.js";
+import type { IBlock, Action, ActionType, ActionHandler, BlockId, IBlockNetwork, ActionEntry, BlockStore } from "../index.js";
+import { Log, CacheStore, Atomic, Tracker, copyTransforms, CacheSource } from "../index.js";
 import { NetworkSource } from "../network/network-source.js";
-import { CollectionHeaderBlock, CollectionId, ICollection } from "./index.js";
+import type { CollectionHeaderBlock, CollectionId, ICollection } from "./index.js";
 
 export type CollectionInitOptions<TAction> = {
 	modules: Record<ActionType, ActionHandler<TAction>>;

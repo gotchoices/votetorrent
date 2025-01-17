@@ -1,5 +1,5 @@
-import { CollectionId, BlockId, IBlock, TrxId, Transforms, Transform } from "../index.js";
-import { TrxContext, TrxRev } from "../transaction/struct.js";
+import type { CollectionId, BlockId, IBlock, TrxId, Transform, Transforms } from "../index.js";
+import type { TrxContext, TrxRev } from "../transaction/struct.js";
 
 export type TrxBlocks = {
 	blockIds: BlockId[];

@@ -1,7 +1,9 @@
-import { apply, BlockId, BlockStore, get } from "../blocks";
-import { ITreeNode } from "./nodes";
-import { ITreeTrunk } from "./trunk";
-import { TreeBlock, TreeRootBlockType, rootId$ } from "./tree-block";
+import type { ITreeTrunk } from './trunk'
+import type { BlockId, BlockStore } from "../blocks";
+import type { ITreeNode } from "./nodes";
+import type { TreeBlock } from "./tree-block";
+import { apply, get } from "../blocks";
+import { TreeRootBlockType, rootId$ } from "./tree-block";
 
 export class IndependentTrunk implements ITreeTrunk {
 	protected constructor(

@@ -1,10 +1,11 @@
-import { ITreeTrunk, KeyRange, Path, PathBranch, getTrunkFunc } from ".";
-import { apply, BlockId, BlockStore, get } from "../blocks";
-import { MakeRange } from "../utility/make-range";
-import { TreeLeafBlockType, TreeBranchBlockType } from "./nodes";
-import { BranchNode, ITreeNode, LeafNode, entries$, nodes$, occupancy$, partitions$, sequence$ } from "./nodes";
-import { clearOccupancy, first0, isOccupied, setFirstNOccupied, setOccupancy } from "./occupancy";
-import { TreeBlock } from "./tree-block";
+import { Path, PathBranch, type ITreeTrunk, type KeyRange, type getTrunkFunc } from "./index.js";
+import type { BlockId, BlockStore } from "../blocks/index.js";
+import { apply, get } from "../blocks/index.js";
+import { MakeRange } from "../utility/make-range.js";
+import { TreeLeafBlockType, TreeBranchBlockType, entries$, nodes$, occupancy$, partitions$, sequence$ } from "./nodes.js";
+import type { BranchNode, ITreeNode, LeafNode } from "./nodes.js";
+import { clearOccupancy, first0, isOccupied, setFirstNOccupied, setOccupancy } from "./occupancy.js";
+import type { TreeBlock } from "./tree-block.js";
 
 export type MovedEntry<TEntry> = [entry: TEntry, newBlockId: BlockId, newIndex: number];
 
@@ -49,6 +50,7 @@ export class BTree<TKey, TEntry> {
 		newId?: BlockId,
 	) {
 		const root = BTree.createRoot(store as BlockStore<TreeBlock>);
+		store.insert(root);
 		const trunk = createTrunk(store as BlockStore<TreeBlock>, root.header.id, newId);
 		return new BTree(store, trunk, keyFromEntry, compare, entriesMoved);
 	}

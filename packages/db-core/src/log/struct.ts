@@ -1,4 +1,4 @@
-import { BlockId, CollectionId, TrxId, TrxRev } from "../index.js";
+import type { BlockId, CollectionId, TrxId, TrxRev } from "../index.js";
 
 /** A log entry - either an action or a checkpoint */
 export type LogEntry<TAction> = {

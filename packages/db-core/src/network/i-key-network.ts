@@ -1,5 +1,5 @@
-import { AbortOptions, PeerId, Stream } from "@libp2p/interface";
-import { ClusterPeers } from "../cluster/structs.js";
+import type { AbortOptions, PeerId, Stream } from "@libp2p/interface";
+import type { ClusterPeers } from "../cluster/structs.js";
 
 export type FindCoordinatorOptions = {
 	/** Peers that have already been tried (and failed) */

@@ -1,7 +1,8 @@
-import { Collection, CollectionInitOptions, CollectionId } from "../../collection/index.js";
-import { IBlockNetwork, Log, Action, BlockId, CacheStore, Tracker, BlockStore, IBlock, BTree, Path, KeyRange } from "../../index.js";
+import { Collection, type CollectionInitOptions, type CollectionId } from "../../collection/index.js";
+import type { IBlockNetwork, BlockId, BlockStore, IBlock } from "../../index.js";
+import { BTree, type Path, type KeyRange } from "../../btree/index.js";
 import { CollectionTrunk } from "./collection-trunk.js";
-import { TreeHeaderBlockType, TreeReplaceAction } from "./struct.js";
+import { TreeHeaderBlockType, type TreeReplaceAction } from "./struct.js";
 
 export class Tree<TKey, TEntry> {
 

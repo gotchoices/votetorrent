@@ -1,4 +1,4 @@
-import { IBlock, BlockOperations, BlockId } from "../blocks/structs.js";
+import type { IBlock, BlockId, BlockOperations } from "../blocks/structs.js";
 
 // TODO: make each of these optional (assumes empty)
 

@@ -1,4 +1,4 @@
-import { TrxBlocks, CommitResult, GetBlockResults, PendResult, PendRequest, CommitRequest, BlockGets } from "../index.js";
+import type { TrxBlocks, CommitResult, GetBlockResults, PendResult, PendRequest, CommitRequest, BlockGets } from "../index.js";
 
 export type MessageOptions = {
 	expiration?: number;

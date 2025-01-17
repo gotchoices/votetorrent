@@ -4,10 +4,10 @@
   "type": "module",
   "description": "Core database functionality for VoteTorrent",
   "main": "dist/src/index.js",
-  "types": "dist/src/index.d.ts",
+  "types": "./dist/src/index.d.ts",
   "files": [
     "src",
-    "dist/src",
+    "dist",
     "!dist/test",
     "!**/*.tsbuildinfo"
   ],
@@ -19,7 +19,7 @@
   },
   "scripts": {
     "clean": "aegir clean",
-    "build": "aegir build",
+    "build": "aegir build --env node",
     "lint": "aegir lint",
     "test": "aegir test",
     "test:node": "aegir test -t node",

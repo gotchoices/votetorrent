@@ -1,7 +1,6 @@
 import { PeerId } from "@libp2p/interface";
-import { TrxTransforms, TrxBlocks, BlockTrxStatus, IBlockNetwork, PendSuccess, StaleFailure, IKeyNetwork, BlockId, GetBlockResults, blockIdsForTransform, Transforms, transformForBlockId, mergeTransforms, IRepo, TrxId, PendResult, CommitResult, PendRequest, concatTransforms, groupBy, BlockGets, concatTransform, transformsFromTransform, TrxPending } from "../../db-core/src/index.js";
+import { type TrxTransforms, type TrxBlocks, type BlockTrxStatus, type IBlockNetwork, type PendSuccess, type StaleFailure, type IKeyNetwork, type BlockId, type GetBlockResults, type PendResult, type CommitResult, type PendRequest, type TrxPending, type IRepo, type BlockGets, type Transforms, concatTransform, transformForBlockId, transformsFromTransform, blockIdsForTransform } from "../../db-core/src/index.js";
 import { RepoClient, Pending, blockIdToBytes, recordEmpty } from "./index.js";
-import map from "it-map";
 
 type CoordinatorBatch<TPayload, TResponse> = {
 	peerId: PeerId;

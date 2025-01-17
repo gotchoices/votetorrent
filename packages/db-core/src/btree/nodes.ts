@@ -1,5 +1,6 @@
-import { BlockId, IBlock, registerBlockType } from "../blocks";
-import { nameof } from "../utility/nameof";
+import type { BlockId, IBlock } from "../blocks/index.js";
+import { registerBlockType } from "../blocks/index.js";
+import { nameof } from "../utility/nameof.js";
 
 export const TreeLeafBlockType = registerBlockType('TL', "TreeLeaf");
 export const TreeBranchBlockType = registerBlockType('TB', "TreeBranch");

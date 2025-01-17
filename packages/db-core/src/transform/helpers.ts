@@ -1,4 +1,4 @@
-import { BlockId, BlockOperation, BlockOperations, BlockStore, IBlock, Transform, Transforms } from "../index.js";
+import type { BlockId, BlockOperation, BlockOperations, BlockStore, IBlock, Transform, Transforms } from "../index.js";
 
 /** Mutates the given block with the given operation */
 export function applyOperation(block: IBlock, [entity, index, deleteCount, inserted]: BlockOperation) {
