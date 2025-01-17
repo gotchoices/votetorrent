@@ -8,9 +8,7 @@ export const TreeBranchBlockType = registerBlockType('TB', "TreeBranch");
 export interface ITreeNode extends IBlock { }
 
 export interface LeafNode<TEntry> extends ITreeNode {
-	sequence: number[],    // Entry indexes sorted by key values (count also determined from this)
-	entries: TEntry[];    // These don't move so that they can be externally referenced -- only inserted not deleted (to preserve indexes)
-	occupancy: number[],  // Redundant with sequence, but would have to search for available entry (3-5x slower in tests)
+	entries: TEntry[];    // Entries stored in order by key
 }
 
 export interface BranchNode<TKey> extends ITreeNode {
@@ -20,9 +18,7 @@ export interface BranchNode<TKey> extends ITreeNode {
 
 // Entities
 
-export const sequence$ = nameof<LeafNode<any>>("sequence");
 export const entries$ = nameof<LeafNode<any>>("entries");
-export const occupancy$ = nameof<LeafNode<any>>("occupancy");
 
 export const partitions$ = nameof<BranchNode<any>>("partitions");
 export const nodes$ = nameof<BranchNode<any>>("nodes");

@@ -1,15 +1,9 @@
 import { Path, PathBranch, type ITreeTrunk, type KeyRange, type getTrunkFunc } from "./index.js";
 import type { BlockId, BlockStore } from "../blocks/index.js";
 import { apply, get } from "../blocks/index.js";
-import { MakeRange } from "../utility/make-range.js";
-import { TreeLeafBlockType, TreeBranchBlockType, entries$, nodes$, occupancy$, partitions$, sequence$ } from "./nodes.js";
+import { TreeLeafBlockType, TreeBranchBlockType, entries$, nodes$, partitions$ } from "./nodes.js";
 import type { BranchNode, ITreeNode, LeafNode } from "./nodes.js";
-import { clearOccupancy, first0, isOccupied, setFirstNOccupied, setOccupancy } from "./occupancy.js";
 import type { TreeBlock } from "./tree-block.js";
-
-export type MovedEntry<TEntry> = [entry: TEntry, newBlockId: BlockId, newIndex: number];
-
-export type MovedEntryFunc<TEntry> = (movedEntries: MovedEntry<TEntry>[]) => void;
 
 export const NodeCapacity = 64;
 
@@ -31,7 +25,6 @@ export class BTree<TKey, TEntry> {
 		public readonly trunk: ITreeTrunk,
 		public readonly keyFromEntry = (entry: TEntry) => entry as unknown as TKey,
 		public readonly compare = (a: TKey, b: TKey) => a < b ? -1 : a > b ? 1 : 0 as number,
-		public readonly entriesMoved?: MovedEntryFunc<TEntry>,
 	) {
 	}
 
@@ -46,13 +39,12 @@ export class BTree<TKey, TEntry> {
 		createTrunk: getTrunkFunc,
 		keyFromEntry = (entry: TEntry) => entry as unknown as TKey,
 		compare = (a: TKey, b: TKey) => a < b ? -1 : a > b ? 1 : 0,
-		entriesMoved?: MovedEntryFunc<TEntry>,
 		newId?: BlockId,
 	) {
 		const root = BTree.createRoot(store as BlockStore<TreeBlock>);
 		store.insert(root);
 		const trunk = createTrunk(store as BlockStore<TreeBlock>, root.header.id, newId);
-		return new BTree(store, trunk, keyFromEntry, compare, entriesMoved);
+		return new BTree(store, trunk, keyFromEntry, compare);
 	}
 
 
@@ -233,8 +225,8 @@ export class BTree<TKey, TEntry> {
 		const path = from ? from.path.clone() : await this.first();
 		if (from?.ascending ?? true) {
 			while (path.on) {
-				result += path.leafNode.sequence.length - path.leafIndex;
-				path.leafIndex = path.leafNode.sequence.length - 1;
+				result += path.leafNode.entries.length - path.leafIndex;
+				path.leafIndex = path.leafNode.entries.length - 1;
 				await this.internalNext(path);
 			}
 		} else {
@@ -275,7 +267,7 @@ export class BTree<TKey, TEntry> {
 
 	/** @remarks Assumes the path is "on" */
 	protected keyFromPath(path: Path<TKey, TEntry>): TKey {
-		return this.keyFromEntry(path.leafNode.entries[path.leafNode.sequence[path.leafIndex]]);
+		return this.keyFromEntry(path.leafNode.entries[path.leafIndex]);
 	}
 
 	private async *internalAscending(path: Path<TKey, TEntry>): AsyncIterableIterator<Path<TKey, TEntry>> {
@@ -321,7 +313,7 @@ export class BTree<TKey, TEntry> {
 	protected async getPath(node: ITreeNode, key: TKey): Promise<Path<TKey, TEntry>> {
 		if (node.header.type === TreeLeafBlockType) {
 			const leaf = node as LeafNode<TEntry>;
-			const [on, index] = this.indexOfEntry(leaf.sequence, leaf.entries, key);
+			const [on, index] = this.indexOfEntry(leaf.entries, key);
 			return new Path<TKey, TEntry>([], leaf, index, on, this._version);
 		} else {
 			const branch = node as BranchNode<TKey>;
@@ -332,15 +324,15 @@ export class BTree<TKey, TEntry> {
 		}
 	}
 
-	private indexOfEntry(sequence: number[], entries: TEntry[], key: TKey): [on: boolean, index: number] {
+	private indexOfEntry(entries: TEntry[], key: TKey): [on: boolean, index: number] {
 		let lo = 0;
-		let hi = sequence.length - 1;
+		let hi = entries.length - 1;
 		let split = 0;
 		let result = -1;
 
 		while (lo <= hi) {
 			split = (lo + hi) >>> 1;
-			result = this.compare(key, this.keyFromEntry(entries[sequence[split]]));
+			result = this.compare(key, this.keyFromEntry(entries[split]));
 
 			if (result === 0)
 				return [true, split];
@@ -377,11 +369,11 @@ export class BTree<TKey, TEntry> {
 	private async internalNext(path: Path<TKey, TEntry>) {
 		if (!path.on) {	// Attempt to move off of crack
 			path.on = path.branches.every(branch => branch.index >= 0 && branch.index < branch.node.nodes.length)
-				&& path.leafIndex >= 0 && path.leafIndex < path.leafNode.sequence.length;
+				&& path.leafIndex >= 0 && path.leafIndex < path.leafNode.entries.length;
 			if (path.on) {
 				return;
 			}
-		} else if (path.leafIndex >= path.leafNode.sequence.length - 1) {
+		} else if (path.leafIndex >= path.leafNode.entries.length - 1) {
 			let popCount = 0;
 			let found = false;
 			const last = path.branches.length - 1;
@@ -394,7 +386,7 @@ export class BTree<TKey, TEntry> {
 			}
 
 			if (!found) {
-				path.leafIndex = path.leafNode.sequence.length;	// after last row = end crack
+				path.leafIndex = path.leafNode.entries.length;	// after last row = end crack
 				path.on = false;
 			} else {
 				path.branches.splice(-popCount, popCount);
@@ -430,7 +422,7 @@ export class BTree<TKey, TEntry> {
 				path.branches.splice(-popCount, popCount);
 				const branch = path.branches.at(-1)!;
 				--branch.index;
-				this.moveToLast(await get(this.store, branch.node.nodes[branch.index]), path);
+				await this.moveToLast(await get(this.store, branch.node.nodes[branch.index]), path);
 			}
 		}
 		else {
@@ -459,7 +451,7 @@ export class BTree<TKey, TEntry> {
 
 	protected async internalDelete(path: Path<TKey, TEntry>): Promise<boolean> {
 		if (path.on) {
-			deleteEntries(path.leafNode, path.leafIndex, 1, this.store);
+			apply(this.store, path.leafNode, [entries$, path.leafIndex, 1, []]);
 			if (path.branches.length > 0) {   // Only worry about underflows, balancing, etc. if not root
 				if (path.leafIndex === 0) { // If we deleted index 0, update branches with new key
 					const pathBranch = path.branches.at(-1)!;
@@ -498,6 +490,7 @@ export class BTree<TKey, TEntry> {
 		}
 		if (split) {
 			const newBranch = newBranchNode(this.store, [split.key], [await this.trunk.getId(), split.right.header.id]);
+			await this.store.insert(newBranch);
 			await this.trunk.set(newBranch);
 			path.branches.unshift(new PathBranch(newBranch, split.indexDelta));
 		}
@@ -509,10 +502,10 @@ export class BTree<TKey, TEntry> {
 			const leaf = node as LeafNode<TEntry>;
 			path.leafNode = leaf;
 			path.leafIndex = 0;
-			path.on = leaf.sequence.length > 0;
+			path.on = leaf.entries.length > 0;
 		} else {
 			path.branches.push(new PathBranch(node as BranchNode<TKey>, 0));
-			this.moveToFirst(await get(this.store, (node as BranchNode<TKey>).nodes[0]), path);
+			await this.moveToFirst(await get(this.store, (node as BranchNode<TKey>).nodes[0]), path);
 		}
 	}
 
@@ -520,7 +513,7 @@ export class BTree<TKey, TEntry> {
 	private async moveToLast(node: ITreeNode, path: Path<TKey, TEntry>) {
 		if (node.header.type === TreeLeafBlockType) {
 			const leaf = node as LeafNode<TEntry>;
-			const count = leaf.sequence.length;
+			const count = leaf.entries.length;
 			path.leafNode = leaf;
 			path.on = count > 0;
 			path.leafIndex = count > 0 ? count - 1 : 0;
@@ -528,7 +521,7 @@ export class BTree<TKey, TEntry> {
 			const branch = node as BranchNode<TKey>;
 			const pathBranch = new PathBranch(branch, branch.partitions.length);
 			path.branches.push(pathBranch);
-			this.moveToLast(await get(this.store, branch.nodes[pathBranch.index]), path);
+			await this.moveToLast(await get(this.store, branch.nodes[pathBranch.index]), path);
 		}
 	}
 
@@ -536,7 +529,7 @@ export class BTree<TKey, TEntry> {
 	private async getFirst(node: ITreeNode): Promise<Path<TKey, TEntry>> {
 		if (node.header.type === TreeLeafBlockType) {
 			const leaf = node as LeafNode<TEntry>;
-			return new Path<TKey, TEntry>([], leaf, 0, leaf.sequence.length > 0, this._version)
+			return new Path<TKey, TEntry>([], leaf, 0, leaf.entries.length > 0, this._version)
 		} else {
 			const branch = node as BranchNode<TKey>;
 			const path = await this.getFirst(await get(this.store, branch.nodes[0]));
@@ -549,7 +542,7 @@ export class BTree<TKey, TEntry> {
 	private async getLast(node: ITreeNode): Promise<Path<TKey, TEntry>> {
 		if (node.header.type === TreeLeafBlockType) {
 			const leaf = node as LeafNode<TEntry>;
-			const count = leaf.sequence.length;
+			const count = leaf.entries.length;
 			return new Path<TKey, TEntry>([], leaf, count > 0 ? count - 1 : 0, count > 0, this._version);
 		} else {
 			const branch = node as BranchNode<TKey>;
@@ -562,16 +555,14 @@ export class BTree<TKey, TEntry> {
 
 	private leafInsert(path: Path<TKey, TEntry>, entry: TEntry): Split<TKey> | undefined {
 		const { leafNode: leaf, leafIndex: index } = path;
-		let entryIndex = first0(leaf.occupancy);
-		if (entryIndex >= 0) {  // No split needed
-			insertEntries(leaf, index, [entry], this.store);
+		if (leaf.entries.length < NodeCapacity) {  // No split needed
+			apply(this.store, leaf, [entries$, index, 0, [entry]]);
 			return undefined;
 		}
 		// Full. Split needed
 
-		const midIndex = (leaf.sequence.length + 1) >>> 1;
-		const moveSequences = leaf.sequence.slice(midIndex, -1);
-		const newEntries = moveSequences.map(e => leaf.entries[e]);
+		const midIndex = (leaf.entries.length + 1) >>> 1;
+		const newEntries = leaf.entries.slice(midIndex);
 
 		// New node
 		if (index >= midIndex) {	// Put the new entry directly rather than log an insert
@@ -580,22 +571,15 @@ export class BTree<TKey, TEntry> {
 		const newLeaf = newLeafNode(this.store, newEntries);
 		this.store.insert(newLeaf);
 
-		// Delete entries
-		deleteEntries(leaf, midIndex, leaf.sequence.length - midIndex, this.store);
+		// Delete entries from old node
+		apply(this.store, leaf, [entries$, midIndex, leaf.entries.length - midIndex, []]);
 
-		let newSequence: number[];
 		if (index < midIndex) {	// Insert new entry into old node
-			newSequence = newLeaf.sequence;
-			insertEntries(leaf, index, [entry], this.store);
+			apply(this.store, leaf, [entries$, index, 0, [entry]]);
 		} else {
 			path.leafNode = newLeaf;
-			path.leafIndex -= leaf.entries.length;
-			// Sequence with new entry removed so sequences align for move notification
-			newSequence = [...newLeaf.sequence].splice(path.leafIndex, 1);
+			path.leafIndex -= midIndex;
 		}
-
-		// Indicate moved entries (e.g. for reverse index)
-		this.doEntriesMoved(moveSequences, leaf, newSequence, newLeaf);
 
 		return new Split<TKey>(this.keyFromEntry(newEntries[0]), newLeaf, index < midIndex ? 0 : 1);
 	}
@@ -637,7 +621,7 @@ export class BTree<TKey, TEntry> {
 	}
 
 	protected async rebalanceLeaf(path: Path<TKey, TEntry>, depth: number): Promise<ITreeNode | undefined> {
-		if (depth === 0 || path.leafNode.sequence.length >= (NodeCapacity >>> 1)) {
+		if (depth === 0 || path.leafNode.entries.length >= (NodeCapacity >>> 1)) {
 			return undefined;
 		}
 
@@ -646,49 +630,43 @@ export class BTree<TKey, TEntry> {
 		const pIndex = parent.index;
 		const pNode = parent.node;
 
-		const rightSib = pIndex < pNode.nodes.length ? (await get(this.store, pNode.nodes[pIndex + 1])) as LeafNode<TEntry> : undefined;
-		if (rightSib && rightSib.sequence.length > (NodeCapacity >>> 1)) {   // Attempt to borrow from right sibling
-			const rightIndex = rightSib.sequence[0];
-			const entry = rightSib.entries[rightIndex];
-			deleteEntries(rightSib, 0, 1, this.store);
-			const newIndexes = insertEntries(leaf, leaf.sequence.length, [entry], this.store);
+		const rightSibId = pNode.nodes[pIndex + 1];
+		const rightSib = rightSibId ? (await get(this.store, rightSibId)) as LeafNode<TEntry> : undefined;
+		if (rightSib && rightSib.entries.length > (NodeCapacity >>> 1)) {   // Attempt to borrow from right sibling
+			const entry = rightSib.entries[0];
+			apply(this.store, rightSib, [entries$, 0, 1, []]);
+			apply(this.store, leaf, [entries$, leaf.entries.length, 0, [entry]]);
 			this.updatePartition(pIndex + 1, path, depth - 1, this.keyFromEntry(rightSib.entries[0]!));
-			this.doEntriesMoved([rightIndex], rightSib, newIndexes, leaf);
 			return undefined;
 		}
 
-		const leftSib = pIndex > 0 ? (await get(this.store, pNode.nodes[pIndex - 1])) as LeafNode<TEntry> : undefined;
-		if (leftSib && leftSib.sequence.length > (NodeCapacity >>> 1)) {   // Attempt to borrow from left sibling
-			const leftIndex = leftSib.sequence[leftSib.sequence.length - 1];
-			const entry = leftSib.entries[leftIndex];
-			deleteEntries(leftSib, leftSib.sequence.length - 1, 1, this.store);
-			const newIndexes = insertEntries(leaf, 0, [entry], this.store);
+		const leftSibId = pNode.nodes[pIndex - 1];
+		const leftSib = leftSibId ? (await get(this.store, leftSibId)) as LeafNode<TEntry> : undefined;
+		if (leftSib && leftSib.entries.length > (NodeCapacity >>> 1)) {   // Attempt to borrow from left sibling
+			const entry = leftSib.entries[leftSib.entries.length - 1];
+			apply(this.store, leftSib, [entries$, leftSib.entries.length - 1, 1, []]);
+			apply(this.store, leaf, [entries$, 0, 0, [entry]]);
 			this.updatePartition(pIndex, path, depth - 1, this.keyFromEntry(entry));
-			this.doEntriesMoved([leftIndex], leftSib, newIndexes, leaf);
 			path.leafIndex += 1;
 			return undefined;
 		}
 
-		if (rightSib && rightSib.sequence.length + leaf.sequence.length <= NodeCapacity) {  // Attempt to merge right sibling into leaf (right sib deleted)
-			const entries = rightSib.sequence.map(s => rightSib.entries[s]);
-			const newIndexes = insertEntries(leaf, leaf.sequence.length, entries, this.store);
+		if (rightSib && rightSib.entries.length + leaf.entries.length <= NodeCapacity) {  // Attempt to merge right sibling into leaf (right sib deleted)
+			apply(this.store, leaf, [entries$, leaf.entries.length, 0, rightSib.entries]);
 			this.store.delete(rightSib.header.id);
 			this.deletePartition(pNode, pIndex);
 			if (pIndex === 0) { // 0th node of parent, update parent key
 				this.updatePartition(pIndex, path, depth - 1, this.keyFromEntry(leaf.entries[0]!));
 			}
-			this.doEntriesMoved(rightSib.sequence, rightSib, newIndexes, leaf);
 			return await this.rebalanceBranch(path, depth - 1);
 		}
 
-		if (leftSib && leftSib.sequence.length + leaf.sequence.length <= NodeCapacity) {  // Attempt to merge into left sibling (leaf deleted)
-			const entries = leaf.sequence.map(s => leaf.entries[s]);
-			const newIndexes = insertEntries(leftSib, leftSib.sequence.length, entries, this.store);
+		if (leftSib && leftSib.entries.length + leaf.entries.length <= NodeCapacity) {  // Attempt to merge into left sibling (leaf deleted)
+			path.leafNode = leftSib;
+			path.leafIndex += leftSib.entries.length;
+			apply(this.store, leftSib, [entries$, leftSib.entries.length, 0, leaf.entries]);
 			this.store.delete(leaf.header.id);
 			this.deletePartition(pNode, pIndex - 1);
-			this.doEntriesMoved(leaf.sequence, leaf, newIndexes, leftSib);
-			path.leafNode = leftSib;
-			path.leafIndex += leftSib.sequence.length;
 			return await this.rebalanceBranch(path, depth - 1);
 		}
 	}
@@ -708,9 +686,8 @@ export class BTree<TKey, TEntry> {
 		const pIndex = parent.index;
 		const pNode = parent.node;
 
-		const rightSib = pIndex < pNode.nodes.length
-			? (await get(this.store, pNode.nodes[pIndex + 1])) as BranchNode<TKey>
-			: undefined;
+		const rightSibId = pNode.nodes[pIndex + 1];
+		const rightSib = rightSibId ? (await get(this.store, rightSibId)) as BranchNode<TKey> : undefined;
 		if (rightSib && rightSib.nodes.length > (NodeCapacity >>> 1)) {   // Attempt to borrow from right sibling
 			const node = rightSib.nodes[0];
 			const rightKey = rightSib.partitions[0];
@@ -720,9 +697,8 @@ export class BTree<TKey, TEntry> {
 			return undefined;
 		}
 
-		const leftSib = pIndex > 0
-			? (await get(this.store, pNode.nodes[pIndex - 1])) as BranchNode<TKey>
-			: undefined;
+		const leftSibId = pNode.nodes[pIndex - 1];
+		const leftSib = leftSibId ? (await get(this.store, leftSibId)) as BranchNode<TKey> : undefined;
 		if (leftSib && leftSib.nodes.length > (NodeCapacity >>> 1)) {   // Attempt to borrow from left sibling
 			const node = leftSib.nodes[leftSib.nodes.length - 1];
 			const pKey = leftSib.partitions[leftSib.partitions.length - 1];
@@ -772,8 +748,8 @@ export class BTree<TKey, TEntry> {
 	}
 
 	protected deletePartition(branch: BranchNode<TKey>, index: number, nodeOffset = 1) {
-		apply(this.store, branch, [partitions$, index, 0, []]);
-		apply(this.store, branch, [nodes$, index + nodeOffset, 0, []]);
+		apply(this.store, branch, [partitions$, index, 1, []]);
+		apply(this.store, branch, [nodes$, index + nodeOffset, 1, []]);
 	}
 
 	private validatePath(path: Path<TKey, TEntry>) {
@@ -793,18 +769,12 @@ export class BTree<TKey, TEntry> {
 		yield node.header.id;
 	}
 
-	protected doEntriesMoved(sequences: number[], leaf: LeafNode<TEntry>, newSequences: number[], newLeaf: LeafNode<TEntry>) {
-		const entries = sequences.map((s, i) => [leaf.entries[s], newLeaf.header.id, newSequences[i]] as MovedEntry<TEntry>);
-		this.entriesMoved?.(entries);
-	}
-
 	protected getEntry(path: Path<TKey, TEntry>): TEntry {
-		return path.leafNode.entries[path.leafNode.sequence[path.leafIndex]];
+		return path.leafNode.entries[path.leafIndex];
 	}
 
 	protected updateEntry(path: Path<TKey, TEntry>, entry: TEntry) {
-		const leaf = path.leafNode;
-		apply(this.store, leaf, [entries$, leaf.sequence[path.leafIndex], 1, [entry]]);
+		apply(this.store, path.leafNode, [entries$, path.leafIndex, 1, [entry]]);
 	}
 }
 
@@ -816,85 +786,12 @@ class Split<TKey> {
 	) { }
 }
 
-function changedIndexes<T>(a: T[], b: T[]) {
-	return a.reduce((acc, cur, i) => {
-		if (cur !== b[i]) {
-			acc.push(i);
-		}
-		return acc;
-	}, [] as number[]);
-}
-
-function* sequentialSpans(values: number[], sortInput: boolean): IterableIterator<[start: number, end: number, count: number]> {
-	const sortedValues = sortInput
-		? values.sort()
-		: [...values].sort();
-	let span: [number, number, number] | undefined = undefined;
-	for (let value of sortedValues) {
-		if (span) {
-			if (span[1] !== value - 1) {
-				yield span;
-				span = [value, value, 1];
-			} else {
-				++span[1];
-				++span[2];
-			}
-		} else {
-			span = [value, value, 1];
-		}
-	}
-	if (span) {
-		yield span;
-	}
-}
-
 function newLeafNode<TEntry>(store: BlockStore<ITreeNode>, entries: TEntry[]): LeafNode<TEntry> {
 	const header = store.createBlockHeader(TreeLeafBlockType);
-	const occupancy = Array(((NodeCapacity - 1) >>> 5) + 1).fill(0);	// Number of 32-bit integers to represent capacity bits
-	setFirstNOccupied(occupancy, entries.length);
-	const sequence = MakeRange.asArray(0, entries.length - 1);
-	return { header, sequence, occupancy, entries };
+	return { header, entries };
 }
 
 function newBranchNode<TKey>(store: BlockStore<ITreeNode>, partitions: TKey[], nodes: BlockId[]): BranchNode<TKey> {
 	const header = store.createBlockHeader(TreeBranchBlockType);
 	return { header, partitions, nodes };
-}
-
-// Note: these are exported for naughty back-door access by Column
-/** @param entries entries in sequence order
- * @returns indexes of the inserted entries */
-export function insertEntries<TEntry>(leaf: LeafNode<TEntry>, seqIndex: number, entries: TEntry[], store: BlockStore<ITreeNode>) {
-	const occupancy = [...leaf.occupancy];	// snapshot
-	const entryIndexes = entries.map((_, i) => {
-		// Prefer corresponding index, to reduce fragmentation, otherwise first available
-		const entryIndex = isOccupied(occupancy, i) ? i : first0(occupancy);
-		setOccupancy(occupancy, entryIndex);
-		return entryIndex;
-	});
-	for (const [start, , count] of sequentialSpans(entryIndexes, false)) {
-		apply(store, leaf, [entries$, start, count, entries.slice(0, count)]);
-	}
-	const occChangeIndexes = changedIndexes(occupancy, leaf.occupancy);
-	for (let [start, end, count] of sequentialSpans(occChangeIndexes, true)) {
-		apply(store, leaf, [occupancy$, start, count, occupancy.slice(start, end + 1)]);
-	}
-	apply(store, leaf, [sequence$, seqIndex, 0, entryIndexes]);
-	return entryIndexes;
-}
-
-export function deleteEntries<TEntry>(leaf: LeafNode<TEntry>, seqIndex: number, count: number, store: BlockStore<ITreeNode>) {
-	const entryIndexes = MakeRange.asArray(seqIndex, seqIndex + count).map(s => leaf.sequence[s]);
-	const occupancy = [...leaf.occupancy];	// snapshot
-	for (const [start, end, count] of sequentialSpans(entryIndexes, true)) {
-		apply(store, leaf, [entries$, start, count, Array(count).fill(undefined)]);	// Wipe entries
-		for (let i = start; i <= end; ++i) {
-			clearOccupancy(occupancy, i);
-		}
-	}
-	const occChangeIndexes = changedIndexes(occupancy, leaf.occupancy);
-	for (let [start, end, count] of sequentialSpans(occChangeIndexes, true)) {
-		apply(store, leaf, [occupancy$, start, count, occupancy.slice(start, end + 1)]);
-	}
-	apply(store, leaf, [sequence$, seqIndex, count, []]);
 }

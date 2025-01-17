@@ -77,10 +77,10 @@ describe('Transform functionality', () => {
 
 		it('should apply array operations correctly', () => {
 			const block = { ...testBlock }
-			const operation: BlockOperation = ['items', 0, 0, 'updated']
+			const operation: BlockOperation = ['items', 0, 1, ['updated']]
 
 			applyOperation(block, operation)
-			expect(block.items).to.deep.equal(['updated'])
+			expect(block.items).to.deep.equal(['updated', 'item2'])
 		})
 
     it('should create new block with operation applied', () => {
