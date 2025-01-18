@@ -2,6 +2,7 @@ import { expect } from 'aegir/chai'
 import { BTree } from '../src/btree/index.js'
 import { applyOperation, type BlockOperation, type BlockStore, type IBlock } from '../src/index.js'
 import type { ITreeNode } from '../src/btree/nodes.js'
+import { createActor } from '../src/utility/actor.js'
 
 // Simple in-memory block store for testing
 class TestBlockStore implements BlockStore<ITreeNode> {
@@ -263,21 +264,23 @@ describe('BTree', () => {
   })
 
   it('should maintain consistency during concurrent operations', async () => {
+		// The following would fail without an actor proxy because the tree is not thread-safe by design.
+		const safeBtree = createActor(btree);
     // Insert initial data
     for (let i = 0; i < 10; i++) {
-      await btree.insert(i)
+      await safeBtree.insert(i)
     }
 
     // Perform concurrent operations
     await Promise.all([
-      btree.insert(20),
-      btree.insert(30),
-      btree.insert(40)
+      safeBtree.insert(20),
+      safeBtree.insert(30),
+      safeBtree.insert(40)
     ])
 
     // Verify tree is still consistent
-    expect(await btree.get(20)).to.equal(20)
-    expect(await btree.get(30)).to.equal(30)
-    expect(await btree.get(40)).to.equal(40)
+    expect(await safeBtree.get(20)).to.equal(20)
+    expect(await safeBtree.get(30)).to.equal(30)
+    expect(await safeBtree.get(40)).to.equal(40)
   })
 })

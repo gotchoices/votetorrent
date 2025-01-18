@@ -760,6 +760,7 @@ export class BTree<TKey, TEntry> {
 
 	/** Iterates every node ID below and including the given node. */
 	private async *nodeIds(node: ITreeNode): AsyncIterableIterator<BlockId> {
+		// TODO: This would be much more efficient if we avoided iterating into leaf nodes
 		if (node.header.type === TreeBranchBlockType) {
 			const subNodes = await Promise.all((node as BranchNode<TKey>).nodes.map(id => get(this.store, id)));
 			for (let subNode of subNodes) {
