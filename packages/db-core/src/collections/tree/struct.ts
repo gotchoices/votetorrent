@@ -1,4 +1,4 @@
-import { type BlockId, type CollectionHeaderBlock, nameof, registerBlockType } from "../..";
+import { type BlockId, type CollectionHeaderBlock, nameof, registerBlockType } from "../../index.js";
 
 export const TreeHeaderBlockType = registerBlockType("TRE", "TreeHeaderBlock");
 

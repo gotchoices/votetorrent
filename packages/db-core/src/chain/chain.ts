@@ -1,20 +1,20 @@
 import { Atomic, type BlockStore, type BlockId, type IBlock } from "../index.js";
-import { ChainDataBlockType, ChainHeaderBlockType } from "./chain-blocks.js";
-import type { ChainDataBlock, ChainHeaderBlock } from "./chain-blocks.js";
+import { ChainDataBlockType, ChainHeaderBlockType } from "./chain-nodes.js";
+import type { ChainDataNode, ChainHeaderNode } from "./chain-nodes.js";
 import { apply } from "../blocks/index.js";
 
 export const EntriesPerBlock = 32;
 
 export type ChainPath<TEntry> = {
-	headerBlock: ChainHeaderBlock;
-	block: ChainDataBlock<TEntry>;
+	headerBlock: ChainHeaderNode;
+	block: ChainDataNode<TEntry>;
 	index: number; // Index of the entry in the block
 };
 
 export type ChainInitOptions<TEntry> = {
-	createDataBlock?: () => Partial<ChainDataBlock<TEntry>>;
-	createHeaderBlock?: (id?: BlockId) => Partial<ChainHeaderBlock>;
-	blockAdded?: (newTail: ChainDataBlock<TEntry>, oldTail: ChainDataBlock<TEntry> | undefined) => Promise<void>;
+	createDataBlock?: () => Partial<ChainDataNode<TEntry>>;
+	createHeaderBlock?: (id?: BlockId) => Partial<ChainHeaderNode>;
+	blockAdded?: (newTail: ChainDataNode<TEntry>, oldTail: ChainDataNode<TEntry> | undefined) => Promise<void>;
 }
 
 export type ChainCreateOptions<TEntry> = ChainInitOptions<TEntry> & {
@@ -35,13 +35,14 @@ export class Chain<TEntry> {
 	/** Creates a new queue, with an optional given id. */
 	static async create<TEntry>(store: BlockStore<IBlock>, options?: ChainCreateOptions<TEntry>) {
 		const tailBlock = {
-			...(options?.createDataBlock?.() ?? (() => ({ block: store.createBlockHeader(ChainDataBlockType) }))),
-		} as ChainDataBlock<TEntry>;
+			...(options?.createDataBlock?.() ?? { header: store.createBlockHeader(ChainDataBlockType) }),
+			entries: [],
+		} as ChainDataNode<TEntry>;
 		const headerBlock = {
-			...(options?.createHeaderBlock?.(options?.newId) ?? ((id: BlockId) => ({ block: store.createBlockHeader(ChainHeaderBlockType, id) }))),
+			...(options?.createHeaderBlock?.(options?.newId) ?? { header: store.createBlockHeader(ChainHeaderBlockType, options?.newId) }),
 			headId: tailBlock.header.id,
 			tailId: tailBlock.header.id,
-		} as ChainHeaderBlock;
+		} as ChainHeaderNode;
 		store.insert(headerBlock);
 		store.insert(tailBlock);
 		return new Chain<TEntry>(store, headerBlock.header.id, options);
@@ -67,11 +68,11 @@ export class Chain<TEntry> {
 
 		while (entries.length > 0) {
 			const newTail = {
-				...(this.options?.createDataBlock?.() ?? (() => ({ block: this.store.createBlockHeader(ChainDataBlockType) }))),
+				...(this.options?.createDataBlock?.() ?? { header: this.store.createBlockHeader(ChainDataBlockType) }),
 				entries: entries.slice(0, Math.min(EntriesPerBlock, entries.length)),
 				priorId: undefined,
 				nextId: tail.header.id,	// Tail's next is the old tail
-			} as ChainDataBlock<TEntry>;
+			} as ChainDataNode<TEntry>;
 			trx.insert(newTail);
 			apply(trx, tail, ['priorId', 0, 0, newTail.header.id]);
 			await this.options?.blockAdded?.(newTail, oldTail);
@@ -115,7 +116,7 @@ export class Chain<TEntry> {
 				n -= tail.entries.length;
 				if (tail.nextId) {
 					trx.delete(tail.header.id);
-					tail = await trx.tryGet(tail.nextId) as ChainDataBlock<TEntry>;
+					tail = await trx.tryGet(tail.nextId) as ChainDataNode<TEntry>;
 					apply(trx, tail, ['priorId', 0, 0, undefined]);
 				} else {	// No more blocks... just empty what's left
 					apply(trx, tail, ['entries', 0, tail.entries.length, []]);
@@ -159,7 +160,7 @@ export class Chain<TEntry> {
 				n -= head.entries.length;
 				if (head.nextId) {
 					trx.delete(head.header.id);
-					head = await trx.tryGet(head.nextId) as ChainDataBlock<TEntry>;
+					head = await trx.tryGet(head.nextId) as ChainDataNode<TEntry>;
 					apply(trx, head, ['nextId', 0, 0, undefined]);
 				} else {	// No more blocks... just empty what's left
 					apply(trx, head, ['entries', 0, head.entries.length, []]);
@@ -178,7 +179,7 @@ export class Chain<TEntry> {
 
 	async *select(starting?: ChainPath<TEntry>, forward = true): AsyncIterableIterator<ChainPath<TEntry>> {
 		const path = starting ?? (forward ? await this.getTail() : await this.getHead());
-		let block: ChainDataBlock<TEntry> | undefined = path.block;
+		let block: ChainDataNode<TEntry> | undefined = path.block;
 
 		let index = path.index;
 		if (forward) {
@@ -186,7 +187,7 @@ export class Chain<TEntry> {
 				for (; index < block.entries.length; ++index) {
 					yield { headerBlock: path.headerBlock, block, index };
 				}
-				block = block.nextId ? await this.store.tryGet(block.nextId) as ChainDataBlock<TEntry> : undefined;
+				block = block.nextId ? await this.store.tryGet(block.nextId) as ChainDataNode<TEntry> : undefined;
 				index = 0;
 			}
 		} else {
@@ -194,7 +195,7 @@ export class Chain<TEntry> {
 				for (; index >= 0; --index) {
 					yield { headerBlock: path.headerBlock, block, index };
 				}
-				block = block.priorId ? await this.store.tryGet(block.priorId) as ChainDataBlock<TEntry> : undefined;
+				block = block.priorId ? await this.store.tryGet(block.priorId) as ChainDataNode<TEntry> : undefined;
 				index = (block?.entries.length ?? 0) - 1;
 			}
 		}
@@ -208,7 +209,7 @@ export class Chain<TEntry> {
 		}
 		return {
 			headerBlock,
-			block: await this.store.tryGet(block.nextId) as ChainDataBlock<TEntry>,
+			block: await this.store.tryGet(block.nextId) as ChainDataNode<TEntry>,
 			index: 0,
 		};
 	}
@@ -221,33 +222,33 @@ export class Chain<TEntry> {
 		}
 		return {
 			headerBlock,
-			block: await this.store.tryGet(block.priorId) as ChainDataBlock<TEntry>,
+			block: await this.store.tryGet(block.priorId) as ChainDataNode<TEntry>,
 			index: block.entries.length - 1,
 		};
 	}
 
-	async getTail(header?: ChainHeaderBlock): Promise<ChainPath<TEntry>> {
+	async getTail(header?: ChainHeaderNode): Promise<ChainPath<TEntry>> {
 		const headerBlock = header ?? await this.getHeader();
-		let tail = await this.store.tryGet(headerBlock.tailId) as ChainDataBlock<TEntry>;
+		let tail = await this.store.tryGet(headerBlock.tailId) as ChainDataNode<TEntry>;
 		// Possible that the block has filled between reading the header and reading the block... follow priorId links to find true end
 		while (tail?.priorId) {
-			tail = await this.store.tryGet(tail.priorId) as ChainDataBlock<TEntry>;
+			tail = await this.store.tryGet(tail.priorId) as ChainDataNode<TEntry>;
 		}
 		return { headerBlock, block: tail, index: tail.entries.length - 1 };
 	}
 
-	async getHead(header?: ChainHeaderBlock): Promise<ChainPath<TEntry>> {
+	async getHead(header?: ChainHeaderNode): Promise<ChainPath<TEntry>> {
 		const headerBlock = header ?? await this.getHeader();
-		let head = await this.store.tryGet(headerBlock.headId) as ChainDataBlock<TEntry>;
+		let head = await this.store.tryGet(headerBlock.headId) as ChainDataNode<TEntry>;
 		// Possible that the block has filled between reading the header and reading the block... follow nextId links to find true start
 		while (head.nextId) {
-			head = await this.store.tryGet(head.nextId) as ChainDataBlock<TEntry>;
+			head = await this.store.tryGet(head.nextId) as ChainDataNode<TEntry>;
 		}
 		return { headerBlock, block: head, index: 0 };
 	}
 
 	async getHeader() {
-		return await this.store.tryGet(this.id) as ChainHeaderBlock;
+		return await this.store.tryGet(this.id) as ChainHeaderNode;
 	}
 }
 

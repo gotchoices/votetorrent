@@ -1,7 +1,7 @@
-import { apply, type BlockId, type BlockStore, get, type IBlock } from "../../blocks";
-import type { ITreeNode } from "../../btree/nodes";
-import type { ITreeTrunk } from "../../btree/trunk";
-import { rootId$, type TreeCollectionHeaderBlock } from "./struct";
+import { apply, get } from "../../index.js";
+import type { BlockId, BlockStore, IBlock, ITreeTrunk } from "../../index.js";
+import type { ITreeNode } from "../../btree/nodes.js";
+import { rootId$, type TreeCollectionHeaderBlock } from "./struct.js";
 
 export class CollectionTrunk implements ITreeTrunk {
     constructor(

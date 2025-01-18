@@ -1,11 +1,12 @@
 import { sha256 } from 'multiformats/hashes/sha2'
 import { Chain, entryAt } from "../index.js";
-import type { IBlock, BlockId, TrxId, CollectionId, ChainPath, TrxRev, TrxContext, ChainInitOptions, BlockStore, ChainDataBlock } from "../index.js";
+import type { IBlock, BlockId, TrxId, CollectionId, ChainPath, TrxRev, TrxContext, ChainInitOptions, BlockStore } from "../index.js";
 import type { LogEntry, ActionEntry } from "./index.js";
 import { LogDataBlockType, LogHeaderBlockType } from "./index.js";
 import { toString as uint8ArrayToString } from 'uint8arrays/to-string'
+import type { ChainDataNode } from '../chain/chain-nodes.js';
 
-export type LogBlock<TAction> = ChainDataBlock<LogEntry<TAction>>
+export type LogBlock<TAction> = ChainDataNode<LogEntry<TAction>>
 	& {
 		/** Base64url encoded Sha256 hash of the next block - present on every block except the head */
 		nextHash?: string,
