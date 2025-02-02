@@ -17,7 +17,5 @@
     "aegir": "^45.0.8"
   },
   "dependencies": {
-    "@libp2p/crypto": "^5.0.9",
-    "multiformats": "^13.3.1"
   }
 }

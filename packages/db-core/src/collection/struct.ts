@@ -5,7 +5,7 @@ export type CollectionId = BlockId;
 export type CollectionHeaderType = 'CH';
 
 export type CollectionHeaderBlock = IBlock & {
-	block: {
+	header: {
 		type: CollectionHeaderType;
 	};
 	logId: BlockId;

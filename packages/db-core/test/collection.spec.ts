@@ -40,19 +40,37 @@ describe('Collection', () => {
   it('should create a new collection', async () => {
     const collection = await Collection.createOrOpen<TestAction>(network, collectionId, initOptions)
     expect(collection.id).to.equal(collectionId)
-    expect(collection.isNew).to.be.true
   })
 
   it('should open an existing collection', async () => {
-    // Create first instance
+    // Create first instance and sync it to network
     const collection1 = await Collection.createOrOpen<TestAction>(network, collectionId, initOptions)
-    expect(collection1.isNew).to.be.true
+    await collection1.updateAndSync() // Sync to network so collection2 can see it
 
     // Open existing collection
     const collection2 = await Collection.createOrOpen<TestAction>(network, collectionId, initOptions)
-    expect(collection2.isNew).to.be.false
     expect(collection2.id).to.equal(collection1.id)
     expect(collection2.logId).to.equal(collection1.logId)
+
+    // Verify they share state by adding an action to collection1 and reading from collection2
+    const action: Action<TestAction> = {
+      type: 'set',
+      data: {
+        value: 'test value',
+        timestamp: Date.now()
+      }
+    }
+    await collection1.transact(action)
+    await collection1.updateAndSync()
+
+    // collection2 should be able to see the action after updating
+    await collection2.update()
+    const actions: Action<TestAction>[] = []
+    for await (const logAction of collection2.selectLog()) {
+      actions.push(logAction)
+    }
+    expect(actions).to.have.lengthOf(1)
+    expect(actions[0]).to.deep.equal(action)
   })
 
   it('should handle single action transaction', async () => {

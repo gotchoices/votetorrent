@@ -76,7 +76,7 @@ describe('Diary', () => {
 
     // Retrieve in reverse order
     const retrievedEntries: TestEntry[] = []
-    for await (const entry of diary.select(true)) {
+    for await (const entry of diary.select(false)) {
       retrievedEntries.push(entry)
     }
 

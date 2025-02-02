@@ -53,7 +53,7 @@ export class TestNetwork implements IBlockNetwork {
         reason: 'Blocks have pending transactions',
         pending: pendingOnBlocks.map(blockId => ({
           blockId,
-          trxId: Array.from(this.pendingTrx.keys())[0]
+          trxId: Array.from(this.pendingTrx.keys())[0]!
         }))
       };
     }

@@ -1,6 +1,9 @@
 import type { IBlock, BlockId, BlockStore as IBlockStore, BlockHeader, BlockOperation, BlockType, BlockSource as IBlockSource } from "../index.js";
 import { applyOperation, emptyTransforms, blockIdsForTransform, copyTransforms, ensured } from "../index.js";
 
+/** A block store that collects transformations, without applying them to the underlying source.
+ * Transformations are also applied to the retrieved blocks, making it seem like the source has been modified.
+ */
 export class Tracker<T extends IBlock> implements IBlockStore<T> {
 	constructor(
 		private readonly source: IBlockSource<T>,
@@ -13,7 +16,13 @@ export class Tracker<T extends IBlock> implements IBlockStore<T> {
 		if (block) {
 			const ops = this.transform.updates[id] ?? [];
 			ops.forEach(op => applyOperation(block!, op));
+			if (Object.hasOwn(this.transform.deletes, id)) {
+				return undefined;
+			}
+		} else if (Object.hasOwn(this.transform.inserts, id)) {
+			return structuredClone(this.transform.inserts[id]) as T;
 		}
+
 		return block;
 	}
 
@@ -26,7 +35,7 @@ export class Tracker<T extends IBlock> implements IBlockStore<T> {
 	}
 
 	insert(block: T) {
-		this.transform.inserts[block.header.id] = block;
+		this.transform.inserts[block.header.id] = structuredClone(block);
 		this.transform.deletes.delete(block.header.id);
 	}
 
@@ -52,7 +61,7 @@ export class Tracker<T extends IBlock> implements IBlockStore<T> {
 	}
 
 	transformedBlockIds(): BlockId[] {
-		return blockIdsForTransform(this.transform);
+		return Array.from(new Set(blockIdsForTransform(this.transform)));
 	}
 
 	conflicts(blockIds: Set<BlockId>) {

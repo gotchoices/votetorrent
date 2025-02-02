@@ -1,4 +1,4 @@
-import type { IBlock, Action, ActionType, ActionHandler, BlockId, IBlockNetwork, ActionEntry, BlockStore } from "../index.js";
+import type { IBlock, Action, ActionType, ActionHandler, BlockId, IBlockNetwork, ActionEntry, BlockStore, GetFromResult } from "../index.js";
 import { Log, CacheStore, Atomic, Tracker, copyTransforms, CacheSource } from "../index.js";
 import { NetworkSource } from "../network/network-source.js";
 import type { CollectionHeaderBlock, CollectionId, ICollection } from "./index.js";
@@ -10,7 +10,6 @@ export type CollectionInitOptions<TAction> = {
 
 export class Collection<TAction> implements ICollection<TAction> {
 	private readonly pending: Action<TAction>[] = [];
-	public readonly cache: CacheStore<IBlock>;
 
 	protected constructor(
 		public readonly id: CollectionId,
@@ -18,11 +17,13 @@ export class Collection<TAction> implements ICollection<TAction> {
 		public readonly logId: BlockId,
 		private readonly handlers: Record<ActionType, ActionHandler<TAction>>,
 		private readonly source: NetworkSource<IBlock>,
+		/** Cache of unmodified blocks from the source */
 		private readonly sourceCache: CacheSource<IBlock>,
+		/** Tracked Changes */
 		private readonly tracker: Tracker<IBlock>,
-		public readonly isNew: boolean,
+		/** Cache of tracked changes */
+		public readonly cache: CacheStore<IBlock>,
 	) {
-		this.cache = new CacheStore(tracker);
 	}
 
 	static async createOrOpen<TAction>(network: IBlockNetwork, id: CollectionId, init: CollectionInitOptions<TAction>) {
@@ -30,26 +31,26 @@ export class Collection<TAction> implements ICollection<TAction> {
 		const source = new NetworkSource(id, network, undefined);
 		const sourceCache = new CacheSource(source);
 		const tracker = new Tracker(sourceCache);
+		const cache = new CacheStore(tracker);
 		const header = await source.tryGet(id) as CollectionHeaderBlock | undefined;
 		let logId: BlockId;
-		let isNew = false;
+
 		if (header) {	// Collection already exists
 			logId = header.logId;
-			const log = Log.open<Action<TAction>>(tracker, logId);
+			const log = Log.open<Action<TAction>>(cache, logId);
 			source.trxContext = await log.getTrxContext();
 		} else {	// Collection does not exist
 			source.trxContext = undefined;
 			logId = source.generateId();
 			const newHeader = {
-				...init.createHeaderBlock(id, tracker),
+				...init.createHeaderBlock(id, cache),
 				logId,
 			};
-			await Log.create<Action<TAction>>(tracker, logId);
-			tracker.insert(newHeader);
-			isNew = true;
+			await Log.create<Action<TAction>>(cache, logId);
+			cache.insert(newHeader);
 		}
 
-		return new Collection(id, network, logId, init.modules, source, sourceCache, tracker, isNew);
+		return new Collection(id, network, logId, init.modules, source, sourceCache, tracker, cache);
 	}
 
 	async transact(...actions: Action<TAction>[]) {
@@ -62,13 +63,16 @@ export class Collection<TAction> implements ICollection<TAction> {
 
 		for (const action of actions) {
 			const handler = this.handlers[action.type];
+			if (!handler) {
+				throw new Error(`No handler for action type ${action.type}`);
+			}
 			await handler(action, trx);
 		}
 
 		trx.commit();
 	}
 
-	/** Sync incoming changes and update our context to the latest log revision - resolve any conflicts with our pending actions. */
+	/** Load external changes and update our context to the latest log revision - resolve any conflicts with our pending actions. */
 	async update() {
 		// Start with a context that can see to the end of the log
 		const source = new NetworkSource(this.id, this.network, undefined);
@@ -76,8 +80,14 @@ export class Collection<TAction> implements ICollection<TAction> {
 		const cache = new CacheStore(tracker);
 
 		// Get the latest entries from the log, starting from where we left off
-		const log = Log.open<Action<TAction>>(cache, this.logId);
-		const latest = await log.getFrom(this.source.trxContext?.rev ?? 0);
+		const trxContext = this.source.trxContext;
+		let latest: GetFromResult<Action<TAction>>;
+		if (trxContext) {
+			const log = Log.open<Action<TAction>>(cache, this.logId);
+			latest = await log.getFrom(trxContext.rev);
+		} else {
+			latest = { entries: [], context: undefined };
+		}
 
 		// Process the entries and track the blocks they affect
 		let anyConflicts = false;
@@ -104,14 +114,14 @@ export class Collection<TAction> implements ICollection<TAction> {
 			// Create a snapshot tracker for the transaction, so that we can ditch the log changes if we have to retry the transaction
 			const snapshot = copyTransforms(this.tracker.transform);
 			const tracker = new Tracker(this.sourceCache, snapshot);
-			const cache = new CacheStore(tracker);
+			const cache = new CacheStore(tracker, snapshot);
 
 			// Add the transaction to the log
 			const log = Log.open<Action<TAction>>(cache, this.logId);
 			const newRev = (this.source.trxContext?.rev ?? 0) + 1;
 			const addResult = await log.addActions(this.pending, trxId, newRev);
 			// HACK: Adding to the log affects the transaction's blocks - patch the final set of blocks affected by the transaction
-			addResult.entry.action!.blockIds = [...tracker.transformedBlockIds(), ...this.tracker.transformedBlockIds()];
+			addResult.entry.action!.blockIds = tracker.transformedBlockIds();
 
 			// Commit the transaction to the network
 			const staleFailure = await this.source.transact(tracker.transform, trxId, newRev, addResult.tailPath.block.header.id);
@@ -140,9 +150,9 @@ export class Collection<TAction> implements ICollection<TAction> {
 		await this.sync();
 	}
 
-	async *selectLog(reverse = false): AsyncIterableIterator<Action<TAction>> {
+	async *selectLog(forward = true): AsyncIterableIterator<Action<TAction>> {
 		const log = Log.open<Action<TAction>>(this.cache, this.logId);
-		for await (const entry of log.select(undefined, reverse)) {
+		for await (const entry of log.select(undefined, forward)) {
 			if (entry.action) {
 				yield* entry.action.actions;
 			}

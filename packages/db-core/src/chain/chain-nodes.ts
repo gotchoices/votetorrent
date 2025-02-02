@@ -3,8 +3,8 @@ import { nameof } from "../utility/nameof.js";
 
 export type ChainDataNode<TEntry> = IBlock & {
 	entries: TEntry[];
-	priorId?: BlockId;
-	nextId?: BlockId;
+	priorId: BlockId | undefined;
+	nextId: BlockId | undefined;
 };
 
 export const entries$ = nameof<ChainDataNode<any>>("entries");

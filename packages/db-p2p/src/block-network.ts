@@ -1,5 +1,5 @@
 import { PeerId } from "@libp2p/interface";
-import { type TrxTransforms, type TrxBlocks, type BlockTrxStatus, type IBlockNetwork, type PendSuccess, type StaleFailure, type IKeyNetwork, type BlockId, type GetBlockResults, type PendResult, type CommitResult, type PendRequest, type TrxPending, type IRepo, type BlockGets, type Transforms, concatTransform, transformForBlockId, transformsFromTransform, blockIdsForTransform } from "../../db-core/src/index.js";
+import { type TrxTransforms, type TrxBlocks, type BlockTrxStatus, type IBlockNetwork, type PendSuccess, type StaleFailure, type IKeyNetwork, type BlockId, type GetBlockResults, type PendResult, type CommitResult, type PendRequest, type TrxPending, type IRepo, type BlockGets, type Transforms, concatTransform, transformForBlockId, transformsFromTransform, blockIdsForTransform, CommitRequest } from "../../db-core/src/index.js";
 import { RepoClient, Pending, blockIdToBytes, recordEmpty } from "./index.js";
 
 type CoordinatorBatch<TPayload, TResponse> = {
@@ -154,12 +154,12 @@ export class BlockNetwork implements IBlockNetwork {
 		);
 	}
 
-	async commit(tailId: BlockId, trxRef: TrxBlocks, rev: number): Promise<CommitResult> {
+	async commit(tailId: BlockId, request: CommitRequest): Promise<CommitResult> {
 		// Commit the tail block
-		const { batches: tailBatches, error: tailError } = await this.commitBlocks([tailId], trxRef.trxId, rev);
+		const { batches: tailBatches, error: tailError } = await this.commitBlocks({ blockIds: [tailId], trxId: request.trxId, rev: request.rev });
 		if (tailError) {
 			// Cancel all pending transactions as background microtask
-			Promise.resolve().then(() => this.cancel({ blockIds: [...trxRef.blockIds, tailId], trxId: trxRef.trxId }));
+			Promise.resolve().then(() => this.cancel({ blockIds: [...request.blockIds, tailId], trxId: request.trxId }));
 			// Collect and return any active stale failures
 			const stale = Array.from(allBatches(tailBatches, b => b.request?.isResponse as boolean && !b.request!.response!.success));
 			if (stale.length > 0) {
@@ -169,7 +169,7 @@ export class BlockNetwork implements IBlockNetwork {
 		}
 
 		// Commit all remaining block ids
-		const { batches, error } = await this.commitBlocks(trxRef.blockIds.filter(bid => bid !== tailId), trxRef.trxId, rev);
+		const { batches, error } = await this.commitBlocks({ blockIds: request.blockIds.filter(bid => bid !== tailId), trxId: request.trxId, rev: request.rev });
 		if (error) {
 			// Errors must recover once the tail is committed
 			// TODO: log failure
@@ -182,14 +182,14 @@ export class BlockNetwork implements IBlockNetwork {
 	}
 
 	/** Attempts to commit a set of blocks, and handles failures and errors */
-	private async commitBlocks(blockIds: BlockId[], transactionId: TrxId, rev: number) {
+	private async commitBlocks({ blockIds, trxId, rev }: CommitRequest) {
 		const expiration = Date.now() + this.timeoutMs;
 		const batches = await this.batchesForPayload<BlockId[], CommitResult>(blockIds, blockIds, mergeBlocks, []);
 		let error: Error | undefined;
 		try {
 			await this.processBatches(
 				batches,
-				(repo, batch) => repo.commit({ trxId: transactionId, blockIds: batch.payload, rev }, { expiration }),
+				(repo, batch) => repo.commit({ trxId: trxId, blockIds: batch.payload, rev }, { expiration }),
 				batch => batch.payload,
 				mergeBlocks,
 				expiration

@@ -1,4 +1,4 @@
-import type { BlockId, CollectionId, TrxId, TrxRev } from "../index.js";
+import type { BlockId, CollectionId, TrxContext, TrxId, TrxRev } from "../index.js";
 
 /** A log entry - either an action or a checkpoint */
 export type LogEntry<TAction> = {
@@ -34,3 +34,7 @@ export type CheckpointEntry = {
 export const LogDataBlockType = "LGD";
 export const LogHeaderBlockType = "LGH";
 
+export type GetFromResult<TAction> = {
+	context: TrxContext | undefined;
+	entries: ActionEntry<TAction>[];
+};

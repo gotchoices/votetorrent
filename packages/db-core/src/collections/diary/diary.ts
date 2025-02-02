@@ -35,8 +35,8 @@ export class Diary<TEntry> {
         await this.collection.updateAndSync();
     }
 
-    async *select(reverse = false): AsyncIterableIterator<TEntry> {
-        for await (const entry of this.collection.selectLog(reverse)) {
+    async *select(forward = true): AsyncIterableIterator<TEntry> {
+        for await (const entry of this.collection.selectLog(forward)) {
             yield entry.data;
         }
     }

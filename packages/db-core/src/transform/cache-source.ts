@@ -13,7 +13,7 @@ export class CacheSource<T extends IBlock> implements BlockSource<T> {
 		if (!block) {
 			block = await this.source.tryGet(id);
 		}
-		return block;
+		return structuredClone(block);
 	}
 
 	generateId(): BlockId {

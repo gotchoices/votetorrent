@@ -1,7 +1,8 @@
 import { expect } from 'aegir/chai'
 import { NetworkSource } from '../src/network/network-source.js'
 import { TestNetwork } from './test-network.js'
-import { randomUUID } from 'crypto'
+import { randomBytes } from '@libp2p/crypto'
+import { toString as uint8ArrayToString } from 'uint8arrays/to-string'
 import type { IBlock, TrxId, TrxContext, Transforms, BlockOperation } from '../src/index.js'
 
 describe('NetworkSource', () => {
@@ -11,6 +12,9 @@ describe('NetworkSource', () => {
 
   // Helper to create a valid block operation
   const createBlockOperation = (entity = 'test'): BlockOperation => [entity, 0, 0, []]
+
+  // Helper to generate a random transaction ID
+  const generateTrxId = (): TrxId => uint8ArrayToString(randomBytes(16), 'base64url') as TrxId
 
   beforeEach(() => {
     network = new TestNetwork()
@@ -47,7 +51,7 @@ describe('NetworkSource', () => {
 
     // Add block to network
     await network.pend({
-      trxId: randomUUID() as TrxId,
+      trxId: generateTrxId(),
       transforms: {
         inserts: { [blockId]: block },
         updates: {},
@@ -68,7 +72,7 @@ describe('NetworkSource', () => {
   it('should handle transaction context in block retrieval', async () => {
     const blockId = 'test-block'
     const trxContext: TrxContext = {
-      committed: [{ trxId: randomUUID() as TrxId, rev: 1 }],
+      committed: [{ trxId: generateTrxId(), rev: 1 }],
       rev: 1
     }
 
@@ -79,7 +83,7 @@ describe('NetworkSource', () => {
 
   it('should handle successful transaction lifecycle', async () => {
     const blockId = 'test-block'
-    const trxId = randomUUID() as TrxId
+    const trxId = generateTrxId()
     const transform: Transforms = {
       inserts: {},
       updates: { [blockId]: [createBlockOperation()] },
@@ -99,8 +103,8 @@ describe('NetworkSource', () => {
 
   it('should handle failed pend operation', async () => {
     const blockId = 'test-block'
-    const trxId1 = randomUUID() as TrxId
-    const trxId2 = randomUUID() as TrxId
+    const trxId1 = generateTrxId()
+    const trxId2 = generateTrxId()
 
     // Create a pending transaction
     await network.pend({
@@ -128,7 +132,7 @@ describe('NetworkSource', () => {
 
   it('should handle failed commit operation', async () => {
     const blockId = 'test-block'
-    const trxId = randomUUID() as TrxId
+    const trxId = generateTrxId()
     const transform: Transforms = {
       inserts: {},
       updates: { [blockId]: [createBlockOperation()] },
@@ -150,7 +154,7 @@ describe('NetworkSource', () => {
     })
 
     // Try to commit with an older revision
-    const result = await source.transact(transform, randomUUID() as TrxId, 1, 'tail-id')
+    const result = await source.transact(transform, generateTrxId(), 1, 'tail-id')
     expect(result).to.not.be.undefined
     expect(result?.success).to.be.false
     expect(result?.reason).to.equal('Blocks have been modified')
@@ -159,7 +163,7 @@ describe('NetworkSource', () => {
   it('should handle concurrent transactions', async () => {
     const promises = Array(5).fill(0).map(async (_, i) => {
       const blockId = `test-block-${i}`
-      const trxId = randomUUID() as TrxId
+      const trxId = generateTrxId()
       const transform: Transforms = {
         inserts: {},
         updates: { [blockId]: [createBlockOperation()] },
