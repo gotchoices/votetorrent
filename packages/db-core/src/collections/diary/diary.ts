@@ -1,5 +1,5 @@
 import { Collection } from "../../index.js";
-import type { IBlockNetwork, Action, BlockId, BlockStore, IBlock, CollectionInitOptions, CollectionId } from "../../index.js";
+import type { ITransactor, Action, BlockId, BlockStore, IBlock, CollectionInitOptions, CollectionId } from "../../index.js";
 import { DiaryHeaderBlockType } from "./index.js";
 
 export class Diary<TEntry> {
@@ -8,7 +8,7 @@ export class Diary<TEntry> {
 		) {
     }
 
-    static async create<TEntry>(network: IBlockNetwork, id: CollectionId): Promise<Diary<TEntry>> {
+    static async create<TEntry>(network: ITransactor, id: CollectionId): Promise<Diary<TEntry>> {
         const init: CollectionInitOptions<TEntry> = {
             modules: {
 							"append": async (action, trx) => {
@@ -31,7 +31,7 @@ export class Diary<TEntry> {
             data: data
         };
 
-        await this.collection.transact(action);
+        await this.collection.act(action);
         await this.collection.updateAndSync();
     }
 

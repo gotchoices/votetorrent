@@ -1,5 +1,5 @@
 import type { IBlock, BlockId, BlockStore as IBlockStore, BlockHeader, BlockOperation, BlockType, BlockSource as IBlockSource } from "../index.js";
-import { applyOperation, emptyTransforms, blockIdsForTransform, copyTransforms, ensured } from "../index.js";
+import { applyOperation, emptyTransforms, blockIdsForTransforms, ensured } from "../index.js";
 
 /** A block store that collects transformations, without applying them to the underlying source.
  * Transformations are also applied to the retrieved blocks, making it seem like the source has been modified.
@@ -8,19 +8,19 @@ export class Tracker<T extends IBlock> implements IBlockStore<T> {
 	constructor(
 		private readonly source: IBlockSource<T>,
 		/** The collected set of transformations to be applied. Treat as immutable */
-		public transform = emptyTransforms(),
+		public transforms = emptyTransforms(),
 	) { }
 
 	async tryGet(id: BlockId): Promise<T | undefined> {
 		const block = await this.source.tryGet(id);
 		if (block) {
-			const ops = this.transform.updates[id] ?? [];
+			const ops = this.transforms.updates[id] ?? [];
 			ops.forEach(op => applyOperation(block!, op));
-			if (Object.hasOwn(this.transform.deletes, id)) {
+			if (Object.hasOwn(this.transforms.deletes, id)) {
 				return undefined;
 			}
-		} else if (Object.hasOwn(this.transform.inserts, id)) {
-			return structuredClone(this.transform.inserts[id]) as T;
+		} else if (Object.hasOwn(this.transforms.inserts, id)) {
+			return structuredClone(this.transforms.inserts[id]) as T;
 		}
 
 		return block;
@@ -35,33 +35,33 @@ export class Tracker<T extends IBlock> implements IBlockStore<T> {
 	}
 
 	insert(block: T) {
-		this.transform.inserts[block.header.id] = structuredClone(block);
-		this.transform.deletes.delete(block.header.id);
+		this.transforms.inserts[block.header.id] = structuredClone(block);
+		this.transforms.deletes.delete(block.header.id);
 	}
 
 	update(blockId: BlockId, op: BlockOperation) {
-		const inserted = this.transform.inserts[blockId];
+		const inserted = this.transforms.inserts[blockId];
 		if (inserted) {
 			applyOperation(inserted, op);
 		} else {
-			ensured(this.transform.updates, blockId, () => []).push(op);
+			ensured(this.transforms.updates, blockId, () => []).push(structuredClone(op));
 		}
 	}
 
 	delete(blockId: BlockId) {
-		delete this.transform.inserts[blockId];
-		delete this.transform.updates[blockId];
-		this.transform.deletes.add(blockId);
+		delete this.transforms.inserts[blockId];
+		delete this.transforms.updates[blockId];
+		this.transforms.deletes.add(blockId);
 	}
 
 	reset(newTransform = emptyTransforms()) {
-		const oldTransform = this.transform;
-		this.transform = newTransform;
+		const oldTransform = this.transforms;
+		this.transforms = newTransform;
 		return oldTransform;
 	}
 
 	transformedBlockIds(): BlockId[] {
-		return Array.from(new Set(blockIdsForTransform(this.transform)));
+		return Array.from(new Set(blockIdsForTransforms(this.transforms)));
 	}
 
 	conflicts(blockIds: Set<BlockId>) {

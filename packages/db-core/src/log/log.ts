@@ -1,5 +1,5 @@
 import { sha256 } from 'multiformats/hashes/sha2'
-import { Chain, entryAt } from "../index.js";
+import { apply, Chain, entryAt, nameof } from "../index.js";
 import type { IBlock, BlockId, TrxId, CollectionId, ChainPath, TrxRev, TrxContext, ChainInitOptions, BlockStore } from "../index.js";
 import type { LogEntry, ActionEntry } from "./index.js";
 import { LogDataBlockType, LogHeaderBlockType } from "./index.js";
@@ -10,8 +10,10 @@ import type { GetFromResult } from './struct.js';
 export type LogBlock<TAction> = ChainDataNode<LogEntry<TAction>>
 	& {
 		/** Base64url encoded Sha256 hash of the next block - present on every block except the head */
-		nextHash?: string,
+		priorHash?: string,
 	};
+
+export const priorHash$ = nameof<LogBlock<any>>("priorHash");
 
 export class Log<TAction> {
 	protected constructor(
@@ -34,10 +36,12 @@ export class Log<TAction> {
 	}
 
 	/** Adds a new entry to the log. */
-	async addActions(actions: TAction[], transactionId: TrxId, rev: number, blockIds: BlockId[] = [], collectionIds: CollectionId[] = [], timestamp: number = Date.now()) {
-		const entry = { timestamp, rev, action: { trxId: transactionId, actions, blockIds, collectionIds } } as LogEntry<TAction>;
+	async addActions(actions: TAction[], transactionId: TrxId, rev: number, getBlockIds: () => BlockId[], collectionIds: CollectionId[] = [], timestamp: number = Date.now()) {
+		const entry = { timestamp, rev, action: { trxId: transactionId, actions, blockIds: [], collectionIds } } as LogEntry<TAction>;
 		const tailPath = await this.chain.add(entry);
-		return { entry, tailPath };
+		const entryWithBlockIds = { ...entry, action: { ...entry.action!, blockIds: getBlockIds() } };
+		this.chain.updateAt(tailPath, entryWithBlockIds);
+		return { entry: entryWithBlockIds, tailPath };
 	}
 
 	/** Adds a checkpoint to the log. */
@@ -138,12 +142,13 @@ export class Log<TAction> {
 		return {
 			createDataBlock: () => ({ header: store.createBlockHeader(LogDataBlockType) }),
 			createHeaderBlock: (id?: BlockId) => ({ header: store.createBlockHeader(LogHeaderBlockType, id) }),
-			blockAdded: async (newTail: LogBlock<TAction>, oldTail: LogBlock<TAction> | undefined) => {
+			newBlock: async (newTail: LogBlock<TAction>, oldTail: LogBlock<TAction> | undefined) => {
 				if (oldTail) {
-					const hash = await sha256.digest(new TextEncoder().encode(JSON.stringify(oldTail)))
-					newTail.nextHash = uint8ArrayToString(hash.digest, 'base64url')
+					const hash = await sha256.digest(new TextEncoder().encode(JSON.stringify(oldTail)));
+					newTail.priorHash = uint8ArrayToString(hash.digest, 'base64url');
 				}
 			},
 		} as ChainInitOptions<LogEntry<TAction>>;
+
 	}
 }

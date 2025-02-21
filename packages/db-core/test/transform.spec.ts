@@ -1,7 +1,7 @@
 import { expect } from 'aegir/chai'
 import type { BlockId, BlockOperation, IBlock, BlockType, Transforms } from '../src/index.js'
 import { Tracker } from '../src/transform/tracker.js'
-import { applyOperation, withOperation, blockIdsForTransform, emptyTransforms, mergeTransforms, concatTransforms, transformForBlockId } from '../src/index.js'
+import { applyOperation, withOperation, blockIdsForTransforms, emptyTransforms, mergeTransforms, concatTransforms, transformForBlockId } from '../src/index.js'
 
 interface TestBlock extends IBlock {
   data: string
@@ -35,8 +35,8 @@ describe('Transform functionality', () => {
       const newBlock = { ...testBlock, header: { ...testBlock.header, id: 'new-id' as BlockId } }
 
       tracker.insert(newBlock)
-      expect(tracker.transform.inserts['new-id']).to.deep.equal(newBlock)
-      expect(tracker.transform.deletes.has('new-id')).to.be.false
+      expect(tracker.transforms.inserts['new-id']).to.deep.equal(newBlock)
+      expect(tracker.transforms.deletes.has('new-id')).to.be.false
     })
 
     it('should track updates correctly', async () => {
@@ -44,16 +44,16 @@ describe('Transform functionality', () => {
       const operation: BlockOperation = ['data', 0, 0, 'updated']
 
       tracker.update('test-id' as BlockId, operation)
-      expect(tracker.transform.updates['test-id']).to.deep.equal([operation])
+      expect(tracker.transforms.updates['test-id']).to.deep.equal([operation])
     })
 
     it('should track deletes correctly', async () => {
       const tracker = new Tracker(mockSource)
 
       tracker.delete('test-id' as BlockId)
-      expect(tracker.transform.deletes.has('test-id')).to.be.true
-      expect(tracker.transform.inserts['test-id']).to.be.undefined
-      expect(tracker.transform.updates['test-id']).to.be.undefined
+      expect(tracker.transforms.deletes.has('test-id')).to.be.true
+      expect(tracker.transforms.inserts['test-id']).to.be.undefined
+      expect(tracker.transforms.updates['test-id']).to.be.undefined
     })
 
     it('should reset transform correctly', async () => {
@@ -62,7 +62,7 @@ describe('Transform functionality', () => {
 
       const oldTransforms = tracker.reset()
       expect(oldTransforms.inserts['test-id']).to.deep.equal(testBlock)
-      expect(tracker.transform).to.deep.equal(emptyTransforms())
+      expect(tracker.transforms).to.deep.equal(emptyTransforms())
     })
   })
 
@@ -98,7 +98,7 @@ describe('Transform functionality', () => {
         deletes: new Set(['id3'])
       }
 
-      const ids = blockIdsForTransform(transform)
+      const ids = blockIdsForTransforms(transform)
       expect(ids).to.have.members(['id1', 'id2', 'id3'])
     })
 

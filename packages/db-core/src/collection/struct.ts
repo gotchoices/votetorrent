@@ -1,4 +1,4 @@
-import type { IBlock, BlockId } from "../index.js";
+import type { IBlock, BlockId, Action } from "../index.js";
 
 export type CollectionId = BlockId;
 
@@ -15,3 +15,7 @@ export interface ICollection<TAction> {
 	update(): Promise<void>;
 	sync(): Promise<void>;
 }
+
+export type CreateCollectionAction = Action<void> & {
+	type: "create";
+};

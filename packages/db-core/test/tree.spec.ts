@@ -1,6 +1,6 @@
 import { expect } from 'aegir/chai'
 import { Tree } from '../src/collections/tree/index.js'
-import { TestNetwork } from './test-network.js'
+import { TestTransactor } from './test-transactor.js'
 import { KeyRange, KeyBound } from '../src/btree/index.js'
 
 interface TestEntry {
@@ -10,12 +10,12 @@ interface TestEntry {
 }
 
 describe('Tree', () => {
-  let network: TestNetwork
+  let network: TestTransactor
   let tree: Tree<number, TestEntry>
   const collectionId = 'test-tree'
 
   beforeEach(async () => {
-    network = new TestNetwork()
+    network = new TestTransactor()
     tree = await Tree.createOrOpen<number, TestEntry>(
       network,
       collectionId,

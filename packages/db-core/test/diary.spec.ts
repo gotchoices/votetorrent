@@ -1,6 +1,6 @@
 import { expect } from 'aegir/chai'
 import { Diary } from '../src/collections/diary/index.js'
-import { TestNetwork } from './test-network.js'
+import { TestTransactor } from './test-transactor.js'
 
 interface TestEntry {
   id: number
@@ -9,12 +9,12 @@ interface TestEntry {
 }
 
 describe('Diary', () => {
-  let network: TestNetwork
+  let network: TestTransactor
   let diary: Diary<TestEntry>
   const collectionId = 'test-diary'
 
   beforeEach(async () => {
-    network = new TestNetwork()
+    network = new TestTransactor()
     diary = await Diary.create<TestEntry>(network, collectionId)
   })
 

@@ -1,0 +1,52 @@
+{
+  "name": "@votetorrent/vote-engine",
+  "version": "0.0.1",
+  "type": "module",
+  "description": "Concerete implementation of voting functionality for VoteTorrent",
+  "main": "dist/src/index.js",
+  "types": "dist/src/index.d.ts",
+  "files": [
+    "src",
+    "dist",
+    "!dist/test",
+    "!**/*.tsbuildinfo"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "import": "./dist/src/index.js"
+    }
+  },
+  "scripts": {
+    "clean": "aegir clean",
+    "build": "aegir build",
+    "lint": "aegir lint",
+    "test": "aegir test",
+    "test:node": "aegir test -t node",
+    "dep-check": "aegir dep-check"
+  },
+  "homepage": "https://github.com/gotchoices/votetorrent",
+  "bugs": {
+    "url": "https://github.com/gotchoices/votetorrent/issues"
+  },
+  "keywords": [
+    "vote",
+    "voting",
+    "peer to peer",
+    "p2p"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^22.9.0",
+    "aegir": "^45.0.8"
+  },
+  "dependencies": {
+    "@votetorrent/db-core": "*",
+    "@votetorrent/db-p2p": "*",
+    "@votetorrent/vote-core": "*",
+    "@libp2p/interface": "^1.1.0",
+    "@libp2p/peer-id": "^4.0.0",
+    "uint8arrays": "^5.1.0",
+		"@react-native-async-storage/async-storage": "^2.1.1"
+  }
+}

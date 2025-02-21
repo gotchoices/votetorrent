@@ -36,4 +36,8 @@ export class TestLogStore implements BlockStore<LogBlock<any>> {
 	logBlockIds() {
 		console.log('Current blocks:', [...this.blocks.keys()]);
 	}
+
+	getDirtiedBlockIds() {
+		return [...this.blocks.keys()];
+	}
 }

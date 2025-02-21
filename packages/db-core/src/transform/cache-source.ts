@@ -12,6 +12,9 @@ export class CacheSource<T extends IBlock> implements BlockSource<T> {
 		let block = this.cache.get(id);
 		if (!block) {
 			block = await this.source.tryGet(id);
+			if (block) {
+				this.cache.set(id, block);
+			}
 		}
 		return structuredClone(block);
 	}
@@ -40,7 +43,7 @@ export class CacheSource<T extends IBlock> implements BlockSource<T> {
 			this.cache.delete(blockId);
 		}
 		for (const [, block] of Object.entries(transform.inserts)) {
-			this.cache.set(block.header.id, block as T);
+			this.cache.set(block.header.id, structuredClone(block) as T);
 		}
 		for (const [blockId, operations] of Object.entries(transform.updates)) {
 			for (const op of operations) {

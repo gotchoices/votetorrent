@@ -1,5 +1,5 @@
 import type { CollectionId, BlockId, IBlock, TrxId, Transform, Transforms } from "../index.js";
-import type { TrxContext, TrxRev } from "../transaction/struct.js";
+import type { TrxContext, TrxRev } from "../collection/transaction.js";
 
 export type TrxBlocks = {
 	blockIds: BlockId[];
@@ -29,7 +29,7 @@ export type PendRequest = TrxTransforms & {
 	 * 'c' is continue normally,
 	 * 'f' is fail, returning the pending TrxIds,
 	 * 'r' is return, which fails but returns the pending TrxIds and their transforms */
-	pending: 'c' | 'f' | 'r';
+	policy: 'c' | 'f' | 'r';
 };
 
 export type BlockTrxStatus = TrxBlocks & {
@@ -57,6 +57,10 @@ export type StaleFailure = {
 export type PendResult = PendSuccess | StaleFailure;
 
 export type CommitRequest = TrxBlocks & {
+	/** The header block of the collection, if this is a new collection (commit first) */
+	headerId?: BlockId;
+	/** The tail block of the log (commit next) */
+	tailId: BlockId;
 	/** The new revision for the committed transaction */
 	rev: number;
 };

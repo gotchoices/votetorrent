@@ -1,5 +1,5 @@
 import { Atomic, type BlockStore, type BlockId, type IBlock } from "../index.js";
-import { ChainDataBlockType, ChainHeaderBlockType } from "./chain-nodes.js";
+import { ChainDataBlockType, ChainHeaderBlockType, entries$, headId$, nextId$, priorId$, tailId$ } from "./chain-nodes.js";
 import type { ChainDataNode, ChainHeaderNode } from "./chain-nodes.js";
 import { apply } from "../blocks/index.js";
 
@@ -18,7 +18,7 @@ export type ChainNodeInit<T> = IBlock & {
 export type ChainInitOptions<TEntry> = {
 	createDataBlock?: () => ChainNodeInit<ChainDataNode<TEntry>>;
 	createHeaderBlock?: (id?: BlockId) => ChainNodeInit<ChainHeaderNode>;
-	blockAdded?: (newTail: ChainDataNode<TEntry>, oldTail: ChainDataNode<TEntry> | undefined) => Promise<void>;
+	newBlock?: (newTail: ChainDataNode<TEntry>, oldTail: ChainDataNode<TEntry> | undefined) => Promise<void>;
 }
 
 export type ChainCreateOptions<TEntry> = ChainInitOptions<TEntry> & {
@@ -73,7 +73,7 @@ export class Chain<TEntry> {
 		// Attempt to fit in current block
 		const copied = entries.slice(0, EntriesPerBlock - tail.entries.length);
 		if (copied.length > 0) {
-			apply(trx, tail, ['entries', tail.entries.length, 0, copied]);
+			apply(trx, tail, [entries$, tail.entries.length, 0, copied]);
 			entries = entries.slice(copied.length);
 		}
 
@@ -84,19 +84,28 @@ export class Chain<TEntry> {
 				priorId: tail.header.id,
 				nextId: undefined,
 			} as ChainDataNode<TEntry>;
+			await this.options?.newBlock?.(newTail, oldTail);
 			trx.insert(newTail);
-			apply(trx, tail, ['nextId', 0, 0, newTail.header.id]);
-			await this.options?.blockAdded?.(newTail, oldTail);
+			apply(trx, tail, [nextId$, 0, 0, newTail.header.id]);
 			tail = newTail;
 		}
 
 		if (tail !== oldTail) {
-			apply(trx, headerBlock, ['tailId', 0, 0, tail.header.id]);
+			apply(trx, headerBlock, [tailId$, 0, 0, tail.header.id]);
 		}
 
 		trx.commit();
 
-		return { headerBlock, block: tail, index: tail.entries.length };
+		return { headerBlock, block: tail, index: tail.entries.length - 1 };
+	}
+
+	/** Updates the entry at the given path. */
+	updateAt(path: ChainPath<TEntry>, entry: TEntry) {
+		if (!pathValid(path)) {
+			throw new Error("Invalid path");
+		}
+		const { index, block } = path;
+		apply(this.store, block, [entries$, index, 1, [entry]]);
 	}
 
 	/**
@@ -124,7 +133,7 @@ export class Chain<TEntry> {
 			if (tail.entries.length > n) { // Partial removal
 				const removed = tail.entries.slice(-n);
 				result.unshift(...removed);
-				apply(trx, tail, ['entries', tail.entries.length - n, n, []]);
+				apply(trx, tail, [entries$, tail.entries.length - n, n, []]);
 				break;
 			} else {	// Entire block removal
 				result.unshift(...tail.entries);
@@ -132,16 +141,16 @@ export class Chain<TEntry> {
 				if (tail.priorId) {
 					trx.delete(tail.header.id);
 					tail = await trx.tryGet(tail.priorId) as ChainDataNode<TEntry>;
-					apply(trx, tail, ['nextId', 0, 0, undefined]);
+					apply(trx, tail, [nextId$, 0, 0, undefined]);
 				} else {	// No more blocks... just empty what's left
-					apply(trx, tail, ['entries', 0, tail.entries.length, []]);
+					apply(trx, tail, [entries$, 0, tail.entries.length, []]);
 					break;
 				}
 			}
 		}
 
 		if (tail !== oldTail) {
-			apply(trx, headerBlock, ['tailId', 0, 0, tail.header.id]);
+			apply(trx, headerBlock, [tailId$, 0, 0, tail.header.id]);
 		}
 
 		trx.commit();
@@ -173,7 +182,7 @@ export class Chain<TEntry> {
 		while (n > 0) {
 			if (head.entries.length > n) {	// Consumes part of block
 				result.push(...head.entries.slice(0, n));
-				apply(trx, head, ['entries', 0, n, []]);
+				apply(trx, head, [entries$, 0, n, []]);
 				break;
 			} else {	// Consumes entire block
 				result.push(...head.entries);
@@ -181,15 +190,15 @@ export class Chain<TEntry> {
 				if (head.nextId) {
 					trx.delete(head.header.id);
 					head = await trx.tryGet(head.nextId) as ChainDataNode<TEntry>;
-					apply(trx, head, ['priorId', 0, 0, undefined]);
+					apply(trx, head, [priorId$, 0, 0, undefined]);
 				} else {	// No more blocks... just empty what's left
-					apply(trx, head, ['entries', 0, head.entries.length, []]);
+					apply(trx, head, [entries$, 0, head.entries.length, []]);
 					break;
 				}
 			}
 		}
 		if (head !== oldHead) {
-			apply(trx, headerBlock, ['headId', 0, 0, head.header.id]);
+			apply(trx, headerBlock, [headId$, 0, 0, head.header.id]);
 		}
 
 		trx.commit();
@@ -206,7 +215,6 @@ export class Chain<TEntry> {
 			return;
 		}
 		let block: ChainDataNode<TEntry> | undefined = path.block;
-
 
 		let index = path.index;
 		if (forward) {

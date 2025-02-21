@@ -1,13 +1,13 @@
 import { expect } from 'aegir/chai'
-import { NetworkSource } from '../src/network/network-source.js'
-import { TestNetwork } from './test-network.js'
+import { TransactorSource } from '../src/transactor/transactor-source.js'
+import { TestTransactor } from './test-transactor.js'
 import { randomBytes } from '@libp2p/crypto'
 import { toString as uint8ArrayToString } from 'uint8arrays/to-string'
 import type { IBlock, TrxId, TrxContext, Transforms, BlockOperation } from '../src/index.js'
 
 describe('NetworkSource', () => {
-  let network: TestNetwork
-  let source: NetworkSource<IBlock>
+  let network: TestTransactor
+  let source: TransactorSource<IBlock>
   const collectionId = 'test-collection'
 
   // Helper to create a valid block operation
@@ -17,8 +17,8 @@ describe('NetworkSource', () => {
   const generateTrxId = (): TrxId => uint8ArrayToString(randomBytes(16), 'base64url') as TrxId
 
   beforeEach(() => {
-    network = new TestNetwork()
-    source = new NetworkSource(collectionId, network, undefined)
+    network = new TestTransactor()
+    source = new TransactorSource(collectionId, network, undefined)
   })
 
   it('should create block headers with correct properties', () => {
@@ -57,7 +57,7 @@ describe('NetworkSource', () => {
         updates: {},
         deletes: new Set()
       },
-      pending: 'c'
+      policy: 'c'
     })
 
     const retrieved = await source.tryGet(blockId)
@@ -76,7 +76,7 @@ describe('NetworkSource', () => {
       rev: 1
     }
 
-    source = new NetworkSource(collectionId, network, trxContext)
+    source = new TransactorSource(collectionId, network, trxContext)
     const retrieved = await source.tryGet(blockId)
     expect(retrieved).to.be.undefined
   })
@@ -90,7 +90,7 @@ describe('NetworkSource', () => {
       deletes: new Set()
     }
 
-    const result = await source.transact(transform, trxId, 1, 'tail-id')
+    const result = await source.transact(transform, trxId, 1, 'header-id', 'tail-id')
     expect(result).to.be.undefined
 
     const pendingTrx = network.getPendingTransactions()
@@ -114,7 +114,7 @@ describe('NetworkSource', () => {
         updates: { [blockId]: [createBlockOperation()] },
         deletes: new Set()
       },
-      pending: 'c'
+      policy: 'c'
     })
 
     // Try to create another transaction on the same block
@@ -124,7 +124,7 @@ describe('NetworkSource', () => {
       deletes: new Set()
     }
 
-    const result = await source.transact(transform, trxId2, 1, 'tail-id')
+    const result = await source.transact(transform, trxId2, 1, 'header-id', 'tail-id')
     expect(result).to.not.be.undefined
     expect(result?.success).to.be.false
     expect(result?.reason).to.equal('Blocks have pending transactions')
@@ -143,18 +143,20 @@ describe('NetworkSource', () => {
     await network.pend({
       trxId,
       transforms: transform,
-      pending: 'c'
+      policy: 'c'
     })
 
     // Simulate a stale revision
-    await network.commit('tail-id', {
+    await network.commit({
+      headerId: 'header-id',
+      tailId: 'tail-id',
       blockIds: [blockId],
       trxId,
       rev: 2
     })
 
     // Try to commit with an older revision
-    const result = await source.transact(transform, generateTrxId(), 1, 'tail-id')
+    const result = await source.transact(transform, generateTrxId(), 1, 'header-id', 'tail-id')
     expect(result).to.not.be.undefined
     expect(result?.success).to.be.false
     expect(result?.reason).to.equal('Blocks have been modified')
@@ -170,7 +172,7 @@ describe('NetworkSource', () => {
         deletes: new Set()
       }
 
-      return source.transact(transform, trxId, i + 1, 'tail-id')
+      return source.transact(transform, trxId, i + 1, 'header-id', 'tail-id')
     })
 
     const results = await Promise.all(promises)
@@ -179,5 +181,91 @@ describe('NetworkSource', () => {
 
     const committedTrx = network.getCommittedTransactions()
     expect(committedTrx.size).to.equal(5)
+  })
+
+  it('should handle transaction rollback', async () => {
+    const blockId = 'test-block'
+    const trxId = generateTrxId()
+    const transform: Transforms = {
+      inserts: {},
+      updates: { [blockId]: [createBlockOperation()] },
+      deletes: new Set()
+    }
+
+    // Start transaction
+    await network.pend({
+      trxId,
+      transforms: transform,
+      policy: 'c'
+    })
+
+    // Rollback the transaction
+    await network.cancel({
+      trxId,
+      blockIds: [blockId]
+    })
+
+    // Verify block is available for new transactions
+    const newTrxId = generateTrxId()
+    const result = await source.transact(transform, newTrxId, 1, 'header-id', 'tail-id')
+    expect(result?.success).to.be.true
+  })
+
+  it('should handle concurrent transactions on different blocks', async () => {
+    const blockId1 = 'test-block-1'
+    const blockId2 = 'test-block-2'
+    const trxId1 = generateTrxId()
+    const trxId2 = generateTrxId()
+
+    const transform1: Transforms = {
+      inserts: {},
+      updates: { [blockId1]: [createBlockOperation()] },
+      deletes: new Set()
+    }
+
+    const transform2: Transforms = {
+      inserts: {},
+      updates: { [blockId2]: [createBlockOperation()] },
+      deletes: new Set()
+    }
+
+    // Execute transactions concurrently
+    const [result1, result2] = await Promise.all([
+      source.transact(transform1, trxId1, 1, 'header-id', 'tail-id'),
+      source.transact(transform2, trxId2, 1, 'header-id', 'tail-id')
+    ])
+
+    expect(result1?.success).to.be.true
+    expect(result2?.success).to.be.true
+  })
+
+  it('should handle block deletion with pending transactions', async () => {
+    const blockId = 'test-block'
+    const trxId1 = generateTrxId()
+
+    // Create a pending transaction
+    const transform: Transforms = {
+      inserts: {},
+      updates: { [blockId]: [createBlockOperation()] },
+      deletes: new Set([blockId])
+    }
+
+    await network.pend({
+      trxId: trxId1,
+      transforms: transform,
+      policy: 'c'
+    })
+
+    // Try to delete the block with another transaction
+    const trxId2 = generateTrxId()
+    const deleteTransform: Transforms = {
+      inserts: {},
+      updates: {},
+      deletes: new Set([blockId])
+    }
+
+    const result = await source.transact(deleteTransform, trxId2, 1, 'header-id', 'tail-id')
+    expect(result?.success).to.be.false
+    expect(result?.reason).to.equal('Blocks have pending transactions')
   })
 })

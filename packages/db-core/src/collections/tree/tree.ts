@@ -1,5 +1,5 @@
 import { Collection, type CollectionInitOptions, type CollectionId } from "../../collection/index.js";
-import type { IBlockNetwork, BlockId, BlockStore, IBlock } from "../../index.js";
+import type { ITransactor, BlockId, BlockStore, IBlock } from "../../index.js";
 import { BTree, type Path, type KeyRange } from "../../btree/index.js";
 import { CollectionTrunk } from "./collection-trunk.js";
 import { TreeHeaderBlockType, type TreeReplaceAction } from "./struct.js";
@@ -13,7 +13,7 @@ export class Tree<TKey, TEntry> {
 	}
 
 	static async createOrOpen<TKey, TEntry>(
-		network: IBlockNetwork,
+		network: ITransactor,
 		id: CollectionId,
 		keyFromEntry = (entry: TEntry) => entry as unknown as TKey,
 		compare = (a: TKey, b: TKey) => a < b ? -1 : a > b ? 1 : 0,
@@ -47,12 +47,12 @@ export class Tree<TKey, TEntry> {
 		};
 
 		const collection = await Collection.createOrOpen<TreeReplaceAction<TKey, TEntry>>(network, id, init);
-		btree = btree ?? new BTree<TKey, TEntry>(collection.cache, new CollectionTrunk(collection.cache, collection.id), keyFromEntry, compare);
+		btree = btree ?? new BTree<TKey, TEntry>(collection.tracker, new CollectionTrunk(collection.tracker, collection.id), keyFromEntry, compare);
 		return new Tree<TKey, TEntry>(collection, btree);
 	}
 
 	async replace(data: TreeReplaceAction<TKey, TEntry>): Promise<void> {
-			await this.collection.transact({ type: "replace", data });
+			await this.collection.act({ type: "replace", data });
 			await this.collection.updateAndSync();
 	}
 

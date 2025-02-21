@@ -47,7 +47,6 @@ export class BTree<TKey, TEntry> {
 		return new BTree(store, trunk, keyFromEntry, compare);
 	}
 
-
 	/** @returns a path to the first entry (on = false if no entries) */
 	async first(): Promise<Path<TKey, TEntry>> {
 		return await this.getFirst(await this.trunk.get());

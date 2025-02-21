@@ -31,6 +31,8 @@
   },
   "dependencies": {
     "@votetorrent/db-core": "*",
+		"it-pipe": "^3.0.1",
+		"it-length-prefixed": "^10.0.0",
     "@libp2p/interface": "^1.1.0",
     "@libp2p/peer-id": "^4.0.0",
     "uint8arrays": "^5.1.0"

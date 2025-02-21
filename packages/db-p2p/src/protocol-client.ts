@@ -1,8 +1,8 @@
 import { pipe } from 'it-pipe';
 import { encode as lpEncode, decode as lpDecode } from 'it-length-prefixed';
 import { pushable } from 'it-pushable';
-import { PeerId } from '@libp2p/interface';
-import { IKeyNetwork } from '../../db-core/src/network/i-key-network.js';
+import type { PeerId } from '@libp2p/interface';
+import type { IKeyNetwork } from '@votetorrent/db-core';
 import { first } from './it-utility.js';
 
 export class ProtocolClient {

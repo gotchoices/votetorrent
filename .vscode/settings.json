@@ -19,7 +19,10 @@
 		"pushable",
 		"Startable",
 		"Trxes",
-		"uncheckpointed"
+		"Trxs",
+		"uncheckpointed",
+		"upserted",
+		"votetorrent"
 	],
 	"svg.preview.background": "custom"
 }
