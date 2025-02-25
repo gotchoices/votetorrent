@@ -1,4 +1,4 @@
-import { PendRequest, TrxBlocks, IRepo, MessageOptions, CommitResult, GetBlockResults, PendResult, BlockGets, CommitRequest } from "../../db-core/src/index.js";
+import type { PendRequest, TrxBlocks, IRepo, MessageOptions, CommitResult, GetBlockResults, PendResult, BlockGets, CommitRequest } from "@votetorrent/db-core";
 import { KeyNetwork } from "./key-network.js";
 
 /** Cluster coordination repo - uses local store, as well as distributes changes to other nodes using cluster consensus. */

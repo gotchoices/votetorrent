@@ -1,6 +1,8 @@
-import { IRepo, MessageOptions, BlockId, blockIdsForTransform, CommitRequest, CommitResult, GetBlockResults, IBlock, PendRequest, PendResult, TrxBlocks, TrxId, transformForBlockId, BlockTrxState, TrxRev, BlockGets, TrxPending, Transform, applyTransform, PendSuccess, TrxTransform, groupBy, concatTransform, emptyTransforms } from "../../../db-core/src/index.js";
+import type { IRepo, MessageOptions, BlockId, CommitRequest, CommitResult, GetBlockResults, PendRequest, PendResult, TrxBlocks,
+	TrxId, BlockGets, TrxPending, PendSuccess, TrxTransform } from "@votetorrent/db-core";
+import { transformForBlockId, applyTransform, groupBy, concatTransform, emptyTransforms, blockIdsForTransforms } from "@votetorrent/db-core";
 import { asyncIteratorToArray } from "../it-utility.js";
-import { IBlockStorage } from "./i-block-storage.js";
+import type { IBlockStorage } from "./i-block-storage.js";
 
 export class StorageRepo implements IRepo {
 	constructor(
@@ -57,7 +59,7 @@ export class StorageRepo implements IRepo {
 	}
 
 	async pend(request: PendRequest, options?: MessageOptions): Promise<PendResult> {
-		const blockIds = blockIdsForTransform(request.transforms);
+		const blockIds = blockIdsForTransforms(request.transforms);
 		const pendings: TrxPending[] = [];
 
 		// First handle any pending transactions
@@ -65,9 +67,9 @@ export class StorageRepo implements IRepo {
 			const blockStorage = this.createBlockStorage(blockId);
 			const pending = await asyncIteratorToArray(blockStorage.listPendingTransactions());
 			if (pending.length > 0) {
-				if (request.pending === 'f') {
+				if (request.policy === 'f') {
 					return { success: false, pending: pending.map(trxId => ({ blockId, trxId })) };
-				} else if (request.pending === 'r') {
+				} else if (request.policy === 'r') {
 					return {
 						success: false,
 						pending: await Promise.all(pending.map(async trxId => ({
@@ -206,7 +208,7 @@ function perBlockTrxTransformsToPerTransaction(missing: { blockId: BlockId; tran
 			return acc;
 		}, {
 			trxId: trxId as TrxId,
-			rev: items[0].transform.rev,	// Assumption: all missing trxIds share the same revision
+			rev: items[0]!.transform.rev,	// Assumption: all missing trxIds share the same revision
 			transforms: emptyTransforms()
 		})
 	);

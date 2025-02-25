@@ -1,4 +1,4 @@
-import { BlockId, IBlock, Transforms, TrxId, TrxRev, TrxTransform, TrxTransforms } from "../../../db-core/src/index.js";
+import type { BlockId, IBlock, TrxId, TrxRev, TrxTransform, TrxTransforms } from "@votetorrent/db-core";
 
 export type RevisionRange = [
 	/** Inclusive start */

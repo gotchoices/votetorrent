@@ -1,6 +1,6 @@
-import { BlockId, IBlock, Transform, TrxId, TrxRev } from "../../../db-core/src/index.js";
-import { BlockArchive, BlockMetadata, RestoreCallback, RevisionRange } from "./struct.js";
-import { IRawStorage } from "./i-raw-storage.js";
+import type { BlockId, TrxRev } from "@votetorrent/db-core";
+import type { BlockArchive, BlockMetadata, RestoreCallback, RevisionRange } from "./struct.js";
+import type { IRawStorage } from "./i-raw-storage.js";
 import { mergeRanges } from "./helpers.js";
 
 export class BlockStorageManager {

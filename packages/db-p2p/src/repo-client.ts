@@ -1,7 +1,8 @@
-import { IKeyNetwork, IRepo, GetBlockResults, PendSuccess, StaleFailure, TrxBlocks, CommitSuccess, MessageOptions, CommitResult, PendRequest, CommitRequest, BlockGets } from '../../db-core/src/index.js';
-import { RepoMessage } from '../../db-core/src/network/repo-protocol.js';
-import { PeerId } from '@libp2p/interface';
-import { ProtocolClient } from './protocol-client.js';
+import type { IKeyNetwork, IRepo, GetBlockResults, PendSuccess, StaleFailure, TrxBlocks, MessageOptions, CommitResult,
+	PendRequest, CommitRequest, BlockGets } from "@votetorrent/db-core";
+import type { RepoMessage } from "@votetorrent/db-core";
+import type { PeerId } from "@libp2p/interface";
+import { ProtocolClient } from "./protocol-client.js";
 
 export class RepoClient extends ProtocolClient implements IRepo {
 	private constructor(peerId: PeerId, keyNetwork: IKeyNetwork) {

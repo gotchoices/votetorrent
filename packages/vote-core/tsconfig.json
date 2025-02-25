@@ -2,9 +2,8 @@
 	"extends": "aegir/src/config/tsconfig.aegir.json",
   "compilerOptions": {
 		"outDir": "dist",
-		"strict": true,
 		"strictFunctionTypes": true,
 		"noUncheckedIndexedAccess": true
   },
-  "include": ["src", "test", "oldsrc/structs/authority.ts", "oldsrc/structs/authorized-timestamp.ts", "oldsrc/structs/device-attestation.ts", "oldsrc/structs/device-signature.ts", "oldsrc/structs/election.ts", "oldsrc/structs/index.ts", "oldsrc/structs/pool.ts", "oldsrc/structs/question.ts", "oldsrc/structs/receipt.ts", "oldsrc/structs/registrant.ts", "oldsrc/structs/registration-initiation.ts", "oldsrc/structs/registration-interview.ts", "oldsrc/structs/results.ts", "oldsrc/structs/rule.ts", "oldsrc/structs/template.ts", "oldsrc/structs/timestamp-authority-client.ts", "oldsrc/structs/timestamp-service.ts", "oldsrc/structs/trace.ts", "oldsrc/structs/validation.ts", "oldsrc/structs/vote-block.ts", "oldsrc/structs/vote.ts", "oldsrc/structs/voter.ts", "oldsrc/structs/vouch.ts"]
+  "include": ["src", "test"]
 }

@@ -1,5 +1,5 @@
-import { BlockId, TrxId, TrxRev, Transform, IBlock } from "../../../db-core/src";
-import { BlockMetadata } from "./struct";
+import type { BlockId, TrxId, TrxRev, Transform, IBlock } from "@votetorrent/db-core";
+import type { BlockMetadata } from "./struct";
 
 export interface IRawStorage {
 	// Metadata operations

@@ -1,4 +1,4 @@
-import { IBlock, Transform, TrxId, TrxRev } from "../../../db-core/src/index.js";
+import type { IBlock, Transform, TrxId, TrxRev } from "@votetorrent/db-core";
 
 /** Interface for block-level storage operations */
 export interface IBlockStorage {

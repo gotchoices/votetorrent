@@ -1,7 +1,6 @@
-import { PeerId } from '@libp2p/interface';
-import { IKeyNetwork } from '../../db-core/src/network/i-key-network.js';
+import { type PeerId } from '@libp2p/interface';
+import type { IKeyNetwork, ICluster, ClusterRecord } from '@votetorrent/db-core';
 import { ProtocolClient } from './protocol-client.js';
-import { ICluster, ClusterRecord } from '../../db-core/src/index.js';
 
 export class ClusterClient extends ProtocolClient implements ICluster {
 	private constructor(peerId: PeerId, keyNetwork: IKeyNetwork) {

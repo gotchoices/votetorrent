@@ -1,7 +1,7 @@
 import { createLibp2p } from 'libp2p';
 import { tcp } from '@libp2p/tcp';
 import { noise } from '@chainsafe/libp2p-noise';
-import { mplex } from '@libp2p/mplex';
+import { yamux } from '@chainsafe/libp2p-yamux';
 import { kadDHT } from '@libp2p/kad-dht';
 import { gossipsub } from '@chainsafe/libp2p-gossipsub';
 import { bootstrap } from '@libp2p/bootstrap';
@@ -26,7 +26,7 @@ async function createLibp2pNode(port: number, bootstrapNodes: string[]): Promise
     },
     transports: [tcp()],
     connectionEncryption: [noise()],
-    streamMuxers: [mplex()],
+    streamMuxers: [yamux()],
     pubsub: gossipsub(),
     dht: kadDHT(),
     services: {

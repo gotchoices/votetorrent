@@ -4,10 +4,10 @@
   "type": "module",
   "description": "P2P database functionality for VoteTorrent",
   "main": "dist/src/index.js",
-  "types": "dist/src/index.d.ts",
+  "types": "./dist/src/index.d.ts",
   "files": [
     "src",
-    "dist/src",
+    "dist",
     "!dist/test",
     "!**/*.tsbuildinfo"
   ],
@@ -19,7 +19,7 @@
   },
   "scripts": {
     "clean": "aegir clean",
-    "build": "aegir build",
+    "build": "aegir build --env node",
     "lint": "aegir lint",
     "test": "aegir test",
     "test:node": "aegir test -t node",
@@ -33,6 +33,7 @@
     "@votetorrent/db-core": "*",
 		"it-pipe": "^3.0.1",
 		"it-length-prefixed": "^10.0.0",
+		"it-all": "^3.0.6",
     "@libp2p/interface": "^1.1.0",
     "@libp2p/peer-id": "^4.0.0",
     "uint8arrays": "^5.1.0"

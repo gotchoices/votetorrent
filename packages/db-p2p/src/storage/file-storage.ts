@@ -1,8 +1,8 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { BlockId, IBlock, Transform, Transforms, TrxId, TrxRev, TrxTransforms } from "../../../db-core/src/index.js";
-import { BlockMetadata } from "./struct.js";
-import { IRawStorage } from "./i-raw-storage.js";
+import type { BlockId, IBlock, Transform, TrxId, TrxRev } from "@votetorrent/db-core";
+import type { BlockMetadata } from "./struct.js";
+import type { IRawStorage } from "./i-raw-storage.js";
 
 export class FileRawStorage implements IRawStorage {
 	constructor(private readonly basePath: string) {

@@ -1,8 +1,9 @@
-import { BlockId, IBlock, Transform, TrxId, TrxRev, applyTransform } from "../../../db-core/src/index.js";
-import { BlockArchive, BlockMetadata, RestoreCallback, RevisionRange } from "./struct.js";
-import { IRawStorage as IBaseStorage } from "./i-raw-storage.js";
+import type { BlockId, IBlock, Transform, TrxId, TrxRev } from "@votetorrent/db-core";
+import { applyTransform } from "@votetorrent/db-core";
+import type { BlockArchive, BlockMetadata, RestoreCallback, RevisionRange } from "./struct.js";
+import type { IRawStorage as IBaseStorage } from "./i-raw-storage.js";
 import { mergeRanges } from "./helpers.js";
-import { IBlockStorage } from "./i-block-storage.js";
+import type { IBlockStorage } from "./i-block-storage.js";
 
 export class BlockStorage implements IBlockStorage {
     constructor(
@@ -119,7 +120,7 @@ export class BlockStorage implements IBlockStorage {
 
         // Apply transforms in reverse order
         for (let i = transactions.length - 1; i >= 0; --i) {
-            const { trxId } = transactions[i];
+            const { trxId } = transactions[i]!;
             const transform = await this.storage.getTransaction(this.blockId, trxId);
             if (!transform) {
                 throw new Error(`Missing transaction ${trxId} for block ${this.blockId}`);
@@ -131,8 +132,8 @@ export class BlockStorage implements IBlockStorage {
 						throw new Error(`Block ${this.blockId} has been deleted`);
 				}
         if (transactions.length) {
-            await this.storage.saveMaterializedBlock(this.blockId, transactions[0].trxId, block);
-            return { block, trxRev: transactions[0] };
+            await this.storage.saveMaterializedBlock(this.blockId, transactions[0]!.trxId, block);
+            return { block, trxRev: transactions[0]! };
         }
         return { block, trxRev: materializedTrxRev };
     }
