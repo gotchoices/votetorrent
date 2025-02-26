@@ -1,4 +1,4 @@
-import { createLibp2p } from 'libp2p';
+import { createLibp2p, type Libp2p } from 'libp2p';
 import { tcp } from '@libp2p/tcp';
 import { noise } from '@chainsafe/libp2p-noise';
 import { yamux } from '@chainsafe/libp2p-yamux';
@@ -25,10 +25,8 @@ async function createLibp2pNode(port: number, bootstrapNodes: string[]): Promise
       listen: [`/ip4/0.0.0.0/tcp/${port}`]
     },
     transports: [tcp()],
-    connectionEncryption: [noise()],
+    connectionEncrypters: [noise()],
     streamMuxers: [yamux()],
-    pubsub: gossipsub(),
-    dht: kadDHT(),
     services: {
       dht: kadDHT(),
       pubsub: gossipsub()

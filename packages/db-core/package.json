@@ -32,6 +32,7 @@
   "dependencies": {
     "uint8arrays": "^5.1.0",
     "@libp2p/crypto": "^5.0.9",
+		"@libp2p/interface": "^2.6.1",
     "@multiformats/multiaddr": "^12.4.0"
   }
 }

@@ -1,8 +1,5 @@
-import type { Libp2p } from "@libp2p/interface";
-import type { AbortOptions } from "@libp2p/interface";
-import type { PeerId } from "@libp2p/interface";
+import type { Libp2p, AbortOptions, PeerId, Stream } from "@libp2p/interface";
 import type { ClusterPeers, FindCoordinatorOptions, IKeyNetwork } from "@votetorrent/db-core";
-import type { Stream } from "stream";
 
 export class KeyNetworkLibp2p implements IKeyNetwork {
 	constructor(private readonly libp2p: Libp2p) { }
