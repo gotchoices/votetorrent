@@ -26,13 +26,13 @@
     "dep-check": "aegir dep-check"
   },
   "devDependencies": {
-    "@types/node": "^22.9.0",
-    "aegir": "^45.0.8"
+    "@types/node": "^22.13.9",
+    "aegir": "^45.1.2"
   },
   "dependencies": {
     "uint8arrays": "^5.1.0",
-    "@libp2p/crypto": "^5.0.9",
-		"@libp2p/interface": "^2.6.1",
+    "@libp2p/crypto": "^5.0.15",
+		"@libp2p/interface": "^2.7.0",
     "@multiformats/multiaddr": "^12.4.0"
   }
 }

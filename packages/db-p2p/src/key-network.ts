@@ -13,10 +13,11 @@ export class KeyNetwork implements IKeyNetwork {
 	}
 
 	async findCoordinator<T>(key: Uint8Array, options?: Partial<FindCoordinatorOptions>): Promise<PeerId> {
-		return (await first(
+		const peer = await first(
 			signal => this.libp2p.peerRouting.getClosestPeers(key, { signal, useCache: Boolean(options?.excludedPeers?.length) }),
 			() => { throw new Error('No coordinator found') }
-		)).id;
+		);
+		return peer.id;
 	}
 
 	async findCluster(key: Uint8Array): Promise<ClusterPeers> {
