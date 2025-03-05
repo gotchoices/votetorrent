@@ -45,7 +45,7 @@ export type Administrator = {
 	/** Name of the administrator */
 	name: string;
 
-	/** Role of the administrator */
+	/** Role of the administrator - Note: may be an automated IT system */
 	role: string;
 
 	/** URL of the administrator's image */
