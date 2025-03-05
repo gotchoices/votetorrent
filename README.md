@@ -32,7 +32,7 @@ Whether transactional or storage, a stand-alone node can optionally serve as a:
 
 **Mobile apps coming soon:**
 * VoteTorrent Election
-* VoteTorrent Authority
+* VoteTorrent Authority ([android APK](https://votetorrent.org/authority.apk))
 
 These will be available in the Apple App Store and Google Play Store.
 
