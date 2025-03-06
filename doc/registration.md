@@ -62,3 +62,14 @@ AssociationPrivate
 * DeviceId
 * Attestation
 * Expiration
+
+
+## In Person Voting
+
+In order to avoid disenfranchising voters with a voting system that exclusively requires every person to have a reasonably recent phone and know how to install and operate an app, so at least this gives us a solution.  There will also probably be legislative hurtles, if we don't have a "inclusive" solution too.  I wonder if there is even a case for our system, over existing ones, even for situations where only in-person voting is allowed.  At least the community would be given transparency, and could contribute server infrastructure, and we would not be at the whims of honorable poll-workers and administrators.
+
+One thing we didn't discuss yesterday is how to handle voters without phones, or who can't or won't use one.  I think it is simple with what we have:
+* The voter is put before a tablet at the polling location.  This tablet is configured to only allow the VT app.  That app is also in polling mode, which doesn't allow switching networks, and resets users after use.
+* In polling mode, the app forces re-association, so even if the user has previously associated with a device, the user begins with the association flow before starting the voting flow.  So the user looks up their registration, and scans their biometric, and  per usual, this sends the vault public key and device attestation to the authority for signing.
+* The authority ignores the fact that it's a duplicate device ID, because the device ID is in a "white-list" of approved devices.
+* Perhaps we should include a hashcode of the device ID in the public device association table.  This allows us to disclose the uniqueness of devices, without disclosing the actual device ID.  Is there an argument against this, because someone could infer exactly who else voted on the same tablet?  That's good for transparency, but can also be used to infer a person's location as a certain time.

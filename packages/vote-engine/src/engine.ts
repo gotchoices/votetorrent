@@ -19,7 +19,7 @@ export async function createElectionEngine(init: ElectionEngineInit): Promise<El
 	return await ElectionEngine.connect(init, localStorage, keyNetwork);
 }
 
-async function createLibp2pNode(port: number, bootstrapNodes: string[]): Promise<Libp2p> {
+export async function createLibp2pNode(port: number, bootstrapNodes: string[]): Promise<Libp2p> {
   const node = await createLibp2p({
     addresses: {
       listen: [`/ip4/0.0.0.0/tcp/${port}`]

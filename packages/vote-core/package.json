@@ -38,8 +38,8 @@
   "author": "Nathan Allan",
   "license": "MIT",
   "devDependencies": {
-    "@types/node": "^22.9.0",
-    "aegir": "^45.0.8"
+    "@types/node": "^22.13.9",
+    "aegir": "^45.1.2"
   },
   "dependencies": {
     "@votetorrent/db-core": "*",
