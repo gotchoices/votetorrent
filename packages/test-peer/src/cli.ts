@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
-import { createLibp2p } from 'libp2p';
-import { createNode } from './node.js';
+import { createLibp2pNode } from '@votetorrent/vote-engine';
 
 const program = new Command();
 
@@ -14,8 +13,9 @@ program
   .command('start-node')
   .description('Start a P2P node')
   .option('-p, --port <number>', 'Port to listen on', '0')
+	.option('-b, --bootstrap <string>', 'Comma-separated list of bootstrap nodes')
   .action(async (options) => {
-    const node = await createNode(parseInt(options.port));
+    const node = await createLibp2pNode(parseInt(options.port), options.bootstrap == null ? [] : options.bootstrap.split(','));
     console.log(`Node started with ID: ${node.peerId.toString()}`);
     console.log(`Listening on:`);
     node.getMultiaddrs().forEach((ma) => {
