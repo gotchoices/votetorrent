@@ -3,7 +3,7 @@
 ## Election Processes
 
 ### Voters register
-  * Voter receives or finds registration authority
+  * Voter receives or finds Election Network
     * Receives - could come from a QR, NFC, deep-link, or:
     * Finds - global Directory Network facilitates finding authorities and Election Networks:
       * The user's location is retrieved from the device
@@ -13,12 +13,18 @@
         * The list of content addresses is retrieved from the Directory, deduplicated (taking newest), and authority records are read from Authority Collection
         * The authority data in each document contains precise GeoJson geometry for each district; only those containing the user's location are kept
       * Authority records are verified based on their CA certificates
+  * Voter verifies Election Network
+    * An Election Network has an ID, which is included in the protocol, so every participant knows and acknowledges it.  This ID is a hash, or includes a hash, of the primary authority for that network.
+    * Voter is prompted to confirm the Election Network's "code" from an external source
+    * This code cannot be included in the link or QR, and must be verified out of band via a website the user must find, or in-person
+    * Voter enters the code, which is a compressed hashcode of the Election Network's ID.
+    * The app proceeds if there is a match.
   * Voter generates key pair:
     * Biometrics used to generate key pair in hardware vault
     * Private key never leaves device
     * Can be shown QR visualization of public key - can optionally print for easier recovery
     * Voter may be allowed to add entropy to randomness
-  * Voter submits required public information
+  * Voter submits required public information - TODO: update this:  See [Registration](registration.md) for now
     * Option: submitted to authority for signature; alternative is only self-signature
     * Voter uses Matchmaking to ask for workers to transact the registration onto the Election Network
       * Matchmaking of `registration` topic is used to form a transactor squad, consisting of a critical number of workers

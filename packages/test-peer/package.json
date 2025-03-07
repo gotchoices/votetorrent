@@ -4,10 +4,10 @@
   "type": "module",
   "description": "Test peer implementation for VoteTorrent",
   "main": "dist/src/index.js",
-  "types": "dist/src/index.d.ts",
+  "types": "./dist/src/index.d.ts",
   "files": [
     "src",
-    "dist/src",
+    "dist",
     "!dist/test",
     "!**/*.tsbuildinfo"
   ],
@@ -19,21 +19,29 @@
   },
   "scripts": {
     "clean": "aegir clean",
-    "build": "aegir build",
+    "build": "aegir build --env node",
     "lint": "aegir lint",
     "test": "aegir test",
     "test:node": "aegir test -t node",
     "dep-check": "aegir dep-check"
   },
   "devDependencies": {
-    "@types/node": "^22.9.0",
-    "aegir": "^45.0.8"
+    "@types/node": "^22.13.9",
+    "aegir": "^45.1.2"
   },
   "dependencies": {
     "@votetorrent/db-core": "*",
     "@votetorrent/db-p2p": "*",
-    "@libp2p/interface": "^1.1.0",
-    "@libp2p/peer-id": "^4.0.0",
+    "@votetorrent/vote-core": "*",
+    "@votetorrent/vote-engine": "*",
+    "@libp2p/interface": "^2.7.0",
+    "@libp2p/peer-id": "^5.0.16",
+    "commander": "^13.1.0",
     "uint8arrays": "^5.1.0"
+  },
+  "aegir": {
+    "build": {
+      "bundle": false
+    }
   }
 }

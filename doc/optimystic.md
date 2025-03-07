@@ -90,6 +90,15 @@ The resulting transaction model provides optimistic concurrency control, ensurin
 3. The client replays its own logical actions into a new set of block transforms
 4. The client attempts to pend and commit the new set of block transforms
 
+## Distributed Transactions
+
+Distributed transactions are affected by virtue of conditional transactions.  Here is how a DT is conducted:
+* An attempt is made to appended all involved collection logs with a conditional transaction identifying a single authoritative collection.  A signature is obtained from each tail maintenance cluster, indicating that this conditional transaction was successful.
+* All needed signatures are provided to the authoritative collection tail, which posts a completion transaction (in addition to the conditional transaction which it also applied).
+* All other log tails post a completion transaction, containing the authoritative collection's signature.
+* In the event that any of the above fails, e.g. a collection rejects the conditional due to it being stale, a compensatory transaction is appended to all logs to which a conditional was posted.  This compensatory transaction identifies the log entry, and undoes the operation of that entry.
+* While the conditional transaction is outstanding, other transactors can choose to continue to transact, if their action doesn't conflict or depend on the final outcome, or can wait for the outcome.
+
 ## Archival Storage
 
 VoteTorrent's archival storage system, called **Arachnode**, organizes storage nodes into concentric rings, with each ring representing progressively finer partitions of the keyspace. The outermost ring, called Ring Zulu, handles transactions and dynamic ranges based on an overlap factor rather than specific partition boundaries. Any storage nodes in the innermost ring, ring 0, would store the entire keyspace, while nodes in outer rings manage smaller, more specific portions of the keyspace. This design allows nodes to adjust their range responsibility based on storage capacity, dynamically shifting to more granular rings when needed.

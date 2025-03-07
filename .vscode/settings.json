@@ -6,7 +6,11 @@
 	"plantuml.exportSubFolder": false,
 	"cSpell.words": [
 		"archivers",
+		"chainsafe",
 		"checkpointed",
+		"Encrypters",
+		"gossipsub",
+		"hashcode",
 		"Kademlia",
 		"keyholder",
 		"keyholders",
@@ -14,6 +18,9 @@
 		"libp",
 		"multiaddr",
 		"multiaddress",
+		"Multiaddrs",
+		"multiformats",
+		"Muxers",
 		"nameof",
 		"pendings",
 		"pushable",
@@ -22,7 +29,8 @@
 		"Trxs",
 		"uncheckpointed",
 		"upserted",
-		"votetorrent"
+		"votetorrent",
+		"yamux"
 	],
 	"svg.preview.background": "custom"
 }
