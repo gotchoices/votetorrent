@@ -30,12 +30,12 @@
     "aegir": "^45.1.2"
   },
   "dependencies": {
+    "@libp2p/interface": "^2.7.0",
+    "@libp2p/peer-id": "^5.0.16",
     "@votetorrent/db-core": "*",
     "@votetorrent/db-p2p": "*",
     "@votetorrent/vote-core": "*",
     "@votetorrent/vote-engine": "*",
-    "@libp2p/interface": "^2.7.0",
-    "@libp2p/peer-id": "^5.0.16",
     "commander": "^13.1.0",
     "uint8arrays": "^5.1.0"
   },

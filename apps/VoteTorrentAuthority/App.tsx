@@ -6,12 +6,12 @@ import {darkTheme, lightTheme} from './src/theme/themes';
 import {useColorScheme} from 'react-native';
 
 export default function App() {
-  const colorScheme = useColorScheme();
+	const colorScheme = useColorScheme();
 
-  return (
-    <NavigationContainer
-      theme={colorScheme === 'dark' ? darkTheme : lightTheme}>
-      <RootNavigator />
-    </NavigationContainer>
-  );
+	return (
+		<NavigationContainer
+			theme={colorScheme === 'dark' ? darkTheme : lightTheme}>
+			<RootNavigator />
+		</NavigationContainer>
+	);
 }
