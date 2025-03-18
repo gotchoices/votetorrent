@@ -30,13 +30,13 @@
     "aegir": "^45.1.2"
   },
   "dependencies": {
-    "@votetorrent/db-core": "*",
-		"it-pipe": "^3.0.1",
-		"it-length-prefixed": "^10.0.1",
-		"it-all": "^3.0.6",
     "@libp2p/interface": "^2.7.0",
     "@libp2p/peer-id": "^5.0.16",
-    "uint8arrays": "^5.1.0",
-		"multiformats": "^13.3.2"
+    "@votetorrent/db-core": "*",
+    "it-all": "^3.0.6",
+    "it-length-prefixed": "^10.0.1",
+    "it-pipe": "^3.0.1",
+    "multiformats": "^13.3.2",
+    "uint8arrays": "^5.1.0"
   }
 }

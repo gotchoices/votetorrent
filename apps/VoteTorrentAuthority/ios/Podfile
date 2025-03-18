@@ -1,0 +1,27 @@
+require_relative '../node_modules/react-native/scripts/react_native_pods'
+require_relative '../node_modules/@react-native-community/cli-platform-ios/native_modules'
+
+platform :ios, min_ios_version_supported
+prepare_react_native_project!
+
+target 'VoteTorrentAuthority' do
+  config = use_native_modules!
+
+  use_react_native!(
+    :path => config[:reactNativePath],
+    # Hermes is now enabled by default
+    :hermes_enabled => true,
+    # An absolute path to your application root.
+    :app_path => "#{Pod::Config.instance.installation_root}/.."
+  )
+
+  pod 'RNVectorIcons', :path => '../node_modules/react-native-vector-icons'
+
+  target 'VoteTorrentAuthorityTests' do
+    inherit! :complete
+  end
+
+  post_install do |installer|
+    react_native_post_install(installer, config[:reactNativePath])
+  end
+end

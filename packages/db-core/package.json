@@ -30,9 +30,9 @@
     "aegir": "^45.1.2"
   },
   "dependencies": {
-    "uint8arrays": "^5.1.0",
     "@libp2p/crypto": "^5.0.15",
-		"@libp2p/interface": "^2.7.0",
-    "@multiformats/multiaddr": "^12.4.0"
+    "@libp2p/interface": "^2.7.0",
+    "@multiformats/multiaddr": "^12.4.0",
+    "uint8arrays": "^5.1.0"
   }
 }
