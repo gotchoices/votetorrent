@@ -42,6 +42,8 @@
     "aegir": "^45.1.2"
   },
   "dependencies": {
+    "@libp2p/interface": "^2.7.0",
+    "@libp2p/peer-id-factory": "^4.2.4",
     "@votetorrent/db-core": "*",
     "uint8arrays": "^5.1.0"
   }

@@ -1,4 +1,4 @@
-import type { AbortOptions, PeerId, Stream } from "@libp2p/interface";
+import type { PeerId } from "@libp2p/interface";
 import type { ClusterPeers } from "../cluster/structs.js";
 
 export type FindCoordinatorOptions = {
@@ -7,12 +7,7 @@ export type FindCoordinatorOptions = {
 };
 
 
-export interface IKeyNetwork {
-	/**
-	 * Dial a peer and establish a protocol stream
-	 */
-	dialProtocol(peerId: PeerId, protocol: string, options?: AbortOptions): Promise<Stream>;
-
+export type IKeyNetwork = {
 	/**
 	 * Find a coordinator node responsible for a given key in the KadDHT and establish connection
 	 * @param key The key to find coordinator for

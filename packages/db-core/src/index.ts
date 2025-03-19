@@ -11,3 +11,4 @@ export * from "./transform/index.js";
 export * from "./utility/groupby.js";
 export * from "./utility/nameof.js";
 export * from "./utility/ensured.js";
+export * from "./utility/pending.js";

@@ -5,22 +5,27 @@ import type { ICluster, ClusterRecord } from '@votetorrent/db-core';
 import type { Uint8ArrayList } from 'uint8arraylist';
 
 interface BaseComponents {
-	logger: { forComponent: (name: string) => Logger };
+	logger: { forComponent: (name: string) => Logger },
 	registrar: {
-		handle: (protocol: string, handler: (data: IncomingStreamData) => void, options: any) => Promise<void>;
-		unhandle: (protocol: string) => Promise<void>;
-	};
+		handle: (protocol: string, handler: (data: IncomingStreamData) => void, options: any) => Promise<void>,
+		unhandle: (protocol: string) => Promise<void>
+	}
 }
 
 export interface ClusterServiceComponents extends BaseComponents {
-	cluster: ICluster;
+	cluster: ICluster
 }
 
 export interface ClusterServiceInit {
-	protocol?: string;
-	maxInboundStreams?: number;
-	maxOutboundStreams?: number;
-	logPrefix?: string;
+	protocol?: string,
+	protocolPrefix?: string,
+	maxInboundStreams?: number,
+	maxOutboundStreams?: number,
+	logPrefix?: string,
+}
+
+export function clusterService(init: ClusterServiceInit = {}): (components: ClusterServiceComponents) => ClusterService {
+	return (components: ClusterServiceComponents) => new ClusterService(components, init);
 }
 
 /**
@@ -37,15 +42,15 @@ export class ClusterService implements Startable {
 
 	constructor(components: ClusterServiceComponents, init: ClusterServiceInit = {}) {
 		this.components = components;
-		this.protocol = init.protocol ?? '/db-p2p-cluster/1.0.0';
+		this.protocol = init.protocol ?? (init.protocolPrefix ?? '/db-p2p') + '/cluster/1.0.0';
 		this.maxInboundStreams = init.maxInboundStreams ?? 32;
 		this.maxOutboundStreams = init.maxOutboundStreams ?? 64;
-		this.log = components.logger.forComponent(init.logPrefix ?? 'db-p2p:cluster-service');
+		this.log = components.logger.forComponent(init.logPrefix ?? 'db-p2p:cluster');
 		this.cluster = components.cluster;
 		this.running = false;
 	}
 
-	readonly [Symbol.toStringTag] = '@libp2p/cluster-service';
+	readonly [Symbol.toStringTag] = '@libp2p/cluster';
 
 	async start(): Promise<void> {
 		if (this.running) {

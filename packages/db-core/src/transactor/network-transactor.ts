@@ -3,32 +3,20 @@ import type { TrxTransforms, TrxBlocks, BlockTrxStatus, ITransactor, PendSuccess
 import { transformForBlockId, groupBy, concatTransforms, concatTransform, transformsFromTransform, blockIdsForTransforms } from "../index.js";
 import { blockIdToBytes } from "../utility/block-id-to-bytes.js";
 import { isRecordEmpty } from "../utility/is-record-empty.js";
-import { Pending } from "../utility/pending.js";
-
-type CoordinatorBatch<TPayload, TResponse> = {
-	peerId: PeerId;
-	blockId: BlockId;
-	payload: TPayload;
-	repo?: IRepo;
-	request?: Pending<TResponse>;
-	/** Whether this batch has been subsumed by other successful batches */
-	subsumedBy?: CoordinatorBatch<TPayload, TResponse>[];
-	/** Peers that have already been tried (and failed) */
-	excludedPeers?: PeerId[];
-}
+import { type CoordinatorBatch, makeBatchesByPeer, incompleteBatches, everyBatch, allBatches, mergeBlocks, processBatches, createBatchesForPayload } from "../utility/batch-coordinator.js";
 
 type NetworkTransactorInit = {
 	timeoutMs: number;
 	abortOrCancelTimeoutMs: number;
 	keyNetwork: IKeyNetwork;
-	createRepoClient: (peerId: PeerId, keyNetwork: IKeyNetwork) => IRepo;
+	getRepo: (blockId: BlockId) => IRepo;
 }
 
 export class NetworkTransactor implements ITransactor {
 	private readonly keyNetwork: IKeyNetwork;
 	private readonly timeoutMs: number;
 	private readonly abortOrCancelTimeoutMs: number;
-	private readonly createRepoClient: (peerId: PeerId, keyNetwork: IKeyNetwork) => IRepo;
+	private readonly getRepo: (blockId: BlockId) => IRepo;
 
 	constructor(
 		init: NetworkTransactorInit,
@@ -36,7 +24,7 @@ export class NetworkTransactor implements ITransactor {
 		this.keyNetwork = init.keyNetwork;
 		this.timeoutMs = init.timeoutMs;
 		this.abortOrCancelTimeoutMs = init.abortOrCancelTimeoutMs;
-		this.createRepoClient = init.createRepoClient;
+		this.getRepo = init.getRepo;
 	}
 
 	async get(blockGets: BlockGets): Promise<GetBlockResults> {
@@ -54,12 +42,13 @@ export class NetworkTransactor implements ITransactor {
 
 		let error: Error | undefined;
 		try {
-			await this.processBatches(
+			await processBatches(
 				batches,
-				(repo, batch) => repo.get({ blockIds: batch.payload, context: blockGets.context }, { expiration }),
+				(batch) => this.getRepo(batch.blockId).get({ blockIds: batch.payload, context: blockGets.context }, { expiration }),
 				batch => batch.payload,
 				(gets, blockId, mergeWithGets) => [...(mergeWithGets ?? []), ...gets.filter(bid => bid === blockId)],
-				expiration
+				expiration,
+				async (blockId, options) => this.keyNetwork.findCoordinator(blockIdToBytes(blockId), options)
 			);
 		} catch (e) {
 			error = e as Error;
@@ -107,12 +96,13 @@ export class NetworkTransactor implements ITransactor {
 		let error: Error | undefined;
 		try {
 			// Process all batches, noting all outstanding peers
-			await this.processBatches<Transforms, PendResult>(
+			await processBatches(
 				batches,
-				(repo, batch) => repo.pend({ ...blockTrx, transforms: batch.payload }, { expiration }),
+				(batch) => this.getRepo(batch.blockId).pend({ ...blockTrx, transforms: batch.payload }, { expiration }),
 				batch => blockIdsForTransforms(batch.payload),
 				transformForBlock,
-				expiration
+				expiration,
+				async (blockId, options) => this.keyNetwork.findCoordinator(blockIdToBytes(blockId), options)
 			);
 		} catch (e) {
 			error = e as Error;
@@ -151,12 +141,13 @@ export class NetworkTransactor implements ITransactor {
 			[]
 		);
 		const expiration = Date.now() + this.abortOrCancelTimeoutMs;
-		await this.processBatches(
+		await processBatches(
 			batches,
-			(repo, batch) => repo.cancel({ trxId: trxRef.trxId, blockIds: batch.payload }, { expiration }),
+			(batch) => this.getRepo(batch.blockId).cancel({ trxId: trxRef.trxId, blockIds: batch.payload }, { expiration }),
 			batch => batch.payload,
 			mergeBlocks,
-			expiration
+			expiration,
+			async (blockId, options) => this.keyNetwork.findCoordinator(blockIdToBytes(blockId), options)
 		);
 	}
 
@@ -210,12 +201,13 @@ export class NetworkTransactor implements ITransactor {
 		const batches = await this.batchesForPayload<BlockId[], CommitResult>(blockIds, blockIds, mergeBlocks, []);
 		let error: Error | undefined;
 		try {
-			await this.processBatches(
+			await processBatches(
 				batches,
-				(repo, batch) => repo.commit({ trxId, blockIds: batch.payload, rev }, { expiration }),
+				(batch) => this.getRepo(batch.blockId).commit({ trxId, blockIds: batch.payload, rev }, { expiration }),
 				batch => batch.payload,
 				mergeBlocks,
-				expiration
+				expiration,
+				async (blockId, options) => this.keyNetwork.findCoordinator(blockIdToBytes(blockId), options)
 			);
 		} catch (e) {
 			error = e as Error;
@@ -227,42 +219,6 @@ export class NetworkTransactor implements ITransactor {
 		return { batches, error };
 	};
 
-	/** Processes a set of batches, retrying any failures until success or expiration
-	 * @param batches - The batches to process - each represents a group of blocks centered on a coordinating peer
-	 * @param process - The function to call for a given batch
-	 * @param getBlockIds - The function to call to get the block ids for a given batch
-	 * @param getBlockPayload - The function to call to get the payload given a parent payload and block id, and optionally merge with an existing payload
-	 * @param expiration - The expiration time for the operation
-	*/
-	private async processBatches<TPayload, TResponse>(
-		batches: CoordinatorBatch<TPayload, TResponse>[],
-		process: (repo: IRepo, batch: CoordinatorBatch<TPayload, TResponse>) => Promise<TResponse>,
-		getBlockIds: (batch: CoordinatorBatch<TPayload, TResponse>) => BlockId[],
-		getBlockPayload: (payload: TPayload, blockId: BlockId, mergeWithPayload: TPayload | undefined) => TPayload,
-		expiration: number
-	): Promise<void> {
-		await Promise.all(batches.map(async (batch) => {
-			batch.repo = this.createRepoClient(batch.peerId, this.keyNetwork);
-			batch.request = new Pending(process(batch.repo, batch)
-				.catch(async e => {
-					// TODO: log failure
-					// logger.log(`operation failed for ${batch.peerId}`);
-					if (expiration > Date.now()) {
-						const excludedPeers = [batch.peerId, ...(batch.excludedPeers ?? [])];
-						// Redistribute failed attempts and append to original batches
-						const retries = await this.batchesForPayload<TPayload, TResponse>(getBlockIds(batch), batch.payload, getBlockPayload, excludedPeers);
-						// Process the new attempts
-						if (retries.length > 0 && expiration > Date.now()) {
-							batch.subsumedBy = retries;
-							// Append new attempts to the original batches map
-							await this.processBatches(retries, process, getBlockIds, getBlockPayload, expiration);
-						}
-					}
-					throw e;
-				}));
-		}));
-	}
-
 	/** Creates batches for a given payload, grouped by the coordinating peer for each block id */
 	private async batchesForPayload<TPayload, TResponse>(
 		blockIds: BlockId[],
@@ -270,18 +226,13 @@ export class NetworkTransactor implements ITransactor {
 		getBlockPayload: (payload: TPayload, blockId: BlockId, mergeWithPayload: TPayload | undefined) => TPayload,
 		excludedPeers: PeerId[]
 	): Promise<CoordinatorBatch<TPayload, TResponse>[]> {
-		// Group by block id
-		const distinctBlockIds = new Set(blockIds);
-
-		// Find coordinator for each key
-		const blockIdPeerId = await Promise.all(
-			Array.from(distinctBlockIds).map(async (bid) =>
-				[bid, await this.keyNetwork.findCoordinator(blockIdToBytes(bid), { excludedPeers })] as const
-			)
+		return createBatchesForPayload<TPayload, TResponse>(
+			blockIds,
+			payload,
+			getBlockPayload,
+			excludedPeers,
+			async (blockId, options) => this.keyNetwork.findCoordinator(blockIdToBytes(blockId), options)
 		);
-
-		// Group blocks around their coordinating peers
-		return makeBatchesByPeer<TPayload, TResponse>(blockIdPeerId, payload, getBlockPayload);
 	}
 
 	/** Cancels a pending transaction by canceling all blocks associated with the transaction, including failed peers */
@@ -296,62 +247,23 @@ export class NetworkTransactor implements ITransactor {
 			mergeBlocks,
 			[]
 		);
-		await this.processBatches(
+		await processBatches(
 			operationBatches,
-			(repo, batch) => repo.cancel({ trxId: trxRef.trxId, blockIds: batch.payload }),
+			(batch) => this.getRepo(batch.blockId).cancel({ trxId: trxRef.trxId, blockIds: batch.payload }, { expiration }),
 			batch => batch.payload,
 			mergeBlocks,
-			expiration
+			expiration,
+			async (blockId, options) => this.keyNetwork.findCoordinator(blockIdToBytes(blockId), options)
 		);
 	}
 }
 
-/** Creates batches for a given payload, grouped by the coordinating peer for each block id */
-function makeBatchesByPeer<TPayload, TResponse>(
-	blockPeers: (readonly [BlockId, PeerId])[],
-	payload: TPayload,
-	getBlockPayload: (payload: TPayload, blockId: BlockId, mergeWithPayload: TPayload | undefined) => TPayload,
-	excludedPeers?: PeerId[]
-) {
-	const groups = blockPeers.reduce((acc, [blockId, peerId]) => {
-		const peerId_str = peerId.toString();
-		const coordinator = acc.get(peerId_str) ?? { peerId, blockId, excludedPeers } as Partial<CoordinatorBatch<TPayload, TResponse>>;
-		acc.set(peerId_str, { ...coordinator, payload: getBlockPayload(payload, blockId, coordinator.payload) } as CoordinatorBatch<TPayload, TResponse>);
-		return acc;
-	}, new Map<string, CoordinatorBatch<TPayload, TResponse>>());
-	return Array.from(groups.values());
-}
 
-/** Iterates over all batches that have not completed, whether subsumed or not */
-function *incompleteBatches<TPayload, TResponse>(batches: CoordinatorBatch<TPayload, TResponse>[]): IterableIterator<CoordinatorBatch<TPayload, TResponse>> {
-	for (const batch of batches) {
-		if (!batch.request || !batch.request.isResponse) yield batch;
-		if (batch.subsumedBy) yield* incompleteBatches(batch.subsumedBy);
-	}
-}
-
-/** Checks if all completed batches (ignoring failures) satisfy a predicate */
-function everyBatch<TPayload, TResponse>(batches: CoordinatorBatch<TPayload, TResponse>[], predicate: (batch: CoordinatorBatch<TPayload, TResponse>) => boolean): boolean {
-	return batches.every(b => (b.subsumedBy && everyBatch(b.subsumedBy, predicate)) ||predicate(b));
-}
-
-/** Iterates over all batches that satisfy an optional predicate, whether subsumed or not */
-function *allBatches<TPayload, TResponse>(batches: CoordinatorBatch<TPayload, TResponse>[], predicate?: (batch: CoordinatorBatch<TPayload, TResponse>) => boolean): IterableIterator<CoordinatorBatch<TPayload, TResponse>> {
-	for (const batch of batches) {
-		if (!predicate || predicate(batch)) yield batch;
-		if (batch.subsumedBy) yield* allBatches(batch.subsumedBy, predicate);
-	}
-}
-
-/** Returns a new blockId list payload with the given block id appended */
-function mergeBlocks(payload: BlockId[], blockId: BlockId, mergeWithPayload: BlockId[] | undefined): BlockId[] {
-	return [...(mergeWithPayload ?? []), blockId];
-}
-
-/** Returns the block trxes grouped by transaction id and concatenated transforms */
-function distinctBlockTrxTransforms(blockTrxes: TrxTransforms[]): TrxTransforms[] {
+/**
+ * Returns the block trxes grouped by transaction id and concatenated transforms
+ */
+export function distinctBlockTrxTransforms(blockTrxes: TrxTransforms[]): TrxTransforms[] {
 	const grouped = groupBy(blockTrxes, ({ trxId }) => trxId);
 	return Object.entries(grouped).map(([trxId, trxes]) =>
 		({ trxId, transforms: concatTransforms(...trxes.map(t => t.transforms)) } as TrxTransforms));
 }
-

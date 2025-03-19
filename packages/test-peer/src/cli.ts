@@ -14,8 +14,17 @@ program
   .description('Start a P2P node')
   .option('-p, --port <number>', 'Port to listen on', '0')
 	.option('-b, --bootstrap <string>', 'Comma-separated list of bootstrap nodes')
+	.option('-i, --id <string>', 'Peer ID')
+	.option('-r, --relay', 'Enable relay service')
+	.option('-n, --network <string>', 'Network name')
   .action(async (options) => {
-    const node = await createLibp2pNode(parseInt(options.port), options.bootstrap == null ? [] : options.bootstrap.split(','));
+    const node = await createLibp2pNode({
+			port: parseInt(options.port),
+			bootstrapNodes: options.bootstrap == null ? [] : options.bootstrap.split(','),
+			id: options.id,
+			relay: options.relay,
+			networkName: options.network
+		});
     console.log(`Node started with ID: ${node.peerId.toString()}`);
     console.log(`Listening on:`);
     node.getMultiaddrs().forEach((ma) => {

@@ -5,5 +5,5 @@
 		"strictFunctionTypes": true,
 		"noUncheckedIndexedAccess": true
   },
-  "include": ["src", "test"]
+  "include": ["src", "test", "../db-p2p/src/node.ts"]
 }

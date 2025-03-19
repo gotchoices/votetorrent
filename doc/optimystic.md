@@ -25,12 +25,6 @@ The system may experience hotspots at the log tail block, but the tail is transi
   - ensures read includes uncheckpointed and uncommitted transactions
   - reinforces commits (in case committer fails to propagate)
 
-#### Cross-collection transactions:
-* Proceeds as in single collection transaction, except that:
-  * Logical entry for each collection includes all affected collection IDs - the transaction is considered to be conditional on all of these collections
-  * If any of the collections fail to commit by the TTL, after retries if no collisions, the transaction fails - all conditional transactions are considered aborted.
-  * If a transaction is aborted, a reciprocal transaction (noting the conditional commit) is posted.  Poster's of any transactions subsequent to a conditional commit are responsible to compensate for the abort, since they were aware of the conditional commit.  If the transaction succeeds, a checkpoint is appended indicating that the condition is removed.
-
 ## Collections
 
 A collection is the fundamental unit of data storage in Optimystic.  It consists of a transaction log, as well as a type-specific structure, such as a tree, all build on top of block storage.  It also represents the smallest scope of transaction processing.
@@ -41,6 +35,62 @@ Types of collections include:
   * **Hashed Tree** - a tree where each node contains a hash of its children or entries (Merkle tree)
 
 Each collection has a unique identifier, which is a reference to a block ID containing the collection's header.
+
+For details, see [repository](./doc/repository.md).
+
+## Transactor
+
+A Transactor represents transactions against block storage independent of the underlying implementation.  Logical transactions are identified by a Transaction ID, which is also mirrored in the physical block repositories. The Transactor offers four core operations: 
+- `get()` to retrieve the latest or a specific version of a set of blocks
+- `pend()` to store the given block transforms as a pending transaction
+- `cancel()` to cancel a pending transaction
+- `commit()` to commit a pending transaction
+
+Transactor operations, in general, apply to multiple blocks, and are split into multiple block-specific operations depending on the physical groupings of blocks.  For instance, an update transformation to both Block 1 and Block 2 may be turned into two separate update operations, one for Block 1 and one for Block 2 and sent to two separate block repositories.
+
+## Transactions
+
+Transactions are actions scoped to one or more collections.  There are three main layers to transactions:
+* **Logical actions** - Actions applied to the collection are affected against the collection's logical structure (e.g. append to a tree), and the actions are also appended to the logical transaction log.
+* **Block transforms** - Each logical action ultimately translates to block level transforms, including the appending of the transaction log, which is stored as a chain of blocks.
+* **Cluster sub-transactions** - Peers who are in proximity to a block ID address on the network, have to coordinate the individual transaction sub-operations.
+
+The transaction log is physically represented as a linked list of blocks, each containing a set of logical log entries.  The collection header block points to the tail block, and each block points to the prior block in the chain.
+
+![Collection Log](figures/collection-log.png)
+
+To apply a transaction to the blocks:
+1. The client sends `pend()` requests to all involved blocks, containing the block transforms.  This allows the transform payload to be communicated to all involved blocks, prior to commitment.
+2. The client specifically attempts to `commit()` the request to the tail block of the transaction log.  Successful commits to this block represent the "tip of the spear" for the transaction - if this commit succeeds, the transaction will ultimately succeed.
+3. The client propagates the commit to the remaining involved blocks.
+4. Once commit confirmation is received for all involved blocks, a checkpoint entry is appended to the transaction log.
+
+Prior to checkpointing, the transaction is still complete, but client's must not assume that all block storage clusters have received the commit, so any `get()` requests should include the transaction ID / revision information, so that the storage repository will a) be informed of the commit; and b) be sure to retrieve the committed revision.
+
+The resulting transaction model provides optimistic concurrency control, ensuring safe and reliable ACID mutations.  If a given transaction is stale, as in it is not "based on" the latest committed revision, the transaction will fail.  If this happens, the transaction must be retried as follows:
+1. The client abandons its pending block operations
+2. The winning transaction's logical actions are loaded by the client, and any conflicts resolved
+3. The client replays its own logical actions into a new set of block transforms
+4. The client attempts to pend and commit the new set of block transforms
+
+## Distributed Transactions
+
+Distributed transactions are affected by virtue of conditional transactions.  Here is how a DT is conducted:
+* An attempt is made to appended all involved collection logs with a conditional transaction.  A promise signature is obtained from each tail maintenance cluster, indicating that this conditional transaction was successful.
+* Once all needed promise signatures are obtained, the set of promises is propagated.
+* Containing full promises, all log tails post a completion transaction.
+* In the event that any of the above fails, e.g. a collection rejects the conditional due to it being stale, a compensatory transaction is appended to all logs to which a conditional was posted.  This compensatory transaction identifies the log entry, and undoes the operation of that entry.
+* While the conditional transaction is outstanding, other transactors can choose to continue to transact, if their action doesn't conflict or depend on the final outcome, or they can wait for the outcome.
+
+## Network Transactor & Clustering
+
+The network transactor distributes a single transactional read or write operation (pend, commit, etc.) over the network of peers.  Each Block ID address is managed by a set of nearby (in hash space) peers, termed the block's *Cluster*.  There is a nested transaction scheme for transacting within each cluster; a variation of a two-phase commit (2PC) enriched with cryptographic signatures, decentralized verification, and a gossip-based finalization.  
+
+![Network Transactor](figures/transactor-layers.svg)
+
+For each block involved in the transaction, the network transactor selects a peer from that block's cluster to act as coordinator.  The portion of the payload that applies to a given coordinator is then sent to that coordinator.  A cluster coordinator validates the operation and sends the operation request in parallel to all members of the cluster for independent validation and a promise signature.  If all, or sufficient promises are received prior to the operation expiration, the coordinator signs a commit signature and broadcasts the set of signatures back out to the cluster for commit signatures.  Once the coordinator receives a consensus of commit signatures, it can affect the operation on it's local storage, and respond the the network transactor, and propagate the consensus back out to the cluster peers.
+
+In the event that the operation's expiration arrives, any peer left in-doubt can reach out to other peers in the cluster.  Possession of a consensus of commit signatures, however gathered, constitutes proof that the transaction succeeded.  Possession of a consensus of commit rejection signatures constitutes proof of transaction failure.  Cluster peers continue to propagate signature records around to each other until the transaction goes to success or failure.  If the originator doesn't receive a response from the coordinator by the expiration, it can reach out to any other of the cluster peers for an update on the operation's status.
 
 ## Block Storage
 
@@ -53,51 +103,6 @@ Block Storage is composed of:
 If a revision is requested that is not materialized, the block storage will materialize the block, using an older materialization and the necessary transforms.
 
 Block Storage may choose to sweep old revisions and materialized blocks to free up space.  If an older revision is needed, the storage system will attempt to retrieve it from an archive.
-
-## Block Repository Client
-
-A Block Repository Client collectively represents block storage across the network, with peers proximal to a block's address being responsible to provide Block Storage.  Block revisions are identified by a Transaction ID, which is coordinated across block repositories. The Block Repository Client offers four core operations: 
-- `get()` to retrieve the latest or a specific version of a set of blocks
-- `pend()` to store the given block transforms as a pending transaction
-- `cancel()` to cancel a pending transaction
-- `commit()` to commit a pending transaction
-
-Block client operations, in general, apply to multiple blocks, and are turned into multiple block-specific operations.  Furthermore, because a given block's repository role is shared by multiple peers in proximity to the block ID address, a coordinator is selected for each block by the client, and the coordinator is responsible for propagating the transaction operations to other peers replicating the block's storage, and for achieving consensus on the transaction.  Transactions are also sent to archive nodes asynchronously, as soon as consensus is reached.
-
-For details, see [repository](./doc/repository.md).
-
-## Transactions
-
-Transactions are actions scoped to one or more collections.  There are two main layers to transactions:
-* **Logical actions** - Actions applied to the collection are affected against the collection's logical structure (e.g. append to a tree), and the actions are also appended to the logical transaction log.
-* **Block transforms** - Each logical action ultimately translates to block level transforms, including the appending of the transaction log, which is stored as a chain of blocks.
-
-The transaction log is physically represented as a linked list of blocks, each containing a set of logical log entries.  The collection header block points to the tail block, and each block points to the prior block in the chain.
-
-![Collection Log](figures/collection-log.png)
-
-To apply a transaction to the network:
-1. The client sends `pend()` requests to all involved blocks, containing the block transforms.  This allows the transform payload to be communicated to all involved blocks, prior to commitment.
-2. The client specifically attempts to `commit()` the request to the tail block of the transaction log.  Successful commits to this block represent the "tip of the spear" for the transaction - if this commit succeeds, the transaction will ultimately succeed.
-3. The client propagates the commit to the remaining involved blocks.
-4. Once commit confirmation is received for all involved blocks, a checkpoint entry is appended to the transaction log.
-
-Prior to checkpointing, the transaction is still complete, but client's must not assume that all block storage repositories have received the commit, so any `get()` requests should include the transaction ID / revision information, so that the storage repository will a) be informed of the commit; and b) be sure to retrieve the committed revision.
-
-The resulting transaction model provides optimistic concurrency control, ensuring safe and reliable ACID mutations.  If a given transaction is stale, as in it is not "based on" the latest committed revision, the transaction will fail.  If this happens, the transaction must be retried as follows:
-1. The client abandons its pending block operations
-2. The winning transaction's logical actions are loaded by the client, and any conflicts resolved
-3. The client replays its own logical actions into a new set of block transforms
-4. The client attempts to pend and commit the new set of block transforms
-
-## Distributed Transactions
-
-Distributed transactions are affected by virtue of conditional transactions.  Here is how a DT is conducted:
-* An attempt is made to appended all involved collection logs with a conditional transaction identifying a single authoritative collection.  A signature is obtained from each tail maintenance cluster, indicating that this conditional transaction was successful.
-* All needed signatures are provided to the authoritative collection tail, which posts a completion transaction (in addition to the conditional transaction which it also applied).
-* All other log tails post a completion transaction, containing the authoritative collection's signature.
-* In the event that any of the above fails, e.g. a collection rejects the conditional due to it being stale, a compensatory transaction is appended to all logs to which a conditional was posted.  This compensatory transaction identifies the log entry, and undoes the operation of that entry.
-* While the conditional transaction is outstanding, other transactors can choose to continue to transact, if their action doesn't conflict or depend on the final outcome, or can wait for the outcome.
 
 ## Archival Storage
 
@@ -128,6 +133,8 @@ For details, see [Arachnode](./doc/arachnode.md).
   * Starting from unmodified cached blocks, play the read logical log entries, capturing physical changes in "unchanged" blocks
   * Note any conflicts from the loaded logical log entries, from our list - affect our list if necessary
   * Play our logical log entries, capturing physical changes as changed blocks and transforms
+
+![Transaction from sync to disk](figures/transaction-flow.png)
 
 ## Blocks
 

@@ -1,6 +1,8 @@
 import type { IBlock, Action, ActionType, ActionHandler, BlockId, ITransactor, ActionEntry, BlockStore } from "../index.js";
 import { Log, Atomic, Tracker, copyTransforms, CacheSource, isTransformsEmpty, TransactorSource } from "../index.js";
 import type { CollectionHeaderBlock, CollectionId, ICollection } from "./index.js";
+import { randomBytes } from '@libp2p/crypto';
+import { toString as uint8ArrayToString } from 'uint8arrays/to-string';
 
 const PendingRetryDelayMs = 100;
 
@@ -100,7 +102,8 @@ export class Collection<TAction> implements ICollection<TAction> {
 
 	/** Push our pending actions to the transactor */
 	async sync() {
-		const trxId = crypto.randomUUID();
+		const bytes = randomBytes(16);
+		const trxId = uint8ArrayToString(bytes, 'base64url');
 
 		while (this.pending.length || !isTransformsEmpty(this.tracker.transforms)) {
 			// Create a snapshot tracker for the transaction, so that we can ditch the log changes if we have to retry the transaction

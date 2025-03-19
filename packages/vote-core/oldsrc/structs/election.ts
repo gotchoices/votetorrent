@@ -33,16 +33,22 @@ export type Election = {
 	/** The timestamp authorities that are used to timestamp the election */
 	timestampAuthorities: { url: string }[];
 
+	/** The number of timestamp authorities that must sign records to make them valid */
+	timestampAuthorityCount: number,
+
 	/** The signature of the election authority's administrator(s) */
 	signature: string,
 }
 
 /** Election specific keyholder */
 export interface Keyholder {
-	/** The public key of the registrant */
-	registrantKey: string,
+	inviteNonce: string,
 
-	/** The keyholder's name - may be redundant with public registration data, but here to ensure disclosure */
+	inviteExpiration: number,
+
+	inviteSignature: string,
+
+	/** The keyholder's name */
 	name: string,
 
 	/** The keyholder's official title */

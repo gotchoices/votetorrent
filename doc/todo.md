@@ -1,4 +1,4 @@
-* How to prevent a flood of spoofed authorities?
+* Have the NetworkTransactor look for intersections between clusters, rather than arbitrary coordinators.
 * Refactor elections/confirmations into rounds (grouping of elections for corrections or for runoffs)
 * Collect signatures digitally
 * Potential enhancement: have the peers at or around the block's CID submit the block, to make the source more anonymous

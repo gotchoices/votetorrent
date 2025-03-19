@@ -1,17 +1,17 @@
-import type { IKeyNetwork, IRepo, GetBlockResults, PendSuccess, StaleFailure, TrxBlocks, MessageOptions, CommitResult,
-	PendRequest, CommitRequest, BlockGets } from "@votetorrent/db-core";
+import type { IRepo, GetBlockResults, PendSuccess, StaleFailure, TrxBlocks, MessageOptions, CommitResult,
+	PendRequest, CommitRequest, BlockGets, IPeerNetwork} from "@votetorrent/db-core";
 import type { RepoMessage } from "@votetorrent/db-core";
 import type { PeerId } from "@libp2p/interface";
-import { ProtocolClient } from "./protocol-client.js";
+import { ProtocolClient } from "../protocol-client.js";
 
 export class RepoClient extends ProtocolClient implements IRepo {
-	private constructor(peerId: PeerId, keyNetwork: IKeyNetwork) {
-		super(peerId, keyNetwork);
+	private constructor(peerId: PeerId, peerNetwork: IPeerNetwork, readonly protocolPrefix?: string) {
+		super(peerId, peerNetwork);
 	}
 
 	/** Create a new client instance */
-	public static create(peerId: PeerId, keyNetwork: IKeyNetwork): RepoClient {
-		return new RepoClient(peerId, keyNetwork);
+	public static create(peerId: PeerId, peerNetwork: IPeerNetwork): RepoClient {
+		return new RepoClient(peerId, peerNetwork);
 	}
 
 	async get(blockGets: BlockGets, options: MessageOptions): Promise<GetBlockResults> {
@@ -53,7 +53,7 @@ export class RepoClient extends ProtocolClient implements IRepo {
 
 		return super.processMessage<T>(
 			message,
-			'/db-p2p-repo/1.0.0',
+			(this.protocolPrefix ?? '/db-p2p') + '/repo/1.0.0',
 			{ signal: options?.signal }
 		);
 	}

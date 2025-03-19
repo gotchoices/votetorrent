@@ -1,14 +1,14 @@
 import type { BlockId, IBlock, Transform, TrxId, TrxRev } from "@votetorrent/db-core";
 import { applyTransform } from "@votetorrent/db-core";
 import type { BlockArchive, BlockMetadata, RestoreCallback, RevisionRange } from "./struct.js";
-import type { IRawStorage as IBaseStorage } from "./i-raw-storage.js";
+import type { IRawStorage } from "./i-raw-storage.js";
 import { mergeRanges } from "./helpers.js";
 import type { IBlockStorage } from "./i-block-storage.js";
 
 export class BlockStorage implements IBlockStorage {
     constructor(
         private readonly blockId: BlockId,
-        private readonly storage: IBaseStorage,
+        private readonly storage: IRawStorage,
         private readonly restoreCallback?: RestoreCallback
     ) {}
 
