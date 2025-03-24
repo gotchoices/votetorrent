@@ -9,14 +9,14 @@ type NetworkTransactorInit = {
 	timeoutMs: number;
 	abortOrCancelTimeoutMs: number;
 	keyNetwork: IKeyNetwork;
-	getRepo: (blockId: BlockId) => IRepo;
+	getRepo: (peerId: PeerId) => IRepo;
 }
 
 export class NetworkTransactor implements ITransactor {
 	private readonly keyNetwork: IKeyNetwork;
 	private readonly timeoutMs: number;
 	private readonly abortOrCancelTimeoutMs: number;
-	private readonly getRepo: (blockId: BlockId) => IRepo;
+	private readonly getRepo: (peerId: PeerId) => IRepo;
 
 	constructor(
 		init: NetworkTransactorInit,
@@ -44,7 +44,7 @@ export class NetworkTransactor implements ITransactor {
 		try {
 			await processBatches(
 				batches,
-				(batch) => this.getRepo(batch.blockId).get({ blockIds: batch.payload, context: blockGets.context }, { expiration }),
+				(batch) => this.getRepo(batch.peerId).get({ blockIds: batch.payload, context: blockGets.context }, { expiration }),
 				batch => batch.payload,
 				(gets, blockId, mergeWithGets) => [...(mergeWithGets ?? []), ...gets.filter(bid => bid === blockId)],
 				expiration,
@@ -98,7 +98,7 @@ export class NetworkTransactor implements ITransactor {
 			// Process all batches, noting all outstanding peers
 			await processBatches(
 				batches,
-				(batch) => this.getRepo(batch.blockId).pend({ ...blockTrx, transforms: batch.payload }, { expiration }),
+				(batch) => this.getRepo(batch.peerId).pend({ ...blockTrx, transforms: batch.payload }, { expiration }),
 				batch => blockIdsForTransforms(batch.payload),
 				transformForBlock,
 				expiration,
@@ -143,7 +143,7 @@ export class NetworkTransactor implements ITransactor {
 		const expiration = Date.now() + this.abortOrCancelTimeoutMs;
 		await processBatches(
 			batches,
-			(batch) => this.getRepo(batch.blockId).cancel({ trxId: trxRef.trxId, blockIds: batch.payload }, { expiration }),
+			(batch) => this.getRepo(batch.peerId).cancel({ trxId: trxRef.trxId, blockIds: batch.payload }, { expiration }),
 			batch => batch.payload,
 			mergeBlocks,
 			expiration,
@@ -203,7 +203,7 @@ export class NetworkTransactor implements ITransactor {
 		try {
 			await processBatches(
 				batches,
-				(batch) => this.getRepo(batch.blockId).commit({ trxId, blockIds: batch.payload, rev }, { expiration }),
+				(batch) => this.getRepo(batch.peerId).commit({ trxId, blockIds: batch.payload, rev }, { expiration }),
 				batch => batch.payload,
 				mergeBlocks,
 				expiration,
@@ -249,7 +249,7 @@ export class NetworkTransactor implements ITransactor {
 		);
 		await processBatches(
 			operationBatches,
-			(batch) => this.getRepo(batch.blockId).cancel({ trxId: trxRef.trxId, blockIds: batch.payload }, { expiration }),
+			(batch) => this.getRepo(batch.peerId).cancel({ trxId: trxRef.trxId, blockIds: batch.payload }, { expiration }),
 			batch => batch.payload,
 			mergeBlocks,
 			expiration,
