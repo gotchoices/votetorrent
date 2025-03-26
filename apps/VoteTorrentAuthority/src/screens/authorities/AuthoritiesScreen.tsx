@@ -1,6 +1,5 @@
 import {useTranslation} from 'react-i18next';
 import {ScrollView, StyleSheet, View} from 'react-native';
-import {ImageSourcePropType} from 'react-native';
 import {InfoCard} from '../../components/InfoCard';
 import {CollapsibleSection} from '../../components/CollapsibleSection';
 import {ChipButton} from '../../components/ChipButton';
@@ -9,10 +8,11 @@ import React, {useState} from 'react';
 import {useNavigation} from '@react-navigation/native';
 import type {NavigationProp} from '../../navigation/types';
 import type {Authority} from '@votetorrent/vote-core';
+import {MockElectionEngine} from '@votetorrent/vote-core';
 
 const INITIAL_AUTHORITIES: Authority[] = [
 	{
-		said: '1',
+		sid: '1',
 		imageUrl: require('../../assets/images/utah-flag.png'),
 		name: 'Utah State Elections',
 		domainName: 'utah.gov',
@@ -20,7 +20,7 @@ const INITIAL_AUTHORITIES: Authority[] = [
 		signature: '[valid]',
 	},
 	{
-		said: '2',
+		sid: '2',
 		imageUrl: require('../../assets/images/utah-flag.png'),
 		name: 'Salt Lake County',
 		domainName: 'slco.gov',
@@ -28,7 +28,7 @@ const INITIAL_AUTHORITIES: Authority[] = [
 		signature: '[valid]',
 	},
 	{
-		said: '3',
+		sid: '3',
 		imageUrl: require('../../assets/images/utah-flag.png'),
 		name: 'Utah County',
 		domainName: 'utahcounty.gov',
@@ -36,7 +36,7 @@ const INITIAL_AUTHORITIES: Authority[] = [
 		signature: '[valid]',
 	},
 	{
-		said: '4',
+		sid: '4',
 		imageUrl: require('../../assets/images/utah-flag.png'),
 		name: 'Provo City',
 		domainName: 'provo.gov',
@@ -44,7 +44,7 @@ const INITIAL_AUTHORITIES: Authority[] = [
 		signature: '[valid]',
 	},
 	{
-		said: '5',
+		sid: '5',
 		imageUrl: require('../../assets/images/utah-flag.png'),
 		name: 'Orem City',
 		domainName: 'orem.gov',
@@ -52,7 +52,7 @@ const INITIAL_AUTHORITIES: Authority[] = [
 		signature: '[valid]',
 	},
 	{
-		said: '6',
+		sid: '6',
 		imageUrl: require('../../assets/images/utah-flag.png'),
 		name: 'West Jordan City',
 		domainName: 'westjordan.gov',
@@ -91,7 +91,7 @@ export default function AuthoritiesScreen() {
 			{pinnedAuthorities.length > 0 ? (
 				pinnedAuthorities.map((authority: Authority) => (
 					<InfoCard
-						key={authority.said}
+						key={authority.sid}
 						title={authority.name}
 						additionalInfo={[{label: 'CID', value: authority.imageCid}]}
 						icon={'chevron-right'}
@@ -125,7 +125,7 @@ export default function AuthoritiesScreen() {
 				{unpinnedAuthorities.length > 0 ? (
 					unpinnedAuthorities.map(authority => (
 						<InfoCard
-							key={authority.said}
+							key={authority.sid}
 							title={authority.name}
 							additionalInfo={[{label: 'CID', value: authority.imageCid}]}
 							icon={'thumbtack'}

@@ -6,5 +6,5 @@ export type ElectionEngineInit = {
 	/** One or more multiaddresses to stable hosts, necessary to initially connect to the network */
 	bootstrap: string[];
 	/** The SAID of the primary authority, also used to identify the network's protocol */
-	primaryAuthoritySaid: string;
+	primaryAuthoritySid: string;
 }

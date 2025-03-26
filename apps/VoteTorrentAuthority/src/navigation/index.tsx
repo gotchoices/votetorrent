@@ -20,160 +20,161 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator();
 
 function SplitHeaderTitle() {
-  const {colors} = useTheme() as ExtendedTheme;
-  return (
-    <View style={styles.headerContainer}>
-      <Text
-        style={[styles.headerText, styles.networkText, {color: colors.text}]}
-        numberOfLines={1}>
-        Current Network
-      </Text>
-      <Text
-        style={[styles.headerText, styles.usernameText, {color: colors.text}]}
-        numberOfLines={1}>
-        Username Username
-      </Text>
-    </View>
-  );
+	const {colors} = useTheme() as ExtendedTheme;
+	return (
+		<View style={styles.headerContainer}>
+			<Text
+				style={[styles.headerText, styles.networkText, {color: colors.text}]}
+				numberOfLines={1}>
+				Current Network
+			</Text>
+			<Text
+				style={[styles.headerText, styles.usernameText, {color: colors.text}]}
+				numberOfLines={1}>
+				Username Username
+			</Text>
+		</View>
+	);
 }
 
 function useTabHeaderOptions() {
-  const {colors} = useTheme() as ExtendedTheme;
-  const navigation = useNavigation<NavigationProp>();
+	const {colors} = useTheme() as ExtendedTheme;
+	const navigation = useNavigation<NavigationProp>();
 
-  const handleNetworkPress = () => {
-    navigation.navigate('Networks');
-  };
+	const handleNetworkPress = () => {
+		navigation.navigate('Networks');
+	};
 
-  return {
-    headerLeft: () => (
-      <Pressable onPress={handleNetworkPress} style={styles.headerButton}>
-        <FontAwesome6 name="circle-nodes" size={24} color={colors.text} />
-      </Pressable>
-    ),
-    headerRight: () => (
-      <Pressable style={styles.headerButton}>
-        <FontAwesome6 name="circle-user" size={24} color={colors.text} />
-      </Pressable>
-    ),
-    headerTitle: () => <SplitHeaderTitle />,
-    headerShadowVisible: false,
-  };
+	return {
+		headerLeft: () => (
+			<Pressable onPress={handleNetworkPress} style={styles.headerButton}>
+				<FontAwesome6 name="circle-nodes" size={24} color={colors.text} />
+			</Pressable>
+		),
+		headerRight: () => (
+			<Pressable style={styles.headerButton}>
+				<FontAwesome6 name="circle-user" size={24} color={colors.text} />
+			</Pressable>
+		),
+		headerTitle: () => <SplitHeaderTitle />,
+		headerShadowVisible: false,
+	};
 }
 
 const TabNavigator = () => {
-  const {colors} = useTheme() as ExtendedTheme;
-  const {t} = useTranslation();
-  const tabHeaderOptions = useTabHeaderOptions();
+	const {colors} = useTheme() as ExtendedTheme;
+	const {t} = useTranslation();
+	const tabHeaderOptions = useTabHeaderOptions();
 
-  return (
-    <Tab.Navigator
-      screenOptions={({route}) => ({
-        tabBarIcon: ({focused, color, size}) => {
-          let iconName: string;
+	return (
+		<Tab.Navigator
+			screenOptions={({route}) => ({
+				tabBarIcon: ({focused, color, size}) => {
+					let iconName: string;
 
-          switch (route.name) {
-            case 'Elections':
-              iconName = 'check-to-slot';
-              break;
-            case 'Signers':
-              iconName = 'person';
-              break;
-            case 'Authorities':
-              iconName = 'shield';
-              break;
-            case 'Settings':
-              iconName = 'gear';
-              break;
-            default:
-              iconName = 'alert';
-          }
+					switch (route.name) {
+						case 'Elections':
+							iconName = 'check-to-slot';
+							break;
+						case 'Signers':
+							iconName = 'person';
+							break;
+						case 'Authorities':
+							iconName = 'shield';
+							break;
+						case 'Settings':
+							iconName = 'gear';
+							break;
+						default:
+							iconName = 'alert';
+					}
 
-          return <FontAwesome6 name={iconName} size={size} color={color} />;
-        },
-        tabBarActiveTintColor: colors.primary,
-        tabBarInactiveTintColor: 'gray',
-      })}>
-      <Tab.Screen
-        name="Elections"
-        component={ElectionsScreen}
-        options={{...tabHeaderOptions}}
-      />
-      <Tab.Screen
-        name="Signers"
-        component={SignersScreen}
-        options={{...tabHeaderOptions}}
-      />
-      <Tab.Screen
-        name="Authorities"
-        component={AuthoritiesScreen}
-        options={tabHeaderOptions}
-      />
-      <Tab.Screen
-        name="Settings"
-        component={SettingsScreen}
-        options={{...tabHeaderOptions}}
-      />
-    </Tab.Navigator>
-  );
+					return <FontAwesome6 name={iconName} size={size} color={color} />;
+				},
+				tabBarActiveTintColor: colors.primary,
+				tabBarInactiveTintColor: 'gray',
+			})}>
+			<Tab.Screen
+				name="Elections"
+				component={ElectionsScreen}
+				options={{...tabHeaderOptions}}
+			/>
+			<Tab.Screen
+				name="Signers"
+				component={SignersScreen}
+				options={{...tabHeaderOptions}}
+			/>
+			<Tab.Screen
+				name="Authorities"
+				component={AuthoritiesScreen}
+				options={tabHeaderOptions}
+			/>
+			<Tab.Screen
+				name="Settings"
+				component={SettingsScreen}
+				options={{...tabHeaderOptions}}
+			/>
+		</Tab.Navigator>
+	);
 };
 
 const styles = StyleSheet.create({
-  headerContainer: {
-    flex: 1,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 8,
-    width: '100%',
-  },
-  headerText: {
-    fontSize: 16,
-    fontWeight: '500',
-  },
-  networkText: {
-    flex: 1,
-    textAlign: 'left',
-    marginRight: 8,
-  },
-  usernameText: {
-    flex: 1,
-    textAlign: 'right',
-    opacity: 0.7,
-  },
-  headerButton: {
-    padding: 8,
-    marginHorizontal: 4,
-  },
+	headerContainer: {
+		flex: 1,
+		flexDirection: 'row',
+		justifyContent: 'space-between',
+		alignItems: 'center',
+		paddingHorizontal: 2,
+		width: '100%',
+	},
+	headerText: {
+		fontSize: 16,
+		fontWeight: '500',
+	},
+	networkText: {
+		flex: 1,
+		textAlign: 'left',
+		marginRight: 8,
+	},
+	usernameText: {
+		flex: 1,
+		textAlign: 'right',
+		opacity: 0.7,
+	},
+	headerButton: {
+		padding: 8,
+		marginHorizontal: 4,
+		marginVertical: -2,
+	},
 });
 
 export const RootNavigator = () => {
-  const {t} = useTranslation();
+	const {t} = useTranslation();
 
-  return (
-    <Stack.Navigator>
-      <Stack.Screen
-        name="Tabs"
-        component={TabNavigator}
-        options={{headerShown: false}}
-      />
-      <Stack.Screen
-        name="AuthorityDetails"
-        component={AuthorityDetailsScreen}
-        options={{
-          title: t('authority'),
-          headerRight: () => (
-            <ChipButton label={t('unpin')} icon={'thumbtack-slash'} />
-          ),
-        }}
-      />
-      <Stack.Screen
-        name="Networks"
-        component={NetworksScreen}
-        options={{
-          title: t('recentNetworks'),
-        }}
-      />
-    </Stack.Navigator>
-  );
+	return (
+		<Stack.Navigator>
+			<Stack.Screen
+				name="Tabs"
+				component={TabNavigator}
+				options={{headerShown: false}}
+			/>
+			<Stack.Screen
+				name="AuthorityDetails"
+				component={AuthorityDetailsScreen}
+				options={{
+					title: t('authority'),
+					headerRight: () => (
+						<ChipButton label={t('unpin')} icon={'thumbtack-slash'} />
+					),
+				}}
+			/>
+			<Stack.Screen
+				name="Networks"
+				component={NetworksScreen}
+				options={{
+					title: t('joinANetwork'),
+				}}
+			/>
+		</Stack.Navigator>
+	);
 };

@@ -1,8 +1,9 @@
 import type { IKeyNetwork } from "@votetorrent/db-core";
 import type { Authority, UserIdentity, LocalStorage as ILocalStorage, Cursor } from "../index.js";
 import type { ElectionEngineInit } from "./struct.js";
+import type { IElectionEngine } from "./interfaces.js";
 
-export class ElectionEngine {
+export class ElectionEngine implements IElectionEngine {
 	protected constructor(
 		public readonly init: ElectionEngineInit,
 			/** The local storage to use for the network */
@@ -23,15 +24,15 @@ export class ElectionEngine {
 	/** Pins an authority to the user's device */
 	async pinAuthority(authority: Authority): Promise<void> {
 		const pinnedAuthorities = await this.getPinnedAuthorities();
-		const unique = Object.fromEntries(pinnedAuthorities.map(authority => [authority.said, authority]));
-		const appended = { ...unique, [authority.said]: authority };
+		const unique = Object.fromEntries(pinnedAuthorities.map(authority => [authority.sid, authority]));
+		const appended = { ...unique, [authority.sid]: authority };
 		await this.localStorage.setItem("pinnedAuthorities", Object.values(appended));
 	}
 
 	/** Unpins an authority from the user's device */
-	async unpinAuthority(authoritySaid: string): Promise<void> {
+	async unpinAuthority(authoritySid: string): Promise<void> {
 		const pinnedAuthorities = await this.getPinnedAuthorities();
-		const filtered = pinnedAuthorities.filter(authority => authority.said !== authoritySaid);
+		const filtered = pinnedAuthorities.filter(authority => authority.sid !== authoritySid);
 		await this.localStorage.setItem("pinnedAuthorities", filtered);
 	}
 

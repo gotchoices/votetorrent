@@ -4,14 +4,17 @@ import './src/i18n';
 import {RootNavigator} from './src/navigation';
 import {darkTheme, lightTheme} from './src/theme/themes';
 import {useColorScheme} from 'react-native';
+import {AppProvider} from './src/providers/AppProvider';
 
 export default function App() {
 	const colorScheme = useColorScheme();
 
 	return (
-		<NavigationContainer
-			theme={colorScheme === 'dark' ? darkTheme : lightTheme}>
-			<RootNavigator />
-		</NavigationContainer>
+		<AppProvider>
+			<NavigationContainer
+				theme={colorScheme === 'dark' ? darkTheme : lightTheme}>
+				<RootNavigator />
+			</NavigationContainer>
+		</AppProvider>
 	);
 }

@@ -30,6 +30,7 @@ export function InfoCard({
 	onPress,
 }: InfoCardProps) {
 	const {colors} = useTheme() as ExtendedTheme;
+	console.log(image);
 
 	return (
 		<TouchableOpacity
