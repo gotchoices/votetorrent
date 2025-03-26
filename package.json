@@ -3,14 +3,31 @@
   "version": "0.0.1",
   "private": true,
   "type": "module",
-  "workspaces": [
-    "packages/*"
-  ],
+  "workspaces": {
+    "packages": [
+      "packages/*",
+      "apps/*"
+    ],
+    "nohoist": [
+      "**/react-native",
+      "**/react-native/**",
+      "**/@react-native/**",
+      "**/@react-native-*",
+      "**/react-native-*",
+      "**/@react-navigation/**",
+      "**/react-i18next",
+      "**/i18next",
+      "**/@babel/**"
+    ]
+  },
   "scripts": {
-    "clean": "npm run clean --workspaces",
-    "build": "npm run build --workspaces",
-    "lint": "npm run lint --workspaces",
-    "test": "npm run test --workspaces"
+    "clean": "yarn workspaces run clean",
+    "build": "yarn workspaces run build",
+    "lint": "yarn workspaces run lint",
+    "test": "yarn workspaces run test",
+    "start": "yarn workspace votetorrent-authority start",
+    "android": "yarn workspace votetorrent-authority android",
+    "ios": "yarn workspace votetorrent-authority ios"
   },
   "devDependencies": {
     "@types/node": "^22.13.10",
