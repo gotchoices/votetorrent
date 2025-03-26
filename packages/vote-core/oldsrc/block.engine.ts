@@ -2,7 +2,8 @@ import type { AuthorityEngineStore } from "../index.js";
 import type { Answer, VoteBlock, Template, Question, Receipt, TraceFunc, Vote, Voter } from "../src/network/index.js";
 import { Asymmetric, AsymmetricVault, base64ToArray } from "chipcryptbase";
 import type { TimestampService } from "./structs/timestamp-service.js";
-import { createHash } from "crypto";
+import { sha256 } from "multiformats/hashes/sha2";
+import { toString as uint8ArrayToString } from 'uint8arrays/to-string';
 import type { VoterWithKey } from "./structs/voter.js";
 import type { VoteWithNonce } from "../src/network/vote.js";
 
@@ -250,7 +251,9 @@ export class BlockEngine {
 	private async generateReceipt(blockCid: string, result: string, error?: any, details?: Record<string, any>): Promise<Receipt> {
 		const receipt = { blockCid, result, ...details };
 		// TODO: acquire timestamp from TSA
-		const imprint = createHash('sha256').update(JSON.stringify(receipt)).digest('base64');
+		const msgBytes = new TextEncoder().encode(JSON.stringify(receipt));
+		const hashBytes = await sha256.digest(msgBytes);
+		const imprint = uint8ArrayToString(hashBytes.digest, 'base64');
 		const timestamps = await this.timestampService.fetchTimestamps(imprint);
 		const signature = await this.vault.sign(JSON.stringify(receipt));
 		return { ...receipt, timestamps, signature } as Receipt;

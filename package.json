@@ -30,8 +30,7 @@
     "ios": "yarn workspace votetorrent-authority ios"
   },
   "devDependencies": {
-    "@types/node": "^22.10.2",
-    "aegir": "^45.0.8"
-  },
-  "packageManager": "yarn@4.7.0"
+    "@types/node": "^22.13.10",
+    "aegir": "^45.1.4"
+  }
 }

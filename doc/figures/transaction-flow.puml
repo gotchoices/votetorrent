@@ -1,0 +1,50 @@
+@startuml
+
+title Transaction - from Sync to Disk
+skinparam ActivityBackgroundColor white
+skinparam ActivityBorderColor black
+skinparam ArrowColor black
+skinparam ActivityDiamondBackgroundColor white
+skinparam ActivityDiamondBorderColor black
+
+|Application Layer|
+start
+-[#black]-> sync();
+:Collection;
+-[#black]-> transact();
+:TransactorSource;
+-[#black]-> pend();
+:NetworkTransactor;
+-[#black]-> pend();
+:RepoClient;
+-[#black]-> stream...;
+:libp2p;
+
+|Cluster Coordinator|
+-[#black]-> processStream();
+:RepoService;
+-[#black]-> pend();
+:CoordinatorRepo;
+-[#black]-> executeClusterTransaction();
+:ClusterCoordinator;
+-[#black]-> update();
+:ClusterClient;
+-[#black]-> stream...;
+:libp2p;
+
+|Cluster Member|
+-[#black]-> processStream();
+:ClusterService;
+-[#black]-> update();
+:ClusterMember;
+-[#black]-> pend();
+:StorageRepo;
+-[#black]-> savePendingTransaction();
+:BlockStorage;
+-[#black]-> savePendingTransaction();
+:FileStorage;
+-[#black]-> writeFile();
+:File System;
+stop
+
+@enduml

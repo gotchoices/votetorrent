@@ -1,5 +1,9 @@
 # Election Logic
 
+## Network and Authorities Formed
+
+See [Administration](./administration.md)
+
 ## Election Processes
 
 ### Voters register

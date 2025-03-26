@@ -2,13 +2,14 @@ import { pipe } from 'it-pipe';
 import { encode as lpEncode, decode as lpDecode } from 'it-length-prefixed';
 import { pushable } from 'it-pushable';
 import type { PeerId } from '@libp2p/interface';
-import type { IKeyNetwork } from '@votetorrent/db-core';
+import type { IPeerNetwork } from '@votetorrent/db-core';
 import { first } from './it-utility.js';
 
+/** Base class for clients that communicate via a libp2p protocol */
 export class ProtocolClient {
 	constructor(
 		protected readonly peerId: PeerId,
-		protected readonly keyNetwork: IKeyNetwork,
+		protected readonly peerNetwork: IPeerNetwork,
 	) { }
 
 	protected async processMessage<T>(
@@ -16,7 +17,7 @@ export class ProtocolClient {
 		protocol: string,
 		options?: { signal?: AbortSignal }
 	): Promise<T> {
-		const stream = await this.keyNetwork.dialProtocol(
+		const stream = await this.peerNetwork.dialProtocol(
 			this.peerId,
 			protocol,
 			{ signal: options?.signal }

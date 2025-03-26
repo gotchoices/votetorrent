@@ -38,11 +38,13 @@
   "author": "Nathan Allan",
   "license": "MIT",
   "devDependencies": {
-    "@types/node": "^22.13.9",
-    "aegir": "^45.1.2"
+    "@types/node": "^22.13.10",
+    "aegir": "^45.1.4"
   },
   "dependencies": {
-    "@votetorrent/db-core": "*",
+    "@libp2p/interface": "^2.7.0",
+    "@libp2p/peer-id-factory": "^4.2.4",
+    "@votetorrent/db-core": "^0.0.1",
     "uint8arrays": "^5.1.0"
   }
 }

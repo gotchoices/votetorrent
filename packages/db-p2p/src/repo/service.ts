@@ -1,29 +1,32 @@
 import { pipe } from 'it-pipe'
 import { decode as lpDecode, encode as lpEncode } from 'it-length-prefixed'
 import type { Startable, Logger, IncomingStreamData } from '@libp2p/interface'
-import type { RepoMessage, ICluster } from '@votetorrent/db-core'
-import { Repo } from './index.js'
+import type { IRepo, RepoMessage } from '@votetorrent/db-core'
 import type { Uint8ArrayList } from 'uint8arraylist'
 
 // Define Components interface
 interface BaseComponents {
-  logger: { forComponent: (name: string) => Logger }
+  logger: { forComponent: (name: string) => Logger },
   registrar: {
     handle: (protocol: string, handler: (data: IncomingStreamData) => void, options: any) => Promise<void>
     unhandle: (protocol: string) => Promise<void>
   }
 }
 
-export interface RepoServiceComponents extends BaseComponents {
-  repo: Repo
-  cluster: ICluster
+export type RepoServiceComponents = BaseComponents & {
+  repo: IRepo
 }
 
-export interface RepoServiceInit {
-  protocol?: string
-  maxInboundStreams?: number
-  maxOutboundStreams?: number
-  logPrefix?: string
+export type RepoServiceInit = {
+  protocol?: string,
+	protocolPrefix?: string,
+  maxInboundStreams?: number,
+  maxOutboundStreams?: number,
+  logPrefix?: string,
+}
+
+export function repoService(init: RepoServiceInit = {}): (components: RepoServiceComponents) => RepoService {
+	return (components: RepoServiceComponents) => new RepoService(components, init);
 }
 
 /**
@@ -34,13 +37,13 @@ export class RepoService implements Startable {
   private readonly maxInboundStreams: number
   private readonly maxOutboundStreams: number
   private readonly log: Logger
-  private readonly repo: Repo
+  private readonly repo: IRepo
   private readonly components: RepoServiceComponents
   private running: boolean
 
   constructor(components: RepoServiceComponents, init: RepoServiceInit = {}) {
     this.components = components
-    this.protocol = init.protocol ?? '/db-p2p-repo/1.0.0'
+    this.protocol = init.protocol ?? (init.protocolPrefix ?? '/db-p2p') + '/repo/1.0.0'
     this.maxInboundStreams = init.maxInboundStreams ?? 32
     this.maxOutboundStreams = init.maxOutboundStreams ?? 64
     this.log = components.logger.forComponent(init.logPrefix ?? 'db-p2p:repo-service')
