@@ -12,6 +12,8 @@ type BlockState = {
   revisionTrxs: Map<RevisionNumber, TrxId>;
   /** Currently pending transactions */
   pendingTrxs: Map<TrxId, Transform>;
+	/** Committed transactions */
+	committedTrxs: Map<TrxId, Transform>;
 }
 
 // Simple in-memory transactor for testing that maintains materialized blocks for every revision
@@ -116,7 +118,7 @@ export class TestTransactor implements ITransactor {
     // Initialize block states if needed and store pending transaction
 		const blockIds = blockIdsForTransforms(transforms);
     for (const blockId of blockIds) {
-			const blockState = ensuredMap(this.blocks, blockId, () => createBlockState());
+			const blockState = ensuredMap(this.blocks, blockId, () => newBlockState());
       blockState.pendingTrxs.set(trxId, transformForBlockId(transforms, blockId));
     }
 
@@ -208,6 +210,7 @@ export class TestTransactor implements ITransactor {
       // Update block state
       blockState.latestRev = rev;
       blockState.revisionTrxs.set(rev, trxId);
+			blockState.committedTrxs.set(trxId, transform);
       blockState.pendingTrxs.delete(trxId);
     }
 
@@ -238,7 +241,7 @@ export class TestTransactor implements ITransactor {
     const allCommitted = new Map<TrxId, TrxTransforms>();
     for (const [blockId, blockState] of this.blocks.entries()) {
       for (const [rev, trxId] of blockState.revisionTrxs) {
-        const transform = blockState.pendingTrxs.get(trxId);
+        const transform = blockState.committedTrxs.get(trxId);
         if (transform) {
           const existing = allCommitted.get(trxId);
           if (!existing) {
@@ -267,12 +270,13 @@ export class TestTransactor implements ITransactor {
 	}
 }
 
-function createBlockState(): BlockState {
+function newBlockState(): BlockState {
 	return {
 		materializedBlocks: new Map(),
 		latestRev: 0,
 		revisionTrxs: new Map(),
-		pendingTrxs: new Map()
+		pendingTrxs: new Map(),
+		committedTrxs: new Map()
 	};
 }
 
