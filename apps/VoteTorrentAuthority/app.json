@@ -1,0 +1,9 @@
+{
+  "name": "VoteTorrentAuthority",
+  "displayName": "VoteTorrentAuthority",
+  "expo": {
+    "plugins": [
+      "react-native-screens"
+    ]
+  }
+}
