@@ -44,7 +44,8 @@ export function evaluatePolynomial(coeffs: bigint[], x: bigint, n: bigint = CURV
         result = (result + coeff * xPower) % n;
         xPower = (xPower * x) % n;
     }
-    return result;
+    // Ensure the final result is in the range [0, n-1]
+    return (result + n) % n;
 }
 
 // Lagrange interpolation to find P(0) given points {x_i, y_i}

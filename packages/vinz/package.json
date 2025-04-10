@@ -1,8 +1,8 @@
 {
-  "name": "@votetorrent/proofs",
+  "name": "@votetorrent/vinz",
   "version": "0.0.1",
   "type": "module",
-  "description": "Proofs for VoteTorrent",
+  "description": "Vinz Clortho - Threshold cryptography for VoteTorrent",
   "main": "dist/src/index.js",
   "types": "./dist/src/index.d.ts",
   "files": [
@@ -23,7 +23,7 @@
     "lint": "aegir lint",
     "test": "aegir test",
     "test:node": "aegir test -t node",
-		"prove": "node --loader ts-node/esm src/test.ts",
+		"prove": "node --loader ts-node/esm test/test.ts",
     "dep-check": "aegir dep-check"
   },
   "devDependencies": {
