@@ -33,11 +33,11 @@ export class TransactorSource<TBlock extends IBlock> implements BlockSource<TBlo
 	}
 
 	async transact(transform: Transforms, trxId: TrxId, rev: number, headerId: BlockId, tailId: BlockId): Promise<undefined | StaleFailure> {
-		const isNew = Object.hasOwn(transform.inserts, headerId);
 		const pendResult = await this.transactor.pend({ transforms: transform, trxId, policy: 'f' });
 		if (!pendResult.success) {
 			return pendResult;
 		}
+		const isNew = Object.hasOwn(transform.inserts, headerId);
 		const commitResult = await this.transactor.commit({ headerId: isNew ? headerId : undefined, tailId, blockIds: pendResult.blockIds, trxId, rev });
 		if (!commitResult.success) {
 			return commitResult;

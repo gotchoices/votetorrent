@@ -12,7 +12,7 @@ export type CollectionInitOptions<TAction> = {
 }
 
 export class Collection<TAction> implements ICollection<TAction> {
-	private readonly pending: Action<TAction>[] = [];
+	private pending: Action<TAction>[] = [];
 
 	protected constructor(
 		public readonly id: CollectionId,
@@ -100,44 +100,60 @@ export class Collection<TAction> implements ICollection<TAction> {
 		this.source.trxContext = latest.context;
 	}
 
+	private syncing = false;
+
 	/** Push our pending actions to the transactor */
 	async sync() {
-		const bytes = randomBytes(16);
-		const trxId = uint8ArrayToString(bytes, 'base64url');
+		if (this.syncing) {
+			return;
+		}
+		this.syncing = true;
+		try {
+			const bytes = randomBytes(16);
+			const trxId = uint8ArrayToString(bytes, 'base64url');
 
-		while (this.pending.length || !isTransformsEmpty(this.tracker.transforms)) {
-			// Create a snapshot tracker for the transaction, so that we can ditch the log changes if we have to retry the transaction
-			const snapshot = copyTransforms(this.tracker.transforms);
-			const tracker = new Tracker(this.sourceCache, snapshot);
+			while (this.pending.length || !isTransformsEmpty(this.tracker.transforms)) {
+				// Snapshot the pending actions so that any new actions aren't assumed to be part of this transaction
+				const pending = [...this.pending];
 
-			// Add the transaction to the log
-			const log = Log.open<Action<TAction>>(tracker, this.logId);
-			const newRev = (this.source.trxContext?.rev ?? 0) + 1;
-			const addResult = await log.addActions(this.pending, trxId, newRev, () => tracker.transformedBlockIds());
+				// Create a snapshot tracker for the transaction, so that we can ditch the log changes if we have to retry the transaction
+				const snapshot = copyTransforms(this.tracker.transforms);
+				const tracker = new Tracker(this.sourceCache, snapshot);
 
-			// Commit the transaction to the transactor
-			const staleFailure = await this.source.transact(tracker.transforms, trxId, newRev, this.id, addResult.tailPath.block.header.id);
-			if (staleFailure) {
-				if (staleFailure.missing) {	// One or more transactions have been committed ahead of us, need to incorporate the changes and replay our actions
-					for (const trx of staleFailure.missing) {
-						this.sourceCache.transformCache(trx.transforms);
+				// Add the transaction to the log (in local tracking space)
+				const log = Log.open<Action<TAction>>(tracker, this.logId);
+				const newRev = (this.source.trxContext?.rev ?? 0) + 1;
+				const addResult = await log.addActions(pending, trxId, newRev, () => tracker.transformedBlockIds());
+
+				// Commit the transaction to the transactor
+				const staleFailure = await this.source.transact(tracker.transforms, trxId, newRev, this.id, addResult.tailPath.block.header.id);
+				if (staleFailure) {
+					if (staleFailure.missing) {	// One or more transactions have been committed ahead of us, need to incorporate the changes and replay our actions
+						for (const trx of staleFailure.missing) {
+							this.sourceCache.transformCache(trx.transforms);
+						}
+					} else if (staleFailure.pending) {	// One or more transactions are pending on the same block(s) as us, need to wait for them to commit
+						// Clear pending caches for the conflicting blocks
+						this.sourceCache.clear(staleFailure.pending.map(p => p.blockId));
+						// Wait for short time to allow the pending transactions to commit
+						await new Promise(resolve => setTimeout(resolve, PendingRetryDelayMs));
 					}
-				} else if (staleFailure.pending) {	// One or more transactions are pending on the same block(s) as us, need to wait for them to commit
-					// Clear pending caches for the conflicting blocks
-					this.sourceCache.clear(staleFailure.pending.map(p => p.blockId));
-					// Wait for short time to allow the pending transactions to commit
-					await new Promise(resolve => setTimeout(resolve, PendingRetryDelayMs));
+					await this.replayActions();
+					this.source.trxContext = await log.getTrxContext();
+				} else {
+					// Clear the pending actions that were part of this transaction
+					this.pending = this.pending.slice(pending.length);
+					// Reset cache and replay any actions that were added during the transaction
+					const transforms = tracker.reset();
+					await this.replayActions();
+					this.sourceCache.transformCache(transforms);
+					this.source.trxContext = this.source.trxContext
+						? { committed: [...this.source.trxContext.committed, { trxId, rev: newRev }], rev: newRev }
+						: { committed: [{ trxId, rev: newRev }], rev: newRev };
 				}
-				await this.replayActions();
-				this.source.trxContext = await log.getTrxContext();
-			} else {
-				this.pending.length = 0;
-				this.tracker.reset();
-				this.sourceCache.transformCache(tracker.reset());
-				this.source.trxContext = this.source.trxContext
-					? { committed: [...this.source.trxContext.committed, { trxId, rev: newRev }], rev: newRev }
-					: { committed: [{ trxId, rev: newRev }], rev: newRev };
 			}
+		} finally {
+			this.syncing = false;
 		}
 	}
 
@@ -158,7 +174,12 @@ export class Collection<TAction> implements ICollection<TAction> {
 
 	private async replayActions() {
 		this.tracker.reset();
-		await this.internalTransact(...this.pending);
+		// Because pending could be appended while we're async, we need to snapshot and repeat until empty
+		while (this.pending.length) {
+			const pending = [...this.pending];
+			this.pending = [];
+			await this.internalTransact(...pending);
+		}
 	}
 
 	protected processUpdateAction(delta: ActionEntry<Action<TAction>>) {
