@@ -1,4 +1,5 @@
 import type { Timestamp } from "../common/timestamp";
+import type { ImageRef } from "../common/image-ref";
 
 export type Authority = {
 	/** Sovereign ID of the authority */
@@ -10,11 +11,8 @@ export type Authority = {
 	/** Registered domain name of the authority */
 	domainName: string;
 
-	/** URL of the authority's image */
-	imageUrl?: string;
-
-	/** CID of the authority's image */
-	imageCid?: string;
+	/** Image reference for the authority */
+	imageRef: ImageRef;
 
 	/** The network information published by the authority */
 	network?: AuthorityNetwork;
@@ -28,11 +26,20 @@ export type AuthorityNetwork = {
 	/** The name for the network */
 	name: string;
 
+	/** The hash of the network name and primary authority's sovereign ID */
+	hash: string;
+
+	/** The primary authority's sovereign ID */
+	primaryAuthoritySid: string;
+
 	/** The optional image for the network */
-	imageUrl?: string;
+	imageRef: ImageRef;
 
 	/** One or more multiaddresses to stable hosts, necessary to initially connect to the network */
-	bootstrap: string[];
+	relays: string[];
+
+	/** The signature of the primary authority */
+	signature: string;
 }
 
 export type Administrator = {
@@ -51,11 +58,8 @@ export type Administrator = {
 	/** Scopes of the administrator */
 	scopes: Scope[];
 
-	/** URL of the administrator's image */
-	imageUrl?: string;
-
-	/** CID of the administrator's image */
-	imageCid?: string;
+	/** Image reference for the administrator */
+	imageRef?: ImageRef;
 
 	/** Signatures of the administrator */
 	signatures: string[];
@@ -83,14 +87,25 @@ export type Administration = {
 
 /** Scope codes representing different administrator privileges */
 export type Scope = 
-    | 'rad'  // Revise or replace the Administration
-    | 'vrg'  // Validate registrations
-    | 'iad'  // Invite other Authorities
-    | 'rnp'  // Revise Network Policies
-    | 'uai'  // Update Authority Information
-    | 'ceb'  // Create/Edit ballot templates
-    | 'mel'  // Manage Elections
-    | 'cap'; // Configure Authority Peers
+    | 'rad'
+    | 'vrg'
+    | 'iad'
+    | 'rnp'
+    | 'uai'
+    | 'ceb'
+    | 'mel'
+    | 'cap';
+
+export const scopeDescriptions: Record<string, string> = {
+	rad: 'Revise or replace the Administration',
+	vrg: 'Validate registrations',
+	iad: 'Invite other Authorities',
+	rnp: 'Revise Network Policies',
+	uai: 'Update Authority Information',
+	ceb: 'Create/Edit ballot templates',
+	mel: 'Manage Elections',
+	cap: 'Configure Authority Peers',
+};
 
 export type AuthorityPeer = {
 	/** Reference to the Authority this peer belongs to */

@@ -27,7 +27,8 @@
 		"test": "yarn workspaces run test",
 		"start": "yarn workspace votetorrent-authority start",
 		"android": "yarn workspace votetorrent-authority android",
-		"ios": "yarn workspace votetorrent-authority ios"
+		"ios": "yarn workspace votetorrent-authority ios",
+		"all": "yarn workspace votetorrent-authority ios && yarn workspace votetorrent-authority android"
 	},
 	"devDependencies": {
 		"@types/node": "^22.10.2",

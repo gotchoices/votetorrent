@@ -1,4 +1,4 @@
-package com.votetorrentauthority
+package org.votetorrent.authority
 
 import android.os.Bundle
 import com.facebook.react.ReactActivity

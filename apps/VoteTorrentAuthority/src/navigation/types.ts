@@ -1,15 +1,31 @@
-import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
-import {Authority} from '../screens/authorities/AuthoritiesScreen';
+import type {Authority, Administrator} from '@votetorrent/vote-core';
 
 export type RootStackParamList = {
-  Tabs: undefined;
-  AuthorityDetails: {
-    authority: Authority;
-  };
-  Networks: undefined;
+	Home: undefined;
+	AuthorityDetails: {authority: Authority};
+	Networks: undefined;
+	AdministratorDetails: {administrator: Administrator};
+	AddNetwork: undefined;
+	Hosting: undefined;
+	ReplaceAdministration: {
+		authority: Authority;
+		administrator?: Administrator;
+		removeAdministrator?: boolean;
+	};
+	EditAdministrator: {
+		authority: Authority;
+		administratorSid?: string;
+	};
 };
 
-export type NavigationProp = NativeStackNavigationProp<
-  RootStackParamList,
-  'AuthorityDetails'
->;
+export type TabParamList = {
+	Elections: undefined;
+	Signers: undefined;
+	Authorities: undefined;
+	Settings: undefined;
+};
+
+export type NavigationProp = {
+	navigate: (screen: keyof RootStackParamList, params?: any) => void;
+	setOptions: (options: any) => void;
+};

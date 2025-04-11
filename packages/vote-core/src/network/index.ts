@@ -1,2 +1,2 @@
-export * from "./struct.js";
-export * from "./mock-networks-engine.js";
+export * from "./network-reference.js";
+export * from "./types.js";

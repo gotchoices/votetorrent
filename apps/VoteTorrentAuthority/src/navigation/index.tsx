@@ -5,35 +5,36 @@ import {useTranslation} from 'react-i18next';
 import {createNativeStackNavigator} from '@react-navigation/native-stack';
 import type {RootStackParamList} from './types';
 import AuthorityDetailsScreen from '../screens/authorities/AuthorityDetailsScreen';
+import AdministratorDetailsScreen from '../screens/administration/AdministratorDetailsScreen';
 import ElectionsScreen from '../screens/elections/ElectionsScreen';
-import SignersScreen from '../screens/signers/SignersScreen';
+import TasksScreen from '../screens/tasks/TasksScreen';
 import AuthoritiesScreen from '../screens/authorities/AuthoritiesScreen';
 import SettingsScreen from '../screens/settings/SettingsScreen';
 import {ChipButton} from '../components/ChipButton';
-import {Pressable, StyleSheet, View, Text} from 'react-native';
+import {Pressable, StyleSheet} from 'react-native';
 import {ExtendedTheme, useNavigation} from '@react-navigation/native';
 import {useTheme} from '@react-navigation/native';
 import NetworksScreen from '../screens/networks/NetworksScreen';
 import type {NavigationProp} from './types';
+import AddNetworkScreen from '../screens/networks/AddNetworkScreen';
+import HostingScreen from '../screens/networks/HostingScreen';
+import ReplaceAdministrationScreen from '../screens/administration/ReplaceAdministrationScreen';
+import {useApp} from '../providers/AppProvider';
+import EditAdministratorScreen from '../screens/administration/EditAdministratorScreen';
+import {ThemedText} from '../components/ThemedText';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator();
 
-function SplitHeaderTitle() {
-	const {colors} = useTheme() as ExtendedTheme;
+function HeaderTitle() {
+	const {currentNetwork} = useApp();
+	const {t} = useTranslation();
+	const navigation = useNavigation<NavigationProp>();
+
 	return (
-		<View style={styles.headerContainer}>
-			<Text
-				style={[styles.headerText, styles.networkText, {color: colors.text}]}
-				numberOfLines={1}>
-				Current Network
-			</Text>
-			<Text
-				style={[styles.headerText, styles.usernameText, {color: colors.text}]}
-				numberOfLines={1}>
-				Username Username
-			</Text>
-		</View>
+		<Pressable onPress={() => navigation.navigate('Networks')} style={[styles.networkTextContainer, styles.headerText]}>
+			<ThemedText type="header">{currentNetwork ? currentNetwork.name : t('selectNetwork')}</ThemedText>
+		</Pressable>
 	);
 }
 
@@ -56,14 +57,13 @@ function useTabHeaderOptions() {
 				<FontAwesome6 name="circle-user" size={24} color={colors.text} />
 			</Pressable>
 		),
-		headerTitle: () => <SplitHeaderTitle />,
-		headerShadowVisible: false,
+		headerTitle: () => <HeaderTitle />,
+		headerShadowVisible: false
 	};
 }
 
 const TabNavigator = () => {
 	const {colors} = useTheme() as ExtendedTheme;
-	const {t} = useTranslation();
 	const tabHeaderOptions = useTabHeaderOptions();
 
 	return (
@@ -76,8 +76,8 @@ const TabNavigator = () => {
 						case 'Elections':
 							iconName = 'check-to-slot';
 							break;
-						case 'Signers':
-							iconName = 'person';
+						case 'Tasks':
+							iconName = 'list-check';
 							break;
 						case 'Authorities':
 							iconName = 'shield';
@@ -92,60 +92,42 @@ const TabNavigator = () => {
 					return <FontAwesome6 name={iconName} size={size} color={color} />;
 				},
 				tabBarActiveTintColor: colors.primary,
-				tabBarInactiveTintColor: 'gray',
+				tabBarInactiveTintColor: 'gray'
 			})}>
-			<Tab.Screen
-				name="Elections"
-				component={ElectionsScreen}
-				options={{...tabHeaderOptions}}
-			/>
-			<Tab.Screen
-				name="Signers"
-				component={SignersScreen}
-				options={{...tabHeaderOptions}}
-			/>
-			<Tab.Screen
-				name="Authorities"
-				component={AuthoritiesScreen}
-				options={tabHeaderOptions}
-			/>
-			<Tab.Screen
-				name="Settings"
-				component={SettingsScreen}
-				options={{...tabHeaderOptions}}
-			/>
+			<Tab.Screen name="Elections" component={ElectionsScreen} options={{...tabHeaderOptions}} />
+			<Tab.Screen name="Tasks" component={TasksScreen} options={{...tabHeaderOptions}} />
+			<Tab.Screen name="Authorities" component={AuthoritiesScreen} options={tabHeaderOptions} />
+			<Tab.Screen name="Settings" component={SettingsScreen} options={{...tabHeaderOptions}} />
 		</Tab.Navigator>
 	);
 };
 
 const styles = StyleSheet.create({
-	headerContainer: {
+	splitHeaderContainer: {
 		flex: 1,
 		flexDirection: 'row',
 		justifyContent: 'space-between',
 		alignItems: 'center',
 		paddingHorizontal: 2,
-		width: '100%',
+		width: '100%'
+	},
+	networkTextContainer: {
+		flex: 1,
+		marginRight: 8
 	},
 	headerText: {
-		fontSize: 16,
-		fontWeight: '500',
-	},
-	networkText: {
-		flex: 1,
-		textAlign: 'left',
-		marginRight: 8,
+		justifyContent: 'center'
 	},
 	usernameText: {
 		flex: 1,
 		textAlign: 'right',
-		opacity: 0.7,
+		opacity: 0.7
 	},
 	headerButton: {
 		padding: 8,
 		marginHorizontal: 4,
-		marginVertical: -2,
-	},
+		marginVertical: -2
+	}
 });
 
 export const RootNavigator = () => {
@@ -153,26 +135,41 @@ export const RootNavigator = () => {
 
 	return (
 		<Stack.Navigator>
-			<Stack.Screen
-				name="Tabs"
-				component={TabNavigator}
-				options={{headerShown: false}}
-			/>
+			<Stack.Screen name="Home" component={TabNavigator} options={{headerShown: false}} />
 			<Stack.Screen
 				name="AuthorityDetails"
 				component={AuthorityDetailsScreen}
 				options={{
 					title: t('authority'),
-					headerRight: () => (
-						<ChipButton label={t('unpin')} icon={'thumbtack-slash'} />
-					),
+					headerRight: () => <ChipButton label={t('unpin')} icon={'thumbtack-slash'} />
+				}}
+			/>
+			<Stack.Screen
+				name="AdministratorDetails"
+				component={AdministratorDetailsScreen}
+				options={{
+					title: t('administrator')
 				}}
 			/>
 			<Stack.Screen
 				name="Networks"
 				component={NetworksScreen}
 				options={{
-					title: t('joinANetwork'),
+					title: ''
+				}}
+			/>
+			<Stack.Screen name="AddNetwork" component={AddNetworkScreen} options={{title: t('addNetwork')}} />
+			<Stack.Screen name="Hosting" component={HostingScreen} options={{title: t('hosting')}} />
+			<Stack.Screen
+				name="ReplaceAdministration"
+				component={ReplaceAdministrationScreen}
+				options={{title: t('proposeReplacement')}}
+			/>
+			<Stack.Screen
+				name="EditAdministrator"
+				component={EditAdministratorScreen}
+				options={{
+					title: t('administrator')
 				}}
 			/>
 		</Stack.Navigator>
