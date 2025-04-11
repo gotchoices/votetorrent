@@ -31,13 +31,7 @@
     "aegir": "^45.1.4"
   },
   "dependencies": {
-    "@libp2p/interface": "^1.7.0",
-    "@libp2p/peer-id": "^4.2.4",
     "@noble/secp256k1": "^2.2.3",
-    "@votetorrent/db-core": "^0.0.1",
-    "it-all": "^3.0.7",
-    "it-length-prefixed": "^10.0.1",
-    "it-pipe": "^3.0.1",
     "multiformats": "^13.3.2",
     "uint8arrays": "^5.1.0"
   }
