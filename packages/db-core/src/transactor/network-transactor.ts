@@ -152,7 +152,7 @@ export class NetworkTransactor implements ITransactor {
 	}
 
 	async commit(request: CommitRequest): Promise<CommitResult> {
-		const allBlockIds = [...request.blockIds, request.tailId];
+		const allBlockIds = [...new Set([...request.blockIds, request.tailId])];
 
 		if (request.headerId) {	// Commit the header block if this is a first time commit
 			const headerResult = await this.commitBlock(request.headerId, allBlockIds, request.trxId, request.rev);

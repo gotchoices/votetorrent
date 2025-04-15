@@ -1,13 +1,16 @@
-import type { IRepo, MessageOptions, BlockId, CommitRequest, CommitResult, GetBlockResults, PendRequest, PendResult, TrxBlocks,
-	TrxId, BlockGets, TrxPending, PendSuccess, TrxTransform } from "@votetorrent/db-core";
-import { transformForBlockId, applyTransform, groupBy, concatTransform, emptyTransforms, blockIdsForTransforms } from "@votetorrent/db-core";
+import type {
+	IRepo, MessageOptions, BlockId, CommitRequest, CommitResult, GetBlockResults, PendRequest, PendResult, TrxBlocks,
+	TrxId, BlockGets, TrxPending, PendSuccess, TrxTransform, TrxTransforms
+} from "@votetorrent/db-core";
+import { Latches, transformForBlockId, applyTransform, groupBy, concatTransform, emptyTransforms,
+	blockIdsForTransforms, transformsFromTransform } from "@votetorrent/db-core";
 import { asyncIteratorToArray } from "../it-utility.js";
 import type { IBlockStorage } from "./i-block-storage.js";
 
 export class StorageRepo implements IRepo {
 	constructor(
 		private readonly createBlockStorage: (blockId: BlockId) => IBlockStorage
-	) {}
+	) { }
 
 	async get({ blockIds, context }: BlockGets, options?: MessageOptions): Promise<GetBlockResults> {
 		const distinctBlockIds = Array.from(new Set(blockIds));
@@ -61,35 +64,78 @@ export class StorageRepo implements IRepo {
 	async pend(request: PendRequest, options?: MessageOptions): Promise<PendResult> {
 		const blockIds = blockIdsForTransforms(request.transforms);
 		const pendings: TrxPending[] = [];
+		const missing: TrxTransforms[] = [];
 
-		// First handle any pending transactions
+		// Potential race condition: A concurrent commit operation could complete
+		// between the conflict checks (latest.rev, listPendingTransactions) and the
+		// savePendingTransaction call below. This pend operation might succeed based on
+		// stale information, but the subsequent commit for this pend would likely
+		// fail correctly later if a conflict arose. Locking here could make the initial
+		// check more accurate but adds overhead. The current approach prioritizes
+		// letting the commit be the final arbiter.
 		for (const blockId of blockIds) {
 			const blockStorage = this.createBlockStorage(blockId);
+
+			// First handle any pending transactions
 			const pending = await asyncIteratorToArray(blockStorage.listPendingTransactions());
-			if (pending.length > 0) {
-				if (request.policy === 'f') {
-					return { success: false, pending: pending.map(trxId => ({ blockId, trxId })) };
-				} else if (request.policy === 'r') {
-					return {
-						success: false,
-						pending: await Promise.all(pending.map(async trxId => ({
-							blockId,
-							trxId,
-							transform: (await blockStorage.getPendingTransaction(trxId))!
-						})))
-					};
-				} else {
-					pendings.push(...pending.map(trxId => ({ blockId, trxId } as TrxPending)));
+			pendings.push(...pending.map(trxId => ({ blockId, trxId } as TrxPending)));
+
+			// Handle any conflicting revisions
+			if (request.rev !== undefined) {
+				const latest = await blockStorage.getLatest();
+				if (latest && latest.rev >= request.rev) {
+					const transforms = await asyncIteratorToArray(blockStorage.listRevisions(request.rev, latest.rev));
+					for (const trxRev of transforms) {
+						const transform = await blockStorage.getTransaction(trxRev.trxId);
+						if (!transform) {
+							throw new Error(`Missing transaction ${trxRev.trxId} for block ${blockId}`);
+						}
+						missing.push({
+							trxId: trxRev.trxId,
+							rev: trxRev.rev,
+							transforms: transformsFromTransform(transform, blockId)
+						});
+					}
 				}
 			}
 		}
 
-		// Save pending transaction for each block
-		for (const blockId of blockIds) {
+		if (missing.length) {
+			return {
+				success: false,
+				missing
+			};
+		}
+
+		if (pendings.length > 0) {
+			if (request.policy === 'f') {
+				return { success: false, pending: pendings };
+			} else if (request.policy === 'r') {
+				return {
+					success: false,
+					pending: await Promise.all(pendings.map(async trx => {
+						const blockStorage = this.createBlockStorage(trx.blockId);
+						return {
+							blockId: trx.blockId,
+							trxId: trx.trxId,
+							transform: (await blockStorage.getPendingTransaction(trx.trxId))
+								?? (await blockStorage.getTransaction(trx.trxId))!	// Possible that since enumeration, the transaction has been promoted
+						}
+					}))
+				};
+			}
+		}
+
+
+		// Simultaneously save pending transaction for each block
+		// Note: that this is not atomic, after we checked for conflicts and pending transactions
+		// new pending or committed transactions may have been added.  This is okay, because
+		// this check during pend is conservative.
+		await Promise.all(blockIds.map(blockId => {
 			const blockStorage = this.createBlockStorage(blockId);
 			const blockTransform = transformForBlockId(request.transforms, blockId);
-			await blockStorage.savePendingTransaction(request.trxId, blockTransform);
-		}
+			return blockStorage.savePendingTransaction(request.trxId, blockTransform);
+		}));
 
 		return {
 			success: true,
@@ -106,71 +152,98 @@ export class StorageRepo implements IRepo {
 	}
 
 	async commit(request: CommitRequest, options?: MessageOptions): Promise<CommitResult> {
-		const blockStorages = request.blockIds.map(blockId => ({
-			blockId,
-			storage: this.createBlockStorage(blockId)
-		}));
+		const uniqueBlockIds = [...new Set(request.blockIds)].sort();
+		const releases: (() => void)[] = [];
 
-		// Check for stale revisions and collect missing transactions
-		const missedCommits: { blockId: BlockId, transforms: TrxTransform[] }[] = [];
-		for (const { blockId, storage } of blockStorages) {
-			const latest = await storage.getLatest();
-			if (latest && latest.rev >= request.rev) {
-				const transforms: TrxTransform[] = [];
-				for await (const trxRev of storage.listRevisions(request.rev, latest.rev)) {
-					const transform = await storage.getTransaction(trxRev.trxId);
-					if (!transform) {
-						throw new Error(`Missing transaction ${trxRev.trxId} for block ${blockId}`);
+		try {
+			// Acquire locks sequentially based on sorted IDs to prevent deadlocks
+			for (const id of uniqueBlockIds) {
+				const release = await Latches.acquire(id);
+				releases.push(release);
+			}
+
+			// --- Start of Critical Section ---
+
+			const blockStorages = request.blockIds.map(blockId => ({
+				blockId,
+				storage: this.createBlockStorage(blockId)
+			}));
+
+			// Check for stale revisions and collect missing transactions
+			const missedCommits: { blockId: BlockId, transforms: TrxTransform[] }[] = [];
+			for (const { blockId, storage } of blockStorages) {
+				const latest = await storage.getLatest();
+				if (latest && latest.rev >= request.rev) {
+					const transforms: TrxTransform[] = [];
+					for await (const trxRev of storage.listRevisions(request.rev, latest.rev)) {
+						const transform = await storage.getTransaction(trxRev.trxId);
+						if (!transform) {
+							throw new Error(`Missing transaction ${trxRev.trxId} for block ${blockId}`);
+						}
+						transforms.push({
+							trxId: trxRev.trxId,
+							rev: trxRev.rev,
+							transform
+						});
 					}
-					transforms.push({
-						trxId: trxRev.trxId,
-						rev: trxRev.rev,
-						transform
-					});
+					missedCommits.push({ blockId, transforms });	// Push, even if transforms is empty, because we want to reject the older version
 				}
-				missedCommits.push({ blockId, transforms });
 			}
-		}
 
-		if (missedCommits.length) {
-			return {
-				success: false,
-				missing: perBlockTrxTransformsToPerTransaction(missedCommits)
-			};
-		}
-
-		// Check for missing pending transactions
-		const missingPends: { blockId: BlockId, trxId: TrxId }[] = [];
-		for (const { blockId, storage } of blockStorages) {
-			const pendingTrx = await storage.getPendingTransaction(request.trxId);
-			if (!pendingTrx) {
-				missingPends.push({ blockId, trxId: request.trxId });
-			}
-		}
-
-		if (missingPends.length) {
-			throw new Error(`Pending transaction ${request.trxId} not found for block(s): ${missingPends.map(p => p.blockId).join(', ')}`);
-		}
-
-		// Commit the transaction for each block
-		for (const { blockId, storage } of blockStorages) {
-			try {
-				await this.internalCommit(blockId, request.trxId, request.rev, storage);
-			} catch (err) {
-				return {
+			if (missedCommits.length) {
+				return { // Return directly, locks will be released in finally
 					success: false,
-					reason: err instanceof Error ? err.message : 'Unknown error'
+					missing: perBlockTrxTransformsToPerTransaction(missedCommits)
 				};
 			}
+
+			// Check for missing pending transactions
+			const missingPends: { blockId: BlockId, trxId: TrxId }[] = [];
+			for (const { blockId, storage } of blockStorages) {
+				const pendingTrx = await storage.getPendingTransaction(request.trxId);
+				if (!pendingTrx) {
+					missingPends.push({ blockId, trxId: request.trxId });
+				}
+			}
+
+			if (missingPends.length) {
+				throw new Error(`Pending transaction ${request.trxId} not found for block(s): ${missingPends.map(p => p.blockId).join(', ')}`);
+			}
+
+			// Commit the transaction for each block
+			// This loop will execute atomically for all blocks due to the acquired locks
+			for (const { blockId, storage } of blockStorages) {
+				try {
+					// internalCommit will throw if it encounters an issue
+					await this.internalCommit(blockId, request.trxId, request.rev, storage);
+				} catch (err) {
+					// TODO: Recover as best we can. Rollback or handle partial commit? For now, return failure.
+					return {
+						success: false,
+						reason: err instanceof Error ? err.message : 'Unknown error during commit'
+					};
+				}
+			}
+		}
+		finally {
+			// Release locks in reverse order of acquisition
+			releases.reverse().forEach(release => release());
 		}
 
 		return { success: true };
 	}
 
 	private async internalCommit(blockId: BlockId, trxId: TrxId, rev: number, storage: IBlockStorage): Promise<void> {
+		// Note: This method is called within the locked critical section of commit()
+		// So, operations like getPendingTransaction, getLatest, getBlock, saveMaterializedBlock,
+		// saveRevision, promotePendingTransaction, setLatest are protected against
+		// concurrent commits for the *same blockId*.
+
 		const transform = await storage.getPendingTransaction(trxId);
+		// No need to check if !transform here, as the caller (commit) already verified this.
+		// If it's null here, it indicates a logic error or race condition bypassed the lock (unlikely).
 		if (!transform) {
-			throw new Error(`Pending transaction ${trxId} not found for block ${blockId}`);
+			throw new Error(`Consistency Error: Pending transaction ${trxId} disappeared for block ${blockId} within critical section.`);
 		}
 
 		// Get prior materialized block if it exists
@@ -187,12 +260,14 @@ export class StorageRepo implements IRepo {
 			await storage.saveMaterializedBlock(trxId, newBlock);
 		}
 
-		// Update latest revision
-		await storage.setLatest({ trxId, rev });
-
-		// Save revision and promote transaction
+		// Save revision and promote transaction *before* updating latest
+		// This ensures that if the process crashes between these steps,
+		// the 'latest' pointer doesn't point to a revision that hasn't been fully recorded.
 		await storage.saveRevision(rev, trxId);
 		await storage.promotePendingTransaction(trxId);
+
+		// Update latest revision *last*
+		await storage.setLatest({ trxId, rev });
 	}
 }
 
