@@ -45,7 +45,7 @@ export class TransactorSource<TBlock extends IBlock> implements BlockSource<TBlo
 	 * @returns A promise that resolves to undefined if the transaction is successful, or a StaleFailure if the transaction is stale.
 	 */
 	async transact(transform: Transforms, trxId: TrxId, rev: number, headerId: BlockId, tailId: BlockId): Promise<undefined | StaleFailure> {
-		const pendResult = await this.transactor.pend({ transforms: transform, trxId, rev, policy: 'f' });
+		const pendResult = await this.transactor.pend({ transforms: transform, trxId, rev, policy: 'r' });
 		if (!pendResult.success) {
 			return pendResult;
 		}

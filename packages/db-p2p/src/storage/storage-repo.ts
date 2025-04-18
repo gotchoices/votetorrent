@@ -1,6 +1,7 @@
 import type {
 	IRepo, MessageOptions, BlockId, CommitRequest, CommitResult, GetBlockResults, PendRequest, PendResult, TrxBlocks,
-	TrxId, BlockGets, TrxPending, PendSuccess, TrxTransform, TrxTransforms
+	TrxId, BlockGets, TrxPending, PendSuccess, TrxTransform, TrxTransforms,
+	Transforms
 } from "@votetorrent/db-core";
 import { Latches, transformForBlockId, applyTransform, groupBy, concatTransform, emptyTransforms,
 	blockIdsForTransforms, transformsFromTransform } from "@votetorrent/db-core";
@@ -75,16 +76,17 @@ export class StorageRepo implements IRepo {
 		// letting the commit be the final arbiter.
 		for (const blockId of blockIds) {
 			const blockStorage = this.createBlockStorage(blockId);
+			const transforms = transformForBlockId(request.transforms, blockId);
 
 			// First handle any pending transactions
 			const pending = await asyncIteratorToArray(blockStorage.listPendingTransactions());
 			pendings.push(...pending.map(trxId => ({ blockId, trxId } as TrxPending)));
 
 			// Handle any conflicting revisions
-			if (request.rev !== undefined) {
+			if (request.rev !== undefined || transforms.insert) {
 				const latest = await blockStorage.getLatest();
-				if (latest && latest.rev >= request.rev) {
-					const transforms = await asyncIteratorToArray(blockStorage.listRevisions(request.rev, latest.rev));
+				if (latest && latest.rev >=	(request.rev ?? 0)) {
+					const transforms = await asyncIteratorToArray(blockStorage.listRevisions(request.rev ?? 0, latest.rev));
 					for (const trxRev of transforms) {
 						const transform = await blockStorage.getTransaction(trxRev.trxId);
 						if (!transform) {
@@ -108,9 +110,9 @@ export class StorageRepo implements IRepo {
 		}
 
 		if (pendings.length > 0) {
-			if (request.policy === 'f') {
+			if (request.policy === 'f') {	// Fail on pending transactions
 				return { success: false, pending: pendings };
-			} else if (request.policy === 'r') {
+			} else if (request.policy === 'r') {	// Return populated pending transactions
 				return {
 					success: false,
 					pending: await Promise.all(pendings.map(async trx => {
@@ -158,7 +160,8 @@ export class StorageRepo implements IRepo {
 		try {
 			// Acquire locks sequentially based on sorted IDs to prevent deadlocks
 			for (const id of uniqueBlockIds) {
-				const release = await Latches.acquire(id);
+				const lockId = `StorageRepo.commit:${id}`;
+				const release = await Latches.acquire(lockId);
 				releases.push(release);
 			}
 

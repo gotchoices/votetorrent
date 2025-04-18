@@ -1,10 +1,10 @@
 import { sha256 } from 'multiformats/hashes/sha2'
 import { Chain, entryAt, nameof } from "../index.js";
 import type { IBlock, BlockId, TrxId, CollectionId, ChainPath, TrxRev, TrxContext, ChainInitOptions, BlockStore } from "../index.js";
+import type { ChainHeaderBlockType, ChainDataNode } from '../chain/chain-nodes.js';
 import type { LogEntry, ActionEntry } from "./index.js";
 import { LogDataBlockType, LogHeaderBlockType } from "./index.js";
 import { toString as uint8ArrayToString } from 'uint8arrays/to-string'
-import type { ChainDataNode } from '../chain/chain-nodes.js';
 import type { GetFromResult } from './struct.js';
 
 export type LogBlock<TAction> = ChainDataNode<LogEntry<TAction>>
@@ -26,8 +26,9 @@ export class Log<TAction> {
 	}
 
 	/** Opens a presumably existing log. */
-	static open<TAction>(store: BlockStore<IBlock>, id: BlockId) {
-		return new Log<TAction>(new Chain(store, id, Log.getChainOptions(store)));
+	static async open<TAction>(store: BlockStore<IBlock>, id: BlockId): Promise<Log<TAction> | undefined> {
+		const chain = await Chain.open<LogEntry<TAction>>(store, id, Log.getChainOptions(store));
+		return chain ? new Log<TAction>(chain) : undefined;
 	}
 
 	/** Creates a new log. */

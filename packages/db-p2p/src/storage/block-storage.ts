@@ -87,7 +87,8 @@ export class BlockStorage implements IBlockStorage {
             return;
         }
 
-        const release = await Latches.acquire(this.blockId);
+        const lockId = `BlockStorage.ensureRevision:${this.blockId}`;
+        const release = await Latches.acquire(lockId);
         try {
             const currentMeta = await this.storage.getMetadata(this.blockId);
             if (!currentMeta) {
