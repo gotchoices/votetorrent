@@ -1,0 +1,139 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="800" height="500" xmlns="http://www.w3.org/2000/svg">
+    <!-- Background -->
+    <rect width="800" height="800" fill="#f8f9fa"/>
+
+    <!-- Title -->
+    <text x="400" y="40" text-anchor="middle" font-family="Arial" font-size="20" font-weight="bold">Network Block Transactor</text>
+
+    <!-- NetworkTransactor -->
+    <rect x="300" y="80" width="200" height="60" rx="5" fill="#007bff" opacity="0.8"/>
+    <text x="400" y="115" text-anchor="middle" font-family="Arial" font-size="14" fill="white">NetworkTransactor</text>
+
+    <!-- Large Arc -->
+    <path d="M 0,400 Q 400,300 800,400"
+          fill="none"
+          stroke="black"
+          stroke-width="1"/>
+
+    <!-- Distributed Circles -->
+    <circle cx="100" cy="378" r="12" fill="#D3D3D3"/>
+    <circle cx="250" cy="358" r="12" fill="#FFB000"/>
+    <circle cx="400" cy="350" r="12" fill="#FFB000"/>
+    <circle cx="550" cy="358" r="12" fill="#FFB000"/>
+    <circle cx="700" cy="378" r="12" fill="#D3D3D3"/>
+
+    <!-- Arrow to Peer -->
+    <path d="M 330,140 L 250,338"
+          fill="none"
+          stroke="black"
+          stroke-width="1.5"
+          marker-end="url(#arrowhead)"/>
+    <path d="M 260,338 L 340,140"
+          fill="none"
+          stroke="black"
+          stroke-width="1.5"
+          marker-end="url(#arrowhead)"/>
+    <text x="230" y="230"
+          text-anchor="middle"
+          font-family="Arial"
+          font-size="12">1. pend(Block 123)</text>
+
+    <!-- Arrow to Unseen Peer -->
+    <path d="M 500,138 L 950,338"
+          fill="none"
+          stroke="silver"
+          stroke-width="1.5"
+          marker-end="url(#arrowhead)"/>
+    <path d="M 970,338 L 500,130"
+          fill="none"
+          stroke="silver"
+          stroke-width="1.5"
+          marker-end="url(#arrowhead)"/>
+    <text x="620" y="230"
+          text-anchor="middle"
+          font-family="Arial"
+          font-size="12">1. pend(Block 456)</text>
+
+		<!-- Peer Labels -->
+    <text x="180" y="338"
+          text-anchor="middle"
+          font-family="Arial"
+          font-size="12">cluster coordinator (peer)</text>
+    <text x="345" y="330"
+          text-anchor="middle"
+          font-family="Arial"
+          font-size="12">cluster member (peer)</text>
+    <text x="605" y="338"
+          text-anchor="middle"
+          font-family="Arial"
+          font-size="12">cluster member (peer)</text>
+
+    <!-- Cluster Promise Arrows -->
+    <path d="M 270,366 Q 325,370 390,356"
+          fill="none"
+          stroke="black"
+          stroke-width="1.5"
+          marker-end="url(#arrowhead)"/>
+    <path d="M 376,365 Q 325,380 270,370"
+          fill="none"
+          stroke="black"
+          stroke-width="1.5"
+          marker-end="url(#arrowhead)"/>
+    <path d="M 270,375 Q 360,430 540,370"
+          fill="none"
+          stroke="black"
+          stroke-width="1.5"
+          marker-end="url(#arrowhead)"/>
+    <path d="M 527,380 Q 360,440 265,378"
+          fill="none"
+          stroke="black"
+          stroke-width="1.5"
+          marker-end="url(#arrowhead)"/>
+    <text x="390" y="388"
+          text-anchor="middle"
+          font-family="Arial"
+          font-size="12">2. cluster promise</text>
+
+    <!-- Cluster Commit Arrows -->
+    <path d="M 260,393 Q 305,450 360,426"
+          fill="none"
+          stroke="black"
+          stroke-width="1.5"
+          marker-end="url(#arrowhead)"/>
+    <path d="M 345,435 Q 305,453 260,400"
+          fill="none"
+          stroke="black"
+          stroke-width="1.5"
+          marker-end="url(#arrowhead)"/>
+    <path d="M 260,410 Q 370,543 530,410"
+          fill="none"
+          stroke="black"
+          stroke-width="1.5"
+          marker-end="url(#arrowhead)"/>
+    <path d="M 520,423 Q 370,550 260,418"
+          fill="none"
+          stroke="black"
+          stroke-width="1.5"
+          marker-end="url(#arrowhead)"/>
+    <text x="390" y="462"
+          text-anchor="middle"
+          font-family="Arial"
+          font-size="12">3. cluster commit</text>
+
+    <!-- BlockID Diamond -->
+    <rect x="430" y="346" width="16" height="16"
+          transform="translate(8 -8) rotate(45 430 346)"
+          fill="#FFB000"/>
+    <text x="460" y="335"
+          text-anchor="middle"
+          font-family="Arial"
+          font-size="12">Block 123</text>
+
+    <!-- Arrow Marker Definition -->
+    <defs>
+        <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#000"/>
+        </marker>
+    </defs>
+</svg>

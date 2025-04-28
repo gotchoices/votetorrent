@@ -26,16 +26,16 @@
     "dep-check": "aegir dep-check"
   },
   "devDependencies": {
-    "@types/node": "^22.13.9",
-    "aegir": "^45.1.2"
+    "@types/node": "^22.13.10",
+    "aegir": "^45.1.4"
   },
   "dependencies": {
-    "@votetorrent/db-core": "*",
-    "@votetorrent/db-p2p": "*",
-    "@votetorrent/vote-core": "*",
-    "@votetorrent/vote-engine": "*",
     "@libp2p/interface": "^2.7.0",
-    "@libp2p/peer-id": "^5.0.16",
+    "@libp2p/peer-id": "^4.2.4",
+    "@votetorrent/db-core": "^0.0.1",
+    "@votetorrent/db-p2p": "^0.0.1",
+    "@votetorrent/vote-core": "^0.0.1",
+    "@votetorrent/vote-engine": "^0.0.1",
     "commander": "^13.1.0",
     "uint8arrays": "^5.1.0"
   },

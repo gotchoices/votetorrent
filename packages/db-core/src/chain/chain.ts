@@ -29,7 +29,7 @@ export type ChainCreateOptions<TEntry> = ChainInitOptions<TEntry> & {
 
 /** Represents a chain of blocks, forming a stack, queue, or log. */
 export class Chain<TEntry> {
-	constructor(
+	private constructor(
 		readonly store: BlockStore<IBlock>,
 		public readonly id: BlockId,
 		private readonly options?: ChainInitOptions<TEntry>,
@@ -38,12 +38,7 @@ export class Chain<TEntry> {
 
 	/** Creates a new queue, with an optional given id. */
 	static async create<TEntry>(store: BlockStore<IBlock>, options?: ChainCreateOptions<TEntry>) {
-		const tailBlock = {
-			...(options?.createDataBlock?.() ?? { header: store.createBlockHeader(ChainDataBlockType) }),
-			entries: [] as TEntry[],
-			priorId: undefined,
-			nextId: undefined,
-		} as ChainDataNode<TEntry>;
+		const tailBlock = Chain.createTailBlock<TEntry>(store, options);
 		const headerBlock = {
 			...(options?.createHeaderBlock?.(options?.newId) ?? { header: store.createBlockHeader(ChainHeaderBlockType, options?.newId) }),
 			headId: tailBlock.header.id,
@@ -52,6 +47,34 @@ export class Chain<TEntry> {
 		store.insert(headerBlock);
 		store.insert(tailBlock);
 		return new Chain<TEntry>(store, headerBlock.header.id, options);
+	}
+
+	private static createTailBlock<TEntry>(store: BlockStore<IBlock>, options: ChainCreateOptions<TEntry> | undefined) {
+		return {
+			...(options?.createDataBlock?.() ?? { header: store.createBlockHeader(ChainDataBlockType) }),
+			entries: [] as TEntry[],
+			priorId: undefined,
+			nextId: undefined,
+		} as ChainDataNode<TEntry>;
+	}
+
+	/** Opens an existing chain, verifying and potentially initializing the header. */
+	static async open<TEntry>(store: BlockStore<IBlock>, id: BlockId, options?: ChainInitOptions<TEntry>): Promise<Chain<TEntry> | undefined> {
+		const headerBlock = await store.tryGet(id) as ChainHeaderNode | undefined;
+		if (!headerBlock) {
+			return undefined;
+		}
+
+		// If the header block is missing headId or tailId, create a tail block and update the header
+		const headerAny = headerBlock as any; // Use 'any' for easier property checking/setting
+		if (!Object.hasOwn(headerAny, 'headId') || !Object.hasOwn(headerAny, 'tailId')) {
+			const tailBlock = Chain.createTailBlock<TEntry>(store, options);
+			store.insert(tailBlock);
+			apply(store, headerBlock, [headId$, 0, 0, tailBlock.header.id]);
+			apply(store, headerBlock, [tailId$, 0, 0, tailBlock.header.id]);
+		}
+
+		return new Chain<TEntry>(store, id, options);
 	}
 
 	/**

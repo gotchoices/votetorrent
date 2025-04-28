@@ -27,7 +27,7 @@ export interface IBlockStorage {
     listRevisions(startRev: number, endRev: number): AsyncIterable<TrxRev>;
 
     /** Saves a materialized block */
-    saveMaterializedBlock(trxId: TrxId, block: IBlock): Promise<void>;
+    saveMaterializedBlock(trxId: TrxId, block: IBlock | undefined): Promise<void>;
 
     /** Saves a revision */
     saveRevision(rev: number, trxId: TrxId): Promise<void>;

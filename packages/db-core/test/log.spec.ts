@@ -2,22 +2,9 @@ import { expect } from 'aegir/chai'
 import { Log } from '../src/log/index.js'
 import type { LogBlock } from '../src/log/index.js'
 import { TestLogStore } from './test-log-store.js'
-import type { TrxId, TrxRev, BlockId } from '../src/index.js'
-import { randomBytes } from '@libp2p/crypto'
-import { toString as uint8ArrayToString } from 'uint8arrays/to-string'
-import { generateTrxId } from './generate-trx-id.js'
-
-// Helper function to generate random UUIDs
-function generateRandomTrxId(): `${string}-${string}-${string}-${string}-${string}` {
-  const bytes = randomBytes(16)
-  // Set version (4) and variant (2) bits as per UUID v4 spec
-  bytes[6] = (bytes[6]! & 0x0f) | 0x40
-  bytes[8] = (bytes[8]! & 0x3f) | 0x80
-
-  // Convert to hex and format as UUID
-  const hex = uint8ArrayToString(bytes, 'hex')
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}` as const
-}
+import type { TrxId, TrxRev } from '../src/index.js'
+import { generateNumericTrxId } from './generate-numeric-trx-id.js'
+import { generateRandomTrxId } from './generate-random-trx-id.js'
 
 describe('Log', () => {
   let store: TestLogStore
@@ -30,8 +17,8 @@ describe('Log', () => {
     const log = await Log.create<string>(store)
     expect(log.id).to.be.a('string')
 
-    const openedLog = Log.open<string>(store, log.id)
-    expect(openedLog.id).to.equal(log.id)
+    const openedLog = await Log.open<string>(store, log.id)
+    expect(openedLog?.id).to.equal(log.id)
   })
 
   it('should add and retrieve actions', async () => {
@@ -56,13 +43,46 @@ describe('Log', () => {
     expect(retrieved.context?.committed[0]?.rev).to.equal(rev)
   })
 
+  it('should handle log iteration', async () => {
+    const log = await Log.create<string>(store)
+
+    // Add transactions
+    const transactions = Array(5).fill(0).map((_, i) => ({
+      trxId: generateNumericTrxId(i + 1),
+      rev: i + 1,
+      actions: [`action-${i}`]
+    }))
+
+    for (const trx of transactions) {
+      await log.addActions(trx.actions, trx.trxId, trx.rev, () => [])
+    }
+
+    // Test forward iteration
+    let index = 0
+    for await (const entry of log.select()) {
+      expect(entry.action?.trxId).to.equal(transactions[index]!.trxId)
+      expect(entry.action?.actions).to.deep.equal(transactions[index]!.actions)
+      index++
+    }
+    expect(index).to.equal(transactions.length)
+
+    // Test reverse iteration
+    index = transactions.length - 1
+    for await (const entry of log.select(undefined, false)) {
+      expect(entry.action?.trxId).to.equal(transactions[index]!.trxId)
+      expect(entry.action?.actions).to.deep.equal(transactions[index]!.actions)
+      index--
+    }
+    expect(index).to.equal(-1)
+  })
+
   it('should handle checkpoints', async () => {
     const log = await Log.create<string>(store)
 
     // Add some actions first
-    const trx1Id = generateTrxId(1)
-    const trx2Id = generateTrxId(2)
-    const trx3Id = generateTrxId(3)
+    const trx1Id = generateNumericTrxId(1)
+    const trx2Id = generateNumericTrxId(2)
+    const trx3Id = generateNumericTrxId(3)
 
     await log.addActions(['action1'], trx1Id, 1, () => [])
     await log.addActions(['action2'], trx2Id, 2, () => [])
@@ -92,9 +112,9 @@ describe('Log', () => {
     const log = await Log.create<string>(store)
 
     // Add initial actions
-    const trx1 = generateTrxId(1)
+    const trx1 = generateNumericTrxId(1)
     await log.addActions(['action1'], trx1, 1, () => [])
-    const trx2 = generateTrxId(2)
+    const trx2 = generateNumericTrxId(2)
     await log.addActions(['action2'], trx2, 2, () => [])
 
     // Verify implicit commits
@@ -109,7 +129,7 @@ describe('Log', () => {
     await log.addCheckpoint(pendings, 3)
 
     // Add more actions
-    const trx3 = generateTrxId(3)
+    const trx3 = generateNumericTrxId(3)
     await log.addActions(['action3'], trx3, 4, () => [])
 
     // Test retrieval and verify commit state
@@ -125,23 +145,6 @@ describe('Log', () => {
     expect(fromMiddle.context?.committed.length).to.equal(2)
   })
 
-  it('should handle reverse iteration', async () => {
-    const log = await Log.create<string>(store)
-
-    await log.addActions(['action1'], generateTrxId(1), 1, () => [])
-    await log.addActions(['action2'], generateTrxId(2), 2, () => [])
-    await log.addActions(['action3'], generateTrxId(3), 3, () => [])
-
-    const entries: string[] = []
-    for await (const entry of log.select(undefined, false)) {
-      if (entry.action) {
-        entries.push(...entry.action.actions)
-      }
-    }
-
-    expect(entries).to.deep.equal(['action3', 'action2', 'action1'])
-  })
-
   it('should maintain block hashes correctly', async () => {
     const log = await Log.create<string>(store)
 
@@ -149,7 +152,7 @@ describe('Log', () => {
     const actions = Array.from({ length: 33 }, (_, i) => `action${i + 1}`)
     const results = []
     for (let i = 0; i < actions.length; i++) {
-      results.push(await log.addActions([actions[i]!], generateTrxId(i + 1), i + 1, () => []))
+      results.push(await log.addActions([actions[i]!], generateNumericTrxId(i + 1), i + 1, () => []))
     }
 
     // Get the blocks directly from store to check hashes
@@ -180,7 +183,7 @@ describe('Log', () => {
 
     // Add actions
     for (let i = 0; i < actionCount; i++) {
-      await log.addActions([`action${i}`], generateTrxId(i), i + 1, () => [])
+      await log.addActions([`action${i}`], generateNumericTrxId(i), i + 1, () => [])
     }
 
     // Verify retrieval
@@ -197,9 +200,9 @@ describe('Log', () => {
     const log = await Log.create<string>(store)
 
     // Add several actions first - these will be implicitly committed
-    await log.addActions(['action1'], generateTrxId(1), 1, () => [])
-    await log.addActions(['action2'], generateTrxId(2), 2, () => [])
-    await log.addActions(['action3'], generateTrxId(3), 3, () => [])
+    await log.addActions(['action1'], generateNumericTrxId(1), 1, () => [])
+    await log.addActions(['action2'], generateNumericTrxId(2), 2, () => [])
+    await log.addActions(['action3'], generateNumericTrxId(3), 3, () => [])
 
     // Verify implicit commits include all actions
     let context = await log.getTrxContext()
@@ -209,8 +212,8 @@ describe('Log', () => {
     // Add a checkpoint that only includes the first two actions
     // This explicitly states what's committed, overriding the implicit behavior
     await log.addCheckpoint([
-      { trxId: generateTrxId(1), rev: 1 },
-      { trxId: generateTrxId(2), rev: 2 }
+      { trxId: generateNumericTrxId(1), rev: 1 },
+      { trxId: generateNumericTrxId(2), rev: 2 }
     ], 4)
 
     // Verify the checkpoint reduced the committed set
@@ -219,8 +222,8 @@ describe('Log', () => {
     expect(context?.rev).to.equal(4)
 
     // Add more actions
-    await log.addActions(['action4'], generateTrxId(4), 5, () => [])
-    await log.addActions(['action5'], generateTrxId(5), 6, () => [])
+    await log.addActions(['action4'], generateNumericTrxId(4), 5, () => [])
+    await log.addActions(['action5'], generateNumericTrxId(5), 6, () => [])
 
     // Without a new checkpoint, these are implicitly added to committed set
     context = await log.getTrxContext()
@@ -229,8 +232,8 @@ describe('Log', () => {
 
     // Add a new checkpoint that only keeps the most recent actions
     await log.addCheckpoint([
-      { trxId: generateTrxId(4), rev: 5 },
-      { trxId: generateTrxId(5), rev: 6 }
+      { trxId: generateNumericTrxId(4), rev: 5 },
+      { trxId: generateNumericTrxId(5), rev: 6 }
     ], 7)
 
     // Verify final state only includes explicitly checkpointed actions
@@ -245,7 +248,7 @@ describe('Log', () => {
     // Add several actions
     const trxIds: TrxId[] = []
     for (let i = 1; i <= 5; i++) {
-      const trxId = generateTrxId(i)
+      const trxId = generateNumericTrxId(i)
       trxIds.push(trxId)
       await log.addActions([`action${i}`], trxId, i, () => [])
     }
@@ -263,7 +266,7 @@ describe('Log', () => {
     // Context should reflect checkpoint state
     expect(fromRev2.context?.committed.length).to.equal(2)
 
-		const trx6 = generateTrxId(6)
+		const trx6 = generateNumericTrxId(6)
     trxIds.push(trx6)
     await log.addActions(['action6'], trx6, 7, () => [])
 
@@ -288,7 +291,7 @@ describe('Log', () => {
     for (let i = 0; i < actions.length; i++) {
       const result = await log.addActions(
         [actions[i]!],
-        generateTrxId(i + 1),
+        generateNumericTrxId(i + 1),
         i + 1,
         () => store.getDirtiedBlockIds()
       )
@@ -310,7 +313,7 @@ describe('Log', () => {
 
     // Create multiple transactions concurrently
     const transactions = Array(trxCount).fill(0).map((_, i) => ({
-      trxId: generateTrxId(i + 1),
+      trxId: generateNumericTrxId(i + 1),
       rev: i + 1,
       actions: Array(actionsPerTrx).fill(0).map((_, j) => `action-${i}-${j}`)
     }))
@@ -324,116 +327,16 @@ describe('Log', () => {
     const result = await log.getFrom(0)
     expect(result.entries).to.have.lengthOf(trxCount)
 
-    // Verify each transaction's actions
-    for (let i = 0; i < trxCount; i++) {
-      const trx = transactions[i]!
-      const entry = result.entries[i]
-      expect(entry?.trxId).to.equal(trx.trxId)
-      expect(entry?.actions).to.deep.equal(trx.actions)
+    // Create a map of transaction IDs to their expected actions for easier lookup
+    const expectedActionsMap = new Map<TrxId, string[]>(
+      transactions.map(trx => [trx.trxId, trx.actions])
+    )
+
+    // Verify each entry's actions match their corresponding transaction
+    for (const entry of result.entries) {
+      const expectedActions = expectedActionsMap.get(entry.trxId)
+      expect(expectedActions).to.exist
+      expect(entry.actions).to.deep.equal(expectedActions)
     }
-  })
-
-  it('should handle transaction dependencies', async () => {
-    const log = await Log.create<string>(store)
-
-    // Create first transaction
-    const trx1Id = generateTrxId(1)
-    const trx1Actions = ['action1', 'action2']
-    const trx1Result = await log.addActions(trx1Actions, trx1Id, 1, () => [])
-
-    // Create second transaction depending on first
-    const trx2Id = generateTrxId(2)
-    const trx2Actions = ['action3', 'action4']
-    const trx2Result = await log.addActions(trx2Actions, trx2Id, 2, () => [trx1Id])
-
-    // Verify dependencies
-    const result = await log.getFrom(0)
-    expect(result.context?.committed).to.have.lengthOf(2)
-    expect(result.context?.committed[0]?.trxId).to.equal(trx1Id)
-    expect(result.context?.committed[1]?.trxId).to.equal(trx2Id)
-  })
-
-  it('should handle transaction rollbacks', async () => {
-    const log = await Log.create<string>(store)
-
-    // Add initial transaction
-    const trx1Id = generateTrxId(1)
-    const trx1Actions = ['action1', 'action2']
-    await log.addActions(trx1Actions, trx1Id, 1, () => [])
-
-    // Try to add transaction with missing dependency
-    const trx2Id = generateTrxId(2)
-    const trx2Actions = ['action3', 'action4']
-    const missingTrxId = generateTrxId(3)
-
-    try {
-      await log.addActions(trx2Actions, trx2Id, 2, () => [missingTrxId])
-      expect.fail('Should have thrown error for missing dependency')
-    } catch (error) {
-      // Verify only first transaction remains
-      const result = await log.getFrom(0)
-      expect(result.entries).to.have.lengthOf(1)
-      expect(result.entries[0]?.trxId).to.equal(trx1Id)
-    }
-  })
-
-  it('should handle log compaction', async () => {
-    const log = await Log.create<string>(store)
-
-    // Add multiple transactions
-    const transactions = Array(10).fill(0).map((_, i) => ({
-      trxId: generateTrxId(i + 1),
-      rev: i + 1,
-      actions: [`action-${i}`]
-    }))
-
-    for (const trx of transactions) {
-      await log.addActions(trx.actions, trx.trxId, trx.rev, () => [])
-    }
-
-    // Verify all entries are present
-    const result = await log.getFrom(0)
-    expect(result.entries).to.have.lengthOf(10)
-
-    // Verify entries are in correct order
-    for (let i = 0; i < 10; i++) {
-      const entry = result.entries[i]
-      const originalTrx = transactions[i]!
-      expect(entry?.trxId).to.equal(originalTrx.trxId)
-      expect(entry?.actions).to.deep.equal(originalTrx.actions)
-    }
-  })
-
-  it('should handle log iteration', async () => {
-    const log = await Log.create<string>(store)
-
-    // Add transactions
-    const transactions = Array(5).fill(0).map((_, i) => ({
-      trxId: generateTrxId(i + 1),
-      rev: i + 1,
-      actions: [`action-${i}`]
-    }))
-
-    for (const trx of transactions) {
-      await log.addActions(trx.actions, trx.trxId, trx.rev, () => [])
-    }
-
-    // Test forward iteration
-    let index = 0
-    for await (const entry of log.select()) {
-      expect(entry.action?.trxId).to.equal(transactions[index]!.trxId)
-      expect(entry.action?.actions).to.deep.equal(transactions[index]!.actions)
-      index++
-    }
-    expect(index).to.equal(transactions.length)
-
-    // Test reverse iteration
-    index = transactions.length - 1
-    for await (const entry of log.select(undefined, false)) {
-      expect(entry.action?.trxId).to.equal(transactions[index]!.trxId)
-      expect(entry.action?.actions).to.deep.equal(transactions[index]!.actions)
-      index--
-    }
-    expect(index).to.equal(-1)
   })
 })

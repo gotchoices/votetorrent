@@ -1,5 +1,7 @@
 import { RegistrantDetails, TraceFunc, RegistrationInitiation } from "./structs/index.js";
 import { AuthorityEngineStore } from "../index.js";
+import { randomBytes } from '@libp2p/crypto';
+import { toString as uint8ArrayToString } from 'uint8arrays/to-string';
 
 export class RegistrationEngine {
     constructor(
@@ -11,7 +13,7 @@ export class RegistrationEngine {
         this.trace?.("beginRegistration", "starting registration process");
         const submission: RegistrationInitiation = {
             registrantCid: generateCid(),
-            nonce: crypto.randomBytes(16).toString("base64"),
+            nonce: uint8ArrayToString(randomBytes(16), 'base64'),
             requirements: await this.store.loadSubmissionRequirements(),
         };
         await this.store.saveRegistrantSubmission(submission);
