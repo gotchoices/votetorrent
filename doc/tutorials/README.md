@@ -2,6 +2,41 @@
 
 This directory contains scripts for creating tutorial and explainer videos for the VoteTorrent platform. These guidelines will help maintain consistency across all educational content.
 
+## Canonical Template
+
+The [`new_network.md`](new_network.md) script serves as our canonical template for all tutorials. New scripts should follow its structure, format, and approach to delivering information efficiently.
+
+Key characteristics of this template:
+- Clear Goals & Objectives section
+- Concise (~250 words) and Ultra-Concise (~150 words) versions
+- Effective use of visual cues
+- Direct, action-oriented language
+- Prioritization of must-know information
+
+## Tutorial Status Tracker
+
+| Tutorial Topic | Planning | Key Questions | Concise Script | Ultra-Concise | Status |
+|----------------|:--------:|:-------------:|:--------------:|:-------------:|:------:|
+| Understanding the "Create Network" Button | ✅ | ✅ | ✅ | ✅ | Complete |
+| Understanding Administrators | ✅ | ✅ | ✅ | ❌ | In Progress |
+| Creating and Managing Elections | ✅ | ✅ | ❌ | ❌ | Planning |
+| Understanding and Managing Keyholders | ✅ | ✅ | ❌ | ❌ | Planning |
+
+**Note:** All file names should use underscores (e.g., `new_network.md`, `new_administrator.md`) for consistency.
+
+### Future Tutorial Topics to Consider
+
+1. **Voter Registration Process** - Explaining how voter registration works in VoteTorrent
+2. **Ballot Templates** - Creating and managing ballot templates for different districts
+3. **Certification Process** - Steps for certifying election results
+4. **Troubleshooting Common Issues** - Guidance for resolving common problems
+5. **Security Best Practices** - Comprehensive security guidance for all participants
+6. **Distributed Election Network (DEN)** - Technical explanation of the DEN
+7. **Community Managed Elections (CME)** - Explaining the CME concept and implementation
+8. **Runoff Elections** - How to configure and manage runoff elections
+9. **Authority Mobile App** - Comprehensive guide to the administrator mobile application
+10. **Voter Mobile App** - Overview of the voter experience with the mobile app
+
 ## Script Format Guidelines
 
 ### 1. Tutorial Goals & Objectives Section
@@ -49,15 +84,17 @@ This directory contains scripts for creating tutorial and explainer videos for t
 
 ## Script Lengths
 
-Each tutorial should have both a comprehensive and condensed version:
+Each tutorial should have two primary versions:
 
-1. **Full Version (~500 words)**: Detailed explanation with complete context
-2. **Concise Version (~250 words)**: Essential information only
+1. **Concise Version (~250 words)**: Essential information delivered efficiently
+2. **Ultra-Concise Version (~150 words)**: Critical points for quick reference
+
+The longer (~500 words) versions are now considered **optional** and should only be created when a topic's complexity truly requires additional explanation.
 
 ## File Structure
 
-- Each script should be saved as `topic_name.md`
-- Include both full and concise versions in the same file
+- Each script should be saved as `topic_name.md` (using underscores, not hyphens)
+- Include required script versions in the same file
 - Begin with a clear title indicating the topic
 - Add a Goals & Objectives section before the script content
 - Add metadata comments if needed (prerequisites, related features, etc.)
@@ -79,19 +116,6 @@ The tutorial targets [describe audience and their expected knowledge level].
 
 ---
 
-## Video Narration Script (Full Version - ~500 words)
-
-[SHOW RELEVANT UI ELEMENT]
-
-Initial explanation of the feature's importance and purpose.
-
-(transition)
-
-[SHOW VISUALIZATION]
-Detailed explanation of how the feature works.
-
-...additional content...
-
 ## Video Narration Script (Concise Version - ~250 words)
 
 [SHOW RELEVANT UI ELEMENT]
@@ -99,6 +123,14 @@ Detailed explanation of how the feature works.
 Concise explanation of the feature's purpose.
 
 ...essential information only...
+
+## Video Narration Script (Ultra-Concise Version - ~150 words)
+
+[SHOW RELEVANT UI ELEMENT]
+
+Ultra-concise explanation focusing only on critical points.
+
+...only the most essential information...
 ```
 
 ## Best Practices
@@ -115,8 +147,8 @@ Concise explanation of the feature's purpose.
 1. Research the feature thoroughly (review documentation and code)
 2. Create a content outline to organize key points
 3. Draft the Goals & Objectives section to clarify purpose
-4. Draft the full version script first
-5. Extract the most critical information for the concise version
+4. Draft the concise version script first
+5. Further distill content for the ultra-concise version
 6. Add visual cues and pacing notes
 7. Review for technical accuracy
 8. Edit for clarity and natural flow
