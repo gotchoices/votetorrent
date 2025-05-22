@@ -32,7 +32,7 @@ Let's examine when you SHOULD create a new network: [SHOW CHECKLIST]
 
 First, when you're starting fresh. This includes setting up your very first election with VoteTorrent, beginning a completely separate election cycle with different voters, or creating a distinct voting organization - like moving from school board to city council elections.
 
-Second, after any security compromise. If you suspect the previous network's primary key was exposed, or there's evidence of tampering, it's time for a fresh start with a new network.
+Second, after any security compromise. If you suspect the previous network's private key was exposed, or there's evidence of tampering, it's time for a fresh start with a new network.
 
 Third, after an administrative expiration. This happens when the previous authority's administration period has expired beyond renewal, or you can no longer access the administrator account that created the original network.
 
@@ -64,7 +64,7 @@ Creating a network establishes you as the primary authority - a powerful positio
 
 [SHOW CREATE NETWORK BUTTON]
 
-When you press this button, you're establishing an entire election system and becoming its primary authority. Let's quickly cover when you should - and shouldn't - use this important function.
+When you press this button, you're establishing an election data storage system and becoming its primary administrator. Let's quickly cover when you should - and shouldn't - use this important function.
 
 (transition)
 
@@ -73,22 +73,21 @@ An Election Network is a distributed database that securely stores all your elec
 
 You should create a new network when: [SHOW LIST WITH ICONS]
 - You're setting up your first VoteTorrent election
-- You're creating a separate voting organization (like moving from county to state elections)
-- After a security breach compromises the primary administrator's key
+- You're creating a separate voting organization (like a party primary vs a state election)
+- After a security breach compromises the primary administrator's private key
 - When a previous authority's administration has expired beyond recovery
 
 (transition)
 
 However, don't create a new network for: [SHOW "NO" SYMBOLS]
-- Regular elections within your organization
-- New election cycles with the same voters
+- Ongoing election cycles within the same organization
 - Simple changes to administrators, ballots, or parameters
 
 (pause)
 
-Your network's private key is crucial - if lost: [SHOW KEY ICON]
+Your network's private key is crucial - if it is lost: [SHOW KEY ICON]
 - You can't authorize new administrators if authority chains break
-- You may eventually need to start over completely
+- You may eventually need to start over with a new network
 
 (transition)
 
@@ -98,4 +97,32 @@ Best practices include: [SHOW QUICK CHECKLIST]
 - Renewing your administration before expiration
 - Testing in a sandbox environment first
 
-Creating a network is a significant decision with long-term consequences. Use this power wisely, and always safeguard that private key. 
+Creating a network is a significant decision with long-term consequences. Use this power wisely, and always safeguard the private key.
+
+---
+
+## Video Narration Script (Ultra-Concise Version - ~150 words)
+
+[SHOW CREATE NETWORK BUTTON]
+
+The Create Network button establishes a new, distributed database for storing and managing all your election data. You become its primary authority.
+
+[SHOW SPLIT SCREEN: DO/DON'T]
+
+Create a new network only when:
+- Setting up your first election
+- Creating a separate voting organization
+- After loss or compromise of the network private key
+- Administration has expired beyond recovery
+
+Don't create a new network for:
+- Regular elections in your organization
+- Routine administrator changes
+
+[SHOW KEY ICON]
+Protect your network private key with biometrics and backups. If lost, you'll need to create a new network.
+
+[SHOW QUICK PRACTICES]
+Maintain multiple administrators and renew administration before expiration.
+
+Only create a new network when absolutely necessary, and always safeguard your private key. 
