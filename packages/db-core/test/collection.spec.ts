@@ -55,7 +55,6 @@ describe('Collection', () => {
     }
     expect(actions).to.have.lengthOf(0)
     expect(collection2.id).to.equal(collection1.id)
-    expect(collection2.logId).to.equal(collection1.logId)
 
     // Verify they share state by adding an action to collection1 and reading from collection2
     const action: Action<TestAction> = {
@@ -179,18 +178,14 @@ describe('Collection', () => {
     expect(logActions).to.deep.equal([...actions].reverse())
   })
 
-	// TODO: fix the implementation to support concurrent collection creation - probably try not to have it be an error (have it recover)
-  // it('should error on concurrent creation', async () => {
-  //   const collection1 = await Collection.createOrOpen<TestAction>(transactor, collectionId, initOptions)
-  //   const collection2 = await Collection.createOrOpen<TestAction>(transactor, collectionId, initOptions)
+  it('should error on concurrent creation', async () => {
+    const collection1 = await Collection.createOrOpen<TestAction>(transactor, collectionId, initOptions)
+    const collection2 = await Collection.createOrOpen<TestAction>(transactor, collectionId, initOptions)
 
-  //   await collection1.sync()
-
-  //   // Second collection should fail to sync because collection1 wrote the header first
-  //   expect(() =>
-	// 		collection2.sync()
-	// 	).to.throw()
-  // })
+    await collection1.sync()
+    // Second collection should succeed because it should recognize the log file conflict and update.
+    await collection2.sync()
+  })
 
   // it('should handle concurrent modifications', async () => {
   //   const collection1 = await Collection.createOrOpen<TestAction>(transactor, collectionId, initOptions)

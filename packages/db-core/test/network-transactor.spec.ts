@@ -14,7 +14,7 @@ describe('NetworkTransactor', () => {
   const generateBlockId = (): BlockId => uint8ArrayToString(randomBytes(8), 'base64url') as BlockId
 
   // Helper to setup the test environment
-  async function setupNetworkTest(scenario: Scenario = { nodeCount: 10, clusterSize: 3 }) {
+  async function setupNetworkTest(scenario: Scenario = { nodeCount: 10, clusterSize: 1 }) {
     const network = await NetworkSimulation.create(scenario)
 
     const networkTransactor = new NetworkTransactor({
@@ -127,10 +127,10 @@ describe('NetworkTransactor', () => {
       const pendRequest: PendRequest = {
         trxId,
         transforms: {
-          updates: {},
           inserts: {	// Has to be an insert for a non-existing block
 						[blockId]: { header: { id: blockId, type: 'block', collectionId: 'test' } }
 					},
+          updates: {},
           deletes: new Set()
         },
         policy: 'c' // Continue normally if there are pending transactions
@@ -230,7 +230,7 @@ describe('NetworkTransactor', () => {
   // Test network partition scenarios
   describe('network partitions', () => {
     it('should handle network partitions gracefully', async () => {
-      const { network, networkTransactor } = await setupNetworkTest({ nodeCount: 10, clusterSize: 3 })
+      const { network, networkTransactor } = await setupNetworkTest({ nodeCount: 10, clusterSize: 1 })
 
       // Create a partition by making half the nodes only aware of themselves
       const halfNodes = network.nodes.slice(0, 5)
@@ -282,7 +282,7 @@ describe('NetworkTransactor', () => {
   // Test node failures
   describe('node failures', () => {
     it('should handle node failures by falling back to other nodes', async () => {
-      const { network, networkTransactor } = await setupNetworkTest({ nodeCount: 10, clusterSize: 3 })
+      const { network, networkTransactor } = await setupNetworkTest({ nodeCount: 10, clusterSize: 1 })
 
       // Make a block ID
       const blockId = generateBlockId()

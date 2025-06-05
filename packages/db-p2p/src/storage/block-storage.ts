@@ -1,5 +1,5 @@
 import type { BlockId, IBlock, Transform, TrxId, TrxRev } from "@votetorrent/db-core";
-import { applyTransform } from "@votetorrent/db-core";
+import { Latches, applyTransform } from "@votetorrent/db-core";
 import type { BlockArchive, BlockMetadata, RestoreCallback, RevisionRange } from "./struct.js";
 import type { IRawStorage } from "./i-raw-storage.js";
 import { mergeRanges } from "./helpers.js";
@@ -61,7 +61,7 @@ export class BlockStorage implements IBlockStorage {
         yield* this.storage.listRevisions(this.blockId, startRev, endRev);
     }
 
-    async saveMaterializedBlock(trxId: TrxId, block: IBlock): Promise<void> {
+    async saveMaterializedBlock(trxId: TrxId, block: IBlock | undefined): Promise<void> {
         await this.storage.saveMaterializedBlock(this.blockId, trxId, block);
     }
 
@@ -83,17 +83,33 @@ export class BlockStorage implements IBlockStorage {
     }
 
     private async ensureRevision(meta: BlockMetadata, rev: number): Promise<void> {
-        if (!this.inRanges(rev, meta.ranges)) {
+        if (this.inRanges(rev, meta.ranges)) {
+            return;
+        }
+
+        const lockId = `BlockStorage.ensureRevision:${this.blockId}`;
+        const release = await Latches.acquire(lockId);
+        try {
+            const currentMeta = await this.storage.getMetadata(this.blockId);
+            if (!currentMeta) {
+                throw new Error(`Block ${this.blockId} metadata disappeared unexpectedly.`);
+            }
+            if (this.inRanges(rev, currentMeta.ranges)) {
+                return;
+            }
+
             const restored = await this.restoreBlock(rev);
             if (!restored) {
-                throw new Error(`Block ${this.blockId} revision ${rev} not found`);
+                throw new Error(`Block ${this.blockId} revision ${rev} not found during restore attempt.`);
             }
             await this.saveRestored(restored);
 
-            // Update metadata with new range
-            meta.ranges.unshift(restored.range);
-            meta.ranges = mergeRanges(meta.ranges);
-            await this.storage.saveMetadata(this.blockId, meta);
+            currentMeta.ranges.unshift(restored.range);
+            currentMeta.ranges = mergeRanges(currentMeta.ranges);
+            await this.storage.saveMetadata(this.blockId, currentMeta);
+
+        } finally {
+            release();
         }
     }
 
@@ -128,9 +144,9 @@ export class BlockStorage implements IBlockStorage {
             block = applyTransform(block, transform);
         }
 
-				if (!block) {
-						throw new Error(`Block ${this.blockId} has been deleted`);
-				}
+        if (!block) {
+            throw new Error(`Block ${this.blockId} has been deleted`);
+        }
         if (transactions.length) {
             await this.storage.saveMaterializedBlock(this.blockId, transactions[0]!.trxId, block);
             return { block, trxRev: transactions[0]! };

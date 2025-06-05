@@ -8,7 +8,6 @@ export type CollectionHeaderBlock = IBlock & {
 	header: {
 		type: CollectionHeaderType;
 	};
-	logId: BlockId;
 };
 
 export interface ICollection<TAction> {

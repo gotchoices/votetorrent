@@ -17,8 +17,8 @@ describe('Log', () => {
     const log = await Log.create<string>(store)
     expect(log.id).to.be.a('string')
 
-    const openedLog = Log.open<string>(store, log.id)
-    expect(openedLog.id).to.equal(log.id)
+    const openedLog = await Log.open<string>(store, log.id)
+    expect(openedLog?.id).to.equal(log.id)
   })
 
   it('should add and retrieve actions', async () => {

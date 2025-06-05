@@ -110,6 +110,11 @@ export async function processBatches<TPayload, TResponse>(
 				throw e;
 			}));
 	}));
+
+	// Wait for all pending requests to settle (resolve or reject)
+	await Promise.all(batches.map(b => b.request?.result().catch(() => {
+		/* Ignore errors here, handled by Pending state */
+	})));
 }
 
 /**

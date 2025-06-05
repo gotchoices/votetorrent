@@ -33,6 +33,7 @@
     "@libp2p/interface": "^1.7.0",
     "@libp2p/peer-id": "^4.2.4",
     "@votetorrent/db-core": "^0.0.1",
+    "async-mutex": "^0.5.0",
     "it-all": "^3.0.7",
     "it-length-prefixed": "^10.0.1",
     "it-pipe": "^3.0.1",

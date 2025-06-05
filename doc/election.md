@@ -2,6 +2,12 @@
 
 ## Network and Authorities Formed
 
+A Network is a shared, distributed database containing all of the records for an election.  Any user can form a network, starting with only their own device, after which they can invite other users and/or dedicated servers to join.  Storage and processing are distributed across all participants, with significant overlap for redundancy.
+
+The user who creates the network also creates the primary authority for the network, and becomes it's first administrator.  The network is intrinsically linked to the primary authority, at the protocol level.  This means that the network's name itself is inextricably linked to the primary authority, so when any user joins or participates in the network, they are assured that any delegated authorization can be tied back to the primary authority.
+
+The primary authority doesn't have to do all administration for the network as they can invite other authorities if desired.  Those authorities can in turn invite other authorities, and so on.  Any authority can create or contribute to elections, the main function of the primary authority is to bootstrap the network's legitimacy and to address administrative lapses.  If the chain of authority for a given authority is broken, for instance an administration expires without renewal, only the primary authority can authorize a new administration.  If the chain of authority is broken for the primary authority, the primary authority for the network becomes inoperative; other authorities can continue to function so long as they don't also become inoperative.  In this case, a new network can be formed with a new primary authority, though all setup and propagation of the network will have to be redone.
+
 See [Administration](./administration.md)
 
 ## Election Processes
