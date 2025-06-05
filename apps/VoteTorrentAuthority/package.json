@@ -1,6 +1,6 @@
 {
 	"name": "votetorrent-authority",
-	"version": "0.0.1",
+	"version": "0.0.3",
 	"private": true,
 	"description": "Authority app to set up VoteTorrent networks, authorities, and elections",
 	"scripts": {

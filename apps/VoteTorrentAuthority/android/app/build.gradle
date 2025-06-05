@@ -88,8 +88,8 @@ android {
         applicationId "org.votetorrent.authority"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "0.0.1"
+        versionCode 3
+        versionName "0.0.3"
     }
     signingConfigs {
         debug {
