@@ -1,19 +1,35 @@
-import type { Authority, Cursor, Administration } from '../index.js';
-import type { NetworkReference } from './network-reference.js';
+import type { IAuthorityEngine } from '../authority/types.js';
+import type { SID } from '../common';
+import type {
+	Authority,
+	Cursor,
+	NetworkSummary,
+	NetworkDetails,
+	NetworkInfrastructure,
+	HostingProvider,
+	NetworkRevisionInit,
+} from '../index.js';
+import type { InvitationAction } from '../invitation/models.js';
 import type { IUserEngine } from '../user/types.js';
 
 export type INetworkEngine = {
-	readonly init: NetworkReference;
-	getPinnedAuthorities(): Promise<Authority[]>;
-	pinAuthority(authority: Authority): Promise<void>;
-	unpinAuthority(authoritySid: string): Promise<void>;
 	getAuthoritiesByName(name: string | undefined): Promise<Cursor<Authority>>;
-	moveAuthoritiesByName(
+	getCurrentUser(): Promise<IUserEngine | undefined>;
+	getDetails(): Promise<NetworkDetails>;
+	getHostingProviders(): AsyncIterable<HostingProvider>;
+	getInfrastructure(): Promise<NetworkInfrastructure>;
+	getNetworkSummary(): Promise<NetworkSummary>;
+	getPinnedAuthorities(): Promise<Authority[]>;
+	getUser(userSid: SID): Promise<IUserEngine | undefined>;
+	nextAuthoritiesByName(
 		cursor: Cursor<Authority>,
 		forward: boolean
 	): Promise<Cursor<Authority>>;
-	getAdministration(authoritySid: string): Promise<Administration>;
-	setProposedAdministration(authoritySid: string, administration: Administration): Promise<void>;
-	getProposedAdministration(authoritySid: string): Promise<Administration | undefined>;
-	getUser(): IUserEngine;
-}
+	openAuthority(authoritySid: SID): Promise<IAuthorityEngine>;
+	pinAuthority(authority: Authority): Promise<void>;
+	proposeRevision(revision: NetworkRevisionInit): Promise<void>;
+	respondToInvitation<TInvokes, TSlot>(
+		invitation: InvitationAction<TInvokes, TSlot>
+	): Promise<SID>;
+	unpinAuthority(authoritySid: SID): Promise<void>;
+};

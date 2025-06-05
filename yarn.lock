@@ -3563,6 +3563,15 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@noble/curves@npm:^1.0.0":
+  version: 1.9.0
+  resolution: "@noble/curves@npm:1.9.0"
+  dependencies:
+    "@noble/hashes": "npm:1.8.0"
+  checksum: 10c0/a76d57444b4d136f43363eb19229d990df15a00fb0e2efbf08a7a4cbaee655f73e46eb29b6ad07b8749be5f7b890c0a7a06a19f4324a4b149b06b3da1def8593
+  languageName: node
+  linkType: hard
+
 "@noble/curves@npm:^1.1.0, @noble/curves@npm:^1.4.0, @noble/curves@npm:^1.7.0":
   version: 1.8.1
   resolution: "@noble/curves@npm:1.8.1"
@@ -3576,6 +3585,20 @@ __metadata:
   version: 1.7.1
   resolution: "@noble/hashes@npm:1.7.1"
   checksum: 10c0/2f8ec0338ccc92b576a0f5c16ab9c017a3a494062f1fbb569ae641c5e7eab32072f9081acaa96b5048c0898f972916c818ea63cbedda707886a4b5ffcfbf94e3
+  languageName: node
+  linkType: hard
+
+"@noble/hashes@npm:1.8.0":
+  version: 1.8.0
+  resolution: "@noble/hashes@npm:1.8.0"
+  checksum: 10c0/06a0b52c81a6fa7f04d67762e08b2c476a00285858150caeaaff4037356dd5e119f45b2a530f638b77a5eeca013168ec1b655db41bae3236cb2e9d511484fc77
+  languageName: node
+  linkType: hard
+
+"@noble/secp256k1@npm:^2.2.3":
+  version: 2.2.3
+  resolution: "@noble/secp256k1@npm:2.2.3"
+  checksum: 10c0/d88c9c239ae6b1b7aeacf4212f84ab12dff51e12b1a221f52830cf275e19c66af9bd1bdbde2104090f5b1eb4325e24309eded312aa322104ec43f6c8b0877807
   languageName: node
   linkType: hard
 
@@ -5167,6 +5190,15 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@types/node@npm:^22.14.0":
+  version: 22.14.1
+  resolution: "@types/node@npm:22.14.1"
+  dependencies:
+    undici-types: "npm:~6.21.0"
+  checksum: 10c0/d49c4d00403b1c2348cf0701b505fd636d80aabe18102105998dc62fdd36dcaf911e73c7a868c48c21c1022b825c67b475b65b1222d84b704d8244d152bb7f86
+  languageName: node
+  linkType: hard
+
 "@types/normalize-package-data@npm:^2.4.0, @types/normalize-package-data@npm:^2.4.3":
   version: 2.4.4
   resolution: "@types/normalize-package-data@npm:2.4.4"
@@ -5574,6 +5606,19 @@ __metadata:
   languageName: unknown
   linkType: soft
 
+"@votetorrent/vinz@npm:^0.0.1, @votetorrent/vinz@workspace:packages/vinz":
+  version: 0.0.0-use.local
+  resolution: "@votetorrent/vinz@workspace:packages/vinz"
+  dependencies:
+    "@noble/curves": "npm:^1.0.0"
+    "@noble/secp256k1": "npm:^2.2.3"
+    "@types/node": "npm:^22.14.0"
+    aegir: "npm:^45.1.4"
+    multiformats: "npm:^13.3.2"
+    uint8arrays: "npm:^5.1.0"
+  languageName: unknown
+  linkType: soft
+
 "@votetorrent/vote-core@npm:^0.0.1, @votetorrent/vote-core@workspace:*, @votetorrent/vote-core@workspace:packages/vote-core":
   version: 0.0.0-use.local
   resolution: "@votetorrent/vote-core@workspace:packages/vote-core"
@@ -5582,6 +5627,7 @@ __metadata:
     "@libp2p/peer-id-factory": "npm:^4.2.4"
     "@types/node": "npm:^22.13.10"
     "@votetorrent/db-core": "npm:^0.0.1"
+    "@votetorrent/vinz": "npm:^0.0.1"
     aegir: "npm:^45.1.4"
     uint8arrays: "npm:^5.1.0"
   languageName: unknown
@@ -5591,6 +5637,8 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@votetorrent/vote-engine@workspace:packages/vote-engine"
   dependencies:
+    "@babel/core": "npm:^7.25.2"
+    "@babel/runtime": "npm:^7.25.0"
     "@chainsafe/libp2p-gossipsub": "npm:^14.1.0"
     "@chainsafe/libp2p-noise": "npm:^16.0.3"
     "@chainsafe/libp2p-yamux": "npm:^7.0.1"
@@ -5610,6 +5658,8 @@ __metadata:
     "@votetorrent/vote-core": "npm:^0.0.1"
     aegir: "npm:^45.1.4"
     libp2p: "npm:^2.8.2"
+    react: "npm:19.0.0"
+    react-native: "npm:0.78.0"
     sinon: "npm:^19.0.4"
     uint8arrays: "npm:^5.1.0"
   peerDependencies:
@@ -19539,6 +19589,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"undici-types@npm:~6.21.0":
+  version: 6.21.0
+  resolution: "undici-types@npm:6.21.0"
+  checksum: 10c0/c01ed51829b10aa72fc3ce64b747f8e74ae9b60eafa19a7b46ef624403508a54c526ffab06a14a26b3120d055e1104d7abe7c9017e83ced038ea5cf52f8d5e04
+  languageName: node
+  linkType: hard
+
 "unicode-canonical-property-names-ecmascript@npm:^2.0.0":
   version: 2.0.1
   resolution: "unicode-canonical-property-names-ecmascript@npm:2.0.1"
@@ -19857,6 +19914,7 @@ __metadata:
     "@babel/core": "npm:^7.25.2"
     "@babel/preset-env": "npm:^7.25.3"
     "@babel/runtime": "npm:^7.25.0"
+    "@react-native-async-storage/async-storage": "npm:^2.1.2"
     "@react-native-community/cli": "npm:^15.1.0"
     "@react-native-community/cli-platform-android": "npm:^15.1.0"
     "@react-native-community/cli-platform-ios": "npm:^15.1.0"

@@ -1,15 +1,25 @@
-import React, {createContext, useContext, useEffect, useState} from 'react';
-import type {PropsWithChildren} from 'react';
-import type {AuthorityNetwork, INetworkEngine, NetworkReference, INetworksEngine} from '@votetorrent/vote-core';
-import {MockNetworksEngine, MockNetworkEngine} from '@votetorrent/vote-engine';
-import {ActivityIndicator, View} from 'react-native';
-import {hideSplash} from 'react-native-splash-view';
+import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from "react";
+import type { PropsWithChildren } from "react";
+import type { NetworkReference, INetworksEngine } from "@votetorrent/vote-core";
+import {
+	MockNetworksEngine,
+	MockNetworkEngine,
+	MockDefaultUserEngine,
+	MockKeysTasksEngine,
+	MockSignatureTasksEngine,
+	MockOnboardingTasksEngine,
+	MockElectionsEngine,
+	MockElectionEngine,
+} from "@votetorrent/vote-engine";
+import { ActivityIndicator, View } from "react-native";
+import { hideSplash } from "react-native-splash-view";
 
 interface AppContextType {
-	currentNetwork?: AuthorityNetwork;
 	networksEngine?: INetworksEngine;
-	networkEngine?: INetworkEngine;
+	getEngine: <T>(engineName: string, initParams?: any) => Promise<T>;
+	hasEngine: (engineName: string) => boolean;
 	isInitialized: boolean;
+	hasNetwork: boolean;
 }
 
 const AppContext = createContext<AppContextType | null>(null);
@@ -17,74 +27,102 @@ const AppContext = createContext<AppContextType | null>(null);
 export function useApp() {
 	const context = useContext(AppContext);
 	if (!context) {
-		throw new Error('useApp must be used within an AppProvider');
+		throw new Error("useApp must be used within an AppProvider");
 	}
 	return context;
 }
 
-export function AppProvider({children}: PropsWithChildren) {
+export function AppProvider({ children }: PropsWithChildren) {
 	const [isInitialized, setIsInitialized] = useState(false);
+	const [hasNetwork, setHasNetwork] = useState(false);
 	const [networksEngine, setNetworksEngine] = useState<INetworksEngine | null>(null);
-	const [networkEngine, setNetworkEngine] = useState<INetworkEngine | null>(null);
-	const [currentNetwork, setCurrentNetwork] = useState<AuthorityNetwork | undefined>(undefined);
+	const enginesRef = useRef<Record<string, any>>({});
+
+	const getEngine = useCallback(
+		async <T,>(engineName: string, initParams?: any): Promise<T> => {
+			if (!enginesRef.current[engineName]) {
+				let engine;
+				switch (engineName) {
+					case "network":
+						if (hasNetwork && initParams === undefined) {
+							engine = enginesRef.current["network"];
+							break;
+						}
+						engine = new MockNetworkEngine(initParams as NetworkReference);
+						setHasNetwork(true);
+						break;
+					case "defaultUser":
+						engine = new MockDefaultUserEngine();
+						break;
+					case "user":
+						if (!enginesRef.current["network"]) {
+							throw new Error("Network engine not initialized");
+						}
+						engine = await enginesRef.current["network"].getCurrentUser();
+						break;
+					case "authority":
+						if (!enginesRef.current["network"]) {
+							throw new Error("Network engine not initialized");
+						}
+						engine = await enginesRef.current["network"].openAuthority(initParams as string);
+						break;
+					case "keysTasksEngine":
+						engine = new MockKeysTasksEngine();
+						break;
+					case "signatureTasksEngine":
+						engine = new MockSignatureTasksEngine();
+						break;
+					case "onboardingTasksEngine":
+						engine = new MockOnboardingTasksEngine();
+						break;
+					case "elections":
+						engine = new MockElectionsEngine();
+						break;
+					case "election":
+						engine = new MockElectionEngine();
+						break;
+					default:
+						throw new Error(`Unknown engine type: ${engineName}`);
+				}
+				enginesRef.current = { ...enginesRef.current, [engineName]: engine };
+				return engine as T;
+			}
+			return enginesRef.current[engineName] as T;
+		},
+		[hasNetwork]
+	);
+
+	const hasEngine = useCallback((engineName: string) => {
+		return enginesRef.current[engineName] !== undefined;
+	}, []);
 
 	useEffect(() => {
 		async function initialize() {
 			try {
-				// Initialize engines and services
-				const networksEngine = await MockNetworksEngine.create();
+				// Initialize core engines
+				const networksEngine = new MockNetworksEngine();
 
 				// Load any stored data
 				const networks = await networksEngine.getRecentNetworks();
-				const network = networks[0];
-
-				// Initialize election engine with current network
-				if (network) {
-					const networkReference: NetworkReference = {
-						hash: network.hash,
-						imageUrl: network.imageRef.url,
-						relays: network.relays
-					};
-					const networkEngine = await MockNetworkEngine.create(networkReference);
-					setNetworkEngine(networkEngine);
+				if (networks.length > 0) {
+					const network = networks[0];
+					await getEngine("network", network as NetworkReference);
 				}
 
 				setNetworksEngine(networksEngine);
-				setCurrentNetwork(network);
 				setIsInitialized(true);
 				hideSplash();
 			} catch (error) {
-				console.error('Failed to initialize app:', error);
+				console.error("Failed to initialize app:", error);
 			}
 		}
 
 		initialize();
 	}, []);
 
-	// Update election engine when network changes
-	useEffect(() => {
-		async function updateNetworkEngine() {
-			if (!currentNetwork) return;
-
-			try {
-				const networkReference: NetworkReference = {
-					hash: currentNetwork.hash,
-					imageUrl: currentNetwork.imageRef.url,
-					relays: currentNetwork.relays
-				};
-				const engine = await MockNetworkEngine.create(networkReference);
-				setNetworkEngine(engine);
-			} catch (error) {
-				console.error('Failed to update election engine:', error);
-			}
-		}
-
-		updateNetworkEngine();
-	}, [currentNetwork]);
-
-	if (!isInitialized || !networksEngine || !networkEngine) {
+	if (!isInitialized || !networksEngine) {
 		return (
-			<View style={{flex: 1, justifyContent: 'center', alignItems: 'center'}}>
+			<View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
 				<ActivityIndicator size="large" />
 			</View>
 		);
@@ -93,11 +131,13 @@ export function AppProvider({children}: PropsWithChildren) {
 	return (
 		<AppContext.Provider
 			value={{
-				currentNetwork,
 				networksEngine,
-				networkEngine,
-				isInitialized
-			}}>
+				getEngine,
+				hasEngine,
+				isInitialized,
+				hasNetwork,
+			}}
+		>
 			{children}
 		</AppContext.Provider>
 	);

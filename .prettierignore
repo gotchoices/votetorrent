@@ -1,2 +1,0 @@
- # Ignore vote-core package
-packages/vote-core/**/*.ts

@@ -4,4 +4,3 @@ export type LocalStorage = {
   removeItem(key: string): Promise<void>;
   clear(): Promise<void>;
 };
-

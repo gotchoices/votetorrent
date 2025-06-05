@@ -1,9 +1,10 @@
-import type { AuthorityNetwork } from "../authority/struct";
-import type { NetworkReference } from "../network/network-reference";
+import type { AdornedNetworkReference, NetworkInit, NetworkReference } from "../network/models";
+import type { INetworkEngine } from "../network/types";
 
 export type INetworksEngine = {
-  getRecentNetworks(): Promise<AuthorityNetwork[]>;
   clearRecentNetworks(): Promise<void>;
-  discoverNetworks(latitude: number, longitude: number): Promise<AuthorityNetwork[]>;
-  connect(init: NetworkReference): Promise<void>;
+  create(init: NetworkInit): Promise<INetworkEngine>;
+  discover(latitude: number, longitude: number): Promise<AdornedNetworkReference[]>;
+  getRecentNetworks(): Promise<AdornedNetworkReference[]>;
+  open(ref: NetworkReference, storeAsRecent?: boolean): Promise<INetworkEngine>;
 }

@@ -1,2 +1,2 @@
-export * from "./network-reference.js";
+export * from "./models.js";
 export * from "./types.js";

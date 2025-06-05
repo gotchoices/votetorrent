@@ -1,65 +1,70 @@
-import type { AuthorityNetwork } from '@votetorrent/vote-core';
+import type {
+	AdornedNetworkReference,
+	INetworkEngine,
+	NetworkInit,
+	NetworkReference,
+} from '@votetorrent/vote-core';
 import type { INetworksEngine } from '@votetorrent/vote-core';
-
-const MOCK_NETWORKS: AuthorityNetwork[] = [
-	{
-		name: 'Utah State Network',
-		imageRef: {
-			url: 'https://picsum.photos/500/500?random=1',
-			cid: 'QmHash',
-		},
-		hash: '1234567890',
-		primaryAuthoritySid: '1',
-		signature: '1234567890',
-		relays: ['/ip4/127.0.0.1/tcp/8080/p2p/QmHash'],
-	},
-	{
-		name: 'Idaho State Network',
-		imageRef: {
-			url: 'https://picsum.photos/500/500?random=2',
-			cid: 'QmHash',
-		},
-		hash: '1234567890',
-		primaryAuthoritySid: '2',
-		signature: '1234567890',
-		relays: ['/ip4/127.0.0.1/tcp/8080/p2p/QmHash'],
-	},
-];
+import { MockNetworkEngine } from '../network/mock-network-engine';
+import { MOCK_NETWORKS } from '../mock-data';
 
 export class MockNetworksEngine implements INetworksEngine {
-	protected recentNetworks: AuthorityNetwork[] = [];
+	protected recentNetworks: AdornedNetworkReference[] = [];
 
 	constructor() {
-		this.recentNetworks = MOCK_NETWORKS;
-	}
-
-	static async create(): Promise<MockNetworksEngine> {
-		return new MockNetworksEngine();
-	}
-
-	async getRecentNetworks(): Promise<AuthorityNetwork[]> {
-		return this.recentNetworks;
+		this.recentNetworks = [...MOCK_NETWORKS];
 	}
 
 	async clearRecentNetworks(): Promise<void> {
 		this.recentNetworks = [];
 	}
 
-	async discoverNetworks(
+	async create(init: NetworkInit): Promise<INetworkEngine> {
+		const adornedRef: AdornedNetworkReference = {
+			...init,
+			hash: '54321',
+			primaryAuthorityDomainName: 'new-network.com',
+		};
+		this.recentNetworks.unshift(adornedRef);
+		return new MockNetworkEngine(adornedRef);
+	}
+
+	async discover(
 		latitude: number,
 		longitude: number
-	): Promise<AuthorityNetwork[]> {
-		return MOCK_NETWORKS;
+	): Promise<AdornedNetworkReference[]> {
+		return [...MOCK_NETWORKS];
 	}
 
-	async connect(init: AuthorityNetwork): Promise<void> {
-		this.setRecentNetwork(init);
+	async getRecentNetworks(): Promise<AdornedNetworkReference[]> {
+		return [...this.recentNetworks];
 	}
 
-	private async setRecentNetwork(init: AuthorityNetwork): Promise<void> {
-		this.recentNetworks = this.recentNetworks.filter(
-			(network) => network.primaryAuthoritySid !== init.primaryAuthoritySid
+	async open(
+		ref: NetworkReference,
+		storeAsRecent?: boolean
+	): Promise<INetworkEngine> {
+		const matchingNetwork = this.recentNetworks.find(
+			(network) => network.hash === ref.hash
 		);
-		this.recentNetworks.unshift(init);
+		if (matchingNetwork) {
+			this.recentNetworks = this.recentNetworks.filter(
+				(n) => n.hash !== ref.hash
+			);
+			this.recentNetworks.unshift(matchingNetwork);
+			return new MockNetworkEngine(matchingNetwork);
+		} else {
+			const adornedRef: AdornedNetworkReference = {
+				hash: ref.hash,
+				imageUrl: ref.imageUrl,
+				relays: ref.relays,
+				name: 'Newly Opened Network',
+				primaryAuthorityDomainName: 'unknown-domain.com',
+			};
+			if (storeAsRecent !== false) {
+				this.recentNetworks.unshift(adornedRef);
+			}
+			return new MockNetworkEngine(adornedRef);
+		}
 	}
 }

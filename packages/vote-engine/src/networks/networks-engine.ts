@@ -1,39 +1,37 @@
-import type { AuthorityNetwork } from '@votetorrent/vote-core';
+import type {
+	AdornedNetworkReference,
+	INetworkEngine,
+	NetworkInit,
+	NetworkReference,
+} from '@votetorrent/vote-core';
 import type { INetworksEngine } from '@votetorrent/vote-core';
 
-export function createNetworksEngine(): INetworksEngine {
-	return new NetworksEngine();
-}
-
 export class NetworksEngine implements INetworksEngine {
-	protected recentNetworks: AuthorityNetwork[] = [];
+	protected recentNetworks: AdornedNetworkReference[] = [];
 
 	constructor() {}
-
-	async getRecentNetworks(): Promise<AuthorityNetwork[]> {
-		return this.recentNetworks;
-	}
 
 	async clearRecentNetworks(): Promise<void> {
 		this.recentNetworks = [];
 	}
 
-	async discoverNetworks(
+	async create(init: NetworkInit): Promise<INetworkEngine> {
+		throw new Error('Not implemented');
+	}
+
+	async discover(
 		latitude: number,
 		longitude: number
-	): Promise<AuthorityNetwork[]> {
-		let networks: AuthorityNetwork[] = [];
+	): Promise<AdornedNetworkReference[]> {
+		let networks: AdornedNetworkReference[] = [];
 		return networks;
 	}
 
-	async connect(init: AuthorityNetwork): Promise<void> {
-		this.setRecentNetwork(init);
+	async getRecentNetworks(): Promise<AdornedNetworkReference[]> {
+		return this.recentNetworks;
 	}
 
-	private async setRecentNetwork(init: AuthorityNetwork): Promise<void> {
-		this.recentNetworks = this.recentNetworks.filter(
-			(network) => network.primaryAuthoritySid !== init.primaryAuthoritySid
-		);
-		this.recentNetworks.unshift(init);
+	async open(ref: NetworkReference, storeAsRecent?: boolean): Promise<INetworkEngine> {
+		throw new Error('Not implemented');
 	}
 }

@@ -1,12 +1,25 @@
-import type {Authority, Administrator} from '@votetorrent/vote-core';
+import type {
+	Authority,
+	Administrator,
+	DefaultUser,
+	IDefaultUserEngine,
+	User,
+	IUserEngine,
+	AdornedNetworkReference,
+	ReleaseKeyTask,
+	SignatureTask,
+	SID,
+	IElectionEngine,
+} from '@votetorrent/vote-core';
 
 export type RootStackParamList = {
 	Home: undefined;
-	AuthorityDetails: {authority: Authority};
 	Networks: undefined;
-	AdministratorDetails: {administrator: Administrator};
 	AddNetwork: undefined;
+	NetworkDetails: { network: AdornedNetworkReference };
 	Hosting: undefined;
+	AuthorityDetails: { authority: Authority };
+	AdministratorDetails: { administrator: Administrator };
 	ReplaceAdministration: {
 		authority: Authority;
 		administrator?: Administrator;
@@ -16,6 +29,15 @@ export type RootStackParamList = {
 		authority: Authority;
 		administratorSid?: string;
 	};
+	DefaultUser: { defaultUser: DefaultUser; defaultUserEngine: IDefaultUserEngine };
+	UserDetails: { user: User; userEngine: IUserEngine };
+	ReviseUser: { user: User; userEngine: IUserEngine };
+	AddKey: { user: User; userEngine: IUserEngine };
+	RevokeKey: { user: User; userEngine: IUserEngine };
+	AddDevice: undefined;
+	KeyTask: { task: ReleaseKeyTask };
+	SignatureTask: { task: SignatureTask };
+	ElectionDetails: { electionEngine: IElectionEngine };
 };
 
 export type TabParamList = {

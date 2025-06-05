@@ -1,33 +1,25 @@
 import type {
 	CreateUserHistory,
-	IUserEngine,
-	User,
-	UserKey,
-	UserHistory,
 	DeviceAdvertisement,
+	IUserEngine,
 	ReviseUserHistory,
+	User,
+	UserHistory,
+	UserKey,
 } from '@votetorrent/vote-core';
 
 export class UserEngine implements IUserEngine {
 	constructor(private readonly user: User) {}
 
-	async create(user: CreateUserHistory): Promise<void> {
-		throw new Error('Not implemented');
-	}
-
-	async revise(user: ReviseUserHistory): Promise<void> {
-		throw new Error('Not implemented');
-	}
-
-	async revokeKey(key: string): Promise<void> {
-		throw new Error('Not implemented');
-	}
-
 	async addKey(key: UserKey): Promise<void> {
 		throw new Error('Not implemented');
 	}
 
-	async get(networkSid: string): Promise<User | undefined> {
+	async connectDevice(): Promise<DeviceAdvertisement> {
+		throw new Error('Not implemented');
+	}
+
+	async create(user: CreateUserHistory): Promise<void> {
 		throw new Error('Not implemented');
 	}
 
@@ -38,7 +30,19 @@ export class UserEngine implements IUserEngine {
 		throw new Error('Not implemented');
 	}
 
-	async connectDevice(): Promise<DeviceAdvertisement> {
+	async getSummary(): Promise<User | undefined> {
+		throw new Error('Not implemented');
+	}
+
+	async isPrivileged(): Promise<boolean> {
+		throw new Error('Not implemented');
+	}
+
+	async revise(user: ReviseUserHistory): Promise<void> {
+		throw new Error('Not implemented');
+	}
+
+	async revokeKey(key: string): Promise<void> {
 		throw new Error('Not implemented');
 	}
 }

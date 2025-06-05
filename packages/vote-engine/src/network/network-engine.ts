@@ -1,13 +1,26 @@
 import type { IKeyNetwork } from '@votetorrent/db-core';
 import type {
 	Authority,
-	LocalStorage as ILocalStorage,
 	Cursor,
-	Administration,
+	HostingProvider,
+	IAuthorityEngine,
+	INetworkEngine,
+	IUserEngine,
+	LocalStorage as ILocalStorage,
+	NetworkDetails,
+	NetworkInfrastructure,
+	NetworkReference,
+	NetworkSummary,
+	InvitationAction,
+	SID,
+	Proposal,
+	NetworkRevisionInit,
 } from '@votetorrent/vote-core';
-import type { NetworkReference } from '@votetorrent/vote-core';
-import type { INetworkEngine } from '@votetorrent/vote-core';
-import type { IUserEngine } from '@votetorrent/vote-core';
+import type {
+	ElectionInit,
+	ElectionSummary,
+} from '@votetorrent/vote-core/dist/src/election/models';
+import type { IElectionEngine } from '@votetorrent/vote-core/dist/src/election/types';
 
 export class NetworkEngine implements INetworkEngine {
 	protected constructor(
@@ -18,22 +31,74 @@ export class NetworkEngine implements INetworkEngine {
 		private readonly keyNetwork: IKeyNetwork
 	) {}
 
-	static async connect(
-		init: NetworkReference,
-		localStorage: ILocalStorage,
-		keyNetwork: IKeyNetwork
-	): Promise<NetworkEngine> {
-		return new NetworkEngine(init, localStorage, keyNetwork);
+	createElection(election: ElectionInit): Promise<void> {
+		throw new Error('Not implemented');
 	}
 
-	/** Returns all authorities that are pinned by the user */
+	/** Returns all authorities that match the name */
+	async getAuthoritiesByName(
+		name: string | undefined
+	): Promise<Cursor<Authority>> {
+		throw new Error('Not implemented');
+	}
+
+	getCurrentUser(): Promise<IUserEngine | undefined> {
+		throw new Error('Not implemented');
+	}
+
+	getDetails(): Promise<NetworkDetails> {
+		throw new Error('Not implemented');
+	}
+
+	getElectionHistory(): Promise<ElectionSummary[]> {
+		throw new Error('Not implemented');
+	}
+
+	getElections(): Promise<ElectionSummary[]> {
+		throw new Error('Not implemented');
+	}
+
+	getHostingProviders(): AsyncIterable<HostingProvider> {
+		throw new Error('Not implemented');
+	}
+
+	getInfrastructure(): Promise<NetworkInfrastructure> {
+		throw new Error('Not implemented');
+	}
+
+	getNetworkSummary(): Promise<NetworkSummary> {
+		throw new Error('Not implemented');
+	}
+
 	async getPinnedAuthorities(): Promise<Authority[]> {
 		return (
 			(await this.localStorage.getItem<Authority[]>('pinnedAuthorities')) ?? []
 		);
 	}
 
-	/** Pins an authority to the user's device */
+	getProposedElections(): Promise<Proposal<ElectionInit>[]> {
+		throw new Error('Not implemented');
+	}
+
+	getUser(userSid: SID): Promise<IUserEngine | undefined> {
+		throw new Error('Not implemented');
+	}
+
+	async nextAuthoritiesByName(
+		cursor: Cursor<Authority>,
+		forward: boolean
+	): Promise<Cursor<Authority>> {
+		throw new Error('Not implemented');
+	}
+
+	openAuthority(authoritySid: SID): Promise<IAuthorityEngine> {
+		throw new Error('Not implemented');
+	}
+
+	openElection(electionSid: SID): Promise<IElectionEngine> {
+		throw new Error('Not implemented');
+	}
+
 	async pinAuthority(authority: Authority): Promise<void> {
 		const pinnedAuthorities = await this.getPinnedAuthorities();
 		const unique = Object.fromEntries(
@@ -46,47 +111,21 @@ export class NetworkEngine implements INetworkEngine {
 		);
 	}
 
-	/** Unpins an authority from the user's device */
-	async unpinAuthority(authoritySid: string): Promise<void> {
+	proposeRevision(revision: NetworkRevisionInit): Promise<void> {
+		throw new Error('Not implemented');
+	}
+
+	async respondToInvitation<TInvokes, TSlot>(
+		invitation: InvitationAction<TInvokes, TSlot>
+	): Promise<SID> {
+		throw new Error('Not implemented');
+	}
+
+	async unpinAuthority(authoritySid: SID): Promise<void> {
 		const pinnedAuthorities = await this.getPinnedAuthorities();
 		const filtered = pinnedAuthorities.filter(
 			(authority) => authority.sid !== authoritySid
 		);
 		await this.localStorage.setItem('pinnedAuthorities', filtered);
-	}
-
-	/** Returns all authorities that match the name */
-	async getAuthoritiesByName(
-		name: string | undefined
-	): Promise<Cursor<Authority>> {
-		throw new Error('Not implemented');
-	}
-
-	async moveAuthoritiesByName(
-		cursor: Cursor<Authority>,
-		forward: boolean
-	): Promise<Cursor<Authority>> {
-		throw new Error('Not implemented');
-	}
-
-	async getAdministration(): Promise<Administration> {
-		throw new Error('Not implemented');
-	}
-
-	async setProposedAdministration(
-		authoritySid: string,
-		administration: Administration
-	): Promise<void> {
-		throw new Error('Not implemented');
-	}
-
-	async getProposedAdministration(
-		authoritySid: string
-	): Promise<Administration | undefined> {
-		throw new Error('Not implemented');
-	}
-
-	getUser(): IUserEngine {
-		throw new Error('Not implemented');
 	}
 }
