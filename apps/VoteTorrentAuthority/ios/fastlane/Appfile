@@ -1,0 +1,3 @@
+app_identifier("org.votetorrent.authority")
+apple_id(ENV["APPLE_ID"])
+team_id(ENV["TEAM_ID"]) 

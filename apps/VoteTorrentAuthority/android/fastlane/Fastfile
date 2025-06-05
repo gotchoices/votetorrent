@@ -1,0 +1,27 @@
+default_platform(:android)
+
+platform :android do
+  desc "Deploy a new version to the Google Play"
+  lane :release do
+    # Increment version code
+    increment_version_code
+    
+    # Build the release version of the app
+    gradle(
+      task: "clean bundleRelease",
+      properties: {
+        "android.injected.signing.store.file" => ENV["KEYSTORE_FILE"],
+        "android.injected.signing.store.password" => ENV["STORE_PASSWORD"],
+        "android.injected.signing.key.alias" => ENV["KEY_ALIAS"],
+        "android.injected.signing.key.password" => ENV["KEY_PASSWORD"],
+      }
+    )
+    
+    # Upload to Play Store
+    upload_to_play_store(
+      track: 'production',
+      release_status: 'completed',
+      aab: '../app/build/outputs/bundle/release/app-release.aab'
+    )
+  end
+end 

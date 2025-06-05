@@ -1,180 +1,333 @@
-import FontAwesome6 from 'react-native-vector-icons/FontAwesome6';
-import {ExtendedTheme, useNavigation, useTheme} from '@react-navigation/native';
-import React from 'react';
-import {useTranslation} from 'react-i18next';
-import {
-  Image,
-  ImageSourcePropType,
-  ScrollView,
-  StyleSheet,
-  TouchableOpacity,
-  View,
-} from 'react-native';
-import {ChipButton} from '../../components/ChipButton';
-import {InfoCard} from '../../components/InfoCard';
-import {ThemedText} from '../../components/ThemedText';
-import {Authority} from './AuthoritiesScreen';
-import {useRoute} from '@react-navigation/native';
-
-export interface Administrator {
-  id: string;
-  image: ImageSourcePropType;
-  name: string;
-  position: string;
-  cid: string;
-}
-
-export const mockAdmins: Administrator[] = [
-  {
-    id: '1',
-    image: require('../../assets/images/stock-man.jpg'),
-    name: 'John Doe',
-    position: 'County Clerk',
-    cid: 'QmX40sdfn2T54',
-  },
-  {
-    id: '2',
-    image: require('../../assets/images/stock-woman.jpg'),
-    name: 'Jane Smith',
-    position: 'Assistant County Clerk',
-    cid: 'QmY40sdfn2T54',
-  },
-];
+import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { Image, ScrollView, StyleSheet, View } from "react-native";
+import { ChipButton } from "../../components/ChipButton";
+import { InfoCard } from "../../components/InfoCard";
+import { ThemedText } from "../../components/ThemedText";
+import type {
+	Authority,
+	Administration,
+	IAuthorityEngine,
+	INetworkEngine,
+	AdministrationDetails,
+	User,
+	Administrator,
+} from "@votetorrent/vote-core";
+import { ExtendedTheme, useNavigation, useRoute, useTheme } from "@react-navigation/native";
+import { CustomButton } from "../../components/CustomButton";
+import type { RootStackParamList } from "../../navigation/types";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import { useApp } from "../../providers/AppProvider";
+import { AuthorizationSection } from "../../components/AuthorizationSection";
+import { globalStyles } from "../../theme/styles";
+import { formatDate } from "../../utils/displayUtils";
 
 export default function AuthorityDetailsScreen() {
-  const {colors} = useTheme() as ExtendedTheme;
-  const {t} = useTranslation();
-  const {authority} = useRoute().params as {authority: Authority};
-  const authorityData = authority;
-  const navigation = useNavigation();
+	const { t } = useTranslation();
+	const { colors } = useTheme() as ExtendedTheme;
+	const { authority } = useRoute().params as { authority: Authority };
+	const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+	const { getEngine } = useApp();
+	const [networkEngine, setNetworkEngine] = useState<INetworkEngine | null>(null);
+	const [authorityEngine, setAuthorityEngine] = useState<IAuthorityEngine | null>(null);
+	const [pinned, setPinned] = useState(false);
+	const [administrationDetails, setAdministrationDetails] = useState<AdministrationDetails | null>(
+		null
+	);
+	const [administratorUsers, setAdministratorUsers] = useState<Map<string, User>>(new Map());
+	const [administrators, setAdministrators] = useState<Administrator[]>([]);
 
-  if (!authorityData) {
-    return null;
-  }
+	const handlePinToggle = async () => {
+		try {
+			if (pinned) {
+				await networkEngine?.unpinAuthority(authority.sid);
+			} else {
+				await networkEngine?.pinAuthority(authority);
+			}
+			setPinned(!pinned);
+		} catch (error) {
+			console.error("Error toggling authority pin:", error);
+		}
+	};
 
-  const authorityDetails = [
-    {label: t('name'), value: authorityData.title},
-    {
-      label: t('domainName'),
-      value: authorityData.domainName,
-    },
-    {label: t('cid'), value: authorityData.cid},
-    {label: t('address'), value: authorityData.address},
-    {label: t('signature'), value: authorityData.signature},
-  ];
+	useEffect(() => {
+		async function loadEngines() {
+			try {
+				const engine = await getEngine("network");
+				setNetworkEngine(engine as INetworkEngine);
+				if (engine) {
+					const authorityEngine = await (engine as INetworkEngine).openAuthority(authority.sid);
+					setAuthorityEngine(authorityEngine);
+				}
+			} catch (error) {
+				console.error("Error loading engines:", error);
+			}
+		}
+		loadEngines();
+	}, [getEngine, authority.sid]);
 
-  const adminFields = [
-    {label: t('cid'), value: 'QmAsdn$(leRJ456'},
-    {label: t('priorCid'), value: 'QmBasdn$2nfs789'},
-    {label: t('handoffSignature'), value: '[valid]'},
-    {label: t('expires'), value: 'December 31, 2025'},
-  ];
+	useEffect(() => {
+		async function getAuthorityData() {
+			if (!networkEngine || !authorityEngine) {
+				setPinned(false);
+				setAdministrationDetails(null);
+				return;
+			}
+			try {
+				const pinnedAuthorities = await networkEngine.getPinnedAuthorities();
+				setPinned(pinnedAuthorities.some((a: Authority) => a.sid === authority.sid));
+				const details = await authorityEngine.getAdministrationDetails();
+				setAdministrationDetails(details);
+			} catch (error) {
+				console.error("Error checking pinned status:", error);
+				setPinned(false);
+				setAdministrationDetails(null);
+			}
+		}
+		getAuthorityData();
+	}, [networkEngine, authorityEngine, authority.sid]);
 
-  const handlePinToggle = (id: string) => {
-    //dispatch(togglePin(id));
-  };
+	useEffect(() => {
+		async function getUsers() {
+			if (!networkEngine || !administrationDetails) {
+				setAdministrators([]);
+				setAdministratorUsers(new Map());
+				return;
+			}
 
-  React.useEffect(() => {
-    navigation.setOptions({
-      headerRight: () => (
-        <ChipButton
-          label={authorityData.isPinned ? t('unpin') : t('pin')}
-          icon={authorityData.isPinned ? 'thumbtack-slash' : 'thumbtack'}
-          onPress={() => handlePinToggle(authorityData.id)}
-        />
-      ),
-    });
-  }, [authorityData.isPinned]);
+			try {
+				// Store the administrators list
+				setAdministrators(administrationDetails.administration.administrators);
 
-  return (
-    <ScrollView style={styles.container}>
-      <View style={styles.section}>
-        <ThemedText type="title">{t('authority')}</ThemedText>
-        <Image
-          source={authorityData.image}
-          style={styles.authorityImage}
-          resizeMode="contain"
-        />
-        {authorityDetails.map(field => (
-          <View key={field.label} style={styles.field}>
-            <ThemedText type="defaultSemiBold">{field.label}: </ThemedText>
-            <ThemedText>{field.value}</ThemedText>
-          </View>
-        ))}
-      </View>
+				// Create mapping of userSid to User object
+				const userMap = new Map<string, User>();
 
-      <View style={styles.section}>
-        <ThemedText type="title">{t('administration')}</ThemedText>
-        {adminFields.map(field => (
-          <View key={field.label} style={styles.field}>
-            <ThemedText type="defaultSemiBold">{field.label}: </ThemedText>
-            <ThemedText>{field.value}</ThemedText>
-          </View>
-        ))}
+				// Get all userSids we need to fetch (both current and proposed existing administrators)
+				const userSids = new Set<string>();
 
-        {mockAdmins.map(admin => (
-          <InfoCard
-            key={admin.id}
-            image={admin.image}
-            title={admin.name}
-            additionalInfo={[
-              {
-                label: t('position'),
-                value: admin.position,
-              },
-              {label: t('cid'), value: admin.cid},
-            ]}
-            icon="chevron-right"
-            onPress={() => console.log(`Pressed ${admin.name}`)}
-          />
-        ))}
+				// Add current administrators
+				administrationDetails.administration.administrators.forEach((admin) => {
+					userSids.add(admin.userSid);
+				});
 
-        <TouchableOpacity
-          style={[styles.handoffButton, {backgroundColor: colors.contrast}]}
-          onPress={() => console.log('Hand-off')}>
-          <ThemedText style={[styles.handoffText, {color: colors.card}]}>
-            {t('handoff')}
-          </ThemedText>
-          <FontAwesome6
-            name="triangle-exclamation"
-            size={16}
-            color={colors.warning}
-            style={styles.handoffIcon}
-          />
-        </TouchableOpacity>
-      </View>
-    </ScrollView>
-  );
+				// Add proposed existing administrators
+				if (administrationDetails.proposed?.proposed.administrators) {
+					administrationDetails.proposed.proposed.administrators.forEach((adminSelection) => {
+						if (adminSelection.existing) {
+							userSids.add(adminSelection.existing.userSid);
+						}
+					});
+				}
+
+				// Fetch all users
+				const userEnginePromises = Array.from(userSids).map(async (userSid) => {
+					const userEngine = await networkEngine.getUser(userSid);
+					if (userEngine) {
+						const details = await userEngine.getSummary();
+						if (details) {
+							userMap.set(userSid, details);
+						}
+					}
+				});
+				await Promise.all(userEnginePromises);
+				setAdministratorUsers(userMap);
+			} catch (error) {
+				console.error("Error fetching users:", error);
+				setAdministrators([]);
+				setAdministratorUsers(new Map());
+			}
+		}
+		getUsers();
+	}, [networkEngine, administrationDetails]);
+
+	useEffect(() => {
+		navigation.setOptions({
+			headerRight: () => (
+				<ChipButton
+					label={pinned ? t("unpin") : t("pin")}
+					icon={pinned ? "thumbtack-slash" : "thumbtack"}
+					onPress={handlePinToggle}
+				/>
+			),
+		});
+	}, [pinned, navigation, t, handlePinToggle]);
+
+	if (!authority || !networkEngine) {
+		return null;
+	}
+
+	return (
+		<ScrollView style={styles.container}>
+			<View style={styles.section}>
+				<View style={styles.imageContainer}>
+					<Image source={{ uri: authority.imageRef?.url }} style={styles.authorityImage} />
+				</View>
+				<View style={styles.detail}>
+					<ThemedText type="defaultSemiBold">{t("name")}: </ThemedText>
+					<ThemedText numberOfLines={1} ellipsizeMode="tail">
+						{authority.name}
+					</ThemedText>
+				</View>
+				<View style={styles.detail}>
+					<ThemedText type="defaultSemiBold">{t("domainName")}: </ThemedText>
+					<ThemedText numberOfLines={1} ellipsizeMode="tail">
+						{authority.domainName}
+					</ThemedText>
+				</View>
+				<View style={styles.detail}>
+					<ThemedText type="defaultSemiBold">{t("sid")}: </ThemedText>
+					<ThemedText numberOfLines={1} ellipsizeMode="tail">
+						{authority.sid}
+					</ThemedText>
+				</View>
+				<View style={styles.detail}>
+					<ThemedText type="defaultSemiBold">{t("imageUrl")}: </ThemedText>
+					<ThemedText numberOfLines={1} ellipsizeMode="tail">
+						{authority.imageRef?.url}
+					</ThemedText>
+				</View>
+				<View style={styles.detail}>
+					<ThemedText type="defaultSemiBold">{t("address")}: </ThemedText>
+					<ThemedText numberOfLines={1} ellipsizeMode="tail">
+						{authority.domainName}
+					</ThemedText>
+				</View>
+				<View style={styles.detail}>
+					<ThemedText type="defaultSemiBold">{t("signature")}: </ThemedText>
+					<ThemedText numberOfLines={1} ellipsizeMode="tail">
+						{authority.signature.signature}
+					</ThemedText>
+				</View>
+				<CustomButton
+					title={t("reviseAuthority")}
+					icon="pencil"
+					size="thin"
+					backgroundColor={colors.accent}
+					onPress={() => {}}
+				/>
+			</View>
+
+			<View style={styles.section}>
+				<ThemedText type="title">{t("administration")}</ThemedText>
+
+				{administrationDetails?.administration.signatures && (
+					<View>
+						<View style={styles.detail}>
+							<ThemedText type="defaultSemiBold">{t("handoffSignature")}: </ThemedText>
+						</View>
+						<View style={styles.subDetails}>
+							{administrationDetails.administration.signatures.map((signature) => (
+								<View style={styles.detail}>
+									<ThemedText type="default">{signature.signerKey}: </ThemedText>
+									<ThemedText>{signature.signature}</ThemedText>
+								</View>
+							))}
+						</View>
+					</View>
+				)}
+				<View style={styles.detail}>
+					<ThemedText type="defaultSemiBold">{t("expires")}: </ThemedText>
+					<ThemedText>{formatDate(administrationDetails?.administration.expiration)}</ThemedText>
+				</View>
+
+				{administrators.map((admin) => {
+					const user = administratorUsers.get(admin.userSid);
+					return (
+						<InfoCard
+							key={admin.userSid}
+							image={{ uri: user?.image.url || "" }}
+							title={user?.name || ""}
+							additionalInfo={[
+								{
+									label: t("title"),
+									value: admin.title,
+								},
+								{ label: t("sid"), value: admin.userSid },
+							]}
+							icon="chevron-right"
+							onPress={() =>
+								navigation.navigate("AdministratorDetails", {
+									administrator: admin,
+								})
+							}
+						/>
+					);
+				})}
+
+				{!administrationDetails?.proposed && (
+					<CustomButton
+						title={t("reviseAdministration")}
+						icon="pencil"
+						size="thin"
+						onPress={() =>
+							navigation.navigate("ReplaceAdministration", {
+								authority: authority,
+							})
+						}
+					/>
+				)}
+			</View>
+
+			{administrationDetails?.proposed && (
+				<View>
+					<View style={styles.section}>
+						<ThemedText type="title">{t("proposedAdministration")}</ThemedText>
+						{administrationDetails.proposed.proposed.administrators.map((adminSelection) => {
+							const admin = adminSelection.existing || {
+								userSid: "",
+								title: adminSelection.init?.title || "",
+								scopes: adminSelection.init?.scopes || [],
+							};
+							const user = admin.userSid ? administratorUsers.get(admin.userSid) : undefined;
+							return (
+								<InfoCard
+									key={admin.userSid || adminSelection.init?.name}
+									image={user?.image?.url ? { uri: user.image.url } : undefined}
+									title={user?.name || adminSelection.init?.name || ""}
+									additionalInfo={[
+										{
+											label: t("title"),
+											value: admin.title,
+										},
+										{ label: t("sid"), value: admin.userSid || t("pending") },
+									]}
+									icon="chevron-right"
+									onPress={() =>
+										navigation.navigate("AdministratorDetails", {
+											administrator: admin,
+										})
+									}
+								/>
+							);
+						})}
+					</View>
+
+					<AuthorizationSection administration={administrationDetails} />
+				</View>
+			)}
+		</ScrollView>
+	);
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    padding: 16,
-  },
-  section: {
-    marginBottom: 24,
-  },
-  authorityImage: {
-    height: 100,
-    alignSelf: 'center',
-    marginVertical: 16,
-  },
-  field: {
-    flexDirection: 'row',
-  },
-  handoffButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 12,
-    borderRadius: 32,
-    marginTop: 16,
-  },
-  handoffIcon: {
-    marginLeft: 8,
-  },
-  handoffText: {
-    fontWeight: 'bold',
-  },
+const localStyles = StyleSheet.create({
+	imageContainer: {
+		position: "relative",
+		width: 200,
+		height: 200,
+		alignSelf: "center",
+		marginVertical: 16,
+	},
+	authorityImage: {
+		width: "100%",
+		height: "100%",
+		borderRadius: 8,
+	},
+	detail: {
+		flexDirection: "row",
+	},
+	subDetails: {
+		marginLeft: 8,
+	},
 });
+
+const styles = { ...globalStyles, ...localStyles };

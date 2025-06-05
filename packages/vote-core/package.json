@@ -1,50 +1,51 @@
 {
-  "name": "@votetorrent/vote-core",
-  "version": "0.0.1",
-  "type": "module",
-  "description": "Core voting functionality for VoteTorrent",
-  "main": "dist/src/index.js",
-  "types": "dist/src/index.d.ts",
-  "files": [
-    "src",
-    "dist",
-    "!dist/test",
-    "!**/*.tsbuildinfo"
-  ],
-  "exports": {
-    ".": {
-      "types": "./dist/src/index.d.ts",
-      "import": "./dist/src/index.js"
-    }
-  },
-  "scripts": {
-    "clean": "aegir clean",
-    "build": "aegir build",
-    "lint": "aegir lint",
-    "test": "aegir test",
-    "test:node": "aegir test -t node",
-    "dep-check": "aegir dep-check"
-  },
-  "homepage": "https://github.com/gotchoices/votetorrent",
-  "bugs": {
-    "url": "https://github.com/gotchoices/votetorrent/issues"
-  },
-  "keywords": [
-    "vote",
-    "voting",
-    "peer to peer",
-    "p2p"
-  ],
-  "author": "Nathan Allan",
-  "license": "MIT",
-  "devDependencies": {
-    "@types/node": "^22.13.10",
-    "aegir": "^45.1.4"
-  },
-  "dependencies": {
-    "@libp2p/interface": "^2.7.0",
-    "@libp2p/peer-id-factory": "^4.2.4",
-    "@votetorrent/db-core": "^0.0.1",
-    "uint8arrays": "^5.1.0"
-  }
+	"name": "@votetorrent/vote-core",
+	"version": "0.0.1",
+	"type": "module",
+	"description": "Core voting functionality for VoteTorrent",
+	"main": "dist/src/index.js",
+	"types": "dist/src/index.d.ts",
+	"files": [
+		"src",
+		"dist",
+		"!dist/test",
+		"!**/*.tsbuildinfo"
+	],
+	"exports": {
+		".": {
+			"types": "./dist/src/index.d.ts",
+			"import": "./dist/src/index.js"
+		}
+	},
+	"scripts": {
+		"clean": "aegir clean",
+		"build": "aegir build",
+		"lint": "aegir lint",
+		"test": "aegir test",
+		"test:node": "aegir test -t node",
+		"dep-check": "aegir dep-check"
+	},
+	"homepage": "https://github.com/gotchoices/votetorrent",
+	"bugs": {
+		"url": "https://github.com/gotchoices/votetorrent/issues"
+	},
+	"keywords": [
+		"vote",
+		"voting",
+		"peer to peer",
+		"p2p"
+	],
+	"author": "Nathan Allan",
+	"license": "MIT",
+	"devDependencies": {
+		"@types/node": "^22.13.10",
+		"aegir": "^45.1.4"
+	},
+	"dependencies": {
+		"@libp2p/interface": "^2.7.0",
+		"@libp2p/peer-id-factory": "^4.2.4",
+		"@votetorrent/db-core": "^0.0.1",
+		"@votetorrent/vinz": "^0.0.1",
+		"uint8arrays": "^5.1.0"
+	}
 }

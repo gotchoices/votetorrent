@@ -1,0 +1,36 @@
+---
+description: Building new components or editing component styles
+globs:
+alwaysApply: false
+---
+rule "component-styles"
+
+- Avoid inline styles
+- Colocate styles at the bottom of the component
+- Avoid overwriting global styles
+- Do not hard code color values; when colors are needed, put the style inline and reference the colors from the useTheme hook
+- Try to use global styles over component specific ones
+- Declare a localStyles object in the component and merge it with the global styles
+
+[styles.ts](mdc:apps/VoteTorrentAuthority/src/theme/styles.ts)
+
+Example:
+
+export default function ExampleScreen() {
+	const {colors} = useTheme() as ExtendedTheme;
+
+	return {
+		<View style={[styles.container, {backgroundColor: colors.background}]}>
+			<FontAwesome6 name="circle-info" size={16} color={colors.text} style={styles.infoIcon} />
+		</View>
+	}
+
+	const localStyles = StyleSheet.create({
+		infoIcon: {
+			marginLeft: 8
+		}
+	});
+
+	const styles = {...globalStyles, ...localStyles};
+
+}

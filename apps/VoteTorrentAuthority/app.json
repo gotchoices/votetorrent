@@ -1,9 +1,7 @@
 {
-  "name": "VoteTorrentAuthority",
-  "displayName": "VoteTorrentAuthority",
-  "expo": {
-    "plugins": [
-      "react-native-screens"
-    ]
-  }
+	"name": "VoteTorrentAuthority",
+	"displayName": "VoteTorrent Authority",
+	"expo": {
+		"plugins": ["react-native-screens"]
+	}
 }
