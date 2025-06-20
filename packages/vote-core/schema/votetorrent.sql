@@ -53,7 +53,7 @@ create table Authority (
 
 create view InvitationType (values ('au', 'Authority'), ('ad', 'Administrator'), ('k', 'Keyholder')) as InvitationType(Code, Name);
 
-create table Invitation (
+create table InvitationSlot (
 	Cid text,
 	Type text,
 	Expiration text,
@@ -61,22 +61,13 @@ create table Invitation (
 	InviteSignature text,
 )
 
--- Invitation to participate in a proposed administration
-create table AdministratorInvitation (
-	Cid text,
-	Expiration text,
-	InviteKey text, -- public key of temporary invitation key pair
-	InviteSignature text,
-	AuthoritySid text,
-	Name text,
-	Title text,
-	Scopes text, -- json array of strings - TODO: constraint
-
-	primary key (Cid),
-)
-
 create table InvitationResult (
+	SlotCid text primary key,
 	UserSid text,
 	IsAccepted boolean,
+	InvokedSid text,
+	InvitationSignature text,
+	UserSignerKey text,
+	UserSignature text,
 
 )
