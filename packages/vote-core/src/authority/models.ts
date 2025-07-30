@@ -109,11 +109,8 @@ export type Administrator = {
 	/** Scopes of the administrator */
 	scopes: Scope[];
 
-	/** SID of the invitation to the administrator
-	 * When accepted, this is approving only this administrator, not the overall administration.
-	 * This allows us to carry this forward as the other administrators change.
-	 */
-	invitationSid?: SID;
+	/** The signature of this record by this user */
+	signature: Signature;
 };
 
 export type AdministratorInit = {
