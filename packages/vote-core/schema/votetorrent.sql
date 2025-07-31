@@ -4,12 +4,12 @@ create table Network (
 	SignerKey text,
 	Signature text,
 	primary key (/* none - one row max */),
-	constraint SignatureValid check (SignatureValid(Digest(Sid, Hash), Signature, SignerKey)),
-	constraint HashValid check (Hash = Digest(Sid) % 65536),
+	--constraint SignatureValid check (SignatureValid(Digest(Sid, Hash), Signature, SignerKey)),
+	--constraint HashValid check (Hash = Digest(Sid) % 65536),
 	constraint InsertOnly check on update, delete (false)
 );
 
-create view ElectionType (values ('o', 'Official'), ('a', 'Adhoc')) as ElectionType(Code, Name);
+create view ElectionType as select * from (values ('o', 'Official'), ('a', 'Adhoc')) as ElectionType(Code, Name);
 
 create table NetworkRevision (
 	NetworkSid text,
@@ -33,7 +33,7 @@ create table NetworkRevision (
 	constraint InsertOnly check on update, delete (false)
 );
 
-create view Scope (values
+create view Scope as select * from (values
 	('rn', 'Revise Network'),
 	('rad', 'Revise or replace the Administration'),
 	('vrg', 'Validate registrations'),
@@ -52,12 +52,12 @@ create table Authority (
 	SignerKey text,
 	Signature text,
 	primary key (Sid),
-	constraint NewSidValid check on insert (Sid = Digest(Name, DomainName, ImageRef)),
+	--constraint NewSidValid check on insert (Sid = Digest(Name, DomainName, ImageRef)),
 	constraint SidImmutable check on update (new.Sid = old.Sid),
 	constraint InvitationValid check on insert (
 		not exists (select 1 from Authority)
-			or exists (select 1 from InvitationResult IR join InvitationSlot IS on IS.Cid = IR.SlotCid
-				where IS.Type = 'au' and IR.InvokedSid = new.Sid)
+			or exists (select 1 from InvitationResult IR join InvitationSlot InvS on InvS.Cid = IR.SlotCid
+				where InvS.Type = 'au' and IR.InvokedSid = new.Sid)
 	),
 	constraint CantDelete check on delete (false),
 	constraint SignerKeyValid check (exists (select 1 from Administration A where A.AuthoritySid = new.Sid and A.Revision = 1))
@@ -77,15 +77,17 @@ create table Administrator (
 	constraint AdministrationValid check (exists (select 1 from Administration A where A.AuthoritySid = new.AuthoritySid and A.Revision = new.AdministrationRevision)),
 	constraint InsertOnly check on update, delete (false),
 	constraint ScopesValid check (not exists (select 1 from json_array_elements_text(Scopes) S(s) where s not in (select Code from Scope))),
-	constraint SignerKeyValid check (exists (select 1 from UserKey K where K.UserSid = new.UserSid and K.Key = new.SignerKey and K.Expiration > now())),
-	constraint SignatureValid check (SignatureValid(
-		Digest(Sid, AuthoritySid, AdministrationRevision, UserSid, Title, Scopes),
-		Signature,
-		SignerKey)
-	)
+	constraint SignerKeyValid check (exists (select 1 from UserKey K where K.UserSid = new.UserSid and K.Key = new.SignerKey and K.Expiration > now()))
+	-- constraint SignatureValid check (SignatureValid(
+	-- 	Digest(Sid, AuthoritySid, AdministrationRevision, UserSid, Title, Scopes),
+	-- 	Signature,
+	-- 	SignerKey)
+	-- )
 	-- TODO: transaction level constraint that Administrators and Administration are inserted together
-	--constraint AdministrationValid transaction check (exists (select 1 from Administration A where A.AuthoritySid = new.AuthoritySid and A.Revision = new.AdministrationRevision))
-)
+	-- constraint AdministrationValid transaction check (exists (select 1 from Administration A where A.AuthoritySid = new.AuthoritySid and A.Revision = new.AdministrationRevision))
+);
+
+create index AdministratorUser on Administrator (UserSid); -- include (Scopes)
 
 create table Administration (
 	AuthoritySid text,
@@ -99,30 +101,31 @@ create table Administration (
 		Revision > 0
 			and (Revision = 1 or Revision = (select max(Revision) from Administration A where A.AuthoritySid = new.AuthoritySid) + 1)
 	),
-	constraint ThresholdPoliciesValid check (...), -- TODO: constraint
+	--constraint ThresholdPoliciesValid check (...), -- TODO: constraint
 	constraint AuthoritySidValid check (exists (select 1 from Authority A where A.Sid = new.AuthoritySid)),
 	constraint InsertOnly check on update, delete (false),
-	constraint ExpirationFuture check (Expiration > now()),
+	constraint ExpirationFuture check (Expiration > now())
 	-- TODO: If prior administration, SignerKey is threshold public key of prior administration, otherwise it's the threshold public key of the current (new) administration
-	constraint SignerKeyValid check (Revision = 1 or SignerKey ...),
-	constraint SignatureValid check (SignatureValid(
-		Digest(
-			Sid,
-			AuthoritySid,
-			Revision,
-			Expiration,
-			ThresholdPolicies,
-			-- TODO: fix this syntax:
-			json(select * from Administrator A where A.AuthoritySid = new.AuthoritySid
-				and A.AdministrationRevision = new.Revision
-			)
-		), Signature, SignerKey))
+	--constraint SignerKeyValid check (Revision = 1 or SignerKey ...),
+	-- constraint SignatureValid check (SignatureValid(
+	-- 	Digest(
+	-- 		Sid,
+	-- 		AuthoritySid,
+	-- 		Revision,
+	-- 		Expiration,
+	-- 		ThresholdPolicies,
+	-- 		-- TODO: fix this syntax:
+	-- 		json(select * from Administrator A where A.AuthoritySid = new.AuthoritySid
+	-- 			and A.AdministrationRevision = new.Revision
+	-- 		)
+	-- 	), Signature, SignerKey)
+    -- )
 );
 
 -- TODO: create table ProposedAdministration & ProposedAdministrator
 -- Note: proposed aren't dependencies, just a workflow for constructing a fully signed admin
 
-create view InvitationType (values ('au', 'Authority'), ('ad', 'Administrator'), ('k', 'Keyholder'), ('r', 'Registrant')) as InvitationType(Code, Name);
+create view InvitationType as select * from (values ('au', 'Authority'), ('ad', 'Administrator'), ('k', 'Keyholder'), ('r', 'Registrant')) as InvitationType(Code, Name);
 
 create table InvitationSlot (
 	Cid text,
@@ -132,6 +135,30 @@ create table InvitationSlot (
 	Expiration text,
 	InviteKey text, -- public key of temporary invitation key pair
 	InviteSignature text,
+	InviterKey text, -- public key of inviter
+	InviterSignature text, -- signature of inviter on the invitation slot
+	primary key (Cid),
+	constraint TypeValid check (exists (select 1 from InvitationType IT where IT.Code = new.Type)),
+	constraint ExpirationValid check (Expiration > now()),
+	-- Prooves that the inviter has a valid private key corresponding to the public key in the invitation slot
+	constraint InviteSignatureValid check (SignatureValid(Digest(Cid, Type, Name, Expiration), InviteSignature, InviteKey)),
+	constraint InviterKeyValid check (exists (
+		select 1 from UserKey K
+			join Administrator A on A.UserSid = K.UserSid
+			where K.Key = new.InviterKey and K.Expiration > now()
+	)),
+	constraint InviterSignatureValid check (SignatureValid(Digest(Cid, Type, Name, Expiration, InviteKey, InviteSignature), InviterSignature, InviterKey)),
+	constraint InsertOnly check on update, delete (false)
+)
+
+create table InvitationSlotScope (
+	SlotCid text,
+	Scopes text, -- json array of strings
+	primary key (SlotCid),
+	constraint SlotCidValid check (exists (select 1 from InvitationSlot IS where IS.Cid = new.SlotCid)),
+	-- TODO: look up the inviter administrator and verify that this represents a subset of their scopes
+	-- constraint ScopesValid check (...),
+	constraint InsertOnly check on update, delete (false)
 )
 
 -- Acceptance or rejection of invitation, created before resulting object
