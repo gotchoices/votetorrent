@@ -1,4 +1,3 @@
-import type { FinalShareData } from '@votetorrent/vinz';
 import type { ReleaseKeyTask, SignatureTask, SignatureResult } from './models';
 
 export interface IOnboardingTasksEngine {
@@ -8,8 +7,8 @@ export interface IOnboardingTasksEngine {
 
 export interface IKeysTasksEngine {
 	completeKeyRelease: (
-		task: ReleaseKeyTask,
-		keyShares: FinalShareData
+		task: ReleaseKeyTask
+		//keyShares: FinalShareData
 	) => Promise<void>;
 	getKeysToRelease: (pending: boolean) => Promise<ReleaseKeyTask[]>;
 }

@@ -6,6 +6,7 @@ import type {
 	Timestamp,
 	ThresholdPolicy,
 } from '../common/index.js';
+import type { UserKey } from '../user/models';
 
 /*********** Authority ***********/
 export type Authority = {
@@ -20,9 +21,6 @@ export type Authority = {
 
 	/** Image reference for the authority */
 	imageRef?: ImageRef;
-
-	/** SID of the invitation to the authority */
-	invitationSid?: SID;
 
 	/** The signature of this record by the current administration */
 	signature: Signature;
@@ -47,14 +45,27 @@ export type AuthorityDetails = {
 	proposed?: Proposal<AuthorityInit>;
 };
 
-export type AuthorityContent = {
-	/** SID of the Authority issuing the invitation */
-	authoritySid: string;
-};
-
-export type AuthorityInvitationContent = AuthorityContent & {
+export type AuthorityInvitationContent = {
 	/** Suggested name for the new Authority */
 	name: string;
+
+	/** The type of the invitation */
+	type: 'au';
+
+	/** The expiration date of the invitation */
+	expiration: string;
+
+	/** The public key of the invitation */
+	inviteKey: string;
+
+	/** The private key of the invitation */
+	invitePrivate: string;
+
+	/** The signature of the invitation */
+	inviteSignature: string;
+
+	/** The digest of the invitation */
+	digest: string;
 };
 
 export type AuthorityInvitation = Invitation<AuthorityInvitationContent> & {
@@ -132,8 +143,7 @@ export type AdministratorSelection = {
 	existing?: Administrator;
 };
 
-export type AdministratorInvitationContent = AuthorityContent &
-	AdministratorInit;
+export type AdministratorInvitationContent = AdministratorInit;
 
 export type AdministratorInvitation =
 	Invitation<AdministratorInvitationContent> & {

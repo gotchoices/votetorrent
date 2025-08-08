@@ -60,13 +60,15 @@
 		"@libp2p/peer-id-factory": "^4.2.4",
 		"@libp2p/tcp": "^10.1.8",
 		"@multiformats/multiaddr": "^12.4.0",
+		"@noble/curves": "^1.9.6",
+		"@noble/hashes": "^1.8.0",
+		"@quereus/quereus": "^0.1.0",
 		"@react-native-async-storage/async-storage": "^2.1.2",
-		"@votetorrent/db-core": "^0.0.1",
-		"@votetorrent/db-p2p": "^0.0.1",
 		"@votetorrent/vote-core": "^0.0.1",
 		"libp2p": "^2.8.2",
 		"react": "19.0.0",
 		"react-native": "0.78.0",
+		"temporal-polyfill": "^0.3.0",
 		"uint8arrays": "^5.1.0"
 	}
 }

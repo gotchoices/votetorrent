@@ -1,24 +1,26 @@
-import type { Signature } from "../common/signature.js";
-import type { SID, Timestamp, UserInit } from "../index.js";
-import type { NetworkReference } from "../network/models.js";
+import type { Envelope } from '../common/envelope.js';
+import type { Signature } from '../common/signature.js';
+import type { Signed } from '../common/signed.js';
+import type { SID, Timestamp, UserInit } from '../index.js';
+import type { NetworkReference } from '../network/models.js';
 
 export type Invitation<T> = {
 	slot: InvitationSlot<T>;
 	privateKey: string;
 	networkRef: NetworkReference;
-}
+};
 
 export type InvitationSlot<T> = {
 	invite: T;
 	type: InvitationType;
 	expiration: Timestamp;
-}
+};
 
 export type InvitationStatus<T> = {
 	slot: InvitationSlot<T>;
 	sent?: InvitationSent;
 	result?: InvitationResult;
-}
+};
 
 export type InvitationResult = {
 	/** SID of the user that accepted the invitation */
@@ -32,13 +34,13 @@ export type InvitationResult = {
 
 	/** SID of the result */
 	invokedSid?: SID;
-}
+};
 
 export type InvitationSent = {
 	key: string; //This could be negotiated as a threshold key to allow multiple administrators to sign
 
 	signatures: Signature[];
-}
+};
 
 export type InvitationAction<TInvokes, TSlot> = {
 	/** What the invitation is invoking */
@@ -46,12 +48,12 @@ export type InvitationAction<TInvokes, TSlot> = {
 
 	/** The user that is being created if this is a new user
 	 * Use this or userSid, not both
-	*/
+	 */
 	userInit?: UserInit;
 
 	/** SID of the user that accepted the invitation if this is an existing user
 	 * Use this or userInit, not both
-	*/
+	 */
 	userSid?: SID;
 
 	/** The slot that was accepted */
@@ -62,7 +64,23 @@ export type InvitationAction<TInvokes, TSlot> = {
 
 	/** The digest is the invite slot, the isAccepted flag, and the acceptingSid. Signed by the private key given in the invitation */
 	invitationSignature: string;
-}
+};
 
 /** eg "Administrator" | "Authority" | "Keyholder" */
 export type InvitationType = string;
+
+export type InvitationEnvelope<TContent extends Record<string, string>> = {
+	envelope: Envelope<TContent>;
+	privateKey: string;
+};
+
+export type InvitationSigned<TContent extends Record<string, string>> = {
+	/** The CID is of the InvitationSlot. It consists of the digest of the signed content */
+	cid: string;
+
+	/** The signed content of the invitation */
+	signed: Signed<TContent>;
+
+	/** The invitation private key which is sent to the invitee but is not part of the cid of the InvitationSlot */
+	privateKey: string;
+};

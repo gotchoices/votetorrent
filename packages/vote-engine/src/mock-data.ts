@@ -359,16 +359,16 @@ export const MOCK_USER_HISTORY_EVENTS: UserHistory[] = [
 
 export const MOCK_SHARED_ADMINISTRATORS: Administrator[] = [
 	{
-		invitationSid: generateSid('inv'),
 		scopes: ['rad', 'vrg', 'iad', 'rnp', 'uai'] as Scope[],
 		title: 'Chief Election Official',
 		userSid: MOCK_CURRENT_USER.sid,
+		signature: MOCK_SIGNATURE,
 	},
 	{
-		invitationSid: generateSid('inv'),
 		scopes: ['rad', 'vrg', 'iad'] as Scope[],
 		title: 'Deputy Election Official',
 		userSid: generateSid('user'),
+		signature: MOCK_SIGNATURE,
 	},
 ];
 

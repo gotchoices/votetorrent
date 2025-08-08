@@ -14,6 +14,8 @@ import type {
 	Scope,
 	ThresholdPolicy,
 	IAuthorityEngine,
+	InvitationEnvelope,
+	InvitationSigned,
 } from '@votetorrent/vote-core';
 import {
 	MOCK_SHARED_ADMINISTRATION_DETAILS, // Import shared details
@@ -43,6 +45,15 @@ export class MockAuthorityEngine implements IAuthorityEngine {
 		this.administration.authoritySid = this.authority.sid;
 
 		this.proposedAdministration = detailsCopy.proposed;
+	}
+
+	createAuthorityInvitation(
+		name: string
+	): InvitationEnvelope<AuthorityInvitationContent> {
+		console.warn(
+			'MockAuthorityEngine: createAuthorityInvitation is not implemented.'
+		);
+		throw new Error('Not implemented');
 	}
 
 	async getAdministrationDetails(): Promise<AdministrationDetails> {
@@ -79,10 +90,12 @@ export class MockAuthorityEngine implements IAuthorityEngine {
 		throw new Error('Not implemented');
 	}
 
-	async inviteAuthority(
-		invitationProposal: Proposal<AuthorityInvitationContent>
-	): Promise<AuthorityInvitation> {
-		console.warn('MockAuthorityEngine: inviteAuthority is not implemented.');
+	async saveAuthorityInvite(
+		invitation: InvitationSigned<AuthorityInvitationContent>
+	): Promise<void> {
+		console.warn(
+			'MockAuthorityEngine: saveAuthorityInvite is not implemented.'
+		);
 		throw new Error('Not implemented');
 	}
 

@@ -7,3 +7,4 @@ export * from './network/index.js';
 export * from './networks/index.js';
 export * from './user/index.js';
 export * from './tasks/index.js';
+export * from './types.js';

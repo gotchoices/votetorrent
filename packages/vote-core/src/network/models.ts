@@ -35,7 +35,7 @@ export type NetworkRevision = {
 	/** The policies for the network */
 	policies: NetworkPolicies;
 
-	/** The signature of the network */
+	/** The signature of an administrator of the primary authority */
 	signature: Signature;
 };
 

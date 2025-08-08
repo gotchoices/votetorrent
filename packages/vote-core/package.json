@@ -44,8 +44,6 @@
 	"dependencies": {
 		"@libp2p/interface": "^2.7.0",
 		"@libp2p/peer-id-factory": "^4.2.4",
-		"@votetorrent/db-core": "^0.0.1",
-		"@votetorrent/vinz": "^0.0.1",
 		"uint8arrays": "^5.1.0"
 	}
 }

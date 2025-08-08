@@ -1,5 +1,4 @@
 import type { ReleaseKeyTask } from '@votetorrent/vote-core';
-import type { FinalShareData } from '../../../vinz/dist/src/internal-types';
 import { KeysTasksEngine } from './keys-tasks-engine';
 import {
 	ElectionEvent, // Import as value for enum usage
@@ -178,8 +177,8 @@ const MOCK_COMPLETED_RELEASE_KEY_TASKS: ReleaseKeyTask[] = [
 
 export class MockKeysTasksEngine extends KeysTasksEngine {
 	async completeKeyRelease(
-		task: ReleaseKeyTask,
-		keyShares: FinalShareData
+		task: ReleaseKeyTask
+		//keyShares: FinalShareData
 	): Promise<void> {
 		const index = MOCK_PENDING_RELEASE_KEY_TASKS.findIndex(
 			(t) =>

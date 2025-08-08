@@ -1,13 +1,33 @@
-import type { InvitationStatus } from "../invitation/models";
-import type { Proposal } from "../common/proposal";
-import type { AuthorityDetails, AdministrationDetails, AuthorityInvitation, AuthorityInvitationContent, AdministratorInvitationContent, AdministratorInvitation, AdministrationInit, AuthorityContent } from "./models";
+import type {
+	InvitationEnvelope,
+	InvitationSigned,
+	InvitationStatus,
+} from '../invitation/models';
+import type { Proposal, Signature } from '../common';
+import type {
+	AuthorityDetails,
+	AdministrationDetails,
+	AuthorityInvitation,
+	AuthorityInvitationContent,
+	AdministratorInvitationContent,
+	AdministratorInvitation,
+	AdministrationInit,
+} from './models';
 
 export type IAuthorityEngine = {
+	createAuthorityInvitation(
+		name: string
+	): InvitationEnvelope<AuthorityInvitationContent>;
 	getAdministrationDetails(): Promise<AdministrationDetails>;
 	getAuthorityInvitations(): Promise<InvitationStatus<AuthorityInvitation>[]>;
 	getDetails(): Promise<AuthorityDetails>;
-	inviteAdministrator(name: Proposal<AdministratorInvitationContent>): Promise<AdministratorInvitation>;
-	inviteAuthority(name: Proposal<AuthorityInvitationContent>): Promise<AuthorityInvitation>;
-	proposeAdministration(administration: Proposal<AuthorityContent & AdministrationInit>): Promise<void>;
-	proposeAuthority(authority: Proposal<AuthorityInvitationContent>): Promise<void>;
+	inviteAdministrator(
+		name: Proposal<AdministratorInvitationContent>
+	): Promise<AdministratorInvitation>;
+	proposeAdministration(
+		administration: Proposal<AuthorityInvitationContent & AdministrationInit>
+	): Promise<void>;
+	saveAuthorityInvite(
+		invitation: InvitationSigned<AuthorityInvitationContent>
+	): Promise<void>;
 };

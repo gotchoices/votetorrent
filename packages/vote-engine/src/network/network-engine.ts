@@ -1,4 +1,3 @@
-import type { IKeyNetwork } from '@votetorrent/db-core';
 import type {
 	Authority,
 	Cursor,
@@ -26,10 +25,10 @@ export class NetworkEngine implements INetworkEngine {
 	protected constructor(
 		public readonly init: NetworkReference,
 		/** The local storage to use for the network */
-		private readonly localStorage: ILocalStorage,
-		/** The key network to access */
-		private readonly keyNetwork: IKeyNetwork
-	) {}
+		private readonly localStorage: ILocalStorage
+	) /** The key network to access */
+	//private readonly keyNetwork: IKeyNetwork
+	{}
 
 	createElection(election: ElectionInit): Promise<void> {
 		throw new Error('Not implemented');
