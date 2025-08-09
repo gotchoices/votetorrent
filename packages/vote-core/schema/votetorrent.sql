@@ -65,48 +65,42 @@ create table Authority (
 
 create table Administrator (
 	AuthoritySid text,
-	AdministrationRevision integer,
+	AdministrationEffectiveAt text,
 	UserSid text,
 	Title text,
 	Scopes text default '[]', -- json array of strings
 	SignerKey text,
 	Signature text,
-	primary key (AuthoritySid, AdministrationRevision, UserSid),
+	primary key (AuthoritySid, AdministrationEffectiveAt, UserSid),
 	constraint AuthoritySidValid check (exists (select 1 from Authority A where A.Sid = new.AuthoritySid)),
 	constraint UserSidValid check (exists (select 1 from User U where U.Sid = new.UserSid)),
-	constraint AdministrationValid check (exists (select 1 from Administration A where A.AuthoritySid = new.AuthoritySid and A.Revision = new.AdministrationRevision)),
+	constraint AdministrationValid check (exists (select 1 from Administration A where A.AuthoritySid = new.AuthoritySid and A.EffectiveAt = new.AdministrationEffectiveAt)),
 	constraint InsertOnly check on update, delete (false),
 	constraint ScopesValid check (not exists (select 1 from json_array_elements_text(Scopes) S(s) where s not in (select Code from Scope))),
 	constraint SignerKeyValid check (exists (select 1 from UserKey K where K.UserSid = new.UserSid and K.Key = new.SignerKey and K.Expiration > now()))
 	-- constraint SignatureValid check (SignatureValid(
-	-- 	Digest(Sid, AuthoritySid, AdministrationRevision, UserSid, Title, Scopes),
+	-- 	Digest(AuthoritySid, AdministrationEffectiveAt, UserSid, Title, Scopes),
 	-- 	Signature,
 	-- 	SignerKey)
 	-- )
 	-- TODO: transaction level constraint that Administrators and Administration are inserted together
-	-- constraint AdministrationValid transaction check (exists (select 1 from Administration A where A.AuthoritySid = new.AuthoritySid and A.Revision = new.AdministrationRevision))
+	-- constraint AdministrationValid transaction check (exists (select 1 from Administration A where A.AuthoritySid = new.AuthoritySid and A.EffectiveAt = new.AdministrationEffectiveAt))
 );
 
 create index AdministratorUser on Administrator (UserSid); -- include (Scopes)
 
 create table Administration (
 	AuthoritySid text,
-	Revision integer,
-	Expiration text,
+	EffectiveAt text,
 	ThresholdPolicies text default '[]', -- json array of { policy: string (Scope), threshold: integer }
-	SignerKey text,
+	SignerKey text,	-- The threshold public key of the current administration
 	Signature text,
-	primary key (AuthoritySid, Revision),
-	constraint Monotonicity check (
-		Revision > 0
-			and (Revision = 1 or Revision = (select max(Revision) from Administration A where A.AuthoritySid = new.AuthoritySid) + 1)
-	),
+	primary key (AuthoritySid, EffectiveAt),
 	--constraint ThresholdPoliciesValid check (...), -- TODO: constraint
 	constraint AuthoritySidValid check (exists (select 1 from Authority A where A.Sid = new.AuthoritySid)),
-	constraint InsertOnly check on update, delete (false),
-	constraint ExpirationFuture check (Expiration > now())
-	-- TODO: If prior administration, SignerKey is threshold public key of prior administration, otherwise it's the threshold public key of the current (new) administration
-	--constraint SignerKeyValid check (Revision = 1 or SignerKey ...),
+	constraint CantDelete check on delete (false),
+	-- constraint SignerKeyValid check (not exists (select 1 from Administration A where A.AuthoritySid = new.AuthoritySid)
+	--	or SignerKey ...),
 	-- constraint SignatureValid check (SignatureValid(
 	-- 	Digest(
 	-- 		Sid,
@@ -119,11 +113,74 @@ create table Administration (
 	-- 			and A.AdministrationRevision = new.Revision
 	-- 		)
 	-- 	), Signature, SignerKey)
-    -- )
+  -- )
 );
 
--- TODO: create table ProposedAdministration & ProposedAdministrator
 -- Note: proposed aren't dependencies, just a workflow for constructing a fully signed admin
+
+create table ProposedAdministrator (
+	AuthoritySid text,
+	AdministrationEffectiveAt text,
+	ProposedName text,
+	Title text,
+	Scopes text default '[]', -- json array of strings
+	AdministratorKey text,	-- Key of some current administrator
+	AdministratorSignature text,
+	primary key (AuthoritySid, AdministrationEffectiveAt, ProposedName),
+	constraint AuthoritySidValid check (exists (select 1 from Authority A where A.Sid = new.AuthoritySid)),
+	constraint AdministrationValid check (exists (select 1 from Administration A where A.AuthoritySid = new.AuthoritySid and A.Revision = new.AdministrationRevision)),
+	constraint CantDelete check on delete (false),
+	constraint ScopesValid check (not exists (select 1 from json_array_elements_text(Scopes) S(s) where s not in (select Code from Scope))),
+	constraint AdministratorKeyValid check (exists (select 1 from UserKey K
+		-- Most recent effective administration
+		join Administrator A on A.UserSid = K.UserSid and A.AdministrationEffectiveAt <= now()
+		join Administration AD on AD.AuthoritySid = A.AuthoritySid and AD.E
+		where K.UserSid = new.AdministratorKey and K.Expiration > now()))
+);
+
+-- Extension of ProposedAdministrator to associate a specific UserSid and include the user's signature
+create table ProposedAdministratorUser (
+	AuthoritySid text,
+	AdministrationEffectiveAt text,
+	ProposedName text,
+	UserSid text,
+	UserKey text,
+	UserSignature text,
+	primary key (AuthoritySid, AdministrationEffectiveAt, ProposedName),
+	constraint ProposedAdministratorValid check (exists (select 1 from ProposedAdministrator PA where PA.AuthoritySid = new.AuthoritySid and PA.AdministrationEffectiveAt = new.AdministrationEffectiveAt and PA.ProposedName = new.ProposedName)),
+	constraint UserSidValid check (exists (select 1 from User U where U.Sid = new.UserSid)),
+	constraint UserKeyValid check (exists (select 1 from UserKey K where K.UserSid = new.UserSid and K.Key = new.UserKey and K.Expiration > now()))
+	constraint CantDelete check on delete (false),
+	constraint SignatureValid check (exists (select 1 from ProposedAdministrator PA
+		where PA.AuthoritySid = new.AuthoritySid and PA.AdministrationRevision = new.AdministrationRevision and PA.ProposedName = new.ProposedName and PA.UserSid = new.UserSid and PA.SignerKey = new.SignerKey and PA.Signature = new.Signature
+		-- and SignatureValid(
+		-- 	Digest(new.AuthoritySid, new.AdministrationRevision, new.UserSid, PA.Title, PA.Scopes),
+		-- 	Signature,
+		-- 	SignerKey
+		-- )
+	)
+);
+
+create table ProposedAdministration (
+	AuthoritySid text,
+	EffectiveAt text,
+	Expiration text,
+	ThresholdPolicies text default '[]', -- json array of { policy: string (Scope), threshold: integer }
+	primary key (AuthoritySid, EffectiveAt),
+	--constraint ThresholdPoliciesValid check (...), -- TODO: constraint
+	constraint AuthoritySidValid check (exists (select 1 from Authority A where A.Sid = new.AuthoritySid)),
+	constraint CantDelete check on delete (false),
+	constraint ExpirationFuture check (Expiration > now())
+);
+
+create table ProposedAdministrationSignature (
+	AuthoritySid text,
+	EffectiveAt text,
+	UserSid text,
+	SignerKey text,	-- TODO: Is this a key, or a threshold share, or what?
+	SignatureShare text,
+	primary key (AuthoritySid, EffectiveAt, UserSid),
+);
 
 create view InvitationType as select * from (values ('au', 'Authority'), ('ad', 'Administrator'), ('k', 'Keyholder'), ('r', 'Registrant')) as InvitationType(Code, Name);
 
