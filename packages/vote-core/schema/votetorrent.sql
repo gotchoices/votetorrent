@@ -118,6 +118,117 @@ create table Administration (
 
 -- Note: proposed aren't dependencies, just a workflow for constructing a fully signed admin
 
+-- A threshold signing "session"
+create table ThresholdSigning (
+	Nonce text, -- Random ID
+	ThresholdKey text, -- Public key of the threshold group
+	Threshold integer, -- Number of required participants
+	TermsHash text, -- Hash of the DKG terms
+	Digest text, -- Content hash to be signed - Base64url encoded sha256
+	primary key (Nonce),
+	constraint InsertOnly check on update, delete (false)
+);
+
+-- Indicates that a given user has opted in as a participant for the upcoming attempt
+create table ThresholdOptIn (
+	SigningNonce text,
+	AttemptSequence integer,
+	IdNum integer, -- User's threshold ID number
+	UserSid text,
+	primary key (SigningNonce, AttemptSequence, IdNum),
+	constraint SigningNonceValid check (exists (select 1 from ThresholdSigning TS where TS.Nonce = new.SigningNonce)),
+	constraint InsertOnly check on update, delete (false),
+	constraint OnlyAddBeforeAttempt check (not exists (select 1 from ThresholdAttempt TA where TA.SigningNonce = new.SigningNonce and TA.Sequence = new.AttemptSequence))
+	constraint ValidUserSid check (exists (select 1 from User U where U.Sid = new.UserSid))
+);
+
+-- Represents the beginning of an attempt to complete a signature based on the current opt-in set
+-- Once this is created, no more opt-ins are allowed for this attempt
+create table ThresholdAttempt (
+	SigningNonce text,
+	Sequence integer,
+	primary key (SigningNonce, Sequence),
+	constraint EnoughOptIns check (
+		(select count(*) from ThresholdOptIn TOI where TOI.SigningNonce = new.SigningNonce and TOI.AttemptSequence = new.Sequence)
+			>= (select Threshold from ThresholdSigning TS where TS.Nonce = new.SigningNonce)
+	),
+	constraint InsertOnly check on update, delete (false)
+);
+
+-- Participant's commitment to the attempt
+create table ThresholdCommitment (
+	SigningNonce text,
+	AttemptSequence integer,
+	IdNum integer, -- Also assumed ordering
+	R1 text,
+	R2 text,
+	primary key (SigningNonce, AttemptSequence, IdNum),
+	constraint InsertOnly check on update, delete (false),
+	constraint ThresholdAttemptExists check (exists (select 1 from ThresholdAttempt TA where TA.SigningNonce = new.SigningNonce and TA.Sequence = new.AttemptSequence)),
+	constraint IdNumValid check (IdNum in (select IdNum from ThresholdOptIn TOI where TOI.SigningNonce = new.SigningNonce and TOI.AttemptSequence = new.AttemptSequence))
+	constraint R1Valid check (IsValidPoint(R1) and not IsIdentityPoint(R1)),
+	constraint R2Valid check (IsValidPoint(R2) and not IsIdentityPoint(R2))
+);
+
+-- Participant's response to the attempt - each participant should verify all other commitments
+create table ThresholdResponse (
+	SigningNonce text,
+	AttemptSequence integer,
+	IdNum integer,
+	SignatureShare text null,	-- encoded s_i
+	RejectionReason text null,
+	primary key (SigningNonce, AttemptSequence, IdNum),
+	constraint InsertOnly check on update, delete (false),
+	constraint ShareRejectionMutex check ((SignatureShare is not null) xor (RejectionReason is not null)),
+	constraint SignatureShareValid check (
+		SignatureShare is null or IsScalarModN(SignatureShare)
+	),
+	constraint ThresholdCommitmentsValid check (
+		-- Use case expression to short-circuit the check
+		case when
+			-- A response is already present for this attempt and participant (fast check with short-circuit)
+			exists (select 1 from ThresholdResponse TR where TR.SigningNonce = new.SigningNonce and TR.AttemptSequence = new.AttemptSequence and TR.IdNum <> new.IdNum)
+		then true
+		else
+			-- Or all expected commitments are present
+			not exists ((select IdNum from ThresholdCommitment TC where TC.SigningNonce = new.SigningNonce and TC.AttemptSequence = new.AttemptSequence)
+				diff (select IdNum from ThresholdOptIn TOI where TOI.SigningNonce = new.SigningNonce and TOI.AttemptSequence = new.AttemptSequence))
+		end
+	)
+);
+
+-- The final signature output - only need one for Signing since this will only insert if valid
+create table ThresholdSignature (
+	SigningNonce text,
+	AttemptSequence integer,
+	Signature text,	-- encoded schnorr (r||s)
+	primary key (SigningNonce),
+	constraint InsertOnly check on update, delete (false),
+	constraint SignatureValid check (exists (
+		select 1 from ThresholdSigning TS on TS.Nonce = new.SigningNonce
+			where SchnorrSignatureValid(TS.Digest, Signature, TS.ThresholdKey))
+	)
+);
+
+create table ProposedAdministration (
+	AuthoritySid text,
+	EffectiveAt text,
+	ThresholdPolicies text default '[]', -- json array of { policy: string (Scope), threshold: integer }
+	primary key (AuthoritySid, EffectiveAt),
+	--constraint ThresholdPoliciesValid check (...), -- TODO: constraint
+	constraint AuthoritySidValid check (exists (select 1 from Authority A where A.Sid = new.AuthoritySid)),
+	constraint CantDelete check on delete (false),
+);
+
+create table ProposedAdministrationSignature (
+	AuthoritySid text,
+	EffectiveAt text,
+	UserSid text,
+	SignerKey text,	-- TODO: Is this a key, or a threshold share, or what?
+	SignatureShare text,
+	primary key (AuthoritySid, EffectiveAt, UserSid),
+);
+
 create table ProposedAdministrator (
 	AuthoritySid text,
 	AdministrationEffectiveAt text,
@@ -159,27 +270,6 @@ create table ProposedAdministratorUser (
 		-- 	SignerKey
 		-- )
 	)
-);
-
-create table ProposedAdministration (
-	AuthoritySid text,
-	EffectiveAt text,
-	Expiration text,
-	ThresholdPolicies text default '[]', -- json array of { policy: string (Scope), threshold: integer }
-	primary key (AuthoritySid, EffectiveAt),
-	--constraint ThresholdPoliciesValid check (...), -- TODO: constraint
-	constraint AuthoritySidValid check (exists (select 1 from Authority A where A.Sid = new.AuthoritySid)),
-	constraint CantDelete check on delete (false),
-	constraint ExpirationFuture check (Expiration > now())
-);
-
-create table ProposedAdministrationSignature (
-	AuthoritySid text,
-	EffectiveAt text,
-	UserSid text,
-	SignerKey text,	-- TODO: Is this a key, or a threshold share, or what?
-	SignatureShare text,
-	primary key (AuthoritySid, EffectiveAt, UserSid),
 );
 
 create view InvitationType as select * from (values ('au', 'Authority'), ('ad', 'Administrator'), ('k', 'Keyholder'), ('r', 'Registrant')) as InvitationType(Code, Name);
