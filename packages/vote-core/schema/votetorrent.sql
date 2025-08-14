@@ -49,17 +49,23 @@ create table Authority (
 	Name text,
 	DomainName text,
 	ImageRef text null, -- json object { url?: string, cid?: string }
-	SignerKey text,
-	Signature text,
+	SigningNonce text null,
 	primary key (Sid),
 	--constraint NewSidValid check on insert (Sid = Digest(Name, DomainName, ImageRef)),
 	constraint SidImmutable check on update (new.Sid = old.Sid),
-	constraint InvitationValid check on insert (
+	constraint CantDelete check on delete (false),
+	constraint NoSigningNonceOnInsert check on insert (SigningNonce is null),
+	constraint NewAuthorityValid check on insert (
+		-- Very first authority in the network - shoe-in, no invitation
 		not exists (select 1 from Authority)
+			-- Valid invitation for this authority
 			or exists (select 1 from InvitationResult IR join InvitationSlot InvS on InvS.Cid = IR.SlotCid
 				where InvS.Type = 'au' and IR.InvokedSid = new.Sid)
 	),
-	constraint CantDelete check on delete (false),
+	constraint UpdateAuthorityValid check on update (
+		exists (select 1 from AdministrationSigning ADS
+			join AdministrationSignature
+			where ADS.Nonce = new.SigningNonce)
 	constraint SignerKeyValid check (exists (select 1 from Administration A where A.AuthoritySid = new.Sid and A.Revision = 1))
 );
 
@@ -92,11 +98,19 @@ create index AdministratorUser on Administrator (UserSid); -- include (Scopes)
 create table Administration (
 	AuthoritySid text,
 	EffectiveAt text,
-	ThresholdPolicies text default '[]', -- json array of { policy: string (Scope), threshold: integer }
+	ThresholdPolicies text default '[]', -- json array of { scope: string, threshold: integer }
 	SignerKey text,	-- The threshold public key of the current administration
 	Signature text,
 	primary key (AuthoritySid, EffectiveAt),
-	--constraint ThresholdPoliciesValid check (...), -- TODO: constraint
+	-- Threshold policies are valid - the number of administrators for each scope is at least the threshold
+	constraint ThresholdPoliciesValid check (
+		not exists (select 1 from json_array_elements_text(ThresholdPolicies) TP(tp)
+			where tp.threshold > (select count(*) from Administrator A
+				where A.AuthoritySid = new.AuthoritySid and A.AdministrationEffectiveAt = new.EffectiveAt
+					and tp.scope in (select policy from json_array_elements_text(A.Scopes) S(s) where s = tp.scope)
+			)
+		)
+	),
 	constraint AuthoritySidValid check (exists (select 1 from Authority A where A.Sid = new.AuthoritySid)),
 	constraint CantDelete check on delete (false),
 	-- constraint SignerKeyValid check (not exists (select 1 from Administration A where A.AuthoritySid = new.AuthoritySid)
@@ -118,96 +132,72 @@ create table Administration (
 
 -- Note: proposed aren't dependencies, just a workflow for constructing a fully signed admin
 
--- A threshold signing "session"
-create table ThresholdSigning (
+-- A signing "session" for an administration
+create table AdministrationSigning (
 	Nonce text, -- Random ID
-	ThresholdKey text, -- Public key of the threshold group
-	Threshold integer, -- Number of required participants
-	TermsHash text, -- Hash of the DKG terms
+	AuthoritySid text,
+	AdministrationEffectiveAt text,
+	Scope text, -- references Scope(Code)
 	Digest text, -- Content hash to be signed - Base64url encoded sha256
+	UserSid text, -- Administrator who is initiating the signing session
+	SignerKey text, -- Instigator's signing key
+	Signature text, -- Instigator's signature of this row
 	primary key (Nonce),
-	constraint InsertOnly check on update, delete (false)
-);
-
--- Indicates that a given user has opted in as a participant for the upcoming attempt
-create table ThresholdOptIn (
-	SigningNonce text,
-	AttemptSequence integer,
-	IdNum integer, -- User's threshold ID number
-	UserSid text,
-	primary key (SigningNonce, AttemptSequence, IdNum),
-	constraint SigningNonceValid check (exists (select 1 from ThresholdSigning TS where TS.Nonce = new.SigningNonce)),
 	constraint InsertOnly check on update, delete (false),
-	constraint OnlyAddBeforeAttempt check (not exists (select 1 from ThresholdAttempt TA where TA.SigningNonce = new.SigningNonce and TA.Sequence = new.AttemptSequence))
-	constraint ValidUserSid check (exists (select 1 from User U where U.Sid = new.UserSid))
+	constraint ScopeValid check (exists (select 1 from Scope S where S.Code = new.Scope))
+	constraint UserSidValid check (exists (
+		select 1 from Administrator A
+			where A.UserSid = new.UserSid
+				and A.AdministrationEffectiveAt = new.AdministrationEffectiveAt
+				and A.AuthoritySid = new.AuthoritySid
+	)),
+	constraint SignerKeyValid check (exists (select 1 from UserKey K where K.UserSid = new.UserSid and K.Key = new.SignerKey and K.Expiration > now())),
+	constraint SignatureValid check (SignatureValid(Digest(Nonce, AuthoritySid, AdministrationEffectiveAt, Scope, Digest, UserSid), Signature, SignerKey))
 );
 
--- Represents the beginning of an attempt to complete a signature based on the current opt-in set
--- Once this is created, no more opt-ins are allowed for this attempt
-create table ThresholdAttempt (
+-- Administrator's signature on the signing session
+create table AdministratorSignature (
 	SigningNonce text,
-	Sequence integer,
-	primary key (SigningNonce, Sequence),
-	constraint EnoughOptIns check (
-		(select count(*) from ThresholdOptIn TOI where TOI.SigningNonce = new.SigningNonce and TOI.AttemptSequence = new.Sequence)
-			>= (select Threshold from ThresholdSigning TS where TS.Nonce = new.SigningNonce)
+	UserSid text,	-- Particular administrator
+	SignerKey text,	-- User's particular signing key
+	Signature text,	-- User's signature of the digest
+	primary key (SigningNonce, UserSid),
+	constraint InsertOnly check on update, delete (false),
+	-- Key is valid for the user and the UserSid is valid
+	constraint SignerKeyValid check (
+		exists (select 1 from UserKey K where K.UserSid = new.UserSid and K.Key = new.SignerKey and K.Expiration > now())
 	),
-	constraint InsertOnly check on update, delete (false)
-);
-
--- Participant's commitment to the attempt
-create table ThresholdCommitment (
-	SigningNonce text,
-	AttemptSequence integer,
-	IdNum integer, -- Also assumed ordering
-	R1 text,
-	R2 text,
-	primary key (SigningNonce, AttemptSequence, IdNum),
-	constraint InsertOnly check on update, delete (false),
-	constraint ThresholdAttemptExists check (exists (select 1 from ThresholdAttempt TA where TA.SigningNonce = new.SigningNonce and TA.Sequence = new.AttemptSequence)),
-	constraint IdNumValid check (IdNum in (select IdNum from ThresholdOptIn TOI where TOI.SigningNonce = new.SigningNonce and TOI.AttemptSequence = new.AttemptSequence))
-	constraint R1Valid check (IsValidPoint(R1) and not IsIdentityPoint(R1)),
-	constraint R2Valid check (IsValidPoint(R2) and not IsIdentityPoint(R2))
-);
-
--- Participant's response to the attempt - each participant should verify all other commitments
-create table ThresholdResponse (
-	SigningNonce text,
-	AttemptSequence integer,
-	IdNum integer,
-	SignatureShare text null,	-- encoded s_i
-	RejectionReason text null,
-	primary key (SigningNonce, AttemptSequence, IdNum),
-	constraint InsertOnly check on update, delete (false),
-	constraint ShareRejectionMutex check ((SignatureShare is not null) xor (RejectionReason is not null)),
-	constraint SignatureShareValid check (
-		SignatureShare is null or IsScalarModN(SignatureShare)
+	-- User is an administrator with the required scope
+	constraint AdministratorValid check (
+		exists (select 1 from AdministrationSigning ADS
+			join Administrator A on A.AuthoritySid = ADS.AuthoritySid and A.AdministrationEffectiveAt = ADS.AdministrationEffectiveAt
+			where ADS.Nonce = new.SigningNonce
+				 and A.UserSid = new.UserSid
+				 and ADS.Scope in (select policy from json_array_elements_text(A.Scopes) S(s) where s = new.Scope)
+		)
 	),
-	constraint ThresholdCommitmentsValid check (
-		-- Use case expression to short-circuit the check
-		case when
-			-- A response is already present for this attempt and participant (fast check with short-circuit)
-			exists (select 1 from ThresholdResponse TR where TR.SigningNonce = new.SigningNonce and TR.AttemptSequence = new.AttemptSequence and TR.IdNum <> new.IdNum)
-		then true
-		else
-			-- Or all expected commitments are present
-			not exists ((select IdNum from ThresholdCommitment TC where TC.SigningNonce = new.SigningNonce and TC.AttemptSequence = new.AttemptSequence)
-				diff (select IdNum from ThresholdOptIn TOI where TOI.SigningNonce = new.SigningNonce and TOI.AttemptSequence = new.AttemptSequence))
-		end
-	)
+	constraint SignatureValid check (exists (
+		select 1 from AdministrationSigning ADS
+			where ADS.Nonce = new.SigningNonce
+				and SignatureValid(ADS.Digest, Signature, SignerKey)
+	))
 );
 
--- The final signature output - only need one for Signing since this will only insert if valid
-create table ThresholdSignature (
+-- The final administration signature output - only exists if required threshold of signatures are met - exists to avoid long validation
+create table AdministrationSignature (
 	SigningNonce text,
-	AttemptSequence integer,
-	Signature text,	-- encoded schnorr (r||s)
 	primary key (SigningNonce),
 	constraint InsertOnly check on update, delete (false),
-	constraint SignatureValid check (exists (
-		select 1 from ThresholdSigning TS on TS.Nonce = new.SigningNonce
-			where SchnorrSignatureValid(TS.Digest, Signature, TS.ThresholdKey))
-	)
+	-- Satisfies the threshold policies of the administration for the given scope
+	constraint SignatureValid check (
+		(select count(*) from AdministratorSignature ADS where ADS.SigningNonce = new.SigningNonce)
+			>= (
+				select threshold from Administration A
+					join AuthoritySignature ATS on ATS.AuthoritySid = A.AuthoritySid and ATS.AdministrationEffectiveAt = A.EffectiveAt
+					cross join lateral json_array_elements_text(A.ThresholdPolicies) TP(tp) on tp.scope = ATS.Scope
+					where ATS.Nonce = new.SigningNonce
+			)
+	))
 );
 
 create table ProposedAdministration (
