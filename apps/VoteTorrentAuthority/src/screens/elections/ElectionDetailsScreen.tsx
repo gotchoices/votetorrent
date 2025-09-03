@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { View, ScrollView, StyleSheet, TouchableOpacity } from "react-native";
-import { ExtendedTheme, useRoute, useTheme } from "@react-navigation/native";
+import { ExtendedTheme, useRoute, useTheme, useNavigation } from "@react-navigation/native";
 import { useTranslation } from "react-i18next";
 import { ThemedText } from "../../components/ThemedText";
 import type { ElectionDetails, IElectionEngine } from "@votetorrent/vote-core";
@@ -17,6 +17,7 @@ export default function ElectionDetailsScreen() {
 	const [electionDetails, setElectionDetails] = useState<ElectionDetails | null>(null);
 	const [showMore, setShowMore] = useState(false);
 	const { colors } = useTheme() as ExtendedTheme;
+	const navigation = useNavigation();
 
 	useEffect(() => {
 		const loadElectionDetails = async () => {
@@ -110,7 +111,7 @@ export default function ElectionDetailsScreen() {
 					size="thin"
 					icon="plus"
 					backgroundColor={colors.accent}
-					onPress={() => {}}
+					onPress={() => navigation.navigate("EditBallot")}
 				/>
 			</View>
 		</ScrollView>

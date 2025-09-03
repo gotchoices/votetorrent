@@ -33,6 +33,7 @@ import NetworkDetailsScreen from "../screens/networks/NetworkDetailsScreen";
 import KeyTaskScreen from "../screens/tasks/KeyTaskScreen";
 import SignatureTaskScreen from "../screens/tasks/SignatureTaskScreen";
 import ElectionDetailsScreen from "../screens/elections/ElectionDetailsScreen";
+import EditBallotScreen from "../screens/ballots/EditBallotScreen";
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator();
@@ -269,6 +270,11 @@ export const RootNavigator = () => {
 				name="ElectionDetails"
 				component={ElectionDetailsScreen}
 				options={{ title: t("election") }}
+			/>
+			<Stack.Screen
+				name="EditBallot"
+				component={EditBallotScreen}
+				options={{ title: t("ballotTemplate") }}
 			/>
 		</Stack.Navigator>
 	);

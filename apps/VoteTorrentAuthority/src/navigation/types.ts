@@ -38,6 +38,7 @@ export type RootStackParamList = {
 	KeyTask: { task: ReleaseKeyTask };
 	SignatureTask: { task: SignatureTask };
 	ElectionDetails: { electionEngine: IElectionEngine };
+	EditBallot: undefined;
 };
 
 export type TabParamList = {
