@@ -1,5 +1,5 @@
 import type { ImageRef, SID } from '../common';
-import type { Invitation } from '../invitation/models';
+import type { Invitation, InvitationContent } from '../invitation/models';
 import type {
 	Proposal,
 	Signature,
@@ -45,27 +45,12 @@ export type AuthorityDetails = {
 	proposed?: Proposal<AuthorityInit>;
 };
 
-export type AuthorityInvitationContent = {
+export type AuthorityInvitationContent = InvitationContent & {
 	/** Suggested name for the new Authority */
 	name: string;
 
 	/** The type of the invitation */
 	type: 'au';
-
-	/** The expiration date of the invitation */
-	expiration: string;
-
-	/** The public key of the invitation */
-	inviteKey: string;
-
-	/** The private key of the invitation */
-	invitePrivate: string;
-
-	/** The signature of the invitation */
-	inviteSignature: string;
-
-	/** The digest of the invitation */
-	digest: string;
 };
 
 export type AuthorityInvitation = Invitation<AuthorityInvitationContent> & {
@@ -96,6 +81,9 @@ export type Administration = {
 export type AdministrationInit = {
 	/** The administrators */
 	administrators: AdministratorSelection[];
+
+	/** The effective date of the administration */
+	effectiveAt: Timestamp;
 
 	/** Threshold policies */
 	thresholdPolicies: ThresholdPolicy[];
@@ -131,8 +119,8 @@ export type AdministratorInit = {
 	/** Title of the administrator */
 	title: string;
 
-	/** Scopes of the administrator */
-	scopes: Scope[];
+	/** Scopes of the administrator, comma separated list of scope codes */
+	scopes: string;
 };
 
 export type AdministratorSelection = {
@@ -143,7 +131,11 @@ export type AdministratorSelection = {
 	existing?: Administrator;
 };
 
-export type AdministratorInvitationContent = AdministratorInit;
+export type AdministratorInvitationContent = InvitationContent &
+	AdministratorInit & {
+		/** The type of the invitation */
+		type: 'ad';
+	};
 
 export type AdministratorInvitation =
 	Invitation<AdministratorInvitationContent> & {

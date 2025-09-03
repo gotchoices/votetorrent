@@ -66,8 +66,28 @@ export type InvitationAction<TInvokes, TSlot> = {
 	invitationSignature: string;
 };
 
-/** eg "Administrator" | "Authority" | "Keyholder" */
-export type InvitationType = string;
+/** "au" for authority, "ad" for administrator, "k" for keyholder, "r" for registrant */
+export type InvitationType = 'au' | 'ad' | 'k' | 'r';
+
+export type InvitationContent = {
+	/** The type of the invitation */
+	type: InvitationType;
+
+	/** The expiration date of the invitation */
+	expiration: string;
+
+	/** The public key of the invitation */
+	inviteKey: string;
+
+	/** The private key of the invitation */
+	invitePrivate: string;
+
+	/** The signature of the invitation */
+	inviteSignature: string;
+
+	/** The digest of the invitation */
+	digest: string;
+};
 
 export type InvitationEnvelope<TContent extends Record<string, string>> = {
 	envelope: Envelope<TContent>;

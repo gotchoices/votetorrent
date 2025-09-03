@@ -3,29 +3,32 @@ import type {
 	InvitationSigned,
 	InvitationStatus,
 } from '../invitation/models';
-import type { Proposal, Signature } from '../common';
+import type { Proposal } from '../common';
 import type {
 	AuthorityDetails,
 	AdministrationDetails,
 	AuthorityInvitation,
 	AuthorityInvitationContent,
 	AdministratorInvitationContent,
-	AdministratorInvitation,
 	AdministrationInit,
+	AdministratorInit,
 } from './models';
 
 export type IAuthorityEngine = {
+	createAdministratorInvitation(
+		init: AdministratorInit
+	): InvitationEnvelope<AdministratorInvitationContent>;
 	createAuthorityInvitation(
 		name: string
 	): InvitationEnvelope<AuthorityInvitationContent>;
 	getAdministrationDetails(): Promise<AdministrationDetails>;
 	getAuthorityInvitations(): Promise<InvitationStatus<AuthorityInvitation>[]>;
 	getDetails(): Promise<AuthorityDetails>;
-	inviteAdministrator(
-		name: Proposal<AdministratorInvitationContent>
-	): Promise<AdministratorInvitation>;
 	proposeAdministration(
 		administration: Proposal<AuthorityInvitationContent & AdministrationInit>
+	): Promise<void>;
+	saveAdministratorInvite(
+		invitation: InvitationSigned<AdministratorInvitationContent>
 	): Promise<void>;
 	saveAuthorityInvite(
 		invitation: InvitationSigned<AuthorityInvitationContent>
