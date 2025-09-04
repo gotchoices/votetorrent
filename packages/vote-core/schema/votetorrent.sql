@@ -49,17 +49,23 @@ create table Authority (
 	Name text,
 	DomainName text,
 	ImageRef text null, -- json object { url?: string, cid?: string }
-	SignerKey text,
-	Signature text,
+	SigningNonce text null,
 	primary key (Sid),
 	--constraint NewSidValid check on insert (Sid = Digest(Name, DomainName, ImageRef)),
 	constraint SidImmutable check on update (new.Sid = old.Sid),
-	constraint InvitationValid check on insert (
+	constraint CantDelete check on delete (false),
+	constraint NoSigningNonceOnInsert check on insert (SigningNonce is null),
+	constraint NewAuthorityValid check on insert (
+		-- Very first authority in the network - shoe-in, no invitation
 		not exists (select 1 from Authority)
+			-- Valid invitation for this authority
 			or exists (select 1 from InvitationResult IR join InvitationSlot InvS on InvS.Cid = IR.SlotCid
 				where InvS.Type = 'au' and IR.InvokedSid = new.Sid)
 	),
-	constraint CantDelete check on delete (false),
+	constraint UpdateAuthorityValid check on update (
+		exists (select 1 from AdministrationSigning ADS
+			join AdministrationSignature
+			where ADS.Nonce = new.SigningNonce)
 	constraint SignerKeyValid check (exists (select 1 from Administration A where A.AuthoritySid = new.Sid and A.Revision = 1))
 );
 
@@ -92,11 +98,19 @@ create index AdministratorUser on Administrator (UserSid); -- include (Scopes)
 create table Administration (
 	AuthoritySid text,
 	EffectiveAt text,
-	ThresholdPolicies text default '[]', -- json array of { policy: string (Scope), threshold: integer }
+	ThresholdPolicies text default '[]', -- json array of { scope: string, threshold: integer }
 	SignerKey text,	-- The threshold public key of the current administration
 	Signature text,
 	primary key (AuthoritySid, EffectiveAt),
-	--constraint ThresholdPoliciesValid check (...), -- TODO: constraint
+	-- Threshold policies are valid - the number of administrators for each scope is at least the threshold
+	constraint ThresholdPoliciesValid check (
+		not exists (select 1 from json_array_elements_text(ThresholdPolicies) TP(tp)
+			where tp.threshold > (select count(*) from Administrator A
+				where A.AuthoritySid = new.AuthoritySid and A.AdministrationEffectiveAt = new.EffectiveAt
+					and tp.scope in (select policy from json_array_elements_text(A.Scopes) S(s) where s = tp.scope)
+			)
+		)
+	),
 	constraint AuthoritySidValid check (exists (select 1 from Authority A where A.Sid = new.AuthoritySid)),
 	constraint CantDelete check on delete (false),
 	-- constraint SignerKeyValid check (not exists (select 1 from Administration A where A.AuthoritySid = new.AuthoritySid)
@@ -117,6 +131,93 @@ create table Administration (
 );
 
 -- Note: proposed aren't dependencies, just a workflow for constructing a fully signed admin
+
+-- A signing "session" for an administration
+create table AdministrationSigning (
+	Nonce text, -- Random ID
+	AuthoritySid text,
+	AdministrationEffectiveAt text,
+	Scope text, -- references Scope(Code)
+	Digest text, -- Content hash to be signed - Base64url encoded sha256
+	UserSid text, -- Administrator who is initiating the signing session
+	SignerKey text, -- Instigator's signing key
+	Signature text, -- Instigator's signature of this row
+	primary key (Nonce),
+	constraint InsertOnly check on update, delete (false),
+	constraint ScopeValid check (exists (select 1 from Scope S where S.Code = new.Scope))
+	constraint UserSidValid check (exists (
+		select 1 from Administrator A
+			where A.UserSid = new.UserSid
+				and A.AdministrationEffectiveAt = new.AdministrationEffectiveAt
+				and A.AuthoritySid = new.AuthoritySid
+	)),
+	constraint SignerKeyValid check (exists (select 1 from UserKey K where K.UserSid = new.UserSid and K.Key = new.SignerKey and K.Expiration > now())),
+	constraint SignatureValid check (SignatureValid(Digest(Nonce, AuthoritySid, AdministrationEffectiveAt, Scope, Digest, UserSid), Signature, SignerKey))
+);
+
+-- Administrator's signature on the signing session
+create table AdministratorSignature (
+	SigningNonce text,
+	UserSid text,	-- Particular administrator
+	SignerKey text,	-- User's particular signing key
+	Signature text,	-- User's signature of the digest
+	primary key (SigningNonce, UserSid),
+	constraint InsertOnly check on update, delete (false),
+	-- Key is valid for the user and the UserSid is valid
+	constraint SignerKeyValid check (
+		exists (select 1 from UserKey K where K.UserSid = new.UserSid and K.Key = new.SignerKey and K.Expiration > now())
+	),
+	-- User is an administrator with the required scope
+	constraint AdministratorValid check (
+		exists (select 1 from AdministrationSigning ADS
+			join Administrator A on A.AuthoritySid = ADS.AuthoritySid and A.AdministrationEffectiveAt = ADS.AdministrationEffectiveAt
+			where ADS.Nonce = new.SigningNonce
+				 and A.UserSid = new.UserSid
+				 and ADS.Scope in (select policy from json_array_elements_text(A.Scopes) S(s) where s = new.Scope)
+		)
+	),
+	constraint SignatureValid check (exists (
+		select 1 from AdministrationSigning ADS
+			where ADS.Nonce = new.SigningNonce
+				and SignatureValid(ADS.Digest, Signature, SignerKey)
+	))
+);
+
+-- The final administration signature output - only exists if required threshold of signatures are met - exists to avoid long validation
+create table AdministrationSignature (
+	SigningNonce text,
+	primary key (SigningNonce),
+	constraint InsertOnly check on update, delete (false),
+	-- Satisfies the threshold policies of the administration for the given scope
+	constraint SignatureValid check (
+		(select count(*) from AdministratorSignature ADS where ADS.SigningNonce = new.SigningNonce)
+			>= (
+				select threshold from Administration A
+					join AuthoritySignature ATS on ATS.AuthoritySid = A.AuthoritySid and ATS.AdministrationEffectiveAt = A.EffectiveAt
+					cross join lateral json_array_elements_text(A.ThresholdPolicies) TP(tp) on tp.scope = ATS.Scope
+					where ATS.Nonce = new.SigningNonce
+			)
+	))
+);
+
+create table ProposedAdministration (
+	AuthoritySid text,
+	EffectiveAt text,
+	ThresholdPolicies text default '[]', -- json array of { policy: string (Scope), threshold: integer }
+	primary key (AuthoritySid, EffectiveAt),
+	--constraint ThresholdPoliciesValid check (...), -- TODO: constraint
+	constraint AuthoritySidValid check (exists (select 1 from Authority A where A.Sid = new.AuthoritySid)),
+	constraint CantDelete check on delete (false),
+);
+
+create table ProposedAdministrationSignature (
+	AuthoritySid text,
+	EffectiveAt text,
+	UserSid text,
+	SignerKey text,	-- TODO: Is this a key, or a threshold share, or what?
+	SignatureShare text,
+	primary key (AuthoritySid, EffectiveAt, UserSid),
+);
 
 create table ProposedAdministrator (
 	AuthoritySid text,
@@ -159,27 +260,6 @@ create table ProposedAdministratorUser (
 		-- 	SignerKey
 		-- )
 	)
-);
-
-create table ProposedAdministration (
-	AuthoritySid text,
-	EffectiveAt text,
-	Expiration text,
-	ThresholdPolicies text default '[]', -- json array of { policy: string (Scope), threshold: integer }
-	primary key (AuthoritySid, EffectiveAt),
-	--constraint ThresholdPoliciesValid check (...), -- TODO: constraint
-	constraint AuthoritySidValid check (exists (select 1 from Authority A where A.Sid = new.AuthoritySid)),
-	constraint CantDelete check on delete (false),
-	constraint ExpirationFuture check (Expiration > now())
-);
-
-create table ProposedAdministrationSignature (
-	AuthoritySid text,
-	EffectiveAt text,
-	UserSid text,
-	SignerKey text,	-- TODO: Is this a key, or a threshold share, or what?
-	SignatureShare text,
-	primary key (AuthoritySid, EffectiveAt, UserSid),
 );
 
 create view InvitationType as select * from (values ('au', 'Authority'), ('ad', 'Administrator'), ('k', 'Keyholder'), ('r', 'Registrant')) as InvitationType(Code, Name);
