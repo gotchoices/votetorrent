@@ -1,11 +1,7 @@
 import type { ElectionDetails, ElectionInit, BallotInit } from '../election';
-import type { AdornedNetworkReference, NetworkRevisionInit } from '../network';
+import type { NetworkReference, NetworkInit } from '../network';
 import type { SID } from '../index';
-import type {
-	AdministrationInit,
-	AuthorityInit,
-	Authority,
-} from '../authority';
+import type { AdminInit, AuthorityInit, Authority } from '../authority';
 import type { Proposal, Signature } from '../common';
 
 export type Task = {
@@ -14,17 +10,17 @@ export type Task = {
 
 export type ReleaseKeyTask = Task & {
 	type: 'release-key';
-	network: AdornedNetworkReference;
+	network: NetworkReference;
 	election: ElectionDetails;
 	userSid: SID;
 };
 
 export type SignatureTask = Task & {
 	type: 'signature';
-	network: AdornedNetworkReference;
+	network: NetworkReference;
 	userSid: SID;
 	signatureType:
-		| 'administration'
+		| 'admin'
 		| 'authority'
 		| 'network'
 		| 'election'
@@ -32,9 +28,9 @@ export type SignatureTask = Task & {
 		| 'ballot';
 };
 
-export type AdministrationSignatureTask = SignatureTask & {
-	signatureType: 'administration';
-	administration: Proposal<AdministrationInit>;
+export type AdminSignatureTask = SignatureTask & {
+	signatureType: 'admin';
+	administration: Proposal<AdminInit>;
 	authority: Authority;
 };
 
@@ -45,7 +41,7 @@ export type AuthoritySignatureTask = SignatureTask & {
 
 export type NetworkSignatureTask = SignatureTask & {
 	signatureType: 'network';
-	networkRevision: Proposal<NetworkRevisionInit>;
+	networkRevision: Proposal<NetworkInit>;
 };
 
 export type ElectionSignatureTask = SignatureTask & {

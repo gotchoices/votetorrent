@@ -114,7 +114,7 @@ export default function AddNetworkScreen() {
 
 				<View style={styles.section}>
 					<ThemedText type="title" style={styles.sectionTitle}>
-						{t("initialAdministrator")}
+						{t("initialOfficer")}
 					</ThemedText>
 					<CustomTextInput
 						title={t("name")}

@@ -1,33 +1,32 @@
 import type {
 	Authority,
-	Administrator,
+	Officer,
 	DefaultUser,
 	IDefaultUserEngine,
 	User,
 	IUserEngine,
-	AdornedNetworkReference,
 	ReleaseKeyTask,
 	SignatureTask,
-	SID,
 	IElectionEngine,
+	NetworkReference,
 } from '@votetorrent/vote-core';
 
 export type RootStackParamList = {
 	Home: undefined;
 	Networks: undefined;
 	AddNetwork: undefined;
-	NetworkDetails: { network: AdornedNetworkReference };
+	NetworkDetails: { network: NetworkReference };
 	Hosting: undefined;
 	AuthorityDetails: { authority: Authority };
-	AdministratorDetails: { administrator: Administrator };
-	ReplaceAdministration: {
+	OfficerDetails: { officer: Officer };
+	ReplaceAdmin: {
 		authority: Authority;
-		administrator?: Administrator;
-		removeAdministrator?: boolean;
+		officer?: Officer;
+		removeOfficer?: boolean;
 	};
-	EditAdministrator: {
+	EditOfficer: {
 		authority: Authority;
-		administratorSid?: string;
+		officerSid?: string;
 	};
 	DefaultUser: { defaultUser: DefaultUser; defaultUserEngine: IDefaultUserEngine };
 	UserDetails: { user: User; userEngine: IUserEngine };

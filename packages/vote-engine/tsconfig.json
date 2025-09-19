@@ -1,9 +1,8 @@
 {
-	"extends": "aegir/src/config/tsconfig.aegir.json",
-  "compilerOptions": {
+	"compilerOptions": {
 		"outDir": "dist",
 		"strictFunctionTypes": true,
 		"noUncheckedIndexedAccess": true
-  },
-  "include": ["src", "test", "../db-p2p/src/node.ts"]
+	},
+	"include": ["src", "test", "../db-p2p/src/node.ts"]
 }

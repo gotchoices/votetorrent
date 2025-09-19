@@ -6,7 +6,6 @@ import type {
 	Timestamp,
 	ThresholdPolicy,
 } from '../common/index.js';
-import type { UserKey } from '../user/models';
 
 /*********** Authority ***********/
 export type Authority = {
@@ -58,15 +57,15 @@ export type AuthorityInvitation = Invitation<AuthorityInvitationContent> & {
 };
 
 /*********** Administration ***********/
-export type Administration = {
+export type Admin = {
 	/** Sovereign ID of the administration */
 	sid: SID;
 
 	/** The authority's sid */
 	authoritySid: SID;
 
-	/** The administrators */
-	administrators: Administrator[];
+	/** The officers */
+	officers: Officer[];
 
 	/** The threshold policies */
 	thresholdPolicies: ThresholdPolicy[];
@@ -78,9 +77,9 @@ export type Administration = {
 	signatures?: Signature[];
 };
 
-export type AdministrationInit = {
-	/** The administrators */
-	administrators: AdministratorSelection[];
+export type AdminInit = {
+	/** The officers */
+	officers: OfficerSelection[];
 
 	/** The effective date of the administration */
 	effectiveAt: Timestamp;
@@ -89,60 +88,59 @@ export type AdministrationInit = {
 	thresholdPolicies: ThresholdPolicy[];
 };
 
-export type AdministrationDetails = {
+export type AdminDetails = {
 	/** The administration */
-	administration: Administration;
+	admin: Admin;
 
 	/** The proposed changes to the administration */
-	proposed?: Proposal<AdministrationInit>;
+	proposed?: Proposal<AdminInit>;
 };
 
-/*********** Administrator ***********/
-export type Administrator = {
-	/** Sovereign ID of the administrator's user */
+/*********** Officer ***********/
+export type Officer = {
+	/** Sovereign ID of the officer's user */
 	userSid: SID;
 
-	/** Title of the administrator */
+	/** Title of the officer */
 	title: string;
 
-	/** Scopes of the administrator */
+	/** Scopes of the officer */
 	scopes: Scope[];
 
 	/** The signature of this record by this user */
 	signature: Signature;
 };
 
-export type AdministratorInit = {
-	/** Suggested name of the administrator (informational for targeting the right person) */
+export type OfficerInit = {
+	/** Suggested name of the officer (informational for targeting the right person) */
 	name: string;
 
-	/** Title of the administrator */
+	/** Title of the officer */
 	title: string;
 
-	/** Scopes of the administrator, comma separated list of scope codes */
+	/** Scopes of the officer, comma separated list of scope codes */
 	scopes: string;
 };
 
-export type AdministratorSelection = {
-	/** If it's a new administrator */
-	init?: AdministratorInit;
+export type OfficerSelection = {
+	/** If it's a new officer */
+	init?: OfficerInit;
 
-	/** If it's an existing administrator */
-	existing?: Administrator;
+	/** If it's an existing officer */
+	existing?: Officer;
 };
 
-export type AdministratorInvitationContent = InvitationContent &
-	AdministratorInit & {
+export type OfficerInvitationContent = InvitationContent &
+	OfficerInit & {
 		/** The type of the invitation */
-		type: 'ad';
+		type: 'of';
 	};
 
-export type AdministratorInvitation =
-	Invitation<AdministratorInvitationContent> & {
-		type: 'Administrator';
-	};
+export type OfficerInvitation = Invitation<OfficerInvitationContent> & {
+	type: 'Officer';
+};
 
-/** Scope codes representing different administrator privileges */
+/** Scope codes representing different officer privileges */
 export type Scope =
 	| 'rn'
 	| 'rad'

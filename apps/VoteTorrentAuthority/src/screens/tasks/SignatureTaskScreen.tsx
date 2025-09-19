@@ -2,14 +2,14 @@ import { ScrollView, StyleSheet, View } from "react-native";
 import { globalStyles } from "../../theme/styles";
 import type {
 	SignatureTask,
-	AdministrationSignatureTask,
+	AdminSignatureTask,
 	AuthoritySignatureTask,
 	NetworkSignatureTask,
 	ElectionSignatureTask,
 	ElectionRevisionSignatureTask,
 	BallotSignatureTask,
 } from "@votetorrent/vote-core";
-import { AdministrationSignatureTaskDetails } from "./components/AdministrationSignatureTaskDetails";
+import { AdminSignatureTaskDetails } from "./components/AdminSignatureTaskDetails";
 import { AuthoritySignatureTaskDetails } from "./components/AuthoritySignatureTaskDetails";
 import { NetworkSignatureTaskDetails } from "./components/NetworkSignatureTaskDetails";
 import { ElectionSignatureTaskDetails } from "./components/ElectionSignatureTaskDetails";
@@ -39,8 +39,8 @@ export default function SignatureTaskScreen() {
 	return (
 		<View style={styles.content}>
 			<ScrollView style={styles.container}>
-				{task.signatureType === "administration" && (
-					<AdministrationSignatureTaskDetails task={task as AdministrationSignatureTask} />
+				{task.signatureType === "admin" && (
+					<AdminSignatureTaskDetails task={task as AdminSignatureTask} />
 				)}
 				{task.signatureType === "authority" && (
 					<AuthoritySignatureTaskDetails task={task as AuthoritySignatureTask} />

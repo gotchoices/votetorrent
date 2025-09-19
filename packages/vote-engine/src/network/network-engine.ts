@@ -13,22 +13,22 @@ import type {
 	InvitationAction,
 	SID,
 	Proposal,
-	NetworkRevisionInit,
+	NetworkInit,
+	Network,
 } from '@votetorrent/vote-core';
 import type {
 	ElectionInit,
 	ElectionSummary,
 } from '@votetorrent/vote-core/dist/src/election/models';
 import type { IElectionEngine } from '@votetorrent/vote-core/dist/src/election/types';
+import { EngineContext } from '../types';
 
 export class NetworkEngine implements INetworkEngine {
-	protected constructor(
+	constructor(
 		public readonly init: NetworkReference,
-		/** The local storage to use for the network */
-		private readonly localStorage: ILocalStorage
-	) /** The key network to access */
-	//private readonly keyNetwork: IKeyNetwork
-	{}
+		private readonly localStorage: ILocalStorage,
+		private readonly ctx: EngineContext
+	) {}
 
 	createElection(election: ElectionInit): Promise<void> {
 		throw new Error('Not implemented');
@@ -65,8 +65,24 @@ export class NetworkEngine implements INetworkEngine {
 		throw new Error('Not implemented');
 	}
 
-	getNetworkSummary(): Promise<NetworkSummary> {
-		throw new Error('Not implemented');
+	async getNetworkSummary(): Promise<NetworkSummary> {
+		try {
+			const network = await this.ctx.db.prepare(`select 1 from Network`).get()[
+				'result'
+			];
+			const primaryAuthority = await this.ctx.db
+				.prepare(`select 1 from Authority where Sid = :sid`)
+				.get([network.primaryAuthoritySid])['result'];
+			return {
+				sid: network.sid,
+				hash: network.hash,
+				name: network.name,
+				imageUrl: network.imageRef?.url,
+				primaryAuthorityDomainName: primaryAuthority.domainName,
+			};
+		} catch (error) {
+			throw new Error('Network not found');
+		}
 	}
 
 	async getPinnedAuthorities(): Promise<Authority[]> {
@@ -110,7 +126,7 @@ export class NetworkEngine implements INetworkEngine {
 		);
 	}
 
-	proposeRevision(revision: NetworkRevisionInit): Promise<void> {
+	proposeRevision(revision: NetworkInit): Promise<void> {
 		throw new Error('Not implemented');
 	}
 

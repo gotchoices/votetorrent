@@ -1,8 +1,8 @@
 import type {
-	AdministrationDetails,
-	AdministrationInit,
-	AdministratorInit,
-	AdministratorInvitationContent,
+	AdminDetails,
+	AdminInit,
+	OfficerInit,
+	OfficerInvitationContent,
 	Authority,
 	AuthorityDetails,
 	AuthorityInvitation,
@@ -19,18 +19,22 @@ import type { EngineContext } from '../types';
 import { sha256 } from '@noble/hashes/sha2';
 
 export class AuthorityEngine implements IAuthorityEngine {
-	constructor(private authority: Authority, private ctx: EngineContext) {}
+	constructor(private authority: Authority, private ctx: EngineContext) {
+		this.invitationSpanMinutes = 60;
+	}
 
-	createAdministratorInvitation(
-		init: AdministratorInit
-	): InvitationEnvelope<AdministratorInvitationContent> {
+	private invitationSpanMinutes: number;
+
+	createOfficerInvitation(
+		init: OfficerInit
+	): InvitationEnvelope<OfficerInvitationContent> {
 		//create invitation key pair
 		const invitePrivate = secp256k1.utils.randomSecretKey().toString();
 		const inviteKey = secp256k1.getPublicKey(invitePrivate).toString();
 
-		const type = 'ad';
+		const type = 'of';
 		const expiration = Temporal.Now.plainDateTimeISO('UTC')
-			.add({ minutes: this.ctx.config.invitationSpanMinutes })
+			.add({ minutes: this.invitationSpanMinutes })
 			.toString();
 
 		const signedBytes = new TextEncoder().encode(
@@ -76,7 +80,7 @@ export class AuthorityEngine implements IAuthorityEngine {
 
 		const type = 'au';
 		const expiration = Temporal.Now.plainDateTimeISO('UTC')
-			.add({ minutes: this.ctx.config.invitationSpanMinutes })
+			.add({ minutes: this.invitationSpanMinutes })
 			.toString();
 		const signedBytes = new TextEncoder().encode(type + name + expiration);
 		const inviteSignature = secp256k1
@@ -104,7 +108,13 @@ export class AuthorityEngine implements IAuthorityEngine {
 		};
 	}
 
-	async getAdministrationDetails(): Promise<AdministrationDetails> {
+	async getAdminDetails(): Promise<AdminDetails> {
+		// try {
+		// 	const admin = await this.ctx.db.prepare(`select 1 from Admin where AuthoritySid = :sid`).get([this.authority.sid])['result'];
+		// 	return admin as AdminDetails;
+		// } catch (error) {
+		// 	throw new Error('Failed to get admin details');
+		// }
 		throw new Error('Not implemented');
 	}
 
@@ -118,14 +128,12 @@ export class AuthorityEngine implements IAuthorityEngine {
 		throw new Error('Not implemented');
 	}
 
-	async proposeAdministration(
-		administration: Proposal<AdministrationInit>
-	): Promise<void> {
+	async proposeAdmin(admin: Proposal<AdminInit>): Promise<void> {
 		throw new Error('Not implemented');
 	}
 
-	async saveAdministratorInvite(
-		invitation: InvitationSigned<AdministratorInvitationContent>
+	async saveAdminInvite(
+		invitation: InvitationSigned<OfficerInvitationContent>
 	): Promise<void> {
 		try {
 			await this.ctx.db.exec(
@@ -162,7 +170,7 @@ export class AuthorityEngine implements IAuthorityEngine {
 				}
 			);
 		} catch (error) {
-			throw new Error('Failed to save administrator invitation');
+			throw new Error('Failed to save officer invitation');
 		}
 	}
 

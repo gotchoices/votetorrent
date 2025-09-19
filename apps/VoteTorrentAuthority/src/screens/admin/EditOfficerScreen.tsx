@@ -1,11 +1,11 @@
 import { ExtendedTheme, useTheme } from "@react-navigation/native";
 import React, { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ScrollView, StyleSheet, View, Switch, Image } from "react-native";
+import { ScrollView, StyleSheet, View, Switch } from "react-native";
 import { ThemedText } from "../../components/ThemedText";
 import { ChipButton } from "../../components/ChipButton";
 import { CustomButton } from "../../components/CustomButton";
-import type { Administrator, Authority, Scope } from "@votetorrent/vote-core";
+import type { Authority, Officer, Scope } from "@votetorrent/vote-core";
 import { scopeDescriptions } from "@votetorrent/vote-core";
 import { useRoute, useNavigation } from "@react-navigation/native";
 import { useApp } from "../../providers/AppProvider";
@@ -15,41 +15,38 @@ import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { CustomTextInput } from "../../components/CustomTextInput";
 import { globalStyles } from "../../theme/styles";
 
-export default function EditAdministratorScreen() {
+export default function EditOfficerScreen() {
 	const { colors } = useTheme() as ExtendedTheme;
 	const { t } = useTranslation();
-	const { authority, administratorSid } = useRoute().params as {
+	const { authority, officerSid } = useRoute().params as {
 		authority: Authority;
-		administratorSid?: string;
+		officerSid?: string;
 	};
 	const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 	const { networkEngine } = useApp();
 	const [name, setName] = useState("");
 	const [title, setTitle] = useState("");
 	const [scopes, setScopes] = useState<Scope[]>([]);
-	const [administrator, setAdministrator] = useState<Administrator | null>(null);
-	const [inviteId, setInviteId] = useState("ssFfe4G23kr89"); //TODO: create invite id
+	const [officer, setOfficer] = useState<Officer | null>(null);
 
 	useEffect(() => {
-		async function loadAdministrator() {
-			if (!networkEngine || !administratorSid) return;
+		async function loadOfficer() {
+			if (!networkEngine || !officerSid) return;
 			try {
-				const administration = await networkEngine.getAdministration(authority.sid);
-				const foundAdministrator = administration.administrators.find(
-					(a: Administrator) => a.sid === administratorSid
-				);
-				if (foundAdministrator) {
-					setAdministrator(foundAdministrator);
-					setName(foundAdministrator.name);
-					setTitle(foundAdministrator.title);
-					setScopes(foundAdministrator.scopes);
+				const admin = await networkEngine.getAdmin(authority.sid);
+				const foundOfficer = admin.officers.find((a: Officer) => a.userSid === officerSid);
+				if (foundOfficer) {
+					setOfficer(foundOfficer);
+					setName(foundOfficer.name);
+					setTitle(foundOfficer.title);
+					setScopes(foundOfficer.scopes);
 				}
 			} catch (error) {
-				console.error("Error loading administrator:", error);
+				console.error("Error loading officer:", error);
 			}
 		}
-		loadAdministrator();
-	}, [networkEngine, authority.sid, administratorSid]);
+		loadOfficer();
+	}, [networkEngine, authority.sid, officerSid]);
 
 	useEffect(() => {
 		navigation.setOptions({
@@ -58,23 +55,23 @@ export default function EditAdministratorScreen() {
 					label={t("remove")}
 					icon="trash"
 					onPress={() => {
-						// If we're editing an existing administrator, pass back the remove flag
-						if (administrator) {
+						// If we're editing an existing officer, pass back the remove flag
+						if (officer) {
 							// Set the params on the previous screen and go back
-							navigation.popTo("ReplaceAdministration", {
+							navigation.popTo("ReplaceAdmin", {
 								authority,
-								administrator,
-								removeAdministrator: true,
+								officer,
+								removeOfficer: true,
 							});
 						} else {
-							// For new administrators, just go back without any changes
+							// For new officers, just go back without any changes
 							navigation.goBack();
 						}
 					}}
 				/>
 			),
 		});
-	}, [navigation, t, administrator, authority]);
+	}, [navigation, t, officer, authority]);
 
 	const handleScopeToggle = (scope: Scope) => {
 		setScopes((prev) => {
@@ -86,22 +83,19 @@ export default function EditAdministratorScreen() {
 		});
 	};
 
-	const handleAddAdministrator = async () => {
+	const handleAddOfficer = async () => {
 		try {
-			const newAdministrator: Administrator = {
-				sid: administrator?.sid || `admin-${Date.now()}`,
-				key: administrator?.key || "",
-				name,
+			const newOfficer: Officer = {
+				userSid: officer?.userSid || `admin-${Date.now()}`,
 				title,
 				scopes,
-				signatures: administrator?.signatures || [],
-				invitationCid: administrator?.invitationCid,
+				signature: officer?.signature || { signature: "", signerKey: "" },
 			};
 
-			// Pass the administrator back to ReplaceAdministrationScreen
-			navigation.popTo("ReplaceAdministration", { authority, administrator: newAdministrator });
+			// Pass the officer back to ReplaceAdminScreen
+			navigation.popTo("ReplaceAdmin", { authority, officer: newOfficer });
 		} catch (error) {
-			console.error("Error adding administrator:", error);
+			console.error("Error adding officer:", error);
 		}
 	};
 
@@ -110,27 +104,11 @@ export default function EditAdministratorScreen() {
 			<ScrollView style={styles.container}>
 				<View style={styles.section}>
 					<ThemedText type="title" style={styles.sectionTitle}>
-						{t("administrator")}
+						{t("officer")}
 					</ThemedText>
-
-					{administrator?.key && (
-						<View style={styles.detail}>
-							<ThemedText type="defaultSemiBold">
-								{t("publicKey")}: {administrator.key}
-							</ThemedText>
-						</View>
-					)}
 
 					<CustomTextInput title={t("name")} value={name} onChangeText={setName} />
 					<CustomTextInput title={t("title")} value={title} onChangeText={setTitle} />
-
-					{!administrator?.key && (
-						<View>
-							<ThemedText type="defaultSemiBold">
-								{t("inviteId")}: {inviteId}
-							</ThemedText>
-						</View>
-					)}
 				</View>
 
 				<View style={styles.section}>
@@ -166,7 +144,7 @@ export default function EditAdministratorScreen() {
 					disabled={!name || !title}
 					backgroundColor={colors.success}
 					forceDarkText={true}
-					onPress={handleAddAdministrator}
+					onPress={handleAddOfficer}
 				/>
 			</View>
 		</View>

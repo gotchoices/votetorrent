@@ -5,30 +5,27 @@ import { useTranslation } from "react-i18next";
 import { StyleSheet, View } from "react-native";
 import { ThemedText } from "./ThemedText";
 import { CustomButton } from "./CustomButton";
-import type { AdministrationDetails, INetworkEngine } from "@votetorrent/vote-core";
+import type { AdminDetails, INetworkEngine } from "@votetorrent/vote-core";
 import { globalStyles } from "../theme/styles";
 import { useApp } from "../providers/AppProvider";
 
-interface DetailedAdmin {
+interface DetailedOfficer {
 	userSid: string;
 	name: string;
 	isSigned: boolean;
 }
 
 interface AuthorizationSectionProps {
-	administration: AdministrationDetails | null;
-	signedAdministratorSids?: string[];
+	admin: AdminDetails | null;
+	signedOfficerSids?: string[];
 }
 
-export function AuthorizationSection({
-	administration,
-	signedAdministratorSids,
-}: AuthorizationSectionProps) {
+export function AuthorizationSection({ admin, signedOfficerSids }: AuthorizationSectionProps) {
 	const { t } = useTranslation();
 	const { colors } = useTheme() as ExtendedTheme;
 	const { getEngine } = useApp();
 	const [networkEngine, setNetworkEngine] = useState<INetworkEngine | null>(null);
-	const [detailedAdministrators, setDetailedAdministrators] = useState<DetailedAdmin[]>([]);
+	const [detailedOfficers, setDetailedOfficers] = useState<DetailedOfficer[]>([]);
 
 	useEffect(() => {
 		const loadData = async () => {
@@ -36,30 +33,28 @@ export function AuthorizationSection({
 				const engine = await getEngine<INetworkEngine>("network");
 				setNetworkEngine(engine);
 
-				if (engine && administration && administration.administration) {
-					const adminDetailsPromises = administration.administration.administrators.map(
-						async (admin) => {
-							const userEngine = await engine.getUser(admin.userSid);
-							const user = await userEngine?.getSummary();
-							return {
-								userSid: admin.userSid,
-								name: user?.name || t("unknownUser"),
-								isSigned: signedAdministratorSids?.includes(admin.userSid) ?? false,
-							};
-						}
-					);
-					const resolvedAdminDetails = await Promise.all(adminDetailsPromises);
-					setDetailedAdministrators(resolvedAdminDetails);
+				if (engine && admin && admin.admin) {
+					const officerDetailsPromises = admin.admin.officers.map(async (officer) => {
+						const userEngine = await engine.getUser(officer.userSid);
+						const user = await userEngine?.getSummary();
+						return {
+							userSid: officer.userSid,
+							name: user?.name || t("unknownUser"),
+							isSigned: signedOfficerSids?.includes(officer.userSid) ?? false,
+						};
+					});
+					const resolvedAdminDetails = await Promise.all(officerDetailsPromises);
+					setDetailedOfficers(resolvedAdminDetails);
 				} else {
-					setDetailedAdministrators([]);
+					setDetailedOfficers([]);
 				}
 			} catch (error) {
 				console.error("Failed to load network or user details:", error);
-				setDetailedAdministrators([]);
+				setDetailedOfficers([]);
 			}
 		};
 		loadData();
-	}, [getEngine, administration, signedAdministratorSids, t]);
+	}, [getEngine, admin, signedOfficerSids, t]);
 
 	return (
 		<View style={styles.section}>
@@ -73,14 +68,14 @@ export function AuthorizationSection({
 			/>
 			<View style={styles.authorizationBlock}>
 				<View style={styles.adminChecks}>
-					{detailedAdministrators.map((adminDetail) => (
-						<View key={adminDetail.userSid} style={styles.adminCheck}>
+					{detailedOfficers.map((officerDetail) => (
+						<View key={officerDetail.userSid} style={styles.adminCheck}>
 							<FontAwesome6
-								name={adminDetail.isSigned ? "check-circle" : "circle"}
+								name={officerDetail.isSigned ? "check-circle" : "circle"}
 								size={24}
 								color={colors.text}
 							/>
-							<ThemedText style={styles.adminCheckText}>{adminDetail.name}</ThemedText>
+							<ThemedText style={styles.adminCheckText}>{officerDetail.name}</ThemedText>
 						</View>
 					))}
 				</View>

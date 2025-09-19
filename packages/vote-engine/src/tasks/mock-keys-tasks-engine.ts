@@ -5,7 +5,6 @@ import {
 	ElectionType, // Import as value for enum usage
 } from '@votetorrent/vote-core';
 import type {
-	AdornedNetworkReference,
 	ElectionDetails,
 	SID,
 	ElectionCore,
@@ -32,11 +31,6 @@ const MOCK_NETWORK_REFERENCE: NetworkReference = {
 	hash: 'as43GaFf',
 	relays: ['/ip4/127.0.0.1/tcp/4001/p2p/mock-peer-id'],
 	imageUrl: 'https://picsum.photos/500/500?random=2',
-};
-
-// Mock AdornedNetworkReference
-const MOCK_ADORNED_NETWORK_REFERENCE: AdornedNetworkReference = {
-	...MOCK_NETWORK_REFERENCE,
 	name: 'Republican Primary Election',
 	primaryAuthorityDomainName: 'Utah State Republican Party',
 };
@@ -60,7 +54,7 @@ const MOCK_KEYHOLDER_INVITATION_CONTENT: KeyholderInvitationContent = {
 // Mock InvitationSlot for KeyholderInvitationContent (used within KeyholderInvitation)
 const MOCK_KH_INV_CONTENT_SLOT: InvitationSlot<KeyholderInvitationContent> = {
 	invite: MOCK_KEYHOLDER_INVITATION_CONTENT,
-	type: 'KeyholderInvitationContentSlot', // A descriptive type for this specific slot structure
+	type: 'k', // A descriptive type for this specific slot structure
 	expiration: MOCK_TIMESTAMP + 1000 * 60 * 60 * 24 * 7, // 7 days
 };
 
@@ -76,7 +70,7 @@ const MOCK_KEYHOLDER_INVITATION: KeyholderInvitation = {
 const MOCK_KEYHOLDER_INVITATION_SLOT_FOR_STATUS: InvitationSlot<KeyholderInvitation> =
 	{
 		invite: MOCK_KEYHOLDER_INVITATION, // The actual KeyholderInvitation
-		type: 'Keyholder', // Matches KeyholderInvitation.type
+		type: 'k', // Matches KeyholderInvitation.type
 		expiration: MOCK_TIMESTAMP + 1000 * 60 * 60 * 24 * 14, // 14 days
 	};
 
@@ -145,7 +139,7 @@ const MOCK_ELECTION_DETAILS: ElectionDetails = {
 // Mock ReleaseKeyTask
 const MOCK_RELEASE_KEY_TASK_1: ReleaseKeyTask = {
 	type: 'release-key',
-	network: MOCK_ADORNED_NETWORK_REFERENCE,
+	network: MOCK_NETWORK_REFERENCE,
 	election: MOCK_ELECTION_DETAILS,
 	userSid: MOCK_USER_SID,
 };
@@ -153,7 +147,7 @@ const MOCK_RELEASE_KEY_TASK_1: ReleaseKeyTask = {
 const MOCK_RELEASE_KEY_TASK_2: ReleaseKeyTask = {
 	type: 'release-key',
 	network: {
-		...MOCK_ADORNED_NETWORK_REFERENCE,
+		...MOCK_NETWORK_REFERENCE,
 		hash: 'sdj36fF',
 		name: 'Utah State Elections',
 	},

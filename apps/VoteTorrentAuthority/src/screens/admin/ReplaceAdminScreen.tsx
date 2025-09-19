@@ -7,81 +7,81 @@ import { ChipButton } from "../../components/ChipButton";
 import { CustomButton } from "../../components/CustomButton";
 import { InfoCard } from "../../components/InfoCard";
 import type { RootStackParamList } from "../../navigation/types";
-import type { Authority, Administrator, Administration } from "@votetorrent/vote-core";
+import type { Authority, Officer, Admin } from "@votetorrent/vote-core";
 import { useRoute, useNavigation } from "@react-navigation/native";
 import { useApp } from "../../providers/AppProvider";
 import { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { globalStyles } from "../../theme/styles";
 
-export default function ReplaceAdministrationScreen() {
+export default function ReplaceAdminScreen() {
 	const { colors } = useTheme() as ExtendedTheme;
 	const colorScheme = useColorScheme();
 	const { t } = useTranslation();
-	const { authority, administrator, removeAdministrator } = useRoute().params as {
+	const { authority, officer, removeOfficer } = useRoute().params as {
 		authority: Authority;
-		administrator?: Administrator;
-		removeAdministrator?: boolean;
+		officer?: Officer;
+		removeOfficer?: boolean;
 	};
 	const { networkEngine } = useApp();
-	const [currentAdministration, setCurrentAdministration] = useState<Administration | null>(null);
-	const [proposedAdministrators, setProposedAdministrators] = useState<Administrator[]>([]);
+	const [currentAdmin, setCurrentAdmin] = useState<Admin | null>(null);
+	const [proposedOfficers, setProposedOfficers] = useState<Officer[]>([]);
 	const [isLoading, setIsLoading] = useState(true);
 	const [hasLoadedInitialData, setHasLoadedInitialData] = useState(false);
 	const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 
 	useEffect(() => {
-		async function loadAdministration() {
+		async function loadAdmin() {
 			if (!networkEngine) return;
 			try {
 				setIsLoading(true);
-				const administration = await networkEngine.getAdministration(authority.sid);
-				console.log("Loaded administration:", administration);
-				setCurrentAdministration(administration);
-				// Only set proposed administrators if we haven't loaded initial data
+				const admin = await networkEngine.getAdmin(authority.sid);
+				console.log("Loaded admin:", admin);
+				setCurrentAdmin(admin);
+				// Only set proposed officers if we haven't loaded initial data
 				if (!hasLoadedInitialData) {
-					setProposedAdministrators(administration.administrators);
+					setProposedOfficers(admin.officers);
 					setHasLoadedInitialData(true);
 				}
 			} catch (error) {
-				console.error("Error loading administration:", error);
+				console.error("Error loading admin:", error);
 			} finally {
 				setIsLoading(false);
 			}
 		}
-		loadAdministration();
+		loadAdmin();
 	}, [networkEngine, authority]);
 
 	useEffect(() => {
-		if (administrator) {
-			if (removeAdministrator) {
-				// Remove the administrator from the list
-				setProposedAdministrators((current) => {
+		if (officer) {
+			if (removeOfficer) {
+				// Remove the officer from the list
+				setProposedOfficers((current) => {
 					console.log("Before removal - Current list:", current);
-					console.log("Current administration:", currentAdministration);
-					const filtered = current.filter((a) => a.sid !== administrator.sid);
+					console.log("Current admin:", currentAdmin);
+					const filtered = current.filter((a) => a.sid !== officer.sid);
 					console.log("After removal - New list:", filtered);
 					return filtered;
 				});
 			} else {
-				// Add or update the administrator
-				setProposedAdministrators((current) => {
+				// Add or update the officer
+				setProposedOfficers((current) => {
 					console.log("Before add/update - Current list:", current);
-					// If editing an existing administrator, replace it
-					const existingIndex = current.findIndex((a) => a.sid === administrator.sid);
+					// If editing an existing officer, replace it
+					const existingIndex = current.findIndex((a) => a.sid === officer.sid);
 					if (existingIndex >= 0) {
-						const newAdministrators = [...current];
-						newAdministrators[existingIndex] = administrator;
-						console.log("After update - New list:", newAdministrators);
-						return newAdministrators;
+						const newOfficers = [...current];
+						newOfficers[existingIndex] = officer;
+						console.log("After update - New list:", newOfficers);
+						return newOfficers;
 					}
-					// If adding a new administrator, append it
-					const newList = [...current, administrator];
+					// If adding a new officer, append it
+					const newList = [...current, officer];
 					console.log("After add - New list:", newList);
 					return newList;
 				});
 			}
 		}
-	}, [administrator, removeAdministrator]);
+	}, [officer, removeOfficer]);
 
 	if (!networkEngine || isLoading) {
 		return (
@@ -91,22 +91,22 @@ export default function ReplaceAdministrationScreen() {
 		);
 	}
 
-	const handleEditAdministrator = (administrator?: Administrator) => {
-		navigation.navigate("EditAdministrator", {
+	const handleEditOfficer = (officer?: Officer) => {
+		navigation.navigate("EditOfficer", {
 			authority: authority,
-			administratorSid: administrator?.sid,
+			officerSid: officer?.sid,
 		});
 	};
 
 	const handleCreateProposal = async () => {
 		try {
-			const newAdministration: Administration = {
+			const newAdmin: Admin = {
 				sid: "",
 				authoritySid: authority.sid,
-				administrators: proposedAdministrators,
+				officers: proposedOfficers,
 				expiration: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).getTime(), // 30 days from now
 			};
-			await networkEngine.setProposedAdministration(authority.sid, newAdministration);
+			await networkEngine.setProposedAdmin(authority.sid, newAdmin);
 			navigation.popTo("AuthorityDetails", { authority });
 		} catch (error) {
 			console.error("Error creating proposal:", error);
@@ -121,7 +121,7 @@ export default function ReplaceAdministrationScreen() {
 				</ThemedText>
 
 				<View style={styles.section}>
-					{proposedAdministrators.map((admin) => (
+					{proposedOfficers.map((admin) => (
 						<InfoCard
 							key={admin.sid}
 							title={admin.name}
@@ -131,15 +131,11 @@ export default function ReplaceAdministrationScreen() {
 								{ label: t("sid"), value: admin.sid },
 							]}
 							icon="pen"
-							onPress={() => handleEditAdministrator(admin)}
+							onPress={() => handleEditOfficer(admin)}
 						/>
 					))}
 					<View style={styles.addButtonContainer}>
-						<ChipButton
-							label={t("addAdministrator")}
-							icon="circle-plus"
-							onPress={handleEditAdministrator}
-						/>
+						<ChipButton label={t("addOfficer")} icon="circle-plus" onPress={handleEditOfficer} />
 					</View>
 				</View>
 			</ScrollView>

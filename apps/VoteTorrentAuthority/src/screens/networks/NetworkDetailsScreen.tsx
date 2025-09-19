@@ -4,13 +4,12 @@ import { ThemedText } from "../../components/ThemedText";
 import { useTranslation } from "react-i18next";
 import { ExtendedTheme, useRoute, useTheme } from "@react-navigation/native";
 import {
-	AdornedNetworkReference,
-	AdministrationDetails,
+	NetworkReference,
+	AdminDetails,
 	AuthorityDetails,
 	IAuthorityEngine,
 	INetworkEngine,
 	NetworkDetails,
-	NetworkReference,
 } from "@votetorrent/vote-core";
 import { CustomButton } from "../../components/CustomButton";
 import { useEffect, useState } from "react";
@@ -19,13 +18,12 @@ import NetworkDetailsComponent from "./components/NetworkDetailsComponent";
 import { AuthorizationSection } from "../../components/AuthorizationSection";
 
 export function NetworkDetailsScreen() {
-	const { networkRef } = useRoute().params as { networkRef: AdornedNetworkReference };
+	const { networkRef } = useRoute().params as { networkRef: NetworkReference };
 	const [networkEngine, setNetworkEngine] = useState<INetworkEngine>();
 	const [networkDetails, setNetworkDetails] = useState<NetworkDetails>();
 	const [primaryAuthorityEngine, setPrimaryAuthorityEngine] = useState<IAuthorityEngine>();
 	const [primaryAuthorityDetails, setPrimaryAuthorityDetails] = useState<AuthorityDetails>();
-	const [primaryAuthorityAdministration, setPrimaryAuthorityAdministration] =
-		useState<AdministrationDetails>();
+	const [primaryAuthorityAdmin, setPrimaryAuthorityAdmin] = useState<AdminDetails>();
 	const { getEngine } = useApp();
 	const { t } = useTranslation();
 	const { colors } = useTheme() as ExtendedTheme;
@@ -55,9 +53,9 @@ export function NetworkDetailsScreen() {
 				setPrimaryAuthorityEngine(authorityEngine);
 				const details = await authorityEngine.getDetails();
 				setPrimaryAuthorityDetails(details);
-				const administration = await authorityEngine.getAdministrationDetails();
+				const administration = await authorityEngine.getAdminDetails();
 				console.log("administration", administration);
-				setPrimaryAuthorityAdministration(administration);
+				setPrimaryAuthorityAdmin(administration);
 			} catch (error) {
 				console.error("Failed to load primary authority details:", error);
 			}
@@ -68,7 +66,7 @@ export function NetworkDetailsScreen() {
 	return (
 		<ScrollView style={styles.container}>
 			<View style={styles.section}>
-				<ThemedText type="header">{networkDetails?.current.name}</ThemedText>
+				<ThemedText type="header">{networkDetails?.network.name}</ThemedText>
 				<CustomButton
 					title={t("select")}
 					icon="chevron-left"
@@ -117,9 +115,9 @@ export function NetworkDetailsScreen() {
 				</View>
 			)}
 
-			{networkDetails?.proposed && primaryAuthorityAdministration && (
+			{networkDetails?.proposed && primaryAuthorityAdmin && (
 				<View style={styles.section}>
-					<AuthorizationSection administration={primaryAuthorityAdministration} />
+					<AuthorizationSection admin={primaryAuthorityAdmin} />
 				</View>
 			)}
 		</ScrollView>

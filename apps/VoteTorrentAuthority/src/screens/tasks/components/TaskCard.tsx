@@ -5,7 +5,7 @@ import { Image, TouchableOpacity } from "react-native";
 import { ThemedText } from "../../../components/ThemedText";
 import FontAwesome6 from "react-native-vector-icons/FontAwesome6";
 import {
-	AdministrationSignatureTask,
+	AdminSignatureTask,
 	AuthoritySignatureTask,
 	BallotSignatureTask,
 	ElectionRevisionSignatureTask,
@@ -41,8 +41,8 @@ export function TaskCard({ task, onPress }: TaskCardProps) {
 			if (task.type === "signature") {
 				let tempTask;
 				switch (task.signatureType) {
-					case "administration":
-						tempTask = task as AdministrationSignatureTask;
+					case "admin":
+						tempTask = task as AdminSignatureTask;
 						setTitle(tempTask.authority.name);
 						setSubtitle(t("administrationRevision"));
 						setImageUrl(tempTask.authority.imageRef?.url);

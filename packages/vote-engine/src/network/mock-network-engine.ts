@@ -1,5 +1,4 @@
 import type {
-	AdornedNetworkReference,
 	Authority,
 	Cursor,
 	HostingProvider,
@@ -11,12 +10,11 @@ import type {
 	NetworkDetails,
 	NetworkInfrastructure,
 	NetworkReference,
-	NetworkRevision,
-	NetworkRevisionInit,
 	NetworkSummary,
 	Proposal,
 	SID,
 	ElectionType,
+	NetworkRevision,
 } from '@votetorrent/vote-core';
 import {
 	MOCK_AUTHORITIES,
@@ -36,7 +34,7 @@ import type {
 import type { IElectionEngine } from '@votetorrent/vote-core/dist/src/election/types';
 
 export class MockNetworkEngine implements INetworkEngine {
-	private currentNetworkReference: AdornedNetworkReference;
+	private currentNetworkReference: NetworkReference;
 	private mockNetworkDetails?: NetworkDetails;
 	private pinnedAuthorities: Authority[] = [];
 
@@ -51,31 +49,32 @@ export class MockNetworkEngine implements INetworkEngine {
 				const basicNetwork: Network = {
 					hash: matchedNetwork.hash,
 					sid: generateSid('net'),
-					signature: {
-						signature: 'mock-signature-1',
-						signerKey: 'mock-signer-key-1',
-					},
-				};
-				const basicRevision: NetworkRevision = {
-					networkSid: basicNetwork.sid,
-					revision: 1,
-					timestamp: Date.now(),
+					primaryAuthoritySid: generateSid('auth'),
 					name: matchedNetwork.name,
-					imageRef: { url: matchedNetwork.imageUrl },
 					relays: matchedNetwork.relays,
 					policies: {
 						numberRequiredTSAs: 0,
 						timestampAuthorities: [],
 						electionType: 'adhoc' as ElectionType,
 					},
-					signature: {
-						signature: 'mock-signature-1',
-						signerKey: 'mock-signer-key-1',
+				};
+				const basicNetworkRevision: NetworkRevision = {
+					name: matchedNetwork.name,
+					relays: matchedNetwork.relays,
+					policies: {
+						numberRequiredTSAs: 0,
+						timestampAuthorities: [],
+						electionType: 'adhoc' as ElectionType,
 					},
+				};
+				const basicNetworkRevisionProposal: Proposal<NetworkRevision> = {
+					proposed: basicNetworkRevision,
+					timestamp: Date.now(),
+					signatures: [],
 				};
 				this.mockNetworkDetails = {
 					network: basicNetwork,
-					current: basicRevision,
+					proposed: basicNetworkRevisionProposal,
 				};
 			}
 		} else {
@@ -89,31 +88,32 @@ export class MockNetworkEngine implements INetworkEngine {
 			const basicNetwork: Network = {
 				hash: this.currentNetworkReference.hash,
 				sid: generateSid('net'),
-				signature: {
-					signature: 'mock-signature-1',
-					signerKey: 'mock-signer-key-1',
-				},
-			};
-			const basicRevision: NetworkRevision = {
-				networkSid: basicNetwork.sid,
-				revision: 1,
-				timestamp: Date.now(),
+				primaryAuthoritySid: generateSid('auth'),
 				name: this.currentNetworkReference.name,
-				imageRef: { url: this.currentNetworkReference.imageUrl },
 				relays: this.currentNetworkReference.relays,
 				policies: {
 					numberRequiredTSAs: 0,
 					timestampAuthorities: [],
 					electionType: 'adhoc' as ElectionType,
 				},
-				signature: {
-					signature: 'mock-signature-1',
-					signerKey: 'mock-signer-key-1',
+			};
+			const basicNetworkRevision: NetworkRevision = {
+				name: this.currentNetworkReference.name,
+				relays: this.currentNetworkReference.relays,
+				policies: {
+					numberRequiredTSAs: 0,
+					timestampAuthorities: [],
+					electionType: 'adhoc' as ElectionType,
 				},
+			};
+			const basicNetworkRevisionProposal: Proposal<NetworkRevision> = {
+				proposed: basicNetworkRevision,
+				timestamp: Date.now(),
+				signatures: [],
 			};
 			this.mockNetworkDetails = {
 				network: basicNetwork,
-				current: basicRevision,
+				proposed: basicNetworkRevisionProposal,
 			};
 			console.warn(
 				`MockNetworkEngine: Initialized with hash '${init.hash}' not found in MOCK_NETWORKS. Providing minimal details.`
@@ -256,7 +256,7 @@ export class MockNetworkEngine implements INetworkEngine {
 		}
 	}
 
-	async proposeRevision(revision: NetworkRevisionInit): Promise<void> {
+	async proposeRevision(revision: NetworkRevision): Promise<void> {
 		if (
 			this.mockNetworkDetails &&
 			this.currentNetworkReference.hash ===

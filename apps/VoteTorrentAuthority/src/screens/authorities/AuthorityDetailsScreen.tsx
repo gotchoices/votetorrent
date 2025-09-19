@@ -6,12 +6,12 @@ import { InfoCard } from "../../components/InfoCard";
 import { ThemedText } from "../../components/ThemedText";
 import type {
 	Authority,
-	Administration,
+	Admin,
 	IAuthorityEngine,
 	INetworkEngine,
-	AdministrationDetails,
+	AdminDetails,
 	User,
-	Administrator,
+	Officer,
 } from "@votetorrent/vote-core";
 import { ExtendedTheme, useNavigation, useRoute, useTheme } from "@react-navigation/native";
 import { CustomButton } from "../../components/CustomButton";
@@ -31,11 +31,9 @@ export default function AuthorityDetailsScreen() {
 	const [networkEngine, setNetworkEngine] = useState<INetworkEngine | null>(null);
 	const [authorityEngine, setAuthorityEngine] = useState<IAuthorityEngine | null>(null);
 	const [pinned, setPinned] = useState(false);
-	const [administrationDetails, setAdministrationDetails] = useState<AdministrationDetails | null>(
-		null
-	);
-	const [administratorUsers, setAdministratorUsers] = useState<Map<string, User>>(new Map());
-	const [administrators, setAdministrators] = useState<Administrator[]>([]);
+	const [adminDetails, setAdminDetails] = useState<AdminDetails | null>(null);
+	const [officerUsers, setOfficerUsers] = useState<Map<string, User>>(new Map());
+	const [officers, setOfficers] = useState<Officer[]>([]);
 
 	const handlePinToggle = async () => {
 		try {
@@ -70,18 +68,18 @@ export default function AuthorityDetailsScreen() {
 		async function getAuthorityData() {
 			if (!networkEngine || !authorityEngine) {
 				setPinned(false);
-				setAdministrationDetails(null);
+				setAdminDetails(null);
 				return;
 			}
 			try {
 				const pinnedAuthorities = await networkEngine.getPinnedAuthorities();
 				setPinned(pinnedAuthorities.some((a: Authority) => a.sid === authority.sid));
-				const details = await authorityEngine.getAdministrationDetails();
-				setAdministrationDetails(details);
+				const details = await authorityEngine.getAdminDetails();
+				setAdminDetails(details);
 			} catch (error) {
 				console.error("Error checking pinned status:", error);
 				setPinned(false);
-				setAdministrationDetails(null);
+				setAdminDetails(null);
 			}
 		}
 		getAuthorityData();
@@ -89,32 +87,32 @@ export default function AuthorityDetailsScreen() {
 
 	useEffect(() => {
 		async function getUsers() {
-			if (!networkEngine || !administrationDetails) {
-				setAdministrators([]);
-				setAdministratorUsers(new Map());
+			if (!networkEngine || !adminDetails) {
+				setOfficers([]);
+				setOfficerUsers(new Map());
 				return;
 			}
 
 			try {
-				// Store the administrators list
-				setAdministrators(administrationDetails.administration.administrators);
+				// Store the officers list
+				setOfficers(adminDetails.admin.officers);
 
 				// Create mapping of userSid to User object
 				const userMap = new Map<string, User>();
 
-				// Get all userSids we need to fetch (both current and proposed existing administrators)
+				// Get all userSids we need to fetch (both current and proposed existing officers)
 				const userSids = new Set<string>();
 
-				// Add current administrators
-				administrationDetails.administration.administrators.forEach((admin) => {
+				// Add current officers
+				adminDetails.admin.officers.forEach((admin) => {
 					userSids.add(admin.userSid);
 				});
 
 				// Add proposed existing administrators
-				if (administrationDetails.proposed?.proposed.administrators) {
-					administrationDetails.proposed.proposed.administrators.forEach((adminSelection) => {
-						if (adminSelection.existing) {
-							userSids.add(adminSelection.existing.userSid);
+				if (adminDetails.proposed?.proposed.officers) {
+					adminDetails.proposed.proposed.officers.forEach((officerSelection) => {
+						if (officerSelection.existing) {
+							userSids.add(officerSelection.existing.userSid);
 						}
 					});
 				}
@@ -130,15 +128,15 @@ export default function AuthorityDetailsScreen() {
 					}
 				});
 				await Promise.all(userEnginePromises);
-				setAdministratorUsers(userMap);
+				setOfficerUsers(userMap);
 			} catch (error) {
 				console.error("Error fetching users:", error);
-				setAdministrators([]);
-				setAdministratorUsers(new Map());
+				setOfficers([]);
+				setOfficerUsers(new Map());
 			}
 		}
 		getUsers();
-	}, [networkEngine, administrationDetails]);
+	}, [networkEngine, adminDetails]);
 
 	useEffect(() => {
 		navigation.setOptions({
@@ -210,13 +208,13 @@ export default function AuthorityDetailsScreen() {
 			<View style={styles.section}>
 				<ThemedText type="title">{t("administration")}</ThemedText>
 
-				{administrationDetails?.administration.signatures && (
+				{adminDetails?.admin.signatures && (
 					<View>
 						<View style={styles.detail}>
 							<ThemedText type="defaultSemiBold">{t("handoffSignature")}: </ThemedText>
 						</View>
 						<View style={styles.subDetails}>
-							{administrationDetails.administration.signatures.map((signature) => (
+							{adminDetails.admin.signatures.map((signature) => (
 								<View style={styles.detail}>
 									<ThemedText type="default">{signature.signerKey}: </ThemedText>
 									<ThemedText>{signature.signature}</ThemedText>
@@ -227,40 +225,40 @@ export default function AuthorityDetailsScreen() {
 				)}
 				<View style={styles.detail}>
 					<ThemedText type="defaultSemiBold">{t("expires")}: </ThemedText>
-					<ThemedText>{formatDate(administrationDetails?.administration.expiration)}</ThemedText>
+					<ThemedText>{formatDate(adminDetails?.admin.expiration)}</ThemedText>
 				</View>
 
-				{administrators.map((admin) => {
-					const user = administratorUsers.get(admin.userSid);
+				{officers.map((officer) => {
+					const user = officerUsers.get(officer.userSid);
 					return (
 						<InfoCard
-							key={admin.userSid}
+							key={officer.userSid}
 							image={{ uri: user?.image.url || "" }}
 							title={user?.name || ""}
 							additionalInfo={[
 								{
 									label: t("title"),
-									value: admin.title,
+									value: officer.title,
 								},
-								{ label: t("sid"), value: admin.userSid },
+								{ label: t("sid"), value: officer.userSid },
 							]}
 							icon="chevron-right"
 							onPress={() =>
-								navigation.navigate("AdministratorDetails", {
-									administrator: admin,
+								navigation.navigate("OfficerDetails", {
+									officer: officer,
 								})
 							}
 						/>
 					);
 				})}
 
-				{!administrationDetails?.proposed && (
+				{!adminDetails?.proposed && (
 					<CustomButton
 						title={t("reviseAdministration")}
 						icon="pencil"
 						size="thin"
 						onPress={() =>
-							navigation.navigate("ReplaceAdministration", {
+							navigation.navigate("ReplaceAdmin", {
 								authority: authority,
 							})
 						}
@@ -268,33 +266,34 @@ export default function AuthorityDetailsScreen() {
 				)}
 			</View>
 
-			{administrationDetails?.proposed && (
+			{adminDetails?.proposed && (
 				<View>
 					<View style={styles.section}>
 						<ThemedText type="title">{t("proposedAdministration")}</ThemedText>
-						{administrationDetails.proposed.proposed.administrators.map((adminSelection) => {
-							const admin = adminSelection.existing || {
+						{adminDetails.proposed.proposed.officers.map((officerSelection) => {
+							const officer = officerSelection.existing || {
 								userSid: "",
-								title: adminSelection.init?.title || "",
-								scopes: adminSelection.init?.scopes || [],
+								title: officerSelection.init?.title || "",
+								scopes: officerSelection.init?.scopes || [],
+								signature: { signature: "", signerKey: "" },
 							};
-							const user = admin.userSid ? administratorUsers.get(admin.userSid) : undefined;
+							const user = officer.userSid ? officerUsers.get(officer.userSid) : undefined;
 							return (
 								<InfoCard
-									key={admin.userSid || adminSelection.init?.name}
+									key={officer.userSid || officerSelection.init?.name}
 									image={user?.image?.url ? { uri: user.image.url } : undefined}
-									title={user?.name || adminSelection.init?.name || ""}
+									title={user?.name || officerSelection.init?.name || ""}
 									additionalInfo={[
 										{
 											label: t("title"),
-											value: admin.title,
+											value: officer.title,
 										},
-										{ label: t("sid"), value: admin.userSid || t("pending") },
+										{ label: t("sid"), value: officer.userSid || t("pending") },
 									]}
 									icon="chevron-right"
 									onPress={() =>
-										navigation.navigate("AdministratorDetails", {
-											administrator: admin,
+										navigation.navigate("OfficerDetails", {
+											officer: officer,
 										})
 									}
 								/>
@@ -302,7 +301,7 @@ export default function AuthorityDetailsScreen() {
 						})}
 					</View>
 
-					<AuthorizationSection administration={administrationDetails} />
+					<AuthorizationSection admin={adminDetails} />
 				</View>
 			)}
 		</ScrollView>

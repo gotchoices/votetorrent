@@ -131,19 +131,19 @@ export class MockElectionsEngine implements IElectionsEngine {
 		console.log('Getting election history');
 		const now = getUnixTimestamp(new Date());
 		// Simple mock logic: history = elections with date in the past
-		return [...this.elections.values()].filter((e) => e.date < now);
+		return Array.from(this.elections.values()).filter((e) => e.date < now);
 	}
 
 	async getElections(): Promise<ElectionSummary[]> {
 		console.log('Getting active elections');
 		const now = getUnixTimestamp(new Date());
 		// Simple mock logic: active/pending = elections with date in the future
-		return [...this.elections.values()].filter((e) => e.date >= now);
+		return Array.from(this.elections.values()).filter((e) => e.date >= now);
 	}
 
 	async getProposedElections(): Promise<Proposal<ElectionInit>[]> {
 		console.log('Getting proposed elections');
-		return [...this.proposedElections.values()];
+		return Array.from(this.proposedElections.values());
 	}
 
 	async openElection(electionSid: SID): Promise<IElectionEngine> {

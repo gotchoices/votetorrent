@@ -66,8 +66,8 @@ export type InvitationAction<TInvokes, TSlot> = {
 	invitationSignature: string;
 };
 
-/** "au" for authority, "ad" for administrator, "k" for keyholder, "r" for registrant */
-export type InvitationType = 'au' | 'ad' | 'k' | 'r';
+/** "au" for authority, "of" for officer, "k" for keyholder, "r" for registrant */
+export type InvitationType = 'au' | 'of' | 'k' | 'r';
 
 export type InvitationContent = {
 	/** The type of the invitation */

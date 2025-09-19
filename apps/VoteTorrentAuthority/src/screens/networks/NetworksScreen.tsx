@@ -5,7 +5,7 @@ import { ScrollView, StyleSheet, TouchableOpacity, View } from "react-native";
 import { InfoCard } from "../../components/InfoCard";
 import { ThemedText } from "../../components/ThemedText";
 import { useApp } from "../../providers/AppProvider";
-import type { AdornedNetworkReference } from "@votetorrent/vote-core";
+import type { NetworkReference } from "@votetorrent/vote-core";
 import FontAwesome6 from "react-native-vector-icons/FontAwesome6";
 import type { NavigationProp } from "../../navigation/types";
 import { ChipButton } from "../../components/ChipButton";
@@ -17,7 +17,7 @@ export default function NetworksScreen() {
 	const { colors } = useTheme() as ExtendedTheme;
 	const { t } = useTranslation();
 	const { networksEngine } = useApp();
-	const [recentNetworkRefs, setRecentNetworkRefs] = useState<AdornedNetworkReference[]>([]);
+	const [recentNetworkRefs, setRecentNetworkRefs] = useState<NetworkReference[]>([]);
 	const navigation = useNavigation<NavigationProp>();
 
 	useEffect(() => {

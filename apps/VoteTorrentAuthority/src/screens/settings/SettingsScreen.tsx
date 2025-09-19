@@ -71,7 +71,7 @@ export default function SettingsScreen() {
 				return;
 			}
 			const networkDetails = await networkEngine.getDetails();
-			setCurrentNetwork(networkDetails.current.name);
+			setCurrentNetwork(networkDetails.network.name);
 		};
 		loadNetworkName();
 	}, [networkEngine]);

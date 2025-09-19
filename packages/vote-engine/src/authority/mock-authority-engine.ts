@@ -1,10 +1,10 @@
 import type {
-	AdministrationDetails,
-	AdministrationInit,
-	Administrator,
-	AdministratorInvitation,
-	AdministratorInvitationContent,
-	Administration,
+	AdminDetails,
+	AdminInit,
+	Officer,
+	OfficerInvitation,
+	OfficerInvitationContent,
+	Admin,
 	Authority,
 	AuthorityDetails,
 	AuthorityInvitation,
@@ -16,6 +16,7 @@ import type {
 	IAuthorityEngine,
 	InvitationEnvelope,
 	InvitationSigned,
+	OfficerInit,
 } from '@votetorrent/vote-core';
 import {
 	MOCK_SHARED_ADMINISTRATION_DETAILS, // Import shared details
@@ -29,8 +30,8 @@ import {
 // Local mock data definitions (MOCK_ADMINISTRATORS, MOCK_THRESHOLD_POLICIES, etc.) are removed.
 
 export class MockAuthorityEngine implements IAuthorityEngine {
-	private administration: Administration;
-	private proposedAdministration?: Proposal<AdministrationInit>; // Can be undefined if not SLCO or no proposal made
+	private admin: Admin;
+	private proposedAdmin?: Proposal<AdminInit>; // Can be undefined if not SLCO or no proposal made
 	private proposedAuthority?: Proposal<Authority>; // Unused by current mock methods but part of interface/state
 	// private isSlcoAuthority: boolean = false; // No longer needed
 
@@ -40,11 +41,11 @@ export class MockAuthorityEngine implements IAuthorityEngine {
 			JSON.stringify(MOCK_SHARED_ADMINISTRATION_DETAILS)
 		);
 
-		this.administration = detailsCopy.administration;
+		this.admin = detailsCopy.admin;
 		// **Important**: Set the correct authoritySid for this specific instance
-		this.administration.authoritySid = this.authority.sid;
+		this.admin.authoritySid = this.authority.sid;
 
-		this.proposedAdministration = detailsCopy.proposed;
+		this.proposedAdmin = detailsCopy.proposed;
 	}
 
 	createAuthorityInvitation(
@@ -56,11 +57,11 @@ export class MockAuthorityEngine implements IAuthorityEngine {
 		throw new Error('Not implemented');
 	}
 
-	async getAdministrationDetails(): Promise<AdministrationDetails> {
+	async getAdminDetails(): Promise<AdminDetails> {
 		// Return the instance-specific administration details
 		return {
-			administration: this.administration,
-			proposed: this.proposedAdministration,
+			admin: this.admin,
+			proposed: this.proposedAdmin,
 		};
 	}
 
@@ -80,12 +81,10 @@ export class MockAuthorityEngine implements IAuthorityEngine {
 		};
 	}
 
-	async inviteAdministrator(
-		invitationProposal: Proposal<AdministratorInvitationContent>
-	): Promise<AdministratorInvitation> {
-		console.warn(
-			'MockAuthorityEngine: inviteAdministrator is not implemented.'
-		);
+	async inviteOfficer(
+		invitationProposal: Proposal<OfficerInvitationContent>
+	): Promise<OfficerInvitation> {
+		console.warn('MockAuthorityEngine: inviteOfficer is not implemented.');
 		// Mock: could add to this.administration.administrators if simple, or require proposal flow.
 		throw new Error('Not implemented');
 	}
@@ -99,15 +98,11 @@ export class MockAuthorityEngine implements IAuthorityEngine {
 		throw new Error('Not implemented');
 	}
 
-	async proposeAdministration(
-		administrationProposal: Proposal<AdministrationInit>
-	): Promise<void> {
+	async proposeAdmin(adminProposal: Proposal<AdminInit>): Promise<void> {
 		// Update the instance's proposed administration directly
-		this.proposedAdministration = JSON.parse(
-			JSON.stringify(administrationProposal)
-		);
+		this.proposedAdmin = JSON.parse(JSON.stringify(adminProposal));
 		console.log(
-			`MockAuthorityEngine: Administration proposed for ${this.authority.name}.`
+			`MockAuthorityEngine: Admin proposed for ${this.authority.name}.`
 		);
 	}
 
@@ -115,6 +110,22 @@ export class MockAuthorityEngine implements IAuthorityEngine {
 		authorityUpdateProposal: Proposal<AuthorityInvitationContent> // Type might need adjustment
 	): Promise<void> {
 		console.warn('MockAuthorityEngine: proposeAuthority is not implemented.');
+		throw new Error('Not implemented');
+	}
+
+	createOfficerInvitation(
+		init: OfficerInit
+	): InvitationEnvelope<OfficerInvitationContent> {
+		console.warn(
+			'MockAuthorityEngine: createOfficerInvitation is not implemented.'
+		);
+		throw new Error('Not implemented');
+	}
+
+	async saveAdminInvite(
+		invitation: InvitationSigned<OfficerInvitationContent>
+	): Promise<void> {
+		console.warn('MockAuthorityEngine: saveAdminInvite is not implemented.');
 		throw new Error('Not implemented');
 	}
 }

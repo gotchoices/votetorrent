@@ -1,28 +1,24 @@
 import type {
-	AdornedNetworkReference,
+	NetworkReference,
 	ISignatureTasksEngine,
 	SID,
 	SignatureResult,
 	SignatureTask,
-	NetworkReference,
 	Proposal,
 	Signature,
 	Timestamp,
-	AdministrationSignatureTask,
 	AuthoritySignatureTask,
 	NetworkSignatureTask,
 	ElectionSignatureTask,
 	ElectionRevisionSignatureTask,
 	BallotSignatureTask,
-	AdministrationInit,
 	Authority,
 	AuthorityInit,
-	NetworkRevisionInit,
 	ElectionInit,
 	BallotInit,
 	// Assuming the following types are available from @votetorrent/vote-core or its sub-paths
 	// based on the previously read files. Actual import paths might differ.
-	AdministratorSelection,
+	OfficerSelection,
 	ThresholdPolicy,
 	Scope,
 	ImageRef,
@@ -32,6 +28,9 @@ import type {
 	ElectionRevisionInit,
 	KeyholderInvitationContent,
 	Question,
+	AdminInit,
+	NetworkInit,
+	AdminSignatureTask,
 } from '@votetorrent/vote-core';
 import { ElectionEvent, ElectionType } from '@votetorrent/vote-core';
 
@@ -52,11 +51,6 @@ const MOCK_NETWORK_REFERENCE: NetworkReference = {
 	hash: 'sigNet43GaFf',
 	relays: ['/ip4/127.0.0.1/tcp/4002/p2p/mock-sig-peer-id'],
 	imageUrl: 'https://picsum.photos/500/500?random=3',
-};
-
-// Mock AdornedNetworkReference
-const MOCK_ADORNED_NETWORK_REFERENCE: AdornedNetworkReference = {
-	...MOCK_NETWORK_REFERENCE,
 	name: 'Signature Task Network General',
 	primaryAuthorityDomainName: 'Mock Signature Authority General',
 };
@@ -70,17 +64,18 @@ const MOCK_AUTHORITY: Authority = {
 };
 
 // --- MOCK PROPOSAL DATA (simplified) ---
-const MOCK_ADMINISTRATION_INIT: AdministrationInit = {
-	administrators: [
+const MOCK_ADMINISTRATION_INIT: AdminInit = {
+	officers: [
 		{
 			init: {
 				name: 'Admin One',
 				title: 'Chief Admin',
-				scopes: ['rad' as Scope],
+				scopes: 'rad',
 			},
 		},
 	],
-	thresholdPolicies: [], // Simplified
+	thresholdPolicies: [],
+	effectiveAt: MOCK_TIMESTAMP,
 };
 
 const MOCK_AUTHORITY_INIT: AuthorityInit = {
@@ -88,11 +83,9 @@ const MOCK_AUTHORITY_INIT: AuthorityInit = {
 	domainName: 'new.authority.example.com',
 };
 
-const MOCK_NETWORK_REVISION_INIT: NetworkRevisionInit = {
-	networkSid: 'mock-network-sid-rev',
-	revision: 1,
-	timestamp: MOCK_TIMESTAMP,
+const MOCK_NETWORK_INIT: NetworkInit = {
 	name: 'Revised Mock Network',
+	imageUrl: 'https://picsum.photos/500/500?random=4',
 	relays: ['/ip4/127.0.0.1/tcp/4003/p2p/mock-rev-peer-id'],
 	policies: {
 		timestampAuthorities: [
@@ -101,6 +94,8 @@ const MOCK_NETWORK_REVISION_INIT: NetworkRevisionInit = {
 		numberRequiredTSAs: 1,
 		electionType: ElectionType.official,
 	},
+	admin: MOCK_ADMINISTRATION_INIT,
+	primaryAuthority: MOCK_AUTHORITY_INIT,
 };
 
 const MOCK_ELECTION_CORE_INIT: ElectionCoreInit = {
@@ -156,7 +151,7 @@ const MOCK_BALLOT_INIT: BallotInit = {
 };
 
 // --- MOCK PROPOSALS ---
-const MOCK_PROPOSAL_ADMINISTRATION: Proposal<AdministrationInit> = {
+const MOCK_PROPOSAL_ADMINISTRATION: Proposal<AdminInit> = {
 	proposed: MOCK_ADMINISTRATION_INIT,
 	timestamp: MOCK_TIMESTAMP,
 	signatures: [MOCK_SIGNATURE],
@@ -168,8 +163,8 @@ const MOCK_PROPOSAL_AUTHORITY: Proposal<AuthorityInit> = {
 	signatures: [MOCK_SIGNATURE],
 };
 
-const MOCK_PROPOSAL_NETWORK_REVISION: Proposal<NetworkRevisionInit> = {
-	proposed: MOCK_NETWORK_REVISION_INIT,
+const MOCK_PROPOSAL_NETWORK_REVISION: Proposal<NetworkInit> = {
+	proposed: MOCK_NETWORK_INIT,
 	timestamp: MOCK_TIMESTAMP,
 	signatures: [MOCK_SIGNATURE],
 };
@@ -187,25 +182,25 @@ const MOCK_PROPOSAL_BALLOT: Proposal<BallotInit> = {
 };
 
 // --- MOCK SIGNATURE TASKS ---
-const MOCK_ADMINISTRATION_SIGNATURE_TASK: AdministrationSignatureTask = {
+const MOCK_ADMINISTRATION_SIGNATURE_TASK: AdminSignatureTask = {
 	type: 'signature',
-	network: MOCK_ADORNED_NETWORK_REFERENCE,
+	network: MOCK_NETWORK_REFERENCE,
 	userSid: MOCK_USER_SID,
-	signatureType: 'administration',
+	signatureType: 'admin',
 	administration: MOCK_PROPOSAL_ADMINISTRATION,
 	authority: MOCK_AUTHORITY,
 };
 
 const MOCK_AUTHORITY_SIGNATURE_TASK: AuthoritySignatureTask = {
 	type: 'signature',
-	network: MOCK_ADORNED_NETWORK_REFERENCE,
+	network: MOCK_NETWORK_REFERENCE,
 	userSid: MOCK_USER_SID,
 	signatureType: 'authority',
 	authority: MOCK_PROPOSAL_AUTHORITY,
 };
 
 // Commenting out the helper for combined data as it's not needed with the correct type understanding
-// const MOCK_COMBINED_NETWORK_DATA_FOR_TASK: AdornedNetworkReference & Proposal<NetworkRevisionInit> = {
+// const MOCK_COMBINED_NETWORK_DATA_FOR_TASK: NetworkReference & Proposal<NetworkRevisionInit> = {
 //     hash: MOCK_ADORNED_NETWORK_REFERENCE.hash,
 //     relays: MOCK_ADORNED_NETWORK_REFERENCE.relays,
 //     imageUrl: MOCK_ADORNED_NETWORK_REFERENCE.imageUrl,
@@ -218,7 +213,7 @@ const MOCK_AUTHORITY_SIGNATURE_TASK: AuthoritySignatureTask = {
 
 const MOCK_NETWORK_SIGNATURE_TASK: NetworkSignatureTask = {
 	type: 'signature',
-	network: MOCK_ADORNED_NETWORK_REFERENCE, // This is AdornedNetworkReference from SignatureTask
+	network: MOCK_NETWORK_REFERENCE, // This is NetworkReference from SignatureTask
 	userSid: MOCK_USER_SID,
 	signatureType: 'network',
 	networkRevision: MOCK_PROPOSAL_NETWORK_REVISION, // This is the new Proposal<NetworkRevisionInit> field
@@ -226,7 +221,7 @@ const MOCK_NETWORK_SIGNATURE_TASK: NetworkSignatureTask = {
 
 const MOCK_ELECTION_SIGNATURE_TASK: ElectionSignatureTask = {
 	type: 'signature',
-	network: MOCK_ADORNED_NETWORK_REFERENCE,
+	network: MOCK_NETWORK_REFERENCE,
 	userSid: MOCK_USER_SID,
 	signatureType: 'election',
 	election: MOCK_PROPOSAL_ELECTION,
@@ -234,7 +229,7 @@ const MOCK_ELECTION_SIGNATURE_TASK: ElectionSignatureTask = {
 
 const MOCK_ELECTION_REVISION_SIGNATURE_TASK: ElectionRevisionSignatureTask = {
 	type: 'signature',
-	network: MOCK_ADORNED_NETWORK_REFERENCE,
+	network: MOCK_NETWORK_REFERENCE,
 	userSid: MOCK_USER_SID,
 	signatureType: 'election-revision',
 	election: MOCK_PROPOSAL_ELECTION,
@@ -242,7 +237,7 @@ const MOCK_ELECTION_REVISION_SIGNATURE_TASK: ElectionRevisionSignatureTask = {
 
 const MOCK_BALLOT_SIGNATURE_TASK: BallotSignatureTask = {
 	type: 'signature',
-	network: MOCK_ADORNED_NETWORK_REFERENCE,
+	network: MOCK_NETWORK_REFERENCE,
 	userSid: MOCK_USER_SID,
 	signatureType: 'ballot',
 	ballot: MOCK_PROPOSAL_BALLOT,

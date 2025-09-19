@@ -316,15 +316,14 @@ create table ProposedOfficerUser (
 	constraint UserSidValid check (exists (select 1 from User U where U.Sid = new.UserSid)),
 	constraint UserKeyValid check (exists (select 1 from UserKey K where K.UserSid = new.UserSid and K.Key = new.UserKey and K.Expiration > datetime('now'))),
 	constraint CantDelete check on delete (false),
-	constraint SignatureValid check (exists (
-		select 1 from ProposedOfficer PA
-			where PA.AuthoritySid = new.AuthoritySid and PA.AdminRevision = new.AdminRevision and PA.ProposedName = new.ProposedName and PA.UserSid = new.UserSid and PA.SignerKey = new.SignerKey and PA.Signature = new.Signature
-			-- and SignatureValid(
-			-- 	Digest(new.AuthoritySid, new.AdminRevision, new.UserSid, PA.Title, PA.Scopes),
-			-- 	Signature,
-			-- 	SignerKey
-			-- )
-	))
+	constraint SignatureValid check (exists (select 1 from ProposedOfficer PA
+		where PA.AuthoritySid = new.AuthoritySid and PA.AdminRevision = new.AdminRevision and PA.ProposedName = new.ProposedName and PA.UserSid = new.UserSid and PA.SignerKey = new.SignerKey and PA.Signature = new.Signature
+		-- and SignatureValid(
+		-- 	Digest(new.AuthoritySid, new.AdminRevision, new.UserSid, PA.Title, PA.Scopes),
+		-- 	Signature,
+		-- 	SignerKey
+		)
+	)
 );
 
 create table InviteSlot (

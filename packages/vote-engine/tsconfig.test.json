@@ -1,0 +1,17 @@
+{
+	"extends": "./tsconfig.json",
+	"compilerOptions": {
+		"target": "ES2022",
+		"module": "ES2022",
+		"moduleResolution": "node",
+		"strict": true,
+		"sourceMap": true,
+		"types": ["node", "mocha"],
+		"allowImportingTsExtensions": true
+	},
+	"ts-node": {
+		"esm": true,
+		"experimentalSpecifierResolution": "node"
+	},
+	"include": ["test/**/*", "src/**/*"]
+}

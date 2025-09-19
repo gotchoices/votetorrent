@@ -1,15 +1,15 @@
 import type {
-	AdornedNetworkReference,
 	INetworkEngine,
 	NetworkInit,
 	NetworkReference,
+	User,
 } from '@votetorrent/vote-core';
 import type { INetworksEngine } from '@votetorrent/vote-core';
 import { MockNetworkEngine } from '../network/mock-network-engine';
 import { MOCK_NETWORKS } from '../mock-data';
 
 export class MockNetworksEngine implements INetworksEngine {
-	protected recentNetworks: AdornedNetworkReference[] = [];
+	protected recentNetworks: NetworkReference[] = [];
 
 	constructor() {
 		this.recentNetworks = [...MOCK_NETWORKS];
@@ -20,28 +20,29 @@ export class MockNetworksEngine implements INetworksEngine {
 	}
 
 	async create(init: NetworkInit): Promise<INetworkEngine> {
-		const adornedRef: AdornedNetworkReference = {
+		const networkRef: NetworkReference = {
 			...init,
 			hash: '54321',
 			primaryAuthorityDomainName: 'new-network.com',
 		};
-		this.recentNetworks.unshift(adornedRef);
-		return new MockNetworkEngine(adornedRef);
+		this.recentNetworks.unshift(networkRef);
+		return new MockNetworkEngine(networkRef);
 	}
 
 	async discover(
 		latitude: number,
 		longitude: number
-	): Promise<AdornedNetworkReference[]> {
+	): Promise<NetworkReference[]> {
 		return [...MOCK_NETWORKS];
 	}
 
-	async getRecentNetworks(): Promise<AdornedNetworkReference[]> {
+	async getRecentNetworks(): Promise<NetworkReference[]> {
 		return [...this.recentNetworks];
 	}
 
 	async open(
 		ref: NetworkReference,
+		user: User,
 		storeAsRecent?: boolean
 	): Promise<INetworkEngine> {
 		const matchingNetwork = this.recentNetworks.find(
@@ -54,17 +55,17 @@ export class MockNetworksEngine implements INetworksEngine {
 			this.recentNetworks.unshift(matchingNetwork);
 			return new MockNetworkEngine(matchingNetwork);
 		} else {
-			const adornedRef: AdornedNetworkReference = {
+			const networkRef: NetworkReference = {
 				hash: ref.hash,
 				imageUrl: ref.imageUrl,
 				relays: ref.relays,
 				name: 'Newly Opened Network',
 				primaryAuthorityDomainName: 'unknown-domain.com',
 			};
-			if (storeAsRecent !== false) {
-				this.recentNetworks.unshift(adornedRef);
+			if (storeAsRecent) {
+				this.recentNetworks.unshift(networkRef);
 			}
-			return new MockNetworkEngine(adornedRef);
+			return new MockNetworkEngine(networkRef);
 		}
 	}
 }

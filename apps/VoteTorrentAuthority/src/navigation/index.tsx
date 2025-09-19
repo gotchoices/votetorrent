@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "./types";
 import AuthorityDetailsScreen from "../screens/authorities/AuthorityDetailsScreen";
-import AdministratorDetailsScreen from "../screens/administration/AdministratorDetailsScreen";
+import OfficerDetailsScreen from "../screens/admin/OfficerDetailsScreen";
 import ElectionsScreen from "../screens/elections/ElectionsScreen";
 import TasksScreen from "../screens/tasks/TasksScreen";
 import AuthoritiesScreen from "../screens/authorities/AuthoritiesScreen";
@@ -18,9 +18,9 @@ import NetworksScreen from "../screens/networks/NetworksScreen";
 import type { NavigationProp } from "./types";
 import AddNetworkScreen from "../screens/networks/AddNetworkScreen";
 import HostingScreen from "../screens/networks/HostingScreen";
-import ReplaceAdministrationScreen from "../screens/administration/ReplaceAdministrationScreen";
+import ReplaceAdminScreen from "../screens/admin/ReplaceAdminScreen";
 import { useApp } from "../providers/AppProvider";
-import EditAdministratorScreen from "../screens/administration/EditAdministratorScreen";
+import EditOfficerScreen from "../screens/admin/EditOfficerScreen";
 import { ThemedText } from "../components/ThemedText";
 import { INetworkEngine } from "@votetorrent/vote-core";
 import DefaultUserScreen from "../screens/users/DefaultUserScreen";
@@ -51,7 +51,7 @@ function HeaderTitle() {
 					const engine = (await getEngine("network")) as INetworkEngine;
 					if (engine) {
 						const networkDetails = await engine.getDetails();
-						setNetworkName(networkDetails.current.name);
+						setNetworkName(networkDetails.network.name);
 					}
 				} catch (error) {
 					console.error("Error fetching network details:", error);
@@ -216,22 +216,22 @@ export const RootNavigator = () => {
 				}}
 			/>
 			<Stack.Screen
-				name="AdministratorDetails"
-				component={AdministratorDetailsScreen}
+				name="OfficerDetails"
+				component={OfficerDetailsScreen}
 				options={{
-					title: t("administrator"),
+					title: t("officer"),
 				}}
 			/>
 			<Stack.Screen
-				name="ReplaceAdministration"
-				component={ReplaceAdministrationScreen}
+				name="ReplaceAdmin"
+				component={ReplaceAdminScreen}
 				options={{ title: t("proposeReplacement") }}
 			/>
 			<Stack.Screen
-				name="EditAdministrator"
-				component={EditAdministratorScreen}
+				name="EditOfficer"
+				component={EditOfficerScreen}
 				options={{
-					title: t("administrator"),
+					title: t("officer"),
 				}}
 			/>
 			<Stack.Screen

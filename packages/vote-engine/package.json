@@ -18,12 +18,11 @@
 		}
 	},
 	"scripts": {
-		"clean": "aegir clean",
-		"build": "aegir build --env node",
-		"lint": "aegir lint",
-		"test": "aegir test",
-		"test:node": "aegir test -t node",
-		"dep-check": "aegir dep-check"
+		"clean": "yarn clean",
+		"build": "yarn build --env node",
+		"lint": "yarn lint",
+		"test": "TS_NODE_PROJECT=./tsconfig.test.json mocha --node-option=loader=ts-node/esm --node-option=experimental-specifier-resolution=node --require tsconfig-paths/register \"test/**/*.spec.ts\"",
+		"dep-check": "yarn dep-check"
 	},
 	"homepage": "https://github.com/gotchoices/votetorrent",
 	"bugs": {
@@ -41,10 +40,10 @@
 		"react-native": "0.78.0"
 	},
 	"devDependencies": {
+		"@types/mocha": "^10.0.10",
 		"@types/node": "^22.13.10",
-		"@types/sinon": "^17.0.4",
-		"aegir": "^45.1.4",
-		"sinon": "^19.0.4"
+		"ts-node": "^10.9.2",
+		"tsconfig-paths": "^4.2.0"
 	},
 	"dependencies": {
 		"@babel/core": "^7.25.2",
@@ -65,10 +64,16 @@
 		"@quereus/quereus": "^0.1.0",
 		"@react-native-async-storage/async-storage": "^2.1.2",
 		"@votetorrent/vote-core": "^0.0.1",
+		"chai": "^5.2.0",
 		"libp2p": "^2.8.2",
+		"mocha": "^11.5.0",
 		"react": "19.0.0",
 		"react-native": "0.78.0",
 		"temporal-polyfill": "^0.3.0",
 		"uint8arrays": "^5.1.0"
+	},
+	"ts-node": {
+		"esm": true,
+		"experimentalSpecifierResolution": "node"
 	}
 }

@@ -7,7 +7,7 @@ import type {
 	NetworkDetails,
 	NetworkInfrastructure,
 	HostingProvider,
-	NetworkRevisionInit,
+	NetworkInit,
 } from '../index.js';
 import type { InvitationAction } from '../invitation/models.js';
 import type { IUserEngine } from '../user/types.js';
@@ -27,7 +27,7 @@ export type INetworkEngine = {
 	): Promise<Cursor<Authority>>;
 	openAuthority(authoritySid: SID): Promise<IAuthorityEngine>;
 	pinAuthority(authority: Authority): Promise<void>;
-	proposeRevision(revision: NetworkRevisionInit): Promise<void>;
+	proposeRevision(revision: NetworkInit): Promise<void>;
 	respondToInvitation<TInvokes, TSlot>(
 		invitation: InvitationAction<TInvokes, TSlot>
 	): Promise<SID>;

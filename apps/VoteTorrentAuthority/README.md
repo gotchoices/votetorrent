@@ -18,7 +18,7 @@ The VoteTorrent Authority app is a mobile application designed for election admi
 
 - **Authority Administration**
 
-  - Manage administrator roles and permissions
+  - Manage officer roles and permissions
   - Oversee election certification process
 
 ## Getting Started

@@ -1,16 +1,11 @@
 import type {
-	AdornedNetworkReference,
 	Authority,
-	ImageRef,
 	Signature,
 	SID,
 	Network,
 	NetworkPolicies,
-	NetworkRevision,
 	NetworkDetails,
-	NetworkRevisionInit,
 	ElectionType,
-	TimestampAuthority,
 	HostingProvider,
 	DefaultUser,
 	User,
@@ -20,13 +15,15 @@ import type {
 	AddUserKeyHistory,
 	ReviseUserHistory,
 	RevokeUserKeyHistory,
-	Administrator,
+	Officer,
 	ThresholdPolicy,
 	Scope,
-	Administration,
-	AdministrationInit,
+	Admin,
+	AdminInit,
 	Proposal,
-	AdministrationDetails,
+	AdminDetails,
+	NetworkInit,
+	NetworkReference,
 } from '@votetorrent/vote-core';
 import { UserHistoryEvent, UserKeyType } from '@votetorrent/vote-core';
 
@@ -51,7 +48,7 @@ export const MOCK_SIGNATURE: Signature = {
 export const getUnixTimestamp = (date: Date): number =>
 	Math.floor(date.getTime() / 1000);
 
-export const MOCK_NETWORKS: AdornedNetworkReference[] = [
+export const MOCK_NETWORKS: NetworkReference[] = [
 	{
 		hash: 'mock-network-hash-utah-123',
 		imageUrl: 'https://picsum.photos/500/500?random=1',
@@ -172,7 +169,7 @@ export const MOCK_AUTHORITIES: Authority[] = [
 // --- Network Specific Data (Primarily for Utah State Network) ---
 
 // Helper to find a network by name, throwing if not found for critical mocks
-const findNetworkOrThrow = (name: string): AdornedNetworkReference => {
+const findNetworkOrThrow = (name: string): NetworkReference => {
 	const network = MOCK_NETWORKS.find((n) => n.name === name);
 	if (!network) {
 		throw new Error(
@@ -198,7 +195,7 @@ export const UTAH_STATE_NETWORK_REF = findNetworkOrThrow('Utah State Network');
 export const UTAH_PRIMARY_AUTHORITY = findAuthorityOrThrow('State of Utah');
 
 // This specific adorned reference can be used where an explicit one for Utah is needed.
-export const MOCK_UTAH_ADORNED_NETWORK_REFERENCE: AdornedNetworkReference =
+export const MOCK_UTAH_ADORNED_NETWORK_REFERENCE: NetworkReference =
 	UTAH_STATE_NETWORK_REF;
 
 // Rename to shared policies
@@ -211,74 +208,10 @@ export const MOCK_SHARED_NETWORK_POLICIES: NetworkPolicies = {
 export const MOCK_UTAH_NETWORK: Network = {
 	hash: UTAH_STATE_NETWORK_REF.hash,
 	sid: UTAH_PRIMARY_AUTHORITY.sid,
-	signature: MOCK_SIGNATURE,
-};
-
-export const MOCK_UTAH_NETWORK_REVISION: NetworkRevision = {
-	networkSid: UTAH_PRIMARY_AUTHORITY.sid,
-	revision: 1,
-	timestamp: getUnixTimestamp(new Date(Date.now() - 1000 * 60 * 60 * 24 * 30)),
+	primaryAuthoritySid: UTAH_PRIMARY_AUTHORITY.sid,
 	name: UTAH_STATE_NETWORK_REF.name,
-	imageRef: { cid: 'mock-cid-ut-rev1', url: UTAH_STATE_NETWORK_REF.imageUrl },
 	relays: UTAH_STATE_NETWORK_REF.relays,
 	policies: MOCK_SHARED_NETWORK_POLICIES,
-	signature: MOCK_SIGNATURE,
-};
-
-// Define shared proposed network revision
-export const MOCK_SHARED_NETWORK_REVISION_PROPOSAL: Proposal<NetworkRevisionInit> =
-	{
-		proposed: {
-			revision: 2,
-			timestamp: getUnixTimestamp(
-				new Date(Date.now() - 1000 * 60 * 60 * 24 * 2)
-			),
-			name: `Network Revision Proposal v2`,
-			imageRef: {
-				cid: 'mock-cid-prop-rev2',
-				url: 'https://picsum.photos/500/500?random=10',
-			},
-			relays: ['/ip4/127.0.0.1/tcp/9091/p2p/QmSharedProposalRelay'],
-			policies: MOCK_SHARED_NETWORK_POLICIES,
-		} as NetworkRevisionInit,
-		signatures: [MOCK_SIGNATURE],
-		timestamp: getUnixTimestamp(new Date(Date.now() - 1000 * 60 * 60 * 24 * 2)),
-	};
-
-export const MOCK_UTAH_NETWORK_DETAILS: NetworkDetails = {
-	network: MOCK_UTAH_NETWORK,
-	current: MOCK_UTAH_NETWORK_REVISION,
-	proposed: MOCK_SHARED_NETWORK_REVISION_PROPOSAL,
-};
-
-// --- Mock Hosting Providers ---
-export const MOCK_HOSTING_PROVIDERS: HostingProvider[] = [
-	{
-		description:
-			'Specialized in secure election infrastructure with 99.99% uptime',
-		handoffUrl: 'https://casa-de-vote.example.com/handoff',
-		informationUrl: 'https://casa-de-vote.example.com',
-		name: 'Casa de Vote',
-	},
-	{
-		description: 'Dedicated election hosting with end-to-end encryption',
-		handoffUrl: 'https://electioncloud.example.com/handoff',
-		informationUrl: 'https://electioncloud.example.com',
-		name: 'ElectionCloud',
-	},
-	{
-		description: 'Professional election hosting with 24/7 support',
-		handoffUrl: 'https://votehost-pro.example.com/handoff',
-		informationUrl: 'https://votehost-pro.example.com',
-		name: 'VoteHost Pro',
-	},
-];
-
-// --- Mock User Data ---
-
-export const MOCK_DEFAULT_USER: DefaultUser = {
-	name: 'Jane Doe',
-	image: { url: 'https://picsum.photos/200/200?random=201' },
 };
 
 // --- Mock User Data (for MockUserEngine) ---
@@ -312,6 +245,95 @@ export const MOCK_CURRENT_USER: User = {
 	name: 'Alice Wonderland',
 	image: { url: 'https://picsum.photos/200/200?random=202' },
 	activeKeys: [MOCK_USER_KEYS[0]!, MOCK_USER_KEYS[1]!],
+};
+
+export const MOCK_SHARED_ADMINISTRATORS: Officer[] = [
+	{
+		scopes: ['rad', 'vrg', 'iad', 'rnp', 'uai'] as Scope[],
+		title: 'Chief Election Official',
+		userSid: MOCK_CURRENT_USER.sid,
+		signature: MOCK_SIGNATURE,
+	},
+	{
+		scopes: ['rad', 'vrg', 'iad'] as Scope[],
+		title: 'Deputy Election Official',
+		userSid: generateSid('user'),
+		signature: MOCK_SIGNATURE,
+	},
+];
+
+export const MOCK_SHARED_THRESHOLD_POLICIES: ThresholdPolicy[] = [
+	{ threshold: 1, policy: 'rn' as Scope },
+	{ threshold: 1, policy: 'rad' as Scope },
+	{ threshold: 2, policy: 'vrg' as Scope },
+	{ threshold: 1, policy: 'iad' as Scope },
+	{ threshold: 1, policy: 'rnp' as Scope },
+];
+
+export const MOCK_SHARED_ADMINISTRATION: Admin = {
+	sid: 'admin-shared-sid',
+	authoritySid: 'authority-sid-placeholder-needs-override' as SID,
+	officers: MOCK_SHARED_ADMINISTRATORS,
+	thresholdPolicies: MOCK_SHARED_THRESHOLD_POLICIES,
+	expiration: getUnixTimestamp(
+		new Date(Date.now() + 1000 * 60 * 60 * 24 * 365 * 5)
+	),
+};
+
+export const MOCK_SHARED_ADMINISTRATION_INIT: AdminInit = {
+	officers: MOCK_SHARED_ADMINISTRATORS.map((admin) => ({
+		existing: admin,
+	})),
+	effectiveAt: getUnixTimestamp(new Date(Date.now() - 1000 * 60 * 60 * 24 * 5)),
+	thresholdPolicies: MOCK_SHARED_THRESHOLD_POLICIES,
+};
+
+export const MOCK_SHARED_NETWORK_INIT: NetworkInit = {
+	...MOCK_UTAH_NETWORK,
+	primaryAuthority: UTAH_PRIMARY_AUTHORITY,
+	admin: MOCK_SHARED_ADMINISTRATION_INIT,
+	policies: MOCK_SHARED_NETWORK_POLICIES,
+};
+
+export const MOCK_SHARED_NETWORK_PROPOSAL: Proposal<Network> = {
+	proposed: MOCK_UTAH_NETWORK,
+	signatures: [MOCK_SIGNATURE],
+	timestamp: getUnixTimestamp(new Date(Date.now() - 1000 * 60 * 60 * 24 * 2)),
+};
+
+export const MOCK_UTAH_NETWORK_DETAILS: NetworkDetails = {
+	network: MOCK_UTAH_NETWORK,
+	proposed: MOCK_SHARED_NETWORK_PROPOSAL,
+};
+
+// --- Mock Hosting Providers ---
+export const MOCK_HOSTING_PROVIDERS: HostingProvider[] = [
+	{
+		description:
+			'Specialized in secure election infrastructure with 99.99% uptime',
+		handoffUrl: 'https://casa-de-vote.example.com/handoff',
+		informationUrl: 'https://casa-de-vote.example.com',
+		name: 'Casa de Vote',
+	},
+	{
+		description: 'Dedicated election hosting with end-to-end encryption',
+		handoffUrl: 'https://electioncloud.example.com/handoff',
+		informationUrl: 'https://electioncloud.example.com',
+		name: 'ElectionCloud',
+	},
+	{
+		description: 'Professional election hosting with 24/7 support',
+		handoffUrl: 'https://votehost-pro.example.com/handoff',
+		informationUrl: 'https://votehost-pro.example.com',
+		name: 'VoteHost Pro',
+	},
+];
+
+// --- Mock User Data ---
+
+export const MOCK_DEFAULT_USER: DefaultUser = {
+	name: 'Jane Doe',
+	image: { url: 'https://picsum.photos/200/200?random=201' },
 };
 
 export const MOCK_USER_HISTORY_EVENTS: UserHistory[] = [
@@ -357,52 +379,13 @@ export const MOCK_USER_HISTORY_EVENTS: UserHistory[] = [
 // const SLCO_AUTHORITY = ... // Lookup still useful if needed elsewhere
 // const aliceUserSid = ... // Lookup still useful
 
-export const MOCK_SHARED_ADMINISTRATORS: Administrator[] = [
-	{
-		scopes: ['rad', 'vrg', 'iad', 'rnp', 'uai'] as Scope[],
-		title: 'Chief Election Official',
-		userSid: MOCK_CURRENT_USER.sid,
-		signature: MOCK_SIGNATURE,
-	},
-	{
-		scopes: ['rad', 'vrg', 'iad'] as Scope[],
-		title: 'Deputy Election Official',
-		userSid: generateSid('user'),
-		signature: MOCK_SIGNATURE,
-	},
-];
-
-export const MOCK_SHARED_THRESHOLD_POLICIES: ThresholdPolicy[] = [
-	{ threshold: 1, policy: 'rn' as Scope },
-	{ threshold: 1, policy: 'rad' as Scope },
-	{ threshold: 2, policy: 'vrg' as Scope },
-	{ threshold: 1, policy: 'iad' as Scope },
-	{ threshold: 1, policy: 'rnp' as Scope },
-];
-
-export const MOCK_SHARED_ADMINISTRATION: Administration = {
-	sid: 'admin-shared-sid',
-	authoritySid: 'authority-sid-placeholder-needs-override' as SID,
-	administrators: MOCK_SHARED_ADMINISTRATORS,
-	thresholdPolicies: MOCK_SHARED_THRESHOLD_POLICIES,
-	expiration: getUnixTimestamp(
-		new Date(Date.now() + 1000 * 60 * 60 * 24 * 365 * 5)
-	),
+export const MOCK_SHARED_PROPOSED_ADMINISTRATION: Proposal<AdminInit> = {
+	proposed: MOCK_SHARED_ADMINISTRATION_INIT,
+	timestamp: getUnixTimestamp(new Date(Date.now() - 1000 * 60 * 60 * 24 * 5)),
+	signatures: [MOCK_SIGNATURE],
 };
 
-export const MOCK_SHARED_PROPOSED_ADMINISTRATION: Proposal<AdministrationInit> =
-	{
-		proposed: {
-			administrators: MOCK_SHARED_ADMINISTRATORS.map((admin) => ({
-				existing: admin,
-			})),
-			thresholdPolicies: MOCK_SHARED_THRESHOLD_POLICIES,
-		} as AdministrationInit,
-		timestamp: getUnixTimestamp(new Date(Date.now() - 1000 * 60 * 60 * 24 * 5)),
-		signatures: [MOCK_SIGNATURE],
-	};
-
-export const MOCK_SHARED_ADMINISTRATION_DETAILS: AdministrationDetails = {
-	administration: MOCK_SHARED_ADMINISTRATION,
+export const MOCK_SHARED_ADMINISTRATION_DETAILS: AdminDetails = {
+	admin: MOCK_SHARED_ADMINISTRATION,
 	proposed: MOCK_SHARED_PROPOSED_ADMINISTRATION,
 };

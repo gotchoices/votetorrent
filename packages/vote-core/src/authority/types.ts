@@ -6,29 +6,29 @@ import type {
 import type { Proposal } from '../common';
 import type {
 	AuthorityDetails,
-	AdministrationDetails,
+	AdminDetails,
 	AuthorityInvitation,
 	AuthorityInvitationContent,
-	AdministratorInvitationContent,
-	AdministrationInit,
-	AdministratorInit,
+	OfficerInvitationContent,
+	AdminInit,
+	OfficerInit,
 } from './models';
 
 export type IAuthorityEngine = {
-	createAdministratorInvitation(
-		init: AdministratorInit
-	): InvitationEnvelope<AdministratorInvitationContent>;
+	createOfficerInvitation(
+		init: OfficerInit
+	): InvitationEnvelope<OfficerInvitationContent>;
 	createAuthorityInvitation(
 		name: string
 	): InvitationEnvelope<AuthorityInvitationContent>;
-	getAdministrationDetails(): Promise<AdministrationDetails>;
+	getAdminDetails(): Promise<AdminDetails>;
 	getAuthorityInvitations(): Promise<InvitationStatus<AuthorityInvitation>[]>;
 	getDetails(): Promise<AuthorityDetails>;
-	proposeAdministration(
-		administration: Proposal<AuthorityInvitationContent & AdministrationInit>
+	proposeAdmin(
+		admin: Proposal<AuthorityInvitationContent & AdminInit>
 	): Promise<void>;
-	saveAdministratorInvite(
-		invitation: InvitationSigned<AdministratorInvitationContent>
+	saveAdminInvite(
+		invitation: InvitationSigned<OfficerInvitationContent>
 	): Promise<void>;
 	saveAuthorityInvite(
 		invitation: InvitationSigned<AuthorityInvitationContent>

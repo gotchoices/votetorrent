@@ -2,13 +2,7 @@ import { Image, StyleSheet, View } from "react-native";
 import { globalStyles } from "../../../theme/styles";
 import { InfoCard } from "../../../components/InfoCard";
 import { ThemedText } from "../../../components/ThemedText";
-import type {
-	AuthorityDetails,
-	NetworkDetails,
-	NetworkRevision,
-	NetworkRevisionInit,
-	Proposal,
-} from "@votetorrent/vote-core";
+import type { AuthorityDetails, NetworkDetails } from "@votetorrent/vote-core";
 import { useTranslation } from "react-i18next";
 
 interface NetworkDetailsProps {
@@ -28,9 +22,7 @@ export function NetworkDetailsComponent({
 		<View style={[styles.section, styles.detailContainer]}>
 			<View style={styles.detail}>
 				<ThemedText type="defaultSemiBold">{t("sid")}:</ThemedText>
-				<ThemedText>
-					{isProposed ? details.proposed?.proposed.networkSid : details.network.sid}
-				</ThemedText>
+				<ThemedText>{details.network.sid}</ThemedText>
 			</View>
 			<View style={styles.detail}>
 				<ThemedText type="defaultSemiBold">{t("hash")}:</ThemedText>
@@ -42,7 +34,7 @@ export function NetworkDetailsComponent({
 					? details.proposed?.proposed.policies.timestampAuthorities.map((authority) => (
 							<ThemedText key={authority.url}>• {authority.url}</ThemedText>
 					  ))
-					: details.current.policies.timestampAuthorities.map((authority) => (
+					: details.network.policies.timestampAuthorities.map((authority) => (
 							<ThemedText key={authority.url}>• {authority.url}</ThemedText>
 					  ))}
 			</View>
@@ -51,13 +43,13 @@ export function NetworkDetailsComponent({
 				<ThemedText>
 					{isProposed
 						? details.proposed?.proposed.policies.numberRequiredTSAs
-						: details.current.policies.numberRequiredTSAs}
+						: details.network.policies.numberRequiredTSAs}
 				</ThemedText>
 			</View>
 			<View style={styles.detail}>
 				<ThemedText type="defaultSemiBold">{t("imageUrl")}:</ThemedText>
 				<ThemedText style={styles.imageUrl} numberOfLines={1} ellipsizeMode="tail">
-					{isProposed ? details.proposed?.proposed.imageRef?.url : details.current.imageRef?.url}
+					{isProposed ? details.proposed?.proposed.imageRef?.url : details.network.imageRef?.url}
 				</ThemedText>
 			</View>
 			<View style={styles.imageContainer}>
@@ -65,7 +57,7 @@ export function NetworkDetailsComponent({
 					source={{
 						uri: isProposed
 							? details.proposed?.proposed.imageRef?.url
-							: details.current.imageRef?.url,
+							: details.network.imageRef?.url,
 					}}
 					style={styles.image}
 				/>
@@ -77,14 +69,8 @@ export function NetworkDetailsComponent({
 					? details.proposed?.proposed.relays.map((relay) => (
 							<ThemedText key={relay}>• {relay}</ThemedText>
 					  ))
-					: details.current.relays.map((relay) => <ThemedText key={relay}>• {relay}</ThemedText>)}
+					: details.network.relays.map((relay) => <ThemedText key={relay}>• {relay}</ThemedText>)}
 			</View>
-			{!isProposed && (
-				<View style={styles.detail}>
-					<ThemedText type="defaultSemiBold">{t("signature")}:</ThemedText>
-					<ThemedText>{details.current.signature.signature}</ThemedText>
-				</View>
-			)}
 			<ThemedText type="defaultSemiBold">{t("primaryAuthority")}:</ThemedText>
 			<InfoCard
 				title={primaryAuthorityDetails?.authority.name}
