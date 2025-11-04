@@ -8,3 +8,5 @@ export * from './networks/index.js';
 export * from './user/index.js';
 export * from './tasks/index.js';
 export * from './types.js';
+export * from './common/crypto-utils.js';
+export * from './secure-storage-react.js';

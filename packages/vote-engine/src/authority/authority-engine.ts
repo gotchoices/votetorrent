@@ -14,9 +14,13 @@ import type {
 	InvitationSigned,
 } from '@votetorrent/vote-core';
 import { Temporal } from 'temporal-polyfill';
-import { secp256k1 } from '@noble/curves/secp256k1';
 import type { EngineContext } from '../types';
-import { sha256 } from '@noble/hashes/sha2';
+import {
+	generatePrivateKey,
+	getPublicKey,
+	signMessage,
+	hashMessage,
+} from '../common/crypto-utils.js';
 
 export class AuthorityEngine implements IAuthorityEngine {
 	constructor(private authority: Authority, private ctx: EngineContext) {}
@@ -24,18 +28,22 @@ export class AuthorityEngine implements IAuthorityEngine {
 	createAuthorityInvitation(
 		name: string
 	): InvitationEnvelope<AuthorityInvitationContent> {
-		//create invitation key pair
-		const invitePrivate = secp256k1.utils.randomSecretKey().toString();
-		const inviteKey = secp256k1.getPublicKey(invitePrivate).toString();
+		// Create invitation key pair using secure crypto utilities
+		const invitePrivate = generatePrivateKey();
+		const inviteKey = getPublicKey(invitePrivate);
 
 		const type = 'au';
 		const expiration = Temporal.Now.plainDateTimeISO('UTC')
 			.add({ minutes: this.ctx.config.invitationSpanMinutes })
 			.toString();
-		const signedBytes = new TextEncoder().encode(type + name + expiration);
-		const inviteSignature = secp256k1
-			.sign(sha256(signedBytes), invitePrivate)
-			.toString();
+
+		// Sign the invitation metadata
+		const messageToSign = type + name + expiration;
+		const inviteSignature = signMessage(messageToSign, invitePrivate);
+
+		// Create digest of the complete invitation content
+		const digestMessage = type + name + expiration + inviteKey + inviteSignature;
+		const digest = hashMessage(digestMessage);
 
 		return {
 			envelope: {
@@ -46,11 +54,7 @@ export class AuthorityEngine implements IAuthorityEngine {
 					inviteKey,
 					invitePrivate,
 					inviteSignature,
-					digest: sha256(
-						new TextEncoder().encode(
-							type + name + expiration + inviteKey + inviteSignature
-						)
-					).toString(),
+					digest,
 				},
 				potentialKeys: this.ctx.user.activeKeys,
 			},

@@ -29,16 +29,22 @@ import type {
 	AdministrationDetails,
 } from '@votetorrent/vote-core';
 import { UserHistoryEvent, UserKeyType } from '@votetorrent/vote-core';
+import { generateSecureSid } from './common/crypto-utils.js';
 
-// Function to generate a plausible SID with a prefix
+/**
+ * Function to generate a cryptographically secure SID with a prefix
+ *
+ * @param prefix - The prefix for the SID (e.g., 'auth', 'user', 'election')
+ * @param hashLength - The number of random bytes to generate (default: 16)
+ * @returns A SID in the format `${prefix}-${hexString}`
+ *
+ * @remarks
+ * This function now uses cryptographically secure random number generation
+ * instead of Math.random(), addressing the security vulnerability identified
+ * in the security audit.
+ */
 export const generateSid = (prefix: string, hashLength: number = 16): SID => {
-	const characters =
-		'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-	let result = '';
-	for (let i = 0; i < hashLength; i++) {
-		result += characters.charAt(Math.floor(Math.random() * characters.length));
-	}
-	return `${prefix}-${result}` as SID;
+	return generateSecureSid(prefix, hashLength);
 };
 
 // Define a standard mock signature object
