@@ -1,4 +1,5 @@
 export * from './cursor.js';
+export * from './di-container.js';
 export * from './image-ref.js';
 export * from './local-storage.js';
 export * from './proposal.js';
