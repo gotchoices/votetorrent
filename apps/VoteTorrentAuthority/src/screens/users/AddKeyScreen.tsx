@@ -18,24 +18,28 @@ export function AddKeyScreen() {
 	const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 	const [isAddingKey, setIsAddingKey] = useState(false);
 	const [isSigned, setIsSigned] = useState(false);
-	const [newKey, setNewKey] = useState<string | null>("sdflkj236jSFgjSVj35j78kdn2");
+	const [newKey, setNewKey] = useState<string | null>(null);
 	const { t } = useTranslation();
 	const { colors } = useTheme() as ExtendedTheme;
 
 	const scanDevice = () => {
-		console.log("scanDevice");
+		// TODO: Implement QR code scanning for device authentication
 		setIsAddingKey(true);
 	};
 
 	const generateExternalKey = () => {
-		console.log("generateExternalKey");
+		// TODO: Implement external key generation (e.g., Yubikey)
 		setIsAddingKey(true);
 	};
 
 	const addKey = async () => {
-		console.log("addKey");
+		if (!newKey) {
+			// TODO: Show error message to user
+			return;
+		}
+
 		const keyToAdd: UserKey = {
-			key: newKey as string,
+			key: newKey,
 			type: UserKeyType.mobile,
 			expiration: new Date(Date.now() + 1000 * 60 * 60 * 24 * 30).getTime(),
 		};
@@ -43,11 +47,10 @@ export function AddKeyScreen() {
 			.addKey(keyToAdd)
 			.then(() => {
 				setIsAddingKey(false);
-				console.log("popping to ReviseUser");
 				navigation.popTo("UserDetails", { user: user, userEngine: userEngine });
 			})
 			.catch((error) => {
-				console.error(error);
+				// TODO: Implement proper error logging
 				setIsAddingKey(false);
 			});
 	};

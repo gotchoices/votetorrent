@@ -5500,6 +5500,7 @@ __metadata:
     libp2p: "npm:^2.8.2"
     react: "npm:19.0.0"
     react-native: "npm:0.78.0"
+    react-native-keychain: "npm:^10.0.0"
     sinon: "npm:^19.0.4"
     temporal-polyfill: "npm:^0.3.0"
     uint8arrays: "npm:^5.1.0"
@@ -16765,6 +16766,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"react-native-keychain@npm:^10.0.0":
+  version: 10.0.0
+  resolution: "react-native-keychain@npm:10.0.0"
+  checksum: 10c0/a632ad27e58264506d2b373d329a867f042fb014e8a78db3a63031e953d61b5c98066eed1be238ee6c186d3f213d0efaa2a26526fb3a1d36a624c4460e982230
+  languageName: node
+  linkType: hard
+
 "react-native-localize@npm:^3.4.1":
   version: 3.4.1
   resolution: "react-native-localize@npm:3.4.1"
@@ -19805,6 +19813,7 @@ __metadata:
     react: "npm:19.0.0"
     react-i18next: "npm:^15.4.1"
     react-native: "npm:0.78.0"
+    react-native-keychain: "npm:^10.0.0"
     react-native-localize: "npm:^3.4.1"
     react-native-safe-area-context: "npm:^5.2.0"
     react-native-screens: "npm:^4.5.0"
