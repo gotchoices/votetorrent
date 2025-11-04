@@ -11,3 +11,4 @@ export * from './types.js';
 export * from './common/crypto-utils.js';
 export * from './common/logger.js';
 export * from './secure-storage-react.js';
+export * from './auth/auth-manager.js';
