@@ -3,6 +3,7 @@ export * from './di-container.js';
 export * from './image-ref.js';
 export * from './local-storage.js';
 export * from './proposal.js';
+export * from './result.js';
 export * from './signature.js';
 export * from './threshold-policies.js';
 export * from './types.js';
