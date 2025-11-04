@@ -1,4 +1,7 @@
 import * as Keychain from 'react-native-keychain';
+import { createLogger } from './common/logger.js';
+
+const log = createLogger('SecureStorageReact');
 
 /**
  * SecureStorageReact provides hardware-backed secure storage for sensitive data
@@ -82,7 +85,7 @@ export class SecureStorageReact {
 
 			return JSON.parse(credentials.password) as Record<string, any>;
 		} catch (error) {
-			console.error(`SecureStorage.getAllItems error:`, error);
+			log.error('Failed to retrieve all items from secure storage', error instanceof Error ? error : undefined);
 			return {};
 		}
 	}
@@ -98,7 +101,7 @@ export class SecureStorageReact {
 			return storage[key] as T | undefined;
 		} catch (error) {
 			// User cancelled biometric prompt or other error
-			console.error(`SecureStorage.getItem error for key "${key}":`, error);
+			log.warn('Failed to retrieve item from secure storage', { key }, { error: error instanceof Error ? error.message : String(error) });
 			return undefined;
 		}
 	}
