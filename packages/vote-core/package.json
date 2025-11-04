@@ -44,6 +44,7 @@
 	"dependencies": {
 		"@libp2p/interface": "^2.7.0",
 		"@libp2p/peer-id-factory": "^4.2.4",
-		"uint8arrays": "^5.1.0"
+		"uint8arrays": "^5.1.0",
+		"zod": "^4.1.12"
 	}
 }
