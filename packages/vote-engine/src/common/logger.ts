@@ -118,8 +118,8 @@ export class Logger {
 		// Detect environment
 		if (typeof process !== 'undefined' && process.env) {
 			this.isDevelopment = process.env.NODE_ENV !== 'production';
-		} else if (typeof __DEV__ !== 'undefined') {
-			this.isDevelopment = __DEV__;
+		} else if (typeof (globalThis as any).__DEV__ !== 'undefined') {
+			this.isDevelopment = (globalThis as any).__DEV__;
 		}
 
 		// Set appropriate log level
