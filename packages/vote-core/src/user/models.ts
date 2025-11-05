@@ -1,14 +1,14 @@
-import type { ImageRef, SID, Signature, Timestamp } from '../common';
+import type { ImageRef, Signature, Timestamp } from '../common';
 
 export type DefaultUser = {
 	name: string;
-	image: ImageRef;
+	imageRef?: ImageRef;
 };
 
 export type User = {
-	sid: SID;
+	id: string;
 	name: string;
-	image: ImageRef;
+	imageRef?: ImageRef;
 	activeKeys: UserKey[];
 };
 
@@ -51,7 +51,7 @@ export type ReviseUserHistory = UserHistory & {
 
 export type UserInfo = {
 	name: string;
-	image: ImageRef;
+	imageRef: ImageRef;
 };
 
 export type UserInit = UserInfo & {

@@ -1,4 +1,4 @@
-import { OnboardingTasksEngine } from './onboarding-tasks-engine';
+import { OnboardingTasksEngine } from './onboarding-tasks-engine.js';
 
 export class MockOnboardingTasksEngine extends OnboardingTasksEngine {
 	async getCompletedOnboardingTasks(): Promise<string[]> {

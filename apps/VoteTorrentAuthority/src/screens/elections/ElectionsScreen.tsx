@@ -11,7 +11,6 @@ import {
 	IElectionsEngine,
 	INetworkEngine,
 	Proposal,
-	SID,
 } from "@votetorrent/vote-core";
 import { ElectionCard } from "./components/ElectionCard";
 import { ExtendedTheme, useNavigation, useTheme } from "@react-navigation/native";
@@ -93,8 +92,8 @@ export const ElectionsScreen = () => {
 		setShowHistory(!showHistory);
 	};
 
-	const navigateToElectionDetails = async (electionSid: SID) => {
-		const engine = await electionsEngine?.openElection(electionSid);
+	const navigateToElectionDetails = async (electionId: string) => {
+		const engine = await electionsEngine?.openElection(electionId);
 		if (engine) {
 			navigation.navigate("ElectionDetails", {
 				electionEngine: engine,
@@ -108,10 +107,10 @@ export const ElectionsScreen = () => {
 				{elections.length > 0 ? (
 					elections.map((election) => (
 						<ElectionCard
-							key={election.sid}
+							key={election.id}
 							election={election}
 							onPress={() => {
-								navigateToElectionDetails(election.sid);
+								navigateToElectionDetails(election.id);
 							}}
 						/>
 					))
@@ -128,10 +127,10 @@ export const ElectionsScreen = () => {
 				{proposedElections.length > 0 ? (
 					proposedElections.map((election) => (
 						<ElectionCard
-							key={election.proposed.election.sid}
+							key={election.proposed.election.id}
 							election={election.proposed.election}
 							onPress={() => {
-								navigateToElectionDetails(election.proposed.election.sid);
+								navigateToElectionDetails(election.proposed.election.id);
 							}}
 						/>
 					))
@@ -157,7 +156,7 @@ export const ElectionsScreen = () => {
 									key={index}
 									election={historyItem}
 									onPress={() => {
-										navigateToElectionDetails(historyItem.sid);
+										navigateToElectionDetails(historyItem.id);
 									}}
 								/>
 							))

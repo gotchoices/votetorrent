@@ -48,7 +48,7 @@ export function NetworkDetailsScreen() {
 			try {
 				const authorityEngine = await getEngine<IAuthorityEngine>(
 					"authority",
-					networkDetails?.network.sid
+					networkDetails?.network.id
 				);
 				setPrimaryAuthorityEngine(authorityEngine);
 				const details = await authorityEngine.getDetails();

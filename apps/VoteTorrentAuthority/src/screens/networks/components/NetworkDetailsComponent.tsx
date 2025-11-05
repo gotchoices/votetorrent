@@ -21,8 +21,8 @@ export function NetworkDetailsComponent({
 	return (
 		<View style={[styles.section, styles.detailContainer]}>
 			<View style={styles.detail}>
-				<ThemedText type="defaultSemiBold">{t("sid")}:</ThemedText>
-				<ThemedText>{details.network.sid}</ThemedText>
+				<ThemedText type="defaultSemiBold">{t("id")}:</ThemedText>
+				<ThemedText>{details.network.id}</ThemedText>
 			</View>
 			<View style={styles.detail}>
 				<ThemedText type="defaultSemiBold">{t("hash")}:</ThemedText>

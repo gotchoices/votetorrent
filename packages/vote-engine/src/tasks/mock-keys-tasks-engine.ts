@@ -1,12 +1,11 @@
 import type { ReleaseKeyTask } from '@votetorrent/vote-core';
-import { KeysTasksEngine } from './keys-tasks-engine';
+import { KeysTasksEngine } from './keys-tasks-engine.js';
 import {
 	ElectionEvent, // Import as value for enum usage
 	ElectionType, // Import as value for enum usage
 } from '@votetorrent/vote-core';
 import type {
 	ElectionDetails,
-	SID,
 	ElectionCore,
 	ElectionRevision,
 	KeyholderInvitation,
@@ -18,10 +17,10 @@ import type {
 	InvitationStatus,
 } from '@votetorrent/vote-core';
 
-// Mock SID
-const MOCK_USER_SID: SID = 'mock-user-sid-123';
-const MOCK_ELECTION_SID: SID = 'mock-election-sid-456';
-const MOCK_AUTHORITY_SID: SID = 'mock-authority-sid-789';
+// Mock ID
+const MOCK_USER_ID: string = 'mock-user-id-123';
+const MOCK_ELECTION_ID: string = 'mock-election-id-456';
+const MOCK_AUTHORITY_ID: string = 'mock-authority-id-789';
 
 // Mock Timestamp (simplified)
 const MOCK_TIMESTAMP: Timestamp = Date.now();
@@ -83,17 +82,17 @@ const MOCK_KEYHOLDER_INVITATION_STATUS: InvitationStatus<KeyholderInvitation> =
 			signatures: [MOCK_SIGNATURE_1],
 		},
 		result: {
-			userSid: 'mock-keyholder-user-sid',
+			userId: 'mock-keyholder-user-id',
 			isAccepted: true,
 			invitationSignature: 'mock-invitation-signature-value',
-			invokedSid: 'mock-invoked-keyholder-sid',
+			invokedId: 'mock-invoked-keyholder-id',
 		},
 	};
 
 // Mock ElectionCore
 const MOCK_ELECTION_CORE: ElectionCore = {
-	sid: MOCK_ELECTION_SID,
-	authoritySid: MOCK_AUTHORITY_SID,
+	id: MOCK_ELECTION_ID,
+	authorityId: MOCK_AUTHORITY_ID,
 	title: 'Mock General Election 2024',
 	date: new Date('2024-11-05T00:00:00.000Z').getTime(),
 	revisionDeadline: new Date('2024-10-01T00:00:00.000Z').getTime(),
@@ -103,7 +102,7 @@ const MOCK_ELECTION_CORE: ElectionCore = {
 
 // Mock ElectionRevision
 const MOCK_ELECTION_REVISION: ElectionRevision = {
-	electionSid: MOCK_ELECTION_SID,
+	electionId: MOCK_ELECTION_ID,
 	revision: 1,
 	revisionTimestamp: [MOCK_TIMESTAMP],
 	tags: ['general', 'mock'],
@@ -141,7 +140,7 @@ const MOCK_RELEASE_KEY_TASK_1: ReleaseKeyTask = {
 	type: 'release-key',
 	network: MOCK_NETWORK_REFERENCE,
 	election: MOCK_ELECTION_DETAILS,
-	userSid: MOCK_USER_SID,
+	userId: MOCK_USER_ID,
 };
 
 const MOCK_RELEASE_KEY_TASK_2: ReleaseKeyTask = {
@@ -155,11 +154,11 @@ const MOCK_RELEASE_KEY_TASK_2: ReleaseKeyTask = {
 		...MOCK_ELECTION_DETAILS,
 		election: {
 			...MOCK_ELECTION_DETAILS.election,
-			sid: MOCK_ELECTION_SID,
+			id: MOCK_ELECTION_ID,
 			title: 'Repubican Primary Election',
 		},
 	},
-	userSid: MOCK_USER_SID,
+	userId: MOCK_USER_ID,
 };
 
 const MOCK_PENDING_RELEASE_KEY_TASKS: ReleaseKeyTask[] = [
@@ -176,8 +175,8 @@ export class MockKeysTasksEngine extends KeysTasksEngine {
 	): Promise<void> {
 		const index = MOCK_PENDING_RELEASE_KEY_TASKS.findIndex(
 			(t) =>
-				t.userSid === task.userSid &&
-				t.election.election.sid === task.election.election.sid
+				t.userId === task.userId &&
+				t.election.election.id === task.election.election.id
 		);
 		if (index > -1) {
 			const completedTask = MOCK_PENDING_RELEASE_KEY_TASKS.splice(index, 1)[0];

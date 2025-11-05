@@ -17,8 +17,7 @@ export default function OfficerDetailsScreen() {
 
 	const officerDetails = [
 		{ label: t("title"), value: officer.title },
-		{ label: t("userSid"), value: officer.userSid },
-		{ label: t("signature"), value: officer.signature.signature },
+		{ label: t("userId"), value: officer.userId },
 	];
 
 	return (

@@ -3,10 +3,10 @@ import type {
 	NetworkInit,
 	NetworkReference,
 	User,
+	INetworksEngine,
 } from '@votetorrent/vote-core';
-import type { INetworksEngine } from '@votetorrent/vote-core';
-import { MockNetworkEngine } from '../network/mock-network-engine';
-import { MOCK_NETWORKS } from '../mock-data';
+import { MockNetworkEngine } from '../network/mock-network-engine.js';
+import { MOCK_NETWORKS } from '../mock-data.js';
 
 export class MockNetworksEngine implements INetworksEngine {
 	protected recentNetworks: NetworkReference[] = [];

@@ -4,7 +4,6 @@ import type {
 	IElectionEngine,
 	IElectionsEngine,
 	Proposal,
-	SID,
 } from '@votetorrent/vote-core';
 
 export class ElectionsEngine implements IElectionsEngine {
@@ -28,7 +27,7 @@ export class ElectionsEngine implements IElectionsEngine {
 		throw new Error('Not implemented');
 	}
 
-	openElection(electionSid: SID): Promise<IElectionEngine> {
+	openElection(electionId: string): Promise<IElectionEngine> {
 		throw new Error('Not implemented');
 	}
 }

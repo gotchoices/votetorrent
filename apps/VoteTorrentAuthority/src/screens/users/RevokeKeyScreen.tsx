@@ -65,8 +65,8 @@ export function RevokeKeyScreen() {
 			<ScrollView style={styles.container}>
 				<View style={[styles.section, styles.detailContainer]}>
 					<View style={styles.detail}>
-						<ThemedText type="defaultSemiBold">{t("sid")}:</ThemedText>
-						<ThemedText>{user.sid}</ThemedText>
+						<ThemedText type="defaultSemiBold">{t("id")}:</ThemedText>
+						<ThemedText>{user.id}</ThemedText>
 					</View>
 					<View style={styles.detail}>
 						<ThemedText type="defaultSemiBold">{t("name")}:</ThemedText>

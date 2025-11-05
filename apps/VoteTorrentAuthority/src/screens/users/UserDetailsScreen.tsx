@@ -37,7 +37,7 @@ export function UserDetailsScreen() {
 	useFocusEffect(
 		useCallback(() => {
 			const fetchUserData = async () => {
-				if (!initialUser?.sid || !userEngine) return;
+				if (!initialUser?.id || !userEngine) return;
 
 				setIsLoadingUser(true);
 				try {
@@ -45,7 +45,7 @@ export function UserDetailsScreen() {
 					if (latestUser) {
 						setUser(latestUser);
 					} else {
-						console.warn("User not found after refetch:", initialUser.sid);
+						console.warn("User not found after refetch:", initialUser.id);
 					}
 				} catch (error) {
 					console.error("Failed to fetch latest user data:", error);
@@ -55,17 +55,17 @@ export function UserDetailsScreen() {
 			};
 
 			fetchUserData();
-		}, [initialUser?.sid, userEngine])
+		}, [initialUser?.id, userEngine])
 	);
 
 	useFocusEffect(
 		useCallback(() => {
 			const fetchHistory = async () => {
-				if (!initialUser?.sid || !userEngine) return;
+				if (!initialUser?.id || !userEngine) return;
 
 				setIsLoadingHistory(true);
 				try {
-					const historyIterable = await userEngine.getHistory(initialUser.sid, true);
+					const historyIterable = await userEngine.getHistory(initialUser.id, true);
 					const historyArray = await asyncIterableToArray(historyIterable);
 					setUserHistoryList(historyArray);
 				} catch (error) {
@@ -76,7 +76,7 @@ export function UserDetailsScreen() {
 			};
 
 			fetchHistory();
-		}, [initialUser?.sid, userEngine])
+		}, [initialUser?.id, userEngine])
 	);
 
 	const toggleHistory = () => {
@@ -91,8 +91,8 @@ export function UserDetailsScreen() {
 
 			<View style={[styles.section, styles.detailContainer]}>
 				<View style={styles.detail}>
-					<ThemedText type="defaultSemiBold">{t("sid")}: </ThemedText>
-					<ThemedText>{user.sid}</ThemedText>
+					<ThemedText type="defaultSemiBold">{t("id")}: </ThemedText>
+					<ThemedText>{user.id}</ThemedText>
 				</View>
 				<View style={styles.detail}>
 					<ThemedText type="defaultSemiBold">{t("name")}: </ThemedText>

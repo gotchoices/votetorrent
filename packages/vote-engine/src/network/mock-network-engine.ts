@@ -12,9 +12,11 @@ import type {
 	NetworkReference,
 	NetworkSummary,
 	Proposal,
-	SID,
 	ElectionType,
 	NetworkRevision,
+	ElectionInit,
+	ElectionSummary,
+	IElectionEngine,
 } from '@votetorrent/vote-core';
 import {
 	MOCK_AUTHORITIES,
@@ -23,15 +25,10 @@ import {
 	MOCK_UTAH_NETWORK_DETAILS,
 	MOCK_UTAH_ADORNED_NETWORK_REFERENCE,
 	MOCK_UTAH_NETWORK,
-	generateSid,
-} from '../mock-data';
-import { MockAuthorityEngine } from '../authority/mock-authority-engine';
-import { MockUserEngine } from '../user/mock-user-engine';
-import type {
-	ElectionInit,
-	ElectionSummary,
-} from '@votetorrent/vote-core/dist/src/election/models';
-import type { IElectionEngine } from '@votetorrent/vote-core/dist/src/election/types';
+	generateId,
+} from '../mock-data.js';
+import { MockAuthorityEngine } from '../authority/mock-authority-engine.js';
+import { MockUserEngine } from '../user/mock-user-engine.js';
 
 export class MockNetworkEngine implements INetworkEngine {
 	private currentNetworkReference: NetworkReference;
@@ -48,8 +45,8 @@ export class MockNetworkEngine implements INetworkEngine {
 			} else {
 				const basicNetwork: Network = {
 					hash: matchedNetwork.hash,
-					sid: generateSid('net'),
-					primaryAuthoritySid: generateSid('auth'),
+					id: generateId('net'),
+					primaryAuthorityId: generateId('auth'),
 					name: matchedNetwork.name,
 					relays: matchedNetwork.relays,
 					policies: {
@@ -87,8 +84,8 @@ export class MockNetworkEngine implements INetworkEngine {
 			};
 			const basicNetwork: Network = {
 				hash: this.currentNetworkReference.hash,
-				sid: generateSid('net'),
-				primaryAuthoritySid: generateSid('auth'),
+				id: generateId('net'),
+				primaryAuthorityId: generateId('auth'),
 				name: this.currentNetworkReference.name,
 				relays: this.currentNetworkReference.relays,
 				policies: {
@@ -188,7 +185,7 @@ export class MockNetworkEngine implements INetworkEngine {
 			MOCK_UTAH_NETWORK
 		) {
 			return {
-				sid: MOCK_UTAH_NETWORK.sid,
+				id: MOCK_UTAH_NETWORK.id,
 				hash: this.currentNetworkReference.hash,
 				name: this.currentNetworkReference.name,
 				imageUrl: this.currentNetworkReference.imageUrl,
@@ -197,7 +194,7 @@ export class MockNetworkEngine implements INetworkEngine {
 			};
 		}
 		return {
-			sid: generateSid('netsum'),
+			id: generateId('netsum'),
 			hash: this.currentNetworkReference.hash,
 			name: this.currentNetworkReference.name,
 			imageUrl: this.currentNetworkReference.imageUrl,
@@ -216,7 +213,7 @@ export class MockNetworkEngine implements INetworkEngine {
 		);
 	}
 
-	async getUser(userSid: SID): Promise<IUserEngine | undefined> {
+	async getUser(userId: string): Promise<IUserEngine | undefined> {
 		return new MockUserEngine();
 	}
 
@@ -232,26 +229,26 @@ export class MockNetworkEngine implements INetworkEngine {
 		};
 	}
 
-	async openAuthority(authoritySid: SID): Promise<IAuthorityEngine> {
+	async openAuthority(authorityId: string): Promise<IAuthorityEngine> {
 		const matchingAuthority = MOCK_AUTHORITIES.find(
-			(a) => a.sid === authoritySid
+			(a) => a.id === authorityId
 		);
 		if (!matchingAuthority) {
 			throw new Error(
-				`MockNetworkEngine: Authority SID '${authoritySid}' not found.`
+				`MockNetworkEngine: Authority ID '${authorityId}' not found.`
 			);
 		}
 		return new MockAuthorityEngine(matchingAuthority);
 	}
 
-	async openElection(electionSid: SID): Promise<IElectionEngine> {
+	async openElection(electionId: string): Promise<IElectionEngine> {
 		throw new Error(
 			'MockNetworkEngine: openElection is not implemented. Use MockElectionsEngine.'
 		);
 	}
 
 	async pinAuthority(authority: Authority): Promise<void> {
-		if (!this.pinnedAuthorities.find((a) => a.sid === authority.sid)) {
+		if (!this.pinnedAuthorities.find((a) => a.id === authority.id)) {
 			this.pinnedAuthorities.push(authority);
 		}
 	}
@@ -283,17 +280,17 @@ export class MockNetworkEngine implements INetworkEngine {
 
 	async respondToInvitation<TInvokes, TSlot>(
 		invitation: InvitationAction<TInvokes, TSlot>
-	): Promise<SID> {
+	): Promise<string> {
 		console.log(
 			'MockNetworkEngine: respondToInvitation called with:',
 			invitation
 		);
-		return generateSid('inv-resp') as SID;
+		return generateId('inv-resp') as string;
 	}
 
-	async unpinAuthority(authoritySid: SID): Promise<void> {
+	async unpinAuthority(authorityId: string): Promise<void> {
 		this.pinnedAuthorities = this.pinnedAuthorities.filter(
-			(a) => a.sid !== authoritySid
+			(a) => a.id !== authorityId
 		);
 	}
 }

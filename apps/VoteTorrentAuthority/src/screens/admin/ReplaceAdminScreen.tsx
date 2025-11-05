@@ -15,7 +15,6 @@ import { globalStyles } from "../../theme/styles";
 
 export default function ReplaceAdminScreen() {
 	const { colors } = useTheme() as ExtendedTheme;
-	const colorScheme = useColorScheme();
 	const { t } = useTranslation();
 	const { authority, officer, removeOfficer } = useRoute().params as {
 		authority: Authority;
@@ -34,7 +33,7 @@ export default function ReplaceAdminScreen() {
 			if (!networkEngine) return;
 			try {
 				setIsLoading(true);
-				const admin = await networkEngine.getAdmin(authority.sid);
+				const admin = await networkEngine.getAdmin(authority.id);
 				console.log("Loaded admin:", admin);
 				setCurrentAdmin(admin);
 				// Only set proposed officers if we haven't loaded initial data
@@ -58,7 +57,7 @@ export default function ReplaceAdminScreen() {
 				setProposedOfficers((current) => {
 					console.log("Before removal - Current list:", current);
 					console.log("Current admin:", currentAdmin);
-					const filtered = current.filter((a) => a.sid !== officer.sid);
+					const filtered = current.filter((a) => a.userId !== officer.userId);
 					console.log("After removal - New list:", filtered);
 					return filtered;
 				});
@@ -67,7 +66,7 @@ export default function ReplaceAdminScreen() {
 				setProposedOfficers((current) => {
 					console.log("Before add/update - Current list:", current);
 					// If editing an existing officer, replace it
-					const existingIndex = current.findIndex((a) => a.sid === officer.sid);
+					const existingIndex = current.findIndex((a) => a.userId === officer.userId);
 					if (existingIndex >= 0) {
 						const newOfficers = [...current];
 						newOfficers[existingIndex] = officer;
@@ -94,19 +93,20 @@ export default function ReplaceAdminScreen() {
 	const handleEditOfficer = (officer?: Officer) => {
 		navigation.navigate("EditOfficer", {
 			authority: authority,
-			officerSid: officer?.sid,
+			officerId: officer?.userId,
 		});
 	};
 
 	const handleCreateProposal = async () => {
 		try {
 			const newAdmin: Admin = {
-				sid: "",
-				authoritySid: authority.sid,
+				id: "",
+				authorityId: authority.id,
 				officers: proposedOfficers,
-				expiration: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).getTime(), // 30 days from now
+				effectiveAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).getTime(), // 30 days from now
+				thresholdPolicies: [],
 			};
-			await networkEngine.setProposedAdmin(authority.sid, newAdmin);
+			await networkEngine.setProposedAdmin(authority.id, newAdmin);
 			navigation.popTo("AuthorityDetails", { authority });
 		} catch (error) {
 			console.error("Error creating proposal:", error);
@@ -121,17 +121,17 @@ export default function ReplaceAdminScreen() {
 				</ThemedText>
 
 				<View style={styles.section}>
-					{proposedOfficers.map((admin) => (
+					{proposedOfficers.map((officer) => (
 						<InfoCard
-							key={admin.sid}
-							title={admin.name}
-							image={{ uri: admin.imageRef?.url }}
+							key={officer.userId}
+							title={officer.title}
+							image={{ uri: officer.imageRef?.url }}
 							additionalInfo={[
-								{ label: t("title"), value: admin.title },
-								{ label: t("sid"), value: admin.sid },
+								{ label: t("title"), value: officer.title },
+								{ label: t("userId"), value: officer.userId },
 							]}
 							icon="pen"
-							onPress={() => handleEditOfficer(admin)}
+							onPress={() => handleEditOfficer(officer)}
 						/>
 					))}
 					<View style={styles.addButtonContainer}>

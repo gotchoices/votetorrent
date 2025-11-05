@@ -1,9 +1,12 @@
-import type { ImageRef, Proposal, SID } from '../common';
+import type { ImageRef, Proposal } from '../common';
 import type { AdminInit, AuthorityInit } from '../authority/models';
 import type { ElectionType } from '../election/models';
 
 export type Network = {
-	/** The hash of the network sovereign ID */
+	/** The network ID */
+	id: string;
+
+	/** The hash of the network ID */
 	hash: string;
 
 	/** The optional image for the network */
@@ -15,14 +18,11 @@ export type Network = {
 	/** The policies for the network */
 	policies: NetworkPolicies;
 
-	/** The primary authority sovereign ID */
-	primaryAuthoritySid: SID;
+	/** The primary authority ID */
+	primaryAuthorityId: string;
 
 	/** One or more multiaddresses to stable hosts, necessary to initially connect to the network */
 	relays: string[];
-
-	/** The network sovereign ID */
-	sid: SID;
 };
 
 export type NetworkRevision = {
@@ -59,7 +59,7 @@ export type NetworkPolicies = {
 };
 
 export type NetworkReference = {
-	/** Hash of networkSid - encoded into the network protocols */
+	/** Hash of networkId - encoded into the network protocols */
 	hash: string;
 
 	/** The optional image for the network (published by the primary authority) - this should be verified once connected to prevent spoofing
@@ -101,7 +101,7 @@ export type NetworkInit = {
 };
 
 export type NetworkSummary = {
-	/** The hash of the network sovereign ID */
+	/** The hash of the network ID */
 	hash: string;
 
 	/** The optional image for the network
@@ -115,8 +115,8 @@ export type NetworkSummary = {
 	/** The domain name of the primary authority */
 	primaryAuthorityDomainName: string;
 
-	/** The network sovereign ID */
-	sid: SID;
+	/** The network ID */
+	id: string;
 };
 
 export type NetworkInfrastructure = {

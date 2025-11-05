@@ -6,10 +6,12 @@ import type {
 	User,
 } from '@votetorrent/vote-core';
 import type { INetworksEngine } from '@votetorrent/vote-core';
-import type { EngineContext } from '../types';
-import { NetworkEngine } from '../network/network-engine';
-import { Database } from '@quereus/quereus';
-import { initDB } from '../database/initialize';
+import type { EngineContext } from '../types.js';
+import { NetworkEngine } from '../network/network-engine.js';
+import { Database, MisuseError, QuereusError } from '@quereus/quereus';
+import { initDB } from '../database/initialize.js';
+import { randomUUID } from 'crypto';
+import { Digest } from '@optimystic/quereus-plugin-crypto';
 
 export class NetworksEngine implements INetworksEngine {
 	constructor(private readonly localStorage: LocalStorage) {}
@@ -19,25 +21,19 @@ export class NetworksEngine implements INetworksEngine {
 	}
 
 	async create(networkInit: NetworkInit, user: User): Promise<INetworkEngine> {
-		const ctx = await this.createContext(user);
-		const primaryAuthoritySid = (await ctx.db
-			.prepare(`select Digest(?, ?, ?, ?, ?) as result`)
-			.get([
-				networkInit.primaryAuthority.name,
-				networkInit.primaryAuthority.domainName,
-				networkInit.imageUrl ?? null,
-				null,
-				null,
-			])['result']) as string;
-		if (!primaryAuthoritySid) {
-			throw new Error(
-				'Failed to create network: Primary authority SID is null'
-			);
+		let ctx: EngineContext;
+		try {
+			ctx = await this.createContext(user);
+		} catch (error) {
+			throw new Error('Failed to create database context: ' + error);
 		}
 
 		// Prepare json fields
-		const imageRefJson = networkInit.imageUrl
+		const networkImageRefJson = networkInit.imageUrl
 			? JSON.stringify(networkInit.imageUrl)
+			: null;
+		const primaryAuthorityImageRefJson = networkInit.primaryAuthority.imageUrl
+			? JSON.stringify(networkInit.primaryAuthority.imageUrl)
 			: null;
 		const relaysJson = JSON.stringify(networkInit.relays ?? []);
 		const tsaJson = JSON.stringify(
@@ -45,35 +41,40 @@ export class NetworksEngine implements INetworksEngine {
 		);
 		const numberRequiredTSAs = networkInit.policies?.numberRequiredTSAs ?? 0;
 		const electionType = networkInit.policies?.electionType ?? null;
+		const thresholdPolicies = JSON.stringify(
+			networkInit.admin.thresholdPolicies ?? []
+		);
+		const userImageRefJson = user?.imageRef?.url
+			? JSON.stringify(user.imageRef)
+			: null;
 
-		const networkSid = (await ctx.db
-			.prepare(`select Digest(?, ?, ?, ?, ?, ?, ?) as result`)
-			.get([
-				primaryAuthoritySid,
-				networkInit.name,
-				imageRefJson,
-				relaysJson,
-				tsaJson,
-				numberRequiredTSAs,
-				electionType,
-			])['result']) as string;
-		if (!networkSid) {
-			throw new Error('Failed to create network: Network SID is null');
-		}
-		const networkHash = (await ctx.db
-			.prepare(`select H16(?) as result`)
-			.get([networkSid])['result']) as string;
+		const networkId = randomUUID().toString();
+		const primaryAuthorityId = randomUUID().toString();
+		const networkHash = Digest(networkId).toString();
 		if (!networkHash) {
 			throw new Error('Failed to create network: Network hash is null');
 		}
 
+		const firstOfficer = networkInit.admin.officers?.[0];
+		if (!firstOfficer || !firstOfficer.init) {
+			throw new Error('Failed to create network: Officer init is required');
+		}
+		const officerInit = firstOfficer.init;
+		const officerScopesJson = JSON.stringify(officerInit.scopes);
+
+		const firstKey = user.activeKeys?.[0];
+		if (!firstKey) {
+			throw new Error('Failed to create network: User key is required');
+		}
+
 		try {
-			// Insert Network
-			await ctx.db.exec(
+			//TODO add context ( Tid )
+			await ctx.db.eval(
 				`
 				insert into Network (
-					Sid,
+					Id,
 					Hash,
+					PrimaryAuthorityId,
 					Name,
 					ImageRef,
 					Relays,
@@ -82,29 +83,89 @@ export class NetworksEngine implements INetworksEngine {
 					ElectionType
 				)
 				values (
-					:sid,
-					:hash,
-					:name,
-					:imageRef,
+					:networkId,
+					:networkHash,
+					:primaryAuthorityId,
+					:networkName,
+					:networkImageRef,
 					:relays,
 					:timestampAuthorities,
 					:numberRequiredTSAs,
 					:electionType
 				)
+
+				insert into Authority (
+					Id,
+					Name,
+					DomainName,
+					ImageRef
+				)
+				values (:primaryAuthorityId, :primaryAuthorityName, :primaryAuthorityDomainName, :primaryAuthorityImageRef)
+
+				insert into Admin (
+					AuthorityId,
+					EffectiveAt,
+					ThresholdPolicies
+				)
+				values (:primaryAuthorityId, :adminEffectiveAt, :thresholdPolicies)
+
+				insert into Officer (
+					AuthorityId,
+					AdminEffectiveAt,
+					UserId,
+					Title,
+					Scopes
+				)
+				values (:primaryAuthorityId, :adminEffectiveAt, :userId, :title, :scopes)
+
+				insert into User (
+					Id,
+					Name,
+					ImageRef
+				)
+				values (:userId, :userName, :userImageRef)
+
+				insert into UserKey (
+					UserId,
+					Type,
+					Key,
+					Expiration
+				)
+				values (:userId, :keyType, :keyValue, :expiration)
 				`,
 				{
-					sid: networkSid,
-					hash: networkHash,
-					name: networkInit.name,
-					imageRef: imageRefJson,
+					networkId: networkId,
+					networkHash: networkHash,
+					networkName: networkInit.name,
+					networkImageRef: networkImageRefJson,
 					relays: relaysJson,
 					timestampAuthorities: tsaJson,
 					numberRequiredTSAs: numberRequiredTSAs,
-					electionType: electionType,
+					electionType: electionType!.toString(),
+					primaryAuthorityId: primaryAuthorityId,
+					primaryAuthorityName: networkInit.primaryAuthority.name,
+					primaryAuthorityDomainName: networkInit.primaryAuthority.domainName,
+					primaryAuthorityImageRef: primaryAuthorityImageRefJson,
+					adminEffectiveAt: networkInit.admin.effectiveAt,
+					thresholdPolicies: thresholdPolicies,
+					userId: user.id,
+					title: officerInit.title,
+					scopes: officerScopesJson,
+					userName: user.name,
+					userImageRef: userImageRefJson,
+					keyType: 'user',
+					keyValue: firstKey.key,
+					expiration: firstKey.expiration,
 				}
 			);
-		} catch (error) {
-			throw new Error('Failed to create network: ' + error);
+		} catch (err) {
+			if (err instanceof QuereusError) {
+				throw new Error(`Quereus error (code ${err.code}): ${err.message}`);
+			} else if (err instanceof MisuseError) {
+				throw new Error(`API misuse: ${err.message}`);
+			} else {
+				throw new Error(`Unknown error: ${err}`);
+			}
 		}
 
 		// Update recent networks list
@@ -146,7 +207,7 @@ export class NetworksEngine implements INetworksEngine {
 	async open(
 		ref: NetworkReference,
 		user: User | undefined,
-		storeAsRecent?: boolean
+		storeAsRecent: boolean = true
 	): Promise<INetworkEngine> {
 		const ctx = await this.createContext(user);
 		const qNetworkEngine = new NetworkEngine(ref, this.localStorage, ctx);

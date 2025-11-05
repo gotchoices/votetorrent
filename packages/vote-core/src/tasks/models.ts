@@ -1,6 +1,5 @@
-import type { ElectionDetails, ElectionInit, BallotInit } from '../election';
+import type { ElectionDetails, ElectionInit, Ballot } from '../election';
 import type { NetworkReference, NetworkInit } from '../network';
-import type { SID } from '../index';
 import type { AdminInit, AuthorityInit, Authority } from '../authority';
 import type { Proposal, Signature } from '../common';
 
@@ -12,20 +11,20 @@ export type ReleaseKeyTask = Task & {
 	type: 'release-key';
 	network: NetworkReference;
 	election: ElectionDetails;
-	userSid: SID;
+	userId: string;
 };
 
 export type SignatureTask = Task & {
 	type: 'signature';
 	network: NetworkReference;
-	userSid: SID;
+	userId: string;
 	signatureType:
 		| 'admin'
 		| 'authority'
-		| 'network'
+		| 'ballot'
 		| 'election'
 		| 'election-revision'
-		| 'ballot';
+		| 'network';
 };
 
 export type AdminSignatureTask = SignatureTask & {
@@ -41,7 +40,7 @@ export type AuthoritySignatureTask = SignatureTask & {
 
 export type NetworkSignatureTask = SignatureTask & {
 	signatureType: 'network';
-	networkRevision: Proposal<NetworkInit>;
+	network: Proposal<NetworkInit>;
 };
 
 export type ElectionSignatureTask = SignatureTask & {
@@ -56,7 +55,7 @@ export type ElectionRevisionSignatureTask = SignatureTask & {
 
 export type BallotSignatureTask = SignatureTask & {
 	signatureType: 'ballot';
-	ballot: Proposal<BallotInit>;
+	ballot: Proposal<Ballot>;
 };
 
 export type SignatureResult = {

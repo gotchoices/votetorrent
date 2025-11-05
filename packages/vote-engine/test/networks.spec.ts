@@ -6,8 +6,9 @@ import type {
 	NetworkInit,
 	INetworksEngine,
 	INetworkEngine,
+	Scope,
 } from '@votetorrent/vote-core';
-import { ElectionType } from '@votetorrent/vote-core';
+import { ElectionType, UserKeyType } from '@votetorrent/vote-core';
 
 // Using AsyncStorage shim for local storage
 import { AsyncStorage } from './shims/react-native';
@@ -17,9 +18,7 @@ describe('NetworksEngine', () => {
 		// Ensure recentNetworks starts as an empty array for spread operations in create()
 		await AsyncStorage.setItem('recentNetworks', []);
 
-		const engine = new NetworksEngine(
-			AsyncStorage
-		) as unknown as INetworksEngine;
+		const engine = new NetworksEngine(AsyncStorage) as INetworksEngine;
 
 		// getRecentNetworks (initial)
 		const initialRecents = await engine.getRecentNetworks();
@@ -34,7 +33,7 @@ describe('NetworksEngine', () => {
 		await AsyncStorage.setItem('recentNetworks', []);
 
 		// create()
-		const networkInit: NetworkInit = {
+		const networkInitPass: NetworkInit = {
 			name: 'Test Network',
 			imageUrl: 'https://cdn.example.com/logo.png',
 			relays: ['/dns4/relay.example.com/tcp/443/wss'],
@@ -45,7 +44,11 @@ describe('NetworksEngine', () => {
 			admin: {
 				officers: [
 					{
-						init: { name: 'Admin A', title: 'Chair', scopes: 'rn,mel' },
+						init: {
+							name: 'Admin A',
+							title: 'Chair',
+							scopes: ['rn', 'mel'] as Scope[],
+						},
 					},
 				],
 				effectiveAt: Date.now(),
@@ -59,14 +62,20 @@ describe('NetworksEngine', () => {
 		};
 
 		const user: User = {
-			sid: 'user-1',
+			id: 'user-1',
 			name: 'Test User',
-			image: { url: 'https://img.local/user.png' },
-			activeKeys: [],
+			imageRef: { url: 'https://img.local/user.png' },
+			activeKeys: [
+				{
+					key: 'key-1',
+					type: UserKeyType.mobile,
+					expiration: Date.now(),
+				},
+			],
 		};
 
 		const returnedNetwork: INetworkEngine = await engine.create(
-			networkInit,
+			networkInitPass,
 			user
 		);
 
@@ -77,15 +86,42 @@ describe('NetworksEngine', () => {
 		const recents = (await AsyncStorage.getItem('recentNetworks')) as any[];
 		expect(recents).to.be.an('array').with.length(1);
 		expect(recents[0]).to.include({
-			name: networkInit.name,
-			primaryAuthorityDomainName: networkInit.primaryAuthority.domainName,
+			name: networkInitPass.name,
+			primaryAuthorityDomainName: networkInitPass.primaryAuthority.domainName,
 		});
-		expect(recents[0].relays).to.deep.equal(networkInit.relays);
-		expect(recents[0].imageUrl).to.equal(networkInit.imageUrl);
+		expect(recents[0].relays).to.deep.equal(networkInitPass.relays);
+		expect(recents[0].imageUrl).to.equal(networkInitPass.imageUrl);
 
 		// getRecentNetworks after create
 		const recentViaEngine = await engine.getRecentNetworks();
 		expect(recentViaEngine).to.be.an('array').with.length(1);
+
+		//	create() should fail with missing officers
+		const networkInitFail: NetworkInit = {
+			name: 'Test Network',
+			imageUrl: 'https://cdn.example.com/logo.png',
+			relays: ['/dns4/relay.example.com/tcp/443/wss'],
+			primaryAuthority: {
+				name: 'Primary Authority',
+				domainName: 'authority.example.com',
+			},
+			admin: {
+				officers: [],
+				effectiveAt: Date.now(),
+				thresholdPolicies: [],
+			},
+			policies: {
+				timestampAuthorities: [],
+				numberRequiredTSAs: 0,
+				electionType: ElectionType.adhoc,
+			},
+		};
+
+		const returnedNetworkFail: INetworkEngine = await engine.create(
+			networkInitFail,
+			user
+		);
+		expect(returnedNetworkFail).to.be.undefined;
 
 		// open() returns a NetworkEngine and can store as recent (dedup to front)
 		const ref = {

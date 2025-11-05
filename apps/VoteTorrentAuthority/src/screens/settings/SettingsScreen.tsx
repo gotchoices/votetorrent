@@ -206,7 +206,7 @@ export default function SettingsScreen() {
 					<InfoCard
 						title={currentUser.name}
 						image={{ uri: currentUser.image?.url || "" }}
-						additionalInfo={[{ label: "SID", value: currentUser.sid }]}
+						additionalInfo={[{ label: "ID", value: currentUser.id }]}
 						icon="chevron-right"
 						onPress={() => {
 							navigation.navigate("UserDetails", {

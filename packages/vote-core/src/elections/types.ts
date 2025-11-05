@@ -1,4 +1,4 @@
-import type { Proposal, SID } from '../common';
+import type { Proposal } from '../common';
 import type { ElectionInit, ElectionSummary } from '../election/models';
 import type { IElectionEngine } from '../election/types';
 
@@ -8,5 +8,5 @@ export type IElectionsEngine = {
 	getElectionHistory(): Promise<ElectionSummary[]>;
 	getElections(): Promise<ElectionSummary[]>;
 	getProposedElections(): Promise<Proposal<ElectionInit>[]>;
-	openElection(electionSid: SID): Promise<IElectionEngine>;
+	openElection(electionId: string): Promise<IElectionEngine>;
 };

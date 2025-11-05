@@ -17,8 +17,8 @@ export function NetworkSignatureTaskDetails({ task }: { task: NetworkSignatureTa
 				<ThemedText>{task.network.name}</ThemedText>
 			</View>
 			<View style={styles.detail}>
-				<ThemedText type="defaultSemiBold">{t("userSid")}: </ThemedText>
-				<ThemedText>{task.userSid}</ThemedText>
+				<ThemedText type="defaultSemiBold">{t("userId")}: </ThemedText>
+				<ThemedText>{task.userId}</ThemedText>
 			</View>
 			<View style={styles.detail}>
 				<ThemedText type="defaultSemiBold">{t("networkRevision")}: </ThemedText>

@@ -1,24 +1,59 @@
 {
-  "version": "0.2.0",
-  "configurations": [
-    {
-      "type": "node",
-      "request": "launch",
-      "name": "Debug Core Tests",
-      "cwd": "${workspaceFolder}/packages/db-core",
-      "program": "${workspaceFolder}/node_modules/aegir/src/index.js",
-      "args": [
-        "test",
-        "--debug",
-        "-g",
-        "Collection"
-      ],
-      "console": "integratedTerminal",
-      "internalConsoleOptions": "neverOpen",
-      "sourceMaps": true,
-      "skipFiles": [
-        "<node_internals>/**"
-      ]
-    }
-  ]
+	"version": "0.2.0",
+	"configurations": [
+		{
+			"type": "node",
+			"request": "launch",
+			"name": "Mocha - Current test file (vote-engine)",
+			"program": "${workspaceFolder}/node_modules/mocha/bin/mocha.js",
+			"args": ["${file}", "--colors", "--bail", "--timeout", "60000"],
+			"runtimeArgs": [
+				"--import",
+				"${workspaceFolder}/packages/vote-engine/register-ts-node.mjs",
+				"--experimental-specifier-resolution=node"
+			],
+			"env": {
+				"TS_NODE_PROJECT": "${workspaceFolder}/packages/vote-engine/tsconfig.test.json"
+			},
+			"cwd": "${workspaceFolder}",
+			"console": "integratedTerminal",
+			"internalConsoleOptions": "neverOpen"
+		},
+		{
+			"type": "node",
+			"request": "launch",
+			"name": "Mocha - All tests (vote-engine)",
+			"program": "${workspaceFolder}/node_modules/mocha/bin/mocha.js",
+			"args": [
+				"packages/vote-engine/test/**/*.spec.ts",
+				"--colors",
+				"--bail",
+				"--timeout",
+				"60000"
+			],
+			"runtimeArgs": [
+				"--import",
+				"${workspaceFolder}/packages/vote-engine/register-ts-node.mjs",
+				"--experimental-specifier-resolution=node"
+			],
+			"env": {
+				"TS_NODE_PROJECT": "${workspaceFolder}/packages/vote-engine/tsconfig.test.json"
+			},
+			"cwd": "${workspaceFolder}",
+			"console": "integratedTerminal",
+			"internalConsoleOptions": "neverOpen"
+		},
+		{
+			"type": "node",
+			"request": "launch",
+			"name": "Debug Core Tests",
+			"cwd": "${workspaceFolder}/packages/db-core",
+			"program": "${workspaceFolder}/node_modules/aegir/src/index.js",
+			"args": ["test", "--debug", "-g", "Collection"],
+			"console": "integratedTerminal",
+			"internalConsoleOptions": "neverOpen",
+			"sourceMaps": true,
+			"skipFiles": ["<node_internals>/**"]
+		}
+	]
 }

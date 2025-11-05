@@ -1,7 +1,6 @@
 import type {
 	AdminDetails,
 	AdminInit,
-	Officer,
 	OfficerInvitation,
 	OfficerInvitationContent,
 	Admin,
@@ -11,8 +10,6 @@ import type {
 	AuthorityInvitationContent,
 	InvitationStatus,
 	Proposal,
-	Scope,
-	ThresholdPolicy,
 	IAuthorityEngine,
 	InvitationEnvelope,
 	InvitationSigned,
@@ -22,10 +19,10 @@ import {
 	MOCK_SHARED_ADMINISTRATION_DETAILS, // Import shared details
 	// MOCK_AUTHORITIES, // Keep if needed for other potential logic
 	// MOCK_THRESHOLD_POLICIES_SLCO, // No longer needed, part of shared
-	generateSid, // Keep for generic cases if needed
+	generateId, // Keep for generic cases if needed
 	// generateHash, // Keep if needed
 	// getUnixTimestamp // Keep if needed
-} from '../mock-data';
+} from '../mock-data.js';
 
 // Local mock data definitions (MOCK_ADMINISTRATORS, MOCK_THRESHOLD_POLICIES, etc.) are removed.
 
@@ -42,8 +39,8 @@ export class MockAuthorityEngine implements IAuthorityEngine {
 		);
 
 		this.admin = detailsCopy.admin;
-		// **Important**: Set the correct authoritySid for this specific instance
-		this.admin.authoritySid = this.authority.sid;
+		// **Important**: Set the correct authorityId for this specific instance
+		this.admin.authorityId = this.authority.id;
 
 		this.proposedAdmin = detailsCopy.proposed;
 	}

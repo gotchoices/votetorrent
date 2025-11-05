@@ -1,20 +1,13 @@
-import type {
-	ImageRef,
-	Proposal,
-	SID,
-	Signature,
-	Timestamp,
-	VideoRef,
-} from '../common';
-import type { Invitation, InvitationStatus } from '../invitation/models';
+import type { ImageRef, Proposal, Timestamp, VideoRef } from '../common';
+import type { Invite, InviteStatus } from '../invite/models';
 
 /** The immutable election record - any change requires abandoning and replacing the election */
 export type ElectionCore = {
-	/** The sid of the election */
-	sid: SID;
+	/** The id of the election */
+	id: string;
 
-	/** The sid of the election authority */
-	authoritySid: SID;
+	/** The id of the election authority */
+	authorityId: string;
 
 	/** The title of the election */
 	title: string;
@@ -25,16 +18,16 @@ export type ElectionCore = {
 	/** The deadline for making revisions to the election - this deadline cannot itself be revised */
 	revisionDeadline: number;
 
+	/** The deadline for adding or revising ballots to the election */
+	ballotDeadline: number;
+
 	/** The type of election */
 	type: ElectionType;
-
-	/** The signature of the election authority's administrator(s) */
-	signature: Signature;
 };
 
 export interface ElectionRevision {
-	/** SID of the election */
-	electionSid: SID;
+	/** ID of the election */
+	electionId: string;
 
 	/** The monotonically increasing sequence number of the revision */
 	revision: number;
@@ -49,24 +42,21 @@ export interface ElectionRevision {
 	instructions: string;
 
 	/** The keyholders who's combined signatures decrypt the election records - there must be at least one */
-	keyholders: InvitationStatus<KeyholderInvitation>[];
+	keyholders: InviteStatus<SentKeyholderInvite>[];
 
 	/** Unix timestamps corresponding to each cut-off event */
 	timeline: Record<ElectionEvent, number>;
 
 	/** The policy for the required number of keyholders */
 	keyholderThreshold: number;
-
-	/** Authority's administrator's signature of election revision digest */
-	signature: Signature;
 }
 
 export type ElectionCoreInit = {
-	/** The sid of the election */
-	sid: SID;
+	/** The id of the election */
+	id: string;
 
-	/** The sid of the election authority */
-	authoritySid: SID;
+	/** The id of the election authority */
+	authorityId: string;
 
 	/** The title of the election */
 	title: string;
@@ -77,19 +67,22 @@ export type ElectionCoreInit = {
 	/** The deadline for making revisions to the election - this deadline cannot itself be revised */
 	revisionDeadline: number;
 
+	/** The deadline for adding or revising ballots to the election */
+	ballotDeadline: number;
+
 	/** The type of election */
 	type: ElectionType;
 };
 
 export type ElectionRevisionInit = {
-	/** SID of the election */
-	electionSid: SID;
+	/** ID of the election */
+	electionId: string;
 
 	/** The monotonically increasing sequence number of the revision */
 	revision: number;
 
 	/** Evidence that the revision was made prior to the revisionDeadline of the election */
-	revisionTimestamp: Timestamp[];
+	revisionTimestamp: Timestamp;
 
 	/** Tags describing and grouping the election.  e.g. ["general"] or ["democrat", "primary"] */
 	tags: string[];
@@ -98,7 +91,7 @@ export type ElectionRevisionInit = {
 	instructions: string;
 
 	/** The keyholders who's combined signatures decrypt the election records - there must be at least one */
-	keyholders: KeyholderInvitationContent[];
+	keyholders: KeyholderInvite[];
 
 	/** Unix timestamps corresponding to each cut-off event */
 	timeline: Record<ElectionEvent, number>;
@@ -127,8 +120,8 @@ export type ElectionInit = {
 };
 
 export type ElectionSummary = {
-	/** The sid of the election */
-	sid: SID;
+	/** The id of the election */
+	id: string;
 
 	/** The title of the election */
 	title: string;
@@ -158,49 +151,23 @@ export enum ElectionEvent {
 	closed = 'closed',
 }
 
-export type KeyholderInvitationContent = {
+export type KeyholderInvite = Invite & {
 	name: string;
 };
 
-export type KeyholderInvitation = Invitation<KeyholderInvitationContent> & {
-	type: 'Keyholder';
+export type SentKeyholderInvite = {
+	name: string;
 };
 
 export type Ballot = {
-	/** The sid of the ballot */
-	sid: SID;
+	/** The id of the ballot */
+	id: string;
 
-	/** The sid of the election */
-	electionSid: SID;
+	/** The id of the election */
+	electionId: string;
 
-	/** The sid of the authority posting the ballot */
-	authoritySid: SID;
-
-	/** The description of the ballot (who is this for, what is the purpose of this ballot, etc.) */
-	description: string;
-
-	/** The district/group codes on the ballot */
-	districts: string[];
-
-	/** The questions on the ballot */
-	questions: Question[];
-
-	/** The timestamp of the ballot */
-	timestamp: Timestamp;
-
-	/** The signature of the ballot */
-	signature: Signature;
-};
-
-export type BallotInit = {
-	/** The sid of the ballot */
-	sid: SID;
-
-	/** The sid of the election */
-	electionSid: SID;
-
-	/** The sid of the authority posting the ballot */
-	authoritySid: SID;
+	/** The id of the authority posting the ballot */
+	authorityId: string;
 
 	/** The description of the ballot (who is this for, what is the purpose of this ballot, etc.) */
 	description: string;
@@ -210,9 +177,6 @@ export type BallotInit = {
 
 	/** The questions on the ballot */
 	questions: Question[];
-
-	/** The timestamp of the ballot */
-	timestamp: Timestamp;
 };
 
 export type BallotDetails = {
@@ -220,18 +184,18 @@ export type BallotDetails = {
 	ballot: Ballot;
 
 	/** The proposed revision of the ballot */
-	proposed?: Proposal<BallotInit>;
+	proposed?: Proposal<Ballot>;
 };
 
 export type BallotSummary = {
-	/** The sid of the ballot */
-	sid: SID;
+	/** The id of the ballot */
+	id: string;
 
-	/** The sid of the election */
-	electionSid: SID;
+	/** The id of the election */
+	electionId: string;
 
-	/** The sid of the authority posting the ballot */
-	authoritySid: SID;
+	/** The id of the authority posting the ballot */
+	authorityId: string;
 };
 
 export type Option = {

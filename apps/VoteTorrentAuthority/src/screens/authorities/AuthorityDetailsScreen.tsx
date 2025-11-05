@@ -38,7 +38,7 @@ export default function AuthorityDetailsScreen() {
 	const handlePinToggle = async () => {
 		try {
 			if (pinned) {
-				await networkEngine?.unpinAuthority(authority.sid);
+				await networkEngine?.unpinAuthority(authority.id);
 			} else {
 				await networkEngine?.pinAuthority(authority);
 			}
@@ -54,7 +54,7 @@ export default function AuthorityDetailsScreen() {
 				const engine = await getEngine("network");
 				setNetworkEngine(engine as INetworkEngine);
 				if (engine) {
-					const authorityEngine = await (engine as INetworkEngine).openAuthority(authority.sid);
+					const authorityEngine = await (engine as INetworkEngine).openAuthority(authority.id);
 					setAuthorityEngine(authorityEngine);
 				}
 			} catch (error) {
@@ -62,7 +62,7 @@ export default function AuthorityDetailsScreen() {
 			}
 		}
 		loadEngines();
-	}, [getEngine, authority.sid]);
+	}, [getEngine, authority.id]);
 
 	useEffect(() => {
 		async function getAuthorityData() {
@@ -73,7 +73,7 @@ export default function AuthorityDetailsScreen() {
 			}
 			try {
 				const pinnedAuthorities = await networkEngine.getPinnedAuthorities();
-				setPinned(pinnedAuthorities.some((a: Authority) => a.sid === authority.sid));
+				setPinned(pinnedAuthorities.some((a: Authority) => a.id === authority.id));
 				const details = await authorityEngine.getAdminDetails();
 				setAdminDetails(details);
 			} catch (error) {
@@ -83,7 +83,7 @@ export default function AuthorityDetailsScreen() {
 			}
 		}
 		getAuthorityData();
-	}, [networkEngine, authorityEngine, authority.sid]);
+	}, [networkEngine, authorityEngine, authority.id]);
 
 	useEffect(() => {
 		async function getUsers() {
@@ -97,33 +97,33 @@ export default function AuthorityDetailsScreen() {
 				// Store the officers list
 				setOfficers(adminDetails.admin.officers);
 
-				// Create mapping of userSid to User object
+				// Create mapping of userId to User object
 				const userMap = new Map<string, User>();
 
-				// Get all userSids we need to fetch (both current and proposed existing officers)
-				const userSids = new Set<string>();
+				// Get all userIds we need to fetch (both current and proposed existing officers)
+				const userIds = new Set<string>();
 
 				// Add current officers
 				adminDetails.admin.officers.forEach((admin) => {
-					userSids.add(admin.userSid);
+					userIds.add(admin.userId);
 				});
 
 				// Add proposed existing administrators
 				if (adminDetails.proposed?.proposed.officers) {
 					adminDetails.proposed.proposed.officers.forEach((officerSelection) => {
 						if (officerSelection.existing) {
-							userSids.add(officerSelection.existing.userSid);
+							userIds.add(officerSelection.existing.userId);
 						}
 					});
 				}
 
 				// Fetch all users
-				const userEnginePromises = Array.from(userSids).map(async (userSid) => {
-					const userEngine = await networkEngine.getUser(userSid);
+				const userEnginePromises = Array.from(userIds).map(async (userId) => {
+					const userEngine = await networkEngine.getUser(userId);
 					if (userEngine) {
 						const details = await userEngine.getSummary();
 						if (details) {
-							userMap.set(userSid, details);
+							userMap.set(userId, details);
 						}
 					}
 				});
@@ -173,9 +173,9 @@ export default function AuthorityDetailsScreen() {
 					</ThemedText>
 				</View>
 				<View style={styles.detail}>
-					<ThemedText type="defaultSemiBold">{t("sid")}: </ThemedText>
+					<ThemedText type="defaultSemiBold">{t("id")}: </ThemedText>
 					<ThemedText numberOfLines={1} ellipsizeMode="tail">
-						{authority.sid}
+						{authority.id}
 					</ThemedText>
 				</View>
 				<View style={styles.detail}>
@@ -188,12 +188,6 @@ export default function AuthorityDetailsScreen() {
 					<ThemedText type="defaultSemiBold">{t("address")}: </ThemedText>
 					<ThemedText numberOfLines={1} ellipsizeMode="tail">
 						{authority.domainName}
-					</ThemedText>
-				</View>
-				<View style={styles.detail}>
-					<ThemedText type="defaultSemiBold">{t("signature")}: </ThemedText>
-					<ThemedText numberOfLines={1} ellipsizeMode="tail">
-						{authority.signature.signature}
 					</ThemedText>
 				</View>
 				<CustomButton
@@ -225,14 +219,14 @@ export default function AuthorityDetailsScreen() {
 				)}
 				<View style={styles.detail}>
 					<ThemedText type="defaultSemiBold">{t("expires")}: </ThemedText>
-					<ThemedText>{formatDate(adminDetails?.admin.expiration)}</ThemedText>
+					<ThemedText>{formatDate(adminDetails?.admin.effectiveAt)}</ThemedText>
 				</View>
 
 				{officers.map((officer) => {
-					const user = officerUsers.get(officer.userSid);
+					const user = officerUsers.get(officer.userId);
 					return (
 						<InfoCard
-							key={officer.userSid}
+							key={officer.userId}
 							image={{ uri: user?.image.url || "" }}
 							title={user?.name || ""}
 							additionalInfo={[
@@ -240,7 +234,7 @@ export default function AuthorityDetailsScreen() {
 									label: t("title"),
 									value: officer.title,
 								},
-								{ label: t("sid"), value: officer.userSid },
+								{ label: t("userId"), value: officer.userId },
 							]}
 							icon="chevron-right"
 							onPress={() =>
@@ -272,15 +266,15 @@ export default function AuthorityDetailsScreen() {
 						<ThemedText type="title">{t("proposedAdministration")}</ThemedText>
 						{adminDetails.proposed.proposed.officers.map((officerSelection) => {
 							const officer = officerSelection.existing || {
-								userSid: "",
+								userId: "",
 								title: officerSelection.init?.title || "",
 								scopes: officerSelection.init?.scopes || [],
 								signature: { signature: "", signerKey: "" },
 							};
-							const user = officer.userSid ? officerUsers.get(officer.userSid) : undefined;
+							const user = officer.userId ? officerUsers.get(officer.userId) : undefined;
 							return (
 								<InfoCard
-									key={officer.userSid || officerSelection.init?.name}
+									key={officer.userId || officerSelection.init?.name}
 									image={user?.image?.url ? { uri: user.image.url } : undefined}
 									title={user?.name || officerSelection.init?.name || ""}
 									additionalInfo={[
@@ -288,7 +282,7 @@ export default function AuthorityDetailsScreen() {
 											label: t("title"),
 											value: officer.title,
 										},
-										{ label: t("sid"), value: officer.userSid || t("pending") },
+										{ label: t("userId"), value: officer.userId || t("pending") },
 									]}
 									icon="chevron-right"
 									onPress={() =>

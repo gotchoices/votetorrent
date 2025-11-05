@@ -10,17 +10,17 @@ import { globalStyles } from "../theme/styles";
 import { useApp } from "../providers/AppProvider";
 
 interface DetailedOfficer {
-	userSid: string;
+	userId: string;
 	name: string;
 	isSigned: boolean;
 }
 
 interface AuthorizationSectionProps {
 	admin: AdminDetails | null;
-	signedOfficerSids?: string[];
+	signedOfficerIds?: string[];
 }
 
-export function AuthorizationSection({ admin, signedOfficerSids }: AuthorizationSectionProps) {
+export function AuthorizationSection({ admin, signedOfficerIds }: AuthorizationSectionProps) {
 	const { t } = useTranslation();
 	const { colors } = useTheme() as ExtendedTheme;
 	const { getEngine } = useApp();
@@ -35,12 +35,12 @@ export function AuthorizationSection({ admin, signedOfficerSids }: Authorization
 
 				if (engine && admin && admin.admin) {
 					const officerDetailsPromises = admin.admin.officers.map(async (officer) => {
-						const userEngine = await engine.getUser(officer.userSid);
+						const userEngine = await engine.getUser(officer.userId);
 						const user = await userEngine?.getSummary();
 						return {
-							userSid: officer.userSid,
+							userId: officer.userId,
 							name: user?.name || t("unknownUser"),
-							isSigned: signedOfficerSids?.includes(officer.userSid) ?? false,
+							isSigned: signedOfficerIds?.includes(officer.userId) ?? false,
 						};
 					});
 					const resolvedAdminDetails = await Promise.all(officerDetailsPromises);
@@ -54,7 +54,7 @@ export function AuthorizationSection({ admin, signedOfficerSids }: Authorization
 			}
 		};
 		loadData();
-	}, [getEngine, admin, signedOfficerSids, t]);
+	}, [getEngine, admin, signedOfficerIds, t]);
 
 	return (
 		<View style={styles.section}>
@@ -69,7 +69,7 @@ export function AuthorizationSection({ admin, signedOfficerSids }: Authorization
 			<View style={styles.authorizationBlock}>
 				<View style={styles.adminChecks}>
 					{detailedOfficers.map((officerDetail) => (
-						<View key={officerDetail.userSid} style={styles.adminCheck}>
+						<View key={officerDetail.userId} style={styles.adminCheck}>
 							<FontAwesome6
 								name={officerDetail.isSigned ? "check-circle" : "circle"}
 								size={24}

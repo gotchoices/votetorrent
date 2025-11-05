@@ -1,5 +1,14 @@
 {
 	"compilerOptions": {
+		"module": "ESNext",
+		"moduleResolution": "Bundler",
+		"target": "ES2022",
+		"lib": ["ES2022"],
+		"types": ["node", "mocha"],
+		"verbatimModuleSyntax": false,
+		"allowSyntheticDefaultImports": true,
+		"esModuleInterop": true,
+		"skipLibCheck": true,
 		"outDir": "dist",
 		"strictFunctionTypes": true,
 		"noUncheckedIndexedAccess": true

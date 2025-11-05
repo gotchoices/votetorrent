@@ -1,2 +1,2 @@
-export * from './authority-engine';
-export * from './mock-authority-engine';
+export * from './authority-engine.js';
+export * from './mock-authority-engine.js';

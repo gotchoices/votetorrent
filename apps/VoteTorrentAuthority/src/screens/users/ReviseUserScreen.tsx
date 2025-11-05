@@ -65,7 +65,7 @@ export function ReviseUserScreen() {
 	};
 
 	const handleSign = () => {
-		setNewSignature(userState.sid);
+		setNewSignature(userState.id);
 		//TODO: Actually handle the signing
 	};
 
@@ -73,8 +73,8 @@ export function ReviseUserScreen() {
 		<View style={styles.content}>
 			<ScrollView style={[styles.container, { backgroundColor: colors.background }]}>
 				<View style={[styles.section, styles.detailContainer]}>
-					<ThemedText type="defaultSemiBold">{t("sid")}:</ThemedText>
-					<ThemedText>{userState.sid}</ThemedText>
+					<ThemedText type="defaultSemiBold">{t("id")}:</ThemedText>
+					<ThemedText>{userState.id}</ThemedText>
 				</View>
 				<View style={styles.section}>
 					<CustomTextInput

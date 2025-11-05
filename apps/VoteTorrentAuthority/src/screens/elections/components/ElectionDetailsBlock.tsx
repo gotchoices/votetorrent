@@ -29,7 +29,7 @@ export function ElectionDetailsBlock({ electionDetails }: ElectionDetailsBlockPr
 				</View>
 				<View style={styles.detail}>
 					<ThemedText type="defaultSemiBold">{t("authority")}: </ThemedText>
-					<ThemedText>{electionDetails.election.authoritySid}</ThemedText>
+					<ThemedText>{electionDetails.election.authorityId}</ThemedText>
 				</View>
 			</View>
 

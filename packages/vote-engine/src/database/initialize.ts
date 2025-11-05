@@ -11,10 +11,12 @@ export async function initDB(db: Database): Promise<void> {
 	const __dirname = dirname(__filename);
 	const schemaPath = resolve(
 		__dirname,
-		'../../../vote-core/schema/votetorrent.sql'
+		'../../../vote-core/schema/votetorrent.qsql'
 	);
 
 	const schemaSql = readFileSync(schemaPath, 'utf8');
+
+	//console.log(schemaSql);
 
 	try {
 		await db.exec(schemaSql);

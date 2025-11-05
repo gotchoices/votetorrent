@@ -1,25 +1,24 @@
-import type { SID } from '../common';
 import type {
+	Ballot,
 	BallotDetails,
-	BallotInit,
 	BallotSummary,
 	ElectionDetails,
 	ElectionRevisionInit,
-	KeyholderInvitationContent,
+	KeyholderInvite,
 } from './models.js';
 
 export type IElectionEngine = {
-	getBallotDetails(sid: SID): Promise<BallotDetails>;
+	getBallotDetails(id: string): Promise<BallotDetails>;
 	getBallots(): Promise<BallotSummary[]>;
 	getElectionDetails(): Promise<ElectionDetails>;
 	inviteKeyholder(
-		keyholder: KeyholderInvitationContent,
-		electionSid: SID
+		keyholder: KeyholderInvite,
+		electionId: string
 	): Promise<void>;
-	proposeBallot(ballot: BallotInit): Promise<void>;
+	proposeBallot(ballot: Ballot): Promise<void>;
 	proposeRevision(revision: ElectionRevisionInit): Promise<void>;
 	revokeKeyholder(
-		keyholder: KeyholderInvitationContent,
-		electionSid: SID
+		keyholder: KeyholderInvite,
+		electionId: string
 	): Promise<void>;
 };

@@ -30,7 +30,7 @@ export function ElectionCard({ election, onPress }: ElectionCardProps) {
 					{election.title}
 				</ThemedText>
 				<ThemedText type="default" numberOfLines={1}>
-					{isElectionSummary(election) ? election.authorityName : election.authoritySid}
+					{isElectionSummary(election) ? election.authorityName : election.authorityId}
 				</ThemedText>
 				<ThemedText type="default" numberOfLines={1}>
 					{new Date(election.date).toLocaleDateString()}

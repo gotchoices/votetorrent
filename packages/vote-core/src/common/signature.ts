@@ -1,5 +1,5 @@
 export type Signature = {
-  signature: string;
-  signerKey: string;
-}
-
+	signature: string;
+	signerKey: string;
+	signerUserId: string;
+};

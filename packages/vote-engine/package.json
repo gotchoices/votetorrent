@@ -18,10 +18,10 @@
 		}
 	},
 	"scripts": {
-		"clean": "yarn clean",
-		"build": "yarn build --env node",
+		"clean": "rm -rf dist",
+		"build": "tsc -p tsconfig.build.json",
 		"lint": "yarn lint",
-		"test": "TS_NODE_PROJECT=./tsconfig.test.json mocha --node-option=loader=ts-node/esm --node-option=experimental-specifier-resolution=node --require tsconfig-paths/register \"test/**/*.spec.ts\"",
+		"test": "TS_NODE_PROJECT=./tsconfig.test.json mocha --node-option=import=./register-ts-node.mjs --node-option=experimental-specifier-resolution=node --require tsconfig-paths/register \"test/**/*.spec.ts\"",
 		"dep-check": "yarn dep-check"
 	},
 	"homepage": "https://github.com/gotchoices/votetorrent",
@@ -30,9 +30,7 @@
 	},
 	"keywords": [
 		"vote",
-		"voting",
-		"peer to peer",
-		"p2p"
+		"voting"
 	],
 	"license": "MIT",
 	"peerDependencies": {
@@ -43,34 +41,23 @@
 		"@types/mocha": "^10.0.10",
 		"@types/node": "^22.13.10",
 		"ts-node": "^10.9.2",
-		"tsconfig-paths": "^4.2.0"
+		"tsconfig-paths": "^4.2.0",
+		"typescript": "^5.6.3"
 	},
 	"dependencies": {
 		"@babel/core": "^7.25.2",
 		"@babel/runtime": "^7.25.0",
-		"@chainsafe/libp2p-gossipsub": "^14.1.0",
-		"@chainsafe/libp2p-noise": "^16.0.3",
-		"@chainsafe/libp2p-yamux": "^7.0.1",
-		"@libp2p/bootstrap": "^11.0.32",
-		"@libp2p/identify": "^3.0.27",
-		"@libp2p/interface": "^2.7.0",
-		"@libp2p/kad-dht": "^14.2.15",
-		"@libp2p/peer-id": "^4.2.4",
-		"@libp2p/peer-id-factory": "^4.2.4",
-		"@libp2p/tcp": "^10.1.8",
-		"@multiformats/multiaddr": "^12.4.0",
 		"@noble/curves": "^1.9.6",
 		"@noble/hashes": "^1.8.0",
-		"@quereus/quereus": "^0.1.0",
+		"@optimystic/quereus-plugin-crypto": "0.2.0",
+		"@quereus/quereus": "^0.4.11",
 		"@react-native-async-storage/async-storage": "^2.1.2",
 		"@votetorrent/vote-core": "^0.0.1",
 		"chai": "^5.2.0",
-		"libp2p": "^2.8.2",
 		"mocha": "^11.5.0",
 		"react": "19.0.0",
 		"react-native": "0.78.0",
-		"temporal-polyfill": "^0.3.0",
-		"uint8arrays": "^5.1.0"
+		"temporal-polyfill": "^0.3.0"
 	},
 	"ts-node": {
 		"esm": true,

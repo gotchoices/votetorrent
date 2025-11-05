@@ -32,7 +32,7 @@ export default function AuthoritiesScreen() {
 			const unpinnedCursor = await networkEngine.getAuthoritiesByName(searchText);
 			setUnpinnedAuthorities(
 				unpinnedCursor.buffer.filter(
-					(a: Authority) => !pinned.some((p: Authority) => p.sid === a.sid)
+					(a: Authority) => !pinned.some((p: Authority) => p.id === a.id)
 				)
 			);
 		} catch (error) {
@@ -65,10 +65,10 @@ export default function AuthoritiesScreen() {
 		async (authority: Authority) => {
 			if (!networkEngine) return;
 			try {
-				const isPinned = pinnedAuthorities.some((a) => a.sid === authority.sid);
+				const isPinned = pinnedAuthorities.some((a) => a.id === authority.id);
 
 				if (isPinned) {
-					await networkEngine.unpinAuthority(authority.sid);
+					await networkEngine.unpinAuthority(authority.id);
 				} else {
 					await networkEngine.pinAuthority(authority);
 				}
@@ -81,7 +81,7 @@ export default function AuthoritiesScreen() {
 				setPinnedAuthorities(pinned);
 				setUnpinnedAuthorities(
 					unpinnedCursor.buffer.filter(
-						(a: Authority) => !pinned.some((p: Authority) => p.sid === a.sid)
+						(a: Authority) => !pinned.some((p: Authority) => p.id === a.id)
 					)
 				);
 			} catch (error) {
@@ -108,7 +108,7 @@ export default function AuthoritiesScreen() {
 			{pinnedAuthorities.length > 0 ? (
 				pinnedAuthorities.map((authority: Authority) => (
 					<InfoCard
-						key={authority.sid}
+						key={authority.id}
 						title={authority.name}
 						image={{ uri: authority.imageRef?.url || "" }}
 						additionalInfo={[{ label: "Domain Name", value: authority.domainName }]}
@@ -132,7 +132,7 @@ export default function AuthoritiesScreen() {
 				{unpinnedAuthorities.length > 0 ? (
 					unpinnedAuthorities.map((authority) => (
 						<InfoCard
-							key={authority.sid}
+							key={authority.id}
 							title={authority.name}
 							image={{ uri: authority.imageRef?.url || "" }}
 							additionalInfo={[{ label: "Domain Name", value: authority.domainName }]}

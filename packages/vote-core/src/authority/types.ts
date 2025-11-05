@@ -1,36 +1,26 @@
-import type {
-	InvitationEnvelope,
-	InvitationSigned,
-	InvitationStatus,
-} from '../invitation/models';
-import type { Proposal } from '../common';
+import type { InviteStatus } from '../invite/models';
+import type { Proposal, Signature } from '../common';
 import type {
 	AuthorityDetails,
 	AdminDetails,
-	AuthorityInvitation,
-	AuthorityInvitationContent,
-	OfficerInvitationContent,
+	AuthorityInvite,
+	OfficerInvite,
 	AdminInit,
 	OfficerInit,
+	Scope,
+	SentAuthorityInvite,
 } from './models';
 
 export type IAuthorityEngine = {
-	createOfficerInvitation(
-		init: OfficerInit
-	): InvitationEnvelope<OfficerInvitationContent>;
-	createAuthorityInvitation(
-		name: string
-	): InvitationEnvelope<AuthorityInvitationContent>;
+	createOfficerInvite(init: OfficerInit): OfficerInvite;
+	createAuthorityInvite(name: string): AuthorityInvite;
 	getAdminDetails(): Promise<AdminDetails>;
-	getAuthorityInvitations(): Promise<InvitationStatus<AuthorityInvitation>[]>;
+	getAuthorityInvites(): Promise<InviteStatus<SentAuthorityInvite>[]>;
 	getDetails(): Promise<AuthorityDetails>;
-	proposeAdmin(
-		admin: Proposal<AuthorityInvitationContent & AdminInit>
-	): Promise<void>;
-	saveAdminInvite(
-		invitation: InvitationSigned<OfficerInvitationContent>
-	): Promise<void>;
-	saveAuthorityInvite(
-		invitation: InvitationSigned<AuthorityInvitationContent>
+	proposeAdmin(admin: Proposal<AuthorityInvite & AdminInit>): Promise<void>;
+	saveInviteWithSigning(
+		invite: AuthorityInvite | OfficerInvite,
+		scope: Scope,
+		signature: Signature
 	): Promise<void>;
 };

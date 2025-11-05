@@ -4,8 +4,8 @@ import type {
 	IElectionEngine,
 	IElectionsEngine,
 } from '@votetorrent/vote-core';
-import type { ElectionType, Proposal, SID } from '@votetorrent/vote-core';
-import { MockElectionEngine } from '../election/mock-election-engine';
+import type { ElectionType, Proposal } from '@votetorrent/vote-core';
+import { MockElectionEngine } from '../election/mock-election-engine.js';
 
 // Helper function to get Unix timestamp
 const getUnixTimestamp = (date: Date): number =>
@@ -13,14 +13,14 @@ const getUnixTimestamp = (date: Date): number =>
 
 const mockElections: ElectionSummary[] = [
 	{
-		sid: 'election-1' as SID,
+		id: 'election-1' as string,
 		title: 'Test Election 1 (Past)',
 		authorityName: 'Mock Authority A',
 		date: getUnixTimestamp(new Date('2024-01-01')),
 		type: 'adhoc' as ElectionType,
 	},
 	{
-		sid: 'election-2' as SID,
+		id: 'election-2' as string,
 		title: 'Test Election 2 (Future)',
 		authorityName: 'Mock Authority B',
 		date: getUnixTimestamp(new Date(Date.now() + 10 * 24 * 60 * 60 * 1000)), // 10 days from now
@@ -31,8 +31,8 @@ const mockElections: ElectionSummary[] = [
 // Mock ElectionInit structure for the proposal
 const mockElectionInitData: ElectionInit = {
 	election: {
-		sid: 'election-3' as SID,
-		authoritySid: 'authority-mock' as SID,
+		id: 'election-3' as string,
+		authorityId: 'authority-mock' as string,
 		title: 'Proposed Election 3',
 		date: getUnixTimestamp(new Date(Date.now() + 14 * 24 * 60 * 60 * 1000)), // Starts in 14 days
 		revisionDeadline: getUnixTimestamp(
@@ -41,7 +41,7 @@ const mockElectionInitData: ElectionInit = {
 		type: 'adhoc' as ElectionType,
 	},
 	revision: {
-		electionSid: 'election-3' as SID,
+		electionId: 'election-3' as string,
 		revision: 1,
 		revisionTimestamp: [], // Mock timestamp
 		tags: ['proposed', 'test'],
@@ -81,49 +81,49 @@ const mockProposedElections: Proposal<ElectionInit>[] = [
 ];
 
 export class MockElectionsEngine implements IElectionsEngine {
-	private elections: Map<SID, ElectionSummary> = new Map(
-		mockElections.map((e) => [e.sid, e])
+	private elections: Map<string, ElectionSummary> = new Map(
+		mockElections.map((e) => [e.id, e])
 	);
-	private proposedElections: Map<SID, Proposal<ElectionInit>> = new Map(
-		mockProposedElections.map((p) => [p.proposed.election.sid, p])
+	private proposedElections: Map<string, Proposal<ElectionInit>> = new Map(
+		mockProposedElections.map((p) => [p.proposed.election.id, p])
 	);
 
 	async adjustElection(election: ElectionInit): Promise<void> {
 		console.log('Adjusting election:', election);
-		const electionSid = election.election.sid;
-		const existing = this.elections.get(electionSid);
+		const electionId = election.election.id;
+		const existing = this.elections.get(electionId);
 		if (!existing) {
-			throw new Error(`Election with SID ${electionSid} not found.`);
+			throw new Error(`Election with ID ${electionId} not found.`);
 		}
 		// Simulate adjustment - in a real scenario, this would likely involve a proposal process
 		const updatedSummary: ElectionSummary = {
-			sid: electionSid,
+			id: electionId,
 			title: election.election.title,
 			authorityName: existing.authorityName, // Assuming authority doesn't change easily
 			date: election.election.date,
 			type: election.election.type,
 		};
-		this.elections.set(electionSid, updatedSummary);
+		this.elections.set(electionId, updatedSummary);
 		console.log('Election adjusted:', updatedSummary);
 	}
 
 	async createElection(election: ElectionInit): Promise<void> {
 		console.log('Creating election:', election);
-		const electionSid = election.election.sid;
-		if (this.elections.has(electionSid)) {
-			throw new Error(`Election with SID ${electionSid} already exists.`);
+		const electionId = election.election.id;
+		if (this.elections.has(electionId)) {
+			throw new Error(`Election with ID ${electionId} already exists.`);
 		}
 		// Simulate creation - usually follows a proposal approval
 		const newElectionSummary: ElectionSummary = {
-			sid: electionSid,
+			id: electionId,
 			title: election.election.title,
-			authorityName: `Mock Authority for ${electionSid}`,
+			authorityName: `Mock Authority for ${electionId}`,
 			date: election.election.date,
 			type: election.election.type,
 		};
-		this.elections.set(electionSid, newElectionSummary);
+		this.elections.set(electionId, newElectionSummary);
 		// Remove from proposed if it existed there
-		this.proposedElections.delete(electionSid);
+		this.proposedElections.delete(electionId);
 		console.log('Election created:', newElectionSummary);
 	}
 
@@ -146,15 +146,15 @@ export class MockElectionsEngine implements IElectionsEngine {
 		return Array.from(this.proposedElections.values());
 	}
 
-	async openElection(electionSid: SID): Promise<IElectionEngine> {
-		console.log('Opening election:', electionSid);
-		const electionSummary = this.elections.get(electionSid);
+	async openElection(electionId: string): Promise<IElectionEngine> {
+		console.log('Opening election:', electionId);
+		const electionSummary = this.elections.get(electionId);
 		if (!electionSummary) {
-			throw new Error(`Election with SID ${electionSid} not found.`);
+			throw new Error(`Election with ID ${electionId} not found.`);
 		}
 		// Return a mock election engine instance for this specific election
 		// MockElectionEngine constructor takes no arguments currently.
-		// In a real scenario, it would likely take the electionSid or summary
+		// In a real scenario, it would likely take the electionId or summary
 		// to fetch/manage the specific election's details.
 		return new MockElectionEngine();
 	}

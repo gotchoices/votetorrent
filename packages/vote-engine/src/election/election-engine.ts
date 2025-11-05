@@ -3,14 +3,13 @@ import type {
 	BallotInit,
 	ElectionDetails,
 	ElectionRevisionInit,
-	KeyholderInvitationContent,
-} from '@votetorrent/vote-core/dist/src/election/models';
-import type { SID } from '@votetorrent/vote-core/dist/src/common';
-import type { BallotSummary } from '@votetorrent/vote-core/dist/src/election/models';
-import type { IElectionEngine } from '@votetorrent/vote-core/dist/src/election/types';
+	KeyholderInvite,
+	BallotSummary,
+	IElectionEngine,
+} from '@votetorrent/vote-core/';
 
 export class ElectionEngine implements IElectionEngine {
-	getBallotDetails(sid: SID): Promise<BallotDetails> {
+	getBallotDetails(id: string): Promise<BallotDetails> {
 		throw new Error('Not implemented');
 	}
 
@@ -23,8 +22,8 @@ export class ElectionEngine implements IElectionEngine {
 	}
 
 	inviteKeyholder(
-		keyholder: KeyholderInvitationContent,
-		electionSid: SID
+		keyholder: KeyholderInvite,
+		electionId: string
 	): Promise<void> {
 		throw new Error('Not implemented');
 	}
@@ -38,8 +37,8 @@ export class ElectionEngine implements IElectionEngine {
 	}
 
 	revokeKeyholder(
-		keyholder: KeyholderInvitationContent,
-		electionSid: SID
+		keyholder: KeyholderInvite,
+		electionId: string
 	): Promise<void> {
 		throw new Error('Not implemented');
 	}

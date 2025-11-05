@@ -8,15 +8,14 @@ import type {
 	UserHistory,
 	DeviceAdvertisement,
 } from './models';
-import type { SID } from '../common';
 
 export type IUserEngine = {
 	addKey(key: UserKey): Promise<void>;
 	connectDevice(): Promise<DeviceAdvertisement>;
 	create(user: CreateUserHistory): Promise<void>;
-	getHistory(userSid: SID, forward: boolean): AsyncIterable<UserHistory>;
+	getHistory(userId: string, forward: boolean): AsyncIterable<UserHistory>;
 	getSummary(): Promise<User | undefined>;
-	isPrivileged(scope: Scope, sid: SID): Promise<boolean>;
+	isPrivileged(scope: Scope, userId: string): Promise<boolean>;
 	revise(user: ReviseUserHistory): Promise<void>;
 	revokeKey(key: string): Promise<void>;
 };

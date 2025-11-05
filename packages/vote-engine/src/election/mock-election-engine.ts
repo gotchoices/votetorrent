@@ -4,7 +4,6 @@ import type {
 	ElectionDetails,
 	ElectionRevisionInit,
 	KeyholderInvitationContent,
-	SID,
 	Signature,
 	Timestamp,
 	BallotSummary,
@@ -13,7 +12,7 @@ import type {
 import { ElectionType, ElectionEvent } from '@votetorrent/vote-core';
 
 export class MockElectionEngine implements IElectionEngine {
-	getBallotDetails(sid: SID): Promise<BallotDetails> {
+	getBallotDetails(id: string): Promise<BallotDetails> {
 		throw new Error('Not implemented');
 	}
 
@@ -25,8 +24,8 @@ export class MockElectionEngine implements IElectionEngine {
 		// Mock data for Utah General Election
 		const mockElection: ElectionDetails = {
 			election: {
-				sid: 'utah-general-2024',
-				authoritySid: 'utah-election-authority',
+				id: 'utah-general-2024',
+				authorityId: 'utah-election-authority',
 				title: 'Utah General Election 2024',
 				date: new Date('2024-11-05').getTime(), // Election Day
 				revisionDeadline: new Date('2024-10-15').getTime(), // 3 weeks before election
@@ -34,7 +33,7 @@ export class MockElectionEngine implements IElectionEngine {
 				signature: 'mock-signature-1' as unknown as Signature,
 			},
 			current: {
-				electionSid: 'utah-general-2024',
+				electionId: 'utah-general-2024',
 				revision: 1,
 				revisionTimestamp: [new Date().getTime() as Timestamp],
 				tags: ['general', 'state', '2024'],
@@ -106,10 +105,10 @@ Please review all candidates and measures carefully before voting.`,
 							],
 						},
 						result: {
-							userSid: 'mock-user-sid-2',
+							userId: 'mock-user-id-2',
 							isAccepted: false,
 							invitationSignature: 'mock-invitation-signature-2',
-							invokedSid: 'mock-invoked-sid-2',
+							invokedId: 'mock-invoked-id-2',
 						},
 					},
 					{
@@ -145,10 +144,10 @@ Please review all candidates and measures carefully before voting.`,
 							],
 						},
 						result: {
-							userSid: 'mock-user-sid-3',
+							userId: 'mock-user-id-3',
 							isAccepted: true,
 							invitationSignature: 'mock-invitation-signature-3',
-							invokedSid: 'mock-invoked-sid-3',
+							invokedId: 'mock-invoked-id-3',
 						},
 					},
 				],
@@ -176,7 +175,7 @@ Please review all candidates and measures carefully before voting.`,
 
 	inviteKeyholder(
 		keyholder: KeyholderInvitationContent,
-		electionSid: SID
+		electionId: string
 	): Promise<void> {
 		throw new Error('Not implemented');
 	}
@@ -191,7 +190,7 @@ Please review all candidates and measures carefully before voting.`,
 
 	revokeKeyholder(
 		keyholder: KeyholderInvitationContent,
-		electionSid: SID
+		electionId: string
 	): Promise<void> {
 		throw new Error('Not implemented');
 	}

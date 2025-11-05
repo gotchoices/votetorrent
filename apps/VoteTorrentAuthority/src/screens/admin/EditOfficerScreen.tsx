@@ -18,9 +18,9 @@ import { globalStyles } from "../../theme/styles";
 export default function EditOfficerScreen() {
 	const { colors } = useTheme() as ExtendedTheme;
 	const { t } = useTranslation();
-	const { authority, officerSid } = useRoute().params as {
+	const { authority, officerId } = useRoute().params as {
 		authority: Authority;
-		officerSid?: string;
+		officerId?: string;
 	};
 	const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 	const { networkEngine } = useApp();
@@ -31,10 +31,10 @@ export default function EditOfficerScreen() {
 
 	useEffect(() => {
 		async function loadOfficer() {
-			if (!networkEngine || !officerSid) return;
+			if (!networkEngine || !officerId) return;
 			try {
-				const admin = await networkEngine.getAdmin(authority.sid);
-				const foundOfficer = admin.officers.find((a: Officer) => a.userSid === officerSid);
+				const admin = await networkEngine.getAdmin(authority.id);
+				const foundOfficer = admin.officers.find((a: Officer) => a.userId === officerId);
 				if (foundOfficer) {
 					setOfficer(foundOfficer);
 					setName(foundOfficer.name);
@@ -46,7 +46,7 @@ export default function EditOfficerScreen() {
 			}
 		}
 		loadOfficer();
-	}, [networkEngine, authority.sid, officerSid]);
+	}, [networkEngine, authority.id, officerId]);
 
 	useEffect(() => {
 		navigation.setOptions({
@@ -86,10 +86,9 @@ export default function EditOfficerScreen() {
 	const handleAddOfficer = async () => {
 		try {
 			const newOfficer: Officer = {
-				userSid: officer?.userSid || `admin-${Date.now()}`,
+				userId: officer?.userId || `admin-${Date.now()}`,
 				title,
 				scopes,
-				signature: officer?.signature || { signature: "", signerKey: "" },
 			};
 
 			// Pass the officer back to ReplaceAdminScreen

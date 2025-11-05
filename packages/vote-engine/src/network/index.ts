@@ -1,2 +1,2 @@
-export * from './mock-network-engine';
-export * from './network-engine';
+export * from './mock-network-engine.js';
+export * from './network-engine.js';

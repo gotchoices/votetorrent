@@ -1,0 +1,20 @@
+declare schema main
+{
+	view TestTypes as select Code, Name from (values ('test', 'Testing')) as v(Code, Name);
+
+	table Test (
+		Id text, -- 32 byte random id
+		ShouldBeNumberLargerThanZero integer,
+		ShouldBeNull text null,
+		Type text, -- references TestTypes(Code)
+		ShouldHaveDefault text default 'default',
+		primary key (), -- testing blank primary key
+		constraint CheckUpdate check on update (new.Id = old.Id),
+		constraint ShouldBeNumberLargerThanZeroValid check (ShouldBeNumberLargerThanZero > 0),
+		-- constraint TypeValid check (Type in (select Code from TestTypes)),
+		constraint ShouldHaveDefaultValid check (ShouldHaveDefault = 'default')
+	);
+
+}
+
+apply schema main;

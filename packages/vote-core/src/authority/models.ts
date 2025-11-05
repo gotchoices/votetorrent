@@ -1,16 +1,11 @@
-import type { ImageRef, SID } from '../common';
-import type { Invitation, InvitationContent } from '../invitation/models';
-import type {
-	Proposal,
-	Signature,
-	Timestamp,
-	ThresholdPolicy,
-} from '../common/index.js';
+import type { ImageRef } from '../common';
+import type { Invite } from '../invite/models';
+import type { Proposal, Timestamp, ThresholdPolicy } from '../common/index.js';
 
 /*********** Authority ***********/
 export type Authority = {
 	/** Sovereign ID of the authority */
-	sid: SID;
+	id: string;
 
 	/** Official, legal name */
 	name: string;
@@ -20,9 +15,6 @@ export type Authority = {
 
 	/** Image reference for the authority */
 	imageRef?: ImageRef;
-
-	/** The signature of this record by the current administration */
-	signature: Signature;
 };
 
 export type AuthorityInit = {
@@ -32,8 +24,8 @@ export type AuthorityInit = {
 	/** Domain name of the authority */
 	domainName: string;
 
-	/** Image reference for the authority */
-	imageRef?: ImageRef;
+	/** Image url for the authority */
+	imageUrl?: string;
 };
 
 export type AuthorityDetails = {
@@ -44,37 +36,35 @@ export type AuthorityDetails = {
 	proposed?: Proposal<AuthorityInit>;
 };
 
-export type AuthorityInvitationContent = InvitationContent & {
+export type AuthorityInvite = Invite & {
 	/** Suggested name for the new Authority */
 	name: string;
 
-	/** The type of the invitation */
+	/** The type of the invite */
 	type: 'au';
 };
 
-export type AuthorityInvitation = Invitation<AuthorityInvitationContent> & {
-	type: 'Authority';
+export type SentAuthorityInvite = {
+	name: string;
+	type: 'au';
 };
 
 /*********** Administration ***********/
 export type Admin = {
-	/** Sovereign ID of the administration */
-	sid: SID;
+	/** ID of the administration */
+	id: string;
 
-	/** The authority's sid */
-	authoritySid: SID;
+	/** The authority's id */
+	authorityId: string;
+
+	/** The effective date of the administration */
+	effectiveAt: Timestamp;
 
 	/** The officers */
 	officers: Officer[];
 
 	/** The threshold policies */
 	thresholdPolicies: ThresholdPolicy[];
-
-	/** The expiration date of this administration */
-	expiration: Timestamp;
-
-	/** The previous administration's signatures of this record (if there was one) */
-	signatures?: Signature[];
 };
 
 export type AdminInit = {
@@ -98,17 +88,17 @@ export type AdminDetails = {
 
 /*********** Officer ***********/
 export type Officer = {
-	/** Sovereign ID of the officer's user */
-	userSid: SID;
+	/** ID of the officer's user */
+	userId: string;
+
+	/** The authority's id */
+	authorityId: string;
 
 	/** Title of the officer */
 	title: string;
 
 	/** Scopes of the officer */
 	scopes: Scope[];
-
-	/** The signature of this record by this user */
-	signature: Signature;
 };
 
 export type OfficerInit = {
@@ -118,8 +108,8 @@ export type OfficerInit = {
 	/** Title of the officer */
 	title: string;
 
-	/** Scopes of the officer, comma separated list of scope codes */
-	scopes: string;
+	/** Scopes of the officer */
+	scopes: Scope[];
 };
 
 export type OfficerSelection = {
@@ -130,14 +120,14 @@ export type OfficerSelection = {
 	existing?: Officer;
 };
 
-export type OfficerInvitationContent = InvitationContent &
+export type OfficerInvite = Invite &
 	OfficerInit & {
-		/** The type of the invitation */
+		/** The type of the invite */
 		type: 'of';
 	};
 
-export type OfficerInvitation = Invitation<OfficerInvitationContent> & {
-	type: 'Officer';
+export type SentOfficerInvite = OfficerInit & {
+	type: 'of';
 };
 
 /** Scope codes representing different officer privileges */

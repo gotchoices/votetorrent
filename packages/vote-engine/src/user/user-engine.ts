@@ -24,7 +24,7 @@ export class UserEngine implements IUserEngine {
 	}
 
 	async *getHistory(
-		userSid: string,
+		userId: string,
 		forward: boolean
 	): AsyncIterable<UserHistory> {
 		throw new Error('Not implemented');

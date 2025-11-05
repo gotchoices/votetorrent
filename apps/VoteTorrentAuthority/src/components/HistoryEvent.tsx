@@ -15,7 +15,7 @@ interface HistoryEventProps {
 const keyTranslations: { [key: string]: string } = {
 	url: "Image Url",
 	expiration: "Expires",
-	sid: "SID",
+	id: "ID",
 	cid: "CID",
 };
 

@@ -1,7 +1,6 @@
 import type {
 	Authority,
 	Signature,
-	SID,
 	Network,
 	NetworkPolicies,
 	NetworkDetails,
@@ -27,15 +26,15 @@ import type {
 } from '@votetorrent/vote-core';
 import { UserHistoryEvent, UserKeyType } from '@votetorrent/vote-core';
 
-// Function to generate a plausible SID with a prefix
-export const generateSid = (prefix: string, hashLength: number = 16): SID => {
+// Function to generate a plausible ID with a prefix
+export const generateId = (prefix: string, hashLength: number = 16): string => {
 	const characters =
 		'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
 	let result = '';
 	for (let i = 0; i < hashLength; i++) {
 		result += characters.charAt(Math.floor(Math.random() * characters.length));
 	}
-	return `${prefix}-${result}` as SID;
+	return `${prefix}-${result}` as string;
 };
 
 // Define a standard mock signature object
@@ -75,94 +74,85 @@ export const MOCK_NETWORKS: NetworkReference[] = [
 // --- Mock Authority Data ---
 export const MOCK_AUTHORITIES: Authority[] = [
 	{
-		sid: generateSid('auth'),
+		id: generateId('auth'),
 		name: 'Salt Lake County',
 		domainName: 'slco.org',
 		imageRef: {
 			cid: 'mock-cid-slco',
 			url: 'https://picsum.photos/500/500?random=101',
 		},
-		signature: MOCK_SIGNATURE,
 	},
 	{
-		sid: generateSid('auth'),
+		id: generateId('auth'),
 		name: 'Utah County',
 		domainName: 'utahcounty.gov',
 		imageRef: {
 			cid: 'mock-cid-utahco',
 			url: 'https://picsum.photos/500/500?random=102',
 		},
-		signature: MOCK_SIGNATURE,
 	},
 	{
-		sid: generateSid('auth'),
+		id: generateId('auth'),
 		name: 'Ada County',
 		domainName: 'adacounty.id.gov',
 		imageRef: {
 			cid: 'mock-cid-ada',
 			url: 'https://picsum.photos/500/500?random=103',
 		},
-		signature: MOCK_SIGNATURE,
 	},
 	{
-		sid: generateSid('auth'),
+		id: generateId('auth'),
 		name: 'Canyon County',
 		domainName: 'canyonco.org',
 		imageRef: {
 			cid: 'mock-cid-canyon',
 			url: 'https://picsum.photos/500/500?random=104',
 		},
-		signature: MOCK_SIGNATURE,
 	},
 	{
-		sid: generateSid('auth'),
+		id: generateId('auth'),
 		name: 'Los Angeles County',
 		domainName: 'lavote.gov',
 		imageRef: {
 			cid: 'mock-cid-la',
 			url: 'https://picsum.photos/500/500?random=105',
 		},
-		signature: MOCK_SIGNATURE,
 	},
 	{
-		sid: generateSid('auth'),
+		id: generateId('auth'),
 		name: 'San Diego County',
 		domainName: 'sdvote.com',
 		imageRef: {
 			cid: 'mock-cid-sd',
 			url: 'https://picsum.photos/500/500?random=106',
 		},
-		signature: MOCK_SIGNATURE,
 	},
 	{
-		sid: generateSid('auth-ut'),
+		id: generateId('auth-ut'),
 		name: 'State of Utah',
 		domainName: 'utah.gov',
 		imageRef: {
 			cid: 'mock-cid-ut-state',
 			url: 'https://picsum.photos/500/500?random=107',
 		},
-		signature: MOCK_SIGNATURE,
 	},
 	{
-		sid: generateSid('auth-id'),
+		id: generateId('auth-id'),
 		name: 'State of Idaho',
 		domainName: 'idaho.gov',
 		imageRef: {
 			cid: 'mock-cid-id-state',
 			url: 'https://picsum.photos/500/500?random=108',
 		},
-		signature: MOCK_SIGNATURE,
 	},
 	{
-		sid: generateSid('auth-ca'),
+		id: generateId('auth-ca'),
 		name: 'State of California',
 		domainName: 'ca.gov',
 		imageRef: {
 			cid: 'mock-cid-ca-state',
 			url: 'https://picsum.photos/500/500?random=109',
 		},
-		signature: MOCK_SIGNATURE,
 	},
 ];
 
@@ -207,8 +197,8 @@ export const MOCK_SHARED_NETWORK_POLICIES: NetworkPolicies = {
 
 export const MOCK_UTAH_NETWORK: Network = {
 	hash: UTAH_STATE_NETWORK_REF.hash,
-	sid: UTAH_PRIMARY_AUTHORITY.sid,
-	primaryAuthoritySid: UTAH_PRIMARY_AUTHORITY.sid,
+	id: UTAH_PRIMARY_AUTHORITY.id,
+	primaryAuthorityId: UTAH_PRIMARY_AUTHORITY.id,
 	name: UTAH_STATE_NETWORK_REF.name,
 	relays: UTAH_STATE_NETWORK_REF.relays,
 	policies: MOCK_SHARED_NETWORK_POLICIES,
@@ -241,7 +231,7 @@ export const MOCK_USER_KEYS: UserKey[] = [
 ];
 
 export const MOCK_CURRENT_USER: User = {
-	sid: generateSid('user'),
+	id: generateId('user'),
 	name: 'Alice Wonderland',
 	image: { url: 'https://picsum.photos/200/200?random=202' },
 	activeKeys: [MOCK_USER_KEYS[0]!, MOCK_USER_KEYS[1]!],
@@ -251,14 +241,12 @@ export const MOCK_SHARED_ADMINISTRATORS: Officer[] = [
 	{
 		scopes: ['rad', 'vrg', 'iad', 'rnp', 'uai'] as Scope[],
 		title: 'Chief Election Official',
-		userSid: MOCK_CURRENT_USER.sid,
-		signature: MOCK_SIGNATURE,
+		userId: MOCK_CURRENT_USER.id,
 	},
 	{
 		scopes: ['rad', 'vrg', 'iad'] as Scope[],
 		title: 'Deputy Election Official',
-		userSid: generateSid('user'),
-		signature: MOCK_SIGNATURE,
+		userId: generateId('user'),
 	},
 ];
 
@@ -271,11 +259,11 @@ export const MOCK_SHARED_THRESHOLD_POLICIES: ThresholdPolicy[] = [
 ];
 
 export const MOCK_SHARED_ADMINISTRATION: Admin = {
-	sid: 'admin-shared-sid',
-	authoritySid: 'authority-sid-placeholder-needs-override' as SID,
+	id: 'admin-shared-id',
+	authorityId: 'authority-id-placeholder-needs-override' as string,
 	officers: MOCK_SHARED_ADMINISTRATORS,
 	thresholdPolicies: MOCK_SHARED_THRESHOLD_POLICIES,
-	expiration: getUnixTimestamp(
+	effectiveAt: getUnixTimestamp(
 		new Date(Date.now() + 1000 * 60 * 60 * 24 * 365 * 5)
 	),
 };
@@ -377,7 +365,7 @@ export const MOCK_USER_HISTORY_EVENTS: UserHistory[] = [
 // --- Mock Authority Engine Data (Shared) ---
 
 // const SLCO_AUTHORITY = ... // Lookup still useful if needed elsewhere
-// const aliceUserSid = ... // Lookup still useful
+// const aliceUserId = ... // Lookup still useful
 
 export const MOCK_SHARED_PROPOSED_ADMINISTRATION: Proposal<AdminInit> = {
 	proposed: MOCK_SHARED_ADMINISTRATION_INIT,

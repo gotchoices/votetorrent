@@ -26,7 +26,7 @@ export type RootStackParamList = {
 	};
 	EditOfficer: {
 		authority: Authority;
-		officerSid?: string;
+		officerId?: string;
 	};
 	DefaultUser: { defaultUser: DefaultUser; defaultUserEngine: IDefaultUserEngine };
 	UserDetails: { user: User; userEngine: IUserEngine };

@@ -1,7 +1,6 @@
 import type {
 	NetworkReference,
 	ISignatureTasksEngine,
-	SID,
 	SignatureResult,
 	SignatureTask,
 	Proposal,
@@ -16,13 +15,6 @@ import type {
 	AuthorityInit,
 	ElectionInit,
 	BallotInit,
-	// Assuming the following types are available from @votetorrent/vote-core or its sub-paths
-	// based on the previously read files. Actual import paths might differ.
-	OfficerSelection,
-	ThresholdPolicy,
-	Scope,
-	ImageRef,
-	NetworkPolicies,
 	TimestampAuthority,
 	ElectionCoreInit,
 	ElectionRevisionInit,
@@ -34,8 +26,8 @@ import type {
 } from '@votetorrent/vote-core';
 import { ElectionEvent, ElectionType } from '@votetorrent/vote-core';
 
-// Mock SID
-const MOCK_USER_SID: SID = 'mock-user-sid-sig-123';
+// Mock ID
+const MOCK_USER_ID: string = 'mock-user-id-sig-123';
 
 // Mock Timestamp
 const MOCK_TIMESTAMP: Timestamp = Date.now();
@@ -57,10 +49,9 @@ const MOCK_NETWORK_REFERENCE: NetworkReference = {
 
 // Mock Authority (simplified)
 const MOCK_AUTHORITY: Authority = {
-	sid: 'mock-authority-sid-gen',
+	id: 'mock-authority-id-gen',
 	name: 'Mock General Authority',
 	domainName: 'authority.example.com',
-	signature: MOCK_SIGNATURE,
 };
 
 // --- MOCK PROPOSAL DATA (simplified) ---
@@ -99,8 +90,8 @@ const MOCK_NETWORK_INIT: NetworkInit = {
 };
 
 const MOCK_ELECTION_CORE_INIT: ElectionCoreInit = {
-	sid: 'mock-election-core-sid',
-	authoritySid: MOCK_AUTHORITY.sid,
+	id: 'mock-election-core-id',
+	authorityId: MOCK_AUTHORITY.id,
 	title: 'Mock Core Election',
 	date: MOCK_TIMESTAMP + 86400000, // Tomorrow
 	revisionDeadline: MOCK_TIMESTAMP + 172800000, // Day after tomorrow
@@ -108,7 +99,7 @@ const MOCK_ELECTION_CORE_INIT: ElectionCoreInit = {
 };
 
 const MOCK_ELECTION_REVISION_INIT: ElectionRevisionInit = {
-	electionSid: MOCK_ELECTION_CORE_INIT.sid,
+	electionId: MOCK_ELECTION_CORE_INIT.id,
 	revision: 1,
 	revisionTimestamp: [MOCK_TIMESTAMP],
 	tags: ['mock', 'initial'],
@@ -132,9 +123,9 @@ const MOCK_ELECTION_INIT: ElectionInit = {
 };
 
 const MOCK_BALLOT_INIT: BallotInit = {
-	sid: 'mock-ballot-sid',
-	electionSid: MOCK_ELECTION_CORE_INIT.sid,
-	authoritySid: MOCK_AUTHORITY.sid,
+	id: 'mock-ballot-id',
+	electionId: MOCK_ELECTION_CORE_INIT.id,
+	authorityId: MOCK_AUTHORITY.id,
 	description: 'Mock Ballot for Something Important',
 	districts: ['District A'],
 	questions: [
@@ -185,7 +176,7 @@ const MOCK_PROPOSAL_BALLOT: Proposal<BallotInit> = {
 const MOCK_ADMINISTRATION_SIGNATURE_TASK: AdminSignatureTask = {
 	type: 'signature',
 	network: MOCK_NETWORK_REFERENCE,
-	userSid: MOCK_USER_SID,
+	userId: MOCK_USER_ID,
 	signatureType: 'admin',
 	administration: MOCK_PROPOSAL_ADMINISTRATION,
 	authority: MOCK_AUTHORITY,
@@ -194,7 +185,7 @@ const MOCK_ADMINISTRATION_SIGNATURE_TASK: AdminSignatureTask = {
 const MOCK_AUTHORITY_SIGNATURE_TASK: AuthoritySignatureTask = {
 	type: 'signature',
 	network: MOCK_NETWORK_REFERENCE,
-	userSid: MOCK_USER_SID,
+	userId: MOCK_USER_ID,
 	signatureType: 'authority',
 	authority: MOCK_PROPOSAL_AUTHORITY,
 };
@@ -214,7 +205,7 @@ const MOCK_AUTHORITY_SIGNATURE_TASK: AuthoritySignatureTask = {
 const MOCK_NETWORK_SIGNATURE_TASK: NetworkSignatureTask = {
 	type: 'signature',
 	network: MOCK_NETWORK_REFERENCE, // This is NetworkReference from SignatureTask
-	userSid: MOCK_USER_SID,
+	userId: MOCK_USER_ID,
 	signatureType: 'network',
 	networkRevision: MOCK_PROPOSAL_NETWORK_REVISION, // This is the new Proposal<NetworkRevisionInit> field
 };
@@ -222,7 +213,7 @@ const MOCK_NETWORK_SIGNATURE_TASK: NetworkSignatureTask = {
 const MOCK_ELECTION_SIGNATURE_TASK: ElectionSignatureTask = {
 	type: 'signature',
 	network: MOCK_NETWORK_REFERENCE,
-	userSid: MOCK_USER_SID,
+	userId: MOCK_USER_ID,
 	signatureType: 'election',
 	election: MOCK_PROPOSAL_ELECTION,
 };
@@ -230,7 +221,7 @@ const MOCK_ELECTION_SIGNATURE_TASK: ElectionSignatureTask = {
 const MOCK_ELECTION_REVISION_SIGNATURE_TASK: ElectionRevisionSignatureTask = {
 	type: 'signature',
 	network: MOCK_NETWORK_REFERENCE,
-	userSid: MOCK_USER_SID,
+	userId: MOCK_USER_ID,
 	signatureType: 'election-revision',
 	election: MOCK_PROPOSAL_ELECTION,
 };
@@ -238,7 +229,7 @@ const MOCK_ELECTION_REVISION_SIGNATURE_TASK: ElectionRevisionSignatureTask = {
 const MOCK_BALLOT_SIGNATURE_TASK: BallotSignatureTask = {
 	type: 'signature',
 	network: MOCK_NETWORK_REFERENCE,
-	userSid: MOCK_USER_SID,
+	userId: MOCK_USER_ID,
 	signatureType: 'ballot',
 	ballot: MOCK_PROPOSAL_BALLOT,
 };
