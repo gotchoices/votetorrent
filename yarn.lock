@@ -5469,6 +5469,7 @@ __metadata:
     "@types/node": "npm:^22.13.10"
     aegir: "npm:^45.1.4"
     uint8arrays: "npm:^5.1.0"
+    zod: "npm:^4.1.12"
   languageName: unknown
   linkType: soft
 
@@ -5500,6 +5501,7 @@ __metadata:
     libp2p: "npm:^2.8.2"
     react: "npm:19.0.0"
     react-native: "npm:0.78.0"
+    react-native-keychain: "npm:^10.0.0"
     sinon: "npm:^19.0.4"
     temporal-polyfill: "npm:^0.3.0"
     uint8arrays: "npm:^5.1.0"
@@ -9619,6 +9621,13 @@ __metadata:
   version: 0.1.8
   resolution: "eyes@npm:0.1.8"
   checksum: 10c0/4c79a9cbf45746d8c9f48cc957e35ad8ea336add1c7b8d5a0e002efc791a7a62b27b2188184ef1a1eea7bc3cd06b161791421e0e6c5fe78309705a162c53eea8
+  languageName: node
+  linkType: hard
+
+"fast-base64-decode@npm:^1.0.0":
+  version: 1.0.0
+  resolution: "fast-base64-decode@npm:1.0.0"
+  checksum: 10c0/6d8feab513222a463d1cb58d24e04d2e04b0791ac6559861f99543daaa590e2636d040d611b40a50799bfb5c5304265d05e3658b5adf6b841a50ef6bf833d821
   languageName: node
   linkType: hard
 
@@ -16765,6 +16774,24 @@ __metadata:
   languageName: node
   linkType: hard
 
+"react-native-get-random-values@npm:^2.0.0":
+  version: 2.0.0
+  resolution: "react-native-get-random-values@npm:2.0.0"
+  dependencies:
+    fast-base64-decode: "npm:^1.0.0"
+  peerDependencies:
+    react-native: ">=0.81"
+  checksum: 10c0/fd2e10ab3bca54bff8f5844e3314b797e02822e86663bc2dafe00a511b8a8e1c05d96aa0b8dc1ffad428387d44bbf458ce770a429858433d36f58a16e6e52986
+  languageName: node
+  linkType: hard
+
+"react-native-keychain@npm:^10.0.0":
+  version: 10.0.0
+  resolution: "react-native-keychain@npm:10.0.0"
+  checksum: 10c0/a632ad27e58264506d2b373d329a867f042fb014e8a78db3a63031e953d61b5c98066eed1be238ee6c186d3f213d0efaa2a26526fb3a1d36a624c4460e982230
+  languageName: node
+  linkType: hard
+
 "react-native-localize@npm:^3.4.1":
   version: 3.4.1
   resolution: "react-native-localize@npm:3.4.1"
@@ -19805,6 +19832,8 @@ __metadata:
     react: "npm:19.0.0"
     react-i18next: "npm:^15.4.1"
     react-native: "npm:0.78.0"
+    react-native-get-random-values: "npm:^2.0.0"
+    react-native-keychain: "npm:^10.0.0"
     react-native-localize: "npm:^3.4.1"
     react-native-safe-area-context: "npm:^5.2.0"
     react-native-screens: "npm:^4.5.0"
@@ -20364,6 +20393,13 @@ __metadata:
   version: 2.1.1
   resolution: "yoctocolors@npm:2.1.1"
   checksum: 10c0/85903f7fa96f1c70badee94789fade709f9d83dab2ec92753d612d84fcea6d34c772337a9f8914c6bed2f5fc03a428ac5d893e76fab636da5f1236ab725486d0
+  languageName: node
+  linkType: hard
+
+"zod@npm:^4.1.12":
+  version: 4.1.12
+  resolution: "zod@npm:4.1.12"
+  checksum: 10c0/b64c1feb19e99d77075261eaf613e0b2be4dfcd3551eff65ad8b4f2a079b61e379854d066f7d447491fcf193f45babd8095551a9d47973d30b46b6d8e2c46774
   languageName: node
   linkType: hard
 

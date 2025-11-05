@@ -1,6 +1,32 @@
 # VoteTorrent
 Crowd voting protocol and reference application.
 
+## ⚠️ SECURITY WARNING - NOT PRODUCTION READY ⚠️
+
+**This codebase is currently under active development and is NOT ready for production use.**
+
+Critical security features are being implemented as part of a comprehensive security hardening initiative. Do NOT deploy this system for any real elections or production use cases until:
+
+1. ✅ All Phase 1-5 security improvements are complete (see [Modernization Plan](doc/modernization-plan.md))
+2. ✅ Third-party security audit has been conducted and all findings addressed
+3. ✅ Full test coverage (>80%) has been achieved
+4. ✅ Production deployment certification has been issued
+
+**Current Status:**
+- Phase 1: Critical Security Hardening (✅ COMPLETE)
+  - ✅ Hardware-backed secure storage (iOS Keychain, Android Keystore)
+  - ✅ Cryptographically secure operations (proper RNG, encoding, hashing)
+  - ✅ Input validation with comprehensive schemas (XSS, injection prevention)
+  - ✅ Structured logging with sensitive data redaction
+  - ✅ Biometric + PIN authentication system
+  - ✅ Removed hardcoded test data and keys
+- Phase 2: Architectural Refactoring (PENDING)
+- Expected Production Ready: Q3 2026 (pending resource allocation)
+
+For more details, see the [Security Audit](doc/security-audit.md) and [Review Summary](doc/review-summary.md).
+
+---
+
 See the following documentation:
 
 * [End-user Frequently Asked Questions](doc/user-faq.md)

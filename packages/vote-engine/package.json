@@ -68,6 +68,7 @@
 		"libp2p": "^2.8.2",
 		"react": "19.0.0",
 		"react-native": "0.78.0",
+		"react-native-keychain": "^10.0.0",
 		"temporal-polyfill": "^0.3.0",
 		"uint8arrays": "^5.1.0"
 	}

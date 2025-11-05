@@ -1,12 +1,12 @@
 import React, { useState } from "react";
-import { View, StyleSheet, Image, ScrollView } from "react-native";
+import { View, StyleSheet, Image, ScrollView, Alert } from "react-native";
 import { useTheme, ExtendedTheme, useRoute, useNavigation } from "@react-navigation/native";
 import { useTranslation } from "react-i18next";
 import { CustomTextInput } from "../../components/CustomTextInput";
 import { CustomButton } from "../../components/CustomButton";
 import { globalStyles } from "../../theme/styles";
 import type { User, IUserEngine, ImageRef, ReviseUserHistory } from "@votetorrent/vote-core";
-import { UserHistoryEvent } from "@votetorrent/vote-core";
+import { UserHistoryEvent, SafeStringSchema, URLSchema } from "@votetorrent/vote-core";
 import { ThemedText } from "../../components/ThemedText";
 import type { RootStackParamList } from "../../navigation/types";
 import { NativeStackNavigationProp } from "@react-navigation/native-stack";
@@ -27,7 +27,18 @@ export function ReviseUserScreen() {
 	const handleSave = async () => {
 		try {
 			if (!newSignature) {
-				console.error("Signature is missing");
+				Alert.alert(t("error"), t("signatureRequired"));
+				return;
+			}
+
+			// Validate user inputs before saving
+			try {
+				SafeStringSchema.min(1).max(100).parse(userState.name);
+				if (userState.image?.url) {
+					URLSchema.parse(userState.image.url);
+				}
+			} catch (validationError) {
+				Alert.alert(t("error"), t("invalidInput"));
 				return;
 			}
 
@@ -46,8 +57,7 @@ export function ReviseUserScreen() {
 			await userEngine.revise(reviseUserHistory);
 			navigation.popTo("UserDetails", { user: userState, userEngine });
 		} catch (error) {
-			console.error("Error saving user:", error);
-			//TODO: Show an alert to the user
+			Alert.alert(t("error"), t("errorSavingUser"));
 		}
 	};
 

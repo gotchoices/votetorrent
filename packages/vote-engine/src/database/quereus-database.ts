@@ -1,4 +1,5 @@
 import { Database } from '@quereus/quereus';
+import { CUSTOM_FUNCTIONS } from './custom-functions.js';
 
 /**
  * Main database class that manages the quereus instance and provides
@@ -19,13 +20,42 @@ export class QuereusDatabase {
 		}
 
 		try {
-			// TODO: Initialize quereus instance with proper configuration
-			// this.quereus = new Quereus(config);
+			// Initialize quereus instance
+			this.quereus = new Database();
+
+			// Register custom cryptographic functions
+			this.registerCustomFunctions();
+
+			// TODO: Load and apply schema from vote-core
+			// const schema = SchemaLoader.loadSchema('votetorrent');
+			// await this.quereus.exec(schema);
 
 			this.isInitialized = true;
 		} catch (error) {
 			throw new Error(`Failed to initialize database: ${error}`);
 		}
+	}
+
+	/**
+	 * Register custom SQL functions for cryptographic operations
+	 */
+	private registerCustomFunctions(): void {
+		if (!this.quereus) {
+			throw new Error('Cannot register functions before database initialization');
+		}
+
+		const mainSchema = this.quereus.schemaManager.getMainSchema();
+
+		for (const funcDef of CUSTOM_FUNCTIONS) {
+			try {
+				mainSchema.addFunction(funcDef);
+			} catch (error) {
+				console.error(`Failed to register function ${funcDef.name}:`, error);
+				throw error;
+			}
+		}
+
+		console.log(`Registered ${CUSTOM_FUNCTIONS.length} custom database functions`);
 	}
 
 	/**

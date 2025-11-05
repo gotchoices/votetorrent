@@ -13,10 +13,19 @@ import type {
 	InvitationEnvelope,
 	InvitationSigned,
 } from '@votetorrent/vote-core';
+import {
+	SafeStringSchema,
+	HexStringSchema,
+	TimestampSchema,
+} from '@votetorrent/vote-core';
 import { Temporal } from 'temporal-polyfill';
-import { secp256k1 } from '@noble/curves/secp256k1';
 import type { EngineContext } from '../types';
-import { sha256 } from '@noble/hashes/sha2';
+import {
+	generatePrivateKey,
+	getPublicKey,
+	signMessage,
+	hashMessage,
+} from '../common/crypto-utils.js';
 
 export class AuthorityEngine implements IAuthorityEngine {
 	constructor(private authority: Authority, private ctx: EngineContext) {}
@@ -24,33 +33,36 @@ export class AuthorityEngine implements IAuthorityEngine {
 	createAuthorityInvitation(
 		name: string
 	): InvitationEnvelope<AuthorityInvitationContent> {
-		//create invitation key pair
-		const invitePrivate = secp256k1.utils.randomSecretKey().toString();
-		const inviteKey = secp256k1.getPublicKey(invitePrivate).toString();
+		// Validate input to prevent injection attacks
+		const validatedName = SafeStringSchema.min(1).max(200).parse(name);
+
+		// Create invitation key pair using secure crypto utilities
+		const invitePrivate = generatePrivateKey();
+		const inviteKey = getPublicKey(invitePrivate);
 
 		const type = 'au';
 		const expiration = Temporal.Now.plainDateTimeISO('UTC')
 			.add({ minutes: this.ctx.config.invitationSpanMinutes })
 			.toString();
-		const signedBytes = new TextEncoder().encode(type + name + expiration);
-		const inviteSignature = secp256k1
-			.sign(sha256(signedBytes), invitePrivate)
-			.toString();
+
+		// Sign the invitation metadata
+		const messageToSign = type + validatedName + expiration;
+		const inviteSignature = signMessage(messageToSign, invitePrivate);
+
+		// Create digest of the complete invitation content
+		const digestMessage = type + validatedName + expiration + inviteKey + inviteSignature;
+		const digest = hashMessage(digestMessage);
 
 		return {
 			envelope: {
 				content: {
-					name,
+					name: validatedName,
 					type,
 					expiration,
 					inviteKey,
 					invitePrivate,
 					inviteSignature,
-					digest: sha256(
-						new TextEncoder().encode(
-							type + name + expiration + inviteKey + inviteSignature
-						)
-					).toString(),
+					digest,
 				},
 				potentialKeys: this.ctx.user.activeKeys,
 			},
@@ -87,6 +99,13 @@ export class AuthorityEngine implements IAuthorityEngine {
 	async saveAuthorityInvite(
 		invitation: InvitationSigned<AuthorityInvitationContent>
 	): Promise<void> {
+		// Validate all user inputs before database insertion
+		const validatedName = SafeStringSchema.min(1).max(200).parse(invitation.signed.content.name);
+		const validatedInviteKey = HexStringSchema.parse(invitation.signed.content.inviteKey);
+		const validatedInviteSignature = HexStringSchema.parse(invitation.signed.content.inviteSignature);
+		const validatedInviterKey = HexStringSchema.parse(invitation.signed.signature.signerKey);
+		const validatedInviterSignature = HexStringSchema.parse(invitation.signed.signature.signature);
+
 		try {
 			await this.ctx.db.exec(
 				`
@@ -113,12 +132,12 @@ export class AuthorityEngine implements IAuthorityEngine {
 				{
 					cid: invitation.cid,
 					type: invitation.signed.content.type,
-					name: invitation.signed.content.name,
+					name: validatedName,
 					expiration: invitation.signed.content.expiration,
-					inviteKey: invitation.signed.content.inviteKey,
-					inviteSignature: invitation.signed.content.inviteSignature,
-					inviterKey: invitation.signed.signature.signerKey,
-					inviterSignature: invitation.signed.signature.signature,
+					inviteKey: validatedInviteKey,
+					inviteSignature: validatedInviteSignature,
+					inviterKey: validatedInviterKey,
+					inviterSignature: validatedInviterSignature,
 				}
 			);
 		} catch (error) {

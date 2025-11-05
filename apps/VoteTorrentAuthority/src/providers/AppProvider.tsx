@@ -40,6 +40,21 @@ export function AppProvider({ children }: PropsWithChildren) {
 
 	const getEngine = useCallback(
 		async <T,>(engineName: string, initParams?: any): Promise<T> => {
+			// SECURITY: Prevent mock engines in production
+			if (__DEV__ === false) {
+				const mockEngineTypes = [
+					'network', 'defaultUser', 'keysTasksEngine',
+					'signatureTasksEngine', 'onboardingTasksEngine',
+					'elections', 'election'
+				];
+				if (mockEngineTypes.includes(engineName)) {
+					throw new Error(
+						`SECURITY: Mock engine "${engineName}" not allowed in production. ` +
+						`Real implementations required for production deployment.`
+					);
+				}
+			}
+
 			if (!enginesRef.current[engineName]) {
 				let engine;
 				switch (engineName) {
@@ -113,7 +128,8 @@ export function AppProvider({ children }: PropsWithChildren) {
 				setIsInitialized(true);
 				hideSplash();
 			} catch (error) {
-				console.error("Failed to initialize app:", error);
+				// TODO: Implement proper error logging and user notification
+				hideSplash();
 			}
 		}
 
