@@ -141,6 +141,42 @@ export function verifySignature(
 }
 
 /**
+ * Verifies a signature against a pre-hashed message
+ *
+ * @param messageHashHex - Hex-encoded SHA-256 hash of the message
+ * @param signatureHex - Hex-encoded signature
+ * @param publicKeyHex - Hex-encoded public key
+ * @returns True if the signature is valid, false otherwise
+ *
+ * @remarks
+ * Unlike verifySignature(), this function expects the message to already
+ * be hashed. This is used when the hash is computed separately (e.g., in
+ * database Digest() function).
+ *
+ * @example
+ * ```typescript
+ * const hash = sha256Hash('Hello, world!');
+ * const isValid = verifySignatureHash(hash, signature, publicKey);
+ * ```
+ */
+export function verifySignatureHash(
+	messageHashHex: string,
+	signatureHex: string,
+	publicKeyHex: string
+): boolean {
+	try {
+		const messageHash = hexToBytes(messageHashHex);
+		const signatureBytes = hexToBytes(signatureHex);
+		const publicKeyBytes = hexToBytes(publicKeyHex);
+
+		return secp256k1.verify(signatureBytes, messageHash, publicKeyBytes);
+	} catch (error) {
+		// Invalid signature format or other error
+		return false;
+	}
+}
+
+/**
  * Computes SHA-256 hash of a string
  *
  * @param message - The message to hash

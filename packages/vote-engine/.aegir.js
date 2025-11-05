@@ -30,7 +30,10 @@ export default {
     files: [
       // Only run tests that don't depend on React Native (use built versions)
       'dist/test/crypto-utils.spec.js',
-      'dist/test/logger.spec.js'
+      'dist/test/crypto-security.spec.js',
+      'dist/test/logger.spec.js',
+      'dist/test/custom-functions.spec.js',
+      'dist/test/authorization.spec.js'
       // Excluded: auth-manager, local-storage-react, secure-storage-react
       // (these require React Native environment)
     ]
