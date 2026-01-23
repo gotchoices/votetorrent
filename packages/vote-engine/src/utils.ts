@@ -1,3 +1,5 @@
+import { sha256 } from '@noble/hashes/sha2';
+
 //sql data validation helpers
 export const asText = (value: unknown, field: string): string => {
 	if (value === null || value === undefined) {
@@ -31,3 +33,12 @@ export const parseJsonOr = <T>(
 		throw new Error(`${field} has invalid JSON`);
 	}
 };
+
+// H16 hash function
+export function H16(input: string): string {
+	const hash = sha256(input);
+	// Take first 16 bytes (128 bits) and convert to hex string
+	return Array.from(hash.slice(0, 16))
+		.map((b) => b.toString(16).padStart(2, '0'))
+		.join('');
+}

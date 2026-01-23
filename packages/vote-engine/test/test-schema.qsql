@@ -12,8 +12,10 @@ declare schema main
 		constraint CheckUpdate check on update (new.Id = old.Id),
 		constraint ShouldBeNumberLargerThanZeroValid check (ShouldBeNumberLargerThanZero > 0),
 		-- constraint TypeValid check (Type in (select Code from TestTypes)),
-		constraint ShouldHaveDefaultValid check (ShouldHaveDefault = 'default')
-	);
+		constraint ShouldHaveDefaultValid check (ShouldHaveDefault = 'default'),
+		constraint ShouldBe8Valid check (context.ShouldBe8 = 8)
+	)
+	with context (ShouldBe8 int);
 
 }
 

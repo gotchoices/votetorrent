@@ -24,6 +24,7 @@ describe('Basics', () => {
 		await db.exec(
 			`
 			insert into Test (Id, ShouldBeNumberLargerThanZero, Type)
+			with context ShouldBe8 = 8
 			values (:id, :shouldBeNumberLargerThanZero, :type);
 		`,
 			{

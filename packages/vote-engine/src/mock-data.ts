@@ -5,7 +5,6 @@ import type {
 	NetworkPolicies,
 	NetworkDetails,
 	ElectionType,
-	HostingProvider,
 	DefaultUser,
 	User,
 	UserKey,

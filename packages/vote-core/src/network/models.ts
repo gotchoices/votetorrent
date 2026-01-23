@@ -119,31 +119,6 @@ export type NetworkSummary = {
 	id: string;
 };
 
-export type NetworkInfrastructure = {
-	/** The configuration of the network */
-	configuration: NetworkReference;
-
-	/** The estimated number of nodes in the network */
-	estimatedNodes: number;
-
-	/** The estimated number of servers in the network */
-	estimatedServers: number;
-};
-
-export type HostingProvider = {
-	/** The description of the hosting provider */
-	description: string;
-
-	/** The URL used to handoff to the hosting provider */
-	handoffUrl: string;
-
-	/** The visible URL of the hosting provider */
-	informationUrl: string;
-
-	/** The name of the hosting provider */
-	name: string;
-};
-
 export type TimestampAuthority = {
 	/** The URL of the timestamp authority */
 	url: string;

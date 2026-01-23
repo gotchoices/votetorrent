@@ -11,7 +11,7 @@ import { NetworkEngine } from '../network/network-engine.js';
 import { Database, MisuseError, QuereusError } from '@quereus/quereus';
 import { initDB } from '../database/initialize.js';
 import { randomUUID } from 'crypto';
-import { Digest } from '@optimystic/quereus-plugin-crypto';
+import { H16 } from '../utils.js';
 
 export class NetworksEngine implements INetworksEngine {
 	constructor(private readonly localStorage: LocalStorage) {}
@@ -50,10 +50,7 @@ export class NetworksEngine implements INetworksEngine {
 
 		const networkId = randomUUID().toString();
 		const primaryAuthorityId = randomUUID().toString();
-		const networkHash = Digest(networkId).toString();
-		if (!networkHash) {
-			throw new Error('Failed to create network: Network hash is null');
-		}
+		const networkHash = H16(networkId);
 
 		const firstOfficer = networkInit.admin.officers?.[0];
 		if (!firstOfficer || !firstOfficer.init) {
@@ -82,6 +79,7 @@ export class NetworksEngine implements INetworksEngine {
 					NumberRequiredTSAs,
 					ElectionType
 				)
+				with context Tid = TransactionId()
 				values (
 					:networkId,
 					:networkHash,
@@ -185,15 +183,6 @@ export class NetworksEngine implements INetworksEngine {
 		]);
 
 		return this.open(networkRef, user, true);
-	}
-
-	async discover(
-		latitude: number,
-		longitude: number
-	): Promise<NetworkReference[]> {
-		//TODO How are we going to discover networks?
-		let networks: NetworkReference[] = [];
-		return networks;
 	}
 
 	async getRecentNetworks(): Promise<NetworkReference[]> {

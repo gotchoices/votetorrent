@@ -5,7 +5,6 @@ import type { User } from '../user/models';
 export type INetworksEngine = {
 	clearRecentNetworks(): Promise<void>;
 	create(networkInit: NetworkInit, user: User): Promise<INetworkEngine>;
-	discover(latitude: number, longitude: number): Promise<NetworkReference[]>;
 	getRecentNetworks(): Promise<NetworkReference[]>;
 	open(
 		ref: NetworkReference,

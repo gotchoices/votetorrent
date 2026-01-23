@@ -3491,16 +3491,16 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@optimystic/quereus-plugin-crypto@npm:0.2.0":
-  version: 0.2.0
-  resolution: "@optimystic/quereus-plugin-crypto@npm:0.2.0"
+"@optimystic/quereus-plugin-crypto@npm:0.3.0":
+  version: 0.3.0
+  resolution: "@optimystic/quereus-plugin-crypto@npm:0.3.0"
   dependencies:
     "@noble/curves": "npm:^1.9.6"
     "@noble/hashes": "npm:^1.8.0"
     uint8arrays: "npm:^5.1.0"
   peerDependencies:
-    "@quereus/quereus": ^0.4.5
-  checksum: 10c0/b885f7c8a8bd7c16ee4aafc23d0247ff9803176517603cba328799ccc027dae096a10bcdf22c2e2003f2a3c349ad4e13246b79c516e6cbb419402eecb15be79c
+    "@quereus/quereus": ^0.6.1
+  checksum: 10c0/3e4c09888c77b62bdb5bcdf959747ca8f1c27b3e4d8a543fb0a29a815b5a4d0398e508c13a32f0fd8ecdf0e02cc5ac03e6dca5dc40434dc4ebef45004ac72498
   languageName: node
   linkType: hard
 
@@ -3577,16 +3577,17 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@quereus/quereus@npm:^0.4.11":
-  version: 0.4.11
-  resolution: "@quereus/quereus@npm:0.4.11"
+"@quereus/quereus@npm:^0.12.0":
+  version: 0.12.1
+  resolution: "@quereus/quereus@npm:0.12.1"
   dependencies:
     debug: "npm:^4.4.1"
     fast-json-patch: "npm:^3.1.1"
     inheritree: "npm:^0.3.2"
+    moat-maker: "npm:^2.2.0"
     temporal-polyfill: "npm:^0.3.0"
     uint8arrays: "npm:^5.1.0"
-  checksum: 10c0/5984c5554919f6a9ab06d499848cbb1760fac5cd70e58f72985b817cbb5f5a167baa137920b352488c9c9c03589012b0bd3f9d77e0a7e9113e9beaaba84e8645
+  checksum: 10c0/8429a7a71304b3cb653f690b6fe2e2e6a350c174a4c9b9cb5681dbabb17bea4ca7d86210bddea03d60b66d1edd4d625b808c247b2a916270446e757c106612a1
   languageName: node
   linkType: hard
 
@@ -5069,8 +5070,8 @@ __metadata:
     "@babel/runtime": "npm:^7.25.0"
     "@noble/curves": "npm:^1.9.6"
     "@noble/hashes": "npm:^1.8.0"
-    "@optimystic/quereus-plugin-crypto": "npm:0.2.0"
-    "@quereus/quereus": "npm:^0.4.11"
+    "@optimystic/quereus-plugin-crypto": "npm:0.3.0"
+    "@quereus/quereus": "npm:^0.12.0"
     "@react-native-async-storage/async-storage": "npm:^2.1.2"
     "@types/mocha": "npm:^10.0.10"
     "@types/node": "npm:^22.13.10"
@@ -13939,6 +13940,13 @@ __metadata:
   bin:
     mkdirp: dist/cjs/src/bin.js
   checksum: 10c0/9f2b975e9246351f5e3a40dcfac99fcd0baa31fbfab615fe059fb11e51f10e4803c63de1f384c54d656e4db31d000e4767e9ef076a22e12a641357602e31d57d
+  languageName: node
+  linkType: hard
+
+"moat-maker@npm:^2.2.0":
+  version: 2.2.0
+  resolution: "moat-maker@npm:2.2.0"
+  checksum: 10c0/8fbdb31dd953bba8b46c90c16dca77e7d669c4e4c16ca01812960899270b47f199ed69ac1aafe619d4c549ddb19140c793ff9208a466a3158b0d262c8fb908f4
   languageName: node
   linkType: hard
 

@@ -1,14 +1,12 @@
 import type {
 	Authority,
 	Cursor,
-	HostingProvider,
 	IAuthorityEngine,
 	INetworkEngine,
 	InvitationAction,
 	IUserEngine,
 	Network,
 	NetworkDetails,
-	NetworkInfrastructure,
 	NetworkReference,
 	NetworkSummary,
 	Proposal,
@@ -162,20 +160,6 @@ export class MockNetworkEngine implements INetworkEngine {
 
 	async getElections(): Promise<ElectionSummary[]> {
 		throw new Error('MockNetworkEngine: getElections is not implemented.');
-	}
-
-	async *getHostingProviders(): AsyncIterable<HostingProvider> {
-		for (const provider of MOCK_HOSTING_PROVIDERS) {
-			yield provider;
-		}
-	}
-
-	async getInfrastructure(): Promise<NetworkInfrastructure> {
-		return {
-			configuration: this.currentNetworkReference,
-			estimatedNodes: 100,
-			estimatedServers: 10,
-		};
 	}
 
 	async getNetworkSummary(): Promise<NetworkSummary> {

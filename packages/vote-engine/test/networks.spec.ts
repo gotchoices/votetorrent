@@ -98,7 +98,7 @@ describe('NetworksEngine', () => {
 
 		//	create() should fail with missing officers
 		const networkInitFail: NetworkInit = {
-			name: 'Test Network',
+			name: 'Failing Network',
 			imageUrl: 'https://cdn.example.com/logo.png',
 			relays: ['/dns4/relay.example.com/tcp/443/wss'],
 			primaryAuthority: {
@@ -117,11 +117,14 @@ describe('NetworksEngine', () => {
 			},
 		};
 
-		const returnedNetworkFail: INetworkEngine = await engine.create(
-			networkInitFail,
-			user
-		);
-		expect(returnedNetworkFail).to.be.undefined;
+		try {
+			await engine.create(networkInitFail, user);
+		} catch (error) {
+			expect(error)
+				.to.be.an('error')
+				.with.property('message')
+				.that.includes('Failed to create network: Officer init is required');
+		}
 
 		// open() returns a NetworkEngine and can store as recent (dedup to front)
 		const ref = {
@@ -139,8 +142,7 @@ describe('NetworksEngine', () => {
 		)) as any[];
 		expect(recentsAfterOpen).to.be.an('array').with.length(1);
 		expect(recentsAfterOpen[0].hash).to.equal(ref.hash);
-		// Since open stores plain NetworkReference, adornments are not guaranteed
-		expect(recentsAfterOpen[0].name).to.equal(undefined);
+		expect(recentsAfterOpen[0].name).to.equal(ref.name);
 
 		// open() with storeAsRecent=false does not modify recents
 		const prev = JSON.stringify(recentsAfterOpen);

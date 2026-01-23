@@ -1,7 +1,6 @@
 import type {
 	Authority,
 	Cursor,
-	HostingProvider,
 	IAuthorityEngine,
 	ImageRef,
 	INetworkEngine,
@@ -9,7 +8,6 @@ import type {
 	LocalStorage as ILocalStorage,
 	Network,
 	NetworkDetails,
-	NetworkInfrastructure,
 	NetworkReference,
 	NetworkSummary,
 	Proposal,
@@ -309,14 +307,6 @@ export class NetworkEngine implements INetworkEngine {
 				throw new Error(`Unknown error: ${err}`);
 			}
 		}
-	}
-
-	getHostingProviders(): AsyncIterable<HostingProvider> {
-		throw new Error('Not implemented');
-	}
-
-	getInfrastructure(): Promise<NetworkInfrastructure> {
-		throw new Error('Not implemented');
 	}
 
 	async getNetworkSummary(): Promise<NetworkSummary> {

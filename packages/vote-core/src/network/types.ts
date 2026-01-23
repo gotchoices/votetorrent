@@ -4,8 +4,6 @@ import type {
 	Cursor,
 	NetworkSummary,
 	NetworkDetails,
-	NetworkInfrastructure,
-	HostingProvider,
 	NetworkRevision,
 	AuthorityInit,
 	AdminInit,
@@ -20,8 +18,6 @@ export type INetworkEngine = {
 	getAuthoritiesByName(name: string | undefined): Promise<Cursor<Authority>>;
 	getCurrentUser(): Promise<IUserEngine | undefined>;
 	getDetails(): Promise<NetworkDetails>;
-	getHostingProviders(): AsyncIterable<HostingProvider>;
-	getInfrastructure(): Promise<NetworkInfrastructure>;
 	getNetworkSummary(): Promise<NetworkSummary>;
 	getPinnedAuthorities(): Promise<Authority[]>;
 	getProposedElections(): Promise<Proposal<ElectionInit>[]>;
