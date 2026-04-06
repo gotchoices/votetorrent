@@ -1,0 +1,416 @@
+define
+
+# =========================
+# ATTRIBUTE TYPES
+# =========================
+
+attribute network_id, value string;
+attribute network_hash, value string;
+attribute authority_id, value string;
+attribute user_id, value string;
+attribute nonce, value string;
+attribute slot_cid, value string;
+attribute tid, value integer;
+
+attribute name, value string;
+attribute title, value string;
+attribute domain_name, value string;
+attribute image_ref, value string;
+attribute proposed_name, value string;
+
+attribute relays, value string;
+attribute timestamp_authorities, value string;
+attribute number_required_tsas, value integer;
+
+attribute election_type, value string;
+attribute scope_code, value string;
+attribute key_type, value string;
+
+attribute effective_at, value datetime-tz;
+attribute expiration, value datetime-tz;
+
+attribute threshold_policies, value string;
+attribute scopes, value string;
+
+attribute digest, value string;
+attribute pub_key, value string;
+attribute signer_key, value string;
+attribute signature, value string;
+attribute invite_key, value string;
+attribute invite_signature, value string;
+
+attribute is_accepted, value boolean;
+attribute invoked_id, value string;
+
+# =========================
+# "COMPOSITE KEY" SURROGATES
+# =========================
+
+attribute admin_key, value string;
+attribute officer_key, value string;
+attribute user_key_key, value string;
+attribute officer_signature_key, value string;
+attribute proposed_admin_key, value string;
+attribute proposed_officer_key, value string;
+attribute proposed_officer_user_key, value string;
+
+
+# =========================
+# ENTITY TYPES
+# =========================
+
+entity network,
+  owns network_id @key,
+  owns network_hash,
+  owns name,
+  owns image_ref,
+  owns relays,
+  owns timestamp_authorities,
+  owns number_required_tsas,
+  owns election_type,
+  plays network_primary_authority:network;
+
+entity authority,
+  owns authority_id @key,
+  owns name,
+  owns domain_name,
+  owns image_ref,
+  plays network_primary_authority:primary_authority,
+  plays authority_admin:authority,
+  plays signing_authority:authority,
+  plays authority_invite_creation:created_authority;
+
+entity admin,
+  owns admin_key @key,
+  owns authority_id,
+  owns effective_at,
+  owns threshold_policies,
+  plays authority_admin:admin,
+  plays admin_officer:admin,
+  plays admin_signing_context:admin;
+
+entity officer,
+  owns officer_key @key,
+  owns authority_id,
+  owns effective_at,
+  owns user_id,
+  owns title,
+  owns scopes,
+  plays admin_officer:officer,
+  plays officer_user:officer,
+  plays signing_initiation:initiator_officer;
+
+entity user,
+  owns user_id @key,
+  owns name,
+  owns image_ref,
+  plays officer_user:user,
+  plays key_ownership:user;
+
+entity user_key,
+  owns user_key_key @key,
+  owns user_id,
+  owns key_type,
+  owns pub_key,
+  owns expiration,
+  plays key_ownership:key;
+
+
+# =========================
+# SIGNING WORKFLOW ENTITIES
+# =========================
+
+entity admin_signing,
+  owns nonce @key,
+  owns authority_id,
+  owns effective_at,
+  owns scope_code,
+  owns digest,
+  owns user_id,
+  owns signer_key,
+  owns signature,
+  plays signing_authority:session,
+  plays signing_initiation:session,
+  plays co_signature_link:session,
+  plays signature_finalization:session,
+  plays admin_signing_context:signing_session,
+  plays invite_slot_authorization:authorizing_session;
+
+entity officer_signature,
+  owns officer_signature_key @key,
+  owns nonce,
+  owns user_id,
+  owns signer_key,
+  owns signature,
+  plays co_signature_link:co_signature;
+
+entity admin_signature,
+  owns nonce @key,
+  plays signature_finalization:finalized_signature;
+
+
+# =========================
+# INVITATION ENTITIES
+# =========================
+
+entity invite_slot,
+  owns slot_cid @key,
+  owns name,
+  owns expiration,
+  owns invite_key,
+  owns invite_signature,
+  owns nonce,
+  plays invite_slot_authorization:slot,
+  plays invite_outcome:slot;
+
+entity invite_result,
+  owns slot_cid @key,
+  owns is_accepted,
+  owns digest,
+  owns invite_signature,
+  owns invoked_id,
+  plays invite_outcome:result,
+  plays authority_invite_creation:invite_proof;
+
+
+# =========================
+# PROPOSAL ENTITIES
+# =========================
+
+entity proposed_network,
+  owns name,
+  owns image_ref,
+  owns relays,
+  owns timestamp_authorities,
+  owns number_required_tsas,
+  owns election_type;
+
+entity proposed_authority,
+  owns authority_id @key,
+  owns name,
+  owns domain_name,
+  owns image_ref;
+
+entity proposed_admin,
+  owns proposed_admin_key @key,
+  owns authority_id,
+  owns effective_at,
+  owns threshold_policies,
+  plays proposed_admin_officer:proposed_admin;
+
+entity proposed_officer,
+  owns proposed_officer_key @key,
+  owns authority_id,
+  owns effective_at,
+  owns proposed_name,
+  owns title,
+  owns scopes,
+  plays proposed_admin_officer:proposed_officer,
+  plays proposed_officer_user_link:proposed_officer;
+
+entity proposed_officer_user,
+  owns proposed_officer_user_key @key,
+  owns authority_id,
+  owns effective_at,
+  owns proposed_name,
+  owns user_id,
+  owns pub_key,
+  owns signature,
+  plays proposed_officer_user_link:proposed_user;
+
+
+# =========================
+# RELATION TYPES
+# =========================
+
+relation network_primary_authority,
+  relates network,
+  relates primary_authority;
+
+relation authority_admin,
+  relates authority,
+  relates admin;
+
+relation admin_officer,
+  relates admin,
+  relates officer;
+
+relation officer_user,
+  relates officer,
+  relates user;
+
+relation key_ownership,
+  relates user,
+  relates key;
+
+relation signing_authority,
+  relates session,
+  relates authority;
+
+relation admin_signing_context,
+  relates signing_session,
+  relates admin;
+
+relation signing_initiation,
+  relates session,
+  relates initiator_officer;
+
+relation co_signature_link,
+  relates session,
+  relates co_signature;
+
+relation signature_finalization,
+  relates session,
+  relates finalized_signature;
+
+relation invite_slot_authorization,
+  relates authorizing_session,
+  relates slot;
+
+relation invite_outcome,
+  relates slot,
+  relates result;
+
+relation authority_invite_creation,
+  relates invite_proof,
+  relates created_authority;
+
+relation proposed_admin_officer,
+  relates proposed_admin,
+  relates proposed_officer;
+
+relation proposed_officer_user_link,
+  relates proposed_officer,
+  relates proposed_user;
+
+
+# ============================================================
+# RULES (TypeQL inference)
+# ============================================================
+
+# CurrentAdmin: latest effective admin per authority.
+# Cannot use datetime('now') in TypeQL rules, so this is a query pattern:
+#   match $a isa admin, has authority-id $aid, has effective-at $eat;
+#     not { $a2 isa admin, has authority-id $aid, has effective-at $eat2; $eat2 > $eat; };
+
+# AcceptedInvite: join accepted InviteResult → InviteSlot → AdminSigning for scope.
+# Modeled as a query pattern rather than a rule since it's read-only.
+
+# Scope enumeration (valid codes):
+#   rn  = Revise Network
+#   rad = Revise or Replace Admin
+#   vrg = Validate Registrations
+#   iad = Invite other Authorities
+#   uai = Update Authority Information
+#   ceb = Create/Edit Ballot templates
+#   mel = Manage Elections
+#   cap = Configure Authority Peers
+
+# ElectionType enumeration:
+#   o = Official
+#   a = Adhoc
+
+# UserKeyType enumeration:
+#   M = Mobile
+#   Y = Yubico
+
+
+# ============================================================
+# BUSINESS LOGIC APPENDIX
+# ============================================================
+# The following constraints are encoded in the original QSQL schema
+# but CANNOT be expressed in TypeQL.  They must be enforced at the
+# application / middleware layer.
+# ============================================================
+#
+# ── 1. BOOTSTRAP (Genesis) EXCEPTION ──────────────────────────
+#   The very first Authority, Admin, Officer, User, and UserKey
+#   in the network may be created without any invite or signing
+#   session.  This is the one-time genesis path.
+#
+# ── 2. MULTI-PARTY SIGNING WORKFLOW ──────────────────────────
+#   a) An Officer initiates an AdminSigning session specifying
+#      a scope and a digest of the intended mutation.
+#   b) Other Officers holding the same scope co-sign by adding
+#      OfficerSignature rows against the same digest.
+#   c) An AdminSignature row may be created only when:
+#        count(OfficerSignature for nonce)
+#          >= Admin.ThresholdPolicies[scope].threshold
+#      (defaults to 1 if the scope has no explicit policy).
+#   d) Downstream constraints (Network update, Authority insert,
+#      Admin mutation, InviteSlot creation) reference the
+#      AdminSignature as proof of approval.
+#
+# ── 3. INVITATION WORKFLOW ────────────────────────────────────
+#   a) InviteSlots are created in batches; the entire batch
+#      must be covered by a single AdminSigning whose digest =
+#      DigestAll(slot-cid ORDER BY slot-cid).
+#   b) The invitee accepts/rejects via InviteResult.  Acceptance
+#      requires a non-null digest matching the content of the
+#      entity to be created.
+#   c) InviteResult.invite-signature must verify against the
+#      InviteSlot's invite-key.
+#
+# ── 4. PROPOSAL AUTHORIZATION ────────────────────────────────
+#   Each Proposed* entity requires:
+#     - Caller is an Officer in CurrentAdmin of relevant authority.
+#     - Officer holds the required scope for the mutation.
+#     - Caller provides a non-expired UserKey.
+#     - Caller provides a signature validating:
+#         SignatureValid(Digest(Tid, ...fields...), sig, userKey)
+#
+# ── 5. DIGEST DISCIPLINE ─────────────────────────────────────
+#   - Every mutation's digest is computed over all material fields.
+#   - Tid (transaction ID) is always included to prevent replay.
+#   - For ordered sets (admin epochs, officers within an epoch),
+#     DigestAll(...) OVER (ORDER BY ...) binds both content and
+#     ordering to prevent reordering attacks.
+#
+# ── 6. IMMUTABILITY RULES ────────────────────────────────────
+#   - network-id, network-hash, primary-authority link: immutable.
+#   - authority-id: immutable.
+#   - user-id: immutable.
+#   - Insert-only (no update or delete):
+#       Officer, AdminSigning, OfficerSignature, AdminSignature,
+#       InviteSlot, InviteResult.
+#   - Cannot delete: Network, Authority, User, ProposedOfficer,
+#       ProposedOfficerUser.
+#   - UserKey: no updates (insert + delete only).
+#
+# ── 7. TEMPORAL VALIDITY ─────────────────────────────────────
+#   - Admin.effective-at: ISO 8601 datetime ending in 'Z'.
+#   - UserKey.expiration: must be in the future at insert time.
+#   - InviteSlot.expiration: must be in the future at insert time.
+#   - CurrentAdmin = max(effective-at) where effective-at <= now,
+#     per authority.
+#
+# ── 8. CRYPTOGRAPHIC SIGNATURE VALIDATION ────────────────────
+#   SignatureValid(digest, signature, publicKey) is called for:
+#   - AdminSigning: initiator proves key ownership.
+#   - OfficerSignature: co-signer attests same digest.
+#   - InviteSlot/InviteResult: invite key holder authored slot/response.
+#   - UserKey: owner proves possession of existing key on add/delete.
+#   - Proposals: officer proves identity and intent.
+#
+# ── 9. CONTEXT PARAMETERS ────────────────────────────────────
+#   The original schema uses `with context(...)` to supply
+#   caller-provided parameters that are validated but NOT stored:
+#     SigningNonce, InviteSlotCid, InviteSignature,
+#     UserId, UserKey, Signature, Tid.
+#   These must be provided as transactional context at the
+#   application layer and validated before writes.
+#
+# ── 10. SCOPE-BASED ACCESS CONTROL ───────────────────────────
+#   Each sensitive mutation is tied to a scope-code.
+#   The signing or proposing officer must hold that scope in
+#   their scopes[] array.  Scope ↔ mutation mapping:
+#     rn  → Network updates, ProposedNetwork
+#     rad → Admin/Officer changes, ProposedAdmin, ProposedOfficer
+#     uai → Authority info updates, ProposedAuthority
+#     iad → Invite creation for new authorities
+#     vrg → Validate registrations
+#     ceb → Create/Edit ballot templates
+#     mel → Manage elections
+#     cap → Configure authority peers
+#
+# ============================================================

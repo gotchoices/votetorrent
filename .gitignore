@@ -86,3 +86,5 @@ typings/
 # TypeScript output
 dist
 out
+
+.yarn

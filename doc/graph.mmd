@@ -1,0 +1,50 @@
+graph TD
+    %% Data Sources Layer
+    subgraph Data_Sources [Distributed Data Sources]
+        Endpoints[Endpoints & Servers]
+        Cloud[Cloud Assets: AWS/Azure/GCP]
+        Network[Network Infrastructure]
+        IoT[IoT & Environmental Sensors]
+    end
+
+    %% Collection Layer
+    subgraph Collection_Layer [Intelligence Collection Hub]
+        Agents[Agent-Based Interrogation]
+        LogStream[Real-time Log Streaming]
+        APIDisc[Cloud/SaaS APIs]
+        VAPT[Continuous Security Scans]
+    end
+
+    %% Processing & AI Engine
+    subgraph AI_Core [AI-Powered Core Engine]
+        direction TB
+        AnomDet[Anomaly Detection]
+        PredFail[Failure Prediction 30-60 Days]
+        SIEM[SIEM Event Correlation]
+        CompScore[Continuous Compliance Scoring]
+    end
+
+    %% Action & Outcome Layer
+    subgraph Outcomes [Operational Outcomes]
+        direction LR
+        AutoRem[Auto-Remediation]
+        Ticketing[AI-Routed PSA Tickets]
+        AuditPortal[Auditor Evidence Portal]
+        RemoteControl[Secure Remote Management]
+    end
+
+    %% Data Flow Connections
+    Endpoints --> Agents
+    Cloud --> APIDisc
+    Network --> LogStream
+    IoT --> Agents
+
+    Agents --> AI_Core
+    LogStream -->|AI_Core
+    APIDisc -->|AI_Core
+    VAPT --> AI_Core
+
+    AI_Core -->| AutoRem
+    AI_Core -->| Ticketing
+    AI_Core -->| AuditPortal
+    AI_Core -->|RemoteControl
