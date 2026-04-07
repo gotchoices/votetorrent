@@ -3129,6 +3129,15 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@noble/curves@npm:^2.0.1":
+  version: 2.0.1
+  resolution: "@noble/curves@npm:2.0.1"
+  dependencies:
+    "@noble/hashes": "npm:2.0.1"
+  checksum: 10c0/e0b329eb9229e862d3b7203e0444bd479e9ecf2d5990181908dad416aab69106717ca696fc7b12ad0eb19d710f58c454646b27ce517a4298ab9abc89a9bdb6ee
+  languageName: node
+  linkType: hard
+
 "@noble/hashes@npm:1.7.1, @noble/hashes@npm:^1.4.0":
   version: 1.7.1
   resolution: "@noble/hashes@npm:1.7.1"
@@ -3140,6 +3149,13 @@ __metadata:
   version: 1.8.0
   resolution: "@noble/hashes@npm:1.8.0"
   checksum: 10c0/06a0b52c81a6fa7f04d67762e08b2c476a00285858150caeaaff4037356dd5e119f45b2a530f638b77a5eeca013168ec1b655db41bae3236cb2e9d511484fc77
+  languageName: node
+  linkType: hard
+
+"@noble/hashes@npm:2.0.1, @noble/hashes@npm:^2.0.1":
+  version: 2.0.1
+  resolution: "@noble/hashes@npm:2.0.1"
+  checksum: 10c0/e81769ce21c3b1c80141a3b99bd001f17edea09879aa936692ae39525477386d696101cd573928a304806efb2b9fa751e1dd83241c67d0c84d30091e85c79bdb
   languageName: node
   linkType: hard
 
@@ -3491,16 +3507,16 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@optimystic/quereus-plugin-crypto@npm:0.3.0":
-  version: 0.3.0
-  resolution: "@optimystic/quereus-plugin-crypto@npm:0.3.0"
+"@optimystic/quereus-plugin-crypto@npm:0.9.3":
+  version: 0.9.3
+  resolution: "@optimystic/quereus-plugin-crypto@npm:0.9.3"
   dependencies:
-    "@noble/curves": "npm:^1.9.6"
-    "@noble/hashes": "npm:^1.8.0"
+    "@noble/curves": "npm:^2.0.1"
+    "@noble/hashes": "npm:^2.0.1"
     uint8arrays: "npm:^5.1.0"
   peerDependencies:
-    "@quereus/quereus": ^0.6.1
-  checksum: 10c0/3e4c09888c77b62bdb5bcdf959747ca8f1c27b3e4d8a543fb0a29a815b5a4d0398e508c13a32f0fd8ecdf0e02cc5ac03e6dca5dc40434dc4ebef45004ac72498
+    "@quereus/quereus": ^0.16.2
+  checksum: 10c0/1b15841f294169e27f74c442c5c4a86dfffe82aa53f4f0e5eac90039723b75d802c45d1c76584d0aa14b63945ae8cffc83a54ec1a4d7bb55db33e9d2b79719a4
   languageName: node
   linkType: hard
 
@@ -3577,17 +3593,17 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@quereus/quereus@npm:^0.12.0":
-  version: 0.12.1
-  resolution: "@quereus/quereus@npm:0.12.1"
+"@quereus/quereus@npm:^1.3.1":
+  version: 1.3.1
+  resolution: "@quereus/quereus@npm:1.3.1"
   dependencies:
-    debug: "npm:^4.4.1"
+    debug: "npm:^4.4.3"
     fast-json-patch: "npm:^3.1.1"
-    inheritree: "npm:^0.3.2"
+    inheritree: "npm:^0.3.4"
     moat-maker: "npm:^2.2.0"
     temporal-polyfill: "npm:^0.3.0"
     uint8arrays: "npm:^5.1.0"
-  checksum: 10c0/8429a7a71304b3cb653f690b6fe2e2e6a350c174a4c9b9cb5681dbabb17bea4ca7d86210bddea03d60b66d1edd4d625b808c247b2a916270446e757c106612a1
+  checksum: 10c0/82ddb9c57f23fdd1469c904f4c8358795142724a26ed76c0988fa250014d9c8c692a966f896097a69b2dc52dd9d9ef009e9bb0d94b140da591727bdacf4f6c4d
   languageName: node
   linkType: hard
 
@@ -5070,15 +5086,15 @@ __metadata:
     "@babel/runtime": "npm:^7.25.0"
     "@noble/curves": "npm:^1.9.6"
     "@noble/hashes": "npm:^1.8.0"
-    "@optimystic/quereus-plugin-crypto": "npm:0.3.0"
-    "@quereus/quereus": "npm:^0.12.0"
+    "@optimystic/quereus-plugin-crypto": "npm:0.9.3"
+    "@quereus/quereus": "npm:^1.3.1"
     "@react-native-async-storage/async-storage": "npm:^2.1.2"
     "@types/mocha": "npm:^10.0.10"
     "@types/node": "npm:^22.13.10"
     "@votetorrent/vote-core": "npm:^0.0.1"
     chai: "npm:^5.2.0"
     mocha: "npm:^11.5.0"
-    react: "npm:19.0.0"
+    react: "npm:19.2.4"
     react-native: "npm:0.78.0"
     temporal-polyfill: "npm:^0.3.0"
     ts-node: "npm:^10.9.2"
@@ -7611,6 +7627,18 @@ __metadata:
     supports-color:
       optional: true
   checksum: 10c0/d2b44bc1afd912b49bb7ebb0d50a860dc93a4dd7d946e8de94abc957bb63726b7dd5aa48c18c2386c379ec024c46692e15ed3ed97d481729f929201e671fcd55
+  languageName: node
+  linkType: hard
+
+"debug@npm:^4.4.3":
+  version: 4.4.3
+  resolution: "debug@npm:4.4.3"
+  dependencies:
+    ms: "npm:^2.1.3"
+  peerDependenciesMeta:
+    supports-color:
+      optional: true
+  checksum: 10c0/d79136ec6c83ecbefd0f6a5593da6a9c91ec4d7ddc4b54c883d6e71ec9accb5f67a1a5e96d00a328196b5b5c86d365e98d8a3a70856aaf16b4e7b1985e67f5a6
   languageName: node
   linkType: hard
 
@@ -10592,10 +10620,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"inheritree@npm:^0.3.2":
-  version: 0.3.2
-  resolution: "inheritree@npm:0.3.2"
-  checksum: 10c0/f60cbf77fe12d024a2730deef475f1a16879e335a40e49ba786e833197d11528f0ccff96b1414d2344cf350b5e1c991c94e8d98a59b87bd4a23145649189fc8e
+"inheritree@npm:^0.3.4":
+  version: 0.3.4
+  resolution: "inheritree@npm:0.3.4"
+  checksum: 10c0/31c3791c5d140a04c952ccd9ca8db05bc5a5cfbc89cd6b966f483e5548819f084a9d1776a4f8e2d31c5da5f627c383a8ef62a5ae228ee3625fb3889811c97c27
   languageName: node
   linkType: hard
 
@@ -16222,6 +16250,13 @@ __metadata:
   version: 19.0.0
   resolution: "react@npm:19.0.0"
   checksum: 10c0/9cad8f103e8e3a16d15cb18a0d8115d8bd9f9e1ce3420310aea381eb42aa0a4f812cf047bb5441349257a05fba8a291515691e3cb51267279b2d2c3253f38471
+  languageName: node
+  linkType: hard
+
+"react@npm:19.2.4":
+  version: 19.2.4
+  resolution: "react@npm:19.2.4"
+  checksum: 10c0/cd2c9ff67a720799cc3b38a516009986f7fc4cb8d3e15716c6211cf098d1357ee3e348ab05ad0600042bbb0fd888530ba92e329198c92eafa0994f5213396596
   languageName: node
   linkType: hard
 
