@@ -1,0 +1,239 @@
+define
+
+# ATTRIBUTE TYPES
+attribute network_key, value string;
+attribute id, value string;
+attribute hash, value string;
+attribute primary_authority_id, value string;
+attribute name, value string;
+attribute image_ref, value string;
+attribute relays, value string;
+attribute timestamp_authorities, value string;
+attribute number_required_tsas, value integer;
+attribute election_type, value string;
+attribute domain_name, value string;
+attribute admin_key, value string;
+attribute authority_id, value string;
+attribute effective_at, value datetime-tz;
+attribute threshold_policies, value string;
+attribute officer_key, value string;
+attribute admin_effective_at, value datetime-tz;
+attribute user_id, value string;
+attribute title, value string;
+attribute scopes, value string;
+attribute nonce, value string;
+attribute scope, value string;
+attribute digest, value string;
+attribute signer_key, value string;
+attribute signature, value string;
+attribute officer_signature_key, value string;
+attribute signing_nonce, value string;
+attribute proposed_network_key, value string;
+attribute proposed_admin_key, value string;
+attribute proposed_officer_key, value string;
+attribute proposed_name, value string;
+attribute proposed_officer_user_key, value string;
+attribute user_key, value string;
+attribute user_signature, value string;
+attribute cid, value string;
+attribute expiration, value datetime-tz;
+attribute invite_key, value string;
+attribute invite_signature, value string;
+attribute slot_cid, value string;
+attribute is_accepted, value boolean;
+attribute invoked_id, value string;
+attribute user_key_key, value string;
+attribute type, value string;
+attribute pub_key, value string;
+
+# ENTITY TYPES
+entity network,
+  owns network_key @key,
+  owns id,
+  owns hash,
+  owns primary_authority_id,
+  owns name,
+  owns image_ref,
+  owns relays,
+  owns timestamp_authorities,
+  owns number_required_tsas,
+  owns election_type,
+  plays network_primary_authority:network;
+
+entity authority,
+  owns id @key,
+  owns name,
+  owns domain_name,
+  owns image_ref,
+  plays network_primary_authority:primary_authority,
+  plays admin_authority:authority,
+  plays officer_authority:authority,
+  plays admin_signing_authority:authority,
+  plays proposed_admin_authority:authority,
+  plays proposed_officer_authority:authority,
+  plays proposed_officer_user_authority:authority;
+
+entity admin,
+  owns admin_key @key,
+  owns authority_id,
+  owns effective_at,
+  owns threshold_policies,
+  plays admin_authority:admin;
+
+entity officer,
+  owns officer_key @key,
+  owns authority_id,
+  owns admin_effective_at,
+  owns user_id,
+  owns title,
+  owns scopes,
+  plays officer_authority:officer,
+  plays officer_user:officer;
+
+entity admin_signing,
+  owns nonce @key,
+  owns authority_id,
+  owns admin_effective_at,
+  owns scope,
+  owns digest,
+  owns user_id,
+  owns signer_key,
+  owns signature,
+  plays admin_signing_authority:admin_signing,
+  plays admin_signing_user:admin_signing;
+
+entity officer_signature,
+  owns officer_signature_key @key,
+  owns signing_nonce,
+  owns user_id,
+  owns signer_key,
+  owns signature,
+  plays officer_signature_user:officer_signature;
+
+entity admin_signature,
+  owns signing_nonce @key;
+
+entity proposed_network,
+  owns proposed_network_key @key,
+  owns name,
+  owns image_ref,
+  owns relays,
+  owns timestamp_authorities,
+  owns number_required_tsas,
+  owns election_type;
+
+entity proposed_authority,
+  owns id @key,
+  owns name,
+  owns domain_name,
+  owns image_ref;
+
+entity proposed_admin,
+  owns proposed_admin_key @key,
+  owns authority_id,
+  owns effective_at,
+  owns threshold_policies,
+  plays proposed_admin_authority:proposed_admin;
+
+entity proposed_officer,
+  owns proposed_officer_key @key,
+  owns authority_id,
+  owns admin_effective_at,
+  owns proposed_name,
+  owns title,
+  owns scopes,
+  plays proposed_officer_authority:proposed_officer;
+
+entity proposed_officer_user,
+  owns proposed_officer_user_key @key,
+  owns authority_id,
+  owns admin_effective_at,
+  owns proposed_name,
+  owns user_id,
+  owns user_key,
+  owns user_signature,
+  plays proposed_officer_user_authority:proposed_officer_user,
+  plays proposed_officer_user_user:proposed_officer_user;
+
+entity invite_slot,
+  owns cid @key,
+  owns name,
+  owns expiration,
+  owns invite_key,
+  owns invite_signature,
+  owns signing_nonce;
+
+entity invite_result,
+  owns slot_cid @key,
+  owns is_accepted,
+  owns digest,
+  owns invite_signature,
+  owns invoked_id;
+
+entity user,
+  owns id @key,
+  owns name,
+  owns image_ref,
+  plays officer_user:user,
+  plays admin_signing_user:user,
+  plays officer_signature_user:user,
+  plays proposed_officer_user_user:user,
+  plays user_key_user:user;
+
+entity user_key,
+  owns user_key_key @key,
+  owns user_id,
+  owns type,
+  owns pub_key,
+  owns expiration,
+  plays user_key_user:user_key;
+
+# RELATION TYPES
+relation network_primary_authority,
+  relates network,
+  relates primary_authority;
+
+relation admin_authority,
+  relates admin,
+  relates authority;
+
+relation officer_authority,
+  relates officer,
+  relates authority;
+
+relation officer_user,
+  relates officer,
+  relates user;
+
+relation admin_signing_authority,
+  relates admin_signing,
+  relates authority;
+
+relation admin_signing_user,
+  relates admin_signing,
+  relates user;
+
+relation officer_signature_user,
+  relates officer_signature,
+  relates user;
+
+relation proposed_admin_authority,
+  relates proposed_admin,
+  relates authority;
+
+relation proposed_officer_authority,
+  relates proposed_officer,
+  relates authority;
+
+relation proposed_officer_user_authority,
+  relates proposed_officer_user,
+  relates authority;
+
+relation proposed_officer_user_user,
+  relates proposed_officer_user,
+  relates user;
+
+relation user_key_user,
+  relates user_key,
+  relates user;
+
