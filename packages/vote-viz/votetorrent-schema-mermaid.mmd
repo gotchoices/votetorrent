@@ -1,0 +1,147 @@
+erDiagram
+
+  network {
+    string network_key PK
+    string id
+    string hash
+    string primary_authority_id FK
+    string name
+    string image_ref
+    string relays
+    string timestamp_authorities
+    int number_required_tsas
+    string election_type
+  }
+
+  authority {
+    string id PK
+    string name
+    string domain_name
+    string image_ref
+  }
+
+  admin {
+    string admin_key PK
+    string authority_id FK
+    datetime effective_at
+    string threshold_policies
+  }
+
+  officer {
+    string officer_key PK
+    string authority_id FK
+    datetime admin_effective_at
+    string user_id FK
+    string title
+    string scopes
+  }
+
+  admin_signing {
+    string nonce PK
+    string authority_id FK
+    datetime admin_effective_at
+    string scope
+    string digest
+    string user_id FK
+    string signer_key
+    string signature
+  }
+
+  officer_signature {
+    string officer_signature_key PK
+    string signing_nonce
+    string user_id FK
+    string signer_key
+    string signature
+  }
+
+  admin_signature {
+    string signing_nonce PK
+  }
+
+  proposed_network {
+    string proposed_network_key PK
+    string name
+    string image_ref
+    string relays
+    string timestamp_authorities
+    int number_required_tsas
+    string election_type
+  }
+
+  proposed_authority {
+    string id PK
+    string name
+    string domain_name
+    string image_ref
+  }
+
+  proposed_admin {
+    string proposed_admin_key PK
+    string authority_id FK
+    datetime effective_at
+    string threshold_policies
+  }
+
+  proposed_officer {
+    string proposed_officer_key PK
+    string authority_id FK
+    datetime admin_effective_at
+    string proposed_name
+    string title
+    string scopes
+  }
+
+  proposed_officer_user {
+    string proposed_officer_user_key PK
+    string authority_id FK
+    datetime admin_effective_at
+    string proposed_name
+    string user_id FK
+    string user_key
+    string user_signature
+  }
+
+  invite_slot {
+    string cid PK
+    string name
+    datetime expiration
+    string invite_key
+    string invite_signature
+    string signing_nonce
+  }
+
+  invite_result {
+    string slot_cid PK
+    boolean is_accepted
+    string digest
+    string invite_signature
+    string invoked_id
+  }
+
+  user {
+    string id PK
+    string name
+    string image_ref
+  }
+
+  user_key {
+    string user_key_key PK
+    string user_id FK
+    string type
+    string pub_key
+    datetime expiration
+  }
+
+  network }o--|| primary_authority : "network_primary_authority"
+  admin }o--|| authority : "admin_authority"
+  officer }o--|| authority : "officer_authority"
+  officer }o--|| user : "officer_user"
+  admin_signing }o--|| authority : "admin_signing_authority"
+  admin_signing }o--|| user : "admin_signing_user"
+  officer_signature }o--|| user : "officer_signature_user"
+  proposed_admin }o--|| authority : "proposed_admin_authority"
+  proposed_officer }o--|| authority : "proposed_officer_authority"
+  proposed_officer_user }o--|| authority : "proposed_officer_user_authority"
+  proposed_officer_user }o--|| user : "proposed_officer_user_user"
+  user_key }o--|| user : "user_key_user"

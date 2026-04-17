@@ -1,13 +1,11 @@
 /**
- * AST → table extraction (handles declare schema + create table)
-		snake_case normalization
-		type mapping (text/integer/datetime/boolean)
-		attribute emission
-		entity emission (surrogate key for composite PKs)
-		simple relation inference from _id columns
-		plays lines on entities for inferred relations
- *
-*/
+ * Shared AST extraction layer for QSQL → * transpilers
+ *    handles declare schema + create table statements
+ *    snake_case normalization
+ *    SQL type → canonical AttributeType mapping
+ *    table/column/PK extraction
+ *    relation inference from _id columns
+ */
 
 import type {
 	ColumnConstraint,
@@ -43,7 +41,7 @@ export interface TranspiledSchema {
   playsByEntity: Map<string, Set<string>>;
 }
 
-const TYPE_MAP: Record<string, AttributeType> = {
+export const TYPE_MAP: Record<string, AttributeType> = {
   text: 'string',
   string: 'string',
   integer: 'integer',
@@ -54,11 +52,6 @@ const TYPE_MAP: Record<string, AttributeType> = {
   datetime: 'datetime-tz',
   'datetime-tz': 'datetime-tz',
 };
-
-export function transpileQuereusAstToTypeql(statements: Statement[]): string {
-  const schema = buildTranspiledSchema(statements);
-  return renderTypeql(schema);
-}
 
 export function buildTranspiledSchema(statements: Statement[]): TranspiledSchema {
   const tables = extractTables(statements);
@@ -226,7 +219,7 @@ function registerPlay(map: Map<string, Set<string>>, entity: string, play: strin
   map.set(entity, plays);
 }
 
-function mapDataType(dataType?: string): AttributeType {
+export function mapDataType(dataType?: string): AttributeType {
   if (!dataType) {
     return 'string';
   }
@@ -236,7 +229,7 @@ function mapDataType(dataType?: string): AttributeType {
   return TYPE_MAP[token] ?? 'string';
 }
 
-function upsertAttribute(map: Map<string, AttributeType>, name: string, type: AttributeType): void {
+export function upsertAttribute(map: Map<string, AttributeType>, name: string, type: AttributeType): void {
   const existing = map.get(name);
   if (!existing) {
     map.set(name, type);
@@ -248,62 +241,7 @@ function upsertAttribute(map: Map<string, AttributeType>, name: string, type: At
   }
 }
 
-function renderTypeql(schema: TranspiledSchema): string {
-  const lines: string[] = ['define', ''];
-
-  lines.push('# ATTRIBUTE TYPES');
-  for (const [name, type] of schema.attributes) {
-    lines.push(`attribute ${name}, value ${type};`);
-  }
-
-  lines.push('', '# ENTITY TYPES');
-  for (const table of schema.tables) {
-    const entityLines: string[] = [];
-    const needsSurrogateKey = table.primaryKeyColumns.length !== 1;
-
-    if (needsSurrogateKey) {
-      entityLines.push(`owns ${table.name}_key @key`);
-    }
-
-    for (const column of table.columns) {
-      if (!needsSurrogateKey && table.primaryKeyColumns.includes(column.name)) {
-        entityLines.push(`owns ${column.name} @key`);
-      } else {
-        entityLines.push(`owns ${column.name}`);
-      }
-    }
-
-    const plays = schema.playsByEntity.get(table.name);
-    if (plays) {
-      for (const play of plays) {
-        entityLines.push(`plays ${play}`);
-      }
-    }
-
-    lines.push(`entity ${table.name},`);
-    entityLines.forEach((line, idx) => {
-      const suffix = idx === entityLines.length - 1 ? ';' : ',';
-      lines.push(`  ${line}${suffix}`);
-    });
-    lines.push('');
-  }
-
-  if (schema.relations.length > 0) {
-    lines.push('# RELATION TYPES');
-    for (const relation of schema.relations) {
-      lines.push(`relation ${relation.name},`);
-      relation.roles.forEach((role, idx) => {
-        const suffix = idx === relation.roles.length - 1 ? ';' : ',';
-        lines.push(`  relates ${role}${suffix}`);
-      });
-      lines.push('');
-    }
-  }
-
-  return lines.join('\n').trim() + '\n';
-}
-
-function toSnakeCase(value: string): string {
+export function toSnakeCase(value: string): string {
   return value
     .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
     .replace(/[^a-zA-Z0-9]+/g, '_')

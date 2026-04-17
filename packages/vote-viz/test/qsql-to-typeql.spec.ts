@@ -1,11 +1,7 @@
-import { parse, parseAll } from '@quereus/quereus/parser';
-import { transpileQuereusAstToTypeql } from './quereus-to-typeql';
+import { expect } from 'aegir/chai';
+import { parseAll } from '@quereus/quereus/parser';
+import { transpileQuereusAstToTypeql } from '../src/qsql-to-typeql.js';
 
-// Single statement
-// const ast = parse(`DECLARE SCHEMA myschema { ... }`);
-// console.log(JSON.stringify(ast, null, 2));
-
-// Multiple statements
 export const ast = parseAll(`
 	declare schema main
 
@@ -617,6 +613,102 @@ index AdminSigningDigest on AdminSigning (Digest);
 apply schema main;
 
 	`);
-// console.log(JSON.stringify(ast, null, 2));
-const typeql = transpileQuereusAstToTypeql(ast);
-console.log(typeql);
+
+describe('qsql-to-typeql', () => {
+	let typeql: string;
+
+	before(() => {
+		typeql = transpileQuereusAstToTypeql(ast);
+	});
+
+	describe('structure', () => {
+		it('starts with define block', () => {
+			expect(typeql.trimStart()).to.match(/^define/);
+		});
+
+		it('declares attribute types section', () => {
+			expect(typeql).to.include('# ATTRIBUTE TYPES');
+		});
+
+		it('declares entity types section', () => {
+			expect(typeql).to.include('# ENTITY TYPES');
+		});
+
+		it('declares relation types section', () => {
+			expect(typeql).to.include('# RELATION TYPES');
+		});
+	});
+
+	describe('attributes', () => {
+		it('maps text columns to string attributes', () => {
+			expect(typeql).to.include('attribute name, value string;');
+		});
+
+		it('maps integer columns to integer attributes', () => {
+			expect(typeql).to.include('attribute number_required_tsas, value integer;');
+		});
+
+		it('maps datetime columns to datetime-tz attributes', () => {
+			expect(typeql).to.include('attribute effective_at, value datetime-tz;');
+		});
+
+		it('maps boolean columns to boolean attributes', () => {
+			expect(typeql).to.include('attribute is_accepted, value boolean;');
+		});
+	});
+
+	describe('entities', () => {
+		it('emits entity for each table', () => {
+			expect(typeql).to.include('entity authority,');
+			expect(typeql).to.include('entity network,');
+			expect(typeql).to.include('entity admin,');
+			expect(typeql).to.include('entity officer,');
+			expect(typeql).to.include('entity user_key,');
+		});
+
+		it('uses @key for single-column primary key', () => {
+			expect(typeql).to.include('entity authority,');
+			expect(typeql).to.match(/entity authority,[\s\S]*?owns id @key/);
+		});
+
+		it('uses surrogate key for composite or missing primary key', () => {
+			expect(typeql).to.include('owns network_key @key');
+			expect(typeql).to.include('owns admin_key @key');
+			expect(typeql).to.include('owns officer_key @key');
+			expect(typeql).to.include('owns user_key_key @key');
+		});
+
+		it('owns all non-key columns as attributes', () => {
+			expect(typeql).to.match(/entity authority,[\s\S]*?owns name/);
+			expect(typeql).to.match(/entity admin,[\s\S]*?owns threshold_policies/);
+		});
+	});
+
+	describe('relations', () => {
+		it('infers relation from authority_id column on admin', () => {
+			expect(typeql).to.include('relation admin_authority,');
+		});
+
+		it('infers relation from authority_id column on officer', () => {
+			expect(typeql).to.include('relation officer_authority,');
+		});
+
+		it('infers relation from user_id column on officer', () => {
+			expect(typeql).to.include('relation officer_user,');
+		});
+
+		it('infers relation from user_id column on user_key', () => {
+			expect(typeql).to.include('relation user_key_user,');
+		});
+
+		it('emits relates lines for each role', () => {
+			expect(typeql).to.match(/relation admin_authority,[\s\S]*?relates admin/);
+			expect(typeql).to.match(/relation admin_authority,[\s\S]*?relates authority/);
+		});
+
+		it('emits plays lines on the corresponding entities', () => {
+			expect(typeql).to.match(/entity admin,[\s\S]*?plays admin_authority:admin/);
+			expect(typeql).to.match(/entity authority,[\s\S]*?plays admin_authority:authority/);
+		});
+	});
+});
