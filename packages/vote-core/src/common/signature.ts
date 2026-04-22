@@ -1,5 +1,5 @@
-export type Signature = {
-	signature: string;
-	signerKey: string;
-	signerUserId: string;
-};
+export interface Signature {
+  signature: string
+  signerKey: string
+  signerUserId: string
+}

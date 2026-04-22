@@ -21,10 +21,10 @@
 		]
 	},
 	"scripts": {
-		"clean": "yarn workspaces run clean",
-		"build": "yarn workspaces run build",
-		"lint": "yarn workspaces run lint",
-		"test": "yarn workspaces run test",
+		"clean": "yarn workspaces foreach -A run clean",
+		"build": "yarn workspaces foreach -A run build",
+		"lint": "yarn workspaces foreach -A run lint",
+		"test": "yarn workspaces foreach -A run test",
 		"start": "yarn workspace votetorrent-authority start",
 		"android": "yarn workspace votetorrent-authority android",
 		"ios": "yarn workspace votetorrent-authority ios",

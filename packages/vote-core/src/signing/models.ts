@@ -1,4 +1,4 @@
-export type SigningResult = {
-	nonce: string;
-	thresholdReached: boolean;
-};
+export interface SigningResult {
+  nonce: string
+  thresholdReached: boolean
+}

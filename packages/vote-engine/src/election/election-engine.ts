@@ -1,45 +1,44 @@
 import type {
-	BallotDetails,
-	BallotInit,
-	ElectionDetails,
-	ElectionRevisionInit,
-	KeyholderInvite,
-	BallotSummary,
-	IElectionEngine,
-} from '@votetorrent/vote-core/';
+  BallotDetails,
+  ElectionDetails,
+  ElectionRevisionInit,
+  KeyholderInvite,
+  BallotSummary,
+  IElectionEngine
+} from '@votetorrent/vote-core/'
 
 export class ElectionEngine implements IElectionEngine {
-	getBallotDetails(id: string): Promise<BallotDetails> {
-		throw new Error('Not implemented');
-	}
+  async getBallotDetails (id: string): Promise<BallotDetails> {
+    throw new Error('Not implemented')
+  }
 
-	getBallots(): Promise<BallotSummary[]> {
-		throw new Error('Not implemented');
-	}
+  async getBallots (): Promise<BallotSummary[]> {
+    throw new Error('Not implemented')
+  }
 
-	getElectionDetails(): Promise<ElectionDetails> {
-		throw new Error('Not implemented yet');
-	}
+  async getElectionDetails (): Promise<ElectionDetails> {
+    throw new Error('Not implemented yet')
+  }
 
-	inviteKeyholder(
-		keyholder: KeyholderInvite,
-		electionId: string
-	): Promise<void> {
-		throw new Error('Not implemented');
-	}
+  async inviteKeyholder (
+    keyholder: KeyholderInvite,
+    electionId: string
+  ): Promise<void> {
+    throw new Error('Not implemented')
+  }
 
-	proposeBallot(ballot: BallotInit): Promise<void> {
-		throw new Error('Not implemented');
-	}
+  async proposeBallot (ballot): Promise<void> {
+    throw new Error('Not implemented')
+  }
 
-	proposeRevision(revision: ElectionRevisionInit): Promise<void> {
-		throw new Error('Not implemented');
-	}
+  async proposeRevision (revision: ElectionRevisionInit): Promise<void> {
+    throw new Error('Not implemented')
+  }
 
-	revokeKeyholder(
-		keyholder: KeyholderInvite,
-		electionId: string
-	): Promise<void> {
-		throw new Error('Not implemented');
-	}
+  async revokeKeyholder (
+    keyholder: KeyholderInvite,
+    electionId: string
+  ): Promise<void> {
+    throw new Error('Not implemented')
+  }
 }

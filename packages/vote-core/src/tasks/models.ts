@@ -1,64 +1,64 @@
-import type { ElectionDetails, ElectionInit, Ballot } from '../election';
-import type { NetworkReference, NetworkInit } from '../network';
-import type { AdminInit, AuthorityInit, Authority } from '../authority';
-import type { Proposal, Signature } from '../common';
+import type { AdminInit, AuthorityInit, Authority } from '../authority'
+import type { Proposal, Signature } from '../common'
+import type { ElectionDetails, ElectionInit, Ballot } from '../election'
+import type { NetworkReference, NetworkInit } from '../network'
 
-export type Task = {
-	type: string;
-};
+export interface Task {
+  type: string
+}
 
 export type ReleaseKeyTask = Task & {
-	type: 'release-key';
-	network: NetworkReference;
-	election: ElectionDetails;
-	userId: string;
-};
+  type: 'release-key'
+  network: NetworkReference
+  election: ElectionDetails
+  userId: string
+}
 
 export type SignatureTask = Task & {
-	type: 'signature';
-	network: NetworkReference;
-	userId: string;
-	signatureType:
-		| 'admin'
-		| 'authority'
-		| 'ballot'
-		| 'election'
-		| 'election-revision'
-		| 'network';
-};
+  type: 'signature'
+  network: NetworkReference
+  userId: string
+  signatureType:
+  | 'admin'
+  | 'authority'
+  | 'ballot'
+  | 'election'
+  | 'election-revision'
+  | 'network'
+}
 
 export type AdminSignatureTask = SignatureTask & {
-	signatureType: 'admin';
-	administration: Proposal<AdminInit>;
-	authority: Authority;
-};
+  signatureType: 'admin'
+  administration: Proposal<AdminInit>
+  authority: Authority
+}
 
 export type AuthoritySignatureTask = SignatureTask & {
-	signatureType: 'authority';
-	authority: Proposal<AuthorityInit>;
-};
+  signatureType: 'authority'
+  authority: Proposal<AuthorityInit>
+}
 
 export type NetworkSignatureTask = SignatureTask & {
-	signatureType: 'network';
-	network: Proposal<NetworkInit>;
-};
+  signatureType: 'network'
+  network: Proposal<NetworkInit>
+}
 
 export type ElectionSignatureTask = SignatureTask & {
-	signatureType: 'election';
-	election: Proposal<ElectionInit>;
-};
+  signatureType: 'election'
+  election: Proposal<ElectionInit>
+}
 
 export type ElectionRevisionSignatureTask = SignatureTask & {
-	signatureType: 'election-revision';
-	election: Proposal<ElectionInit>;
-};
+  signatureType: 'election-revision'
+  election: Proposal<ElectionInit>
+}
 
 export type BallotSignatureTask = SignatureTask & {
-	signatureType: 'ballot';
-	ballot: Proposal<Ballot>;
-};
+  signatureType: 'ballot'
+  ballot: Proposal<Ballot>
+}
 
-export type SignatureResult = {
-	isAccepted: boolean;
-	signature: Signature;
-};
+export interface SignatureResult {
+  isAccepted: boolean
+  signature: Signature
+}
