@@ -9,7 +9,7 @@ import type {
   INetworksEngine,
   INetworkEngine,
   Scope,
-	NetworkReference
+  NetworkReference
 } from '@votetorrent/vote-core'
 
 // Using AsyncStorage shim for local storage
@@ -84,15 +84,15 @@ describe('NetworksEngine', () => {
     expect(returnedNetwork).to.be.instanceOf(NetworkEngine)
 
     // Recent networks updated
-    const recents: NetworkReference[] = (await AsyncStorage.getItem('recentNetworks')) || []
+    const recents: NetworkReference[] = (await AsyncStorage.getItem('recentNetworks')) ?? []
     expect(recents).to.be.an('array').with.length(1)
-    const firstRecent = recents[0]!
+    const firstRecent = recents[0]
     expect(firstRecent).to.include({
       name: networkInitPass.name,
       primaryAuthorityDomainName: networkInitPass.primaryAuthority.domainName
     })
-    expect(firstRecent.relays).to.deep.equal(networkInitPass.relays)
-    expect(firstRecent.imageUrl).to.equal(networkInitPass.imageUrl)
+    expect(firstRecent?.relays).to.deep.equal(networkInitPass.relays)
+    expect(firstRecent?.imageUrl).to.equal(networkInitPass.imageUrl)
 
     // getRecentNetworks after create
     const recentViaEngine = await engine.getRecentNetworks()
@@ -130,18 +130,18 @@ describe('NetworksEngine', () => {
 
     // open() returns a NetworkEngine and can store as recent (dedup to front)
     const ref: NetworkReference = {
-      hash: recents?.[0]?.hash ?? "",
+      hash: recents?.[0]?.hash ?? '',
       relays: recents?.[0]?.relays ?? [],
-      imageUrl: recents?.[0]?.imageUrl ?? "",
-      name: recents?.[0]?.name ?? "mock-name",
-      primaryAuthorityDomainName: recents?.[0]?.primaryAuthorityDomainName ?? ""
+      imageUrl: recents?.[0]?.imageUrl ?? '',
+      name: recents?.[0]?.name ?? 'mock-name',
+      primaryAuthorityDomainName: recents?.[0]?.primaryAuthorityDomainName ?? ''
     }
     const opened = await engine.open(ref, user, true)
     expect(opened).to.be.instanceOf(NetworkEngine)
 
     const recentsAfterOpen: NetworkReference[] = (await AsyncStorage.getItem(
       'recentNetworks'
-    )) || []
+    )) ?? []
     expect(recentsAfterOpen).to.be.an('array').with.length(1)
     expect(recentsAfterOpen?.[0]?.hash).to.equal(ref.hash)
     expect(recentsAfterOpen?.[0]?.name).to.equal(ref.name)

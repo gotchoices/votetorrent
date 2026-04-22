@@ -1,27 +1,27 @@
 import { ElectionType, UserKeyType } from '@votetorrent/vote-core'
-import { expect } from 'chai'
-import { NetworkEngine } from '../src/network/network-engine'
+// import { expect } from 'chai'
+// import { NetworkEngine } from '../src/network/network-engine'
 import { NetworksEngine } from '../src/networks/networks-engine'
 import { AsyncStorage } from './shims/react-native'
 import type {
   User,
   NetworkInit,
   INetworkEngine,
-  NetworkRevision,
+  // NetworkRevision,
   NetworkReference,
-  Authority,
-  AdminInit,
-  AuthorityInit,
-  Scope,
-  NetworkDetails,
-  NetworkSummary,
+  // Authority,
+  // AdminInit,
+  // AuthorityInit,
+  Scope
+  // NetworkDetails,
+  // NetworkSummary,
 } from '@votetorrent/vote-core'
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makeUser(overrides?: Partial<User>): User {
+function makeUser (overrides?: Partial<User>): User {
   return {
     id: 'user-1',
     name: 'Test User',
@@ -30,21 +30,21 @@ function makeUser(overrides?: Partial<User>): User {
       {
         key: 'key-1',
         type: UserKeyType.mobile,
-        expiration: Date.now() + 86_400_000,
-      },
+        expiration: Date.now() + 86_400_000
+      }
     ],
-    ...overrides,
+    ...overrides
   }
 }
 
-function makeNetworkInit(overrides?: Partial<NetworkInit>): NetworkInit {
+function makeNetworkInit (overrides?: Partial<NetworkInit>): NetworkInit {
   return {
     name: 'Test Network',
     imageUrl: 'https://cdn.example.com/logo.png',
     relays: ['/dns4/relay.example.com/tcp/443/wss'],
     primaryAuthority: {
       name: 'Primary Authority',
-      domainName: 'authority.example.com',
+      domainName: 'authority.example.com'
     },
     admin: {
       officers: [
@@ -52,23 +52,23 @@ function makeNetworkInit(overrides?: Partial<NetworkInit>): NetworkInit {
           init: {
             name: 'Admin A',
             title: 'Chair',
-            scopes: ['rn', 'mel'] as Scope[],
-          },
-        },
+            scopes: ['rn', 'mel'] as Scope[]
+          }
+        }
       ],
       effectiveAt: Date.now(),
-      thresholdPolicies: [{ policy: 'rn', threshold: 1 }],
+      thresholdPolicies: [{ policy: 'rn', threshold: 1 }]
     },
     policies: {
       timestampAuthorities: [{ url: 'https://tsa.example.com' }],
       numberRequiredTSAs: 1,
-      electionType: ElectionType.adhoc,
+      electionType: ElectionType.adhoc
     },
-    ...overrides,
+    ...overrides
   }
 }
 
-async function createNetworkEngine(): Promise<{
+async function createNetworkEngine (): Promise<{
   engine: INetworkEngine
   ref: NetworkReference
 }> {
@@ -89,7 +89,6 @@ async function createNetworkEngine(): Promise<{
 // ===========================================================================
 
 describe('NetworkEngine', () => {
-
   // -----------------------------------------------------------------------
   // 1. Network Details & Summary
   // -----------------------------------------------------------------------
@@ -294,7 +293,6 @@ describe('NetworkEngine', () => {
 // ===========================================================================
 
 describe('NetworksEngine - creation constraints', () => {
-
   // -----------------------------------------------------------------------
   // 13. Network Creation Validation
   // -----------------------------------------------------------------------
