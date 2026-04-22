@@ -8,7 +8,8 @@ import type {
   NetworkInit,
   INetworksEngine,
   INetworkEngine,
-  Scope
+  Scope,
+	NetworkReference
 } from '@votetorrent/vote-core'
 
 // Using AsyncStorage shim for local storage
@@ -83,14 +84,15 @@ describe('NetworksEngine', () => {
     expect(returnedNetwork).to.be.instanceOf(NetworkEngine)
 
     // Recent networks updated
-    const recents = (await AsyncStorage.getItem('recentNetworks'))
+    const recents: NetworkReference[] = (await AsyncStorage.getItem('recentNetworks')) || []
     expect(recents).to.be.an('array').with.length(1)
-    expect(recents?.[0]).to.include({
+    const firstRecent = recents[0]!
+    expect(firstRecent).to.include({
       name: networkInitPass.name,
       primaryAuthorityDomainName: networkInitPass.primaryAuthority.domainName
     })
-    expect(recents?.[0].relays).to.deep.equal(networkInitPass.relays)
-    expect(recents?.[0].imageUrl).to.equal(networkInitPass.imageUrl)
+    expect(firstRecent.relays).to.deep.equal(networkInitPass.relays)
+    expect(firstRecent.imageUrl).to.equal(networkInitPass.imageUrl)
 
     // getRecentNetworks after create
     const recentViaEngine = await engine.getRecentNetworks()
@@ -127,22 +129,22 @@ describe('NetworksEngine', () => {
     }
 
     // open() returns a NetworkEngine and can store as recent (dedup to front)
-    const ref = {
-      hash: recents?.[0].hash,
-      relays: recents?.[0].relays,
-      imageUrl: recents?.[0].imageUrl,
-      name: recents?.[0].name,
-      primaryAuthorityDomainName: recents?.[0].primaryAuthorityDomainName
+    const ref: NetworkReference = {
+      hash: recents?.[0]?.hash ?? "",
+      relays: recents?.[0]?.relays ?? [],
+      imageUrl: recents?.[0]?.imageUrl ?? "",
+      name: recents?.[0]?.name ?? "mock-name",
+      primaryAuthorityDomainName: recents?.[0]?.primaryAuthorityDomainName ?? ""
     }
     const opened = await engine.open(ref, user, true)
     expect(opened).to.be.instanceOf(NetworkEngine)
 
-    const recentsAfterOpen = (await AsyncStorage.getItem(
+    const recentsAfterOpen: NetworkReference[] = (await AsyncStorage.getItem(
       'recentNetworks'
-    ))
+    )) || []
     expect(recentsAfterOpen).to.be.an('array').with.length(1)
-    expect(recentsAfterOpen?.[0].hash).to.equal(ref.hash)
-    expect(recentsAfterOpen?.[0].name).to.equal(ref.name)
+    expect(recentsAfterOpen?.[0]?.hash).to.equal(ref.hash)
+    expect(recentsAfterOpen?.[0]?.name).to.equal(ref.name)
 
     // open() with storeAsRecent=false does not modify recents
     const prev = JSON.stringify(recentsAfterOpen)
