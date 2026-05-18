@@ -547,7 +547,7 @@ declare schema main
 		-- TODO add check for valid update
 		constraint InsertValid check on insert (
 			-- First user in the network - no invite, no signing
-			(SigningNonce is null and InviteSlotCid is null and InviteSignature is null and (select count(*) from User) = 1)
+			(SigningNonce is null and InviteSlotCid is null and InviteSignature is null and (select count(*) from User) = 0)
 				-- or Valid Invite for this user
 				or (SigningNonce is null and InviteSlotCid is not null and InviteSignature is not null
 					and exists (
