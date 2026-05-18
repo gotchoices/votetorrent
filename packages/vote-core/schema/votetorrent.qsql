@@ -1002,7 +1002,7 @@ declare schema main
 					where A.Nonce = context.SigningNonce
 						and A.Scope = 'mel'
 						and A.Digest = Digest(
-							Tid, new.UserId, new.Type, new.ReferenceId
+							Tid, new.Id, new.UserId, new.Type, new.SignatureType, new.SigningNonce
 						)
 			)
 		)
