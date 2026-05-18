@@ -915,7 +915,7 @@ declare schema main
 	)
 		with context ( SigningNonce text, Tid int );
 
-	-- view QuestionType as select * from (values ('select'), ('rank'), ('score'), ('text')) as QuestionType(Type);
+	view QuestionType as select * from (values ('select', 'Select'), ('rank', 'Rank'), ('score', 'Score'), ('text', 'Text')) as QuestionType(Code, Name);
 
 	table ProposedOption (
 		BallotId text, -- references ProposedBallot.Id
