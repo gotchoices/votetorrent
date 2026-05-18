@@ -433,8 +433,8 @@ declare schema main
 							context.UserKey
 						)
 			)
-		),
-	);
+		)
+	)
 		with context ( UserId text, UserKey text, Signature text, Tid int );
 
 	-- Possibly remove, since users must be associated with a keyholer or officer
@@ -557,7 +557,7 @@ declare schema main
 					)
 				)
 		),
-	);
+	)
 		with context (SigningNonce text null, InviteSlotCid text null, InviteSignature text null, Tid int);
 
 	table UserKey (
