@@ -460,14 +460,18 @@ declare schema main
 		constraint SignatureValid check (true)
 	);
 
+	view InviteType as select * from (values ('au', 'Authority'), ('of', 'Officer'), ('k', 'Keyholder'), ('r', 'Registrant')) as InviteType(Code, Name);
+
 	table InviteSlot (
 		Cid text primary key,
+		Type text, -- references InviteType(Code) — must match TS union InviteType in packages/vote-core/src/invite/models.ts:68 ('au'|'of'|'k'|'r')
 		Name text, -- Name of invited person or authority for informational purpose and/or manually catch abuse
 		Expiration datetime,
 		InviteKey text, -- public key of temporary Invite key pair
 		InviteSignature text,
 		SigningNonce text, -- AdminSigning.Nonce, shows admin approval including scope (implies the type of invite, e.g. authority, officer, keyholder, registrant)
 		constraint CidValid check (Cid = Digest(Name, Expiration, InviteKey, InviteSignature, SigningNonce)),
+		constraint TypeValid check (Type in (select Code from InviteType)),
 		constraint ExpirationValid check (Expiration > datetime('now')),
 		-- Proves that the inviter has a valid private key corresponding to the public key in the Invite slot
 		constraint InviteSignatureValid check (SignatureValid(Digest(Cid, Type, Name, Expiration), InviteSignature, InviteKey)),
