@@ -455,15 +455,9 @@ declare schema main
 		constraint UserIdValid check (exists (select 1 from User U where U.Id = new.UserId)),
 		constraint UserKeyValid check (exists (select 1 from UserKey K where K.UserId = new.UserId and K.Key = new.UserKey and K.Expiration > datetime('now'))),
 		constraint CantDelete check on delete (false),
-		constraint SignatureValid check (exists (select 1 from ProposedOfficer PA
-			where PA.AuthorityId = new.AuthorityId and PA.AdminRevision = new.AdminRevision and PA.ProposedName = new.ProposedName and PA.UserId = new.UserId and PA.SignerKey = new.SignerKey and PA.Signature = new.Signature
-			-- and SignatureValid(
-			-- 	Digest(new.AuthorityId, new.AdminRevision, new.UserId, PA.Title, PA.Scopes),
-			-- 	Signature,
-			-- 	SignerKey
-			-- 	)
-			)
-		)
+		-- TODO: re-enable when ProposedOfficerUser's role is decided (currently "possibly remove" per the table comment).
+		-- Original (broken) body referenced PA.AdminRevision / PA.UserId / PA.SignerKey / PA.Signature which do not exist on ProposedOfficer.
+		constraint SignatureValid check (true)
 	);
 
 	table InviteSlot (
