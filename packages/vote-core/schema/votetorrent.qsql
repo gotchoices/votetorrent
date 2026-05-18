@@ -829,6 +829,7 @@ declare schema main
 			exists (
 				select 1 from AdminSignature ASig join AdminSigning A on A.Nonce = ASig.SigningNonce
 					join Ballot B on B.Id = old.BallotId
+					join Election E on E.Id = B.ElectionId
 					where A.Nonce = context.SigningNonce
 						and A.AuthorityId = B.AuthorityId
 						and E.BallotDeadline > datetime('now')
@@ -909,6 +910,7 @@ declare schema main
 			exists (
 				select 1 from AdminSignature ASig join AdminSigning A on A.Nonce = ASig.SigningNonce
 					join Ballot B on B.Id = old.BallotId
+					join Election E on E.Id = B.ElectionId
 					where A.Nonce = context.SigningNonce
 						and A.AuthorityId = B.AuthorityId
 						and E.BallotDeadline > datetime('now')
