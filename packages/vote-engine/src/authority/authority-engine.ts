@@ -396,6 +396,7 @@ export class AuthorityEngine implements IAuthorityEngine {
 					InviteSignature,
 					SigningNonce
 					)
+					with context now = datetime('now')
 					values (
 						:cid,
 						:name,
@@ -446,6 +447,7 @@ export class AuthorityEngine implements IAuthorityEngine {
 					InviteSignature,
 					SigningNonce
 					)
+				with context now = datetime('now')
 				values (
 					:cid,
 					:type,

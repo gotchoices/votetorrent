@@ -91,4 +91,50 @@ describe('Schema load', () => {
 			.get();
 		expect(sigValid).to.exist;
 	});
+
+	it('binds caller-supplied now via with context for time-bounded CHECK constraints', async () => {
+		// SCHEMA-15 / G-01 witness: prove that the `with context now = ...`
+		// binding round-trips through the planner and that the ExpirationFuture
+		// CHECK on UserKey now references `context.now` (not `datetime('now')`)
+		// without firing the SchemaManager.validateCheckConstraintDeterminism
+		// rejection.
+		//
+		// We `prepare()` an INSERT into UserKey that supplies `with context now`;
+		// planner success witnesses that (a) the CHECK body parses, (b) the
+		// context-var is declared on the table, and (c) the determinism validator
+		// is satisfied. We do NOT execute the INSERT — full bootstrap requires
+		// the crypto plugin's view-column resolution path, which is independent
+		// of G-01 and tracked separately (see Test 2 H16/1 failure).
+		const db = new Database();
+		await prepareDb(db);
+
+		let prepareError: Error | undefined;
+		try {
+			const stmt = db.prepare(
+				`insert into UserKey (UserId, Type, PubKey, Expiration)
+				with context now = datetime('now')
+				values (:userId, :keyType, :keyValue, :expiration)`
+			);
+			// finalize() if the API exposes it; otherwise letting it GC is fine
+			// — we only needed the prepare path to succeed.
+			void stmt;
+		} catch (err) {
+			prepareError = err instanceof Error ? err : new Error(String(err));
+		}
+
+		if (prepareError) {
+			const msg = prepareError.message;
+			if (msg.includes('validateCheckConstraintDeterminism')) {
+				throw new Error(
+					`SCHEMA-15 regression: determinism validator fired despite context.now rewrites: ${msg}`
+				);
+			}
+			throw new Error(`with-context UserKey insert failed to prepare: ${msg}`);
+		}
+
+		expect(
+			prepareError,
+			'UserKey insert with `with context now = datetime(\'now\')` must prepare cleanly under quereus 2.x'
+		).to.be.undefined;
+	});
 });
