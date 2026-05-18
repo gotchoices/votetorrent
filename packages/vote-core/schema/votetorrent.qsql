@@ -1119,11 +1119,11 @@ declare schema main
 		TaskId text primary key, -- references Task.Id
 		ElectionId text, -- references Election.Id
 		constraint TaskIdValid check (exists (select 1 from Task T where T.Id = new.TaskId and T.Type = 'election')),
-		constraint ElectionIdValid check (exists (select 1 from ProposedElection E where E.ElectionId = new.ElectionId)),
+		constraint ElectionIdValid check (exists (select 1 from ProposedElection E where E.Id = new.ElectionId)),
 		constraint MutationValid check on insert, update (
 			exists (
 				select 1 from Task T join AdminSigning A on A.Nonce = T.SigningNonce and A.Scope = 'mel'
-					join ProposedElection PE on PE.ElectionId = new.ElectionId
+					join ProposedElection PE on PE.Id = new.ElectionId
 						where T.Id = new.TaskId and T.Type = 'election'
 							and T.IsCompleted = false
 							and A.Digest = Digest(
@@ -1182,11 +1182,11 @@ declare schema main
 		TaskId text primary key, -- references Task.Id
 		BallotId text, -- references Ballot.Id
 		constraint TaskIdValid check (exists (select 1 from Task T where T.Id = new.TaskId and T.Type = 'ballot')),
-		constraint BallotIdValid check (exists (select 1 from ProposedBallot B where B.BallotId = new.BallotId)),
+		constraint BallotIdValid check (exists (select 1 from ProposedBallot B where B.Id = new.BallotId)),
 		constraint MutationValid check on insert, update (
 			exists (
 				select 1 from Task T join AdminSigning A on A.Nonce = T.SigningNonce and A.Scope = 'ceb'
-					join ProposedBallot PB on PB.BallotId = new.BallotId
+					join ProposedBallot PB on PB.Id = new.BallotId
 						where T.Id = new.TaskId and T.Type = 'ballot'
 							and T.IsCompleted = false
 							and A.Digest = Digest(
