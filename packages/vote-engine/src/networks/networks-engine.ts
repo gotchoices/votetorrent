@@ -135,6 +135,7 @@ export class NetworksEngine implements INetworksEngine {
 					Key,
 					Expiration
 				)
+				with context now = datetime('now')
 				values (:userId, :keyType, :keyValue, :expiration)
 				`,
 				{

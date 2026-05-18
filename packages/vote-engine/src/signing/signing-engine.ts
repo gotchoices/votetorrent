@@ -20,6 +20,7 @@ export class SigningEngine implements ISigningEngine {
 					SignerKey,
 					Signature
 				)
+				with context now = datetime('now')
 				values (
 					:nonce,
 					:userId,
@@ -129,6 +130,7 @@ export class SigningEngine implements ISigningEngine {
 					SignerKey,
 					Signature
 				)
+				with context now = datetime('now')
 				values (
 					:nonce,
 					:authorityId,
