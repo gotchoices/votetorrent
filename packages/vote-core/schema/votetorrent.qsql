@@ -1023,7 +1023,7 @@ declare schema main
 		TaskId text primary key, -- references Task.Id
 		NetworkName text, -- references Network.Name
 		constraint TaskIdValid check (exists (select 1 from Task T where T.Id = new.TaskId and T.Type = 'network')),
-		constraint NetworkIdValid check (exists (select 1 from ProposedNetwork N where N.Name = new.NetworkId)),
+		constraint NetworkIdValid check (exists (select 1 from ProposedNetwork N where N.Name = new.NetworkName)),
 		constraint MutationValid check on insert, update (
 			exists (
 				select 1 from Task T join AdminSigning A on A.Nonce = T.SigningNonce and A.Scope = 'rn'
@@ -1048,7 +1048,7 @@ declare schema main
 	)
 		with context ( Tid int );
 
-	index NetworkSignatureTaskName on NetworkSignatureTaskExtension (NetworkId);
+	index NetworkSignatureTaskName on NetworkSignatureTaskExtension (NetworkName);
 
 	table AuthoritySignatureTaskExtension (
 		TaskId text primary key, -- references Task.Id
