@@ -103,7 +103,7 @@ declare schema main
 		),
 		constraint AuthorityIdValid check (exists (select 1 from Authority A where A.Id = new.AuthorityId)),
 		constraint EffectiveAtValid check (isISODatetime(EffectiveAt) and endswith(EffectiveAt, 'Z')),
-		TODO: constraint ThresholdPoliciesValid check (valid json array of { scope: string, threshold: integer }),
+		-- TODO: constraint ThresholdPoliciesValid check (valid json array of { scope: string, threshold: integer })
 		constraint MutationValid check (
 			-- Initial admin for the first authority - no invite, no signing
 			(
@@ -223,7 +223,7 @@ declare schema main
 		)),
 		constraint SignerKeyValid check (exists (select 1 from UserKey K where K.UserId = new.UserId and K.Key = new.SignerKey and K.Expiration > datetime('now'))),
 		constraint SignatureValid check (SignatureValid(Digest(Nonce, AuthorityId, AdminEffectiveAt, Scope, Digest, UserId), Signature, SignerKey))
-	); //TODO fix signature
+	); -- TODO fix signature
 
 	index AdminSigningDigest on AdminSigning (Digest);
 
