@@ -404,7 +404,7 @@ declare schema main
 							context.UserKey
 						)
 			)
-		),
+		)
 	)
 		with context ( UserId text, UserKey text, Signature text, Tid int );
 
@@ -556,7 +556,7 @@ declare schema main
 						select 1 from InviteSlot I where I.Cid = InviteSlotCid and I.InviteSignature = InviteSignature
 					)
 				)
-		),
+		)
 	)
 		with context (SigningNonce text null, InviteSlotCid text null, InviteSignature text null, Tid int);
 
@@ -598,7 +598,7 @@ declare schema main
 				UserKey)
 			),
 		constraint NoUpdate check on update (false),
-		constraint ExpirationFuture check (Expiration > datetime('now')),
+		constraint ExpirationFuture check (Expiration > datetime('now'))
 	)
 		with context ( UserKey text null, Signature text null, Tid int );
 
@@ -761,7 +761,7 @@ declare schema main
 							Tid, old.Id, 'delete'
 						)
 			)
-		),
+		)
 	)
 		with context ( SigningNonce text, Tid int );
 
@@ -833,7 +833,7 @@ declare schema main
 							Tid, old.BallotId, 'delete'
 						)
 			)
-		),
+		)
 	)
 		with context ( SigningNonce text, Tid int );
 
@@ -869,7 +869,7 @@ declare schema main
 							context.UserKey
 						)
 			)
-		),
+		)
 	)
 		with context ( UserId text, UserKey text, Signature text, Tid int );
 
@@ -913,7 +913,7 @@ declare schema main
 							Tid, old.BallotId, 'delete'
 						)
 			)
-		),
+		)
 	)
 		with context ( SigningNonce text, Tid int );
 
@@ -1005,7 +1005,7 @@ declare schema main
 							Tid, new.UserId, new.Type, new.ReferenceId
 						)
 			)
-		),
+		)
 	)
 		with context ( SigningNonce text, Tid int );
 
@@ -1044,7 +1044,7 @@ declare schema main
 		constraint DeleteValid check on delete (
 			not exists (select 1 from Task T where T.Id = old.TaskId)
 				or exists (select 1 from Task T where T.Id = old.TaskId and T.IsCompleted = true)
-		),
+		)
 	)
 		with context ( Tid int );
 
@@ -1075,7 +1075,7 @@ declare schema main
 		constraint DeleteValid check on delete (
 			not exists (select 1 from Task T where T.Id = old.TaskId)
 				or exists (select 1 from Task T where T.Id = old.TaskId and T.IsCompleted = true)
-		),
+		)
 	)
 		with context ( Tid int );
 
@@ -1108,7 +1108,7 @@ declare schema main
 		constraint DeleteValid check on delete (
 			not exists (select 1 from Task T where T.Id = old.TaskId)
 				or exists (select 1 from Task T where T.Id = old.TaskId and T.IsCompleted = true)
-		),
+		)
 	)
 		with context ( Tid int );
 
@@ -1140,7 +1140,7 @@ declare schema main
 		constraint DeleteValid check on delete (
 			not exists (select 1 from Task T where T.Id = old.TaskId)
 				or exists (select 1 from Task T where T.Id = old.TaskId and T.IsCompleted = true)
-		),
+		)
 	)
 		with context ( Tid int );
 
@@ -1172,7 +1172,7 @@ declare schema main
 		constraint DeleteValid check on delete (
 			not exists (select 1 from Task T where T.Id = old.TaskId)
 				or exists (select 1 from Task T where T.Id = old.TaskId and T.IsCompleted = true)
-		),
+		)
 	)
 		with context ( Tid int );
 
@@ -1203,7 +1203,7 @@ declare schema main
 		constraint DeleteValid check on delete (
 			not exists (select 1 from Task T where T.Id = old.TaskId)
 				or exists (select 1 from Task T where T.Id = old.TaskId and T.IsCompleted = true)
-		),
+		)
 	)
 		with context ( Tid int );
 
@@ -1213,14 +1213,14 @@ declare schema main
 		TaskId text primary key, -- references Task.Id
 		OnboardingId text, -- references Onboarding.Id
 		constraint TaskIdValid check (exists (select 1 from Task T where T.Id = new.TaskId and T.Type = 'onboarding')),
-		constraint OnboardingIdValid check (exists (select 1 from Onboarding O where O.Id = new.OnboardingId)),
+		constraint OnboardingIdValid check (exists (select 1 from Onboarding O where O.Id = new.OnboardingId))
 	)
 		with context ( Tid int );
 
 	table Onboarding (
 		Id text primary key, -- 32 byte random id
 		-- TODO: Add whatever onboarding tasks will need
-		constraint InsertOnly check on update, delete (false),
+		constraint InsertOnly check on update, delete (false)
 	)
 		with context ( Tid int );
 
