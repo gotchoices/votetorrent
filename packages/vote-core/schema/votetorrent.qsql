@@ -754,9 +754,11 @@ declare schema main
 		),
 		constraint DeleteValid check on delete (
 			exists (
-				select 1 from AdminSignature ASig join AdminSigning A on A.Nonce = ASig.SigningNonce
+				select 1 from AdminSignature ASig
+					join AdminSigning A on A.Nonce = ASig.SigningNonce
+					join Election E on E.Id = old.ElectionId
 					where A.Nonce = context.SigningNonce
-						and A.AuthorityId = new.AuthorityId
+						and A.AuthorityId = old.AuthorityId
 						and E.BallotDeadline > datetime('now')
 						and A.Scope = 'ceb'
 						and A.Digest = Digest(
