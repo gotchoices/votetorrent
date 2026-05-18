@@ -262,12 +262,16 @@ declare schema main
 		-- Satisfies the threshold policies of the Admin for the given scope
 		constraint SignatureValid check (
 			(select count(*) from OfficerSignature OS where OS.SigningNonce = new.SigningNonce)
-				>= (
-					select threshold from Admin A
-						join AuthoritySignature ATS on ATS.AuthorityId = A.AuthorityId and ATS.AdminEffectiveAt = A.EffectiveAt
-						-- TODO: if threshold policy is missing, 1 is assumed
-						cross join lateral json_array_elements_text(A.ThresholdPolicies) TP(tp) on tp.scope = ATS.Scope
-						where ATS.Nonce = new.SigningNonce
+				>= coalesce(
+					(
+						select cast(json_extract(TP.value, '$.threshold') as integer)
+							from AdminSigning AS_
+							join Admin A on A.AuthorityId = AS_.AuthorityId and A.EffectiveAt = AS_.AdminEffectiveAt
+							cross join json_each(A.ThresholdPolicies) TP
+							where AS_.Nonce = new.SigningNonce
+								and json_extract(TP.value, '$.scope') = AS_.Scope
+					),
+					1
 				)
 		)
 	);
