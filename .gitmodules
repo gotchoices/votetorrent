@@ -1,0 +1,3 @@
+[submodule ".planning"]
+	path = .planning
+	url = git@github.com:inspirions/votetorrent-gsd.git
