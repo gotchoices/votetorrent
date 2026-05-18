@@ -245,7 +245,7 @@ declare schema main
 				join Officer O on O.AuthorityId = ADS.AuthorityId and O.AdminEffectiveAt = ADS.AdminEffectiveAt
 				where ADS.Nonce = new.SigningNonce
 					and O.UserId = new.UserId
-					and ADS.Scope in (select policy from json_array_elements_text(O.Scopes) S(s) where s = new.Scope)
+					and exists (select 1 from json_array_elements_text(O.Scopes) S(s) where s = ADS.Scope)
 			)
 		),
 		constraint SignatureValid check (exists (
