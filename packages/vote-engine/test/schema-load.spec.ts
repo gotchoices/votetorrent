@@ -1,6 +1,6 @@
 import { Database } from '@quereus/quereus';
 import { expect } from 'chai';
-import { initDB } from '../src/database/initialize';
+import { prepareDb } from '../src/database/initialize';
 
 /**
  * Schema-load gate test for SCHEMA-13 and SCHEMA-14.
@@ -15,7 +15,7 @@ import { initDB } from '../src/database/initialize';
 describe('Schema load', () => {
 	it('loads the production schema via initDB and exposes all core tables', async () => {
 		const db = new Database();
-		await initDB(db);
+		await prepareDb(db);
 
 		// D-09 (2): each of the 8 core tables must be queryable.
 		// `select 1 from <T> limit 0` parses the FROM clause without returning
@@ -60,7 +60,7 @@ describe('Schema load', () => {
 
 	it('registers all six custom functions from the crypto plugin', async () => {
 		const db = new Database();
-		await initDB(db);
+		await prepareDb(db);
 
 		// D-10: each custom function called individually; absence of throw is
 		// the primary assertion. Specific value assertions follow PATTERNS.md §1.
