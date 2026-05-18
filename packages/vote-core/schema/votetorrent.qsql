@@ -646,6 +646,7 @@ declare schema main
 				select 1 from Officer O
 					join CurrentAdmin CA on CA.AuthorityId = O.AuthorityId and CA.EffectiveAt = O.AdminEffectiveAt
 					join UserKey K on K.UserId = O.UserId and K.Key = context.UserKey and K.Expiration > datetime('now')
+					join Election E on E.Id = new.Id
 					where O.UserId = context.UserId and O.AuthorityId = E.AuthorityId and E.RevisionDeadline > new.RevisionTimestamp
 						and exists(select 1 from json_array_elements_text(O.Scopes) S(s) where s = 'mel')
 						and SignatureValid(
