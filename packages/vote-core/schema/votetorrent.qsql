@@ -221,9 +221,10 @@ declare schema main
 					and O.AdminEffectiveAt = new.AdminEffectiveAt
 					and O.AuthorityId = new.AuthorityId
 		)),
-		constraint SignerKeyValid check (exists (select 1 from UserKey K where K.UserId = new.UserId and K.Key = new.SignerKey and K.Expiration > datetime('now'))),
+		constraint SignerKeyValid check (exists (select 1 from UserKey K where K.UserId = new.UserId and K.Key = new.SignerKey and K.Expiration > context.now)),
 		constraint SignatureValid check (SignatureValid(Digest(Nonce, AuthorityId, AdminEffectiveAt, Scope, Digest, UserId), Signature, SignerKey))
-	); -- TODO fix signature
+	)
+		with context ( now datetime ); -- TODO fix signature
 
 	index AdminSigningDigest on AdminSigning (Digest);
 
@@ -237,7 +238,7 @@ declare schema main
 		constraint InsertOnly check on update, delete (false),
 		-- Key is valid for the user and the UserId is valid
 		constraint SignerKeyValid check (
-			exists (select 1 from UserKey K where K.UserId = new.UserId and K.Key = new.SignerKey and K.Expiration > datetime('now'))
+			exists (select 1 from UserKey K where K.UserId = new.UserId and K.Key = new.SignerKey and K.Expiration > context.now)
 		),
 		-- User is an Officer with the required scope
 		constraint OfficerValid check (
@@ -253,7 +254,8 @@ declare schema main
 				where ADS.Nonce = new.SigningNonce
 					and SignatureValid(ADS.Digest, Signature, SignerKey)
 		))
-	);
+	)
+		with context ( now datetime );
 
 	-- The final Admin signature output - only exists if required threshold of signatures are met - exists to avoid long validation
 	table AdminSignature (
@@ -453,12 +455,13 @@ declare schema main
 		primary key (AuthorityId, AdminEffectiveAt, ProposedName),
 		constraint ProposedOfficerValid check (exists (select 1 from ProposedOfficer PA where PA.AuthorityId = new.AuthorityId and PA.AdminEffectiveAt = new.AdminEffectiveAt and PA.ProposedName = new.ProposedName)),
 		constraint UserIdValid check (exists (select 1 from User U where U.Id = new.UserId)),
-		constraint UserKeyValid check (exists (select 1 from UserKey K where K.UserId = new.UserId and K.Key = new.UserKey and K.Expiration > datetime('now'))),
+		constraint UserKeyValid check (exists (select 1 from UserKey K where K.UserId = new.UserId and K.Key = new.UserKey and K.Expiration > context.now)),
 		constraint CantDelete check on delete (false),
 		-- TODO: re-enable when ProposedOfficerUser's role is decided (currently "possibly remove" per the table comment).
 		-- Original (broken) body referenced PA.AdminRevision / PA.UserId / PA.SignerKey / PA.Signature which do not exist on ProposedOfficer.
 		constraint SignatureValid check (true)
-	);
+	)
+		with context ( now datetime );
 
 	view InviteType as select * from (values ('au', 'Authority'), ('of', 'Officer'), ('k', 'Keyholder'), ('r', 'Registrant')) as InviteType(Code, Name);
 
@@ -472,7 +475,7 @@ declare schema main
 		SigningNonce text, -- AdminSigning.Nonce, shows admin approval including scope (implies the type of invite, e.g. authority, officer, keyholder, registrant)
 		constraint CidValid check (Cid = Digest(Name, Expiration, InviteKey, InviteSignature, SigningNonce)),
 		constraint TypeValid check (Type in (select Code from InviteType)),
-		constraint ExpirationValid check (Expiration > datetime('now')),
+		constraint ExpirationValid check (Expiration > context.now),
 		-- Proves that the inviter has a valid private key corresponding to the public key in the Invite slot
 		constraint InviteSignatureValid check (SignatureValid(Digest(Cid, Type, Name, Expiration), InviteSignature, InviteKey)),
 		constraint InsertOnly check on update, delete (false),
@@ -484,7 +487,7 @@ declare schema main
 			)
 		)
 	)
-		with context ( Tid int );
+		with context ( Tid int, now datetime );
 
 	index InviteSlotSigningNonce on InviteSlot (SigningNonce, Cid);
 
@@ -600,9 +603,9 @@ declare schema main
 				UserKey)
 			),
 		constraint NoUpdate check on update (false),
-		constraint ExpirationFuture check (Expiration > datetime('now'))
+		constraint ExpirationFuture check (Expiration > context.now)
 	)
-		with context ( UserKey text null, Signature text null, Tid int );
+		with context ( UserKey text null, Signature text null, Tid int, now datetime );
 
 	table Election (
 		Id text primary key, -- 32 byte random id
@@ -613,7 +616,7 @@ declare schema main
 		BallotDeadline datetime, -- deadline for adding or revising ballots to the election
 		Type text, -- references ElectionType(Code)
 		constraint AuthorityIdValid check (exists (select 1 from Authority A where A.Id = new.AuthorityId)),
-		constraint DateValid check (isISODatetime(Date) and endswith(Date, 'Z') and Date >= datetime('now')),
+		constraint DateValid check (isISODatetime(Date) and endswith(Date, 'Z') and Date >= context.now),
 		constraint RevisionDeadlineValid check (isISODatetime(RevisionDeadline) and endswith(RevisionDeadline, 'Z') and RevisionDeadline <= Date),
 		constraint BallotDeadlineValid check (isISODatetime(BallotDeadline) and endswith(BallotDeadline, 'Z') and BallotDeadline <= Date),
 		constraint TypeValid check (Type in (select Code from ElectionType)),
@@ -631,7 +634,7 @@ declare schema main
 			)
 		)
 	)
-		with context ( SigningNonce text, Tid int );
+		with context ( SigningNonce text, Tid int, now datetime );
 
 	table ProposedElection (
 		Id text primary key, -- 32 byte random id
@@ -672,7 +675,7 @@ declare schema main
 		KeyholderThreshold integer, -- number of keyholders required to sign the election
 		constraint ElectionIdValid check (exists (select 1 from Election E where E.Id = new.ElectionId)),
 		constraint ElectionIdImmutable check on update (new.ElectionId = old.ElectionId),
-		constraint BeforeRevisionDeadline check (exists (select 1 from Election E where E.Id = new.ElectionId and E.RevisionDeadline > datetime('now'))),
+		constraint BeforeRevisionDeadline check (exists (select 1 from Election E where E.Id = new.ElectionId and E.RevisionDeadline > context.now)),
 		constraint RevisionStart check on insert (Revision = 0),
 		constraint RevisionMonotonic check on update (new.Revision = old.Revision + 1),
 		constraint RevisionTimestampValid check (isISODatetime(RevisionTimestamp) and endswith(RevisionTimestamp, 'Z')
@@ -694,7 +697,7 @@ declare schema main
 			)
 		)
 	)
-		with context ( SigningNonce text, Tid int );
+		with context ( SigningNonce text, Tid int, now datetime );
 
 	table ProposedElectionRevision (
 		ElectionId text primary key, -- references Election.Id
