@@ -87,3 +87,6 @@ typings/
 dist
 out
 
+.planning
+
+.claude
