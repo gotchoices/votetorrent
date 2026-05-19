@@ -1,6 +1,5 @@
 import { randomUUID } from 'crypto';
 import { Database, MisuseError, QuereusError } from '@quereus/quereus';
-import { initDB } from '../database/initialize.js';
 import { NetworkEngine } from '../network/network-engine.js';
 import { H16 } from '../utils.js';
 import type { EngineContext } from '../types.js';
@@ -12,12 +11,7 @@ import type {
 	User,
 } from '@votetorrent/vote-core';
 import type { INetworksEngine } from '@votetorrent/vote-core';
-import type { EngineContext } from '../types.js';
-import { NetworkEngine } from '../network/network-engine.js';
-import { Database, MisuseError, QuereusError } from '@quereus/quereus';
 import { prepareDb } from '../database/initialize.js';
-import { randomUUID } from 'crypto';
-import { H16 } from '../utils.js';
 
 export class NetworksEngine implements INetworksEngine {
 	constructor(private readonly localStorage: LocalStorage) {}
