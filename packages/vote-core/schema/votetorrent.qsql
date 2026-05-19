@@ -102,7 +102,7 @@ declare schema main
 			)
 		),
 		constraint AuthorityIdValid check (exists (select 1 from Authority A where A.Id = new.AuthorityId)),
-		constraint EffectiveAtValid check (isISODatetime(EffectiveAt) and endswith(EffectiveAt, 'Z')),
+		constraint EffectiveAtValid check (isISODatetime(EffectiveAt) and like('%Z', EffectiveAt)),
 		-- TODO: constraint ThresholdPoliciesValid check (valid json array of { scope: string, threshold: integer })
 		constraint MutationValid check (
 			-- Initial admin for the first authority - no invite, no signing
@@ -296,7 +296,7 @@ declare schema main
 				select 1 from Officer O
 					join CurrentAdmin CA on CA.AuthorityId = O.AuthorityId and CA.EffectiveAt = O.AdminEffectiveAt
 					join Network N on N.PrimaryAuthorityId = CA.AuthorityId
-					join UserKey K on K.UserId = O.UserId and K.Key = context.UserKey and K.Expiration > datetime('now')
+					join UserKey K on K.UserId = O.UserId and K.Key = context.UserKey and K.Expiration > context.now
 					where O.UserId = context.UserId
 						and exists(select 1 from json_array_elements_text(O.Scopes) S(s) where s = 'rn')
 						and SignatureValid(
@@ -350,7 +350,7 @@ declare schema main
 		-- 	)
 		-- )
 	)
-		with context ( UserId text, UserKey text, Signature text, Tid int );
+		with context ( UserId text, UserKey text, Signature text, Tid int, now datetime );
 
 	table ProposedAuthority (
 		Id text primary key,
@@ -362,7 +362,7 @@ declare schema main
 			exists (
 				select 1 from Officer O
 					join CurrentAdmin CA on CA.AuthorityId = O.AuthorityId and CA.EffectiveAt = O.AdminEffectiveAt
-					join UserKey K on K.UserId = O.UserId and K.Key = context.UserKey and K.Expiration > datetime('now')
+					join UserKey K on K.UserId = O.UserId and K.Key = context.UserKey and K.Expiration > context.now
 					where O.UserId = context.UserId and O.AuthorityId = new.Id
 						and exists(select 1 from json_array_elements_text(O.Scopes) S(s) where s = 'uai')
 						and SignatureValid(
@@ -386,7 +386,7 @@ declare schema main
 		-- 	)
 		-- )
 	)
-		with context ( UserId text, UserKey text, Signature text, Tid int );
+		with context ( UserId text, UserKey text, Signature text, Tid int, now datetime );
 
 	table ProposedAdmin (
 		AuthorityId text,
@@ -394,13 +394,13 @@ declare schema main
 		ThresholdPolicies text default '[]', -- json array of { policy: string (Scope), threshold: integer }
 		primary key (AuthorityId, EffectiveAt),
 		constraint AuthorityIdValid check (exists (select 1 from Authority A where A.Id = new.AuthorityId)),
-		constraint EffectiveAtValid check on insert, update (isISODatetime(EffectiveAt) and endswith(EffectiveAt, 'Z')),
+		constraint EffectiveAtValid check on insert, update (isISODatetime(EffectiveAt) and like('%Z', EffectiveAt)),
 		--constraint ThresholdPoliciesValid check (...), -- TODO: constraint
 		constraint UserValid check (
 			exists (
 				select 1 from Officer O
 					join CurrentAdmin CA on CA.AuthorityId = O.AuthorityId and CA.EffectiveAt = O.AdminEffectiveAt
-					join UserKey K on K.UserId = O.UserId and K.Key = context.UserKey and K.Expiration > datetime('now')
+					join UserKey K on K.UserId = O.UserId and K.Key = context.UserKey and K.Expiration > context.now
 					where O.UserId = context.UserId and O.AuthorityId = new.AuthorityId
 						and exists(select 1 from json_array_elements_text(O.Scopes) S(s) where s = 'rad')
 						and SignatureValid(
@@ -412,7 +412,7 @@ declare schema main
 			)
 		)
 	)
-		with context ( UserId text, UserKey text, Signature text, Tid int );
+		with context ( UserId text, UserKey text, Signature text, Tid int, now datetime );
 
 	table ProposedOfficer (
 		AuthorityId text,
@@ -429,7 +429,7 @@ declare schema main
 			exists (
 				select 1 from Officer O
 					join CurrentAdmin CA on CA.AuthorityId = O.AuthorityId and CA.EffectiveAt = O.AdminEffectiveAt
-					join UserKey K on K.UserId = O.UserId and K.Key = context.UserKey and K.Expiration > datetime('now')
+					join UserKey K on K.UserId = O.UserId and K.Key = context.UserKey and K.Expiration > context.now
 					where O.UserId = context.UserId and O.AuthorityId = new.AuthorityId
 						and exists(select 1 from json_array_elements_text(O.Scopes) S(s) where s = 'rad')
 						and SignatureValid(
@@ -441,7 +441,7 @@ declare schema main
 			)
 		)
 	)
-		with context ( UserId text, UserKey text, Signature text, Tid int );
+		with context ( UserId text, UserKey text, Signature text, Tid int, now datetime );
 
 	-- Possibly remove, since users must be associated with a keyholer or officer
 	-- Extension of ProposedOfficer to associate a specific UserId and include the user''s signature
@@ -584,12 +584,12 @@ declare schema main
 				from UserKey K
 				where K.UserId = new.UserId
 					and K.PubKey = context.UserKey
-					and K.Expiration > datetime('now')
+					and K.Expiration > context.now
 			)
 	),
 		constraint DeleteValid check on delete (
 				-- must be a non-expired key for the user
-				exists (select 1 from UserKey K where K.UserId = old.UserId and K.PubKey = context.UserKey and K.Expiration > datetime('now'))
+				exists (select 1 from UserKey K where K.UserId = old.UserId and K.PubKey = context.UserKey and K.Expiration > context.now)
 					-- and not the last key for the user
 					and exists (select 1 from UserKey K where K.UserId = old.UserId and K.PubKey <> old.PubKey)
 		),
@@ -616,9 +616,9 @@ declare schema main
 		BallotDeadline datetime, -- deadline for adding or revising ballots to the election
 		Type text, -- references ElectionType(Code)
 		constraint AuthorityIdValid check (exists (select 1 from Authority A where A.Id = new.AuthorityId)),
-		constraint DateValid check (isISODatetime(Date) and endswith(Date, 'Z') and Date >= context.now),
-		constraint RevisionDeadlineValid check (isISODatetime(RevisionDeadline) and endswith(RevisionDeadline, 'Z') and RevisionDeadline <= Date),
-		constraint BallotDeadlineValid check (isISODatetime(BallotDeadline) and endswith(BallotDeadline, 'Z') and BallotDeadline <= Date),
+		constraint DateValid check (isISODatetime(Date) and like('%Z', Date) and Date >= context.now),
+		constraint RevisionDeadlineValid check (isISODatetime(RevisionDeadline) and like('%Z', RevisionDeadline) and RevisionDeadline <= Date),
+		constraint BallotDeadlineValid check (isISODatetime(BallotDeadline) and like('%Z', BallotDeadline) and BallotDeadline <= Date),
 		constraint TypeValid check (Type in (select Code from ElectionType)),
 		-- TODO: constrain Timeline
 		constraint InsertOnly check on update, delete (false),
@@ -648,7 +648,7 @@ declare schema main
 			exists (
 				select 1 from Officer O
 					join CurrentAdmin CA on CA.AuthorityId = O.AuthorityId and CA.EffectiveAt = O.AdminEffectiveAt
-					join UserKey K on K.UserId = O.UserId and K.Key = context.UserKey and K.Expiration > datetime('now')
+					join UserKey K on K.UserId = O.UserId and K.Key = context.UserKey and K.Expiration > context.now
 					join Election E on E.Id = new.Id
 					where O.UserId = context.UserId and O.AuthorityId = E.AuthorityId and E.RevisionDeadline > new.RevisionTimestamp
 						and exists(select 1 from json_array_elements_text(O.Scopes) S(s) where s = 'mel')
@@ -663,7 +663,7 @@ declare schema main
 			)
 		)
 	)
-		with context ( UserId text, UserKey text, Signature text, Tid int );
+		with context ( UserId text, UserKey text, Signature text, Tid int, now datetime );
 
 	table ElectionRevision (
 		ElectionId text primary key, -- references Election.Id
@@ -678,8 +678,8 @@ declare schema main
 		constraint BeforeRevisionDeadline check (exists (select 1 from Election E where E.Id = new.ElectionId and E.RevisionDeadline > context.now)),
 		constraint RevisionStart check on insert (Revision = 0),
 		constraint RevisionMonotonic check on update (new.Revision = old.Revision + 1),
-		constraint RevisionTimestampValid check (isISODatetime(RevisionTimestamp) and endswith(RevisionTimestamp, 'Z')
-			and RevisionTimestamp < datetime('now')
+		constraint RevisionTimestampValid check (isISODatetime(RevisionTimestamp) and like('%Z', RevisionTimestamp)
+			and RevisionTimestamp < context.now
 			and RevisionTimestamp < (select RevisionDeadline from Election E where E.Id = new.ElectionId)),
 		constraint RevisionTimestampValidUpdate check on update (new.RevisionTimestamp > old.RevisionTimestamp),
 		--TODO constrain Timeline
@@ -716,7 +716,7 @@ declare schema main
 			exists (
 				select 1 from Officer O
 					join CurrentAdmin CA on CA.AuthorityId = O.AuthorityId and CA.EffectiveAt = O.AdminEffectiveAt
-					join UserKey K on K.UserId = O.UserId and K.Key = context.UserKey and K.Expiration > datetime('now')
+					join UserKey K on K.UserId = O.UserId and K.Key = context.UserKey and K.Expiration > context.now
 					join Election E on E.Id = new.ElectionId
 					where O.UserId = context.UserId and O.AuthorityId = E.AuthorityId and E.RevisionDeadline > new.RevisionTimestamp
 						and exists(select 1 from json_array_elements_text(O.Scopes) S(s) where s = 'mel')
@@ -731,7 +731,7 @@ declare schema main
 			)
 		)
 	)
-		with context ( UserId text, UserKey text, Signature text, Tid int );
+		with context ( UserId text, UserKey text, Signature text, Tid int, now datetime );
 
 	table Ballot (
 		Id text primary key, -- 32 byte random id
@@ -749,7 +749,7 @@ declare schema main
 				select 1 from AdminSignature ASig join AdminSigning A on A.Nonce = ASig.SigningNonce join Election E on E.Id = new.ElectionId
 					where A.Nonce = context.SigningNonce
 						and A.AuthorityId = new.AuthorityId
-						and E.BallotDeadline > datetime('now')
+						and E.BallotDeadline > context.now
 						and A.Scope = 'ceb'
 						and A.Digest = Digest(
 							Tid, new.Id, new.ElectionId, new.AuthorityId, new.Description, new.Districts
@@ -763,7 +763,7 @@ declare schema main
 					join Election E on E.Id = old.ElectionId
 					where A.Nonce = context.SigningNonce
 						and A.AuthorityId = old.AuthorityId
-						and E.BallotDeadline > datetime('now')
+						and E.BallotDeadline > context.now
 						and A.Scope = 'ceb'
 						and A.Digest = Digest(
 							Tid, old.Id, 'delete'
@@ -771,7 +771,7 @@ declare schema main
 			)
 		)
 	)
-		with context ( SigningNonce text, Tid int );
+		with context ( SigningNonce text, Tid int, now datetime );
 
 	table ProposedBallot (
 		Id text primary key, -- 32 byte random id or references Ballot.Id
@@ -785,9 +785,9 @@ declare schema main
 			exists (
 				select 1 from Officer O
 					join CurrentAdmin CA on CA.AuthorityId = O.AuthorityId and CA.EffectiveAt = O.AdminEffectiveAt
-					join UserKey K on K.UserId = O.UserId and K.Key = context.UserKey and K.Expiration > datetime('now')
+					join UserKey K on K.UserId = O.UserId and K.Key = context.UserKey and K.Expiration > context.now
 					join Election E on E.Id = new.ElectionId
-					where O.UserId = context.UserId and O.AuthorityId = E.AuthorityId and E.RevisionDeadline > datetime('now')
+					where O.UserId = context.UserId and O.AuthorityId = E.AuthorityId and E.RevisionDeadline > context.now
 						and exists(select 1 from json_array_elements_text(O.Scopes) S(s) where s = 'ceb')
 						and SignatureValid(
 							Digest(Tid, coalesce(new.Id, old.Id), coalesce(new.ElectionId, old.ElectionId), coalesce(new.AuthorityId, old.AuthorityId), coalesce(new.Description, old.Description),
@@ -798,7 +798,7 @@ declare schema main
 			)
 		)
 	)
-		with context ( UserId text, UserKey text, Signature text, Tid int );
+		with context ( UserId text, UserKey text, Signature text, Tid int, now datetime );
 
 	table Question (
 		BallotId text, -- references Ballot.Id
@@ -836,7 +836,7 @@ declare schema main
 					join Election E on E.Id = B.ElectionId
 					where A.Nonce = context.SigningNonce
 						and A.AuthorityId = B.AuthorityId
-						and E.BallotDeadline > datetime('now')
+						and E.BallotDeadline > context.now
 						and A.Scope = 'ceb'
 						and A.Digest = Digest(
 							Tid, old.BallotId, 'delete'
@@ -844,7 +844,7 @@ declare schema main
 			)
 		)
 	)
-		with context ( SigningNonce text, Tid int );
+		with context ( SigningNonce text, Tid int, now datetime );
 
 	table ProposedQuestion (
 		BallotId text, -- references ProposedBallot.Id
@@ -864,10 +864,10 @@ declare schema main
 			exists (
 				select 1 from Officer O
 					join CurrentAdmin CA on CA.AuthorityId = O.AuthorityId and CA.EffectiveAt = O.AdminEffectiveAt
-					join UserKey K on K.UserId = O.UserId and K.Key = context.UserKey and K.Expiration > datetime('now')
+					join UserKey K on K.UserId = O.UserId and K.Key = context.UserKey and K.Expiration > context.now
 					join Ballot B on B.Id = new.BallotId
 					join Election E on E.Id = B.ElectionId
-					where O.UserId = context.UserId and O.AuthorityId = B.AuthorityId and E.RevisionDeadline > datetime('now')
+					where O.UserId = context.UserId and O.AuthorityId = B.AuthorityId and E.RevisionDeadline > context.now
 						and exists(select 1 from json_array_elements_text(O.Scopes) S(s) where s = 'ceb')
 						and SignatureValid(
 							Digest(Tid, coalesce(new.BallotId, old.BallotId), coalesce(new.Code, old.Code), coalesce(new.Title, old.Title),
@@ -880,7 +880,7 @@ declare schema main
 			)
 		)
 	)
-		with context ( UserId text, UserKey text, Signature text, Tid int );
+		with context ( UserId text, UserKey text, Signature text, Tid int, now datetime );
 
 	table Option (
 		BallotId text, -- references Ballot.Id
@@ -917,7 +917,7 @@ declare schema main
 					join Election E on E.Id = B.ElectionId
 					where A.Nonce = context.SigningNonce
 						and A.AuthorityId = B.AuthorityId
-						and E.BallotDeadline > datetime('now')
+						and E.BallotDeadline > context.now
 						and A.Scope = 'ceb'
 						and A.Digest = Digest(
 							Tid, old.BallotId, 'delete'
@@ -925,7 +925,7 @@ declare schema main
 			)
 		)
 	)
-		with context ( SigningNonce text, Tid int );
+		with context ( SigningNonce text, Tid int, now datetime );
 
 	view QuestionType as select * from (values ('select', 'Select'), ('rank', 'Rank'), ('score', 'Score'), ('text', 'Text')) as QuestionType(Code, Name);
 
@@ -949,11 +949,11 @@ declare schema main
 			exists (
 				select 1 from Officer O
 					join CurrentAdmin CA on CA.AuthorityId = O.AuthorityId and CA.EffectiveAt = O.AdminEffectiveAt
-					join UserKey K on K.UserId = O.UserId and K.Key = context.UserKey and K.Expiration > datetime('now')
+					join UserKey K on K.UserId = O.UserId and K.Key = context.UserKey and K.Expiration > context.now
 					join Ballot B on B.Id = new.BallotId
 					join Question Q on Q.BallotId = B.Id and Q.Code = new.QuestionCode
 					join Election E on E.Id = B.ElectionId
-					where O.UserId = context.UserId and O.AuthorityId = B.AuthorityId and E.RevisionDeadline > datetime('now')
+					where O.UserId = context.UserId and O.AuthorityId = B.AuthorityId and E.RevisionDeadline > context.now
 						and exists(select 1 from json_array_elements_text(O.Scopes) S(s) where s = 'ceb')
 						and SignatureValid(
 							Digest(Tid, coalesce(new.BallotId, old.BallotId), coalesce(new.QuestionCode, old.QuestionCode), coalesce(new.Code, old.Code),
@@ -965,7 +965,7 @@ declare schema main
 			)
 		)
 	)
-		with context ( UserId text, UserKey text, Signature text, Tid int );
+		with context ( UserId text, UserKey text, Signature text, Tid int, now datetime );
 
 	table Keyholder (
 		ElectionId text, -- references Election.Id
