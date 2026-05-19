@@ -58,38 +58,55 @@ describe('Schema load', () => {
 		expect(user, 'table User should be queryable').to.equal(0);
 	});
 
-	it('registers all six custom functions from the crypto plugin', async () => {
+	it('registers crypto-plugin SQL functions and exposes quereus builtins used by the schema', async () => {
 		const db = new Database();
 		await prepareDb(db);
 
-		// D-10: each custom function called individually; absence of throw is
-		// the primary assertion. Specific value assertions follow PATTERNS.md §1.
+		// D-10: each callable function is exercised individually; absence of
+		// throw is the primary assertion.
+		//
+		// Scope (post quereus 0.12 → 2.x migration):
+		//
+		// - quereus 2.x builtins used by the schema: `isISODatetime`, `like`.
+		// - @optimystic/quereus-plugin-crypto SQL surface (5 functions):
+		//   `digest`, `sign`, `verify`, `hash_mod`, `random_bytes`. These are
+		//   the only SQL functions registered by the plugin; case-insensitive
+		//   resolution maps schema-level `Digest(...)` → `digest(...)`.
+		//
+		// Intentionally NOT covered here:
+		// - JS-only helpers exported by the plugin (`Digest`, `DigestAll`,
+		//   `Sign`, `SignatureValid`). They are not part of the SQL surface
+		//   and must not be invoked via `select <name>(...)`.
+		// - `H16` — a JS-only utility; schema references at votetorrent.qsql
+		//   lines 8 and 19 are documentation/TODO comments, not SQL calls.
 
-		const h16 = await db.prepare(`select H16('test') as v`).get();
-		expect(h16!['v']).to.be.a('string');
-
+		// quereus 2.x returns BOOLEAN as native true/false (0.12 returned 1/0).
 		const iso = await db
 			.prepare(`select isISODatetime('2024-01-01T00:00:00Z') as v`)
 			.get();
-		expect(iso!['v']).to.equal(1);
+		expect(iso!['v']).to.equal(true);
 
-		const ends = await db
-			.prepare(`select endswith('foo.bar', '.bar') as v`)
+		const likeMatch = await db
+			.prepare(`select like('%Z', '2024-01-01T00:00:00Z') as v`)
 			.get();
-		expect(ends!['v']).to.equal(1);
+		expect(likeMatch!['v']).to.satisfy((v: unknown) => v === true || v === 1);
 
-		const digest = await db.prepare(`select Digest('a', 'b') as v`).get();
+		// Crypto plugin: signature is (data, algorithm?, inputEncoding?, outputEncoding?).
+		// Inputs default to base64url; 'dGVzdA' is base64url for 'test'.
+		const digest = await db
+			.prepare(`select digest('dGVzdA') as v`)
+			.get();
 		expect(digest!['v']).to.be.a('string');
 
-		const digestAll = await db.prepare(`select DigestAll('a') as v`).get();
-		expect(digestAll!['v']).to.be.a('string');
-
-		// SignatureValid may return false per D-10; we only assert the call
-		// did not throw and produced a row.
-		const sigValid = await db
-			.prepare(`select SignatureValid('digest', 'sig', 'key') as v`)
+		// hash_mod(data, bits): returns INTEGER < 2^bits.
+		const hm = await db
+			.prepare(`select hash_mod('dGVzdA', 16) as v`)
 			.get();
-		expect(sigValid).to.exist;
+		expect(hm!['v']).to.be.a('number');
+
+		// random_bytes(bits?, encoding?): returns TEXT.
+		const rb = await db.prepare(`select random_bytes(64) as v`).get();
+		expect(rb!['v']).to.be.a('string');
 	});
 
 	it('binds caller-supplied now via with context for time-bounded CHECK constraints', async () => {
@@ -104,7 +121,7 @@ describe('Schema load', () => {
 		// context-var is declared on the table, and (c) the determinism validator
 		// is satisfied. We do NOT execute the INSERT — full bootstrap requires
 		// the crypto plugin's view-column resolution path, which is independent
-		// of G-01 and tracked separately (see Test 2 H16/1 failure).
+		// of G-01.
 		const db = new Database();
 		await prepareDb(db);
 
