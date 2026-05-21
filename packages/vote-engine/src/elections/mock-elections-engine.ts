@@ -50,6 +50,9 @@ const mockElectionInitData: ElectionInit = {
 		revisionTimestamp: getUnixTimestamp(new Date()), // Mock timestamp
 		tags: ['proposed', 'test'],
 		instructions: 'These are the instructions for the proposed election.',
+		// Plan 03-01 Rule-3 transitional cast: invitePrivate was removed
+		// from base Invite (D-24). Plan 02 will refactor these mock
+		// keyholder literals to the *Share subtype.
 		keyholders: [
 			{
 				name: 'Keyholder 1',
@@ -69,7 +72,7 @@ const mockElectionInitData: ElectionInit = {
 				inviteSignature: '',
 				digest: '',
 			},
-		],
+		] as unknown as ElectionInit['keyholders'],
 		timeline: {
 			registrationEnds: getUnixTimestamp(
 				new Date(Date.now() + 15 * 24 * 60 * 60 * 1000),
