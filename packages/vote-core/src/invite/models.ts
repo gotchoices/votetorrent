@@ -7,13 +7,10 @@ export interface Invite {
   /** The expiration date of the invitation */
   expiration: string
 
-  /** The public key of the invitation */
+  /** Hex-encoded secp256k1 compressed public key (66 chars, 33 bytes). */
   inviteKey: string
 
-  /** The private key of the invitation */
-  invitePrivate: string
-
-  /** The signature of the invitation */
+  /** Hex-encoded secp256k1 compact signature (128 chars, 64 bytes). */
   inviteSignature: string
 
   /** The digest of the invitation */
