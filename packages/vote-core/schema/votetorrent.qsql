@@ -221,7 +221,7 @@ declare schema main
 					and O.AdminEffectiveAt = new.AdminEffectiveAt
 					and O.AuthorityId = new.AuthorityId
 		)),
-		constraint SignerKeyValid check (exists (select 1 from UserKey K where K.UserId = new.UserId and K.Key = new.SignerKey and K.Expiration > context.now)),
+		constraint SignerKeyValid check (exists (select 1 from UserKey K where K.UserId = new.UserId and K.PubKey = new.SignerKey and K.Expiration > context.now)),
 		constraint SignatureValid check (SignatureValid(Digest(Nonce, AuthorityId, AdminEffectiveAt, Scope, Digest, UserId), Signature, SignerKey))
 	)
 		with context ( now datetime ); -- TODO fix signature
@@ -238,7 +238,7 @@ declare schema main
 		constraint InsertOnly check on update, delete (false),
 		-- Key is valid for the user and the UserId is valid
 		constraint SignerKeyValid check (
-			exists (select 1 from UserKey K where K.UserId = new.UserId and K.Key = new.SignerKey and K.Expiration > context.now)
+			exists (select 1 from UserKey K where K.UserId = new.UserId and K.PubKey = new.SignerKey and K.Expiration > context.now)
 		),
 		-- User is an Officer with the required scope
 		constraint OfficerValid check (
@@ -296,7 +296,7 @@ declare schema main
 				select 1 from Officer O
 					join CurrentAdmin CA on CA.AuthorityId = O.AuthorityId and CA.EffectiveAt = O.AdminEffectiveAt
 					join Network N on N.PrimaryAuthorityId = CA.AuthorityId
-					join UserKey K on K.UserId = O.UserId and K.Key = context.UserKey and K.Expiration > context.now
+					join UserKey K on K.UserId = O.UserId and K.PubKey = context.UserKey and K.Expiration > context.now
 					where O.UserId = context.UserId
 						and exists(select 1 from json_array_elements_text(O.Scopes) S(s) where s = 'rn')
 						and SignatureValid(
@@ -362,7 +362,7 @@ declare schema main
 			exists (
 				select 1 from Officer O
 					join CurrentAdmin CA on CA.AuthorityId = O.AuthorityId and CA.EffectiveAt = O.AdminEffectiveAt
-					join UserKey K on K.UserId = O.UserId and K.Key = context.UserKey and K.Expiration > context.now
+					join UserKey K on K.UserId = O.UserId and K.PubKey = context.UserKey and K.Expiration > context.now
 					where O.UserId = context.UserId and O.AuthorityId = new.Id
 						and exists(select 1 from json_array_elements_text(O.Scopes) S(s) where s = 'uai')
 						and SignatureValid(
@@ -400,7 +400,7 @@ declare schema main
 			exists (
 				select 1 from Officer O
 					join CurrentAdmin CA on CA.AuthorityId = O.AuthorityId and CA.EffectiveAt = O.AdminEffectiveAt
-					join UserKey K on K.UserId = O.UserId and K.Key = context.UserKey and K.Expiration > context.now
+					join UserKey K on K.UserId = O.UserId and K.PubKey = context.UserKey and K.Expiration > context.now
 					where O.UserId = context.UserId and O.AuthorityId = new.AuthorityId
 						and exists(select 1 from json_array_elements_text(O.Scopes) S(s) where s = 'rad')
 						and SignatureValid(
@@ -429,7 +429,7 @@ declare schema main
 			exists (
 				select 1 from Officer O
 					join CurrentAdmin CA on CA.AuthorityId = O.AuthorityId and CA.EffectiveAt = O.AdminEffectiveAt
-					join UserKey K on K.UserId = O.UserId and K.Key = context.UserKey and K.Expiration > context.now
+					join UserKey K on K.UserId = O.UserId and K.PubKey = context.UserKey and K.Expiration > context.now
 					where O.UserId = context.UserId and O.AuthorityId = new.AuthorityId
 						and exists(select 1 from json_array_elements_text(O.Scopes) S(s) where s = 'rad')
 						and SignatureValid(
@@ -455,7 +455,7 @@ declare schema main
 		primary key (AuthorityId, AdminEffectiveAt, ProposedName),
 		constraint ProposedOfficerValid check (exists (select 1 from ProposedOfficer PA where PA.AuthorityId = new.AuthorityId and PA.AdminEffectiveAt = new.AdminEffectiveAt and PA.ProposedName = new.ProposedName)),
 		constraint UserIdValid check (exists (select 1 from User U where U.Id = new.UserId)),
-		constraint UserKeyValid check (exists (select 1 from UserKey K where K.UserId = new.UserId and K.Key = new.UserKey and K.Expiration > context.now)),
+		constraint UserKeyValid check (exists (select 1 from UserKey K where K.UserId = new.UserId and K.PubKey = new.UserKey and K.Expiration > context.now)),
 		constraint CantDelete check on delete (false),
 		-- TODO: re-enable when ProposedOfficerUser's role is decided (currently "possibly remove" per the table comment).
 		-- Original (broken) body referenced PA.AdminRevision / PA.UserId / PA.SignerKey / PA.Signature which do not exist on ProposedOfficer.
@@ -648,7 +648,7 @@ declare schema main
 			exists (
 				select 1 from Officer O
 					join CurrentAdmin CA on CA.AuthorityId = O.AuthorityId and CA.EffectiveAt = O.AdminEffectiveAt
-					join UserKey K on K.UserId = O.UserId and K.Key = context.UserKey and K.Expiration > context.now
+					join UserKey K on K.UserId = O.UserId and K.PubKey = context.UserKey and K.Expiration > context.now
 					join Election E on E.Id = new.Id
 					where O.UserId = context.UserId and O.AuthorityId = E.AuthorityId and E.RevisionDeadline > new.RevisionTimestamp
 						and exists(select 1 from json_array_elements_text(O.Scopes) S(s) where s = 'mel')
@@ -716,7 +716,7 @@ declare schema main
 			exists (
 				select 1 from Officer O
 					join CurrentAdmin CA on CA.AuthorityId = O.AuthorityId and CA.EffectiveAt = O.AdminEffectiveAt
-					join UserKey K on K.UserId = O.UserId and K.Key = context.UserKey and K.Expiration > context.now
+					join UserKey K on K.UserId = O.UserId and K.PubKey = context.UserKey and K.Expiration > context.now
 					join Election E on E.Id = new.ElectionId
 					where O.UserId = context.UserId and O.AuthorityId = E.AuthorityId and E.RevisionDeadline > new.RevisionTimestamp
 						and exists(select 1 from json_array_elements_text(O.Scopes) S(s) where s = 'mel')
@@ -785,7 +785,7 @@ declare schema main
 			exists (
 				select 1 from Officer O
 					join CurrentAdmin CA on CA.AuthorityId = O.AuthorityId and CA.EffectiveAt = O.AdminEffectiveAt
-					join UserKey K on K.UserId = O.UserId and K.Key = context.UserKey and K.Expiration > context.now
+					join UserKey K on K.UserId = O.UserId and K.PubKey = context.UserKey and K.Expiration > context.now
 					join Election E on E.Id = new.ElectionId
 					where O.UserId = context.UserId and O.AuthorityId = E.AuthorityId and E.RevisionDeadline > context.now
 						and exists(select 1 from json_array_elements_text(O.Scopes) S(s) where s = 'ceb')
@@ -864,7 +864,7 @@ declare schema main
 			exists (
 				select 1 from Officer O
 					join CurrentAdmin CA on CA.AuthorityId = O.AuthorityId and CA.EffectiveAt = O.AdminEffectiveAt
-					join UserKey K on K.UserId = O.UserId and K.Key = context.UserKey and K.Expiration > context.now
+					join UserKey K on K.UserId = O.UserId and K.PubKey = context.UserKey and K.Expiration > context.now
 					join Ballot B on B.Id = new.BallotId
 					join Election E on E.Id = B.ElectionId
 					where O.UserId = context.UserId and O.AuthorityId = B.AuthorityId and E.RevisionDeadline > context.now
@@ -949,7 +949,7 @@ declare schema main
 			exists (
 				select 1 from Officer O
 					join CurrentAdmin CA on CA.AuthorityId = O.AuthorityId and CA.EffectiveAt = O.AdminEffectiveAt
-					join UserKey K on K.UserId = O.UserId and K.Key = context.UserKey and K.Expiration > context.now
+					join UserKey K on K.UserId = O.UserId and K.PubKey = context.UserKey and K.Expiration > context.now
 					join Ballot B on B.Id = new.BallotId
 					join Question Q on Q.BallotId = B.Id and Q.Code = new.QuestionCode
 					join Election E on E.Id = B.ElectionId
