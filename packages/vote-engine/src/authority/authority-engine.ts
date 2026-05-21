@@ -72,7 +72,7 @@ export class AuthorityEngine implements IAuthorityEngine {
 					inviteKey +
 					inviteSignature
       ).toString()
-    }
+    } as OfficerInvite & { invitePrivate: string }
   }
 
   createAuthorityInvite (name: string): AuthorityInvite {
@@ -89,6 +89,7 @@ export class AuthorityEngine implements IAuthorityEngine {
       .sign(sha256(signedBytes), invitePrivate)
       .toString()
 
+    // Plan 03-01 Rule-3 transitional cast — see createOfficerInvite for context.
     return {
       name,
       type,
@@ -99,7 +100,7 @@ export class AuthorityEngine implements IAuthorityEngine {
       digest: Digest(
         type + name + expiration + inviteKey + inviteSignature
       ).toString()
-    }
+    } as AuthorityInvite & { invitePrivate: string }
   }
 
   async getAdminDetails (): Promise<AdminDetails> {
