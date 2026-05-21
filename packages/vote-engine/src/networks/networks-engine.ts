@@ -14,6 +14,11 @@ import type { INetworksEngine } from '@votetorrent/vote-core';
 import { prepareDb } from '../database/initialize.js';
 
 export class NetworksEngine implements INetworksEngine {
+	// D-07: per-instance hash→EngineContext cache.
+	// Lifetime is bound to this NetworksEngine instance (AppProvider owns one).
+	// D-11: no eviction in v1.0 — revisit at the v2 persistence milestone.
+	private readonly contexts = new Map<string, EngineContext>();
+
 	constructor(private readonly localStorage: LocalStorage) {}
 
 	async clearRecentNetworks(): Promise<void> {
@@ -65,7 +70,19 @@ export class NetworksEngine implements INetworksEngine {
 		}
 
 		try {
-			// TODO add context ( Tid )
+			// KNOWN ISSUE — this multi-INSERT batch is a silent no-op today.
+			// `db.eval` returns an AsyncIterableIterator and only executes
+			// during iteration; awaiting it (the historical pattern) unwraps
+			// the iterator without running any SQL. Switching to `db.exec`
+			// exposes a chain of compounding schema/engine issues that are
+			// out of scope for Plan 03-01: (1) `TransactionId()` is a phantom
+			// SQL function the schema invokes via `with context Tid = ...`,
+			// (2) the `ElectionType` view's derived-column-alias form fails
+			// at CHECK-eval time, (3) `NoSigningNonceOnInsert` references
+			// bare `SigningNonce` without a `context.` prefix, (4) each
+			// table's INSERT needs its full declared `with context (...)`
+			// bound by the engine. See 03-01-SUMMARY.md for the full chain.
+			// Tracked for a dedicated follow-up plan.
 			await ctx.db.eval(
 				`
 				insert into Network (
@@ -126,7 +143,7 @@ export class NetworksEngine implements INetworksEngine {
 				insert into UserKey (
 					UserId,
 					Type,
-					Key,
+					PubKey,
 					Expiration
 				)
 				with context now = datetime('now')
@@ -167,6 +184,11 @@ export class NetworksEngine implements INetworksEngine {
 			}
 		}
 
+		// D-08: cache the freshly-built EngineContext so subsequent open()
+		// calls return a NetworkEngine bound to the same in-memory Database
+		// (the only place Database instances are constructed in production).
+		this.contexts.set(networkHash, ctx);
+
 		// Update recent networks list
 		const networkRef: NetworkReference = {
 			hash: networkHash,
@@ -194,7 +216,17 @@ export class NetworksEngine implements INetworksEngine {
 		user: User | undefined,
 		storeAsRecent: boolean = true,
 	): Promise<INetworkEngine> {
-		const ctx = await this.createContext(user);
+		// D-09/D-10: open() reads from the per-instance cache. The cached
+		// EngineContext.db is shared verbatim; the caller-supplied `user`
+		// is injected into a fresh wrapper without mutating the cached ctx
+		// (Claude's-discretion bullet on cache-context user field).
+		const cached = this.contexts.get(ref.hash);
+		if (!cached) {
+			throw new Error(
+				'Network not opened in this session — use create() first',
+			);
+		}
+		const ctx: EngineContext = { ...cached, user };
 		const qNetworkEngine = new NetworkEngine(ref, this.localStorage, ctx);
 		if (storeAsRecent) {
 			const recentNetworks: NetworkReference[] =
