@@ -37,7 +37,7 @@ declare schema main
 							and A.AuthorityId = new.PrimaryAuthorityId
 							and A.Scope = 'rn'
 							and A.Digest = Digest(
-								Tid, new.Id, new.Name, new.ImageRef, new.Relays, new.TimestampAuthorities, new.NumberRequiredTSAs, new.ElectionType
+								context.Tid, new.Id, new.Name, new.ImageRef, new.Relays, new.TimestampAuthorities, new.NumberRequiredTSAs, new.ElectionType
 							)
 			)
 		)
@@ -71,7 +71,7 @@ declare schema main
 					and exists (
 						select 1 from InviteResult I where I.SlotCid = InviteSlotCid and I.IsAccepted
 							and I.Digest = Digest(
-								Tid, new.Id, new.Name, new.DomainName, new.ImageRef
+								context.Tid, new.Id, new.Name, new.DomainName, new.ImageRef
 							)
 					)
 				)
@@ -83,7 +83,7 @@ declare schema main
 					where A.Nonce = context.SigningNonce
 						and A.Scope = 'uai'
 						and A.Digest = Digest(
-							Tid, new.Name, new.DomainName, new.ImageRef
+							context.Tid, new.Name, new.DomainName, new.ImageRef
 						)
 			)
 		)
@@ -120,7 +120,7 @@ declare schema main
 							select 1 from InviteResult I join Authority A on A.Id = new.AuthorityId
 							where I.SlotCid = InviteSlotCid and I.IsAccepted
 								and I.Digest = Digest(
-									Tid, A.Id, A.Name, A.DomainName, A.ImageRef,
+									context.Tid, A.Id, A.Name, A.DomainName, A.ImageRef,
 									(select DigestAll(Digest(EffectiveAt, ThresholdPolicies)) over (order by EffectiveAt)
 											from Admin A where A.AuthorityId = new.AuthorityId and A.EffectiveAt = new.EffectiveAt),
 									(select DigestAll(Digest(AdminEffectiveAt, UserId, Title, Scopes)) over (order by AdminEffectiveAt, UserId)
@@ -135,7 +135,7 @@ declare schema main
 							select 1 from AdminSignature ASig join AdminSigning A on A.Nonce = ASig.SigningNonce
 								where A.Nonce = context.SigningNonce
 									and A.Digest = Digest(
-										Tid, AuthorityId,
+										context.Tid, AuthorityId,
 										(select DigestAll(Digest(EffectiveAt, ThresholdPolicies)) over (order by EffectiveAt)
 												from Admin Ad where Ad.AuthorityId = new.AuthorityId and Ad.EffectiveAt = new.EffectiveAt),
 										(select DigestAll(Digest(AdminEffectiveAt, UserId, Title, Scopes)) over (order by AdminEffectiveAt, UserId)
@@ -176,7 +176,7 @@ declare schema main
 							select 1 from InviteResult I join Authority A on A.Id = new.AuthorityId
 							where I.SlotCid = InviteSlotCid and I.IsAccepted
 								and I.Digest = Digest(
-									Tid, A.Id, A.Name, A.DomainName, A.ImageRef,
+									context.Tid, A.Id, A.Name, A.DomainName, A.ImageRef,
 									(select DigestAll(Digest(EffectiveAt, ThresholdPolicies)) over (order by EffectiveAt)
 											from Admin A where A.AuthorityId = new.AuthorityId and A.EffectiveAt = new.AdminEffectiveAt),
 									(select DigestAll(Digest(AdminEffectiveAt, UserId, Title, Scopes)) over (order by AdminEffectiveAt, UserId)
@@ -190,7 +190,7 @@ declare schema main
 							select 1 from AdminSignature ASig join AdminSigning A on A.Nonce = ASig.SigningNonce
 								where A.Nonce = context.SigningNonce
 									and A.Digest = Digest(
-										Tid, AuthorityId,
+										context.Tid, AuthorityId,
 										(select DigestAll(Digest(EffectiveAt, ThresholdPolicies)) over (order by EffectiveAt)
 												from Admin Ad where Ad.AuthorityId = new.AuthorityId and Ad.EffectiveAt = new.AdminEffectiveAt),
 										(select DigestAll(Digest(AdminEffectiveAt, UserId, Title, Scopes)) over (order by AdminEffectiveAt, UserId)
@@ -301,7 +301,7 @@ declare schema main
 					where O.UserId = context.UserId
 						and exists(select 1 from json_array_elements_text(O.Scopes) S(s) where s = 'rn')
 						and SignatureValid(
-							Digest(Tid, coalesce(new.Name, old.Name), coalesce(new.ImageRef, old.ImageRef), coalesce(new.Relays, old.Relays),
+							Digest(context.Tid, coalesce(new.Name, old.Name), coalesce(new.ImageRef, old.ImageRef), coalesce(new.Relays, old.Relays),
 								coalesce(new.TimestampAuthorities, old.TimestampAuthorities), coalesce(new.NumberRequiredTSAs, old.NumberRequiredTSAs),
 								coalesce(new.ElectionType, old.ElectionType)),
 							context.Signature,
@@ -318,7 +318,7 @@ declare schema main
 		-- 			join Network N on N.Name = coalesce(new.Name, old.Name) and N.PrimaryAuthorityId = A.AuthorityId
 		-- 			where A.Scope = 'rn'
 		-- 				and A.Digest = Digest(
-		-- 					Tid,
+		-- 					context.Tid,
 		-- 					coalesce(new.Name, old.Name),
 		-- 					coalesce(new.ImageRef, old.ImageRef),
 		-- 					coalesce(new.Relays, old.Relays),
@@ -367,7 +367,7 @@ declare schema main
 					where O.UserId = context.UserId and O.AuthorityId = new.Id
 						and exists(select 1 from json_array_elements_text(O.Scopes) S(s) where s = 'uai')
 						and SignatureValid(
-							Digest(Tid, coalesce(new.Id, old.Id), coalesce(new.Name, old.Name), coalesce(new.DomainName, old.DomainName),
+							Digest(context.Tid, coalesce(new.Id, old.Id), coalesce(new.Name, old.Name), coalesce(new.DomainName, old.DomainName),
 								coalesce(new.ImageRef, old.ImageRef)),
 							context.Signature,
 							context.UserKey
@@ -405,7 +405,7 @@ declare schema main
 					where O.UserId = context.UserId and O.AuthorityId = new.AuthorityId
 						and exists(select 1 from json_array_elements_text(O.Scopes) S(s) where s = 'rad')
 						and SignatureValid(
-							Digest(Tid, coalesce(new.AuthorityId, old.AuthorityId),
+							Digest(context.Tid, coalesce(new.AuthorityId, old.AuthorityId),
 								coalesce(new.EffectiveAt, old.EffectiveAt), coalesce(new.ThresholdPolicies, old.ThresholdPolicies)),
 							context.Signature,
 							context.UserKey
@@ -434,7 +434,7 @@ declare schema main
 					where O.UserId = context.UserId and O.AuthorityId = new.AuthorityId
 						and exists(select 1 from json_array_elements_text(O.Scopes) S(s) where s = 'rad')
 						and SignatureValid(
-							Digest(Tid, coalesce(new.AuthorityId, old.AuthorityId), coalesce(new.AdminEffectiveAt, old.AdminEffectiveAt),
+							Digest(context.Tid, coalesce(new.AuthorityId, old.AuthorityId), coalesce(new.AdminEffectiveAt, old.AdminEffectiveAt),
 								coalesce(new.ProposedName, old.ProposedName), coalesce(new.Title, old.Title), coalesce(new.Scopes, old.Scopes)),
 							context.Signature,
 							context.UserKey
@@ -603,7 +603,7 @@ declare schema main
 			-- first key for the user
 			(UserKey is null
 			or SignatureValid(
-				Digest(Tid, coalesce(old.UserId, new.UserId), coalesce(old.Type, new.Type),
+				Digest(context.Tid, coalesce(old.UserId, new.UserId), coalesce(old.Type, new.Type),
 					coalesce(old.PubKey, new.PubKey), coalesce(old.Expiration, new.Expiration)),
 				Signature,
 				UserKey)
@@ -635,7 +635,7 @@ declare schema main
 						and A.AuthorityId = new.AuthorityId
 						and A.Scope = 'mel'
 						and A.Digest = Digest(
-							Tid, Id, AuthorityId, Title, Date, RevisionDeadline, BallotDeadline, Type
+							context.Tid, Id, AuthorityId, Title, Date, RevisionDeadline, BallotDeadline, Type
 						)
 			)
 		)
@@ -659,7 +659,7 @@ declare schema main
 					where O.UserId = context.UserId and O.AuthorityId = E.AuthorityId and E.RevisionDeadline > new.RevisionTimestamp
 						and exists(select 1 from json_array_elements_text(O.Scopes) S(s) where s = 'mel')
 						and SignatureValid(
-							Digest(Tid, coalesce(new.ElectionId, old.ElectionId), coalesce(new.Revision, old.Revision),
+							Digest(context.Tid, coalesce(new.ElectionId, old.ElectionId), coalesce(new.Revision, old.Revision),
 								coalesce(new.RevisionTimestamp, old.RevisionTimestamp), coalesce(new.Tags, old.Tags),
 									coalesce(new.Instructions, old.Instructions), coalesce(new.Timeline, old.Timeline),
 										coalesce(new.KeyholderThreshold, old.KeyholderThreshold)),
@@ -698,7 +698,7 @@ declare schema main
 						and A.AuthorityId = E.AuthorityId
 						and A.Scope = 'mel'
 						and A.Digest = Digest(
-							Tid, new.ElectionId, new.Revision, new.RevisionTimestamp, new.Tags, new.Instructions, new.Timeline, new.KeyholderThreshold
+							context.Tid, new.ElectionId, new.Revision, new.RevisionTimestamp, new.Tags, new.Instructions, new.Timeline, new.KeyholderThreshold
 						)
 			)
 		)
@@ -727,7 +727,7 @@ declare schema main
 					where O.UserId = context.UserId and O.AuthorityId = E.AuthorityId and E.RevisionDeadline > new.RevisionTimestamp
 						and exists(select 1 from json_array_elements_text(O.Scopes) S(s) where s = 'mel')
 						and SignatureValid(
-							Digest(Tid, coalesce(new.ElectionId, old.ElectionId), coalesce(new.Revision, old.Revision),
+							Digest(context.Tid, coalesce(new.ElectionId, old.ElectionId), coalesce(new.Revision, old.Revision),
 								coalesce(new.RevisionTimestamp, old.RevisionTimestamp), coalesce(new.Tags, old.Tags),
 									coalesce(new.Instructions, old.Instructions), coalesce(new.Timeline, old.Timeline),
 										coalesce(new.KeyholderThreshold, old.KeyholderThreshold)),
@@ -758,7 +758,7 @@ declare schema main
 						and E.BallotDeadline > context.now
 						and A.Scope = 'ceb'
 						and A.Digest = Digest(
-							Tid, new.Id, new.ElectionId, new.AuthorityId, new.Description, new.Districts
+							context.Tid, new.Id, new.ElectionId, new.AuthorityId, new.Description, new.Districts
 						)
 			)
 		),
@@ -772,7 +772,7 @@ declare schema main
 						and E.BallotDeadline > context.now
 						and A.Scope = 'ceb'
 						and A.Digest = Digest(
-							Tid, old.Id, 'delete'
+							context.Tid, old.Id, 'delete'
 						)
 			)
 		)
@@ -796,7 +796,7 @@ declare schema main
 					where O.UserId = context.UserId and O.AuthorityId = E.AuthorityId and E.RevisionDeadline > context.now
 						and exists(select 1 from json_array_elements_text(O.Scopes) S(s) where s = 'ceb')
 						and SignatureValid(
-							Digest(Tid, coalesce(new.Id, old.Id), coalesce(new.ElectionId, old.ElectionId), coalesce(new.AuthorityId, old.AuthorityId), coalesce(new.Description, old.Description),
+							Digest(context.Tid, coalesce(new.Id, old.Id), coalesce(new.ElectionId, old.ElectionId), coalesce(new.AuthorityId, old.AuthorityId), coalesce(new.Description, old.Description),
 								coalesce(new.Description, old.Description), coalesce(new.Districts, old.Districts)),
 							context.Signature,
 							context.UserKey
@@ -831,7 +831,7 @@ declare schema main
 						and A.AuthorityId = B.AuthorityId
 						and A.Scope = 'ceb'
 						and A.Digest = Digest(
-							Tid, new.BallotId, new.Code, new.Title, new.Instructions, new.DependsOn, new.Type, new.OptionRange, new.ScoreRange, new.Grouping, new.Sequence, new.Required
+							context.Tid, new.BallotId, new.Code, new.Title, new.Instructions, new.DependsOn, new.Type, new.OptionRange, new.ScoreRange, new.Grouping, new.Sequence, new.Required
 						)
 			)
 		),
@@ -845,7 +845,7 @@ declare schema main
 						and E.BallotDeadline > context.now
 						and A.Scope = 'ceb'
 						and A.Digest = Digest(
-							Tid, old.BallotId, 'delete'
+							context.Tid, old.BallotId, 'delete'
 						)
 			)
 		)
@@ -876,7 +876,7 @@ declare schema main
 					where O.UserId = context.UserId and O.AuthorityId = B.AuthorityId and E.RevisionDeadline > context.now
 						and exists(select 1 from json_array_elements_text(O.Scopes) S(s) where s = 'ceb')
 						and SignatureValid(
-							Digest(Tid, coalesce(new.BallotId, old.BallotId), coalesce(new.Code, old.Code), coalesce(new.Title, old.Title),
+							Digest(context.Tid, coalesce(new.BallotId, old.BallotId), coalesce(new.Code, old.Code), coalesce(new.Title, old.Title),
 								coalesce(new.Instructions, old.Instructions), coalesce(new.DependsOn, old.DependsOn), coalesce(new.Type, old.Type),
 								coalesce(new.OptionRange, old.OptionRange), coalesce(new.ScoreRange, old.ScoreRange), coalesce(new.Grouping, old.Grouping),
 								coalesce(new.Sequence, old.Sequence), coalesce(new.Required, old.Required)),
@@ -912,7 +912,7 @@ declare schema main
 						and A.AuthorityId = B.AuthorityId
 						and A.Scope = 'ceb'
 						and A.Digest = Digest(
-							Tid, new.BallotId, new.QuestionCode, new.Code, new.Sequence, new.Title, new.Details, new.InfoURL, new.Image, new.Video
+							context.Tid, new.BallotId, new.QuestionCode, new.Code, new.Sequence, new.Title, new.Details, new.InfoURL, new.Image, new.Video
 						)
 			)
 		),
@@ -926,7 +926,7 @@ declare schema main
 						and E.BallotDeadline > context.now
 						and A.Scope = 'ceb'
 						and A.Digest = Digest(
-							Tid, old.BallotId, 'delete'
+							context.Tid, old.BallotId, 'delete'
 						)
 			)
 		)
@@ -966,7 +966,7 @@ declare schema main
 					where O.UserId = context.UserId and O.AuthorityId = B.AuthorityId and E.RevisionDeadline > context.now
 						and exists(select 1 from json_array_elements_text(O.Scopes) S(s) where s = 'ceb')
 						and SignatureValid(
-							Digest(Tid, coalesce(new.BallotId, old.BallotId), coalesce(new.QuestionCode, old.QuestionCode), coalesce(new.Code, old.Code),
+							Digest(context.Tid, coalesce(new.BallotId, old.BallotId), coalesce(new.QuestionCode, old.QuestionCode), coalesce(new.Code, old.Code),
 								coalesce(new.Sequence, old.Sequence), coalesce(new.Title, old.Title), coalesce(new.Details, old.Details),
 								coalesce(new.InfoURL, old.InfoURL), coalesce(new.Image, old.Image), coalesce(new.Video, old.Video)),
 							context.Signature,
@@ -1022,7 +1022,7 @@ declare schema main
 					where A.Nonce = context.SigningNonce
 						and A.Scope = 'mel'
 						and A.Digest = Digest(
-							Tid, new.Id, new.UserId, new.Type, new.SignatureType, new.SigningNonce
+							context.Tid, new.Id, new.UserId, new.Type, new.SignatureType, new.SigningNonce
 						)
 			)
 		)
@@ -1051,7 +1051,7 @@ declare schema main
 						where T.Id = new.TaskId and T.Type = 'network'
 							and T.IsCompleted = false
 							and A.Digest = Digest(
-								Tid, N.Name, N.ImageRef, N.Relays, N.TimestampAuthorities, N.NumberRequiredTSAs, N.ElectionType
+								context.Tid, N.Name, N.ImageRef, N.Relays, N.TimestampAuthorities, N.NumberRequiredTSAs, N.ElectionType
 							)
 			)
 			-- if the network change has been fully signed, no uncompleted tasks should be left
@@ -1082,7 +1082,7 @@ declare schema main
 						where T.Id = new.TaskId and T.Type = 'authority'
 							and T.IsCompleted = false
 							and A.Digest = Digest(
-								Tid, PA.Id, PA.Name, PA.DomainName, PA.ImageRef
+								context.Tid, PA.Id, PA.Name, PA.DomainName, PA.ImageRef
 							)
 			)
 			-- if the authority change has been fully signed, no uncompleted tasks should be left
@@ -1115,7 +1115,7 @@ declare schema main
 						where T.Id = new.TaskId and T.Type = 'admin'
 							and T.IsCompleted = false
 							and A.Digest = Digest(
-								Tid, PA.AuthorityId, PA.EffectiveAt, PA.ThresholdPolicies
+								context.Tid, PA.AuthorityId, PA.EffectiveAt, PA.ThresholdPolicies
 							)
 			)
 			-- if the admin change has been fully signed, no uncompleted tasks should be left
@@ -1147,7 +1147,7 @@ declare schema main
 						where T.Id = new.TaskId and T.Type = 'election'
 							and T.IsCompleted = false
 							and A.Digest = Digest(
-								Tid, PE.Id, PE.AuthorityId, PE.Title, PE.Date, PE.RevisionDeadline, PE.BallotDeadline, PE.Type
+								context.Tid, PE.Id, PE.AuthorityId, PE.Title, PE.Date, PE.RevisionDeadline, PE.BallotDeadline, PE.Type
 							)
 			)
 			-- if the election has been fully signed, no uncompleted tasks should be left
@@ -1179,7 +1179,7 @@ declare schema main
 						where T.Id = new.TaskId and T.Type = 'election-revision'
 							and T.IsCompleted = false
 							and A.Digest = Digest(
-								Tid, PER.ElectionId, PER.Revision, PER.RevisionTimestamp, PER.Tags, PER.Instructions, PER.Timeline, PER.KeyholderThreshold
+								context.Tid, PER.ElectionId, PER.Revision, PER.RevisionTimestamp, PER.Tags, PER.Instructions, PER.Timeline, PER.KeyholderThreshold
 							)
 			)
 			-- if the election revision has been fully signed, no uncompleted tasks should be left
@@ -1210,7 +1210,7 @@ declare schema main
 						where T.Id = new.TaskId and T.Type = 'ballot'
 							and T.IsCompleted = false
 							and A.Digest = Digest(
-								Tid, PB.Id, PB.ElectionId, PB.AuthorityId, PB.Description, PB.Districts
+								context.Tid, PB.Id, PB.ElectionId, PB.AuthorityId, PB.Description, PB.Districts
 							)
 			)
 			-- if the ballot has been fully signed, no uncompleted tasks should be left
