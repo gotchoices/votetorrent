@@ -1,7 +1,9 @@
 declare schema main
 
 {
-	view ElectionType as select * from (values ('o', 'Official'), ('a', 'Adhoc')) as ElectionType(Code, Name);
+	view ElectionType as
+		select 'o' as Code, 'Official' as Name
+		union all select 'a' as Code, 'Adhoc' as Name;
 
 	table Network (
 		Id text, -- 32 byte random id
@@ -42,16 +44,15 @@ declare schema main
 	)
 		with context ( SigningNonce text null, Tid int );
 
-	view Scope as select * from (values
-		('rn', 'Revise Network'),
-		('rad', 'Revise or replace the Admin'),
-		('vrg', 'Validate registrations'),
-		('iad', 'Invite other Authorities'),
-		('uai', 'Update Authority Information'),
-		('ceb', 'Create/Edit ballot templates'),
-		('mel', 'Manage Elections'),
-		('cap', 'Configure Authority Peers')
-	) as Scope(Code, Name);
+	view Scope as
+		select 'rn' as Code, 'Revise Network' as Name
+		union all select 'rad' as Code, 'Revise or replace the Admin' as Name
+		union all select 'vrg' as Code, 'Validate registrations' as Name
+		union all select 'iad' as Code, 'Invite other Authorities' as Name
+		union all select 'uai' as Code, 'Update Authority Information' as Name
+		union all select 'ceb' as Code, 'Create/Edit ballot templates' as Name
+		union all select 'mel' as Code, 'Manage Elections' as Name
+		union all select 'cap' as Code, 'Configure Authority Peers' as Name;
 
 	table Authority (
 		Id text primary key, -- 32 byte random id
@@ -463,7 +464,11 @@ declare schema main
 	)
 		with context ( now datetime );
 
-	view InviteType as select * from (values ('au', 'Authority'), ('of', 'Officer'), ('k', 'Keyholder'), ('r', 'Registrant')) as InviteType(Code, Name);
+	view InviteType as
+		select 'au' as Code, 'Authority' as Name
+		union all select 'of' as Code, 'Officer' as Name
+		union all select 'k' as Code, 'Keyholder' as Name
+		union all select 'r' as Code, 'Registrant' as Name;
 
 	table InviteSlot (
 		Cid text primary key,
@@ -533,7 +538,8 @@ declare schema main
 			where IR.IsAccepted;
 
 	view UserKeyType as
-		select Code, Name from (values ('M', 'Mobile'), ('Y', 'Yubico')) as UserKeyType(Code, Name);
+		select 'M' as Code, 'Mobile' as Name
+		union all select 'Y' as Code, 'Yubico' as Name;
 
 	table User (
 		Id text primary key, -- Random ID
@@ -927,7 +933,11 @@ declare schema main
 	)
 		with context ( SigningNonce text, Tid int, now datetime );
 
-	view QuestionType as select * from (values ('select', 'Select'), ('rank', 'Rank'), ('score', 'Score'), ('text', 'Text')) as QuestionType(Code, Name);
+	view QuestionType as
+		select 'select' as Code, 'Select' as Name
+		union all select 'rank' as Code, 'Rank' as Name
+		union all select 'score' as Code, 'Score' as Name
+		union all select 'text' as Code, 'Text' as Name;
 
 	table ProposedOption (
 		BallotId text, -- references ProposedBallot.Id
@@ -1234,9 +1244,18 @@ declare schema main
 	)
 		with context ( Tid int );
 
-	view TaskType as select * from (values ('release-key'), ('signature'), ('onboarding')) as TaskType(Code);
+	view TaskType as
+		select 'release-key' as Code
+		union all select 'signature' as Code
+		union all select 'onboarding' as Code;
 
-	view SignatureType as select * from (values ('admin'), ('authority'), ('network'), ('election'), ('election-revision'), ('ballot')) as SignatureType(Code);
+	view SignatureType as
+		select 'admin' as Code
+		union all select 'authority' as Code
+		union all select 'network' as Code
+		union all select 'election' as Code
+		union all select 'election-revision' as Code
+		union all select 'ballot' as Code;
 
 }
 
