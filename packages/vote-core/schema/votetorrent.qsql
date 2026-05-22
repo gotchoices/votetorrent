@@ -99,7 +99,7 @@ declare schema main
 		primary key (AuthorityId, EffectiveAt),
 		constraint OfficerRequired check on insert (
 			exists (select 1 from Officer O where O.AuthorityId = new.AuthorityId and O.AdminEffectiveAt = new.EffectiveAt
-				and exists (select scope from json_array_elements_text(O.Scopes) S(s) where s = 'rad')
+				and exists (select scope from json_each(O.Scopes) where value = 'rad')
 			)
 		),
 		constraint AuthorityIdValid check (exists (select 1 from Authority A where A.Id = new.AuthorityId)),
@@ -164,7 +164,7 @@ declare schema main
 		constraint AuthorityIdValid check (exists (select 1 from Authority A where A.Id = new.AuthorityId)),
 		constraint AdminValid check (exists (select 1 from Admin A where A.AuthorityId = new.AuthorityId and A.EffectiveAt = new.AdminEffectiveAt)),
 		constraint UserIdValid check (exists (select 1 from User U where U.Id = new.UserId)),
-		constraint ScopesValid check (not exists (select 1 from json_array_elements_text(Scopes) S(s) where s not in (select Code from Scope))), -- throwing errors
+		constraint ScopesValid check (not exists (select 1 from json_each(Scopes) where value not in (select Code from Scope))), -- throwing errors
 		constraint OnlyInsert check on update, delete (false),
 		constraint InsertValid check on insert (
 			-- part of the very first authority in the network - no invite, no signing
@@ -247,7 +247,7 @@ declare schema main
 				join Officer O on O.AuthorityId = ADS.AuthorityId and O.AdminEffectiveAt = ADS.AdminEffectiveAt
 				where ADS.Nonce = new.SigningNonce
 					and O.UserId = new.UserId
-					and exists (select 1 from json_array_elements_text(O.Scopes) S(s) where s = ADS.Scope)
+					and exists (select 1 from json_each(O.Scopes) where value = ADS.Scope)
 			)
 		),
 		constraint SignatureValid check (exists (
@@ -299,7 +299,7 @@ declare schema main
 					join Network N on N.PrimaryAuthorityId = CA.AuthorityId
 					join UserKey K on K.UserId = O.UserId and K.PubKey = context.UserKey and K.Expiration > context.now
 					where O.UserId = context.UserId
-						and exists(select 1 from json_array_elements_text(O.Scopes) S(s) where s = 'rn')
+						and exists(select 1 from json_each(O.Scopes) where value = 'rn')
 						and SignatureValid(
 							Digest(context.Tid, coalesce(new.Name, old.Name), coalesce(new.ImageRef, old.ImageRef), coalesce(new.Relays, old.Relays),
 								coalesce(new.TimestampAuthorities, old.TimestampAuthorities), coalesce(new.NumberRequiredTSAs, old.NumberRequiredTSAs),
@@ -334,7 +334,7 @@ declare schema main
 		-- 					select 1 from Officer O
 		-- 						where O.AuthorityId = A.AuthorityId
 		-- 							and O.AdminEffectiveAt = A.AdminEffectiveAt
-		-- 							and exists (select 1 from json_array_elements_text(O.Scopes) S(s) where s = 'rn')
+		-- 							and exists (select 1 from json_each(O.Scopes) where value = 'rn')
 		-- 							and O.UserId != A.UserId
 		-- 							and not exists (
 		-- 								select 1 from Task T
@@ -365,7 +365,7 @@ declare schema main
 					join CurrentAdmin CA on CA.AuthorityId = O.AuthorityId and CA.EffectiveAt = O.AdminEffectiveAt
 					join UserKey K on K.UserId = O.UserId and K.PubKey = context.UserKey and K.Expiration > context.now
 					where O.UserId = context.UserId and O.AuthorityId = new.Id
-						and exists(select 1 from json_array_elements_text(O.Scopes) S(s) where s = 'uai')
+						and exists(select 1 from json_each(O.Scopes) where value = 'uai')
 						and SignatureValid(
 							Digest(context.Tid, coalesce(new.Id, old.Id), coalesce(new.Name, old.Name), coalesce(new.DomainName, old.DomainName),
 								coalesce(new.ImageRef, old.ImageRef)),
@@ -403,7 +403,7 @@ declare schema main
 					join CurrentAdmin CA on CA.AuthorityId = O.AuthorityId and CA.EffectiveAt = O.AdminEffectiveAt
 					join UserKey K on K.UserId = O.UserId and K.PubKey = context.UserKey and K.Expiration > context.now
 					where O.UserId = context.UserId and O.AuthorityId = new.AuthorityId
-						and exists(select 1 from json_array_elements_text(O.Scopes) S(s) where s = 'rad')
+						and exists(select 1 from json_each(O.Scopes) where value = 'rad')
 						and SignatureValid(
 							Digest(context.Tid, coalesce(new.AuthorityId, old.AuthorityId),
 								coalesce(new.EffectiveAt, old.EffectiveAt), coalesce(new.ThresholdPolicies, old.ThresholdPolicies)),
@@ -425,14 +425,14 @@ declare schema main
 		constraint AuthorityIdValid check (exists (select 1 from Authority A where A.Id = new.AuthorityId)),
 		constraint AdminValid check (exists (select 1 from ProposedAdmin A where A.AuthorityId = new.AuthorityId and A.EffectiveAt = new.AdminEffectiveAt)),
 		constraint CantDelete check on delete (false),
-		constraint ScopesValid check (not exists (select 1 from json_array_elements_text(Scopes) S(s) where s not in (select Code from Scope))),
+		constraint ScopesValid check (not exists (select 1 from json_each(Scopes) where value not in (select Code from Scope))),
 		constraint UserValid check (
 			exists (
 				select 1 from Officer O
 					join CurrentAdmin CA on CA.AuthorityId = O.AuthorityId and CA.EffectiveAt = O.AdminEffectiveAt
 					join UserKey K on K.UserId = O.UserId and K.PubKey = context.UserKey and K.Expiration > context.now
 					where O.UserId = context.UserId and O.AuthorityId = new.AuthorityId
-						and exists(select 1 from json_array_elements_text(O.Scopes) S(s) where s = 'rad')
+						and exists(select 1 from json_each(O.Scopes) where value = 'rad')
 						and SignatureValid(
 							Digest(context.Tid, coalesce(new.AuthorityId, old.AuthorityId), coalesce(new.AdminEffectiveAt, old.AdminEffectiveAt),
 								coalesce(new.ProposedName, old.ProposedName), coalesce(new.Title, old.Title), coalesce(new.Scopes, old.Scopes)),
@@ -657,7 +657,7 @@ declare schema main
 					join UserKey K on K.UserId = O.UserId and K.PubKey = context.UserKey and K.Expiration > context.now
 					join Election E on E.Id = new.Id
 					where O.UserId = context.UserId and O.AuthorityId = E.AuthorityId and E.RevisionDeadline > new.RevisionTimestamp
-						and exists(select 1 from json_array_elements_text(O.Scopes) S(s) where s = 'mel')
+						and exists(select 1 from json_each(O.Scopes) where value = 'mel')
 						and SignatureValid(
 							Digest(context.Tid, coalesce(new.ElectionId, old.ElectionId), coalesce(new.Revision, old.Revision),
 								coalesce(new.RevisionTimestamp, old.RevisionTimestamp), coalesce(new.Tags, old.Tags),
@@ -725,7 +725,7 @@ declare schema main
 					join UserKey K on K.UserId = O.UserId and K.PubKey = context.UserKey and K.Expiration > context.now
 					join Election E on E.Id = new.ElectionId
 					where O.UserId = context.UserId and O.AuthorityId = E.AuthorityId and E.RevisionDeadline > new.RevisionTimestamp
-						and exists(select 1 from json_array_elements_text(O.Scopes) S(s) where s = 'mel')
+						and exists(select 1 from json_each(O.Scopes) where value = 'mel')
 						and SignatureValid(
 							Digest(context.Tid, coalesce(new.ElectionId, old.ElectionId), coalesce(new.Revision, old.Revision),
 								coalesce(new.RevisionTimestamp, old.RevisionTimestamp), coalesce(new.Tags, old.Tags),
@@ -794,7 +794,7 @@ declare schema main
 					join UserKey K on K.UserId = O.UserId and K.PubKey = context.UserKey and K.Expiration > context.now
 					join Election E on E.Id = new.ElectionId
 					where O.UserId = context.UserId and O.AuthorityId = E.AuthorityId and E.RevisionDeadline > context.now
-						and exists(select 1 from json_array_elements_text(O.Scopes) S(s) where s = 'ceb')
+						and exists(select 1 from json_each(O.Scopes) where value = 'ceb')
 						and SignatureValid(
 							Digest(context.Tid, coalesce(new.Id, old.Id), coalesce(new.ElectionId, old.ElectionId), coalesce(new.AuthorityId, old.AuthorityId), coalesce(new.Description, old.Description),
 								coalesce(new.Description, old.Description), coalesce(new.Districts, old.Districts)),
@@ -874,7 +874,7 @@ declare schema main
 					join Ballot B on B.Id = new.BallotId
 					join Election E on E.Id = B.ElectionId
 					where O.UserId = context.UserId and O.AuthorityId = B.AuthorityId and E.RevisionDeadline > context.now
-						and exists(select 1 from json_array_elements_text(O.Scopes) S(s) where s = 'ceb')
+						and exists(select 1 from json_each(O.Scopes) where value = 'ceb')
 						and SignatureValid(
 							Digest(context.Tid, coalesce(new.BallotId, old.BallotId), coalesce(new.Code, old.Code), coalesce(new.Title, old.Title),
 								coalesce(new.Instructions, old.Instructions), coalesce(new.DependsOn, old.DependsOn), coalesce(new.Type, old.Type),
@@ -964,7 +964,7 @@ declare schema main
 					join Question Q on Q.BallotId = B.Id and Q.Code = new.QuestionCode
 					join Election E on E.Id = B.ElectionId
 					where O.UserId = context.UserId and O.AuthorityId = B.AuthorityId and E.RevisionDeadline > context.now
-						and exists(select 1 from json_array_elements_text(O.Scopes) S(s) where s = 'ceb')
+						and exists(select 1 from json_each(O.Scopes) where value = 'ceb')
 						and SignatureValid(
 							Digest(context.Tid, coalesce(new.BallotId, old.BallotId), coalesce(new.QuestionCode, old.QuestionCode), coalesce(new.Code, old.Code),
 								coalesce(new.Sequence, old.Sequence), coalesce(new.Title, old.Title), coalesce(new.Details, old.Details),
