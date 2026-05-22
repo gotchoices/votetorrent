@@ -6,6 +6,7 @@ import {
 } from '@votetorrent/vote-core'
 import { expect } from 'chai'
 import { prepareDb } from '../src/database/initialize'
+import { NetworkEngine } from '../src/network/network-engine'
 import { NetworksEngine } from '../src/networks/networks-engine'
 import { DefaultUserEngine } from '../src/user/default-user-engine'
 import { UserEngine } from '../src/user/user-engine'
@@ -361,18 +362,70 @@ describe('UserEngine', () => {
   // NetworkEngine when DB seeding becomes possible).
   // -----------------------------------------------------------------------
   describe('respondToInvite', () => {
+    // USER-07 lives on NetworkEngine. These tests exercise it via the
+    // cached EngineContext produced by createUserEngineForExistingNetwork
+    // — same shape as network.spec.ts §11. Both require a seeded
+    // InviteSlot + AdminSignature for the InviteResult CHECK constraints,
+    // so they remain bug-blocked on quereus#23.
+
     // BLOCKED on quereus#23 — seeding an InviteSlot + AdminSignature row
     // is required for the InviteResult CHECK constraints to pass, and
     // both require a populated DB from create().
     it.skip('inserts an InviteResult row for an accepted invite', async () => {
-      // Body exercised via NetworkEngine.respondToInvite once seeding
-      // is unblocked. See network-engine.ts for the engine entry point.
+      const { ctx } = await createUserEngineForExistingNetwork()
+      const networkEngine = new NetworkEngine(
+        {
+          hash: 'unused-test-hash',
+          name: 'unused',
+          relays: [],
+          primaryAuthorityDomainName: 'unused.example'
+        },
+        AsyncStorage,
+        ctx
+      )
+      const slotCid = 'slot-accept-' + crypto.randomUUID()
+      await networkEngine.respondToInvite({
+        invite: { digest: slotCid } as never,
+        isAccepted: true,
+        invokes: { authority: { name: 'Invokee', domainName: 'inv.example' } },
+        inviteSignature: 'a'.repeat(128),
+        userId: undefined,
+        userInit: undefined
+      } as never)
+      const row = await ctx.db
+        .prepare('select IsAccepted, Digest from InviteResult where SlotCid = :c')
+        .get({ ':c': slotCid })
+      expect(Boolean(row?.IsAccepted)).to.equal(true)
+      expect(row?.Digest).to.not.equal(null)
     })
 
     // BLOCKED on quereus#23 — same chain.
     it.skip('inserts an InviteResult row with null digest for a rejected invite', async () => {
-      // Body exercised via NetworkEngine.respondToInvite once seeding
-      // is unblocked.
+      const { ctx } = await createUserEngineForExistingNetwork()
+      const networkEngine = new NetworkEngine(
+        {
+          hash: 'unused-test-hash',
+          name: 'unused',
+          relays: [],
+          primaryAuthorityDomainName: 'unused.example'
+        },
+        AsyncStorage,
+        ctx
+      )
+      const slotCid = 'slot-reject-' + crypto.randomUUID()
+      await networkEngine.respondToInvite({
+        invite: { digest: slotCid } as never,
+        isAccepted: false,
+        invokes: undefined,
+        inviteSignature: 'b'.repeat(128),
+        userId: undefined,
+        userInit: undefined
+      } as never)
+      const row = await ctx.db
+        .prepare('select IsAccepted, Digest from InviteResult where SlotCid = :c')
+        .get({ ':c': slotCid })
+      expect(Boolean(row?.IsAccepted)).to.equal(false)
+      expect(row?.Digest).to.equal(null)
     })
   })
 })
