@@ -166,14 +166,60 @@ describe('SigningEngine', () => {
 
     // BLOCKED on quereus#23 — same chain.
     it.skip('INSERTs an AdminSigning row with the scope, digest, and signer fields', async () => {
-      // Once #23 lands: assert
-      // `select count(*) from AdminSigning where Nonce = :nonce` === 1.
+      const { ctx, user } = await createPopulatedContext()
+      const engine = new SigningEngine(ctx)
+      const authRow = await ctx.db
+        .prepare('select Id from Authority limit 1')
+        .get({})
+      const authorityId = authRow!.Id as string
+      const sig: Signature = {
+        signerUserId: user.id,
+        signerKey: user.activeKeys[0]!.key,
+        signature: 'a'.repeat(128)
+      }
+      const digest = 'd'.repeat(64)
+      const { nonce } = await engine.startSigningSession(
+        authorityId,
+        digest,
+        'rad',
+        sig
+      )
+      const row = await ctx.db
+        .prepare(
+          'select Scope, Digest, UserId, SignerKey from AdminSigning where Nonce = :nonce'
+        )
+        .get({ ':nonce': nonce })
+      expect(row?.Scope).to.equal('rad')
+      expect(row?.Digest).to.equal(digest)
+      expect(row?.UserId).to.equal(user.id)
+      expect(row?.SignerKey).to.equal(sig.signerKey)
     })
 
     // BLOCKED on quereus#23 — same chain.
     it.skip('rejects an invalid scope via AdminSigning.ScopeValid', async () => {
-      // Once #23 lands: pass an invalid scope code and assert a
-      // ConstraintError surfaces from the wrapping rethrow.
+      const { ctx, user } = await createPopulatedContext()
+      const engine = new SigningEngine(ctx)
+      const authRow = await ctx.db
+        .prepare('select Id from Authority limit 1')
+        .get({})
+      const authorityId = authRow!.Id as string
+      const sig: Signature = {
+        signerUserId: user.id,
+        signerKey: user.activeKeys[0]!.key,
+        signature: 'a'.repeat(128)
+      }
+      let caught: unknown
+      try {
+        await engine.startSigningSession(
+          authorityId,
+          'd'.repeat(64),
+          'xx' as unknown as Scope,
+          sig
+        )
+      } catch (err) {
+        caught = err
+      }
+      expect((caught as Error)?.message).to.include('ScopeValid')
     })
   })
 
@@ -306,8 +352,35 @@ describe('SigningEngine', () => {
     // row to look up the scope. Without #23, no AdminSigning row can be
     // seeded, so the read-side path is unreachable today.
     it.skip('reads scope and threshold from the AdminSigning + Admin join', async () => {
-      // Once #23 lands: seed an AdminSigning row with scope=rad, then
-      // verify that sign() picks up the matching ThresholdPolicies row.
+      // Seed an AdminSigning row with scope=rad (matches the seeded
+      // ThresholdPolicies entry { policy: 'rad', threshold: 1 }), then
+      // call sign() and verify the threshold-reached branch fires.
+      const { ctx, user } = await createPopulatedContext()
+      const engine = new SigningEngine(ctx)
+      const authRow = await ctx.db
+        .prepare('select Id from Authority limit 1')
+        .get({})
+      const authorityId = authRow!.Id as string
+      const sig: Signature = {
+        signerUserId: user.id,
+        signerKey: user.activeKeys[0]!.key,
+        signature: 'a'.repeat(128)
+      }
+      const { nonce, thresholdReached } = await engine.startSigningSession(
+        authorityId,
+        'd'.repeat(64),
+        'rad',
+        sig
+      )
+      // ThresholdPolicies seed is { rad: 1 }; one OfficerSignature inserted
+      // by startSigningSession's call to sign() should hit the threshold.
+      expect(thresholdReached).to.equal(true)
+      const adminSig = await ctx.db
+        .prepare(
+          'select SigningNonce from AdminSignature where SigningNonce = :n'
+        )
+        .get({ ':n': nonce })
+      expect(adminSig?.SigningNonce).to.equal(nonce)
     })
   })
 
