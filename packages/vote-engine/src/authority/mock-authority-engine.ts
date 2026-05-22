@@ -9,10 +9,12 @@ import type {
   AuthorityDetails,
   AuthorityInit,
   AuthorityInvite,
+  AuthorityInviteShare,
   IAuthorityEngine,
   InviteStatus,
   OfficerInit,
   OfficerInvite,
+  OfficerInviteShare,
   Proposal,
   Scope,
   SentAuthorityInvite,
@@ -40,11 +42,11 @@ export class MockAuthorityEngine implements IAuthorityEngine {
     this.proposedAdmin = detailsCopy.proposed
   }
 
-  createOfficerInvite (init: OfficerInit): OfficerInvite {
+  createOfficerInvite (init: OfficerInit): OfficerInviteShare {
     throw new Error('Method not implemented.')
   }
 
-  createAuthorityInvite (name: string): AuthorityInvite {
+  createAuthorityInvite (name: string): AuthorityInviteShare {
     throw new Error('Method not implemented.')
   }
 
@@ -71,7 +73,7 @@ export class MockAuthorityEngine implements IAuthorityEngine {
     }
   }
 
-  async proposeAdmin (adminProposal: Proposal<AdminInit>): Promise<void> {
+  async proposeAdmin (adminProposal: Proposal<AdminInit>, _signature: Signature): Promise<void> {
     // Update the instance's proposed administration directly
     this.proposedAdmin = JSON.parse(JSON.stringify(adminProposal))
     console.log(
