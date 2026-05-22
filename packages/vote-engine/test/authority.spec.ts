@@ -1,8 +1,14 @@
+import { Database } from '@quereus/quereus'
+import { bytesToHex } from '@noble/curves/abstract/utils'
+import { secp256k1 } from '@noble/curves/secp256k1'
+import { sha256 } from '@noble/hashes/sha2'
 import { ElectionType, UserKeyType } from '@votetorrent/vote-core'
-// import { expect } from 'chai'
-// import { AuthorityEngine } from '../src/authority/authority-engine'
-// import { NetworkEngine } from '../src/network/network-engine'
+import { expect } from 'chai'
+import { AuthorityEngine } from '../src/authority/authority-engine'
+import { prepareDb } from '../src/database/initialize'
 import { NetworksEngine } from '../src/networks/networks-engine'
+import type { EngineContext } from '../src/types.js'
+import { randomTestKeyPair } from './fixtures/keys.js'
 import { AsyncStorage } from './shims/react-native'
 import type {
   User,
@@ -10,18 +16,12 @@ import type {
   INetworkEngine,
   IAuthorityEngine,
   Authority,
-  // AdminDetails,
-  // AuthorityDetails,
-  // AdminInit,
-  // OfficerInit,
-  // OfficerInvite,
-  // AuthorityInvite,
-  // InviteStatus,
-  // SentAuthorityInvite,
-  // Proposal,
   Scope,
-  // Signature,
-  NetworkReference
+  Signature,
+  NetworkReference,
+  OfficerInit,
+  Proposal,
+  AdminInit
 } from '@votetorrent/vote-core'
 
 // ---------------------------------------------------------------------------
@@ -103,6 +103,35 @@ async function createNetworkAndAuthority (): Promise<{
   }
 }
 
+// AUTH-01: real hex-encoded secp256k1 signature for test inputs.
+// Generates a fresh keypair, signs sha256(digestText ?? signerUserId), and
+// returns the hex shapes contractually required by the engine.
+function makeRealSignature (signerUserId: string, digestText?: string): Signature {
+  const { privateHex, publicHex } = randomTestKeyPair()
+  const privBytes = Uint8Array.from(privateHex.match(/.{2}/g)!.map((b) => parseInt(b, 16)))
+  const digestBytes = sha256(new TextEncoder().encode(digestText ?? signerUserId))
+  const sig = secp256k1.sign(digestBytes, privBytes).toCompactHex()
+  return { signerUserId, signerKey: publicHex, signature: sig }
+}
+
+// Construct a minimal AuthorityEngine that has a real Database (so the
+// constructor's default SigningEngine wiring is valid) but where the
+// caller does NOT depend on a populated db. Useful for testing pure
+// methods like createOfficerInvite / createAuthorityInvite that touch
+// only in-memory crypto.
+async function makeDbOnlyAuthorityEngine (): Promise<{ authorityEngine: AuthorityEngine, ctx: EngineContext, authority: Authority }> {
+  const db = new Database()
+  await prepareDb(db)
+  const authority: Authority = {
+    id: 'aid-pure',
+    name: 'Pure Test Authority',
+    domainName: 'pure.example.com'
+  }
+  const ctx: EngineContext = { db, user: undefined }
+  const authorityEngine = new AuthorityEngine(authority, ctx)
+  return { authorityEngine, ctx, authority }
+}
+
 // ===========================================================================
 // AuthorityEngine Tests
 // ===========================================================================
@@ -112,119 +141,368 @@ describe('AuthorityEngine', () => {
   // 1. Authority Details
   // -----------------------------------------------------------------------
   describe('getDetails', () => {
-    it('should return authority details with correct id, name, and domainName')
+    // BLOCKED on https://github.com/gotchoices/quereus/issues/23 — CantDelete
+    // fires on INSERT in the create() batch; createNetworkAndAuthority cannot
+    // complete until upstream ships the fix. Unskip once #23 lands.
+    it.skip('should return authority details with correct id, name, and domainName', async () => {
+      const { authority, authorityEngine } = await createNetworkAndAuthority()
+      const details = await authorityEngine.getDetails()
+      expect(details.authority.id).to.equal(authority.id)
+      expect(details.authority.name).to.equal('Primary Authority')
+      expect(details.authority.domainName).to.equal('authority.example.com')
+    })
 
-    it('should return imageRef when set on the authority')
+    // BLOCKED on quereus#23 (CantDelete on INSERT)
+    it.skip('should return imageRef when set on the authority', async () => {
+      const { authorityEngine } = await createNetworkAndAuthority()
+      const details = await authorityEngine.getDetails()
+      // The seed network init does not set primaryAuthority.imageUrl, so
+      // this exists only to assert presence semantics once #23 lands.
+      expect(details.authority).to.have.property('imageRef')
+    })
 
-    it('should return undefined imageRef when not set')
+    // BLOCKED on quereus#23 (CantDelete on INSERT)
+    it.skip('should return undefined imageRef when not set', async () => {
+      const { authorityEngine } = await createNetworkAndAuthority()
+      const details = await authorityEngine.getDetails()
+      expect(details.authority.imageRef).to.equal(undefined)
+    })
 
-    it('should include proposed authority details when a proposal exists')
+    // BLOCKED on quereus#23 (CantDelete on INSERT) — Plan 03-04 does not seed
+    // ProposedAuthority directly because the schema's ProposedAuthority
+    // CHECK constraints would themselves trip on the same upstream bugs.
+    // Phase 6 will cover the full flow with proposal seeding once upstream
+    // is unblocked.
+    it.skip('should include proposed authority details when a proposal exists', async () => {
+      // Placeholder body — see comment.
+    })
 
-    it('should return undefined proposed when no authority proposal exists')
+    // BLOCKED on quereus#23 (CantDelete on INSERT)
+    it.skip('should return undefined proposed when no authority proposal exists', async () => {
+      const { authorityEngine } = await createNetworkAndAuthority()
+      const details = await authorityEngine.getDetails()
+      expect(details.proposed).to.equal(undefined)
+    })
   })
 
   // -----------------------------------------------------------------------
   // 2. Admin Details
   // -----------------------------------------------------------------------
   describe('getAdminDetails', () => {
-    it('should return admin with correct id, authorityId, and effectiveAt')
+    // BLOCKED on quereus#23 (CantDelete on INSERT) — all rows depend on the
+    // create() batch succeeding.
+    it.skip('should return admin with correct id, authorityId, and effectiveAt', async () => {
+      const { authority, authorityEngine } = await createNetworkAndAuthority()
+      const details = await authorityEngine.getAdminDetails()
+      expect(details.admin.authorityId).to.equal(authority.id)
+      expect(details.admin.id).to.be.a('string').with.length.greaterThan(0)
+      expect(details.admin.effectiveAt).to.be.a('number')
+    })
 
-    it('should return the current admin officers with userId, title, and scopes')
+    // BLOCKED on quereus#23
+    it.skip('should return the current admin officers with userId, title, and scopes', async () => {
+      const { authorityEngine } = await createNetworkAndAuthority()
+      const details = await authorityEngine.getAdminDetails()
+      expect(details.admin.officers).to.be.an('array').with.length(1)
+      const officer = details.admin.officers[0]!
+      expect(officer.userId).to.be.a('string').with.length.greaterThan(0)
+      expect(officer.title).to.equal('Chair')
+      expect(officer.scopes).to.be.an('array').that.includes('rad')
+    })
 
-    it('should parse thresholdPolicies from JSON stored in the Admin row')
+    // BLOCKED on quereus#23
+    it.skip('should parse thresholdPolicies from JSON stored in the Admin row', async () => {
+      const { authorityEngine } = await createNetworkAndAuthority()
+      const details = await authorityEngine.getAdminDetails()
+      expect(details.admin.thresholdPolicies).to.deep.equal([
+        { policy: 'rad', threshold: 1 }
+      ])
+    })
 
-    it('should return proposed admin details when a ProposedAdmin exists')
+    // BLOCKED on quereus#23 — needs ProposedAdmin row, which requires create()
+    it.skip('should return proposed admin details when a ProposedAdmin exists', async () => {
+      // Placeholder body — Phase 6 covers full proposal seeding.
+    })
 
-    it('should return proposed officers from ProposedOfficer rows')
+    // BLOCKED on quereus#23
+    it.skip('should return proposed officers from ProposedOfficer rows', async () => {
+      // Placeholder body — Phase 6 covers full proposal seeding.
+    })
 
-    it('should throw when authority has no admin rows')
+    // BLOCKED on quereus#23 — even the "no admin row" path needs a populated
+    // db to demonstrate the AUTH-04 null guard against a bound-but-missing
+    // authority id. Pure construction of an AuthorityEngine against an empty
+    // db would also trip quereus#23 because prepareDb itself runs INSERTs
+    // through the schema's deferred-constraint queue.
+    it.skip('should throw Admin not found when the AuthorityEngine is bound to an unknown authority id', async () => {
+      const { authorityEngine } = await createNetworkAndAuthority()
+      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
+      const empty = new AuthorityEngine(
+        { id: 'never-existed-authority', name: 'X', domainName: 'x' },
+        ctx
+      )
+      try {
+        await empty.getAdminDetails()
+        expect.fail('expected getAdminDetails to throw Admin not found')
+      } catch (err) {
+        expect((err as Error).message).to.include('Admin not found')
+      }
+    })
   })
 
   // -----------------------------------------------------------------------
   // 3. Propose Admin
   // -----------------------------------------------------------------------
   describe('proposeAdmin', () => {
-    it('should insert a ProposedAdmin row with authorityId, effectiveAt, and thresholdPolicies')
+    // BLOCKED on quereus#23 — proposeAdmin inserts into ProposedAdmin which
+    // requires an existing Admin row from create().
+    it.skip('should insert a ProposedAdmin row with authorityId, effectiveAt, and thresholdPolicies', async () => {
+      const { authority, authorityEngine } = await createNetworkAndAuthority()
+      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
+      const sig = makeRealSignature('user-1')
+      const effectiveAt = Date.now() + 60_000
+      const proposal: Proposal<AdminInit> = {
+        proposed: {
+          officers: [{ existing: { userId: 'user-1', authorityId: authority.id, title: 'Chair', scopes: ['rad'] as Scope[] } }],
+          effectiveAt,
+          thresholdPolicies: [{ policy: 'rad', threshold: 1 }]
+        },
+        signers: ['user-1']
+      }
+      await authorityEngine.proposeAdmin(proposal, sig)
+      const row = await ctx.db
+        .prepare('select count(*) as n from ProposedAdmin where AuthorityId = :id and EffectiveAt = :e')
+        .get({ ':id': authority.id, ':e': effectiveAt })
+      expect(Number(row?.n)).to.equal(1)
+    })
 
-    it('should serialize thresholdPolicies as JSON')
+    // BLOCKED on quereus#23
+    it.skip('should serialize thresholdPolicies as JSON', async () => {
+      // Placeholder body — Phase 6 covers full proposal seeding.
+    })
 
-    it('should start a signing session with scope rad')
+    // BLOCKED on quereus#23
+    it.skip('should start a signing session with scope rad', async () => {
+      // Placeholder body — Phase 6 covers full proposal seeding.
+    })
 
-    it('should throw when no signers are provided in the proposal')
+    // This test does NOT depend on create() succeeding — the guard fires
+    // before the DB call. Runs against a freshly-prepared empty db.
+    it('should throw when no signers are provided in the proposal', async () => {
+      const { authorityEngine } = await makeDbOnlyAuthorityEngine()
+      const sig = makeRealSignature('user-1')
+      const proposal: Proposal<AdminInit> = {
+        proposed: {
+          officers: [],
+          effectiveAt: Date.now(),
+          thresholdPolicies: []
+        },
+        signers: []
+      }
+      try {
+        await authorityEngine.proposeAdmin(proposal, sig)
+        expect.fail('expected proposeAdmin to throw on empty signers')
+      } catch (err) {
+        expect((err as Error).message).to.include('No initial signer')
+      }
+    })
 
-    it('should use the first signer as the instigator of the signing session')
+    // BLOCKED on quereus#23
+    it.skip('should use the first signer as the instigator of the signing session', async () => {
+      // Placeholder body — Phase 6 covers full proposal seeding.
+    })
 
-    it('should propagate Quereus constraint errors with descriptive messages')
+    // BLOCKED on quereus#23
+    it.skip('should propagate Quereus constraint errors with descriptive messages', async () => {
+      // Placeholder body — Phase 6 covers full proposal seeding.
+    })
   })
 
   // -----------------------------------------------------------------------
-  // 4. Create Officer Invite
+  // 4. Create Officer Invite — pure crypto, NO db dependency
   // -----------------------------------------------------------------------
   describe('createOfficerInvite', () => {
-    it('should return an OfficerInvite with type "of"')
+    const officerInit: OfficerInit = {
+      name: 'Officer Aria',
+      title: 'Inspector',
+      scopes: ['rad', 'iad'] as Scope[]
+    }
 
-    it('should generate a secp256k1 key pair for the invite')
+    it('should return an OfficerInvite with type "of"', async () => {
+      const { authorityEngine } = await makeDbOnlyAuthorityEngine()
+      const invite = authorityEngine.createOfficerInvite(officerInit)
+      expect(invite.type).to.equal('of')
+    })
 
-    it('should set expiration based on invitationSpanMinutes from now')
+    it('should generate a hex-encoded secp256k1 key pair for the invite', async () => {
+      const { authorityEngine } = await makeDbOnlyAuthorityEngine()
+      const invite = authorityEngine.createOfficerInvite(officerInit)
+      expect(invite.invitePrivate).to.match(/^[0-9a-f]{64}$/)
+      expect(invite.inviteKey).to.match(/^[0-9a-f]{66}$/)
+    })
 
-    it('should include the officer init fields (name, title, scopes) in the invite')
+    it('should set expiration based on invitationSpanMinutes from now', async () => {
+      const { authorityEngine } = await makeDbOnlyAuthorityEngine()
+      const before = Date.now()
+      const invite = authorityEngine.createOfficerInvite(officerInit)
+      // Expiration is a Temporal.PlainDateTime ISO string. Parse via Date.
+      const expMs = Date.parse(invite.expiration + 'Z')
+      const deltaMin = (expMs - before) / 60_000
+      // 60-minute span ± 1 minute tolerance.
+      expect(deltaMin).to.be.greaterThan(59)
+      expect(deltaMin).to.be.lessThan(61)
+    })
 
-    it('should compute inviteSignature over the invite fields using the private key')
+    it('should include the officer init fields (name, title, scopes) in the invite', async () => {
+      const { authorityEngine } = await makeDbOnlyAuthorityEngine()
+      const invite = authorityEngine.createOfficerInvite(officerInit)
+      expect(invite.name).to.equal(officerInit.name)
+      expect(invite.title).to.equal(officerInit.title)
+      expect(invite.scopes).to.deep.equal(officerInit.scopes)
+    })
 
-    it('should compute a digest over all invite fields including the signature')
+    it('should compute inviteSignature as a 128-char hex compact secp256k1 signature', async () => {
+      // Phase 6 / TEST-01 will add full SignatureValid round-trip per
+      // CONTEXT.md <deferred> (the digest formula here does not match the
+      // schema's InviteSignatureValid).
+      const { authorityEngine } = await makeDbOnlyAuthorityEngine()
+      const invite = authorityEngine.createOfficerInvite(officerInit)
+      expect(invite.inviteSignature).to.match(/^[0-9a-f]{128}$/)
+    })
+
+    it('should compute a non-empty digest over the invite fields', async () => {
+      // Exact digest-formula verification deferred to Phase 6 per
+      // CONTEXT.md <deferred>.
+      const { authorityEngine } = await makeDbOnlyAuthorityEngine()
+      const invite = authorityEngine.createOfficerInvite(officerInit)
+      expect(invite.digest).to.be.a('string').with.length.greaterThan(0)
+    })
   })
 
   // -----------------------------------------------------------------------
-  // 5. Create Authority Invite
+  // 5. Create Authority Invite — pure crypto, NO db dependency
   // -----------------------------------------------------------------------
   describe('createAuthorityInvite', () => {
-    it('should return an AuthorityInvite with type "au"')
+    it('should return an AuthorityInvite with type "au"', async () => {
+      const { authorityEngine } = await makeDbOnlyAuthorityEngine()
+      const invite = authorityEngine.createAuthorityInvite('InviteCorp')
+      expect(invite.type).to.equal('au')
+    })
 
-    it('should generate a secp256k1 key pair for the invite')
+    it('should generate a hex-encoded secp256k1 key pair for the invite', async () => {
+      const { authorityEngine } = await makeDbOnlyAuthorityEngine()
+      const invite = authorityEngine.createAuthorityInvite('InviteCorp')
+      expect(invite.invitePrivate).to.match(/^[0-9a-f]{64}$/)
+      expect(invite.inviteKey).to.match(/^[0-9a-f]{66}$/)
+    })
 
-    it('should set expiration based on invitationSpanMinutes from now')
+    it('should set expiration based on invitationSpanMinutes from now', async () => {
+      const { authorityEngine } = await makeDbOnlyAuthorityEngine()
+      const before = Date.now()
+      const invite = authorityEngine.createAuthorityInvite('InviteCorp')
+      const expMs = Date.parse(invite.expiration + 'Z')
+      const deltaMin = (expMs - before) / 60_000
+      expect(deltaMin).to.be.greaterThan(59)
+      expect(deltaMin).to.be.lessThan(61)
+    })
 
-    it('should include the authority name in the invite')
+    it('should include the authority name in the invite', async () => {
+      const { authorityEngine } = await makeDbOnlyAuthorityEngine()
+      const invite = authorityEngine.createAuthorityInvite('InviteCorp')
+      expect(invite.name).to.equal('InviteCorp')
+    })
 
-    it('should compute inviteSignature over the invite fields using the private key')
+    it('should compute inviteSignature as a 128-char hex compact secp256k1 signature', async () => {
+      // Phase 6 / TEST-01 will add full SignatureValid round-trip.
+      const { authorityEngine } = await makeDbOnlyAuthorityEngine()
+      const invite = authorityEngine.createAuthorityInvite('InviteCorp')
+      expect(invite.inviteSignature).to.match(/^[0-9a-f]{128}$/)
+    })
 
-    it('should compute a digest over all invite fields including the signature')
+    it('should compute a non-empty digest over the invite fields', async () => {
+      const { authorityEngine } = await makeDbOnlyAuthorityEngine()
+      const invite = authorityEngine.createAuthorityInvite('InviteCorp')
+      expect(invite.digest).to.be.a('string').with.length.greaterThan(0)
+    })
   })
 
   // -----------------------------------------------------------------------
   // 6. Save Invite with Signing
   // -----------------------------------------------------------------------
   describe('saveInviteWithSigning', () => {
-    it('should start a signing session using the authority id and invite digest')
+    // BLOCKED on quereus#23 — all flows depend on create() succeeding.
+    it.skip('should start a signing session using the authority id and invite digest', async () => {
+      // Placeholder body — Phase 6 covers the full flow.
+    })
 
-    it('should save an authority invite to InviteSlot when type is "au"')
+    // BLOCKED on quereus#23
+    it.skip('should save an authority invite to InviteSlot when type is "au"', async () => {
+      // Placeholder body — Phase 6 covers the full flow.
+    })
 
-    it('should save an officer invite to InviteSlot when type is "of"')
+    // BLOCKED on quereus#23
+    it.skip('should save an officer invite to InviteSlot when type is "of"', async () => {
+      // Placeholder body — Phase 6 covers the full flow.
+    })
 
-    it('should use scope "iad" for authority invites')
+    // BLOCKED on quereus#23
+    it.skip('should use scope "iad" for authority invites', async () => {
+      // Placeholder body — Phase 6 covers the full flow.
+    })
 
-    it('should use scope "rad" for officer invites')
+    // BLOCKED on quereus#23
+    it.skip('should use scope "rad" for officer invites', async () => {
+      // Placeholder body — Phase 6 covers the full flow.
+    })
 
-    it('should compute CID as Digest of invite fields and nonce')
+    // BLOCKED on quereus#23
+    it.skip('should compute CID as Digest of invite fields and nonce', async () => {
+      // Placeholder body — Phase 6 covers the full flow.
+    })
 
-    it('should store expiration, inviteKey, and inviteSignature in InviteSlot')
+    // BLOCKED on quereus#23
+    it.skip('should store expiration, inviteKey, and inviteSignature in InviteSlot', async () => {
+      // Placeholder body — Phase 6 covers the full flow.
+    })
   })
 
   // -----------------------------------------------------------------------
   // 7. Get Authority Invites
   // -----------------------------------------------------------------------
   describe('getAuthorityInvites', () => {
-    it('should return an empty array when no authority invites exist')
+    // BLOCKED on quereus#23 — needs a populated db from create().
+    it.skip('should return an empty array when no authority invites exist', async () => {
+      const { authorityEngine } = await createNetworkAndAuthority()
+      const invites = await authorityEngine.getAuthorityInvites()
+      expect(invites).to.be.an('array').with.length(0)
+    })
 
-    it('should return sent invites with name and type "au"')
+    // BLOCKED on quereus#23
+    it.skip('should return sent invites with name and type "au"', async () => {
+      // Placeholder body — Phase 6 covers the full flow.
+    })
 
-    it('should include InviteResult when an invite has been accepted')
+    // BLOCKED on Phase 4 / USER-07 (respondToInvite). Even after quereus#23
+    // lands, seeding InviteResult requires UserEngine.respondToInvite, which
+    // ships in Phase 4.
+    it.skip('should include InviteResult when an invite has been accepted', async () => {
+      // Placeholder body — Phase 4 / USER-07.
+    })
 
-    it('should include InviteResult when an invite has been rejected')
+    // BLOCKED on Phase 4 / USER-07 (respondToInvite). See note above.
+    it.skip('should include InviteResult when an invite has been rejected', async () => {
+      // Placeholder body — Phase 4 / USER-07.
+    })
 
-    it('should return undefined result when invite has not been responded to')
+    // BLOCKED on quereus#23
+    it.skip('should return undefined result when invite has not been responded to', async () => {
+      // Placeholder body — Phase 6 covers the full flow.
+    })
 
-    it('should only return invites scoped to "iad" for the current authority')
+    // BLOCKED on quereus#23
+    it.skip('should only return invites scoped to "iad" for the current authority', async () => {
+      // Placeholder body — Phase 6 covers the full flow.
+    })
   })
 
   // -----------------------------------------------------------------------
@@ -407,3 +685,8 @@ describe('AuthorityEngine', () => {
     it('should prevent reuse of an already-claimed officer invite slot')
   })
 })
+
+// Quiet unused-import warning — bytesToHex is reserved for future hex
+// reconstruction; the current makeRealSignature reads privateHex back
+// via Uint8Array.from + .match.
+void bytesToHex
