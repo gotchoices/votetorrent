@@ -3,6 +3,7 @@ import { expect } from 'chai';
 
 /**
  * Quereus 2.x bug repro — Stage 6
+ * Upstream issue: https://github.com/gotchoices/quereus/issues/23
  *
  * `constraint X check on delete (expr)` fires on INSERT (and other ops),
  * not just DELETE as the syntax declares.
