@@ -9,15 +9,15 @@ import type {
   Scope,
   SentAuthorityInvite
 } from './models'
-import type { InviteStatus } from '../invite/models'
+import type { AuthorityInviteShare, InviteStatus, OfficerInviteShare } from '../invite/models'
 
 export interface IAuthorityEngine {
-  createOfficerInvite(init: OfficerInit): OfficerInvite
-  createAuthorityInvite(name: string): AuthorityInvite
+  createOfficerInvite(init: OfficerInit): OfficerInviteShare
+  createAuthorityInvite(name: string): AuthorityInviteShare
   getAdminDetails(): Promise<AdminDetails>
   getAuthorityInvites(): Promise<Array<InviteStatus<SentAuthorityInvite>>>
   getDetails(): Promise<AuthorityDetails>
-  proposeAdmin(admin: Proposal<AdminInit>): Promise<void>
+  proposeAdmin(admin: Proposal<AdminInit>, signature: Signature): Promise<void>
   saveInviteWithSigning(
     invite: AuthorityInvite | OfficerInvite,
     scope: Scope,
