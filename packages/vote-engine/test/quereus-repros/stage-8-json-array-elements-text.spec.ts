@@ -3,6 +3,7 @@ import { expect } from 'chai';
 
 /**
  * Quereus 2.x bug repro — Stage 8
+ * Upstream issue: https://github.com/gotchoices/quereus/issues/24
  *
  * `json_array_elements_text/1` is a phantom function in Quereus 2.x:
  * referencing it produces a "Function not found" error at prepare/exec time.

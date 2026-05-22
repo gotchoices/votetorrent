@@ -6,6 +6,10 @@ import { expect } from 'chai';
  * out to be TWO independent bugs once isolated. This file demonstrates both;
  * the README directs each as a separate upstream issue.
  *
+ * Upstream issues:
+ *   Bug A (view union-all row-loss): https://github.com/gotchoices/quereus/issues/21
+ *   Bug B (not-in subquery in CHECK): https://github.com/gotchoices/quereus/issues/22
+ *
  * Bug A — VIEW row-loss with `union all`
  * --------------------------------------
  * A view defined as `select … union all select …` returns ONLY THE FIRST

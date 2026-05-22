@@ -18,12 +18,14 @@ The investigation produced FOUR distinct upstream bugs across three repro
 files. Plan 03-05's framing of three stages (6, 7, 8) turned out to fold
 stage 7 into two independent bugs once isolated.
 
-| File | Bug | Sub-tests | Severity |
-|------|-----|-----------|----------|
-| `stage-6-check-on-delete.spec.ts` | Bug C — `check on delete (expr)` fires on INSERT (and other ops) | 2 | High — blocks 4 insert paths in production schema |
-| `stage-7-in-subquery.spec.ts` | Bug A — VIEW with `union all` returns only the first row | A1–A3 | Critical — silent data loss; subsumes Plan 03-05 "stage 3" |
-| `stage-7-in-subquery.spec.ts` | Bug B — `X not in (subquery)` in CHECK always evaluates as false | B1–B3 | High — schema cannot express negative-membership constraints |
-| `stage-8-json-array-elements-text.spec.ts` | Bug D — `json_array_elements_text/1` is not registered | 1 | Medium — workaround via `json_each` |
+| File | Bug | Sub-tests | Severity | Upstream issue |
+|------|-----|-----------|----------|----------------|
+| `stage-6-check-on-delete.spec.ts` | Bug C — `check on delete (expr)` fires on INSERT (and other ops) | 2 | High — blocks 4 insert paths in production schema | [quereus#23](https://github.com/gotchoices/quereus/issues/23) |
+| `stage-7-in-subquery.spec.ts` | Bug A — VIEW with `union all` returns only the first row | A1–A3 | Critical — silent data loss; subsumes Plan 03-05 "stage 3" | [quereus#21](https://github.com/gotchoices/quereus/issues/21) |
+| `stage-7-in-subquery.spec.ts` | Bug B — `X not in (subquery)` in CHECK always evaluates as false | B1–B3 | High — schema cannot express negative-membership constraints | [quereus#22](https://github.com/gotchoices/quereus/issues/22) |
+| `stage-8-json-array-elements-text.spec.ts` | Bug D — `json_array_elements_text/1` is not registered | 1 | Medium — workaround via `json_each` | [quereus#24](https://github.com/gotchoices/quereus/issues/24) |
+
+All four confirmed present in Quereus **2.9.0** and **3.1.1** (latest as of 2026-05-22).
 
 The original Plan 03-05 stage 7 claim ("IN (subquery) misbehaves in CHECK")
 is **refuted** by sub-test B3: IN-against-table works correctly in CHECK.
