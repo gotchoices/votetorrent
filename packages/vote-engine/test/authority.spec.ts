@@ -507,183 +507,200 @@ describe('AuthorityEngine', () => {
   })
 
   // -----------------------------------------------------------------------
+  // 8-19. Schema Constraints + Lifecycle + Invitation Flows
+  //
+  // Each `it.skip` below was a body-less `it('...')` placeholder. All
+  // assertions in these blocks are schema-level invariants requiring a
+  // populated DB (Authority + Admin + Officer + Network rows seeded via
+  // NetworksEngine.create()). Every such seed trips
+  // https://github.com/gotchoices/quereus/issues/23 (CantDelete on INSERT)
+  // today, so every placeholder is annotated `it.skip` + bug link rather
+  // than left body-less. When #23 ships, sweep this section: replace
+  // `it.skip` with `it` and fill the body using the same per-INSERT
+  // context-envelope pattern AuthorityEngine + NetworksEngine establish.
+  // -----------------------------------------------------------------------
+
+  // -----------------------------------------------------------------------
   // 8. Schema Constraints - Authority Table
   // -----------------------------------------------------------------------
   describe('schema constraints - Authority table', () => {
-    it('should allow the very first authority without an invite or signing nonce')
+    it.skip('should allow the very first authority without an invite or signing nonce — BLOCKED on quereus#23')
 
-    it('should reject deletion of an Authority (CantDelete constraint)')
+    it.skip('should reject deletion of an Authority (CantDelete constraint) — BLOCKED on quereus#23')
 
-    it('should reject mutation of Authority.Id on update (IdImmutable constraint)')
+    it.skip('should reject mutation of Authority.Id on update (IdImmutable constraint) — BLOCKED on quereus#23')
 
-    it('should require an Admin row to exist when inserting an Authority (AdminRequired)')
+    it.skip('should require an Admin row to exist when inserting an Authority (AdminRequired) — BLOCKED on quereus#23')
 
-    it('should require a valid accepted InviteResult for subsequent authority inserts (InsertValid)')
+    it.skip('should require a valid accepted InviteResult for subsequent authority inserts (InsertValid) — BLOCKED on quereus#23')
 
-    it('should validate update using AdminSignature with scope uai (UpdateValid)')
+    it.skip('should validate update using AdminSignature with scope uai (UpdateValid) — BLOCKED on quereus#23')
   })
 
   // -----------------------------------------------------------------------
   // 9. Schema Constraints - Admin Table
   // -----------------------------------------------------------------------
   describe('schema constraints - Admin table', () => {
-    it('should require at least one Officer with rad scope when inserting Admin (OfficerRequired)')
+    it.skip('should require at least one Officer with rad scope when inserting Admin (OfficerRequired) — BLOCKED on quereus#23')
 
-    it('should reject Admin insert when AuthorityId does not reference an existing Authority')
+    it.skip('should reject Admin insert when AuthorityId does not reference an existing Authority — BLOCKED on quereus#23')
 
-    it('should reject Admin when EffectiveAt is not a valid ISO datetime ending in Z')
+    it.skip('should reject Admin when EffectiveAt is not a valid ISO datetime ending in Z — BLOCKED on quereus#23')
 
-    it('should allow initial admin for very first authority without invite or signing (MutationValid)')
+    it.skip('should allow initial admin for very first authority without invite or signing (MutationValid) — BLOCKED on quereus#23')
 
-    it('should require valid invite for admin of a new (non-first) authority (MutationValid)')
+    it.skip('should require valid invite for admin of a new (non-first) authority (MutationValid) — BLOCKED on quereus#23')
 
-    it('should require valid AdminSignature for admin update of existing authority (MutationValid)')
+    it.skip('should require valid AdminSignature for admin update of existing authority (MutationValid) — BLOCKED on quereus#23')
   })
 
   // -----------------------------------------------------------------------
   // 10. Schema Constraints - Officer Table
   // -----------------------------------------------------------------------
   describe('schema constraints - Officer table', () => {
-    it('should reject Officer with scopes not in the Scope view (ScopesValid)')
+    it.skip('should reject Officer with scopes not in the Scope view (ScopesValid) — BLOCKED on quereus#23')
 
-    it('should reject Officer update or delete (OnlyInsert constraint)')
+    it.skip('should reject Officer update or delete (OnlyInsert constraint) — BLOCKED on quereus#23')
 
-    it('should require Admin row to exist for the officer AdminEffectiveAt (AdminValid)')
+    it.skip('should require Admin row to exist for the officer AdminEffectiveAt (AdminValid) — BLOCKED on quereus#23')
 
-    it('should require User to exist for the officer UserId (UserIdValid)')
+    it.skip('should require User to exist for the officer UserId (UserIdValid) — BLOCKED on quereus#23')
 
-    it('should allow initial officer for very first authority without invite or signing (InsertValid)')
+    it.skip('should allow initial officer for very first authority without invite or signing (InsertValid) — BLOCKED on quereus#23')
 
-    it('should require valid invite for officers of a new authority (InsertValid)')
+    it.skip('should require valid invite for officers of a new authority (InsertValid) — BLOCKED on quereus#23')
 
-    it('should require valid AdminSigning for officers of an existing authority (InsertValid)')
+    it.skip('should require valid AdminSigning for officers of an existing authority (InsertValid) — BLOCKED on quereus#23')
   })
 
   // -----------------------------------------------------------------------
   // 11. Schema Constraints - ProposedAuthority Table
   // -----------------------------------------------------------------------
   describe('schema constraints - ProposedAuthority table', () => {
-    it('should require the authority to exist (AuthorityExists)')
+    it.skip('should require the authority to exist (AuthorityExists) — BLOCKED on quereus#23')
 
-    it('should require a valid officer with uai scope and matching signature (UserValid)')
+    it.skip('should require a valid officer with uai scope and matching signature (UserValid) — BLOCKED on quereus#23')
   })
 
   // -----------------------------------------------------------------------
   // 12. Schema Constraints - ProposedAdmin Table
   // -----------------------------------------------------------------------
   describe('schema constraints - ProposedAdmin table', () => {
-    it('should require the authority to exist (AuthorityIdValid)')
+    it.skip('should require the authority to exist (AuthorityIdValid) — BLOCKED on quereus#23')
 
-    it('should require EffectiveAt to be a valid ISO datetime ending in Z')
+    it.skip('should require EffectiveAt to be a valid ISO datetime ending in Z — BLOCKED on quereus#23')
 
-    it('should require a valid officer with rad scope and matching signature (UserValid)')
+    it.skip('should require a valid officer with rad scope and matching signature (UserValid) — BLOCKED on quereus#23')
   })
 
   // -----------------------------------------------------------------------
   // 13. Schema Constraints - ProposedOfficer Table
   // -----------------------------------------------------------------------
   describe('schema constraints - ProposedOfficer table', () => {
-    it('should require the authority to exist (AuthorityIdValid)')
+    it.skip('should require the authority to exist (AuthorityIdValid) — BLOCKED on quereus#23')
 
-    it('should require a ProposedAdmin to exist for the officer AdminEffectiveAt (AdminValid)')
+    it.skip('should require a ProposedAdmin to exist for the officer AdminEffectiveAt (AdminValid) — BLOCKED on quereus#23')
 
-    it('should reject deletion of a ProposedOfficer (CantDelete)')
+    it.skip('should reject deletion of a ProposedOfficer (CantDelete) — BLOCKED on quereus#23')
 
-    it('should reject scopes not in the Scope view (ScopesValid)')
+    it.skip('should reject scopes not in the Scope view (ScopesValid) — BLOCKED on quereus#23')
 
-    it('should require a valid officer with rad scope and matching signature (UserValid)')
+    it.skip('should require a valid officer with rad scope and matching signature (UserValid) — BLOCKED on quereus#23')
   })
 
   // -----------------------------------------------------------------------
   // 14. Schema Constraints - InviteSlot Table
   // -----------------------------------------------------------------------
   describe('schema constraints - InviteSlot table', () => {
-    it('should validate CID as Digest of invite fields (CidValid)')
+    it.skip('should validate CID as Digest of invite fields (CidValid) — BLOCKED on quereus#23')
 
-    it('should reject InviteSlot when expiration is in the past (ExpirationValid)')
+    it.skip('should reject InviteSlot when expiration is in the past (ExpirationValid) — BLOCKED on quereus#23')
 
-    it('should validate InviteSignature against InviteKey (InviteSignatureValid)')
+    it.skip('should validate InviteSignature against InviteKey (InviteSignatureValid) — BLOCKED on quereus#23')
 
-    it('should reject update or delete of InviteSlot (InsertOnly)')
+    it.skip('should reject update or delete of InviteSlot (InsertOnly) — BLOCKED on quereus#23')
 
-    it('should require a completed AdminSignature for the signing nonce (InsertValid)')
+    it.skip('should require a completed AdminSignature for the signing nonce (InsertValid) — BLOCKED on quereus#23')
   })
 
   // -----------------------------------------------------------------------
   // 15. Schema Constraints - InviteResult Table
   // -----------------------------------------------------------------------
   describe('schema constraints - InviteResult table', () => {
-    it('should reject update or delete of InviteResult (InsertOnly)')
+    it.skip('should reject update or delete of InviteResult (InsertOnly) — BLOCKED on quereus#23')
 
-    it('should require a valid InviteSlot and AdminSignature (SigningValid)')
+    it.skip('should require a valid InviteSlot and AdminSignature (SigningValid) — BLOCKED on quereus#23')
 
-    it('should validate InviteSignature against the InviteSlot InviteKey (SignatureValid)')
+    it.skip('should validate InviteSignature against the InviteSlot InviteKey (SignatureValid) — BLOCKED on quereus#23')
 
-    it('should reject acceptance when Digest is null (DigestValid)')
+    it.skip('should reject acceptance when Digest is null (DigestValid) — BLOCKED on quereus#23')
 
-    it('should reject rejection when Digest is not null (DigestValid)')
+    it.skip('should reject rejection when Digest is not null (DigestValid) — BLOCKED on quereus#23')
   })
 
   // -----------------------------------------------------------------------
   // 16. Admin Signing Flow (via SigningEngine)
+  //
+  // Most of these duplicate signing.spec.ts coverage (TEST-02). Authority
+  // tests retained as the flow's natural-language witness once #23 ships.
   // -----------------------------------------------------------------------
   describe('admin signing flow', () => {
-    it('should create an AdminSigning session with a random nonce')
+    it.skip('should create an AdminSigning session with a random nonce — BLOCKED on quereus#23 (covered in signing.spec.ts)')
 
-    it('should reject AdminSigning with an invalid scope code (ScopeValid)')
+    it.skip('should reject AdminSigning with an invalid scope code (ScopeValid) — BLOCKED on quereus#23')
 
-    it('should validate the instigator signature on AdminSigning (SignatureValid)')
+    it.skip('should validate the instigator signature on AdminSigning (SignatureValid) — BLOCKED on quereus#23')
 
-    it('should reject update or delete of AdminSigning (InsertOnly)')
+    it.skip('should reject update or delete of AdminSigning (InsertOnly) — BLOCKED on quereus#23')
 
-    it('should accept OfficerSignature when the officer has the required scope and digest matches')
+    it.skip('should accept OfficerSignature when the officer has the required scope and digest matches — BLOCKED on quereus#23')
 
-    it('should reject OfficerSignature when the signature does not match the digest')
+    it.skip('should reject OfficerSignature when the signature does not match the digest — BLOCKED on quereus#23')
 
-    it('should create AdminSignature only when the threshold of OfficerSignatures is met')
+    it.skip('should create AdminSignature only when the threshold of OfficerSignatures is met — BLOCKED on quereus#23 (covered in signing.spec.ts threshold-met test)')
 
-    it('should reject AdminSignature when insufficient OfficerSignatures exist')
+    it.skip('should reject AdminSignature when insufficient OfficerSignatures exist — BLOCKED on quereus#23')
   })
 
   // -----------------------------------------------------------------------
   // 17. Administration Lifecycle
   // -----------------------------------------------------------------------
   describe('administration lifecycle', () => {
-    it('should allow admin renewal before expiration with proper signatures')
+    it.skip('should allow admin renewal before expiration with proper signatures — BLOCKED on quereus#23')
 
-    it('should allow primary authority to replace expired admin of another authority')
+    it.skip('should allow primary authority to replace expired admin of another authority — BLOCKED on quereus#23')
 
-    it('should require a new network if the primary authority admin itself expires without renewal')
+    it.skip('should require a new network if the primary authority admin itself expires without renewal — BLOCKED on quereus#23')
 
-    it('should transition proposed admin to current admin after signing threshold is met')
+    it.skip('should transition proposed admin to current admin after signing threshold is met — BLOCKED on quereus#23')
   })
 
   // -----------------------------------------------------------------------
   // 18. Invitation Flow - Authority
   // -----------------------------------------------------------------------
   describe('invitation flow - authority invites', () => {
-    it('should create an InviteSlot with a valid CID, key pair, and AdminSignature backing')
+    it.skip('should create an InviteSlot with a valid CID, key pair, and AdminSignature backing — BLOCKED on quereus#23')
 
-    it('should allow creating a new Authority via accepted invite with valid proof of possession')
+    it.skip('should allow creating a new Authority via accepted invite with valid proof of possession — BLOCKED on quereus#23')
 
-    it('should prevent reuse of an already-claimed invite slot')
+    it.skip('should prevent reuse of an already-claimed invite slot — BLOCKED on quereus#23')
 
-    it('should create InviteResult marking acceptance with digest and invite signature')
+    it.skip('should create InviteResult marking acceptance with digest and invite signature — BLOCKED on quereus#23')
 
-    it('should create InviteResult marking rejection with null digest')
+    it.skip('should create InviteResult marking rejection with null digest — BLOCKED on quereus#23')
   })
 
   // -----------------------------------------------------------------------
   // 19. Invitation Flow - Officer
   // -----------------------------------------------------------------------
   describe('invitation flow - officer invites', () => {
-    it('should create an InviteSlot for an officer invite with type "of"')
+    it.skip('should create an InviteSlot for an officer invite with type "of" — BLOCKED on quereus#23')
 
-    it('should include officer name, title, and scopes in the invite')
+    it.skip('should include officer name, title, and scopes in the invite — BLOCKED on quereus#23')
 
-    it('should allow accepting an officer invite to associate a user with the authority')
+    it.skip('should allow accepting an officer invite to associate a user with the authority — BLOCKED on quereus#23')
 
-    it('should prevent reuse of an already-claimed officer invite slot')
+    it.skip('should prevent reuse of an already-claimed officer invite slot — BLOCKED on quereus#23')
   })
 })
 
