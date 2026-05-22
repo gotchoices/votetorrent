@@ -3594,16 +3594,16 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@optimystic/quereus-plugin-crypto@npm:^0.13.0":
-  version: 0.13.0
-  resolution: "@optimystic/quereus-plugin-crypto@npm:0.13.0"
+"@optimystic/quereus-plugin-crypto@npm:^0.13.4":
+  version: 0.13.4
+  resolution: "@optimystic/quereus-plugin-crypto@npm:0.13.4"
   dependencies:
     "@noble/curves": "npm:^2.0.1"
     "@noble/hashes": "npm:^2.0.1"
     uint8arrays: "npm:^5.1.0"
   peerDependencies:
     "@quereus/quereus": ^0.16.2
-  checksum: 10c0/d8674170d6c4e9b3fc4d05da1856cb1352c021f8630cea7c411acd9e9dcc315a3bbab9ce37e1ace52386e110e4b1da9d61945c5d79b705a4e64ad901880ce52e
+  checksum: 10c0/f4a9cdb36be2c4a67560c343f09b3d09b04280ffaf3240c3a72da570499bf5f244de3e3ff92d2946b5c7ec480464249463677ab865faad368b3b83e2287a412d
   languageName: node
   linkType: hard
 
@@ -5199,7 +5199,7 @@ __metadata:
   dependencies:
     "@noble/curves": "npm:^1.9.6"
     "@noble/hashes": "npm:^1.8.0"
-    "@optimystic/quereus-plugin-crypto": "npm:^0.13.0"
+    "@optimystic/quereus-plugin-crypto": "npm:^0.13.4"
     "@quereus/quereus": "npm:^2.9.0"
     "@react-native-async-storage/async-storage": "npm:^2.1.2"
     "@types/mocha": "npm:^10.0.10"
