@@ -14,7 +14,7 @@ regression checks after each Quereus version bump.
 
 ## Index of bugs
 
-The investigation produced FOUR distinct upstream bugs across three repro
+The investigation produced THREE distinct upstream bugs across two repro
 files. Plan 03-05's framing of three stages (6, 7, 8) turned out to fold
 stage 7 into two independent bugs once isolated.
 
@@ -23,9 +23,12 @@ stage 7 into two independent bugs once isolated.
 | `stage-6-check-on-delete.spec.ts` | Bug C — `check on delete (expr)` fires on INSERT (and other ops) | 2 | High — blocks 4 insert paths in production schema | [quereus#23](https://github.com/gotchoices/quereus/issues/23) |
 | `stage-7-in-subquery.spec.ts` | Bug A — VIEW with `union all` returns only the first row | A1–A3 | Critical — silent data loss; subsumes Plan 03-05 "stage 3" | [quereus#21](https://github.com/gotchoices/quereus/issues/21) |
 | `stage-7-in-subquery.spec.ts` | Bug B — `X not in (subquery)` in CHECK always evaluates as false | B1–B3 | High — schema cannot express negative-membership constraints | [quereus#22](https://github.com/gotchoices/quereus/issues/22) |
-| `stage-8-json-array-elements-text.spec.ts` | Bug D — `json_array_elements_text/1` is not registered | 1 | Medium — workaround via `json_each` | [quereus#24](https://github.com/gotchoices/quereus/issues/24) |
 
-All four confirmed present in Quereus **2.9.0** and **3.1.1** (latest as of 2026-05-22).
+All three confirmed present in Quereus **2.9.0** and **3.1.1** (latest as of 2026-05-22).
+
+### Retired (not a bug)
+
+**Bug D — `json_array_elements_text/1` "phantom function"** ([quereus#24](https://github.com/gotchoices/quereus/issues/24)) was filed in error. It is not a Quereus bug — Quereus provides `json_each` as the canonical equivalent, and the schema has been swept (2026-05-22) to use `json_each(X)` projecting `value` instead. The stage-8 repro spec was deleted; issue #24 should be closed upstream as invalid.
 
 The original Plan 03-05 stage 7 claim ("IN (subquery) misbehaves in CHECK")
 is **refuted** by sub-test B3: IN-against-table works correctly in CHECK.
@@ -215,42 +218,6 @@ the CHECK fails.
 The positive form `check (X in (subquery))` against a real table works
 correctly (see sub-test B3), so the issue is specific to the `not in`
 path or the boolean coercion of its result inside CHECK eval.
-
----
-
-### Issue: `json_array_elements_text/1` is not registered
-
-**File:** `packages/vote-engine/test/quereus-repros/stage-8-json-array-elements-text.spec.ts`
-
-**Summary**
-
-References to `json_array_elements_text(json)` throw "Function not found".
-The function is a Postgres-ism imported into schema-author mental models
-but not present in Quereus core.
-
-**Reproduction**
-
-```sql
-select 1 from json_array_elements_text('["a","b"]') S(s);
--- throws: QuereusError: Function not found: json_array_elements_text/1
-```
-
-**Resolution options (for upstream discussion)**
-
-1. **Register an alias** — expose `json_array_elements_text(X)` as a
-   built-in equivalent to `json_each(X)` projecting the `value` column,
-   to ease porting Postgres-flavored schemas.
-2. **Document the canonical equivalent** — extend `docs/sql.md` with a
-   "Postgres equivalents" section pointing `json_array_elements_text`
-   at `json_each(X)`.
-3. **No action** — leave it to schema authors to discover `json_each`.
-
-**Confirmation that `json_each` exists**
-
-`select value from json_each('["a","b","c"]')` returns the 3 expected
-rows under Quereus 2.9.0, so the schema-side workaround (rewrite all
-`from json_array_elements_text(X) S(s)` as `from json_each(X)` and
-project `value`) is viable today.
 
 ---
 
