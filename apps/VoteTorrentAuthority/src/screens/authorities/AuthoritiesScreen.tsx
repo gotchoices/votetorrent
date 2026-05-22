@@ -111,7 +111,10 @@ export default function AuthoritiesScreen() {
 						key={authority.id}
 						title={authority.name}
 						image={{ uri: authority.imageRef?.url || "" }}
-						additionalInfo={[{ label: "Domain Name", value: authority.domainName }]}
+						additionalInfo={[
+							{ label: t("sid"), value: authority.id },
+							{ label: t("domain"), value: authority.domainName },
+						]}
 						icon={"chevron-right"}
 						onPress={() => {
 							navigation.navigate("AuthorityDetails", {
@@ -128,6 +131,7 @@ export default function AuthoritiesScreen() {
 				title={t("find")}
 				searchPlaceholder={t("filterAuthorities")}
 				onSearch={setSearchText}
+				defaultExpanded
 			>
 				{unpinnedAuthorities.length > 0 ? (
 					unpinnedAuthorities.map((authority) => (
@@ -135,13 +139,16 @@ export default function AuthoritiesScreen() {
 							key={authority.id}
 							title={authority.name}
 							image={{ uri: authority.imageRef?.url || "" }}
-							additionalInfo={[{ label: "Domain Name", value: authority.domainName }]}
+							additionalInfo={[
+								{ label: t("sid"), value: authority.id },
+								{ label: t("domain"), value: authority.domainName },
+							]}
 							icon={"thumbtack"}
 							onPress={() => handlePinToggle(authority)}
 						/>
 					))
 				) : (
-					<ThemedText style={styles.emptyText}>No authorities found</ThemedText>
+					<ThemedText style={styles.emptyText}>{t("noAuthoritiesFound")}</ThemedText>
 				)}
 			</CollapsibleSection>
 		</ScrollView>

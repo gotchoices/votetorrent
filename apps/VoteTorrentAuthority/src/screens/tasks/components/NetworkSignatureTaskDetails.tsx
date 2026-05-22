@@ -22,7 +22,7 @@ export function NetworkSignatureTaskDetails({ task }: { task: NetworkSignatureTa
 			</View>
 			<View style={styles.detail}>
 				<ThemedText type="defaultSemiBold">{t("networkRevision")}: </ThemedText>
-				<ThemedText>{task.networkRevision.proposed.name}</ThemedText>
+				<ThemedText>{task.network.proposed?.name ?? "(unknown)"}</ThemedText>
 			</View>
 		</View>
 	);

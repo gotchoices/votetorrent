@@ -3,8 +3,8 @@
 	"version": "0.0.1",
 	"type": "module",
 	"description": "Concerete implementation of voting functionality for VoteTorrent",
-	"main": "dist/src/index.js",
-	"types": "dist/src/index.d.ts",
+	"main": "dist/index.js",
+	"types": "dist/index.d.ts",
 	"files": [
 		"src",
 		"dist",
@@ -13,8 +13,8 @@
 	],
 	"exports": {
 		".": {
-			"types": "./dist/src/index.d.ts",
-			"import": "./dist/src/index.js"
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js"
 		}
 	},
 	"scripts": {
@@ -40,6 +40,7 @@
 	"devDependencies": {
 		"@types/mocha": "^10.0.10",
 		"@types/node": "^22.13.10",
+		"@types/uuid": "^11.0.0",
 		"aegir": "^45.1.4",
 		"chai": "^5.2.0",
 		"eslint": "^8.31.0",
@@ -57,7 +58,8 @@
 		"@votetorrent/vote-core": "^0.0.1",
 		"react": "19.0.0",
 		"react-native": "0.78.0",
-		"temporal-polyfill": "^0.3.0"
+		"temporal-polyfill": "^0.3.0",
+		"uuid": "^14.0.0"
 	},
 	"ts-node": {
 		"esm": true,

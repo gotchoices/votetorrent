@@ -11,6 +11,7 @@ export type ThemedTextProps = TextProps & {
 		| "defaultSemiBold"
 		| "header"
 		| "subtitle"
+		| "cardTitle"
 		| "link"
 		| "small"
 		| "smallBold"
@@ -36,6 +37,7 @@ export function ThemedText({
 				type === "defaultSemiBold" ? styles.defaultSemiBold : undefined,
 				type === "header" ? styles.header : undefined,
 				type === "subtitle" ? styles.subtitle : undefined,
+				type === "cardTitle" ? styles.cardTitle : undefined,
 				type === "link" ? styles.link : undefined,
 				type === "small" ? { ...styles.small } : undefined,
 				type === "smallBold" ? { ...styles.smallBold } : undefined,
@@ -67,6 +69,11 @@ const styles = StyleSheet.create({
 	subtitle: {
 		fontSize: 18,
 		fontWeight: "400",
+	},
+	cardTitle: {
+		fontSize: 22,
+		lineHeight: 28,
+		fontWeight: "700",
 	},
 	link: {
 		lineHeight: 30,

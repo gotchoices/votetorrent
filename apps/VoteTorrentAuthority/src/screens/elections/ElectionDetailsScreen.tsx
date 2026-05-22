@@ -57,9 +57,9 @@ export default function ElectionDetailsScreen() {
 
 			<View style={styles.section}>
 				<ThemedText type="defaultSemiBold">{t("keyholders")}</ThemedText>
-				{electionDetails.current.keyholders.map((keyholder) => (
+				{electionDetails.current.keyholders.map((keyholder, index) => (
 					<KeyholderCard
-						key={keyholder.slot.invite.slot.invite.name}
+						key={keyholder.invite?.name ?? `keyholder-${index}`}
 						invitationStatus={keyholder}
 						onPress={() => {}}
 					/>

@@ -135,7 +135,7 @@ export const ElectionsScreen = () => {
 						/>
 					))
 				) : (
-					<ThemedText style={styles.noElectionsText}>{t("noProposedElections")}</ThemedText>
+					<ThemedText style={styles.emptyHint}>{t("noProposedElectionsCurrently")}</ThemedText>
 				)}
 			</View>
 
@@ -178,6 +178,12 @@ const localStyles = StyleSheet.create({
 	},
 	noElectionsText: {
 		padding: 16,
+	},
+	emptyHint: {
+		marginTop: 8,
+		marginBottom: 4,
+		fontStyle: "italic",
+		opacity: 0.6,
 	},
 	historyHeader: {
 		flexDirection: "row",

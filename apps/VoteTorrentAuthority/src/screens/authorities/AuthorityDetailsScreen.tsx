@@ -167,29 +167,25 @@ export default function AuthorityDetailsScreen() {
 					</ThemedText>
 				</View>
 				<View style={styles.detail}>
-					<ThemedText type="defaultSemiBold">{t("domainName")}: </ThemedText>
+					<ThemedText type="defaultSemiBold">{t("domain")}: </ThemedText>
 					<ThemedText numberOfLines={1} ellipsizeMode="tail">
 						{authority.domainName}
 					</ThemedText>
 				</View>
 				<View style={styles.detail}>
-					<ThemedText type="defaultSemiBold">{t("id")}: </ThemedText>
+					<ThemedText type="defaultSemiBold">{t("cid")}: </ThemedText>
 					<ThemedText numberOfLines={1} ellipsizeMode="tail">
 						{authority.id}
 					</ThemedText>
 				</View>
-				<View style={styles.detail}>
-					<ThemedText type="defaultSemiBold">{t("imageUrl")}: </ThemedText>
-					<ThemedText numberOfLines={1} ellipsizeMode="tail">
-						{authority.imageRef?.url}
-					</ThemedText>
-				</View>
-				<View style={styles.detail}>
-					<ThemedText type="defaultSemiBold">{t("address")}: </ThemedText>
-					<ThemedText numberOfLines={1} ellipsizeMode="tail">
-						{authority.domainName}
-					</ThemedText>
-				</View>
+				{authority.imageRef?.url ? (
+					<View style={styles.detail}>
+						<ThemedText type="defaultSemiBold">{t("imageUrl")}: </ThemedText>
+						<ThemedText numberOfLines={1} ellipsizeMode="tail">
+							{authority.imageRef.url}
+						</ThemedText>
+					</View>
+				) : null}
 				<CustomButton
 					title={t("reviseAuthority")}
 					icon="pencil"
@@ -202,21 +198,37 @@ export default function AuthorityDetailsScreen() {
 			<View style={styles.section}>
 				<ThemedText type="title">{t("administration")}</ThemedText>
 
-				{adminDetails?.admin.signatures && (
-					<View>
-						<View style={styles.detail}>
-							<ThemedText type="defaultSemiBold">{t("handoffSignature")}: </ThemedText>
+				{(() => {
+					const adminSignatures = (adminDetails?.admin as any)?.signatures as
+						| Array<{ signerKey?: string; signature?: string }>
+						| undefined;
+					if (!adminSignatures || adminSignatures.length === 0) return null;
+					return (
+						<View>
+							<View style={styles.detail}>
+								<ThemedText type="defaultSemiBold">{t("handoffSignatures")}: </ThemedText>
+							</View>
+							<View style={styles.subDetails}>
+								{adminSignatures.map((signature, idx) => (
+									<View key={signature.signerKey ?? idx} style={styles.detail}>
+										<ThemedText type="default" numberOfLines={1} ellipsizeMode="middle">
+											{signature.signerKey}
+										</ThemedText>
+										<ThemedText> ({t("signature")})</ThemedText>
+									</View>
+								))}
+							</View>
 						</View>
-						<View style={styles.subDetails}>
-							{adminDetails.admin.signatures.map((signature) => (
-								<View style={styles.detail}>
-									<ThemedText type="default">{signature.signerKey}: </ThemedText>
-									<ThemedText>{signature.signature}</ThemedText>
-								</View>
-							))}
-						</View>
+					);
+				})()}
+				{adminDetails?.admin.id ? (
+					<View style={styles.detail}>
+						<ThemedText type="defaultSemiBold">{t("cid")}: </ThemedText>
+						<ThemedText numberOfLines={1} ellipsizeMode="tail">
+							{adminDetails.admin.id}
+						</ThemedText>
 					</View>
-				)}
+				) : null}
 				<View style={styles.detail}>
 					<ThemedText type="defaultSemiBold">{t("expires")}: </ThemedText>
 					<ThemedText>{formatDate(adminDetails?.admin.effectiveAt)}</ThemedText>
@@ -227,14 +239,11 @@ export default function AuthorityDetailsScreen() {
 					return (
 						<InfoCard
 							key={officer.userId}
-							image={{ uri: user?.image.url || "" }}
+							image={user?.image?.url ? { uri: user.image.url } : undefined}
 							title={user?.name || ""}
+							subtitle={officer.title}
 							additionalInfo={[
-								{
-									label: t("title"),
-									value: officer.title,
-								},
-								{ label: t("userId"), value: officer.userId },
+								{ label: t("cid"), value: officer.userId },
 							]}
 							icon="chevron-right"
 							onPress={() =>
@@ -277,12 +286,9 @@ export default function AuthorityDetailsScreen() {
 									key={officer.userId || officerSelection.init?.name}
 									image={user?.image?.url ? { uri: user.image.url } : undefined}
 									title={user?.name || officerSelection.init?.name || ""}
+									subtitle={officer.title}
 									additionalInfo={[
-										{
-											label: t("title"),
-											value: officer.title,
-										},
-										{ label: t("userId"), value: officer.userId || t("pending") },
+										{ label: t("cid"), value: officer.userId || t("pending") },
 									]}
 									icon="chevron-right"
 									onPress={() =>

@@ -11,7 +11,7 @@ import TasksScreen from "../screens/tasks/TasksScreen";
 import AuthoritiesScreen from "../screens/authorities/AuthoritiesScreen";
 import SettingsScreen from "../screens/settings/SettingsScreen";
 import { ChipButton } from "../components/ChipButton";
-import { Pressable, StyleSheet } from "react-native";
+import { Pressable, StyleSheet, Text } from "react-native";
 import { ExtendedTheme, useNavigation } from "@react-navigation/native";
 import { useTheme } from "@react-navigation/native";
 import NetworksScreen from "../screens/networks/NetworksScreen";
@@ -85,7 +85,7 @@ function useTabHeaderOptions(tab?: string) {
 	return {
 		headerLeft: () => (
 			<Pressable onPress={handleNetworkPress} style={styles.headerButton}>
-				<FontAwesome6 name="circle-nodes" size={24} color={colors.text} />
+				<FontAwesome6 name="cloud-rain" size={24} color={colors.text} />
 			</Pressable>
 		),
 		headerRight: () => (
@@ -105,30 +105,35 @@ const TabNavigator = () => {
 	return (
 		<Tab.Navigator
 			screenOptions={({ route }) => ({
-				tabBarIcon: ({ focused, color, size }) => {
-					let iconName: string;
-
-					switch (route.name) {
-						case "Elections":
-							iconName = "check-to-slot";
-							break;
-						case "Tasks":
-							iconName = "list-check";
-							break;
-						case "Authorities":
-							iconName = "shield";
-							break;
-						case "Settings":
-							iconName = "gear";
-							break;
-						default:
-							iconName = "alert";
+				tabBarIcon: ({ focused, color }) => {
+					if (route.name === "Settings") {
+						return <FontAwesome6 name="gear" size={22} color={color} />;
 					}
-
-					return <FontAwesome6 name={iconName} size={size} color={color} />;
+					const letterMap: Record<string, string> = {
+						Elections: "E",
+						Tasks: "T",
+						Authorities: "A",
+					};
+					const letter = letterMap[route.name] ?? "?";
+					return (
+						<Text
+							style={[
+								styles.tabLetter,
+								{ color, fontWeight: focused ? "900" : "700" },
+							]}
+						>
+							{letter}
+						</Text>
+					);
 				},
-				tabBarActiveTintColor: colors.primary,
+				tabBarActiveTintColor: colors.text,
 				tabBarInactiveTintColor: "gray",
+				tabBarLabelStyle: { fontWeight: "700" },
+				tabBarBadgeStyle: {
+					backgroundColor: colors.notification,
+					color: colors.light,
+					fontWeight: "700",
+				},
 			})}
 		>
 			<Tab.Screen
@@ -139,7 +144,10 @@ const TabNavigator = () => {
 			<Tab.Screen
 				name="Tasks"
 				component={TasksScreen}
-				options={{ ...useTabHeaderOptions("tasks") }}
+				options={{
+					...useTabHeaderOptions("tasks"),
+					tabBarBadge: 3,
+				}}
 			/>
 			<Tab.Screen
 				name="Authorities"
@@ -181,7 +189,20 @@ const styles = StyleSheet.create({
 		marginHorizontal: 4,
 		marginVertical: -2,
 	},
+	tabLetter: {
+		fontSize: 22,
+		lineHeight: 24,
+	},
 });
+
+function CloseButton({ onPress }: { onPress: () => void }) {
+	const { colors } = useTheme() as ExtendedTheme;
+	return (
+		<Pressable onPress={onPress} style={styles.headerButton} hitSlop={8}>
+			<FontAwesome6 name="xmark" size={22} color={colors.text} />
+		</Pressable>
+	);
+}
 
 export const RootNavigator = () => {
 	const { t } = useTranslation();
@@ -210,10 +231,13 @@ export const RootNavigator = () => {
 			<Stack.Screen
 				name="AuthorityDetails"
 				component={AuthorityDetailsScreen}
-				options={{
+				options={({ navigation }) => ({
 					title: t("authority"),
+					presentation: "modal",
+					headerBackVisible: false,
+					headerLeft: () => <CloseButton onPress={() => navigation.goBack()} />,
 					headerRight: () => <ChipButton label={t("unpin")} icon={"thumbtack-slash"} />,
-				}}
+				})}
 			/>
 			<Stack.Screen
 				name="OfficerDetails"
@@ -259,7 +283,12 @@ export const RootNavigator = () => {
 			<Stack.Screen
 				name="KeyTask"
 				component={KeyTaskScreen}
-				options={{ title: t("keyholderRelease") }}
+				options={({ navigation }) => ({
+					title: t("keyholderRelease"),
+					presentation: "modal",
+					headerBackVisible: false,
+					headerLeft: () => <CloseButton onPress={() => navigation.goBack()} />,
+				})}
 			/>
 			<Stack.Screen
 				name="SignatureTask"
@@ -269,7 +298,12 @@ export const RootNavigator = () => {
 			<Stack.Screen
 				name="ElectionDetails"
 				component={ElectionDetailsScreen}
-				options={{ title: t("election") }}
+				options={({ navigation }) => ({
+					title: t("election"),
+					presentation: "modal",
+					headerBackVisible: false,
+					headerLeft: () => <CloseButton onPress={() => navigation.goBack()} />,
+				})}
 			/>
 			<Stack.Screen
 				name="EditBallot"

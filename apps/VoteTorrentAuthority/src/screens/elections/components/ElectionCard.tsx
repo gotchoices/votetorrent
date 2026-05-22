@@ -26,7 +26,7 @@ export function ElectionCard({ election, onPress }: ElectionCardProps) {
 	return (
 		<TouchableOpacity onPress={onPress} style={[styles.card, { backgroundColor: colors.card }]}>
 			<View style={styles.cardContent}>
-				<ThemedText type="subtitle" numberOfLines={1}>
+				<ThemedText type="cardTitle" numberOfLines={1}>
 					{election.title}
 				</ThemedText>
 				<ThemedText type="default" numberOfLines={1}>
@@ -36,36 +36,24 @@ export function ElectionCard({ election, onPress }: ElectionCardProps) {
 					{new Date(election.date).toLocaleDateString()}
 				</ThemedText>
 			</View>
-			<FontAwesome6 name="chevron-right" size={16} color={colors.text} style={styles.icon} />
+			<FontAwesome6 name="chevron-right" size={20} color={colors.text} style={styles.icon} />
 		</TouchableOpacity>
 	);
 }
 
 const localStyles = StyleSheet.create({
 	card: {
+		...globalStyles.cardSurface,
 		flexDirection: "row",
 		alignItems: "center",
-		padding: 12,
-		marginVertical: 8,
-		marginHorizontal: 4,
-		borderRadius: 12,
-		shadowColor: "#000",
-		shadowOffset: {
-			width: 0,
-			height: 2,
-		},
-		shadowOpacity: 0.1,
-		shadowRadius: 4,
-		elevation: 3,
 	},
 	cardContent: {
 		flex: 1,
-		marginLeft: 16,
 		marginRight: 8,
-		paddingRight: 16,
+		paddingRight: 8,
 	},
 	icon: {
-		marginLeft: 16,
+		marginLeft: 8,
 	},
 });
 
