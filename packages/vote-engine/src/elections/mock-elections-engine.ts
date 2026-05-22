@@ -1,6 +1,7 @@
 import { MockElectionEngine } from '../election/mock-election-engine.js';
 import type {
 	ElectionInit,
+	ElectionRevisionInit,
 	ElectionSummary,
 	IElectionEngine,
 	IElectionsEngine,
@@ -72,7 +73,7 @@ const mockElectionInitData: ElectionInit = {
 				inviteSignature: '',
 				digest: '',
 			},
-		] as unknown as ElectionInit['keyholders'],
+		] as unknown as ElectionRevisionInit['keyholders'],
 		timeline: {
 			registrationEnds: getUnixTimestamp(
 				new Date(Date.now() + 15 * 24 * 60 * 60 * 1000),
