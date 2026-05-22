@@ -482,16 +482,17 @@ describe('AuthorityEngine', () => {
       // Placeholder body — Phase 6 covers the full flow.
     })
 
-    // BLOCKED on Phase 4 / USER-07 (respondToInvite). Even after quereus#23
-    // lands, seeding InviteResult requires UserEngine.respondToInvite, which
-    // ships in Phase 4.
+    // BLOCKED on https://github.com/gotchoices/quereus/issues/23 —
+    // NetworkEngine.respondToInvite (USER-07) shipped in Phase 4, but
+    // exercising it requires a seeded InviteSlot + AdminSignature from
+    // AuthorityEngine.saveInviteWithSigning, which itself trips #23.
     it.skip('should include InviteResult when an invite has been accepted', async () => {
-      // Placeholder body — Phase 4 / USER-07.
+      // Placeholder body — see comment.
     })
 
-    // BLOCKED on Phase 4 / USER-07 (respondToInvite). See note above.
+    // BLOCKED on quereus#23 (same chain — needs a seeded InviteSlot row).
     it.skip('should include InviteResult when an invite has been rejected', async () => {
-      // Placeholder body — Phase 4 / USER-07.
+      // Placeholder body — see comment.
     })
 
     // BLOCKED on quereus#23

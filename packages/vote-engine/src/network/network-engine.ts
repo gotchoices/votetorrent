@@ -121,7 +121,12 @@ export class NetworkEngine implements INetworkEngine {
   }
 
   async getCurrentUser (): Promise<IUserEngine | undefined> {
-    throw new Error('Not implemented')
+    // USER-01: resolve the current user from the engine context (set by
+    // NetworksEngine.open(...)). Delegates the row-level read to
+    // NetworkEngine.getUser(id) so the User+UserKey join logic lives in
+    // one place.
+    if (!this.ctx.user) return undefined
+    return await this.getUser(this.ctx.user.id)
   }
 
   async getDetails (): Promise<NetworkDetails> {
@@ -484,7 +489,7 @@ export class NetworkEngine implements INetworkEngine {
         activeKeys
       }
       if (user) {
-        return new UserEngine(user)
+        return new UserEngine(user, this.ctx)
       }
       return undefined
     } catch (err) {
@@ -588,7 +593,63 @@ export class NetworkEngine implements INetworkEngine {
   async respondToInvite<TInvokes>(
     invite: InviteAction<TInvokes>
   ): Promise<string> {
-    throw new Error('Not implemented')
+    // USER-07: insert a row into InviteResult. The InviteSlot row must
+    // already exist (seeded via AuthorityEngine.saveInviteWithSigning).
+    //
+    // Schema (vote-core/schema/votetorrent.qsql:511 InviteResult):
+    //   SlotCid       text primary key       — the InviteSlot CID
+    //   IsAccepted    boolean                 — if false, Digest must be null
+    //   Digest        text null               — digest of whatever the invited
+    //                                          party intends to create
+    //   InviteSignature text                  — H(SlotCid, Digest, IsAccepted)
+    //                                          signed by InviteSlot.InviteKey
+    //   InvokedId     text null               — id of the object the invite
+    //                                          will invoke (Authority / User)
+    //
+    // The CHECK constraints (SigningValid + SignatureValid) require an
+    // existing AdminSignature row for the slot and a valid signature
+    // over the digest. This method is the engine boundary; the caller
+    // supplies the already-computed signature in the InviteAction.
+    const slotCid = invite.invite.digest
+    const invokedId =
+      invite.userId ?? (invite.userInit ? crypto.randomUUID() : null)
+    const resultDigest = invite.isAccepted
+      ? JSON.stringify(invite.invokes)
+      : null
+    try {
+      await this.ctx.db.exec(
+				`insert into InviteResult (
+					SlotCid,
+					IsAccepted,
+					Digest,
+					InviteSignature,
+					InvokedId
+				)
+				values (
+					:slotCid,
+					:isAccepted,
+					:digest,
+					:inviteSignature,
+					:invokedId
+				)`,
+        {
+          slotCid,
+          isAccepted: invite.isAccepted,
+          digest: resultDigest,
+          inviteSignature: invite.inviteSignature,
+          invokedId
+        }
+      )
+    } catch (err) {
+      if (err instanceof QuereusError) {
+        throw new Error(`Quereus error (code ${err.code}): ${err.message}`)
+      } else if (err instanceof MisuseError) {
+        throw new Error(`API misuse: ${err.message}`)
+      } else {
+        throw new Error(`Failed to respond to invite: ${String(err)}`)
+      }
+    }
+    return invokedId ?? ''
   }
 
   async unpinAuthority (authorityId: string): Promise<void> {
