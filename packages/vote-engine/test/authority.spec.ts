@@ -174,7 +174,27 @@ describe('AuthorityEngine', () => {
     // Phase 6 will cover the full flow with proposal seeding once upstream
     // is unblocked.
     it.skip('should include proposed authority details when a proposal exists', async () => {
-      // Placeholder body — see comment.
+      const { authorityEngine, authority } = await createNetworkAndAuthority()
+      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
+      // Seed a ProposedAuthority row directly (engine has no proposeAuthority
+      // method yet). UserValid CHECK fires unless context.UserId/UserKey/
+      // Signature line up with a current officer; this scaffold inserts via
+      // raw exec with the seeded user's keys.
+      const sig = makeRealSignature('user-1')
+      await ctx.db.exec(
+        `insert into ProposedAuthority (Id, Name, DomainName, ImageRef)
+         with context UserId = :uid, UserKey = :key, Signature = :sig, Tid = 7, now = datetime('now')
+         values (:id, 'Proposed Name', 'proposed.example', null)`,
+        {
+          ':uid': 'user-1',
+          ':key': sig.signerKey,
+          ':sig': sig.signature,
+          ':id': authority.id
+        }
+      )
+      const details = await authorityEngine.getDetails()
+      expect(details.proposed).to.not.equal(undefined)
+      expect(details.proposed?.proposed?.name).to.equal('Proposed Name')
     })
 
     // BLOCKED on quereus#23 (CantDelete on INSERT)
@@ -221,12 +241,64 @@ describe('AuthorityEngine', () => {
 
     // BLOCKED on quereus#23 — needs ProposedAdmin row, which requires create()
     it.skip('should return proposed admin details when a ProposedAdmin exists', async () => {
-      // Placeholder body — Phase 6 covers full proposal seeding.
+      const { authority, authorityEngine } = await createNetworkAndAuthority()
+      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
+      const sig = makeRealSignature('user-1')
+      const effectiveAt = new Date(Date.now() + 60_000).toISOString()
+      await ctx.db.exec(
+        `insert into ProposedAdmin (AuthorityId, EffectiveAt, ThresholdPolicies)
+         with context UserId = :uid, UserKey = :key, Signature = :sig, Tid = 7, now = datetime('now')
+         values (:authId, :eff, :tp)`,
+        {
+          ':uid': 'user-1',
+          ':key': sig.signerKey,
+          ':sig': sig.signature,
+          ':authId': authority.id,
+          ':eff': effectiveAt,
+          ':tp': JSON.stringify([{ policy: 'rad', threshold: 1 }])
+        }
+      )
+      const details = await authorityEngine.getAdminDetails()
+      expect(details.proposed).to.not.equal(undefined)
     })
 
     // BLOCKED on quereus#23
     it.skip('should return proposed officers from ProposedOfficer rows', async () => {
-      // Placeholder body — Phase 6 covers full proposal seeding.
+      const { authority, authorityEngine } = await createNetworkAndAuthority()
+      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
+      const sig = makeRealSignature('user-1')
+      const effectiveAt = new Date(Date.now() + 60_000).toISOString()
+      // Seed ProposedAdmin first (required by ProposedOfficer.AdminValid).
+      await ctx.db.exec(
+        `insert into ProposedAdmin (AuthorityId, EffectiveAt, ThresholdPolicies)
+         with context UserId = :uid, UserKey = :key, Signature = :sig, Tid = 7, now = datetime('now')
+         values (:authId, :eff, '[]')`,
+        {
+          ':uid': 'user-1',
+          ':key': sig.signerKey,
+          ':sig': sig.signature,
+          ':authId': authority.id,
+          ':eff': effectiveAt
+        }
+      )
+      await ctx.db.exec(
+        `insert into ProposedOfficer (AuthorityId, AdminEffectiveAt, ProposedName, Title, Scopes)
+         with context UserId = :uid, UserKey = :key, Signature = :sig, Tid = 7, now = datetime('now')
+         values (:authId, :eff, 'Officer Bob', 'Inspector', :scopes)`,
+        {
+          ':uid': 'user-1',
+          ':key': sig.signerKey,
+          ':sig': sig.signature,
+          ':authId': authority.id,
+          ':eff': effectiveAt,
+          ':scopes': JSON.stringify(['rad'])
+        }
+      )
+      const details = await authorityEngine.getAdminDetails()
+      const proposedOfficers =
+        (details.proposed as { proposed?: { officers?: unknown[] } } | undefined)
+          ?.proposed?.officers
+      expect(proposedOfficers).to.be.an('array').with.length.greaterThan(0)
     })
 
     // BLOCKED on quereus#23 — even the "no admin row" path needs a populated
@@ -278,12 +350,73 @@ describe('AuthorityEngine', () => {
 
     // BLOCKED on quereus#23
     it.skip('should serialize thresholdPolicies as JSON', async () => {
-      // Placeholder body — Phase 6 covers full proposal seeding.
+      const { authority, authorityEngine } = await createNetworkAndAuthority()
+      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
+      const sig = makeRealSignature('user-1')
+      const effectiveAt = Date.now() + 60_000
+      const policies = [
+        { policy: 'rad' as Scope, threshold: 2 },
+        { policy: 'iad' as Scope, threshold: 1 }
+      ]
+      await authorityEngine.proposeAdmin(
+        {
+          proposed: {
+            officers: [
+              {
+                existing: {
+                  userId: 'user-1',
+                  authorityId: authority.id,
+                  title: 'Chair',
+                  scopes: ['rad'] as Scope[]
+                }
+              }
+            ],
+            effectiveAt,
+            thresholdPolicies: policies
+          },
+          signers: ['user-1']
+        },
+        sig
+      )
+      const row = await ctx.db
+        .prepare(
+          'select ThresholdPolicies from ProposedAdmin where AuthorityId = :id and EffectiveAt = :e'
+        )
+        .get({ ':id': authority.id, ':e': effectiveAt })
+      expect(JSON.parse(row!.ThresholdPolicies as string)).to.deep.equal(policies)
     })
 
     // BLOCKED on quereus#23
     it.skip('should start a signing session with scope rad', async () => {
-      // Placeholder body — Phase 6 covers full proposal seeding.
+      const { authority, authorityEngine } = await createNetworkAndAuthority()
+      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
+      const sig = makeRealSignature('user-1')
+      await authorityEngine.proposeAdmin(
+        {
+          proposed: {
+            officers: [
+              {
+                existing: {
+                  userId: 'user-1',
+                  authorityId: authority.id,
+                  title: 'Chair',
+                  scopes: ['rad'] as Scope[]
+                }
+              }
+            ],
+            effectiveAt: Date.now() + 60_000,
+            thresholdPolicies: [{ policy: 'rad', threshold: 1 }]
+          },
+          signers: ['user-1']
+        },
+        sig
+      )
+      const row = await ctx.db
+        .prepare(
+          'select Scope from AdminSigning where AuthorityId = :id order by Nonce desc limit 1'
+        )
+        .get({ ':id': authority.id })
+      expect(row?.Scope).to.equal('rad')
     })
 
     // This test does NOT depend on create() succeeding — the guard fires
@@ -309,12 +442,71 @@ describe('AuthorityEngine', () => {
 
     // BLOCKED on quereus#23
     it.skip('should use the first signer as the instigator of the signing session', async () => {
-      // Placeholder body — Phase 6 covers full proposal seeding.
+      const { authority, authorityEngine } = await createNetworkAndAuthority()
+      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
+      const sig = makeRealSignature('user-1')
+      await authorityEngine.proposeAdmin(
+        {
+          proposed: {
+            officers: [
+              {
+                existing: {
+                  userId: 'user-1',
+                  authorityId: authority.id,
+                  title: 'Chair',
+                  scopes: ['rad'] as Scope[]
+                }
+              }
+            ],
+            effectiveAt: Date.now() + 60_000,
+            thresholdPolicies: [{ policy: 'rad', threshold: 1 }]
+          },
+          // Two signers — proposeAdmin should pick the first ('user-1').
+          signers: ['user-1', 'user-2']
+        },
+        sig
+      )
+      const row = await ctx.db
+        .prepare(
+          'select UserId from AdminSigning where AuthorityId = :id order by Nonce desc limit 1'
+        )
+        .get({ ':id': authority.id })
+      expect(row?.UserId).to.equal('user-1')
     })
 
     // BLOCKED on quereus#23
     it.skip('should propagate Quereus constraint errors with descriptive messages', async () => {
-      // Placeholder body — Phase 6 covers full proposal seeding.
+      // A proposeAdmin call with a wildly invalid EffectiveAt should surface
+      // a constraint-named error wrapped by the engine's QuereusError catch.
+      const { authority, authorityEngine } = await createNetworkAndAuthority()
+      const sig = makeRealSignature('user-1')
+      let caught: unknown
+      try {
+        await authorityEngine.proposeAdmin(
+          {
+            proposed: {
+              officers: [
+                {
+                  existing: {
+                    userId: 'user-1',
+                    authorityId: authority.id,
+                    title: 'Chair',
+                    scopes: ['rad'] as Scope[]
+                  }
+                }
+              ],
+              effectiveAt: 'not-an-iso-string' as unknown as number,
+              thresholdPolicies: []
+            },
+            signers: ['user-1']
+          },
+          sig
+        )
+      } catch (err) {
+        caught = err
+      }
+      const msg = (caught as Error)?.message ?? ''
+      expect(msg).to.match(/Quereus error|EffectiveAtValid/)
     })
   })
 
@@ -432,37 +624,115 @@ describe('AuthorityEngine', () => {
   describe('saveInviteWithSigning', () => {
     // BLOCKED on quereus#23 — all flows depend on create() succeeding.
     it.skip('should start a signing session using the authority id and invite digest', async () => {
-      // Placeholder body — Phase 6 covers the full flow.
+      const { authority, authorityEngine } = await createNetworkAndAuthority()
+      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
+      const invite = authorityEngine.createAuthorityInvite('InviteCorp')
+      const sig = makeRealSignature('user-1', invite.digest)
+      await authorityEngine.saveInviteWithSigning(invite, 'iad', sig)
+      const row = await ctx.db
+        .prepare(
+          'select Digest from AdminSigning where AuthorityId = :id order by Nonce desc limit 1'
+        )
+        .get({ ':id': authority.id })
+      expect(row?.Digest).to.equal(invite.digest)
     })
 
     // BLOCKED on quereus#23
     it.skip('should save an authority invite to InviteSlot when type is "au"', async () => {
-      // Placeholder body — Phase 6 covers the full flow.
+      const { authorityEngine } = await createNetworkAndAuthority()
+      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
+      const invite = authorityEngine.createAuthorityInvite('InviteCorp')
+      const sig = makeRealSignature('user-1', invite.digest)
+      await authorityEngine.saveInviteWithSigning(invite, 'iad', sig)
+      const row = await ctx.db
+        .prepare('select Name from InviteSlot where Name = :n')
+        .get({ ':n': 'InviteCorp' })
+      expect(row?.Name).to.equal('InviteCorp')
     })
 
     // BLOCKED on quereus#23
     it.skip('should save an officer invite to InviteSlot when type is "of"', async () => {
-      // Placeholder body — Phase 6 covers the full flow.
+      const { authorityEngine } = await createNetworkAndAuthority()
+      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
+      const invite = authorityEngine.createOfficerInvite({
+        name: 'Officer X',
+        title: 'Inspector',
+        scopes: ['rad'] as Scope[]
+      })
+      const sig = makeRealSignature('user-1', invite.digest)
+      await authorityEngine.saveInviteWithSigning(invite, 'rad', sig)
+      const row = await ctx.db
+        .prepare('select Name from InviteSlot where Name = :n')
+        .get({ ':n': 'Officer X' })
+      expect(row?.Name).to.equal('Officer X')
     })
 
     // BLOCKED on quereus#23
     it.skip('should use scope "iad" for authority invites', async () => {
-      // Placeholder body — Phase 6 covers the full flow.
+      const { authority, authorityEngine } = await createNetworkAndAuthority()
+      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
+      const invite = authorityEngine.createAuthorityInvite('IADCorp')
+      const sig = makeRealSignature('user-1', invite.digest)
+      await authorityEngine.saveInviteWithSigning(invite, 'iad', sig)
+      const row = await ctx.db
+        .prepare(
+          'select Scope from AdminSigning where AuthorityId = :id and Digest = :d'
+        )
+        .get({ ':id': authority.id, ':d': invite.digest })
+      expect(row?.Scope).to.equal('iad')
     })
 
     // BLOCKED on quereus#23
     it.skip('should use scope "rad" for officer invites', async () => {
-      // Placeholder body — Phase 6 covers the full flow.
+      const { authority, authorityEngine } = await createNetworkAndAuthority()
+      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
+      const invite = authorityEngine.createOfficerInvite({
+        name: 'RAD Officer',
+        title: 'Inspector',
+        scopes: ['rad'] as Scope[]
+      })
+      const sig = makeRealSignature('user-1', invite.digest)
+      await authorityEngine.saveInviteWithSigning(invite, 'rad', sig)
+      const row = await ctx.db
+        .prepare(
+          'select Scope from AdminSigning where AuthorityId = :id and Digest = :d'
+        )
+        .get({ ':id': authority.id, ':d': invite.digest })
+      expect(row?.Scope).to.equal('rad')
     })
 
     // BLOCKED on quereus#23
     it.skip('should compute CID as Digest of invite fields and nonce', async () => {
-      // Placeholder body — Phase 6 covers the full flow.
+      // CidValid CHECK in the schema: Cid = Digest(Name, Expiration,
+      // InviteKey, InviteSignature, SigningNonce). saveInviteWithSigning
+      // computes Cid client-side via the same Digest call; here we just
+      // assert that the row lands (CidValid would fire on a mismatch).
+      const { authorityEngine } = await createNetworkAndAuthority()
+      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
+      const invite = authorityEngine.createAuthorityInvite('CidCheck')
+      const sig = makeRealSignature('user-1', invite.digest)
+      await authorityEngine.saveInviteWithSigning(invite, 'iad', sig)
+      const row = await ctx.db
+        .prepare('select Cid from InviteSlot where Name = :n')
+        .get({ ':n': 'CidCheck' })
+      expect(row?.Cid).to.be.a('string').with.length.greaterThan(0)
     })
 
     // BLOCKED on quereus#23
     it.skip('should store expiration, inviteKey, and inviteSignature in InviteSlot', async () => {
-      // Placeholder body — Phase 6 covers the full flow.
+      const { authorityEngine } = await createNetworkAndAuthority()
+      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
+      const invite = authorityEngine.createAuthorityInvite('FieldCheck')
+      const sig = makeRealSignature('user-1', invite.digest)
+      await authorityEngine.saveInviteWithSigning(invite, 'iad', sig)
+      const row = await ctx.db
+        .prepare(
+          'select Expiration, InviteKey, InviteSignature from InviteSlot where Name = :n'
+        )
+        .get({ ':n': 'FieldCheck' })
+      expect(row?.Expiration).to.equal(invite.expiration)
+      expect(row?.InviteKey).to.equal(invite.inviteKey)
+      expect(row?.InviteSignature).to.equal(invite.inviteSignature)
     })
   })
 
@@ -479,7 +749,14 @@ describe('AuthorityEngine', () => {
 
     // BLOCKED on quereus#23
     it.skip('should return sent invites with name and type "au"', async () => {
-      // Placeholder body — Phase 6 covers the full flow.
+      const { authorityEngine } = await createNetworkAndAuthority()
+      const invite = authorityEngine.createAuthorityInvite('Sent Inv')
+      const sig = makeRealSignature('user-1', invite.digest)
+      await authorityEngine.saveInviteWithSigning(invite, 'iad', sig)
+      const invites = await authorityEngine.getAuthorityInvites()
+      expect(invites).to.have.length.greaterThan(0)
+      const found = invites.find((i) => i.invite.name === 'Sent Inv')
+      expect(found?.invite.type).to.equal('au')
     })
 
     // BLOCKED on https://github.com/gotchoices/quereus/issues/23 —
@@ -487,22 +764,71 @@ describe('AuthorityEngine', () => {
     // exercising it requires a seeded InviteSlot + AdminSignature from
     // AuthorityEngine.saveInviteWithSigning, which itself trips #23.
     it.skip('should include InviteResult when an invite has been accepted', async () => {
-      // Placeholder body — see comment.
+      const { networkEngine, authorityEngine } = await createNetworkAndAuthority()
+      const invite = authorityEngine.createAuthorityInvite('Accepted')
+      const sig = makeRealSignature('user-1', invite.digest)
+      await authorityEngine.saveInviteWithSigning(invite, 'iad', sig)
+      await networkEngine.respondToInvite({
+        invite: { digest: invite.digest } as never,
+        isAccepted: true,
+        invokes: { authority: { name: 'Accepted', domainName: 'a.example' } },
+        inviteSignature: invite.inviteSignature,
+        userId: undefined,
+        userInit: undefined
+      } as never)
+      const invites = await authorityEngine.getAuthorityInvites()
+      const found = invites.find((i) => i.invite.name === 'Accepted')
+      expect((found as { result?: { isAccepted?: boolean } } | undefined)?.result?.isAccepted).to.equal(true)
     })
 
     // BLOCKED on quereus#23 (same chain — needs a seeded InviteSlot row).
     it.skip('should include InviteResult when an invite has been rejected', async () => {
-      // Placeholder body — see comment.
+      const { networkEngine, authorityEngine } = await createNetworkAndAuthority()
+      const invite = authorityEngine.createAuthorityInvite('Rejected')
+      const sig = makeRealSignature('user-1', invite.digest)
+      await authorityEngine.saveInviteWithSigning(invite, 'iad', sig)
+      await networkEngine.respondToInvite({
+        invite: { digest: invite.digest } as never,
+        isAccepted: false,
+        invokes: undefined,
+        inviteSignature: invite.inviteSignature,
+        userId: undefined,
+        userInit: undefined
+      } as never)
+      const invites = await authorityEngine.getAuthorityInvites()
+      const found = invites.find((i) => i.invite.name === 'Rejected')
+      expect((found as { result?: { isAccepted?: boolean } } | undefined)?.result?.isAccepted).to.equal(false)
     })
 
     // BLOCKED on quereus#23
     it.skip('should return undefined result when invite has not been responded to', async () => {
-      // Placeholder body — Phase 6 covers the full flow.
+      const { authorityEngine } = await createNetworkAndAuthority()
+      const invite = authorityEngine.createAuthorityInvite('NoResponse')
+      const sig = makeRealSignature('user-1', invite.digest)
+      await authorityEngine.saveInviteWithSigning(invite, 'iad', sig)
+      const invites = await authorityEngine.getAuthorityInvites()
+      const found = invites.find((i) => i.invite.name === 'NoResponse')
+      expect((found as { result?: unknown } | undefined)?.result).to.equal(undefined)
     })
 
     // BLOCKED on quereus#23
     it.skip('should only return invites scoped to "iad" for the current authority', async () => {
-      // Placeholder body — Phase 6 covers the full flow.
+      const { authorityEngine } = await createNetworkAndAuthority()
+      const auInvite = authorityEngine.createAuthorityInvite('AuthorityScoped')
+      const auSig = makeRealSignature('user-1', auInvite.digest)
+      await authorityEngine.saveInviteWithSigning(auInvite, 'iad', auSig)
+      const ofInvite = authorityEngine.createOfficerInvite({
+        name: 'OfficerScoped',
+        title: 'Inspector',
+        scopes: ['rad'] as Scope[]
+      })
+      const ofSig = makeRealSignature('user-1', ofInvite.digest)
+      await authorityEngine.saveInviteWithSigning(ofInvite, 'rad', ofSig)
+      const invites = await authorityEngine.getAuthorityInvites()
+      // Only the 'au' (iad-scoped) invite should appear in the authority list.
+      const names = invites.map((i) => i.invite.name)
+      expect(names).to.include('AuthorityScoped')
+      expect(names).to.not.include('OfficerScoped')
     })
   })
 
@@ -524,118 +850,762 @@ describe('AuthorityEngine', () => {
   // 8. Schema Constraints - Authority Table
   // -----------------------------------------------------------------------
   describe('schema constraints - Authority table', () => {
-    it.skip('should allow the very first authority without an invite or signing nonce — BLOCKED on quereus#23')
+    it.skip('should allow the very first authority without an invite or signing nonce — BLOCKED on quereus#23', async () => {
+      const { authorityEngine } = await createNetworkAndAuthority()
+      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
+      const row = await ctx.db
+        .prepare('select count(*) as n from Authority')
+        .get({})
+      expect(Number(row?.n)).to.equal(1)
+    })
 
-    it.skip('should reject deletion of an Authority (CantDelete constraint) — BLOCKED on quereus#23')
+    it.skip('should reject deletion of an Authority (CantDelete constraint) — BLOCKED on quereus#23', async () => {
+      const { authorityEngine } = await createNetworkAndAuthority()
+      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
+      let caught: unknown
+      try {
+        await ctx.db.exec(
+          'delete from Authority with context Tid = 1, SigningNonce = null, InviteSlotCid = null, InviteSignature = null'
+        )
+      } catch (err) {
+        caught = err
+      }
+      expect((caught as Error)?.message).to.include('CantDelete')
+    })
 
-    it.skip('should reject mutation of Authority.Id on update (IdImmutable constraint) — BLOCKED on quereus#23')
+    it.skip('should reject mutation of Authority.Id on update (IdImmutable constraint) — BLOCKED on quereus#23', async () => {
+      const { authorityEngine } = await createNetworkAndAuthority()
+      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
+      let caught: unknown
+      try {
+        await ctx.db.exec(
+          'update Authority set Id = :id with context Tid = 1, SigningNonce = null, InviteSlotCid = null, InviteSignature = null',
+          { ':id': 'mutated-id' }
+        )
+      } catch (err) {
+        caught = err
+      }
+      expect((caught as Error)?.message).to.include('IdImmutable')
+    })
 
-    it.skip('should require an Admin row to exist when inserting an Authority (AdminRequired) — BLOCKED on quereus#23')
+    it.skip('should require an Admin row to exist when inserting an Authority (AdminRequired) — BLOCKED on quereus#23', async () => {
+      await AsyncStorage.clear()
+      const db = new Database()
+      await prepareDb(db)
+      let caught: unknown
+      try {
+        await db.exec(
+          `insert into Authority (Id, Name, DomainName, ImageRef)
+           with context Tid = 1, SigningNonce = null, InviteSlotCid = null, InviteSignature = null
+           values (:id, 'NoAdmin', 'na.example', null)`,
+          { ':id': crypto.randomUUID() }
+        )
+      } catch (err) {
+        caught = err
+      }
+      expect((caught as Error)?.message).to.include('AdminRequired')
+    })
 
-    it.skip('should require a valid accepted InviteResult for subsequent authority inserts (InsertValid) — BLOCKED on quereus#23')
+    it.skip('should require a valid accepted InviteResult for subsequent authority inserts (InsertValid) — BLOCKED on quereus#23', async () => {
+      const { networkEngine } = await createNetworkAndAuthority()
+      let caught: unknown
+      try {
+        await networkEngine.createAuthority(
+          { name: 'NoInvite', domainName: 'ni.example' },
+          {
+            officers: [
+              { init: { name: 'O', title: 'T', scopes: ['rad'] as Scope[] } }
+            ],
+            effectiveAt: Date.now(),
+            thresholdPolicies: []
+          }
+        )
+      } catch (err) {
+        caught = err
+      }
+      expect((caught as Error)?.message).to.include('InsertValid')
+    })
 
-    it.skip('should validate update using AdminSignature with scope uai (UpdateValid) — BLOCKED on quereus#23')
+    it.skip('should validate update using AdminSignature with scope uai (UpdateValid) — BLOCKED on quereus#23', async () => {
+      const { authorityEngine } = await createNetworkAndAuthority()
+      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
+      let caught: unknown
+      try {
+        await ctx.db.exec(
+          'update Authority set Name = :n with context Tid = 1, SigningNonce = null, InviteSlotCid = null, InviteSignature = null',
+          { ':n': 'Renamed' }
+        )
+      } catch (err) {
+        caught = err
+      }
+      expect((caught as Error)?.message).to.include('UpdateValid')
+    })
   })
 
   // -----------------------------------------------------------------------
   // 9. Schema Constraints - Admin Table
   // -----------------------------------------------------------------------
   describe('schema constraints - Admin table', () => {
-    it.skip('should require at least one Officer with rad scope when inserting Admin (OfficerRequired) — BLOCKED on quereus#23')
+    it.skip('should require at least one Officer with rad scope when inserting Admin (OfficerRequired) — BLOCKED on quereus#23', async () => {
+      await AsyncStorage.clear()
+      await AsyncStorage.setItem('recentNetworks', [])
+      let caught: unknown
+      try {
+        await new NetworksEngine(AsyncStorage).create(
+          makeNetworkInit({
+            admin: {
+              officers: [
+                {
+                  init: {
+                    name: 'No-Rad',
+                    title: 'Chair',
+                    scopes: ['mel'] as Scope[]
+                  }
+                }
+              ],
+              effectiveAt: Date.now(),
+              thresholdPolicies: []
+            }
+          }),
+          makeUser()
+        )
+      } catch (err) {
+        caught = err
+      }
+      expect((caught as Error)?.message).to.include('OfficerRequired')
+    })
 
-    it.skip('should reject Admin insert when AuthorityId does not reference an existing Authority — BLOCKED on quereus#23')
+    it.skip('should reject Admin insert when AuthorityId does not reference an existing Authority — BLOCKED on quereus#23', async () => {
+      const { authorityEngine } = await createNetworkAndAuthority()
+      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
+      let caught: unknown
+      try {
+        await ctx.db.exec(
+          `insert into Admin (AuthorityId, EffectiveAt, ThresholdPolicies)
+           with context Tid = 9, SigningNonce = null, InviteSlotCid = null, InviteSignature = null
+           values ('no-such', :e, '[]')`,
+          { ':e': new Date().toISOString() }
+        )
+      } catch (err) {
+        caught = err
+      }
+      expect((caught as Error)?.message).to.include('AuthorityIdValid')
+    })
 
-    it.skip('should reject Admin when EffectiveAt is not a valid ISO datetime ending in Z — BLOCKED on quereus#23')
+    it.skip('should reject Admin when EffectiveAt is not a valid ISO datetime ending in Z — BLOCKED on quereus#23', async () => {
+      const { authority, authorityEngine } = await createNetworkAndAuthority()
+      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
+      let caught: unknown
+      try {
+        await ctx.db.exec(
+          `insert into Admin (AuthorityId, EffectiveAt, ThresholdPolicies)
+           with context Tid = 9, SigningNonce = null, InviteSlotCid = null, InviteSignature = null
+           values (:id, 'not-iso', '[]')`,
+          { ':id': authority.id }
+        )
+      } catch (err) {
+        caught = err
+      }
+      expect((caught as Error)?.message).to.include('EffectiveAtValid')
+    })
 
-    it.skip('should allow initial admin for very first authority without invite or signing (MutationValid) — BLOCKED on quereus#23')
+    it.skip('should allow initial admin for very first authority without invite or signing (MutationValid) — BLOCKED on quereus#23', async () => {
+      const { authorityEngine } = await createNetworkAndAuthority()
+      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
+      const row = await ctx.db
+        .prepare('select count(*) as n from Admin')
+        .get({})
+      expect(Number(row?.n)).to.equal(1)
+    })
 
-    it.skip('should require valid invite for admin of a new (non-first) authority (MutationValid) — BLOCKED on quereus#23')
+    it.skip('should require valid invite for admin of a new (non-first) authority (MutationValid) — BLOCKED on quereus#23', async () => {
+      const { networkEngine } = await createNetworkAndAuthority()
+      let caught: unknown
+      try {
+        await networkEngine.createAuthority(
+          { name: 'Second', domainName: 's.example' },
+          {
+            officers: [
+              { init: { name: 'O', title: 'T', scopes: ['rad'] as Scope[] } }
+            ],
+            effectiveAt: Date.now(),
+            thresholdPolicies: []
+          }
+        )
+      } catch (err) {
+        caught = err
+      }
+      const msg = (caught as Error)?.message ?? ''
+      expect(msg).to.match(/MutationValid|InsertValid/)
+    })
 
-    it.skip('should require valid AdminSignature for admin update of existing authority (MutationValid) — BLOCKED on quereus#23')
+    it.skip('should require valid AdminSignature for admin update of existing authority (MutationValid) — BLOCKED on quereus#23', async () => {
+      const { authority, authorityEngine } = await createNetworkAndAuthority()
+      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
+      let caught: unknown
+      try {
+        await ctx.db.exec(
+          `update Admin set ThresholdPolicies = '[]'
+           with context Tid = 9, SigningNonce = null, InviteSlotCid = null, InviteSignature = null
+           where AuthorityId = :id`,
+          { ':id': authority.id }
+        )
+      } catch (err) {
+        caught = err
+      }
+      expect((caught as Error)?.message).to.include('MutationValid')
+    })
   })
 
   // -----------------------------------------------------------------------
   // 10. Schema Constraints - Officer Table
   // -----------------------------------------------------------------------
   describe('schema constraints - Officer table', () => {
-    it.skip('should reject Officer with scopes not in the Scope view (ScopesValid) — BLOCKED on quereus#23')
+    it.skip('should reject Officer with scopes not in the Scope view (ScopesValid) — BLOCKED on quereus#23', async () => {
+      const { authority, authorityEngine } = await createNetworkAndAuthority()
+      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
+      let caught: unknown
+      try {
+        await ctx.db.exec(
+          `insert into Officer (AuthorityId, AdminEffectiveAt, UserId, Title, Scopes)
+           with context Tid = 9, SigningNonce = null, InviteSlotCid = null, InviteSignature = null
+           values (:id, :e, 'user-1', 'Bad', :scopes)`,
+          {
+            ':id': authority.id,
+            ':e': new Date().toISOString(),
+            ':scopes': JSON.stringify(['no-such-scope'])
+          }
+        )
+      } catch (err) {
+        caught = err
+      }
+      expect((caught as Error)?.message).to.include('ScopesValid')
+    })
 
-    it.skip('should reject Officer update or delete (OnlyInsert constraint) — BLOCKED on quereus#23')
+    it.skip('should reject Officer update or delete (OnlyInsert constraint) — BLOCKED on quereus#23', async () => {
+      const { authorityEngine } = await createNetworkAndAuthority()
+      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
+      let updateErr: unknown
+      try {
+        await ctx.db.exec(
+          `update Officer set Title = 'X'
+           with context Tid = 9, SigningNonce = null, InviteSlotCid = null, InviteSignature = null`
+        )
+      } catch (err) {
+        updateErr = err
+      }
+      expect((updateErr as Error)?.message).to.include('OnlyInsert')
 
-    it.skip('should require Admin row to exist for the officer AdminEffectiveAt (AdminValid) — BLOCKED on quereus#23')
+      let deleteErr: unknown
+      try {
+        await ctx.db.exec(
+          `delete from Officer
+           with context Tid = 9, SigningNonce = null, InviteSlotCid = null, InviteSignature = null`
+        )
+      } catch (err) {
+        deleteErr = err
+      }
+      expect((deleteErr as Error)?.message).to.include('OnlyInsert')
+    })
 
-    it.skip('should require User to exist for the officer UserId (UserIdValid) — BLOCKED on quereus#23')
+    it.skip('should require Admin row to exist for the officer AdminEffectiveAt (AdminValid) — BLOCKED on quereus#23', async () => {
+      const { authority, authorityEngine } = await createNetworkAndAuthority()
+      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
+      let caught: unknown
+      try {
+        await ctx.db.exec(
+          `insert into Officer (AuthorityId, AdminEffectiveAt, UserId, Title, Scopes)
+           with context Tid = 9, SigningNonce = null, InviteSlotCid = null, InviteSignature = null
+           values (:id, '9999-01-01T00:00:00.000Z', 'user-1', 'Orphan', '["rad"]')`,
+          { ':id': authority.id }
+        )
+      } catch (err) {
+        caught = err
+      }
+      expect((caught as Error)?.message).to.include('AdminValid')
+    })
 
-    it.skip('should allow initial officer for very first authority without invite or signing (InsertValid) — BLOCKED on quereus#23')
+    it.skip('should require User to exist for the officer UserId (UserIdValid) — BLOCKED on quereus#23', async () => {
+      const { authority, authorityEngine } = await createNetworkAndAuthority()
+      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
+      let caught: unknown
+      try {
+        await ctx.db.exec(
+          `insert into Officer (AuthorityId, AdminEffectiveAt, UserId, Title, Scopes)
+           with context Tid = 9, SigningNonce = null, InviteSlotCid = null, InviteSignature = null
+           values (:id, :e, 'no-such-user', 'X', '["rad"]')`,
+          { ':id': authority.id, ':e': new Date().toISOString() }
+        )
+      } catch (err) {
+        caught = err
+      }
+      expect((caught as Error)?.message).to.include('UserIdValid')
+    })
 
-    it.skip('should require valid invite for officers of a new authority (InsertValid) — BLOCKED on quereus#23')
+    it.skip('should allow initial officer for very first authority without invite or signing (InsertValid) — BLOCKED on quereus#23', async () => {
+      const { authorityEngine } = await createNetworkAndAuthority()
+      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
+      const row = await ctx.db
+        .prepare('select count(*) as n from Officer')
+        .get({})
+      expect(Number(row?.n)).to.equal(1)
+    })
 
-    it.skip('should require valid AdminSigning for officers of an existing authority (InsertValid) — BLOCKED on quereus#23')
+    it.skip('should require valid invite for officers of a new authority (InsertValid) — BLOCKED on quereus#23', async () => {
+      const { networkEngine } = await createNetworkAndAuthority()
+      let caught: unknown
+      try {
+        await networkEngine.createAuthority(
+          { name: 'NewOfficerCheck', domainName: 'noc.example' },
+          {
+            officers: [
+              { init: { name: 'O', title: 'T', scopes: ['rad'] as Scope[] } }
+            ],
+            effectiveAt: Date.now(),
+            thresholdPolicies: []
+          }
+        )
+      } catch (err) {
+        caught = err
+      }
+      expect((caught as Error)?.message).to.include('InsertValid')
+    })
+
+    it.skip('should require valid AdminSigning for officers of an existing authority (InsertValid) — BLOCKED on quereus#23', async () => {
+      const { authority, authorityEngine } = await createNetworkAndAuthority()
+      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
+      let caught: unknown
+      try {
+        await ctx.db.exec(
+          `insert into Officer (AuthorityId, AdminEffectiveAt, UserId, Title, Scopes)
+           with context Tid = 9, SigningNonce = null, InviteSlotCid = null, InviteSignature = null
+           values (:id, :e, 'user-1', 'Extra', '["rad"]')`,
+          { ':id': authority.id, ':e': new Date().toISOString() }
+        )
+      } catch (err) {
+        caught = err
+      }
+      expect((caught as Error)?.message).to.include('InsertValid')
+    })
   })
 
   // -----------------------------------------------------------------------
   // 11. Schema Constraints - ProposedAuthority Table
   // -----------------------------------------------------------------------
   describe('schema constraints - ProposedAuthority table', () => {
-    it.skip('should require the authority to exist (AuthorityExists) — BLOCKED on quereus#23')
+    it.skip('should require the authority to exist (AuthorityExists) — BLOCKED on quereus#23', async () => {
+      const { authorityEngine } = await createNetworkAndAuthority()
+      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
+      const sig = makeRealSignature('user-1')
+      let caught: unknown
+      try {
+        await ctx.db.exec(
+          `insert into ProposedAuthority (Id, Name, DomainName, ImageRef)
+           with context UserId = :uid, UserKey = :key, Signature = :sig, Tid = 9, now = datetime('now')
+           values ('no-such-authority', 'X', 'x.example', null)`,
+          {
+            ':uid': 'user-1',
+            ':key': sig.signerKey,
+            ':sig': sig.signature
+          }
+        )
+      } catch (err) {
+        caught = err
+      }
+      expect((caught as Error)?.message).to.include('AuthorityExists')
+    })
 
-    it.skip('should require a valid officer with uai scope and matching signature (UserValid) — BLOCKED on quereus#23')
+    it.skip('should require a valid officer with uai scope and matching signature (UserValid) — BLOCKED on quereus#23', async () => {
+      const { authority, authorityEngine } = await createNetworkAndAuthority()
+      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
+      let caught: unknown
+      try {
+        await ctx.db.exec(
+          `insert into ProposedAuthority (Id, Name, DomainName, ImageRef)
+           with context UserId = 'no-such-user', UserKey = 'no-key', Signature = 'bad', Tid = 9, now = datetime('now')
+           values (:id, 'X', 'x.example', null)`,
+          { ':id': authority.id }
+        )
+      } catch (err) {
+        caught = err
+      }
+      expect((caught as Error)?.message).to.include('UserValid')
+    })
   })
 
   // -----------------------------------------------------------------------
   // 12. Schema Constraints - ProposedAdmin Table
   // -----------------------------------------------------------------------
   describe('schema constraints - ProposedAdmin table', () => {
-    it.skip('should require the authority to exist (AuthorityIdValid) — BLOCKED on quereus#23')
+    it.skip('should require the authority to exist (AuthorityIdValid) — BLOCKED on quereus#23', async () => {
+      const { authorityEngine } = await createNetworkAndAuthority()
+      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
+      const sig = makeRealSignature('user-1')
+      let caught: unknown
+      try {
+        await ctx.db.exec(
+          `insert into ProposedAdmin (AuthorityId, EffectiveAt, ThresholdPolicies)
+           with context UserId = :uid, UserKey = :key, Signature = :sig, Tid = 9, now = datetime('now')
+           values ('no-such', :e, '[]')`,
+          {
+            ':uid': 'user-1',
+            ':key': sig.signerKey,
+            ':sig': sig.signature,
+            ':e': new Date().toISOString()
+          }
+        )
+      } catch (err) {
+        caught = err
+      }
+      expect((caught as Error)?.message).to.include('AuthorityIdValid')
+    })
 
-    it.skip('should require EffectiveAt to be a valid ISO datetime ending in Z — BLOCKED on quereus#23')
+    it.skip('should require EffectiveAt to be a valid ISO datetime ending in Z — BLOCKED on quereus#23', async () => {
+      const { authority, authorityEngine } = await createNetworkAndAuthority()
+      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
+      const sig = makeRealSignature('user-1')
+      let caught: unknown
+      try {
+        await ctx.db.exec(
+          `insert into ProposedAdmin (AuthorityId, EffectiveAt, ThresholdPolicies)
+           with context UserId = :uid, UserKey = :key, Signature = :sig, Tid = 9, now = datetime('now')
+           values (:id, 'not-iso', '[]')`,
+          {
+            ':uid': 'user-1',
+            ':key': sig.signerKey,
+            ':sig': sig.signature,
+            ':id': authority.id
+          }
+        )
+      } catch (err) {
+        caught = err
+      }
+      expect((caught as Error)?.message).to.include('EffectiveAtValid')
+    })
 
-    it.skip('should require a valid officer with rad scope and matching signature (UserValid) — BLOCKED on quereus#23')
+    it.skip('should require a valid officer with rad scope and matching signature (UserValid) — BLOCKED on quereus#23', async () => {
+      const { authority, authorityEngine } = await createNetworkAndAuthority()
+      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
+      let caught: unknown
+      try {
+        await ctx.db.exec(
+          `insert into ProposedAdmin (AuthorityId, EffectiveAt, ThresholdPolicies)
+           with context UserId = 'no-user', UserKey = 'no-key', Signature = 'bad', Tid = 9, now = datetime('now')
+           values (:id, :e, '[]')`,
+          { ':id': authority.id, ':e': new Date().toISOString() }
+        )
+      } catch (err) {
+        caught = err
+      }
+      expect((caught as Error)?.message).to.include('UserValid')
+    })
   })
 
   // -----------------------------------------------------------------------
   // 13. Schema Constraints - ProposedOfficer Table
   // -----------------------------------------------------------------------
   describe('schema constraints - ProposedOfficer table', () => {
-    it.skip('should require the authority to exist (AuthorityIdValid) — BLOCKED on quereus#23')
+    it.skip('should require the authority to exist (AuthorityIdValid) — BLOCKED on quereus#23', async () => {
+      const { authorityEngine } = await createNetworkAndAuthority()
+      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
+      const sig = makeRealSignature('user-1')
+      let caught: unknown
+      try {
+        await ctx.db.exec(
+          `insert into ProposedOfficer (AuthorityId, AdminEffectiveAt, ProposedName, Title, Scopes)
+           with context UserId = :uid, UserKey = :key, Signature = :sig, Tid = 9, now = datetime('now')
+           values ('no-such', :e, 'X', 'T', '["rad"]')`,
+          {
+            ':uid': 'user-1',
+            ':key': sig.signerKey,
+            ':sig': sig.signature,
+            ':e': new Date().toISOString()
+          }
+        )
+      } catch (err) {
+        caught = err
+      }
+      expect((caught as Error)?.message).to.include('AuthorityIdValid')
+    })
 
-    it.skip('should require a ProposedAdmin to exist for the officer AdminEffectiveAt (AdminValid) — BLOCKED on quereus#23')
+    it.skip('should require a ProposedAdmin to exist for the officer AdminEffectiveAt (AdminValid) — BLOCKED on quereus#23', async () => {
+      const { authority, authorityEngine } = await createNetworkAndAuthority()
+      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
+      const sig = makeRealSignature('user-1')
+      let caught: unknown
+      try {
+        await ctx.db.exec(
+          `insert into ProposedOfficer (AuthorityId, AdminEffectiveAt, ProposedName, Title, Scopes)
+           with context UserId = :uid, UserKey = :key, Signature = :sig, Tid = 9, now = datetime('now')
+           values (:id, '9999-01-01T00:00:00.000Z', 'Orphan', 'T', '["rad"]')`,
+          {
+            ':uid': 'user-1',
+            ':key': sig.signerKey,
+            ':sig': sig.signature,
+            ':id': authority.id
+          }
+        )
+      } catch (err) {
+        caught = err
+      }
+      expect((caught as Error)?.message).to.include('AdminValid')
+    })
 
-    it.skip('should reject deletion of a ProposedOfficer (CantDelete) — BLOCKED on quereus#23')
+    it.skip('should reject deletion of a ProposedOfficer (CantDelete) — BLOCKED on quereus#23', async () => {
+      const { authorityEngine } = await createNetworkAndAuthority()
+      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
+      const sig = makeRealSignature('user-1')
+      let caught: unknown
+      try {
+        await ctx.db.exec(
+          `delete from ProposedOfficer
+           with context UserId = :uid, UserKey = :key, Signature = :sig, Tid = 9, now = datetime('now')`,
+          {
+            ':uid': 'user-1',
+            ':key': sig.signerKey,
+            ':sig': sig.signature
+          }
+        )
+      } catch (err) {
+        caught = err
+      }
+      expect((caught as Error)?.message).to.include('CantDelete')
+    })
 
-    it.skip('should reject scopes not in the Scope view (ScopesValid) — BLOCKED on quereus#23')
+    it.skip('should reject scopes not in the Scope view (ScopesValid) — BLOCKED on quereus#23', async () => {
+      const { authority, authorityEngine } = await createNetworkAndAuthority()
+      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
+      const sig = makeRealSignature('user-1')
+      let caught: unknown
+      try {
+        await ctx.db.exec(
+          `insert into ProposedOfficer (AuthorityId, AdminEffectiveAt, ProposedName, Title, Scopes)
+           with context UserId = :uid, UserKey = :key, Signature = :sig, Tid = 9, now = datetime('now')
+           values (:id, :e, 'Bad', 'T', :scopes)`,
+          {
+            ':uid': 'user-1',
+            ':key': sig.signerKey,
+            ':sig': sig.signature,
+            ':id': authority.id,
+            ':e': new Date().toISOString(),
+            ':scopes': JSON.stringify(['no-such-scope'])
+          }
+        )
+      } catch (err) {
+        caught = err
+      }
+      expect((caught as Error)?.message).to.include('ScopesValid')
+    })
 
-    it.skip('should require a valid officer with rad scope and matching signature (UserValid) — BLOCKED on quereus#23')
+    it.skip('should require a valid officer with rad scope and matching signature (UserValid) — BLOCKED on quereus#23', async () => {
+      const { authority, authorityEngine } = await createNetworkAndAuthority()
+      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
+      let caught: unknown
+      try {
+        await ctx.db.exec(
+          `insert into ProposedOfficer (AuthorityId, AdminEffectiveAt, ProposedName, Title, Scopes)
+           with context UserId = 'no-user', UserKey = 'no-key', Signature = 'bad', Tid = 9, now = datetime('now')
+           values (:id, :e, 'X', 'T', '["rad"]')`,
+          { ':id': authority.id, ':e': new Date().toISOString() }
+        )
+      } catch (err) {
+        caught = err
+      }
+      expect((caught as Error)?.message).to.include('UserValid')
+    })
   })
 
   // -----------------------------------------------------------------------
   // 14. Schema Constraints - InviteSlot Table
   // -----------------------------------------------------------------------
   describe('schema constraints - InviteSlot table', () => {
-    it.skip('should validate CID as Digest of invite fields (CidValid) — BLOCKED on quereus#23')
+    it.skip('should validate CID as Digest of invite fields (CidValid) — BLOCKED on quereus#23', async () => {
+      const { authorityEngine } = await createNetworkAndAuthority()
+      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
+      let caught: unknown
+      try {
+        await ctx.db.exec(
+          `insert into InviteSlot (Cid, Type, Name, Expiration, InviteKey, InviteSignature, SigningNonce)
+           with context Tid = 9, now = datetime('now')
+           values ('wrong-cid', 'au', 'X', :e, 'pk', 'sig', 'nonce')`,
+          { ':e': new Date(Date.now() + 60_000).toISOString() }
+        )
+      } catch (err) {
+        caught = err
+      }
+      expect((caught as Error)?.message).to.include('CidValid')
+    })
 
-    it.skip('should reject InviteSlot when expiration is in the past (ExpirationValid) — BLOCKED on quereus#23')
+    it.skip('should reject InviteSlot when expiration is in the past (ExpirationValid) — BLOCKED on quereus#23', async () => {
+      const { authorityEngine } = await createNetworkAndAuthority()
+      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
+      let caught: unknown
+      try {
+        await ctx.db.exec(
+          `insert into InviteSlot (Cid, Type, Name, Expiration, InviteKey, InviteSignature, SigningNonce)
+           with context Tid = 9, now = datetime('now')
+           values ('past-cid', 'au', 'Past', :e, 'pk', 'sig', 'nonce')`,
+          { ':e': new Date(Date.now() - 60_000).toISOString() }
+        )
+      } catch (err) {
+        caught = err
+      }
+      expect((caught as Error)?.message).to.include('ExpirationValid')
+    })
 
-    it.skip('should validate InviteSignature against InviteKey (InviteSignatureValid) — BLOCKED on quereus#23')
+    it.skip('should validate InviteSignature against InviteKey (InviteSignatureValid) — BLOCKED on quereus#23', async () => {
+      const { authorityEngine } = await createNetworkAndAuthority()
+      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
+      let caught: unknown
+      try {
+        await ctx.db.exec(
+          `insert into InviteSlot (Cid, Type, Name, Expiration, InviteKey, InviteSignature, SigningNonce)
+           with context Tid = 9, now = datetime('now')
+           values ('cid', 'au', 'BadSig', :e, 'pk', 'wrong-sig', 'nonce')`,
+          { ':e': new Date(Date.now() + 60_000).toISOString() }
+        )
+      } catch (err) {
+        caught = err
+      }
+      expect((caught as Error)?.message).to.include('InviteSignatureValid')
+    })
 
-    it.skip('should reject update or delete of InviteSlot (InsertOnly) — BLOCKED on quereus#23')
+    it.skip('should reject update or delete of InviteSlot (InsertOnly) — BLOCKED on quereus#23', async () => {
+      const { authorityEngine } = await createNetworkAndAuthority()
+      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
+      let updateErr: unknown
+      try {
+        await ctx.db.exec(
+          `update InviteSlot set Name = 'X' with context Tid = 9, now = datetime('now')`
+        )
+      } catch (err) {
+        updateErr = err
+      }
+      expect((updateErr as Error)?.message).to.include('InsertOnly')
 
-    it.skip('should require a completed AdminSignature for the signing nonce (InsertValid) — BLOCKED on quereus#23')
+      let deleteErr: unknown
+      try {
+        await ctx.db.exec(
+          `delete from InviteSlot with context Tid = 9, now = datetime('now')`
+        )
+      } catch (err) {
+        deleteErr = err
+      }
+      expect((deleteErr as Error)?.message).to.include('InsertOnly')
+    })
+
+    it.skip('should require a completed AdminSignature for the signing nonce (InsertValid) — BLOCKED on quereus#23', async () => {
+      const { authorityEngine } = await createNetworkAndAuthority()
+      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
+      let caught: unknown
+      try {
+        await ctx.db.exec(
+          `insert into InviteSlot (Cid, Type, Name, Expiration, InviteKey, InviteSignature, SigningNonce)
+           with context Tid = 9, now = datetime('now')
+           values ('orphan', 'au', 'Orphan', :e, 'pk', 'sig', 'never-signed')`,
+          { ':e': new Date(Date.now() + 60_000).toISOString() }
+        )
+      } catch (err) {
+        caught = err
+      }
+      expect((caught as Error)?.message).to.include('InsertValid')
+    })
   })
 
   // -----------------------------------------------------------------------
   // 15. Schema Constraints - InviteResult Table
   // -----------------------------------------------------------------------
   describe('schema constraints - InviteResult table', () => {
-    it.skip('should reject update or delete of InviteResult (InsertOnly) — BLOCKED on quereus#23')
+    it.skip('should reject update or delete of InviteResult (InsertOnly) — BLOCKED on quereus#23', async () => {
+      const { authorityEngine } = await createNetworkAndAuthority()
+      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
+      let updateErr: unknown
+      try {
+        await ctx.db.exec(`update InviteResult set IsAccepted = false`)
+      } catch (err) {
+        updateErr = err
+      }
+      expect((updateErr as Error)?.message).to.include('InsertOnly')
 
-    it.skip('should require a valid InviteSlot and AdminSignature (SigningValid) — BLOCKED on quereus#23')
+      let deleteErr: unknown
+      try {
+        await ctx.db.exec(`delete from InviteResult`)
+      } catch (err) {
+        deleteErr = err
+      }
+      expect((deleteErr as Error)?.message).to.include('InsertOnly')
+    })
 
-    it.skip('should validate InviteSignature against the InviteSlot InviteKey (SignatureValid) — BLOCKED on quereus#23')
+    it.skip('should require a valid InviteSlot and AdminSignature (SigningValid) — BLOCKED on quereus#23', async () => {
+      const { authorityEngine } = await createNetworkAndAuthority()
+      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
+      let caught: unknown
+      try {
+        await ctx.db.exec(
+          `insert into InviteResult (SlotCid, IsAccepted, Digest, InviteSignature, InvokedId)
+           values ('no-such-slot', true, 'd', 'sig', null)`
+        )
+      } catch (err) {
+        caught = err
+      }
+      expect((caught as Error)?.message).to.include('SigningValid')
+    })
 
-    it.skip('should reject acceptance when Digest is null (DigestValid) — BLOCKED on quereus#23')
+    it.skip('should validate InviteSignature against the InviteSlot InviteKey (SignatureValid) — BLOCKED on quereus#23', async () => {
+      // Once a seeded InviteSlot exists with a known InviteKey, attempting
+      // to insert an InviteResult with a non-matching signature should fail
+      // on SignatureValid. Setup requires a valid saveInviteWithSigning
+      // round-trip; the assertion shape is documented.
+      const { authorityEngine } = await createNetworkAndAuthority()
+      const invite = authorityEngine.createAuthorityInvite('SigCheck')
+      const sig = makeRealSignature('user-1', invite.digest)
+      await authorityEngine.saveInviteWithSigning(invite, 'iad', sig)
+      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
+      const slot = await ctx.db
+        .prepare('select Cid from InviteSlot where Name = :n')
+        .get({ ':n': 'SigCheck' })
+      let caught: unknown
+      try {
+        await ctx.db.exec(
+          `insert into InviteResult (SlotCid, IsAccepted, Digest, InviteSignature, InvokedId)
+           values (:cid, true, 'd', 'wrong-signature', null)`,
+          { ':cid': slot!.Cid as string }
+        )
+      } catch (err) {
+        caught = err
+      }
+      expect((caught as Error)?.message).to.include('SignatureValid')
+    })
 
-    it.skip('should reject rejection when Digest is not null (DigestValid) — BLOCKED on quereus#23')
+    it.skip('should reject acceptance when Digest is null (DigestValid) — BLOCKED on quereus#23', async () => {
+      const { authorityEngine } = await createNetworkAndAuthority()
+      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
+      let caught: unknown
+      try {
+        await ctx.db.exec(
+          `insert into InviteResult (SlotCid, IsAccepted, Digest, InviteSignature, InvokedId)
+           values ('any', true, null, 'sig', null)`
+        )
+      } catch (err) {
+        caught = err
+      }
+      expect((caught as Error)?.message).to.include('DigestValid')
+    })
+
+    it.skip('should reject rejection when Digest is not null (DigestValid) — BLOCKED on quereus#23', async () => {
+      const { authorityEngine } = await createNetworkAndAuthority()
+      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
+      let caught: unknown
+      try {
+        await ctx.db.exec(
+          `insert into InviteResult (SlotCid, IsAccepted, Digest, InviteSignature, InvokedId)
+           values ('any', false, 'non-null', 'sig', null)`
+        )
+      } catch (err) {
+        caught = err
+      }
+      expect((caught as Error)?.message).to.include('DigestValid')
+    })
   })
 
   // -----------------------------------------------------------------------
@@ -645,62 +1615,520 @@ describe('AuthorityEngine', () => {
   // tests retained as the flow's natural-language witness once #23 ships.
   // -----------------------------------------------------------------------
   describe('admin signing flow', () => {
-    it.skip('should create an AdminSigning session with a random nonce — BLOCKED on quereus#23 (covered in signing.spec.ts)')
+    it.skip('should create an AdminSigning session with a random nonce — BLOCKED on quereus#23 (covered in signing.spec.ts)', async () => {
+      const { authority, authorityEngine } = await createNetworkAndAuthority()
+      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
+      // proposeAdmin triggers SigningEngine.startSigningSession internally.
+      const sig = makeRealSignature('user-1')
+      await authorityEngine.proposeAdmin(
+        {
+          proposed: {
+            officers: [
+              {
+                existing: {
+                  userId: 'user-1',
+                  authorityId: authority.id,
+                  title: 'Chair',
+                  scopes: ['rad'] as Scope[]
+                }
+              }
+            ],
+            effectiveAt: Date.now() + 60_000,
+            thresholdPolicies: [{ policy: 'rad', threshold: 1 }]
+          },
+          signers: ['user-1']
+        },
+        sig
+      )
+      const row = await ctx.db
+        .prepare(
+          'select Nonce from AdminSigning where AuthorityId = :id order by Nonce desc limit 1'
+        )
+        .get({ ':id': authority.id })
+      expect(row?.Nonce).to.be.a('string').with.length.greaterThan(0)
+    })
 
-    it.skip('should reject AdminSigning with an invalid scope code (ScopeValid) — BLOCKED on quereus#23')
+    it.skip('should reject AdminSigning with an invalid scope code (ScopeValid) — BLOCKED on quereus#23', async () => {
+      const { authority, authorityEngine } = await createNetworkAndAuthority()
+      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
+      const sig = makeRealSignature('user-1')
+      let caught: unknown
+      try {
+        await ctx.db.exec(
+          `insert into AdminSigning (Nonce, AuthorityId, AdminEffectiveAt, Scope, Digest, UserId, SignerKey, Signature)
+           with context now = datetime('now')
+           values ('bad-scope', :id, :e, 'xx', 'd', 'user-1', :key, :sig)`,
+          {
+            ':id': authority.id,
+            ':e': new Date().toISOString(),
+            ':key': sig.signerKey,
+            ':sig': sig.signature
+          }
+        )
+      } catch (err) {
+        caught = err
+      }
+      expect((caught as Error)?.message).to.include('ScopeValid')
+    })
 
-    it.skip('should validate the instigator signature on AdminSigning (SignatureValid) — BLOCKED on quereus#23')
+    it.skip('should validate the instigator signature on AdminSigning (SignatureValid) — BLOCKED on quereus#23', async () => {
+      const { authority, authorityEngine } = await createNetworkAndAuthority()
+      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
+      const sig = makeRealSignature('user-1')
+      let caught: unknown
+      try {
+        await ctx.db.exec(
+          `insert into AdminSigning (Nonce, AuthorityId, AdminEffectiveAt, Scope, Digest, UserId, SignerKey, Signature)
+           with context now = datetime('now')
+           values ('bad-sig', :id, :e, 'rad', 'd', 'user-1', :key, 'deadbeef')`,
+          {
+            ':id': authority.id,
+            ':e': new Date().toISOString(),
+            ':key': sig.signerKey
+          }
+        )
+      } catch (err) {
+        caught = err
+      }
+      expect((caught as Error)?.message).to.include('SignatureValid')
+    })
 
-    it.skip('should reject update or delete of AdminSigning (InsertOnly) — BLOCKED on quereus#23')
+    it.skip('should reject update or delete of AdminSigning (InsertOnly) — BLOCKED on quereus#23', async () => {
+      const { authorityEngine } = await createNetworkAndAuthority()
+      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
+      let updateErr: unknown
+      try {
+        await ctx.db.exec(
+          `update AdminSigning set Scope = 'rn' with context now = datetime('now')`
+        )
+      } catch (err) {
+        updateErr = err
+      }
+      expect((updateErr as Error)?.message).to.include('InsertOnly')
 
-    it.skip('should accept OfficerSignature when the officer has the required scope and digest matches — BLOCKED on quereus#23')
+      let deleteErr: unknown
+      try {
+        await ctx.db.exec(
+          `delete from AdminSigning with context now = datetime('now')`
+        )
+      } catch (err) {
+        deleteErr = err
+      }
+      expect((deleteErr as Error)?.message).to.include('InsertOnly')
+    })
 
-    it.skip('should reject OfficerSignature when the signature does not match the digest — BLOCKED on quereus#23')
+    it.skip('should accept OfficerSignature when the officer has the required scope and digest matches — BLOCKED on quereus#23', async () => {
+      // Happy-path OfficerSignature insertion through the full proposeAdmin
+      // chain — covered in detail in signing.spec.ts. Asserts the row lands.
+      const { authority, authorityEngine } = await createNetworkAndAuthority()
+      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
+      const sig = makeRealSignature('user-1')
+      await authorityEngine.proposeAdmin(
+        {
+          proposed: {
+            officers: [
+              {
+                existing: {
+                  userId: 'user-1',
+                  authorityId: authority.id,
+                  title: 'Chair',
+                  scopes: ['rad'] as Scope[]
+                }
+              }
+            ],
+            effectiveAt: Date.now() + 60_000,
+            thresholdPolicies: [{ policy: 'rad', threshold: 1 }]
+          },
+          signers: ['user-1']
+        },
+        sig
+      )
+      const row = await ctx.db
+        .prepare('select count(*) as n from OfficerSignature')
+        .get({})
+      expect(Number(row?.n)).to.be.greaterThan(0)
+    })
 
-    it.skip('should create AdminSignature only when the threshold of OfficerSignatures is met — BLOCKED on quereus#23 (covered in signing.spec.ts threshold-met test)')
+    it.skip('should reject OfficerSignature when the signature does not match the digest — BLOCKED on quereus#23', async () => {
+      const { authority, authorityEngine } = await createNetworkAndAuthority()
+      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
+      const sig = makeRealSignature('user-1')
+      const nonce = 'mismatch-' + crypto.randomUUID()
+      await ctx.db.exec(
+        `insert into AdminSigning (Nonce, AuthorityId, AdminEffectiveAt, Scope, Digest, UserId, SignerKey, Signature)
+         with context now = datetime('now')
+         values (:n, :id, :e, 'rad', 'real-digest', 'user-1', :key, :sig)`,
+        {
+          ':n': nonce,
+          ':id': authority.id,
+          ':e': new Date().toISOString(),
+          ':key': sig.signerKey,
+          ':sig': sig.signature
+        }
+      )
+      let caught: unknown
+      try {
+        await ctx.db.exec(
+          `insert into OfficerSignature (SigningNonce, UserId, SignerKey, Signature)
+           with context now = datetime('now')
+           values (:n, 'user-1', :key, 'wrong-sig')`,
+          { ':n': nonce, ':key': sig.signerKey }
+        )
+      } catch (err) {
+        caught = err
+      }
+      expect((caught as Error)?.message).to.include('SignatureValid')
+    })
 
-    it.skip('should reject AdminSignature when insufficient OfficerSignatures exist — BLOCKED on quereus#23')
+    it.skip('should create AdminSignature only when the threshold of OfficerSignatures is met — BLOCKED on quereus#23 (covered in signing.spec.ts threshold-met test)', async () => {
+      // Sentinel post-state: proposeAdmin with threshold=1 should land an
+      // AdminSignature row after the single officer signs.
+      const { authority, authorityEngine } = await createNetworkAndAuthority()
+      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
+      const sig = makeRealSignature('user-1')
+      await authorityEngine.proposeAdmin(
+        {
+          proposed: {
+            officers: [
+              {
+                existing: {
+                  userId: 'user-1',
+                  authorityId: authority.id,
+                  title: 'Chair',
+                  scopes: ['rad'] as Scope[]
+                }
+              }
+            ],
+            effectiveAt: Date.now() + 60_000,
+            thresholdPolicies: [{ policy: 'rad', threshold: 1 }]
+          },
+          signers: ['user-1']
+        },
+        sig
+      )
+      const row = await ctx.db
+        .prepare('select count(*) as n from AdminSignature')
+        .get({})
+      expect(Number(row?.n)).to.be.greaterThan(0)
+    })
+
+    it.skip('should reject AdminSignature when insufficient OfficerSignatures exist — BLOCKED on quereus#23', async () => {
+      const { authorityEngine } = await createNetworkAndAuthority()
+      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
+      let caught: unknown
+      try {
+        await ctx.db.exec(
+          `insert into AdminSignature (SigningNonce) values ('no-sigs-nonce')`
+        )
+      } catch (err) {
+        caught = err
+      }
+      expect((caught as Error)?.message).to.include('SignatureValid')
+    })
   })
 
   // -----------------------------------------------------------------------
   // 17. Administration Lifecycle
   // -----------------------------------------------------------------------
   describe('administration lifecycle', () => {
-    it.skip('should allow admin renewal before expiration with proper signatures — BLOCKED on quereus#23')
+    // These lifecycle witnesses duplicate proposeAdmin + signing.spec.ts
+    // coverage. They assert observable post-state shapes; the deeper
+    // multi-step setup (time-warp, threshold-met chain across multiple
+    // admins) will be wired in when #23 lands.
 
-    it.skip('should allow primary authority to replace expired admin of another authority — BLOCKED on quereus#23')
+    it.skip('should allow admin renewal before expiration with proper signatures — BLOCKED on quereus#23', async () => {
+      const { authority, authorityEngine } = await createNetworkAndAuthority()
+      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
+      const sig = makeRealSignature('user-1')
+      await authorityEngine.proposeAdmin(
+        {
+          proposed: {
+            officers: [
+              {
+                existing: {
+                  userId: 'user-1',
+                  authorityId: authority.id,
+                  title: 'Chair',
+                  scopes: ['rad'] as Scope[]
+                }
+              }
+            ],
+            effectiveAt: Date.now() + 60_000,
+            thresholdPolicies: [{ policy: 'rad', threshold: 1 }]
+          },
+          signers: ['user-1']
+        },
+        sig
+      )
+      const row = await ctx.db
+        .prepare(
+          'select count(*) as n from ProposedAdmin where AuthorityId = :id'
+        )
+        .get({ ':id': authority.id })
+      expect(Number(row?.n)).to.be.greaterThan(0)
+    })
 
-    it.skip('should require a new network if the primary authority admin itself expires without renewal — BLOCKED on quereus#23')
+    it.skip('should allow primary authority to replace expired admin of another authority — BLOCKED on quereus#23', async () => {
+      const { authorityEngine } = await createNetworkAndAuthority()
+      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
+      const row = await ctx.db
+        .prepare('select count(*) as n from Authority')
+        .get({})
+      expect(Number(row?.n)).to.equal(1)
+    })
 
-    it.skip('should transition proposed admin to current admin after signing threshold is met — BLOCKED on quereus#23')
+    it.skip('should require a new network if the primary authority admin itself expires without renewal — BLOCKED on quereus#23', async () => {
+      const { authority, authorityEngine } = await createNetworkAndAuthority()
+      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
+      const row = await ctx.db
+        .prepare(
+          'select AuthorityId from CurrentAdmin where AuthorityId = :id'
+        )
+        .get({ ':id': authority.id })
+      expect(row?.AuthorityId).to.equal(authority.id)
+    })
+
+    it.skip('should transition proposed admin to current admin after signing threshold is met — BLOCKED on quereus#23', async () => {
+      // Post-#23 sweep: after the full proposeAdmin + signing chain
+      // completes, the ProposedAdmin row should be promoted (or its
+      // EffectiveAt should now appear in CurrentAdmin).
+      const { authority, authorityEngine } = await createNetworkAndAuthority()
+      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
+      const sig = makeRealSignature('user-1')
+      const newEffectiveAt = Date.now() + 60_000
+      await authorityEngine.proposeAdmin(
+        {
+          proposed: {
+            officers: [
+              {
+                existing: {
+                  userId: 'user-1',
+                  authorityId: authority.id,
+                  title: 'Chair',
+                  scopes: ['rad'] as Scope[]
+                }
+              }
+            ],
+            effectiveAt: newEffectiveAt,
+            thresholdPolicies: [{ policy: 'rad', threshold: 1 }]
+          },
+          signers: ['user-1']
+        },
+        sig
+      )
+      const adminSig = await ctx.db
+        .prepare('select count(*) as n from AdminSignature')
+        .get({})
+      expect(Number(adminSig?.n)).to.be.greaterThan(0)
+    })
   })
 
   // -----------------------------------------------------------------------
   // 18. Invitation Flow - Authority
   // -----------------------------------------------------------------------
   describe('invitation flow - authority invites', () => {
-    it.skip('should create an InviteSlot with a valid CID, key pair, and AdminSignature backing — BLOCKED on quereus#23')
+    it.skip('should create an InviteSlot with a valid CID, key pair, and AdminSignature backing — BLOCKED on quereus#23', async () => {
+      const { authorityEngine } = await createNetworkAndAuthority()
+      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
+      const invite = authorityEngine.createAuthorityInvite('InviteCheck')
+      const sig = makeRealSignature('user-1', invite.digest)
+      await authorityEngine.saveInviteWithSigning(invite, 'iad', sig)
+      const row = await ctx.db
+        .prepare('select Cid, InviteKey from InviteSlot where Name = :n')
+        .get({ ':n': 'InviteCheck' })
+      expect(row?.Cid).to.be.a('string').with.length.greaterThan(0)
+      expect(row?.InviteKey).to.equal(invite.inviteKey)
+    })
 
-    it.skip('should allow creating a new Authority via accepted invite with valid proof of possession — BLOCKED on quereus#23')
+    it.skip('should allow creating a new Authority via accepted invite with valid proof of possession — BLOCKED on quereus#23', async () => {
+      // Full flow: saveInviteWithSigning → respondToInvite(accept) →
+      // NetworkEngine.createAuthority succeeds with context.InviteSlotCid.
+      // Post-#23 sweep wires up the engine path that consumes the invite.
+      const { networkEngine, authorityEngine } = await createNetworkAndAuthority()
+      const invite = authorityEngine.createAuthorityInvite('NewAuthority')
+      const sig = makeRealSignature('user-1', invite.digest)
+      await authorityEngine.saveInviteWithSigning(invite, 'iad', sig)
+      await networkEngine.respondToInvite({
+        invite: { digest: invite.digest } as never,
+        isAccepted: true,
+        invokes: { authority: { name: 'NewAuthority', domainName: 'na.example' } },
+        inviteSignature: invite.inviteSignature,
+        userId: undefined,
+        userInit: undefined
+      } as never)
+      // Sweep: when createAuthority(...) accepts InviteSlotCid context, run
+      // it here and assert a new Authority row exists.
+      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
+      const row = await ctx.db
+        .prepare('select count(*) as n from InviteResult')
+        .get({})
+      expect(Number(row?.n)).to.be.greaterThan(0)
+    })
 
-    it.skip('should prevent reuse of an already-claimed invite slot — BLOCKED on quereus#23')
+    it.skip('should prevent reuse of an already-claimed invite slot — BLOCKED on quereus#23', async () => {
+      // InviteResult primary key is SlotCid; a duplicate insert collides.
+      const { networkEngine, authorityEngine } = await createNetworkAndAuthority()
+      const invite = authorityEngine.createAuthorityInvite('ReusedSlot')
+      const sig = makeRealSignature('user-1', invite.digest)
+      await authorityEngine.saveInviteWithSigning(invite, 'iad', sig)
+      await networkEngine.respondToInvite({
+        invite: { digest: invite.digest } as never,
+        isAccepted: true,
+        invokes: { authority: { name: 'X', domainName: 'x.example' } },
+        inviteSignature: invite.inviteSignature,
+        userId: undefined,
+        userInit: undefined
+      } as never)
+      let caught: unknown
+      try {
+        await networkEngine.respondToInvite({
+          invite: { digest: invite.digest } as never,
+          isAccepted: true,
+          invokes: { authority: { name: 'Y', domainName: 'y.example' } },
+          inviteSignature: invite.inviteSignature,
+          userId: undefined,
+          userInit: undefined
+        } as never)
+      } catch (err) {
+        caught = err
+      }
+      expect(caught).to.not.equal(undefined)
+    })
 
-    it.skip('should create InviteResult marking acceptance with digest and invite signature — BLOCKED on quereus#23')
+    it.skip('should create InviteResult marking acceptance with digest and invite signature — BLOCKED on quereus#23', async () => {
+      const { networkEngine, authorityEngine } = await createNetworkAndAuthority()
+      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
+      const invite = authorityEngine.createAuthorityInvite('AcceptCheck')
+      const sig = makeRealSignature('user-1', invite.digest)
+      await authorityEngine.saveInviteWithSigning(invite, 'iad', sig)
+      await networkEngine.respondToInvite({
+        invite: { digest: invite.digest } as never,
+        isAccepted: true,
+        invokes: { authority: { name: 'AC', domainName: 'ac.example' } },
+        inviteSignature: invite.inviteSignature,
+        userId: undefined,
+        userInit: undefined
+      } as never)
+      const row = await ctx.db
+        .prepare(
+          'select IsAccepted, Digest, InviteSignature from InviteResult where SlotCid = :c'
+        )
+        .get({ ':c': invite.digest })
+      expect(Boolean(row?.IsAccepted)).to.equal(true)
+      expect(row?.Digest).to.not.equal(null)
+      expect(row?.InviteSignature).to.equal(invite.inviteSignature)
+    })
 
-    it.skip('should create InviteResult marking rejection with null digest — BLOCKED on quereus#23')
+    it.skip('should create InviteResult marking rejection with null digest — BLOCKED on quereus#23', async () => {
+      const { networkEngine, authorityEngine } = await createNetworkAndAuthority()
+      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
+      const invite = authorityEngine.createAuthorityInvite('RejectCheck')
+      const sig = makeRealSignature('user-1', invite.digest)
+      await authorityEngine.saveInviteWithSigning(invite, 'iad', sig)
+      await networkEngine.respondToInvite({
+        invite: { digest: invite.digest } as never,
+        isAccepted: false,
+        invokes: undefined,
+        inviteSignature: invite.inviteSignature,
+        userId: undefined,
+        userInit: undefined
+      } as never)
+      const row = await ctx.db
+        .prepare('select IsAccepted, Digest from InviteResult where SlotCid = :c')
+        .get({ ':c': invite.digest })
+      expect(Boolean(row?.IsAccepted)).to.equal(false)
+      expect(row?.Digest).to.equal(null)
+    })
   })
 
   // -----------------------------------------------------------------------
   // 19. Invitation Flow - Officer
   // -----------------------------------------------------------------------
   describe('invitation flow - officer invites', () => {
-    it.skip('should create an InviteSlot for an officer invite with type "of" — BLOCKED on quereus#23')
+    it.skip('should create an InviteSlot for an officer invite with type "of" — BLOCKED on quereus#23', async () => {
+      const { authorityEngine } = await createNetworkAndAuthority()
+      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
+      const invite = authorityEngine.createOfficerInvite({
+        name: 'OfType',
+        title: 'Inspector',
+        scopes: ['rad'] as Scope[]
+      })
+      const sig = makeRealSignature('user-1', invite.digest)
+      await authorityEngine.saveInviteWithSigning(invite, 'rad', sig)
+      const row = await ctx.db
+        .prepare('select Type from InviteSlot where Name = :n')
+        .get({ ':n': 'OfType' })
+      expect(row?.Type).to.equal('of')
+    })
 
-    it.skip('should include officer name, title, and scopes in the invite — BLOCKED on quereus#23')
+    it.skip('should include officer name, title, and scopes in the invite — BLOCKED on quereus#23', async () => {
+      const { authorityEngine } = await createNetworkAndAuthority()
+      const invite = authorityEngine.createOfficerInvite({
+        name: 'Officer X',
+        title: 'Inspector',
+        scopes: ['rad', 'iad'] as Scope[]
+      })
+      expect(invite.name).to.equal('Officer X')
+      expect(invite.title).to.equal('Inspector')
+      expect(invite.scopes).to.deep.equal(['rad', 'iad'])
+    })
 
-    it.skip('should allow accepting an officer invite to associate a user with the authority — BLOCKED on quereus#23')
+    it.skip('should allow accepting an officer invite to associate a user with the authority — BLOCKED on quereus#23', async () => {
+      const { networkEngine, authorityEngine } = await createNetworkAndAuthority()
+      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
+      const invite = authorityEngine.createOfficerInvite({
+        name: 'OfAccept',
+        title: 'Inspector',
+        scopes: ['rad'] as Scope[]
+      })
+      const sig = makeRealSignature('user-1', invite.digest)
+      await authorityEngine.saveInviteWithSigning(invite, 'rad', sig)
+      await networkEngine.respondToInvite({
+        invite: { digest: invite.digest } as never,
+        isAccepted: true,
+        invokes: { officer: { userId: 'user-2', title: 'Inspector' } },
+        inviteSignature: invite.inviteSignature,
+        userId: 'user-2',
+        userInit: undefined
+      } as never)
+      const row = await ctx.db
+        .prepare('select IsAccepted from InviteResult where SlotCid = :c')
+        .get({ ':c': invite.digest })
+      expect(Boolean(row?.IsAccepted)).to.equal(true)
+    })
 
-    it.skip('should prevent reuse of an already-claimed officer invite slot — BLOCKED on quereus#23')
+    it.skip('should prevent reuse of an already-claimed officer invite slot — BLOCKED on quereus#23', async () => {
+      const { networkEngine, authorityEngine } = await createNetworkAndAuthority()
+      const invite = authorityEngine.createOfficerInvite({
+        name: 'OfReuse',
+        title: 'Inspector',
+        scopes: ['rad'] as Scope[]
+      })
+      const sig = makeRealSignature('user-1', invite.digest)
+      await authorityEngine.saveInviteWithSigning(invite, 'rad', sig)
+      await networkEngine.respondToInvite({
+        invite: { digest: invite.digest } as never,
+        isAccepted: true,
+        invokes: { officer: { userId: 'user-3', title: 'A' } },
+        inviteSignature: invite.inviteSignature,
+        userId: 'user-3',
+        userInit: undefined
+      } as never)
+      let caught: unknown
+      try {
+        await networkEngine.respondToInvite({
+          invite: { digest: invite.digest } as never,
+          isAccepted: true,
+          invokes: { officer: { userId: 'user-4', title: 'B' } },
+          inviteSignature: invite.inviteSignature,
+          userId: 'user-4',
+          userInit: undefined
+        } as never)
+      } catch (err) {
+        caught = err
+      }
+      expect(caught).to.not.equal(undefined)
+    })
   })
 })
 
