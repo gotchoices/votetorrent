@@ -13,6 +13,13 @@ import type {
 import type { INetworksEngine } from '@votetorrent/vote-core';
 import { prepareDb } from '../database/initialize.js';
 
+// Plan 03-05 Q1 — monotonic counter for Tid generation. Same Tid bound across
+// every INSERT in a single create() batch (matches the schema's "one logical
+// transaction = one Tid" framing). Re-evaluate at v2 persistence milestone
+// (PERSIST-01): a process-local counter that resets to 1 on restart can
+// collide with stored Tids once DBs persist across runs.
+let nextTid = 1;
+
 export class NetworksEngine implements INetworksEngine {
 	// D-07: per-instance hash→EngineContext cache.
 	// Lifetime is bound to this NetworksEngine instance (AppProvider owns one).
@@ -69,21 +76,26 @@ export class NetworksEngine implements INetworksEngine {
 			throw new Error('Failed to create network: User key is required');
 		}
 
+		// Plan 03-05 Q1: one Tid per create() batch.
+		const tid = nextTid++;
+
 		try {
-			// KNOWN ISSUE — this multi-INSERT batch is a silent no-op today.
-			// `db.eval` returns an AsyncIterableIterator and only executes
-			// during iteration; awaiting it (the historical pattern) unwraps
-			// the iterator without running any SQL. Switching to `db.exec`
-			// exposes a chain of compounding schema/engine issues that are
-			// out of scope for Plan 03-01: (1) `TransactionId()` is a phantom
-			// SQL function the schema invokes via `with context Tid = ...`,
-			// (2) the `ElectionType` view's derived-column-alias form fails
-			// at CHECK-eval time, (3) `NoSigningNonceOnInsert` references
-			// bare `SigningNonce` without a `context.` prefix, (4) each
-			// table's INSERT needs its full declared `with context (...)`
-			// bound by the engine. See 03-01-SUMMARY.md for the full chain.
-			// Tracked for a dedicated follow-up plan.
-			await ctx.db.eval(
+			// Plan 03-05 Task 3: db.exec (vs the old awaited db.eval which was a
+			// silent no-op — iterator never drained), with per-INSERT context
+			// envelopes (Plan 03-05 Q2 — engine-side per-INSERT binding) and
+			// the monotonic Tid bound for every statement in the batch.
+			//
+			// All six INSERTs run in a single db.exec batch so Quereus's
+			// deferred-constraint queue can resolve cross-table CHECKs
+			// (notably Network.PrimaryAuthorityIdValid → Authority) at the
+			// end of the batch rather than at the moment of each insert.
+			//
+			// Schema kept as-written intentionally: when upstream Quereus
+			// ships fixes for #21 (view union-all), #22 (not-in), #23
+			// (check on delete), #24 (json_array_elements_text), the
+			// affected CHECK constraints will start enforcing correctly
+			// without any further engine change.
+			await ctx.db.exec(
 				`
 				insert into Network (
 					Id,
@@ -96,7 +108,7 @@ export class NetworksEngine implements INetworksEngine {
 					NumberRequiredTSAs,
 					ElectionType
 				)
-				with context Tid = TransactionId()
+				with context SigningNonce = null, Tid = ${tid}
 				values (
 					:networkId,
 					:networkHash,
@@ -107,7 +119,7 @@ export class NetworksEngine implements INetworksEngine {
 					:timestampAuthorities,
 					:numberRequiredTSAs,
 					:electionType
-				)
+				);
 
 				insert into Authority (
 					Id,
@@ -115,14 +127,16 @@ export class NetworksEngine implements INetworksEngine {
 					DomainName,
 					ImageRef
 				)
-				values (:primaryAuthorityId, :primaryAuthorityName, :primaryAuthorityDomainName, :primaryAuthorityImageRef)
+				with context SigningNonce = null, InviteSlotCid = null, InviteSignature = null, Tid = ${tid}
+				values (:primaryAuthorityId, :primaryAuthorityName, :primaryAuthorityDomainName, :primaryAuthorityImageRef);
 
 				insert into Admin (
 					AuthorityId,
 					EffectiveAt,
 					ThresholdPolicies
 				)
-				values (:primaryAuthorityId, :adminEffectiveAt, :thresholdPolicies)
+				with context SigningNonce = null, InviteSlotCid = null, InviteSignature = null, Tid = ${tid}
+				values (:primaryAuthorityId, :adminEffectiveAt, :thresholdPolicies);
 
 				insert into Officer (
 					AuthorityId,
@@ -131,14 +145,16 @@ export class NetworksEngine implements INetworksEngine {
 					Title,
 					Scopes
 				)
-				values (:primaryAuthorityId, :adminEffectiveAt, :userId, :title, :scopes)
+				with context SigningNonce = null, InviteSlotCid = null, InviteSignature = null, Tid = ${tid}
+				values (:primaryAuthorityId, :adminEffectiveAt, :userId, :title, :scopes);
 
 				insert into User (
 					Id,
 					Name,
 					ImageRef
 				)
-				values (:userId, :userName, :userImageRef)
+				with context SigningNonce = null, InviteSlotCid = null, InviteSignature = null, Tid = ${tid}
+				values (:userId, :userName, :userImageRef);
 
 				insert into UserKey (
 					UserId,
@@ -146,8 +162,8 @@ export class NetworksEngine implements INetworksEngine {
 					PubKey,
 					Expiration
 				)
-				with context now = datetime('now')
-				values (:userId, :keyType, :keyValue, :expiration)
+				with context UserKey = null, Signature = null, Tid = ${tid}, now = datetime('now')
+				values (:userId, :keyType, :keyValue, :expiration);
 				`,
 				{
 					networkId,
