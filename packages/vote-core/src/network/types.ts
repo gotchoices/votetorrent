@@ -12,6 +12,7 @@ import type {
 } from '../index.js'
 import type { InviteAction } from '../invite/models.js'
 import type { IUserEngine } from '../user/types.js'
+import type { IBuilder } from '../common/builder.js'
 
 export interface INetworkEngine {
   createAuthority(authority: AuthorityInit, admin: AdminInit): Promise<void>
@@ -36,4 +37,29 @@ export interface INetworkEngine {
     invite: InviteAction<TInvokes>
   ): Promise<string>
   unpinAuthority(authorityId: string): Promise<void>
+  buildCreateAuthority(): INetworkCreateAuthorityBuilder
+  buildPinAuthority(): INetworkPinAuthorityBuilder
+  buildUnpinAuthority(): INetworkUnpinAuthorityBuilder
+  buildProposeRevision(): INetworkProposeRevisionBuilder
+  buildRespondToInvite<TInvokes>(): INetworkRespondToInviteBuilder<TInvokes>
+}
+
+export interface INetworkCreateAuthorityBuilder extends IBuilder<{ authority: AuthorityInit; admin: AdminInit }, void> {
+  fromPayload(payload: { authority: AuthorityInit; admin: AdminInit }): this
+}
+
+export interface INetworkPinAuthorityBuilder extends IBuilder<Authority, void> {
+  fromPayload(payload: Authority): this
+}
+
+export interface INetworkUnpinAuthorityBuilder extends IBuilder<string, void> {
+  fromPayload(payload: string): this
+}
+
+export interface INetworkProposeRevisionBuilder extends IBuilder<NetworkRevision, void> {
+  fromPayload(payload: NetworkRevision): this
+}
+
+export interface INetworkRespondToInviteBuilder<TInvokes> extends IBuilder<InviteAction<TInvokes>, string> {
+  fromPayload(payload: InviteAction<TInvokes>): this
 }
