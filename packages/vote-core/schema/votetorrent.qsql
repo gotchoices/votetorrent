@@ -826,6 +826,7 @@ declare schema main
 							or ( SignatureType = 'election' and exists (select 1 from ElectionSignatureTaskExtension E where E.TaskId = new.Id))
 							or ( SignatureType = 'election-revision' and exists (select 1 from ElectionRevisionSignatureTaskExtension ER where ER.TaskId = new.Id))
 							or ( SignatureType = 'ballot' and exists (select 1 from BallotSignatureTaskExtension B where B.TaskId = new.Id))
+								or ( SignatureType = 'registration' and exists (select 1 from RegistrationSignatureTaskExtension RS where RS.TaskId = new.Id))
 					)
 		),
 		constraint MutationValid check on insert, update (context.IsMutationValid = true)
@@ -1058,7 +1059,325 @@ declare schema main
 		union all select 'network' as Code
 		union all select 'election' as Code
 		union all select 'election-revision' as Code
-		union all select 'ballot' as Code;
+		union all select 'ballot' as Code
+		union all select 'registration' as Code;
+
+	-- ═══════════════════════════════════════════════════════════════════════
+	-- Registration
+	-- Voter registration, device association, authority peers, polling devices
+	-- ═══════════════════════════════════════════════════════════════════════
+
+	view RegistrantStatus as
+		select 'a' as Code, 'Active' as Name
+		union all select 's', 'Suspended'
+		union all select 'r', 'Revoked';
+
+	table Registrant (
+		Id text primary key, -- 32 byte random unique registrant identifier
+		AuthorityId text, -- authority that validated this registrant
+		PrivateCid text, -- content-addressed hash of the registrant's private data
+		PublicCid text null, -- content-addressed hash of the registrant's public data (null if no public data)
+		Status text default 'a', -- references RegistrantStatus(Code)
+		Expiration datetime,
+		SignorKey text, -- public key of the authority signor
+		Signature text, -- signature of this record by the signor
+		constraint AuthorityIdValid check (exists (select 1 from Authority A where A.Id = new.AuthorityId)),
+		constraint StatusValid check (Status in (select Code from RegistrantStatus)),
+		constraint ExpirationValid check (isISODatetime(Expiration) and like('%Z', Expiration)),
+		constraint ExpirationFuture check on insert (Expiration > context.now),
+		constraint IdImmutable check on update (new.Id = old.Id),
+		constraint AuthorityIdImmutable check on update (new.AuthorityId = old.AuthorityId),
+		constraint SignatureValid check (
+			SignatureValid(
+				Digest(Id, AuthorityId, PrivateCid, PublicCid, Status, Expiration),
+				Signature,
+				SignorKey
+			)
+		),
+		constraint NoDelete check on delete (false),
+		constraint MutationValid check on insert, update (
+			exists (
+				select 1 from AdminSignature ASig join AdminSigning A on A.Nonce = ASig.SigningNonce
+					where A.Nonce = context.SigningNonce
+						and A.AuthorityId = new.AuthorityId
+						and A.Scope = 'vrg'
+						and A.Digest = Digest(
+							Tid, new.Id, new.AuthorityId, new.PrivateCid, new.PublicCid, new.Status, new.Expiration, new.SignorKey, new.Signature
+						)
+			)
+		)
+	)
+		with context ( SigningNonce text, Tid int, now datetime );
+
+	table RegistrantPublic (
+		Cid text primary key, -- content-addressed hash of this record
+		RegistrantId text, -- references Registrant.Id
+		LastName text null,
+		FirstName text null,
+		District text null,
+		ExtraFields text null, -- json object for authority-specific public fields
+		constraint RegistrantIdValid check (exists (select 1 from Registrant R where R.Id = new.RegistrantId)),
+		constraint CidValid check (Cid = Digest(RegistrantId, LastName, FirstName, District, ExtraFields)),
+		constraint RegistrantCidMatch check (exists (select 1 from Registrant R where R.Id = new.RegistrantId and R.PublicCid = new.Cid)),
+		constraint InsertOnly check on update, delete (false),
+		constraint InsertValid check on insert (
+			exists (
+				select 1 from AdminSignature ASig join AdminSigning A on A.Nonce = ASig.SigningNonce
+					where A.Nonce = context.SigningNonce
+						and A.Scope = 'vrg'
+						and A.Digest = Digest(
+							Tid, new.Cid, new.RegistrantId, new.LastName, new.FirstName, new.District, new.ExtraFields
+						)
+			)
+		)
+	)
+		with context ( SigningNonce text, Tid int );
+
+	index RegistrantPublicRegistrantId on RegistrantPublic (RegistrantId);
+
+	table ElectionRegistrant (
+		ElectionId text,
+		RegistrantId text,
+		primary key (ElectionId, RegistrantId),
+		constraint ElectionIdValid check (exists (select 1 from Election E where E.Id = new.ElectionId)),
+		constraint RegistrantIdValid check (exists (select 1 from Registrant R where R.Id = new.RegistrantId and R.Status = 'a')),
+		constraint RegistrantNotExpired check (exists (select 1 from Registrant R where R.Id = new.RegistrantId and R.Expiration > context.now)),
+		constraint InsertValid check on insert (
+			exists (
+				select 1 from AdminSignature ASig join AdminSigning A on A.Nonce = ASig.SigningNonce
+					where A.Nonce = context.SigningNonce
+						and A.Scope = 'vrg'
+						and A.Digest = Digest(
+							Tid, new.ElectionId, new.RegistrantId
+						)
+			)
+		),
+		constraint DeleteValid check on delete (
+			exists (
+				select 1 from AdminSignature ASig join AdminSigning A on A.Nonce = ASig.SigningNonce
+					where A.Nonce = context.SigningNonce
+						and A.Scope = 'vrg'
+						and A.Digest = Digest(
+							Tid, old.ElectionId, old.RegistrantId, 'delete'
+						)
+			)
+		),
+		constraint NoUpdate check on update (false)
+	)
+		with context ( SigningNonce text, Tid int, now datetime );
+
+	index ElectionRegistrantRegistrant on ElectionRegistrant (RegistrantId);
+
+	table Association (
+		RegistrantId text,
+		DeviceKey text, -- public key for voting; private key in biometrically secured TPM
+		DeviceHash text, -- sha256 hash of the device's ID (not the ID itself, for privacy)
+		Expiration datetime,
+		SignorKey text, -- public key of the authority signor
+		Signature text, -- signature of this record by the signor
+		primary key (RegistrantId, DeviceKey),
+		constraint RegistrantIdValid check (exists (select 1 from Registrant R where R.Id = new.RegistrantId and R.Status = 'a')),
+		constraint ExpirationValid check (isISODatetime(Expiration) and like('%Z', Expiration)),
+		constraint ExpirationFuture check on insert (Expiration > context.now),
+		constraint SignatureValid check (
+			SignatureValid(
+				Digest(RegistrantId, DeviceKey, DeviceHash, Expiration),
+				Signature,
+				SignorKey
+			)
+		),
+		constraint InsertValid check on insert (
+			exists (
+				select 1 from AdminSignature ASig join AdminSigning A on A.Nonce = ASig.SigningNonce
+					where A.Nonce = context.SigningNonce
+						and A.Scope = 'vrg'
+						and A.Digest = Digest(
+							Tid, new.RegistrantId, new.DeviceKey, new.DeviceHash, new.Expiration, new.SignorKey, new.Signature
+						)
+			)
+		),
+		constraint NoUpdate check on update (false),
+		constraint DeleteValid check on delete (
+			exists (
+				select 1 from AdminSignature ASig join AdminSigning A on A.Nonce = ASig.SigningNonce
+					where A.Nonce = context.SigningNonce
+						and A.Scope = 'vrg'
+						and A.Digest = Digest(
+							Tid, old.RegistrantId, old.DeviceKey, 'delete'
+						)
+			)
+		)
+	)
+		with context ( SigningNonce text, Tid int, now datetime );
+
+	index AssociationDeviceHash on Association (DeviceHash);
+
+	view CurrentAssociation as
+		select A.RegistrantId, A.DeviceKey, A.DeviceHash, A.Expiration
+			from Association A
+			join Registrant R on R.Id = A.RegistrantId
+			where A.Expiration > datetime('now') and R.Status = 'a' and R.Expiration > datetime('now');
+
+	table AuthorityPeer (
+		AuthorityId text,
+		PeerId text,
+		primary key (AuthorityId, PeerId),
+		constraint AuthorityIdValid check (exists (select 1 from Authority A where A.Id = new.AuthorityId)),
+		constraint InsertValid check on insert (
+			exists (
+				select 1 from AdminSignature ASig join AdminSigning A on A.Nonce = ASig.SigningNonce
+					where A.Nonce = context.SigningNonce
+						and A.AuthorityId = new.AuthorityId
+						and A.Scope = 'cap'
+						and A.Digest = Digest(
+							Tid, new.AuthorityId, new.PeerId
+						)
+			)
+		),
+		constraint DeleteValid check on delete (
+			exists (
+				select 1 from AdminSignature ASig join AdminSigning A on A.Nonce = ASig.SigningNonce
+					where A.Nonce = context.SigningNonce
+						and A.AuthorityId = old.AuthorityId
+						and A.Scope = 'cap'
+						and A.Digest = Digest(
+							Tid, old.AuthorityId, old.PeerId, 'delete'
+						)
+			)
+		),
+		constraint NoUpdate check on update (false)
+	)
+		with context ( SigningNonce text, Tid int );
+
+	table PollingDevice (
+		AuthorityId text,
+		DeviceHash text, -- sha256 hash of the device ID
+		Label text null, -- human-readable label for the polling location/device
+		primary key (AuthorityId, DeviceHash),
+		constraint AuthorityIdValid check (exists (select 1 from Authority A where A.Id = new.AuthorityId)),
+		constraint InsertValid check on insert (
+			exists (
+				select 1 from AdminSignature ASig join AdminSigning A on A.Nonce = ASig.SigningNonce
+					where A.Nonce = context.SigningNonce
+						and A.AuthorityId = new.AuthorityId
+						and A.Scope = 'vrg'
+						and A.Digest = Digest(
+							Tid, new.AuthorityId, new.DeviceHash, new.Label
+						)
+			)
+		),
+		constraint DeleteValid check on delete (
+			exists (
+				select 1 from AdminSignature ASig join AdminSigning A on A.Nonce = ASig.SigningNonce
+					where A.Nonce = context.SigningNonce
+						and A.AuthorityId = old.AuthorityId
+						and A.Scope = 'vrg'
+						and A.Digest = Digest(
+							Tid, old.AuthorityId, old.DeviceHash, 'delete'
+						)
+			)
+		),
+		constraint NoUpdate check on update (false)
+	)
+		with context ( SigningNonce text, Tid int );
+
+	-- Registration: Proposed variants for the proposal/multi-sig workflow
+
+	table ProposedRegistrant (
+		Id text primary key,
+		AuthorityId text,
+		PrivateCid text,
+		PublicCid text null,
+		Status text default 'a',
+		Expiration datetime,
+		SignorKey text,
+		Signature text,
+		constraint AuthorityIdValid check (exists (select 1 from Authority A where A.Id = new.AuthorityId)),
+		constraint StatusValid check (Status in (select Code from RegistrantStatus)),
+		constraint ExpirationValid check (isISODatetime(Expiration) and like('%Z', Expiration)),
+		constraint UserValid check (
+			exists (
+				select 1 from Officer O
+					join CurrentAdmin CA on CA.AuthorityId = O.AuthorityId and CA.EffectiveAt = O.AdminEffectiveAt
+					join UserKey K on K.UserId = O.UserId and K.Key = context.UserKey and K.Expiration > context.now
+					where O.UserId = context.UserId and O.AuthorityId = new.AuthorityId
+						and exists(select 1 from json_array_elements_text(O.Scopes) S(s) where s = 'vrg')
+						and SignatureValid(
+							Digest(Tid, coalesce(new.Id, old.Id), coalesce(new.AuthorityId, old.AuthorityId),
+								coalesce(new.PrivateCid, old.PrivateCid), coalesce(new.PublicCid, old.PublicCid),
+								coalesce(new.Status, old.Status), coalesce(new.Expiration, old.Expiration),
+								coalesce(new.SignorKey, old.SignorKey), coalesce(new.Signature, old.Signature)),
+							context.Signature,
+							context.UserKey
+						)
+			)
+		)
+	)
+		with context ( UserId text, UserKey text, Signature text, Tid int, now datetime );
+
+	table ProposedAssociation (
+		RegistrantId text,
+		DeviceKey text,
+		DeviceHash text,
+		Expiration datetime,
+		SignorKey text,
+		Signature text,
+		primary key (RegistrantId, DeviceKey),
+		constraint RegistrantIdValid check (
+			exists (select 1 from Registrant R where R.Id = new.RegistrantId)
+				or exists (select 1 from ProposedRegistrant R where R.Id = new.RegistrantId)
+		),
+		constraint ExpirationValid check (isISODatetime(Expiration) and like('%Z', Expiration)),
+		constraint UserValid check (
+			exists (
+				select 1 from Officer O
+					join CurrentAdmin CA on CA.AuthorityId = O.AuthorityId and CA.EffectiveAt = O.AdminEffectiveAt
+					join UserKey K on K.UserId = O.UserId and K.Key = context.UserKey and K.Expiration > context.now
+					where O.UserId = context.UserId
+						and exists(select 1 from json_array_elements_text(O.Scopes) S(s) where s = 'vrg')
+						and SignatureValid(
+							Digest(Tid, coalesce(new.RegistrantId, old.RegistrantId), coalesce(new.DeviceKey, old.DeviceKey),
+								coalesce(new.DeviceHash, old.DeviceHash), coalesce(new.Expiration, old.Expiration),
+								coalesce(new.SignorKey, old.SignorKey), coalesce(new.Signature, old.Signature)),
+							context.Signature,
+							context.UserKey
+						)
+			)
+		)
+	)
+		with context ( UserId text, UserKey text, Signature text, Tid int, now datetime );
+
+	-- Registration: Signature task extension
+
+	table RegistrationSignatureTaskExtension (
+		TaskId text primary key,
+		RegistrantId text,
+		constraint TaskIdValid check (exists (select 1 from Task T where T.Id = new.TaskId and T.SignatureType = 'registration')),
+		constraint RegistrantIdValid check (exists (select 1 from ProposedRegistrant R where R.Id = new.RegistrantId)),
+		constraint MutationValid check on insert, update (
+			exists (
+				select 1 from Task T join AdminSigning A on A.Nonce = T.SigningNonce and A.Scope = 'vrg'
+					join ProposedRegistrant PR on PR.Id = new.RegistrantId
+						where T.Id = new.TaskId
+							and T.IsCompleted = false
+							and A.Digest = Digest(
+								Tid, PR.Id, PR.AuthorityId, PR.PrivateCid, PR.PublicCid, PR.Status, PR.Expiration, PR.SignorKey, PR.Signature
+							)
+			)
+			and not exists (
+				select 1 from Task T join AdminSigning A on A.Nonce = T.SigningNonce
+					join AdminSignature ASig on ASig.SigningNonce = A.Nonce
+						where T.Id = new.TaskId and T.IsCompleted = false
+			)
+		),
+		constraint DeleteValid check on delete (
+			not exists (select 1 from Task T where T.Id = old.TaskId)
+				or exists (select 1 from Task T where T.Id = old.TaskId and T.IsCompleted = true)
+		)
+	)
+		with context ( Tid int );
+
+	index RegistrationSignatureTaskRegistrant on RegistrationSignatureTaskExtension (RegistrantId);
 
 }
 

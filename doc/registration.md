@@ -75,3 +75,17 @@ In-person voting using a tablet furnished by the authority, avoids disenfranchis
 ### Exclusively In-Person
 
 VoteTorrent can be used entirely as an in-person voting system via the above.  As such a system, it still provides advantages over historically monolithic systems.  The community is provided transparency, can contribute server infrastructure, and would not be subject to various forms of mistakes and corruption at the hands of poll-workers and administrators.
+
+
+
+## Minimal Reference Implementation workflow
+
+Registration Workflow (from App User's Perspective)
+  
+  1. Open app, select network — User launches VoteTorrent, picks the election network they want to register with.
+  2. Register — User taps "Register", provides required private and public identity info (name, district, etc.). The app bundles this into a registration request sent to the authority's peer cluster. The authority verifies the info (potentially out-of-band — ID check, existing voter roll lookup), then signs a Registrant record. The signed record is returned to the user and published to the Election Network.
+  3. Associate device — User completes a biometric unlock (FaceID/fingerprint) to prove TPM access. The app generates a device attestation (challenge-response with the authority), and the authority signs an Association record binding the registrant to the device's public key. This record is also published to the network.
+  4. Election enrollment — When an election is published, the authority (or the user, if permitted) creates an ElectionRegistrant entry linking the registrant to that election. The user sees the election appear in their ballot list.
+  5. Vote — The user's device signs their ballot with the TPM-backed private key from the Association. Network nodes verify the Association and ElectionRegistrant records to confirm legitimacy.
+
+  In-person variant (step 3 differs): At a polling location, the voter uses a whitelisted tablet (PollingDevice). The app forces re-association — the voter looks up their registration, scans biometrics, and gets a fresh Association for that tablet's key. The authority accepts duplicate device hashes for whitelisted devices.
