@@ -902,7 +902,7 @@ describe('NetworkEngine', () => {
 			const nonce = 'nonce-' + crypto.randomUUID();
 			await ctx.db.exec(
 				`insert into AdminSigning (Nonce, AuthorityId, AdminEffectiveAt, Scope, Digest, UserId, SignerKey, Signature)
-         with context now = ${Date.now()}, IsSignatureValid = true
+         with context now = ${Date.now()}, IsSignatureValid = true, IsSignerKeyValid = true
          values (:nonce, :authId, :effAt, 'rn', :digest, :uid, :key, :sig)`,
 				{
 					nonce: nonce,
@@ -928,7 +928,7 @@ describe('NetworkEngine', () => {
 			try {
 				await ctx.db.exec(
 					`insert into AdminSigning (Nonce, AuthorityId, AdminEffectiveAt, Scope, Digest, UserId, SignerKey, Signature)
-           with context now = ${Date.now()}
+           with context now = ${Date.now()}, IsSignatureValid = true, IsSignerKeyValid = true
            values (:nonce, :authId, :effAt, 'xx', :digest, :uid, :key, :sig)`,
 					{
 						nonce: 'bad-scope-nonce',
@@ -954,7 +954,7 @@ describe('NetworkEngine', () => {
 			try {
 				await ctx.db.exec(
 					`insert into AdminSigning (Nonce, AuthorityId, AdminEffectiveAt, Scope, Digest, UserId, SignerKey, Signature)
-           with context now = ${Date.now()}
+           with context now = ${Date.now()}, IsSignatureValid = true, IsSignerKeyValid = true
            values ('bad-sig-nonce', :authId, :effAt, 'rn', 'd', :uid, :key, 'deadbeef')`,
 					{
 						authId: details.network.primaryAuthorityId,
@@ -996,7 +996,7 @@ describe('NetworkEngine', () => {
 			const nonce = 'os-mismatch-' + crypto.randomUUID();
 			await ctx.db.exec(
 				`insert into AdminSigning (Nonce, AuthorityId, AdminEffectiveAt, Scope, Digest, UserId, SignerKey, Signature)
-         with context now = ${Date.now()}, IsSignatureValid = true
+         with context now = ${Date.now()}, IsSignatureValid = true, IsSignerKeyValid = true
          values (:nonce, :authId, :effAt, 'rn', 'd-true', :uid, :key, :sig)`,
 				{
 					nonce: nonce,
@@ -1011,7 +1011,7 @@ describe('NetworkEngine', () => {
 			try {
 				await ctx.db.exec(
 					`insert into OfficerSignature (SigningNonce, UserId, SignerKey, Signature)
-           with context now = ${Date.now()}, IsSignatureValid = false
+           with context now = ${Date.now()}, IsSignatureValid = false, IsSignerKeyValid = true, IsOfficerValid = true
            values (:nonce, :uid, :key, 'wrong-sig')`,
 					{
 						nonce: nonce,
@@ -2167,7 +2167,7 @@ describe('NetworksEngine - creation constraints', () => {
 			try {
 				await ctx.db.exec(
 					`insert into InviteSlot (Cid, Type, Name, Expiration, InviteKey, InviteSignature, SigningNonce)
-           with context Tid = 9, now = ${Date.now()}, IsSignatureValid = true
+           with context Tid = 9, now = ${Date.now()}, IsSignatureValid = false
            values ('badsig-cid', 'au', 'BadSig', :exp, 'pubkey', 'not-a-real-sig', 'nonce')`,
 					{ exp: new Date(Date.now() + 60_000).toISOString() },
 				);

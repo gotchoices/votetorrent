@@ -1462,7 +1462,7 @@ describe('AuthorityEngine', () => {
       try {
         await ctx.db.exec(
           `insert into InviteSlot (Cid, Type, Name, Expiration, InviteKey, InviteSignature, SigningNonce)
-           with context Tid = 9, now = ${Date.now()}, IsSignatureValid = true
+           with context Tid = 9, now = ${Date.now()}, IsSignatureValid = false
            values ('cid', 'au', 'BadSig', :e, 'pk', 'wrong-sig', 'nonce')`,
           { e: new Date(Date.now() + 60_000).toISOString() }
         )
@@ -1662,7 +1662,7 @@ describe('AuthorityEngine', () => {
       try {
         await ctx.db.exec(
           `insert into AdminSigning (Nonce, AuthorityId, AdminEffectiveAt, Scope, Digest, UserId, SignerKey, Signature)
-           with context now = ${Date.now()}, IsSignatureValid = true
+           with context now = ${Date.now()}, IsSignatureValid = true, IsSignerKeyValid = true
            values ('bad-scope', :id, :e, 'xx', 'd', 'user-1', :key, :sig)`,
           {
             id: authority.id,
@@ -1762,7 +1762,7 @@ describe('AuthorityEngine', () => {
       const nonce = 'mismatch-' + crypto.randomUUID()
       await ctx.db.exec(
         `insert into AdminSigning (Nonce, AuthorityId, AdminEffectiveAt, Scope, Digest, UserId, SignerKey, Signature)
-         with context now = ${Date.now()}, IsSignatureValid = true
+         with context now = ${Date.now()}, IsSignatureValid = true, IsSignerKeyValid = true
          values (:n, :id, :e, 'rad', 'real-digest', 'user-1', :key, :sig)`,
         {
           n: nonce,
