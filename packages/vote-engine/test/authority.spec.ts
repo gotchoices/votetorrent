@@ -2187,3 +2187,481 @@ describe('AuthorityEngine', () => {
 // reconstruction; the current makeRealSignature reads privateHex back
 // via Uint8Array.from + .match.
 void bytesToHex
+
+// ===========================================================================
+// Authority Builder Tests (Phase 09 — BUILD-AUTH-01)
+// ===========================================================================
+
+import {
+  BuilderAlreadyCommittedError,
+  BuilderValidationError
+} from '@votetorrent/vote-core'
+import { AuthorityCreateOfficerInviteBuilder } from '../src/authority/builders/authority-create-officer-invite-builder.js'
+import { AuthorityCreateAuthorityInviteBuilder } from '../src/authority/builders/authority-create-authority-invite-builder.js'
+import { AuthorityProposeAdminBuilder } from '../src/authority/builders/authority-propose-admin-builder.js'
+import { AuthoritySaveInviteWithSigningBuilder } from '../src/authority/builders/authority-save-invite-with-signing-builder.js'
+import { MockAuthorityEngine } from '../src/authority/mock-authority-engine.js'
+import type {
+  AuthorityInvite,
+  AuthorityInviteShare,
+  OfficerInviteShare
+} from '@votetorrent/vote-core'
+
+// ---------------------------------------------------------------------------
+// Builder test helpers
+// ---------------------------------------------------------------------------
+
+function makeStubAuthorityEngine (): IAuthorityEngine {
+  return {
+    createOfficerInvite (init: OfficerInit): OfficerInviteShare {
+      return {
+        ...init,
+        type: 'of',
+        expiration: '2099-01-01T00:00:00',
+        inviteKey: '02' + 'aa'.repeat(32),
+        invitePrivate: 'bb'.repeat(32),
+        inviteSignature: 'cc'.repeat(64),
+        digest: 'dd'.repeat(16)
+      }
+    },
+    createAuthorityInvite (name: string): AuthorityInviteShare {
+      return {
+        name,
+        type: 'au',
+        expiration: '2099-01-01T00:00:00',
+        inviteKey: '02' + 'ee'.repeat(32),
+        invitePrivate: 'ff'.repeat(32),
+        inviteSignature: '11'.repeat(64),
+        digest: '22'.repeat(16)
+      }
+    },
+    async proposeAdmin (): Promise<void> {},
+    async saveInviteWithSigning (): Promise<void> {},
+    async getAdminDetails () { throw new Error('not implemented') },
+    async getAuthorityInvites () { throw new Error('not implemented') },
+    async getDetails () { throw new Error('not implemented') },
+    buildCreateOfficerInvite () { throw new Error('not implemented') },
+    buildCreateAuthorityInvite () { throw new Error('not implemented') },
+    buildProposeAdmin () { throw new Error('not implemented') },
+    buildSaveInviteWithSigning () { throw new Error('not implemented') }
+  }
+}
+
+function makeSignature (): Signature {
+  return {
+    signature: 'aa'.repeat(64),
+    signerKey: '02' + 'bb'.repeat(32),
+    signerUserId: 'user-1'
+  }
+}
+
+function makeOfficerInit (): OfficerInit {
+  return { name: 'Alice', title: 'Secretary', scopes: ['rad'] as Scope[] }
+}
+
+function makeAdminProposal (): Proposal<AdminInit> {
+  return {
+    proposed: {
+      officers: [{ init: { name: 'Admin A', title: 'Chair', scopes: ['rad'] as Scope[] } }],
+      effectiveAt: Date.now() + 60_000,
+      thresholdPolicies: [{ policy: 'rad', threshold: 1 }]
+    },
+    signers: ['user-1']
+  }
+}
+
+function makeAuthorityInvite (): AuthorityInvite {
+  return {
+    name: 'TestCorp',
+    type: 'au',
+    expiration: '2099-01-01T00:00:00',
+    inviteKey: '02' + 'aa'.repeat(32),
+    inviteSignature: 'bb'.repeat(64),
+    digest: 'cc'.repeat(16)
+  }
+}
+
+// ---------------------------------------------------------------------------
+// AuthorityCreateOfficerInviteBuilder
+// ---------------------------------------------------------------------------
+
+describe('AuthorityCreateOfficerInviteBuilder', () => {
+  it('empty builder reports isValid===false and lists required missingFields', () => {
+    const builder = new AuthorityCreateOfficerInviteBuilder(makeStubAuthorityEngine())
+    expect(builder.isValid()).to.equal(false)
+    const missing = builder.missingFields().map(m => m.path)
+    expect(missing).to.include('name')
+    expect(missing).to.include('title')
+    expect(missing).to.include('scopes')
+  })
+
+  it('per-setter validation: empty name records BuilderError without throwing', () => {
+    const builder = new AuthorityCreateOfficerInviteBuilder(makeStubAuthorityEngine())
+      .setName('')
+    const errs = builder.errors()
+    expect(errs.some(e => e.path === 'name' && e.code === 'EMPTY')).to.equal(true)
+  })
+
+  it('errors/missingFields progression as setters fill fields', () => {
+    const engine = makeStubAuthorityEngine()
+    let b = new AuthorityCreateOfficerInviteBuilder(engine)
+    expect(b.missingFields().length).to.equal(3)
+
+    b = b.setName('Alice')
+    expect(b.missingFields().length).to.equal(2)
+
+    b = b.setTitle('Secretary')
+    expect(b.missingFields().length).to.equal(1)
+
+    b = b.setScopes(['rad'] as Scope[])
+    expect(b.missingFields().length).to.equal(0)
+    expect(b.isValid()).to.equal(true)
+  })
+
+  it('SC4 DB-FREE: isValid===true => commit() returns OfficerInviteShare AND double-commit sync-guard', async () => {
+    const builder = new AuthorityCreateOfficerInviteBuilder(makeStubAuthorityEngine())
+      .setName('Alice')
+      .setTitle('Secretary')
+      .setScopes(['rad'] as Scope[])
+
+    expect(builder.isValid()).to.equal(true)
+    const result = await builder.commit()
+    expect(result.type).to.equal('of')
+    expect(result.name).to.equal('Alice')
+    expect(result.inviteKey).to.be.a('string')
+
+    // Double-commit guard
+    expect(() => builder.commit()).to.throw(BuilderAlreadyCommittedError)
+  })
+
+  it('round-trip serialization and fromJSON kind/version rejection', () => {
+    const engine = makeStubAuthorityEngine()
+    const builder = new AuthorityCreateOfficerInviteBuilder(engine)
+      .setName('Alice')
+      .setTitle('Secretary')
+      .setScopes(['rad'] as Scope[])
+
+    const json = builder.toJSON()
+    expect(json.kind).to.equal('authority.createOfficerInvite')
+    expect(json.version).to.equal(1)
+
+    const restored = AuthorityCreateOfficerInviteBuilder.fromJSON(json, engine)
+    expect(restored.isValid()).to.equal(true)
+    expect(restored.toEngineInput().name).to.equal('Alice')
+
+    // Wrong kind
+    expect(() => AuthorityCreateOfficerInviteBuilder.fromJSON(
+      { kind: 'wrong', version: 1, draft: {} }, engine
+    )).to.throw(/unknown kind/)
+
+    // Wrong version
+    expect(() => AuthorityCreateOfficerInviteBuilder.fromJSON(
+      { kind: 'authority.createOfficerInvite', version: 99, draft: {} }, engine
+    )).to.throw(/unsupported version/)
+  })
+
+  it('toEngineInput returns OfficerInit shape; throws on incomplete', () => {
+    const builder = new AuthorityCreateOfficerInviteBuilder(makeStubAuthorityEngine())
+    expect(() => builder.toEngineInput()).to.throw(BuilderValidationError)
+
+    const complete = builder.setName('A').setTitle('T').setScopes(['rad'] as Scope[])
+    const input = complete.toEngineInput()
+    expect(input).to.deep.equal({ name: 'A', title: 'T', scopes: ['rad'] })
+  })
+
+  it('FACT-04 parity: MockAuthorityEngine.buildCreateOfficerInvite() returns instanceof AuthorityCreateOfficerInviteBuilder', () => {
+    const mock = new MockAuthorityEngine({ id: 'auth-1', name: 'Test', domainName: 'test.org' })
+    const builder = mock.buildCreateOfficerInvite()
+    expect(builder).to.be.instanceOf(AuthorityCreateOfficerInviteBuilder)
+  })
+
+  it.skip('REAL ENGINE equivalence smoke — BLOCKED on quereus#23')
+})
+
+// ---------------------------------------------------------------------------
+// AuthorityCreateAuthorityInviteBuilder
+// ---------------------------------------------------------------------------
+
+describe('AuthorityCreateAuthorityInviteBuilder', () => {
+  it('empty builder reports isValid===false and lists required missingFields', () => {
+    const builder = new AuthorityCreateAuthorityInviteBuilder(makeStubAuthorityEngine())
+    expect(builder.isValid()).to.equal(false)
+    const missing = builder.missingFields().map(m => m.path)
+    expect(missing).to.include('name')
+  })
+
+  it('per-setter validation: empty name records BuilderError without throwing', () => {
+    const builder = new AuthorityCreateAuthorityInviteBuilder(makeStubAuthorityEngine())
+      .setName('')
+    const errs = builder.errors()
+    expect(errs.some(e => e.path === 'name' && e.code === 'EMPTY')).to.equal(true)
+  })
+
+  it('errors/missingFields progression as setters fill fields', () => {
+    const engine = makeStubAuthorityEngine()
+    let b = new AuthorityCreateAuthorityInviteBuilder(engine)
+    expect(b.missingFields().length).to.equal(1)
+
+    b = b.setName('Corp')
+    expect(b.missingFields().length).to.equal(0)
+    expect(b.isValid()).to.equal(true)
+  })
+
+  it('SC4 DB-FREE: isValid===true => commit() returns AuthorityInviteShare AND double-commit sync-guard', async () => {
+    const builder = new AuthorityCreateAuthorityInviteBuilder(makeStubAuthorityEngine())
+      .setName('Corp')
+
+    expect(builder.isValid()).to.equal(true)
+    const result = await builder.commit()
+    expect(result.type).to.equal('au')
+    expect(result.name).to.equal('Corp')
+
+    expect(() => builder.commit()).to.throw(BuilderAlreadyCommittedError)
+  })
+
+  it('round-trip serialization and fromJSON kind/version rejection', () => {
+    const engine = makeStubAuthorityEngine()
+    const builder = new AuthorityCreateAuthorityInviteBuilder(engine)
+      .setName('Corp')
+
+    const json = builder.toJSON()
+    expect(json.kind).to.equal('authority.createAuthorityInvite')
+    expect(json.version).to.equal(1)
+
+    const restored = AuthorityCreateAuthorityInviteBuilder.fromJSON(json, engine)
+    expect(restored.isValid()).to.equal(true)
+
+    expect(() => AuthorityCreateAuthorityInviteBuilder.fromJSON(
+      { kind: 'wrong', version: 1, draft: {} }, engine
+    )).to.throw(/unknown kind/)
+
+    expect(() => AuthorityCreateAuthorityInviteBuilder.fromJSON(
+      { kind: 'authority.createAuthorityInvite', version: 99, draft: {} }, engine
+    )).to.throw(/unsupported version/)
+  })
+
+  it('toEngineInput returns string; throws on incomplete', () => {
+    const builder = new AuthorityCreateAuthorityInviteBuilder(makeStubAuthorityEngine())
+    expect(() => builder.toEngineInput()).to.throw(BuilderValidationError)
+
+    const complete = builder.setName('Corp')
+    expect(complete.toEngineInput()).to.equal('Corp')
+  })
+
+  it('FACT-04 parity: MockAuthorityEngine.buildCreateAuthorityInvite() returns instanceof AuthorityCreateAuthorityInviteBuilder', () => {
+    const mock = new MockAuthorityEngine({ id: 'auth-1', name: 'Test', domainName: 'test.org' })
+    const builder = mock.buildCreateAuthorityInvite()
+    expect(builder).to.be.instanceOf(AuthorityCreateAuthorityInviteBuilder)
+  })
+
+  it.skip('REAL ENGINE equivalence smoke — BLOCKED on quereus#23')
+})
+
+// ---------------------------------------------------------------------------
+// AuthorityProposeAdminBuilder
+// ---------------------------------------------------------------------------
+
+describe('AuthorityProposeAdminBuilder', () => {
+  it('empty builder reports isValid===false and lists required missingFields', () => {
+    const builder = new AuthorityProposeAdminBuilder(makeStubAuthorityEngine())
+    expect(builder.isValid()).to.equal(false)
+    const missing = builder.missingFields().map(m => m.path)
+    expect(missing).to.include('admin')
+    expect(missing).to.include('signature')
+  })
+
+  it('per-setter validation: invalid admin object', () => {
+    const builder = new AuthorityProposeAdminBuilder(makeStubAuthorityEngine())
+      .setAdmin('not-an-object' as never)
+    const errs = builder.errors()
+    expect(errs.some(e => e.path === 'admin' && e.code === 'INVALID')).to.equal(true)
+  })
+
+  it('per-setter validation: invalid signature object', () => {
+    const builder = new AuthorityProposeAdminBuilder(makeStubAuthorityEngine())
+      .setSignature({ signature: '', signerKey: '', signerUserId: '' })
+    const errs = builder.errors()
+    expect(errs.some(e => e.path === 'signature' && e.code === 'INVALID')).to.equal(true)
+  })
+
+  it('errors/missingFields progression as setters fill fields', () => {
+    const engine = makeStubAuthorityEngine()
+    let b = new AuthorityProposeAdminBuilder(engine)
+    expect(b.missingFields().length).to.equal(2)
+
+    b = b.setAdmin(makeAdminProposal())
+    expect(b.missingFields().length).to.equal(1)
+
+    b = b.setSignature(makeSignature())
+    expect(b.missingFields().length).to.equal(0)
+    expect(b.isValid()).to.equal(true)
+  })
+
+  it('SC4 DB-FREE: isValid===true => commit() resolves AND double-commit sync-guard', async () => {
+    const builder = new AuthorityProposeAdminBuilder(makeStubAuthorityEngine())
+      .setAdmin(makeAdminProposal())
+      .setSignature(makeSignature())
+
+    expect(builder.isValid()).to.equal(true)
+    await builder.commit()
+
+    try {
+      await builder.commit()
+      expect.fail('expected double-commit to throw BuilderAlreadyCommittedError')
+    } catch (err) {
+      expect(err).to.be.instanceOf(BuilderAlreadyCommittedError)
+    }
+  })
+
+  it('round-trip serialization and fromJSON kind/version rejection', () => {
+    const engine = makeStubAuthorityEngine()
+    const builder = new AuthorityProposeAdminBuilder(engine)
+      .setAdmin(makeAdminProposal())
+      .setSignature(makeSignature())
+
+    const json = builder.toJSON()
+    expect(json.kind).to.equal('authority.proposeAdmin')
+    expect(json.version).to.equal(1)
+
+    const restored = AuthorityProposeAdminBuilder.fromJSON(json, engine)
+    expect(restored.isValid()).to.equal(true)
+
+    expect(() => AuthorityProposeAdminBuilder.fromJSON(
+      { kind: 'wrong', version: 1, draft: {} }, engine
+    )).to.throw(/unknown kind/)
+
+    expect(() => AuthorityProposeAdminBuilder.fromJSON(
+      { kind: 'authority.proposeAdmin', version: 99, draft: {} }, engine
+    )).to.throw(/unsupported version/)
+  })
+
+  it('toEngineInput returns { admin, signature } shape; throws on incomplete', () => {
+    const builder = new AuthorityProposeAdminBuilder(makeStubAuthorityEngine())
+    expect(() => builder.toEngineInput()).to.throw(BuilderValidationError)
+
+    const complete = builder.setAdmin(makeAdminProposal()).setSignature(makeSignature())
+    const input = complete.toEngineInput()
+    expect(input).to.have.property('admin')
+    expect(input).to.have.property('signature')
+  })
+
+  it('cross-field: admin.signers empty surfaces cross-field error code NO_SIGNERS', () => {
+    const proposal = makeAdminProposal()
+    proposal.signers = []
+    const builder = new AuthorityProposeAdminBuilder(makeStubAuthorityEngine())
+      .setAdmin(proposal)
+      .setSignature(makeSignature())
+
+    expect(builder.isValid()).to.equal(false)
+    const errs = builder.errors()
+    expect(errs.some(e => e.code === 'NO_SIGNERS' && e.kind === 'cross-field')).to.equal(true)
+  })
+
+  it('FACT-04 parity: MockAuthorityEngine.buildProposeAdmin() returns instanceof AuthorityProposeAdminBuilder', () => {
+    const mock = new MockAuthorityEngine({ id: 'auth-1', name: 'Test', domainName: 'test.org' })
+    const builder = mock.buildProposeAdmin()
+    expect(builder).to.be.instanceOf(AuthorityProposeAdminBuilder)
+  })
+
+  it.skip('REAL ENGINE equivalence smoke — BLOCKED on quereus#23')
+})
+
+// ---------------------------------------------------------------------------
+// AuthoritySaveInviteWithSigningBuilder
+// ---------------------------------------------------------------------------
+
+describe('AuthoritySaveInviteWithSigningBuilder', () => {
+  it('empty builder reports isValid===false and lists required missingFields', () => {
+    const builder = new AuthoritySaveInviteWithSigningBuilder(makeStubAuthorityEngine())
+    expect(builder.isValid()).to.equal(false)
+    const missing = builder.missingFields().map(m => m.path)
+    expect(missing).to.include('invite')
+    expect(missing).to.include('scope')
+    expect(missing).to.include('signature')
+  })
+
+  it('per-setter validation: invalid invite object', () => {
+    const builder = new AuthoritySaveInviteWithSigningBuilder(makeStubAuthorityEngine())
+      .setInvite('not-an-object' as never)
+    const errs = builder.errors()
+    expect(errs.some(e => e.path === 'invite' && e.code === 'INVALID')).to.equal(true)
+  })
+
+  it('errors/missingFields progression as setters fill fields', () => {
+    const engine = makeStubAuthorityEngine()
+    let b = new AuthoritySaveInviteWithSigningBuilder(engine)
+    expect(b.missingFields().length).to.equal(3)
+
+    b = b.setInvite(makeAuthorityInvite())
+    expect(b.missingFields().length).to.equal(2)
+
+    b = b.setScope('iad')
+    expect(b.missingFields().length).to.equal(1)
+
+    b = b.setSignature(makeSignature())
+    expect(b.missingFields().length).to.equal(0)
+    expect(b.isValid()).to.equal(true)
+  })
+
+  it('SC4 DB-FREE: isValid===true => commit() resolves AND double-commit sync-guard', async () => {
+    const builder = new AuthoritySaveInviteWithSigningBuilder(makeStubAuthorityEngine())
+      .setInvite(makeAuthorityInvite())
+      .setScope('iad')
+      .setSignature(makeSignature())
+
+    expect(builder.isValid()).to.equal(true)
+    await builder.commit()
+
+    try {
+      await builder.commit()
+      expect.fail('expected double-commit to throw BuilderAlreadyCommittedError')
+    } catch (err) {
+      expect(err).to.be.instanceOf(BuilderAlreadyCommittedError)
+    }
+  })
+
+  it('round-trip serialization and fromJSON kind/version rejection', () => {
+    const engine = makeStubAuthorityEngine()
+    const builder = new AuthoritySaveInviteWithSigningBuilder(engine)
+      .setInvite(makeAuthorityInvite())
+      .setScope('iad')
+      .setSignature(makeSignature())
+
+    const json = builder.toJSON()
+    expect(json.kind).to.equal('authority.saveInviteWithSigning')
+    expect(json.version).to.equal(1)
+
+    const restored = AuthoritySaveInviteWithSigningBuilder.fromJSON(json, engine)
+    expect(restored.isValid()).to.equal(true)
+
+    expect(() => AuthoritySaveInviteWithSigningBuilder.fromJSON(
+      { kind: 'wrong', version: 1, draft: {} }, engine
+    )).to.throw(/unknown kind/)
+
+    expect(() => AuthoritySaveInviteWithSigningBuilder.fromJSON(
+      { kind: 'authority.saveInviteWithSigning', version: 99, draft: {} }, engine
+    )).to.throw(/unsupported version/)
+  })
+
+  it('toEngineInput returns { invite, scope, signature } shape; throws on incomplete', () => {
+    const builder = new AuthoritySaveInviteWithSigningBuilder(makeStubAuthorityEngine())
+    expect(() => builder.toEngineInput()).to.throw(BuilderValidationError)
+
+    const complete = builder
+      .setInvite(makeAuthorityInvite())
+      .setScope('iad')
+      .setSignature(makeSignature())
+    const input = complete.toEngineInput()
+    expect(input).to.have.property('invite')
+    expect(input).to.have.property('scope')
+    expect(input).to.have.property('signature')
+  })
+
+  it('FACT-04 parity: MockAuthorityEngine.buildSaveInviteWithSigning() returns instanceof AuthoritySaveInviteWithSigningBuilder', () => {
+    const mock = new MockAuthorityEngine({ id: 'auth-1', name: 'Test', domainName: 'test.org' })
+    const builder = mock.buildSaveInviteWithSigning()
+    expect(builder).to.be.instanceOf(AuthoritySaveInviteWithSigningBuilder)
+  })
+
+  it.skip('REAL ENGINE equivalence smoke — BLOCKED on quereus#23')
+})

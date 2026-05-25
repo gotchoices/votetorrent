@@ -11,6 +11,10 @@ import type {
   AuthorityInvite,
   AuthorityInviteShare,
   IAuthorityEngine,
+  IAuthorityCreateOfficerInviteBuilder,
+  IAuthorityCreateAuthorityInviteBuilder,
+  IAuthorityProposeAdminBuilder,
+  IAuthoritySaveInviteWithSigningBuilder,
   InviteStatus,
   OfficerInit,
   OfficerInvite,
@@ -20,6 +24,12 @@ import type {
   SentAuthorityInvite,
   Signature
 } from '@votetorrent/vote-core'
+import {
+  AuthorityCreateOfficerInviteBuilder,
+  AuthorityCreateAuthorityInviteBuilder,
+  AuthorityProposeAdminBuilder,
+  AuthoritySaveInviteWithSigningBuilder
+} from './builders/index.js'
 
 // Local mock data definitions (MOCK_ADMINISTRATORS, MOCK_THRESHOLD_POLICIES, etc.) are removed.
 
@@ -79,5 +89,23 @@ export class MockAuthorityEngine implements IAuthorityEngine {
     console.log(
 			`MockAuthorityEngine: Admin proposed for ${this.authority.name}.`
     )
+  }
+
+  // ---- builder factories (BUILD-AUTH-01 / FACT-04) ----
+
+  buildCreateOfficerInvite (): IAuthorityCreateOfficerInviteBuilder {
+    return new AuthorityCreateOfficerInviteBuilder(this)
+  }
+
+  buildCreateAuthorityInvite (): IAuthorityCreateAuthorityInviteBuilder {
+    return new AuthorityCreateAuthorityInviteBuilder(this)
+  }
+
+  buildProposeAdmin (): IAuthorityProposeAdminBuilder {
+    return new AuthorityProposeAdminBuilder(this)
+  }
+
+  buildSaveInviteWithSigning (): IAuthoritySaveInviteWithSigningBuilder {
+    return new AuthoritySaveInviteWithSigningBuilder(this)
   }
 }

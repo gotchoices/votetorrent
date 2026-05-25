@@ -21,6 +21,10 @@ import type {
   AuthorityInvite,
   AuthorityInviteShare,
   IAuthorityEngine,
+  IAuthorityCreateOfficerInviteBuilder,
+  IAuthorityCreateAuthorityInviteBuilder,
+  IAuthorityProposeAdminBuilder,
+  IAuthoritySaveInviteWithSigningBuilder,
   InviteStatus,
   Proposal,
   ISigningEngine,
@@ -32,6 +36,12 @@ import type {
   OfficerSelection,
   ImageRef
 } from '@votetorrent/vote-core'
+import {
+  AuthorityCreateOfficerInviteBuilder,
+  AuthorityCreateAuthorityInviteBuilder,
+  AuthorityProposeAdminBuilder,
+  AuthoritySaveInviteWithSigningBuilder
+} from './builders/index.js'
 
 export class AuthorityEngine implements IAuthorityEngine {
   constructor (
@@ -545,5 +555,23 @@ export class AuthorityEngine implements IAuthorityEngine {
     } catch (error) {
       throw new Error('Failed to save officer invitation')
     }
+  }
+
+  // ---- builder factories (BUILD-AUTH-01 / FACT-04) ----
+
+  buildCreateOfficerInvite (): IAuthorityCreateOfficerInviteBuilder {
+    return new AuthorityCreateOfficerInviteBuilder(this)
+  }
+
+  buildCreateAuthorityInvite (): IAuthorityCreateAuthorityInviteBuilder {
+    return new AuthorityCreateAuthorityInviteBuilder(this)
+  }
+
+  buildProposeAdmin (): IAuthorityProposeAdminBuilder {
+    return new AuthorityProposeAdminBuilder(this)
+  }
+
+  buildSaveInviteWithSigning (): IAuthoritySaveInviteWithSigningBuilder {
+    return new AuthoritySaveInviteWithSigningBuilder(this)
   }
 }
