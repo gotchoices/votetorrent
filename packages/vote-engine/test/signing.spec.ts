@@ -1,13 +1,21 @@
 import { Database } from '@quereus/quereus'
-import { UserKeyType } from '@votetorrent/vote-core'
+import {
+  BuilderAlreadyCommittedError,
+  BuilderValidationError,
+  UserKeyType
+} from '@votetorrent/vote-core'
 import { expect } from 'chai'
 import { prepareDb } from '../src/database/initialize'
 import { NetworksEngine } from '../src/networks/networks-engine'
 import { SigningEngine } from '../src/signing/signing-engine'
+import { MockSigningEngine } from '../src/signing/mock-signing-engine'
+import { SigningSignBuilder } from '../src/signing/builders/signing-sign-builder.js'
+import { SigningStartSigningSessionBuilder } from '../src/signing/builders/signing-start-signing-session-builder.js'
 import type { EngineContext } from '../src/types.js'
 import { randomTestKeyPair } from './fixtures/keys.js'
 import { AsyncStorage } from './shims/react-native'
 import type {
+  ISigningEngine,
   NetworkInit,
   NetworkReference,
   Scope,
@@ -426,4 +434,255 @@ describe('SigningEngine', () => {
       expect((caught as Error)?.message).to.include('Admin not found')
     })
   })
+})
+
+// ===========================================================================
+// Builder helpers
+// ===========================================================================
+
+function makeStubSigningEngine (): ISigningEngine {
+  return {
+    async sign (_nonce: string, _signature: Signature): Promise<boolean> {
+      return false
+    },
+    async startSigningSession (_authorityId: string, _digest: string, _scope: Scope, _signature: Signature) {
+      return { nonce: 'stub-nonce', thresholdReached: false }
+    },
+    buildSign () {
+      return new SigningSignBuilder(this)
+    },
+    buildStartSigningSession () {
+      return new SigningStartSigningSessionBuilder(this)
+    }
+  }
+}
+
+function makeTestSignature (): Signature {
+  return {
+    signature: 'aa'.repeat(64),
+    signerKey: '02' + 'bb'.repeat(32),
+    signerUserId: 'user-1'
+  }
+}
+
+// ===========================================================================
+// SigningSignBuilder
+// ===========================================================================
+
+describe('SigningSignBuilder', () => {
+  it('empty builder reports isValid===false and lists required missingFields [nonce, signature]', () => {
+    const builder = new SigningSignBuilder(makeStubSigningEngine())
+    expect(builder.isValid()).to.equal(false)
+    const missing = builder.missingFields().map(m => m.path)
+    expect(missing).to.include('nonce')
+    expect(missing).to.include('signature')
+  })
+
+  it('per-setter: empty nonce records BuilderError without throwing', () => {
+    const builder = new SigningSignBuilder(makeStubSigningEngine())
+      .setNonce('')
+    const errs = builder.errors()
+    expect(errs.some(e => e.path === 'nonce' && e.code === 'EMPTY')).to.equal(true)
+  })
+
+  it('per-setter: invalid signature (missing signerKey) records BuilderError', () => {
+    const builder = new SigningSignBuilder(makeStubSigningEngine())
+      .setSignature({ signature: 'aa'.repeat(64), signerKey: '', signerUserId: 'user-1' })
+    const errs = builder.errors()
+    expect(errs.some(e => e.path === 'signature.signerKey' && e.code === 'EMPTY')).to.equal(true)
+  })
+
+  it('errors/missingFields progression as setters fill fields', () => {
+    const engine = makeStubSigningEngine()
+    let b = new SigningSignBuilder(engine)
+    expect(b.missingFields().length).to.equal(2)
+
+    b = b.setNonce('session-uuid-1234')
+    expect(b.missingFields().length).to.equal(1)
+
+    b = b.setSignature(makeTestSignature())
+    expect(b.missingFields().length).to.equal(0)
+    expect(b.isValid()).to.equal(true)
+  })
+
+  it('SC4 DB-FREE: isValid===true => commit() returns boolean AND double-commit sync-guard', async () => {
+    const builder = new SigningSignBuilder(makeStubSigningEngine())
+      .setNonce('session-uuid-1234')
+      .setSignature(makeTestSignature())
+
+    expect(builder.isValid()).to.equal(true)
+    const result = await builder.commit()
+    expect(result).to.be.a('boolean')
+
+    try {
+      await builder.commit()
+      expect.fail('expected double-commit to throw BuilderAlreadyCommittedError')
+    } catch (err) {
+      expect(err).to.be.instanceOf(BuilderAlreadyCommittedError)
+    }
+  })
+
+  it('round-trip serialization and fromJSON kind/version rejection', () => {
+    const engine = makeStubSigningEngine()
+    const builder = new SigningSignBuilder(engine)
+      .setNonce('session-uuid-1234')
+      .setSignature(makeTestSignature())
+
+    const json = builder.toJSON()
+    expect(json.kind).to.equal('signing.sign')
+    expect(json.version).to.equal(1)
+
+    const restored = SigningSignBuilder.fromJSON(json, engine)
+    expect(restored.isValid()).to.equal(true)
+
+    expect(() => SigningSignBuilder.fromJSON(
+      { kind: 'wrong', version: 1, draft: {} }, engine
+    )).to.throw(/unknown kind/)
+
+    expect(() => SigningSignBuilder.fromJSON(
+      { kind: 'signing.sign', version: 99, draft: {} }, engine
+    )).to.throw(/unsupported version/)
+  })
+
+  it('toEngineInput returns { nonce, signature } shape; throws on incomplete', () => {
+    const builder = new SigningSignBuilder(makeStubSigningEngine())
+    expect(() => builder.toEngineInput()).to.throw(BuilderValidationError)
+
+    const complete = builder.setNonce('session-uuid-1234').setSignature(makeTestSignature())
+    const input = complete.toEngineInput()
+    expect(input).to.have.property('nonce')
+    expect(input).to.have.property('signature')
+  })
+
+  it('FACT-04 parity: MockSigningEngine.buildSign() returns instanceof SigningSignBuilder', () => {
+    const mock = new MockSigningEngine()
+    const builder = mock.buildSign()
+    expect(builder).to.be.instanceOf(SigningSignBuilder)
+  })
+
+  it.skip('REAL ENGINE equivalence smoke -- BLOCKED on quereus#23')
+})
+
+// ===========================================================================
+// SigningStartSigningSessionBuilder
+// ===========================================================================
+
+describe('SigningStartSigningSessionBuilder', () => {
+  it('empty builder reports isValid===false and lists required missingFields', () => {
+    const builder = new SigningStartSigningSessionBuilder(makeStubSigningEngine())
+    expect(builder.isValid()).to.equal(false)
+    const missing = builder.missingFields().map(m => m.path)
+    expect(missing).to.include('authorityId')
+    expect(missing).to.include('digest')
+    expect(missing).to.include('scope')
+    expect(missing).to.include('signature')
+  })
+
+  it('per-setter: empty authorityId records BuilderError', () => {
+    const builder = new SigningStartSigningSessionBuilder(makeStubSigningEngine())
+      .setAuthorityId('')
+    const errs = builder.errors()
+    expect(errs.some(e => e.path === 'authorityId' && e.code === 'EMPTY')).to.equal(true)
+  })
+
+  it('per-setter: invalid scope value records INVALID_SCOPE error', () => {
+    const builder = new SigningStartSigningSessionBuilder(makeStubSigningEngine())
+      .setScope('invalid' as never)
+    const errs = builder.errors()
+    expect(errs.some(e => e.path === 'scope' && e.code === 'INVALID_SCOPE')).to.equal(true)
+  })
+
+  it('per-setter: invalid signature (empty signerUserId) records BuilderError', () => {
+    const builder = new SigningStartSigningSessionBuilder(makeStubSigningEngine())
+      .setSignature({ signature: 'aa'.repeat(64), signerKey: '02' + 'bb'.repeat(32), signerUserId: '' })
+    const errs = builder.errors()
+    expect(errs.some(e => e.path === 'signature.signerUserId' && e.code === 'EMPTY')).to.equal(true)
+  })
+
+  it('errors/missingFields progression as setters fill fields', () => {
+    const engine = makeStubSigningEngine()
+    let b = new SigningStartSigningSessionBuilder(engine)
+    expect(b.missingFields().length).to.equal(4)
+
+    b = b.setAuthorityId('auth-1')
+    expect(b.missingFields().length).to.equal(3)
+
+    b = b.setDigest('d'.repeat(64))
+    expect(b.missingFields().length).to.equal(2)
+
+    b = b.setScope('rad')
+    expect(b.missingFields().length).to.equal(1)
+
+    b = b.setSignature(makeTestSignature())
+    expect(b.missingFields().length).to.equal(0)
+    expect(b.isValid()).to.equal(true)
+  })
+
+  it('SC4 DB-FREE: isValid===true => commit() returns SigningResult AND double-commit sync-guard', async () => {
+    const builder = new SigningStartSigningSessionBuilder(makeStubSigningEngine())
+      .setAuthorityId('auth-1')
+      .setDigest('d'.repeat(64))
+      .setScope('rad')
+      .setSignature(makeTestSignature())
+
+    expect(builder.isValid()).to.equal(true)
+    const result = await builder.commit()
+    expect(result).to.have.property('nonce')
+    expect(result).to.have.property('thresholdReached')
+
+    try {
+      await builder.commit()
+      expect.fail('expected double-commit to throw BuilderAlreadyCommittedError')
+    } catch (err) {
+      expect(err).to.be.instanceOf(BuilderAlreadyCommittedError)
+    }
+  })
+
+  it('round-trip serialization and fromJSON kind/version rejection', () => {
+    const engine = makeStubSigningEngine()
+    const builder = new SigningStartSigningSessionBuilder(engine)
+      .setAuthorityId('auth-1')
+      .setDigest('d'.repeat(64))
+      .setScope('rad')
+      .setSignature(makeTestSignature())
+
+    const json = builder.toJSON()
+    expect(json.kind).to.equal('signing.startSigningSession')
+    expect(json.version).to.equal(1)
+
+    const restored = SigningStartSigningSessionBuilder.fromJSON(json, engine)
+    expect(restored.isValid()).to.equal(true)
+
+    expect(() => SigningStartSigningSessionBuilder.fromJSON(
+      { kind: 'wrong', version: 1, draft: {} }, engine
+    )).to.throw(/unknown kind/)
+
+    expect(() => SigningStartSigningSessionBuilder.fromJSON(
+      { kind: 'signing.startSigningSession', version: 99, draft: {} }, engine
+    )).to.throw(/unsupported version/)
+  })
+
+  it('toEngineInput returns { authorityId, digest, scope, signature } shape; throws on incomplete', () => {
+    const builder = new SigningStartSigningSessionBuilder(makeStubSigningEngine())
+    expect(() => builder.toEngineInput()).to.throw(BuilderValidationError)
+
+    const complete = builder
+      .setAuthorityId('auth-1')
+      .setDigest('d'.repeat(64))
+      .setScope('rad')
+      .setSignature(makeTestSignature())
+    const input = complete.toEngineInput()
+    expect(input).to.have.property('authorityId')
+    expect(input).to.have.property('digest')
+    expect(input).to.have.property('scope')
+    expect(input).to.have.property('signature')
+  })
+
+  it('FACT-04 parity: MockSigningEngine.buildStartSigningSession() returns instanceof SigningStartSigningSessionBuilder', () => {
+    const mock = new MockSigningEngine()
+    const builder = mock.buildStartSigningSession()
+    expect(builder).to.be.instanceOf(SigningStartSigningSessionBuilder)
+  })
+
+  it.skip('REAL ENGINE equivalence smoke -- BLOCKED on quereus#23')
 })

@@ -1,10 +1,14 @@
 import { ConstraintError, MisuseError, QuereusError } from '@quereus/quereus'
 import {
   type ISigningEngine,
+  type ISigningSignBuilder,
+  type ISigningStartSigningSessionBuilder,
   type Scope,
   type Signature,
   type SigningResult
 } from '@votetorrent/vote-core'
+import { SigningSignBuilder } from './builders/signing-sign-builder.js'
+import { SigningStartSigningSessionBuilder } from './builders/signing-start-signing-session-builder.js'
 import { type EngineContext } from '../types'
 
 export class SigningEngine implements ISigningEngine {
@@ -195,5 +199,13 @@ export class SigningEngine implements ISigningEngine {
     }
     const thresholdReached = await this.sign(nonce, signature)
     return { nonce, thresholdReached }
+  }
+
+  buildSign (): ISigningSignBuilder {
+    return new SigningSignBuilder(this)
+  }
+
+  buildStartSigningSession (): ISigningStartSigningSessionBuilder {
+    return new SigningStartSigningSessionBuilder(this)
   }
 }
