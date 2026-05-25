@@ -24,8 +24,18 @@ export interface IAuthorityEngine {
     scope: Scope,
     signature: Signature
   ): Promise<void>
+  buildCreateOfficerInvite(): IAuthorityCreateOfficerInviteBuilder
+  buildCreateAuthorityInvite(): IAuthorityCreateAuthorityInviteBuilder
   buildProposeAdmin(): IAuthorityProposeAdminBuilder
   buildSaveInviteWithSigning(): IAuthoritySaveInviteWithSigningBuilder
+}
+
+export interface IAuthorityCreateOfficerInviteBuilder extends IBuilder<OfficerInit, OfficerInviteShare> {
+  fromPayload(payload: OfficerInit): this
+}
+
+export interface IAuthorityCreateAuthorityInviteBuilder extends IBuilder<string, AuthorityInviteShare> {
+  fromPayload(payload: string): this
 }
 
 export interface IAuthorityProposeAdminBuilder extends IBuilder<{ admin: Proposal<AdminInit>; signature: Signature }, void> {
