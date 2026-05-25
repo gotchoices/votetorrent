@@ -453,15 +453,17 @@ export class AuthorityEngine implements IAuthorityEngine {
 				`
 				insert into InviteSlot (
 					Cid,
+					Type,
 					Name,
 					Expiration,
 					InviteKey,
 					InviteSignature,
 					SigningNonce
 					)
-					with context now = :now, IsSignatureValid = true, IsInsertValid = true
+					with context Tid = :tid, now = :now, IsSignatureValid = true, IsInsertValid = true
 					values (
 						:cid,
+						:type,
 						:name,
 						:expiration,
 						:inviteKey,
@@ -476,11 +478,12 @@ export class AuthorityEngine implements IAuthorityEngine {
 				    invite.inviteSignature,
 				    nonce
 				  ).toString(),
+				  type: 'au',
 				  name: invite.name,
 				  expiration: invite.expiration,
 				  inviteKey: invite.inviteKey,
 				  inviteSignature: invite.inviteSignature,
-				  signingNonce: nonce,
+				  signingNonce: nonce, tid: nextTid++,
 				  now: Date.now()
 				}
       )
@@ -511,7 +514,7 @@ export class AuthorityEngine implements IAuthorityEngine {
 					InviteSignature,
 					SigningNonce
 					)
-				with context now = :now, IsSignatureValid = true, IsInsertValid = true
+				with context Tid = :tid, now = :now, IsSignatureValid = true, IsInsertValid = true
 				values (
 					:cid,
 					:type,
@@ -535,7 +538,7 @@ export class AuthorityEngine implements IAuthorityEngine {
 				  expiration: invite.expiration,
 				  inviteKey: invite.inviteKey,
 				  inviteSignature: invite.inviteSignature,
-				  signingNonce: nonce,
+				  signingNonce: nonce, tid: nextTid++,
 				  now: Date.now()
 				}
       )
