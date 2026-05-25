@@ -26,7 +26,7 @@ export class SigningEngine implements ISigningEngine {
 						SignerKey,
 						Signature
 					)
-					with context now = datetime('now')
+					with context now = :now
 					values (
 						:nonce,
 						:userId,
@@ -37,14 +37,15 @@ export class SigningEngine implements ISigningEngine {
 					  nonce,
 					  userId: signature.signerUserId,
 					  signerKey: signature.signerKey,
-					  signature: signature.signature
+					  signature: signature.signature,
+					  now: Date.now()
 					}
         )
 
         // Get the scope for the current signing session
         const scopeRes = await this.ctx.db
           .prepare('select Scope from AdminSigning where Nonce = :nonce')
-          .get({ ':nonce': nonce })
+          .get({ nonce })
         const scope = scopeRes?.Scope as Scope
 
         // Get the current number of OfficerSignatures for the given signing nonce
@@ -52,7 +53,7 @@ export class SigningEngine implements ISigningEngine {
           .prepare(
             'select count(*) as signatureCount from OfficerSignature where SigningNonce = :nonce'
           )
-          .get({ ':nonce': nonce })
+          .get({ nonce })
         const signatureCount = Number(signatureCountRes?.signatureCount)
 
         // Get the threshold for this signing session from the Admin table, matching the authority, effective date, and scope
@@ -78,7 +79,7 @@ export class SigningEngine implements ISigningEngine {
 						and ADS.AdminEffectiveAt = A.EffectiveAt
 					where ADS.Nonce = :nonce`
           )
-          .get({ ':nonce': nonce, ':scope': scope })
+          .get({ nonce, scope })
 
         const threshold = Number(thresholdRes?.threshold) || 1
 
@@ -86,7 +87,7 @@ export class SigningEngine implements ISigningEngine {
           try {
             await this.ctx.db.exec(
               'insert into AdminSignature (SigningNonce) values (:nonce)',
-              { ':nonce': nonce }
+              { nonce }
             )
             await this.ctx.db.exec('COMMIT')
             return true
@@ -143,8 +144,8 @@ export class SigningEngine implements ISigningEngine {
 								where Officer.UserId = :userId and Officer.AuthorityId = :authorityId`
         )
         .get({
-          ':userId': signature.signerUserId,
-          ':authorityId': authorityId
+          userId: signature.signerUserId,
+          authorityId
         })
       if (!adminDB) {
         throw new Error('Admin not found')
@@ -160,7 +161,7 @@ export class SigningEngine implements ISigningEngine {
 					SignerKey,
 					Signature
 				)
-				with context now = datetime('now')
+				with context now = :now
 				values (
 					:nonce,
 					:authorityId,
@@ -179,7 +180,8 @@ export class SigningEngine implements ISigningEngine {
 				  digest,
 				  userId: signature.signerUserId,
 				  signerKey: signature.signerKey,
-				  signature: signature.signature
+				  signature: signature.signature,
+				  now: Date.now()
 				}
       )
     } catch (err) {

@@ -87,13 +87,13 @@ export class NetworkEngine implements INetworkEngine {
 				values (:authorityId, :adminEffectiveAt, :userId, :title, :scopes)
 				`,
 				{
-				  ':id': id,
-				  ':name': authority.name,
-				  ':domainName': authority.domainName,
-				  ':imageRef': imageRefJson,
-				  ':authorityId': id,
-				  ':adminEffectiveAt': admin.effectiveAt,
-				  ':thresholdPolicies': thresholdPoliciesJson
+				  id,
+				  name: authority.name,
+				  domainName: authority.domainName,
+				  imageRef: imageRefJson,
+				  authorityId: id,
+				  adminEffectiveAt: admin.effectiveAt,
+				  thresholdPolicies: thresholdPoliciesJson
 
 				  // TODO: add context values
 				}
@@ -142,7 +142,7 @@ export class NetworkEngine implements INetworkEngine {
 						limit 1
 					`
         )
-        .get({ ':hash': this.init.hash })
+        .get({ hash: this.init.hash })
 
       if (!nRow) throw new Error('Network not found')
 
@@ -174,10 +174,10 @@ export class NetworkEngine implements INetworkEngine {
 						select
 							Name, ImageRef, Relays, TimestampAuthorities, NumberRequiredTSAs, ElectionType
 						from ProposedNetwork
-						where NetworkId = :networkId
+						where Name = :name
 					`
         )
-        .get({ ':networkId': network.id })
+        .get({ name: network.name })
       let proposedNetwork: NetworkRevision | undefined
       if (pnRow) {
         proposedNetwork = {
@@ -213,7 +213,7 @@ export class NetworkEngine implements INetworkEngine {
 						where Id = :id
 					`
         )
-        .get({ ':id': network.primaryAuthorityId })
+        .get({ id: network.primaryAuthorityId })
       if (!aRow) {
         throw new Error('Primary authority not found')
       }
@@ -261,7 +261,7 @@ export class NetworkEngine implements INetworkEngine {
 					from Election
 					where Date < :date
 				`,
-				{ ':date': Date.now() }
+				{ date: Date.now() }
       )) {
         elections.push({
           id: election.Id as string,
@@ -292,7 +292,7 @@ export class NetworkEngine implements INetworkEngine {
 						Id, Title, AuthorityName, Date, Type
 					from Election
 					where Date > :date`,
-				{ ':date': Date.now() }
+				{ date: Date.now() }
       )) {
         elections.push({
           id: election.Id as string,
@@ -327,7 +327,7 @@ export class NetworkEngine implements INetworkEngine {
 						limit 1
 					`
         )
-        .get({ ':hash': this.init.hash })
+        .get({ hash: this.init.hash })
 
       if (!nRow) throw new Error('Network not found')
 
@@ -341,7 +341,7 @@ export class NetworkEngine implements INetworkEngine {
 					`
         )
         .get({
-          ':id': asText(nRow.PrimaryAuthorityId, 'Network.PrimaryAuthorityId')
+          id: asText(nRow.PrimaryAuthorityId, 'Network.PrimaryAuthorityId')
         })
       if (!aRow) {
         throw new Error('Primary authority not found')
@@ -383,7 +383,7 @@ export class NetworkEngine implements INetworkEngine {
 					from ProposedElection
 					where Date > :date
 				`,
-				{ ':date': Date.now() }
+				{ date: Date.now() }
       )) {
         proposedElections.push({
           id: proposal.Id as string,
@@ -407,7 +407,7 @@ export class NetworkEngine implements INetworkEngine {
 						where ElectionId = :id
 					`
           )
-          .get({ ':id': election.id })
+          .get({ id: election.id })
         if (revRow) {
           proposedElectionRevisions.push({
             electionId: revRow.ElectionId as string,
@@ -465,15 +465,15 @@ export class NetworkEngine implements INetworkEngine {
     try {
       const userDB = await this.ctx.db
         .prepare('select Id, Name, ImageRef from User where Id = :id')
-        .get({ ':id': userId })
+        .get({ id: userId })
       if (!userDB) throw new Error('User not found')
       const activeKeys: UserKey[] = []
       for await (const key of this.ctx.db.eval(
-        'select Key, Type, Expiration from UserKey where UserId = :id and Expiration > :date',
-        { ':id': userId, ':date': Date.now() }
+        'select PubKey, Type, Expiration from UserKey where UserId = :id and Expiration > :date',
+        { id: userId, date: Date.now() }
       )) {
         activeKeys.push({
-          key: key.Key as string,
+          key: key.PubKey as string,
           type: key.Type as UserKeyType,
           expiration: key.Expiration as Timestamp
         })
@@ -522,7 +522,7 @@ export class NetworkEngine implements INetworkEngine {
         .prepare(
           'select Id, Name, DomainName, ImageRef from Authority where Id = :id'
         )
-        .get({ ':id': authorityId })
+        .get({ id: authorityId })
       if (!authorityDB) throw new Error('Authority not found')
       const authority: Authority = {
         id: authorityDB.Id as string,
@@ -577,12 +577,12 @@ export class NetworkEngine implements INetworkEngine {
 				values
 					(:name, :imageRef, :relays, :timestampAuthorities, :numberRequiredTSAs, :electionType)`,
 				{
-				  ':name': revision.name,
-				  ':imageRef': imageRefJson,
-				  ':relays': relaysJson,
-				  ':timestampAuthorities': timestampAuthoritiesJson,
-				  ':numberRequiredTSAs': revision.policies.numberRequiredTSAs,
-				  ':electionType': revision.policies.electionType
+				  name: revision.name,
+				  imageRef: imageRefJson,
+				  relays: relaysJson,
+				  timestampAuthorities: timestampAuthoritiesJson,
+				  numberRequiredTSAs: revision.policies.numberRequiredTSAs,
+				  electionType: revision.policies.electionType
 				}
       )
     } catch (error) {

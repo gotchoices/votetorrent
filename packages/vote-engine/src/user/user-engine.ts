@@ -63,7 +63,7 @@ export class UserEngine implements IUserEngine {
 					PubKey,
 					Expiration
 				)
-				with context UserKey = :userKey, Signature = :signature, Tid = ${tid}, now = datetime('now')
+				with context UserKey = :userKey, Signature = :signature, Tid = ${tid}, now = :now
 				values (:userId, :keyType, :keyValue, :expiration)`,
         {
           userId: this.user.id,
@@ -77,7 +77,8 @@ export class UserEngine implements IUserEngine {
           // signer pubkey + signature pair on subsequent keys. The caller
           // can pre-sign via the signing engine and then bind signature
           // through a follow-up addKey overload (Phase 6 — TEST-01).
-          signature: null
+          signature: null,
+          now: Date.now()
         }
       )
     } catch (err) {
@@ -117,7 +118,7 @@ export class UserEngine implements IUserEngine {
 					PubKey,
 					Expiration
 				)
-				with context UserKey = null, Signature = null, Tid = ${tid}, now = datetime('now')
+				with context UserKey = null, Signature = null, Tid = ${tid}, now = :now
 				values (:userId, :keyType, :keyValue, :expiration);
 				`,
         {
@@ -126,7 +127,8 @@ export class UserEngine implements IUserEngine {
           userImageRef: imageRefJson,
           keyType: userInit.userKey.type,
           keyValue: userInit.userKey.key,
-          expiration: userInit.userKey.expiration
+          expiration: userInit.userKey.expiration,
+          now: Date.now()
         }
       )
     } catch (err) {
@@ -158,12 +160,12 @@ export class UserEngine implements IUserEngine {
     try {
       const row = await this.ctx.db
         .prepare('select Id, Name, ImageRef from User where Id = :id')
-        .get({ ':id': this.user.id })
+        .get({ id: this.user.id })
       if (!row) return undefined
       const activeKeys: UserKey[] = []
       for await (const k of this.ctx.db.eval(
         'select PubKey, Type, Expiration from UserKey where UserId = :id and Expiration > :date',
-        { ':id': this.user.id, ':date': Date.now() }
+        { id: this.user.id, date: Date.now() }
       )) {
         activeKeys.push({
           key: k.PubKey as string,
@@ -245,13 +247,14 @@ export class UserEngine implements IUserEngine {
     try {
       await this.ctx!.db.exec(
 				`delete from UserKey
-				with context UserKey = :userKey, Signature = :signature, Tid = ${tid}, now = datetime('now')
+				with context UserKey = :userKey, Signature = :signature, Tid = ${tid}, now = :now
 				where UserId = :userId and PubKey = :pubKey`,
         {
           userId: this.user.id,
           pubKey: keyToRevoke,
           userKey: signerKey,
-          signature: null
+          signature: null,
+          now: Date.now()
         }
       )
     } catch (err) {

@@ -299,7 +299,7 @@ export class ElectionEngine implements IElectionEngine {
 					Timeline,
 					KeyholderThreshold
 				)
-				with context UserId = :userId, UserKey = :userKey, Signature = :signature, Tid = ${tid}, now = datetime('now')
+				with context UserId = :userId, UserKey = :userKey, Signature = :signature, Tid = ${tid}, now = :now
 				values (
 					:electionId,
 					:revision,
@@ -319,7 +319,8 @@ export class ElectionEngine implements IElectionEngine {
           keyholderThreshold: revision.keyholderThreshold,
           userId: this.ctx.user?.id ?? null,
           userKey: signerKey,
-          signature: null
+          signature: null,
+          now: Date.now()
         }
       )
     } catch (err) {
@@ -345,7 +346,7 @@ export class ElectionEngine implements IElectionEngine {
 					Description,
 					Districts
 				)
-				with context UserId = :userId, UserKey = :userKey, Signature = :signature, Tid = ${tid}, now = datetime('now')
+				with context UserId = :userId, UserKey = :userKey, Signature = :signature, Tid = ${tid}, now = :now
 				values (
 					:id,
 					:electionId,
@@ -361,7 +362,8 @@ export class ElectionEngine implements IElectionEngine {
           districts: JSON.stringify(ballot.districts),
           userId: this.ctx.user?.id ?? null,
           userKey: signerKey,
-          signature: null
+          signature: null,
+          now: Date.now()
         }
       )
     } catch (err) {
@@ -398,7 +400,7 @@ export class ElectionEngine implements IElectionEngine {
 					Sequence,
 					Required
 				)
-				with context UserId = :userId, UserKey = :userKey, Signature = :signature, Tid = ${tid}, now = datetime('now')
+				with context UserId = :userId, UserKey = :userKey, Signature = :signature, Tid = ${tid}, now = :now
 				values (
 					:ballotId,
 					:code,
@@ -432,7 +434,8 @@ export class ElectionEngine implements IElectionEngine {
           required: question.required ?? true,
           userId: this.ctx.user?.id ?? null,
           userKey: signerKey,
-          signature: null
+          signature: null,
+          now: Date.now()
         }
       )
     } catch (err) {
@@ -465,7 +468,7 @@ export class ElectionEngine implements IElectionEngine {
 					Image,
 					Video
 				)
-				with context UserId = :userId, UserKey = :userKey, Signature = :signature, Tid = ${tid}, now = datetime('now')
+				with context UserId = :userId, UserKey = :userKey, Signature = :signature, Tid = ${tid}, now = :now
 				values (
 					:ballotId,
 					:questionCode,
@@ -489,7 +492,8 @@ export class ElectionEngine implements IElectionEngine {
           video: option.video ? JSON.stringify(option.video) : null,
           userId: this.ctx.user?.id ?? null,
           userKey: signerKey,
-          signature: null
+          signature: null,
+          now: Date.now()
         }
       )
     } catch (err) {

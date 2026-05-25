@@ -54,7 +54,7 @@ export class ElectionsEngine implements IElectionsEngine {
 					BallotDeadline,
 					Type
 				)
-				with context UserId = :userId, UserKey = :userKey, Signature = :signature, Tid = ${tid}, now = datetime('now')
+				with context UserId = :userId, UserKey = :userKey, Signature = :signature, Tid = ${tid}, now = :now
 				values (
 					:id,
 					:authorityId,
@@ -78,7 +78,8 @@ export class ElectionsEngine implements IElectionsEngine {
           // caller pre-signs via the signing engine and binds the signature
           // through the AdminSigning/AdminSignature pipeline. Phase 6 /
           // TEST-01 will tighten this contract to require a Signature here.
-          signature: null
+          signature: null,
+          now: Date.now()
         }
       )
     } catch (err) {
@@ -112,7 +113,7 @@ export class ElectionsEngine implements IElectionsEngine {
 					BallotDeadline,
 					Type
 				)
-				with context SigningNonce = :signingNonce, Tid = ${tid}, now = datetime('now')
+				with context SigningNonce = :signingNonce, Tid = ${tid}, now = :now
 				values (
 					:id,
 					:authorityId,
@@ -135,7 +136,8 @@ export class ElectionsEngine implements IElectionsEngine {
           // surface to take the nonce explicitly). Today we forward null;
           // when the schema's InsertValid CHECK becomes enforceable post
           // #23, the call site supplies it via context binding overload.
-          signingNonce: null
+          signingNonce: null,
+          now: Date.now()
         }
       )
     } catch (err) {

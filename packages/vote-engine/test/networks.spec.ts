@@ -20,7 +20,7 @@ describe('NetworksEngine', () => {
   // BLOCKED on https://github.com/gotchoices/quereus/issues/23 — Network's
   // `CantDelete check on delete (false)` fires on INSERT in Quereus 2.9.0/
   // 3.1.1. Whole-flow test depends on create() succeeding.
-  it.skip('should exercise create, clearRecentNetworks, getRecentNetworks, and open', async () => {
+  it('should exercise create, clearRecentNetworks, getRecentNetworks, and open', async () => {
     // Ensure recentNetworks starts as an empty array for spread operations in create()
     await AsyncStorage.setItem('recentNetworks', [])
 
@@ -226,7 +226,7 @@ describe('NetworksEngine', () => {
   // tripping Network.CantDelete during the create() batch. When the
   // upstream fix ships, remove `.skip` and the row-level read below
   // becomes a passing assertion.
-  it.skip('NET-01: create() binds the UserKey insert to the PubKey column and caches the EngineContext', async () => {
+  it('NET-01: create() binds the UserKey insert to the PubKey column and caches the EngineContext', async () => {
     await AsyncStorage.setItem('recentNetworks', [])
     const engine = new NetworksEngine(AsyncStorage)
     const { publicHex } = randomTestKeyPair()
@@ -255,7 +255,7 @@ describe('NetworksEngine', () => {
   // BLOCKED on https://github.com/gotchoices/quereus/issues/23 (same
   // CantDelete-on-INSERT trip as NET-01). Restored row-level read of the
   // User row becomes a passing assertion once #23 lands.
-  it.skip('NET-02/NET-03: open() reuses the cached EngineContext.db instance from create()', async () => {
+  it('NET-02/NET-03: open() reuses the cached EngineContext.db instance from create()', async () => {
     await AsyncStorage.setItem('recentNetworks', [])
     const engine = new NetworksEngine(AsyncStorage)
     const { publicHex } = randomTestKeyPair()
@@ -321,7 +321,7 @@ describe('NetworksEngine', () => {
   // BLOCKED on https://github.com/gotchoices/quereus/issues/23 (CantDelete
   // fires on INSERT). NET-04 itself only tests LocalStorage, but it gates
   // on a successful create() call which trips #23.
-  it.skip('NET-04: getRecentNetworks() round-trips through LocalStorage after create()', async () => {
+  it('NET-04: getRecentNetworks() round-trips through LocalStorage after create()', async () => {
     await AsyncStorage.setItem('recentNetworks', [])
     const engine = new NetworksEngine(AsyncStorage)
     const { publicHex } = randomTestKeyPair()
