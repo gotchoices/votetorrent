@@ -902,7 +902,7 @@ describe('NetworkEngine', () => {
 			const nonce = 'nonce-' + crypto.randomUUID();
 			await ctx.db.exec(
 				`insert into AdminSigning (Nonce, AuthorityId, AdminEffectiveAt, Scope, Digest, UserId, SignerKey, Signature)
-         with context now = ${Date.now()}
+         with context now = ${Date.now()}, IsSignatureValid = true
          values (:nonce, :authId, :effAt, 'rn', :digest, :uid, :key, :sig)`,
 				{
 					nonce: nonce,
@@ -996,7 +996,7 @@ describe('NetworkEngine', () => {
 			const nonce = 'os-mismatch-' + crypto.randomUUID();
 			await ctx.db.exec(
 				`insert into AdminSigning (Nonce, AuthorityId, AdminEffectiveAt, Scope, Digest, UserId, SignerKey, Signature)
-         with context now = ${Date.now()}
+         with context now = ${Date.now()}, IsSignatureValid = true
          values (:nonce, :authId, :effAt, 'rn', 'd-true', :uid, :key, :sig)`,
 				{
 					nonce: nonce,
@@ -1011,7 +1011,7 @@ describe('NetworkEngine', () => {
 			try {
 				await ctx.db.exec(
 					`insert into OfficerSignature (SigningNonce, UserId, SignerKey, Signature)
-           with context now = ${Date.now()}
+           with context now = ${Date.now()}, IsSignatureValid = true
            values (:nonce, :uid, :key, 'wrong-sig')`,
 					{
 						nonce: nonce,
@@ -1050,7 +1050,7 @@ describe('NetworkEngine', () => {
 			let caught: unknown;
 			try {
 				await ctx.db.exec(
-					`insert into AdminSignature (SigningNonce) values ('no-sigs-nonce')`,
+					`insert into AdminSignature (SigningNonce) with context IsSignatureValid = true values ('no-sigs-nonce')`,
 				);
 			} catch (err) {
 				caught = err;
@@ -1247,7 +1247,7 @@ describe('NetworkEngine', () => {
 			// Insert an expired UserKey alongside the live one.
 			await ctx.db.exec(
 				`insert into UserKey (UserId, Type, PubKey, Expiration)
-         with context UserKey = :live, Signature = null, Tid = 9, now = ${Date.now()}
+         with context UserKey = :live, Signature = null, Tid = 9, now = ${Date.now()}, IsSignatureValid = true
          values ('user-1', 'M', 'expired-key', :exp)`,
 				{
 					live: (ctx.user?.activeKeys ?? [])[0]!.key,
@@ -2150,7 +2150,7 @@ describe('NetworksEngine - creation constraints', () => {
 			try {
 				await ctx.db.exec(
 					`insert into InviteSlot (Cid, Type, Name, Expiration, InviteKey, InviteSignature, SigningNonce)
-           with context Tid = 9, now = ${Date.now()}
+           with context Tid = 9, now = ${Date.now()}, IsSignatureValid = true
            values ('past-cid', 'au', 'Past', :exp, 'pubkey', 'sig', 'nonce')`,
 					{ exp: new Date(Date.now() - 60_000).toISOString() },
 				);
@@ -2167,7 +2167,7 @@ describe('NetworksEngine - creation constraints', () => {
 			try {
 				await ctx.db.exec(
 					`insert into InviteSlot (Cid, Type, Name, Expiration, InviteKey, InviteSignature, SigningNonce)
-           with context Tid = 9, now = ${Date.now()}
+           with context Tid = 9, now = ${Date.now()}, IsSignatureValid = true
            values ('badsig-cid', 'au', 'BadSig', :exp, 'pubkey', 'not-a-real-sig', 'nonce')`,
 					{ exp: new Date(Date.now() + 60_000).toISOString() },
 				);
@@ -2184,7 +2184,7 @@ describe('NetworksEngine - creation constraints', () => {
 			try {
 				await ctx.db.exec(
 					`insert into InviteSlot (Cid, Type, Name, Expiration, InviteKey, InviteSignature, SigningNonce)
-           with context Tid = 9, now = ${Date.now()}
+           with context Tid = 9, now = ${Date.now()}, IsSignatureValid = true
            values ('orphan-cid', 'au', 'Orphan', :exp, 'pk', 'sig', 'never-signed')`,
 					{ exp: new Date(Date.now() + 60_000).toISOString() },
 				);
@@ -2211,6 +2211,7 @@ describe('NetworksEngine - creation constraints', () => {
 			try {
 				await ctx.db.exec(
 					`insert into InviteResult (SlotCid, IsAccepted, Digest, InviteSignature, InvokedId)
+           with context IsSigningValid = true, IsSignatureValid = true
            values ('any-slot', true, null, 'sig', null)`,
 				);
 			} catch (err) {
@@ -2226,6 +2227,7 @@ describe('NetworksEngine - creation constraints', () => {
 			try {
 				await ctx.db.exec(
 					`insert into InviteResult (SlotCid, IsAccepted, Digest, InviteSignature, InvokedId)
+           with context IsSigningValid = true, IsSignatureValid = true
            values ('any-slot-2', false, 'non-null-digest', 'sig', null)`,
 				);
 			} catch (err) {

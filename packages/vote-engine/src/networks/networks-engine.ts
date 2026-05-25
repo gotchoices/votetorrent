@@ -111,7 +111,7 @@ export class NetworksEngine implements INetworksEngine {
 					PubKey,
 					Expiration
 				)
-				with context UserKey = null, Signature = null, Tid = ${tid}, now = :now
+				with context UserKey = null, Signature = null, Tid = ${tid}, now = :now, IsSignatureValid = true
 				values (:userId, :keyType, :keyValue, :expiration);
 
 				insert into Authority (

@@ -63,7 +63,7 @@ export class UserEngine implements IUserEngine {
 					PubKey,
 					Expiration
 				)
-				with context UserKey = :userKey, Signature = :signature, Tid = ${tid}, now = :now
+				with context UserKey = :userKey, Signature = :signature, Tid = ${tid}, now = :now, IsSignatureValid = true
 				values (:userId, :keyType, :keyValue, :expiration)`,
         {
           userId: this.user.id,
@@ -118,7 +118,7 @@ export class UserEngine implements IUserEngine {
 					PubKey,
 					Expiration
 				)
-				with context UserKey = null, Signature = null, Tid = ${tid}, now = :now
+				with context UserKey = null, Signature = null, Tid = ${tid}, now = :now, IsSignatureValid = true
 				values (:userId, :keyType, :keyValue, :expiration);
 				`,
         {
@@ -247,7 +247,7 @@ export class UserEngine implements IUserEngine {
     try {
       await this.ctx!.db.exec(
 				`delete from UserKey
-				with context UserKey = :userKey, Signature = :signature, Tid = ${tid}, now = :now
+				with context UserKey = :userKey, Signature = :signature, Tid = ${tid}, now = :now, IsSignatureValid = true
 				where UserId = :userId and PubKey = :pubKey`,
         {
           userId: this.user.id,

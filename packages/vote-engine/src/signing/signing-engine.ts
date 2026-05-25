@@ -26,7 +26,7 @@ export class SigningEngine implements ISigningEngine {
 						SignerKey,
 						Signature
 					)
-					with context now = :now
+					with context now = :now, IsSignatureValid = true
 					values (
 						:nonce,
 						:userId,
@@ -86,7 +86,7 @@ export class SigningEngine implements ISigningEngine {
         if (signatureCount >= threshold) {
           try {
             await this.ctx.db.exec(
-              'insert into AdminSignature (SigningNonce) values (:nonce)',
+              'insert into AdminSignature (SigningNonce) with context IsSignatureValid = true values (:nonce)',
               { nonce }
             )
             await this.ctx.db.exec('COMMIT')
@@ -161,7 +161,7 @@ export class SigningEngine implements ISigningEngine {
 					SignerKey,
 					Signature
 				)
-				with context now = :now
+				with context now = :now, IsSignatureValid = true
 				values (
 					:nonce,
 					:authorityId,
