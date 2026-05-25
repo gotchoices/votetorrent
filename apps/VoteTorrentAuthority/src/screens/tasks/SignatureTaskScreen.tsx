@@ -1,3 +1,4 @@
+import { useLayoutEffect } from "react";
 import { ScrollView, StyleSheet, View } from "react-native";
 import { globalStyles } from "../../theme/styles";
 import type {
@@ -25,6 +26,13 @@ export default function SignatureTaskScreen() {
 	const { t } = useTranslation();
 	const { colors } = useTheme() as ExtendedTheme;
 	const navigation = useNavigation();
+	const isNetwork = task.signatureType === "network";
+
+	useLayoutEffect(() => {
+		if (isNetwork) {
+			navigation.setOptions({ title: t("networkRevision") });
+		}
+	}, [isNetwork, navigation, t]);
 
 	const sign = () => {
 		console.log("sign");
@@ -62,7 +70,7 @@ export default function SignatureTaskScreen() {
 				style={[styles.footer, styles.footerButtonsContainer, { backgroundColor: colors.card }]}
 			>
 				<CustomButton
-					title={t("sign")}
+					title={isNetwork ? t("accept") : t("sign")}
 					icon="check"
 					backgroundColor={colors.success}
 					size="thin"

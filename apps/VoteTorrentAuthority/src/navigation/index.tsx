@@ -95,7 +95,7 @@ function useTabHeaderOptions(tab?: string) {
 		),
 		headerTitle: () =>
 			tab === "tasks" ? <ThemedText type="header">{"All Networks"}</ThemedText> : <HeaderTitle />,
-		headerShadowVisible: false,
+		headerShadowVisible: true,
 	};
 }
 

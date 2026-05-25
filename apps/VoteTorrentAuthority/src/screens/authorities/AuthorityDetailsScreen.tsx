@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Image, ScrollView, StyleSheet, View } from "react-native";
+import { Image, ScrollView, StyleSheet, TouchableOpacity, View } from "react-native";
 import { ChipButton } from "../../components/ChipButton";
 import { InfoCard } from "../../components/InfoCard";
 import { ThemedText } from "../../components/ThemedText";
+import FontAwesome6 from "react-native-vector-icons/FontAwesome6";
 import type {
 	Authority,
 	Admin,
@@ -13,6 +14,7 @@ import type {
 	User,
 	Officer,
 } from "@votetorrent/vote-core";
+import { scopeDescriptions } from "@votetorrent/vote-core";
 import { ExtendedTheme, useNavigation, useRoute, useTheme } from "@react-navigation/native";
 import { CustomButton } from "../../components/CustomButton";
 import type { RootStackParamList } from "../../navigation/types";
@@ -273,6 +275,21 @@ export default function AuthorityDetailsScreen() {
 				<View>
 					<View style={styles.section}>
 						<ThemedText type="title">{t("proposedAdministration")}</ThemedText>
+						{adminDetails.admin.id ? (
+							<View style={styles.detail}>
+								<ThemedText type="defaultSemiBold">{t("cid")}: </ThemedText>
+								<ThemedText numberOfLines={1} ellipsizeMode="tail">
+									{adminDetails.admin.id}
+								</ThemedText>
+							</View>
+						) : null}
+						<View style={styles.detail}>
+							<ThemedText type="defaultSemiBold">{t("expires")}: </ThemedText>
+							<ThemedText>{formatDate(adminDetails.proposed.proposed.effectiveAt)}</ThemedText>
+						</View>
+						<ThemedText type="defaultSemiBold" style={styles.administratorsHeading}>
+							{t("administrators")}
+						</ThemedText>
 						{adminDetails.proposed.proposed.officers.map((officerSelection) => {
 							const officer = officerSelection.existing || {
 								userId: "",
@@ -281,22 +298,51 @@ export default function AuthorityDetailsScreen() {
 								signature: { signature: "", signerKey: "" },
 							};
 							const user = officer.userId ? officerUsers.get(officer.userId) : undefined;
+							const name = user?.name || officerSelection.init?.name || "";
+							const isAccepted = !!officerSelection.existing;
+							const statusText = isAccepted
+								? `${t("accepted")} - CID: ${officer.userId}`
+								: t("sent");
+
 							return (
-								<InfoCard
-									key={officer.userId || officerSelection.init?.name}
-									image={user?.image?.url ? { uri: user.image.url } : undefined}
-									title={user?.name || officerSelection.init?.name || ""}
-									subtitle={officer.title}
-									additionalInfo={[
-										{ label: t("cid"), value: officer.userId || t("pending") },
-									]}
-									icon="chevron-right"
-									onPress={() =>
-										navigation.navigate("OfficerDetails", {
-											officer: officer,
-										})
-									}
-								/>
+								<View key={officer.userId || officerSelection.init?.name} style={styles.officerCard}>
+									<View style={styles.detail}>
+										<ThemedText type="defaultSemiBold">{t("name")}: </ThemedText>
+										<ThemedText>{name}</ThemedText>
+									</View>
+									<View style={styles.detail}>
+										<ThemedText type="defaultSemiBold">{t("title")}: </ThemedText>
+										<ThemedText style={styles.italicText}>{officer.title}</ThemedText>
+									</View>
+									<View style={styles.detail}>
+										<ThemedText type="defaultSemiBold">{t("inviteId")}: </ThemedText>
+										<ThemedText numberOfLines={1} ellipsizeMode="tail">
+											{officer.userId || t("pending")}
+										</ThemedText>
+									</View>
+									<ThemedText type="defaultSemiBold">{t("permissions")}:</ThemedText>
+									<View style={styles.subDetails}>
+										{officer.scopes.map((scope) => (
+											<View key={scope} style={styles.bulletRow}>
+												<ThemedText>{"• "}</ThemedText>
+												<ThemedText>{scopeDescriptions[scope] || scope}</ThemedText>
+											</View>
+										))}
+									</View>
+									<View style={styles.officerStatusRow}>
+										<ThemedText style={{ color: isAccepted ? colors.success : colors.warning }}>
+											{statusText}
+										</ThemedText>
+										<View style={styles.officerActions}>
+											<ChipButton label={t("invite")} icon="share-nodes" onPress={() => {}} />
+											<TouchableOpacity
+												style={[styles.removeButton, { borderColor: colors.error }]}
+											>
+												<FontAwesome6 name="xmark" size={12} color={colors.error} />
+											</TouchableOpacity>
+										</View>
+									</View>
+								</View>
 							);
 						})}
 					</View>
@@ -326,6 +372,42 @@ const localStyles = StyleSheet.create({
 	},
 	subDetails: {
 		marginLeft: 8,
+	},
+	administratorsHeading: {
+		marginTop: 12,
+		marginBottom: 4,
+	},
+	officerCard: {
+		marginTop: 12,
+		paddingTop: 12,
+		borderTopWidth: StyleSheet.hairlineWidth,
+		borderTopColor: "#D0D0D0",
+		gap: 2,
+	},
+	italicText: {
+		fontStyle: "italic",
+	},
+	bulletRow: {
+		flexDirection: "row",
+	},
+	officerStatusRow: {
+		flexDirection: "row",
+		alignItems: "center",
+		justifyContent: "space-between",
+		marginTop: 6,
+	},
+	officerActions: {
+		flexDirection: "row",
+		alignItems: "center",
+		gap: 8,
+	},
+	removeButton: {
+		width: 28,
+		height: 28,
+		borderRadius: 14,
+		borderWidth: 1.5,
+		alignItems: "center",
+		justifyContent: "center",
 	},
 });
 
