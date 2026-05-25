@@ -394,15 +394,14 @@ declare schema main
 		InviteKey text, -- public key of temporary Invite key pair
 		InviteSignature text,
 		SigningNonce text, -- AdminSigning.Nonce, shows admin approval including scope (implies the type of invite, e.g. authority, officer, keyholder, registrant)
-		constraint CidValid check (Cid = Digest(Name, Expiration, InviteKey, InviteSignature, SigningNonce)),
+		constraint CidValid check (context.IsCidValid = true),
 		constraint TypeValid check (Type in (select Code from InviteType)),
 		constraint ExpirationValid check (Expiration > context.now),
-		-- Proves that the inviter has a valid private key corresponding to the public key in the Invite slot
 		constraint InviteSignatureValid check (context.IsSignatureValid = true),
 		constraint InsertOnly check on update, delete (false),
 		constraint InsertValid check on insert (context.IsInsertValid = true)
 	)
-		with context ( Tid int, now datetime, IsSignatureValid boolean, IsInsertValid boolean );
+		with context ( Tid int, now datetime, IsSignatureValid boolean, IsInsertValid boolean, IsCidValid boolean );
 
 	index InviteSlotSigningNonce on InviteSlot (SigningNonce, Cid);
 

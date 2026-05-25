@@ -246,10 +246,10 @@ export class AuthorityEngine implements IAuthorityEngine {
 
       const acceptedAuthorityInvites: Array<InviteResult & { cid: string }> = []
       for await (const inviteResult of this.ctx.db.eval(
-				`select SlotCid, IsAccepted, InviteSignature, InvokedId from InviteResult
+				`select InviteResult.SlotCid, InviteResult.IsAccepted, InviteResult.InviteSignature, InviteResult.InvokedId from InviteResult
 					join InviteSlot on InviteResult.SlotCid = InviteSlot.Cid
 						join AdminSigning on InviteSlot.SigningNonce = AdminSigning.Nonce
-				where AuthorityId = :id and Scope = :scope`,
+				where AdminSigning.AuthorityId = :id and AdminSigning.Scope = :scope`,
 				{ id: this.authority.id, scope: 'iad' }
       )) {
         acceptedAuthorityInvites.push({
@@ -460,7 +460,7 @@ export class AuthorityEngine implements IAuthorityEngine {
 					InviteSignature,
 					SigningNonce
 					)
-					with context Tid = :tid, now = :now, IsSignatureValid = true, IsInsertValid = true
+					with context Tid = :tid, now = :now, IsSignatureValid = true, IsInsertValid = true, IsCidValid = true
 					values (
 						:cid,
 						:type,
@@ -514,7 +514,7 @@ export class AuthorityEngine implements IAuthorityEngine {
 					InviteSignature,
 					SigningNonce
 					)
-				with context Tid = :tid, now = :now, IsSignatureValid = true, IsInsertValid = true
+				with context Tid = :tid, now = :now, IsSignatureValid = true, IsInsertValid = true, IsCidValid = true
 				values (
 					:cid,
 					:type,

@@ -187,7 +187,7 @@ describe('AuthorityEngine', () => {
          values (:id, 'Proposed Name', 'proposed.example', null)`,
         {
           uid: 'user-1',
-          key: sig.signerKey,
+          pubKey: sig.signerKey,
           sig: sig.signature,
           id: authority.id
         }
@@ -251,7 +251,7 @@ describe('AuthorityEngine', () => {
          values (:authId, :eff, :tp)`,
         {
           uid: 'user-1',
-          key: sig.signerKey,
+          pubKey: sig.signerKey,
           sig: sig.signature,
           authId: authority.id,
           eff: effectiveAt,
@@ -275,7 +275,7 @@ describe('AuthorityEngine', () => {
          values (:authId, :eff, '[]')`,
         {
           uid: 'user-1',
-          key: sig.signerKey,
+          pubKey: sig.signerKey,
           sig: sig.signature,
           authId: authority.id,
           eff: effectiveAt
@@ -287,7 +287,7 @@ describe('AuthorityEngine', () => {
          values (:authId, :eff, 'Officer Bob', 'Inspector', :scopes)`,
         {
           uid: 'user-1',
-          key: sig.signerKey,
+          pubKey: sig.signerKey,
           sig: sig.signature,
           authId: authority.id,
           eff: effectiveAt,
@@ -1207,7 +1207,7 @@ describe('AuthorityEngine', () => {
            values ('no-such-authority', 'X', 'x.example', null)`,
           {
             uid: 'user-1',
-            key: sig.signerKey,
+            pubKey: sig.signerKey,
             sig: sig.signature
           }
         )
@@ -1251,7 +1251,7 @@ describe('AuthorityEngine', () => {
            values ('no-such', :e, '[]')`,
           {
             uid: 'user-1',
-            key: sig.signerKey,
+            pubKey: sig.signerKey,
             sig: sig.signature,
             e: new Date().toISOString()
           }
@@ -1274,7 +1274,7 @@ describe('AuthorityEngine', () => {
            values (:id, 'not-iso', '[]')`,
           {
             uid: 'user-1',
-            key: sig.signerKey,
+            pubKey: sig.signerKey,
             sig: sig.signature,
             id: authority.id
           }
@@ -1319,7 +1319,7 @@ describe('AuthorityEngine', () => {
            values ('no-such', :e, 'X', 'T', '["rad"]')`,
           {
             uid: 'user-1',
-            key: sig.signerKey,
+            pubKey: sig.signerKey,
             sig: sig.signature,
             e: new Date().toISOString()
           }
@@ -1342,7 +1342,7 @@ describe('AuthorityEngine', () => {
            values (:id, '9999-01-01T00:00:00.000Z', 'Orphan', 'T', '["rad"]')`,
           {
             uid: 'user-1',
-            key: sig.signerKey,
+            pubKey: sig.signerKey,
             sig: sig.signature,
             id: authority.id
           }
@@ -1364,7 +1364,7 @@ describe('AuthorityEngine', () => {
            with context UserId = :uid, UserKey = :key, Signature = :sig, Tid = 9, now = ${Date.now()}, IsUserValid = true`,
           {
             uid: 'user-1',
-            key: sig.signerKey,
+            pubKey: sig.signerKey,
             sig: sig.signature
           }
         )
@@ -1386,7 +1386,7 @@ describe('AuthorityEngine', () => {
            values (:id, :e, 'Bad', 'T', :scopes)`,
           {
             uid: 'user-1',
-            key: sig.signerKey,
+            pubKey: sig.signerKey,
             sig: sig.signature,
             id: authority.id,
             e: new Date().toISOString(),
@@ -1667,7 +1667,7 @@ describe('AuthorityEngine', () => {
           {
             id: authority.id,
             e: new Date().toISOString(),
-            key: sig.signerKey,
+            pubKey: sig.signerKey,
             sig: sig.signature
           }
         )
@@ -1690,7 +1690,7 @@ describe('AuthorityEngine', () => {
           {
             id: authority.id,
             e: new Date().toISOString(),
-            key: sig.signerKey
+            pubKey: sig.signerKey
           }
         )
       } catch (err) {
@@ -1768,7 +1768,7 @@ describe('AuthorityEngine', () => {
           n: nonce,
           id: authority.id,
           e: new Date().toISOString(),
-          key: sig.signerKey,
+          pubKey: sig.signerKey,
           sig: sig.signature
         }
       )
@@ -1778,7 +1778,7 @@ describe('AuthorityEngine', () => {
           `insert into OfficerSignature (SigningNonce, UserId, SignerKey, Signature)
            with context now = ${Date.now()}
            values (:n, 'user-1', :key, 'wrong-sig')`,
-          { n: nonce, key: sig.signerKey }
+          { n: nonce, pubKey: sig.signerKey }
         )
       } catch (err) {
         caught = err

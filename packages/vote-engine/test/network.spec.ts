@@ -910,7 +910,7 @@ describe('NetworkEngine', () => {
 					effAt: new Date().toISOString(),
 					digest: 'digest-rn',
 					uid: ctx.user?.id ?? 'user-1',
-					key: (ctx.user?.activeKeys ?? [])[0]!.key,
+					pubKey: (ctx.user?.activeKeys ?? [])[0]!.key,
 					sig: 'a'.repeat(128),
 				},
 			);
@@ -936,7 +936,7 @@ describe('NetworkEngine', () => {
 						effAt: new Date().toISOString(),
 						digest: 'd',
 						uid: ctx.user?.id ?? 'user-1',
-						key: (ctx.user?.activeKeys ?? [])[0]!.key,
+						pubKey: (ctx.user?.activeKeys ?? [])[0]!.key,
 						sig: 'a'.repeat(128),
 					},
 				);
@@ -960,7 +960,7 @@ describe('NetworkEngine', () => {
 						authId: details.network.primaryAuthorityId,
 						effAt: new Date().toISOString(),
 						uid: ctx.user?.id ?? 'user-1',
-						key: (ctx.user?.activeKeys ?? [])[0]!.key,
+						pubKey: (ctx.user?.activeKeys ?? [])[0]!.key,
 					},
 				);
 			} catch (err) {
@@ -1003,7 +1003,7 @@ describe('NetworkEngine', () => {
 					authId: details.network.primaryAuthorityId,
 					effAt: new Date().toISOString(),
 					uid: ctx.user?.id ?? 'user-1',
-					key: (ctx.user?.activeKeys ?? [])[0]!.key,
+					pubKey: (ctx.user?.activeKeys ?? [])[0]!.key,
 					sig: 'a'.repeat(128),
 				},
 			);
@@ -1016,7 +1016,7 @@ describe('NetworkEngine', () => {
 					{
 						nonce: nonce,
 						uid: ctx.user?.id ?? 'user-1',
-						key: (ctx.user?.activeKeys ?? [])[0]!.key,
+						pubKey: (ctx.user?.activeKeys ?? [])[0]!.key,
 					},
 				);
 			} catch (err) {
@@ -2018,7 +2018,7 @@ describe('NetworksEngine - creation constraints', () => {
            values ('BadSig', null, '[]', '[]', 1, 'a')`,
 					{
 						uid: ctx.user?.id ?? 'user-1',
-						key: (ctx.user?.activeKeys ?? [])[0]!.key,
+						pubKey: (ctx.user?.activeKeys ?? [])[0]!.key,
 					},
 				);
 			} catch (err) {
