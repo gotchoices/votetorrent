@@ -1,17 +1,33 @@
 import { Database } from '@quereus/quereus';
-import { ElectionType, UserKeyType } from '@votetorrent/vote-core';
+import {
+	BuilderAlreadyCommittedError,
+	BuilderValidationError,
+	ElectionType,
+	UserKeyType,
+} from '@votetorrent/vote-core';
 import { expect } from 'chai';
 import { prepareDb } from '../src/database/initialize';
 import { NetworkEngine } from '../src/network/network-engine';
+import { MockNetworkEngine } from '../src/network/mock-network-engine';
+import { NetworkCreateAuthorityBuilder } from '../src/network/builders/network-create-authority-builder';
+import { NetworkPinAuthorityBuilder } from '../src/network/builders/network-pin-authority-builder';
+import { NetworkUnpinAuthorityBuilder } from '../src/network/builders/network-unpin-authority-builder';
+import { NetworkProposeRevisionBuilder } from '../src/network/builders/network-propose-revision-builder';
+import { NetworkRespondToInviteBuilder } from '../src/network/builders/network-respond-to-invite-builder';
 import { NetworksEngine } from '../src/networks/networks-engine';
 import type { EngineContext } from '../src/types.js';
 import { randomTestKeyPair } from './fixtures/keys.js';
 import { AsyncStorage } from './shims/react-native';
 import type {
+	AdminInit,
 	Authority,
+	AuthorityInit,
+	InviteAction,
 	INetworkEngine,
 	NetworkInit,
+	NetworkPolicies,
 	NetworkReference,
+	NetworkRevision,
 	Scope,
 	User,
 	UserKey,
@@ -2301,5 +2317,646 @@ describe('NetworksEngine - creation constraints', () => {
 				.get({});
 			expect(Number(row?.n)).to.be.a('number');
 		});
+	});
+});
+
+// ===========================================================================
+// Builder Helpers
+// ===========================================================================
+
+function makeStubNetworkEngine (opts?: { failOn?: string }): INetworkEngine {
+	const fail = opts?.failOn;
+	return {
+		createAuthority: fail === 'createAuthority'
+			? async () => { throw new Error('stub failure'); }
+			: async () => undefined,
+		pinAuthority: fail === 'pinAuthority'
+			? async () => { throw new Error('stub failure'); }
+			: async () => undefined,
+		unpinAuthority: fail === 'unpinAuthority'
+			? async () => { throw new Error('stub failure'); }
+			: async () => undefined,
+		proposeRevision: fail === 'proposeRevision'
+			? async () => { throw new Error('stub failure'); }
+			: async () => undefined,
+		respondToInvite: fail === 'respondToInvite'
+			? async () => { throw new Error('stub failure'); }
+			: async () => 'invite-result-id',
+		getAuthoritiesByName: async () => ({ buffer: [], firstBOF: true, lastEOF: true, offset: 0 }),
+		getCurrentUser: async () => undefined,
+		getDetails: async () => ({ network: {} as never, proposed: undefined }),
+		getNetworkSummary: async () => ({} as never),
+		getPinnedAuthorities: async () => [],
+		getProposedElections: async () => [],
+		getUser: async () => undefined,
+		nextAuthoritiesByName: async () => ({ buffer: [], firstBOF: true, lastEOF: true, offset: 0 }),
+		openAuthority: async () => ({} as never),
+		pinAuthority: async () => undefined,
+		unpinAuthority: async () => undefined,
+		buildCreateAuthority: () => new NetworkCreateAuthorityBuilder({} as INetworkEngine),
+		buildPinAuthority: () => new NetworkPinAuthorityBuilder({} as INetworkEngine),
+		buildUnpinAuthority: () => new NetworkUnpinAuthorityBuilder({} as INetworkEngine),
+		buildProposeRevision: () => new NetworkProposeRevisionBuilder({} as INetworkEngine),
+		buildRespondToInvite: () => new NetworkRespondToInviteBuilder({} as INetworkEngine) as never,
+	} as INetworkEngine;
+}
+
+function makeAuthorityInit (overrides?: Partial<AuthorityInit>): AuthorityInit {
+	return {
+		name: 'Test Authority',
+		domainName: 'test.example.com',
+		...overrides,
+	};
+}
+
+function makeAdminInit (overrides?: Partial<AdminInit>): AdminInit {
+	return {
+		officers: [{ init: { name: 'Officer A', title: 'Chair', scopes: ['rn', 'rad'] as Scope[] } }],
+		effectiveAt: Date.now(),
+		thresholdPolicies: [{ policy: 'rn', threshold: 1 }],
+		...overrides,
+	};
+}
+
+function makeAuthority (overrides?: Partial<Authority>): Authority {
+	return {
+		id: 'auth-id-1',
+		name: 'Test Authority',
+		domainName: 'test.example.com',
+		...overrides,
+	};
+}
+
+function makeNetworkRevisionFixture (overrides?: Partial<NetworkRevision>): NetworkRevision {
+	return {
+		name: 'Revised Network',
+		policies: {
+			timestampAuthorities: [{ url: 'https://tsa.example.com' }],
+			numberRequiredTSAs: 1,
+			electionType: ElectionType.adhoc,
+		},
+		relays: ['/dns4/relay.example.com/tcp/443/wss'],
+		...overrides,
+	};
+}
+
+function makeInviteAction (overrides?: Partial<InviteAction<unknown>>): InviteAction<unknown> {
+	return {
+		invite: { type: 'au', expiration: '2099-01-01T00:00:00Z', inviteKey: 'a'.repeat(66), inviteSignature: 'b'.repeat(128), digest: 'digest-1' },
+		isAccepted: true,
+		inviteSignature: 'c'.repeat(128),
+		invokes: { authority: { name: 'Invokee', domainName: 'inv.example' } },
+		userInit: undefined,
+		userId: undefined,
+		...overrides,
+	} as InviteAction<unknown>;
+}
+
+// ===========================================================================
+// NetworkCreateAuthorityBuilder Tests
+// ===========================================================================
+
+describe('NetworkCreateAuthorityBuilder', () => {
+	it('empty builder reports isValid===false and lists required missingFields', () => {
+		const b = new NetworkCreateAuthorityBuilder(makeStubNetworkEngine());
+		expect(b.isValid()).to.equal(false);
+		const paths = b.missingFields().map(m => m.path);
+		expect(paths).to.include('authority');
+		expect(paths).to.include('admin');
+		expect(b.errors().length).to.be.greaterThan(0);
+	});
+
+	it('per-setter validation rejects invalid input as BuilderError without throwing', () => {
+		let caught: unknown;
+		let b: NetworkCreateAuthorityBuilder;
+		try {
+			b = new NetworkCreateAuthorityBuilder(makeStubNetworkEngine()).setAuthority({ name: '', domainName: '' } as AuthorityInit);
+		} catch (err) {
+			caught = err;
+		}
+		expect(caught).to.equal(undefined);
+		b = new NetworkCreateAuthorityBuilder(makeStubNetworkEngine()).setAuthority({ name: '', domainName: '' } as AuthorityInit);
+		const errs = b.errors();
+		const nameErr = errs.find(e => e.path === 'authority.name' && e.kind === 'per-setter');
+		expect(nameErr).to.not.equal(undefined);
+
+		const b2 = b.setAuthority(makeAuthorityInit());
+		const errs2 = b2.errors();
+		const nameErr2 = errs2.find(e => e.path === 'authority.name' && e.code === 'EMPTY');
+		expect(nameErr2).to.equal(undefined);
+	});
+
+	it('errors/missingFields progression as setters succeed', () => {
+		const stub = makeStubNetworkEngine();
+		const empty = new NetworkCreateAuthorityBuilder(stub);
+		expect(empty.missingFields().length).to.equal(2);
+
+		const step1 = empty.setAuthority(makeAuthorityInit());
+		expect(step1.missingFields().length).to.equal(1);
+
+		const full = step1.setAdmin(makeAdminInit());
+		expect(full.missingFields().length).to.equal(0);
+		expect(full.isValid()).to.equal(true);
+	});
+
+	// BLOCKED on https://github.com/gotchoices/quereus/issues/23
+	it.skip('REAL ENGINE: isValid===true => commit() does not throw BuilderValidationError', async () => {});
+
+	it('round-trip serialization and fromJSON kind/version rejection', () => {
+		const stub = makeStubNetworkEngine();
+		const b = new NetworkCreateAuthorityBuilder(stub)
+			.setAuthority(makeAuthorityInit())
+			.setAdmin(makeAdminInit());
+		const json = b.toJSON();
+		const roundTripped = JSON.parse(JSON.stringify(json));
+		expect(roundTripped).to.deep.equal(json);
+
+		const restored = NetworkCreateAuthorityBuilder.fromJSON(json, stub);
+		expect(restored.isValid()).to.equal(b.isValid());
+		expect(restored.toJSON().draft).to.deep.equal(json.draft);
+
+		expect(() => NetworkCreateAuthorityBuilder.fromJSON({ kind: 'wrong', version: 1, draft: {} }, stub)).to.throw(/unknown kind/);
+		expect(() => NetworkCreateAuthorityBuilder.fromJSON({ kind: 'network.createAuthority', version: 99, draft: {} }, stub)).to.throw(/unsupported version/);
+	});
+
+	// BLOCKED on https://github.com/gotchoices/quereus/issues/23
+	it.skip('REAL ENGINE: double-commit guard throws BuilderAlreadyCommittedError', async () => {});
+
+	it('toEngineInput returns exact payload shape; throws on incomplete', () => {
+		const stub = makeStubNetworkEngine();
+		const incomplete = new NetworkCreateAuthorityBuilder(stub);
+		expect(() => incomplete.toEngineInput()).to.throw(BuilderValidationError);
+
+		const full = incomplete.setAuthority(makeAuthorityInit()).setAdmin(makeAdminInit());
+		const input = full.toEngineInput();
+		expect(input).to.have.property('authority');
+		expect(input).to.have.property('admin');
+		expect(input.authority.name).to.equal('Test Authority');
+	});
+
+	it('SC4 DB-FREE: stub INetworkEngine -- isValid===true => commit() does not throw BuilderValidationError AND second commit() throws BuilderAlreadyCommittedError synchronously', async () => {
+		const stub = makeStubNetworkEngine();
+		const b = new NetworkCreateAuthorityBuilder(stub)
+			.setAuthority(makeAuthorityInit())
+			.setAdmin(makeAdminInit());
+		expect(b.isValid()).to.equal(true);
+
+		await b.commit();
+
+		let caught: unknown;
+		try {
+			b.commit();
+		} catch (err) {
+			caught = err;
+		}
+		expect(caught).to.be.instanceOf(BuilderAlreadyCommittedError);
+	});
+
+	// BLOCKED on https://github.com/gotchoices/quereus/issues/23
+	it.skip('REAL ENGINE equivalence smoke: engine.createAuthority(authority, admin) vs builder.fromPayload({authority, admin}).commit()', async () => {});
+
+	it('FACT-04 parity: MockNetworkEngine.buildCreateAuthority() returns instanceof NetworkCreateAuthorityBuilder', () => {
+		const mock = new MockNetworkEngine({ hash: 'h'.repeat(16), relays: [], name: 'Test', primaryAuthorityDomainName: 'test.example' });
+		const builder = mock.buildCreateAuthority();
+		expect(builder).to.be.instanceOf(NetworkCreateAuthorityBuilder);
+	});
+});
+
+// ===========================================================================
+// NetworkPinAuthorityBuilder Tests
+// ===========================================================================
+
+describe('NetworkPinAuthorityBuilder', () => {
+	it('empty builder reports isValid===false and lists required missingFields', () => {
+		const b = new NetworkPinAuthorityBuilder(makeStubNetworkEngine());
+		expect(b.isValid()).to.equal(false);
+		const paths = b.missingFields().map(m => m.path);
+		expect(paths).to.include('id');
+		expect(paths).to.include('name');
+		expect(paths).to.include('domainName');
+		expect(b.errors().length).to.be.greaterThan(0);
+	});
+
+	it('per-setter validation rejects invalid input as BuilderError without throwing', () => {
+		let caught: unknown;
+		let b: NetworkPinAuthorityBuilder;
+		try {
+			b = new NetworkPinAuthorityBuilder(makeStubNetworkEngine()).setAuthority({ id: '', name: '', domainName: '' });
+		} catch (err) {
+			caught = err;
+		}
+		expect(caught).to.equal(undefined);
+		b = new NetworkPinAuthorityBuilder(makeStubNetworkEngine()).setAuthority({ id: '', name: '', domainName: '' });
+		const errs = b.errors();
+		const idErr = errs.find(e => e.path === 'id' && e.kind === 'per-setter');
+		expect(idErr).to.not.equal(undefined);
+
+		const b2 = b.setAuthority(makeAuthority());
+		const errs2 = b2.errors();
+		expect(errs2.length).to.equal(0);
+	});
+
+	it('errors/missingFields progression as setters succeed', () => {
+		const stub = makeStubNetworkEngine();
+		const empty = new NetworkPinAuthorityBuilder(stub);
+		expect(empty.missingFields().length).to.equal(3);
+
+		const full = empty.setAuthority(makeAuthority());
+		expect(full.missingFields().length).to.equal(0);
+		expect(full.isValid()).to.equal(true);
+	});
+
+	// BLOCKED on https://github.com/gotchoices/quereus/issues/23
+	it.skip('REAL ENGINE: isValid===true => commit() does not throw BuilderValidationError', async () => {});
+
+	it('round-trip serialization and fromJSON kind/version rejection', () => {
+		const stub = makeStubNetworkEngine();
+		const b = new NetworkPinAuthorityBuilder(stub).setAuthority(makeAuthority());
+		const json = b.toJSON();
+		const roundTripped = JSON.parse(JSON.stringify(json));
+		expect(roundTripped).to.deep.equal(json);
+
+		const restored = NetworkPinAuthorityBuilder.fromJSON(json, stub);
+		expect(restored.isValid()).to.equal(b.isValid());
+
+		expect(() => NetworkPinAuthorityBuilder.fromJSON({ kind: 'wrong', version: 1, draft: {} }, stub)).to.throw(/unknown kind/);
+		expect(() => NetworkPinAuthorityBuilder.fromJSON({ kind: 'network.pinAuthority', version: 99, draft: {} }, stub)).to.throw(/unsupported version/);
+	});
+
+	// BLOCKED on https://github.com/gotchoices/quereus/issues/23
+	it.skip('REAL ENGINE: double-commit guard throws BuilderAlreadyCommittedError', async () => {});
+
+	it('toEngineInput returns exact payload shape; throws on incomplete', () => {
+		const stub = makeStubNetworkEngine();
+		const incomplete = new NetworkPinAuthorityBuilder(stub);
+		expect(() => incomplete.toEngineInput()).to.throw(BuilderValidationError);
+
+		const full = incomplete.setAuthority(makeAuthority());
+		const input = full.toEngineInput();
+		expect(input.id).to.equal('auth-id-1');
+		expect(input.name).to.equal('Test Authority');
+		expect(input.domainName).to.equal('test.example.com');
+	});
+
+	it('SC4 DB-FREE: stub INetworkEngine -- isValid===true => commit() does not throw BuilderValidationError AND second commit() throws BuilderAlreadyCommittedError synchronously', async () => {
+		const stub = makeStubNetworkEngine();
+		const b = new NetworkPinAuthorityBuilder(stub).setAuthority(makeAuthority());
+		expect(b.isValid()).to.equal(true);
+
+		await b.commit();
+
+		let caught: unknown;
+		try {
+			b.commit();
+		} catch (err) {
+			caught = err;
+		}
+		expect(caught).to.be.instanceOf(BuilderAlreadyCommittedError);
+	});
+
+	// BLOCKED on https://github.com/gotchoices/quereus/issues/23
+	it.skip('REAL ENGINE equivalence smoke: engine.pinAuthority(authority) vs builder.fromPayload(authority).commit()', async () => {});
+
+	it('FACT-04 parity: MockNetworkEngine.buildPinAuthority() returns instanceof NetworkPinAuthorityBuilder', () => {
+		const mock = new MockNetworkEngine({ hash: 'h'.repeat(16), relays: [], name: 'Test', primaryAuthorityDomainName: 'test.example' });
+		const builder = mock.buildPinAuthority();
+		expect(builder).to.be.instanceOf(NetworkPinAuthorityBuilder);
+	});
+});
+
+// ===========================================================================
+// NetworkUnpinAuthorityBuilder Tests
+// ===========================================================================
+
+describe('NetworkUnpinAuthorityBuilder', () => {
+	it('empty builder reports isValid===false and lists required missingFields', () => {
+		const b = new NetworkUnpinAuthorityBuilder(makeStubNetworkEngine());
+		expect(b.isValid()).to.equal(false);
+		const paths = b.missingFields().map(m => m.path);
+		expect(paths).to.include('authorityId');
+		expect(b.errors().length).to.be.greaterThan(0);
+	});
+
+	it('per-setter validation rejects invalid input as BuilderError without throwing', () => {
+		let caught: unknown;
+		let b: NetworkUnpinAuthorityBuilder;
+		try {
+			b = new NetworkUnpinAuthorityBuilder(makeStubNetworkEngine()).setAuthorityId('');
+		} catch (err) {
+			caught = err;
+		}
+		expect(caught).to.equal(undefined);
+		b = new NetworkUnpinAuthorityBuilder(makeStubNetworkEngine()).setAuthorityId('');
+		const errs = b.errors();
+		const idErr = errs.find(e => e.path === 'authorityId' && e.kind === 'per-setter');
+		expect(idErr).to.not.equal(undefined);
+
+		const b2 = b.setAuthorityId('valid-authority-id');
+		const errs2 = b2.errors();
+		expect(errs2.length).to.equal(0);
+	});
+
+	it('errors/missingFields progression as setters succeed', () => {
+		const stub = makeStubNetworkEngine();
+		const empty = new NetworkUnpinAuthorityBuilder(stub);
+		expect(empty.missingFields().length).to.equal(1);
+
+		const full = empty.setAuthorityId('some-id');
+		expect(full.missingFields().length).to.equal(0);
+		expect(full.isValid()).to.equal(true);
+	});
+
+	// BLOCKED on https://github.com/gotchoices/quereus/issues/23
+	it.skip('REAL ENGINE: isValid===true => commit() does not throw BuilderValidationError', async () => {});
+
+	it('round-trip serialization and fromJSON kind/version rejection', () => {
+		const stub = makeStubNetworkEngine();
+		const b = new NetworkUnpinAuthorityBuilder(stub).setAuthorityId('auth-xyz');
+		const json = b.toJSON();
+		const roundTripped = JSON.parse(JSON.stringify(json));
+		expect(roundTripped).to.deep.equal(json);
+
+		const restored = NetworkUnpinAuthorityBuilder.fromJSON(json, stub);
+		expect(restored.isValid()).to.equal(b.isValid());
+
+		expect(() => NetworkUnpinAuthorityBuilder.fromJSON({ kind: 'wrong', version: 1, draft: {} }, stub)).to.throw(/unknown kind/);
+		expect(() => NetworkUnpinAuthorityBuilder.fromJSON({ kind: 'network.unpinAuthority', version: 99, draft: {} }, stub)).to.throw(/unsupported version/);
+	});
+
+	// BLOCKED on https://github.com/gotchoices/quereus/issues/23
+	it.skip('REAL ENGINE: double-commit guard throws BuilderAlreadyCommittedError', async () => {});
+
+	it('toEngineInput returns exact payload shape; throws on incomplete', () => {
+		const stub = makeStubNetworkEngine();
+		const incomplete = new NetworkUnpinAuthorityBuilder(stub);
+		expect(() => incomplete.toEngineInput()).to.throw(BuilderValidationError);
+
+		const full = incomplete.setAuthorityId('auth-123');
+		const input = full.toEngineInput();
+		expect(input).to.equal('auth-123');
+	});
+
+	it('SC4 DB-FREE: stub INetworkEngine -- isValid===true => commit() does not throw BuilderValidationError AND second commit() throws BuilderAlreadyCommittedError synchronously', async () => {
+		const stub = makeStubNetworkEngine();
+		const b = new NetworkUnpinAuthorityBuilder(stub).setAuthorityId('auth-abc');
+		expect(b.isValid()).to.equal(true);
+
+		await b.commit();
+
+		let caught: unknown;
+		try {
+			b.commit();
+		} catch (err) {
+			caught = err;
+		}
+		expect(caught).to.be.instanceOf(BuilderAlreadyCommittedError);
+	});
+
+	// BLOCKED on https://github.com/gotchoices/quereus/issues/23
+	it.skip('REAL ENGINE equivalence smoke: engine.unpinAuthority(id) vs builder.fromPayload(id).commit()', async () => {});
+
+	it('FACT-04 parity: MockNetworkEngine.buildUnpinAuthority() returns instanceof NetworkUnpinAuthorityBuilder', () => {
+		const mock = new MockNetworkEngine({ hash: 'h'.repeat(16), relays: [], name: 'Test', primaryAuthorityDomainName: 'test.example' });
+		const builder = mock.buildUnpinAuthority();
+		expect(builder).to.be.instanceOf(NetworkUnpinAuthorityBuilder);
+	});
+});
+
+// ===========================================================================
+// NetworkProposeRevisionBuilder Tests
+// ===========================================================================
+
+describe('NetworkProposeRevisionBuilder', () => {
+	it('empty builder reports isValid===false and lists required missingFields', () => {
+		const b = new NetworkProposeRevisionBuilder(makeStubNetworkEngine());
+		expect(b.isValid()).to.equal(false);
+		const paths = b.missingFields().map(m => m.path);
+		expect(paths).to.include('name');
+		expect(paths).to.include('policies');
+		expect(paths).to.include('relays');
+		expect(b.errors().length).to.be.greaterThan(0);
+	});
+
+	it('per-setter validation rejects invalid input as BuilderError without throwing', () => {
+		let caught: unknown;
+		let b: NetworkProposeRevisionBuilder;
+		try {
+			b = new NetworkProposeRevisionBuilder(makeStubNetworkEngine()).setName('');
+		} catch (err) {
+			caught = err;
+		}
+		expect(caught).to.equal(undefined);
+		b = new NetworkProposeRevisionBuilder(makeStubNetworkEngine()).setName('');
+		const errs = b.errors();
+		const nameErr = errs.find(e => e.path === 'name' && e.kind === 'per-setter');
+		expect(nameErr).to.not.equal(undefined);
+
+		const b2 = b.setName('Valid Name');
+		const errs2 = b2.errors();
+		const nameErr2 = errs2.find(e => e.path === 'name' && e.code === 'EMPTY');
+		expect(nameErr2).to.equal(undefined);
+	});
+
+	it('errors/missingFields progression as setters succeed', () => {
+		const stub = makeStubNetworkEngine();
+		const empty = new NetworkProposeRevisionBuilder(stub);
+		expect(empty.missingFields().length).to.equal(3);
+
+		const step1 = empty.setName('Revised');
+		expect(step1.missingFields().length).to.equal(2);
+
+		const step2 = step1.setPolicies({
+			timestampAuthorities: [{ url: 'https://tsa.example.com' }],
+			numberRequiredTSAs: 1,
+			electionType: ElectionType.adhoc,
+		});
+		expect(step2.missingFields().length).to.equal(1);
+
+		const full = step2.setRelays(['/dns4/relay.example.com/tcp/443/wss']);
+		expect(full.missingFields().length).to.equal(0);
+		expect(full.isValid()).to.equal(true);
+	});
+
+	// BLOCKED on https://github.com/gotchoices/quereus/issues/23
+	it.skip('REAL ENGINE: isValid===true => commit() does not throw BuilderValidationError', async () => {});
+
+	it('round-trip serialization and fromJSON kind/version rejection', () => {
+		const stub = makeStubNetworkEngine();
+		const b = new NetworkProposeRevisionBuilder(stub)
+			.setName('Revised')
+			.setPolicies({ timestampAuthorities: [{ url: 'https://tsa.example.com' }], numberRequiredTSAs: 1, electionType: ElectionType.adhoc })
+			.setRelays(['/dns4/relay.example.com/tcp/443/wss']);
+		const json = b.toJSON();
+		const roundTripped = JSON.parse(JSON.stringify(json));
+		expect(roundTripped).to.deep.equal(json);
+
+		const restored = NetworkProposeRevisionBuilder.fromJSON(json, stub);
+		expect(restored.isValid()).to.equal(b.isValid());
+
+		expect(() => NetworkProposeRevisionBuilder.fromJSON({ kind: 'wrong', version: 1, draft: {} }, stub)).to.throw(/unknown kind/);
+		expect(() => NetworkProposeRevisionBuilder.fromJSON({ kind: 'network.proposeRevision', version: 99, draft: {} }, stub)).to.throw(/unsupported version/);
+	});
+
+	// BLOCKED on https://github.com/gotchoices/quereus/issues/23
+	it.skip('REAL ENGINE: double-commit guard throws BuilderAlreadyCommittedError', async () => {});
+
+	it('toEngineInput returns exact payload shape; throws on incomplete', () => {
+		const stub = makeStubNetworkEngine();
+		const incomplete = new NetworkProposeRevisionBuilder(stub);
+		expect(() => incomplete.toEngineInput()).to.throw(BuilderValidationError);
+
+		const full = incomplete
+			.setName('Rev')
+			.setPolicies({ timestampAuthorities: [{ url: 'https://tsa.example.com' }], numberRequiredTSAs: 1, electionType: ElectionType.adhoc })
+			.setRelays(['/dns4/relay.example.com/tcp/443/wss']);
+		const input = full.toEngineInput();
+		expect(input.name).to.equal('Rev');
+		expect(input.policies).to.have.property('numberRequiredTSAs');
+		expect(input.relays).to.be.an('array').with.length(1);
+	});
+
+	it('SC4 DB-FREE: stub INetworkEngine -- isValid===true => commit() does not throw BuilderValidationError AND second commit() throws BuilderAlreadyCommittedError synchronously', async () => {
+		const stub = makeStubNetworkEngine();
+		const b = new NetworkProposeRevisionBuilder(stub)
+			.setName('Revised')
+			.setPolicies({ timestampAuthorities: [{ url: 'https://tsa.example.com' }], numberRequiredTSAs: 1, electionType: ElectionType.adhoc })
+			.setRelays(['/dns4/relay.example.com/tcp/443/wss']);
+		expect(b.isValid()).to.equal(true);
+
+		await b.commit();
+
+		let caught: unknown;
+		try {
+			b.commit();
+		} catch (err) {
+			caught = err;
+		}
+		expect(caught).to.be.instanceOf(BuilderAlreadyCommittedError);
+	});
+
+	// BLOCKED on https://github.com/gotchoices/quereus/issues/23
+	it.skip('REAL ENGINE equivalence smoke: engine.proposeRevision(revision) vs builder.fromPayload(revision).commit()', async () => {});
+
+	it('FACT-04 parity: MockNetworkEngine.buildProposeRevision() returns instanceof NetworkProposeRevisionBuilder', () => {
+		const mock = new MockNetworkEngine({ hash: 'h'.repeat(16), relays: [], name: 'Test', primaryAuthorityDomainName: 'test.example' });
+		const builder = mock.buildProposeRevision();
+		expect(builder).to.be.instanceOf(NetworkProposeRevisionBuilder);
+	});
+
+	it('cross-field TSA_MISMATCH validation fires when numberRequiredTSAs > timestampAuthorities.length', () => {
+		const stub = makeStubNetworkEngine();
+		const b = new NetworkProposeRevisionBuilder(stub)
+			.setName('Bad TSA')
+			.setPolicies({ timestampAuthorities: [], numberRequiredTSAs: 5, electionType: ElectionType.adhoc })
+			.setRelays(['/dns4/relay.example.com/tcp/443/wss']);
+		expect(b.isValid()).to.equal(false);
+		const errs = b.errors();
+		const tsaErr = errs.find(e => e.code === 'TSA_MISMATCH');
+		expect(tsaErr).to.not.equal(undefined);
+		expect(tsaErr!.kind).to.equal('cross-field');
+	});
+});
+
+// ===========================================================================
+// NetworkRespondToInviteBuilder Tests
+// ===========================================================================
+
+describe('NetworkRespondToInviteBuilder', () => {
+	it('empty builder reports isValid===false and lists required missingFields', () => {
+		const b = new NetworkRespondToInviteBuilder(makeStubNetworkEngine());
+		expect(b.isValid()).to.equal(false);
+		const paths = b.missingFields().map(m => m.path);
+		expect(paths).to.include('invite');
+		expect(paths).to.include('isAccepted');
+		expect(paths).to.include('inviteSignature');
+		expect(b.errors().length).to.be.greaterThan(0);
+	});
+
+	it('per-setter validation rejects invalid input as BuilderError without throwing', () => {
+		let caught: unknown;
+		let b: NetworkRespondToInviteBuilder;
+		try {
+			b = new NetworkRespondToInviteBuilder(makeStubNetworkEngine()).update({ inviteSignature: '' });
+		} catch (err) {
+			caught = err;
+		}
+		expect(caught).to.equal(undefined);
+		b = new NetworkRespondToInviteBuilder(makeStubNetworkEngine()).update({ inviteSignature: '' });
+		const errs = b.errors();
+		const sigErr = errs.find(e => e.path === 'inviteSignature' && e.kind === 'per-setter');
+		expect(sigErr).to.not.equal(undefined);
+
+		const b2 = b.update({ inviteSignature: 'a'.repeat(128) });
+		const errs2 = b2.errors();
+		const sigErr2 = errs2.find(e => e.path === 'inviteSignature' && e.code === 'EMPTY');
+		expect(sigErr2).to.equal(undefined);
+	});
+
+	it('errors/missingFields progression as setters succeed', () => {
+		const stub = makeStubNetworkEngine();
+		const empty = new NetworkRespondToInviteBuilder(stub);
+		expect(empty.missingFields().length).to.equal(3);
+
+		const full = empty.setInvite(makeInviteAction());
+		expect(full.missingFields().length).to.equal(0);
+		expect(full.isValid()).to.equal(true);
+	});
+
+	// BLOCKED on https://github.com/gotchoices/quereus/issues/23
+	it.skip('REAL ENGINE: isValid===true => commit() does not throw BuilderValidationError', async () => {});
+
+	it('round-trip serialization and fromJSON kind/version rejection', () => {
+		const stub = makeStubNetworkEngine();
+		const b = new NetworkRespondToInviteBuilder(stub).setInvite(makeInviteAction());
+		const json = b.toJSON();
+		const roundTripped = JSON.parse(JSON.stringify(json));
+		expect(roundTripped).to.deep.equal(json);
+
+		const restored = NetworkRespondToInviteBuilder.fromJSON(json, stub);
+		expect(restored.isValid()).to.equal(b.isValid());
+
+		expect(() => NetworkRespondToInviteBuilder.fromJSON({ kind: 'wrong', version: 1, draft: {} }, stub)).to.throw(/unknown kind/);
+		expect(() => NetworkRespondToInviteBuilder.fromJSON({ kind: 'network.respondToInvite', version: 99, draft: {} }, stub)).to.throw(/unsupported version/);
+	});
+
+	// BLOCKED on https://github.com/gotchoices/quereus/issues/23
+	it.skip('REAL ENGINE: double-commit guard throws BuilderAlreadyCommittedError', async () => {});
+
+	it('toEngineInput returns exact payload shape; throws on incomplete', () => {
+		const stub = makeStubNetworkEngine();
+		const incomplete = new NetworkRespondToInviteBuilder(stub);
+		expect(() => incomplete.toEngineInput()).to.throw(BuilderValidationError);
+
+		const full = incomplete.setInvite(makeInviteAction());
+		const input = full.toEngineInput();
+		expect(input).to.have.property('invite');
+		expect(input).to.have.property('isAccepted');
+		expect(input).to.have.property('inviteSignature');
+	});
+
+	it('SC4 DB-FREE: stub INetworkEngine -- isValid===true => commit() does not throw BuilderValidationError AND second commit() throws BuilderAlreadyCommittedError synchronously', async () => {
+		const stub = makeStubNetworkEngine();
+		const b = new NetworkRespondToInviteBuilder(stub).setInvite(makeInviteAction());
+		expect(b.isValid()).to.equal(true);
+
+		const result = await b.commit();
+		expect(result).to.be.a('string');
+
+		let caught: unknown;
+		try {
+			b.commit();
+		} catch (err) {
+			caught = err;
+		}
+		expect(caught).to.be.instanceOf(BuilderAlreadyCommittedError);
+	});
+
+	// BLOCKED on https://github.com/gotchoices/quereus/issues/23
+	it.skip('REAL ENGINE equivalence smoke: engine.respondToInvite(invite) vs builder.fromPayload(invite).commit()', async () => {});
+
+	it('FACT-04 parity: MockNetworkEngine.buildRespondToInvite() returns instanceof NetworkRespondToInviteBuilder', () => {
+		const mock = new MockNetworkEngine({ hash: 'h'.repeat(16), relays: [], name: 'Test', primaryAuthorityDomainName: 'test.example' });
+		const builder = mock.buildRespondToInvite();
+		expect(builder).to.be.instanceOf(NetworkRespondToInviteBuilder);
 	});
 });

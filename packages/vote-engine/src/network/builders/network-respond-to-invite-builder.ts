@@ -186,10 +186,18 @@ export class NetworkRespondToInviteBuilder implements INetworkRespondToInviteBui
   }
 
   toJSON (): SerializedBuilder<Partial<InviteAction<unknown>>> {
+    // Exclude undefined fields so JSON round-trip is stable (SER-04).
+    const draft: Partial<InviteAction<unknown>> = {}
+    if (this.draft.invite !== undefined) draft.invite = this.draft.invite
+    if (this.draft.isAccepted !== undefined) draft.isAccepted = this.draft.isAccepted
+    if (this.draft.inviteSignature !== undefined) draft.inviteSignature = this.draft.inviteSignature
+    if (this.draft.invokes !== undefined) draft.invokes = this.draft.invokes
+    if (this.draft.userInit !== undefined) draft.userInit = this.draft.userInit
+    if (this.draft.userId !== undefined) draft.userId = this.draft.userId
     return {
       kind: NetworkRespondToInviteBuilder.KIND,
       version: NetworkRespondToInviteBuilder.KIND_VERSION,
-      draft: { ...this.draft }
+      draft
     }
   }
 

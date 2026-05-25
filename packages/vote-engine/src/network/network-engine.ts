@@ -8,7 +8,12 @@ import type {
   Cursor,
   IAuthorityEngine,
   ImageRef,
+  INetworkCreateAuthorityBuilder,
   INetworkEngine,
+  INetworkPinAuthorityBuilder,
+  INetworkProposeRevisionBuilder,
+  INetworkRespondToInviteBuilder,
+  INetworkUnpinAuthorityBuilder,
   IUserEngine,
   LocalStorage as ILocalStorage,
   Network,
@@ -32,6 +37,11 @@ import type {
   UserKeyType,
   User
 } from '@votetorrent/vote-core'
+import { NetworkCreateAuthorityBuilder } from './builders/network-create-authority-builder.js'
+import { NetworkPinAuthorityBuilder } from './builders/network-pin-authority-builder.js'
+import { NetworkUnpinAuthorityBuilder } from './builders/network-unpin-authority-builder.js'
+import { NetworkProposeRevisionBuilder } from './builders/network-propose-revision-builder.js'
+import { NetworkRespondToInviteBuilder } from './builders/network-respond-to-invite-builder.js'
 
 export class NetworkEngine implements INetworkEngine {
   constructor (
@@ -663,5 +673,27 @@ export class NetworkEngine implements INetworkEngine {
       (authority) => authority.id !== authorityId
     )
     await this.localStorage.setItem('pinnedAuthorities', filtered)
+  }
+
+  // ---- Builder factories (FACT-01 / FACT-04) ----
+
+  buildCreateAuthority (): INetworkCreateAuthorityBuilder {
+    return new NetworkCreateAuthorityBuilder(this)
+  }
+
+  buildPinAuthority (): INetworkPinAuthorityBuilder {
+    return new NetworkPinAuthorityBuilder(this)
+  }
+
+  buildUnpinAuthority (): INetworkUnpinAuthorityBuilder {
+    return new NetworkUnpinAuthorityBuilder(this)
+  }
+
+  buildProposeRevision (): INetworkProposeRevisionBuilder {
+    return new NetworkProposeRevisionBuilder(this)
+  }
+
+  buildRespondToInvite<TInvokes> (): INetworkRespondToInviteBuilder<TInvokes> {
+    return new NetworkRespondToInviteBuilder(this) as unknown as INetworkRespondToInviteBuilder<TInvokes>
   }
 }
