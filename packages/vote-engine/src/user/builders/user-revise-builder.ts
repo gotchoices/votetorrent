@@ -22,7 +22,15 @@ import {
   UserHistoryEvent
 } from '@votetorrent/vote-core'
 
-type Draft = Readonly<Partial<ReviseUserHistory & { info: Partial<UserInfo> }>>
+/** Draft tracks the info sub-object as Partial<UserInfo> since setters fill fields individually. */
+interface ReviseDraft {
+  event?: typeof UserHistoryEvent.revise
+  timestamp?: Timestamp
+  signature?: Signature
+  info?: Partial<UserInfo>
+}
+
+type Draft = Readonly<ReviseDraft>
 type DraftValidator = (draft: Draft) => BuilderError[]
 
 const HEX_RE = /^[0-9a-fA-F]+$/
@@ -51,7 +59,7 @@ export class UserReviseBuilder implements IUserReviseBuilder {
 
   private static validateEvent (draft: Draft): BuilderError[] {
     if (draft.event === undefined) return []
-    if (draft.event !== UserHistoryEvent.revise) {
+    if ((draft.event as string) !== UserHistoryEvent.revise) {
       return [{
         path: 'event',
         code: 'INVALID_EVENT',
@@ -115,7 +123,7 @@ export class UserReviseBuilder implements IUserReviseBuilder {
   }
 
   private static validateInfoName (draft: Draft): BuilderError[] {
-    const info = draft.info as Partial<UserInfo> | undefined
+    const info = draft.info
     if (info?.name === undefined) return []
     if (typeof info.name !== 'string' || info.name.trim() === '') {
       return [{
@@ -129,7 +137,7 @@ export class UserReviseBuilder implements IUserReviseBuilder {
   }
 
   private static validateInfoImageRef (draft: Draft): BuilderError[] {
-    const info = draft.info as Partial<UserInfo> | undefined
+    const info = draft.info
     if (info?.imageRef === undefined) return []
     const ref = info.imageRef as ImageRef | null
     if (
@@ -173,12 +181,12 @@ export class UserReviseBuilder implements IUserReviseBuilder {
   }
 
   setInfoName (name: string): this {
-    const info = { ...(this.draft.info as Partial<UserInfo> | undefined), name }
+    const info: Partial<UserInfo> = { ...this.draft.info, name }
     return new UserReviseBuilder(this.engine, { ...this.draft, info }) as this
   }
 
   setInfoImageRef (imageRef: ImageRef): this {
-    const info = { ...(this.draft.info as Partial<UserInfo> | undefined), imageRef }
+    const info: Partial<UserInfo> = { ...this.draft.info, imageRef }
     return new UserReviseBuilder(this.engine, { ...this.draft, info }) as this
   }
 
@@ -201,14 +209,13 @@ export class UserReviseBuilder implements IUserReviseBuilder {
       }
       throw new BuilderValidationError(allErrors)
     }
-    const info = this.draft.info as UserInfo
     return {
       event: UserHistoryEvent.revise,
       timestamp: this.draft.timestamp!,
       signature: this.draft.signature!,
       info: {
-        name: info.name,
-        imageRef: info.imageRef
+        name: this.draft.info!.name!,
+        imageRef: this.draft.info!.imageRef!
       }
     }
   }
@@ -246,7 +253,7 @@ export class UserReviseBuilder implements IUserReviseBuilder {
     if (this.draft.event === undefined) missing.push({ path: 'event', reason: 'required' })
     if (this.draft.timestamp === undefined) missing.push({ path: 'timestamp', reason: 'required' })
     if (this.draft.signature === undefined) missing.push({ path: 'signature', reason: 'required' })
-    const info = this.draft.info as Partial<UserInfo> | undefined
+    const info = this.draft.info
     if (info?.name === undefined || (typeof info.name === 'string' && info.name.trim() === '')) {
       missing.push({ path: 'info.name', reason: 'required' })
     }
@@ -255,7 +262,12 @@ export class UserReviseBuilder implements IUserReviseBuilder {
   }
 
   update (partial: Partial<ReviseUserHistory>): this {
-    return new UserReviseBuilder(this.engine, { ...this.draft, ...partial }) as this
+    const merged: ReviseDraft = { ...this.draft }
+    if (partial.event !== undefined) merged.event = partial.event as typeof UserHistoryEvent.revise
+    if (partial.timestamp !== undefined) merged.timestamp = partial.timestamp
+    if (partial.signature !== undefined) merged.signature = partial.signature
+    if (partial.info !== undefined) merged.info = { ...merged.info, ...partial.info }
+    return new UserReviseBuilder(this.engine, merged) as this
   }
 
   reset (): this {
@@ -266,7 +278,7 @@ export class UserReviseBuilder implements IUserReviseBuilder {
     return new UserReviseBuilder(this.engine, { ...this.draft }) as this
   }
 
-  toJSON (): SerializedBuilder<Partial<ReviseUserHistory>> {
+  toJSON (): SerializedBuilder<ReviseDraft> {
     return {
       kind: UserReviseBuilder.KIND,
       version: UserReviseBuilder.KIND_VERSION,
@@ -304,6 +316,6 @@ export class UserReviseBuilder implements IUserReviseBuilder {
     if (draft === null || typeof draft !== 'object' || Array.isArray(draft)) {
       throw new Error('UserReviseBuilder.fromJSON: draft must be a plain object')
     }
-    return new UserReviseBuilder(engine, draft as Partial<ReviseUserHistory>)
+    return new UserReviseBuilder(engine, draft as ReviseDraft)
   }
 }

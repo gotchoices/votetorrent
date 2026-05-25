@@ -6,6 +6,11 @@ import {
   UserHistoryEvent,
   UserKeyType
 } from '@votetorrent/vote-core'
+import { UserCreateBuilder } from '../src/user/builders/user-create-builder.js'
+import { UserAddKeyBuilder } from '../src/user/builders/user-add-key-builder.js'
+import { UserReviseBuilder } from '../src/user/builders/user-revise-builder.js'
+import { UserRevokeKeyBuilder } from '../src/user/builders/user-revoke-key-builder.js'
+import { MockUserEngine } from '../src/user/mock-user-engine.js'
 import { expect } from 'chai'
 import { prepareDb } from '../src/database/initialize'
 import { NetworkEngine } from '../src/network/network-engine'
@@ -20,10 +25,14 @@ import { AsyncStorage } from './shims/react-native'
 import type {
   CreateUserHistory,
   DefaultUser,
+  ImageRef,
+  IUserEngine,
   NetworkInit,
   NetworkReference,
   ReviseUserHistory,
   Scope,
+  Signature,
+  Timestamp,
   User,
   UserKey
 } from '@votetorrent/vote-core'
@@ -660,5 +669,654 @@ describe('DefaultUserSetBuilder', () => {
 
     expect(realEngine.buildSet()).to.be.instanceOf(DefaultUserSetBuilder)
     expect(mockEngine.buildSet()).to.be.instanceOf(DefaultUserSetBuilder)
+  })
+})
+
+// ===========================================================================
+// Stub IUserEngine helper for DB-FREE SC4 coverage
+// ===========================================================================
+
+function makeStubUserEngine (opts?: { failOn?: 'create' | 'addKey' | 'revise' | 'revokeKey' }): IUserEngine {
+  const fail = opts?.failOn
+  return {
+    create: fail === 'create'
+      ? async () => { throw new Error('stub failure') }
+      : async () => undefined,
+    addKey: fail === 'addKey'
+      ? async () => { throw new Error('stub failure') }
+      : async () => undefined,
+    revise: fail === 'revise'
+      ? async () => { throw new Error('stub failure') }
+      : async () => undefined,
+    revokeKey: fail === 'revokeKey'
+      ? async () => { throw new Error('stub failure') }
+      : async () => undefined,
+    connectDevice: async () => ({ multiAddress: '', token: '' }),
+    getHistory: async function * () { /* empty */ },
+    getSummary: async () => undefined,
+    isPrivileged: async () => false,
+    buildCreate: () => new UserCreateBuilder({} as IUserEngine),
+    buildAddKey: () => new UserAddKeyBuilder({} as IUserEngine),
+    buildRevise: () => new UserReviseBuilder({} as IUserEngine),
+    buildRevokeKey: () => new UserRevokeKeyBuilder({} as IUserEngine)
+  } as IUserEngine
+}
+
+// ===========================================================================
+// UserCreateBuilder Tests
+// ===========================================================================
+
+describe('UserCreateBuilder', () => {
+  const VALID_SIG: Signature = {
+    signature: 'a'.repeat(128),
+    signerKey: 'b'.repeat(66),
+    signerUserId: 'user-1'
+  }
+  const VALID_KEY: UserKey = {
+    key: 'c'.repeat(66),
+    type: UserKeyType.mobile,
+    expiration: Date.now() + 86_400_000
+  }
+  const VALID_IMAGE_REF: ImageRef = { url: 'https://img.local/user.png' }
+
+  function makeFullBuilder (engine: IUserEngine): UserCreateBuilder {
+    let b = new UserCreateBuilder(engine)
+    b = b.setEvent(UserHistoryEvent.create)
+      .setTimestamp(Date.now())
+      .setSignature(VALID_SIG)
+      .setName('Test User')
+      .setImageRef(VALID_IMAGE_REF)
+      .setUserKey(VALID_KEY) as UserCreateBuilder
+    return b
+  }
+
+  it('empty builder reports isValid===false and lists required missingFields', () => {
+    const b = new UserCreateBuilder(makeStubUserEngine())
+    expect(b.isValid()).to.equal(false)
+    const paths = b.missingFields().map(m => m.path)
+    expect(paths).to.include('event')
+    expect(paths).to.include('timestamp')
+    expect(paths).to.include('signature')
+    expect(paths).to.include('name')
+    expect(paths).to.include('imageRef')
+    expect(paths).to.include('userKey')
+    expect(b.errors().length).to.be.greaterThan(0)
+  })
+
+  it('per-setter validation rejects invalid input as BuilderError without throwing', () => {
+    let caught: unknown
+    let b: UserCreateBuilder
+    try {
+      b = new UserCreateBuilder(makeStubUserEngine()).setName('')
+    } catch (err) {
+      caught = err
+    }
+    expect(caught).to.equal(undefined)
+    b = new UserCreateBuilder(makeStubUserEngine()).setName('')
+    const errs = b.errors()
+    const nameErr = errs.find(e => e.path === 'name' && e.kind === 'per-setter')
+    expect(nameErr).to.not.equal(undefined)
+
+    const b2 = b.setName('Alice')
+    const errs2 = b2.errors()
+    const nameErr2 = errs2.find(e => e.path === 'name' && e.code === 'EMPTY')
+    expect(nameErr2).to.equal(undefined)
+  })
+
+  it('errors/missingFields progression as setters succeed', () => {
+    const stub = makeStubUserEngine()
+    const empty = new UserCreateBuilder(stub)
+    expect(empty.missingFields().length).to.equal(6)
+
+    const step1 = empty.setEvent(UserHistoryEvent.create)
+    expect(step1.missingFields().length).to.equal(5)
+
+    const step2 = step1.setTimestamp(Date.now())
+    expect(step2.missingFields().length).to.equal(4)
+
+    const full = makeFullBuilder(stub)
+    expect(full.missingFields().length).to.equal(0)
+    expect(full.isValid()).to.equal(true)
+  })
+
+  // BLOCKED on https://github.com/gotchoices/quereus/issues/23 —
+  // createUserEngineForExistingNetwork() depends on NetworksEngine.create()
+  // succeeding, which trips CantDelete on INSERT in Quereus 3.1.1.
+  it.skip('REAL ENGINE: isValid===true => commit() does not throw BuilderValidationError; engine.create observable side effects match', async () => {
+    const { engine } = await createUserEngineForExistingNetwork()
+    const b = makeFullBuilder(engine)
+    expect(b.isValid()).to.equal(true)
+    await b.commit()
+  })
+
+  it('round-trip serialization: JSON.parse(JSON.stringify(b.toJSON())) deep-equals; fromJSON reproduces draft + validation state', () => {
+    const stub = makeStubUserEngine()
+    const b = makeFullBuilder(stub)
+    const json = b.toJSON()
+    const roundTripped = JSON.parse(JSON.stringify(json))
+    expect(roundTripped).to.deep.equal(json)
+    expect(json.kind).to.equal('user.create')
+    expect(json.version).to.equal(1)
+
+    const rehydrated = UserCreateBuilder.fromJSON(json, stub)
+    expect(rehydrated.isValid()).to.equal(true)
+    expect(rehydrated.toEngineInput()).to.deep.equal(b.toEngineInput())
+
+    let kindErr: unknown
+    try { UserCreateBuilder.fromJSON({ kind: 'wrong', version: 1, draft: {} }, stub) } catch (err) { kindErr = err }
+    expect(kindErr).to.be.instanceOf(Error)
+
+    let versionErr: unknown
+    try { UserCreateBuilder.fromJSON({ kind: 'user.create', version: 99, draft: {} }, stub) } catch (err) { versionErr = err }
+    expect(versionErr).to.be.instanceOf(Error)
+  })
+
+  // BLOCKED on https://github.com/gotchoices/quereus/issues/23 —
+  // createUserEngineForExistingNetwork() depends on NetworksEngine.create()
+  // succeeding, which trips CantDelete on INSERT in Quereus 3.1.1.
+  it.skip('REAL ENGINE: double-commit guard: 2nd commit() throws BuilderAlreadyCommittedError synchronously, no second engine write', async () => {
+    const { engine } = await createUserEngineForExistingNetwork()
+    const b = makeFullBuilder(engine)
+    await b.commit()
+    let caught: unknown
+    try { b.commit() } catch (err) { caught = err }
+    expect(caught).to.be.instanceOf(BuilderAlreadyCommittedError)
+  })
+
+  it('toEngineInput returns the exact engine payload shape; throws BuilderValidationError on incomplete builder', () => {
+    const stub = makeStubUserEngine()
+    const empty = new UserCreateBuilder(stub)
+    let caught: unknown
+    try { empty.toEngineInput() } catch (err) { caught = err }
+    expect(caught).to.be.instanceOf(BuilderValidationError)
+
+    const full = makeFullBuilder(stub)
+    const input = full.toEngineInput()
+    expect(input).to.have.property('event', UserHistoryEvent.create)
+    expect(input).to.have.property('timestamp').that.is.a('number')
+    expect(input).to.have.property('signature').that.is.an('object')
+    expect(input).to.have.property('name', 'Test User')
+    expect(input).to.have.property('imageRef').that.is.an('object')
+    expect(input).to.have.property('userKey').that.is.an('object')
+  })
+
+  it('SC4 DB-FREE: stub IUserEngine -- isValid===true => commit() does not throw BuilderValidationError AND second commit() throws BuilderAlreadyCommittedError synchronously', async () => {
+    const stub = makeStubUserEngine()
+    const b = makeFullBuilder(stub)
+    expect(b.isValid()).to.equal(true)
+
+    // SC4 part A: VALID-03
+    let validationErr: unknown
+    try { await b.commit() } catch (err) { validationErr = err }
+    if (validationErr instanceof BuilderValidationError) {
+      expect.fail('commit() threw BuilderValidationError on a valid builder')
+    }
+    expect(validationErr).to.equal(undefined)
+
+    // SC4 part B: FACT-03
+    let caught: unknown
+    try { b.commit() } catch (err) { caught = err }
+    expect(caught).to.be.instanceOf(BuilderAlreadyCommittedError)
+  })
+
+  // BLOCKED on https://github.com/gotchoices/quereus/issues/23 —
+  // createUserEngineForExistingNetwork() depends on NetworksEngine.create()
+  // succeeding, which trips CantDelete on INSERT in Quereus 3.1.1.
+  it.skip('REAL ENGINE: engine.create(payload) and engine.buildCreate().fromPayload(payload).commit() produce structurally identical observable state', async () => {
+    // Post-#23: seed DB, run both paths, compare rows
+  })
+
+  it('FACT-04 parity: MockUserEngine.buildCreate() returns instanceof UserCreateBuilder', () => {
+    const mock = new MockUserEngine()
+    expect(mock.buildCreate()).to.be.instanceOf(UserCreateBuilder)
+  })
+})
+
+// ===========================================================================
+// UserAddKeyBuilder Tests
+// ===========================================================================
+
+describe('UserAddKeyBuilder', () => {
+  function makeFullBuilder (engine: IUserEngine): UserAddKeyBuilder {
+    let b = new UserAddKeyBuilder(engine)
+    b = b.setKey('d'.repeat(66))
+      .setType(UserKeyType.mobile)
+      .setExpiration(Date.now() + 86_400_000) as UserAddKeyBuilder
+    return b
+  }
+
+  it('empty builder reports isValid===false and lists required missingFields', () => {
+    const b = new UserAddKeyBuilder(makeStubUserEngine())
+    expect(b.isValid()).to.equal(false)
+    const paths = b.missingFields().map(m => m.path)
+    expect(paths).to.include('key')
+    expect(paths).to.include('type')
+    expect(paths).to.include('expiration')
+    expect(b.errors().length).to.be.greaterThan(0)
+  })
+
+  it('per-setter validation rejects invalid input as BuilderError without throwing', () => {
+    let caught: unknown
+    let b: UserAddKeyBuilder
+    try {
+      b = new UserAddKeyBuilder(makeStubUserEngine()).setKey('not-hex')
+    } catch (err) {
+      caught = err
+    }
+    expect(caught).to.equal(undefined)
+    b = new UserAddKeyBuilder(makeStubUserEngine()).setKey('not-hex')
+    const errs = b.errors()
+    const keyErr = errs.find(e => e.path === 'key' && e.kind === 'per-setter')
+    expect(keyErr).to.not.equal(undefined)
+
+    const b2 = b.setKey('d'.repeat(66))
+    const errs2 = b2.errors()
+    const keyErr2 = errs2.find(e => e.path === 'key' && e.code === 'INVALID_KEY_HEX')
+    expect(keyErr2).to.equal(undefined)
+  })
+
+  it('errors/missingFields progression as setters succeed', () => {
+    const stub = makeStubUserEngine()
+    const empty = new UserAddKeyBuilder(stub)
+    expect(empty.missingFields().length).to.equal(3)
+
+    const step1 = empty.setKey('d'.repeat(66))
+    expect(step1.missingFields().length).to.equal(2)
+
+    const full = makeFullBuilder(stub)
+    expect(full.missingFields().length).to.equal(0)
+    expect(full.isValid()).to.equal(true)
+  })
+
+  // BLOCKED on https://github.com/gotchoices/quereus/issues/23 —
+  // createUserEngineForExistingNetwork() depends on NetworksEngine.create()
+  // succeeding, which trips CantDelete on INSERT in Quereus 3.1.1.
+  it.skip('REAL ENGINE: isValid===true => commit() does not throw BuilderValidationError; engine.addKey observable side effects match', async () => {
+    const { engine } = await createUserEngineForExistingNetwork()
+    const b = makeFullBuilder(engine)
+    expect(b.isValid()).to.equal(true)
+    await b.commit()
+  })
+
+  it('round-trip serialization: JSON.parse(JSON.stringify(b.toJSON())) deep-equals; fromJSON reproduces draft + validation state', () => {
+    const stub = makeStubUserEngine()
+    const b = makeFullBuilder(stub)
+    const json = b.toJSON()
+    const roundTripped = JSON.parse(JSON.stringify(json))
+    expect(roundTripped).to.deep.equal(json)
+    expect(json.kind).to.equal('user.addKey')
+    expect(json.version).to.equal(1)
+
+    const rehydrated = UserAddKeyBuilder.fromJSON(json, stub)
+    expect(rehydrated.isValid()).to.equal(true)
+    expect(rehydrated.toEngineInput()).to.deep.equal(b.toEngineInput())
+
+    let kindErr: unknown
+    try { UserAddKeyBuilder.fromJSON({ kind: 'wrong', version: 1, draft: {} }, stub) } catch (err) { kindErr = err }
+    expect(kindErr).to.be.instanceOf(Error)
+
+    let versionErr: unknown
+    try { UserAddKeyBuilder.fromJSON({ kind: 'user.addKey', version: 99, draft: {} }, stub) } catch (err) { versionErr = err }
+    expect(versionErr).to.be.instanceOf(Error)
+  })
+
+  // BLOCKED on https://github.com/gotchoices/quereus/issues/23 —
+  // createUserEngineForExistingNetwork() depends on NetworksEngine.create()
+  // succeeding, which trips CantDelete on INSERT in Quereus 3.1.1.
+  it.skip('REAL ENGINE: double-commit guard: 2nd commit() throws BuilderAlreadyCommittedError synchronously, no second engine write', async () => {
+    const { engine } = await createUserEngineForExistingNetwork()
+    const b = makeFullBuilder(engine)
+    await b.commit()
+    let caught: unknown
+    try { b.commit() } catch (err) { caught = err }
+    expect(caught).to.be.instanceOf(BuilderAlreadyCommittedError)
+  })
+
+  it('toEngineInput returns the exact engine payload shape; throws BuilderValidationError on incomplete builder', () => {
+    const stub = makeStubUserEngine()
+    const empty = new UserAddKeyBuilder(stub)
+    let caught: unknown
+    try { empty.toEngineInput() } catch (err) { caught = err }
+    expect(caught).to.be.instanceOf(BuilderValidationError)
+
+    const full = makeFullBuilder(stub)
+    const input = full.toEngineInput()
+    expect(input).to.have.property('key', 'd'.repeat(66))
+    expect(input).to.have.property('type', UserKeyType.mobile)
+    expect(input).to.have.property('expiration').that.is.a('number')
+  })
+
+  it('SC4 DB-FREE: stub IUserEngine -- isValid===true => commit() does not throw BuilderValidationError AND second commit() throws BuilderAlreadyCommittedError synchronously', async () => {
+    const stub = makeStubUserEngine()
+    const b = makeFullBuilder(stub)
+    expect(b.isValid()).to.equal(true)
+
+    let validationErr: unknown
+    try { await b.commit() } catch (err) { validationErr = err }
+    if (validationErr instanceof BuilderValidationError) {
+      expect.fail('commit() threw BuilderValidationError on a valid builder')
+    }
+    expect(validationErr).to.equal(undefined)
+
+    let caught: unknown
+    try { b.commit() } catch (err) { caught = err }
+    expect(caught).to.be.instanceOf(BuilderAlreadyCommittedError)
+  })
+
+  // BLOCKED on https://github.com/gotchoices/quereus/issues/23 —
+  // createUserEngineForExistingNetwork() depends on NetworksEngine.create()
+  // succeeding, which trips CantDelete on INSERT in Quereus 3.1.1.
+  it.skip('REAL ENGINE: engine.addKey(payload) and engine.buildAddKey().fromPayload(payload).commit() produce structurally identical observable state', async () => {
+    // Post-#23: seed DB, run both paths, compare rows
+  })
+
+  it('FACT-04 parity: MockUserEngine.buildAddKey() returns instanceof UserAddKeyBuilder', () => {
+    const mock = new MockUserEngine()
+    expect(mock.buildAddKey()).to.be.instanceOf(UserAddKeyBuilder)
+  })
+
+  it('cross-field validation: expired expiration reports cross-field EXPIRED error', () => {
+    const stub = makeStubUserEngine()
+    const b = new UserAddKeyBuilder(stub)
+      .setKey('d'.repeat(66))
+      .setType(UserKeyType.mobile)
+      .setExpiration(1000) as UserAddKeyBuilder // well in the past
+    const errs = b.errors()
+    const expired = errs.find(e => e.code === 'EXPIRED' && e.kind === 'cross-field')
+    expect(expired).to.not.equal(undefined)
+    expect(b.isValid()).to.equal(false)
+  })
+})
+
+// ===========================================================================
+// UserReviseBuilder Tests
+// ===========================================================================
+
+describe('UserReviseBuilder', () => {
+  const VALID_SIG: Signature = {
+    signature: 'a'.repeat(128),
+    signerKey: 'b'.repeat(66),
+    signerUserId: 'user-1'
+  }
+  const VALID_IMAGE_REF: ImageRef = { url: 'https://img.local/user.png' }
+
+  function makeFullBuilder (engine: IUserEngine): UserReviseBuilder {
+    let b = new UserReviseBuilder(engine)
+    b = b.setEvent(UserHistoryEvent.revise)
+      .setTimestamp(Date.now())
+      .setSignature(VALID_SIG)
+      .setInfoName('Revised Name')
+      .setInfoImageRef(VALID_IMAGE_REF) as UserReviseBuilder
+    return b
+  }
+
+  it('empty builder reports isValid===false and lists required missingFields', () => {
+    const b = new UserReviseBuilder(makeStubUserEngine())
+    expect(b.isValid()).to.equal(false)
+    const paths = b.missingFields().map(m => m.path)
+    expect(paths).to.include('event')
+    expect(paths).to.include('timestamp')
+    expect(paths).to.include('signature')
+    expect(paths).to.include('info.name')
+    expect(paths).to.include('info.imageRef')
+    expect(b.errors().length).to.be.greaterThan(0)
+  })
+
+  it('per-setter validation rejects invalid input as BuilderError without throwing', () => {
+    let caught: unknown
+    let b: UserReviseBuilder
+    try {
+      b = new UserReviseBuilder(makeStubUserEngine()).setInfoName('')
+    } catch (err) {
+      caught = err
+    }
+    expect(caught).to.equal(undefined)
+    b = new UserReviseBuilder(makeStubUserEngine()).setInfoName('')
+    const errs = b.errors()
+    const nameErr = errs.find(e => e.path === 'info.name' && e.kind === 'per-setter')
+    expect(nameErr).to.not.equal(undefined)
+
+    const b2 = b.setInfoName('Alice')
+    const errs2 = b2.errors()
+    const nameErr2 = errs2.find(e => e.path === 'info.name' && e.code === 'EMPTY')
+    expect(nameErr2).to.equal(undefined)
+  })
+
+  it('errors/missingFields progression as setters succeed', () => {
+    const stub = makeStubUserEngine()
+    const empty = new UserReviseBuilder(stub)
+    expect(empty.missingFields().length).to.equal(5)
+
+    const step1 = empty.setEvent(UserHistoryEvent.revise)
+    expect(step1.missingFields().length).to.equal(4)
+
+    const full = makeFullBuilder(stub)
+    expect(full.missingFields().length).to.equal(0)
+    expect(full.isValid()).to.equal(true)
+  })
+
+  // BLOCKED on https://github.com/gotchoices/quereus/issues/23 —
+  // createUserEngineForExistingNetwork() depends on NetworksEngine.create()
+  // succeeding, which trips CantDelete on INSERT in Quereus 3.1.1.
+  it.skip('REAL ENGINE: isValid===true => commit() does not throw BuilderValidationError; engine.revise observable side effects match', async () => {
+    const { engine } = await createUserEngineForExistingNetwork()
+    const b = makeFullBuilder(engine)
+    expect(b.isValid()).to.equal(true)
+    await b.commit()
+  })
+
+  it('round-trip serialization: JSON.parse(JSON.stringify(b.toJSON())) deep-equals; fromJSON reproduces draft + validation state', () => {
+    const stub = makeStubUserEngine()
+    const b = makeFullBuilder(stub)
+    const json = b.toJSON()
+    const roundTripped = JSON.parse(JSON.stringify(json))
+    expect(roundTripped).to.deep.equal(json)
+    expect(json.kind).to.equal('user.revise')
+    expect(json.version).to.equal(1)
+
+    const rehydrated = UserReviseBuilder.fromJSON(json, stub)
+    expect(rehydrated.isValid()).to.equal(true)
+    expect(rehydrated.toEngineInput()).to.deep.equal(b.toEngineInput())
+
+    let kindErr: unknown
+    try { UserReviseBuilder.fromJSON({ kind: 'wrong', version: 1, draft: {} }, stub) } catch (err) { kindErr = err }
+    expect(kindErr).to.be.instanceOf(Error)
+
+    let versionErr: unknown
+    try { UserReviseBuilder.fromJSON({ kind: 'user.revise', version: 99, draft: {} }, stub) } catch (err) { versionErr = err }
+    expect(versionErr).to.be.instanceOf(Error)
+  })
+
+  // BLOCKED on https://github.com/gotchoices/quereus/issues/23 —
+  // createUserEngineForExistingNetwork() depends on NetworksEngine.create()
+  // succeeding, which trips CantDelete on INSERT in Quereus 3.1.1.
+  it.skip('REAL ENGINE: double-commit guard: 2nd commit() throws BuilderAlreadyCommittedError synchronously, no second engine write', async () => {
+    const { engine } = await createUserEngineForExistingNetwork()
+    const b = makeFullBuilder(engine)
+    await b.commit()
+    let caught: unknown
+    try { b.commit() } catch (err) { caught = err }
+    expect(caught).to.be.instanceOf(BuilderAlreadyCommittedError)
+  })
+
+  it('toEngineInput returns the exact engine payload shape; throws BuilderValidationError on incomplete builder', () => {
+    const stub = makeStubUserEngine()
+    const empty = new UserReviseBuilder(stub)
+    let caught: unknown
+    try { empty.toEngineInput() } catch (err) { caught = err }
+    expect(caught).to.be.instanceOf(BuilderValidationError)
+
+    const full = makeFullBuilder(stub)
+    const input = full.toEngineInput()
+    expect(input).to.have.property('event', UserHistoryEvent.revise)
+    expect(input).to.have.property('timestamp').that.is.a('number')
+    expect(input).to.have.property('signature').that.is.an('object')
+    expect(input).to.have.property('info').that.is.an('object')
+    expect(input.info).to.have.property('name', 'Revised Name')
+    expect(input.info).to.have.property('imageRef').that.is.an('object')
+  })
+
+  it('SC4 DB-FREE: stub IUserEngine -- isValid===true => commit() does not throw BuilderValidationError AND second commit() throws BuilderAlreadyCommittedError synchronously', async () => {
+    const stub = makeStubUserEngine()
+    const b = makeFullBuilder(stub)
+    expect(b.isValid()).to.equal(true)
+
+    let validationErr: unknown
+    try { await b.commit() } catch (err) { validationErr = err }
+    if (validationErr instanceof BuilderValidationError) {
+      expect.fail('commit() threw BuilderValidationError on a valid builder')
+    }
+    expect(validationErr).to.equal(undefined)
+
+    let caught: unknown
+    try { b.commit() } catch (err) { caught = err }
+    expect(caught).to.be.instanceOf(BuilderAlreadyCommittedError)
+  })
+
+  // BLOCKED on https://github.com/gotchoices/quereus/issues/23 —
+  // createUserEngineForExistingNetwork() depends on NetworksEngine.create()
+  // succeeding, which trips CantDelete on INSERT in Quereus 3.1.1.
+  it.skip('REAL ENGINE: engine.revise(payload) and engine.buildRevise().fromPayload(payload).commit() produce structurally identical observable state', async () => {
+    // Post-#23: seed DB, run both paths, compare rows
+  })
+
+  it('FACT-04 parity: MockUserEngine.buildRevise() returns instanceof UserReviseBuilder', () => {
+    const mock = new MockUserEngine()
+    expect(mock.buildRevise()).to.be.instanceOf(UserReviseBuilder)
+  })
+})
+
+// ===========================================================================
+// UserRevokeKeyBuilder Tests
+// ===========================================================================
+
+describe('UserRevokeKeyBuilder', () => {
+  function makeFullBuilder (engine: IUserEngine): UserRevokeKeyBuilder {
+    let b = new UserRevokeKeyBuilder(engine)
+    b = b.setKey('e'.repeat(66)) as UserRevokeKeyBuilder
+    return b
+  }
+
+  it('empty builder reports isValid===false and lists required missingFields', () => {
+    const b = new UserRevokeKeyBuilder(makeStubUserEngine())
+    expect(b.isValid()).to.equal(false)
+    const paths = b.missingFields().map(m => m.path)
+    expect(paths).to.include('key')
+    expect(b.errors().length).to.be.greaterThan(0)
+  })
+
+  it('per-setter validation rejects invalid input as BuilderError without throwing', () => {
+    let caught: unknown
+    let b: UserRevokeKeyBuilder
+    try {
+      b = new UserRevokeKeyBuilder(makeStubUserEngine()).setKey('not-hex')
+    } catch (err) {
+      caught = err
+    }
+    expect(caught).to.equal(undefined)
+    b = new UserRevokeKeyBuilder(makeStubUserEngine()).setKey('not-hex')
+    const errs = b.errors()
+    const keyErr = errs.find(e => e.path === 'key' && e.kind === 'per-setter')
+    expect(keyErr).to.not.equal(undefined)
+
+    const b2 = b.setKey('e'.repeat(66))
+    const errs2 = b2.errors()
+    const keyErr2 = errs2.find(e => e.path === 'key' && e.code === 'INVALID_KEY_HEX')
+    expect(keyErr2).to.equal(undefined)
+  })
+
+  it('errors/missingFields progression as setters succeed', () => {
+    const stub = makeStubUserEngine()
+    const empty = new UserRevokeKeyBuilder(stub)
+    expect(empty.missingFields().length).to.equal(1)
+
+    const full = makeFullBuilder(stub)
+    expect(full.missingFields().length).to.equal(0)
+    expect(full.isValid()).to.equal(true)
+  })
+
+  // BLOCKED on https://github.com/gotchoices/quereus/issues/23 —
+  // createUserEngineForExistingNetwork() depends on NetworksEngine.create()
+  // succeeding, which trips CantDelete on INSERT in Quereus 3.1.1.
+  it.skip('REAL ENGINE: isValid===true => commit() does not throw BuilderValidationError; engine.revokeKey observable side effects match', async () => {
+    const { engine } = await createUserEngineForExistingNetwork()
+    const b = makeFullBuilder(engine)
+    expect(b.isValid()).to.equal(true)
+    await b.commit()
+  })
+
+  it('round-trip serialization: JSON.parse(JSON.stringify(b.toJSON())) deep-equals; fromJSON reproduces draft + validation state', () => {
+    const stub = makeStubUserEngine()
+    const b = makeFullBuilder(stub)
+    const json = b.toJSON()
+    const roundTripped = JSON.parse(JSON.stringify(json))
+    expect(roundTripped).to.deep.equal(json)
+    expect(json.kind).to.equal('user.revokeKey')
+    expect(json.version).to.equal(1)
+
+    const rehydrated = UserRevokeKeyBuilder.fromJSON(json, stub)
+    expect(rehydrated.isValid()).to.equal(true)
+    expect(rehydrated.toEngineInput()).to.deep.equal(b.toEngineInput())
+
+    let kindErr: unknown
+    try { UserRevokeKeyBuilder.fromJSON({ kind: 'wrong', version: 1, draft: {} }, stub) } catch (err) { kindErr = err }
+    expect(kindErr).to.be.instanceOf(Error)
+
+    let versionErr: unknown
+    try { UserRevokeKeyBuilder.fromJSON({ kind: 'user.revokeKey', version: 99, draft: {} }, stub) } catch (err) { versionErr = err }
+    expect(versionErr).to.be.instanceOf(Error)
+  })
+
+  // BLOCKED on https://github.com/gotchoices/quereus/issues/23 —
+  // createUserEngineForExistingNetwork() depends on NetworksEngine.create()
+  // succeeding, which trips CantDelete on INSERT in Quereus 3.1.1.
+  it.skip('REAL ENGINE: double-commit guard: 2nd commit() throws BuilderAlreadyCommittedError synchronously, no second engine write', async () => {
+    const { engine } = await createUserEngineForExistingNetwork()
+    const b = makeFullBuilder(engine)
+    await b.commit()
+    let caught: unknown
+    try { b.commit() } catch (err) { caught = err }
+    expect(caught).to.be.instanceOf(BuilderAlreadyCommittedError)
+  })
+
+  it('toEngineInput returns the exact engine payload shape; throws BuilderValidationError on incomplete builder', () => {
+    const stub = makeStubUserEngine()
+    const empty = new UserRevokeKeyBuilder(stub)
+    let caught: unknown
+    try { empty.toEngineInput() } catch (err) { caught = err }
+    expect(caught).to.be.instanceOf(BuilderValidationError)
+
+    const full = makeFullBuilder(stub)
+    const input = full.toEngineInput()
+    expect(input).to.equal('e'.repeat(66))
+  })
+
+  it('SC4 DB-FREE: stub IUserEngine -- isValid===true => commit() does not throw BuilderValidationError AND second commit() throws BuilderAlreadyCommittedError synchronously', async () => {
+    const stub = makeStubUserEngine()
+    const b = makeFullBuilder(stub)
+    expect(b.isValid()).to.equal(true)
+
+    let validationErr: unknown
+    try { await b.commit() } catch (err) { validationErr = err }
+    if (validationErr instanceof BuilderValidationError) {
+      expect.fail('commit() threw BuilderValidationError on a valid builder')
+    }
+    expect(validationErr).to.equal(undefined)
+
+    let caught: unknown
+    try { b.commit() } catch (err) { caught = err }
+    expect(caught).to.be.instanceOf(BuilderAlreadyCommittedError)
+  })
+
+  // BLOCKED on https://github.com/gotchoices/quereus/issues/23 —
+  // createUserEngineForExistingNetwork() depends on NetworksEngine.create()
+  // succeeding, which trips CantDelete on INSERT in Quereus 3.1.1.
+  it.skip('REAL ENGINE: engine.revokeKey(payload) and engine.buildRevokeKey().fromPayload(payload).commit() produce structurally identical observable state', async () => {
+    // Post-#23: seed DB, run both paths, compare rows
+  })
+
+  it('FACT-04 parity: MockUserEngine.buildRevokeKey() returns instanceof UserRevokeKeyBuilder', () => {
+    const mock = new MockUserEngine()
+    expect(mock.buildRevokeKey()).to.be.instanceOf(UserRevokeKeyBuilder)
   })
 })

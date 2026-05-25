@@ -6,7 +6,11 @@ import type {
   CreateUserHistory,
   DeviceAdvertisement,
   ImageRef,
+  IUserAddKeyBuilder,
+  IUserCreateBuilder,
   IUserEngine,
+  IUserReviseBuilder,
+  IUserRevokeKeyBuilder,
   ReviseUserHistory,
   Timestamp,
   User,
@@ -14,6 +18,12 @@ import type {
   UserKey,
   UserKeyType
 } from '@votetorrent/vote-core'
+import {
+  UserAddKeyBuilder,
+  UserCreateBuilder,
+  UserReviseBuilder,
+  UserRevokeKeyBuilder
+} from './builders/index.js'
 
 // Phase 04 USER-02/04/05/06: monotonic Tid counter for UserEngine batches.
 // Local to this module — mirrors NetworksEngine's pattern. Re-evaluate at
@@ -260,6 +270,24 @@ export class UserEngine implements IUserEngine {
     } catch (err) {
       this.rethrow(err, 'revokeKey')
     }
+  }
+
+  // ---------- builder factories ----------
+
+  buildCreate (): IUserCreateBuilder {
+    return new UserCreateBuilder(this)
+  }
+
+  buildAddKey (): IUserAddKeyBuilder {
+    return new UserAddKeyBuilder(this)
+  }
+
+  buildRevise (): IUserReviseBuilder {
+    return new UserReviseBuilder(this)
+  }
+
+  buildRevokeKey (): IUserRevokeKeyBuilder {
+    return new UserRevokeKeyBuilder(this)
   }
 
   // ---------- helpers ----------
