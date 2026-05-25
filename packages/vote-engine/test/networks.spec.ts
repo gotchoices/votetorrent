@@ -75,7 +75,7 @@ describe('NetworksEngine', () => {
         {
           key: 'key-1',
           type: UserKeyType.mobile,
-          expiration: Date.now()
+          expiration: Date.now() + 86_400_000
         }
       ]
     }

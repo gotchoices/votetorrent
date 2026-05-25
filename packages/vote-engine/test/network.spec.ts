@@ -1508,8 +1508,8 @@ describe('NetworksEngine - creation constraints', () => {
 			const { engine } = await createNetworkEngine();
 			const ctx = (engine as unknown as { ctx: EngineContext }).ctx;
 			const row = await ctx.db.prepare('select Id, Hash from Network').get({});
-			// H16 produces a 16-char hex slice; assert shape rather than recompute.
-			expect((row?.Hash as string)?.length).to.equal(16);
+			// H16 produces a 32-char hex string (16 bytes × 2 hex chars each).
+			expect((row?.Hash as string)?.length).to.equal(32);
 			expect(row?.Hash).to.match(/^[0-9a-f]+$/);
 		});
 
