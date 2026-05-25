@@ -2,38 +2,17 @@ import { Database, ConstraintError } from '@quereus/quereus';
 import { expect } from 'chai';
 
 /**
- * Quereus 2.x bug repro — Stage 6
- * Upstream issue: https://github.com/gotchoices/quereus/issues/23
+ * Quereus stage 6 — `check on delete` scoping verification.
+ * Upstream fix: https://github.com/gotchoices/quereus/issues/23 (resolved in 3.x)
  *
- * `constraint X check on delete (expr)` fires on INSERT (and other ops),
- * not just DELETE as the syntax declares.
- *
- * Expected behavior: the `on delete` modifier scopes the CHECK to DELETE
- * ops only; INSERT should not evaluate `expr`.
- *
- * Observed behavior (Quereus 2.9.0): INSERT trips the constraint with
- * `CHECK constraint failed: X`. Discovered during the VoteTorrent
- * engine-insert-path probe (Plan 03-05); the production schema declares
- * `constraint CantDelete check on delete (false)` on 16 tables, of which
- * 4 actively block insert paths.
- *
- * Test asserts the buggy behavior so the test PASSES today. Once upstream
- * ships a fix, this test will fail — at which point the assertion should
- * be inverted (assert INSERT succeeds) and the schema's `on delete`
- * markers can be re-enabled without workarounds.
- *
- * Root cause hypothesis: parser correctly captures `operations: ['delete']`
- * in the AST (verified at dist/src/parser/parser.js:3261/3361); the schema
- * manager converts to bitmask `RowOpFlag.DELETE = 4`; the bug is downstream
- * in `shouldCheckConstraint` or its callers — INSERT-path eval is not
- * filtering by op mask correctly.
+ * `constraint X check on delete (expr)` must fire only on DELETE, not INSERT.
+ * Previously (Quereus 2.9.0) INSERT would trip the constraint — that bug is
+ * now fixed. These tests confirm correct behavior.
  */
-describe('Quereus repro — stage 6: `check on delete` fires on INSERT', () => {
-	it('INSERT trips a `check on delete (false)` constraint (BUG)', async () => {
+describe('Quereus — stage 6: `check on delete` correctly scoped to DELETE only', () => {
+	it('INSERT succeeds with `check on delete (false)` — constraint not evaluated on INSERT', async () => {
 		const db = new Database();
 
-		// Minimal schema: one table, one `check on delete (false)` constraint.
-		// No views, no plugins, no other constraints.
 		await db.exec(`
 			declare schema main
 
@@ -48,27 +27,12 @@ describe('Quereus repro — stage 6: `check on delete` fires on INSERT', () => {
 			apply schema main;
 		`);
 
-		let caught: unknown;
-		try {
-			await db.exec(`insert into T (Id) values (1)`);
-		} catch (err) {
-			caught = err;
-		}
-
-		// Assert the buggy behavior: INSERT throws a CHECK violation that
-		// names the `on delete`-scoped constraint.
-		expect(caught, 'INSERT should throw under Quereus 2.9.0 (bug)').to.be.instanceOf(Error);
-		const msg = (caught as Error).message;
-		expect(msg).to.match(
-			/CHECK constraint failed.*NoDeleteEver|NoDeleteEver.*CHECK constraint/i,
-			`expected CHECK violation naming NoDeleteEver, got: ${msg}`
-		);
-
-		// Sanity: this is a ConstraintError, not a parse/type error.
-		expect(caught).to.be.instanceOf(ConstraintError);
+		await db.exec(`insert into T (Id) values (1)`);
+		const row = await db.prepare('select Id from T where Id = 1').get();
+		expect(row?.Id).to.equal(1);
 	});
 
-	it('semantic equivalence: `check on delete (1 = 0)` also fires on INSERT (rules out literal-false handling)', async () => {
+	it('INSERT succeeds with `check on delete (1 = 0)` — not a literal-false special case', async () => {
 		const db = new Database();
 
 		await db.exec(`
@@ -85,20 +49,36 @@ describe('Quereus repro — stage 6: `check on delete` fires on INSERT', () => {
 			apply schema main;
 		`);
 
+		await db.exec(`insert into U (Id) values (1)`);
+		const row = await db.prepare('select Id from U where Id = 1').get();
+		expect(row?.Id).to.equal(1);
+	});
+
+	it('DELETE is blocked by `check on delete (false)`', async () => {
+		const db = new Database();
+
+		await db.exec(`
+			declare schema main
+
+			{
+				table V (
+					Id int,
+					primary key (),
+					constraint NoDel check on delete (false)
+				);
+			}
+
+			apply schema main;
+		`);
+
+		await db.exec(`insert into V (Id) values (1)`);
+
 		let caught: unknown;
 		try {
-			await db.exec(`insert into U (Id) values (1)`);
+			await db.exec(`delete from V where Id = 1`);
 		} catch (err) {
 			caught = err;
 		}
-
-		// Same shape failure as above; confirms the bug is the `on delete`
-		// modifier being ignored, not a special case of the literal `false`.
-		expect(caught, 'INSERT should throw under Quereus 2.9.0 (bug)').to.be.instanceOf(ConstraintError);
-		const msg = (caught as Error).message;
-		expect(msg).to.match(
-			/CHECK constraint failed.*NoDeleteEither|NoDeleteEither.*CHECK constraint/i,
-			`expected CHECK violation naming NoDeleteEither, got: ${msg}`
-		);
+		expect(caught).to.be.instanceOf(ConstraintError);
 	});
 });

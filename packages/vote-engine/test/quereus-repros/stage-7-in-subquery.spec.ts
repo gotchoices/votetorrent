@@ -54,7 +54,7 @@ describe('Quereus repro — stage 7 split (Bug A: view union-all, Bug B: not-in 
 		expect(n, 'inline union-all chain must return all 3 rows').to.equal(3);
 	});
 
-	it('A2 — BUG: same `union all` chain inside a VIEW returns only 1 row', async () => {
+	it('A2 — FIXED: `union all` chain inside a VIEW returns all rows', async () => {
 		const db = new Database();
 
 		await db.exec(`
@@ -75,15 +75,10 @@ describe('Quereus repro — stage 7 split (Bug A: view union-all, Bug B: not-in 
 			seen.push(row['Code'] as string);
 		}
 
-		// Buggy behavior: only the first leg of the union all is returned.
-		expect(seen, `expected 1 row (BUG); 3 would be correct.`).to.deep.equal(['r']);
+		expect(seen, 'VIEW union-all should return all 3 rows').to.deep.equal(['r', 'g', 'b']);
 	});
 
-	it('A3 — downstream symptom: CHECK against view incorrectly rejects values past the first row', async () => {
-		// This was originally catalogued as a separate IN-subquery bug (Plan 03-05 stage 7).
-		// It is in fact a downstream effect of Bug A: the view exposes only 'r', so
-		// inserting Color='g' correctly fails the `IN (select Code from V)` check
-		// against the (buggy) one-row view. Fixing Bug A also fixes this symptom.
+	it('A3 — FIXED: CHECK against view accepts values from all union-all rows', async () => {
 		const db = new Database();
 
 		await db.exec(`
@@ -105,18 +100,11 @@ describe('Quereus repro — stage 7 split (Bug A: view union-all, Bug B: not-in 
 			apply schema main;
 		`);
 
-		// Color = 'r' (first view row) succeeds — masks the view bug for that value.
 		await db.exec(`insert into T (Id, Color) values (1, 'r')`);
+		await db.exec(`insert into T (Id, Color) values (2, 'g')`);
 
-		// Color = 'g' (second view row) fails — observed CHECK violation is the
-		// downstream symptom of Bug A.
-		let caught: unknown;
-		try {
-			await db.exec(`insert into T (Id, Color) values (2, 'g')`);
-		} catch (err) {
-			caught = err;
-		}
-		expect(caught, "INSERT 'g' should throw under Quereus 2.9.0 (downstream of Bug A)").to.be.instanceOf(ConstraintError);
+		const row = await db.prepare('select Id from T where Color = :c').get({ c: 'g' });
+		expect(row?.Id).to.equal(2);
 	});
 
 	// ---------------------------------------------------------------
@@ -141,7 +129,7 @@ describe('Quereus repro — stage 7 split (Bug A: view union-all, Bug B: not-in 
 		expect(r2?.['v'], "'r' not in blocklist {r, y} should be false").to.equal(false);
 	});
 
-	it('B2 — BUG: `X not in (subquery)` in CHECK rejects values that are NOT in the subquery', async () => {
+	it('B2 — FIXED: `X not in (subquery)` in CHECK correctly accepts non-blocked values', async () => {
 		const db = new Database();
 
 		await db.exec(`
@@ -163,21 +151,17 @@ describe('Quereus repro — stage 7 split (Bug A: view union-all, Bug B: not-in 
 		await db.exec(`insert into Block (Code) values ('r')`);
 		await db.exec(`insert into Block (Code) values ('y')`);
 
-		// 'g' is NOT in the blocklist {r, y} — under correct semantics, INSERT succeeds.
-		// Under the bug, the CHECK evaluates as false and INSERT throws.
+		await db.exec(`insert into T (Id, Color) values (1, 'g')`);
+		const row = await db.prepare('select Color from T where Id = 1').get();
+		expect(row?.Color).to.equal('g');
+
 		let caught: unknown;
 		try {
-			await db.exec(`insert into T (Id, Color) values (1, 'g')`);
+			await db.exec(`insert into T (Id, Color) values (2, 'r')`);
 		} catch (err) {
 			caught = err;
 		}
-
-		expect(caught, 'INSERT should throw under Quereus 2.9.0 (bug)').to.be.instanceOf(ConstraintError);
-		const msg = (caught as Error).message;
-		// The error message rewrites the expression as `not Color in (...)`,
-		// hinting at an early de-sugaring of `not in` that leaves the resulting
-		// `not (...)` evaluating to NULL when the inner IN doesn't yield a clean boolean.
-		expect(msg).to.match(/not Color in|NB/i, `expected CHECK violation naming NB, got: ${msg}`);
+		expect(caught, 'INSERT of blocked value should throw').to.be.instanceOf(ConstraintError);
 	});
 
 	it('B3 — control: IN-subquery in CHECK works correctly against a TABLE', async () => {

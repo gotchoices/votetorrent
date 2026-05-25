@@ -185,7 +185,7 @@ describe('ElectionsEngine', () => {
     // BLOCKED on https://github.com/gotchoices/quereus/issues/23 —
     // createPopulatedContext depends on NetworksEngine.create()
     // succeeding, which trips CantDelete on INSERT.
-    it.skip('returns upcoming elections joined with Authority name', async () => {
+    it('returns upcoming elections joined with Authority name', async () => {
       const { ctx } = await createPopulatedContext()
       const engine = new ElectionsEngine(ctx)
       // After #23 lands, seed an Election row through createElection and
@@ -228,14 +228,14 @@ describe('ElectionsEngine', () => {
     // BLOCKED on https://github.com/gotchoices/quereus/issues/23 —
     // Election.InsertOnly (`check on update, delete (false)`) fires on
     // INSERT today, same chain as networks-engine.create().
-    it.skip('INSERTs an Election row via the AdminSignature pipeline', async () => {
+    it('INSERTs an Election row via the AdminSignature pipeline', async () => {
       const { ctx } = await createPopulatedContext()
       const engine = new ElectionsEngine(ctx)
       const init = makeElectionInit()
       await engine.createElection(init)
       const row = await ctx.db
         .prepare('select Id, Title from Election where Id = :id')
-        .get({ ':id': init.election.id })
+        .get({ id: init.election.id })
       expect(row?.Title).to.equal(init.election.title)
     })
   })
@@ -257,13 +257,13 @@ describe('ElectionsEngine', () => {
 
     // BLOCKED on quereus#23 — ProposedElection.UserValid CHECK joins
     // through Officer + UserKey, both seeded only via NetworksEngine.create.
-    it.skip('INSERTs a ProposedElection row gated by Officer scope mel', async () => {
+    it('INSERTs a ProposedElection row gated by Officer scope mel', async () => {
       const { ctx } = await createPopulatedContext()
       const engine = new ElectionsEngine(ctx)
       await engine.adjustElection(makeElectionInit())
       const row = await ctx.db
         .prepare('select Id from ProposedElection where Id = :id')
-        .get({ ':id': 'election-1' })
+        .get({ id: 'election-1' })
       expect(row?.Id).to.equal('election-1')
     })
   })
@@ -338,7 +338,7 @@ describe('ElectionEngine', () => {
 
     // BLOCKED on quereus#23 — seeding Election + ElectionRevision
     // through createElection trips CantDelete on INSERT.
-    it.skip('returns Election joined with the current ElectionRevision', async () => {
+    it('returns Election joined with the current ElectionRevision', async () => {
       const { ctx } = await createPopulatedContext()
       const engine = new ElectionEngine(
         { id: 'election-1', authorityId: 'authority-1' },
@@ -365,7 +365,7 @@ describe('ElectionEngine', () => {
     })
 
     // BLOCKED on quereus#23
-    it.skip('returns ElectionRevision rows ordered by Revision asc', async () => {
+    it('returns ElectionRevision rows ordered by Revision asc', async () => {
       const { ctx } = await createPopulatedContext()
       const engine = new ElectionEngine(
         { id: 'election-1', authorityId: 'authority-1' },
@@ -383,7 +383,7 @@ describe('ElectionEngine', () => {
     // BLOCKED on quereus#23 — ProposedElectionRevision.UserValid CHECK
     // joins through Officer + UserKey + Election rows seeded by
     // NetworksEngine.create.
-    it.skip('INSERTs a ProposedElectionRevision row', async () => {
+    it('INSERTs a ProposedElectionRevision row', async () => {
       const { ctx } = await createPopulatedContext()
       const engine = new ElectionEngine(
         { id: 'election-1', authorityId: 'authority-1' },
@@ -404,7 +404,7 @@ describe('ElectionEngine', () => {
         .prepare(
           'select Revision from ProposedElectionRevision where ElectionId = :id'
         )
-        .get({ ':id': 'election-1' })
+        .get({ id: 'election-1' })
       expect(row?.Revision).to.equal(1)
     })
   })
@@ -415,7 +415,7 @@ describe('ElectionEngine', () => {
   describe('proposeBallot', () => {
     // BLOCKED on quereus#23 — ProposedBallot.UserValid joins through
     // Officer + UserKey + Election rows seeded by NetworksEngine.create.
-    it.skip('INSERTs a ProposedBallot row', async () => {
+    it('INSERTs a ProposedBallot row', async () => {
       const { ctx } = await createPopulatedContext()
       const engine = new ElectionEngine(
         { id: 'election-1', authorityId: 'authority-1' },
@@ -432,7 +432,7 @@ describe('ElectionEngine', () => {
       await engine.proposeBallot(ballot)
       const row = await ctx.db
         .prepare('select Description from ProposedBallot where Id = :id')
-        .get({ ':id': 'ballot-1' })
+        .get({ id: 'ballot-1' })
       expect(row?.Description).to.equal('Test ballot')
     })
   })
@@ -446,7 +446,7 @@ describe('ElectionEngine', () => {
     // any value other than 'select' silently fails the TypeValid CHECK.
     // Also BLOCKED on quereus#23 transitively (UserValid joins through
     // tables seeded by NetworksEngine.create).
-    it.skip('INSERTs a ProposedQuestion row with the QuestionType enum guard', async () => {
+    it('INSERTs a ProposedQuestion row with the QuestionType enum guard', async () => {
       const { ctx } = await createPopulatedContext()
       const engine = new ElectionEngine(
         { id: 'election-1', authorityId: 'authority-1' },
@@ -464,7 +464,7 @@ describe('ElectionEngine', () => {
         .prepare(
           'select Code from ProposedQuestion where BallotId = :id and Code = :c'
         )
-        .get({ ':id': 'ballot-1', ':c': 'q1' })
+        .get({ id: 'ballot-1', c: 'q1' })
       expect(row?.Code).to.equal('q1')
     })
   })
@@ -474,7 +474,7 @@ describe('ElectionEngine', () => {
   // -----------------------------------------------------------------------
   describe('addOption', () => {
     // BLOCKED on quereus#23 transitively.
-    it.skip('INSERTs a ProposedOption row', async () => {
+    it('INSERTs a ProposedOption row', async () => {
       const { ctx } = await createPopulatedContext()
       const engine = new ElectionEngine(
         { id: 'election-1', authorityId: 'authority-1' },
@@ -486,7 +486,7 @@ describe('ElectionEngine', () => {
         .prepare(
           'select Code from ProposedOption where BallotId = :id and QuestionCode = :qc and Code = :c'
         )
-        .get({ ':id': 'ballot-1', ':qc': 'q1', ':c': 'opt-1' })
+        .get({ id: 'ballot-1', qc: 'q1', c: 'opt-1' })
       expect(row?.Code).to.equal('opt-1')
     })
   })
@@ -529,7 +529,7 @@ describe('ElectionEngine', () => {
   describe('inviteKeyholder', () => {
     // BLOCKED on quereus#23 — Keyholder.ElectionIdValid + ElectionRevisionValid
     // depend on Election + ElectionRevision rows that today require #23.
-    it.skip('INSERTs a Keyholder row pinned to the election + revision', async () => {
+    it('INSERTs a Keyholder row pinned to the election + revision', async () => {
       const { ctx } = await createPopulatedContext()
       const engine = new ElectionEngine(
         { id: 'election-1', authorityId: 'authority-1' },
@@ -548,14 +548,14 @@ describe('ElectionEngine', () => {
         .prepare(
           'select UserId from Keyholder where ElectionId = :id limit 1'
         )
-        .get({ ':id': 'election-1' })
+        .get({ id: 'election-1' })
       expect(row?.UserId).to.be.a('string')
     })
   })
 
   describe('revokeKeyholder', () => {
     // BLOCKED on quereus#23 — Keyholder rows can't be seeded today.
-    it.skip('DELETEs a Keyholder row', async () => {
+    it('DELETEs a Keyholder row', async () => {
       const { ctx } = await createPopulatedContext()
       const engine = new ElectionEngine(
         { id: 'election-1', authorityId: 'authority-1' },
@@ -572,7 +572,7 @@ describe('ElectionEngine', () => {
       await engine.revokeKeyholder(kh, 'election-1')
       const row = await ctx.db
         .prepare('select UserId from Keyholder where ElectionId = :id')
-        .get({ ':id': 'election-1' })
+        .get({ id: 'election-1' })
       expect(row).to.equal(undefined)
     })
   })
@@ -623,7 +623,7 @@ describe('KeysTasksEngine', () => {
     // UPDATE Task path trips Task.MutationValid which requires an
     // AdminSignature row seeded via the same pipeline that fails on
     // INSERT today.
-    it.skip('marks a release-key Task as completed', async () => {
+    it('marks a release-key Task as completed', async () => {
       const { ctx } = await createPopulatedContext()
       const engine = new KeysTasksEngine(makeNetworkRef(), ctx)
       const task = {
@@ -641,7 +641,7 @@ describe('KeysTasksEngine', () => {
           `select IsCompleted from Task T join ReleaseKeyTaskExtension R on R.TaskId = T.Id
             where T.UserId = :userId and R.ElectionId = :electionId`
         )
-        .get({ ':userId': 'user-1', ':electionId': 'election-1' })
+        .get({ userId: 'user-1', electionId: 'election-1' })
       expect(row?.IsCompleted).to.equal(1)
     })
   })
@@ -721,7 +721,7 @@ describe('SignatureTasksEngine', () => {
 
     // BLOCKED on quereus#23 — SigningEngine.sign() + UPDATE Task
     // pipeline depends on seeded AdminSigning + Task rows.
-    it.skip('invokes SigningEngine.sign and marks the Task complete', async () => {
+    it('invokes SigningEngine.sign and marks the Task complete', async () => {
       const { ctx } = await createPopulatedContext()
       const engine = new SignatureTasksEngine(makeNetworkRef(), ctx)
       const task: SignatureTask = {
@@ -777,13 +777,13 @@ describe('OnboardingTasksEngine', () => {
 
     // BLOCKED on https://github.com/gotchoices/quereus/issues/23 —
     // Task.MutationValid on update needs the AdminSignature pipeline.
-    it.skip('marks an onboarding Task as completed', async () => {
+    it('marks an onboarding Task as completed', async () => {
       const { ctx } = await createPopulatedContext()
       const engine = new OnboardingTasksEngine(ctx)
       await engine.setOnboardingTaskCompleted('task-1')
       const row = await ctx.db
         .prepare('select IsCompleted from Task where Id = :id')
-        .get({ ':id': 'task-1' })
+        .get({ id: 'task-1' })
       expect(row?.IsCompleted).to.equal(1)
     })
   })

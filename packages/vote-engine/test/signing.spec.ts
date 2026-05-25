@@ -144,7 +144,7 @@ describe('SigningEngine', () => {
     // CantDelete on INSERT (same chain as NetworksEngine.create()).
     // Test asserts: a nonce is returned (UUID format), thresholdReached
     // honours the single-officer-threshold-policy seed.
-    it.skip('returns a nonce and propagates threshold result from sign()', async () => {
+    it('returns a nonce and propagates threshold result from sign()', async () => {
       const { ctx, user } = await createPopulatedContext()
       const engine = new SigningEngine(ctx)
       const sig: Signature = {
@@ -165,7 +165,7 @@ describe('SigningEngine', () => {
     })
 
     // BLOCKED on quereus#23 — same chain.
-    it.skip('INSERTs an AdminSigning row with the scope, digest, and signer fields', async () => {
+    it('INSERTs an AdminSigning row with the scope, digest, and signer fields', async () => {
       const { ctx, user } = await createPopulatedContext()
       const engine = new SigningEngine(ctx)
       const authRow = await ctx.db
@@ -188,7 +188,7 @@ describe('SigningEngine', () => {
         .prepare(
           'select Scope, Digest, UserId, SignerKey from AdminSigning where Nonce = :nonce'
         )
-        .get({ ':nonce': nonce })
+        .get({ nonce: nonce })
       expect(row?.Scope).to.equal('rad')
       expect(row?.Digest).to.equal(digest)
       expect(row?.UserId).to.equal(user.id)
@@ -196,7 +196,7 @@ describe('SigningEngine', () => {
     })
 
     // BLOCKED on quereus#23 — same chain.
-    it.skip('rejects an invalid scope via AdminSigning.ScopeValid', async () => {
+    it('rejects an invalid scope via AdminSigning.ScopeValid', async () => {
       const { ctx, user } = await createPopulatedContext()
       const engine = new SigningEngine(ctx)
       const authRow = await ctx.db
@@ -291,7 +291,7 @@ describe('SigningEngine', () => {
     // BLOCKED on https://github.com/gotchoices/quereus/issues/23 —
     // sign() INSERTs into OfficerSignature which trips CantDelete on
     // INSERT in Quereus 3.1.1.
-    it.skip('INSERTs an OfficerSignature row keyed by SigningNonce', async () => {
+    it('INSERTs an OfficerSignature row keyed by SigningNonce', async () => {
       const { ctx, user } = await createPopulatedContext()
       const engine = new SigningEngine(ctx)
       const nonce = crypto.randomUUID()
@@ -311,7 +311,7 @@ describe('SigningEngine', () => {
 
     // BLOCKED on quereus#23 — same chain. Threshold-met path triggers the
     // AdminSignature INSERT branch.
-    it.skip('inserts an AdminSignature row once the threshold is met', async () => {
+    it('inserts an AdminSignature row once the threshold is met', async () => {
       const { ctx, user } = await createPopulatedContext()
       const engine = new SigningEngine(ctx)
       const nonce = crypto.randomUUID()
@@ -333,7 +333,7 @@ describe('SigningEngine', () => {
     // BLOCKED on quereus#23 — same chain. Idempotent-completion branch:
     // calling sign() a second time after the threshold is reached should
     // treat the PK collision as success (D-17), not as an error.
-    it.skip('is idempotent on duplicate threshold completion (D-17 PK collision is benign)', async () => {
+    it('is idempotent on duplicate threshold completion (D-17 PK collision is benign)', async () => {
       const { ctx, user } = await createPopulatedContext()
       const engine = new SigningEngine(ctx)
       const nonce = crypto.randomUUID()
@@ -351,7 +351,7 @@ describe('SigningEngine', () => {
     // BLOCKED on quereus#23 — sign() relies on a pre-existing AdminSigning
     // row to look up the scope. Without #23, no AdminSigning row can be
     // seeded, so the read-side path is unreachable today.
-    it.skip('reads scope and threshold from the AdminSigning + Admin join', async () => {
+    it('reads scope and threshold from the AdminSigning + Admin join', async () => {
       // Seed an AdminSigning row with scope=rad (matches the seeded
       // ThresholdPolicies entry { policy: 'rad', threshold: 1 }), then
       // call sign() and verify the threshold-reached branch fires.
@@ -379,7 +379,7 @@ describe('SigningEngine', () => {
         .prepare(
           'select SigningNonce from AdminSignature where SigningNonce = :n'
         )
-        .get({ ':n': nonce })
+        .get({ n: nonce })
       expect(adminSig?.SigningNonce).to.equal(nonce)
     })
   })

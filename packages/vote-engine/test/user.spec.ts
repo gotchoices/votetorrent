@@ -143,7 +143,7 @@ describe('UserEngine', () => {
     // BLOCKED on https://github.com/gotchoices/quereus/issues/23 —
     // createUserEngineForExistingNetwork() depends on NetworksEngine.create()
     // succeeding, which trips CantDelete on INSERT in Quereus 3.1.1.
-    it.skip('returns the User row read from the DB when a context is bound', async () => {
+    it('returns the User row read from the DB when a context is bound', async () => {
       const { engine, user } = await createUserEngineForExistingNetwork()
       const summary = await engine.getSummary()
       expect(summary?.id).to.equal(user.id)
@@ -152,7 +152,7 @@ describe('UserEngine', () => {
 
     // BLOCKED on quereus#23 (same chain — needs a populated DB to assert
     // the undefined branch is reachable via missing id).
-    it.skip('returns undefined when the bound user id has no row', async () => {
+    it('returns undefined when the bound user id has no row', async () => {
       const { ctx } = await createUserEngineForExistingNetwork()
       const ghost = makeUser({ id: 'never-existed-user' })
       const engine = new UserEngine(ghost, ctx)
@@ -167,7 +167,7 @@ describe('UserEngine', () => {
   describe('create', () => {
     // BLOCKED on quereus#23 — User.CantDelete (`check on delete (false)`)
     // fires on the INSERT, same chain as networks-engine.create().
-    it.skip('inserts a User row and an initial UserKey row with hex pubkey', async () => {
+    it('inserts a User row and an initial UserKey row with hex pubkey', async () => {
       const { engine, ctx, user } = await makeDbOnlyUserEngine()
       const { publicHex } = randomTestKeyPair()
       const init: CreateUserHistory = {
@@ -189,11 +189,11 @@ describe('UserEngine', () => {
       await engine.create(init)
       const userRow = await ctx.db
         .prepare('select Name from User where Id = :id')
-        .get({ ':id': user.id })
+        .get({ id: user.id })
       expect(userRow?.Name).to.equal(user.name)
       const keyRow = await ctx.db
         .prepare('select PubKey from UserKey where UserId = :id')
-        .get({ ':id': user.id })
+        .get({ id: user.id })
       expect(keyRow?.PubKey).to.equal(publicHex)
     })
 
@@ -231,7 +231,7 @@ describe('UserEngine', () => {
   // -----------------------------------------------------------------------
   describe('revise', () => {
     // BLOCKED on quereus#23 — depends on a User row produced by create().
-    it.skip('updates User name and imageRef', async () => {
+    it('updates User name and imageRef', async () => {
       const { engine, ctx, user } = await createUserEngineForExistingNetwork()
       const revise: ReviseUserHistory = {
         event: UserHistoryEvent.revise,
@@ -249,7 +249,7 @@ describe('UserEngine', () => {
       await engine.revise(revise)
       const row = await ctx.db
         .prepare('select Name from User where Id = :id')
-        .get({ ':id': user.id })
+        .get({ id: user.id })
       expect(row?.Name).to.equal('Renamed User')
     })
 
@@ -281,7 +281,7 @@ describe('UserEngine', () => {
   describe('addKey', () => {
     // BLOCKED on quereus#23 — UserKey CHECK pipeline (UserIdValid +
     // SignatureValid) needs a User row, which create() can't seed today.
-    it.skip('inserts a UserKey row with the per-INSERT context envelope', async () => {
+    it('inserts a UserKey row with the per-INSERT context envelope', async () => {
       const { engine, ctx, user } = await createUserEngineForExistingNetwork()
       const { publicHex } = randomTestKeyPair()
       const key: UserKey = {
@@ -294,7 +294,7 @@ describe('UserEngine', () => {
         .prepare(
           'select PubKey from UserKey where UserId = :id and PubKey = :pk'
         )
-        .get({ ':id': user.id, ':pk': publicHex })
+        .get({ id: user.id, pk: publicHex })
       expect(row?.PubKey).to.equal(publicHex)
     })
 
@@ -324,7 +324,7 @@ describe('UserEngine', () => {
     // The DELETE will fail today on the buggy check-on-delete trip even
     // though the row to delete may not exist; once #23 lands, this test
     // exercises the schema's intended "not-the-last-key" guard.
-    it.skip('deletes a UserKey row by hex pubkey', async () => {
+    it('deletes a UserKey row by hex pubkey', async () => {
       const { engine, ctx, user } = await createUserEngineForExistingNetwork()
       // Add a second key first so the revoke does not trip the
       // "not the last key" branch of DeleteValid.
@@ -339,7 +339,7 @@ describe('UserEngine', () => {
         .prepare(
           'select PubKey from UserKey where UserId = :id and PubKey = :pk'
         )
-        .get({ ':id': user.id, ':pk': secondPub })
+        .get({ id: user.id, pk: secondPub })
       expect(row).to.equal(undefined)
     })
 
@@ -371,7 +371,7 @@ describe('UserEngine', () => {
     // BLOCKED on quereus#23 — seeding an InviteSlot + AdminSignature row
     // is required for the InviteResult CHECK constraints to pass, and
     // both require a populated DB from create().
-    it.skip('inserts an InviteResult row for an accepted invite', async () => {
+    it('inserts an InviteResult row for an accepted invite', async () => {
       const { ctx } = await createUserEngineForExistingNetwork()
       const networkEngine = new NetworkEngine(
         {
@@ -394,13 +394,13 @@ describe('UserEngine', () => {
       } as never)
       const row = await ctx.db
         .prepare('select IsAccepted, Digest from InviteResult where SlotCid = :c')
-        .get({ ':c': slotCid })
+        .get({ c: slotCid })
       expect(Boolean(row?.IsAccepted)).to.equal(true)
       expect(row?.Digest).to.not.equal(null)
     })
 
     // BLOCKED on quereus#23 — same chain.
-    it.skip('inserts an InviteResult row with null digest for a rejected invite', async () => {
+    it('inserts an InviteResult row with null digest for a rejected invite', async () => {
       const { ctx } = await createUserEngineForExistingNetwork()
       const networkEngine = new NetworkEngine(
         {
@@ -423,7 +423,7 @@ describe('UserEngine', () => {
       } as never)
       const row = await ctx.db
         .prepare('select IsAccepted, Digest from InviteResult where SlotCid = :c')
-        .get({ ':c': slotCid })
+        .get({ c: slotCid })
       expect(Boolean(row?.IsAccepted)).to.equal(false)
       expect(row?.Digest).to.equal(null)
     })

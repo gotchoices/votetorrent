@@ -121,7 +121,7 @@ export class AuthorityEngine implements IAuthorityEngine {
 						from Admin A join CurrentAdmin CA on A.AuthorityId = CA.AuthorityId and A.EffectiveAt = CA.EffectiveAt
 					where A.AuthorityId = :id`
         )
-        .get({ ':id': this.authority.id })
+        .get({ id: this.authority.id })
       // AUTH-04: guard against missing admin instead of `?.`-ing past it.
       if (!adminDB) {
         throw new Error('Admin not found')
@@ -130,8 +130,8 @@ export class AuthorityEngine implements IAuthorityEngine {
       for await (const officer of this.ctx.db.eval(
         'select * from Officer where AuthorityId = :id and AdminEffectiveAt = :effectiveAt',
         {
-				  ':id': this.authority.id,
-				  ':effectiveAt': adminDB.EffectiveAt as number
+				  id: this.authority.id,
+				  effectiveAt: adminDB.EffectiveAt as number
         }
       )) {
         officersDB.push({
@@ -160,7 +160,7 @@ export class AuthorityEngine implements IAuthorityEngine {
         .prepare(
           'select EffectiveAt, ThresholdPolicies from ProposedAdmin where AuthorityId = :id'
         )
-        .get({ ':id': this.authority.id })
+        .get({ id: this.authority.id })
       if (!proposedAdminDB) {
         return { admin, proposed: undefined }
       }
@@ -168,8 +168,8 @@ export class AuthorityEngine implements IAuthorityEngine {
       for await (const officer of this.ctx.db.eval(
         'select * from ProposedOfficer where AuthorityId = :id and AdminEffectiveAt = :effectiveAt',
         {
-				  ':id': this.authority.id,
-				  ':effectiveAt': proposedAdminDB.EffectiveAt as number
+				  id: this.authority.id,
+				  effectiveAt: proposedAdminDB.EffectiveAt as number
         }
       )) {
         proposedOfficersDB.push({
@@ -191,11 +191,11 @@ export class AuthorityEngine implements IAuthorityEngine {
         .prepare(
           'select Nonce from AdminSigning where AuthorityId = :id and Scope = :scope order by AdminEffectiveAt desc limit 1'
         )
-        .get({ ':id': this.authority.id, ':scope': 'rad' })
+        .get({ id: this.authority.id, scope: 'rad' })
       if (signingDB?.Nonce) {
         for await (const row of this.ctx.db.eval(
           'select UserId from OfficerSignature where SigningNonce = :nonce',
-          { ':nonce': signingDB.Nonce as string }
+          { nonce: signingDB.Nonce as string }
         )) {
           signers.push(row.UserId as string)
         }
@@ -233,7 +233,7 @@ export class AuthorityEngine implements IAuthorityEngine {
 				`select Name, Cid from InviteSlot
 					join AdminSigning on InviteSlot.SigningNonce = AdminSigning.Nonce
 						where AdminSigning.AuthorityId = :id and AdminSigning.Scope = :scope`,
-				{ ':id': this.authority.id, ':scope': 'iad' }
+				{ id: this.authority.id, scope: 'iad' }
       )) {
         authorityInvites.push({
           name: invite.Name as string,
@@ -248,7 +248,7 @@ export class AuthorityEngine implements IAuthorityEngine {
 					join InviteSlot on InviteResult.SlotCid = InviteSlot.Cid
 						join AdminSigning on InviteSlot.SigningNonce = AdminSigning.Nonce
 				where AuthorityId = :id and Scope = :scope`,
-				{ ':id': this.authority.id, ':scope': 'iad' }
+				{ id: this.authority.id, scope: 'iad' }
       )) {
         acceptedAuthorityInvites.push({
           cid: inviteResult.SlotCid as string,
@@ -293,7 +293,7 @@ export class AuthorityEngine implements IAuthorityEngine {
         .prepare(
           'select Id, Name, DomainName, ImageRef from Authority where Id = :id'
         )
-        .get({ ':id': this.authority.id })
+        .get({ id: this.authority.id })
       if (!authorityDB) {
         throw new Error('Authority not found')
       }
@@ -309,7 +309,7 @@ export class AuthorityEngine implements IAuthorityEngine {
       }
       const proposedAuthorityDB = await this.ctx.db
         .prepare('select Name, DomainName from ProposedAuthority where Id = :id')
-        .get({ ':id': this.authority.id })
+        .get({ id: this.authority.id })
       if (!proposedAuthorityDB) {
         return { authority, proposed: undefined }
       }
@@ -320,11 +320,11 @@ export class AuthorityEngine implements IAuthorityEngine {
         .prepare(
           'select Nonce from AdminSigning where AuthorityId = :id and Scope = :scope order by AdminEffectiveAt desc limit 1'
         )
-        .get({ ':id': this.authority.id, ':scope': 'iad' })
+        .get({ id: this.authority.id, scope: 'iad' })
       if (signingDB?.Nonce) {
         for await (const row of this.ctx.db.eval(
           'select UserId from OfficerSignature where SigningNonce = :nonce',
-          { ':nonce': signingDB.Nonce as string }
+          { nonce: signingDB.Nonce as string }
         )) {
           signers.push(row.UserId as string)
         }
@@ -455,7 +455,7 @@ export class AuthorityEngine implements IAuthorityEngine {
 					InviteSignature,
 					SigningNonce
 					)
-					with context now = datetime('now')
+					with context now = :now
 					values (
 						:cid,
 						:name,
@@ -476,7 +476,8 @@ export class AuthorityEngine implements IAuthorityEngine {
 				  expiration: invite.expiration,
 				  inviteKey: invite.inviteKey,
 				  inviteSignature: invite.inviteSignature,
-				  signingNonce: nonce
+				  signingNonce: nonce,
+				  now: Date.now()
 				}
       )
     } catch (err) {
@@ -506,7 +507,7 @@ export class AuthorityEngine implements IAuthorityEngine {
 					InviteSignature,
 					SigningNonce
 					)
-				with context now = datetime('now')
+				with context now = :now
 				values (
 					:cid,
 					:type,
@@ -530,7 +531,8 @@ export class AuthorityEngine implements IAuthorityEngine {
 				  expiration: invite.expiration,
 				  inviteKey: invite.inviteKey,
 				  inviteSignature: invite.inviteSignature,
-				  signingNonce: nonce
+				  signingNonce: nonce,
+				  now: Date.now()
 				}
       )
     } catch (error) {

@@ -97,29 +97,22 @@ export class NetworksEngine implements INetworksEngine {
 			// without any further engine change.
 			await ctx.db.exec(
 				`
-				insert into Network (
+				insert into User (
 					Id,
-					Hash,
-					PrimaryAuthorityId,
 					Name,
-					ImageRef,
-					Relays,
-					TimestampAuthorities,
-					NumberRequiredTSAs,
-					ElectionType
+					ImageRef
 				)
-				with context SigningNonce = null, Tid = ${tid}
-				values (
-					:networkId,
-					:networkHash,
-					:primaryAuthorityId,
-					:networkName,
-					:networkImageRef,
-					:relays,
-					:timestampAuthorities,
-					:numberRequiredTSAs,
-					:electionType
-				);
+				with context SigningNonce = null, InviteSlotCid = null, InviteSignature = null, Tid = ${tid}
+				values (:userId, :userName, :userImageRef);
+
+				insert into UserKey (
+					UserId,
+					Type,
+					PubKey,
+					Expiration
+				)
+				with context UserKey = null, Signature = null, Tid = ${tid}, now = :now
+				values (:userId, :keyType, :keyValue, :expiration);
 
 				insert into Authority (
 					Id,
@@ -148,22 +141,29 @@ export class NetworksEngine implements INetworksEngine {
 				with context SigningNonce = null, InviteSlotCid = null, InviteSignature = null, Tid = ${tid}
 				values (:primaryAuthorityId, :adminEffectiveAt, :userId, :title, :scopes);
 
-				insert into User (
+				insert into Network (
 					Id,
+					Hash,
+					PrimaryAuthorityId,
 					Name,
-					ImageRef
+					ImageRef,
+					Relays,
+					TimestampAuthorities,
+					NumberRequiredTSAs,
+					ElectionType
 				)
-				with context SigningNonce = null, InviteSlotCid = null, InviteSignature = null, Tid = ${tid}
-				values (:userId, :userName, :userImageRef);
-
-				insert into UserKey (
-					UserId,
-					Type,
-					PubKey,
-					Expiration
-				)
-				with context UserKey = null, Signature = null, Tid = ${tid}, now = datetime('now')
-				values (:userId, :keyType, :keyValue, :expiration);
+				with context SigningNonce = null, Tid = ${tid}
+				values (
+					:networkId,
+					:networkHash,
+					:primaryAuthorityId,
+					:networkName,
+					:networkImageRef,
+					:relays,
+					:timestampAuthorities,
+					:numberRequiredTSAs,
+					:electionType
+				);
 				`,
 				{
 					networkId,
@@ -188,6 +188,7 @@ export class NetworksEngine implements INetworksEngine {
 					keyType: 'user',
 					keyValue: firstKey.key,
 					expiration: firstKey.expiration,
+					now: Date.now(),
 				},
 			);
 		} catch (err) {
