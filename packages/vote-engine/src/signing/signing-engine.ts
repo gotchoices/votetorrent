@@ -138,7 +138,7 @@ export class SigningEngine implements ISigningEngine {
     try {
       const adminDB = await this.ctx.db
         .prepare(
-					`select 1 from CurrentAdmin join Officer
+					`select CurrentAdmin.EffectiveAt from CurrentAdmin join Officer
 						on CurrentAdmin.AuthorityId = Officer.AuthorityId
 							and CurrentAdmin.EffectiveAt = Officer.AdminEffectiveAt
 								where Officer.UserId = :userId and Officer.AuthorityId = :authorityId`
