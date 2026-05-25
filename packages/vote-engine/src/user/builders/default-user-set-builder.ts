@@ -123,14 +123,15 @@ export class DefaultUserSetBuilder implements IDefaultUserSetBuilder {
     }
   }
 
-  async commit (): Promise<void> {
+  commit (): Promise<void> {
     if (this.committed) {
       throw new BuilderAlreadyCommittedError(DefaultUserSetBuilder.KIND)
     }
     this.toEngineInput() // validate before committing
     this.committed = true
-    await this.engine.set(this.toEngineInput())
+    const result = this.engine.set(this.toEngineInput())
     this.cachedOutput = undefined
+    return result
   }
 
   isValid (): boolean {
@@ -140,7 +141,14 @@ export class DefaultUserSetBuilder implements IDefaultUserSetBuilder {
   }
 
   errors (): readonly BuilderError[] {
-    return this.runValidators()
+    const validatorErrors = this.runValidators()
+    const missing = this.missingFields()
+    if (missing.length === 0) return validatorErrors
+    const all: BuilderError[] = [...validatorErrors]
+    for (const m of missing) {
+      all.push({ path: m.path, code: 'MISSING', message: m.reason, kind: 'per-setter' })
+    }
+    return Object.freeze(all)
   }
 
   missingFields (): readonly MissingField[] {

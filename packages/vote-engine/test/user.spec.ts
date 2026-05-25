@@ -1,5 +1,7 @@
 import { Database } from '@quereus/quereus'
 import {
+  BuilderAlreadyCommittedError,
+  BuilderValidationError,
   ElectionType,
   UserHistoryEvent,
   UserKeyType
@@ -9,6 +11,8 @@ import { prepareDb } from '../src/database/initialize'
 import { NetworkEngine } from '../src/network/network-engine'
 import { NetworksEngine } from '../src/networks/networks-engine'
 import { DefaultUserEngine } from '../src/user/default-user-engine'
+import { DefaultUserSetBuilder } from '../src/user/builders/default-user-set-builder.js'
+import { MockDefaultUserEngine } from '../src/user/mock-default-user-engine.js'
 import { UserEngine } from '../src/user/user-engine'
 import type { EngineContext } from '../src/types.js'
 import { randomTestKeyPair } from './fixtures/keys.js'
@@ -484,5 +488,177 @@ describe('DefaultUserEngine', () => {
       expect(got?.name).to.equal('No-Image User')
       expect(got?.imageRef).to.equal(undefined)
     })
+  })
+})
+
+// ===========================================================================
+// DefaultUserSetBuilder Tests
+// ===========================================================================
+
+describe('DefaultUserSetBuilder', () => {
+  function makeDefaultUser (overrides?: Partial<DefaultUser>): DefaultUser {
+    return {
+      name: 'Alice',
+      imageRef: { url: 'https://img.local/alice.png' },
+      ...overrides
+    }
+  }
+
+  let storage: typeof AsyncStorage
+  let engine: DefaultUserEngine
+
+  beforeEach(async () => {
+    storage = AsyncStorage
+    await storage.clear()
+    engine = new DefaultUserEngine(storage)
+  })
+
+  it('empty builder is invalid and reports missingFields=[name]', async () => {
+    const b = engine.buildSet()
+    expect(b.isValid()).to.equal(false)
+    const missing = b.missingFields().map(m => m.path)
+    expect(missing).to.deep.equal(['name'])
+    expect(b.errors().length).to.be.greaterThan(0)
+  })
+
+  it('setName per-setter validation: empty string records BuilderError; valid name clears it', () => {
+    let caught: unknown
+    let b: ReturnType<typeof engine.buildSet>
+    try {
+      b = engine.buildSet().setName('')
+    } catch (err) {
+      caught = err
+    }
+    expect(caught).to.equal(undefined) // setter never throws
+    b = engine.buildSet().setName('')
+    const errs = b.errors()
+    const nameErr = errs.find(e => e.path === 'name' && e.kind === 'per-setter')
+    expect(nameErr).to.not.equal(undefined)
+
+    const b2 = b.setName('Alice')
+    const errs2 = b2.errors()
+    const nameErr2 = errs2.find(e => e.path === 'name')
+    expect(nameErr2).to.equal(undefined)
+  })
+
+  it('errors/missingFields progression as setters succeed', () => {
+    const empty = engine.buildSet()
+    expect(empty.missingFields().length).to.equal(1)
+
+    const withName = empty.setName('Alice')
+    expect(withName.missingFields().length).to.equal(0)
+    expect(withName.isValid()).to.equal(true)
+  })
+
+  it('isValid===true => commit() does not throw BuilderValidationError; engine.get() reflects the committed user', async () => {
+    const b = engine.buildSet().setName('Alice')
+    expect(b.isValid()).to.equal(true)
+
+    await b.commit()
+    const got = await engine.get()
+    expect(got?.name).to.equal('Alice')
+  })
+
+  it('round-trip serialization: JSON.parse(JSON.stringify(b.toJSON())) deep-equals; fromJSON reproduces draft + validation state', () => {
+    const b = engine.buildSet().setName('Alice').setImageRef({ url: 'https://img.local/alice.png' })
+    const json = b.toJSON()
+    const roundTripped = JSON.parse(JSON.stringify(json))
+    expect(roundTripped).to.deep.equal(json)
+    expect(json).to.deep.equal({
+      kind: 'defaultUser.set',
+      version: 1,
+      draft: { name: 'Alice', imageRef: { url: 'https://img.local/alice.png' } }
+    })
+
+    const rehydrated = DefaultUserSetBuilder.fromJSON(json, engine)
+    expect(rehydrated.isValid()).to.equal(true)
+    expect(rehydrated.toEngineInput()).to.deep.equal(b.toEngineInput())
+
+    // fromJSON throws on kind mismatch
+    let kindErr: unknown
+    try {
+      DefaultUserSetBuilder.fromJSON({ kind: 'user.create', version: 1, draft: {} }, engine)
+    } catch (err) {
+      kindErr = err
+    }
+    expect(kindErr).to.be.instanceOf(Error)
+
+    // fromJSON throws on version mismatch
+    let versionErr: unknown
+    try {
+      DefaultUserSetBuilder.fromJSON({ kind: 'defaultUser.set', version: 99, draft: {} }, engine)
+    } catch (err) {
+      versionErr = err
+    }
+    expect(versionErr).to.be.instanceOf(Error)
+  })
+
+  it('double-commit guard: second commit() throws BuilderAlreadyCommittedError synchronously, no engine.set called twice', async () => {
+    const b = engine.buildSet().setName('Alice')
+    await b.commit()
+
+    const before = await engine.get()
+
+    let caught: unknown
+    try {
+      b.commit() // sync throw expected — no await
+    } catch (err) {
+      caught = err
+    }
+    expect(caught).to.be.instanceOf(BuilderAlreadyCommittedError)
+
+    const after = await engine.get()
+    expect(after).to.deep.equal(before)
+  })
+
+  it('toEngineInput returns DefaultUser shape; throws BuilderValidationError on incomplete builder', () => {
+    const empty = engine.buildSet()
+    let caught: unknown
+    try {
+      empty.toEngineInput()
+    } catch (err) {
+      caught = err
+    }
+    expect(caught).to.be.instanceOf(BuilderValidationError)
+
+    const valid = engine.buildSet().setName('Alice')
+    const input = valid.toEngineInput()
+    expect(input).to.have.property('name', 'Alice')
+    expect(input).to.have.property('imageRef')
+  })
+
+  it('equivalence smoke: engine.set(payload) and engine.buildSet().fromPayload(payload).commit() produce identical engine.get() result', async () => {
+    // Two separate engines with separate storage for isolation
+    const storageA = AsyncStorage
+    await storageA.clear()
+    const engineA = new DefaultUserEngine(storageA)
+
+    // For storageB, we reuse the same AsyncStorage after clearing again
+    // (tests are serial; before/after isolation is per-test via beforeEach)
+    const storageB = AsyncStorage
+    await storageB.clear()
+    const engineB = new DefaultUserEngine(storageB)
+
+    const payload = makeDefaultUser()
+
+    // Direct path
+    await engineA.set(payload)
+    const directResult = await engineA.get()
+
+    // Clear storage for builder path
+    await storageB.clear()
+    const engineB2 = new DefaultUserEngine(storageB)
+    await engineB2.buildSet().fromPayload(payload).commit()
+    const builderResult = await engineB2.get()
+
+    expect(builderResult).to.deep.equal(directResult)
+  })
+
+  it('FACT-04 real-mock parity: both DefaultUserEngine and MockDefaultUserEngine return DefaultUserSetBuilder instances from buildSet()', () => {
+    const realEngine = new DefaultUserEngine(AsyncStorage)
+    const mockEngine = new MockDefaultUserEngine()
+
+    expect(realEngine.buildSet()).to.be.instanceOf(DefaultUserSetBuilder)
+    expect(mockEngine.buildSet()).to.be.instanceOf(DefaultUserSetBuilder)
   })
 })
