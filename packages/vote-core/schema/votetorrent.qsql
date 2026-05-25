@@ -222,10 +222,10 @@ declare schema main
 					and O.AdminEffectiveAt = new.AdminEffectiveAt
 					and O.AuthorityId = new.AuthorityId
 		)),
-		constraint SignerKeyValid check (exists (select 1 from UserKey K where K.UserId = new.UserId and K.PubKey = new.SignerKey and K.Expiration > context.now)),
+		constraint SignerKeyValid check (context.IsSignerKeyValid = true),
 		constraint SignatureValid check (context.IsSignatureValid = true)
 	)
-		with context ( now datetime, IsSignatureValid boolean ); -- TODO fix signature
+		with context ( now datetime, IsSignatureValid boolean, IsSignerKeyValid boolean ); -- TODO fix signature
 
 	index AdminSigningDigest on AdminSigning (Digest);
 
@@ -238,21 +238,11 @@ declare schema main
 		primary key (SigningNonce, UserId),
 		constraint InsertOnly check on update, delete (false),
 		-- Key is valid for the user and the UserId is valid
-		constraint SignerKeyValid check (
-			exists (select 1 from UserKey K where K.UserId = new.UserId and K.PubKey = new.SignerKey and K.Expiration > context.now)
-		),
-		-- User is an Officer with the required scope
-		constraint OfficerValid check (
-			exists (select 1 from AdminSigning ADS
-				join Officer O on O.AuthorityId = ADS.AuthorityId and O.AdminEffectiveAt = ADS.AdminEffectiveAt
-				where ADS.Nonce = new.SigningNonce
-					and O.UserId = new.UserId
-					and exists (select 1 from json_each(O.Scopes) where value = ADS.Scope)
-			)
-		),
+		constraint SignerKeyValid check (context.IsSignerKeyValid = true),
+		constraint OfficerValid check (context.IsOfficerValid = true),
 		constraint SignatureValid check (context.IsSignatureValid = true)
 	)
-		with context ( now datetime, IsSignatureValid boolean );
+		with context ( now datetime, IsSignatureValid boolean, IsSignerKeyValid boolean, IsOfficerValid boolean );
 
 	-- The final Admin signature output - only exists if required threshold of signatures are met - exists to avoid long validation
 	table AdminSignature (

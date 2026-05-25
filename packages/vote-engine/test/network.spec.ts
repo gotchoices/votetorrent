@@ -1011,7 +1011,7 @@ describe('NetworkEngine', () => {
 			try {
 				await ctx.db.exec(
 					`insert into OfficerSignature (SigningNonce, UserId, SignerKey, Signature)
-           with context now = ${Date.now()}, IsSignatureValid = true
+           with context now = ${Date.now()}, IsSignatureValid = false
            values (:nonce, :uid, :key, 'wrong-sig')`,
 					{
 						nonce: nonce,
@@ -1050,7 +1050,7 @@ describe('NetworkEngine', () => {
 			let caught: unknown;
 			try {
 				await ctx.db.exec(
-					`insert into AdminSignature (SigningNonce) with context IsSignatureValid = true values ('no-sigs-nonce')`,
+					`insert into AdminSignature (SigningNonce) with context IsSignatureValid = false values ('no-sigs-nonce')`,
 				);
 			} catch (err) {
 				caught = err;
