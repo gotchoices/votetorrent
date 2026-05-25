@@ -7,6 +7,8 @@ import { Temporal } from 'temporal-polyfill'
 import { SigningEngine } from '../signing/signing-engine.js'
 import { asText, parseJsonOr } from '../utils.js'
 import type { EngineContext } from '../types.js'
+
+let nextTid = 1
 import type {
   AdminDetails,
   AdminInit,
@@ -117,7 +119,7 @@ export class AuthorityEngine implements IAuthorityEngine {
     try {
       const adminDB = await this.ctx.db
         .prepare(
-					`select Id, AuthorityId, EffectiveAt, ThresholdPolicies
+					`select A.AuthorityId, A.EffectiveAt, A.ThresholdPolicies
 						from Admin A join CurrentAdmin CA on A.AuthorityId = CA.AuthorityId and A.EffectiveAt = CA.EffectiveAt
 					where A.AuthorityId = :id`
         )
@@ -363,6 +365,7 @@ export class AuthorityEngine implements IAuthorityEngine {
     if (!initialSignerId) {
       throw new Error('Failed to propose admin: No initial signer')
     }
+    const tid = nextTid++
     try {
       await this.ctx.db.exec(
 				`insert into ProposedAdmin (
@@ -370,7 +373,7 @@ export class AuthorityEngine implements IAuthorityEngine {
 					EffectiveAt,
 					ThresholdPolicies
 				)
-					with context :signerUserId, :signerKey, :signature, Tid
+					with context UserId = :signerUserId, UserKey = :signerKey, Signature = :signature, Tid = ${tid}
 				values (
 					:authorityId,
 					:effectiveAt,

@@ -571,9 +571,11 @@ export class NetworkEngine implements INetworkEngine {
       const timestampAuthoritiesJson = JSON.stringify(
         revision.policies.timestampAuthorities
       )
+      const userKey = this.ctx.user?.activeKeys?.[0]?.key ?? null
       await this.ctx.db.exec(
 				`insert into ProposedNetwork
 					(Name, ImageRef, Relays, TimestampAuthorities, NumberRequiredTSAs, ElectionType)
+				with context UserId = :userId, UserKey = :userKey, now = :now
 				values
 					(:name, :imageRef, :relays, :timestampAuthorities, :numberRequiredTSAs, :electionType)`,
 				{
@@ -582,7 +584,10 @@ export class NetworkEngine implements INetworkEngine {
 				  relays: relaysJson,
 				  timestampAuthorities: timestampAuthoritiesJson,
 				  numberRequiredTSAs: revision.policies.numberRequiredTSAs,
-				  electionType: revision.policies.electionType
+				  electionType: revision.policies.electionType,
+				  userId: this.ctx.user?.id ?? null,
+				  userKey,
+				  now: Date.now()
 				}
       )
     } catch (error) {

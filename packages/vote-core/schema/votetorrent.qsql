@@ -517,7 +517,7 @@ declare schema main
 		constraint InsertOnly check on update, delete (false),
 		constraint SigningValid check (exists (
 			select 1 from InviteSlot I
-				join AdminSignature SIG on SIG.Nonce = I.SigningNonce
+				join AdminSignature SIG on SIG.SigningNonce = I.SigningNonce
 				where I.Cid = new.SlotCid)
 		),
 		constraint SignatureValid check (exists (
