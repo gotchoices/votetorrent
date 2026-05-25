@@ -903,7 +903,7 @@ describe('NetworkEngine', () => {
 			await ctx.db.exec(
 				`insert into AdminSigning (Nonce, AuthorityId, AdminEffectiveAt, Scope, Digest, UserId, SignerKey, Signature)
          with context now = ${Date.now()}, IsSignatureValid = true, IsSignerKeyValid = true
-         values (:nonce, :authId, :effAt, 'rn', :digest, :uid, :key, :sig)`,
+         values (:nonce, :authId, :effAt, 'rn', :digest, :uid, :pubKey, :sig)`,
 				{
 					nonce: nonce,
 					authId: details.network.primaryAuthorityId,
@@ -929,7 +929,7 @@ describe('NetworkEngine', () => {
 				await ctx.db.exec(
 					`insert into AdminSigning (Nonce, AuthorityId, AdminEffectiveAt, Scope, Digest, UserId, SignerKey, Signature)
            with context now = ${Date.now()}, IsSignatureValid = true, IsSignerKeyValid = true
-           values (:nonce, :authId, :effAt, 'xx', :digest, :uid, :key, :sig)`,
+           values (:nonce, :authId, :effAt, 'xx', :digest, :uid, :pubKey, :sig)`,
 					{
 						nonce: 'bad-scope-nonce',
 						authId: details.network.primaryAuthorityId,
@@ -955,7 +955,7 @@ describe('NetworkEngine', () => {
 				await ctx.db.exec(
 					`insert into AdminSigning (Nonce, AuthorityId, AdminEffectiveAt, Scope, Digest, UserId, SignerKey, Signature)
            with context now = ${Date.now()}, IsSignatureValid = true, IsSignerKeyValid = true
-           values ('bad-sig-nonce', :authId, :effAt, 'rn', 'd', :uid, :key, 'deadbeef')`,
+           values ('bad-sig-nonce', :authId, :effAt, 'rn', 'd', :uid, :pubKey, 'deadbeef')`,
 					{
 						authId: details.network.primaryAuthorityId,
 						effAt: new Date().toISOString(),
@@ -997,7 +997,7 @@ describe('NetworkEngine', () => {
 			await ctx.db.exec(
 				`insert into AdminSigning (Nonce, AuthorityId, AdminEffectiveAt, Scope, Digest, UserId, SignerKey, Signature)
          with context now = ${Date.now()}, IsSignatureValid = true, IsSignerKeyValid = true
-         values (:nonce, :authId, :effAt, 'rn', 'd-true', :uid, :key, :sig)`,
+         values (:nonce, :authId, :effAt, 'rn', 'd-true', :uid, :pubKey, :sig)`,
 				{
 					nonce: nonce,
 					authId: details.network.primaryAuthorityId,
@@ -1012,7 +1012,7 @@ describe('NetworkEngine', () => {
 				await ctx.db.exec(
 					`insert into OfficerSignature (SigningNonce, UserId, SignerKey, Signature)
            with context now = ${Date.now()}, IsSignatureValid = false, IsSignerKeyValid = true, IsOfficerValid = true
-           values (:nonce, :uid, :key, 'wrong-sig')`,
+           values (:nonce, :uid, :pubKey, 'wrong-sig')`,
 					{
 						nonce: nonce,
 						uid: ctx.user?.id ?? 'user-1',
@@ -1247,11 +1247,12 @@ describe('NetworkEngine', () => {
 			// Insert an expired UserKey alongside the live one.
 			await ctx.db.exec(
 				`insert into UserKey (UserId, Type, PubKey, Expiration)
-         with context UserKey = :live, Signature = null, Tid = 9, now = ${Date.now()}, IsSignatureValid = true
+         with context UserKey = :live, Signature = null, Tid = 9, now = :insertNow, IsSignatureValid = true
          values ('user-1', 'M', 'expired-key', :exp)`,
 				{
 					live: (ctx.user?.activeKeys ?? [])[0]!.key,
 					exp: Date.now() - 60_000,
+					insertNow: Date.now() - 120_000,
 				},
 			);
 			const userEngine = await engine.getUser('user-1');
@@ -2014,7 +2015,7 @@ describe('NetworksEngine - creation constraints', () => {
 			try {
 				await ctx.db.exec(
 					`insert into ProposedNetwork (Name, ImageRef, Relays, TimestampAuthorities, NumberRequiredTSAs, ElectionType)
-           with context UserId = :uid, UserKey = :key, Signature = 'bad-sig', Tid = 9, now = ${Date.now()}, IsUserValid = false
+           with context UserId = :uid, UserKey = :pubKey, Signature = 'bad-sig', Tid = 9, now = ${Date.now()}, IsUserValid = false
            values ('BadSig', null, '[]', '[]', 1, 'a')`,
 					{
 						uid: ctx.user?.id ?? 'user-1',
