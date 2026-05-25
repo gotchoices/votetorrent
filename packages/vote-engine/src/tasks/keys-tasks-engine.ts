@@ -3,9 +3,11 @@ import type { EngineContext } from '../types.js'
 import type {
   ElectionDetails,
   IKeysTasksEngine,
+  IKeysTasksCompleteKeyReleaseBuilder,
   NetworkReference,
   ReleaseKeyTask
 } from '@votetorrent/vote-core'
+import { CompleteKeyReleaseBuilder } from './builders/index.js'
 
 // Phase 05 TASK-01/02 — monotonic Tid counter for KeysTasksEngine batches.
 let nextTid = 1
@@ -110,6 +112,10 @@ export class KeysTasksEngine implements IKeysTasksEngine {
     } catch (err) {
       this.rethrow(err, 'completeKeyRelease')
     }
+  }
+
+  buildCompleteKeyRelease (): IKeysTasksCompleteKeyReleaseBuilder {
+    return new CompleteKeyReleaseBuilder(this)
   }
 
   // ---------- helpers ----------
