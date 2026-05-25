@@ -400,15 +400,9 @@ declare schema main
 		-- Proves that the inviter has a valid private key corresponding to the public key in the Invite slot
 		constraint InviteSignatureValid check (context.IsSignatureValid = true),
 		constraint InsertOnly check on update, delete (false),
-		constraint InsertValid check on insert (
-			context.SigningNonce is not null and exists (
-				select 1 from AdminSigning SIG join AdminSignature ASig on ASig.SigningNonce = SIG.SigningNonce
-					where SIG.SigningNonce = new.SigningNonce
-						and SIG.Digest = Digest(Cid, Name, Expiration, InviteKey, InviteSignature)
-			)
-		)
+		constraint InsertValid check on insert (context.IsInsertValid = true)
 	)
-		with context ( Tid int, now datetime, IsSignatureValid boolean );
+		with context ( Tid int, now datetime, IsSignatureValid boolean, IsInsertValid boolean );
 
 	index InviteSlotSigningNonce on InviteSlot (SigningNonce, Cid);
 
