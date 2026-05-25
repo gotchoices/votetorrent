@@ -94,14 +94,15 @@ export class SetOnboardingTaskCompletedBuilder implements IOnboardingTasksSetOnb
     return this.draft.taskId!
   }
 
-  async commit (): Promise<void> {
+  commit (): Promise<void> {
     if (this.committed) {
       throw new BuilderAlreadyCommittedError(SetOnboardingTaskCompletedBuilder.KIND)
     }
     const input = this.toEngineInput()
     this.committed = true
-    await this.engine.setOnboardingTaskCompleted(input)
+    const result = this.engine.setOnboardingTaskCompleted(input)
     this.cachedOutput = undefined
+    return result
   }
 
   isValid (): boolean {

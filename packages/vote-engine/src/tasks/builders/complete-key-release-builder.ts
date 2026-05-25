@@ -121,14 +121,15 @@ export class CompleteKeyReleaseBuilder implements IKeysTasksCompleteKeyReleaseBu
     return this.draft.task!
   }
 
-  async commit (): Promise<void> {
+  commit (): Promise<void> {
     if (this.committed) {
       throw new BuilderAlreadyCommittedError(CompleteKeyReleaseBuilder.KIND)
     }
     const input = this.toEngineInput()
     this.committed = true
-    await this.engine.completeKeyRelease(input)
+    const result = this.engine.completeKeyRelease(input)
     this.cachedOutput = undefined
+    return result
   }
 
   isValid (): boolean {

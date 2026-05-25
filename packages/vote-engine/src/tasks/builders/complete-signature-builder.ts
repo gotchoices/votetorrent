@@ -171,14 +171,15 @@ export class CompleteSignatureBuilder implements ISignatureTasksCompleteSignatur
     return { task: this.draft.task!, result: this.draft.result! }
   }
 
-  async commit (): Promise<void> {
+  commit (): Promise<void> {
     if (this.committed) {
       throw new BuilderAlreadyCommittedError(CompleteSignatureBuilder.KIND)
     }
     const input = this.toEngineInput()
     this.committed = true
-    await this.engine.completeSignature(input.task, input.result)
+    const result = this.engine.completeSignature(input.task, input.result)
     this.cachedOutput = undefined
+    return result
   }
 
   isValid (): boolean {
