@@ -10,8 +10,9 @@ import type {
 	NetworkReference,
 	User,
 } from '@votetorrent/vote-core';
-import type { INetworksEngine } from '@votetorrent/vote-core';
+import type { INetworksEngine, INetworksCreateBuilder } from '@votetorrent/vote-core';
 import { prepareDb } from '../database/initialize.js';
+import { NetworksCreateBuilder } from './builders/index.js';
 
 // Plan 03-05 Q1 — monotonic counter for Tid generation. Same Tid bound across
 // every INSERT in a single create() batch (matches the schema's "one logical
@@ -258,6 +259,10 @@ export class NetworksEngine implements INetworksEngine {
 			}
 		}
 		return qNetworkEngine;
+	}
+
+	buildCreate (): INetworksCreateBuilder {
+		return new NetworksCreateBuilder(this);
 	}
 
 	private async createContext(user: User | undefined): Promise<EngineContext> {

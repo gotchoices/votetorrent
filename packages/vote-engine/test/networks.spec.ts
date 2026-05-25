@@ -1,7 +1,14 @@
-import { ElectionType, UserKeyType } from '@votetorrent/vote-core'
+import {
+  BuilderAlreadyCommittedError,
+  BuilderValidationError,
+  ElectionType,
+  UserKeyType
+} from '@votetorrent/vote-core'
 import { expect } from 'chai'
 import { NetworkEngine } from '../src/network/network-engine'
 import { NetworksEngine } from '../src/networks/networks-engine'
+import { NetworksCreateBuilder } from '../src/networks/builders/networks-create-builder.js'
+import { MockNetworksEngine } from '../src/networks/mock-networks-engine.js'
 import type { EngineContext } from '../src/types.js'
 import { randomTestKeyPair } from './fixtures/keys.js'
 import { AsyncStorage } from './shims/react-native'
@@ -332,5 +339,188 @@ describe('NetworksEngine', () => {
     expect(recents).to.be.an('array').with.length(1)
     expect(recents[0]?.name).to.equal('NET-test Network')
     expect(recents[0]?.hash).to.be.a('string').with.length.greaterThan(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// NetworksCreateBuilder — Phase 08 Plan 01
+// ---------------------------------------------------------------------------
+
+function makeStubNetworksEngine (): INetworksEngine {
+  const stub: INetworksEngine = {
+    async clearRecentNetworks () {},
+    async create (_init: NetworkInit, _user: User): Promise<INetworkEngine> {
+      return {} as INetworkEngine
+    },
+    async getRecentNetworks () { return [] },
+    async open () { return {} as INetworkEngine },
+    buildCreate () { return new NetworksCreateBuilder(stub) }
+  }
+  return stub
+}
+
+function makeBuilderNetworkInit (): NetworkInit {
+  return {
+    name: 'Builder Test Network',
+    imageUrl: 'https://cdn.example.com/logo.png',
+    relays: ['/dns4/relay.example.com/tcp/443/wss'],
+    primaryAuthority: {
+      name: 'Primary Authority',
+      domainName: 'authority.example.com'
+    },
+    admin: {
+      officers: [{ init: { name: 'Admin', title: 'Chair', scopes: ['rn'] as Scope[] } }],
+      effectiveAt: Date.now(),
+      thresholdPolicies: [{ policy: 'rn', threshold: 1 }]
+    },
+    policies: {
+      timestampAuthorities: [{ url: 'https://tsa.example.com' }],
+      numberRequiredTSAs: 1,
+      electionType: ElectionType.adhoc
+    }
+  }
+}
+
+function makeBuilderUser (): User {
+  return {
+    id: 'builder-user-1',
+    name: 'Builder Test User',
+    activeKeys: [{ key: 'abc123hex', type: UserKeyType.mobile, expiration: Date.now() + 86_400_000 }]
+  }
+}
+
+describe('NetworksCreateBuilder', () => {
+  // Test 1 — BTEST-01
+  it('empty builder reports isValid===false and lists required missingFields', () => {
+    const engine = makeStubNetworksEngine()
+    const builder = new NetworksCreateBuilder(engine)
+    expect(builder.isValid()).to.equal(false)
+    const missing = builder.missingFields()
+    expect(missing.map(m => m.path)).to.include('networkInit')
+    expect(missing.map(m => m.path)).to.include('user')
+  })
+
+  // Test 2 — VALID-01
+  it('per-setter validation: invalid networkInit records BuilderError without throwing', () => {
+    const engine = makeStubNetworksEngine()
+    const invalidInit = { name: '', relays: [], policies: null, primaryAuthority: null, admin: null } as unknown as NetworkInit
+    const b = new NetworksCreateBuilder(engine).setNetworkInit(invalidInit)
+    // Should not throw -- errors are recorded
+    const errs = b.errors()
+    expect(errs.some(e => e.kind === 'per-setter')).to.equal(true)
+    // Now set a valid networkInit, per-setter errors for networkInit should clear
+    const b2 = new NetworksCreateBuilder(engine).setNetworkInit(makeBuilderNetworkInit())
+    const errs2 = b2.errors().filter(e => e.path.startsWith('networkInit'))
+    expect(errs2.length).to.equal(0)
+  })
+
+  // Test 3 — BTEST-01
+  it('errors/missingFields progression as setters fill fields', () => {
+    const engine = makeStubNetworksEngine()
+    const b0 = new NetworksCreateBuilder(engine)
+    expect(b0.missingFields().length).to.equal(2) // networkInit + user
+
+    const b1 = b0.setNetworkInit(makeBuilderNetworkInit())
+    expect(b1.missingFields().length).to.equal(1) // user still missing
+    expect(b1.missingFields()[0]?.path).to.equal('user')
+
+    const b2 = b1.setUser(makeBuilderUser())
+    expect(b2.missingFields().length).to.equal(0)
+    expect(b2.isValid()).to.equal(true)
+  })
+
+  // Test 4 — DB-bound (it.skip)
+  it.skip('REAL ENGINE: isValid===true => commit() returns INetworkEngine (BLOCKED on quereus#23)', async () => {
+    // Integration test — requires real DB context via NetworksEngine.create()
+  })
+
+  // Test 5 — SER-04
+  it('round-trip serialization and fromJSON kind/version rejection', () => {
+    const engine = makeStubNetworksEngine()
+    const b = new NetworksCreateBuilder(engine)
+      .setNetworkInit(makeBuilderNetworkInit())
+      .setUser(makeBuilderUser())
+    const json = b.toJSON()
+
+    // Round-trip via JSON.parse(JSON.stringify(...))
+    const roundTripped = JSON.parse(JSON.stringify(json))
+    expect(roundTripped).to.deep.equal(json)
+
+    // fromJSON reproduces draft + validation state
+    const restored = NetworksCreateBuilder.fromJSON(json, engine)
+    expect(restored.isValid()).to.equal(b.isValid())
+    expect(restored.toJSON()).to.deep.equal(json)
+
+    // Rejects wrong kind
+    expect(() => NetworksCreateBuilder.fromJSON({ kind: 'wrong', version: 1, draft: {} }, engine))
+      .to.throw(/unknown kind/)
+
+    // Rejects wrong version
+    expect(() => NetworksCreateBuilder.fromJSON({ kind: 'networks.create', version: 99, draft: {} }, engine))
+      .to.throw(/unsupported version/)
+  })
+
+  // Test 6 — DB-bound (it.skip)
+  it.skip('REAL ENGINE: double-commit guard (BLOCKED on quereus#23)', async () => {
+    // Integration test — requires real DB context
+  })
+
+  // Test 7 — BTEST-01
+  it('toEngineInput returns compound { networkInit, user } shape; throws on incomplete', () => {
+    const engine = makeStubNetworksEngine()
+    const bIncomplete = new NetworksCreateBuilder(engine)
+    expect(() => bIncomplete.toEngineInput()).to.throw(BuilderValidationError)
+
+    const bComplete = new NetworksCreateBuilder(engine)
+      .setNetworkInit(makeBuilderNetworkInit())
+      .setUser(makeBuilderUser())
+    const input = bComplete.toEngineInput()
+    expect(input).to.have.property('networkInit')
+    expect(input).to.have.property('user')
+    expect(input.networkInit.name).to.equal('Builder Test Network')
+    expect(input.user.id).to.equal('builder-user-1')
+  })
+
+  // Test 8 — SC4 DB-FREE stub engine
+  it('SC4 DB-FREE: stub INetworksEngine -- isValid===true => commit() no-throw AND double-commit sync-guard', async () => {
+    const engine = makeStubNetworksEngine()
+    const b = new NetworksCreateBuilder(engine)
+      .setNetworkInit(makeBuilderNetworkInit())
+      .setUser(makeBuilderUser())
+
+    expect(b.isValid()).to.equal(true)
+
+    // commit() returns a value (the stub INetworkEngine)
+    const result = await b.commit()
+    expect(result).to.not.equal(undefined)
+
+    // Second commit() throws BuilderAlreadyCommittedError synchronously
+    expect(() => b.commit()).to.throw(BuilderAlreadyCommittedError)
+  })
+
+  // Test 9 — equivalence smoke (it.skip)
+  it.skip('REAL ENGINE equivalence smoke: engine.create(init, user) vs engine.buildCreate().fromPayload({networkInit, user}).commit() (BLOCKED on quereus#23)', async () => {
+    // Integration test — would compare direct engine.create() vs builder commit()
+  })
+
+  // Test 10 — FACT-04
+  it('FACT-04 parity: MockNetworksEngine.buildCreate() returns instanceof NetworksCreateBuilder', () => {
+    const mockEngine = new MockNetworksEngine()
+    const builder = mockEngine.buildCreate()
+    expect(builder).to.be.instanceOf(NetworksCreateBuilder)
+  })
+
+  // Test 11 — cross-field validation
+  it('cross-field: policies.numberRequiredTSAs > timestampAuthorities.length surfaces cross-field error', () => {
+    const engine = makeStubNetworksEngine()
+    const ni = makeBuilderNetworkInit()
+    ni.policies.numberRequiredTSAs = 5 // exceeds timestampAuthorities.length (1)
+    const b = new NetworksCreateBuilder(engine)
+      .setNetworkInit(ni)
+      .setUser(makeBuilderUser())
+    expect(b.isValid()).to.equal(false)
+    const crossFieldErrors = b.errors().filter(e => e.kind === 'cross-field')
+    expect(crossFieldErrors.length).to.be.greaterThan(0)
+    expect(crossFieldErrors.some(e => e.code === 'TSA_MISMATCH')).to.equal(true)
   })
 })
