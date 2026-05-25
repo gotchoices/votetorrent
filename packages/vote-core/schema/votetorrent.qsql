@@ -531,7 +531,7 @@ declare schema main
 						and A.AuthorityId = new.AuthorityId
 						and A.Scope = 'mel'
 						and A.Digest = Digest(
-							context.Tid, Id, AuthorityId, Title, Date, RevisionDeadline, BallotDeadline, Type
+							context.Tid, new.Id, new.AuthorityId, new.Title, new.Date, new.RevisionDeadline, new.BallotDeadline, new.Type
 						)
 			)
 		)
