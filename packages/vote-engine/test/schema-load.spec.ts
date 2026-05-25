@@ -129,7 +129,7 @@ describe('Schema load', () => {
 		try {
 			const stmt = db.prepare(
 				`insert into UserKey (UserId, Type, PubKey, Expiration)
-				with context now = datetime('now')
+				with context now = datetime('now'), IsSignatureValid = true
 				values (:userId, :keyType, :keyValue, :expiration)`
 			);
 			// finalize() if the API exposes it; otherwise letting it GC is fine

@@ -26,7 +26,7 @@ export class SigningEngine implements ISigningEngine {
 						SignerKey,
 						Signature
 					)
-					with context now = :now, IsSignatureValid = true
+					with context now = :now, IsSignatureValid = true, IsSignerKeyValid = true, IsOfficerValid = true
 					values (
 						:nonce,
 						:userId,
@@ -161,7 +161,7 @@ export class SigningEngine implements ISigningEngine {
 					SignerKey,
 					Signature
 				)
-				with context now = :now, IsSignatureValid = true
+				with context now = :now, IsSignatureValid = true, IsSignerKeyValid = true
 				values (
 					:nonce,
 					:authorityId,
