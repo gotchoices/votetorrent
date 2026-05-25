@@ -1,5 +1,7 @@
 import { Database } from '@quereus/quereus'
 import {
+  BuilderAlreadyCommittedError,
+  BuilderValidationError,
   ElectionEvent,
   ElectionType,
   UserKeyType
@@ -8,6 +10,9 @@ import { expect } from 'chai'
 import { prepareDb } from '../src/database/initialize'
 import { ElectionEngine } from '../src/election/election-engine'
 import { ElectionsEngine } from '../src/elections/elections-engine'
+import { ElectionsCreateElectionBuilder } from '../src/elections/builders/elections-create-election-builder.js'
+import { ElectionsAdjustElectionBuilder } from '../src/elections/builders/elections-adjust-election-builder.js'
+import { MockElectionsEngine } from '../src/elections/mock-elections-engine.js'
 import { NetworksEngine } from '../src/networks/networks-engine'
 import { KeysTasksEngine } from '../src/tasks/keys-tasks-engine'
 import { OnboardingTasksEngine } from '../src/tasks/onboarding-tasks-engine'
@@ -19,6 +24,7 @@ import type {
   Ballot,
   ElectionInit,
   ElectionRevisionInit,
+  IElectionsEngine,
   KeyholderInvite,
   NetworkInit,
   NetworkReference,
@@ -786,5 +792,210 @@ describe('OnboardingTasksEngine', () => {
         .get({ id: 'task-1' })
       expect(row?.IsCompleted).to.equal(1)
     })
+  })
+})
+
+// ===========================================================================
+// ElectionsCreateElectionBuilder — BUILD-ELEC-01
+// ===========================================================================
+
+function makeStubElectionsEngine (): IElectionsEngine {
+  return {
+    createElection: async () => {},
+    adjustElection: async () => {},
+    getElections: async () => [],
+    getElectionHistory: async () => [],
+    getProposedElections: async () => [],
+    openElection: async () => { throw new Error('stub') },
+    buildCreateElection: () => { throw new Error('stub') },
+    buildAdjustElection: () => { throw new Error('stub') }
+  }
+}
+
+describe('ElectionsCreateElectionBuilder', () => {
+  const stubEngine = makeStubElectionsEngine()
+
+  it('empty builder is invalid with missingFields=[election, revision]', () => {
+    const b = new ElectionsCreateElectionBuilder(stubEngine)
+    expect(b.isValid()).to.equal(false)
+    const missing = b.missingFields()
+    expect(missing.map(m => m.path)).to.deep.equal(['election', 'revision'])
+  })
+
+  it('per-setter validation rejects invalid election fields', () => {
+    const b = new ElectionsCreateElectionBuilder(stubEngine)
+      .setElection({
+        id: '',
+        authorityId: '',
+        title: '',
+        date: -1,
+        revisionDeadline: 0,
+        ballotDeadline: 0,
+        type: ElectionType.adhoc
+      })
+    const errs = b.errors().filter(e => e.kind === 'per-setter')
+    expect(errs.length).to.be.greaterThan(0)
+    expect(errs.some(e => e.path === 'election.id')).to.equal(true)
+  })
+
+  it('errors/missingFields progression: setting election removes its missing field', () => {
+    const init = makeElectionInit()
+    const b = new ElectionsCreateElectionBuilder(stubEngine).setElection(init.election)
+    const missing = b.missingFields()
+    expect(missing.map(m => m.path)).to.deep.equal(['revision'])
+  })
+
+  it.skip('REAL ENGINE: isValid===true => commit() succeeds — BLOCKED: quereus#23', async () => {
+    // Real engine needs populated DB context
+  })
+
+  it('round-trip serialization + fromJSON kind/version rejection', () => {
+    const init = makeElectionInit()
+    const b = new ElectionsCreateElectionBuilder(stubEngine).fromPayload(init)
+    const json = b.toJSON()
+    const parsed = JSON.parse(JSON.stringify(json))
+    expect(parsed).to.deep.equal(json)
+    const restored = ElectionsCreateElectionBuilder.fromJSON(parsed, stubEngine)
+    expect(restored.isValid()).to.equal(b.isValid())
+    // Reject wrong kind
+    expect(() => ElectionsCreateElectionBuilder.fromJSON({ kind: 'wrong', version: 1, draft: {} }, stubEngine))
+      .to.throw(/unknown kind/)
+    // Reject wrong version
+    expect(() => ElectionsCreateElectionBuilder.fromJSON({ kind: 'elections.createElection', version: 99, draft: {} }, stubEngine))
+      .to.throw(/unsupported version/)
+  })
+
+  it.skip('REAL ENGINE: double-commit throws BuilderAlreadyCommittedError — BLOCKED: quereus#23', async () => {})
+
+  it('toEngineInput shape matches ElectionInit + incomplete builder rejection', () => {
+    const init = makeElectionInit()
+    init.revision.keyholderThreshold = 0
+    const b = new ElectionsCreateElectionBuilder(stubEngine).fromPayload(init)
+    const input = b.toEngineInput()
+    expect(input).to.have.property('election')
+    expect(input).to.have.property('revision')
+    expect(input.election.id).to.equal(init.election.id)
+    // Incomplete builder throws
+    expect(() => new ElectionsCreateElectionBuilder(stubEngine).toEngineInput())
+      .to.throw(BuilderValidationError)
+  })
+
+  it('SC4 DB-FREE stub: isValid===true => commit() no-throw + double-commit sync guard', async () => {
+    const init = makeElectionInit()
+    init.revision.keyholderThreshold = 0
+    const b = new ElectionsCreateElectionBuilder(stubEngine).fromPayload(init)
+    expect(b.isValid()).to.equal(true)
+    await b.commit()
+    expect(() => b.commit()).to.throw(BuilderAlreadyCommittedError)
+  })
+
+  it.skip('REAL ENGINE: equivalence smoke — BLOCKED: quereus#23', async () => {})
+
+  it('FACT-04 parity: both engines return instanceof ElectionsCreateElectionBuilder', () => {
+    const real = new ElectionsEngine()
+    const mock = new MockElectionsEngine()
+    expect(real.buildCreateElection()).to.be.instanceOf(ElectionsCreateElectionBuilder)
+    expect(mock.buildCreateElection()).to.be.instanceOf(ElectionsCreateElectionBuilder)
+  })
+
+  it('cross-field: keyholderThreshold > keyholders.length surfaces error', () => {
+    const init = makeElectionInit()
+    init.revision.keyholderThreshold = 5
+    init.revision.keyholders = []
+    const b = new ElectionsCreateElectionBuilder(stubEngine).fromPayload(init)
+    const errs = b.errors().filter(e => e.code === 'THRESHOLD_EXCEEDS_KEYHOLDERS')
+    expect(errs.length).to.equal(1)
+    expect(errs[0].kind).to.equal('cross-field')
+  })
+})
+
+// ===========================================================================
+// ElectionsAdjustElectionBuilder — BUILD-ELEC-01
+// ===========================================================================
+
+describe('ElectionsAdjustElectionBuilder', () => {
+  const stubEngine = makeStubElectionsEngine()
+
+  it('empty builder is invalid with missingFields=[election, revision]', () => {
+    const b = new ElectionsAdjustElectionBuilder(stubEngine)
+    expect(b.isValid()).to.equal(false)
+    const missing = b.missingFields()
+    expect(missing.map(m => m.path)).to.deep.equal(['election', 'revision'])
+  })
+
+  it('per-setter validation rejects invalid election fields', () => {
+    const b = new ElectionsAdjustElectionBuilder(stubEngine)
+      .setElection({
+        id: '',
+        authorityId: '',
+        title: '',
+        date: -1,
+        revisionDeadline: 0,
+        ballotDeadline: 0,
+        type: ElectionType.adhoc
+      })
+    const errs = b.errors().filter(e => e.kind === 'per-setter')
+    expect(errs.length).to.be.greaterThan(0)
+  })
+
+  it('errors/missingFields progression: setting both clears all missing', () => {
+    const init = makeElectionInit()
+    const b = new ElectionsAdjustElectionBuilder(stubEngine)
+      .setElection(init.election)
+      .setRevision(init.revision)
+    const missing = b.missingFields()
+    expect(missing.length).to.equal(0)
+  })
+
+  it.skip('REAL ENGINE: isValid===true => commit() — BLOCKED: quereus#23', async () => {})
+
+  it('round-trip serialization', () => {
+    const init = makeElectionInit()
+    const b = new ElectionsAdjustElectionBuilder(stubEngine).fromPayload(init)
+    const json = b.toJSON()
+    const parsed = JSON.parse(JSON.stringify(json))
+    expect(parsed).to.deep.equal(json)
+    const restored = ElectionsAdjustElectionBuilder.fromJSON(parsed, stubEngine)
+    expect(restored.isValid()).to.equal(b.isValid())
+  })
+
+  it.skip('REAL ENGINE: double-commit — BLOCKED: quereus#23', async () => {})
+
+  it('toEngineInput shape + incomplete rejection', () => {
+    const init = makeElectionInit()
+    init.revision.keyholderThreshold = 0
+    const b = new ElectionsAdjustElectionBuilder(stubEngine).fromPayload(init)
+    const input = b.toEngineInput()
+    expect(input.election.id).to.equal(init.election.id)
+    expect(() => new ElectionsAdjustElectionBuilder(stubEngine).toEngineInput())
+      .to.throw(BuilderValidationError)
+  })
+
+  it('SC4 DB-FREE stub: isValid===true => commit() no-throw + double-commit guard', async () => {
+    const init = makeElectionInit()
+    init.revision.keyholderThreshold = 0
+    const b = new ElectionsAdjustElectionBuilder(stubEngine).fromPayload(init)
+    expect(b.isValid()).to.equal(true)
+    await b.commit()
+    expect(() => b.commit()).to.throw(BuilderAlreadyCommittedError)
+  })
+
+  it.skip('REAL ENGINE: equivalence smoke — BLOCKED: quereus#23', async () => {})
+
+  it('FACT-04 parity: both engines return instanceof ElectionsAdjustElectionBuilder', () => {
+    const real = new ElectionsEngine()
+    const mock = new MockElectionsEngine()
+    expect(real.buildAdjustElection()).to.be.instanceOf(ElectionsAdjustElectionBuilder)
+    expect(mock.buildAdjustElection()).to.be.instanceOf(ElectionsAdjustElectionBuilder)
+  })
+
+  it('cross-field: keyholderThreshold > keyholders.length surfaces error', () => {
+    const init = makeElectionInit()
+    init.revision.keyholderThreshold = 5
+    init.revision.keyholders = []
+    const b = new ElectionsAdjustElectionBuilder(stubEngine).fromPayload(init)
+    const errs = b.errors().filter(e => e.code === 'THRESHOLD_EXCEEDS_KEYHOLDERS')
+    expect(errs.length).to.equal(1)
+    expect(errs[0].kind).to.equal('cross-field')
   })
 })

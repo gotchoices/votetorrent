@@ -6,9 +6,17 @@ import type {
   ElectionDetails,
   ElectionRevisionInit,
   IElectionEngine,
+  IElectionInviteKeyholderBuilder,
+  IElectionProposeBallotBuilder,
+  IElectionProposeRevisionBuilder,
+  IElectionRevokeKeyholderBuilder,
   KeyholderInvite,
   Timestamp
 } from '@votetorrent/vote-core'
+import { ElectionProposeBallotBuilder } from './builders/election-propose-ballot-builder.js'
+import { ElectionProposeRevisionBuilder } from './builders/election-propose-revision-builder.js'
+import { ElectionInviteKeyholderBuilder } from './builders/election-invite-keyholder-builder.js'
+import { ElectionRevokeKeyholderBuilder } from './builders/election-revoke-keyholder-builder.js'
 
 export class MockElectionEngine implements IElectionEngine {
   async getBallotDetails (id: string): Promise<BallotDetails> {
@@ -111,5 +119,21 @@ Please review all candidates and measures carefully before voting.`,
     electionId: string
   ): Promise<void> {
     throw new Error('Not implemented')
+  }
+
+  buildProposeBallot (): IElectionProposeBallotBuilder {
+    return new ElectionProposeBallotBuilder(this)
+  }
+
+  buildProposeRevision (): IElectionProposeRevisionBuilder {
+    return new ElectionProposeRevisionBuilder(this)
+  }
+
+  buildInviteKeyholder (): IElectionInviteKeyholderBuilder {
+    return new ElectionInviteKeyholderBuilder(this)
+  }
+
+  buildRevokeKeyholder (): IElectionRevokeKeyholderBuilder {
+    return new ElectionRevokeKeyholderBuilder(this)
   }
 }

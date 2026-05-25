@@ -1,9 +1,13 @@
 import { MockElectionEngine } from '../election/mock-election-engine.js';
+import { ElectionsCreateElectionBuilder } from './builders/elections-create-election-builder.js';
+import { ElectionsAdjustElectionBuilder } from './builders/elections-adjust-election-builder.js';
 import type {
 	ElectionInit,
 	ElectionRevisionInit,
 	ElectionSummary,
 	IElectionEngine,
+	IElectionsAdjustElectionBuilder,
+	IElectionsCreateElectionBuilder,
 	IElectionsEngine,
 	ElectionType,
 	Proposal,
@@ -172,6 +176,14 @@ export class MockElectionsEngine implements IElectionsEngine {
 	async getProposedElections(): Promise<Array<Proposal<ElectionInit>>> {
 		console.log('Getting proposed elections');
 		return Array.from(this.proposedElections.values());
+	}
+
+	buildCreateElection(): IElectionsCreateElectionBuilder {
+		return new ElectionsCreateElectionBuilder(this);
+	}
+
+	buildAdjustElection(): IElectionsAdjustElectionBuilder {
+		return new ElectionsAdjustElectionBuilder(this);
 	}
 
 	async openElection(electionId: string): Promise<IElectionEngine> {

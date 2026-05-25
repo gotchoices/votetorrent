@@ -6,9 +6,13 @@ import type {
   ElectionSummary,
   ElectionType,
   IElectionEngine,
+  IElectionsAdjustElectionBuilder,
+  IElectionsCreateElectionBuilder,
   IElectionsEngine,
   Proposal
 } from '@votetorrent/vote-core'
+import { ElectionsCreateElectionBuilder } from './builders/elections-create-election-builder.js'
+import { ElectionsAdjustElectionBuilder } from './builders/elections-adjust-election-builder.js'
 
 // Phase 05 ELEC-01/02 — monotonic Tid counter for ElectionsEngine batches.
 // Mirrors NetworksEngine/UserEngine pattern. Re-evaluate at the v2
@@ -251,6 +255,16 @@ export class ElectionsEngine implements IElectionsEngine {
       },
       this.ctx!
     )
+  }
+
+  // ---------- builder factories ----------
+
+  buildCreateElection (): IElectionsCreateElectionBuilder {
+    return new ElectionsCreateElectionBuilder(this)
+  }
+
+  buildAdjustElection (): IElectionsAdjustElectionBuilder {
+    return new ElectionsAdjustElectionBuilder(this)
   }
 
   // ---------- helpers ----------

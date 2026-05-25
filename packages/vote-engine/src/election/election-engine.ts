@@ -12,11 +12,19 @@ import type {
   ElectionRevisionInit,
   ElectionType,
   IElectionEngine,
+  IElectionInviteKeyholderBuilder,
+  IElectionProposeBallotBuilder,
+  IElectionProposeRevisionBuilder,
+  IElectionRevokeKeyholderBuilder,
   KeyholderInvite,
   Option,
   Question,
   Timestamp
 } from '@votetorrent/vote-core'
+import { ElectionProposeBallotBuilder } from './builders/election-propose-ballot-builder.js'
+import { ElectionProposeRevisionBuilder } from './builders/election-propose-revision-builder.js'
+import { ElectionInviteKeyholderBuilder } from './builders/election-invite-keyholder-builder.js'
+import { ElectionRevokeKeyholderBuilder } from './builders/election-revoke-keyholder-builder.js'
 
 // Phase 05 ELEC-03..08 — monotonic Tid counter for ElectionEngine batches.
 // Same shape as NetworksEngine/UserEngine/ElectionsEngine. Re-evaluate at
@@ -561,6 +569,24 @@ export class ElectionEngine implements IElectionEngine {
     } catch (err) {
       this.rethrow(err, 'revokeKeyholder')
     }
+  }
+
+  // ---------- builder factories ----------
+
+  buildProposeBallot (): IElectionProposeBallotBuilder {
+    return new ElectionProposeBallotBuilder(this)
+  }
+
+  buildProposeRevision (): IElectionProposeRevisionBuilder {
+    return new ElectionProposeRevisionBuilder(this)
+  }
+
+  buildInviteKeyholder (): IElectionInviteKeyholderBuilder {
+    return new ElectionInviteKeyholderBuilder(this)
+  }
+
+  buildRevokeKeyholder (): IElectionRevokeKeyholderBuilder {
+    return new ElectionRevokeKeyholderBuilder(this)
   }
 
   // ---------- helpers ----------
