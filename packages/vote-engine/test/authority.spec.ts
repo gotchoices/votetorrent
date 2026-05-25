@@ -183,7 +183,7 @@ describe('AuthorityEngine', () => {
       const sig = makeRealSignature('user-1')
       await ctx.db.exec(
         `insert into ProposedAuthority (Id, Name, DomainName, ImageRef)
-         with context UserId = :uid, UserKey = :key, Signature = :sig, Tid = 7, now = ${Date.now()}
+         with context UserId = :uid, UserKey = :key, Signature = :sig, Tid = 7, now = ${Date.now()}, IsUserValid = true
          values (:id, 'Proposed Name', 'proposed.example', null)`,
         {
           uid: 'user-1',
@@ -247,7 +247,7 @@ describe('AuthorityEngine', () => {
       const effectiveAt = new Date(Date.now() + 60_000).toISOString()
       await ctx.db.exec(
         `insert into ProposedAdmin (AuthorityId, EffectiveAt, ThresholdPolicies)
-         with context UserId = :uid, UserKey = :key, Signature = :sig, Tid = 7, now = ${Date.now()}
+         with context UserId = :uid, UserKey = :key, Signature = :sig, Tid = 7, now = ${Date.now()}, IsUserValid = true
          values (:authId, :eff, :tp)`,
         {
           uid: 'user-1',
@@ -271,7 +271,7 @@ describe('AuthorityEngine', () => {
       // Seed ProposedAdmin first (required by ProposedOfficer.AdminValid).
       await ctx.db.exec(
         `insert into ProposedAdmin (AuthorityId, EffectiveAt, ThresholdPolicies)
-         with context UserId = :uid, UserKey = :key, Signature = :sig, Tid = 7, now = ${Date.now()}
+         with context UserId = :uid, UserKey = :key, Signature = :sig, Tid = 7, now = ${Date.now()}, IsUserValid = true
          values (:authId, :eff, '[]')`,
         {
           uid: 'user-1',
@@ -283,7 +283,7 @@ describe('AuthorityEngine', () => {
       )
       await ctx.db.exec(
         `insert into ProposedOfficer (AuthorityId, AdminEffectiveAt, ProposedName, Title, Scopes)
-         with context UserId = :uid, UserKey = :key, Signature = :sig, Tid = 7, now = ${Date.now()}
+         with context UserId = :uid, UserKey = :key, Signature = :sig, Tid = 7, now = ${Date.now()}, IsUserValid = true
          values (:authId, :eff, 'Officer Bob', 'Inspector', :scopes)`,
         {
           uid: 'user-1',
@@ -879,7 +879,7 @@ describe('AuthorityEngine', () => {
       let caught: unknown
       try {
         await ctx.db.exec(
-          'update Authority set Id = :id with context Tid = 1, SigningNonce = null, InviteSlotCid = null, InviteSignature = null',
+          'update Authority with context Tid = 1, SigningNonce = null, InviteSlotCid = null, InviteSignature = null set Id = :id',
           { id: 'mutated-id' }
         )
       } catch (err) {
@@ -932,7 +932,7 @@ describe('AuthorityEngine', () => {
       let caught: unknown
       try {
         await ctx.db.exec(
-          'update Authority set Name = :n with context Tid = 1, SigningNonce = null, InviteSlotCid = null, InviteSignature = null',
+          'update Authority with context Tid = 1, SigningNonce = null, InviteSlotCid = null, InviteSignature = null set Name = :n',
           { n: 'Renamed' }
         )
       } catch (err) {
@@ -1045,8 +1045,9 @@ describe('AuthorityEngine', () => {
       let caught: unknown
       try {
         await ctx.db.exec(
-          `update Admin set ThresholdPolicies = '[]'
+          `update Admin
            with context Tid = 9, SigningNonce = null, InviteSlotCid = null, InviteSignature = null
+           set ThresholdPolicies = '[]'
            where AuthorityId = :id`,
           { id: authority.id }
         )
@@ -1088,8 +1089,9 @@ describe('AuthorityEngine', () => {
       let updateErr: unknown
       try {
         await ctx.db.exec(
-          `update Officer set Title = 'X'
-           with context Tid = 9, SigningNonce = null, InviteSlotCid = null, InviteSignature = null`
+          `update Officer
+           with context Tid = 9, SigningNonce = null, InviteSlotCid = null, InviteSignature = null
+           set Title = 'X'`
         )
       } catch (err) {
         updateErr = err
@@ -1201,7 +1203,7 @@ describe('AuthorityEngine', () => {
       try {
         await ctx.db.exec(
           `insert into ProposedAuthority (Id, Name, DomainName, ImageRef)
-           with context UserId = :uid, UserKey = :key, Signature = :sig, Tid = 9, now = ${Date.now()}
+           with context UserId = :uid, UserKey = :key, Signature = :sig, Tid = 9, now = ${Date.now()}, IsUserValid = true
            values ('no-such-authority', 'X', 'x.example', null)`,
           {
             uid: 'user-1',
@@ -1222,7 +1224,7 @@ describe('AuthorityEngine', () => {
       try {
         await ctx.db.exec(
           `insert into ProposedAuthority (Id, Name, DomainName, ImageRef)
-           with context UserId = 'no-such-user', UserKey = 'no-key', Signature = 'bad', Tid = 9, now = ${Date.now()}
+           with context UserId = 'no-such-user', UserKey = 'no-key', Signature = 'bad', Tid = 9, now = ${Date.now()}, IsUserValid = false
            values (:id, 'X', 'x.example', null)`,
           { id: authority.id }
         )
@@ -1245,7 +1247,7 @@ describe('AuthorityEngine', () => {
       try {
         await ctx.db.exec(
           `insert into ProposedAdmin (AuthorityId, EffectiveAt, ThresholdPolicies)
-           with context UserId = :uid, UserKey = :key, Signature = :sig, Tid = 9, now = ${Date.now()}
+           with context UserId = :uid, UserKey = :key, Signature = :sig, Tid = 9, now = ${Date.now()}, IsUserValid = true
            values ('no-such', :e, '[]')`,
           {
             uid: 'user-1',
@@ -1268,7 +1270,7 @@ describe('AuthorityEngine', () => {
       try {
         await ctx.db.exec(
           `insert into ProposedAdmin (AuthorityId, EffectiveAt, ThresholdPolicies)
-           with context UserId = :uid, UserKey = :key, Signature = :sig, Tid = 9, now = ${Date.now()}
+           with context UserId = :uid, UserKey = :key, Signature = :sig, Tid = 9, now = ${Date.now()}, IsUserValid = true
            values (:id, 'not-iso', '[]')`,
           {
             uid: 'user-1',
@@ -1290,7 +1292,7 @@ describe('AuthorityEngine', () => {
       try {
         await ctx.db.exec(
           `insert into ProposedAdmin (AuthorityId, EffectiveAt, ThresholdPolicies)
-           with context UserId = 'no-user', UserKey = 'no-key', Signature = 'bad', Tid = 9, now = ${Date.now()}
+           with context UserId = 'no-user', UserKey = 'no-key', Signature = 'bad', Tid = 9, now = ${Date.now()}, IsUserValid = false
            values (:id, :e, '[]')`,
           { id: authority.id, e: new Date().toISOString() }
         )
@@ -1313,7 +1315,7 @@ describe('AuthorityEngine', () => {
       try {
         await ctx.db.exec(
           `insert into ProposedOfficer (AuthorityId, AdminEffectiveAt, ProposedName, Title, Scopes)
-           with context UserId = :uid, UserKey = :key, Signature = :sig, Tid = 9, now = ${Date.now()}
+           with context UserId = :uid, UserKey = :key, Signature = :sig, Tid = 9, now = ${Date.now()}, IsUserValid = true
            values ('no-such', :e, 'X', 'T', '["rad"]')`,
           {
             uid: 'user-1',
@@ -1336,7 +1338,7 @@ describe('AuthorityEngine', () => {
       try {
         await ctx.db.exec(
           `insert into ProposedOfficer (AuthorityId, AdminEffectiveAt, ProposedName, Title, Scopes)
-           with context UserId = :uid, UserKey = :key, Signature = :sig, Tid = 9, now = ${Date.now()}
+           with context UserId = :uid, UserKey = :key, Signature = :sig, Tid = 9, now = ${Date.now()}, IsUserValid = true
            values (:id, '9999-01-01T00:00:00.000Z', 'Orphan', 'T', '["rad"]')`,
           {
             uid: 'user-1',
@@ -1359,7 +1361,7 @@ describe('AuthorityEngine', () => {
       try {
         await ctx.db.exec(
           `delete from ProposedOfficer
-           with context UserId = :uid, UserKey = :key, Signature = :sig, Tid = 9, now = ${Date.now()}`,
+           with context UserId = :uid, UserKey = :key, Signature = :sig, Tid = 9, now = ${Date.now()}, IsUserValid = true`,
           {
             uid: 'user-1',
             key: sig.signerKey,
@@ -1380,7 +1382,7 @@ describe('AuthorityEngine', () => {
       try {
         await ctx.db.exec(
           `insert into ProposedOfficer (AuthorityId, AdminEffectiveAt, ProposedName, Title, Scopes)
-           with context UserId = :uid, UserKey = :key, Signature = :sig, Tid = 9, now = ${Date.now()}
+           with context UserId = :uid, UserKey = :key, Signature = :sig, Tid = 9, now = ${Date.now()}, IsUserValid = true
            values (:id, :e, 'Bad', 'T', :scopes)`,
           {
             uid: 'user-1',
@@ -1404,7 +1406,7 @@ describe('AuthorityEngine', () => {
       try {
         await ctx.db.exec(
           `insert into ProposedOfficer (AuthorityId, AdminEffectiveAt, ProposedName, Title, Scopes)
-           with context UserId = 'no-user', UserKey = 'no-key', Signature = 'bad', Tid = 9, now = ${Date.now()}
+           with context UserId = 'no-user', UserKey = 'no-key', Signature = 'bad', Tid = 9, now = ${Date.now()}, IsUserValid = false
            values (:id, :e, 'X', 'T', '["rad"]')`,
           { id: authority.id, e: new Date().toISOString() }
         )
@@ -1476,7 +1478,7 @@ describe('AuthorityEngine', () => {
       let updateErr: unknown
       try {
         await ctx.db.exec(
-          `update InviteSlot set Name = 'X' with context Tid = 9, now = ${Date.now()}`
+          `update InviteSlot with context Tid = 9, now = ${Date.now()} set Name = 'X'`
         )
       } catch (err) {
         updateErr = err
@@ -1699,7 +1701,7 @@ describe('AuthorityEngine', () => {
       let updateErr: unknown
       try {
         await ctx.db.exec(
-          `update AdminSigning set Scope = 'rn' with context now = ${Date.now()}`
+          `update AdminSigning with context now = ${Date.now()} set Scope = 'rn'`
         )
       } catch (err) {
         updateErr = err

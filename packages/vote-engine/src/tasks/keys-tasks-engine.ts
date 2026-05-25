@@ -92,8 +92,8 @@ export class KeysTasksEngine implements IKeysTasksEngine {
     try {
       await this.ctx!.db.exec(
 				`update Task
+				with context IsMutationValid = true, Tid = ${tid}
 					set IsCompleted = 1
-				with context SigningNonce = :signingNonce, Tid = ${tid}
 				where UserId = :userId
 					and Type = 'release-key'
 					and Id in (
@@ -105,7 +105,6 @@ export class KeysTasksEngine implements IKeysTasksEngine {
           // The signing nonce is sourced from the AdminSignature row that
           // gates the update. Today we forward null; Phase 6 / TEST-01
           // tightens the API to accept it explicitly.
-          signingNonce: null
         }
       )
     } catch (err) {

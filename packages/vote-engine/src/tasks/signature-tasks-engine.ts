@@ -119,12 +119,11 @@ export class SignatureTasksEngine implements ISignatureTasksEngine {
     try {
       await this.ctx!.db.exec(
 				`update Task
+				with context IsMutationValid = true, Tid = ${tid}
 					set IsCompleted = 1
-				with context SigningNonce = :signingNonce, Tid = ${tid}
 				where Id = :id`,
         {
           id: taskRow.Id as string,
-          signingNonce: nonce
         }
       )
     } catch (err) {

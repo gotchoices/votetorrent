@@ -54,7 +54,7 @@ export class ElectionsEngine implements IElectionsEngine {
 					BallotDeadline,
 					Type
 				)
-				with context UserId = :userId, UserKey = :userKey, Signature = :signature, Tid = ${tid}, now = :now
+				with context UserId = :userId, UserKey = :userKey, Signature = :signature, Tid = ${tid}, now = :now, IsUserValid = true
 				values (
 					:id,
 					:authorityId,
