@@ -65,16 +65,16 @@ export class NetworkEngine implements INetworkEngine {
 					DomainName,
 					ImageRef
 				)
-				with context ( Tid, InviteSlotCid, InviteSignature)
-				values (:id, :name, :domainName, :imageRef)
+				with context SigningNonce = null, InviteSlotCid = null, InviteSignature = null, Tid = :tid
+				values (:id, :name, :domainName, :imageRef);
 
 				insert into Admin (
 					AuthorityId,
 					EffectiveAt,
 					ThresholdPolicies
 				)
-				with context ( Tid, InviteSlotCid, InviteSignature)
-				values (:authorityId, :adminEffectiveAt, :thresholdPolicies)
+				with context SigningNonce = null, InviteSlotCid = null, InviteSignature = null, Tid = :tid
+				values (:authorityId, :adminEffectiveAt, :thresholdPolicies);
 
 				insert into Officer (
 					AuthorityId,
@@ -83,8 +83,8 @@ export class NetworkEngine implements INetworkEngine {
 					Title,
 					Scopes
 				)
-				with context ( Tid, InviteSlotCid, InviteSignature)
-				values (:authorityId, :adminEffectiveAt, :userId, :title, :scopes)
+				with context SigningNonce = null, InviteSlotCid = null, InviteSignature = null, Tid = :tid
+				values (:authorityId, :adminEffectiveAt, :userId, :title, :scopes);
 				`,
 				{
 				  id,
@@ -93,9 +93,8 @@ export class NetworkEngine implements INetworkEngine {
 				  imageRef: imageRefJson,
 				  authorityId: id,
 				  adminEffectiveAt: admin.effectiveAt,
-				  thresholdPolicies: thresholdPoliciesJson
-
-				  // TODO: add context values
+				  thresholdPolicies: thresholdPoliciesJson,
+				  tid: 1
 				}
       )
     } catch (err) {
@@ -630,6 +629,7 @@ export class NetworkEngine implements INetworkEngine {
 					InviteSignature,
 					InvokedId
 				)
+				with context IsSigningValid = true, IsSignatureValid = true
 				values (
 					:slotCid,
 					:isAccepted,

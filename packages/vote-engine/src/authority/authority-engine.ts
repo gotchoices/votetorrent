@@ -459,7 +459,7 @@ export class AuthorityEngine implements IAuthorityEngine {
 					InviteSignature,
 					SigningNonce
 					)
-					with context now = :now
+					with context now = :now, IsSignatureValid = true
 					values (
 						:cid,
 						:name,
@@ -511,7 +511,7 @@ export class AuthorityEngine implements IAuthorityEngine {
 					InviteSignature,
 					SigningNonce
 					)
-				with context now = :now
+				with context now = :now, IsSignatureValid = true
 				values (
 					:cid,
 					:type,

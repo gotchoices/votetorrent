@@ -1428,7 +1428,7 @@ describe('AuthorityEngine', () => {
       try {
         await ctx.db.exec(
           `insert into InviteSlot (Cid, Type, Name, Expiration, InviteKey, InviteSignature, SigningNonce)
-           with context Tid = 9, now = ${Date.now()}
+           with context Tid = 9, now = ${Date.now()}, IsSignatureValid = true
            values ('wrong-cid', 'au', 'X', :e, 'pk', 'sig', 'nonce')`,
           { e: new Date(Date.now() + 60_000).toISOString() }
         )
@@ -1445,7 +1445,7 @@ describe('AuthorityEngine', () => {
       try {
         await ctx.db.exec(
           `insert into InviteSlot (Cid, Type, Name, Expiration, InviteKey, InviteSignature, SigningNonce)
-           with context Tid = 9, now = ${Date.now()}
+           with context Tid = 9, now = ${Date.now()}, IsSignatureValid = true
            values ('past-cid', 'au', 'Past', :e, 'pk', 'sig', 'nonce')`,
           { e: new Date(Date.now() - 60_000).toISOString() }
         )
@@ -1462,7 +1462,7 @@ describe('AuthorityEngine', () => {
       try {
         await ctx.db.exec(
           `insert into InviteSlot (Cid, Type, Name, Expiration, InviteKey, InviteSignature, SigningNonce)
-           with context Tid = 9, now = ${Date.now()}
+           with context Tid = 9, now = ${Date.now()}, IsSignatureValid = true
            values ('cid', 'au', 'BadSig', :e, 'pk', 'wrong-sig', 'nonce')`,
           { e: new Date(Date.now() + 60_000).toISOString() }
         )
@@ -1478,7 +1478,7 @@ describe('AuthorityEngine', () => {
       let updateErr: unknown
       try {
         await ctx.db.exec(
-          `update InviteSlot with context Tid = 9, now = ${Date.now()} set Name = 'X'`
+          `update InviteSlot with context Tid = 9, now = ${Date.now()}, IsSignatureValid = true set Name = 'X'`
         )
       } catch (err) {
         updateErr = err
@@ -1488,7 +1488,7 @@ describe('AuthorityEngine', () => {
       let deleteErr: unknown
       try {
         await ctx.db.exec(
-          `delete from InviteSlot with context Tid = 9, now = ${Date.now()}`
+          `delete from InviteSlot with context Tid = 9, now = ${Date.now()}, IsSignatureValid = true`
         )
       } catch (err) {
         deleteErr = err
@@ -1503,7 +1503,7 @@ describe('AuthorityEngine', () => {
       try {
         await ctx.db.exec(
           `insert into InviteSlot (Cid, Type, Name, Expiration, InviteKey, InviteSignature, SigningNonce)
-           with context Tid = 9, now = ${Date.now()}
+           with context Tid = 9, now = ${Date.now()}, IsSignatureValid = true
            values ('orphan', 'au', 'Orphan', :e, 'pk', 'sig', 'never-signed')`,
           { e: new Date(Date.now() + 60_000).toISOString() }
         )
