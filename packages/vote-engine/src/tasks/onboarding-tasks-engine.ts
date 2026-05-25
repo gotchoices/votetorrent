@@ -55,12 +55,11 @@ export class OnboardingTasksEngine implements IOnboardingTasksEngine {
     try {
       await this.ctx!.db.exec(
 				`update Task
+				with context IsMutationValid = true, Tid = ${tid}
 					set IsCompleted = 1
-				with context SigningNonce = :signingNonce, Tid = ${tid}
 				where Id = :id and Type = 'onboarding'`,
         {
           id: taskId,
-          signingNonce: null
         }
       )
     } catch (err) {

@@ -299,7 +299,7 @@ export class ElectionEngine implements IElectionEngine {
 					Timeline,
 					KeyholderThreshold
 				)
-				with context UserId = :userId, UserKey = :userKey, Signature = :signature, Tid = ${tid}, now = :now
+				with context UserId = :userId, UserKey = :userKey, Signature = :signature, Tid = ${tid}, now = :now, IsUserValid = true
 				values (
 					:electionId,
 					:revision,
@@ -346,7 +346,7 @@ export class ElectionEngine implements IElectionEngine {
 					Description,
 					Districts
 				)
-				with context UserId = :userId, UserKey = :userKey, Signature = :signature, Tid = ${tid}, now = :now
+				with context UserId = :userId, UserKey = :userKey, Signature = :signature, Tid = ${tid}, now = :now, IsUserValid = true
 				values (
 					:id,
 					:electionId,
@@ -400,7 +400,7 @@ export class ElectionEngine implements IElectionEngine {
 					Sequence,
 					Required
 				)
-				with context UserId = :userId, UserKey = :userKey, Signature = :signature, Tid = ${tid}, now = :now
+				with context UserId = :userId, UserKey = :userKey, Signature = :signature, Tid = ${tid}, now = :now, IsMutationValid = true
 				values (
 					:ballotId,
 					:code,
@@ -468,7 +468,7 @@ export class ElectionEngine implements IElectionEngine {
 					Image,
 					Video
 				)
-				with context UserId = :userId, UserKey = :userKey, Signature = :signature, Tid = ${tid}, now = :now
+				with context UserId = :userId, UserKey = :userKey, Signature = :signature, Tid = ${tid}, now = :now, IsMutationValid = true
 				values (
 					:ballotId,
 					:questionCode,

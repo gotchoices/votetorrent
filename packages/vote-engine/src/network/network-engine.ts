@@ -575,7 +575,7 @@ export class NetworkEngine implements INetworkEngine {
       await this.ctx.db.exec(
 				`insert into ProposedNetwork
 					(Name, ImageRef, Relays, TimestampAuthorities, NumberRequiredTSAs, ElectionType)
-				with context UserId = :userId, UserKey = :userKey, now = :now
+				with context UserId = :userId, UserKey = :userKey, Signature = null, Tid = 0, now = :now, IsUserValid = true
 				values
 					(:name, :imageRef, :relays, :timestampAuthorities, :numberRequiredTSAs, :electionType)`,
 				{

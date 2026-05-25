@@ -234,8 +234,7 @@ describe('NetworkEngine', () => {
 			let caught: unknown;
 			try {
 				await ctx.db.exec(
-					'update Network set Id = :newId with context Tid = 1',
-					{ newId: 'mutated-network-id' },
+					'update Network with context Tid = 1 set Id = :newId',					{ newId: 'mutated-network-id' },
 				);
 			} catch (err) {
 				caught = err;
@@ -249,8 +248,7 @@ describe('NetworkEngine', () => {
 			let caught: unknown;
 			try {
 				await ctx.db.exec(
-					'update Network set Hash = :newHash with context Tid = 1',
-					{ newHash: 'h'.repeat(16) },
+					'update Network with context Tid = 1 set Hash = :newHash',					{ newHash: 'h'.repeat(16) },
 				);
 			} catch (err) {
 				caught = err;
@@ -264,8 +262,7 @@ describe('NetworkEngine', () => {
 			let caught: unknown;
 			try {
 				await ctx.db.exec(
-					'update Network set PrimaryAuthorityId = :newPa with context Tid = 1',
-					{ newPa: 'some-other-authority-id' },
+					'update Network with context Tid = 1 set PrimaryAuthorityId = :newPa',					{ newPa: 'some-other-authority-id' },
 				);
 			} catch (err) {
 				caught = err;
@@ -305,8 +302,7 @@ describe('NetworkEngine', () => {
 			let caught: unknown;
 			try {
 				await ctx.db.exec(
-					'update Network set ElectionType = :et with context Tid = 1',
-					{ et: 'xx' },
+					'update Network with context Tid = 1 set ElectionType = :et',					{ et: 'xx' },
 				);
 			} catch (err) {
 				caught = err;
@@ -320,8 +316,7 @@ describe('NetworkEngine', () => {
 			let caught: unknown;
 			try {
 				await ctx.db.exec(
-					'update Network set NumberRequiredTSAs = :n with context Tid = 1',
-					{ n: -1 },
+					'update Network with context Tid = 1 set NumberRequiredTSAs = :n',					{ n: -1 },
 				);
 			} catch (err) {
 				caught = err;
@@ -335,8 +330,7 @@ describe('NetworkEngine', () => {
 			let caught: unknown;
 			try {
 				await ctx.db.exec(
-					'update Network set NumberRequiredTSAs = :n with context Tid = 1',
-					{ n: 1.5 },
+					'update Network with context Tid = 1 set NumberRequiredTSAs = :n',					{ n: 1.5 },
 				);
 			} catch (err) {
 				caught = err;
@@ -377,8 +371,7 @@ describe('NetworkEngine', () => {
 			let caught: unknown;
 			try {
 				await ctx.db.exec(
-					'update Network set Name = :n with context Tid = 1, SigningNonce = null',
-					{ n: 'Renamed' },
+					'update Network with context Tid = 1, SigningNonce = null set Name = :n',					{ n: 'Renamed' },
 				);
 			} catch (err) {
 				caught = err;
@@ -633,8 +626,7 @@ describe('NetworkEngine', () => {
 			let caught: unknown;
 			try {
 				await ctx.db.exec(
-					'update Authority set Id = :id with context Tid = 1, SigningNonce = null, InviteSlotCid = null, InviteSignature = null',
-					{ id: 'mutated-authority-id' },
+					'update Authority with context Tid = 1, SigningNonce = null, InviteSlotCid = null, InviteSignature = null set Id = :id',					{ id: 'mutated-authority-id' },
 				);
 			} catch (err) {
 				caught = err;
@@ -687,8 +679,7 @@ describe('NetworkEngine', () => {
 			let caught: unknown;
 			try {
 				await ctx.db.exec(
-					'update Authority set Name = :n with context Tid = 1, SigningNonce = null, InviteSlotCid = null, InviteSignature = null',
-					{ n: 'Renamed' },
+					'update Authority with context Tid = 1, SigningNonce = null, InviteSlotCid = null, InviteSignature = null set Name = :n',					{ n: 'Renamed' },
 				);
 			} catch (err) {
 				caught = err;
@@ -880,7 +871,7 @@ describe('NetworkEngine', () => {
 				// resulting QuereusError.
 				await ctx.db.exec(
 					`insert into ProposedNetwork (Name, ImageRef, Relays, TimestampAuthorities, NumberRequiredTSAs, ElectionType)
-           with context UserId = :uid, UserKey = 'bad-key', Signature = 'deadbeef', Tid = 9, now = ${Date.now()}
+           with context UserId = :uid, UserKey = 'bad-key', Signature = 'deadbeef', Tid = 9, now = ${Date.now()}, IsUserValid = false
            values ('SigCheck', null, '[]', '[]', 1, 'a')`,
 					{ uid: ctx.user?.id ?? 'user-1' },
 				);
@@ -1075,7 +1066,7 @@ describe('NetworkEngine', () => {
 			let caught: unknown;
 			try {
 				await ctx.db.exec(
-					`update Network set Name = 'X' with context Tid = 1, SigningNonce = 'no-such-nonce'`,
+					`update Network with context Tid = 1, SigningNonce = 'no-such-nonce' set Name = 'X'`
 				);
 			} catch (err) {
 				caught = err;
@@ -2007,7 +1998,7 @@ describe('NetworksEngine - creation constraints', () => {
 			try {
 				await ctx.db.exec(
 					`insert into ProposedNetwork (Name, ImageRef, Relays, TimestampAuthorities, NumberRequiredTSAs, ElectionType)
-           with context UserId = 'no-such-user', UserKey = 'no-key', Signature = 'sig', Tid = 9, now = ${Date.now()}
+           with context UserId = 'no-such-user', UserKey = 'no-key', Signature = 'sig', Tid = 9, now = ${Date.now()}, IsUserValid = false
            values ('NoScope', null, '[]', '[]', 1, 'a')`,
 				);
 			} catch (err) {
@@ -2023,7 +2014,7 @@ describe('NetworksEngine - creation constraints', () => {
 			try {
 				await ctx.db.exec(
 					`insert into ProposedNetwork (Name, ImageRef, Relays, TimestampAuthorities, NumberRequiredTSAs, ElectionType)
-           with context UserId = :uid, UserKey = :key, Signature = 'bad-sig', Tid = 9, now = ${Date.now()}
+           with context UserId = :uid, UserKey = :key, Signature = 'bad-sig', Tid = 9, now = ${Date.now()}, IsUserValid = false
            values ('BadSig', null, '[]', '[]', 1, 'a')`,
 					{
 						uid: ctx.user?.id ?? 'user-1',

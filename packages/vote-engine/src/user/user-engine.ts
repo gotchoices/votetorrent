@@ -213,8 +213,8 @@ export class UserEngine implements IUserEngine {
     try {
       await this.ctx!.db.exec(
 				`update User
-					set Name = :name, ImageRef = :imageRef
 				with context SigningNonce = null, InviteSlotCid = null, InviteSignature = null, Tid = ${tid}
+					set Name = :name, ImageRef = :imageRef
 				where Id = :userId`,
         {
           name: userRevise.info.name,

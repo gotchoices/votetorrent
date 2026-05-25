@@ -373,7 +373,7 @@ export class AuthorityEngine implements IAuthorityEngine {
 					EffectiveAt,
 					ThresholdPolicies
 				)
-					with context UserId = :signerUserId, UserKey = :signerKey, Signature = :signature, Tid = ${tid}
+					with context UserId = :signerUserId, UserKey = :signerKey, Signature = :signature, Tid = ${tid}, now = :now, IsUserValid = true
 				values (
 					:authorityId,
 					:effectiveAt,
@@ -385,7 +385,8 @@ export class AuthorityEngine implements IAuthorityEngine {
 				  thresholdPolicies: thresholdPoliciesJson,
 				  signerUserId: signature.signerUserId,
 				  signerKey: signature.signerKey,
-				  signature: signature.signature
+				  signature: signature.signature,
+				  now: Date.now()
 				}
       )
 
