@@ -17,6 +17,9 @@ export type RootStackParamList = {
 	AddNetwork: undefined;
 	NetworkDetails: { network: NetworkReference };
 	Hosting: undefined;
+	// Phase 8 plan 08-06 — Networks routes (NETUI-05, NETUI-06; D-12 / D-13)
+	NetworkStatistics: { networkId: string };
+	NetworkRevision: { networkId: string };
 	AuthorityDetails: { authority: Authority };
 	// Phase 8 plan 08-01: typed entry for ProposedAdministration (screen lands in 08-02 per D-04)
 	ProposedAdministration: { authorityId: string };

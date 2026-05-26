@@ -136,13 +136,12 @@ export function NetworkDetailsScreen() {
 					icon="pencil"
 					backgroundColor={colors.accent}
 					size="thin"
-					onPress={() => {
-						// TODO(08-06): wire NetworkRevision — route is registered by
-						// plan 08-06 (Wave 2). Until then this is a no-op stub; the
-						// REVISE NETWORK call site is owned by this plan (08-05)
-						// while the destination screen + route entry live in 08-06.
-						console.log("revise network stub — pending 08-06 NetworkRevision route");
-					}}
+					onPress={() =>
+						networkDetails &&
+						navigation.navigate("NetworkRevision", {
+							networkId: networkDetails.network.id,
+						})
+					}
 				/>
 				<CustomButton
 					title={t("servers")}
@@ -158,6 +157,20 @@ export function NetworkDetailsScreen() {
 					size="thin"
 					onPress={() =>
 						console.log("share network stub", networkDetails?.network.name)
+					}
+				/>
+				{/* Phase 8 plan 08-06 (D-12): STATISTICS entry — navigates to the
+				    standalone NetworkStatisticsScreen (NETUI-05, Figma frame 1425:1448). */}
+				<CustomButton
+					title={t("statistics")}
+					icon="chart-column"
+					backgroundColor={colors.accent}
+					size="thin"
+					onPress={() =>
+						networkDetails &&
+						navigation.navigate("NetworkStatistics", {
+							networkId: networkDetails.network.id,
+						})
 					}
 				/>
 			</View>
