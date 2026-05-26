@@ -22,9 +22,18 @@ interface TaskCardProps {
 	task: ReleaseKeyTask | SignatureTask;
 	onPress?: () => void;
 	showIndicator?: boolean;
+	// Phase 7 additions (07-01 D-02): task-type chip rendered above title
+	chipLabel?: string;
+	chipColor?: string;
 }
 
-export function TaskCard({ task, onPress, showIndicator = true }: TaskCardProps) {
+export function TaskCard({
+	task,
+	onPress,
+	showIndicator = true,
+	chipLabel,
+	chipColor,
+}: TaskCardProps) {
 	const { colors } = useTheme() as ExtendedTheme;
 	const { t } = useTranslation();
 	const [title, setTitle] = useState<string>();
@@ -100,6 +109,11 @@ export function TaskCard({ task, onPress, showIndicator = true }: TaskCardProps)
 		<TouchableOpacity onPress={onPress} style={[styles.card, { backgroundColor: colors.card }]}>
 			{imageUrl && <Image source={{ uri: imageUrl }} style={styles.image} />}
 			<View style={styles.content}>
+				{chipLabel && (
+					<View style={[styles.chip, { backgroundColor: chipColor ?? colors.accent }]}>
+						<ThemedText type="small">{chipLabel.toUpperCase()}</ThemedText>
+					</View>
+				)}
 				<ThemedText type="cardTitle" numberOfLines={1}>
 					{title}
 				</ThemedText>
@@ -158,6 +172,14 @@ const styles = StyleSheet.create({
 		width: 14,
 		height: 14,
 		borderRadius: 7,
+	},
+	chip: {
+		height: 24,
+		paddingHorizontal: 8,
+		borderRadius: 12,
+		alignSelf: "flex-start",
+		justifyContent: "center",
+		marginBottom: 4,
 	},
 });
 
