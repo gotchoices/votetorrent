@@ -52,13 +52,12 @@ export class AuthoritySaveInviteWithSigningBuilder implements IAuthoritySaveInvi
       typeof draft.invite.type !== 'string' ||
       typeof draft.invite.expiration !== 'string' ||
       typeof draft.invite.inviteKey !== 'string' ||
-      typeof draft.invite.inviteSignature !== 'string' ||
-      typeof draft.invite.digest !== 'string'
+      typeof draft.invite.inviteSignature !== 'string'
     ) {
       return [{
         path: 'invite',
         code: 'INVALID',
-        message: 'invite must have type, expiration, inviteKey, inviteSignature, and digest',
+        message: 'invite must have type, expiration, inviteKey, and inviteSignature',
         kind: 'per-setter'
       }]
     }
