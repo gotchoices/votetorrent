@@ -1,7 +1,7 @@
 import { bytesToHex } from '@noble/curves/abstract/utils'
 import { secp256k1 } from '@noble/curves/secp256k1'
 import { sha256 } from '@noble/hashes/sha2'
-import { Digest } from '@optimystic/quereus-plugin-crypto'
+import { digest } from '../database/digest.js'
 import { MisuseError, QuereusError } from '@quereus/quereus'
 import { Temporal } from 'temporal-polyfill'
 import { SigningEngine } from '../signing/signing-engine.js'
@@ -67,10 +67,10 @@ export class AuthorityEngine implements IAuthorityEngine {
       .add({ minutes: this.invitationSpanMinutes })
       .toString()
 
-    // Known divergence (deferred): the digest formula here does not match
-    // the schema's InviteSignatureValid / CidValid. Phase 6 / TEST-01
-    // surfaces the divergence via flow tests. Plan 03-02 hex-encodes
-    // the materials only — formula unchanged.
+    // D-05: digest formula now uses the unified helper (pipe-join, SHA-256,
+    // base64url) matching SQL Digest(). The signing formula below (TextEncoder
+    // + secp256k1.sign) is separate — it validates engine-side via
+    // context.IsSignatureValid, not via SQL Digest constraints (D-06).
     const signedBytes = new TextEncoder().encode(
       init.name + init.title + init.scopes + type + expiration + inviteKey
     )
@@ -85,15 +85,7 @@ export class AuthorityEngine implements IAuthorityEngine {
       inviteKey,
       invitePrivate,
       inviteSignature,
-      digest: Digest(
-        init.name +
-					init.title +
-					init.scopes +
-					type +
-					expiration +
-					inviteKey +
-					inviteSignature
-      ).toString()
+      digest: digest(init.name, init.title, init.scopes, type, expiration, inviteKey, inviteSignature)
     } satisfies OfficerInviteShare
   }
 
@@ -119,9 +111,7 @@ export class AuthorityEngine implements IAuthorityEngine {
       inviteKey,
       invitePrivate,
       inviteSignature,
-      digest: Digest(
-        type + name + expiration + inviteKey + inviteSignature
-      ).toString()
+      digest: digest(type, name, expiration, inviteKey, inviteSignature)
     } satisfies AuthorityInviteShare
   }
 
@@ -402,11 +392,7 @@ export class AuthorityEngine implements IAuthorityEngine {
 
       const signingResult = await this.signingEngine.startSigningSession(
         this.authority.id,
-        Digest(
-          this.authority.id,
-          admin.proposed.effectiveAt,
-          thresholdPoliciesJson
-        ).toString(),
+        digest(this.authority.id, admin.proposed.effectiveAt, thresholdPoliciesJson),
         'rad',
         signature
       )
@@ -481,13 +467,7 @@ export class AuthorityEngine implements IAuthorityEngine {
 						:signingNonce
 						)`,
 				{
-				  cid: Digest(
-				    invite.name,
-				    invite.expiration,
-				    invite.inviteKey,
-				    invite.inviteSignature,
-				    nonce
-				  ).toString(),
+				  cid: digest(invite.name, invite.expiration, invite.inviteKey, invite.inviteSignature, nonce),
 				  type: 'au',
 				  name: invite.name,
 				  expiration: invite.expiration,
@@ -535,14 +515,7 @@ export class AuthorityEngine implements IAuthorityEngine {
 					:signingNonce
 				)`,
 				{
-				  cid: Digest(
-				    invite.type,
-				    invite.name,
-				    invite.expiration,
-				    invite.inviteKey,
-				    invite.inviteSignature,
-				    nonce
-				  ).toString(),
+				  cid: digest(invite.type, invite.name, invite.expiration, invite.inviteKey, invite.inviteSignature, nonce),
 				  type: invite.type,
 				  name: invite.name,
 				  expiration: invite.expiration,
