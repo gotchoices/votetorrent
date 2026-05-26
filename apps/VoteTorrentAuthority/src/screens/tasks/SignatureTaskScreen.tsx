@@ -16,23 +16,28 @@ import { NetworkSignatureTaskDetails } from "./components/NetworkSignatureTaskDe
 import { ElectionSignatureTaskDetails } from "./components/ElectionSignatureTaskDetails";
 import { ElectionRevisionSignatureTaskDetails } from "./components/ElectionRevisionSignatureTaskDetails";
 import { BallotSignatureTaskDetails } from "./components/BallotSignatureTaskDetails";
+import { SignatureTaskFooter } from "./components/SignatureTaskFooter";
 import { useTranslation } from "react-i18next";
-import { ExtendedTheme, useNavigation, useRoute } from "@react-navigation/native";
-import { useTheme } from "@react-navigation/native";
-import { CustomButton } from "../../components/CustomButton";
+import { useNavigation, useRoute } from "@react-navigation/native";
+
+const titleKey: Record<SignatureTask["signatureType"], string> = {
+	admin: "adminRevision",
+	authority: "authorityRevision",
+	network: "networkRevision",
+	election: "electionRevision",
+	"election-revision": "electionRevision",
+	ballot: "ballotRevision",
+};
 
 export default function SignatureTaskScreen() {
 	const { task } = useRoute().params as { task: SignatureTask };
 	const { t } = useTranslation();
-	const { colors } = useTheme() as ExtendedTheme;
 	const navigation = useNavigation();
 	const isNetwork = task.signatureType === "network";
 
 	useLayoutEffect(() => {
-		if (isNetwork) {
-			navigation.setOptions({ title: t("networkRevision") });
-		}
-	}, [isNetwork, navigation, t]);
+		navigation.setOptions({ title: t(titleKey[task.signatureType]) });
+	}, [navigation, t, task.signatureType]);
 
 	const sign = () => {
 		console.log("sign");
@@ -66,26 +71,11 @@ export default function SignatureTaskScreen() {
 					<BallotSignatureTaskDetails task={task as BallotSignatureTask} />
 				)}
 			</ScrollView>
-			<View
-				style={[styles.footer, styles.footerButtonsContainer, { backgroundColor: colors.card }]}
-			>
-				<CustomButton
-					title={isNetwork ? t("accept") : t("sign")}
-					icon="check"
-					backgroundColor={colors.success}
-					size="thin"
-					flex={true}
-					onPress={sign}
-				/>
-				<CustomButton
-					title={t("reject")}
-					icon="xmark"
-					backgroundColor={colors.error}
-					size="thin"
-					flex={true}
-					onPress={reject}
-				/>
-			</View>
+			<SignatureTaskFooter
+				onAccept={sign}
+				onReject={reject}
+				acceptLabel={isNetwork ? t("accept") : t("sign")}
+			/>
 		</View>
 	);
 }
