@@ -265,6 +265,10 @@ const resources = {
 			proposedRevisionBodySecondary: 'You can resend the release request or cancel it.',
 			proposedRevisionResendRequest: 'Resend Request',
 			proposedRevisionCancelRequest: 'Cancel Request',
+			// Phase 8 plan 08-01 — Authorities polish + OfficerCard extraction
+			noAuthorities: 'No authorities',
+			noAuthoritiesHelper: 'Authorities you join or pin will appear here',
+			manageProposal: 'Manage Proposal',
 		},
 	},
 	es: {
@@ -526,6 +530,10 @@ const resources = {
 			proposedRevisionBodySecondary: 'You can resend the release request or cancel it.',
 			proposedRevisionResendRequest: 'Resend Request',
 			proposedRevisionCancelRequest: 'Cancel Request',
+			// Phase 8 plan 08-01 — ES mirrors EN per D-13; proper Spanish in Phase 11
+			noAuthorities: 'No authorities',
+			noAuthoritiesHelper: 'Authorities you join or pin will appear here',
+			manageProposal: 'Manage Proposal',
 		},
 	},
 };
