@@ -17,6 +17,8 @@ const resources = {
 			light: 'Light',
 			english: 'English',
 			recentNetworks: 'Recent Networks',
+			// Phase 8 plan 08-05 (NETUI-01): empty-state hint when no recents.
+			noRecentNetworks: 'No recent networks yet. Find one below to get started.',
 			find: 'Find',
 			scanQrCode: 'Scan QR Code',
 			enterBootstrap: 'Enter Bootstrap (advanced)',
@@ -146,6 +148,8 @@ const resources = {
 			hash: 'Hash',
 			requiredTimestampAuthorities: 'Required Timestamp Authorities',
 			timestampAuthorities: 'Timestamp Authorities',
+			// Phase 8 plan 08-05 (NETUI-02): label used in the Proposed Changes diff row.
+			electionType: 'Election Type',
 			reviseNetwork: 'Revise Network',
 			servers: 'Server(s)',
 			proposedChanges: 'Proposed Changes',
@@ -285,6 +289,8 @@ const resources = {
 			light: 'Claro',
 			english: 'Inglés',
 			recentNetworks: 'Redes Recientes',
+			// Phase 8 plan 08-05 (NETUI-01): empty-state hint when no recents.
+			noRecentNetworks: 'Aún no hay redes recientes. Encuentra una abajo para comenzar.',
 			find: 'Buscar',
 			scanQrCode: 'Escanear Código QR',
 			enterBootstrap: 'Ingresar Bootstrap (avanzado)',
@@ -418,6 +424,8 @@ const resources = {
 			hash: 'Hash',
 			requiredTimestampAuthorities: 'Autoridades de Temporizador Requeridas',
 			timestampAuthorities: 'Autoridades de Temporizador',
+			// Phase 8 plan 08-05 (NETUI-02): label used in the Proposed Changes diff row.
+			electionType: 'Tipo de Elección',
 			reviseNetwork: 'Revisar Red',
 			servers: 'Servidor(es)',
 			proposedChanges: 'Cambios Propuestos',
