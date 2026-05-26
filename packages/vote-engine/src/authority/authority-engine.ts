@@ -1,7 +1,6 @@
 import { bytesToHex } from '@noble/curves/abstract/utils'
 import { secp256k1 } from '@noble/curves/secp256k1'
 import { sha256 } from '@noble/hashes/sha2'
-import { digest } from '../database/digest.js'
 import { MisuseError, QuereusError } from '@quereus/quereus'
 import { Temporal } from 'temporal-polyfill'
 import { SigningEngine } from '../signing/signing-engine.js'
@@ -11,6 +10,7 @@ import type { EngineContext } from '../types.js'
 let nextTid = 1
 import type {
   AdminDetails,
+  AdminDigestArgs,
   AdminInit,
   Officer,
   OfficerInit,
@@ -84,8 +84,7 @@ export class AuthorityEngine implements IAuthorityEngine {
       expiration,
       inviteKey,
       invitePrivate,
-      inviteSignature,
-      digest: digest(init.name, init.title, init.scopes, type, expiration, inviteKey, inviteSignature)
+      inviteSignature
     } satisfies OfficerInviteShare
   }
 
@@ -110,8 +109,7 @@ export class AuthorityEngine implements IAuthorityEngine {
       expiration,
       inviteKey,
       invitePrivate,
-      inviteSignature,
-      digest: digest(type, name, expiration, inviteKey, inviteSignature)
+      inviteSignature
     } satisfies AuthorityInviteShare
   }
 
@@ -390,9 +388,14 @@ export class AuthorityEngine implements IAuthorityEngine {
 				}
       )
 
+      const adminDigestArgs: AdminDigestArgs = {
+        authorityId: this.authority.id,
+        effectiveAt: String(admin.proposed.effectiveAt),
+        thresholdPolicies: thresholdPoliciesJson
+      }
       const signingResult = await this.signingEngine.startSigningSession(
         this.authority.id,
-        digest(this.authority.id, admin.proposed.effectiveAt, thresholdPoliciesJson),
+        adminDigestArgs,
         'rad',
         signature
       )
@@ -425,19 +428,22 @@ export class AuthorityEngine implements IAuthorityEngine {
     scope: Scope, // either 'iad' for authority invites or 'rad' for officer invites
     signature: Signature
   ): Promise<void> {
-    const result = await this.signingEngine.startSigningSession(
-      this.authority.id,
-      invite.digest,
-      scope,
-      signature
-    )
+    // D-19: nonce first, InviteSlots second, AdminSigning (startSigningSession) third
+    const nonce = this.signingEngine.generateSigningNonce()
     if (invite.type === 'au') {
       // assume threshold for authority invites is 1
-      await this.saveAuthorityInvite(invite, result.nonce)
+      await this.saveAuthorityInvite(invite, nonce)
     } else {
       // assume threshold for officer invites is 1
-      await this.saveOfficerInvite(invite, result.nonce)
+      await this.saveOfficerInvite(invite, nonce)
     }
+    await this.signingEngine.startSigningSession(
+      this.authority.id,
+      null,
+      scope,
+      signature,
+      nonce
+    )
   }
 
   private async saveAuthorityInvite (
@@ -458,22 +464,22 @@ export class AuthorityEngine implements IAuthorityEngine {
 					)
 					with context Tid = :tid, now = :now, IsSignatureValid = true, IsInsertValid = true, IsCidValid = true
 					values (
-						:cid,
+						Digest(:expiration, :inviteKey, :inviteSignature, :name, :nonce),
 						:type,
 						:name,
 						:expiration,
 						:inviteKey,
 						:inviteSignature,
-						:signingNonce
+						:nonce
 						)`,
 				{
-				  cid: digest(invite.name, invite.expiration, invite.inviteKey, invite.inviteSignature, nonce),
 				  type: 'au',
 				  name: invite.name,
 				  expiration: invite.expiration,
 				  inviteKey: invite.inviteKey,
 				  inviteSignature: invite.inviteSignature,
-				  signingNonce: nonce, tid: nextTid++,
+				  nonce,
+				  tid: nextTid++,
 				  now: Date.now()
 				}
       )
@@ -506,22 +512,22 @@ export class AuthorityEngine implements IAuthorityEngine {
 					)
 				with context Tid = :tid, now = :now, IsSignatureValid = true, IsInsertValid = true, IsCidValid = true
 				values (
-					:cid,
+					Digest(:expiration, :inviteKey, :inviteSignature, :name, :nonce, :type),
 					:type,
 					:name,
 					:expiration,
 					:inviteKey,
 					:inviteSignature,
-					:signingNonce
+					:nonce
 				)`,
 				{
-				  cid: digest(invite.type, invite.name, invite.expiration, invite.inviteKey, invite.inviteSignature, nonce),
 				  type: invite.type,
 				  name: invite.name,
 				  expiration: invite.expiration,
 				  inviteKey: invite.inviteKey,
 				  inviteSignature: invite.inviteSignature,
-				  signingNonce: nonce, tid: nextTid++,
+				  nonce,
+				  tid: nextTid++,
 				  now: Date.now()
 				}
       )
