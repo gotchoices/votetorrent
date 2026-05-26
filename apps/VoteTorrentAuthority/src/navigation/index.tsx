@@ -84,6 +84,7 @@ function HeaderTitle() {
 function useTabHeaderOptions(tab?: string) {
 	const { colors } = useTheme() as ExtendedTheme;
 	const navigation = useNavigation<NavigationProp>();
+	const { t } = useTranslation();
 
 	const handleNetworkPress = () => {
 		navigation.navigate("Networks");
@@ -101,7 +102,7 @@ function useTabHeaderOptions(tab?: string) {
 			</Pressable>
 		),
 		headerTitle: () =>
-			tab === "tasks" ? <ThemedText type="header">{"All Networks"}</ThemedText> : <HeaderTitle />,
+			tab === "tasks" ? <ThemedText type="header">{t("allNetworks")}</ThemedText> : <HeaderTitle />,
 		headerShadowVisible: true,
 	};
 }
