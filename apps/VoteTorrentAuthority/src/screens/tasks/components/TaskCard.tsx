@@ -57,7 +57,7 @@ export function TaskCard({
 					case "admin":
 						tempTask = task as AdminSignatureTask;
 						setTitle(tempTask.authority.name);
-						setSubtitle(t("administrationRevision"));
+						setSubtitle(t("adminRevision"));
 						setImageUrl(tempTask.authority.imageRef?.url);
 						setNetworkName(tempTask.network.name);
 						break;
