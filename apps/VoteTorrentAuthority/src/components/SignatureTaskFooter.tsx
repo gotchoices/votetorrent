@@ -1,8 +1,8 @@
 import { View, StyleSheet } from "react-native";
 import { ExtendedTheme, useTheme } from "@react-navigation/native";
 import { useTranslation } from "react-i18next";
-import { CustomButton } from "../../../components/CustomButton";
-import { globalStyles } from "../../../theme/styles";
+import { CustomButton } from "./CustomButton";
+import { globalStyles } from "../theme/styles";
 
 export interface SignatureTaskFooterProps {
 	onAccept: () => void;

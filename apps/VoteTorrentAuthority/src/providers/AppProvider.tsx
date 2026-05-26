@@ -10,6 +10,7 @@ import {
 	MockOnboardingTasksEngine,
 	MockElectionsEngine,
 	MockElectionEngine,
+	MockInvitationEngine,
 } from "@votetorrent/vote-engine";
 import { ActivityIndicator, View } from "react-native";
 import { hideSplash } from "react-native-splash-view";
@@ -77,6 +78,9 @@ export function AppProvider({ children }: PropsWithChildren) {
 						break;
 					case "elections":
 						engine = new MockElectionsEngine();
+						break;
+					case "invitations":
+						engine = new MockInvitationEngine();
 						break;
 					case "election":
 						engine = new MockElectionEngine();

@@ -1,4 +1,5 @@
 import type { UserInit } from '../index.js'
+import type { SentOfficerInvite, SentAuthorityInvite } from '../authority/models.js'
 
 export interface Invite {
   /** The type of the invitation */
@@ -91,3 +92,24 @@ export interface InviteAction<TInvokes> {
 
 /** "au" for authority, "of" for officer, "k" for keyholder, "r" for registrant */
 export type InviteType = 'au' | 'of' | 'k' | 'r'
+
+/**
+ * Engine surface for invitation read + respond flows (D-10).
+ * Mocks-only in v1.1; real implementation lands in a later milestone.
+ */
+export interface IInvitationEngine {
+  /** Pending officer (administrator) invites the current user has sent or received. */
+  getPendingOfficerInvites(): Promise<Array<InviteStatus<SentOfficerInvite>>>
+
+  /** Pending authority invites the current user has sent or received. */
+  getPendingAuthorityInvites(): Promise<Array<InviteStatus<SentAuthorityInvite>>>
+
+  /** Fetch a single officer invite by id, or undefined if not found. */
+  getOfficerInvite(id: string): Promise<InviteStatus<SentOfficerInvite> | undefined>
+
+  /** Fetch a single authority invite by id, or undefined if not found. */
+  getAuthorityInvite(id: string): Promise<InviteStatus<SentAuthorityInvite> | undefined>
+
+  /** Respond to an invite — accept (true) or decline (false). */
+  respondToInvite(invitationId: string, accept: boolean): Promise<void>
+}

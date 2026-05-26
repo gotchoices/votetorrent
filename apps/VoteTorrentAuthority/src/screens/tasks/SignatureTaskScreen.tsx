@@ -16,7 +16,7 @@ import { NetworkSignatureTaskDetails } from "./components/NetworkSignatureTaskDe
 import { ElectionSignatureTaskDetails } from "./components/ElectionSignatureTaskDetails";
 import { ElectionRevisionSignatureTaskDetails } from "./components/ElectionRevisionSignatureTaskDetails";
 import { BallotSignatureTaskDetails } from "./components/BallotSignatureTaskDetails";
-import { SignatureTaskFooter } from "./components/SignatureTaskFooter";
+import { SignatureTaskFooter } from "../../components/SignatureTaskFooter";
 import { useTranslation } from "react-i18next";
 import { useNavigation, useRoute } from "@react-navigation/native";
 

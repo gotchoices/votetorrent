@@ -279,6 +279,15 @@ const resources = {
 			// Fallback for missing scopeDescriptions[rnp] (vote-core defines 8/9 — D-03)
 			scope_rnp: 'Revise Network Policies',
 			loading: 'Loading...',
+			// Phase 8 plan 08-03 — OfficerDetails + Invitation screens (AUTHUI-04, 05, 06)
+			administrator: 'Administrator',
+			administratorInvitation: 'Administrator Invitation',
+			authorityInvitation: 'Authority Invitation',
+			sendInvitation: 'Send Invitation',
+			invitation: 'Invitation',
+			send: 'Send',
+			decline: 'Decline',
+			userId: 'User ID',
 		},
 	},
 	es: {
@@ -553,6 +562,15 @@ const resources = {
 			addAdministrator: 'Add Administrator',
 			scope_rnp: 'Revise Network Policies',
 			loading: 'Loading...',
+			// Phase 8 plan 08-03 — ES mirrors EN per D-13; proper Spanish in Phase 11
+			administrator: 'Administrator',
+			administratorInvitation: 'Administrator Invitation',
+			authorityInvitation: 'Authority Invitation',
+			sendInvitation: 'Send Invitation',
+			invitation: 'Invitation',
+			send: 'Send',
+			decline: 'Decline',
+			userId: 'User ID',
 		},
 	},
 };
