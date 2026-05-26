@@ -6,6 +6,7 @@ import { ElectionType, UserKeyType } from '@votetorrent/vote-core'
 import { expect } from 'chai'
 import { AuthorityEngine } from '../src/authority/authority-engine'
 import { prepareDb } from '../src/database/initialize'
+import { digest } from '../src/database/digest'
 import { NetworksEngine } from '../src/networks/networks-engine'
 import type { EngineContext } from '../src/types.js'
 import { randomTestKeyPair } from './fixtures/keys.js'
@@ -569,7 +570,7 @@ describe('AuthorityEngine', () => {
       // CONTEXT.md <deferred>.
       const { authorityEngine } = await makeDbOnlyAuthorityEngine()
       const invite = authorityEngine.createOfficerInvite(officerInit)
-      expect(invite.digest).to.be.a('string').with.length.greaterThan(0)
+      expect(invite.digest).to.match(/^[A-Za-z0-9_-]{43}$/)
     })
   })
 
@@ -616,7 +617,7 @@ describe('AuthorityEngine', () => {
     it('should compute a non-empty digest over the invite fields', async () => {
       const { authorityEngine } = await makeDbOnlyAuthorityEngine()
       const invite = authorityEngine.createAuthorityInvite('InviteCorp')
-      expect(invite.digest).to.be.a('string').with.length.greaterThan(0)
+      expect(invite.digest).to.match(/^[A-Za-z0-9_-]{43}$/)
     })
   })
 

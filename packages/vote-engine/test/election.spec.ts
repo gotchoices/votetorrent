@@ -17,6 +17,7 @@ import { ElectionInviteKeyholderBuilder } from '../src/election/builders/electio
 import { ElectionRevokeKeyholderBuilder } from '../src/election/builders/election-revoke-keyholder-builder.js'
 import { ElectionEngine } from '../src/election/election-engine.js'
 import { MockElectionEngine } from '../src/election/mock-election-engine.js'
+import { digest } from '../src/database/digest'
 import type {
   Ballot,
   ElectionRevisionInit,
@@ -97,7 +98,7 @@ function makeKeyholderInvite (overrides?: Partial<KeyholderInvite>): KeyholderIn
     expiration: '0',
     inviteKey: 'k'.repeat(66),
     inviteSignature: 's'.repeat(128),
-    digest: 'd'.repeat(64),
+    digest: digest('test-keyholder-invite'),
     ...overrides
   } as KeyholderInvite
 }

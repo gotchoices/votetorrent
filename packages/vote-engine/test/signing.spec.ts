@@ -6,6 +6,7 @@ import {
 } from '@votetorrent/vote-core'
 import { expect } from 'chai'
 import { prepareDb } from '../src/database/initialize'
+import { digest } from '../src/database/digest'
 import { NetworksEngine } from '../src/networks/networks-engine'
 import { SigningEngine } from '../src/signing/signing-engine'
 import { MockSigningEngine } from '../src/signing/mock-signing-engine'
@@ -120,6 +121,9 @@ function makeSignature (signerUserId: string): Signature {
 // SigningEngine — TEST-02
 // ===========================================================================
 
+// D-11: real computed digest replacing placeholder 'd'.repeat(64)
+const testDigest = digest('test-authority', 'test-effective-at', '[]')
+
 describe('SigningEngine', () => {
   // -----------------------------------------------------------------------
   // AUTH-08 — startSigningSession
@@ -137,7 +141,7 @@ describe('SigningEngine', () => {
       try {
         await engine.startSigningSession(
           'unknown-authority-id',
-          'd'.repeat(64),
+          testDigest,
           'rad',
           sig
         )
@@ -166,7 +170,7 @@ describe('SigningEngine', () => {
       }
       const result = await engine.startSigningSession(
         authorityId,
-        'd'.repeat(64),
+        testDigest,
         'rad',
         sig
       )
@@ -187,7 +191,7 @@ describe('SigningEngine', () => {
         signerKey: user.activeKeys[0]!.key,
         signature: 'a'.repeat(128)
       }
-      const digest = 'd'.repeat(64)
+      const digest = testDigest
       const { nonce } = await engine.startSigningSession(
         authorityId,
         digest,
@@ -222,7 +226,7 @@ describe('SigningEngine', () => {
       try {
         await engine.startSigningSession(
           authorityId,
-          'd'.repeat(64),
+          testDigest,
           'xx' as unknown as Scope,
           sig
         )
@@ -312,7 +316,7 @@ describe('SigningEngine', () => {
         signature: 'a'.repeat(128)
       }
       // Create an AdminSigning session first so sign() has a row to read scope from
-      const { nonce } = await engine.startSigningSession(authorityId, 'd'.repeat(64), 'rad', sig)
+      const { nonce } = await engine.startSigningSession(authorityId, testDigest, 'rad', sig)
       // sign() with the nonce from startSigningSession (which already called sign internally)
       // The OfficerSignature row should exist from startSigningSession's internal sign() call
       const row = await ctx.db
@@ -336,7 +340,7 @@ describe('SigningEngine', () => {
         signature: 'a'.repeat(128)
       }
       // startSigningSession creates AdminSigning + calls sign() internally
-      const { nonce, thresholdReached } = await engine.startSigningSession(authorityId, 'd'.repeat(64), 'rad', sig)
+      const { nonce, thresholdReached } = await engine.startSigningSession(authorityId, testDigest, 'rad', sig)
       expect(thresholdReached).to.equal(true)
       const row = await ctx.db
         .prepare(
@@ -360,7 +364,7 @@ describe('SigningEngine', () => {
         signature: 'a'.repeat(128)
       }
       // startSigningSession creates AdminSigning + calls sign() internally
-      const { nonce, thresholdReached: first } = await engine.startSigningSession(authorityId, 'd'.repeat(64), 'rad', sig)
+      const { nonce, thresholdReached: first } = await engine.startSigningSession(authorityId, testDigest, 'rad', sig)
       expect(first).to.equal(true)
       // Second sign() with the same nonce — OfficerSignature PK collision
       // is expected. D-17 handles AdminSignature idempotency, but the
@@ -396,7 +400,7 @@ describe('SigningEngine', () => {
       }
       const { nonce, thresholdReached } = await engine.startSigningSession(
         authorityId,
-        'd'.repeat(64),
+        testDigest,
         'rad',
         sig
       )
@@ -425,7 +429,7 @@ describe('SigningEngine', () => {
       const sig = makeSignature('user-1')
       let caught: unknown
       try {
-        await engine.startSigningSession('aid', 'd'.repeat(64), 'rad', sig)
+        await engine.startSigningSession('aid', testDigest, 'rad', sig)
       } catch (err) {
         caught = err
       }
@@ -607,7 +611,7 @@ describe('SigningStartSigningSessionBuilder', () => {
     b = b.setAuthorityId('auth-1')
     expect(b.missingFields().length).to.equal(3)
 
-    b = b.setDigest('d'.repeat(64))
+    b = b.setDigest(testDigest)
     expect(b.missingFields().length).to.equal(2)
 
     b = b.setScope('rad')
@@ -621,7 +625,7 @@ describe('SigningStartSigningSessionBuilder', () => {
   it('SC4 DB-FREE: isValid===true => commit() returns SigningResult AND double-commit sync-guard', async () => {
     const builder = new SigningStartSigningSessionBuilder(makeStubSigningEngine())
       .setAuthorityId('auth-1')
-      .setDigest('d'.repeat(64))
+      .setDigest(testDigest)
       .setScope('rad')
       .setSignature(makeTestSignature())
 
@@ -642,7 +646,7 @@ describe('SigningStartSigningSessionBuilder', () => {
     const engine = makeStubSigningEngine()
     const builder = new SigningStartSigningSessionBuilder(engine)
       .setAuthorityId('auth-1')
-      .setDigest('d'.repeat(64))
+      .setDigest(testDigest)
       .setScope('rad')
       .setSignature(makeTestSignature())
 
@@ -668,7 +672,7 @@ describe('SigningStartSigningSessionBuilder', () => {
 
     const complete = builder
       .setAuthorityId('auth-1')
-      .setDigest('d'.repeat(64))
+      .setDigest(testDigest)
       .setScope('rad')
       .setSignature(makeTestSignature())
     const input = complete.toEngineInput()
