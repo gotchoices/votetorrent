@@ -184,7 +184,7 @@ export default function AddNetworkScreen() {
 					icon="floppy-disk"
 					backgroundColor={colors.success}
 					forceDarkText={true}
-					onPress={() => console.log("Create network")}
+					onPress={() => console.log("createNetwork stub")}
 				/>
 			</View>
 		</View>
