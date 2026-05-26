@@ -8,7 +8,6 @@ import {
 } from '@votetorrent/vote-core'
 import { expect } from 'chai'
 import { prepareDb } from '../src/database/initialize'
-import { digest } from '../src/database/digest'
 import { ElectionEngine } from '../src/election/election-engine'
 import { ElectionsEngine } from '../src/elections/elections-engine'
 import { ElectionsCreateElectionBuilder } from '../src/elections/builders/elections-create-election-builder.js'
@@ -548,7 +547,6 @@ describe('ElectionEngine', () => {
         expiration: '0',
         inviteKey: 'k'.repeat(66),
         inviteSignature: 's'.repeat(128),
-        digest: digest('test-keyholder-invite')
       }
       await engine.inviteKeyholder(kh, 'election-1')
       const row = await ctx.db
@@ -574,7 +572,6 @@ describe('ElectionEngine', () => {
         expiration: '0',
         inviteKey: 'k'.repeat(66),
         inviteSignature: 's'.repeat(128),
-        digest: digest('test-keyholder-invite')
       }
       await engine.revokeKeyholder(kh, 'election-1')
       const row = await ctx.db

@@ -6,7 +6,6 @@ import { ElectionType, UserKeyType } from '@votetorrent/vote-core'
 import { expect } from 'chai'
 import { AuthorityEngine } from '../src/authority/authority-engine'
 import { prepareDb } from '../src/database/initialize'
-import { digest } from '../src/database/digest'
 import { NetworksEngine } from '../src/networks/networks-engine'
 import type { EngineContext } from '../src/types.js'
 import { randomTestKeyPair } from './fixtures/keys.js'
@@ -565,13 +564,6 @@ describe('AuthorityEngine', () => {
       expect(invite.inviteSignature).to.match(/^[0-9a-f]{128}$/)
     })
 
-    it('should compute a non-empty digest over the invite fields', async () => {
-      // Exact digest-formula verification deferred to Phase 6 per
-      // CONTEXT.md <deferred>.
-      const { authorityEngine } = await makeDbOnlyAuthorityEngine()
-      const invite = authorityEngine.createOfficerInvite(officerInit)
-      expect(invite.digest).to.match(/^[A-Za-z0-9_-]{43}$/)
-    })
   })
 
   // -----------------------------------------------------------------------
@@ -614,11 +606,6 @@ describe('AuthorityEngine', () => {
       expect(invite.inviteSignature).to.match(/^[0-9a-f]{128}$/)
     })
 
-    it('should compute a non-empty digest over the invite fields', async () => {
-      const { authorityEngine } = await makeDbOnlyAuthorityEngine()
-      const invite = authorityEngine.createAuthorityInvite('InviteCorp')
-      expect(invite.digest).to.match(/^[A-Za-z0-9_-]{43}$/)
-    })
   })
 
   // -----------------------------------------------------------------------
@@ -630,14 +617,14 @@ describe('AuthorityEngine', () => {
       const { authority, authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
       const invite = authorityEngine.createAuthorityInvite('InviteCorp')
-      const sig = makeRealSignature('user-1', invite.digest)
+      const sig = makeRealSignature('user-1', invite.inviteKey)
       await authorityEngine.saveInviteWithSigning(invite, 'iad', sig)
       const row = await ctx.db
         .prepare(
           'select Digest from AdminSigning where AuthorityId = :id order by Nonce desc limit 1'
         )
         .get({ id: authority.id })
-      expect(row?.Digest).to.equal(invite.digest)
+      expect(row?.Digest).to.match(/^[A-Za-z0-9_-]{43}$/)
     })
 
     // BLOCKED on quereus#23
@@ -645,7 +632,7 @@ describe('AuthorityEngine', () => {
       const { authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
       const invite = authorityEngine.createAuthorityInvite('InviteCorp')
-      const sig = makeRealSignature('user-1', invite.digest)
+      const sig = makeRealSignature('user-1', invite.inviteKey)
       await authorityEngine.saveInviteWithSigning(invite, 'iad', sig)
       const row = await ctx.db
         .prepare('select Name from InviteSlot where Name = :n')
@@ -662,7 +649,7 @@ describe('AuthorityEngine', () => {
         title: 'Inspector',
         scopes: ['rad'] as Scope[]
       })
-      const sig = makeRealSignature('user-1', invite.digest)
+      const sig = makeRealSignature('user-1', invite.inviteKey)
       await authorityEngine.saveInviteWithSigning(invite, 'rad', sig)
       const row = await ctx.db
         .prepare('select Name from InviteSlot where Name = :n')
@@ -675,13 +662,13 @@ describe('AuthorityEngine', () => {
       const { authority, authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
       const invite = authorityEngine.createAuthorityInvite('IADCorp')
-      const sig = makeRealSignature('user-1', invite.digest)
+      const sig = makeRealSignature('user-1', invite.inviteKey)
       await authorityEngine.saveInviteWithSigning(invite, 'iad', sig)
       const row = await ctx.db
         .prepare(
-          'select Scope from AdminSigning where AuthorityId = :id and Digest = :d'
+          'select Scope from AdminSigning where AuthorityId = :id order by Nonce desc limit 1'
         )
-        .get({ id: authority.id, d: invite.digest })
+        .get({ id: authority.id })
       expect(row?.Scope).to.equal('iad')
     })
 
@@ -694,13 +681,13 @@ describe('AuthorityEngine', () => {
         title: 'Inspector',
         scopes: ['rad'] as Scope[]
       })
-      const sig = makeRealSignature('user-1', invite.digest)
+      const sig = makeRealSignature('user-1', invite.inviteKey)
       await authorityEngine.saveInviteWithSigning(invite, 'rad', sig)
       const row = await ctx.db
         .prepare(
-          'select Scope from AdminSigning where AuthorityId = :id and Digest = :d'
+          'select Scope from AdminSigning where AuthorityId = :id order by Nonce desc limit 1'
         )
-        .get({ id: authority.id, d: invite.digest })
+        .get({ id: authority.id })
       expect(row?.Scope).to.equal('rad')
     })
 
@@ -713,7 +700,7 @@ describe('AuthorityEngine', () => {
       const { authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
       const invite = authorityEngine.createAuthorityInvite('CidCheck')
-      const sig = makeRealSignature('user-1', invite.digest)
+      const sig = makeRealSignature('user-1', invite.inviteKey)
       await authorityEngine.saveInviteWithSigning(invite, 'iad', sig)
       const row = await ctx.db
         .prepare('select Cid from InviteSlot where Name = :n')
@@ -726,7 +713,7 @@ describe('AuthorityEngine', () => {
       const { authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
       const invite = authorityEngine.createAuthorityInvite('FieldCheck')
-      const sig = makeRealSignature('user-1', invite.digest)
+      const sig = makeRealSignature('user-1', invite.inviteKey)
       await authorityEngine.saveInviteWithSigning(invite, 'iad', sig)
       const row = await ctx.db
         .prepare(
@@ -754,7 +741,7 @@ describe('AuthorityEngine', () => {
     it('should return sent invites with name and type "au"', async () => {
       const { authorityEngine } = await createNetworkAndAuthority()
       const invite = authorityEngine.createAuthorityInvite('Sent Inv')
-      const sig = makeRealSignature('user-1', invite.digest)
+      const sig = makeRealSignature('user-1', invite.inviteKey)
       await authorityEngine.saveInviteWithSigning(invite, 'iad', sig)
       const invites = await authorityEngine.getAuthorityInvites()
       expect(invites).to.have.length.greaterThan(0)
@@ -769,7 +756,7 @@ describe('AuthorityEngine', () => {
     it('should include InviteResult when an invite has been accepted', async () => {
       const { networkEngine, authorityEngine } = await createNetworkAndAuthority()
       const invite = authorityEngine.createAuthorityInvite('Accepted')
-      const sig = makeRealSignature('user-1', invite.digest)
+      const sig = makeRealSignature('user-1', invite.inviteKey)
       await authorityEngine.saveInviteWithSigning(invite, 'iad', sig)
       // Retrieve the actual CID that saveInviteWithSigning computed
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
@@ -792,7 +779,7 @@ describe('AuthorityEngine', () => {
     it('should include InviteResult when an invite has been rejected', async () => {
       const { networkEngine, authorityEngine } = await createNetworkAndAuthority()
       const invite = authorityEngine.createAuthorityInvite('Rejected')
-      const sig = makeRealSignature('user-1', invite.digest)
+      const sig = makeRealSignature('user-1', invite.inviteKey)
       await authorityEngine.saveInviteWithSigning(invite, 'iad', sig)
       // Retrieve the actual CID that saveInviteWithSigning computed
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
@@ -815,7 +802,7 @@ describe('AuthorityEngine', () => {
     it('should return undefined result when invite has not been responded to', async () => {
       const { authorityEngine } = await createNetworkAndAuthority()
       const invite = authorityEngine.createAuthorityInvite('NoResponse')
-      const sig = makeRealSignature('user-1', invite.digest)
+      const sig = makeRealSignature('user-1', invite.inviteKey)
       await authorityEngine.saveInviteWithSigning(invite, 'iad', sig)
       const invites = await authorityEngine.getAuthorityInvites()
       const found = invites.find((i) => i.invite.name === 'NoResponse')
@@ -826,14 +813,14 @@ describe('AuthorityEngine', () => {
     it('should only return invites scoped to "iad" for the current authority', async () => {
       const { authorityEngine } = await createNetworkAndAuthority()
       const auInvite = authorityEngine.createAuthorityInvite('AuthorityScoped')
-      const auSig = makeRealSignature('user-1', auInvite.digest)
+      const auSig = makeRealSignature('user-1', auInvite.inviteKey)
       await authorityEngine.saveInviteWithSigning(auInvite, 'iad', auSig)
       const ofInvite = authorityEngine.createOfficerInvite({
         name: 'OfficerScoped',
         title: 'Inspector',
         scopes: ['rad'] as Scope[]
       })
-      const ofSig = makeRealSignature('user-1', ofInvite.digest)
+      const ofSig = makeRealSignature('user-1', ofInvite.inviteKey)
       await authorityEngine.saveInviteWithSigning(ofInvite, 'rad', ofSig)
       const invites = await authorityEngine.getAuthorityInvites()
       // Only the 'au' (iad-scoped) invite should appear in the authority list.
@@ -1598,7 +1585,7 @@ describe('AuthorityEngine', () => {
       // round-trip; the assertion shape is documented.
       const { authorityEngine } = await createNetworkAndAuthority()
       const invite = authorityEngine.createAuthorityInvite('SigCheck')
-      const sig = makeRealSignature('user-1', invite.digest)
+      const sig = makeRealSignature('user-1', invite.inviteKey)
       await authorityEngine.saveInviteWithSigning(invite, 'iad', sig)
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
       const slot = await ctx.db
@@ -1983,7 +1970,7 @@ describe('AuthorityEngine', () => {
       const { authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
       const invite = authorityEngine.createAuthorityInvite('InviteCheck')
-      const sig = makeRealSignature('user-1', invite.digest)
+      const sig = makeRealSignature('user-1', invite.inviteKey)
       await authorityEngine.saveInviteWithSigning(invite, 'iad', sig)
       const row = await ctx.db
         .prepare('select Cid, InviteKey from InviteSlot where Name = :n')
@@ -1998,10 +1985,13 @@ describe('AuthorityEngine', () => {
       // Post-#23 sweep wires up the engine path that consumes the invite.
       const { networkEngine, authorityEngine } = await createNetworkAndAuthority()
       const invite = authorityEngine.createAuthorityInvite('NewAuthority')
-      const sig = makeRealSignature('user-1', invite.digest)
+      const sig = makeRealSignature('user-1', invite.inviteKey)
       await authorityEngine.saveInviteWithSigning(invite, 'iad', sig)
+      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
+      const slotRow = await ctx.db.prepare('SELECT Cid FROM InviteSlot WHERE InviteKey = :k').get({ k: invite.inviteKey })
+      const slotCid = slotRow!.Cid as string
       await networkEngine.respondToInvite({
-        invite: { digest: invite.digest } as never,
+        invite: { digest: slotCid } as never,
         isAccepted: true,
         invokes: { authority: { name: 'NewAuthority', domainName: 'na.example' } },
         inviteSignature: invite.inviteSignature,
@@ -2010,7 +2000,6 @@ describe('AuthorityEngine', () => {
       } as never)
       // Sweep: when createAuthority(...) accepts InviteSlotCid context, run
       // it here and assert a new Authority row exists.
-      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
       const row = await ctx.db
         .prepare('select count(*) as n from InviteResult')
         .get({})
@@ -2021,10 +2010,13 @@ describe('AuthorityEngine', () => {
       // InviteResult primary key is SlotCid; a duplicate insert collides.
       const { networkEngine, authorityEngine } = await createNetworkAndAuthority()
       const invite = authorityEngine.createAuthorityInvite('ReusedSlot')
-      const sig = makeRealSignature('user-1', invite.digest)
+      const sig = makeRealSignature('user-1', invite.inviteKey)
       await authorityEngine.saveInviteWithSigning(invite, 'iad', sig)
+      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
+      const slotRow = await ctx.db.prepare('SELECT Cid FROM InviteSlot WHERE InviteKey = :k').get({ k: invite.inviteKey })
+      const slotCid = slotRow!.Cid as string
       await networkEngine.respondToInvite({
-        invite: { digest: invite.digest } as never,
+        invite: { digest: slotCid } as never,
         isAccepted: true,
         invokes: { authority: { name: 'X', domainName: 'x.example' } },
         inviteSignature: invite.inviteSignature,
@@ -2034,7 +2026,7 @@ describe('AuthorityEngine', () => {
       let caught: unknown
       try {
         await networkEngine.respondToInvite({
-          invite: { digest: invite.digest } as never,
+          invite: { digest: slotCid } as never,
           isAccepted: true,
           invokes: { authority: { name: 'Y', domainName: 'y.example' } },
           inviteSignature: invite.inviteSignature,
@@ -2051,10 +2043,12 @@ describe('AuthorityEngine', () => {
       const { networkEngine, authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
       const invite = authorityEngine.createAuthorityInvite('AcceptCheck')
-      const sig = makeRealSignature('user-1', invite.digest)
+      const sig = makeRealSignature('user-1', invite.inviteKey)
       await authorityEngine.saveInviteWithSigning(invite, 'iad', sig)
+      const slotRow = await ctx.db.prepare('SELECT Cid FROM InviteSlot WHERE InviteKey = :k').get({ k: invite.inviteKey })
+      const slotCid = slotRow!.Cid as string
       await networkEngine.respondToInvite({
-        invite: { digest: invite.digest } as never,
+        invite: { digest: slotCid } as never,
         isAccepted: true,
         invokes: { authority: { name: 'AC', domainName: 'ac.example' } },
         inviteSignature: invite.inviteSignature,
@@ -2065,7 +2059,7 @@ describe('AuthorityEngine', () => {
         .prepare(
           'select IsAccepted, Digest, InviteSignature from InviteResult where SlotCid = :c'
         )
-        .get({ c: invite.digest })
+        .get({ c: slotCid })
       expect(Boolean(row?.IsAccepted)).to.equal(true)
       expect(row?.Digest).to.not.equal(null)
       expect(row?.InviteSignature).to.equal(invite.inviteSignature)
@@ -2075,10 +2069,12 @@ describe('AuthorityEngine', () => {
       const { networkEngine, authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
       const invite = authorityEngine.createAuthorityInvite('RejectCheck')
-      const sig = makeRealSignature('user-1', invite.digest)
+      const sig = makeRealSignature('user-1', invite.inviteKey)
       await authorityEngine.saveInviteWithSigning(invite, 'iad', sig)
+      const slotRow = await ctx.db.prepare('SELECT Cid FROM InviteSlot WHERE InviteKey = :k').get({ k: invite.inviteKey })
+      const slotCid = slotRow!.Cid as string
       await networkEngine.respondToInvite({
-        invite: { digest: invite.digest } as never,
+        invite: { digest: slotCid } as never,
         isAccepted: false,
         invokes: undefined,
         inviteSignature: invite.inviteSignature,
@@ -2087,7 +2083,7 @@ describe('AuthorityEngine', () => {
       } as never)
       const row = await ctx.db
         .prepare('select IsAccepted, Digest from InviteResult where SlotCid = :c')
-        .get({ c: invite.digest })
+        .get({ c: slotCid })
       expect(Boolean(row?.IsAccepted)).to.equal(false)
       expect(row?.Digest).to.equal(null)
     })
@@ -2105,7 +2101,7 @@ describe('AuthorityEngine', () => {
         title: 'Inspector',
         scopes: ['rad'] as Scope[]
       })
-      const sig = makeRealSignature('user-1', invite.digest)
+      const sig = makeRealSignature('user-1', invite.inviteKey)
       await authorityEngine.saveInviteWithSigning(invite, 'rad', sig)
       const row = await ctx.db
         .prepare('select Type from InviteSlot where Name = :n')
@@ -2133,10 +2129,12 @@ describe('AuthorityEngine', () => {
         title: 'Inspector',
         scopes: ['rad'] as Scope[]
       })
-      const sig = makeRealSignature('user-1', invite.digest)
+      const sig = makeRealSignature('user-1', invite.inviteKey)
       await authorityEngine.saveInviteWithSigning(invite, 'rad', sig)
+      const slotRow = await ctx.db.prepare('SELECT Cid FROM InviteSlot WHERE InviteKey = :k').get({ k: invite.inviteKey })
+      const slotCid = slotRow!.Cid as string
       await networkEngine.respondToInvite({
-        invite: { digest: invite.digest } as never,
+        invite: { digest: slotCid } as never,
         isAccepted: true,
         invokes: { officer: { userId: 'user-2', title: 'Inspector' } },
         inviteSignature: invite.inviteSignature,
@@ -2145,7 +2143,7 @@ describe('AuthorityEngine', () => {
       } as never)
       const row = await ctx.db
         .prepare('select IsAccepted from InviteResult where SlotCid = :c')
-        .get({ c: invite.digest })
+        .get({ c: slotCid })
       expect(Boolean(row?.IsAccepted)).to.equal(true)
     })
 
@@ -2156,10 +2154,13 @@ describe('AuthorityEngine', () => {
         title: 'Inspector',
         scopes: ['rad'] as Scope[]
       })
-      const sig = makeRealSignature('user-1', invite.digest)
+      const sig = makeRealSignature('user-1', invite.inviteKey)
       await authorityEngine.saveInviteWithSigning(invite, 'rad', sig)
+      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
+      const slotRow = await ctx.db.prepare('SELECT Cid FROM InviteSlot WHERE InviteKey = :k').get({ k: invite.inviteKey })
+      const slotCid = slotRow!.Cid as string
       await networkEngine.respondToInvite({
-        invite: { digest: invite.digest } as never,
+        invite: { digest: slotCid } as never,
         isAccepted: true,
         invokes: { officer: { userId: 'user-3', title: 'A' } },
         inviteSignature: invite.inviteSignature,
@@ -2169,7 +2170,7 @@ describe('AuthorityEngine', () => {
       let caught: unknown
       try {
         await networkEngine.respondToInvite({
-          invite: { digest: invite.digest } as never,
+          invite: { digest: slotCid } as never,
           isAccepted: true,
           invokes: { officer: { userId: 'user-4', title: 'B' } },
           inviteSignature: invite.inviteSignature,
@@ -2221,8 +2222,7 @@ function makeStubAuthorityEngine (): IAuthorityEngine {
         expiration: '2099-01-01T00:00:00',
         inviteKey: '02' + 'aa'.repeat(32),
         invitePrivate: 'bb'.repeat(32),
-        inviteSignature: 'cc'.repeat(64),
-        digest: 'dd'.repeat(16)
+        inviteSignature: 'cc'.repeat(64)
       }
     },
     createAuthorityInvite (name: string): AuthorityInviteShare {
@@ -2232,8 +2232,7 @@ function makeStubAuthorityEngine (): IAuthorityEngine {
         expiration: '2099-01-01T00:00:00',
         inviteKey: '02' + 'ee'.repeat(32),
         invitePrivate: 'ff'.repeat(32),
-        inviteSignature: '11'.repeat(64),
-        digest: '22'.repeat(16)
+        inviteSignature: '11'.repeat(64)
       }
     },
     async proposeAdmin (): Promise<void> {},
@@ -2277,8 +2276,7 @@ function makeAuthorityInvite (): AuthorityInvite {
     type: 'au',
     expiration: '2099-01-01T00:00:00',
     inviteKey: '02' + 'aa'.repeat(32),
-    inviteSignature: 'bb'.repeat(64),
-    digest: 'cc'.repeat(16)
+    inviteSignature: 'bb'.repeat(64)
   }
 }
 

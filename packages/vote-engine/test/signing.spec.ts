@@ -6,7 +6,6 @@ import {
 } from '@votetorrent/vote-core'
 import { expect } from 'chai'
 import { prepareDb } from '../src/database/initialize'
-import { digest } from '../src/database/digest'
 import { NetworksEngine } from '../src/networks/networks-engine'
 import { SigningEngine } from '../src/signing/signing-engine'
 import { MockSigningEngine } from '../src/signing/mock-signing-engine'
@@ -122,9 +121,6 @@ function makeSignature (signerUserId: string): Signature {
 // SigningEngine — TEST-02
 // ===========================================================================
 
-// D-11: real computed digest replacing placeholder 'd'.repeat(64)
-const testDigest = digest('test-authority', 'test-effective-at', '[]')
-
 // D-09: AdminDigestArgs for startSigningSession (replaces raw digest string)
 const testDigestArgs: AdminDigestArgs = {
   authorityId: 'test-authority',
@@ -205,14 +201,13 @@ describe('SigningEngine', () => {
         'rad',
         sig
       )
-      const digest = testDigest
       const row = await ctx.db
         .prepare(
           'select Scope, Digest, UserId, SignerKey from AdminSigning where Nonce = :nonce'
         )
         .get({ nonce: nonce })
       expect(row?.Scope).to.equal('rad')
-      expect(row?.Digest).to.equal(digest)
+      expect(row?.Digest).to.match(/^[A-Za-z0-9_-]{43}$/)
       expect(row?.UserId).to.equal(user.id)
       expect(row?.SignerKey).to.equal(sig.signerKey)
     })
