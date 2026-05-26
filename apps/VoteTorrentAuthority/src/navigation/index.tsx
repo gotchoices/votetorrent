@@ -7,6 +7,8 @@ import type { RootStackParamList } from "./types";
 import AuthorityDetailsScreen from "../screens/authorities/AuthorityDetailsScreen";
 import ProposedAdministrationScreen from "../screens/authorities/ProposedAdministrationScreen";
 import OfficerDetailsScreen from "../screens/admin/OfficerDetailsScreen";
+import AdministratorInvitationScreen from "../screens/admin/AdministratorInvitationScreen";
+import AuthorityInvitationScreen from "../screens/authorities/AuthorityInvitationScreen";
 import ElectionsScreen from "../screens/elections/ElectionsScreen";
 import TasksScreen from "../screens/tasks/TasksScreen";
 import AuthoritiesScreen from "../screens/authorities/AuthoritiesScreen";
@@ -259,6 +261,16 @@ export const RootNavigator = () => {
 				name="ProposedAdministration"
 				component={ProposedAdministrationScreen}
 				options={{ title: t("proposedAdministration") }}
+			/>
+			<Stack.Screen
+				name="AdministratorInvitation"
+				component={AdministratorInvitationScreen}
+				options={{ title: t("administratorInvitation") }}
+			/>
+			<Stack.Screen
+				name="AuthorityInvitation"
+				component={AuthorityInvitationScreen}
+				options={{ title: t("authorityInvitation") }}
 			/>
 			<Stack.Screen
 				name="ReplaceAdmin"
