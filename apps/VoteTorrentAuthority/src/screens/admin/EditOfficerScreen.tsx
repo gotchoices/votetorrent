@@ -37,7 +37,17 @@ export default function EditOfficerScreen() {
 				const foundOfficer = admin.officers.find((a: Officer) => a.userId === officerId);
 				if (foundOfficer) {
 					setOfficer(foundOfficer);
-					setName(foundOfficer.name);
+					// Officer has no `name` field (vote-core/authority/models.ts:90-102).
+					// Source the display name from the User join via networkEngine.getUser()
+					// (Phase 7 D-15 opportunistic fix; preferred Option A from 08-04 plan).
+					try {
+						const userEngine = await networkEngine.getUser(foundOfficer.userId);
+						const user = await userEngine?.getSummary();
+						setName(user?.name ?? "");
+					} catch (userError) {
+						console.error("Error loading user for officer:", userError);
+						setName("");
+					}
 					setTitle(foundOfficer.title);
 					setScopes(foundOfficer.scopes);
 				}
@@ -139,7 +149,7 @@ export default function EditOfficerScreen() {
 			<View style={[styles.footer, { backgroundColor: colors.card }]}>
 				<CustomButton
 					title={t("save")}
-					icon="save"
+					icon="floppy-disk"
 					disabled={!name || !title}
 					backgroundColor={colors.success}
 					forceDarkText={true}
