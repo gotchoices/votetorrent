@@ -1,5 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { ScrollView, StyleSheet, View } from "react-native";
+import FontAwesome6 from "react-native-vector-icons/FontAwesome6";
+import { ExtendedTheme, useTheme } from "@react-navigation/native";
 import { InfoCard } from "../../components/InfoCard";
 import { CollapsibleSection } from "../../components/CollapsibleSection";
 import { ThemedText } from "../../components/ThemedText";
@@ -13,6 +15,7 @@ import { globalStyles } from "../../theme/styles";
 
 export default function AuthoritiesScreen() {
 	const { t } = useTranslation();
+	const { colors } = useTheme() as ExtendedTheme;
 	const navigation = useNavigation<NavigationProp>();
 	const { getEngine, hasNetwork } = useApp();
 
@@ -103,6 +106,25 @@ export default function AuthoritiesScreen() {
 		);
 	}
 
+	const bothListsEmpty =
+		pinnedAuthorities.length === 0 && unpinnedAuthorities.length === 0;
+
+	if (bothListsEmpty) {
+		return (
+			<View style={styles.emptyContainer}>
+				<FontAwesome6
+					name="building-columns"
+					size={56}
+					color={colors.textSecondary}
+				/>
+				<ThemedText type="title">{t("noAuthorities")}</ThemedText>
+				<ThemedText style={{ color: colors.textSecondary }}>
+					{t("noAuthoritiesHelper")}
+				</ThemedText>
+			</View>
+		);
+	}
+
 	return (
 		<ScrollView style={styles.container}>
 			{pinnedAuthorities.length > 0 ? (
@@ -160,6 +182,13 @@ const localStyles = StyleSheet.create({
 		flex: 1,
 		justifyContent: "center",
 		alignItems: "center",
+	},
+	emptyContainer: {
+		flex: 1,
+		alignItems: "center",
+		justifyContent: "center",
+		padding: 32,
+		gap: 12,
 	},
 	emptyText: {
 		textAlign: "center",

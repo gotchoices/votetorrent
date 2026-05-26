@@ -1,20 +1,16 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Image, ScrollView, StyleSheet, TouchableOpacity, View } from "react-native";
+import { Image, ScrollView, StyleSheet, View } from "react-native";
 import { ChipButton } from "../../components/ChipButton";
-import { InfoCard } from "../../components/InfoCard";
 import { ThemedText } from "../../components/ThemedText";
-import FontAwesome6 from "react-native-vector-icons/FontAwesome6";
 import type {
 	Authority,
-	Admin,
 	IAuthorityEngine,
 	INetworkEngine,
 	AdminDetails,
 	User,
 	Officer,
 } from "@votetorrent/vote-core";
-import { scopeDescriptions } from "@votetorrent/vote-core";
 import { ExtendedTheme, useNavigation, useRoute, useTheme } from "@react-navigation/native";
 import { CustomButton } from "../../components/CustomButton";
 import type { RootStackParamList } from "../../navigation/types";
@@ -23,6 +19,7 @@ import { useApp } from "../../providers/AppProvider";
 import { AuthorizationSection } from "../../components/AuthorizationSection";
 import { globalStyles } from "../../theme/styles";
 import { formatDate } from "../../utils/displayUtils";
+import { OfficerCard } from "./components/OfficerCard";
 
 export default function AuthorityDetailsScreen() {
 	const { t } = useTranslation();
@@ -239,15 +236,11 @@ export default function AuthorityDetailsScreen() {
 				{officers.map((officer) => {
 					const user = officerUsers.get(officer.userId);
 					return (
-						<InfoCard
+						<OfficerCard
 							key={officer.userId}
+							officer={officer}
+							userName={user?.name || officer.userId}
 							image={user?.image?.url ? { uri: user.image.url } : undefined}
-							title={user?.name || ""}
-							subtitle={officer.title}
-							additionalInfo={[
-								{ label: t("cid"), value: officer.userId },
-							]}
-							icon="chevron-right"
 							onPress={() =>
 								navigation.navigate("OfficerDetails", {
 									officer: officer,
@@ -291,60 +284,41 @@ export default function AuthorityDetailsScreen() {
 							{t("administrators")}
 						</ThemedText>
 						{adminDetails.proposed.proposed.officers.map((officerSelection) => {
-							const officer = officerSelection.existing || {
+							const officer: Officer = officerSelection.existing || {
 								userId: "",
+								authorityId: authority.id,
 								title: officerSelection.init?.title || "",
 								scopes: officerSelection.init?.scopes || [],
-								signature: { signature: "", signerKey: "" },
 							};
 							const user = officer.userId ? officerUsers.get(officer.userId) : undefined;
 							const name = user?.name || officerSelection.init?.name || "";
-							const isAccepted = !!officerSelection.existing;
-							const statusText = isAccepted
-								? `${t("accepted")} - CID: ${officer.userId}`
-								: t("sent");
+							const status = officerSelection.existing
+								? { label: t("accepted"), tone: "accepted" as const }
+								: { label: t("pending"), tone: "pending" as const };
 
 							return (
-								<View key={officer.userId || officerSelection.init?.name} style={styles.officerCard}>
-									<View style={styles.detail}>
-										<ThemedText type="defaultSemiBold">{t("name")}: </ThemedText>
-										<ThemedText>{name}</ThemedText>
-									</View>
-									<View style={styles.detail}>
-										<ThemedText type="defaultSemiBold">{t("title")}: </ThemedText>
-										<ThemedText style={styles.italicText}>{officer.title}</ThemedText>
-									</View>
-									<View style={styles.detail}>
-										<ThemedText type="defaultSemiBold">{t("inviteId")}: </ThemedText>
-										<ThemedText numberOfLines={1} ellipsizeMode="tail">
-											{officer.userId || t("pending")}
-										</ThemedText>
-									</View>
-									<ThemedText type="defaultSemiBold">{t("permissions")}:</ThemedText>
-									<View style={styles.subDetails}>
-										{officer.scopes.map((scope) => (
-											<View key={scope} style={styles.bulletRow}>
-												<ThemedText>{"• "}</ThemedText>
-												<ThemedText>{scopeDescriptions[scope] || scope}</ThemedText>
-											</View>
-										))}
-									</View>
-									<View style={styles.officerStatusRow}>
-										<ThemedText style={{ color: isAccepted ? colors.success : colors.warning }}>
-											{statusText}
-										</ThemedText>
-										<View style={styles.officerActions}>
-											<ChipButton label={t("invite")} icon="share-nodes" onPress={() => {}} />
-											<TouchableOpacity
-												style={[styles.removeButton, { borderColor: colors.error }]}
-											>
-												<FontAwesome6 name="xmark" size={12} color={colors.error} />
-											</TouchableOpacity>
-										</View>
-									</View>
-								</View>
+								<OfficerCard
+									key={officer.userId || officerSelection.init?.name}
+									officer={officer}
+									userName={name}
+									image={user?.image?.url ? { uri: user.image.url } : undefined}
+									status={status}
+									onInvite={() => {}}
+									onRemove={() => {}}
+								/>
 							);
 						})}
+						<CustomButton
+							title={t("manageProposal")}
+							icon="sliders"
+							size="thin"
+							backgroundColor={colors.accent}
+							onPress={() =>
+								navigation.navigate("ProposedAdministration", {
+									authorityId: authority.id,
+								})
+							}
+						/>
 					</View>
 
 					<AuthorizationSection admin={adminDetails} />
@@ -376,38 +350,6 @@ const localStyles = StyleSheet.create({
 	administratorsHeading: {
 		marginTop: 12,
 		marginBottom: 4,
-	},
-	officerCard: {
-		marginTop: 12,
-		paddingTop: 12,
-		borderTopWidth: StyleSheet.hairlineWidth,
-		borderTopColor: "#D0D0D0",
-		gap: 2,
-	},
-	italicText: {
-		fontStyle: "italic",
-	},
-	bulletRow: {
-		flexDirection: "row",
-	},
-	officerStatusRow: {
-		flexDirection: "row",
-		alignItems: "center",
-		justifyContent: "space-between",
-		marginTop: 6,
-	},
-	officerActions: {
-		flexDirection: "row",
-		alignItems: "center",
-		gap: 8,
-	},
-	removeButton: {
-		width: 28,
-		height: 28,
-		borderRadius: 14,
-		borderWidth: 1.5,
-		alignItems: "center",
-		justifyContent: "center",
 	},
 });
 

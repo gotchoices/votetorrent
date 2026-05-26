@@ -18,6 +18,8 @@ export type RootStackParamList = {
 	NetworkDetails: { network: NetworkReference };
 	Hosting: undefined;
 	AuthorityDetails: { authority: Authority };
+	// Phase 8 plan 08-01: typed entry for ProposedAdministration (screen lands in 08-02 per D-04)
+	ProposedAdministration: { authorityId: string };
 	OfficerDetails: { officer: Officer };
 	ReplaceAdmin: {
 		authority: Authority;
