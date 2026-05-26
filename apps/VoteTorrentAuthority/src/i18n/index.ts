@@ -273,6 +273,12 @@ const resources = {
 			noAuthorities: 'No authorities',
 			noAuthoritiesHelper: 'Authorities you join or pin will appear here',
 			manageProposal: 'Manage Proposal',
+			// Phase 8 plan 08-02 — Proposed Administration screen (AUTHUI-03)
+			thresholdPolicies: 'Threshold Policies',
+			addAdministrator: 'Add Administrator',
+			// Fallback for missing scopeDescriptions[rnp] (vote-core defines 8/9 — D-03)
+			scope_rnp: 'Revise Network Policies',
+			loading: 'Loading...',
 		},
 	},
 	es: {
@@ -542,6 +548,11 @@ const resources = {
 			noAuthorities: 'No authorities',
 			noAuthoritiesHelper: 'Authorities you join or pin will appear here',
 			manageProposal: 'Manage Proposal',
+			// Phase 8 plan 08-02 — ES mirrors EN per D-13; proper Spanish in Phase 11
+			thresholdPolicies: 'Threshold Policies',
+			addAdministrator: 'Add Administrator',
+			scope_rnp: 'Revise Network Policies',
+			loading: 'Loading...',
 		},
 	},
 };
