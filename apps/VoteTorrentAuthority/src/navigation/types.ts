@@ -36,6 +36,15 @@ export type RootStackParamList = {
 	AddDevice: undefined;
 	KeyTask: { task: ReleaseKeyTask };
 	SignatureTask: { task: SignatureTask };
+	// Phase 7 onboarding routes (07-05) — standalone screens per D-09
+	OnboardingFrame2: { taskId?: string };
+	OnboardingFrame7: { taskId?: string };
+	OnboardingFrame18: { taskId?: string };
+	OnboardingFrame19: { taskId?: string };
+	OnboardingFrame20: { taskId?: string };
+	OnboardingFrame21: { taskId?: string };
+	// Dev-entry route per D-12 (temporary; replaced by real callers in phases 8–10)
+	OnboardingDebug: undefined;
 	ElectionDetails: { electionEngine: IElectionEngine };
 	EditBallot: undefined;
 };
