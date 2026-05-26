@@ -67,4 +67,5 @@ export type TabParamList = {
 export type NavigationProp = {
 	navigate: (screen: keyof RootStackParamList, params?: any) => void;
 	setOptions: (options: any) => void;
+	goBack: () => void;
 };
