@@ -6,17 +6,22 @@ import { globalStyles } from "../../theme/styles";
 import { ThemedText } from "../../components/ThemedText";
 import { CustomButton } from "../../components/CustomButton";
 
-export default function OnboardingFrame20Screen() {
+export default function EditElectionScreen() {
 	const { t } = useTranslation();
 	const { colors } = useTheme() as ExtendedTheme;
 	const navigation = useNavigation();
 
 	useLayoutEffect(() => {
-		navigation.setOptions({ title: t("onboardingFrame20Title") });
+		navigation.setOptions({ title: t("editElectionTitle") });
 	}, [navigation, t]);
 
+	const onResend = () => {
+		console.log("editElection-resend");
+		navigation.goBack();
+	};
+
 	const onBackToTasks = () => {
-		console.log("frame20-backToTasks");
+		console.log("editElection-backToTasks");
 		navigation.goBack();
 	};
 
@@ -24,14 +29,27 @@ export default function OnboardingFrame20Screen() {
 		<View style={styles.content}>
 			<ScrollView style={styles.container}>
 				<View style={styles.section}>
-					<ThemedText type="default">{t("onboardingFrame20BodyPrimary")}</ThemedText>
+					<ThemedText type="default">{t("editElectionBodyPrimary")}</ThemedText>
+				</View>
+				<View style={styles.section}>
+					<ThemedText type="default">{t("editElectionBodySecondary")}</ThemedText>
 				</View>
 			</ScrollView>
-			<View style={[styles.footer, { backgroundColor: colors.card }]}>
+			<View
+				style={[styles.footer, styles.footerButtonsContainer, { backgroundColor: colors.card }]}
+			>
 				<CustomButton
-					title={t("onboardingFrame20BackToTasks")}
+					title={t("editElectionResend")}
+					backgroundColor={colors.accent}
+					size="thin"
+					flex={true}
+					onPress={onResend}
+				/>
+				<CustomButton
+					title={t("editElectionBackToTasks")}
 					backgroundColor={colors.success}
 					size="thin"
+					flex={true}
 					onPress={onBackToTasks}
 				/>
 			</View>

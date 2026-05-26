@@ -6,22 +6,17 @@ import { globalStyles } from "../../theme/styles";
 import { ThemedText } from "../../components/ThemedText";
 import { CustomButton } from "../../components/CustomButton";
 
-export default function OnboardingFrame19Screen() {
+export default function ProposedElectionScreen() {
 	const { t } = useTranslation();
 	const { colors } = useTheme() as ExtendedTheme;
 	const navigation = useNavigation();
 
 	useLayoutEffect(() => {
-		navigation.setOptions({ title: t("onboardingFrame19Title") });
+		navigation.setOptions({ title: t("proposedElectionTitle") });
 	}, [navigation, t]);
 
-	const onResend = () => {
-		console.log("frame19-resend");
-		navigation.goBack();
-	};
-
-	const onDismissRequest = () => {
-		console.log("frame19-dismissRequest");
+	const onBackToTasks = () => {
+		console.log("proposedElection-backToTasks");
 		navigation.goBack();
 	};
 
@@ -29,28 +24,15 @@ export default function OnboardingFrame19Screen() {
 		<View style={styles.content}>
 			<ScrollView style={styles.container}>
 				<View style={styles.section}>
-					<ThemedText type="default">{t("onboardingFrame19BodyPrimary")}</ThemedText>
-				</View>
-				<View style={styles.section}>
-					<ThemedText type="default">{t("onboardingFrame19BodySecondary")}</ThemedText>
+					<ThemedText type="default">{t("proposedElectionBodyPrimary")}</ThemedText>
 				</View>
 			</ScrollView>
-			<View
-				style={[styles.footer, styles.footerButtonsContainer, { backgroundColor: colors.card }]}
-			>
+			<View style={[styles.footer, { backgroundColor: colors.card }]}>
 				<CustomButton
-					title={t("onboardingFrame19Resend")}
-					backgroundColor={colors.accent}
+					title={t("proposedElectionBackToTasks")}
+					backgroundColor={colors.success}
 					size="thin"
-					flex={true}
-					onPress={onResend}
-				/>
-				<CustomButton
-					title={t("onboardingFrame19DismissRequest")}
-					backgroundColor={colors.accent}
-					size="thin"
-					flex={true}
-					onPress={onDismissRequest}
+					onPress={onBackToTasks}
 				/>
 			</View>
 		</View>

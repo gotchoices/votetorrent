@@ -6,22 +6,22 @@ import { globalStyles } from "../../theme/styles";
 import { ThemedText } from "../../components/ThemedText";
 import { CustomButton } from "../../components/CustomButton";
 
-export default function OnboardingFrame21Screen() {
+export default function AuthorityDetailScreen() {
 	const { t } = useTranslation();
 	const { colors } = useTheme() as ExtendedTheme;
 	const navigation = useNavigation();
 
 	useLayoutEffect(() => {
-		navigation.setOptions({ title: t("onboardingFrame21Title") });
+		navigation.setOptions({ title: t("authorityDetailTitle") });
 	}, [navigation, t]);
 
-	const onResendRequest = () => {
-		console.log("frame21-resendRequest");
+	const onResend = () => {
+		console.log("authorityDetail-resend");
 		navigation.goBack();
 	};
 
-	const onCancelRequest = () => {
-		console.log("frame21-cancelRequest");
+	const onCancelInvitation = () => {
+		console.log("authorityDetail-cancelInvitation");
 		navigation.goBack();
 	};
 
@@ -29,28 +29,28 @@ export default function OnboardingFrame21Screen() {
 		<View style={styles.content}>
 			<ScrollView style={styles.container}>
 				<View style={styles.section}>
-					<ThemedText type="default">{t("onboardingFrame21BodyPrimary")}</ThemedText>
+					<ThemedText type="default">{t("authorityDetailBodyPrimary")}</ThemedText>
 				</View>
 				<View style={styles.section}>
-					<ThemedText type="default">{t("onboardingFrame21BodySecondary")}</ThemedText>
+					<ThemedText type="default">{t("authorityDetailBodySecondary")}</ThemedText>
 				</View>
 			</ScrollView>
 			<View
 				style={[styles.footer, styles.footerButtonsContainer, { backgroundColor: colors.card }]}
 			>
 				<CustomButton
-					title={t("onboardingFrame21ResendRequest")}
+					title={t("authorityDetailResend")}
 					backgroundColor={colors.accent}
 					size="thin"
 					flex={true}
-					onPress={onResendRequest}
+					onPress={onResend}
 				/>
 				<CustomButton
-					title={t("onboardingFrame21CancelRequest")}
+					title={t("authorityDetailCancelInvitation")}
 					backgroundColor={colors.accent}
 					size="thin"
 					flex={true}
-					onPress={onCancelRequest}
+					onPress={onCancelInvitation}
 				/>
 			</View>
 		</View>

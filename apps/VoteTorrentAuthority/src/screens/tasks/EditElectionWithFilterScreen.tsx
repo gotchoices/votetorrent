@@ -6,17 +6,17 @@ import { globalStyles } from "../../theme/styles";
 import { ThemedText } from "../../components/ThemedText";
 import { CustomButton } from "../../components/CustomButton";
 
-export default function OnboardingFrame18Screen() {
+export default function EditElectionWithFilterScreen() {
 	const { t } = useTranslation();
 	const { colors } = useTheme() as ExtendedTheme;
 	const navigation = useNavigation();
 
 	useLayoutEffect(() => {
-		navigation.setOptions({ title: t("onboardingFrame18Title") });
+		navigation.setOptions({ title: t("editElectionWithFilterTitle") });
 	}, [navigation, t]);
 
 	const onGotIt = () => {
-		console.log("frame18-gotIt");
+		console.log("editElectionWithFilter-gotIt");
 		navigation.goBack();
 	};
 
@@ -24,12 +24,12 @@ export default function OnboardingFrame18Screen() {
 		<View style={styles.content}>
 			<ScrollView style={styles.container}>
 				<View style={styles.section}>
-					<ThemedText type="default">{t("onboardingFrame18BodyPrimary")}</ThemedText>
+					<ThemedText type="default">{t("editElectionWithFilterBodyPrimary")}</ThemedText>
 				</View>
 			</ScrollView>
 			<View style={[styles.footer, { backgroundColor: colors.card }]}>
 				<CustomButton
-					title={t("onboardingFrame18GotIt")}
+					title={t("editElectionWithFilterGotIt")}
 					backgroundColor={colors.success}
 					size="thin"
 					onPress={onGotIt}
