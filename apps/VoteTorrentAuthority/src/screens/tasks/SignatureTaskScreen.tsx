@@ -24,7 +24,7 @@ const titleKey: Record<SignatureTask["signatureType"], string> = {
 	admin: "adminRevision",
 	authority: "authorityRevision",
 	network: "networkRevision",
-	election: "electionRevision",
+	election: "election",
 	"election-revision": "electionRevision",
 	ballot: "ballotRevision",
 };
