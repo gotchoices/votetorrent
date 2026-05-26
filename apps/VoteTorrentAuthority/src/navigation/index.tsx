@@ -32,6 +32,13 @@ import AddDeviceScreen from "../screens/users/AddDeviceScreen";
 import NetworkDetailsScreen from "../screens/networks/NetworkDetailsScreen";
 import KeyTaskScreen from "../screens/tasks/KeyTaskScreen";
 import SignatureTaskScreen from "../screens/tasks/SignatureTaskScreen";
+import OnboardingFrame2Screen from "../screens/tasks/OnboardingFrame2Screen";
+import OnboardingFrame7Screen from "../screens/tasks/OnboardingFrame7Screen";
+import OnboardingFrame18Screen from "../screens/tasks/OnboardingFrame18Screen";
+import OnboardingFrame19Screen from "../screens/tasks/OnboardingFrame19Screen";
+import OnboardingFrame20Screen from "../screens/tasks/OnboardingFrame20Screen";
+import OnboardingFrame21Screen from "../screens/tasks/OnboardingFrame21Screen";
+import OnboardingDebugScreen from "../screens/tasks/OnboardingDebugScreen";
 import ElectionDetailsScreen from "../screens/elections/ElectionDetailsScreen";
 import EditBallotScreen from "../screens/ballots/EditBallotScreen";
 
@@ -294,6 +301,41 @@ export const RootNavigator = () => {
 				name="SignatureTask"
 				component={SignatureTaskScreen}
 				options={{ title: t("signature") }}
+			/>
+			<Stack.Screen
+				name="OnboardingFrame2"
+				component={OnboardingFrame2Screen}
+				options={{ title: t("onboardingFrame2Title") }}
+			/>
+			<Stack.Screen
+				name="OnboardingFrame7"
+				component={OnboardingFrame7Screen}
+				options={{ title: t("onboardingFrame7Title") }}
+			/>
+			<Stack.Screen
+				name="OnboardingFrame18"
+				component={OnboardingFrame18Screen}
+				options={{ title: t("onboardingFrame18Title") }}
+			/>
+			<Stack.Screen
+				name="OnboardingFrame19"
+				component={OnboardingFrame19Screen}
+				options={{ title: t("onboardingFrame19Title") }}
+			/>
+			<Stack.Screen
+				name="OnboardingFrame20"
+				component={OnboardingFrame20Screen}
+				options={{ title: t("onboardingFrame20Title") }}
+			/>
+			<Stack.Screen
+				name="OnboardingFrame21"
+				component={OnboardingFrame21Screen}
+				options={{ title: t("onboardingFrame21Title") }}
+			/>
+			<Stack.Screen
+				name="OnboardingDebug"
+				component={OnboardingDebugScreen}
+				options={{ title: t("onboardingDebugTitle") }}
 			/>
 			<Stack.Screen
 				name="ElectionDetails"
