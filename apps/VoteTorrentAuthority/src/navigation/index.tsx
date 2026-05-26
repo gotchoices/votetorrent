@@ -32,13 +32,13 @@ import AddDeviceScreen from "../screens/users/AddDeviceScreen";
 import NetworkDetailsScreen from "../screens/networks/NetworkDetailsScreen";
 import KeyTaskScreen from "../screens/tasks/KeyTaskScreen";
 import SignatureTaskScreen from "../screens/tasks/SignatureTaskScreen";
-import OnboardingFrame2Screen from "../screens/tasks/OnboardingFrame2Screen";
-import OnboardingFrame7Screen from "../screens/tasks/OnboardingFrame7Screen";
-import OnboardingFrame18Screen from "../screens/tasks/OnboardingFrame18Screen";
-import OnboardingFrame19Screen from "../screens/tasks/OnboardingFrame19Screen";
-import OnboardingFrame20Screen from "../screens/tasks/OnboardingFrame20Screen";
-import OnboardingFrame21Screen from "../screens/tasks/OnboardingFrame21Screen";
-import OnboardingDebugScreen from "../screens/tasks/OnboardingDebugScreen";
+import EditElectionScreen from "../screens/tasks/EditElectionScreen";
+import AuthorityDetailScreen from "../screens/tasks/AuthorityDetailScreen";
+import EditElectionWithFilterScreen from "../screens/tasks/EditElectionWithFilterScreen";
+import EditRevisionFormScreen from "../screens/tasks/EditRevisionFormScreen";
+import ProposedElectionScreen from "../screens/tasks/ProposedElectionScreen";
+import ProposedRevisionScreen from "../screens/tasks/ProposedRevisionScreen";
+import ScreenScaffoldsDebugScreen from "../screens/tasks/ScreenScaffoldsDebugScreen";
 import ElectionDetailsScreen from "../screens/elections/ElectionDetailsScreen";
 import EditBallotScreen from "../screens/ballots/EditBallotScreen";
 
@@ -304,39 +304,39 @@ export const RootNavigator = () => {
 				options={{ title: t("signature") }}
 			/>
 			<Stack.Screen
-				name="OnboardingFrame2"
-				component={OnboardingFrame2Screen}
-				options={{ title: t("onboardingFrame2Title") }}
+				name="EditElection"
+				component={EditElectionScreen}
+				options={{ title: t("editElectionTitle") }}
 			/>
 			<Stack.Screen
-				name="OnboardingFrame7"
-				component={OnboardingFrame7Screen}
-				options={{ title: t("onboardingFrame7Title") }}
+				name="AuthorityDetail"
+				component={AuthorityDetailScreen}
+				options={{ title: t("authorityDetailTitle") }}
 			/>
 			<Stack.Screen
-				name="OnboardingFrame18"
-				component={OnboardingFrame18Screen}
-				options={{ title: t("onboardingFrame18Title") }}
+				name="EditElectionWithFilter"
+				component={EditElectionWithFilterScreen}
+				options={{ title: t("editElectionWithFilterTitle") }}
 			/>
 			<Stack.Screen
-				name="OnboardingFrame19"
-				component={OnboardingFrame19Screen}
-				options={{ title: t("onboardingFrame19Title") }}
+				name="EditRevisionForm"
+				component={EditRevisionFormScreen}
+				options={{ title: t("editRevisionFormTitle") }}
 			/>
 			<Stack.Screen
-				name="OnboardingFrame20"
-				component={OnboardingFrame20Screen}
-				options={{ title: t("onboardingFrame20Title") }}
+				name="ProposedElection"
+				component={ProposedElectionScreen}
+				options={{ title: t("proposedElectionTitle") }}
 			/>
 			<Stack.Screen
-				name="OnboardingFrame21"
-				component={OnboardingFrame21Screen}
-				options={{ title: t("onboardingFrame21Title") }}
+				name="ProposedRevision"
+				component={ProposedRevisionScreen}
+				options={{ title: t("proposedRevisionTitle") }}
 			/>
 			<Stack.Screen
-				name="OnboardingDebug"
-				component={OnboardingDebugScreen}
-				options={{ title: t("onboardingDebugTitle") }}
+				name="ScreenScaffoldsDebug"
+				component={ScreenScaffoldsDebugScreen}
+				options={{ title: t("screenScaffoldsDebugTitle") }}
 			/>
 			<Stack.Screen
 				name="ElectionDetails"

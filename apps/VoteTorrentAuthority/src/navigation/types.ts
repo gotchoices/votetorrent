@@ -36,15 +36,15 @@ export type RootStackParamList = {
 	AddDevice: undefined;
 	KeyTask: { task: ReleaseKeyTask };
 	SignatureTask: { task: SignatureTask };
-	// Phase 7 onboarding routes (07-05) — standalone screens per D-09
-	OnboardingFrame2: { taskId?: string };
-	OnboardingFrame7: { taskId?: string };
-	OnboardingFrame18: { taskId?: string };
-	OnboardingFrame19: { taskId?: string };
-	OnboardingFrame20: { taskId?: string };
-	OnboardingFrame21: { taskId?: string };
-	// Dev-entry route per D-12 (temporary; replaced by real callers in phases 8–10)
-	OnboardingDebug: undefined;
+	// Phase 7 scaffold routes (07-05; renamed by 07-08) — standalone screens per D-09; real impls land in Phases 8–10
+	EditElection: { taskId?: string };
+	AuthorityDetail: { taskId?: string };
+	EditElectionWithFilter: { taskId?: string };
+	EditRevisionForm: { taskId?: string };
+	ProposedElection: { taskId?: string };
+	ProposedRevision: { taskId?: string };
+	// Dev-entry route per D-12 — temporary; replaced by real callers in phases 8–10 (renamed by 07-08)
+	ScreenScaffoldsDebug: undefined;
 	ElectionDetails: { electionEngine: IElectionEngine };
 	EditBallot: undefined;
 };
