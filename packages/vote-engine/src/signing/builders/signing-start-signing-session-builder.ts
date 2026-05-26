@@ -4,13 +4,17 @@
  * ISigningStartSigningSessionBuilder as an additive layer over
  * SigningEngine.startSigningSession.
  *
+ * Phase 12 -- D-10: Updated to use digestArgs: AdminDigestArgs | null
+ * instead of digest: string to match the new SQL-side digest migration interface.
+ *
  * SECURITY: This builder holds NO private-key material, NO cryptographic
  * nonces, and NO @noble/curves or @noble/hashes imports. All draft fields
- * are public-facing metadata: authorityId (UUID), digest (hash output hex),
+ * are public-facing metadata: authorityId (UUID), digestArgs (typed fields for SQL),
  * scope (privilege enum), signature (hex-encoded public output).
  */
 
 import type {
+  AdminDigestArgs,
   BuilderError,
   ISigningEngine,
   ISigningStartSigningSessionBuilder,
@@ -28,19 +32,19 @@ import {
 /** Valid Scope values for compile-time-safe runtime validation. */
 const VALID_SCOPES: readonly string[] = ['rn', 'rad', 'vrg', 'iad', 'rnp', 'uai', 'ceb', 'mel', 'cap']
 
-type Draft = { authorityId?: string; digest?: string; scope?: Scope; signature?: Signature }
+type Draft = { authorityId?: string; digestArgs?: AdminDigestArgs | null; scope?: Scope; signature?: Signature; nonce?: string }
 type DraftValidator = (draft: Readonly<Draft>) => BuilderError[]
 
 export class SigningStartSigningSessionBuilder implements ISigningStartSigningSessionBuilder {
   static readonly KIND = 'signing.startSigningSession'
-  static readonly KIND_VERSION = 1
+  static readonly KIND_VERSION = 2
 
   private committed = false
   private cachedOutput: SigningResult | undefined = undefined
 
   private static readonly VALIDATORS: readonly DraftValidator[] = [
     SigningStartSigningSessionBuilder.validateAuthorityId,
-    SigningStartSigningSessionBuilder.validateDigest,
+    SigningStartSigningSessionBuilder.validateDigestArgs,
     SigningStartSigningSessionBuilder.validateScope,
     SigningStartSigningSessionBuilder.validateSignature
   ]
@@ -65,17 +69,30 @@ export class SigningStartSigningSessionBuilder implements ISigningStartSigningSe
     return []
   }
 
-  private static validateDigest (draft: Readonly<Draft>): BuilderError[] {
-    if (draft.digest === undefined || draft.digest === null) return []
-    if (typeof draft.digest !== 'string' || draft.digest.trim() === '') {
+  private static validateDigestArgs (draft: Readonly<Draft>): BuilderError[] {
+    // digestArgs may be explicitly set to null (invite flow) — that is valid
+    if (draft.digestArgs === undefined) return []
+    if (draft.digestArgs === null) return []
+    // When set to an object, validate it has the required AdminDigestArgs fields
+    if (typeof draft.digestArgs !== 'object' || Array.isArray(draft.digestArgs)) {
       return [{
-        path: 'digest',
-        code: 'EMPTY',
-        message: 'digest required',
+        path: 'digestArgs',
+        code: 'INVALID',
+        message: 'digestArgs must be AdminDigestArgs or null',
         kind: 'per-setter'
       }]
     }
-    return []
+    const errors: BuilderError[] = []
+    if (typeof draft.digestArgs.authorityId !== 'string' || draft.digestArgs.authorityId.trim() === '') {
+      errors.push({ path: 'digestArgs.authorityId', code: 'EMPTY', message: 'digestArgs.authorityId required', kind: 'per-setter' })
+    }
+    if (typeof draft.digestArgs.effectiveAt !== 'string' || draft.digestArgs.effectiveAt.trim() === '') {
+      errors.push({ path: 'digestArgs.effectiveAt', code: 'EMPTY', message: 'digestArgs.effectiveAt required', kind: 'per-setter' })
+    }
+    if (typeof draft.digestArgs.thresholdPolicies !== 'string' || draft.digestArgs.thresholdPolicies.trim() === '') {
+      errors.push({ path: 'digestArgs.thresholdPolicies', code: 'EMPTY', message: 'digestArgs.thresholdPolicies required', kind: 'per-setter' })
+    }
+    return errors
   }
 
   private static validateScope (draft: Readonly<Draft>): BuilderError[] {
@@ -139,14 +156,14 @@ export class SigningStartSigningSessionBuilder implements ISigningStartSigningSe
     return Object.freeze(errors)
   }
 
-  // ---- IBuilder<{ authorityId; digest; scope; signature }, SigningResult> surface ----
+  // ---- IBuilder<{ authorityId; digestArgs; scope; signature; nonce? }, SigningResult> surface ----
 
   setAuthorityId (authorityId: string): this {
     return new SigningStartSigningSessionBuilder(this.engine, { ...this.draft, authorityId }) as this
   }
 
-  setDigest (digest: string): this {
-    return new SigningStartSigningSessionBuilder(this.engine, { ...this.draft, digest }) as this
+  setDigestArgs (digestArgs: AdminDigestArgs | null): this {
+    return new SigningStartSigningSessionBuilder(this.engine, { ...this.draft, digestArgs }) as this
   }
 
   setScope (scope: Scope): this {
@@ -157,11 +174,15 @@ export class SigningStartSigningSessionBuilder implements ISigningStartSigningSe
     return new SigningStartSigningSessionBuilder(this.engine, { ...this.draft, signature }) as this
   }
 
-  build (): { authorityId: string; digest: string; scope: Scope; signature: Signature } {
+  setNonce (nonce: string): this {
+    return new SigningStartSigningSessionBuilder(this.engine, { ...this.draft, nonce }) as this
+  }
+
+  build (): { authorityId: string; digestArgs: AdminDigestArgs | null; scope: Scope; signature: Signature; nonce?: string } {
     return this.toEngineInput()
   }
 
-  toEngineInput (): { authorityId: string; digest: string; scope: Scope; signature: Signature } {
+  toEngineInput (): { authorityId: string; digestArgs: AdminDigestArgs | null; scope: Scope; signature: Signature; nonce?: string } {
     const errors = this.runValidators()
     const missing = this.missingFields()
     if (errors.length > 0 || missing.length > 0) {
@@ -178,9 +199,10 @@ export class SigningStartSigningSessionBuilder implements ISigningStartSigningSe
     }
     return {
       authorityId: this.draft.authorityId!,
-      digest: this.draft.digest!,
+      digestArgs: this.draft.digestArgs!,
       scope: this.draft.scope!,
-      signature: this.draft.signature!
+      signature: this.draft.signature!,
+      nonce: this.draft.nonce
     }
   }
 
@@ -192,9 +214,10 @@ export class SigningStartSigningSessionBuilder implements ISigningStartSigningSe
     this.committed = true
     const result = await this.engine.startSigningSession(
       input.authorityId,
-      input.digest,
+      input.digestArgs,
       input.scope,
-      input.signature
+      input.signature,
+      input.nonce
     )
     this.cachedOutput = result
     return result
@@ -222,8 +245,9 @@ export class SigningStartSigningSessionBuilder implements ISigningStartSigningSe
     if (this.draft.authorityId === undefined || this.draft.authorityId === null) {
       missing.push({ path: 'authorityId', reason: 'required' })
     }
-    if (this.draft.digest === undefined || this.draft.digest === null) {
-      missing.push({ path: 'digest', reason: 'required' })
+    // digestArgs can be null (invite flow) — only missing if undefined
+    if (this.draft.digestArgs === undefined) {
+      missing.push({ path: 'digestArgs', reason: 'required (pass null for invite flow)' })
     }
     if (this.draft.scope === undefined || this.draft.scope === null) {
       missing.push({ path: 'scope', reason: 'required' })
@@ -234,7 +258,7 @@ export class SigningStartSigningSessionBuilder implements ISigningStartSigningSe
     return Object.freeze(missing)
   }
 
-  update (partial: Partial<{ authorityId: string; digest: string; scope: Scope; signature: Signature }>): this {
+  update (partial: Partial<{ authorityId: string; digestArgs: AdminDigestArgs | null; scope: Scope; signature: Signature; nonce?: string }>): this {
     return new SigningStartSigningSessionBuilder(this.engine, { ...this.draft, ...partial }) as this
   }
 
@@ -258,12 +282,13 @@ export class SigningStartSigningSessionBuilder implements ISigningStartSigningSe
     // Reserved no-op per CONTEXT.md
   }
 
-  fromPayload (payload: { authorityId: string; digest: string; scope: Scope; signature: Signature }): this {
+  fromPayload (payload: { authorityId: string; digestArgs: AdminDigestArgs | null; scope: Scope; signature: Signature; nonce?: string }): this {
     return new SigningStartSigningSessionBuilder(this.engine, {
       authorityId: payload.authorityId,
-      digest: payload.digest,
+      digestArgs: payload.digestArgs,
       scope: payload.scope,
-      signature: payload.signature
+      signature: payload.signature,
+      nonce: payload.nonce
     }) as this
   }
 
