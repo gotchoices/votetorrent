@@ -1,6 +1,7 @@
 // export * from './key-network-libp2p.js';
 export * from './authority/index.js'
 export * from './election/index.js'
+export * from './invite/index.js'
 export * from './elections/index.js'
 export * from './local-storage-react.js'
 export * from './network/index.js'
