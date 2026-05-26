@@ -1,7 +1,7 @@
 import { ExtendedTheme, useTheme } from "@react-navigation/native";
 import React, { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ScrollView, StyleSheet, useColorScheme, View } from "react-native";
+import { ScrollView, StyleSheet, View } from "react-native";
 import { ThemedText } from "../../components/ThemedText";
 import { ChipButton } from "../../components/ChipButton";
 import { CustomButton } from "../../components/CustomButton";
@@ -116,7 +116,7 @@ export default function ReplaceAdminScreen() {
 	return (
 		<View style={styles.content}>
 			<ScrollView style={styles.container}>
-				<ThemedText type="defaultSemiBold" style={styles.sectionTitle}>
+				<ThemedText type="title" style={styles.sectionTitle}>
 					{t("createProposedReplacement")}
 				</ThemedText>
 
@@ -125,7 +125,6 @@ export default function ReplaceAdminScreen() {
 						<InfoCard
 							key={officer.userId}
 							title={officer.title}
-							image={{ uri: officer.imageRef?.url }}
 							additionalInfo={[
 								{ label: t("title"), value: officer.title },
 								{ label: t("userId"), value: officer.userId },
