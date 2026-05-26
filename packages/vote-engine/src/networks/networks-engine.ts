@@ -1,4 +1,3 @@
-import { randomUUID } from 'crypto';
 import { Database, MisuseError, QuereusError } from '@quereus/quereus';
 import { NetworkEngine } from '../network/network-engine.js';
 import { H16 } from '../utils.js';
@@ -48,8 +47,8 @@ export class NetworksEngine implements INetworksEngine {
 			? JSON.stringify(user.imageRef)
 			: null;
 
-		const networkId = randomUUID().toString();
-		const primaryAuthorityId = randomUUID().toString();
+		const networkId = crypto.randomUUID().toString();
+		const primaryAuthorityId = crypto.randomUUID().toString();
 		const networkHash = H16(networkId);
 
 		const firstOfficer = networkInit.admin.officers?.[0];
