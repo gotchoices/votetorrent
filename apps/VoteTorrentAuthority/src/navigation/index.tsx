@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "./types";
 import AuthorityDetailsScreen from "../screens/authorities/AuthorityDetailsScreen";
+import ProposedAdministrationScreen from "../screens/authorities/ProposedAdministrationScreen";
 import OfficerDetailsScreen from "../screens/admin/OfficerDetailsScreen";
 import ElectionsScreen from "../screens/elections/ElectionsScreen";
 import TasksScreen from "../screens/tasks/TasksScreen";
@@ -253,6 +254,11 @@ export const RootNavigator = () => {
 				options={{
 					title: t("officer"),
 				}}
+			/>
+			<Stack.Screen
+				name="ProposedAdministration"
+				component={ProposedAdministrationScreen}
+				options={{ title: t("proposedAdministration") }}
 			/>
 			<Stack.Screen
 				name="ReplaceAdmin"
