@@ -33,6 +33,8 @@ import AddKeyScreen from "../screens/users/AddKeyScreen";
 import RevokeKeyScreen from "../screens/users/RevokeKeyScreen";
 import AddDeviceScreen from "../screens/users/AddDeviceScreen";
 import NetworkDetailsScreen from "../screens/networks/NetworkDetailsScreen";
+import NetworkStatisticsScreen from "../screens/networks/NetworkStatisticsScreen";
+import NetworkRevisionScreen from "../screens/networks/NetworkRevisionScreen";
 import KeyTaskScreen from "../screens/tasks/KeyTaskScreen";
 import SignatureTaskScreen from "../screens/tasks/SignatureTaskScreen";
 import EditElectionScreen from "../screens/tasks/EditElectionScreen";
@@ -239,6 +241,16 @@ export const RootNavigator = () => {
 				options={{ title: t("network") }}
 			/>
 			<Stack.Screen name="Hosting" component={HostingScreen} options={{ title: t("hosting") }} />
+			<Stack.Screen
+				name="NetworkStatistics"
+				component={NetworkStatisticsScreen}
+				options={{ title: t("statistics") }}
+			/>
+			<Stack.Screen
+				name="NetworkRevision"
+				component={NetworkRevisionScreen}
+				options={{ title: t("reviseNetwork") }}
+			/>
 			<Stack.Screen
 				name="AuthorityDetails"
 				component={AuthorityDetailsScreen}
