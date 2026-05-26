@@ -624,7 +624,12 @@ export class NetworkEngine implements INetworkEngine {
     // existing AdminSignature row for the slot and a valid signature
     // over the digest. This method is the engine boundary; the caller
     // supplies the already-computed signature in the InviteAction.
-    const slotCid = invite.invite.digest
+    // D-05: query InviteSlot by InviteKey+Type for CID (SQL-side, not JS-computed)
+    const slotRow = await this.ctx.db
+      .prepare('SELECT Cid FROM InviteSlot WHERE InviteKey = :inviteKey AND Type = :type')
+      .get({ inviteKey: invite.invite.inviteKey, type: invite.invite.type })
+    if (!slotRow) throw new Error('InviteSlot not found for given inviteKey and type')
+    const slotCid = slotRow.Cid as string
     const invokedId =
       invite.userId ?? (invite.userInit ? crypto.randomUUID() : null)
     const resultDigest = invite.isAccepted
