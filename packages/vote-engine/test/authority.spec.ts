@@ -2573,7 +2573,7 @@ describe('AuthorityProposeAdminBuilder', () => {
     expect(builder).to.be.instanceOf(AuthorityProposeAdminBuilder)
   })
 
-  it.skip('REAL ENGINE equivalence smoke: engine.proposeAdmin(admin, signature) vs builder.fromPayload(...).commit() — BLOCKED: ProposedAdmin INSERT fails (requires valid AdminSignature row for the signing nonce)', async () => {
+  it('REAL ENGINE equivalence smoke: engine.proposeAdmin(admin, signature) vs builder.fromPayload(...).commit()', async () => {
     const { authorityEngine: eng1 } = await createNetworkAndAuthority()
     const admin = makeAdminProposal()
     const sig = makeRealSignature('user-1')
@@ -2684,16 +2684,17 @@ describe('AuthoritySaveInviteWithSigningBuilder', () => {
     expect(builder).to.be.instanceOf(AuthoritySaveInviteWithSigningBuilder)
   })
 
-  it.skip('REAL ENGINE equivalence smoke: engine.saveInviteWithSigning(invite, scope, signature) vs builder.fromPayload(...).commit() — BLOCKED: InviteSlot INSERT requires valid AdminSignature (saveInviteWithSigning is DB-bound)', async () => {
+  it('REAL ENGINE equivalence smoke: engine.saveInviteWithSigning(invite, scope, signature) vs builder.fromPayload(...).commit()', async () => {
     const { authorityEngine: eng1 } = await createNetworkAndAuthority()
-    const invite = makeAuthorityInvite()
+    const invite1 = eng1.createAuthorityInvite('Invite1')
     const sig = makeRealSignature('user-1')
     let err1: unknown
-    try { await eng1.saveInviteWithSigning(invite, 'iad', sig) } catch (e) { err1 = e }
+    try { await eng1.saveInviteWithSigning(invite1, 'iad', sig) } catch (e) { err1 = e }
     expect(err1).to.equal(undefined)
     const { authorityEngine: eng2 } = await createNetworkAndAuthority()
+    const invite2 = eng2.createAuthorityInvite('Invite2')
     let err2: unknown
-    try { await eng2.buildSaveInviteWithSigning().fromPayload({ invite, scope: 'iad', signature: sig }).commit() } catch (e) { err2 = e }
+    try { await eng2.buildSaveInviteWithSigning().fromPayload({ invite: invite2, scope: 'iad', signature: sig }).commit() } catch (e) { err2 = e }
     expect(err2).to.equal(undefined)
   })
 })
