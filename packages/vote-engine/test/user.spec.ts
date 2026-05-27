@@ -384,7 +384,7 @@ describe('UserEngine', () => {
     // BLOCKED on quereus#23 — seeding an InviteSlot + AdminSignature row
     // is required for the InviteResult CHECK constraints to pass, and
     // both require a populated DB from create().
-    it.skip('inserts an InviteResult row for an accepted invite — BLOCKED on quereus#23 (needs seeded InviteSlot)', async () => {
+    it('inserts an InviteResult row for an accepted invite', async () => {
       const { ctx } = await createUserEngineForExistingNetwork()
       const networkEngine = new NetworkEngine(
         {
@@ -397,7 +397,13 @@ describe('UserEngine', () => {
         ctx
       )
       const fakeInviteKey = 'k'.repeat(66)
-      const fakeInvite = { inviteKey: fakeInviteKey, type: 'au', expiration: '0', inviteSignature: 'a'.repeat(128) }
+      const fakeInvite = { inviteKey: fakeInviteKey, type: 'au' as const, expiration: '0', inviteSignature: 'a'.repeat(128) }
+      await ctx.db.exec(
+        `INSERT INTO InviteSlot (Cid, Type, Name, Expiration, InviteKey, InviteSignature, SigningNonce)
+         WITH CONTEXT Tid = 1, IsCidValid = true, IsSignatureValid = true, IsInsertValid = true, now = datetime('now', '-1 day')
+         VALUES (Digest(:inviteKey, :type), :type, 'test', :expiration, :inviteKey, :inviteSignature, 'test-nonce-1')`,
+        { inviteKey: fakeInviteKey, type: 'au', expiration: '2099-12-31T23:59:59', inviteSignature: 'a'.repeat(128) }
+      )
       await networkEngine.respondToInvite({
         invite: fakeInvite,
         isAccepted: true,
@@ -414,8 +420,7 @@ describe('UserEngine', () => {
       expect(row?.Digest).to.not.equal(null)
     })
 
-    // BLOCKED on quereus#23 — same chain.
-    it.skip('inserts an InviteResult row with null digest for a rejected invite — BLOCKED on quereus#23 (needs seeded InviteSlot)', async () => {
+    it('inserts an InviteResult row with null digest for a rejected invite', async () => {
       const { ctx } = await createUserEngineForExistingNetwork()
       const networkEngine = new NetworkEngine(
         {
@@ -428,7 +433,13 @@ describe('UserEngine', () => {
         ctx
       )
       const fakeInviteKey = 'j'.repeat(66)
-      const fakeInvite = { inviteKey: fakeInviteKey, type: 'au', expiration: '0', inviteSignature: 'b'.repeat(128) }
+      const fakeInvite = { inviteKey: fakeInviteKey, type: 'au' as const, expiration: '0', inviteSignature: 'b'.repeat(128) }
+      await ctx.db.exec(
+        `INSERT INTO InviteSlot (Cid, Type, Name, Expiration, InviteKey, InviteSignature, SigningNonce)
+         WITH CONTEXT Tid = 1, IsCidValid = true, IsSignatureValid = true, IsInsertValid = true, now = datetime('now', '-1 day')
+         VALUES (Digest(:inviteKey, :type), :type, 'test', :expiration, :inviteKey, :inviteSignature, 'test-nonce-2')`,
+        { inviteKey: fakeInviteKey, type: 'au', expiration: '2099-12-31T23:59:59', inviteSignature: 'b'.repeat(128) }
+      )
       await networkEngine.respondToInvite({
         invite: fakeInvite,
         isAccepted: false,
