@@ -220,6 +220,15 @@ export default function SettingsScreen() {
 						{t("noUserFound")}
 					</ThemedText>
 				)}
+
+				<CustomButton
+					title={t("screenScaffoldsDebugTitle")}
+					icon="wrench"
+					size="thin"
+					onPress={() => {
+						navigation.navigate("ScreenScaffoldsDebug");
+					}}
+				/>
 			</View>
 		</View>
 	);
