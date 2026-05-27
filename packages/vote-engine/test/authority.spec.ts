@@ -758,12 +758,8 @@ describe('AuthorityEngine', () => {
       const invite = authorityEngine.createAuthorityInvite('Accepted')
       const sig = makeRealSignature('user-1', invite.inviteKey)
       await authorityEngine.saveInviteWithSigning(invite, 'iad', sig)
-      // Retrieve the actual CID that saveInviteWithSigning computed
-      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
-      const slot = await ctx.db.prepare('select Cid from InviteSlot where Name = :n').get({ n: 'Accepted' })
-      const slotCid = slot?.Cid as string
       await networkEngine.respondToInvite({
-        invite: { digest: slotCid } as never,
+        invite,
         isAccepted: true,
         invokes: { authority: { name: 'Accepted', domainName: 'a.example' } },
         inviteSignature: invite.inviteSignature,
@@ -781,12 +777,8 @@ describe('AuthorityEngine', () => {
       const invite = authorityEngine.createAuthorityInvite('Rejected')
       const sig = makeRealSignature('user-1', invite.inviteKey)
       await authorityEngine.saveInviteWithSigning(invite, 'iad', sig)
-      // Retrieve the actual CID that saveInviteWithSigning computed
-      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
-      const slot = await ctx.db.prepare('select Cid from InviteSlot where Name = :n').get({ n: 'Rejected' })
-      const slotCid = slot?.Cid as string
       await networkEngine.respondToInvite({
-        invite: { digest: slotCid } as never,
+        invite,
         isAccepted: false,
         invokes: undefined,
         inviteSignature: invite.inviteSignature,
@@ -1991,7 +1983,7 @@ describe('AuthorityEngine', () => {
       const slotRow = await ctx.db.prepare('SELECT Cid FROM InviteSlot WHERE InviteKey = :k').get({ k: invite.inviteKey })
       const slotCid = slotRow!.Cid as string
       await networkEngine.respondToInvite({
-        invite: { digest: slotCid } as never,
+        invite,
         isAccepted: true,
         invokes: { authority: { name: 'NewAuthority', domainName: 'na.example' } },
         inviteSignature: invite.inviteSignature,
@@ -2016,7 +2008,7 @@ describe('AuthorityEngine', () => {
       const slotRow = await ctx.db.prepare('SELECT Cid FROM InviteSlot WHERE InviteKey = :k').get({ k: invite.inviteKey })
       const slotCid = slotRow!.Cid as string
       await networkEngine.respondToInvite({
-        invite: { digest: slotCid } as never,
+        invite,
         isAccepted: true,
         invokes: { authority: { name: 'X', domainName: 'x.example' } },
         inviteSignature: invite.inviteSignature,
@@ -2026,7 +2018,7 @@ describe('AuthorityEngine', () => {
       let caught: unknown
       try {
         await networkEngine.respondToInvite({
-          invite: { digest: slotCid } as never,
+          invite,
           isAccepted: true,
           invokes: { authority: { name: 'Y', domainName: 'y.example' } },
           inviteSignature: invite.inviteSignature,
@@ -2048,7 +2040,7 @@ describe('AuthorityEngine', () => {
       const slotRow = await ctx.db.prepare('SELECT Cid FROM InviteSlot WHERE InviteKey = :k').get({ k: invite.inviteKey })
       const slotCid = slotRow!.Cid as string
       await networkEngine.respondToInvite({
-        invite: { digest: slotCid } as never,
+        invite,
         isAccepted: true,
         invokes: { authority: { name: 'AC', domainName: 'ac.example' } },
         inviteSignature: invite.inviteSignature,
@@ -2074,7 +2066,7 @@ describe('AuthorityEngine', () => {
       const slotRow = await ctx.db.prepare('SELECT Cid FROM InviteSlot WHERE InviteKey = :k').get({ k: invite.inviteKey })
       const slotCid = slotRow!.Cid as string
       await networkEngine.respondToInvite({
-        invite: { digest: slotCid } as never,
+        invite,
         isAccepted: false,
         invokes: undefined,
         inviteSignature: invite.inviteSignature,
@@ -2134,7 +2126,7 @@ describe('AuthorityEngine', () => {
       const slotRow = await ctx.db.prepare('SELECT Cid FROM InviteSlot WHERE InviteKey = :k').get({ k: invite.inviteKey })
       const slotCid = slotRow!.Cid as string
       await networkEngine.respondToInvite({
-        invite: { digest: slotCid } as never,
+        invite,
         isAccepted: true,
         invokes: { officer: { userId: 'user-2', title: 'Inspector' } },
         inviteSignature: invite.inviteSignature,
@@ -2160,7 +2152,7 @@ describe('AuthorityEngine', () => {
       const slotRow = await ctx.db.prepare('SELECT Cid FROM InviteSlot WHERE InviteKey = :k').get({ k: invite.inviteKey })
       const slotCid = slotRow!.Cid as string
       await networkEngine.respondToInvite({
-        invite: { digest: slotCid } as never,
+        invite,
         isAccepted: true,
         invokes: { officer: { userId: 'user-3', title: 'A' } },
         inviteSignature: invite.inviteSignature,
@@ -2170,7 +2162,7 @@ describe('AuthorityEngine', () => {
       let caught: unknown
       try {
         await networkEngine.respondToInvite({
-          invite: { digest: slotCid } as never,
+          invite,
           isAccepted: true,
           invokes: { officer: { userId: 'user-4', title: 'B' } },
           inviteSignature: invite.inviteSignature,
