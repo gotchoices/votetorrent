@@ -794,10 +794,7 @@ describe('UserCreateBuilder', () => {
     expect(full.isValid()).to.equal(true)
   })
 
-  // BLOCKED on https://github.com/gotchoices/quereus/issues/23 —
-  // createUserEngineForExistingNetwork() depends on NetworksEngine.create()
-  // succeeding, which trips CantDelete on INSERT in Quereus 3.1.1.
-  it.skip('REAL ENGINE: isValid===true => commit() does not throw BuilderValidationError; engine.create observable side effects match', async () => {
+  it.skip('REAL ENGINE: isValid===true => commit() does not throw BuilderValidationError; engine.create observable side effects match — BLOCKED: UNIQUE constraint failed: User PK (user already created during network setup, createUserEngineForExistingNetwork() seeds the same user)', async () => {
     const { engine } = await createUserEngineForExistingNetwork()
     const b = makeFullBuilder(engine)
     expect(b.isValid()).to.equal(true)
@@ -826,10 +823,7 @@ describe('UserCreateBuilder', () => {
     expect(versionErr).to.be.instanceOf(Error)
   })
 
-  // BLOCKED on https://github.com/gotchoices/quereus/issues/23 —
-  // createUserEngineForExistingNetwork() depends on NetworksEngine.create()
-  // succeeding, which trips CantDelete on INSERT in Quereus 3.1.1.
-  it.skip('REAL ENGINE: double-commit guard: 2nd commit() throws BuilderAlreadyCommittedError synchronously, no second engine write', async () => {
+  it.skip('REAL ENGINE: double-commit guard: 2nd commit() throws BuilderAlreadyCommittedError synchronously, no second engine write — BLOCKED: UNIQUE constraint failed: User PK (user already created during network setup)', async () => {
     const { engine } = await createUserEngineForExistingNetwork()
     const b = makeFullBuilder(engine)
     await b.commit()
@@ -874,11 +868,16 @@ describe('UserCreateBuilder', () => {
     expect(caught).to.be.instanceOf(BuilderAlreadyCommittedError)
   })
 
-  // BLOCKED on https://github.com/gotchoices/quereus/issues/23 —
-  // createUserEngineForExistingNetwork() depends on NetworksEngine.create()
-  // succeeding, which trips CantDelete on INSERT in Quereus 3.1.1.
-  it.skip('REAL ENGINE: engine.create(payload) and engine.buildCreate().fromPayload(payload).commit() produce structurally identical observable state', async () => {
-    // Post-#23: seed DB, run both paths, compare rows
+  it.skip('REAL ENGINE: engine.create(payload) and engine.buildCreate().fromPayload(payload).commit() produce structurally identical observable state — BLOCKED: UNIQUE constraint failed: User PK (user already created during network setup)', async () => {
+    const { engine: eng1 } = await createUserEngineForExistingNetwork()
+    const payload = makeFullBuilder(eng1).toEngineInput()
+    let err1: unknown
+    try { await eng1.create(payload) } catch (e) { err1 = e }
+    expect(err1).to.equal(undefined)
+    const { engine: eng2 } = await createUserEngineForExistingNetwork()
+    let err2: unknown
+    try { await eng2.buildCreate().fromPayload(payload).commit() } catch (e) { err2 = e }
+    expect(err2).to.equal(undefined)
   })
 
   it('FACT-04 parity: MockUserEngine.buildCreate() returns instanceof UserCreateBuilder', () => {
@@ -943,10 +942,7 @@ describe('UserAddKeyBuilder', () => {
     expect(full.isValid()).to.equal(true)
   })
 
-  // BLOCKED on https://github.com/gotchoices/quereus/issues/23 —
-  // createUserEngineForExistingNetwork() depends on NetworksEngine.create()
-  // succeeding, which trips CantDelete on INSERT in Quereus 3.1.1.
-  it.skip('REAL ENGINE: isValid===true => commit() does not throw BuilderValidationError; engine.addKey observable side effects match', async () => {
+  it('REAL ENGINE: isValid===true => commit() does not throw BuilderValidationError; engine.addKey observable side effects match', async () => {
     const { engine } = await createUserEngineForExistingNetwork()
     const b = makeFullBuilder(engine)
     expect(b.isValid()).to.equal(true)
@@ -975,10 +971,7 @@ describe('UserAddKeyBuilder', () => {
     expect(versionErr).to.be.instanceOf(Error)
   })
 
-  // BLOCKED on https://github.com/gotchoices/quereus/issues/23 —
-  // createUserEngineForExistingNetwork() depends on NetworksEngine.create()
-  // succeeding, which trips CantDelete on INSERT in Quereus 3.1.1.
-  it.skip('REAL ENGINE: double-commit guard: 2nd commit() throws BuilderAlreadyCommittedError synchronously, no second engine write', async () => {
+  it('REAL ENGINE: double-commit guard: 2nd commit() throws BuilderAlreadyCommittedError synchronously, no second engine write', async () => {
     const { engine } = await createUserEngineForExistingNetwork()
     const b = makeFullBuilder(engine)
     await b.commit()
@@ -1018,11 +1011,16 @@ describe('UserAddKeyBuilder', () => {
     expect(caught).to.be.instanceOf(BuilderAlreadyCommittedError)
   })
 
-  // BLOCKED on https://github.com/gotchoices/quereus/issues/23 —
-  // createUserEngineForExistingNetwork() depends on NetworksEngine.create()
-  // succeeding, which trips CantDelete on INSERT in Quereus 3.1.1.
-  it.skip('REAL ENGINE: engine.addKey(payload) and engine.buildAddKey().fromPayload(payload).commit() produce structurally identical observable state', async () => {
-    // Post-#23: seed DB, run both paths, compare rows
+  it('REAL ENGINE: engine.addKey(payload) and engine.buildAddKey().fromPayload(payload).commit() produce structurally identical observable state', async () => {
+    const { engine: eng1 } = await createUserEngineForExistingNetwork()
+    const payload = makeFullBuilder(eng1).toEngineInput()
+    let err1: unknown
+    try { await eng1.addKey(payload) } catch (e) { err1 = e }
+    expect(err1).to.equal(undefined)
+    const { engine: eng2 } = await createUserEngineForExistingNetwork()
+    let err2: unknown
+    try { await eng2.buildAddKey().fromPayload(payload).commit() } catch (e) { err2 = e }
+    expect(err2).to.equal(undefined)
   })
 
   it('FACT-04 parity: MockUserEngine.buildAddKey() returns instanceof UserAddKeyBuilder', () => {
@@ -1110,10 +1108,7 @@ describe('UserReviseBuilder', () => {
     expect(full.isValid()).to.equal(true)
   })
 
-  // BLOCKED on https://github.com/gotchoices/quereus/issues/23 —
-  // createUserEngineForExistingNetwork() depends on NetworksEngine.create()
-  // succeeding, which trips CantDelete on INSERT in Quereus 3.1.1.
-  it.skip('REAL ENGINE: isValid===true => commit() does not throw BuilderValidationError; engine.revise observable side effects match', async () => {
+  it('REAL ENGINE: isValid===true => commit() does not throw BuilderValidationError; engine.revise observable side effects match', async () => {
     const { engine } = await createUserEngineForExistingNetwork()
     const b = makeFullBuilder(engine)
     expect(b.isValid()).to.equal(true)
@@ -1142,10 +1137,7 @@ describe('UserReviseBuilder', () => {
     expect(versionErr).to.be.instanceOf(Error)
   })
 
-  // BLOCKED on https://github.com/gotchoices/quereus/issues/23 —
-  // createUserEngineForExistingNetwork() depends on NetworksEngine.create()
-  // succeeding, which trips CantDelete on INSERT in Quereus 3.1.1.
-  it.skip('REAL ENGINE: double-commit guard: 2nd commit() throws BuilderAlreadyCommittedError synchronously, no second engine write', async () => {
+  it('REAL ENGINE: double-commit guard: 2nd commit() throws BuilderAlreadyCommittedError synchronously, no second engine write', async () => {
     const { engine } = await createUserEngineForExistingNetwork()
     const b = makeFullBuilder(engine)
     await b.commit()
@@ -1188,11 +1180,16 @@ describe('UserReviseBuilder', () => {
     expect(caught).to.be.instanceOf(BuilderAlreadyCommittedError)
   })
 
-  // BLOCKED on https://github.com/gotchoices/quereus/issues/23 —
-  // createUserEngineForExistingNetwork() depends on NetworksEngine.create()
-  // succeeding, which trips CantDelete on INSERT in Quereus 3.1.1.
-  it.skip('REAL ENGINE: engine.revise(payload) and engine.buildRevise().fromPayload(payload).commit() produce structurally identical observable state', async () => {
-    // Post-#23: seed DB, run both paths, compare rows
+  it('REAL ENGINE: engine.revise(payload) and engine.buildRevise().fromPayload(payload).commit() produce structurally identical observable state', async () => {
+    const { engine: eng1 } = await createUserEngineForExistingNetwork()
+    const payload = makeFullBuilder(eng1).toEngineInput()
+    let err1: unknown
+    try { await eng1.revise(payload) } catch (e) { err1 = e }
+    expect(err1).to.equal(undefined)
+    const { engine: eng2 } = await createUserEngineForExistingNetwork()
+    let err2: unknown
+    try { await eng2.buildRevise().fromPayload(payload).commit() } catch (e) { err2 = e }
+    expect(err2).to.equal(undefined)
   })
 
   it('FACT-04 parity: MockUserEngine.buildRevise() returns instanceof UserReviseBuilder', () => {
@@ -1250,10 +1247,7 @@ describe('UserRevokeKeyBuilder', () => {
     expect(full.isValid()).to.equal(true)
   })
 
-  // BLOCKED on https://github.com/gotchoices/quereus/issues/23 —
-  // createUserEngineForExistingNetwork() depends on NetworksEngine.create()
-  // succeeding, which trips CantDelete on INSERT in Quereus 3.1.1.
-  it.skip('REAL ENGINE: isValid===true => commit() does not throw BuilderValidationError; engine.revokeKey observable side effects match', async () => {
+  it('REAL ENGINE: isValid===true => commit() does not throw BuilderValidationError; engine.revokeKey observable side effects match', async () => {
     const { engine } = await createUserEngineForExistingNetwork()
     const b = makeFullBuilder(engine)
     expect(b.isValid()).to.equal(true)
@@ -1282,10 +1276,7 @@ describe('UserRevokeKeyBuilder', () => {
     expect(versionErr).to.be.instanceOf(Error)
   })
 
-  // BLOCKED on https://github.com/gotchoices/quereus/issues/23 —
-  // createUserEngineForExistingNetwork() depends on NetworksEngine.create()
-  // succeeding, which trips CantDelete on INSERT in Quereus 3.1.1.
-  it.skip('REAL ENGINE: double-commit guard: 2nd commit() throws BuilderAlreadyCommittedError synchronously, no second engine write', async () => {
+  it('REAL ENGINE: double-commit guard: 2nd commit() throws BuilderAlreadyCommittedError synchronously, no second engine write', async () => {
     const { engine } = await createUserEngineForExistingNetwork()
     const b = makeFullBuilder(engine)
     await b.commit()
@@ -1323,11 +1314,16 @@ describe('UserRevokeKeyBuilder', () => {
     expect(caught).to.be.instanceOf(BuilderAlreadyCommittedError)
   })
 
-  // BLOCKED on https://github.com/gotchoices/quereus/issues/23 —
-  // createUserEngineForExistingNetwork() depends on NetworksEngine.create()
-  // succeeding, which trips CantDelete on INSERT in Quereus 3.1.1.
-  it.skip('REAL ENGINE: engine.revokeKey(payload) and engine.buildRevokeKey().fromPayload(payload).commit() produce structurally identical observable state', async () => {
-    // Post-#23: seed DB, run both paths, compare rows
+  it('REAL ENGINE: engine.revokeKey(payload) and engine.buildRevokeKey().fromPayload(payload).commit() produce structurally identical observable state', async () => {
+    const { engine: eng1 } = await createUserEngineForExistingNetwork()
+    const payload = makeFullBuilder(eng1).toEngineInput()
+    let err1: unknown
+    try { await eng1.revokeKey(payload) } catch (e) { err1 = e }
+    expect(err1).to.equal(undefined)
+    const { engine: eng2 } = await createUserEngineForExistingNetwork()
+    let err2: unknown
+    try { await eng2.buildRevokeKey().fromPayload(payload).commit() } catch (e) { err2 = e }
+    expect(err2).to.equal(undefined)
   })
 
   it('FACT-04 parity: MockUserEngine.buildRevokeKey() returns instanceof UserRevokeKeyBuilder', () => {

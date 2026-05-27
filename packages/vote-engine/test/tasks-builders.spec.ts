@@ -187,9 +187,7 @@ describe('CompleteKeyReleaseBuilder', () => {
     expect(builder).to.be.instanceOf(CompleteKeyReleaseBuilder)
   })
 
-  it.skip('REAL ENGINE equivalence smoke: engine.completeKeyRelease(task) vs builder commit() -- quereus#23', () => {
-    // Blocked on quereus#23 — unskip when upstream lands.
-  })
+  it.skip('REAL ENGINE equivalence smoke: engine.completeKeyRelease(task) vs builder.setTask(task).commit() — BLOCKED: no Task/ReleaseKeyTaskExtension row in DB (requires election creation pipeline to seed Task rows; election creation blocked by DateValid CHECK constraint)', async () => {})
 })
 
 // ====================================================================
@@ -281,9 +279,7 @@ describe('CompleteSignatureBuilder', () => {
     expect(builder).to.be.instanceOf(CompleteSignatureBuilder)
   })
 
-  it.skip('REAL ENGINE equivalence smoke: engine.completeSignature(task, result) vs builder commit() -- quereus#23', () => {
-    // Blocked on quereus#23 — unskip when upstream lands.
-  })
+  it.skip('REAL ENGINE equivalence smoke: engine.completeSignature(task, result) vs builder.setTask(task).setResult(result).commit() — BLOCKED: no pending Task row (requires election creation pipeline to seed AdminSigning + Task rows; election creation blocked by DateValid CHECK constraint)', async () => {})
 })
 
 // ====================================================================
@@ -355,7 +351,5 @@ describe('SetOnboardingTaskCompletedBuilder', () => {
     expect(builder).to.be.instanceOf(SetOnboardingTaskCompletedBuilder)
   })
 
-  it.skip('REAL ENGINE equivalence smoke: engine.setOnboardingTaskCompleted(taskId) vs builder commit() -- quereus#23', () => {
-    // Blocked on quereus#23 — unskip when upstream lands.
-  })
+  it.skip('REAL ENGINE equivalence smoke: engine.setOnboardingTaskCompleted(taskId) vs builder.setTaskId(taskId).commit() — BLOCKED: no Task row in DB (requires election creation pipeline to seed Task rows; election creation blocked by DateValid CHECK constraint)', async () => {})
 })

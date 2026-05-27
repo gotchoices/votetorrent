@@ -844,9 +844,7 @@ describe('ElectionsCreateElectionBuilder', () => {
     expect(missing.map(m => m.path)).to.deep.equal(['revision'])
   })
 
-  it.skip('REAL ENGINE: isValid===true => commit() succeeds — BLOCKED: quereus#23', async () => {
-    // Real engine needs populated DB context
-  })
+  it.skip('REAL ENGINE: isValid===true => commit() does not throw BuilderValidationError — BLOCKED: Election INSERT fails DateValid CHECK (election.date must be in the future; also requires Election row which needs createElection to succeed first)', async () => {})
 
   it('round-trip serialization + fromJSON kind/version rejection', () => {
     const init = makeElectionInit()
@@ -864,7 +862,7 @@ describe('ElectionsCreateElectionBuilder', () => {
       .to.throw(/unsupported version/)
   })
 
-  it.skip('REAL ENGINE: double-commit throws BuilderAlreadyCommittedError — BLOCKED: quereus#23', async () => {})
+  it.skip('REAL ENGINE: double-commit guard throws BuilderAlreadyCommittedError — BLOCKED: Election INSERT fails DateValid CHECK (same chain as isValid+commit test)', async () => {})
 
   it('toEngineInput shape matches ElectionInit + incomplete builder rejection', () => {
     const init = makeElectionInit()
@@ -888,7 +886,7 @@ describe('ElectionsCreateElectionBuilder', () => {
     expect(() => b.commit()).to.throw(BuilderAlreadyCommittedError)
   })
 
-  it.skip('REAL ENGINE: equivalence smoke — BLOCKED: quereus#23', async () => {})
+  it.skip('REAL ENGINE: equivalence smoke: engine.createElection(init) vs builder.fromPayload(init).commit() — BLOCKED: Election INSERT fails DateValid CHECK (election.date must be in the future; createElection pipeline blocked)', async () => {})
 
   it('FACT-04 parity: both engines return instanceof ElectionsCreateElectionBuilder', () => {
     const real = new ElectionsEngine()
@@ -946,7 +944,7 @@ describe('ElectionsAdjustElectionBuilder', () => {
     expect(missing.length).to.equal(0)
   })
 
-  it.skip('REAL ENGINE: isValid===true => commit() — BLOCKED: quereus#23', async () => {})
+  it.skip('REAL ENGINE: isValid===true => commit() does not throw BuilderValidationError — BLOCKED: ProposedElection INSERT blocked by UserValid CHECK (requires Officer + UserKey rows seeded by NetworksEngine.create; quereus#23)', async () => {})
 
   it('round-trip serialization', () => {
     const init = makeElectionInit()
@@ -958,7 +956,7 @@ describe('ElectionsAdjustElectionBuilder', () => {
     expect(restored.isValid()).to.equal(b.isValid())
   })
 
-  it.skip('REAL ENGINE: double-commit — BLOCKED: quereus#23', async () => {})
+  it.skip('REAL ENGINE: double-commit guard throws BuilderAlreadyCommittedError — BLOCKED: ProposedElection INSERT blocked by quereus#23 (same chain as isValid+commit test)', async () => {})
 
   it('toEngineInput shape + incomplete rejection', () => {
     const init = makeElectionInit()
@@ -979,7 +977,7 @@ describe('ElectionsAdjustElectionBuilder', () => {
     expect(() => b.commit()).to.throw(BuilderAlreadyCommittedError)
   })
 
-  it.skip('REAL ENGINE: equivalence smoke — BLOCKED: quereus#23', async () => {})
+  it.skip('REAL ENGINE: equivalence smoke: engine.adjustElection(init) vs builder.fromPayload(init).commit() — BLOCKED: ProposedElection INSERT blocked by UserValid CHECK (requires Officer + UserKey rows seeded by NetworksEngine.create; quereus#23)', async () => {})
 
   it('FACT-04 parity: both engines return instanceof ElectionsAdjustElectionBuilder', () => {
     const real = new ElectionsEngine()

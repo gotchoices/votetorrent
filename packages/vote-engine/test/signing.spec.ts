@@ -571,7 +571,7 @@ describe('SigningSignBuilder', () => {
     expect(builder).to.be.instanceOf(SigningSignBuilder)
   })
 
-  it.skip('REAL ENGINE equivalence smoke -- BLOCKED on quereus#23')
+  it.skip('REAL ENGINE equivalence smoke: engine.sign(nonce, sig) vs builder.fromPayload({nonce, signature}).commit() — BLOCKED: no AdminSigning row (startSigningSession INSERT blocked by quereus#23 — AdminSigning.UserValid CHECK requires Officer + UserKey rows only seeded via NetworksEngine.create)', async () => {})
 })
 
 // ===========================================================================
@@ -699,5 +699,5 @@ describe('SigningStartSigningSessionBuilder', () => {
     expect(builder).to.be.instanceOf(SigningStartSigningSessionBuilder)
   })
 
-  it.skip('REAL ENGINE equivalence smoke -- BLOCKED on quereus#23')
+  it.skip('REAL ENGINE equivalence smoke: engine.startSigningSession(...) vs builder.fromPayload(...).commit() — BLOCKED: AdminSigning INSERT blocked by quereus#23 (AdminSigning.UserValid CHECK requires Officer + UserKey rows only seeded via NetworksEngine.create)', async () => {})
 })
