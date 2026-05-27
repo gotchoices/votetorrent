@@ -62,12 +62,14 @@ const styles = StyleSheet.create({
 		alignItems: "center",
 		justifyContent: "center",
 		gap: 12,
+		minHeight: 24,
 	},
 	disabled: {
 		opacity: 0.5,
 	},
 	flex: {
 		flex: 1,
+		alignSelf: "stretch",
 	},
 	text: {
 		fontSize: 16,
