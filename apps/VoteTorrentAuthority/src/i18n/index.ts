@@ -238,6 +238,10 @@ const resources = {
 			// Slug fallback: FrameN per plan contingency (semantic rename deferred — see 07-05-SUMMARY)
 			screenScaffoldsDebugTitle: 'Onboarding Debug',
 			screenScaffoldsDebugIntro: 'Direct entry points for the six onboarding screens. Temporary dev route per D-12; replaced by real callers in phases 8–10.',
+			// Phase 8 gap-closure 08-07 — interim accept/send-mode invitation entries
+			debugAdministratorInvitationAccept: 'Administrator Invitation (Accept)',
+			debugAuthorityInvitationSend: 'Authority Invitation (Send)',
+			debugAuthorityInvitationAccept: 'Authority Invitation (Accept)',
 			// Frame 2 — Invitation sent (initial confirmation)
 			editElectionTitle: 'Invitation Sent',
 			editElectionBodyPrimary: 'Your invitation has been sent. You will be notified when the recipient responds.',
@@ -529,6 +533,10 @@ const resources = {
 			// Phase 7 onboarding keys (07-05) — ES mirrors EN per D-13; proper Spanish in Phase 11
 			screenScaffoldsDebugTitle: 'Onboarding Debug',
 			screenScaffoldsDebugIntro: 'Direct entry points for the six onboarding screens. Temporary dev route per D-12; replaced by real callers in phases 8–10.',
+			// Phase 8 gap-closure 08-07 — interim accept/send-mode invitation entries
+			debugAdministratorInvitationAccept: 'Invitación de administrador (aceptar)',
+			debugAuthorityInvitationSend: 'Invitación de autoridad (enviar)',
+			debugAuthorityInvitationAccept: 'Invitación de autoridad (aceptar)',
 			editElectionTitle: 'Invitation Sent',
 			editElectionBodyPrimary: 'Your invitation has been sent. You will be notified when the recipient responds.',
 			editElectionBodySecondary: 'If no response is received soon, you can resend the invitation.',

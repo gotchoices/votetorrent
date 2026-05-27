@@ -10,14 +10,30 @@ import type { NavigationProp } from "../../navigation/types";
 // Phase 7 dev-entry route per D-12. Lists every scaffold screen so reviewers can
 // reach all six before phases 8–10 wire the real callers.
 // Temporary by design — remove once callers are wired upstream.
-const FRAME_ROUTES = [
+//
+// Phase 8 gap-closure 08-07 Task 3: three additional entries for accept/send
+// invitation modes (closes UAT tests 7 + 8 accept-mode reachability). The
+// invitationId values are placeholders; MockInvitationEngine returns the seeded
+// invite for any id (VERIFICATION.md truth #10). A real Tasks/Inbox surface is
+// deferred to a future milestone per scope_constraints.
+type FrameRoute = {
+	key: string;
+	route: string;
+	titleKey: string;
+	params?: Record<string, unknown>;
+};
+
+const FRAME_ROUTES: ReadonlyArray<FrameRoute> = [
 	{ key: "editElection",            route: "EditElection",            titleKey: "editElectionTitle" },
 	{ key: "authorityDetail",         route: "AuthorityDetail",         titleKey: "authorityDetailTitle" },
 	{ key: "editElectionWithFilter",  route: "EditElectionWithFilter",  titleKey: "editElectionWithFilterTitle" },
 	{ key: "editRevisionForm",        route: "EditRevisionForm",        titleKey: "editRevisionFormTitle" },
 	{ key: "proposedElection",        route: "ProposedElection",        titleKey: "proposedElectionTitle" },
 	{ key: "proposedRevision",        route: "ProposedRevision",        titleKey: "proposedRevisionTitle" },
-] as const;
+	{ key: "administratorInvitationAccept", route: "AdministratorInvitation", titleKey: "debugAdministratorInvitationAccept", params: { mode: "accept", invitationId: "mock-officer-invite-1" } },
+	{ key: "authorityInvitationSend",       route: "AuthorityInvitation",     titleKey: "debugAuthorityInvitationSend",       params: { mode: "send" } },
+	{ key: "authorityInvitationAccept",     route: "AuthorityInvitation",     titleKey: "debugAuthorityInvitationAccept",     params: { mode: "accept", invitationId: "mock-authority-invite-1" } },
+];
 
 export default function ScreenScaffoldsDebugScreen() {
 	const { t } = useTranslation();
@@ -42,7 +58,7 @@ export default function ScreenScaffoldsDebugScreen() {
 							size="thin"
 							onPress={() => {
 								console.log(`screenScaffoldsDebug-navigate-${entry.route}`);
-								navigation.navigate(entry.route as any);
+								navigation.navigate(entry.route as any, entry.params as any);
 							}}
 						/>
 					</View>
