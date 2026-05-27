@@ -53,7 +53,8 @@ export class NetworkEngine implements INetworkEngine {
   /** This is used for a new authority when responding to an invite, not when made as part of a network creation */
   async createAuthority (
     authority: AuthorityInit,
-    admin: AdminInit
+    admin: AdminInit,
+    options?: { inviteSlotCid?: string; inviteSignature?: string }
   ): Promise<void> {
     const id = crypto.randomUUID()
     const imageRefJson = authority.imageUrl
@@ -67,7 +68,31 @@ export class NetworkEngine implements INetworkEngine {
     }
     const officerInit = firstOfficer.init
 
+    // Phase 12.2: invite context params (inviteSlotCid, inviteSignature)
+    // are passed through for second-authority creation per D-06/TEST-03.
+    // For the first authority these default to null (backward-compat).
+    const params = {
+      id,
+      name: authority.name,
+      domainName: authority.domainName,
+      imageRef: imageRefJson,
+      authorityId: id,
+      adminEffectiveAt: admin.effectiveAt,
+      thresholdPolicies: thresholdPoliciesJson,
+      userId: this.ctx.user?.id ?? null,
+      title: officerInit.title,
+      scopes: JSON.stringify(officerInit.scopes),
+      inviteSlotCid: options?.inviteSlotCid ?? null,
+      inviteSignature: options?.inviteSignature ?? null,
+      tid: 1
+    }
+
     try {
+      // Phase 12.2 split-batch fix: split Authority + Admin from Officer
+      // so Admin is committed before Officer (Officer.AdminValid CHECK
+      // requires Admin to exist). Defensive against future quereus
+      // versions that evaluate CHECKs eagerly per-INSERT.
+
       await this.ctx.db.exec(
 				`insert into Authority (
 					Id,
@@ -75,7 +100,7 @@ export class NetworkEngine implements INetworkEngine {
 					DomainName,
 					ImageRef
 				)
-				with context SigningNonce = null, InviteSlotCid = null, InviteSignature = null, Tid = :tid
+				with context SigningNonce = null, InviteSlotCid = :inviteSlotCid, InviteSignature = :inviteSignature, Tid = :tid
 				values (:id, :name, :domainName, :imageRef);
 
 				insert into Admin (
@@ -83,29 +108,24 @@ export class NetworkEngine implements INetworkEngine {
 					EffectiveAt,
 					ThresholdPolicies
 				)
-				with context SigningNonce = null, InviteSlotCid = null, InviteSignature = null, Tid = :tid
+				with context SigningNonce = null, InviteSlotCid = :inviteSlotCid, InviteSignature = :inviteSignature, Tid = :tid
 				values (:authorityId, :adminEffectiveAt, :thresholdPolicies);
+				`,
+				params
+      )
 
-				insert into Officer (
+      await this.ctx.db.exec(
+				`insert into Officer (
 					AuthorityId,
 					AdminEffectiveAt,
 					UserId,
 					Title,
 					Scopes
 				)
-				with context SigningNonce = null, InviteSlotCid = null, InviteSignature = null, Tid = :tid
+				with context SigningNonce = null, InviteSlotCid = :inviteSlotCid, InviteSignature = :inviteSignature, Tid = :tid
 				values (:authorityId, :adminEffectiveAt, :userId, :title, :scopes);
 				`,
-				{
-				  id,
-				  name: authority.name,
-				  domainName: authority.domainName,
-				  imageRef: imageRefJson,
-				  authorityId: id,
-				  adminEffectiveAt: admin.effectiveAt,
-				  thresholdPolicies: thresholdPoliciesJson,
-				  tid: 1
-				}
+				params
       )
     } catch (err) {
       if (err instanceof QuereusError) {
