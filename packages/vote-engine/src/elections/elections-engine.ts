@@ -1,4 +1,5 @@
 import { MisuseError, QuereusError } from '@quereus/quereus'
+import { Temporal } from 'temporal-polyfill'
 import { ElectionEngine } from '../election/election-engine.js'
 import type { EngineContext } from '../types.js'
 import type {
@@ -19,6 +20,9 @@ import { ElectionsAdjustElectionBuilder } from './builders/elections-adjust-elec
 // persistence milestone (PERSIST-01) — a process-local counter can collide
 // with stored Tids once DBs persist across runs.
 let nextTid = 1
+
+/** For test use only — returns the Tid that the next createElection() call will use. */
+export function peekNextElectionTid (): number { return nextTid }
 
 /**
  * ElectionsEngine — Phase 05 (ELEC-01, ELEC-02) implementation.
@@ -72,6 +76,8 @@ export class ElectionsEngine implements IElectionsEngine {
           id: e.id,
           authorityId: e.authorityId,
           title: e.title,
+          // ProposedElection has no DateValid CHECK — raw epoch ms is fine
+          // here (quereus 3.1.2 datetime columns accept raw numbers).
           date: e.date,
           revisionDeadline: e.revisionDeadline,
           ballotDeadline: e.ballotDeadline,
@@ -102,7 +108,7 @@ export class ElectionsEngine implements IElectionsEngine {
    * The schema's `InsertOnly check on update, delete (false)` is exactly
    * the constraint pattern that quereus#23 breaks today on INSERT.
    */
-  async createElection (election: ElectionInit): Promise<void> {
+  async createElection (election: ElectionInit, options?: { signingNonce?: string }): Promise<void> {
     this.requireCtx('createElection')
     const tid = nextTid++
     const e = election.election
@@ -131,16 +137,11 @@ export class ElectionsEngine implements IElectionsEngine {
           id: e.id,
           authorityId: e.authorityId,
           title: e.title,
-          date: e.date,
-          revisionDeadline: e.revisionDeadline,
-          ballotDeadline: e.ballotDeadline,
+          date: Temporal.Instant.fromEpochMilliseconds(e.date).toString(),
+          revisionDeadline: Temporal.Instant.fromEpochMilliseconds(e.revisionDeadline).toString(),
+          ballotDeadline: Temporal.Instant.fromEpochMilliseconds(e.ballotDeadline).toString(),
           type: e.type,
-          // The signing nonce is expected to be supplied by the caller via
-          // the surrounding signing session (Phase 6 / TEST-01 tightens the
-          // surface to take the nonce explicitly). Today we forward null;
-          // when the schema's InsertValid CHECK becomes enforceable post
-          // #23, the call site supplies it via context binding overload.
-          signingNonce: null,
+          signingNonce: options?.signingNonce ?? null,
           now: Date.now()
         }
       )
