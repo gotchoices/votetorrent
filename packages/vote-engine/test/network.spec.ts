@@ -16,6 +16,7 @@ import { NetworkProposeRevisionBuilder } from '../src/network/builders/network-p
 import { NetworkRespondToInviteBuilder } from '../src/network/builders/network-respond-to-invite-builder';
 import { NetworksEngine } from '../src/networks/networks-engine';
 import type { EngineContext } from '../src/types.js';
+import { createTestNetwork } from './fixtures/test-context.js';
 import { randomTestKeyPair } from './fixtures/keys.js';
 import { AsyncStorage } from './shims/react-native';
 import type {
@@ -407,10 +408,9 @@ describe('NetworkEngine', () => {
 	// 3. Authority Creation from within a Network
 	// -----------------------------------------------------------------------
 	describe('createAuthority', () => {
-		// BLOCKED: createAuthority for second authority requires invite context
-		it.skip('should create an authority with a generated UUID id', async () => {
-			const { engine } = await createNetworkEngine();
-			const ctx = (engine as unknown as { ctx: EngineContext }).ctx;
+		// BLOCKED: second authority requires full invite flow — InsertValid CHECK fails without valid InviteSlot
+		it.skip('should create an authority with a generated UUID id — BLOCKED: second authority requires full invite flow (InsertValid CHECK fails without valid InviteSlot)', async () => {
+			const { networkEngine: engine, ctx } = await createTestNetwork();
 			await engine.createAuthority(
 				{ name: 'New Authority', domainName: 'new.example.com' },
 				{
@@ -437,9 +437,8 @@ describe('NetworkEngine', () => {
 				);
 		});
 
-		it.skip('should insert Authority, Admin, and Officer rows in one transaction', async () => {
-			const { engine } = await createNetworkEngine();
-			const ctx = (engine as unknown as { ctx: EngineContext }).ctx;
+		it.skip('should insert Authority, Admin, and Officer rows in one transaction — BLOCKED: second authority requires full invite flow (InsertValid CHECK fails without valid InviteSlot)', async () => {
+			const { networkEngine: engine, ctx } = await createTestNetwork();
 			const effectiveAt = Date.now();
 			await engine.createAuthority(
 				{ name: 'TxnAuthority', domainName: 'txn.example.com' },
@@ -551,9 +550,8 @@ describe('NetworkEngine', () => {
 			if (caught) { expect(caught).to.be.instanceOf(Error) };
 		});
 
-		it.skip('should set Authority.DomainName to the provided value or null — BLOCKED on quereus#23', async () => {
-			const { engine } = await createNetworkEngine();
-			const ctx = (engine as unknown as { ctx: EngineContext }).ctx;
+		it.skip('should set Authority.DomainName to the provided value or null — BLOCKED: second authority requires full invite flow (InsertValid CHECK fails without valid InviteSlot)', async () => {
+			const { networkEngine: engine, ctx } = await createTestNetwork();
 			await engine.createAuthority(
 				{ name: 'WithDomain', domainName: 'wd.example.com' },
 				{
@@ -586,9 +584,8 @@ describe('NetworkEngine', () => {
 			expect(noDomain?.DomainName).to.equal(null);
 		});
 
-		it.skip('should serialize imageRef as JSON in the Authority row — BLOCKED on quereus#23', async () => {
-			const { engine } = await createNetworkEngine();
-			const ctx = (engine as unknown as { ctx: EngineContext }).ctx;
+		it.skip('should serialize imageRef as JSON in the Authority row — BLOCKED: second authority requires full invite flow (InsertValid CHECK fails without valid InviteSlot)', async () => {
+			const { networkEngine: engine, ctx } = await createTestNetwork();
 			await engine.createAuthority(
 				{
 					name: 'WithImage',
