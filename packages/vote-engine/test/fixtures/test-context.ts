@@ -317,6 +317,68 @@ export async function addTestElection (auth: TestAuthorityContext): Promise<Test
   const tid = peekNextElectionTid()
   const { nonce } = await seedElectionSigning(auth.ctx, auth.authority.id, init, auth.user, tid)
   await electionsEngine.createElection(init, { signingNonce: nonce })
+
+  // Also seed ElectionRevision (revision 0) so tests that need getElectionDetails work.
+  // The ElectionRevision.MutationValid CHECK requires its own AdminSignature pipeline.
+  const revNonce = crypto.randomUUID()
+  const revSig = makeTestSignature(auth.user)
+  const adminRow = await auth.ctx.db
+    .prepare('select EffectiveAt from CurrentAdmin where AuthorityId = :authorityId')
+    .get({ authorityId: auth.authority.id })
+  if (!adminRow) throw new Error('addTestElection: CurrentAdmin not found for revision signing')
+  const adminEffectiveAt = adminRow.EffectiveAt as number | string
+  const revTimestamp = Temporal.Now.instant().add({ seconds: -1 }).toString({ smallestUnit: 'second' })
+  const revTags = JSON.stringify(init.revision.tags)
+  const revTimeline = JSON.stringify(init.revision.timeline)
+
+  await auth.ctx.db.exec(
+    `insert into AdminSigning (
+      Nonce, AuthorityId, AdminEffectiveAt, Scope, Digest, UserId, SignerKey, Signature
+    )
+    with context now = :now, IsSignatureValid = true, IsSignerKeyValid = true
+    values (
+      :nonce, :authorityId, :adminEffectiveAt, 'mel',
+      Digest(1, :electionId, 0, :revTimestamp, :tags, :instructions, :timeline, :keyholderThreshold),
+      :userId, :signerKey, :signature
+    )`,
+    {
+      nonce: revNonce,
+      authorityId: auth.authority.id,
+      adminEffectiveAt,
+      electionId: init.election.id,
+      revTimestamp,
+      tags: revTags,
+      instructions: init.revision.instructions,
+      timeline: revTimeline,
+      keyholderThreshold: init.revision.keyholderThreshold,
+      userId: auth.user.id,
+      signerKey: revSig.signerKey,
+      signature: revSig.signature,
+      now: Date.now(),
+    }
+  )
+
+  const revSigning = new SigningEngine(auth.ctx)
+  await revSigning.sign(revNonce, revSig)
+
+  // Insert ElectionRevision with the signing nonce
+  const nowIso = Temporal.Now.instant().toString({ smallestUnit: 'second' })
+  await auth.ctx.db.exec(
+    `insert into ElectionRevision (ElectionId, Revision, RevisionTimestamp, Tags, Instructions, Timeline, KeyholderThreshold)
+     with context SigningNonce = :signingNonce, Tid = 1, now = :now
+     values (:electionId, 0, :revTimestamp, :tags, :instructions, :timeline, :keyholderThreshold)`,
+    {
+      signingNonce: revNonce,
+      electionId: init.election.id,
+      revTimestamp,
+      tags: revTags,
+      instructions: init.revision.instructions,
+      timeline: revTimeline,
+      keyholderThreshold: init.revision.keyholderThreshold,
+      now: nowIso,
+    }
+  )
+
   const electionEngine = await electionsEngine.openElection(init.election.id)
   return { ...auth, electionsEngine, electionEngine }
 }

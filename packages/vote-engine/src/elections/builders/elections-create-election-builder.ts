@@ -174,13 +174,13 @@ export class ElectionsCreateElectionBuilder implements IElectionsCreateElectionB
     }
   }
 
-  commit (): Promise<void> {
+  commit (options?: { signingNonce?: string }): Promise<void> {
     if (this.committed) {
       throw new BuilderAlreadyCommittedError(ElectionsCreateElectionBuilder.KIND)
     }
     this.toEngineInput() // validate
     this.committed = true
-    return this.engine.createElection(this.toEngineInput())
+    return this.engine.createElection(this.toEngineInput(), options)
   }
 
   isValid (): boolean {

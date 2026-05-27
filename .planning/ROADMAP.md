@@ -578,7 +578,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*:
 
-- [ ] 12.2-extend-test-fixtures-for-e2e-seeding/12.2-02-PLAN.md — Composable test helpers: seedElectionSigning, addTestElection rewrite, seedAuthorityInvite, makeDistinctTestUser, makeTestSignature
+- [x] 12.2-extend-test-fixtures-for-e2e-seeding/12.2-02-PLAN.md — Composable test helpers: seedElectionSigning, addTestElection rewrite, seedAuthorityInvite, makeDistinctTestUser, makeTestSignature
 
 **Wave 3** *(blocked on Wave 2 completion)*:
 

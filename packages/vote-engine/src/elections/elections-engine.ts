@@ -142,7 +142,7 @@ export class ElectionsEngine implements IElectionsEngine {
           ballotDeadline: Temporal.Instant.fromEpochMilliseconds(e.ballotDeadline).toString(),
           type: e.type,
           signingNonce: options?.signingNonce ?? null,
-          now: Date.now()
+          now: Temporal.Now.instant().toString({ smallestUnit: 'second' })
         }
       )
     } catch (err) {

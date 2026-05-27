@@ -513,9 +513,9 @@ declare schema main
 		Id text primary key, -- 32 byte random id
 		AuthorityId text, -- authority that created the election
 		Title text, -- title of the election
-		Date datetime, -- date of the election
-		RevisionDeadline datetime, -- deadline for making revisions to the election, cannot be revised itself
-		BallotDeadline datetime, -- deadline for adding or revising ballots to the election
+		Date text, -- date of the election (ISO 8601 Z-suffix string; quereus 3.1.2 rejects Z-suffix on datetime columns)
+		RevisionDeadline text, -- deadline for making revisions to the election, cannot be revised itself
+		BallotDeadline text, -- deadline for adding or revising ballots to the election
 		Type text, -- references ElectionType(Code)
 		constraint AuthorityIdValid check (exists (select 1 from Authority A where A.Id = new.AuthorityId)),
 		constraint DateValid check (isISODatetime(Date) and like('%Z', Date) and Date >= context.now),
@@ -536,7 +536,7 @@ declare schema main
 			)
 		)
 	)
-		with context ( SigningNonce text, Tid int, now datetime );
+		with context ( SigningNonce text, Tid int, now text );
 
 	table ProposedElection (
 		Id text primary key, -- 32 byte random id
@@ -553,7 +553,7 @@ declare schema main
 	table ElectionRevision (
 		ElectionId text primary key, -- references Election.Id
 		Revision integer, -- references Election.Revision
-		RevisionTimestamp datetime, -- timestamp of the revision
+		RevisionTimestamp text, -- timestamp of the revision (ISO 8601 Z-suffix; quereus 3.1.2 rejects Z-suffix on datetime columns)
 		Tags text, -- json array of strings
 		Instructions text, -- markdown instructions for the election
 		Timeline text, -- json object { [ElectionEvent]: datetime }
@@ -582,7 +582,7 @@ declare schema main
 			)
 		)
 	)
-		with context ( SigningNonce text, Tid int, now datetime );
+		with context ( SigningNonce text, Tid int, now text );
 
 	table ProposedElectionRevision (
 		ElectionId text primary key, -- references Election.Id

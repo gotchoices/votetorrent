@@ -18,7 +18,7 @@ import { ElectionRevokeKeyholderBuilder } from '../src/election/builders/electio
 import { ElectionEngine } from '../src/election/election-engine.js'
 import type { ElectionSubject } from '../src/election/election-engine.js'
 import { MockElectionEngine } from '../src/election/mock-election-engine.js'
-import { createTestNetwork } from './fixtures/test-context.js'
+import { createTestNetwork, addTestAuthority, addTestElection } from './fixtures/test-context.js'
 import type {
   Ballot,
   ElectionRevisionInit,
@@ -140,10 +140,12 @@ describe('ElectionProposeBallotBuilder', () => {
     expect(missing).to.include('authorityId')
   })
 
-  it.skip('REAL ENGINE: isValid===true => commit() does not throw BuilderValidationError — BLOCKED: ProposedBallot INSERT fails ElectionIdValid CHECK (no Election row — createElection blocked by DateValid CHECK constraint)', async () => {
-    const { ctx } = await createTestNetwork()
-    const engine = new ElectionEngine(testElectionSubject, ctx)
-    const b = new ElectionProposeBallotBuilder(engine).fromPayload(makeBallot())
+  it('REAL ENGINE: isValid===true => commit() does not throw BuilderValidationError', async () => {
+    const net = await createTestNetwork()
+    const auth = await addTestAuthority(net)
+    const elCtx = await addTestElection(auth)
+    const engine = new ElectionEngine({ id: 'election-1', authorityId: auth.authority.id }, elCtx.ctx)
+    const b = new ElectionProposeBallotBuilder(engine).fromPayload(makeBallot({ authorityId: auth.authority.id }))
     expect(b.isValid()).to.equal(true)
     await b.commit()
   })
@@ -160,10 +162,12 @@ describe('ElectionProposeBallotBuilder', () => {
       .to.throw(/unknown kind/)
   })
 
-  it.skip('REAL ENGINE: double-commit guard throws BuilderAlreadyCommittedError — BLOCKED: ProposedBallot INSERT fails ElectionIdValid CHECK (no Election row — createElection blocked by DateValid CHECK constraint)', async () => {
-    const { ctx } = await createTestNetwork()
-    const engine = new ElectionEngine(testElectionSubject, ctx)
-    const b = new ElectionProposeBallotBuilder(engine).fromPayload(makeBallot())
+  it('REAL ENGINE: double-commit guard throws BuilderAlreadyCommittedError', async () => {
+    const net = await createTestNetwork()
+    const auth = await addTestAuthority(net)
+    const elCtx = await addTestElection(auth)
+    const engine = new ElectionEngine({ id: 'election-1', authorityId: auth.authority.id }, elCtx.ctx)
+    const b = new ElectionProposeBallotBuilder(engine).fromPayload(makeBallot({ authorityId: auth.authority.id }))
     await b.commit()
     let caught: unknown
     try { b.commit() } catch (err) { caught = err }
@@ -187,17 +191,24 @@ describe('ElectionProposeBallotBuilder', () => {
     expect(() => b.commit()).to.throw(BuilderAlreadyCommittedError)
   })
 
-  it.skip('REAL ENGINE: equivalence smoke: engine.proposeBallot(ballot) vs builder.fromPayload(ballot).commit() — BLOCKED: ProposedBallot INSERT fails ElectionIdValid CHECK (no Election row — createElection blocked by DateValid CHECK constraint)', async () => {
-    const ballot = makeBallot()
-    const { ctx: ctx1 } = await createTestNetwork()
-    const engine1 = new ElectionEngine(testElectionSubject, ctx1)
+  it('REAL ENGINE: equivalence smoke: engine.proposeBallot(ballot) vs builder.fromPayload(ballot).commit()', async () => {
+    // Direct path
+    const net1 = await createTestNetwork()
+    const auth1 = await addTestAuthority(net1)
+    const elCtx1 = await addTestElection(auth1)
+    const engine1 = new ElectionEngine({ id: 'election-1', authorityId: auth1.authority.id }, elCtx1.ctx)
+    const ballot1 = makeBallot({ authorityId: auth1.authority.id })
     let err1: unknown
-    try { await engine1.proposeBallot(ballot) } catch (e) { err1 = e }
+    try { await engine1.proposeBallot(ballot1) } catch (e) { err1 = e }
     expect(err1).to.equal(undefined)
-    const { ctx: ctx2 } = await createTestNetwork()
-    const engine2 = new ElectionEngine(testElectionSubject, ctx2)
+    // Builder path
+    const net2 = await createTestNetwork()
+    const auth2 = await addTestAuthority(net2)
+    const elCtx2 = await addTestElection(auth2)
+    const engine2 = new ElectionEngine({ id: 'election-1', authorityId: auth2.authority.id }, elCtx2.ctx)
+    const ballot2 = makeBallot({ authorityId: auth2.authority.id })
     let err2: unknown
-    try { await engine2.buildProposeBallot().fromPayload(ballot).commit() } catch (e) { err2 = e }
+    try { await engine2.buildProposeBallot().fromPayload(ballot2).commit() } catch (e) { err2 = e }
     expect(err2).to.equal(undefined)
   })
 
@@ -250,9 +261,11 @@ describe('ElectionProposeRevisionBuilder', () => {
     expect(missing).to.include('keyholders')
   })
 
-  it.skip('REAL ENGINE: isValid===true => commit() does not throw BuilderValidationError — BLOCKED: ProposedElectionRevision INSERT fails ElectionIdValid CHECK (no Election row — createElection blocked by DateValid CHECK constraint)', async () => {
-    const { ctx } = await createTestNetwork()
-    const engine = new ElectionEngine(testElectionSubject, ctx)
+  it('REAL ENGINE: isValid===true => commit() does not throw BuilderValidationError', async () => {
+    const net = await createTestNetwork()
+    const auth = await addTestAuthority(net)
+    const elCtx = await addTestElection(auth)
+    const engine = new ElectionEngine({ id: 'election-1', authorityId: auth.authority.id }, elCtx.ctx)
     const b = new ElectionProposeRevisionBuilder(engine).fromPayload(makeElectionRevisionInit())
     expect(b.isValid()).to.equal(true)
     await b.commit()
@@ -268,9 +281,11 @@ describe('ElectionProposeRevisionBuilder', () => {
     expect(restored.isValid()).to.equal(b.isValid())
   })
 
-  it.skip('REAL ENGINE: double-commit guard throws BuilderAlreadyCommittedError — BLOCKED: ProposedElectionRevision INSERT fails ElectionIdValid CHECK (no Election row — createElection blocked by DateValid CHECK constraint)', async () => {
-    const { ctx } = await createTestNetwork()
-    const engine = new ElectionEngine(testElectionSubject, ctx)
+  it('REAL ENGINE: double-commit guard throws BuilderAlreadyCommittedError', async () => {
+    const net = await createTestNetwork()
+    const auth = await addTestAuthority(net)
+    const elCtx = await addTestElection(auth)
+    const engine = new ElectionEngine({ id: 'election-1', authorityId: auth.authority.id }, elCtx.ctx)
     const b = new ElectionProposeRevisionBuilder(engine).fromPayload(makeElectionRevisionInit())
     await b.commit()
     let caught: unknown
@@ -295,15 +310,21 @@ describe('ElectionProposeRevisionBuilder', () => {
     expect(() => b.commit()).to.throw(BuilderAlreadyCommittedError)
   })
 
-  it.skip('REAL ENGINE: equivalence smoke: engine.proposeRevision(rev) vs builder.fromPayload(rev).commit() — BLOCKED: ProposedElectionRevision INSERT fails ElectionIdValid CHECK (no Election row — createElection blocked by DateValid CHECK constraint)', async () => {
+  it('REAL ENGINE: equivalence smoke: engine.proposeRevision(rev) vs builder.fromPayload(rev).commit()', async () => {
     const rev = makeElectionRevisionInit()
-    const { ctx: ctx1 } = await createTestNetwork()
-    const engine1 = new ElectionEngine(testElectionSubject, ctx1)
+    // Direct path
+    const net1 = await createTestNetwork()
+    const auth1 = await addTestAuthority(net1)
+    const elCtx1 = await addTestElection(auth1)
+    const engine1 = new ElectionEngine({ id: 'election-1', authorityId: auth1.authority.id }, elCtx1.ctx)
     let err1: unknown
     try { await engine1.proposeRevision(rev) } catch (e) { err1 = e }
     expect(err1).to.equal(undefined)
-    const { ctx: ctx2 } = await createTestNetwork()
-    const engine2 = new ElectionEngine(testElectionSubject, ctx2)
+    // Builder path
+    const net2 = await createTestNetwork()
+    const auth2 = await addTestAuthority(net2)
+    const elCtx2 = await addTestElection(auth2)
+    const engine2 = new ElectionEngine({ id: 'election-1', authorityId: auth2.authority.id }, elCtx2.ctx)
     let err2: unknown
     try { await engine2.buildProposeRevision().fromPayload(rev).commit() } catch (e) { err2 = e }
     expect(err2).to.equal(undefined)
@@ -369,9 +390,11 @@ describe('ElectionInviteKeyholderBuilder', () => {
     expect(missing).to.deep.equal(['electionId'])
   })
 
-  it.skip('REAL ENGINE: isValid===true => commit() does not throw BuilderValidationError — BLOCKED: Keyholder INSERT fails ElectionIdValid CHECK (no Election row — createElection blocked by DateValid CHECK constraint)', async () => {
-    const { ctx } = await createTestNetwork()
-    const engine = new ElectionEngine(testElectionSubject, ctx)
+  it('REAL ENGINE: isValid===true => commit() does not throw BuilderValidationError', async () => {
+    const net = await createTestNetwork()
+    const auth = await addTestAuthority(net)
+    const elCtx = await addTestElection(auth)
+    const engine = new ElectionEngine({ id: 'election-1', authorityId: auth.authority.id }, elCtx.ctx)
     const b = new ElectionInviteKeyholderBuilder(engine).fromPayload({ keyholder: makeKeyholderInvite(), electionId: 'election-1' })
     expect(b.isValid()).to.equal(true)
     await b.commit()
@@ -387,9 +410,11 @@ describe('ElectionInviteKeyholderBuilder', () => {
     expect(restored.isValid()).to.equal(b.isValid())
   })
 
-  it.skip('REAL ENGINE: double-commit guard throws BuilderAlreadyCommittedError — BLOCKED: Keyholder INSERT fails ElectionIdValid CHECK (no Election row — createElection blocked by DateValid CHECK constraint)', async () => {
-    const { ctx } = await createTestNetwork()
-    const engine = new ElectionEngine(testElectionSubject, ctx)
+  it('REAL ENGINE: double-commit guard throws BuilderAlreadyCommittedError', async () => {
+    const net = await createTestNetwork()
+    const auth = await addTestAuthority(net)
+    const elCtx = await addTestElection(auth)
+    const engine = new ElectionEngine({ id: 'election-1', authorityId: auth.authority.id }, elCtx.ctx)
     const b = new ElectionInviteKeyholderBuilder(engine).fromPayload({ keyholder: makeKeyholderInvite(), electionId: 'election-1' })
     await b.commit()
     let caught: unknown
@@ -415,15 +440,21 @@ describe('ElectionInviteKeyholderBuilder', () => {
     expect(() => b.commit()).to.throw(BuilderAlreadyCommittedError)
   })
 
-  it.skip('REAL ENGINE: equivalence smoke: engine.inviteKeyholder(payload) vs builder.fromPayload(payload).commit() — BLOCKED: Keyholder INSERT fails ElectionIdValid CHECK (no Election row — createElection blocked by DateValid CHECK constraint)', async () => {
+  it('REAL ENGINE: equivalence smoke: engine.inviteKeyholder(payload) vs builder.fromPayload(payload).commit()', async () => {
     const payload = { keyholder: makeKeyholderInvite(), electionId: 'election-1' }
-    const { ctx: ctx1 } = await createTestNetwork()
-    const engine1 = new ElectionEngine(testElectionSubject, ctx1)
+    // Direct path
+    const net1 = await createTestNetwork()
+    const auth1 = await addTestAuthority(net1)
+    const elCtx1 = await addTestElection(auth1)
+    const engine1 = new ElectionEngine({ id: 'election-1', authorityId: auth1.authority.id }, elCtx1.ctx)
     let err1: unknown
     try { await engine1.inviteKeyholder(payload.keyholder, payload.electionId) } catch (e) { err1 = e }
     expect(err1).to.equal(undefined)
-    const { ctx: ctx2 } = await createTestNetwork()
-    const engine2 = new ElectionEngine(testElectionSubject, ctx2)
+    // Builder path
+    const net2 = await createTestNetwork()
+    const auth2 = await addTestAuthority(net2)
+    const elCtx2 = await addTestElection(auth2)
+    const engine2 = new ElectionEngine({ id: 'election-1', authorityId: auth2.authority.id }, elCtx2.ctx)
     let err2: unknown
     try { await engine2.buildInviteKeyholder().fromPayload(payload).commit() } catch (e) { err2 = e }
     expect(err2).to.equal(undefined)
