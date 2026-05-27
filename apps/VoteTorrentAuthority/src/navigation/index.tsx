@@ -47,6 +47,36 @@ import ScreenScaffoldsDebugScreen from "../screens/tasks/ScreenScaffoldsDebugScr
 import ElectionDetailsScreen from "../screens/elections/ElectionDetailsScreen";
 import { CreateElectionScreen } from "../screens/elections/CreateElectionScreen";
 import EditBallotScreen from "../screens/ballots/EditBallotScreen";
+// Phase 9 plan 09-04 — Ballot flow screens + scoped draft provider (D-10, D-11)
+import CreateBallotScreen from "../screens/ballots/CreateBallotScreen";
+import EditQuestionScreen from "../screens/ballots/EditQuestionScreen";
+import EditQuestionOption from "../screens/ballots/EditQuestionOption";
+import { BallotDraftProvider } from "../screens/ballots/providers/BallotDraftProvider";
+
+/**
+ * Ballot-flow scoping per D-11: each of the three ballot screens is registered
+ * with a per-screen wrapper that mounts BallotDraftProvider. We use the
+ * portable wrapper strategy (b) from the plan rather than `screenLayout` so
+ * the wrap is local and obvious. All three screens share the SAME provider
+ * instance only when navigated in sequence as part of the same nav stack —
+ * which matches the "survives back-navigation within the flow" semantics in
+ * D-11. The provider is NOT global (no AppProvider sibling).
+ */
+const CreateBallotScreenWrapped = (props: React.ComponentProps<typeof CreateBallotScreen>) => (
+	<BallotDraftProvider>
+		<CreateBallotScreen {...props} />
+	</BallotDraftProvider>
+);
+const EditQuestionScreenWrapped = (props: React.ComponentProps<typeof EditQuestionScreen>) => (
+	<BallotDraftProvider>
+		<EditQuestionScreen {...props} />
+	</BallotDraftProvider>
+);
+const EditQuestionOptionWrapped = (props: React.ComponentProps<typeof EditQuestionOption>) => (
+	<BallotDraftProvider>
+		<EditQuestionOption {...props} />
+	</BallotDraftProvider>
+);
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator();
@@ -389,6 +419,26 @@ export const RootNavigator = () => {
 				name="EditBallot"
 				component={EditBallotScreen}
 				options={{ title: t("ballotTemplate") }}
+			/>
+			{/* Phase 9 plan 09-04 (BALUI-01..04) — Ballot flow screen-stack.
+			    Each screen mounts its own BallotDraftProvider (D-11 scoped).
+			    Native-stack keeps pushed screens mounted, so the parent
+			    CreateBallot provider survives across EditQuestion/Option
+			    pushes and receives carry-back data via popTo route params. */}
+			<Stack.Screen
+				name="CreateBallot"
+				component={CreateBallotScreenWrapped}
+				options={{ title: t("createBallot") }}
+			/>
+			<Stack.Screen
+				name="EditQuestion"
+				component={EditQuestionScreenWrapped}
+				options={{ title: t("question") }}
+			/>
+			<Stack.Screen
+				name="EditQuestionOption"
+				component={EditQuestionOptionWrapped}
+				options={{ title: t("option") }}
 			/>
 		</Stack.Navigator>
 	);

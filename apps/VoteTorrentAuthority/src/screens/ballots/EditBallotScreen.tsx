@@ -1,6 +1,6 @@
 import React from "react";
-import { View, StyleSheet, FlatList, ScrollView } from "react-native";
-import { useTheme } from "@react-navigation/native";
+import { View, StyleSheet, ScrollView } from "react-native";
+import { ExtendedTheme, useTheme } from "@react-navigation/native";
 import { ThemedText } from "../../components/ThemedText";
 import { CustomTextInput } from "../../components/CustomTextInput";
 import { InfoCard } from "../../components/InfoCard";
@@ -9,11 +9,24 @@ import { globalStyles } from "../../theme/styles";
 import { useTranslation } from "react-i18next";
 import { CustomButton } from "../../components/CustomButton";
 
+/**
+ * EditBallotScreen — polish for BALUI-02 (Figma frame 57:490).
+ *
+ * Read-only view of a published ballot template. Strings via t(); theme
+ * tokens for all colors. The hardcoded "Election Title"/"Election Date"
+ * placeholders are replaced by t() label rows pending the engine wiring
+ * that surfaces real values (deferred per D-18 / 09-04 plan boundary).
+ */
 const EditBallotScreen = () => {
-	const { colors } = useTheme();
+	const { colors } = useTheme() as ExtendedTheme;
 	const { t } = useTranslation();
 
-	const questions: Array<{ id: string; questionTitle: string; code: string; type: string }> = [];
+	const questions: Array<{
+		id: string;
+		questionTitle: string;
+		code: string;
+		type: string;
+	}> = [];
 
 	return (
 		<View style={styles.content}>
@@ -22,13 +35,13 @@ const EditBallotScreen = () => {
 					<View style={styles.detail}>
 						<ThemedText type="defaultSemiBold">{t("election")}: </ThemedText>
 						<ThemedText numberOfLines={1} ellipsizeMode="tail">
-							Election Title
+							{t("electionTitle")}
 						</ThemedText>
 					</View>
 					<View style={styles.detail}>
 						<ThemedText type="defaultSemiBold">{t("date")}: </ThemedText>
 						<ThemedText numberOfLines={1} ellipsizeMode="tail">
-							Election Date
+							{t("date")}
 						</ThemedText>
 					</View>
 				</View>
@@ -40,18 +53,16 @@ const EditBallotScreen = () => {
 					<ThemedText>{t("description")}</ThemedText>
 					<CustomTextInput />
 				</View>
-				{questions.map(
-					(question: { id: string; questionTitle: string; code: string; type: string }) => (
-						<InfoCard
-							key={question.id}
-							title={question.questionTitle}
-							additionalInfo={[
-								{ label: t("code"), value: question.code },
-								{ label: t("type"), value: question.type },
-							]}
-						/>
-					)
-				)}
+				{questions.map((question) => (
+					<InfoCard
+						key={question.id}
+						title={question.questionTitle}
+						additionalInfo={[
+							{ label: t("code"), value: question.code },
+							{ label: t("type"), value: question.type },
+						]}
+					/>
+				))}
 				<ChipButton label={t("addQuestion")} />
 				<View style={styles.section}>
 					<View style={styles.row}>
@@ -71,8 +82,6 @@ const EditBallotScreen = () => {
 					onPress={() => {}}
 					forceDarkText={false}
 					icon={"save"}
-					// backgroundColor={edited ? colors.success : colors.accent}
-					// disabled={!edited}
 				/>
 			</View>
 		</View>
@@ -85,9 +94,6 @@ const localStyles = StyleSheet.create({
 	},
 	title: {
 		marginBottom: 16,
-	},
-	section: {
-		marginBottom: 20,
 	},
 	row: {
 		flexDirection: "row",

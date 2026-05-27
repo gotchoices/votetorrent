@@ -1,38 +1,99 @@
 import { ScrollView, StyleSheet, View } from "react-native";
 import { globalStyles } from "../../theme/styles";
-import { useTheme } from "@react-navigation/native";
+import {
+	ExtendedTheme,
+	useTheme,
+	useRoute,
+	useNavigation,
+} from "@react-navigation/native";
+import type { RouteProp } from "@react-navigation/native";
 import { ThemedText } from "../../components/ThemedText";
 import { CustomTextInput } from "../../components/CustomTextInput";
 import { useTranslation } from "react-i18next";
 import { Image } from "react-native";
 import { useState } from "react";
 import { CustomButton } from "../../components/CustomButton";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import type { RootStackParamList } from "../../navigation/types";
+import { useBallotDraft } from "./providers/BallotDraftProvider";
+import type { Option } from "@votetorrent/vote-core";
 
+/**
+ * EditQuestionOption — polish for BALUI-04 (Figma frame 57:740).
+ *
+ * Leaf screen of the Ballot screen-stack: assembles an Option and on SAVE
+ * popTos back to EditQuestion carrying the new option via route param (D-10).
+ * Reads ballot draft to seed initial values when editing an existing option.
+ */
 export function EditQuestionOption() {
-	const { colors } = useTheme();
+	const { colors } = useTheme() as ExtendedTheme;
 	const { t } = useTranslation();
-	const [imageUrl, setImageUrl] = useState("");
-	const [videoUrl, setVideoUrl] = useState("");
+	const route = useRoute<RouteProp<RootStackParamList, "EditQuestionOption">>();
+	const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+	const { ballotDraft, addOption } = useBallotDraft();
+
+	const { questionCode, optionCode } = route.params ?? { questionCode: "" };
+	const existingOption = optionCode
+		? (ballotDraft.questions ?? [])
+				.find((q) => q.code === questionCode)
+				?.options?.find((o) => o.code === optionCode)
+		: undefined;
+
+	const [code, setCode] = useState(existingOption?.code ?? "");
+	const [title, setTitle] = useState(existingOption?.title ?? "");
+	const [details, setDetails] = useState(existingOption?.details ?? "");
+	const [infoUrl, setInfoUrl] = useState(existingOption?.infoURL ?? "");
+	const [imageUrl, setImageUrl] = useState(existingOption?.image?.url ?? "");
+	const [videoUrl, setVideoUrl] = useState(existingOption?.video?.url ?? "");
 
 	const handleMakePermanent = () => {
-		//TODO: Implement make permanent
-		console.log("Make permanent");
+		// Stub — make-permanent is a v1.x backlog item, not in BALUI-04 scope.
+		console.log("editQuestionOption-makePermanent stub");
+	};
+
+	const handleSave = () => {
+		const newOption: Option = {
+			code: code || `o-${Date.now()}`,
+			title,
+			details: details || undefined,
+			infoURL: infoUrl || undefined,
+			image: imageUrl ? ({ url: imageUrl } as Option["image"]) : undefined,
+			video: videoUrl ? ({ url: videoUrl } as Option["video"]) : undefined,
+		};
+		// Sync into shared draft so EditQuestion's draft view is up to date.
+		if (questionCode) {
+			addOption(questionCode, newOption);
+		}
+		navigation.popTo("EditQuestion", { questionCode, newOption } as any);
 	};
 
 	return (
 		<View style={styles.content}>
 			<ScrollView style={[styles.container, { backgroundColor: colors.background }]}>
-				<ThemedText type="defaultSemiBold">Election Title</ThemedText>
+				<View style={styles.detail}>
+					<ThemedText type="defaultSemiBold">{t("election")}: </ThemedText>
+					<ThemedText numberOfLines={1} ellipsizeMode="tail">
+						{t("electionTitle")}
+					</ThemedText>
+				</View>
 				<View style={styles.detail}>
 					<ThemedText type="defaultSemiBold">{t("date")}: </ThemedText>
 					<ThemedText numberOfLines={1} ellipsizeMode="tail">
-						Election Date
+						{t("date")}
 					</ThemedText>
 				</View>
-				<CustomTextInput title={t("code")} />
-				<CustomTextInput title={t("title")} />
-				<CustomTextInput title={t("additionalDetails")} />
-				<CustomTextInput title={t("informationUrl")} />
+				<CustomTextInput title={t("code")} value={code} onChangeText={setCode} />
+				<CustomTextInput title={t("title")} value={title} onChangeText={setTitle} />
+				<CustomTextInput
+					title={t("additionalDetails")}
+					value={details}
+					onChangeText={setDetails}
+				/>
+				<CustomTextInput
+					title={t("informationUrl")}
+					value={infoUrl}
+					onChangeText={setInfoUrl}
+				/>
 				<CustomTextInput
 					title={t("imageUrl")}
 					value={imageUrl}
@@ -42,12 +103,16 @@ export function EditQuestionOption() {
 					makePermanentPressed={handleMakePermanent}
 				/>
 				{imageUrl ? (
-					<Image source={{ uri: imageUrl }} style={styles.previewImage} resizeMode="cover" />
+					<Image
+						source={{ uri: imageUrl }}
+						style={styles.previewImage}
+						resizeMode="cover"
+					/>
 				) : null}
 				<CustomTextInput
 					title={t("videoUrl")}
 					value={videoUrl}
-					placeholder={t("optionalImageAddress")}
+					placeholder={t("optionalVideoAddress")}
 					onChangeText={setVideoUrl}
 					isImageUrlField={true}
 					makePermanentPressed={handleMakePermanent}
@@ -55,12 +120,11 @@ export function EditQuestionOption() {
 			</ScrollView>
 			<View style={[styles.footer, { backgroundColor: colors.card }]}>
 				<CustomButton
-					title={t("propose")}
-					onPress={() => {}}
-					forceDarkText={false}
-					icon={"save"}
-					// backgroundColor={edited ? colors.success : colors.accent}
-					// disabled={!edited}
+					title={t("save")}
+					onPress={handleSave}
+					forceDarkText={true}
+					icon={"floppy-disk"}
+					backgroundColor={colors.success}
 				/>
 			</View>
 		</View>

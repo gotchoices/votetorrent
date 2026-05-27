@@ -60,7 +60,13 @@ export type RootStackParamList = {
 	// registration is deferred; only the type signature is added here so the
 	// navigate(...) calls in ElectionsScreen / ElectionDetailsScreen compile.
 	CreateElection: undefined;
-	CreateBallot: { electionId: string };
+	// Phase 9 plan 09-04 — Ballot flow screen-stack (BALUI-01..04). Route-param
+	// shapes are intentionally loose-typed (no Question/Option imports) to
+	// avoid circular imports between navigation/types and vote-core models;
+	// consumers narrow via local casts. popTo carry-back fields are optional.
+	CreateBallot: { electionId: string; question?: any };
+	EditQuestion: { questionCode?: string; newOption?: any };
+	EditQuestionOption: { questionCode: string; optionCode?: string };
 };
 
 export type TabParamList = {
