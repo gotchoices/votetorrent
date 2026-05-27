@@ -7,14 +7,17 @@
 //
 // Phase 12.1 — Wave 1 deliverable.
 
+import { Temporal } from 'temporal-polyfill'
 import { ElectionEvent, ElectionType, UserKeyType } from '@votetorrent/vote-core'
-import { ElectionsEngine } from '../../src/elections/elections-engine.js'
+import { ElectionsEngine, peekNextElectionTid } from '../../src/elections/elections-engine.js'
+import { SigningEngine } from '../../src/signing/signing-engine.js'
 import { NetworksEngine } from '../../src/networks/networks-engine.js'
 import { randomTestKeyPair } from './keys.js'
 import { AsyncStorage } from '../shims/react-native.js'
 import type { EngineContext } from '../../src/types.js'
 import type {
   Authority,
+  AuthorityInviteShare,
   ElectionInit,
   IAuthorityEngine,
   IElectionEngine,
@@ -22,6 +25,7 @@ import type {
   NetworkInit,
   NetworkReference,
   Scope,
+  Signature,
   User,
 } from '@votetorrent/vote-core'
 
@@ -47,6 +51,40 @@ export function makeTestUser (overrides?: Partial<User>): User {
       },
     ],
     ...overrides,
+  }
+}
+
+/**
+ * Create a Signature fixture from the given user's first active key.
+ * Uses a dummy 128-char hex signature since the DB bypasses crypto
+ * validation via IsSignatureValid = true context (D-02).
+ */
+export function makeTestSignature (user: User): Signature {
+  return {
+    signature: 'a'.repeat(128),
+    signerKey: user.activeKeys[0]!.key,
+    signerUserId: user.id,
+  }
+}
+
+/**
+ * Create a User with a fresh UUID and fresh key pair per call.
+ * Use when a test needs a second user identity that won't collide
+ * with the 'user-1' seeded by createTestNetwork() (D-07).
+ */
+export function makeDistinctTestUser (): User {
+  const { publicHex } = randomTestKeyPair()
+  return {
+    id: crypto.randomUUID(),
+    name: 'Distinct Test User',
+    imageRef: { url: 'https://img.local/user2.png' },
+    activeKeys: [
+      {
+        key: publicHex,
+        type: UserKeyType.mobile,
+        expiration: Date.now() + 86_400_000,
+      },
+    ],
   }
 }
 
@@ -125,6 +163,85 @@ export function makeElectionInit (overrides?: Partial<ElectionInit['election']>)
 }
 
 // ---------------------------------------------------------------------------
+// Layer-2.5: seedElectionSigning primitive (per D-04/D-05)
+// ---------------------------------------------------------------------------
+
+/**
+ * Seed AdminSigning + AdminSignature rows for the election-scope digest
+ * required by Election.InsertValid. No existing engine method produces
+ * the election-specific digest formula, so this inserts AdminSigning
+ * directly using the DB's Digest() function, then calls SigningEngine.sign()
+ * to trigger OfficerSignature + AdminSignature (threshold=1).
+ *
+ * @returns The signing nonce to pass to createElection({ signingNonce }).
+ */
+export async function seedElectionSigning (
+  ctx: EngineContext,
+  authorityId: string,
+  electionInit: ElectionInit,
+  user: User,
+  tid: number
+): Promise<{ nonce: string }> {
+  const nonce = crypto.randomUUID()
+  const e = electionInit.election
+  const sig = makeTestSignature(user)
+
+  // Resolve CurrentAdmin.EffectiveAt for the authority
+  const adminRow = await ctx.db
+    .prepare('select EffectiveAt from CurrentAdmin where AuthorityId = :authorityId')
+    .get({ authorityId })
+  if (!adminRow) throw new Error('seedElectionSigning: CurrentAdmin not found')
+  const adminEffectiveAt = adminRow.EffectiveAt as number | string
+
+  // Insert AdminSigning with election-specific Digest matching Election.InsertValid
+  await ctx.db.exec(
+    `insert into AdminSigning (
+      Nonce,
+      AuthorityId,
+      AdminEffectiveAt,
+      Scope,
+      Digest,
+      UserId,
+      SignerKey,
+      Signature
+    )
+    with context now = :now, IsSignatureValid = true, IsSignerKeyValid = true
+    values (
+      :nonce,
+      :authorityId,
+      :adminEffectiveAt,
+      'mel',
+      Digest(:tid, :id, :authorityId, :title, :date, :revisionDeadline, :ballotDeadline, :type),
+      :userId,
+      :signerKey,
+      :signature
+    )`,
+    {
+      nonce,
+      authorityId,
+      adminEffectiveAt,
+      tid: String(tid),
+      id: e.id,
+      title: e.title,
+      date: Temporal.Instant.fromEpochMilliseconds(e.date).toString(),
+      revisionDeadline: Temporal.Instant.fromEpochMilliseconds(e.revisionDeadline).toString(),
+      ballotDeadline: Temporal.Instant.fromEpochMilliseconds(e.ballotDeadline).toString(),
+      type: e.type,
+      userId: user.id,
+      signerKey: sig.signerKey,
+      signature: sig.signature,
+      now: Date.now(),
+    }
+  )
+
+  // Call sign() to create OfficerSignature and trigger AdminSignature (threshold=1)
+  const signing = new SigningEngine(ctx)
+  await signing.sign(nonce, sig)
+
+  return { nonce }
+}
+
+// ---------------------------------------------------------------------------
 // Layer-1: TestNetworkContext
 // ---------------------------------------------------------------------------
 
@@ -186,24 +303,20 @@ export async function addTestAuthority (net: TestNetworkContext): Promise<TestAu
 
 export interface TestElectionContext extends TestAuthorityContext {
   electionsEngine: ElectionsEngine
-  electionEngine: IElectionEngine | null
+  electionEngine: IElectionEngine
 }
 
 /**
- * Create an election from a TestAuthorityContext.
- * If createElection() fails (e.g., InsertValid requires AdminSignature),
- * sets electionEngine to null so downstream tests can detect and skip gracefully.
+ * Create an election from a TestAuthorityContext by seeding the full
+ * AdminSigning/AdminSignature pipeline first. The election always
+ * succeeds — no try/catch swallow.
  */
 export async function addTestElection (auth: TestAuthorityContext): Promise<TestElectionContext> {
   const electionsEngine = new ElectionsEngine(auth.ctx)
-  let electionEngine: IElectionEngine | null = null
-  try {
-    await electionsEngine.createElection(makeElectionInit())
-    electionEngine = await electionsEngine.openElection('election-1')
-  } catch {
-    // createElection may fail if InsertValid requires AdminSignature —
-    // set electionEngine null and let downstream tests handle or skip.
-    electionEngine = null
-  }
+  const init = makeElectionInit({ authorityId: auth.authority.id })
+  const tid = peekNextElectionTid()
+  const { nonce } = await seedElectionSigning(auth.ctx, auth.authority.id, init, auth.user, tid)
+  await electionsEngine.createElection(init, { signingNonce: nonce })
+  const electionEngine = await electionsEngine.openElection(init.election.id)
   return { ...auth, electionsEngine, electionEngine }
 }
