@@ -9,10 +9,16 @@ interface ElectionDetailsBlockProps {
 	electionDetails: ElectionDetails;
 }
 
+/**
+ * Election header + metadata block.
+ *
+ * Phase 9 plan 09-01: The inline timeline rows that previously lived here have
+ * been removed in favor of the local `Timeline` component (D-05/D-06/D-08).
+ * `ElectionDetailsScreen` mounts `Timeline` separately as the focal section.
+ */
 export function ElectionDetailsBlock({ electionDetails }: ElectionDetailsBlockProps) {
 	const { t } = useTranslation();
 	const { election, current } = electionDetails;
-	const timeline = current.timeline;
 
 	const typeLabel =
 		election.type === ElectionType.official
@@ -48,10 +54,6 @@ export function ElectionDetailsBlock({ electionDetails }: ElectionDetailsBlockPr
 					<ThemedText type="defaultSemiBold">{t("dateTime")}: </ThemedText>
 					<ThemedText>{formatDate(election.date)}</ThemedText>
 				</View>
-				<View style={styles.detail}>
-					<ThemedText type="defaultSemiBold">{t("revisionDeadline")}: </ThemedText>
-					<ThemedText>{formatDate(election.revisionDeadline)}</ThemedText>
-				</View>
 				{coreSignature ? (
 					<View style={styles.detail}>
 						<ThemedText type="defaultSemiBold">{t("coreSignature")}: </ThemedText>
@@ -68,41 +70,6 @@ export function ElectionDetailsBlock({ electionDetails }: ElectionDetailsBlockPr
 				<View style={styles.detail}>
 					<ThemedText type="defaultSemiBold">{t("tags")}: </ThemedText>
 					<ThemedText>{current.tags.join(", ")}</ThemedText>
-				</View>
-				<View style={styles.detail}>
-					<ThemedText type="defaultSemiBold">{t("timeline")}: </ThemedText>
-				</View>
-				<View style={styles.subDetails}>
-					<View style={styles.detail}>
-						<ThemedText type="defaultSemiBold">{t("registrationEnds")}: </ThemedText>
-						<ThemedText>{formatDate(timeline.registrationEnds)}</ThemedText>
-					</View>
-					<View style={styles.detail}>
-						<ThemedText type="defaultSemiBold">{t("ballotsFinal")}: </ThemedText>
-						<ThemedText>{formatDate(timeline.ballotsFinal)}</ThemedText>
-					</View>
-					<View style={styles.detail}>
-						<ThemedText type="defaultSemiBold">{t("votingStarts")}: </ThemedText>
-						<ThemedText>{formatDate(timeline.votingStarts)}</ThemedText>
-					</View>
-					<View style={styles.detail}>
-						<ThemedText type="defaultSemiBold">{t("tallyingStarts")}: </ThemedText>
-						<ThemedText>{formatDate(timeline.tallyingStarts)}</ThemedText>
-					</View>
-					<View style={styles.detail}>
-						<ThemedText type="defaultSemiBold">{t("validation")}: </ThemedText>
-						<ThemedText>{formatDate(timeline.validation)}</ThemedText>
-					</View>
-					{timeline.certificationStarts ? (
-						<View style={styles.detail}>
-							<ThemedText type="defaultSemiBold">{t("certificationStarts")}: </ThemedText>
-							<ThemedText>{formatDate(timeline.certificationStarts)}</ThemedText>
-						</View>
-					) : null}
-					<View style={styles.detail}>
-						<ThemedText type="defaultSemiBold">{t("closed")}: </ThemedText>
-						<ThemedText>{formatDate(timeline.closed)}</ThemedText>
-					</View>
 				</View>
 				<View style={styles.detail}>
 					<ThemedText type="defaultSemiBold">{t("keyholderPolicy")}: </ThemedText>
@@ -125,9 +92,6 @@ const localStyles = StyleSheet.create({
 	},
 	detail: {
 		flexDirection: "row",
-	},
-	subDetails: {
-		marginLeft: 8,
 	},
 });
 

@@ -6,56 +6,78 @@ import type {
   ElectionDetails,
   ElectionRevisionInit,
   IElectionEngine,
-  KeyholderInvite,
-  Timestamp
+  KeyholderInvite
 } from '@votetorrent/vote-core'
+
+// Phase 9 plan 09-01 (D-14, D-18) — seed data for the demo Timeline + Ballot
+// renderers. Anchored to "now + N days" so the Timeline's past/current/future
+// status-dot logic resolves correctly at runtime regardless of when the demo
+// is run.
+//
+// Timeline mapping (ElectionEvent enum → Phase 9 D-06 milestone labels):
+//   registrationStarts → (synthetic: revision.revisionTimestamp[0])
+//   registrationEnds   → ElectionEvent.registrationEnds   ("Registration Closes")
+//   votingStarts       → ElectionEvent.votingStarts       ("Voting Opens")
+//   votingEnds         → ElectionEvent.tallyingStarts     ("Voting Closes")
+//   revisionDeadline   → election.revisionDeadline        ("Revision Deadline")
+const MOCK_DAY_MS = 24 * 60 * 60 * 1000
+const MOCK_NOW = Date.now()
+
+const MOCK_BALLOT: Ballot = {
+  id: 'ballot-mock-1',
+  electionId: 'election-2',
+  authorityId: 'auth-b',
+  description: 'Mock ballot for Phase 9',
+  districts: [],
+  questions: []
+}
 
 export class MockElectionEngine implements IElectionEngine {
   async getBallotDetails (id: string): Promise<BallotDetails> {
-    throw new Error('Not implemented')
+    // Return the seeded ballot regardless of id so the BallotTemplate screen
+    // (BALUI-02) has something to render in the Phase 9 demo flow.
+    return {
+      ballot: { ...MOCK_BALLOT, id }
+    }
   }
 
   async getBallots (): Promise<BallotSummary[]> {
-    throw new Error('Not implemented')
+    return [
+      {
+        id: MOCK_BALLOT.id,
+        electionId: MOCK_BALLOT.electionId,
+        authorityId: MOCK_BALLOT.authorityId
+      }
+    ]
   }
 
   async getElectionDetails (): Promise<ElectionDetails> {
-    // Mock data for Utah General Election
+    // All 5 D-06 milestone dates are non-null. Dates anchored to MOCK_NOW so
+    // the Timeline component (Phase 9 plan 09-01) resolves past/current/future
+    // status correctly at runtime.
     const mockElection: ElectionDetails = {
       election: {
-        id: 'utah-general-2024',
-        authorityId: 'utah-election-authority',
-        title: 'Utah General Election 2024',
-        date: new Date('2024-11-05').getTime(), // Election Day
-        revisionDeadline: new Date('2024-10-15').getTime(), // 3 weeks before election
+        id: 'election-2',
+        authorityId: 'auth-b',
+        title: 'Test Election 2 (Future)',
+        date: MOCK_NOW + 14 * MOCK_DAY_MS,
+        revisionDeadline: MOCK_NOW + 7 * MOCK_DAY_MS,
         type: ElectionType.official,
-        ballotDeadline: new Date('2024-10-22').getTime() // 2 weeks before election
+        ballotDeadline: MOCK_NOW + 5 * MOCK_DAY_MS
       },
       current: {
-        electionId: 'utah-general-2024',
+        electionId: 'election-2',
         revision: 1,
-        revisionTimestamp: [new Date().getTime()],
-        tags: ['general', 'state', '2024'],
-        instructions: `# Utah General Election 2024
-
-This election will determine various state and local offices in Utah, including:
-- Governor
-- State Legislature
-- Congressional Representatives
-- State Supreme Court Justices
-- Local County Officials
-
-Please review all candidates and measures carefully before voting.`,
+        // registrationStarts (synthetic) — used by Timeline as "Registration Opens"
+        revisionTimestamp: [MOCK_NOW - 3 * MOCK_DAY_MS],
+        tags: ['general', 'demo', '2026'],
+        instructions: '# Mock Election\n\nMock seed for the Phase 9 demo.',
         keyholders: [
           {
-            invite: {
-              name: 'Dr. Sarah Chen'
-            }
+            invite: { name: 'Dr. Sarah Chen' }
           },
           {
-            invite: {
-              name: 'Judge Michael Rodriguez'
-            },
+            invite: { name: 'Judge Michael Rodriguez' },
             result: {
               isAccepted: false,
               invitationSignature: 'mock-invitation-signature-2',
@@ -63,9 +85,7 @@ Please review all candidates and measures carefully before voting.`,
             }
           },
           {
-            invite: {
-              name: 'Prof. James Wilson'
-            },
+            invite: { name: 'Prof. James Wilson' },
             result: {
               isAccepted: true,
               invitationSignature: 'mock-invitation-signature-3',
@@ -74,15 +94,16 @@ Please review all candidates and measures carefully before voting.`,
           }
         ],
         timeline: {
-          [ElectionEvent.registrationEnds]: new Date('2024-10-25').getTime(),
-          [ElectionEvent.ballotsFinal]: new Date('2024-10-15').getTime(),
-          [ElectionEvent.votingStarts]: new Date('2024-10-22').getTime(),
-          [ElectionEvent.tallyingStarts]: new Date(
-            '2024-11-05T20:00:00'
-          ).getTime(),
-          [ElectionEvent.validation]: new Date('2024-11-06').getTime(),
-          [ElectionEvent.certificationStarts]: new Date('2024-11-07').getTime(),
-          [ElectionEvent.closed]: new Date('2024-11-08').getTime()
+          // D-06 milestones (5) — all non-null per the plan's acceptance criteria:
+          //   registrationStarts (synthetic) is sourced from revisionTimestamp above.
+          [ElectionEvent.registrationEnds]: MOCK_NOW + 2 * MOCK_DAY_MS,
+          [ElectionEvent.ballotsFinal]: MOCK_NOW + 5 * MOCK_DAY_MS,
+          [ElectionEvent.votingStarts]: MOCK_NOW + 10 * MOCK_DAY_MS,
+          // votingEnds is rendered from tallyingStarts in the Timeline mapping.
+          [ElectionEvent.tallyingStarts]: MOCK_NOW + 14 * MOCK_DAY_MS,
+          [ElectionEvent.validation]: MOCK_NOW + 15 * MOCK_DAY_MS,
+          [ElectionEvent.certificationStarts]: MOCK_NOW + 16 * MOCK_DAY_MS,
+          [ElectionEvent.closed]: MOCK_NOW + 17 * MOCK_DAY_MS
         },
         keyholderThreshold: 3
       }
@@ -92,23 +113,23 @@ Please review all candidates and measures carefully before voting.`,
   }
 
   async inviteKeyholder (
-    keyholder: KeyholderInvite,
-    electionId: string
+    _keyholder: KeyholderInvite,
+    _electionId: string
   ): Promise<void> {
     throw new Error('Not implemented')
   }
 
-  async proposeBallot (ballot: Ballot): Promise<void> {
+  async proposeBallot (_ballot: Ballot): Promise<void> {
     throw new Error('Not implemented')
   }
 
-  async proposeRevision (revision: ElectionRevisionInit): Promise<void> {
+  async proposeRevision (_revision: ElectionRevisionInit): Promise<void> {
     throw new Error('Not implemented')
   }
 
   async revokeKeyholder (
-    keyholder: KeyholderInvite,
-    electionId: string
+    _keyholder: KeyholderInvite,
+    _electionId: string
   ): Promise<void> {
     throw new Error('Not implemented')
   }
