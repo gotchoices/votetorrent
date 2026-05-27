@@ -62,19 +62,19 @@ import { BallotDraftProvider } from "../screens/ballots/providers/BallotDraftPro
  * which matches the "survives back-navigation within the flow" semantics in
  * D-11. The provider is NOT global (no AppProvider sibling).
  */
-const CreateBallotScreenWrapped = (props: React.ComponentProps<typeof CreateBallotScreen>) => (
+const CreateBallotScreenWrapped = () => (
 	<BallotDraftProvider>
-		<CreateBallotScreen {...props} />
+		<CreateBallotScreen />
 	</BallotDraftProvider>
 );
-const EditQuestionScreenWrapped = (props: React.ComponentProps<typeof EditQuestionScreen>) => (
+const EditQuestionScreenWrapped = () => (
 	<BallotDraftProvider>
-		<EditQuestionScreen {...props} />
+		<EditQuestionScreen />
 	</BallotDraftProvider>
 );
-const EditQuestionOptionWrapped = (props: React.ComponentProps<typeof EditQuestionOption>) => (
+const EditQuestionOptionWrapped = () => (
 	<BallotDraftProvider>
-		<EditQuestionOption {...props} />
+		<EditQuestionOption />
 	</BallotDraftProvider>
 );
 
