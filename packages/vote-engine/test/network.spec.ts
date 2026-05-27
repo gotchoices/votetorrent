@@ -1385,7 +1385,7 @@ describe('NetworkEngine', () => {
 				.prepare(
 					'select IsAccepted, Digest from InviteResult where SlotCid = :c',
 				)
-				.get({ c: slotRow?.Cid });
+				.get({ c: slotRow!.Cid as string });
 			expect(Boolean(row?.IsAccepted)).to.equal(true);
 			expect(row?.Digest).to.not.equal(null);
 		});
@@ -1414,7 +1414,7 @@ describe('NetworkEngine', () => {
 				.prepare(
 					'select IsAccepted, Digest from InviteResult where SlotCid = :c',
 				)
-				.get({ c: slotRow?.Cid });
+				.get({ c: slotRow!.Cid as string });
 			expect(Boolean(row?.IsAccepted)).to.equal(false);
 			expect(row?.Digest).to.equal(null);
 		});

@@ -415,7 +415,7 @@ describe('UserEngine', () => {
       const slotRow = await ctx.db.prepare('SELECT Cid FROM InviteSlot WHERE InviteKey = :k AND Type = :t').get({ k: fakeInviteKey, t: 'au' })
       const row = await ctx.db
         .prepare('select IsAccepted, Digest from InviteResult where SlotCid = :c')
-        .get({ c: slotRow?.Cid })
+        .get({ c: slotRow!.Cid as string })
       expect(Boolean(row?.IsAccepted)).to.equal(true)
       expect(row?.Digest).to.not.equal(null)
     })
@@ -451,7 +451,7 @@ describe('UserEngine', () => {
       const slotRow = await ctx.db.prepare('SELECT Cid FROM InviteSlot WHERE InviteKey = :k AND Type = :t').get({ k: fakeInviteKey, t: 'au' })
       const row = await ctx.db
         .prepare('select IsAccepted, Digest from InviteResult where SlotCid = :c')
-        .get({ c: slotRow?.Cid })
+        .get({ c: slotRow!.Cid as string })
       expect(Boolean(row?.IsAccepted)).to.equal(false)
       expect(row?.Digest).to.equal(null)
     })
