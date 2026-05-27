@@ -571,7 +571,25 @@ describe('SigningSignBuilder', () => {
     expect(builder).to.be.instanceOf(SigningSignBuilder)
   })
 
-  it.skip('REAL ENGINE equivalence smoke: engine.sign(nonce, sig) vs builder.fromPayload({nonce, signature}).commit() — BLOCKED: no AdminSigning row (startSigningSession INSERT blocked by quereus#23 — AdminSigning.UserValid CHECK requires Officer + UserKey rows only seeded via NetworksEngine.create)', async () => {})
+  it.skip('REAL ENGINE equivalence smoke: engine.sign(nonce, sig) vs builder.fromPayload({nonce, signature}).commit() — BLOCKED: OfficerSignature PK constraint prevents sign() call after startSigningSession (which calls sign() internally; OfficerSignature already seeded for nonce+user pair)', async () => {
+    const { ctx: ctx1, user: user1 } = await createPopulatedContext()
+    const eng1 = new SigningEngine(ctx1)
+    const authRow1 = await ctx1.db.prepare('select Id from Authority limit 1').get({})
+    const authorityId1 = authRow1!.Id as string
+    const sig1 = makeSignature(user1.id)
+    const { nonce: nonce1 } = await eng1.startSigningSession(authorityId1, testDigestArgs, 'rad', sig1)
+    const directResult = await eng1.sign(nonce1, sig1)
+    expect(directResult).to.be.a('boolean')
+
+    const { ctx: ctx2, user: user2 } = await createPopulatedContext()
+    const eng2 = new SigningEngine(ctx2)
+    const authRow2 = await ctx2.db.prepare('select Id from Authority limit 1').get({})
+    const authorityId2 = authRow2!.Id as string
+    const sig2 = makeSignature(user2.id)
+    const { nonce: nonce2 } = await eng2.startSigningSession(authorityId2, testDigestArgs, 'rad', sig2)
+    const builderResult = await eng2.buildSign().fromPayload({ nonce: nonce2, signature: sig2 }).commit()
+    expect(builderResult).to.be.a('boolean')
+  })
 })
 
 // ===========================================================================
@@ -699,5 +717,27 @@ describe('SigningStartSigningSessionBuilder', () => {
     expect(builder).to.be.instanceOf(SigningStartSigningSessionBuilder)
   })
 
-  it.skip('REAL ENGINE equivalence smoke: engine.startSigningSession(...) vs builder.fromPayload(...).commit() — BLOCKED: AdminSigning INSERT blocked by quereus#23 (AdminSigning.UserValid CHECK requires Officer + UserKey rows only seeded via NetworksEngine.create)', async () => {})
+  it('REAL ENGINE equivalence smoke: engine.startSigningSession(...) vs builder.fromPayload(...).commit()', async () => {
+    // Direct path
+    const { ctx: ctx1, user: user1 } = await createPopulatedContext()
+    const eng1 = new SigningEngine(ctx1)
+    const authRow1 = await ctx1.db.prepare('select Id from Authority limit 1').get({})
+    const authorityId1 = authRow1!.Id as string
+    const sig1 = makeSignature(user1.id)
+    const directResult = await eng1.startSigningSession(authorityId1, testDigestArgs, 'rad', sig1)
+    expect(directResult).to.have.property('nonce')
+    expect(directResult).to.have.property('thresholdReached')
+
+    // Builder path
+    const { ctx: ctx2, user: user2 } = await createPopulatedContext()
+    const eng2 = new SigningEngine(ctx2)
+    const authRow2 = await ctx2.db.prepare('select Id from Authority limit 1').get({})
+    const authorityId2 = authRow2!.Id as string
+    const sig2 = makeSignature(user2.id)
+    const builderResult = await eng2.buildStartSigningSession()
+      .fromPayload({ authorityId: authorityId2, digestArgs: testDigestArgs, scope: 'rad', signature: sig2 })
+      .commit()
+    expect(builderResult).to.have.property('nonce')
+    expect(builderResult).to.have.property('thresholdReached')
+  })
 })

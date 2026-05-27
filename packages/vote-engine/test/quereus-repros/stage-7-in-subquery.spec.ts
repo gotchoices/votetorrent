@@ -78,7 +78,7 @@ describe('Quereus repro — stage 7 split (Bug A: view union-all, Bug B: not-in 
 		expect(seen, 'VIEW union-all should return all 3 rows').to.deep.equal(['r', 'g', 'b']);
 	});
 
-	it.skip('A3 — BLOCKED: primary key () behavior changed in quereus 3.x', async () => {
+	it.skip('A3 — BLOCKED: primary key () (zero-column PK) enforces UNIQUE constraint across all rows in quereus 3.x — second INSERT always fails with UNIQUE constraint failed: T PK', async () => {
 		const db = new Database();
 
 		await db.exec(`
