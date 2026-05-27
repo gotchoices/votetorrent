@@ -149,7 +149,7 @@ export class SigningEngine implements ISigningEngine {
    * PATH B (digestArgs is null — used by invite flows via saveInviteWithSigning):
    *   Callers must first call generateSigningNonce() to get the nonce, INSERT
    *   InviteSlots with that nonce, then call this with digestArgs=null + the same nonce.
-   *   INSERT AdminSigning with a DigestAll subquery over InviteSlots tagged with that nonce.
+   *   INSERT AdminSigning with a Digest subquery over the InviteSlot tagged with that nonce.
    */
   async startSigningSession (
     authorityId: string,
@@ -222,7 +222,7 @@ export class SigningEngine implements ISigningEngine {
 					}
         )
       } else {
-        // PATH B: DigestAll subquery over InviteSlots tagged with this nonce (D-17)
+        // PATH B: Digest subquery over the InviteSlot tagged with this nonce (D-17)
         await this.ctx.db.exec(
 					`insert into AdminSigning (
 						Nonce,
@@ -240,7 +240,7 @@ export class SigningEngine implements ISigningEngine {
 						:authorityId,
 						:adminEffectiveAt,
 						:scope,
-						(SELECT DigestAll(Cid) FROM (SELECT Cid FROM InviteSlot WHERE SigningNonce = :nonce ORDER BY Cid)),
+						(SELECT Digest(Cid) FROM InviteSlot WHERE SigningNonce = :nonce),
 						:userId,
 						:signerKey,
 						:signature

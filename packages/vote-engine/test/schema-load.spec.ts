@@ -74,7 +74,7 @@ describe('Schema load', () => {
 		//   resolution maps schema-level `Digest(...)` → `digest(...)`.
 		//
 		// Intentionally NOT covered here:
-		// - JS-only helpers exported by the plugin (`Digest`, `DigestAll`,
+		// - JS-only helpers exported by the plugin (`Digest`,
 		//   `Sign`, `SignatureValid`). They are not part of the SQL surface
 		//   and must not be invoked via `select <name>(...)`.
 		// - `H16` — a JS-only utility; schema references at votetorrent.qsql

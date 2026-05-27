@@ -121,9 +121,9 @@ declare schema main
 							where I.SlotCid = context.InviteSlotCid and I.IsAccepted
 								and I.Digest = Digest(
 									context.Tid, A.Id, A.Name, A.DomainName, A.ImageRef,
-									(select DigestAll(Digest(EffectiveAt, ThresholdPolicies)) over (order by EffectiveAt)
+									(select Digest(EffectiveAt, ThresholdPolicies)
 											from Admin A where A.AuthorityId = new.AuthorityId and A.EffectiveAt = new.EffectiveAt),
-									(select DigestAll(Digest(AdminEffectiveAt, UserId, Title, Scopes)) over (order by AdminEffectiveAt, UserId)
+									(select Digest(AdminEffectiveAt, UserId, Title, Scopes)
 										from Officer O where O.AuthorityId = new.AuthorityId and O.AdminEffectiveAt = new.EffectiveAt)
 								)
 						)
@@ -136,9 +136,9 @@ declare schema main
 								where A.Nonce = context.SigningNonce
 									and A.Digest = Digest(
 										context.Tid, new.AuthorityId,
-										(select DigestAll(Digest(EffectiveAt, ThresholdPolicies)) over (order by EffectiveAt)
+										(select Digest(EffectiveAt, ThresholdPolicies)
 												from Admin Ad where Ad.AuthorityId = new.AuthorityId and Ad.EffectiveAt = new.EffectiveAt),
-										(select DigestAll(Digest(AdminEffectiveAt, UserId, Title, Scopes)) over (order by AdminEffectiveAt, UserId)
+										(select Digest(AdminEffectiveAt, UserId, Title, Scopes)
 												from Officer O where O.AuthorityId = new.AuthorityId and O.AdminEffectiveAt = new.EffectiveAt)
 									)
 						)
@@ -177,9 +177,9 @@ declare schema main
 							where I.SlotCid = context.InviteSlotCid and I.IsAccepted
 								and I.Digest = Digest(
 									context.Tid, A.Id, A.Name, A.DomainName, A.ImageRef,
-									(select DigestAll(Digest(EffectiveAt, ThresholdPolicies)) over (order by EffectiveAt)
+									(select Digest(EffectiveAt, ThresholdPolicies)
 											from Admin A where A.AuthorityId = new.AuthorityId and A.EffectiveAt = new.AdminEffectiveAt),
-									(select DigestAll(Digest(AdminEffectiveAt, UserId, Title, Scopes)) over (order by AdminEffectiveAt, UserId)
+									(select Digest(AdminEffectiveAt, UserId, Title, Scopes)
 										from Officer O where O.AuthorityId = new.AuthorityId and O.AdminEffectiveAt = new.AdminEffectiveAt)
 								)
 						)
@@ -191,9 +191,9 @@ declare schema main
 								where A.Nonce = context.SigningNonce
 									and A.Digest = Digest(
 										context.Tid, new.AuthorityId,
-										(select DigestAll(Digest(EffectiveAt, ThresholdPolicies)) over (order by EffectiveAt)
+										(select Digest(EffectiveAt, ThresholdPolicies)
 												from Admin Ad where Ad.AuthorityId = new.AuthorityId and Ad.EffectiveAt = new.AdminEffectiveAt),
-										(select DigestAll(Digest(AdminEffectiveAt, UserId, Title, Scopes)) over (order by AdminEffectiveAt, UserId)
+										(select Digest(AdminEffectiveAt, UserId, Title, Scopes)
 												from Officer O where O.AuthorityId = new.AuthorityId and O.AdminEffectiveAt = new.AdminEffectiveAt)
 									)
 						)
@@ -408,7 +408,7 @@ declare schema main
 	-- A single signing can encompass a batch of Invite slots, so validate the whole batch at once
 	assertion InviteSlotSigningValid check (not exists (
 		select 1 from (
-			select SigningNonce, DigestAll(Cid) over (order by Cid) as Digest from InviteSlot I
+			select SigningNonce, Digest(Cid) as Digest from InviteSlot I
 		) SND
 			where not exists (
 				select 1 from AdminSigning SIG
