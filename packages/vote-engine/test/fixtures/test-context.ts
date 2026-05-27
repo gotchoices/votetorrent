@@ -320,3 +320,49 @@ export async function addTestElection (auth: TestAuthorityContext): Promise<Test
   const electionEngine = await electionsEngine.openElection(init.election.id)
   return { ...auth, electionsEngine, electionEngine }
 }
+
+// ---------------------------------------------------------------------------
+// Layer-2.5: TestInviteContext + seedAuthorityInvite (per D-06)
+// ---------------------------------------------------------------------------
+
+export interface TestInviteContext extends TestAuthorityContext {
+  inviteShare: AuthorityInviteShare
+  inviteSlotCid: string
+}
+
+/**
+ * Run the full invite flow chain using real engine methods (D-01):
+ *   createAuthorityInvite → saveInviteWithSigning → respondToInvite
+ *
+ * Returns the inviteSlotCid so callers can pass it to createAuthority()
+ * via the optional invite context params added in Plan 01.
+ */
+export async function seedAuthorityInvite (auth: TestAuthorityContext): Promise<TestInviteContext> {
+  // Step a: generate a real secp256k1 invite key pair
+  const inviteShare = auth.authorityEngine.createAuthorityInvite('Second Authority')
+
+  // Step b: build signature from the test user
+  const sig = makeTestSignature(auth.user)
+
+  // Step c: saveInviteWithSigning inserts InviteSlot + AdminSigning + AdminSignature
+  await auth.authorityEngine.saveInviteWithSigning(inviteShare, 'iad' as Scope, sig)
+
+  // Step d: query the InviteSlot CID back from the DB
+  const slotRow = await auth.ctx.db
+    .prepare('select Cid from InviteSlot where InviteKey = :inviteKey')
+    .get({ inviteKey: inviteShare.inviteKey })
+  if (!slotRow) throw new Error('seedAuthorityInvite: InviteSlot not found after saveInviteWithSigning')
+  const inviteSlotCid = slotRow.Cid as string
+
+  // Step e: respondToInvite inserts InviteResult
+  await auth.networkEngine.respondToInvite({
+    invite: inviteShare,
+    isAccepted: true,
+    invokes: { authority: { name: 'Second Authority', domainName: 'second.example.com' } },
+    inviteSignature: 'a'.repeat(128),
+    userId: undefined,
+    userInit: undefined,
+  } as never)
+
+  return { ...auth, inviteShare, inviteSlotCid }
+}
