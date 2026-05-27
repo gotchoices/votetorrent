@@ -18,6 +18,7 @@ import { KeysTasksEngine } from '../src/tasks/keys-tasks-engine'
 import { OnboardingTasksEngine } from '../src/tasks/onboarding-tasks-engine'
 import { SignatureTasksEngine } from '../src/tasks/signature-tasks-engine'
 import type { EngineContext } from '../src/types.js'
+import { createTestNetwork } from './fixtures/test-context.js'
 import { randomTestKeyPair } from './fixtures/keys.js'
 import { AsyncStorage } from './shims/react-native'
 import type {
@@ -234,8 +235,8 @@ describe('ElectionsEngine', () => {
     // BLOCKED on https://github.com/gotchoices/quereus/issues/23 —
     // Election.InsertOnly (`check on update, delete (false)`) fires on
     // INSERT today, same chain as networks-engine.create().
-    it.skip('INSERTs an Election row via the AdminSignature pipeline — BLOCKED: InsertValid requires AdminSignature', async () => {
-      const { ctx } = await createPopulatedContext()
+    it.skip('INSERTs an Election row via the AdminSignature pipeline — BLOCKED: DateValid CHECK constraint fails (election dates must be in the future relative to context.now)', async () => {
+      const { ctx } = await createTestNetwork()
       const engine = new ElectionsEngine(ctx)
       const init = makeElectionInit()
       await engine.createElection(init)
@@ -344,8 +345,8 @@ describe('ElectionEngine', () => {
 
     // BLOCKED on quereus#23 — seeding Election + ElectionRevision
     // through createElection trips CantDelete on INSERT.
-    it.skip('returns Election joined with the current ElectionRevision — BLOCKED: depends on election creation', async () => {
-      const { ctx } = await createPopulatedContext()
+    it.skip('returns Election joined with the current ElectionRevision — BLOCKED: Election row not present (createElection blocked by DateValid CHECK constraint)', async () => {
+      const { ctx } = await createTestNetwork()
       const engine = new ElectionEngine(
         { id: 'election-1', authorityId: 'authority-1' },
         ctx
@@ -371,8 +372,8 @@ describe('ElectionEngine', () => {
     })
 
     // BLOCKED on quereus#23
-    it.skip('returns ElectionRevision rows ordered by Revision asc — BLOCKED: depends on election creation', async () => {
-      const { ctx } = await createPopulatedContext()
+    it.skip('returns ElectionRevision rows ordered by Revision asc — BLOCKED: no Election row seeded (createElection blocked by DateValid CHECK constraint)', async () => {
+      const { ctx } = await createTestNetwork()
       const engine = new ElectionEngine(
         { id: 'election-1', authorityId: 'authority-1' },
         ctx
@@ -389,8 +390,8 @@ describe('ElectionEngine', () => {
     // BLOCKED on quereus#23 — ProposedElectionRevision.UserValid CHECK
     // joins through Officer + UserKey + Election rows seeded by
     // NetworksEngine.create.
-    it.skip('INSERTs a ProposedElectionRevision row — BLOCKED: depends on election creation', async () => {
-      const { ctx } = await createPopulatedContext()
+    it.skip('INSERTs a ProposedElectionRevision row — BLOCKED: ElectionIdValid CHECK constraint fails (no Election row — createElection blocked by DateValid)', async () => {
+      const { ctx } = await createTestNetwork()
       const engine = new ElectionEngine(
         { id: 'election-1', authorityId: 'authority-1' },
         ctx
@@ -421,8 +422,8 @@ describe('ElectionEngine', () => {
   describe('proposeBallot', () => {
     // BLOCKED on quereus#23 — ProposedBallot.UserValid joins through
     // Officer + UserKey + Election rows seeded by NetworksEngine.create.
-    it.skip('INSERTs a ProposedBallot row — BLOCKED: depends on election creation', async () => {
-      const { ctx } = await createPopulatedContext()
+    it.skip('INSERTs a ProposedBallot row — BLOCKED: ElectionIdValid CHECK constraint fails (no Election row — createElection blocked by DateValid)', async () => {
+      const { ctx } = await createTestNetwork()
       const engine = new ElectionEngine(
         { id: 'election-1', authorityId: 'authority-1' },
         ctx
@@ -452,8 +453,8 @@ describe('ElectionEngine', () => {
     // any value other than 'select' silently fails the TypeValid CHECK.
     // Also BLOCKED on quereus#23 transitively (UserValid joins through
     // tables seeded by NetworksEngine.create).
-    it.skip('INSERTs a ProposedQuestion row — BLOCKED: depends on election creation', async () => {
-      const { ctx } = await createPopulatedContext()
+    it.skip('INSERTs a ProposedQuestion row — BLOCKED: NOT NULL constraint failed: ProposedQuestion.DependsOn (engine does not bind DependsOn; also needs Election row)', async () => {
+      const { ctx } = await createTestNetwork()
       const engine = new ElectionEngine(
         { id: 'election-1', authorityId: 'authority-1' },
         ctx
@@ -480,8 +481,8 @@ describe('ElectionEngine', () => {
   // -----------------------------------------------------------------------
   describe('addOption', () => {
     // BLOCKED on quereus#23 transitively.
-    it.skip('INSERTs a ProposedOption row — BLOCKED: depends on election creation', async () => {
-      const { ctx } = await createPopulatedContext()
+    it.skip('INSERTs a ProposedOption row — BLOCKED: NOT NULL constraint failed: ProposedOption.Details (engine does not bind Details; also needs Election row)', async () => {
+      const { ctx } = await createTestNetwork()
       const engine = new ElectionEngine(
         { id: 'election-1', authorityId: 'authority-1' },
         ctx
@@ -535,8 +536,8 @@ describe('ElectionEngine', () => {
   describe('inviteKeyholder', () => {
     // BLOCKED on quereus#23 — Keyholder.ElectionIdValid + ElectionRevisionValid
     // depend on Election + ElectionRevision rows that today require #23.
-    it.skip('INSERTs a Keyholder row — BLOCKED: depends on election creation', async () => {
-      const { ctx } = await createPopulatedContext()
+    it.skip('INSERTs a Keyholder row — BLOCKED: ElectionIdValid CHECK constraint fails (no Election row — createElection blocked by DateValid)', async () => {
+      const { ctx } = await createTestNetwork()
       const engine = new ElectionEngine(
         { id: 'election-1', authorityId: 'authority-1' },
         ctx
@@ -627,8 +628,8 @@ describe('KeysTasksEngine', () => {
     // UPDATE Task path trips Task.MutationValid which requires an
     // AdminSignature row seeded via the same pipeline that fails on
     // INSERT today.
-    it.skip('marks a release-key Task as completed — BLOCKED: depends on election creation', async () => {
-      const { ctx } = await createPopulatedContext()
+    it.skip('marks a release-key Task as completed — BLOCKED: no Task/ReleaseKeyTaskExtension row in DB (requires election creation pipeline to seed Task rows)', async () => {
+      const { ctx } = await createTestNetwork()
       const engine = new KeysTasksEngine(makeNetworkRef(), ctx)
       const task = {
         type: 'release-key' as const,
@@ -725,8 +726,8 @@ describe('SignatureTasksEngine', () => {
 
     // BLOCKED on quereus#23 — SigningEngine.sign() + UPDATE Task
     // pipeline depends on seeded AdminSigning + Task rows.
-    it.skip('invokes SigningEngine.sign and marks the Task complete — BLOCKED: depends on election creation', async () => {
-      const { ctx } = await createPopulatedContext()
+    it.skip('invokes SigningEngine.sign and marks the Task complete — BLOCKED: no pending Task row (requires election creation pipeline to seed AdminSigning + Task rows)', async () => {
+      const { ctx } = await createTestNetwork()
       const engine = new SignatureTasksEngine(makeNetworkRef(), ctx)
       const task: SignatureTask = {
         type: 'signature',
@@ -781,8 +782,8 @@ describe('OnboardingTasksEngine', () => {
 
     // BLOCKED on https://github.com/gotchoices/quereus/issues/23 —
     // Task.MutationValid on update needs the AdminSignature pipeline.
-    it.skip('marks an onboarding Task as completed — BLOCKED: depends on election creation', async () => {
-      const { ctx } = await createPopulatedContext()
+    it.skip('marks an onboarding Task as completed — BLOCKED: no Task row in DB (requires election creation pipeline to seed Task rows)', async () => {
+      const { ctx } = await createTestNetwork()
       const engine = new OnboardingTasksEngine(ctx)
       await engine.setOnboardingTaskCompleted('task-1')
       const row = await ctx.db
