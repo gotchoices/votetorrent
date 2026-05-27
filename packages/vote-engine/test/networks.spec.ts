@@ -429,9 +429,17 @@ describe('NetworksCreateBuilder', () => {
     expect(b2.isValid()).to.equal(true)
   })
 
-  // Test 4 — DB-bound (it.skip)
-  it.skip('REAL ENGINE: isValid===true => commit() returns INetworkEngine (BLOCKED on quereus#23)', async () => {
-    // Integration test — requires real DB context via NetworksEngine.create()
+  // Test 4 — DB-bound (real engine)
+  it('REAL ENGINE: isValid===true => commit() returns INetworkEngine', async () => {
+    await AsyncStorage.clear()
+    await AsyncStorage.setItem('recentNetworks', [])
+    const networksEngine = new NetworksEngine(AsyncStorage)
+    const b = new NetworksCreateBuilder(networksEngine)
+      .setNetworkInit(makeBuilderNetworkInit())
+      .setUser(makeBuilderUser())
+    expect(b.isValid()).to.equal(true)
+    const result = await b.commit()
+    expect(result).to.not.equal(undefined)
   })
 
   // Test 5 — SER-04
@@ -460,9 +468,18 @@ describe('NetworksCreateBuilder', () => {
       .to.throw(/unsupported version/)
   })
 
-  // Test 6 — DB-bound (it.skip)
-  it.skip('REAL ENGINE: double-commit guard (BLOCKED on quereus#23)', async () => {
-    // Integration test — requires real DB context
+  // Test 6 — DB-bound (real engine)
+  it('REAL ENGINE: double-commit guard throws BuilderAlreadyCommittedError', async () => {
+    await AsyncStorage.clear()
+    await AsyncStorage.setItem('recentNetworks', [])
+    const networksEngine = new NetworksEngine(AsyncStorage)
+    const b = new NetworksCreateBuilder(networksEngine)
+      .setNetworkInit(makeBuilderNetworkInit())
+      .setUser(makeBuilderUser())
+    await b.commit()
+    let caught: unknown
+    try { b.commit() } catch (err) { caught = err }
+    expect(caught).to.be.instanceOf(BuilderAlreadyCommittedError)
   })
 
   // Test 7 — BTEST-01
@@ -498,9 +515,22 @@ describe('NetworksCreateBuilder', () => {
     expect(() => b.commit()).to.throw(BuilderAlreadyCommittedError)
   })
 
-  // Test 9 — equivalence smoke (it.skip)
-  it.skip('REAL ENGINE equivalence smoke: engine.create(init, user) vs engine.buildCreate().fromPayload({networkInit, user}).commit() (BLOCKED on quereus#23)', async () => {
-    // Integration test — would compare direct engine.create() vs builder commit()
+  // Test 9 — equivalence smoke (real engine)
+  it('REAL ENGINE equivalence smoke: engine.create(init, user) vs engine.buildCreate().fromPayload({networkInit, user}).commit()', async () => {
+    const ni = makeBuilderNetworkInit()
+    const u = makeBuilderUser()
+    // Direct path
+    await AsyncStorage.clear()
+    await AsyncStorage.setItem('recentNetworks', [])
+    const eng1 = new NetworksEngine(AsyncStorage)
+    const directResult = await eng1.create(ni, u)
+    expect(directResult).to.not.equal(undefined)
+    // Builder path
+    await AsyncStorage.clear()
+    await AsyncStorage.setItem('recentNetworks', [])
+    const eng2 = new NetworksEngine(AsyncStorage)
+    const builderResult = await eng2.buildCreate().fromPayload({ networkInit: ni, user: u }).commit()
+    expect(builderResult).to.not.equal(undefined)
   })
 
   // Test 10 — FACT-04

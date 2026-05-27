@@ -2366,7 +2366,17 @@ describe('AuthorityCreateOfficerInviteBuilder', () => {
     expect(builder).to.be.instanceOf(AuthorityCreateOfficerInviteBuilder)
   })
 
-  it.skip('REAL ENGINE equivalence smoke — BLOCKED on quereus#23')
+  it('REAL ENGINE equivalence smoke: engine.createOfficerInvite(init) vs builder.fromPayload(init).commit()', async () => {
+    const { authorityEngine: eng1 } = await makeDbOnlyAuthorityEngine()
+    const init = makeOfficerInit()
+    const directResult = await eng1.buildCreateOfficerInvite().fromPayload(init).commit()
+    const { authorityEngine: eng2 } = await makeDbOnlyAuthorityEngine()
+    const directResult2 = eng2.createOfficerInvite(init)
+    expect(directResult).to.not.equal(undefined)
+    expect(directResult2).to.not.equal(undefined)
+    expect(directResult.type).to.equal('of')
+    expect(directResult2.type).to.equal('of')
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -2445,7 +2455,16 @@ describe('AuthorityCreateAuthorityInviteBuilder', () => {
     expect(builder).to.be.instanceOf(AuthorityCreateAuthorityInviteBuilder)
   })
 
-  it.skip('REAL ENGINE equivalence smoke — BLOCKED on quereus#23')
+  it('REAL ENGINE equivalence smoke: engine.createAuthorityInvite(name) vs builder.fromPayload(name).commit()', async () => {
+    const { authorityEngine: eng1 } = await makeDbOnlyAuthorityEngine()
+    const directResult = eng1.createAuthorityInvite('TestCorp')
+    const { authorityEngine: eng2 } = await makeDbOnlyAuthorityEngine()
+    const builderResult = await eng2.buildCreateAuthorityInvite().fromPayload('TestCorp').commit()
+    expect(directResult).to.not.equal(undefined)
+    expect(builderResult).to.not.equal(undefined)
+    expect(directResult.type).to.equal('au')
+    expect(builderResult.type).to.equal('au')
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -2554,7 +2573,18 @@ describe('AuthorityProposeAdminBuilder', () => {
     expect(builder).to.be.instanceOf(AuthorityProposeAdminBuilder)
   })
 
-  it.skip('REAL ENGINE equivalence smoke — BLOCKED on quereus#23')
+  it.skip('REAL ENGINE equivalence smoke: engine.proposeAdmin(admin, signature) vs builder.fromPayload(...).commit() — BLOCKED: ProposedAdmin INSERT fails (requires valid AdminSignature row for the signing nonce)', async () => {
+    const { authorityEngine: eng1 } = await createNetworkAndAuthority()
+    const admin = makeAdminProposal()
+    const sig = makeRealSignature('user-1')
+    let err1: unknown
+    try { await eng1.proposeAdmin(admin, sig) } catch (e) { err1 = e }
+    expect(err1).to.equal(undefined)
+    const { authorityEngine: eng2 } = await createNetworkAndAuthority()
+    let err2: unknown
+    try { await eng2.buildProposeAdmin().fromPayload({ admin, signature: sig }).commit() } catch (e) { err2 = e }
+    expect(err2).to.equal(undefined)
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -2654,5 +2684,16 @@ describe('AuthoritySaveInviteWithSigningBuilder', () => {
     expect(builder).to.be.instanceOf(AuthoritySaveInviteWithSigningBuilder)
   })
 
-  it.skip('REAL ENGINE equivalence smoke — BLOCKED on quereus#23')
+  it.skip('REAL ENGINE equivalence smoke: engine.saveInviteWithSigning(invite, scope, signature) vs builder.fromPayload(...).commit() — BLOCKED: InviteSlot INSERT requires valid AdminSignature (saveInviteWithSigning is DB-bound)', async () => {
+    const { authorityEngine: eng1 } = await createNetworkAndAuthority()
+    const invite = makeAuthorityInvite()
+    const sig = makeRealSignature('user-1')
+    let err1: unknown
+    try { await eng1.saveInviteWithSigning(invite, 'iad', sig) } catch (e) { err1 = e }
+    expect(err1).to.equal(undefined)
+    const { authorityEngine: eng2 } = await createNetworkAndAuthority()
+    let err2: unknown
+    try { await eng2.buildSaveInviteWithSigning().fromPayload({ invite, scope: 'iad', signature: sig }).commit() } catch (e) { err2 = e }
+    expect(err2).to.equal(undefined)
+  })
 })

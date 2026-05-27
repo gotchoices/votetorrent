@@ -2469,8 +2469,14 @@ describe('NetworkCreateAuthorityBuilder', () => {
 		expect(full.isValid()).to.equal(true);
 	});
 
-	// BLOCKED on https://github.com/gotchoices/quereus/issues/23
-	it.skip('REAL ENGINE: isValid===true => commit() does not throw BuilderValidationError', async () => {});
+	it.skip('REAL ENGINE: isValid===true => commit() does not throw BuilderValidationError — BLOCKED: second authority requires full invite flow (InsertValid CHECK fails without valid InviteSlot)', async () => {
+		const { networkEngine: engine } = await createTestNetwork();
+		const b = new NetworkCreateAuthorityBuilder(engine)
+			.setAuthority(makeAuthorityInit())
+			.setAdmin(makeAdminInit());
+		expect(b.isValid()).to.equal(true);
+		await b.commit();
+	});
 
 	it('round-trip serialization and fromJSON kind/version rejection', () => {
 		const stub = makeStubNetworkEngine();
@@ -2489,8 +2495,16 @@ describe('NetworkCreateAuthorityBuilder', () => {
 		expect(() => NetworkCreateAuthorityBuilder.fromJSON({ kind: 'network.createAuthority', version: 99, draft: {} }, stub)).to.throw(/unsupported version/);
 	});
 
-	// BLOCKED on https://github.com/gotchoices/quereus/issues/23
-	it.skip('REAL ENGINE: double-commit guard throws BuilderAlreadyCommittedError', async () => {});
+	it.skip('REAL ENGINE: double-commit guard throws BuilderAlreadyCommittedError — BLOCKED: second authority requires full invite flow (InsertValid CHECK fails without valid InviteSlot)', async () => {
+		const { networkEngine: engine } = await createTestNetwork();
+		const b = new NetworkCreateAuthorityBuilder(engine)
+			.setAuthority(makeAuthorityInit())
+			.setAdmin(makeAdminInit());
+		await b.commit();
+		let caught: unknown;
+		try { b.commit(); } catch (err) { caught = err; }
+		expect(caught).to.be.instanceOf(BuilderAlreadyCommittedError);
+	});
 
 	it('toEngineInput returns exact payload shape; throws on incomplete', () => {
 		const stub = makeStubNetworkEngine();
@@ -2522,8 +2536,18 @@ describe('NetworkCreateAuthorityBuilder', () => {
 		expect(caught).to.be.instanceOf(BuilderAlreadyCommittedError);
 	});
 
-	// BLOCKED on https://github.com/gotchoices/quereus/issues/23
-	it.skip('REAL ENGINE equivalence smoke: engine.createAuthority(authority, admin) vs builder.fromPayload({authority, admin}).commit()', async () => {});
+	it.skip('REAL ENGINE equivalence smoke: engine.createAuthority(authority, admin) vs builder.fromPayload({authority, admin}).commit() — BLOCKED: second authority requires full invite flow (InsertValid CHECK fails without valid InviteSlot)', async () => {
+		const authority = makeAuthorityInit();
+		const admin = makeAdminInit();
+		const { networkEngine: eng1 } = await createTestNetwork();
+		let err1: unknown;
+		try { await eng1.createAuthority(authority, admin); } catch (e) { err1 = e; }
+		expect(err1).to.equal(undefined);
+		const { networkEngine: eng2 } = await createTestNetwork();
+		let err2: unknown;
+		try { await eng2.buildCreateAuthority().fromPayload({ authority, admin }).commit(); } catch (e) { err2 = e; }
+		expect(err2).to.equal(undefined);
+	});
 
 	it('FACT-04 parity: MockNetworkEngine.buildCreateAuthority() returns instanceof NetworkCreateAuthorityBuilder', () => {
 		const mock = new MockNetworkEngine({ hash: 'h'.repeat(16), relays: [], name: 'Test', primaryAuthorityDomainName: 'test.example' });
@@ -2576,8 +2600,12 @@ describe('NetworkPinAuthorityBuilder', () => {
 		expect(full.isValid()).to.equal(true);
 	});
 
-	// BLOCKED on https://github.com/gotchoices/quereus/issues/23
-	it.skip('REAL ENGINE: isValid===true => commit() does not throw BuilderValidationError', async () => {});
+	it('REAL ENGINE: isValid===true => commit() does not throw BuilderValidationError', async () => {
+		const { networkEngine: engine } = await createTestNetwork();
+		const b = new NetworkPinAuthorityBuilder(engine).setAuthority(makeAuthority());
+		expect(b.isValid()).to.equal(true);
+		await b.commit();
+	});
 
 	it('round-trip serialization and fromJSON kind/version rejection', () => {
 		const stub = makeStubNetworkEngine();
@@ -2593,8 +2621,14 @@ describe('NetworkPinAuthorityBuilder', () => {
 		expect(() => NetworkPinAuthorityBuilder.fromJSON({ kind: 'network.pinAuthority', version: 99, draft: {} }, stub)).to.throw(/unsupported version/);
 	});
 
-	// BLOCKED on https://github.com/gotchoices/quereus/issues/23
-	it.skip('REAL ENGINE: double-commit guard throws BuilderAlreadyCommittedError', async () => {});
+	it('REAL ENGINE: double-commit guard throws BuilderAlreadyCommittedError', async () => {
+		const { networkEngine: engine } = await createTestNetwork();
+		const b = new NetworkPinAuthorityBuilder(engine).setAuthority(makeAuthority());
+		await b.commit();
+		let caught: unknown;
+		try { b.commit(); } catch (err) { caught = err; }
+		expect(caught).to.be.instanceOf(BuilderAlreadyCommittedError);
+	});
 
 	it('toEngineInput returns exact payload shape; throws on incomplete', () => {
 		const stub = makeStubNetworkEngine();
@@ -2624,8 +2658,17 @@ describe('NetworkPinAuthorityBuilder', () => {
 		expect(caught).to.be.instanceOf(BuilderAlreadyCommittedError);
 	});
 
-	// BLOCKED on https://github.com/gotchoices/quereus/issues/23
-	it.skip('REAL ENGINE equivalence smoke: engine.pinAuthority(authority) vs builder.fromPayload(authority).commit()', async () => {});
+	it('REAL ENGINE equivalence smoke: engine.pinAuthority(authority) vs builder.fromPayload(authority).commit()', async () => {
+		const authority = makeAuthority();
+		const { networkEngine: eng1 } = await createTestNetwork();
+		let err1: unknown;
+		try { await eng1.pinAuthority(authority); } catch (e) { err1 = e; }
+		expect(err1).to.equal(undefined);
+		const { networkEngine: eng2 } = await createTestNetwork();
+		let err2: unknown;
+		try { await eng2.buildPinAuthority().fromPayload(authority).commit(); } catch (e) { err2 = e; }
+		expect(err2).to.equal(undefined);
+	});
 
 	it('FACT-04 parity: MockNetworkEngine.buildPinAuthority() returns instanceof NetworkPinAuthorityBuilder', () => {
 		const mock = new MockNetworkEngine({ hash: 'h'.repeat(16), relays: [], name: 'Test', primaryAuthorityDomainName: 'test.example' });
@@ -2676,8 +2719,12 @@ describe('NetworkUnpinAuthorityBuilder', () => {
 		expect(full.isValid()).to.equal(true);
 	});
 
-	// BLOCKED on https://github.com/gotchoices/quereus/issues/23
-	it.skip('REAL ENGINE: isValid===true => commit() does not throw BuilderValidationError', async () => {});
+	it('REAL ENGINE: isValid===true => commit() does not throw BuilderValidationError', async () => {
+		const { networkEngine: engine } = await createTestNetwork();
+		const b = new NetworkUnpinAuthorityBuilder(engine).setAuthorityId('auth-abc');
+		expect(b.isValid()).to.equal(true);
+		await b.commit();
+	});
 
 	it('round-trip serialization and fromJSON kind/version rejection', () => {
 		const stub = makeStubNetworkEngine();
@@ -2693,8 +2740,14 @@ describe('NetworkUnpinAuthorityBuilder', () => {
 		expect(() => NetworkUnpinAuthorityBuilder.fromJSON({ kind: 'network.unpinAuthority', version: 99, draft: {} }, stub)).to.throw(/unsupported version/);
 	});
 
-	// BLOCKED on https://github.com/gotchoices/quereus/issues/23
-	it.skip('REAL ENGINE: double-commit guard throws BuilderAlreadyCommittedError', async () => {});
+	it('REAL ENGINE: double-commit guard throws BuilderAlreadyCommittedError', async () => {
+		const { networkEngine: engine } = await createTestNetwork();
+		const b = new NetworkUnpinAuthorityBuilder(engine).setAuthorityId('auth-abc');
+		await b.commit();
+		let caught: unknown;
+		try { b.commit(); } catch (err) { caught = err; }
+		expect(caught).to.be.instanceOf(BuilderAlreadyCommittedError);
+	});
 
 	it('toEngineInput returns exact payload shape; throws on incomplete', () => {
 		const stub = makeStubNetworkEngine();
@@ -2722,8 +2775,16 @@ describe('NetworkUnpinAuthorityBuilder', () => {
 		expect(caught).to.be.instanceOf(BuilderAlreadyCommittedError);
 	});
 
-	// BLOCKED on https://github.com/gotchoices/quereus/issues/23
-	it.skip('REAL ENGINE equivalence smoke: engine.unpinAuthority(id) vs builder.fromPayload(id).commit()', async () => {});
+	it('REAL ENGINE equivalence smoke: engine.unpinAuthority(id) vs builder.fromPayload(id).commit()', async () => {
+		const { networkEngine: eng1 } = await createTestNetwork();
+		let err1: unknown;
+		try { await eng1.unpinAuthority('auth-abc'); } catch (e) { err1 = e; }
+		expect(err1).to.equal(undefined);
+		const { networkEngine: eng2 } = await createTestNetwork();
+		let err2: unknown;
+		try { await eng2.buildUnpinAuthority().fromPayload('auth-abc').commit(); } catch (e) { err2 = e; }
+		expect(err2).to.equal(undefined);
+	});
 
 	it('FACT-04 parity: MockNetworkEngine.buildUnpinAuthority() returns instanceof NetworkUnpinAuthorityBuilder', () => {
 		const mock = new MockNetworkEngine({ hash: 'h'.repeat(16), relays: [], name: 'Test', primaryAuthorityDomainName: 'test.example' });
@@ -2787,8 +2848,15 @@ describe('NetworkProposeRevisionBuilder', () => {
 		expect(full.isValid()).to.equal(true);
 	});
 
-	// BLOCKED on https://github.com/gotchoices/quereus/issues/23
-	it.skip('REAL ENGINE: isValid===true => commit() does not throw BuilderValidationError', async () => {});
+	it.skip('REAL ENGINE: isValid===true => commit() does not throw BuilderValidationError — BLOCKED: ProposedNetwork single-row PK — second proposeRevision trips UNIQUE constraint', async () => {
+		const { networkEngine: engine } = await createTestNetwork();
+		const b = new NetworkProposeRevisionBuilder(engine)
+			.setName('Revised')
+			.setPolicies({ timestampAuthorities: [{ url: 'https://tsa.example.com' }], numberRequiredTSAs: 1, electionType: ElectionType.adhoc })
+			.setRelays(['/dns4/relay.example.com/tcp/443/wss']);
+		expect(b.isValid()).to.equal(true);
+		await b.commit();
+	});
 
 	it('round-trip serialization and fromJSON kind/version rejection', () => {
 		const stub = makeStubNetworkEngine();
@@ -2807,8 +2875,17 @@ describe('NetworkProposeRevisionBuilder', () => {
 		expect(() => NetworkProposeRevisionBuilder.fromJSON({ kind: 'network.proposeRevision', version: 99, draft: {} }, stub)).to.throw(/unsupported version/);
 	});
 
-	// BLOCKED on https://github.com/gotchoices/quereus/issues/23
-	it.skip('REAL ENGINE: double-commit guard throws BuilderAlreadyCommittedError', async () => {});
+	it.skip('REAL ENGINE: double-commit guard throws BuilderAlreadyCommittedError — BLOCKED: ProposedNetwork single-row PK — second proposeRevision trips UNIQUE constraint', async () => {
+		const { networkEngine: engine } = await createTestNetwork();
+		const b = new NetworkProposeRevisionBuilder(engine)
+			.setName('Revised')
+			.setPolicies({ timestampAuthorities: [{ url: 'https://tsa.example.com' }], numberRequiredTSAs: 1, electionType: ElectionType.adhoc })
+			.setRelays(['/dns4/relay.example.com/tcp/443/wss']);
+		await b.commit();
+		let caught: unknown;
+		try { b.commit(); } catch (err) { caught = err; }
+		expect(caught).to.be.instanceOf(BuilderAlreadyCommittedError);
+	});
 
 	it('toEngineInput returns exact payload shape; throws on incomplete', () => {
 		const stub = makeStubNetworkEngine();
@@ -2844,8 +2921,17 @@ describe('NetworkProposeRevisionBuilder', () => {
 		expect(caught).to.be.instanceOf(BuilderAlreadyCommittedError);
 	});
 
-	// BLOCKED on https://github.com/gotchoices/quereus/issues/23
-	it.skip('REAL ENGINE equivalence smoke: engine.proposeRevision(revision) vs builder.fromPayload(revision).commit()', async () => {});
+	it.skip('REAL ENGINE equivalence smoke: engine.proposeRevision(revision) vs builder.fromPayload(revision).commit() — BLOCKED: ProposedNetwork single-row PK — second proposeRevision trips UNIQUE constraint', async () => {
+		const revision = makeNetworkRevisionFixture();
+		const { networkEngine: eng1 } = await createTestNetwork();
+		let err1: unknown;
+		try { await eng1.proposeRevision(revision); } catch (e) { err1 = e; }
+		expect(err1).to.equal(undefined);
+		const { networkEngine: eng2 } = await createTestNetwork();
+		let err2: unknown;
+		try { await eng2.buildProposeRevision().fromPayload(revision).commit(); } catch (e) { err2 = e; }
+		expect(err2).to.equal(undefined);
+	});
 
 	it('FACT-04 parity: MockNetworkEngine.buildProposeRevision() returns instanceof NetworkProposeRevisionBuilder', () => {
 		const mock = new MockNetworkEngine({ hash: 'h'.repeat(16), relays: [], name: 'Test', primaryAuthorityDomainName: 'test.example' });
@@ -2912,8 +2998,28 @@ describe('NetworkRespondToInviteBuilder', () => {
 		expect(full.isValid()).to.equal(true);
 	});
 
-	// BLOCKED on https://github.com/gotchoices/quereus/issues/23
-	it.skip('REAL ENGINE: isValid===true => commit() does not throw BuilderValidationError', async () => {});
+	it('REAL ENGINE: isValid===true => commit() does not throw BuilderValidationError', async () => {
+		const { networkEngine: engine } = await createTestNetwork();
+		const ctx = (engine as unknown as { ctx: EngineContext }).ctx;
+		const fakeInviteKey = 'r'.repeat(66);
+		await ctx.db.exec(
+			`INSERT INTO InviteSlot (Cid, Type, Name, Expiration, InviteKey, InviteSignature, SigningNonce)
+			 WITH CONTEXT Tid = 1, IsCidValid = true, IsSignatureValid = true, IsInsertValid = true, now = datetime('now', '-1 day')
+			 VALUES (Digest(:inviteKey, :type), :type, 'test', :expiration, :inviteKey, :inviteSignature, 'test-nonce-rb1')`,
+			{ inviteKey: fakeInviteKey, type: 'au', expiration: '2099-12-31T23:59:59', inviteSignature: 'r'.repeat(128) }
+		);
+		const invite: InviteAction<unknown> = {
+			invite: { type: 'au', expiration: '2099-01-01T00:00:00Z', inviteKey: fakeInviteKey, inviteSignature: 'r'.repeat(128), digest: null },
+			isAccepted: true,
+			inviteSignature: 'r'.repeat(128),
+			invokes: { authority: { name: 'Invokee', domainName: 'inv.example' } },
+			userInit: undefined,
+			userId: undefined,
+		} as InviteAction<unknown>;
+		const b = new NetworkRespondToInviteBuilder(engine).setInvite(invite);
+		expect(b.isValid()).to.equal(true);
+		await b.commit();
+	});
 
 	it('round-trip serialization and fromJSON kind/version rejection', () => {
 		const stub = makeStubNetworkEngine();
@@ -2929,8 +3035,30 @@ describe('NetworkRespondToInviteBuilder', () => {
 		expect(() => NetworkRespondToInviteBuilder.fromJSON({ kind: 'network.respondToInvite', version: 99, draft: {} }, stub)).to.throw(/unsupported version/);
 	});
 
-	// BLOCKED on https://github.com/gotchoices/quereus/issues/23
-	it.skip('REAL ENGINE: double-commit guard throws BuilderAlreadyCommittedError', async () => {});
+	it('REAL ENGINE: double-commit guard throws BuilderAlreadyCommittedError', async () => {
+		const { networkEngine: engine } = await createTestNetwork();
+		const ctx = (engine as unknown as { ctx: EngineContext }).ctx;
+		const fakeInviteKey = 's'.repeat(66);
+		await ctx.db.exec(
+			`INSERT INTO InviteSlot (Cid, Type, Name, Expiration, InviteKey, InviteSignature, SigningNonce)
+			 WITH CONTEXT Tid = 1, IsCidValid = true, IsSignatureValid = true, IsInsertValid = true, now = datetime('now', '-1 day')
+			 VALUES (Digest(:inviteKey, :type), :type, 'test', :expiration, :inviteKey, :inviteSignature, 'test-nonce-rb2')`,
+			{ inviteKey: fakeInviteKey, type: 'au', expiration: '2099-12-31T23:59:59', inviteSignature: 's'.repeat(128) }
+		);
+		const invite: InviteAction<unknown> = {
+			invite: { type: 'au', expiration: '2099-01-01T00:00:00Z', inviteKey: fakeInviteKey, inviteSignature: 's'.repeat(128), digest: null },
+			isAccepted: true,
+			inviteSignature: 's'.repeat(128),
+			invokes: { authority: { name: 'Invokee', domainName: 'inv.example' } },
+			userInit: undefined,
+			userId: undefined,
+		} as InviteAction<unknown>;
+		const b = new NetworkRespondToInviteBuilder(engine).setInvite(invite);
+		await b.commit();
+		let caught: unknown;
+		try { b.commit(); } catch (err) { caught = err; }
+		expect(caught).to.be.instanceOf(BuilderAlreadyCommittedError);
+	});
 
 	it('toEngineInput returns exact payload shape; throws on incomplete', () => {
 		const stub = makeStubNetworkEngine();
@@ -2961,8 +3089,48 @@ describe('NetworkRespondToInviteBuilder', () => {
 		expect(caught).to.be.instanceOf(BuilderAlreadyCommittedError);
 	});
 
-	// BLOCKED on https://github.com/gotchoices/quereus/issues/23
-	it.skip('REAL ENGINE equivalence smoke: engine.respondToInvite(invite) vs builder.fromPayload(invite).commit()', async () => {});
+	it('REAL ENGINE equivalence smoke: engine.respondToInvite(invite) vs builder.fromPayload(invite).commit()', async () => {
+		// Direct path
+		const { networkEngine: eng1 } = await createTestNetwork();
+		const ctx1 = (eng1 as unknown as { ctx: EngineContext }).ctx;
+		const fakeInviteKey1 = 't'.repeat(66);
+		await ctx1.db.exec(
+			`INSERT INTO InviteSlot (Cid, Type, Name, Expiration, InviteKey, InviteSignature, SigningNonce)
+			 WITH CONTEXT Tid = 1, IsCidValid = true, IsSignatureValid = true, IsInsertValid = true, now = datetime('now', '-1 day')
+			 VALUES (Digest(:inviteKey, :type), :type, 'test', :expiration, :inviteKey, :inviteSignature, 'test-nonce-eq1')`,
+			{ inviteKey: fakeInviteKey1, type: 'au', expiration: '2099-12-31T23:59:59', inviteSignature: 't'.repeat(128) }
+		);
+		const invite1: InviteAction<unknown> = {
+			invite: { type: 'au', expiration: '2099-01-01T00:00:00Z', inviteKey: fakeInviteKey1, inviteSignature: 't'.repeat(128), digest: null },
+			isAccepted: true,
+			inviteSignature: 't'.repeat(128),
+			invokes: { authority: { name: 'Invokee', domainName: 'inv.example' } },
+			userInit: undefined,
+			userId: undefined,
+		} as InviteAction<unknown>;
+		const directResult = await eng1.respondToInvite(invite1);
+		expect(directResult).to.not.equal(undefined);
+		// Builder path
+		const { networkEngine: eng2 } = await createTestNetwork();
+		const ctx2 = (eng2 as unknown as { ctx: EngineContext }).ctx;
+		const fakeInviteKey2 = 'u'.repeat(66);
+		await ctx2.db.exec(
+			`INSERT INTO InviteSlot (Cid, Type, Name, Expiration, InviteKey, InviteSignature, SigningNonce)
+			 WITH CONTEXT Tid = 1, IsCidValid = true, IsSignatureValid = true, IsInsertValid = true, now = datetime('now', '-1 day')
+			 VALUES (Digest(:inviteKey, :type), :type, 'test', :expiration, :inviteKey, :inviteSignature, 'test-nonce-eq2')`,
+			{ inviteKey: fakeInviteKey2, type: 'au', expiration: '2099-12-31T23:59:59', inviteSignature: 'u'.repeat(128) }
+		);
+		const invite2: InviteAction<unknown> = {
+			invite: { type: 'au', expiration: '2099-01-01T00:00:00Z', inviteKey: fakeInviteKey2, inviteSignature: 'u'.repeat(128), digest: null },
+			isAccepted: true,
+			inviteSignature: 'u'.repeat(128),
+			invokes: { authority: { name: 'Invokee', domainName: 'inv.example' } },
+			userInit: undefined,
+			userId: undefined,
+		} as InviteAction<unknown>;
+		const builderResult = await eng2.buildRespondToInvite().fromPayload(invite2).commit();
+		expect(builderResult).to.not.equal(undefined);
+	});
 
 	it('FACT-04 parity: MockNetworkEngine.buildRespondToInvite() returns instanceof NetworkRespondToInviteBuilder', () => {
 		const mock = new MockNetworkEngine({ hash: 'h'.repeat(16), relays: [], name: 'Test', primaryAuthorityDomainName: 'test.example' });
