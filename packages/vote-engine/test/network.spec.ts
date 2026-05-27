@@ -26,12 +26,10 @@ import type {
 	InviteAction,
 	INetworkEngine,
 	NetworkInit,
-	NetworkPolicies,
 	NetworkReference,
 	NetworkRevision,
 	Scope,
 	User,
-	UserKey,
 } from '@votetorrent/vote-core';
 
 // ---------------------------------------------------------------------------
@@ -2361,8 +2359,6 @@ function makeStubNetworkEngine (opts?: { failOn?: string }): INetworkEngine {
 		getUser: async () => undefined,
 		nextAuthoritiesByName: async () => ({ buffer: [], firstBOF: true, lastEOF: true, offset: 0 }),
 		openAuthority: async () => ({} as never),
-		pinAuthority: async () => undefined,
-		unpinAuthority: async () => undefined,
 		buildCreateAuthority: () => new NetworkCreateAuthorityBuilder({} as INetworkEngine),
 		buildPinAuthority: () => new NetworkPinAuthorityBuilder({} as INetworkEngine),
 		buildUnpinAuthority: () => new NetworkUnpinAuthorityBuilder({} as INetworkEngine),
