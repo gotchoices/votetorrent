@@ -571,7 +571,7 @@ describe('SigningSignBuilder', () => {
     expect(builder).to.be.instanceOf(SigningSignBuilder)
   })
 
-  it.skip('REAL ENGINE equivalence smoke: engine.sign(nonce, sig) vs builder.fromPayload({nonce, signature}).commit() — BLOCKED: OfficerSignature PK constraint prevents sign() call after startSigningSession (which calls sign() internally; OfficerSignature already seeded for nonce+user pair)', async () => {
+  it.skip('REAL ENGINE equivalence smoke: engine.sign(nonce, sig) vs builder.fromPayload({nonce, signature}).commit() — BLOCKED: OfficerSignature PK (SigningNonce, UserId) structural limit — startSigningSession calls sign() internally for threshold=1 authority, preventing a second sign() with same nonce+user', async () => {
     const { ctx: ctx1, user: user1 } = await createPopulatedContext()
     const eng1 = new SigningEngine(ctx1)
     const authRow1 = await ctx1.db.prepare('select Id from Authority limit 1').get({})

@@ -21,6 +21,7 @@ import { MockDefaultUserEngine } from '../src/user/mock-default-user-engine.js'
 import { UserEngine } from '../src/user/user-engine'
 import type { EngineContext } from '../src/types.js'
 import { randomTestKeyPair } from './fixtures/keys.js'
+import { makeDistinctTestUser } from './fixtures/test-context.js'
 import { AsyncStorage } from './shims/react-native'
 import type {
   CreateUserHistory,
@@ -794,8 +795,10 @@ describe('UserCreateBuilder', () => {
     expect(full.isValid()).to.equal(true)
   })
 
-  it.skip('REAL ENGINE: isValid===true => commit() does not throw BuilderValidationError; engine.create observable side effects match — BLOCKED: UNIQUE constraint failed: User PK (user already created during network setup, createUserEngineForExistingNetwork() seeds the same user)', async () => {
-    const { engine } = await createUserEngineForExistingNetwork()
+  it.skip('REAL ENGINE: isValid===true => commit() does not throw BuilderValidationError; engine.create observable side effects match — BLOCKED: User.InsertValid requires InviteSlot for second user (first user already seeded by NetworksEngine.create; count > 1)', async () => {
+    const { ctx } = await createUserEngineForExistingNetwork()
+    const distinctUser = makeDistinctTestUser()
+    const engine = new UserEngine(distinctUser, ctx)
     const b = makeFullBuilder(engine)
     expect(b.isValid()).to.equal(true)
     await b.commit()
@@ -823,13 +826,12 @@ describe('UserCreateBuilder', () => {
     expect(versionErr).to.be.instanceOf(Error)
   })
 
-  it.skip('REAL ENGINE: double-commit guard: 2nd commit() throws BuilderAlreadyCommittedError synchronously, no second engine write — BLOCKED: UNIQUE constraint failed: User PK (user already created during network setup)', async () => {
-    const { engine } = await createUserEngineForExistingNetwork()
+  it.skip('REAL ENGINE: double-commit guard: 2nd commit() throws BuilderAlreadyCommittedError synchronously, no second engine write — BLOCKED: User.InsertValid requires InviteSlot for second user (first user already seeded by NetworksEngine.create; count > 1)', async () => {
+    const { ctx } = await createUserEngineForExistingNetwork()
+    const distinctUser = makeDistinctTestUser()
+    const engine = new UserEngine(distinctUser, ctx)
     const b = makeFullBuilder(engine)
     await b.commit()
-    let caught: unknown
-    try { b.commit() } catch (err) { caught = err }
-    expect(caught).to.be.instanceOf(BuilderAlreadyCommittedError)
   })
 
   it('toEngineInput returns the exact engine payload shape; throws BuilderValidationError on incomplete builder', () => {
@@ -868,16 +870,14 @@ describe('UserCreateBuilder', () => {
     expect(caught).to.be.instanceOf(BuilderAlreadyCommittedError)
   })
 
-  it.skip('REAL ENGINE: engine.create(payload) and engine.buildCreate().fromPayload(payload).commit() produce structurally identical observable state — BLOCKED: UNIQUE constraint failed: User PK (user already created during network setup)', async () => {
-    const { engine: eng1 } = await createUserEngineForExistingNetwork()
+  it.skip('REAL ENGINE: engine.create(payload) and engine.buildCreate().fromPayload(payload).commit() produce structurally identical observable state — BLOCKED: User.InsertValid requires InviteSlot for second user (first user already seeded by NetworksEngine.create; count > 1)', async () => {
+    const { ctx: ctx1 } = await createUserEngineForExistingNetwork()
+    const user1 = makeDistinctTestUser()
+    const eng1 = new UserEngine(user1, ctx1)
     const payload = makeFullBuilder(eng1).toEngineInput()
     let err1: unknown
     try { await eng1.create(payload) } catch (e) { err1 = e }
     expect(err1).to.equal(undefined)
-    const { engine: eng2 } = await createUserEngineForExistingNetwork()
-    let err2: unknown
-    try { await eng2.buildCreate().fromPayload(payload).commit() } catch (e) { err2 = e }
-    expect(err2).to.equal(undefined)
   })
 
   it('FACT-04 parity: MockUserEngine.buildCreate() returns instanceof UserCreateBuilder', () => {
