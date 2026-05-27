@@ -45,6 +45,7 @@ import ProposedElectionScreen from "../screens/tasks/ProposedElectionScreen";
 import ProposedRevisionScreen from "../screens/tasks/ProposedRevisionScreen";
 import ScreenScaffoldsDebugScreen from "../screens/tasks/ScreenScaffoldsDebugScreen";
 import ElectionDetailsScreen from "../screens/elections/ElectionDetailsScreen";
+import { CreateElectionScreen } from "../screens/elections/CreateElectionScreen";
 import EditBallotScreen from "../screens/ballots/EditBallotScreen";
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -377,6 +378,12 @@ export const RootNavigator = () => {
 					headerBackVisible: false,
 					headerLeft: () => <CloseButton onPress={() => navigation.goBack()} />,
 				})}
+			/>
+			{/* Phase 9 plan 09-02 (ELECUI-03) — CreateElection wizard route. */}
+			<Stack.Screen
+				name="CreateElection"
+				component={CreateElectionScreen}
+				options={{ title: t("createElection") }}
 			/>
 			<Stack.Screen
 				name="EditBallot"

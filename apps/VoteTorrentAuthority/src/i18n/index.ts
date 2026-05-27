@@ -205,6 +205,18 @@ const resources = {
 			registrationCloses: 'Registration Closes',
 			votingOpens: 'Voting Opens',
 			votingCloses: 'Voting Closes',
+			// Phase 9 plan 09-02 (ELECUI-03) — Create Election wizard keys.
+			// D-17: en-only; Spanish backfill deferred to Phase 11 COMUI-02.
+			basics: 'Basics',
+			review: 'Review',
+			next: 'Next',
+			back: 'Back',
+			edit: 'Edit',
+			step: 'Step',
+			addTag: 'Add a tag (comma-separated)',
+			registrationDeadline: 'Registration Deadline',
+			selectKeyholders: 'Select keyholders for this election:',
+			noKeyholdersSelected: 'No keyholders selected yet.',
 			preview: 'Preview',
 			election: 'Election',
 			keyholders: 'Keyholders',
