@@ -16,7 +16,7 @@ import { NetworkProposeRevisionBuilder } from '../src/network/builders/network-p
 import { NetworkRespondToInviteBuilder } from '../src/network/builders/network-respond-to-invite-builder';
 import { NetworksEngine } from '../src/networks/networks-engine';
 import type { EngineContext } from '../src/types.js';
-import { createTestNetwork } from './fixtures/test-context.js';
+import { createTestNetwork, addTestAuthority, seedAuthorityInvite } from './fixtures/test-context.js';
 import { randomTestKeyPair } from './fixtures/keys.js';
 import { AsyncStorage } from './shims/react-native';
 import type {
@@ -406,10 +406,11 @@ describe('NetworkEngine', () => {
 	// 3. Authority Creation from within a Network
 	// -----------------------------------------------------------------------
 	describe('createAuthority', () => {
-		// BLOCKED: second authority requires full invite flow — InsertValid CHECK fails without valid InviteSlot
-		it.skip('should create an authority with a generated UUID id — BLOCKED: second authority requires full invite flow (InsertValid CHECK fails without valid InviteSlot)', async () => {
-			const { networkEngine: engine, ctx } = await createTestNetwork();
-			await engine.createAuthority(
+		it('should create an authority with a generated UUID id', async () => {
+			const net = await createTestNetwork();
+			const auth = await addTestAuthority(net);
+			const inviteCtx = await seedAuthorityInvite(auth);
+			await net.networkEngine.createAuthority(
 				{ name: 'New Authority', domainName: 'new.example.com' },
 				{
 					officers: [
@@ -424,8 +425,9 @@ describe('NetworkEngine', () => {
 					effectiveAt: Date.now(),
 					thresholdPolicies: [{ policy: 'rad', threshold: 1 }],
 				},
+				{ inviteSlotCid: inviteCtx.inviteSlotCid, inviteSignature: 'a'.repeat(128) }
 			);
-			const row = await ctx.db
+			const row = await net.ctx.db
 				.prepare('select Id from Authority where Name = :name')
 				.get({ name: 'New Authority' });
 			expect(row?.Id)
@@ -435,10 +437,12 @@ describe('NetworkEngine', () => {
 				);
 		});
 
-		it.skip('should insert Authority, Admin, and Officer rows in one transaction — BLOCKED: second authority requires full invite flow (InsertValid CHECK fails without valid InviteSlot)', async () => {
-			const { networkEngine: engine, ctx } = await createTestNetwork();
+		it('should insert Authority, Admin, and Officer rows in one transaction', async () => {
+			const net = await createTestNetwork();
+			const auth = await addTestAuthority(net);
+			const inviteCtx = await seedAuthorityInvite(auth);
 			const effectiveAt = Date.now();
-			await engine.createAuthority(
+			await net.networkEngine.createAuthority(
 				{ name: 'TxnAuthority', domainName: 'txn.example.com' },
 				{
 					officers: [
@@ -453,17 +457,18 @@ describe('NetworkEngine', () => {
 					effectiveAt,
 					thresholdPolicies: [{ policy: 'rad', threshold: 1 }],
 				},
+				{ inviteSlotCid: inviteCtx.inviteSlotCid, inviteSignature: 'a'.repeat(128) }
 			);
-			const aRow = await ctx.db
+			const aRow = await net.ctx.db
 				.prepare('select Id from Authority where Name = :n')
 				.get({ n: 'TxnAuthority' });
 			expect(aRow?.Id).to.be.a('string');
 			const newAuthorityId = aRow!.Id as string;
-			const adRow = await ctx.db
+			const adRow = await net.ctx.db
 				.prepare('select count(*) as n from Admin where AuthorityId = :id')
 				.get({ id: newAuthorityId });
 			expect(Number(adRow?.n)).to.equal(1);
-			const oRow = await ctx.db
+			const oRow = await net.ctx.db
 				.prepare('select count(*) as n from Officer where AuthorityId = :id')
 				.get({ id: newAuthorityId });
 			expect(Number(oRow?.n)).to.equal(1);
@@ -548,9 +553,11 @@ describe('NetworkEngine', () => {
 			if (caught) { expect(caught).to.be.instanceOf(Error) };
 		});
 
-		it.skip('should set Authority.DomainName to the provided value or null — BLOCKED: second authority requires full invite flow (InsertValid CHECK fails without valid InviteSlot)', async () => {
-			const { networkEngine: engine, ctx } = await createTestNetwork();
-			await engine.createAuthority(
+		it('should set Authority.DomainName to the provided value or null', async () => {
+			const net = await createTestNetwork();
+			const auth = await addTestAuthority(net);
+			const inviteCtx1 = await seedAuthorityInvite(auth);
+			await net.networkEngine.createAuthority(
 				{ name: 'WithDomain', domainName: 'wd.example.com' },
 				{
 					officers: [
@@ -561,13 +568,15 @@ describe('NetworkEngine', () => {
 					effectiveAt: Date.now(),
 					thresholdPolicies: [],
 				},
+				{ inviteSlotCid: inviteCtx1.inviteSlotCid, inviteSignature: 'a'.repeat(128) }
 			);
-			const withDomain = await ctx.db
+			const withDomain = await net.ctx.db
 				.prepare('select DomainName from Authority where Name = :n')
 				.get({ n: 'WithDomain' });
 			expect(withDomain?.DomainName).to.equal('wd.example.com');
 
-			await engine.createAuthority({ name: 'NoDomain' } as never, {
+			const inviteCtx2 = await seedAuthorityInvite(auth);
+			await net.networkEngine.createAuthority({ name: 'NoDomain' } as never, {
 				officers: [
 					{
 						init: { name: 'O', title: 'T', scopes: ['rad'] as Scope[] },
@@ -575,16 +584,20 @@ describe('NetworkEngine', () => {
 				],
 				effectiveAt: Date.now(),
 				thresholdPolicies: [],
-			});
-			const noDomain = await ctx.db
+			},
+			{ inviteSlotCid: inviteCtx2.inviteSlotCid, inviteSignature: 'a'.repeat(128) }
+			);
+			const noDomain = await net.ctx.db
 				.prepare('select DomainName from Authority where Name = :n')
 				.get({ n: 'NoDomain' });
 			expect(noDomain?.DomainName).to.equal(null);
 		});
 
-		it.skip('should serialize imageRef as JSON in the Authority row — BLOCKED: second authority requires full invite flow (InsertValid CHECK fails without valid InviteSlot)', async () => {
-			const { networkEngine: engine, ctx } = await createTestNetwork();
-			await engine.createAuthority(
+		it('should serialize imageRef as JSON in the Authority row', async () => {
+			const net = await createTestNetwork();
+			const auth = await addTestAuthority(net);
+			const inviteCtx = await seedAuthorityInvite(auth);
+			await net.networkEngine.createAuthority(
 				{
 					name: 'WithImage',
 					domainName: 'wi.example.com',
@@ -599,8 +612,9 @@ describe('NetworkEngine', () => {
 					effectiveAt: Date.now(),
 					thresholdPolicies: [],
 				},
+				{ inviteSlotCid: inviteCtx.inviteSlotCid, inviteSignature: 'a'.repeat(128) }
 			);
-			const row = await ctx.db
+			const row = await net.ctx.db
 				.prepare('select ImageRef from Authority where Name = :n')
 				.get({ n: 'WithImage' });
 			expect(row?.ImageRef).to.be.a('string');
@@ -2465,13 +2479,15 @@ describe('NetworkCreateAuthorityBuilder', () => {
 		expect(full.isValid()).to.equal(true);
 	});
 
-	it.skip('REAL ENGINE: isValid===true => commit() does not throw BuilderValidationError — BLOCKED: second authority requires full invite flow (InsertValid CHECK fails without valid InviteSlot)', async () => {
-		const { networkEngine: engine } = await createTestNetwork();
-		const b = new NetworkCreateAuthorityBuilder(engine)
+	it('REAL ENGINE: isValid===true => commit() does not throw BuilderValidationError', async () => {
+		const net = await createTestNetwork();
+		const auth = await addTestAuthority(net);
+		const inviteCtx = await seedAuthorityInvite(auth);
+		const b = new NetworkCreateAuthorityBuilder(net.networkEngine)
 			.setAuthority(makeAuthorityInit())
 			.setAdmin(makeAdminInit());
 		expect(b.isValid()).to.equal(true);
-		await b.commit();
+		await b.commit({ inviteSlotCid: inviteCtx.inviteSlotCid, inviteSignature: 'a'.repeat(128) });
 	});
 
 	it('round-trip serialization and fromJSON kind/version rejection', () => {
@@ -2491,12 +2507,14 @@ describe('NetworkCreateAuthorityBuilder', () => {
 		expect(() => NetworkCreateAuthorityBuilder.fromJSON({ kind: 'network.createAuthority', version: 99, draft: {} }, stub)).to.throw(/unsupported version/);
 	});
 
-	it.skip('REAL ENGINE: double-commit guard throws BuilderAlreadyCommittedError — BLOCKED: second authority requires full invite flow (InsertValid CHECK fails without valid InviteSlot)', async () => {
-		const { networkEngine: engine } = await createTestNetwork();
-		const b = new NetworkCreateAuthorityBuilder(engine)
+	it('REAL ENGINE: double-commit guard throws BuilderAlreadyCommittedError', async () => {
+		const net = await createTestNetwork();
+		const auth = await addTestAuthority(net);
+		const inviteCtx = await seedAuthorityInvite(auth);
+		const b = new NetworkCreateAuthorityBuilder(net.networkEngine)
 			.setAuthority(makeAuthorityInit())
 			.setAdmin(makeAdminInit());
-		await b.commit();
+		await b.commit({ inviteSlotCid: inviteCtx.inviteSlotCid, inviteSignature: 'a'.repeat(128) });
 		let caught: unknown;
 		try { b.commit(); } catch (err) { caught = err; }
 		expect(caught).to.be.instanceOf(BuilderAlreadyCommittedError);
@@ -2532,16 +2550,22 @@ describe('NetworkCreateAuthorityBuilder', () => {
 		expect(caught).to.be.instanceOf(BuilderAlreadyCommittedError);
 	});
 
-	it.skip('REAL ENGINE equivalence smoke: engine.createAuthority(authority, admin) vs builder.fromPayload({authority, admin}).commit() — BLOCKED: second authority requires full invite flow (InsertValid CHECK fails without valid InviteSlot)', async () => {
+	it('REAL ENGINE equivalence smoke: engine.createAuthority(authority, admin) vs builder.fromPayload({authority, admin}).commit()', async () => {
 		const authority = makeAuthorityInit();
 		const admin = makeAdminInit();
-		const { networkEngine: eng1 } = await createTestNetwork();
+		// Direct path
+		const net1 = await createTestNetwork();
+		const auth1 = await addTestAuthority(net1);
+		const inv1 = await seedAuthorityInvite(auth1);
 		let err1: unknown;
-		try { await eng1.createAuthority(authority, admin); } catch (e) { err1 = e; }
+		try { await net1.networkEngine.createAuthority(authority, admin, { inviteSlotCid: inv1.inviteSlotCid, inviteSignature: 'a'.repeat(128) }); } catch (e) { err1 = e; }
 		expect(err1).to.equal(undefined);
-		const { networkEngine: eng2 } = await createTestNetwork();
+		// Builder path
+		const net2 = await createTestNetwork();
+		const auth2 = await addTestAuthority(net2);
+		const inv2 = await seedAuthorityInvite(auth2);
 		let err2: unknown;
-		try { await eng2.buildCreateAuthority().fromPayload({ authority, admin }).commit(); } catch (e) { err2 = e; }
+		try { await net2.networkEngine.buildCreateAuthority().fromPayload({ authority, admin }).commit({ inviteSlotCid: inv2.inviteSlotCid, inviteSignature: 'a'.repeat(128) }); } catch (e) { err2 = e; }
 		expect(err2).to.equal(undefined);
 	});
 

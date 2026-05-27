@@ -154,14 +154,14 @@ export class NetworkCreateAuthorityBuilder implements INetworkCreateAuthorityBui
     }
   }
 
-  commit (): Promise<void> {
+  commit (options?: { inviteSlotCid?: string; inviteSignature?: string }): Promise<void> {
     if (this.committed) {
       throw new BuilderAlreadyCommittedError(NetworkCreateAuthorityBuilder.KIND)
     }
     const input = this.toEngineInput()
     this.committed = true
-    // FACT-02: delegate verbatim to engine.createAuthority(authority, admin)
-    const result = this.engine.createAuthority(input.authority, input.admin)
+    // FACT-02: delegate verbatim to engine.createAuthority(authority, admin, options)
+    const result = this.engine.createAuthority(input.authority, input.admin, options)
     this.cachedOutput = undefined
     return result
   }

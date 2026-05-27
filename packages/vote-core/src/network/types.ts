@@ -15,7 +15,7 @@ import type { IUserEngine } from '../user/types.js'
 import type { IBuilder } from '../common/builder.js'
 
 export interface INetworkEngine {
-  createAuthority(authority: AuthorityInit, admin: AdminInit): Promise<void>
+  createAuthority(authority: AuthorityInit, admin: AdminInit, options?: { inviteSlotCid?: string; inviteSignature?: string }): Promise<void>
   getAuthoritiesByName(name: string | undefined): Promise<Cursor<Authority>>
   getCurrentUser(): Promise<IUserEngine | undefined>
   getDetails(): Promise<NetworkDetails>
