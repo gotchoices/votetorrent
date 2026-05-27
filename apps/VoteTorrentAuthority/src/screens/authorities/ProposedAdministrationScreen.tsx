@@ -10,6 +10,7 @@ import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useTranslation } from "react-i18next";
 import type {
 	AdminDetails,
+	Authority,
 	IAuthorityEngine,
 	INetworkEngine,
 	Officer,
@@ -64,6 +65,7 @@ export default function ProposedAdministrationScreen() {
 	);
 	const [thresholds, setThresholds] = useState<Record<string, number>>({});
 	const [isLoading, setIsLoading] = useState(true);
+	const [authority, setAuthority] = useState<Authority | null>(null);
 
 	// Header title (Phase 7 D-14 inherited pattern)
 	useLayoutEffect(() => {
@@ -85,6 +87,15 @@ export default function ProposedAdministrationScreen() {
 				const details: AdminDetails = await (
 					authorityEngine as IAuthorityEngine
 				).getAdminDetails();
+
+				// Lift the full Authority object for navigation params
+				// (gap-closure 08-07 Task 1 — see 08-UAT.md test 6).
+				const authorityDetails = await (
+					authorityEngine as IAuthorityEngine
+				).getDetails();
+				if (!cancelled) {
+					setAuthority(authorityDetails.authority);
+				}
 
 				// Prefer a live proposal's officer selections; otherwise wrap each
 				// current officer as { existing: officer } so the OfficerCard render
@@ -161,6 +172,11 @@ export default function ProposedAdministrationScreen() {
 
 	const handleAddAdministrator = () => {
 		console.log("addAdministrator stub");
+		if (!authority) return;
+		navigation.navigate("AdministratorInvitation", {
+			mode: "send",
+			authority,
+		});
 	};
 
 	if (isLoading) {

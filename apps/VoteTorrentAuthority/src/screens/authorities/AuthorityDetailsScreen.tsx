@@ -303,7 +303,12 @@ export default function AuthorityDetailsScreen() {
 									userName={name}
 									image={user?.image?.url ? { uri: user.image.url } : undefined}
 									status={status}
-									onInvite={() => {}}
+									onInvite={() =>
+										navigation.navigate("AdministratorInvitation", {
+											mode: "send",
+											authority,
+										})
+									}
 									onRemove={() => {}}
 								/>
 							);
