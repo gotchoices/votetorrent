@@ -31,28 +31,48 @@ export default function CreateBallotScreen() {
 	const { electionId } = route.params ?? { electionId: "" };
 	const { ballotDraft, setBallotDraft, addQuestion, updateQuestion } = useBallotDraft();
 
+	// Persist electionId from initial route param into the shared draft so
+	// it survives popTo carry-backs that drop the param. Read from draft on
+	// SAVE, not from route.params. Closes UAT Test 4 electionId-empty gap.
+	useEffect(() => {
+		if (electionId && ballotDraft.electionId !== electionId) {
+			setBallotDraft({ ...ballotDraft, electionId });
+		}
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [electionId]);
+
 	// Carry-back from EditQuestionScreen: child screen passes a `question` route
 	// param when SAVE is pressed; we merge it into the draft and clear the param.
 	const incomingQuestion = (route.params as { question?: Question } | undefined)?.question;
 
 	useEffect(() => {
 		if (!incomingQuestion) return;
-		const existing = (ballotDraft.questions ?? []).some(
-			(q) => q.code === incomingQuestion.code
-		);
+		// Prefer the ORIGINAL questionCode from route.params so a user-rename
+		// of the code field still resolves to the existing question — closes
+		// UAT Test 4 question-update broken path.
+		const originalQuestionCode = (
+			route.params as { originalQuestionCode?: string } | undefined
+		)?.originalQuestionCode;
+		const lookupCode = originalQuestionCode ?? incomingQuestion.code;
+		const existing = (ballotDraft.questions ?? []).some((q) => q.code === lookupCode);
 		if (existing) {
-			updateQuestion(incomingQuestion.code, incomingQuestion);
+			updateQuestion(lookupCode, incomingQuestion);
 		} else {
 			addQuestion(incomingQuestion);
 		}
-		// Clear the param so subsequent renders don't re-apply.
-		navigation.setParams({ question: undefined } as any);
+		// Clear the params so subsequent renders don't re-apply.
+		navigation.setParams({
+			question: undefined,
+			originalQuestionCode: undefined,
+		} as any);
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [incomingQuestion?.code]);
 
 	const handleSave = () => {
-		// D-12 stub — no engine persistence in v1.1.
-		console.log("createBallot-save stub", { electionId, ...ballotDraft });
+		// D-12 stub — no engine persistence in v1.1. electionId now lives
+		// inside ballotDraft (persisted by the useEffect above) so the payload
+		// is just ballotDraft itself.
+		console.log("createBallot-save stub", ballotDraft);
 		navigation.goBack();
 	};
 
