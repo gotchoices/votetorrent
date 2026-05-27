@@ -27,7 +27,7 @@ export function CustomButton({
 	const { colors } = useTheme() as ExtendedTheme;
 	const buttonColor = backgroundColor ?? colors.accent;
 	let textColor = forceDarkText ? colors.dark : colors.text;
-	if (backgroundColor && (backgroundColor === colors.success || backgroundColor === colors.error)) {
+	if (backgroundColor && (backgroundColor === colors.success || backgroundColor === colors.error || backgroundColor === colors.primary)) {
 		textColor = colors.light;
 	}
 

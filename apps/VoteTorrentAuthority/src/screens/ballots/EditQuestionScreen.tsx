@@ -120,8 +120,6 @@ export function EditQuestionScreen() {
 					value={instructions}
 					onChangeText={setInstructions}
 				/>
-				<ThemedText>{t("dependsOn")}</ThemedText>
-				<ChipButton label={t("addDependency")} />
 				<ThemedText>{t("type")}</ThemedText>
 				<QuestionTypeSelector value={type} onChange={setType} />
 
