@@ -30,7 +30,7 @@ export function EditQuestionOption() {
 	const { t } = useTranslation();
 	const route = useRoute<RouteProp<RootStackParamList, "EditQuestionOption">>();
 	const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
-	const { ballotDraft, addOption } = useBallotDraft();
+	const { ballotDraft, addOption, updateOption } = useBallotDraft();
 
 	const { questionCode, optionCode } = route.params ?? { questionCode: "" };
 	const existingOption = optionCode
@@ -60,11 +60,23 @@ export function EditQuestionOption() {
 			image: imageUrl ? ({ url: imageUrl } as Option["image"]) : undefined,
 			video: videoUrl ? ({ url: videoUrl } as Option["video"]) : undefined,
 		};
-		// Sync into shared draft so EditQuestion's draft view is up to date.
+		// Branch on optionCode presence: edit path uses updateOption (locates
+		// the existing option by its ORIGINAL code from route.params, even if
+		// the user renamed it in the form); add path uses addOption.
 		if (questionCode) {
-			addOption(questionCode, newOption);
+			if (optionCode) {
+				updateOption(questionCode, optionCode, newOption);
+			} else {
+				addOption(questionCode, newOption);
+			}
 		}
-		navigation.popTo("EditQuestion", { questionCode, newOption } as any);
+		// Pass originalOptionCode through so EditQuestion's local options state
+		// can findIndex against the ORIGINAL code even if the user renamed it.
+		navigation.popTo("EditQuestion", {
+			questionCode,
+			newOption,
+			originalOptionCode: optionCode,
+		} as any);
 	};
 
 	return (

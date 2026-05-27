@@ -30,7 +30,7 @@ export function EditQuestionScreen() {
 	const { t } = useTranslation();
 	const route = useRoute<RouteProp<RootStackParamList, "EditQuestion">>();
 	const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
-	const { ballotDraft, addOption } = useBallotDraft();
+	const { ballotDraft } = useBallotDraft();
 
 	const questionCode = route.params?.questionCode;
 	const existingQuestion = questionCode
@@ -46,12 +46,20 @@ export function EditQuestionScreen() {
 	const [options, setOptions] = useState<Option[]>(existingQuestion?.options ?? []);
 
 	// Carry-back from EditQuestionOption: child screen passes a `newOption`
-	// route param when SAVE is pressed. Merge it and clear the param.
+	// route param when SAVE is pressed. Merge it into local form state and
+	// clear the params. Per Plan 09-05: the shared BallotDraftProvider is
+	// the single source of truth for option mutations — EditQuestionOption
+	// itself writes addOption/updateOption, so we no longer need to also
+	// call addOption here on carry-back (that produced the stub duplicates).
 	const incomingOption = route.params?.newOption as Option | undefined;
 	useEffect(() => {
 		if (!incomingOption) return;
+		const originalOptionCode = (route.params as any)?.originalOptionCode as
+			| string
+			| undefined;
 		setOptions((current) => {
-			const existsAt = current.findIndex((o) => o.code === incomingOption.code);
+			const lookup = originalOptionCode ?? incomingOption.code;
+			const existsAt = current.findIndex((o) => o.code === lookup);
 			if (existsAt >= 0) {
 				const next = [...current];
 				next[existsAt] = incomingOption;
@@ -59,16 +67,19 @@ export function EditQuestionScreen() {
 			}
 			return [...current, incomingOption];
 		});
-		// Also push into the shared draft so other consumers see the option.
-		if (code) {
-			addOption(code, incomingOption);
-		}
-		navigation.setParams({ newOption: undefined } as any);
+		navigation.setParams({
+			newOption: undefined,
+			originalOptionCode: undefined,
+		} as any);
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [incomingOption?.code]);
 
 	const handleAddOption = () => {
 		navigation.navigate("EditQuestionOption", { questionCode: code || `q-${Date.now()}` });
+	};
+
+	const handleEditOption = (optionCode: string) => {
+		navigation.navigate("EditQuestionOption", { questionCode: code || `q-${Date.now()}`, optionCode });
 	};
 
 	const handleSave = () => {
@@ -79,7 +90,12 @@ export function EditQuestionScreen() {
 			options,
 			type,
 		};
-		navigation.popTo("CreateBallot", { electionId: "", question: assembled } as any);
+		// Pass the ORIGINAL questionCode from route.params so CreateBallot
+		// can branch add-vs-update on it even if the user renamed the code.
+		navigation.popTo("CreateBallot", {
+			question: assembled,
+			originalQuestionCode: questionCode,
+		} as any);
 	};
 
 	return (
@@ -119,7 +135,7 @@ export function EditQuestionScreen() {
 							title={o.title}
 							additionalInfo={[{ label: t("code"), value: o.code }]}
 							icon="pen"
-							onPress={handleAddOption}
+							onPress={() => handleEditOption(o.code)}
 						/>
 					))}
 					<View style={styles.addButtonContainer}>
