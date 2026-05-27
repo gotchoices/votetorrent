@@ -574,7 +574,7 @@ Plans:
 
 **Wave 1:**
 
-- [ ] 12.2-extend-test-fixtures-for-e2e-seeding/12.2-01-PLAN.md — Fix quereus 3.2.1 AdminValid regression (split-batch in NetworksEngine.create + NetworkEngine.createAuthority) + fix ElectionsEngine.createElection date format and signing nonce parameter
+- [x] 12.2-extend-test-fixtures-for-e2e-seeding/12.2-01-PLAN.md — Pin quereus 3.1.2, split-batch create()/createAuthority(), extend createAuthority() invite params, fix createElection() date format + signingNonce, export peekNextElectionTid()
 
 **Wave 2** *(blocked on Wave 1 completion)*:
 
