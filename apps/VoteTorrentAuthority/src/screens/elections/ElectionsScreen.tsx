@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from "react";
-import { View, ScrollView, StyleSheet, TouchableOpacity } from "react-native";
+import { View, ScrollView, StyleSheet } from "react-native";
 import { NoNetwork } from "../../components/NoNetwork";
 import { useApp } from "../../providers/AppProvider";
 import { ChipButton } from "../../components/ChipButton";
+import { CollapsibleSection } from "../../components/CollapsibleSection";
 import { useTranslation } from "react-i18next";
 import { globalStyles } from "../../theme/styles";
 import {
@@ -13,43 +14,28 @@ import {
 	Proposal,
 } from "@votetorrent/vote-core";
 import { ElectionCard } from "./components/ElectionCard";
-import { ExtendedTheme, useNavigation, useTheme } from "@react-navigation/native";
+import { useNavigation } from "@react-navigation/native";
 import type { NavigationProp } from "../../navigation/types";
 import { ThemedText } from "../../components/ThemedText";
-import FontAwesome6 from "react-native-vector-icons/FontAwesome6";
 
-// Mock data for elections
-const mockElections = [
-	{
-		id: "1",
-		title: "2024 Presidential Election",
-		authority: "Federal Election Commission",
-		date: "2024-11-05",
-	},
-	{
-		id: "2",
-		title: "State Senate District 12",
-		authority: "State Election Board",
-		date: "2024-08-15",
-	},
-	{
-		id: "3",
-		title: "City Council Special Election",
-		authority: "City Clerk",
-		date: "2024-06-20",
-	},
-];
-
+/**
+ * ElectionsScreen — three stacked sections per Phase 9 D-13:
+ *   1. Active/Future elections (no header) + right-aligned CREATE ELECTION chip
+ *   2. "Proposed Elections" section (header)
+ *   3. "Election History" CollapsibleSection (collapsed by default — mirrors
+ *      AuthoritiesScreen's default-collapsed convention)
+ *
+ * The hand-rolled chevron + state previously used for the history section has
+ * been replaced with the shared CollapsibleSection primitive.
+ */
 export const ElectionsScreen = () => {
 	const { getEngine, hasNetwork } = useApp();
 	const navigation = useNavigation<NavigationProp>();
-	const [networkEngine, setNetworkEngine] = useState<INetworkEngine>();
+	const [, setNetworkEngine] = useState<INetworkEngine>();
 	const [electionsEngine, setElectionsEngine] = useState<IElectionsEngine>();
 	const [elections, setElections] = useState<ElectionSummary[]>([]);
 	const [proposedElections, setProposedElections] = useState<Proposal<ElectionInit>[]>([]);
 	const [electionHistory, setElectionHistory] = useState<ElectionSummary[]>([]);
-	const [showHistory, setShowHistory] = useState(false);
-	const { colors } = useTheme() as ExtendedTheme;
 	const { t } = useTranslation();
 
 	useEffect(() => {
@@ -67,30 +53,25 @@ export const ElectionsScreen = () => {
 				const engine = await getEngine<IElectionsEngine>("elections");
 				setElectionsEngine(engine);
 
-				const [elections, proposedElections, electionHistory] = await Promise.all([
+				const [activeElections, proposed, history] = await Promise.all([
 					engine.getElections(),
 					engine.getProposedElections(),
 					engine.getElectionHistory(),
 				]);
 
-				setElections(elections);
-				console.log("elections", elections);
-				setProposedElections(proposedElections);
-				setElectionHistory(electionHistory);
+				setElections(activeElections);
+				setProposedElections(proposed);
+				setElectionHistory(history);
 			} catch (error) {
 				console.error("Error loading elections:", error);
 			}
 		}
 		initializeElectionsEngine();
-	}, [electionsEngine]);
+	}, [hasNetwork]);
 
 	if (!hasNetwork) {
 		return <NoNetwork />;
 	}
-
-	const toggleHistory = () => {
-		setShowHistory(!showHistory);
-	};
 
 	const navigateToElectionDetails = async (electionId: string) => {
 		const engine = await electionsEngine?.openElection(electionId);
@@ -103,6 +84,7 @@ export const ElectionsScreen = () => {
 
 	return (
 		<ScrollView style={styles.container}>
+			{/* Section 1: Active / Future elections — no header per D-13 */}
 			<View style={styles.section}>
 				{elections.length > 0 ? (
 					elections.map((election) => (
@@ -115,13 +97,18 @@ export const ElectionsScreen = () => {
 						/>
 					))
 				) : (
-					<ThemedText style={styles.noElectionsText}>{t("noCurrentElections")}</ThemedText>
+					<ThemedText style={styles.emptyText}>{t("noCurrentElections")}</ThemedText>
 				)}
 				<View style={styles.buttonContainer}>
-					<ChipButton label={t("createElection")} icon="plus" onPress={() => {}} />
+					<ChipButton
+						label={t("createElection")}
+						icon="plus"
+						onPress={() => navigation.navigate("CreateElection")}
+					/>
 				</View>
 			</View>
 
+			{/* Section 2: Proposed Elections — titled section */}
 			<View style={styles.section}>
 				<ThemedText type="title">{t("proposedElections")}</ThemedText>
 				{proposedElections.length > 0 ? (
@@ -139,33 +126,22 @@ export const ElectionsScreen = () => {
 				)}
 			</View>
 
-			<View style={styles.section}>
-				<TouchableOpacity style={styles.historyHeader} onPress={toggleHistory}>
-					<FontAwesome6
-						name={showHistory ? "chevron-down" : "chevron-right"}
-						size={14}
-						color={colors.text}
-					/>
-					<ThemedText type="title">{t("electionHistory")}</ThemedText>
-				</TouchableOpacity>
-				{showHistory && (
-					<View style={styles.section}>
-						{electionHistory.length > 0 ? (
-							electionHistory.map((historyItem, index) => (
-								<ElectionCard
-									key={index}
-									election={historyItem}
-									onPress={() => {
-										navigateToElectionDetails(historyItem.id);
-									}}
-								/>
-							))
-						) : (
-							<ThemedText>{t("noHistoryFound", "No history found.")}</ThemedText>
-						)}
-					</View>
+			{/* Section 3: Election History — CollapsibleSection per D-13 */}
+			<CollapsibleSection title={t("electionHistory")} defaultExpanded={false}>
+				{electionHistory.length > 0 ? (
+					electionHistory.map((historyItem) => (
+						<ElectionCard
+							key={historyItem.id}
+							election={historyItem}
+							onPress={() => {
+								navigateToElectionDetails(historyItem.id);
+							}}
+						/>
+					))
+				) : (
+					<ThemedText style={styles.emptyText}>{t("noHistoryFound")}</ThemedText>
 				)}
-			</View>
+			</CollapsibleSection>
 		</ScrollView>
 	);
 };
@@ -176,7 +152,7 @@ const localStyles = StyleSheet.create({
 		justifyContent: "flex-end",
 		padding: 16,
 	},
-	noElectionsText: {
+	emptyText: {
 		padding: 16,
 	},
 	emptyHint: {
@@ -184,12 +160,6 @@ const localStyles = StyleSheet.create({
 		marginBottom: 4,
 		fontStyle: "italic",
 		opacity: 0.6,
-	},
-	historyHeader: {
-		flexDirection: "row",
-		alignItems: "center",
-		gap: 16,
-		marginBottom: 16,
 	},
 });
 

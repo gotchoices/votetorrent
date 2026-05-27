@@ -55,6 +55,12 @@ export type RootStackParamList = {
 	ScreenScaffoldsDebug: undefined;
 	ElectionDetails: { electionEngine: IElectionEngine };
 	EditBallot: undefined;
+	// Phase 9 plan 09-01 — type entries for routes whose screens land in later
+	// plans (CreateElection in 09-02, CreateBallot in 09-04). Stack.Screen
+	// registration is deferred; only the type signature is added here so the
+	// navigate(...) calls in ElectionsScreen / ElectionDetailsScreen compile.
+	CreateElection: undefined;
+	CreateBallot: { electionId: string };
 };
 
 export type TabParamList = {

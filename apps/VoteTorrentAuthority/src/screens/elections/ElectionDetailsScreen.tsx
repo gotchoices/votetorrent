@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { View, ScrollView, StyleSheet, TouchableOpacity } from "react-native";
+import { View, ScrollView, StyleSheet } from "react-native";
 import { ExtendedTheme, useRoute, useTheme, useNavigation } from "@react-navigation/native";
 import { useTranslation } from "react-i18next";
 import { ThemedText } from "../../components/ThemedText";
@@ -9,15 +9,29 @@ import { ElectionDetailsBlock } from "./components/ElectionDetailsBlock";
 import { ChipButton } from "../../components/ChipButton";
 import { KeyholderCard } from "./components/KeyholderCard";
 import { CustomButton } from "../../components/CustomButton";
-import FontAwesome6 from "react-native-vector-icons/FontAwesome6";
+import { Timeline } from "./components/Timeline";
+import { formatDate } from "../../utils/displayUtils";
+import type { NavigationProp } from "../../navigation/types";
 
+/**
+ * ElectionDetailsScreen — timeline-focal stacked layout per Phase 9 D-07.
+ *
+ * Order (top → bottom):
+ *   1. Header (title + metadata via ElectionDetailsBlock)
+ *   2. Timeline (vertical, 5 milestones with status dots) — focal section
+ *   3. Keyholders (compact list)
+ *   4. Tags (chip row)
+ *   5. Revision deadline (callout)
+ *   6. Revise / Clone actions
+ *   7. Ballot templates list — replaced by CreateBallot empty-state action
+ *      per D-09 when no ballot is attached.
+ */
 export default function ElectionDetailsScreen() {
 	const { t } = useTranslation();
 	const { electionEngine } = useRoute().params as { electionEngine: IElectionEngine };
 	const [electionDetails, setElectionDetails] = useState<ElectionDetails | null>(null);
-	const [showMore, setShowMore] = useState(false);
 	const { colors } = useTheme() as ExtendedTheme;
-	const navigation = useNavigation();
+	const navigation = useNavigation<NavigationProp>();
 
 	useEffect(() => {
 		const loadElectionDetails = async () => {
@@ -34,10 +48,6 @@ export default function ElectionDetailsScreen() {
 		loadElectionDetails();
 	}, [electionEngine]);
 
-	const toggleShowMore = () => {
-		setShowMore(!showMore);
-	};
-
 	if (!electionDetails) {
 		return (
 			<View style={styles.container}>
@@ -48,13 +58,18 @@ export default function ElectionDetailsScreen() {
 
 	return (
 		<ScrollView style={styles.container}>
+			{/* Header + immutable metadata */}
 			<View style={styles.section}>
 				<ElectionDetailsBlock electionDetails={electionDetails} />
-				<View style={styles.buttonContainer}>
-					<ChipButton label={t("preview")} onPress={() => {}} />
-				</View>
 			</View>
 
+			{/* Timeline — focal section per D-07 */}
+			<View style={styles.section}>
+				<ThemedText type="defaultSemiBold">{t("timeline")}</ThemedText>
+				<Timeline electionDetails={electionDetails} />
+			</View>
+
+			{/* Keyholders */}
 			<View style={styles.section}>
 				<ThemedText type="defaultSemiBold">{t("keyholders")}</ThemedText>
 				{electionDetails.current.keyholders.map((keyholder, index) => (
@@ -66,6 +81,23 @@ export default function ElectionDetailsScreen() {
 				))}
 			</View>
 
+			{/* Tags chip row */}
+			<View style={styles.section}>
+				<ThemedText type="defaultSemiBold">{t("tags")}</ThemedText>
+				<View style={styles.tagRow}>
+					{electionDetails.current.tags.map((tag) => (
+						<ChipButton key={tag} label={tag} />
+					))}
+				</View>
+			</View>
+
+			{/* Revision deadline callout */}
+			<View style={[styles.section, styles.calloutBox, { backgroundColor: colors.card, borderColor: colors.border }]}>
+				<ThemedText type="defaultSemiBold">{t("revisionDeadline")}</ThemedText>
+				<ThemedText>{formatDate(electionDetails.election.revisionDeadline)}</ThemedText>
+			</View>
+
+			{/* Revise / Clone actions */}
 			<View style={styles.section}>
 				<CustomButton
 					title={t("reviseElection")}
@@ -83,35 +115,22 @@ export default function ElectionDetailsScreen() {
 				/>
 			</View>
 
+			{/* Create-ballot empty-state action — D-09 entry point to CreateBallot
+			    route. Route is registered by Plan 09-04; verify-time the call must
+			    exist with electionId param. */}
 			<View style={styles.section}>
 				<ThemedText type="title">{t("ballotTemplates")}</ThemedText>
-				<ThemedText type="small">{t("noAssociatedAuthoritiesHaveTemplates")}</ThemedText>
-			</View>
-
-			<View style={styles.section}>
-				<ThemedText type="title">{t("pendingBallotTemplates")}</ThemedText>
-				<ThemedText type="small">{t("noAssociatedAuthoritiesHaveTemplates")}</ThemedText>
-			</View>
-
-			<View style={styles.section}>
-				<TouchableOpacity style={styles.moreHeader} onPress={toggleShowMore}>
-					<FontAwesome6
-						name={showMore ? "chevron-down" : "chevron-right"}
-						size={14}
-						color={colors.text}
-					/>
-					<ThemedText type="title">{t("more")}</ThemedText>
-				</TouchableOpacity>
-				{showMore && <ThemedText type="small">{t("noBallotTemplates")}</ThemedText>}
-			</View>
-
-			<View style={styles.section}>
+				<ThemedText type="small">{t("noBallotYet")}</ThemedText>
 				<CustomButton
-					title={t("createBallotTemplate")}
+					title={t("createBallot")}
 					size="thin"
 					icon="plus"
 					backgroundColor={colors.accent}
-					onPress={() => navigation.navigate("EditBallot")}
+					onPress={() =>
+						navigation.navigate("CreateBallot", {
+							electionId: electionDetails.election.id,
+						})
+					}
 				/>
 			</View>
 		</ScrollView>
@@ -119,15 +138,16 @@ export default function ElectionDetailsScreen() {
 }
 
 const localStyles = StyleSheet.create({
-	buttonContainer: {
+	tagRow: {
 		flexDirection: "row",
-		justifyContent: "flex-end",
+		flexWrap: "wrap",
+		gap: 8,
+		marginTop: 8,
 	},
-	moreHeader: {
-		flexDirection: "row",
-		alignItems: "center",
-		gap: 16,
-		marginBottom: 16,
+	calloutBox: {
+		padding: 12,
+		borderRadius: 8,
+		borderWidth: 1,
 	},
 });
 
