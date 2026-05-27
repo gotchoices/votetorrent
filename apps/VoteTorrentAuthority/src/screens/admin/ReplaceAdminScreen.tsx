@@ -7,7 +7,7 @@ import { ChipButton } from "../../components/ChipButton";
 import { CustomButton } from "../../components/CustomButton";
 import { InfoCard } from "../../components/InfoCard";
 import type { RootStackParamList } from "../../navigation/types";
-import type { Authority, Officer, Admin } from "@votetorrent/vote-core";
+import type { Authority, Officer, Admin, INetworkEngine } from "@votetorrent/vote-core";
 import { useRoute, useNavigation } from "@react-navigation/native";
 import { useApp } from "../../providers/AppProvider";
 import { NativeStackNavigationProp } from "@react-navigation/native-stack";
@@ -21,7 +21,8 @@ export default function ReplaceAdminScreen() {
 		officer?: Officer;
 		removeOfficer?: boolean;
 	};
-	const { networkEngine } = useApp();
+	const { getEngine } = useApp();
+	const [networkEngine, setNetworkEngine] = useState<INetworkEngine | null>(null);
 	const [currentAdmin, setCurrentAdmin] = useState<Admin | null>(null);
 	const [proposedOfficers, setProposedOfficers] = useState<Officer[]>([]);
 	const [isLoading, setIsLoading] = useState(true);
@@ -29,16 +30,29 @@ export default function ReplaceAdminScreen() {
 	const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 
 	useEffect(() => {
+		async function loadNetworkEngine() {
+			try {
+				const engine = await getEngine<INetworkEngine>("network");
+				setNetworkEngine(engine);
+			} catch (error) {
+				console.error("Error loading network engine:", error);
+				setIsLoading(false);
+			}
+		}
+		loadNetworkEngine();
+	}, [getEngine]);
+
+	useEffect(() => {
 		async function loadAdmin() {
 			if (!networkEngine) return;
 			try {
 				setIsLoading(true);
-				const admin = await networkEngine.getAdmin(authority.id);
-				console.log("Loaded admin:", admin);
-				setCurrentAdmin(admin);
-				// Only set proposed officers if we haven't loaded initial data
+				const authorityEngine = await networkEngine.openAuthority(authority.id, authority);
+				const adminDetails = await authorityEngine.getAdminDetails();
+				console.log("Loaded admin:", adminDetails.admin);
+				setCurrentAdmin(adminDetails.admin);
 				if (!hasLoadedInitialData) {
-					setProposedOfficers(admin.officers);
+					setProposedOfficers(adminDetails.admin.officers);
 					setHasLoadedInitialData(true);
 				}
 			} catch (error) {
@@ -97,20 +111,13 @@ export default function ReplaceAdminScreen() {
 		});
 	};
 
-	const handleCreateProposal = async () => {
-		try {
-			const newAdmin: Admin = {
-				id: "",
-				authorityId: authority.id,
-				officers: proposedOfficers,
-				effectiveAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).getTime(), // 30 days from now
-				thresholdPolicies: [],
-			};
-			await networkEngine.setProposedAdmin(authority.id, newAdmin);
-			navigation.popTo("AuthorityDetails", { authority });
-		} catch (error) {
-			console.error("Error creating proposal:", error);
-		}
+	const handleCreateProposal = () => {
+		// v1.1 milestone scope: functional interaction beyond navigation is OOS.
+		// setProposedAdmin is not exposed on INetworkEngine. Stub the save and
+		// navigate back; real proposal creation lands when the engine API is
+		// extended in a later phase.
+		console.log("replaceAdmin-createProposal stub", { authorityId: authority.id, proposedOfficers });
+		navigation.goBack();
 	};
 
 	return (
