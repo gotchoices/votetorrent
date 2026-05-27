@@ -1,39 +1,53 @@
-import React, { useState } from "react";
+import React from "react";
 import { View, Text, TouchableOpacity, StyleSheet } from "react-native";
-import { useTheme } from "@react-navigation/native";
+import { ExtendedTheme, useTheme } from "@react-navigation/native";
+import { useTranslation } from "react-i18next";
 import { globalStyles } from "../../../theme/styles";
 import FontAwesome from "react-native-vector-icons/FontAwesome";
 
-const QuestionTypeSelector = () => {
-	const { colors } = useTheme();
-	const [selectedType, setSelectedType] = useState<{ label: string; icon: string } | null>(null);
+type QuestionTypeValue = "select" | "rank" | "score" | "text";
 
-	const types = [
-		{ label: "Select", icon: "check-circle" },
-		{ label: "Rank", icon: "sort" },
-		{ label: "Score", icon: "star" },
-		{ label: "Text", icon: "font" },
-	];
+interface QuestionTypeSelectorProps {
+	value?: QuestionTypeValue;
+	onChange?: (next: QuestionTypeValue) => void;
+}
 
-	const handleSelect = (type: { label: string; icon: string }) => {
-		setSelectedType(type);
+const TYPES: Array<{ value: QuestionTypeValue; labelKey: string; icon: string }> = [
+	{ value: "select", labelKey: "select", icon: "check-circle" },
+	{ value: "rank", labelKey: "rank", icon: "sort" },
+	{ value: "score", labelKey: "score", icon: "star" },
+	{ value: "text", labelKey: "text", icon: "font" },
+];
+
+const QuestionTypeSelector = ({ value, onChange }: QuestionTypeSelectorProps) => {
+	const { colors } = useTheme() as ExtendedTheme;
+	const { t } = useTranslation();
+
+	const handleSelect = (next: QuestionTypeValue) => {
+		onChange?.(next);
 	};
 
 	return (
 		<View style={styles.gridContainer}>
-			{types.map((type, index) => (
-				<TouchableOpacity
-					key={index}
-					style={[
-						styles.typeContainer,
-						selectedType?.label === type.label && { backgroundColor: colors.primary },
-					]}
-					onPress={() => handleSelect(type)}
-				>
-					<Text style={styles.label}>{type.label}</Text>
-					<FontAwesome name={type.icon} size={24} color={colors.text} />
-				</TouchableOpacity>
-			))}
+			{TYPES.map((type) => {
+				const selected = value === type.value;
+				return (
+					<TouchableOpacity
+						key={type.value}
+						style={[
+							styles.typeContainer,
+							{ borderColor: colors.border },
+							selected && { backgroundColor: colors.primary },
+						]}
+						onPress={() => handleSelect(type.value)}
+					>
+						<Text style={[styles.label, { color: colors.text }]}>
+							{t(type.labelKey)}
+						</Text>
+						<FontAwesome name={type.icon} size={24} color={colors.text} />
+					</TouchableOpacity>
+				);
+			})}
 		</View>
 	);
 };
@@ -53,7 +67,6 @@ const localStyles = StyleSheet.create({
 		padding: 16,
 		marginBottom: 16,
 		borderWidth: 1,
-		borderColor: "#ccc",
 		borderRadius: 8,
 	},
 	label: {
