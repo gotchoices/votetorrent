@@ -13,7 +13,7 @@ import type { IBuilder } from '../common/builder.js'
 export interface IUserEngine {
   addKey(key: UserKey): Promise<void>
   connectDevice(): Promise<DeviceAdvertisement>
-  create(user: CreateUserHistory): Promise<void>
+  create(user: CreateUserHistory, options?: { inviteSlotCid?: string; inviteSignature?: string }): Promise<void>
   getHistory(userId: string, forward: boolean): AsyncIterable<UserHistory>
   getSummary(): Promise<User | undefined>
   isPrivileged(scope: Scope, userId: string): Promise<boolean>

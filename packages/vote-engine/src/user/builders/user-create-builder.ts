@@ -252,13 +252,13 @@ export class UserCreateBuilder implements IUserCreateBuilder {
     }
   }
 
-  commit (): Promise<void> {
+  commit (options?: { inviteSlotCid?: string; inviteSignature?: string }): Promise<void> {
     if (this.committed) {
       throw new BuilderAlreadyCommittedError(UserCreateBuilder.KIND)
     }
     this.toEngineInput() // validate before committing
     this.committed = true
-    const result = this.engine.create(this.toEngineInput())
+    const result = this.engine.create(this.toEngineInput(), options)
     this.cachedOutput = undefined
     return result
   }

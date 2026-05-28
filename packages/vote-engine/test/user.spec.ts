@@ -795,23 +795,16 @@ describe('UserCreateBuilder', () => {
     expect(full.isValid()).to.equal(true)
   })
 
-  // BLOCKED on UserEngine.create() invite-context overload (Phase 12.3-07 engine gap).
-  // The seed half is in place (seedUserInvite produces a valid InviteSlot row), but
-  // UserEngine.create hardcodes `InviteSlotCid = null, InviteSignature = null` so the
-  // User.InsertValid invite-bound branch is unreachable for the 2nd user. Follow-up:
-  // extend UserEngine.create(userInit, options?: { inviteSlotCid, inviteSignature })
-  // parallel to NetworkEngine.createAuthority's Plan 12.2-01 Part B extension.
-  it.skip('REAL ENGINE: isValid===true => commit() does not throw BuilderValidationError; engine.create observable side effects match — BLOCKED: UserEngine.create lacks invite-context overload (seedUserInvite seed-half works; engine SQL hardcodes InviteSlotCid=null,InviteSignature=null)', async () => {
+  it('REAL ENGINE: isValid===true => commit() does not throw BuilderValidationError; engine.create observable side effects match', async () => {
     const net = await createTestNetwork()
     const auth = await addTestAuthority(net)
     const distinctUser = makeDistinctTestUser()
     // Seed the User.InsertValid invite-bound branch for the 2nd user (Plan 12.3-03).
     const { inviteSlotCid, inviteSignature } = await seedUserInvite(auth, distinctUser)
-    void inviteSlotCid; void inviteSignature
     const engine = new UserEngine(distinctUser, auth.ctx)
     const b = makeFullBuilder(engine)
     expect(b.isValid()).to.equal(true)
-    await b.commit()
+    await b.commit({ inviteSlotCid, inviteSignature })
   })
 
   it('round-trip serialization: JSON.parse(JSON.stringify(b.toJSON())) deep-equals; fromJSON reproduces draft + validation state', () => {
@@ -836,18 +829,16 @@ describe('UserCreateBuilder', () => {
     expect(versionErr).to.be.instanceOf(Error)
   })
 
-  // BLOCKED — same UserEngine.create() invite-context gap as the preceding test.
-  it.skip('REAL ENGINE: double-commit guard: 2nd commit() throws BuilderAlreadyCommittedError synchronously, no second engine write — BLOCKED: UserEngine.create lacks invite-context overload (seedUserInvite seed-half works; engine SQL hardcodes InviteSlotCid=null,InviteSignature=null)', async () => {
+  it('REAL ENGINE: double-commit guard: 2nd commit() throws BuilderAlreadyCommittedError synchronously, no second engine write', async () => {
     const net = await createTestNetwork()
     const auth = await addTestAuthority(net)
     const distinctUser = makeDistinctTestUser()
     const { inviteSlotCid, inviteSignature } = await seedUserInvite(auth, distinctUser)
-    void inviteSlotCid; void inviteSignature
     const engine = new UserEngine(distinctUser, auth.ctx)
     const b = makeFullBuilder(engine)
-    await b.commit()
+    await b.commit({ inviteSlotCid, inviteSignature })
     let caught: unknown
-    try { await b.commit() } catch (err) { caught = err }
+    try { await b.commit({ inviteSlotCid, inviteSignature }) } catch (err) { caught = err }
     expect(caught).to.be.instanceOf(BuilderAlreadyCommittedError)
   })
 
@@ -887,17 +878,15 @@ describe('UserCreateBuilder', () => {
     expect(caught).to.be.instanceOf(BuilderAlreadyCommittedError)
   })
 
-  // BLOCKED — same UserEngine.create() invite-context gap as the two preceding tests.
-  it.skip('REAL ENGINE: engine.create(payload) and engine.buildCreate().fromPayload(payload).commit() produce structurally identical observable state — BLOCKED: UserEngine.create lacks invite-context overload (seedUserInvite seed-half works; engine SQL hardcodes InviteSlotCid=null,InviteSignature=null)', async () => {
+  it('REAL ENGINE: engine.create(payload) and engine.buildCreate().fromPayload(payload).commit() produce structurally identical observable state', async () => {
     const net = await createTestNetwork()
     const auth = await addTestAuthority(net)
     const user1 = makeDistinctTestUser()
     const { inviteSlotCid, inviteSignature } = await seedUserInvite(auth, user1)
-    void inviteSlotCid; void inviteSignature
     const eng1 = new UserEngine(user1, auth.ctx)
     const payload = makeFullBuilder(eng1).toEngineInput()
     let err1: unknown
-    try { await eng1.create(payload) } catch (e) { err1 = e }
+    try { await eng1.create(payload, { inviteSlotCid, inviteSignature }) } catch (e) { err1 = e }
     expect(err1).to.equal(undefined)
   })
 

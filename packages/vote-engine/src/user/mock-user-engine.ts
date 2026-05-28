@@ -63,7 +63,10 @@ export class MockUserEngine implements IUserEngine {
     }
   }
 
-  async create (userInit: CreateUserHistory): Promise<void> {
+  async create (
+    userInit: CreateUserHistory,
+    _options?: { inviteSlotCid?: string; inviteSignature?: string }
+  ): Promise<void> {
     // This method re-initializes the user for this engine instance
     this.mockUser = {
       id: generateId('user'), // Generate a new ID for the created user

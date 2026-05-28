@@ -107,7 +107,10 @@ export class UserEngine implements IUserEngine {
    * cross-table CHECKs (User.UserKeyValid → UserKey, UserKey.UserIdValid
    * → User) at end-of-batch rather than at each insert moment.
    */
-  async create (userInit: CreateUserHistory): Promise<void> {
+  async create (
+    userInit: CreateUserHistory,
+    options?: { inviteSlotCid?: string; inviteSignature?: string }
+  ): Promise<void> {
     this.requireCtx('create')
     const tid = nextTid++
     const imageRefJson = userInit.imageRef ? JSON.stringify(userInit.imageRef) : null
@@ -119,7 +122,7 @@ export class UserEngine implements IUserEngine {
 					Name,
 					ImageRef
 				)
-				with context SigningNonce = null, InviteSlotCid = null, InviteSignature = null, Tid = ${tid}
+				with context SigningNonce = null, InviteSlotCid = :inviteSlotCid, InviteSignature = :inviteSignature, Tid = ${tid}
 				values (:userId, :userName, :userImageRef);
 
 				insert into UserKey (
@@ -138,6 +141,8 @@ export class UserEngine implements IUserEngine {
           keyType: userInit.userKey.type,
           keyValue: userInit.userKey.key,
           expiration: toCanonicalDatetime(userInit.userKey.expiration),
+          inviteSlotCid: options?.inviteSlotCid ?? null,
+          inviteSignature: options?.inviteSignature ?? null,
           now: nowCanonicalDatetime()
         }
       )
