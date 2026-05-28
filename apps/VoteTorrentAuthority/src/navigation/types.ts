@@ -64,9 +64,11 @@ export type RootStackParamList = {
 	// shapes are intentionally loose-typed (no Question/Option imports) to
 	// avoid circular imports between navigation/types and vote-core models;
 	// consumers narrow via local casts. popTo carry-back fields are optional.
-	CreateBallot: { electionId: string; question?: any };
-	EditQuestion: { questionCode?: string; newOption?: any };
-	EditQuestionOption: { questionCode: string; optionCode?: string };
+	// Phase 9 plan 09-07 — electionTitle/electionDate added so screens can show
+	// real election context without engine imports (display strings passed by caller).
+	CreateBallot: { electionId: string; question?: any; electionTitle?: string; electionDate?: string };
+	EditQuestion: { questionCode?: string; newOption?: any; electionTitle?: string; electionDate?: string };
+	EditQuestionOption: { questionCode: string; optionCode?: string; electionTitle?: string; electionDate?: string };
 };
 
 export type TabParamList = {

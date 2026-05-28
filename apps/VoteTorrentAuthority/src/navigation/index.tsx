@@ -409,12 +409,36 @@ export const RootNavigator = () => {
 				<Stack.Screen
 					name="EditQuestion"
 					component={EditQuestionScreen}
-					options={{ title: t("question") }}
+					options={({ navigation }) => ({
+						title: t("ballotQuestion"),
+						headerRight: () => (
+							<ChipButton
+								label={t("remove")}
+								icon="trash"
+								onPress={() => {
+									console.log("editQuestion-remove stub");
+									navigation.goBack();
+								}}
+							/>
+						),
+					})}
 				/>
 				<Stack.Screen
 					name="EditQuestionOption"
 					component={EditQuestionOption}
-					options={{ title: t("option") }}
+					options={({ navigation }) => ({
+						title: t("questionOption"),
+						headerRight: () => (
+							<ChipButton
+								label={t("remove")}
+								icon="trash"
+								onPress={() => {
+									console.log("editQuestionOption-remove stub");
+									navigation.goBack();
+								}}
+							/>
+						),
+					})}
 				/>
 			</Stack.Group>
 		</Stack.Navigator>

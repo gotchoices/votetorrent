@@ -330,6 +330,18 @@ const resources = {
 			informationUrl: 'Information URL',
 			videoUrl: 'Video URL',
 			optionalVideoAddress: 'Optional video address',
+			// Phase 9 plan 09-07 — Ballot Question + Question Option parity (BALUI-03/04).
+			// D-17: en-only; Spanish deferred to Phase 11.
+			ballotQuestion: 'Ballot Question',
+			questionOption: 'Question Option',
+			selectionLimits: 'Selection Limits',
+			min: 'Min',
+			max: 'Max',
+			forceOrder: 'Force Order',
+			required: 'Required',
+			group: 'Group',
+			sequence: 'Sequence',
+			groupPlaceholder: 'county/seats',
 		},
 	},
 	es: {
