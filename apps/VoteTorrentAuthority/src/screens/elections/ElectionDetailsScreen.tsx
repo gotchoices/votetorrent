@@ -1,9 +1,9 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { View, ScrollView, StyleSheet } from "react-native";
-import { ExtendedTheme, useRoute, useTheme, useNavigation } from "@react-navigation/native";
+import { ExtendedTheme, useRoute, useTheme, useNavigation, useFocusEffect } from "@react-navigation/native";
 import { useTranslation } from "react-i18next";
 import { ThemedText } from "../../components/ThemedText";
-import type { ElectionDetails, IElectionEngine } from "@votetorrent/vote-core";
+import type { BallotSummary, ElectionDetails, IElectionEngine } from "@votetorrent/vote-core";
 import { globalStyles } from "../../theme/styles";
 import { ElectionDetailsBlock } from "./components/ElectionDetailsBlock";
 import { ChipButton } from "../../components/ChipButton";
@@ -24,13 +24,15 @@ import type { NavigationProp } from "../../navigation/types";
  *   4. Tags (chip row)
  *   5. Revision deadline (callout)
  *   6. Revise / Clone actions
- *   7. Ballot templates list — replaced by CreateBallot empty-state action
- *      per D-09 when no ballot is attached.
+ *   7. Ballot templates list — G2/G12 (09-10): loaded from electionEngine.getBallots()
+ *      via useFocusEffect; one card per template when >=1 exists; empty-state
+ *      (noBallotYet text + CREATE BALLOT TEMPLATE button) shown only when 0 templates.
  */
 export default function ElectionDetailsScreen() {
 	const { t } = useTranslation();
 	const { electionEngine } = useRoute().params as { electionEngine: IElectionEngine };
 	const [electionDetails, setElectionDetails] = useState<ElectionDetails | null>(null);
+	const [ballots, setBallots] = useState<BallotSummary[]>([]);
 	const { colors } = useTheme() as ExtendedTheme;
 	const navigation = useNavigation<NavigationProp>();
 
@@ -48,6 +50,24 @@ export default function ElectionDetailsScreen() {
 
 		loadElectionDetails();
 	}, [electionEngine]);
+
+	// G2/G12: Refresh ballot list on every focus so newly proposed templates appear
+	// immediately on return from CreateBallot/EditBallot.
+	useFocusEffect(
+		useCallback(() => {
+			const loadBallots = async () => {
+				try {
+					if (electionEngine) {
+						const summaries = await electionEngine.getBallots();
+						setBallots(summaries);
+					}
+				} catch (error) {
+					console.error("Error loading ballots:", error);
+				}
+			};
+			loadBallots();
+		}, [electionEngine])
+	);
 
 	if (!electionDetails) {
 		return (
@@ -116,37 +136,48 @@ export default function ElectionDetailsScreen() {
 				/>
 			</View>
 
-			{/* Ballot Templates section — D-09 entry point to CreateBallot (empty state)
-			    and EditBallot (existing template edit mode). Per 09-08 decision 3. */}
+			{/* Ballot Templates section — G1/G2/G12 (09-10):
+			    Show one InfoCard per template when >=1 exists (each navigates EditBallot
+			    with ballotId+electionEngine for upsert). When 0 templates, show only
+			    the empty-state text + CREATE BALLOT TEMPLATE button (G1 label). */}
 			<View style={styles.section}>
 				<ThemedText type="title">{t("ballotTemplates")}</ThemedText>
-				{/* Existing template list card → EditBallot edit mode */}
-				<InfoCard
-					title={t("ballotTemplate")}
-					icon="chevron-right"
-					onPress={() =>
-						navigation.navigate("EditBallot", {
-							electionId: electionDetails.election.id,
-							electionTitle: electionDetails.election.title,
-							electionDate: formatDate(electionDetails.election.revisionDeadline),
-						})
-					}
-				/>
-				{/* Empty-state: create new ballot template */}
-				<ThemedText type="small">{t("noBallotYet")}</ThemedText>
-				<CustomButton
-					title={t("createBallot")}
-					size="thin"
-					icon="plus"
-					backgroundColor={colors.accent}
-					onPress={() =>
-						navigation.navigate("CreateBallot", {
-							electionId: electionDetails.election.id,
-							electionTitle: electionDetails.election.title,
-							electionDate: formatDate(electionDetails.election.revisionDeadline),
-						})
-					}
-				/>
+				{ballots.length > 0 ? (
+					ballots.map((ballot) => (
+						<InfoCard
+							key={ballot.id}
+							title={t("ballotTemplate")}
+							icon="chevron-right"
+							onPress={() =>
+								navigation.navigate("EditBallot", {
+									electionId: electionDetails.election.id,
+									electionTitle: electionDetails.election.title,
+									electionDate: formatDate(electionDetails.election.revisionDeadline),
+									ballotId: ballot.id,
+									electionEngine,
+								} as any)
+							}
+						/>
+					))
+				) : (
+					<>
+						<ThemedText type="small">{t("noBallotYet")}</ThemedText>
+						<CustomButton
+							title={t("createBallotTemplate")}
+							size="thin"
+							icon="plus"
+							backgroundColor={colors.accent}
+							onPress={() =>
+								navigation.navigate("CreateBallot", {
+									electionId: electionDetails.election.id,
+									electionTitle: electionDetails.election.title,
+									electionDate: formatDate(electionDetails.election.revisionDeadline),
+									electionEngine,
+								} as any)
+							}
+						/>
+					</>
+				)}
 			</View>
 		</ScrollView>
 	);

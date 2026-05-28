@@ -9,14 +9,19 @@ import { globalStyles } from "../../theme/styles";
 import { useBallotDraft } from "./providers/BallotDraftProvider";
 import { BallotTemplateForm } from "./components/BallotTemplateForm";
 import { CustomButton } from "../../components/CustomButton";
+import type { Ballot } from "@votetorrent/vote-core";
 
 /**
  * EditBallotScreen — Ballot Template frame (Figma 57:490) in edit/populated mode.
  *
  * Reached from ElectionDetailsScreen's ballot template chevron list card (09-08).
  * Shares BallotTemplateForm with CreateBallotScreen (Decision 3).
- * Seeded from route.params for v1.1 (no real engine); draft serves as the
- * editable copy. PROPOSE logs a real payload then goBack().
+ *
+ * 09-10 G12: reads electionEngine + ballotId from route.params. When ballotId
+ * is present, calls getBallotDetails(ballotId) on mount and seeds the draft so
+ * the form pre-populates AND retains the SAME id. On PROPOSE, calls
+ * engine.proposeBallot(ballot) with the existing id — the engine upserts by id
+ * (from 09-09) so editing replaces the card instead of inserting a duplicate.
  */
 const EditBallotScreen = () => {
 	const { colors } = useTheme() as ExtendedTheme;
@@ -24,6 +29,8 @@ const EditBallotScreen = () => {
 	const route = useRoute<RouteProp<RootStackParamList, "EditBallot">>();
 	const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 	const { electionId, electionTitle, electionDate } = route.params ?? {};
+	const electionEngine = (route.params as any)?.electionEngine;
+	const ballotId = (route.params as any)?.ballotId;
 	const { ballotDraft, setBallotDraft, removeQuestion } = useBallotDraft();
 
 	// Seed the draft with electionId from route params (edit mode entry point)
@@ -33,6 +40,24 @@ const EditBallotScreen = () => {
 		}
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [electionId]);
+
+	// G12 edit/upsert: load existing ballot from engine on mount so the form
+	// pre-populates AND the draft retains the SAME id for upsert on PROPOSE.
+	useEffect(() => {
+		if (!ballotId || !electionEngine) return;
+		const loadBallot = async () => {
+			try {
+				const details = await electionEngine.getBallotDetails(ballotId);
+				if (details?.ballot) {
+					setBallotDraft(details.ballot);
+				}
+			} catch (error) {
+				console.error("getBallotDetails error", error);
+			}
+		};
+		loadBallot();
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [ballotId]);
 
 	// Carry-back from EditQuestionScreen REMOVE: child passes removeQuestionCode via popTo.
 	// We remove the question then clear the param to prevent re-fire (WARNING 7).
@@ -44,15 +69,26 @@ const EditBallotScreen = () => {
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [removeQuestionCode]);
 
-	const handlePropose = () => {
-		// v1.1 stub — logs a real payload then navigates back.
-		console.log("editBallot-propose stub", {
-			electionId: ballotDraft.electionId ?? electionId,
-			authority: (ballotDraft as any).authority,
-			description: ballotDraft.description,
-			districts: ballotDraft.districts,
-			questions: ballotDraft.questions,
-		});
+	const handlePropose = async () => {
+		// G12: upsert via engine (uses existing id to replace, not duplicate).
+		if (!electionEngine) {
+			// Guard: no engine in test/standalone contexts — still navigate back.
+			navigation.goBack();
+			return;
+		}
+		const ballot: Ballot = {
+			id: (ballotDraft as any).id ?? ballotId ?? `ballot-${electionId}-${Date.now()}`,
+			electionId: ballotDraft.electionId ?? electionId ?? "",
+			authorityId: (ballotDraft as any).authority ?? (ballotDraft as any).authorityId ?? "",
+			description: ballotDraft.description ?? "",
+			districts: ballotDraft.districts ?? [],
+			questions: ballotDraft.questions ?? [],
+		};
+		try {
+			await electionEngine.proposeBallot(ballot);
+		} catch (error) {
+			console.error("proposeBallot error", error);
+		}
 		navigation.goBack();
 	};
 

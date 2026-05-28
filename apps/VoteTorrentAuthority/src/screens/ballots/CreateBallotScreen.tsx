@@ -9,7 +9,7 @@ import { globalStyles } from "../../theme/styles";
 import { useBallotDraft } from "./providers/BallotDraftProvider";
 import { BallotTemplateForm } from "./components/BallotTemplateForm";
 import { CustomButton } from "../../components/CustomButton";
-import type { Question } from "@votetorrent/vote-core";
+import type { Ballot, Question } from "@votetorrent/vote-core";
 
 /**
  * CreateBallotScreen — Ballot Template frame (Figma 57:490) in create/empty mode.
@@ -19,9 +19,13 @@ import type { Question } from "@votetorrent/vote-core";
  * Shares BallotTemplateForm with EditBallotScreen (Decision 3).
  *
  * UAT Test 4 wiring preserved:
- *   - electionId persistence useEffect
+ *   - electionId persistence useEffect (also seeds a stable ballot id, G12 WARNING 8)
  *   - incomingQuestion carry-back useEffect
  *   - useBallotDraft wiring (D-11)
+ *
+ * 09-10 G12: reads electionEngine from route.params; handlePropose calls
+ * engine.proposeBallot(ballot) then goBack so the template appears in
+ * ElectionDetails on focus.
  */
 export default function CreateBallotScreen() {
 	const { colors } = useTheme() as ExtendedTheme;
@@ -33,14 +37,20 @@ export default function CreateBallotScreen() {
 		electionTitle: undefined,
 		electionDate: undefined,
 	};
+	const electionEngine = (route.params as any)?.electionEngine;
 	const { ballotDraft, setBallotDraft, addQuestion, updateQuestion, removeQuestion } = useBallotDraft();
 
-	// Persist electionId from initial route param into the shared draft so
-	// it survives popTo carry-backs that drop the param. Read from draft on
-	// PROPOSE, not from route.params. Closes UAT Test 4 electionId-empty gap.
+	// Persist electionId (and seed a STABLE ballot id once) from initial route param
+	// into the shared draft so they survive popTo carry-backs that drop the param.
+	// Read from draft on PROPOSE, not from route.params (G12 WARNING 8 — prevents
+	// duplicate cards on re-press because id is generated once, not each press).
 	useEffect(() => {
 		if (electionId && ballotDraft.electionId !== electionId) {
-			setBallotDraft({ ...ballotDraft, electionId });
+			setBallotDraft({
+				...ballotDraft,
+				electionId,
+				id: (ballotDraft as any).id ?? `ballot-${electionId}-${Date.now()}`,
+			});
 		}
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [electionId]);
@@ -82,10 +92,27 @@ export default function CreateBallotScreen() {
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [removeQuestionCode]);
 
-	const handlePropose = () => {
-		// D-12 stub — no engine persistence in v1.1. Footer label: t("propose").
-		// electionId lives inside ballotDraft (persisted by the useEffect above).
-		console.log("createBallot-propose stub", ballotDraft);
+	const handlePropose = async () => {
+		// G12: persist template via engine then goBack so ElectionDetails' useFocusEffect
+		// re-fetches getBallots() and shows the new card.
+		if (!electionEngine) {
+			// Guard: no engine in test/standalone contexts — still navigate back.
+			navigation.goBack();
+			return;
+		}
+		const ballot: Ballot = {
+			id: (ballotDraft as any).id ?? `ballot-${electionId}-${Date.now()}`,
+			electionId: ballotDraft.electionId ?? electionId,
+			authorityId: (ballotDraft as any).authority ?? "",
+			description: ballotDraft.description ?? "",
+			districts: ballotDraft.districts ?? [],
+			questions: ballotDraft.questions ?? [],
+		};
+		try {
+			await electionEngine.proposeBallot(ballot);
+		} catch (error) {
+			console.error("proposeBallot error", error);
+		}
 		navigation.goBack();
 	};
 
