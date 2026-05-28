@@ -33,7 +33,7 @@ export default function CreateBallotScreen() {
 		electionTitle: undefined,
 		electionDate: undefined,
 	};
-	const { ballotDraft, setBallotDraft, addQuestion, updateQuestion } = useBallotDraft();
+	const { ballotDraft, setBallotDraft, addQuestion, updateQuestion, removeQuestion } = useBallotDraft();
 
 	// Persist electionId from initial route param into the shared draft so
 	// it survives popTo carry-backs that drop the param. Read from draft on
@@ -72,6 +72,16 @@ export default function CreateBallotScreen() {
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [incomingQuestion?.code]);
 
+	// Carry-back from EditQuestionScreen REMOVE: child passes removeQuestionCode via popTo.
+	// We remove the question then clear the param to prevent re-fire (WARNING 7).
+	const removeQuestionCode = (route.params as { removeQuestionCode?: string } | undefined)?.removeQuestionCode;
+	useEffect(() => {
+		if (!removeQuestionCode) return;
+		removeQuestion(removeQuestionCode);
+		navigation.setParams({ removeQuestionCode: undefined } as any);
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [removeQuestionCode]);
+
 	const handlePropose = () => {
 		// D-12 stub — no engine persistence in v1.1. Footer label: t("propose").
 		// electionId lives inside ballotDraft (persisted by the useEffect above).
@@ -106,6 +116,7 @@ export default function CreateBallotScreen() {
 				electionDate={electionDate}
 				authority={(ballotDraft as any).authority ?? ""}
 				onAuthorityChange={handleAuthorityChange}
+				authorityOptions={[t("mockAuthorityA"), t("mockAuthorityB")]}
 				description={ballotDraft.description ?? ""}
 				onDescriptionChange={handleDescriptionChange}
 				districts={ballotDraft.districts ?? []}

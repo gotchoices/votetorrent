@@ -23,6 +23,7 @@ interface BallotDraftContextType {
 	removeQuestion: (code: string) => void;
 	addOption: (questionCode: string, o: Option) => void;
 	updateOption: (questionCode: string, optionCode: string, o: Option) => void;
+	removeOption: (questionCode: string, optionCode: string) => void;
 }
 
 const BallotDraftContext = createContext<BallotDraftContextType | null>(null);
@@ -95,6 +96,20 @@ export function BallotDraftProvider({ children }: PropsWithChildren) {
 		[]
 	);
 
+	const removeOption = useCallback((questionCode: string, optionCode: string) => {
+		setBallotDraftState((prev) => ({
+			...prev,
+			questions: (prev.questions ?? []).map((existing) =>
+				existing.code === questionCode
+					? {
+							...existing,
+							options: (existing.options ?? []).filter((opt) => opt.code !== optionCode),
+						}
+					: existing
+			),
+		}));
+	}, []);
+
 	return (
 		<BallotDraftContext.Provider
 			value={{
@@ -105,6 +120,7 @@ export function BallotDraftProvider({ children }: PropsWithChildren) {
 				removeQuestion,
 				addOption,
 				updateOption,
+				removeOption,
 			}}
 		>
 			{children}

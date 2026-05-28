@@ -410,15 +410,26 @@ export const RootNavigator = () => {
 				<Stack.Screen
 					name="EditQuestion"
 					component={EditQuestionScreen}
-					options={({ navigation }) => ({
+					options={({ navigation, route }) => ({
 						title: t("ballotQuestion"),
 						headerRight: () => (
 							<ChipButton
 								label={t("remove")}
 								icon="trash"
 								onPress={() => {
-									console.log("editQuestion-remove stub");
-									navigation.goBack();
+									const questionCode = (route.params as { questionCode?: string })?.questionCode;
+									if (!questionCode) {
+										navigation.goBack();
+										return;
+									}
+									// popTo whichever ballot-root is actually in the stack
+									const state = navigation.getState();
+									const hasEditBallot = state.routes.some((r: { name: string }) => r.name === "EditBallot");
+									if (hasEditBallot) {
+										navigation.popTo("EditBallot", { removeQuestionCode: questionCode } as any);
+									} else {
+										navigation.popTo("CreateBallot", { removeQuestionCode: questionCode } as any);
+									}
 								}}
 							/>
 						),
@@ -427,15 +438,23 @@ export const RootNavigator = () => {
 				<Stack.Screen
 					name="EditQuestionOption"
 					component={EditQuestionOption}
-					options={({ navigation }) => ({
+					options={({ navigation, route }) => ({
 						title: t("questionOption"),
 						headerRight: () => (
 							<ChipButton
 								label={t("remove")}
 								icon="trash"
 								onPress={() => {
-									console.log("editQuestionOption-remove stub");
-									navigation.goBack();
+									const optionCode = (route.params as { optionCode?: string })?.optionCode;
+									const questionCode = (route.params as { questionCode?: string })?.questionCode ?? "";
+									if (!optionCode) {
+										navigation.goBack();
+										return;
+									}
+									navigation.popTo("EditQuestion", {
+										questionCode,
+										removeOptionCode: optionCode,
+									} as any);
 								}}
 							/>
 						),

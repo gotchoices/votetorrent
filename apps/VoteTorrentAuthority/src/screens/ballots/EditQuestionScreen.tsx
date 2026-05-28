@@ -26,13 +26,19 @@ type QuestionType = Question["type"];
  * current question (if questionCode route param present), pushes
  * EditQuestionOption for option creation, and on SAVE popTos back to
  * CreateBallot carrying the assembled Question via route param (D-10).
+ *
+ * 09-10 gap closures:
+ *   G7: Options section moved to sit directly below Type (above Selection Limits)
+ *   G8: Min + Max Steppers wrapped in a single row (side-by-side)
+ *   G9: useEffect keyed on questionCode resets all fields when existingQuestion resolves
+ *   G11: removeOptionCode carry-back removes option from local state + draft
  */
 export function EditQuestionScreen() {
 	const { colors } = useTheme() as ExtendedTheme;
 	const { t } = useTranslation();
 	const route = useRoute<RouteProp<RootStackParamList, "EditQuestion">>();
 	const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
-	const { ballotDraft } = useBallotDraft();
+	const { ballotDraft, removeOption } = useBallotDraft();
 
 	const questionCode = route.params?.questionCode;
 	const electionTitle = route.params?.electionTitle;
@@ -59,6 +65,25 @@ export function EditQuestionScreen() {
 	const [required, setRequired] = useState<boolean>(existingQuestion?.required ?? true);
 	const [group, setGroup] = useState<string>(existingQuestion?.group ?? "");
 	const [sequence, setSequence] = useState<number>(existingQuestion?.sequence ?? 0);
+
+	// G9: Re-seed local state when the existing question resolves (draft may load
+	// after mount). Keyed on questionCode only — does not clobber user edits on
+	// every render. Guards: only fires when questionCode is set and question is found.
+	useEffect(() => {
+		if (!questionCode || !existingQuestion) return;
+		setCode(existingQuestion.code ?? "");
+		setTitle(existingQuestion.title ?? "");
+		setInstructions(existingQuestion.instructions ?? "");
+		setType(existingQuestion.type ?? "select");
+		setOptions(existingQuestion.options ?? []);
+		setOptionMin(existingQuestion.optionRange?.min ?? 1);
+		setOptionMax(existingQuestion.optionRange?.max ?? 1);
+		setOptionsOrdered(existingQuestion.optionsOrdered ?? false);
+		setRequired(existingQuestion.required ?? true);
+		setGroup(existingQuestion.group ?? "");
+		setSequence(existingQuestion.sequence ?? 0);
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [questionCode]);
 
 	// Carry-back from EditQuestionOption: child screen passes a `newOption`
 	// route param when SAVE is pressed. Merge it into local form state and
@@ -88,6 +113,17 @@ export function EditQuestionScreen() {
 		} as any);
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [incomingOption?.code]);
+
+	// G11: Carry-back from EditQuestionOption REMOVE: child passes removeOptionCode
+	// via popTo. Remove from local state + draft, then clear param (WARNING 7).
+	const removeOptionCode = route.params?.removeOptionCode;
+	useEffect(() => {
+		if (!removeOptionCode || !questionCode) return;
+		setOptions((current) => current.filter((o) => o.code !== removeOptionCode));
+		removeOption(questionCode, removeOptionCode);
+		navigation.setParams({ removeOptionCode: undefined } as any);
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [removeOptionCode]);
 
 	const handleAddOption = () => {
 		navigation.navigate("EditQuestionOption", {
@@ -152,23 +188,53 @@ export function EditQuestionScreen() {
 				<ThemedText>{t("type")}</ThemedText>
 				<QuestionTypeSelector value={type} onChange={setType} />
 
-				{/* Selection Limits — Figma 57:574 scrolled section */}
+				{/* G7: Options section directly below Type (above Selection Limits) */}
+				<View style={styles.section}>
+					<ThemedText type="defaultSemiBold" style={styles.sectionTitle}>
+						{t("option")}
+					</ThemedText>
+					{options.map((o) => (
+						<InfoCard
+							key={o.code}
+							image={o.image?.url ? { uri: o.image.url } : undefined}
+							title={o.title}
+							additionalInfo={[{ label: t("code"), value: o.code }]}
+							icon="chevron-right"
+							onPress={() => handleEditOption(o.code)}
+						/>
+					))}
+					<View style={styles.addButtonContainer}>
+						<ChipButton
+							label={t("addOption")}
+							icon="circle-plus"
+							onPress={handleAddOption}
+						/>
+					</View>
+				</View>
+
+				{/* G8: Selection Limits — Min + Max side-by-side in one row */}
 				<View style={styles.section}>
 					<ThemedText type="defaultSemiBold" style={styles.sectionTitle}>
 						{t("selectionLimits")}
 					</ThemedText>
-					<Stepper
-						label={t("min")}
-						value={optionMin}
-						onChange={setOptionMin}
-						min={0}
-					/>
-					<Stepper
-						label={t("max")}
-						value={optionMax}
-						onChange={setOptionMax}
-						min={0}
-					/>
+					<View style={styles.selectionLimitsRow}>
+						<View style={styles.stepperFlex}>
+							<Stepper
+								label={t("min")}
+								value={optionMin}
+								onChange={setOptionMin}
+								min={0}
+							/>
+						</View>
+						<View style={styles.stepperFlex}>
+							<Stepper
+								label={t("max")}
+								value={optionMax}
+								onChange={setOptionMax}
+								min={0}
+							/>
+						</View>
+					</View>
 				</View>
 
 				<ToggleRow
@@ -195,29 +261,6 @@ export function EditQuestionScreen() {
 					onChange={setSequence}
 					min={0}
 				/>
-
-				<View style={styles.section}>
-					<ThemedText type="defaultSemiBold" style={styles.sectionTitle}>
-						{t("option")}
-					</ThemedText>
-					{options.map((o) => (
-						<InfoCard
-							key={o.code}
-							image={o.image?.url ? { uri: o.image.url } : undefined}
-							title={o.title}
-							additionalInfo={[{ label: t("code"), value: o.code }]}
-							icon="chevron-right"
-							onPress={() => handleEditOption(o.code)}
-						/>
-					))}
-					<View style={styles.addButtonContainer}>
-						<ChipButton
-							label={t("addOption")}
-							icon="circle-plus"
-							onPress={handleAddOption}
-						/>
-					</View>
-				</View>
 			</ScrollView>
 			<View style={[styles.footer, { backgroundColor: colors.card }]}>
 				<CustomButton
@@ -239,6 +282,14 @@ const localStyles = StyleSheet.create({
 	addButtonContainer: {
 		flexDirection: "row",
 		justifyContent: "flex-end",
+	},
+	// G8: side-by-side Min/Max row
+	selectionLimitsRow: {
+		flexDirection: "row",
+		gap: 12,
+	},
+	stepperFlex: {
+		flex: 1,
 	},
 });
 

@@ -347,6 +347,9 @@ const resources = {
 			group: 'Group',
 			sequence: 'Sequence',
 			groupPlaceholder: 'county/seats',
+			// Phase 9 plan 09-10 — mock authority dropdown options (G6). EN only; es deferred per D-17.
+			mockAuthorityA: 'Mock Authority A',
+			mockAuthorityB: 'Mock Authority B',
 		},
 	},
 	es: {

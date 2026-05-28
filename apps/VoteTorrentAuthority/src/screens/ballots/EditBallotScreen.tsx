@@ -24,7 +24,7 @@ const EditBallotScreen = () => {
 	const route = useRoute<RouteProp<RootStackParamList, "EditBallot">>();
 	const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 	const { electionId, electionTitle, electionDate } = route.params ?? {};
-	const { ballotDraft, setBallotDraft } = useBallotDraft();
+	const { ballotDraft, setBallotDraft, removeQuestion } = useBallotDraft();
 
 	// Seed the draft with electionId from route params (edit mode entry point)
 	useEffect(() => {
@@ -33,6 +33,16 @@ const EditBallotScreen = () => {
 		}
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [electionId]);
+
+	// Carry-back from EditQuestionScreen REMOVE: child passes removeQuestionCode via popTo.
+	// We remove the question then clear the param to prevent re-fire (WARNING 7).
+	const removeQuestionCode = (route.params as { removeQuestionCode?: string } | undefined)?.removeQuestionCode;
+	useEffect(() => {
+		if (!removeQuestionCode) return;
+		removeQuestion(removeQuestionCode);
+		navigation.setParams({ removeQuestionCode: undefined } as any);
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [removeQuestionCode]);
 
 	const handlePropose = () => {
 		// v1.1 stub — logs a real payload then navigates back.
@@ -73,6 +83,7 @@ const EditBallotScreen = () => {
 				electionDate={electionDate}
 				authority={(ballotDraft as any).authority ?? ""}
 				onAuthorityChange={handleAuthorityChange}
+				authorityOptions={[t("mockAuthorityA"), t("mockAuthorityB")]}
 				description={ballotDraft.description ?? ""}
 				onDescriptionChange={handleDescriptionChange}
 				districts={ballotDraft.districts ?? []}

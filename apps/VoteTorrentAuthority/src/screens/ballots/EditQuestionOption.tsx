@@ -11,7 +11,7 @@ import { ThemedText } from "../../components/ThemedText";
 import { CustomTextInput } from "../../components/CustomTextInput";
 import { useTranslation } from "react-i18next";
 import { Image } from "react-native";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { CustomButton } from "../../components/CustomButton";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../../navigation/types";
@@ -45,6 +45,19 @@ export function EditQuestionOption() {
 	const [infoUrl, setInfoUrl] = useState(existingOption?.infoURL ?? "");
 	const [imageUrl, setImageUrl] = useState(existingOption?.image?.url ?? "");
 	const [videoUrl, setVideoUrl] = useState(existingOption?.video?.url ?? "");
+
+	// G11: Re-seed local state when the existing option resolves (draft may load
+	// after mount). Keyed on optionCode only to avoid clobbering user edits.
+	useEffect(() => {
+		if (!optionCode || !existingOption) return;
+		setCode(existingOption.code ?? "");
+		setTitle(existingOption.title ?? "");
+		setDetails(existingOption.details ?? "");
+		setInfoUrl(existingOption.infoURL ?? "");
+		setImageUrl(existingOption.image?.url ?? "");
+		setVideoUrl(existingOption.video?.url ?? "");
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [optionCode]);
 
 	const handleMakePermanent = () => {
 		// Stub — make-permanent is a v1.x backlog item, not in BALUI-04 scope.

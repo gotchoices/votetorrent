@@ -54,7 +54,7 @@ export type RootStackParamList = {
 	// Dev-entry route per D-12 — temporary; replaced by real callers in phases 8–10 (renamed by 07-08)
 	ScreenScaffoldsDebug: undefined;
 	ElectionDetails: { electionEngine: IElectionEngine };
-	EditBallot: { electionId?: string; electionTitle?: string; electionDate?: string };
+	EditBallot: { electionId?: string; electionTitle?: string; electionDate?: string; ballotId?: string; electionEngine?: IElectionEngine; removeQuestionCode?: string };
 	// Phase 9 plan 09-01 — type entries for routes whose screens land in later
 	// plans (CreateElection in 09-02, CreateBallot in 09-04). Stack.Screen
 	// registration is deferred; only the type signature is added here so the
@@ -66,8 +66,8 @@ export type RootStackParamList = {
 	// consumers narrow via local casts. popTo carry-back fields are optional.
 	// Phase 9 plan 09-07 — electionTitle/electionDate added so screens can show
 	// real election context without engine imports (display strings passed by caller).
-	CreateBallot: { electionId: string; question?: any; electionTitle?: string; electionDate?: string };
-	EditQuestion: { questionCode?: string; newOption?: any; electionTitle?: string; electionDate?: string };
+	CreateBallot: { electionId: string; question?: any; electionTitle?: string; electionDate?: string; removeQuestionCode?: string; electionEngine?: IElectionEngine };
+	EditQuestion: { questionCode?: string; newOption?: any; electionTitle?: string; electionDate?: string; removeOptionCode?: string };
 	EditQuestionOption: { questionCode: string; optionCode?: string; electionTitle?: string; electionDate?: string };
 };
 
