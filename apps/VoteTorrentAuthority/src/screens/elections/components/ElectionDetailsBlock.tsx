@@ -10,15 +10,17 @@ interface ElectionDetailsBlockProps {
 }
 
 /**
- * Election header + metadata block.
+ * Immutable-core-only election header block.
  *
- * Phase 9 plan 09-01: The inline timeline rows that previously lived here have
- * been removed in favor of the local `Timeline` component (D-05/D-06/D-08).
- * `ElectionDetailsScreen` mounts `Timeline` separately as the focal section.
+ * Phase 9 plan 09-14 (Checker fix B3): pared down to the immutable core:
+ *   title + Authority + Type + Date-time + Core Signature.
+ * The revision/tags/keyholder-policy/revision-signature rows have been
+ * removed from here — they live in ElectionDetailsScreen's current-revision
+ * section to avoid duplication.
  */
 export function ElectionDetailsBlock({ electionDetails }: ElectionDetailsBlockProps) {
 	const { t } = useTranslation();
-	const { election, current } = electionDetails;
+	const { election } = electionDetails;
 
 	const typeLabel =
 		election.type === ElectionType.official
@@ -27,13 +29,7 @@ export function ElectionDetailsBlock({ electionDetails }: ElectionDetailsBlockPr
 			? t("adhoc")
 			: String(election.type);
 
-	const keyholderCount = current.keyholders?.length ?? 0;
-	const policyText = keyholderCount
-		? `${current.keyholderThreshold} of ${keyholderCount}`
-		: String(current.keyholderThreshold);
-
 	const coreSignature = (election as any).signature?.signature as string | undefined;
-	const revisionSignature = (current as any).signature?.signature as string | undefined;
 
 	return (
 		<View>
@@ -58,27 +54,6 @@ export function ElectionDetailsBlock({ electionDetails }: ElectionDetailsBlockPr
 					<View style={styles.detail}>
 						<ThemedText type="defaultSemiBold">{t("coreSignature")}: </ThemedText>
 						<ThemedText numberOfLines={1} ellipsizeMode="middle">{coreSignature}</ThemedText>
-					</View>
-				) : null}
-			</View>
-
-			<View style={styles.section}>
-				<View style={styles.detail}>
-					<ThemedText type="defaultSemiBold">{t("revision")}: </ThemedText>
-					<ThemedText>{current.revision}</ThemedText>
-				</View>
-				<View style={styles.detail}>
-					<ThemedText type="defaultSemiBold">{t("tags")}: </ThemedText>
-					<ThemedText>{current.tags.join(", ")}</ThemedText>
-				</View>
-				<View style={styles.detail}>
-					<ThemedText type="defaultSemiBold">{t("keyholderPolicy")}: </ThemedText>
-					<ThemedText>{policyText}</ThemedText>
-				</View>
-				{revisionSignature ? (
-					<View style={styles.detail}>
-						<ThemedText type="defaultSemiBold">{t("revisionSignature")}: </ThemedText>
-						<ThemedText numberOfLines={1} ellipsizeMode="middle">{revisionSignature}</ThemedText>
 					</View>
 				) : null}
 			</View>

@@ -7,33 +7,37 @@ import { ThemedText } from "../../components/ThemedText";
 import type { BallotSummary, ElectionDetails, IElectionEngine } from "@votetorrent/vote-core";
 import { globalStyles } from "../../theme/styles";
 import { ElectionDetailsBlock } from "./components/ElectionDetailsBlock";
+import { ElectionTimelineList } from "./components/ElectionTimelineList";
 import { ChipButton } from "../../components/ChipButton";
 import { KeyholderCard } from "./components/KeyholderCard";
 import { CustomButton } from "../../components/CustomButton";
+import { CustomTextInput } from "../../components/CustomTextInput";
 import { InfoCard } from "../../components/InfoCard";
-import { Timeline } from "./components/Timeline";
 import { formatDate } from "../../utils/displayUtils";
 import type { NavigationProp } from "../../navigation/types";
 
 /**
- * ElectionDetailsScreen — timeline-focal stacked layout per Phase 9 D-07.
+ * ElectionDetailsScreen — Figma parity #13/#18/#19 per Phase 9 plan 09-14.
  *
- * Order (top → bottom):
- *   1. Header (title + metadata via ElectionDetailsBlock)
- *   2. Timeline (vertical, 5 milestones with status dots) — focal section
- *   3. Keyholders (compact list)
- *   4. Tags (chip row)
- *   5. Revision deadline (callout)
- *   6. Revise / Clone actions
- *   7. Ballot templates list — G2/G12 (09-10): loaded from electionEngine.getBallots()
- *      via useFocusEffect; one card per template when >=1 exists; empty-state
- *      (noBallotYet text + CREATE BALLOT TEMPLATE button) shown only when 0 templates.
+ * Render order (top → bottom):
+ *   1.  ElectionDetailsBlock — immutable core (title, Authority, Type, Date-time, Core Sig)
+ *   2.  Current revision section (Revision #N + date, Tags, Timeline text list,
+ *       Keyholder Policy, Revision Signature, PREVIEW chip)
+ *   3.  Keyholders — Sent/Unsent cards + chevron
+ *   4.  REVISE ELECTION / CLONE ELECTION actions
+ *   5.  Proposed Revision block (conditional — only when electionDetails.proposed exists)
+ *       · revision header, tags, timeline text list, keyholder policy
+ *       · signing rows per keyholder (SIGN accent / SHARE warning CustomButton pills)
+ *       · ADJUST REVISION → EditElectionRevision
+ *   6.  Ballot Templates section (one InfoCard per template with Questions subtitle)
+ *   7.  More section (collapsible) + filter-authorities input
  */
 export default function ElectionDetailsScreen() {
 	const { t } = useTranslation();
 	const { electionEngine } = useRoute().params as { electionEngine: IElectionEngine };
 	const [electionDetails, setElectionDetails] = useState<ElectionDetails | null>(null);
 	const [ballots, setBallots] = useState<BallotSummary[]>([]);
+	const [moreOpen, setMoreOpen] = useState(false);
 	const { colors } = useTheme() as ExtendedTheme;
 	const navigation = useNavigation<NavigationProp>();
 	const insets = useSafeAreaInsets();
@@ -79,25 +83,57 @@ export default function ElectionDetailsScreen() {
 		);
 	}
 
+	const { election, current, proposed } = electionDetails;
+	const revisionSignature = (current as any).signature?.signature as string | undefined;
+	const revisionDate = Array.isArray(current.revisionTimestamp) && current.revisionTimestamp.length > 0
+		? (current.revisionTimestamp[0] as unknown as number)
+		: election.date;
+
 	return (
 		<ScrollView
 			style={styles.container}
 			contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}>
-			{/* Header + immutable metadata */}
+
+			{/* 1. Immutable core block (title + Authority/Type/Date + Core Signature) */}
 			<View style={styles.section}>
 				<ElectionDetailsBlock electionDetails={electionDetails} />
 			</View>
 
-			{/* Timeline — focal section per D-07 */}
+			{/* 2. Current revision section — rendered ONCE here */}
 			<View style={styles.section}>
-				<ThemedText type="defaultSemiBold">{t("timeline")}</ThemedText>
-				<Timeline electionDetails={electionDetails} />
+				<View style={styles.detail}>
+					<ThemedText type="defaultSemiBold">{t("revision")}: </ThemedText>
+					<ThemedText>#{current.revision} - {formatDate(revisionDate)}</ThemedText>
+				</View>
+				<View style={styles.detail}>
+					<ThemedText type="defaultSemiBold">{t("tags")}: </ThemedText>
+					<ThemedText>{current.tags.join(", ")}</ThemedText>
+				</View>
+
+				{/* Timeline — text list per Decision 2 */}
+				<ThemedText type="defaultSemiBold" style={styles.sectionLabel}>{t("timeline")}</ThemedText>
+				<ElectionTimelineList timeline={current.timeline} />
+
+				<View style={styles.detail}>
+					<ThemedText type="defaultSemiBold">{t("keyholderPolicy")}: </ThemedText>
+					<ThemedText>{current.keyholderThreshold} of {current.keyholders.length}</ThemedText>
+				</View>
+
+				{revisionSignature ? (
+					<View style={styles.detail}>
+						<ThemedText type="defaultSemiBold">{t("revisionSignature")}: </ThemedText>
+						<ThemedText numberOfLines={1} ellipsizeMode="middle">{revisionSignature}</ThemedText>
+					</View>
+				) : null}
+
+				{/* PREVIEW chip — stub */}
+				<ChipButton label={t("previewBallots")} onPress={() => console.log("preview-stub")} />
 			</View>
 
-			{/* Keyholders */}
+			{/* 3. Keyholders — Sent/Unsent + chevron */}
 			<View style={styles.section}>
 				<ThemedText type="defaultSemiBold">{t("keyholders")}</ThemedText>
-				{electionDetails.current.keyholders.map((keyholder, index) => (
+				{current.keyholders.map((keyholder, index) => (
 					<KeyholderCard
 						key={keyholder.invite?.name ?? `keyholder-${index}`}
 						invitationStatus={keyholder}
@@ -106,44 +142,81 @@ export default function ElectionDetailsScreen() {
 				))}
 			</View>
 
-			{/* Tags chip row */}
-			<View style={styles.section}>
-				<ThemedText type="defaultSemiBold">{t("tags")}</ThemedText>
-				<View style={styles.tagRow}>
-					{electionDetails.current.tags.map((tag) => (
-						<ChipButton key={tag} label={tag} />
-					))}
-				</View>
-			</View>
-
-			{/* Revision deadline callout */}
-			<View style={[styles.section, styles.calloutBox, { backgroundColor: colors.card, borderColor: colors.border }]}>
-				<ThemedText type="defaultSemiBold">{t("revisionDeadline")}</ThemedText>
-				<ThemedText>{formatDate(electionDetails.election.revisionDeadline)}</ThemedText>
-			</View>
-
-			{/* Revise / Clone actions */}
+			{/* 4. REVISE / CLONE actions */}
 			<View style={styles.section}>
 				<CustomButton
 					title={t("reviseElection")}
 					size="thin"
 					icon="pencil"
 					backgroundColor={colors.accent}
-					onPress={() => {}}
+					onPress={() => navigation.navigate("EditElectionRevision", { electionEngine })}
 				/>
 				<CustomButton
 					title={t("cloneElection")}
 					size="thin"
 					icon="copy"
 					backgroundColor={colors.accent}
-					onPress={() => {}}
+					onPress={() => console.log("clone-stub")}
 				/>
 			</View>
 
-			{/* Ballot Templates section — G1/G2/G12 (09-10):
-			    Show one InfoCard per template when >=1 exists (each navigates EditBallot
-			    with ballotId+electionEngine for upsert). When 0 templates, show only
-			    the empty-state text + CREATE BALLOT TEMPLATE button (G1 label). */}
+			{/* 5. Proposed Revision block — conditional */}
+			{electionDetails.proposed && (
+				<View style={styles.section}>
+					<ThemedText type="defaultSemiBold">{t("proposedRevisionHeader")}</ThemedText>
+
+					<View style={styles.detail}>
+						<ThemedText type="defaultSemiBold">{t("revision")}: </ThemedText>
+						<ThemedText>#{proposed!.proposed.revision}</ThemedText>
+					</View>
+					<View style={styles.detail}>
+						<ThemedText type="defaultSemiBold">{t("tags")}: </ThemedText>
+						<ThemedText>{proposed!.proposed.tags.join(", ")}</ThemedText>
+					</View>
+
+					<ThemedText type="defaultSemiBold" style={styles.sectionLabel}>{t("timeline")}</ThemedText>
+					<ElectionTimelineList timeline={proposed!.proposed.timeline} />
+
+					<View style={styles.detail}>
+						<ThemedText type="defaultSemiBold">{t("keyholderPolicy")}: </ThemedText>
+						<ThemedText>{proposed!.proposed.keyholderThreshold} of {proposed!.proposed.keyholders.length}</ThemedText>
+					</View>
+
+					{/* Signing rows — one per proposed keyholder */}
+					{proposed!.proposed.keyholders.map((holder, idx) => (
+						<View key={holder.name ?? `proposed-holder-${idx}`} style={styles.signingRow}>
+							<ThemedText type="defaultSemiBold" style={styles.holderName}>{holder.name}</ThemedText>
+							<View style={styles.signingPills}>
+								<CustomButton
+									title={t("signRevision")}
+									size="thin"
+									icon="signature"
+									backgroundColor={colors.accent}
+									onPress={() => console.log("sign-stub")}
+								/>
+								<CustomButton
+									title={t("shareRevision")}
+									size="thin"
+									icon="share-nodes"
+									backgroundColor={colors.warning}
+									onPress={() => console.log("share-stub")}
+								/>
+							</View>
+						</View>
+					))}
+
+					{/* ADJUST REVISION → EditElectionRevision */}
+					<CustomButton
+						title={t("adjustRevision")}
+						size="thin"
+						icon="pencil"
+						backgroundColor={colors.accent}
+						onPress={() => navigation.navigate("EditElectionRevision", { electionEngine })}
+					/>
+				</View>
+			)}
+
+			{/* 6. Ballot Templates section */}
 			<View style={styles.section}>
 				<ThemedText type="title">{t("ballotTemplates")}</ThemedText>
 				{ballots.length > 0 ? (
@@ -151,12 +224,13 @@ export default function ElectionDetailsScreen() {
 						<InfoCard
 							key={ballot.id}
 							title={ballot.authorityId || t("ballotTemplate")}
+							subtitle={t("questionsLabel") + ": —"}
 							icon="chevron-right"
 							onPress={() =>
 								navigation.navigate("EditBallot", {
-									electionId: electionDetails.election.id,
-									electionTitle: electionDetails.election.title,
-									electionDate: formatDate(electionDetails.election.revisionDeadline),
+									electionId: election.id,
+									electionTitle: election.title,
+									electionDate: formatDate(election.revisionDeadline),
 									ballotId: ballot.id,
 									electionEngine,
 								} as any)
@@ -173,9 +247,9 @@ export default function ElectionDetailsScreen() {
 							backgroundColor={colors.accent}
 							onPress={() =>
 								navigation.navigate("CreateBallot", {
-									electionId: electionDetails.election.id,
-									electionTitle: electionDetails.election.title,
-									electionDate: formatDate(electionDetails.election.revisionDeadline),
+									electionId: election.id,
+									electionTitle: election.title,
+									electionDate: formatDate(election.revisionDeadline),
 									electionEngine,
 								} as any)
 							}
@@ -183,21 +257,39 @@ export default function ElectionDetailsScreen() {
 					</>
 				)}
 			</View>
+
+			{/* 7. More section (collapsible) + filter-authorities input */}
+			<View style={styles.section}>
+				<ChipButton label={t("more")} onPress={() => setMoreOpen((v) => !v)} />
+				{moreOpen && (
+					<CustomTextInput
+						placeholder={t("filterAuthoritiesField")}
+					/>
+				)}
+			</View>
 		</ScrollView>
 	);
 }
 
 const localStyles = StyleSheet.create({
-	tagRow: {
+	detail: {
 		flexDirection: "row",
 		flexWrap: "wrap",
-		gap: 8,
-		marginTop: 8,
+		marginVertical: 2,
 	},
-	calloutBox: {
-		padding: 12,
-		borderRadius: 8,
-		borderWidth: 1,
+	sectionLabel: {
+		marginTop: 8,
+		marginBottom: 2,
+	},
+	signingRow: {
+		marginVertical: 6,
+	},
+	holderName: {
+		marginBottom: 4,
+	},
+	signingPills: {
+		flexDirection: "row",
+		gap: 8,
 	},
 });
 
