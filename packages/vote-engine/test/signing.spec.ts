@@ -571,24 +571,90 @@ describe('SigningSignBuilder', () => {
     expect(builder).to.be.instanceOf(SigningSignBuilder)
   })
 
-  it.skip('REAL ENGINE equivalence smoke: engine.sign(nonce, sig) vs builder.fromPayload({nonce, signature}).commit() — BLOCKED: OfficerSignature PK (SigningNonce, UserId) structural limit — startSigningSession calls sign() internally for threshold=1 authority, preventing a second sign() with same nonce+user', async () => {
+  // Phase 12.3-09 (Group H): rewritten per CONTEXT.md option (a) — fresh nonce +
+  // signing session for each leg. The OfficerSignature PK (SigningNonce, UserId)
+  // structural limit means startSigningSession's internal sign() call for
+  // threshold=1 authorities consumes the (nonce, user) slot, so a follow-up
+  // engine.sign(nonce, sig) on the same nonce+user PK-collides. By giving each
+  // leg its own session, the engine.sign code path is exercised exactly once per
+  // leg (via the internal sign() in startSigningSession), and the equivalence
+  // assertion compares the observable OfficerSignature + AdminSignature state
+  // produced by the engine path (Leg A) and the builder path (Leg B).
+  it('REAL ENGINE equivalence smoke: engine.startSigningSession(...) sign path vs buildStartSigningSession().fromPayload(...).commit() sign path — observable OfficerSignature/AdminSignature state matches across fresh sessions', async () => {
+    // Leg A — engine path: startSigningSession internally calls sign() for
+    // threshold=1, producing the OfficerSignature + AdminSignature rows.
     const { ctx: ctx1, user: user1 } = await createPopulatedContext()
     const eng1 = new SigningEngine(ctx1)
     const authRow1 = await ctx1.db.prepare('select Id from Authority limit 1').get({})
     const authorityId1 = authRow1!.Id as string
     const sig1 = makeSignature(user1.id)
-    const { nonce: nonce1 } = await eng1.startSigningSession(authorityId1, testDigestArgs, 'rad', sig1)
-    const directResult = await eng1.sign(nonce1, sig1)
-    expect(directResult).to.be.a('boolean')
+    const sessionA = await eng1.startSigningSession(authorityId1, testDigestArgs, 'rad', sig1)
+    expect(sessionA).to.have.property('nonce')
+    expect(sessionA).to.have.property('thresholdReached')
 
+    const officerA = await ctx1.db
+      .prepare(
+        'select UserId, SignerKey, Signature from OfficerSignature where SigningNonce = :nonce'
+      )
+      .get({ nonce: sessionA.nonce })
+    const adminA = await ctx1.db
+      .prepare(
+        'select count(*) as c from AdminSignature where SigningNonce = :nonce'
+      )
+      .get({ nonce: sessionA.nonce })
+    const scopeA = await ctx1.db
+      .prepare('select Scope from AdminSigning where Nonce = :nonce')
+      .get({ nonce: sessionA.nonce })
+
+    // Leg B — builder path: buildStartSigningSession().commit() forwards to the
+    // same internal sign() code path against a SECOND fresh session with a
+    // distinct SigningNonce, avoiding the (SigningNonce, UserId) PK collision.
     const { ctx: ctx2, user: user2 } = await createPopulatedContext()
     const eng2 = new SigningEngine(ctx2)
     const authRow2 = await ctx2.db.prepare('select Id from Authority limit 1').get({})
     const authorityId2 = authRow2!.Id as string
     const sig2 = makeSignature(user2.id)
-    const { nonce: nonce2 } = await eng2.startSigningSession(authorityId2, testDigestArgs, 'rad', sig2)
-    const builderResult = await eng2.buildSign().fromPayload({ nonce: nonce2, signature: sig2 }).commit()
-    expect(builderResult).to.be.a('boolean')
+    const sessionB = await eng2.buildStartSigningSession()
+      .fromPayload({ authorityId: authorityId2, digestArgs: testDigestArgs, scope: 'rad', signature: sig2 })
+      .commit()
+    expect(sessionB).to.have.property('nonce')
+    expect(sessionB).to.have.property('thresholdReached')
+
+    const officerB = await ctx2.db
+      .prepare(
+        'select UserId, SignerKey, Signature from OfficerSignature where SigningNonce = :nonce'
+      )
+      .get({ nonce: sessionB.nonce })
+    const adminB = await ctx2.db
+      .prepare(
+        'select count(*) as c from AdminSignature where SigningNonce = :nonce'
+      )
+      .get({ nonce: sessionB.nonce })
+    const scopeB = await ctx2.db
+      .prepare('select Scope from AdminSigning where Nonce = :nonce')
+      .get({ nonce: sessionB.nonce })
+
+    // Equivalence assertions on OBSERVABLE state — NOT nonce equality, since
+    // the two legs intentionally use different nonces to avoid PK collision.
+    // Both legs must produce: (a) thresholdReached=true (threshold=1, so a
+    // single internal sign() call meets it), (b) one OfficerSignature row keyed
+    // by the leg's nonce + that leg's user, (c) one AdminSignature row, and
+    // (d) the same AdminSigning Scope.
+    expect(sessionA.thresholdReached).to.equal(sessionB.thresholdReached)
+    expect(sessionA.thresholdReached).to.equal(true)
+
+    expect(officerA?.UserId).to.equal(user1.id)
+    expect(officerB?.UserId).to.equal(user2.id)
+    expect(officerA?.SignerKey).to.equal(sig1.signerKey)
+    expect(officerB?.SignerKey).to.equal(sig2.signerKey)
+    expect(officerA?.Signature).to.equal(sig1.signature)
+    expect(officerB?.Signature).to.equal(sig2.signature)
+
+    expect(Number(adminA?.c)).to.equal(1)
+    expect(Number(adminB?.c)).to.equal(1)
+
+    expect(scopeA?.Scope).to.equal('rad')
+    expect(scopeB?.Scope).to.equal(scopeA?.Scope)
   })
 })
 
