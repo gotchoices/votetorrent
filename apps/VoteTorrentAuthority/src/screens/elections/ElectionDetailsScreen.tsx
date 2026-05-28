@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { View, ScrollView, StyleSheet } from "react-native";
 import { ExtendedTheme, useRoute, useTheme, useNavigation, useFocusEffect } from "@react-navigation/native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTranslation } from "react-i18next";
 import { ThemedText } from "../../components/ThemedText";
 import type { BallotSummary, ElectionDetails, IElectionEngine } from "@votetorrent/vote-core";
@@ -35,6 +36,7 @@ export default function ElectionDetailsScreen() {
 	const [ballots, setBallots] = useState<BallotSummary[]>([]);
 	const { colors } = useTheme() as ExtendedTheme;
 	const navigation = useNavigation<NavigationProp>();
+	const insets = useSafeAreaInsets();
 
 	useEffect(() => {
 		const loadElectionDetails = async () => {
@@ -78,7 +80,9 @@ export default function ElectionDetailsScreen() {
 	}
 
 	return (
-		<ScrollView style={styles.container}>
+		<ScrollView
+			style={styles.container}
+			contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}>
 			{/* Header + immutable metadata */}
 			<View style={styles.section}>
 				<ElectionDetailsBlock electionDetails={electionDetails} />

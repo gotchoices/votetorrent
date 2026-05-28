@@ -1,4 +1,5 @@
 import { ExtendedTheme, useTheme, useRoute, useNavigation } from "@react-navigation/native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import React, { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { View } from "react-native";
@@ -32,6 +33,7 @@ export default function CreateBallotScreen() {
 	const { t } = useTranslation();
 	const route = useRoute<RouteProp<RootStackParamList, "CreateBallot">>();
 	const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+	const insets = useSafeAreaInsets();
 	const { electionId, electionTitle, electionDate } = route.params ?? {
 		electionId: "",
 		electionTitle: undefined,
@@ -40,20 +42,20 @@ export default function CreateBallotScreen() {
 	const electionEngine = (route.params as any)?.electionEngine;
 	const { ballotDraft, setBallotDraft, addQuestion, updateQuestion, removeQuestion } = useBallotDraft();
 
-	// Persist electionId (and seed a STABLE ballot id once) from initial route param
-	// into the shared draft so they survive popTo carry-backs that drop the param.
-	// Read from draft on PROPOSE, not from route.params (G12 WARNING 8 — prevents
-	// duplicate cards on re-press because id is generated once, not each press).
+	// Fresh-create reset: the BallotDraftProvider is now hoisted above the
+	// navigator (shared across the ballot flow), so a previously created/edited
+	// ballot would leak into a new one without an explicit reset. Runs once on
+	// mount — popTo carry-backs re-render but do NOT remount, so accumulated
+	// questions are preserved. Seeds a STABLE id once (no duplicate cards on
+	// re-PROPOSE).
 	useEffect(() => {
-		if (electionId && ballotDraft.electionId !== electionId) {
-			setBallotDraft({
-				...ballotDraft,
-				electionId,
-				id: (ballotDraft as any).id ?? `ballot-${electionId}-${Date.now()}`,
-			});
-		}
+		setBallotDraft({
+			electionId,
+			id: `ballot-${electionId}-${Date.now()}`,
+			questions: [],
+		});
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [electionId]);
+	}, []);
 
 	// Carry-back from EditQuestionScreen: child screen passes a `question` route
 	// param when SAVE is pressed; we merge it into the draft and clear the param.
@@ -133,7 +135,15 @@ export default function CreateBallotScreen() {
 	};
 
 	const handleEditQuestion = (questionCode: string) => {
-		navigation.navigate("EditQuestion", { questionCode, electionTitle, electionDate });
+		// Pass the existing question so EditQuestion can pre-populate — its own
+		// draft provider instance is separate/empty (screenLayout per-screen).
+		const editQuestion = (ballotDraft.questions ?? []).find((q) => q.code === questionCode);
+		navigation.navigate("EditQuestion", {
+			questionCode,
+			editQuestion,
+			electionTitle,
+			electionDate,
+		} as any);
 	};
 
 	return (
@@ -153,7 +163,7 @@ export default function CreateBallotScreen() {
 				onEditQuestion={handleEditQuestion}
 			/>
 			{/* Footer: PROPOSE — owned by screen so create vs edit can wire own handlers */}
-			<View style={[globalStyles.footer, { backgroundColor: colors.card }]}>
+			<View style={[globalStyles.footer, { backgroundColor: colors.card, paddingBottom: insets.bottom + 16 }]}>
 				<CustomButton
 					title={t("propose")}
 					icon="floppy-disk"

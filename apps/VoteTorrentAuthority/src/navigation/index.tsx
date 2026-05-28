@@ -15,7 +15,7 @@ import AuthoritiesScreen from "../screens/authorities/AuthoritiesScreen";
 import SettingsScreen from "../screens/settings/SettingsScreen";
 import { ChipButton } from "../components/ChipButton";
 import { Pressable, StyleSheet, Text } from "react-native";
-import { ExtendedTheme, useNavigation } from "@react-navigation/native";
+import { ExtendedTheme, useNavigation, StackActions } from "@react-navigation/native";
 import { useTheme } from "@react-navigation/native";
 import NetworksScreen from "../screens/networks/NetworksScreen";
 import type { NavigationProp } from "./types";
@@ -51,7 +51,6 @@ import EditBallotScreen from "../screens/ballots/EditBallotScreen";
 import CreateBallotScreen from "../screens/ballots/CreateBallotScreen";
 import EditQuestionScreen from "../screens/ballots/EditQuestionScreen";
 import EditQuestionOption from "../screens/ballots/EditQuestionOption";
-import { BallotDraftProvider } from "../screens/ballots/providers/BallotDraftProvider";
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator();
@@ -390,13 +389,10 @@ export const RootNavigator = () => {
 				component={CreateElectionScreen}
 				options={{ title: t("createElection") }}
 			/>
-			{/* Phase 9 plan 09-05 — single shared BallotDraftProvider for the three ballot screens via Stack.Group screenLayout (D-11 closure). */}
-			{/* Phase 9 plan 09-08 — EditBallot moved INTO the BallotDraftProvider Stack.Group so it shares draft context. */}
-			<Stack.Group
-				screenLayout={({ children }) => (
-					<BallotDraftProvider>{children}</BallotDraftProvider>
-				)}
-			>
+			{/* BallotDraftProvider is hoisted above the navigator (App.tsx) so all
+			    ballot screens share ONE draft instance (screenLayout gave each
+			    screen its own — D-11 root fix). Group retained only for grouping. */}
+			<Stack.Group>
 				<Stack.Screen
 					name="CreateBallot"
 					component={CreateBallotScreen}
@@ -422,14 +418,17 @@ export const RootNavigator = () => {
 										navigation.goBack();
 										return;
 									}
-									// popTo whichever ballot-root is actually in the stack
+									// popTo whichever ballot-root is actually in the stack;
+									// merge=true keeps the target's electionEngine/context params.
 									const state = navigation.getState();
 									const hasEditBallot = state.routes.some((r: { name: string }) => r.name === "EditBallot");
-									if (hasEditBallot) {
-										navigation.popTo("EditBallot", { removeQuestionCode: questionCode } as any);
-									} else {
-										navigation.popTo("CreateBallot", { removeQuestionCode: questionCode } as any);
-									}
+									navigation.dispatch(
+										StackActions.popTo(
+											hasEditBallot ? "EditBallot" : "CreateBallot",
+											{ removeQuestionCode: questionCode },
+											{ merge: true }
+										)
+									);
 								}}
 							/>
 						),
@@ -451,10 +450,13 @@ export const RootNavigator = () => {
 										navigation.goBack();
 										return;
 									}
-									navigation.popTo("EditQuestion", {
-										questionCode,
-										removeOptionCode: optionCode,
-									} as any);
+									navigation.dispatch(
+										StackActions.popTo(
+											"EditQuestion",
+											{ questionCode, removeOptionCode: optionCode },
+											{ merge: true }
+										)
+									);
 								}}
 							/>
 						),

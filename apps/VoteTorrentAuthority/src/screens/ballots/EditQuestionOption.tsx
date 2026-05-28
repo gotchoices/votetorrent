@@ -5,8 +5,10 @@ import {
 	useTheme,
 	useRoute,
 	useNavigation,
+	StackActions,
 } from "@react-navigation/native";
 import type { RouteProp } from "@react-navigation/native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ThemedText } from "../../components/ThemedText";
 import { CustomTextInput } from "../../components/CustomTextInput";
 import { useTranslation } from "react-i18next";
@@ -30,14 +32,20 @@ export function EditQuestionOption() {
 	const { t } = useTranslation();
 	const route = useRoute<RouteProp<RootStackParamList, "EditQuestionOption">>();
 	const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+	const insets = useSafeAreaInsets();
 	const { ballotDraft, addOption, updateOption } = useBallotDraft();
 
 	const { questionCode, optionCode, electionTitle, electionDate } = route.params ?? { questionCode: "" };
-	const existingOption = optionCode
-		? (ballotDraft.questions ?? [])
-				.find((q) => q.code === questionCode)
-				?.options?.find((o) => o.code === optionCode)
-		: undefined;
+	// This screen's BallotDraftProvider instance is separate/empty (screenLayout
+	// mounts one per screen), so the parent passes the option to edit as a route
+	// param. Fall back to a draft lookup.
+	const existingOption: Option | undefined =
+		(route.params?.editOption as Option | undefined) ??
+		(optionCode
+			? (ballotDraft.questions ?? [])
+					.find((q) => q.code === questionCode)
+					?.options?.find((o) => o.code === optionCode)
+			: undefined);
 
 	const [code, setCode] = useState(existingOption?.code ?? "");
 	const [title, setTitle] = useState(existingOption?.title ?? "");
@@ -64,6 +72,10 @@ export function EditQuestionOption() {
 		console.log("editQuestionOption-makePermanent stub");
 	};
 
+	// SAVE is disabled until the option has a code or title — prevents the
+	// junk "Code: o-<timestamp>" card from an all-empty save.
+	const canSave = code.trim().length > 0 || title.trim().length > 0;
+
 	const handleSave = () => {
 		const newOption: Option = {
 			code: code || `o-${Date.now()}`,
@@ -85,16 +97,22 @@ export function EditQuestionOption() {
 		}
 		// Pass originalOptionCode through so EditQuestion's local options state
 		// can findIndex against the ORIGINAL code even if the user renamed it.
-		navigation.popTo("EditQuestion", {
-			questionCode,
-			newOption,
-			originalOptionCode: optionCode,
-		} as any);
+		// merge=true preserves EditQuestion's existing params (electionTitle/Date,
+		// editQuestion) instead of replacing them.
+		navigation.dispatch(
+			StackActions.popTo(
+				"EditQuestion",
+				{ questionCode, newOption, originalOptionCode: optionCode },
+				{ merge: true }
+			)
+		);
 	};
 
 	return (
 		<View style={styles.content}>
-			<ScrollView style={[styles.container, { backgroundColor: colors.background }]}>
+			<ScrollView
+				style={[styles.container, { backgroundColor: colors.background }]}
+				contentContainerStyle={{ paddingBottom: 24 }}>
 				<View style={styles.detail}>
 					<ThemedText type="defaultSemiBold">{t("election")}: </ThemedText>
 					<ThemedText numberOfLines={1} ellipsizeMode="tail">
@@ -143,13 +161,14 @@ export function EditQuestionOption() {
 					makePermanentPressed={handleMakePermanent}
 				/>
 			</ScrollView>
-			<View style={[styles.footer, { backgroundColor: colors.card }]}>
+			<View style={[styles.footer, { backgroundColor: colors.card, paddingBottom: insets.bottom + 16 }]}>
 				<CustomButton
 					title={t("save")}
 					onPress={handleSave}
 					forceDarkText={true}
 					icon={"floppy-disk"}
 					backgroundColor={colors.success}
+					disabled={!canSave}
 				/>
 			</View>
 		</View>

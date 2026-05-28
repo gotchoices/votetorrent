@@ -6,10 +6,14 @@ import type { Ballot, Question, Option } from "@votetorrent/vote-core";
  * BallotDraftProvider — React Context scoped to the Ballot flow per Phase 9 D-11.
  *
  * Holds the in-progress ballot draft (questions[] with nested options[]).
- * Survives back-navigation within the Ballot flow only; no on-device
- * persistence. State dies on flow exit. The provider MUST wrap
- * only the CreateBallot/EditQuestion/EditQuestionOption screen subtree — NOT
- * the whole app.
+ *
+ * Mounted ONCE above the navigator (App.tsx) so all four ballot screens
+ * (CreateBallot / EditBallot / EditQuestion / EditQuestionOption) share a
+ * single draft instance. `screenLayout` was previously used but wraps each
+ * screen separately, giving every screen its own empty draft — which broke
+ * edit pre-population. Because the instance now persists across ballot-flow
+ * entries, callers reset per flow: CreateBallot clears the draft on mount
+ * (fresh create); EditBallot replaces it via getBallotDetails (edit mode).
  *
  * Pattern reference: apps/VoteTorrentAuthority/src/providers/AppProvider.tsx
  * (createContext + useContext + hook + Provider).

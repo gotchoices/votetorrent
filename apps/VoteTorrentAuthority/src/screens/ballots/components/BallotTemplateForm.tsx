@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { ScrollView, StyleSheet, TouchableOpacity, View } from "react-native";
 import { ExtendedTheme, useTheme } from "@react-navigation/native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTranslation } from "react-i18next";
 import FontAwesome6 from "react-native-vector-icons/FontAwesome6";
 import { ThemedText } from "../../../components/ThemedText";
@@ -65,6 +66,7 @@ export function BallotTemplateForm({
 }: BallotTemplateFormProps) {
 	const { colors } = useTheme() as ExtendedTheme;
 	const { t } = useTranslation();
+	const insets = useSafeAreaInsets();
 	const [dropdownOpen, setDropdownOpen] = useState(false);
 
 	const handleAuthoritySelect = (option: string) => {
@@ -79,7 +81,9 @@ export function BallotTemplateForm({
 	};
 
 	return (
-		<ScrollView style={[styles.container, { backgroundColor: colors.background }]}>
+		<ScrollView
+			style={[styles.container, { backgroundColor: colors.background }]}
+			contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}>
 			{/* 1. Election + Date context header */}
 			<View style={[styles.section, styles.contextHeader]}>
 				<View style={styles.contextRow}>

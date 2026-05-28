@@ -1,6 +1,7 @@
 import { ScrollView, StyleSheet, View } from "react-native";
 import { globalStyles } from "../../theme/styles";
-import { useTheme, useRoute, useNavigation } from "@react-navigation/native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useTheme, useRoute, useNavigation, StackActions } from "@react-navigation/native";
 import type { ExtendedTheme, RouteProp } from "@react-navigation/native";
 import { useTranslation } from "react-i18next";
 import { ThemedText } from "../../components/ThemedText";
@@ -38,15 +39,21 @@ export function EditQuestionScreen() {
 	const { t } = useTranslation();
 	const route = useRoute<RouteProp<RootStackParamList, "EditQuestion">>();
 	const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+	const insets = useSafeAreaInsets();
 	const { ballotDraft, removeOption } = useBallotDraft();
 
 	const questionCode = route.params?.questionCode;
 	const electionTitle = route.params?.electionTitle;
 	const electionDate = route.params?.electionDate;
 
-	const existingQuestion = questionCode
-		? (ballotDraft.questions ?? []).find((q) => q.code === questionCode)
-		: undefined;
+	// The shared draft is NOT shared across screens (each ballot screen has its
+	// own BallotDraftProvider instance via screenLayout), so the parent passes
+	// the question to edit as a route param. Fall back to a draft lookup.
+	const existingQuestion: Question | undefined =
+		(route.params?.editQuestion as Question | undefined) ??
+		(questionCode
+			? (ballotDraft.questions ?? []).find((q) => q.code === questionCode)
+			: undefined);
 
 	const [code, setCode] = useState<string>(existingQuestion?.code ?? "");
 	const [title, setTitle] = useState<string>(existingQuestion?.title ?? "");
@@ -134,13 +141,20 @@ export function EditQuestionScreen() {
 	};
 
 	const handleEditOption = (optionCode: string) => {
+		// Pass the existing option object so the leaf screen can pre-populate
+		// (its own draft instance is empty — see existingQuestion note above).
+		const editOption = options.find((o) => o.code === optionCode);
 		navigation.navigate("EditQuestionOption", {
 			questionCode: code || `q-${Date.now()}`,
 			optionCode,
+			editOption,
 			electionTitle,
 			electionDate,
-		});
+		} as any);
 	};
+
+	// SAVE is disabled until the question has a code or title.
+	const canSave = code.trim().length > 0 || title.trim().length > 0;
 
 	const handleSave = () => {
 		const assembled: Question = {
@@ -155,17 +169,29 @@ export function EditQuestionScreen() {
 			group: group || undefined,
 			sequence,
 		};
-		// Pass the ORIGINAL questionCode from route.params so CreateBallot
-		// can branch add-vs-update on it even if the user renamed the code.
-		navigation.popTo("CreateBallot", {
-			question: assembled,
-			originalQuestionCode: questionCode,
-		} as any);
+		// Pass the ORIGINAL questionCode so the ballot root can branch
+		// add-vs-update even if the user renamed the code. popTo whichever
+		// ballot-root is actually in the stack (EditBallot when editing an
+		// existing template, else CreateBallot) — mirrors the header REMOVE.
+		const state = navigation.getState();
+		const hasEditBallot = state.routes.some((r: { name: string }) => r.name === "EditBallot");
+		// merge=true so the target keeps its existing params (electionEngine,
+		// electionTitle/Date, ballotId) — a plain popTo replaces them, which
+		// dropped the engine (PROPOSE couldn't persist) and the context labels.
+		navigation.dispatch(
+			StackActions.popTo(
+				hasEditBallot ? "EditBallot" : "CreateBallot",
+				{ question: assembled, originalQuestionCode: questionCode },
+				{ merge: true }
+			)
+		);
 	};
 
 	return (
 		<View style={styles.content}>
-			<ScrollView style={[styles.container, { backgroundColor: colors.background }]}>
+			<ScrollView
+				style={[styles.container, { backgroundColor: colors.background }]}
+				contentContainerStyle={{ paddingBottom: 24 }}>
 				<View style={styles.detail}>
 					<ThemedText type="defaultSemiBold">{t("election")}: </ThemedText>
 					<ThemedText numberOfLines={1} ellipsizeMode="tail">
@@ -262,13 +288,14 @@ export function EditQuestionScreen() {
 					min={0}
 				/>
 			</ScrollView>
-			<View style={[styles.footer, { backgroundColor: colors.card }]}>
+			<View style={[styles.footer, { backgroundColor: colors.card, paddingBottom: insets.bottom + 16 }]}>
 				<CustomButton
 					title={t("save")}
 					onPress={handleSave}
 					forceDarkText={true}
 					icon={"floppy-disk"}
 					backgroundColor={colors.success}
+					disabled={!canSave}
 				/>
 			</View>
 		</View>

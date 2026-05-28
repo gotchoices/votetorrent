@@ -1,7 +1,9 @@
 import React, { useEffect } from "react";
 import { View } from "react-native";
 import { ExtendedTheme, useTheme, useNavigation, useRoute } from "@react-navigation/native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTranslation } from "react-i18next";
+import type { Question } from "@votetorrent/vote-core";
 import type { RouteProp } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../../navigation/types";
@@ -28,10 +30,11 @@ const EditBallotScreen = () => {
 	const { t } = useTranslation();
 	const route = useRoute<RouteProp<RootStackParamList, "EditBallot">>();
 	const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+	const insets = useSafeAreaInsets();
 	const { electionId, electionTitle, electionDate } = route.params ?? {};
 	const electionEngine = (route.params as any)?.electionEngine;
 	const ballotId = (route.params as any)?.ballotId;
-	const { ballotDraft, setBallotDraft, removeQuestion } = useBallotDraft();
+	const { ballotDraft, setBallotDraft, addQuestion, updateQuestion, removeQuestion } = useBallotDraft();
 
 	// Seed the draft with electionId from route params (edit mode entry point)
 	useEffect(() => {
@@ -49,7 +52,12 @@ const EditBallotScreen = () => {
 			try {
 				const details = await electionEngine.getBallotDetails(ballotId);
 				if (details?.ballot) {
-					setBallotDraft(details.ballot);
+					// Map authorityId → authority (the loose key BallotTemplateForm's
+					// dropdown reads) so the Authority field re-populates on reopen.
+					setBallotDraft({
+						...details.ballot,
+						authority: (details.ballot as any).authorityId ?? "",
+					} as any);
 				}
 			} catch (error) {
 				console.error("getBallotDetails error", error);
@@ -58,6 +66,29 @@ const EditBallotScreen = () => {
 		loadBallot();
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [ballotId]);
+
+	// Carry-back from EditQuestionScreen SAVE: when editing an existing template,
+	// EditQuestion popTos here with the assembled `question`. Merge it into the
+	// draft (add or update by original code), then clear the param.
+	const incomingQuestion = (route.params as { question?: Question } | undefined)?.question;
+	useEffect(() => {
+		if (!incomingQuestion) return;
+		const originalQuestionCode = (
+			route.params as { originalQuestionCode?: string } | undefined
+		)?.originalQuestionCode;
+		const lookupCode = originalQuestionCode ?? incomingQuestion.code;
+		const existing = (ballotDraft.questions ?? []).some((q) => q.code === lookupCode);
+		if (existing) {
+			updateQuestion(lookupCode, incomingQuestion);
+		} else {
+			addQuestion(incomingQuestion);
+		}
+		navigation.setParams({
+			question: undefined,
+			originalQuestionCode: undefined,
+		} as any);
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [incomingQuestion?.code]);
 
 	// Carry-back from EditQuestionScreen REMOVE: child passes removeQuestionCode via popTo.
 	// We remove the question then clear the param to prevent re-fire (WARNING 7).
@@ -109,7 +140,15 @@ const EditBallotScreen = () => {
 	};
 
 	const handleEditQuestion = (questionCode: string) => {
-		navigation.navigate("EditQuestion", { questionCode, electionTitle, electionDate });
+		// Pass the existing question so EditQuestion can pre-populate — its own
+		// draft provider instance is separate/empty (screenLayout per-screen).
+		const editQuestion = (ballotDraft.questions ?? []).find((q) => q.code === questionCode);
+		navigation.navigate("EditQuestion", {
+			questionCode,
+			editQuestion,
+			electionTitle,
+			electionDate,
+		} as any);
 	};
 
 	return (
@@ -129,7 +168,7 @@ const EditBallotScreen = () => {
 				onEditQuestion={handleEditQuestion}
 			/>
 			{/* Footer: PROPOSE — owned by screen per plan; matches CreateBallotScreen footer */}
-			<View style={[globalStyles.footer, { backgroundColor: colors.card }]}>
+			<View style={[globalStyles.footer, { backgroundColor: colors.card, paddingBottom: insets.bottom + 16 }]}>
 				<CustomButton
 					title={t("propose")}
 					icon="floppy-disk"
