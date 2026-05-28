@@ -358,10 +358,10 @@ export class NetworkEngine implements INetworkEngine {
     try {
       for await (const election of this.ctx.db.eval(
 				`
-					select
-						Id, Title, AuthorityName, Date, Type
-					from Election
-					where Date < :date
+					select E.Id, E.Title, A.Name as AuthorityName, E.Date, E.Type
+					from Election E
+					join Authority A on A.Id = E.AuthorityId
+					where E.Date < :date
 				`,
 				{ date: nowCanonicalDatetime() }
       )) {
@@ -390,10 +390,10 @@ export class NetworkEngine implements INetworkEngine {
     try {
       for await (const election of this.ctx.db.eval(
 				`
-					select
-						Id, Title, AuthorityName, Date, Type
-					from Election
-					where Date > :date`,
+					select E.Id, E.Title, A.Name as AuthorityName, E.Date, E.Type
+					from Election E
+					join Authority A on A.Id = E.AuthorityId
+					where E.Date > :date`,
 				{ date: nowCanonicalDatetime() }
       )) {
         elections.push({
