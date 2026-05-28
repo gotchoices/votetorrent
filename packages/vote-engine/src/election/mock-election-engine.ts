@@ -23,32 +23,34 @@ import type {
 const MOCK_DAY_MS = 24 * 60 * 60 * 1000
 const MOCK_NOW = Date.now()
 
-const MOCK_BALLOT: Ballot = {
-  id: 'ballot-mock-1',
-  electionId: 'election-2',
-  authorityId: 'auth-b',
-  description: 'Mock ballot for Phase 9',
-  districts: [],
-  questions: []
-}
-
 export class MockElectionEngine implements IElectionEngine {
+  // Phase 9 plan 09-09 (G12) — stateful in-memory ballot store. Starts EMPTY
+  // so the ElectionDetails empty-state shows before any template is created.
+  // AppProvider caches the engine instance, so this array persists across
+  // navigations within a session (the intended persistence vehicle).
+  private ballots: Ballot[] = []
+
   async getBallotDetails (id: string): Promise<BallotDetails> {
-    // Return the seeded ballot regardless of id so the BallotTemplate screen
-    // (BALUI-02) has something to render in the Phase 9 demo flow.
+    // Return the stored ballot if found; fall back to a safe stub so
+    // ElectionDetails/EditBallot do not crash on stale or unknown ids.
     return {
-      ballot: { ...MOCK_BALLOT, id }
+      ballot: this.ballots.find(b => b.id === id) ?? {
+        id,
+        electionId: '',
+        authorityId: '',
+        description: '',
+        districts: [],
+        questions: []
+      }
     }
   }
 
   async getBallots (): Promise<BallotSummary[]> {
-    return [
-      {
-        id: MOCK_BALLOT.id,
-        electionId: MOCK_BALLOT.electionId,
-        authorityId: MOCK_BALLOT.authorityId
-      }
-    ]
+    return this.ballots.map(({ id, electionId, authorityId }) => ({
+      id,
+      electionId,
+      authorityId
+    }))
   }
 
   async getElectionDetails (): Promise<ElectionDetails> {
@@ -119,8 +121,13 @@ export class MockElectionEngine implements IElectionEngine {
     throw new Error('Not implemented')
   }
 
-  async proposeBallot (_ballot: Ballot): Promise<void> {
-    throw new Error('Not implemented')
+  async proposeBallot (ballot: Ballot): Promise<void> {
+    const idx = this.ballots.findIndex(b => b.id === ballot.id)
+    if (idx >= 0) {
+      this.ballots[idx] = ballot
+    } else {
+      this.ballots.push(ballot)
+    }
   }
 
   async proposeRevision (_revision: ElectionRevisionInit): Promise<void> {
