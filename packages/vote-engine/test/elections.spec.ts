@@ -437,16 +437,17 @@ describe('ElectionEngine', () => {
     // annotation was obsolete and that the only real blocker was the
     // missing Ballot row. After Plan 12.3-03 (`seedBallot`) resolved the
     // Ballot-row gap, the test was re-attempted and revealed that the
-    // DependsOn-NOT-NULL failure is in fact real on quereus 3.2.1 — the
-    // schema declares `DependsOn text null` (line 707 of votetorrent.qsql)
-    // but quereus still raises `NOT NULL constraint failed:
-    // ProposedQuestion.DependsOn` when the engine binds JS `null`. This is
-    // a quereus-side parser / parameter-binding behavior, not an
-    // engine-side missing binding (the engine DOES bind `:dependsOn`).
-    // Re-skipping with the corrected diagnosis; Ballot-seeding is in
-    // place so the test will pass as soon as the upstream null-binding
-    // issue is addressed.
-    it.skip('INSERTs a ProposedQuestion row — BLOCKED: quereus 3.2.1 raises NOT NULL on ProposedQuestion.DependsOn despite `text null` schema (Ballot-row blocker is now resolved by seedBallot; this is the remaining upstream issue)', async () => {
+    // BLOCKED on a Quereus bug confirmed in 3.3.0: binding explicit NULL
+    // (via :param or SQL literal) to a column declared with a non-NULL
+    // `default X` throws `NOT NULL constraint failed`. ProposedQuestion has
+    // two such columns — `OptionRange text default '{1, 1}'` and
+    // `Required boolean default true` — and the engine binds null/false to
+    // both. The error message names a nullable sibling (`DependsOn`) which
+    // is what produced the original misdiagnosis. See repro spec
+    // test/quereus-repros/text-null-column.spec.ts (D1–D3) and issue draft
+    // .planning/quick/260528-001-quereus-not-null-text-null-column/issues/
+    // default-column-rejects-explicit-null.md.
+    it.skip('INSERTs a ProposedQuestion row — BLOCKED: quereus 3.3.0 rejects explicit null binding against a `default X` column (ProposedQuestion.OptionRange / .Required); error message misleadingly names DependsOn', async () => {
       const net = await createTestNetwork()
       const auth = await addTestAuthority(net)
       const elec = await addTestElection(auth)
