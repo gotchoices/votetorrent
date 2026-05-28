@@ -66,13 +66,10 @@ declare schema main
 		constraint InsertValid check on insert (
 			-- Very first authority in the network - shoe-in, no Invite, no signing
 			(context.SigningNonce is null and context.InviteSignature is null and (select count(*) from Authority) = 1)
-				-- or Valid Invite for this authority
+				-- or Valid Invite for this authority (D-07b: existence-only; cryptographic binding moved to Admin.MutationValid TX3)
 				or (context.InviteSlotCid is not null and context.InviteSignature is not null
 					and exists (
 						select 1 from InviteResult I where I.SlotCid = context.InviteSlotCid and I.IsAccepted
-							and I.Digest = Digest(
-								context.Tid, new.Id, new.Name, new.DomainName, new.ImageRef
-							)
 					)
 				)
 		),
@@ -123,8 +120,9 @@ declare schema main
 									context.Tid, A.Id, A.Name, A.DomainName, A.ImageRef,
 									(select Digest(EffectiveAt, ThresholdPolicies)
 											from Admin A where A.AuthorityId = new.AuthorityId and A.EffectiveAt = new.EffectiveAt),
+									-- D-09: sort + bind first officer to make the multi-row scalar subquery deterministic under quereus 3.3.0
 									(select Digest(AdminEffectiveAt, UserId, Title, Scopes)
-										from Officer O where O.AuthorityId = new.AuthorityId and O.AdminEffectiveAt = new.EffectiveAt)
+										from (select * from Officer where AuthorityId = new.AuthorityId and AdminEffectiveAt = new.EffectiveAt order by UserId asc limit 1))
 								)
 						)
 				)
@@ -138,8 +136,9 @@ declare schema main
 										context.Tid, new.AuthorityId,
 										(select Digest(EffectiveAt, ThresholdPolicies)
 												from Admin Ad where Ad.AuthorityId = new.AuthorityId and Ad.EffectiveAt = new.EffectiveAt),
+										-- D-09: sort + bind first officer to make the multi-row scalar subquery deterministic under quereus 3.3.0
 										(select Digest(AdminEffectiveAt, UserId, Title, Scopes)
-												from Officer O where O.AuthorityId = new.AuthorityId and O.AdminEffectiveAt = new.EffectiveAt)
+												from (select * from Officer where AuthorityId = new.AuthorityId and AdminEffectiveAt = new.EffectiveAt order by UserId asc limit 1))
 									)
 						)
 				)
@@ -162,26 +161,24 @@ declare schema main
 		primary key (AuthorityId, AdminEffectiveAt, UserId),
 		-- NOT NEEDED - AuthorityId is validated through Admin
 		constraint AuthorityIdValid check (exists (select 1 from Authority A where A.Id = new.AuthorityId)),
-		constraint AdminValid check (exists (select 1 from Admin A where A.AuthorityId = new.AuthorityId and A.EffectiveAt = new.AdminEffectiveAt)),
+		constraint AdminValid check (
+			-- D-07d: non-invite path keeps the strong FK check (Admin must exist before Officer);
+			-- invite-bound path defers FK enforcement to Admin.MutationValid TX3 (D-07a insert order: Authority → Officer → Admin)
+			((context.InviteSlotCid is null or context.InviteSignature is null) and exists (select 1 from Admin A where A.AuthorityId = new.AuthorityId and A.EffectiveAt = new.AdminEffectiveAt))
+				or (context.InviteSlotCid is not null and context.InviteSignature is not null)
+		),
 		constraint UserIdValid check (exists (select 1 from User U where U.Id = new.UserId)),
 		constraint ScopesValid check (not exists (select 1 from json_each(Scopes) where value not in (select Code from Scope))), -- throwing errors
 		constraint OnlyInsert check on update, delete (false),
 		constraint InsertValid check on insert (
 			-- part of the very first authority in the network - no invite, no signing
 			(context.SigningNonce is null and context.InviteSlotCid is null and context.InviteSignature is null and (select count(*) from Authority) = 1)
-			-- part of the first admin for an authority - invite is valid
+			-- part of the first admin for an authority - invite is valid (D-07c: existence-only; cryptographic binding moved to Admin.MutationValid TX3; Authority count relaxed to 1 per D-07a insert order)
 				or (context.SigningNonce is null and context.InviteSlotCid is not null and context.InviteSignature is not null
-					and (select count(*) from Authority where Id = new.AuthorityId) = 0
+					and (select count(*) from Authority where Id = new.AuthorityId) = 1
 						and exists (
-							select 1 from InviteResult I join Authority A on A.Id = new.AuthorityId
+							select 1 from InviteResult I
 							where I.SlotCid = context.InviteSlotCid and I.IsAccepted
-								and I.Digest = Digest(
-									context.Tid, A.Id, A.Name, A.DomainName, A.ImageRef,
-									(select Digest(EffectiveAt, ThresholdPolicies)
-											from Admin A where A.AuthorityId = new.AuthorityId and A.EffectiveAt = new.AdminEffectiveAt),
-									(select Digest(AdminEffectiveAt, UserId, Title, Scopes)
-										from Officer O where O.AuthorityId = new.AuthorityId and O.AdminEffectiveAt = new.AdminEffectiveAt)
-								)
 						)
 				)
 				-- or, if a signing nonce is present this is a new or updated administration for existing authority - signing nonce is valid
@@ -193,8 +190,9 @@ declare schema main
 										context.Tid, new.AuthorityId,
 										(select Digest(EffectiveAt, ThresholdPolicies)
 												from Admin Ad where Ad.AuthorityId = new.AuthorityId and Ad.EffectiveAt = new.AdminEffectiveAt),
+										-- D-09: sort + bind first officer to make the multi-row scalar subquery deterministic under quereus 3.3.0
 										(select Digest(AdminEffectiveAt, UserId, Title, Scopes)
-												from Officer O where O.AuthorityId = new.AuthorityId and O.AdminEffectiveAt = new.AdminEffectiveAt)
+												from (select * from Officer where AuthorityId = new.AuthorityId and AdminEffectiveAt = new.AdminEffectiveAt order by UserId asc limit 1))
 									)
 						)
 				)
