@@ -118,9 +118,10 @@ export default function CreateBallotScreen() {
 			<View style={[globalStyles.footer, { backgroundColor: colors.card }]}>
 				<CustomButton
 					title={t("propose")}
-					icon="paper-plane"
+					icon="floppy-disk"
 					onPress={handlePropose}
-					backgroundColor={colors.primary}
+					backgroundColor={colors.success}
+					forceDarkText={true}
 				/>
 			</View>
 		</View>
