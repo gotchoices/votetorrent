@@ -46,6 +46,9 @@ import ProposedRevisionScreen from "../screens/tasks/ProposedRevisionScreen";
 import ScreenScaffoldsDebugScreen from "../screens/tasks/ScreenScaffoldsDebugScreen";
 import ElectionDetailsScreen from "../screens/elections/ElectionDetailsScreen";
 import { CreateElectionScreen } from "../screens/elections/CreateElectionScreen";
+// Phase 9 plan 09-13 (ELECUI-04) — Election Revision screen (Screen C, Figma #16/#17).
+// Aliased to avoid name collision with task-flow EditElectionScreen (imported above on ~line 40).
+import EditElectionRevisionScreen from "../screens/elections/EditElectionScreen";
 import EditBallotScreen from "../screens/ballots/EditBallotScreen";
 // Phase 9 plan 09-04 — Ballot flow screens + scoped draft provider (D-10, D-11)
 import CreateBallotScreen from "../screens/ballots/CreateBallotScreen";
@@ -388,6 +391,13 @@ export const RootNavigator = () => {
 				name="CreateElection"
 				component={CreateElectionScreen}
 				options={{ title: t("createElection") }}
+			/>
+			{/* Phase 9 plan 09-13 (ELECUI-04) — EditElectionRevision route (Screen C, Figma #16/#17).
+			    Separate from the task-flow EditElection route — points at elections/EditElectionScreen. */}
+			<Stack.Screen
+				name="EditElectionRevision"
+				component={EditElectionRevisionScreen}
+				options={{ title: t("electionRevisionTitle") }}
 			/>
 			{/* BallotDraftProvider is hoisted above the navigator (App.tsx) so all
 			    ballot screens share ONE draft instance (screenLayout gave each

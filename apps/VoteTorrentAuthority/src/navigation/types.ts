@@ -46,6 +46,9 @@ export type RootStackParamList = {
 	SignatureTask: { task: SignatureTask };
 	// Phase 7 scaffold routes (07-05; renamed by 07-08) — standalone screens per D-09; real impls land in Phases 8–10
 	EditElection: { taskId?: string };
+	// Phase 9 plan 09-13 (ELECUI-04) — dedicated Election Revision route (Screen C, Figma #16/#17).
+	// Separate from the task-flow EditElection route above. electionEngine? mirrors ElectionDetails shape.
+	EditElectionRevision: { electionEngine?: IElectionEngine };
 	AuthorityDetail: { taskId?: string };
 	EditElectionWithFilter: { taskId?: string };
 	EditRevisionForm: { taskId?: string };
