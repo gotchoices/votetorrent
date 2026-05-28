@@ -657,3 +657,154 @@ export async function seedBallot (
 
   return { ballotId }
 }
+
+// ---------------------------------------------------------------------------
+// Layer-3: seedQuestion helper (Phase 12.4-02)
+// ---------------------------------------------------------------------------
+
+export interface SeedQuestionInput {
+  code: string
+  title: string
+  instructions: string
+  type: string
+  dependsOn?: string | null
+  optionRange?: string
+  scoreRange?: string | null
+  grouping?: string | null
+  sequence?: number | null
+  required?: boolean
+}
+
+export interface SeedQuestionResult {
+  questionCode: string
+}
+
+/**
+ * Seed a canonical `Question` row so that `ProposedOption.QuestionCodeValid`
+ * (`exists (select 1 from Question Q where Q.BallotId = new.BallotId and
+ * Q.Code = new.QuestionCode)`) is satisfied for downstream `addOption`
+ * calls. Layer-3 fixture, parallel to `seedBallot`.
+ *
+ * Why this exists: `ElectionEngine.addQuestion` writes only to
+ * `ProposedQuestion`, not the canonical `Question` table. `Question.MutationValid`
+ * (votetorrent.qsql:672-682) requires a full AdminSignature pipeline with
+ * scope='ceb' and a 12-arg Digest over (Tid, BallotId, Code, Title,
+ * Instructions, DependsOn, Type, OptionRange, ScoreRange, Grouping,
+ * Sequence, Required). This helper composes the same 3-step spine as
+ * `seedBallot`: AdminSigning('ceb') + SigningEngine.sign + raw Question
+ * INSERT.
+ *
+ * Quereus 3.3.0 NULL-bug bypass: the schema declares
+ * `OptionRange text default '{1, 1}'` and `Required boolean default true`.
+ * Quereus 3.3.0 incorrectly rejects NULL-bound writes to default-valued
+ * columns (tracked at 260528-001-quereus-not-null-text-null-column).
+ * This helper resolves both defaults JS-side BEFORE building the
+ * AdminSigning Digest tuple, so non-NULL explicit values are bound in
+ * BOTH the Digest call and the Question INSERT — keeping the recomputed
+ * Question.MutationValid Digest equal to the AdminSigning Digest.
+ */
+export async function seedQuestion (
+  elec: TestElectionContext,
+  ballotId: string,
+  q: SeedQuestionInput
+): Promise<SeedQuestionResult> {
+  // ---- Step 0: Resolve defaults JS-side (Pitfall 1: avoids binding NULL
+  //              into default-valued columns, which trips the quereus 3.3.0
+  //              NULL-bug). These resolved values are the single source of
+  //              truth — they must match the schema literal defaults exactly
+  //              ('{1, 1}', true) and they are bound into BOTH the
+  //              AdminSigning Digest call (Step 2) and the Question INSERT
+  //              (Step 4) so the Digest equality in Question.MutationValid
+  //              holds.
+  const dependsOn = q.dependsOn ?? null
+  const optionRange = q.optionRange ?? '{1, 1}'
+  const scoreRange = q.scoreRange ?? null
+  const grouping = q.grouping ?? null
+  const sequence = q.sequence ?? null
+  const required = q.required ?? true
+
+  // ---- Step 1: Resolve CurrentAdmin.EffectiveAt for the authority
+  const authorityId = elec.authority.id
+  const adminRow = await elec.ctx.db
+    .prepare('select EffectiveAt from CurrentAdmin where AuthorityId = :authorityId')
+    .get({ authorityId })
+  if (!adminRow) throw new Error('seedQuestion: CurrentAdmin not found')
+  const adminEffectiveAt = adminRow.EffectiveAt as number | string
+
+  // ---- Step 2: AdminSigning (scope='ceb') with the 12-arg Question digest
+  //              formula matching Question.MutationValid at qsql:672-682.
+  const nonce = crypto.randomUUID()
+  const sig = makeTestSignature(elec.user)
+
+  await elec.ctx.db.exec(
+    `insert into AdminSigning (
+      Nonce, AuthorityId, AdminEffectiveAt, Scope, Digest, UserId, SignerKey, Signature
+    )
+    with context now = :now, IsSignatureValid = true, IsSignerKeyValid = true
+    values (
+      :nonce, :authorityId, :adminEffectiveAt, 'ceb',
+      Digest(1, :ballotId, :code, :title, :instructions, :dependsOn, :type, :optionRange, :scoreRange, :grouping, :sequence, :required),
+      :userId, :signerKey, :signature
+    )`,
+    {
+      nonce,
+      authorityId,
+      adminEffectiveAt,
+      ballotId,
+      code: q.code,
+      title: q.title,
+      instructions: q.instructions,
+      dependsOn,
+      type: q.type,
+      optionRange,
+      scoreRange,
+      grouping,
+      sequence,
+      required,
+      userId: elec.user.id,
+      signerKey: sig.signerKey,
+      signature: sig.signature,
+      now: nowCanonicalDatetime(),
+    }
+  )
+
+  // ---- Step 3: AdminSignature (threshold=1 auto-completes via SigningEngine.sign)
+  const signing = new SigningEngine(elec.ctx)
+  await signing.sign(nonce, sig)
+
+  // ---- Step 4: Question insert under the signed nonce.
+  //              Question.MutationValid recomputes Digest(Tid, BallotId,
+  //              Code, Title, Instructions, DependsOn, Type, OptionRange,
+  //              ScoreRange, Grouping, Sequence, Required); the
+  //              AdminSignature row inserted above matches that tuple
+  //              verbatim because every default-column value comes from
+  //              the shared Step-0 locals.
+  await elec.ctx.db.exec(
+    `insert into Question (
+      BallotId, Code, Title, Instructions, DependsOn, Type,
+      OptionRange, ScoreRange, Grouping, Sequence, Required
+    )
+    with context SigningNonce = :nonce, Tid = 1, now = :now
+    values (
+      :ballotId, :code, :title, :instructions, :dependsOn, :type,
+      :optionRange, :scoreRange, :grouping, :sequence, :required
+    )`,
+    {
+      nonce,
+      ballotId,
+      code: q.code,
+      title: q.title,
+      instructions: q.instructions,
+      dependsOn,
+      type: q.type,
+      optionRange,
+      scoreRange,
+      grouping,
+      sequence,
+      required,
+      now: nowCanonicalDatetime(),
+    }
+  )
+
+  return { questionCode: q.code }
+}
