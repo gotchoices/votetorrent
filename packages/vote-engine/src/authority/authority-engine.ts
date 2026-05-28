@@ -4,7 +4,7 @@ import { sha256 } from '@noble/hashes/sha2'
 import { MisuseError, QuereusError } from '@quereus/quereus'
 import { Temporal } from 'temporal-polyfill'
 import { SigningEngine } from '../signing/signing-engine.js'
-import { asText, parseJsonOr } from '../utils.js'
+import { asText, fromCanonicalDatetime, nowCanonicalDatetime, parseJsonOr, toCanonicalDatetime } from '../utils.js'
 import type { EngineContext } from '../types.js'
 
 let nextTid = 1
@@ -131,7 +131,7 @@ export class AuthorityEngine implements IAuthorityEngine {
         'select * from Officer where AuthorityId = :id and AdminEffectiveAt = :effectiveAt',
         {
 				  id: this.authority.id,
-				  effectiveAt: adminDB.EffectiveAt as number
+				  effectiveAt: adminDB.EffectiveAt as string
         }
       )) {
         officersDB.push({
@@ -148,7 +148,7 @@ export class AuthorityEngine implements IAuthorityEngine {
       const admin = {
         id: adminDB.Id as string,
         authorityId: adminDB.AuthorityId as string,
-        effectiveAt: adminDB.EffectiveAt as number,
+        effectiveAt: fromCanonicalDatetime(adminDB.EffectiveAt as string),
         officers: officersDB,
         thresholdPolicies: parseJsonOr<ThresholdPolicy[]>(
           adminDB.ThresholdPolicies,
@@ -169,7 +169,7 @@ export class AuthorityEngine implements IAuthorityEngine {
         'select * from ProposedOfficer where AuthorityId = :id and AdminEffectiveAt = :effectiveAt',
         {
 				  id: this.authority.id,
-				  effectiveAt: proposedAdminDB.EffectiveAt as number
+				  effectiveAt: proposedAdminDB.EffectiveAt as string
         }
       )) {
         proposedOfficersDB.push({
@@ -205,7 +205,7 @@ export class AuthorityEngine implements IAuthorityEngine {
         proposed: {
           proposed: {
             officers: proposedOfficersDB,
-            effectiveAt: proposedAdminDB.EffectiveAt as number,
+            effectiveAt: fromCanonicalDatetime(proposedAdminDB.EffectiveAt as string),
             thresholdPolicies: parseJsonOr<ThresholdPolicy[]>(
               proposedAdminDB.ThresholdPolicies,
               [],
@@ -379,18 +379,18 @@ export class AuthorityEngine implements IAuthorityEngine {
 				)`,
 				{
 				  authorityId: this.authority.id,
-				  effectiveAt: admin.proposed.effectiveAt,
+				  effectiveAt: toCanonicalDatetime(admin.proposed.effectiveAt),
 				  thresholdPolicies: thresholdPoliciesJson,
 				  signerUserId: signature.signerUserId,
 				  signerKey: signature.signerKey,
 				  signature: signature.signature,
-				  now: Date.now()
+				  now: nowCanonicalDatetime()
 				}
       )
 
       const adminDigestArgs: AdminDigestArgs = {
         authorityId: this.authority.id,
-        effectiveAt: String(admin.proposed.effectiveAt),
+        effectiveAt: toCanonicalDatetime(admin.proposed.effectiveAt),
         thresholdPolicies: thresholdPoliciesJson
       }
       const signingResult = await this.signingEngine.startSigningSession(
@@ -480,7 +480,7 @@ export class AuthorityEngine implements IAuthorityEngine {
 				  inviteSignature: invite.inviteSignature,
 				  nonce,
 				  tid: nextTid++,
-				  now: Date.now()
+				  now: nowCanonicalDatetime()
 				}
       )
     } catch (err) {
@@ -528,7 +528,7 @@ export class AuthorityEngine implements IAuthorityEngine {
 				  inviteSignature: invite.inviteSignature,
 				  nonce,
 				  tid: nextTid++,
-				  now: Date.now()
+				  now: nowCanonicalDatetime()
 				}
       )
     } catch (error) {

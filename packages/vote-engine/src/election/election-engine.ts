@@ -1,5 +1,5 @@
 import { MisuseError, QuereusError } from '@quereus/quereus'
-import { parseJsonOr } from '../utils.js'
+import { fromCanonicalDatetime, nowCanonicalDatetime, parseJsonOr } from '../utils.js'
 import type { EngineContext } from '../types.js'
 import type {
   Ballot,
@@ -180,9 +180,9 @@ export class ElectionEngine implements IElectionEngine {
         id: eRow.Id as string,
         authorityId: eRow.AuthorityId as string,
         title: eRow.Title as string,
-        date: eRow.Date as number,
-        revisionDeadline: eRow.RevisionDeadline as number,
-        ballotDeadline: eRow.BallotDeadline as number,
+        date: fromCanonicalDatetime(eRow.Date as string),
+        revisionDeadline: fromCanonicalDatetime(eRow.RevisionDeadline as string),
+        ballotDeadline: fromCanonicalDatetime(eRow.BallotDeadline as string),
         type: eRow.Type as ElectionType
       }
 
@@ -204,7 +204,7 @@ export class ElectionEngine implements IElectionEngine {
       const current: ElectionRevision = {
         electionId: revRow.ElectionId as string,
         revision: revRow.Revision as number,
-        revisionTimestamp: [revRow.RevisionTimestamp as Timestamp],
+        revisionTimestamp: [fromCanonicalDatetime(revRow.RevisionTimestamp as string)],
         tags: parseJsonOr<string[]>(revRow.Tags, [], 'ElectionRevision.Tags'),
         instructions: revRow.Instructions as string,
         keyholders: [], // Populated by the Keyholder/InviteSlot join in TEST-01.
@@ -229,7 +229,7 @@ export class ElectionEngine implements IElectionEngine {
         const proposedInit: ElectionRevisionInit = {
           electionId: proposedRow.ElectionId as string,
           revision: proposedRow.Revision as number,
-          revisionTimestamp: proposedRow.RevisionTimestamp as Timestamp,
+          revisionTimestamp: fromCanonicalDatetime(proposedRow.RevisionTimestamp as string),
           tags: parseJsonOr<string[]>(
             proposedRow.Tags,
             [],
@@ -270,7 +270,7 @@ export class ElectionEngine implements IElectionEngine {
         out.push({
           electionId: row.ElectionId as string,
           revision: row.Revision as number,
-          revisionTimestamp: [row.RevisionTimestamp as Timestamp],
+          revisionTimestamp: [fromCanonicalDatetime(row.RevisionTimestamp as string)],
           tags: parseJsonOr<string[]>(row.Tags, [], 'ElectionRevision.Tags'),
           instructions: row.Instructions as string,
           keyholders: [],
@@ -328,7 +328,7 @@ export class ElectionEngine implements IElectionEngine {
           userId: this.ctx.user?.id ?? null,
           userKey: signerKey,
           signature: null,
-          now: Date.now()
+          now: nowCanonicalDatetime()
         }
       )
     } catch (err) {
@@ -371,7 +371,7 @@ export class ElectionEngine implements IElectionEngine {
           userId: this.ctx.user?.id ?? null,
           userKey: signerKey,
           signature: null,
-          now: Date.now()
+          now: nowCanonicalDatetime()
         }
       )
     } catch (err) {
@@ -443,7 +443,7 @@ export class ElectionEngine implements IElectionEngine {
           userId: this.ctx.user?.id ?? null,
           userKey: signerKey,
           signature: null,
-          now: Date.now()
+          now: nowCanonicalDatetime()
         }
       )
     } catch (err) {
@@ -501,7 +501,7 @@ export class ElectionEngine implements IElectionEngine {
           userId: this.ctx.user?.id ?? null,
           userKey: signerKey,
           signature: null,
-          now: Date.now()
+          now: nowCanonicalDatetime()
         }
       )
     } catch (err) {

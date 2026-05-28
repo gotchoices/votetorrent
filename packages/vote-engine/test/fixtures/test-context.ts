@@ -7,8 +7,8 @@
 //
 // Phase 12.1 — Wave 1 deliverable.
 
-import { Temporal } from 'temporal-polyfill'
 import { ElectionEvent, ElectionType, UserKeyType } from '@votetorrent/vote-core'
+import { nowCanonicalDatetime, toCanonicalDatetime } from '../../src/utils.js'
 import { ElectionsEngine, peekNextElectionTid } from '../../src/elections/elections-engine.js'
 import { SigningEngine } from '../../src/signing/signing-engine.js'
 import { NetworksEngine } from '../../src/networks/networks-engine.js'
@@ -223,14 +223,14 @@ export async function seedElectionSigning (
       tid: String(tid),
       id: e.id,
       title: e.title,
-      date: Temporal.Instant.fromEpochMilliseconds(e.date).toString(),
-      revisionDeadline: Temporal.Instant.fromEpochMilliseconds(e.revisionDeadline).toString(),
-      ballotDeadline: Temporal.Instant.fromEpochMilliseconds(e.ballotDeadline).toString(),
+      date: toCanonicalDatetime(e.date),
+      revisionDeadline: toCanonicalDatetime(e.revisionDeadline),
+      ballotDeadline: toCanonicalDatetime(e.ballotDeadline),
       type: e.type,
       userId: user.id,
       signerKey: sig.signerKey,
       signature: sig.signature,
-      now: Date.now(),
+      now: nowCanonicalDatetime(),
     }
   )
 
@@ -327,7 +327,7 @@ export async function addTestElection (auth: TestAuthorityContext): Promise<Test
     .get({ authorityId: auth.authority.id })
   if (!adminRow) throw new Error('addTestElection: CurrentAdmin not found for revision signing')
   const adminEffectiveAt = adminRow.EffectiveAt as number | string
-  const revTimestamp = Temporal.Now.instant().add({ seconds: -1 }).toString({ smallestUnit: 'second' })
+  const revTimestamp = toCanonicalDatetime(Date.now() - 1000)
   const revTags = JSON.stringify(init.revision.tags)
   const revTimeline = JSON.stringify(init.revision.timeline)
 
@@ -354,7 +354,7 @@ export async function addTestElection (auth: TestAuthorityContext): Promise<Test
       userId: auth.user.id,
       signerKey: revSig.signerKey,
       signature: revSig.signature,
-      now: Date.now(),
+      now: nowCanonicalDatetime(),
     }
   )
 
@@ -362,7 +362,7 @@ export async function addTestElection (auth: TestAuthorityContext): Promise<Test
   await revSigning.sign(revNonce, revSig)
 
   // Insert ElectionRevision with the signing nonce
-  const nowIso = Temporal.Now.instant().toString({ smallestUnit: 'second' })
+  const nowIso = nowCanonicalDatetime()
   await auth.ctx.db.exec(
     `insert into ElectionRevision (ElectionId, Revision, RevisionTimestamp, Tags, Instructions, Timeline, KeyholderThreshold)
      with context SigningNonce = :signingNonce, Tid = 1, now = :now

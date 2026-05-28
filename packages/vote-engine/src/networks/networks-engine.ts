@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto';
 import { Database, MisuseError, QuereusError } from '@quereus/quereus';
 import { NetworkEngine } from '../network/network-engine.js';
-import { H16 } from '../utils.js';
+import { H16, nowCanonicalDatetime, toCanonicalDatetime } from '../utils.js';
 import type { EngineContext } from '../types.js';
 import type {
 	LocalStorage,
@@ -93,7 +93,7 @@ export class NetworksEngine implements INetworksEngine {
 			primaryAuthorityName: networkInit.primaryAuthority.name,
 			primaryAuthorityDomainName: networkInit.primaryAuthority.domainName,
 			primaryAuthorityImageRef: primaryAuthorityImageRefJson,
-			adminEffectiveAt: networkInit.admin.effectiveAt,
+			adminEffectiveAt: toCanonicalDatetime(networkInit.admin.effectiveAt),
 			thresholdPolicies,
 			userId: user.id,
 			title: officerInit.title,
@@ -102,8 +102,8 @@ export class NetworksEngine implements INetworksEngine {
 			userImageRef: userImageRefJson,
 			keyType: 'user',
 			keyValue: firstKey.key,
-			expiration: firstKey.expiration,
-			now: Date.now(),
+			expiration: toCanonicalDatetime(firstKey.expiration),
+			now: nowCanonicalDatetime(),
 		};
 
 		try {

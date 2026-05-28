@@ -61,3 +61,44 @@ export function H16 (input: string): string {
 export function toHexKey (value: string | Uint8Array): string {
   return value instanceof Uint8Array ? bytesToHex(value) : value
 }
+
+/**
+ * Quereus canonical datetime form: `YYYY-MM-DDTHH:MM:SS` (no fractional
+ * seconds, no `Z` suffix). This matches the post-coercion canonical
+ * representation that quereus emits when it normalizes numeric epoch
+ * timestamps for `datetime` columns.
+ *
+ * Passing values in this exact form at insert time bypasses the deferred
+ * CHECK coercion bug (see
+ * `.planning/quick/260522-001-quereus-bug-repros/issues/bug-D-deferred-check-datetime-coercion.md`):
+ * because no coercion is needed, `new.*` values seen by deferred
+ * subqueries match the stored values in referenced tables.
+ */
+export function toCanonicalDatetime (input: number | Date): string {
+  const d = typeof input === 'number' ? new Date(input) : input
+  // Defer invalid-input rejection to the database layer: passing the raw
+  // string through lets the datetime column type or downstream CHECK
+  // constraint surface a descriptive error instead of a JS RangeError.
+  if (!(d instanceof Date) || Number.isNaN(d.getTime())) return String(input)
+  return d.toISOString().slice(0, 19)
+}
+
+/** Current time in {@link toCanonicalDatetime} form. */
+export function nowCanonicalDatetime (): string {
+  return new Date().toISOString().slice(0, 19)
+}
+
+/**
+ * Inverse of {@link toCanonicalDatetime}. Quereus stores canonical
+ * datetime values without a `Z` suffix, but they semantically represent
+ * UTC. Appending `Z` before parsing is required because JavaScript's
+ * `Date` constructor treats ISO strings without a timezone designator as
+ * local time, while strings with `Z` are treated as UTC.
+ *
+ * Accepts numeric epoch-ms inputs as a pass-through to tolerate callers
+ * that may receive pre-coerced values from older code paths.
+ */
+export function fromCanonicalDatetime (value: string | number): number {
+  if (typeof value === 'number') return value
+  return new Date(value + 'Z').getTime()
+}

@@ -1,6 +1,6 @@
 import { MisuseError, QuereusError } from '@quereus/quereus'
-import { Temporal } from 'temporal-polyfill'
 import { ElectionEngine } from '../election/election-engine.js'
+import { fromCanonicalDatetime, nowCanonicalDatetime, toCanonicalDatetime } from '../utils.js'
 import type { EngineContext } from '../types.js'
 import type {
   ElectionInit,
@@ -89,7 +89,7 @@ export class ElectionsEngine implements IElectionsEngine {
           // through the AdminSigning/AdminSignature pipeline. Phase 6 /
           // TEST-01 will tighten this contract to require a Signature here.
           signature: null,
-          now: Date.now()
+          now: nowCanonicalDatetime()
         }
       )
     } catch (err) {
@@ -137,12 +137,12 @@ export class ElectionsEngine implements IElectionsEngine {
           id: e.id,
           authorityId: e.authorityId,
           title: e.title,
-          date: Temporal.Instant.fromEpochMilliseconds(e.date).toString(),
-          revisionDeadline: Temporal.Instant.fromEpochMilliseconds(e.revisionDeadline).toString(),
-          ballotDeadline: Temporal.Instant.fromEpochMilliseconds(e.ballotDeadline).toString(),
+          date: toCanonicalDatetime(e.date),
+          revisionDeadline: toCanonicalDatetime(e.revisionDeadline),
+          ballotDeadline: toCanonicalDatetime(e.ballotDeadline),
           type: e.type,
           signingNonce: options?.signingNonce ?? null,
-          now: Temporal.Now.instant().toString({ smallestUnit: 'second' })
+          now: nowCanonicalDatetime()
         }
       )
     } catch (err) {
@@ -157,7 +157,7 @@ export class ElectionsEngine implements IElectionsEngine {
   async getElectionHistory (): Promise<ElectionSummary[]> {
     if (!this.ctx) return []
     const out: ElectionSummary[] = []
-    const now = Date.now()
+    const now = nowCanonicalDatetime()
     try {
       for await (const row of this.ctx.db.eval(
 				`select E.Id, E.Title, A.Name as AuthorityName, E.Date, E.Type
@@ -169,7 +169,7 @@ export class ElectionsEngine implements IElectionsEngine {
           id: row.Id as string,
           title: row.Title as string,
           authorityName: row.AuthorityName as string,
-          date: row.Date as number,
+          date: fromCanonicalDatetime(row.Date as string),
           type: row.Type as ElectionType
         })
       }
@@ -187,7 +187,7 @@ export class ElectionsEngine implements IElectionsEngine {
   async getElections (): Promise<ElectionSummary[]> {
     if (!this.ctx) return []
     const out: ElectionSummary[] = []
-    const now = Date.now()
+    const now = nowCanonicalDatetime()
     try {
       for await (const row of this.ctx.db.eval(
 				`select E.Id, E.Title, A.Name as AuthorityName, E.Date, E.Type
@@ -199,7 +199,7 @@ export class ElectionsEngine implements IElectionsEngine {
           id: row.Id as string,
           title: row.Title as string,
           authorityName: row.AuthorityName as string,
-          date: row.Date as number,
+          date: fromCanonicalDatetime(row.Date as string),
           type: row.Type as ElectionType
         })
       }
@@ -224,9 +224,9 @@ export class ElectionsEngine implements IElectionsEngine {
               id: row.Id as string,
               authorityId: row.AuthorityId as string,
               title: row.Title as string,
-              date: row.Date as number,
-              revisionDeadline: row.RevisionDeadline as number,
-              ballotDeadline: row.BallotDeadline as number,
+              date: fromCanonicalDatetime(row.Date as string),
+              revisionDeadline: fromCanonicalDatetime(row.RevisionDeadline as string),
+              ballotDeadline: fromCanonicalDatetime(row.BallotDeadline as string),
               type: row.Type as ElectionType
             },
             revision: undefined as unknown as ElectionInit['revision']

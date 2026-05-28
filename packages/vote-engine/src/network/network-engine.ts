@@ -1,7 +1,7 @@
 import { QuereusError, MisuseError } from '@quereus/quereus'
 import { AuthorityEngine } from '../authority/authority-engine.js'
 import { UserEngine } from '../user/user-engine.js'
-import { asText, parseJsonOr } from '../utils.js'
+import { asText, fromCanonicalDatetime, nowCanonicalDatetime, parseJsonOr, toCanonicalDatetime } from '../utils.js'
 import type { EngineContext } from '../types.js'
 import type {
   Authority,
@@ -77,7 +77,7 @@ export class NetworkEngine implements INetworkEngine {
       domainName: authority.domainName,
       imageRef: imageRefJson,
       authorityId: id,
-      adminEffectiveAt: admin.effectiveAt,
+      adminEffectiveAt: toCanonicalDatetime(admin.effectiveAt),
       thresholdPolicies: thresholdPoliciesJson,
       userId: this.ctx.user?.id ?? null,
       title: officerInit.title,
@@ -290,13 +290,13 @@ export class NetworkEngine implements INetworkEngine {
 					from Election
 					where Date < :date
 				`,
-				{ date: Date.now() }
+				{ date: nowCanonicalDatetime() }
       )) {
         elections.push({
           id: election.Id as string,
           title: election.Title as string,
           authorityName: election.AuthorityName as string,
-          date: new Date(election.Date as number).getTime(),
+          date: fromCanonicalDatetime(election.Date as string),
           type: election.Type as ElectionType
         })
       }
@@ -321,13 +321,13 @@ export class NetworkEngine implements INetworkEngine {
 						Id, Title, AuthorityName, Date, Type
 					from Election
 					where Date > :date`,
-				{ date: Date.now() }
+				{ date: nowCanonicalDatetime() }
       )) {
         elections.push({
           id: election.Id as string,
           title: election.Title as string,
           authorityName: election.AuthorityName as string,
-          date: new Date(election.Date as number).getTime(),
+          date: fromCanonicalDatetime(election.Date as string),
           type: election.Type as ElectionType
         })
       }
@@ -412,17 +412,17 @@ export class NetworkEngine implements INetworkEngine {
 					from ProposedElection
 					where Date > :date
 				`,
-				{ date: Date.now() }
+				{ date: nowCanonicalDatetime() }
       )) {
         proposedElections.push({
           id: proposal.Id as string,
           authorityId: proposal.AuthorityId as string,
           title: proposal.Title as string,
-          date: new Date(proposal.Date as number).getTime(),
-          revisionDeadline: new Date(
-            proposal.RevisionDeadline as number
-          ).getTime(),
-          ballotDeadline: new Date(proposal.BallotDeadline as number).getTime(),
+          date: fromCanonicalDatetime(proposal.Date as string),
+          revisionDeadline: fromCanonicalDatetime(
+            proposal.RevisionDeadline as string
+          ),
+          ballotDeadline: fromCanonicalDatetime(proposal.BallotDeadline as string),
           type: proposal.Type as ElectionType
         })
       }
@@ -441,7 +441,7 @@ export class NetworkEngine implements INetworkEngine {
           proposedElectionRevisions.push({
             electionId: revRow.ElectionId as string,
             revision: revRow.Revision as number,
-            revisionTimestamp: revRow.RevisionTimestamp as Timestamp,
+            revisionTimestamp: fromCanonicalDatetime(revRow.RevisionTimestamp as string),
             tags: parseJsonOr<string[]>(
               revRow.Tags,
               [],
@@ -499,12 +499,12 @@ export class NetworkEngine implements INetworkEngine {
       const activeKeys: UserKey[] = []
       for await (const key of this.ctx.db.eval(
         'select PubKey, Type, Expiration from UserKey where UserId = :id and Expiration > :date',
-        { id: userId, date: Date.now() }
+        { id: userId, date: nowCanonicalDatetime() }
       )) {
         activeKeys.push({
           key: key.PubKey as string,
           type: key.Type as UserKeyType,
-          expiration: key.Expiration as Timestamp
+          expiration: fromCanonicalDatetime(key.Expiration as string)
         })
       }
       const user: User = {
@@ -616,7 +616,7 @@ export class NetworkEngine implements INetworkEngine {
 				  electionType: revision.policies.electionType,
 				  userId: this.ctx.user?.id ?? null,
 				  userKey,
-				  now: Date.now()
+				  now: nowCanonicalDatetime()
 				}
       )
     } catch (error) {

@@ -195,12 +195,12 @@ describe('Quereus repro — stage 8: deferred CHECK datetime coercion mismatch',
 			caught = err;
 		}
 
-		// quereus 3.1.2: batch defers CHECK evaluation, timestamps coerce
-		// consistently within the deferred queue — INSERT succeeds.
-		// quereus 3.2.1 (regression): eager CHECK + inconsistent datetime
-		// normalization causes AdminValid to fail (epoch vs Temporal string).
-		// Pinned to 3.1.2 per Phase 12.2-01 — assert success.
-		expect(caught, 'Officer INSERT should succeed — both timestamps coerce to same value').to.be.undefined;
+		// quereus 3.2.1: deferred CHECK subquery sees pre-coercion new.* (raw
+		// numeric) while stored Admin.EffectiveAt is post-coercion ISO text —
+		// equality fails, AdminValid fires. This bug repro is the reason the
+		// engine code now pre-converts all datetime values to canonical ISO
+		// form via toCanonicalDatetime() before INSERT (see utils.ts).
+		expect(caught, 'Officer INSERT should fail — pre-coercion new.* vs post-coercion stored value mismatch').to.exist;
 	});
 
 	it('C2 — CONTROL: same three-table cascade passes with text columns', async () => {

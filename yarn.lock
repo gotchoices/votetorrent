@@ -3680,9 +3680,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@quereus/quereus@npm:3.1.2":
-  version: 3.1.2
-  resolution: "@quereus/quereus@npm:3.1.2"
+"@quereus/quereus@npm:3.2.1":
+  version: 3.2.1
+  resolution: "@quereus/quereus@npm:3.2.1"
   dependencies:
     debug: "npm:^4.4.3"
     fast-json-patch: "npm:^3.1.1"
@@ -3690,7 +3690,7 @@ __metadata:
     moat-maker: "npm:^2.2.0"
     temporal-polyfill: "npm:^0.3.0"
     uint8arrays: "npm:^5.1.0"
-  checksum: 10c0/15e09612b734d7bc5ff443e5bd54f2e05804d5e29883f8ee13ffdcb2f2d61dcf27c0034a90393248e372300538c3d9a55b68a5591dbbd44f11110babf3d45d4a
+  checksum: 10c0/404093a4c743bb79fbcb84a6009748d41e5d4743afc13d1e6293240d7ab8e9e65a50bbf2068366085a627ab695c09360638706214c1d51893d63f6b56b684853
   languageName: node
   linkType: hard
 
@@ -5200,7 +5200,7 @@ __metadata:
     "@noble/curves": "npm:^1.9.6"
     "@noble/hashes": "npm:^1.8.0"
     "@optimystic/quereus-plugin-crypto": "npm:^0.13.4"
-    "@quereus/quereus": "npm:3.1.2"
+    "@quereus/quereus": "npm:3.2.1"
     "@react-native-async-storage/async-storage": "npm:^2.1.2"
     "@types/mocha": "npm:^10.0.10"
     "@types/node": "npm:^22.13.10"

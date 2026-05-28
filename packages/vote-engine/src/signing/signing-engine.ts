@@ -11,6 +11,7 @@ import {
 import { SigningSignBuilder } from './builders/signing-sign-builder.js'
 import { SigningStartSigningSessionBuilder } from './builders/signing-start-signing-session-builder.js'
 import { type EngineContext } from '../types'
+import { nowCanonicalDatetime } from '../utils.js'
 
 export class SigningEngine implements ISigningEngine {
   constructor (private readonly ctx: EngineContext) {}
@@ -50,7 +51,7 @@ export class SigningEngine implements ISigningEngine {
 					  userId: signature.signerUserId,
 					  signerKey: signature.signerKey,
 					  signature: signature.signature,
-					  now: Date.now()
+					  now: nowCanonicalDatetime()
 					}
         )
 
@@ -211,14 +212,14 @@ export class SigningEngine implements ISigningEngine {
 					{
 					  nonce: sessionNonce,
 					  authorityId,
-					  adminEffectiveAt: adminDB.EffectiveAt as number,
+					  adminEffectiveAt: adminDB.EffectiveAt as string,
 					  scope,
 					  effectiveAt: digestArgs.effectiveAt,
 					  thresholdPolicies: digestArgs.thresholdPolicies,
 					  userId: signature.signerUserId,
 					  signerKey: signature.signerKey,
 					  signature: signature.signature,
-					  now: Date.now()
+					  now: nowCanonicalDatetime()
 					}
         )
       } else {
@@ -248,12 +249,12 @@ export class SigningEngine implements ISigningEngine {
 					{
 					  nonce: sessionNonce,
 					  authorityId,
-					  adminEffectiveAt: adminDB.EffectiveAt as number,
+					  adminEffectiveAt: adminDB.EffectiveAt as string,
 					  scope,
 					  userId: signature.signerUserId,
 					  signerKey: signature.signerKey,
 					  signature: signature.signature,
-					  now: Date.now()
+					  now: nowCanonicalDatetime()
 					}
         )
       }
