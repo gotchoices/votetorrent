@@ -582,8 +582,32 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*:
 
-- [ ] 12.2-extend-test-fixtures-for-e2e-seeding/12.2-03-PLAN.md — Unskip ~35 tests across 7 spec files (elections, election, network, authority, user, tasks-builders, signing)
+- [x] 12.2-extend-test-fixtures-for-e2e-seeding/12.2-03-PLAN.md — Unskip ~35 tests across 7 spec files (elections, election, network, authority, user, tasks-builders, signing) — COMPLETE 2026-05-27; canonical-datetime migration follow-up landed 2026-05-28 (91581df): 547 passing / 25 pending / 0 failing on quereus 3.2.1
 
 ---
 
-*Roadmap last updated: 2026-05-27 — Phase 12.2 planned (3 plans in 3 waves); extends test fixtures for E2E seeding and unskips ~35 tests.*
+### Phase 12.3: Close Non-Quereus Pending Tests (INSERTED)
+
+**Goal:** Resolve the ~18 pending tests whose blockers are engine bugs, schema design, or test-infrastructure gaps. Quereus-upstream-only blockers (5 tests across Groups D + G) remain skipped pending upstream fixes.
+**Requirements**: TEST-01, TEST-03, TEST-05, BTEST-02 (closure)
+**Depends on:** Phase 12.2
+**Plans:** 9 plans in 3 waves
+
+**Success Criteria:**
+
+1. `respondToInvite` Digest formula matches `Authority.InsertValid` expectation (6 network tests unblock).
+2. `ProposedNetwork` schema accepts multiple proposed revisions (3 network revision tests unblock).
+3. `User.InsertValid` second-user invite chain wired into test seeding (3 user builder tests unblock).
+4. `ElectionEngine.addQuestion` / `addOption` callable from tests with proper Ballot seeding (2 elections tests unblock).
+5. `OfficerSignature` PK self-call avoided in signing equivalence smoke (1 signing test unblock).
+6. Raw-SQL tests that hardcode `Date.now()` / `'user-1'` rewritten to use canonical fixtures (3 authority/network tests unblock).
+7. Test suite at >= 565 passing / <= 7 pending (D + G only) / 0 failing.
+
+**Out of scope (waits for quereus upstream):**
+
+- Group D — `Task.ExtensionExists` ↔ `*.TaskIdValid` circular CHECK dependency (4 tests)
+- Group G — `primary key ()` zero-column PK UNIQUE enforcement (1 test)
+
+---
+
+*Roadmap last updated: 2026-05-28 — Phase 12.2 complete (551→547 passing on 3.2.1 + canonical-datetime); Phase 12.3 inserted to close 18 remaining non-quereus pending tests.*
