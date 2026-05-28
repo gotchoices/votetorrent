@@ -762,7 +762,7 @@ describe('AuthorityEngine', () => {
       await networkEngine.respondToInvite({
         invite,
         isAccepted: true,
-        invokes: { authority: { name: 'Accepted', domainName: 'a.example' } },
+        invokes: { authority: { name: 'Accepted', domainName: 'a.example' }, admin: { effectiveAt: '2026-01-01T00:00:00', thresholdPolicies: '[{"policy":"rad","threshold":1}]' }, officers: [{ adminEffectiveAt: '2026-01-01T00:00:00', userId: 'user-1', title: 'Officer', scopes: '["rad"]' }] },
         inviteSignature: invite.inviteSignature,
         userId: undefined,
         userInit: undefined
@@ -2001,7 +2001,7 @@ describe('AuthorityEngine', () => {
       await networkEngine.respondToInvite({
         invite,
         isAccepted: true,
-        invokes: { authority: { name: 'NewAuthority', domainName: 'na.example' } },
+        invokes: { authority: { name: 'NewAuthority', domainName: 'na.example' }, admin: { effectiveAt: '2026-01-01T00:00:00', thresholdPolicies: '[{"policy":"rad","threshold":1}]' }, officers: [{ adminEffectiveAt: '2026-01-01T00:00:00', userId: 'user-1', title: 'Officer', scopes: '["rad"]' }] },
         inviteSignature: invite.inviteSignature,
         userId: undefined,
         userInit: undefined
@@ -2026,7 +2026,7 @@ describe('AuthorityEngine', () => {
       await networkEngine.respondToInvite({
         invite,
         isAccepted: true,
-        invokes: { authority: { name: 'X', domainName: 'x.example' } },
+        invokes: { authority: { name: 'X', domainName: 'x.example' }, admin: { effectiveAt: '2026-01-01T00:00:00', thresholdPolicies: '[{"policy":"rad","threshold":1}]' }, officers: [{ adminEffectiveAt: '2026-01-01T00:00:00', userId: 'user-1', title: 'Officer', scopes: '["rad"]' }] },
         inviteSignature: invite.inviteSignature,
         userId: undefined,
         userInit: undefined
@@ -2036,7 +2036,7 @@ describe('AuthorityEngine', () => {
         await networkEngine.respondToInvite({
           invite,
           isAccepted: true,
-          invokes: { authority: { name: 'Y', domainName: 'y.example' } },
+          invokes: { authority: { name: 'Y', domainName: 'y.example' }, admin: { effectiveAt: '2026-01-01T00:00:00', thresholdPolicies: '[{"policy":"rad","threshold":1}]' }, officers: [{ adminEffectiveAt: '2026-01-01T00:00:00', userId: 'user-1', title: 'Officer', scopes: '["rad"]' }] },
           inviteSignature: invite.inviteSignature,
           userId: undefined,
           userInit: undefined
@@ -2058,7 +2058,7 @@ describe('AuthorityEngine', () => {
       await networkEngine.respondToInvite({
         invite,
         isAccepted: true,
-        invokes: { authority: { name: 'AC', domainName: 'ac.example' } },
+        invokes: { authority: { name: 'AC', domainName: 'ac.example' }, admin: { effectiveAt: '2026-01-01T00:00:00', thresholdPolicies: '[{"policy":"rad","threshold":1}]' }, officers: [{ adminEffectiveAt: '2026-01-01T00:00:00', userId: 'user-1', title: 'Officer', scopes: '["rad"]' }] },
         inviteSignature: invite.inviteSignature,
         userId: undefined,
         userInit: undefined

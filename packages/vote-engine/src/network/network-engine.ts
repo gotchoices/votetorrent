@@ -28,6 +28,7 @@ import type {
   IElectionEngine,
   AdminInit,
   AuthorityInit,
+  AuthorityInviteInvokes,
   InviteAction,
   ElectionType,
   ElectionCoreInit,
@@ -76,37 +77,65 @@ export class NetworkEngine implements INetworkEngine {
       : null
     const thresholdPoliciesJson = JSON.stringify(admin.thresholdPolicies)
 
-    const firstOfficer = admin.officers?.[0]
-    if (!firstOfficer?.init) {
+    if (!admin.officers || admin.officers.length === 0 || !admin.officers[0]?.init) {
       throw new Error('Failed to create authority: Officer init is required')
     }
-    const officerInit = firstOfficer.init
+
+    const adminEffectiveAtCanonical = toCanonicalDatetime(admin.effectiveAt)
+    const callerUserId = this.ctx.user?.id ?? null
+
+    // D-09 / Decision 2 (Phase 12.4): sort officers by UserId ASC so the first
+    // officer inserted is the one whose Digest was bound into InviteResult by
+    // respondToInvite. All officers insert (D-07c relaxes Officer.InsertValid
+    // Branch 2 to existence-only) but only officer[0] is hash-bound to the
+    // invite. Use the caller's user id as a per-officer fallback when init
+    // omits a userId (mirrors the pre-Phase-12.4 single-officer behavior).
+    const officerRows = admin.officers
+      .filter((o): o is { init: NonNullable<typeof o.init> } => o?.init != null)
+      .map(o => ({
+        userId: callerUserId,
+        title: o.init.title,
+        scopes: JSON.stringify(o.init.scopes),
+      }))
+      .sort((a, b) => {
+        const ua = a.userId ?? ''
+        const ub = b.userId ?? ''
+        return ua.localeCompare(ub)
+      })
 
     // Phase 12.2: invite context params (inviteSlotCid, inviteSignature)
     // are passed through for second-authority creation per D-06/TEST-03.
     // For the first authority these default to null (backward-compat).
-    const params = {
+    const authorityParams = {
       id,
       name: authority.name,
-      domainName: authority.domainName,
+      // Coerce undefined → null so quereus's strict TEXT-or-NULL binding
+      // accepts the missing-domainName case (Rule 2 — safety; the test
+      // 'should set Authority.DomainName to the provided value or null'
+      // constructs an AuthorityInit without domainName via `as never`).
+      domainName: authority.domainName ?? null,
       imageRef: imageRefJson,
-      authorityId: id,
-      adminEffectiveAt: toCanonicalDatetime(admin.effectiveAt),
-      thresholdPolicies: thresholdPoliciesJson,
-      userId: this.ctx.user?.id ?? null,
-      title: officerInit.title,
-      scopes: JSON.stringify(officerInit.scopes),
       inviteSlotCid: options?.inviteSlotCid ?? null,
       inviteSignature: options?.inviteSignature ?? null,
       tid: 1
     }
 
     try {
-      // Phase 12.2 split-batch fix: split Authority + Admin from Officer
-      // so Admin is committed before Officer (Officer.AdminValid CHECK
-      // requires Admin to exist). Defensive against future quereus
-      // versions that evaluate CHECKs eagerly per-INSERT.
+      // D-07a (Phase 12.4): insert order is Authority → Officer (sorted by
+      // UserId ASC) → Admin. Three separate db.exec calls because the
+      // D-07g probe (12.4-00-SUMMARY) shows quereus 3.3.0 fires CHECKs
+      // per-statement inside a single batch — collapsing into one db.exec
+      // in this order would trip Officer.AdminValid before Admin exists
+      // (the conditional short-circuit in D-07d handles the invite-bound
+      // path, but the non-invite first-authority path still requires
+      // Admin-first ordering, which createAuthority's first-authority
+      // shoe-in case relies on through the very-first-authority shoe-in
+      // branch where InviteSlotCid is null). Three-batch shape works for
+      // both paths.
 
+      // TX1 — Authority insert (Authority.InsertValid fires; Branch 2
+      // existence-only under D-07b for invite-bound; Branch 1 shoe-in
+      // for very-first-authority).
       await this.ctx.db.exec(
 				`insert into Authority (
 					Id,
@@ -116,8 +145,45 @@ export class NetworkEngine implements INetworkEngine {
 				)
 				with context SigningNonce = null, InviteSlotCid = :inviteSlotCid, InviteSignature = :inviteSignature, Tid = :tid
 				values (:id, :name, :domainName, :imageRef);
+				`,
+				authorityParams
+      )
 
-				insert into Admin (
+      // TX2 — Officer inserts (one per officer, sorted by UserId ASC).
+      // Officer.AdminValid is conditionally short-circuited for the
+      // invite-bound path (D-07d). Officer.InsertValid Branch 2 is
+      // existence-only under D-07c.
+      for (const officer of officerRows) {
+        await this.ctx.db.exec(
+					`insert into Officer (
+						AuthorityId,
+						AdminEffectiveAt,
+						UserId,
+						Title,
+						Scopes
+					)
+					with context SigningNonce = null, InviteSlotCid = :inviteSlotCid, InviteSignature = :inviteSignature, Tid = :tid
+					values (:authorityId, :adminEffectiveAt, :userId, :title, :scopes);
+					`,
+          {
+            authorityId: id,
+            adminEffectiveAt: adminEffectiveAtCanonical,
+            userId: officer.userId,
+            title: officer.title,
+            scopes: officer.scopes,
+            inviteSlotCid: options?.inviteSlotCid ?? null,
+            inviteSignature: options?.inviteSignature ?? null,
+            tid: 1,
+          }
+        )
+      }
+
+      // TX3 — Admin insert last. Admin.MutationValid fires here with
+      // full 7-arg binding (both sub-Admin and sub-Officer subqueries
+      // populated under D-09 ORDER BY UserId LIMIT 1). This is the
+      // authoritative cryptographic gate (D-07e).
+      await this.ctx.db.exec(
+				`insert into Admin (
 					AuthorityId,
 					EffectiveAt,
 					ThresholdPolicies
@@ -125,21 +191,14 @@ export class NetworkEngine implements INetworkEngine {
 				with context SigningNonce = null, InviteSlotCid = :inviteSlotCid, InviteSignature = :inviteSignature, Tid = :tid
 				values (:authorityId, :adminEffectiveAt, :thresholdPolicies);
 				`,
-				params
-      )
-
-      await this.ctx.db.exec(
-				`insert into Officer (
-					AuthorityId,
-					AdminEffectiveAt,
-					UserId,
-					Title,
-					Scopes
-				)
-				with context SigningNonce = null, InviteSlotCid = :inviteSlotCid, InviteSignature = :inviteSignature, Tid = :tid
-				values (:authorityId, :adminEffectiveAt, :userId, :title, :scopes);
-				`,
-				params
+        {
+          authorityId: id,
+          adminEffectiveAt: adminEffectiveAtCanonical,
+          thresholdPolicies: thresholdPoliciesJson,
+          inviteSlotCid: options?.inviteSlotCid ?? null,
+          inviteSignature: options?.inviteSignature ?? null,
+          tid: 1,
+        }
       )
     } catch (err) {
       if (err instanceof QuereusError) {
@@ -697,6 +756,29 @@ export class NetworkEngine implements INetworkEngine {
       : null
     try {
       if (isAuthorityInvite && invite.isAccepted) {
+        // D-06 / D-09 (Phase 12.4): the engine commits a 7-arg Digest to
+        // InviteResult.Digest so that Admin.MutationValid (which fires last
+        // under D-07a insert order Authority → Officer → Admin) can recompute
+        // the same 7-arg Digest and validate the entire invite bundle.
+        //
+        // Schema's nested Officer subquery is `(select Digest(AdminEffectiveAt,
+        // UserId, Title, Scopes) from (select * from Officer ... order by
+        // UserId asc limit 1))` — a single-row scalar. We mirror that by
+        // computing `Digest(...)` as an inline scalar over the first
+        // (lex-smallest UserId) officer's columns.
+        const invokesAdmin = (invite.invokes as unknown as AuthorityInviteInvokes).admin
+        const invokesOfficers = (invite.invokes as unknown as AuthorityInviteInvokes).officers
+        // Pitfall 5 / T-12.4-01-03 mitigation: silently committing a wrong-shape
+        // Digest here would land an invite that no downstream createAuthority
+        // insert can satisfy.
+        if (invokesAdmin == null || !Array.isArray(invokesOfficers) || invokesOfficers.length === 0) {
+          throw new Error('respondToInvite: authority invite requires invokes.admin and non-empty invokes.officers[]')
+        }
+        // D-09: sort by userId ASC and bind only the first officer's columns
+        // into InviteResult.Digest. Officers 2..N are not hash-bound — this is
+        // the documented v1.2 follow-up limitation.
+        const sortedOfficers = [...invokesOfficers].sort((a, b) => a.userId.localeCompare(b.userId))
+        const firstOfficer = sortedOfficers[0]!
         await this.ctx.db.exec(
 					`insert into InviteResult (
 						SlotCid,
@@ -709,7 +791,10 @@ export class NetworkEngine implements INetworkEngine {
 					values (
 						:slotCid,
 						:isAccepted,
-						Digest(:tid, :authorityId, :authorityName, :authorityDomainName, :authorityImageRef),
+						Digest(:tid, :authorityId, :authorityName, :authorityDomainName, :authorityImageRef,
+							Digest(:adminEffectiveAt, :adminThresholdPolicies),
+							Digest(:officerAdminEffectiveAt, :officerUserId, :officerTitle, :officerScopes)
+						),
 						:inviteSignature,
 						:invokedId
 					)`,
@@ -721,6 +806,12 @@ export class NetworkEngine implements INetworkEngine {
             authorityName: invokesAuthority?.name ?? null,
             authorityDomainName: invokesAuthority?.domainName ?? null,
             authorityImageRef: authorityImageRefJson,
+            adminEffectiveAt: invokesAdmin.effectiveAt,
+            adminThresholdPolicies: invokesAdmin.thresholdPolicies,
+            officerAdminEffectiveAt: firstOfficer.adminEffectiveAt,
+            officerUserId: firstOfficer.userId,
+            officerTitle: firstOfficer.title,
+            officerScopes: firstOfficer.scopes,
             inviteSignature: invite.inviteSignature,
             invokedId
           }

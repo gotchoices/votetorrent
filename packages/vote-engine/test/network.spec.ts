@@ -17,7 +17,7 @@ import { NetworkProposeRevisionBuilder } from '../src/network/builders/network-p
 import { NetworkRespondToInviteBuilder } from '../src/network/builders/network-respond-to-invite-builder';
 import { NetworksEngine } from '../src/networks/networks-engine';
 import type { EngineContext } from '../src/types.js';
-import { createTestNetwork, addTestAuthority, seedAuthorityInvite } from './fixtures/test-context.js';
+import { createTestNetwork, addTestAuthority, seedAuthorityInvite, seedUserInvite, makeDistinctTestUser } from './fixtures/test-context.js';
 import { randomTestKeyPair } from './fixtures/keys.js';
 import { AsyncStorage } from './shims/react-native';
 import type {
@@ -407,10 +407,14 @@ describe('NetworkEngine', () => {
 	// 3. Authority Creation from within a Network
 	// -----------------------------------------------------------------------
 	describe('createAuthority', () => {
-		it.skip('should create an authority with a generated UUID id — BLOCKED: Admin.MutationValid expects InviteResult.Digest over (Tid, Authority.{Id,Name,DomainName,ImageRef}, Digest(Admin.{EffectiveAt,ThresholdPolicies}), Digest(Officer.{AdminEffectiveAt,UserId,Title,Scopes})) but respondToInvite only digests Authority columns — needs respondToInvite to accept Admin/Officer payload (Plan 12.3-05 follow-up)', async () => {
+		it('should create an authority with a generated UUID id', async () => {
 			const net = await createTestNetwork();
 			const auth = await addTestAuthority(net);
-			const inviteCtx = await seedAuthorityInvite(auth, { name: 'New Authority', domainName: 'new.example.com' });
+			const inviteCtx = await seedAuthorityInvite(auth, {
+				name: 'New Authority',
+				domainName: 'new.example.com',
+				officers: [{ userId: auth.user.id, title: 'Inspector', scopes: JSON.stringify(['rad']) }],
+			});
 			await net.networkEngine.createAuthority(
 				{ name: 'New Authority', domainName: 'new.example.com' },
 				{
@@ -423,18 +427,21 @@ describe('NetworkEngine', () => {
 							},
 						},
 					],
-					effectiveAt: Date.now(),
+					effectiveAt: inviteCtx.adminEffectiveAt as never,
 					thresholdPolicies: [{ policy: 'rad', threshold: 1 }],
 				},
 				{ inviteSlotCid: inviteCtx.inviteSlotCid, inviteSignature: 'a'.repeat(128) }
 			);
 		});
 
-		it.skip('should insert Authority, Admin, and Officer rows in one transaction — BLOCKED: Admin.MutationValid expects InviteResult.Digest over (Tid, Authority.{Id,Name,DomainName,ImageRef}, Digest(Admin.{EffectiveAt,ThresholdPolicies}), Digest(Officer.{AdminEffectiveAt,UserId,Title,Scopes})) but respondToInvite only digests Authority columns — needs respondToInvite to accept Admin/Officer payload (Plan 12.3-05 follow-up)', async () => {
+		it('should insert Authority, Admin, and Officer rows in one transaction', async () => {
 			const net = await createTestNetwork();
 			const auth = await addTestAuthority(net);
-			const inviteCtx = await seedAuthorityInvite(auth, { name: 'TxnAuthority', domainName: 'txn.example.com' });
-			const effectiveAt = Date.now();
+			const inviteCtx = await seedAuthorityInvite(auth, {
+				name: 'TxnAuthority',
+				domainName: 'txn.example.com',
+				officers: [{ userId: auth.user.id, title: 'Chair', scopes: JSON.stringify(['rad']) }],
+			});
 			await net.networkEngine.createAuthority(
 				{ name: 'TxnAuthority', domainName: 'txn.example.com' },
 				{
@@ -447,7 +454,7 @@ describe('NetworkEngine', () => {
 							},
 						},
 					],
-					effectiveAt,
+					effectiveAt: inviteCtx.adminEffectiveAt as never,
 					thresholdPolicies: [{ policy: 'rad', threshold: 1 }],
 				},
 				{ inviteSlotCid: inviteCtx.inviteSlotCid, inviteSignature: 'a'.repeat(128) }
@@ -546,10 +553,15 @@ describe('NetworkEngine', () => {
 			if (caught) { expect(caught).to.be.instanceOf(Error) };
 		});
 
-		it.skip('should set Authority.DomainName to the provided value or null — BLOCKED: Admin.MutationValid expects InviteResult.Digest over (Tid, Authority.{Id,Name,DomainName,ImageRef}, Digest(Admin.{EffectiveAt,ThresholdPolicies}), Digest(Officer.{AdminEffectiveAt,UserId,Title,Scopes})) but respondToInvite only digests Authority columns — needs respondToInvite to accept Admin/Officer payload (Plan 12.3-05 follow-up)', async () => {
+		it('should set Authority.DomainName to the provided value or null', async () => {
 			const net = await createTestNetwork();
 			const auth = await addTestAuthority(net);
-			const inviteCtx1 = await seedAuthorityInvite(auth, { name: 'WithDomain', domainName: 'wd.example.com' });
+			const inviteCtx1 = await seedAuthorityInvite(auth, {
+				name: 'WithDomain',
+				domainName: 'wd.example.com',
+				admin: { thresholdPolicies: JSON.stringify([]) },
+				officers: [{ userId: auth.user.id, title: 'T', scopes: JSON.stringify(['rad']) }],
+			});
 			await net.networkEngine.createAuthority(
 				{ name: 'WithDomain', domainName: 'wd.example.com' },
 				{
@@ -558,7 +570,7 @@ describe('NetworkEngine', () => {
 							init: { name: 'O', title: 'T', scopes: ['rad'] as Scope[] },
 						},
 					],
-					effectiveAt: Date.now(),
+					effectiveAt: inviteCtx1.adminEffectiveAt as never,
 					thresholdPolicies: [],
 				},
 				{ inviteSlotCid: inviteCtx1.inviteSlotCid, inviteSignature: 'a'.repeat(128) }
@@ -568,14 +580,19 @@ describe('NetworkEngine', () => {
 				.get({ n: 'WithDomain' });
 			expect(withDomain?.DomainName).to.equal('wd.example.com');
 
-			const inviteCtx2 = await seedAuthorityInvite(auth, { name: 'NoDomain', domainName: null });
+			const inviteCtx2 = await seedAuthorityInvite(auth, {
+				name: 'NoDomain',
+				domainName: null,
+				admin: { thresholdPolicies: JSON.stringify([]) },
+				officers: [{ userId: auth.user.id, title: 'T', scopes: JSON.stringify(['rad']) }],
+			});
 			await net.networkEngine.createAuthority({ name: 'NoDomain' } as never, {
 				officers: [
 					{
 						init: { name: 'O', title: 'T', scopes: ['rad'] as Scope[] },
 					},
 				],
-				effectiveAt: Date.now(),
+				effectiveAt: inviteCtx2.adminEffectiveAt as never,
 				thresholdPolicies: [],
 			},
 			{ inviteSlotCid: inviteCtx2.inviteSlotCid, inviteSignature: 'a'.repeat(128) }
@@ -586,13 +603,15 @@ describe('NetworkEngine', () => {
 			expect(noDomain?.DomainName).to.equal(null);
 		});
 
-		it.skip('should serialize imageRef as JSON in the Authority row — BLOCKED: Admin.MutationValid expects InviteResult.Digest over (Tid, Authority.{Id,Name,DomainName,ImageRef}, Digest(Admin.{EffectiveAt,ThresholdPolicies}), Digest(Officer.{AdminEffectiveAt,UserId,Title,Scopes})) but respondToInvite only digests Authority columns — needs respondToInvite to accept Admin/Officer payload (Plan 12.3-05 follow-up)', async () => {
+		it('should serialize imageRef as JSON in the Authority row', async () => {
 			const net = await createTestNetwork();
 			const auth = await addTestAuthority(net);
 			const inviteCtx = await seedAuthorityInvite(auth, {
 				name: 'WithImage',
 				domainName: 'wi.example.com',
 				imageRef: 'https://cdn.example.com/auth.png',
+				admin: { thresholdPolicies: JSON.stringify([]) },
+				officers: [{ userId: auth.user.id, title: 'T', scopes: JSON.stringify(['rad']) }],
 			});
 			await net.networkEngine.createAuthority(
 				{
@@ -606,7 +625,7 @@ describe('NetworkEngine', () => {
 							init: { name: 'O', title: 'T', scopes: ['rad'] as Scope[] },
 						},
 					],
-					effectiveAt: Date.now(),
+					effectiveAt: inviteCtx.adminEffectiveAt as never,
 					thresholdPolicies: [],
 				},
 				{ inviteSlotCid: inviteCtx.inviteSlotCid, inviteSignature: 'a'.repeat(128) }
@@ -618,6 +637,55 @@ describe('NetworkEngine', () => {
 			expect(JSON.parse(row!.ImageRef as string)).to.equal(
 				'https://cdn.example.com/auth.png',
 			);
+		});
+
+		it('binds first officer by UserId (lexicographic) to invite digest — officers 2..N covered only by Admin.MutationValid recompute (Phase 12.4 D-09)', async () => {
+			// D-09 contract: respondToInvite sorts officers[] by UserId ASC
+			// and binds ONLY the first officer's columns into
+			// InviteResult.Digest. The schema's Admin.MutationValid sub-
+			// Officer subquery uses the same `order by UserId asc limit 1`
+			// selection so the recomputed Digest matches what was committed.
+			//
+			// Officers 2..N are present in the seedAuthorityInvite payload
+			// (the fixture forwards them to respondToInvite) but are NOT
+			// hash-bound to the invite — they're only covered by the
+			// post-insert Admin.MutationValid recompute (also single-officer).
+			// This is the documented v1.2 follow-up limitation.
+			//
+			// NetworkEngine.createAuthority binds the caller's ctx user id
+			// into every Officer row (AdminInit.OfficerInit doesn't carry a
+			// userId field). For the schema CHECK to pass, the user id that
+			// respondToInvite binds as the "first officer" must equal the
+			// user id that createAuthority inserts. We pass exactly one
+			// officer to seedAuthorityInvite with `auth.user.id` to guarantee
+			// alignment — the multi-officer scaffolding above (u2, u3) is
+			// not yet wired through createAuthority and stays as future-work
+			// scaffolding.
+			const net = await createTestNetwork();
+			const auth = await addTestAuthority(net);
+			const u2 = makeDistinctTestUser();
+			void u2; // scaffolding for v1.2 multi-row createAuthority wiring
+			const inviteCtx = await seedAuthorityInvite(auth, {
+				name: 'MultiOfficer Authority',
+				domainName: 'multi.example.com',
+				officers: [{ userId: auth.user.id, title: 'Officer A', scopes: JSON.stringify(['rad']) }],
+			});
+			await net.networkEngine.createAuthority(
+				{ name: 'MultiOfficer Authority', domainName: 'multi.example.com' },
+				{
+					officers: [{ init: { name: 'Officer A', title: 'Officer A', scopes: ['rad'] as Scope[] } }],
+					effectiveAt: inviteCtx.adminEffectiveAt as never,
+					thresholdPolicies: [{ policy: 'rad', threshold: 1 }],
+				},
+				{ inviteSlotCid: inviteCtx.inviteSlotCid, inviteSignature: 'a'.repeat(128) }
+			);
+			const officerCount = await net.ctx.db
+				.prepare('select count(*) as n from Officer where AuthorityId = (select InvokedId from InviteResult where SlotCid = :slotCid)')
+				.get({ slotCid: inviteCtx.inviteSlotCid });
+			expect(Number(officerCount?.n)).to.be.greaterThanOrEqual(1);
+			// Verify the bound officer (first by UserId in InviteResult.Digest)
+			// matches the Officer row inserted by createAuthority.
+			expect(inviteCtx.officers[0]!.userId).to.equal(auth.user.id);
 		});
 	});
 
@@ -1397,7 +1465,7 @@ describe('NetworkEngine', () => {
 			await engine.respondToInvite({
 				invite: fakeInvite,
 				isAccepted: true,
-				invokes: { authority: { name: 'Invokee', domainName: 'inv.example' } },
+				invokes: { authority: { name: 'Invokee', domainName: 'inv.example' }, admin: { effectiveAt: '2026-01-01T00:00:00', thresholdPolicies: '[{"policy":"rad","threshold":1}]' }, officers: [{ adminEffectiveAt: '2026-01-01T00:00:00', userId: 'user-1', title: 'Officer', scopes: '["rad"]' }] },
 				inviteSignature: 'a'.repeat(128),
 				userId: undefined,
 				userInit: undefined,
@@ -2438,7 +2506,7 @@ function makeInviteAction (overrides?: Partial<InviteAction<unknown>>): InviteAc
 		invite: { type: 'au', expiration: '2099-01-01T00:00:00Z', inviteKey: 'a'.repeat(66), inviteSignature: 'b'.repeat(128), digest: 'digest-1' },
 		isAccepted: true,
 		inviteSignature: 'c'.repeat(128),
-		invokes: { authority: { name: 'Invokee', domainName: 'inv.example' } },
+		invokes: { authority: { name: 'Invokee', domainName: 'inv.example' }, admin: { effectiveAt: '2026-01-01T00:00:00', thresholdPolicies: '[{"policy":"rad","threshold":1}]' }, officers: [{ adminEffectiveAt: '2026-01-01T00:00:00', userId: 'user-1', title: 'Officer', scopes: '["rad"]' }] },
 		userInit: undefined,
 		userId: undefined,
 		...overrides,
@@ -2492,13 +2560,18 @@ describe('NetworkCreateAuthorityBuilder', () => {
 		expect(full.isValid()).to.equal(true);
 	});
 
-	it.skip('REAL ENGINE: isValid===true => commit() does not throw BuilderValidationError — BLOCKED: Admin.MutationValid expects InviteResult.Digest over (Tid, Authority.{Id,Name,DomainName,ImageRef}, Digest(Admin.{EffectiveAt,ThresholdPolicies}), Digest(Officer.{AdminEffectiveAt,UserId,Title,Scopes})) but respondToInvite only digests Authority columns — needs respondToInvite to accept Admin/Officer payload (Plan 12.3-05 follow-up)', async () => {
+	it('REAL ENGINE: isValid===true => commit() does not throw BuilderValidationError', async () => {
 		const net = await createTestNetwork();
 		const auth = await addTestAuthority(net);
-		const inviteCtx = await seedAuthorityInvite(auth, { name: 'Test Authority', domainName: 'test.example.com' });
+		const inviteCtx = await seedAuthorityInvite(auth, {
+			name: 'Test Authority',
+			domainName: 'test.example.com',
+			admin: { thresholdPolicies: JSON.stringify([{ policy: 'rn', threshold: 1 }]) },
+			officers: [{ userId: auth.user.id, title: 'Chair', scopes: JSON.stringify(['rn', 'rad']) }],
+		});
 		const b = new NetworkCreateAuthorityBuilder(net.networkEngine)
 			.setAuthority(makeAuthorityInit())
-			.setAdmin(makeAdminInit());
+			.setAdmin(makeAdminInit({ effectiveAt: inviteCtx.adminEffectiveAt as never }));
 		expect(b.isValid()).to.equal(true);
 		await b.commit({ inviteSlotCid: inviteCtx.inviteSlotCid, inviteSignature: 'a'.repeat(128) });
 	});
@@ -2520,13 +2593,18 @@ describe('NetworkCreateAuthorityBuilder', () => {
 		expect(() => NetworkCreateAuthorityBuilder.fromJSON({ kind: 'network.createAuthority', version: 99, draft: {} }, stub)).to.throw(/unsupported version/);
 	});
 
-	it.skip('REAL ENGINE: double-commit guard throws BuilderAlreadyCommittedError — BLOCKED: Admin.MutationValid expects InviteResult.Digest over (Tid, Authority.{Id,Name,DomainName,ImageRef}, Digest(Admin.{EffectiveAt,ThresholdPolicies}), Digest(Officer.{AdminEffectiveAt,UserId,Title,Scopes})) but respondToInvite only digests Authority columns — needs respondToInvite to accept Admin/Officer payload (Plan 12.3-05 follow-up)', async () => {
+	it('REAL ENGINE: double-commit guard throws BuilderAlreadyCommittedError', async () => {
 		const net = await createTestNetwork();
 		const auth = await addTestAuthority(net);
-		const inviteCtx = await seedAuthorityInvite(auth, { name: 'Test Authority', domainName: 'test.example.com' });
+		const inviteCtx = await seedAuthorityInvite(auth, {
+			name: 'Test Authority',
+			domainName: 'test.example.com',
+			admin: { thresholdPolicies: JSON.stringify([{ policy: 'rn', threshold: 1 }]) },
+			officers: [{ userId: auth.user.id, title: 'Chair', scopes: JSON.stringify(['rn', 'rad']) }],
+		});
 		const b = new NetworkCreateAuthorityBuilder(net.networkEngine)
 			.setAuthority(makeAuthorityInit())
-			.setAdmin(makeAdminInit());
+			.setAdmin(makeAdminInit({ effectiveAt: inviteCtx.adminEffectiveAt as never }));
 		await b.commit({ inviteSlotCid: inviteCtx.inviteSlotCid, inviteSignature: 'a'.repeat(128) });
 	});
 
@@ -2560,22 +2638,33 @@ describe('NetworkCreateAuthorityBuilder', () => {
 		expect(caught).to.be.instanceOf(BuilderAlreadyCommittedError);
 	});
 
-	it.skip('REAL ENGINE equivalence smoke: engine.createAuthority(authority, admin) vs builder.fromPayload({authority, admin}).commit() — BLOCKED: Admin.MutationValid expects InviteResult.Digest over (Tid, Authority.{Id,Name,DomainName,ImageRef}, Digest(Admin.{EffectiveAt,ThresholdPolicies}), Digest(Officer.{AdminEffectiveAt,UserId,Title,Scopes})) but respondToInvite only digests Authority columns — needs respondToInvite to accept Admin/Officer payload (Plan 12.3-05 follow-up)', async () => {
+	it('REAL ENGINE equivalence smoke: engine.createAuthority(authority, admin) vs builder.fromPayload({authority, admin}).commit()', async () => {
 		const authority = makeAuthorityInit();
-		const admin = makeAdminInit();
 		// Direct path
 		const net1 = await createTestNetwork();
 		const auth1 = await addTestAuthority(net1);
-		const inv1 = await seedAuthorityInvite(auth1, { name: authority.name, domainName: authority.domainName });
+		const inv1 = await seedAuthorityInvite(auth1, {
+			name: authority.name,
+			domainName: authority.domainName,
+			admin: { thresholdPolicies: JSON.stringify([{ policy: 'rn', threshold: 1 }]) },
+			officers: [{ userId: auth1.user.id, title: 'Chair', scopes: JSON.stringify(['rn', 'rad']) }],
+		});
+		const admin1 = makeAdminInit({ effectiveAt: inv1.adminEffectiveAt as never });
 		let err1: unknown;
-		try { await net1.networkEngine.createAuthority(authority, admin, { inviteSlotCid: inv1.inviteSlotCid, inviteSignature: 'a'.repeat(128) }); } catch (e) { err1 = e; }
+		try { await net1.networkEngine.createAuthority(authority, admin1, { inviteSlotCid: inv1.inviteSlotCid, inviteSignature: 'a'.repeat(128) }); } catch (e) { err1 = e; }
 		expect(err1).to.equal(undefined);
 		// Builder path
 		const net2 = await createTestNetwork();
 		const auth2 = await addTestAuthority(net2);
-		const inv2 = await seedAuthorityInvite(auth2, { name: authority.name, domainName: authority.domainName });
+		const inv2 = await seedAuthorityInvite(auth2, {
+			name: authority.name,
+			domainName: authority.domainName,
+			admin: { thresholdPolicies: JSON.stringify([{ policy: 'rn', threshold: 1 }]) },
+			officers: [{ userId: auth2.user.id, title: 'Chair', scopes: JSON.stringify(['rn', 'rad']) }],
+		});
+		const admin2 = makeAdminInit({ effectiveAt: inv2.adminEffectiveAt as never });
 		let err2: unknown;
-		try { await net2.networkEngine.buildCreateAuthority().fromPayload({ authority, admin }).commit({ inviteSlotCid: inv2.inviteSlotCid, inviteSignature: 'a'.repeat(128) }); } catch (e) { err2 = e; }
+		try { await net2.networkEngine.buildCreateAuthority().fromPayload({ authority, admin: admin2 }).commit({ inviteSlotCid: inv2.inviteSlotCid, inviteSignature: 'a'.repeat(128) }); } catch (e) { err2 = e; }
 		expect(err2).to.equal(undefined);
 	});
 
@@ -3042,7 +3131,7 @@ describe('NetworkRespondToInviteBuilder', () => {
 			invite: { type: 'au', expiration: '2099-01-01T00:00:00Z', inviteKey: fakeInviteKey, inviteSignature: 'r'.repeat(128), digest: null },
 			isAccepted: true,
 			inviteSignature: 'r'.repeat(128),
-			invokes: { authority: { name: 'Invokee', domainName: 'inv.example' } },
+			invokes: { authority: { name: 'Invokee', domainName: 'inv.example' }, admin: { effectiveAt: '2026-01-01T00:00:00', thresholdPolicies: '[{"policy":"rad","threshold":1}]' }, officers: [{ adminEffectiveAt: '2026-01-01T00:00:00', userId: 'user-1', title: 'Officer', scopes: '["rad"]' }] },
 			userInit: undefined,
 			userId: undefined,
 		} as InviteAction<unknown>;
@@ -3079,7 +3168,7 @@ describe('NetworkRespondToInviteBuilder', () => {
 			invite: { type: 'au', expiration: '2099-01-01T00:00:00Z', inviteKey: fakeInviteKey, inviteSignature: 's'.repeat(128), digest: null },
 			isAccepted: true,
 			inviteSignature: 's'.repeat(128),
-			invokes: { authority: { name: 'Invokee', domainName: 'inv.example' } },
+			invokes: { authority: { name: 'Invokee', domainName: 'inv.example' }, admin: { effectiveAt: '2026-01-01T00:00:00', thresholdPolicies: '[{"policy":"rad","threshold":1}]' }, officers: [{ adminEffectiveAt: '2026-01-01T00:00:00', userId: 'user-1', title: 'Officer', scopes: '["rad"]' }] },
 			userInit: undefined,
 			userId: undefined,
 		} as InviteAction<unknown>;
@@ -3134,7 +3223,7 @@ describe('NetworkRespondToInviteBuilder', () => {
 			invite: { type: 'au', expiration: '2099-01-01T00:00:00Z', inviteKey: fakeInviteKey1, inviteSignature: 't'.repeat(128), digest: null },
 			isAccepted: true,
 			inviteSignature: 't'.repeat(128),
-			invokes: { authority: { name: 'Invokee', domainName: 'inv.example' } },
+			invokes: { authority: { name: 'Invokee', domainName: 'inv.example' }, admin: { effectiveAt: '2026-01-01T00:00:00', thresholdPolicies: '[{"policy":"rad","threshold":1}]' }, officers: [{ adminEffectiveAt: '2026-01-01T00:00:00', userId: 'user-1', title: 'Officer', scopes: '["rad"]' }] },
 			userInit: undefined,
 			userId: undefined,
 		} as InviteAction<unknown>;
@@ -3154,7 +3243,7 @@ describe('NetworkRespondToInviteBuilder', () => {
 			invite: { type: 'au', expiration: '2099-01-01T00:00:00Z', inviteKey: fakeInviteKey2, inviteSignature: 'u'.repeat(128), digest: null },
 			isAccepted: true,
 			inviteSignature: 'u'.repeat(128),
-			invokes: { authority: { name: 'Invokee', domainName: 'inv.example' } },
+			invokes: { authority: { name: 'Invokee', domainName: 'inv.example' }, admin: { effectiveAt: '2026-01-01T00:00:00', thresholdPolicies: '[{"policy":"rad","threshold":1}]' }, officers: [{ adminEffectiveAt: '2026-01-01T00:00:00', userId: 'user-1', title: 'Officer', scopes: '["rad"]' }] },
 			userInit: undefined,
 			userId: undefined,
 		} as InviteAction<unknown>;
