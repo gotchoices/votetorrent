@@ -391,6 +391,10 @@ export async function addTestElection (auth: TestAuthorityContext): Promise<Test
 export interface TestInviteContext extends TestAuthorityContext {
   inviteShare: AuthorityInviteShare
   inviteSlotCid: string
+  /** Canonical ISO 8601 datetime — single source of truth shared with downstream createAuthority (Pitfall 2 mitigation) */
+  adminEffectiveAt: string
+  /** Officers forwarded to respondToInvite — each has `adminEffectiveAt` populated with the resolved canonical string */
+  officers: Array<{ adminEffectiveAt: string; userId: string; title: string; scopes: string }>
 }
 
 /**
@@ -409,11 +413,39 @@ export interface TestInviteContext extends TestAuthorityContext {
  */
 export async function seedAuthorityInvite (
   auth: TestAuthorityContext,
-  invokes?: { name?: string; domainName?: string | null; imageRef?: unknown }
+  invokes?: {
+    name?: string
+    domainName?: string | null
+    imageRef?: unknown
+    admin?: { effectiveAt?: string; thresholdPolicies?: string }
+    officers?: Array<{ adminEffectiveAt?: string; userId: string; title: string; scopes: string }>
+  }
 ): Promise<TestInviteContext> {
   const authorityName = invokes?.name ?? 'Second Authority'
   const authorityDomainName = invokes?.domainName ?? 'second.example.com'
   const authorityImageRef = invokes?.imageRef
+
+  // Decision 4 (Phase 12.4): resolve a single canonical `adminEffectiveAt`
+  // and re-use it everywhere downstream (Pitfall 2 mitigation — eliminates
+  // timing drift between fixture and the caller's createAuthority).
+  const adminEffectiveAt = invokes?.admin?.effectiveAt ?? nowCanonicalDatetime()
+  const thresholdPolicies = invokes?.admin?.thresholdPolicies
+    ?? JSON.stringify([{ policy: 'rad', threshold: 1 }])
+
+  // Resolve officers. Default: single officer = the seeded admin user with
+  // scope 'rad'. Callers passing officers may omit `adminEffectiveAt` —
+  // the fixture fills it in from the resolved canonical adminEffectiveAt
+  // (per Task 5 multi-officer test contract).
+  const officers = (invokes?.officers ?? [{
+    userId: auth.user.id,
+    title: 'Member',
+    scopes: JSON.stringify(['rad']),
+  }]).map(o => ({
+    adminEffectiveAt: o.adminEffectiveAt ?? adminEffectiveAt,
+    userId: o.userId,
+    title: o.title,
+    scopes: o.scopes,
+  }))
 
   // Step a: generate a real secp256k1 invite key pair
   const inviteShare = auth.authorityEngine.createAuthorityInvite(authorityName)
@@ -431,7 +463,7 @@ export async function seedAuthorityInvite (
   if (!slotRow) throw new Error('seedAuthorityInvite: InviteSlot not found after saveInviteWithSigning')
   const inviteSlotCid = slotRow.Cid as string
 
-  // Step e: respondToInvite inserts InviteResult
+  // Step e: respondToInvite inserts InviteResult with the 7-arg Digest (D-06)
   const authorityInvokes: { name: string; domainName: string | null; imageRef?: unknown } = {
     name: authorityName,
     domainName: authorityDomainName,
@@ -442,13 +474,17 @@ export async function seedAuthorityInvite (
   await auth.networkEngine.respondToInvite({
     invite: inviteShare,
     isAccepted: true,
-    invokes: { authority: authorityInvokes },
+    invokes: {
+      authority: authorityInvokes,
+      admin: { effectiveAt: adminEffectiveAt, thresholdPolicies },
+      officers,
+    },
     inviteSignature: 'a'.repeat(128),
     userId: undefined,
     userInit: undefined,
   } as never)
 
-  return { ...auth, inviteShare, inviteSlotCid }
+  return { ...auth, inviteShare, inviteSlotCid, adminEffectiveAt, officers }
 }
 
 // ---------------------------------------------------------------------------
