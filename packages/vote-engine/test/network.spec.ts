@@ -751,7 +751,7 @@ describe('NetworkEngine', () => {
 			expect(row?.ElectionType).to.equal('o');
 		});
 
-		it.skip('should serialize imageRef as JSON or null — BLOCKED: second proposeRevision trips ProposedNetwork PK', async () => {
+		it('should serialize imageRef as JSON or null', async () => {
 			const { engine } = await createNetworkEngine();
 			const ctx = (engine as unknown as { ctx: EngineContext }).ctx;
 			await engine.proposeRevision({
@@ -2878,7 +2878,7 @@ describe('NetworkProposeRevisionBuilder', () => {
 		expect(full.isValid()).to.equal(true);
 	});
 
-	it.skip('REAL ENGINE: isValid===true => commit() does not throw BuilderValidationError — BLOCKED: ProposedNetwork single-row PK — second proposeRevision trips UNIQUE constraint', async () => {
+	it('REAL ENGINE: isValid===true => commit() does not throw BuilderValidationError', async () => {
 		const { networkEngine: engine } = await createTestNetwork();
 		const b = new NetworkProposeRevisionBuilder(engine)
 			.setName('Revised')
@@ -2905,7 +2905,7 @@ describe('NetworkProposeRevisionBuilder', () => {
 		expect(() => NetworkProposeRevisionBuilder.fromJSON({ kind: 'network.proposeRevision', version: 99, draft: {} }, stub)).to.throw(/unsupported version/);
 	});
 
-	it.skip('REAL ENGINE: double-commit guard throws BuilderAlreadyCommittedError — BLOCKED: ProposedNetwork single-row PK — second proposeRevision trips UNIQUE constraint', async () => {
+	it('REAL ENGINE: double-commit guard throws BuilderAlreadyCommittedError', async () => {
 		const { networkEngine: engine } = await createTestNetwork();
 		const b = new NetworkProposeRevisionBuilder(engine)
 			.setName('Revised')
@@ -2951,7 +2951,7 @@ describe('NetworkProposeRevisionBuilder', () => {
 		expect(caught).to.be.instanceOf(BuilderAlreadyCommittedError);
 	});
 
-	it.skip('REAL ENGINE equivalence smoke: engine.proposeRevision(revision) vs builder.fromPayload(revision).commit() — BLOCKED: ProposedNetwork single-row PK — second proposeRevision trips UNIQUE constraint', async () => {
+	it('REAL ENGINE equivalence smoke: engine.proposeRevision(revision) vs builder.fromPayload(revision).commit()', async () => {
 		const revision = makeNetworkRevisionFixture();
 		const { networkEngine: eng1 } = await createTestNetwork();
 		let err1: unknown;
