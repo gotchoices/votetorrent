@@ -24,6 +24,7 @@ import type {
   INetworkEngine,
   NetworkInit,
   NetworkReference,
+  OfficerInit,
   Scope,
   Signature,
   User,
@@ -427,4 +428,70 @@ export async function seedAuthorityInvite (auth: TestAuthorityContext): Promise<
   } as never)
 
   return { ...auth, inviteShare, inviteSlotCid }
+}
+
+// ---------------------------------------------------------------------------
+// Layer-2.5: seedUserInvite primitive (Phase 12.3-03)
+// ---------------------------------------------------------------------------
+
+export interface SeedUserInviteResult {
+  /** Cid of the InviteSlot row — pass to User insert as context.InviteSlotCid */
+  inviteSlotCid: string
+  /** InviteSignature stored on the InviteSlot row — pass to User insert as context.InviteSignature */
+  inviteSignature: string
+}
+
+/**
+ * Seed an officer-scope InviteSlot via real engine methods so that
+ * `User.InsertValid`'s invite-bound branch is satisfied for an nth user.
+ *
+ * Schema reference (votetorrent.qsql User.InsertValid):
+ *   exists (select 1 from InviteSlot I
+ *           where I.Cid = context.InviteSlotCid
+ *             and I.InviteSignature = context.InviteSignature)
+ *
+ * There is no `'u'` InviteType — the User row is always created off the
+ * back of an officer / keyholder / registrant invite. Officer ('of') is
+ * the simplest available chain because `createOfficerInvite` +
+ * `saveInviteWithSigning(_, 'rad', _)` are already exposed on
+ * IAuthorityEngine. This mirrors `seedAuthorityInvite` but stops at the
+ * InviteSlot step (no respondToInvite required — User.InsertValid only
+ * checks for an InviteSlot row, not an InviteResult row).
+ *
+ * Phase 12.3-07 (Group E) will compose this helper with the actual User
+ * insert. If that plan surfaces a missing engine method for the user-side
+ * of the invite flow, it should be addressed there — this helper provides
+ * the seed half only.
+ */
+export async function seedUserInvite (
+  auth: TestAuthorityContext,
+  newUser: User,
+  overrides?: { officerInit?: Partial<OfficerInit> }
+): Promise<SeedUserInviteResult> {
+  const officerInit: OfficerInit = {
+    name: overrides?.officerInit?.name ?? newUser.name,
+    title: overrides?.officerInit?.title ?? 'Member',
+    scopes: (overrides?.officerInit?.scopes ?? (['rad'] as Scope[])) as Scope[],
+  }
+
+  // Step a: build an OfficerInviteShare with a real one-time secp256k1 key pair
+  const officerInvite = auth.authorityEngine.createOfficerInvite(officerInit)
+
+  // Step b: signature from the seeded admin user (validated via context.IsSignatureValid)
+  const sig = makeTestSignature(auth.user)
+
+  // Step c: saveInviteWithSigning inserts InviteSlot + AdminSigning + AdminSignature
+  //         (scope 'rad' matches the seeded admin's threshold policy in makeTestNetworkInit)
+  await auth.authorityEngine.saveInviteWithSigning(officerInvite, 'rad' as Scope, sig)
+
+  // Step d: query the InviteSlot CID back from the DB so the caller can
+  //         bind it (alongside the original InviteSignature) into the
+  //         User insert's `with context InviteSlotCid = ..., InviteSignature = ...` clause.
+  const slotRow = await auth.ctx.db
+    .prepare('select Cid from InviteSlot where InviteKey = :inviteKey and Type = :type')
+    .get({ inviteKey: officerInvite.inviteKey, type: 'of' })
+  if (!slotRow) throw new Error('seedUserInvite: InviteSlot not found after saveInviteWithSigning')
+  const inviteSlotCid = slotRow.Cid as string
+
+  return { inviteSlotCid, inviteSignature: officerInvite.inviteSignature }
 }
