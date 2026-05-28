@@ -150,7 +150,7 @@ export default function ElectionDetailsScreen() {
 					ballots.map((ballot) => (
 						<InfoCard
 							key={ballot.id}
-							title={t("ballotTemplate")}
+							title={ballot.authorityId || t("ballotTemplate")}
 							icon="chevron-right"
 							onPress={() =>
 								navigation.navigate("EditBallot", {
