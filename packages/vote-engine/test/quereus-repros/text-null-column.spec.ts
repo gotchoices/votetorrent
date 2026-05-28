@@ -5,27 +5,20 @@ import { expect } from 'chai';
  * Quereus regression repro — explicit NULL binding against a column with
  * a non-NULL `default` value.
  *
- * Surfaced during VoteTorrent Phase 12.3-08 against Quereus 3.1.2 as
- *   `NOT NULL constraint failed: ProposedQuestion.DependsOn`
- * on `INSERT INTO ProposedQuestion (...) values (..., :dependsOn, ...)`
- * where the schema declared `DependsOn text null` and `:dependsOn` was
- * bound to `null`. That diagnosis was misleading — the column the error
- * message names is not the offending one.
+ * Bug: a column declared with a non-NULL default (e.g. `text default 'X'`,
+ * `boolean default true`) treats an explicit NULL binding — whether via
+ * `:param` or a SQL `null` literal — as a NOT NULL constraint violation,
+ * even though the column is not declared `not null`. Omitting the column
+ * from the INSERT column list correctly applies the default; only
+ * **explicitly** writing null fails. The error message can also name an
+ * unrelated nullable sibling column in the same row, which makes the bug
+ * hard to diagnose (see D3).
  *
- * Root cause, isolated here: a column declared with a non-NULL default
- * (e.g. `text default 'X'`, `boolean default true`) treats an explicit
- * NULL binding — whether via `:param` or a SQL `null` literal — as a
- * NOT NULL constraint violation. Omitting the column from the INSERT
- * column list correctly applies the default; only **explicitly** writing
- * null fails. The error message can name an unrelated nullable sibling
- * column in the same row (see the upstream issue draft for the original
- * misleading-column-name observation).
+ * Confirmed in Quereus **3.3.0** (current pin); also reproduced in 3.1.2.
  *
- * Upstream issue draft:
- *   .planning/quick/260528-001-quereus-not-null-text-null-column/issues/
- *   default-column-rejects-explicit-null.md
- *
- * Confirmed in Quereus **3.3.0** (current pin).
+ * The spec passes today by asserting the observed broken behavior. When
+ * upstream ships a fix, invert D1/D2/D3 to assert success and update the
+ * D3 error-message assertion.
  */
 describe('Quereus repro — explicit NULL against `default X` column', () => {
 	// ---------------------------------------------------------------

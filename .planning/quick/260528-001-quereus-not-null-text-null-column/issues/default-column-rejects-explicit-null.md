@@ -127,9 +127,10 @@ Both workarounds were considered for VoteTorrent's `ElectionEngine.addQuestion`
 that exercises this path remains skipped with a precise annotation pending
 an upstream fix.
 
-## In-repo regression repro
+## Standalone reproduction file
 
-`packages/vote-engine/test/quereus-repros/text-null-column.spec.ts` —
-sub-tests D1, D2, D3 reproduce the bug; D4, D5, D6 pin the working
-contrast cases. The spec currently passes by asserting the **observed**
-broken behavior; invert the assertions once upstream ships a fix.
+See the attached / linked `default-column-rejects-explicit-null.spec.ts`
+(mocha + chai, drops in next to existing Quereus repros). Sub-tests
+D1, D2, D3 reproduce the bug; D4, D5, D6 pin the working contrast cases.
+The spec currently passes by asserting the **observed** broken behavior;
+invert the assertions once a fix ships.
