@@ -299,7 +299,7 @@ describe('CompleteSignatureBuilder', () => {
     expect(builder).to.be.instanceOf(CompleteSignatureBuilder)
   })
 
-  it.skip('REAL ENGINE equivalence smoke: engine.completeSignature(task, result) vs builder.setTask(task).setResult(result).commit() — BLOCKED: Task.ExtensionExists and SignatureTaskExtension.TaskIdValid form a circular dependency that quereus 3.1.2 cannot resolve (both checks fire eagerly within a batch)', async () => {
+  it('REAL ENGINE equivalence smoke: engine.completeSignature(task, result) vs builder.setTask(task).setResult(result).commit()', async () => {
     // completeSignature throws "no pending task" when no Task row exists.
     // Blocked until election creation pipeline is unblocked (DateValid CHECK
     // requires future date in DB context to seed Election rows).

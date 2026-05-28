@@ -641,7 +641,7 @@ describe('KeysTasksEngine', () => {
       expect((caught as Error)?.message).to.include('no EngineContext bound')
     })
 
-    it.skip('marks a release-key Task as completed — BLOCKED: Task.ExtensionExists and ReleaseKeyTaskExtension.TaskIdValid form a circular dependency that quereus 3.1.2 cannot resolve (both checks fire eagerly within a batch)', async () => {
+    it.skip('marks a release-key Task as completed — BLOCKED: QuereusError CHECK constraint failed: ReleaseKeyTaskExtension.TaskIdValid fires at commit (DeferredConstraintQueue) and does not see the sibling Task row inserted in the same db.exec batch. Phase 12.4 CR-02 + CR-03 schema fixes are not the root cause (ReleaseKey CHECK was already valid pre-Phase-12.4); the actual blocker is the deferred-CHECK visibility semantics in quereus 3.3.0 for sibling rows inserted within the same batch.', async () => {
       const net = await createTestNetwork()
       const auth = await addTestAuthority(net)
       const elCtx = await addTestElection(auth)
@@ -740,7 +740,7 @@ describe('SignatureTasksEngine', () => {
       expect((caught as Error)?.message).to.include('no pending task')
     })
 
-    it.skip('invokes SigningEngine.sign and marks the Task complete — BLOCKED: Task.ExtensionExists and AdminSignatureTaskExtension.TaskIdValid form a circular dependency that quereus 3.1.2 cannot resolve (both checks fire eagerly within a batch)', async () => {
+    it.skip('invokes SigningEngine.sign and marks the Task complete — BLOCKED: QuereusError CHECK constraint failed: AdminSignatureTaskExtension.TaskIdValid fires at commit (DeferredConstraintQueue) and does not see the sibling Task row inserted in the same db.exec batch, even with the post-Phase 12.4 CR-02 compound discriminator (T.Type=signature and T.SignatureType=admin). The CR-02 fix is necessary but not sufficient; the actual blocker is the deferred-CHECK visibility semantics in quereus 3.3.0 for sibling rows in one batch.', async () => {
       const net = await createTestNetwork()
       const auth = await addTestAuthority(net)
       // Seed a separate AdminSigning row for the signature task
@@ -828,7 +828,7 @@ describe('OnboardingTasksEngine', () => {
       expect((caught as Error)?.message).to.include('no EngineContext bound')
     })
 
-    it.skip('marks an onboarding Task as completed — BLOCKED: Task.ExtensionExists and OnboardingTaskExtension.TaskIdValid form a circular dependency that quereus 3.1.2 cannot resolve (both checks fire eagerly within a batch)', async () => {
+    it.skip('marks an onboarding Task as completed — BLOCKED: QuereusError CHECK constraint failed: OnboardingTaskExtension.TaskIdValid fires at commit (DeferredConstraintQueue) and does not see the sibling Task row inserted in the same db.exec batch. Phase 12.4 CR-02 + CR-03 schema fixes are not the root cause (Onboarding CHECK was already valid pre-Phase-12.4); the actual blocker is the deferred-CHECK visibility semantics in quereus 3.3.0 for sibling rows in one batch.', async () => {
       const net = await createTestNetwork()
       await net.ctx.db.exec(
         `insert into Onboarding (Id) with context Tid = 1 values ('onboarding-1')`
