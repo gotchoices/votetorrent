@@ -7,6 +7,7 @@ import {
 } from '@votetorrent/vote-core';
 import { expect } from 'chai';
 import { prepareDb } from '../src/database/initialize';
+import { nowCanonicalDatetime } from '../src/utils.js';
 import { NetworkEngine } from '../src/network/network-engine';
 import { MockNetworkEngine } from '../src/network/mock-network-engine';
 import { NetworkCreateAuthorityBuilder } from '../src/network/builders/network-create-authority-builder';
@@ -925,25 +926,32 @@ describe('NetworkEngine', () => {
 		// exact signature bytes, since real digest construction lives in
 		// SigningEngine and is exercised in detail there.
 
-		it.skip('should create an AdminSigning session with scope rn and a valid digest — BLOCKED: raw-SQL test uses numeric Date.now() for AdminEffectiveAt but Officer rows now store canonical ISO datetime; needs query for actual CurrentAdmin.EffectiveAt and use toCanonicalDatetime()', async () => {
+		it('should create an AdminSigning session with scope rn and a valid digest', async () => {
 			const { engine } = await createNetworkEngine();
 			const ctx = (engine as unknown as { ctx: EngineContext }).ctx;
 			const details = await engine.getDetails();
+			// Query CurrentAdmin.EffectiveAt (canonical-string) — do not pass Date.now().
+			const adminRow = await ctx.db
+				.prepare('select EffectiveAt from CurrentAdmin where AuthorityId = :authorityId')
+				.get({ authorityId: details.network.primaryAuthorityId });
+			if (!adminRow) throw new Error('CurrentAdmin row not found for primary authority');
+			const adminEffectiveAt = adminRow.EffectiveAt as string;
 			// Seed an AdminSigning row with scope rn. Real digest/signature
 			// production lives in SigningEngine; here we assert the row lands.
 			const nonce = 'nonce-' + crypto.randomUUID();
 			await ctx.db.exec(
 				`insert into AdminSigning (Nonce, AuthorityId, AdminEffectiveAt, Scope, Digest, UserId, SignerKey, Signature)
-         with context now = ${Date.now()}, IsSignatureValid = true, IsSignerKeyValid = true
+         with context now = :now, IsSignatureValid = true, IsSignerKeyValid = true
          values (:nonce, :authId, :effAt, 'rn', :digest, :uid, :pubKey, :sig)`,
 				{
 					nonce: nonce,
 					authId: details.network.primaryAuthorityId,
-					effAt: Date.now(),
+					effAt: adminEffectiveAt,
 					digest: 'digest-rn',
 					uid: ctx.user?.id ?? 'user-1',
 					pubKey: (ctx.user?.activeKeys ?? [])[0]!.key,
 					sig: 'a'.repeat(128),
+					now: nowCanonicalDatetime(),
 				},
 			);
 			const row = await ctx.db
@@ -1017,47 +1025,56 @@ describe('NetworkEngine', () => {
 			expect(Number(row?.n)).to.be.a('number');
 		});
 
-		it.skip('should reject OfficerSignature when the signature does not match the AdminSigning digest — BLOCKED: raw-SQL test uses numeric Date.now() for AdminEffectiveAt but Officer rows now store canonical ISO datetime; needs query for actual CurrentAdmin.EffectiveAt and use toCanonicalDatetime()', async () => {
+		it('should reject OfficerSignature when the signature does not match the AdminSigning digest', async () => {
 			// After a valid AdminSigning is in place, insert an OfficerSignature
 			// whose Signature does not validate against AdminSigning.Digest;
 			// expect SignatureValid to fire.
 			const { engine } = await createNetworkEngine();
 			const ctx = (engine as unknown as { ctx: EngineContext }).ctx;
 			const details = await engine.getDetails();
+			// Query CurrentAdmin.EffectiveAt (canonical-string) — do not pass Date.now().
+			const adminRow = await ctx.db
+				.prepare('select EffectiveAt from CurrentAdmin where AuthorityId = :authorityId')
+				.get({ authorityId: details.network.primaryAuthorityId });
+			if (!adminRow) throw new Error('CurrentAdmin row not found for primary authority');
+			const adminEffectiveAt = adminRow.EffectiveAt as string;
 			// Seed AdminSigning first (real signature production deferred to
 			// SigningEngine; this stub asserts the SignatureValid CHECK fires
 			// on a deliberately-wrong OfficerSignature).
 			const nonce = 'os-mismatch-' + crypto.randomUUID();
 			await ctx.db.exec(
 				`insert into AdminSigning (Nonce, AuthorityId, AdminEffectiveAt, Scope, Digest, UserId, SignerKey, Signature)
-         with context now = ${Date.now()}, IsSignatureValid = true, IsSignerKeyValid = true
+         with context now = :now, IsSignatureValid = true, IsSignerKeyValid = true
          values (:nonce, :authId, :effAt, 'rn', 'd-true', :uid, :pubKey, :sig)`,
 				{
 					nonce: nonce,
 					authId: details.network.primaryAuthorityId,
-					effAt: Date.now(),
+					effAt: adminEffectiveAt,
 					uid: ctx.user?.id ?? 'user-1',
 					pubKey: (ctx.user?.activeKeys ?? [])[0]!.key,
 					sig: 'a'.repeat(128),
+					now: nowCanonicalDatetime(),
 				},
 			);
 			let caught: unknown;
 			try {
 				await ctx.db.exec(
 					`insert into OfficerSignature (SigningNonce, UserId, SignerKey, Signature)
-           with context now = ${Date.now()}, IsSignatureValid = false, IsSignerKeyValid = true, IsOfficerValid = true
+           with context now = :now, IsSignatureValid = false, IsSignerKeyValid = true, IsOfficerValid = true
            values (:nonce, :uid, :pubKey, 'wrong-sig')`,
 					{
 						nonce: nonce,
 						uid: ctx.user?.id ?? 'user-1',
 						pubKey: (ctx.user?.activeKeys ?? [])[0]!.key,
+						now: nowCanonicalDatetime(),
 					},
 				);
 			} catch (err) {
 				caught = err;
 			}
-			// quereus 3.x: context may differ
-			if (caught) { expect(caught).to.be.instanceOf(Error) };
+			// SignatureValid CHECK rejects 'wrong-sig' that does not validate
+			// over AdminSigning.Digest 'd-true'.
+			expect(caught).to.be.instanceOf(Error);
 		});
 
 		it('should create AdminSignature only when the threshold of OfficerSignatures is met — BLOCKED on quereus#23', async () => {
