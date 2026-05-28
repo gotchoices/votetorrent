@@ -1,79 +1,109 @@
 import { ExtendedTheme, useTheme, useNavigation, useRoute } from "@react-navigation/native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import React, { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ScrollView, StyleSheet, View } from "react-native";
 import { ThemedText } from "../../components/ThemedText";
 import { CustomButton } from "../../components/CustomButton";
-import { CustomTextInput } from "../../components/CustomTextInput";
 import { globalStyles } from "../../theme/styles";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RouteProp } from "@react-navigation/native";
 import type { RootStackParamList } from "../../navigation/types";
+import { ElectionRevisionForm, ElectionRevisionFormValue } from "./components/ElectionRevisionForm";
 
-// Phase 9 plan 09-03 (ELECUI-04) — Edit Election polish.
-// Scaffold per PATTERNS.md §7 mirroring EditBallotScreen shape.
-// PROPOSE stub matches Phase 8 D-04/D-15 convention (D-03 also).
-// taskId? route param is consumed for type-safe nav; not exercised
-// (Phase 9 is UI parity only per CONTEXT D-18). Spanish strings
-// deferred to Phase 11 per D-17.
+// Phase 9 plan 09-13 (ELECUI-04) — Election Revision form (Screen C, Figma #16/#17).
+// Replaces thin scaffold (title/description/tags/voting dates) from 09-03.
+// Route typed against EditElectionRevision (NOT EditElection — task-flow stub).
+// electionEngine read from route.params (not taskId — dropped entirely).
+// Context block uses hardcoded mock strings (D-18; no engine import).
+// PROPOSE stub: console.log + goBack. Persistence deferred to 09-15.
+// D-17: en-only i18n; Spanish deferred to Phase 11.
 export default function EditElectionScreen() {
 	const { colors } = useTheme() as ExtendedTheme;
 	const { t } = useTranslation();
 	const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
-	const route = useRoute<RouteProp<RootStackParamList, "EditElection">>();
+	const route = useRoute<RouteProp<RootStackParamList, "EditElectionRevision">>();
+	const insets = useSafeAreaInsets();
 
-	const [title, setTitle] = useState("");
-	const [description, setDescription] = useState("");
-	const [tags, setTags] = useState("");
-	const [votingOpens, setVotingOpens] = useState("");
-	const [votingCloses, setVotingCloses] = useState("");
-	const [revisionDeadline, setRevisionDeadline] = useState("");
+	// electionEngine from route params (optional — not exercised at v1.1 per D-18)
+	const electionEngine = route.params?.electionEngine;
 
+	// Proposed Revision form state
+	const [revision, setRevision] = useState<ElectionRevisionFormValue>({
+		registrationEnds: "",
+		ballotsFinal: "",
+		releasingKeys: "",
+		votingStarts: "",
+		keyholders: [],
+		threshold: 1,
+		tags: [],
+		instructions: "",
+	});
+
+	// PROPOSE stub — persistence wired in 09-15
 	const handlePropose = () => {
-		// v1.1 milestone scope: functional persistence is OOS (CONTEXT D-18).
-		// Stub the propose action and navigate back — real engine wiring
-		// lands when IElectionEngine.proposeElection() is added later.
-		console.log("editElection-propose stub", {
-			title,
-			description,
-			tags,
-			votingOpens,
-			votingCloses,
-			revisionDeadline,
-			taskId: route.params?.taskId,
-		});
+		console.log("editElection-propose stub", revision);
 		navigation.goBack();
 	};
 
 	return (
 		<View style={styles.content}>
-			<ScrollView style={[styles.container, { backgroundColor: colors.background }]}>
+			<ScrollView
+				style={styles.container}
+				contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
+			>
+				{/* ── Read-only election context block ─────────────────────────── */}
 				<View style={styles.section}>
-					<ThemedText>{t("title")}</ThemedText>
-					<CustomTextInput value={title} onChangeText={setTitle} />
+					<ThemedText type="defaultSemiBold" style={localStyles.electionTitle}>
+						{"Republican Primary"}
+					</ThemedText>
+
+					<View style={localStyles.contextRow}>
+						<ThemedText type="defaultSemiBold">{t("authority")}: </ThemedText>
+						<ThemedText type="default">{"Mock Authority B"}</ThemedText>
+					</View>
+					<View style={localStyles.contextRow}>
+						<ThemedText type="defaultSemiBold">{t("type")}: </ThemedText>
+						<ThemedText type="default">{t("official")}</ThemedText>
+					</View>
+					<View style={localStyles.contextRow}>
+						<ThemedText type="defaultSemiBold">{t("dateTime")}: </ThemedText>
+						<ThemedText type="default">{"Nov 5, 2024 7:00 AM"}</ThemedText>
+					</View>
+					<View style={localStyles.contextRow}>
+						<ThemedText type="defaultSemiBold">{t("revisionDeadline")}: </ThemedText>
+						<ThemedText type="default">{"Oct 1, 2024 11:59 PM"}</ThemedText>
+					</View>
 				</View>
+
+				{/* ── Proposed Revision header ──────────────────────────────────── */}
 				<View style={styles.section}>
-					<ThemedText>{t("description")}</ThemedText>
-					<CustomTextInput value={description} onChangeText={setDescription} />
+					<ThemedText type="defaultSemiBold" style={styles.sectionTitle}>
+						{t("proposedRevisionHeader")}
+					</ThemedText>
+					<View style={localStyles.contextRow}>
+						<ThemedText type="defaultSemiBold">{t("revision")}: </ThemedText>
+						<ThemedText type="default">{"#1 - Sep 15, 2024"}</ThemedText>
+					</View>
 				</View>
+
+				{/* ── Shared ElectionRevisionForm ───────────────────────────────── */}
 				<View style={styles.section}>
-					<ThemedText>{t("tags")}</ThemedText>
-					<CustomTextInput value={tags} onChangeText={setTags} />
-				</View>
-				<View style={styles.section}>
-					<ThemedText>{t("votingOpens")}</ThemedText>
-					<CustomTextInput value={votingOpens} onChangeText={setVotingOpens} />
-				</View>
-				<View style={styles.section}>
-					<ThemedText>{t("votingCloses")}</ThemedText>
-					<CustomTextInput value={votingCloses} onChangeText={setVotingCloses} />
-				</View>
-				<View style={styles.section}>
-					<ThemedText>{t("revisionDeadline")}</ThemedText>
-					<CustomTextInput value={revisionDeadline} onChangeText={setRevisionDeadline} />
+					<ElectionRevisionForm
+						value={revision}
+						onChange={setRevision}
+						tagOptions={["Primary", "Utah", "General", "Local"]}
+					/>
 				</View>
 			</ScrollView>
-			<View style={[styles.footer, { backgroundColor: colors.card }]}>
+
+			{/* ── PROPOSE footer ────────────────────────────────────────────────── */}
+			<View
+				style={[
+					styles.footer,
+					{ backgroundColor: colors.card, paddingBottom: insets.bottom + 16 },
+				]}
+			>
 				<CustomButton
 					title={t("propose")}
 					icon="floppy-disk"
@@ -87,8 +117,14 @@ export default function EditElectionScreen() {
 }
 
 const localStyles = StyleSheet.create({
-	section: {
-		marginBottom: 20,
+	electionTitle: {
+		marginBottom: 8,
+		fontSize: 18,
+	},
+	contextRow: {
+		flexDirection: "row",
+		alignItems: "center",
+		marginBottom: 4,
 	},
 });
 
