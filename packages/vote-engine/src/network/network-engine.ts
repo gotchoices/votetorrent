@@ -109,7 +109,11 @@ export class NetworkEngine implements INetworkEngine {
     const authorityParams = {
       id,
       name: authority.name,
-      domainName: authority.domainName,
+      // Coerce undefined → null so quereus's strict TEXT-or-NULL binding
+      // accepts the missing-domainName case (Rule 2 — safety; the test
+      // 'should set Authority.DomainName to the provided value or null'
+      // constructs an AuthorityInit without domainName via `as never`).
+      domainName: authority.domainName ?? null,
       imageRef: imageRefJson,
       inviteSlotCid: options?.inviteSlotCid ?? null,
       inviteSignature: options?.inviteSignature ?? null,

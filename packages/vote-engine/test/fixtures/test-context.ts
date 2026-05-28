@@ -422,7 +422,11 @@ export async function seedAuthorityInvite (
   }
 ): Promise<TestInviteContext> {
   const authorityName = invokes?.name ?? 'Second Authority'
-  const authorityDomainName = invokes?.domainName ?? 'second.example.com'
+  // Preserve explicit null (caller signaled "no domain"); only default
+  // when the caller did not supply domainName at all.
+  const authorityDomainName = invokes?.domainName === undefined
+    ? 'second.example.com'
+    : invokes.domainName
   const authorityImageRef = invokes?.imageRef
 
   // Decision 4 (Phase 12.4): resolve a single canonical `adminEffectiveAt`

@@ -408,7 +408,7 @@ describe('UserEngine', () => {
       await networkEngine.respondToInvite({
         invite: fakeInvite,
         isAccepted: true,
-        invokes: { authority: { name: 'Invokee', domainName: 'inv.example' } },
+        invokes: { authority: { name: 'Invokee', domainName: 'inv.example' }, admin: { effectiveAt: '2026-01-01T00:00:00', thresholdPolicies: '[{"policy":"rad","threshold":1}]' }, officers: [{ adminEffectiveAt: '2026-01-01T00:00:00', userId: 'user-1', title: 'Officer', scopes: '["rad"]' }] },
         inviteSignature: 'a'.repeat(128),
         userId: undefined,
         userInit: undefined
