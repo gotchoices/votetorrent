@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import FontAwesome6 from "react-native-vector-icons/FontAwesome6";
 import { ThemedText } from "../../../components/ThemedText";
 import { CustomTextInput } from "../../../components/CustomTextInput";
+import { DateField } from "../../../components/DateField";
 import { ChipButton } from "../../../components/ChipButton";
 import { Stepper } from "../../../components/Stepper";
 import { globalStyles } from "../../../theme/styles";
@@ -107,33 +108,29 @@ export function ElectionRevisionForm({
 					{t("timeline")}
 				</ThemedText>
 
-				<CustomTextInput
+				<DateField
 					title={t("registrationEnds")}
 					value={value.registrationEnds}
-					onChangeText={(v) => set({ registrationEnds: v })}
+					onChange={(v) => set({ registrationEnds: v })}
 					placeholder={t("selectDate")}
-					icon="calendar"
 				/>
-				<CustomTextInput
+				<DateField
 					title={t("ballotsFinal")}
 					value={value.ballotsFinal}
-					onChangeText={(v) => set({ ballotsFinal: v })}
+					onChange={(v) => set({ ballotsFinal: v })}
 					placeholder={t("selectDate")}
-					icon="calendar"
 				/>
-				<CustomTextInput
+				<DateField
 					title={t("releasingKeys")}
 					value={value.releasingKeys}
-					onChangeText={(v) => set({ releasingKeys: v })}
+					onChange={(v) => set({ releasingKeys: v })}
 					placeholder={t("selectDate")}
-					icon="calendar"
 				/>
-				<CustomTextInput
+				<DateField
 					title={t("votingStarts")}
 					value={value.votingStarts}
-					onChangeText={(v) => set({ votingStarts: v })}
+					onChange={(v) => set({ votingStarts: v })}
 					placeholder={t("selectDate")}
-					icon="calendar"
 				/>
 			</View>
 

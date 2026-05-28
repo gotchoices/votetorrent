@@ -6,6 +6,7 @@ import { ScrollView, StyleSheet, View } from "react-native";
 import { ThemedText } from "../../components/ThemedText";
 import { CustomButton } from "../../components/CustomButton";
 import { CustomTextInput } from "../../components/CustomTextInput";
+import { DateField } from "../../components/DateField";
 import { globalStyles } from "../../theme/styles";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../../navigation/types";
@@ -143,22 +144,20 @@ export function CreateElectionScreen() {
 						onChangeText={setCoreTitle}
 					/>
 
-					<CustomTextInput
+					<DateField
 						title={t("date")}
-						icon="calendar"
 						placeholder={t("selectDate")}
 						value={coreDate}
-						onChangeText={setCoreDate}
+						onChange={setCoreDate}
 					/>
 					<ThemedText type="small" style={localStyles.helperText}>
 						{t("coreDateHelp")}
 					</ThemedText>
 
-					<CustomTextInput
+					<DateField
 						title={t("revisionDeadline")}
-						icon="calendar"
 						value={coreRevisionDeadline}
-						onChangeText={setCoreRevisionDeadline}
+						onChange={setCoreRevisionDeadline}
 					/>
 					<ThemedText type="small" style={localStyles.helperText}>
 						{t("revisionDeadlineHelp")}

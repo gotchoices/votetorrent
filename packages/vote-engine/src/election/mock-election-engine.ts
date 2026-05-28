@@ -6,8 +6,7 @@ import type {
   ElectionDetails,
   ElectionRevisionInit,
   IElectionEngine,
-  KeyholderInvite,
-  Proposal
+  KeyholderInvite
 } from '@votetorrent/vote-core'
 
 // Phase 9 plan 09-01 (D-14, D-18) — seed data for the demo Timeline + Ballot
@@ -112,52 +111,10 @@ export class MockElectionEngine implements IElectionEngine {
       }
     }
 
-    // Seed a proposed revision so the Proposed-Revision + signing UI on
-    // ElectionDetailsScreen renders. Phase 9 plan 09-15 (ELECUI-03).
-    const proposedRevision: Proposal<ElectionRevisionInit> = {
-      proposed: {
-        electionId: 'election-2',
-        revision: 2,
-        revisionTimestamp: MOCK_NOW,
-        tags: ['general', 'demo', '2026', 'revised'],
-        instructions: 'Proposed revision for the demo.',
-        keyholders: [
-          {
-            name: 'Dr. Sarah Chen',
-            type: 'k',
-            expiration: '0',
-            inviteKey: '',
-            invitePrivate: '',
-            inviteSignature: '',
-            digest: '',
-          },
-          {
-            name: 'Judge Michael Rodriguez',
-            type: 'k',
-            expiration: '0',
-            inviteKey: '',
-            invitePrivate: '',
-            inviteSignature: '',
-            digest: '',
-          },
-        ],
-        timeline: {
-          [ElectionEvent.registrationEnds]: MOCK_NOW + 3 * MOCK_DAY_MS,
-          [ElectionEvent.ballotsFinal]: MOCK_NOW + 6 * MOCK_DAY_MS,
-          [ElectionEvent.votingStarts]: MOCK_NOW + 11 * MOCK_DAY_MS,
-          [ElectionEvent.tallyingStarts]: MOCK_NOW + 15 * MOCK_DAY_MS,
-          [ElectionEvent.validation]: MOCK_NOW + 16 * MOCK_DAY_MS,
-          [ElectionEvent.certificationStarts]: MOCK_NOW + 17 * MOCK_DAY_MS,
-          [ElectionEvent.closed]: MOCK_NOW + 18 * MOCK_DAY_MS,
-        },
-        keyholderThreshold: 2,
-      },
-      signers: [],
-      timestamp: MOCK_NOW,
-    }
-
-    mockElection.proposed = proposedRevision
-
+    // No `proposed` revision is seeded: a freshly created election has not been
+    // revised, so the Proposed-Revision UI must stay hidden until a real
+    // proposed revision exists. (The blanket demo seed added in 09-15 made every
+    // election show a phantom revision — removed per UAT.)
     return Promise.resolve(mockElection)
   }
 
