@@ -495,3 +495,104 @@ export async function seedUserInvite (
 
   return { inviteSlotCid, inviteSignature: officerInvite.inviteSignature }
 }
+
+// ---------------------------------------------------------------------------
+// Layer-3: seedBallot helper (Phase 12.3-03)
+// ---------------------------------------------------------------------------
+
+export interface SeedBallotResult {
+  ballotId: string
+}
+
+/**
+ * Seed a `Ballot` row so that `ProposedQuestion.BallotIdValid` and
+ * `ProposedOption.BallotIdValid` (both `exists (select 1 from Ballot ...)`)
+ * are satisfied for downstream `addQuestion` / `addOption` calls.
+ *
+ * Note: `IElectionEngine.proposeBallot` only INSERTs into `ProposedBallot`,
+ * not `Ballot`. The Ballot-row insert lives downstream of an accepted
+ * proposal (Ballot.MutationValid requires AdminSignature scope='ceb' with
+ * `Digest(Tid, Id, ElectionId, AuthorityId, Description, Districts)`).
+ * No engine method currently fires that insert, so this helper composes
+ * the AdminSigning ('ceb') + raw Ballot INSERT itself — mirroring how
+ * `seedElectionSigning` + `addTestElection` compose the Election scope.
+ *
+ * Test intent stays unchanged: callers receive `{ ballotId }` and can
+ * issue `addQuestion(ballotId, q)` / `addOption(ballotId, q.code, o, i)`.
+ */
+export async function seedBallot (
+  elec: TestElectionContext,
+  ballotId: string = 'ballot-1'
+): Promise<SeedBallotResult> {
+  // electionEngine.election is private; resolve the election id off the DB
+  // via the authority's most recent Election row. addTestElection seeds
+  // exactly one Election per authority so this is unambiguous.
+  const authorityId = elec.authority.id
+  const electionRow = await elec.ctx.db
+    .prepare('select Id from Election where AuthorityId = :authorityId limit 1')
+    .get({ authorityId })
+  if (!electionRow) throw new Error('seedBallot: Election not found for authority')
+  const electionId = electionRow.Id as string
+  const description = 'Test Ballot'
+  const districts = JSON.stringify([])
+
+  // ---- Step 1: AdminSigning (scope='ceb') with the Ballot's digest formula
+  const nonce = crypto.randomUUID()
+  const sig = makeTestSignature(elec.user)
+
+  const adminRow = await elec.ctx.db
+    .prepare('select EffectiveAt from CurrentAdmin where AuthorityId = :authorityId')
+    .get({ authorityId })
+  if (!adminRow) throw new Error('seedBallot: CurrentAdmin not found')
+  const adminEffectiveAt = adminRow.EffectiveAt as number | string
+
+  await elec.ctx.db.exec(
+    `insert into AdminSigning (
+      Nonce, AuthorityId, AdminEffectiveAt, Scope, Digest, UserId, SignerKey, Signature
+    )
+    with context now = :now, IsSignatureValid = true, IsSignerKeyValid = true
+    values (
+      :nonce, :authorityId, :adminEffectiveAt, 'ceb',
+      Digest(1, :id, :electionId, :authorityId, :description, :districts),
+      :userId, :signerKey, :signature
+    )`,
+    {
+      nonce,
+      authorityId,
+      adminEffectiveAt,
+      id: ballotId,
+      electionId,
+      description,
+      districts,
+      userId: elec.user.id,
+      signerKey: sig.signerKey,
+      signature: sig.signature,
+      now: nowCanonicalDatetime(),
+    }
+  )
+
+  // ---- Step 2: AdminSignature (threshold=1 auto-completes via SigningEngine.sign)
+  const signing = new SigningEngine(elec.ctx)
+  await signing.sign(nonce, sig)
+
+  // ---- Step 3: Ballot insert under the signed nonce.
+  //              Ballot.MutationValid recomputes Digest(Tid, Id, ElectionId,
+  //              AuthorityId, Description, Districts); the AdminSignature
+  //              row inserted above matches that tuple verbatim.
+  await elec.ctx.db.exec(
+    `insert into Ballot (Id, ElectionId, AuthorityId, Description, Districts)
+     with context SigningNonce = :nonce, Tid = 1, now = :now
+     values (:id, :electionId, :authorityId, :description, :districts)`,
+    {
+      nonce,
+      id: ballotId,
+      electionId,
+      authorityId,
+      description,
+      districts,
+      now: nowCanonicalDatetime(),
+    }
+  )
+
+  return { ballotId }
+}
