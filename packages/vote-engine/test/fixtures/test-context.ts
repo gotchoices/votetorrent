@@ -399,10 +399,24 @@ export interface TestInviteContext extends TestAuthorityContext {
  *
  * Returns the inviteSlotCid so callers can pass it to createAuthority()
  * via the optional invite context params added in Plan 01.
+ *
+ * Phase 12.3-05: accepts an optional `invokes` override so the
+ * `respondToInvite` step commits a Digest over the same
+ * (name, domainName, imageRef) tuple the downstream createAuthority()
+ * insert will reproduce. Callers MUST pass identical values when they
+ * later invoke createAuthority() — otherwise Authority.InsertValid's
+ * Digest-match clause will fail.
  */
-export async function seedAuthorityInvite (auth: TestAuthorityContext): Promise<TestInviteContext> {
+export async function seedAuthorityInvite (
+  auth: TestAuthorityContext,
+  invokes?: { name?: string; domainName?: string | null; imageRef?: unknown }
+): Promise<TestInviteContext> {
+  const authorityName = invokes?.name ?? 'Second Authority'
+  const authorityDomainName = invokes?.domainName ?? 'second.example.com'
+  const authorityImageRef = invokes?.imageRef
+
   // Step a: generate a real secp256k1 invite key pair
-  const inviteShare = auth.authorityEngine.createAuthorityInvite('Second Authority')
+  const inviteShare = auth.authorityEngine.createAuthorityInvite(authorityName)
 
   // Step b: build signature from the test user
   const sig = makeTestSignature(auth.user)
@@ -418,10 +432,17 @@ export async function seedAuthorityInvite (auth: TestAuthorityContext): Promise<
   const inviteSlotCid = slotRow.Cid as string
 
   // Step e: respondToInvite inserts InviteResult
+  const authorityInvokes: { name: string; domainName: string | null; imageRef?: unknown } = {
+    name: authorityName,
+    domainName: authorityDomainName,
+  }
+  if (authorityImageRef !== undefined) {
+    authorityInvokes.imageRef = authorityImageRef
+  }
   await auth.networkEngine.respondToInvite({
     invite: inviteShare,
     isAccepted: true,
-    invokes: { authority: { name: 'Second Authority', domainName: 'second.example.com' } },
+    invokes: { authority: authorityInvokes },
     inviteSignature: 'a'.repeat(128),
     userId: undefined,
     userInit: undefined,
