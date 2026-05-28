@@ -1783,35 +1783,46 @@ describe('AuthorityEngine', () => {
       expect(Number(row?.n)).to.be.greaterThan(0)
     })
 
-    it.skip('should reject OfficerSignature when the signature does not match the digest — BLOCKED: test seeds AdminSigning with hardcoded UserId="user-1" which does not exist in User table; needs makeDistinctTestUser + Officer/User seeding rewrite', async () => {
+    it('should reject OfficerSignature when the signature does not match the digest', async () => {
       const { authority, authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
-      const sig = makeRealSignature('user-1')
+      const userId = ctx.user?.id ?? 'user-1'
+      const signerKey = (ctx.user?.activeKeys ?? [])[0]?.key ?? ''
+      const sig = makeRealSignature(userId)
       const nonce = 'mismatch-' + crypto.randomUUID()
+      // Query CurrentAdmin.EffectiveAt for the seeded authority (canonical-string).
+      const adminRow = await ctx.db
+        .prepare('select EffectiveAt from CurrentAdmin where AuthorityId = :authorityId')
+        .get({ authorityId: authority.id })
+      if (!adminRow) throw new Error('CurrentAdmin row not found for seeded authority')
+      const adminEffectiveAt = adminRow.EffectiveAt as string
       await ctx.db.exec(
         `insert into AdminSigning (Nonce, AuthorityId, AdminEffectiveAt, Scope, Digest, UserId, SignerKey, Signature)
-         with context now = ${Date.now()}, IsSignatureValid = true, IsSignerKeyValid = true
-         values (:n, :id, :e, 'rad', 'real-digest', 'user-1', :pubKey, :sig)`,
+         with context now = :now, IsSignatureValid = true, IsSignerKeyValid = true
+         values (:n, :id, :e, 'rad', 'real-digest', :uid, :pubKey, :sig)`,
         {
           n: nonce,
           id: authority.id,
-          e: Date.now(),
-          pubKey: sig.signerKey,
-          sig: sig.signature
+          e: adminEffectiveAt,
+          uid: userId,
+          pubKey: signerKey,
+          sig: sig.signature,
+          now: nowCanonicalDatetime()
         }
       )
       let caught: unknown
       try {
         await ctx.db.exec(
           `insert into OfficerSignature (SigningNonce, UserId, SignerKey, Signature)
-           with context now = ${Date.now()}
-           values (:n, 'user-1', :pubKey, 'wrong-sig')`,
-          { n: nonce, pubKey: sig.signerKey }
+           with context now = :now
+           values (:n, :uid, :pubKey, 'wrong-sig')`,
+          { n: nonce, uid: userId, pubKey: signerKey, now: nowCanonicalDatetime() }
         )
       } catch (err) {
         caught = err
       }
-      // quereus 3.x: Missing mutation context may fire before SignatureValid
+      // SignatureValid CHECK rejects 'wrong-sig' that does not validate over
+      // the AdminSigning.Digest 'real-digest'.
       expect(caught).to.be.instanceOf(Error)
     })
 

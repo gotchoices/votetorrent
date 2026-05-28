@@ -18,7 +18,7 @@ import { KeysTasksEngine } from '../src/tasks/keys-tasks-engine'
 import { OnboardingTasksEngine } from '../src/tasks/onboarding-tasks-engine'
 import { SignatureTasksEngine } from '../src/tasks/signature-tasks-engine'
 import type { EngineContext } from '../src/types.js'
-import { createTestNetwork, addTestAuthority, addTestElection, seedElectionSigning, makeElectionInit as makeElectionInitFromFixture, makeTestSignature } from './fixtures/test-context.js'
+import { createTestNetwork, addTestAuthority, addTestElection, seedBallot, seedElectionSigning, makeElectionInit as makeElectionInitFromFixture, makeTestSignature } from './fixtures/test-context.js'
 import { peekNextElectionTid } from '../src/elections/elections-engine.js'
 import { randomTestKeyPair } from './fixtures/keys.js'
 import { AsyncStorage } from './shims/react-native'
@@ -433,16 +433,27 @@ describe('ElectionEngine', () => {
   // ELEC-07 — addQuestion (ProposedQuestion INSERT) — class-only method
   // -----------------------------------------------------------------------
   describe('addQuestion', () => {
-    // BLOCKED on https://github.com/gotchoices/quereus/issues/21 —
-    // QuestionType view union-all returns only the first row ('select');
-    // any value other than 'select' silently fails the TypeValid CHECK.
-    // Also BLOCKED on quereus#23 transitively (UserValid joins through
-    // tables seeded by NetworksEngine.create).
-    it.skip('INSERTs a ProposedQuestion row — BLOCKED: NOT NULL constraint on ProposedQuestion.DependsOn (ElectionEngine.addQuestion does not bind DependsOn column)', async () => {
-      const { ctx } = await createTestNetwork()
+    // CONTEXT.md (Group F) predicted the prior DependsOn-NOT-NULL skip
+    // annotation was obsolete and that the only real blocker was the
+    // missing Ballot row. After Plan 12.3-03 (`seedBallot`) resolved the
+    // Ballot-row gap, the test was re-attempted and revealed that the
+    // DependsOn-NOT-NULL failure is in fact real on quereus 3.2.1 — the
+    // schema declares `DependsOn text null` (line 707 of votetorrent.qsql)
+    // but quereus still raises `NOT NULL constraint failed:
+    // ProposedQuestion.DependsOn` when the engine binds JS `null`. This is
+    // a quereus-side parser / parameter-binding behavior, not an
+    // engine-side missing binding (the engine DOES bind `:dependsOn`).
+    // Re-skipping with the corrected diagnosis; Ballot-seeding is in
+    // place so the test will pass as soon as the upstream null-binding
+    // issue is addressed.
+    it.skip('INSERTs a ProposedQuestion row — BLOCKED: quereus 3.2.1 raises NOT NULL on ProposedQuestion.DependsOn despite `text null` schema (Ballot-row blocker is now resolved by seedBallot; this is the remaining upstream issue)', async () => {
+      const net = await createTestNetwork()
+      const auth = await addTestAuthority(net)
+      const elec = await addTestElection(auth)
+      const { ballotId } = await seedBallot(elec, 'ballot-1')
       const engine = new ElectionEngine(
-        { id: 'election-1', authorityId: 'authority-1' },
-        ctx
+        { id: 'election-1', authorityId: auth.authority.id },
+        elec.ctx
       )
       const q: Question = {
         code: 'q1',
@@ -451,12 +462,12 @@ describe('ElectionEngine', () => {
         options: [],
         type: 'select'
       }
-      await engine.addQuestion('ballot-1', q)
-      const row = await ctx.db
+      await engine.addQuestion(ballotId, q)
+      const row = await elec.ctx.db
         .prepare(
           'select Code from ProposedQuestion where BallotId = :id and Code = :c'
         )
-        .get({ id: 'ballot-1', c: 'q1' })
+        .get({ id: ballotId, c: 'q1' })
       expect(row?.Code).to.equal('q1')
     })
   })
@@ -465,20 +476,48 @@ describe('ElectionEngine', () => {
   // ELEC-08 — addOption (ProposedOption INSERT) — class-only method
   // -----------------------------------------------------------------------
   describe('addOption', () => {
-    // BLOCKED on quereus#23 transitively.
-    it.skip('INSERTs a ProposedOption row — BLOCKED: NOT NULL constraint on ProposedOption.Details (ElectionEngine.addOption does not bind Details column)', async () => {
-      const { ctx } = await createTestNetwork()
+    // Prior skip annotation claimed NOT NULL constraints on
+    // ProposedOption.Details / Details-binding bugs. That was wrong — the
+    // engine binds Details=null and the schema allows null.
+    //
+    // Two blockers were uncovered after switching to seedBallot:
+    //   1. ProposedOption.BallotIdValid — resolved by seedBallot (Plan 12.3-03).
+    //   2. ProposedOption.QuestionCodeValid — checks
+    //      `exists (select 1 from Question Q where Q.BallotId = new.BallotId
+    //       and Q.Code = new.QuestionCode)`. This references the canonical
+    //      Question table, not ProposedQuestion. Question.MutationValid
+    //      requires a full AdminSignature pipeline with scope='ceb' and a
+    //      Digest over (Tid, BallotId, Code, Title, Instructions, DependsOn,
+    //      Type, OptionRange, ScoreRange, Grouping, Sequence, Required) —
+    //      i.e. a `seedQuestion` helper analogous to seedBallot is needed.
+    //      No such helper exists yet; ElectionEngine.addQuestion only writes
+    //      to ProposedQuestion. Deferred to a future plan that adds a
+    //      seedQuestion fixture (or to a real proposal-accept flow that
+    //      promotes ProposedQuestion → Question).
+    it.skip('INSERTs a ProposedOption row — BLOCKED: ProposedOption.QuestionCodeValid requires a canonical Question row; needs a seedQuestion fixture helper (mirror of seedBallot) which does not yet exist', async () => {
+      const net = await createTestNetwork()
+      const auth = await addTestAuthority(net)
+      const elec = await addTestElection(auth)
+      const { ballotId } = await seedBallot(elec, 'ballot-1')
       const engine = new ElectionEngine(
-        { id: 'election-1', authorityId: 'authority-1' },
-        ctx
+        { id: 'election-1', authorityId: auth.authority.id },
+        elec.ctx
       )
+      const q: Question = {
+        code: 'q1',
+        title: 'Q1',
+        instructions: 'pick one',
+        options: [],
+        type: 'select'
+      }
+      await engine.addQuestion(ballotId, q)
       const o: Option = { code: 'opt-1', title: 'Option 1' }
-      await engine.addOption('ballot-1', 'q1', o, 0)
-      const row = await ctx.db
+      await engine.addOption(ballotId, 'q1', o, 0)
+      const row = await elec.ctx.db
         .prepare(
           'select Code from ProposedOption where BallotId = :id and QuestionCode = :qc and Code = :c'
         )
-        .get({ id: 'ballot-1', qc: 'q1', c: 'opt-1' })
+        .get({ id: ballotId, qc: 'q1', c: 'opt-1' })
       expect(row?.Code).to.equal('opt-1')
     })
   })
