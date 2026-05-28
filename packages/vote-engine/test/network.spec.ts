@@ -17,7 +17,7 @@ import { NetworkProposeRevisionBuilder } from '../src/network/builders/network-p
 import { NetworkRespondToInviteBuilder } from '../src/network/builders/network-respond-to-invite-builder';
 import { NetworksEngine } from '../src/networks/networks-engine';
 import type { EngineContext } from '../src/types.js';
-import { createTestNetwork, addTestAuthority, seedAuthorityInvite, seedUserInvite, makeDistinctTestUser } from './fixtures/test-context.js';
+import { createTestNetwork, addTestAuthority, addTestElection, seedAuthorityInvite, seedUserInvite, makeDistinctTestUser } from './fixtures/test-context.js';
 import { randomTestKeyPair } from './fixtures/keys.js';
 import { AsyncStorage } from './shims/react-native';
 import type {
@@ -1441,6 +1441,24 @@ describe('NetworkEngine', () => {
 				caught = err;
 			}
 			expect((caught as Error)?.message).to.include('Not implemented');
+		});
+	});
+
+	// -----------------------------------------------------------------------
+	// 10.5. getElections / getElectionHistory — Phase 12.4 CR-01 regression
+	// -----------------------------------------------------------------------
+	describe('getElections', () => {
+		it('returns populated rows with authorityName resolved from Authority.Name (Phase 12.4 CR-01 regression)', async () => {
+			const net = await createTestNetwork();
+			const auth = await addTestAuthority(net);
+			const elec = await addTestElection(auth);
+			void elec; // suppress unused-var; elec ensures the election row has been seeded
+			const elections = await net.networkEngine.getElections();
+			expect(elections).to.have.lengthOf.at.least(1);
+			const found = elections.find(e => e.id === 'election-1');
+			expect(found).to.exist;
+			expect(found?.authorityName).to.equal(auth.authority.name);
+			expect(found?.title).to.equal('Test Election');
 		});
 	});
 
