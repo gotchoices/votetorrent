@@ -816,14 +816,14 @@ declare schema main
 		constraint ExtensionExists check (
 			(Type = 'release-key' and exists (select 1 from ReleaseKeyTaskExtension R where R.TaskId = new.Id))
 				or ( Type = 'onboarding' and exists (select 1 from OnboardingTaskExtension O where O.TaskId = new.Id))
-					or ( Type = 'signature' and
+					or ( Type = 'signature' and (
 						( SignatureType = 'network' and exists (select 1 from NetworkSignatureTaskExtension N where N.TaskId = new.Id))
 							or ( SignatureType = 'authority' and exists (select 1 from AuthoritySignatureTaskExtension A where A.TaskId = new.Id))
 							or ( SignatureType = 'admin' and exists (select 1 from AdminSignatureTaskExtension A where A.TaskId = new.Id))
 							or ( SignatureType = 'election' and exists (select 1 from ElectionSignatureTaskExtension E where E.TaskId = new.Id))
 							or ( SignatureType = 'election-revision' and exists (select 1 from ElectionRevisionSignatureTaskExtension ER where ER.TaskId = new.Id))
 							or ( SignatureType = 'ballot' and exists (select 1 from BallotSignatureTaskExtension B where B.TaskId = new.Id))
-					)
+					) )
 		),
 		constraint MutationValid check on insert, update (context.IsMutationValid = true)
 	)
