@@ -5,7 +5,6 @@ import { useTranslation } from "react-i18next";
 import FontAwesome6 from "react-native-vector-icons/FontAwesome6";
 import { ThemedText } from "../../../components/ThemedText";
 import { CustomTextInput } from "../../../components/CustomTextInput";
-import { CustomButton } from "../../../components/CustomButton";
 import { ChipButton } from "../../../components/ChipButton";
 import { InfoCard } from "../../../components/InfoCard";
 import { DistrictsGroupsEditor } from "./DistrictsGroupsEditor";
@@ -31,8 +30,6 @@ interface BallotTemplateFormProps {
 	questions: Question[];
 	onAddQuestion: () => void;
 	onEditQuestion: (code: string) => void;
-	/** Footer propose action */
-	onPropose: () => void;
 }
 
 /**
@@ -47,7 +44,10 @@ interface BallotTemplateFormProps {
  *   3. Description input
  *   4. Questions list (chevron InfoCards) + ADD QUESTION chip
  *   5. Districts/Groups editor
- *   6. PROPOSE footer
+ *
+ * NOTE: The PROPOSE footer is owned by the SCREEN (not this component)
+ * so each screen can wire its own handler. Both screens render an identical
+ * footer, keeping them in sync.
  */
 export function BallotTemplateForm({
 	electionTitle,
@@ -62,7 +62,6 @@ export function BallotTemplateForm({
 	questions,
 	onAddQuestion,
 	onEditQuestion,
-	onPropose,
 }: BallotTemplateFormProps) {
 	const { colors } = useTheme() as ExtendedTheme;
 	const { t } = useTranslation();
@@ -80,122 +79,110 @@ export function BallotTemplateForm({
 	};
 
 	return (
-		<View style={styles.content}>
-			<ScrollView style={[styles.container, { backgroundColor: colors.background }]}>
-				{/* 1. Election + Date context header */}
-				<View style={[styles.section, styles.contextHeader]}>
-					<View style={styles.contextRow}>
-						<ThemedText type="defaultSemiBold">{t("election")}: </ThemedText>
-						<ThemedText numberOfLines={1} ellipsizeMode="tail" style={styles.contextValue}>
-							{electionTitle ?? t("election")}
-						</ThemedText>
-					</View>
-					<View style={styles.contextRow}>
-						<ThemedText type="defaultSemiBold">{t("date")}: </ThemedText>
-						<ThemedText numberOfLines={1} ellipsizeMode="tail" style={styles.contextValue}>
-							{electionDate ?? t("date")}
-						</ThemedText>
-					</View>
-				</View>
-
-				{/* 2. Authority dropdown */}
-				<View style={styles.section}>
-					<ThemedText type="defaultSemiBold" style={styles.sectionTitle}>
-						{t("authority")}
+		<ScrollView style={[styles.container, { backgroundColor: colors.background }]}>
+			{/* 1. Election + Date context header */}
+			<View style={[styles.section, styles.contextHeader]}>
+				<View style={styles.contextRow}>
+					<ThemedText type="defaultSemiBold">{t("election")}: </ThemedText>
+					<ThemedText numberOfLines={1} ellipsizeMode="tail" style={styles.contextValue}>
+						{electionTitle ?? t("election")}
 					</ThemedText>
-					<TouchableOpacity
-						onPress={handleDropdownToggle}
+				</View>
+				<View style={styles.contextRow}>
+					<ThemedText type="defaultSemiBold">{t("date")}: </ThemedText>
+					<ThemedText numberOfLines={1} ellipsizeMode="tail" style={styles.contextValue}>
+						{electionDate ?? t("date")}
+					</ThemedText>
+				</View>
+			</View>
+
+			{/* 2. Authority dropdown */}
+			<View style={styles.section}>
+				<ThemedText type="defaultSemiBold" style={styles.sectionTitle}>
+					{t("authority")}
+				</ThemedText>
+				<TouchableOpacity
+					onPress={handleDropdownToggle}
+					style={[
+						styles.dropdownRow,
+						{ backgroundColor: colors.card, borderColor: colors.border },
+					]}
+				>
+					<ThemedText
 						style={[
-							styles.dropdownRow,
+							styles.dropdownText,
+							{ color: authority ? colors.text : colors.textSecondary },
+						]}
+					>
+						{authority || t("authorityPlaceholder")}
+					</ThemedText>
+					<FontAwesome6 name="chevron-down" size={16} color={colors.text} />
+				</TouchableOpacity>
+				{dropdownOpen && authorityOptions.length > 0 && (
+					<View
+						style={[
+							styles.dropdownList,
 							{ backgroundColor: colors.card, borderColor: colors.border },
 						]}
 					>
-						<ThemedText
-							style={[
-								styles.dropdownText,
-								{ color: authority ? colors.text : colors.textSecondary },
-							]}
-						>
-							{authority || t("authorityPlaceholder")}
-						</ThemedText>
-						<FontAwesome6 name="chevron-down" size={16} color={colors.text} />
-					</TouchableOpacity>
-					{dropdownOpen && authorityOptions.length > 0 && (
-						<View
-							style={[
-								styles.dropdownList,
-								{ backgroundColor: colors.card, borderColor: colors.border },
-							]}
-						>
-							{authorityOptions.map((option) => (
-								<TouchableOpacity
-									key={option}
-									onPress={() => handleAuthoritySelect(option)}
-									style={[
-										styles.dropdownItem,
-										{ borderBottomColor: colors.border },
-										option === authority && { backgroundColor: colors.accent },
-									]}
-								>
-									<ThemedText>{option}</ThemedText>
-								</TouchableOpacity>
-							))}
-						</View>
-					)}
-				</View>
-
-				{/* 3. Description input */}
-				<View style={styles.section}>
-					<CustomTextInput
-						title={t("description")}
-						value={description}
-						onChangeText={onDescriptionChange}
-						placeholder={t("description")}
-					/>
-				</View>
-
-				{/* 4. Questions list + ADD QUESTION */}
-				<View style={styles.section}>
-					<ThemedText type="defaultSemiBold" style={styles.sectionTitle}>
-						{t("question")}
-					</ThemedText>
-					{questions.map((q) => (
-						<InfoCard
-							key={q.code}
-							title={q.title}
-							additionalInfo={[
-								{ label: t("code"), value: q.code },
-								{ label: t("type"), value: q.type },
-							]}
-							icon="chevron-right"
-							onPress={() => onEditQuestion(q.code)}
-						/>
-					))}
-					<View style={styles.addButtonContainer}>
-						<ChipButton
-							label={t("addQuestion")}
-							icon="circle-plus"
-							onPress={onAddQuestion}
-						/>
+						{authorityOptions.map((option) => (
+							<TouchableOpacity
+								key={option}
+								onPress={() => handleAuthoritySelect(option)}
+								style={[
+									styles.dropdownItem,
+									{ borderBottomColor: colors.border },
+									option === authority && { backgroundColor: colors.accent },
+								]}
+							>
+								<ThemedText>{option}</ThemedText>
+							</TouchableOpacity>
+						))}
 					</View>
-				</View>
+				)}
+			</View>
 
-				{/* 5. Districts / Groups editor */}
-				<View style={styles.section}>
-					<DistrictsGroupsEditor districts={districts} onChange={onDistrictsChange} />
-				</View>
-			</ScrollView>
-
-			{/* 6. Footer: PROPOSE */}
-			<View style={[styles.footer, { backgroundColor: colors.card }]}>
-				<CustomButton
-					title={t("propose")}
-					icon="paper-plane"
-					onPress={onPropose}
-					backgroundColor={colors.primary}
+			{/* 3. Description input */}
+			<View style={styles.section}>
+				<CustomTextInput
+					title={t("description")}
+					value={description}
+					onChangeText={onDescriptionChange}
+					placeholder={t("description")}
 				/>
 			</View>
-		</View>
+
+			{/* 4. Questions list + ADD QUESTION */}
+			<View style={styles.section}>
+				<ThemedText type="defaultSemiBold" style={styles.sectionTitle}>
+					{t("question")}
+				</ThemedText>
+				{questions.map((q) => (
+					<InfoCard
+						key={q.code}
+						title={q.title}
+						additionalInfo={[
+							{ label: t("code"), value: q.code },
+							{ label: t("type"), value: q.type },
+						]}
+						icon="chevron-right"
+						onPress={() => onEditQuestion(q.code)}
+					/>
+				))}
+				<View style={styles.addButtonContainer}>
+					<ChipButton
+						label={t("addQuestion")}
+						icon="circle-plus"
+						onPress={onAddQuestion}
+					/>
+				</View>
+			</View>
+
+			{/* 5. Districts / Groups editor */}
+			<View style={styles.section}>
+				<DistrictsGroupsEditor districts={districts} onChange={onDistrictsChange} />
+			</View>
+		</ScrollView>
 	);
 }
 
@@ -241,4 +228,5 @@ const localStyles = StyleSheet.create({
 	},
 });
 
+// globalStyles provides: container, section, sectionTitle, footer
 const styles = { ...globalStyles, ...localStyles };
