@@ -18,7 +18,7 @@ import { KeysTasksEngine } from '../src/tasks/keys-tasks-engine'
 import { OnboardingTasksEngine } from '../src/tasks/onboarding-tasks-engine'
 import { SignatureTasksEngine } from '../src/tasks/signature-tasks-engine'
 import type { EngineContext } from '../src/types.js'
-import { createTestNetwork, addTestAuthority, addTestElection, seedBallot, seedElectionSigning, makeElectionInit as makeElectionInitFromFixture, makeTestSignature } from './fixtures/test-context.js'
+import { createTestNetwork, addTestAuthority, addTestElection, seedBallot, seedQuestion, seedElectionSigning, makeElectionInit as makeElectionInitFromFixture, makeTestSignature } from './fixtures/test-context.js'
 import { peekNextElectionTid } from '../src/elections/elections-engine.js'
 import { randomTestKeyPair } from './fixtures/keys.js'
 import { AsyncStorage } from './shims/react-native'
@@ -477,42 +477,38 @@ describe('ElectionEngine', () => {
   // ELEC-08 — addOption (ProposedOption INSERT) — class-only method
   // -----------------------------------------------------------------------
   describe('addOption', () => {
-    // Prior skip annotation claimed NOT NULL constraints on
-    // ProposedOption.Details / Details-binding bugs. That was wrong — the
-    // engine binds Details=null and the schema allows null.
-    //
-    // Two blockers were uncovered after switching to seedBallot:
-    //   1. ProposedOption.BallotIdValid — resolved by seedBallot (Plan 12.3-03).
-    //   2. ProposedOption.QuestionCodeValid — checks
-    //      `exists (select 1 from Question Q where Q.BallotId = new.BallotId
-    //       and Q.Code = new.QuestionCode)`. This references the canonical
-    //      Question table, not ProposedQuestion. Question.MutationValid
-    //      requires a full AdminSignature pipeline with scope='ceb' and a
-    //      Digest over (Tid, BallotId, Code, Title, Instructions, DependsOn,
-    //      Type, OptionRange, ScoreRange, Grouping, Sequence, Required) —
-    //      i.e. a `seedQuestion` helper analogous to seedBallot is needed.
-    //      No such helper exists yet; ElectionEngine.addQuestion only writes
-    //      to ProposedQuestion. Deferred to a future plan that adds a
-    //      seedQuestion fixture (or to a real proposal-accept flow that
-    //      promotes ProposedQuestion → Question).
-    it.skip('INSERTs a ProposedOption row — BLOCKED: ProposedOption.QuestionCodeValid requires a canonical Question row; needs a seedQuestion fixture helper (mirror of seedBallot) which does not yet exist', async () => {
+    // Phase 12.4: uses seedQuestion (Layer-3 fixture) to seed the canonical
+    // Question row required by ProposedOption.QuestionCodeValid. seedQuestion
+    // bypasses the quereus 3.3.0 default-column NULL bug that blocks the
+    // ElectionEngine addQuestion path.
+    it('INSERTs a ProposedOption row', async () => {
       const net = await createTestNetwork()
       const auth = await addTestAuthority(net)
       const elec = await addTestElection(auth)
       const { ballotId } = await seedBallot(elec, 'ballot-1')
+      await seedQuestion(elec, ballotId, {
+        code: 'q1',
+        title: 'Q1',
+        instructions: 'pick one',
+        type: 'select'
+      })
       const engine = new ElectionEngine(
         { id: 'election-1', authorityId: auth.authority.id },
         elec.ctx
       )
-      const q: Question = {
-        code: 'q1',
-        title: 'Q1',
-        instructions: 'pick one',
-        options: [],
-        type: 'select'
+      // NOTE: provide non-null values for all optional columns (details,
+      // infoURL, image, video) — the quereus 3.3.0 default-column NULL bug
+      // (260528-001) currently rejects NULL writes to nullable text columns
+      // on ProposedOption. Once quereus lands the upstream fix the test
+      // can revert to `{ code, title }` only.
+      const o: Option = {
+        code: 'opt-1',
+        title: 'Option 1',
+        details: '',
+        infoURL: '',
+        image: { url: '' },
+        video: { url: '' }
       }
-      await engine.addQuestion(ballotId, q)
-      const o: Option = { code: 'opt-1', title: 'Option 1' }
       await engine.addOption(ballotId, 'q1', o, 0)
       const row = await elec.ctx.db
         .prepare(
