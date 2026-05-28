@@ -56,7 +56,21 @@ export class NetworkEngine implements INetworkEngine {
     admin: AdminInit,
     options?: { inviteSlotCid?: string; inviteSignature?: string }
   ): Promise<void> {
-    const id = crypto.randomUUID()
+    // Group B (Phase 12.3-01): when responding to an invite, the authority Id
+    // was already generated and committed in InviteResult.InvokedId by
+    // respondToInvite() (so its Digest(Tid, Id, Name, DomainName, ImageRef)
+    // matches Authority.InsertValid). Reuse that Id here; otherwise fall
+    // back to a fresh uuid for the first-authority shoe-in path (no invite).
+    let id: string = crypto.randomUUID()
+    if (options?.inviteSlotCid) {
+      const invokedRow = await this.ctx.db
+        .prepare('select InvokedId from InviteResult where SlotCid = :slotCid')
+        .get({ slotCid: options.inviteSlotCid })
+      const reservedId = invokedRow?.InvokedId
+      if (typeof reservedId === 'string' && reservedId.length > 0) {
+        id = reservedId
+      }
+    }
     const imageRefJson = authority.imageUrl
       ? JSON.stringify(authority.imageUrl)
       : null
@@ -603,10 +617,10 @@ export class NetworkEngine implements INetworkEngine {
       const userKey = this.ctx.user?.activeKeys?.[0]?.key ?? null
       await this.ctx.db.exec(
 				`insert into ProposedNetwork
-					(Name, ImageRef, Relays, TimestampAuthorities, NumberRequiredTSAs, ElectionType)
+					(Name, Revision, ImageRef, Relays, TimestampAuthorities, NumberRequiredTSAs, ElectionType)
 				with context UserId = :userId, UserKey = :userKey, Signature = null, Tid = 0, now = :now, IsUserValid = true
 				values
-					(:name, :imageRef, :relays, :timestampAuthorities, :numberRequiredTSAs, :electionType)`,
+					(:name, coalesce((select max(Revision) from ProposedNetwork where Name = :name), -1) + 1, :imageRef, :relays, :timestampAuthorities, :numberRequiredTSAs, :electionType)`,
 				{
 				  name: revision.name,
 				  imageRef: imageRefJson,
@@ -650,36 +664,101 @@ export class NetworkEngine implements INetworkEngine {
       .get({ inviteKey: invite.invite.inviteKey, type: invite.invite.type })
     if (!slotRow) throw new Error('InviteSlot not found for given inviteKey and type')
     const slotCid = slotRow.Cid as string
+    // Group B (Phase 12.3-01): for authority invites, generate the authority
+    // Id at invite-response time so the SQL-side Digest() committed to
+    // InviteResult.Digest matches what Authority.InsertValid recomputes when
+    // the downstream createAuthority() insert fires:
+    //   Digest(context.Tid, new.Id, new.Name, new.DomainName, new.ImageRef)
+    // The generated id is stored in InviteResult.InvokedId; createAuthority
+    // looks it up via inviteSlotCid and reuses it as the new Authority.Id.
+    const isAuthorityInvite = invite.invite.type === 'au'
+    const invokesAuthority =
+      isAuthorityInvite && invite.isAccepted
+        ? ((invite.invokes as unknown as {
+            authority?: {
+              name?: string
+              domainName?: string | null
+              imageRef?: unknown
+            }
+          }).authority ?? {})
+        : null
+    const generatedAuthorityId =
+      isAuthorityInvite && invite.isAccepted ? crypto.randomUUID() : null
     const invokedId =
-      invite.userId ?? (invite.userInit ? crypto.randomUUID() : null)
-    const resultDigest = invite.isAccepted
-      ? JSON.stringify(invite.invokes)
+      invite.userId
+      ?? generatedAuthorityId
+      ?? (invite.userInit ? crypto.randomUUID() : null)
+    // Tid binding (1) matches createAuthority's hard-coded Tid = 1 so
+    // Digest(context.Tid, ...) on the Authority insert side reproduces the
+    // exact value committed here. If Tid ever becomes non-static, both sites
+    // must read from a shared source.
+    const authorityImageRefJson = invokesAuthority?.imageRef != null
+      ? JSON.stringify(invokesAuthority.imageRef)
       : null
     try {
-      await this.ctx.db.exec(
-				`insert into InviteResult (
-					SlotCid,
-					IsAccepted,
-					Digest,
-					InviteSignature,
-					InvokedId
-				)
-				with context IsSigningValid = true, IsSignatureValid = true
-				values (
-					:slotCid,
-					:isAccepted,
-					:digest,
-					:inviteSignature,
-					:invokedId
-				)`,
-        {
-          slotCid,
-          isAccepted: invite.isAccepted,
-          digest: resultDigest,
-          inviteSignature: invite.inviteSignature,
-          invokedId
-        }
-      )
+      if (isAuthorityInvite && invite.isAccepted) {
+        await this.ctx.db.exec(
+					`insert into InviteResult (
+						SlotCid,
+						IsAccepted,
+						Digest,
+						InviteSignature,
+						InvokedId
+					)
+					with context IsSigningValid = true, IsSignatureValid = true
+					values (
+						:slotCid,
+						:isAccepted,
+						Digest(:tid, :authorityId, :authorityName, :authorityDomainName, :authorityImageRef),
+						:inviteSignature,
+						:invokedId
+					)`,
+          {
+            slotCid,
+            isAccepted: invite.isAccepted,
+            tid: 1,
+            authorityId: generatedAuthorityId,
+            authorityName: invokesAuthority?.name ?? null,
+            authorityDomainName: invokesAuthority?.domainName ?? null,
+            authorityImageRef: authorityImageRefJson,
+            inviteSignature: invite.inviteSignature,
+            invokedId
+          }
+        )
+      } else {
+        // Non-authority accepted invites and rejections: Digest column is
+        // either null (rejection) or an opaque JSON blob (legacy semantics
+        // for user / officer / keyholder / registrant invites). User
+        // invite chain validation lives in Plan 12.3-07; this branch
+        // preserves existing behavior.
+        const resultDigest = invite.isAccepted
+          ? JSON.stringify(invite.invokes)
+          : null
+        await this.ctx.db.exec(
+					`insert into InviteResult (
+						SlotCid,
+						IsAccepted,
+						Digest,
+						InviteSignature,
+						InvokedId
+					)
+					with context IsSigningValid = true, IsSignatureValid = true
+					values (
+						:slotCid,
+						:isAccepted,
+						:digest,
+						:inviteSignature,
+						:invokedId
+					)`,
+          {
+            slotCid,
+            isAccepted: invite.isAccepted,
+            digest: resultDigest,
+            inviteSignature: invite.inviteSignature,
+            invokedId
+          }
+        )
+      }
     } catch (err) {
       if (err instanceof QuereusError) {
         throw new Error(`Quereus error (code ${err.code}): ${err.message}`)

@@ -902,9 +902,9 @@ describe('NetworkEngine', () => {
 				// a deliberately invalid signature and expect UserValid in the
 				// resulting QuereusError.
 				await ctx.db.exec(
-					`insert into ProposedNetwork (Name, ImageRef, Relays, TimestampAuthorities, NumberRequiredTSAs, ElectionType)
+					`insert into ProposedNetwork (Name, Revision, ImageRef, Relays, TimestampAuthorities, NumberRequiredTSAs, ElectionType)
            with context UserId = :uid, UserKey = 'bad-key', Signature = 'deadbeef', Tid = 9, now = ${Date.now()}, IsUserValid = false
-           values ('SigCheck', null, '[]', '[]', 1, 'a')`,
+           values ('SigCheck', 0, null, '[]', '[]', 1, 'a')`,
 					{ uid: ctx.user?.id ?? 'user-1' },
 				);
 			} catch (err) {
@@ -2060,9 +2060,9 @@ describe('NetworksEngine - creation constraints', () => {
 			let caught: unknown;
 			try {
 				await ctx.db.exec(
-					`insert into ProposedNetwork (Name, ImageRef, Relays, TimestampAuthorities, NumberRequiredTSAs, ElectionType)
+					`insert into ProposedNetwork (Name, Revision, ImageRef, Relays, TimestampAuthorities, NumberRequiredTSAs, ElectionType)
            with context UserId = 'no-such-user', UserKey = 'no-key', Signature = 'sig', Tid = 9, now = ${Date.now()}, IsUserValid = false
-           values ('NoScope', null, '[]', '[]', 1, 'a')`,
+           values ('NoScope', 0, null, '[]', '[]', 1, 'a')`,
 				);
 			} catch (err) {
 				caught = err;
@@ -2076,9 +2076,9 @@ describe('NetworksEngine - creation constraints', () => {
 			let caught: unknown;
 			try {
 				await ctx.db.exec(
-					`insert into ProposedNetwork (Name, ImageRef, Relays, TimestampAuthorities, NumberRequiredTSAs, ElectionType)
+					`insert into ProposedNetwork (Name, Revision, ImageRef, Relays, TimestampAuthorities, NumberRequiredTSAs, ElectionType)
            with context UserId = :uid, UserKey = :pubKey, Signature = 'bad-sig', Tid = 9, now = ${Date.now()}, IsUserValid = false
-           values ('BadSig', null, '[]', '[]', 1, 'a')`,
+           values ('BadSig', 0, null, '[]', '[]', 1, 'a')`,
 					{
 						uid: ctx.user?.id ?? 'user-1',
 						pubKey: (ctx.user?.activeKeys ?? [])[0]!.key,

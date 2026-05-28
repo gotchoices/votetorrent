@@ -255,12 +255,13 @@ declare schema main
 
 	table ProposedNetwork (
 		Name text,
+		Revision integer not null, -- monotonic discriminator allowing many proposed revisions per Name (Phase 12.3-02)
 		ImageRef text null, -- json object { url?: string, cid?: string }
 		Relays text, -- json array of strings - TODO: constraint
 		TimestampAuthorities text, -- json array of { url: string } - TODO: constraint
 		NumberRequiredTSAs integer default 0,
 		ElectionType text, -- references ElectionType(Code)
-		primary key (),
+		primary key (Name, Revision),
 		-- TODO: constraint ImageRefValid check (ImageRef is a valid image reference JSON)
 		-- TODO: constraint RelaysValid check (Relays is a valid array of strings)
 		-- TODO: constraint TimestampAuthoritiesValid check (TimestampAuthorities is a valid array of { url: string })
