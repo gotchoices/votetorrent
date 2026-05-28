@@ -390,12 +390,8 @@ export const RootNavigator = () => {
 				component={CreateElectionScreen}
 				options={{ title: t("createElection") }}
 			/>
-			<Stack.Screen
-				name="EditBallot"
-				component={EditBallotScreen}
-				options={{ title: t("ballotTemplate") }}
-			/>
 			{/* Phase 9 plan 09-05 — single shared BallotDraftProvider for the three ballot screens via Stack.Group screenLayout (D-11 closure). */}
+			{/* Phase 9 plan 09-08 — EditBallot moved INTO the BallotDraftProvider Stack.Group so it shares draft context. */}
 			<Stack.Group
 				screenLayout={({ children }) => (
 					<BallotDraftProvider>{children}</BallotDraftProvider>
@@ -404,7 +400,12 @@ export const RootNavigator = () => {
 				<Stack.Screen
 					name="CreateBallot"
 					component={CreateBallotScreen}
-					options={{ title: t("createBallot") }}
+					options={{ title: t("ballotTemplate") }}
+				/>
+				<Stack.Screen
+					name="EditBallot"
+					component={EditBallotScreen}
+					options={{ title: t("ballotTemplate") }}
 				/>
 				<Stack.Screen
 					name="EditQuestion"

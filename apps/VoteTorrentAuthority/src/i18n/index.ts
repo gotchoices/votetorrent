@@ -237,6 +237,11 @@ const resources = {
 			clearAll: 'Clear All',
 			addRange: 'Add Range',
 			propose: 'Propose',
+			// Phase 9 plan 09-08 — Ballot Template parity (BALUI-01/02).
+			// D-17: en-only; Spanish deferred to Phase 11.
+			authorityPlaceholder: 'Select authority',
+			addDistrictCode: 'Add district code',
+			itemsRangeCount: '{{from}}–{{to}} of {{total}} items',
 			// Phase 7 foundation keys (07-01)
 			adminRevision: 'Admin Revision',
 			authorityRevision: 'Authority Revision',

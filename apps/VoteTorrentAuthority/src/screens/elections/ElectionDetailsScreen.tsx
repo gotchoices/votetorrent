@@ -9,6 +9,7 @@ import { ElectionDetailsBlock } from "./components/ElectionDetailsBlock";
 import { ChipButton } from "../../components/ChipButton";
 import { KeyholderCard } from "./components/KeyholderCard";
 import { CustomButton } from "../../components/CustomButton";
+import { InfoCard } from "../../components/InfoCard";
 import { Timeline } from "./components/Timeline";
 import { formatDate } from "../../utils/displayUtils";
 import type { NavigationProp } from "../../navigation/types";
@@ -115,11 +116,23 @@ export default function ElectionDetailsScreen() {
 				/>
 			</View>
 
-			{/* Create-ballot empty-state action — D-09 entry point to CreateBallot
-			    route. Route is registered by Plan 09-04; verify-time the call must
-			    exist with electionId param. */}
+			{/* Ballot Templates section — D-09 entry point to CreateBallot (empty state)
+			    and EditBallot (existing template edit mode). Per 09-08 decision 3. */}
 			<View style={styles.section}>
 				<ThemedText type="title">{t("ballotTemplates")}</ThemedText>
+				{/* Existing template list card → EditBallot edit mode */}
+				<InfoCard
+					title={t("ballotTemplate")}
+					icon="chevron-right"
+					onPress={() =>
+						navigation.navigate("EditBallot", {
+							electionId: electionDetails.election.id,
+							electionTitle: electionDetails.election.title,
+							electionDate: formatDate(electionDetails.election.revisionDeadline),
+						})
+					}
+				/>
+				{/* Empty-state: create new ballot template */}
 				<ThemedText type="small">{t("noBallotYet")}</ThemedText>
 				<CustomButton
 					title={t("createBallot")}
@@ -129,6 +142,8 @@ export default function ElectionDetailsScreen() {
 					onPress={() =>
 						navigation.navigate("CreateBallot", {
 							electionId: electionDetails.election.id,
+							electionTitle: electionDetails.election.title,
+							electionDate: formatDate(electionDetails.election.revisionDeadline),
 						})
 					}
 				/>
