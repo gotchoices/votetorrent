@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { View, ScrollView, StyleSheet } from "react-native";
 import { NoNetwork } from "../../components/NoNetwork";
 import { useApp } from "../../providers/AppProvider";
@@ -14,7 +14,7 @@ import {
 	Proposal,
 } from "@votetorrent/vote-core";
 import { ElectionCard } from "./components/ElectionCard";
-import { useNavigation } from "@react-navigation/native";
+import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NavigationProp } from "../../navigation/types";
 import { ThemedText } from "../../components/ThemedText";
 
@@ -68,6 +68,33 @@ export const ElectionsScreen = () => {
 		}
 		initializeElectionsEngine();
 	}, [hasNetwork]);
+
+	// Phase 9 plan 09-15 — re-load on screen focus so a newly created election/revision
+	// appears on return (mirrors the useFocusEffect pattern from the ballot round in 09-09).
+	useFocusEffect(
+		useCallback(() => {
+			async function reloadElections() {
+				if (!hasNetwork) return;
+				try {
+					const engine = await getEngine<IElectionsEngine>("elections");
+					setElectionsEngine(engine);
+
+					const [activeElections, proposed, history] = await Promise.all([
+						engine.getElections(),
+						engine.getProposedElections(),
+						engine.getElectionHistory(),
+					]);
+
+					setElections(activeElections);
+					setProposedElections(proposed);
+					setElectionHistory(history);
+				} catch (error) {
+					console.error("Error reloading elections on focus:", error);
+				}
+			}
+			reloadElections();
+		}, [hasNetwork, getEngine])
+	);
 
 	if (!hasNetwork) {
 		return <NoNetwork />;

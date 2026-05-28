@@ -10,6 +10,9 @@ import { globalStyles } from "../../theme/styles";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../../navigation/types";
 import { ElectionRevisionForm, ElectionRevisionFormValue } from "./components/ElectionRevisionForm";
+import { useApp } from "../../providers/AppProvider";
+import { ElectionType } from "@votetorrent/vote-core";
+import type { IElectionsEngine, ElectionInit } from "@votetorrent/vote-core";
 
 // Phase 9 plan 09-12 (ELECUI-03) — Single-scroll New Election form.
 // Replaces the 4-step wizard (D-01..D-04) per Binding Decision 1 (09-PARITY-GAPS-R3).
@@ -24,6 +27,7 @@ export function CreateElectionScreen() {
 	const { t } = useTranslation();
 	const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 	const insets = useSafeAreaInsets();
+	const { getEngine } = useApp();
 
 	// Core section state (cannot change once approved)
 	const [coreTitle, setCoreTitle] = useState("");
@@ -42,14 +46,70 @@ export function CreateElectionScreen() {
 		instructions: "",
 	});
 
-	// PROPOSE stub per D-03 / 09-15 deferred persistence
-	const handlePropose = () => {
-		console.log("createElection-propose stub", {
-			coreTitle,
-			coreDate,
-			coreRevisionDeadline,
-			revision,
-		});
+	// Phase 9 plan 09-15 — PROPOSE calls electionsEngine.createElection, then goBack.
+	const handlePropose = async () => {
+		try {
+			const electionsEngine = await getEngine<IElectionsEngine>("elections");
+			if (!electionsEngine) {
+				navigation.goBack();
+				return;
+			}
+			const now = Date.now();
+			const parseDateOrFallback = (s: string, fallbackMs: number): number =>
+				s.trim() ? new Date(s).getTime() || fallbackMs : fallbackMs;
+			const init: ElectionInit = {
+				election: {
+					id: `election-${now}`,
+					authorityId: "authority-mock",
+					title: coreTitle || "Untitled Election",
+					date: parseDateOrFallback(coreDate, now + 14 * 24 * 60 * 60 * 1000),
+					revisionDeadline: parseDateOrFallback(
+						coreRevisionDeadline,
+						now + 7 * 24 * 60 * 60 * 1000
+					),
+					ballotDeadline: now + 10 * 24 * 60 * 60 * 1000,
+					type: ElectionType.official,
+				},
+				revision: {
+					electionId: `election-${now}`,
+					revision: 1,
+					revisionTimestamp: now,
+					tags: revision.tags,
+					instructions: revision.instructions,
+					keyholders: revision.keyholders.map((name) => ({
+						name,
+						type: "k",
+						expiration: "0",
+						inviteKey: "",
+						invitePrivate: "",
+						inviteSignature: "",
+						digest: "",
+					})),
+					timeline: {
+						registrationEnds: parseDateOrFallback(
+							revision.registrationEnds,
+							now + 2 * 24 * 60 * 60 * 1000
+						),
+						ballotsFinal: parseDateOrFallback(
+							revision.ballotsFinal,
+							now + 5 * 24 * 60 * 60 * 1000
+						),
+						votingStarts: parseDateOrFallback(
+							revision.votingStarts,
+							now + 10 * 24 * 60 * 60 * 1000
+						),
+						tallyingStarts: now + 14 * 24 * 60 * 60 * 1000,
+						validation: now + 15 * 24 * 60 * 60 * 1000,
+						certificationStarts: now + 16 * 24 * 60 * 60 * 1000,
+						closed: now + 17 * 24 * 60 * 60 * 1000,
+					},
+					keyholderThreshold: revision.threshold,
+				},
+			};
+			await electionsEngine.createElection(init);
+		} catch (err) {
+			console.error("createElection error:", err);
+		}
 		navigation.goBack();
 	};
 
