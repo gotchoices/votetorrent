@@ -407,10 +407,10 @@ describe('NetworkEngine', () => {
 	// 3. Authority Creation from within a Network
 	// -----------------------------------------------------------------------
 	describe('createAuthority', () => {
-		it.skip('should create an authority with a generated UUID id — BLOCKED: Authority.InsertValid expects InviteResult.Digest = Digest(Tid, Id, Name, DomainName, ImageRef) but respondToInvite stores JSON.stringify(invokes) — engine Digest mismatch', async () => {
+		it.skip('should create an authority with a generated UUID id — BLOCKED: Admin.MutationValid expects InviteResult.Digest over (Tid, Authority.{Id,Name,DomainName,ImageRef}, Digest(Admin.{EffectiveAt,ThresholdPolicies}), Digest(Officer.{AdminEffectiveAt,UserId,Title,Scopes})) but respondToInvite only digests Authority columns — needs respondToInvite to accept Admin/Officer payload (Plan 12.3-05 follow-up)', async () => {
 			const net = await createTestNetwork();
 			const auth = await addTestAuthority(net);
-			const inviteCtx = await seedAuthorityInvite(auth);
+			const inviteCtx = await seedAuthorityInvite(auth, { name: 'New Authority', domainName: 'new.example.com' });
 			await net.networkEngine.createAuthority(
 				{ name: 'New Authority', domainName: 'new.example.com' },
 				{
@@ -430,10 +430,10 @@ describe('NetworkEngine', () => {
 			);
 		});
 
-		it.skip('should insert Authority, Admin, and Officer rows in one transaction — BLOCKED: Authority.InsertValid expects InviteResult.Digest = Digest(Tid, Id, Name, DomainName, ImageRef) but respondToInvite stores JSON.stringify(invokes) — engine Digest mismatch', async () => {
+		it.skip('should insert Authority, Admin, and Officer rows in one transaction — BLOCKED: Admin.MutationValid expects InviteResult.Digest over (Tid, Authority.{Id,Name,DomainName,ImageRef}, Digest(Admin.{EffectiveAt,ThresholdPolicies}), Digest(Officer.{AdminEffectiveAt,UserId,Title,Scopes})) but respondToInvite only digests Authority columns — needs respondToInvite to accept Admin/Officer payload (Plan 12.3-05 follow-up)', async () => {
 			const net = await createTestNetwork();
 			const auth = await addTestAuthority(net);
-			const inviteCtx = await seedAuthorityInvite(auth);
+			const inviteCtx = await seedAuthorityInvite(auth, { name: 'TxnAuthority', domainName: 'txn.example.com' });
 			const effectiveAt = Date.now();
 			await net.networkEngine.createAuthority(
 				{ name: 'TxnAuthority', domainName: 'txn.example.com' },
@@ -546,10 +546,10 @@ describe('NetworkEngine', () => {
 			if (caught) { expect(caught).to.be.instanceOf(Error) };
 		});
 
-		it.skip('should set Authority.DomainName to the provided value or null — BLOCKED: Authority.InsertValid expects InviteResult.Digest = Digest(Tid, Id, Name, DomainName, ImageRef) but respondToInvite stores JSON.stringify(invokes) — engine Digest mismatch', async () => {
+		it.skip('should set Authority.DomainName to the provided value or null — BLOCKED: Admin.MutationValid expects InviteResult.Digest over (Tid, Authority.{Id,Name,DomainName,ImageRef}, Digest(Admin.{EffectiveAt,ThresholdPolicies}), Digest(Officer.{AdminEffectiveAt,UserId,Title,Scopes})) but respondToInvite only digests Authority columns — needs respondToInvite to accept Admin/Officer payload (Plan 12.3-05 follow-up)', async () => {
 			const net = await createTestNetwork();
 			const auth = await addTestAuthority(net);
-			const inviteCtx1 = await seedAuthorityInvite(auth);
+			const inviteCtx1 = await seedAuthorityInvite(auth, { name: 'WithDomain', domainName: 'wd.example.com' });
 			await net.networkEngine.createAuthority(
 				{ name: 'WithDomain', domainName: 'wd.example.com' },
 				{
@@ -568,7 +568,7 @@ describe('NetworkEngine', () => {
 				.get({ n: 'WithDomain' });
 			expect(withDomain?.DomainName).to.equal('wd.example.com');
 
-			const inviteCtx2 = await seedAuthorityInvite(auth);
+			const inviteCtx2 = await seedAuthorityInvite(auth, { name: 'NoDomain', domainName: null });
 			await net.networkEngine.createAuthority({ name: 'NoDomain' } as never, {
 				officers: [
 					{
@@ -586,10 +586,14 @@ describe('NetworkEngine', () => {
 			expect(noDomain?.DomainName).to.equal(null);
 		});
 
-		it.skip('should serialize imageRef as JSON in the Authority row — BLOCKED: Authority.InsertValid expects InviteResult.Digest = Digest(Tid, Id, Name, DomainName, ImageRef) but respondToInvite stores JSON.stringify(invokes) — engine Digest mismatch', async () => {
+		it.skip('should serialize imageRef as JSON in the Authority row — BLOCKED: Admin.MutationValid expects InviteResult.Digest over (Tid, Authority.{Id,Name,DomainName,ImageRef}, Digest(Admin.{EffectiveAt,ThresholdPolicies}), Digest(Officer.{AdminEffectiveAt,UserId,Title,Scopes})) but respondToInvite only digests Authority columns — needs respondToInvite to accept Admin/Officer payload (Plan 12.3-05 follow-up)', async () => {
 			const net = await createTestNetwork();
 			const auth = await addTestAuthority(net);
-			const inviteCtx = await seedAuthorityInvite(auth);
+			const inviteCtx = await seedAuthorityInvite(auth, {
+				name: 'WithImage',
+				domainName: 'wi.example.com',
+				imageRef: 'https://cdn.example.com/auth.png',
+			});
 			await net.networkEngine.createAuthority(
 				{
 					name: 'WithImage',
@@ -2488,10 +2492,10 @@ describe('NetworkCreateAuthorityBuilder', () => {
 		expect(full.isValid()).to.equal(true);
 	});
 
-	it.skip('REAL ENGINE: isValid===true => commit() does not throw BuilderValidationError — BLOCKED: Authority.InsertValid expects InviteResult.Digest = Digest(Tid, Id, Name, DomainName, ImageRef) but respondToInvite stores JSON.stringify(invokes) — engine Digest mismatch', async () => {
+	it.skip('REAL ENGINE: isValid===true => commit() does not throw BuilderValidationError — BLOCKED: Admin.MutationValid expects InviteResult.Digest over (Tid, Authority.{Id,Name,DomainName,ImageRef}, Digest(Admin.{EffectiveAt,ThresholdPolicies}), Digest(Officer.{AdminEffectiveAt,UserId,Title,Scopes})) but respondToInvite only digests Authority columns — needs respondToInvite to accept Admin/Officer payload (Plan 12.3-05 follow-up)', async () => {
 		const net = await createTestNetwork();
 		const auth = await addTestAuthority(net);
-		const inviteCtx = await seedAuthorityInvite(auth);
+		const inviteCtx = await seedAuthorityInvite(auth, { name: 'Test Authority', domainName: 'test.example.com' });
 		const b = new NetworkCreateAuthorityBuilder(net.networkEngine)
 			.setAuthority(makeAuthorityInit())
 			.setAdmin(makeAdminInit());
@@ -2516,10 +2520,10 @@ describe('NetworkCreateAuthorityBuilder', () => {
 		expect(() => NetworkCreateAuthorityBuilder.fromJSON({ kind: 'network.createAuthority', version: 99, draft: {} }, stub)).to.throw(/unsupported version/);
 	});
 
-	it.skip('REAL ENGINE: double-commit guard throws BuilderAlreadyCommittedError — BLOCKED: Authority.InsertValid expects InviteResult.Digest = Digest(Tid, Id, Name, DomainName, ImageRef) but respondToInvite stores JSON.stringify(invokes) — engine Digest mismatch', async () => {
+	it.skip('REAL ENGINE: double-commit guard throws BuilderAlreadyCommittedError — BLOCKED: Admin.MutationValid expects InviteResult.Digest over (Tid, Authority.{Id,Name,DomainName,ImageRef}, Digest(Admin.{EffectiveAt,ThresholdPolicies}), Digest(Officer.{AdminEffectiveAt,UserId,Title,Scopes})) but respondToInvite only digests Authority columns — needs respondToInvite to accept Admin/Officer payload (Plan 12.3-05 follow-up)', async () => {
 		const net = await createTestNetwork();
 		const auth = await addTestAuthority(net);
-		const inviteCtx = await seedAuthorityInvite(auth);
+		const inviteCtx = await seedAuthorityInvite(auth, { name: 'Test Authority', domainName: 'test.example.com' });
 		const b = new NetworkCreateAuthorityBuilder(net.networkEngine)
 			.setAuthority(makeAuthorityInit())
 			.setAdmin(makeAdminInit());
@@ -2556,20 +2560,20 @@ describe('NetworkCreateAuthorityBuilder', () => {
 		expect(caught).to.be.instanceOf(BuilderAlreadyCommittedError);
 	});
 
-	it.skip('REAL ENGINE equivalence smoke: engine.createAuthority(authority, admin) vs builder.fromPayload({authority, admin}).commit() — BLOCKED: Authority.InsertValid expects InviteResult.Digest = Digest(Tid, Id, Name, DomainName, ImageRef) but respondToInvite stores JSON.stringify(invokes) — engine Digest mismatch', async () => {
+	it.skip('REAL ENGINE equivalence smoke: engine.createAuthority(authority, admin) vs builder.fromPayload({authority, admin}).commit() — BLOCKED: Admin.MutationValid expects InviteResult.Digest over (Tid, Authority.{Id,Name,DomainName,ImageRef}, Digest(Admin.{EffectiveAt,ThresholdPolicies}), Digest(Officer.{AdminEffectiveAt,UserId,Title,Scopes})) but respondToInvite only digests Authority columns — needs respondToInvite to accept Admin/Officer payload (Plan 12.3-05 follow-up)', async () => {
 		const authority = makeAuthorityInit();
 		const admin = makeAdminInit();
 		// Direct path
 		const net1 = await createTestNetwork();
 		const auth1 = await addTestAuthority(net1);
-		const inv1 = await seedAuthorityInvite(auth1);
+		const inv1 = await seedAuthorityInvite(auth1, { name: authority.name, domainName: authority.domainName });
 		let err1: unknown;
 		try { await net1.networkEngine.createAuthority(authority, admin, { inviteSlotCid: inv1.inviteSlotCid, inviteSignature: 'a'.repeat(128) }); } catch (e) { err1 = e; }
 		expect(err1).to.equal(undefined);
 		// Builder path
 		const net2 = await createTestNetwork();
 		const auth2 = await addTestAuthority(net2);
-		const inv2 = await seedAuthorityInvite(auth2);
+		const inv2 = await seedAuthorityInvite(auth2, { name: authority.name, domainName: authority.domainName });
 		let err2: unknown;
 		try { await net2.networkEngine.buildCreateAuthority().fromPayload({ authority, admin }).commit({ inviteSlotCid: inv2.inviteSlotCid, inviteSignature: 'a'.repeat(128) }); } catch (e) { err2 = e; }
 		expect(err2).to.equal(undefined);
