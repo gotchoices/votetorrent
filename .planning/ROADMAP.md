@@ -610,4 +610,4 @@ Plans:
 
 ---
 
-*Roadmap last updated: 2026-05-28 — Phase 12.2 complete (551→547 passing on 3.2.1 + canonical-datetime); Phase 12.3 inserted to close 18 remaining non-quereus pending tests.*
+*Roadmap last updated: 2026-05-28 — Phase 12.3 Wave 1 done (01/02/09 — respondToInvite SQL Digest + ProposedNetwork composite PK + signing.spec.ts:574 unskip). Wave 2 in progress: Plan 03 done (seedUserInvite + seedBallot helpers); 04/05/06 next. 549 passing / 24 pending / 0 failing.*
