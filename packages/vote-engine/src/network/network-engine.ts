@@ -603,10 +603,10 @@ export class NetworkEngine implements INetworkEngine {
       const userKey = this.ctx.user?.activeKeys?.[0]?.key ?? null
       await this.ctx.db.exec(
 				`insert into ProposedNetwork
-					(Name, ImageRef, Relays, TimestampAuthorities, NumberRequiredTSAs, ElectionType)
+					(Name, Revision, ImageRef, Relays, TimestampAuthorities, NumberRequiredTSAs, ElectionType)
 				with context UserId = :userId, UserKey = :userKey, Signature = null, Tid = 0, now = :now, IsUserValid = true
 				values
-					(:name, :imageRef, :relays, :timestampAuthorities, :numberRequiredTSAs, :electionType)`,
+					(:name, coalesce((select max(Revision) from ProposedNetwork where Name = :name), -1) + 1, :imageRef, :relays, :timestampAuthorities, :numberRequiredTSAs, :electionType)`,
 				{
 				  name: revision.name,
 				  imageRef: imageRefJson,
