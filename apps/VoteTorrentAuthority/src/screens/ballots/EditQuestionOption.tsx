@@ -32,7 +32,7 @@ export function EditQuestionOption() {
 	const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 	const { ballotDraft, addOption, updateOption } = useBallotDraft();
 
-	const { questionCode, optionCode } = route.params ?? { questionCode: "" };
+	const { questionCode, optionCode, electionTitle, electionDate } = route.params ?? { questionCode: "" };
 	const existingOption = optionCode
 		? (ballotDraft.questions ?? [])
 				.find((q) => q.code === questionCode)
@@ -85,13 +85,13 @@ export function EditQuestionOption() {
 				<View style={styles.detail}>
 					<ThemedText type="defaultSemiBold">{t("election")}: </ThemedText>
 					<ThemedText numberOfLines={1} ellipsizeMode="tail">
-						{t("electionTitle")}
+						{electionTitle ?? t("election")}
 					</ThemedText>
 				</View>
 				<View style={styles.detail}>
 					<ThemedText type="defaultSemiBold">{t("date")}: </ThemedText>
 					<ThemedText numberOfLines={1} ellipsizeMode="tail">
-						{t("date")}
+						{electionDate ?? t("date")}
 					</ThemedText>
 				</View>
 				<CustomTextInput title={t("code")} value={code} onChangeText={setCode} />

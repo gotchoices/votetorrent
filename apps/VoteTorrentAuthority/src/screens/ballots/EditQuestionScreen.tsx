@@ -8,6 +8,8 @@ import { CustomTextInput } from "../../components/CustomTextInput";
 import { ChipButton } from "../../components/ChipButton";
 import { InfoCard } from "../../components/InfoCard";
 import QuestionTypeSelector from "./components/QuestionTypeSelector";
+import { Stepper } from "../../components/Stepper";
+import { ToggleRow } from "../../components/ToggleRow";
 import { CustomButton } from "../../components/CustomButton";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../../navigation/types";
@@ -33,6 +35,9 @@ export function EditQuestionScreen() {
 	const { ballotDraft } = useBallotDraft();
 
 	const questionCode = route.params?.questionCode;
+	const electionTitle = route.params?.electionTitle;
+	const electionDate = route.params?.electionDate;
+
 	const existingQuestion = questionCode
 		? (ballotDraft.questions ?? []).find((q) => q.code === questionCode)
 		: undefined;
@@ -44,6 +49,16 @@ export function EditQuestionScreen() {
 	);
 	const [type, setType] = useState<QuestionType>(existingQuestion?.type ?? "select");
 	const [options, setOptions] = useState<Option[]>(existingQuestion?.options ?? []);
+
+	// Selection Limits + additional Question fields (09-07: BALUI-03 parity)
+	const [optionMin, setOptionMin] = useState<number>(existingQuestion?.optionRange?.min ?? 1);
+	const [optionMax, setOptionMax] = useState<number>(existingQuestion?.optionRange?.max ?? 1);
+	const [optionsOrdered, setOptionsOrdered] = useState<boolean>(
+		existingQuestion?.optionsOrdered ?? false
+	);
+	const [required, setRequired] = useState<boolean>(existingQuestion?.required ?? true);
+	const [group, setGroup] = useState<string>(existingQuestion?.group ?? "");
+	const [sequence, setSequence] = useState<number>(existingQuestion?.sequence ?? 0);
 
 	// Carry-back from EditQuestionOption: child screen passes a `newOption`
 	// route param when SAVE is pressed. Merge it into local form state and
@@ -75,11 +90,20 @@ export function EditQuestionScreen() {
 	}, [incomingOption?.code]);
 
 	const handleAddOption = () => {
-		navigation.navigate("EditQuestionOption", { questionCode: code || `q-${Date.now()}` });
+		navigation.navigate("EditQuestionOption", {
+			questionCode: code || `q-${Date.now()}`,
+			electionTitle,
+			electionDate,
+		});
 	};
 
 	const handleEditOption = (optionCode: string) => {
-		navigation.navigate("EditQuestionOption", { questionCode: code || `q-${Date.now()}`, optionCode });
+		navigation.navigate("EditQuestionOption", {
+			questionCode: code || `q-${Date.now()}`,
+			optionCode,
+			electionTitle,
+			electionDate,
+		});
 	};
 
 	const handleSave = () => {
@@ -89,6 +113,11 @@ export function EditQuestionScreen() {
 			instructions,
 			options,
 			type,
+			optionRange: { min: optionMin, max: optionMax },
+			optionsOrdered,
+			required,
+			group: group || undefined,
+			sequence,
 		};
 		// Pass the ORIGINAL questionCode from route.params so CreateBallot
 		// can branch add-vs-update on it even if the user renamed the code.
@@ -104,13 +133,13 @@ export function EditQuestionScreen() {
 				<View style={styles.detail}>
 					<ThemedText type="defaultSemiBold">{t("election")}: </ThemedText>
 					<ThemedText numberOfLines={1} ellipsizeMode="tail">
-						{t("electionTitle")}
+						{electionTitle ?? t("election")}
 					</ThemedText>
 				</View>
 				<View style={styles.detail}>
 					<ThemedText type="defaultSemiBold">{t("date")}: </ThemedText>
 					<ThemedText numberOfLines={1} ellipsizeMode="tail">
-						{t("date")}
+						{electionDate ?? t("date")}
 					</ThemedText>
 				</View>
 				<CustomTextInput title={t("code")} value={code} onChangeText={setCode} />
@@ -123,6 +152,50 @@ export function EditQuestionScreen() {
 				<ThemedText>{t("type")}</ThemedText>
 				<QuestionTypeSelector value={type} onChange={setType} />
 
+				{/* Selection Limits — Figma 57:574 scrolled section */}
+				<View style={styles.section}>
+					<ThemedText type="defaultSemiBold" style={styles.sectionTitle}>
+						{t("selectionLimits")}
+					</ThemedText>
+					<Stepper
+						label={t("min")}
+						value={optionMin}
+						onChange={setOptionMin}
+						min={0}
+					/>
+					<Stepper
+						label={t("max")}
+						value={optionMax}
+						onChange={setOptionMax}
+						min={0}
+					/>
+				</View>
+
+				<ToggleRow
+					label={t("forceOrder")}
+					value={optionsOrdered}
+					onValueChange={setOptionsOrdered}
+				/>
+				<ToggleRow
+					label={t("required")}
+					value={required}
+					onValueChange={setRequired}
+				/>
+
+				<CustomTextInput
+					title={t("group")}
+					value={group}
+					placeholder={t("groupPlaceholder")}
+					onChangeText={setGroup}
+				/>
+
+				<Stepper
+					label={t("sequence")}
+					value={sequence}
+					onChange={setSequence}
+					min={0}
+				/>
+
 				<View style={styles.section}>
 					<ThemedText type="defaultSemiBold" style={styles.sectionTitle}>
 						{t("option")}
@@ -130,9 +203,10 @@ export function EditQuestionScreen() {
 					{options.map((o) => (
 						<InfoCard
 							key={o.code}
+							image={o.image?.url ? { uri: o.image.url } : undefined}
 							title={o.title}
 							additionalInfo={[{ label: t("code"), value: o.code }]}
-							icon="pen"
+							icon="chevron-right"
 							onPress={() => handleEditOption(o.code)}
 						/>
 					))}
