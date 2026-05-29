@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { View, StyleSheet, Switch, TouchableOpacity, Modal, Pressable } from "react-native";
+import { View, StyleSheet, Switch, TouchableOpacity } from "react-native";
 import { useNavigation, useTheme, useFocusEffect } from "@react-navigation/native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import i18n from "../../i18n";
@@ -161,45 +161,44 @@ export default function SettingsScreen() {
 	return (
 		<View style={styles.content}>
 			<View style={[styles.container, { backgroundColor: colors.background }]}>
-				<View style={styles.helpIconsRow}>
+				<View style={[styles.helpIconsRow, { zIndex: 10 }]}>
 					<ThemedText type="default">{t('language')}</ThemedText>
-					<TouchableOpacity
-						onPress={() => setShowLangModal(true)}
-						style={[styles.langDropdownBtn, { backgroundColor: colors.accent }]}
-						accessibilityRole="button"
-					>
-						<ThemedText type="defaultSemiBold">
-							{LANGUAGES.find(l => l.code === currentLang)?.label ?? currentLang}
-						</ThemedText>
-						<FontAwesome6 name="chevron-down" size={12} color={colors.text} style={{ marginLeft: 6 }} />
-					</TouchableOpacity>
+					<View style={styles.langSelector}>
+						<TouchableOpacity
+							onPress={() => setShowLangModal(prev => !prev)}
+							style={[styles.langDropdownBtn, { backgroundColor: colors.accent }]}
+							accessibilityRole="button"
+						>
+							<ThemedText type="defaultSemiBold">
+								{LANGUAGES.find(l => l.code === currentLang)?.label ?? currentLang}
+							</ThemedText>
+							<FontAwesome6
+								name={showLangModal ? "chevron-up" : "chevron-down"}
+								size={12}
+								color={colors.text}
+								style={{ marginLeft: 6 }}
+							/>
+						</TouchableOpacity>
+						{showLangModal && (
+							<View style={[styles.langDropdown, { backgroundColor: colors.card }]}>
+								{LANGUAGES.map(lang => (
+									<TouchableOpacity
+										key={lang.code}
+										style={[styles.langDropdownItem, currentLang === lang.code && { backgroundColor: colors.primary + '33' }]}
+										onPress={() => { handleLanguageChange(lang.code); setShowLangModal(false); }}
+									>
+										<ThemedText type={currentLang === lang.code ? 'defaultSemiBold' : 'default'}>
+											{lang.label}
+										</ThemedText>
+										{currentLang === lang.code && (
+											<FontAwesome6 name="check" size={14} color={colors.primary} />
+										)}
+									</TouchableOpacity>
+								))}
+							</View>
+						)}
+					</View>
 				</View>
-
-				<Modal
-					visible={showLangModal}
-					transparent
-					animationType="fade"
-					onRequestClose={() => setShowLangModal(false)}
-				>
-					<Pressable style={styles.modalOverlay} onPress={() => setShowLangModal(false)}>
-						<View style={[styles.modalMenu, { backgroundColor: colors.card }]}>
-							{LANGUAGES.map(lang => (
-								<TouchableOpacity
-									key={lang.code}
-									style={[styles.modalItem, currentLang === lang.code && { backgroundColor: colors.primary + '33' }]}
-									onPress={() => { handleLanguageChange(lang.code); setShowLangModal(false); }}
-								>
-									<ThemedText type={currentLang === lang.code ? 'defaultSemiBold' : 'default'}>
-										{lang.label}
-									</ThemedText>
-									{currentLang === lang.code && (
-										<FontAwesome6 name="check" size={14} color={colors.primary} />
-									)}
-								</TouchableOpacity>
-							))}
-						</View>
-					</Pressable>
-				</Modal>
 
 				<View style={styles.helpIconsRow}>
 					<View style={styles.helpIcons}>
@@ -296,6 +295,9 @@ const localStyles = StyleSheet.create({
 		alignItems: "center",
 		marginBottom: 16,
 	},
+	langSelector: {
+		position: "relative",
+	},
 	langDropdownBtn: {
 		flexDirection: "row",
 		alignItems: "center",
@@ -304,27 +306,25 @@ const localStyles = StyleSheet.create({
 		borderRadius: 8,
 		minHeight: 44,
 	},
-	modalOverlay: {
-		flex: 1,
-		justifyContent: "center",
-		alignItems: "center",
-		backgroundColor: "rgba(0, 0, 0, 0.5)",
-	},
-	modalMenu: {
-		borderRadius: 12,
-		overflow: "hidden",
-		minWidth: 180,
+	langDropdown: {
+		position: "absolute",
+		top: 48,
+		right: 0,
+		borderRadius: 8,
+		minWidth: 140,
+		zIndex: 999,
 		elevation: 8,
 		shadowOffset: { width: 0, height: 2 },
-		shadowOpacity: 0.2,
+		shadowOpacity: 0.15,
 		shadowRadius: 4,
+		overflow: "hidden",
 	},
-	modalItem: {
+	langDropdownItem: {
 		flexDirection: "row",
 		alignItems: "center",
 		justifyContent: "space-between",
-		paddingHorizontal: 16,
-		paddingVertical: 14,
+		paddingHorizontal: 14,
+		paddingVertical: 12,
 	},
 	helpIcons: {
 		flexDirection: "row",
