@@ -8,6 +8,8 @@ import type {
 	ReleaseKeyTask,
 	SignatureTask,
 	IElectionEngine,
+	InviteStatus,
+	SentKeyholderInvite,
 	NetworkReference,
 } from '@votetorrent/vote-core';
 
@@ -45,6 +47,9 @@ export type RootStackParamList = {
 	// Phase 10 plan 10-01 (USRUI-05, USRUI-09; D-01, D-04) — display-only confirmation routes
 	AddedKey: { user: User; keyValue: string; keyType: string; expiration: number };
 	AddedDevice: { multiaddress: string; token: string };
+	// Phase 10 plan 10-02 (KHUI-01/02; D-05, D-06) — keyholder detail + invitation routes
+	Keyholder: { keyholder: InviteStatus<SentKeyholderInvite>; electionEngine: IElectionEngine };
+	KeyholderInvitation: { mode: "send" | "accept"; invitationId?: string };
 	KeyTask: { task: ReleaseKeyTask };
 	SignatureTask: { task: SignatureTask };
 	// Phase 7 scaffold routes (07-05; renamed by 07-08) — standalone screens per D-09; real impls land in Phases 8–10

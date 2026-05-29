@@ -34,6 +34,8 @@ import RevokeKeyScreen from "../screens/users/RevokeKeyScreen";
 import AddDeviceScreen from "../screens/users/AddDeviceScreen";
 import AddedKeyScreen from "../screens/users/AddedKeyScreen";
 import AddedDeviceScreen from "../screens/users/AddedDeviceScreen";
+import KeyholderScreen from "../screens/keyholder/KeyholderScreen";
+import KeyholderInvitationScreen from "../screens/keyholder/KeyholderInvitationScreen";
 import NetworkDetailsScreen from "../screens/networks/NetworkDetailsScreen";
 import NetworkStatisticsScreen from "../screens/networks/NetworkStatisticsScreen";
 import NetworkRevisionScreen from "../screens/networks/NetworkRevisionScreen";
@@ -338,6 +340,17 @@ export const RootNavigator = () => {
 				name="AddedDevice"
 				component={AddedDeviceScreen}
 				options={{ title: t("addedDevice") }}
+			/>
+			{/* Phase 10 plan 10-02 (KHUI-01/02; D-05) — keyholder routes */}
+			<Stack.Screen
+				name="Keyholder"
+				component={KeyholderScreen}
+				options={{ title: t("keyholder") }}
+			/>
+			<Stack.Screen
+				name="KeyholderInvitation"
+				component={KeyholderInvitationScreen}
+				options={{ title: t("keyholderInvitation") }}
 			/>
 			<Stack.Screen
 				name="KeyTask"

@@ -380,6 +380,11 @@ const resources = {
 			addedDevice: 'Added Device',
 			deviceAdded: 'Device Added',
 			done: 'Done',
+			// Phase 10 plan 10-02 (KHUI-01/02) — D-17: en-only; Spanish deferred to Phase 11
+			keyholder: 'Keyholder',
+			keyholderInvitation: 'Keyholder Invitation',
+			debugKeyholderInvitationSend: 'Keyholder Invitation (Send)',
+			debugKeyholderInvitationAccept: 'Keyholder Invitation (Accept)',
 		},
 	},
 	es: {
