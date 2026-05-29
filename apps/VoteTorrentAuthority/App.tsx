@@ -1,7 +1,9 @@
 import React from 'react';
 import {NavigationContainer} from '@react-navigation/native';
+import {SafeAreaProvider} from 'react-native-safe-area-context';
 import './src/i18n';
 import {RootNavigator} from './src/navigation';
+import {BallotDraftProvider} from './src/screens/ballots/providers/BallotDraftProvider';
 import {darkTheme, lightTheme} from './src/theme/themes';
 import {useColorScheme} from 'react-native';
 import {AppProvider} from './src/providers/AppProvider';
@@ -10,11 +12,19 @@ export default function App() {
 	const colorScheme = useColorScheme();
 
 	return (
-		<AppProvider>
-			<NavigationContainer
-				theme={colorScheme === 'dark' ? darkTheme : lightTheme}>
-				<RootNavigator />
-			</NavigationContainer>
-		</AppProvider>
+		<SafeAreaProvider>
+			<AppProvider>
+				<NavigationContainer
+					theme={colorScheme === 'dark' ? darkTheme : lightTheme}>
+					{/* BallotDraftProvider hoisted above the navigator so the ballot
+					    draft is genuinely shared across CreateBallot/EditBallot/
+					    EditQuestion/EditQuestionOption. Per-flow reset happens on
+					    CreateBallot mount (fresh) and EditBallot load (from engine). */}
+					<BallotDraftProvider>
+						<RootNavigator />
+					</BallotDraftProvider>
+				</NavigationContainer>
+			</AppProvider>
+		</SafeAreaProvider>
 	);
 }

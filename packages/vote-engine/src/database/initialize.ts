@@ -1,6 +1,7 @@
 import { readFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
+<<<<<<< HEAD
 import { createHash } from 'crypto';
 import type { Database } from '@quereus/quereus';
 import { registerPlugin, TEXT_TYPE, BOOLEAN_TYPE, createScalarFunction, FunctionFlags } from '@quereus/quereus';
@@ -61,13 +62,35 @@ async function registerCustomFunctions(db: Database): Promise<void> {
 	);
 	db.registerFunction(digestSchema);
 }
+=======
+import type { Database } from '@quereus/quereus';
+import { registerPlugin } from '@quereus/quereus';
+// Crypto plugin entry point: per @optimystic/quereus-plugin-crypto@0.13.0
+// package.json `exports`, the registration function is the default export of
+// the `./plugin` subpath. The package's top-level entry (`./`) exports the
+// JS-level helpers (`Digest`, `Sign`, `SignatureValid`, etc.) used elsewhere
+// in the engine; the SQL function registrations live behind `./plugin`.
+//
+// `@ts-ignore` is necessary because tsconfig.test.json uses
+// `moduleResolution: "node"` (classic), which does not honor the package's
+// `exports` map subpaths. The production build (`tsconfig.build.json`) uses
+// `moduleResolution: "Bundler"` and resolves this correctly without the
+// directive. The runtime ESM loader (Node 24) resolves the subpath in both
+// modes. Normalizing the test tsconfig is out of Phase 2 scope (D-03).
+// @ts-ignore TS2307 — exports subpath, see comment above
+import cryptoPlugin from '@optimystic/quereus-plugin-crypto/plugin';
+>>>>>>> origin/authority-app
 
 /**
  * Initialize a fresh Quereus database by loading and executing the VoteTorrent SQL schema.
  *
  * NOTE: This function is intentionally schema-only (single-responsibility per
  * Phase 2 D-02). It does NOT register plugins. Callers that need the crypto
+<<<<<<< HEAD
  * plugin's SQL functions (`Digest`, `SignatureValid`, ...) to
+=======
+ * plugin's SQL functions (`Digest`, `DigestAll`, `SignatureValid`, ...) to
+>>>>>>> origin/authority-app
  * resolve in schema constraints must call `prepareDb(db)` instead, which
  * registers the plugin and then calls `initDB`.
  */
@@ -81,6 +104,11 @@ export async function initDB(db: Database): Promise<void> {
 
 	const schemaSql = readFileSync(schemaPath, 'utf8');
 
+<<<<<<< HEAD
+=======
+	// console.log(schemaSql);
+
+>>>>>>> origin/authority-app
 	try {
 		await db.exec(schemaSql);
 	} catch (error) {
@@ -91,8 +119,13 @@ export async function initDB(db: Database): Promise<void> {
 
 /**
  * Prepare a fresh Quereus database for VoteTorrent use: register the crypto
+<<<<<<< HEAD
  * plugin (so schema constraint references to `Digest`, `SignatureValid`,
  * etc. resolve), then load the schema via `initDB`.
+=======
+ * plugin (so schema constraint references to `Digest`, `DigestAll`,
+ * `SignatureValid`, etc. resolve), then load the schema via `initDB`.
+>>>>>>> origin/authority-app
  *
  * Per Phase 2 D-02 / D-02b option (b): production code (NetworksEngine.createContext)
  * and Phase 1's schema-load.spec.ts both route through this single helper so the
@@ -100,7 +133,10 @@ export async function initDB(db: Database): Promise<void> {
  */
 export async function prepareDb(db: Database): Promise<void> {
 	await registerPlugin(db, cryptoPlugin);
+<<<<<<< HEAD
 	await registerCustomFunctions(db);
+=======
+>>>>>>> origin/authority-app
 	await initDB(db);
 }
 

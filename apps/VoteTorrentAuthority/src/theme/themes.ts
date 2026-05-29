@@ -39,6 +39,7 @@ declare module '@react-navigation/native' {
 			dark: string;
 			light: string;
 			important: string;
+			muted: string;
 		};
 		fonts: typeof fonts;
 	};
@@ -64,6 +65,7 @@ export const lightTheme: ExtendedTheme = {
 		important: '#e8e3ad',
 		dark: '#000000',
 		light: '#ffffff',
+		muted: '#9e9e9e',
 	},
 	fonts,
 };
@@ -88,6 +90,7 @@ export const darkTheme: ExtendedTheme = {
 		dark: '#000000',
 		light: '#ffffff',
 		important: '#e8e3adc8',
+		muted: '#6e6e6e',
 	},
 	fonts,
 };

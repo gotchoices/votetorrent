@@ -5,14 +5,17 @@ import { useTranslation } from "react-i18next";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "./types";
 import AuthorityDetailsScreen from "../screens/authorities/AuthorityDetailsScreen";
+import ProposedAdministrationScreen from "../screens/authorities/ProposedAdministrationScreen";
 import OfficerDetailsScreen from "../screens/admin/OfficerDetailsScreen";
+import AdministratorInvitationScreen from "../screens/admin/AdministratorInvitationScreen";
+import AuthorityInvitationScreen from "../screens/authorities/AuthorityInvitationScreen";
 import ElectionsScreen from "../screens/elections/ElectionsScreen";
 import TasksScreen from "../screens/tasks/TasksScreen";
 import AuthoritiesScreen from "../screens/authorities/AuthoritiesScreen";
 import SettingsScreen from "../screens/settings/SettingsScreen";
 import { ChipButton } from "../components/ChipButton";
-import { Pressable, StyleSheet } from "react-native";
-import { ExtendedTheme, useNavigation } from "@react-navigation/native";
+import { Pressable, StyleSheet, Text } from "react-native";
+import { ExtendedTheme, useNavigation, StackActions } from "@react-navigation/native";
 import { useTheme } from "@react-navigation/native";
 import NetworksScreen from "../screens/networks/NetworksScreen";
 import type { NavigationProp } from "./types";
@@ -30,10 +33,27 @@ import AddKeyScreen from "../screens/users/AddKeyScreen";
 import RevokeKeyScreen from "../screens/users/RevokeKeyScreen";
 import AddDeviceScreen from "../screens/users/AddDeviceScreen";
 import NetworkDetailsScreen from "../screens/networks/NetworkDetailsScreen";
+import NetworkStatisticsScreen from "../screens/networks/NetworkStatisticsScreen";
+import NetworkRevisionScreen from "../screens/networks/NetworkRevisionScreen";
 import KeyTaskScreen from "../screens/tasks/KeyTaskScreen";
 import SignatureTaskScreen from "../screens/tasks/SignatureTaskScreen";
+import EditElectionScreen from "../screens/tasks/EditElectionScreen";
+import AuthorityDetailScreen from "../screens/tasks/AuthorityDetailScreen";
+import EditElectionWithFilterScreen from "../screens/tasks/EditElectionWithFilterScreen";
+import EditRevisionFormScreen from "../screens/tasks/EditRevisionFormScreen";
+import ProposedElectionScreen from "../screens/tasks/ProposedElectionScreen";
+import ProposedRevisionScreen from "../screens/tasks/ProposedRevisionScreen";
+import ScreenScaffoldsDebugScreen from "../screens/tasks/ScreenScaffoldsDebugScreen";
 import ElectionDetailsScreen from "../screens/elections/ElectionDetailsScreen";
+import { CreateElectionScreen } from "../screens/elections/CreateElectionScreen";
+// Phase 9 plan 09-13 (ELECUI-04) — Election Revision screen (Screen C, Figma #16/#17).
+// Aliased to avoid name collision with task-flow EditElectionScreen (imported above on ~line 40).
+import EditElectionRevisionScreen from "../screens/elections/EditElectionScreen";
 import EditBallotScreen from "../screens/ballots/EditBallotScreen";
+// Phase 9 plan 09-04 — Ballot flow screens + scoped draft provider (D-10, D-11)
+import CreateBallotScreen from "../screens/ballots/CreateBallotScreen";
+import EditQuestionScreen from "../screens/ballots/EditQuestionScreen";
+import EditQuestionOption from "../screens/ballots/EditQuestionOption";
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator();
@@ -77,6 +97,7 @@ function HeaderTitle() {
 function useTabHeaderOptions(tab?: string) {
 	const { colors } = useTheme() as ExtendedTheme;
 	const navigation = useNavigation<NavigationProp>();
+	const { t } = useTranslation();
 
 	const handleNetworkPress = () => {
 		navigation.navigate("Networks");
@@ -85,7 +106,7 @@ function useTabHeaderOptions(tab?: string) {
 	return {
 		headerLeft: () => (
 			<Pressable onPress={handleNetworkPress} style={styles.headerButton}>
-				<FontAwesome6 name="circle-nodes" size={24} color={colors.text} />
+				<FontAwesome6 name="cloud-rain" size={24} color={colors.text} />
 			</Pressable>
 		),
 		headerRight: () => (
@@ -94,8 +115,8 @@ function useTabHeaderOptions(tab?: string) {
 			</Pressable>
 		),
 		headerTitle: () =>
-			tab === "tasks" ? <ThemedText type="header">{"All Networks"}</ThemedText> : <HeaderTitle />,
-		headerShadowVisible: false,
+			tab === "tasks" ? <ThemedText type="header">{t("allNetworks")}</ThemedText> : <HeaderTitle />,
+		headerShadowVisible: true,
 	};
 }
 
@@ -105,30 +126,35 @@ const TabNavigator = () => {
 	return (
 		<Tab.Navigator
 			screenOptions={({ route }) => ({
-				tabBarIcon: ({ focused, color, size }) => {
-					let iconName: string;
-
-					switch (route.name) {
-						case "Elections":
-							iconName = "check-to-slot";
-							break;
-						case "Tasks":
-							iconName = "list-check";
-							break;
-						case "Authorities":
-							iconName = "shield";
-							break;
-						case "Settings":
-							iconName = "gear";
-							break;
-						default:
-							iconName = "alert";
+				tabBarIcon: ({ focused, color }) => {
+					if (route.name === "Settings") {
+						return <FontAwesome6 name="gear" size={22} color={color} />;
 					}
-
-					return <FontAwesome6 name={iconName} size={size} color={color} />;
+					const letterMap: Record<string, string> = {
+						Elections: "E",
+						Tasks: "T",
+						Authorities: "A",
+					};
+					const letter = letterMap[route.name] ?? "?";
+					return (
+						<Text
+							style={[
+								styles.tabLetter,
+								{ color, fontWeight: focused ? "900" : "700" },
+							]}
+						>
+							{letter}
+						</Text>
+					);
 				},
-				tabBarActiveTintColor: colors.primary,
+				tabBarActiveTintColor: colors.text,
 				tabBarInactiveTintColor: "gray",
+				tabBarLabelStyle: { fontWeight: "700" },
+				tabBarBadgeStyle: {
+					backgroundColor: colors.notification,
+					color: colors.light,
+					fontWeight: "700",
+				},
 			})}
 		>
 			<Tab.Screen
@@ -139,7 +165,10 @@ const TabNavigator = () => {
 			<Tab.Screen
 				name="Tasks"
 				component={TasksScreen}
-				options={{ ...useTabHeaderOptions("tasks") }}
+				options={{
+					...useTabHeaderOptions("tasks"),
+					tabBarBadge: 3,
+				}}
 			/>
 			<Tab.Screen
 				name="Authorities"
@@ -181,7 +210,20 @@ const styles = StyleSheet.create({
 		marginHorizontal: 4,
 		marginVertical: -2,
 	},
+	tabLetter: {
+		fontSize: 22,
+		lineHeight: 24,
+	},
 });
+
+function CloseButton({ onPress }: { onPress: () => void }) {
+	const { colors } = useTheme() as ExtendedTheme;
+	return (
+		<Pressable onPress={onPress} style={styles.headerButton} hitSlop={8}>
+			<FontAwesome6 name="xmark" size={22} color={colors.text} />
+		</Pressable>
+	);
+}
 
 export const RootNavigator = () => {
 	const { t } = useTranslation();
@@ -208,12 +250,25 @@ export const RootNavigator = () => {
 			/>
 			<Stack.Screen name="Hosting" component={HostingScreen} options={{ title: t("hosting") }} />
 			<Stack.Screen
+				name="NetworkStatistics"
+				component={NetworkStatisticsScreen}
+				options={{ title: t("statistics") }}
+			/>
+			<Stack.Screen
+				name="NetworkRevision"
+				component={NetworkRevisionScreen}
+				options={{ title: t("reviseNetwork") }}
+			/>
+			<Stack.Screen
 				name="AuthorityDetails"
 				component={AuthorityDetailsScreen}
-				options={{
+				options={({ navigation }) => ({
 					title: t("authority"),
+					presentation: "modal",
+					headerBackVisible: false,
+					headerLeft: () => <CloseButton onPress={() => navigation.goBack()} />,
 					headerRight: () => <ChipButton label={t("unpin")} icon={"thumbtack-slash"} />,
-				}}
+				})}
 			/>
 			<Stack.Screen
 				name="OfficerDetails"
@@ -221,6 +276,21 @@ export const RootNavigator = () => {
 				options={{
 					title: t("officer"),
 				}}
+			/>
+			<Stack.Screen
+				name="ProposedAdministration"
+				component={ProposedAdministrationScreen}
+				options={{ title: t("proposedAdministration") }}
+			/>
+			<Stack.Screen
+				name="AdministratorInvitation"
+				component={AdministratorInvitationScreen}
+				options={{ title: t("administratorInvitation") }}
+			/>
+			<Stack.Screen
+				name="AuthorityInvitation"
+				component={AuthorityInvitationScreen}
+				options={{ title: t("authorityInvitation") }}
 			/>
 			<Stack.Screen
 				name="ReplaceAdmin"
@@ -259,7 +329,12 @@ export const RootNavigator = () => {
 			<Stack.Screen
 				name="KeyTask"
 				component={KeyTaskScreen}
-				options={{ title: t("keyholderRelease") }}
+				options={({ navigation }) => ({
+					title: t("keyholderRelease"),
+					presentation: "modal",
+					headerBackVisible: false,
+					headerLeft: () => <CloseButton onPress={() => navigation.goBack()} />,
+				})}
 			/>
 			<Stack.Screen
 				name="SignatureTask"
@@ -267,15 +342,137 @@ export const RootNavigator = () => {
 				options={{ title: t("signature") }}
 			/>
 			<Stack.Screen
-				name="ElectionDetails"
-				component={ElectionDetailsScreen}
-				options={{ title: t("election") }}
+				name="EditElection"
+				component={EditElectionScreen}
+				options={{ title: t("editElectionTitle") }}
 			/>
 			<Stack.Screen
-				name="EditBallot"
-				component={EditBallotScreen}
-				options={{ title: t("ballotTemplate") }}
+				name="AuthorityDetail"
+				component={AuthorityDetailScreen}
+				options={{ title: t("authorityDetailTitle") }}
 			/>
+			<Stack.Screen
+				name="EditElectionWithFilter"
+				component={EditElectionWithFilterScreen}
+				options={{ title: t("editElectionWithFilterTitle") }}
+			/>
+			<Stack.Screen
+				name="EditRevisionForm"
+				component={EditRevisionFormScreen}
+				options={{ title: t("editRevisionFormTitle") }}
+			/>
+			<Stack.Screen
+				name="ProposedElection"
+				component={ProposedElectionScreen}
+				options={{ title: t("proposedElectionTitle") }}
+			/>
+			<Stack.Screen
+				name="ProposedRevision"
+				component={ProposedRevisionScreen}
+				options={{ title: t("proposedRevisionTitle") }}
+			/>
+			<Stack.Screen
+				name="ScreenScaffoldsDebug"
+				component={ScreenScaffoldsDebugScreen}
+				options={{ title: t("screenScaffoldsDebugTitle") }}
+			/>
+			<Stack.Screen
+				name="ElectionDetails"
+				component={ElectionDetailsScreen}
+				options={({ navigation }) => ({
+					title: t("election"),
+					presentation: "modal",
+					headerBackVisible: false,
+					headerLeft: () => <CloseButton onPress={() => navigation.goBack()} />,
+				})}
+			/>
+			{/* Phase 9 plan 09-02 (ELECUI-03) — CreateElection wizard route. */}
+			<Stack.Screen
+				name="CreateElection"
+				component={CreateElectionScreen}
+				options={{ title: t("createElection") }}
+			/>
+			{/* Phase 9 plan 09-13 (ELECUI-04) — EditElectionRevision route (Screen C, Figma #16/#17).
+			    Separate from the task-flow EditElection route — points at elections/EditElectionScreen. */}
+			<Stack.Screen
+				name="EditElectionRevision"
+				component={EditElectionRevisionScreen}
+				options={{ title: t("electionRevisionTitle") }}
+			/>
+			{/* BallotDraftProvider is hoisted above the navigator (App.tsx) so all
+			    ballot screens share ONE draft instance (screenLayout gave each
+			    screen its own — D-11 root fix). Group retained only for grouping. */}
+			<Stack.Group>
+				<Stack.Screen
+					name="CreateBallot"
+					component={CreateBallotScreen}
+					options={{ title: t("ballotTemplate") }}
+				/>
+				<Stack.Screen
+					name="EditBallot"
+					component={EditBallotScreen}
+					options={{ title: t("ballotTemplate") }}
+				/>
+				<Stack.Screen
+					name="EditQuestion"
+					component={EditQuestionScreen}
+					options={({ navigation, route }) => ({
+						title: t("ballotQuestion"),
+						headerRight: () => (
+							<ChipButton
+								label={t("remove")}
+								icon="trash"
+								onPress={() => {
+									const questionCode = (route.params as { questionCode?: string })?.questionCode;
+									if (!questionCode) {
+										navigation.goBack();
+										return;
+									}
+									// popTo whichever ballot-root is actually in the stack;
+									// merge=true keeps the target's electionEngine/context params.
+									const state = navigation.getState();
+									const hasEditBallot = state.routes.some((r: { name: string }) => r.name === "EditBallot");
+									navigation.dispatch(
+										StackActions.popTo(
+											hasEditBallot ? "EditBallot" : "CreateBallot",
+											{ removeQuestionCode: questionCode },
+											{ merge: true }
+										)
+									);
+								}}
+							/>
+						),
+					})}
+				/>
+				<Stack.Screen
+					name="EditQuestionOption"
+					component={EditQuestionOption}
+					options={({ navigation, route }) => ({
+						title: t("questionOption"),
+						headerRight: () => (
+							<ChipButton
+								label={t("remove")}
+								icon="trash"
+								onPress={() => {
+									const optionCode = (route.params as { optionCode?: string })?.optionCode;
+									const questionCode = (route.params as { questionCode?: string })?.questionCode ?? "";
+									if (!optionCode) {
+										navigation.goBack();
+										return;
+									}
+									navigation.dispatch(
+										StackActions.popTo(
+											"EditQuestion",
+											{ questionCode, removeOptionCode: optionCode },
+											{ merge: true }
+										)
+									);
+								}}
+							/>
+						),
+					})}
+				/>
+			</Stack.Group>
 		</Stack.Navigator>
 	);
 };

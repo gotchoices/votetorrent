@@ -1,9 +1,8 @@
 import {ExtendedTheme, useTheme} from '@react-navigation/native';
 import React from 'react';
 import {useTranslation} from 'react-i18next';
-import {ScrollView, StyleSheet, TextInput, TouchableOpacity, View, Linking} from 'react-native';
+import {ScrollView, StyleSheet, View, Linking} from 'react-native';
 import {ThemedText} from '../../components/ThemedText';
-import FontAwesome6 from 'react-native-vector-icons/FontAwesome6';
 import {ChipButton} from '../../components/ChipButton';
 import {InfoCard} from '../../components/InfoCard';
 import {globalStyles} from '../../theme/styles';
@@ -83,7 +82,7 @@ export default function HostingScreen() {
 						/>
 					))}
 					<View style={styles.addProviderContainer}>
-						<ChipButton label={t('addProvider')} icon="circle-plus" onPress={() => console.log('Add provider')} />
+						<ChipButton label={t('addProvider')} icon="circle-plus" onPress={() => console.log('addProvider stub')} />
 					</View>
 				</View>
 			</ScrollView>

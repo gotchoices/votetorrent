@@ -1,5 +1,5 @@
 import { ExtendedTheme, useTheme, useNavigation } from "@react-navigation/native";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useLayoutEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ScrollView, StyleSheet, TouchableOpacity, View } from "react-native";
 import { InfoCard } from "../../components/InfoCard";
@@ -31,7 +31,8 @@ export default function NetworksScreen() {
 		loadNetworks();
 	}, [networksEngine]);
 
-	useEffect(() => {
+	// Phase 7 D-14: headerRight via useLayoutEffect (avoids first-frame flicker).
+	useLayoutEffect(() => {
 		navigation.setOptions({
 			headerRight: () => (
 				<ChipButton
@@ -41,7 +42,7 @@ export default function NetworksScreen() {
 				/>
 			),
 		});
-	}, []);
+	}, [navigation, t]);
 
 	return (
 		<ScrollView style={styles.container}>
@@ -50,6 +51,14 @@ export default function NetworksScreen() {
 					{t("useOneOfTheFollowingToGetConnected")}
 				</ThemedText>
 				<ThemedText type="title">{t("recentNetworks")}</ThemedText>
+				{recentNetworkRefs.length === 0 && (
+					// NETUI-01 empty-state: short hint when no recent networks.
+					// The find/scan/bootstrap sections below remain the primary
+					// entry points; this is purely an explanatory line.
+					<ThemedText type="small" style={{ color: colors.textSecondary }}>
+						{t("noRecentNetworks")}
+					</ThemedText>
+				)}
 				{recentNetworkRefs.map((networkRef) => (
 					<View key={networkRef.hash} style={styles.networkContainer}>
 						<View style={styles.infoCardContainer}>

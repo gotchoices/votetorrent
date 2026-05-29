@@ -1,18 +1,22 @@
 import { useTranslation } from "react-i18next";
 import { ScrollView, StyleSheet, View } from "react-native";
+import FontAwesome6 from "react-native-vector-icons/FontAwesome6";
+import { ExtendedTheme, useTheme } from "@react-navigation/native";
 import { InfoCard } from "../../components/InfoCard";
 import { CollapsibleSection } from "../../components/CollapsibleSection";
 import { ThemedText } from "../../components/ThemedText";
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useLayoutEffect, useState, useCallback } from "react";
 import { useNavigation, useFocusEffect } from "@react-navigation/native";
 import type { NavigationProp } from "../../navigation/types";
 import type { Authority, INetworkEngine } from "@votetorrent/vote-core";
+import { ChipButton } from "../../components/ChipButton";
 import { NoNetwork } from "../../components/NoNetwork";
 import { useApp } from "../../providers/AppProvider";
 import { globalStyles } from "../../theme/styles";
 
 export default function AuthoritiesScreen() {
 	const { t } = useTranslation();
+	const { colors } = useTheme() as ExtendedTheme;
 	const navigation = useNavigation<NavigationProp>();
 	const { getEngine, hasNetwork } = useApp();
 
@@ -54,6 +58,23 @@ export default function AuthoritiesScreen() {
 		}
 		initializeNetworkEngine();
 	}, [hasNetwork, getEngine]);
+
+	// Header "+ Add Authority" chip → AuthorityInvitation(send).
+	// Sibling effect (do NOT merge with network-engine init above —
+	// see 08-07-PLAN Task 2). Closes UAT test 8 (send-mode entry).
+	useLayoutEffect(() => {
+		navigation.setOptions({
+			headerRight: () => (
+				<ChipButton
+					label={t("addAuthority")}
+					icon="circle-plus"
+					onPress={() =>
+						navigation.navigate("AuthorityInvitation", { mode: "send" })
+					}
+				/>
+			),
+		});
+	}, [navigation, t]);
 
 	useFocusEffect(
 		useCallback(() => {
@@ -103,6 +124,25 @@ export default function AuthoritiesScreen() {
 		);
 	}
 
+	const bothListsEmpty =
+		pinnedAuthorities.length === 0 && unpinnedAuthorities.length === 0;
+
+	if (bothListsEmpty) {
+		return (
+			<View style={styles.emptyContainer}>
+				<FontAwesome6
+					name="building-columns"
+					size={56}
+					color={colors.textSecondary}
+				/>
+				<ThemedText type="title">{t("noAuthorities")}</ThemedText>
+				<ThemedText style={{ color: colors.textSecondary }}>
+					{t("noAuthoritiesHelper")}
+				</ThemedText>
+			</View>
+		);
+	}
+
 	return (
 		<ScrollView style={styles.container}>
 			{pinnedAuthorities.length > 0 ? (
@@ -111,7 +151,10 @@ export default function AuthoritiesScreen() {
 						key={authority.id}
 						title={authority.name}
 						image={{ uri: authority.imageRef?.url || "" }}
-						additionalInfo={[{ label: "Domain Name", value: authority.domainName }]}
+						additionalInfo={[
+							{ label: t("sid"), value: authority.id },
+							{ label: t("domain"), value: authority.domainName },
+						]}
 						icon={"chevron-right"}
 						onPress={() => {
 							navigation.navigate("AuthorityDetails", {
@@ -128,6 +171,7 @@ export default function AuthoritiesScreen() {
 				title={t("find")}
 				searchPlaceholder={t("filterAuthorities")}
 				onSearch={setSearchText}
+				defaultExpanded
 			>
 				{unpinnedAuthorities.length > 0 ? (
 					unpinnedAuthorities.map((authority) => (
@@ -135,13 +179,16 @@ export default function AuthoritiesScreen() {
 							key={authority.id}
 							title={authority.name}
 							image={{ uri: authority.imageRef?.url || "" }}
-							additionalInfo={[{ label: "Domain Name", value: authority.domainName }]}
+							additionalInfo={[
+								{ label: t("sid"), value: authority.id },
+								{ label: t("domain"), value: authority.domainName },
+							]}
 							icon={"thumbtack"}
 							onPress={() => handlePinToggle(authority)}
 						/>
 					))
 				) : (
-					<ThemedText style={styles.emptyText}>No authorities found</ThemedText>
+					<ThemedText style={styles.emptyText}>{t("noAuthoritiesFound")}</ThemedText>
 				)}
 			</CollapsibleSection>
 		</ScrollView>
@@ -153,6 +200,13 @@ const localStyles = StyleSheet.create({
 		flex: 1,
 		justifyContent: "center",
 		alignItems: "center",
+	},
+	emptyContainer: {
+		flex: 1,
+		alignItems: "center",
+		justifyContent: "center",
+		padding: 32,
+		gap: 12,
 	},
 	emptyText: {
 		textAlign: "center",

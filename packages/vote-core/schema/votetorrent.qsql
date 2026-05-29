@@ -65,9 +65,15 @@ declare schema main
 		-- TODO: constraint ImageRefValid check (ImageRef is a valid image reference JSON)
 		constraint InsertValid check on insert (
 			-- Very first authority in the network - shoe-in, no Invite, no signing
+<<<<<<< HEAD
 			(context.SigningNonce is null and context.InviteSignature is null and (select count(*) from Authority) = 1)
 				-- or Valid Invite for this authority (D-07b: existence-only; cryptographic binding moved to Admin.MutationValid TX3)
 				or (context.InviteSlotCid is not null and context.InviteSignature is not null
+=======
+			(SigningNonce is null and InviteSignature is null and not exists (select 1 from Authority))
+				-- or Valid Invite for this authority
+				or (InviteSlotCid is not null and InviteSignature is not null
+>>>>>>> origin/authority-app
 					and exists (
 						select 1 from InviteResult I where I.SlotCid = context.InviteSlotCid and I.IsAccepted
 					)
@@ -100,7 +106,11 @@ declare schema main
 			)
 		),
 		constraint AuthorityIdValid check (exists (select 1 from Authority A where A.Id = new.AuthorityId)),
+<<<<<<< HEAD
 		constraint EffectiveAtValid check (EffectiveAt is not null),
+=======
+		constraint EffectiveAtValid check (isISODatetime(EffectiveAt) and like('%Z', EffectiveAt)),
+>>>>>>> origin/authority-app
 		-- TODO: constraint ThresholdPoliciesValid check (valid json array of { scope: string, threshold: integer })
 		constraint MutationValid check (
 			-- Initial admin for the first authority - no invite, no signing
@@ -168,6 +178,7 @@ declare schema main
 				or (context.InviteSlotCid is not null and context.InviteSignature is not null)
 		),
 		constraint UserIdValid check (exists (select 1 from User U where U.Id = new.UserId)),
+<<<<<<< HEAD
 		constraint ScopesValid check (not exists (select 1 from json_each(Scopes) where value not in (select Code from Scope))), -- throwing errors
 		constraint OnlyInsert check on update, delete (false),
 		constraint InsertValid check on insert (
@@ -176,6 +187,16 @@ declare schema main
 			-- part of the first admin for an authority - invite is valid (D-07c: existence-only; cryptographic binding moved to Admin.MutationValid TX3; Authority count relaxed to 1 per D-07a insert order)
 				or (context.SigningNonce is null and context.InviteSlotCid is not null and context.InviteSignature is not null
 					and (select count(*) from Authority where Id = new.AuthorityId) = 1
+=======
+		constraint ScopesValid check (not exists (select 1 from json_array_elements_text(Scopes) S(s) where s not in (select Code from Scope))), -- throwing errors
+		constraint OnlyInsert check on update, delete (false),
+		constraint InsertValid check on insert (
+			-- part of the very first authority in the network - no invite, no signing
+			(SigningNonce is null and InviteSlotCid is null and InviteSignature is null and not exists (select 1 from Authority))
+			-- part of the first admin for an authority - invite is valid
+				or (SigningNonce is null and InviteSlotCid is not null and InviteSignature is not null
+					and not exists (select 1 from Authority A where A.Id = new.AuthorityId)
+>>>>>>> origin/authority-app
 						and exists (
 							select 1 from InviteResult I
 							where I.SlotCid = context.InviteSlotCid and I.IsAccepted
@@ -220,10 +241,17 @@ declare schema main
 					and O.AdminEffectiveAt = new.AdminEffectiveAt
 					and O.AuthorityId = new.AuthorityId
 		)),
+<<<<<<< HEAD
 		constraint SignerKeyValid check (context.IsSignerKeyValid = true),
 		constraint SignatureValid check (context.IsSignatureValid = true)
 	)
 		with context ( now datetime, IsSignatureValid boolean, IsSignerKeyValid boolean ); -- TODO fix signature
+=======
+		constraint SignerKeyValid check (exists (select 1 from UserKey K where K.UserId = new.UserId and K.Key = new.SignerKey and K.Expiration > context.now)),
+		constraint SignatureValid check (SignatureValid(Digest(Nonce, AuthorityId, AdminEffectiveAt, Scope, Digest, UserId), Signature, SignerKey))
+	)
+		with context ( now datetime ); -- TODO fix signature
+>>>>>>> origin/authority-app
 
 	index AdminSigningDigest on AdminSigning (Digest);
 
@@ -236,20 +264,60 @@ declare schema main
 		primary key (SigningNonce, UserId),
 		constraint InsertOnly check on update, delete (false),
 		-- Key is valid for the user and the UserId is valid
+<<<<<<< HEAD
 		constraint SignerKeyValid check (context.IsSignerKeyValid = true),
 		constraint OfficerValid check (context.IsOfficerValid = true),
 		constraint SignatureValid check (context.IsSignatureValid = true)
 	)
 		with context ( now datetime, IsSignatureValid boolean, IsSignerKeyValid boolean, IsOfficerValid boolean );
+=======
+		constraint SignerKeyValid check (
+			exists (select 1 from UserKey K where K.UserId = new.UserId and K.Key = new.SignerKey and K.Expiration > context.now)
+		),
+		-- User is an Officer with the required scope
+		constraint OfficerValid check (
+			exists (select 1 from AdminSigning ADS
+				join Officer O on O.AuthorityId = ADS.AuthorityId and O.AdminEffectiveAt = ADS.AdminEffectiveAt
+				where ADS.Nonce = new.SigningNonce
+					and O.UserId = new.UserId
+					and exists (select 1 from json_array_elements_text(O.Scopes) S(s) where s = ADS.Scope)
+			)
+		),
+		constraint SignatureValid check (exists (
+			select 1 from AdminSigning ADS
+				where ADS.Nonce = new.SigningNonce
+					and SignatureValid(ADS.Digest, Signature, SignerKey)
+		))
+	)
+		with context ( now datetime );
+>>>>>>> origin/authority-app
 
 	-- The final Admin signature output - only exists if required threshold of signatures are met - exists to avoid long validation
 	table AdminSignature (
 		SigningNonce text primary key,
 		constraint InsertOnly check on update, delete (false),
 		-- Satisfies the threshold policies of the Admin for the given scope
+<<<<<<< HEAD
 		constraint SignatureValid check (context.IsSignatureValid = true)
 	)
 		with context ( IsSignatureValid boolean );
+=======
+		constraint SignatureValid check (
+			(select count(*) from OfficerSignature OS where OS.SigningNonce = new.SigningNonce)
+				>= coalesce(
+					(
+						select cast(json_extract(TP.value, '$.threshold') as integer)
+							from AdminSigning AS_
+							join Admin A on A.AuthorityId = AS_.AuthorityId and A.EffectiveAt = AS_.AdminEffectiveAt
+							cross join json_each(A.ThresholdPolicies) TP
+							where AS_.Nonce = new.SigningNonce
+								and json_extract(TP.value, '$.scope') = AS_.Scope
+					),
+					1
+				)
+		)
+	);
+>>>>>>> origin/authority-app
 
 	table ProposedNetwork (
 		Name text,
@@ -265,7 +333,27 @@ declare schema main
 		-- TODO: constraint TimestampAuthoritiesValid check (TimestampAuthorities is a valid array of { url: string })
 		constraint NumberRequiredTSAsValid check (NumberRequiredTSAs >= 0 and typeof(new.NumberRequiredTSAs) = 'integer'),
 		constraint ElectionTypeValid check (ElectionType in (select Code from ElectionType)),
+<<<<<<< HEAD
 		constraint UserValid check (context.IsUserValid = true),
+=======
+		constraint UserValid check (
+			exists (
+				select 1 from Officer O
+					join CurrentAdmin CA on CA.AuthorityId = O.AuthorityId and CA.EffectiveAt = O.AdminEffectiveAt
+					join Network N on N.PrimaryAuthorityId = CA.AuthorityId
+					join UserKey K on K.UserId = O.UserId and K.Key = context.UserKey and K.Expiration > context.now
+					where O.UserId = context.UserId
+						and exists(select 1 from json_array_elements_text(O.Scopes) S(s) where s = 'rn')
+						and SignatureValid(
+							Digest(Tid, coalesce(new.Name, old.Name), coalesce(new.ImageRef, old.ImageRef), coalesce(new.Relays, old.Relays),
+								coalesce(new.TimestampAuthorities, old.TimestampAuthorities), coalesce(new.NumberRequiredTSAs, old.NumberRequiredTSAs),
+								coalesce(new.ElectionType, old.ElectionType)),
+							context.Signature,
+							context.UserKey
+						)
+			)
+		),
+>>>>>>> origin/authority-app
 		-- constraint TasksHandled	check (
 		-- 	-- There must be an AdminSigning for rn whose digest matches this ProposedNetwork,
 		-- 	-- and either the signing is fully completed (AdminSignature exists), or
@@ -308,7 +396,11 @@ declare schema main
 		-- 	)
 		-- )
 	)
+<<<<<<< HEAD
 		with context ( UserId text, UserKey text, Signature text, Tid int, now datetime, IsUserValid boolean );
+=======
+		with context ( UserId text, UserKey text, Signature text, Tid int, now datetime );
+>>>>>>> origin/authority-app
 
 	table ProposedAuthority (
 		Id text primary key,
@@ -316,7 +408,25 @@ declare schema main
 		DomainName text null,
 		ImageRef text null, -- json object { url?: string, cid?: string }
 		constraint AuthorityExists check on insert, update (exists (select 1 from Authority A where A.Id = new.Id)),
+<<<<<<< HEAD
 		constraint UserValid check (context.IsUserValid = true),
+=======
+		constraint UserValid check (
+			exists (
+				select 1 from Officer O
+					join CurrentAdmin CA on CA.AuthorityId = O.AuthorityId and CA.EffectiveAt = O.AdminEffectiveAt
+					join UserKey K on K.UserId = O.UserId and K.Key = context.UserKey and K.Expiration > context.now
+					where O.UserId = context.UserId and O.AuthorityId = new.Id
+						and exists(select 1 from json_array_elements_text(O.Scopes) S(s) where s = 'uai')
+						and SignatureValid(
+							Digest(Tid, coalesce(new.Id, old.Id), coalesce(new.Name, old.Name), coalesce(new.DomainName, old.DomainName),
+								coalesce(new.ImageRef, old.ImageRef)),
+							context.Signature,
+							context.UserKey
+						)
+			)
+		),
+>>>>>>> origin/authority-app
 		-- constraint TasksHandled	check (
 		-- 	-- if more signatures are required
 		-- 	-- exists (
@@ -330,7 +440,11 @@ declare schema main
 		-- 	)
 		-- )
 	)
+<<<<<<< HEAD
 		with context ( UserId text, UserKey text, Signature text, Tid int, now datetime, IsUserValid boolean );
+=======
+		with context ( UserId text, UserKey text, Signature text, Tid int, now datetime );
+>>>>>>> origin/authority-app
 
 	table ProposedAdmin (
 		AuthorityId text,
@@ -338,11 +452,33 @@ declare schema main
 		ThresholdPolicies text default '[]', -- json array of { policy: string (Scope), threshold: integer }
 		primary key (AuthorityId, EffectiveAt),
 		constraint AuthorityIdValid check (exists (select 1 from Authority A where A.Id = new.AuthorityId)),
+<<<<<<< HEAD
 		constraint EffectiveAtValid check on insert, update (EffectiveAt is not null),
 		--constraint ThresholdPoliciesValid check (...), -- TODO: constraint
 		constraint UserValid check (context.IsUserValid = true)
 	)
 		with context ( UserId text, UserKey text, Signature text, Tid int, now datetime, IsUserValid boolean );
+=======
+		constraint EffectiveAtValid check on insert, update (isISODatetime(EffectiveAt) and like('%Z', EffectiveAt)),
+		--constraint ThresholdPoliciesValid check (...), -- TODO: constraint
+		constraint UserValid check (
+			exists (
+				select 1 from Officer O
+					join CurrentAdmin CA on CA.AuthorityId = O.AuthorityId and CA.EffectiveAt = O.AdminEffectiveAt
+					join UserKey K on K.UserId = O.UserId and K.Key = context.UserKey and K.Expiration > context.now
+					where O.UserId = context.UserId and O.AuthorityId = new.AuthorityId
+						and exists(select 1 from json_array_elements_text(O.Scopes) S(s) where s = 'rad')
+						and SignatureValid(
+							Digest(Tid, coalesce(new.AuthorityId, old.AuthorityId),
+								coalesce(new.EffectiveAt, old.EffectiveAt), coalesce(new.ThresholdPolicies, old.ThresholdPolicies)),
+							context.Signature,
+							context.UserKey
+						)
+			)
+		)
+	)
+		with context ( UserId text, UserKey text, Signature text, Tid int, now datetime );
+>>>>>>> origin/authority-app
 
 	table ProposedOfficer (
 		AuthorityId text,
@@ -354,10 +490,31 @@ declare schema main
 		constraint AuthorityIdValid check (exists (select 1 from Authority A where A.Id = new.AuthorityId)),
 		constraint AdminValid check (exists (select 1 from ProposedAdmin A where A.AuthorityId = new.AuthorityId and A.EffectiveAt = new.AdminEffectiveAt)),
 		constraint CantDelete check on delete (false),
+<<<<<<< HEAD
 		constraint ScopesValid check (not exists (select 1 from json_each(Scopes) where value not in (select Code from Scope))),
 		constraint UserValid check (context.IsUserValid = true)
 	)
 		with context ( UserId text, UserKey text, Signature text, Tid int, now datetime, IsUserValid boolean );
+=======
+		constraint ScopesValid check (not exists (select 1 from json_array_elements_text(Scopes) S(s) where s not in (select Code from Scope))),
+		constraint UserValid check (
+			exists (
+				select 1 from Officer O
+					join CurrentAdmin CA on CA.AuthorityId = O.AuthorityId and CA.EffectiveAt = O.AdminEffectiveAt
+					join UserKey K on K.UserId = O.UserId and K.Key = context.UserKey and K.Expiration > context.now
+					where O.UserId = context.UserId and O.AuthorityId = new.AuthorityId
+						and exists(select 1 from json_array_elements_text(O.Scopes) S(s) where s = 'rad')
+						and SignatureValid(
+							Digest(Tid, coalesce(new.AuthorityId, old.AuthorityId), coalesce(new.AdminEffectiveAt, old.AdminEffectiveAt),
+								coalesce(new.ProposedName, old.ProposedName), coalesce(new.Title, old.Title), coalesce(new.Scopes, old.Scopes)),
+							context.Signature,
+							context.UserKey
+						)
+			)
+		)
+	)
+		with context ( UserId text, UserKey text, Signature text, Tid int, now datetime );
+>>>>>>> origin/authority-app
 
 	-- Possibly remove, since users must be associated with a keyholer or officer
 	-- Extension of ProposedOfficer to associate a specific UserId and include the user''s signature
@@ -371,7 +528,11 @@ declare schema main
 		primary key (AuthorityId, AdminEffectiveAt, ProposedName),
 		constraint ProposedOfficerValid check (exists (select 1 from ProposedOfficer PA where PA.AuthorityId = new.AuthorityId and PA.AdminEffectiveAt = new.AdminEffectiveAt and PA.ProposedName = new.ProposedName)),
 		constraint UserIdValid check (exists (select 1 from User U where U.Id = new.UserId)),
+<<<<<<< HEAD
 		constraint UserKeyValid check (exists (select 1 from UserKey K where K.UserId = new.UserId and K.PubKey = new.UserKey and K.Expiration > context.now)),
+=======
+		constraint UserKeyValid check (exists (select 1 from UserKey K where K.UserId = new.UserId and K.Key = new.UserKey and K.Expiration > context.now)),
+>>>>>>> origin/authority-app
 		constraint CantDelete check on delete (false),
 		-- TODO: re-enable when ProposedOfficerUser's role is decided (currently "possibly remove" per the table comment).
 		-- Original (broken) body referenced PA.AdminRevision / PA.UserId / PA.SignerKey / PA.Signature which do not exist on ProposedOfficer.
@@ -379,11 +540,15 @@ declare schema main
 	)
 		with context ( now datetime );
 
+<<<<<<< HEAD
 	view InviteType as
 		select 'au' as Code, 'Authority' as Name
 		union all select 'of' as Code, 'Officer' as Name
 		union all select 'k' as Code, 'Keyholder' as Name
 		union all select 'r' as Code, 'Registrant' as Name;
+=======
+	view InviteType as select * from (values ('au', 'Authority'), ('of', 'Officer'), ('k', 'Keyholder'), ('r', 'Registrant')) as InviteType(Code, Name);
+>>>>>>> origin/authority-app
 
 	table InviteSlot (
 		Cid text primary key,
@@ -393,14 +558,26 @@ declare schema main
 		InviteKey text, -- public key of temporary Invite key pair
 		InviteSignature text,
 		SigningNonce text, -- AdminSigning.Nonce, shows admin approval including scope (implies the type of invite, e.g. authority, officer, keyholder, registrant)
+<<<<<<< HEAD
 		constraint CidValid check (context.IsCidValid = true),
 		constraint TypeValid check (Type in (select Code from InviteType)),
 		constraint ExpirationValid check (Expiration > context.now),
 		constraint InviteSignatureValid check (context.IsSignatureValid = true),
+=======
+		constraint CidValid check (Cid = Digest(Name, Expiration, InviteKey, InviteSignature, SigningNonce)),
+		constraint TypeValid check (Type in (select Code from InviteType)),
+		constraint ExpirationValid check (Expiration > context.now),
+		-- Proves that the inviter has a valid private key corresponding to the public key in the Invite slot
+		constraint InviteSignatureValid check (SignatureValid(Digest(Cid, Type, Name, Expiration), InviteSignature, InviteKey)),
+>>>>>>> origin/authority-app
 		constraint InsertOnly check on update, delete (false),
 		constraint InsertValid check on insert (context.IsInsertValid = true)
 	)
+<<<<<<< HEAD
 		with context ( Tid int, now datetime, IsSignatureValid boolean, IsInsertValid boolean, IsCidValid boolean );
+=======
+		with context ( Tid int, now datetime );
+>>>>>>> origin/authority-app
 
 	index InviteSlotSigningNonce on InviteSlot (SigningNonce, Cid);
 
@@ -462,7 +639,11 @@ declare schema main
 		-- TODO add check for valid update
 		constraint InsertValid check on insert (
 			-- First user in the network - no invite, no signing
+<<<<<<< HEAD
 			(context.SigningNonce is null and context.InviteSlotCid is null and context.InviteSignature is null and (select count(*) from User) = 1)
+=======
+			(SigningNonce is null and InviteSlotCid is null and InviteSignature is null and (select count(*) from User) = 0)
+>>>>>>> origin/authority-app
 				-- or Valid Invite for this user
 				or (context.SigningNonce is null and context.InviteSlotCid is not null and context.InviteSignature is not null
 					and exists (
@@ -484,7 +665,11 @@ declare schema main
 		),
 		constraint InsertValid check on insert (
 			(
+<<<<<<< HEAD
 				(select count(*) from UserKey K where K.UserId = new.UserId) = 1
+=======
+				not exists (select 1 from UserKey K where K.UserId = new.UserId)
+>>>>>>> origin/authority-app
 				and context.UserKey is null
 			)
 			or exists (
@@ -493,7 +678,10 @@ declare schema main
 				where K.UserId = new.UserId
 					and K.PubKey = context.UserKey
 					and K.Expiration > context.now
+<<<<<<< HEAD
 					and K.PubKey <> new.PubKey
+=======
+>>>>>>> origin/authority-app
 			)
 	),
 		constraint DeleteValid check on delete (
@@ -506,7 +694,11 @@ declare schema main
 		constraint NoUpdate check on update (false),
 		constraint ExpirationFuture check (Expiration > context.now)
 	)
+<<<<<<< HEAD
 		with context ( UserKey text null, Signature text null, Tid int, now datetime, IsSignatureValid boolean );
+=======
+		with context ( UserKey text null, Signature text null, Tid int, now datetime );
+>>>>>>> origin/authority-app
 
 	table Election (
 		Id text primary key, -- 32 byte random id
@@ -517,9 +709,15 @@ declare schema main
 		BallotDeadline datetime, -- deadline for adding or revising ballots to the election
 		Type text, -- references ElectionType(Code)
 		constraint AuthorityIdValid check (exists (select 1 from Authority A where A.Id = new.AuthorityId)),
+<<<<<<< HEAD
 		constraint DateValid check (Date >= context.now),
 		constraint RevisionDeadlineValid check (RevisionDeadline <= Date),
 		constraint BallotDeadlineValid check (BallotDeadline <= Date),
+=======
+		constraint DateValid check (isISODatetime(Date) and like('%Z', Date) and Date >= context.now),
+		constraint RevisionDeadlineValid check (isISODatetime(RevisionDeadline) and like('%Z', RevisionDeadline) and RevisionDeadline <= Date),
+		constraint BallotDeadlineValid check (isISODatetime(BallotDeadline) and like('%Z', BallotDeadline) and BallotDeadline <= Date),
+>>>>>>> origin/authority-app
 		constraint TypeValid check (Type in (select Code from ElectionType)),
 		-- TODO: constrain Timeline
 		constraint InsertOnly check on update, delete (false),
@@ -530,12 +728,20 @@ declare schema main
 						and A.AuthorityId = new.AuthorityId
 						and A.Scope = 'mel'
 						and A.Digest = Digest(
+<<<<<<< HEAD
 							context.Tid, new.Id, new.AuthorityId, new.Title, new.Date, new.RevisionDeadline, new.BallotDeadline, new.Type
+=======
+							Tid, Id, AuthorityId, Title, Date, RevisionDeadline, BallotDeadline, Type
+>>>>>>> origin/authority-app
 						)
 			)
 		)
 	)
+<<<<<<< HEAD
 		with context ( SigningNonce text, Tid int, now text );
+=======
+		with context ( SigningNonce text, Tid int, now datetime );
+>>>>>>> origin/authority-app
 
 	table ProposedElection (
 		Id text primary key, -- 32 byte random id
@@ -545,9 +751,32 @@ declare schema main
 		RevisionDeadline datetime, -- deadline for making revisions to the election, cannot be revised itself
 		BallotDeadline datetime, -- deadline for adding or revising ballots to the election
 		Type text, -- references ElectionType(Code)
+<<<<<<< HEAD
 		constraint UserValid check (context.IsUserValid = true)
 	)
 		with context ( UserId text, UserKey text, Signature text, Tid int, now datetime, IsUserValid boolean );
+=======
+		constraint UserValid check (
+			exists (
+				select 1 from Officer O
+					join CurrentAdmin CA on CA.AuthorityId = O.AuthorityId and CA.EffectiveAt = O.AdminEffectiveAt
+					join UserKey K on K.UserId = O.UserId and K.Key = context.UserKey and K.Expiration > context.now
+					join Election E on E.Id = new.Id
+					where O.UserId = context.UserId and O.AuthorityId = E.AuthorityId and E.RevisionDeadline > new.RevisionTimestamp
+						and exists(select 1 from json_array_elements_text(O.Scopes) S(s) where s = 'mel')
+						and SignatureValid(
+							Digest(Tid, coalesce(new.ElectionId, old.ElectionId), coalesce(new.Revision, old.Revision),
+								coalesce(new.RevisionTimestamp, old.RevisionTimestamp), coalesce(new.Tags, old.Tags),
+									coalesce(new.Instructions, old.Instructions), coalesce(new.Timeline, old.Timeline),
+										coalesce(new.KeyholderThreshold, old.KeyholderThreshold)),
+							context.Signature,
+							context.UserKey
+						)
+			)
+		)
+	)
+		with context ( UserId text, UserKey text, Signature text, Tid int, now datetime );
+>>>>>>> origin/authority-app
 
 	table ElectionRevision (
 		ElectionId text primary key, -- references Election.Id
@@ -562,7 +791,12 @@ declare schema main
 		constraint BeforeRevisionDeadline check (exists (select 1 from Election E where E.Id = new.ElectionId and E.RevisionDeadline > context.now)),
 		constraint RevisionStart check on insert (Revision = 0),
 		constraint RevisionMonotonic check on update (new.Revision = old.Revision + 1),
+<<<<<<< HEAD
 		constraint RevisionTimestampValid check (RevisionTimestamp < context.now
+=======
+		constraint RevisionTimestampValid check (isISODatetime(RevisionTimestamp) and like('%Z', RevisionTimestamp)
+			and RevisionTimestamp < context.now
+>>>>>>> origin/authority-app
 			and RevisionTimestamp < (select RevisionDeadline from Election E where E.Id = new.ElectionId)),
 		constraint RevisionTimestampValidUpdate check on update (new.RevisionTimestamp > old.RevisionTimestamp),
 		--TODO constrain Timeline
@@ -575,12 +809,20 @@ declare schema main
 						and A.AuthorityId = E.AuthorityId
 						and A.Scope = 'mel'
 						and A.Digest = Digest(
+<<<<<<< HEAD
 							context.Tid, new.ElectionId, new.Revision, new.RevisionTimestamp, new.Tags, new.Instructions, new.Timeline, new.KeyholderThreshold
+=======
+							Tid, new.ElectionId, new.Revision, new.RevisionTimestamp, new.Tags, new.Instructions, new.Timeline, new.KeyholderThreshold
+>>>>>>> origin/authority-app
 						)
 			)
 		)
 	)
+<<<<<<< HEAD
 		with context ( SigningNonce text, Tid int, now text );
+=======
+		with context ( SigningNonce text, Tid int, now datetime );
+>>>>>>> origin/authority-app
 
 	table ProposedElectionRevision (
 		ElectionId text primary key, -- references Election.Id
@@ -595,9 +837,32 @@ declare schema main
 				or -- the election is still being proposed
 					exists (select 1 from ProposedElection PE where PE.Id = new.ElectionId)
 		),
+<<<<<<< HEAD
 		constraint UserValid check (context.IsUserValid = true)
 	)
 		with context ( UserId text, UserKey text, Signature text, Tid int, now datetime, IsUserValid boolean );
+=======
+		constraint UserValid check (
+			exists (
+				select 1 from Officer O
+					join CurrentAdmin CA on CA.AuthorityId = O.AuthorityId and CA.EffectiveAt = O.AdminEffectiveAt
+					join UserKey K on K.UserId = O.UserId and K.Key = context.UserKey and K.Expiration > context.now
+					join Election E on E.Id = new.ElectionId
+					where O.UserId = context.UserId and O.AuthorityId = E.AuthorityId and E.RevisionDeadline > new.RevisionTimestamp
+						and exists(select 1 from json_array_elements_text(O.Scopes) S(s) where s = 'mel')
+						and SignatureValid(
+							Digest(Tid, coalesce(new.ElectionId, old.ElectionId), coalesce(new.Revision, old.Revision),
+								coalesce(new.RevisionTimestamp, old.RevisionTimestamp), coalesce(new.Tags, old.Tags),
+									coalesce(new.Instructions, old.Instructions), coalesce(new.Timeline, old.Timeline),
+										coalesce(new.KeyholderThreshold, old.KeyholderThreshold)),
+							context.Signature,
+							context.UserKey
+						)
+			)
+		)
+	)
+		with context ( UserId text, UserKey text, Signature text, Tid int, now datetime );
+>>>>>>> origin/authority-app
 
 	table Ballot (
 		Id text primary key, -- 32 byte random id
@@ -618,7 +883,11 @@ declare schema main
 						and E.BallotDeadline > context.now
 						and A.Scope = 'ceb'
 						and A.Digest = Digest(
+<<<<<<< HEAD
 							context.Tid, new.Id, new.ElectionId, new.AuthorityId, new.Description, new.Districts
+=======
+							Tid, new.Id, new.ElectionId, new.AuthorityId, new.Description, new.Districts
+>>>>>>> origin/authority-app
 						)
 			)
 		),
@@ -632,7 +901,11 @@ declare schema main
 						and E.BallotDeadline > context.now
 						and A.Scope = 'ceb'
 						and A.Digest = Digest(
+<<<<<<< HEAD
 							context.Tid, old.Id, 'delete'
+=======
+							Tid, old.Id, 'delete'
+>>>>>>> origin/authority-app
 						)
 			)
 		)
@@ -647,9 +920,30 @@ declare schema main
 		Districts text, -- json array of strings
 		constraint ElectionIdValid check on insert, update (exists (select 1 from Election E where E.Id = new.ElectionId)),
 		constraint AuthorityIdValid check on insert, update (exists (select 1 from Authority A where A.Id = new.AuthorityId)),
+<<<<<<< HEAD
 		constraint UserValid check (context.IsUserValid = true)
 	)
 		with context ( UserId text, UserKey text, Signature text, Tid int, now datetime, IsUserValid boolean );
+=======
+		constraint UserValid check (
+			exists (
+				select 1 from Officer O
+					join CurrentAdmin CA on CA.AuthorityId = O.AuthorityId and CA.EffectiveAt = O.AdminEffectiveAt
+					join UserKey K on K.UserId = O.UserId and K.Key = context.UserKey and K.Expiration > context.now
+					join Election E on E.Id = new.ElectionId
+					where O.UserId = context.UserId and O.AuthorityId = E.AuthorityId and E.RevisionDeadline > context.now
+						and exists(select 1 from json_array_elements_text(O.Scopes) S(s) where s = 'ceb')
+						and SignatureValid(
+							Digest(Tid, coalesce(new.Id, old.Id), coalesce(new.ElectionId, old.ElectionId), coalesce(new.AuthorityId, old.AuthorityId), coalesce(new.Description, old.Description),
+								coalesce(new.Description, old.Description), coalesce(new.Districts, old.Districts)),
+							context.Signature,
+							context.UserKey
+						)
+			)
+		)
+	)
+		with context ( UserId text, UserKey text, Signature text, Tid int, now datetime );
+>>>>>>> origin/authority-app
 
 	table Question (
 		BallotId text, -- references Ballot.Id
@@ -676,7 +970,11 @@ declare schema main
 						and A.AuthorityId = B.AuthorityId
 						and A.Scope = 'ceb'
 						and A.Digest = Digest(
+<<<<<<< HEAD
 							context.Tid, new.BallotId, new.Code, new.Title, new.Instructions, new.DependsOn, new.Type, new.OptionRange, new.ScoreRange, new.Grouping, new.Sequence, new.Required
+=======
+							Tid, new.BallotId, new.Code, new.Title, new.Instructions, new.DependsOn, new.Type, new.OptionRange, new.ScoreRange, new.Grouping, new.Sequence, new.Required
+>>>>>>> origin/authority-app
 						)
 			)
 		),
@@ -690,7 +988,11 @@ declare schema main
 						and E.BallotDeadline > context.now
 						and A.Scope = 'ceb'
 						and A.Digest = Digest(
+<<<<<<< HEAD
 							context.Tid, old.BallotId, 'delete'
+=======
+							Tid, old.BallotId, 'delete'
+>>>>>>> origin/authority-app
 						)
 			)
 		)
@@ -711,9 +1013,33 @@ declare schema main
 		Required boolean default true, -- whether the question is required
 		constraint BallotIdValid check (exists (select 1 from Ballot B where B.Id = new.BallotId)),
 		constraint TypeValid check (Type in (select Code from QuestionType)),
+<<<<<<< HEAD
 		constraint MutationValid check on insert, update (context.IsMutationValid = true)
 	)
 		with context ( UserId text, UserKey text, Signature text, Tid int, now datetime, IsMutationValid boolean );
+=======
+		constraint MutationValid check on insert, update (
+			exists (
+				select 1 from Officer O
+					join CurrentAdmin CA on CA.AuthorityId = O.AuthorityId and CA.EffectiveAt = O.AdminEffectiveAt
+					join UserKey K on K.UserId = O.UserId and K.Key = context.UserKey and K.Expiration > context.now
+					join Ballot B on B.Id = new.BallotId
+					join Election E on E.Id = B.ElectionId
+					where O.UserId = context.UserId and O.AuthorityId = B.AuthorityId and E.RevisionDeadline > context.now
+						and exists(select 1 from json_array_elements_text(O.Scopes) S(s) where s = 'ceb')
+						and SignatureValid(
+							Digest(Tid, coalesce(new.BallotId, old.BallotId), coalesce(new.Code, old.Code), coalesce(new.Title, old.Title),
+								coalesce(new.Instructions, old.Instructions), coalesce(new.DependsOn, old.DependsOn), coalesce(new.Type, old.Type),
+								coalesce(new.OptionRange, old.OptionRange), coalesce(new.ScoreRange, old.ScoreRange), coalesce(new.Grouping, old.Grouping),
+								coalesce(new.Sequence, old.Sequence), coalesce(new.Required, old.Required)),
+							context.Signature,
+							context.UserKey
+						)
+			)
+		)
+	)
+		with context ( UserId text, UserKey text, Signature text, Tid int, now datetime );
+>>>>>>> origin/authority-app
 
 	table Option (
 		BallotId text, -- references Ballot.Id
@@ -739,7 +1065,11 @@ declare schema main
 						and A.AuthorityId = B.AuthorityId
 						and A.Scope = 'ceb'
 						and A.Digest = Digest(
+<<<<<<< HEAD
 							context.Tid, new.BallotId, new.QuestionCode, new.Code, new.Sequence, new.Title, new.Details, new.InfoURL, new.Image, new.Video
+=======
+							Tid, new.BallotId, new.QuestionCode, new.Code, new.Sequence, new.Title, new.Details, new.InfoURL, new.Image, new.Video
+>>>>>>> origin/authority-app
 						)
 			)
 		),
@@ -753,18 +1083,26 @@ declare schema main
 						and E.BallotDeadline > context.now
 						and A.Scope = 'ceb'
 						and A.Digest = Digest(
+<<<<<<< HEAD
 							context.Tid, old.BallotId, 'delete'
+=======
+							Tid, old.BallotId, 'delete'
+>>>>>>> origin/authority-app
 						)
 			)
 		)
 	)
 		with context ( SigningNonce text, Tid int, now datetime );
 
+<<<<<<< HEAD
 	view QuestionType as
 		select 'select' as Code, 'Select' as Name
 		union all select 'rank' as Code, 'Rank' as Name
 		union all select 'score' as Code, 'Score' as Name
 		union all select 'text' as Code, 'Text' as Name;
+=======
+	view QuestionType as select * from (values ('select', 'Select'), ('rank', 'Rank'), ('score', 'Score'), ('text', 'Text')) as QuestionType(Code, Name);
+>>>>>>> origin/authority-app
 
 	table ProposedOption (
 		BallotId text, -- references ProposedBallot.Id
@@ -782,9 +1120,33 @@ declare schema main
 		constraint QuestionCodeImmutable check on update (new.QuestionCode = old.QuestionCode),
 		constraint CodeImmutable check on update (new.Code = old.Code),
 		constraint SequenceValid check (Sequence is null or (typeof(Sequence) = 'integer' and Sequence >= 0)),
+<<<<<<< HEAD
 		constraint MutationValid check on insert, update (context.IsMutationValid = true)
 	)
 		with context ( UserId text, UserKey text, Signature text, Tid int, now datetime, IsMutationValid boolean );
+=======
+		constraint MutationValid check on insert, update (
+			exists (
+				select 1 from Officer O
+					join CurrentAdmin CA on CA.AuthorityId = O.AuthorityId and CA.EffectiveAt = O.AdminEffectiveAt
+					join UserKey K on K.UserId = O.UserId and K.Key = context.UserKey and K.Expiration > context.now
+					join Ballot B on B.Id = new.BallotId
+					join Question Q on Q.BallotId = B.Id and Q.Code = new.QuestionCode
+					join Election E on E.Id = B.ElectionId
+					where O.UserId = context.UserId and O.AuthorityId = B.AuthorityId and E.RevisionDeadline > context.now
+						and exists(select 1 from json_array_elements_text(O.Scopes) S(s) where s = 'ceb')
+						and SignatureValid(
+							Digest(Tid, coalesce(new.BallotId, old.BallotId), coalesce(new.QuestionCode, old.QuestionCode), coalesce(new.Code, old.Code),
+								coalesce(new.Sequence, old.Sequence), coalesce(new.Title, old.Title), coalesce(new.Details, old.Details),
+								coalesce(new.InfoURL, old.InfoURL), coalesce(new.Image, old.Image), coalesce(new.Video, old.Video)),
+							context.Signature,
+							context.UserKey
+						)
+			)
+		)
+	)
+		with context ( UserId text, UserKey text, Signature text, Tid int, now datetime );
+>>>>>>> origin/authority-app
 
 	table Keyholder (
 		ElectionId text, -- references Election.Id
@@ -795,7 +1157,11 @@ declare schema main
 		constraint UserIdValid check (exists (select 1 from User U where U.Id = new.UserId)),
 		constraint ElectionRevisionValid check (exists (select 1 from ElectionRevision ER where ER.ElectionId = new.ElectionId and ER.Revision = new.ElectionRevision)),
 		constraint InsertValid check on insert (
+<<<<<<< HEAD
 			context.SigningNonce is null and context.InviteSlotCid is null and context.InviteSignature is null
+=======
+			SigningNonce is null and InviteSlotCid is null and InviteSignature is null
+>>>>>>> origin/authority-app
 		)
 	)
 		with context ( SigningNonce text null, InviteSlotCid text null, InviteSignature text null, Tid int );
@@ -814,6 +1180,7 @@ declare schema main
 		constraint TypeImmutable check on update (new.Type = old.Type),
 		constraint SignatureTypeImmutable check on update (new.SignatureType = old.SignatureType),
 		constraint ExtensionExists check (
+<<<<<<< HEAD
 			(Type = 'release-key' and exists (select 1 from ReleaseKeyTaskExtension R where R.TaskId = new.Id))
 				or ( Type = 'onboarding' and exists (select 1 from OnboardingTaskExtension O where O.TaskId = new.Id))
 					or ( Type = 'signature' and (
@@ -828,6 +1195,31 @@ declare schema main
 		constraint MutationValid check on insert, update (context.IsMutationValid = true)
 	)
 		with context ( IsMutationValid boolean, Tid int );
+=======
+			(Type = 'release-key' and exists (select 1 from ReleaseKeyTask R where R.TaskId = new.Id))
+				or ( Type = 'onboarding' and exists (select 1 from OnboardingTask O where O.TaskId = new.Id))
+					or ( Type = 'signature' and
+						( SignatureType = 'network' and exists (select 1 from NetworkSignatureTask N where N.TaskId = new.Id))
+							or ( SignatureType = 'authority' and exists (select 1 from AuthoritySignatureTask A where A.TaskId = new.Id))
+							or ( SignatureType = 'admin' and exists (select 1 from AdminSignatureTask A where A.TaskId = new.Id))
+							or ( SignatureType = 'election' and exists (select 1 from ElectionSignatureTask E where E.TaskId = new.Id))
+							or ( SignatureType = 'election-revision' and exists (select 1 from ElectionRevisionSignatureTask ER where ER.TaskId = new.Id))
+							or ( SignatureType = 'ballot' and exists (select 1 from BallotSignatureTask B where B.TaskId = new.Id))
+					)
+		),
+		constraint MutationValid check on insert, update (
+			exists (
+				select 1 from AdminSignature ASig join AdminSigning A on A.Nonce = ASig.SigningNonce
+					where A.Nonce = context.SigningNonce
+						and A.Scope = 'mel'
+						and A.Digest = Digest(
+							Tid, new.Id, new.UserId, new.Type, new.SignatureType, new.SigningNonce
+						)
+			)
+		)
+	)
+		with context ( SigningNonce text, Tid int );
+>>>>>>> origin/authority-app
 
 	table ReleaseKeyTaskExtension (
 		TaskId text primary key, -- references Task.Id
@@ -842,16 +1234,27 @@ declare schema main
 	table NetworkSignatureTaskExtension (
 		TaskId text primary key, -- references Task.Id
 		NetworkName text, -- references Network.Name
+<<<<<<< HEAD
 		constraint TaskIdValid check (exists (select 1 from Task T where T.Id = new.TaskId and T.Type = 'signature' and T.SignatureType = 'network')),
+=======
+		constraint TaskIdValid check (exists (select 1 from Task T where T.Id = new.TaskId and T.Type = 'network')),
+>>>>>>> origin/authority-app
 		constraint NetworkIdValid check (exists (select 1 from ProposedNetwork N where N.Name = new.NetworkName)),
 		constraint MutationValid check on insert, update (
 			exists (
 				select 1 from Task T join AdminSigning A on A.Nonce = T.SigningNonce and A.Scope = 'rn'
 					join ProposedNetwork N on N.Name = new.NetworkName
+<<<<<<< HEAD
 						where T.Id = new.TaskId and T.Type = 'signature' and T.SignatureType = 'network'
 							and T.IsCompleted = false
 							and A.Digest = Digest(
 								context.Tid, N.Name, N.ImageRef, N.Relays, N.TimestampAuthorities, N.NumberRequiredTSAs, N.ElectionType
+=======
+						where T.Id = new.TaskId and T.Type = 'network'
+							and T.IsCompleted = false
+							and A.Digest = Digest(
+								Tid, N.Name, N.ImageRef, N.Relays, N.TimestampAuthorities, N.NumberRequiredTSAs, N.ElectionType
+>>>>>>> origin/authority-app
 							)
 			)
 			-- if the network change has been fully signed, no uncompleted tasks should be left
@@ -873,16 +1276,27 @@ declare schema main
 	table AuthoritySignatureTaskExtension (
 		TaskId text primary key, -- references Task.Id
 		AuthorityId text, -- references Authority.Id
+<<<<<<< HEAD
 		constraint TaskIdValid check (exists (select 1 from Task T where T.Id = new.TaskId and T.Type = 'signature' and T.SignatureType = 'authority')),
+=======
+		constraint TaskIdValid check (exists (select 1 from Task T where T.Id = new.TaskId and T.Type = 'authority')),
+>>>>>>> origin/authority-app
 		constraint AuthorityIdValid check (exists (select 1 from ProposedAuthority A where A.Id = new.AuthorityId)),
 		constraint MutationValid check on insert, update (
 			exists (
 				select 1 from Task T join AdminSigning A on A.Nonce = T.SigningNonce and A.Scope = 'uai'
 					join ProposedAuthority PA on PA.Id = new.AuthorityId
+<<<<<<< HEAD
 						where T.Id = new.TaskId and T.Type = 'signature' and T.SignatureType = 'authority'
 							and T.IsCompleted = false
 							and A.Digest = Digest(
 								context.Tid, PA.Id, PA.Name, PA.DomainName, PA.ImageRef
+=======
+						where T.Id = new.TaskId and T.Type = 'authority'
+							and T.IsCompleted = false
+							and A.Digest = Digest(
+								Tid, PA.Id, PA.Name, PA.DomainName, PA.ImageRef
+>>>>>>> origin/authority-app
 							)
 			)
 			-- if the authority change has been fully signed, no uncompleted tasks should be left
@@ -905,17 +1319,28 @@ declare schema main
 		TaskId text primary key, -- references Task.Id
 		AuthorityId text, -- references Authority.Id
 		AdminEffectiveAt datetime, -- references Admin.EffectiveAt
+<<<<<<< HEAD
 		constraint TaskIdValid check (exists (select 1 from Task T where T.Id = new.TaskId and T.Type = 'signature' and T.SignatureType = 'admin')),
+=======
+		constraint TaskIdValid check (exists (select 1 from Task T where T.Id = new.TaskId and T.Type = 'admin')),
+>>>>>>> origin/authority-app
 		constraint AuthorityIdValid check (exists (select 1 from Authority A where A.Id = new.AuthorityId)),
 		constraint AdminEffectiveAtValid check (exists (select 1 from Admin A where A.AuthorityId = new.AuthorityId and A.EffectiveAt = new.AdminEffectiveAt)),
 		constraint MutationValid check on insert, update (
 			exists (
 				select 1 from Task T join AdminSigning A on A.Nonce = T.SigningNonce and A.Scope = 'rad'
 					join ProposedAdmin PA on PA.AuthorityId = new.AuthorityId and PA.EffectiveAt = new.AdminEffectiveAt
+<<<<<<< HEAD
 						where T.Id = new.TaskId and T.Type = 'signature' and T.SignatureType = 'admin'
 							and T.IsCompleted = false
 							and A.Digest = Digest(
 								context.Tid, PA.AuthorityId, PA.EffectiveAt, PA.ThresholdPolicies
+=======
+						where T.Id = new.TaskId and T.Type = 'admin'
+							and T.IsCompleted = false
+							and A.Digest = Digest(
+								Tid, PA.AuthorityId, PA.EffectiveAt, PA.ThresholdPolicies
+>>>>>>> origin/authority-app
 							)
 			)
 			-- if the admin change has been fully signed, no uncompleted tasks should be left
@@ -938,16 +1363,27 @@ declare schema main
 	table ElectionSignatureTaskExtension (
 		TaskId text primary key, -- references Task.Id
 		ElectionId text, -- references Election.Id
+<<<<<<< HEAD
 		constraint TaskIdValid check (exists (select 1 from Task T where T.Id = new.TaskId and T.Type = 'signature' and T.SignatureType = 'election')),
+=======
+		constraint TaskIdValid check (exists (select 1 from Task T where T.Id = new.TaskId and T.Type = 'election')),
+>>>>>>> origin/authority-app
 		constraint ElectionIdValid check (exists (select 1 from ProposedElection E where E.Id = new.ElectionId)),
 		constraint MutationValid check on insert, update (
 			exists (
 				select 1 from Task T join AdminSigning A on A.Nonce = T.SigningNonce and A.Scope = 'mel'
 					join ProposedElection PE on PE.Id = new.ElectionId
+<<<<<<< HEAD
 						where T.Id = new.TaskId and T.Type = 'signature' and T.SignatureType = 'election'
 							and T.IsCompleted = false
 							and A.Digest = Digest(
 								context.Tid, PE.Id, PE.AuthorityId, PE.Title, PE.Date, PE.RevisionDeadline, PE.BallotDeadline, PE.Type
+=======
+						where T.Id = new.TaskId and T.Type = 'election'
+							and T.IsCompleted = false
+							and A.Digest = Digest(
+								Tid, PE.Id, PE.AuthorityId, PE.Title, PE.Date, PE.RevisionDeadline, PE.BallotDeadline, PE.Type
+>>>>>>> origin/authority-app
 							)
 			)
 			-- if the election has been fully signed, no uncompleted tasks should be left
@@ -970,16 +1406,27 @@ declare schema main
 		TaskId text primary key, -- references Task.Id
 		ElectionId text, -- references Election.Id
 		ElectionRevision integer, -- references ElectionRevision.Revision
+<<<<<<< HEAD
 		constraint TaskIdValid check (exists (select 1 from Task T where T.Id = new.TaskId and T.Type = 'signature' and T.SignatureType = 'election-revision')),
+=======
+		constraint TaskIdValid check (exists (select 1 from Task T where T.Id = new.TaskId and T.Type = 'election-revision')),
+>>>>>>> origin/authority-app
 		constraint ElectionIdValid check (exists (select 1 from ProposedElectionRevision ER where ER.ElectionId = new.ElectionId and ER.Revision = new.ElectionRevision)),
 		constraint MutationValid check on insert, update (
 			exists (
 				select 1 from Task T join AdminSigning A on A.Nonce = T.SigningNonce and A.Scope = 'mel'
 					join ProposedElectionRevision PER on PER.ElectionId = new.ElectionId and PER.Revision = new.ElectionRevision
+<<<<<<< HEAD
 						where T.Id = new.TaskId and T.Type = 'signature' and T.SignatureType = 'election-revision'
 							and T.IsCompleted = false
 							and A.Digest = Digest(
 								context.Tid, PER.ElectionId, PER.Revision, PER.RevisionTimestamp, PER.Tags, PER.Instructions, PER.Timeline, PER.KeyholderThreshold
+=======
+						where T.Id = new.TaskId and T.Type = 'election-revision'
+							and T.IsCompleted = false
+							and A.Digest = Digest(
+								Tid, PER.ElectionId, PER.Revision, PER.RevisionTimestamp, PER.Tags, PER.Instructions, PER.Timeline, PER.KeyholderThreshold
+>>>>>>> origin/authority-app
 							)
 			)
 			-- if the election revision has been fully signed, no uncompleted tasks should be left
@@ -1001,16 +1448,27 @@ declare schema main
 	table BallotSignatureTaskExtension (
 		TaskId text primary key, -- references Task.Id
 		BallotId text, -- references Ballot.Id
+<<<<<<< HEAD
 		constraint TaskIdValid check (exists (select 1 from Task T where T.Id = new.TaskId and T.Type = 'signature' and T.SignatureType = 'ballot')),
+=======
+		constraint TaskIdValid check (exists (select 1 from Task T where T.Id = new.TaskId and T.Type = 'ballot')),
+>>>>>>> origin/authority-app
 		constraint BallotIdValid check (exists (select 1 from ProposedBallot B where B.Id = new.BallotId)),
 		constraint MutationValid check on insert, update (
 			exists (
 				select 1 from Task T join AdminSigning A on A.Nonce = T.SigningNonce and A.Scope = 'ceb'
 					join ProposedBallot PB on PB.Id = new.BallotId
+<<<<<<< HEAD
 						where T.Id = new.TaskId and T.Type = 'signature' and T.SignatureType = 'ballot'
 							and T.IsCompleted = false
 							and A.Digest = Digest(
 								context.Tid, PB.Id, PB.ElectionId, PB.AuthorityId, PB.Description, PB.Districts
+=======
+						where T.Id = new.TaskId and T.Type = 'ballot'
+							and T.IsCompleted = false
+							and A.Digest = Digest(
+								Tid, PB.Id, PB.ElectionId, PB.AuthorityId, PB.Description, PB.Districts
+>>>>>>> origin/authority-app
 							)
 			)
 			-- if the ballot has been fully signed, no uncompleted tasks should be left
@@ -1044,6 +1502,7 @@ declare schema main
 	)
 		with context ( Tid int );
 
+<<<<<<< HEAD
 	view TaskType as
 		select 'release-key' as Code
 		union all select 'signature' as Code
@@ -1056,6 +1515,11 @@ declare schema main
 		union all select 'election' as Code
 		union all select 'election-revision' as Code
 		union all select 'ballot' as Code;
+=======
+	view TaskType as select * from (values ('release-key'), ('signature'), ('onboarding')) as TaskType(Code);
+
+	view SignatureType as select * from (values ('admin'), ('authority'), ('network'), ('election'), ('election-revision'), ('ballot')) as SignatureType(Code);
+>>>>>>> origin/authority-app
 
 }
 

@@ -24,14 +24,12 @@ export function AuthorizationSection({ admin, signedOfficerIds }: AuthorizationS
 	const { t } = useTranslation();
 	const { colors } = useTheme() as ExtendedTheme;
 	const { getEngine } = useApp();
-	const [networkEngine, setNetworkEngine] = useState<INetworkEngine | null>(null);
 	const [detailedOfficers, setDetailedOfficers] = useState<DetailedOfficer[]>([]);
 
 	useEffect(() => {
 		const loadData = async () => {
 			try {
 				const engine = await getEngine<INetworkEngine>("network");
-				setNetworkEngine(engine);
 
 				if (engine && admin && admin.admin) {
 					const officerDetailsPromises = admin.admin.officers.map(async (officer) => {
@@ -66,62 +64,38 @@ export function AuthorizationSection({ admin, signedOfficerIds }: AuthorizationS
 				size="thin"
 				onPress={() => {}}
 			/>
-			<View style={styles.authorizationBlock}>
-				<View style={styles.adminChecks}>
-					{detailedOfficers.map((officerDetail) => (
-						<View key={officerDetail.userId} style={styles.adminCheck}>
-							<FontAwesome6
-								name={officerDetail.isSigned ? "check-circle" : "circle"}
-								size={24}
-								color={colors.text}
-							/>
-							<ThemedText style={styles.adminCheckText}>{officerDetail.name}</ThemedText>
-						</View>
-					))}
-				</View>
-				<View style={styles.signButtons}>
+			{detailedOfficers.map((officerDetail) => (
+				<View key={officerDetail.userId} style={styles.adminCheck}>
+					<ThemedText style={styles.adminCheckName}>{officerDetail.name}</ThemedText>
+					<FontAwesome6
+						name={officerDetail.isSigned ? "square-check" : "square"}
+						size={20}
+						color={colors.text}
+					/>
 					<CustomButton
-						title={t("sign")}
-						icon="signature"
+						title={officerDetail.isSigned ? t("share") : t("sign")}
+						icon={officerDetail.isSigned ? "share-nodes" : "signature"}
 						backgroundColor={colors.important}
 						forceDarkText={true}
 						size="thin"
-						onPress={() => {}}
-					/>
-					<CustomButton
-						title={t("share")}
-						icon="share-nodes"
-						backgroundColor={colors.important}
-						forceDarkText={true}
-						size="thin"
+						flex={true}
 						onPress={() => {}}
 					/>
 				</View>
-			</View>
+			))}
 		</View>
 	);
 }
 
 const localStyles = StyleSheet.create({
-	authorizationBlock: {
-		flexDirection: "row",
-		alignItems: "flex-start",
-		justifyContent: "space-between",
-	},
-	adminChecks: {
-		justifyContent: "space-between",
-	},
 	adminCheck: {
 		flexDirection: "row",
-		width: "100%",
-		paddingRight: 8,
-		marginTop: 16,
+		alignItems: "center",
+		marginTop: 12,
+		gap: 12,
 	},
-	adminCheckText: {
-		marginLeft: 32,
-	},
-	signButtons: {
-		gap: 4,
+	adminCheckName: {
+		flex: 1,
 	},
 });
 const styles = { ...globalStyles, ...localStyles };

@@ -1,4 +1,5 @@
 import { MockElectionEngine } from '../election/mock-election-engine.js';
+<<<<<<< HEAD
 import { ElectionsCreateElectionBuilder } from './builders/elections-create-election-builder.js';
 import { ElectionsAdjustElectionBuilder } from './builders/elections-adjust-election-builder.js';
 import type {
@@ -8,6 +9,12 @@ import type {
 	IElectionEngine,
 	IElectionsAdjustElectionBuilder,
 	IElectionsCreateElectionBuilder,
+=======
+import type {
+	ElectionInit,
+	ElectionSummary,
+	IElectionEngine,
+>>>>>>> origin/authority-app
 	IElectionsEngine,
 	ElectionType,
 	Proposal,
@@ -55,9 +62,12 @@ const mockElectionInitData: ElectionInit = {
 		revisionTimestamp: getUnixTimestamp(new Date()), // Mock timestamp
 		tags: ['proposed', 'test'],
 		instructions: 'These are the instructions for the proposed election.',
+<<<<<<< HEAD
 		// Plan 03-01 Rule-3 transitional cast: invitePrivate was removed
 		// from base Invite (D-24). Plan 02 will refactor these mock
 		// keyholder literals to the *Share subtype.
+=======
+>>>>>>> origin/authority-app
 		keyholders: [
 			{
 				name: 'Keyholder 1',
@@ -77,7 +87,11 @@ const mockElectionInitData: ElectionInit = {
 				inviteSignature: '',
 				digest: '',
 			},
+<<<<<<< HEAD
 		] as unknown as ElectionRevisionInit['keyholders'],
+=======
+		],
+>>>>>>> origin/authority-app
 		timeline: {
 			registrationEnds: getUnixTimestamp(
 				new Date(Date.now() + 15 * 24 * 60 * 60 * 1000),
@@ -178,6 +192,7 @@ export class MockElectionsEngine implements IElectionsEngine {
 		return Array.from(this.proposedElections.values());
 	}
 
+<<<<<<< HEAD
 	buildCreateElection(): IElectionsCreateElectionBuilder {
 		return new ElectionsCreateElectionBuilder(this);
 	}
@@ -186,6 +201,8 @@ export class MockElectionsEngine implements IElectionsEngine {
 		return new ElectionsAdjustElectionBuilder(this);
 	}
 
+=======
+>>>>>>> origin/authority-app
 	async openElection(electionId: string): Promise<IElectionEngine> {
 		console.log('Opening election:', electionId);
 		const electionSummary = this.elections.get(electionId);

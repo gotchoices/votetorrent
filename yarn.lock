@@ -3594,16 +3594,26 @@ __metadata:
   languageName: node
   linkType: hard
 
+<<<<<<< HEAD
 "@optimystic/quereus-plugin-crypto@npm:^0.13.4":
   version: 0.13.4
   resolution: "@optimystic/quereus-plugin-crypto@npm:0.13.4"
+=======
+"@optimystic/quereus-plugin-crypto@npm:^0.13.0":
+  version: 0.13.0
+  resolution: "@optimystic/quereus-plugin-crypto@npm:0.13.0"
+>>>>>>> origin/authority-app
   dependencies:
     "@noble/curves": "npm:^2.0.1"
     "@noble/hashes": "npm:^2.0.1"
     uint8arrays: "npm:^5.1.0"
   peerDependencies:
     "@quereus/quereus": ^0.16.2
+<<<<<<< HEAD
   checksum: 10c0/f4a9cdb36be2c4a67560c343f09b3d09b04280ffaf3240c3a72da570499bf5f244de3e3ff92d2946b5c7ec480464249463677ab865faad368b3b83e2287a412d
+=======
+  checksum: 10c0/d8674170d6c4e9b3fc4d05da1856cb1352c021f8630cea7c411acd9e9dcc315a3bbab9ce37e1ace52386e110e4b1da9d61945c5d79b705a4e64ad901880ce52e
+>>>>>>> origin/authority-app
   languageName: node
   linkType: hard
 
@@ -3680,9 +3690,15 @@ __metadata:
   languageName: node
   linkType: hard
 
+<<<<<<< HEAD
 "@quereus/quereus@npm:3.3.0":
   version: 3.3.0
   resolution: "@quereus/quereus@npm:3.3.0"
+=======
+"@quereus/quereus@npm:^2.9.0":
+  version: 2.9.0
+  resolution: "@quereus/quereus@npm:2.9.0"
+>>>>>>> origin/authority-app
   dependencies:
     debug: "npm:^4.4.3"
     fast-json-patch: "npm:^3.1.1"
@@ -3690,7 +3706,11 @@ __metadata:
     moat-maker: "npm:^2.2.0"
     temporal-polyfill: "npm:^0.3.0"
     uint8arrays: "npm:^5.1.0"
+<<<<<<< HEAD
   checksum: 10c0/313983be6402873de08758a951c02df24f25035e1af5d68741653af2b0e6da26593ad96f00c411504fe6a57f7d44cb939a0a6cf2b45662f3c5868d651022413a
+=======
+  checksum: 10c0/8e9ed006a2c15b768e6cbb2148118f0027cc78c1ec4f35f71202b3bb9f3daf1fbc0b68fbc5ab80fd80a70c71a31fdfc72f1e2064370f151ac79e75d2afd4d617
+>>>>>>> origin/authority-app
   languageName: node
   linkType: hard
 
@@ -3891,6 +3911,32 @@ __metadata:
   bin:
     rnc-cli: build/bin.js
   checksum: 10c0/db5589e85851b917cbaaa95b3a0ee7c8c78535980a4bc5d07249e64c3e735bba1b510c7434c4d32592a062f8e60475cfd989ae240143828653319cfea75b5d9e
+  languageName: node
+  linkType: hard
+
+"@react-native-community/datetimepicker@npm:^9.1.0":
+  version: 9.1.0
+  resolution: "@react-native-community/datetimepicker@npm:9.1.0"
+  dependencies:
+    invariant: "npm:^2.2.4"
+  peerDependencies:
+    expo: ">=52.0.0"
+    react: "*"
+    react-native: "*"
+    react-native-windows: "*"
+  peerDependenciesMeta:
+    expo:
+      optional: true
+    react-native-windows:
+      optional: true
+  checksum: 10c0/3f31baec58c1245204a9b4057809027019aa1abb4b8caea4cb4d44ab70f5a97dfe5114a8aa315299aa47ad31971059181c355aa056d9c3a14b7892582da9f4cb
+  languageName: node
+  linkType: hard
+
+"@react-native-community/slider@npm:^4.5.2":
+  version: 4.5.7
+  resolution: "@react-native-community/slider@npm:4.5.7"
+  checksum: 10c0/9154c88972eb97ecb53190ff215148b41ec195619991e51061f543dc67c8b2463d1d195dd9c166755b8db1cc4d5a1ae8a152c3ecd5d3285cc4a14c35fddb3716
   languageName: node
   linkType: hard
 
@@ -4946,6 +4992,15 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@types/uuid@npm:^11.0.0":
+  version: 11.0.0
+  resolution: "@types/uuid@npm:11.0.0"
+  dependencies:
+    uuid: "npm:*"
+  checksum: 10c0/6ebf1448d8fdc78d348a8a84389b74083f2f58bed75a5a6cf3be8419d33dcf757735c8b2de746b066ff8ef07f4384d02549774dc84195ffa46b24745471e9d8e
+  languageName: node
+  linkType: hard
+
 "@types/yargs-parser@npm:*":
   version: 21.0.3
   resolution: "@types/yargs-parser@npm:21.0.3"
@@ -5199,11 +5254,17 @@ __metadata:
   dependencies:
     "@noble/curves": "npm:^1.9.6"
     "@noble/hashes": "npm:^1.8.0"
+<<<<<<< HEAD
     "@optimystic/quereus-plugin-crypto": "npm:^0.13.4"
     "@quereus/quereus": "npm:3.3.0"
+=======
+    "@optimystic/quereus-plugin-crypto": "npm:^0.13.0"
+    "@quereus/quereus": "npm:^2.9.0"
+>>>>>>> origin/authority-app
     "@react-native-async-storage/async-storage": "npm:^2.1.2"
     "@types/mocha": "npm:^10.0.10"
     "@types/node": "npm:^22.13.10"
+    "@types/uuid": "npm:^11.0.0"
     "@votetorrent/vote-core": "npm:^0.0.1"
     aegir: "npm:^45.1.4"
     chai: "npm:^5.2.0"
@@ -5215,6 +5276,7 @@ __metadata:
     temporal-polyfill: "npm:^0.3.0"
     tsconfig-paths: "npm:^4.2.0"
     typescript: "npm:^5.6.3"
+    uuid: "npm:^14.0.0"
   peerDependencies:
     "@react-native-async-storage/async-storage": ^2.1.1
     react-native: 0.78.0
@@ -14042,6 +14104,16 @@ __metadata:
   version: 14.0.0
   resolution: "multiformats@npm:14.0.0"
   checksum: 10c0/ec4b7d5ffa9dfb5b18274afb41c105c2d410e758b2c9242fdfbd938972c3a9796cabba74c214158b8732a41e1b5ba3c106c9dd5f1b7b19c4669c8f45b91db5cd
+<<<<<<< HEAD
+=======
+  languageName: node
+  linkType: hard
+
+"multiformats@npm:^9.4.2":
+  version: 9.9.0
+  resolution: "multiformats@npm:9.9.0"
+  checksum: 10c0/1fdb34fd2fb085142665e8bd402570659b50a5fae5994027e1df3add9e1ce1283ed1e0c2584a5c63ac0a58e871b8ee9665c4a99ca36ce71032617449d48aa975
+>>>>>>> origin/authority-app
   languageName: node
   linkType: hard
 
@@ -16123,9 +16195,15 @@ __metadata:
   languageName: node
   linkType: hard
 
+<<<<<<< HEAD
 "react-native-screens@npm:^4.5.0":
   version: 4.25.1
   resolution: "react-native-screens@npm:4.25.1"
+=======
+"react-native-screens@npm:4.10.0":
+  version: 4.10.0
+  resolution: "react-native-screens@npm:4.10.0"
+>>>>>>> origin/authority-app
   dependencies:
     react-freeze: "npm:^1.0.0"
     warn-once: "npm:^0.1.0"
@@ -18779,6 +18857,7 @@ __metadata:
   dependencies:
     uint8arrays: "npm:^5.0.1"
   checksum: 10c0/d5c355c055a29c2faa1cf2d5340fa2310473602088bcc1987176a8e58d678980f6b0361c3d604fba26047df32495f199ffba360473f873e5bf4a8adb7d20820b
+<<<<<<< HEAD
   languageName: node
   linkType: hard
 
@@ -18806,6 +18885,26 @@ __metadata:
   dependencies:
     multiformats: "npm:^14.0.0"
   checksum: 10c0/5814d69e5fada5d169ee8e88c750ad4ddf57a6ee86a7fe9534b86b55a147fab8e0b75d66cb1d2a1c6c2350526edd03e57a3ab5f0a0977c8ac13a6ce350c7b958
+=======
+  languageName: node
+  linkType: hard
+
+"uint8arraylist@npm:^3.0.1":
+  version: 3.0.2
+  resolution: "uint8arraylist@npm:3.0.2"
+  dependencies:
+    uint8arrays: "npm:^6.0.0"
+  checksum: 10c0/83673fea99cd902e21e1b6cb50b999d62de15f2866d5c5a50228ad1f13e8cc8e6bc6832301d571ac926e20660262a03e7b93c6f7171cc522ff12c4d1c9509a14
+  languageName: node
+  linkType: hard
+
+"uint8arrays@npm:3.1.1":
+  version: 3.1.1
+  resolution: "uint8arrays@npm:3.1.1"
+  dependencies:
+    multiformats: "npm:^9.4.2"
+  checksum: 10c0/9946668e04f29b46bbb73cca3d190f63a2fbfe5452f8e6551ef4257d9d597b72da48fa895c15ef2ef772808a5335b3305f69da5f13a09f8c2924896b409565ff
+>>>>>>> origin/authority-app
   languageName: node
   linkType: hard
 
@@ -19088,12 +19187,12 @@ __metadata:
   languageName: node
   linkType: hard
 
-"uuid@npm:^8.3.2":
-  version: 8.3.2
-  resolution: "uuid@npm:8.3.2"
+"uuid@npm:9.0.1":
+  version: 9.0.1
+  resolution: "uuid@npm:9.0.1"
   bin:
     uuid: dist/bin/uuid
-  checksum: 10c0/bcbb807a917d374a49f475fae2e87fdca7da5e5530820ef53f65ba1d12131bd81a92ecf259cc7ce317cbe0f289e7d79fdfebcef9bfa3087c8c8a2fa304c9be54
+  checksum: 10c0/1607dd32ac7fc22f2d8f77051e6a64845c9bce5cd3dd8aa0070c074ec73e666a1f63c7b4e0f4bf2bc8b9d59dc85a15e17807446d9d2b17c8485fbc2147b27f9b
   languageName: node
   linkType: hard
 
@@ -19171,6 +19270,8 @@ __metadata:
     "@react-native-community/cli": "npm:^15.1.0"
     "@react-native-community/cli-platform-android": "npm:^15.1.0"
     "@react-native-community/cli-platform-ios": "npm:^15.1.0"
+    "@react-native-community/datetimepicker": "npm:^9.1.0"
+    "@react-native-community/slider": "npm:^4.5.2"
     "@react-native/babel-preset": "npm:0.78.0"
     "@react-native/eslint-config": "npm:0.78.0"
     "@react-native/gradle-plugin": "npm:^0.78.0"

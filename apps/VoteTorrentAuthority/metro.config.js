@@ -18,6 +18,7 @@ const config = {
       path.resolve(projectRoot, 'node_modules'),
       path.resolve(workspaceRoot, 'node_modules'),
     ],
+    unstable_enablePackageExports: true,
   },
 };
 

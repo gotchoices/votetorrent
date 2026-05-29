@@ -462,7 +462,11 @@ export class AuthorityEngine implements IAuthorityEngine {
 					InviteSignature,
 					SigningNonce
 					)
+<<<<<<< HEAD
 					with context Tid = :tid, now = :now, IsSignatureValid = true, IsInsertValid = true, IsCidValid = true
+=======
+					with context now = datetime('now')
+>>>>>>> origin/authority-app
 					values (
 						Digest(:expiration, :inviteKey, :inviteSignature, :name, :nonce),
 						:type,
@@ -510,7 +514,11 @@ export class AuthorityEngine implements IAuthorityEngine {
 					InviteSignature,
 					SigningNonce
 					)
+<<<<<<< HEAD
 				with context Tid = :tid, now = :now, IsSignatureValid = true, IsInsertValid = true, IsCidValid = true
+=======
+				with context now = datetime('now')
+>>>>>>> origin/authority-app
 				values (
 					Digest(:expiration, :inviteKey, :inviteSignature, :name, :nonce, :type),
 					:type,

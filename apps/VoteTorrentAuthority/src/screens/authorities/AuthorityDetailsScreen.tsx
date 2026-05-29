@@ -2,11 +2,9 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Image, ScrollView, StyleSheet, View } from "react-native";
 import { ChipButton } from "../../components/ChipButton";
-import { InfoCard } from "../../components/InfoCard";
 import { ThemedText } from "../../components/ThemedText";
 import type {
 	Authority,
-	Admin,
 	IAuthorityEngine,
 	INetworkEngine,
 	AdminDetails,
@@ -21,6 +19,7 @@ import { useApp } from "../../providers/AppProvider";
 import { AuthorizationSection } from "../../components/AuthorizationSection";
 import { globalStyles } from "../../theme/styles";
 import { formatDate } from "../../utils/displayUtils";
+import { OfficerCard } from "./components/OfficerCard";
 
 export default function AuthorityDetailsScreen() {
 	const { t } = useTranslation();
@@ -167,29 +166,25 @@ export default function AuthorityDetailsScreen() {
 					</ThemedText>
 				</View>
 				<View style={styles.detail}>
-					<ThemedText type="defaultSemiBold">{t("domainName")}: </ThemedText>
+					<ThemedText type="defaultSemiBold">{t("domain")}: </ThemedText>
 					<ThemedText numberOfLines={1} ellipsizeMode="tail">
 						{authority.domainName}
 					</ThemedText>
 				</View>
 				<View style={styles.detail}>
-					<ThemedText type="defaultSemiBold">{t("id")}: </ThemedText>
+					<ThemedText type="defaultSemiBold">{t("cid")}: </ThemedText>
 					<ThemedText numberOfLines={1} ellipsizeMode="tail">
 						{authority.id}
 					</ThemedText>
 				</View>
-				<View style={styles.detail}>
-					<ThemedText type="defaultSemiBold">{t("imageUrl")}: </ThemedText>
-					<ThemedText numberOfLines={1} ellipsizeMode="tail">
-						{authority.imageRef?.url}
-					</ThemedText>
-				</View>
-				<View style={styles.detail}>
-					<ThemedText type="defaultSemiBold">{t("address")}: </ThemedText>
-					<ThemedText numberOfLines={1} ellipsizeMode="tail">
-						{authority.domainName}
-					</ThemedText>
-				</View>
+				{authority.imageRef?.url ? (
+					<View style={styles.detail}>
+						<ThemedText type="defaultSemiBold">{t("imageUrl")}: </ThemedText>
+						<ThemedText numberOfLines={1} ellipsizeMode="tail">
+							{authority.imageRef.url}
+						</ThemedText>
+					</View>
+				) : null}
 				<CustomButton
 					title={t("reviseAuthority")}
 					icon="pencil"
@@ -202,21 +197,37 @@ export default function AuthorityDetailsScreen() {
 			<View style={styles.section}>
 				<ThemedText type="title">{t("administration")}</ThemedText>
 
-				{adminDetails?.admin.signatures && (
-					<View>
-						<View style={styles.detail}>
-							<ThemedText type="defaultSemiBold">{t("handoffSignature")}: </ThemedText>
+				{(() => {
+					const adminSignatures = (adminDetails?.admin as any)?.signatures as
+						| Array<{ signerKey?: string; signature?: string }>
+						| undefined;
+					if (!adminSignatures || adminSignatures.length === 0) return null;
+					return (
+						<View>
+							<View style={styles.detail}>
+								<ThemedText type="defaultSemiBold">{t("handoffSignatures")}: </ThemedText>
+							</View>
+							<View style={styles.subDetails}>
+								{adminSignatures.map((signature, idx) => (
+									<View key={signature.signerKey ?? idx} style={styles.detail}>
+										<ThemedText type="default" numberOfLines={1} ellipsizeMode="middle">
+											{signature.signerKey}
+										</ThemedText>
+										<ThemedText> ({t("signature")})</ThemedText>
+									</View>
+								))}
+							</View>
 						</View>
-						<View style={styles.subDetails}>
-							{adminDetails.admin.signatures.map((signature) => (
-								<View style={styles.detail}>
-									<ThemedText type="default">{signature.signerKey}: </ThemedText>
-									<ThemedText>{signature.signature}</ThemedText>
-								</View>
-							))}
-						</View>
+					);
+				})()}
+				{adminDetails?.admin.id ? (
+					<View style={styles.detail}>
+						<ThemedText type="defaultSemiBold">{t("cid")}: </ThemedText>
+						<ThemedText numberOfLines={1} ellipsizeMode="tail">
+							{adminDetails.admin.id}
+						</ThemedText>
 					</View>
-				)}
+				) : null}
 				<View style={styles.detail}>
 					<ThemedText type="defaultSemiBold">{t("expires")}: </ThemedText>
 					<ThemedText>{formatDate(adminDetails?.admin.effectiveAt)}</ThemedText>
@@ -225,18 +236,11 @@ export default function AuthorityDetailsScreen() {
 				{officers.map((officer) => {
 					const user = officerUsers.get(officer.userId);
 					return (
-						<InfoCard
+						<OfficerCard
 							key={officer.userId}
-							image={{ uri: user?.image.url || "" }}
-							title={user?.name || ""}
-							additionalInfo={[
-								{
-									label: t("title"),
-									value: officer.title,
-								},
-								{ label: t("userId"), value: officer.userId },
-							]}
-							icon="chevron-right"
+							officer={officer}
+							userName={user?.name || officer.userId}
+							image={user?.image?.url ? { uri: user.image.url } : undefined}
 							onPress={() =>
 								navigation.navigate("OfficerDetails", {
 									officer: officer,
@@ -264,35 +268,62 @@ export default function AuthorityDetailsScreen() {
 				<View>
 					<View style={styles.section}>
 						<ThemedText type="title">{t("proposedAdministration")}</ThemedText>
+						{adminDetails.admin.id ? (
+							<View style={styles.detail}>
+								<ThemedText type="defaultSemiBold">{t("cid")}: </ThemedText>
+								<ThemedText numberOfLines={1} ellipsizeMode="tail">
+									{adminDetails.admin.id}
+								</ThemedText>
+							</View>
+						) : null}
+						<View style={styles.detail}>
+							<ThemedText type="defaultSemiBold">{t("expires")}: </ThemedText>
+							<ThemedText>{formatDate(adminDetails.proposed.proposed.effectiveAt)}</ThemedText>
+						</View>
+						<ThemedText type="defaultSemiBold" style={styles.administratorsHeading}>
+							{t("administrators")}
+						</ThemedText>
 						{adminDetails.proposed.proposed.officers.map((officerSelection) => {
-							const officer = officerSelection.existing || {
+							const officer: Officer = officerSelection.existing || {
 								userId: "",
+								authorityId: authority.id,
 								title: officerSelection.init?.title || "",
 								scopes: officerSelection.init?.scopes || [],
-								signature: { signature: "", signerKey: "" },
 							};
 							const user = officer.userId ? officerUsers.get(officer.userId) : undefined;
+							const name = user?.name || officerSelection.init?.name || "";
+							const status = officerSelection.existing
+								? { label: t("accepted"), tone: "accepted" as const }
+								: { label: t("pending"), tone: "pending" as const };
+
 							return (
-								<InfoCard
+								<OfficerCard
 									key={officer.userId || officerSelection.init?.name}
+									officer={officer}
+									userName={name}
 									image={user?.image?.url ? { uri: user.image.url } : undefined}
-									title={user?.name || officerSelection.init?.name || ""}
-									additionalInfo={[
-										{
-											label: t("title"),
-											value: officer.title,
-										},
-										{ label: t("userId"), value: officer.userId || t("pending") },
-									]}
-									icon="chevron-right"
-									onPress={() =>
-										navigation.navigate("OfficerDetails", {
-											officer: officer,
+									status={status}
+									onInvite={() =>
+										navigation.navigate("AdministratorInvitation", {
+											mode: "send",
+											authority,
 										})
 									}
+									onRemove={() => {}}
 								/>
 							);
 						})}
+						<CustomButton
+							title={t("manageProposal")}
+							icon="sliders"
+							size="thin"
+							backgroundColor={colors.accent}
+							onPress={() =>
+								navigation.navigate("ProposedAdministration", {
+									authorityId: authority.id,
+								})
+							}
+						/>
 					</View>
 
 					<AuthorizationSection admin={adminDetails} />
@@ -320,6 +351,10 @@ const localStyles = StyleSheet.create({
 	},
 	subDetails: {
 		marginLeft: 8,
+	},
+	administratorsHeading: {
+		marginTop: 12,
+		marginBottom: 4,
 	},
 });
 

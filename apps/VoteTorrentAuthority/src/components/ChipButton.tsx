@@ -18,7 +18,11 @@ export function ChipButton({label, icon, onPress}: ChipButtonProps) {
 			// This is using onPressIn because of a bug with onPress in headers
 			onPressIn={onPress}
 			style={[styles.button, {backgroundColor: colors.accent}]}>
-			{icon && <FontAwesome6 name={icon} size={14} color={colors.text} style={styles.icon} />}
+			{icon && (
+				<View style={[styles.iconCircle, {backgroundColor: colors.dark}]}>
+					<FontAwesome6 name={icon} size={16} color={colors.light} />
+				</View>
+			)}
 			<ThemedText>{label.toUpperCase()}</ThemedText>
 		</TouchableOpacity>
 	);
@@ -28,12 +32,17 @@ const styles = StyleSheet.create({
 	button: {
 		flexDirection: 'row',
 		alignItems: 'center',
-		paddingVertical: 2,
+		height: 32,
 		paddingHorizontal: 12,
-		borderRadius: 20,
-		alignSelf: 'flex-start'
+		borderRadius: 16,
+		alignSelf: 'flex-start',
+		gap: 8,
 	},
-	icon: {
-		marginRight: 6
-	}
+	iconCircle: {
+		width: 24,
+		height: 24,
+		borderRadius: 12,
+		alignItems: 'center',
+		justifyContent: 'center',
+	},
 });

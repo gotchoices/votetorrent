@@ -77,6 +77,11 @@ export interface INetworkEngine {
   getCurrentUser(): Promise<IUserEngine | undefined>
   getDetails(): Promise<NetworkDetails>
   getNetworkSummary(): Promise<NetworkSummary>
+  /**
+   * Returns network-wide statistics (D-15 / NETUI-05). Mock implementations
+   * return static values; real engines compute from live network telemetry.
+   */
+  getStatistics(): Promise<{ estimatedNodes: number; serverCount: number }>
   getPinnedAuthorities(): Promise<Authority[]>
   getProposedElections(): Promise<Array<Proposal<ElectionInit>>>
   getUser(userId: string): Promise<IUserEngine | undefined>

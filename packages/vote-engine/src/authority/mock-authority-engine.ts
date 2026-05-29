@@ -39,6 +39,17 @@ export class MockAuthorityEngine implements IAuthorityEngine {
   private readonly proposedAuthority?: Proposal<AuthorityInit> // Unused by current mock methods but part of interface/state
   // private isSlcoAuthority: boolean = false; // No longer needed
 
+  // Authorities whose mock keeps a proposed administration. All other seeded
+  // authorities return adminDetails.proposed === undefined so the "Revise
+  // Administration" button gate (!adminDetails?.proposed) on AuthorityDetails
+  // evaluates true. Closes Phase 8 UAT gap 14 (gap-closure plan 08-07 Task 4).
+  // Names MUST match packages/vote-engine/src/mock-data.ts MOCK_AUTHORITIES[*].name
+  // verbatim (case-sensitive).
+  private static readonly AUTHORITIES_WITH_PROPOSAL = new Set<string>([
+    'Salt Lake County',
+    'State of Utah'
+  ])
+
   constructor (private readonly authority: Authority) {
     // Always initialize using the shared administration template
     const detailsCopy = JSON.parse(
@@ -49,7 +60,11 @@ export class MockAuthorityEngine implements IAuthorityEngine {
     // **Important**: Set the correct authorityId for this specific instance
     this.admin.authorityId = this.authority.id
 
-    this.proposedAdmin = detailsCopy.proposed
+    this.proposedAdmin = MockAuthorityEngine.AUTHORITIES_WITH_PROPOSAL.has(
+      this.authority.name
+    )
+      ? detailsCopy.proposed
+      : undefined
   }
 
   createOfficerInvite (init: OfficerInit): OfficerInviteShare {

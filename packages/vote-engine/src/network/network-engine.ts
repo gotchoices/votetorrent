@@ -898,6 +898,10 @@ export class NetworkEngine implements INetworkEngine {
     return invokedId ?? ''
   }
 
+  async getStatistics (): Promise<{ estimatedNodes: number; serverCount: number }> {
+    throw new Error('Not implemented')
+  }
+
   async unpinAuthority (authorityId: string): Promise<void> {
     const pinnedAuthorities = await this.getPinnedAuthorities()
     const filtered = pinnedAuthorities.filter(

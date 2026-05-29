@@ -3,38 +3,55 @@ import { globalStyles } from "../../../theme/styles";
 import { ThemedText } from "../../../components/ThemedText";
 import { useTranslation } from "react-i18next";
 import type { ElectionSignatureTask } from "@votetorrent/vote-core";
+import { formatDate } from "../../../utils/displayUtils";
+import { SignatureTaskBody } from "./SignatureTaskBody";
 
 export function ElectionSignatureTaskDetails({ task }: { task: ElectionSignatureTask }) {
 	const { t } = useTranslation();
-	return (
-		<View style={[styles.section, styles.detailContainer]}>
-			<View style={styles.detail}>
-				<ThemedText type="defaultSemiBold">{t("type")}: </ThemedText>
-				<ThemedText>{task.type}</ThemedText>
-			</View>
-			<View style={styles.detail}>
-				<ThemedText type="defaultSemiBold">{t("network")}: </ThemedText>
-				<ThemedText>{task.network.name}</ThemedText>
-			</View>
-			<View style={styles.detail}>
-				<ThemedText type="defaultSemiBold">{t("userId")}: </ThemedText>
-				<ThemedText>{task.userId}</ThemedText>
-			</View>
-			<View style={styles.detail}>
-				<ThemedText type="defaultSemiBold">{t("election")}: </ThemedText>
-				<ThemedText>{task.election.proposed.election.title}</ThemedText>
-			</View>
+	const proposed = task.election.proposed;
+	const election = proposed.election;
+	const revision = proposed.revision;
+
+	const tagsSlot = (
+		<View style={styles.bullets}>
+			{revision.tags.map((tag) => (
+				<View key={tag} style={styles.bulletRow}>
+					<ThemedText>{"• "}</ThemedText>
+					<ThemedText>{tag}</ThemedText>
+				</View>
+			))}
 		</View>
+	);
+
+	return (
+		<SignatureTaskBody
+			sections={[
+				{
+					title: t("proposal"),
+					rows: [
+						{ label: t("network"), value: task.network.name },
+						{ label: t("election"), value: election.title },
+						{ label: t("date"), value: formatDate(election.date) },
+					],
+				},
+				{
+					title: t("details"),
+					rows: [
+						{ label: t("revision"), value: String(revision.revision) },
+						{ label: t("tags"), slot: tagsSlot },
+					],
+				},
+			]}
+		/>
 	);
 }
 
 const localStyles = StyleSheet.create({
-	detailContainer: {
-		width: "100%",
+	bullets: {
+		marginLeft: 8,
 	},
-	detail: {
+	bulletRow: {
 		flexDirection: "row",
-		gap: 4,
 	},
 });
 

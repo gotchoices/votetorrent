@@ -1,0 +1,5 @@
+[submodule ".planning"]
+	path = .planning
+	url = git@github.com:inspirions/votetorrent-gsd.git
+	branch = main
+	update = merge

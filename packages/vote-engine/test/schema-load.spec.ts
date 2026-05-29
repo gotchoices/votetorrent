@@ -74,7 +74,11 @@ describe('Schema load', () => {
 		//   resolution maps schema-level `Digest(...)` → `digest(...)`.
 		//
 		// Intentionally NOT covered here:
+<<<<<<< HEAD
 		// - JS-only helpers exported by the plugin (`Digest`,
+=======
+		// - JS-only helpers exported by the plugin (`Digest`, `DigestAll`,
+>>>>>>> origin/authority-app
 		//   `Sign`, `SignatureValid`). They are not part of the SQL surface
 		//   and must not be invoked via `select <name>(...)`.
 		// - `H16` — a JS-only utility; schema references at votetorrent.qsql
@@ -129,7 +133,11 @@ describe('Schema load', () => {
 		try {
 			const stmt = db.prepare(
 				`insert into UserKey (UserId, Type, PubKey, Expiration)
+<<<<<<< HEAD
 				with context now = datetime('now'), IsSignatureValid = true
+=======
+				with context now = datetime('now')
+>>>>>>> origin/authority-app
 				values (:userId, :keyType, :keyValue, :expiration)`
 			);
 			// finalize() if the API exposes it; otherwise letting it GC is fine

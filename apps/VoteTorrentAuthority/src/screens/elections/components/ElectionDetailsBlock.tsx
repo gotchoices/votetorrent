@@ -1,4 +1,4 @@
-import { ElectionDetails } from "@votetorrent/vote-core";
+import { ElectionDetails, ElectionType } from "@votetorrent/vote-core";
 import { StyleSheet, View } from "react-native";
 import { ThemedText } from "../../../components/ThemedText";
 import { globalStyles } from "../../../theme/styles";
@@ -9,76 +9,53 @@ interface ElectionDetailsBlockProps {
 	electionDetails: ElectionDetails;
 }
 
+/**
+ * Immutable-core-only election header block.
+ *
+ * Phase 9 plan 09-14 (Checker fix B3): pared down to the immutable core:
+ *   title + Authority + Type + Date-time + Core Signature.
+ * The revision/tags/keyholder-policy/revision-signature rows have been
+ * removed from here — they live in ElectionDetailsScreen's current-revision
+ * section to avoid duplication.
+ */
 export function ElectionDetailsBlock({ electionDetails }: ElectionDetailsBlockProps) {
 	const { t } = useTranslation();
+	const { election } = electionDetails;
+
+	const typeLabel =
+		election.type === ElectionType.official
+			? t("official")
+			: election.type === ElectionType.adhoc
+			? t("adhoc")
+			: String(election.type);
+
+	const coreSignature = (election as any).signature?.signature as string | undefined;
 
 	return (
 		<View>
 			<View style={styles.section}>
-				<ThemedText type="subtitle">{electionDetails.election.title}</ThemedText>
+				<ThemedText type="subtitle">{election.title}</ThemedText>
 			</View>
 
 			<View style={[styles.section, styles.detailContainer]}>
 				<View style={styles.detail}>
-					<ThemedText type="defaultSemiBold">{t("date")}: </ThemedText>
-					<ThemedText>{formatDate(electionDetails.election.date)}</ThemedText>
-				</View>
-				<View style={styles.detail}>
-					<ThemedText type="defaultSemiBold">{t("revisionDeadline")}: </ThemedText>
-					<ThemedText>{formatDate(electionDetails.election.revisionDeadline)}</ThemedText>
-				</View>
-				<View style={styles.detail}>
 					<ThemedText type="defaultSemiBold">{t("authority")}: </ThemedText>
-					<ThemedText>{electionDetails.election.authorityId}</ThemedText>
-				</View>
-			</View>
-
-			<View style={styles.section}>
-				<View style={styles.detail}>
-					<ThemedText type="defaultSemiBold">{t("revision")}: </ThemedText>
-					<ThemedText>{electionDetails.current.revision}</ThemedText>
+					<ThemedText>{election.authorityId}</ThemedText>
 				</View>
 				<View style={styles.detail}>
-					<ThemedText type="defaultSemiBold">{t("tags")}: </ThemedText>
-					<ThemedText>{electionDetails.current.tags.join(", ")}</ThemedText>
+					<ThemedText type="defaultSemiBold">{t("type")}: </ThemedText>
+					<ThemedText>{typeLabel}</ThemedText>
 				</View>
 				<View style={styles.detail}>
-					<ThemedText type="defaultSemiBold">{t("timeline")}: </ThemedText>
+					<ThemedText type="defaultSemiBold">{t("dateTime")}: </ThemedText>
+					<ThemedText>{formatDate(election.date)}</ThemedText>
 				</View>
-				<View style={styles.subDetails}>
+				{coreSignature ? (
 					<View style={styles.detail}>
-						<ThemedText type="defaultSemiBold">{t("registrationEnds")}: </ThemedText>
-						<ThemedText>{formatDate(electionDetails.current.timeline.registrationEnds)}</ThemedText>
+						<ThemedText type="defaultSemiBold">{t("coreSignature")}: </ThemedText>
+						<ThemedText numberOfLines={1} ellipsizeMode="middle">{coreSignature}</ThemedText>
 					</View>
-					<View style={styles.detail}>
-						<ThemedText type="defaultSemiBold">{t("ballotsFinal")}: </ThemedText>
-						<ThemedText>{formatDate(electionDetails.current.timeline.ballotsFinal)}</ThemedText>
-					</View>
-					<View style={styles.detail}>
-						<ThemedText type="defaultSemiBold">{t("votingStarts")}: </ThemedText>
-						<ThemedText>{formatDate(electionDetails.current.timeline.votingStarts)}</ThemedText>
-					</View>
-					<View style={styles.detail}>
-						<ThemedText type="defaultSemiBold">{t("tallyingStarts")}: </ThemedText>
-						<ThemedText>{formatDate(electionDetails.current.timeline.tallyingStarts)}</ThemedText>
-					</View>
-					<View style={styles.detail}>
-						<ThemedText type="defaultSemiBold">{t("validation")}: </ThemedText>
-						<ThemedText>{formatDate(electionDetails.current.timeline.validation)}</ThemedText>
-					</View>
-					<View style={styles.detail}>
-						<ThemedText type="defaultSemiBold">{t("closed")}: </ThemedText>
-						<ThemedText>{formatDate(electionDetails.current.timeline.closed)}</ThemedText>
-					</View>
-				</View>
-				<View style={styles.detail}>
-					<ThemedText type="defaultSemiBold">{t("keyholderThreshold")}: </ThemedText>
-					<ThemedText>{electionDetails.current.keyholderThreshold}</ThemedText>
-				</View>
-				<View style={styles.detail}>
-					<ThemedText type="defaultSemiBold">{t("signature")}: </ThemedText>
-					<ThemedText>{electionDetails.current.signature.signature}</ThemedText>
-				</View>
+				) : null}
 			</View>
 		</View>
 	);
@@ -90,9 +67,6 @@ const localStyles = StyleSheet.create({
 	},
 	detail: {
 		flexDirection: "row",
-	},
-	subDetails: {
-		marginLeft: 8,
 	},
 });
 

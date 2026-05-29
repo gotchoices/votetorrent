@@ -27,7 +27,7 @@ export function CustomButton({
 	const { colors } = useTheme() as ExtendedTheme;
 	const buttonColor = backgroundColor ?? colors.accent;
 	let textColor = forceDarkText ? colors.dark : colors.text;
-	if (backgroundColor && (backgroundColor === colors.success || backgroundColor === colors.error)) {
+	if (backgroundColor && (backgroundColor === colors.success || backgroundColor === colors.error || backgroundColor === colors.primary)) {
 		textColor = colors.light;
 	}
 
@@ -56,18 +56,22 @@ const styles = StyleSheet.create({
 		borderRadius: 32,
 		marginVertical: 8,
 		marginHorizontal: 4,
+		alignItems: "center",
+		justifyContent: "center",
 	},
 	buttonContent: {
 		flexDirection: "row",
 		alignItems: "center",
 		justifyContent: "center",
 		gap: 12,
+		minHeight: 24,
 	},
 	disabled: {
 		opacity: 0.5,
 	},
 	flex: {
 		flex: 1,
+		alignSelf: "stretch",
 	},
 	text: {
 		fontSize: 16,
