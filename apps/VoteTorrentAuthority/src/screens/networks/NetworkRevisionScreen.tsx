@@ -13,7 +13,6 @@ import {
 	TouchableOpacity,
 	View,
 } from "react-native";
-import FontAwesome6 from "react-native-vector-icons/FontAwesome6";
 import { ChipButton } from "../../components/ChipButton";
 import { CustomButton } from "../../components/CustomButton";
 import { CustomTextInput } from "../../components/CustomTextInput";
@@ -124,22 +123,22 @@ export default function NetworkRevisionScreen() {
 							style={styles.radioOption}
 							onPress={() => setElectionType(ElectionType.adhoc)}
 						>
-							<FontAwesome6
-								name={electionType === ElectionType.adhoc ? "circle-dot" : "circle"}
-								size={18}
-								color={electionType === ElectionType.adhoc ? colors.primary : colors.textSecondary}
-							/>
+							<View style={[styles.radioOuter, { borderColor: electionType === ElectionType.adhoc ? colors.primary : colors.textSecondary }]}>
+								{electionType === ElectionType.adhoc && (
+									<View style={[styles.radioInner, { backgroundColor: colors.primary }]} />
+								)}
+							</View>
 							<ThemedText style={styles.radioLabel}>{t("adhoc")}</ThemedText>
 						</TouchableOpacity>
 						<TouchableOpacity
 							style={styles.radioOption}
 							onPress={() => setElectionType(ElectionType.official)}
 						>
-							<FontAwesome6
-								name={electionType === ElectionType.official ? "circle-dot" : "circle"}
-								size={18}
-								color={electionType === ElectionType.official ? colors.primary : colors.textSecondary}
-							/>
+							<View style={[styles.radioOuter, { borderColor: electionType === ElectionType.official ? colors.primary : colors.textSecondary }]}>
+								{electionType === ElectionType.official && (
+									<View style={[styles.radioInner, { backgroundColor: colors.primary }]} />
+								)}
+							</View>
 							<ThemedText style={styles.radioLabel}>{t("official")}</ThemedText>
 						</TouchableOpacity>
 					</View>
@@ -174,8 +173,8 @@ export default function NetworkRevisionScreen() {
 				</View>
 
 				<View style={styles.section}>
-					<View style={styles.sectionHeader}>
-						<ThemedText type="title">{t("timestampAuthorities")}</ThemedText>
+					<ThemedText type="title">{t("timestampAuthorities")}</ThemedText>
+					<View style={styles.importRow}>
 						<ChipButton
 							label={t("import")}
 							icon="circle-plus"
@@ -208,7 +207,7 @@ export default function NetworkRevisionScreen() {
 				</View>
 			</ScrollView>
 
-			<View style={[styles.footer, { backgroundColor: colors.card }]}>
+			<View style={[styles.footer, { backgroundColor: colors.card, paddingBottom: 32 }]}>
 				<CustomButton
 					title={t("propose")}
 					icon="floppy-disk"
@@ -243,6 +242,19 @@ const localStyles = StyleSheet.create({
 		gap: 8,
 		paddingVertical: 4,
 	},
+	radioOuter: {
+		width: 20,
+		height: 20,
+		borderRadius: 10,
+		borderWidth: 2,
+		alignItems: "center",
+		justifyContent: "center",
+	},
+	radioInner: {
+		width: 10,
+		height: 10,
+		borderRadius: 5,
+	},
 	radioLabel: {
 		fontSize: 15,
 	},
@@ -250,6 +262,11 @@ const localStyles = StyleSheet.create({
 		flexDirection: "row",
 		justifyContent: "space-between",
 		alignItems: "center",
+		marginBottom: 8,
+	},
+	importRow: {
+		flexDirection: "row",
+		justifyContent: "flex-end",
 		marginBottom: 8,
 	},
 	addButtonRow: {
