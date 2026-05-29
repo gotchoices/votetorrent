@@ -551,15 +551,15 @@ const resources = {
 			registrationEnds: 'Finaliza Registro',
 			ballotsFinal: 'Boletas Finales',
 			votingStarts: 'Inicia Votación',
-			tallyingStarts: 'Inicia Tallying',
+			tallyingStarts: 'Inicia el Recuento', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
 			validation: 'Validación',
 			certificationStarts: 'Inicia Certificación',
 			closed: 'Cerrado',
 			revision: 'Revisión',
 			tags: 'Etiquetas',
 			timeline: 'Cronograma',
-			keyholderThreshold: 'Umbral de Clave',
-			keyholderPolicy: 'Política de Claves',
+			keyholderThreshold: 'Umbral de Custodios', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			keyholderPolicy: 'Política de Custodios', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
 			official: 'Oficial',
 			adhoc: 'Ad-hoc',
 			dateTime: 'Fecha/hora',
@@ -577,7 +577,7 @@ const resources = {
 			noProposedElectionsCurrently: 'No hay elecciones propuestas actualmente',
 			ready: 'Listo',
 			remaining: 'restante',
-			keyholderRelease: 'Liberación de Clave',
+			keyholderRelease: 'Liberación de Custodio', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
 			release: 'Liberar',
 			createElection: 'Crear Elecciones',
 			proposedElections: 'Elecciones Propuestas',
@@ -586,7 +586,7 @@ const resources = {
 			electionHistory: 'Historial de Elecciones',
 			preview: 'Vista Previa',
 			election: 'Elección',
-			keyholders: 'Claves',
+			keyholders: 'Custodios', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
 			cloneElection: 'Clonar Elecciones',
 			reviseElection: 'Revisar Elecciones',
 			ballotTemplates: 'Plantillas de Boletas',
@@ -604,75 +604,75 @@ const resources = {
 			clearAll: 'Limpiar Todo',
 			addRange: 'Agregar Rango',
 			propose: 'Proponer',
-			// Phase 7 foundation keys (07-01) — ES mirrors EN per D-13; proper Spanish in Phase 11
-			adminRevision: 'Admin Revision',
-			authorityRevision: 'Authority Revision',
-			electionRevision: 'Election Revision',
-			ballotRevision: 'Ballot Revision',
-			allNetworks: 'All Networks',
-			noTasks: 'No tasks',
-			noTasksHelper: 'You have no pending tasks.',
-			chipSignature: 'Signature',
-			chipRelease: 'Release',
-			chipOnboarding: 'Onboarding',
-			closeScreen: 'Close screen',
-			proposal: 'Proposal',
-			details: 'Details',
-			policies: 'Policies',
-			admin: 'Admin',
-			image: 'Image',
-			electionTitle: 'Election Title',
-			// Phase 7 onboarding keys (07-05) — ES mirrors EN per D-13; proper Spanish in Phase 11
-			screenScaffoldsDebugTitle: 'Onboarding Debug',
-			screenScaffoldsDebugIntro: 'Direct entry points for the six onboarding screens. Temporary dev route per D-12; replaced by real callers in phases 8–10.',
+			// Phase 7 foundation keys (07-01) — Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			adminRevision: 'Revisión de Admin', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			authorityRevision: 'Revisión de Autoridad', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			electionRevision: 'Revisión de Elección', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			ballotRevision: 'Revisión de Boleta', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			allNetworks: 'Todas las Redes', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			noTasks: 'Sin tareas', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			noTasksHelper: 'No tienes tareas pendientes.', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			chipSignature: 'Firma', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			chipRelease: 'Liberar', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			chipOnboarding: 'Incorporación', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			closeScreen: 'Cerrar pantalla', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			proposal: 'Propuesta', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			details: 'Detalles', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			policies: 'Políticas', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			admin: 'Administrador', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			image: 'Imagen', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			electionTitle: 'Título de la Elección', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			// Phase 7 onboarding keys (07-05) — Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			screenScaffoldsDebugTitle: 'Depuración de Incorporación', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			screenScaffoldsDebugIntro: 'Puntos de entrada directos a las seis pantallas de incorporación. Ruta temporal de desarrollo; reemplazada por llamadas reales en las fases 8–10.', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
 			// Phase 8 gap-closure 08-07 — interim accept/send-mode invitation entries
 			debugAdministratorInvitationAccept: 'Invitación de administrador (aceptar)',
 			debugAuthorityInvitationSend: 'Invitación de autoridad (enviar)',
 			debugAuthorityInvitationAccept: 'Invitación de autoridad (aceptar)',
-			editElectionTitle: 'Invitation Sent',
-			editElectionBodyPrimary: 'Your invitation has been sent. You will be notified when the recipient responds.',
-			editElectionBodySecondary: 'If no response is received soon, you can resend the invitation.',
-			editElectionResend: 'Resend Invitation',
-			editElectionBackToTasks: 'Back to Tasks',
-			authorityDetailTitle: 'Awaiting Response',
-			authorityDetailBodyPrimary: 'Waiting for the recipient to respond to your invitation.',
-			authorityDetailBodySecondary: 'You can resend the invitation or cancel it if no longer needed.',
-			authorityDetailResend: 'Resend Invitation',
-			authorityDetailCancelInvitation: 'Cancel Invitation',
-			editElectionWithFilterTitle: 'Request Sent',
-			editElectionWithFilterBodyPrimary: 'Your request has been submitted successfully.',
-			editElectionWithFilterGotIt: 'Got It',
-			editRevisionFormTitle: 'Awaiting Approval',
-			editRevisionFormBodyPrimary: 'Your submission is pending approval from the authority.',
-			editRevisionFormBodySecondary: 'You will receive a notification once it is reviewed.',
-			editRevisionFormResend: 'Resend Request',
-			editRevisionFormDismissRequest: 'Dismiss Request',
-			proposedElectionTitle: 'Release Request Sent',
-			proposedElectionBodyPrimary: 'Your key release request has been delivered to the keyholders.',
-			proposedElectionBackToTasks: 'Back to Tasks',
-			proposedRevisionTitle: 'Awaiting Release',
-			proposedRevisionBodyPrimary: 'Waiting for keyholders to complete the release.',
-			proposedRevisionBodySecondary: 'You can resend the release request or cancel it.',
-			proposedRevisionResendRequest: 'Resend Request',
-			proposedRevisionCancelRequest: 'Cancel Request',
-			// Phase 8 plan 08-01 — ES mirrors EN per D-13; proper Spanish in Phase 11
-			noAuthorities: 'No authorities',
-			noAuthoritiesHelper: 'Authorities you join or pin will appear here',
-			manageProposal: 'Manage Proposal',
-			// Phase 8 plan 08-02 — ES mirrors EN per D-13; proper Spanish in Phase 11
-			thresholdPolicies: 'Threshold Policies',
-			addAdministrator: 'Add Administrator',
-			scope_rnp: 'Revise Network Policies',
-			loading: 'Loading...',
-			// Phase 8 plan 08-03 — ES mirrors EN per D-13; proper Spanish in Phase 11
-			administrator: 'Administrator',
-			administratorInvitation: 'Administrator Invitation',
-			authorityInvitation: 'Authority Invitation',
-			sendInvitation: 'Send Invitation',
-			invitation: 'Invitation',
-			send: 'Send',
-			decline: 'Decline',
-			userId: 'User ID',
+			editElectionTitle: 'Invitación Enviada', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			editElectionBodyPrimary: 'Tu invitación ha sido enviada. Se te notificará cuando el destinatario responda.', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			editElectionBodySecondary: 'Si no se recibe respuesta pronto, puedes reenviar la invitación.', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			editElectionResend: 'Reenviar Invitación', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			editElectionBackToTasks: 'Volver a Tareas', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			authorityDetailTitle: 'Esperando Respuesta', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			authorityDetailBodyPrimary: 'Esperando que el destinatario responda tu invitación.', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			authorityDetailBodySecondary: 'Puedes reenviar la invitación o cancelarla si ya no es necesaria.', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			authorityDetailResend: 'Reenviar Invitación', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			authorityDetailCancelInvitation: 'Cancelar Invitación', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			editElectionWithFilterTitle: 'Solicitud Enviada', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			editElectionWithFilterBodyPrimary: 'Tu solicitud ha sido enviada exitosamente.', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			editElectionWithFilterGotIt: 'Entendido', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			editRevisionFormTitle: 'Esperando Aprobación', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			editRevisionFormBodyPrimary: 'Tu envío está pendiente de aprobación por parte de la autoridad.', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			editRevisionFormBodySecondary: 'Recibirás una notificación una vez que sea revisado.', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			editRevisionFormResend: 'Reenviar Solicitud', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			editRevisionFormDismissRequest: 'Descartar Solicitud', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			proposedElectionTitle: 'Solicitud de Liberación Enviada', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			proposedElectionBodyPrimary: 'Tu solicitud de liberación de clave ha sido entregada a los custodios.', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			proposedElectionBackToTasks: 'Volver a Tareas', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			proposedRevisionTitle: 'Esperando Liberación', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			proposedRevisionBodyPrimary: 'Esperando que los custodios completen la liberación.', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			proposedRevisionBodySecondary: 'Puedes reenviar la solicitud de liberación o cancelarla.', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			proposedRevisionResendRequest: 'Reenviar Solicitud', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			proposedRevisionCancelRequest: 'Cancelar Solicitud', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			// Phase 8 plan 08-01 — Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			noAuthorities: 'Sin autoridades', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			noAuthoritiesHelper: 'Las autoridades a las que te unes o marcas aparecerán aquí.', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			manageProposal: 'Gestionar Propuesta', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			// Phase 8 plan 08-02 — Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			thresholdPolicies: 'Políticas de Umbral', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			addAdministrator: 'Agregar Administrador', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			scope_rnp: 'Revisar Políticas de Red', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			loading: 'Cargando...', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			// Phase 8 plan 08-03 — Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			administrator: 'Administrador', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			administratorInvitation: 'Invitación de Administrador', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			authorityInvitation: 'Invitación de Autoridad', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			sendInvitation: 'Enviar Invitación', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			invitation: 'Invitación', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			send: 'Enviar', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			decline: 'Rechazar', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			userId: 'ID de Usuario', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
 		},
 	},
 };
