@@ -5,7 +5,8 @@ import { ThemedText } from "../../components/ThemedText";
 import { ExtendedTheme, useNavigation, useRoute, useTheme } from "@react-navigation/native";
 import { CustomButton } from "../../components/CustomButton";
 import { User, UserKeyType } from "@votetorrent/vote-core";
-import type { NavigationProp } from "../../navigation/types";
+import type { RootStackParamList } from "../../navigation/types";
+import { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { formatDate, getKeyTypeDisplayName } from "../../utils/displayUtils";
 
 export function AddedKeyScreen() {
@@ -17,11 +18,12 @@ export function AddedKeyScreen() {
 		keyType: string;
 		expiration: number;
 	};
-	const navigation = useNavigation<NavigationProp>();
+	const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 
 	const onDone = () => {
-		console.log("addedKey-done stub");
-		navigation.goBack();
+		// Stack is UserDetails -> AddKey -> AddedKey; pop both so Done returns to User Details
+		// (where the new key appears), not the Add Key form.
+		navigation.pop(2);
 	};
 
 	return (
