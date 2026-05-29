@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { View, StyleSheet, Image, ScrollView } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTheme, ExtendedTheme, useRoute, useNavigation } from "@react-navigation/native";
 import { useTranslation } from "react-i18next";
 import { CustomTextInput } from "../../components/CustomTextInput";
@@ -15,6 +16,7 @@ export function DefaultUserScreen() {
 	};
 	const { colors } = useTheme() as ExtendedTheme;
 	const { t } = useTranslation();
+	const insets = useSafeAreaInsets();
 	const navigation = useNavigation();
 
 	const [defaultUserState, setDefaultUserState] = useState<DefaultUser>(defaultUser);
@@ -71,7 +73,7 @@ export function DefaultUserScreen() {
 					/>
 				)}
 			</ScrollView>
-			<View style={[styles.footer, { backgroundColor: colors.card }]}>
+			<View style={[styles.footer, { backgroundColor: colors.card, paddingBottom: insets.bottom + 16 }]}>
 				<CustomButton
 					title={t("save")}
 					onPress={handleSave}

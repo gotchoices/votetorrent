@@ -77,6 +77,7 @@ const styles = StyleSheet.create({
 		fontSize: 16,
 		fontWeight: "600",
 		textAlign: "center",
+		flexShrink: 1,
 	},
 	tall: {
 		paddingVertical: 16,

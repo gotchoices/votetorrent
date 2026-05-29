@@ -190,7 +190,7 @@ export default function SettingsScreen() {
 				<CustomButton
 					title={t("connectDevice")}
 					icon="qrcode"
-					backgroundColor={colors.success}
+					backgroundColor={colors.important}
 					forceDarkText={true}
 					size="thin"
 					onPress={() => {
