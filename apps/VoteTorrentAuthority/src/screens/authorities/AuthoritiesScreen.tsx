@@ -66,7 +66,7 @@ export default function AuthoritiesScreen() {
 		navigation.setOptions({
 			headerRight: () => (
 				<ChipButton
-					label={t("addAuthority")}
+					label=""
 					icon="circle-plus"
 					onPress={() =>
 						navigation.navigate("AuthorityInvitation", { mode: "send" })

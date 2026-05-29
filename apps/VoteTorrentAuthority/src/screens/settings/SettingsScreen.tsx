@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { View, StyleSheet, Switch, TouchableOpacity } from "react-native";
+import { View, StyleSheet, Switch, TouchableOpacity, Modal, Pressable } from "react-native";
 import { useNavigation, useTheme, useFocusEffect } from "@react-navigation/native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import i18n from "../../i18n";
@@ -20,9 +20,15 @@ import {
 import type { NavigationProp } from "../../navigation/types";
 import { globalStyles } from "../../theme/styles";
 
+const LANGUAGES: { code: 'en' | 'es'; label: string }[] = [
+	{ code: 'en', label: 'English' },
+	{ code: 'es', label: 'Español' },
+];
+
 export default function SettingsScreen() {
 	const [showHelpIcons, setShowHelpIcons] = useState(false);
 	const [currentLang, setCurrentLang] = useState<'en' | 'es'>(i18n.language as 'en' | 'es');
+	const [showLangModal, setShowLangModal] = useState(false);
 	const [defaultUserEngine, setDefaultUserEngine] = useState<IDefaultUserEngine | null>(null);
 	const [defaultUser, setDefaultUser] = useState<DefaultUser | null>(null);
 	const [networkEngine, setNetworkEngine] = useState<INetworkEngine | null>(null);
@@ -155,36 +161,45 @@ export default function SettingsScreen() {
 	return (
 		<View style={styles.content}>
 			<View style={[styles.container, { backgroundColor: colors.background }]}>
-				{/* Phase 11 plan 11-02 (D-01/D-02/D-03) — Language toggle: EN | ES segmented control */}
 				<View style={styles.helpIconsRow}>
 					<ThemedText type="default">{t('language')}</ThemedText>
-					<View
-						style={styles.languageToggle}
-						accessibilityRole="radiogroup"
-						accessibilityLabel={t('language')}
+					<TouchableOpacity
+						onPress={() => setShowLangModal(true)}
+						style={[styles.langDropdownBtn, { backgroundColor: colors.accent }]}
+						accessibilityRole="button"
 					>
-						<TouchableOpacity
-							onPress={() => handleLanguageChange('en')}
-							style={[styles.langBtn, { backgroundColor: currentLang === 'en' ? colors.primary : colors.accent }]}
-							accessibilityRole="button"
-							accessibilityState={{ selected: currentLang === 'en' }}
-						>
-							<ThemedText type={currentLang === 'en' ? 'defaultSemiBold' : 'default'}>
-								{t('english')}
-							</ThemedText>
-						</TouchableOpacity>
-						<TouchableOpacity
-							onPress={() => handleLanguageChange('es')}
-							style={[styles.langBtn, { backgroundColor: currentLang === 'es' ? colors.primary : colors.accent }]}
-							accessibilityRole="button"
-							accessibilityState={{ selected: currentLang === 'es' }}
-						>
-							<ThemedText type={currentLang === 'es' ? 'defaultSemiBold' : 'default'}>
-								Español
-							</ThemedText>
-						</TouchableOpacity>
-					</View>
+						<ThemedText type="defaultSemiBold">
+							{LANGUAGES.find(l => l.code === currentLang)?.label ?? currentLang}
+						</ThemedText>
+						<FontAwesome6 name="chevron-down" size={12} color={colors.text} style={{ marginLeft: 6 }} />
+					</TouchableOpacity>
 				</View>
+
+				<Modal
+					visible={showLangModal}
+					transparent
+					animationType="fade"
+					onRequestClose={() => setShowLangModal(false)}
+				>
+					<Pressable style={styles.modalOverlay} onPress={() => setShowLangModal(false)}>
+						<View style={[styles.modalMenu, { backgroundColor: colors.card }]}>
+							{LANGUAGES.map(lang => (
+								<TouchableOpacity
+									key={lang.code}
+									style={[styles.modalItem, currentLang === lang.code && { backgroundColor: colors.primary + '33' }]}
+									onPress={() => { handleLanguageChange(lang.code); setShowLangModal(false); }}
+								>
+									<ThemedText type={currentLang === lang.code ? 'defaultSemiBold' : 'default'}>
+										{lang.label}
+									</ThemedText>
+									{currentLang === lang.code && (
+										<FontAwesome6 name="check" size={14} color={colors.primary} />
+									)}
+								</TouchableOpacity>
+							))}
+						</View>
+					</Pressable>
+				</Modal>
 
 				<View style={styles.helpIconsRow}>
 					<View style={styles.helpIcons}>
@@ -281,17 +296,35 @@ const localStyles = StyleSheet.create({
 		alignItems: "center",
 		marginBottom: 16,
 	},
-	languageToggle: {
+	langDropdownBtn: {
 		flexDirection: "row",
-		borderRadius: 8,
-		overflow: "hidden",
-	},
-	langBtn: {
-		paddingHorizontal: 16,
-		paddingVertical: 8,
-		minHeight: 44,
 		alignItems: "center",
+		paddingHorizontal: 12,
+		paddingVertical: 8,
+		borderRadius: 8,
+		minHeight: 44,
+	},
+	modalOverlay: {
+		flex: 1,
 		justifyContent: "center",
+		alignItems: "center",
+		backgroundColor: "rgba(0, 0, 0, 0.5)",
+	},
+	modalMenu: {
+		borderRadius: 12,
+		overflow: "hidden",
+		minWidth: 180,
+		elevation: 8,
+		shadowOffset: { width: 0, height: 2 },
+		shadowOpacity: 0.2,
+		shadowRadius: 4,
+	},
+	modalItem: {
+		flexDirection: "row",
+		alignItems: "center",
+		justifyContent: "space-between",
+		paddingHorizontal: 16,
+		paddingVertical: 14,
 	},
 	helpIcons: {
 		flexDirection: "row",

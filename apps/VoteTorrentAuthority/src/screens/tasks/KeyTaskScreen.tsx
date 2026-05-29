@@ -131,7 +131,7 @@ export default function KeyTaskScreen() {
 					</ThemedText>
 				</View>
 			</ScrollView>
-			<View style={[styles.footer, { backgroundColor: colors.card }]}>
+			<View style={[styles.footer, { backgroundColor: colors.card, paddingBottom: 32 }]}>
 				<CustomButton
 					title={t("release")}
 					icon="save"
