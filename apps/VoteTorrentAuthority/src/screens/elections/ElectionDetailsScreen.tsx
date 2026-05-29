@@ -137,9 +137,16 @@ export default function ElectionDetailsScreen() {
 					<KeyholderCard
 						key={keyholder.invite?.name ?? `keyholder-${index}`}
 						invitationStatus={keyholder}
-						onPress={() => {}}
+						onPress={() => navigation.navigate("Keyholder", { keyholder, electionEngine })}
 					/>
 				))}
+				<CustomButton
+					title={t("invite")}
+					icon="paper-plane"
+					backgroundColor={colors.accent}
+					size="thin"
+					onPress={() => navigation.navigate("KeyholderInvitation", { mode: "send" })}
+				/>
 			</View>
 
 			{/* 4. REVISE / CLONE actions */}
