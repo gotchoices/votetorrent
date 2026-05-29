@@ -299,10 +299,7 @@ describe('CompleteSignatureBuilder', () => {
     expect(builder).to.be.instanceOf(CompleteSignatureBuilder)
   })
 
-  it('REAL ENGINE equivalence smoke: engine.completeSignature(task, result) vs builder.setTask(task).setResult(result).commit()', async () => {
-    // completeSignature throws "no pending task" when no Task row exists.
-    // Blocked until election creation pipeline is unblocked (DateValid CHECK
-    // requires future date in DB context to seed Election rows).
+  it.skip('REAL ENGINE equivalence smoke: engine.completeSignature(task, result) vs builder.setTask(task).setResult(result).commit() — BLOCKED: QuereusError CHECK constraint failed: AdminSignatureTaskExtension.TaskIdValid fires at commit (DeferredConstraintQueue) and does not see the sibling Task row inserted in the same db.exec batch, mirroring the elections.spec deferred-CHECK sibling-row visibility limitation in quereus 3.3.0. WR-03 (12.4-REVIEW) re-skip: previously unskipped in Plan 12.4-05 with a body that was entirely commented out — passed vacuously without exercising completeSignature.', async () => {
     // Preserved body for when the blocker is lifted:
     // const stubRef: NetworkReference = { hash: 'h'.repeat(16), name: 'Test Network',
     //   relays: ['/dns4/relay.example.com/tcp/443/wss'], primaryAuthorityDomainName: 'authority.example.com' }
