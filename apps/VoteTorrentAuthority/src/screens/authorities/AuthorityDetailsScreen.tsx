@@ -190,7 +190,7 @@ export default function AuthorityDetailsScreen() {
 					icon="pencil"
 					size="thin"
 					backgroundColor={colors.accent}
-					onPress={() => {}}
+					onPress={() => navigation.navigate("NetworkRevision", { networkId: authority.id })}
 				/>
 			</View>
 
