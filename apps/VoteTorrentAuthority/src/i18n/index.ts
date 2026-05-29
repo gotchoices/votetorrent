@@ -6,6 +6,7 @@ const resources = {
 	en: {
 		translation: {
 			elections: 'Elections',
+			tasks: 'Tasks',
 			authorities: 'Authorities',
 			signers: 'Signers',
 			settings: 'Settings',
@@ -393,6 +394,7 @@ const resources = {
 	es: {
 		translation: {
 			elections: 'Elecciones',
+			tasks: 'Tareas', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
 			authorities: 'Autoridades',
 			signers: 'Firmantes',
 			settings: 'Ajustes',

@@ -126,10 +126,12 @@ function useTabHeaderOptions(tab?: string) {
 
 const TabNavigator = () => {
 	const { colors } = useTheme() as ExtendedTheme;
+	const { t } = useTranslation();
 
 	return (
 		<Tab.Navigator
 			screenOptions={({ route }) => ({
+				tabBarLabel: t(route.name.toLowerCase()),
 				tabBarIcon: ({ focused, color }) => {
 					if (route.name === "Settings") {
 						return <FontAwesome6 name="gear" size={22} color={color} />;
