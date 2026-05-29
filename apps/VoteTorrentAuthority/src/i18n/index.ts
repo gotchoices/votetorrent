@@ -385,6 +385,9 @@ const resources = {
 			keyholderInvitation: 'Keyholder Invitation',
 			debugKeyholderInvitationSend: 'Keyholder Invitation (Send)',
 			debugKeyholderInvitationAccept: 'Keyholder Invitation (Accept)',
+			// Phase 11 plan 11-01 (D-11) — en mirrors added for es orphan keys (create/revise)
+			create: 'Create', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			revise: 'Revise', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
 		},
 	},
 	es: {
@@ -673,6 +676,94 @@ const resources = {
 			send: 'Enviar', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
 			decline: 'Rechazar', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
 			userId: 'ID de Usuario', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			// Phase 9 plan 09-01 (ELECUI-01/02/05) — Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			noHistoryFound: 'No se encontró historial.', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			noBallotYet: 'Aún no se ha creado una boleta para esta elección.', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			createBallot: 'Crear Boleta', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			viewBallot: 'Ver Boleta', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			registrationOpens: 'Abre el Registro', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			registrationCloses: 'Cierra el Registro', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			votingOpens: 'Inicia la Votación', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			votingCloses: 'Cierra la Votación', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			// Phase 9 plan 09-02 (ELECUI-03) — Create Election wizard — Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			basics: 'Básico', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			review: 'Revisar', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			next: 'Siguiente', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			back: 'Atrás', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			edit: 'Editar', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			step: 'Paso', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			addTag: 'Agregar etiqueta (separadas por coma)', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			registrationDeadline: 'Fecha Límite de Registro', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			selectKeyholders: 'Selecciona custodios para esta elección:', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			noKeyholdersSelected: 'No se han seleccionado custodios.', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			authorityPlaceholder: 'Seleccionar autoridad', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			addDistrictCode: 'Agregar código de distrito', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			itemsRangeCount: '{{from}}–{{to}} de {{total}} elementos', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			// Phase 9 plan 09-04 (BALUI-01..04) — Ballot Question/Option — Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			save: 'Guardar', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			code: 'Código', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			question: 'Pregunta', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			option: 'Opción', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			addOption: 'Agregar Opción', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			rank: 'Rango', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			score: 'Puntuación', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			text: 'Texto', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			additionalInstructions: 'Instrucciones Adicionales', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			dependsOn: 'Depende de', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			addDependency: 'Agregar Dependencia', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			additionalDetails: 'Detalles Adicionales', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			informationUrl: 'URL de Información', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			videoUrl: 'URL de Video', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			optionalVideoAddress: 'Dirección de video opcional', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			// Phase 9 plan 09-07 (BALUI-03/04) — Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			ballotQuestion: 'Pregunta de Boleta', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			questionOption: 'Opción de Pregunta', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			selectionLimits: 'Límites de Selección', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			min: 'Mín', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			max: 'Máx', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			forceOrder: 'Orden Obligatorio', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			required: 'Obligatorio', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			group: 'Grupo', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			sequence: 'Secuencia', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			groupPlaceholder: 'condado/escaños', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			// Phase 9 plan 09-10 — mock authority dropdown — Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			mockAuthorityA: 'Autoridad Mock A', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			mockAuthorityB: 'Autoridad Mock B', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			// Phase 9 plan 09-11 (ELECUI-03/04) — election form — Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			newElection: 'Nueva Elección', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			electionRevisionTitle: 'Revisión de Elección', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			coreSectionHeader: 'Principal (no se puede cambiar una vez aprobado)', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			initialRevisionHeader: 'Revisión Inicial (puede cambiar)', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			proposedRevisionHeader: 'Revisión Propuesta', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			coreDateHelp: 'La fecha principal de la elección', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			revisionDeadlineHelp: 'Última fecha/hora en que se permiten cambios', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			releasingKeys: 'Liberando Claves', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			selectDate: 'Seleccionar fecha', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			keyHolders: 'Custodios de Clave', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			addKeyHolder: 'Agregar Custodio', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			thresholdPolicy: 'Política de Umbral', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			thresholdValue: '{{n}} de {{m}}', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			instructions: 'Instrucciones', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			instructionsOptional: 'Instrucciones (opcional)', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			keyholderName: 'Nombre del custodio', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			adjustRevision: 'Ajustar Revisión', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			signRevision: 'Firmar', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			shareRevision: 'Compartir', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			previewBallots: 'Previsualizar…', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			questionsLabel: 'Preguntas', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			validForAuthority: '[válido para {{authority}}]', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			filterAuthoritiesField: 'Filtrar autoridades...', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			// Phase 10 plan 10-01 (USRUI-05/09) — Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			addedKey: 'Clave Agregada', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			noActiveKeysFound: 'No se encontraron claves activas.', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			addedDevice: 'Dispositivo Agregado', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			deviceAdded: 'Dispositivo Añadido', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			done: 'Listo', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			// Phase 10 plan 10-02 (KHUI-01/02) — Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			keyholder: 'Custodio de Clave', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			keyholderInvitation: 'Invitación de Custodio', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			debugKeyholderInvitationSend: 'Invitación de Custodio (Enviar)', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			debugKeyholderInvitationAccept: 'Invitación de Custodio (Aceptar)', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
 		},
 	},
 };
