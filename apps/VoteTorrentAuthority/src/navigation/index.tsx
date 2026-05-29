@@ -32,6 +32,8 @@ import ReviseUserScreen from "../screens/users/ReviseUserScreen";
 import AddKeyScreen from "../screens/users/AddKeyScreen";
 import RevokeKeyScreen from "../screens/users/RevokeKeyScreen";
 import AddDeviceScreen from "../screens/users/AddDeviceScreen";
+import AddedKeyScreen from "../screens/users/AddedKeyScreen";
+import AddedDeviceScreen from "../screens/users/AddedDeviceScreen";
 import NetworkDetailsScreen from "../screens/networks/NetworkDetailsScreen";
 import NetworkStatisticsScreen from "../screens/networks/NetworkStatisticsScreen";
 import NetworkRevisionScreen from "../screens/networks/NetworkRevisionScreen";
@@ -325,6 +327,17 @@ export const RootNavigator = () => {
 				name="AddDevice"
 				component={AddDeviceScreen}
 				options={{ title: t("addDevice") }}
+			/>
+			{/* Phase 10 plan 10-01 (USRUI-05, USRUI-09; D-01) — confirmation routes */}
+			<Stack.Screen
+				name="AddedKey"
+				component={AddedKeyScreen}
+				options={{ title: t("addedKey") }}
+			/>
+			<Stack.Screen
+				name="AddedDevice"
+				component={AddedDeviceScreen}
+				options={{ title: t("addedDevice") }}
 			/>
 			<Stack.Screen
 				name="KeyTask"

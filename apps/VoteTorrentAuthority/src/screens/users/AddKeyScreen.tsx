@@ -2,7 +2,7 @@ import { ScrollView, StyleSheet, View } from "react-native";
 import { globalStyles } from "../../theme/styles";
 import { useTranslation } from "react-i18next";
 import { ThemedText } from "../../components/ThemedText";
-import { IUserEngine, UserKey, UserKeyType } from "@votetorrent/vote-core";
+import { IUserEngine, UserKeyType } from "@votetorrent/vote-core";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import { ExtendedTheme } from "@react-navigation/native";
 import { useTheme } from "@react-navigation/native";
@@ -32,24 +32,16 @@ export function AddKeyScreen() {
 		setIsAddingKey(true);
 	};
 
-	const addKey = async () => {
-		console.log("addKey");
-		const keyToAdd: UserKey = {
-			key: newKey as string,
-			type: UserKeyType.mobile,
-			expiration: new Date(Date.now() + 1000 * 60 * 60 * 24 * 30).getTime(),
-		};
-		userEngine
-			.addKey(keyToAdd)
-			.then(() => {
-				setIsAddingKey(false);
-				console.log("popping to ReviseUser");
-				navigation.popTo("UserDetails", { user: user, userEngine: userEngine });
-			})
-			.catch((error) => {
-				console.error(error);
-				setIsAddingKey(false);
-			});
+	const addKey = () => {
+		// D-04: display-only — do NOT call userEngine.addKey(); navigate to confirmation instead
+		const expiration = new Date(Date.now() + 1000 * 60 * 60 * 24 * 30).getTime();
+		navigation.navigate("AddedKey", {
+			user,
+			keyValue: newKey as string,
+			keyType: UserKeyType.mobile,
+			expiration,
+		});
+		setIsAddingKey(false);
 	};
 
 	return (
