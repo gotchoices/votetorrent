@@ -26,32 +26,42 @@ describe('Schema load', () => {
 		// SQL strings are written verbatim (one per table) to keep the failure
 		// mode diagnostic — a regression points at the exact table that broke.
 		const drain = async (
-			stream: AsyncIterable<Record<string, unknown>>
+			stream: AsyncIterable<Record<string, unknown>>,
 		): Promise<number> => {
 			let count = 0;
 			for await (const _ of stream) count++;
 			return count;
 		};
 
-		const network = await drain(db.prepare('select 1 from Network limit 0').all());
+		const network = await drain(
+			db.prepare('select 1 from Network limit 0').all(),
+		);
 		expect(network, 'table Network should be queryable').to.equal(0);
 
-		const authority = await drain(db.prepare('select 1 from Authority limit 0').all());
+		const authority = await drain(
+			db.prepare('select 1 from Authority limit 0').all(),
+		);
 		expect(authority, 'table Authority should be queryable').to.equal(0);
 
 		const admin = await drain(db.prepare('select 1 from Admin limit 0').all());
 		expect(admin, 'table Admin should be queryable').to.equal(0);
 
-		const officer = await drain(db.prepare('select 1 from Officer limit 0').all());
+		const officer = await drain(
+			db.prepare('select 1 from Officer limit 0').all(),
+		);
 		expect(officer, 'table Officer should be queryable').to.equal(0);
 
-		const election = await drain(db.prepare('select 1 from Election limit 0').all());
+		const election = await drain(
+			db.prepare('select 1 from Election limit 0').all(),
+		);
 		expect(election, 'table Election should be queryable').to.equal(0);
 
 		const task = await drain(db.prepare('select 1 from Task limit 0').all());
 		expect(task, 'table Task should be queryable').to.equal(0);
 
-		const inviteSlot = await drain(db.prepare('select 1 from InviteSlot limit 0').all());
+		const inviteSlot = await drain(
+			db.prepare('select 1 from InviteSlot limit 0').all(),
+		);
 		expect(inviteSlot, 'table InviteSlot should be queryable').to.equal(0);
 
 		const user = await drain(db.prepare('select 1 from User limit 0').all());
@@ -74,11 +84,7 @@ describe('Schema load', () => {
 		//   resolution maps schema-level `Digest(...)` → `digest(...)`.
 		//
 		// Intentionally NOT covered here:
-<<<<<<< HEAD
 		// - JS-only helpers exported by the plugin (`Digest`,
-=======
-		// - JS-only helpers exported by the plugin (`Digest`, `DigestAll`,
->>>>>>> origin/authority-app
 		//   `Sign`, `SignatureValid`). They are not part of the SQL surface
 		//   and must not be invoked via `select <name>(...)`.
 		// - `H16` — a JS-only utility; schema references at votetorrent.qsql
@@ -97,15 +103,11 @@ describe('Schema load', () => {
 
 		// Crypto plugin: signature is (data, algorithm?, inputEncoding?, outputEncoding?).
 		// Inputs default to base64url; 'dGVzdA' is base64url for 'test'.
-		const digest = await db
-			.prepare(`select digest('dGVzdA') as v`)
-			.get();
+		const digest = await db.prepare(`select digest('dGVzdA') as v`).get();
 		expect(digest!['v']).to.be.a('string');
 
 		// hash_mod(data, bits): returns INTEGER < 2^bits.
-		const hm = await db
-			.prepare(`select hash_mod('dGVzdA', 16) as v`)
-			.get();
+		const hm = await db.prepare(`select hash_mod('dGVzdA', 16) as v`).get();
 		expect(hm!['v']).to.be.a('number');
 
 		// random_bytes(bits?, encoding?): returns TEXT.
@@ -133,12 +135,8 @@ describe('Schema load', () => {
 		try {
 			const stmt = db.prepare(
 				`insert into UserKey (UserId, Type, PubKey, Expiration)
-<<<<<<< HEAD
 				with context now = datetime('now'), IsSignatureValid = true
-=======
-				with context now = datetime('now')
->>>>>>> origin/authority-app
-				values (:userId, :keyType, :keyValue, :expiration)`
+				values (:userId, :keyType, :keyValue, :expiration)`,
 			);
 			// finalize() if the API exposes it; otherwise letting it GC is fine
 			// — we only needed the prepare path to succeed.
@@ -151,7 +149,7 @@ describe('Schema load', () => {
 			const msg = prepareError.message;
 			if (msg.includes('validateCheckConstraintDeterminism')) {
 				throw new Error(
-					`SCHEMA-15 regression: determinism validator fired despite context.now rewrites: ${msg}`
+					`SCHEMA-15 regression: determinism validator fired despite context.now rewrites: ${msg}`,
 				);
 			}
 			throw new Error(`with-context UserKey insert failed to prepare: ${msg}`);
@@ -159,7 +157,7 @@ describe('Schema load', () => {
 
 		expect(
 			prepareError,
-			'UserKey insert with `with context now = datetime(\'now\')` must prepare cleanly under quereus 2.x'
+			"UserKey insert with `with context now = datetime('now')` must prepare cleanly under quereus 2.x",
 		).to.be.undefined;
 	});
 });
