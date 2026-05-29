@@ -501,7 +501,7 @@ const resources = {
 			inviteId: 'ID de Invitación',
 			showHelpIcons: 'Mostrar iconos de ayuda',
 			defaultUser: 'Usuario predeterminado',
-			connectDevice: 'Conectar este dispositivo a usuario existente',
+			connectDevice: 'Conectar este dispositivo\na usuario existente', // Phase 11 plan 11-03 (D-10) — line-break for ES overflow.
 			noUserFound: 'No se encontró usuario para esta red',
 			user: 'Usuario',
 			noDefaultUserFound: 'No se encontró usuario predeterminado',
