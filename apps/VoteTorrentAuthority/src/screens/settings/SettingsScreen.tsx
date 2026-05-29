@@ -19,6 +19,7 @@ import {
 } from "@votetorrent/vote-core";
 import type { NavigationProp } from "../../navigation/types";
 import { globalStyles } from "../../theme/styles";
+import { useSettings } from "../../providers/SettingsProvider";
 
 const LANGUAGES: { code: 'en' | 'es'; label: string }[] = [
 	{ code: 'en', label: 'English' },
@@ -26,7 +27,7 @@ const LANGUAGES: { code: 'en' | 'es'; label: string }[] = [
 ];
 
 export default function SettingsScreen() {
-	const [showHelpIcons, setShowHelpIcons] = useState(false);
+	const { showHelpIcons, setShowHelpIcons } = useSettings();
 	const [currentLang, setCurrentLang] = useState<'en' | 'es'>(i18n.language as 'en' | 'es');
 	const [showLangModal, setShowLangModal] = useState(false);
 	const [defaultUserEngine, setDefaultUserEngine] = useState<IDefaultUserEngine | null>(null);

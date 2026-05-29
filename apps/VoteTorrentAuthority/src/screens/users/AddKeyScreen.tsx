@@ -13,6 +13,7 @@ import FontAwesome6 from "react-native-vector-icons/FontAwesome6";
 import { useState } from "react";
 import type { NavigationProp, RootStackParamList } from "../../navigation/types";
 import { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import { useSettings } from "../../providers/SettingsProvider";
 
 export function AddKeyScreen() {
 	const { user, userEngine } = useRoute().params as { user: User; userEngine: IUserEngine };
@@ -22,6 +23,7 @@ export function AddKeyScreen() {
 	const [newKey, setNewKey] = useState<string | null>("sdflkj236jSFgjSVj35j78kdn2");
 	const { t } = useTranslation();
 	const { colors } = useTheme() as ExtendedTheme;
+	const { showHelpIcons } = useSettings();
 	const insets = useSafeAreaInsets();
 
 	const scanDevice = () => {
@@ -94,7 +96,7 @@ export function AddKeyScreen() {
 						<View style={styles.section}>
 							<View style={styles.titleRow}>
 								<ThemedText type="title">{t("addYubicoDongleKey")}</ThemedText>
-								<FontAwesome6 name="circle-info" size={24} color={colors.text} />
+								{showHelpIcons && <FontAwesome6 name="circle-info" size={24} color={colors.text} />}
 							</View>
 							<ThemedText type="link">{t("detailedInstructions")}</ThemedText>
 							<ThemedText type="default">{t("addYubicoInstructions")}</ThemedText>

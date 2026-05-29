@@ -9,6 +9,7 @@ import {BallotDraftProvider} from './src/screens/ballots/providers/BallotDraftPr
 import {darkTheme, lightTheme} from './src/theme/themes';
 import {useColorScheme} from 'react-native';
 import {AppProvider} from './src/providers/AppProvider';
+import {SettingsProvider} from './src/providers/SettingsProvider';
 
 export default function App() {
 	const colorScheme = useColorScheme();
@@ -24,6 +25,7 @@ export default function App() {
 
 	return (
 		<SafeAreaProvider>
+			<SettingsProvider>
 			<AppProvider>
 				<NavigationContainer
 					theme={colorScheme === 'dark' ? darkTheme : lightTheme}>
@@ -36,6 +38,7 @@ export default function App() {
 					</BallotDraftProvider>
 				</NavigationContainer>
 			</AppProvider>
+			</SettingsProvider>
 		</SafeAreaProvider>
 	);
 }

@@ -9,6 +9,7 @@ import type { Authority, Officer, Scope } from "@votetorrent/vote-core";
 import { scopeDescriptions } from "@votetorrent/vote-core";
 import { useRoute, useNavigation } from "@react-navigation/native";
 import { useApp } from "../../providers/AppProvider";
+import { useSettings } from "../../providers/SettingsProvider";
 import FontAwesome6 from "react-native-vector-icons/FontAwesome6";
 import type { RootStackParamList } from "../../navigation/types";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
@@ -18,6 +19,7 @@ import { globalStyles } from "../../theme/styles";
 export default function EditOfficerScreen() {
 	const { colors } = useTheme() as ExtendedTheme;
 	const { t } = useTranslation();
+	const { showHelpIcons } = useSettings();
 	const { authority, officerId } = useRoute().params as {
 		authority: Authority;
 		officerId?: string;
@@ -128,12 +130,14 @@ export default function EditOfficerScreen() {
 						<View key={scope} style={styles.scopeRow}>
 							<View style={styles.scopeDescriptionContainer}>
 								<ThemedText>{description}</ThemedText>
-								<FontAwesome6
-									name="circle-info"
-									size={16}
-									color={colors.text}
-									style={styles.scopeInfoIcon}
-								/>
+								{showHelpIcons && (
+									<FontAwesome6
+										name="circle-info"
+										size={16}
+										color={colors.text}
+										style={styles.scopeInfoIcon}
+									/>
+								)}
 							</View>
 							<Switch
 								value={scopes.includes(scope as Scope)}
