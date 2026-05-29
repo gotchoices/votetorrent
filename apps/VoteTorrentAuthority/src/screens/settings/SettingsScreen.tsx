@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { View, StyleSheet, Switch } from "react-native";
+import { View, StyleSheet, Switch, TouchableOpacity } from "react-native";
 import { useNavigation, useTheme, useFocusEffect } from "@react-navigation/native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import i18n from "../../i18n";
 import FontAwesome6 from "react-native-vector-icons/FontAwesome6";
 import { InfoCard } from "../../components/InfoCard";
 import { ThemedText } from "../../components/ThemedText";
@@ -20,6 +22,7 @@ import { globalStyles } from "../../theme/styles";
 
 export default function SettingsScreen() {
 	const [showHelpIcons, setShowHelpIcons] = useState(false);
+	const [currentLang, setCurrentLang] = useState<'en' | 'es'>(i18n.language as 'en' | 'es');
 	const [defaultUserEngine, setDefaultUserEngine] = useState<IDefaultUserEngine | null>(null);
 	const [defaultUser, setDefaultUser] = useState<DefaultUser | null>(null);
 	const [networkEngine, setNetworkEngine] = useState<INetworkEngine | null>(null);
@@ -30,6 +33,12 @@ export default function SettingsScreen() {
 	const { t } = useTranslation();
 	const { getEngine } = useApp();
 	const navigation = useNavigation<NavigationProp>();
+
+	const handleLanguageChange = async (lang: 'en' | 'es') => {
+		await i18n.changeLanguage(lang);
+		await AsyncStorage.setItem('appLanguage', lang);
+		setCurrentLang(lang);
+	};
 
 	useEffect(() => {
 		const loadBaseEngines = async () => {
@@ -146,6 +155,37 @@ export default function SettingsScreen() {
 	return (
 		<View style={styles.content}>
 			<View style={[styles.container, { backgroundColor: colors.background }]}>
+				{/* Phase 11 plan 11-02 (D-01/D-02/D-03) — Language toggle: EN | ES segmented control */}
+				<View style={styles.helpIconsRow}>
+					<ThemedText type="default">{t('language')}</ThemedText>
+					<View
+						style={styles.languageToggle}
+						accessibilityRole="radiogroup"
+						accessibilityLabel={t('language')}
+					>
+						<TouchableOpacity
+							onPress={() => handleLanguageChange('en')}
+							style={[styles.langBtn, { backgroundColor: currentLang === 'en' ? colors.primary : colors.accent }]}
+							accessibilityRole="button"
+							accessibilityState={{ selected: currentLang === 'en' }}
+						>
+							<ThemedText type={currentLang === 'en' ? 'defaultSemiBold' : 'default'}>
+								{t('english')}
+							</ThemedText>
+						</TouchableOpacity>
+						<TouchableOpacity
+							onPress={() => handleLanguageChange('es')}
+							style={[styles.langBtn, { backgroundColor: currentLang === 'es' ? colors.primary : colors.accent }]}
+							accessibilityRole="button"
+							accessibilityState={{ selected: currentLang === 'es' }}
+						>
+							<ThemedText type={currentLang === 'es' ? 'defaultSemiBold' : 'default'}>
+								Español
+							</ThemedText>
+						</TouchableOpacity>
+					</View>
+				</View>
+
 				<View style={styles.helpIconsRow}>
 					<View style={styles.helpIcons}>
 						<ThemedText type="default">{t("showHelpIcons")}</ThemedText>
@@ -239,7 +279,19 @@ const localStyles = StyleSheet.create({
 		flexDirection: "row",
 		justifyContent: "space-between",
 		alignItems: "center",
-		marginBottom: 24,
+		marginBottom: 16,
+	},
+	languageToggle: {
+		flexDirection: "row",
+		borderRadius: 8,
+		overflow: "hidden",
+	},
+	langBtn: {
+		paddingHorizontal: 16,
+		paddingVertical: 8,
+		minHeight: 44,
+		alignItems: "center",
+		justifyContent: "center",
 	},
 	helpIcons: {
 		flexDirection: "row",
