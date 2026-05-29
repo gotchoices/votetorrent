@@ -1,7 +1,9 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import {NavigationContainer} from '@react-navigation/native';
 import {SafeAreaProvider} from 'react-native-safe-area-context';
 import './src/i18n';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import i18n from './src/i18n';
 import {RootNavigator} from './src/navigation';
 import {BallotDraftProvider} from './src/screens/ballots/providers/BallotDraftProvider';
 import {darkTheme, lightTheme} from './src/theme/themes';
@@ -10,6 +12,15 @@ import {AppProvider} from './src/providers/AppProvider';
 
 export default function App() {
 	const colorScheme = useColorScheme();
+
+	// Phase 11 plan 11-02 (D-02) — restore persisted language on boot
+	useEffect(() => {
+		AsyncStorage.getItem('appLanguage').then((lang) => {
+			if (lang && lang !== i18n.language) {
+				i18n.changeLanguage(lang as string);
+			}
+		});
+	}, []);
 
 	return (
 		<SafeAreaProvider>
