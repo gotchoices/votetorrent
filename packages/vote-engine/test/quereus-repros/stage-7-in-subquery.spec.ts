@@ -78,35 +78,6 @@ describe('Quereus repro — stage 7 split (Bug A: view union-all, Bug B: not-in 
 		expect(seen, 'VIEW union-all should return all 3 rows').to.deep.equal(['r', 'g', 'b']);
 	});
 
-	it.skip('A3 — BLOCKED: primary key () (zero-column PK) enforces UNIQUE constraint across all rows in quereus 3.x — second INSERT always fails with UNIQUE constraint failed: T PK', async () => {
-		const db = new Database();
-
-		await db.exec(`
-			declare schema main
-
-			{
-				view V as
-					select 'r' as Code, 'Red' as Name
-					union all select 'g' as Code, 'Green' as Name;
-
-				table T (
-					Id int,
-					Color text,
-					primary key (),
-					constraint VC check (Color in (select Code from V))
-				);
-			}
-
-			apply schema main;
-		`);
-
-		await db.exec(`insert into T (Id, Color) values (1, 'r')`);
-		await db.exec(`insert into T (Id, Color) values (2, 'g')`);
-
-		const row = await db.prepare('select Id from T where Color = :c').get({ c: 'g' });
-		expect(row?.Id).to.equal(2);
-	});
-
 	// ---------------------------------------------------------------
 	// Bug B — `NOT IN (subquery)` always-false in CHECK
 	// ---------------------------------------------------------------
