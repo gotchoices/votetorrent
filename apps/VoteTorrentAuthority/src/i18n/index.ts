@@ -374,8 +374,9 @@ const resources = {
 			questionsLabel: 'Questions',
 			validForAuthority: '[valid for {{authority}}]',
 			filterAuthoritiesField: 'Filter authorities...',
-			// Phase 10 plan 10-01 (USRUI-05/09) — D-17: en-only; Spanish deferred to Phase 11
+			// Phase 10 plan 10-01 (USRUI-05/09; USRUI-01 polish) — D-17: en-only; Spanish deferred to Phase 11
 			addedKey: 'Added Key',
+			noActiveKeysFound: 'No active keys found.',
 			addedDevice: 'Added Device',
 			deviceAdded: 'Device Added',
 			done: 'Done',

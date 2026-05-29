@@ -75,14 +75,14 @@ export function RevokeKeyScreen() {
 					<View style={styles.detail}>
 						<ThemedText type="defaultSemiBold">{t("imageUrl")}:</ThemedText>
 						<ThemedText style={styles.imageUrl} numberOfLines={1} ellipsizeMode="tail">
-							{user.image?.url}
+							{user.image?.url ?? "N/A"}
 						</ThemedText>
 					</View>
 				</View>
 
 				<View>
 					<ThemedText type="subtitle" style={localStyles.activeKeysTitle}>
-						{t("activeKeys", "Active Keys")}:{" "}
+						{t("activeKeys")}:{" "}
 					</ThemedText>
 					<View style={styles.keysListContainer}>
 						{user.activeKeys.length > 0 ? (
@@ -129,7 +129,7 @@ export function RevokeKeyScreen() {
 								);
 							})
 						) : (
-							<ThemedText style={styles.noKeysText}>No active keys found.</ThemedText>
+							<ThemedText style={styles.noKeysText}>{t("noActiveKeysFound")}</ThemedText>
 						)}
 					</View>
 				</View>
@@ -150,12 +150,20 @@ export function RevokeKeyScreen() {
 					onPress={() => handleSign()}
 					disabled={!readyToSign || selectedKeys.size === 0}
 				/>
+				{isSigned && (
+					<View style={styles.detail}>
+						<ThemedText type="defaultSemiBold">{t("signed")}: </ThemedText>
+						<ThemedText style={styles.imageUrl} numberOfLines={1} ellipsizeMode="middle">
+							{user.id}
+						</ThemedText>
+					</View>
+				)}
 			</ScrollView>
 			<View style={[styles.footer, { backgroundColor: colors.card }]}>
 				<CustomButton
 					title={t("revoke")}
 					icon={"trash"}
-					backgroundColor={colors.error}
+					backgroundColor={colors.success}
 					onPress={() => handleRevoke()}
 					disabled={!isSigned || selectedKeys.size === 0}
 				/>
