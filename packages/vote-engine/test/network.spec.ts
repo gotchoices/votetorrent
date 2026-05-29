@@ -609,7 +609,7 @@ describe('NetworkEngine', () => {
 			const inviteCtx = await seedAuthorityInvite(auth, {
 				name: 'WithImage',
 				domainName: 'wi.example.com',
-				imageRef: 'https://cdn.example.com/auth.png',
+				imageUrl: 'https://cdn.example.com/auth.png',
 				admin: { thresholdPolicies: JSON.stringify([]) },
 				officers: [{ userId: auth.user.id, title: 'T', scopes: JSON.stringify(['rad']) }],
 			});

@@ -37,7 +37,17 @@ export interface AuthorityInviteInvokes {
   authority: {
     name: string
     domainName: string | null
-    imageRef?: unknown
+    /**
+     * WR-04 (12.4-REVIEW): renamed from `imageRef` to `imageUrl` and typed
+     * as `string` to match `AuthorityInit.imageUrl` consumed by
+     * `createAuthority`. Both sites now serialize the same scalar string
+     * the same way (`JSON.stringify(url)` → quoted-JSON), so the
+     * cryptographic Digest binding stays consistent across respondToInvite
+     * and createAuthority. Object-shaped image references (a future v1.2
+     * extension to a richer ImageRef-style shape with `{ url, cid }`)
+     * must be added at both sites simultaneously.
+     */
+    imageUrl?: string | null
   }
   admin: {
     /** Canonical ISO 8601 datetime — single source of truth shared with downstream createAuthority */

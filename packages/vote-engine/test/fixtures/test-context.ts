@@ -416,7 +416,10 @@ export async function seedAuthorityInvite (
   invokes?: {
     name?: string
     domainName?: string | null
-    imageRef?: unknown
+    /** WR-04 (12.4-REVIEW): renamed from `imageRef` to `imageUrl` to match
+     * AuthorityInviteInvokes.authority.imageUrl and AuthorityInit.imageUrl
+     * — both sites now serialize the same scalar string the same way. */
+    imageUrl?: string | null
     admin?: { effectiveAt?: string; thresholdPolicies?: string }
     officers?: Array<{ adminEffectiveAt?: string; userId: string; title: string; scopes: string }>
   }
@@ -427,7 +430,7 @@ export async function seedAuthorityInvite (
   const authorityDomainName = invokes?.domainName === undefined
     ? 'second.example.com'
     : invokes.domainName
-  const authorityImageRef = invokes?.imageRef
+  const authorityImageUrl = invokes?.imageUrl
 
   // Decision 4 (Phase 12.4): resolve a single canonical `adminEffectiveAt`
   // and re-use it everywhere downstream (Pitfall 2 mitigation — eliminates
@@ -468,12 +471,12 @@ export async function seedAuthorityInvite (
   const inviteSlotCid = slotRow.Cid as string
 
   // Step e: respondToInvite inserts InviteResult with the 7-arg Digest (D-06)
-  const authorityInvokes: { name: string; domainName: string | null; imageRef?: unknown } = {
+  const authorityInvokes: { name: string; domainName: string | null; imageUrl?: string | null } = {
     name: authorityName,
     domainName: authorityDomainName,
   }
-  if (authorityImageRef !== undefined) {
-    authorityInvokes.imageRef = authorityImageRef
+  if (authorityImageUrl !== undefined) {
+    authorityInvokes.imageUrl = authorityImageUrl
   }
   await auth.networkEngine.respondToInvite({
     invite: inviteShare,

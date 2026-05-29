@@ -742,7 +742,7 @@ export class NetworkEngine implements INetworkEngine {
             authority?: {
               name?: string
               domainName?: string | null
-              imageRef?: unknown
+              imageUrl?: string | null
             }
           }).authority ?? {})
         : null
@@ -756,8 +756,16 @@ export class NetworkEngine implements INetworkEngine {
     // Digest(context.Tid, ...) on the Authority insert side reproduces the
     // exact value committed here. If Tid ever becomes non-static, both sites
     // must read from a shared source.
-    const authorityImageRefJson = invokesAuthority?.imageRef != null
-      ? JSON.stringify(invokesAuthority.imageRef)
+    //
+    // WR-04 (12.4-REVIEW): use the same field name (`imageUrl`) and same
+    // serialization (`JSON.stringify(stringValue)` → quoted-JSON) as
+    // createAuthority above. Previously this site read `invokes.imageRef`
+    // (typed `unknown`) while createAuthority read `authority.imageUrl`
+    // — an object-shaped value (e.g. `{ url: ... }`) would silently
+    // produce a different JSON encoding at the two sites and trip
+    // Admin.MutationValid TX3 with a non-actionable CHECK error.
+    const authorityImageRefJson = invokesAuthority?.imageUrl != null
+      ? JSON.stringify(invokesAuthority.imageUrl)
       : null
     try {
       if (isAuthorityInvite && invite.isAccepted) {
