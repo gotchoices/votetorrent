@@ -110,6 +110,27 @@ if (typeof globalThis.CustomEvent === 'undefined') {
   };
 }
 
-// NOTE: timer .ref()/.unref() wrappers from the reference app may also be needed — add if libp2p
-// throws on timer handles. Do NOT add fast-text-encoding (double-encoding bugs; Hermes has native
-// TextEncoder).
+// 10. Timer .ref()/.unref() — Node timers return objects with .ref()/.unref(); Hermes returns
+//     numbers. Required by @optimystic/db-p2p (ClusterMember calls expirationInterval.unref()).
+//     Confirmed needed on-device by spike 007 (`TypeError: this.expirationInterval.unref is not a
+//     function`). clearTimeout/clearInterval are patched to unwrap, since RN's native clear expects
+//     the raw numeric id. (Verbatim from reference-app-rn polyfills/hermes.js.)
+{
+  const _setTimeout = globalThis.setTimeout;
+  const _setInterval = globalThis.setInterval;
+  const _clearTimeout = globalThis.clearTimeout;
+  const _clearInterval = globalThis.clearInterval;
+  const unwrap = h => (h && typeof h === 'object' && '_id' in h ? h._id : h);
+  const wrap = id => {
+    if (typeof id === 'object' && id !== null) return id;
+    return { _id: id, ref() { return this; }, unref() { return this; }, [Symbol.toPrimitive]() { return this._id; } };
+  };
+  globalThis.setTimeout = function (...a) { return wrap(_setTimeout.apply(this, a)); };
+  Object.assign(globalThis.setTimeout, _setTimeout);
+  globalThis.setInterval = function (...a) { return wrap(_setInterval.apply(this, a)); };
+  Object.assign(globalThis.setInterval, _setInterval);
+  globalThis.clearTimeout = function (h) { return _clearTimeout.call(this, unwrap(h)); };
+  globalThis.clearInterval = function (h) { return _clearInterval.call(this, unwrap(h)); };
+}
+
+// NOTE: Do NOT add fast-text-encoding (double-encoding bugs; Hermes has native TextEncoder).
