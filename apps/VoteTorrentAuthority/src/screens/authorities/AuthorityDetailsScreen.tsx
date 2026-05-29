@@ -154,7 +154,7 @@ export default function AuthorityDetailsScreen() {
 	}
 
 	return (
-		<ScrollView style={styles.container}>
+		<ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 32 }}>
 			<View style={styles.section}>
 				<View style={styles.imageContainer}>
 					<Image source={{ uri: authority.imageRef?.url }} style={styles.authorityImage} />
