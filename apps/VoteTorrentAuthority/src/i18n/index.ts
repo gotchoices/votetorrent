@@ -112,7 +112,7 @@ const resources = {
 			inviteId: 'Invite ID',
 			showHelpIcons: 'Show help icons',
 			defaultUser: 'Default User',
-			connectDevice: 'Connect this device to existing user',
+			connectDevice: 'Connect this device\nto existing user',
 			noUserFound: 'No user found for this network',
 			user: 'User',
 			noDefaultUserFound: 'No default user found',
