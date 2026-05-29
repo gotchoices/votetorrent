@@ -71,8 +71,18 @@ export interface AdminInit {
   /** The officers */
   officers: OfficerSelection[]
 
-  /** The effective date of the administration */
-  effectiveAt: Timestamp
+  /**
+   * The effective date of the administration.
+   *
+   * WR-06 (12.4-REVIEW): widened from `Timestamp` (number) to
+   * `Timestamp | string` so callers may pass a canonical-datetime ISO
+   * string (e.g. the value returned by `nowCanonicalDatetime()` and
+   * propagated through `seedAuthorityInvite`'s `adminEffectiveAt` field).
+   * The engine normalizes both forms through `toCanonicalDatetime`. This
+   * removes the need for the `as never` casts that previously bypassed
+   * type-checking at the test boundary.
+   */
+  effectiveAt: Timestamp | string
 
   /** Threshold policies */
   thresholdPolicies: ThresholdPolicy[]

@@ -17,11 +17,13 @@ import { AsyncStorage } from '../shims/react-native.js'
 import type { EngineContext } from '../../src/types.js'
 import type {
   Authority,
+  AuthorityInviteInvokes,
   AuthorityInviteShare,
   ElectionInit,
   IAuthorityEngine,
   IElectionEngine,
   INetworkEngine,
+  InviteAction,
   NetworkInit,
   NetworkReference,
   OfficerInit,
@@ -478,7 +480,12 @@ export async function seedAuthorityInvite (
   if (authorityImageUrl !== undefined) {
     authorityInvokes.imageUrl = authorityImageUrl
   }
-  await auth.networkEngine.respondToInvite({
+  // WR-06 (12.4-REVIEW): typed boundary — pass an explicit
+  // `InviteAction<AuthorityInviteInvokes>` so the AuthorityInviteInvokes
+  // contract (authority/admin/officers shape) is enforced at the test
+  // seam instead of being silently bypassed by `as never`. If a future
+  // schema change breaks this shape, the test suite fails at compile time.
+  const inviteAction: InviteAction<AuthorityInviteInvokes> = {
     invite: inviteShare,
     isAccepted: true,
     invokes: {
@@ -487,9 +494,8 @@ export async function seedAuthorityInvite (
       officers,
     },
     inviteSignature: 'a'.repeat(128),
-    userId: undefined,
-    userInit: undefined,
-  } as never)
+  }
+  await auth.networkEngine.respondToInvite(inviteAction)
 
   return { ...auth, inviteShare, inviteSlotCid, adminEffectiveAt, officers }
 }

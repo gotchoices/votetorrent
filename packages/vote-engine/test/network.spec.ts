@@ -427,7 +427,7 @@ describe('NetworkEngine', () => {
 							},
 						},
 					],
-					effectiveAt: inviteCtx.adminEffectiveAt as never,
+					effectiveAt: inviteCtx.adminEffectiveAt,
 					thresholdPolicies: [{ policy: 'rad', threshold: 1 }],
 				},
 				{ inviteSlotCid: inviteCtx.inviteSlotCid, inviteSignature: 'a'.repeat(128) }
@@ -454,7 +454,7 @@ describe('NetworkEngine', () => {
 							},
 						},
 					],
-					effectiveAt: inviteCtx.adminEffectiveAt as never,
+					effectiveAt: inviteCtx.adminEffectiveAt,
 					thresholdPolicies: [{ policy: 'rad', threshold: 1 }],
 				},
 				{ inviteSlotCid: inviteCtx.inviteSlotCid, inviteSignature: 'a'.repeat(128) }
@@ -570,7 +570,7 @@ describe('NetworkEngine', () => {
 							init: { name: 'O', title: 'T', scopes: ['rad'] as Scope[] },
 						},
 					],
-					effectiveAt: inviteCtx1.adminEffectiveAt as never,
+					effectiveAt: inviteCtx1.adminEffectiveAt,
 					thresholdPolicies: [],
 				},
 				{ inviteSlotCid: inviteCtx1.inviteSlotCid, inviteSignature: 'a'.repeat(128) }
@@ -592,7 +592,7 @@ describe('NetworkEngine', () => {
 						init: { name: 'O', title: 'T', scopes: ['rad'] as Scope[] },
 					},
 				],
-				effectiveAt: inviteCtx2.adminEffectiveAt as never,
+				effectiveAt: inviteCtx2.adminEffectiveAt,
 				thresholdPolicies: [],
 			},
 			{ inviteSlotCid: inviteCtx2.inviteSlotCid, inviteSignature: 'a'.repeat(128) }
@@ -625,7 +625,7 @@ describe('NetworkEngine', () => {
 							init: { name: 'O', title: 'T', scopes: ['rad'] as Scope[] },
 						},
 					],
-					effectiveAt: inviteCtx.adminEffectiveAt as never,
+					effectiveAt: inviteCtx.adminEffectiveAt,
 					thresholdPolicies: [],
 				},
 				{ inviteSlotCid: inviteCtx.inviteSlotCid, inviteSignature: 'a'.repeat(128) }
@@ -664,7 +664,7 @@ describe('NetworkEngine', () => {
 				{ name: 'MultiOfficer Authority', domainName: 'multi.example.com' },
 				{
 					officers: [{ init: { name: 'Officer A', title: 'Officer A', scopes: ['rad'] as Scope[] } }],
-					effectiveAt: inviteCtx.adminEffectiveAt as never,
+					effectiveAt: inviteCtx.adminEffectiveAt,
 					thresholdPolicies: [{ policy: 'rad', threshold: 1 }],
 				},
 				{ inviteSlotCid: inviteCtx.inviteSlotCid, inviteSignature: 'a'.repeat(128) }
@@ -2626,7 +2626,7 @@ describe('NetworkCreateAuthorityBuilder', () => {
 		});
 		const b = new NetworkCreateAuthorityBuilder(net.networkEngine)
 			.setAuthority(makeAuthorityInit())
-			.setAdmin(makeAdminInit({ effectiveAt: inviteCtx.adminEffectiveAt as never }));
+			.setAdmin(makeAdminInit({ effectiveAt: inviteCtx.adminEffectiveAt }));
 		expect(b.isValid()).to.equal(true);
 		await b.commit({ inviteSlotCid: inviteCtx.inviteSlotCid, inviteSignature: 'a'.repeat(128) });
 	});
@@ -2659,7 +2659,7 @@ describe('NetworkCreateAuthorityBuilder', () => {
 		});
 		const b = new NetworkCreateAuthorityBuilder(net.networkEngine)
 			.setAuthority(makeAuthorityInit())
-			.setAdmin(makeAdminInit({ effectiveAt: inviteCtx.adminEffectiveAt as never }));
+			.setAdmin(makeAdminInit({ effectiveAt: inviteCtx.adminEffectiveAt }));
 		await b.commit({ inviteSlotCid: inviteCtx.inviteSlotCid, inviteSignature: 'a'.repeat(128) });
 	});
 
@@ -2704,7 +2704,7 @@ describe('NetworkCreateAuthorityBuilder', () => {
 			admin: { thresholdPolicies: JSON.stringify([{ policy: 'rn', threshold: 1 }]) },
 			officers: [{ userId: auth1.user.id, title: 'Chair', scopes: JSON.stringify(['rn', 'rad']) }],
 		});
-		const admin1 = makeAdminInit({ effectiveAt: inv1.adminEffectiveAt as never });
+		const admin1 = makeAdminInit({ effectiveAt: inv1.adminEffectiveAt });
 		let err1: unknown;
 		try { await net1.networkEngine.createAuthority(authority, admin1, { inviteSlotCid: inv1.inviteSlotCid, inviteSignature: 'a'.repeat(128) }); } catch (e) { err1 = e; }
 		expect(err1).to.equal(undefined);
@@ -2717,7 +2717,7 @@ describe('NetworkCreateAuthorityBuilder', () => {
 			admin: { thresholdPolicies: JSON.stringify([{ policy: 'rn', threshold: 1 }]) },
 			officers: [{ userId: auth2.user.id, title: 'Chair', scopes: JSON.stringify(['rn', 'rad']) }],
 		});
-		const admin2 = makeAdminInit({ effectiveAt: inv2.adminEffectiveAt as never });
+		const admin2 = makeAdminInit({ effectiveAt: inv2.adminEffectiveAt });
 		let err2: unknown;
 		try { await net2.networkEngine.buildCreateAuthority().fromPayload({ authority, admin: admin2 }).commit({ inviteSlotCid: inv2.inviteSlotCid, inviteSignature: 'a'.repeat(128) }); } catch (e) { err2 = e; }
 		expect(err2).to.equal(undefined);

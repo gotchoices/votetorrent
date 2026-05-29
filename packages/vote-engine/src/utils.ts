@@ -74,7 +74,20 @@ export function toHexKey (value: string | Uint8Array): string {
  * because no coercion is needed, `new.*` values seen by deferred
  * subqueries match the stored values in referenced tables.
  */
-export function toCanonicalDatetime (input: number | Date): string {
+export function toCanonicalDatetime (input: number | string | Date): string {
+  // WR-06 (12.4-REVIEW): accept canonical-datetime strings as a passthrough.
+  // AdminInit.effectiveAt was widened to `Timestamp | string` so callers
+  // can hand the engine a `nowCanonicalDatetime()`-shaped value directly
+  // without an `as never` cast. The string fast-path preserves the exact
+  // 19-char canonical form expected by the schema; non-canonical strings
+  // fall through to the Date parser below.
+  if (typeof input === 'string') {
+    // Already-canonical (e.g. '2026-01-01T00:00:00') — return as-is.
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(input)) return input
+    const parsed = new Date(input)
+    if (!Number.isNaN(parsed.getTime())) return parsed.toISOString().slice(0, 19)
+    return input
+  }
   const d = typeof input === 'number' ? new Date(input) : input
   // Defer invalid-input rejection to the database layer: passing the raw
   // string through lets the datetime column type or downstream CHECK
