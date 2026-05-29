@@ -688,4 +688,5 @@ i18n.use(initReactI18next).init({
 	},
 });
 
+export { resources };
 export default i18n;
