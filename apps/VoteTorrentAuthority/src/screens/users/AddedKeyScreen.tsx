@@ -4,9 +4,9 @@ import { useTranslation } from "react-i18next";
 import { ThemedText } from "../../components/ThemedText";
 import { ExtendedTheme, useNavigation, useRoute, useTheme } from "@react-navigation/native";
 import { CustomButton } from "../../components/CustomButton";
-import { User } from "@votetorrent/vote-core";
+import { User, UserKeyType } from "@votetorrent/vote-core";
 import type { NavigationProp } from "../../navigation/types";
-import { formatDate } from "../../utils/displayUtils";
+import { formatDate, getKeyTypeDisplayName } from "../../utils/displayUtils";
 
 export function AddedKeyScreen() {
 	const { t } = useTranslation();
@@ -46,7 +46,7 @@ export function AddedKeyScreen() {
 					</View>
 					<View style={styles.detail}>
 						<ThemedText type="defaultSemiBold">{t("type")}: </ThemedText>
-						<ThemedText>{keyType}</ThemedText>
+						<ThemedText>{t(getKeyTypeDisplayName(keyType as UserKeyType))}</ThemedText>
 					</View>
 					<View style={styles.detail}>
 						<ThemedText type="defaultSemiBold">{t("expiration")}: </ThemedText>
