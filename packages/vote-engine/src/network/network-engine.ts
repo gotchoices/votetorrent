@@ -98,9 +98,14 @@ export class NetworkEngine implements INetworkEngine {
         scopes: JSON.stringify(o.init.scopes),
       }))
       .sort((a, b) => {
+        // D-09 (WR-01): use codepoint comparison (`<` / `>` on strings) to
+        // match quereus' TEXT `order by UserId asc` binary ordering. JS
+        // `localeCompare` is locale-sensitive and host-ICU-dependent — for
+        // non-ASCII userIds it would diverge from the schema's recompute and
+        // silently break the Admin.MutationValid CHECK.
         const ua = a.userId ?? ''
         const ub = b.userId ?? ''
-        return ua.localeCompare(ub)
+        return ua < ub ? -1 : ua > ub ? 1 : 0
       })
 
     // Phase 12.2: invite context params (inviteSlotCid, inviteSignature)
@@ -777,7 +782,13 @@ export class NetworkEngine implements INetworkEngine {
         // D-09: sort by userId ASC and bind only the first officer's columns
         // into InviteResult.Digest. Officers 2..N are not hash-bound — this is
         // the documented v1.2 follow-up limitation.
-        const sortedOfficers = [...invokesOfficers].sort((a, b) => a.userId.localeCompare(b.userId))
+        // D-09 (WR-01): codepoint comparison to mirror SQL `order by UserId asc`.
+        // localeCompare is locale-sensitive; binary `<`/`>` matches quereus TEXT
+        // ordering and keeps the bound first-officer identity consistent across
+        // engine and schema.
+        const sortedOfficers = [...invokesOfficers].sort(
+          (a, b) => a.userId < b.userId ? -1 : a.userId > b.userId ? 1 : 0
+        )
         const firstOfficer = sortedOfficers[0]!
         await this.ctx.db.exec(
 					`insert into InviteResult (
