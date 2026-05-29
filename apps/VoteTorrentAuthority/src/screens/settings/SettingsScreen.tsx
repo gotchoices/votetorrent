@@ -172,7 +172,7 @@ export default function SettingsScreen() {
 					<InfoCard
 						title={t("defaultUser")}
 						subtitle={defaultUser.name}
-						image={{ uri: defaultUser.image?.url || "" }}
+						image={{ uri: (defaultUser as any).image?.url || "" }}
 						icon="chevron-right"
 						onPress={() => {
 							navigation.navigate("DefaultUser", {
@@ -190,7 +190,7 @@ export default function SettingsScreen() {
 				<CustomButton
 					title={t("connectDevice")}
 					icon="qrcode"
-					backgroundColor={colors.important}
+					backgroundColor={colors.success}
 					forceDarkText={true}
 					size="thin"
 					onPress={() => {
@@ -205,7 +205,7 @@ export default function SettingsScreen() {
 				{currentUser ? (
 					<InfoCard
 						title={currentUser.name}
-						image={{ uri: currentUser.image?.url || "" }}
+						image={{ uri: (currentUser as any).image?.url || "" }}
 						additionalInfo={[{ label: "ID", value: currentUser.id }]}
 						icon="chevron-right"
 						onPress={() => {
