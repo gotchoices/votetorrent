@@ -82,6 +82,23 @@ export class NetworkEngine implements INetworkEngine {
     }
 
     const adminEffectiveAtCanonical = toCanonicalDatetime(admin.effectiveAt)
+    // WR-05 (12.4-REVIEW): fail fast when an invite-bound createAuthority is
+    // invoked without an authenticated current user. Officer.UserIdValid
+    // (qsql:170) requires `exists (select 1 from User U where U.Id = new.UserId)`
+    // — a null UserId binding cannot satisfy that existence CHECK, producing
+    // a non-actionable schema error instead of a clear "no current user" one.
+    // Same class as WR-04 (silent encoding mismatch between the two sites
+    // that must agree byte-for-byte for D-09 binding) but on the userId
+    // channel.
+    //
+    // v1.2 follow-up: AdminInit.OfficerInit does not currently carry a per-
+    // officer `userId` field, so the engine binds `ctx.user.id` for every
+    // officer row. Once OfficerInit gains a `userId` channel, this guard
+    // should also verify the caller-supplied first-officer userId matches
+    // what respondToInvite bound into InviteResult.Digest.
+    if (options?.inviteSlotCid && !this.ctx.user?.id) {
+      throw new Error('createAuthority: invite-bound flow requires an authenticated current user')
+    }
     const callerUserId = this.ctx.user?.id ?? null
 
     // D-09 / Decision 2 (Phase 12.4): sort officers by UserId ASC so the first
