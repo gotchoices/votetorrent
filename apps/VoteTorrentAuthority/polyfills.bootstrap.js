@@ -93,6 +93,17 @@ if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.prototype.throwIfAb
   };
 }
 
+// 7b. AbortSignal.timeout — bare RN 0.78 Hermes lacks this static (Expo's Hermes has it, so the
+//     reference app didn't need it). libp2p's dial path calls AbortSignal.timeout(ms); without it a
+//     dial throws "AbortSignal.timeout is not a function". Confirmed needed on-device by spike 009.
+if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout !== 'function') {
+  AbortSignal.timeout = function timeout(ms) {
+    const c = new AbortController();
+    setTimeout(() => c.abort(new DOMException('The operation timed out.', 'TimeoutError')), ms);
+    return c.signal;
+  };
+}
+
 // 8. Symbol.asyncIterator (for `for await…of` in Quereus/libp2p)
 if (typeof Symbol !== 'undefined' && typeof Symbol.asyncIterator === 'undefined') {
   try {
