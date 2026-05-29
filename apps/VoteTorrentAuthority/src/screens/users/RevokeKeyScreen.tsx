@@ -75,7 +75,7 @@ export function RevokeKeyScreen() {
 					<View style={styles.detail}>
 						<ThemedText type="defaultSemiBold">{t("imageUrl")}:</ThemedText>
 						<ThemedText style={styles.imageUrl} numberOfLines={1} ellipsizeMode="tail">
-							{user.image?.url ?? "N/A"}
+							{(user as any).image?.url ?? "N/A"}
 						</ThemedText>
 					</View>
 				</View>

@@ -59,7 +59,7 @@ export function AddKeyScreen() {
 					<View style={styles.detail}>
 						<ThemedText type="defaultSemiBold">{t("imageUrl")}:</ThemedText>
 						<ThemedText style={styles.imageUrl} numberOfLines={1} ellipsizeMode="tail">
-							{user.image?.url}
+							{(user as any).image?.url}
 						</ThemedText>
 					</View>
 				</View>

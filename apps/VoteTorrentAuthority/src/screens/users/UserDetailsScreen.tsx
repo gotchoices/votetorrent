@@ -81,7 +81,7 @@ export function UserDetailsScreen() {
 	return (
 		<ScrollView style={styles.container}>
 			<View style={styles.imageContainer}>
-				<Image source={{ uri: user.image?.url }} style={styles.image} />
+				<Image source={{ uri: (user as any).image?.url }} style={styles.image} />
 			</View>
 
 			<View style={[styles.section, styles.detailContainer]}>
@@ -96,7 +96,7 @@ export function UserDetailsScreen() {
 				<View style={styles.detail}>
 					<ThemedText type="defaultSemiBold">{t("imageUrl")}: </ThemedText>
 					<ThemedText style={styles.imageUrl} numberOfLines={1} ellipsizeMode="tail">
-						{user.image?.url ?? "N/A"}
+						{(user as any).image?.url ?? "N/A"}
 					</ThemedText>
 				</View>
 			</View>
