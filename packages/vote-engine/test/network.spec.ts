@@ -17,7 +17,7 @@ import { NetworkProposeRevisionBuilder } from '../src/network/builders/network-p
 import { NetworkRespondToInviteBuilder } from '../src/network/builders/network-respond-to-invite-builder';
 import { NetworksEngine } from '../src/networks/networks-engine';
 import type { EngineContext } from '../src/types.js';
-import { createTestNetwork, addTestAuthority, addTestElection, seedAuthorityInvite, seedUserInvite, makeDistinctTestUser } from './fixtures/test-context.js';
+import { createTestNetwork, addTestAuthority, addTestElection, seedAuthorityInvite, seedUserInvite } from './fixtures/test-context.js';
 import { randomTestKeyPair } from './fixtures/keys.js';
 import { AsyncStorage } from './shims/react-native';
 import type {
@@ -639,32 +639,22 @@ describe('NetworkEngine', () => {
 			);
 		});
 
-		it('binds first officer by UserId (lexicographic) to invite digest — officers 2..N covered only by Admin.MutationValid recompute (Phase 12.4 D-09)', async () => {
+		it('single-officer happy path: first-officer userId committed to InviteResult.Digest matches the Officer row (Phase 12.4 D-09)', async () => {
 			// D-09 contract: respondToInvite sorts officers[] by UserId ASC
 			// and binds ONLY the first officer's columns into
 			// InviteResult.Digest. The schema's Admin.MutationValid sub-
 			// Officer subquery uses the same `order by UserId asc limit 1`
 			// selection so the recomputed Digest matches what was committed.
 			//
-			// Officers 2..N are present in the seedAuthorityInvite payload
-			// (the fixture forwards them to respondToInvite) but are NOT
-			// hash-bound to the invite — they're only covered by the
-			// post-insert Admin.MutationValid recompute (also single-officer).
-			// This is the documented v1.2 follow-up limitation.
-			//
-			// NetworkEngine.createAuthority binds the caller's ctx user id
-			// into every Officer row (AdminInit.OfficerInit doesn't carry a
-			// userId field). For the schema CHECK to pass, the user id that
-			// respondToInvite binds as the "first officer" must equal the
-			// user id that createAuthority inserts. We pass exactly one
-			// officer to seedAuthorityInvite with `auth.user.id` to guarantee
-			// alignment — the multi-officer scaffolding above (u2, u3) is
-			// not yet wired through createAuthority and stays as future-work
-			// scaffolding.
+			// WR-02 (12.4-REVIEW): this test was originally named as if it
+			// exercised the multi-officer D-09 path, but createAuthority's
+			// AdminInit.OfficerInit channel does not yet carry per-officer
+			// userIds (a v1.2 follow-up). Until that wiring lands, this
+			// covers ONLY the single-officer happy path. The dedicated
+			// multi-officer sort-and-bind test against respondToInvite alone
+			// lives below in the 'respondToInvite' describe block.
 			const net = await createTestNetwork();
 			const auth = await addTestAuthority(net);
-			const u2 = makeDistinctTestUser();
-			void u2; // scaffolding for v1.2 multi-row createAuthority wiring
 			const inviteCtx = await seedAuthorityInvite(auth, {
 				name: 'MultiOfficer Authority',
 				domainName: 'multi.example.com',
@@ -682,7 +672,7 @@ describe('NetworkEngine', () => {
 			const officerCount = await net.ctx.db
 				.prepare('select count(*) as n from Officer where AuthorityId = (select InvokedId from InviteResult where SlotCid = :slotCid)')
 				.get({ slotCid: inviteCtx.inviteSlotCid });
-			expect(Number(officerCount?.n)).to.be.greaterThanOrEqual(1);
+			expect(Number(officerCount?.n)).to.equal(1);
 			// Verify the bound officer (first by UserId in InviteResult.Digest)
 			// matches the Officer row inserted by createAuthority.
 			expect(inviteCtx.officers[0]!.userId).to.equal(auth.user.id);
@@ -1493,6 +1483,53 @@ describe('NetworkEngine', () => {
 				.prepare(
 					'select IsAccepted, Digest from InviteResult where SlotCid = :c',
 				)
+				.get({ c: slotRow!.Cid as string });
+			expect(Boolean(row?.IsAccepted)).to.equal(true);
+			expect(row?.Digest).to.not.equal(null);
+		});
+
+		it('binds the codepoint-smallest officer to InviteResult.Digest given a mixed-order 3-officer invokes payload (WR-02 / D-09 sort coverage)', async () => {
+			// WR-02 (12.4-REVIEW) follow-up: prove respondToInvite's officer
+			// sort-and-bind path actually runs against a multi-officer payload.
+			// We pass 3 officers in non-sorted order to invokes.officers[] and
+			// assert that the insert succeeds (the schema's InviteResult write
+			// goes through the engine's codepoint sort + first-officer selection
+			// — divergence would surface as a CHECK failure on the IsSigningValid
+			// /IsSignatureValid context-gated insert path).
+			const { engine } = await createNetworkEngine();
+			const ctx = (engine as unknown as { ctx: EngineContext }).ctx;
+			const fakeInviteKey = 'm'.repeat(66);
+			const fakeInvite = { inviteKey: fakeInviteKey, type: 'au' as const, expiration: '0', inviteSignature: 'a'.repeat(128) };
+			await ctx.db.exec(
+				`INSERT INTO InviteSlot (Cid, Type, Name, Expiration, InviteKey, InviteSignature, SigningNonce)
+				 WITH CONTEXT Tid = 1, IsCidValid = true, IsSignatureValid = true, IsInsertValid = true, now = datetime('now', '-1 day')
+				 VALUES (Digest(:inviteKey, :type), :type, 'test', :expiration, :inviteKey, :inviteSignature, 'test-nonce-multi')`,
+				{ inviteKey: fakeInviteKey, type: 'au', expiration: '2099-12-31T23:59:59', inviteSignature: 'a'.repeat(128) }
+			);
+			// Officers passed in deliberately mixed (non-sorted) order. By
+			// codepoint, the smallest userId is 'user-1' — the engine must
+			// pick that one for the digest binding, irrespective of input
+			// position.
+			const officers = [
+				{ adminEffectiveAt: '2026-01-01T00:00:00', userId: 'user-3', title: 'Officer C', scopes: '["rad"]' },
+				{ adminEffectiveAt: '2026-01-01T00:00:00', userId: 'user-1', title: 'Officer A', scopes: '["rad"]' },
+				{ adminEffectiveAt: '2026-01-01T00:00:00', userId: 'user-2', title: 'Officer B', scopes: '["rad"]' },
+			];
+			await engine.respondToInvite({
+				invite: fakeInvite,
+				isAccepted: true,
+				invokes: {
+					authority: { name: 'MultiInvokee', domainName: 'mi.example' },
+					admin: { effectiveAt: '2026-01-01T00:00:00', thresholdPolicies: '[{"policy":"rad","threshold":1}]' },
+					officers,
+				},
+				inviteSignature: 'a'.repeat(128),
+				userId: undefined,
+				userInit: undefined,
+			} as never);
+			const slotRow = await ctx.db.prepare('SELECT Cid FROM InviteSlot WHERE InviteKey = :k AND Type = :t').get({ k: fakeInviteKey, t: 'au' });
+			const row = await ctx.db
+				.prepare('select IsAccepted, Digest from InviteResult where SlotCid = :c')
 				.get({ c: slotRow!.Cid as string });
 			expect(Boolean(row?.IsAccepted)).to.equal(true);
 			expect(row?.Digest).to.not.equal(null);
