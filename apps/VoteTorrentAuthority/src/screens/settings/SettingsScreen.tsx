@@ -227,7 +227,7 @@ export default function SettingsScreen() {
 					<InfoCard
 						title={t("defaultUser")}
 						subtitle={defaultUser.name}
-						image={{ uri: (defaultUser as any).image?.url || "" }}
+						image={(defaultUser as any).image?.url ? { uri: (defaultUser as any).image.url } : undefined}
 						icon="chevron-right"
 						onPress={() => {
 							navigation.navigate("DefaultUser", {
@@ -260,7 +260,7 @@ export default function SettingsScreen() {
 				{currentUser ? (
 					<InfoCard
 						title={currentUser.name}
-						image={{ uri: (currentUser as any).image?.url || "" }}
+						image={(currentUser as any).image?.url ? { uri: (currentUser as any).image.url } : undefined}
 						additionalInfo={[{ label: "ID", value: currentUser.id }]}
 						icon="chevron-right"
 						onPress={() => {
