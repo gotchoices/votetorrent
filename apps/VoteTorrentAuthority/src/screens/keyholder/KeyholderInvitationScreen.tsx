@@ -1,6 +1,7 @@
 import React, { useEffect, useLayoutEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ScrollView, StyleSheet, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ExtendedTheme, useNavigation, useRoute, useTheme } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { IInvitationEngine, InviteStatus, SentKeyholderInvite } from "@votetorrent/vote-core";
@@ -20,6 +21,7 @@ type KeyholderInvitationParams = {
 export function KeyholderInvitationScreen() {
 	const { t } = useTranslation();
 	const { colors } = useTheme() as ExtendedTheme;
+	const insets = useSafeAreaInsets();
 	const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 	const { mode, invitationId } = useRoute().params as KeyholderInvitationParams;
 	const { getEngine } = useApp();
@@ -76,7 +78,7 @@ export function KeyholderInvitationScreen() {
 						<CustomTextInput title={t("name")} value={name} onChangeText={setName} />
 					</View>
 				</ScrollView>
-				<View style={[styles.footer, { backgroundColor: colors.card }]}>
+				<View style={[styles.footer, { backgroundColor: colors.card, paddingBottom: insets.bottom + 16 }]}>
 					<CustomButton
 						title={t("send")}
 						icon="paper-plane"

@@ -1,4 +1,5 @@
 import { ScrollView, StyleSheet, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { globalStyles } from "../../theme/styles";
 import { useTranslation } from "react-i18next";
 import { ThemedText } from "../../components/ThemedText";
@@ -12,6 +13,7 @@ import { formatDate, getKeyTypeDisplayName } from "../../utils/displayUtils";
 export function AddedKeyScreen() {
 	const { t } = useTranslation();
 	const { colors } = useTheme() as ExtendedTheme;
+	const insets = useSafeAreaInsets();
 	const { user, keyValue, keyType, expiration } = useRoute().params as {
 		user: User;
 		keyValue: string;
@@ -56,7 +58,7 @@ export function AddedKeyScreen() {
 					</View>
 				</View>
 			</ScrollView>
-			<View style={[styles.footer, { backgroundColor: colors.card }]}>
+			<View style={[styles.footer, { backgroundColor: colors.card, paddingBottom: insets.bottom + 16 }]}>
 				<CustomButton
 					title={t("done")}
 					icon="check"

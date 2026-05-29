@@ -1,4 +1,5 @@
 import { StyleSheet, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { globalStyles } from "../../theme/styles";
 import { ThemedText } from "../../components/ThemedText";
 import { useTranslation } from "react-i18next";
@@ -14,6 +15,7 @@ const MOCK_TOKEN = "1234567890";
 export function AddDeviceScreen() {
 	const { t } = useTranslation();
 	const { colors } = useTheme() as ExtendedTheme;
+	const insets = useSafeAreaInsets();
 	const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 
 	return (
@@ -32,7 +34,7 @@ export function AddDeviceScreen() {
 				</View>
 				<ThemedText type="default">{t("fromOtherDevice")}</ThemedText>
 			</View>
-			<View style={[styles.footer, { backgroundColor: colors.card }]}>
+			<View style={[styles.footer, { backgroundColor: colors.card, paddingBottom: insets.bottom + 16 }]}>
 				<CustomButton
 					title={t("done")}
 					icon="check"

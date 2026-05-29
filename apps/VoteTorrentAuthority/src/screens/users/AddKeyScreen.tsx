@@ -1,4 +1,5 @@
 import { ScrollView, StyleSheet, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { globalStyles } from "../../theme/styles";
 import { useTranslation } from "react-i18next";
 import { ThemedText } from "../../components/ThemedText";
@@ -21,6 +22,7 @@ export function AddKeyScreen() {
 	const [newKey, setNewKey] = useState<string | null>("sdflkj236jSFgjSVj35j78kdn2");
 	const { t } = useTranslation();
 	const { colors } = useTheme() as ExtendedTheme;
+	const insets = useSafeAreaInsets();
 
 	const scanDevice = () => {
 		console.log("scanDevice");
@@ -106,7 +108,7 @@ export function AddKeyScreen() {
 				)}
 			</ScrollView>
 			{isAddingKey && (
-				<View style={[styles.footer, { backgroundColor: colors.card }]}>
+				<View style={[styles.footer, { backgroundColor: colors.card, paddingBottom: insets.bottom + 16 }]}>
 					<CustomButton
 						title={t("addKey")}
 						icon="save"

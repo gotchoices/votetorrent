@@ -1,4 +1,5 @@
 import { ScrollView, StyleSheet, View, TouchableOpacity } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ThemedText } from "../../components/ThemedText";
 import { globalStyles } from "../../theme/styles";
 import { IUserEngine } from "@votetorrent/vote-core";
@@ -18,6 +19,7 @@ export function RevokeKeyScreen() {
 	const { user, userEngine } = useRoute().params as { user: User; userEngine: IUserEngine };
 	const { t } = useTranslation();
 	const { colors } = useTheme() as ExtendedTheme;
+	const insets = useSafeAreaInsets();
 	const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
 	const [confirmText, setConfirmText] = useState("");
 	const [readyToSign, setReadyToSign] = useState(false);
@@ -159,7 +161,7 @@ export function RevokeKeyScreen() {
 					</View>
 				)}
 			</ScrollView>
-			<View style={[styles.footer, { backgroundColor: colors.card }]}>
+			<View style={[styles.footer, { backgroundColor: colors.card, paddingBottom: insets.bottom + 16 }]}>
 				<CustomButton
 					title={t("revoke")}
 					icon={"trash"}
