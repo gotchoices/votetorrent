@@ -3,9 +3,11 @@ import React, { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ScrollView, StyleSheet, View, Switch } from "react-native";
 import { ThemedText } from "../../components/ThemedText";
+import { ChipButton } from "../../components/ChipButton";
 import { CustomButton } from "../../components/CustomButton";
 import { Footer } from "../../components/Footer";
-import type { Authority, Officer, Scope } from "@votetorrent/vote-core";
+import { InfoCard } from "../../components/InfoCard";
+import type { Authority, IUserEngine, Officer, Scope, User } from "@votetorrent/vote-core";
 import { scopeDescriptions } from "@votetorrent/vote-core";
 import { useRoute, useNavigation } from "@react-navigation/native";
 import { useApp } from "../../providers/AppProvider";
@@ -30,6 +32,13 @@ export default function EditOfficerScreen() {
 	const [title, setTitle] = useState("");
 	const [scopes, setScopes] = useState<Scope[]>([]);
 	const [officer, setOfficer] = useState<Officer | null>(null);
+	const [user, setUser] = useState<User | null>(null);
+	const [userEngine, setUserEngine] = useState<IUserEngine | null>(null);
+
+	// Editing an existing administrator (vs. adding a new one). Drives the
+	// frame-35 vs frame-12 layout: edit shows the User card + REMOVE; add shows
+	// the Name input with the "name on invitation" placeholder.
+	const isEditing = !!officerId;
 
 	useEffect(() => {
 		async function loadOfficer() {
@@ -43,9 +52,11 @@ export default function EditOfficerScreen() {
 					// Source the display name from the User join via networkEngine.getUser()
 					// (Phase 7 D-15 opportunistic fix; preferred Option A from 08-04 plan).
 					try {
-						const userEngine = await networkEngine.getUser(foundOfficer.userId);
-						const user = await userEngine?.getSummary();
-						setName(user?.name ?? "");
+						const ue = await networkEngine.getUser(foundOfficer.userId);
+						const u = await ue?.getSummary();
+						setUserEngine(ue ?? null);
+						setUser(u ?? null);
+						setName(u?.name ?? "");
 					} catch (userError) {
 						console.error("Error loading user for officer:", userError);
 						setName("");
@@ -59,6 +70,21 @@ export default function EditOfficerScreen() {
 		}
 		loadOfficer();
 	}, [networkEngine, authority.id, officerId]);
+
+	// REMOVE button (header) — only when editing an existing administrator
+	// (frame 35). Removing from the proposed administration is engine-stubbed.
+	const handleRemove = () => {
+		console.log("editOfficer-remove stub", { officerId });
+		navigation.goBack();
+	};
+
+	useEffect(() => {
+		navigation.setOptions({
+			headerRight: isEditing
+				? () => <ChipButton label={t("remove")} icon="trash" onPress={handleRemove} />
+				: undefined,
+		});
+	}, [navigation, t, isEditing]);
 
 	const handleScopeToggle = (scope: Scope) => {
 		setScopes((prev) => {
@@ -87,12 +113,26 @@ export default function EditOfficerScreen() {
 		<View style={styles.content}>
 			<ScrollView style={styles.container}>
 				<View style={styles.section}>
-					<CustomTextInput
-						title={t("name")}
-						placeholder={t("nameOnInvitation")}
-						value={name}
-						onChangeText={setName}
-					/>
+					{isEditing ? (
+						<InfoCard
+							image={(user as any)?.image?.url ? { uri: (user as any).image.url } : undefined}
+							additionalInfo={[
+								{ label: t("user"), value: user?.name ?? officerId },
+								{ label: t("sid"), value: officerId },
+							]}
+							icon="chevron-right"
+							onPress={() =>
+								user && userEngine && navigation.navigate("UserDetails", { user, userEngine })
+							}
+						/>
+					) : (
+						<CustomTextInput
+							title={t("name")}
+							placeholder={t("nameOnInvitation")}
+							value={name}
+							onChangeText={setName}
+						/>
+					)}
 					<CustomTextInput
 						title={t("title")}
 						placeholder={t("officialTitle")}
