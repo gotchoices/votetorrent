@@ -17,9 +17,14 @@ import type { RootStackParamList } from "../../navigation/types";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useApp } from "../../providers/AppProvider";
 import { AuthorizationSection } from "../../components/AuthorizationSection";
+import { InfoCard } from "../../components/InfoCard";
+import { CustomTextInput } from "../../components/CustomTextInput";
 import { globalStyles } from "../../theme/styles";
 import { formatDate } from "../../utils/displayUtils";
 import { OfficerCard } from "./components/OfficerCard";
+
+/** Shape the (forthcoming) real authority engine will provide for invited authorities. */
+type InvitedAuthority = { name: string; status: "sent" | "unsent" };
 
 export default function AuthorityDetailsScreen() {
 	const { t } = useTranslation();
@@ -33,6 +38,8 @@ export default function AuthorityDetailsScreen() {
 	const [adminDetails, setAdminDetails] = useState<AdminDetails | null>(null);
 	const [officerUsers, setOfficerUsers] = useState<Map<string, User>>(new Map());
 	const [officers, setOfficers] = useState<Officer[]>([]);
+	const [inviteSearch, setInviteSearch] = useState("");
+	const [invitedAuthorities, setInvitedAuthorities] = useState<InvitedAuthority[]>([]);
 
 	const handlePinToggle = async () => {
 		try {
@@ -138,6 +145,22 @@ export default function AuthorityDetailsScreen() {
 	}, [networkEngine, adminDetails]);
 
 	useEffect(() => {
+		// Invited authorities are supplied by the real authority engine (to be
+		// implemented). Bind defensively so this UI is ready without adding mock
+		// data — the section renders empty until the engine provides the list.
+		async function loadInvited() {
+			const fn = (authorityEngine as any)?.getInvitedAuthorities;
+			if (typeof fn !== "function") return;
+			try {
+				setInvitedAuthorities((await fn.call(authorityEngine)) ?? []);
+			} catch (error) {
+				console.error("Error loading invited authorities:", error);
+			}
+		}
+		loadInvited();
+	}, [authorityEngine]);
+
+	useEffect(() => {
 		navigation.setOptions({
 			headerRight: () => (
 				<ChipButton
@@ -166,7 +189,7 @@ export default function AuthorityDetailsScreen() {
 					</ThemedText>
 				</View>
 				<View style={styles.detail}>
-					<ThemedText type="defaultSemiBold">{t("domain")}: </ThemedText>
+					<ThemedText type="defaultSemiBold">{t("domainName")}: </ThemedText>
 					<ThemedText numberOfLines={1} ellipsizeMode="tail">
 						{authority.domainName}
 					</ThemedText>
@@ -185,6 +208,18 @@ export default function AuthorityDetailsScreen() {
 						</ThemedText>
 					</View>
 				) : null}
+				{(authority as any).address ? (
+					<View style={styles.detail}>
+						<ThemedText type="defaultSemiBold">{t("address")}: </ThemedText>
+						<ThemedText numberOfLines={1} ellipsizeMode="middle">
+							{(authority as any).address}
+						</ThemedText>
+					</View>
+				) : null}
+				<View style={styles.detail}>
+					<ThemedText type="defaultSemiBold">{t("signature")}: </ThemedText>
+					<ThemedText>[{t("valid")}]</ThemedText>
+				</View>
 				<CustomButton
 					title={t("reviseAuthority")}
 					icon="pencil"
@@ -197,9 +232,18 @@ export default function AuthorityDetailsScreen() {
 			<View style={styles.section}>
 				<ThemedText type="title">{t("administration")}</ThemedText>
 
+				{(adminDetails?.admin as any)?.priorId ? (
+					<View style={styles.detail}>
+						<ThemedText type="defaultSemiBold">{t("priorCid")}: </ThemedText>
+						<ThemedText numberOfLines={1} ellipsizeMode="tail">
+							{(adminDetails?.admin as any).priorId}
+						</ThemedText>
+					</View>
+				) : null}
+
 				{(() => {
 					const adminSignatures = (adminDetails?.admin as any)?.signatures as
-						| Array<{ signerKey?: string; signature?: string }>
+						| Array<{ name?: string; signerKey?: string; valid?: boolean }>
 						| undefined;
 					if (!adminSignatures || adminSignatures.length === 0) return null;
 					return (
@@ -210,10 +254,10 @@ export default function AuthorityDetailsScreen() {
 							<View style={styles.subDetails}>
 								{adminSignatures.map((signature, idx) => (
 									<View key={signature.signerKey ?? idx} style={styles.detail}>
-										<ThemedText type="default" numberOfLines={1} ellipsizeMode="middle">
-											{signature.signerKey}
+										<ThemedText numberOfLines={1} ellipsizeMode="middle">
+											{signature.name ? `${signature.name} ` : ""}[{signature.signerKey}]
 										</ThemedText>
-										<ThemedText> ({t("signature")})</ThemedText>
+										<ThemedText> ({t("valid")})</ThemedText>
 									</View>
 								))}
 							</View>
@@ -329,6 +373,34 @@ export default function AuthorityDetailsScreen() {
 					<AuthorizationSection admin={adminDetails} />
 				</View>
 			)}
+
+			<View style={styles.section}>
+				<View style={styles.invitedHeader}>
+					<ThemedText type="title">{t("invitedAuthorities")}</ThemedText>
+					<ChipButton
+						label={t("inviteAuthority")}
+						icon="circle-plus"
+						onPress={() => navigation.navigate("AuthorityInvitation", { mode: "send" })}
+					/>
+				</View>
+				<ThemedText type="defaultSemiBold" style={styles.invitedNameLabel}>
+					{t("name")}
+				</ThemedText>
+				<CustomTextInput
+					placeholder={t("name")}
+					value={inviteSearch}
+					onChangeText={setInviteSearch}
+				/>
+				{invitedAuthorities.map((invited) => (
+					<InfoCard
+						key={invited.name}
+						title={invited.name}
+						subtitle={invited.status === "sent" ? t("sent") : t("unsent")}
+						icon="chevron-right"
+						onPress={() => {}}
+					/>
+				))}
+			</View>
 		</ScrollView>
 	);
 }
@@ -354,6 +426,16 @@ const localStyles = StyleSheet.create({
 	},
 	administratorsHeading: {
 		marginTop: 12,
+		marginBottom: 4,
+	},
+	invitedHeader: {
+		flexDirection: "row",
+		alignItems: "center",
+		justifyContent: "space-between",
+		marginBottom: 8,
+	},
+	invitedNameLabel: {
+		marginTop: 8,
 		marginBottom: 4,
 	},
 });
