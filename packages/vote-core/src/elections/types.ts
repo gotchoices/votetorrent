@@ -5,7 +5,7 @@ import type { IBuilder } from '../common/builder.js'
 
 export interface IElectionsEngine {
   adjustElection(election: ElectionInit): Promise<void>
-  createElection(election: ElectionInit): Promise<void>
+  createElection(election: ElectionInit, options?: { signingNonce?: string }): Promise<void>
   getElectionHistory(): Promise<ElectionSummary[]>
   getElections(): Promise<ElectionSummary[]>
   getProposedElections(): Promise<Array<Proposal<ElectionInit>>>
