@@ -62,7 +62,7 @@ export function AuthorizationSection({ admin, signedOfficerIds, onAdjustProposal
 			<ThemedText type="title">{t("authorization")}</ThemedText>
 			<CustomButton
 				title={t("adjustProposal")}
-				icon="pen"
+				rightIcon="pen"
 				backgroundColor={colors.accent}
 				size="thin"
 				onPress={onAdjustProposal ?? (() => {})}
@@ -77,7 +77,7 @@ export function AuthorizationSection({ admin, signedOfficerIds, onAdjustProposal
 					/>
 					<CustomButton
 						title={officerDetail.isSigned ? t("share") : t("sign")}
-						icon={officerDetail.isSigned ? "share-nodes" : "signature"}
+						rightIcon={officerDetail.isSigned ? "share-nodes" : "signature"}
 						backgroundColor={colors.important}
 						forceDarkText={true}
 						size="thin"

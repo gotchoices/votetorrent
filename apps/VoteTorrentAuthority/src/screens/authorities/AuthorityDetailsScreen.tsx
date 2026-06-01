@@ -340,9 +340,14 @@ export default function AuthorityDetailsScreen() {
 							};
 							const user = officer.userId ? officerUsers.get(officer.userId) : undefined;
 							const name = user?.name || officerSelection.init?.name || "";
+							// Frame 14: accepted entries show "Accepted - CID: <cid>" in
+							// green; pending invites show "Sent" in the warning tone.
 							const status = officerSelection.existing
-								? { label: t("accepted"), tone: "accepted" as const }
-								: { label: t("pending"), tone: "pending" as const };
+								? {
+										label: `${t("accepted")} - ${t("cid")}: ${officer.userId}`,
+										tone: "accepted" as const,
+									}
+								: { label: t("sent"), tone: "warning" as const };
 
 							return (
 								<OfficerCard
@@ -350,6 +355,7 @@ export default function AuthorityDetailsScreen() {
 									officer={officer}
 									userName={name}
 									image={user?.image?.url ? { uri: user.image.url } : undefined}
+									inviteId={(officerSelection as any)?.inviteId}
 									status={status}
 									onInvite={() =>
 										navigation.navigate("AdministratorInvitation", {
@@ -361,20 +367,16 @@ export default function AuthorityDetailsScreen() {
 								/>
 							);
 						})}
-						<CustomButton
-							title={t("manageProposal")}
-							icon="sliders"
-							size="thin"
-							backgroundColor={colors.accent}
-							onPress={() =>
-								navigation.navigate("ProposedAdministration", {
-									authorityId: authority.id,
-								})
-							}
-						/>
 					</View>
 
-					<AuthorizationSection admin={adminDetails} />
+					<AuthorizationSection
+						admin={adminDetails}
+						onAdjustProposal={() =>
+							navigation.navigate("ProposedAdministration", {
+								authorityId: authority.id,
+							})
+						}
+					/>
 				</View>
 			)}
 
