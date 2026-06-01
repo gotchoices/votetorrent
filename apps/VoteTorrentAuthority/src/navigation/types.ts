@@ -25,7 +25,7 @@ export type RootStackParamList = {
 	AuthorityDetails: { authority: Authority };
 	// Phase 8 plan 08-01: typed entry for ProposedAdministration (screen lands in 08-02 per D-04)
 	ProposedAdministration: { authorityId: string };
-	OfficerDetails: { officer: Officer };
+	OfficerDetails: { officer: Officer; userName?: string };
 	// Phase 8 plan 08-03 — Administrator + Authority invitation routes (D-08, D-09)
 	AdministratorInvitation: { mode: "send" | "accept"; invitationId?: string; authority?: Authority };
 	AuthorityInvitation: { mode: "send" | "accept"; invitationId?: string };

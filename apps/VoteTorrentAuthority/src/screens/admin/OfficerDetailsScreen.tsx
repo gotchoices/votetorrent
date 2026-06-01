@@ -1,109 +1,107 @@
 import React, { useLayoutEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { Image, ScrollView, StyleSheet, View } from "react-native";
-import { ThemedText } from "../../components/ThemedText";
-import { ChipButton } from "../../components/ChipButton";
+import { ScrollView, StyleSheet, TouchableOpacity, View } from "react-native";
+import FontAwesome6 from "react-native-vector-icons/FontAwesome6";
+import { ExtendedTheme, useNavigation, useRoute, useTheme } from "@react-navigation/native";
 import type { Officer } from "@votetorrent/vote-core";
-import { useNavigation, useRoute } from "@react-navigation/native";
 import { scopeDescriptions } from "@votetorrent/vote-core";
+import { ThemedText } from "../../components/ThemedText";
+import { InfoCard } from "../../components/InfoCard";
 import { globalStyles } from "../../theme/styles";
 
 export default function OfficerDetailsScreen() {
 	const { t } = useTranslation();
+	const { colors } = useTheme() as ExtendedTheme;
 	const navigation = useNavigation();
-	// `Officer` from vote-core (authority/models.ts:90–102) has no `imageRef`
-	// field; the prior cast to `Officer` left the value at runtime but produced
-	// a TS error. Loosen the route-param type so Phase 8 mocks-only routes can
-	// pass an optional image URI without forcing a vote-core schema change
-	// (Phase 7 D-15: opportunistic fix on lines this task touches).
-	const { officer } = useRoute().params as {
+	// `Officer` (vote-core authority/models.ts) has no name/imageRef; the route
+	// optionally carries the resolved user name. SID = officer.userId.
+	const { officer, userName } = useRoute().params as {
 		officer: Officer & { imageRef?: { url: string } };
+		userName?: string;
 	};
 
-	// D-05: user-facing header label is "Administrator", not "Officer".
-	// D-07: render Accepted-state chip in headerRight. v1.1 mocks-only — render
-	// unconditionally; real status comes from IInvitationEngine in a later phase.
+	// D-05: header label is "Administrator", not "Officer".
 	useLayoutEffect(() => {
-		navigation.setOptions({
-			title: t("administrator"),
-			headerRight: () => (
-				<ChipButton label={t("accepted")} icon="circle-check" onPress={() => {}} />
-			),
-		});
+		navigation.setOptions({ title: t("administrator") });
 	}, [navigation, t]);
 
 	if (!officer) {
 		return null;
 	}
 
-	const officerDetails = [
-		{ label: t("title"), value: officer.title },
-		{ label: t("userId"), value: officer.userId },
-	];
+	const displayName = userName ?? officer.userId;
+	const permissions = officer.scopes
+		.map((scope) => scopeDescriptions[scope] ?? t(`scope_${scope}`))
+		.join(", ");
 
 	return (
-		<ScrollView style={styles.container}>
+		<ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 24 }}>
 			<View style={styles.section}>
-				<View style={styles.imageContainer}>
-					{officer.imageRef && (
-						<Image source={{ uri: officer.imageRef.url }} style={styles.administratorImage} />
-					)}
+				{/* Name / Title / Permissions — inline text block (Figma frame 13) */}
+				<View style={styles.detail}>
+					<ThemedText type="defaultSemiBold">{t("name")}: </ThemedText>
+					<ThemedText>{displayName}</ThemedText>
 				</View>
-				{officerDetails.map((field) => (
-					<View key={field.label} style={styles.field}>
-						<ThemedText type="defaultSemiBold">{field.label}: </ThemedText>
-						<ThemedText>{field.value}</ThemedText>
+				<View style={styles.detail}>
+					<ThemedText type="defaultSemiBold">{t("title")}: </ThemedText>
+					<ThemedText>{officer.title}</ThemedText>
+				</View>
+				<View style={styles.detail}>
+					<ThemedText type="defaultSemiBold">{t("permissions")}: </ThemedText>
+					<ThemedText style={styles.permissions}>{permissions}</ThemedText>
+				</View>
+
+				{/* User card → user profile */}
+				<InfoCard
+					image={officer.imageRef?.url ? { uri: officer.imageRef.url } : undefined}
+					additionalInfo={[
+						{ label: t("user"), value: displayName },
+						{ label: t("sid"), value: officer.userId },
+					]}
+					icon="chevron-right"
+					onPress={() => {}}
+				/>
+			</View>
+
+			{/* Invitation section */}
+			<View style={styles.section}>
+				<ThemedText type="title">{t("invitation")}</ThemedText>
+				<TouchableOpacity style={[styles.invitationCard, { backgroundColor: colors.card }]}>
+					<View style={styles.invitationContent}>
+						<ThemedText type="cardTitle">{displayName}</ThemedText>
+						<ThemedText type="defaultSemiBold" style={{ color: colors.success }}>
+							{t("accepted")}
+						</ThemedText>
 					</View>
-				))}
-				<View style={styles.scopesSection}>
-					<ThemedText type="defaultSemiBold" style={styles.scopesTitle}>
-						{t("scopes")}:
-					</ThemedText>
-					{officer.scopes.map((scope) => (
-						<View key={scope} style={styles.scopeItem}>
-							<ThemedText style={styles.bullet}>•</ThemedText>
-							<ThemedText style={styles.scopeDescription}>
-								{scopeDescriptions[scope] ?? t(`scope_${scope}`)}
-							</ThemedText>
-						</View>
-					))}
-				</View>
+					<FontAwesome6 name="chevron-right" size={18} color={colors.text} />
+				</TouchableOpacity>
 			</View>
 		</ScrollView>
 	);
 }
 
 const localStyles = StyleSheet.create({
-	imageContainer: {
-		position: "relative",
-		width: 200,
-		height: 200,
-		alignSelf: "center",
-		marginVertical: 16,
-	},
-	administratorImage: {
-		width: "100%",
-		height: "100%",
-		borderRadius: 8,
-	},
-	field: {
+	detail: {
 		flexDirection: "row",
+		marginVertical: 1,
 	},
-	scopesSection: {
-		marginTop: 16,
-	},
-	scopesTitle: {
-		marginBottom: 8,
-	},
-	scopeItem: {
-		flexDirection: "row",
-		marginBottom: 4,
-	},
-	bullet: {
-		marginRight: 8,
-	},
-	scopeDescription: {
+	permissions: {
 		flex: 1,
+		flexWrap: "wrap",
+	},
+	invitationCard: {
+		flexDirection: "row",
+		alignItems: "center",
+		justifyContent: "space-between",
+		borderRadius: 16,
+		paddingVertical: 16,
+		paddingHorizontal: 16,
+		marginVertical: 10,
+		marginHorizontal: 4,
+	},
+	invitationContent: {
+		flex: 1,
+		gap: 4,
 	},
 });
 

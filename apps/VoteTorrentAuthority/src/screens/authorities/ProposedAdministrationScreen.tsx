@@ -24,7 +24,7 @@ import { ThemedText } from "../../components/ThemedText";
 import { ChipButton } from "../../components/ChipButton";
 import { CustomButton } from "../../components/CustomButton";
 import { Footer } from "../../components/Footer";
-import { OfficerCard } from "./components/OfficerCard";
+import { InfoCard } from "../../components/InfoCard";
 import { ThresholdPolicyRow } from "./components/ThresholdPolicyRow";
 import { globalStyles } from "../../theme/styles";
 import type { RootStackParamList } from "../../navigation/types";
@@ -208,29 +208,22 @@ export default function ProposedAdministrationScreen() {
 								title: selection.init?.title ?? "",
 								scopes: selection.init?.scopes ?? [],
 							} as Officer);
-						const userName =
-							selection.existing
-								? officerUsers.get(selection.existing.userId)
-										?.name ?? selection.existing.userId
-								: selection.init?.name;
-						const status = selection.existing
-							? {
-									label: t("accepted"),
-									tone: "accepted" as const,
-								}
-							: {
-									label: t("pending"),
-									tone: "pending" as const,
-								};
+						const userName = selection.existing
+							? officerUsers.get(selection.existing.userId)?.name ??
+								selection.existing.userId
+							: selection.init?.name ?? "";
 						const key =
 							selection.existing?.userId ??
 							`init-${selection.init?.name ?? idx}`;
+						// Figma frame 10: compact card (name · role · CID) + chevron → Administrator detail.
 						return (
-							<OfficerCard
+							<InfoCard
 								key={key}
-								officer={officer}
-								userName={userName}
-								status={status}
+								title={userName}
+								subtitle={officer.title}
+								additionalInfo={[{ label: t("cid"), value: officer.userId }]}
+								icon="chevron-right"
+								onPress={() => navigation.navigate("OfficerDetails", { officer, userName })}
 							/>
 						);
 					})}

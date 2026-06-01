@@ -288,6 +288,7 @@ export default function AuthorityDetailsScreen() {
 							onPress={() =>
 								navigation.navigate("OfficerDetails", {
 									officer: officer,
+									userName: user?.name,
 								})
 							}
 						/>

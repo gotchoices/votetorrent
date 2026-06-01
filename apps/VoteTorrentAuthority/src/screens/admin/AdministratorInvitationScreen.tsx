@@ -15,9 +15,11 @@ import { ThemedText } from "../../components/ThemedText";
 import { CustomButton } from "../../components/CustomButton";
 import { CustomTextInput } from "../../components/CustomTextInput";
 import { Footer } from "../../components/Footer";
+import { InfoCard } from "../../components/InfoCard";
 import { SignatureTaskFooter } from "../../components/SignatureTaskFooter";
 import type { RootStackParamList } from "../../navigation/types";
 import { useApp } from "../../providers/AppProvider";
+import { INetworkEngine } from "@votetorrent/vote-core";
 import { globalStyles } from "../../theme/styles";
 
 type AdministratorInvitationParams = {
@@ -39,6 +41,21 @@ export default function AdministratorInvitationScreen() {
 
 	// Accept-mode fetched invite
 	const [invite, setInvite] = useState<InviteStatus<SentOfficerInvite> | undefined>(undefined);
+	const [networkName, setNetworkName] = useState("");
+
+	useEffect(() => {
+		// Network context for the invitation header (best-effort; real engine later).
+		async function loadNetwork() {
+			try {
+				const engine = await getEngine<INetworkEngine>("network");
+				const details = await engine?.getDetails();
+				if (details?.network?.name) setNetworkName(details.network.name);
+			} catch (error) {
+				console.error("Error loading network for invitation:", error);
+			}
+		}
+		loadNetwork();
+	}, [getEngine]);
 
 	useLayoutEffect(() => {
 		navigation.setOptions({
@@ -112,17 +129,23 @@ export default function AdministratorInvitationScreen() {
 		);
 	}
 
-	// Accept mode
+	// Accept mode (Figma frame 32)
 	const seedInvite = invite?.invite;
+	const permissions = (seedInvite?.scopes ?? [])
+		.map((scope: Scope) => scopeDescriptions[scope] ?? t(`scope_${scope}`))
+		.join(", ");
 	return (
 		<View style={styles.content}>
-			<ScrollView style={styles.container}>
+			<ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 24 }}>
 				<View style={styles.section}>
-					<ThemedText type="title" style={styles.sectionTitle}>
-						{t("administratorInvitation")}
-					</ThemedText>
 					{seedInvite ? (
 						<>
+							{networkName ? (
+								<View style={styles.detailRow}>
+									<ThemedText type="defaultSemiBold">{t("network")}: </ThemedText>
+									<ThemedText>{networkName}</ThemedText>
+								</View>
+							) : null}
 							<View style={styles.detailRow}>
 								<ThemedText type="defaultSemiBold">{t("name")}: </ThemedText>
 								<ThemedText>{seedInvite.name}</ThemedText>
@@ -131,19 +154,38 @@ export default function AdministratorInvitationScreen() {
 								<ThemedText type="defaultSemiBold">{t("title")}: </ThemedText>
 								<ThemedText>{seedInvite.title}</ThemedText>
 							</View>
-							<View style={styles.scopesSection}>
-								<ThemedText type="defaultSemiBold" style={styles.scopesTitle}>
-									{t("scopes")}:
-								</ThemedText>
-								{seedInvite.scopes.map((scope: Scope) => (
-									<View key={scope} style={styles.scopeItem}>
-										<ThemedText style={styles.bullet}>•</ThemedText>
-										<ThemedText style={styles.scopeDescription}>
-											{scopeDescriptions[scope] ?? t(`scope_${scope}`)}
-										</ThemedText>
-									</View>
-								))}
+							<View style={styles.detailRow}>
+								<ThemedText type="defaultSemiBold">{t("permissions")}: </ThemedText>
+								<ThemedText style={styles.permissionsText}>{permissions}</ThemedText>
 							</View>
+
+							{/* Create a new user, OR sign with the existing profile (Figma frame 32) */}
+							<CustomButton
+								title={t("createUser")}
+								icon="circle-plus"
+								backgroundColor={colors.accent}
+								size="thin"
+								onPress={() => {}}
+							/>
+							<ThemedText type="defaultSemiBold" style={styles.orText}>
+								{t("or")}
+							</ThemedText>
+							<InfoCard
+								additionalInfo={[
+									{ label: t("user"), value: seedInvite.name },
+									{ label: t("sid"), value: (seedInvite as any).userId },
+								]}
+								icon="chevron-right"
+								onPress={() => {}}
+							/>
+							<CustomButton
+								title={t("sign")}
+								icon="signature"
+								backgroundColor={colors.important}
+								forceDarkText={true}
+								size="thin"
+								onPress={() => {}}
+							/>
 						</>
 					) : (
 						<ThemedText>{t("loading")}</ThemedText>
@@ -154,7 +196,7 @@ export default function AdministratorInvitationScreen() {
 				onAccept={onAccept}
 				onReject={onDecline}
 				acceptLabel={t("accept")}
-				rejectLabel={t("decline")}
+				rejectLabel={t("reject")}
 			/>
 		</View>
 	);
@@ -164,6 +206,14 @@ const localStyles = StyleSheet.create({
 	detailRow: {
 		flexDirection: "row",
 		marginBottom: 8,
+	},
+	permissionsText: {
+		flex: 1,
+		flexWrap: "wrap",
+	},
+	orText: {
+		textAlign: "center",
+		marginVertical: 8,
 	},
 	scopesSection: {
 		marginTop: 16,
