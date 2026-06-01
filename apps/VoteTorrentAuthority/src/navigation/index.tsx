@@ -21,7 +21,6 @@ import NetworksScreen from "../screens/networks/NetworksScreen";
 import type { NavigationProp } from "./types";
 import AddNetworkScreen from "../screens/networks/AddNetworkScreen";
 import HostingScreen from "../screens/networks/HostingScreen";
-import ReplaceAdminScreen from "../screens/admin/ReplaceAdminScreen";
 import { useApp } from "../providers/AppProvider";
 import EditOfficerScreen from "../screens/admin/EditOfficerScreen";
 import { ThemedText } from "../components/ThemedText";
@@ -300,11 +299,6 @@ export const RootNavigator = () => {
 				name="AuthorityInvitation"
 				component={AuthorityInvitationScreen}
 				options={{ title: t("authorityInvitation") }}
-			/>
-			<Stack.Screen
-				name="ReplaceAdmin"
-				component={ReplaceAdminScreen}
-				options={{ title: t("proposeReplacement") }}
 			/>
 			<Stack.Screen
 				name="EditOfficer"

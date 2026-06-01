@@ -304,8 +304,8 @@ export default function AuthorityDetailsScreen() {
 						icon="pencil"
 						size="thin"
 						onPress={() =>
-							navigation.navigate("ReplaceAdmin", {
-								authority: authority,
+							navigation.navigate("ProposedAdministration", {
+								authorityId: authority.id,
 							})
 						}
 					/>

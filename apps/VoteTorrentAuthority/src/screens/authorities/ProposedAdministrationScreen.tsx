@@ -172,12 +172,11 @@ export default function ProposedAdministrationScreen() {
 	};
 
 	const handleAddAdministrator = () => {
-		console.log("addAdministrator stub");
 		if (!authority) return;
-		navigation.navigate("AdministratorInvitation", {
-			mode: "send",
-			authority,
-		});
+		// Frame 12 (EditOfficer) is the canonical administrator editor — it captures
+		// name + title + permissions, unlike the invitation send-form (name/title
+		// only). Adding a new administrator opens it with no officerId.
+		navigation.navigate("EditOfficer", { authority });
 	};
 
 	if (isLoading) {

@@ -3,7 +3,6 @@ import React, { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ScrollView, StyleSheet, View, Switch } from "react-native";
 import { ThemedText } from "../../components/ThemedText";
-import { ChipButton } from "../../components/ChipButton";
 import { CustomButton } from "../../components/CustomButton";
 import { Footer } from "../../components/Footer";
 import type { Authority, Officer, Scope } from "@votetorrent/vote-core";
@@ -61,31 +60,6 @@ export default function EditOfficerScreen() {
 		loadOfficer();
 	}, [networkEngine, authority.id, officerId]);
 
-	useEffect(() => {
-		navigation.setOptions({
-			headerRight: () => (
-				<ChipButton
-					label={t("remove")}
-					icon="trash"
-					onPress={() => {
-						// If we're editing an existing officer, pass back the remove flag
-						if (officer) {
-							// Set the params on the previous screen and go back
-							navigation.popTo("ReplaceAdmin", {
-								authority,
-								officer,
-								removeOfficer: true,
-							});
-						} else {
-							// For new officers, just go back without any changes
-							navigation.goBack();
-						}
-					}}
-				/>
-			),
-		});
-	}, [navigation, t, officer, authority]);
-
 	const handleScopeToggle = (scope: Scope) => {
 		setScopes((prev) => {
 			if (prev.includes(scope)) {
@@ -96,19 +70,17 @@ export default function EditOfficerScreen() {
 		});
 	};
 
-	const handleAddOfficer = async () => {
-		try {
-			const newOfficer: Officer = {
-				userId: officer?.userId || `admin-${Date.now()}`,
-				title,
-				scopes,
-			};
-
-			// Pass the officer back to ReplaceAdminScreen
-			navigation.popTo("ReplaceAdmin", { authority, officer: newOfficer });
-		} catch (error) {
-			console.error("Error adding officer:", error);
-		}
+	const handleSave = () => {
+		// UI-only stub: persisting the administrator (name/title/permissions) to the
+		// proposed administration lands when the engine API is extended. Mirror the
+		// ProposedAdministration propose/add stubs and return to the list.
+		console.log("editOfficer-save stub", {
+			officerId: officer?.userId,
+			name,
+			title,
+			scopes,
+		});
+		navigation.goBack();
 	};
 
 	return (
@@ -164,7 +136,7 @@ export default function EditOfficerScreen() {
 					disabled={!name || !title}
 					backgroundColor={colors.success}
 					forceDarkText={true}
-					onPress={handleAddOfficer}
+					onPress={handleSave}
 				/>
 			</Footer>
 		</View>
