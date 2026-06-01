@@ -1,6 +1,6 @@
 import { Database, MisuseError, QuereusError } from '@quereus/quereus';
 import { NetworkEngine } from '../network/network-engine.js';
-import { H16 } from '../utils.js';
+import { H16, nowCanonicalDatetime, toCanonicalDatetime } from '../utils.js';
 import type { EngineContext } from '../types.js';
 import type {
 	LocalStorage,
@@ -9,10 +9,26 @@ import type {
 	NetworkReference,
 	User,
 } from '@votetorrent/vote-core';
-import type { INetworksEngine } from '@votetorrent/vote-core';
+import type {
+	INetworksEngine,
+	INetworksCreateBuilder,
+} from '@votetorrent/vote-core';
 import { prepareDb } from '../database/initialize.js';
+import { NetworksCreateBuilder } from './builders/index.js';
+
+// Plan 03-05 Q1 — monotonic counter for Tid generation. Same Tid bound across
+// every INSERT in a single create() batch (matches the schema's "one logical
+// transaction = one Tid" framing). Re-evaluate at v2 persistence milestone
+// (PERSIST-01): a process-local counter that resets to 1 on restart can
+// collide with stored Tids once DBs persist across runs.
+let nextTid = 1;
 
 export class NetworksEngine implements INetworksEngine {
+	// D-07: per-instance hash→EngineContext cache.
+	// Lifetime is bound to this NetworksEngine instance (AppProvider owns one).
+	// D-11: no eviction in v1.0 — revisit at the v2 persistence milestone.
+	private readonly contexts = new Map<string, EngineContext>();
+
 	constructor(private readonly localStorage: LocalStorage) {}
 
 	async clearRecentNetworks(): Promise<void> {
@@ -63,9 +79,101 @@ export class NetworksEngine implements INetworksEngine {
 			throw new Error('Failed to create network: User key is required');
 		}
 
+		// Plan 03-05 Q1: one Tid per create() batch.
+		const tid = nextTid++;
+
+		const params = {
+			networkId,
+			networkHash,
+			networkName: networkInit.name,
+			networkImageRef: networkImageRefJson,
+			relays: relaysJson,
+			timestampAuthorities: tsaJson,
+			numberRequiredTSAs,
+			electionType: electionType.toString(),
+			primaryAuthorityId,
+			primaryAuthorityName: networkInit.primaryAuthority.name,
+			primaryAuthorityDomainName: networkInit.primaryAuthority.domainName,
+			primaryAuthorityImageRef: primaryAuthorityImageRefJson,
+			adminEffectiveAt: toCanonicalDatetime(networkInit.admin.effectiveAt),
+			thresholdPolicies,
+			userId: user.id,
+			title: officerInit.title,
+			scopes: officerScopesJson,
+			userName: user.name,
+			userImageRef: userImageRefJson,
+			keyType: 'user',
+			keyValue: firstKey.key,
+			expiration: toCanonicalDatetime(firstKey.expiration),
+			now: nowCanonicalDatetime(),
+		};
+
 		try {
-			// TODO add context ( Tid )
-			await ctx.db.eval(
+			// Phase 12.2 split-batch fix: split the six INSERTs into three
+			// sequential exec() calls so that Admin is committed before
+			// Officer (Officer.AdminValid CHECK requires Admin to exist).
+			// Defensive against future quereus versions that may evaluate
+			// CHECKs eagerly per-INSERT rather than deferring to batch end.
+			//
+			// 1. User + UserKey + Authority + Admin (no cross-table forward deps)
+			// 2. Officer (depends on Admin existing)
+			// 3. Network (depends on Authority existing, committed in batch 1)
+
+			await ctx.db.exec(
+				`
+				insert into User (
+					Id,
+					Name,
+					ImageRef
+				)
+				with context SigningNonce = null, InviteSlotCid = null, InviteSignature = null, Tid = ${tid}
+				values (:userId, :userName, :userImageRef);
+
+				insert into UserKey (
+					UserId,
+					Type,
+					PubKey,
+					Expiration
+				)
+				with context UserKey = null, Signature = null, Tid = ${tid}, now = :now, IsSignatureValid = true
+				values (:userId, :keyType, :keyValue, :expiration);
+
+				insert into Authority (
+					Id,
+					Name,
+					DomainName,
+					ImageRef
+				)
+				with context SigningNonce = null, InviteSlotCid = null, InviteSignature = null, Tid = ${tid}
+				values (:primaryAuthorityId, :primaryAuthorityName, :primaryAuthorityDomainName, :primaryAuthorityImageRef);
+
+				insert into Admin (
+					AuthorityId,
+					EffectiveAt,
+					ThresholdPolicies
+				)
+				with context SigningNonce = null, InviteSlotCid = null, InviteSignature = null, Tid = ${tid}
+				values (:primaryAuthorityId, :adminEffectiveAt, :thresholdPolicies);
+				`,
+				params,
+			);
+
+			await ctx.db.exec(
+				`
+				insert into Officer (
+					AuthorityId,
+					AdminEffectiveAt,
+					UserId,
+					Title,
+					Scopes
+				)
+				with context SigningNonce = null, InviteSlotCid = null, InviteSignature = null, Tid = ${tid}
+				values (:primaryAuthorityId, :adminEffectiveAt, :userId, :title, :scopes);
+				`,
+				params,
+			);
+
+			await ctx.db.exec(
 				`
 				insert into Network (
 					Id,
@@ -78,7 +186,7 @@ export class NetworksEngine implements INetworksEngine {
 					NumberRequiredTSAs,
 					ElectionType
 				)
-				with context Tid = TransactionId()
+				with context SigningNonce = null, Tid = ${tid}
 				values (
 					:networkId,
 					:networkHash,
@@ -89,72 +197,9 @@ export class NetworksEngine implements INetworksEngine {
 					:timestampAuthorities,
 					:numberRequiredTSAs,
 					:electionType
-				)
-
-				insert into Authority (
-					Id,
-					Name,
-					DomainName,
-					ImageRef
-				)
-				values (:primaryAuthorityId, :primaryAuthorityName, :primaryAuthorityDomainName, :primaryAuthorityImageRef)
-
-				insert into Admin (
-					AuthorityId,
-					EffectiveAt,
-					ThresholdPolicies
-				)
-				values (:primaryAuthorityId, :adminEffectiveAt, :thresholdPolicies)
-
-				insert into Officer (
-					AuthorityId,
-					AdminEffectiveAt,
-					UserId,
-					Title,
-					Scopes
-				)
-				values (:primaryAuthorityId, :adminEffectiveAt, :userId, :title, :scopes)
-
-				insert into User (
-					Id,
-					Name,
-					ImageRef
-				)
-				values (:userId, :userName, :userImageRef)
-
-				insert into UserKey (
-					UserId,
-					Type,
-					Key,
-					Expiration
-				)
-				with context now = datetime('now')
-				values (:userId, :keyType, :keyValue, :expiration)
+				);
 				`,
-				{
-					networkId,
-					networkHash,
-					networkName: networkInit.name,
-					networkImageRef: networkImageRefJson,
-					relays: relaysJson,
-					timestampAuthorities: tsaJson,
-					numberRequiredTSAs,
-					electionType: electionType.toString(),
-					primaryAuthorityId,
-					primaryAuthorityName: networkInit.primaryAuthority.name,
-					primaryAuthorityDomainName: networkInit.primaryAuthority.domainName,
-					primaryAuthorityImageRef: primaryAuthorityImageRefJson,
-					adminEffectiveAt: networkInit.admin.effectiveAt,
-					thresholdPolicies,
-					userId: user.id,
-					title: officerInit.title,
-					scopes: officerScopesJson,
-					userName: user.name,
-					userImageRef: userImageRefJson,
-					keyType: 'user',
-					keyValue: firstKey.key,
-					expiration: firstKey.expiration,
-				},
+				params,
 			);
 		} catch (err) {
 			if (err instanceof QuereusError) {
@@ -165,6 +210,11 @@ export class NetworksEngine implements INetworksEngine {
 				throw new Error(`Unknown error: ${err}`);
 			}
 		}
+
+		// D-08: cache the freshly-built EngineContext so subsequent open()
+		// calls return a NetworkEngine bound to the same in-memory Database
+		// (the only place Database instances are constructed in production).
+		this.contexts.set(networkHash, ctx);
 
 		// Update recent networks list
 		const networkRef: NetworkReference = {
@@ -193,7 +243,17 @@ export class NetworksEngine implements INetworksEngine {
 		user: User | undefined,
 		storeAsRecent: boolean = true,
 	): Promise<INetworkEngine> {
-		const ctx = await this.createContext(user);
+		// D-09/D-10: open() reads from the per-instance cache. The cached
+		// EngineContext.db is shared verbatim; the caller-supplied `user`
+		// is injected into a fresh wrapper without mutating the cached ctx
+		// (Claude's-discretion bullet on cache-context user field).
+		const cached = this.contexts.get(ref.hash);
+		if (!cached) {
+			throw new Error(
+				'Network not opened in this session — use create() first',
+			);
+		}
+		const ctx: EngineContext = { ...cached, user };
 		const qNetworkEngine = new NetworkEngine(ref, this.localStorage, ctx);
 		if (storeAsRecent) {
 			const recentNetworks: NetworkReference[] =
@@ -208,6 +268,10 @@ export class NetworksEngine implements INetworksEngine {
 			}
 		}
 		return qNetworkEngine;
+	}
+
+	buildCreate(): INetworksCreateBuilder {
+		return new NetworksCreateBuilder(this);
 	}
 
 	private async createContext(user: User | undefined): Promise<EngineContext> {

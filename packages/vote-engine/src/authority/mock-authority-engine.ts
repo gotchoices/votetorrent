@@ -9,15 +9,27 @@ import type {
   AuthorityDetails,
   AuthorityInit,
   AuthorityInvite,
+  AuthorityInviteShare,
   IAuthorityEngine,
+  IAuthorityCreateOfficerInviteBuilder,
+  IAuthorityCreateAuthorityInviteBuilder,
+  IAuthorityProposeAdminBuilder,
+  IAuthoritySaveInviteWithSigningBuilder,
   InviteStatus,
   OfficerInit,
   OfficerInvite,
+  OfficerInviteShare,
   Proposal,
   Scope,
   SentAuthorityInvite,
   Signature
 } from '@votetorrent/vote-core'
+import {
+  AuthorityCreateOfficerInviteBuilder,
+  AuthorityCreateAuthorityInviteBuilder,
+  AuthorityProposeAdminBuilder,
+  AuthoritySaveInviteWithSigningBuilder
+} from './builders/index.js'
 
 // Local mock data definitions (MOCK_ADMINISTRATORS, MOCK_THRESHOLD_POLICIES, etc.) are removed.
 
@@ -55,11 +67,11 @@ export class MockAuthorityEngine implements IAuthorityEngine {
       : undefined
   }
 
-  createOfficerInvite (init: OfficerInit): OfficerInvite {
+  createOfficerInvite (init: OfficerInit): OfficerInviteShare {
     throw new Error('Method not implemented.')
   }
 
-  createAuthorityInvite (name: string): AuthorityInvite {
+  createAuthorityInvite (name: string): AuthorityInviteShare {
     throw new Error('Method not implemented.')
   }
 
@@ -86,11 +98,29 @@ export class MockAuthorityEngine implements IAuthorityEngine {
     }
   }
 
-  async proposeAdmin (adminProposal: Proposal<AdminInit>): Promise<void> {
+  async proposeAdmin (adminProposal: Proposal<AdminInit>, _signature: Signature): Promise<void> {
     // Update the instance's proposed administration directly
     this.proposedAdmin = JSON.parse(JSON.stringify(adminProposal))
     console.log(
 			`MockAuthorityEngine: Admin proposed for ${this.authority.name}.`
     )
+  }
+
+  // ---- builder factories (BUILD-AUTH-01 / FACT-04) ----
+
+  buildCreateOfficerInvite (): IAuthorityCreateOfficerInviteBuilder {
+    return new AuthorityCreateOfficerInviteBuilder(this)
+  }
+
+  buildCreateAuthorityInvite (): IAuthorityCreateAuthorityInviteBuilder {
+    return new AuthorityCreateAuthorityInviteBuilder(this)
+  }
+
+  buildProposeAdmin (): IAuthorityProposeAdminBuilder {
+    return new AuthorityProposeAdminBuilder(this)
+  }
+
+  buildSaveInviteWithSigning (): IAuthoritySaveInviteWithSigningBuilder {
+    return new AuthoritySaveInviteWithSigningBuilder(this)
   }
 }

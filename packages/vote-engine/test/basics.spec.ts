@@ -48,8 +48,7 @@ describe('Basics', () => {
     expect(result?.ShouldHaveDefault as string).to.equal('default')
 
     await db.exec(`
-			update Test set ShouldBeNumberLargerThanZero = 2 where Id = '1234567890'
-			with context ShouldBe8 = 8;
+			update Test with context ShouldBe8 = 8 set ShouldBeNumberLargerThanZero = 2 where Id = '1234567890';
 		`)
 
     const result2 = await db

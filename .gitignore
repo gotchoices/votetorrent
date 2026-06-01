@@ -88,6 +88,11 @@ dist
 out
 
 .planning
+.planning/*
+
+.claude
+
+.planning
 
 .claude
 # Android bugreport dumps (timestamped, never commit)
