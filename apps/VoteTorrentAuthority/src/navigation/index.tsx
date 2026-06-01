@@ -114,7 +114,10 @@ function useTabHeaderOptions(tab?: string) {
 			</Pressable>
 		),
 		headerRight: () => (
-			<Pressable style={styles.headerButton}>
+			<Pressable
+				style={styles.headerButton}
+				onPress={() => navigation.navigate("Home", { screen: "Settings" })}
+			>
 				<FontAwesome6 name="circle-user" size={24} color={colors.text} />
 			</Pressable>
 		),

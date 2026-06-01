@@ -5,11 +5,10 @@ import { ExtendedTheme, useTheme } from "@react-navigation/native";
 import { InfoCard } from "../../components/InfoCard";
 import { CollapsibleSection } from "../../components/CollapsibleSection";
 import { ThemedText } from "../../components/ThemedText";
-import React, { useEffect, useLayoutEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import { useNavigation, useFocusEffect } from "@react-navigation/native";
 import type { NavigationProp } from "../../navigation/types";
 import type { Authority, INetworkEngine } from "@votetorrent/vote-core";
-import { ChipButton } from "../../components/ChipButton";
 import { NoNetwork } from "../../components/NoNetwork";
 import { useApp } from "../../providers/AppProvider";
 import { globalStyles } from "../../theme/styles";
@@ -59,22 +58,10 @@ export default function AuthoritiesScreen() {
 		initializeNetworkEngine();
 	}, [hasNetwork, getEngine]);
 
-	// Header "+ Add Authority" chip → AuthorityInvitation(send).
-	// Sibling effect (do NOT merge with network-engine init above —
-	// see 08-07-PLAN Task 2). Closes UAT test 8 (send-mode entry).
-	useLayoutEffect(() => {
-		navigation.setOptions({
-			headerRight: () => (
-				<ChipButton
-					label=""
-					icon="circle-plus"
-					onPress={() =>
-						navigation.navigate("AuthorityInvitation", { mode: "send" })
-					}
-				/>
-			),
-		});
-	}, [navigation, t]);
+	// Header right intentionally NOT overridden — the Authorities tab inherits
+	// the global circle-user account avatar from useTabHeaderOptions() to match
+	// the Figma header. AuthorityInvitation(send) remains reachable via the
+	// ScreenScaffoldsDebug dev route (authorityInvitationSend).
 
 	useFocusEffect(
 		useCallback(() => {

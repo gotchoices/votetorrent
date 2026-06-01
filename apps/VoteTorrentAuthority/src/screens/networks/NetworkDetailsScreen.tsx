@@ -186,7 +186,16 @@ export function NetworkDetailsScreen() {
 
 			{networkDetails?.proposed && primaryAuthorityAdmin && (
 				<View style={styles.section}>
-					<AuthorizationSection admin={primaryAuthorityAdmin} />
+					<AuthorizationSection
+						admin={primaryAuthorityAdmin}
+						onAdjustProposal={() => {
+							if (networkDetails) {
+								navigation.navigate("NetworkRevision", {
+									networkId: networkDetails.network.id,
+								});
+							}
+						}}
+					/>
 				</View>
 			)}
 		</ScrollView>
