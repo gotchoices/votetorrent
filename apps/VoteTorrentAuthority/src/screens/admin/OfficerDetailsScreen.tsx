@@ -90,14 +90,13 @@ const localStyles = StyleSheet.create({
 		flexWrap: "wrap",
 	},
 	invitationCard: {
+		// Match the InfoCard surface above (shadow/elevation) so the invitation
+		// reads as a card per Figma frame 13 — the bare backgroundColor was
+		// invisible against the light screen background.
+		...globalStyles.cardSurface,
 		flexDirection: "row",
 		alignItems: "center",
 		justifyContent: "space-between",
-		borderRadius: 16,
-		paddingVertical: 16,
-		paddingHorizontal: 16,
-		marginVertical: 10,
-		marginHorizontal: 4,
 	},
 	invitationContent: {
 		flex: 1,
