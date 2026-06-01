@@ -9,6 +9,7 @@ import type {
 	SentAuthorityInvite,
 } from "@votetorrent/vote-core";
 import { ThemedText } from "../../components/ThemedText";
+import { ChipButton } from "../../components/ChipButton";
 import { CustomButton } from "../../components/CustomButton";
 import { CustomTextInput } from "../../components/CustomTextInput";
 import { Footer } from "../../components/Footer";
@@ -208,11 +209,10 @@ export default function AuthorityInvitationScreen() {
 
 					{/* Create a new user, OR sign with the existing profile (Figma frame 34) */}
 					<ThemedText style={styles.note}>{t("soleInitialAdministratorNote")}</ThemedText>
-					<CustomButton
-						title={t("createUser")}
+					<ChipButton
+						label={t("createUser")}
 						icon="circle-plus"
-						backgroundColor={colors.accent}
-						size="thin"
+						fullWidth
 						onPress={() => {}}
 					/>
 					<ThemedText type="defaultSemiBold" style={styles.orText}>

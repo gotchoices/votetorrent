@@ -279,12 +279,15 @@ export default function AuthorityDetailsScreen() {
 
 				{officers.map((officer) => {
 					const user = officerUsers.get(officer.userId);
+					// Figma frame 7: compact card (image · name · role · CID) + chevron.
 					return (
-						<OfficerCard
+						<InfoCard
 							key={officer.userId}
-							officer={officer}
-							userName={user?.name || officer.userId}
-							image={user?.image?.url ? { uri: user.image.url } : undefined}
+							image={(user as any)?.image?.url ? { uri: (user as any).image.url } : undefined}
+							title={user?.name || officer.userId}
+							subtitle={officer.title}
+							additionalInfo={[{ label: t("cid"), value: officer.userId }]}
+							icon="chevron-right"
 							onPress={() =>
 								navigation.navigate("OfficerDetails", {
 									officer: officer,
