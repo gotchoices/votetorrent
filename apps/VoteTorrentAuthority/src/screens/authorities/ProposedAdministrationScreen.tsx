@@ -222,7 +222,10 @@ export default function ProposedAdministrationScreen() {
 								subtitle={officer.title}
 								additionalInfo={[{ label: t("cid"), value: officer.userId }]}
 								icon="chevron-right"
-								onPress={() => navigation.navigate("OfficerDetails", { officer, userName })}
+								onPress={() =>
+									authority &&
+									navigation.navigate("OfficerDetails", { officer, userName, authority })
+								}
 							/>
 						);
 					})}

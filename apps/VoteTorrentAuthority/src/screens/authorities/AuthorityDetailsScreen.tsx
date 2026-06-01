@@ -292,6 +292,7 @@ export default function AuthorityDetailsScreen() {
 								navigation.navigate("OfficerDetails", {
 									officer: officer,
 									userName: user?.name,
+									authority: authority,
 								})
 							}
 						/>

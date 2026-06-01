@@ -3,21 +3,45 @@ import { useTranslation } from "react-i18next";
 import { ScrollView, StyleSheet, TouchableOpacity, View } from "react-native";
 import FontAwesome6 from "react-native-vector-icons/FontAwesome6";
 import { ExtendedTheme, useNavigation, useRoute, useTheme } from "@react-navigation/native";
-import type { Officer } from "@votetorrent/vote-core";
+import type { Authority, INetworkEngine, Officer } from "@votetorrent/vote-core";
 import { scopeDescriptions } from "@votetorrent/vote-core";
 import { ThemedText } from "../../components/ThemedText";
 import { InfoCard } from "../../components/InfoCard";
+import { useApp } from "../../providers/AppProvider";
+import type { NavigationProp } from "../../navigation/types";
 import { globalStyles } from "../../theme/styles";
 
 export default function OfficerDetailsScreen() {
 	const { t } = useTranslation();
 	const { colors } = useTheme() as ExtendedTheme;
-	const navigation = useNavigation();
+	const navigation = useNavigation<NavigationProp>();
+	const { getEngine } = useApp();
 	// `Officer` (vote-core authority/models.ts) has no name/imageRef; the route
 	// optionally carries the resolved user name. SID = officer.userId.
-	const { officer, userName } = useRoute().params as {
+	const { officer, userName, authority } = useRoute().params as {
 		officer: Officer & { imageRef?: { url: string } };
 		userName?: string;
+		authority: Authority;
+	};
+
+	// User/SID card → the user's profile (Figma frames: User detail). Resolve the
+	// user + its engine from the network engine, then hand both to UserDetails.
+	const handleOpenUser = async () => {
+		try {
+			const networkEngine = await getEngine<INetworkEngine>("network");
+			const userEngine = await networkEngine?.getUser(officer.userId);
+			const user = await userEngine?.getSummary();
+			if (userEngine && user) {
+				navigation.navigate("UserDetails", { user, userEngine });
+			}
+		} catch (error) {
+			console.error("Error opening user from officer detail:", error);
+		}
+	};
+
+	// Invitation card → the Administrator editor (Figma frame 12 / EditOfficer).
+	const handleOpenInvitation = () => {
+		navigation.navigate("EditOfficer", { authority, officerId: officer.userId });
 	};
 
 	// D-05: header label is "Administrator", not "Officer".
@@ -59,14 +83,17 @@ export default function OfficerDetailsScreen() {
 						{ label: t("sid"), value: officer.userId },
 					]}
 					icon="chevron-right"
-					onPress={() => {}}
+					onPress={handleOpenUser}
 				/>
 			</View>
 
 			{/* Invitation section */}
 			<View style={styles.section}>
 				<ThemedText type="title">{t("invitation")}</ThemedText>
-				<TouchableOpacity style={[styles.invitationCard, { backgroundColor: colors.card }]}>
+				<TouchableOpacity
+						style={[styles.invitationCard, { backgroundColor: colors.card }]}
+						onPress={handleOpenInvitation}
+					>
 					<View style={styles.invitationContent}>
 						<ThemedText type="cardTitle">{displayName}</ThemedText>
 						<ThemedText type="defaultSemiBold" style={{ color: colors.success }}>
