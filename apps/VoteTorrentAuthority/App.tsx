@@ -1,7 +1,6 @@
 import React, { useEffect } from 'react';
 import {NavigationContainer} from '@react-navigation/native';
 import {SafeAreaProvider} from 'react-native-safe-area-context';
-import './src/i18n';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import i18n from './src/i18n';
 import {RootNavigator} from './src/navigation';

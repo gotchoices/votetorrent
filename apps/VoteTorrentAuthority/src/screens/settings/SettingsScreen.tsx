@@ -47,6 +47,14 @@ export default function SettingsScreen() {
 		setCurrentLang(lang);
 	};
 
+	// HI-01 — keep currentLang in sync when language changes elsewhere
+	// (e.g. App.tsx boot restore fires i18n.changeLanguage before this mounts)
+	useEffect(() => {
+		const handler = (lang: string) => setCurrentLang(lang as 'en' | 'es');
+		i18n.on('languageChanged', handler);
+		return () => i18n.off('languageChanged', handler);
+	}, []);
+
 	useEffect(() => {
 		const loadBaseEngines = async () => {
 			if (defaultUserEngine && networkEngine) {
@@ -186,7 +194,7 @@ export default function SettingsScreen() {
 									<TouchableOpacity
 										key={lang.code}
 										style={[styles.langDropdownItem, currentLang === lang.code && { backgroundColor: colors.primary + '33' }]}
-										onPress={() => { handleLanguageChange(lang.code); setShowLangModal(false); }}
+										onPress={() => { handleLanguageChange(lang.code).then(() => setShowLangModal(false)); }}
 									>
 										<ThemedText type={currentLang === lang.code ? 'defaultSemiBold' : 'default'}>
 											{lang.label}
