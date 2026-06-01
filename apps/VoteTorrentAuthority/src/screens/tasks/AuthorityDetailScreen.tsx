@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { globalStyles } from "../../theme/styles";
 import { ThemedText } from "../../components/ThemedText";
 import { CustomButton } from "../../components/CustomButton";
+import { Footer } from "../../components/Footer";
 
 export default function AuthorityDetailScreen() {
 	const { t } = useTranslation();
@@ -35,9 +36,7 @@ export default function AuthorityDetailScreen() {
 					<ThemedText type="default">{t("authorityDetailBodySecondary")}</ThemedText>
 				</View>
 			</ScrollView>
-			<View
-				style={[styles.footer, styles.footerButtonsContainer, { backgroundColor: colors.card }]}
-			>
+			<Footer row>
 				<CustomButton
 					title={t("authorityDetailResend")}
 					backgroundColor={colors.accent}
@@ -52,7 +51,7 @@ export default function AuthorityDetailScreen() {
 					flex={true}
 					onPress={onCancelInvitation}
 				/>
-			</View>
+			</Footer>
 		</View>
 	);
 }

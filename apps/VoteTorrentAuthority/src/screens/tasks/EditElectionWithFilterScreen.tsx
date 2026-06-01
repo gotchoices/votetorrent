@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { globalStyles } from "../../theme/styles";
 import { ThemedText } from "../../components/ThemedText";
 import { CustomButton } from "../../components/CustomButton";
+import { Footer } from "../../components/Footer";
 
 export default function EditElectionWithFilterScreen() {
 	const { t } = useTranslation();
@@ -27,14 +28,14 @@ export default function EditElectionWithFilterScreen() {
 					<ThemedText type="default">{t("editElectionWithFilterBodyPrimary")}</ThemedText>
 				</View>
 			</ScrollView>
-			<View style={[styles.footer, { backgroundColor: colors.card }]}>
+			<Footer>
 				<CustomButton
 					title={t("editElectionWithFilterGotIt")}
 					backgroundColor={colors.success}
 					size="thin"
 					onPress={onGotIt}
 				/>
-			</View>
+			</Footer>
 		</View>
 	);
 }

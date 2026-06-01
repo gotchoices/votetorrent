@@ -23,6 +23,7 @@ import { useApp } from "../../providers/AppProvider";
 import { ThemedText } from "../../components/ThemedText";
 import { ChipButton } from "../../components/ChipButton";
 import { CustomButton } from "../../components/CustomButton";
+import { Footer } from "../../components/Footer";
 import { OfficerCard } from "./components/OfficerCard";
 import { ThresholdPolicyRow } from "./components/ThresholdPolicyRow";
 import { globalStyles } from "../../theme/styles";
@@ -270,7 +271,7 @@ export default function ProposedAdministrationScreen() {
 			</ScrollView>
 
 			{/* PROPOSE footer — stub per D-04 */}
-			<View style={[styles.footer, { backgroundColor: colors.card }]}>
+			<Footer>
 				<CustomButton
 					title={t("propose")}
 					icon="floppy-disk"
@@ -278,7 +279,7 @@ export default function ProposedAdministrationScreen() {
 					forceDarkText={true}
 					onPress={handlePropose}
 				/>
-			</View>
+			</Footer>
 		</View>
 	);
 }

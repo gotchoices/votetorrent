@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { ScrollView, StyleSheet, View } from "react-native";
 import { ThemedText } from "../../components/ThemedText";
 import { CustomButton } from "../../components/CustomButton";
+import { Footer } from "../../components/Footer";
 import { globalStyles } from "../../theme/styles";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RouteProp } from "@react-navigation/native";
@@ -160,12 +161,7 @@ export default function EditElectionScreen() {
 			</ScrollView>
 
 			{/* ── PROPOSE footer ────────────────────────────────────────────────── */}
-			<View
-				style={[
-					styles.footer,
-					{ backgroundColor: colors.card, paddingBottom: insets.bottom + 16 },
-				]}
-			>
+			<Footer>
 				<CustomButton
 					title={t("propose")}
 					icon="floppy-disk"
@@ -173,7 +169,7 @@ export default function EditElectionScreen() {
 					backgroundColor={colors.success}
 					forceDarkText={true}
 				/>
-			</View>
+			</Footer>
 		</View>
 	);
 }

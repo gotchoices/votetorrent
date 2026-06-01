@@ -1,6 +1,5 @@
 import { ScrollView, StyleSheet, View } from "react-native";
 import { globalStyles } from "../../theme/styles";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTheme, useRoute, useNavigation, StackActions } from "@react-navigation/native";
 import type { ExtendedTheme, RouteProp } from "@react-navigation/native";
 import { useTranslation } from "react-i18next";
@@ -12,6 +11,7 @@ import QuestionTypeSelector from "./components/QuestionTypeSelector";
 import { Stepper } from "../../components/Stepper";
 import { ToggleRow } from "../../components/ToggleRow";
 import { CustomButton } from "../../components/CustomButton";
+import { Footer } from "../../components/Footer";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../../navigation/types";
 import { useBallotDraft } from "./providers/BallotDraftProvider";
@@ -39,7 +39,6 @@ export function EditQuestionScreen() {
 	const { t } = useTranslation();
 	const route = useRoute<RouteProp<RootStackParamList, "EditQuestion">>();
 	const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
-	const insets = useSafeAreaInsets();
 	const { ballotDraft, removeOption } = useBallotDraft();
 
 	const questionCode = route.params?.questionCode;
@@ -288,7 +287,7 @@ export function EditQuestionScreen() {
 					min={0}
 				/>
 			</ScrollView>
-			<View style={[styles.footer, { backgroundColor: colors.card, paddingBottom: insets.bottom + 16 }]}>
+			<Footer>
 				<CustomButton
 					title={t("save")}
 					onPress={handleSave}
@@ -297,7 +296,7 @@ export function EditQuestionScreen() {
 					backgroundColor={colors.success}
 					disabled={!canSave}
 				/>
-			</View>
+			</Footer>
 		</View>
 	);
 }

@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { globalStyles } from "../../theme/styles";
 import { ThemedText } from "../../components/ThemedText";
 import { CustomButton } from "../../components/CustomButton";
+import { Footer } from "../../components/Footer";
 
 export default function ProposedRevisionScreen() {
 	const { t } = useTranslation();
@@ -35,9 +36,7 @@ export default function ProposedRevisionScreen() {
 					<ThemedText type="default">{t("proposedRevisionBodySecondary")}</ThemedText>
 				</View>
 			</ScrollView>
-			<View
-				style={[styles.footer, styles.footerButtonsContainer, { backgroundColor: colors.card }]}
-			>
+			<Footer row>
 				<CustomButton
 					title={t("proposedRevisionResendRequest")}
 					backgroundColor={colors.accent}
@@ -52,7 +51,7 @@ export default function ProposedRevisionScreen() {
 					flex={true}
 					onPress={onCancelRequest}
 				/>
-			</View>
+			</Footer>
 		</View>
 	);
 }

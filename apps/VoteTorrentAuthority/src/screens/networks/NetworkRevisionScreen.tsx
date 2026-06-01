@@ -15,6 +15,7 @@ import {
 } from "react-native";
 import { ChipButton } from "../../components/ChipButton";
 import { CustomButton } from "../../components/CustomButton";
+import { Footer } from "../../components/Footer";
 import { CustomTextInput } from "../../components/CustomTextInput";
 import { ThemedText } from "../../components/ThemedText";
 import { useApp } from "../../providers/AppProvider";
@@ -207,7 +208,7 @@ export default function NetworkRevisionScreen() {
 				</View>
 			</ScrollView>
 
-			<View style={[styles.footer, { backgroundColor: colors.card, paddingBottom: 32 }]}>
+			<Footer>
 				<CustomButton
 					title={t("propose")}
 					icon="floppy-disk"
@@ -218,7 +219,7 @@ export default function NetworkRevisionScreen() {
 						navigation.goBack();
 					}}
 				/>
-			</View>
+			</Footer>
 		</View>
 	);
 }

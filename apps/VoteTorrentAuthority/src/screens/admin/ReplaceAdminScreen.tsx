@@ -5,6 +5,7 @@ import { ScrollView, StyleSheet, View } from "react-native";
 import { ThemedText } from "../../components/ThemedText";
 import { ChipButton } from "../../components/ChipButton";
 import { CustomButton } from "../../components/CustomButton";
+import { Footer } from "../../components/Footer";
 import { InfoCard } from "../../components/InfoCard";
 import type { RootStackParamList } from "../../navigation/types";
 import type { Authority, Officer, Admin, INetworkEngine } from "@votetorrent/vote-core";
@@ -146,7 +147,7 @@ export default function ReplaceAdminScreen() {
 				</View>
 			</ScrollView>
 
-			<View style={[styles.footer, { backgroundColor: colors.card }]}>
+			<Footer>
 				<CustomButton
 					title={t("createProposal")}
 					icon="floppy-disk"
@@ -154,7 +155,7 @@ export default function ReplaceAdminScreen() {
 					backgroundColor={colors.success}
 					forceDarkText={true}
 				/>
-			</View>
+			</Footer>
 		</View>
 	);
 }

@@ -6,6 +6,7 @@ import { ThemedText } from "../../components/ThemedText";
 import FontAwesome6 from "react-native-vector-icons/FontAwesome6";
 import { ChipButton } from "../../components/ChipButton";
 import { CustomButton } from "../../components/CustomButton";
+import { Footer } from "../../components/Footer";
 import { globalStyles } from "../../theme/styles";
 import { CustomTextInput } from "../../components/CustomTextInput";
 
@@ -178,7 +179,7 @@ export default function AddNetworkScreen() {
 				) : null}
 			</ScrollView>
 
-			<View style={[styles.footer, { backgroundColor: colors.card }]}>
+			<Footer>
 				<CustomButton
 					title={t("create")}
 					icon="floppy-disk"
@@ -186,7 +187,7 @@ export default function AddNetworkScreen() {
 					forceDarkText={true}
 					onPress={() => console.log("createNetwork stub")}
 				/>
-			</View>
+			</Footer>
 		</View>
 	);
 }

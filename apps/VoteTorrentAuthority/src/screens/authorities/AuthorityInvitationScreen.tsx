@@ -11,6 +11,7 @@ import type {
 import { ThemedText } from "../../components/ThemedText";
 import { CustomButton } from "../../components/CustomButton";
 import { CustomTextInput } from "../../components/CustomTextInput";
+import { Footer } from "../../components/Footer";
 import { SignatureTaskFooter } from "../../components/SignatureTaskFooter";
 import type { RootStackParamList } from "../../navigation/types";
 import { useApp } from "../../providers/AppProvider";
@@ -105,7 +106,7 @@ export default function AuthorityInvitationScreen() {
 						/>
 					</View>
 				</ScrollView>
-				<View style={[styles.footer, { backgroundColor: colors.card }]}>
+				<Footer>
 					<CustomButton
 						title={t("send")}
 						icon="paper-plane"
@@ -113,7 +114,7 @@ export default function AuthorityInvitationScreen() {
 						forceDarkText={true}
 						onPress={onSend}
 					/>
-				</View>
+				</Footer>
 			</View>
 		);
 	}

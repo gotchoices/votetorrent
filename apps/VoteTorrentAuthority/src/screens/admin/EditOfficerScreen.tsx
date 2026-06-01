@@ -5,6 +5,7 @@ import { ScrollView, StyleSheet, View, Switch } from "react-native";
 import { ThemedText } from "../../components/ThemedText";
 import { ChipButton } from "../../components/ChipButton";
 import { CustomButton } from "../../components/CustomButton";
+import { Footer } from "../../components/Footer";
 import type { Authority, Officer, Scope } from "@votetorrent/vote-core";
 import { scopeDescriptions } from "@votetorrent/vote-core";
 import { useRoute, useNavigation } from "@react-navigation/native";
@@ -150,7 +151,7 @@ export default function EditOfficerScreen() {
 				</View>
 			</ScrollView>
 
-			<View style={[styles.footer, { backgroundColor: colors.card }]}>
+			<Footer>
 				<CustomButton
 					title={t("save")}
 					icon="floppy-disk"
@@ -159,7 +160,7 @@ export default function EditOfficerScreen() {
 					forceDarkText={true}
 					onPress={handleAddOfficer}
 				/>
-			</View>
+			</Footer>
 		</View>
 	);
 }
