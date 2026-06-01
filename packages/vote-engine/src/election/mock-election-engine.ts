@@ -18,6 +18,11 @@ import { ElectionProposeRevisionBuilder } from './builders/election-propose-revi
 import { ElectionInviteKeyholderBuilder } from './builders/election-invite-keyholder-builder.js';
 import { ElectionRevokeKeyholderBuilder } from './builders/election-revoke-keyholder-builder.js';
 
+// Mock time anchors. MOCK_NOW is captured once at module load so milestone
+// dates below resolve to stable past/current/future offsets at runtime.
+const MOCK_DAY_MS = 24 * 60 * 60 * 1000;
+const MOCK_NOW = Date.now();
+
 export class MockElectionEngine implements IElectionEngine {
 	// Phase 9 plan 09-09 (G12) — stateful in-memory ballot store. Starts EMPTY
 	// so the ElectionDetails empty-state shows before any template is created.
