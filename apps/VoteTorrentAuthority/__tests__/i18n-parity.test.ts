@@ -5,8 +5,16 @@
  * Asserts that es.translation contains every en.translation key,
  * that there are no orphan es-only keys, and that no English-leftover
  * values remain in the es block (outside the D-08 tech-term allowlist).
+ *
+ * v1.1 milestone-audit follow-up (2026-06-01) — adds source-key coverage:
+ * EN<->ES symmetry alone let `enterName`, `enterImageUrl`, `connect`, and
+ * `unknownUser` ship missing from BOTH locales (rendered the raw key at
+ * runtime). The third test below scans the source tree for literal t("key")
+ * calls and fails if any key is absent from the bundle.
  */
 
+import * as fs from 'fs';
+import * as path from 'path';
 import { resources } from '../src/i18n/index';
 
 const enTranslation = resources.en.translation as Record<string, string>;
@@ -48,5 +56,43 @@ describe('i18n parity (D-12)', () => {
 			return typeof enVal === 'string' && typeof esVal === 'string' && enVal === esVal;
 		});
 		expect(leftoverEnglish).toEqual([]);
+	});
+
+	test('every literal t("key") used in source exists in the bundle', () => {
+		const srcDir = path.resolve(__dirname, '../src');
+
+		// Match t('key') / t("key") where the `t` is NOT part of a longer
+		// identifier or a member call (e.g. excludes `.split('T')`,
+		// `formatDate('x')`). Only single string-literal arguments are checked;
+		// dynamic keys like t(route.name) or t(getKeyTypeDisplayName(x)) are
+		// intentionally skipped — they can't be statically resolved.
+		const callRe = /(?<![\w.])t\(\s*['"]([A-Za-z][\w]*)['"]\s*\)/g;
+
+		const walk = (dir: string): string[] =>
+			fs.readdirSync(dir, { withFileTypes: true }).flatMap(entry => {
+				const full = path.join(dir, entry.name);
+				if (entry.isDirectory()) {
+					if (entry.name === 'node_modules' || entry.name === '__tests__') return [];
+					return walk(full);
+				}
+				return /\.(ts|tsx)$/.test(entry.name) && full !== path.join(srcDir, 'i18n', 'index.ts')
+					? [full]
+					: [];
+			});
+
+		const missing = new Map<string, string>(); // key -> first file it appears in
+		for (const file of walk(srcDir)) {
+			const text = fs.readFileSync(file, 'utf8');
+			let m: RegExpExecArray | null;
+			while ((m = callRe.exec(text)) !== null) {
+				const key = m[1];
+				if (!enKeys.includes(key) && !missing.has(key)) {
+					missing.set(key, path.relative(srcDir, file));
+				}
+			}
+		}
+
+		const report = Array.from(missing, ([key, file]) => `${key} (${file})`);
+		expect(report).toEqual([]);
 	});
 });
