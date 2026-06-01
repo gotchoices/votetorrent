@@ -8,6 +8,11 @@ import {
   MOCK_UTAH_NETWORK_DETAILS
 } from '../mock-data.js'
 import { MockUserEngine } from '../user/mock-user-engine.js'
+import { NetworkCreateAuthorityBuilder } from './builders/network-create-authority-builder.js'
+import { NetworkPinAuthorityBuilder } from './builders/network-pin-authority-builder.js'
+import { NetworkUnpinAuthorityBuilder } from './builders/network-unpin-authority-builder.js'
+import { NetworkProposeRevisionBuilder } from './builders/network-propose-revision-builder.js'
+import { NetworkRespondToInviteBuilder } from './builders/network-respond-to-invite-builder.js'
 import type {
   AdminInit,
   Authority,
@@ -18,7 +23,12 @@ import type {
   ElectionType,
   IAuthorityEngine,
   IElectionEngine,
+  INetworkCreateAuthorityBuilder,
   INetworkEngine,
+  INetworkPinAuthorityBuilder,
+  INetworkProposeRevisionBuilder,
+  INetworkRespondToInviteBuilder,
+  INetworkUnpinAuthorityBuilder,
   InviteAction,
   IUserEngine,
   Network,
@@ -291,5 +301,27 @@ export class MockNetworkEngine implements INetworkEngine {
     this.pinnedAuthorities = this.pinnedAuthorities.filter(
       (a) => a.id !== authorityId
     )
+  }
+
+  // ---- Builder factories (FACT-01 / FACT-04) ----
+
+  buildCreateAuthority (): INetworkCreateAuthorityBuilder {
+    return new NetworkCreateAuthorityBuilder(this)
+  }
+
+  buildPinAuthority (): INetworkPinAuthorityBuilder {
+    return new NetworkPinAuthorityBuilder(this)
+  }
+
+  buildUnpinAuthority (): INetworkUnpinAuthorityBuilder {
+    return new NetworkUnpinAuthorityBuilder(this)
+  }
+
+  buildProposeRevision (): INetworkProposeRevisionBuilder {
+    return new NetworkProposeRevisionBuilder(this)
+  }
+
+  buildRespondToInvite<TInvokes> (): INetworkRespondToInviteBuilder<TInvokes> {
+    return new NetworkRespondToInviteBuilder(this) as unknown as INetworkRespondToInviteBuilder<TInvokes>
   }
 }

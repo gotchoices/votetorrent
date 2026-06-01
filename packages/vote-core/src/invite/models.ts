@@ -1,4 +1,5 @@
 import type { UserInit } from '../index.js'
+import type { AuthorityInvite, OfficerInvite } from '../authority/models.js'
 
 export interface Invite {
   /** The type of the invitation */
@@ -7,17 +8,11 @@ export interface Invite {
   /** The expiration date of the invitation */
   expiration: string
 
-  /** The public key of the invitation */
+  /** Hex-encoded secp256k1 compressed public key (66 chars, 33 bytes). */
   inviteKey: string
 
-  /** The private key of the invitation */
-  invitePrivate: string
-
-  /** The signature of the invitation */
+  /** Hex-encoded secp256k1 compact signature (128 chars, 64 bytes). */
   inviteSignature: string
-
-  /** The digest of the invitation */
-  digest: string
 }
 
 export interface InviteStatus<TSentInvite> {
@@ -91,3 +86,24 @@ export interface InviteAction<TInvokes> {
 
 /** "au" for authority, "of" for officer, "k" for keyholder, "r" for registrant */
 export type InviteType = 'au' | 'of' | 'k' | 'r'
+
+/**
+ * Officer invite + the one-time invite private key. One-time use only —
+ * discard the OfficerInviteShare reference after the share-link / QR
+ * moment per Phase 3 D-27. The base `OfficerInvite` type intentionally
+ * has no `invitePrivate` field; only this `Share` variant carries it.
+ */
+export interface OfficerInviteShare extends OfficerInvite {
+  /** Hex-encoded secp256k1 private key (64 chars, 32 bytes). One-time use only. */
+  invitePrivate: string
+}
+
+/**
+ * Authority invite + the one-time invite private key. Same lifecycle
+ * contract as `OfficerInviteShare` — discard after the share-link / QR
+ * moment per Phase 3 D-27.
+ */
+export interface AuthorityInviteShare extends AuthorityInvite {
+  /** Hex-encoded secp256k1 private key (64 chars, 32 bytes). One-time use only. */
+  invitePrivate: string
+}

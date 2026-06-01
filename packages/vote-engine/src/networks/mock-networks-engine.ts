@@ -2,11 +2,13 @@ import { MOCK_NETWORKS } from '../mock-data.js'
 import { MockNetworkEngine } from '../network/mock-network-engine.js'
 import type {
   INetworkEngine,
+  INetworksCreateBuilder,
   NetworkInit,
   NetworkReference,
   User,
   INetworksEngine
 } from '@votetorrent/vote-core'
+import { NetworksCreateBuilder } from './builders/index.js'
 
 export class MockNetworksEngine implements INetworksEngine {
   protected recentNetworks: NetworkReference[] = []
@@ -67,5 +69,9 @@ export class MockNetworksEngine implements INetworksEngine {
       }
       return new MockNetworkEngine(networkRef)
     }
+  }
+
+  buildCreate (): INetworksCreateBuilder {
+    return new NetworksCreateBuilder(this)
   }
 }

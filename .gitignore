@@ -88,5 +88,10 @@ dist
 out
 
 .planning
+.planning/*
+
+.claude
+
+.planning
 
 .claude

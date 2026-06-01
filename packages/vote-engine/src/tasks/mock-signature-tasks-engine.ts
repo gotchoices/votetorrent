@@ -1,7 +1,9 @@
 import { ElectionEvent, ElectionType } from '@votetorrent/vote-core'
+import { CompleteSignatureBuilder } from './builders/index.js'
 import type {
   NetworkReference,
   ISignatureTasksEngine,
+  ISignatureTasksCompleteSignatureBuilder,
   SignatureResult,
   SignatureTask,
   Proposal,
@@ -257,6 +259,10 @@ export class MockSignatureTasksEngine implements ISignatureTasksEngine {
       return t !== task
     })
     return Promise.resolve()
+  }
+
+  buildCompleteSignature (): ISignatureTasksCompleteSignatureBuilder {
+    return new CompleteSignatureBuilder(this)
   }
 
   async getRequestedSignatures (pending: boolean): Promise<SignatureTask[]> {
