@@ -18,6 +18,9 @@ const resources = {
 			light: 'Light',
 			english: 'English',
 			recentNetworks: 'Recent Networks',
+			connectedNetworks: 'Connected Networks',
+			directAdvanced: 'Direct (advanced)',
+			or: 'OR',
 			// Phase 8 plan 08-05 (NETUI-01): empty-state hint when no recents.
 			noRecentNetworks: 'No recent networks yet. Find one below to get started.',
 			find: 'Find',
@@ -417,6 +420,9 @@ const resources = {
 			light: 'Claro',
 			english: 'Inglés',
 			recentNetworks: 'Redes Recientes',
+			connectedNetworks: 'Redes Conectadas',
+			directAdvanced: 'Directo (avanzado)',
+			or: 'O',
 			// Phase 8 plan 08-05 (NETUI-01): empty-state hint when no recents.
 			noRecentNetworks: 'Aún no hay redes recientes. Encuentra una abajo para comenzar.',
 			find: 'Buscar',

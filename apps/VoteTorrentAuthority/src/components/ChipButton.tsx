@@ -23,7 +23,7 @@ export function ChipButton({label, icon, onPress}: ChipButtonProps) {
 					<FontAwesome6 name={icon} size={16} color={colors.light} />
 				</View>
 			)}
-			<ThemedText>{label.toUpperCase()}</ThemedText>
+			<ThemedText numberOfLines={1}>{label.toUpperCase()}</ThemedText>
 		</TouchableOpacity>
 	);
 }

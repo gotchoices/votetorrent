@@ -120,6 +120,7 @@ export function NetworkDetailsScreen() {
 				<CustomButton
 					title={t("select")}
 					icon="chevron-left"
+					rightIcon="cloud-rain"
 					backgroundColor={colors.success}
 					onPress={() => {}}
 				/>

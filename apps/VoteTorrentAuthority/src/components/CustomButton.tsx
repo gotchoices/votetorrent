@@ -6,6 +6,8 @@ import { ExtendedTheme, useTheme } from "@react-navigation/native";
 interface FullButtonProps {
 	title: string;
 	icon?: string;
+	/** Optional trailing glyph pinned to the right edge (e.g. SELECT's network symbol). */
+	rightIcon?: string;
 	disabled?: boolean;
 	backgroundColor?: string;
 	forceDarkText?: boolean;
@@ -17,6 +19,7 @@ interface FullButtonProps {
 export function CustomButton({
 	title,
 	icon,
+	rightIcon,
 	disabled = false,
 	backgroundColor,
 	forceDarkText,
@@ -46,6 +49,9 @@ export function CustomButton({
 			<View style={styles.buttonContent}>
 				{icon && <FontAwesome6 name={icon} size={20} color={textColor} />}
 				<ThemedText style={[styles.text, { color: textColor }]}>{title.toUpperCase()}</ThemedText>
+				{rightIcon && (
+					<FontAwesome6 name={rightIcon} size={20} color={textColor} style={styles.rightIcon} />
+				)}
 			</View>
 		</TouchableOpacity>
 	);
@@ -78,6 +84,10 @@ const styles = StyleSheet.create({
 		fontWeight: "600",
 		textAlign: "center",
 		flexShrink: 1,
+	},
+	rightIcon: {
+		position: "absolute",
+		right: 16,
 	},
 	tall: {
 		paddingVertical: 16,
