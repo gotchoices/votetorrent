@@ -12,6 +12,7 @@ import { ChipButton } from "../../components/ChipButton";
 import { CustomButton } from "../../components/CustomButton";
 import { globalStyles } from "../../theme/styles";
 import { CustomTextInput } from "../../components/CustomTextInput";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 export default function NetworksScreen() {
 	const { colors } = useTheme() as ExtendedTheme;
@@ -19,6 +20,7 @@ export default function NetworksScreen() {
 	const { networksEngine } = useApp();
 	const [recentNetworkRefs, setRecentNetworkRefs] = useState<NetworkReference[]>([]);
 	const navigation = useNavigation<NavigationProp>();
+	const insets = useSafeAreaInsets();
 
 	useEffect(() => {
 		async function loadNetworks() {
@@ -45,7 +47,10 @@ export default function NetworksScreen() {
 	}, [navigation, t]);
 
 	return (
-		<ScrollView style={styles.container}>
+		<ScrollView
+			style={styles.container}
+			contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}
+		>
 			<View style={styles.section}>
 				<ThemedText type="defaultSemiBold" style={styles.section}>
 					{t("useOneOfTheFollowingToGetConnected")}

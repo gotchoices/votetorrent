@@ -49,10 +49,12 @@ export function CustomButton({
 			<View style={styles.buttonContent}>
 				{icon && <FontAwesome6 name={icon} size={20} color={textColor} />}
 				<ThemedText style={[styles.text, { color: textColor }]}>{title.toUpperCase()}</ThemedText>
-				{rightIcon && (
-					<FontAwesome6 name={rightIcon} size={20} color={textColor} style={styles.rightIcon} />
-				)}
 			</View>
+			{rightIcon && (
+				<View style={styles.rightIconWrap} pointerEvents="none">
+					<FontAwesome6 name={rightIcon} size={20} color={textColor} />
+				</View>
+			)}
 		</TouchableOpacity>
 	);
 }
@@ -85,9 +87,12 @@ const styles = StyleSheet.create({
 		textAlign: "center",
 		flexShrink: 1,
 	},
-	rightIcon: {
+	rightIconWrap: {
 		position: "absolute",
 		right: 16,
+		top: 0,
+		bottom: 0,
+		justifyContent: "center",
 	},
 	tall: {
 		paddingVertical: 16,
