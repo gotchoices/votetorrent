@@ -383,11 +383,13 @@ export default function AuthorityDetailsScreen() {
 			<View style={styles.section}>
 				<View style={styles.invitedHeader}>
 					<ThemedText type="title">{t("invitedAuthorities")}</ThemedText>
-					<ChipButton
-						label={t("inviteAuthority")}
-						icon="circle-plus"
-						onPress={() => navigation.navigate("AuthorityInvitation", { mode: "send" })}
-					/>
+					<View style={styles.invitedAction}>
+						<ChipButton
+							label={t("inviteAuthority")}
+							icon="circle-plus"
+							onPress={() => navigation.navigate("AuthorityInvitation", { mode: "send" })}
+						/>
+					</View>
 				</View>
 				<ThemedText type="defaultSemiBold" style={styles.invitedNameLabel}>
 					{t("name")}
@@ -435,10 +437,15 @@ const localStyles = StyleSheet.create({
 		marginBottom: 4,
 	},
 	invitedHeader: {
-		flexDirection: "row",
-		alignItems: "center",
-		justifyContent: "space-between",
 		marginBottom: 8,
+	},
+	invitedAction: {
+		// 24px title + "INVITE AUTHORITY" chip don't fit on one row on a phone,
+		// so the chip drops below the heading, right-aligned — mirroring the
+		// proposed-administration "ADD ADMINISTRATOR" chip placement.
+		flexDirection: "row",
+		justifyContent: "flex-end",
+		marginTop: 8,
 	},
 	invitedNameLabel: {
 		marginTop: 8,
