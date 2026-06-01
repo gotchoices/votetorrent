@@ -310,7 +310,7 @@ export const RootNavigator = () => {
 				name="EditOfficer"
 				component={EditOfficerScreen}
 				options={{
-					title: t("officer"),
+					title: t("administrator"),
 				}}
 			/>
 			<Stack.Screen

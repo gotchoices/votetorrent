@@ -115,12 +115,18 @@ export default function EditOfficerScreen() {
 		<View style={styles.content}>
 			<ScrollView style={styles.container}>
 				<View style={styles.section}>
-					<ThemedText type="title" style={styles.sectionTitle}>
-						{t("officer")}
-					</ThemedText>
-
-					<CustomTextInput title={t("name")} value={name} onChangeText={setName} />
-					<CustomTextInput title={t("title")} value={title} onChangeText={setTitle} />
+					<CustomTextInput
+						title={t("name")}
+						placeholder={t("nameOnInvitation")}
+						value={name}
+						onChangeText={setName}
+					/>
+					<CustomTextInput
+						title={t("title")}
+						placeholder={t("officialTitle")}
+						value={title}
+						onChangeText={setTitle}
+					/>
 				</View>
 
 				<View style={styles.section}>
