@@ -12,6 +12,7 @@ import { ChipButton } from "../../components/ChipButton";
 import { CustomButton } from "../../components/CustomButton";
 import { globalStyles } from "../../theme/styles";
 import { CustomTextInput } from "../../components/CustomTextInput";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 export default function NetworksScreen() {
 	const { colors } = useTheme() as ExtendedTheme;
@@ -19,6 +20,7 @@ export default function NetworksScreen() {
 	const { networksEngine } = useApp();
 	const [recentNetworkRefs, setRecentNetworkRefs] = useState<NetworkReference[]>([]);
 	const navigation = useNavigation<NavigationProp>();
+	const insets = useSafeAreaInsets();
 
 	useEffect(() => {
 		async function loadNetworks() {
@@ -45,12 +47,15 @@ export default function NetworksScreen() {
 	}, [navigation, t]);
 
 	return (
-		<ScrollView style={styles.container}>
+		<ScrollView
+			style={styles.container}
+			contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}
+		>
 			<View style={styles.section}>
 				<ThemedText type="defaultSemiBold" style={styles.section}>
 					{t("useOneOfTheFollowingToGetConnected")}
 				</ThemedText>
-				<ThemedText type="title">{t("recentNetworks")}</ThemedText>
+				<ThemedText type="title">{t("connectedNetworks")}</ThemedText>
 				{recentNetworkRefs.length === 0 && (
 					// NETUI-01 empty-state: short hint when no recent networks.
 					// The find/scan/bootstrap sections below remain the primary
@@ -95,6 +100,9 @@ export default function NetworksScreen() {
 			<View style={styles.section}>
 				<ThemedText type="title">{t("find")}</ThemedText>
 				<CustomTextInput placeholder={t("enterAddressOrLocation")} />
+				<ThemedText type="defaultSemiBold" style={styles.orSeparator}>
+					{t("or")}
+				</ThemedText>
 				<CustomButton
 					title={t("useLocation")}
 					backgroundColor={colors.important}
@@ -109,7 +117,7 @@ export default function NetworksScreen() {
 			</View>
 
 			<View style={styles.section}>
-				<ThemedText type="title">{t("enterBootstrap")}</ThemedText>
+				<ThemedText type="title">{t("directAdvanced")}</ThemedText>
 				<CustomTextInput placeholder={t("enterBootstrapPlaceholder")} />
 				<CustomButton title={t("connect")} onPress={() => console.log("Use bootstrap")} />
 			</View>
@@ -140,6 +148,10 @@ const localStyles = StyleSheet.create({
 		borderRadius: 32,
 		fontSize: 16,
 		borderWidth: 1,
+	},
+	orSeparator: {
+		textAlign: "center",
+		marginVertical: 8,
 	},
 });
 

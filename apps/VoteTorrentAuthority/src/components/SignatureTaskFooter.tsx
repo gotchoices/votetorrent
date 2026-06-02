@@ -1,8 +1,7 @@
-import { View, StyleSheet } from "react-native";
 import { ExtendedTheme, useTheme } from "@react-navigation/native";
 import { useTranslation } from "react-i18next";
 import { CustomButton } from "./CustomButton";
-import { globalStyles } from "../theme/styles";
+import { Footer } from "./Footer";
 
 export interface SignatureTaskFooterProps {
 	onAccept: () => void;
@@ -20,9 +19,7 @@ export function SignatureTaskFooter({
 	const { colors } = useTheme() as ExtendedTheme;
 	const { t } = useTranslation();
 	return (
-		<View
-			style={[styles.footer, styles.footerButtonsContainer, { backgroundColor: colors.card }]}
-		>
+		<Footer row>
 			<CustomButton
 				title={acceptLabel ?? t("accept")}
 				icon="check"
@@ -39,10 +36,6 @@ export function SignatureTaskFooter({
 				flex={true}
 				onPress={onReject}
 			/>
-		</View>
+		</Footer>
 	);
 }
-
-const localStyles = StyleSheet.create({});
-
-const styles = { ...globalStyles, ...localStyles };

@@ -33,6 +33,9 @@ const FRAME_ROUTES: ReadonlyArray<FrameRoute> = [
 	{ key: "administratorInvitationAccept", route: "AdministratorInvitation", titleKey: "debugAdministratorInvitationAccept", params: { mode: "accept", invitationId: "mock-officer-invite-1" } },
 	{ key: "authorityInvitationSend",       route: "AuthorityInvitation",     titleKey: "debugAuthorityInvitationSend",       params: { mode: "send" } },
 	{ key: "authorityInvitationAccept",     route: "AuthorityInvitation",     titleKey: "debugAuthorityInvitationAccept",     params: { mode: "accept", invitationId: "mock-authority-invite-1" } },
+	// Phase 10 plan 10-02 — Keyholder invitation dev entries (D-07 accept reachability, D-10 keep wrench)
+	{ key: "keyholderInvitationSend",   route: "KeyholderInvitation", titleKey: "debugKeyholderInvitationSend",   params: { mode: "send" } },
+	{ key: "keyholderInvitationAccept", route: "KeyholderInvitation", titleKey: "debugKeyholderInvitationAccept", params: { mode: "accept", invitationId: "mock-keyholder-invite-1" } },
 ];
 
 export default function ScreenScaffoldsDebugScreen() {

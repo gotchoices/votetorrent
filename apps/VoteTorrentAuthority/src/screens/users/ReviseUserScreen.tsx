@@ -4,6 +4,7 @@ import { useTheme, ExtendedTheme, useRoute, useNavigation } from "@react-navigat
 import { useTranslation } from "react-i18next";
 import { CustomTextInput } from "../../components/CustomTextInput";
 import { CustomButton } from "../../components/CustomButton";
+import { Footer } from "../../components/Footer";
 import { globalStyles } from "../../theme/styles";
 import type { User, IUserEngine, ImageRef, ReviseUserHistory } from "@votetorrent/vote-core";
 import { UserHistoryEvent } from "@votetorrent/vote-core";
@@ -120,7 +121,7 @@ export function ReviseUserScreen() {
 					)}
 				</View>
 			</ScrollView>
-			<View style={[styles.footer, { backgroundColor: colors.card }]}>
+			<Footer>
 				<CustomButton
 					title={t("save")}
 					onPress={handleSave}
@@ -129,7 +130,7 @@ export function ReviseUserScreen() {
 					disabled={!newSignature}
 					backgroundColor={colors.success}
 				/>
-			</View>
+			</Footer>
 		</View>
 	);
 }

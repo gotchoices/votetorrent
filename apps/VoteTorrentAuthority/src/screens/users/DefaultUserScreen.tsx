@@ -4,6 +4,7 @@ import { useTheme, ExtendedTheme, useRoute, useNavigation } from "@react-navigat
 import { useTranslation } from "react-i18next";
 import { CustomTextInput } from "../../components/CustomTextInput";
 import { CustomButton } from "../../components/CustomButton";
+import { Footer } from "../../components/Footer";
 import { globalStyles } from "../../theme/styles";
 import type { DefaultUser } from "@votetorrent/vote-core";
 import { IDefaultUserEngine } from "@votetorrent/vote-core";
@@ -71,7 +72,7 @@ export function DefaultUserScreen() {
 					/>
 				)}
 			</ScrollView>
-			<View style={[styles.footer, { backgroundColor: colors.card }]}>
+			<Footer>
 				<CustomButton
 					title={t("save")}
 					onPress={handleSave}
@@ -80,7 +81,7 @@ export function DefaultUserScreen() {
 					backgroundColor={edited ? colors.success : colors.accent}
 					disabled={!edited}
 				/>
-			</View>
+			</Footer>
 		</View>
 	);
 }

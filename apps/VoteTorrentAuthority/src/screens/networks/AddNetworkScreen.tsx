@@ -6,6 +6,7 @@ import { ThemedText } from "../../components/ThemedText";
 import FontAwesome6 from "react-native-vector-icons/FontAwesome6";
 import { ChipButton } from "../../components/ChipButton";
 import { CustomButton } from "../../components/CustomButton";
+import { Footer } from "../../components/Footer";
 import { globalStyles } from "../../theme/styles";
 import { CustomTextInput } from "../../components/CustomTextInput";
 
@@ -22,6 +23,11 @@ export default function AddNetworkScreen() {
 	const [isSigned, setIsSigned] = useState(false);
 	const [showAdvanced, setShowAdvanced] = useState(false);
 	const [relayAddresses, setRelayAddresses] = useState([""]);
+	// Election Characteristics (Figma "New Network" frame) — keyholder usage and
+	// single-vs-multiple authority. v1.1 is mocks-only, so these drive local UI
+	// state only; CREATE is a stub.
+	const [useKeyholders, setUseKeyholders] = useState(true);
+	const [singleAuthority, setSingleAuthority] = useState(true);
 	const scrollViewRef = useRef<ScrollView>(null);
 
 	const toggleAdvanced = () => {
@@ -82,6 +88,52 @@ export default function AddNetworkScreen() {
 				</View>
 
 				<View style={styles.section}>
+					<ThemedText type="defaultSemiBold" style={styles.sectionTitle}>
+						{t("electionCharacteristics")}
+					</ThemedText>
+					<View style={styles.characteristicsGrid}>
+						<TouchableOpacity
+							style={styles.radioOption}
+							onPress={() => setUseKeyholders(true)}
+						>
+							<View style={[styles.radioOuter, { borderColor: useKeyholders ? colors.primary : colors.textSecondary }]}>
+								{useKeyholders && <View style={[styles.radioInner, { backgroundColor: colors.primary }]} />}
+							</View>
+							<ThemedText style={styles.radioLabel}>{t("useKeyholders")}</ThemedText>
+						</TouchableOpacity>
+						<TouchableOpacity
+							style={styles.radioOption}
+							onPress={() => setUseKeyholders(false)}
+						>
+							<View style={[styles.radioOuter, { borderColor: !useKeyholders ? colors.primary : colors.textSecondary }]}>
+								{!useKeyholders && <View style={[styles.radioInner, { backgroundColor: colors.primary }]} />}
+							</View>
+							<ThemedText style={styles.radioLabel}>{t("noKeyholders")}</ThemedText>
+						</TouchableOpacity>
+					</View>
+					<View style={styles.characteristicsGrid}>
+						<TouchableOpacity
+							style={styles.radioOption}
+							onPress={() => setSingleAuthority(true)}
+						>
+							<View style={[styles.radioOuter, { borderColor: singleAuthority ? colors.primary : colors.textSecondary }]}>
+								{singleAuthority && <View style={[styles.radioInner, { backgroundColor: colors.primary }]} />}
+							</View>
+							<ThemedText style={styles.radioLabel}>{t("singleAuthority")}</ThemedText>
+						</TouchableOpacity>
+						<TouchableOpacity
+							style={styles.radioOption}
+							onPress={() => setSingleAuthority(false)}
+						>
+							<View style={[styles.radioOuter, { borderColor: !singleAuthority ? colors.primary : colors.textSecondary }]}>
+								{!singleAuthority && <View style={[styles.radioInner, { backgroundColor: colors.primary }]} />}
+							</View>
+							<ThemedText style={styles.radioLabel}>{t("multiple")}</ThemedText>
+						</TouchableOpacity>
+					</View>
+				</View>
+
+				<View style={styles.section}>
 					<ThemedText type="title" style={styles.sectionTitle}>
 						{t("primaryAuthority")}
 					</ThemedText>
@@ -114,7 +166,7 @@ export default function AddNetworkScreen() {
 
 				<View style={styles.section}>
 					<ThemedText type="title" style={styles.sectionTitle}>
-						{t("initialOfficer")}
+						{t("initialAdministrator")}
 					</ThemedText>
 					<CustomTextInput
 						title={t("name")}
@@ -178,7 +230,7 @@ export default function AddNetworkScreen() {
 				) : null}
 			</ScrollView>
 
-			<View style={[styles.footer, { backgroundColor: colors.card }]}>
+			<Footer>
 				<CustomButton
 					title={t("create")}
 					icon="floppy-disk"
@@ -186,7 +238,7 @@ export default function AddNetworkScreen() {
 					forceDarkText={true}
 					onPress={() => console.log("createNetwork stub")}
 				/>
-			</View>
+			</Footer>
 		</View>
 	);
 }
@@ -216,6 +268,32 @@ const localStyles = StyleSheet.create({
 		marginTop: 8,
 		height: 200,
 		borderRadius: 16,
+	},
+	characteristicsGrid: {
+		flexDirection: "row",
+		marginTop: 12,
+	},
+	radioOption: {
+		flexDirection: "row",
+		alignItems: "center",
+		flex: 1,
+	},
+	radioOuter: {
+		width: 20,
+		height: 20,
+		borderRadius: 10,
+		borderWidth: 2,
+		alignItems: "center",
+		justifyContent: "center",
+		marginRight: 8,
+	},
+	radioInner: {
+		width: 10,
+		height: 10,
+		borderRadius: 5,
+	},
+	radioLabel: {
+		flex: 1,
 	},
 	signButton: {
 		flexDirection: "row",

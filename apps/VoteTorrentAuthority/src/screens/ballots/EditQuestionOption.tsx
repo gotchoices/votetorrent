@@ -8,13 +8,13 @@ import {
 	StackActions,
 } from "@react-navigation/native";
 import type { RouteProp } from "@react-navigation/native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ThemedText } from "../../components/ThemedText";
 import { CustomTextInput } from "../../components/CustomTextInput";
 import { useTranslation } from "react-i18next";
 import { Image } from "react-native";
 import { useEffect, useState } from "react";
 import { CustomButton } from "../../components/CustomButton";
+import { Footer } from "../../components/Footer";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../../navigation/types";
 import { useBallotDraft } from "./providers/BallotDraftProvider";
@@ -32,7 +32,6 @@ export function EditQuestionOption() {
 	const { t } = useTranslation();
 	const route = useRoute<RouteProp<RootStackParamList, "EditQuestionOption">>();
 	const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
-	const insets = useSafeAreaInsets();
 	const { ballotDraft, addOption, updateOption } = useBallotDraft();
 
 	const { questionCode, optionCode, electionTitle, electionDate } = route.params ?? { questionCode: "" };
@@ -161,7 +160,7 @@ export function EditQuestionOption() {
 					makePermanentPressed={handleMakePermanent}
 				/>
 			</ScrollView>
-			<View style={[styles.footer, { backgroundColor: colors.card, paddingBottom: insets.bottom + 16 }]}>
+			<Footer>
 				<CustomButton
 					title={t("save")}
 					onPress={handleSave}
@@ -170,7 +169,7 @@ export function EditQuestionOption() {
 					backgroundColor={colors.success}
 					disabled={!canSave}
 				/>
-			</View>
+			</Footer>
 		</View>
 	);
 }

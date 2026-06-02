@@ -19,6 +19,9 @@ export interface OfficerCardProps {
 	officer: Officer;
 	userName?: string;
 	image?: ImageSourcePropType;
+	/** Invitation id for this proposed officer. Optional — populated by the real
+	 *  engine; the row is hidden when absent (Figma frame 14). */
+	inviteId?: string;
 	status?: { label: string; tone: "accepted" | "pending" | "warning" };
 	onPress?: () => void;
 	onInvite?: () => void;
@@ -50,6 +53,7 @@ export function OfficerCard({
 	officer,
 	userName,
 	image,
+	inviteId,
 	status,
 	onPress,
 	onInvite,
@@ -80,6 +84,12 @@ export function OfficerCard({
 				<ThemedText type="defaultSemiBold">{t("title")}: </ThemedText>
 				<ThemedText style={styles.italicText}>{officer.title}</ThemedText>
 			</View>
+			{inviteId ? (
+				<View style={styles.detail}>
+					<ThemedText type="smallBold">{t("inviteId")}: </ThemedText>
+					<ThemedText type="small">{inviteId}</ThemedText>
+				</View>
+			) : null}
 			<ThemedText type="defaultSemiBold">{t("permissions")}:</ThemedText>
 			<View style={styles.subDetails}>
 				{officer.scopes.map((scope) => (
@@ -92,17 +102,9 @@ export function OfficerCard({
 			{(status || onInvite || onRemove) && (
 				<View style={styles.officerStatusRow}>
 					{status ? (
-						status.tone === "accepted" ? (
-							<ChipButton
-								label={status.label}
-								icon="circle-check"
-								onPress={() => {}}
-							/>
-						) : (
-							<ThemedText style={{ color: statusColor }}>
-								{status.label}
-							</ThemedText>
-						)
+						<ThemedText type="defaultSemiBold" style={[styles.statusText, { color: statusColor }]}>
+							{status.label}
+						</ThemedText>
 					) : (
 						<View />
 					)}
@@ -132,7 +134,9 @@ export function OfficerCard({
 		</>
 	);
 
-	const outerStyle = [styles.cardSurface, { backgroundColor: colors.card }];
+	// Frame 14 renders proposed administrators as flat inline entries (no card
+	// surface), separated by spacing — unlike the boxed InfoCard elsewhere.
+	const outerStyle = styles.officerEntry;
 
 	if (onPress) {
 		return (
@@ -145,6 +149,14 @@ export function OfficerCard({
 }
 
 const localStyles = StyleSheet.create({
+	officerEntry: {
+		marginTop: 16,
+		marginHorizontal: 4,
+	},
+	statusText: {
+		flex: 1,
+		marginRight: 8,
+	},
 	officerImage: {
 		width: "100%",
 		height: 160,

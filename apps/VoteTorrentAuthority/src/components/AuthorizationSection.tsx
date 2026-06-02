@@ -18,9 +18,12 @@ interface DetailedOfficer {
 interface AuthorizationSectionProps {
 	admin: AdminDetails | null;
 	signedOfficerIds?: string[];
+	/** Invoked when ADJUST PROPOSAL is tapped. Callers wire this to their
+	 *  revision flow (e.g. NetworkDetails → NetworkRevision). Defaults to no-op. */
+	onAdjustProposal?: () => void;
 }
 
-export function AuthorizationSection({ admin, signedOfficerIds }: AuthorizationSectionProps) {
+export function AuthorizationSection({ admin, signedOfficerIds, onAdjustProposal }: AuthorizationSectionProps) {
 	const { t } = useTranslation();
 	const { colors } = useTheme() as ExtendedTheme;
 	const { getEngine } = useApp();
@@ -59,10 +62,10 @@ export function AuthorizationSection({ admin, signedOfficerIds }: AuthorizationS
 			<ThemedText type="title">{t("authorization")}</ThemedText>
 			<CustomButton
 				title={t("adjustProposal")}
-				icon="pen"
+				rightIcon="pen"
 				backgroundColor={colors.accent}
 				size="thin"
-				onPress={() => {}}
+				onPress={onAdjustProposal ?? (() => {})}
 			/>
 			{detailedOfficers.map((officerDetail) => (
 				<View key={officerDetail.userId} style={styles.adminCheck}>
@@ -74,7 +77,7 @@ export function AuthorizationSection({ admin, signedOfficerIds }: AuthorizationS
 					/>
 					<CustomButton
 						title={officerDetail.isSigned ? t("share") : t("sign")}
-						icon={officerDetail.isSigned ? "share-nodes" : "signature"}
+						rightIcon={officerDetail.isSigned ? "share-nodes" : "signature"}
 						backgroundColor={colors.important}
 						forceDarkText={true}
 						size="thin"

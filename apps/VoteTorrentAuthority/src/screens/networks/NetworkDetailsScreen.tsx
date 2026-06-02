@@ -1,4 +1,5 @@
 import { ScrollView, StyleSheet, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { globalStyles } from "../../theme/styles";
 import { ThemedText } from "../../components/ThemedText";
 import { useTranslation } from "react-i18next";
@@ -38,6 +39,7 @@ export function NetworkDetailsScreen() {
 	const { t } = useTranslation();
 	const { colors } = useTheme() as ExtendedTheme;
 	const navigation = useNavigation<NavigationProp>();
+	const insets = useSafeAreaInsets();
 
 	useEffect(() => {
 		const loadNetwork = async () => {
@@ -114,12 +116,16 @@ export function NetworkDetailsScreen() {
 	}, [networkEngine, networkDetails]);
 
 	return (
-		<ScrollView style={styles.container}>
+		<ScrollView
+			style={styles.container}
+			contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}
+		>
 			<View style={styles.section}>
 				<ThemedText type="header">{networkDetails?.network.name}</ThemedText>
 				<CustomButton
 					title={t("select")}
 					icon="chevron-left"
+					rightIcon="cloud-rain"
 					backgroundColor={colors.success}
 					onPress={() => {}}
 				/>
@@ -186,7 +192,16 @@ export function NetworkDetailsScreen() {
 
 			{networkDetails?.proposed && primaryAuthorityAdmin && (
 				<View style={styles.section}>
-					<AuthorizationSection admin={primaryAuthorityAdmin} />
+					<AuthorizationSection
+						admin={primaryAuthorityAdmin}
+						onAdjustProposal={() => {
+							if (networkDetails) {
+								navigation.navigate("NetworkRevision", {
+									networkId: networkDetails.network.id,
+								});
+							}
+						}}
+					/>
 				</View>
 			)}
 		</ScrollView>

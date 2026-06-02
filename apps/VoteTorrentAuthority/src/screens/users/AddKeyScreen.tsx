@@ -2,16 +2,18 @@ import { ScrollView, StyleSheet, View } from "react-native";
 import { globalStyles } from "../../theme/styles";
 import { useTranslation } from "react-i18next";
 import { ThemedText } from "../../components/ThemedText";
-import { IUserEngine, UserKey, UserKeyType } from "@votetorrent/vote-core";
+import { IUserEngine, UserKeyType } from "@votetorrent/vote-core";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import { ExtendedTheme } from "@react-navigation/native";
 import { useTheme } from "@react-navigation/native";
 import { User } from "@votetorrent/vote-core";
 import { CustomButton } from "../../components/CustomButton";
+import { Footer } from "../../components/Footer";
 import FontAwesome6 from "react-native-vector-icons/FontAwesome6";
 import { useState } from "react";
 import type { NavigationProp, RootStackParamList } from "../../navigation/types";
 import { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import { useSettings } from "../../providers/SettingsProvider";
 
 export function AddKeyScreen() {
 	const { user, userEngine } = useRoute().params as { user: User; userEngine: IUserEngine };
@@ -21,6 +23,7 @@ export function AddKeyScreen() {
 	const [newKey, setNewKey] = useState<string | null>("sdflkj236jSFgjSVj35j78kdn2");
 	const { t } = useTranslation();
 	const { colors } = useTheme() as ExtendedTheme;
+	const { showHelpIcons } = useSettings();
 
 	const scanDevice = () => {
 		console.log("scanDevice");
@@ -32,24 +35,16 @@ export function AddKeyScreen() {
 		setIsAddingKey(true);
 	};
 
-	const addKey = async () => {
-		console.log("addKey");
-		const keyToAdd: UserKey = {
-			key: newKey as string,
-			type: UserKeyType.mobile,
-			expiration: new Date(Date.now() + 1000 * 60 * 60 * 24 * 30).getTime(),
-		};
-		userEngine
-			.addKey(keyToAdd)
-			.then(() => {
-				setIsAddingKey(false);
-				console.log("popping to ReviseUser");
-				navigation.popTo("UserDetails", { user: user, userEngine: userEngine });
-			})
-			.catch((error) => {
-				console.error(error);
-				setIsAddingKey(false);
-			});
+	const addKey = () => {
+		// D-04: display-only — do NOT call userEngine.addKey(); navigate to confirmation instead
+		const expiration = new Date(Date.now() + 1000 * 60 * 60 * 24 * 30).getTime();
+		navigation.navigate("AddedKey", {
+			user,
+			keyValue: newKey as string,
+			keyType: UserKeyType.mobile,
+			expiration,
+		});
+		setIsAddingKey(false);
 	};
 
 	return (
@@ -67,7 +62,7 @@ export function AddKeyScreen() {
 					<View style={styles.detail}>
 						<ThemedText type="defaultSemiBold">{t("imageUrl")}:</ThemedText>
 						<ThemedText style={styles.imageUrl} numberOfLines={1} ellipsizeMode="tail">
-							{user.image?.url}
+							{(user as any).image?.url}
 						</ThemedText>
 					</View>
 				</View>
@@ -100,7 +95,7 @@ export function AddKeyScreen() {
 						<View style={styles.section}>
 							<View style={styles.titleRow}>
 								<ThemedText type="title">{t("addYubicoDongleKey")}</ThemedText>
-								<FontAwesome6 name="circle-info" size={24} color={colors.text} />
+								{showHelpIcons && <FontAwesome6 name="circle-info" size={24} color={colors.text} />}
 							</View>
 							<ThemedText type="link">{t("detailedInstructions")}</ThemedText>
 							<ThemedText type="default">{t("addYubicoInstructions")}</ThemedText>
@@ -114,9 +109,9 @@ export function AddKeyScreen() {
 				)}
 			</ScrollView>
 			{isAddingKey && (
-				<View style={[styles.footer, { backgroundColor: colors.card }]}>
+				<Footer>
 					<CustomButton
-						title={t("add")}
+						title={t("addKey")}
 						icon="save"
 						backgroundColor={colors.success}
 						disabled={!isSigned}
@@ -124,7 +119,7 @@ export function AddKeyScreen() {
 							addKey();
 						}}
 					/>
-				</View>
+				</Footer>
 			)}
 		</View>
 	);

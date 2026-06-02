@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { globalStyles } from "../../theme/styles";
 import { ThemedText } from "../../components/ThemedText";
 import { CustomButton } from "../../components/CustomButton";
+import { Footer } from "../../components/Footer";
 
 export default function EditElectionScreen() {
 	const { t } = useTranslation();
@@ -35,9 +36,7 @@ export default function EditElectionScreen() {
 					<ThemedText type="default">{t("editElectionBodySecondary")}</ThemedText>
 				</View>
 			</ScrollView>
-			<View
-				style={[styles.footer, styles.footerButtonsContainer, { backgroundColor: colors.card }]}
-			>
+			<Footer row>
 				<CustomButton
 					title={t("editElectionResend")}
 					backgroundColor={colors.accent}
@@ -52,7 +51,7 @@ export default function EditElectionScreen() {
 					flex={true}
 					onPress={onBackToTasks}
 				/>
-			</View>
+			</Footer>
 		</View>
 	);
 }

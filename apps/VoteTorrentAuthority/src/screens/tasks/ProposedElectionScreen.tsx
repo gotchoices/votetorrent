@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { globalStyles } from "../../theme/styles";
 import { ThemedText } from "../../components/ThemedText";
 import { CustomButton } from "../../components/CustomButton";
+import { Footer } from "../../components/Footer";
 
 export default function ProposedElectionScreen() {
 	const { t } = useTranslation();
@@ -27,14 +28,14 @@ export default function ProposedElectionScreen() {
 					<ThemedText type="default">{t("proposedElectionBodyPrimary")}</ThemedText>
 				</View>
 			</ScrollView>
-			<View style={[styles.footer, { backgroundColor: colors.card }]}>
+			<Footer>
 				<CustomButton
 					title={t("proposedElectionBackToTasks")}
 					backgroundColor={colors.success}
 					size="thin"
 					onPress={onBackToTasks}
 				/>
-			</View>
+			</Footer>
 		</View>
 	);
 }

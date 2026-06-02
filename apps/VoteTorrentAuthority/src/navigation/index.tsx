@@ -21,7 +21,6 @@ import NetworksScreen from "../screens/networks/NetworksScreen";
 import type { NavigationProp } from "./types";
 import AddNetworkScreen from "../screens/networks/AddNetworkScreen";
 import HostingScreen from "../screens/networks/HostingScreen";
-import ReplaceAdminScreen from "../screens/admin/ReplaceAdminScreen";
 import { useApp } from "../providers/AppProvider";
 import EditOfficerScreen from "../screens/admin/EditOfficerScreen";
 import { ThemedText } from "../components/ThemedText";
@@ -32,6 +31,10 @@ import ReviseUserScreen from "../screens/users/ReviseUserScreen";
 import AddKeyScreen from "../screens/users/AddKeyScreen";
 import RevokeKeyScreen from "../screens/users/RevokeKeyScreen";
 import AddDeviceScreen from "../screens/users/AddDeviceScreen";
+import AddedKeyScreen from "../screens/users/AddedKeyScreen";
+import AddedDeviceScreen from "../screens/users/AddedDeviceScreen";
+import KeyholderScreen from "../screens/keyholder/KeyholderScreen";
+import KeyholderInvitationScreen from "../screens/keyholder/KeyholderInvitationScreen";
 import NetworkDetailsScreen from "../screens/networks/NetworkDetailsScreen";
 import NetworkStatisticsScreen from "../screens/networks/NetworkStatisticsScreen";
 import NetworkRevisionScreen from "../screens/networks/NetworkRevisionScreen";
@@ -110,7 +113,10 @@ function useTabHeaderOptions(tab?: string) {
 			</Pressable>
 		),
 		headerRight: () => (
-			<Pressable style={styles.headerButton}>
+			<Pressable
+				style={styles.headerButton}
+				onPress={() => navigation.navigate("Home", { screen: "Settings" })}
+			>
 				<FontAwesome6 name="circle-user" size={24} color={colors.text} />
 			</Pressable>
 		),
@@ -122,10 +128,12 @@ function useTabHeaderOptions(tab?: string) {
 
 const TabNavigator = () => {
 	const { colors } = useTheme() as ExtendedTheme;
+	const { t } = useTranslation();
 
 	return (
 		<Tab.Navigator
 			screenOptions={({ route }) => ({
+				tabBarLabel: t(route.name.toLowerCase()),
 				tabBarIcon: ({ focused, color }) => {
 					if (route.name === "Settings") {
 						return <FontAwesome6 name="gear" size={22} color={color} />;
@@ -293,15 +301,10 @@ export const RootNavigator = () => {
 				options={{ title: t("authorityInvitation") }}
 			/>
 			<Stack.Screen
-				name="ReplaceAdmin"
-				component={ReplaceAdminScreen}
-				options={{ title: t("proposeReplacement") }}
-			/>
-			<Stack.Screen
 				name="EditOfficer"
 				component={EditOfficerScreen}
 				options={{
-					title: t("officer"),
+					title: t("administrator"),
 				}}
 			/>
 			<Stack.Screen
@@ -325,6 +328,28 @@ export const RootNavigator = () => {
 				name="AddDevice"
 				component={AddDeviceScreen}
 				options={{ title: t("addDevice") }}
+			/>
+			{/* Phase 10 plan 10-01 (USRUI-05, USRUI-09; D-01) — confirmation routes */}
+			<Stack.Screen
+				name="AddedKey"
+				component={AddedKeyScreen}
+				options={{ title: t("addedKey") }}
+			/>
+			<Stack.Screen
+				name="AddedDevice"
+				component={AddedDeviceScreen}
+				options={{ title: t("addedDevice") }}
+			/>
+			{/* Phase 10 plan 10-02 (KHUI-01/02; D-05) — keyholder routes */}
+			<Stack.Screen
+				name="Keyholder"
+				component={KeyholderScreen}
+				options={{ title: t("keyholder") }}
+			/>
+			<Stack.Screen
+				name="KeyholderInvitation"
+				component={KeyholderInvitationScreen}
+				options={{ title: t("keyholderInvitation") }}
 			/>
 			<Stack.Screen
 				name="KeyTask"

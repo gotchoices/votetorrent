@@ -7,6 +7,7 @@ import { globalStyles } from "../../theme/styles";
 import { useTranslation } from "react-i18next";
 import { formatDate } from "../../utils/displayUtils";
 import { CustomButton } from "../../components/CustomButton";
+import { Footer } from "../../components/Footer";
 import { ReleaseKeyTask } from "@votetorrent/vote-core";
 
 export default function KeyTaskScreen() {
@@ -131,7 +132,7 @@ export default function KeyTaskScreen() {
 					</ThemedText>
 				</View>
 			</ScrollView>
-			<View style={[styles.footer, { backgroundColor: colors.card }]}>
+			<Footer>
 				<CustomButton
 					title={t("release")}
 					icon="save"
@@ -141,7 +142,7 @@ export default function KeyTaskScreen() {
 						releaseKey();
 					}}
 				/>
-			</View>
+			</Footer>
 		</View>
 	);
 }

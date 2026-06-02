@@ -5,10 +5,13 @@ import { ScrollView, StyleSheet, View, Switch } from "react-native";
 import { ThemedText } from "../../components/ThemedText";
 import { ChipButton } from "../../components/ChipButton";
 import { CustomButton } from "../../components/CustomButton";
-import type { Authority, Officer, Scope } from "@votetorrent/vote-core";
+import { Footer } from "../../components/Footer";
+import { InfoCard } from "../../components/InfoCard";
+import type { Authority, IUserEngine, Officer, Scope, User } from "@votetorrent/vote-core";
 import { scopeDescriptions } from "@votetorrent/vote-core";
 import { useRoute, useNavigation } from "@react-navigation/native";
 import { useApp } from "../../providers/AppProvider";
+import { useSettings } from "../../providers/SettingsProvider";
 import FontAwesome6 from "react-native-vector-icons/FontAwesome6";
 import type { RootStackParamList } from "../../navigation/types";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
@@ -18,6 +21,7 @@ import { globalStyles } from "../../theme/styles";
 export default function EditOfficerScreen() {
 	const { colors } = useTheme() as ExtendedTheme;
 	const { t } = useTranslation();
+	const { showHelpIcons } = useSettings();
 	const { authority, officerId } = useRoute().params as {
 		authority: Authority;
 		officerId?: string;
@@ -28,6 +32,13 @@ export default function EditOfficerScreen() {
 	const [title, setTitle] = useState("");
 	const [scopes, setScopes] = useState<Scope[]>([]);
 	const [officer, setOfficer] = useState<Officer | null>(null);
+	const [user, setUser] = useState<User | null>(null);
+	const [userEngine, setUserEngine] = useState<IUserEngine | null>(null);
+
+	// Editing an existing administrator (vs. adding a new one). Drives the
+	// frame-35 vs frame-12 layout: edit shows the User card + REMOVE; add shows
+	// the Name input with the "name on invitation" placeholder.
+	const isEditing = !!officerId;
 
 	useEffect(() => {
 		async function loadOfficer() {
@@ -41,9 +52,11 @@ export default function EditOfficerScreen() {
 					// Source the display name from the User join via networkEngine.getUser()
 					// (Phase 7 D-15 opportunistic fix; preferred Option A from 08-04 plan).
 					try {
-						const userEngine = await networkEngine.getUser(foundOfficer.userId);
-						const user = await userEngine?.getSummary();
-						setName(user?.name ?? "");
+						const ue = await networkEngine.getUser(foundOfficer.userId);
+						const u = await ue?.getSummary();
+						setUserEngine(ue ?? null);
+						setUser(u ?? null);
+						setName(u?.name ?? "");
 					} catch (userError) {
 						console.error("Error loading user for officer:", userError);
 						setName("");
@@ -58,30 +71,20 @@ export default function EditOfficerScreen() {
 		loadOfficer();
 	}, [networkEngine, authority.id, officerId]);
 
+	// REMOVE button (header) — only when editing an existing administrator
+	// (frame 35). Removing from the proposed administration is engine-stubbed.
+	const handleRemove = () => {
+		console.log("editOfficer-remove stub", { officerId });
+		navigation.goBack();
+	};
+
 	useEffect(() => {
 		navigation.setOptions({
-			headerRight: () => (
-				<ChipButton
-					label={t("remove")}
-					icon="trash"
-					onPress={() => {
-						// If we're editing an existing officer, pass back the remove flag
-						if (officer) {
-							// Set the params on the previous screen and go back
-							navigation.popTo("ReplaceAdmin", {
-								authority,
-								officer,
-								removeOfficer: true,
-							});
-						} else {
-							// For new officers, just go back without any changes
-							navigation.goBack();
-						}
-					}}
-				/>
-			),
+			headerRight: isEditing
+				? () => <ChipButton label={t("remove")} icon="trash" onPress={handleRemove} />
+				: undefined,
 		});
-	}, [navigation, t, officer, authority]);
+	}, [navigation, t, isEditing]);
 
 	const handleScopeToggle = (scope: Scope) => {
 		setScopes((prev) => {
@@ -93,31 +96,49 @@ export default function EditOfficerScreen() {
 		});
 	};
 
-	const handleAddOfficer = async () => {
-		try {
-			const newOfficer: Officer = {
-				userId: officer?.userId || `admin-${Date.now()}`,
-				title,
-				scopes,
-			};
-
-			// Pass the officer back to ReplaceAdminScreen
-			navigation.popTo("ReplaceAdmin", { authority, officer: newOfficer });
-		} catch (error) {
-			console.error("Error adding officer:", error);
-		}
+	const handleSave = () => {
+		// UI-only stub: persisting the administrator (name/title/permissions) to the
+		// proposed administration lands when the engine API is extended. Mirror the
+		// ProposedAdministration propose/add stubs and return to the list.
+		console.log("editOfficer-save stub", {
+			officerId: officer?.userId,
+			name,
+			title,
+			scopes,
+		});
+		navigation.goBack();
 	};
 
 	return (
 		<View style={styles.content}>
 			<ScrollView style={styles.container}>
 				<View style={styles.section}>
-					<ThemedText type="title" style={styles.sectionTitle}>
-						{t("officer")}
-					</ThemedText>
-
-					<CustomTextInput title={t("name")} value={name} onChangeText={setName} />
-					<CustomTextInput title={t("title")} value={title} onChangeText={setTitle} />
+					{isEditing ? (
+						<InfoCard
+							image={(user as any)?.image?.url ? { uri: (user as any).image.url } : undefined}
+							additionalInfo={[
+								{ label: t("user"), value: user?.name ?? officerId },
+								{ label: t("sid"), value: officerId },
+							]}
+							icon="chevron-right"
+							onPress={() =>
+								user && userEngine && navigation.navigate("UserDetails", { user, userEngine })
+							}
+						/>
+					) : (
+						<CustomTextInput
+							title={t("name")}
+							placeholder={t("nameOnInvitation")}
+							value={name}
+							onChangeText={setName}
+						/>
+					)}
+					<CustomTextInput
+						title={t("title")}
+						placeholder={t("officialTitle")}
+						value={title}
+						onChangeText={setTitle}
+					/>
 				</View>
 
 				<View style={styles.section}>
@@ -128,12 +149,14 @@ export default function EditOfficerScreen() {
 						<View key={scope} style={styles.scopeRow}>
 							<View style={styles.scopeDescriptionContainer}>
 								<ThemedText>{description}</ThemedText>
-								<FontAwesome6
-									name="circle-info"
-									size={16}
-									color={colors.text}
-									style={styles.scopeInfoIcon}
-								/>
+								{showHelpIcons && (
+									<FontAwesome6
+										name="circle-info"
+										size={16}
+										color={colors.text}
+										style={styles.scopeInfoIcon}
+									/>
+								)}
 							</View>
 							<Switch
 								value={scopes.includes(scope as Scope)}
@@ -146,16 +169,16 @@ export default function EditOfficerScreen() {
 				</View>
 			</ScrollView>
 
-			<View style={[styles.footer, { backgroundColor: colors.card }]}>
+			<Footer>
 				<CustomButton
 					title={t("save")}
 					icon="floppy-disk"
 					disabled={!name || !title}
 					backgroundColor={colors.success}
 					forceDarkText={true}
-					onPress={handleAddOfficer}
+					onPress={handleSave}
 				/>
-			</View>
+			</Footer>
 		</View>
 	);
 }

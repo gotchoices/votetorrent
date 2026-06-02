@@ -17,9 +17,14 @@ import type { RootStackParamList } from "../../navigation/types";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useApp } from "../../providers/AppProvider";
 import { AuthorizationSection } from "../../components/AuthorizationSection";
+import { InfoCard } from "../../components/InfoCard";
+import { CustomTextInput } from "../../components/CustomTextInput";
 import { globalStyles } from "../../theme/styles";
 import { formatDate } from "../../utils/displayUtils";
 import { OfficerCard } from "./components/OfficerCard";
+
+/** Shape the (forthcoming) real authority engine will provide for invited authorities. */
+type InvitedAuthority = { name: string; status: "sent" | "unsent" };
 
 export default function AuthorityDetailsScreen() {
 	const { t } = useTranslation();
@@ -33,6 +38,8 @@ export default function AuthorityDetailsScreen() {
 	const [adminDetails, setAdminDetails] = useState<AdminDetails | null>(null);
 	const [officerUsers, setOfficerUsers] = useState<Map<string, User>>(new Map());
 	const [officers, setOfficers] = useState<Officer[]>([]);
+	const [inviteSearch, setInviteSearch] = useState("");
+	const [invitedAuthorities, setInvitedAuthorities] = useState<InvitedAuthority[]>([]);
 
 	const handlePinToggle = async () => {
 		try {
@@ -138,6 +145,22 @@ export default function AuthorityDetailsScreen() {
 	}, [networkEngine, adminDetails]);
 
 	useEffect(() => {
+		// Invited authorities are supplied by the real authority engine (to be
+		// implemented). Bind defensively so this UI is ready without adding mock
+		// data — the section renders empty until the engine provides the list.
+		async function loadInvited() {
+			const fn = (authorityEngine as any)?.getInvitedAuthorities;
+			if (typeof fn !== "function") return;
+			try {
+				setInvitedAuthorities((await fn.call(authorityEngine)) ?? []);
+			} catch (error) {
+				console.error("Error loading invited authorities:", error);
+			}
+		}
+		loadInvited();
+	}, [authorityEngine]);
+
+	useEffect(() => {
 		navigation.setOptions({
 			headerRight: () => (
 				<ChipButton
@@ -154,7 +177,7 @@ export default function AuthorityDetailsScreen() {
 	}
 
 	return (
-		<ScrollView style={styles.container}>
+		<ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 32 }}>
 			<View style={styles.section}>
 				<View style={styles.imageContainer}>
 					<Image source={{ uri: authority.imageRef?.url }} style={styles.authorityImage} />
@@ -166,7 +189,7 @@ export default function AuthorityDetailsScreen() {
 					</ThemedText>
 				</View>
 				<View style={styles.detail}>
-					<ThemedText type="defaultSemiBold">{t("domain")}: </ThemedText>
+					<ThemedText type="defaultSemiBold">{t("domainName")}: </ThemedText>
 					<ThemedText numberOfLines={1} ellipsizeMode="tail">
 						{authority.domainName}
 					</ThemedText>
@@ -185,21 +208,42 @@ export default function AuthorityDetailsScreen() {
 						</ThemedText>
 					</View>
 				) : null}
+				{(authority as any).address ? (
+					<View style={styles.detail}>
+						<ThemedText type="defaultSemiBold">{t("address")}: </ThemedText>
+						<ThemedText numberOfLines={1} ellipsizeMode="middle">
+							{(authority as any).address}
+						</ThemedText>
+					</View>
+				) : null}
+				<View style={styles.detail}>
+					<ThemedText type="defaultSemiBold">{t("signature")}: </ThemedText>
+					<ThemedText>[{t("valid")}]</ThemedText>
+				</View>
 				<CustomButton
 					title={t("reviseAuthority")}
 					icon="pencil"
 					size="thin"
 					backgroundColor={colors.accent}
-					onPress={() => {}}
+					onPress={() => navigation.navigate("NetworkRevision", { networkId: authority.id })}
 				/>
 			</View>
 
 			<View style={styles.section}>
 				<ThemedText type="title">{t("administration")}</ThemedText>
 
+				{(adminDetails?.admin as any)?.priorId ? (
+					<View style={styles.detail}>
+						<ThemedText type="defaultSemiBold">{t("priorCid")}: </ThemedText>
+						<ThemedText numberOfLines={1} ellipsizeMode="tail">
+							{(adminDetails?.admin as any).priorId}
+						</ThemedText>
+					</View>
+				) : null}
+
 				{(() => {
 					const adminSignatures = (adminDetails?.admin as any)?.signatures as
-						| Array<{ signerKey?: string; signature?: string }>
+						| Array<{ name?: string; signerKey?: string; valid?: boolean }>
 						| undefined;
 					if (!adminSignatures || adminSignatures.length === 0) return null;
 					return (
@@ -210,10 +254,10 @@ export default function AuthorityDetailsScreen() {
 							<View style={styles.subDetails}>
 								{adminSignatures.map((signature, idx) => (
 									<View key={signature.signerKey ?? idx} style={styles.detail}>
-										<ThemedText type="default" numberOfLines={1} ellipsizeMode="middle">
-											{signature.signerKey}
+										<ThemedText numberOfLines={1} ellipsizeMode="middle">
+											{signature.name ? `${signature.name} ` : ""}[{signature.signerKey}]
 										</ThemedText>
-										<ThemedText> ({t("signature")})</ThemedText>
+										<ThemedText> ({t("valid")})</ThemedText>
 									</View>
 								))}
 							</View>
@@ -235,15 +279,20 @@ export default function AuthorityDetailsScreen() {
 
 				{officers.map((officer) => {
 					const user = officerUsers.get(officer.userId);
+					// Figma frame 7: compact card (image · name · role · CID) + chevron.
 					return (
-						<OfficerCard
+						<InfoCard
 							key={officer.userId}
-							officer={officer}
-							userName={user?.name || officer.userId}
-							image={user?.image?.url ? { uri: user.image.url } : undefined}
+							image={(user as any)?.image?.url ? { uri: (user as any).image.url } : undefined}
+							title={user?.name || officer.userId}
+							subtitle={officer.title}
+							additionalInfo={[{ label: t("cid"), value: officer.userId }]}
+							icon="chevron-right"
 							onPress={() =>
 								navigation.navigate("OfficerDetails", {
 									officer: officer,
+									userName: user?.name,
+									authority: authority,
 								})
 							}
 						/>
@@ -256,8 +305,8 @@ export default function AuthorityDetailsScreen() {
 						icon="pencil"
 						size="thin"
 						onPress={() =>
-							navigation.navigate("ReplaceAdmin", {
-								authority: authority,
+							navigation.navigate("ProposedAdministration", {
+								authorityId: authority.id,
 							})
 						}
 					/>
@@ -292,9 +341,14 @@ export default function AuthorityDetailsScreen() {
 							};
 							const user = officer.userId ? officerUsers.get(officer.userId) : undefined;
 							const name = user?.name || officerSelection.init?.name || "";
+							// Frame 14: accepted entries show "Accepted - CID: <cid>" in
+							// green; pending invites show "Sent" in the warning tone.
 							const status = officerSelection.existing
-								? { label: t("accepted"), tone: "accepted" as const }
-								: { label: t("pending"), tone: "pending" as const };
+								? {
+										label: `${t("accepted")} - ${t("cid")}: ${officer.userId}`,
+										tone: "accepted" as const,
+									}
+								: { label: t("sent"), tone: "warning" as const };
 
 							return (
 								<OfficerCard
@@ -302,6 +356,7 @@ export default function AuthorityDetailsScreen() {
 									officer={officer}
 									userName={name}
 									image={user?.image?.url ? { uri: user.image.url } : undefined}
+									inviteId={(officerSelection as any)?.inviteId}
 									status={status}
 									onInvite={() =>
 										navigation.navigate("AdministratorInvitation", {
@@ -313,22 +368,48 @@ export default function AuthorityDetailsScreen() {
 								/>
 							);
 						})}
-						<CustomButton
-							title={t("manageProposal")}
-							icon="sliders"
-							size="thin"
-							backgroundColor={colors.accent}
-							onPress={() =>
-								navigation.navigate("ProposedAdministration", {
-									authorityId: authority.id,
-								})
-							}
-						/>
 					</View>
 
-					<AuthorizationSection admin={adminDetails} />
+					<AuthorizationSection
+						admin={adminDetails}
+						onAdjustProposal={() =>
+							navigation.navigate("ProposedAdministration", {
+								authorityId: authority.id,
+							})
+						}
+					/>
 				</View>
 			)}
+
+			<View style={styles.section}>
+				<View style={styles.invitedHeader}>
+					<ThemedText type="title">{t("invitedAuthorities")}</ThemedText>
+					<View style={styles.invitedAction}>
+						<ChipButton
+							label={t("inviteAuthority")}
+							icon="circle-plus"
+							onPress={() => navigation.navigate("AuthorityInvitation", { mode: "send" })}
+						/>
+					</View>
+				</View>
+				<ThemedText type="defaultSemiBold" style={styles.invitedNameLabel}>
+					{t("name")}
+				</ThemedText>
+				<CustomTextInput
+					placeholder={t("name")}
+					value={inviteSearch}
+					onChangeText={setInviteSearch}
+				/>
+				{invitedAuthorities.map((invited) => (
+					<InfoCard
+						key={invited.name}
+						title={invited.name}
+						subtitle={invited.status === "sent" ? t("sent") : t("unsent")}
+						icon="chevron-right"
+						onPress={() => {}}
+					/>
+				))}
+			</View>
 		</ScrollView>
 	);
 }
@@ -354,6 +435,21 @@ const localStyles = StyleSheet.create({
 	},
 	administratorsHeading: {
 		marginTop: 12,
+		marginBottom: 4,
+	},
+	invitedHeader: {
+		marginBottom: 8,
+	},
+	invitedAction: {
+		// 24px title + "INVITE AUTHORITY" chip don't fit on one row on a phone,
+		// so the chip drops below the heading, right-aligned — mirroring the
+		// proposed-administration "ADD ADMINISTRATOR" chip placement.
+		flexDirection: "row",
+		justifyContent: "flex-end",
+		marginTop: 8,
+	},
+	invitedNameLabel: {
+		marginTop: 8,
 		marginBottom: 4,
 	},
 });

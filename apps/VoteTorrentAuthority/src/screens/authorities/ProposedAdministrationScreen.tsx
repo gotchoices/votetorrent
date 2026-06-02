@@ -23,7 +23,8 @@ import { useApp } from "../../providers/AppProvider";
 import { ThemedText } from "../../components/ThemedText";
 import { ChipButton } from "../../components/ChipButton";
 import { CustomButton } from "../../components/CustomButton";
-import { OfficerCard } from "./components/OfficerCard";
+import { Footer } from "../../components/Footer";
+import { InfoCard } from "../../components/InfoCard";
 import { ThresholdPolicyRow } from "./components/ThresholdPolicyRow";
 import { globalStyles } from "../../theme/styles";
 import type { RootStackParamList } from "../../navigation/types";
@@ -171,12 +172,11 @@ export default function ProposedAdministrationScreen() {
 	};
 
 	const handleAddAdministrator = () => {
-		console.log("addAdministrator stub");
 		if (!authority) return;
-		navigation.navigate("AdministratorInvitation", {
-			mode: "send",
-			authority,
-		});
+		// Frame 12 (EditOfficer) is the canonical administrator editor — it captures
+		// name + title + permissions, unlike the invitation send-form (name/title
+		// only). Adding a new administrator opens it with no officerId.
+		navigation.navigate("EditOfficer", { authority });
 	};
 
 	if (isLoading) {
@@ -207,29 +207,25 @@ export default function ProposedAdministrationScreen() {
 								title: selection.init?.title ?? "",
 								scopes: selection.init?.scopes ?? [],
 							} as Officer);
-						const userName =
-							selection.existing
-								? officerUsers.get(selection.existing.userId)
-										?.name ?? selection.existing.userId
-								: selection.init?.name;
-						const status = selection.existing
-							? {
-									label: t("accepted"),
-									tone: "accepted" as const,
-								}
-							: {
-									label: t("pending"),
-									tone: "pending" as const,
-								};
+						const userName = selection.existing
+							? officerUsers.get(selection.existing.userId)?.name ??
+								selection.existing.userId
+							: selection.init?.name ?? "";
 						const key =
 							selection.existing?.userId ??
 							`init-${selection.init?.name ?? idx}`;
+						// Figma frame 10: compact card (name · role · CID) + chevron → Administrator detail.
 						return (
-							<OfficerCard
+							<InfoCard
 								key={key}
-								officer={officer}
-								userName={userName}
-								status={status}
+								title={userName}
+								subtitle={officer.title}
+								additionalInfo={[{ label: t("cid"), value: officer.userId }]}
+								icon="chevron-right"
+								onPress={() =>
+									authority &&
+									navigation.navigate("OfficerDetails", { officer, userName, authority })
+								}
 							/>
 						);
 					})}
@@ -270,7 +266,7 @@ export default function ProposedAdministrationScreen() {
 			</ScrollView>
 
 			{/* PROPOSE footer — stub per D-04 */}
-			<View style={[styles.footer, { backgroundColor: colors.card }]}>
+			<Footer>
 				<CustomButton
 					title={t("propose")}
 					icon="floppy-disk"
@@ -278,7 +274,7 @@ export default function ProposedAdministrationScreen() {
 					forceDarkText={true}
 					onPress={handlePropose}
 				/>
-			</View>
+			</Footer>
 		</View>
 	);
 }

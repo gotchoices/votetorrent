@@ -8,6 +8,8 @@ import type {
 	ReleaseKeyTask,
 	SignatureTask,
 	IElectionEngine,
+	InviteStatus,
+	SentKeyholderInvite,
 	NetworkReference,
 } from '@votetorrent/vote-core';
 
@@ -23,15 +25,10 @@ export type RootStackParamList = {
 	AuthorityDetails: { authority: Authority };
 	// Phase 8 plan 08-01: typed entry for ProposedAdministration (screen lands in 08-02 per D-04)
 	ProposedAdministration: { authorityId: string };
-	OfficerDetails: { officer: Officer };
+	OfficerDetails: { officer: Officer; userName?: string; authority: Authority };
 	// Phase 8 plan 08-03 — Administrator + Authority invitation routes (D-08, D-09)
 	AdministratorInvitation: { mode: "send" | "accept"; invitationId?: string; authority?: Authority };
 	AuthorityInvitation: { mode: "send" | "accept"; invitationId?: string };
-	ReplaceAdmin: {
-		authority: Authority;
-		officer?: Officer;
-		removeOfficer?: boolean;
-	};
 	EditOfficer: {
 		authority: Authority;
 		officerId?: string;
@@ -42,6 +39,12 @@ export type RootStackParamList = {
 	AddKey: { user: User; userEngine: IUserEngine };
 	RevokeKey: { user: User; userEngine: IUserEngine };
 	AddDevice: undefined;
+	// Phase 10 plan 10-01 (USRUI-05, USRUI-09; D-01, D-04) — display-only confirmation routes
+	AddedKey: { user: User; keyValue: string; keyType: string; expiration: number };
+	AddedDevice: { multiaddress: string; token: string };
+	// Phase 10 plan 10-02 (KHUI-01/02; D-05, D-06) — keyholder detail + invitation routes
+	Keyholder: { keyholder: InviteStatus<SentKeyholderInvite>; electionEngine: IElectionEngine };
+	KeyholderInvitation: { mode: "send" | "accept"; invitationId?: string };
 	KeyTask: { task: ReleaseKeyTask };
 	SignatureTask: { task: SignatureTask };
 	// Phase 7 scaffold routes (07-05; renamed by 07-08) — standalone screens per D-09; real impls land in Phases 8–10

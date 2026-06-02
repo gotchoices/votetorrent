@@ -90,3 +90,19 @@ out
 .planning
 
 .claude
+
+# Android bugreport dumps (timestamped, never commit)
+bugreport-*.zip
+**/bugreport-*.zip
+
+#figma token
+figmaToken.txt
+
+# Temp Figma REST artifacts (local only)
+.figma-tmp/
+
+.yarn/*
+!.yarn/releases
+!.yarn/plugins
+!.yarn/sdks
+!.yarn/versions
