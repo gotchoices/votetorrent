@@ -6,20 +6,45 @@
  * Context: yarn berry 4 under nodeLinker:node-modules emits YN0086 (a project-wide
  * "Some peer dependencies are incorrectly met" summary) for ALL unmet peer deps — not
  * just the @optimystic/quereus-plugin-* ones. .yarnrc.yml discards YN0086 globally so
- * that the known-allowed @optimystic crypto-plugin mismatch stays silent. Because that
- * discard is broad, this guard restores the signal for the only surface it could mask:
- * @optimystic/quereus-plugin-* consumer mismatches.
+ * that the known-allowed @optimystic crypto/optimystic plugin mismatches stay silent.
+ * Because that discard is broad, this guard restores the signal for the only surface it
+ * could mask: @optimystic/quereus-plugin-* consumer mismatches.
  *
  * What this script does:
- *   1. Runs `yarn explain peer-requirements` and parses its stdout.
- *   2. Selects only ✘ lines mentioning an @optimystic/quereus-plugin-* consumer.
- *   3. Extracts the unique consumer descriptors from those lines.
- *   4. Compares that set against KNOWN_ALLOWED.
- *   5. Exits non-zero if any UNEXPECTED descriptor is found; exits 0 on the happy path.
+ *   1. Runs `yarn explain peer-requirements` (no args) and parses its stdout.
+ *   2. Selects the ✘ summary lines mentioning an @optimystic/quereus-plugin-* consumer,
+ *      capturing each line's leading p-hash.
+ *   3. For each selected line, drills into `yarn explain peer-requirements <p-hash>` —
+ *      the DETAIL tree enumerates EVERY consumer explicitly, including ones the folded
+ *      "… and N other dependency" summary hides. It unions all observed
+ *      @optimystic/quereus-plugin-<name>@npm:<version> descriptors from those detail trees.
+ *   4. Compares that expanded observed set against KNOWN_ALLOWED.
+ *   5. Exits non-zero if any UNEXPECTED descriptor is found, OR if a folded summary line's
+ *      detail drill-down cannot be enumerated (fail closed). Exits 0 on the happy path.
  *
- * To update the allow-list (e.g. when upstream @optimystic releases a clean version):
- *   - Remove the resolved entry from KNOWN_ALLOWED (D-02 removal trigger).
+ * Why the detail drill-down (CR-02): `yarn explain peer-requirements` folds multiple
+ * consumers of the same provided-peer into one ✘ summary line (e.g. cadre-core's
+ * "… and 1 other dependency"), naming only quereus-plugin-crypto and hiding
+ * quereus-plugin-optimystic. The summary text alone is therefore blind to folded
+ * mismatches. The per-requirement detail tree (`yarn explain peer-requirements <p-hash>`)
+ * lists each consumer as its own branch, so the guard sees the full surface.
+ * (`--json` is NOT supported by this yarn 4.7.0 subcommand.)
+ *
+ * On the reconciled tree (quereus 3.3.0, @optimystic family 0.13.5) the full known-allowed
+ * @optimystic/quereus-plugin-* surface is BOTH:
+ *   @optimystic/quereus-plugin-crypto@npm:0.13.5
+ *   @optimystic/quereus-plugin-optimystic@npm:0.13.5
+ * (the optimystic plugin was previously folded into cadre-core's summary and invisible;
+ * the detail drill-down now surfaces it).
+ *
+ * To update the allow-list (e.g. when upstream @optimystic releases a clean version that
+ * peers on @quereus/quereus 3.x — D-02 removal trigger):
+ *   - Remove the resolved entry/entries from KNOWN_ALLOWED.
  *   - Also remove the `logFilters: code: YN0086` entry from .yarnrc.yml.
+ *
+ * This guard runs automatically on every `yarn install` (root package.json `postinstall`)
+ * and before the workspace lints (root `lint`), so the broad YN0086 discard is operationally
+ * enforced, not merely available as `yarn lint:peers` (WR-04).
  */
 
 import { exec } from 'node:child_process';
@@ -30,57 +55,113 @@ const execAsync = promisify(exec);
 // ---------------------------------------------------------------------------
 // KNOWN_ALLOWED: the exact set of @optimystic/quereus-plugin-* consumer
 // descriptors that are currently expected to appear as ✘ in
-// `yarn explain peer-requirements`.
+// `yarn explain peer-requirements` (across the EXPANDED detail trees).
 //
-// Empirically, on the reconciled tree (quereus 3.3.0, @optimystic family
-// 0.13.5), only one explicit consumer descriptor is printed:
+// On the reconciled tree (quereus 3.3.0, @optimystic family 0.13.5) both
+// plugins peer-want ~0.16.2 against the in-use 3.3.0:
 //   @optimystic/quereus-plugin-crypto@npm:0.13.5
-// (quereus-plugin-optimystic's mismatch is folded into cadre-core's
-// "… and 1 other dependency" summary rather than listed as its own line.)
-//
-// Update this list — and remove the YN0086 logFilters from .yarnrc.yml —
-// when a clean upstream @optimystic release peers on @quereus/quereus 3.x.
+//   @optimystic/quereus-plugin-optimystic@npm:0.13.5
 // ---------------------------------------------------------------------------
 const KNOWN_ALLOWED = new Set([
   '@optimystic/quereus-plugin-crypto@npm:0.13.5',
+  '@optimystic/quereus-plugin-optimystic@npm:0.13.5',
 ]);
 
-// Regex to match the ✘ marker (U+2718)
+// The ✘ marker (U+2718)
 const FAIL_MARKER = '✘';
 
-// Regex to extract @optimystic/quereus-plugin-<name>@npm:<version> descriptors
-const CONSUMER_RE = /@optimystic\/quereus-plugin-[a-z]+@npm:[0-9][0-9.]*/g;
+// Match @optimystic/quereus-plugin-<name>@npm:<version> descriptors. Name allows
+// hyphenated/multi-segment names ([a-z0-9-]+); version allows the full npm version
+// charset (digits, letters, dot, hyphen) so prerelease/build versions are captured
+// verbatim rather than truncated (closes the WR-01/WR-02 fail-open holes).
+const CONSUMER_RE = /@optimystic\/quereus-plugin-[a-z0-9-]+@npm:[0-9A-Za-z.-]+/g;
+
+// Detect a folded summary line ("… and N other dependency/dependencies").
+const FOLD_RE = /and\s+\d+\s+other\s+dependenc(?:y|ies)/i;
+
+// Capture the leading p-hash of a no-arg listing line: "p0bd4b → ✘ …"
+const PHASH_RE = /^\s*(\S+)\s*→/;
+
+async function runYarnExplain(args) {
+  // `yarn explain peer-requirements` (and its detail form) exit 0 even when ✘
+  // lines are present — parse the output, never rely on the exit code.
+  const { stdout } = await execAsync(`yarn explain peer-requirements ${args}`.trim(), {
+    maxBuffer: 10 * 1024 * 1024,
+  });
+  return stdout;
+}
 
 async function main() {
   let stdout;
   try {
-    // yarn explain peer-requirements exits 0 even when ✘ lines are present.
-    // Do NOT rely on its exit code — parse the output instead.
-    ({ stdout } = await execAsync('yarn explain peer-requirements', {
-      maxBuffer: 10 * 1024 * 1024,
-    }));
+    stdout = await runYarnExplain('');
   } catch (err) {
-    // exec rejects on non-zero exit; but yarn explain peer-requirements should
-    // always exit 0. Surface any unexpected error.
-    stderr(`yarn explain peer-requirements failed: ${err.message}`);
+    // CR-01: surface the REAL yarn error (err.message) — do not call an undefined
+    // symbol. Fail closed (non-zero) so a broken guard never silently passes.
+    process.stderr.write(
+      `[lint:peers] yarn explain peer-requirements failed: ${err.message}\n`,
+    );
     process.exit(2);
   }
 
   const lines = stdout.split('\n');
 
-  // Select lines that have BOTH a ✘ marker AND an @optimystic/quereus-plugin-* mention
+  // Select the ✘ summary lines that mention an @optimystic/quereus-plugin-* consumer.
   const mismatchLines = lines.filter(
     (l) => l.includes(FAIL_MARKER) && l.includes('@optimystic/quereus-plugin-'),
   );
 
-  // Extract the unique consumer descriptors from those lines
+  // Build the observed set from the EXPANDED detail trees, not the folded summary text.
   const observed = new Set();
   for (const line of mismatchLines) {
-    const matches = line.match(CONSUMER_RE);
-    if (matches) {
-      for (const m of matches) {
-        observed.add(m);
+    const phashMatch = line.match(PHASH_RE);
+    const phash = phashMatch ? phashMatch[1] : null;
+    const isFolded = FOLD_RE.test(line);
+
+    let detail = null;
+    if (phash) {
+      try {
+        detail = await runYarnExplain(phash);
+      } catch (err) {
+        detail = null;
+        process.stderr.write(
+          `[lint:peers] detail drill-down failed for ${phash}: ${err.message}\n`,
+        );
       }
+    }
+
+    if (detail) {
+      const matches = detail.match(CONSUMER_RE);
+      if (matches) {
+        for (const m of matches) observed.add(m);
+      }
+    }
+
+    // Fail-closed fallback: a folded summary line whose detail tree could not be
+    // enumerated by name must NOT slip through — a folded @optimystic/quereus-plugin-*
+    // mismatch could be hiding there.
+    if (isFolded) {
+      const detailMatches = detail ? detail.match(CONSUMER_RE) : null;
+      if (!detailMatches || detailMatches.length === 0) {
+        process.stderr.write(
+          `[lint:peers] ERROR: a folded @optimystic/quereus-plugin-* peer mismatch ` +
+            `could not be verified by name.\n` +
+            `\n` +
+            `The summary line "${line.trim()}" folds extra consumers into "and N other\n` +
+            `dependency", and its detail view (yarn explain peer-requirements ${phash ?? '<p-hash>'})\n` +
+            `did not enumerate the @optimystic/quereus-plugin-* consumers. The YN0086 install\n` +
+            `summary is discarded in .yarnrc.yml, so this guard is the only thing catching such\n` +
+            `mismatches — failing closed rather than passing blind.\n`,
+        );
+        process.exit(1);
+      }
+    }
+
+    // Also fold the explicitly-named consumer from the summary line itself, as a
+    // belt-and-suspenders measure for non-folded lines.
+    const summaryMatches = line.match(CONSUMER_RE);
+    if (summaryMatches) {
+      for (const m of summaryMatches) observed.add(m);
     }
   }
 
