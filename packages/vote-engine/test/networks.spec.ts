@@ -712,4 +712,164 @@ describe('NetworksEngine — factory DI and persistence seam (Phase 14)', () => 
     const tid = await readTidCounter(db);
     expect(tid).to.be.a('number').greaterThanOrEqual(1);
   });
+
+  // --------------------------------------------------------------------------
+  // open() cache-first re-attach tests (D-05/D-06/D-13)
+  // --------------------------------------------------------------------------
+
+  it('open() returns cached context on cache HIT without calling factory again (D-06)', async () => {
+    const { factory, getCallCount } = makeMockFactory();
+    const engine = new NetworksEngine(AsyncStorage, factory);
+    await engine.create(makePhase14NetworkInit(), makePhase14User());
+    const countAfterCreate = getCallCount(); // should be 1
+    const recents: NetworkReference[] = (await AsyncStorage.getItem('recentNetworks')) ?? [];
+    const ref = recents[0]!;
+    // open() on a cached hash — factory must NOT be called again
+    await engine.open(ref, makePhase14User(), false);
+    expect(getCallCount(), 'factory should not be called on cache hit').to.equal(countAfterCreate);
+  });
+
+  it('open() on cache MISS with INITIALIZED store re-attaches (plugins-only, no re-insertion) and caches handle (D-05/D-06)', async () => {
+    // Create a fresh engine to set up an initialized db under a known hash
+    const { factory } = makeMockFactory();
+    const setupEngine = new NetworksEngine(AsyncStorage, factory);
+    await setupEngine.create(makePhase14NetworkInit(), makePhase14User());
+    const recents: NetworkReference[] = (await AsyncStorage.getItem('recentNetworks')) ?? [];
+    const ref = recents[0]!;
+    const hash = ref.hash;
+
+    // Grab the db that was created so we can reuse it as the "persisted store"
+    const setupCtx = (setupEngine as unknown as { contexts: Map<string, EngineContext> }).contexts.get(hash)!;
+    const persistedDb = setupCtx.db;
+
+    // Build a new engine with a factory that returns the already-initialized db
+    let secondCallCount = 0;
+    const reattachFactory: DbFactory = async (_h: string) => {
+      secondCallCount++;
+      return persistedDb; // already has schema + SchemaVersion
+    };
+    const newEngine = new NetworksEngine(AsyncStorage, reattachFactory);
+
+    // Cache miss → should re-attach (not throw) because the db is initialized
+    const opened = await newEngine.open(ref, makePhase14User(), false);
+    expect(opened).to.be.instanceOf(NetworkEngine);
+    expect(secondCallCount, 'factory called once for cache miss').to.equal(1);
+
+    // Second open on same hash → cache hit, factory NOT called again
+    await newEngine.open(ref, makePhase14User(), false);
+    expect(secondCallCount, 'factory not called on second open (cache hit)').to.equal(1);
+  });
+
+  it('open() on cache MISS with UNINITIALIZED store THROWS and runs NO DDL (D-05)', async () => {
+    const { factory, getExecCount } = makeUninitializedFactory();
+    const engine = new NetworksEngine(AsyncStorage, factory);
+
+    const unknownRef: NetworkReference = {
+      hash: 'unknown-uninit-hash',
+      relays: [],
+      name: 'ghost',
+      primaryAuthorityDomainName: 'ghost.example.com',
+    };
+
+    let caught: unknown;
+    try {
+      await engine.open(unknownRef, makePhase14User(), false);
+      expect.fail('open() should throw for an uninitialized store');
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).to.be.an('error');
+    expect((caught as Error).message).to.include('Network not opened in this session');
+
+    // The factory's db had exec wrapped to count DDL. On the uninitialized path
+    // open() must NOT call exec at all (no DDL). The only exec calls allowed are
+    // from registerDbPlugins (which does NOT call exec — it only calls registerPlugin
+    // and registerFunction). The isSchemaInitialized check uses prepare().get() (not exec).
+    // Therefore exec should be 0 on this path.
+    expect(getExecCount(), 'open() must run no DDL exec on uninitialized store (D-05)').to.equal(0);
+
+    // The store must NOT be cached — a subsequent call with the same hash goes to factory again
+    const contexts = (engine as unknown as { contexts: Map<string, EngineContext> }).contexts;
+    expect(contexts.has('unknown-uninit-hash'), 'uninitialized store must not be cached').to.equal(false);
+  });
+
+  it('open() propagates factory throw — no silent in-memory fallback (D-13)', async () => {
+    const throwingFactory: DbFactory = async (_hash: string) => {
+      throw new Error('LevelDB open failed: disk full');
+    };
+    const engine = new NetworksEngine(AsyncStorage, throwingFactory);
+
+    const ref: NetworkReference = {
+      hash: 'some-hash',
+      relays: [],
+      name: 'failing-net',
+      primaryAuthorityDomainName: 'fail.example.com',
+    };
+
+    let caught: unknown;
+    try {
+      await engine.open(ref, makePhase14User(), false);
+      expect.fail('open() should propagate factory error');
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).to.be.an('error');
+    // The message should include the factory error (wrapped in D-13 message)
+    expect((caught as Error).message).to.include('use create() first');
+
+    // No cached entry — factory failure must not pollute the cache
+    const contexts = (engine as unknown as { contexts: Map<string, EngineContext> }).contexts;
+    expect(contexts.has('some-hash'), 'failed open must not cache anything').to.equal(false);
+  });
+
+  it('DDL not re-applied when schema-version marker present (D-07) — re-attach skips initDB', async () => {
+    // Create an initialized db via prepareDb (simulates a persisted store)
+    const initializedDb = new Database();
+    await prepareDb(initializedDb);
+
+    // Capture subsequent exec calls to detect DDL
+    let ddlExecCount = 0;
+    const origExec = initializedDb.exec.bind(initializedDb);
+    (initializedDb as unknown as { exec: (sql: string, params?: unknown) => Promise<void> }).exec =
+      async (sql: string, params?: unknown) => {
+        ddlExecCount++;
+        return origExec(sql, params as Parameters<typeof origExec>[1]);
+      };
+
+    const reattachFactory: DbFactory = async (_hash: string) => initializedDb;
+    const engine = new NetworksEngine(AsyncStorage, reattachFactory);
+    const ref: NetworkReference = {
+      hash: 'marker-hash',
+      relays: [],
+      name: 'initialized',
+      primaryAuthorityDomainName: 'test.example.com',
+    };
+
+    // Should re-attach without running DDL
+    await engine.open(ref, makePhase14User(), false);
+    expect(ddlExecCount, 'open() on initialized store must not run any DDL exec').to.equal(0);
+  });
+
+  it('nextTid seeded from TidSequence on re-attach (D-12)', async () => {
+    // Build an initialized db with a known TidSequence value
+    const persistedDb = new Database();
+    await prepareDb(persistedDb);
+    // Manually advance TidSequence to a recognizable value
+    await persistedDb.exec('update TidSequence set NextTid = 42');
+
+    const reattachFactory: DbFactory = async (_hash: string) => persistedDb;
+    const engine = new NetworksEngine(AsyncStorage, reattachFactory);
+    const ref: NetworkReference = {
+      hash: 'tid-seed-hash',
+      relays: [],
+      name: 'tid-seed',
+      primaryAuthorityDomainName: 'tid.example.com',
+    };
+
+    await engine.open(ref, makePhase14User(), false);
+
+    // The tidCounters Map should now reflect the seeded value (42)
+    const tidCounters = (engine as unknown as { tidCounters: Map<string, number> }).tidCounters;
+    expect(tidCounters.get('tid-seed-hash'), 'Tid seeded from persisted TidSequence value').to.equal(42);
+  });
 })
