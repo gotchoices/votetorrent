@@ -47,4 +47,25 @@ export function createHash(algorithm) {
 	return new Hash(fn);
 }
 
-export default { createHash };
+// randomUUID() — RFC 4122 v4 via the global getRandomValues polyfilled by
+// react-native-get-random-values (imported in polyfills.bootstrap before any
+// library). Several engine paths (e.g. NetworksEngine) do `import { randomUUID }
+// from 'crypto'`, which Metro maps here.
+const _hex = [];
+for (let _i = 0; _i < 256; _i++) _hex.push((_i + 0x100).toString(16).slice(1));
+
+export function randomUUID() {
+	const b = new Uint8Array(16);
+	globalThis.crypto.getRandomValues(b);
+	b[6] = (b[6] & 0x0f) | 0x40; // version 4
+	b[8] = (b[8] & 0x3f) | 0x80; // variant 10
+	return (
+		_hex[b[0]] + _hex[b[1]] + _hex[b[2]] + _hex[b[3]] + '-' +
+		_hex[b[4]] + _hex[b[5]] + '-' +
+		_hex[b[6]] + _hex[b[7]] + '-' +
+		_hex[b[8]] + _hex[b[9]] + '-' +
+		_hex[b[10]] + _hex[b[11]] + _hex[b[12]] + _hex[b[13]] + _hex[b[14]] + _hex[b[15]]
+	);
+}
+
+export default { createHash, randomUUID };

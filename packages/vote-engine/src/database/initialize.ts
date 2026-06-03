@@ -99,6 +99,25 @@ export async function registerDbPlugins(db: Database): Promise<void> {
 }
 
 /**
+ * Bundled-schema override. React-Native / Hermes has no Node `fs`, so the
+ * on-device fresh-store DDL path cannot read `votetorrent.qsql` from disk.
+ * The app injects the schema as a bundled string via `setSchemaSql()` before
+ * the first `createContext()`. When unset (Node: tests, CLI), `initDB` falls
+ * back to the original `readFileSync` path so the 581 in-memory tests are
+ * byte-for-byte unchanged.
+ */
+let schemaSqlOverride: string | undefined;
+
+/**
+ * Inject the VoteTorrent schema SQL as a string (RN/Hermes — no Node fs).
+ * Call once at app boot before any `createContext()`. Pass `undefined` to
+ * clear the override and restore the Node `readFileSync` fallback.
+ */
+export function setSchemaSql(sql: string | undefined): void {
+	schemaSqlOverride = sql;
+}
+
+/**
  * Initialize a fresh Quereus database by loading and executing the VoteTorrent SQL schema.
  *
  * NOTE: This function is intentionally schema-only (single-responsibility per
@@ -106,16 +125,23 @@ export async function registerDbPlugins(db: Database): Promise<void> {
  * plugin's SQL functions (`Digest`, `SignatureValid`, ...) to
  * resolve in schema constraints must call `prepareDb(db)` instead, which
  * registers the plugin and then calls `initDB`.
+ *
+ * Schema source: the injected `setSchemaSql()` override when present (RN/Hermes),
+ * otherwise the on-disk `votetorrent.qsql` via Node `fs` (tests / Node runtime).
  */
 export async function initDB(db: Database): Promise<void> {
-	const __filename = fileURLToPath(import.meta.url);
-	const __dirname = dirname(__filename);
-	const schemaPath = resolve(
-		__dirname,
-		'../../../vote-core/schema/votetorrent.qsql',
-	);
-
-	const schemaSql = readFileSync(schemaPath, 'utf8');
+	let schemaSql: string;
+	if (schemaSqlOverride !== undefined) {
+		schemaSql = schemaSqlOverride;
+	} else {
+		const __filename = fileURLToPath(import.meta.url);
+		const __dirname = dirname(__filename);
+		const schemaPath = resolve(
+			__dirname,
+			'../../../vote-core/schema/votetorrent.qsql',
+		);
+		schemaSql = readFileSync(schemaPath, 'utf8');
+	}
 
 	try {
 		await db.exec(schemaSql);

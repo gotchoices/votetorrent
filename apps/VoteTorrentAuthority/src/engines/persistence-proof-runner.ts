@@ -18,6 +18,10 @@
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
+// Inject the bundled schema string so the on-device fresh-store DDL path
+// (initDB) never touches Node fs (which does not exist on Hermes).
+import { setSchemaSql } from '../../../../packages/vote-engine/dist/database/initialize.js';
+import { VOTETORRENT_SCHEMA } from './votetorrent-schema';
 import {
   makeProofEngine,
   runWritePhase,
@@ -40,6 +44,10 @@ export async function runPersistenceProof(): Promise<void> {
   if (!PROOF_ENABLED) {
     return;
   }
+
+  // Hermes has no Node fs — feed the schema in as a bundled string before any
+  // createContext() runs DDL on a fresh on-device store.
+  setSchemaSql(VOTETORRENT_SCHEMA);
 
   try {
     const alreadyWritten = await AsyncStorage.getItem(PROOF_NETWORK_REF_KEY);
