@@ -1248,6 +1248,41 @@ declare schema main
 
 	index RegistrantPublicRegistrantId on RegistrantPublic (RegistrantId);
 
+	-- Authority-held private registrant data (not replicated to the public Election Network).
+	-- Referenced by Registrant.PrivateCid; Registrant.Signature commits to this record via that hash.
+	-- Both detail columns are json arrays of attribute triples { name, value, hint? } where `value`
+	-- is either a scalar (a top-level field) or a nested array of the same triples (an object), and
+	-- `hint` is optional validation metadata for that scalar or whole object.
+	-- PrivateDetails is never disclosed. SelectiveDetails is disclosed selectively by the authority;
+	-- which fields/objects are revealed and to which audience (e.g. same-district neighbors, or
+	-- everyone) is decided by election policy at disclosure time, not by a per-attribute flag.
+	table RegistrantPrivate (
+		Cid text primary key, -- content-addressed hash of this record
+		RegistrantId text, -- references Registrant.Id
+		Expiration datetime,
+		PrivateDetails text null, -- json array of { name, value, hint? } triples (recursive); never disclosed
+		SelectiveDetails text null, -- json array of { name, value, hint? } triples (recursive); disclosed per election policy
+		constraint RegistrantIdValid check (exists (select 1 from Registrant R where R.Id = new.RegistrantId)),
+		constraint ExpirationValid check (isISODatetime(Expiration) and like('%Z', Expiration)),
+		constraint ExpirationFuture check on insert (Expiration > context.now),
+		constraint CidValid check (Cid = Digest(RegistrantId, Expiration, PrivateDetails, SelectiveDetails)),
+		constraint RegistrantCidMatch check (exists (select 1 from Registrant R where R.Id = new.RegistrantId and R.PrivateCid = new.Cid)),
+		constraint InsertOnly check on update, delete (false),
+		constraint InsertValid check on insert (
+			exists (
+				select 1 from AdminSignature ASig join AdminSigning A on A.Nonce = ASig.SigningNonce
+					where A.Nonce = context.SigningNonce
+						and A.Scope = 'vrg'
+						and A.Digest = Digest(
+							Tid, new.Cid, new.RegistrantId, new.Expiration, new.PrivateDetails, new.SelectiveDetails
+						)
+			)
+		)
+	)
+		with context ( SigningNonce text, Tid int, now datetime );
+
+	index RegistrantPrivateRegistrantId on RegistrantPrivate (RegistrantId);
+
 	table ElectionRegistrant (
 		ElectionId text,
 		RegistrantId text,

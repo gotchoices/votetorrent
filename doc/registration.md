@@ -48,14 +48,14 @@ AuthorityPeers
 
 ### Private, Authority-held schema
 
-RegistrantPrivate
+RegistrantPrivate — authority-held, not replicated to the public Election Network. Referenced by Registrant.PrivateCid (the authority's signature on the Registrant record commits to this record via that hash).
 * CID * - Identifier and hashcode of this record
 * RegistrantId
 * Expiration
-* [SSN]
-* [Phone]
-* [DOB]
-* ...
+* PrivateDetails - registrant detail attributes that are never disclosed (e.g. SSN, DOB, phone)
+* SelectiveDetails - registrant detail attributes the authority may disclose, selectively, per election policy (e.g. to same-district neighbors, or to everyone)
+
+Both `PrivateDetails` and `SelectiveDetails` are JSON arrays of attribute triples `{ name, value, hint? }`, where `value` is either a scalar (a top-level field) or a nested array of the same triples (an object), and `hint` is optional validation metadata for that scalar or whole object. The selectively-public column carries **no** per-attribute visibility flag — which fields/objects are disclosed, and to which audience, is decided by election policy at disclosure time.
 
 AssociationPrivate
 * RegistrationId *
