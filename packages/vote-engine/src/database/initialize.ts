@@ -144,7 +144,10 @@ export async function initDB(db: Database): Promise<void> {
  */
 export async function isSchemaInitialized(db: Database): Promise<boolean> {
 	try {
-		const row = await db.prepare('select Version from SchemaVersion limit 1').get();
+		// Point lookup on the primary key (Version=1), NOT a full table scan:
+		// the Optimystic/LevelDB vtab's full-scan path aborts under "concurrent
+		// mutations", whereas a PK equality routes to a safe point lookup.
+		const row = await db.prepare('select Version from SchemaVersion where Version = 1').get();
 		return row !== undefined && row !== null;
 	} catch {
 		return false; // Table absent = fresh store
@@ -173,9 +176,12 @@ export async function writeSchemaVersionMarker(db: Database): Promise<void> {
  * Phase 14 D-12: monotonic per-context Tid counter seeded from persisted state.
  */
 export async function ensureTidSequence(db: Database): Promise<void> {
+	// Id primary key (fixed at 1) so reads/updates are PK point lookups, not full
+	// table scans. The Optimystic/LevelDB vtab aborts full scans under "concurrent
+	// mutations"; PK equality routes to the safe point-lookup path (D-12 on-device).
 	await db.exec(
-		`create table if not exists TidSequence (NextTid integer not null);
-		 insert or ignore into TidSequence (NextTid) values (1);`,
+		`create table if not exists TidSequence (Id integer primary key, NextTid integer not null);
+		 insert or ignore into TidSequence (Id, NextTid) values (1, 1);`,
 	);
 }
 
@@ -187,7 +193,8 @@ export async function ensureTidSequence(db: Database): Promise<void> {
  * Phase 14 D-12.
  */
 export async function readTidCounter(db: Database): Promise<number> {
-	const row = await db.prepare('select NextTid from TidSequence limit 1').get();
+	// PK point lookup (Id=1), not a full scan — see ensureTidSequence.
+	const row = await db.prepare('select NextTid from TidSequence where Id = 1').get();
 	return (row?.['NextTid'] as number | null) ?? 1;
 }
 
@@ -197,7 +204,8 @@ export async function readTidCounter(db: Database): Promise<number> {
  * Phase 14 D-12: ensures the on-disk counter is monotonic across restarts.
  */
 export async function incrementTidCounter(db: Database): Promise<void> {
-	await db.exec('update TidSequence set NextTid = NextTid + 1');
+	// PK-scoped update (Id=1), not a full scan — see ensureTidSequence.
+	await db.exec('update TidSequence set NextTid = NextTid + 1 where Id = 1');
 }
 
 /**
