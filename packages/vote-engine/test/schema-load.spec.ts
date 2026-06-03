@@ -57,20 +57,27 @@ describe('Schema load', () => {
 		const user = await drain(db.prepare('select 1 from User limit 0').all());
 		expect(user, 'table User should be queryable').to.equal(0);
 
-		// 260603-001: RegistrantPrivate adds the authority-held PrivateDetails /
-		// SelectiveDetails registrant-detail columns. Selecting the columns by name
-		// gates that both the new table and its columns parse and load.
+		// 260603-001: registrant detail is split into authority-held tiers —
+		// RegistrantPrivate (PrivateDetails, never disclosed) and RegistrantSelective
+		// (SelectiveDetails, own SelectiveCid). Select the columns by name to gate that
+		// both tables and their columns parse and load.
 		const registrantPrivate = await drain(
 			db
 				.prepare(
-					'select Cid, RegistrantId, Expiration, PrivateDetails, SelectiveDetails from RegistrantPrivate limit 0'
+					'select Cid, RegistrantId, Expiration, PrivateDetails from RegistrantPrivate limit 0'
 				)
 				.all()
 		);
-		expect(
-			registrantPrivate,
-			'table RegistrantPrivate (with detail columns) should be queryable'
-		).to.equal(0);
+		expect(registrantPrivate, 'table RegistrantPrivate should be queryable').to.equal(0);
+
+		const registrantSelective = await drain(
+			db
+				.prepare(
+					'select Cid, RegistrantId, Expiration, SelectiveDetails from RegistrantSelective limit 0'
+				)
+				.all()
+		);
+		expect(registrantSelective, 'table RegistrantSelective should be queryable').to.equal(0);
 	});
 
 	it('registers crypto-plugin SQL functions and exposes quereus builtins used by the schema', async () => {

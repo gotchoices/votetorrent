@@ -48,14 +48,36 @@ AuthorityPeers
 
 ### Private, Authority-held schema
 
-RegistrantPrivate — authority-held, not replicated to the public Election Network. Referenced by Registrant.PrivateCid (the authority's signature on the Registrant record commits to this record via that hash).
+Registrant detail is split across **three content-addressed tiers**, each referenced by a hash on the `Registrant` record and all bound by the authority's `Registrant` signature (so none can be altered without detection):
+
+| Tier | Record | Registrant ref | Disclosure |
+|------|--------|----------------|-----------|
+| Public | `RegistrantPublic` | `PublicCid` | Always public on the Election Network |
+| Selective | `RegistrantSelective` | `SelectiveCid` | Disclosed to a permitted audience per election policy |
+| Private | `RegistrantPrivate` | `PrivateCid` | Authority-held; never disclosed |
+
+RegistrantPrivate — authority-held, not replicated to the public Election Network.
 * CID * - Identifier and hashcode of this record
 * RegistrantId
 * Expiration
 * PrivateDetails - registrant detail attributes that are never disclosed (e.g. SSN, DOB, phone)
-* SelectiveDetails - registrant detail attributes the authority may disclose, selectively, per election policy (e.g. to same-district neighbors, or to everyone)
 
-Both `PrivateDetails` and `SelectiveDetails` are JSON arrays of attribute triples `{ name, value, hint? }`, where `value` is either a scalar (a top-level field) or a nested array of the same triples (an object), and `hint` is optional validation metadata for that scalar or whole object. The selectively-public column carries **no** per-attribute visibility flag — which fields/objects are disclosed, and to which audience, is decided by election policy at disclosure time.
+RegistrantSelective — authority-held, committed separately from RegistrantPrivate (own CID, referenced by Registrant.SelectiveCid).
+* CID * - Identifier and hashcode of this record
+* RegistrantId
+* Expiration
+* SelectiveDetails - registrant detail attributes the authority may disclose, per election policy (e.g. to same-district neighbors, or to everyone)
+
+`PrivateDetails` and `SelectiveDetails` are JSON arrays of attribute triples `{ name, value, hint? }`, where `value` is either a scalar (a top-level field) or a nested array of the same triples (an object), and `hint` is optional validation metadata for that scalar or whole object.
+
+#### Selective disclosure (spec)
+
+The **selective** tier lets an authority reveal *some* registrant detail to *some* audience without exposing the never-disclosed private fields.
+
+- **Commitment — separate `SelectiveCid`.** `RegistrantSelective` has its own `CID = Digest(RegistrantId, Expiration, SelectiveDetails)`, distinct from `PrivateCid`. `Registrant.SelectiveCid` references it, and the authority's `Registrant.Signature` commits to it (the signed digest binds `PrivateCid`, `PublicCid`, `SelectiveCid`, `Status`, `Expiration`). A recipient given the selective set can recompute the CID and check it against the signed `Registrant.SelectiveCid` — verifying authenticity **without** any access to `PrivateDetails`.
+- **Granularity — whole-set, all-or-nothing.** The entire `SelectiveDetails` set is revealed to the permitted audience as a unit. Per-attribute selective reveal (e.g. disclose `District` but not `Address`) is **not** supported by this scheme and there is **no** per-attribute `visibility` flag; that would require per-attribute salted commitments + a Merkle root (a future option if the need arises).
+- **Audience semantics — policy-driven.** *Which* selective fields are disclosed and *to whom* (e.g. same-district neighbors vs everyone) is decided by **election policy at disclosure time**, not encoded per-attribute. The policy schema (where audiences/field-sets are configured — likely on `ElectionRevision` or network policy) and the disclosure transport are **not yet specified** (tracked as follow-up).
+- **Verification flow.** Recipient: (1) obtain the `Registrant` record + the `SelectiveDetails` payload; (2) recompute `Digest(RegistrantId, Expiration, SelectiveDetails)` and assert it equals `Registrant.SelectiveCid`; (3) verify `Registrant.Signature` over the `Registrant` record against an authorized signor key. Tampering or substitution fails step 2 or 3.
 
 AssociationPrivate
 * RegistrationId *
