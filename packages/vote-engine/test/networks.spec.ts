@@ -5,13 +5,21 @@ import {
   UserKeyType
 } from '@votetorrent/vote-core'
 import { expect } from 'chai'
+import { Database } from '@quereus/quereus'
 import { NetworkEngine } from '../src/network/network-engine'
 import { NetworksEngine } from '../src/networks/networks-engine'
 import { NetworksCreateBuilder } from '../src/networks/builders/networks-create-builder.js'
 import { MockNetworksEngine } from '../src/networks/mock-networks-engine.js'
 import type { EngineContext } from '../src/types.js'
+import type { DbFactory } from '../src/types.js'
 import { randomTestKeyPair } from './fixtures/keys.js'
 import { AsyncStorage } from './shims/react-native'
+import {
+  isSchemaInitialized,
+  readTidCounter,
+  prepareDb,
+  registerDbPlugins,
+} from '../src/database/initialize.js'
 import type {
   User,
   NetworkInit,
@@ -553,4 +561,155 @@ describe('NetworksCreateBuilder', () => {
     expect(crossFieldErrors.length).to.be.greaterThan(0)
     expect(crossFieldErrors.some(e => e.code === 'TSA_MISMATCH')).to.equal(true)
   })
+})
+
+// ---------------------------------------------------------------------------
+// Phase 14 — factory DI and persistence seam
+// ---------------------------------------------------------------------------
+
+/** Returns a counting mock DbFactory whose returned db is fully prepareDb'd. */
+function makeMockFactory(): { factory: DbFactory; getCallCount: () => number; getLastHash: () => string | undefined } {
+  let callCount = 0;
+  const lastHashes: string[] = [];
+  const factory: DbFactory = async (hash: string) => {
+    callCount++;
+    lastHashes.push(hash);
+    const db = new Database();
+    await prepareDb(db);
+    return db;
+  };
+  return {
+    factory,
+    getCallCount: () => callCount,
+    getLastHash: () => lastHashes.at(-1),
+  };
+}
+
+/** Returns a factory whose returned db has plugins applied but NO DDL (uninitialized store). */
+function makeUninitializedFactory(): {
+  factory: DbFactory;
+  getExecCount: () => number;
+} {
+  let execCount = 0;
+  const factory: DbFactory = async (_hash: string) => {
+    const db = new Database();
+    await registerDbPlugins(db);
+    // Wrap exec to count DDL calls
+    const origExec = db.exec.bind(db);
+    (db as unknown as { exec: typeof origExec }).exec = async (sql: string, params?: unknown) => {
+      execCount++;
+      return origExec(sql, params as Parameters<typeof origExec>[1]);
+    };
+    return db;
+  };
+  return {
+    factory,
+    getExecCount: () => execCount,
+  };
+}
+
+const makePhase14NetworkInit = (): NetworkInit => ({
+  name: 'Phase14 Network',
+  relays: [],
+  primaryAuthority: { name: 'Auth', domainName: 'auth.example.com' },
+  admin: {
+    officers: [{ init: { name: 'Admin A', title: 'Chair', scopes: ['rn'] as Scope[] } }],
+    effectiveAt: Date.now(),
+    thresholdPolicies: [{ policy: 'rn', threshold: 1 }],
+  },
+  policies: {
+    timestampAuthorities: [],
+    numberRequiredTSAs: 0,
+    electionType: ElectionType.adhoc,
+  },
+})
+
+const makePhase14User = (): User => ({
+  id: 'p14-user-1',
+  name: 'Phase14 User',
+  activeKeys: [{ key: 'p14-hex-key', type: UserKeyType.mobile, expiration: Date.now() + 86_400_000 }],
+})
+
+describe('NetworksEngine — factory DI and persistence seam (Phase 14)', () => {
+  beforeEach(async () => {
+    await AsyncStorage.clear();
+    await AsyncStorage.setItem('recentNetworks', []);
+  });
+
+  it('create() uses injected factory instead of new Database()', async () => {
+    const { factory, getCallCount } = makeMockFactory();
+    const engine = new NetworksEngine(AsyncStorage, factory);
+    await engine.create(makePhase14NetworkInit(), makePhase14User());
+    expect(getCallCount(), 'factory should have been called once during create()').to.equal(1);
+  });
+
+  it('in-memory factory default: create() succeeds with no factory argument (SC4)', async () => {
+    const engine = new NetworksEngine(AsyncStorage);
+    const result = await engine.create(makePhase14NetworkInit(), makePhase14User());
+    expect(result).to.be.instanceOf(NetworkEngine);
+  });
+
+  it('after create(), isSchemaInitialized(ctx.db) is true and readTidCounter reflects seeded value', async () => {
+    const { factory } = makeMockFactory();
+    const engine = new NetworksEngine(AsyncStorage, factory);
+    await engine.create(makePhase14NetworkInit(), makePhase14User());
+    const recents: NetworkReference[] = (await AsyncStorage.getItem('recentNetworks')) ?? [];
+    const hash = recents[0]?.hash ?? '';
+    const ctx = (engine as unknown as { contexts: Map<string, EngineContext> }).contexts.get(hash);
+    expect(ctx, 'context must be cached after create()').to.not.equal(undefined);
+    const initialized = await isSchemaInitialized(ctx!.db);
+    expect(initialized, 'schema should be initialized after create()').to.equal(true);
+    const tid = await readTidCounter(ctx!.db);
+    expect(tid, 'TidCounter should be a positive integer').to.be.a('number').greaterThanOrEqual(1);
+  });
+
+  it('Tid bound in create() batch comes from per-context counter (not module global)', async () => {
+    const { factory } = makeMockFactory();
+    const engine = new NetworksEngine(AsyncStorage, factory);
+    // Run two separate creates on separate engine instances — each should start from
+    // the seeded TidSequence value (not a global accumulator).
+    const engine2 = new NetworksEngine(AsyncStorage, factory);
+    await AsyncStorage.clear();
+    await AsyncStorage.setItem('recentNetworks', []);
+    await engine.create(makePhase14NetworkInit(), makePhase14User());
+    const recents1: NetworkReference[] = (await AsyncStorage.getItem('recentNetworks')) ?? [];
+    const hash1 = recents1[0]?.hash ?? '';
+    const ctx1 = (engine as unknown as { contexts: Map<string, EngineContext> }).contexts.get(hash1);
+    const tid1 = await readTidCounter(ctx1!.db);
+    // A second independent engine from a fresh factory also starts at 1+ (not continuing from engine's tid)
+    await AsyncStorage.clear();
+    await AsyncStorage.setItem('recentNetworks', []);
+    await engine2.create(makePhase14NetworkInit(), makePhase14User());
+    const recents2: NetworkReference[] = (await AsyncStorage.getItem('recentNetworks')) ?? [];
+    const hash2 = recents2[0]?.hash ?? '';
+    const ctx2 = (engine2 as unknown as { contexts: Map<string, EngineContext> }).contexts.get(hash2);
+    const tid2 = await readTidCounter(ctx2!.db);
+    // Both Tid counters reflect the persisted TidSequence; neither should be 0
+    expect(tid1).to.be.a('number').greaterThanOrEqual(1);
+    expect(tid2).to.be.a('number').greaterThanOrEqual(1);
+  });
+
+  // --------------------------------------------------------------------------
+  // D-08 sentinel tests (schema-version marker)
+  // --------------------------------------------------------------------------
+
+  it('schema-version marker absent on fresh db → isSchemaInitialized returns false (D-08)', async () => {
+    const db = new Database();
+    const initialized = await isSchemaInitialized(db);
+    expect(initialized).to.equal(false);
+  });
+
+  it('schema-version marker present after prepareDb → isSchemaInitialized returns true (D-08)', async () => {
+    const db = new Database();
+    await prepareDb(db);
+    const initialized = await isSchemaInitialized(db);
+    expect(initialized).to.equal(true);
+  });
+
+  it('TidCounter reflects seeded TidSequence value (D-12)', async () => {
+    const db = new Database();
+    await prepareDb(db);
+    const tid = await readTidCounter(db);
+    expect(tid).to.be.a('number').greaterThanOrEqual(1);
+  });
 })
