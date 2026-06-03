@@ -78,6 +78,25 @@ describe('Schema load', () => {
 				.all()
 		);
 		expect(registrantSelective, 'table RegistrantSelective should be queryable').to.equal(0);
+
+		// 260603-001: ElectionDisclosurePolicy (selective field → audience, per election) + the
+		// DisclosureAudience code view (currently 'district' and 'everyone').
+		const disclosurePolicy = await drain(
+			db
+				.prepare(
+					'select ElectionId, FieldName, Audience from ElectionDisclosurePolicy limit 0'
+				)
+				.all()
+		);
+		expect(disclosurePolicy, 'table ElectionDisclosurePolicy should be queryable').to.equal(0);
+
+		const disclosureAudience = await drain(
+			db.prepare('select Code, Name from DisclosureAudience').all()
+		);
+		expect(
+			disclosureAudience,
+			'view DisclosureAudience should expose its audience codes'
+		).to.equal(2);
 	});
 
 	it('registers crypto-plugin SQL functions and exposes quereus builtins used by the schema', async () => {

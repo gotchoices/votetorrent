@@ -1341,6 +1341,53 @@ declare schema main
 		constraint NoUpdate check on update (false)
 	)
 		with context ( SigningNonce text, Tid int );
+
+	view DisclosureAudience as
+		select 'district' as Code, 'Same district (neighboring voters)' as Name
+		union all select 'everyone' as Code, 'Everyone' as Name;
+
+	-- Election policy: which RegistrantSelective field/object names may be disclosed, and to which
+	-- audience, for a given election. The selective set itself is committed authority-side
+	-- (RegistrantSelective / Registrant.SelectiveCid); this table only declares the disclosure
+	-- intent per election (keyed by ElectionId). Delivery/filtering of disclosed data to
+	-- recipients is handled off-schema by the engine/app at query time (no on-network disclosure
+	-- record). Whole-set commitment (option B) means a disclosed subset is authority-vouched, not
+	-- independently verifiable against SelectiveCid.
+	table ElectionDisclosurePolicy (
+		ElectionId text, -- references Election.Id
+		FieldName text, -- a top-level attribute name within RegistrantSelective.SelectiveDetails
+		Audience text, -- references DisclosureAudience(Code)
+		primary key (ElectionId, FieldName),
+		constraint ElectionIdValid check (exists (select 1 from Election E where E.Id = new.ElectionId)),
+		constraint AudienceValid check (Audience in (select Code from DisclosureAudience)),
+		constraint MutationValid check on insert, update (
+			exists (
+				select 1 from AdminSignature ASig join AdminSigning A on A.Nonce = ASig.SigningNonce
+					join Election E on E.Id = new.ElectionId
+					where A.Nonce = context.SigningNonce
+						and A.AuthorityId = E.AuthorityId
+						and A.Scope = 'mel'
+						and A.Digest = Digest(
+							context.Tid, new.ElectionId, new.FieldName, new.Audience
+						)
+			)
+		),
+		constraint DeleteValid check on delete (
+			exists (
+				select 1 from AdminSignature ASig join AdminSigning A on A.Nonce = ASig.SigningNonce
+					join Election E on E.Id = old.ElectionId
+					where A.Nonce = context.SigningNonce
+						and A.AuthorityId = E.AuthorityId
+						and A.Scope = 'mel'
+						and A.Digest = Digest(
+							context.Tid, old.ElectionId, old.FieldName, old.Audience, 'delete'
+						)
+			)
+		)
+	)
+		with context ( SigningNonce text, Tid int );
+
+	index ElectionDisclosurePolicyElection on ElectionDisclosurePolicy (ElectionId);
 }
 
 apply schema main;
