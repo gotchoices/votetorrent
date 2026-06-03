@@ -19,6 +19,28 @@
 // 1. CSPRNG — MUST be first; without it libp2p key generation is insecure.
 import 'react-native-get-random-values';
 
+// 1b. crypto.randomUUID — Hermes' global crypto (after react-native-get-random-values)
+//     exposes getRandomValues but NOT randomUUID. Several engines call the GLOBAL
+//     crypto.randomUUID() (e.g. NetworksEngine/NetworkEngine/SigningEngine), which
+//     works under Node 19+ but is undefined on Hermes. Polyfill it via getRandomValues.
+if (globalThis.crypto && typeof globalThis.crypto.randomUUID !== 'function') {
+  const _uuidHex = [];
+  for (let i = 0; i < 256; i++) _uuidHex.push((i + 0x100).toString(16).slice(1));
+  globalThis.crypto.randomUUID = function randomUUID() {
+    const b = new Uint8Array(16);
+    globalThis.crypto.getRandomValues(b);
+    b[6] = (b[6] & 0x0f) | 0x40; // version 4
+    b[8] = (b[8] & 0x3f) | 0x80; // variant 10
+    return (
+      _uuidHex[b[0]] + _uuidHex[b[1]] + _uuidHex[b[2]] + _uuidHex[b[3]] + '-' +
+      _uuidHex[b[4]] + _uuidHex[b[5]] + '-' +
+      _uuidHex[b[6]] + _uuidHex[b[7]] + '-' +
+      _uuidHex[b[8]] + _uuidHex[b[9]] + '-' +
+      _uuidHex[b[10]] + _uuidHex[b[11]] + _uuidHex[b[12]] + _uuidHex[b[13]] + _uuidHex[b[14]] + _uuidHex[b[15]]
+    );
+  };
+}
+
 // 2. crypto.subtle.digest (SHA-256/512) via @noble/hashes
 if (globalThis.crypto && !globalThis.crypto.subtle) {
   const {sha256, sha512} = require('@noble/hashes/sha2');
