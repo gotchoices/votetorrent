@@ -65,16 +65,6 @@ const config = {
       crypto: path.resolve(projectRoot, 'polyfills/node-crypto.js'),
       net: emptyShim,
       tls: emptyShim,
-      // vote-engine's initialize.ts statically imports fs/path/url for its Node
-      // schema-read fallback. On device the schema is injected as a bundled
-      // string (setSchemaSql), so that branch never runs — empty shims satisfy
-      // Metro's static resolution without pulling Node internals.
-      fs: emptyShim,
-      'node:fs': emptyShim,
-      path: emptyShim,
-      'node:path': emptyShim,
-      url: emptyShim,
-      'node:url': emptyShim,
     },
   },
 };

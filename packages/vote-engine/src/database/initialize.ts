@@ -1,7 +1,5 @@
-import { readFileSync } from 'fs';
-import { resolve, dirname } from 'path';
-import { fileURLToPath } from 'url';
 import { createHash } from 'crypto';
+import { VOTETORRENT_SCHEMA_SQL } from './schema-sql.js';
 import type { Database } from '@quereus/quereus';
 import {
 	registerPlugin,
@@ -99,26 +97,24 @@ export async function registerDbPlugins(db: Database): Promise<void> {
 }
 
 /**
- * Bundled-schema override. React-Native / Hermes has no Node `fs`, so the
- * on-device fresh-store DDL path cannot read `votetorrent.qsql` from disk.
- * The app injects the schema as a bundled string via `setSchemaSql()` before
- * the first `createContext()`. When unset (Node: tests, CLI), `initDB` falls
- * back to the original `readFileSync` path so the 581 in-memory tests are
- * byte-for-byte unchanged.
+ * Optional schema-SQL override. The schema is bundled as a string
+ * (`VOTETORRENT_SCHEMA_SQL`) so `initDB` works in every runtime — Node tests AND
+ * React-Native/Hermes — without Node `fs` or `import.meta` (Hermes cannot parse
+ * `import.meta`). `setSchemaSql()` lets a host inject an alternate schema string
+ * if ever needed; when unset, the bundled default is used.
  */
 let schemaSqlOverride: string | undefined;
 
 /**
- * Inject the VoteTorrent schema SQL as a string (RN/Hermes — no Node fs).
- * Call once at app boot before any `createContext()`. Pass `undefined` to
- * clear the override and restore the Node `readFileSync` fallback.
+ * Override the schema SQL string used by `initDB`. Pass `undefined` to restore
+ * the bundled default (`VOTETORRENT_SCHEMA_SQL`).
  */
 export function setSchemaSql(sql: string | undefined): void {
 	schemaSqlOverride = sql;
 }
 
 /**
- * Initialize a fresh Quereus database by loading and executing the VoteTorrent SQL schema.
+ * Initialize a fresh Quereus database by executing the VoteTorrent SQL schema.
  *
  * NOTE: This function is intentionally schema-only (single-responsibility per
  * Phase 2 D-02). It does NOT register plugins. Callers that need the crypto
@@ -126,22 +122,11 @@ export function setSchemaSql(sql: string | undefined): void {
  * resolve in schema constraints must call `prepareDb(db)` instead, which
  * registers the plugin and then calls `initDB`.
  *
- * Schema source: the injected `setSchemaSql()` override when present (RN/Hermes),
- * otherwise the on-disk `votetorrent.qsql` via Node `fs` (tests / Node runtime).
+ * Schema source: the `setSchemaSql()` override when set, else the bundled
+ * `VOTETORRENT_SCHEMA_SQL` string (generated from `vote-core/schema/votetorrent.qsql`).
  */
 export async function initDB(db: Database): Promise<void> {
-	let schemaSql: string;
-	if (schemaSqlOverride !== undefined) {
-		schemaSql = schemaSqlOverride;
-	} else {
-		const __filename = fileURLToPath(import.meta.url);
-		const __dirname = dirname(__filename);
-		const schemaPath = resolve(
-			__dirname,
-			'../../../vote-core/schema/votetorrent.qsql',
-		);
-		schemaSql = readFileSync(schemaPath, 'utf8');
-	}
+	const schemaSql = schemaSqlOverride ?? VOTETORRENT_SCHEMA_SQL;
 
 	try {
 		await db.exec(schemaSql);
