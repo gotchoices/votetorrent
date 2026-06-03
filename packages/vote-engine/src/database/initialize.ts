@@ -86,6 +86,19 @@ async function registerCustomFunctions(db: Database): Promise<void> {
 }
 
 /**
+ * Always-run plugin registration: register the crypto plugin and custom SQL
+ * functions on a freshly-created Database instance. This is per-Database-instance
+ * state (not persisted), so it must run on EVERY database, fresh or re-attached.
+ *
+ * Phase 14 D-07: separated from DDL so that re-attach paths call this without
+ * triggering schema creation.
+ */
+export async function registerDbPlugins(db: Database): Promise<void> {
+	await registerPlugin(db, cryptoPlugin);
+	await registerCustomFunctions(db);
+}
+
+/**
  * Initialize a fresh Quereus database by loading and executing the VoteTorrent SQL schema.
  *
  * NOTE: This function is intentionally schema-only (single-responsibility per
@@ -113,6 +126,70 @@ export async function initDB(db: Database): Promise<void> {
 }
 
 /**
+ * Check whether the database has been initialized (i.e., SchemaVersion table
+ * exists and has at least one row). Returns false on a fresh/empty store.
+ *
+ * Phase 14 D-08: used as a gate to decide whether to run DDL on re-attach.
+ */
+export async function isSchemaInitialized(db: Database): Promise<boolean> {
+	try {
+		const row = await db.prepare('select Version from SchemaVersion limit 1').get();
+		return row !== undefined && row !== null;
+	} catch {
+		return false; // Table absent = fresh store
+	}
+}
+
+/**
+ * Write the schema-version marker after DDL is applied on a fresh store.
+ * Creates the SchemaVersion table (if absent) and inserts version 1.
+ *
+ * Phase 14 D-08/D-10: placed in TS, NOT in votetorrent.qsql, so the schema
+ * stays backend-agnostic.
+ */
+export async function writeSchemaVersionMarker(db: Database): Promise<void> {
+	await db.exec(
+		`create table if not exists SchemaVersion (Version integer primary key);
+		 insert into SchemaVersion (Version) values (1);`,
+	);
+}
+
+/**
+ * Ensure the TidSequence table exists and has its initial row.
+ * Safe to run on a fresh store only (always-run on in-memory path since it
+ * is always fresh; on the persistent path this is part of first-time DDL).
+ *
+ * Phase 14 D-12: monotonic per-context Tid counter seeded from persisted state.
+ */
+export async function ensureTidSequence(db: Database): Promise<void> {
+	await db.exec(
+		`create table if not exists TidSequence (NextTid integer not null);
+		 insert or ignore into TidSequence (NextTid) values (1);`,
+	);
+}
+
+/**
+ * Read the current NextTid value from the persisted TidSequence table.
+ * Defaults to 1 if the table is empty or absent (should not happen after
+ * ensureTidSequence, but safe fallback).
+ *
+ * Phase 14 D-12.
+ */
+export async function readTidCounter(db: Database): Promise<number> {
+	const row = await db.prepare('select NextTid from TidSequence limit 1').get();
+	return (row?.['NextTid'] as number | null) ?? 1;
+}
+
+/**
+ * Advance the persisted TidSequence counter by 1 after consuming a Tid.
+ *
+ * Phase 14 D-12: ensures the on-disk counter is monotonic across restarts.
+ */
+export async function incrementTidCounter(db: Database): Promise<void> {
+	await db.exec('update TidSequence set NextTid = NextTid + 1');
+}
+
+/**
  * Prepare a fresh Quereus database for VoteTorrent use: register the crypto
  * plugin (so schema constraint references to `Digest`, `SignatureValid`,
  * etc. resolve), then load the schema via `initDB`.
@@ -120,11 +197,16 @@ export async function initDB(db: Database): Promise<void> {
  * Per Phase 2 D-02 / D-02b option (b): production code (NetworksEngine.createContext)
  * and Phase 1's schema-load.spec.ts both route through this single helper so the
  * registration plumbing stays in one place.
+ *
+ * Phase 14 backward-compat wrapper (D-07/SC4): composed from registerDbPlugins +
+ * initDB + ensureTidSequence + writeSchemaVersionMarker. The in-memory path is
+ * always fresh, so these always-run together. Existing callers need zero changes.
  */
 export async function prepareDb(db: Database): Promise<void> {
-	await registerPlugin(db, cryptoPlugin);
-	await registerCustomFunctions(db);
+	await registerDbPlugins(db);
 	await initDB(db);
+	await ensureTidSequence(db);
+	await writeSchemaVersionMarker(db);
 }
 
 export default initDB;
