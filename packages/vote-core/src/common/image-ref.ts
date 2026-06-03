@@ -1,4 +1,4 @@
-export type ImageRef = {
-  url?: string;
-  cid?: string;
+export interface ImageRef {
+  url?: string
+  cid?: string
 }

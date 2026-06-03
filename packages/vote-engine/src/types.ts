@@ -1,7 +1,7 @@
-import type { Database } from '@quereus/quereus';
-import type { User } from '@votetorrent/vote-core';
+import type { Database } from '@quereus/quereus'
+import type { User } from '@votetorrent/vote-core'
 
-export type EngineContext = {
-	db: Database;
-	user?: User;
-};
+export interface EngineContext {
+  db: Database
+  user?: User
+}

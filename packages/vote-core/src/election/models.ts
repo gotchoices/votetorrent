@@ -1,273 +1,295 @@
-import type { ImageRef, Proposal, Timestamp, VideoRef } from '../common';
-import type { Invite, InviteStatus } from '../invite/models';
+import type { ImageRef, Proposal, Timestamp, VideoRef } from '../common'
+import type { Invite, InviteStatus, InvitationSlot } from '../invite/models'
+import type { NetworkReference } from '../network/models'
 
 /** The immutable election record - any change requires abandoning and replacing the election */
-export type ElectionCore = {
-	/** The id of the election */
-	id: string;
+export interface ElectionCore {
+  /** The id of the election */
+  id: string
 
-	/** The id of the election authority */
-	authorityId: string;
+  /** The id of the election authority */
+  authorityId: string
 
-	/** The title of the election */
-	title: string;
+  /** The title of the election */
+  title: string
 
-	/** The date/time of the election */
-	date: number;
+  /** The date/time of the election */
+  date: number
 
-	/** The deadline for making revisions to the election - this deadline cannot itself be revised */
-	revisionDeadline: number;
+  /** The deadline for making revisions to the election - this deadline cannot itself be revised */
+  revisionDeadline: number
 
-	/** The deadline for adding or revising ballots to the election */
-	ballotDeadline: number;
+  /** The deadline for adding or revising ballots to the election */
+  ballotDeadline: number
 
-	/** The type of election */
-	type: ElectionType;
-};
-
-export interface ElectionRevision {
-	/** ID of the election */
-	electionId: string;
-
-	/** The monotonically increasing sequence number of the revision */
-	revision: number;
-
-	/** Evidence that the revision was made prior to the revisionDeadline of the election */
-	revisionTimestamp: Timestamp[];
-
-	/** Tags describing and grouping the election.  e.g. ["general"] or ["democrat", "primary"] */
-	tags: string[];
-
-	/** Markdown instructions for the election. */
-	instructions: string;
-
-	/** The keyholders who's combined signatures decrypt the election records - there must be at least one */
-	keyholders: InviteStatus<SentKeyholderInvite>[];
-
-	/** Unix timestamps corresponding to each cut-off event */
-	timeline: Record<ElectionEvent, number>;
-
-	/** The policy for the required number of keyholders */
-	keyholderThreshold: number;
+  /** The type of election */
+  type: ElectionType
 }
 
-export type ElectionCoreInit = {
-	/** The id of the election */
-	id: string;
+export interface ElectionRevision {
+  /** ID of the election */
+  electionId: string
 
-	/** The id of the election authority */
-	authorityId: string;
+  /** The monotonically increasing sequence number of the revision */
+  revision: number
 
-	/** The title of the election */
-	title: string;
+  /** Evidence that the revision was made prior to the revisionDeadline of the election */
+  revisionTimestamp: Timestamp[]
 
-	/** The date/time of the election */
-	date: number;
+  /** Tags describing and grouping the election.  e.g. ["general"] or ["democrat", "primary"] */
+  tags: string[]
 
-	/** The deadline for making revisions to the election - this deadline cannot itself be revised */
-	revisionDeadline: number;
+  /** Markdown instructions for the election. */
+  instructions: string
 
-	/** The deadline for adding or revising ballots to the election */
-	ballotDeadline: number;
+  /** The keyholders who's combined signatures decrypt the election records - there must be at least one */
+  keyholders: Array<InviteStatus<SentKeyholderInvite>>
 
-	/** The type of election */
-	type: ElectionType;
-};
+  /** Unix timestamps corresponding to each cut-off event */
+  timeline: Record<ElectionEvent, number>
 
-export type ElectionRevisionInit = {
-	/** ID of the election */
-	electionId: string;
+  /** The policy for the required number of keyholders */
+  keyholderThreshold: number
+}
 
-	/** The monotonically increasing sequence number of the revision */
-	revision: number;
+export interface ElectionCoreInit {
+  /** The id of the election */
+  id: string
 
-	/** Evidence that the revision was made prior to the revisionDeadline of the election */
-	revisionTimestamp: Timestamp;
+  /** The id of the election authority */
+  authorityId: string
 
-	/** Tags describing and grouping the election.  e.g. ["general"] or ["democrat", "primary"] */
-	tags: string[];
+  /** The title of the election */
+  title: string
 
-	/** Markdown instructions for the election. */
-	instructions: string;
+  /** The date/time of the election */
+  date: number
 
-	/** The keyholders who's combined signatures decrypt the election records - there must be at least one */
-	keyholders: KeyholderInvite[];
+  /** The deadline for making revisions to the election - this deadline cannot itself be revised */
+  revisionDeadline: number
 
-	/** Unix timestamps corresponding to each cut-off event */
-	timeline: Record<ElectionEvent, number>;
+  /** The deadline for adding or revising ballots to the election */
+  ballotDeadline: number
 
-	/** The policy for the required number of keyholders */
-	keyholderThreshold: number;
-};
+  /** The type of election */
+  type: ElectionType
+}
 
-export type ElectionDetails = {
-	/** The election information published by the authority */
-	election: ElectionCore;
+export interface ElectionRevisionInit {
+  /** ID of the election */
+  electionId: string
 
-	/** The current revision of the election */
-	current: ElectionRevision;
+  /** The monotonically increasing sequence number of the revision */
+  revision: number
 
-	/** The proposed revision of the election */
-	proposed?: Proposal<ElectionRevisionInit>;
-};
+  /** Evidence that the revision was made prior to the revisionDeadline of the election */
+  revisionTimestamp: Timestamp
 
-export type ElectionInit = {
-	/** The immutable election information */
-	election: ElectionCoreInit;
+  /** Tags describing and grouping the election.  e.g. ["general"] or ["democrat", "primary"] */
+  tags: string[]
 
-	/** The initial revision of the election */
-	revision: ElectionRevisionInit;
-};
+  /** Markdown instructions for the election. */
+  instructions: string
 
-export type ElectionSummary = {
-	/** The id of the election */
-	id: string;
+  /** The keyholders who's combined signatures decrypt the election records - there must be at least one */
+  keyholders: KeyholderInvite[]
 
-	/** The title of the election */
-	title: string;
+  /** Unix timestamps corresponding to each cut-off event */
+  timeline: Record<ElectionEvent, number>
 
-	/** The name of the election authority */
-	authorityName: string;
+  /** The policy for the required number of keyholders */
+  keyholderThreshold: number
+}
 
-	/** The date/time of the election */
-	date: number;
+export interface ElectionDetails {
+  /** The election information published by the authority */
+  election: ElectionCore
 
-	/** The type of election */
-	type: ElectionType;
-};
+  /** The current revision of the election */
+  current: ElectionRevision
+
+  /** The proposed revision of the election */
+  proposed?: Proposal<ElectionRevisionInit>
+}
+
+export interface ElectionInit {
+  /** The immutable election information */
+  election: ElectionCoreInit
+
+  /** The initial revision of the election */
+  revision: ElectionRevisionInit
+}
+
+export interface ElectionSummary {
+  /** The id of the election */
+  id: string
+
+  /** The title of the election */
+  title: string
+
+  /** The name of the election authority */
+  authorityName: string
+
+  /** The date/time of the election */
+  date: number
+
+  /** The type of election */
+  type: ElectionType
+}
 
 export enum ElectionType {
-	official = 'o',
-	adhoc = 'a',
+  official = 'o',
+  adhoc = 'a',
 }
 
 export enum ElectionEvent {
-	registrationEnds = 'registrationEnds',
-	ballotsFinal = 'ballotsFinal',
-	votingStarts = 'votingStarts',
-	tallyingStarts = 'tallyingStarts',
-	validation = 'validation',
-	certificationStarts = 'certificationStarts',
-	closed = 'closed',
+  registrationEnds = 'registrationEnds',
+  ballotsFinal = 'ballotsFinal',
+  votingStarts = 'votingStarts',
+  tallyingStarts = 'tallyingStarts',
+  validation = 'validation',
+  certificationStarts = 'certificationStarts',
+  closed = 'closed',
 }
 
 export type KeyholderInvite = Invite & {
-	name: string;
-};
+  name: string
+}
 
-export type SentKeyholderInvite = {
-	name: string;
-};
+// TODO(compat): Legacy name retained for older vote-engine mocks.
+// Prefer `KeyholderInvite` in new code.
+export interface KeyholderInvitationContent {
+  name: string
+}
 
-export type Ballot = {
-	/** The id of the ballot */
-	id: string;
+// TODO(compat): Legacy wrapper retained for older vote-engine mocks.
+// Prefer directly using `KeyholderInvite` + `InviteStatus<SentKeyholderInvite>` in new code.
+export interface KeyholderInvitation {
+  slot: InvitationSlot<KeyholderInvitationContent>
+  privateKey: string
+  networkRef: NetworkReference
+  type: 'Keyholder'
+}
 
-	/** The id of the election */
-	electionId: string;
+export interface SentKeyholderInvite {
+  name: string
+}
 
-	/** The id of the authority posting the ballot */
-	authorityId: string;
+export interface Ballot {
+  /** The id of the ballot */
+  id: string
 
-	/** The description of the ballot (who is this for, what is the purpose of this ballot, etc.) */
-	description: string;
+  /** The id of the election */
+  electionId: string
 
-	/** The district/group codes on the ballot */
-	districts: string[];
+  /** The id of the authority posting the ballot */
+  authorityId: string
 
-	/** The questions on the ballot */
-	questions: Question[];
-};
+  /** The description of the ballot (who is this for, what is the purpose of this ballot, etc.) */
+  description: string
 
-export type BallotDetails = {
-	/** The ballot information published by the authority */
-	ballot: Ballot;
+  /** The district/group codes on the ballot */
+  districts: string[]
 
-	/** The proposed revision of the ballot */
-	proposed?: Proposal<Ballot>;
-};
+  /** The questions on the ballot */
+  questions: Question[]
+}
 
-export type BallotSummary = {
-	/** The id of the ballot */
-	id: string;
+// TODO(compat): Legacy alias retained for older vote-engine mocks.
+// Prefer `Ballot` in new code. `timestamp` is optional and inferred from existing mock usage.
+export type BallotInit = Ballot & {
+  timestamp?: Timestamp
+}
 
-	/** The id of the election */
-	electionId: string;
+export interface BallotDetails {
+  /** The ballot information published by the authority */
+  ballot: Ballot
 
-	/** The id of the authority posting the ballot */
-	authorityId: string;
-};
+  /** The proposed revision of the ballot */
+  proposed?: Proposal<Ballot>
+}
 
-export type Option = {
-	/** The option code */
-	code: string;
+export interface BallotSummary {
+  /** The id of the ballot */
+  id: string
 
-	/** The option description */
-	title: string;
+  /** The id of the election */
+  electionId: string
 
-	/** Details about the option */
-	details?: string;
+  /** The id of the authority posting the ballot */
+  authorityId: string
+}
 
-	/** Additional information link */
-	infoURL?: string;
+export interface Option {
+  /** The option code */
+  code: string
 
-	/** The image for the option */
-	image?: ImageRef;
+  /** The option description */
+  title: string
 
-	/** The video for the option */
-	video?: VideoRef;
-};
+  /** Details about the option */
+  details?: string
 
-export type Question = {
-	/** The slot code on the election describing the position, role, or question filled by this question */
-	code: string;
+  /** Additional information link */
+  infoURL?: string
 
-	/** Description of the position, role, or question to be filled by the eventual election */
-	title: string;
+  /** The image for the option */
+  image?: ImageRef
 
-	/** Markdown instructions for this question. */
-	instructions: string;
+  /** The video for the option */
+  video?: VideoRef
+}
 
-	dependsOn?: {
-		/** The question code that this question depends on */
-		code: string;
+export interface Question {
+  /** The slot code on the election describing the position, role, or question filled by this question */
+  code: string
 
-		/** The answer value(s) to the question that this question depends on */
-		valuesExpression?: string;
-	};
+  /** Description of the position, role, or question to be filled by the eventual election */
+  title: string
 
-	/** The options to be selected from or ranked - must have at least one entry for a select or rank question */
-	options: Option[];
+  /** Markdown instructions for this question. */
+  instructions: string
 
-	/** Type of question. Default: 'select'	*/
-	type: 'select' | 'rank' | 'score' | 'text';
+  dependsOn?: {
+    /** The question code that this question depends on */
+    code: string
 
-	/** minimum and maximum number of options to select from or rank (default 1 and 1) */
-	optionRange?: { min: number; max: number };
+    /** The answer value(s) to the question that this question depends on */
+    valuesExpression?: string
+  }
 
-	/** Preserve the order of the options (default false) */
-	optionsOrdered?: boolean;
+  /** The options to be selected from or ranked - must have at least one entry for a select or rank question */
+  options: Option[]
 
-	/** The range and step of scores that can be given */
-	scoreRange?: { min: number; max: number; step: number };
+  /** Type of question. Default: 'select' */
+  type: 'select' | 'rank' | 'score' | 'text'
 
-	/** The grouping (hierarchy) containing the question */
-	group?: string;
+  /** minimum and maximum number of options to select from or rank (default 1 and 1) */
+  optionRange?: { min: number, max: number }
 
-	/** The sequence of the question within the group */
-	sequence?: number;
+  /** Preserve the order of the options (default false) */
+  optionsOrdered?: boolean
 
-	/** Required.  Default: true. */
-	required?: boolean;
-};
+  /** The range and step of scores that can be given */
+  scoreRange?: { min: number, max: number, step: number }
 
-export type QuestionSummary = {
-	/** The code of the question */
-	code: string;
+  /** The grouping (hierarchy) containing the question */
+  group?: string
 
-	/** The title of the question */
-	title: string;
+  /** The sequence of the question within the group */
+  sequence?: number
 
-	/** The type of question */
-	type: 'select' | 'rank' | 'score' | 'text';
-};
+  /** Required.  Default: true. */
+  required?: boolean
+}
+
+export interface QuestionSummary {
+  /** The code of the question */
+  code: string
+
+  /** The title of the question */
+  title: string
+
+  /** The type of question */
+  type: 'select' | 'rank' | 'score' | 'text'
+}

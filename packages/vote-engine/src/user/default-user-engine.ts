@@ -1,11 +1,29 @@
-import type { IDefaultUserEngine, User } from '@votetorrent/vote-core';
+import type { DefaultUser, IDefaultUserEngine, IDefaultUserSetBuilder, LocalStorage } from '@votetorrent/vote-core'
+import { DefaultUserSetBuilder } from './builders/index.js'
 
+/**
+ * USER-08 — DefaultUserEngine backed by {@link LocalStorage}.
+ *
+ * The default user (name + optional imageRef) is the bootstrap identity
+ * the app uses before any Network has been opened. Persistence is
+ * device-local (LocalStorage / AsyncStorage) — there is no DB row.
+ */
 export class DefaultUserEngine implements IDefaultUserEngine {
-	async get(): Promise<User | undefined> {
-		throw new Error('Not implemented');
-	}
+  private static readonly STORAGE_KEY = 'defaultUser'
 
-	async set(user: User): Promise<void> {
-		throw new Error('Not implemented');
-	}
+  constructor (private readonly localStorage: LocalStorage) {}
+
+  async get (): Promise<DefaultUser | undefined> {
+    return await this.localStorage.getItem<DefaultUser>(
+      DefaultUserEngine.STORAGE_KEY
+    )
+  }
+
+  async set (user: DefaultUser): Promise<void> {
+    await this.localStorage.setItem(DefaultUserEngine.STORAGE_KEY, user)
+  }
+
+  buildSet (): IDefaultUserSetBuilder {
+    return new DefaultUserSetBuilder(this)
+  }
 }

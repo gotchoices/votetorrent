@@ -1,11 +1,17 @@
+import { MockElectionEngine } from '../election/mock-election-engine.js';
+import { ElectionsCreateElectionBuilder } from './builders/elections-create-election-builder.js';
+import { ElectionsAdjustElectionBuilder } from './builders/elections-adjust-election-builder.js';
 import type {
 	ElectionInit,
+	ElectionRevisionInit,
 	ElectionSummary,
 	IElectionEngine,
+	IElectionsAdjustElectionBuilder,
+	IElectionsCreateElectionBuilder,
 	IElectionsEngine,
+	ElectionType,
+	Proposal,
 } from '@votetorrent/vote-core';
-import type { ElectionType, Proposal } from '@votetorrent/vote-core';
-import { MockElectionEngine } from '../election/mock-election-engine.js';
 
 // Helper function to get Unix timestamp
 const getUnixTimestamp = (date: Date): number =>
@@ -36,35 +42,60 @@ const mockElectionInitData: ElectionInit = {
 		title: 'Proposed Election 3',
 		date: getUnixTimestamp(new Date(Date.now() + 14 * 24 * 60 * 60 * 1000)), // Starts in 14 days
 		revisionDeadline: getUnixTimestamp(
-			new Date(Date.now() + 10 * 24 * 60 * 60 * 1000)
+			new Date(Date.now() + 10 * 24 * 60 * 60 * 1000),
 		), // 10 days from now
+		ballotDeadline: getUnixTimestamp(
+			new Date(Date.now() + 12 * 24 * 60 * 60 * 1000),
+		), // 12 days from now
 		type: 'adhoc' as ElectionType,
 	},
 	revision: {
 		electionId: 'election-3' as string,
 		revision: 1,
-		revisionTimestamp: [], // Mock timestamp
+		revisionTimestamp: getUnixTimestamp(new Date()), // Mock timestamp
 		tags: ['proposed', 'test'],
 		instructions: 'These are the instructions for the proposed election.',
-		keyholders: [{ name: 'Keyholder 1' }, { name: 'Keyholder 2' }],
+		// Plan 03-01 Rule-3 transitional cast: invitePrivate was removed
+		// from base Invite (D-24). Plan 02 will refactor these mock
+		// keyholder literals to the *Share subtype.
+		keyholders: [
+			{
+				name: 'Keyholder 1',
+				type: 'au',
+				expiration: '0',
+				inviteKey: '',
+				invitePrivate: '',
+				inviteSignature: '',
+				digest: '',
+			},
+			{
+				name: 'Keyholder 2',
+				type: 'of',
+				expiration: '0',
+				inviteKey: '',
+				invitePrivate: '',
+				inviteSignature: '',
+				digest: '',
+			},
+		] as unknown as ElectionRevisionInit['keyholders'],
 		timeline: {
 			registrationEnds: getUnixTimestamp(
-				new Date(Date.now() + 15 * 24 * 60 * 60 * 1000)
+				new Date(Date.now() + 15 * 24 * 60 * 60 * 1000),
 			),
 			ballotsFinal: getUnixTimestamp(
-				new Date(Date.now() + 16 * 24 * 60 * 60 * 1000)
+				new Date(Date.now() + 16 * 24 * 60 * 60 * 1000),
 			),
 			votingStarts: getUnixTimestamp(
-				new Date(Date.now() + 17 * 24 * 60 * 60 * 1000)
+				new Date(Date.now() + 17 * 24 * 60 * 60 * 1000),
 			),
 			tallyingStarts: getUnixTimestamp(
-				new Date(Date.now() + 21 * 24 * 60 * 60 * 1000)
+				new Date(Date.now() + 21 * 24 * 60 * 60 * 1000),
 			),
 			validation: getUnixTimestamp(
-				new Date(Date.now() + 22 * 24 * 60 * 60 * 1000)
+				new Date(Date.now() + 22 * 24 * 60 * 60 * 1000),
 			),
 			certificationStarts: getUnixTimestamp(
-				new Date(Date.now() + 23 * 24 * 60 * 60 * 1000)
+				new Date(Date.now() + 23 * 24 * 60 * 60 * 1000),
 			),
 			closed: getUnixTimestamp(new Date(Date.now() + 24 * 24 * 60 * 60 * 1000)),
 		},
@@ -72,20 +103,21 @@ const mockElectionInitData: ElectionInit = {
 	},
 };
 
-const mockProposedElections: Proposal<ElectionInit>[] = [
+const mockProposedElections: Array<Proposal<ElectionInit>> = [
 	{
 		proposed: mockElectionInitData,
 		timestamp: getUnixTimestamp(new Date()),
-		signatures: [], // Mock signatures
+		signers: [],
 	},
 ];
 
 export class MockElectionsEngine implements IElectionsEngine {
-	private elections: Map<string, ElectionSummary> = new Map(
-		mockElections.map((e) => [e.id, e])
+	private readonly elections = new Map<string, ElectionSummary>(
+		mockElections.map((e) => [e.id, e]),
 	);
-	private proposedElections: Map<string, Proposal<ElectionInit>> = new Map(
-		mockProposedElections.map((p) => [p.proposed.election.id, p])
+
+	private readonly proposedElections = new Map<string, Proposal<ElectionInit>>(
+		mockProposedElections.map((p) => [p.proposed.election.id, p]),
 	);
 
 	async adjustElection(election: ElectionInit): Promise<void> {
@@ -141,9 +173,17 @@ export class MockElectionsEngine implements IElectionsEngine {
 		return Array.from(this.elections.values()).filter((e) => e.date >= now);
 	}
 
-	async getProposedElections(): Promise<Proposal<ElectionInit>[]> {
+	async getProposedElections(): Promise<Array<Proposal<ElectionInit>>> {
 		console.log('Getting proposed elections');
 		return Array.from(this.proposedElections.values());
+	}
+
+	buildCreateElection(): IElectionsCreateElectionBuilder {
+		return new ElectionsCreateElectionBuilder(this);
+	}
+
+	buildAdjustElection(): IElectionsAdjustElectionBuilder {
+		return new ElectionsAdjustElectionBuilder(this);
 	}
 
 	async openElection(electionId: string): Promise<IElectionEngine> {

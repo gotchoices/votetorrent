@@ -1,6 +1,6 @@
-export type Cursor<T> = {
-	buffer: T[];
-	offset: number;
-	firstBOF: boolean;
-	lastEOF: boolean;
+export interface Cursor<T> {
+  buffer: T[]
+  offset: number
+  firstBOF: boolean
+  lastEOF: boolean
 }

@@ -86,3 +86,8 @@ typings/
 # TypeScript output
 dist
 out
+
+.planning
+.planning/*
+
+.claude

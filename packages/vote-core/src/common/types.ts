@@ -1,1 +1,1 @@
-export type Timestamp = number;
+export type Timestamp = number
