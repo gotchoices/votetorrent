@@ -1,14 +1,27 @@
 import { ConstraintError, MisuseError, QuereusError } from '@quereus/quereus'
 import {
+  type AdminDigestArgs,
   type ISigningEngine,
+  type ISigningSignBuilder,
+  type ISigningStartSigningSessionBuilder,
   type Scope,
   type Signature,
   type SigningResult
 } from '@votetorrent/vote-core'
+import { SigningSignBuilder } from './builders/signing-sign-builder.js'
+import { SigningStartSigningSessionBuilder } from './builders/signing-start-signing-session-builder.js'
 import { type EngineContext } from '../types'
+import { nowCanonicalDatetime } from '../utils.js'
 
 export class SigningEngine implements ISigningEngine {
   constructor (private readonly ctx: EngineContext) {}
+
+  /** D-18: Generate a fresh nonce without creating AdminSigning.
+   *  Invite flows call this first, then INSERT InviteSlots (with the nonce),
+   *  then call startSigningSession with digestArgs=null + the same nonce. */
+  generateSigningNonce (): string {
+    return crypto.randomUUID()
+  }
 
   async sign (nonce: string, signature: Signature): Promise<boolean> {
     try {
@@ -38,7 +51,7 @@ export class SigningEngine implements ISigningEngine {
 					  userId: signature.signerUserId,
 					  signerKey: signature.signerKey,
 					  signature: signature.signature,
-					  now: Date.now()
+					  now: nowCanonicalDatetime()
 					}
         )
 
@@ -128,13 +141,33 @@ export class SigningEngine implements ISigningEngine {
     }
   }
 
+  /** D-06/D-08/D-17: Two-path startSigningSession.
+   *
+   * PATH A (digestArgs provided — used by proposeAdmin):
+   *   Generate a fresh nonce, INSERT AdminSigning with inline
+   *   Digest(:authorityId, :effectiveAt, :thresholdPolicies) in alphabetical order.
+   *
+   * PATH B (digestArgs is null — used by invite flows via saveInviteWithSigning):
+   *   Callers must first call generateSigningNonce() to get the nonce, INSERT
+   *   InviteSlots with that nonce, then call this with digestArgs=null + the same nonce.
+   *   INSERT AdminSigning with a Digest subquery over the InviteSlot tagged with that nonce.
+   */
   async startSigningSession (
     authorityId: string,
-    digest: string,
+    digestArgs: AdminDigestArgs | null,
     scope: Scope,
-    signature: Signature
+    signature: Signature,
+    nonce?: string
   ): Promise<SigningResult> {
-    const nonce = crypto.randomUUID()
+    // PATH A: non-invite callers — generate a fresh nonce
+    // PATH B: invite callers — must supply the pre-generated nonce
+    const sessionNonce = digestArgs !== null
+      ? crypto.randomUUID()
+      : (() => {
+          if (!nonce) throw new Error('nonce is required when digestArgs is null (invite flow)')
+          return nonce
+        })()
+
     try {
       const adminDB = await this.ctx.db
         .prepare(
@@ -150,40 +183,81 @@ export class SigningEngine implements ISigningEngine {
       if (!adminDB) {
         throw new Error('Admin not found')
       }
-      await this.ctx.db.exec(
-				`insert into AdminSigning (
-					Nonce,
-					AuthorityId,
-					AdminEffectiveAt,
-					Scope,
-					Digest,
-					UserId,
-					SignerKey,
-					Signature
-				)
-				with context now = :now, IsSignatureValid = true, IsSignerKeyValid = true
-				values (
-					:nonce,
-					:authorityId,
-					:adminEffectiveAt,
-					:scope,
-					:digest,
-					:userId,
-					:signerKey,
-					:signature
-				)`,
-				{
-				  nonce,
-				  authorityId,
-				  adminEffectiveAt: adminDB.EffectiveAt as number,
-				  scope,
-				  digest,
-				  userId: signature.signerUserId,
-				  signerKey: signature.signerKey,
-				  signature: signature.signature,
-				  now: Date.now()
-				}
-      )
+
+      if (digestArgs !== null) {
+        // PATH A: inline Digest() — fields in alphabetical order (D-07d)
+        // AdminDigestArgs fields: authorityId, effectiveAt, thresholdPolicies
+        await this.ctx.db.exec(
+					`insert into AdminSigning (
+						Nonce,
+						AuthorityId,
+						AdminEffectiveAt,
+						Scope,
+						Digest,
+						UserId,
+						SignerKey,
+						Signature
+					)
+					with context now = :now, IsSignatureValid = true, IsSignerKeyValid = true
+					values (
+						:nonce,
+						:authorityId,
+						:adminEffectiveAt,
+						:scope,
+						Digest(:authorityId, :effectiveAt, :thresholdPolicies),
+						:userId,
+						:signerKey,
+						:signature
+					)`,
+					{
+					  nonce: sessionNonce,
+					  authorityId,
+					  adminEffectiveAt: adminDB.EffectiveAt as string,
+					  scope,
+					  effectiveAt: digestArgs.effectiveAt,
+					  thresholdPolicies: digestArgs.thresholdPolicies,
+					  userId: signature.signerUserId,
+					  signerKey: signature.signerKey,
+					  signature: signature.signature,
+					  now: nowCanonicalDatetime()
+					}
+        )
+      } else {
+        // PATH B: Digest subquery over the InviteSlot tagged with this nonce (D-17)
+        await this.ctx.db.exec(
+					`insert into AdminSigning (
+						Nonce,
+						AuthorityId,
+						AdminEffectiveAt,
+						Scope,
+						Digest,
+						UserId,
+						SignerKey,
+						Signature
+					)
+					with context now = :now, IsSignatureValid = true, IsSignerKeyValid = true
+					values (
+						:nonce,
+						:authorityId,
+						:adminEffectiveAt,
+						:scope,
+						(SELECT Digest(Cid) FROM InviteSlot WHERE SigningNonce = :nonce),
+						:userId,
+						:signerKey,
+						:signature
+					)`,
+					{
+					  nonce: sessionNonce,
+					  authorityId,
+					  adminEffectiveAt: adminDB.EffectiveAt as string,
+					  scope,
+					  userId: signature.signerUserId,
+					  signerKey: signature.signerKey,
+					  signature: signature.signature,
+					  now: nowCanonicalDatetime()
+					}
+        )
+      }
     } catch (err) {
       if (err instanceof QuereusError) {
         throw new Error(`Quereus error (code ${err.code}): ${err.message}`)
@@ -193,7 +267,15 @@ export class SigningEngine implements ISigningEngine {
         throw new Error(`Unknown error: ${err}`)
       }
     }
-    const thresholdReached = await this.sign(nonce, signature)
-    return { nonce, thresholdReached }
+    const thresholdReached = await this.sign(sessionNonce, signature)
+    return { nonce: sessionNonce, thresholdReached }
+  }
+
+  buildSign (): ISigningSignBuilder {
+    return new SigningSignBuilder(this)
+  }
+
+  buildStartSigningSession (): ISigningStartSigningSessionBuilder {
+    return new SigningStartSigningSessionBuilder(this)
   }
 }

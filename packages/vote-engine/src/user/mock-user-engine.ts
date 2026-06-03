@@ -8,7 +8,11 @@ import type {
   AddUserKeyHistory,
   CreateUserHistory,
   DeviceAdvertisement,
+  IUserAddKeyBuilder,
+  IUserCreateBuilder,
   IUserEngine,
+  IUserReviseBuilder,
+  IUserRevokeKeyBuilder,
   ReviseUserHistory,
   RevokeUserKeyHistory,
   Scope,
@@ -16,6 +20,12 @@ import type {
   UserHistory,
   UserKey
 } from '@votetorrent/vote-core'
+import {
+  UserAddKeyBuilder,
+  UserCreateBuilder,
+  UserReviseBuilder,
+  UserRevokeKeyBuilder
+} from './builders/index.js'
 
 export class MockUserEngine implements IUserEngine {
   // Store local copies of the mock data to allow for modification within an instance
@@ -53,7 +63,10 @@ export class MockUserEngine implements IUserEngine {
     }
   }
 
-  async create (userInit: CreateUserHistory): Promise<void> {
+  async create (
+    userInit: CreateUserHistory,
+    _options?: { inviteSlotCid?: string; inviteSignature?: string }
+  ): Promise<void> {
     // This method re-initializes the user for this engine instance
     this.mockUser = {
       id: generateId('user'), // Generate a new ID for the created user
@@ -123,5 +136,23 @@ export class MockUserEngine implements IUserEngine {
       key: keyToRevoke
     }
     this.mockHistory = [...this.mockHistory, historyEntry]
+  }
+
+  // ---------- builder factories ----------
+
+  buildCreate (): IUserCreateBuilder {
+    return new UserCreateBuilder(this)
+  }
+
+  buildAddKey (): IUserAddKeyBuilder {
+    return new UserAddKeyBuilder(this)
+  }
+
+  buildRevise (): IUserReviseBuilder {
+    return new UserReviseBuilder(this)
+  }
+
+  buildRevokeKey (): IUserRevokeKeyBuilder {
+    return new UserRevokeKeyBuilder(this)
   }
 }

@@ -9,38 +9,7 @@ import type { SqlValue } from '@quereus/quereus';
 import cryptoPlugin from '@optimystic/quereus-plugin-crypto/plugin';
 import { SignatureValid as jsSignatureValid } from '@optimystic/quereus-plugin-crypto';
 
-let customFunctionsRegistered = false;
-
 async function registerCustomFunctions(db: Database): Promise<void> {
-	if (!customFunctionsRegistered) {
-		customFunctionsRegistered = true;
-		const quereusMain = fileURLToPath(import.meta.resolve('@quereus/quereus'));
-		const quereusRoot = resolve(dirname(quereusMain), '../..');
-		const windowModPath = resolve(quereusRoot, 'dist/src/schema/window-function.js');
-		const { registerWindowFunction } = await import(windowModPath);
-		registerWindowFunction({
-			name: 'DigestAll',
-			argCount: 1,
-			returnType: {
-				typeClass: 'scalar',
-				logicalType: TEXT_TYPE,
-				nullable: true,
-				isReadOnly: true
-			},
-			requiresOrderBy: false,
-			kind: 'aggregate',
-			step: (state: unknown, value: unknown) => {
-				if (value === null || value === undefined) return state;
-				if (!state) return String(value);
-				return (state as string) + String(value);
-			},
-			final: (state: unknown) => {
-				if (!state) return null;
-				return createHash('sha256').update(state as string).digest('base64url');
-			}
-		});
-	}
-
 	const signatureValidSchema = createScalarFunction(
 		{
 			name: 'SignatureValid',
@@ -98,7 +67,7 @@ async function registerCustomFunctions(db: Database): Promise<void> {
  *
  * NOTE: This function is intentionally schema-only (single-responsibility per
  * Phase 2 D-02). It does NOT register plugins. Callers that need the crypto
- * plugin's SQL functions (`Digest`, `DigestAll`, `SignatureValid`, ...) to
+ * plugin's SQL functions (`Digest`, `SignatureValid`, ...) to
  * resolve in schema constraints must call `prepareDb(db)` instead, which
  * registers the plugin and then calls `initDB`.
  */
@@ -122,8 +91,8 @@ export async function initDB(db: Database): Promise<void> {
 
 /**
  * Prepare a fresh Quereus database for VoteTorrent use: register the crypto
- * plugin (so schema constraint references to `Digest`, `DigestAll`,
- * `SignatureValid`, etc. resolve), then load the schema via `initDB`.
+ * plugin (so schema constraint references to `Digest`, `SignatureValid`,
+ * etc. resolve), then load the schema via `initDB`.
  *
  * Per Phase 2 D-02 / D-02b option (b): production code (NetworksEngine.createContext)
  * and Phase 1's schema-load.spec.ts both route through this single helper so the

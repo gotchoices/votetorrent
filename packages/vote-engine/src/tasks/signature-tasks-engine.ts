@@ -4,10 +4,12 @@ import type { EngineContext } from '../types.js'
 import type {
   ISigningEngine,
   ISignatureTasksEngine,
+  ISignatureTasksCompleteSignatureBuilder,
   NetworkReference,
   SignatureResult,
   SignatureTask
 } from '@votetorrent/vote-core'
+import { CompleteSignatureBuilder } from './builders/index.js'
 
 // Phase 05 TASK-03/04 — monotonic Tid counter for SignatureTasksEngine.
 let nextTid = 1
@@ -129,6 +131,10 @@ export class SignatureTasksEngine implements ISignatureTasksEngine {
     } catch (err) {
       this.rethrow(err, 'completeSignature')
     }
+  }
+
+  buildCompleteSignature (): ISignatureTasksCompleteSignatureBuilder {
+    return new CompleteSignatureBuilder(this)
   }
 
   // ---------- helpers ----------

@@ -1,12 +1,16 @@
 import { MisuseError, QuereusError } from '@quereus/quereus'
 import { UserHistoryEvent } from '@votetorrent/vote-core'
-import { parseJsonOr } from '../utils.js'
+import { fromCanonicalDatetime, nowCanonicalDatetime, parseJsonOr, toCanonicalDatetime } from '../utils.js'
 import type { EngineContext } from '../types.js'
 import type {
   CreateUserHistory,
   DeviceAdvertisement,
   ImageRef,
+  IUserAddKeyBuilder,
+  IUserCreateBuilder,
   IUserEngine,
+  IUserReviseBuilder,
+  IUserRevokeKeyBuilder,
   ReviseUserHistory,
   Timestamp,
   User,
@@ -14,6 +18,12 @@ import type {
   UserKey,
   UserKeyType
 } from '@votetorrent/vote-core'
+import {
+  UserAddKeyBuilder,
+  UserCreateBuilder,
+  UserReviseBuilder,
+  UserRevokeKeyBuilder
+} from './builders/index.js'
 
 // Phase 04 USER-02/04/05/06: monotonic Tid counter for UserEngine batches.
 // Local to this module — mirrors NetworksEngine's pattern. Re-evaluate at
@@ -69,7 +79,7 @@ export class UserEngine implements IUserEngine {
           userId: this.user.id,
           keyType: key.type,
           keyValue: key.key,
-          expiration: key.expiration,
+          expiration: toCanonicalDatetime(key.expiration),
           userKey: signerKey,
           // No application-level signature is carried on UserKey — the
           // schema's SignatureValid is satisfied by the
@@ -78,7 +88,7 @@ export class UserEngine implements IUserEngine {
           // can pre-sign via the signing engine and then bind signature
           // through a follow-up addKey overload (Phase 6 — TEST-01).
           signature: null,
-          now: Date.now()
+          now: nowCanonicalDatetime()
         }
       )
     } catch (err) {
@@ -97,7 +107,10 @@ export class UserEngine implements IUserEngine {
    * cross-table CHECKs (User.UserKeyValid → UserKey, UserKey.UserIdValid
    * → User) at end-of-batch rather than at each insert moment.
    */
-  async create (userInit: CreateUserHistory): Promise<void> {
+  async create (
+    userInit: CreateUserHistory,
+    options?: { inviteSlotCid?: string; inviteSignature?: string }
+  ): Promise<void> {
     this.requireCtx('create')
     const tid = nextTid++
     const imageRefJson = userInit.imageRef ? JSON.stringify(userInit.imageRef) : null
@@ -109,7 +122,7 @@ export class UserEngine implements IUserEngine {
 					Name,
 					ImageRef
 				)
-				with context SigningNonce = null, InviteSlotCid = null, InviteSignature = null, Tid = ${tid}
+				with context SigningNonce = null, InviteSlotCid = :inviteSlotCid, InviteSignature = :inviteSignature, Tid = ${tid}
 				values (:userId, :userName, :userImageRef);
 
 				insert into UserKey (
@@ -127,8 +140,10 @@ export class UserEngine implements IUserEngine {
           userImageRef: imageRefJson,
           keyType: userInit.userKey.type,
           keyValue: userInit.userKey.key,
-          expiration: userInit.userKey.expiration,
-          now: Date.now()
+          expiration: toCanonicalDatetime(userInit.userKey.expiration),
+          inviteSlotCid: options?.inviteSlotCid ?? null,
+          inviteSignature: options?.inviteSignature ?? null,
+          now: nowCanonicalDatetime()
         }
       )
     } catch (err) {
@@ -165,12 +180,12 @@ export class UserEngine implements IUserEngine {
       const activeKeys: UserKey[] = []
       for await (const k of this.ctx.db.eval(
         'select PubKey, Type, Expiration from UserKey where UserId = :id and Expiration > :date',
-        { id: this.user.id, date: Date.now() }
+        { id: this.user.id, date: nowCanonicalDatetime() }
       )) {
         activeKeys.push({
           key: k.PubKey as string,
           type: k.Type as UserKeyType,
-          expiration: k.Expiration as Timestamp
+          expiration: fromCanonicalDatetime(k.Expiration as string)
         })
       }
       return {
@@ -254,12 +269,30 @@ export class UserEngine implements IUserEngine {
           pubKey: keyToRevoke,
           userKey: signerKey,
           signature: null,
-          now: Date.now()
+          now: nowCanonicalDatetime()
         }
       )
     } catch (err) {
       this.rethrow(err, 'revokeKey')
     }
+  }
+
+  // ---------- builder factories ----------
+
+  buildCreate (): IUserCreateBuilder {
+    return new UserCreateBuilder(this)
+  }
+
+  buildAddKey (): IUserAddKeyBuilder {
+    return new UserAddKeyBuilder(this)
+  }
+
+  buildRevise (): IUserReviseBuilder {
+    return new UserReviseBuilder(this)
+  }
+
+  buildRevokeKey (): IUserRevokeKeyBuilder {
+    return new UserRevokeKeyBuilder(this)
   }
 
   // ---------- helpers ----------

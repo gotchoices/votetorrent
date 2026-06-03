@@ -1,4 +1,5 @@
-import type { DefaultUser, IDefaultUserEngine, LocalStorage } from '@votetorrent/vote-core'
+import type { DefaultUser, IDefaultUserEngine, IDefaultUserSetBuilder, LocalStorage } from '@votetorrent/vote-core'
+import { DefaultUserSetBuilder } from './builders/index.js'
 
 /**
  * USER-08 — DefaultUserEngine backed by {@link LocalStorage}.
@@ -20,5 +21,9 @@ export class DefaultUserEngine implements IDefaultUserEngine {
 
   async set (user: DefaultUser): Promise<void> {
     await this.localStorage.setItem(DefaultUserEngine.STORAGE_KEY, user)
+  }
+
+  buildSet (): IDefaultUserSetBuilder {
+    return new DefaultUserSetBuilder(this)
   }
 }

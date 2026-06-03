@@ -1,6 +1,7 @@
 import { MisuseError, QuereusError } from '@quereus/quereus'
 import type { EngineContext } from '../types.js'
-import type { IOnboardingTasksEngine } from '@votetorrent/vote-core'
+import type { IOnboardingTasksEngine, IOnboardingTasksSetOnboardingTaskCompletedBuilder } from '@votetorrent/vote-core'
+import { SetOnboardingTaskCompletedBuilder } from './builders/index.js'
 
 // Phase 05 TASK-05/06 — monotonic Tid counter for OnboardingTasksEngine.
 let nextTid = 1
@@ -65,6 +66,10 @@ export class OnboardingTasksEngine implements IOnboardingTasksEngine {
     } catch (err) {
       this.rethrow(err, 'setOnboardingTaskCompleted')
     }
+  }
+
+  buildSetOnboardingTaskCompleted (): IOnboardingTasksSetOnboardingTaskCompletedBuilder {
+    return new SetOnboardingTaskCompletedBuilder(this)
   }
 
   // ---------- helpers ----------

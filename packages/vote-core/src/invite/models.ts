@@ -13,9 +13,6 @@ export interface Invite {
 
   /** Hex-encoded secp256k1 compact signature (128 chars, 64 bytes). */
   inviteSignature: string
-
-  /** The digest of the invitation */
-  digest: string
 }
 
 export interface InviteStatus<TSentInvite> {

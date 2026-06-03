@@ -1,14 +1,19 @@
 import { QuereusError, MisuseError } from '@quereus/quereus'
 import { AuthorityEngine } from '../authority/authority-engine.js'
 import { UserEngine } from '../user/user-engine.js'
-import { asText, parseJsonOr } from '../utils.js'
+import { asText, fromCanonicalDatetime, nowCanonicalDatetime, parseJsonOr, toCanonicalDatetime } from '../utils.js'
 import type { EngineContext } from '../types.js'
 import type {
   Authority,
   Cursor,
   IAuthorityEngine,
   ImageRef,
+  INetworkCreateAuthorityBuilder,
   INetworkEngine,
+  INetworkPinAuthorityBuilder,
+  INetworkProposeRevisionBuilder,
+  INetworkRespondToInviteBuilder,
+  INetworkUnpinAuthorityBuilder,
   IUserEngine,
   LocalStorage as ILocalStorage,
   Network,
@@ -23,6 +28,7 @@ import type {
   IElectionEngine,
   AdminInit,
   AuthorityInit,
+  AuthorityInviteInvokes,
   InviteAction,
   ElectionType,
   ElectionCoreInit,
@@ -32,6 +38,11 @@ import type {
   UserKeyType,
   User
 } from '@votetorrent/vote-core'
+import { NetworkCreateAuthorityBuilder } from './builders/network-create-authority-builder.js'
+import { NetworkPinAuthorityBuilder } from './builders/network-pin-authority-builder.js'
+import { NetworkUnpinAuthorityBuilder } from './builders/network-unpin-authority-builder.js'
+import { NetworkProposeRevisionBuilder } from './builders/network-propose-revision-builder.js'
+import { NetworkRespondToInviteBuilder } from './builders/network-respond-to-invite-builder.js'
 
 export class NetworkEngine implements INetworkEngine {
   constructor (
@@ -43,21 +54,110 @@ export class NetworkEngine implements INetworkEngine {
   /** This is used for a new authority when responding to an invite, not when made as part of a network creation */
   async createAuthority (
     authority: AuthorityInit,
-    admin: AdminInit
+    admin: AdminInit,
+    options?: { inviteSlotCid?: string; inviteSignature?: string }
   ): Promise<void> {
-    const id = crypto.randomUUID()
+    // Group B (Phase 12.3-01): when responding to an invite, the authority Id
+    // was already generated and committed in InviteResult.InvokedId by
+    // respondToInvite() (so its Digest(Tid, Id, Name, DomainName, ImageRef)
+    // matches Authority.InsertValid). Reuse that Id here; otherwise fall
+    // back to a fresh uuid for the first-authority shoe-in path (no invite).
+    let id: string = crypto.randomUUID()
+    if (options?.inviteSlotCid) {
+      const invokedRow = await this.ctx.db
+        .prepare('select InvokedId from InviteResult where SlotCid = :slotCid')
+        .get({ slotCid: options.inviteSlotCid })
+      const reservedId = invokedRow?.InvokedId
+      if (typeof reservedId === 'string' && reservedId.length > 0) {
+        id = reservedId
+      }
+    }
     const imageRefJson = authority.imageUrl
       ? JSON.stringify(authority.imageUrl)
       : null
     const thresholdPoliciesJson = JSON.stringify(admin.thresholdPolicies)
 
-    const firstOfficer = admin.officers?.[0]
-    if (!firstOfficer?.init) {
+    if (!admin.officers || admin.officers.length === 0 || !admin.officers[0]?.init) {
       throw new Error('Failed to create authority: Officer init is required')
     }
-    const officerInit = firstOfficer.init
+
+    const adminEffectiveAtCanonical = toCanonicalDatetime(admin.effectiveAt)
+    // WR-05 (12.4-REVIEW): fail fast when an invite-bound createAuthority is
+    // invoked without an authenticated current user. Officer.UserIdValid
+    // (qsql:170) requires `exists (select 1 from User U where U.Id = new.UserId)`
+    // — a null UserId binding cannot satisfy that existence CHECK, producing
+    // a non-actionable schema error instead of a clear "no current user" one.
+    // Same class as WR-04 (silent encoding mismatch between the two sites
+    // that must agree byte-for-byte for D-09 binding) but on the userId
+    // channel.
+    //
+    // v1.2 follow-up: AdminInit.OfficerInit does not currently carry a per-
+    // officer `userId` field, so the engine binds `ctx.user.id` for every
+    // officer row. Once OfficerInit gains a `userId` channel, this guard
+    // should also verify the caller-supplied first-officer userId matches
+    // what respondToInvite bound into InviteResult.Digest.
+    if (options?.inviteSlotCid && !this.ctx.user?.id) {
+      throw new Error('createAuthority: invite-bound flow requires an authenticated current user')
+    }
+    const callerUserId = this.ctx.user?.id ?? null
+
+    // D-09 / Decision 2 (Phase 12.4): sort officers by UserId ASC so the first
+    // officer inserted is the one whose Digest was bound into InviteResult by
+    // respondToInvite. All officers insert (D-07c relaxes Officer.InsertValid
+    // Branch 2 to existence-only) but only officer[0] is hash-bound to the
+    // invite. Use the caller's user id as a per-officer fallback when init
+    // omits a userId (mirrors the pre-Phase-12.4 single-officer behavior).
+    const officerRows = admin.officers
+      .filter((o): o is { init: NonNullable<typeof o.init> } => o?.init != null)
+      .map(o => ({
+        userId: callerUserId,
+        title: o.init.title,
+        scopes: JSON.stringify(o.init.scopes),
+      }))
+      .sort((a, b) => {
+        // D-09 (WR-01): use codepoint comparison (`<` / `>` on strings) to
+        // match quereus' TEXT `order by UserId asc` binary ordering. JS
+        // `localeCompare` is locale-sensitive and host-ICU-dependent — for
+        // non-ASCII userIds it would diverge from the schema's recompute and
+        // silently break the Admin.MutationValid CHECK.
+        const ua = a.userId ?? ''
+        const ub = b.userId ?? ''
+        return ua < ub ? -1 : ua > ub ? 1 : 0
+      })
+
+    // Phase 12.2: invite context params (inviteSlotCid, inviteSignature)
+    // are passed through for second-authority creation per D-06/TEST-03.
+    // For the first authority these default to null (backward-compat).
+    const authorityParams = {
+      id,
+      name: authority.name,
+      // Coerce undefined → null so quereus's strict TEXT-or-NULL binding
+      // accepts the missing-domainName case (Rule 2 — safety; the test
+      // 'should set Authority.DomainName to the provided value or null'
+      // constructs an AuthorityInit without domainName via `as never`).
+      domainName: authority.domainName ?? null,
+      imageRef: imageRefJson,
+      inviteSlotCid: options?.inviteSlotCid ?? null,
+      inviteSignature: options?.inviteSignature ?? null,
+      tid: 1
+    }
 
     try {
+      // D-07a (Phase 12.4): insert order is Authority → Officer (sorted by
+      // UserId ASC) → Admin. Three separate db.exec calls because the
+      // D-07g probe (12.4-00-SUMMARY) shows quereus 3.3.0 fires CHECKs
+      // per-statement inside a single batch — collapsing into one db.exec
+      // in this order would trip Officer.AdminValid before Admin exists
+      // (the conditional short-circuit in D-07d handles the invite-bound
+      // path, but the non-invite first-authority path still requires
+      // Admin-first ordering, which createAuthority's first-authority
+      // shoe-in case relies on through the very-first-authority shoe-in
+      // branch where InviteSlotCid is null). Three-batch shape works for
+      // both paths.
+
+      // TX1 — Authority insert (Authority.InsertValid fires; Branch 2
+      // existence-only under D-07b for invite-bound; Branch 1 shoe-in
+      // for very-first-authority).
       await this.ctx.db.exec(
 				`insert into Authority (
 					Id,
@@ -65,37 +165,62 @@ export class NetworkEngine implements INetworkEngine {
 					DomainName,
 					ImageRef
 				)
-				with context SigningNonce = null, InviteSlotCid = null, InviteSignature = null, Tid = :tid
+				with context SigningNonce = null, InviteSlotCid = :inviteSlotCid, InviteSignature = :inviteSignature, Tid = :tid
 				values (:id, :name, :domainName, :imageRef);
+				`,
+				authorityParams
+      )
 
-				insert into Admin (
+      // TX2 — Officer inserts (one per officer, sorted by UserId ASC).
+      // Officer.AdminValid is conditionally short-circuited for the
+      // invite-bound path (D-07d). Officer.InsertValid Branch 2 is
+      // existence-only under D-07c.
+      for (const officer of officerRows) {
+        await this.ctx.db.exec(
+					`insert into Officer (
+						AuthorityId,
+						AdminEffectiveAt,
+						UserId,
+						Title,
+						Scopes
+					)
+					with context SigningNonce = null, InviteSlotCid = :inviteSlotCid, InviteSignature = :inviteSignature, Tid = :tid
+					values (:authorityId, :adminEffectiveAt, :userId, :title, :scopes);
+					`,
+          {
+            authorityId: id,
+            adminEffectiveAt: adminEffectiveAtCanonical,
+            userId: officer.userId,
+            title: officer.title,
+            scopes: officer.scopes,
+            inviteSlotCid: options?.inviteSlotCid ?? null,
+            inviteSignature: options?.inviteSignature ?? null,
+            tid: 1,
+          }
+        )
+      }
+
+      // TX3 — Admin insert last. Admin.MutationValid fires here with
+      // full 7-arg binding (both sub-Admin and sub-Officer subqueries
+      // populated under D-09 ORDER BY UserId LIMIT 1). This is the
+      // authoritative cryptographic gate (D-07e).
+      await this.ctx.db.exec(
+				`insert into Admin (
 					AuthorityId,
 					EffectiveAt,
 					ThresholdPolicies
 				)
-				with context SigningNonce = null, InviteSlotCid = null, InviteSignature = null, Tid = :tid
+				with context SigningNonce = null, InviteSlotCid = :inviteSlotCid, InviteSignature = :inviteSignature, Tid = :tid
 				values (:authorityId, :adminEffectiveAt, :thresholdPolicies);
-
-				insert into Officer (
-					AuthorityId,
-					AdminEffectiveAt,
-					UserId,
-					Title,
-					Scopes
-				)
-				with context SigningNonce = null, InviteSlotCid = null, InviteSignature = null, Tid = :tid
-				values (:authorityId, :adminEffectiveAt, :userId, :title, :scopes);
 				`,
-				{
-				  id,
-				  name: authority.name,
-				  domainName: authority.domainName,
-				  imageRef: imageRefJson,
-				  authorityId: id,
-				  adminEffectiveAt: admin.effectiveAt,
-				  thresholdPolicies: thresholdPoliciesJson,
-				  tid: 1
-				}
+        {
+          authorityId: id,
+          adminEffectiveAt: adminEffectiveAtCanonical,
+          thresholdPolicies: thresholdPoliciesJson,
+          inviteSlotCid: options?.inviteSlotCid ?? null,
+          inviteSignature: options?.inviteSignature ?? null,
+          tid: 1,
+        }
       )
     } catch (err) {
       if (err instanceof QuereusError) {
@@ -255,18 +380,18 @@ export class NetworkEngine implements INetworkEngine {
     try {
       for await (const election of this.ctx.db.eval(
 				`
-					select
-						Id, Title, AuthorityName, Date, Type
-					from Election
-					where Date < :date
+					select E.Id, E.Title, A.Name as AuthorityName, E.Date, E.Type
+					from Election E
+					join Authority A on A.Id = E.AuthorityId
+					where E.Date < :date
 				`,
-				{ date: Date.now() }
+				{ date: nowCanonicalDatetime() }
       )) {
         elections.push({
           id: election.Id as string,
           title: election.Title as string,
           authorityName: election.AuthorityName as string,
-          date: new Date(election.Date as number).getTime(),
+          date: fromCanonicalDatetime(election.Date as string),
           type: election.Type as ElectionType
         })
       }
@@ -287,17 +412,17 @@ export class NetworkEngine implements INetworkEngine {
     try {
       for await (const election of this.ctx.db.eval(
 				`
-					select
-						Id, Title, AuthorityName, Date, Type
-					from Election
-					where Date > :date`,
-				{ date: Date.now() }
+					select E.Id, E.Title, A.Name as AuthorityName, E.Date, E.Type
+					from Election E
+					join Authority A on A.Id = E.AuthorityId
+					where E.Date > :date`,
+				{ date: nowCanonicalDatetime() }
       )) {
         elections.push({
           id: election.Id as string,
           title: election.Title as string,
           authorityName: election.AuthorityName as string,
-          date: new Date(election.Date as number).getTime(),
+          date: fromCanonicalDatetime(election.Date as string),
           type: election.Type as ElectionType
         })
       }
@@ -382,17 +507,17 @@ export class NetworkEngine implements INetworkEngine {
 					from ProposedElection
 					where Date > :date
 				`,
-				{ date: Date.now() }
+				{ date: nowCanonicalDatetime() }
       )) {
         proposedElections.push({
           id: proposal.Id as string,
           authorityId: proposal.AuthorityId as string,
           title: proposal.Title as string,
-          date: new Date(proposal.Date as number).getTime(),
-          revisionDeadline: new Date(
-            proposal.RevisionDeadline as number
-          ).getTime(),
-          ballotDeadline: new Date(proposal.BallotDeadline as number).getTime(),
+          date: fromCanonicalDatetime(proposal.Date as string),
+          revisionDeadline: fromCanonicalDatetime(
+            proposal.RevisionDeadline as string
+          ),
+          ballotDeadline: fromCanonicalDatetime(proposal.BallotDeadline as string),
           type: proposal.Type as ElectionType
         })
       }
@@ -411,7 +536,7 @@ export class NetworkEngine implements INetworkEngine {
           proposedElectionRevisions.push({
             electionId: revRow.ElectionId as string,
             revision: revRow.Revision as number,
-            revisionTimestamp: revRow.RevisionTimestamp as Timestamp,
+            revisionTimestamp: fromCanonicalDatetime(revRow.RevisionTimestamp as string),
             tags: parseJsonOr<string[]>(
               revRow.Tags,
               [],
@@ -469,12 +594,12 @@ export class NetworkEngine implements INetworkEngine {
       const activeKeys: UserKey[] = []
       for await (const key of this.ctx.db.eval(
         'select PubKey, Type, Expiration from UserKey where UserId = :id and Expiration > :date',
-        { id: userId, date: Date.now() }
+        { id: userId, date: nowCanonicalDatetime() }
       )) {
         activeKeys.push({
           key: key.PubKey as string,
           type: key.Type as UserKeyType,
-          expiration: key.Expiration as Timestamp
+          expiration: fromCanonicalDatetime(key.Expiration as string)
         })
       }
       const user: User = {
@@ -573,10 +698,10 @@ export class NetworkEngine implements INetworkEngine {
       const userKey = this.ctx.user?.activeKeys?.[0]?.key ?? null
       await this.ctx.db.exec(
 				`insert into ProposedNetwork
-					(Name, ImageRef, Relays, TimestampAuthorities, NumberRequiredTSAs, ElectionType)
+					(Name, Revision, ImageRef, Relays, TimestampAuthorities, NumberRequiredTSAs, ElectionType)
 				with context UserId = :userId, UserKey = :userKey, Signature = null, Tid = 0, now = :now, IsUserValid = true
 				values
-					(:name, :imageRef, :relays, :timestampAuthorities, :numberRequiredTSAs, :electionType)`,
+					(:name, coalesce((select max(Revision) from ProposedNetwork where Name = :name), -1) + 1, :imageRef, :relays, :timestampAuthorities, :numberRequiredTSAs, :electionType)`,
 				{
 				  name: revision.name,
 				  imageRef: imageRefJson,
@@ -586,7 +711,7 @@ export class NetworkEngine implements INetworkEngine {
 				  electionType: revision.policies.electionType,
 				  userId: this.ctx.user?.id ?? null,
 				  userKey,
-				  now: Date.now()
+				  now: nowCanonicalDatetime()
 				}
       )
     } catch (error) {
@@ -614,37 +739,153 @@ export class NetworkEngine implements INetworkEngine {
     // existing AdminSignature row for the slot and a valid signature
     // over the digest. This method is the engine boundary; the caller
     // supplies the already-computed signature in the InviteAction.
-    const slotCid = invite.invite.digest
+    // D-05: query InviteSlot by InviteKey+Type for CID (SQL-side, not JS-computed)
+    const slotRow = await this.ctx.db
+      .prepare('SELECT Cid FROM InviteSlot WHERE InviteKey = :inviteKey AND Type = :type')
+      .get({ inviteKey: invite.invite.inviteKey, type: invite.invite.type })
+    if (!slotRow) throw new Error('InviteSlot not found for given inviteKey and type')
+    const slotCid = slotRow.Cid as string
+    // Group B (Phase 12.3-01): for authority invites, generate the authority
+    // Id at invite-response time so the SQL-side Digest() committed to
+    // InviteResult.Digest matches what Authority.InsertValid recomputes when
+    // the downstream createAuthority() insert fires:
+    //   Digest(context.Tid, new.Id, new.Name, new.DomainName, new.ImageRef)
+    // The generated id is stored in InviteResult.InvokedId; createAuthority
+    // looks it up via inviteSlotCid and reuses it as the new Authority.Id.
+    const isAuthorityInvite = invite.invite.type === 'au'
+    const invokesAuthority =
+      isAuthorityInvite && invite.isAccepted
+        ? ((invite.invokes as unknown as {
+            authority?: {
+              name?: string
+              domainName?: string | null
+              imageUrl?: string | null
+            }
+          }).authority ?? {})
+        : null
+    const generatedAuthorityId =
+      isAuthorityInvite && invite.isAccepted ? crypto.randomUUID() : null
     const invokedId =
-      invite.userId ?? (invite.userInit ? crypto.randomUUID() : null)
-    const resultDigest = invite.isAccepted
-      ? JSON.stringify(invite.invokes)
+      invite.userId
+      ?? generatedAuthorityId
+      ?? (invite.userInit ? crypto.randomUUID() : null)
+    // Tid binding (1) matches createAuthority's hard-coded Tid = 1 so
+    // Digest(context.Tid, ...) on the Authority insert side reproduces the
+    // exact value committed here. If Tid ever becomes non-static, both sites
+    // must read from a shared source.
+    //
+    // WR-04 (12.4-REVIEW): use the same field name (`imageUrl`) and same
+    // serialization (`JSON.stringify(stringValue)` → quoted-JSON) as
+    // createAuthority above. Previously this site read `invokes.imageRef`
+    // (typed `unknown`) while createAuthority read `authority.imageUrl`
+    // — an object-shaped value (e.g. `{ url: ... }`) would silently
+    // produce a different JSON encoding at the two sites and trip
+    // Admin.MutationValid TX3 with a non-actionable CHECK error.
+    const authorityImageRefJson = invokesAuthority?.imageUrl != null
+      ? JSON.stringify(invokesAuthority.imageUrl)
       : null
     try {
-      await this.ctx.db.exec(
-				`insert into InviteResult (
-					SlotCid,
-					IsAccepted,
-					Digest,
-					InviteSignature,
-					InvokedId
-				)
-				with context IsSigningValid = true, IsSignatureValid = true
-				values (
-					:slotCid,
-					:isAccepted,
-					:digest,
-					:inviteSignature,
-					:invokedId
-				)`,
-        {
-          slotCid,
-          isAccepted: invite.isAccepted,
-          digest: resultDigest,
-          inviteSignature: invite.inviteSignature,
-          invokedId
+      if (isAuthorityInvite && invite.isAccepted) {
+        // D-06 / D-09 (Phase 12.4): the engine commits a 7-arg Digest to
+        // InviteResult.Digest so that Admin.MutationValid (which fires last
+        // under D-07a insert order Authority → Officer → Admin) can recompute
+        // the same 7-arg Digest and validate the entire invite bundle.
+        //
+        // Schema's nested Officer subquery is `(select Digest(AdminEffectiveAt,
+        // UserId, Title, Scopes) from (select * from Officer ... order by
+        // UserId asc limit 1))` — a single-row scalar. We mirror that by
+        // computing `Digest(...)` as an inline scalar over the first
+        // (lex-smallest UserId) officer's columns.
+        const invokesAdmin = (invite.invokes as unknown as AuthorityInviteInvokes).admin
+        const invokesOfficers = (invite.invokes as unknown as AuthorityInviteInvokes).officers
+        // Pitfall 5 / T-12.4-01-03 mitigation: silently committing a wrong-shape
+        // Digest here would land an invite that no downstream createAuthority
+        // insert can satisfy.
+        if (invokesAdmin == null || !Array.isArray(invokesOfficers) || invokesOfficers.length === 0) {
+          throw new Error('respondToInvite: authority invite requires invokes.admin and non-empty invokes.officers[]')
         }
-      )
+        // D-09: sort by userId ASC and bind only the first officer's columns
+        // into InviteResult.Digest. Officers 2..N are not hash-bound — this is
+        // the documented v1.2 follow-up limitation.
+        // D-09 (WR-01): codepoint comparison to mirror SQL `order by UserId asc`.
+        // localeCompare is locale-sensitive; binary `<`/`>` matches quereus TEXT
+        // ordering and keeps the bound first-officer identity consistent across
+        // engine and schema.
+        const sortedOfficers = [...invokesOfficers].sort(
+          (a, b) => a.userId < b.userId ? -1 : a.userId > b.userId ? 1 : 0
+        )
+        const firstOfficer = sortedOfficers[0]!
+        await this.ctx.db.exec(
+					`insert into InviteResult (
+						SlotCid,
+						IsAccepted,
+						Digest,
+						InviteSignature,
+						InvokedId
+					)
+					with context IsSigningValid = true, IsSignatureValid = true
+					values (
+						:slotCid,
+						:isAccepted,
+						Digest(:tid, :authorityId, :authorityName, :authorityDomainName, :authorityImageRef,
+							Digest(:adminEffectiveAt, :adminThresholdPolicies),
+							Digest(:officerAdminEffectiveAt, :officerUserId, :officerTitle, :officerScopes)
+						),
+						:inviteSignature,
+						:invokedId
+					)`,
+          {
+            slotCid,
+            isAccepted: invite.isAccepted,
+            tid: 1,
+            authorityId: generatedAuthorityId,
+            authorityName: invokesAuthority?.name ?? null,
+            authorityDomainName: invokesAuthority?.domainName ?? null,
+            authorityImageRef: authorityImageRefJson,
+            adminEffectiveAt: invokesAdmin.effectiveAt,
+            adminThresholdPolicies: invokesAdmin.thresholdPolicies,
+            officerAdminEffectiveAt: firstOfficer.adminEffectiveAt,
+            officerUserId: firstOfficer.userId,
+            officerTitle: firstOfficer.title,
+            officerScopes: firstOfficer.scopes,
+            inviteSignature: invite.inviteSignature,
+            invokedId
+          }
+        )
+      } else {
+        // Non-authority accepted invites and rejections: Digest column is
+        // either null (rejection) or an opaque JSON blob (legacy semantics
+        // for user / officer / keyholder / registrant invites). User
+        // invite chain validation lives in Plan 12.3-07; this branch
+        // preserves existing behavior.
+        const resultDigest = invite.isAccepted
+          ? JSON.stringify(invite.invokes)
+          : null
+        await this.ctx.db.exec(
+					`insert into InviteResult (
+						SlotCid,
+						IsAccepted,
+						Digest,
+						InviteSignature,
+						InvokedId
+					)
+					with context IsSigningValid = true, IsSignatureValid = true
+					values (
+						:slotCid,
+						:isAccepted,
+						:digest,
+						:inviteSignature,
+						:invokedId
+					)`,
+          {
+            slotCid,
+            isAccepted: invite.isAccepted,
+            digest: resultDigest,
+            inviteSignature: invite.inviteSignature,
+            invokedId
+          }
+        )
+      }
     } catch (err) {
       if (err instanceof QuereusError) {
         throw new Error(`Quereus error (code ${err.code}): ${err.message}`)
@@ -663,5 +904,27 @@ export class NetworkEngine implements INetworkEngine {
       (authority) => authority.id !== authorityId
     )
     await this.localStorage.setItem('pinnedAuthorities', filtered)
+  }
+
+  // ---- Builder factories (FACT-01 / FACT-04) ----
+
+  buildCreateAuthority (): INetworkCreateAuthorityBuilder {
+    return new NetworkCreateAuthorityBuilder(this)
+  }
+
+  buildPinAuthority (): INetworkPinAuthorityBuilder {
+    return new NetworkPinAuthorityBuilder(this)
+  }
+
+  buildUnpinAuthority (): INetworkUnpinAuthorityBuilder {
+    return new NetworkUnpinAuthorityBuilder(this)
+  }
+
+  buildProposeRevision (): INetworkProposeRevisionBuilder {
+    return new NetworkProposeRevisionBuilder(this)
+  }
+
+  buildRespondToInvite<TInvokes> (): INetworkRespondToInviteBuilder<TInvokes> {
+    return new NetworkRespondToInviteBuilder(this) as unknown as INetworkRespondToInviteBuilder<TInvokes>
   }
 }

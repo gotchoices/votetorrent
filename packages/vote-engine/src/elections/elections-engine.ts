@@ -1,20 +1,28 @@
 import { MisuseError, QuereusError } from '@quereus/quereus'
 import { ElectionEngine } from '../election/election-engine.js'
+import { fromCanonicalDatetime, nowCanonicalDatetime, toCanonicalDatetime } from '../utils.js'
 import type { EngineContext } from '../types.js'
 import type {
   ElectionInit,
   ElectionSummary,
   ElectionType,
   IElectionEngine,
+  IElectionsAdjustElectionBuilder,
+  IElectionsCreateElectionBuilder,
   IElectionsEngine,
   Proposal
 } from '@votetorrent/vote-core'
+import { ElectionsCreateElectionBuilder } from './builders/elections-create-election-builder.js'
+import { ElectionsAdjustElectionBuilder } from './builders/elections-adjust-election-builder.js'
 
 // Phase 05 ELEC-01/02 — monotonic Tid counter for ElectionsEngine batches.
 // Mirrors NetworksEngine/UserEngine pattern. Re-evaluate at the v2
 // persistence milestone (PERSIST-01) — a process-local counter can collide
 // with stored Tids once DBs persist across runs.
 let nextTid = 1
+
+/** For test use only — returns the Tid that the next createElection() call will use. */
+export function peekNextElectionTid (): number { return nextTid }
 
 /**
  * ElectionsEngine — Phase 05 (ELEC-01, ELEC-02) implementation.
@@ -68,6 +76,8 @@ export class ElectionsEngine implements IElectionsEngine {
           id: e.id,
           authorityId: e.authorityId,
           title: e.title,
+          // ProposedElection has no DateValid CHECK — raw epoch ms is fine
+          // here (quereus 3.1.2 datetime columns accept raw numbers).
           date: e.date,
           revisionDeadline: e.revisionDeadline,
           ballotDeadline: e.ballotDeadline,
@@ -79,7 +89,7 @@ export class ElectionsEngine implements IElectionsEngine {
           // through the AdminSigning/AdminSignature pipeline. Phase 6 /
           // TEST-01 will tighten this contract to require a Signature here.
           signature: null,
-          now: Date.now()
+          now: nowCanonicalDatetime()
         }
       )
     } catch (err) {
@@ -98,7 +108,7 @@ export class ElectionsEngine implements IElectionsEngine {
    * The schema's `InsertOnly check on update, delete (false)` is exactly
    * the constraint pattern that quereus#23 breaks today on INSERT.
    */
-  async createElection (election: ElectionInit): Promise<void> {
+  async createElection (election: ElectionInit, options?: { signingNonce?: string }): Promise<void> {
     this.requireCtx('createElection')
     const tid = nextTid++
     const e = election.election
@@ -127,17 +137,12 @@ export class ElectionsEngine implements IElectionsEngine {
           id: e.id,
           authorityId: e.authorityId,
           title: e.title,
-          date: e.date,
-          revisionDeadline: e.revisionDeadline,
-          ballotDeadline: e.ballotDeadline,
+          date: toCanonicalDatetime(e.date),
+          revisionDeadline: toCanonicalDatetime(e.revisionDeadline),
+          ballotDeadline: toCanonicalDatetime(e.ballotDeadline),
           type: e.type,
-          // The signing nonce is expected to be supplied by the caller via
-          // the surrounding signing session (Phase 6 / TEST-01 tightens the
-          // surface to take the nonce explicitly). Today we forward null;
-          // when the schema's InsertValid CHECK becomes enforceable post
-          // #23, the call site supplies it via context binding overload.
-          signingNonce: null,
-          now: Date.now()
+          signingNonce: options?.signingNonce ?? null,
+          now: nowCanonicalDatetime()
         }
       )
     } catch (err) {
@@ -152,7 +157,7 @@ export class ElectionsEngine implements IElectionsEngine {
   async getElectionHistory (): Promise<ElectionSummary[]> {
     if (!this.ctx) return []
     const out: ElectionSummary[] = []
-    const now = Date.now()
+    const now = nowCanonicalDatetime()
     try {
       for await (const row of this.ctx.db.eval(
 				`select E.Id, E.Title, A.Name as AuthorityName, E.Date, E.Type
@@ -164,7 +169,7 @@ export class ElectionsEngine implements IElectionsEngine {
           id: row.Id as string,
           title: row.Title as string,
           authorityName: row.AuthorityName as string,
-          date: row.Date as number,
+          date: fromCanonicalDatetime(row.Date as string),
           type: row.Type as ElectionType
         })
       }
@@ -182,7 +187,7 @@ export class ElectionsEngine implements IElectionsEngine {
   async getElections (): Promise<ElectionSummary[]> {
     if (!this.ctx) return []
     const out: ElectionSummary[] = []
-    const now = Date.now()
+    const now = nowCanonicalDatetime()
     try {
       for await (const row of this.ctx.db.eval(
 				`select E.Id, E.Title, A.Name as AuthorityName, E.Date, E.Type
@@ -194,7 +199,7 @@ export class ElectionsEngine implements IElectionsEngine {
           id: row.Id as string,
           title: row.Title as string,
           authorityName: row.AuthorityName as string,
-          date: row.Date as number,
+          date: fromCanonicalDatetime(row.Date as string),
           type: row.Type as ElectionType
         })
       }
@@ -219,9 +224,9 @@ export class ElectionsEngine implements IElectionsEngine {
               id: row.Id as string,
               authorityId: row.AuthorityId as string,
               title: row.Title as string,
-              date: row.Date as number,
-              revisionDeadline: row.RevisionDeadline as number,
-              ballotDeadline: row.BallotDeadline as number,
+              date: fromCanonicalDatetime(row.Date as string),
+              revisionDeadline: fromCanonicalDatetime(row.RevisionDeadline as string),
+              ballotDeadline: fromCanonicalDatetime(row.BallotDeadline as string),
               type: row.Type as ElectionType
             },
             revision: undefined as unknown as ElectionInit['revision']
@@ -251,6 +256,16 @@ export class ElectionsEngine implements IElectionsEngine {
       },
       this.ctx!
     )
+  }
+
+  // ---------- builder factories ----------
+
+  buildCreateElection (): IElectionsCreateElectionBuilder {
+    return new ElectionsCreateElectionBuilder(this)
+  }
+
+  buildAdjustElection (): IElectionsAdjustElectionBuilder {
+    return new ElectionsAdjustElectionBuilder(this)
   }
 
   // ---------- helpers ----------

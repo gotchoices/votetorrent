@@ -71,8 +71,18 @@ export interface AdminInit {
   /** The officers */
   officers: OfficerSelection[]
 
-  /** The effective date of the administration */
-  effectiveAt: Timestamp
+  /**
+   * The effective date of the administration.
+   *
+   * WR-06 (12.4-REVIEW): widened from `Timestamp` (number) to
+   * `Timestamp | string` so callers may pass a canonical-datetime ISO
+   * string (e.g. the value returned by `nowCanonicalDatetime()` and
+   * propagated through `seedAuthorityInvite`'s `adminEffectiveAt` field).
+   * The engine normalizes both forms through `toCanonicalDatetime`. This
+   * removes the need for the `as never` casts that previously bypassed
+   * type-checking at the test boundary.
+   */
+  effectiveAt: Timestamp | string
 
   /** Threshold policies */
   thresholdPolicies: ThresholdPolicy[]
@@ -110,6 +120,17 @@ export interface OfficerInit {
 
   /** Scopes of the officer */
   scopes: Scope[]
+
+  // WR-05 (12.4-REVIEW) / v1.2 follow-up: this type does NOT yet carry a
+  // per-officer `userId` field. `NetworkEngine.createAuthority` therefore
+  // binds `ctx.user.id` for every officer row, which works for the single-
+  // officer happy path but cannot represent a true multi-officer invite
+  // where each officer has a distinct userId. When this gap is closed (add
+  // `userId?: string` here, thread through OfficerSelection / Admin invite
+  // flows, and have createAuthority verify the caller-supplied first-officer
+  // userId matches the one bound into InviteResult.Digest by respondToInvite),
+  // remove the `callerUserId` fallback and the WR-05 guard in
+  // `network-engine.ts:createAuthority`.
 }
 
 export interface OfficerSelection {

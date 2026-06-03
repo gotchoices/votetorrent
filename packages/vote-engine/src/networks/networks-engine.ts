@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto';
 import { Database, MisuseError, QuereusError } from '@quereus/quereus';
 import { NetworkEngine } from '../network/network-engine.js';
-import { H16 } from '../utils.js';
+import { H16, nowCanonicalDatetime, toCanonicalDatetime } from '../utils.js';
 import type { EngineContext } from '../types.js';
 import type {
 	LocalStorage,
@@ -10,8 +10,9 @@ import type {
 	NetworkReference,
 	User,
 } from '@votetorrent/vote-core';
-import type { INetworksEngine } from '@votetorrent/vote-core';
+import type { INetworksEngine, INetworksCreateBuilder } from '@votetorrent/vote-core';
 import { prepareDb } from '../database/initialize.js';
+import { NetworksCreateBuilder } from './builders/index.js';
 
 // Plan 03-05 Q1 — monotonic counter for Tid generation. Same Tid bound across
 // every INSERT in a single create() batch (matches the schema's "one logical
@@ -79,22 +80,43 @@ export class NetworksEngine implements INetworksEngine {
 		// Plan 03-05 Q1: one Tid per create() batch.
 		const tid = nextTid++;
 
+		const params = {
+			networkId,
+			networkHash,
+			networkName: networkInit.name,
+			networkImageRef: networkImageRefJson,
+			relays: relaysJson,
+			timestampAuthorities: tsaJson,
+			numberRequiredTSAs,
+			electionType: electionType.toString(),
+			primaryAuthorityId,
+			primaryAuthorityName: networkInit.primaryAuthority.name,
+			primaryAuthorityDomainName: networkInit.primaryAuthority.domainName,
+			primaryAuthorityImageRef: primaryAuthorityImageRefJson,
+			adminEffectiveAt: toCanonicalDatetime(networkInit.admin.effectiveAt),
+			thresholdPolicies,
+			userId: user.id,
+			title: officerInit.title,
+			scopes: officerScopesJson,
+			userName: user.name,
+			userImageRef: userImageRefJson,
+			keyType: 'user',
+			keyValue: firstKey.key,
+			expiration: toCanonicalDatetime(firstKey.expiration),
+			now: nowCanonicalDatetime(),
+		};
+
 		try {
-			// Plan 03-05 Task 3: db.exec (vs the old awaited db.eval which was a
-			// silent no-op — iterator never drained), with per-INSERT context
-			// envelopes (Plan 03-05 Q2 — engine-side per-INSERT binding) and
-			// the monotonic Tid bound for every statement in the batch.
+			// Phase 12.2 split-batch fix: split the six INSERTs into three
+			// sequential exec() calls so that Admin is committed before
+			// Officer (Officer.AdminValid CHECK requires Admin to exist).
+			// Defensive against future quereus versions that may evaluate
+			// CHECKs eagerly per-INSERT rather than deferring to batch end.
 			//
-			// All six INSERTs run in a single db.exec batch so Quereus's
-			// deferred-constraint queue can resolve cross-table CHECKs
-			// (notably Network.PrimaryAuthorityIdValid → Authority) at the
-			// end of the batch rather than at the moment of each insert.
-			//
-			// Schema kept as-written intentionally: when upstream Quereus
-			// ships fixes for #21 (view union-all), #22 (not-in), #23
-			// (check on delete), #24 (json_array_elements_text), the
-			// affected CHECK constraints will start enforcing correctly
-			// without any further engine change.
+			// 1. User + UserKey + Authority + Admin (no cross-table forward deps)
+			// 2. Officer (depends on Admin existing)
+			// 3. Network (depends on Authority existing, committed in batch 1)
+
 			await ctx.db.exec(
 				`
 				insert into User (
@@ -130,7 +152,12 @@ export class NetworksEngine implements INetworksEngine {
 				)
 				with context SigningNonce = null, InviteSlotCid = null, InviteSignature = null, Tid = ${tid}
 				values (:primaryAuthorityId, :adminEffectiveAt, :thresholdPolicies);
+				`,
+				params,
+			);
 
+			await ctx.db.exec(
+				`
 				insert into Officer (
 					AuthorityId,
 					AdminEffectiveAt,
@@ -140,7 +167,12 @@ export class NetworksEngine implements INetworksEngine {
 				)
 				with context SigningNonce = null, InviteSlotCid = null, InviteSignature = null, Tid = ${tid}
 				values (:primaryAuthorityId, :adminEffectiveAt, :userId, :title, :scopes);
+				`,
+				params,
+			);
 
+			await ctx.db.exec(
+				`
 				insert into Network (
 					Id,
 					Hash,
@@ -165,31 +197,7 @@ export class NetworksEngine implements INetworksEngine {
 					:electionType
 				);
 				`,
-				{
-					networkId,
-					networkHash,
-					networkName: networkInit.name,
-					networkImageRef: networkImageRefJson,
-					relays: relaysJson,
-					timestampAuthorities: tsaJson,
-					numberRequiredTSAs,
-					electionType: electionType.toString(),
-					primaryAuthorityId,
-					primaryAuthorityName: networkInit.primaryAuthority.name,
-					primaryAuthorityDomainName: networkInit.primaryAuthority.domainName,
-					primaryAuthorityImageRef: primaryAuthorityImageRefJson,
-					adminEffectiveAt: networkInit.admin.effectiveAt,
-					thresholdPolicies,
-					userId: user.id,
-					title: officerInit.title,
-					scopes: officerScopesJson,
-					userName: user.name,
-					userImageRef: userImageRefJson,
-					keyType: 'user',
-					keyValue: firstKey.key,
-					expiration: firstKey.expiration,
-					now: Date.now(),
-				},
+				params,
 			);
 		} catch (err) {
 			if (err instanceof QuereusError) {
@@ -258,6 +266,10 @@ export class NetworksEngine implements INetworksEngine {
 			}
 		}
 		return qNetworkEngine;
+	}
+
+	buildCreate (): INetworksCreateBuilder {
+		return new NetworksCreateBuilder(this);
 	}
 
 	private async createContext(user: User | undefined): Promise<EngineContext> {

@@ -22,6 +22,7 @@
 		"build": "tsc -p tsconfig.build.json",
 		"lint": "aegir lint",
 		"test": "TS_NODE_PROJECT=./tsconfig.test.json mocha --node-option=import=./register-ts-node.mjs --node-option=experimental-specifier-resolution=node --require tsconfig-paths/register \"test/**/*.spec.ts\"",
+		"guard:builders": "bash scripts/ci-grep-guard.sh",
 		"dep-check": "aegir dep-check"
 	},
 	"homepage": "https://github.com/gotchoices/votetorrent",
@@ -52,7 +53,7 @@
 		"@noble/curves": "^1.9.6",
 		"@noble/hashes": "^1.8.0",
 		"@optimystic/quereus-plugin-crypto": "^0.13.4",
-		"@quereus/quereus": "^3.1.2",
+		"@quereus/quereus": "3.3.0",
 		"@react-native-async-storage/async-storage": "^2.1.2",
 		"@votetorrent/vote-core": "^0.0.1",
 		"react": "19.0.0",

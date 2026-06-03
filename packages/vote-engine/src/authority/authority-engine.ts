@@ -1,16 +1,16 @@
 import { bytesToHex } from '@noble/curves/abstract/utils'
 import { secp256k1 } from '@noble/curves/secp256k1'
 import { sha256 } from '@noble/hashes/sha2'
-import { Digest } from '@optimystic/quereus-plugin-crypto'
 import { MisuseError, QuereusError } from '@quereus/quereus'
 import { Temporal } from 'temporal-polyfill'
 import { SigningEngine } from '../signing/signing-engine.js'
-import { asText, parseJsonOr } from '../utils.js'
+import { asText, fromCanonicalDatetime, nowCanonicalDatetime, parseJsonOr, toCanonicalDatetime } from '../utils.js'
 import type { EngineContext } from '../types.js'
 
 let nextTid = 1
 import type {
   AdminDetails,
+  AdminDigestArgs,
   AdminInit,
   Officer,
   OfficerInit,
@@ -21,6 +21,10 @@ import type {
   AuthorityInvite,
   AuthorityInviteShare,
   IAuthorityEngine,
+  IAuthorityCreateOfficerInviteBuilder,
+  IAuthorityCreateAuthorityInviteBuilder,
+  IAuthorityProposeAdminBuilder,
+  IAuthoritySaveInviteWithSigningBuilder,
   InviteStatus,
   Proposal,
   ISigningEngine,
@@ -32,6 +36,12 @@ import type {
   OfficerSelection,
   ImageRef
 } from '@votetorrent/vote-core'
+import {
+  AuthorityCreateOfficerInviteBuilder,
+  AuthorityCreateAuthorityInviteBuilder,
+  AuthorityProposeAdminBuilder,
+  AuthoritySaveInviteWithSigningBuilder
+} from './builders/index.js'
 
 export class AuthorityEngine implements IAuthorityEngine {
   constructor (
@@ -57,10 +67,10 @@ export class AuthorityEngine implements IAuthorityEngine {
       .add({ minutes: this.invitationSpanMinutes })
       .toString()
 
-    // Known divergence (deferred): the digest formula here does not match
-    // the schema's InviteSignatureValid / CidValid. Phase 6 / TEST-01
-    // surfaces the divergence via flow tests. Plan 03-02 hex-encodes
-    // the materials only — formula unchanged.
+    // D-05: digest formula now uses the unified helper (pipe-join, SHA-256,
+    // base64url) matching SQL Digest(). The signing formula below (TextEncoder
+    // + secp256k1.sign) is separate — it validates engine-side via
+    // context.IsSignatureValid, not via SQL Digest constraints (D-06).
     const signedBytes = new TextEncoder().encode(
       init.name + init.title + init.scopes + type + expiration + inviteKey
     )
@@ -74,16 +84,7 @@ export class AuthorityEngine implements IAuthorityEngine {
       expiration,
       inviteKey,
       invitePrivate,
-      inviteSignature,
-      digest: Digest(
-        init.name +
-					init.title +
-					init.scopes +
-					type +
-					expiration +
-					inviteKey +
-					inviteSignature
-      ).toString()
+      inviteSignature
     } satisfies OfficerInviteShare
   }
 
@@ -108,10 +109,7 @@ export class AuthorityEngine implements IAuthorityEngine {
       expiration,
       inviteKey,
       invitePrivate,
-      inviteSignature,
-      digest: Digest(
-        type + name + expiration + inviteKey + inviteSignature
-      ).toString()
+      inviteSignature
     } satisfies AuthorityInviteShare
   }
 
@@ -133,7 +131,7 @@ export class AuthorityEngine implements IAuthorityEngine {
         'select * from Officer where AuthorityId = :id and AdminEffectiveAt = :effectiveAt',
         {
 				  id: this.authority.id,
-				  effectiveAt: adminDB.EffectiveAt as number
+				  effectiveAt: adminDB.EffectiveAt as string
         }
       )) {
         officersDB.push({
@@ -150,7 +148,7 @@ export class AuthorityEngine implements IAuthorityEngine {
       const admin = {
         id: adminDB.Id as string,
         authorityId: adminDB.AuthorityId as string,
-        effectiveAt: adminDB.EffectiveAt as number,
+        effectiveAt: fromCanonicalDatetime(adminDB.EffectiveAt as string),
         officers: officersDB,
         thresholdPolicies: parseJsonOr<ThresholdPolicy[]>(
           adminDB.ThresholdPolicies,
@@ -171,7 +169,7 @@ export class AuthorityEngine implements IAuthorityEngine {
         'select * from ProposedOfficer where AuthorityId = :id and AdminEffectiveAt = :effectiveAt',
         {
 				  id: this.authority.id,
-				  effectiveAt: proposedAdminDB.EffectiveAt as number
+				  effectiveAt: proposedAdminDB.EffectiveAt as string
         }
       )) {
         proposedOfficersDB.push({
@@ -207,7 +205,7 @@ export class AuthorityEngine implements IAuthorityEngine {
         proposed: {
           proposed: {
             officers: proposedOfficersDB,
-            effectiveAt: proposedAdminDB.EffectiveAt as number,
+            effectiveAt: fromCanonicalDatetime(proposedAdminDB.EffectiveAt as string),
             thresholdPolicies: parseJsonOr<ThresholdPolicy[]>(
               proposedAdminDB.ThresholdPolicies,
               [],
@@ -246,10 +244,10 @@ export class AuthorityEngine implements IAuthorityEngine {
 
       const acceptedAuthorityInvites: Array<InviteResult & { cid: string }> = []
       for await (const inviteResult of this.ctx.db.eval(
-				`select SlotCid, IsAccepted, InviteSignature, InvokedId from InviteResult
+				`select InviteResult.SlotCid, InviteResult.IsAccepted, InviteResult.InviteSignature, InviteResult.InvokedId from InviteResult
 					join InviteSlot on InviteResult.SlotCid = InviteSlot.Cid
 						join AdminSigning on InviteSlot.SigningNonce = AdminSigning.Nonce
-				where AuthorityId = :id and Scope = :scope`,
+				where AdminSigning.AuthorityId = :id and AdminSigning.Scope = :scope`,
 				{ id: this.authority.id, scope: 'iad' }
       )) {
         acceptedAuthorityInvites.push({
@@ -381,22 +379,23 @@ export class AuthorityEngine implements IAuthorityEngine {
 				)`,
 				{
 				  authorityId: this.authority.id,
-				  effectiveAt: admin.proposed.effectiveAt,
+				  effectiveAt: toCanonicalDatetime(admin.proposed.effectiveAt),
 				  thresholdPolicies: thresholdPoliciesJson,
 				  signerUserId: signature.signerUserId,
 				  signerKey: signature.signerKey,
 				  signature: signature.signature,
-				  now: Date.now()
+				  now: nowCanonicalDatetime()
 				}
       )
 
+      const adminDigestArgs: AdminDigestArgs = {
+        authorityId: this.authority.id,
+        effectiveAt: toCanonicalDatetime(admin.proposed.effectiveAt),
+        thresholdPolicies: thresholdPoliciesJson
+      }
       const signingResult = await this.signingEngine.startSigningSession(
         this.authority.id,
-        Digest(
-          this.authority.id,
-          admin.proposed.effectiveAt,
-          thresholdPoliciesJson
-        ).toString(),
+        adminDigestArgs,
         'rad',
         signature
       )
@@ -429,19 +428,22 @@ export class AuthorityEngine implements IAuthorityEngine {
     scope: Scope, // either 'iad' for authority invites or 'rad' for officer invites
     signature: Signature
   ): Promise<void> {
-    const result = await this.signingEngine.startSigningSession(
-      this.authority.id,
-      invite.digest,
-      scope,
-      signature
-    )
+    // D-19: nonce first, InviteSlots second, AdminSigning (startSigningSession) third
+    const nonce = this.signingEngine.generateSigningNonce()
     if (invite.type === 'au') {
       // assume threshold for authority invites is 1
-      await this.saveAuthorityInvite(invite, result.nonce)
+      await this.saveAuthorityInvite(invite, nonce)
     } else {
       // assume threshold for officer invites is 1
-      await this.saveOfficerInvite(invite, result.nonce)
+      await this.saveOfficerInvite(invite, nonce)
     }
+    await this.signingEngine.startSigningSession(
+      this.authority.id,
+      null,
+      scope,
+      signature,
+      nonce
+    )
   }
 
   private async saveAuthorityInvite (
@@ -460,31 +462,25 @@ export class AuthorityEngine implements IAuthorityEngine {
 					InviteSignature,
 					SigningNonce
 					)
-					with context Tid = :tid, now = :now, IsSignatureValid = true, IsInsertValid = true
+					with context Tid = :tid, now = :now, IsSignatureValid = true, IsInsertValid = true, IsCidValid = true
 					values (
-						:cid,
+						Digest(:expiration, :inviteKey, :inviteSignature, :name, :nonce),
 						:type,
 						:name,
 						:expiration,
 						:inviteKey,
 						:inviteSignature,
-						:signingNonce
+						:nonce
 						)`,
 				{
-				  cid: Digest(
-				    invite.name,
-				    invite.expiration,
-				    invite.inviteKey,
-				    invite.inviteSignature,
-				    nonce
-				  ).toString(),
 				  type: 'au',
 				  name: invite.name,
 				  expiration: invite.expiration,
 				  inviteKey: invite.inviteKey,
 				  inviteSignature: invite.inviteSignature,
-				  signingNonce: nonce, tid: nextTid++,
-				  now: Date.now()
+				  nonce,
+				  tid: nextTid++,
+				  now: nowCanonicalDatetime()
 				}
       )
     } catch (err) {
@@ -514,36 +510,47 @@ export class AuthorityEngine implements IAuthorityEngine {
 					InviteSignature,
 					SigningNonce
 					)
-				with context Tid = :tid, now = :now, IsSignatureValid = true, IsInsertValid = true
+				with context Tid = :tid, now = :now, IsSignatureValid = true, IsInsertValid = true, IsCidValid = true
 				values (
-					:cid,
+					Digest(:expiration, :inviteKey, :inviteSignature, :name, :nonce, :type),
 					:type,
 					:name,
 					:expiration,
 					:inviteKey,
 					:inviteSignature,
-					:signingNonce
+					:nonce
 				)`,
 				{
-				  cid: Digest(
-				    invite.type,
-				    invite.name,
-				    invite.expiration,
-				    invite.inviteKey,
-				    invite.inviteSignature,
-				    nonce
-				  ).toString(),
 				  type: invite.type,
 				  name: invite.name,
 				  expiration: invite.expiration,
 				  inviteKey: invite.inviteKey,
 				  inviteSignature: invite.inviteSignature,
-				  signingNonce: nonce, tid: nextTid++,
-				  now: Date.now()
+				  nonce,
+				  tid: nextTid++,
+				  now: nowCanonicalDatetime()
 				}
       )
     } catch (error) {
       throw new Error('Failed to save officer invitation')
     }
+  }
+
+  // ---- builder factories (BUILD-AUTH-01 / FACT-04) ----
+
+  buildCreateOfficerInvite (): IAuthorityCreateOfficerInviteBuilder {
+    return new AuthorityCreateOfficerInviteBuilder(this)
+  }
+
+  buildCreateAuthorityInvite (): IAuthorityCreateAuthorityInviteBuilder {
+    return new AuthorityCreateAuthorityInviteBuilder(this)
+  }
+
+  buildProposeAdmin (): IAuthorityProposeAdminBuilder {
+    return new AuthorityProposeAdminBuilder(this)
+  }
+
+  buildSaveInviteWithSigning (): IAuthoritySaveInviteWithSigningBuilder {
+    return new AuthoritySaveInviteWithSigningBuilder(this)
   }
 }
