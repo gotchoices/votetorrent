@@ -3,6 +3,7 @@ import { Database, MisuseError, QuereusError } from '@quereus/quereus';
 import { NetworkEngine } from '../network/network-engine.js';
 import { H16, nowCanonicalDatetime, toCanonicalDatetime } from '../utils.js';
 import type { EngineContext } from '../types.js';
+import type { DbFactory } from '../types.js';
 import type {
 	LocalStorage,
 	INetworkEngine,
@@ -15,15 +16,20 @@ import type {
 	INetworksCreateBuilder,
 } from '@votetorrent/vote-core';
 
-import { prepareDb } from '../database/initialize.js';
+import {
+	registerDbPlugins,
+	initDB,
+	isSchemaInitialized,
+	writeSchemaVersionMarker,
+	ensureTidSequence,
+	readTidCounter,
+	incrementTidCounter,
+} from '../database/initialize.js';
 import { NetworksCreateBuilder } from './builders/index.js';
 
-// Plan 03-05 Q1 — monotonic counter for Tid generation. Same Tid bound across
-// every INSERT in a single create() batch (matches the schema's "one logical
-// transaction = one Tid" framing). Re-evaluate at v2 persistence milestone
-// (PERSIST-01): a process-local counter that resets to 1 on restart can
-// collide with stored Tids once DBs persist across runs.
-let nextTid = 1;
+// D-02: default in-memory factory — keeps all 581 existing tests passing unchanged.
+// Lives at module scope (not inside the class) so it is a stable default parameter.
+const inMemoryFactory: DbFactory = async (_hash: string) => new Database();
 
 export class NetworksEngine implements INetworksEngine {
 	// D-07: per-instance hash→EngineContext cache.
@@ -31,16 +37,26 @@ export class NetworksEngine implements INetworksEngine {
 	// D-11: no eviction in v1.0 — revisit at the v2 persistence milestone.
 	private readonly contexts = new Map<string, EngineContext>();
 
-	constructor(private readonly localStorage: LocalStorage) {}
+	// D-12: per-context monotonic Tid counter seeded from TidSequence on create/attach.
+	private readonly tidCounters = new Map<string, number>();
+
+	constructor(
+		private readonly localStorage: LocalStorage,
+		private readonly dbFactory: DbFactory = inMemoryFactory,
+	) {}
 
 	async clearRecentNetworks(): Promise<void> {
 		this.localStorage.removeItem('recentNetworks');
 	}
 
 	async create(networkInit: NetworkInit, user: User): Promise<INetworkEngine> {
+		// Compute networkHash early so we can pass it to createContext (D-01).
+		const networkId = crypto.randomUUID().toString();
+		const networkHash = H16(networkId);
+
 		let ctx: EngineContext;
 		try {
-			ctx = await this.createContext(user);
+			ctx = await this.createContext(user, networkHash);
 		} catch (error) {
 			throw new Error('Failed to create database context: ' + error);
 		}
@@ -65,9 +81,7 @@ export class NetworksEngine implements INetworksEngine {
 			? JSON.stringify(user.imageRef)
 			: null;
 
-		const networkId = crypto.randomUUID().toString();
 		const primaryAuthorityId = crypto.randomUUID().toString();
-		const networkHash = H16(networkId);
 
 		const firstOfficer = networkInit.admin.officers?.[0];
 		if (!firstOfficer?.init) {
@@ -81,8 +95,11 @@ export class NetworksEngine implements INetworksEngine {
 			throw new Error('Failed to create network: User key is required');
 		}
 
-		// Plan 03-05 Q1: one Tid per create() batch.
-		const tid = nextTid++;
+		// D-12: per-context Tid from tidCounters Map (seeded in createContext).
+		const tid = this.tidCounters.get(networkHash)!;
+		this.tidCounters.set(networkHash, tid + 1);
+		// Persist the bumped counter so re-attach resumes from the right value.
+		await incrementTidCounter(ctx.db);
 
 		const params = {
 			networkId,
@@ -213,9 +230,8 @@ export class NetworksEngine implements INetworksEngine {
 			}
 		}
 
-		// D-08: cache the freshly-built EngineContext so subsequent open()
-		// calls return a NetworkEngine bound to the same in-memory Database
-		// (the only place Database instances are constructed in production).
+		// Cache the freshly-built EngineContext so subsequent open() calls return
+		// a NetworkEngine bound to the same Database (single live handle, D-06).
 		this.contexts.set(networkHash, ctx);
 
 		// Update recent networks list
@@ -245,17 +261,59 @@ export class NetworksEngine implements INetworksEngine {
 		user: User | undefined,
 		storeAsRecent: boolean = true,
 	): Promise<INetworkEngine> {
-		// D-09/D-10: open() reads from the per-instance cache. The cached
-		// EngineContext.db is shared verbatim; the caller-supplied `user`
-		// is injected into a fresh wrapper without mutating the cached ctx
-		// (Claude's-discretion bullet on cache-context user field).
+		// D-06: cache-first — single live handle per store.
 		const cached = this.contexts.get(ref.hash);
-		if (!cached) {
+		if (cached) {
+			const ctx: EngineContext = { ...cached, user };
+			const qNetworkEngine = new NetworkEngine(ref, this.localStorage, ctx);
+			if (storeAsRecent) {
+				const recentNetworks: NetworkReference[] =
+					(await this.localStorage.getItem('recentNetworks')) ?? [];
+				if (recentNetworks.find((network) => network.hash === ref.hash)) {
+					this.localStorage.setItem('recentNetworks', [
+						ref,
+						...recentNetworks.filter((network) => network.hash !== ref.hash),
+					]);
+				} else {
+					this.localStorage.setItem('recentNetworks', [ref, ...recentNetworks]);
+				}
+			}
+			return qNetworkEngine;
+		}
+
+		// D-05: cache miss — re-attach ONLY if an initialized store already exists.
+		// open() MUST NOT route through createContext() (that path runs DDL and would
+		// silently fabricate a fresh empty DB for an unknown hash). Call the factory
+		// DIRECTLY, register plugins (no DDL), then gate on the schema-version marker.
+		// D-13: hard fail — do NOT fall back to new Database() on a factory open error.
+		let db: Database;
+		try {
+			db = await this.dbFactory(ref.hash);
+		} catch (error) {
+			throw new Error(
+				'Network not opened in this session — use create() first: ' + error,
+			);
+		}
+
+		// Always-run, NO DDL (D-07): register plugins and custom functions only.
+		await registerDbPlugins(db);
+
+		// D-05/D-08: if the store has no schema, it is fresh — there is nothing to
+		// re-attach to, so THROW. Do NOT run initDB here (that is create()'s job).
+		const initialized = await isSchemaInitialized(db);
+		if (!initialized) {
 			throw new Error(
 				'Network not opened in this session — use create() first',
 			);
 		}
-		const ctx: EngineContext = { ...cached, user };
+
+		// Re-attach (store exists + initialized): seed Tid from persisted counter (D-12),
+		// then cache the single live handle (D-06).
+		const seed = await readTidCounter(db);
+		this.tidCounters.set(ref.hash, seed);
+
+		const ctx: EngineContext = { db, user };
+		this.contexts.set(ref.hash, ctx);
 		const qNetworkEngine = new NetworkEngine(ref, this.localStorage, ctx);
 		if (storeAsRecent) {
 			const recentNetworks: NetworkReference[] =
@@ -276,10 +334,19 @@ export class NetworksEngine implements INetworksEngine {
 		return new NetworksCreateBuilder(this);
 	}
 
-	private async createContext(user: User | undefined): Promise<EngineContext> {
-		const db = new Database();
-		// Register crypto plugin then load schema (Phase 2 D-02 / D-02b option (b)).
-		await prepareDb(db);
+	// D-01: factory-backed createContext — this is the CREATE path. DDL runs here
+	// on fresh stores (isSchemaInitialized gate). open() MUST NOT call this method.
+	private async createContext(user: User | undefined, hash: string): Promise<EngineContext> {
+		const db = await this.dbFactory(hash);           // D-01: factory, not new Database()
+		await registerDbPlugins(db);                     // D-07: always-run (plugins/functions)
+		const initialized = await isSchemaInitialized(db); // D-08: sentinel check
+		if (!initialized) {
+			await initDB(db);                            // D-07: DDL only on fresh store
+			await ensureTidSequence(db);                 // D-12: create TidSequence table
+			await writeSchemaVersionMarker(db);          // D-08: plant the marker
+		}
+		const seed = await readTidCounter(db);           // D-12: seed per-context Tid
+		this.tidCounters.set(hash, seed);
 		const ctx: EngineContext = { db, user };
 		return ctx;
 	}
