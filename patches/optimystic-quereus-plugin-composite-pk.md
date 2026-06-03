@@ -43,3 +43,44 @@ Compiled equivalent currently applied locally at:
 ## Repro
 apps/VoteTorrentAuthority/src/engines/persistence-proof-runner.ts runVtabCheckProbe()
 probes A-H. Pre-fix: C/D FAIL, F full-composite-key read = undefined. Post-fix: all PASS.
+
+---
+
+# Second finding: re-attach requires re-declaring the schema (engine design)
+
+Status: ROOT-CAUSED on-device, fix NOT yet landed (needs cross-backend reconciliation).
+
+## Observation (probes T / T2, on-device)
+Opening a SECOND Quereus Database handle on an existing Optimystic/LevelDB store does
+NOT auto-restore the table catalog: `select ... from Network` → "Table 'Network' not
+found in schema path: main", even though count(*) on the original handle is 1 and the
+data is persisted. Re-running the schema DDL on the fresh handle makes the tables visible
+AND preserves the rows (probe T2: Network count = 1 after re-declare — bind, not wipe).
+
+## Impact
+The Phase-14 locked design D-05/D-07 ("open() never runs DDL; re-attach is plugins-only")
+is INVALID on the persistent backend. open() after a restart gets a fresh handle from
+rnDbFactory and therefore sees NO tables → re-attach (PERSIST-02) and the read-after-restart
+proof cannot work as designed. runWritePhase's second-handle count hit the same wall.
+
+## Why it's not a one-liner
+Quereus `declare schema main { ... }` is DECLARATIVE. Re-running it:
+  - on the persistent vtab (fresh handle): binds persisted tables (works — probe T2).
+  - on in-memory (handle already has the schema): triggers a declarative MIGRATION that
+    fails ("Cannot DROP NOT NULL on PRIMARY KEY column 'DependsOn'").
+So "always re-run DDL on re-attach" breaks the in-memory backend / the 594-test suite.
+
+## Recommended fix design (next focused pass)
+open() re-attach must re-declare the schema ONLY when this handle doesn't already have it:
+  1. registerDbPlugins(db)
+  2. detect whether domain tables are declared in THIS handle (e.g. try `select 1 from
+     Network`); if declared (in-memory cache-miss mock) → skip re-declare.
+  3. if NOT declared (persistent fresh handle) → re-run the domain DDL (binds data) +
+     re-declare SchemaVersion/TidSequence so the marker/counter rebind.
+  4. gate on the SchemaVersion marker (or "Network row exists") so a fresh/unknown store
+     still THROWS (preserve D-05 intent: no fabricated empty network).
+Then update the Phase-14 open() tests that assert "0 DDL calls on open" to the revised
+contract (open re-declares idempotently; uninitialized store still throws; no re-insertion).
+
+This overturns locked decisions D-05/D-07 with on-device evidence and should be planned as
+its own change (engine + tests), not folded into the proof.

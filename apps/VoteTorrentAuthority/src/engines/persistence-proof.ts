@@ -67,6 +67,17 @@ function makeCapturingFactory(): { factory: DbFactory; getDb: () => Database | u
   };
 }
 
+// Module-level capture of the most recent Database the engine obtained from the
+// factory (via makeProofEngine). The persistent vtab does NOT auto-restore the
+// table catalog into a fresh handle, so queries MUST use the SAME handle the
+// engine's create()/open() used — never a second rnDbFactory() handle.
+let lastProofDb: Database | undefined;
+
+/** The Database the engine last obtained via makeProofEngine's factory. */
+export function getLastProofDb(): Database | undefined {
+  return lastProofDb;
+}
+
 // ---------------------------------------------------------------------------
 // Stable test fixtures (consistent across write + read phase)
 // ---------------------------------------------------------------------------
@@ -148,10 +159,13 @@ export async function runWritePhase(
   }
   const networkHash = ref.hash;
 
-  // Re-open the db via the factory (same networkHash → same LevelDB store) to
-  // run a count query.  On the write phase this is a cache HIT — the engine
-  // returns the same Database object it already cached.
-  const db = await rnDbFactory(networkHash);
+  // Query via the SAME handle the engine used (captured by makeProofEngine's
+  // factory). A fresh rnDbFactory() handle would NOT have the schema declared on
+  // the persistent vtab — see getLastProofDb.
+  const db = getLastProofDb();
+  if (!db) {
+    throw new Error('[proof] write phase: engine did not obtain a db via the proof factory');
+  }
 
   const countRow = await db.prepare('select count(*) as n from Network').get() as
     | { n: number }
@@ -207,13 +221,16 @@ export async function runReadPhase(
 
   console.log(`[proof] read phase: re-attaching to store for hash=${networkHash}`);
 
-  // open() on a fresh process: cache miss → factory-direct re-attach (D-05).
-  // The engine calls rnDbFactory(networkHash), registers plugins (no DDL), and
-  // checks the SchemaVersion marker — confirming the store is initialized.
+  // open() on a fresh process: cache miss → factory-direct re-attach. The engine
+  // re-declares the schema on the fresh handle (binds persisted data) then gates
+  // on the schema-version marker.
   await networksEngine.open(ref, user);
 
-  // Query row count directly from the factory (same LevelDB store).
-  const db = await rnDbFactory(networkHash);
+  // Query via the SAME handle open() used (captured by makeProofEngine's factory).
+  const db = getLastProofDb();
+  if (!db) {
+    throw new Error('[proof] read phase: engine did not obtain a db via the proof factory');
+  }
   const countRow = await db.prepare('select count(*) as n from Network').get() as
     | { n: number }
     | undefined;
@@ -317,5 +334,10 @@ export async function assertCryptoFunctions(
  * Intended for dev/proof invocation only.
  */
 export function makeProofEngine(): NetworksEngine {
-  return new NetworksEngine(makeLocalStorage(), rnDbFactory);
+  const factory: DbFactory = async (networkHash: string) => {
+    const db = await rnDbFactory(networkHash);
+    lastProofDb = db; // capture the engine's actual handle for queries
+    return db;
+  };
+  return new NetworksEngine(makeLocalStorage(), factory);
 }
