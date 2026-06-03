@@ -1232,7 +1232,7 @@ declare schema main
 	table Association (
 		RegistrantId text,
 		DeviceKey text, -- public key for voting; private key in biometrically secured TPM
-		DeviceHash text, -- sha256 hash of the device's ID (not the ID itself, for privacy)
+		DeviceHash text null, -- sha256 hash of the device's ID (not the ID itself, for privacy); null = device uniqueness not publicly disclosed (transparency toggle off)
 		Expiration datetime,
 		SignorKey text, -- public key of the authority signor
 		Signature text, -- signature of this record by the signor

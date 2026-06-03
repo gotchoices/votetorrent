@@ -41,10 +41,11 @@ Association
 * Signor - A key of the signor - this must have been authorized by the authority
 * Signature - The signature of this record, from the signor
 
-AuthorityPeers
+AuthorityPeer (normalized — one row per peer; primary key: AuthorityId + PeerId)
 * AuthorityId *
-* PeerIds - list of PeerIds
-* Signature - Signature from the authority's ID administration
+* PeerId * - a single peer node identifier
+
+Peers are added/removed via Administrator-signed inserts/deletes carrying the "Configure Authority Peers" scope — there is no inline per-record signature; the admin signature on the mutation is the authorization.
 
 ### Private, Authority-held schema
 
@@ -92,7 +93,7 @@ In-person voting using a tablet furnished by the authority, avoids disenfranchis
 * The voter is put before a tablet at the polling location.  This tablet is configured to only allow the VT app.  That app is also in polling mode, which doesn't allow switching networks, and resets users after each use.
 * In polling mode, the app forces re-association, so even if the user has previously associated with a device, the user begins with the association flow before starting the voting flow.  So the user looks up their registration, and scans their biometric, and, per usual, this sends the vault public key and device attestation to the authority for signing.
 * The authority ignores the fact that it's a duplicate device ID, because the device ID is in a "white-list" of approved devices.
-* Optionally, a hashcode of the device ID in the public device association table.  This allows the uniqueness of devices to be publicly disclosed, without disclosing the actual device ID.  That's good for transparency, but can be turned off since it can also be used to infer a person's location as a certain time.
+* Optionally, a hashcode of the device ID in the public device association table.  This allows the uniqueness of devices to be publicly disclosed, without disclosing the actual device ID.  That's good for transparency, but can be turned off since it can also be used to infer a person's location as a certain time.  (In the schema this is a nullable `Association.DeviceHash` — `null` means the device-uniqueness hash is not published.)
 
 ### Exclusively In-Person
 

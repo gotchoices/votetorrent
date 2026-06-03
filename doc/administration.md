@@ -45,9 +45,10 @@ Represents peer nodes that can act on behalf of an Authority for certain automat
 
 | Field | Description |
 |-------|-------------|
-| AuthoritySID | Reference to the Authority this peer belongs to. |
-| PeersIDs | List of peer node identifiers that can act for this Authority. |
-| Signatures | Array of Signature objects validating this peer relationship. |
+| AuthorityId | Reference to the Authority this peer belongs to. |
+| PeerId | A single peer node identifier that can act for this Authority. |
+
+Stored **normalized** — one row per `(AuthorityId, PeerId)` (composite primary key). Peers are added or removed individually via Administrator-signed inserts/deletes carrying the **Configure Authority Peers** scope, rather than as a single list with one inline `Signatures` array.
 
 ### Signature
 Represents a cryptographic signature validating a record.
