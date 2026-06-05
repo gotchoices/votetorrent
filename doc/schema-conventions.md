@@ -82,17 +82,21 @@ the SQL `Digest()`:
 Because `Digest()` produces `AdminSigning.Digest` (the *content hash to be
 signed*), any of these is a signature-substitution surface.
 
-**Fix spans two repos** (tracked as two bug reports under
+**The canonicalization fix is ours; the CID work is optimystic's** (tracked as
+two reports under
 `.planning/quick/260605-002-digest-canonicalization-reports/issues/`):
 
-1. **optimystic** — make the canonical `Digest()` primitive injection-safe
-   (length-prefix / domain-separate each argument; distinguish null from empty),
-   have the proposed `MerkleRoot` primitive inherit the same framing, and add a
-   real **CID UDF** (multihash + CIDv1) so `Cid` columns can become Option B
-   above instead of bare digests.
-2. **votetorrent** — stop shadowing the plugin with the local pipe-join
-   `Digest()`; adopt the framed optimystic primitive once it ships, so the
-   schema and the plugin agree on one canonical encoding.
+1. **votetorrent (the actual bug)** — give our own `Digest()` an injective
+   pre-image (length-prefix / frame each argument; distinguish null from empty;
+   encode arity). This is self-contained: the plugin's `digest()` is a
+   single-value hash and is correct as-is, so combining fields injectively is
+   *our* responsibility, not optimystic's. Also resolve the registry-key shadow
+   (our `Digest` and the plugin's `digest` both key to `digest/-1`).
+2. **optimystic (additive feature requests)** — add a real **CID UDF**
+   (multihash + CIDv1) so `Cid` columns can become Option B above instead of bare
+   digests, and *optionally* a vetted canonical multi-field digest helper so
+   downstreams don't each reinvent (unsafe) field framing. Neither is required to
+   fix #1.
 
 This is a **breaking change** to every digest output — it invalidates existing
 digests, addresses, and signatures, so it must be versioned / coordinated with a
