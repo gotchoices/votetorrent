@@ -21,7 +21,6 @@ import {
 	initDB,
 	isSchemaInitialized,
 	writeSchemaVersionMarker,
-	ensureSchemaVersionCatalog,
 	ensureTidSequence,
 	readTidCounter,
 	incrementTidCounter,
@@ -314,11 +313,11 @@ export class NetworksEngine implements INetworksEngine {
 		//   persistent fresh handle (restart)       → initDB runs (binds LevelDB vtab catalog) → gate passes if initialized
 		//   persistent genuinely uninitialized      → initDB runs (creates vtab bindings) → D-05 gate throws (no marker)
 		if (!db.declaredSchemaManager.hasDeclaredSchema('main')) {
-			await initDB(db);           // declare schema main {...} + apply: creates vtab bindings, binds LevelDB data
+			await initDB(db);           // declare schema main {...} + apply: creates vtab bindings, binds LevelDB data.
+			// initDB also declares the SchemaVersion catalog (NO row) — 14-03 on-device fix: a fresh Quereus
+			// handle does not auto-restore the catalog from LevelDB, so isSchemaInitialized's marker lookup
+			// would otherwise hit an undeclared table → false → wrongly throw on a correctly-persisted store.
 			await ensureTidSequence(db); // idempotent INSERT OR IGNORE — safe to re-run
-			await ensureSchemaVersionCatalog(db); // 14-03 on-device fix: re-declare SchemaVersion catalog (NO insert)
-			// so isSchemaInitialized can see the persisted marker after restart; an uninitialized
-			// store binds an EMPTY catalog → gate below still throws (D-05 preserved).
 		}
 
 		// D-05/D-08: if the store has no schema-version marker, it is uninitialized — THROW.

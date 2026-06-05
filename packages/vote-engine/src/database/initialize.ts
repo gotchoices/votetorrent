@@ -134,6 +134,15 @@ export async function initDB(db: Database): Promise<void> {
 		console.error('Error initializing database:', error);
 		throw error;
 	}
+
+	// Declare the SchemaVersion table catalog (NO version row) as part of every
+	// schema init. initDB only ever runs on a fresh/undeclared handle (create() and
+	// open()'s re-attach guard both gate on this), so this consistently binds the
+	// SchemaVersion catalog on both the create path and the persistent re-attach path
+	// — a fresh Quereus handle does not auto-restore the catalog from LevelDB. The
+	// version ROW remains create()-only (writeSchemaVersionMarker), so a genuinely
+	// uninitialized store still has an EMPTY SchemaVersion and open() throws (D-05).
+	await ensureSchemaVersionCatalog(db);
 }
 
 /**
