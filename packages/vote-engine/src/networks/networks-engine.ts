@@ -295,11 +295,31 @@ export class NetworksEngine implements INetworksEngine {
 			);
 		}
 
-		// Always-run, NO DDL (D-07): register plugins and custom functions only.
+		// Always-run: register plugins and custom functions (per-Database-instance, not persisted).
 		await registerDbPlugins(db);
 
-		// D-05/D-08: if the store has no schema, it is fresh — there is nothing to
-		// re-attach to, so THROW. Do NOT run initDB here (that is create()'s job).
+		// Cross-backend-safe re-attach guard (14-04 — narrows D-05/D-07 with on-device evidence).
+		// See patches/optimystic-quereus-plugin-composite-pk.md (second finding).
+		//
+		// hasDeclaredSchema('main') is false on ANY fresh handle (new process restart OR new
+		// in-memory Database()). Running initDB on an already-declared handle triggers the
+		// Quereus schema-differ to emit ALTER COLUMN DROP NOT NULL on a PK column, which then
+		// throws "Cannot DROP NOT NULL on PRIMARY KEY column 'DependsOn'" — breaking the
+		// in-memory suite. So initDB must ONLY run when the handle lacks the declaration.
+		//
+		// Correctness matrix:
+		//   fresh in-memory (never declared)        → initDB runs (creates tables)  → D-05 gate throws (no marker)
+		//   in-memory already prepared same session → initDB SKIPPED (already declared) → gate passes → re-attach OK
+		//   persistent fresh handle (restart)       → initDB runs (binds LevelDB vtab catalog) → gate passes if initialized
+		//   persistent genuinely uninitialized      → initDB runs (creates vtab bindings) → D-05 gate throws (no marker)
+		if (!db.declaredSchemaManager.hasDeclaredSchema('main')) {
+			await initDB(db);           // declare schema main {...} + apply: creates vtab bindings, binds LevelDB data
+			await ensureTidSequence(db); // idempotent INSERT OR IGNORE — safe to re-run
+		}
+
+		// D-05/D-08: if the store has no schema-version marker, it is uninitialized — THROW.
+		// initDB binds the catalog but does NOT write a SchemaVersion marker (that is create()'s
+		// job via writeSchemaVersionMarker). So a truly uninitialized store still throws here.
 		const initialized = await isSchemaInitialized(db);
 		if (!initialized) {
 			throw new Error(
