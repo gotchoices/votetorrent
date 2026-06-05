@@ -1106,12 +1106,13 @@ declare schema main
 		with context ( SigningNonce text, Tid int, now datetime );
 
 	table RegistrantPublic (
-		Cid text primary key, -- content-addressed hash of this record
+		Cid text, -- content-addressed hash of this record
 		RegistrantId text, -- references Registrant.Id
 		LastName text null,
 		FirstName text null,
 		District text null,
 		ExtraFields text null, -- json object for authority-specific public fields
+		primary key (RegistrantId, Cid), -- registrant-clustered storage key (one ranged fetch per registrant); Cid retains its content-integrity role
 		constraint RegistrantIdValid check (exists (select 1 from Registrant R where R.Id = new.RegistrantId)),
 		constraint CidValid check (Cid = Digest(RegistrantId, LastName, FirstName, District, ExtraFields)),
 		constraint RegistrantCidMatch check (exists (select 1 from Registrant R where R.Id = new.RegistrantId and R.PublicCid = new.Cid)),
@@ -1129,8 +1130,6 @@ declare schema main
 	)
 		with context ( SigningNonce text, Tid int );
 
-	index RegistrantPublicRegistrantId on RegistrantPublic (RegistrantId);
-
 	-- Authority-held private registrant data (not replicated to the public Election Network).
 	-- Referenced by Registrant.PrivateCid; Registrant.Signature commits to this record via that hash.
 	-- PrivateDetails is a json array of attribute triples { name, value, hint? } where `value` is
@@ -1139,10 +1138,11 @@ declare schema main
 	-- disclosable tier lives in RegistrantSelective (separate Cid) so it can be revealed without
 	-- exposing this record.
 	table RegistrantPrivate (
-		Cid text primary key, -- content-addressed hash of this record
+		Cid text, -- content-addressed hash of this record
 		RegistrantId text, -- references Registrant.Id
 		Expiration datetime,
 		PrivateDetails text null, -- json array of { name, value, hint? } triples (recursive); never disclosed
+		primary key (RegistrantId, Cid), -- registrant-clustered storage key (one ranged fetch per registrant); Cid retains its content-integrity role
 		constraint RegistrantIdValid check (exists (select 1 from Registrant R where R.Id = new.RegistrantId)),
 		constraint ExpirationValid check (isISODatetime(Expiration) and like('%Z', Expiration)),
 		constraint ExpirationFuture check on insert (Expiration > context.now),
@@ -1162,8 +1162,6 @@ declare schema main
 	)
 		with context ( SigningNonce text, Tid int, now datetime );
 
-	index RegistrantPrivateRegistrantId on RegistrantPrivate (RegistrantId);
-
 	-- Authority-held selective-disclosure registrant data, committed SEPARATELY from PrivateDetails
 	-- (own Cid, referenced by Registrant.SelectiveCid). The selective set can be revealed to a
 	-- permitted audience and verified against this Cid (which Registrant.Signature covers) WITHOUT
@@ -1171,10 +1169,11 @@ declare schema main
 	-- neighbors, or everyone) is decided by election policy at disclosure time. Whole-set reveal
 	-- (all-or-nothing); per-attribute selective reveal would require per-attribute commitments.
 	table RegistrantSelective (
-		Cid text primary key, -- content-addressed hash of this record
+		Cid text, -- content-addressed hash of this record
 		RegistrantId text, -- references Registrant.Id
 		Expiration datetime,
 		SelectiveDetails text null, -- json array of { name, value, hint? } triples (recursive); disclosed per election policy
+		primary key (RegistrantId, Cid), -- registrant-clustered storage key (one ranged fetch per registrant); Cid retains its content-integrity role
 		constraint RegistrantIdValid check (exists (select 1 from Registrant R where R.Id = new.RegistrantId)),
 		constraint ExpirationValid check (isISODatetime(Expiration) and like('%Z', Expiration)),
 		constraint ExpirationFuture check on insert (Expiration > context.now),
@@ -1193,8 +1192,6 @@ declare schema main
 		)
 	)
 		with context ( SigningNonce text, Tid int, now datetime );
-
-	index RegistrantSelectiveRegistrantId on RegistrantSelective (RegistrantId);
 
 	table ElectionRegistrant (
 		ElectionId text,
