@@ -59,9 +59,7 @@ signed records exist.
 Multi-field digests are **not injective**: distinct logical records can collide.
 Wherever a commitment mixes adjacent **variable-length** fields (names, JSON,
 the registration commitments in `registration.md`), the field boundary is
-ambiguous. The original framing ("no separator or length prefix, so
-`Digest('ab','c') == Digest('a','bc')`") is only partly right — it depends on
-*which* of three implementations you mean (verified 2026-06-05):
+ambiguous:
 
 | Implementation | Where | Pre-image | `Digest('ab','c')==Digest('a','bc')`? |
 |---|---|---|---|
@@ -69,7 +67,7 @@ ambiguous. The original framing ("no separator or length prefix, so
 | `Digest(...)` JS export | `@optimystic/quereus-plugin-crypto` `dist/index.js` | bare `concatBytes(...)` then sha256 | **Yes** — both hash `"abc"` |
 | `digest(...)` SQL UDF | `@optimystic/quereus-plugin-crypto` `dist/plugin.js` | single data arg (extra args are `algorithm`/`encoding`) | n/a — not multi-field |
 
-So the schema's `Digest()` is votetorrent's **own** function (registered after
+So the schema's `Digest()` is votetorrent's function (registered after
 the plugin in `prepareDb`, so it shadows the plugin), and it *does* use a `|`
 separator — the literal collision above does not occur there. But a bare,
 unescaped delimiter join is still not injection-safe. Confirmed collisions in
