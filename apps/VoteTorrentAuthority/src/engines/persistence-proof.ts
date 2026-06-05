@@ -272,6 +272,19 @@ export async function runReadPhase(
  *            or by calling rnDbFactory directly after the engine has initialized
  *            the schema).
  */
+/**
+ * A digest is valid if it is a non-empty string OR a non-empty byte sequence.
+ * The real on-device SQL `Digest(...)` returns raw bytes (a Uint8Array, which
+ * serializes to an object with numeric keys), not a string.
+ */
+function isNonEmptyDigest(v: unknown): boolean {
+  if (typeof v === 'string') return v.length > 0;
+  if (v instanceof Uint8Array) return v.length > 0;
+  if (Array.isArray(v)) return v.length > 0;
+  if (v !== null && typeof v === 'object') return Object.keys(v).length > 0;
+  return false;
+}
+
 export async function assertCryptoFunctions(
   db: Database,
 ): Promise<{
@@ -284,12 +297,14 @@ export async function assertCryptoFunctions(
   console.log('[proof] crypto assertions: starting');
 
   // 1. Digest — registered custom SQL function (initialize.ts:65-85).
-  //    Expects a non-empty string on valid inputs.
+  //    On the real on-device SQL path Digest returns a 32-byte BLOB (Uint8Array,
+  //    serialized as {"0":..,"31":..}), NOT a string. The proof passes on any
+  //    non-empty digest value: a non-empty string OR a non-empty byte sequence.
   const digestRow = await db.prepare(`select Digest('a', 'b', 'c') as v`).get() as
     | { v: unknown }
     | undefined;
   const digestVal = digestRow?.v;
-  const digestOk = typeof digestVal === 'string' && digestVal.length > 0;
+  const digestOk = isNonEmptyDigest(digestVal);
   console.log(`[proof] Digest('a','b','c') = ${JSON.stringify(digestVal)} — ${digestOk ? 'PASS' : 'FAIL'}`);
 
   // 2. SignatureValid — registered custom SQL function (initialize.ts:19-44).
