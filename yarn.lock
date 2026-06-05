@@ -4198,7 +4198,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@optimystic/quereus-plugin-optimystic@npm:^0.13.4":
+"@optimystic/quereus-plugin-optimystic@npm:0.13.5":
   version: 0.13.5
   resolution: "@optimystic/quereus-plugin-optimystic@npm:0.13.5"
   dependencies:
@@ -4220,6 +4220,31 @@ __metadata:
   peerDependencies:
     "@quereus/quereus": ^0.16.2
   checksum: 10c0/6742a770a532e0672597bf7df2956a3a6ecfb0fdc924a8458fad86346132f1ebf9f9163b86ee83da3d4452ac28ae1bfcc7c6590a1fb2959b7a4ec1fee27171f4
+  languageName: node
+  linkType: hard
+
+"@optimystic/quereus-plugin-optimystic@patch:@optimystic/quereus-plugin-optimystic@npm%3A0.13.5#~/.yarn/patches/@optimystic-quereus-plugin-optimystic-npm-0.13.5-6fbe2eccab.patch":
+  version: 0.13.5
+  resolution: "@optimystic/quereus-plugin-optimystic@patch:@optimystic/quereus-plugin-optimystic@npm%3A0.13.5#~/.yarn/patches/@optimystic-quereus-plugin-optimystic-npm-0.13.5-6fbe2eccab.patch::version=0.13.5&hash=ad6136"
+  dependencies:
+    "@chainsafe/libp2p-gossipsub": "npm:^14.1.2"
+    "@chainsafe/libp2p-yamux": "npm:^8.0.1"
+    "@libp2p/bootstrap": "npm:^12.0.11"
+    "@libp2p/crypto": "npm:^5.1.13"
+    "@libp2p/identify": "npm:^4.0.10"
+    "@libp2p/interface": "npm:^3.1.0"
+    "@libp2p/kad-dht": "npm:^16.1.3"
+    "@libp2p/noise": "npm:^1.0.1"
+    "@libp2p/tcp": "npm:^11.0.10"
+    "@noble/hashes": "npm:^2.0.1"
+    "@optimystic/db-core": "npm:^0.13.5"
+    "@optimystic/db-p2p": "npm:^0.13.5"
+    debug: "npm:^4.4.3"
+    libp2p: "npm:^3.1.3"
+    uint8arrays: "npm:^5.1.0"
+  peerDependencies:
+    "@quereus/quereus": ^0.16.2
+  checksum: 10c0/1402b60248861691367add9066993ebe76a972b80796afa595df463cb4b7ebebc7576b4873b2094f0ebfcd1abec4404b07db448fa0d1fc33cb3f5fcb55afbf85
   languageName: node
   linkType: hard
 

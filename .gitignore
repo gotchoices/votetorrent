@@ -106,3 +106,4 @@ figmaToken.txt
 !.yarn/plugins
 !.yarn/sdks
 !.yarn/versions
+!.yarn/patches

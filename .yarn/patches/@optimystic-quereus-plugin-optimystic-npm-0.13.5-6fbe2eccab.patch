@@ -1,0 +1,38 @@
+diff --git a/dist/chunk-HPFDTDHY.js b/dist/chunk-HPFDTDHY.js
+index 1cf4a77398acc282bc9763757dfce403d175b8d1..30a145f7d1fc84987926f6b7ff5d356037f8442f 100644
+--- a/dist/chunk-HPFDTDHY.js
++++ b/dist/chunk-HPFDTDHY.js
+@@ -1485,11 +1485,11 @@ var OptimysticVirtualTable = class extends VirtualTable {
+       if (isSecondaryIndex && filterInfo.args.length > 0) {
+         yield* this.executeIndexScan(indexName, filterInfo.args);
+       } else if (planType === 2 && filterInfo.args.length > 0) {
+-        yield* this.executePointLookup(String(filterInfo.args[0]));
++        yield* this.executePointLookup(filterInfo.args.length > 1 ? this.rowCodec.createPrimaryKey(filterInfo.args) : String(filterInfo.args[0]));
+       } else if (planType === 3) {
+         yield* this.executeRangeQuery(filterInfo);
+       } else if (filterInfo.idxNum === 1) {
+-        yield* this.executePointLookup(filterInfo.args[0] ? String(filterInfo.args[0]) : "");
++        yield* this.executePointLookup(filterInfo.args.length > 1 ? this.rowCodec.createPrimaryKey(filterInfo.args) : (filterInfo.args[0] ? String(filterInfo.args[0]) : ""));
+       } else if (filterInfo.idxNum === 2) {
+         yield* this.executeRangeQuery(filterInfo);
+       } else if (filterInfo.idxNum >= 10) {
+diff --git a/src/optimystic-module.ts b/src/optimystic-module.ts
+index d9c5e9e4b1023dcba15792ef9eb0f90dd5f10559..ef5395a4585ba467c24f5137164fae2f373daf45 100644
+--- a/src/optimystic-module.ts
++++ b/src/optimystic-module.ts
+@@ -330,13 +330,13 @@ export class OptimysticVirtualTable extends VirtualTable {
+         yield* this.executeIndexScan(indexName, filterInfo.args);
+       } else if (planType === 2 && filterInfo.args.length > 0) {
+         // Primary key equality seek (plan=2)
+-        yield* this.executePointLookup(String(filterInfo.args[0]));
++        yield* this.executePointLookup(filterInfo.args.length > 1 ? this.rowCodec.createPrimaryKey(filterInfo.args) : String(filterInfo.args[0]));
+       } else if (planType === 3) {
+         // Range query on primary key (plan=3)
+         yield* this.executeRangeQuery(filterInfo);
+       } else if (filterInfo.idxNum === 1) {
+         // Legacy: Point lookup on primary key
+-        yield* this.executePointLookup(filterInfo.args[0] ? String(filterInfo.args[0]) : '');
++        yield* this.executePointLookup(filterInfo.args.length > 1 ? this.rowCodec.createPrimaryKey(filterInfo.args) : (filterInfo.args[0] ? String(filterInfo.args[0]) : ''));
+       } else if (filterInfo.idxNum === 2) {
+         // Legacy: Range query on primary key
+         yield* this.executeRangeQuery(filterInfo);
