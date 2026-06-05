@@ -18,6 +18,7 @@ import {
   isSchemaInitialized,
   readTidCounter,
   prepareDb,
+  initDB,
   registerDbPlugins,
 } from '../src/database/initialize.js'
 import type {
@@ -760,7 +761,10 @@ describe('NetworksEngine — factory DI and persistence seam (Phase 14)', () => 
     expect(secondCallCount, 'factory not called on second open (cache hit)').to.equal(1);
   });
 
-  it('open() on cache MISS with UNINITIALIZED store THROWS and runs NO DDL (D-05)', async () => {
+  it('open() on cache MISS with UNINITIALIZED store THROWS (D-05) — initDB runs before gate but marker absent', async () => {
+    // 14-04: the hasDeclaredSchema guard means initDB now runs BEFORE the D-05 gate when
+    // the handle lacks the declaration (hasDeclaredSchema=false). But initDB does NOT write
+    // a SchemaVersion marker — that is create()'s job. So an uninitialized store still throws.
     const { factory, getExecCount } = makeUninitializedFactory();
     const engine = new NetworksEngine(AsyncStorage, factory);
 
@@ -781,12 +785,10 @@ describe('NetworksEngine — factory DI and persistence seam (Phase 14)', () => 
     expect(caught).to.be.an('error');
     expect((caught as Error).message).to.include('Network not opened in this session');
 
-    // The factory's db had exec wrapped to count DDL. On the uninitialized path
-    // open() must NOT call exec at all (no DDL). The only exec calls allowed are
-    // from registerDbPlugins (which does NOT call exec — it only calls registerPlugin
-    // and registerFunction). The isSchemaInitialized check uses prepare().get() (not exec).
-    // Therefore exec should be 0 on this path.
-    expect(getExecCount(), 'open() must run no DDL exec on uninitialized store (D-05)').to.equal(0);
+    // 14-04 contract: initDB runs (hasDeclaredSchema was false → exec is called at least once).
+    // D-05 intent is preserved: the store still throws because isSchemaInitialized returns false
+    // (no SchemaVersion marker — only create() writes that via writeSchemaVersionMarker).
+    expect(getExecCount(), 'open() runs initDB exec on uninitialized store (14-04 guard)').to.be.greaterThan(0);
 
     // The store must NOT be cached — a subsequent call with the same hash goes to factory again
     const contexts = (engine as unknown as { contexts: Map<string, EngineContext> }).contexts;
@@ -871,5 +873,62 @@ describe('NetworksEngine — factory DI and persistence seam (Phase 14)', () => 
     // The tidCounters Map should now reflect the seeded value (42)
     const tidCounters = (engine as unknown as { tidCounters: Map<string, number> }).tidCounters;
     expect(tidCounters.get('tid-seed-hash'), 'Tid seeded from persisted TidSequence value').to.equal(42);
+  });
+
+  // --------------------------------------------------------------------------
+  // 14-04 hasDeclaredSchema guard unit tests (PERSIST-02)
+  // --------------------------------------------------------------------------
+
+  it('hasDeclaredSchema is false on a fresh Database() before initDB (PERSIST-02)', async () => {
+    const db = new Database();
+    // A fresh handle — before any initDB call — must not have the domain schema declared.
+    expect(db.declaredSchemaManager.hasDeclaredSchema('main')).to.equal(false);
+  });
+
+  it('hasDeclaredSchema becomes true after initDB(db) (PERSIST-02)', async () => {
+    const db = new Database();
+    await registerDbPlugins(db);
+    expect(db.declaredSchemaManager.hasDeclaredSchema('main'), 'should be false before initDB').to.equal(false);
+    await initDB(db);
+    // After initDB runs "declare schema main {...}", the schema manager records the declaration.
+    expect(db.declaredSchemaManager.hasDeclaredSchema('main'), 'should be true after initDB').to.equal(true);
+  });
+
+  it('open() on already-declared in-memory handle does NOT trigger migration error (PERSIST-02 — already-declared path does not cause DROP NOT NULL migration)', async () => {
+    // This test proves the guard prevents the failing Quereus migration:
+    // "Cannot DROP NOT NULL on PRIMARY KEY column 'DependsOn'" which fires when
+    // apply-schema is re-run on an already-declared in-memory catalog.
+    //
+    // Setup: create a db that already ran prepareDb (hasDeclaredSchema=true).
+    // open() with this factory must succeed (no migration error) AND cache the handle.
+    const alreadyDeclaredDb = new Database();
+    await prepareDb(alreadyDeclaredDb); // hasDeclaredSchema('main') = true after this
+
+    const factory: DbFactory = async (_hash: string) => alreadyDeclaredDb;
+    const engine = new NetworksEngine(AsyncStorage, factory);
+    const ref: NetworkReference = {
+      hash: 'already-declared-hash',
+      relays: [],
+      name: 'already-declared-net',
+      primaryAuthorityDomainName: 'test.example.com',
+    };
+
+    // Must not throw "Cannot DROP NOT NULL on PRIMARY KEY column 'DependsOn'" (or any error).
+    // If the guard is missing, open() would re-run initDB on the already-declared handle,
+    // causing the schema-differ migration to fail.
+    let caughtError: unknown;
+    let result: INetworkEngine | undefined;
+    try {
+      result = await engine.open(ref, makePhase14User(), false);
+    } catch (err) {
+      caughtError = err;
+    }
+
+    expect(caughtError, 'open() must not throw on already-declared handle — no migration error').to.equal(undefined);
+    expect(result, 'open() must return a NetworkEngine on the already-declared path').to.be.instanceOf(NetworkEngine);
+
+    // The handle must be cached (D-06)
+    const contexts = (engine as unknown as { contexts: Map<string, EngineContext> }).contexts;
+    expect(contexts.has('already-declared-hash'), 'already-declared handle must be cached after open()').to.equal(true);
   });
 })
