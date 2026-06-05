@@ -155,6 +155,30 @@ export async function isSchemaInitialized(db: Database): Promise<boolean> {
 }
 
 /**
+ * Re-declare the SchemaVersion table catalog on a handle WITHOUT inserting a
+ * marker row.
+ *
+ * Phase 14-04 follow-up (14-03 on-device gap): a fresh Quereus handle on an
+ * existing LevelDB store does NOT auto-restore the table catalog (the documented
+ * re-attach root cause). open()'s re-attach guard re-runs initDB (rebinds the
+ * domain tables) and ensureTidSequence (rebinds TidSequence), but nothing
+ * re-declared SchemaVersion — so isSchemaInitialized's `select … from
+ * SchemaVersion` hit an undeclared table → false → open() wrongly threw
+ * "use create() first" even on a correctly-persisted store.
+ *
+ * Re-declaring with `create table if not exists` (NO insert) non-destructively
+ * rebinds the persisted Version=1 row on the LevelDB backend, so an initialized
+ * store passes the gate after restart. On a genuinely uninitialized store the
+ * catalog binds to an EMPTY table, so isSchemaInitialized still returns false
+ * and open() still throws — D-05 intent preserved.
+ */
+export async function ensureSchemaVersionCatalog(db: Database): Promise<void> {
+	await db.exec(
+		'create table if not exists SchemaVersion (Version integer primary key);',
+	);
+}
+
+/**
  * Write the schema-version marker after DDL is applied on a fresh store.
  * Creates the SchemaVersion table (if absent) and inserts version 1.
  *
@@ -162,10 +186,8 @@ export async function isSchemaInitialized(db: Database): Promise<boolean> {
  * stays backend-agnostic.
  */
 export async function writeSchemaVersionMarker(db: Database): Promise<void> {
-	await db.exec(
-		`create table if not exists SchemaVersion (Version integer primary key);
-		 insert into SchemaVersion (Version) values (1);`,
-	);
+	await ensureSchemaVersionCatalog(db);
+	await db.exec('insert into SchemaVersion (Version) values (1);');
 }
 
 /**
