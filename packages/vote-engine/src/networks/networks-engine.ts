@@ -357,6 +357,18 @@ export class NetworksEngine implements INetworksEngine {
 		return new NetworksCreateBuilder(this);
 	}
 
+	/**
+	 * D-10: single minimal accessor for the EngineFactory to read the established
+	 * context after open() or create(). Does NOT expose ctx.db to screens — only
+	 * the factory holds the returned reference.
+	 *
+	 * Returns undefined if no context has been established for the given hash
+	 * (caller must call open() or create() first).
+	 */
+	getEstablishedContext(networkHash: string): EngineContext | undefined {
+		return this.contexts.get(networkHash);
+	}
+
 	// D-01: factory-backed createContext — this is the CREATE path. DDL runs here
 	// on fresh stores (isSchemaInitialized gate). open() MUST NOT call this method.
 	private async createContext(user: User | undefined, hash: string): Promise<EngineContext> {
