@@ -25,6 +25,7 @@ import {
   assertCryptoFunctions,
   getLastProofDb,
 } from './persistence-proof';
+import { runRnEntrySmoke } from './rn-entry-smoke';
 
 /** Master switch for the boot-time proof runner. */
 const PROOF_ENABLED = true;
@@ -40,6 +41,10 @@ export async function runPersistenceProof(): Promise<void> {
   if (!PROOF_ENABLED) {
     return;
   }
+
+  // D-03 smoke: run at every boot so Metro traces rn-entry-smoke.ts in the bundle graph.
+  // Logs '[rn-smoke] All /rn exports resolve on Hermes: PASS|FAIL'.
+  runRnEntrySmoke();
 
   try {
     const alreadyWritten = await AsyncStorage.getItem(PROOF_NETWORK_REF_KEY);
