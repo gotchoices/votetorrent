@@ -35,7 +35,9 @@ import { rnDbFactory } from './rn-db-factory';
 // ---------------------------------------------------------------------------
 // AsyncStorage keys used by the proof harness
 // ---------------------------------------------------------------------------
-const PROOF_NETWORK_REF_KEY = 'proof:networkRef';
+// WR-05: single source of truth — the runner imports this same constant so a
+// rename here cannot silently desync phase selection in the runner.
+export const PROOF_NETWORK_REF_KEY = 'proof:networkRef';
 const PROOF_NETWORK_HASH_KEY = 'proof:networkHash';
 
 // ---------------------------------------------------------------------------

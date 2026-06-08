@@ -24,14 +24,15 @@ import {
   runReadPhase,
   assertCryptoFunctions,
   getLastProofDb,
+  PROOF_NETWORK_REF_KEY,
 } from './persistence-proof';
 import { runRnEntrySmoke } from './rn-entry-smoke';
 
 /** Master switch for the boot-time proof runner. */
 const PROOF_ENABLED = true;
 
-/** Presence of this AsyncStorage key means the write phase already ran. */
-const PROOF_NETWORK_REF_KEY = 'proof:networkRef';
+// WR-05: PROOF_NETWORK_REF_KEY is imported from persistence-proof (the module
+// that owns the write) so the runner's WRITE-vs-READ branch cannot desync.
 
 /**
  * Boot entry point. Fire-and-forget from index.js after the app registers.
