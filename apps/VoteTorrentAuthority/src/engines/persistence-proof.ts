@@ -28,9 +28,10 @@ import { ElectionType, UserKeyType } from '@votetorrent/vote-core';
 // @votetorrent/vote-engine/rn is the single sanctioned import path for real engine
 // classes in the RN app layer (D-04). Metro resolves it via the `./rn` subpath in
 // package.json exports + unstable_enablePackageExports: true in metro.config.js.
-import { NetworksEngine, H16, LocalStorageReact } from '@votetorrent/vote-engine/rn';
+import { NetworksEngine, ElectionsEngine, H16, LocalStorageReact } from '@votetorrent/vote-engine/rn';
 import type { DbFactory } from '@votetorrent/vote-engine/rn';
 import { rnDbFactory } from './rn-db-factory';
+import { getOrCreateDeviceUser, getDevicePrivKeyHex } from './device-user';
 
 // ---------------------------------------------------------------------------
 // AsyncStorage keys used by the proof harness
@@ -39,6 +40,11 @@ import { rnDbFactory } from './rn-db-factory';
 // rename here cannot silently desync phase selection in the runner.
 export const PROOF_NETWORK_REF_KEY = 'proof:networkRef';
 const PROOF_NETWORK_HASH_KEY = 'proof:networkHash';
+
+// Full-chain proof key: persists { networkRef, authorityId, electionId } across restarts.
+// The runner uses this as the write-vs-read discriminant (replaces PROOF_NETWORK_REF_KEY
+// for the full-chain boot runner path).
+export const PROOF_CHAIN_REF_KEY = 'proof:fullChainRef';
 
 // ---------------------------------------------------------------------------
 // Minimal LocalStorage wrapper (delegates to AsyncStorage)
@@ -251,6 +257,185 @@ export async function runReadPhase(
   }
 
   return { networkHash, preRestartCount, postRestartCount, passed };
+}
+
+// ---------------------------------------------------------------------------
+// D-07 full-chain write phase (plan 16-05)
+// ---------------------------------------------------------------------------
+
+/**
+ * FULL-CHAIN WRITE PHASE: create Network + use primaryAuthority + create Election via
+ * real engines with a REAL device user (D-07, Pitfall 7 — never PROOF_USER here).
+ *
+ * Steps:
+ *  1. Create the network via networksEngine.create() — establishes Network + Authority rows.
+ *  2. Resolve the primary authority id from getDetails().
+ *  3. Get the established EngineContext (same store handle, no second factory call).
+ *  4. Seed the election signing pipeline via ElectionsEngine.seedElectionSigning()
+ *     using the REAL device privKeyHex (T-16-14 mitigation).
+ *  5. Call createElection() with the signing nonce.
+ *  6. Persist { networkRef, authorityId, electionId } under PROOF_CHAIN_REF_KEY.
+ *
+ * @param networksEngine  Real NetworksEngine backed by rnDbFactory (from makeProofEngine).
+ * @param user            REAL device user from getOrCreateDeviceUser (NOT PROOF_USER).
+ */
+export async function runFullChainWritePhase(
+  networksEngine: NetworksEngine,
+  user: User,
+): Promise<{ networkRef: NetworkReference; authorityId: string; electionId: string; db: Database }> {
+  console.log('[proof] full-chain write phase: starting');
+
+  // Step 1: create the network — Network + primary Authority + Admin/Officer/User/UserKey rows.
+  const networkEngine = await networksEngine.create(PROOF_NETWORK_INIT, user);
+  console.log('[proof] full-chain write: network created');
+
+  // Retrieve the NetworkReference from AsyncStorage (set by create() via recentNetworks).
+  const recents: NetworkReference[] = JSON.parse(
+    (await AsyncStorage.getItem('recentNetworks')) ?? '[]',
+  );
+  const networkRef = recents?.[0];
+  if (!networkRef) {
+    throw new Error('[proof] full-chain write: no NetworkReference found in recentNetworks after create()');
+  }
+
+  // Step 2: resolve the primary authority id (no extra createAuthority call needed —
+  // NetworksEngine.create() already created the primary authority via PROOF_NETWORK_INIT).
+  const details = await networkEngine.getDetails();
+  const authorityId: string = details.network.primaryAuthorityId;
+  console.log(`[proof] full-chain write: authorityId=${authorityId}`);
+
+  // Step 3: get the same EngineContext that create() used (single store handle — Pitfall 5).
+  // Never call rnDbFactory() a second time here; getEstablishedContext returns the cached handle.
+  const ctx = networksEngine.getEstablishedContext(networkRef.hash);
+  if (!ctx) {
+    throw new Error('[proof] full-chain write: no established context for network hash=' + networkRef.hash);
+  }
+
+  // Step 4: build election fields and run the signing seam.
+  // The seam owns tid + Digest computation + secp256k1.sign — screen/harness never signs (D-01).
+  const now = Date.now();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const electionId: string = (globalThis as any).crypto.randomUUID();
+
+  const electionFields = {
+    id: electionId,
+    authorityId,
+    title: 'Proof Election FC',
+    date: now + 30 * 24 * 60 * 60 * 1000,          // 30 days out
+    revisionDeadline: now + 25 * 24 * 60 * 60 * 1000,
+    ballotDeadline: now + 28 * 24 * 60 * 60 * 1000,
+    type: ElectionType.adhoc,
+  };
+
+  // T-16-14 mitigation: use the REAL device private key — never the fake PROOF_USER key.
+  const privKeyHex = await getDevicePrivKeyHex();
+  if (!privKeyHex) {
+    throw new Error('[proof] full-chain write: device private key not found — call getOrCreateDeviceUser first');
+  }
+  const signerKey = user.activeKeys?.[0]?.key;
+  if (!signerKey) {
+    throw new Error('[proof] full-chain write: user has no active key');
+  }
+
+  const electionsEngine = new ElectionsEngine(ctx);
+  const signingNonce = await (electionsEngine as unknown as {
+    seedElectionSigning(
+      electionFields: { id: string; authorityId: string; title: string; date: number; revisionDeadline: number; ballotDeadline: number; type: ElectionType },
+      privKeyHex: string,
+      signerUserId: string,
+      signerKey: string,
+    ): Promise<string>;
+  }).seedElectionSigning(electionFields, privKeyHex, user.id, signerKey);
+  console.log('[proof] full-chain write: election signing seam complete, nonce=' + signingNonce);
+
+  // Step 5: create the election row (Election.InsertValid CHECK satisfied by AdminSignature above).
+  await electionsEngine.createElection(
+    {
+      election: electionFields,
+      revision: undefined as unknown as import('@votetorrent/vote-core').ElectionRevisionInit,
+    },
+    { signingNonce },
+  );
+  console.log('[proof] full-chain write: election created, id=' + electionId);
+
+  // Step 6: persist the full-chain reference for the read phase (survives force-stop).
+  const chainRef = { networkRef, authorityId, electionId };
+  await AsyncStorage.setItem(PROOF_CHAIN_REF_KEY, JSON.stringify(chainRef));
+
+  // Use the captured db handle for caller's assertions (same handle used for all inserts).
+  const db = getLastProofDb();
+  if (!db) {
+    throw new Error('[proof] full-chain write: engine did not obtain a db via the proof factory');
+  }
+
+  const networkCount = ((await db.prepare('select count(*) as n from Network').get()) as { n: number } | undefined)?.n ?? 0;
+  const authorityCount = ((await db.prepare('select count(*) as n from Authority').get()) as { n: number } | undefined)?.n ?? 0;
+  const electionCount = ((await db.prepare('select count(*) as n from Election').get()) as { n: number } | undefined)?.n ?? 0;
+  console.log(
+    `[proof] full-chain write DONE — hash=${networkRef.hash} Network=${networkCount} Authority=${authorityCount} Election=${electionCount}`,
+  );
+
+  return { networkRef, authorityId, electionId, db };
+}
+
+// ---------------------------------------------------------------------------
+// D-07 full-chain read phase (post force-stop/relaunch) (plan 16-05)
+// ---------------------------------------------------------------------------
+
+/**
+ * FULL-CHAIN READ PHASE: re-attach the SAME LevelDB store after force-stop/relaunch
+ * and assert count(*) >= 1 on Network, Authority, and Election (D-07).
+ *
+ * Phase selection discriminant: `PROOF_CHAIN_REF_KEY` present in AsyncStorage → READ.
+ *
+ * @param networksEngine  A fresh NetworksEngine (cache empty after force-stop).
+ * @param user            User passed to open() — same identity as write phase.
+ * @returns               { passed, networkCount, authorityCount, electionCount }
+ */
+export async function runFullChainReadPhase(
+  networksEngine: NetworksEngine,
+  user: User,
+): Promise<{ passed: boolean; networkCount: number; authorityCount: number; electionCount: number }> {
+  console.log('[proof] full-chain read phase: loading chain ref from AsyncStorage');
+
+  const chainRefJson = await AsyncStorage.getItem(PROOF_CHAIN_REF_KEY);
+  if (!chainRefJson) {
+    throw new Error('[proof] full-chain read phase: no chain ref found — run the full-chain write phase first');
+  }
+  const chainRef: { networkRef: NetworkReference; authorityId: string; electionId: string } =
+    JSON.parse(chainRefJson);
+
+  console.log(`[proof] full-chain read: re-attaching to store for hash=${chainRef.networkRef.hash}`);
+
+  // open() on a fresh process: cache miss → factory-direct re-attach (D-05 rebind guard).
+  // The engine re-declares the schema on the fresh handle, binding the persisted LevelDB data.
+  await networksEngine.open(chainRef.networkRef, user);
+
+  // Phase 14 D-05 schema-rebind lesson: MUST use the SAME handle that open() obtained
+  // via the capturing factory — NOT a second rnDbFactory() call (Pitfall 5).
+  const db = getLastProofDb();
+  if (!db) {
+    throw new Error('[proof] full-chain read: no captured db handle after open()');
+  }
+
+  // Assert count(*) >= 1 on all three tables (T-16-13 mitigation — counts on the re-attached store).
+  const networkCount = ((await db.prepare('select count(*) as n from Network').get()) as { n: number } | undefined)?.n ?? 0;
+  const authorityCount = ((await db.prepare('select count(*) as n from Authority').get()) as { n: number } | undefined)?.n ?? 0;
+  const electionCount = ((await db.prepare('select count(*) as n from Election').get()) as { n: number } | undefined)?.n ?? 0;
+
+  const passed = networkCount >= 1 && authorityCount >= 1 && electionCount >= 1;
+
+  if (passed) {
+    console.log(
+      `[proof] full-chain read PASS — Network=${networkCount} Authority=${authorityCount} Election=${electionCount}`,
+    );
+  } else {
+    console.error(
+      `[proof] full-chain read FAIL — Network=${networkCount} Authority=${authorityCount} Election=${electionCount}`,
+    );
+  }
+
+  return { passed, networkCount, authorityCount, electionCount };
 }
 
 // ---------------------------------------------------------------------------
