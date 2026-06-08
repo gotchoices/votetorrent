@@ -102,7 +102,10 @@ export class InvitationEngine implements IInvitationEngine {
         invite: { name: row.Name, type: 'of' as const, title: '', scopes: [] },
         result: row.IsAccepted !== null
           ? {
-            isAccepted: row.IsAccepted,
+            // WR-02: Quereus/SQLite returns boolean columns as 0/1 on the
+            // on-device path. Normalize to a real boolean (the field is typed
+            // boolean) so strict comparisons (=== true) downstream are correct.
+            isAccepted: row.IsAccepted === true || (row.IsAccepted as unknown) === 1,
             invitationSignature: row.InviteSignature ?? '',
             invokedId: row.InvokedId ?? undefined,
           }
@@ -142,7 +145,10 @@ export class InvitationEngine implements IInvitationEngine {
         invite: { name: row.Name, type: 'au' as const },
         result: row.IsAccepted !== null
           ? {
-            isAccepted: row.IsAccepted,
+            // WR-02: Quereus/SQLite returns boolean columns as 0/1 on the
+            // on-device path. Normalize to a real boolean (the field is typed
+            // boolean) so strict comparisons (=== true) downstream are correct.
+            isAccepted: row.IsAccepted === true || (row.IsAccepted as unknown) === 1,
             invitationSignature: row.InviteSignature ?? '',
             invokedId: row.InvokedId ?? undefined,
           }
