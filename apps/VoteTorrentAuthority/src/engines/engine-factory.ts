@@ -87,6 +87,15 @@ export class EngineFactory {
 	// ---------- private helpers ----------
 
 	private cacheKey(engineName: string, initParams?: unknown): string {
+		// The "network" engine is a singleton for the currently-established network
+		// (D-12/D-14). Screens call getEngine("network") with no params while
+		// AppProvider establishes it via getEngine("network", ref); both MUST resolve
+		// to the SAME cache entry. Force a stable, param-free key for "network" so the
+		// screen call is a cache HIT (CR-01) rather than re-entering buildEngine with
+		// undefined initParams (which dereferences ref.hash → crash).
+		if (engineName === 'network') {
+			return 'network'
+		}
 		return initParams !== undefined
 			? `${engineName}:${JSON.stringify(initParams)}`
 			: engineName
@@ -110,7 +119,21 @@ export class EngineFactory {
 				// open() is cache-first inside NetworksEngine (D-06).
 				// It establishes ctx in the contexts Map and returns a NetworkEngine.
 				// We track the hash so requireEstablishedCtx() can look it up (D-10).
-				const ref = initParams as NetworkReference
+				//
+				// CR-01: screens call getEngine("network") with NO params; AppProvider
+				// establishes the network via getEngine("network", ref). When no ref is
+				// supplied, resolve it from the already-established hash rather than
+				// dereferencing undefined.hash. Never overwrite currentNetworkHash with
+				// undefined — that would break every sibling's requireEstablishedCtx().
+				const ref = (initParams as NetworkReference | undefined)
+					?? (this.currentNetworkHash !== undefined
+						? ({ hash: this.currentNetworkHash } as NetworkReference)
+						: undefined)
+				if (ref === undefined) {
+					throw new Error(
+						'EngineFactory: no network established — call getEngine("network", ref) during init',
+					)
+				}
 				// Q3 open question 3: auto-open so screen-initiated network resolution works.
 				const networkEngine = await this.networksEngine.open(ref, undefined)
 				this.currentNetworkHash = ref.hash
