@@ -24,6 +24,7 @@ import {
 	NetworkEngine,
 	ElectionsEngine,
 	ElectionEngine,
+	SigningEngine,
 	DefaultUserEngine,
 	KeysTasksEngine,
 	SignatureTasksEngine,
@@ -104,9 +105,9 @@ export class EngineFactory {
 	/**
 	 * Build a fresh engine instance for the given name.
 	 *
-	 * Covers all 10 engine names currently handled by AppProvider:
+	 * Covers all 11 engine names currently handled by AppProvider:
 	 *   network, defaultUser, user, authority,
-	 *   elections, election, keysTasksEngine, signatureTasksEngine,
+	 *   elections, signing, election, keysTasksEngine, signatureTasksEngine,
 	 *   onboardingTasksEngine, invitations.
 	 *
 	 * For sibling engines that require a live EngineContext, call
@@ -167,6 +168,11 @@ export class EngineFactory {
 			case 'elections': {
 				const ctx = this.requireEstablishedCtx()
 				return new ElectionsEngine(ctx)
+			}
+
+			case 'signing': {
+				const ctx = this.requireEstablishedCtx()
+				return new SigningEngine(ctx)
 			}
 
 			case 'election': {
