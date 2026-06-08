@@ -30,6 +30,9 @@ export function AppProvider({ children }: PropsWithChildren) {
 	const [hasNetwork, setHasNetwork] = useState(false);
 	const [networksEngine, setNetworksEngine] = useState<INetworksEngine | null>(null);
 	const [initError, setInitError] = useState<string | null>(null);
+	// CR-02: bump this to re-run the init effect ("Try Again"). The init effect's
+	// dep array is [initNonce]; setIsInitialized(false) alone cannot re-fire it.
+	const [initNonce, setInitNonce] = useState(0);
 
 	// D-12: one app-lifetime EngineFactory via useRef (constructed once, stable across renders).
 	// Pitfall 7: factory ref is stable — getEngine dep array simplifies to [].
@@ -93,7 +96,8 @@ export function AppProvider({ children }: PropsWithChildren) {
 		}
 
 		initialize();
-	}, []);
+		// CR-02: re-run when initNonce changes so "Try Again" can re-attempt init.
+	}, [initNonce]);
 
 	// D-15: only show the spinner while initialization is truly pending.
 	if (!isInitialized) {
@@ -116,8 +120,12 @@ export function AppProvider({ children }: PropsWithChildren) {
 				<TouchableOpacity
 					onPress={() => {
 						// Try Again: reset error state and re-run initialize().
+						// CR-02: bumping initNonce re-triggers the init effect (its dep
+						// array is [initNonce]); setIsInitialized(false) only shows the
+						// spinner again. D-15: the effect always resolves the view.
 						setInitError(null);
 						setIsInitialized(false);
+						setInitNonce((n) => n + 1);
 					}}
 					style={{ marginBottom: 8 }}
 				>
