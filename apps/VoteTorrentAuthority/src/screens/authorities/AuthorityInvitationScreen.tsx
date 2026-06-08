@@ -4,10 +4,15 @@ import { ScrollView, StyleSheet, View } from "react-native";
 import { ExtendedTheme, useNavigation, useRoute, useTheme } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type {
+	AdminInit,
+	IDefaultUserEngine,
 	IInvitationEngine,
+	INetworksEngine,
 	InviteStatus,
 	SentAuthorityInvite,
 } from "@votetorrent/vote-core";
+import { INetworkEngine } from "@votetorrent/vote-core";
+import { NetworkCreateAuthorityBuilder } from "@votetorrent/vote-engine";
 import { ThemedText } from "../../components/ThemedText";
 import { ChipButton } from "../../components/ChipButton";
 import { CustomButton } from "../../components/CustomButton";
@@ -17,7 +22,7 @@ import { InfoCard } from "../../components/InfoCard";
 import { SignatureTaskFooter } from "../../components/SignatureTaskFooter";
 import type { RootStackParamList } from "../../navigation/types";
 import { useApp } from "../../providers/AppProvider";
-import { INetworkEngine } from "@votetorrent/vote-core";
+import { getOrCreateDeviceUser } from "../../engines/device-user";
 import { globalStyles } from "../../theme/styles";
 
 type AuthorityInvitationParams = {
@@ -30,7 +35,7 @@ export default function AuthorityInvitationScreen() {
 	const { colors } = useTheme() as ExtendedTheme;
 	const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 	const { mode, invitationId } = useRoute().params as AuthorityInvitationParams;
-	const { getEngine } = useApp();
+	const { getEngine, networksEngine } = useApp();
 
 	// Send-mode form state — authority-level fields (mirror AddNetworkScreen
 	// Primary Authority subsection: name + domainName).
@@ -82,8 +87,68 @@ export default function AuthorityInvitationScreen() {
 		loadInvite();
 	}, [mode, invitationId, getEngine]);
 
-	const onSend = () => {
-		console.log("authorityInvitation-send stub");
+	const onSend = async () => {
+		try {
+			// Resolve device identity (D-02 / generate-on-first-run) — needed to
+			// populate ctx.user so Officer.UserIdValid passes (Pitfall 2 / T-16-05).
+			const defaultUserEng = await getEngine<IDefaultUserEngine>("defaultUser");
+			const defaultUser = await defaultUserEng.get();
+			const user = await getOrCreateDeviceUser(defaultUser?.name ?? "Device User");
+
+			// Pitfall 2 mitigation: the EngineFactory's "network" cache entry was opened
+			// with user=undefined (AppProvider.initialize calls open(ref, undefined)).
+			// Officer.UserIdValid requires ctx.user?.id to be a valid User row — null userId
+			// will fail the CHECK constraint even on the first-authority shoe-in path.
+			// Re-open the network via networksEngine.open(ref, user) directly so the
+			// returned NetworkEngine has ctx.user set (bypasses the factory cache).
+			if (!networksEngine) {
+				console.error("onSend: networksEngine not yet initialized");
+				return;
+			}
+			const recentRefs = await (networksEngine as INetworksEngine).getRecentNetworks();
+			if (!recentRefs || recentRefs.length === 0) {
+				console.error("onSend: no recent network found — create a network first");
+				return;
+			}
+			const networkRef = recentRefs[0];
+			// Re-open with the real user attached so ctx.user is non-null in the engine.
+			const networkEngine = await (networksEngine as INetworksEngine).open(networkRef, user);
+
+			// Synthesize AdminInit: default admin/officers to the current device user
+			// with a sensible threshold policy covering the 3 primary governance scopes (D-04).
+			// Threshold of 1 is correct for a single-admin first-authority shoe-in (v1.2 scope).
+			const admin: AdminInit = {
+				officers: [
+					{
+						init: {
+							name: user.name,
+							title: "Chair",
+							scopes: ["rn", "rad", "iad", "uai", "mel", "ceb"],
+						},
+					},
+				],
+				effectiveAt: Date.now(),
+				thresholdPolicies: [
+					{ policy: "rn", threshold: 1 },
+					{ policy: "mel", threshold: 1 },
+					{ policy: "ceb", threshold: 1 },
+				],
+			};
+
+			// Route through v1.1 NetworkCreateAuthorityBuilder (D-03).
+			// commit() with no options → first-authority shoe-in path (no inviteSlotCid).
+			const builder = new NetworkCreateAuthorityBuilder(networkEngine)
+				.setAuthority({ name, domainName })
+				.setAdmin(admin);
+			if (!builder.isValid()) {
+				console.error("onSend: validation errors", builder.errors());
+				return;
+			}
+			await builder.commit();
+		} catch (error) {
+			console.error("createAuthority error:", error);
+			return;
+		}
 		navigation.goBack();
 	};
 
