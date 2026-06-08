@@ -46,7 +46,8 @@ export class NetworksEngine implements INetworksEngine {
 	) {}
 
 	async clearRecentNetworks(): Promise<void> {
-		this.localStorage.removeItem('recentNetworks');
+		// WR-04: await the async storage write so callers observe a settled state.
+		await this.localStorage.removeItem('recentNetworks');
 	}
 
 	async create(networkInit: NetworkInit, user: User): Promise<INetworkEngine> {
@@ -244,7 +245,9 @@ export class NetworksEngine implements INetworksEngine {
 		};
 		const recentNetworks: NetworkReference[] =
 			(await this.localStorage.getItem('recentNetworks')) ?? [];
-		this.localStorage.setItem('recentNetworks', [
+		// WR-04: await so the recents write is durable before create() returns
+		// (and before the persistence proof / AppProvider reads recentNetworks).
+		await this.localStorage.setItem('recentNetworks', [
 			...recentNetworks,
 			networkRef,
 		]);
@@ -264,18 +267,27 @@ export class NetworksEngine implements INetworksEngine {
 		// D-06: cache-first — single live handle per store.
 		const cached = this.contexts.get(ref.hash);
 		if (cached) {
+			// WR-03: keep a single source of truth for ctx.user. Previously the
+			// per-call ctx (with the freshly-supplied user) was returned to the
+			// NetworkEngine but was NOT written back into this.contexts, so
+			// siblings reading via getEstablishedContext() saw the ORIGINAL cached
+			// ctx whose user could differ from what this open() call established.
+			// Write the per-call ctx back so the NetworkEngine and all siblings
+			// observe one consistent ctx.user for this network.
 			const ctx: EngineContext = { ...cached, user };
+			this.contexts.set(ref.hash, ctx);
 			const qNetworkEngine = new NetworkEngine(ref, this.localStorage, ctx);
 			if (storeAsRecent) {
 				const recentNetworks: NetworkReference[] =
 					(await this.localStorage.getItem('recentNetworks')) ?? [];
 				if (recentNetworks.find((network) => network.hash === ref.hash)) {
-					this.localStorage.setItem('recentNetworks', [
+					// WR-04: await to remove the read-before-write race on recentNetworks.
+					await this.localStorage.setItem('recentNetworks', [
 						ref,
 						...recentNetworks.filter((network) => network.hash !== ref.hash),
 					]);
 				} else {
-					this.localStorage.setItem('recentNetworks', [ref, ...recentNetworks]);
+					await this.localStorage.setItem('recentNetworks', [ref, ...recentNetworks]);
 				}
 			}
 			return qNetworkEngine;
