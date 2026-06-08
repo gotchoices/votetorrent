@@ -15,6 +15,10 @@
 		".": {
 			"types": "./dist/index.d.ts",
 			"import": "./dist/index.js"
+		},
+		"./rn": {
+			"types": "./dist/rn-entry.d.ts",
+			"import": "./dist/rn-entry.js"
 		}
 	},
 	"scripts": {

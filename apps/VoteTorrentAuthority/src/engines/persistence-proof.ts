@@ -25,16 +25,12 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { Database } from '@quereus/quereus';
 import type { NetworkReference, User, NetworkInit, Scope } from '@votetorrent/vote-core';
 import { ElectionType, UserKeyType } from '@votetorrent/vote-core';
-// Direct dist imports — these bypass the package `exports` field which intentionally
-// omits NetworksEngine from the public re-exports to prevent Metro from bundling
-// its Node-only transitive dependencies in production.  This file is dev/proof-only.
-// We import the BUILT dist (.js) rather than src/: the TS source uses NodeNext `.js`
-// import specifiers that only resolve after compilation, which Metro cannot follow.
-import { NetworksEngine } from '../../../../packages/vote-engine/dist/networks/networks-engine.js';
-import { H16 } from '../../../../packages/vote-engine/dist/utils.js';
-import { LocalStorageReact } from '../../../../packages/vote-engine/dist/local-storage-react.js';
+// @votetorrent/vote-engine/rn is the single sanctioned import path for real engine
+// classes in the RN app layer (D-04). Metro resolves it via the `./rn` subpath in
+// package.json exports + unstable_enablePackageExports: true in metro.config.js.
+import { NetworksEngine, H16, LocalStorageReact } from '@votetorrent/vote-engine/rn';
+import type { DbFactory } from '@votetorrent/vote-engine/rn';
 import { rnDbFactory } from './rn-db-factory';
-import type { DbFactory } from '@votetorrent/vote-engine';
 
 // ---------------------------------------------------------------------------
 // AsyncStorage keys used by the proof harness
