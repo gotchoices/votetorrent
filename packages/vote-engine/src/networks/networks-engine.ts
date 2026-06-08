@@ -354,12 +354,12 @@ export class NetworksEngine implements INetworksEngine {
 			const recentNetworks: NetworkReference[] =
 				(await this.localStorage.getItem('recentNetworks')) ?? [];
 			if (recentNetworks.find((network) => network.hash === ref.hash)) {
-				this.localStorage.setItem('recentNetworks', [
+				await this.localStorage.setItem('recentNetworks', [
 					ref,
 					...recentNetworks.filter((network) => network.hash !== ref.hash),
 				]);
 			} else {
-				this.localStorage.setItem('recentNetworks', [ref, ...recentNetworks]);
+				await this.localStorage.setItem('recentNetworks', [ref, ...recentNetworks]);
 			}
 		}
 		return qNetworkEngine;
