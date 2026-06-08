@@ -1,8 +1,11 @@
 import { MisuseError, QuereusError } from '@quereus/quereus'
+import { secp256k1 } from '@noble/curves/secp256k1'
+import { bytesToHex, hexToBytes } from '@noble/curves/abstract/utils'
 import { ElectionEngine } from '../election/election-engine.js'
 import { fromCanonicalDatetime, nowCanonicalDatetime, toCanonicalDatetime } from '../utils.js'
 import type { EngineContext } from '../types.js'
 import type {
+  ElectionCoreInit,
   ElectionInit,
   ElectionSummary,
   ElectionType,
@@ -14,6 +17,7 @@ import type {
 } from '@votetorrent/vote-core'
 import { ElectionsCreateElectionBuilder } from './builders/elections-create-election-builder.js'
 import { ElectionsAdjustElectionBuilder } from './builders/elections-adjust-election-builder.js'
+import { SigningEngine } from '../signing/signing-engine.js'
 
 // Phase 05 ELEC-01/02 — monotonic Tid counter for ElectionsEngine batches.
 // Mirrors NetworksEngine/UserEngine pattern. Re-evaluate at the v2
@@ -256,6 +260,152 @@ export class ElectionsEngine implements IElectionsEngine {
       },
       this.ctx!
     )
+  }
+
+  // ---------- election-signing seam (D-01 / Phase 16 Plan 03) ----------
+
+  /**
+   * Seed the AdminSigning → OfficerSignature → AdminSignature prerequisite that
+   * `Election.InsertValid` requires before `createElection()` can succeed.
+   *
+   * Owns the FULL crypto pipeline — the screen passes only election fields and
+   * the device private key hex; the screen never computes tid, Digest, or signs:
+   *
+   * 1. Resolve `CurrentAdmin.EffectiveAt` for the authority.
+   * 2. Peek the next Tid (the same value `createElection` will use — peek, not consume).
+   * 3. Compute the election Digest via `select Digest(...)` over the DB so the bytes
+   *    are IDENTICAL to what `Election.InsertValid` re-computes at insert time.
+   * 4. Produce a REAL secp256k1 signature over those digest bytes using the device
+   *    private key (inside the engine — screen never signs, D-01).
+   * 5. Insert `AdminSigning` with scope='mel' and the election Digest.
+   * 6. Call `SigningEngine.sign()` → OfficerSignature → (threshold=1) → AdminSignature.
+   * 7. Return the nonce so the screen can pass it to `createElection(payload, { signingNonce })`.
+   *
+   * The `IsSignatureValid = true` context flag is the seedElectionSigning pattern
+   * (same as test/fixtures/test-context.ts); it is acceptable because the stored
+   * `Signature` value IS a genuine secp256k1 signature over the correct Digest —
+   * `OfficerSignature.SignatureValid` will verify the real crypto (D-01).
+   *
+   * @param electionFields - The core election fields (id, authorityId, title, date,
+   *   revisionDeadline, ballotDeadline, type) — must match exactly what the builder
+   *   payload will carry so the Digests align.
+   * @param privKeyHex - Device private key as a hex string (from getDevicePrivKeyHex()).
+   * @param signerUserId - Device user id (User.id).
+   * @param signerKey - Device public key hex (User.activeKeys[0].key).
+   * @returns The signing nonce to pass to `createElection(payload, { signingNonce })`.
+   */
+  async seedElectionSigning (
+    electionFields: Pick<ElectionCoreInit, 'id' | 'authorityId' | 'title' | 'date' | 'revisionDeadline' | 'ballotDeadline' | 'type'>,
+    privKeyHex: string,
+    signerUserId: string,
+    signerKey: string
+  ): Promise<string> {
+    this.requireCtx('seedElectionSigning')
+    const ctx = this.ctx!
+    const { id, authorityId, title, date, revisionDeadline, ballotDeadline, type } = electionFields
+
+    // 1. Resolve CurrentAdmin.EffectiveAt for the authority
+    const adminRow = await ctx.db
+      .prepare('select EffectiveAt from CurrentAdmin where AuthorityId = :authorityId')
+      .get({ authorityId })
+    if (!adminRow) {
+      throw new Error(`seedElectionSigning: CurrentAdmin not found for authorityId=${authorityId}`)
+    }
+    const adminEffectiveAt = adminRow.EffectiveAt as string | number
+
+    // 2. Peek the Tid that createElection() will use (peek — do NOT increment)
+    const tid = peekNextElectionTid()
+
+    // Convert date fields to the canonical datetime string form the schema expects,
+    // matching exactly what createElection passes to the Election INSERT.
+    const dateCanon = toCanonicalDatetime(date)
+    const revDeadlineCanon = toCanonicalDatetime(revisionDeadline)
+    const ballotDeadlineCanon = toCanonicalDatetime(ballotDeadline)
+
+    // 3. Compute the election Digest via SQL so the bytes are IDENTICAL to what
+    //    Election.InsertValid will recompute: Digest(context.Tid, new.Id, new.AuthorityId,
+    //    new.Title, new.Date, new.RevisionDeadline, new.BallotDeadline, new.Type).
+    //    Pass tid as a string (String(tid)) matching how createElection binds `Tid = ${tid}`.
+    const digestRow = await ctx.db
+      .prepare(
+        'select Digest(:tid, :id, :authorityId, :title, :date, :revisionDeadline, :ballotDeadline, :type) as d'
+      )
+      .get({
+        tid: String(tid),
+        id,
+        authorityId,
+        title,
+        date: dateCanon,
+        revisionDeadline: revDeadlineCanon,
+        ballotDeadline: ballotDeadlineCanon,
+        type,
+      })
+    if (!digestRow || digestRow.d == null) {
+      throw new Error('seedElectionSigning: Digest() returned null — crypto plugin not registered?')
+    }
+
+    // 4. Produce a REAL secp256k1 signature over the digest bytes — INSIDE the engine
+    //    (the screen never calls secp256k1.sign, satisfying the B2 tier constraint).
+    const digestBytes: Uint8Array =
+      digestRow.d instanceof Uint8Array
+        ? digestRow.d
+        : hexToBytes(digestRow.d as string)
+    const privKeyBytes = hexToBytes(privKeyHex)
+    const sig = secp256k1.sign(digestBytes, privKeyBytes)
+    const signature = bytesToHex(sig.toCompactRawBytes())
+
+    // 5. Generate nonce and insert AdminSigning with the election-specific Digest.
+    //    `IsSignatureValid = true` mirrors the seedElectionSigning test-fixture pattern;
+    //    OfficerSignature.SignatureValid will still verify the genuine secp256k1 signature.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const nonce: string = (globalThis as any).crypto.randomUUID()
+    const now = nowCanonicalDatetime()
+
+    await ctx.db.exec(
+      `insert into AdminSigning (
+        Nonce,
+        AuthorityId,
+        AdminEffectiveAt,
+        Scope,
+        Digest,
+        UserId,
+        SignerKey,
+        Signature
+      )
+      with context now = :now, IsSignatureValid = true, IsSignerKeyValid = true
+      values (
+        :nonce,
+        :authorityId,
+        :adminEffectiveAt,
+        'mel',
+        Digest(:tid, :id, :authorityId, :title, :date, :revisionDeadline, :ballotDeadline, :type),
+        :userId,
+        :signerKey,
+        :signature
+      )`,
+      {
+        nonce,
+        authorityId,
+        adminEffectiveAt,
+        tid: String(tid),
+        id,
+        title,
+        date: dateCanon,
+        revisionDeadline: revDeadlineCanon,
+        ballotDeadline: ballotDeadlineCanon,
+        type,
+        userId: signerUserId,
+        signerKey,
+        signature,
+        now,
+      }
+    )
+
+    // 6. Drive OfficerSignature + AdminSignature via SigningEngine (threshold=1 → AdminSignature).
+    await new SigningEngine(ctx).sign(nonce, { signerUserId, signerKey, signature })
+
+    // 7. Return the nonce for the screen to pass to createElection(payload, { signingNonce }).
+    return nonce
   }
 
   // ---------- builder factories ----------
