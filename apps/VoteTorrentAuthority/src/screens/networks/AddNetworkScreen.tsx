@@ -1,4 +1,6 @@
 import { ExtendedTheme, useTheme } from "@react-navigation/native";
+import { useNavigation } from "@react-navigation/native";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import React, { useState, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { ScrollView, StyleSheet, TouchableOpacity, View, Image } from "react-native";
@@ -9,10 +11,17 @@ import { CustomButton } from "../../components/CustomButton";
 import { Footer } from "../../components/Footer";
 import { globalStyles } from "../../theme/styles";
 import { CustomTextInput } from "../../components/CustomTextInput";
+import { useApp } from "../../providers/AppProvider";
+import { getOrCreateDeviceUser } from "../../engines/device-user";
+import type { IDefaultUserEngine, INetworkEngine, INetworksEngine, NetworkInit, NetworkReference } from "@votetorrent/vote-core";
+import { ElectionType } from "@votetorrent/vote-core";
+import type { RootStackParamList } from "../../navigation/types";
 
 export default function AddNetworkScreen() {
 	const { colors } = useTheme() as ExtendedTheme;
 	const { t } = useTranslation();
+	const { getEngine, networksEngine } = useApp();
+	const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 	const [networkName, setNetworkName] = useState("");
 	const [networkImageUrl, setNetworkImageUrl] = useState("");
 	const [authorityName, setAuthorityName] = useState("");
@@ -24,8 +33,7 @@ export default function AddNetworkScreen() {
 	const [showAdvanced, setShowAdvanced] = useState(false);
 	const [relayAddresses, setRelayAddresses] = useState([""]);
 	// Election Characteristics (Figma "New Network" frame) — keyholder usage and
-	// single-vs-multiple authority. v1.1 is mocks-only, so these drive local UI
-	// state only; CREATE is a stub.
+	// single-vs-multiple authority.
 	const [useKeyholders, setUseKeyholders] = useState(true);
 	const [singleAuthority, setSingleAuthority] = useState(true);
 	const scrollViewRef = useRef<ScrollView>(null);
@@ -59,6 +67,79 @@ export default function AddNetworkScreen() {
 	const handleMakePermanent = () => {
 		//TODO: Implement make permanent
 		console.log("Make permanent");
+	};
+
+	const handleCreate = async () => {
+		try {
+			// Resolve NetworksEngine — available directly from AppProvider context (D-03).
+			if (!networksEngine) {
+				console.error("handleCreate: networksEngine not yet initialized");
+				return;
+			}
+			const networksEng = networksEngine as INetworksEngine;
+
+			// Resolve device identity (D-02 / generate-on-first-run).
+			const defaultUserEng = await getEngine<IDefaultUserEngine>("defaultUser");
+			const defaultUser = await defaultUserEng.get();
+			const user = await getOrCreateDeviceUser(defaultUser?.name ?? "Device User");
+
+			// Assemble NetworkInit from the 11 form-state fields (D-03).
+			// ThresholdPolicy uses `policy` field (not `scope`) per vote-core interface.
+			const networkInit: NetworkInit = {
+				name: networkName,
+				imageUrl: networkImageUrl || undefined,
+				relays: relayAddresses.filter(Boolean),
+				primaryAuthority: {
+					name: authorityName,
+					domainName: domainName,
+				},
+				admin: {
+					officers: [
+						{
+							init: {
+								name: adminName,
+								title: adminTitle,
+								scopes: ["rn", "rad", "iad", "uai", "mel", "ceb"],
+							},
+						},
+					],
+					effectiveAt: Date.now(),
+					thresholdPolicies: [
+						{ policy: "rn", threshold: 1 },
+						{ policy: "mel", threshold: 1 },
+						{ policy: "ceb", threshold: 1 },
+					],
+				},
+				policies: {
+					timestampAuthorities: [],
+					numberRequiredTSAs: 0,
+					electionType: useKeyholders ? ElectionType.official : ElectionType.adhoc,
+				},
+			};
+
+			// Route through v1.1 NetworksCreateBuilder (D-03).
+			// INetworksCreateBuilder.update() is the typed API for setting both fields
+			// (setNetworkInit/setUser are on the concrete class, not the interface).
+			const builder = networksEng.buildCreate().update({ networkInit, user });
+			if (!builder.isValid()) {
+				console.error("handleCreate: validation errors", builder.errors());
+				return;
+			}
+			const networkEngine = await builder.commit();
+
+			// Pitfall 4: re-establish currentNetworkHash in the factory by calling
+			// getEngine("network", ref) with the full NetworkReference that the concrete
+			// NetworkEngine exposes via its `init` property. INetworkEngine does not
+			// declare `init` in the interface, so we access it via a cast.
+			// This allows sibling engines (elections, signing, etc.) to resolve the
+			// established ctx immediately after create without a separate open().
+			const networkRef = (networkEngine as unknown as { init: NetworkReference }).init;
+			await getEngine<INetworkEngine>("network", networkRef);
+		} catch (err) {
+			console.error("handleCreate error:", err);
+			return;
+		}
+		navigation.goBack();
 	};
 
 	return (
@@ -236,7 +317,7 @@ export default function AddNetworkScreen() {
 					icon="floppy-disk"
 					backgroundColor={colors.success}
 					forceDarkText={true}
-					onPress={() => console.log("createNetwork stub")}
+					onPress={handleCreate}
 				/>
 			</Footer>
 		</View>
