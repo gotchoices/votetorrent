@@ -48,6 +48,9 @@ export default function AuthorityInvitationScreen() {
 	// Accept-mode fetched invite
 	const [invite, setInvite] = useState<InviteStatus<SentAuthorityInvite> | undefined>(undefined);
 
+	// 16-08 item 4: surface the ACTUAL send failure inline (send-mode only).
+	const [errorMessage, setErrorMessage] = useState<string>("");
+
 	useEffect(() => {
 		// Network context for the invitation header (best-effort; real engine later).
 		async function loadNetwork() {
@@ -88,6 +91,8 @@ export default function AuthorityInvitationScreen() {
 	}, [mode, invitationId, getEngine]);
 
 	const onSend = async () => {
+		// 16-08 item 4: clear any prior error so a retry starts clean.
+		setErrorMessage("");
 		try {
 			// Resolve device identity (D-02 / generate-on-first-run) — needed to
 			// populate ctx.user so Officer.UserIdValid passes (Pitfall 2 / T-16-05).
@@ -103,11 +108,13 @@ export default function AuthorityInvitationScreen() {
 			// returned NetworkEngine has ctx.user set (bypasses the factory cache).
 			if (!networksEngine) {
 				console.error("onSend: networksEngine not yet initialized");
+				setErrorMessage("Networks engine not yet initialized — please wait and try again.");
 				return;
 			}
 			const recentRefs = await (networksEngine as INetworksEngine).getRecentNetworks();
 			if (!recentRefs || recentRefs.length === 0) {
 				console.error("onSend: no recent network found — create a network first");
+				setErrorMessage("No network found — create a network first.");
 				return;
 			}
 			const networkRef = recentRefs[0];
@@ -142,11 +149,15 @@ export default function AuthorityInvitationScreen() {
 				.setAdmin(admin);
 			if (!builder.isValid()) {
 				console.error("onSend: validation errors", builder.errors());
+				setErrorMessage(
+					builder.errors().map((e) => e.message).join("\n") || "Validation failed.",
+				);
 				return;
 			}
 			await builder.commit();
 		} catch (error) {
 			console.error("createAuthority error:", error);
+			setErrorMessage(error instanceof Error ? error.message : String(error));
 			return;
 		}
 		navigation.goBack();
@@ -196,6 +207,11 @@ export default function AuthorityInvitationScreen() {
 						/>
 					</View>
 				</ScrollView>
+				{errorMessage ? (
+					<ThemedText type="small" style={{ color: colors.error }}>
+						{errorMessage}
+					</ThemedText>
+				) : null}
 				<Footer>
 					<CustomButton
 						title={t("send")}

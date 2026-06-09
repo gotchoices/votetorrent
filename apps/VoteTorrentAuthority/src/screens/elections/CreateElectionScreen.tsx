@@ -54,6 +54,8 @@ export function CreateElectionScreen() {
 	// Replaces the D-18 hardcoded placeholder strings that were in the original stub.
 	const [authorityId, setAuthorityId] = useState<string>("");
 	const [authorityName, setAuthorityName] = useState<string>("");
+	// 16-08 item 4: surface the ACTUAL propose failure inline (not just console.error).
+	const [errorMessage, setErrorMessage] = useState<string>("");
 
 	useEffect(() => {
 		async function loadAuthority() {
@@ -77,6 +79,8 @@ export function CreateElectionScreen() {
 	// Tier split (B2): signing pipeline lives entirely in ElectionsEngine.seedElectionSigning.
 	// The screen passes privKeyHex + election fields; the seam owns tid/Digest/secp256k1.
 	const handlePropose = async () => {
+		// 16-08 item 4: clear any prior error so a retry starts clean.
+		setErrorMessage("");
 		try {
 			const electionsEngine = await getEngine<IElectionsEngine>("elections");
 			if (!electionsEngine) {
@@ -89,7 +93,7 @@ export function CreateElectionScreen() {
 			const privKeyHex = await getDevicePrivKeyHex();
 			if (!privKeyHex) {
 				console.error("handlePropose: device private key not available");
-				navigation.goBack();
+				setErrorMessage("Device private key not available — cannot sign the election.");
 				return;
 			}
 
@@ -240,6 +244,8 @@ export function CreateElectionScreen() {
 			await electionsEngine.createElection(payload, { signingNonce, revisionSigningNonce });
 		} catch (err) {
 			console.error("createElection error:", err);
+			setErrorMessage(err instanceof Error ? err.message : String(err));
+			return;
 		}
 		navigation.goBack();
 	};
@@ -308,6 +314,11 @@ export function CreateElectionScreen() {
 			</ScrollView>
 
 			{/* ── PROPOSE footer ───────────────────────────────────────────── */}
+			{errorMessage ? (
+				<ThemedText type="small" style={{ color: colors.error }}>
+					{errorMessage}
+				</ThemedText>
+			) : null}
 			<Footer>
 				<CustomButton
 					title={t("propose")}

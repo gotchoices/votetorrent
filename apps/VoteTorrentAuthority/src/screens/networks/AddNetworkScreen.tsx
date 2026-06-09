@@ -36,6 +36,8 @@ export default function AddNetworkScreen() {
 	// single-vs-multiple authority.
 	const [useKeyholders, setUseKeyholders] = useState(true);
 	const [singleAuthority, setSingleAuthority] = useState(true);
+	// 16-08 item 4: surface the ACTUAL submit failure inline (not just console.error).
+	const [errorMessage, setErrorMessage] = useState<string>("");
 	const scrollViewRef = useRef<ScrollView>(null);
 
 	const toggleAdvanced = () => {
@@ -70,10 +72,13 @@ export default function AddNetworkScreen() {
 	};
 
 	const handleCreate = async () => {
+		// 16-08 item 4: clear any prior error so a retry starts clean.
+		setErrorMessage("");
 		try {
 			// Resolve NetworksEngine — available directly from AppProvider context (D-03).
 			if (!networksEngine) {
 				console.error("handleCreate: networksEngine not yet initialized");
+				setErrorMessage("Networks engine not yet initialized — please wait and try again.");
 				return;
 			}
 			const networksEng = networksEngine as INetworksEngine;
@@ -123,6 +128,9 @@ export default function AddNetworkScreen() {
 			const builder = networksEng.buildCreate().update({ networkInit, user });
 			if (!builder.isValid()) {
 				console.error("handleCreate: validation errors", builder.errors());
+				setErrorMessage(
+					builder.errors().map((e) => e.message).join("\n") || "Validation failed.",
+				);
 				return;
 			}
 			const networkEngine = await builder.commit();
@@ -137,6 +145,7 @@ export default function AddNetworkScreen() {
 			await getEngine<INetworkEngine>("network", networkRef);
 		} catch (err) {
 			console.error("handleCreate error:", err);
+			setErrorMessage(err instanceof Error ? err.message : String(err));
 			return;
 		}
 		navigation.goBack();
@@ -311,6 +320,11 @@ export default function AddNetworkScreen() {
 				) : null}
 			</ScrollView>
 
+			{errorMessage ? (
+				<ThemedText type="small" style={{ color: colors.error }}>
+					{errorMessage}
+				</ThemedText>
+			) : null}
 			<Footer>
 				<CustomButton
 					title={t("create")}
