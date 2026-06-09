@@ -123,8 +123,8 @@ export function CreateElectionScreen() {
 				})
 				.setRevision({
 					electionId,
-					revision: 1,
-					revisionTimestamp: now,
+					revision: 0,
+					revisionTimestamp: now - 1000,
 					tags: revision.tags,
 					instructions: revision.instructions,
 					keyholders: revision.keyholders.map((name) => ({
@@ -154,7 +154,7 @@ export function CreateElectionScreen() {
 						certificationStarts: now + 16 * 24 * 60 * 60 * 1000,
 						closed: now + 17 * 24 * 60 * 60 * 1000,
 					},
-					keyholderThreshold: revision.threshold,
+					keyholderThreshold: Math.max(0, Math.trunc(revision.threshold)),
 				});
 
 			// Drive the engine signing seam — seam owns tid + Digest + real secp256k1 sign (D-01).
@@ -185,10 +185,59 @@ export function CreateElectionScreen() {
 				user.activeKeys[0].key
 			);
 
-			// Call createElection directly (not via builder.commit()) so signingNonce is forwarded —
+			// Sign the ElectionRevision row (Revision=0) via the companion seam.
+			// revTid = peekNextElectionTid() + 1 (Election consumes T, revision consumes T+1).
+			// pastRevTs = now - 1000 — must be PAST and identical to what builder.setRevision received.
+			const { peekNextElectionTid } = await import("@votetorrent/vote-engine") as unknown as { peekNextElectionTid: () => number };
+			const pastRevTs = now - 1000;
+			const revTid = peekNextElectionTid() + 1;
+			const revisionTimeline = {
+				registrationEnds: parseDateOrFallback(revision.registrationEnds, now + 2 * 24 * 60 * 60 * 1000),
+				ballotsFinal: parseDateOrFallback(revision.ballotsFinal, now + 5 * 24 * 60 * 60 * 1000),
+				votingStarts: parseDateOrFallback(revision.votingStarts, now + 10 * 24 * 60 * 60 * 1000),
+				tallyingStarts: now + 14 * 24 * 60 * 60 * 1000,
+				validation: now + 15 * 24 * 60 * 60 * 1000,
+				certificationStarts: now + 16 * 24 * 60 * 60 * 1000,
+				closed: now + 17 * 24 * 60 * 60 * 1000,
+			};
+			const revisionSigningNonce = await (electionsEngine as unknown as {
+				seedElectionRevisionSigning(
+					electionId: string,
+					authorityId: string,
+					revision: {
+						revision: number;
+						revisionTimestamp: number;
+						tags: string[];
+						instructions: string;
+						timeline: Record<string, number>;
+						keyholderThreshold: number;
+					},
+					tid: number,
+					privKeyHex: string,
+					signerUserId: string,
+					signerKey: string,
+				): Promise<string>;
+			}).seedElectionRevisionSigning(
+				electionId,
+				authorityId,
+				{
+					revision: 0,
+					revisionTimestamp: pastRevTs,
+					tags: revision.tags,
+					instructions: revision.instructions,
+					timeline: revisionTimeline,
+					keyholderThreshold: Math.max(0, Math.trunc(revision.threshold)),
+				},
+				revTid,
+				privKeyHex,
+				user.id,
+				user.activeKeys[0].key,
+			);
+
+			// Call createElection directly (not via builder.commit()) so both nonces are forwarded —
 			// ElectionsCreateElectionBuilder.commit() does NOT forward signingNonce (RESEARCH FQ3 option a).
 			const payload = builder.build();
-			await electionsEngine.createElection(payload, { signingNonce });
+			await electionsEngine.createElection(payload, { signingNonce, revisionSigningNonce });
 		} catch (err) {
 			console.error("createElection error:", err);
 		}

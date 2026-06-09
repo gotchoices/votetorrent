@@ -348,14 +348,65 @@ export async function runFullChainWritePhase(
   }).seedElectionSigning(electionFields, privKeyHex, user.id, signerKey);
   console.log('[proof] full-chain write: election signing seam complete, nonce=' + signingNonce);
 
+  // Step 4b: sign the initial ElectionRevision (Revision=0).
+  // revTid = election tid + 1 (createElection consumes T for Election, T+1 for revision).
+  // Use a PAST revisionTimestamp so RevisionTimestampValid (< context.now AND < RevisionDeadline) passes.
+  // The SAME pastRevTs value is passed to both the seam and the ElectionInit revision so
+  // toCanonicalDatetime() produces byte-identical strings in both paths (T-16-21 mitigation).
+  const pastRevTs = now - 1000;
+  const revisionFields = {
+    revision: 0,
+    revisionTimestamp: pastRevTs,
+    tags: ['proof'],
+    instructions: '# Proof Election FC',
+    timeline: {
+      registrationEnds: now + 2 * 86400000,
+      ballotsFinal: now + 5 * 86400000,
+      votingStarts: now + 10 * 86400000,
+      tallyingStarts: now + 14 * 86400000,
+      validation: now + 15 * 86400000,
+      certificationStarts: now + 16 * 86400000,
+      closed: now + 17 * 86400000,
+    },
+    keyholderThreshold: 0,
+  };
+  // peekNextElectionTid() still points to T (election tid) — +1 gives the revision tid.
+  // Import peekNextElectionTid via the same ElectionsEngine module.
+  const { peekNextElectionTid } = await import('@votetorrent/vote-engine/rn') as unknown as { peekNextElectionTid: () => number };
+  const revTid = peekNextElectionTid() + 1;
+  const revisionSigningNonce = await (electionsEngine as unknown as {
+    seedElectionRevisionSigning(
+      electionId: string,
+      authorityId: string,
+      revision: {
+        revision: number;
+        revisionTimestamp: number;
+        tags: string[];
+        instructions: string;
+        timeline: Record<string, number>;
+        keyholderThreshold: number;
+      },
+      tid: number,
+      privKeyHex: string,
+      signerUserId: string,
+      signerKey: string,
+    ): Promise<string>;
+  }).seedElectionRevisionSigning(
+    electionId, authorityId, revisionFields, revTid, privKeyHex, user.id, signerKey,
+  );
+  console.log('[proof] full-chain write: revision signing seam complete, revNonce=' + revisionSigningNonce);
 
-  // Step 5: create the election row (Election.InsertValid CHECK satisfied by AdminSignature above).
+  // Step 5: create the election row + ElectionRevision (Revision=0, MutationValid satisfied).
   await electionsEngine.createElection(
     {
       election: electionFields,
-      revision: undefined as unknown as import('@votetorrent/vote-core').ElectionRevisionInit,
+      revision: {
+        electionId,
+        ...revisionFields,
+        keyholders: [],
+      },
     },
-    { signingNonce },
+    { signingNonce, revisionSigningNonce },
   );
   console.log('[proof] full-chain write: election created, id=' + electionId);
 

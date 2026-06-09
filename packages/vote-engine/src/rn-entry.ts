@@ -10,7 +10,7 @@
 // double-export MockNetworksEngine alongside NetworksEngine.
 export { NetworksEngine } from './networks/networks-engine.js'
 export { NetworkEngine } from './network/network-engine.js'
-export { ElectionsEngine } from './elections/elections-engine.js'
+export { ElectionsEngine, peekNextElectionTid } from './elections/elections-engine.js'
 export { ElectionEngine } from './election/election-engine.js'
 export type { ElectionSubject } from './election/election-engine.js'
 export { AuthorityEngine } from './authority/authority-engine.js'

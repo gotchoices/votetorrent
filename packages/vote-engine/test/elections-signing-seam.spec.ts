@@ -30,6 +30,26 @@ import {
 } from './fixtures/test-context.js'
 import { randomTestKeyPair } from './fixtures/keys.js'
 
+// Re-export the type for cast below (no import needed — TypeScript sees it via the cast)
+type SeedRevisionSeam = {
+  seedElectionRevisionSigning(
+    electionId: string,
+    authorityId: string,
+    revision: {
+      revision: number
+      revisionTimestamp: number
+      tags: string[]
+      instructions: string
+      timeline: Record<string, number>
+      keyholderThreshold: number
+    },
+    tid: number,
+    privKeyHex: string,
+    signerUserId: string,
+    signerKey: string,
+  ): Promise<string>
+}
+
 describe('Real-seam: seedElectionSigning → createElection through InsertValid', () => {
 
   it('Test A — Election row inserts via REAL seedElectionSigning with genuine secp256k1 signing (regression: InsertValid must pass)', async () => {
@@ -179,5 +199,89 @@ describe('Real-seam: seedElectionSigning → createElection through InsertValid'
     const intDigest = normalise(intRow?.d)
 
     expect(stored, 'stored Digest matches INTEGER Tid recompute (the Digest seam stores the same value InsertValid recomputes)').to.equal(intDigest)
+  })
+
+  it('Test C — createElection + revision seam → getElectionDetails returns current.revision === 0 (FLOW-04 regression lock)', async () => {
+    // Fails-before evidence: without the ElectionRevision insert in createElection,
+    // getElectionDetails() throws:
+    //   ElectionEngine.getElectionDetails: Election <id> has no current revision
+    // Passes-after: with the revision insert (Revision=0) satisfying MutationValid,
+    // getElectionDetails() returns { current: { revision: 0, ... } }.
+
+    const { privateHex, publicHex } = randomTestKeyPair()
+
+    const net = await createTestNetwork({
+      user: {
+        activeKeys: [
+          {
+            key: publicHex,
+            type: UserKeyType.mobile,
+            expiration: Date.now() + 86_400_000,
+          },
+        ],
+      },
+    })
+    const auth = await addTestAuthority(net)
+    const electionsEngine = new ElectionsEngine(auth.ctx)
+
+    const init = makeElectionInit({ authorityId: auth.authority.id })
+    const { election: e } = init
+
+    // Use a PAST revisionTimestamp so RevisionTimestampValid passes.
+    // Supply the SAME epoch ms to both the seam and init.revision.revisionTimestamp
+    // so toCanonicalDatetime() produces identical bytes in both paths.
+    const pastRevTimestamp = Date.now() - 1000
+
+    // Step 1: sign the Election row
+    const electionFields = {
+      id: e.id,
+      authorityId: e.authorityId,
+      title: e.title,
+      date: e.date,
+      revisionDeadline: e.revisionDeadline,
+      ballotDeadline: e.ballotDeadline,
+      type: e.type,
+    }
+    const signingNonce = await electionsEngine.seedElectionSigning(
+      electionFields,
+      privateHex,
+      auth.user.id,
+      auth.user.activeKeys[0]!.key
+    )
+
+    // Step 2: sign the ElectionRevision row.
+    // revTid = peekNextElectionTid() + 1 — Election consumes T, revision consumes T+1.
+    const revTid = peekNextElectionTid() + 1
+    const revisionSigningNonce = await (electionsEngine as unknown as SeedRevisionSeam).seedElectionRevisionSigning(
+      e.id,
+      e.authorityId,
+      {
+        revision: 0,
+        revisionTimestamp: pastRevTimestamp,
+        tags: init.revision.tags,
+        instructions: init.revision.instructions,
+        timeline: init.revision.timeline as Record<string, number>,
+        keyholderThreshold: init.revision.keyholderThreshold,
+      },
+      revTid,
+      privateHex,
+      auth.user.id,
+      auth.user.activeKeys[0]!.key
+    )
+
+    // Step 3: create the election (Election row + ElectionRevision Revision=0).
+    // Pass a PAST revisionTimestamp in init.revision so createElection binds the same bytes.
+    const initWithPastTs = {
+      ...init,
+      revision: { ...init.revision, revisionTimestamp: pastRevTimestamp },
+    }
+    await electionsEngine.createElection(initWithPastTs, { signingNonce, revisionSigningNonce })
+
+    // Step 4: open the election and call getElectionDetails.
+    // Pre-fix: throws "has no current revision"
+    // Post-fix: returns current.revision === 0
+    const electionEngine = await electionsEngine.openElection(e.id)
+    const details = await electionEngine.getElectionDetails()
+    expect(details.current.revision, 'getElectionDetails.current.revision').to.equal(0)
   })
 })
