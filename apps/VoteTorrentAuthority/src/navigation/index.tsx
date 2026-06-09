@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useState } from "react";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import FontAwesome6 from "react-native-vector-icons/FontAwesome6";
 import { useTranslation } from "react-i18next";
@@ -15,7 +15,7 @@ import AuthoritiesScreen from "../screens/authorities/AuthoritiesScreen";
 import SettingsScreen from "../screens/settings/SettingsScreen";
 import { ChipButton } from "../components/ChipButton";
 import { Pressable, StyleSheet, Text } from "react-native";
-import { ExtendedTheme, useNavigation, StackActions } from "@react-navigation/native";
+import { ExtendedTheme, useNavigation, StackActions, useFocusEffect } from "@react-navigation/native";
 import { useTheme } from "@react-navigation/native";
 import NetworksScreen from "../screens/networks/NetworksScreen";
 import type { NavigationProp } from "./types";
@@ -67,25 +67,32 @@ function HeaderTitle() {
 	const navigation = useNavigation<NavigationProp>();
 	const [networkName, setNetworkName] = useState<string | null>(null);
 
-	useEffect(() => {
-		const fetchNetworkDetails = async () => {
-			if (hasNetwork) {
-				try {
-					const engine = (await getEngine("network")) as INetworkEngine;
-					if (engine) {
-						const networkDetails = await engine.getDetails();
-						setNetworkName(networkDetails.network.name);
+	// Re-fetch the active network's name on every focus (not just mount), so selecting
+	// a different network via NetworkDetails' Select button updates the persistent header
+	// title on return. A one-shot useEffect keyed on [hasNetwork, getEngine] never re-ran
+	// because neither dep changes on a network switch (currentNetworkHash is internal to
+	// the factory). Mirrors the useFocusEffect reload pattern used by ElectionsScreen.
+	useFocusEffect(
+		useCallback(() => {
+			const fetchNetworkDetails = async () => {
+				if (hasNetwork) {
+					try {
+						const engine = (await getEngine("network")) as INetworkEngine;
+						if (engine) {
+							const networkDetails = await engine.getDetails();
+							setNetworkName(networkDetails.network.name);
+						}
+					} catch (error) {
+						console.error("Error fetching network details:", error);
 					}
-				} catch (error) {
-					console.error("Error fetching network details:", error);
+				} else {
+					setNetworkName(null);
 				}
-			} else {
-				setNetworkName(null);
-			}
-		};
+			};
 
-		fetchNetworkDetails();
-	}, [hasNetwork, getEngine]);
+			fetchNetworkDetails();
+		}, [hasNetwork, getEngine])
+	);
 
 	return (
 		<Pressable
