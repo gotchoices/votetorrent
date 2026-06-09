@@ -94,13 +94,20 @@ export function NetworkDetailsScreen() {
 		return out;
 	}, [networkDetails, t]);
 
+	// Phase 16 plan 08 (item 1 / T-16-26): load the PRIMARY AUTHORITY by its own id.
+	// EngineFactory.getEngine("authority", initParams) treats initParams as the AUTHORITY id
+	// (networkEngine.openAuthority(initParams)). Passing the NETWORK id here produced
+	// "Authority not found". Pass networkDetails.network.primaryAuthorityId, and short-circuit
+	// when it is falsy so we never pass undefined into openAuthority.
 	useEffect(() => {
 		const loadPrimaryAuthority = async () => {
 			if (!networkDetails) return;
+			const primaryAuthorityId = networkDetails.network.primaryAuthorityId;
+			if (!primaryAuthorityId) return;
 			try {
 				const authorityEngine = await getEngine<IAuthorityEngine>(
 					"authority",
-					networkDetails?.network.id
+					primaryAuthorityId
 				);
 				setPrimaryAuthorityEngine(authorityEngine);
 				const details = await authorityEngine.getDetails();
@@ -115,6 +122,22 @@ export function NetworkDetailsScreen() {
 		loadPrimaryAuthority();
 	}, [networkEngine, networkDetails]);
 
+	// Phase 16 plan 08 (item 2): make the tapped network the active/current network.
+	// Re-resolving via getEngine("network", networkRef) re-points the EngineFactory's
+	// currentNetworkHash to THIS ref's hash (item-3 fix in engine-factory.ts guarantees a
+	// DIFFERENT ref re-binds rather than hitting the stale cache). NetworksEngine.open() also
+	// writes the ref to the recentNetworks LocalStorage list, so no separate persistence is
+	// needed. Then return to the network home; sibling screens (Elections/Authorities/Create)
+	// resolve against the now-selected network.
+	const handleSelectNetwork = async () => {
+		try {
+			await getEngine<INetworkEngine>("network", networkRef as NetworkReference);
+			navigation.goBack();
+		} catch (error) {
+			console.error("Failed to select network:", error);
+		}
+	};
+
 	return (
 		<ScrollView
 			style={styles.container}
@@ -127,7 +150,7 @@ export function NetworkDetailsScreen() {
 					icon="chevron-left"
 					rightIcon="cloud-rain"
 					backgroundColor={colors.success}
-					onPress={() => {}}
+					onPress={handleSelectNetwork}
 				/>
 				{networkDetails && primaryAuthorityDetails && (
 					<NetworkDetailsComponent
