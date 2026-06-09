@@ -76,6 +76,25 @@ export class EngineFactory {
 	 * so different subjects (e.g. different elections) each get their own entry.
 	 */
 	async getEngine<T>(engineName: string, initParams?: unknown): Promise<T> {
+		// 16-08 item 3 fix (approach b): detect a NETWORK SWITCH before the cache-hit
+		// short-circuit. cacheKey('network') is a CONSTANT 'network' (CR-01), so without this
+		// guard a getEngine('network', refB) with a DIFFERENT hash would HIT the boot-time
+		// proof-network entry and never re-point currentNetworkHash — NetworkDetails would then
+		// render the proof network's data for every ref (root cause in 16-08-INVESTIGATION.md).
+		// When the caller asks for a network whose hash differs from the currently-established
+		// one, evict the stale 'network' entry + ctx-dependent siblings so buildEngine re-opens
+		// against the new ref. Param-less / same-hash calls fall through unchanged (CR-01).
+		if (engineName === 'network') {
+			const ref = initParams as NetworkReference | undefined
+			if (
+				ref?.hash !== undefined &&
+				this.currentNetworkHash !== undefined &&
+				ref.hash !== this.currentNetworkHash
+			) {
+				this.evictNetworkScopedEngines()
+			}
+		}
+
 		const key = this.cacheKey(engineName, initParams)
 		if (this.engineCache.has(key)) {
 			return this.engineCache.get(key) as T
@@ -86,6 +105,21 @@ export class EngineFactory {
 	}
 
 	// ---------- private helpers ----------
+
+	/**
+	 * 16-08 item 3: evict the 'network' entry and every ctx-dependent sibling so they re-bind
+	 * to the newly selected network's ctx. Keep 'defaultUser' (LocalStorage-only, no ctx).
+	 * Called from getEngine() when a network switch is detected. Does NOT touch
+	 * currentNetworkHash — buildEngine('network', ref) re-points it as part of the rebuild.
+	 * The 'authority:<id>' and 'election:<subject>' entries are param-keyed, so we drop ALL
+	 * cached engines except 'defaultUser' rather than enumerate every key.
+	 */
+	private evictNetworkScopedEngines(): void {
+		for (const key of [...this.engineCache.keys()]) {
+			if (key === 'defaultUser') continue
+			this.engineCache.delete(key)
+		}
+	}
 
 	private cacheKey(engineName: string, initParams?: unknown): string {
 		// The "network" engine is a singleton for the currently-established network
