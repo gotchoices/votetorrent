@@ -348,10 +348,23 @@ export class ElectionsEngine implements IElectionsEngine {
 
     // 4. Produce a REAL secp256k1 signature over the digest bytes — INSIDE the engine
     //    (the screen never calls secp256k1.sign, satisfying the B2 tier constraint).
-    const digestBytes: Uint8Array =
-      digestRow.d instanceof Uint8Array
-        ? digestRow.d
-        : hexToBytes(digestRow.d as string)
+    //    CR-01: Quereus/crypto-plugin returns the Digest() result as a Uint8Array on
+    //    device/Hermes but as a base64url string on Node. Detect and decode both forms.
+    const digestBytes: Uint8Array = (() => {
+      const d = digestRow.d
+      if (d instanceof Uint8Array) return d
+      if (Buffer.isBuffer(d)) return new Uint8Array(d.buffer, d.byteOffset, d.byteLength)
+      // String: could be base64url (Node/Quereus 3.x) or hex — detect by charset.
+      const s = d as string
+      if (/^[A-Za-z0-9_-]+=*$/.test(s) && s.length % 4 !== 1) {
+        // base64url — decode with standard base64 after restoring padding chars
+        const b64 = s.replace(/-/g, '+').replace(/_/g, '/').padEnd(
+          s.length + (4 - (s.length % 4)) % 4, '='
+        )
+        return Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))
+      }
+      return hexToBytes(s)
+    })()
     const privKeyBytes = hexToBytes(privKeyHex)
     const sig = secp256k1.sign(digestBytes, privKeyBytes)
     const signature = bytesToHex(sig.toCompactRawBytes())
