@@ -28,7 +28,7 @@ class Hash {
 		return this;
 	}
 
-	digest() {
+	digest(encoding) {
 		let total = 0;
 		for (const c of this._chunks) total += c.length;
 		const buf = new Uint8Array(total);
@@ -37,7 +37,29 @@ class Hash {
 			buf.set(c, off);
 			off += c.length;
 		}
-		return this._fn(buf);
+		const result = this._fn(buf);
+		if (!encoding) return result;
+		// Honor string encoding — CR-01: polyfill previously ignored the encoding arg,
+		// causing Digest() to return Uint8Array on device vs base64url string on Node.
+		// This made A.Digest (TEXT, stored as Quereus-serialized Uint8Array) fail the
+		// InsertValid check against Digest(context.Tid,...) (fresh Uint8Array in memory).
+		if (encoding === 'base64url') {
+			// Standard base64, then replace + with -, / with _, strip = padding
+			let binary = '';
+			for (let i = 0; i < result.length; i++) binary += String.fromCharCode(result[i]);
+			return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+		}
+		if (encoding === 'hex') {
+			let hex = '';
+			for (let i = 0; i < result.length; i++) hex += (result[i] < 16 ? '0' : '') + result[i].toString(16);
+			return hex;
+		}
+		if (encoding === 'base64') {
+			let binary = '';
+			for (let i = 0; i < result.length; i++) binary += String.fromCharCode(result[i]);
+			return btoa(binary);
+		}
+		return result;
 	}
 }
 

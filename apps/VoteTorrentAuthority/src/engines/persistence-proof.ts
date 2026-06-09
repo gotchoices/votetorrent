@@ -348,6 +348,7 @@ export async function runFullChainWritePhase(
   }).seedElectionSigning(electionFields, privKeyHex, user.id, signerKey);
   console.log('[proof] full-chain write: election signing seam complete, nonce=' + signingNonce);
 
+
   // Step 5: create the election row (Election.InsertValid CHECK satisfied by AdminSignature above).
   await electionsEngine.createElection(
     {

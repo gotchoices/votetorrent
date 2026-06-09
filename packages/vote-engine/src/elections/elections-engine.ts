@@ -348,13 +348,14 @@ export class ElectionsEngine implements IElectionsEngine {
 
     // 4. Produce a REAL secp256k1 signature over the digest bytes — INSIDE the engine
     //    (the screen never calls secp256k1.sign, satisfying the B2 tier constraint).
-    //    CR-01: Quereus/crypto-plugin returns the Digest() result as a Uint8Array on
-    //    device/Hermes but as a base64url string on Node. Detect and decode both forms.
+    //    CR-01: After the node-crypto.js polyfill fix, Digest() returns a base64url string
+    //    on both Node and device. Guard both forms for robustness: Uint8Array (legacy device
+    //    path before the polyfill fix) and string (Node + post-fix device).
     const digestBytes: Uint8Array = (() => {
       const d = digestRow.d
       if (d instanceof Uint8Array) return d
-      if (Buffer.isBuffer(d)) return new Uint8Array(d.buffer, d.byteOffset, d.byteLength)
-      // String: could be base64url (Node/Quereus 3.x) or hex — detect by charset.
+      // String: could be base64url (Node/Quereus 3.x, post-CR-01-fix device) or hex.
+      // Do NOT use Buffer.isBuffer() — Buffer is not available on Hermes.
       const s = d as string
       if (/^[A-Za-z0-9_-]+=*$/.test(s) && s.length % 4 !== 1) {
         // base64url — decode with standard base64 after restoring padding chars
