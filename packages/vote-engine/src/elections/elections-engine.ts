@@ -325,13 +325,15 @@ export class ElectionsEngine implements IElectionsEngine {
     // 3. Compute the election Digest via SQL so the bytes are IDENTICAL to what
     //    Election.InsertValid will recompute: Digest(context.Tid, new.Id, new.AuthorityId,
     //    new.Title, new.Date, new.RevisionDeadline, new.BallotDeadline, new.Type).
-    //    Pass tid as a string (String(tid)) matching how createElection binds `Tid = ${tid}`.
+    //    Pass tid as an INTEGER (JS number) to match context.Tid:int in Election.InsertValid
+    //    and createElection's integer SQL literal `Tid = ${tid}`. Digest('1', …) ≠ Digest(1, …),
+    //    so binding String(tid) would produce a mismatch and InsertValid would always fail.
     const digestRow = await ctx.db
       .prepare(
         'select Digest(:tid, :id, :authorityId, :title, :date, :revisionDeadline, :ballotDeadline, :type) as d'
       )
       .get({
-        tid: String(tid),
+        tid: tid,
         id,
         authorityId,
         title,
@@ -387,7 +389,7 @@ export class ElectionsEngine implements IElectionsEngine {
         nonce,
         authorityId,
         adminEffectiveAt,
-        tid: String(tid),
+        tid: tid,
         id,
         title,
         date: dateCanon,
