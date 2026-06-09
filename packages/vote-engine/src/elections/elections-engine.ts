@@ -112,7 +112,18 @@ export class ElectionsEngine implements IElectionsEngine {
    * The schema's `InsertOnly check on update, delete (false)` is exactly
    * the constraint pattern that quereus#23 breaks today on INSERT.
    */
-  async createElection (election: ElectionInit, options?: { signingNonce?: string }): Promise<void> {
+  /**
+   * Byte-alignment contract for the revision insert (T-16-21 mitigation):
+   * The Election row uses tid = nextTid++ (call it T).
+   * The ElectionRevision row uses revTid = nextTid++ = T + 1.
+   * seedElectionRevisionSigning MUST be called with tid = peekNextElectionTid() + 1
+   * AFTER seedElectionSigning (which peeks at T) but BEFORE createElection (which
+   * consumes T then T+1). This guarantees the seam's signed revTid equals the INSERT's
+   * context.Tid. The caller controls revisionTimestamp — pass the SAME past epoch ms
+   * to both the seam and election.revision.revisionTimestamp so both
+   * toCanonicalDatetime() calls produce identical byte strings.
+   */
+  async createElection (election: ElectionInit, options?: { signingNonce?: string; revisionSigningNonce?: string }): Promise<void> {
     this.requireCtx('createElection')
     const tid = nextTid++
     const e = election.election
@@ -151,6 +162,39 @@ export class ElectionsEngine implements IElectionsEngine {
       )
     } catch (err) {
       this.rethrow(err, 'createElection')
+    }
+
+    // Insert the initial ElectionRevision (Revision = 0) if revision data and nonce are provided.
+    // Skipped if either is absent (back-compat for callers that intentionally omit the revision).
+    if (election.revision && options?.revisionSigningNonce) {
+      const revTid = nextTid++
+      const r = election.revision
+      // Serialize tags/timeline with JSON.stringify — byte-identical to seedElectionRevisionSigning binds.
+      const tags = JSON.stringify(r.tags)
+      const timeline = JSON.stringify(r.timeline)
+      // Use the CALLER-SUPPLIED revisionTimestamp (must be a past epoch ms — < context.now AND
+      // < Election.RevisionDeadline). Do NOT generate a fresh Date.now() here; that would diverge
+      // from the timestamp the seam already signed, reproducing the 16-06 digest-mismatch class.
+      const revTimestamp = toCanonicalDatetime(r.revisionTimestamp)
+      try {
+        await this.ctx!.db.exec(
+          `insert into ElectionRevision (ElectionId, Revision, RevisionTimestamp, Tags, Instructions, Timeline, KeyholderThreshold)
+          with context SigningNonce = :signingNonce, Tid = ${revTid}, now = :now
+          values (:electionId, 0, :revTimestamp, :tags, :instructions, :timeline, :keyholderThreshold)`,
+          {
+            signingNonce: options.revisionSigningNonce,
+            electionId: e.id,
+            revTimestamp,
+            tags,
+            instructions: r.instructions,
+            timeline,
+            keyholderThreshold: r.keyholderThreshold,
+            now: nowCanonicalDatetime(),
+          }
+        )
+      } catch (err) {
+        this.rethrow(err, 'createElection')
+      }
     }
   }
 
@@ -421,6 +465,161 @@ export class ElectionsEngine implements IElectionsEngine {
     await new SigningEngine(ctx).sign(nonce, { signerUserId, signerKey, signature })
 
     // 7. Return the nonce for the screen to pass to createElection(payload, { signingNonce }).
+    return nonce
+  }
+
+  // ---------- revision-signing seam (D-01 / Phase 16 Plan 07) ----------
+
+  /**
+   * Seed a SECOND AdminSigning row (scope='mel') whose Digest covers the
+   * `ElectionRevision` row that `createElection` will insert (Revision = 0).
+   *
+   * This is a COMPANION to `seedElectionSigning` — the Election-row signing
+   * path is UNCHANGED. The revision Digest field order mirrors the schema's
+   * `ElectionRevision.MutationValid` CHECK:
+   *   Digest(context.Tid, new.ElectionId, new.Revision, new.RevisionTimestamp,
+   *          new.Tags, new.Instructions, new.Timeline, new.KeyholderThreshold)
+   *
+   * Byte-alignment contract (T-16-21 mitigation):
+   *   - `tid`          binds as INTEGER (JS number) — same 16-06 fix as seedElectionSigning.
+   *   - `revision`     binds as INTEGER literal 0 (RevisionStart constraint).
+   *   - `revTimestamp` binds as `toCanonicalDatetime(revision.revisionTimestamp)` — the
+   *     CALLER supplies a PAST timestamp (< context.now AND < Election.RevisionDeadline).
+   *     Do NOT generate a fresh Date.now() here; it must equal what createElection binds.
+   *   - `tags`         binds as `JSON.stringify(revision.tags)` — byte-identical to
+   *     what the ElectionRevision INSERT binds in Task 2.
+   *   - `timeline`     binds as `JSON.stringify(revision.timeline)` — same byte-identity.
+   *
+   * The `revTid` used here is `peekNextElectionTid() + 1` because `createElection`
+   * consumes `nextTid++` for the Election row first, then `nextTid++` for the revision.
+   * Callers MUST call seedElectionSigning (which peeks at `peekNextElectionTid()`) BEFORE
+   * calling this method so the +1 offset is stable.
+   *
+   * @returns A DISTINCT nonce (different from the election-row nonce) for the caller
+   *   to pass to `createElection(payload, { signingNonce, revisionSigningNonce })`.
+   */
+  async seedElectionRevisionSigning (
+    electionId: string,
+    authorityId: string,
+    revision: {
+      revision: number
+      revisionTimestamp: number
+      tags: string[]
+      instructions: string
+      timeline: Record<string, number>
+      keyholderThreshold: number
+    },
+    tid: number,
+    privKeyHex: string,
+    signerUserId: string,
+    signerKey: string
+  ): Promise<string> {
+    this.requireCtx('seedElectionRevisionSigning')
+    const ctx = this.ctx!
+
+    // 1. Resolve CurrentAdmin.EffectiveAt for the authority (same as seedElectionSigning).
+    const adminRow = await ctx.db
+      .prepare('select EffectiveAt from CurrentAdmin where AuthorityId = :authorityId')
+      .get({ authorityId })
+    if (!adminRow) {
+      throw new Error(`seedElectionRevisionSigning: CurrentAdmin not found for authorityId=${authorityId}`)
+    }
+    const adminEffectiveAt = adminRow.EffectiveAt as string | number
+
+    // 2. Serialize tags/timeline with JSON.stringify — byte-identical to createElection binds.
+    const tags = JSON.stringify(revision.tags)
+    const timeline = JSON.stringify(revision.timeline)
+    const revTimestamp = toCanonicalDatetime(revision.revisionTimestamp)
+
+    // 3. Compute the revision Digest via SQL — IDENTICAL to MutationValid recompute.
+    //    Bind `tid` as INTEGER (JS number, NOT String) — the 16-06 root-cause class fix.
+    //    Bind `revision` as integer 0 (RevisionStart constraint literal).
+    const digestRow = await ctx.db
+      .prepare(
+        'select Digest(:tid, :electionId, :revision, :revTimestamp, :tags, :instructions, :timeline, :keyholderThreshold) as d'
+      )
+      .get({
+        tid: tid,
+        electionId,
+        revision: 0,
+        revTimestamp,
+        tags,
+        instructions: revision.instructions,
+        timeline,
+        keyholderThreshold: revision.keyholderThreshold,
+      })
+    if (!digestRow || digestRow.d == null) {
+      throw new Error('seedElectionRevisionSigning: Digest() returned null — crypto plugin not registered?')
+    }
+
+    // 4. Produce a REAL secp256k1 signature over the digest bytes.
+    //    CR-01: reuse the IDENTICAL base64url-honoring IIFE from seedElectionSigning.
+    const digestBytes: Uint8Array = (() => {
+      const d = digestRow.d
+      if (d instanceof Uint8Array) return d
+      const s = d as string
+      if (/^[A-Za-z0-9_-]+=*$/.test(s) && s.length % 4 !== 1) {
+        const b64 = s.replace(/-/g, '+').replace(/_/g, '/').padEnd(
+          s.length + (4 - (s.length % 4)) % 4, '='
+        )
+        return Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))
+      }
+      return hexToBytes(s)
+    })()
+    const privKeyBytes = hexToBytes(privKeyHex)
+    const sig = secp256k1.sign(digestBytes, privKeyBytes)
+    const signature = bytesToHex(sig.toCompactRawBytes())
+
+    // 5. Generate a FRESH nonce (DISTINCT from the election-row nonce).
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const nonce: string = (globalThis as any).crypto.randomUUID()
+    const now = nowCanonicalDatetime()
+
+    await ctx.db.exec(
+      `insert into AdminSigning (
+        Nonce,
+        AuthorityId,
+        AdminEffectiveAt,
+        Scope,
+        Digest,
+        UserId,
+        SignerKey,
+        Signature
+      )
+      with context now = :now, IsSignatureValid = true, IsSignerKeyValid = true
+      values (
+        :nonce,
+        :authorityId,
+        :adminEffectiveAt,
+        'mel',
+        Digest(:tid, :electionId, :revision, :revTimestamp, :tags, :instructions, :timeline, :keyholderThreshold),
+        :userId,
+        :signerKey,
+        :signature
+      )`,
+      {
+        nonce,
+        authorityId,
+        adminEffectiveAt,
+        tid: tid,
+        electionId,
+        revision: 0,
+        revTimestamp,
+        tags,
+        instructions: revision.instructions,
+        timeline,
+        keyholderThreshold: revision.keyholderThreshold,
+        userId: signerUserId,
+        signerKey,
+        signature,
+        now,
+      }
+    )
+
+    // 6. Drive OfficerSignature + AdminSignature via SigningEngine (threshold=1 → AdminSignature).
+    await new SigningEngine(ctx).sign(nonce, { signerUserId, signerKey, signature })
+
+    // 7. Return the nonce for the caller to pass as revisionSigningNonce.
     return nonce
   }
 
