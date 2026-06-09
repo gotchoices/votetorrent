@@ -28,7 +28,7 @@ import { ElectionType, UserKeyType } from '@votetorrent/vote-core';
 // @votetorrent/vote-engine/rn is the single sanctioned import path for real engine
 // classes in the RN app layer (D-04). Metro resolves it via the `./rn` subpath in
 // package.json exports + unstable_enablePackageExports: true in metro.config.js.
-import { NetworksEngine, ElectionsEngine, H16, LocalStorageReact } from '@votetorrent/vote-engine/rn';
+import { NetworksEngine, ElectionsEngine, peekNextElectionTid, H16, LocalStorageReact } from '@votetorrent/vote-engine/rn';
 import type { DbFactory } from '@votetorrent/vote-engine/rn';
 import { rnDbFactory } from './rn-db-factory';
 import { getOrCreateDeviceUser, getDevicePrivKeyHex } from './device-user';
@@ -371,8 +371,7 @@ export async function runFullChainWritePhase(
     keyholderThreshold: 0,
   };
   // peekNextElectionTid() still points to T (election tid) — +1 gives the revision tid.
-  // Import peekNextElectionTid via the same ElectionsEngine module.
-  const { peekNextElectionTid } = await import('@votetorrent/vote-engine/rn') as unknown as { peekNextElectionTid: () => number };
+  // (peekNextElectionTid is imported statically from @votetorrent/vote-engine/rn above.)
   const revTid = peekNextElectionTid() + 1;
   const revisionSigningNonce = await (electionsEngine as unknown as {
     seedElectionRevisionSigning(
