@@ -40,7 +40,8 @@
 		"uint8arrays": "3.1.1",
 		"uuid": "9.0.1",
 		"react-native-screens": "4.10.0",
-		"@optimystic/quereus-plugin-optimystic@npm:^0.13.4": "patch:@optimystic/quereus-plugin-optimystic@npm%3A0.13.5#~/.yarn/patches/@optimystic-quereus-plugin-optimystic-npm-0.13.5-6fbe2eccab.patch"
+		"@optimystic/quereus-plugin-optimystic@npm:^0.13.4": "patch:@optimystic/quereus-plugin-optimystic@npm%3A0.13.5#~/.yarn/patches/@optimystic-quereus-plugin-optimystic-npm-0.13.5-6fbe2eccab.patch",
+		"@serfab/cadre-core@npm:^0.7.1": "patch:@serfab/cadre-core@npm%3A0.7.1#~/.yarn/patches/@serfab-cadre-core-npm-0.7.1-518fb48136.patch"
 	},
 	"packageManager": "yarn@4.7.0"
 }

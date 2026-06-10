@@ -108,6 +108,31 @@ if (typeof Promise.withResolvers !== 'function') {
   };
 }
 
+// 6b. DOMException — bare RN 0.78 Hermes has no DOMException global. The abort/timeout
+//     polyfills below and libp2p's dial path (`signal.reason`, AbortError/TimeoutError)
+//     construct DOMException; without this the timeout callback throws ReferenceError
+//     and the noise upgrade surfaces as an empty-message EncryptionFailedError (P2P-01).
+if (typeof globalThis.DOMException === 'undefined') {
+  globalThis.DOMException = class DOMException extends Error {
+    constructor(message = '', name = 'Error') {
+      super(message);
+      this.name = name;
+    }
+  };
+}
+
+// 6c. WebSocket.bufferedAmount — RN's WebSocket lacks bufferedAmount. @libp2p/websockets
+//     backpressure logic does `canSendMore = ws.bufferedAmount < max` (undefined < N → false)
+//     and waits for a drain that's gated on `ws.bufferedAmount === 0` (undefined === 0 → never),
+//     so EVERY outbound libp2p WS write stalls after the first chunk (P2P-01 dial stall).
+//     RN's bridge exposes no send buffer, so 0 ("flushed") is the honest constant.
+if (typeof WebSocket !== 'undefined' && !('bufferedAmount' in WebSocket.prototype)) {
+  Object.defineProperty(WebSocket.prototype, 'bufferedAmount', {
+    get() { return 0; },
+    configurable: true,
+  });
+}
+
 // 7. AbortSignal.prototype.throwIfAborted
 if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.prototype.throwIfAborted !== 'function') {
   AbortSignal.prototype.throwIfAborted = function () {

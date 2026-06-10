@@ -21,11 +21,17 @@ const projectRoot = __dirname;
 const workspaceRoot = path.resolve(projectRoot, '../..');
 const emptyShim = path.resolve(projectRoot, 'polyfills/empty.js');
 
-// --- @libp2p/crypto browser-field map (load the package's `browser` field and redirect
-//     Node file paths to their .browser.js variants). MANDATORY for Ed25519 keygen. ---
-function loadLibp2pCryptoBrowserMap(nodeModulesPaths) {
+// --- browser-field maps (load each package's `browser` field and redirect Node file
+//     paths to their .browser.js variants). Metro ignores object-form browser fields when
+//     unstable_enablePackageExports is on, so these rewrites are hand-applied:
+//       @libp2p/crypto          — MANDATORY for Ed25519 keygen.
+//       @chainsafe/libp2p-noise — MANDATORY for the Noise handshake: the node variant
+//         (crypto/index.js) uses node:crypto chacha20-poly1305/diffieHellman, which the
+//         polyfill cannot provide on Hermes → EncryptionFailedError on every dial.
+//         The browser variant (index.browser.js) is pure-JS @noble crypto.
+function loadBrowserFieldMap(nodeModulesPaths, pkgParts) {
   for (const nmRoot of nodeModulesPaths) {
-    const pkgDir = path.join(nmRoot, '@libp2p', 'crypto');
+    const pkgDir = path.join(nmRoot, ...pkgParts);
     const pkgJson = path.join(pkgDir, 'package.json');
     if (!fs.existsSync(pkgJson)) continue;
     const map = JSON.parse(fs.readFileSync(pkgJson, 'utf8')).browser;
@@ -43,7 +49,11 @@ const nodeModulesPaths = [
   path.resolve(projectRoot, 'node_modules'),
   path.resolve(workspaceRoot, 'node_modules'),
 ];
-const libp2pCryptoBrowserMap = loadLibp2pCryptoBrowserMap(nodeModulesPaths);
+const libp2pCryptoBrowserMap = Object.assign(
+  Object.create(null),
+  loadBrowserFieldMap(nodeModulesPaths, ['@libp2p', 'crypto']) ?? {},
+  loadBrowserFieldMap(nodeModulesPaths, ['@chainsafe', 'libp2p-noise']) ?? {},
+);
 
 const config = {
   projectRoot,
