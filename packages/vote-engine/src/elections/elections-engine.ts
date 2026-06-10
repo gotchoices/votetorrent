@@ -1,6 +1,6 @@
 import { MisuseError, QuereusError } from '@quereus/quereus'
-import { secp256k1 } from '@noble/curves/secp256k1'
-import { bytesToHex, hexToBytes } from '@noble/curves/abstract/utils'
+import { secp256k1 } from '@noble/curves/secp256k1.js'
+import { bytesToHex, hexToBytes } from '@noble/curves/utils.js'
 import { ElectionEngine } from '../election/election-engine.js'
 import { fromCanonicalDatetime, nowCanonicalDatetime, toCanonicalDatetime } from '../utils.js'
 import type { EngineContext } from '../types.js'
@@ -412,7 +412,7 @@ export class ElectionsEngine implements IElectionsEngine {
     })()
     const privKeyBytes = hexToBytes(privKeyHex)
     const sig = secp256k1.sign(digestBytes, privKeyBytes)
-    const signature = bytesToHex(sig.toCompactRawBytes())
+    const signature = bytesToHex(sig)
 
     // 5. Generate nonce and insert AdminSigning with the election-specific Digest.
     //    `IsSignatureValid = true` mirrors the seedElectionSigning test-fixture pattern;
@@ -568,7 +568,7 @@ export class ElectionsEngine implements IElectionsEngine {
     })()
     const privKeyBytes = hexToBytes(privKeyHex)
     const sig = secp256k1.sign(digestBytes, privKeyBytes)
-    const signature = bytesToHex(sig.toCompactRawBytes())
+    const signature = bytesToHex(sig)
 
     // 5. Generate a FRESH nonce (DISTINCT from the election-row nonce).
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

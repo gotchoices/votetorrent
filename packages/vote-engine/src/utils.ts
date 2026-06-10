@@ -1,4 +1,4 @@
-import { bytesToHex } from '@noble/curves/abstract/utils'
+import { bytesToHex } from '@noble/curves/utils.js'
 import { sha256 } from '@noble/hashes/sha2'
 
 // sql data validation helpers
