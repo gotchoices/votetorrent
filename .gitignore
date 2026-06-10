@@ -109,3 +109,7 @@ figmaToken.txt
 !.yarn/patches
 
 .idea
+
+# proof-flags.generated.ts: committed default-false fallback is tracked (git add -f).
+# Local overrides written by run-vtest02.sh / run-dial-probe.sh are ignored.
+apps/VoteTorrentAuthority/src/engines/proof-flags.generated.ts
