@@ -1,0 +1,16 @@
+{
+  "name": "p2p-probe-host",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Host-side CadreNode drone for the P2P-01 dial proof (dev tooling, Phase 22 reuse).",
+  "scripts": {
+    "start": "node drone.mjs"
+  },
+  "dependencies": {
+    "@serfab/cadre-core": "0.7.1",
+    "@optimystic/db-p2p": "0.13.5",
+    "@libp2p/websockets": "^10",
+    "@libp2p/circuit-relay-v2": "^4"
+  }
+}
