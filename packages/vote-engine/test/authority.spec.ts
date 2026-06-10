@@ -1,6 +1,6 @@
 import { Database } from '@quereus/quereus'
-import { bytesToHex } from '@noble/curves/abstract/utils'
-import { secp256k1 } from '@noble/curves/secp256k1'
+import { bytesToHex } from '@noble/curves/utils.js'
+import { secp256k1 } from '@noble/curves/secp256k1.js'
 import { sha256 } from '@noble/hashes/sha2'
 import { ElectionType, UserKeyType } from '@votetorrent/vote-core'
 import { expect } from 'chai'
@@ -111,7 +111,7 @@ function makeRealSignature (signerUserId: string, digestText?: string): Signatur
   const { privateHex, publicHex } = randomTestKeyPair()
   const privBytes = Uint8Array.from(privateHex.match(/.{2}/g)!.map((b) => parseInt(b, 16)))
   const digestBytes = sha256(new TextEncoder().encode(digestText ?? signerUserId))
-  const sig = secp256k1.sign(digestBytes, privBytes).toCompactHex()
+  const sig = bytesToHex(secp256k1.sign(digestBytes, privBytes))
   return { signerUserId, signerKey: publicHex, signature: sig }
 }
 
