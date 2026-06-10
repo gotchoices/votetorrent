@@ -50,6 +50,10 @@ echo "[run-dial-probe] Force-stopping ${PACKAGE} ..."
 adb shell am force-stop "${PACKAGE}"
 sleep 2
 
+# CR-01: clear the logcat ring buffer so a verdict line from a PREVIOUS run
+# (which survives force-stop) cannot be picked up as a stale PASS/FAIL.
+adb logcat -c
+
 echo "[run-dial-probe] Relaunching ${PACKAGE} ..."
 adb shell monkey -p "${PACKAGE}" -c android.intent.category.LAUNCHER 1
 
