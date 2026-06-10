@@ -573,6 +573,81 @@ export async function assertCryptoFunctions(
 }
 
 // ---------------------------------------------------------------------------
+// Golden vectors for DEBT-04 device-side parity (inlined from plan 03).
+// Byte-identical to packages/vote-engine/test/fixtures/digest-vectors.ts.
+// Semantics: args joined with '|', null/undefined → '', numbers via String().
+// ---------------------------------------------------------------------------
+interface DigestVector {
+  label: string;
+  args: Array<string | number | null>;
+  /** Precomputed base64url SHA-256 of args joined with '|' (null/undefined → ''). */
+  expected: string;
+}
+
+const DIGEST_VECTORS: DigestVector[] = [
+  { label: 'empty-no-args',  args: [],                   expected: '47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU' },
+  { label: 'single-string',  args: ['hello'],             expected: 'LPJNul-wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ' },
+  { label: 'multi-arg',      args: ['foo', 'bar', 'baz'], expected: 'BPsVKJWumgh66hp69KLMN9SEKnAJJeVGYGMkuhxHlB0' },
+  { label: 'null-arg',       args: ['a', null, 'b'],      expected: 'IzYJlP2qYI7pHIjikBwug9UyLcFF-v6-BuTZA21dHig' },
+  { label: 'unicode',        args: ['votetorrent', 'ÿ'],  expected: '63aFKQBNgu0DxgNRwMGiuF8dlrpBsgO1FsMo5apvXEI' },
+  { label: 'int-arg',        args: [1, 'a'],              expected: '1V4EJDRagX43V607tD5sfYiLXIqn31Wp0BIkVmMFJpg' },
+  { label: 'string-int',     args: ['1', 'a'],            expected: '1V4EJDRagX43V607tD5sfYiLXIqn31Wp0BIkVmMFJpg' },
+];
+
+/**
+ * DEBT-04 device-side parity gate — mirrors `assertCryptoFunctions` structure.
+ *
+ * Replays each golden vector through the on-device Quereus Digest() SQL scalar
+ * and compares the result to the Node-pinned expected base64url string.  A
+ * mismatch or throw is collected as a named failure string.  The only way to
+ * confirm that Hermes `btoa`/base64url is available and byte-identical to Node
+ * is to run this on the device — a Node test cannot substitute for this check.
+ *
+ * Quereus binding keys take NO colon prefix in bind objects (confirmed in plan 03
+ * wave-1 context: { 'a0': v }, not { ':a0': v }).
+ *
+ * @param db  The real engine's Database instance (same handle used for crypto assertions).
+ */
+export async function assertDigestParity(
+  db: Database,
+): Promise<{ allPassed: boolean; failures: string[] }> {
+  console.log('[proof] digest parity assertions: starting');
+  const failures: string[] = [];
+
+  for (const vec of DIGEST_VECTORS) {
+    if (vec.args.length === 0) {
+      // Digest() with zero args — call with no placeholders
+      try {
+        const row = (await db.prepare('select Digest() as d').get()) as { d: unknown } | undefined;
+        if (row?.d !== vec.expected) {
+          failures.push(`${vec.label}: got ${JSON.stringify(row?.d)}, expected ${vec.expected}`);
+        }
+      } catch (e) {
+        failures.push(`${vec.label}: threw ${String(e)}`);
+      }
+    } else {
+      const placeholders = vec.args.map((_, i) => `:a${i}`).join(', ');
+      // Quereus binding keys take NO colon prefix in bind objects (wave-1 context note).
+      const bindings = Object.fromEntries(vec.args.map((v, i) => [`a${i}`, v]));
+      try {
+        const row = (await db
+          .prepare(`select Digest(${placeholders}) as d`)
+          .get(bindings)) as { d: unknown } | undefined;
+        if (row?.d !== vec.expected) {
+          failures.push(`${vec.label}: got ${JSON.stringify(row?.d)}, expected ${vec.expected}`);
+        }
+      } catch (e) {
+        failures.push(`${vec.label}: threw ${String(e)}`);
+      }
+    }
+  }
+
+  const allPassed = failures.length === 0;
+  console.log(`[proof] digest parity: ${allPassed ? 'ALL PASSED' : `FAILED: ${failures.join('; ')}`}`);
+  return { allPassed, failures };
+}
+
+// ---------------------------------------------------------------------------
 // Convenience factory: construct a NetworksEngine backed by rnDbFactory.
 // Use this to create the engine instance passed to runWritePhase /
 // runReadPhase from a dev button without touching AppProvider.

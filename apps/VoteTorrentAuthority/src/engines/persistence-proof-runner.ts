@@ -23,6 +23,7 @@ import {
   runFullChainWritePhase,
   runFullChainReadPhase,
   assertCryptoFunctions,
+  assertDigestParity,
   getLastProofDb,
   PROOF_CHAIN_REF_KEY,
 } from './persistence-proof';
@@ -92,13 +93,18 @@ export async function runPersistenceProof(): Promise<void> {
       }
       const crypto = await assertCryptoFunctions(db);
 
+      // DEBT-04 device-side parity gate: replay golden vectors through on-device Quereus
+      // Digest() and compare to Node-pinned expected base64url strings.
+      const digestParity = await assertDigestParity(db);
+
       // Emit the single verdict line that run-vtest02.sh polls for via:
       //   VERDICT_TAG='\[proof\] ========== FULL-CHAIN VERDICT'
       // This log line is the VTEST-02 evidence (D-08) — byte-identical to the script grep target.
-      const verdict = result.passed && crypto.allPassed;
+      // digestParity.allPassed folds into the overall verdict so a parity failure flips PASS→FAIL.
+      const verdict = result.passed && crypto.allPassed && digestParity.allPassed;
       console.log(
         `[proof] ========== FULL-CHAIN VERDICT: ${verdict ? 'PASS' : 'FAIL'} ` +
-          `(network=${result.networkCount},authority=${result.authorityCount},election=${result.electionCount},crypto=${crypto.allPassed}) ==========`,
+          `(network=${result.networkCount},authority=${result.authorityCount},election=${result.electionCount},crypto=${crypto.allPassed},digestParity=${digestParity.allPassed}) ==========`,
       );
     }
   } catch (err) {
