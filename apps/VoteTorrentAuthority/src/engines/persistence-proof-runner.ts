@@ -28,9 +28,11 @@ import {
 } from './persistence-proof';
 import { getOrCreateDeviceUser } from './device-user';
 import { runRnEntrySmoke } from './rn-entry-smoke';
-
-/** Master switch for the boot-time proof runner. */
-const PROOF_ENABLED = true;
+// Static import only — dynamic require() breaks Metro (Phase 16-07 lesson).
+// DIAL_PROBE_ENABLED is consumed by the dial-probe runner (plan 05); imported here
+// so plans 04/05 read both flags from a single generated-file import.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+import { PROOF_ENABLED, DIAL_PROBE_ENABLED } from './proof-flags.generated';
 
 // WR-05: PROOF_CHAIN_REF_KEY is imported from persistence-proof (the module
 // that owns the write) so the runner's WRITE-vs-READ branch cannot desync.
@@ -40,7 +42,7 @@ const PROOF_ENABLED = true;
  * Never throws — any failure is logged as `[proof] FATAL` so the app still boots.
  */
 export async function runPersistenceProof(): Promise<void> {
-  if (!PROOF_ENABLED) {
+  if (!(__DEV__ && PROOF_ENABLED)) {
     return;
   }
 
