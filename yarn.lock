@@ -4151,7 +4151,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@optimystic/db-p2p@npm:^0.13.4, @optimystic/db-p2p@npm:^0.13.5":
+"@optimystic/db-p2p@npm:0.13.5, @optimystic/db-p2p@npm:^0.13.4, @optimystic/db-p2p@npm:^0.13.5":
   version: 0.13.5
   resolution: "@optimystic/db-p2p@npm:0.13.5"
   dependencies:
@@ -16273,6 +16273,17 @@ __metadata:
   checksum: 10c0/c6ef6458a484e6918c32a34e4979cf1f0929437692849027ec94db0430762042a5577aa5e9d8f24dc8769fe946cf0de5ebeb1daf8555fd31d67a30c7334050f9
   languageName: node
   linkType: hard
+
+"p2p-probe-host@workspace:packages/p2p-probe-host":
+  version: 0.0.0-use.local
+  resolution: "p2p-probe-host@workspace:packages/p2p-probe-host"
+  dependencies:
+    "@libp2p/circuit-relay-v2": "npm:^4"
+    "@libp2p/websockets": "npm:^10"
+    "@optimystic/db-p2p": "npm:0.13.5"
+    "@serfab/cadre-core": "npm:0.7.1"
+  languageName: unknown
+  linkType: soft
 
 "package-hash@npm:^4.0.0":
   version: 4.0.0

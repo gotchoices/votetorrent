@@ -17,3 +17,8 @@ AppRegistry.registerComponent(appName, () => App);
 // Disable via PROOF_ENABLED in persistence-proof-runner.ts. Logs under [proof].
 import {runPersistenceProof} from './src/engines/persistence-proof-runner';
 runPersistenceProof();
+
+// Phase 17 (P2P-01) dev-only dial probe. Fire-and-forget; no-op unless
+// __DEV__ && DIAL_PROBE_ENABLED (see proof-flags.generated.ts). Logs under [dial-probe].
+import {runDialProbe} from './src/engines/dial-probe';
+runDialProbe();

@@ -21,6 +21,7 @@ import { openOptimysticRNDb, LevelDBRawStorage, loadOrCreateRNPeerKey } from '@o
 import { CadreNode } from '@serfab/cadre-core';
 import { webSockets } from '@libp2p/websockets';
 import { circuitRelayTransport } from '@libp2p/circuit-relay-v2';
+import { multiaddr } from '@multiformats/multiaddr';
 // Static import only — dynamic require() breaks Metro (Phase 16-07 lesson).
 import { DIAL_PROBE_ENABLED } from './proof-flags.generated';
 
@@ -74,6 +75,15 @@ export async function runDialProbe(): Promise<void> {
     L('started, peerId=', node.peerId?.toString());
 
     const cn = node.getControlNode();
+    // Explicit dial: cadre-core's bootstrap list alone does not guarantee an
+    // eager dial, and internal bootstrap dial errors are swallowed. Dialing
+    // here surfaces the real failure (e.g. "connection gater denied") in logcat.
+    try {
+      await cn.dial(multiaddr(CONTROL_ADDR));
+      L('explicit dial OK');
+    } catch (dialErr) {
+      L('explicit dial error:', dialErr instanceof Error ? (dialErr.stack ?? dialErr.message) : String(dialErr));
+    }
     for (let i = 0; i < 20 && cn.getConnections().length === 0; i++) {
       await new Promise(r => setTimeout(r, 1000));
     }
