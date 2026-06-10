@@ -1,5 +1,5 @@
-import { bytesToHex } from '@noble/curves/abstract/utils';
-import { secp256k1 } from '@noble/curves/secp256k1';
+import { bytesToHex } from '@noble/curves/utils.js';
+import { secp256k1 } from '@noble/curves/secp256k1.js';
 import { sha256 } from '@noble/hashes/sha2';
 import { MisuseError, QuereusError } from '@quereus/quereus';
 import { Temporal } from 'temporal-polyfill';
@@ -80,9 +80,7 @@ export class AuthorityEngine implements IAuthorityEngine {
 		const signedBytes = new TextEncoder().encode(
 			init.name + init.title + init.scopes + type + expiration + inviteKey,
 		);
-		const inviteSignature = secp256k1
-			.sign(sha256(signedBytes), invitePrivateBytes)
-			.toCompactHex();
+		const inviteSignature = bytesToHex(secp256k1.sign(sha256(signedBytes), invitePrivateBytes));
 
 		return {
 			...init,
@@ -105,9 +103,7 @@ export class AuthorityEngine implements IAuthorityEngine {
 			.add({ minutes: this.invitationSpanMinutes })
 			.toString();
 		const signedBytes = new TextEncoder().encode(type + name + expiration);
-		const inviteSignature = secp256k1
-			.sign(sha256(signedBytes), invitePrivateBytes)
-			.toCompactHex();
+		const inviteSignature = bytesToHex(secp256k1.sign(sha256(signedBytes), invitePrivateBytes));
 
 		return {
 			name,

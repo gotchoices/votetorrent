@@ -3723,7 +3723,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@noble/curves@npm:^1.4.0, @noble/curves@npm:^1.9.6":
+"@noble/curves@npm:^1.4.0":
   version: 1.9.7
   resolution: "@noble/curves@npm:1.9.7"
   dependencies:
@@ -3732,7 +3732,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@noble/curves@npm:^2.0.1":
+"@noble/curves@npm:^2, @noble/curves@npm:^2.0.1":
   version: 2.2.0
   resolution: "@noble/curves@npm:2.2.0"
   dependencies:
@@ -5928,7 +5928,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@votetorrent/vote-engine@workspace:packages/vote-engine"
   dependencies:
-    "@noble/curves": "npm:^1.9.6"
+    "@noble/curves": "npm:^2"
     "@noble/hashes": "npm:^1.8.0"
     "@optimystic/quereus-plugin-crypto": "npm:^0.13.5"
     "@quereus/quereus": "npm:3.3.0"
@@ -20382,6 +20382,7 @@ __metadata:
     "@libp2p/crypto": "npm:^5.1.13"
     "@libp2p/interface": "npm:^3.1.0"
     "@libp2p/websockets": "npm:^10"
+    "@noble/curves": "npm:^2"
     "@noble/hashes": "npm:^2"
     "@optimystic/db-p2p": "npm:^0.13.5"
     "@optimystic/db-p2p-storage-rn": "npm:^0.13.5"
