@@ -46,7 +46,21 @@ echo "[vtest02] Relaunching ${PACKAGE} ..."
 adb shell monkey -p "${PACKAGE}" -c android.intent.category.LAUNCHER 1
 
 echo "[vtest02] Polling logcat for verdict (${LOGCAT_TIMEOUT}s timeout) ..."
-VERDICT_LINE=$(timeout "${LOGCAT_TIMEOUT}" adb logcat -e "${VERDICT_TAG}" | head -1 || true)
+# Portable timeout: prefer GNU timeout, then gtimeout (Homebrew coreutils), then bounded poll.
+TIMEOUT_BIN=$(command -v timeout || command -v gtimeout || true)
+VERDICT_LINE=""
+if [ -n "${TIMEOUT_BIN}" ]; then
+  VERDICT_LINE=$(${TIMEOUT_BIN} "${LOGCAT_TIMEOUT}" adb logcat -e "${VERDICT_TAG}" | head -1 || true)
+else
+  # Fallback: bounded poll loop (30 s cap, 5 s intervals) — avoids macOS missing timeout.
+  _elapsed=0
+  while [ "${_elapsed}" -lt "${LOGCAT_TIMEOUT}" ]; do
+    VERDICT_LINE=$(adb logcat -d | grep "${VERDICT_TAG}" | head -1 || true)
+    if [ -n "${VERDICT_LINE}" ]; then break; fi
+    sleep 5
+    _elapsed=$((_elapsed + 5))
+  done
+fi
 
 if [ -z "${VERDICT_LINE}" ]; then
   echo "[vtest02] ERROR: no verdict line captured within ${LOGCAT_TIMEOUT}s — FAIL"
