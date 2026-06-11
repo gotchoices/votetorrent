@@ -54,11 +54,11 @@ CLEAN=true
 while IFS= read -r line; do
   [ -z "$line" ] && continue
   FILE=$(echo "$line" | cut -d: -f1)
-  LINENO=$(echo "$line" | cut -d: -f2)
+  LINE_NUM=$(echo "$line" | cut -d: -f2)
 
   # Read up to 5 preceding lines for context (function signature)
-  START_LINE=$(( LINENO > 5 ? LINENO - 5 : 1 ))
-  CONTEXT=$(sed -n "${START_LINE},${LINENO}p" "$FILE" 2>/dev/null || true)
+  START_LINE=$(( LINE_NUM > 5 ? LINE_NUM - 5 : 1 ))
+  CONTEXT=$(sed -n "${START_LINE},${LINE_NUM}p" "$FILE" 2>/dev/null || true)
 
   ALLOWED=false
   for entry in "${ALLOWLIST[@]}"; do
