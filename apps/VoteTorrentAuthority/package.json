@@ -17,6 +17,7 @@
 		"@libp2p/crypto": "^5.1.13",
 		"@libp2p/interface": "^3.1.0",
 		"@libp2p/websockets": "^10",
+		"@multiformats/multiaddr": "^13.0.1",
 		"@noble/curves": "^2",
 		"@noble/hashes": "^2",
 		"@optimystic/db-p2p": "^0.13.5",
