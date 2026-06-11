@@ -400,25 +400,19 @@ export class AuthorityEngine implements IAuthorityEngine {
 				effectiveAt: toCanonicalDatetime(admin.proposed.effectiveAt),
 				thresholdPolicies: thresholdPoliciesJson,
 			};
-			const signingResult = await this.signingEngine.startSigningSession(
+			// WR-06 (17-REVIEW): proposeAdmin only STARTS the signing session with
+			// the instigator's signature. For threshold policies > 1, the remaining
+			// signers complete the proposal via separate per-signer calls to
+			// `signingEngine.sign(nonce, signature)` — each signer must produce
+			// their OWN signature, so completion cannot happen inside this method
+			// (a previously commented-out loop here would have re-applied the
+			// instigator's signature for every signer, which is wrong).
+			await this.signingEngine.startSigningSession(
 				this.authority.id,
 				adminDigestArgs,
 				'rad',
 				signature,
 			);
-
-			// if the threshold is not reached, apply the remaining signatures
-			// if (!signingResult.thresholdReached) {
-			// 	for (const signerId of admin.signers.slice(1)) {
-			// 		const isDone = await this.signingEngine.sign(
-			// 			signingResult.nonce,
-			// 			signature
-			// 		);
-			// 		if (isDone) {
-			// 			break;
-			// 		}
-			// 	}
-			// }
 		} catch (err) {
 			if (err instanceof QuereusError) {
 				throw new Error(`Quereus error (code ${err.code}): ${err.message}`);
