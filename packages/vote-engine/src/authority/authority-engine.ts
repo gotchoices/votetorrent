@@ -77,6 +77,10 @@ export class AuthorityEngine implements IAuthorityEngine {
 		// base64url) matching SQL Digest(). The signing formula below (TextEncoder
 		// + secp256k1.sign) is separate — it validates engine-side via
 		// context.IsSignatureValid, not via SQL Digest constraints (D-06).
+		// WR-10 (17-REVIEW): @noble/curves v2 defaults to prehash:true, so the
+		// signed domain here is sha256(sha256(signedBytes)) — deliberately
+		// accepted (no pre-migration signatures exist). Verifiers must use
+		// noble v2 default options, never { prehash: false }.
 		const signedBytes = new TextEncoder().encode(
 			init.name + init.title + init.scopes + type + expiration + inviteKey,
 		);

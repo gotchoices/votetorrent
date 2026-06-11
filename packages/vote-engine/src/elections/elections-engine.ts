@@ -425,6 +425,9 @@ export class ElectionsEngine implements IElectionsEngine {
     //    CR-01: After the node-crypto.js polyfill fix, Digest() returns a base64url string
     //    on both Node and device. digestToBytes guards Uint8Array (legacy device path
     //    before the polyfill fix), 43-char base64url, and 64-char hex by shape (WR-01).
+    //    WR-10 (17-REVIEW): @noble/curves v2 defaults to prehash:true, so the signed
+    //    domain is sha256(digestBytes) — deliberately accepted (no pre-migration
+    //    signatures exist). Verifiers must use noble v2 default options.
     const digestBytes: Uint8Array = digestToBytes(digestRow.d)
     const privKeyBytes = hexToBytes(privKeyHex)
     const sig = secp256k1.sign(digestBytes, privKeyBytes)
