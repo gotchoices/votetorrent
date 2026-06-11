@@ -30,6 +30,11 @@
 
 set -euo pipefail
 
+# WR-12 (17-REVIEW): every path below (FLAG_FILE, the dial-probe.ts placeholder
+# guard) is repo-root-relative. Anchor the cwd to the repo root so the script —
+# and crucially its EXIT-trap flag restore — works when invoked from any directory.
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+
 PACKAGE="org.votetorrent.authority"
 # dial-probe.ts logs via multi-arg console.log('[dial-probe]', ...) — RN logcat renders
 # each arg quoted and comma-separated: '[dial-probe]', 'starting — ...'. Patterns must

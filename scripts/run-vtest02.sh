@@ -23,6 +23,11 @@
 
 set -euo pipefail
 
+# WR-12 (17-REVIEW): every path below (FLAG_FILE) is repo-root-relative. Anchor
+# the cwd to the repo root so the script — and crucially its EXIT-trap flag
+# restore — works when invoked from any directory.
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+
 PACKAGE="org.votetorrent.authority"
 VERDICT_TAG='\[proof\] ========== FULL-CHAIN VERDICT'
 BOOT_MARKER='\[proof\] ========== BOOT: READ PHASE'
