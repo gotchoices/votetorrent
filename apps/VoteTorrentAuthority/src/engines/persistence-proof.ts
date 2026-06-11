@@ -61,24 +61,6 @@ function makeLocalStorage(): LocalStorageReact {
   return new LocalStorageReact();
 }
 
-// ---------------------------------------------------------------------------
-// Factory shim that captures the last Database produced by rnDbFactory.
-// This lets the proof read back the database without exposing NetworksEngine
-// internals — the db reference is captured once per write-phase invocation.
-// ---------------------------------------------------------------------------
-function makeCapturingFactory(): { factory: DbFactory; getDb: () => Database | undefined } {
-  let capturedDb: Database | undefined;
-  const factory: DbFactory = async (networkHash: string) => {
-    const db = await rnDbFactory(networkHash);
-    capturedDb = db;
-    return db;
-  };
-  return {
-    factory,
-    getDb: () => capturedDb,
-  };
-}
-
 // Module-level capture of the most recent Database the engine obtained from the
 // factory (via makeProofEngine). The persistent vtab does NOT auto-restore the
 // table catalog into a fresh handle, so queries MUST use the SAME handle the
