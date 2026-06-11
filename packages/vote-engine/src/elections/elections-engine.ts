@@ -29,6 +29,36 @@ let nextTid = 1
 export function peekNextElectionTid (): number { return nextTid }
 
 /**
+ * Convert `Digest()` output to bytes for secp256k1.sign (WR-01, 17-REVIEW).
+ *
+ * Discriminates hex vs base64url by SHAPE (exact length + alphabet), NOT by
+ * alphabet alone: every hex character is also in the base64url alphabet, so an
+ * alphabet-only test silently mis-decodes a 64-char hex digest through the
+ * base64url branch, producing wrong bytes that would then be signed.
+ *
+ * Accepted shapes (all encode a 32-byte SHA-256 digest):
+ *   - Uint8Array          — legacy device path before the node-crypto polyfill fix
+ *   - 43-char base64url   — Node/Quereus 3.x and post-fix device (unpadded)
+ *   - 64-char hex         — defensive fallback for a future format change
+ * Anything else throws loudly instead of signing garbage.
+ *
+ * Do NOT use Buffer.isBuffer() — Buffer is not available on Hermes.
+ */
+function digestToBytes (d: unknown): Uint8Array {
+  if (d instanceof Uint8Array) return d
+  if (typeof d !== 'string') {
+    throw new Error(`digestToBytes: unrecognized Digest() output type: ${typeof d}`)
+  }
+  if (d.length === 64 && /^[0-9a-fA-F]+$/.test(d)) return hexToBytes(d)
+  if (d.length === 43 && /^[A-Za-z0-9_-]+$/.test(d)) {
+    // base64url — decode with standard base64 after restoring padding (43 → 44 chars).
+    const b64 = d.replace(/-/g, '+').replace(/_/g, '/').padEnd(44, '=')
+    return Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))
+  }
+  throw new Error(`digestToBytes: unrecognized Digest() output shape: len=${d.length}`)
+}
+
+/**
  * ElectionsEngine — Phase 05 (ELEC-01, ELEC-02) implementation.
  *
  * The engine is constructed with the shared {@link EngineContext}. Methods
@@ -393,23 +423,9 @@ export class ElectionsEngine implements IElectionsEngine {
     // 4. Produce a REAL secp256k1 signature over the digest bytes — INSIDE the engine
     //    (the screen never calls secp256k1.sign, satisfying the B2 tier constraint).
     //    CR-01: After the node-crypto.js polyfill fix, Digest() returns a base64url string
-    //    on both Node and device. Guard both forms for robustness: Uint8Array (legacy device
-    //    path before the polyfill fix) and string (Node + post-fix device).
-    const digestBytes: Uint8Array = (() => {
-      const d = digestRow.d
-      if (d instanceof Uint8Array) return d
-      // String: could be base64url (Node/Quereus 3.x, post-CR-01-fix device) or hex.
-      // Do NOT use Buffer.isBuffer() — Buffer is not available on Hermes.
-      const s = d as string
-      if (/^[A-Za-z0-9_-]+=*$/.test(s) && s.length % 4 !== 1) {
-        // base64url — decode with standard base64 after restoring padding chars
-        const b64 = s.replace(/-/g, '+').replace(/_/g, '/').padEnd(
-          s.length + (4 - (s.length % 4)) % 4, '='
-        )
-        return Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))
-      }
-      return hexToBytes(s)
-    })()
+    //    on both Node and device. digestToBytes guards Uint8Array (legacy device path
+    //    before the polyfill fix), 43-char base64url, and 64-char hex by shape (WR-01).
+    const digestBytes: Uint8Array = digestToBytes(digestRow.d)
     const privKeyBytes = hexToBytes(privKeyHex)
     const sig = secp256k1.sign(digestBytes, privKeyBytes)
     const signature = bytesToHex(sig)
@@ -553,19 +569,8 @@ export class ElectionsEngine implements IElectionsEngine {
     }
 
     // 4. Produce a REAL secp256k1 signature over the digest bytes.
-    //    CR-01: reuse the IDENTICAL base64url-honoring IIFE from seedElectionSigning.
-    const digestBytes: Uint8Array = (() => {
-      const d = digestRow.d
-      if (d instanceof Uint8Array) return d
-      const s = d as string
-      if (/^[A-Za-z0-9_-]+=*$/.test(s) && s.length % 4 !== 1) {
-        const b64 = s.replace(/-/g, '+').replace(/_/g, '/').padEnd(
-          s.length + (4 - (s.length % 4)) % 4, '='
-        )
-        return Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))
-      }
-      return hexToBytes(s)
-    })()
+    //    CR-01/WR-01: same shape-discriminating decoder as seedElectionSigning.
+    const digestBytes: Uint8Array = digestToBytes(digestRow.d)
     const privKeyBytes = hexToBytes(privKeyHex)
     const sig = secp256k1.sign(digestBytes, privKeyBytes)
     const signature = bytesToHex(sig)
