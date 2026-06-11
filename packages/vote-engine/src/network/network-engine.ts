@@ -863,9 +863,18 @@ export class NetworkEngine implements INetworkEngine {
         // localeCompare is locale-sensitive; binary `<`/`>` matches quereus TEXT
         // ordering and keeps the bound first-officer identity consistent across
         // engine and schema.
-        const sortedOfficers = [...invokesOfficers].sort(
-          (a, b) => a.userId < b.userId ? -1 : a.userId > b.userId ? 1 : 0
-        )
+        // WR-06: coalesce null/undefined userId to '' BEFORE comparing, identical
+        // to createAuthority's sort (lines ~122-124). Bare `a.userId < b.userId`
+        // against a null yields false/false and produces an unstable ordering that
+        // can select a different first officer than createAuthority — the two sites
+        // would then bind divergent InviteResult.Digest values and trip
+        // Admin.MutationValid. Keeping the coalescing identical preserves the D-09
+        // byte-for-byte agreement.
+        const sortedOfficers = [...invokesOfficers].sort((a, b) => {
+          const ua = a.userId ?? ''
+          const ub = b.userId ?? ''
+          return ua < ub ? -1 : ua > ub ? 1 : 0
+        })
         const firstOfficer = sortedOfficers[0]!
         await this.ctx.db.exec(
 					`insert into InviteResult (
