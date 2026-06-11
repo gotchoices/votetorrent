@@ -123,7 +123,11 @@ else
     MARKER_LINE=$(adb logcat -d | grep "${BOOT_MARKER}" | head -1; exit "${PIPESTATUS[0]}")
     _adb_status=$?
     set -e
-    if [ "${_adb_status}" -ne 0 ]; then
+    # WR-23 (17-REVIEW): only fatal when the capture is EMPTY — mirrors the
+    # streaming branch. When the pattern matches early in a large dump, head
+    # exits first and adb dies of SIGPIPE (status 141) AFTER the line was
+    # successfully captured; that is not a device failure.
+    if [ -z "${MARKER_LINE}" ] && [ "${_adb_status}" -ne 0 ]; then
       echo "[vtest02] ERROR: adb logcat -d failed (status ${_adb_status}) while polling for the marker — check device connection (adb devices)" >&2
       exit 1
     fi
@@ -163,7 +167,9 @@ else
     VERDICT_LINE=$(adb logcat -d | grep "${VERDICT_TAG}" | head -1; exit "${PIPESTATUS[0]}")
     _adb_status=$?
     set -e
-    if [ "${_adb_status}" -ne 0 ]; then
+    # WR-23 (17-REVIEW): only fatal when the capture is EMPTY — a SIGPIPE 141
+    # after head matched accompanies a successfully captured verdict line.
+    if [ -z "${VERDICT_LINE}" ] && [ "${_adb_status}" -ne 0 ]; then
       echo "[vtest02] ERROR: adb logcat -d failed (status ${_adb_status}) while polling for the verdict — check device connection (adb devices)" >&2
       exit 1
     fi
