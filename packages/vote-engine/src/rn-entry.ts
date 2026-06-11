@@ -24,3 +24,8 @@ export { InvitationEngine } from './invite/invitation-engine.js'
 export { LocalStorageReact } from './local-storage-react.js'
 export type { DbFactory, EngineContext } from './types.js'
 export { H16 } from './utils.js'
+// WR-15 (17-REVIEW): single source of truth for the DEBT-04 digest golden
+// vectors — the on-device parity gate (persistence-proof.ts) imports these
+// instead of carrying an inline copy that could silently drift.
+export { DIGEST_VECTORS } from './database/digest-vectors.js'
+export type { DigestVector } from './database/digest-vectors.js'

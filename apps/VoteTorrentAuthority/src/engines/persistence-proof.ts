@@ -28,7 +28,7 @@ import { ElectionType, UserKeyType } from '@votetorrent/vote-core';
 // @votetorrent/vote-engine/rn is the single sanctioned import path for real engine
 // classes in the RN app layer (D-04). Metro resolves it via the `./rn` subpath in
 // package.json exports + unstable_enablePackageExports: true in metro.config.js.
-import { NetworksEngine, ElectionsEngine, peekNextElectionTid, H16, LocalStorageReact } from '@votetorrent/vote-engine/rn';
+import { NetworksEngine, ElectionsEngine, peekNextElectionTid, H16, LocalStorageReact, DIGEST_VECTORS } from '@votetorrent/vote-engine/rn';
 import type { DbFactory } from '@votetorrent/vote-engine/rn';
 import { rnDbFactory } from './rn-db-factory';
 import { getOrCreateDeviceUser, getDevicePrivKeyHex } from './device-user';
@@ -588,26 +588,12 @@ export async function assertCryptoFunctions(
 }
 
 // ---------------------------------------------------------------------------
-// Golden vectors for DEBT-04 device-side parity (inlined from plan 03).
-// Byte-identical to packages/vote-engine/test/fixtures/digest-vectors.ts.
+// Golden vectors for DEBT-04 device-side parity.
+// WR-15 (17-REVIEW): imported from @votetorrent/vote-engine/rn (single source
+// of truth, packages/vote-engine/src/database/digest-vectors.ts) — the former
+// inline copy had no drift guard against the Node-side fixture.
 // Semantics: args joined with '|', null/undefined → '', numbers via String().
 // ---------------------------------------------------------------------------
-interface DigestVector {
-  label: string;
-  args: Array<string | number | null>;
-  /** Precomputed base64url SHA-256 of args joined with '|' (null/undefined → ''). */
-  expected: string;
-}
-
-const DIGEST_VECTORS: DigestVector[] = [
-  { label: 'empty-no-args',  args: [],                   expected: '47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU' },
-  { label: 'single-string',  args: ['hello'],             expected: 'LPJNul-wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ' },
-  { label: 'multi-arg',      args: ['foo', 'bar', 'baz'], expected: 'BPsVKJWumgh66hp69KLMN9SEKnAJJeVGYGMkuhxHlB0' },
-  { label: 'null-arg',       args: ['a', null, 'b'],      expected: 'IzYJlP2qYI7pHIjikBwug9UyLcFF-v6-BuTZA21dHig' },
-  { label: 'unicode',        args: ['votetorrent', 'ÿ'],  expected: '63aFKQBNgu0DxgNRwMGiuF8dlrpBsgO1FsMo5apvXEI' },
-  { label: 'int-arg',        args: [1, 'a'],              expected: '1V4EJDRagX43V607tD5sfYiLXIqn31Wp0BIkVmMFJpg' },
-  { label: 'string-int',     args: ['1', 'a'],            expected: '1V4EJDRagX43V607tD5sfYiLXIqn31Wp0BIkVmMFJpg' },
-];
 
 /**
  * DEBT-04 device-side parity gate — mirrors `assertCryptoFunctions` structure.
