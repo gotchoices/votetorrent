@@ -13,8 +13,8 @@
 #   - A real device or AVD (Pixel_8) must be connected and recognised by adb
 #   - The app (org.votetorrent.authority) must be installed on the device
 #   - The host drone must already be running BEFORE this script is called:
-#       cd packages/p2p-probe-host && npm install  # once
-#       nvm use 22 && node drone.mjs               # keep running in a separate terminal
+#       yarn install   # once, at the repo root (p2p-probe-host is a yarn workspace)
+#       cd packages/p2p-probe-host && nvm use 22 && node drone.mjs   # keep running in a separate terminal
 #   - CONTROL_ADDR in apps/VoteTorrentAuthority/src/engines/dial-probe.ts must be
 #     updated with the port and peerId printed by the drone on startup.
 #     Re-build and hot-reload (or bundle rebuild) the app after updating CONTROL_ADDR.

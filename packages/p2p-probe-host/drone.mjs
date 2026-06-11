@@ -8,12 +8,10 @@
  * Boots, prints the control peerId + ws multiaddr, then stays alive.
  *
  * Prerequisites:
- *   Run `npm install --no-workspaces` once inside this directory to install isolated deps.
- *   (The --no-workspaces flag prevents npm from traversing up to the Yarn workspace root
- *   which has workspace: protocol entries that npm cannot resolve.)
- *     cd packages/p2p-probe-host && npm install --no-workspaces
- *   (The app hoists uint8arrays@3.1.1 which collides with @multiformats/multiaddr's
- *   ^6.1.1 requirement under strict Node ESM — isolated install avoids this.)
+ *   This package is a normal yarn workspace — `yarn install` at the repo root installs its deps.
+ *   The root `resolutions` pin uint8arrays only for ^5 ranges (Hermes/quereus compat), so
+ *   @multiformats/multiaddr's ^6 requirement resolves to a real v6 and strict Node ESM works.
+ *   The yarn-patched @serfab/cadre-core (connectionGater pass-through) is what resolves here.
  *
  * Usage:
  *   cd packages/p2p-probe-host

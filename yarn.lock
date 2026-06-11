@@ -16281,7 +16281,7 @@ __metadata:
     "@libp2p/circuit-relay-v2": "npm:^4"
     "@libp2p/websockets": "npm:^10"
     "@optimystic/db-p2p": "npm:0.13.5"
-    "@serfab/cadre-core": "npm:0.7.1"
+    "@serfab/cadre-core": "npm:^0.7.1"
   languageName: unknown
   linkType: soft
 
@@ -20044,6 +20044,15 @@ __metadata:
   languageName: node
   linkType: hard
 
+"uint8arrays@npm:^6.0.0, uint8arrays@npm:^6.1.0, uint8arrays@npm:^6.1.1":
+  version: 6.1.1
+  resolution: "uint8arrays@npm:6.1.1"
+  dependencies:
+    multiformats: "npm:^14.0.0"
+  checksum: 10c0/5814d69e5fada5d169ee8e88c750ad4ddf57a6ee86a7fe9534b86b55a147fab8e0b75d66cb1d2a1c6c2350526edd03e57a3ab5f0a0977c8ac13a6ce350c7b958
+  languageName: node
+  linkType: hard
+
 "unbox-primitive@npm:^1.1.0":
   version: 1.1.0
   resolution: "unbox-primitive@npm:1.1.0"
@@ -20413,6 +20422,7 @@ __metadata:
     "@libp2p/crypto": "npm:^5.1.13"
     "@libp2p/interface": "npm:^3.1.0"
     "@libp2p/websockets": "npm:^10"
+    "@multiformats/multiaddr": "npm:^13.0.1"
     "@noble/curves": "npm:^2"
     "@noble/hashes": "npm:^2"
     "@optimystic/db-p2p": "npm:^0.13.5"
