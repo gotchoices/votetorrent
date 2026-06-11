@@ -13,7 +13,11 @@ import {
 } from '../utils.js';
 import type { EngineContext } from '../types.js';
 
-let nextTid = 1;
+// WR-16 (17-REVIEW): seeded from the epoch-ms clock so a relaunched process
+// attached to a persisted store cannot re-issue Tids consumed by a previous
+// run (see the full rationale on the ElectionsEngine counter). Replace with
+// store-reconciled allocation at PERSIST-01.
+let nextTid = Date.now();
 import type {
 	AdminDetails,
 	AdminDigestArgs,

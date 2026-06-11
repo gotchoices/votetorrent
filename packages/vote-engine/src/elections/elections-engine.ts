@@ -20,10 +20,18 @@ import { ElectionsAdjustElectionBuilder } from './builders/elections-adjust-elec
 import { SigningEngine } from '../signing/signing-engine.js'
 
 // Phase 05 ELEC-01/02 — monotonic Tid counter for ElectionsEngine batches.
-// Mirrors NetworksEngine/UserEngine pattern. Re-evaluate at the v2
-// persistence milestone (PERSIST-01) — a process-local counter can collide
-// with stored Tids once DBs persist across runs.
-let nextTid = 1
+// WR-16 (17-REVIEW): DBs now persist across process restarts (Phase 17 proof
+// harness), so a counter restarting at 1 would re-issue Tids already consumed
+// by a previous process — defeating Tid's replay-protection role ("an update
+// can't be repeated with the same credentials"). Tids are NOT queryable from
+// the store (they live only inside persisted signature digests), so seeding
+// from the store is impossible; instead the counter is seeded from the
+// epoch-ms clock at module load: unique per process start and monotonic
+// across restarts. Increments stay sequential within a process, preserving
+// the createElection T / T+1 revision-tid contract and peekNextElectionTid().
+// Replace with store-reconciled Tid allocation at the v2 persistence
+// milestone (PERSIST-01).
+let nextTid = Date.now()
 
 /** For test use only — returns the Tid that the next createElection() call will use. */
 export function peekNextElectionTid (): number { return nextTid }
