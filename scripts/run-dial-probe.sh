@@ -32,13 +32,28 @@ set -euo pipefail
 
 PACKAGE="org.votetorrent.authority"
 VERDICT_TAG='\[dial-probe\] ========== DIAL VERDICT'
-LOGCAT_TIMEOUT=30  # seconds to wait for the verdict line
+PROBE_MARKER='\[dial-probe\] starting'
+LOGCAT_TIMEOUT=120  # seconds to wait for the verdict line; accounts for Metro dev-server
+                    # rebundle latency plus the probe's own up-to-20s poll loop
+                    # (observed false-FAIL at 30s in 17-UAT when verdict landed just outside).
+MARKER_TIMEOUT=60   # seconds to wait for the [dial-probe] starting marker (proves Metro
+                    # served the enabled bundle and the probe code path is executing).
 FLAG_FILE="apps/VoteTorrentAuthority/src/engines/proof-flags.generated.ts"
+
+# PROBE_STARTED tracks whether the app reached the [dial-probe] starting marker BEFORE the
+# EXIT trap fires.  Initialized to 0 here (before the trap is installed) so restore_flags()
+# can emit a warning if it fires before the probe-start was observed — the exact race
+# observed on dial attempt 1 in 17-UAT (trap restored DIAL_PROBE_ENABLED=false while Metro
+# was still rebundling; app fetched a flags-disabled bundle; probe never ran).
+PROBE_STARTED=0
 
 # WR-03 (17-REVIEW): restore the committed default-false flag file on EXIT
 # (PASS, FAIL, or set -e abort) so the probe-enabled override never leaks
 # into the next dev launch or into a commit. Mirrors run-vtest02.sh.
 restore_flags() {
+  if [ "${PROBE_STARTED}" -eq 0 ]; then
+    echo "[run-dial-probe] WARNING: restoring flags before [dial-probe] starting observed — app may have fetched a flags-disabled bundle (probe silent no-op); re-run" >&2
+  fi
   cat > "${FLAG_FILE}" << 'EOF'
 // proof-flags.generated.ts — committed default fallback (all flags false).
 // The run scripts (run-vtest02.sh, run-dial-probe.sh) overwrite this file
@@ -88,15 +103,44 @@ adb logcat -c
 echo "[run-dial-probe] Relaunching ${PACKAGE} ..."
 adb shell monkey -p "${PACKAGE}" -c android.intent.category.LAUNCHER 1
 
+# Wait for the probe-start marker BEFORE arming the verdict countdown.
+# This marker is emitted by dial-probe.ts ONLY after Metro has served the enabled bundle and
+# the gated dial-probe code path is executing.  Waiting here closes the EXIT-trap rebundle
+# race (WR-03 TIMING fix): the trap is allowed to restore flags at any time, but if we
+# haven't seen this marker it means the app likely fetched the flags-disabled bundle — in
+# which case restore_flags() emits a warning (PROBE_STARTED still 0).
+echo "[run-dial-probe] Waiting up to ${MARKER_TIMEOUT}s for [dial-probe] starting marker ..."
+TIMEOUT_BIN=$(command -v timeout || command -v gtimeout || true)
+MARKER_LINE=""
+if [ -n "${TIMEOUT_BIN}" ]; then
+  MARKER_LINE=$(${TIMEOUT_BIN} "${MARKER_TIMEOUT}" adb logcat -e "${PROBE_MARKER}" | head -1 || true)
+else
+  # Fallback: bounded poll loop (same cap, 5 s intervals) — avoids macOS missing timeout.
+  _elapsed=0
+  while [ "${_elapsed}" -lt "${MARKER_TIMEOUT}" ]; do
+    MARKER_LINE=$(adb logcat -d | grep "${PROBE_MARKER}" | head -1 || true)
+    if [ -n "${MARKER_LINE}" ]; then break; fi
+    sleep 5
+    _elapsed=$((_elapsed + 5))
+  done
+fi
+
+if [ -z "${MARKER_LINE}" ]; then
+  echo "[run-dial-probe] ERROR: [dial-probe] never started — Metro rebundle likely still in flight or flags-disabled bundle served; re-run" >&2
+  exit 1
+fi
+
+echo "[run-dial-probe] Probe-start marker seen: ${MARKER_LINE}"
+PROBE_STARTED=1
+
 # 3. Poll logcat for the DIAL VERDICT line (emitted by dial-probe.ts after the 20s poll loop).
 echo "[run-dial-probe] Polling logcat for verdict (${LOGCAT_TIMEOUT}s timeout) ..."
 # Portable timeout: prefer GNU timeout, then gtimeout (Homebrew coreutils), then bounded poll.
-TIMEOUT_BIN=$(command -v timeout || command -v gtimeout || true)
 VERDICT_LINE=""
 if [ -n "${TIMEOUT_BIN}" ]; then
   VERDICT_LINE=$(${TIMEOUT_BIN} "${LOGCAT_TIMEOUT}" adb logcat -e "${VERDICT_TAG}" | head -1 || true)
 else
-  # Fallback: bounded poll loop (30 s cap, 5 s intervals) — avoids macOS missing timeout.
+  # Fallback: bounded poll loop (120 s cap, 5 s intervals) — avoids macOS missing timeout.
   _elapsed=0
   while [ "${_elapsed}" -lt "${LOGCAT_TIMEOUT}" ]; do
     VERDICT_LINE=$(adb logcat -d | grep "${VERDICT_TAG}" | head -1 || true)

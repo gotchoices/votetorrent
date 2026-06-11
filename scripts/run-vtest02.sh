@@ -25,13 +25,27 @@ set -euo pipefail
 
 PACKAGE="org.votetorrent.authority"
 VERDICT_TAG='\[proof\] ========== FULL-CHAIN VERDICT'
-LOGCAT_TIMEOUT=30  # seconds to wait for the verdict line
+BOOT_MARKER='\[proof\] ========== BOOT: READ PHASE'
+LOGCAT_TIMEOUT=120  # seconds to wait for the verdict line; accounts for Metro dev-server
+                    # rebundle latency (~30-40s) plus the ~17s store re-attach in the read
+                    # phase (observed ~37s+ end-to-end in 17-UAT).
+MARKER_TIMEOUT=60   # seconds to wait for the BOOT: READ PHASE marker (proves Metro served
+                    # the enabled bundle and the gated read phase is executing).
 FLAG_FILE="apps/VoteTorrentAuthority/src/engines/proof-flags.generated.ts"
+
+# PROBE_STARTED tracks whether the app reached the READ PHASE marker BEFORE the EXIT trap
+# fires.  Initialized to 0 here (before the trap is installed) so restore_flags() can emit
+# a warning if the trap fires before the probe-start marker was observed.  The flag is SET
+# to 1 after the marker wait succeeds (see the marker-wait block below).
+PROBE_STARTED=0
 
 # WR-03 (17-REVIEW): restore the committed default-false flag file on EXIT
 # (PASS, FAIL, or set -e abort) so the proof-enabled override never leaks
 # into the next dev launch or into a commit. Mirrors run-dial-probe.sh.
 restore_flags() {
+  if [ "${PROBE_STARTED}" -eq 0 ]; then
+    echo "[vtest02] WARNING: restoring flags before BOOT: READ PHASE observed — app may have fetched flags-disabled bundle; re-run if no verdict" >&2
+  fi
   cat > "${FLAG_FILE}" << 'EOF'
 // proof-flags.generated.ts — committed default fallback (all flags false).
 // The run scripts (run-vtest02.sh, run-dial-probe.sh) overwrite this file
@@ -70,14 +84,43 @@ adb logcat -c
 echo "[vtest02] Relaunching ${PACKAGE} ..."
 adb shell monkey -p "${PACKAGE}" -c android.intent.category.LAUNCHER 1
 
+# Wait for the probe-start marker BEFORE arming the verdict countdown.
+# This marker is emitted by persistence-proof-runner.ts ONLY after Metro has served the
+# enabled bundle and the gated READ PHASE code path is executing.  Waiting here closes the
+# EXIT-trap rebundle race (WR-03 TIMING fix): the trap is allowed to restore flags at any
+# time, but if we haven't seen this marker it means the app likely fetched the flags-disabled
+# bundle — in which case restore_flags() emits a warning (PROBE_STARTED still 0).
+echo "[vtest02] Waiting up to ${MARKER_TIMEOUT}s for BOOT: READ PHASE marker ..."
+TIMEOUT_BIN=$(command -v timeout || command -v gtimeout || true)
+MARKER_LINE=""
+if [ -n "${TIMEOUT_BIN}" ]; then
+  MARKER_LINE=$(${TIMEOUT_BIN} "${MARKER_TIMEOUT}" adb logcat -e "${BOOT_MARKER}" | head -1 || true)
+else
+  # Fallback: bounded poll loop (same cap, 5 s intervals) — avoids macOS missing timeout.
+  _elapsed=0
+  while [ "${_elapsed}" -lt "${MARKER_TIMEOUT}" ]; do
+    MARKER_LINE=$(adb logcat -d | grep "${BOOT_MARKER}" | head -1 || true)
+    if [ -n "${MARKER_LINE}" ]; then break; fi
+    sleep 5
+    _elapsed=$((_elapsed + 5))
+  done
+fi
+
+if [ -z "${MARKER_LINE}" ]; then
+  echo "[vtest02] ERROR: app never reached READ PHASE — Metro rebundle likely still in flight or flags-disabled bundle served; re-run" >&2
+  exit 1
+fi
+
+echo "[vtest02] READ PHASE marker seen: ${MARKER_LINE}"
+PROBE_STARTED=1
+
 echo "[vtest02] Polling logcat for verdict (${LOGCAT_TIMEOUT}s timeout) ..."
 # Portable timeout: prefer GNU timeout, then gtimeout (Homebrew coreutils), then bounded poll.
-TIMEOUT_BIN=$(command -v timeout || command -v gtimeout || true)
 VERDICT_LINE=""
 if [ -n "${TIMEOUT_BIN}" ]; then
   VERDICT_LINE=$(${TIMEOUT_BIN} "${LOGCAT_TIMEOUT}" adb logcat -e "${VERDICT_TAG}" | head -1 || true)
 else
-  # Fallback: bounded poll loop (30 s cap, 5 s intervals) — avoids macOS missing timeout.
+  # Fallback: bounded poll loop (120 s cap, 5 s intervals) — avoids macOS missing timeout.
   _elapsed=0
   while [ "${_elapsed}" -lt "${LOGCAT_TIMEOUT}" ]; do
     VERDICT_LINE=$(adb logcat -d | grep "${VERDICT_TAG}" | head -1 || true)
