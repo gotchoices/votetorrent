@@ -104,6 +104,15 @@ export class ElectionsEngine implements IElectionsEngine {
     this.requireCtx('adjustElection')
     const tid = nextTid++
     const e = election.election
+    // IN-24 (17-REVIEW): the revision row belongs to THIS proposal — a
+    // mismatched revision.electionId would key the revision elsewhere
+    // (possibly a valid foreign Election), leaving this ProposedElection
+    // with no revision row and getProposedElections with nothing to project.
+    if (election.revision.electionId !== e.id) {
+      throw new Error(
+				`ElectionsEngine.adjustElection: revision.electionId (${election.revision.electionId}) does not match election.id (${e.id})`
+      )
+    }
     const signerKey = this.ctx!.user?.activeKeys?.[0]?.key ?? null
     try {
       // WR-24 (17-REVIEW): the ProposedElection + ProposedElectionRevision
