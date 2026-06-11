@@ -13,10 +13,14 @@ import {
 } from '../utils.js';
 import type { EngineContext } from '../types.js';
 
-// WR-16 (17-REVIEW): seeded from the epoch-ms clock so a relaunched process
-// attached to a persisted store cannot re-issue Tids consumed by a previous
-// run (see the full rationale on the ElectionsEngine counter). Replace with
-// store-reconciled allocation at PERSIST-01.
+// WR-16 (17-REVIEW): seeded from the epoch-ms clock to reduce the chance that
+// a relaunched process attached to a persisted store re-issues Tids consumed
+// by a previous run (see the full rationale on the ElectionsEngine counter).
+// WR-25 (17-REVIEW): this is a HEURISTIC, not a guarantee — allocation bursts
+// faster than 1/ms (counter outruns the clock; a restart inside that window
+// re-issues Tids) and device clock rollback both silently defeat it, and
+// neither condition is detected. PERSIST-01 must replace this with
+// store-reconciled allocation seeded from a persisted high-water mark.
 let nextTid = Date.now();
 import type {
 	AdminDetails,

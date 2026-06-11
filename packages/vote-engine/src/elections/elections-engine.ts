@@ -28,11 +28,21 @@ import { SigningEngine } from '../signing/signing-engine.js'
 // can't be repeated with the same credentials"). Tids are NOT queryable from
 // the store (they live only inside persisted signature digests), so seeding
 // from the store is impossible; instead the counter is seeded from the
-// epoch-ms clock at module load: unique per process start and monotonic
-// across restarts. Increments stay sequential within a process, preserving
-// the createElection T / T+1 revision-tid contract and peekNextElectionTid().
-// Replace with store-reconciled Tid allocation at the v2 persistence
-// milestone (PERSIST-01).
+// epoch-ms clock at module load. Increments stay sequential within a process,
+// preserving the createElection T / T+1 revision-tid contract and
+// peekNextElectionTid().
+//
+// WR-25 (17-REVIEW): this seed is a HEURISTIC, not a guarantee. Two unguarded
+// failure modes can silently re-issue consumed Tids:
+//   1. Allocation bursts faster than 1/ms — each nextTid++ advances the
+//      counter 1 ms ahead of the wall clock, so a burst of N allocations lets
+//      the counter outrun the clock by N ms; a process restart within that
+//      window reseeds BELOW already-issued Tids.
+//   2. Device clock rollback (manual change, NTP correction — common on
+//      emulators) reseeds the counter below previously issued Tids.
+// Nothing detects either condition today. PERSIST-01 must replace this with
+// store-reconciled allocation seeded from a persisted high-water mark:
+// nextTid = max(Date.now(), storedHighWater + 1), updated on allocation.
 let nextTid = Date.now()
 
 /** For test use only — returns the Tid that the next createElection() call will use. */
