@@ -25,7 +25,6 @@ import type {
   ElectionEvent,
   ElectionInit,
   ElectionSummary,
-  IElectionEngine,
   AdminInit,
   AuthorityInit,
   AuthorityInviteInvokes,
@@ -231,10 +230,6 @@ export class NetworkEngine implements INetworkEngine {
         throw new Error(`Unknown error creating authority: ${err}`)
       }
     }
-  }
-
-  async createElection (election: ElectionInit): Promise<void> {
-    throw new Error('Not implemented')
   }
 
   /** Returns all authorities that match the name (ENG-01/D-11).
@@ -729,10 +724,6 @@ export class NetworkEngine implements INetworkEngine {
         throw new Error(`Unknown error opening authority: ${err}`)
       }
     }
-  }
-
-  async openElection (electionId: string): Promise<IElectionEngine> {
-    throw new Error('Not implemented')
   }
 
   async pinAuthority (authority: Authority): Promise<void> {

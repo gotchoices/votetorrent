@@ -11,7 +11,7 @@ import type {
 	IElectionRevokeKeyholderBuilder,
 	KeyholderInvite,
 } from '@votetorrent/vote-core';
-import { ElectionEvent, ElectionType } from '@votetorrent/vote-core';
+import { ElectionEvent, ElectionType, FeatureNotAvailableError } from '@votetorrent/vote-core';
 import { ElectionInviteKeyholderBuilder } from './builders/election-invite-keyholder-builder.js';
 import { ElectionProposeBallotBuilder } from './builders/election-propose-ballot-builder.js';
 import { ElectionProposeRevisionBuilder } from './builders/election-propose-revision-builder.js';
@@ -130,7 +130,7 @@ export class MockElectionEngine implements IElectionEngine {
 		_keyholder: KeyholderInvite,
 		_electionId: string,
 	): Promise<void> {
-		throw new Error('Not implemented');
+		throw new FeatureNotAvailableError('inviteKeyholder — available in Phase 21 (signing pipeline)');
 	}
 
 	async proposeBallot(ballot: Ballot): Promise<void> {
@@ -143,14 +143,14 @@ export class MockElectionEngine implements IElectionEngine {
 	}
 
 	async proposeRevision(_revision: ElectionRevisionInit): Promise<void> {
-		throw new Error('Not implemented');
+		throw new FeatureNotAvailableError('proposeRevision — available in Phase 21 (signing pipeline)');
 	}
 
 	async revokeKeyholder(
 		_keyholder: KeyholderInvite,
 		_electionId: string,
 	): Promise<void> {
-		throw new Error('Not implemented');
+		throw new FeatureNotAvailableError('revokeKeyholder — available in Phase 21 (signing pipeline)');
 	}
 
 	buildProposeBallot(): IElectionProposeBallotBuilder {
