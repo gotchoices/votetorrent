@@ -1,5 +1,5 @@
 import { MisuseError, QuereusError } from '@quereus/quereus'
-import { UserHistoryEvent } from '@votetorrent/vote-core'
+import { FeatureNotAvailableError, UserHistoryEvent } from '@votetorrent/vote-core'
 import { fromCanonicalDatetime, nowCanonicalDatetime, parseJsonOr, toCanonicalDatetime } from '../utils.js'
 import type { EngineContext } from '../types.js'
 import type {
@@ -12,6 +12,7 @@ import type {
   IUserReviseBuilder,
   IUserRevokeKeyBuilder,
   ReviseUserHistory,
+  Scope,
   Timestamp,
   User,
   UserHistory,
@@ -97,7 +98,8 @@ export class UserEngine implements IUserEngine {
   }
 
   async connectDevice (): Promise<DeviceAdvertisement> {
-    throw new Error('Not implemented')
+    // ENG-07 phase-gate: connectDevice requires P2P fabric (UKEY-04, Phase 22).
+    throw new FeatureNotAvailableError('connectDevice — available in Phase 22 (P2P fabric)')
   }
 
   /**
@@ -155,10 +157,14 @@ export class UserEngine implements IUserEngine {
     userId: string,
     forward: boolean
   ): AsyncIterable<UserHistory> {
-    // Out of Phase 4 scope (USER-01..08 covers summary + key + revise +
-    // revokeKey + respondToInvite + DefaultUser). UserHistory event-log
-    // reconstruction lives in Phase 6 / TEST-01.
-    throw new Error('Not implemented')
+    // ENG-07 phase-gate: getHistory requires an append-only user-event table
+    // that does not exist in the current schema (D-09). The existing UserKey
+    // table stores no created-at timestamp or signature history — lossy
+    // reconstruction is refused (D-09). Real implementation remanded to
+    // Phase 19 (ENG-02) which will add the event table (D-10).
+    throw new FeatureNotAvailableError('getHistory — available in Phase 19 (user event table)')
+    // TypeScript requires at least one yield for AsyncGenerator type inference
+    // (Pitfall 5). This yield is unreachable; it satisfies the compiler only.
     yield undefined as unknown as UserHistory
   }
 
@@ -203,10 +209,43 @@ export class UserEngine implements IUserEngine {
     }
   }
 
-  async isPrivileged (): Promise<boolean> {
-    // Out of Phase 4 scope. Privilege resolution belongs to Phase 6 /
-    // TEST-01 once Officer/Keyholder joins are exercised end-to-end.
-    throw new Error('Not implemented')
+  /**
+   * ENG-03 — Returns true iff an Officer row exists for `userId` whose
+   * Scopes JSON array includes `scope`, under the currently effective Admin
+   * (current AdminEffectiveAt), in ANY authority of the network.
+   *
+   * T-18-01 mitigation: userId and scope are bound ONLY via the params object
+   * `{ userId, scope }` — never string-interpolated into the SQL statement.
+   *
+   * NOTE: The Scope TS type includes 'rnp' but the DB Scope view does not
+   * list it (existing schema inconsistency, not introduced here). The query
+   * is correct as-is; an Officer with 'rnp' in their Scopes JSON would have
+   * failed the ScopesValid CHECK at insert time — no special handling needed.
+   *
+   * T-18-02 mitigation: Scope match uses exact equality (json_each value = :scope,
+   * not LIKE), and the join is restricted to CurrentAdmin — prevents false-positive
+   * privilege grants.
+   */
+  async isPrivileged (scope: Scope, userId: string): Promise<boolean> {
+    this.requireCtx('isPrivileged')
+    try {
+      const row = await this.ctx!.db
+        .prepare(
+          `SELECT 1 AS found
+             FROM Officer O
+             JOIN CurrentAdmin CA ON CA.AuthorityId = O.AuthorityId
+                                 AND CA.EffectiveAt = O.AdminEffectiveAt
+            WHERE O.UserId = :userId
+              AND EXISTS (
+                SELECT 1 FROM json_each(O.Scopes) WHERE value = :scope
+              )
+            LIMIT 1`
+        )
+        .get({ userId, scope })
+      return row != null
+    } catch (err) {
+      this.rethrow(err, 'isPrivileged')
+    }
   }
 
   /**
