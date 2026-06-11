@@ -202,10 +202,13 @@ export class AuthorityEngine implements IAuthorityEngine {
 			}
 			// AUTH-05 / D-22: populate signers from the most recent AdminSigning
 			// for scope 'rad' (admin-proposal scope) joined via OfficerSignature.
+			// IN-18 (17-REVIEW): Nonce desc tiebreaker — multiple signings can
+			// share an AdminEffectiveAt, and without a tiebreaker which session's
+			// signers get reported is engine-ordering dependent.
 			const signers: string[] = [];
 			const signingDB = await this.ctx.db
 				.prepare(
-					'select Nonce from AdminSigning where AuthorityId = :id and Scope = :scope order by AdminEffectiveAt desc limit 1',
+					'select Nonce from AdminSigning where AuthorityId = :id and Scope = :scope order by AdminEffectiveAt desc, Nonce desc limit 1',
 				)
 				.get({ id: this.authority.id, scope: 'rad' });
 			if (signingDB?.Nonce) {
@@ -338,10 +341,11 @@ export class AuthorityEngine implements IAuthorityEngine {
 			}
 			// AUTH-05 / D-21: populate signers from the most recent AdminSigning
 			// for scope 'iad' (invite-authority scope) joined via OfficerSignature.
+			// IN-18 (17-REVIEW): Nonce desc tiebreaker — see getAdminDetails.
 			const signers: string[] = [];
 			const signingDB = await this.ctx.db
 				.prepare(
-					'select Nonce from AdminSigning where AuthorityId = :id and Scope = :scope order by AdminEffectiveAt desc limit 1',
+					'select Nonce from AdminSigning where AuthorityId = :id and Scope = :scope order by AdminEffectiveAt desc, Nonce desc limit 1',
 				)
 				.get({ id: this.authority.id, scope: 'iad' });
 			if (signingDB?.Nonce) {
