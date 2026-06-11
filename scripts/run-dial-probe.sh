@@ -55,6 +55,16 @@ EOF
 }
 trap restore_flags EXIT
 
+# 0. WR-11 (17-REVIEW): abort BEFORE touching the device if CONTROL_ADDR is
+#    still the committed placeholder — otherwise the operator gets an ambiguous
+#    "DIAL VERDICT: FAIL" / "no verdict line captured" with no hint of the cause.
+if grep -q 'UPDATE_AFTER_DRONE_RESTART' apps/VoteTorrentAuthority/src/engines/dial-probe.ts; then
+  echo "[run-dial-probe] ERROR: CONTROL_ADDR in dial-probe.ts is still the committed placeholder" >&2
+  echo "[run-dial-probe]        Start the drone (packages/p2p-probe-host/drone.mjs), copy the ws" >&2
+  echo "[run-dial-probe]        multiaddr from its READY line into CONTROL_ADDR, then re-run." >&2
+  exit 1
+fi
+
 # 1. Write flag file: DIAL_PROBE_ENABLED=true, PROOF_ENABLED=false (D-18/D-19).
 #    Metro picks up the change on the next bundle request (force-stop clears stale JS cache).
 cat > "${FLAG_FILE}" << 'EOF'
