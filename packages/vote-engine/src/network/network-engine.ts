@@ -395,7 +395,12 @@ export class NetworkEngine implements INetworkEngine {
           : undefined
       }
     } catch (error) {
-      throw new Error('Network not found')
+      // WR-05: preserve the genuine missing-row signal but stop masking every
+      // other failure (bad ImageRef JSON, asText null, Quereus errors, a missing
+      // primary authority) as a benign "Network not found". Only the explicit
+      // not-found throw keeps that message; everything else surfaces with context.
+      if (error instanceof Error && error.message === 'Network not found') throw error
+      throw new Error(`Failed to load network details: ${String(error)}`)
     }
   }
 
@@ -510,7 +515,11 @@ export class NetworkEngine implements INetworkEngine {
         )
       }
     } catch (error) {
-      throw new Error('Network not found')
+      // WR-05: preserve the genuine missing-row signal but stop masking every
+      // other failure (bad ImageRef JSON, asText null, Quereus errors, a missing
+      // primary authority) as a benign "Network not found".
+      if (error instanceof Error && error.message === 'Network not found') throw error
+      throw new Error(`Failed to load network summary: ${String(error)}`)
     }
   }
 
