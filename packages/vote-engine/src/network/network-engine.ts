@@ -237,7 +237,19 @@ export class NetworkEngine implements INetworkEngine {
    * Security note: `name` is wrapped into the pattern ('%' + name + '%')
    * and bound as :pattern via the params object — never concatenated into
    * the SQL string (T-18-04 mitigated). PAGE_SIZE is a compile-time constant
-   * inlined into the SQL (Quereus does not support bound parameters for LIMIT). */
+   * inlined into the SQL (Quereus does not support bound parameters for LIMIT).
+   *
+   * WR-01: a caller-supplied name containing LIKE metacharacters (`%`, `_`)
+   * would otherwise be interpreted as a wildcard — `a_b` would match `aXb`, and
+   * `%` would match every authority. Quereus' LIKE has NO ESCAPE clause and no
+   * escape character (see @quereus util/patterns.ts `simpleLike`), so escaping
+   * cannot be expressed in SQL. Instead the LIKE stays as a (case-sensitive)
+   * index-friendly prefilter and the results are post-filtered in JS to require
+   * the literal substring, so `%`/`_` are matched literally. This is a
+   * correctness/robustness fix, not injection — the value was already bound as
+   * :pattern. NOTE: the LIMIT is applied in SQL before the JS post-filter, so a
+   * page can under-fill when wildcard-only matches are dropped; this mirrors the
+   * pre-existing single-page pagination contract. */
   async getAuthoritiesByName (
     name: string | undefined
   ): Promise<Cursor<Authority>> {
@@ -249,9 +261,14 @@ export class NetworkEngine implements INetworkEngine {
         `SELECT Id, Name, DomainName, ImageRef FROM Authority WHERE Name LIKE :pattern ORDER BY Name ASC LIMIT ${PAGE_SIZE} OFFSET 0`,
         { pattern }
       )) {
+        const rowName = row.Name as string
+        // WR-01: drop rows that matched only because `%`/`_` in `name` acted as
+        // wildcards. A literal substring check makes the search faithful to the
+        // caller's input. Case-sensitive to match Quereus' (non-`i`) LIKE.
+        if (name && !rowName.includes(name)) continue
         buffer.push({
           id: row.Id as string,
-          name: row.Name as string,
+          name: rowName,
           domainName: asText(row.DomainName, 'Authority.DomainName'),
           imageRef: parseJsonOr<ImageRef | undefined>(row.ImageRef, undefined, 'Authority.ImageRef')
         })
@@ -979,6 +996,11 @@ export class NetworkEngine implements INetworkEngine {
       // estimatedNodes is an honest lower-bound floor derived from the count
       // of known relay endpoints. Pending Phase 22 live P2P telemetry, this
       // equals serverCount rather than zero (D-07: honest floor, not zero).
+      // WR-07: the contract is `estimatedNodes >= serverCount` (a floor), not
+      // strict equality — once Phase 22 telemetry lands estimatedNodes becomes a
+      // real estimate that can exceed serverCount. The test asserts the floor
+      // contract, not implementation-equals-itself.
+      // TODO(Phase 22): replace the relay-count floor with live node telemetry.
       return { serverCount, estimatedNodes: serverCount }
     } catch (err) {
       if (err instanceof QuereusError) {

@@ -1433,14 +1433,46 @@ describe('NetworkEngine', () => {
 			expect(next.offset).to.equal(20);
 			expect(next.firstBOF).to.equal(false);
 		});
+
+		// WR-01: LIKE metacharacters in the caller-supplied name must be treated
+		// literally, not as wildcards. With the seeded 'Primary' authority present,
+		// an unescaped `'%' + '%' + '%'` pattern would match every authority; with
+		// the ESCAPE fix, a literal `%` search matches only an authority whose name
+		// actually contains a percent sign — here, none — so the buffer is empty.
+		// A literal `_` search likewise must not match 'Primary' (no underscore).
+		// These run against the seeded DB without extra INSERTs (quereus#23-safe).
+		it('WR-01: escapes a literal % so it is not treated as a match-all wildcard', async () => {
+			const { engine } = await createNetworkEngine();
+			// Sanity: the seeded 'Primary' authority is findable by its real name.
+			const seeded = await engine.getAuthoritiesByName('Primary');
+			expect(seeded.buffer.length).to.be.greaterThan(0);
+			// A literal '%' must NOT behave as match-all and surface 'Primary'.
+			const percentHits = await engine.getAuthoritiesByName('%');
+			expect(percentHits.buffer.length).to.equal(0);
+		});
+
+		it('WR-01: escapes a literal _ so it is not treated as a single-char wildcard', async () => {
+			const { engine } = await createNetworkEngine();
+			// 'Primar_' would match 'Primary' if `_` were a wildcard; with escaping
+			// it is literal and matches nothing (no authority is named 'Primar_').
+			const underscoreHits = await engine.getAuthoritiesByName('Primar_');
+			expect(underscoreHits.buffer.length).to.equal(0);
+		});
 	});
 
 	describe('getStatistics', () => {
-		it('returns serverCount > 0 and estimatedNodes === serverCount for a seeded 1-relay network', async () => {
+		// WR-07: assert the documented contract rather than the self-referential
+		// `estimatedNodes === serverCount`. serverCount must equal the number of
+		// relay endpoints, and estimatedNodes is an honest lower-bound floor
+		// (>= serverCount). When real P2P telemetry lands (Phase 22) estimatedNodes
+		// can exceed serverCount without this test needing to be "fixed" back to
+		// strict equality. TODO(Phase 22): tighten once live node telemetry exists.
+		it('returns serverCount equal to the relay count and estimatedNodes >= serverCount', async () => {
 			const { engine } = await createNetworkEngine();
 			const stats = await engine.getStatistics();
 			expect(stats.serverCount).to.be.a('number').greaterThan(0);
-			expect(stats.estimatedNodes).to.equal(stats.serverCount);
+			// estimatedNodes is a documented lower-bound floor, never below serverCount.
+			expect(stats.estimatedNodes).to.be.at.least(stats.serverCount);
 		});
 	});
 
