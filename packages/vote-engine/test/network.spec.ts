@@ -1408,29 +1408,39 @@ describe('NetworkEngine', () => {
 	});
 
 	// -----------------------------------------------------------------------
-	// 10. Election Stubs (ensure not-implemented errors)
+	// 10. Authority Search & Statistics (ENG-01/D-11/ENG-05/D-06/D-07)
 	// -----------------------------------------------------------------------
-	describe('election methods (not yet implemented)', () => {
-		it('should throw "Not implemented" from createElection', async () => {
-			const { engine } = await makeDbOnlyNetworkEngine();
-			let caught: unknown;
-			try {
-				await engine.createElection({} as never);
-			} catch (err) {
-				caught = err;
-			}
-			expect((caught as Error)?.message).to.include('Not implemented');
+	describe('getAuthoritiesByName', () => {
+		it('returns a non-empty buffer with firstBOF true when a matching authority exists', async () => {
+			const { engine } = await createNetworkEngine();
+			const cursor = await engine.getAuthoritiesByName('Primary');
+			expect(cursor.buffer.length).to.be.greaterThan(0);
+			expect(cursor.firstBOF).to.equal(true);
+			expect(cursor.offset).to.equal(0);
 		});
 
-		it('should throw "Not implemented" from openElection', async () => {
-			const { engine } = await makeDbOnlyNetworkEngine();
-			let caught: unknown;
-			try {
-				await engine.openElection('any-id');
-			} catch (err) {
-				caught = err;
-			}
-			expect((caught as Error)?.message).to.include('Not implemented');
+		it('returns an empty buffer with lastEOF true when no match exists', async () => {
+			const { engine } = await createNetworkEngine();
+			const cursor = await engine.getAuthoritiesByName('zzz-no-match');
+			expect(cursor.buffer.length).to.equal(0);
+			expect(cursor.lastEOF).to.equal(true);
+		});
+
+		it('nextAuthoritiesByName advances offset by 20 when called with forward=true', async () => {
+			const { engine } = await createNetworkEngine();
+			const initial = await engine.getAuthoritiesByName(undefined);
+			const next = await engine.nextAuthoritiesByName(initial, true);
+			expect(next.offset).to.equal(20);
+			expect(next.firstBOF).to.equal(false);
+		});
+	});
+
+	describe('getStatistics', () => {
+		it('returns serverCount > 0 and estimatedNodes === serverCount for a seeded 1-relay network', async () => {
+			const { engine } = await createNetworkEngine();
+			const stats = await engine.getStatistics();
+			expect(stats.serverCount).to.be.a('number').greaterThan(0);
+			expect(stats.estimatedNodes).to.equal(stats.serverCount);
 		});
 	});
 
