@@ -28,6 +28,10 @@ set -euo pipefail
 # restore — works when invoked from any directory.
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
+# IN-21 (17-REVIEW): shared logcat wait/poll helper (wait_for_logcat_line) —
+# previously duplicated verbatim across both run scripts' marker + verdict waits.
+. scripts/lib/logcat-wait.sh
+
 PACKAGE="org.votetorrent.authority"
 VERDICT_TAG='\[proof\] ========== FULL-CHAIN VERDICT'
 BOOT_MARKER='\[proof\] ========== BOOT: READ PHASE'
@@ -104,52 +108,9 @@ adb shell monkey -p "${PACKAGE}" -c android.intent.category.LAUNCHER 1
 # time, but if we haven't seen this marker it means the app likely fetched the flags-disabled
 # bundle — in which case restore_flags() emits a warning (PROBE_STARTED still 0).
 echo "[vtest02] Waiting up to ${MARKER_TIMEOUT}s for BOOT: READ PHASE marker ..."
-TIMEOUT_BIN=$(command -v timeout || command -v gtimeout || true)
-MARKER_LINE=""
-if [ -n "${TIMEOUT_BIN}" ]; then
-  # WR-22 (17-REVIEW): capture the timeout/adb pipeline status instead of a
-  # blanket `|| true` so a device disconnect / immediate adb death is reported
-  # as such, not blamed on a Metro rebundle or a timeout window that never ran.
-  # `exit "${PIPESTATUS[0]}"` propagates the timeout/adb status out of the
-  # substitution (head's own status is useless — it is 0 even when adb dies).
-  # Status 124 = window elapsed (normal no-marker path, handled below); 141
-  # (SIGPIPE after head matched) accompanies a NON-empty capture and is fine.
-  # IN-19 (17-REVIEW) — known latency: head exits on the first match, but the
-  # command substitution only returns when adb dies — via SIGPIPE on its NEXT
-  # matching write, or at the end of the timeout window on a quiet logcat. A
-  # successful capture can therefore stall up to the full window AFTER the
-  # target line was matched. Accepted: the capture is still correct, only
-  # slower; killing adb eagerly would complicate all four wait sites.
-  set +e
-  MARKER_LINE=$("${TIMEOUT_BIN}" "${MARKER_TIMEOUT}" adb logcat -e "${BOOT_MARKER}" | head -1; exit "${PIPESTATUS[0]}")
-  _adb_status=$?
-  set -e
-  if [ -z "${MARKER_LINE}" ] && [ "${_adb_status}" -ne 124 ]; then
-    echo "[vtest02] ERROR: adb logcat exited abnormally (status ${_adb_status}) before the ${MARKER_TIMEOUT}s marker window elapsed — check device connection (adb devices)" >&2
-    exit 1
-  fi
-else
-  # Fallback: bounded poll loop (same cap, 5 s intervals) — avoids macOS missing timeout.
-  _elapsed=0
-  while [ "${_elapsed}" -lt "${MARKER_TIMEOUT}" ]; do
-    # WR-22: an adb failure here previously degraded to silently polling nothing.
-    set +e
-    MARKER_LINE=$(adb logcat -d | grep "${BOOT_MARKER}" | head -1; exit "${PIPESTATUS[0]}")
-    _adb_status=$?
-    set -e
-    # WR-23 (17-REVIEW): only fatal when the capture is EMPTY — mirrors the
-    # streaming branch. When the pattern matches early in a large dump, head
-    # exits first and adb dies of SIGPIPE (status 141) AFTER the line was
-    # successfully captured; that is not a device failure.
-    if [ -z "${MARKER_LINE}" ] && [ "${_adb_status}" -ne 0 ]; then
-      echo "[vtest02] ERROR: adb logcat -d failed (status ${_adb_status}) while polling for the marker — check device connection (adb devices)" >&2
-      exit 1
-    fi
-    if [ -n "${MARKER_LINE}" ]; then break; fi
-    sleep 5
-    _elapsed=$((_elapsed + 5))
-  done
-fi
+# IN-21 (17-REVIEW): wait/poll logic lives in scripts/lib/logcat-wait.sh
+# (single home for the WR-22/WR-23 status handling and the IN-19 latency note).
+MARKER_LINE=$(wait_for_logcat_line "${BOOT_MARKER}" "${MARKER_TIMEOUT}" "[vtest02]" "marker")
 
 if [ -z "${MARKER_LINE}" ]; then
   echo "[vtest02] ERROR: app never reached READ PHASE — Metro rebundle likely still in flight or flags-disabled bundle served; re-run" >&2
@@ -160,38 +121,8 @@ echo "[vtest02] READ PHASE marker seen: ${MARKER_LINE}"
 PROBE_STARTED=1
 
 echo "[vtest02] Polling logcat for verdict (${LOGCAT_TIMEOUT}s timeout) ..."
-# Portable timeout: prefer GNU timeout, then gtimeout (Homebrew coreutils), then bounded poll.
-VERDICT_LINE=""
-if [ -n "${TIMEOUT_BIN}" ]; then
-  # WR-22: status capture instead of blanket `|| true` — see the marker wait above.
-  set +e
-  VERDICT_LINE=$("${TIMEOUT_BIN}" "${LOGCAT_TIMEOUT}" adb logcat -e "${VERDICT_TAG}" | head -1; exit "${PIPESTATUS[0]}")
-  _adb_status=$?
-  set -e
-  if [ -z "${VERDICT_LINE}" ] && [ "${_adb_status}" -ne 124 ]; then
-    echo "[vtest02] ERROR: adb logcat exited abnormally (status ${_adb_status}) before the ${LOGCAT_TIMEOUT}s verdict window elapsed — check device connection (adb devices)" >&2
-    exit 1
-  fi
-else
-  # Fallback: bounded poll loop (120 s cap, 5 s intervals) — avoids macOS missing timeout.
-  _elapsed=0
-  while [ "${_elapsed}" -lt "${LOGCAT_TIMEOUT}" ]; do
-    # WR-22: an adb failure here previously degraded to silently polling nothing.
-    set +e
-    VERDICT_LINE=$(adb logcat -d | grep "${VERDICT_TAG}" | head -1; exit "${PIPESTATUS[0]}")
-    _adb_status=$?
-    set -e
-    # WR-23 (17-REVIEW): only fatal when the capture is EMPTY — a SIGPIPE 141
-    # after head matched accompanies a successfully captured verdict line.
-    if [ -z "${VERDICT_LINE}" ] && [ "${_adb_status}" -ne 0 ]; then
-      echo "[vtest02] ERROR: adb logcat -d failed (status ${_adb_status}) while polling for the verdict — check device connection (adb devices)" >&2
-      exit 1
-    fi
-    if [ -n "${VERDICT_LINE}" ]; then break; fi
-    sleep 5
-    _elapsed=$((_elapsed + 5))
-  done
-fi
+# IN-21: shared helper — see scripts/lib/logcat-wait.sh.
+VERDICT_LINE=$(wait_for_logcat_line "${VERDICT_TAG}" "${LOGCAT_TIMEOUT}" "[vtest02]" "verdict")
 
 if [ -z "${VERDICT_LINE}" ]; then
   echo "[vtest02] ERROR: no verdict line captured within ${LOGCAT_TIMEOUT}s — FAIL"
