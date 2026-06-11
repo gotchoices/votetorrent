@@ -1,5 +1,6 @@
 export * from './builder.js'
 export * from './cursor.js'
+export * from './feature-error.js'
 export * from './image-ref.js'
 export * from './local-storage.js'
 export * from './proposal.js'
