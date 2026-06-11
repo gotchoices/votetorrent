@@ -46,6 +46,14 @@ const PROOF_NETWORK_HASH_KEY = 'proof:networkHash';
 // for the full-chain boot runner path).
 export const PROOF_CHAIN_REF_KEY = 'proof:fullChainRef';
 
+// WR-14 (17-REVIEW): set BEFORE the first write-phase store mutation and cleared
+// only after PROOF_CHAIN_REF_KEY lands. If a boot finds this marker WITHOUT the
+// chain ref, a previous WRITE phase failed mid-flight: the LevelDB store may
+// already contain Network/Authority rows while AsyncStorage carries no
+// discriminant — re-running networksEngine.create() would fail repeatedly.
+// The runner detects this and tells the operator to `pm clear` instead.
+export const PROOF_WRITE_ATTEMPTED_KEY = 'proof:writeAttempted';
+
 // ---------------------------------------------------------------------------
 // Minimal LocalStorage wrapper (delegates to AsyncStorage)
 // ---------------------------------------------------------------------------
@@ -285,6 +293,11 @@ export async function runFullChainWritePhase(
 ): Promise<{ networkRef: NetworkReference; authorityId: string; electionId: string; db: Database }> {
   console.log('[proof] full-chain write phase: starting');
 
+  // WR-14 (17-REVIEW): persist the attempt marker BEFORE any store mutation so a
+  // partial failure (anything between step 1 and step 6 throwing) is detectable
+  // on the next boot — the marker without PROOF_CHAIN_REF_KEY means "partial write".
+  await AsyncStorage.setItem(PROOF_WRITE_ATTEMPTED_KEY, String(Date.now()));
+
   // Step 1: create the network — Network + primary Authority + Admin/Officer/User/UserKey rows.
   const networkEngine = await networksEngine.create(PROOF_NETWORK_INIT, user);
   console.log('[proof] full-chain write: network created');
@@ -412,6 +425,8 @@ export async function runFullChainWritePhase(
   // Step 6: persist the full-chain reference for the read phase (survives force-stop).
   const chainRef = { networkRef, authorityId, electionId };
   await AsyncStorage.setItem(PROOF_CHAIN_REF_KEY, JSON.stringify(chainRef));
+  // WR-14: write completed coherently — clear the partial-write attempt marker.
+  await AsyncStorage.removeItem(PROOF_WRITE_ATTEMPTED_KEY);
 
   // Use the captured db handle for caller's assertions (same handle used for all inserts).
   const db = getLastProofDb();

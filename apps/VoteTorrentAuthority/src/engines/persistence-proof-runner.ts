@@ -26,6 +26,7 @@ import {
   assertDigestParity,
   getLastProofDb,
   PROOF_CHAIN_REF_KEY,
+  PROOF_WRITE_ATTEMPTED_KEY,
 } from './persistence-proof';
 import { getOrCreateDeviceUser } from './device-user';
 import { runRnEntrySmoke } from './rn-entry-smoke';
@@ -58,6 +59,21 @@ export async function runPersistenceProof(): Promise<void> {
     const alreadyWritten = await AsyncStorage.getItem(PROOF_CHAIN_REF_KEY);
 
     if (!alreadyWritten) {
+      // WR-14 (17-REVIEW): the attempt marker without the chain ref means a previous
+      // WRITE phase failed between its first store mutation and the chain-ref commit.
+      // The LevelDB store may already hold Network/Authority rows — blindly re-running
+      // networksEngine.create() against it fails repeatedly. Tell the operator how to
+      // reset instead of wedging the harness.
+      const writeAttempted = await AsyncStorage.getItem(PROOF_WRITE_ATTEMPTED_KEY);
+      if (writeAttempted) {
+        console.error(
+          '[proof] FATAL — partial write detected (a previous WRITE phase failed mid-flight at ' +
+            `${new Date(Number(writeAttempted)).toISOString()}): the store may contain rows but ` +
+            'no chain ref was saved. Reset with: adb shell pm clear org.votetorrent.authority',
+        );
+        return;
+      }
+
       // ---- FULL-CHAIN WRITE PHASE (first launch / after `pm clear`) ----
       console.log('[proof] ========== BOOT: WRITE PHASE (no saved state) ==========');
 
