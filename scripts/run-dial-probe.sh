@@ -152,6 +152,12 @@ if [ -n "${TIMEOUT_BIN}" ]; then
   # substitution (head's own status is useless — it is 0 even when adb dies).
   # Status 124 = window elapsed (normal no-marker path, handled below); 141
   # (SIGPIPE after head matched) accompanies a NON-empty capture and is fine.
+  # IN-19 (17-REVIEW) — known latency: head exits on the first match, but the
+  # command substitution only returns when adb dies — via SIGPIPE on its NEXT
+  # matching write, or at the end of the timeout window on a quiet logcat. A
+  # successful capture can therefore stall up to the full window AFTER the
+  # target line was matched. Accepted: the capture is still correct, only
+  # slower; killing adb eagerly would complicate all four wait sites.
   set +e
   MARKER_LINE=$("${TIMEOUT_BIN}" "${MARKER_TIMEOUT}" adb logcat -e "${PROBE_MARKER}" | head -1; exit "${PIPESTATUS[0]}")
   _adb_status=$?
