@@ -416,28 +416,35 @@ export class ElectionsEngine implements IElectionsEngine {
 							from ProposedElectionRevision where ElectionId = :id`
           )
           .get({ id: core.id })
-        const revision: ElectionRevisionInit = revRow
-          ? {
-              electionId: core.id,
-              revision: revRow.Revision as number,
-              revisionTimestamp: fromCanonicalDatetime(revRow.RevisionTimestamp as string | number),
-              tags: parseJsonOr<string[]>(revRow.Tags, [], 'ProposedElectionRevision.Tags'),
-              instructions: revRow.Instructions as string,
-              // ProposedElectionRevision persists no keyholder invites; []
-              // mirrors ElectionEngine.getRevisions' projection of this field.
-              keyholders: [],
-              timeline: parseJsonOr<Record<ElectionEvent, number>>(
-                revRow.Timeline,
-                {} as Record<ElectionEvent, number>,
-                'ProposedElectionRevision.Timeline'
-              ),
-              keyholderThreshold: revRow.KeyholderThreshold as number
-            }
-          // Rows written before WR-18 (adjustElection used to drop the
-          // revision payload) have no persisted revision row. Surfacing
-          // undefined here is a documented residual for legacy rows only —
-          // dev-phase stores are reset via `pm clear`.
-          : (undefined as unknown as ElectionRevisionInit)
+        // IN-26 (17-REVIEW): rows without a persisted revision (written before
+        // WR-18, when adjustElection dropped the revision payload — WR-24's
+        // transaction now makes fresh partial writes impossible) previously
+        // surfaced a type-lying `undefined as unknown as ElectionRevisionInit`
+        // that crashed consumers at `proposal.proposed.revision.*`. Skip such
+        // legacy rows with a warning instead — dev-phase stores are reset via
+        // `pm clear`.
+        if (!revRow) {
+          console.warn(
+						`ElectionsEngine.getProposedElections: skipping proposal ${core.id} — no persisted ProposedElectionRevision row (legacy/partial write)`
+          )
+          continue
+        }
+        const revision: ElectionRevisionInit = {
+          electionId: core.id,
+          revision: revRow.Revision as number,
+          revisionTimestamp: fromCanonicalDatetime(revRow.RevisionTimestamp as string | number),
+          tags: parseJsonOr<string[]>(revRow.Tags, [], 'ProposedElectionRevision.Tags'),
+          instructions: revRow.Instructions as string,
+          // ProposedElectionRevision persists no keyholder invites; []
+          // mirrors ElectionEngine.getRevisions' projection of this field.
+          keyholders: [],
+          timeline: parseJsonOr<Record<ElectionEvent, number>>(
+            revRow.Timeline,
+            {} as Record<ElectionEvent, number>,
+            'ProposedElectionRevision.Timeline'
+          ),
+          keyholderThreshold: revRow.KeyholderThreshold as number
+        }
 
         out.push({
           proposed: {
