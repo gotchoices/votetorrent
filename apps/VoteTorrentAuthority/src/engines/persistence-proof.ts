@@ -6,13 +6,18 @@
  * buttons or a dedicated debug screen — do NOT alter the production screen
  * visual design.
  *
- * D-16 part 1: restart-persistence proof
- *   runWritePhase  — create a Network via the real engine; persist the
- *                    NetworkReference + network hash to AsyncStorage so the
- *                    read phase can find it after an `am force-stop` relaunch.
- *   runReadPhase   — load the saved NetworkReference; call networksEngine.open()
+ * D-16 part 1 (superseded by the D-07 full-chain phases below):
+ *   runFullChainWritePhase — create Network + Authority + Election via real
+ *                    engines with a REAL device user; persist the chain ref to
+ *                    AsyncStorage so the read phase can find it after an
+ *                    `am force-stop` relaunch.
+ *   runFullChainReadPhase  — load the saved chain ref; call networksEngine.open()
  *                    (cache MISS on a fresh process → re-attach via rnDbFactory);
- *                    assert the row count is UNCHANGED (no re-insertion).
+ *                    assert count(*) >= 1 on Network, Authority, and Election.
+ *
+ * IN-11 (17-REVIEW): the legacy single-table runWritePhase/runReadPhase pair
+ * (and their fake PROOF_USER fixture, banned from real flows by T-16-14) were
+ * removed — the runner drives only the full-chain phases above.
  *
  * D-16 part 2: on-device crypto-function assertions
  *   assertCryptoFunctions — runs SQL assertions for Digest / SignatureValid /
@@ -24,7 +29,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { Database } from '@quereus/quereus';
 import type { NetworkReference, User, NetworkInit, Scope } from '@votetorrent/vote-core';
-import { ElectionType, UserKeyType } from '@votetorrent/vote-core';
+import { ElectionType } from '@votetorrent/vote-core';
 // @votetorrent/vote-engine/rn is the single sanctioned import path for real engine
 // classes in the RN app layer (D-04). Metro resolves it via the `./rn` subpath in
 // package.json exports + unstable_enablePackageExports: true in metro.config.js.
@@ -36,14 +41,11 @@ import { getOrCreateDeviceUser, getDevicePrivKeyHex } from './device-user';
 // ---------------------------------------------------------------------------
 // AsyncStorage keys used by the proof harness
 // ---------------------------------------------------------------------------
-// WR-05: single source of truth — the runner imports this same constant so a
+// WR-05: single source of truth — the runner imports these same constants so a
 // rename here cannot silently desync phase selection in the runner.
-export const PROOF_NETWORK_REF_KEY = 'proof:networkRef';
-const PROOF_NETWORK_HASH_KEY = 'proof:networkHash';
 
 // Full-chain proof key: persists { networkRef, authorityId, electionId } across restarts.
-// The runner uses this as the write-vs-read discriminant (replaces PROOF_NETWORK_REF_KEY
-// for the full-chain boot runner path).
+// The runner uses this as the write-vs-read discriminant.
 export const PROOF_CHAIN_REF_KEY = 'proof:fullChainRef';
 
 // WR-14 (17-REVIEW): set BEFORE the first write-phase store mutation and cleared
@@ -102,152 +104,10 @@ const PROOF_NETWORK_INIT: NetworkInit = {
   },
 };
 
-const PROOF_USER: User = {
-  id: 'proof-user-1',
-  name: 'Proof User',
-  activeKeys: [
-    {
-      key: 'proof-key-hex-000000000000000000000000000000000000000000000000000000000000001',
-      type: UserKeyType.mobile,
-      expiration: Date.now() + 365 * 24 * 60 * 60 * 1000,
-    },
-  ],
-};
-
-// ---------------------------------------------------------------------------
-// D-16 part 1 — Write phase
-// ---------------------------------------------------------------------------
-
-/**
- * WRITE PHASE: create a Network via the real NetworksEngine + rnDbFactory.
- *
- * Steps:
- *  1. Construct a NetworksEngine with rnDbFactory (capturing factory shim so
- *     we can run SQL assertions on the same db the engine used).
- *  2. Call networksEngine.create() to write Network/Authority/Admin/User/UserKey rows.
- *  3. Query row counts and the network hash from the engine's db.
- *  4. Persist the NetworkReference + hash to AsyncStorage for the read phase.
- *  5. Return/log the hash and row counts.
- *
- * @param networksEngine  Pre-constructed engine (pass the same instance used
- *                        by the app so the factory is the real rnDbFactory).
- * @param user            User to pass to create().
- * @returns               An object with the network hash, row counts, and db.
- */
-export async function runWritePhase(
-  networksEngine: NetworksEngine,
-  user: User = PROOF_USER,
-): Promise<{ networkHash: string; networkCount: number; db: Database }> {
-  console.log('[proof] write phase: calling networksEngine.create()');
-
-  const networkEngine = await networksEngine.create(PROOF_NETWORK_INIT, user);
-
-  // Retrieve the most-recently written NetworkReference from AsyncStorage.
-  // create() stores the new ref in recentNetworks — read the first entry.
-  const recents: NetworkReference[] | undefined = JSON.parse(
-    (await AsyncStorage.getItem('recentNetworks')) ?? '[]',
-  );
-  const ref = recents?.[0];
-  if (!ref) {
-    throw new Error('[proof] write phase: no NetworkReference found in recentNetworks after create()');
-  }
-  const networkHash = ref.hash;
-
-  // Query via the SAME handle the engine used (captured by makeProofEngine's
-  // factory). A fresh rnDbFactory() handle would NOT have the schema declared on
-  // the persistent vtab — see getLastProofDb.
-  const db = getLastProofDb();
-  if (!db) {
-    throw new Error('[proof] write phase: engine did not obtain a db via the proof factory');
-  }
-
-  const countRow = await db.prepare('select count(*) as n from Network').get() as
-    | { n: number }
-    | undefined;
-  const networkCount = countRow?.n ?? 0;
-
-  console.log(`[proof] write phase: networkHash=${networkHash}, Network row count=${networkCount}`);
-
-  // Persist ref and hash for the read phase (survives force-stop)
-  await AsyncStorage.setItem(PROOF_NETWORK_REF_KEY, JSON.stringify(ref));
-  await AsyncStorage.setItem(PROOF_NETWORK_HASH_KEY, networkHash);
-
-  console.log('[proof] write phase DONE — trigger am force-stop and relaunch, then call runReadPhase');
-
-  return { networkHash, networkCount, db };
-}
-
-// ---------------------------------------------------------------------------
-// D-16 part 1 — Read phase (post-restart)
-// ---------------------------------------------------------------------------
-
-/**
- * READ PHASE: load the saved NetworkReference and call networksEngine.open().
- *
- * On a fresh process (after `am force-stop + relaunch`), the engine's in-memory
- * cache is empty → open() takes the cache-MISS path → re-attaches via rnDbFactory.
- *
- * Asserts:
- *  - The Network row is present (count >= 1).
- *  - The Network row count equals the pre-restart count (no re-insertion).
- *
- * @param networksEngine  A freshly-constructed NetworksEngine (cache is empty).
- * @param user            User passed to open().
- * @returns               Result object with hash, pre-restart count, post-restart count, and pass/fail verdict.
- */
-export async function runReadPhase(
-  networksEngine: NetworksEngine,
-  user: User = PROOF_USER,
-): Promise<{ networkHash: string; preRestartCount: number; postRestartCount: number; passed: boolean }> {
-  console.log('[proof] read phase: loading saved NetworkReference from AsyncStorage');
-
-  const refJson = await AsyncStorage.getItem(PROOF_NETWORK_REF_KEY);
-  const hashStr = await AsyncStorage.getItem(PROOF_NETWORK_HASH_KEY);
-
-  if (!refJson || !hashStr) {
-    throw new Error(
-      '[proof] read phase: no saved proof state found — run the write phase first',
-    );
-  }
-
-  const ref: NetworkReference = JSON.parse(refJson);
-  const networkHash: string = hashStr;
-
-  console.log(`[proof] read phase: re-attaching to store for hash=${networkHash}`);
-
-  // open() on a fresh process: cache miss → factory-direct re-attach. The engine
-  // re-declares the schema on the fresh handle (binds persisted data) then gates
-  // on the schema-version marker.
-  await networksEngine.open(ref, user);
-
-  // Query via the SAME handle open() used (captured by makeProofEngine's factory).
-  const db = getLastProofDb();
-  if (!db) {
-    throw new Error('[proof] read phase: engine did not obtain a db via the proof factory');
-  }
-  const countRow = await db.prepare('select count(*) as n from Network').get() as
-    | { n: number }
-    | undefined;
-  const postRestartCount = countRow?.n ?? 0;
-
-  // The pre-restart count was 1 (one Network row written in the write phase).
-  // Hardcoded here; ideally compare to the count stored in AsyncStorage by a
-  // production-grade harness. For this proof the invariant is: post == pre == 1.
-  const preRestartCount = 1;
-  const passed = postRestartCount === preRestartCount && postRestartCount >= 1;
-
-  if (passed) {
-    console.log(
-      `[proof] read phase PASS — Network row count post-restart=${postRestartCount} (expected ${preRestartCount}); no re-insertion`,
-    );
-  } else {
-    console.error(
-      `[proof] read phase FAIL — Network row count post-restart=${postRestartCount} (expected ${preRestartCount})`,
-    );
-  }
-
-  return { networkHash, preRestartCount, postRestartCount, passed };
-}
+// IN-11 (17-REVIEW): the legacy single-table runWritePhase/runReadPhase pair
+// and the fake PROOF_USER default (a 79-char non-hex key that T-16-14 bans
+// from real flows) were removed. The full-chain phases below take a REQUIRED
+// real device user (from getOrCreateDeviceUser) — there is no fixture fallback.
 
 // ---------------------------------------------------------------------------
 // D-07 full-chain write phase (plan 16-05)
@@ -499,9 +359,9 @@ export async function runFullChainReadPhase(
  *   - H16 is called as a JS function (NOT via SQL SELECT)
  *   - Only the four registered functions are asserted (no non-existent functions)
  *
- * @param db  The real engine's Database instance (obtained from runWritePhase
- *            or by calling rnDbFactory directly after the engine has initialized
- *            the schema).
+ * @param db  The real engine's Database instance (obtained from
+ *            runFullChainWritePhase or getLastProofDb() after the engine has
+ *            initialized the schema).
  */
 /**
  * A digest is valid if it is a non-empty string OR a non-empty byte sequence.
@@ -632,8 +492,8 @@ export async function assertDigestParity(
 
 // ---------------------------------------------------------------------------
 // Convenience factory: construct a NetworksEngine backed by rnDbFactory.
-// Use this to create the engine instance passed to runWritePhase /
-// runReadPhase from a dev button without touching AppProvider.
+// Use this to create the engine instance passed to runFullChainWritePhase /
+// runFullChainReadPhase from a dev button without touching AppProvider.
 // ---------------------------------------------------------------------------
 
 /**
