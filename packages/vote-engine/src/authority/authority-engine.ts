@@ -85,8 +85,14 @@ export class AuthorityEngine implements IAuthorityEngine {
 		// signed domain here is sha256(sha256(signedBytes)) — deliberately
 		// accepted (no pre-migration signatures exist). Verifiers must use
 		// noble v2 default options, never { prehash: false }.
+		// WR-17 (17-REVIEW): fields are pipe-joined (the canonical form the SQL
+		// Digest path uses — D-05) instead of raw-concatenated, so distinct field
+		// tuples can no longer serialize to identical signed bytes (boundary
+		// ambiguity: name 'A'/title 'BC' vs name 'AB'/title 'C'). scopes is
+		// JSON-stringified for an unambiguous array encoding. Phase 6's
+		// InviteSignatureValid verification MUST recompute this exact form.
 		const signedBytes = new TextEncoder().encode(
-			init.name + init.title + init.scopes + type + expiration + inviteKey,
+			[init.name, init.title, JSON.stringify(init.scopes), type, expiration, inviteKey].join('|'),
 		);
 		const inviteSignature = bytesToHex(secp256k1.sign(sha256(signedBytes), invitePrivateBytes));
 
@@ -110,7 +116,8 @@ export class AuthorityEngine implements IAuthorityEngine {
 		const expiration = Temporal.Now.plainDateTimeISO('UTC')
 			.add({ minutes: this.invitationSpanMinutes })
 			.toString();
-		const signedBytes = new TextEncoder().encode(type + name + expiration);
+		// WR-17 (17-REVIEW): pipe-joined canonical form — see createOfficerInvite.
+		const signedBytes = new TextEncoder().encode([type, name, expiration].join('|'));
 		const inviteSignature = bytesToHex(secp256k1.sign(sha256(signedBytes), invitePrivateBytes));
 
 		return {
