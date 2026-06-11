@@ -129,12 +129,34 @@ echo "[run-dial-probe] Waiting up to ${MARKER_TIMEOUT}s for [dial-probe] startin
 TIMEOUT_BIN=$(command -v timeout || command -v gtimeout || true)
 MARKER_LINE=""
 if [ -n "${TIMEOUT_BIN}" ]; then
-  MARKER_LINE=$(${TIMEOUT_BIN} "${MARKER_TIMEOUT}" adb logcat -e "${PROBE_MARKER}" | head -1 || true)
+  # WR-22 (17-REVIEW): capture the timeout/adb pipeline status instead of a
+  # blanket `|| true` so a device disconnect / immediate adb death is reported
+  # as such, not blamed on a Metro rebundle or a timeout window that never ran.
+  # `exit "${PIPESTATUS[0]}"` propagates the timeout/adb status out of the
+  # substitution (head's own status is useless — it is 0 even when adb dies).
+  # Status 124 = window elapsed (normal no-marker path, handled below); 141
+  # (SIGPIPE after head matched) accompanies a NON-empty capture and is fine.
+  set +e
+  MARKER_LINE=$("${TIMEOUT_BIN}" "${MARKER_TIMEOUT}" adb logcat -e "${PROBE_MARKER}" | head -1; exit "${PIPESTATUS[0]}")
+  _adb_status=$?
+  set -e
+  if [ -z "${MARKER_LINE}" ] && [ "${_adb_status}" -ne 124 ]; then
+    echo "[run-dial-probe] ERROR: adb logcat exited abnormally (status ${_adb_status}) before the ${MARKER_TIMEOUT}s marker window elapsed — check device connection (adb devices)" >&2
+    exit 1
+  fi
 else
   # Fallback: bounded poll loop (same cap, 5 s intervals) — avoids macOS missing timeout.
   _elapsed=0
   while [ "${_elapsed}" -lt "${MARKER_TIMEOUT}" ]; do
-    MARKER_LINE=$(adb logcat -d | grep "${PROBE_MARKER}" | head -1 || true)
+    # WR-22: an adb failure here previously degraded to silently polling nothing.
+    set +e
+    MARKER_LINE=$(adb logcat -d | grep "${PROBE_MARKER}" | head -1; exit "${PIPESTATUS[0]}")
+    _adb_status=$?
+    set -e
+    if [ "${_adb_status}" -ne 0 ]; then
+      echo "[run-dial-probe] ERROR: adb logcat -d failed (status ${_adb_status}) while polling for the marker — check device connection (adb devices)" >&2
+      exit 1
+    fi
     if [ -n "${MARKER_LINE}" ]; then break; fi
     sleep 5
     _elapsed=$((_elapsed + 5))
@@ -154,12 +176,28 @@ echo "[run-dial-probe] Polling logcat for verdict (${LOGCAT_TIMEOUT}s timeout) .
 # Portable timeout: prefer GNU timeout, then gtimeout (Homebrew coreutils), then bounded poll.
 VERDICT_LINE=""
 if [ -n "${TIMEOUT_BIN}" ]; then
-  VERDICT_LINE=$(${TIMEOUT_BIN} "${LOGCAT_TIMEOUT}" adb logcat -e "${VERDICT_TAG}" | head -1 || true)
+  # WR-22: status capture instead of blanket `|| true` — see the marker wait above.
+  set +e
+  VERDICT_LINE=$("${TIMEOUT_BIN}" "${LOGCAT_TIMEOUT}" adb logcat -e "${VERDICT_TAG}" | head -1; exit "${PIPESTATUS[0]}")
+  _adb_status=$?
+  set -e
+  if [ -z "${VERDICT_LINE}" ] && [ "${_adb_status}" -ne 124 ]; then
+    echo "[run-dial-probe] ERROR: adb logcat exited abnormally (status ${_adb_status}) before the ${LOGCAT_TIMEOUT}s verdict window elapsed — check device connection (adb devices)" >&2
+    exit 1
+  fi
 else
   # Fallback: bounded poll loop (120 s cap, 5 s intervals) — avoids macOS missing timeout.
   _elapsed=0
   while [ "${_elapsed}" -lt "${LOGCAT_TIMEOUT}" ]; do
-    VERDICT_LINE=$(adb logcat -d | grep "${VERDICT_TAG}" | head -1 || true)
+    # WR-22: an adb failure here previously degraded to silently polling nothing.
+    set +e
+    VERDICT_LINE=$(adb logcat -d | grep "${VERDICT_TAG}" | head -1; exit "${PIPESTATUS[0]}")
+    _adb_status=$?
+    set -e
+    if [ "${_adb_status}" -ne 0 ]; then
+      echo "[run-dial-probe] ERROR: adb logcat -d failed (status ${_adb_status}) while polling for the verdict — check device connection (adb devices)" >&2
+      exit 1
+    fi
     if [ -n "${VERDICT_LINE}" ]; then break; fi
     sleep 5
     _elapsed=$((_elapsed + 5))
