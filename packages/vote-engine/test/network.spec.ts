@@ -1575,32 +1575,6 @@ describe('NetworkEngine', () => {
 		});
 	});
 
-	// -----------------------------------------------------------------------
-	// 12. Authorities By Name (cursor-based) — Not implemented stubs
-	// -----------------------------------------------------------------------
-	describe('getAuthoritiesByName / nextAuthoritiesByName', () => {
-		it('should throw "Not implemented" from getAuthoritiesByName', async () => {
-			const { engine } = await makeDbOnlyNetworkEngine();
-			let caught: unknown;
-			try {
-				await engine.getAuthoritiesByName(undefined);
-			} catch (err) {
-				caught = err;
-			}
-			expect((caught as Error)?.message).to.include('Not implemented');
-		});
-
-		it('should throw "Not implemented" from nextAuthoritiesByName', async () => {
-			const { engine } = await makeDbOnlyNetworkEngine();
-			let caught: unknown;
-			try {
-				await engine.nextAuthoritiesByName({ items: [] } as never, true);
-			} catch (err) {
-				caught = err;
-			}
-			expect((caught as Error)?.message).to.include('Not implemented');
-		});
-	});
 });
 
 // ===========================================================================

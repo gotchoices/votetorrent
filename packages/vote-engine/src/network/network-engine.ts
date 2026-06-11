@@ -237,11 +237,40 @@ export class NetworkEngine implements INetworkEngine {
     throw new Error('Not implemented')
   }
 
-  /** Returns all authorities that match the name */
+  /** Returns all authorities that match the name (ENG-01/D-11).
+   *
+   * Security note: `name` is wrapped into the pattern ('%' + name + '%')
+   * and bound as :pattern via the params object — never concatenated into
+   * the SQL string (T-18-04 mitigated). PAGE_SIZE is a compile-time constant
+   * inlined into the SQL (Quereus does not support bound parameters for LIMIT). */
   async getAuthoritiesByName (
     name: string | undefined
   ): Promise<Cursor<Authority>> {
-    throw new Error('Not implemented')
+    const PAGE_SIZE = 20
+    const pattern = name ? '%' + name + '%' : '%'
+    const buffer: Authority[] = []
+    try {
+      for await (const row of this.ctx.db.eval(
+        `SELECT Id, Name, DomainName, ImageRef FROM Authority WHERE Name LIKE :pattern ORDER BY Name ASC LIMIT ${PAGE_SIZE} OFFSET 0`,
+        { pattern }
+      )) {
+        buffer.push({
+          id: row.Id as string,
+          name: row.Name as string,
+          domainName: asText(row.DomainName, 'Authority.DomainName'),
+          imageRef: parseJsonOr<ImageRef | undefined>(row.ImageRef, undefined, 'Authority.ImageRef')
+        })
+      }
+      return { buffer, firstBOF: true, lastEOF: buffer.length < PAGE_SIZE, offset: 0 }
+    } catch (err) {
+      if (err instanceof QuereusError) {
+        throw new Error(`Quereus error (code ${err.code}): ${err.message}`)
+      } else if (err instanceof MisuseError) {
+        throw new Error(`API misuse: ${err.message}`)
+      } else {
+        throw new Error(`Unknown error getting authorities: ${err}`)
+      }
+    }
   }
 
   async getCurrentUser (): Promise<IUserEngine | undefined> {
@@ -631,7 +660,39 @@ export class NetworkEngine implements INetworkEngine {
     cursor: Cursor<Authority>,
     forward: boolean
   ): Promise<Cursor<Authority>> {
-    throw new Error('Not implemented')
+    // NOTE: The Cursor shape carries no `name` field — the name filter used
+    // in getAuthoritiesByName cannot be recovered from the cursor. Per
+    // RESEARCH Pattern 2 / Open Question 1, nextAuthoritiesByName pages the
+    // full Authority set (LIKE '%') rather than re-applying the original
+    // search filter. This is an intentional decision for this phase; a future
+    // phase can extend the Cursor shape or the interface if per-name paging
+    // is required.
+    const PAGE_SIZE = 20
+    const newOffset = forward ? cursor.offset + PAGE_SIZE : Math.max(0, cursor.offset - PAGE_SIZE)
+    const buffer: Authority[] = []
+    try {
+      for await (const row of this.ctx.db.eval(
+        // PAGE_SIZE and offset are inlined: Quereus does not support bound parameters
+        // for LIMIT/OFFSET integer expressions — only string/value params are supported.
+        `SELECT Id, Name, DomainName, ImageRef FROM Authority ORDER BY Name ASC LIMIT ${PAGE_SIZE} OFFSET ${newOffset}`
+      )) {
+        buffer.push({
+          id: row.Id as string,
+          name: row.Name as string,
+          domainName: asText(row.DomainName, 'Authority.DomainName'),
+          imageRef: parseJsonOr<ImageRef | undefined>(row.ImageRef, undefined, 'Authority.ImageRef')
+        })
+      }
+      return { buffer, firstBOF: newOffset === 0, lastEOF: buffer.length < PAGE_SIZE, offset: newOffset }
+    } catch (err) {
+      if (err instanceof QuereusError) {
+        throw new Error(`Quereus error (code ${err.code}): ${err.message}`)
+      } else if (err instanceof MisuseError) {
+        throw new Error(`API misuse: ${err.message}`)
+      } else {
+        throw new Error(`Unknown error in nextAuthoritiesByName: ${err}`)
+      }
+    }
   }
 
   async openAuthority (
@@ -899,7 +960,26 @@ export class NetworkEngine implements INetworkEngine {
   }
 
   async getStatistics (): Promise<{ estimatedNodes: number; serverCount: number }> {
-    throw new Error('Not implemented')
+    try {
+      const nRow = await this.ctx.db
+        .prepare('SELECT Relays FROM Network WHERE Hash = :hash LIMIT 1')
+        .get({ hash: this.init.hash })
+      if (!nRow) throw new Error('Network not found')
+      const relays = parseJsonOr<string[]>(nRow.Relays, [], 'Network.Relays')
+      const serverCount = relays.length
+      // estimatedNodes is an honest lower-bound floor derived from the count
+      // of known relay endpoints. Pending Phase 22 live P2P telemetry, this
+      // equals serverCount rather than zero (D-07: honest floor, not zero).
+      return { serverCount, estimatedNodes: serverCount }
+    } catch (err) {
+      if (err instanceof QuereusError) {
+        throw new Error(`Quereus error (code ${err.code}): ${err.message}`)
+      } else if (err instanceof MisuseError) {
+        throw new Error(`API misuse: ${err.message}`)
+      } else {
+        throw new Error(`Unknown error in getStatistics: ${err}`)
+      }
+    }
   }
 
   async unpinAuthority (authorityId: string): Promise<void> {
