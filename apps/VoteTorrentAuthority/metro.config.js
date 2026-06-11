@@ -35,9 +35,15 @@ function loadBrowserFieldMap(nodeModulesPaths, pkgParts) {
     const pkgJson = path.join(pkgDir, 'package.json');
     if (!fs.existsSync(pkgJson)) continue;
     const map = JSON.parse(fs.readFileSync(pkgJson, 'utf8')).browser;
-    if (!map || typeof map !== 'object') return null;
+    // WR-09 (17-REVIEW): a root may contain the package WITHOUT an object-form
+    // browser field — keep scanning the remaining roots instead of bailing out.
+    if (!map || typeof map !== 'object') continue;
     const out = Object.create(null);
     for (const [from, to] of Object.entries(map)) {
+      // WR-09: skip non-string browser entries. `false` means "exclude this
+      // module in browser builds" — path.resolve(pkgDir, false) would fabricate
+      // a bogus `.../false` mapping.
+      if (typeof to !== 'string') continue;
       out[path.resolve(pkgDir, from)] = path.resolve(pkgDir, to);
     }
     return out;
@@ -49,10 +55,30 @@ const nodeModulesPaths = [
   path.resolve(projectRoot, 'node_modules'),
   path.resolve(workspaceRoot, 'node_modules'),
 ];
+// WR-09 (17-REVIEW): both rewrites are MANDATORY (Ed25519 keygen crash;
+// EncryptionFailedError on every dial). Fail LOUDLY at config-load time
+// instead of silently degrading to an empty map (`?? {}`) whose first
+// symptom is a cryptic on-device runtime crash.
+const libp2pCryptoMap = loadBrowserFieldMap(nodeModulesPaths, ['@libp2p', 'crypto']);
+if (!libp2pCryptoMap) {
+  throw new Error(
+    'metro.config.js: @libp2p/crypto browser-field map could not be loaded — ' +
+      'MANDATORY for Ed25519 keygen ("undefined cannot be used as a constructor"). ' +
+      'Check that @libp2p/crypto is installed with an object-form `browser` field.',
+  );
+}
+const noiseBrowserMap = loadBrowserFieldMap(nodeModulesPaths, ['@chainsafe', 'libp2p-noise']);
+if (!noiseBrowserMap) {
+  throw new Error(
+    'metro.config.js: @chainsafe/libp2p-noise browser-field map could not be loaded — ' +
+      'MANDATORY for the Noise handshake (EncryptionFailedError on every dial). ' +
+      'Check that @chainsafe/libp2p-noise is installed with an object-form `browser` field.',
+  );
+}
 const libp2pCryptoBrowserMap = Object.assign(
   Object.create(null),
-  loadBrowserFieldMap(nodeModulesPaths, ['@libp2p', 'crypto']) ?? {},
-  loadBrowserFieldMap(nodeModulesPaths, ['@chainsafe', 'libp2p-noise']) ?? {},
+  libp2pCryptoMap,
+  noiseBrowserMap,
 );
 
 const config = {
