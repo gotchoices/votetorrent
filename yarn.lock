@@ -16278,7 +16278,6 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "p2p-probe-host@workspace:packages/p2p-probe-host"
   dependencies:
-    "@libp2p/circuit-relay-v2": "npm:^4"
     "@libp2p/websockets": "npm:^10"
     "@optimystic/db-p2p": "npm:0.13.5"
     "@serfab/cadre-core": "npm:^0.7.1"
