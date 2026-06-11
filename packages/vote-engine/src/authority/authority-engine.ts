@@ -143,8 +143,11 @@ export class AuthorityEngine implements IAuthorityEngine {
 					scopes: parseJsonOr<Scope[]>(officer.Scopes, [], 'Officer.Scopes'),
 				});
 			}
+			// WR-05 (17-REVIEW): Admin's PK is (AuthorityId, EffectiveAt) — there is
+			// no Id column to project. Derive a stable composite id instead of
+			// reading a never-projected column (which yielded `undefined as string`).
 			const admin = {
-				id: adminDB.Id as string,
+				id: `${adminDB.AuthorityId as string}:${adminDB.EffectiveAt as string}`,
 				authorityId: adminDB.AuthorityId as string,
 				effectiveAt: fromCanonicalDatetime(adminDB.EffectiveAt as string),
 				officers: officersDB,

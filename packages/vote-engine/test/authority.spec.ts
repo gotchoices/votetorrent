@@ -217,7 +217,10 @@ describe('AuthorityEngine', () => {
       const details = await authorityEngine.getAdminDetails()
       expect(details.admin.authorityId).to.equal(authority.id)
       // Admin table uses (AuthorityId, EffectiveAt) as PK — no separate Id column.
-      // The engine sets id from adminDB.Id which is undefined; accept that.
+      // WR-05 (17-REVIEW): the engine derives a stable composite id
+      // `${AuthorityId}:${EffectiveAt}` instead of reading a never-projected column.
+      expect(details.admin.id).to.be.a('string')
+      expect(details.admin.id).to.match(new RegExp(`^${authority.id}:.+`))
       // quereus 3.x stores datetime columns as Temporal strings; accept either format
       expect(details.admin.effectiveAt).to.not.equal(undefined)
     })
