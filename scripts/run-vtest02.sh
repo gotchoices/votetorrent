@@ -26,14 +26,35 @@ set -euo pipefail
 PACKAGE="org.votetorrent.authority"
 VERDICT_TAG='\[proof\] ========== FULL-CHAIN VERDICT'
 LOGCAT_TIMEOUT=30  # seconds to wait for the verdict line
+FLAG_FILE="apps/VoteTorrentAuthority/src/engines/proof-flags.generated.ts"
+
+# WR-03 (17-REVIEW): restore the committed default-false flag file on EXIT
+# (PASS, FAIL, or set -e abort) so the proof-enabled override never leaks
+# into the next dev launch or into a commit. Mirrors run-dial-probe.sh.
+restore_flags() {
+  cat > "${FLAG_FILE}" << 'EOF'
+// proof-flags.generated.ts — committed default fallback (all flags false).
+// The run scripts (run-vtest02.sh, run-dial-probe.sh) overwrite this file
+// before bundling and restore the default-false content in an EXIT trap.
+// NOTE: this file IS git-tracked (gitignore would be a no-op for a tracked
+// file — WR-02, 17-REVIEW). If a run script is killed before its EXIT trap
+// fires, `git status` will show this file modified: restore it with
+// `git checkout -- apps/VoteTorrentAuthority/src/engines/proof-flags.generated.ts`
+// and NEVER commit an enabled-flag override.
+// Static import ONLY — dynamic require() breaks Metro (Phase 16-07 lesson).
+export const PROOF_ENABLED = false;
+export const DIAL_PROBE_ENABLED = false;
+EOF
+}
+trap restore_flags EXIT
 
 # D-18/D-19: Write the generated flag file before launch so PROOF_ENABLED=true and
 # DIAL_PROBE_ENABLED=false are bundled into the Metro-served JS.
 # The dial probe is kept off during a proof run (D-19).
 echo "[vtest02] Writing proof-flags.generated.ts (PROOF_ENABLED=true, DIAL_PROBE_ENABLED=false) ..."
-cat > apps/VoteTorrentAuthority/src/engines/proof-flags.generated.ts << 'EOF'
+cat > "${FLAG_FILE}" << 'EOF'
 // proof-flags.generated.ts — written by run-vtest02.sh before launch (D-18).
-// DO NOT commit this override. The default-false version is the committed baseline.
+// DO NOT commit this override (EXIT trap restores the committed default-false baseline).
 export const PROOF_ENABLED = true;
 export const DIAL_PROBE_ENABLED = false;
 EOF
