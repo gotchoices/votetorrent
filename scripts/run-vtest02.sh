@@ -51,6 +51,14 @@ restore_flags() {
   if [ "${PROBE_STARTED}" -eq 0 ]; then
     echo "[vtest02] WARNING: restoring flags before BOOT: READ PHASE observed — app may have fetched flags-disabled bundle; re-run if no verdict" >&2
   fi
+  # IN-12 (17-REVIEW): git owns the committed default-false content — restore
+  # from the index so an edit to the committed file cannot leave this script
+  # regenerating stale content. The heredoc below is a FALLBACK only (e.g.
+  # git unavailable or the file untracked).
+  if git checkout -- "${FLAG_FILE}" 2>/dev/null; then
+    return 0
+  fi
+  echo "[vtest02] WARNING: git checkout restore failed — writing fallback default-false content (may be stale vs the committed file)" >&2
   cat > "${FLAG_FILE}" << 'EOF'
 // proof-flags.generated.ts — committed default fallback (all flags false).
 // The run scripts (run-vtest02.sh, run-dial-probe.sh) overwrite this file
