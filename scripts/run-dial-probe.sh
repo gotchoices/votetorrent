@@ -99,6 +99,14 @@ if grep -q 'UPDATE_AFTER_DRONE_RESTART' apps/VoteTorrentAuthority/src/engines/di
   echo "[run-dial-probe]        multiaddr from its READY line into CONTROL_ADDR, then re-run." >&2
   exit 1
 fi
+# IN-16 (17-REVIEW): a half-edited CONTROL_ADDR (peer ID replaced, port left as
+# the committed /tcp/0/) passes the placeholder grep above but reproduces the
+# same ambiguous FAIL — reject it explicitly.
+if grep -q '/tcp/0/ws' apps/VoteTorrentAuthority/src/engines/dial-probe.ts; then
+  echo "[run-dial-probe] ERROR: CONTROL_ADDR in dial-probe.ts still carries the placeholder port /tcp/0/" >&2
+  echo "[run-dial-probe]        Replace the port with the one printed on the drone's READY line, then re-run." >&2
+  exit 1
+fi
 
 # WR-21: install the trap only now — immediately before the first flag-file
 # write, the first action the trap exists to undo.
