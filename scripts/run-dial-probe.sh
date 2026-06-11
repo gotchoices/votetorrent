@@ -31,8 +31,12 @@
 set -euo pipefail
 
 PACKAGE="org.votetorrent.authority"
-VERDICT_TAG='\[dial-probe\] ========== DIAL VERDICT'
-PROBE_MARKER='\[dial-probe\] starting'
+# dial-probe.ts logs via multi-arg console.log('[dial-probe]', ...) — RN logcat renders
+# each arg quoted and comma-separated: '[dial-probe]', 'starting — ...'. Patterns must
+# therefore tolerate the quote/comma between the tag and the message (single-string
+# [proof] logs in run-vtest02.sh do not need this).
+VERDICT_TAG='\[dial-probe\].*========== DIAL VERDICT'
+PROBE_MARKER='\[dial-probe\].*starting'
 LOGCAT_TIMEOUT=120  # seconds to wait for the verdict line; accounts for Metro dev-server
                     # rebundle latency plus the probe's own up-to-20s poll loop
                     # (observed false-FAIL at 30s in 17-UAT when verdict landed just outside).
