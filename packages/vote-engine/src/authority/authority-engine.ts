@@ -95,6 +95,14 @@ export class AuthorityEngine implements IAuthorityEngine {
 		// ambiguity: name 'A'/title 'BC' vs name 'AB'/title 'C'). scopes is
 		// JSON-stringified for an unambiguous array encoding. Phase 6's
 		// InviteSignatureValid verification MUST recompute this exact form.
+		// IN-25 (17-REVIEW): RESIDUAL AMBIGUITY — a literal '|' inside a free-text
+		// field still aliases tuples (name 'A|B'/title 'C' vs name 'A'/title
+		// 'B|C'). This matches the existing SQL Digest pipe-join semantics and is
+		// accepted for now: '|' is FORBIDDEN in invite name/title values. Phase 6
+		// MUST resolve this before freezing InviteSignatureValid — either enforce
+		// the '|' ban at the input boundary, or switch the signed encoding to
+		// JSON.stringify([fields...]) / length-prefixed (the last cheap moment to
+		// change the formula is before the freeze).
 		const signedBytes = new TextEncoder().encode(
 			[init.name, init.title, JSON.stringify(init.scopes), type, expiration, inviteKey].join('|'),
 		);
@@ -121,6 +129,9 @@ export class AuthorityEngine implements IAuthorityEngine {
 			.add({ minutes: this.invitationSpanMinutes })
 			.toString();
 		// WR-17 (17-REVIEW): pipe-joined canonical form — see createOfficerInvite.
+		// IN-25 (17-REVIEW): '|' is FORBIDDEN in the invite name — see the
+		// residual-ambiguity note in createOfficerInvite; Phase 6 must resolve
+		// before freezing InviteSignatureValid.
 		const signedBytes = new TextEncoder().encode([type, name, expiration].join('|'));
 		const inviteSignature = bytesToHex(secp256k1.sign(sha256(signedBytes), invitePrivateBytes));
 
