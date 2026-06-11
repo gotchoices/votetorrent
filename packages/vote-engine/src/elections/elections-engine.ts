@@ -2,11 +2,13 @@ import { MisuseError, QuereusError } from '@quereus/quereus'
 import { secp256k1 } from '@noble/curves/secp256k1.js'
 import { bytesToHex, hexToBytes } from '@noble/curves/utils.js'
 import { ElectionEngine } from '../election/election-engine.js'
-import { fromCanonicalDatetime, nowCanonicalDatetime, toCanonicalDatetime } from '../utils.js'
+import { fromCanonicalDatetime, nowCanonicalDatetime, parseJsonOr, toCanonicalDatetime } from '../utils.js'
 import type { EngineContext } from '../types.js'
 import type {
   ElectionCoreInit,
+  ElectionEvent,
   ElectionInit,
+  ElectionRevisionInit,
   ElectionSummary,
   ElectionType,
   IElectionEngine,
@@ -130,6 +132,49 @@ export class ElectionsEngine implements IElectionsEngine {
           // caller pre-signs via the signing engine and binds the signature
           // through the AdminSigning/AdminSignature pipeline. Phase 6 /
           // TEST-01 will tighten this contract to require a Signature here.
+          signature: null,
+          now: nowCanonicalDatetime()
+        }
+      )
+
+      // WR-18 (17-REVIEW): persist the proposal's required revision payload
+      // alongside the core row — previously `election.revision` was silently
+      // dropped at write time, forcing getProposedElections() to fabricate it.
+      // Serialization mirrors ElectionEngine.proposeRevision exactly; the
+      // schema's ElectionIdValid accepts an ElectionId that references the
+      // ProposedElection row inserted above.
+      const revTid = nextTid++
+      const r = election.revision
+      await this.ctx!.db.exec(
+				`insert into ProposedElectionRevision (
+					ElectionId,
+					Revision,
+					RevisionTimestamp,
+					Tags,
+					Instructions,
+					Timeline,
+					KeyholderThreshold
+				)
+				with context UserId = :userId, UserKey = :userKey, Signature = :signature, Tid = ${revTid}, now = :now, IsUserValid = true
+				values (
+					:electionId,
+					:revision,
+					:revisionTimestamp,
+					:tags,
+					:instructions,
+					:timeline,
+					:keyholderThreshold
+				)`,
+        {
+          electionId: r.electionId,
+          revision: r.revision,
+          revisionTimestamp: r.revisionTimestamp,
+          tags: JSON.stringify(r.tags),
+          instructions: r.instructions,
+          timeline: JSON.stringify(r.timeline),
+          keyholderThreshold: r.keyholderThreshold,
+          userId: this.ctx!.user?.id ?? null,
+          userKey: signerKey,
           signature: null,
           now: nowCanonicalDatetime()
         }
@@ -299,25 +344,76 @@ export class ElectionsEngine implements IElectionsEngine {
     if (!this.ctx) return []
     const out: Array<Proposal<ElectionInit>> = []
     try {
+      // Materialize the core rows BEFORE issuing the per-row revision lookups
+      // so the eval cursor is not interleaved with other statements on the
+      // same db handle.
+      const coreRows: Array<{
+        id: string
+        authorityId: string
+        title: string
+        date: number
+        revisionDeadline: number
+        ballotDeadline: number
+        type: ElectionType
+      }> = []
       for await (const row of this.ctx.db.eval(
 				`select Id, AuthorityId, Title, Date, RevisionDeadline, BallotDeadline, Type
 					from ProposedElection`,
         {}
       )) {
+        coreRows.push({
+          id: row.Id as string,
+          authorityId: row.AuthorityId as string,
+          title: row.Title as string,
+          date: fromCanonicalDatetime(row.Date as string),
+          revisionDeadline: fromCanonicalDatetime(row.RevisionDeadline as string),
+          ballotDeadline: fromCanonicalDatetime(row.BallotDeadline as string),
+          type: row.Type as ElectionType
+        })
+      }
+
+      for (const core of coreRows) {
+        // WR-18 (17-REVIEW): project the revision from the persisted
+        // ProposedElectionRevision row (written by adjustElection alongside
+        // the core row) instead of a type-defeating `undefined as unknown`
+        // cast that crashed consumers at `proposal.proposed.revision.*`.
+        const revRow = await this.ctx.db
+          .prepare(
+						`select Revision, RevisionTimestamp, Tags, Instructions, Timeline, KeyholderThreshold
+							from ProposedElectionRevision where ElectionId = :id`
+          )
+          .get({ id: core.id })
+        const revision: ElectionRevisionInit = revRow
+          ? {
+              electionId: core.id,
+              revision: revRow.Revision as number,
+              revisionTimestamp: fromCanonicalDatetime(revRow.RevisionTimestamp as string | number),
+              tags: parseJsonOr<string[]>(revRow.Tags, [], 'ProposedElectionRevision.Tags'),
+              instructions: revRow.Instructions as string,
+              // ProposedElectionRevision persists no keyholder invites; []
+              // mirrors ElectionEngine.getRevisions' projection of this field.
+              keyholders: [],
+              timeline: parseJsonOr<Record<ElectionEvent, number>>(
+                revRow.Timeline,
+                {} as Record<ElectionEvent, number>,
+                'ProposedElectionRevision.Timeline'
+              ),
+              keyholderThreshold: revRow.KeyholderThreshold as number
+            }
+          // Rows written before WR-18 (adjustElection used to drop the
+          // revision payload) have no persisted revision row. Surfacing
+          // undefined here is a documented residual for legacy rows only —
+          // dev-phase stores are reset via `pm clear`.
+          : (undefined as unknown as ElectionRevisionInit)
+
         out.push({
           proposed: {
-            election: {
-              id: row.Id as string,
-              authorityId: row.AuthorityId as string,
-              title: row.Title as string,
-              date: fromCanonicalDatetime(row.Date as string),
-              revisionDeadline: fromCanonicalDatetime(row.RevisionDeadline as string),
-              ballotDeadline: fromCanonicalDatetime(row.BallotDeadline as string),
-              type: row.Type as ElectionType
-            },
-            revision: undefined as unknown as ElectionInit['revision']
+            election: core,
+            revision
           },
-          timestamp: Date.now(),
+          // WR-18: Proposal.timestamp is optional and no proposal time is
+          // persisted — omit it rather than fabricating the read time, which
+          // changed on every call.
           signers: []
         })
       }
