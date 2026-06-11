@@ -520,6 +520,14 @@ describe('UserEngine', () => {
       const result = await nonOfficerEngine.isPrivileged('mel', distinct.id)
       expect(result).to.equal(false)
     })
+
+    // WR-02: the deny-by-default contract (officer under a future-dated admin or
+    // an authority with no effective admin returns false) cannot be seeded as a
+    // unit test today: a raw Admin/Officer INSERT with a custom EffectiveAt trips
+    // the InsertValid CHECK (the quereus#23 family — the same gap that BLOCKs the
+    // constraint tests elsewhere in this suite). The deny-by-default behavior is
+    // instead documented in the isPrivileged docstring; pin a real test once a
+    // signing-context-bearing seed path for custom-dated admins is available.
   })
 })
 

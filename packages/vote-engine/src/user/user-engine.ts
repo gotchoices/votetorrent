@@ -225,6 +225,15 @@ export class UserEngine implements IUserEngine {
    * T-18-02 mitigation: Scope match uses exact equality (json_each value = :scope,
    * not LIKE), and the join is restricted to CurrentAdmin — prevents false-positive
    * privilege grants.
+   *
+   * WR-02 — deny-by-default contract: the CurrentAdmin join requires a current
+   * Admin row (`EffectiveAt <= now`, max per authority) whose `EffectiveAt`
+   * equals the Officer's `AdminEffectiveAt`. If an authority has NO effective
+   * Admin row, or the Officer's `AdminEffectiveAt` is future-dated (admin not yet
+   * effective), no CurrentAdmin row joins and this method returns `false`. This
+   * fail-closed behavior is intentional and safe for privilege grants, but it is
+   * indistinguishable from "user lacks the scope." Pinned by the WR-02 tests in
+   * user.spec.ts (future-dated admin and no-effective-admin both yield `false`).
    */
   async isPrivileged (scope: Scope, userId: string): Promise<boolean> {
     this.requireCtx('isPrivileged')
