@@ -532,8 +532,23 @@ export class AuthorityEngine implements IAuthorityEngine {
 					now: nowCanonicalDatetime(),
 				},
 			);
-		} catch (error) {
-			throw new Error('Failed to save officer invitation');
+		} catch (err) {
+			// WR-07 (17-REVIEW): map errors with full detail (same as
+			// saveAuthorityInvite) instead of swallowing the cause — a
+			// CHECK-constraint failure must remain diagnosable.
+			if (err instanceof QuereusError) {
+				throw new Error(
+					`Failed to save officer invitation — Quereus error (code ${err.code}): ${err.message}`,
+				);
+			} else if (err instanceof MisuseError) {
+				throw new Error(
+					`Failed to save officer invitation — API misuse: ${err.message}`,
+				);
+			} else {
+				throw new Error(`Failed to save officer invitation: ${err}`, {
+					cause: err,
+				});
+			}
 		}
 	}
 
