@@ -40,8 +40,17 @@ ALLOWLIST=(
 # so key-network-libp2p.ts commented stubs are never flagged.
 RAW_HITS=$(grep -rn "Not implemented" "$SEARCH_DIR" --include="*.ts" || true)
 
-# Remove lines that are comments (^\s*//)
-VIOLATIONS=$(echo "$RAW_HITS" | grep -v '^\s*//' | grep -v '^[^:]*:[0-9]*:\s*//' || true)
+# Remove lines that are line-leading `//` comments.
+# WR-03: `grep -rn` output is prefixed `file:line:`, so a bare `^\s*//` never
+# matches it (and `\s` is a PCRE class not portable to BSD/macOS BRE — it can
+# match a literal `s`). Use a single `grep -Ev` with `[[:space:]]` (POSIX,
+# portable across GNU and BSD grep) anchored on the `file:line:` prefix.
+# NOTE: this filters line-leading `//` comments only. Block comments
+# (`/* ... Not implemented ... */`) are intentionally NOT filtered — a deferred
+# note inside a block comment is treated as a violation so it cannot silently
+# hide a real un-gated stub. See not-implemented-guard.spec.ts for the pinned
+# block-comment fixture.
+VIOLATIONS=$(echo "$RAW_HITS" | grep -Ev '^[^:]*:[0-9]+:[[:space:]]*//' || true)
 
 if [ -z "$VIOLATIONS" ]; then
   echo "ENG-07 grep guard: clean — no 'Not implemented' literals found."
@@ -63,7 +72,19 @@ while IFS= read -r line; do
   ALLOWED=false
   for entry in "${ALLOWLIST[@]}"; do
     FNAME="${entry%%:*}"
-    if echo "$CONTEXT" | grep -qE "async[[:space:]].*${FNAME}[[:space:](]"; then
+    # WR-04: anchor on the actual declaration form `async <fname>(` with a single
+    # run of whitespace and an opening paren immediately after the name. The old
+    # `async[[:space:]].*${FNAME}[[:space:](]` allowed arbitrary text (`.*`)
+    # between `async` and the name, so `connectDevice` would match
+    # `connectDeviceLater(` (substring) or a comment mentioning the function,
+    # silently allowlisting an unrelated real violation. Requiring the name to be
+    # immediately followed by `(` makes `connectDeviceLater(` no longer match
+    # `connectDevice`, and dropping the `.*` removes the spurious-context window.
+    # RESIDUAL (WR-04): this closes the substring false-positive only. A real
+    # violation sitting within the 5-line context window BELOW a genuine
+    # allowlisted signature is still allowlisted — closing that requires
+    # nearest-preceding-async resolution and is deferred.
+    if echo "$CONTEXT" | grep -qE "async[[:space:]]+\*?[[:space:]]*${FNAME}[[:space:]]*\("; then
       ALLOWED=true
       break
     fi
