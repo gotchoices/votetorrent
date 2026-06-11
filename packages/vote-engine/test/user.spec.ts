@@ -3,6 +3,7 @@ import {
   BuilderAlreadyCommittedError,
   BuilderValidationError,
   ElectionType,
+  FeatureNotAvailableError,
   UserHistoryEvent,
   UserKeyType
 } from '@votetorrent/vote-core'
@@ -455,6 +456,69 @@ describe('UserEngine', () => {
         .get({ c: slotRow!.Cid as string })
       expect(Boolean(row?.IsAccepted)).to.equal(false)
       expect(row?.Digest).to.equal(null)
+    })
+  })
+
+  // -----------------------------------------------------------------------
+  // ENG-07 — connectDevice phase-gate (Phase 22)
+  // -----------------------------------------------------------------------
+  describe('connectDevice', () => {
+    it('throws FeatureNotAvailableError naming Phase 22', async () => {
+      const user = makeUser({ id: 'cd-user-1' })
+      const engine = new UserEngine(user)
+      let caught: unknown
+      try {
+        await engine.connectDevice()
+      } catch (err) {
+        caught = err
+      }
+      expect(caught).to.be.instanceOf(FeatureNotAvailableError)
+      expect((caught as FeatureNotAvailableError).message).to.include('Phase 22')
+    })
+  })
+
+  // -----------------------------------------------------------------------
+  // ENG-07 — getHistory phase-gate (Phase 19)
+  // -----------------------------------------------------------------------
+  describe('getHistory', () => {
+    it('throws FeatureNotAvailableError naming Phase 19', async () => {
+      const user = makeUser({ id: 'gh-user-1' })
+      const engine = new UserEngine(user)
+      let caught: unknown
+      try {
+        for await (const _ of engine.getHistory(user.id, true)) {
+          // should not reach here
+        }
+      } catch (err) {
+        caught = err
+      }
+      expect(caught).to.be.instanceOf(FeatureNotAvailableError)
+      expect((caught as FeatureNotAvailableError).message).to.include('Phase 19')
+    })
+  })
+
+  // -----------------------------------------------------------------------
+  // ENG-03 — isPrivileged (D-08): real SQL Officer/CurrentAdmin/json_each
+  // -----------------------------------------------------------------------
+  describe('isPrivileged', () => {
+    it('returns true for seeded officer with matching scope (mel)', async () => {
+      const { engine, user } = await createUserEngineForExistingNetwork()
+      const result = await engine.isPrivileged('mel', user.id)
+      expect(result).to.equal(true)
+    })
+
+    it('returns false for seeded officer missing scope (vrg not in seeded scopes)', async () => {
+      const { engine, user } = await createUserEngineForExistingNetwork()
+      const result = await engine.isPrivileged('vrg', user.id)
+      expect(result).to.equal(false)
+    })
+
+    it('returns false for non-officer user', async () => {
+      const { ctx } = await createUserEngineForExistingNetwork()
+      const distinct = makeDistinctTestUser()
+      const nonOfficerEngine = new UserEngine(distinct, ctx)
+      const result = await nonOfficerEngine.isPrivileged('mel', distinct.id)
+      expect(result).to.equal(false)
     })
   })
 })
