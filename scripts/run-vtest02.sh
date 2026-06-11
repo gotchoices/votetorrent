@@ -113,6 +113,13 @@ echo "[vtest02] Waiting up to ${MARKER_TIMEOUT}s for BOOT: READ PHASE marker ...
 MARKER_LINE=$(wait_for_logcat_line "${BOOT_MARKER}" "${MARKER_TIMEOUT}" "[vtest02]" "marker")
 
 if [ -z "${MARKER_LINE}" ]; then
+  # IN-22 (17-REVIEW): if the write-complete precondition was unmet, the app
+  # emitted BOOT: WRITE PHASE instead of the READ marker — it sits in the
+  # freshly-cleared buffer, so check it before blaming Metro/flags.
+  if adb logcat -d 2>/dev/null | grep -q 'BOOT: WRITE PHASE'; then
+    echo "[vtest02] ERROR: app was in WRITE phase (no saved chain ref) — wait for '[proof] WRITE PHASE DONE' in logcat, then re-run for the read-phase verdict" >&2
+    exit 1
+  fi
   echo "[vtest02] ERROR: app never reached READ PHASE — Metro rebundle likely still in flight or flags-disabled bundle served; re-run" >&2
   exit 1
 fi
