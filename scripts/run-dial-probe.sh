@@ -41,7 +41,10 @@ PACKAGE="org.votetorrent.authority"
 # therefore tolerate the quote/comma between the tag and the message (single-string
 # [proof] logs in run-vtest02.sh do not need this).
 VERDICT_TAG='\[dial-probe\].*========== DIAL VERDICT'
-PROBE_MARKER='\[dial-probe\].*starting'
+# IN-20 (17-REVIEW): anchored to the exact dial-probe.ts log line
+# ('starting — CONTROL_ADDR=...') so a future '[dial-probe] ... restarting'
+# line cannot set PROBE_STARTED prematurely.
+PROBE_MARKER='\[dial-probe\].*starting — CONTROL_ADDR'
 LOGCAT_TIMEOUT=120  # seconds to wait for the verdict line; accounts for Metro dev-server
                     # rebundle latency plus the probe's own up-to-20s poll loop
                     # (observed false-FAIL at 30s in 17-UAT when verdict landed just outside).
