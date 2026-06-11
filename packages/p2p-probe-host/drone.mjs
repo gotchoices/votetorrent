@@ -21,7 +21,7 @@
  *   Copy the printed ws multiaddr + peerId into CONTROL_ADDR in dial-probe.ts,
  *   then run ./scripts/run-dial-probe.sh.
  *
- * Exit: Ctrl-C (SIGINT) — gracefully stops the node.
+ * Exit: Ctrl-C (SIGINT) or `kill <pid>` (SIGTERM) — both gracefully stop the node.
  */
 import { CadreNode } from '@serfab/cadre-core';
 import { MemoryRawStorage } from '@optimystic/db-p2p';
@@ -56,9 +56,13 @@ L('control peerId =', node.peerId?.toString());
 L('control addrs  =', JSON.stringify(addrs));
 L('READY — update CONTROL_ADDR in dial-probe.ts with the /ip4/10.0.2.2/tcp/<PORT>/ws/p2p/<PEER_ID> addr above, then run ./scripts/run-dial-probe.sh');
 
-process.on('SIGINT', async () => {
-  L('SIGINT — stopping...');
-  await node.stop();
-  process.exit(0);
-});
+// IN-15 (17-REVIEW): handle SIGTERM (plain `kill <pid>`) as well as SIGINT
+// (Ctrl-C) so both stop paths shut the node down gracefully.
+for (const sig of ['SIGINT', 'SIGTERM']) {
+  process.on(sig, async () => {
+    L(`${sig} — stopping...`);
+    await node.stop();
+    process.exit(0);
+  });
+}
 setInterval(() => {}, 1 << 30); // stay alive
