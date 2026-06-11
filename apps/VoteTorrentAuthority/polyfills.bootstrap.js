@@ -42,8 +42,25 @@ if (globalThis.crypto && typeof globalThis.crypto.randomUUID !== 'function') {
 }
 
 // 2. crypto.subtle.digest (SHA-256/512) via @noble/hashes
+//    WR-13 (17-REVIEW): this shim is DIGEST-ONLY. Libraries that feature-detect
+//    WebCrypto via `if (crypto.subtle)` and then call importKey/sign/encrypt
+//    (several @libp2p/* browser builds do this for AES/RSA/HMAC paths) would
+//    otherwise crash with a bare "undefined is not a function". Every other
+//    SubtleCrypto method is installed as a throwing stub that NAMES the gap so
+//    such a failure is immediately diagnosable instead of latent.
 if (globalThis.crypto && !globalThis.crypto.subtle) {
   const {sha256, sha512} = require('@noble/hashes/sha2');
+  const notPolyfilled = name =>
+    function () {
+      return Promise.reject(
+        new Error(
+          `crypto.subtle.${name} is not polyfilled (digest-only shim) — ` +
+            'see polyfills.bootstrap.js section 2 (WR-13, 17-REVIEW). A dependency ' +
+            'feature-detected WebCrypto and took the subtle branch; either extend ' +
+            'this shim or force the pure-JS fallback in that dependency.',
+        ),
+      );
+    };
   globalThis.crypto.subtle = {
     digest(algorithm, data) {
       const name = typeof algorithm === 'string' ? algorithm : algorithm.name;
@@ -52,6 +69,17 @@ if (globalThis.crypto && !globalThis.crypto.subtle) {
         ? Promise.resolve(fn(new Uint8Array(data)).buffer)
         : Promise.reject(new Error('Unsupported digest: ' + name));
     },
+    encrypt: notPolyfilled('encrypt'),
+    decrypt: notPolyfilled('decrypt'),
+    sign: notPolyfilled('sign'),
+    verify: notPolyfilled('verify'),
+    generateKey: notPolyfilled('generateKey'),
+    deriveKey: notPolyfilled('deriveKey'),
+    deriveBits: notPolyfilled('deriveBits'),
+    importKey: notPolyfilled('importKey'),
+    exportKey: notPolyfilled('exportKey'),
+    wrapKey: notPolyfilled('wrapKey'),
+    unwrapKey: notPolyfilled('unwrapKey'),
   };
 }
 
