@@ -96,6 +96,13 @@ export class ElectionsEngine implements IElectionsEngine {
     const e = election.election
     const signerKey = this.ctx!.user?.activeKeys?.[0]?.key ?? null
     try {
+      // WR-24 (17-REVIEW): the ProposedElection + ProposedElectionRevision
+      // inserts must be atomic — a second-insert failure would otherwise
+      // strand a core row with no revision row, the exact partial state
+      // getProposedElections has to guard against. BEGIN/COMMIT/ROLLBACK
+      // mirrors the AUTH-08 envelope in SigningEngine.sign.
+      await this.ctx!.db.exec('BEGIN')
+      try {
       await this.ctx!.db.exec(
 				`insert into ProposedElection (
 					Id,
@@ -179,6 +186,13 @@ export class ElectionsEngine implements IElectionsEngine {
           now: nowCanonicalDatetime()
         }
       )
+      await this.ctx!.db.exec('COMMIT')
+      } catch (innerErr) {
+        // WR-24: roll back the ProposedElection row if the revision insert
+        // (or the COMMIT itself) failed, so no partial proposal persists.
+        await this.ctx!.db.exec('ROLLBACK')
+        throw innerErr
+      }
     } catch (err) {
       this.rethrow(err, 'adjustElection')
     }
