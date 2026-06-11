@@ -110,6 +110,7 @@ figmaToken.txt
 
 .idea
 
-# proof-flags.generated.ts: committed default-false fallback is tracked (git add -f).
-# Local overrides written by run-vtest02.sh / run-dial-probe.sh are ignored.
-apps/VoteTorrentAuthority/src/engines/proof-flags.generated.ts
+# proof-flags.generated.ts is TRACKED (committed default-false baseline) — an
+# ignore entry here would be a no-op for a tracked file (WR-02, 17-REVIEW).
+# Local overrides written by run-vtest02.sh / run-dial-probe.sh are restored
+# to the default-false content by each script's EXIT trap.
