@@ -1,29 +1,65 @@
-import { useLayoutEffect } from "react";
+import { useLayoutEffect, useState } from "react";
 import { ScrollView, StyleSheet, View } from "react-native";
-import { ExtendedTheme, useNavigation, useTheme } from "@react-navigation/native";
+import {
+	ExtendedTheme,
+	useNavigation,
+	useRoute,
+	useTheme,
+} from "@react-navigation/native";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import type { IAuthorityEngine } from "@votetorrent/vote-core";
 import { useTranslation } from "react-i18next";
 import { globalStyles } from "../../theme/styles";
 import { ThemedText } from "../../components/ThemedText";
 import { CustomButton } from "../../components/CustomButton";
 import { Footer } from "../../components/Footer";
+import type { RootStackParamList } from "../../navigation/types";
+import { useApp } from "../../providers/AppProvider";
 
 export default function AuthorityDetailScreen() {
 	const { t } = useTranslation();
 	const { colors } = useTheme() as ExtendedTheme;
-	const navigation = useNavigation();
+	const navigation =
+		useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+	const { authorityId, slotCid } = useRoute()
+		.params as RootStackParamList["AuthorityDetail"];
+	const { getEngine } = useApp();
+
+	const [loading, setLoading] = useState(false);
+	const [errorMessage, setErrorMessage] = useState<string>("");
 
 	useLayoutEffect(() => {
 		navigation.setOptions({ title: t("authorityDetailTitle") });
 	}, [navigation, t]);
 
-	const onResend = () => {
-		console.log("authorityDetail-resend");
-		navigation.goBack();
+	const onResend = async () => {
+		setErrorMessage("");
+		setLoading(true);
+		try {
+			const engine = await getEngine<IAuthorityEngine>("authority", authorityId);
+			await engine.resendInvite(slotCid);
+			navigation.goBack();
+		} catch (err) {
+			console.error("authorityDetail-resend error:", err);
+			setErrorMessage(err instanceof Error ? err.message : String(err));
+		} finally {
+			setLoading(false);
+		}
 	};
 
-	const onCancelInvitation = () => {
-		console.log("authorityDetail-cancelInvitation");
-		navigation.goBack();
+	const onCancelInvitation = async () => {
+		setErrorMessage("");
+		setLoading(true);
+		try {
+			const engine = await getEngine<IAuthorityEngine>("authority", authorityId);
+			await engine.cancelInvite(slotCid);
+			navigation.goBack();
+		} catch (err) {
+			console.error("authorityDetail-cancelInvitation error:", err);
+			setErrorMessage(err instanceof Error ? err.message : String(err));
+		} finally {
+			setLoading(false);
+		}
 	};
 
 	return (
@@ -35,6 +71,13 @@ export default function AuthorityDetailScreen() {
 				<View style={styles.section}>
 					<ThemedText type="default">{t("authorityDetailBodySecondary")}</ThemedText>
 				</View>
+				{errorMessage ? (
+					<View style={styles.section}>
+						<ThemedText type="small" style={{ color: colors.error }}>
+							{errorMessage}
+						</ThemedText>
+					</View>
+				) : null}
 			</ScrollView>
 			<Footer row>
 				<CustomButton
@@ -42,6 +85,7 @@ export default function AuthorityDetailScreen() {
 					backgroundColor={colors.accent}
 					size="thin"
 					flex={true}
+					disabled={loading}
 					onPress={onResend}
 				/>
 				<CustomButton
@@ -49,6 +93,7 @@ export default function AuthorityDetailScreen() {
 					backgroundColor={colors.accent}
 					size="thin"
 					flex={true}
+					disabled={loading}
 					onPress={onCancelInvitation}
 				/>
 			</Footer>

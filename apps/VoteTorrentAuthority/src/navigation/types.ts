@@ -52,11 +52,17 @@ export type RootStackParamList = {
 	// Phase 9 plan 09-13 (ELECUI-04) — dedicated Election Revision route (Screen C, Figma #16/#17).
 	// Separate from the task-flow EditElection route above. electionEngine? mirrors ElectionDetails shape.
 	EditElectionRevision: { electionEngine?: IElectionEngine };
-	AuthorityDetail: { taskId?: string };
+	// Phase 19 plan 19-07 (SURF-03) — carries the authority id (to open the authority engine
+	// via getEngine("authority", authorityId) → networkEngine.openAuthority) plus the invite
+	// slot Cid so the screen can call IAuthorityEngine.cancelInvite/resendInvite. taskId kept
+	// optional for legacy callers.
+	AuthorityDetail: { authorityId: string; slotCid: string; taskId?: string };
 	EditElectionWithFilter: { taskId?: string };
 	EditRevisionForm: { taskId?: string };
 	ProposedElection: { taskId?: string };
-	ProposedRevision: { taskId?: string };
+	// Phase 19 plan 19-07 (SURF-04) — carries (name, revision) so the screen can call
+	// INetworkEngine.cancelRevision/resendRevision. revision is a NUMBER (engine PK-join contract).
+	ProposedRevision: { name: string; revision: number; taskId?: string };
 	// Dev-entry route per D-12 — temporary; replaced by real callers in phases 8–10 (renamed by 07-08)
 	ScreenScaffoldsDebug: undefined;
 	ElectionDetails: { electionEngine: IElectionEngine };
