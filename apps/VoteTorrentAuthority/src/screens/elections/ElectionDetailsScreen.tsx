@@ -150,21 +150,26 @@ export default function ElectionDetailsScreen() {
 					</View>
 				) : null}
 
-				{/* PREVIEW chip — EUI-05/D-09: navigate to EditBallot in read-only mode */}
-				<ChipButton
-					label={t("previewBallots")}
-					onPress={() => {
-						if (ballots.length === 0) return;
-						navigation.navigate("EditBallot", {
-							electionId: election.id,
-							electionTitle: election.title,
-							electionDate: formatDate(election.revisionDeadline),
-							ballotId: ballots[0].id,
-							electionEngine,
-							readOnly: true,
-						} as any);
-					}}
-				/>
+				{/* PREVIEW chip — EUI-05/D-09: navigate to EditBallot in read-only mode.
+				    WR-07: only show the single top-level PREVIEW when there is exactly
+				    one template — otherwise it would silently preview only ballots[0].
+				    With multiple templates the per-template cards below are the
+				    unambiguous per-ballot entry points. */}
+				{ballots.length === 1 ? (
+					<ChipButton
+						label={t("previewBallots")}
+						onPress={() => {
+							navigation.navigate("EditBallot", {
+								electionId: election.id,
+								electionTitle: election.title,
+								electionDate: formatDate(election.revisionDeadline),
+								ballotId: ballots[0].id,
+								electionEngine,
+								readOnly: true,
+							} as any);
+						}}
+					/>
+				) : null}
 			</View>
 
 			{/* 3. Keyholders — Sent/Unsent + chevron */}
