@@ -25,6 +25,7 @@ import { randomTestKeyPair } from './fixtures/keys.js'
 import { addTestAuthority, createTestNetwork, makeDistinctTestUser, seedUserInvite } from './fixtures/test-context.js'
 import { AsyncStorage } from './shims/react-native'
 import type {
+  AddUserKeyHistory,
   CreateUserHistory,
   DefaultUser,
   ImageRef,
@@ -32,10 +33,12 @@ import type {
   NetworkInit,
   NetworkReference,
   ReviseUserHistory,
+  RevokeUserKeyHistory,
   Scope,
   Signature,
   Timestamp,
   User,
+  UserHistory,
   UserKey
 } from '@votetorrent/vote-core'
 
@@ -478,22 +481,138 @@ describe('UserEngine', () => {
   })
 
   // -----------------------------------------------------------------------
-  // ENG-07 — getHistory phase-gate (Phase 19)
+  // ENG-02 — getHistory over the real UserEvent log (D-17/D-18/D-20)
   // -----------------------------------------------------------------------
   describe('getHistory', () => {
-    it('throws FeatureNotAvailableError naming Phase 19', async () => {
-      const user = makeUser({ id: 'gh-user-1' })
-      const engine = new UserEngine(user)
-      let caught: unknown
-      try {
-        for await (const _ of engine.getHistory(user.id, true)) {
-          // should not reach here
+    // D-20 proof: create -> addKey -> revise -> revokeKey produces a 4-event
+    // append-only log; getHistory reads it back ordered, discriminated, with
+    // real timestamps and a present (D-15 null->'') Signature field. Forward
+    // yields ASC (create first); backward yields DESC (revokeKey first).
+    it('returns 4 ordered discriminated events forward (ASC) and backward (DESC)', async () => {
+      // The user is a real officer of an existing network/authority — required
+      // so revise() satisfies the schema's User.UserValid (officer/keyholder)
+      // gate. The user row + its initial UserKey are seeded by NetworksEngine
+      // .create() (no UserEvent yet). We seed the create ('C') event row the
+      // same way fixtures seed rows, then exercise the real addKey/revise/
+      // revokeKey mutations (which append AK/R/RK events in-batch), and read
+      // all four back through getHistory in both orderings.
+      const { engine, ctx, user } = await createUserEngineForExistingNetwork()
+      const createPub = user.activeKeys[0]!.key
+      const { publicHex: addedPub } = randomTestKeyPair()
+
+      // 1) create — Event 'C', Sequence 0 (seeded: the user was created by the
+      //    networks engine, which predates the UserEvent log; UserEngine.create
+      //    own event write is proven by the db-only create+grep acceptance).
+      await ctx.db.exec(
+        `insert into UserEvent (UserId, Sequence, Event, Timestamp, Signature, Payload)
+         with context Tid = 1, now = :now
+         values (:userId, 0, 'C', :now, null, :payload)`,
+        {
+          userId: user.id,
+          now: '2026-01-01T00:00:00',
+          payload: JSON.stringify({
+            name: user.name,
+            imageRef: { url: 'https://img.local/user.png' },
+            userKey: { key: createPub, type: UserKeyType.mobile, expiration: Date.now() + 86_400_000 }
+          })
         }
-      } catch (err) {
-        caught = err
+      )
+
+      // 2) addKey — Event 'AK', Sequence 1 (second key so revoke is not the last)
+      await engine.addKey({
+        key: addedPub,
+        type: UserKeyType.yubico,
+        expiration: Date.now() + 86_400_000
+      })
+
+      // 3) revise — Event 'R', Sequence 2
+      const revise: ReviseUserHistory = {
+        event: UserHistoryEvent.revise,
+        timestamp: Date.now(),
+        signature: {
+          signature: 'e'.repeat(128),
+          signerKey: createPub,
+          signerUserId: user.id
+        },
+        info: { name: 'Renamed User', imageRef: { url: 'https://img.local/renamed.png' } }
       }
-      expect(caught).to.be.instanceOf(FeatureNotAvailableError)
-      expect((caught as FeatureNotAvailableError).message).to.include('Phase 19')
+      await engine.revise(revise)
+
+      // 4) revokeKey — Event 'RK', Sequence 3
+      await engine.revokeKey(addedPub)
+
+      // Forward (ASC): create, addKey, revise, revokeKey
+      const forward: UserHistory[] = []
+      for await (const ev of engine.getHistory(user.id, true)) forward.push(ev)
+      expect(forward).to.have.length(4)
+      expect(forward.map(e => e.event)).to.deep.equal([
+        UserHistoryEvent.create,
+        UserHistoryEvent.addKey,
+        UserHistoryEvent.revise,
+        UserHistoryEvent.revokeKey
+      ])
+      // real (non-empty) timestamps + a present signature field on every event
+      for (const ev of forward) {
+        expect(ev.timestamp, 'timestamp present').to.not.equal(undefined)
+        expect(Number.isNaN(Number(ev.timestamp)), 'timestamp is a real number').to.equal(false)
+        expect(ev).to.have.property('signature')
+      }
+      // discriminated payloads round-trip to the correct subtype shape
+      const created = forward[0] as CreateUserHistory
+      expect(created.name).to.equal(user.name)
+      expect(created.userKey.key).to.equal(createPub)
+      const added = forward[1] as AddUserKeyHistory
+      expect(added.userKey.key).to.equal(addedPub)
+      const revised = forward[2] as ReviseUserHistory
+      expect(revised.info.name).to.equal('Renamed User')
+      const revoked = forward[3] as RevokeUserKeyHistory
+      expect(revoked.key).to.equal(addedPub)
+
+      // Backward (DESC): revokeKey first, create last — exact reverse
+      const backward: UserHistory[] = []
+      for await (const ev of engine.getHistory(user.id, false)) backward.push(ev)
+      expect(backward.map(e => e.event)).to.deep.equal([
+        UserHistoryEvent.revokeKey,
+        UserHistoryEvent.revise,
+        UserHistoryEvent.addKey,
+        UserHistoryEvent.create
+      ])
+    })
+
+    it('write+read a UserEngine.create event end-to-end (C event own write)', async () => {
+      // Proves UserEngine.create() itself writes a readable 'C' UserEvent row
+      // (db-only path: first user, no invite required for User.InsertValid).
+      const { publicHex: createPub } = randomTestKeyPair()
+      const { engine, user } = await makeDbOnlyUserEngine({
+        id: 'gh-create-user',
+        activeKeys: [
+          { key: createPub, type: UserKeyType.mobile, expiration: Date.now() + 86_400_000 }
+        ]
+      })
+      const init: CreateUserHistory = {
+        event: UserHistoryEvent.create,
+        timestamp: Date.now(),
+        signature: { signature: 'a'.repeat(128), signerKey: createPub, signerUserId: user.id },
+        name: user.name,
+        imageRef: { url: 'https://img.local/user.png' },
+        userKey: { key: createPub, type: UserKeyType.mobile, expiration: Date.now() + 86_400_000 }
+      }
+      await engine.create(init)
+      const events: UserHistory[] = []
+      for await (const ev of engine.getHistory(user.id, true)) events.push(ev)
+      expect(events).to.have.length(1)
+      expect(events[0]!.event).to.equal(UserHistoryEvent.create)
+      const created = events[0] as CreateUserHistory
+      expect(created.name).to.equal(user.name)
+      expect(created.userKey.key).to.equal(createPub)
+      expect(created).to.have.property('signature')
+    })
+
+    it('returns an empty history for a user with no events (D-18, no backfill)', async () => {
+      const { engine } = await makeDbOnlyUserEngine({ id: 'gh-empty-user' })
+      const events: UserHistory[] = []
+      for await (const ev of engine.getHistory('gh-empty-user', true)) events.push(ev)
+      expect(events).to.have.length(0)
     })
   })
 

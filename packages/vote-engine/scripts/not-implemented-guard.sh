@@ -29,7 +29,6 @@ fi
 # a matching async function declaration.
 ALLOWLIST=(
   "connectDevice:Phase22"     # UKEY-04 — P2P fabric wiring
-  "getHistory:Phase19"        # ENG-02 — user event table (schema-backed log)
   "inviteKeyholder:Phase21"   # INV-03 — signing pipeline (MockElectionEngine)
   "proposeRevision:Phase21"   # signing pipeline (MockElectionEngine)
   "revokeKeyholder:Phase21"   # signing pipeline (MockElectionEngine)
