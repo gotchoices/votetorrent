@@ -1,6 +1,6 @@
 import { ExtendedTheme, useTheme, useRoute, useNavigation } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import React, { useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { View } from "react-native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
@@ -10,6 +10,7 @@ import { globalStyles } from "../../theme/styles";
 import { useBallotDraft } from "./providers/BallotDraftProvider";
 import { BallotTemplateForm } from "./components/BallotTemplateForm";
 import { CustomButton } from "../../components/CustomButton";
+import { ThemedText } from "../../components/ThemedText";
 import type { Ballot, Question } from "@votetorrent/vote-core";
 
 /**
@@ -40,6 +41,8 @@ export default function CreateBallotScreen() {
 		electionDate: undefined,
 	};
 	const electionEngine = (route.params as any)?.electionEngine;
+	const [errorMessage, setErrorMessage] = useState("");
+	const [proposing, setProposing] = useState(false);
 	const { ballotDraft, setBallotDraft, addQuestion, updateQuestion, removeQuestion } = useBallotDraft();
 
 	// Fresh-create reset: the BallotDraftProvider is now hoisted above the
@@ -102,6 +105,8 @@ export default function CreateBallotScreen() {
 			navigation.goBack();
 			return;
 		}
+		setErrorMessage("");
+		setProposing(true);
 		const ballot: Ballot = {
 			id: (ballotDraft as any).id ?? `ballot-${electionId}-${Date.now()}`,
 			electionId: ballotDraft.electionId ?? electionId,
@@ -112,10 +117,13 @@ export default function CreateBallotScreen() {
 		};
 		try {
 			await electionEngine.proposeBallot(ballot);
+			navigation.goBack();
 		} catch (error) {
 			console.error("proposeBallot error", error);
+			setErrorMessage(error instanceof Error ? error.message : String(error));
+		} finally {
+			setProposing(false);
 		}
-		navigation.goBack();
 	};
 
 	const handleDescriptionChange = (description: string) => {
@@ -162,6 +170,13 @@ export default function CreateBallotScreen() {
 				onAddQuestion={handleAddQuestion}
 				onEditQuestion={handleEditQuestion}
 			/>
+			{errorMessage ? (
+				<View style={{ paddingHorizontal: 16, paddingBottom: 8 }}>
+					<ThemedText type="small" style={{ color: colors.error }}>
+						{errorMessage}
+					</ThemedText>
+				</View>
+			) : null}
 			{/* Footer: PROPOSE — owned by screen so create vs edit can wire own handlers */}
 			<View style={[globalStyles.footer, { backgroundColor: colors.card, paddingBottom: insets.bottom + 16 }]}>
 				<CustomButton
@@ -170,6 +185,7 @@ export default function CreateBallotScreen() {
 					onPress={handlePropose}
 					backgroundColor={colors.success}
 					forceDarkText={true}
+					disabled={proposing}
 				/>
 			</View>
 		</View>
