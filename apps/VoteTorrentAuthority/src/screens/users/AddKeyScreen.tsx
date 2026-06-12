@@ -20,9 +20,6 @@ import { bytesToHex } from "@noble/curves/utils.js";
 export function AddKeyScreen() {
 	const { user, userEngine } = useRoute().params as { user: User; userEngine: IUserEngine };
 	const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
-	const [isAddingKey, setIsAddingKey] = useState(false);
-	const [isSigned, setIsSigned] = useState(false);
-	const [newKey, setNewKey] = useState<string | null>(null);
 	const [errorMessage, setErrorMessage] = useState("");
 	const { t } = useTranslation();
 	const { colors } = useTheme() as ExtendedTheme;
@@ -86,59 +83,38 @@ export function AddKeyScreen() {
 						</ThemedText>
 					</View>
 				</View>
-				{isAddingKey ? (
-					<View>
-						<View>
-							<ThemedText type="defaultSemiBold">{t("successfullyScannedKey")}:</ThemedText>
-							<ThemedText>{newKey}</ThemedText>
-						</View>
+				<View>
+					<View style={styles.section}>
+						<ThemedText type="title">{t("scanQrCode")}</ThemedText>
+						<ThemedText type="default">{t("addAnotherDeviceQrCode")}</ThemedText>
 						<CustomButton
-							title={t("sign")}
-							icon="signature"
-							backgroundColor={colors.important}
-							onPress={() => {
-								setIsSigned(true);
-							}}
+							title={t("scanDevice")}
+							icon="qrcode"
+							disabled={true}
+							onPress={() => scanDevice()}
 						/>
-						<View style={styles.detail}>
-							<ThemedText type="defaultSemiBold">{t("signed")}:</ThemedText>
-							<ThemedText>{newKey}</ThemedText>
-						</View>
+						<ThemedText type="small" style={{ color: colors.textSecondary }}>
+							{"(Available in Phase 22)"}
+						</ThemedText>
 					</View>
-				) : (
-					<View>
-						<View style={styles.section}>
-							<ThemedText type="title">{t("scanQrCode")}</ThemedText>
-							<ThemedText type="default">{t("addAnotherDeviceQrCode")}</ThemedText>
-							<CustomButton
-								title={t("scanDevice")}
-								icon="qrcode"
-								disabled={true}
-								onPress={() => scanDevice()}
-							/>
-							<ThemedText type="small" style={{ color: colors.textSecondary }}>
-								{"(Available in Phase 22)"}
-							</ThemedText>
+					<View style={styles.section}>
+						<View style={styles.titleRow}>
+							<ThemedText type="title">{t("addYubicoDongleKey")}</ThemedText>
+							{showHelpIcons && <FontAwesome6 name="circle-info" size={24} color={colors.text} />}
 						</View>
-						<View style={styles.section}>
-							<View style={styles.titleRow}>
-								<ThemedText type="title">{t("addYubicoDongleKey")}</ThemedText>
-								{showHelpIcons && <FontAwesome6 name="circle-info" size={24} color={colors.text} />}
-							</View>
-							<ThemedText type="link">{t("detailedInstructions")}</ThemedText>
-							<ThemedText type="default">{t("addYubicoInstructions")}</ThemedText>
-							<CustomButton
-								title={t("generateExternalKey")}
-								icon="hard-drive"
-								disabled={true}
-								onPress={() => generateExternalKey()}
-							/>
-							<ThemedText type="small" style={{ color: colors.textSecondary }}>
-								{"(Available in Phase 22)"}
-							</ThemedText>
-						</View>
+						<ThemedText type="link">{t("detailedInstructions")}</ThemedText>
+						<ThemedText type="default">{t("addYubicoInstructions")}</ThemedText>
+						<CustomButton
+							title={t("generateExternalKey")}
+							icon="hard-drive"
+							disabled={true}
+							onPress={() => generateExternalKey()}
+						/>
+						<ThemedText type="small" style={{ color: colors.textSecondary }}>
+							{"(Available in Phase 22)"}
+						</ThemedText>
 					</View>
-				)}
+				</View>
 				{errorMessage ? (
 					<View style={styles.section}>
 						<ThemedText type="small" style={{ color: colors.error }}>
