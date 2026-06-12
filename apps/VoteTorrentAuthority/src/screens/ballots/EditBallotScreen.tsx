@@ -56,10 +56,15 @@ const EditBallotScreen = () => {
 			try {
 				const details = await electionEngine.getBallotDetails(ballotId);
 				if (details?.ballot) {
+					// WR-06: the async load replaces the whole draft, so it must not drop
+					// the electionId that the synchronous seed effect set. setBallotDraft
+					// is a plain setter (no functional updater), so fall back explicitly to
+					// the loaded ballot's electionId, else the route's electionId param.
 					// Map authorityId → authority (the loose key BallotTemplateForm's
 					// dropdown reads) so the Authority field re-populates on reopen.
 					setBallotDraft({
 						...details.ballot,
+						electionId: (details.ballot as any).electionId || electionId || "",
 						authority: (details.ballot as any).authorityId ?? "",
 					} as any);
 				}
