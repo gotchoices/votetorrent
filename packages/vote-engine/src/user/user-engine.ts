@@ -13,6 +13,7 @@ import type {
   IUserRevokeKeyBuilder,
   ReviseUserHistory,
   Scope,
+  Signature,
   Timestamp,
   User,
   UserHistory,
@@ -75,7 +76,18 @@ export class UserEngine implements IUserEngine {
 					Expiration
 				)
 				with context UserKey = :userKey, Signature = :signature, Tid = ${tid}, now = :now, IsSignatureValid = true
-				values (:userId, :keyType, :keyValue, :expiration)`,
+				values (:userId, :keyType, :keyValue, :expiration);
+
+				insert into UserEvent (UserId, Sequence, Event, Timestamp, Signature, Payload)
+				with context Tid = ${tid}, now = :now
+				values (
+					:userId,
+					coalesce((select max(Sequence) from UserEvent where UserId = :userId), -1) + 1,
+					'AK',
+					:now,
+					:evtSignature,
+					:payload
+				)`,
         {
           userId: this.user.id,
           keyType: key.type,
@@ -89,7 +101,18 @@ export class UserEngine implements IUserEngine {
           // can pre-sign via the signing engine and then bind signature
           // through a follow-up addKey overload (Phase 6 — TEST-01).
           signature: null,
-          now: nowCanonicalDatetime()
+          now: nowCanonicalDatetime(),
+          // D-14/D-15/D-16: append-only AddUserKeyHistory event in the same
+          // batch (same Tid). Signature null this phase. Payload carries the
+          // UserKey with raw epoch-ms expiration (Pitfall 5).
+          evtSignature: null,
+          payload: JSON.stringify({
+            userKey: {
+              key: key.key,
+              type: key.type,
+              expiration: key.expiration
+            }
+          })
         }
       )
     } catch (err) {
@@ -135,6 +158,17 @@ export class UserEngine implements IUserEngine {
 				)
 				with context UserKey = null, Signature = null, Tid = ${tid}, now = :now, IsSignatureValid = true
 				values (:userId, :keyType, :keyValue, :expiration);
+
+				insert into UserEvent (UserId, Sequence, Event, Timestamp, Signature, Payload)
+				with context Tid = ${tid}, now = :now
+				values (
+					:userId,
+					coalesce((select max(Sequence) from UserEvent where UserId = :userId), -1) + 1,
+					'C',
+					:now,
+					:evtSignature,
+					:payload
+				);
 				`,
         {
           userId: this.user.id,
@@ -145,7 +179,22 @@ export class UserEngine implements IUserEngine {
           expiration: toCanonicalDatetime(userInit.userKey.expiration),
           inviteSlotCid: options?.inviteSlotCid ?? null,
           inviteSignature: options?.inviteSignature ?? null,
-          now: nowCanonicalDatetime()
+          now: nowCanonicalDatetime(),
+          // D-15: Signature written null this phase; Phase 21 fills real
+          // signature content via the signing pipeline (no migration).
+          evtSignature: null,
+          // D-16: single JSON Payload round-trips the UserInit shape
+          // (CreateUserHistory = UserHistory & UserInit). expiration is the
+          // raw epoch-ms number (Pitfall 5 — do not canonical-stringify it).
+          payload: JSON.stringify({
+            name: userInit.name,
+            imageRef: userInit.imageRef,
+            userKey: {
+              key: userInit.userKey.key,
+              type: userInit.userKey.type,
+              expiration: userInit.userKey.expiration
+            }
+          })
         }
       )
     } catch (err) {
@@ -153,19 +202,56 @@ export class UserEngine implements IUserEngine {
     }
   }
 
+  /**
+   * ENG-02 (D-17/D-18) — read the append-only UserEvent log for `userId`,
+   * ordered by the per-user `Sequence` key (ASC when `forward`, DESC
+   * otherwise), mapping each row back to its discriminated `UserHistory`
+   * subtype. Users created before the UserEvent table existed have no rows,
+   * so this yields nothing — honest empty history, no synthetic backfill
+   * (D-18).
+   *
+   * T-19-05 mitigation: `userId` is a bound `:param` (never interpolated);
+   * the ORDER BY direction is a whitelisted `'ASC'`/`'DESC'` literal branched
+   * in TS (Quereus rejects `ORDER BY :param` — Pitfall 2). T-19-06: the
+   * SELECT filters `WHERE UserId = :userId`, no cross-user read path.
+   */
   async * getHistory (
     userId: string,
     forward: boolean
   ): AsyncIterable<UserHistory> {
-    // ENG-07 phase-gate: getHistory requires an append-only user-event table
-    // that does not exist in the current schema (D-09). The existing UserKey
-    // table stores no created-at timestamp or signature history — lossy
-    // reconstruction is refused (D-09). Real implementation remanded to
-    // Phase 19 (ENG-02) which will add the event table (D-10).
-    throw new FeatureNotAvailableError('getHistory — available in Phase 19 (user event table)')
-    // TypeScript requires at least one yield for AsyncGenerator type inference
-    // (Pitfall 5). This yield is unreachable; it satisfies the compiler only.
-    yield undefined as unknown as UserHistory
+    this.requireCtx('getHistory')
+    const order = forward ? 'ASC' : 'DESC'
+    try {
+      for await (const row of this.ctx!.db.eval(
+        `SELECT Event, Timestamp, Signature, Payload FROM UserEvent
+          WHERE UserId = :userId ORDER BY Sequence ${order}`,
+        { userId }
+      )) {
+        const base = {
+          timestamp: fromCanonicalDatetime(row.Timestamp as string),
+          // D-15/Pitfall 4: Signature is a REQUIRED field on UserHistory;
+          // the column is written null this phase, read as '' until Phase 21.
+          signature: (row.Signature as Signature | null) ?? ''
+        }
+        const payload = parseJsonOr<any>(row.Payload, {}, 'UserEvent.Payload')
+        switch (row.Event) {
+          case 'C':
+            yield { event: UserHistoryEvent.create, ...base, ...payload } as UserHistory
+            break
+          case 'R':
+            yield { event: UserHistoryEvent.revise, ...base, info: payload.info ?? payload } as UserHistory
+            break
+          case 'AK':
+            yield { event: UserHistoryEvent.addKey, ...base, userKey: payload.userKey } as UserHistory
+            break
+          case 'RK':
+            yield { event: UserHistoryEvent.revokeKey, ...base, key: payload.key } as UserHistory
+            break
+        }
+      }
+    } catch (err) {
+      this.rethrow(err, 'getHistory')
+    }
   }
 
   /**
@@ -278,7 +364,18 @@ export class UserEngine implements IUserEngine {
 				`update User
 				with context SigningNonce = null, InviteSlotCid = null, InviteSignature = null, Tid = ${tid}
 					set Name = :name, ImageRef = :imageRef
-				where Id = :userId`,
+				where Id = :userId;
+
+				insert into UserEvent (UserId, Sequence, Event, Timestamp, Signature, Payload)
+				with context Tid = ${tid}, now = :now
+				values (
+					:userId,
+					coalesce((select max(Sequence) from UserEvent where UserId = :userId), -1) + 1,
+					'R',
+					:now,
+					:evtSignature,
+					:payload
+				)`,
         {
           name: userRevise.info.name,
           imageRef: imageRefJson,
@@ -287,7 +384,17 @@ export class UserEngine implements IUserEngine {
           // CHECKs (User has no SignatureValid on update). Bound here for
           // forward compatibility with Phase 6 / TEST-01 signing tightening.
           signerKey,
-          signature
+          signature,
+          now: nowCanonicalDatetime(),
+          // D-14/D-15/D-16: append-only ReviseUserHistory event in the same
+          // batch (same Tid). Payload carries UserInfo under `info`.
+          evtSignature: null,
+          payload: JSON.stringify({
+            info: {
+              name: userRevise.info.name,
+              imageRef: userRevise.info.imageRef
+            }
+          })
         }
       )
     } catch (err) {
@@ -311,13 +418,28 @@ export class UserEngine implements IUserEngine {
       await this.ctx!.db.exec(
 				`delete from UserKey
 				with context UserKey = :userKey, Signature = :signature, Tid = ${tid}, now = :now, IsSignatureValid = true
-				where UserId = :userId and PubKey = :pubKey`,
+				where UserId = :userId and PubKey = :pubKey;
+
+				insert into UserEvent (UserId, Sequence, Event, Timestamp, Signature, Payload)
+				with context Tid = ${tid}, now = :now
+				values (
+					:userId,
+					coalesce((select max(Sequence) from UserEvent where UserId = :userId), -1) + 1,
+					'RK',
+					:now,
+					:evtSignature,
+					:payload
+				)`,
         {
           userId: this.user.id,
           pubKey: keyToRevoke,
           userKey: signerKey,
           signature: null,
-          now: nowCanonicalDatetime()
+          now: nowCanonicalDatetime(),
+          // D-14/D-15/D-16: append-only RevokeUserKeyHistory event in the
+          // same batch (same Tid). Payload carries the revoked pubkey hex.
+          evtSignature: null,
+          payload: JSON.stringify({ key: keyToRevoke })
         }
       )
     } catch (err) {
