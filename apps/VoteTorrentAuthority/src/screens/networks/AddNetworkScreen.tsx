@@ -35,7 +35,8 @@ export default function AddNetworkScreen() {
 	// Election Characteristics (Figma "New Network" frame) — keyholder usage and
 	// single-vs-multiple authority.
 	const [useKeyholders, setUseKeyholders] = useState(true);
-	const [singleAuthority, setSingleAuthority] = useState(true);
+	// CR-01: single-vs-multiple authority is not yet representable in NetworkInit;
+	// the network is always created single-authority, so no toggle state is kept.
 	// 16-08 item 4: surface the ACTUAL submit failure inline (not just console.error).
 	const [errorMessage, setErrorMessage] = useState<string>("");
 	const scrollViewRef = useRef<ScrollView>(null);
@@ -73,6 +74,12 @@ export default function AddNetworkScreen() {
 	const handleCreate = async () => {
 		// 16-08 item 4: clear any prior error so a retry starts clean.
 		setErrorMessage("");
+		// CR-01: the "Sign" affordance gates creation of a signed permanent record.
+		// Do not create the network unless the administrator has signed.
+		if (!isSigned) {
+			setErrorMessage(t("mustSignBeforeCreating"));
+			return;
+		}
 		try {
 			// Resolve NetworksEngine — available directly from AppProvider context (D-03).
 			if (!networksEngine) {
@@ -200,25 +207,20 @@ export default function AddNetworkScreen() {
 							<ThemedText style={styles.radioLabel}>{t("noKeyholders")}</ThemedText>
 						</TouchableOpacity>
 					</View>
+					{/* CR-01: NetworkInit can only represent a single primary authority, so
+					    the multi-authority option is disabled (rather than a live control
+					    that silently drops the user's choice). Single authority is always used. */}
 					<View style={styles.characteristicsGrid}>
-						<TouchableOpacity
-							style={styles.radioOption}
-							onPress={() => setSingleAuthority(true)}
-						>
-							<View style={[styles.radioOuter, { borderColor: singleAuthority ? colors.primary : colors.textSecondary }]}>
-								{singleAuthority && <View style={[styles.radioInner, { backgroundColor: colors.primary }]} />}
+						<View style={styles.radioOption}>
+							<View style={[styles.radioOuter, { borderColor: colors.primary }]}>
+								<View style={[styles.radioInner, { backgroundColor: colors.primary }]} />
 							</View>
 							<ThemedText style={styles.radioLabel}>{t("singleAuthority")}</ThemedText>
-						</TouchableOpacity>
-						<TouchableOpacity
-							style={styles.radioOption}
-							onPress={() => setSingleAuthority(false)}
-						>
-							<View style={[styles.radioOuter, { borderColor: !singleAuthority ? colors.primary : colors.textSecondary }]}>
-								{!singleAuthority && <View style={[styles.radioInner, { backgroundColor: colors.primary }]} />}
-							</View>
-							<ThemedText style={styles.radioLabel}>{t("multiple")}</ThemedText>
-						</TouchableOpacity>
+						</View>
+						<View style={[styles.radioOption, { opacity: 0.4 }]}>
+							<View style={[styles.radioOuter, { borderColor: colors.textSecondary }]} />
+							<ThemedText style={styles.radioLabel}>{t("multipleAuthorityNotYetSupported")}</ThemedText>
+						</View>
 					</View>
 				</View>
 
