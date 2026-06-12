@@ -978,6 +978,95 @@ describe('NetworkEngine', () => {
 	});
 
 	// -----------------------------------------------------------------------
+	// 5b. cancelRevision / resendRevision (SURF-04, NON-signing, D-09/D-20)
+	// -----------------------------------------------------------------------
+	describe('cancelRevision / resendRevision', () => {
+		// Reads the cancellation-filtered proposed list directly (the same
+		// NOT EXISTS shape getDetails uses), returning every non-cancelled
+		// (Name, Revision) for the given name. Revisions bound as numbers.
+		async function proposedRevisions(
+			ctx: EngineContext,
+			name: string,
+		): Promise<number[]> {
+			const revisions: number[] = [];
+			for await (const r of ctx.db
+				.prepare(
+					`select Revision from ProposedNetwork P
+						where Name = :name
+							and not exists (
+								select 1 from RevisionCancellation C
+								where C.Name = P.Name and C.Revision = P.Revision
+							)
+						order by Revision`,
+				)
+				.all({ name })) {
+				revisions.push(Number(r.Revision));
+			}
+			return revisions;
+		}
+
+		it('cancelRevision markers a proposal off the proposed read (NOT EXISTS); resendRevision proposes max+1', async () => {
+			const { engine } = await createNetworkEngine();
+			const ctx = (engine as unknown as { ctx: EngineContext }).ctx;
+			const name = 'Test Network';
+
+			// Seed a ProposedNetwork row via the real proposeRevision write
+			// (no new fixture). proposeRevision allocates max(Revision)+1.
+			await engine.proposeRevision({
+				name,
+				relays: ['/dns4/r.example.com/tcp/443/wss'],
+				policies: {
+					timestampAuthorities: [{ url: 'https://tsa.example.com' }],
+					numberRequiredTSAs: 1,
+					electionType: ElectionType.official,
+				},
+			});
+			const seeded = await proposedRevisions(ctx, name);
+			expect(seeded.length).to.be.greaterThan(0);
+			const revision = seeded[seeded.length - 1];
+
+			// Proposed read returns the seeded (Name, Revision).
+			expect(await proposedRevisions(ctx, name)).to.include(revision);
+
+			// Cancel: marker inserted, proposed read excludes it.
+			await engine.cancelRevision(name, revision);
+			expect(await proposedRevisions(ctx, name)).to.not.include(revision);
+			const marker = await ctx.db
+				.prepare(
+					'select Name, Revision from RevisionCancellation where Name = :name and Revision = :revision',
+				)
+				.get({ name, revision });
+			expect(marker?.Name).to.equal(name);
+			expect(Number(marker?.Revision)).to.equal(revision);
+
+			// The ProposedNetwork row itself is untouched (marker-only).
+			const stillThere = await ctx.db
+				.prepare(
+					'select 1 as Found from ProposedNetwork where Name = :name and Revision = :revision',
+				)
+				.get({ name, revision });
+			expect(stillThere?.Found).to.equal(1);
+
+			// Resend: a fresh proposal at max+1 (no auto-supersede), and the
+			// returned number equals the new Revision.
+			const maxRow = await ctx.db
+				.prepare(
+					'select max(Revision) as M from ProposedNetwork where Name = :name',
+				)
+				.get({ name });
+			const expectedNew = Number(maxRow?.M) + 1;
+			const newRevision = await engine.resendRevision(name, revision);
+			expect(newRevision).to.equal(expectedNew);
+
+			// The fresh proposal appears in the proposed read; the cancelled
+			// original stays off.
+			const after = await proposedRevisions(ctx, name);
+			expect(after).to.include(newRevision);
+			expect(after).to.not.include(revision);
+		});
+	});
+
+	// -----------------------------------------------------------------------
 	// 6. Network Revision Signing (AdminSigning / AdminSignature flow)
 	// -----------------------------------------------------------------------
 	describe('network revision signing flow', () => {
