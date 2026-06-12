@@ -2245,6 +2245,8 @@ function makeStubAuthorityEngine (): IAuthorityEngine {
     },
     async proposeAdmin (): Promise<void> {},
     async saveInviteWithSigning (): Promise<void> {},
+    async cancelInvite (): Promise<void> {},
+    async resendInvite (): Promise<string> { return '' },
     async getAdminDetails () { throw new Error('not implemented') },
     async getAuthorityInvites () { throw new Error('not implemented') },
     async getDetails () { throw new Error('not implemented') },

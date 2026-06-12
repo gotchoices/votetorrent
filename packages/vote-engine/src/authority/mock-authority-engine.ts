@@ -83,6 +83,18 @@ export class MockAuthorityEngine implements IAuthorityEngine {
     throw new Error('Method not implemented.')
   }
 
+  // SURF-03 (D-05): compile-time parity counterparts. Trivial — the mock does
+  // not back a real Quereus store, so cancel logs + resolves and resend returns
+  // a stub Cid. The real behavior lives in AuthorityEngine (vote-engine).
+  async cancelInvite (slotCid: string): Promise<void> {
+    console.log(`MockAuthorityEngine: cancelInvite(${slotCid}) for ${this.authority.name}.`)
+  }
+
+  async resendInvite (slotCid: string): Promise<string> {
+    console.log(`MockAuthorityEngine: resendInvite(${slotCid}) for ${this.authority.name}.`)
+    return `mock-resent-${slotCid}`
+  }
+
   async getAdminDetails (): Promise<AdminDetails> {
     // Return the instance-specific administration details
     return {
