@@ -135,7 +135,7 @@ export default function NetworkRevisionScreen() {
 						placeholder={t("optionalImageAddress")}
 						onChangeText={setImageUrl}
 						isImageUrlField
-						makePermanentPressed={() => console.log("makePermanent stub")}
+						makePermanentPressed={() => { /* Phase 22: media-pin to content-addressed storage */ }}
 					/>
 					{imageUrl ? (
 						<Image
@@ -179,11 +179,6 @@ export default function NetworkRevisionScreen() {
 				<View style={styles.section}>
 					<View style={styles.sectionHeader}>
 						<ThemedText type="title">{t("relays")}</ThemedText>
-						<ChipButton
-							label={t("import")}
-							icon="circle-plus"
-							onPress={() => console.log("importRelays stub")}
-						/>
 					</View>
 					{relayAddresses.map((address, index) => (
 						<CustomTextInput
@@ -206,13 +201,6 @@ export default function NetworkRevisionScreen() {
 
 				<View style={styles.section}>
 					<ThemedText type="title">{t("timestampAuthorities")}</ThemedText>
-					<View style={styles.importRow}>
-						<ChipButton
-							label={t("import")}
-							icon="circle-plus"
-							onPress={() => console.log("importTsas stub")}
-						/>
-					</View>
 					{tsaUrls.map((url, index) => (
 						<CustomTextInput
 							key={index}
@@ -301,12 +289,7 @@ const localStyles = StyleSheet.create({
 		alignItems: "center",
 		marginBottom: 8,
 	},
-	importRow: {
-		flexDirection: "row",
-		justifyContent: "flex-end",
-		marginBottom: 8,
-	},
-	addButtonRow: {
+addButtonRow: {
 		flexDirection: "row",
 		justifyContent: "flex-end",
 		marginTop: 4,
