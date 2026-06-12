@@ -1,29 +1,65 @@
-import { useLayoutEffect } from "react";
+import { useLayoutEffect, useState } from "react";
 import { ScrollView, StyleSheet, View } from "react-native";
-import { ExtendedTheme, useNavigation, useTheme } from "@react-navigation/native";
+import {
+	ExtendedTheme,
+	useNavigation,
+	useRoute,
+	useTheme,
+} from "@react-navigation/native";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import type { INetworkEngine } from "@votetorrent/vote-core";
 import { useTranslation } from "react-i18next";
 import { globalStyles } from "../../theme/styles";
 import { ThemedText } from "../../components/ThemedText";
 import { CustomButton } from "../../components/CustomButton";
 import { Footer } from "../../components/Footer";
+import type { RootStackParamList } from "../../navigation/types";
+import { useApp } from "../../providers/AppProvider";
 
 export default function ProposedRevisionScreen() {
 	const { t } = useTranslation();
 	const { colors } = useTheme() as ExtendedTheme;
-	const navigation = useNavigation();
+	const navigation =
+		useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+	const { name, revision } = useRoute()
+		.params as RootStackParamList["ProposedRevision"];
+	const { getEngine } = useApp();
+
+	const [loading, setLoading] = useState(false);
+	const [errorMessage, setErrorMessage] = useState<string>("");
 
 	useLayoutEffect(() => {
 		navigation.setOptions({ title: t("proposedRevisionTitle") });
 	}, [navigation, t]);
 
-	const onResendRequest = () => {
-		console.log("proposedRevision-resendRequest");
-		navigation.goBack();
+	const onResendRequest = async () => {
+		setErrorMessage("");
+		setLoading(true);
+		try {
+			const engine = await getEngine<INetworkEngine>("network");
+			await engine.resendRevision(name, revision);
+			navigation.goBack();
+		} catch (err) {
+			console.error("proposedRevision-resendRequest error:", err);
+			setErrorMessage(err instanceof Error ? err.message : String(err));
+		} finally {
+			setLoading(false);
+		}
 	};
 
-	const onCancelRequest = () => {
-		console.log("proposedRevision-cancelRequest");
-		navigation.goBack();
+	const onCancelRequest = async () => {
+		setErrorMessage("");
+		setLoading(true);
+		try {
+			const engine = await getEngine<INetworkEngine>("network");
+			await engine.cancelRevision(name, revision);
+			navigation.goBack();
+		} catch (err) {
+			console.error("proposedRevision-cancelRequest error:", err);
+			setErrorMessage(err instanceof Error ? err.message : String(err));
+		} finally {
+			setLoading(false);
+		}
 	};
 
 	return (
@@ -35,6 +71,13 @@ export default function ProposedRevisionScreen() {
 				<View style={styles.section}>
 					<ThemedText type="default">{t("proposedRevisionBodySecondary")}</ThemedText>
 				</View>
+				{errorMessage ? (
+					<View style={styles.section}>
+						<ThemedText type="small" style={{ color: colors.error }}>
+							{errorMessage}
+						</ThemedText>
+					</View>
+				) : null}
 			</ScrollView>
 			<Footer row>
 				<CustomButton
@@ -42,6 +85,7 @@ export default function ProposedRevisionScreen() {
 					backgroundColor={colors.accent}
 					size="thin"
 					flex={true}
+					disabled={loading}
 					onPress={onResendRequest}
 				/>
 				<CustomButton
@@ -49,6 +93,7 @@ export default function ProposedRevisionScreen() {
 					backgroundColor={colors.accent}
 					size="thin"
 					flex={true}
+					disabled={loading}
 					onPress={onCancelRequest}
 				/>
 			</Footer>
