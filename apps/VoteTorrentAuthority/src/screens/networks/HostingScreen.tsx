@@ -3,23 +3,8 @@ import React from 'react';
 import {useTranslation} from 'react-i18next';
 import {ScrollView, StyleSheet, View, Linking} from 'react-native';
 import {ThemedText} from '../../components/ThemedText';
-import {ChipButton} from '../../components/ChipButton';
-import {InfoCard} from '../../components/InfoCard';
 import {globalStyles} from '../../theme/styles';
 import {CustomTextInput} from '../../components/CustomTextInput';
-
-const MOCK_PROVIDERS = [
-	{
-		id: '1',
-		name: 'Casa de Vote',
-		additionalInfo: [{label: 'Providing the best server infrastructure West of the Rockies'}]
-	},
-	{
-		id: '2',
-		name: 'Host-it Now',
-		additionalInfo: [{label: 'Hosting provider in the US'}]
-	}
-];
 
 export default function HostingScreen() {
 	const {colors} = useTheme() as ExtendedTheme;
@@ -68,23 +53,6 @@ export default function HostingScreen() {
 						{t('forConfiguringAServer')}
 					</ThemedText>
 				</View>
-
-				<View style={styles.section}>
-					<ThemedText type="title" style={styles.sectionTitle}>
-						{t('useHostingProvider')}
-					</ThemedText>
-					{MOCK_PROVIDERS.map(provider => (
-						<InfoCard
-							key={provider.id}
-							title={provider.name}
-							additionalInfo={provider.additionalInfo}
-							icon="chevron-right"
-						/>
-					))}
-					<View style={styles.addProviderContainer}>
-						<ChipButton label={t('addProvider')} icon="circle-plus" onPress={() => console.log('addProvider stub')} />
-					</View>
-				</View>
 			</ScrollView>
 		</View>
 	);
@@ -118,11 +86,6 @@ const localStyles = StyleSheet.create({
 	},
 	instructionsText: {
 		marginTop: 8
-	},
-	addProviderContainer: {
-		flexDirection: 'row',
-		justifyContent: 'flex-end',
-		marginTop: 16
 	}
 });
 
