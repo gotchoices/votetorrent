@@ -70,13 +70,19 @@ export function ElectionRevisionForm({
 
 	const removeKeyholder = (index: number) => {
 		const next = value.keyholders.filter((_, i) => i !== index);
-		// Clamp threshold so it never exceeds the new length (min 1).
-		const clampedThreshold = Math.max(1, Math.min(value.threshold, next.length || 1));
+		// WR-04: clamp threshold to the TRUE remaining count (no phantom `|| 1`).
+		// When the last keyholder is removed the threshold becomes 0 (0-of-0), and the
+		// pre-submit guard (WR-02) rejects the zero-keyholder case before any engine call.
+		const clampedThreshold = Math.min(value.threshold, next.length);
 		set({ keyholders: next, threshold: clampedThreshold });
 	};
 
 	const addKeyholder = () => {
-		set({ keyholders: [...value.keyholders, ""] });
+		const next = [...value.keyholders, ""];
+		// WR-04: keep threshold consistent with the count — once at least one keyholder
+		// exists the threshold must be at least 1 (it can be 0 only when count is 0).
+		const threshold = Math.max(value.threshold, 1);
+		set({ keyholders: next, threshold });
 	};
 
 	// ── Tags helpers ─────────────────────────────────────────────────────────
@@ -176,8 +182,8 @@ export function ElectionRevisionForm({
 							label={t("thresholdPolicy")}
 							value={value.threshold}
 							onChange={(n) => set({ threshold: n })}
-							min={1}
-							max={Math.max(1, value.keyholders.length)}
+							min={value.keyholders.length === 0 ? 0 : 1}
+							max={value.keyholders.length}
 						/>
 					</View>
 					<ThemedText style={styles.thresholdSuffix}>
