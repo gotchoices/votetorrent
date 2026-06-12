@@ -37,6 +37,8 @@ export default function NetworkRevisionScreen() {
 	const [relayAddresses, setRelayAddresses] = useState<string[]>([""]);
 	const [tsaUrls, setTsaUrls] = useState<string[]>([""]);
 	const [numberRequiredTSAs, setNumberRequiredTSAs] = useState("1");
+	const [proposing, setProposing] = useState(false);
+	const [errorMessage, setErrorMessage] = useState<string>("");
 
 	useLayoutEffect(() => {
 		navigation.setOptions({ title: t("reviseNetwork") });
@@ -86,6 +88,35 @@ export default function NetworkRevisionScreen() {
 	const removeTsaField = (index: number) => {
 		if (tsaUrls.length > 1) {
 			setTsaUrls(tsaUrls.filter((_, i) => i !== index));
+		}
+	};
+
+	// Phase 19 plan 19-07 (SURF-04, D-10) — minimal NETOP-01 PROPOSE slice: assemble a
+	// NetworkRevision from the screen's existing form state and call the already-working,
+	// non-signing proposeRevision write. importRelays/importTsas/makePermanent stay Phase-20 stubs.
+	const onPropose = async () => {
+		setErrorMessage("");
+		setProposing(true);
+		try {
+			const engine = await getEngine<INetworkEngine>("network");
+			await engine.proposeRevision({
+				name,
+				imageRef: imageUrl ? { url: imageUrl } : undefined,
+				relays: relayAddresses.filter((address) => address.trim() !== ""),
+				policies: {
+					electionType,
+					numberRequiredTSAs: Number(numberRequiredTSAs),
+					timestampAuthorities: tsaUrls
+						.filter((url) => url.trim() !== "")
+						.map((url) => ({ url })),
+				},
+			});
+			navigation.goBack();
+		} catch (error) {
+			console.error("networkRevision-propose error:", error);
+			setErrorMessage(error instanceof Error ? error.message : String(error));
+		} finally {
+			setProposing(false);
 		}
 	};
 
@@ -206,6 +237,13 @@ export default function NetworkRevisionScreen() {
 						onChangeText={setNumberRequiredTSAs}
 					/>
 				</View>
+				{errorMessage ? (
+					<View style={styles.section}>
+						<ThemedText type="small" style={{ color: colors.error }}>
+							{errorMessage}
+						</ThemedText>
+					</View>
+				) : null}
 			</ScrollView>
 
 			<Footer>
@@ -214,10 +252,8 @@ export default function NetworkRevisionScreen() {
 					icon="floppy-disk"
 					backgroundColor={colors.success}
 					forceDarkText={true}
-					onPress={() => {
-						console.log("networkRevision-propose stub");
-						navigation.goBack();
-					}}
+					disabled={proposing}
+					onPress={onPropose}
 				/>
 			</Footer>
 		</View>
