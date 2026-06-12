@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { StyleSheet, TouchableOpacity, View } from "react-native";
 import { ExtendedTheme, useTheme } from "@react-navigation/native";
 import { useTranslation } from "react-i18next";
+import { computeRange } from "@votetorrent/vote-core";
 import { ThemedText } from "../../../components/ThemedText";
 import { ChipButton } from "../../../components/ChipButton";
 import { CustomTextInput } from "../../../components/CustomTextInput";
@@ -14,7 +15,7 @@ interface DistrictsGroupsEditorProps {
 /**
  * DistrictsGroupsEditor — matches Figma 57:490 Districts/Groups block.
  *
- * Supports: IMPORT chip, district-code input with checkmark add affordance,
+ * Supports: district-code input with checkmark add affordance,
  * removable selected-district chip list with item count,
  * CLEAR ALL (trash) + ADD RANGE chips.
  */
@@ -22,6 +23,9 @@ export function DistrictsGroupsEditor({ districts, onChange }: DistrictsGroupsEd
 	const { colors } = useTheme() as ExtendedTheme;
 	const { t } = useTranslation();
 	const [inputCode, setInputCode] = useState("");
+	const [showRangeInput, setShowRangeInput] = useState(false);
+	const [rangeFrom, setRangeFrom] = useState("");
+	const [rangeTo, setRangeTo] = useState("");
 
 	const handleAddCode = () => {
 		const trimmed = inputCode.trim();
@@ -41,12 +45,11 @@ export function DistrictsGroupsEditor({ districts, onChange }: DistrictsGroupsEd
 		onChange([]);
 	};
 
-	const handleImport = () => {
-		console.log("districtsGroupsEditor-import stub");
-	};
-
 	const handleAddRange = () => {
-		console.log("districtsGroupsEditor-addRange stub");
+		onChange(computeRange(districts, rangeFrom, rangeTo));
+		setRangeFrom("");
+		setRangeTo("");
+		setShowRangeInput(false);
 	};
 
 	// "N–M of K items" — for v1.1: from=1 (or 0 if empty), to=length, total=length
@@ -56,14 +59,9 @@ export function DistrictsGroupsEditor({ districts, onChange }: DistrictsGroupsEd
 
 	return (
 		<View style={styles.container}>
-			{/* Header row: label + IMPORT chip */}
+			{/* Header row: label */}
 			<View style={styles.headerRow}>
 				<ThemedText type="defaultSemiBold">{t("districtsGroups")}</ThemedText>
-				<ChipButton
-					label={t("import")}
-					icon="file-import"
-					onPress={handleImport}
-				/>
 			</View>
 
 			{/* District-code input with trailing checkmark */}
@@ -75,6 +73,41 @@ export function DistrictsGroupsEditor({ districts, onChange }: DistrictsGroupsEd
 				onIconPress={handleAddCode}
 				onSubmitEditing={handleAddCode}
 			/>
+
+			{/* Range input: two fields shown when showRangeInput is true */}
+			{showRangeInput && (
+				<View style={styles.rangeRow}>
+					<View style={styles.rangeField}>
+						<CustomTextInput
+							value={rangeFrom}
+							onChangeText={setRangeFrom}
+							placeholder={t("from")}
+							keyboardType="numeric"
+						/>
+					</View>
+					<View style={styles.rangeField}>
+						<CustomTextInput
+							value={rangeTo}
+							onChangeText={setRangeTo}
+							placeholder={t("to")}
+							keyboardType="numeric"
+						/>
+					</View>
+					<ChipButton
+						label={t("add")}
+						icon="check"
+						onPress={handleAddRange}
+					/>
+					<ChipButton
+						label={t("cancel")}
+						onPress={() => {
+							setShowRangeInput(false);
+							setRangeFrom("");
+							setRangeTo("");
+						}}
+					/>
+				</View>
+			)}
 
 			{/* Selected-district chip list (removable) */}
 			{districts.length > 0 && (
@@ -111,11 +144,13 @@ export function DistrictsGroupsEditor({ districts, onChange }: DistrictsGroupsEd
 					icon="trash"
 					onPress={handleClearAll}
 				/>
-				<ChipButton
-					label={t("addRange")}
-					icon="circle-plus"
-					onPress={handleAddRange}
-				/>
+				{!showRangeInput && (
+					<ChipButton
+						label={t("addRange")}
+						icon="circle-plus"
+						onPress={() => setShowRangeInput(true)}
+					/>
+				)}
 			</View>
 		</View>
 	);
@@ -130,6 +165,16 @@ const localStyles = StyleSheet.create({
 		justifyContent: "space-between",
 		alignItems: "center",
 		marginBottom: 4,
+	},
+	rangeRow: {
+		flexDirection: "row",
+		alignItems: "center",
+		gap: 8,
+		flexWrap: "wrap",
+	},
+	rangeField: {
+		flex: 1,
+		minWidth: 80,
 	},
 	chipList: {
 		flexDirection: "row",
