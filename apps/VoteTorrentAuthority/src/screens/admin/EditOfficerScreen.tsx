@@ -7,7 +7,7 @@ import { ChipButton } from "../../components/ChipButton";
 import { CustomButton } from "../../components/CustomButton";
 import { Footer } from "../../components/Footer";
 import { InfoCard } from "../../components/InfoCard";
-import type { Authority, IUserEngine, Officer, Scope, User } from "@votetorrent/vote-core";
+import type { Authority, INetworkEngine, IUserEngine, Officer, Scope, User } from "@votetorrent/vote-core";
 import { scopeDescriptions } from "@votetorrent/vote-core";
 import { useRoute, useNavigation } from "@react-navigation/native";
 import { useApp } from "../../providers/AppProvider";
@@ -27,7 +27,7 @@ export default function EditOfficerScreen() {
 		officerId?: string;
 	};
 	const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
-	const { networkEngine } = useApp();
+	const { getEngine } = useApp();
 	const [name, setName] = useState("");
 	const [title, setTitle] = useState("");
 	const [scopes, setScopes] = useState<Scope[]>([]);
@@ -42,10 +42,12 @@ export default function EditOfficerScreen() {
 
 	useEffect(() => {
 		async function loadOfficer() {
-			if (!networkEngine || !officerId) return;
+			if (!officerId) return;
 			try {
-				const admin = await networkEngine.getAdmin(authority.id);
-				const foundOfficer = admin.officers.find((a: Officer) => a.userId === officerId);
+				const networkEngine = await getEngine<INetworkEngine>("network");
+				const authorityEngine = await networkEngine.openAuthority(authority.id);
+				const admin = await authorityEngine.getAdminDetails();
+				const foundOfficer = admin.admin.officers.find((o) => o.userId === officerId);
 				if (foundOfficer) {
 					setOfficer(foundOfficer);
 					// Officer has no `name` field (vote-core/authority/models.ts:90-102).
@@ -69,7 +71,7 @@ export default function EditOfficerScreen() {
 			}
 		}
 		loadOfficer();
-	}, [networkEngine, authority.id, officerId]);
+	}, [getEngine, authority.id, officerId]);
 
 	// REMOVE button (header) — only when editing an existing administrator
 	// (frame 35). Removing from the proposed administration is engine-stubbed.
