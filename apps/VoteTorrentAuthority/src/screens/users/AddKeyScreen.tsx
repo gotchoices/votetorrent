@@ -14,37 +14,57 @@ import { useState } from "react";
 import type { NavigationProp, RootStackParamList } from "../../navigation/types";
 import { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useSettings } from "../../providers/SettingsProvider";
+import { secp256k1 } from "@noble/curves/secp256k1.js";
+import { bytesToHex } from "@noble/curves/utils.js";
 
 export function AddKeyScreen() {
 	const { user, userEngine } = useRoute().params as { user: User; userEngine: IUserEngine };
 	const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 	const [isAddingKey, setIsAddingKey] = useState(false);
 	const [isSigned, setIsSigned] = useState(false);
-	const [newKey, setNewKey] = useState<string | null>("sdflkj236jSFgjSVj35j78kdn2");
+	const [newKey, setNewKey] = useState<string | null>(null);
+	const [errorMessage, setErrorMessage] = useState("");
 	const { t } = useTranslation();
 	const { colors } = useTheme() as ExtendedTheme;
 	const { showHelpIcons } = useSettings();
 
+	// Phase 22: scan device (P2P external-key flow) — not available yet
 	const scanDevice = () => {
-		console.log("scanDevice");
-		setIsAddingKey(true);
+		// Available in Phase 22
 	};
 
+	// Phase 22: generate external (Yubico/hardware) key — not available yet
 	const generateExternalKey = () => {
-		console.log("generateExternalKey");
-		setIsAddingKey(true);
+		// Available in Phase 22
 	};
 
-	const addKey = () => {
-		// D-04: display-only — do NOT call userEngine.addKey(); navigate to confirmation instead
-		const expiration = new Date(Date.now() + 1000 * 60 * 60 * 24 * 30).getTime();
-		navigation.navigate("AddedKey", {
-			user,
-			keyValue: newKey as string,
-			keyType: UserKeyType.mobile,
-			expiration,
-		});
-		setIsAddingKey(false);
+	const handleGenerateAndAddKey = async () => {
+		setErrorMessage("");
+
+		// D-04: the device user always has one key from getOrCreateDeviceUser.
+		// first-key path only fires for a user created WITHOUT a key (e.g. in tests).
+		const isFirstKey = user.activeKeys.length === 0;
+		if (!isFirstKey) {
+			// D-04 honest state — adding a subsequent key requires signing (Phase 21)
+			setErrorMessage("Adding a subsequent key requires signing (Phase 21).");
+			return;
+		}
+
+		try {
+			// Generate a real secp256k1 keypair (CSPRNG — T-20-09 mitigation)
+			// Mirror device-user.ts:49-54 exactly
+			const privKey = secp256k1.utils.randomSecretKey();
+			const pubKey = secp256k1.getPublicKey(privKey, true); // compressed (33 bytes)
+			// AUTH-01: bytesToHex is mandatory — do NOT use native Uint8Array serializer
+			const pubHex = bytesToHex(pubKey);
+			// Security: privKey stays local — NEVER logged, NEVER passed to addKey (T-20-08)
+
+			const expiration = Date.now() + 10 * 365 * 24 * 60 * 60 * 1000; // 10 years
+			await userEngine.addKey({ key: pubHex, type: UserKeyType.mobile, expiration });
+			navigation.goBack();
+		} catch (err) {
+			setErrorMessage(err instanceof Error ? err.message : String(err));
+		}
 	};
 
 	return (
@@ -90,7 +110,15 @@ export function AddKeyScreen() {
 						<View style={styles.section}>
 							<ThemedText type="title">{t("scanQrCode")}</ThemedText>
 							<ThemedText type="default">{t("addAnotherDeviceQrCode")}</ThemedText>
-							<CustomButton title={t("scanDevice")} icon="qrcode" onPress={() => scanDevice()} />
+							<CustomButton
+								title={t("scanDevice")}
+								icon="qrcode"
+								disabled={true}
+								onPress={() => scanDevice()}
+							/>
+							<ThemedText type="small" style={{ color: colors.textSecondary }}>
+								{"(Available in Phase 22)"}
+							</ThemedText>
 						</View>
 						<View style={styles.section}>
 							<View style={styles.titleRow}>
@@ -102,25 +130,33 @@ export function AddKeyScreen() {
 							<CustomButton
 								title={t("generateExternalKey")}
 								icon="hard-drive"
+								disabled={true}
 								onPress={() => generateExternalKey()}
 							/>
+							<ThemedText type="small" style={{ color: colors.textSecondary }}>
+								{"(Available in Phase 22)"}
+							</ThemedText>
 						</View>
 					</View>
 				)}
+				{errorMessage ? (
+					<View style={styles.section}>
+						<ThemedText type="small" style={{ color: colors.error }}>
+							{errorMessage}
+						</ThemedText>
+					</View>
+				) : null}
 			</ScrollView>
-			{isAddingKey && (
-				<Footer>
-					<CustomButton
-						title={t("addKey")}
-						icon="save"
-						backgroundColor={colors.success}
-						disabled={!isSigned}
-						onPress={() => {
-							addKey();
-						}}
-					/>
-				</Footer>
-			)}
+			<Footer>
+				<CustomButton
+					title={t("addKey")}
+					icon="save"
+					backgroundColor={colors.success}
+					onPress={() => {
+						handleGenerateAndAddKey();
+					}}
+				/>
+			</Footer>
 		</View>
 	);
 }
