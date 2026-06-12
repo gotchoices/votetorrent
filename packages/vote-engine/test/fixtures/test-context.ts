@@ -567,6 +567,104 @@ export async function seedUserInvite (
 }
 
 // ---------------------------------------------------------------------------
+// Layer-2.5: seedKeyholderInvite primitive (Phase 19-05, SURF-05)
+// ---------------------------------------------------------------------------
+
+export interface SeedKeyholderInviteResult {
+  /** Cid of the seeded Type='k' InviteSlot row */
+  inviteSlotCid: string
+  /** Name stored on the InviteSlot row (= SentKeyholderInvite.name) */
+  name: string
+}
+
+/**
+ * Seed a keyholder-scope (Type='k') InviteSlot so `getKeyholderInvite(cid)`
+ * has a row to read. There is no `createKeyholderInvite` engine method, so we
+ * mirror `AuthorityEngine.saveOfficerInvite` inline with `Type='k'`:
+ *
+ *   1. reuse `createOfficerInvite` for a real one-time secp256k1 key pair +
+ *      InviteSignature (the slot's CHECKs gate on `context.Is*Valid = true`,
+ *      not on re-derived field values, so the officer-shaped share is fine);
+ *   2. raw-INSERT the InviteSlot with `Type='k'` under a fresh SigningNonce;
+ *   3. call `startSigningSession(authorityId, null, 'rad', sig, nonce)` (D-17
+ *      PATH B) so the matching AdminSigning row satisfies the batch-level
+ *      `InviteSlotSigningValid` assertion (`Digest(Cid) WHERE SigningNonce`).
+ *
+ * Stops at the InviteSlot step (no InviteResult) — `getKeyholderInvite`'s
+ * LEFT JOIN leaves `result` undefined, which is the load-only read this phase
+ * proves.
+ */
+export async function seedKeyholderInvite (
+  auth: TestAuthorityContext,
+  overrides?: { name?: string }
+): Promise<SeedKeyholderInviteResult> {
+  const name = overrides?.name ?? 'Some Keyholder'
+
+  // Step a: real one-time secp256k1 key material + InviteSignature.
+  const share = auth.authorityEngine.createOfficerInvite({
+    name,
+    title: 'Keyholder',
+    scopes: ['rad'] as Scope[],
+  })
+
+  // Step b: a fresh nonce the AdminSigning (step d) will sign over.
+  const signing = new SigningEngine(auth.ctx)
+  const nonce = signing.generateSigningNonce()
+
+  // Step c: raw InviteSlot insert with Type='k' (mirrors saveOfficerInvite,
+  // retargeting the type). Cid is the SQL Digest over the slot fields.
+  await auth.ctx.db.exec(
+    `insert into InviteSlot (
+        Cid,
+        Type,
+        Name,
+        Expiration,
+        InviteKey,
+        InviteSignature,
+        SigningNonce
+      )
+      with context Tid = :tid, now = :now, IsSignatureValid = true, IsInsertValid = true, IsCidValid = true
+      values (
+        Digest(:expiration, :inviteKey, :inviteSignature, :name, :nonce, :type),
+        :type,
+        :name,
+        :expiration,
+        :inviteKey,
+        :inviteSignature,
+        :nonce
+      )`,
+    {
+      type: 'k',
+      name,
+      expiration: share.expiration,
+      inviteKey: share.inviteKey,
+      inviteSignature: share.inviteSignature,
+      nonce,
+      tid: Date.now(),
+      now: nowCanonicalDatetime(),
+    }
+  )
+
+  // Step d: AdminSigning (PATH B) over the InviteSlot tagged with this nonce —
+  // satisfies the InviteSlotSigningValid batch assertion.
+  await signing.startSigningSession(
+    auth.authority.id,
+    null,
+    'rad' as Scope,
+    makeTestSignature(auth.user),
+    nonce
+  )
+
+  // Step e: read the Cid back so the caller can pass it to getKeyholderInvite.
+  const slotRow = await auth.ctx.db
+    .prepare('select Cid from InviteSlot where InviteKey = :inviteKey and Type = :type')
+    .get({ inviteKey: share.inviteKey, type: 'k' })
+  if (!slotRow) throw new Error('seedKeyholderInvite: InviteSlot not found after insert')
+
+  return { inviteSlotCid: slotRow.Cid as string, name }
+}
+
+// ---------------------------------------------------------------------------
 // Layer-3: seedBallot helper (Phase 12.3-03)
 // ---------------------------------------------------------------------------
 

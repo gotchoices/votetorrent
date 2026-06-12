@@ -6,9 +6,15 @@ import {
   addTestAuthority,
   seedAuthorityInvite,
   seedUserInvite,
+  seedKeyholderInvite,
   makeDistinctTestUser,
 } from './fixtures/test-context.js'
-import type { InviteStatus, SentOfficerInvite, SentAuthorityInvite } from '@votetorrent/vote-core'
+import type {
+  InviteStatus,
+  SentOfficerInvite,
+  SentAuthorityInvite,
+  SentKeyholderInvite,
+} from '@votetorrent/vote-core'
 
 describe('InvitationEngine', () => {
   it('getPendingOfficerInvites — returns seeded officer invites', async () => {
@@ -70,6 +76,44 @@ describe('InvitationEngine', () => {
     expect(result).to.not.be.undefined
     expect(result!.invite.name).to.equal('Known Officer')
     expect(result!.invite.type).to.equal('of')
+  })
+
+  it('getKeyholderInvite — returns undefined for unknown id', async () => {
+    const { ctx } = await addTestAuthority(await createTestNetwork())
+    const engine = new InvitationEngine(ctx)
+    const result = await engine.getKeyholderInvite('nonexistent-cid')
+    expect(result).to.be.undefined
+  })
+
+  it('getKeyholderInvite — returns the seeded Type=k slot as SentKeyholderInvite { name }', async () => {
+    const auth = await addTestAuthority(await createTestNetwork())
+    const { inviteSlotCid, name } = await seedKeyholderInvite(auth, { name: 'Known Keyholder' })
+
+    const engine = new InvitationEngine(auth.ctx)
+    const result: InviteStatus<SentKeyholderInvite> | undefined =
+      await engine.getKeyholderInvite(inviteSlotCid)
+
+    expect(result).to.not.be.undefined
+    // SentKeyholderInvite is { name } only — no officer type/title/scopes fields.
+    expect(result!.invite).to.deep.equal({ name })
+    expect((result!.invite as Record<string, unknown>).type).to.be.undefined
+    expect((result!.invite as Record<string, unknown>).title).to.be.undefined
+    expect((result!.invite as Record<string, unknown>).scopes).to.be.undefined
+    // No InviteResult seeded → result stays undefined (load-only read).
+    expect(result!.result).to.be.undefined
+  })
+
+  it('getKeyholderInvite — does not return an officer (Type=of) slot', async () => {
+    const auth = await addTestAuthority(await createTestNetwork())
+    const newUser = makeDistinctTestUser()
+    const { inviteSlotCid } = await seedUserInvite(auth, newUser, {
+      officerInit: { name: 'Officer Not Keyholder' },
+    })
+
+    const engine = new InvitationEngine(auth.ctx)
+    // The officer slot's Cid is excluded by the Type='k' filter.
+    const result = await engine.getKeyholderInvite(inviteSlotCid)
+    expect(result).to.be.undefined
   })
 
   it.skip('respondToInvite — BLOCKED: InviteResult INSERT requires full secp256k1 invite signing pipeline (InviteSignature over H(SlotCid, Digest, IsAccepted)); implement after the invite signing pipeline is wired (D-08)', async () => {
