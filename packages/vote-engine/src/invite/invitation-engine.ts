@@ -5,6 +5,7 @@ import type {
   InviteStatus,
   SentOfficerInvite,
   SentAuthorityInvite,
+  SentKeyholderInvite,
 } from '@votetorrent/vote-core'
 
 /**
@@ -156,6 +157,54 @@ export class InvitationEngine implements IInvitationEngine {
       }
     } catch (err) {
       this.rethrow(err, 'getAuthorityInvite')
+    }
+  }
+
+  /**
+   * Return the keyholder InviteSlot with the given Cid, joined with any
+   * InviteResult row. Returns `undefined` when no matching row exists.
+   *
+   * `result` is populated only when `IsAccepted` is non-null (i.e. a
+   * corresponding InviteResult row exists).
+   *
+   * SentKeyholderInvite is `{ name }` only — keyholder invites have no
+   * type/title/scopes officer fields. The Type='k' filter scopes the read to
+   * keyholder slots so officer ('of') / authority ('au') slots are excluded.
+   */
+  async getKeyholderInvite (id: string): Promise<InviteStatus<SentKeyholderInvite> | undefined> {
+    try {
+      const row = await this.ctx.db
+        .prepare(
+          `SELECT IS_.Cid, IS_.Name, IR.IsAccepted, IR.InviteSignature, IR.InvokedId
+           FROM InviteSlot IS_
+           LEFT JOIN InviteResult IR ON IR.SlotCid = IS_.Cid
+           WHERE IS_.Cid = :id AND IS_.Type = 'k'`
+        )
+        .get({ id }) as {
+          Cid: string
+          Name: string
+          IsAccepted: boolean | null
+          InviteSignature: string | null
+          InvokedId: string | null
+        } | undefined
+
+      if (!row) return undefined
+
+      return {
+        invite: { name: row.Name },
+        result: row.IsAccepted !== null
+          ? {
+            // WR-02: Quereus/SQLite returns boolean columns as 0/1 on the
+            // on-device path. Normalize to a real boolean (the field is typed
+            // boolean) so strict comparisons (=== true) downstream are correct.
+            isAccepted: row.IsAccepted === true || (row.IsAccepted as unknown) === 1,
+            invitationSignature: row.InviteSignature ?? '',
+            invokedId: row.InvokedId ?? undefined,
+          }
+          : undefined,
+      }
+    } catch (err) {
+      this.rethrow(err, 'getKeyholderInvite')
     }
   }
 

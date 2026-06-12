@@ -1,5 +1,6 @@
 import type { InviteStatus } from './models.js';
 import type { SentOfficerInvite, SentAuthorityInvite } from '../authority/models.js';
+import type { SentKeyholderInvite } from '../election/models.js';
 
 /**
  * Engine for reading pending invitations and responding to them.
@@ -10,5 +11,6 @@ export interface IInvitationEngine {
 	getPendingAuthorityInvites(): Promise<Array<InviteStatus<SentAuthorityInvite>>>;
 	getOfficerInvite(id: string): Promise<InviteStatus<SentOfficerInvite> | undefined>;
 	getAuthorityInvite(id: string): Promise<InviteStatus<SentAuthorityInvite> | undefined>;
+	getKeyholderInvite(id: string): Promise<InviteStatus<SentKeyholderInvite> | undefined>;
 	respondToInvite(invitationId: string, accept: boolean): Promise<void>;
 }
