@@ -2,12 +2,13 @@ import { ExtendedTheme, useTheme, useNavigation } from "@react-navigation/native
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import React, { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ScrollView, StyleSheet, View } from "react-native";
+import { ScrollView, StyleSheet, TouchableOpacity, View } from "react-native";
 import { ThemedText } from "../../components/ThemedText";
 import { CustomButton } from "../../components/CustomButton";
 import { Footer } from "../../components/Footer";
 import { CustomTextInput } from "../../components/CustomTextInput";
 import { DateField } from "../../components/DateField";
+import { InlineError } from "../../components/InlineError";
 import { globalStyles } from "../../theme/styles";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../../navigation/types";
@@ -19,12 +20,10 @@ import { ElectionsCreateElectionBuilder, peekNextElectionTid } from "@votetorren
 import { getOrCreateDeviceUser, getDevicePrivKeyHex } from "../../engines/device-user";
 
 // Phase 9 plan 09-12 (ELECUI-03) — Single-scroll New Election form.
-// Replaces the 4-step wizard (D-01..D-04) per Binding Decision 1 (09-PARITY-GAPS-R3).
-// D-01..D-04 removed: wizard step state, step constant array, step indicator,
-//   NEXT/BACK footer, and Review-edit-chips are all gone.
-// PROPOSE stub: console.log + goBack. Persistence deferred to 09-15.
-// D-17: en-only i18n; Spanish deferred to Phase 11.
-// D-18: authority/type rows display hardcoded mock strings (no engine import).
+// Phase 20 plan 20-06 (EUI-02, EUI-03) — type radio + per-field inline validation.
+// EUI-02 (D-05): electionType is now useState-backed; radio control replaces read-only row.
+// EUI-03 (D-06/D-07): per-field InlineError under title, date, revisionDeadline fields.
+// D-06: electionTitle = coreTitle.trim() — validated non-empty above (EUI-03), no silent default.
 
 export function CreateElectionScreen() {
 	const { colors } = useTheme() as ExtendedTheme;
@@ -51,9 +50,17 @@ export function CreateElectionScreen() {
 	});
 
 	// Phase 16 Plan 03 — authorityId/name resolved from the real network chain (D-04).
-	// Replaces the D-18 hardcoded placeholder strings that were in the original stub.
 	const [authorityId, setAuthorityId] = useState<string>("");
 	const [authorityName, setAuthorityName] = useState<string>("");
+
+	// EUI-02 (D-05): election type state — was hardcoded const, now useState-backed
+	const [electionType, setElectionType] = useState<ElectionType>(ElectionType.official);
+
+	// EUI-03 (D-06/D-07): per-field inline validation error state
+	const [titleError, setTitleError] = useState<string>("");
+	const [dateError, setDateError] = useState<string>("");
+	const [revisionDeadlineError, setRevisionDeadlineError] = useState<string>("");
+
 	// 16-08 item 4: surface the ACTUAL propose failure inline (not just console.error).
 	const [errorMessage, setErrorMessage] = useState<string>("");
 
@@ -76,11 +83,26 @@ export function CreateElectionScreen() {
 	}, [getEngine]);
 
 	// Phase 16 Plan 03 — PROPOSE wires the real engine-signing seam + createElection (FLOW-03).
-	// Tier split (B2): signing pipeline lives entirely in ElectionsEngine.seedElectionSigning.
-	// The screen passes privKeyHex + election fields; the seam owns tid/Digest/secp256k1.
+	// Phase 20 plan 20-06 — EUI-03: validates title + visible date fields before engine call.
 	const handlePropose = async () => {
 		// 16-08 item 4: clear any prior error so a retry starts clean.
 		setErrorMessage("");
+
+		// EUI-03 (D-06/D-07): validate required fields before proceeding to engine call.
+		// Validate ONLY title + the two visible date fields (RESEARCH OQ2 — ballotDeadline stays auto-computed).
+		if (!coreTitle.trim()) {
+			setTitleError("Title is required");
+			return;
+		}
+		if (!coreDate.trim()) {
+			setDateError("Election date is required");
+			return;
+		}
+		if (!coreRevisionDeadline.trim()) {
+			setRevisionDeadlineError("Revision deadline is required");
+			return;
+		}
+
 		try {
 			const electionsEngine = await getEngine<IElectionsEngine>("elections");
 			if (!electionsEngine) {
@@ -111,8 +133,8 @@ export function CreateElectionScreen() {
 				now + 7 * 24 * 60 * 60 * 1000
 			);
 			const electionBallotDeadline = now + 10 * 24 * 60 * 60 * 1000;
-			const electionTitle = coreTitle || "Untitled Election";
-			const electionType = ElectionType.official;
+			// EUI-03 (D-06): validated non-empty above — trim() only, no silent default
+			const electionTitle = coreTitle.trim();
 
 			// Assemble the full payload via the v1.1 builder (D-03 / FACT-02)
 			const builder = new ElectionsCreateElectionBuilder(electionsEngine)
@@ -256,15 +278,40 @@ export function CreateElectionScreen() {
 				style={styles.container}
 				contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
 			>
-				{/* ── Read-only Authority / Type context rows ─────────────── */}
+				{/* ── Read-only Authority row + EUI-02 Election Type radio control ── */}
 				<View style={styles.section}>
 					<View style={localStyles.contextRow}>
 						<ThemedText type="defaultSemiBold">{t("authority")}: </ThemedText>
 						<ThemedText type="default">{authorityName || "Loading..."}</ThemedText>
 					</View>
-					<View style={localStyles.contextRow}>
-						<ThemedText type="defaultSemiBold">{t("type")}: </ThemedText>
-						<ThemedText type="default">{t("official")}</ThemedText>
+
+					{/* EUI-02 (D-05): radio control replaces read-only "{t("official")}" row */}
+					<ThemedText type="defaultSemiBold" style={localStyles.fieldLabel}>
+						{t("electionType")}
+					</ThemedText>
+					<View style={localStyles.radioRow}>
+						<TouchableOpacity
+							style={localStyles.radioOption}
+							onPress={() => setElectionType(ElectionType.adhoc)}
+						>
+							<View style={[localStyles.radioOuter, { borderColor: electionType === ElectionType.adhoc ? colors.primary : colors.textSecondary }]}>
+								{electionType === ElectionType.adhoc && (
+									<View style={[localStyles.radioInner, { backgroundColor: colors.primary }]} />
+								)}
+							</View>
+							<ThemedText style={localStyles.radioLabel}>{t("adhoc")}</ThemedText>
+						</TouchableOpacity>
+						<TouchableOpacity
+							style={localStyles.radioOption}
+							onPress={() => setElectionType(ElectionType.official)}
+						>
+							<View style={[localStyles.radioOuter, { borderColor: electionType === ElectionType.official ? colors.primary : colors.textSecondary }]}>
+								{electionType === ElectionType.official && (
+									<View style={[localStyles.radioInner, { backgroundColor: colors.primary }]} />
+								)}
+							</View>
+							<ThemedText style={localStyles.radioLabel}>{t("official")}</ThemedText>
+						</TouchableOpacity>
 					</View>
 				</View>
 
@@ -274,27 +321,33 @@ export function CreateElectionScreen() {
 						{t("coreSectionHeader")}
 					</ThemedText>
 
+					{/* EUI-03: title field + InlineError */}
 					<CustomTextInput
 						title={t("title")}
 						value={coreTitle}
-						onChangeText={setCoreTitle}
+						onChangeText={(v) => { setCoreTitle(v); setTitleError(""); }}
 					/>
+					<InlineError message={titleError} />
 
+					{/* EUI-03: date field + InlineError */}
 					<DateField
 						title={t("date")}
 						placeholder={t("selectDate")}
 						value={coreDate}
-						onChange={setCoreDate}
+						onChange={(v) => { setCoreDate(v); setDateError(""); }}
 					/>
+					<InlineError message={dateError} />
 					<ThemedText type="small" style={localStyles.helperText}>
 						{t("coreDateHelp")}
 					</ThemedText>
 
+					{/* EUI-03: revisionDeadline field + InlineError */}
 					<DateField
 						title={t("revisionDeadline")}
 						value={coreRevisionDeadline}
-						onChange={setCoreRevisionDeadline}
+						onChange={(v) => { setCoreRevisionDeadline(v); setRevisionDeadlineError(""); }}
 					/>
+					<InlineError message={revisionDeadlineError} />
 					<ThemedText type="small" style={localStyles.helperText}>
 						{t("revisionDeadlineHelp")}
 					</ThemedText>
@@ -343,6 +396,36 @@ const localStyles = StyleSheet.create({
 	helperText: {
 		marginTop: 4,
 		marginBottom: 8,
+	},
+	fieldLabel: {
+		marginBottom: 8,
+		marginTop: 8,
+	},
+	radioRow: {
+		flexDirection: "row",
+		gap: 24,
+	},
+	radioOption: {
+		flexDirection: "row",
+		alignItems: "center",
+		gap: 8,
+		paddingVertical: 4,
+	},
+	radioOuter: {
+		width: 20,
+		height: 20,
+		borderRadius: 10,
+		borderWidth: 2,
+		alignItems: "center",
+		justifyContent: "center",
+	},
+	radioInner: {
+		width: 10,
+		height: 10,
+		borderRadius: 5,
+	},
+	radioLabel: {
+		fontSize: 15,
 	},
 });
 
