@@ -95,6 +95,20 @@ export interface INetworkEngine {
   ): Promise<IAuthorityEngine>
   pinAuthority(authority: Authority): Promise<void>
   proposeRevision(revision: NetworkRevision): Promise<void>
+  /**
+   * SURF-04: NON-signing. Withdraw a proposed network revision by writing an
+   * append-only `RevisionCancellation` marker keyed by (name, revision). The
+   * proposed-revision read filters cancelled proposals via `NOT EXISTS`; the
+   * `ProposedNetwork` row is never mutated or deleted (append-only audit
+   * consistency — NOT because ProposedNetwork forbids delete; it does not).
+   */
+  cancelRevision(name: string, revision: number): Promise<void>
+  /**
+   * SURF-04: NON-signing. Re-emit a fresh proposed network revision at
+   * `max(Revision)+1` for `name` (no auto-supersede — the cancelled/original
+   * proposals are untouched). Returns the new Revision number.
+   */
+  resendRevision(name: string, revision: number): Promise<number>
   respondToInvite<TInvokes>(
     invite: InviteAction<TInvokes>
   ): Promise<string>

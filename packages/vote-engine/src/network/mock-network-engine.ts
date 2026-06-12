@@ -296,6 +296,23 @@ export class MockNetworkEngine implements INetworkEngine {
     }
   }
 
+  async cancelRevision (name: string, revision: number): Promise<void> {
+    console.log(
+      'MockNetworkEngine: cancelRevision called for',
+      name,
+      revision
+    )
+  }
+
+  async resendRevision (name: string, revision: number): Promise<number> {
+    console.log(
+      'MockNetworkEngine: resendRevision called for',
+      name,
+      revision
+    )
+    return revision + 1
+  }
+
   async respondToInvitation<TInvokes>(
     invitation: InviteAction<TInvokes>
   ): Promise<string> {
