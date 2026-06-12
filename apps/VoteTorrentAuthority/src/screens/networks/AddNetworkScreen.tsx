@@ -67,8 +67,7 @@ export default function AddNetworkScreen() {
 	};
 
 	const handleMakePermanent = () => {
-		//TODO: Implement make permanent
-		console.log("Make permanent");
+		// Phase 22: media-pin to content-addressed storage (CID) — not yet implemented.
 	};
 
 	const handleCreate = async () => {

@@ -161,11 +161,6 @@ export function ElectionRevisionForm({
 
 				<View style={styles.chipRow}>
 					<ChipButton
-						label={t("import")}
-						icon="file-import"
-						onPress={() => console.log("electionRevisionForm-import stub")}
-					/>
-					<ChipButton
 						label={t("addKeyHolder")}
 						icon="circle-plus"
 						onPress={addKeyholder}

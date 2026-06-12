@@ -67,8 +67,7 @@ export function EditQuestionOption() {
 	}, [optionCode]);
 
 	const handleMakePermanent = () => {
-		// Stub — make-permanent is a v1.x backlog item, not in BALUI-04 scope.
-		console.log("editQuestionOption-makePermanent stub");
+		// Phase 22: media-pin to content-addressed storage (CID) — not yet implemented.
 	};
 
 	// SAVE is disabled until the option has a code or title — prevents the
