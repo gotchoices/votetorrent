@@ -337,9 +337,15 @@ export class NetworkEngine implements INetworkEngine {
         .prepare(
 					`
 						select
-							Name, ImageRef, Relays, TimestampAuthorities, NumberRequiredTSAs, ElectionType
-						from ProposedNetwork
+							Name, Revision, ImageRef, Relays, TimestampAuthorities, NumberRequiredTSAs, ElectionType
+						from ProposedNetwork P
 						where Name = :name
+							and not exists (
+								select 1 from RevisionCancellation C
+								where C.Name = P.Name and C.Revision = P.Revision
+							)
+						order by Revision desc
+						limit 1
 					`
         )
         .get({ name: network.name })
@@ -794,6 +800,94 @@ export class NetworkEngine implements INetworkEngine {
       )
     } catch (error) {
       throw new Error('Failed to propose revision: ' + error)
+    }
+  }
+
+  /**
+   * SURF-04 (D-09, NON-signing): withdraw a proposed network revision by
+   * inserting an append-only RevisionCancellation marker keyed by (Name,
+   * Revision). The ProposedNetwork row is never mutated/deleted — the marker
+   * is justified by append-only audit consistency (NOT a CantDelete on
+   * ProposedNetwork; it has none). `revision` is bound as a NUMBER so the
+   * (Name, Revision) PK join is exact (OpenQ 3 / T-19-12). The marker's
+   * ProposalExists CHECK (Plan 19-01) rejects a marker for a non-existent
+   * proposal; we additionally guard in TS for a clearer error message.
+   */
+  async cancelRevision (name: string, revision: number): Promise<void> {
+    try {
+      const existing = await this.ctx.db
+        .prepare(
+					`select 1 from ProposedNetwork where Name = :name and Revision = :revision`
+        )
+        .get({ name, revision })
+      if (!existing) {
+        throw new Error(
+					`No proposed revision found for (${name}, ${revision})`
+        )
+      }
+      await this.ctx.db.exec(
+				`insert into RevisionCancellation (Name, Revision, CancelledAt)
+					with context Tid = 0, now = :now
+					values (:name, :revision, :now)`,
+				{
+				  name,
+				  revision,
+				  now: nowCanonicalDatetime()
+				}
+      )
+    } catch (error) {
+      throw new Error('Failed to cancel revision: ' + error)
+    }
+  }
+
+  /**
+   * SURF-04 (D-09, NON-signing): re-emit a proposed network revision as a
+   * FRESH ProposedNetwork row at coalesce(max(Revision), -1) + 1 for Name
+   * (no auto-supersede — old/cancelled proposals are untouched). Reuses the
+   * original (Name, Revision) row's fields. Returns the new Revision number.
+   * `revision` is bound as a NUMBER for an exact PK lookup of the source row.
+   */
+  async resendRevision (name: string, revision: number): Promise<number> {
+    try {
+      const source = await this.ctx.db
+        .prepare(
+					`select
+							ImageRef, Relays, TimestampAuthorities, NumberRequiredTSAs, ElectionType
+						from ProposedNetwork where Name = :name and Revision = :revision`
+        )
+        .get({ name, revision })
+      if (!source) {
+        throw new Error(
+					`No proposed revision found for (${name}, ${revision})`
+        )
+      }
+      const userKey = this.ctx.user?.activeKeys?.[0]?.key ?? null
+      await this.ctx.db.exec(
+				`insert into ProposedNetwork
+					(Name, Revision, ImageRef, Relays, TimestampAuthorities, NumberRequiredTSAs, ElectionType)
+				with context UserId = :userId, UserKey = :userKey, Signature = null, Tid = 0, now = :now, IsUserValid = true
+				values
+					(:name, coalesce((select max(Revision) from ProposedNetwork where Name = :name), -1) + 1, :imageRef, :relays, :timestampAuthorities, :numberRequiredTSAs, :electionType)`,
+				{
+				  name,
+				  imageRef: source.ImageRef as string | null,
+				  relays: source.Relays as string,
+				  timestampAuthorities: source.TimestampAuthorities as string,
+				  numberRequiredTSAs: source.NumberRequiredTSAs as number,
+				  electionType: source.ElectionType as string,
+				  userId: this.ctx.user?.id ?? null,
+				  userKey,
+				  now: nowCanonicalDatetime()
+				}
+      )
+      const newRow = await this.ctx.db
+        .prepare(
+					`select max(Revision) as MaxRevision from ProposedNetwork where Name = :name`
+        )
+        .get({ name })
+      return Number(newRow?.MaxRevision)
+    } catch (error) {
+      throw new Error('Failed to resend revision: ' + error)
     }
   }
 
