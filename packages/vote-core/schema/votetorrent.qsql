@@ -310,6 +310,25 @@ declare schema main
 	)
 		with context ( UserId text, UserKey text, Signature text, Tid int, now datetime, IsUserValid boolean );
 
+	-- Append-only withdrawal marker for a proposed network revision (SURF-04, D-09).
+	-- Keyed on (Name, Revision) so a withdrawn revision drops off the proposed list via a
+	-- NOT EXISTS read filter, WITHOUT mutating or deleting the ProposedNetwork row.
+	-- Justification: append-only audit consistency + no proposal-history loss — NOT because
+	-- ProposedNetwork forbids delete (it does not: ProposedNetwork has no CantDelete/InsertOnly;
+	-- CantDelete lives only on Network/Officer/ProposedOfficer(User)/Authority). Non-signing
+	-- this phase (D-09/D-05): the context envelope carries only Tid + now, no signature/user CHECK.
+	table RevisionCancellation (
+		Name text,
+		Revision integer not null,
+		CancelledAt datetime,
+		primary key (Name, Revision),
+		constraint ProposalExists check on insert (
+			exists (select 1 from ProposedNetwork P where P.Name = new.Name and P.Revision = new.Revision)
+		),
+		constraint InsertOnly check on update, delete (false)
+	)
+		with context ( Tid int, now datetime );
+
 	table ProposedAuthority (
 		Id text primary key,
 		Name text,
@@ -432,6 +451,19 @@ declare schema main
 	)
 		with context ( IsSigningValid boolean, IsSignatureValid boolean );
 
+	-- Append-only withdrawal marker for a pending InviteSlot (SURF-03, D-06).
+	-- A slot with a matching row drops off the pending list via a NOT EXISTS read filter;
+	-- the InviteSlot itself is never mutated (InviteSlot is InsertOnly, so cancel cannot
+	-- update/delete it). Audit trail persists. Non-signing this phase (D-06/D-05): the
+	-- context envelope carries only Tid + now, no signature/user CHECK.
+	table InviteCancellation (
+		SlotCid text primary key, -- references InviteSlot(Cid)
+		CancelledAt datetime,
+		constraint SlotExists check on insert (exists (select 1 from InviteSlot S where S.Cid = new.SlotCid)),
+		constraint InsertOnly check on update, delete (false)
+	)
+		with context ( Tid int, now datetime );
+
 	view AcceptedInvite as
 		select IR.SlotCid, IR.IsAccepted, IR.Digest, IR.InviteSignature, SIG.Scope
 			from InviteResult IR
@@ -507,6 +539,26 @@ declare schema main
 		constraint ExpirationFuture check (Expiration > context.now)
 	)
 		with context ( UserKey text null, Signature text null, Tid int, now datetime, IsSignatureValid boolean );
+
+	-- Append-only user-event log (ENG-02, D-13..D-18). One row per user mutation
+	-- (create/revise/addKey/revokeKey), written in the same db.exec batch as the mutation.
+	-- Sequence is the per-user monotonic ordering key (NOT a reuse of Tid, which resets per
+	-- process). Signature is written null this phase (D-15, signature-honest schema; Phase 21
+	-- fills content). A single JSON Payload column round-trips all four UserHistory subtypes
+	-- (D-16). Non-signing this phase: no IsSignatureValid/IsUserValid context CHECK.
+	table UserEvent (
+		UserId text,
+		Sequence integer not null, -- per-user monotonic ordering key (coalesce(max(Sequence),-1)+1)
+		Event text, -- 'C' | 'R' | 'AK' | 'RK' (UserHistoryEvent)
+		Timestamp datetime, -- nowCanonicalDatetime()
+		Signature text null, -- D-15: written null now, real signature content arrives in Phase 21
+		Payload text, -- JSON; subtype-specific shape (D-16)
+		primary key (UserId, Sequence),
+		constraint UserIdValid check (exists (select 1 from User U where U.Id = new.UserId)),
+		constraint EventValid check (Event in ('C','R','AK','RK')),
+		constraint InsertOnly check on update, delete (false)
+	)
+		with context ( Tid int, now datetime );
 
 	table Election (
 		Id text primary key, -- 32 byte random id
