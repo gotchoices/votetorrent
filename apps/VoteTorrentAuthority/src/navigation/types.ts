@@ -66,7 +66,7 @@ export type RootStackParamList = {
 	// Dev-entry route per D-12 — temporary; replaced by real callers in phases 8–10 (renamed by 07-08)
 	ScreenScaffoldsDebug: undefined;
 	ElectionDetails: { electionEngine: IElectionEngine };
-	EditBallot: { electionId?: string; electionTitle?: string; electionDate?: string; ballotId?: string; electionEngine?: IElectionEngine; removeQuestionCode?: string; question?: any; originalQuestionCode?: string };
+	EditBallot: { electionId?: string; electionTitle?: string; electionDate?: string; ballotId?: string; electionEngine?: IElectionEngine; removeQuestionCode?: string; question?: any; originalQuestionCode?: string; readOnly?: boolean };
 	// Phase 9 plan 09-01 — type entries for routes whose screens land in later
 	// plans (CreateElection in 09-02, CreateBallot in 09-04). Stack.Screen
 	// registration is deferred; only the type signature is added here so the

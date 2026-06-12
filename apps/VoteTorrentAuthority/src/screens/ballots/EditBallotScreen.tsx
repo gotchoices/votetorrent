@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import { View } from "react-native";
 import { ExtendedTheme, useTheme, useNavigation, useRoute } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -11,6 +11,7 @@ import { globalStyles } from "../../theme/styles";
 import { useBallotDraft } from "./providers/BallotDraftProvider";
 import { BallotTemplateForm } from "./components/BallotTemplateForm";
 import { CustomButton } from "../../components/CustomButton";
+import { ThemedText } from "../../components/ThemedText";
 import type { Ballot } from "@votetorrent/vote-core";
 
 /**
@@ -34,6 +35,9 @@ const EditBallotScreen = () => {
 	const { electionId, electionTitle, electionDate } = route.params ?? {};
 	const electionEngine = (route.params as any)?.electionEngine;
 	const ballotId = (route.params as any)?.ballotId;
+	const readOnly = route.params?.readOnly === true;
+	const [errorMessage, setErrorMessage] = useState("");
+	const [proposing, setProposing] = useState(false);
 	const { ballotDraft, setBallotDraft, addQuestion, updateQuestion, removeQuestion } = useBallotDraft();
 
 	// Seed the draft with electionId from route params (edit mode entry point)
@@ -107,6 +111,8 @@ const EditBallotScreen = () => {
 			navigation.goBack();
 			return;
 		}
+		setErrorMessage("");
+		setProposing(true);
 		const ballot: Ballot = {
 			id: (ballotDraft as any).id ?? ballotId ?? `ballot-${electionId}-${Date.now()}`,
 			electionId: ballotDraft.electionId ?? electionId ?? "",
@@ -117,10 +123,13 @@ const EditBallotScreen = () => {
 		};
 		try {
 			await electionEngine.proposeBallot(ballot);
+			navigation.goBack();
 		} catch (error) {
 			console.error("proposeBallot error", error);
+			setErrorMessage(error instanceof Error ? error.message : String(error));
+		} finally {
+			setProposing(false);
 		}
-		navigation.goBack();
 	};
 
 	const handleAuthorityChange = (authority: string) => {
@@ -167,16 +176,26 @@ const EditBallotScreen = () => {
 				onAddQuestion={handleAddQuestion}
 				onEditQuestion={handleEditQuestion}
 			/>
-			{/* Footer: PROPOSE — owned by screen per plan; matches CreateBallotScreen footer */}
-			<View style={[globalStyles.footer, { backgroundColor: colors.card, paddingBottom: insets.bottom + 16 }]}>
-				<CustomButton
-					title={t("propose")}
-					icon="floppy-disk"
-					onPress={handlePropose}
-					backgroundColor={colors.success}
-					forceDarkText={true}
-				/>
-			</View>
+			{errorMessage ? (
+				<View style={{ paddingHorizontal: 16, paddingBottom: 8 }}>
+					<ThemedText type="small" style={{ color: colors.error }}>
+						{errorMessage}
+					</ThemedText>
+				</View>
+			) : null}
+			{/* Footer: PROPOSE — hidden in readOnly (preview) mode */}
+			{!readOnly && (
+				<View style={[globalStyles.footer, { backgroundColor: colors.card, paddingBottom: insets.bottom + 16 }]}>
+					<CustomButton
+						title={t("propose")}
+						icon="floppy-disk"
+						onPress={handlePropose}
+						backgroundColor={colors.success}
+						forceDarkText={true}
+						disabled={proposing}
+					/>
+				</View>
+			)}
 		</View>
 	);
 };
