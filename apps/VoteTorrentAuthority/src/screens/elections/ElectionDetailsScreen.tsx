@@ -1,10 +1,10 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { View, ScrollView, StyleSheet } from "react-native";
+import { View, ScrollView, StyleSheet, Share } from "react-native";
 import { ExtendedTheme, useRoute, useTheme, useNavigation, useFocusEffect } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTranslation } from "react-i18next";
 import { ThemedText } from "../../components/ThemedText";
-import type { BallotSummary, ElectionDetails, IElectionEngine } from "@votetorrent/vote-core";
+import type { BallotSummary, ElectionDetails, IElectionEngine, ElectionRevisionSignatureTask } from "@votetorrent/vote-core";
 import { globalStyles } from "../../theme/styles";
 import { ElectionDetailsBlock } from "./components/ElectionDetailsBlock";
 import { ElectionTimelineList } from "./components/ElectionTimelineList";
@@ -38,6 +38,7 @@ export default function ElectionDetailsScreen() {
 	const [electionDetails, setElectionDetails] = useState<ElectionDetails | null>(null);
 	const [ballots, setBallots] = useState<BallotSummary[]>([]);
 	const [moreOpen, setMoreOpen] = useState(false);
+	const [errorMessage, setErrorMessage] = useState("");
 	const { colors } = useTheme() as ExtendedTheme;
 	const navigation = useNavigation<NavigationProp>();
 	const insets = useSafeAreaInsets();
@@ -51,6 +52,7 @@ export default function ElectionDetailsScreen() {
 				}
 			} catch (error) {
 				console.error("Error loading election details:", error);
+				setErrorMessage(error instanceof Error ? error.message : String(error));
 			}
 		};
 
@@ -69,11 +71,26 @@ export default function ElectionDetailsScreen() {
 					}
 				} catch (error) {
 					console.error("Error loading ballots:", error);
+					setErrorMessage(error instanceof Error ? error.message : String(error));
 				}
 			};
 			loadBallots();
 		}, [electionEngine])
 	);
+
+	const handleShare = async (election: ElectionDetails["election"], proposed: ElectionDetails["proposed"], current: ElectionDetails["current"]) => {
+		try {
+			const message = [
+				`Election: ${election.title}`,
+				`Revision: #${proposed?.proposed.revision ?? current.revision}`,
+				`Authority: ${election.authorityId}`,
+				`Date: ${formatDate(election.date)}`,
+			].join("\n");
+			await Share.share({ message });
+		} catch (err) {
+			setErrorMessage(err instanceof Error ? err.message : String(err));
+		}
+	};
 
 	if (!electionDetails) {
 		return (
@@ -93,6 +110,13 @@ export default function ElectionDetailsScreen() {
 		<ScrollView
 			style={styles.container}
 			contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}>
+
+			{/* SC6 error state — surfaces load failures inline (D-19) */}
+			{errorMessage ? (
+				<View style={styles.section}>
+					<ThemedText type="small" style={{ color: colors.error }}>{errorMessage}</ThemedText>
+				</View>
+			) : null}
 
 			{/* 1. Immutable core block (title + Authority/Type/Date + Core Signature) */}
 			<View style={styles.section}>
@@ -126,8 +150,21 @@ export default function ElectionDetailsScreen() {
 					</View>
 				) : null}
 
-				{/* PREVIEW chip — stub */}
-				<ChipButton label={t("previewBallots")} onPress={() => console.log("preview-stub")} />
+				{/* PREVIEW chip — EUI-05/D-09: navigate to EditBallot in read-only mode */}
+				<ChipButton
+					label={t("previewBallots")}
+					onPress={() => {
+						if (ballots.length === 0) return;
+						navigation.navigate("EditBallot", {
+							electionId: election.id,
+							electionTitle: election.title,
+							electionDate: formatDate(election.revisionDeadline),
+							ballotId: ballots[0].id,
+							electionEngine,
+							readOnly: true,
+						} as any);
+					}}
+				/>
 			</View>
 
 			{/* 3. Keyholders — Sent/Unsent + chevron */}
@@ -163,7 +200,8 @@ export default function ElectionDetailsScreen() {
 					size="thin"
 					icon="copy"
 					backgroundColor={colors.accent}
-					onPress={() => console.log("clone-stub")}
+					disabled={true}
+					onPress={() => {/* Phase 21 */}}
 				/>
 			</View>
 
@@ -190,27 +228,54 @@ export default function ElectionDetailsScreen() {
 					</View>
 
 					{/* Signing rows — one per proposed keyholder */}
-					{proposed!.proposed.keyholders.map((holder, idx) => (
-						<View key={holder.name ?? `proposed-holder-${idx}`} style={styles.signingRow}>
-							<ThemedText type="defaultSemiBold" style={styles.holderName}>{holder.name}</ThemedText>
-							<View style={styles.signingPills}>
-								<CustomButton
-									title={t("signRevision")}
-									size="thin"
-									icon="signature"
-									backgroundColor={colors.accent}
-									onPress={() => console.log("sign-stub")}
-								/>
-								<CustomButton
-									title={t("shareRevision")}
-									size="thin"
-									icon="share-nodes"
-									backgroundColor={colors.warning}
-									onPress={() => console.log("share-stub")}
-								/>
+					{proposed!.proposed.keyholders.map((holder, idx) => {
+						// EUI-04 (D-02): navigation-only task object; real signing is Phase 21.
+						// Mirrors TasksScreen.tsx:129 navigate("SignatureTask", { task }) shape.
+						const signatureTask: ElectionRevisionSignatureTask = {
+							type: "signature",
+							signatureType: "election-revision",
+							// network and userId are not available on this screen; Phase 21 will
+							// source the real task from the task queue (navigation-only this phase).
+							network: { hash: "", name: election.authorityId, primaryAuthorityDomainName: election.authorityId, relays: [] },
+							userId: "",
+							election: {
+								proposed: {
+									election: {
+										id: election.id,
+										authorityId: election.authorityId,
+										title: election.title,
+										type: election.type,
+										date: election.date,
+										revisionDeadline: election.revisionDeadline,
+										ballotDeadline: election.ballotDeadline,
+									},
+									revision: proposed!.proposed,
+								},
+								signers: [],
+							},
+						};
+						return (
+							<View key={holder.name ?? `proposed-holder-${idx}`} style={styles.signingRow}>
+								<ThemedText type="defaultSemiBold" style={styles.holderName}>{holder.name}</ThemedText>
+								<View style={styles.signingPills}>
+									<CustomButton
+										title={t("signRevision")}
+										size="thin"
+										icon="signature"
+										backgroundColor={colors.accent}
+										onPress={() => navigation.navigate("SignatureTask", { task: signatureTask })}
+									/>
+									<CustomButton
+										title={t("shareRevision")}
+										size="thin"
+										icon="share-nodes"
+										backgroundColor={colors.warning}
+										onPress={() => handleShare(election, proposed, current)}
+									/>
+								</View>
 							</View>
-						</View>
-					))}
+						);
+					})}
 
 					{/* ADJUST REVISION → EditElectionRevision */}
 					<CustomButton
