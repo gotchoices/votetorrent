@@ -42,8 +42,8 @@ export function KeyholderInvitationScreen() {
 			if (mode !== "accept" || !invitationId) return;
 			try {
 				const engine = await getEngine<IInvitationEngine>("invitations");
-				const status = await engine.getOfficerInvite(invitationId);
-				setInvite(status as unknown as InviteStatus<SentKeyholderInvite>);
+				const status = await engine.getKeyholderInvite(invitationId);
+				setInvite(status);
 			} catch (error) {
 				console.error("Error loading keyholder invite:", error);
 			}
