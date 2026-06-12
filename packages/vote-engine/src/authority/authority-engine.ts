@@ -458,6 +458,165 @@ export class AuthorityEngine implements IAuthorityEngine {
 		}
 	}
 
+	// ---- SURF-03: pending-invite read + cancel/resend (non-signing, D-05/06/07) ----
+
+	/**
+	 * SURF-03 read surface: return the Cids of pending officer-invite InviteSlots
+	 * (Type = 'of') for this authority's signing scope, filtered to drop any slot
+	 * that has been responded to (InviteResult) OR cancelled (InviteCancellation).
+	 *
+	 * The cancellation filter is the second `NOT EXISTS` clause appended to the
+	 * existing `getPendingOfficerInvites` template (invitation-engine.ts:35-38):
+	 * a slot with a matching InviteCancellation marker drops off the list while
+	 * the append-only marker — and the slot itself — persist for audit (D-06).
+	 *
+	 * Scoped to this authority via the AdminSigning join used by
+	 * getAuthorityInvites (scope 'rad' = officer-invite admin approval).
+	 */
+	async getPendingInviteCids(): Promise<string[]> {
+		try {
+			const cids: string[] = [];
+			for await (const row of this.ctx.db.eval(
+				`select IS_.Cid from InviteSlot IS_
+					join AdminSigning ADS on IS_.SigningNonce = ADS.Nonce
+				where IS_.Type = 'of'
+					and ADS.AuthorityId = :id
+					and not exists (select 1 from InviteResult IR where IR.SlotCid = IS_.Cid)
+					and not exists (select 1 from InviteCancellation C where C.SlotCid = IS_.Cid)`,
+				{ id: this.authority.id },
+			)) {
+				cids.push(row.Cid as string);
+			}
+			return cids;
+		} catch (err) {
+			this.rethrow(err, 'getPendingInviteCids');
+		}
+	}
+
+	/**
+	 * SURF-03 (D-05/D-06): cancel a pending invitation by inserting an append-only
+	 * InviteCancellation marker keyed by the InviteSlot Cid. NON-signing: the
+	 * context envelope carries only Tid + now. The InviteSlot is never mutated
+	 * (InviteSlot is InsertOnly); the slot simply drops off getPendingInviteCids
+	 * on the next read because of the InviteCancellation NOT EXISTS filter.
+	 *
+	 * Throws when the slot does not exist (the marker's SlotExists CHECK also
+	 * enforces this at the schema boundary — belt and suspenders).
+	 */
+	async cancelInvite(slotCid: string): Promise<void> {
+		try {
+			const slot = await this.ctx.db
+				.prepare('select Cid from InviteSlot where Cid = :slotCid')
+				.get({ slotCid });
+			if (!slot) {
+				throw new Error(`InviteSlot not found: ${slotCid}`);
+			}
+			await this.ctx.db.exec(
+				`insert into InviteCancellation (SlotCid, CancelledAt)
+					with context Tid = ${nextTid++}, now = :now
+				values (:slotCid, :now)`,
+				{ slotCid, now: nowCanonicalDatetime() },
+			);
+		} catch (err) {
+			this.rethrow(err, 'cancelInvite');
+		}
+	}
+
+	/**
+	 * SURF-03 (D-05/D-07): re-emit a pending invitation as a FRESH InviteSlot.
+	 * NON-signing (A2): reuses the original slot's already-approved SigningNonce
+	 * and InviteSignature, so NO new signing round runs (no saveInviteWithSigning,
+	 * no SigningEngine.sign). A fresh, unique Cid is derived by Digesting the
+	 * original fields together with the resend timestamp + a per-process Tid salt
+	 * (so the new row never PK-collides with the original). No marker links
+	 * old→new and there is no auto-supersede — both old and new may legitimately
+	 * appear in the pending list. Returns the new slot's Cid.
+	 *
+	 * Throws when the original slot does not exist.
+	 */
+	async resendInvite(slotCid: string): Promise<string> {
+		try {
+			const orig = await this.ctx.db
+				.prepare(
+					`select Cid, Type, Name, Expiration, InviteKey, InviteSignature, SigningNonce
+						from InviteSlot where Cid = :slotCid`,
+				)
+				.get({ slotCid });
+			if (!orig) {
+				throw new Error(`InviteSlot not found: ${slotCid}`);
+			}
+			const tid = nextTid++;
+			const now = nowCanonicalDatetime();
+			// Fresh, unique Cid: same fields as the original PLUS the resend
+			// timestamp and Tid salt, so the Digest (and therefore the Cid PK)
+			// differs from the original while the approval-bearing SigningNonce /
+			// InviteSignature are reused verbatim (A2 — no new signing round).
+			await this.ctx.db.exec(
+				`insert into InviteSlot (
+					Cid,
+					Type,
+					Name,
+					Expiration,
+					InviteKey,
+					InviteSignature,
+					SigningNonce
+					)
+					with context Tid = ${tid}, now = :now, IsSignatureValid = true, IsInsertValid = true, IsCidValid = true
+				values (
+					Digest(:expiration, :inviteKey, :inviteSignature, :name, :nonce, :type, :resendSalt),
+					:type,
+					:name,
+					:expiration,
+					:inviteKey,
+					:inviteSignature,
+					:nonce
+					)`,
+				{
+					type: orig.Type as string,
+					name: orig.Name as string,
+					expiration: orig.Expiration as string,
+					inviteKey: orig.InviteKey as string,
+					inviteSignature: orig.InviteSignature as string,
+					nonce: orig.SigningNonce as string,
+					resendSalt: `resend|${tid}|${now}`,
+					now,
+				},
+			);
+			const newRow = await this.ctx.db
+				.prepare(
+					`select Cid from InviteSlot
+						where SigningNonce = :nonce and InviteSignature = :inviteSignature and Cid <> :origCid`,
+				)
+				.get({
+					nonce: orig.SigningNonce as string,
+					inviteSignature: orig.InviteSignature as string,
+					origCid: slotCid,
+				});
+			if (!newRow) {
+				throw new Error('resendInvite: fresh InviteSlot not found after insert');
+			}
+			return newRow.Cid as string;
+		} catch (err) {
+			this.rethrow(err, 'resendInvite');
+		}
+	}
+
+	/**
+	 * Shared error funnel mirroring InvitationEngine.rethrow — maps Quereus /
+	 * misuse errors to plain Errors with full detail and re-wraps the rest.
+	 */
+	private rethrow(err: unknown, method: string): never {
+		if (err instanceof QuereusError) {
+			throw new Error(`Quereus error (code ${err.code}): ${err.message}`);
+		} else if (err instanceof MisuseError) {
+			throw new Error(`API misuse: ${err.message}`);
+		} else if (err instanceof Error) {
+			throw new Error(`AuthorityEngine.${method}: ${err.message}`);
+		} else {
+			throw new Error(`AuthorityEngine.${method}: unknown error: ${String(err)}`);
+		}
+	}
+
 	async saveInviteWithSigning(
 		invite: AuthorityInvite | OfficerInvite,
 		scope: Scope, // either 'iad' for authority invites or 'rad' for officer invites
