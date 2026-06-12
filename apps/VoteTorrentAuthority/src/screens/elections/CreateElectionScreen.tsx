@@ -103,6 +103,17 @@ export function CreateElectionScreen() {
 			return;
 		}
 
+		// WR-02 + WR-03: enforce the "at least one keyholder" model invariant
+		// (ElectionRevisionInit.keyholders) and strip blank rows so empty names
+		// never inflate keyholders.length / keyholderThreshold.
+		const cleanKeyholders = revision.keyholders
+			.map((name) => name.trim())
+			.filter(Boolean);
+		if (cleanKeyholders.length === 0) {
+			setErrorMessage(t("atLeastOneKeyholderRequired"));
+			return;
+		}
+
 		try {
 			const electionsEngine = await getEngine<IElectionsEngine>("elections");
 			if (!electionsEngine) {
@@ -123,15 +134,26 @@ export function CreateElectionScreen() {
 			const parseDateOrFallback = (s: string, fallbackMs: number): number =>
 				s.trim() ? new Date(s).getTime() || fallbackMs : fallbackMs;
 
+			// WR-05: the two required core date fields must actually PARSE — do not let an
+			// unparseable string silently fall back to a fabricated now+N-days timeline in
+			// the signed, immutable election. Surface a field error instead.
+			const parsedCoreDate = new Date(coreDate).getTime();
+			if (Number.isNaN(parsedCoreDate)) {
+				setDateError(t("invalidDate"));
+				return;
+			}
+			const parsedRevisionDeadline = new Date(coreRevisionDeadline).getTime();
+			if (Number.isNaN(parsedRevisionDeadline)) {
+				setRevisionDeadlineError(t("invalidDate"));
+				return;
+			}
+
 			// Generate the election id once and use it for both the seam call and the builder
 			// payload — the AdminSigning.Digest and Election.InsertValid Digest must use the
 			// IDENTICAL id (field contract: screen generates id, passes to both paths).
 			const electionId = `election-${now}`;
-			const electionDate = parseDateOrFallback(coreDate, now + 14 * 24 * 60 * 60 * 1000);
-			const electionRevisionDeadline = parseDateOrFallback(
-				coreRevisionDeadline,
-				now + 7 * 24 * 60 * 60 * 1000
-			);
+			const electionDate = parsedCoreDate;
+			const electionRevisionDeadline = parsedRevisionDeadline;
 			const electionBallotDeadline = now + 10 * 24 * 60 * 60 * 1000;
 			// EUI-03 (D-06): validated non-empty above — trim() only, no silent default
 			const electionTitle = coreTitle.trim();
@@ -153,7 +175,7 @@ export function CreateElectionScreen() {
 					revisionTimestamp: now - 1000,
 					tags: revision.tags,
 					instructions: revision.instructions,
-					keyholders: revision.keyholders.map((name) => ({
+					keyholders: cleanKeyholders.map((name) => ({
 						name,
 						type: "k",
 						expiration: "0",

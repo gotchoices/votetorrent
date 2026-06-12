@@ -83,6 +83,18 @@ export default function EditElectionScreen() {
 		if (!details) {
 			return;
 		}
+
+		// WR-02 + WR-03: enforce the "at least one keyholder" model invariant
+		// (ElectionRevisionInit.keyholders) and strip blank rows so empty names
+		// never inflate keyholders.length / keyholderThreshold.
+		const cleanKeyholders = revision.keyholders
+			.map((name) => name.trim())
+			.filter(Boolean);
+		if (cleanKeyholders.length === 0) {
+			setErrorMessage(t("atLeastOneKeyholderRequired"));
+			return;
+		}
+
 		setProposing(true);
 		try {
 			// Pitfall 4: adjustElection is on IElectionsEngine (not the route's IElectionEngine)
@@ -115,7 +127,7 @@ export default function EditElectionScreen() {
 					revisionTimestamp: now - 1000,
 					tags: revision.tags,
 					instructions: revision.instructions,
-					keyholders: revision.keyholders.map((name) => ({
+					keyholders: cleanKeyholders.map((name) => ({
 						name,
 						type: "k",
 						expiration: "0",
