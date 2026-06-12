@@ -10,6 +10,7 @@ import { NetworksEngine } from '../src/networks/networks-engine'
 import { nowCanonicalDatetime, toCanonicalDatetime } from '../src/utils.js'
 import type { EngineContext } from '../src/types.js'
 import { randomTestKeyPair } from './fixtures/keys.js'
+import { createTestNetwork, addTestAuthority, seedUserInvite, makeDistinctTestUser } from './fixtures/test-context.js'
 import { AsyncStorage } from './shims/react-native'
 import type {
   User,
@@ -823,6 +824,116 @@ describe('AuthorityEngine', () => {
       const names = invites.map((i) => i.invite.name)
       expect(names).to.include('AuthorityScoped')
       expect(names).to.not.include('OfficerScoped')
+    })
+  })
+
+  // -----------------------------------------------------------------------
+  // 7b. SURF-03: cancelInvite (marker drop-off) + resendInvite (fresh slot)
+  //
+  // D-08: seed a pending officer InviteSlot via the existing seedUserInvite
+  // fixture, then exercise cancel/resend against it. No new fixture infra.
+  // -----------------------------------------------------------------------
+  describe('cancelInvite / resendInvite (SURF-03, non-signing)', () => {
+    async function seedPendingInvite (): Promise<{
+      authorityEngine: AuthorityEngine
+      ctx: EngineContext
+      inviteSlotCid: string
+    }> {
+      const net = await createTestNetwork()
+      const auth = await addTestAuthority(net)
+      // seedUserInvite seeds an officer-scope (Type='of') InviteSlot via
+      // createOfficerInvite + saveInviteWithSigning and returns its Cid.
+      const newUser = makeDistinctTestUser()
+      const { inviteSlotCid } = await seedUserInvite(auth, newUser)
+      return {
+        authorityEngine: auth.authorityEngine as unknown as AuthorityEngine,
+        ctx: auth.ctx,
+        inviteSlotCid
+      }
+    }
+
+    it('lists a seeded pending invite via getPendingInviteCids', async () => {
+      const { authorityEngine, inviteSlotCid } = await seedPendingInvite()
+      const pending = await authorityEngine.getPendingInviteCids()
+      expect(pending).to.include(inviteSlotCid)
+    })
+
+    it('cancelInvite drops the slot off the pending list and writes an InviteCancellation marker', async () => {
+      const { authorityEngine, ctx, inviteSlotCid } = await seedPendingInvite()
+      expect(await authorityEngine.getPendingInviteCids()).to.include(inviteSlotCid)
+
+      await authorityEngine.cancelInvite(inviteSlotCid)
+
+      // Drops off the pending read (NOT EXISTS InviteCancellation filter).
+      expect(await authorityEngine.getPendingInviteCids()).to.not.include(inviteSlotCid)
+
+      // Audit marker persists (append-only).
+      const marker = await ctx.db
+        .prepare('select SlotCid from InviteCancellation where SlotCid = :cid')
+        .get({ cid: inviteSlotCid })
+      expect(marker?.SlotCid).to.equal(inviteSlotCid)
+
+      // The InviteSlot itself is never mutated/deleted (InsertOnly honored).
+      const slot = await ctx.db
+        .prepare('select Cid from InviteSlot where Cid = :cid')
+        .get({ cid: inviteSlotCid })
+      expect(slot?.Cid).to.equal(inviteSlotCid)
+    })
+
+    it('resendInvite emits a fresh slot (new Cid) reusing the original nonce/signature; no auto-supersede', async () => {
+      const { authorityEngine, ctx, inviteSlotCid } = await seedPendingInvite()
+
+      const orig = await ctx.db
+        .prepare('select SigningNonce, InviteSignature from InviteSlot where Cid = :cid')
+        .get({ cid: inviteSlotCid }) as { SigningNonce: string, InviteSignature: string }
+
+      const newCid = await authorityEngine.resendInvite(inviteSlotCid)
+      expect(newCid).to.be.a('string').with.length.greaterThan(0)
+      expect(newCid).to.not.equal(inviteSlotCid)
+
+      // Fresh slot reuses the original (already-approved) nonce + signature — no new signing round.
+      const fresh = await ctx.db
+        .prepare('select SigningNonce, InviteSignature from InviteSlot where Cid = :cid')
+        .get({ cid: newCid }) as { SigningNonce: string, InviteSignature: string }
+      expect(fresh.SigningNonce).to.equal(orig.SigningNonce)
+      expect(fresh.InviteSignature).to.equal(orig.InviteSignature)
+
+      // No auto-supersede: original was NOT cancelled, so BOTH appear in pending.
+      const pending = await authorityEngine.getPendingInviteCids()
+      expect(pending).to.include(inviteSlotCid)
+      expect(pending).to.include(newCid)
+    })
+
+    it('resend after cancel: cancelled original stays off, fresh slot appears', async () => {
+      const { authorityEngine, inviteSlotCid } = await seedPendingInvite()
+      await authorityEngine.cancelInvite(inviteSlotCid)
+      const newCid = await authorityEngine.resendInvite(inviteSlotCid)
+
+      const pending = await authorityEngine.getPendingInviteCids()
+      expect(pending).to.not.include(inviteSlotCid)
+      expect(pending).to.include(newCid)
+    })
+
+    it('cancelInvite throws when the slot does not exist', async () => {
+      const { authorityEngine } = await seedPendingInvite()
+      let threw = false
+      try {
+        await authorityEngine.cancelInvite('nonexistent-cid')
+      } catch {
+        threw = true
+      }
+      expect(threw).to.equal(true)
+    })
+
+    it('resendInvite throws when the slot does not exist', async () => {
+      const { authorityEngine } = await seedPendingInvite()
+      let threw = false
+      try {
+        await authorityEngine.resendInvite('nonexistent-cid')
+      } catch {
+        threw = true
+      }
+      expect(threw).to.equal(true)
     })
   })
 
