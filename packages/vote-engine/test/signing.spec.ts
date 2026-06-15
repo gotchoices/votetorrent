@@ -9,10 +9,12 @@ import { prepareDb } from '../src/database/initialize'
 import { NetworksEngine } from '../src/networks/networks-engine'
 import { SigningEngine } from '../src/signing/signing-engine'
 import { SignatureTasksEngine } from '../src/tasks/signature-tasks-engine.js'
+import { KeysTasksEngine } from '../src/tasks/keys-tasks-engine.js'
 import { MockSigningEngine } from '../src/signing/mock-signing-engine'
 import { SigningSignBuilder } from '../src/signing/builders/signing-sign-builder.js'
 import { SigningStartSigningSessionBuilder } from '../src/signing/builders/signing-start-signing-session-builder.js'
-import { createTestNetwork, addTestAuthority, makeTestSignature } from './fixtures/test-context.js'
+import { createTestNetwork, addTestAuthority, addTestElection, makeTestSignature } from './fixtures/test-context.js'
+import { nowCanonicalDatetime } from '../src/utils.js'
 import type { EngineContext } from '../src/types.js'
 import { randomTestKeyPair } from './fixtures/keys.js'
 import { AsyncStorage } from './shims/react-native'
@@ -21,6 +23,7 @@ import type {
   ISigningEngine,
   NetworkInit,
   NetworkReference,
+  ReleaseKeyTask,
   Scope,
   Signature,
   SignatureTask,
@@ -458,42 +461,103 @@ describe('SigningEngine', () => {
 // ===========================================================================
 
 describe('completeSignature reject-branch (D-12)', () => {
-  // Shared fixture: seed an AdminSigning session and a matching Task row so
-  // completeSignature has a pending Task to resolve.
-  // Uses PATH A (digestArgs provided) so no InviteSlot pre-seeding is needed.
+  // Shared fixture: seed a ProposedAdmin + AdminSigning + Task + AdminSignatureTaskExtension
+  // chain so completeSignature has a pending Task to resolve.
+  //
+  // Seeding strategy (D-12 fix plan):
+  //   1. Insert ProposedAdmin using the current Admin's EffectiveAt.
+  //   2. Insert AdminSigning with Digest(tid, authorityId, adminEffectiveAt, thresholdPolicies)
+  //      — matches AdminSignatureTaskExtension.MutationValid's Digest formula.
+  //      Do NOT call sign() yet so AdminSignature doesn't exist at extension-insert time.
+  //   3. Use explicit BEGIN...exec...exec...COMMIT to insert Task + AdminSignatureTaskExtension
+  //      together so the deferred ExtensionExists / TaskIdValid checks see each other's rows
+  //      at COMMIT (avoids the quereus single-exec batch visibility limitation).
   async function seedSignatureTask (auth: Awaited<ReturnType<typeof addTestAuthority>>) {
-    const signingEngine = new SigningEngine(auth.ctx)
+    const sig = makeTestSignature(auth.user)
+    const nonce = crypto.randomUUID()
+    const taskId = crypto.randomUUID()
+    // Tid used in both the AdminSigning Digest and the extension context so
+    // AdminSignatureTaskExtension.MutationValid's Digest(context.Tid, ...) matches.
+    const tid = Date.now()
+    const thresholdPolicies = '[]'
 
-    // PATH A: pass real AdminDigestArgs — the signing engine generates a fresh nonce.
-    const digestArgs: AdminDigestArgs = {
-      authorityId: auth.authority.id,
-      effectiveAt: String(Date.now()),
-      thresholdPolicies: JSON.stringify([{ policy: 'rad', threshold: 1 }])
-    }
-    const { nonce } = await signingEngine.startSigningSession(
-      auth.authority.id,
-      digestArgs,
-      'rad' as Scope,
-      makeTestSignature(auth.user)
-    )
+    // Resolve CurrentAdmin.EffectiveAt for the authority.
+    const adminRow = await auth.ctx.db
+      .prepare('select EffectiveAt from CurrentAdmin where AuthorityId = :authorityId')
+      .get({ authorityId: auth.authority.id })
+    if (!adminRow) throw new Error('seedSignatureTask: CurrentAdmin not found')
+    const adminEffectiveAt = adminRow.EffectiveAt as string
 
-    // Insert a pending signature Task tied to this signing nonce.
-    // Task.SignatureTypeValid gates on the SignatureType view (first row = 'admin').
+    // Step 1: Insert ProposedAdmin (requires Authority to exist + IsUserValid context).
+    // Using adminEffectiveAt from CurrentAdmin so AdminSignatureTaskExtension.AdminEffectiveAtValid
+    // (which checks Admin, not ProposedAdmin) also passes.
     await auth.ctx.db.exec(
-      `insert into Task (Id, UserId, Type, SignatureType, SigningNonce, IsCompleted)
-       with context IsMutationValid = true, Tid = :tid
-       values (:id, :userId, 'signature', 'admin', :nonce, 0)`,
+      `insert into ProposedAdmin (AuthorityId, EffectiveAt, ThresholdPolicies)
+       with context IsUserValid = true, Tid = :tid, now = :now,
+                    UserId = :userId, UserKey = :signerKey, Signature = :signature
+       values (:authorityId, :adminEffectiveAt, :thresholdPolicies)`,
       {
-        id: crypto.randomUUID(),
-        userId: auth.user.id,
-        nonce,
-        tid: Date.now(),
+        authorityId: auth.authority.id,
+        adminEffectiveAt,
+        thresholdPolicies,
+        tid,
+        now: nowCanonicalDatetime(),
+        userId: sig.signerUserId,
+        signerKey: sig.signerKey,
+        signature: sig.signature,
       }
     )
-    return { nonce }
+
+    // Step 2: Insert AdminSigning with the 4-arg Digest formula that
+    // AdminSignatureTaskExtension.MutationValid will recompute at extension-INSERT time:
+    //   Digest(context.Tid, PA.AuthorityId, PA.EffectiveAt, PA.ThresholdPolicies)
+    // We do NOT call sign() here — AdminSignature must be absent when the extension is inserted
+    // (the extension's MutationValid "not exists AdminSignature for uncompleted task" gate).
+    await auth.ctx.db.exec(
+      `insert into AdminSigning (Nonce, AuthorityId, AdminEffectiveAt, Scope, Digest, UserId, SignerKey, Signature)
+       with context now = :now, IsSignatureValid = true, IsSignerKeyValid = true
+       values (:nonce, :authorityId, :adminEffectiveAt, 'rad',
+               Digest(:tid, :authorityId, :adminEffectiveAt, :thresholdPolicies),
+               :userId, :signerKey, :signature)`,
+      {
+        nonce,
+        authorityId: auth.authority.id,
+        adminEffectiveAt,
+        thresholdPolicies,
+        tid,
+        now: nowCanonicalDatetime(),
+        userId: sig.signerUserId,
+        signerKey: sig.signerKey,
+        signature: sig.signature,
+      }
+    )
+
+    // Step 3: Insert Task + AdminSignatureTaskExtension in one explicit transaction so the
+    // deferred ExtensionExists (on Task) and TaskIdValid (on extension) checks see each other
+    // at COMMIT — avoids the quereus single-exec batch visibility limitation noted in 21-02.
+    await auth.ctx.db.exec('BEGIN')
+    try {
+      await auth.ctx.db.exec(
+        `insert into Task (Id, UserId, Type, SignatureType, SigningNonce, IsCompleted)
+         with context IsMutationValid = true, Tid = :tid
+         values (:id, :userId, 'signature', 'admin', :nonce, 0)`,
+        { id: taskId, userId: auth.user.id, nonce, tid }
+      )
+      await auth.ctx.db.exec(
+        `insert into AdminSignatureTaskExtension (TaskId, AuthorityId, AdminEffectiveAt)
+         with context Tid = :tid
+         values (:taskId, :authorityId, :adminEffectiveAt)`,
+        { taskId, authorityId: auth.authority.id, adminEffectiveAt, tid }
+      )
+      await auth.ctx.db.exec('COMMIT')
+    } catch (err) {
+      await auth.ctx.db.exec('ROLLBACK')
+      throw err
+    }
+
+    return { nonce, taskId }
   }
 
-  // EXPECTED-RED-UNTIL-IMPL (D-12 reject-branch fix plan)
   it('reject (isAccepted=false) marks the Task complete WITHOUT inserting an OfficerSignature or advancing the threshold', async () => {
     // SIGN-02 / D-12: When the officer DECLINES, completeSignature must NOT call
     // signingEngine.sign() — which would forge a threshold advance (D-12 threat).
@@ -501,7 +565,7 @@ describe('completeSignature reject-branch (D-12)', () => {
     const auth = await addTestAuthority(await createTestNetwork())
     await seedSignatureTask(auth)
 
-    // Record OfficerSignature count BEFORE the reject call.
+    // Record OfficerSignature count BEFORE the reject call (should be 0 — we did NOT sign at seed).
     const countBefore = await auth.ctx.db
       .prepare('select count(*) as c from OfficerSignature')
       .get({})
@@ -537,63 +601,140 @@ describe('completeSignature reject-branch (D-12)', () => {
 
     // Assert 2: the Task row is marked IsCompleted (task is complete even on reject).
     const taskRow = await auth.ctx.db
-      .prepare('select IsCompleted from Task where UserId = :userId and Type = :type and SignatureType = :sigType')
+      .prepare('select IsCompleted from Task where UserId = :userId and Type = :type and SignatureType = :sigType and IsCompleted = 1')
       .get({ userId: auth.user.id, type: 'signature', sigType: 'admin' })
-    expect(Boolean((taskRow as any)?.IsCompleted), 'Task.IsCompleted must be set after reject').to.equal(true)
+    expect(taskRow, 'Task.IsCompleted must be 1 after reject').to.not.be.undefined
   })
 
-  // EXPECTED-RED-UNTIL-IMPL (D-12 reject-branch fix plan — positive control)
-  it('accept (isAccepted=true) DOES insert an OfficerSignature (positive control)', async () => {
-    // Positive control: the accept path must still call sign() and insert an OfficerSignature row.
-    // The startSigningSession in seedSignatureTask already calls sign() internally for threshold=1
-    // (producing the OfficerSignature at seed time). We seed a FRESH session per this test so the
-    // OfficerSignature state is clean.
+  it('accept (isAccepted=true) inserts an OfficerSignature and auto-completes AdminSignature (D-11 threshold=1)', async () => {
+    // Positive control: the accept path must call sign() and insert an OfficerSignature row.
+    // At threshold=1, AdminSignature is also auto-inserted (D-11).
     const auth = await addTestAuthority(await createTestNetwork())
-    await seedSignatureTask(auth)
+    const { nonce } = await seedSignatureTask(auth)
 
-    // Record OfficerSignature count BEFORE — the seed's startSigningSession already inserted one.
+    // OfficerSignature count BEFORE accept — should be 0 (no sign at seed).
     const countBefore = await auth.ctx.db
-      .prepare('select count(*) as c from OfficerSignature')
-      .get({})
-    const officerSigCountBefore = Number((countBefore as any)?.c ?? 0)
+      .prepare('select count(*) as c from OfficerSignature where SigningNonce = :nonce')
+      .get({ nonce })
+    expect(Number((countBefore as any)?.c ?? 0), 'OfficerSignature count before accept must be 0').to.equal(0)
 
-    // The accept path must call sign() and insert another OfficerSignature if the threshold
-    // isn't met yet. Since startSigningSession already consumed the (nonce, user) PK for the
-    // same task, a second sign() would PK-collide. We re-seed a fresh signing nonce for this leg.
-    const signingEngine2 = new SigningEngine(auth.ctx)
-    const digestArgs2: AdminDigestArgs = {
-      authorityId: auth.authority.id,
-      effectiveAt: String(Date.now() + 1),
-      thresholdPolicies: JSON.stringify([{ policy: 'rad', threshold: 1 }])
+    const networkRef = {
+      hash: 'test-hash',
+      name: 'Test Network',
+      relays: [],
+      primaryAuthorityDomainName: 'test.example'
     }
-    const { nonce: nonce2 } = await signingEngine2.startSigningSession(
-      auth.authority.id,
-      digestArgs2,
-      'rad' as Scope,
-      makeTestSignature(auth.user)
-    )
-    await auth.ctx.db.exec(
-      `insert into Task (Id, UserId, Type, SignatureType, SigningNonce, IsCompleted)
-       with context IsMutationValid = true, Tid = :tid
-       values (:id, :userId, 'signature', 'admin', :nonce, 0)`,
-      {
-        id: crypto.randomUUID(),
-        userId: auth.user.id,
-        nonce: nonce2,
-        tid: Date.now() + 1,
-      }
-    )
+    const tasksEngine = new SignatureTasksEngine(networkRef, auth.ctx)
+    const task: SignatureTask = {
+      type: 'signature',
+      userId: auth.user.id,
+      network: networkRef,
+      signatureType: 'admin'
+    }
+    const sig = makeTestSignature(auth.user)
+    const acceptResult = { isAccepted: true, signature: sig }
 
-    // Count before the second completeSignature (includes all rows from both seeds).
-    const countBefore2 = await auth.ctx.db
-      .prepare('select count(*) as c from OfficerSignature')
-      .get({})
-    const officerCountBefore2 = Number((countBefore2 as any)?.c ?? 0)
+    await tasksEngine.completeSignature(task, acceptResult)
 
-    // startSigningSession internally calls sign() — which already produced OfficerSignature.
-    // For threshold=1 the AdminSignature is also inserted. The accept positive-control here
-    // asserts the OfficerSignature count is at LEAST 1 (proving the accept path did sign).
-    expect(officerCountBefore2, 'accept path: OfficerSignature count must be >= 1 after seed').to.be.greaterThanOrEqual(1)
+    // Assert 1: OfficerSignature was inserted by sign() on the accept path.
+    const officerSigRow = await auth.ctx.db
+      .prepare('select UserId from OfficerSignature where SigningNonce = :nonce')
+      .get({ nonce })
+    expect(officerSigRow?.UserId, 'OfficerSignature must be inserted on accept').to.equal(auth.user.id)
+
+    // Assert 2: AdminSignature was inserted — threshold=1 auto-completes (D-11).
+    const adminSigRow = await auth.ctx.db
+      .prepare('select SigningNonce from AdminSignature where SigningNonce = :nonce')
+      .get({ nonce })
+    expect(adminSigRow?.SigningNonce, 'AdminSignature must exist after threshold=1 accept').to.equal(nonce)
+
+    // Assert 3: Task is marked IsCompleted=1.
+    const taskRow = await auth.ctx.db
+      .prepare('select IsCompleted from Task where UserId = :userId and Type = :type and SignatureType = :sigType and IsCompleted = 1')
+      .get({ userId: auth.user.id, type: 'signature', sigType: 'admin' })
+    expect(taskRow, 'Task.IsCompleted must be 1 after accept').to.not.be.undefined
+  })
+})
+
+// ===========================================================================
+// completeKeyRelease tests (SIGN-03)
+//
+// Seeds a real Election + ElectionRevision (via addTestElection), then seeds a
+// release-key Task + ReleaseKeyTaskExtension in an explicit BEGIN...COMMIT so
+// the deferred ExtensionExists / TaskIdValid checks see each other at COMMIT.
+// Calls completeKeyRelease and asserts the Task is IsCompleted=1.
+// ===========================================================================
+
+describe('completeKeyRelease (SIGN-03)', () => {
+  // Seed a release-key Task + ReleaseKeyTaskExtension in a single transaction.
+  async function seedReleaseKeyTask (elCtx: Awaited<ReturnType<typeof addTestElection>>) {
+    const taskId = crypto.randomUUID()
+    const tid = Date.now()
+
+    // Read the seeded Election id from the DB (addTestElection seeds exactly one).
+    const electionRow = await elCtx.ctx.db
+      .prepare('select Id from Election where AuthorityId = :authorityId limit 1')
+      .get({ authorityId: elCtx.authority.id })
+    if (!electionRow) throw new Error('seedReleaseKeyTask: Election not found')
+    const electionId = electionRow.Id as string
+
+    // Insert Task + ReleaseKeyTaskExtension in one explicit transaction so the
+    // deferred ExtensionExists (Task) and TaskIdValid (extension) checks see each
+    // other at COMMIT.
+    await elCtx.ctx.db.exec('BEGIN')
+    try {
+      await elCtx.ctx.db.exec(
+        `insert into Task (Id, UserId, Type, IsCompleted)
+         with context IsMutationValid = true, Tid = :tid
+         values (:id, :userId, 'release-key', 0)`,
+        { id: taskId, userId: elCtx.user.id, tid }
+      )
+      await elCtx.ctx.db.exec(
+        `insert into ReleaseKeyTaskExtension (TaskId, ElectionId, ElectionRevision)
+         with context Tid = :tid
+         values (:taskId, :electionId, 0)`,
+        { taskId, electionId, tid }
+      )
+      await elCtx.ctx.db.exec('COMMIT')
+    } catch (err) {
+      await elCtx.ctx.db.exec('ROLLBACK')
+      throw err
+    }
+
+    return { taskId, electionId }
+  }
+
+  it('marks a release-key Task as completed (SIGN-03 real pipeline)', async () => {
+    // Seed the full election context (includes AdminSigning + AdminSignature for election).
+    const auth = await addTestAuthority(await createTestNetwork())
+    const elCtx = await addTestElection(auth)
+    const { electionId } = await seedReleaseKeyTask(elCtx)
+
+    const networkRef = {
+      hash: 'test-hash',
+      name: 'Test Network',
+      relays: [],
+      primaryAuthorityDomainName: 'test.example'
+    }
+    const engine = new KeysTasksEngine(networkRef, elCtx.ctx)
+
+    const task: ReleaseKeyTask = {
+      type: 'release-key',
+      userId: elCtx.user.id,
+      network: networkRef,
+      election: {
+        election: { id: electionId, authorityId: elCtx.authority.id } as never,
+        current: {} as never,
+      },
+    }
+
+    await engine.completeKeyRelease(task)
+
+    // Assert: Task is marked IsCompleted=1.
+    const taskRow = await elCtx.ctx.db
+      .prepare('select IsCompleted from Task where UserId = :userId and Type = :type and IsCompleted = 1')
+      .get({ userId: elCtx.user.id, type: 'release-key' })
+    expect(taskRow, 'Task.IsCompleted must be 1 after completeKeyRelease').to.not.be.undefined
   })
 })
 

@@ -114,9 +114,16 @@ export class SignatureTasksEngine implements ISignatureTasksEngine {
       )
     }
     const nonce = taskRow.SigningNonce as string
-    await this.signingEngine.sign(nonce, result.signature)
 
-    // Mark the task complete.
+    // D-12: Branch on result.isAccepted.
+    // Accept path only — call sign() to insert OfficerSignature and (at threshold=1)
+    // auto-complete AdminSignature. Do NOT call sign() on reject: a rejection that
+    // advances the signing session is a critical integrity hole (D-12 threat).
+    if (result.isAccepted) {
+      await this.signingEngine.sign(nonce, result.signature)
+    }
+
+    // Mark the task complete (unconditional — both accept and reject close the task).
     const tid = nextTid++
     try {
       await this.ctx!.db.exec(
