@@ -406,6 +406,9 @@ const resources = {
 			questionsLabel: 'Questions',
 			validForAuthority: '[valid for {{authority}}]',
 			filterAuthoritiesField: 'Filter authorities...',
+			// Phase 21 plan 21-07 (UKEY-03) — D-15 copy: external-key honest-state strings with no phase numbers
+			scanDeviceNotAvailable: 'Requires a paired device',
+			generateExternalKeyNotAvailable: 'Requires a hardware key device',
 			// Phase 10 plan 10-01 (USRUI-05/09; USRUI-01 polish) — D-17: en-only; Spanish deferred to Phase 11
 			addedKey: 'Added Key',
 			noActiveKeysFound: 'No active keys found.',
@@ -817,6 +820,9 @@ const resources = {
 			questionsLabel: 'Preguntas', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
 			validForAuthority: '[válido para {{authority}}]', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
 			filterAuthoritiesField: 'Filtrar autoridades...', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			// Phase 21 plan 21-07 (UKEY-03) — D-15 copy: external-key honest-state strings
+			scanDeviceNotAvailable: 'Requiere un dispositivo emparejado',
+			generateExternalKeyNotAvailable: 'Requiere un dispositivo con clave de hardware',
 			// Phase 10 plan 10-01 (USRUI-05/09) — Phase 11 plan 11-01 (D-11) — Spanish backfill.
 			addedKey: 'Clave Agregada', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
 			noActiveKeysFound: 'No se encontraron claves activas.', // Phase 11 plan 11-01 (D-11) — Spanish backfill.

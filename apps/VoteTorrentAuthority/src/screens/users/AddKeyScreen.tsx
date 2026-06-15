@@ -16,6 +16,7 @@ import { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useSettings } from "../../providers/SettingsProvider";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { bytesToHex } from "@noble/curves/utils.js";
+import { createDeviceSigner } from "../../engines/device-signer";
 
 export function AddKeyScreen() {
 	const { user, userEngine } = useRoute().params as { user: User; userEngine: IUserEngine };
@@ -25,14 +26,14 @@ export function AddKeyScreen() {
 	const { colors } = useTheme() as ExtendedTheme;
 	const { showHelpIcons } = useSettings();
 
-	// Phase 22: scan device (P2P external-key flow) — not available yet
+	// External paired-device / hardware-key flow — not available yet
 	const scanDevice = () => {
-		// Available in Phase 22
+		// Requires a paired device — external device flow deferred
 	};
 
-	// Phase 22: generate external (Yubico/hardware) key — not available yet
+	// External paired-device / hardware-key flow — not available yet
 	const generateExternalKey = () => {
-		// Available in Phase 22
+		// Requires a hardware key device — Yubico/hardware-key flow deferred
 	};
 
 	const handleGenerateAndAddKey = async () => {
@@ -41,11 +42,6 @@ export function AddKeyScreen() {
 		// D-04: the device user always has one key from getOrCreateDeviceUser.
 		// first-key path only fires for a user created WITHOUT a key (e.g. in tests).
 		const isFirstKey = user.activeKeys.length === 0;
-		if (!isFirstKey) {
-			// D-04 honest state — adding a subsequent key requires signing (Phase 21)
-			setErrorMessage("Adding a subsequent key requires signing (Phase 21).");
-			return;
-		}
 
 		try {
 			// Generate a real secp256k1 keypair (CSPRNG — T-20-09 mitigation)
@@ -57,7 +53,14 @@ export function AddKeyScreen() {
 			// Security: privKey stays local — NEVER logged, NEVER passed to addKey (T-20-08)
 
 			const expiration = Date.now() + 10 * 365 * 24 * 60 * 60 * 1000; // 10 years
-			await userEngine.addKey({ key: pubHex, type: UserKeyType.mobile, expiration });
+
+			// First-key path: no sign callback (schema's UserKey = null short-circuit).
+			// Subsequent-key path: build signer from the existing active device key
+			// so the engine can bind context.UserKey = existing pubkey + real signature
+			// (UKEY-03 / D-14). createDeviceSigner owns the device private key — the
+			// screen never reads getDevicePrivKeyHex directly (D-01).
+			const signer = isFirstKey ? undefined : await createDeviceSigner(user.name);
+			await userEngine.addKey({ key: pubHex, type: UserKeyType.mobile, expiration }, signer);
 			navigation.goBack();
 		} catch (err) {
 			setErrorMessage(err instanceof Error ? err.message : String(err));
@@ -94,7 +97,7 @@ export function AddKeyScreen() {
 							onPress={() => scanDevice()}
 						/>
 						<ThemedText type="small" style={{ color: colors.textSecondary }}>
-							{"(Available in Phase 22)"}
+							{t("scanDeviceNotAvailable")}
 						</ThemedText>
 					</View>
 					<View style={styles.section}>
@@ -111,7 +114,7 @@ export function AddKeyScreen() {
 							onPress={() => generateExternalKey()}
 						/>
 						<ThemedText type="small" style={{ color: colors.textSecondary }}>
-							{"(Available in Phase 22)"}
+							{t("generateExternalKeyNotAvailable")}
 						</ThemedText>
 					</View>
 				</View>
