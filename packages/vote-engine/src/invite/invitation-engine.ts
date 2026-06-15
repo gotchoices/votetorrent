@@ -3,6 +3,7 @@ import { secp256k1 } from '@noble/curves/secp256k1.js'
 import { sha256 } from '@noble/hashes/sha2'
 import { MisuseError, QuereusError } from '@quereus/quereus'
 import type { EngineContext } from '../types.js'
+import { nowCanonicalDatetime } from '../utils.js'
 import type {
   IInvitationEngine,
   InviteStatus,
@@ -38,8 +39,9 @@ export class InvitationEngine implements IInvitationEngine {
       for await (const row of this.ctx.db.eval(
         `SELECT Cid, Name FROM InviteSlot
          WHERE Type = 'of'
-           AND NOT EXISTS (SELECT 1 FROM InviteResult IR WHERE IR.SlotCid = Cid)`,
-        {}
+           AND NOT EXISTS (SELECT 1 FROM InviteResult IR WHERE IR.SlotCid = Cid)
+           AND Expiration > :now`,
+        { now: nowCanonicalDatetime() }
       )) {
         out.push({
           // InviteSlot stores only Name; title/scopes deferred — see 15-RESEARCH.md Q4 option 3
@@ -62,8 +64,9 @@ export class InvitationEngine implements IInvitationEngine {
       for await (const row of this.ctx.db.eval(
         `SELECT Cid, Name FROM InviteSlot
          WHERE Type = 'au'
-           AND NOT EXISTS (SELECT 1 FROM InviteResult IR WHERE IR.SlotCid = Cid)`,
-        {}
+           AND NOT EXISTS (SELECT 1 FROM InviteResult IR WHERE IR.SlotCid = Cid)
+           AND Expiration > :now`,
+        { now: nowCanonicalDatetime() }
       )) {
         out.push({
           invite: { name: row.Name as string, type: 'au' as const },
