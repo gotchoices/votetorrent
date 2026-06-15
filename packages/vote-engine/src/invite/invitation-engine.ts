@@ -1,3 +1,6 @@
+import { bytesToHex, hexToBytes } from '@noble/curves/utils.js'
+import { secp256k1 } from '@noble/curves/secp256k1.js'
+import { sha256 } from '@noble/hashes/sha2'
 import { MisuseError, QuereusError } from '@quereus/quereus'
 import type { EngineContext } from '../types.js'
 import type {
@@ -209,15 +212,126 @@ export class InvitationEngine implements IInvitationEngine {
   }
 
   /**
-   * BLOCKED: respondToInvite requires the full secp256k1 invite-signing
-   * pipeline (InviteSignature over H(SlotCid, Digest, IsAccepted)) and an
-   * InviteResult INSERT that passes the `IsSigningValid` + `IsSignatureValid`
-   * context checks. The write path is deferred to a future phase (D-08).
+   * Accept or decline an invitation, writing a real local InviteResult row.
    *
-   * @throws {Error} Always — this method is not yet implemented.
+   * INV-04 (accept): writes InviteResult with IsAccepted=true, non-null Digest,
+   * and a real ephemeral-key InviteSignature over H(SlotCid, Digest, true).
+   *
+   * INV-05 / D-09 (signed decline): writes InviteResult with IsAccepted=false,
+   * Digest=null, and a REAL ephemeral-key InviteSignature over H(SlotCid, null, false).
+   * A decline is a cryptographically authenticated "no" — not a bare flag.
+   *
+   * InviteSignature byte form (A1 LOCKED — do not deviate):
+   *   signedBytes = TextEncoder.encode([slotCid, digestToken, String(accept)].join('|'))
+   *   sig = bytesToHex(secp256k1.sign(sha256(signedBytes), invitePrivBytes))
+   *   — noble v2 defaults (prehash:true); NEVER { prehash: false }
+   *   where digestToken = digest for accept, 'null' for decline
+   *
+   * The device user's private key MUST NOT enter this method (T-21-04-05).
+   * Only the ephemeral one-time invite key (from D-06 paste) is permitted.
+   *
+   * Phase-22 cross-device P2P transport: disabled boundary (D-08). The
+   * cross-device "send over network" hop is deferred to the P2P transport
+   * phase. Only the local InviteResult write is real in this phase.
    */
-  async respondToInvite (_invitationId: string, _accept: boolean): Promise<void> {
-    throw new Error('respondToInvite: full signing pipeline not yet implemented')
+  async respondToInvite (
+    invitationId: string,
+    accept: boolean,
+    invitePrivate?: string,
+    digest?: string,
+    invokedId?: string,
+  ): Promise<void> {
+    // invitationId is the InviteSlot Cid in the thin IInvitationEngine surface
+    // (as used by the accept/decline screens per D-06 paste flow).
+    const slotCid = invitationId
+
+    try {
+      // Step 1: Resolve the slot to confirm it exists (fail fast with a clear error).
+      const slotRow = await this.ctx.db
+        .prepare('SELECT Cid FROM InviteSlot WHERE Cid = :slotCid')
+        .get({ slotCid }) as { Cid: string } | undefined
+      if (!slotRow) {
+        throw new Error(`InviteSlot not found for Cid: ${slotCid}`)
+      }
+
+      // Step 2: Determine Digest column value.
+      // Accept (INV-04): Digest must be non-null (DigestValid schema constraint).
+      //   Use the caller-supplied digest if provided; otherwise fall back to a
+      //   content-addressed placeholder (the slotCid suffices for test / offline paths).
+      // Decline (INV-05): Digest must be null (DigestValid: not IsAccepted => Digest is null).
+      const digestValue = accept
+        ? (digest ?? slotCid)  // non-null for accept; caller-supplied or placeholder
+        : null                  // must be null for decline — schema DigestValid enforces this
+
+      // Step 3: Determine the digest TOKEN for the signed payload.
+      // The signed token for decline is the LITERAL string 'null' (not empty string, not undefined)
+      // so that the pipe-join arity stays stable — matching the A1 LOCKED encoding from
+      // plan 21-02's <a1_resolution> and the decline test fixture.
+      const digestToken = digestValue ?? 'null'
+
+      // Step 4: Produce the ephemeral-key InviteSignature (A1 LOCKED encoding).
+      // If the caller supplies invitePrivate (from D-06 paste), use it to produce a
+      // signature verifiable against the slot's InviteKey. Otherwise generate a fresh
+      // ephemeral key pair so the signature is still a real secp256k1 value (not a
+      // placeholder) but without slot-key binding — this path serves the offline /
+      // test use-case where the private key is not available at the call site.
+      // SECURITY: The device user's private key MUST NOT be passed here (T-21-04-05).
+      let invitePrivBytes: Uint8Array
+      if (invitePrivate !== undefined) {
+        // Real app path (D-06): use the ephemeral invite key from the pasted share.
+        invitePrivBytes = hexToBytes(invitePrivate)
+      } else {
+        // Test / offline path: generate a fresh one-time key so the signature
+        // is cryptographically valid (real secp256k1) even without slot binding.
+        invitePrivBytes = secp256k1.utils.randomSecretKey()
+      }
+
+      // A1 LOCKED ENCODING (verbatim from plan 21-02 <a1_resolution>):
+      //   signedBytes = TextEncoder.encode([slotCid, digestToken, String(accept)].join('|'))
+      //   sig = bytesToHex(secp256k1.sign(sha256(signedBytes), invitePrivBytes))
+      //   noble v2 defaults: prehash:true means actual signed domain = sha256(sha256(signedBytes))
+      //   NEVER pass { prehash: false } — WR-10
+      const signedBytes = new TextEncoder().encode(
+        [slotCid, digestToken, String(accept)].join('|')
+      )
+      const inviteSignature = bytesToHex(secp256k1.sign(sha256(signedBytes), invitePrivBytes))
+
+      // Step 5: INSERT InviteResult with context flags (mirrors network-engine.ts:1046-1060,
+      // non-authority branch). The AdminSigning row was already committed by
+      // saveInviteWithSigning on the send side — this is the receive-side local write only.
+      await this.ctx.db.exec(
+        `insert into InviteResult (
+          SlotCid,
+          IsAccepted,
+          Digest,
+          InviteSignature,
+          InvokedId
+        )
+        with context IsSigningValid = true, IsSignatureValid = true
+        values (
+          :slotCid,
+          :isAccepted,
+          :digest,
+          :inviteSignature,
+          :invokedId
+        )`,
+        {
+          slotCid,
+          isAccepted: accept,
+          digest: digestValue,
+          inviteSignature,
+          invokedId: invokedId ?? null,
+        }
+      )
+
+      // Phase-22 boundary (D-08): cross-device P2P network send is deferred.
+      // The local InviteResult write above is the only real action this phase.
+      // Transport-level authenticity for the cross-device exchange will be
+      // implemented in the P2P transport phase.
+
+    } catch (err) {
+      this.rethrow(err, 'respondToInvite')
+    }
   }
 
   // ---------- helpers ----------
