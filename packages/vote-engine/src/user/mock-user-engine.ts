@@ -118,7 +118,7 @@ export class MockUserEngine implements IUserEngine {
     this.mockHistory = [...this.mockHistory, userRevise]
   }
 
-  async revokeKey (keyToRevoke: string): Promise<void> {
+  async revokeKey (keyToRevoke: string, _signature?: Signature): Promise<void> {
     const newActiveKeys = this.mockUser.activeKeys.filter(
       (k) => k.key !== keyToRevoke
     )

@@ -438,7 +438,9 @@ export class UserEngine implements IUserEngine {
           now: nowCanonicalDatetime(),
           // D-14/D-15/D-16: append-only ReviseUserHistory event in the same
           // batch (same Tid). Payload carries UserInfo under `info`.
-          evtSignature: null,
+          // UKEY-01: commit the real signature hex from ReviseUserHistory.signature
+          // to UserEvent.Signature (schema comment votetorrent.qsql:554 anticipated this).
+          evtSignature: userRevise.signature?.signature ?? null,
           payload: JSON.stringify({
             info: {
               name: userRevise.info.name,
@@ -460,9 +462,12 @@ export class UserEngine implements IUserEngine {
    * delete` on every operation; once that lands, this DELETE will work
    * as the schema intends.
    */
-  async revokeKey (keyToRevoke: string): Promise<void> {
+  async revokeKey (keyToRevoke: string, signature: Signature): Promise<void> {
     this.requireCtx('revokeKey')
     const tid = nextTid++
+    // context.UserKey = the user's currently-active signing key (must exist in UserKey
+    // table and be non-expired for DeleteValid to pass). This is the stored active key,
+    // not signature.signerKey — the context gate checks DB membership of this key.
     const signerKey = this.user.activeKeys?.[0]?.key ?? null
     try {
       await this.ctx!.db.exec(
@@ -484,11 +489,14 @@ export class UserEngine implements IUserEngine {
           userId: this.user.id,
           pubKey: keyToRevoke,
           userKey: signerKey,
-          signature: null,
+          // UKEY-02: bind the real device Signature (replaces null) so context.Signature
+          // carries a non-null value for UserKey.SignatureValid.
+          signature: signature.signature,
           now: nowCanonicalDatetime(),
           // D-14/D-15/D-16: append-only RevokeUserKeyHistory event in the
           // same batch (same Tid). Payload carries the revoked pubkey hex.
-          evtSignature: null,
+          // UKEY-02: commit the real Signature to UserEvent.Signature as well.
+          evtSignature: signature.signature,
           payload: JSON.stringify({ key: keyToRevoke })
         }
       )

@@ -19,7 +19,7 @@ export interface IUserEngine {
   getSummary(): Promise<User | undefined>
   isPrivileged(scope: Scope, userId: string): Promise<boolean>
   revise(user: ReviseUserHistory): Promise<void>
-  revokeKey(key: string): Promise<void>
+  revokeKey(key: string, signature: Signature): Promise<void>
   buildCreate(): IUserCreateBuilder
   buildAddKey(): IUserAddKeyBuilder
   buildRevise(): IUserReviseBuilder

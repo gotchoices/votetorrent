@@ -7,7 +7,7 @@ import {
   UserHistoryEvent,
   UserKeyType
 } from '@votetorrent/vote-core'
-import { bytesToHex } from '@noble/curves/utils.js'
+import { bytesToHex, hexToBytes } from '@noble/curves/utils.js'
 import { secp256k1 } from '@noble/curves/secp256k1.js'
 import { sha256 } from '@noble/hashes/sha2'
 import { UserCreateBuilder } from '../src/user/builders/user-create-builder.js'
@@ -459,8 +459,19 @@ describe('UserEngine', () => {
         expiration: Date.now() + 86_400_000
       })
 
-      // Revoke the second key.
-      await engine.revokeKey(secondPub)
+      // Build a real secp256k1 signature for the revoke operation (UKEY-02 impl).
+      const revokePrivBytes = hexToBytes(secondPrivHex)
+      const revokePayloadBytes = new TextEncoder().encode(`revokeKey:${secondPub}`)
+      const revokeSigBytes = secp256k1.sign(sha256(revokePayloadBytes), revokePrivBytes)
+      const revokeSigHex = bytesToHex(revokeSigBytes)
+      const revokeSignature: Signature = {
+        signature: revokeSigHex,
+        signerKey: bytesToHex(secp256k1.getPublicKey(revokePrivBytes)),
+        signerUserId: user.id
+      }
+
+      // Revoke the second key with a real device signature.
+      await engine.revokeKey(secondPub, revokeSignature)
 
       // Assert the UserKey row was deleted.
       const row = await ctx.db
@@ -470,23 +481,27 @@ describe('UserEngine', () => {
         .get({ id: user.id, pk: secondPub })
       expect(row).to.equal(undefined)
 
-      // SIGN-01 negative assertions: the RK event's Signature must not be a placeholder.
+      // SIGN-01 assertions: the RK event's Signature must be the real hex, not a placeholder.
       const eventRow = await ctx.db
         .prepare("select Signature from UserEvent where UserId = :id and Event = 'RK' limit 1")
         .get({ id: user.id })
-      if (eventRow?.Signature !== null && eventRow?.Signature !== undefined) {
-        expect(String(eventRow.Signature)).to.not.equal('mock-signer-key')
-        expect(String(eventRow.Signature)).to.not.equal(user.id)
-      }
-      void secondPrivHex // referenced to note it would be used for real-signing in UKEY-02 impl
+      expect(eventRow?.Signature).to.not.equal(null)
+      expect(String(eventRow?.Signature)).to.equal(revokeSigHex)
+      expect(String(eventRow?.Signature)).to.not.equal('mock-signer-key')
+      expect(String(eventRow?.Signature)).to.not.equal(user.id)
     })
 
     it('throws when no EngineContext is bound', async () => {
       const user = makeUser({ id: 'pure-user-4' })
       const engine = new UserEngine(user)
+      const dummySig: Signature = {
+        signature: 'f'.repeat(128),
+        signerKey: 'a'.repeat(66),
+        signerUserId: user.id
+      }
       let caught: unknown
       try {
-        await engine.revokeKey('a'.repeat(66))
+        await engine.revokeKey('a'.repeat(66), dummySig)
       } catch (err) {
         caught = err
       }
@@ -659,7 +674,13 @@ describe('UserEngine', () => {
       await engine.revise(revise)
 
       // 4) revokeKey — Event 'RK', Sequence 3
-      await engine.revokeKey(addedPub)
+      const historyRevokePriv = secp256k1.utils.randomSecretKey()
+      const historyRevokeSig: Signature = {
+        signature: bytesToHex(secp256k1.sign(sha256(new TextEncoder().encode(`revokeKey:${addedPub}`)), historyRevokePriv)),
+        signerKey: bytesToHex(secp256k1.getPublicKey(historyRevokePriv)),
+        signerUserId: user.id
+      }
+      await engine.revokeKey(addedPub, historyRevokeSig)
 
       // Forward (ASC): create, addKey, revise, revokeKey
       const forward: UserHistory[] = []
@@ -1527,6 +1548,12 @@ describe('UserRevokeKeyBuilder', () => {
   function makeFullBuilder (engine: IUserEngine): UserRevokeKeyBuilder {
     let b = new UserRevokeKeyBuilder(engine)
     b = b.setKey('e'.repeat(66)) as UserRevokeKeyBuilder
+    // Provide a dummy Signature so commit() can pass it to revokeKey (UKEY-02).
+    b = b.setSignature({
+      signature: 'a'.repeat(128),
+      signerKey: 'b'.repeat(66),
+      signerUserId: 'test-user-id'
+    }) as UserRevokeKeyBuilder
     return b
   }
 
@@ -1638,12 +1665,18 @@ describe('UserRevokeKeyBuilder', () => {
   it('REAL ENGINE: engine.revokeKey(payload) and engine.buildRevokeKey().fromPayload(payload).commit() produce structurally identical observable state', async () => {
     const { engine: eng1 } = await createUserEngineForExistingNetwork()
     const payload = makeFullBuilder(eng1).toEngineInput()
+    const pairPriv = secp256k1.utils.randomSecretKey()
+    const pairSig: Signature = {
+      signature: bytesToHex(secp256k1.sign(sha256(new TextEncoder().encode(`revokeKey:${payload}`)), pairPriv)),
+      signerKey: bytesToHex(secp256k1.getPublicKey(pairPriv)),
+      signerUserId: 'parity-test-user'
+    }
     let err1: unknown
-    try { await eng1.revokeKey(payload) } catch (e) { err1 = e }
+    try { await eng1.revokeKey(payload, pairSig) } catch (e) { err1 = e }
     expect(err1).to.equal(undefined)
     const { engine: eng2 } = await createUserEngineForExistingNetwork()
     let err2: unknown
-    try { await eng2.buildRevokeKey().fromPayload(payload).commit() } catch (e) { err2 = e }
+    try { await eng2.buildRevokeKey().fromPayload(payload).setSignature(pairSig).commit() } catch (e) { err2 = e }
     expect(err2).to.equal(undefined)
   })
 
