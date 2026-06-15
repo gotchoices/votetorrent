@@ -34,7 +34,7 @@ export interface IAuthorityEngine {
    */
   resendInvite(slotCid: string): Promise<string>
   getDetails(): Promise<AuthorityDetails>
-  proposeAdmin(admin: Proposal<AdminInit>, signature: Signature): Promise<void>
+  proposeAdmin(admin: Proposal<AdminInit>, signatureOrCallback: Signature | ((digest: Uint8Array) => Promise<Signature>)): Promise<void>
   saveInviteWithSigning(
     invite: AuthorityInvite | OfficerInvite,
     scope: Scope,

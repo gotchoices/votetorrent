@@ -426,6 +426,47 @@ describe('AuthorityEngine', () => {
       expect(row?.Scope).to.equal('rad')
     })
 
+    // GAP-1 / D-03: proposeAdmin sign-callback path — engine computes the
+    // canonical Digest(:authorityId, :effectiveAt, :thresholdPolicies) and hands
+    // those bytes to the callback before committing (engine-authoritative, D-03).
+    it('should invoke a sign-callback with non-empty digest bytes and accept the returned Signature', async () => {
+      const { authority, authorityEngine } = await createNetworkAndAuthority()
+      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
+      // Use the same keypair that makeRealSignature would use but capture the digest bytes.
+      // signerUserId must be 'user-1' — the existing officer in the test fixture (createNetworkAndAuthority).
+      const { privateHex, publicHex } = randomTestKeyPair()
+      const privBytes = Uint8Array.from(privateHex.match(/.{2}/g)!.map((b) => parseInt(b, 16)))
+      let callbackDigestBytes: Uint8Array | null = null
+
+      const signCallback = async (digestBytes: Uint8Array): Promise<Signature> => {
+        callbackDigestBytes = digestBytes
+        const sig = bytesToHex(secp256k1.sign(digestBytes, privBytes))
+        return { signerUserId: 'user-1', signerKey: publicHex, signature: sig }
+      }
+
+      const effectiveAt = Date.now() + 60_000
+      const proposal: Proposal<AdminInit> = {
+        proposed: {
+          officers: [{ existing: { userId: 'user-1', authorityId: authority.id, title: 'Chair', scopes: ['rad'] as Scope[] } }],
+          effectiveAt,
+          thresholdPolicies: [{ policy: 'rad', threshold: 1 }]
+        },
+        signers: ['user-1']
+      }
+
+      await authorityEngine.proposeAdmin(proposal, signCallback)
+
+      // The callback must have received non-empty bytes (32 bytes = SHA-256 Digest output).
+      expect(callbackDigestBytes).to.not.be.null
+      expect((callbackDigestBytes as unknown as Uint8Array).length).to.be.greaterThan(0)
+
+      // A ProposedAdmin row must exist, proving the callback signature was accepted.
+      const row = await ctx.db
+        .prepare('select count(*) as n from ProposedAdmin where AuthorityId = :id and EffectiveAt = :e')
+        .get({ id: authority.id, e: toCanonicalDatetime(effectiveAt) })
+      expect(Number(row?.n)).to.equal(1)
+    })
+
     // This test does NOT depend on create() succeeding — the guard fires
     // before the DB call. Runs against a freshly-prepared empty db.
     it('should throw when no signers are provided in the proposal', async () => {

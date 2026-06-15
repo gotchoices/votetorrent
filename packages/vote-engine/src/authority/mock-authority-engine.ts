@@ -110,7 +110,7 @@ export class MockAuthorityEngine implements IAuthorityEngine {
     }
   }
 
-  async proposeAdmin (adminProposal: Proposal<AdminInit>, _signature: Signature): Promise<void> {
+  async proposeAdmin (adminProposal: Proposal<AdminInit>, _signatureOrCallback: Signature | ((digest: Uint8Array) => Promise<Signature>)): Promise<void> {
     // Update the instance's proposed administration directly
     this.proposedAdmin = JSON.parse(JSON.stringify(adminProposal))
     console.log(

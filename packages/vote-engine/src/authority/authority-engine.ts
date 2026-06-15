@@ -396,7 +396,7 @@ export class AuthorityEngine implements IAuthorityEngine {
 
 	async proposeAdmin(
 		admin: Proposal<AdminInit>,
-		signature: Signature,
+		signatureOrCallback: Signature | ((digest: Uint8Array) => Promise<Signature>),
 	): Promise<void> {
 		const thresholdPoliciesJson = JSON.stringify(
 			admin.proposed.thresholdPolicies,
@@ -405,8 +405,35 @@ export class AuthorityEngine implements IAuthorityEngine {
 		if (!initialSignerId) {
 			throw new Error('Failed to propose admin: No initial signer');
 		}
+		const effectiveAtCanon = toCanonicalDatetime(admin.proposed.effectiveAt);
 		const tid = nextTid++;
 		try {
+			// D-03/D-04: resolve the concrete Signature.
+			// If a sign callback is provided, compute the canonical digest engine-side
+			// (same args as PATH A's inline Digest() in startSigningSession) and invoke
+			// the callback so the caller signs exactly the bytes the engine stores.
+			// If a completed Signature is passed (test fixture path), use it directly.
+			let signature: Signature;
+			if (typeof signatureOrCallback === 'function') {
+				const digestRow = await this.ctx.db
+					.prepare(
+						'select Digest(:authorityId, :effectiveAt, :thresholdPolicies) as d',
+					)
+					.get({
+						authorityId: this.authority.id,
+						effectiveAt: effectiveAtCanon,
+						thresholdPolicies: thresholdPoliciesJson,
+					});
+				if (!digestRow || digestRow.d == null) {
+					throw new Error('proposeAdmin: Digest() returned null — crypto plugin not registered?');
+				}
+				// WR-01: single shared digestToBytes decoder.
+				const digestBytes = digestToBytes(digestRow.d);
+				signature = await signatureOrCallback(digestBytes);
+			} else {
+				signature = signatureOrCallback;
+			}
+
 			await this.ctx.db.exec(
 				`insert into ProposedAdmin (
 					AuthorityId,
@@ -421,7 +448,7 @@ export class AuthorityEngine implements IAuthorityEngine {
 				)`,
 				{
 					authorityId: this.authority.id,
-					effectiveAt: toCanonicalDatetime(admin.proposed.effectiveAt),
+					effectiveAt: effectiveAtCanon,
 					thresholdPolicies: thresholdPoliciesJson,
 					signerUserId: signature.signerUserId,
 					signerKey: signature.signerKey,
@@ -432,7 +459,7 @@ export class AuthorityEngine implements IAuthorityEngine {
 
 			const adminDigestArgs: AdminDigestArgs = {
 				authorityId: this.authority.id,
-				effectiveAt: toCanonicalDatetime(admin.proposed.effectiveAt),
+				effectiveAt: effectiveAtCanon,
 				thresholdPolicies: thresholdPoliciesJson,
 			};
 			// WR-06 (17-REVIEW): proposeAdmin only STARTS the signing session with
