@@ -17,15 +17,20 @@ export function KeyholderScreen() {
 	const { t } = useTranslation();
 	const { colors } = useTheme() as ExtendedTheme;
 	const navigation = useNavigation<NavigationProp>();
-	const { keyholder } = useRoute().params as KeyholderParams;
+	const { keyholder, electionEngine } = useRoute().params as KeyholderParams;
 
 	useLayoutEffect(() => {
 		navigation.setOptions({ title: t("keyholder") });
 	}, [navigation, t]);
 
+	// INV-03: navigate to KeyholderInvitation in send mode, passing the engine and keyholder
+	// so the send screen can call electionEngine.inviteKeyholder (un-gated by 21-05).
 	const onInvite = () => {
-		console.log("keyholderScreen-invite stub");
-		navigation.goBack();
+		navigation.navigate("KeyholderInvitation", {
+			mode: "send",
+			electionEngine,
+			keyholder,
+		});
 	};
 
 	const seedInvite = keyholder.invite;

@@ -3,7 +3,16 @@ import { useTranslation } from "react-i18next";
 import { ScrollView, StyleSheet, View } from "react-native";
 import { ExtendedTheme, useNavigation, useRoute, useTheme } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import type { IInvitationEngine, InviteStatus, SentKeyholderInvite } from "@votetorrent/vote-core";
+import type {
+	IElectionEngine,
+	IInvitationEngine,
+	InviteStatus,
+	KeyholderInvite,
+	SentKeyholderInvite,
+} from "@votetorrent/vote-core";
+import Clipboard from "@react-native-clipboard/clipboard";
+import { secp256k1 } from "@noble/curves/secp256k1.js";
+import { bytesToHex } from "@noble/curves/utils.js";
 import { ThemedText } from "../../components/ThemedText";
 import { CustomButton } from "../../components/CustomButton";
 import { Footer } from "../../components/Footer";
@@ -16,17 +25,25 @@ import { globalStyles } from "../../theme/styles";
 type KeyholderInvitationParams = {
 	mode: "send" | "accept";
 	invitationId?: string;
+	electionEngine?: IElectionEngine;
+	keyholder?: InviteStatus<SentKeyholderInvite>;
 };
 
 export function KeyholderInvitationScreen() {
 	const { t } = useTranslation();
 	const { colors } = useTheme() as ExtendedTheme;
 	const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
-	const { mode, invitationId } = useRoute().params as KeyholderInvitationParams;
+	const { mode, invitationId, electionEngine, keyholder } = useRoute().params as KeyholderInvitationParams;
 	const { getEngine } = useApp();
 
 	// Send-mode form state
-	const [name, setName] = useState("");
+	const [name, setName] = useState(keyholder?.invite?.name ?? "");
+	// Share text shown after a successful send (D-05)
+	const [shareText, setShareText] = useState<string>("");
+	const [errorMessage, setErrorMessage] = useState<string>("");
+
+	// Accept-mode paste field (D-06)
+	const [pastedInvite, setPastedInvite] = useState<string>("");
 
 	// Accept-mode fetched invite
 	const [invite, setInvite] = useState<InviteStatus<SentKeyholderInvite> | undefined>(undefined);
@@ -51,18 +68,104 @@ export function KeyholderInvitationScreen() {
 		loadInvite();
 	}, [mode, invitationId, getEngine]);
 
-	const onSend = () => {
-		console.log("keyholderInvitation-send stub");
+	// INV-03: real keyholder invite send via un-gated inviteKeyholder (21-05)
+	const onSend = async () => {
+		// Pattern B: clear any prior error so a retry starts clean.
+		setErrorMessage("");
+		try {
+			if (!electionEngine) {
+				setErrorMessage("Election engine not available — navigate from an election context.");
+				return;
+			}
+
+			// Build the ephemeral secp256k1 key material for this keyholder invite.
+			// AUTH-01 (D-01): hex-encoded secp256k1 key material at the screen surface.
+			// The signing of the invite fields happens engine-side; the screen only generates
+			// the ephemeral key pair and includes invitePrivate in the share text (D-06).
+			// The inviteSignature is a placeholder because the current inviteKeyholder engine
+			// impl (Phase 5 placeholder) does not validate InviteSignature — this will be
+			// replaced by a createKeyholderInvite engine method in Phase 22 when full
+			// keyholder InviteSlot + InviteResult flow is wired (D-08 boundary).
+			const invitePrivateBytes = secp256k1.utils.randomSecretKey();
+			const invitePrivate = bytesToHex(invitePrivateBytes);
+			const inviteKey = bytesToHex(secp256k1.getPublicKey(invitePrivateBytes));
+			const type = "k" as const;
+			const expiration = new Date(Date.now() + 60 * 60 * 1000).toISOString(); // 1 hour
+			// Placeholder inviteSignature — engine does not validate for keyholder invites
+			// in the Phase 5 placeholder implementation (INSERT uses InviteSignature = null).
+			const inviteSignature = "0".repeat(128);
+
+			const keyholderInvite: KeyholderInvite = {
+				type,
+				expiration,
+				inviteKey,
+				inviteSignature,
+				name,
+			};
+
+			// Get the election ID from the engine.
+			const electionDetails = await electionEngine.getElectionDetails();
+			const electionId = electionDetails.election.id;
+
+			// Call the un-gated inviteKeyholder (21-05 removed the FeatureNotAvailableError gate).
+			await electionEngine.inviteKeyholder(keyholderInvite, electionId);
+
+			// D-05: render the one-time invite material as text for Copy-to-clipboard share.
+			// Include the invitePrivate so the invitee can paste and accept (D-06).
+			const sharePayload = JSON.stringify({
+				invitePrivate,
+				inviteKey,
+				inviteSignature,
+				expiration,
+				type,
+				name,
+			});
+			setShareText(sharePayload);
+			// D-08: do NOT navigate away immediately — keep screen so Copy affordance shows.
+		} catch (error) {
+			console.error("onSend error:", error);
+			setErrorMessage(error instanceof Error ? error.message : String(error));
+		}
+	};
+
+	// D-06: accept — invitee pastes the share text; screen reconstructs ephemeral invitePrivate.
+	const onAccept = async () => {
+		try {
+			const engine = await getEngine<IInvitationEngine>("invitations");
+			let invitePrivate: string | undefined;
+			if (pastedInvite.trim()) {
+				try {
+					const parsed = JSON.parse(pastedInvite.trim());
+					invitePrivate = parsed.invitePrivate as string | undefined;
+				} catch {
+					invitePrivate = pastedInvite.trim();
+				}
+			}
+			// T-21-11-03: accept calls the SIGNED respondToInvite path (D-09).
+			await engine.respondToInvite(invitationId ?? "", true, invitePrivate);
+		} catch (error) {
+			console.error("Error responding to invite:", error);
+		}
 		navigation.goBack();
 	};
 
-	const onAccept = () => {
-		console.log("keyholderInvitation-accept stub");
-		navigation.goBack();
-	};
-
-	const onDecline = () => {
-		console.log("keyholderInvitation-decline stub");
+	const onDecline = async () => {
+		try {
+			const engine = await getEngine<IInvitationEngine>("invitations");
+			let invitePrivate: string | undefined;
+			if (pastedInvite.trim()) {
+				try {
+					const parsed = JSON.parse(pastedInvite.trim());
+					invitePrivate = parsed.invitePrivate as string | undefined;
+				} catch {
+					invitePrivate = pastedInvite.trim();
+				}
+			}
+			// T-21-11-03: decline calls the SAME signed respondToInvite path (D-09).
+			await engine.respondToInvite(invitationId ?? "", false, invitePrivate);
+		} catch (error) {
+			console.error("Error responding to invite:", error);
+		}
 		navigation.goBack();
 	};
 
@@ -75,17 +178,47 @@ export function KeyholderInvitationScreen() {
 							{t("keyholderInvitation")}
 						</ThemedText>
 						<CustomTextInput title={t("name")} value={name} onChangeText={setName} />
+
+						{/* D-05: render share text + Copy button after a successful send */}
+						{shareText ? (
+							<>
+								<ThemedText type="defaultSemiBold" style={styles.shareLabel}>
+									{t("invitationKey")}
+								</ThemedText>
+								<ThemedText
+									style={styles.shareText}
+									selectable
+									numberOfLines={4}
+								>
+									{shareText}
+								</ThemedText>
+								<CustomButton
+									title={t("share")}
+									icon="copy"
+									onPress={() => Clipboard.setString(shareText)}
+								/>
+							</>
+						) : null}
+
+						{/* Pattern B error display */}
+						{errorMessage ? (
+							<ThemedText type="small" style={{ color: colors.error }}>
+								{errorMessage}
+							</ThemedText>
+						) : null}
 					</View>
 				</ScrollView>
-				<Footer>
-					<CustomButton
-						title={t("send")}
-						icon="paper-plane"
-						backgroundColor={colors.success}
-						forceDarkText={true}
-						onPress={onSend}
-					/>
-				</Footer>
+				{!shareText ? (
+					<Footer>
+						<CustomButton
+							title={t("send")}
+							icon="paper-plane"
+							backgroundColor={colors.success}
+							forceDarkText={true}
+							onPress={onSend}
+						/>
+					</Footer>
+				) : null}
 			</View>
 		);
 	}
@@ -107,6 +240,17 @@ export function KeyholderInvitationScreen() {
 					) : (
 						<ThemedText>{t("loading")}</ThemedText>
 					)}
+
+					{/* D-06: paste field for the share text the sender copied */}
+					<ThemedText type="defaultSemiBold" style={styles.shareLabel}>
+						{t("invitationKey")}
+					</ThemedText>
+					<CustomTextInput
+						title={t("invitationKey")}
+						value={pastedInvite}
+						onChangeText={setPastedInvite}
+						placeholder="Paste the invite text from the sender"
+					/>
 				</View>
 			</ScrollView>
 			<SignatureTaskFooter
@@ -123,6 +267,14 @@ const localStyles = StyleSheet.create({
 	detailRow: {
 		flexDirection: "row",
 		marginBottom: 8,
+	},
+	shareLabel: {
+		marginTop: 12,
+		marginBottom: 4,
+	},
+	shareText: {
+		marginBottom: 8,
+		fontFamily: "monospace",
 	},
 });
 
