@@ -450,6 +450,223 @@ describe('SigningEngine', () => {
 })
 
 // ===========================================================================
+// getSignatureDigest + completeSignature accept/reject round-trip (SIGN-02 / D-03)
+//
+// TDD RED: getSignatureDigest does not yet exist on ISignatureTasksEngine.
+// The accept-path round-trip test (case 1) will fail to compile/resolve until
+// the accessor is added to the interface and implemented in SignatureTasksEngine.
+// ===========================================================================
+
+describe('getSignatureDigest + completeSignature round-trip', () => {
+  // Shared fixture: seed ProposedAdmin + AdminSigning + Task + AdminSignatureTaskExtension
+  // (same strategy as the D-12 tests below, separated here for the accessor-path spec).
+  async function seedSignatureTaskForDigest (auth: Awaited<ReturnType<typeof addTestAuthority>>) {
+    const sig = makeTestSignature(auth.user)
+    const nonce = crypto.randomUUID()
+    const taskId = crypto.randomUUID()
+    const tid = Date.now()
+    const thresholdPolicies = '[]'
+
+    const adminRow = await auth.ctx.db
+      .prepare('select EffectiveAt from CurrentAdmin where AuthorityId = :authorityId')
+      .get({ authorityId: auth.authority.id })
+    if (!adminRow) throw new Error('seedSignatureTaskForDigest: CurrentAdmin not found')
+    const adminEffectiveAt = adminRow.EffectiveAt as string
+
+    await auth.ctx.db.exec(
+      `insert into ProposedAdmin (AuthorityId, EffectiveAt, ThresholdPolicies)
+       with context IsUserValid = true, Tid = :tid, now = :now,
+                    UserId = :userId, UserKey = :signerKey, Signature = :signature
+       values (:authorityId, :adminEffectiveAt, :thresholdPolicies)`,
+      {
+        authorityId: auth.authority.id,
+        adminEffectiveAt,
+        thresholdPolicies,
+        tid,
+        now: nowCanonicalDatetime(),
+        userId: sig.signerUserId,
+        signerKey: sig.signerKey,
+        signature: sig.signature,
+      }
+    )
+
+    await auth.ctx.db.exec(
+      `insert into AdminSigning (Nonce, AuthorityId, AdminEffectiveAt, Scope, Digest, UserId, SignerKey, Signature)
+       with context now = :now, IsSignatureValid = true, IsSignerKeyValid = true
+       values (:nonce, :authorityId, :adminEffectiveAt, 'rad',
+               Digest(:tid, :authorityId, :adminEffectiveAt, :thresholdPolicies),
+               :userId, :signerKey, :signature)`,
+      {
+        nonce,
+        authorityId: auth.authority.id,
+        adminEffectiveAt,
+        thresholdPolicies,
+        tid,
+        now: nowCanonicalDatetime(),
+        userId: sig.signerUserId,
+        signerKey: sig.signerKey,
+        signature: sig.signature,
+      }
+    )
+
+    await auth.ctx.db.exec('BEGIN')
+    try {
+      await auth.ctx.db.exec(
+        `insert into Task (Id, UserId, Type, SignatureType, SigningNonce, IsCompleted)
+         with context IsMutationValid = true, Tid = :tid
+         values (:id, :userId, 'signature', 'admin', :nonce, 0)`,
+        { id: taskId, userId: auth.user.id, nonce, tid }
+      )
+      await auth.ctx.db.exec(
+        `insert into AdminSignatureTaskExtension (TaskId, AuthorityId, AdminEffectiveAt)
+         with context Tid = :tid
+         values (:taskId, :authorityId, :adminEffectiveAt)`,
+        { taskId, authorityId: auth.authority.id, adminEffectiveAt, tid }
+      )
+      await auth.ctx.db.exec('COMMIT')
+    } catch (err) {
+      await auth.ctx.db.exec('ROLLBACK')
+      throw err
+    }
+
+    return { nonce, taskId }
+  }
+
+  it('case (1) accept: getSignatureDigest returns bytes, signing them via secp256k1 + completeSignature inserts OfficerSignature + AdminSignature + marks Task complete', async () => {
+    // D-03: getSignatureDigest returns the engine-authoritative AdminSigning.Digest bytes
+    // D-11: threshold=1 auto-completes AdminSignature on accept
+    const { secp256k1: secp } = await import('@noble/curves/secp256k1.js')
+    const { bytesToHex } = await import('@noble/curves/utils.js')
+
+    const auth = await addTestAuthority(await createTestNetwork())
+    const { nonce } = await seedSignatureTaskForDigest(auth)
+
+    const networkRef = {
+      hash: 'test-hash-digest',
+      name: 'Test Network',
+      relays: [],
+      primaryAuthorityDomainName: 'test.example'
+    }
+    const engine = new SignatureTasksEngine(networkRef, auth.ctx)
+
+    const task: SignatureTask = {
+      type: 'signature',
+      userId: auth.user.id,
+      network: networkRef,
+      signatureType: 'admin'
+    }
+
+    // getSignatureDigest: should return the stored AdminSigning.Digest as bytes (D-03)
+    const digest = await engine.getSignatureDigest(task)
+    expect(digest).to.be.instanceOf(Uint8Array)
+    expect(digest.length).to.be.greaterThan(0)
+
+    // Sign the engine-authoritative digest with a fresh test secp256k1 key
+    // (plain closure, NOT the RN device-signer module — headless Node spec)
+    const privKey = secp.utils.randomSecretKey()
+    const pubKey = secp.getPublicKey(privKey)
+    const pubHex = bytesToHex(pubKey)
+    const sigBytes = secp.sign(digest, privKey) // noble v2 defaults: prehash:true
+    const sigHex = bytesToHex(sigBytes.toCompactRawBytes())
+
+    const signature = {
+      signerUserId: auth.user.id,
+      signerKey: pubHex,
+      signature: sigHex
+    }
+
+    // OfficerSignature count before accept should be 0
+    const countBefore = await auth.ctx.db
+      .prepare('select count(*) as c from OfficerSignature where SigningNonce = :nonce')
+      .get({ nonce })
+    expect(Number((countBefore as any)?.c ?? 0), 'OfficerSignature count before accept must be 0').to.equal(0)
+
+    await engine.completeSignature(task, { isAccepted: true, signature })
+
+    // Assert 1: OfficerSignature inserted on accept
+    const officerRow = await auth.ctx.db
+      .prepare('select UserId from OfficerSignature where SigningNonce = :nonce')
+      .get({ nonce })
+    expect(officerRow?.UserId, 'OfficerSignature must be inserted on accept').to.equal(auth.user.id)
+
+    // Assert 2: AdminSignature inserted (threshold=1, D-11)
+    const adminSigRow = await auth.ctx.db
+      .prepare('select SigningNonce from AdminSignature where SigningNonce = :nonce')
+      .get({ nonce })
+    expect(adminSigRow?.SigningNonce, 'AdminSignature must exist after threshold=1 accept').to.equal(nonce)
+
+    // Assert 3: Task marked IsCompleted=1
+    const taskRow = await auth.ctx.db
+      .prepare('select IsCompleted from Task where UserId = :userId and SignatureType = :sigType and IsCompleted = 1')
+      .get({ userId: auth.user.id, sigType: 'admin' })
+    expect(taskRow, 'Task.IsCompleted must be 1 after accept').to.not.be.undefined
+  })
+
+  it('case (2) reject: completeSignature with isAccepted=false inserts NO OfficerSignature, NO AdminSignature, marks Task complete', async () => {
+    // D-12: reject must skip signingEngine.sign() — no OfficerSignature, no threshold advance
+    const auth = await addTestAuthority(await createTestNetwork())
+    await seedSignatureTaskForDigest(auth)
+
+    const networkRef = {
+      hash: 'test-hash-reject',
+      name: 'Test Network',
+      relays: [],
+      primaryAuthorityDomainName: 'test.example'
+    }
+    const engine = new SignatureTasksEngine(networkRef, auth.ctx)
+
+    const task: SignatureTask = {
+      type: 'signature',
+      userId: auth.user.id,
+      network: networkRef,
+      signatureType: 'admin'
+    }
+
+    const countBefore = await auth.ctx.db
+      .prepare('select count(*) as c from OfficerSignature')
+      .get({})
+    const officerCountBefore = Number((countBefore as any)?.c ?? 0)
+
+    await engine.completeSignature(task, {
+      isAccepted: false,
+      signature: { signature: '', signerKey: '', signerUserId: '' }
+    })
+
+    // Assert 1: NO OfficerSignature inserted
+    const countAfter = await auth.ctx.db
+      .prepare('select count(*) as c from OfficerSignature')
+      .get({})
+    expect(Number((countAfter as any)?.c ?? 0), 'OfficerSignature count must be unchanged on reject').to.equal(officerCountBefore)
+
+    // Assert 2: NO AdminSignature
+    const adminSigCount = await auth.ctx.db
+      .prepare('select count(*) as c from AdminSignature')
+      .get({})
+    expect(Number((adminSigCount as any)?.c ?? 0), 'AdminSignature must not be inserted on reject').to.equal(0)
+
+    // Assert 3: Task IsCompleted=1
+    const taskRow = await auth.ctx.db
+      .prepare('select IsCompleted from Task where UserId = :userId and SignatureType = :sigType and IsCompleted = 1')
+      .get({ userId: auth.user.id, sigType: 'admin' })
+    expect(taskRow, 'Task.IsCompleted must be 1 after reject').to.not.be.undefined
+  })
+
+  it('getSignatureDigest throws when no pending task exists', async () => {
+    const { ctx, user } = await makeDbOnlyContext()
+    const networkRef = { hash: 'x', name: 'X', relays: [], primaryAuthorityDomainName: 'x' }
+    const engine = new SignatureTasksEngine(networkRef, ctx)
+    const task: SignatureTask = { type: 'signature', userId: user.id, network: networkRef, signatureType: 'admin' }
+    let caught: unknown
+    try {
+      await engine.getSignatureDigest(task)
+    } catch (err) {
+      caught = err
+    }
+    expect((caught as Error)?.message).to.include('no pending task')
+  })
+})
+
+// ===========================================================================
 // completeSignature reject-branch tests (SIGN-02/D-12)
 //
 // EXPECTED-RED-UNTIL-IMPL: completeSignature currently ALWAYS calls
