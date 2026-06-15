@@ -1,4 +1,7 @@
 import { expect } from 'chai'
+import { bytesToHex } from '@noble/curves/utils.js'
+import { secp256k1 } from '@noble/curves/secp256k1.js'
+import { sha256 } from '@noble/hashes/sha2'
 import { InvitationEngine } from '../src/invite/invitation-engine.js'
 import { AsyncStorage } from './shims/react-native.js'
 import {
@@ -9,6 +12,7 @@ import {
   seedKeyholderInvite,
   makeDistinctTestUser,
 } from './fixtures/test-context.js'
+import { nowCanonicalDatetime } from '../src/utils.js'
 import type {
   InviteStatus,
   SentOfficerInvite,
@@ -116,16 +120,203 @@ describe('InvitationEngine', () => {
     expect(result).to.be.undefined
   })
 
-  it.skip('respondToInvite — BLOCKED: InviteResult INSERT requires full secp256k1 invite signing pipeline (InviteSignature over H(SlotCid, Digest, IsAccepted)); implement after the invite signing pipeline is wired (D-08)', async () => {
-    // BLOCKED: InviteResult INSERT requires full secp256k1 signing pipeline:
-    //   - Generate InviteSignature = sign(H(SlotCid, Digest, IsAccepted)) using the ephemeral InviteKey private key
-    //   - Bind context.IsSigningValid = true (requires AdminSigning row matching InviteSlot.SigningNonce + Digest(SlotCid))
-    //   - Bind context.IsSignatureValid = true (requires verifying InviteSignature against InviteSlot.InviteKey)
-    //   These constraints in InviteResult (SigningValid, SignatureValid) gate on the full secp256k1 invite-key pipeline
-    //   which is deferred to a future phase per D-08.
-    //   See packages/vote-core/schema/votetorrent.qsql InviteResult table (lines 419-433).
+  // EXPECTED-RED-UNTIL-IMPL 21-04 (respondToInvite implementation)
+  it('respondToInvite (accept) writes an InviteResult row with isAccepted=true', async () => {
+    // INV-04: un-skipped (was BLOCKED on D-08 signing pipeline).
+    // Seeds a real officer-invite InviteSlot then calls InvitationEngine.respondToInvite.
+    // respondToInvite is not yet implemented in InvitationEngine (throws) — RED until plan 21-04.
     const auth = await addTestAuthority(await createTestNetwork())
+    const newUser = makeDistinctTestUser()
+    const { inviteSlotCid } = await seedUserInvite(auth, newUser)
+
     const engine = new InvitationEngine(auth.ctx)
-    await engine.respondToInvite('some-slot-cid', true)
+    await engine.respondToInvite(inviteSlotCid, true)
+
+    // Read back the InviteResult row and assert IsAccepted is truthy.
+    const row = await auth.ctx.db
+      .prepare('select IsAccepted from InviteResult where SlotCid = :slotCid')
+      .get({ slotCid: inviteSlotCid })
+    expect(row).to.not.be.undefined
+    expect(Boolean(row!.IsAccepted)).to.equal(true)
+  })
+
+  // EXPECTED-RED-UNTIL-IMPL 21-04 (respondToInvite implementation + InviteResult INSERT)
+  it('respondToInvite (decline) writes an InviteResult row with isAccepted=false carrying a real ephemeral-key signature', async () => {
+    // INV-05 / D-09: Decline must produce a REAL InviteSignature signed by the ephemeral InviteKey.
+    //
+    // A1 LOCKED ENCODING (from plan 21-02 <a1_resolution>):
+    //   signedBytes = TextEncoder.encode([slotCid, 'null', 'false'].join('|'))
+    //   sig = bytesToHex(secp256k1.sign(sha256(signedBytes), invitePrivKeyBytes))
+    //     — noble v2 defaults (prehash:true), NOT { prehash: false }
+    //   result: 128-char lowercase hex compact signature
+    //
+    // inviteSignature is the PRIVATE key given with the invitation. For officer invites,
+    // the InviteSlot.InviteKey carries the PUBLIC key; the matching private key is the
+    // one generated in createOfficerInvite / createAuthorityInvite (ephemeral per D-06).
+    // seedUserInvite uses authorityEngine.createOfficerInvite which returns an OfficerInviteShare
+    // containing inviteKey (public) and inviteSignature (the InviteSlot-level signature).
+    // The PRIVATE key is internal to createOfficerInvite and not exposed on the share.
+    // For this test we generate OUR OWN ephemeral key pair so we control the private bytes,
+    // then insert a raw InviteSlot using those values (mirroring seedKeyholderInvite pattern).
+    const auth = await addTestAuthority(await createTestNetwork())
+    const { SigningEngine } = await import('../src/signing/signing-engine.js')
+    const { nowCanonicalDatetime: nowCdt } = await import('../src/utils.js')
+
+    // Generate a real ephemeral key pair we control (so we have the private bytes).
+    const invitePrivBytes = secp256k1.utils.randomSecretKey()
+    const invitePublicHex = bytesToHex(secp256k1.getPublicKey(invitePrivBytes))
+    const inviteSlotSig = 'a'.repeat(128) // InviteSlot-level signature (IsSignatureValid=true context)
+
+    // Seed a raw InviteSlot with our controlled key pair (mirroring seedKeyholderInvite step c).
+    const signing = new SigningEngine(auth.ctx)
+    const nonce = signing.generateSigningNonce()
+    const expiration = new Date(Date.now() + 86_400_000).toISOString()
+
+    await auth.ctx.db.exec(
+      `insert into InviteSlot (
+          Cid, Type, Name, Expiration, InviteKey, InviteSignature, SigningNonce
+        )
+        with context Tid = :tid, now = :now, IsSignatureValid = true, IsInsertValid = true, IsCidValid = true
+        values (
+          Digest(:expiration, :inviteKey, :inviteSignature, :name, :nonce, :type),
+          :type, :name, :expiration, :inviteKey, :inviteSignature, :nonce
+        )`,
+      {
+        type: 'of',
+        name: 'Decline Test Officer',
+        expiration,
+        inviteKey: invitePublicHex,
+        inviteSignature: inviteSlotSig,
+        nonce,
+        tid: Date.now(),
+        now: nowCdt(),
+      }
+    )
+
+    // Fetch the Cid back.
+    const slotRow = await auth.ctx.db
+      .prepare('select Cid from InviteSlot where InviteKey = :inviteKey and Type = :type')
+      .get({ inviteKey: invitePublicHex, type: 'of' })
+    expect(slotRow).to.not.be.undefined
+    const slotCid = slotRow!.Cid as string
+
+    // Satisfy InviteSlotSigningValid — AdminSigning over this nonce (PATH B).
+    const { makeTestSignature } = await import('./fixtures/test-context.js')
+    await signing.startSigningSession(
+      auth.authority.id,
+      null,
+      'rad' as any,
+      makeTestSignature(auth.user),
+      nonce
+    )
+
+    // A1 LOCKED ENCODING: sign([slotCid, 'null', 'false'].join('|')) with the ephemeral invite private key.
+    // noble v2 defaults: prehash=true means the actual signed domain is sha256(sha256(signedBytes)).
+    // A1 LOCKED ENCODING: sign(sha256(signedBytes), privKey) — noble v2 returns Uint8Array directly.
+    // prehash=true is the default in noble v2, so actual signed domain is sha256(sha256(signedBytes)).
+    const signedBytes = new TextEncoder().encode([slotCid, 'null', 'false'].join('|'))
+    const sigUint8 = secp256k1.sign(sha256(signedBytes), invitePrivBytes) // noble v2 default prehash:true
+    const realInviteSignature = bytesToHex(sigUint8) // noble v2: sign() returns Uint8Array directly
+
+    // The real InviteSignature must be 128 hex chars and NOT be the all-'a' placeholder.
+    expect(realInviteSignature).to.match(/^[0-9a-f]{128}$/)
+    expect(realInviteSignature).to.not.equal('a'.repeat(128))
+
+    // Call respondToInvite with decline (isAccepted=false).
+    // The engine must use the A1 LOCKED encoding internally when implemented.
+    // For now this test proves the assertion shape (RED until 21-04).
+    const engine = new InvitationEngine(auth.ctx)
+    await engine.respondToInvite(slotCid, false)
+
+    // Read back the InviteResult row.
+    const row = await auth.ctx.db
+      .prepare('select IsAccepted, Digest, InviteSignature from InviteResult where SlotCid = :slotCid')
+      .get({ slotCid })
+    expect(row).to.not.be.undefined
+    expect(Boolean(row!.IsAccepted)).to.equal(false)
+    // Digest must be null for decline (DigestValid: IsAccepted=false => Digest is null)
+    expect(row!.Digest).to.equal(null)
+    // InviteSignature must be present and must NOT be the all-'a' placeholder (T-21-02-01 / D-09)
+    expect(row!.InviteSignature).to.be.a('string')
+    expect(row!.InviteSignature).to.not.equal('a'.repeat(128))
+  })
+
+  // EXPECTED-RED-UNTIL-IMPL (the getPendingOfficerInvites / getPendingAuthorityInvites
+  // Expiration filter — lands in the invitation-engine implementation plan for INV-06)
+  it('expired invites are filtered out of pending lists', async () => {
+    // INV-06: Seed an InviteSlot with an Expiration in the past, then assert that
+    // a pending-list read does NOT return it. The filter (Expiration > :now) must
+    // be added to getPendingOfficerInvites in the invitation-engine impl plan.
+    const auth = await addTestAuthority(await createTestNetwork())
+    const { SigningEngine } = await import('../src/signing/signing-engine.js')
+    const { nowCanonicalDatetime: nowCdt } = await import('../src/utils.js')
+
+    const signing = new SigningEngine(auth.ctx)
+    const nonce = signing.generateSigningNonce()
+
+    // Expiration is 1 day IN THE PAST so the slot should be considered expired.
+    const pastExpiration = new Date(Date.now() - 86_400_000).toISOString()
+
+    // Insert the expired InviteSlot. The ExpirationValid CHECK gates on `context.now`
+    // vs Expiration. We bind now to a date BEFORE the expiration so the INSERT passes.
+    const seedNow = new Date(Date.now() - 2 * 86_400_000).toISOString()
+    const { makeTestSignature } = await import('./fixtures/test-context.js')
+    const share = auth.authorityEngine.createOfficerInvite({
+      name: 'Expired Officer',
+      title: 'Member',
+      scopes: ['rad'] as any[],
+    })
+
+    await auth.ctx.db.exec(
+      `insert into InviteSlot (
+          Cid, Type, Name, Expiration, InviteKey, InviteSignature, SigningNonce
+        )
+        with context Tid = :tid, now = :now, IsSignatureValid = true, IsInsertValid = true, IsCidValid = true
+        values (
+          Digest(:expiration, :inviteKey, :inviteSignature, :name, :nonce, :type),
+          :type, :name, :expiration, :inviteKey, :inviteSignature, :nonce
+        )`,
+      {
+        type: 'of',
+        name: 'Expired Officer',
+        expiration: pastExpiration,
+        inviteKey: share.inviteKey,
+        inviteSignature: share.inviteSignature,
+        nonce,
+        tid: Date.now(),
+        now: seedNow, // seed "in the past" so ExpirationValid passes at insert time
+      }
+    )
+
+    // Fetch the Cid so we can assert it's absent from the pending list.
+    const slotRow = await auth.ctx.db
+      .prepare('select Cid from InviteSlot where InviteKey = :inviteKey and Type = :type')
+      .get({ inviteKey: share.inviteKey, type: 'of' })
+    expect(slotRow).to.not.be.undefined
+    const expiredCid = slotRow!.Cid as string
+
+    // Satisfy InviteSlotSigningValid so the row is otherwise valid.
+    await signing.startSigningSession(
+      auth.authority.id,
+      null,
+      'rad' as any,
+      makeTestSignature(auth.user),
+      nonce
+    )
+
+    // Read pending list — the expired slot's Cid must NOT appear.
+    const engine = new InvitationEngine(auth.ctx)
+    const pending = await engine.getPendingOfficerInvites()
+    const foundExpired = pending.some((inv) => {
+      // We need to check if this slot appears — but InviteStatus only carries invite data.
+      // Use a direct DB read to confirm the Cid is absent from what the engine returns.
+      return false // placeholder; real assertion below uses DB join
+    })
+    // Direct assertion: the pending list from getPendingOfficerInvites must not
+    // include an entry whose underlying SlotCid equals expiredCid.
+    // The engine reads by Name; since we have a unique Name we can assert by name absence.
+    const expiredInPending = pending.some((inv) => inv.invite.name === 'Expired Officer')
+    expect(expiredInPending, 'expired invite must not appear in pending list').to.equal(false)
+    void expiredCid // referenced for clarity; the assertion uses name above
   })
 })
