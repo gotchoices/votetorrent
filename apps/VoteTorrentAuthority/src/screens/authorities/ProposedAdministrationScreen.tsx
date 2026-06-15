@@ -16,9 +16,13 @@ import type {
 	Officer,
 	OfficerSelection,
 	Scope,
+	ThresholdPolicy,
 	User,
 } from "@votetorrent/vote-core";
 import { scopeDescriptions } from "@votetorrent/vote-core";
+import { sha256 } from "@noble/hashes/sha2.js";
+import { utf8ToBytes } from "@noble/hashes/utils.js";
+import { createDeviceSigner } from "../../engines/device-signer";
 import { useApp } from "../../providers/AppProvider";
 import { ThemedText } from "../../components/ThemedText";
 import { ChipButton } from "../../components/ChipButton";
@@ -67,6 +71,7 @@ export default function ProposedAdministrationScreen() {
 	const [thresholds, setThresholds] = useState<Record<string, number>>({});
 	const [isLoading, setIsLoading] = useState(true);
 	const [authority, setAuthority] = useState<Authority | null>(null);
+	const [errorMessage, setErrorMessage] = useState<string>("");
 
 	// Header title (Phase 7 D-14 inherited pattern)
 	useLayoutEffect(() => {
@@ -165,10 +170,60 @@ export default function ProposedAdministrationScreen() {
 	const officerCount = proposedOfficers.length;
 	const sliderMax = useMemo(() => Math.max(1, officerCount), [officerCount]);
 
-	// Stub PROPOSE (D-04): no mock-state mutation.
-	const handlePropose = () => {
-		console.log("propose stub");
-		navigation.goBack();
+	// ADM-02: PROPOSE calls proposeAdmin with the proposer's real device-key Signature.
+	// D-01: private key stays app-side (createDeviceSigner closes over it).
+	// D-03: the admin digest is computed from the canonical args matching what
+	//       the engine's startSigningSession SQL Digest() call will produce.
+	// WR-10: secp256k1.sign v2 defaults (prehash:true) inside createDeviceSigner.
+	const handlePropose = async () => {
+		setErrorMessage("");
+		try {
+			const networkEngine = await getEngine<INetworkEngine>("network");
+			if (!networkEngine) {
+				setErrorMessage("Network not available");
+				return;
+			}
+			const authorityEngine = await networkEngine.openAuthority(authorityId) as IAuthorityEngine;
+
+			// Build ThresholdPolicies from on-screen slider state.
+			const thresholdPoliciesArr: ThresholdPolicy[] = SCOPE_ORDER.map(
+				(scope) => ({ policy: scope, threshold: thresholds[scope] ?? 1 })
+			);
+
+			// Canonical effective-at: a future timestamp one year out.
+			// The engine normalizes via toCanonicalDatetime; we produce the same
+			// 19-char UTC form so the AdminDigest args match exactly.
+			const effectiveAtMs = Date.now() + 365 * 24 * 60 * 60 * 1000;
+			const effectiveAtStr = new Date(effectiveAtMs).toISOString().slice(0, 19);
+			const thresholdPoliciesJson = JSON.stringify(thresholdPoliciesArr);
+
+			// Compute the AdminDigest bytes: sha256(authorityId|effectiveAt|thresholdPolicies)
+			// — alphabetical field order per D-07d, matching Digest() in signing-engine.ts PATH A.
+			const digestInput = `${authorityId}|${effectiveAtStr}|${thresholdPoliciesJson}`;
+			const digestBytes = sha256(utf8ToBytes(digestInput));
+
+			// Produce the proposer's real device-key Signature.
+			const sign = await createDeviceSigner(
+				authority?.name ?? "Authority Administrator"
+			);
+			const signature = await sign(digestBytes);
+
+			// Build the Proposal<AdminInit>: officers from on-screen state, signers
+			// initialised with the proposer's userId (required by proposeAdmin:403).
+			const proposal = {
+				proposed: {
+					officers: proposedOfficers,
+					effectiveAt: effectiveAtStr,
+					thresholdPolicies: thresholdPoliciesArr,
+				},
+				signers: [signature.signerUserId],
+			};
+
+			await authorityEngine.proposeAdmin(proposal, signature);
+			navigation.goBack();
+		} catch (err) {
+			setErrorMessage(err instanceof Error ? err.message : String(err));
+		}
 	};
 
 	const handleAddAdministrator = () => {
@@ -265,7 +320,12 @@ export default function ProposedAdministrationScreen() {
 				</View>
 			</ScrollView>
 
-			{/* PROPOSE footer — stub per D-04 */}
+			{/* ADM-02: PROPOSE footer — wired to real proposeAdmin with device-signer Signature */}
+			{errorMessage ? (
+				<ThemedText type="small" style={{ color: colors.error }}>
+					{errorMessage}
+				</ThemedText>
+			) : null}
 			<Footer>
 				<CustomButton
 					title={t("propose")}
