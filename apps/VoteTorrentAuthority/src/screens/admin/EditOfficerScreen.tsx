@@ -17,9 +17,8 @@ import type { RootStackParamList } from "../../navigation/types";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { CustomTextInput } from "../../components/CustomTextInput";
 import { globalStyles } from "../../theme/styles";
-import { sha256 } from "@noble/hashes/sha2.js";
-import { utf8ToBytes } from "@noble/hashes/utils.js";
 import { createDeviceSigner } from "../../engines/device-signer";
+import { getOrCreateDeviceUser } from "../../engines/device-user";
 
 export default function EditOfficerScreen() {
 	const { colors } = useTheme() as ExtendedTheme;
@@ -80,7 +79,8 @@ export default function EditOfficerScreen() {
 	// ADM-01 shared persist helper: rebuilds the proposed officer set and persists
 	// it via proposeAdmin. Both handleSave and handleRemove funnel through here.
 	// D-01: private key stays app-side (createDeviceSigner closes over it).
-	// D-03: AdminDigest bytes computed from canonical args, matching Digest() SQL PATH A.
+	// D-03: AdminDigest is computed ENGINE-SIDE inside proposeAdmin — the app no
+	//       longer recomputes sha256(...) independently.
 	// WR-10: secp256k1.sign v2 defaults (prehash:true) inside createDeviceSigner.
 	const persistOfficerSet = useCallback(async (updatedOfficers: OfficerSelection[]) => {
 		const networkEngine = await getEngine<INetworkEngine>("network");
@@ -94,15 +94,13 @@ export default function EditOfficerScreen() {
 			?? adminDetails.admin.thresholdPolicies;
 		const effectiveAtMs = Date.now() + 365 * 24 * 60 * 60 * 1000;
 		const effectiveAtStr = new Date(effectiveAtMs).toISOString().slice(0, 19);
-		const thresholdPoliciesJson = JSON.stringify(existingPolicies);
 
-		// Compute AdminDigest: sha256(authorityId|effectiveAt|thresholdPolicies) —
-		// alphabetical field order per D-07d, matching Digest() in signing-engine.ts PATH A.
-		const digestInput = `${authority.id}|${effectiveAtStr}|${thresholdPoliciesJson}`;
-		const digestBytes = sha256(utf8ToBytes(digestInput));
+		// Resolve the device user id for the signers array. The callback provides
+		// the full Signature once the engine computes the canonical digest internally.
+		const deviceUser = await getOrCreateDeviceUser(user?.name ?? "Authority Administrator");
 
+		// D-03: engine computes digest; sign callback signs those exact bytes.
 		const sign = await createDeviceSigner(user?.name ?? "Authority Administrator");
-		const signature = await sign(digestBytes);
 
 		const proposal = {
 			proposed: {
@@ -110,9 +108,9 @@ export default function EditOfficerScreen() {
 				effectiveAt: effectiveAtStr,
 				thresholdPolicies: existingPolicies,
 			},
-			signers: [signature.signerUserId],
+			signers: [deviceUser.id],
 		};
-		await authorityEngine.proposeAdmin(proposal, signature);
+		await authorityEngine.proposeAdmin(proposal, sign);
 	}, [authority.id, getEngine, user]);
 
 	// ADM-01: REMOVE drops the officer from the proposed administration officer set.

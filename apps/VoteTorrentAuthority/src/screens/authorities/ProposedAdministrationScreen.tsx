@@ -20,9 +20,8 @@ import type {
 	User,
 } from "@votetorrent/vote-core";
 import { scopeDescriptions } from "@votetorrent/vote-core";
-import { sha256 } from "@noble/hashes/sha2.js";
-import { utf8ToBytes } from "@noble/hashes/utils.js";
 import { createDeviceSigner } from "../../engines/device-signer";
+import { getOrCreateDeviceUser } from "../../engines/device-user";
 import { useApp } from "../../providers/AppProvider";
 import { ThemedText } from "../../components/ThemedText";
 import { ChipButton } from "../../components/ChipButton";
@@ -170,10 +169,10 @@ export default function ProposedAdministrationScreen() {
 	const officerCount = proposedOfficers.length;
 	const sliderMax = useMemo(() => Math.max(1, officerCount), [officerCount]);
 
-	// ADM-02: PROPOSE calls proposeAdmin with the proposer's real device-key Signature.
+	// ADM-02: PROPOSE calls proposeAdmin with a device-signer callback.
 	// D-01: private key stays app-side (createDeviceSigner closes over it).
-	// D-03: the admin digest is computed from the canonical args matching what
-	//       the engine's startSigningSession SQL Digest() call will produce.
+	// D-03: the admin digest is computed ENGINE-SIDE inside proposeAdmin —
+	//       the app no longer recomputes sha256(...) independently.
 	// WR-10: secp256k1.sign v2 defaults (prehash:true) inside createDeviceSigner.
 	const handlePropose = async () => {
 		setErrorMessage("");
@@ -191,35 +190,34 @@ export default function ProposedAdministrationScreen() {
 			);
 
 			// Canonical effective-at: a future timestamp one year out.
-			// The engine normalizes via toCanonicalDatetime; we produce the same
-			// 19-char UTC form so the AdminDigest args match exactly.
 			const effectiveAtMs = Date.now() + 365 * 24 * 60 * 60 * 1000;
 			const effectiveAtStr = new Date(effectiveAtMs).toISOString().slice(0, 19);
-			const thresholdPoliciesJson = JSON.stringify(thresholdPoliciesArr);
 
-			// Compute the AdminDigest bytes: sha256(authorityId|effectiveAt|thresholdPolicies)
-			// — alphabetical field order per D-07d, matching Digest() in signing-engine.ts PATH A.
-			const digestInput = `${authorityId}|${effectiveAtStr}|${thresholdPoliciesJson}`;
-			const digestBytes = sha256(utf8ToBytes(digestInput));
+			// Resolve the device user id for the signers array (proposeAdmin requires
+			// a non-empty signers list at guard time). The callback provides the full
+			// Signature (signerUserId, signerKey, signature) once the engine computes
+			// the canonical digest and passes the bytes to the callback.
+			const deviceUser = await getOrCreateDeviceUser(
+				authority?.name ?? "Authority Administrator"
+			);
 
-			// Produce the proposer's real device-key Signature.
+			// D-03: engine computes digest; sign callback signs those exact bytes.
 			const sign = await createDeviceSigner(
 				authority?.name ?? "Authority Administrator"
 			);
-			const signature = await sign(digestBytes);
 
 			// Build the Proposal<AdminInit>: officers from on-screen state, signers
-			// initialised with the proposer's userId (required by proposeAdmin:403).
+			// initialised with the device user's id (required by proposeAdmin guard).
 			const proposal = {
 				proposed: {
 					officers: proposedOfficers,
 					effectiveAt: effectiveAtStr,
 					thresholdPolicies: thresholdPoliciesArr,
 				},
-				signers: [signature.signerUserId],
+				signers: [deviceUser.id],
 			};
 
-			await authorityEngine.proposeAdmin(proposal, signature);
+			await authorityEngine.proposeAdmin(proposal, sign);
 			navigation.goBack();
 		} catch (err) {
 			setErrorMessage(err instanceof Error ? err.message : String(err));
