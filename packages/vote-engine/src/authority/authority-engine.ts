@@ -6,6 +6,7 @@ import { Temporal } from 'temporal-polyfill';
 import { SigningEngine } from '../signing/signing-engine.js';
 import {
 	asText,
+	digestToBytes,
 	fromCanonicalDatetime,
 	nowCanonicalDatetime,
 	parseJsonOr,
@@ -645,22 +646,9 @@ export class AuthorityEngine implements IAuthorityEngine {
 			if (!digestRow || digestRow.d == null) {
 				throw new Error('saveInviteWithSigning: Digest() returned null — crypto plugin not registered?');
 			}
-			// Convert the base64url digest string to Uint8Array (mirrors seedElectionSigning pattern)
-			const d = digestRow.d as string;
-			let digestBytes: Uint8Array;
-			if (d instanceof Uint8Array) {
-				digestBytes = d;
-			} else if (d.length === 43 || d.length === 44) {
-				// base64url — decode
-				const b64 = d.replace(/-/g, '+').replace(/_/g, '/');
-				const binary = atob(b64);
-				digestBytes = new Uint8Array(binary.length);
-				for (let i = 0; i < binary.length; i++) digestBytes[i] = binary.charCodeAt(i);
-			} else {
-				// hex fallback
-				const { hexToBytes } = await import('@noble/curves/utils.js');
-				digestBytes = hexToBytes(d);
-			}
+			// Convert the Digest() output to Uint8Array via the shared decoder (WR-01 single
+			// source of truth — same helper seedElectionSigning / addKey use).
+			const digestBytes = digestToBytes(digestRow.d);
 			signature = await signatureOrCallback(digestBytes);
 		} else {
 			signature = signatureOrCallback;
