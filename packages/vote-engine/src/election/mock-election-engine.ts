@@ -130,7 +130,7 @@ export class MockElectionEngine implements IElectionEngine {
 		_keyholder: KeyholderInvite,
 		_electionId: string,
 	): Promise<void> {
-		throw new FeatureNotAvailableError('inviteKeyholder — available in Phase 21 (signing pipeline)');
+		return Promise.resolve();
 	}
 
 	async proposeBallot(ballot: Ballot): Promise<void> {
