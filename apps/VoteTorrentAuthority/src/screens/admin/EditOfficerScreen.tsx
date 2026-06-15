@@ -1,5 +1,5 @@
 import { ExtendedTheme, useTheme } from "@react-navigation/native";
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ScrollView, StyleSheet, View, Switch } from "react-native";
 import { ThemedText } from "../../components/ThemedText";
@@ -7,7 +7,7 @@ import { ChipButton } from "../../components/ChipButton";
 import { CustomButton } from "../../components/CustomButton";
 import { Footer } from "../../components/Footer";
 import { InfoCard } from "../../components/InfoCard";
-import type { Authority, INetworkEngine, IUserEngine, Officer, Scope, User } from "@votetorrent/vote-core";
+import type { Authority, IAuthorityEngine, INetworkEngine, IUserEngine, Officer, OfficerSelection, Scope, ThresholdPolicy, User } from "@votetorrent/vote-core";
 import { scopeDescriptions } from "@votetorrent/vote-core";
 import { useRoute, useNavigation } from "@react-navigation/native";
 import { useApp } from "../../providers/AppProvider";
@@ -17,6 +17,9 @@ import type { RootStackParamList } from "../../navigation/types";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { CustomTextInput } from "../../components/CustomTextInput";
 import { globalStyles } from "../../theme/styles";
+import { sha256 } from "@noble/hashes/sha2.js";
+import { utf8ToBytes } from "@noble/hashes/utils.js";
+import { createDeviceSigner } from "../../engines/device-signer";
 
 export default function EditOfficerScreen() {
 	const { colors } = useTheme() as ExtendedTheme;
@@ -34,6 +37,7 @@ export default function EditOfficerScreen() {
 	const [officer, setOfficer] = useState<Officer | null>(null);
 	const [user, setUser] = useState<User | null>(null);
 	const [userEngine, setUserEngine] = useState<IUserEngine | null>(null);
+	const [errorMessage, setErrorMessage] = useState<string>("");
 
 	// Editing an existing administrator (vs. adding a new one). Drives the
 	// frame-35 vs frame-12 layout: edit shows the User card + REMOVE; add shows
@@ -73,12 +77,77 @@ export default function EditOfficerScreen() {
 		loadOfficer();
 	}, [getEngine, authority.id, officerId]);
 
-	// REMOVE button (header) — only when editing an existing administrator
-	// (frame 35). Removing from the proposed administration is engine-stubbed.
-	const handleRemove = () => {
-		console.log("editOfficer-remove stub", { officerId });
-		navigation.goBack();
-	};
+	// ADM-01 shared persist helper: rebuilds the proposed officer set and persists
+	// it via proposeAdmin. Both handleSave and handleRemove funnel through here.
+	// D-01: private key stays app-side (createDeviceSigner closes over it).
+	// D-03: AdminDigest bytes computed from canonical args, matching Digest() SQL PATH A.
+	// WR-10: secp256k1.sign v2 defaults (prehash:true) inside createDeviceSigner.
+	const persistOfficerSet = useCallback(async (updatedOfficers: OfficerSelection[]) => {
+		const networkEngine = await getEngine<INetworkEngine>("network");
+		if (!networkEngine) throw new Error("Network not available");
+		const authorityEngine = await networkEngine.openAuthority(authority.id) as IAuthorityEngine;
+		const adminDetails = await authorityEngine.getAdminDetails();
+
+		// Preserve existing thresholdPolicies + effectiveAt when a proposal exists;
+		// fall back to admin thresholdPolicies (wrap with 'policy' field per ThresholdPolicy).
+		const existingPolicies: ThresholdPolicy[] = adminDetails.proposed?.proposed.thresholdPolicies
+			?? adminDetails.admin.thresholdPolicies;
+		const effectiveAtMs = Date.now() + 365 * 24 * 60 * 60 * 1000;
+		const effectiveAtStr = new Date(effectiveAtMs).toISOString().slice(0, 19);
+		const thresholdPoliciesJson = JSON.stringify(existingPolicies);
+
+		// Compute AdminDigest: sha256(authorityId|effectiveAt|thresholdPolicies) —
+		// alphabetical field order per D-07d, matching Digest() in signing-engine.ts PATH A.
+		const digestInput = `${authority.id}|${effectiveAtStr}|${thresholdPoliciesJson}`;
+		const digestBytes = sha256(utf8ToBytes(digestInput));
+
+		const sign = await createDeviceSigner(user?.name ?? "Authority Administrator");
+		const signature = await sign(digestBytes);
+
+		const proposal = {
+			proposed: {
+				officers: updatedOfficers,
+				effectiveAt: effectiveAtStr,
+				thresholdPolicies: existingPolicies,
+			},
+			signers: [signature.signerUserId],
+		};
+		await authorityEngine.proposeAdmin(proposal, signature);
+	}, [authority.id, getEngine, user]);
+
+	// ADM-01: REMOVE drops the officer from the proposed administration officer set.
+	const handleRemove = useCallback(async () => {
+		setErrorMessage("");
+		try {
+			const networkEngine = await getEngine<INetworkEngine>("network");
+			if (!networkEngine) {
+				setErrorMessage("Network not available");
+				return;
+			}
+			const authorityEngine = await networkEngine.openAuthority(authority.id) as IAuthorityEngine;
+			const adminDetails = await authorityEngine.getAdminDetails();
+
+			// Build the current proposed officer set (or fall back to current admin officers).
+			let currentSelections: OfficerSelection[];
+			if (adminDetails.proposed?.proposed.officers?.length) {
+				currentSelections = adminDetails.proposed.proposed.officers;
+			} else {
+				currentSelections = adminDetails.admin.officers.map(
+					(o: Officer): OfficerSelection => ({ existing: o })
+				);
+			}
+
+			// Drop the officer whose existing.userId matches officerId.
+			const updatedOfficers = currentSelections.filter(
+				(s) => s.existing?.userId !== officerId
+			);
+
+			await persistOfficerSet(updatedOfficers);
+			navigation.goBack();
+		} catch (err) {
+			setErrorMessage(err instanceof Error ? err.message : String(err));
+		}
+	}, [authority.id, officerId, getEngine, navigation, persistOfficerSet]);
 
 	useEffect(() => {
 		navigation.setOptions({
@@ -86,7 +155,7 @@ export default function EditOfficerScreen() {
 				? () => <ChipButton label={t("remove")} icon="trash" onPress={handleRemove} />
 				: undefined,
 		});
-	}, [navigation, t, isEditing]);
+	}, [navigation, t, isEditing, handleRemove]);
 
 	const handleScopeToggle = (scope: Scope) => {
 		setScopes((prev) => {
@@ -98,17 +167,56 @@ export default function EditOfficerScreen() {
 		});
 	};
 
-	const handleSave = () => {
-		// UI-only stub: persisting the administrator (name/title/permissions) to the
-		// proposed administration lands when the engine API is extended. Mirror the
-		// ProposedAdministration propose/add stubs and return to the list.
-		console.log("editOfficer-save stub", {
-			officerId: officer?.userId,
-			name,
-			title,
-			scopes,
-		});
-		navigation.goBack();
+	// ADM-01: SAVE persists the edited/added officer into the proposed administration.
+	const handleSave = async () => {
+		setErrorMessage("");
+		try {
+			const networkEngine = await getEngine<INetworkEngine>("network");
+			if (!networkEngine) {
+				setErrorMessage("Network not available");
+				return;
+			}
+			const authorityEngine = await networkEngine.openAuthority(authority.id) as IAuthorityEngine;
+			const adminDetails = await authorityEngine.getAdminDetails();
+
+			// Build the current proposed officer set (or fall back to current admin officers).
+			let currentSelections: OfficerSelection[];
+			if (adminDetails.proposed?.proposed.officers?.length) {
+				currentSelections = adminDetails.proposed.proposed.officers;
+			} else {
+				currentSelections = adminDetails.admin.officers.map(
+					(o: Officer): OfficerSelection => ({ existing: o })
+				);
+			}
+
+			let updatedOfficers: OfficerSelection[];
+			if (isEditing && officerId) {
+				// Update the matching existing officer's title and scopes.
+				updatedOfficers = currentSelections.map((s) => {
+					if (s.existing?.userId === officerId) {
+						return {
+							existing: {
+								...s.existing,
+								title,
+								scopes,
+							},
+						};
+					}
+					return s;
+				});
+			} else {
+				// Add a new officer via init shape (name/title/scopes).
+				updatedOfficers = [
+					...currentSelections,
+					{ init: { name, title, scopes } },
+				];
+			}
+
+			await persistOfficerSet(updatedOfficers);
+			navigation.goBack();
+		} catch (err) {
+			setErrorMessage(err instanceof Error ? err.message : String(err));
+		}
 	};
 
 	return (
@@ -171,6 +279,11 @@ export default function EditOfficerScreen() {
 				</View>
 			</ScrollView>
 
+			{errorMessage ? (
+				<ThemedText type="small" style={{ color: colors.error }}>
+					{errorMessage}
+				</ThemedText>
+			) : null}
 			<Footer>
 				<CustomButton
 					title={t("save")}
