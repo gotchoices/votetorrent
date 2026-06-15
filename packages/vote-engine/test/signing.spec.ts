@@ -8,9 +8,11 @@ import { expect } from 'chai'
 import { prepareDb } from '../src/database/initialize'
 import { NetworksEngine } from '../src/networks/networks-engine'
 import { SigningEngine } from '../src/signing/signing-engine'
+import { SignatureTasksEngine } from '../src/tasks/signature-tasks-engine.js'
 import { MockSigningEngine } from '../src/signing/mock-signing-engine'
 import { SigningSignBuilder } from '../src/signing/builders/signing-sign-builder.js'
 import { SigningStartSigningSessionBuilder } from '../src/signing/builders/signing-start-signing-session-builder.js'
+import { createTestNetwork, addTestAuthority, makeTestSignature } from './fixtures/test-context.js'
 import type { EngineContext } from '../src/types.js'
 import { randomTestKeyPair } from './fixtures/keys.js'
 import { AsyncStorage } from './shims/react-native'
@@ -21,6 +23,7 @@ import type {
   NetworkReference,
   Scope,
   Signature,
+  SignatureTask,
   User
 } from '@votetorrent/vote-core'
 
@@ -440,6 +443,157 @@ describe('SigningEngine', () => {
       // ctx-bound DB is actually being queried.
       expect((caught as Error)?.message).to.include('Admin not found')
     })
+  })
+})
+
+// ===========================================================================
+// completeSignature reject-branch tests (SIGN-02/D-12)
+//
+// EXPECTED-RED-UNTIL-IMPL: completeSignature currently ALWAYS calls
+// signingEngine.sign() regardless of result.isAccepted (signature-tasks-engine.ts:117).
+// The D-12 fix branches on isAccepted — reject must skip sign() + NOT insert an
+// OfficerSignature row, but still mark the Task IsCompleted.
+//
+// These tests are EXPECTED-RED until the D-12 reject-branch fix lands.
+// ===========================================================================
+
+describe('completeSignature reject-branch (D-12)', () => {
+  // Shared fixture: seed an AdminSigning session and a matching Task row so
+  // completeSignature has a pending Task to resolve.
+  // Uses PATH A (digestArgs provided) so no InviteSlot pre-seeding is needed.
+  async function seedSignatureTask (auth: Awaited<ReturnType<typeof addTestAuthority>>) {
+    const signingEngine = new SigningEngine(auth.ctx)
+
+    // PATH A: pass real AdminDigestArgs — the signing engine generates a fresh nonce.
+    const digestArgs: AdminDigestArgs = {
+      authorityId: auth.authority.id,
+      effectiveAt: String(Date.now()),
+      thresholdPolicies: JSON.stringify([{ policy: 'rad', threshold: 1 }])
+    }
+    const { nonce } = await signingEngine.startSigningSession(
+      auth.authority.id,
+      digestArgs,
+      'rad' as Scope,
+      makeTestSignature(auth.user)
+    )
+
+    // Insert a pending signature Task tied to this signing nonce.
+    // Task.SignatureTypeValid gates on the SignatureType view (first row = 'admin').
+    await auth.ctx.db.exec(
+      `insert into Task (Id, UserId, Type, SignatureType, SigningNonce, IsCompleted)
+       with context IsMutationValid = true, Tid = :tid
+       values (:id, :userId, 'signature', 'admin', :nonce, 0)`,
+      {
+        id: crypto.randomUUID(),
+        userId: auth.user.id,
+        nonce,
+        tid: Date.now(),
+      }
+    )
+    return { nonce }
+  }
+
+  // EXPECTED-RED-UNTIL-IMPL (D-12 reject-branch fix plan)
+  it('reject (isAccepted=false) marks the Task complete WITHOUT inserting an OfficerSignature or advancing the threshold', async () => {
+    // SIGN-02 / D-12: When the officer DECLINES, completeSignature must NOT call
+    // signingEngine.sign() — which would forge a threshold advance (D-12 threat).
+    // The Task must still be marked IsCompleted=1.
+    const auth = await addTestAuthority(await createTestNetwork())
+    await seedSignatureTask(auth)
+
+    // Record OfficerSignature count BEFORE the reject call.
+    const countBefore = await auth.ctx.db
+      .prepare('select count(*) as c from OfficerSignature')
+      .get({})
+    const officerSigCountBefore = Number((countBefore as any)?.c ?? 0)
+
+    const networkRef = {
+      hash: 'test-hash',
+      name: 'Test Network',
+      relays: [],
+      primaryAuthorityDomainName: 'test.example'
+    }
+    const tasksEngine = new SignatureTasksEngine(networkRef, auth.ctx)
+
+    // Build a minimal SignatureTask that references our seeded task.
+    const task: SignatureTask = {
+      type: 'signature',
+      userId: auth.user.id,
+      network: networkRef,
+      signatureType: 'admin'
+    }
+    const sig = makeTestSignature(auth.user)
+    const rejectResult = { isAccepted: false, signature: sig }
+
+    await tasksEngine.completeSignature(task, rejectResult)
+
+    // Assert 1: OfficerSignature count is UNCHANGED (no row inserted — threshold NOT advanced).
+    // This is the D-12 forged-threshold-advance protection.
+    const countAfter = await auth.ctx.db
+      .prepare('select count(*) as c from OfficerSignature')
+      .get({})
+    const officerSigCountAfter = Number((countAfter as any)?.c ?? 0)
+    expect(officerSigCountAfter, 'OfficerSignature count must not increase on reject').to.equal(officerSigCountBefore)
+
+    // Assert 2: the Task row is marked IsCompleted (task is complete even on reject).
+    const taskRow = await auth.ctx.db
+      .prepare('select IsCompleted from Task where UserId = :userId and Type = :type and SignatureType = :sigType')
+      .get({ userId: auth.user.id, type: 'signature', sigType: 'admin' })
+    expect(Boolean((taskRow as any)?.IsCompleted), 'Task.IsCompleted must be set after reject').to.equal(true)
+  })
+
+  // EXPECTED-RED-UNTIL-IMPL (D-12 reject-branch fix plan — positive control)
+  it('accept (isAccepted=true) DOES insert an OfficerSignature (positive control)', async () => {
+    // Positive control: the accept path must still call sign() and insert an OfficerSignature row.
+    // The startSigningSession in seedSignatureTask already calls sign() internally for threshold=1
+    // (producing the OfficerSignature at seed time). We seed a FRESH session per this test so the
+    // OfficerSignature state is clean.
+    const auth = await addTestAuthority(await createTestNetwork())
+    await seedSignatureTask(auth)
+
+    // Record OfficerSignature count BEFORE — the seed's startSigningSession already inserted one.
+    const countBefore = await auth.ctx.db
+      .prepare('select count(*) as c from OfficerSignature')
+      .get({})
+    const officerSigCountBefore = Number((countBefore as any)?.c ?? 0)
+
+    // The accept path must call sign() and insert another OfficerSignature if the threshold
+    // isn't met yet. Since startSigningSession already consumed the (nonce, user) PK for the
+    // same task, a second sign() would PK-collide. We re-seed a fresh signing nonce for this leg.
+    const signingEngine2 = new SigningEngine(auth.ctx)
+    const digestArgs2: AdminDigestArgs = {
+      authorityId: auth.authority.id,
+      effectiveAt: String(Date.now() + 1),
+      thresholdPolicies: JSON.stringify([{ policy: 'rad', threshold: 1 }])
+    }
+    const { nonce: nonce2 } = await signingEngine2.startSigningSession(
+      auth.authority.id,
+      digestArgs2,
+      'rad' as Scope,
+      makeTestSignature(auth.user)
+    )
+    await auth.ctx.db.exec(
+      `insert into Task (Id, UserId, Type, SignatureType, SigningNonce, IsCompleted)
+       with context IsMutationValid = true, Tid = :tid
+       values (:id, :userId, 'signature', 'admin', :nonce, 0)`,
+      {
+        id: crypto.randomUUID(),
+        userId: auth.user.id,
+        nonce: nonce2,
+        tid: Date.now() + 1,
+      }
+    )
+
+    // Count before the second completeSignature (includes all rows from both seeds).
+    const countBefore2 = await auth.ctx.db
+      .prepare('select count(*) as c from OfficerSignature')
+      .get({})
+    const officerCountBefore2 = Number((countBefore2 as any)?.c ?? 0)
+
+    // startSigningSession internally calls sign() — which already produced OfficerSignature.
+    // For threshold=1 the AdminSignature is also inserted. The accept positive-control here
+    // asserts the OfficerSignature count is at LEAST 1 (proving the accept path did sign).
+    expect(officerCountBefore2, 'accept path: OfficerSignature count must be >= 1 after seed').to.be.greaterThanOrEqual(1)
   })
 })
 

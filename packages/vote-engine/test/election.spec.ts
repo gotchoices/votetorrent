@@ -559,3 +559,44 @@ describe('ElectionRevokeKeyholderBuilder', () => {
     expect(mock.buildRevokeKeyholder()).to.be.instanceOf(ElectionRevokeKeyholderBuilder)
   })
 })
+
+// ===========================================================================
+// inviteKeyholder real-path test (INV-03)
+// VERIFIABLE-NOW: ElectionEngine.inviteKeyholder is fully implemented at
+// election-engine.ts:518-548. The MockElectionEngine throws FeatureNotAvailableError
+// (mock-election-engine.ts:129-133), but this test targets the REAL ElectionEngine
+// directly — so it should pass without any mock-gate-removal plan landing.
+// ===========================================================================
+
+describe('ElectionEngine — inviteKeyholder real-path (INV-03)', () => {
+  it('inviteKeyholder succeeds against the real engine without throwing FeatureNotAvailableError', async () => {
+    // INV-03: the real ElectionEngine.inviteKeyholder is implemented (election-engine.ts:518).
+    // This test proves parity — the real engine path works end-to-end without the
+    // FeatureNotAvailableError that the mock guard throws. VERIFIABLE-NOW.
+    const net = await createTestNetwork()
+    const auth = await addTestAuthority(net)
+    const elCtx = await addTestElection(auth)
+    const engine = new ElectionEngine({ id: 'election-1', authorityId: auth.authority.id }, elCtx.ctx)
+
+    const keyholder: KeyholderInvite = {
+      name: 'Test Keyholder',
+      type: 'au',
+      expiration: new Date(Date.now() + 86_400_000).toISOString(),
+      inviteKey: 'k'.repeat(66),
+      inviteSignature: 's'.repeat(128),
+    }
+
+    let caught: unknown
+    try {
+      await engine.inviteKeyholder(keyholder, 'election-1')
+    } catch (err) {
+      caught = err
+    }
+
+    // Must not throw FeatureNotAvailableError (the mock gate); the real engine resolves.
+    const { FeatureNotAvailableError } = await import('@votetorrent/vote-core')
+    expect(caught).to.not.be.instanceOf(FeatureNotAvailableError)
+    // Must not throw at all (real impl should succeed).
+    expect(caught).to.equal(undefined)
+  })
+})
