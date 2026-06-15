@@ -65,7 +65,7 @@ export class MockInvitationEngine implements IInvitationEngine {
     return { invite: { name: 'Some Keyholder' } }
   }
 
-  async respondToInvite (invitationId: string, accept: boolean): Promise<void> {
+  async respondToInvite (invitationId: string, accept: boolean, _invitePrivate?: string, _digest?: string, _invokedId?: string): Promise<void> {
     console.log(`MockInvitationEngine: ${accept ? 'accepted' : 'declined'} invitation ${invitationId}`)
   }
 }
