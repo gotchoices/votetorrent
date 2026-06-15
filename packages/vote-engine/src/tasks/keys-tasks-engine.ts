@@ -104,9 +104,11 @@ export class KeysTasksEngine implements IKeysTasksEngine {
         {
           userId: task.userId,
           electionId: task.election.election.id,
-          // The signing nonce is sourced from the AdminSignature row that
-          // gates the update. Today we forward null; Phase 6 / TEST-01
-          // tightens the API to accept it explicitly.
+          // SIGN-03: The Task.MutationValid gate is satisfied by context.IsMutationValid = true.
+          // The gating signing context (AdminSignature for the election) was verified at
+          // election-creation time and persists in AdminSignature; the release-key Task update
+          // does not need to re-present the signing nonce — the schema CHECK binds on
+          // IsMutationValid, not on a forwarded nonce.
         }
       )
     } catch (err) {
