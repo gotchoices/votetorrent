@@ -17,7 +17,7 @@ import { useApp } from "../../providers/AppProvider";
 import { ElectionType } from "@votetorrent/vote-core";
 import type { IElectionsEngine, INetworkEngine, ElectionInit } from "@votetorrent/vote-core";
 import { ElectionsCreateElectionBuilder, peekNextElectionTid } from "@votetorrent/vote-engine";
-import { getOrCreateDeviceUser, getDevicePrivKeyHex } from "../../engines/device-user";
+import { createDeviceSigner } from "../../engines/device-signer";
 
 // Phase 9 plan 09-12 (ELECUI-03) — Single-scroll New Election form.
 // Phase 20 plan 20-06 (EUI-02, EUI-03) — type radio + per-field inline validation.
@@ -121,14 +121,9 @@ export function CreateElectionScreen() {
 				return;
 			}
 
-			// Source the device user and private key (generate on first run via device-user helper)
-			const user = await getOrCreateDeviceUser("Device User");
-			const privKeyHex = await getDevicePrivKeyHex();
-			if (!privKeyHex) {
-				console.error("handlePropose: device private key not available");
-				setErrorMessage("Device private key not available — cannot sign the election.");
-				return;
-			}
+			// Build the device signer once — the callback closes over the device private key
+			// app-side (D-01). The key never crosses into vote-engine.
+			const signer = await createDeviceSigner("Device User");
 
 			const now = Date.now();
 			const parseDateOrFallback = (s: string, fallbackMs: number): number =>
@@ -205,7 +200,8 @@ export function CreateElectionScreen() {
 					keyholderThreshold: Math.max(0, Math.trunc(revision.threshold)),
 				});
 
-			// Drive the engine signing seam — seam owns tid + Digest + real secp256k1 sign (D-01).
+			// Drive the engine signing seam — seam owns tid + Digest computation (D-03);
+			// the signer callback closes over the device private key app-side (D-01).
 			// Pass the SAME election fields (id, authorityId, title, date, ...) so the seam's
 			// internal AdminSigning.Digest matches what createElection's Election.InsertValid computes.
 			const signingNonce = await (electionsEngine as unknown as {
@@ -214,9 +210,7 @@ export function CreateElectionScreen() {
 						id: string; authorityId: string; title: string;
 						date: number; revisionDeadline: number; ballotDeadline: number; type: string;
 					},
-					privKeyHex: string,
-					signerUserId: string,
-					signerKey: string
+					sign: (digest: Uint8Array) => Promise<{ signerUserId: string; signerKey: string; signature: string }>
 				): Promise<string>;
 			}).seedElectionSigning(
 				{
@@ -228,9 +222,7 @@ export function CreateElectionScreen() {
 					ballotDeadline: electionBallotDeadline,
 					type: electionType,
 				},
-				privKeyHex,
-				user.id,
-				user.activeKeys[0].key
+				signer
 			);
 
 			// Sign the ElectionRevision row (Revision=0) via the companion seam.
@@ -261,9 +253,7 @@ export function CreateElectionScreen() {
 						keyholderThreshold: number;
 					},
 					tid: number,
-					privKeyHex: string,
-					signerUserId: string,
-					signerKey: string,
+					sign: (digest: Uint8Array) => Promise<{ signerUserId: string; signerKey: string; signature: string }>,
 				): Promise<string>;
 			}).seedElectionRevisionSigning(
 				electionId,
@@ -277,9 +267,7 @@ export function CreateElectionScreen() {
 					keyholderThreshold: Math.max(0, Math.trunc(revision.threshold)),
 				},
 				revTid,
-				privKeyHex,
-				user.id,
-				user.activeKeys[0].key,
+				signer,
 			);
 
 			// Call createElection directly (not via builder.commit()) so both nonces are forwarded —
