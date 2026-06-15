@@ -1,7 +1,6 @@
 import { MisuseError, QuereusError } from '@quereus/quereus'
-import { hexToBytes } from '@noble/curves/utils.js'
 import { ElectionEngine } from '../election/election-engine.js'
-import { fromCanonicalDatetime, nowCanonicalDatetime, parseJsonOr, toCanonicalDatetime } from '../utils.js'
+import { digestToBytes, fromCanonicalDatetime, nowCanonicalDatetime, parseJsonOr, toCanonicalDatetime } from '../utils.js'
 import type { EngineContext } from '../types.js'
 import type {
   ElectionCoreInit,
@@ -48,35 +47,8 @@ let nextTid = Date.now()
 /** For test use only — returns the Tid that the next createElection() call will use. */
 export function peekNextElectionTid (): number { return nextTid }
 
-/**
- * Convert `Digest()` output to bytes for the app-layer sign callback (WR-01, 17-REVIEW).
- *
- * Discriminates hex vs base64url by SHAPE (exact length + alphabet), NOT by
- * alphabet alone: every hex character is also in the base64url alphabet, so an
- * alphabet-only test silently mis-decodes a 64-char hex digest through the
- * base64url branch, producing wrong bytes that would then be signed.
- *
- * Accepted shapes (all encode a 32-byte SHA-256 digest):
- *   - Uint8Array          — legacy device path before the node-crypto polyfill fix
- *   - 43-char base64url   — Node/Quereus 3.x and post-fix device (unpadded)
- *   - 64-char hex         — defensive fallback for a future format change
- * Anything else throws loudly instead of signing garbage.
- *
- * Do NOT use Buffer.isBuffer() — Buffer is not available on Hermes.
- */
-function digestToBytes (d: unknown): Uint8Array {
-  if (d instanceof Uint8Array) return d
-  if (typeof d !== 'string') {
-    throw new Error(`digestToBytes: unrecognized Digest() output type: ${typeof d}`)
-  }
-  if (d.length === 64 && /^[0-9a-fA-F]+$/.test(d)) return hexToBytes(d)
-  if (d.length === 43 && /^[A-Za-z0-9_-]+$/.test(d)) {
-    // base64url — decode with standard base64 after restoring padding (43 → 44 chars).
-    const b64 = d.replace(/-/g, '+').replace(/_/g, '/').padEnd(44, '=')
-    return Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))
-  }
-  throw new Error(`digestToBytes: unrecognized Digest() output shape: len=${d.length}`)
-}
+// digestToBytes promoted to packages/vote-engine/src/utils.ts (WR-01 single source of truth).
+// Imported above from '../utils.js'.
 
 /**
  * ElectionsEngine — Phase 05 (ELEC-01, ELEC-02) implementation.

@@ -9,9 +9,10 @@ import type {
 } from './models'
 import type { Scope } from '../authority/models'
 import type { IBuilder } from '../common/builder.js'
+import type { Signature } from '../common/signature.js'
 
 export interface IUserEngine {
-  addKey(key: UserKey): Promise<void>
+  addKey(key: UserKey, sign?: (digest: Uint8Array) => Promise<Signature>): Promise<void>
   connectDevice(): Promise<DeviceAdvertisement>
   create(user: CreateUserHistory, options?: { inviteSlotCid?: string; inviteSignature?: string }): Promise<void>
   getHistory(userId: string, forward: boolean): AsyncIterable<UserHistory>

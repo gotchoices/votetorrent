@@ -1,4 +1,4 @@
-import { bytesToHex } from '@noble/curves/utils.js'
+import { bytesToHex, hexToBytes } from '@noble/curves/utils.js'
 import { sha256 } from '@noble/hashes/sha2'
 
 // sql data validation helpers
@@ -33,6 +33,39 @@ export const parseJsonOr = <T>(
   } catch {
     throw new Error(`${field} has invalid JSON`)
   }
+}
+
+/**
+ * Convert `Digest()` output to bytes for the app-layer sign callback (WR-01, 17-REVIEW).
+ *
+ * Discriminates hex vs base64url by SHAPE (exact length + alphabet), NOT by
+ * alphabet alone: every hex character is also in the base64url alphabet, so an
+ * alphabet-only test silently mis-decodes a 64-char hex digest through the
+ * base64url branch, producing wrong bytes that would then be signed.
+ *
+ * Accepted shapes (all encode a 32-byte SHA-256 digest):
+ *   - Uint8Array          — legacy device path before the node-crypto polyfill fix
+ *   - 43-char base64url   — Node/Quereus 3.x and post-fix device (unpadded)
+ *   - 64-char hex         — defensive fallback for a future format change
+ * Anything else throws loudly instead of signing garbage.
+ *
+ * Do NOT use Buffer.isBuffer() — Buffer is not available on Hermes.
+ *
+ * Promoted from elections-engine.ts to a shared internal util (WR-01 single source of truth).
+ * Both user-engine.ts and elections-engine.ts import this implementation.
+ */
+export function digestToBytes (d: unknown): Uint8Array {
+  if (d instanceof Uint8Array) return d
+  if (typeof d !== 'string') {
+    throw new Error(`digestToBytes: unrecognized Digest() output type: ${typeof d}`)
+  }
+  if (d.length === 64 && /^[0-9a-fA-F]+$/.test(d)) return hexToBytes(d)
+  if (d.length === 43 && /^[A-Za-z0-9_-]+$/.test(d)) {
+    // base64url — decode with standard base64 after restoring padding (43 → 44 chars).
+    const b64 = d.replace(/-/g, '+').replace(/_/g, '/').padEnd(44, '=')
+    return Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))
+  }
+  throw new Error(`digestToBytes: unrecognized Digest() output shape: len=${d.length}`)
 }
 
 // H16 hash function

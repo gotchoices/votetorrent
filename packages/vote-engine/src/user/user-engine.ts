@@ -1,6 +1,6 @@
 import { MisuseError, QuereusError } from '@quereus/quereus'
 import { FeatureNotAvailableError, UserHistoryEvent } from '@votetorrent/vote-core'
-import { fromCanonicalDatetime, nowCanonicalDatetime, parseJsonOr, toCanonicalDatetime } from '../utils.js'
+import { digestToBytes, fromCanonicalDatetime, nowCanonicalDatetime, parseJsonOr, toCanonicalDatetime } from '../utils.js'
 import type { EngineContext } from '../types.js'
 import type {
   CreateUserHistory,
@@ -58,15 +58,67 @@ export class UserEngine implements IUserEngine {
    * constraint binds against `context.UserKey` (signer's pubkey) and
    * `context.Signature`.
    *
-   * The {@link UserKey} input does not carry a signature payload, so the
-   * caller is expected to have populated the engine's {@link User} subject
-   * with the signing key as `activeKeys[0]`. This matches the contract used
-   * by MockUserEngine.
+   * Dispatches on CALLBACK PRESENCE (not key count):
+   * - No `sign` callback → unchanged behavior (existing first-key/no-callback
+   *   path). Binds `context.UserKey = existing active pubkey`, `Signature = null`,
+   *   `IsSignatureValid = true`. The existing test stays green.
+   * - `sign` callback provided → signed subsequent-key path (UKEY-03 / D-14).
+   *   The engine computes a SQL `Digest(userId, newPubKey, keyType, expirationCanon)`,
+   *   converts to bytes via the shared `digestToBytes`, calls the callback with
+   *   those bytes, then binds `context.UserKey = existing active pubkey` (NOT the
+   *   new key — RESEARCH §Pitfall 5), `context.Signature = real signature`, and
+   *   `IsSignatureValid = true` so `UserKey.InsertValid`'s subsequent branch passes.
+   *
+   * The device private key NEVER enters this engine (D-01/D-04): `addKey` receives
+   * a sign callback, not `privKeyHex`. The new key cannot authorize its own insertion.
    */
-  async addKey (key: UserKey): Promise<void> {
+  async addKey (key: UserKey, sign?: (digest: Uint8Array) => Promise<Signature>): Promise<void> {
     this.requireCtx('addKey')
     const tid = nextTid++
+    // EXISTING active pubkey — bound to context.UserKey in BOTH paths.
+    // Per RESEARCH §Pitfall 5: this MUST be the EXISTING key, never key.key.
     const signerKey = this.user.activeKeys?.[0]?.key ?? null
+
+    let boundSignature: string | null = null
+    let evtSignature: string | null = null
+
+    if (sign !== undefined) {
+      // Signed subsequent-key path (UKEY-03 / D-14).
+      // Guard: an existing active key must exist and must differ from the new key.
+      if (signerKey == null) {
+        throw new Error(
+          'UserEngine.addKey: no existing active key to authorize a signed subsequent-key add'
+        )
+      }
+      if (signerKey === key.key) {
+        throw new Error(
+          'UserEngine.addKey: the existing active key cannot sign its own re-insertion (T-21-07-01)'
+        )
+      }
+
+      // Compute the digest via SQL — bytes are IDENTICAL to what InsertValid would recompute.
+      // Convention (LOCKED by 21-02): Digest(userId, newPubKey, keyType, expirationCanon).
+      const expirationCanon = toCanonicalDatetime(key.expiration)
+      const digestRow = await this.ctx!.db
+        .prepare('select Digest(:userId, :newPubKey, :keyType, :expiration) as d')
+        .get({
+          userId: this.user.id,
+          newPubKey: key.key,
+          keyType: key.type,
+          expiration: expirationCanon
+        })
+      if (!digestRow || digestRow.d == null) {
+        throw new Error(
+          'UserEngine.addKey: Digest() returned null — crypto plugin not registered?'
+        )
+      }
+
+      const digestBytes: Uint8Array = digestToBytes(digestRow.d)
+      const signature = await sign(digestBytes)
+      boundSignature = signature.signature
+      evtSignature = signature.signature
+    }
+
     try {
       await this.ctx!.db.exec(
 				`insert into UserKey (
@@ -93,19 +145,17 @@ export class UserEngine implements IUserEngine {
           keyType: key.type,
           keyValue: key.key,
           expiration: toCanonicalDatetime(key.expiration),
+          // context.UserKey is ALWAYS the EXISTING active pubkey (never key.key).
+          // When sign is absent: signerKey may be null (first-key path).
+          // When sign is present: signerKey is the existing authorized signer (guard above).
           userKey: signerKey,
-          // No application-level signature is carried on UserKey — the
-          // schema's SignatureValid is satisfied by the
-          // `UserKey is null` short-circuit for the first key, and by the
-          // signer pubkey + signature pair on subsequent keys. The caller
-          // can pre-sign via the signing engine and then bind signature
-          // through a follow-up addKey overload (Phase 6 — TEST-01).
-          signature: null,
+          // Without sign callback: null (no-callback unchanged path, first-key short-circuit).
+          // With sign callback: real secp256k1 hex signature from the existing active key.
+          signature: boundSignature,
           now: nowCanonicalDatetime(),
-          // D-14/D-15/D-16: append-only AddUserKeyHistory event in the same
-          // batch (same Tid). Signature null this phase. Payload carries the
-          // UserKey with raw epoch-ms expiration (Pitfall 5).
-          evtSignature: null,
+          // D-14/D-15/D-16: append-only AddUserKeyHistory event in the same batch (same Tid).
+          // Payload carries the UserKey with raw epoch-ms expiration (Pitfall 5).
+          evtSignature,
           payload: JSON.stringify({
             userKey: {
               key: key.key,

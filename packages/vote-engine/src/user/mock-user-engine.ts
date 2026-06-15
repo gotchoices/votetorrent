@@ -16,6 +16,7 @@ import type {
   ReviseUserHistory,
   RevokeUserKeyHistory,
   Scope,
+  Signature,
   User,
   UserHistory,
   UserKey
@@ -38,7 +39,7 @@ export class MockUserEngine implements IUserEngine {
     this.mockHistory = JSON.parse(JSON.stringify(MOCK_USER_HISTORY_EVENTS))
   }
 
-  async addKey (key: UserKey): Promise<void> {
+  async addKey (key: UserKey, _sign?: (digest: Uint8Array) => Promise<Signature>): Promise<void> {
     this.mockUser = {
       ...this.mockUser,
       activeKeys: [...this.mockUser.activeKeys, key]
