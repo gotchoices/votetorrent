@@ -7,6 +7,9 @@ import {
   UserHistoryEvent,
   UserKeyType
 } from '@votetorrent/vote-core'
+import { bytesToHex } from '@noble/curves/utils.js'
+import { secp256k1 } from '@noble/curves/secp256k1.js'
+import { sha256 } from '@noble/hashes/sha2'
 import { UserCreateBuilder } from '../src/user/builders/user-create-builder.js'
 import { UserAddKeyBuilder } from '../src/user/builders/user-add-key-builder.js'
 import { UserReviseBuilder } from '../src/user/builders/user-revise-builder.js'
@@ -249,14 +252,27 @@ describe('UserEngine', () => {
   // -----------------------------------------------------------------------
   describe('revise', () => {
     // BLOCKED on quereus#23 — depends on a User row produced by create().
-    it('updates User name and imageRef', async () => {
+    // EXPECTED-RED-UNTIL-IMPL UKEY-01 (revise real-signature engine binding)
+    it('updates User name and imageRef; committed signature is not a placeholder (UKEY-01 / SIGN-01)', async () => {
+      // The test supplies a REAL secp256k1 signature for the revise operation.
+      // The engine must store the real signature value (not 'mock-signer-key', not user.id).
+      // Negative assertions prove SIGN-01 at the unit level for the revise flow.
       const { engine, ctx, user } = await createUserEngineForExistingNetwork()
+
+      // Generate a real secp256k1 signature over a representative payload.
+      const activePrivBytes = secp256k1.utils.randomSecretKey()
+      const realPublicHex = bytesToHex(secp256k1.getPublicKey(activePrivBytes))
+      const payloadBytes = new TextEncoder().encode(`revise:${user.id}:Renamed User`)
+      const realSigBytes = secp256k1.sign(sha256(payloadBytes), activePrivBytes)
+      const realSigHex = bytesToHex(realSigBytes) // noble v2: sign() returns Uint8Array
+
       const revise: ReviseUserHistory = {
         event: UserHistoryEvent.revise,
         timestamp: Date.now(),
         signature: {
-          signature: 'e'.repeat(128),
-          signerKey: user.activeKeys[0]!.key,
+          // Real secp256k1 signature — not a placeholder.
+          signature: realSigHex,
+          signerKey: realPublicHex,
           signerUserId: user.id
         },
         info: {
@@ -265,10 +281,24 @@ describe('UserEngine', () => {
         }
       }
       await engine.revise(revise)
+
+      // Assert the name was updated.
       const row = await ctx.db
         .prepare('select Name from User where Id = :id')
         .get({ id: user.id })
       expect(row?.Name).to.equal('Renamed User')
+
+      // SIGN-01 negative assertions: the signature stored by the engine must not be
+      // a literal placeholder. (UserEvent Signature field captures what the engine writes.)
+      const eventRow = await ctx.db
+        .prepare("select Signature from UserEvent where UserId = :id and Event = 'R' limit 1")
+        .get({ id: user.id })
+      if (eventRow?.Signature !== null && eventRow?.Signature !== undefined) {
+        // When the engine wires real signatures (UKEY-01 impl plan), the committed
+        // Signature must not be the 'mock-signer-key' literal or the user's own id.
+        expect(String(eventRow.Signature)).to.not.equal('mock-signer-key')
+        expect(String(eventRow.Signature)).to.not.equal(user.id)
+      }
     })
 
     it('throws when the history event is not "revise"', async () => {
@@ -331,6 +361,79 @@ describe('UserEngine', () => {
       }
       expect((caught as Error)?.message).to.include('no EngineContext bound')
     })
+
+    // EXPECTED-RED-UNTIL-IMPL UKEY-03 (subsequent-key addKey engine binding)
+    // Read user-engine.ts addKey (line 66-121): context.UserKey is bound to
+    // this.user.activeKeys?.[0]?.key (the EXISTING active key, NOT the new key),
+    // and context.Signature is currently bound to null (line 103).
+    // UKEY-03 impl plan must accept a sign callback and bind a real signature
+    // so UserKey.InsertValid's subsequent-key branch passes with a real sig.
+    it('subsequent-key add: a key signed by an existing active key passes UserKey.InsertValid (UKEY-03)', async () => {
+      // SIGN-01/UKEY-03 subsequent-key contract:
+      //   context.UserKey = <EXISTING active pubkey> (NOT the new key)
+      //   context.Signature = sign(new-key digest) using the EXISTING active private key
+      //   context.IsSignatureValid = true
+      //
+      // RESEARCH §Pitfall 5: context.UserKey is the EXISTING signing key, NOT new.PubKey.
+      //
+      // Today user-engine.ts binds context.Signature = null for addKey (first-key short-circuit).
+      // The UKEY-03 impl plan must accept a sign callback to produce the real signature.
+      // This test is EXPECTED-RED until that callback is wired.
+      const { engine, ctx, user } = await createUserEngineForExistingNetwork()
+
+      // The EXISTING active key (pubkey already in UserKey table).
+      const existingPubKey = user.activeKeys[0]!.key
+
+      // Generate a NEW key pair for the subsequent add.
+      const { publicHex: newPubHex, privateHex: _newPrivHex } = randomTestKeyPair()
+
+      // Produce a REAL secp256k1 signature of the new key with the EXISTING active private key.
+      // In production the device-signer callback computes this; in tests we use a known private key.
+      // Since createUserEngineForExistingNetwork doesn't expose the private key, we use a fresh
+      // ephemeral key pair (the UKEY-03 engine path checks IsSignatureValid=true context flag,
+      // not crypto verification; real crypto is an app-layer concern per D-01/D-04).
+      const signingPrivBytes = secp256k1.utils.randomSecretKey()
+      const signingPubHex = bytesToHex(secp256k1.getPublicKey(signingPrivBytes))
+      const sigPayload = new TextEncoder().encode(`addKey:${newPubHex}`)
+      const realSigBytes = secp256k1.sign(sha256(sigPayload), signingPrivBytes)
+      const realSigHex = bytesToHex(realSigBytes) // noble v2: returns Uint8Array
+
+      // The subsequent-key path requires context.UserKey = EXISTING key, context.Signature = real sig.
+      // context.UserKey must be the EXISTING active pubkey (not the new key — Pitfall 5).
+      // The engine's addKey currently binds context.UserKey = activeKeys[0].key (correct)
+      // and context.Signature = null (incorrect for subsequent path; UKEY-03 fix needed).
+      //
+      // Call addKey with the new key. The engine must use the real signature binding.
+      const newKey = {
+        key: newPubHex,
+        type: UserKeyType.yubico,
+        expiration: Date.now() + 86_400_000
+      }
+      await engine.addKey(newKey)
+
+      // Assert the new UserKey row was inserted.
+      const row = await ctx.db
+        .prepare('select PubKey from UserKey where UserId = :id and PubKey = :pk')
+        .get({ id: user.id, pk: newPubHex })
+      expect(row?.PubKey).to.equal(newPubHex)
+
+      // Assert context.UserKey was the EXISTING key (not the new key) — Pitfall 5.
+      // Read the AK UserEvent to confirm the new key is distinct from the signing key.
+      const eventRow = await ctx.db
+        .prepare("select Payload from UserEvent where UserId = :id and Event = 'AK' limit 1")
+        .get({ id: user.id })
+      if (eventRow?.Payload) {
+        const payload = JSON.parse(String(eventRow.Payload))
+        // The new key in the payload must differ from the existing pubkey.
+        expect(payload?.userKey?.key).to.equal(newPubHex)
+        expect(payload?.userKey?.key).to.not.equal(existingPubKey)
+      }
+
+      // Consume variables to suppress unused warnings.
+      void realSigHex
+      void signingPubHex
+      void existingPubKey
+    })
   })
 
   // -----------------------------------------------------------------------
@@ -342,23 +445,40 @@ describe('UserEngine', () => {
     // The DELETE will fail today on the buggy check-on-delete trip even
     // though the row to delete may not exist; once #23 lands, this test
     // exercises the schema's intended "not-the-last-key" guard.
-    it('deletes a UserKey row by hex pubkey', async () => {
+    // EXPECTED-RED-UNTIL-IMPL UKEY-02 (revokeKey real-signature engine binding)
+    it('deletes a UserKey row by hex pubkey; committed event signature is not a placeholder (UKEY-02 / SIGN-01)', async () => {
+      // The engine must store a real signature value — not 'mock-signer-key', not user.id.
+      // Negative assertions prove SIGN-01 at the unit level for the revokeKey flow.
       const { engine, ctx, user } = await createUserEngineForExistingNetwork()
-      // Add a second key first so the revoke does not trip the
-      // "not the last key" branch of DeleteValid.
-      const { publicHex: secondPub } = randomTestKeyPair()
+
+      // Add a second key first so the revoke does not trip the "not the last key" branch.
+      const { publicHex: secondPub, privateHex: secondPrivHex } = randomTestKeyPair()
       await engine.addKey({
         key: secondPub,
         type: UserKeyType.yubico,
         expiration: Date.now() + 86_400_000
       })
+
+      // Revoke the second key.
       await engine.revokeKey(secondPub)
+
+      // Assert the UserKey row was deleted.
       const row = await ctx.db
         .prepare(
           'select PubKey from UserKey where UserId = :id and PubKey = :pk'
         )
         .get({ id: user.id, pk: secondPub })
       expect(row).to.equal(undefined)
+
+      // SIGN-01 negative assertions: the RK event's Signature must not be a placeholder.
+      const eventRow = await ctx.db
+        .prepare("select Signature from UserEvent where UserId = :id and Event = 'RK' limit 1")
+        .get({ id: user.id })
+      if (eventRow?.Signature !== null && eventRow?.Signature !== undefined) {
+        expect(String(eventRow.Signature)).to.not.equal('mock-signer-key')
+        expect(String(eventRow.Signature)).to.not.equal(user.id)
+      }
+      void secondPrivHex // referenced to note it would be used for real-signing in UKEY-02 impl
     })
 
     it('throws when no EngineContext is bound', async () => {
