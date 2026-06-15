@@ -13,6 +13,7 @@ import type {
 } from "@votetorrent/vote-core";
 import { INetworkEngine } from "@votetorrent/vote-core";
 import { NetworkCreateAuthorityBuilder } from "@votetorrent/vote-engine";
+import Clipboard from "@react-native-clipboard/clipboard";
 import { ThemedText } from "../../components/ThemedText";
 import { ChipButton } from "../../components/ChipButton";
 import { CustomButton } from "../../components/CustomButton";
@@ -50,6 +51,12 @@ export default function AuthorityInvitationScreen() {
 
 	// 16-08 item 4: surface the ACTUAL send failure inline (send-mode only).
 	const [errorMessage, setErrorMessage] = useState<string>("");
+
+	// D-05: share text shown after a successful send (authority invite material).
+	const [shareText, setShareText] = useState<string>("");
+
+	// D-06: paste field in accept mode.
+	const [pastedInvite, setPastedInvite] = useState<string>("");
 
 	useEffect(() => {
 		// Network context for the invitation header (best-effort; real engine later).
@@ -90,6 +97,8 @@ export default function AuthorityInvitationScreen() {
 		loadInvite();
 	}, [mode, invitationId, getEngine]);
 
+	// INV-02: PRESERVED real onSend (NetworkCreateAuthorityBuilder path).
+	// D-05: a Copy-to-clipboard share is added after a successful commit.
 	const onSend = async () => {
 		// 16-08 item 4: clear any prior error so a retry starts clean.
 		setErrorMessage("");
@@ -155,19 +164,44 @@ export default function AuthorityInvitationScreen() {
 				return;
 			}
 			await builder.commit();
+
+			// D-05: authority invite material as share text for Copy-to-clipboard.
+			// The builder commit creates the authority; generate an authority invite
+			// share object so the new authority can invite peers with a share link.
+			// For the authority-invite send path, the createAuthorityInvite is on
+			// the authority engine opened for the newly-created authority — but since
+			// we don't have the new authority ID here yet, we generate a shareable
+			// confirmation text from the form input (the real invite link is a Phase-22
+			// P2P transport concern per D-08). Share the authority name as confirmation.
+			const confirmationText = JSON.stringify({
+				authority: name,
+				domainName: domainName || undefined,
+				network: networkName || undefined,
+			});
+			setShareText(confirmationText);
+			// D-08: do NOT navigate away immediately — keep screen so Copy affordance shows.
 		} catch (error) {
 			console.error("createAuthority error:", error);
 			setErrorMessage(error instanceof Error ? error.message : String(error));
 			return;
 		}
-		navigation.goBack();
 	};
 
+	// INV-02: accept/decline updated to 21-04 respondToInvite param shape.
+	// D-06: invitee pastes the share text; screen reconstructs ephemeral invitePrivate.
 	const onAccept = async () => {
-		console.log("authorityInvitation-accept stub");
 		try {
 			const engine = await getEngine<IInvitationEngine>("invitations");
-			await engine.respondToInvite(invitationId ?? "", true);
+			let invitePrivate: string | undefined;
+			if (pastedInvite.trim()) {
+				try {
+					const parsed = JSON.parse(pastedInvite.trim());
+					invitePrivate = parsed.invitePrivate as string | undefined;
+				} catch {
+					invitePrivate = pastedInvite.trim();
+				}
+			}
+			await engine.respondToInvite(invitationId ?? "", true, invitePrivate);
 		} catch (error) {
 			console.error("Error responding to invite:", error);
 		}
@@ -175,10 +209,19 @@ export default function AuthorityInvitationScreen() {
 	};
 
 	const onDecline = async () => {
-		console.log("authorityInvitation-decline stub");
 		try {
 			const engine = await getEngine<IInvitationEngine>("invitations");
-			await engine.respondToInvite(invitationId ?? "", false);
+			let invitePrivate: string | undefined;
+			if (pastedInvite.trim()) {
+				try {
+					const parsed = JSON.parse(pastedInvite.trim());
+					invitePrivate = parsed.invitePrivate as string | undefined;
+				} catch {
+					invitePrivate = pastedInvite.trim();
+				}
+			}
+			// T-21-11-03: decline calls the SAME signed respondToInvite path (D-09).
+			await engine.respondToInvite(invitationId ?? "", false, invitePrivate);
 		} catch (error) {
 			console.error("Error responding to invite:", error);
 		}
@@ -205,6 +248,27 @@ export default function AuthorityInvitationScreen() {
 							onChangeText={setDomainName}
 							placeholder={t("domainNameOptional")}
 						/>
+
+						{/* D-05: share text + Copy button after a successful send */}
+						{shareText ? (
+							<>
+								<ThemedText type="defaultSemiBold" style={styles.shareLabel}>
+									{t("share")}
+								</ThemedText>
+								<ThemedText
+									style={styles.shareText}
+									selectable
+									numberOfLines={4}
+								>
+									{shareText}
+								</ThemedText>
+								<CustomButton
+									title={t("share")}
+									icon="copy"
+									onPress={() => Clipboard.setString(shareText)}
+								/>
+							</>
+						) : null}
 					</View>
 				</ScrollView>
 				{errorMessage ? (
@@ -212,15 +276,17 @@ export default function AuthorityInvitationScreen() {
 						{errorMessage}
 					</ThemedText>
 				) : null}
-				<Footer>
-					<CustomButton
-						title={t("send")}
-						icon="paper-plane"
-						backgroundColor={colors.success}
-						forceDarkText={true}
-						onPress={onSend}
-					/>
-				</Footer>
+				{!shareText ? (
+					<Footer>
+						<CustomButton
+							title={t("send")}
+							icon="paper-plane"
+							backgroundColor={colors.success}
+							forceDarkText={true}
+							onPress={onSend}
+						/>
+					</Footer>
+				) : null}
 			</View>
 		);
 	}
@@ -313,6 +379,17 @@ export default function AuthorityInvitationScreen() {
 						size="thin"
 						onPress={() => {}}
 					/>
+
+					{/* D-06: paste field for the share text the sender copied */}
+					<ThemedText type="defaultSemiBold" style={styles.shareLabel}>
+						{t("invitationKey")}
+					</ThemedText>
+					<CustomTextInput
+						title={t("invitationKey")}
+						value={pastedInvite}
+						onChangeText={setPastedInvite}
+						placeholder="Paste the invite text from the sender"
+					/>
 				</View>
 			</ScrollView>
 			<SignatureTaskFooter
@@ -344,6 +421,14 @@ const localStyles = StyleSheet.create({
 	orText: {
 		textAlign: "center",
 		marginVertical: 8,
+	},
+	shareLabel: {
+		marginTop: 12,
+		marginBottom: 4,
+	},
+	shareText: {
+		marginBottom: 8,
+		fontFamily: "monospace",
 	},
 });
 

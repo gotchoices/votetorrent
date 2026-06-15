@@ -620,7 +620,7 @@ export class AuthorityEngine implements IAuthorityEngine {
 	async saveInviteWithSigning(
 		invite: AuthorityInvite | OfficerInvite,
 		scope: Scope, // either 'iad' for authority invites or 'rad' for officer invites
-		signature: Signature,
+		signatureOrCallback: Signature | ((digest: Uint8Array) => Promise<Signature>),
 	): Promise<void> {
 		// D-19: nonce first, InviteSlots second, AdminSigning (startSigningSession) third
 		const nonce = this.signingEngine.generateSigningNonce();
@@ -631,6 +631,41 @@ export class AuthorityEngine implements IAuthorityEngine {
 			// assume threshold for officer invites is 1
 			await this.saveOfficerInvite(invite, nonce);
 		}
+
+		// D-03/D-04: if a sign callback is provided (screen-layer device-signer pattern),
+		// compute the invite-slot Digest engine-side and call the callback with the digest
+		// bytes — the engine stays digest-authoritative (D-03). The callback returns a
+		// completed Signature without ever seeing the private key hex (D-01).
+		// If a completed Signature is passed (test fixture path), use it directly.
+		let signature: Signature;
+		if (typeof signatureOrCallback === 'function') {
+			const digestRow = await this.ctx.db
+				.prepare('select Digest(Cid) as d from InviteSlot where SigningNonce = :nonce')
+				.get({ nonce });
+			if (!digestRow || digestRow.d == null) {
+				throw new Error('saveInviteWithSigning: Digest() returned null — crypto plugin not registered?');
+			}
+			// Convert the base64url digest string to Uint8Array (mirrors seedElectionSigning pattern)
+			const d = digestRow.d as string;
+			let digestBytes: Uint8Array;
+			if (d instanceof Uint8Array) {
+				digestBytes = d;
+			} else if (d.length === 43 || d.length === 44) {
+				// base64url — decode
+				const b64 = d.replace(/-/g, '+').replace(/_/g, '/');
+				const binary = atob(b64);
+				digestBytes = new Uint8Array(binary.length);
+				for (let i = 0; i < binary.length; i++) digestBytes[i] = binary.charCodeAt(i);
+			} else {
+				// hex fallback
+				const { hexToBytes } = await import('@noble/curves/utils.js');
+				digestBytes = hexToBytes(d);
+			}
+			signature = await signatureOrCallback(digestBytes);
+		} else {
+			signature = signatureOrCallback;
+		}
+
 		await this.signingEngine.startSigningSession(
 			this.authority.id,
 			null,

@@ -5,12 +5,15 @@ import { ExtendedTheme, useNavigation, useRoute, useTheme } from "@react-navigat
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type {
 	Authority,
+	IAuthorityEngine,
 	IInvitationEngine,
+	INetworkEngine,
 	InviteStatus,
 	Scope,
 	SentOfficerInvite,
 } from "@votetorrent/vote-core";
 import { scopeDescriptions } from "@votetorrent/vote-core";
+import Clipboard from "@react-native-clipboard/clipboard";
 import { ThemedText } from "../../components/ThemedText";
 import { ChipButton } from "../../components/ChipButton";
 import { CustomButton } from "../../components/CustomButton";
@@ -20,7 +23,8 @@ import { InfoCard } from "../../components/InfoCard";
 import { SignatureTaskFooter } from "../../components/SignatureTaskFooter";
 import type { RootStackParamList } from "../../navigation/types";
 import { useApp } from "../../providers/AppProvider";
-import { INetworkEngine } from "@votetorrent/vote-core";
+import { createDeviceSigner } from "../../engines/device-signer";
+import { getOrCreateDeviceUser } from "../../engines/device-user";
 import { globalStyles } from "../../theme/styles";
 
 type AdministratorInvitationParams = {
@@ -33,12 +37,18 @@ export default function AdministratorInvitationScreen() {
 	const { t } = useTranslation();
 	const { colors } = useTheme() as ExtendedTheme;
 	const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
-	const { mode, invitationId } = useRoute().params as AdministratorInvitationParams;
+	const { mode, invitationId, authority } = useRoute().params as AdministratorInvitationParams;
 	const { getEngine } = useApp();
 
 	// Send-mode form state
 	const [name, setName] = useState("");
 	const [title, setTitle] = useState("");
+	// Share text shown after a successful send (D-05)
+	const [shareText, setShareText] = useState<string>("");
+	const [errorMessage, setErrorMessage] = useState<string>("");
+
+	// Accept-mode paste field (D-06 — invitee pastes the share text here)
+	const [pastedInvite, setPastedInvite] = useState<string>("");
 
 	// Accept-mode fetched invite
 	const [invite, setInvite] = useState<InviteStatus<SentOfficerInvite> | undefined>(undefined);
@@ -78,16 +88,80 @@ export default function AdministratorInvitationScreen() {
 		loadInvite();
 	}, [mode, invitationId, getEngine]);
 
-	const onSend = () => {
-		console.log("administratorInvitation-send stub");
-		navigation.goBack();
+	// INV-01: real officer invite send with device signature (D-01/D-03/D-04)
+	const onSend = async () => {
+		// Pattern B: clear any prior error so a retry starts clean.
+		setErrorMessage("");
+		try {
+			if (!authority?.id) {
+				setErrorMessage("Authority not available — navigate from an authority context.");
+				return;
+			}
+
+			// Resolve device user for the signing identity (D-01).
+			const deviceUser = await getOrCreateDeviceUser("Device User");
+
+			// Open the authority engine for this authority.
+			const authorityEngine = await getEngine<IAuthorityEngine>("authority", authority.id);
+
+			// Mint the one-time officer invite (key material stays in engine scope).
+			// createOfficerInvite is synchronous and returns an OfficerInviteShare
+			// containing the ephemeral invitePrivate (one-time only — D-05/D-27).
+			const officerInvite = authorityEngine.createOfficerInvite({
+				name,
+				title,
+				scopes: ["rn", "rad", "iad", "uai", "mel", "ceb"] as Scope[],
+			});
+
+			// D-01/D-03/D-04: device signer callback — engine computes Digest(InviteSlot.Cid)
+			// internally and passes the bytes to this callback (engine-authoritative, D-03).
+			// The callback closes over the device private key; the key never crosses into
+			// vote-engine (D-01). Never { prehash:false } (WR-10).
+			const signer = await createDeviceSigner(deviceUser.name);
+
+			// Save invite with signing — engine computes digest, calls signer, commits.
+			await authorityEngine.saveInviteWithSigning(officerInvite, "rad" as Scope, signer);
+
+			// D-05: render the one-time invite material as text for Copy-to-clipboard share.
+			// Include all fields the invitee needs to reconstruct the ephemeral key (D-06).
+			const sharePayload = JSON.stringify({
+				invitePrivate: officerInvite.invitePrivate,
+				inviteKey: officerInvite.inviteKey,
+				inviteSignature: officerInvite.inviteSignature,
+				expiration: officerInvite.expiration,
+				type: officerInvite.type,
+				name: officerInvite.name,
+				title: officerInvite.title,
+			});
+			setShareText(sharePayload);
+			// D-08: do NOT navigate away immediately — keep screen so Copy affordance shows.
+		} catch (error) {
+			console.error("onSend error:", error);
+			setErrorMessage(error instanceof Error ? error.message : String(error));
+		}
 	};
 
+	// D-06: accept — invitee pastes the share text; screen reconstructs ephemeral invitePrivate.
 	const onAccept = async () => {
-		console.log("administratorInvitation-accept stub");
 		try {
 			const engine = await getEngine<IInvitationEngine>("invitations");
-			await engine.respondToInvite(invitationId ?? "", true);
+			// Reconstruct invitePrivate from pasted text (D-06).
+			let invitePrivate: string | undefined;
+			if (pastedInvite.trim()) {
+				try {
+					const parsed = JSON.parse(pastedInvite.trim());
+					invitePrivate = parsed.invitePrivate as string | undefined;
+				} catch {
+					// Not valid JSON — treat as raw invitePrivate hex
+					invitePrivate = pastedInvite.trim();
+				}
+			}
+			// T-21-11-03: accept calls the SIGNED respondToInvite path (D-09).
+			await engine.respondToInvite(
+				invitationId ?? "",
+				true,
+				invitePrivate,
+			);
 		} catch (error) {
 			console.error("Error responding to invite:", error);
 		}
@@ -95,10 +169,23 @@ export default function AdministratorInvitationScreen() {
 	};
 
 	const onDecline = async () => {
-		console.log("administratorInvitation-decline stub");
 		try {
 			const engine = await getEngine<IInvitationEngine>("invitations");
-			await engine.respondToInvite(invitationId ?? "", false);
+			// T-21-11-03: decline calls the SAME signed respondToInvite path (D-09).
+			let invitePrivate: string | undefined;
+			if (pastedInvite.trim()) {
+				try {
+					const parsed = JSON.parse(pastedInvite.trim());
+					invitePrivate = parsed.invitePrivate as string | undefined;
+				} catch {
+					invitePrivate = pastedInvite.trim();
+				}
+			}
+			await engine.respondToInvite(
+				invitationId ?? "",
+				false,
+				invitePrivate,
+			);
 		} catch (error) {
 			console.error("Error responding to invite:", error);
 		}
@@ -115,17 +202,47 @@ export default function AdministratorInvitationScreen() {
 						</ThemedText>
 						<CustomTextInput title={t("name")} value={name} onChangeText={setName} />
 						<CustomTextInput title={t("title")} value={title} onChangeText={setTitle} />
+
+						{/* D-05: render share text + Copy button after a successful send */}
+						{shareText ? (
+							<>
+								<ThemedText type="defaultSemiBold" style={styles.shareLabel}>
+									{t("invitationKey")}
+								</ThemedText>
+								<ThemedText
+									style={styles.shareText}
+									selectable
+									numberOfLines={4}
+								>
+									{shareText}
+								</ThemedText>
+								<CustomButton
+									title={t("share")}
+									icon="copy"
+									onPress={() => Clipboard.setString(shareText)}
+								/>
+							</>
+						) : null}
+
+						{/* Pattern B error display */}
+						{errorMessage ? (
+							<ThemedText type="small" style={{ color: colors.error }}>
+								{errorMessage}
+							</ThemedText>
+						) : null}
 					</View>
 				</ScrollView>
-				<Footer>
-					<CustomButton
-						title={t("send")}
-						icon="paper-plane"
-						backgroundColor={colors.success}
-						forceDarkText={true}
-						onPress={onSend}
-					/>
-				</Footer>
+				{!shareText ? (
+					<Footer>
+						<CustomButton
+							title={t("send")}
+							icon="paper-plane"
+							backgroundColor={colors.success}
+							forceDarkText={true}
+							onPress={onSend}
+						/>
+					</Footer>
+				) : null}
 			</View>
 		);
 	}
@@ -186,6 +303,17 @@ export default function AdministratorInvitationScreen() {
 								size="thin"
 								onPress={() => {}}
 							/>
+
+							{/* D-06: paste field for the share text the sender copied */}
+							<ThemedText type="defaultSemiBold" style={styles.shareLabel}>
+								{t("invitationKey")}
+							</ThemedText>
+							<CustomTextInput
+								title={t("invitationKey")}
+								value={pastedInvite}
+								onChangeText={setPastedInvite}
+								placeholder="Paste the invite text from the sender"
+							/>
 						</>
 					) : (
 						<ThemedText>{t("loading")}</ThemedText>
@@ -214,6 +342,14 @@ const localStyles = StyleSheet.create({
 	orText: {
 		textAlign: "center",
 		marginVertical: 8,
+	},
+	shareLabel: {
+		marginTop: 12,
+		marginBottom: 4,
+	},
+	shareText: {
+		marginBottom: 8,
+		fontFamily: "monospace",
 	},
 	scopesSection: {
 		marginTop: 16,

@@ -38,7 +38,7 @@ export interface IAuthorityEngine {
   saveInviteWithSigning(
     invite: AuthorityInvite | OfficerInvite,
     scope: Scope,
-    signature: Signature
+    signatureOrCallback: Signature | ((digest: Uint8Array) => Promise<Signature>)
   ): Promise<void>
   buildCreateOfficerInvite(): IAuthorityCreateOfficerInviteBuilder
   buildCreateAuthorityInvite(): IAuthorityCreateAuthorityInviteBuilder
@@ -58,6 +58,6 @@ export interface IAuthorityProposeAdminBuilder extends IBuilder<{ admin: Proposa
   fromPayload(payload: { admin: Proposal<AdminInit>; signature: Signature }): this
 }
 
-export interface IAuthoritySaveInviteWithSigningBuilder extends IBuilder<{ invite: AuthorityInvite | OfficerInvite; scope: Scope; signature: Signature }, void> {
-  fromPayload(payload: { invite: AuthorityInvite | OfficerInvite; scope: Scope; signature: Signature }): this
+export interface IAuthoritySaveInviteWithSigningBuilder extends IBuilder<{ invite: AuthorityInvite | OfficerInvite; scope: Scope; signature: Signature | ((digest: Uint8Array) => Promise<Signature>) }, void> {
+  fromPayload(payload: { invite: AuthorityInvite | OfficerInvite; scope: Scope; signature: Signature | ((digest: Uint8Array) => Promise<Signature>) }): this
 }
