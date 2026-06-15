@@ -143,7 +143,7 @@ export class MockElectionEngine implements IElectionEngine {
 	}
 
 	async proposeRevision(_revision: ElectionRevisionInit): Promise<void> {
-		throw new FeatureNotAvailableError('proposeRevision — available in Phase 21 (signing pipeline)');
+		throw new FeatureNotAvailableError('proposeRevision is not available in the mock engine');
 	}
 
 	async revokeKeyholder(
