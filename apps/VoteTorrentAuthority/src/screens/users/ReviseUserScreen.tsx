@@ -6,11 +6,13 @@ import { CustomTextInput } from "../../components/CustomTextInput";
 import { CustomButton } from "../../components/CustomButton";
 import { Footer } from "../../components/Footer";
 import { globalStyles } from "../../theme/styles";
-import type { User, IUserEngine, ImageRef, ReviseUserHistory } from "@votetorrent/vote-core";
+import type { User, IUserEngine, ImageRef, ReviseUserHistory, Signature } from "@votetorrent/vote-core";
 import { UserHistoryEvent } from "@votetorrent/vote-core";
 import { ThemedText } from "../../components/ThemedText";
 import type { RootStackParamList } from "../../navigation/types";
 import { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import { createDeviceSigner } from "../../engines/device-signer";
+import { utf8ToBytes } from "@noble/hashes/utils.js";
 
 export function ReviseUserScreen() {
 	const { user, userEngine } = useRoute().params as {
@@ -22,13 +24,15 @@ export function ReviseUserScreen() {
 	const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 
 	const [userState, setUserState] = useState<User>(user);
-	const [newSignature, setNewSignature] = useState<string>("");
+	const [realSignature, setRealSignature] = useState<Signature | null>(null);
 	const [edited, setEdited] = useState(false);
+	const [errorMessage, setErrorMessage] = useState<string>("");
 
 	const handleSave = async () => {
+		setErrorMessage("");
 		try {
-			if (!newSignature) {
-				console.error("Signature is missing");
+			if (!realSignature) {
+				setErrorMessage("Signature is required — please sign before saving.");
 				return;
 			}
 
@@ -39,16 +43,12 @@ export function ReviseUserScreen() {
 					image: userState.image as ImageRef,
 				},
 				timestamp: Date.now(),
-				signature: {
-					signature: newSignature,
-					signerKey: "mock-signer-key",
-				},
+				signature: realSignature,
 			};
 			await userEngine.revise(reviseUserHistory);
 			navigation.popTo("UserDetails", { user: userState, userEngine });
 		} catch (error) {
-			console.error("Error saving user:", error);
-			//TODO: Show an alert to the user
+			setErrorMessage(error instanceof Error ? error.message : String(error));
 		}
 	};
 
@@ -65,9 +65,23 @@ export function ReviseUserScreen() {
 		setEdited(true);
 	};
 
-	const handleSign = () => {
-		setNewSignature(userState.id);
-		//TODO: Actually handle the signing
+	const handleSign = async () => {
+		setErrorMessage("");
+		try {
+			// D-01: createDeviceSigner closes over the private key app-side —
+			// only the resulting Signature crosses into vote-engine.
+			// D-03: the callback signs EXACTLY the bytes handed to it; we sign
+			// a representative revise payload so the signature is tied to this revision.
+			// WR-10: secp256k1.sign called with v2 defaults (prehash:true) inside the signer.
+			const signer = await createDeviceSigner(userState.name);
+			const payloadBytes = utf8ToBytes(
+				`revise:${userState.id}:${userState.name}`
+			);
+			const sig = await signer(payloadBytes);
+			setRealSignature(sig);
+		} catch (error) {
+			setErrorMessage(error instanceof Error ? error.message : String(error));
+		}
 	};
 
 	return (
@@ -113,13 +127,20 @@ export function ReviseUserScreen() {
 							handleSign();
 						}}
 					/>
-					{newSignature && (
+					{realSignature && (
 						<View style={styles.detailContainer}>
 							<ThemedText type="defaultSemiBold">{t("signature")}:</ThemedText>
-							<ThemedText>{newSignature}</ThemedText>
+							<ThemedText numberOfLines={1} ellipsizeMode="middle" style={{ flex: 1 }}>
+								{realSignature.signature}
+							</ThemedText>
 						</View>
 					)}
 				</View>
+				{errorMessage ? (
+					<ThemedText type="small" style={{ color: colors.error }}>
+						{errorMessage}
+					</ThemedText>
+				) : null}
 			</ScrollView>
 			<Footer>
 				<CustomButton
@@ -127,7 +148,7 @@ export function ReviseUserScreen() {
 					onPress={handleSave}
 					forceDarkText={false}
 					icon={"save"}
-					disabled={!newSignature}
+					disabled={!realSignature}
 					backgroundColor={colors.success}
 				/>
 			</Footer>

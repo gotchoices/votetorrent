@@ -1,7 +1,7 @@
 import { ScrollView, StyleSheet, View, TouchableOpacity } from "react-native";
 import { ThemedText } from "../../components/ThemedText";
 import { globalStyles } from "../../theme/styles";
-import { IUserEngine } from "@votetorrent/vote-core";
+import type { IUserEngine, Signature } from "@votetorrent/vote-core";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import { useTheme } from "@react-navigation/native";
 import { User } from "@votetorrent/vote-core";
@@ -14,6 +14,8 @@ import { useState } from "react";
 import { CustomTextInput } from "../../components/CustomTextInput";
 import { CustomButton } from "../../components/CustomButton";
 import { Footer } from "../../components/Footer";
+import { createDeviceSigner } from "../../engines/device-signer";
+import { utf8ToBytes } from "@noble/hashes/utils.js";
 
 export function RevokeKeyScreen() {
 	const { user, userEngine } = useRoute().params as { user: User; userEngine: IUserEngine };
@@ -23,6 +25,8 @@ export function RevokeKeyScreen() {
 	const [confirmText, setConfirmText] = useState("");
 	const [readyToSign, setReadyToSign] = useState(false);
 	const [isSigned, setIsSigned] = useState(false);
+	const [realSignature, setRealSignature] = useState<Signature | null>(null);
+	const [errorMessage, setErrorMessage] = useState<string>("");
 	const navigation = useNavigation();
 
 	const toggleKeySelection = (keyId: string) => {
@@ -46,18 +50,40 @@ export function RevokeKeyScreen() {
 		}
 	};
 
-	const handleSign = () => {
-		// TODO: Implement signing
-		setIsSigned(true);
+	const handleSign = async () => {
+		setErrorMessage("");
+		try {
+			// D-01: createDeviceSigner closes over the private key app-side —
+			// only the resulting Signature crosses into vote-engine.
+			// D-03: the callback signs EXACTLY the bytes handed to it; we sign a
+			// representative revoke payload tied to the selected keys and user.
+			// WR-10: secp256k1.sign called with v2 defaults (prehash:true) inside signer.
+			const signer = await createDeviceSigner(user.name);
+			const keysHex = Array.from(selectedKeys).sort().join(",");
+			const payloadBytes = utf8ToBytes(
+				`revokeKey:${user.id}:${keysHex}`
+			);
+			const sig = await signer(payloadBytes);
+			setRealSignature(sig);
+			setIsSigned(true);
+		} catch (error) {
+			setErrorMessage(error instanceof Error ? error.message : String(error));
+		}
 	};
 
 	const handleRevoke = async () => {
+		setErrorMessage("");
 		try {
-			await Promise.all(Array.from(selectedKeys).map((key) => userEngine.revokeKey(key)));
+			if (!realSignature) {
+				setErrorMessage("Signature is required — please sign before revoking.");
+				return;
+			}
+			await Promise.all(
+				Array.from(selectedKeys).map((key) => userEngine.revokeKey(key, realSignature))
+			);
 			navigation.goBack();
 		} catch (error) {
-			console.error("Failed to revoke keys:", error);
-			// TODO: real error handling
+			setErrorMessage(error instanceof Error ? error.message : String(error));
 		}
 	};
 
@@ -151,14 +177,19 @@ export function RevokeKeyScreen() {
 					onPress={() => handleSign()}
 					disabled={!readyToSign || selectedKeys.size === 0}
 				/>
-				{isSigned && (
+				{isSigned && realSignature && (
 					<View style={styles.detail}>
 						<ThemedText type="defaultSemiBold">{t("signed")}: </ThemedText>
 						<ThemedText style={styles.imageUrl} numberOfLines={1} ellipsizeMode="middle">
-							{user.id}
+							{realSignature.signature}
 						</ThemedText>
 					</View>
 				)}
+				{errorMessage ? (
+					<ThemedText type="small" style={{ color: colors.error }}>
+						{errorMessage}
+					</ThemedText>
+				) : null}
 			</ScrollView>
 			<Footer>
 				<CustomButton
