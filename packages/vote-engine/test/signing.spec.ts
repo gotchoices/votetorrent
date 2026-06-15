@@ -566,8 +566,9 @@ describe('getSignatureDigest + completeSignature round-trip', () => {
     const privKey = secp.utils.randomSecretKey()
     const pubKey = secp.getPublicKey(privKey)
     const pubHex = bytesToHex(pubKey)
-    const sigBytes = secp.sign(digest, privKey) // noble v2 defaults: prehash:true
-    const sigHex = bytesToHex(sigBytes.toCompactRawBytes())
+    // noble v2: secp256k1.sign() returns Uint8Array (compact raw bytes) directly
+    const sigBytes = secp.sign(digest, privKey) as unknown as Uint8Array
+    const sigHex = bytesToHex(sigBytes)
 
     const signature = {
       signerUserId: auth.user.id,

@@ -1,5 +1,6 @@
 import { MisuseError, QuereusError } from '@quereus/quereus'
 import { SigningEngine } from '../signing/signing-engine.js'
+import { digestToBytes } from '../utils.js'
 import type { EngineContext } from '../types.js'
 import type {
   ISigningEngine,
@@ -137,6 +138,55 @@ export class SignatureTasksEngine implements ISignatureTasksEngine {
       )
     } catch (err) {
       this.rethrow(err, 'completeSignature')
+    }
+  }
+
+  /**
+   * D-03 — Return the engine-authoritative `AdminSigning.Digest` bytes for the
+   * pending task. The screen passes these bytes to the device-signer callback
+   * and never recomputes any canonical form itself.
+   *
+   * Look-up mirrors the task-row query used by `completeSignature` (same
+   * `(userId, signatureType, IsCompleted=0)` filter). Then reads
+   * `AdminSigning.Digest` for that nonce and converts via `digestToBytes`
+   * (the same helper used throughout the engine for the Digest → Uint8Array
+   * conversion, WR-01 single source of truth).
+   *
+   * No key material enters this method — only bytes are returned (D-01/D-03).
+   */
+  async getSignatureDigest (task: SignatureTask): Promise<Uint8Array> {
+    this.requireCtx('getSignatureDigest')
+    const taskRow = await this.ctx!.db
+      .prepare(
+        `select Id, SigningNonce from Task
+          where UserId = :userId
+            and Type = 'signature'
+            and SignatureType = :signatureType
+            and IsCompleted = 0
+          limit 1`
+      )
+      .get({
+        userId: task.userId,
+        signatureType: task.signatureType
+      })
+    if (!taskRow) {
+      throw new Error(
+        `SignatureTasksEngine.getSignatureDigest: no pending task for user=${task.userId} signatureType=${task.signatureType}`
+      )
+    }
+    const nonce = taskRow.SigningNonce as string
+    const signingRow = await this.ctx!.db
+      .prepare('select Digest from AdminSigning where Nonce = :nonce')
+      .get({ nonce })
+    if (!signingRow) {
+      throw new Error(
+        `SignatureTasksEngine.getSignatureDigest: no AdminSigning row for nonce=${nonce}`
+      )
+    }
+    try {
+      return digestToBytes(signingRow.Digest)
+    } catch (err) {
+      this.rethrow(err, 'getSignatureDigest')
     }
   }
 

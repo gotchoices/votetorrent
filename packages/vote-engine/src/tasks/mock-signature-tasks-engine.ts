@@ -271,4 +271,15 @@ export class MockSignatureTasksEngine implements ISignatureTasksEngine {
     }
     return Promise.resolve([])
   }
+
+  /**
+   * Mock parity for `ISignatureTasksEngine.getSignatureDigest` (D-03).
+   *
+   * Returns a deterministic mock `Uint8Array` keyed by `task.signatureType`
+   * so `compliance.spec.ts` mock-parity assertions hold and the mock-backed
+   * app path resolves the method. No key material is involved (D-01/D-03).
+   */
+  async getSignatureDigest (task: SignatureTask): Promise<Uint8Array> {
+    return new TextEncoder().encode(`mock-digest-${task.signatureType}`)
+  }
 }
