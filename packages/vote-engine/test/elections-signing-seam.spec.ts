@@ -21,7 +21,10 @@
  */
 
 import { UserKeyType } from '@votetorrent/vote-core'
+import type { Signature } from '@votetorrent/vote-core'
 import { expect } from 'chai'
+import { secp256k1 } from '@noble/curves/secp256k1.js'
+import { bytesToHex, hexToBytes } from '@noble/curves/utils.js'
 import { ElectionsEngine, peekNextElectionTid } from '../src/elections/elections-engine.js'
 import {
   createTestNetwork,
@@ -44,10 +47,18 @@ type SeedRevisionSeam = {
       keyholderThreshold: number
     },
     tid: number,
-    privKeyHex: string,
-    signerUserId: string,
-    signerKey: string,
+    sign: (digest: Uint8Array) => Promise<Signature>,
   ): Promise<string>
+}
+
+/** Build a sign callback from a key pair for use in test cases. */
+function makeSignCallback (privateHex: string, userId: string, signerKey: string) {
+  const privBytes = hexToBytes(privateHex)
+  return async (digest: Uint8Array): Promise<Signature> => ({
+    signerUserId: userId,
+    signerKey,
+    signature: bytesToHex(secp256k1.sign(digest, privBytes)),
+  })
 }
 
 describe('Real-seam: seedElectionSigning → createElection through InsertValid', () => {
@@ -91,13 +102,9 @@ describe('Real-seam: seedElectionSigning → createElection through InsertValid'
       type: e.type,
     }
 
-    // Call the REAL seedElectionSigning with genuine secp256k1 signing.
-    const signingNonce = await electionsEngine.seedElectionSigning(
-      electionFields,
-      privateHex,
-      auth.user.id,
-      auth.user.activeKeys[0]!.key
-    )
+    // Call the REAL seedElectionSigning with genuine secp256k1 sign callback.
+    const sign = makeSignCallback(privateHex, auth.user.id, auth.user.activeKeys[0]!.key)
+    const signingNonce = await electionsEngine.seedElectionSigning(electionFields, sign)
 
     // createElection MUST resolve without throwing.
     // Pre-fix: throws CHECK constraint failed: InsertValid
@@ -153,12 +160,8 @@ describe('Real-seam: seedElectionSigning → createElection through InsertValid'
     // Capture the tid BEFORE calling seedElectionSigning so we can compare digests.
     const tid = peekNextElectionTid()
 
-    const signingNonce = await electionsEngine.seedElectionSigning(
-      electionFields,
-      privateHex,
-      auth.user.id,
-      auth.user.activeKeys[0]!.key
-    )
+    const sign = makeSignCallback(privateHex, auth.user.id, auth.user.activeKeys[0]!.key)
+    const signingNonce = await electionsEngine.seedElectionSigning(electionFields, sign)
     await electionsEngine.createElection(init, { signingNonce })
 
     const db = auth.ctx.db
@@ -242,12 +245,8 @@ describe('Real-seam: seedElectionSigning → createElection through InsertValid'
       ballotDeadline: e.ballotDeadline,
       type: e.type,
     }
-    const signingNonce = await electionsEngine.seedElectionSigning(
-      electionFields,
-      privateHex,
-      auth.user.id,
-      auth.user.activeKeys[0]!.key
-    )
+    const sign = makeSignCallback(privateHex, auth.user.id, auth.user.activeKeys[0]!.key)
+    const signingNonce = await electionsEngine.seedElectionSigning(electionFields, sign)
 
     // Step 2: sign the ElectionRevision row.
     // revTid = peekNextElectionTid() + 1 — Election consumes T, revision consumes T+1.
@@ -264,9 +263,7 @@ describe('Real-seam: seedElectionSigning → createElection through InsertValid'
         keyholderThreshold: init.revision.keyholderThreshold,
       },
       revTid,
-      privateHex,
-      auth.user.id,
-      auth.user.activeKeys[0]!.key
+      sign
     )
 
     // Step 3: create the election (Election row + ElectionRevision Revision=0).

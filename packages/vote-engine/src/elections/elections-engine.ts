@@ -1,6 +1,5 @@
 import { MisuseError, QuereusError } from '@quereus/quereus'
-import { secp256k1 } from '@noble/curves/secp256k1.js'
-import { bytesToHex, hexToBytes } from '@noble/curves/utils.js'
+import { hexToBytes } from '@noble/curves/utils.js'
 import { ElectionEngine } from '../election/election-engine.js'
 import { fromCanonicalDatetime, nowCanonicalDatetime, parseJsonOr, toCanonicalDatetime } from '../utils.js'
 import type { EngineContext } from '../types.js'
@@ -15,7 +14,8 @@ import type {
   IElectionsAdjustElectionBuilder,
   IElectionsCreateElectionBuilder,
   IElectionsEngine,
-  Proposal
+  Proposal,
+  Signature
 } from '@votetorrent/vote-core'
 import { ElectionsCreateElectionBuilder } from './builders/elections-create-election-builder.js'
 import { ElectionsAdjustElectionBuilder } from './builders/elections-adjust-election-builder.js'
@@ -49,7 +49,7 @@ let nextTid = Date.now()
 export function peekNextElectionTid (): number { return nextTid }
 
 /**
- * Convert `Digest()` output to bytes for secp256k1.sign (WR-01, 17-REVIEW).
+ * Convert `Digest()` output to bytes for the app-layer sign callback (WR-01, 17-REVIEW).
  *
  * Discriminates hex vs base64url by SHAPE (exact length + alphabet), NOT by
  * alphabet alone: every hex character is also in the base64url alphabet, so an
@@ -507,16 +507,16 @@ export class ElectionsEngine implements IElectionsEngine {
    * @param electionFields - The core election fields (id, authorityId, title, date,
    *   revisionDeadline, ballotDeadline, type) — must match exactly what the builder
    *   payload will carry so the Digests align.
-   * @param privKeyHex - Device private key as a hex string (from getDevicePrivKeyHex()).
-   * @param signerUserId - Device user id (User.id).
-   * @param signerKey - Device public key hex (User.activeKeys[0].key).
+   * @param sign - App-layer signing callback: receives the canonical digest bytes
+   *   (computed via SQL Digest()) and returns a Signature `{ signerUserId, signerKey,
+   *   signature }`. The private key stays app-side (D-01); the callback MUST use
+   *   @noble/curves v2 defaults (prehash:true — WR-10). signerUserId/signerKey arrive
+   *   inside the returned Signature (D-04).
    * @returns The signing nonce to pass to `createElection(payload, { signingNonce })`.
    */
   async seedElectionSigning (
     electionFields: Pick<ElectionCoreInit, 'id' | 'authorityId' | 'title' | 'date' | 'revisionDeadline' | 'ballotDeadline' | 'type'>,
-    privKeyHex: string,
-    signerUserId: string,
-    signerKey: string
+    sign: (digest: Uint8Array) => Promise<Signature>
   ): Promise<string> {
     this.requireCtx('seedElectionSigning')
     const ctx = this.ctx!
@@ -564,18 +564,15 @@ export class ElectionsEngine implements IElectionsEngine {
       throw new Error('seedElectionSigning: Digest() returned null — crypto plugin not registered?')
     }
 
-    // 4. Produce a REAL secp256k1 signature over the digest bytes — INSIDE the engine
-    //    (the screen never calls secp256k1.sign, satisfying the B2 tier constraint).
+    // 4. Hand the canonical digest bytes to the app-layer sign callback (D-01/D-03/D-04).
+    //    The callback closes over the device private key app-side and returns a Signature
+    //    { signerUserId, signerKey, signature }. The engine never sees privKeyHex.
     //    CR-01: After the node-crypto.js polyfill fix, Digest() returns a base64url string
     //    on both Node and device. digestToBytes guards Uint8Array (legacy device path
     //    before the polyfill fix), 43-char base64url, and 64-char hex by shape (WR-01).
-    //    WR-10 (17-REVIEW): @noble/curves v2 defaults to prehash:true, so the signed
-    //    domain is sha256(digestBytes) — deliberately accepted (no pre-migration
-    //    signatures exist). Verifiers must use noble v2 default options.
+    //    WR-10 (17-REVIEW): the callback MUST use @noble/curves v2 defaults (prehash:true).
     const digestBytes: Uint8Array = digestToBytes(digestRow.d)
-    const privKeyBytes = hexToBytes(privKeyHex)
-    const sig = secp256k1.sign(digestBytes, privKeyBytes)
-    const signature = bytesToHex(sig)
+    const signature = await sign(digestBytes)
 
     // 5. Generate nonce and insert AdminSigning with the election-specific Digest.
     //    `IsSignatureValid = true` mirrors the seedElectionSigning test-fixture pattern;
@@ -617,15 +614,15 @@ export class ElectionsEngine implements IElectionsEngine {
         revisionDeadline: revDeadlineCanon,
         ballotDeadline: ballotDeadlineCanon,
         type,
-        userId: signerUserId,
-        signerKey,
-        signature,
+        userId: signature.signerUserId,
+        signerKey: signature.signerKey,
+        signature: signature.signature,
         now,
       }
     )
 
     // 6. Drive OfficerSignature + AdminSignature via SigningEngine (threshold=1 → AdminSignature).
-    await new SigningEngine(ctx).sign(nonce, { signerUserId, signerKey, signature })
+    await new SigningEngine(ctx).sign(nonce, signature)
 
     // 7. Return the nonce for the screen to pass to createElection(payload, { signingNonce }).
     return nonce
@@ -673,9 +670,7 @@ export class ElectionsEngine implements IElectionsEngine {
       keyholderThreshold: number
     },
     tid: number,
-    privKeyHex: string,
-    signerUserId: string,
-    signerKey: string
+    sign: (digest: Uint8Array) => Promise<Signature>
   ): Promise<string> {
     this.requireCtx('seedElectionRevisionSigning')
     const ctx = this.ctx!
@@ -715,12 +710,10 @@ export class ElectionsEngine implements IElectionsEngine {
       throw new Error('seedElectionRevisionSigning: Digest() returned null — crypto plugin not registered?')
     }
 
-    // 4. Produce a REAL secp256k1 signature over the digest bytes.
+    // 4. Hand the canonical digest bytes to the app-layer sign callback (D-01/D-03/D-04).
     //    CR-01/WR-01: same shape-discriminating decoder as seedElectionSigning.
     const digestBytes: Uint8Array = digestToBytes(digestRow.d)
-    const privKeyBytes = hexToBytes(privKeyHex)
-    const sig = secp256k1.sign(digestBytes, privKeyBytes)
-    const signature = bytesToHex(sig)
+    const signature = await sign(digestBytes)
 
     // 5. Generate a FRESH nonce (DISTINCT from the election-row nonce).
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -761,15 +754,15 @@ export class ElectionsEngine implements IElectionsEngine {
         instructions: revision.instructions,
         timeline,
         keyholderThreshold: revision.keyholderThreshold,
-        userId: signerUserId,
-        signerKey,
-        signature,
+        userId: signature.signerUserId,
+        signerKey: signature.signerKey,
+        signature: signature.signature,
         now,
       }
     )
 
     // 6. Drive OfficerSignature + AdminSignature via SigningEngine (threshold=1 → AdminSignature).
-    await new SigningEngine(ctx).sign(nonce, { signerUserId, signerKey, signature })
+    await new SigningEngine(ctx).sign(nonce, signature)
 
     // 7. Return the nonce for the caller to pass as revisionSigningNonce.
     return nonce
