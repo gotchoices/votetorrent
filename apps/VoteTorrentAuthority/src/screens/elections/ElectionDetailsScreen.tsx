@@ -187,7 +187,7 @@ export default function ElectionDetailsScreen() {
 					icon="paper-plane"
 					backgroundColor={colors.accent}
 					size="thin"
-					onPress={() => navigation.navigate("KeyholderInvitation", { mode: "send" })}
+					onPress={() => navigation.navigate("KeyholderInvitation", { mode: "send", electionEngine })}
 				/>
 			</View>
 
