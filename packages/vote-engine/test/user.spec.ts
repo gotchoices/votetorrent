@@ -449,10 +449,33 @@ describe('UserEngine', () => {
     it('deletes a UserKey row by hex pubkey; committed event signature is not a placeholder (UKEY-02 / SIGN-01)', async () => {
       // The engine must store a real signature value — not 'mock-signer-key', not user.id.
       // Negative assertions prove SIGN-01 at the unit level for the revokeKey flow.
-      const { engine, ctx, user } = await createUserEngineForExistingNetwork()
+      //
+      // UKEY-02 / SC#7: revokeKey binds context.UserKey = signature.signerKey so the verified
+      // key is the same keypair that produced the signature. The SIGNER must be a DIFFERENT
+      // key than the one being revoked — DeleteValid checks that context.UserKey is non-expired
+      // and still present after the delete. We therefore create the user with a FIRST key whose
+      // private key we control, add a SECOND key, then sign the revocation of the SECOND key
+      // using the FIRST key's private key. This is the semantically correct single-device flow:
+      // the remaining active key authorises the removal of a key being retired.
+      const { publicHex: firstPub, privateHex: firstPrivHex } = randomTestKeyPair()
+      const firstPrivBytes = hexToBytes(firstPrivHex)
+
+      await AsyncStorage.clear()
+      await AsyncStorage.setItem('recentNetworks', [])
+      const networksEngine = new NetworksEngine(AsyncStorage)
+      const user = makeUser({ activeKeys: [{ key: firstPub, type: UserKeyType.mobile, expiration: Date.now() + 86_400_000 }] })
+      await networksEngine.create(makeNetworkInit(), user)
+      const recents = (await AsyncStorage.getItem<NetworkReference[]>('recentNetworks')) ?? []
+      const ref = recents[0]
+      if (!ref) throw new Error('No network reference after create()')
+      const networkEngine = await networksEngine.open(ref, user, false)
+      const ctx = (networksEngine as unknown as { contexts: Map<string, EngineContext> }).contexts.get(ref.hash)
+      if (!ctx) throw new Error('No cached context after create()')
+      void networkEngine
+      const engine = new UserEngine(user, ctx)
 
       // Add a second key first so the revoke does not trip the "not the last key" branch.
-      const { publicHex: secondPub, privateHex: secondPrivHex } = randomTestKeyPair()
+      const { publicHex: secondPub } = randomTestKeyPair()
       await engine.addKey({
         key: secondPub,
         type: UserKeyType.yubico,
@@ -460,7 +483,9 @@ describe('UserEngine', () => {
       })
 
       // Build a real secp256k1 signature for the revoke operation (UKEY-02 impl).
-      const revokePrivBytes = hexToBytes(secondPrivHex)
+      // SIGNER = FIRST key (remains after revoke); KEY BEING REVOKED = secondPub.
+      // This satisfies DeleteValid: context.UserKey = firstPub which still exists after delete.
+      const revokePrivBytes = firstPrivBytes
       const revokePayloadBytes = new TextEncoder().encode(`revokeKey:${secondPub}`)
       const revokeSigBytes = secp256k1.sign(sha256(revokePayloadBytes), revokePrivBytes)
       const revokeSigHex = bytesToHex(revokeSigBytes)
@@ -470,7 +495,7 @@ describe('UserEngine', () => {
         signerUserId: user.id
       }
 
-      // Revoke the second key with a real device signature.
+      // Revoke the second key with a real device signature signed by the first key.
       await engine.revokeKey(secondPub, revokeSignature)
 
       // Assert the UserKey row was deleted.
@@ -489,6 +514,11 @@ describe('UserEngine', () => {
       expect(String(eventRow?.Signature)).to.equal(revokeSigHex)
       expect(String(eventRow?.Signature)).to.not.equal('mock-signer-key')
       expect(String(eventRow?.Signature)).to.not.equal(user.id)
+
+      // UKEY-02 / SC#7: revokeKey binds context.UserKey = signature.signerKey so the verified
+      // key is exactly the keypair that produced the signature. Assert signerKey == the signing
+      // keypair's public key (= firstPub = the value now bound to context.UserKey).
+      expect(revokeSignature.signerKey).to.equal(bytesToHex(secp256k1.getPublicKey(revokePrivBytes)))
     })
 
     it('throws when no EngineContext is bound', async () => {
@@ -632,8 +662,27 @@ describe('UserEngine', () => {
       // same way fixtures seed rows, then exercise the real addKey/revise/
       // revokeKey mutations (which append AK/R/RK events in-batch), and read
       // all four back through getHistory in both orderings.
-      const { engine, ctx, user } = await createUserEngineForExistingNetwork()
-      const createPub = user.activeKeys[0]!.key
+      // Use a known first keypair so we can sign the revokeKey event with the first key.
+      // UKEY-02: context.UserKey = signature.signerKey, so the signer must exist in UserKey.
+      // The first key (createPub) stays after revoking addedPub — signing with it satisfies
+      // DeleteValid (context.UserKey = createPub is present and non-expired after the delete).
+      const { publicHex: createPub, privateHex: createPrivHex } = randomTestKeyPair()
+      const createPrivBytes = hexToBytes(createPrivHex)
+
+      await AsyncStorage.clear()
+      await AsyncStorage.setItem('recentNetworks', [])
+      const networksEngine2 = new NetworksEngine(AsyncStorage)
+      const user = makeUser({ activeKeys: [{ key: createPub, type: UserKeyType.mobile, expiration: Date.now() + 86_400_000 }] })
+      await networksEngine2.create(makeNetworkInit(), user)
+      const recents2 = (await AsyncStorage.getItem<NetworkReference[]>('recentNetworks')) ?? []
+      const ref2 = recents2[0]
+      if (!ref2) throw new Error('No network reference after create()')
+      const networkEngine2 = await networksEngine2.open(ref2, user, false)
+      const ctx = (networksEngine2 as unknown as { contexts: Map<string, EngineContext> }).contexts.get(ref2.hash)
+      if (!ctx) throw new Error('No cached context after create()')
+      void networkEngine2
+      const engine = new UserEngine(user, ctx)
+
       const { publicHex: addedPub } = randomTestKeyPair()
 
       // 1) create — Event 'C', Sequence 0 (seeded: the user was created by the
@@ -675,10 +724,11 @@ describe('UserEngine', () => {
       await engine.revise(revise)
 
       // 4) revokeKey — Event 'RK', Sequence 3
-      const historyRevokePriv = secp256k1.utils.randomSecretKey()
+      // UKEY-02: sign with the FIRST key (createPub) so context.UserKey = createPub,
+      // which still exists in UserKey after revoking addedPub → DeleteValid passes.
       const historyRevokeSig: Signature = {
-        signature: bytesToHex(secp256k1.sign(sha256(new TextEncoder().encode(`revokeKey:${addedPub}`)), historyRevokePriv)),
-        signerKey: bytesToHex(secp256k1.getPublicKey(historyRevokePriv)),
+        signature: bytesToHex(secp256k1.sign(sha256(new TextEncoder().encode(`revokeKey:${addedPub}`)), createPrivBytes)),
+        signerKey: bytesToHex(secp256k1.getPublicKey(createPrivBytes)),
         signerUserId: user.id
       }
       await engine.revokeKey(addedPub, historyRevokeSig)

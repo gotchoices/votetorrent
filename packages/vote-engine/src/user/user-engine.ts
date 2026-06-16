@@ -465,10 +465,11 @@ export class UserEngine implements IUserEngine {
   async revokeKey (keyToRevoke: string, signature: Signature): Promise<void> {
     this.requireCtx('revokeKey')
     const tid = nextTid++
-    // context.UserKey = the user's currently-active signing key (must exist in UserKey
-    // table and be non-expired for DeleteValid to pass). This is the stored active key,
-    // not signature.signerKey — the context gate checks DB membership of this key.
-    const signerKey = this.user.activeKeys?.[0]?.key ?? null
+    // context.UserKey = the public key that produced the revoke signature (signature.signerKey),
+    // so verify(signature, digest, context.UserKey) succeeds once UserKey.SignatureValid is
+    // activated (SC#7 / UKEY-02). Fall back to the subject's first active key only when
+    // signerKey is absent (preserves pure-guard test path).
+    const signerKey = signature.signerKey ?? this.user.activeKeys?.[0]?.key ?? null
     try {
       await this.ctx!.db.exec(
 				`delete from UserKey
