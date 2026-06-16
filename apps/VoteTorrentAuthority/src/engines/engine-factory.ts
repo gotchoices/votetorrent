@@ -18,7 +18,7 @@
  * which is cache-first (T-15-03-05 / Pitfall 2).
  */
 
-import type { NetworkReference } from '@votetorrent/vote-core'
+import type { NetworkReference, User } from '@votetorrent/vote-core'
 import {
 	NetworksEngine,
 	NetworkEngine,
@@ -40,6 +40,13 @@ export class EngineFactory {
 	private readonly engineCache = new Map<string, unknown>()
 	/** The hash of the most recently opened/created network; gates requireEstablishedCtx. */
 	private currentNetworkHash: string | undefined
+	/** The resolved device user to bind into ctx on every internal open() call. */
+	private currentUser: User | undefined
+
+	/** Called by AppProvider after resolving the device user, before getEngine("network"). */
+	setCurrentUser(user: User | undefined): void {
+		this.currentUser = user
+	}
 
 	constructor(
 		private readonly localStorage: LocalStorageReact,
@@ -170,7 +177,8 @@ export class EngineFactory {
 					)
 				}
 				// Q3 open question 3: auto-open so screen-initiated network resolution works.
-				const networkEngine = await this.networksEngine.open(ref, undefined)
+				// Thread the resolved device user so ctx.user is a real User after boot.
+				const networkEngine = await this.networksEngine.open(ref, this.currentUser)
 				this.currentNetworkHash = ref.hash
 				return networkEngine
 			}

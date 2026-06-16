@@ -1,11 +1,12 @@
 import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from "react";
 import type { PropsWithChildren } from "react";
-import type { INetworksEngine } from "@votetorrent/vote-core";
+import type { INetworksEngine, IDefaultUserEngine } from "@votetorrent/vote-core";
 import { ActivityIndicator, Text, TouchableOpacity, View } from "react-native";
 import { hideSplash } from "react-native-splash-view";
 import { EngineFactory } from "../engines/engine-factory";
 import { LocalStorageReact } from "@votetorrent/vote-engine/rn";
 import { rnDbFactory } from "../engines/rn-db-factory";
+import { getOrCreateDeviceUser } from "../engines/device-user";
 
 interface AppContextType {
 	networksEngine?: INetworksEngine;
@@ -69,7 +70,16 @@ export function AppProvider({ children }: PropsWithChildren) {
 						// D-15: inner try/catch for re-attach; on throw → setInitError, NOT setHasNetwork.
 						// NetworksEngine.open() may throw if the on-device store is corrupt/uninitialized.
 						// NEVER fall back to a silent in-memory context — Phase-14 D-13 hard-fail rule.
-						await networksEng.open(network, undefined);
+						//
+						// Resolve the device user so ctx.user is a real User for UserId-scoped queries.
+						// Mirror the pattern in AuthorityInvitationScreen.onSend.
+						const defaultUserEng = await factory.getEngine<IDefaultUserEngine>("defaultUser");
+						const defaultUser = await defaultUserEng.get();
+						const user = await getOrCreateDeviceUser(defaultUser?.name ?? "Device User");
+						// Bind the resolved user into the factory BEFORE getEngine("network", ...) so
+						// the factory's internal open() (which wins for the hash) also uses the real user.
+						factory.setCurrentUser(user);
+						await networksEng.open(network, user);
 						await factory.getEngine("network", network);
 						// Pitfall 4: setHasNetwork is called by AppProvider (not the factory).
 						setHasNetwork(true);
