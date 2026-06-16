@@ -15,6 +15,7 @@ import { CustomTextInput } from "../../components/CustomTextInput";
 import { CustomButton } from "../../components/CustomButton";
 import { Footer } from "../../components/Footer";
 import { createDeviceSigner } from "../../engines/device-signer";
+import { getOrCreateDeviceUser } from "../../engines/device-user";
 import { utf8ToBytes } from "@noble/hashes/utils.js";
 
 export function RevokeKeyScreen() {
@@ -39,6 +40,11 @@ export function RevokeKeyScreen() {
 			}
 			return newSelectedKeys;
 		});
+		// WR-02 / IN-02: reset the signed state when the selection changes so the user
+		// must re-sign before Revoke is re-enabled — they cannot revoke under a signature
+		// they did not review after toggling keys.
+		setIsSigned(false);
+		setRealSignature(null);
 	};
 
 	const checkConfirmText = (text: string) => {
@@ -53,18 +59,34 @@ export function RevokeKeyScreen() {
 	const handleSign = async () => {
 		setErrorMessage("");
 		try {
+			// WR-02: only the device user can revoke their own keys. Verify subject == device
+			// user before producing any signature, so the device signer's signerKey is always
+			// the subject's active key and the engine's context.UserKey authenticates the correct
+			// identity.
+			const deviceUser = await getOrCreateDeviceUser(user.name);
+			if (deviceUser.id !== user.id) {
+				setErrorMessage("You can only revoke keys for the device's own user.");
+				return;
+			}
+
+			// WR-03: guard undefined firstKey before signing.
+			const firstKey = Array.from(selectedKeys)[0];
+			if (firstKey === undefined) {
+				setErrorMessage("Select at least one key to sign.");
+				return;
+			}
+
 			// D-01: createDeviceSigner closes over the private key app-side —
 			// only the resulting Signature crosses into vote-engine.
 			// WR-10: secp256k1.sign called with v2 defaults (prehash:true) inside signer.
 			// CR-05/UKEY-02: do NOT precompute a single combined-keys signature here —
-			// each key is signed at revoke time over its own revokeKey:userId:thisKey
-			// payload so the signature is bound to that specific key. We only validate
-			// the device signer is available and gate the confirmation UX. For the
-			// "Signed: <signature>" display we sign the FIRST selected key (per-key form),
-			// never a combined-keys payload.
+			// each key is signed at revoke time over its own revokeKey:key payload (two-segment
+			// canonical form matching user.spec.ts:464) so the signature is bound to that
+			// specific key. We only validate the device signer is available and gate the
+			// confirmation UX. For the "Signed: <signature>" display we sign the FIRST selected
+			// key's per-key payload (two-segment form), never a combined-keys payload.
 			const signer = await createDeviceSigner(user.name);
-			const firstKey = Array.from(selectedKeys)[0];
-			const previewBytes = utf8ToBytes(`revokeKey:${user.id}:${firstKey}`);
+			const previewBytes = utf8ToBytes(`revokeKey:${firstKey}`);
 			const previewSig = await signer(previewBytes);
 			setRealSignature(previewSig);
 			setIsSigned(true);
@@ -80,14 +102,14 @@ export function RevokeKeyScreen() {
 				setErrorMessage("Signature is required — please sign before revoking.");
 				return;
 			}
-			// CR-05/UKEY-02: sign each key at revoke time over revokeKey:userId:thisKey
-			// so every revocation carries its OWN signature bound to that key — never a
-			// single combined-key signature reused across keys. Aligns the screen with
-			// the engine test's per-key revokeKey:${key} form.
+			// CR-05/UKEY-02: sign each key at revoke time over revokeKey:${key} (two-segment
+			// canonical form matching the engine test's revokeKey:${secondPub} / revokeKey:${addedPub}
+			// in user.spec.ts:464,680) so every revocation carries its OWN signature bound to
+			// that specific key — never a single combined-key signature reused across keys.
 			const signer = await createDeviceSigner(user.name);
 			await Promise.all(
 				Array.from(selectedKeys).map(async (key) => {
-					const payloadBytes = utf8ToBytes(`revokeKey:${user.id}:${key}`);
+					const payloadBytes = utf8ToBytes(`revokeKey:${key}`);
 					const perKeySignature = await signer(payloadBytes);
 					await userEngine.revokeKey(key, perKeySignature);
 				})
