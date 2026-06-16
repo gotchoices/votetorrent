@@ -5,10 +5,12 @@ import { ExtendedTheme, useNavigation, useRoute, useTheme } from "@react-navigat
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type {
 	AdminInit,
+	IAuthorityEngine,
 	IDefaultUserEngine,
 	IInvitationEngine,
 	INetworksEngine,
 	InviteStatus,
+	Scope,
 	SentAuthorityInvite,
 } from "@votetorrent/vote-core";
 import { INetworkEngine } from "@votetorrent/vote-core";
@@ -23,6 +25,7 @@ import { InfoCard } from "../../components/InfoCard";
 import { SignatureTaskFooter } from "../../components/SignatureTaskFooter";
 import type { RootStackParamList } from "../../navigation/types";
 import { useApp } from "../../providers/AppProvider";
+import { createDeviceSigner } from "../../engines/device-signer";
 import { getOrCreateDeviceUser } from "../../engines/device-user";
 import { globalStyles } from "../../theme/styles";
 
@@ -165,20 +168,48 @@ export default function AuthorityInvitationScreen() {
 			}
 			await builder.commit();
 
-			// D-05: authority invite material as share text for Copy-to-clipboard.
-			// The builder commit creates the authority; generate an authority invite
-			// share object so the new authority can invite peers with a share link.
-			// For the authority-invite send path, the createAuthorityInvite is on
-			// the authority engine opened for the newly-created authority — but since
-			// we don't have the new authority ID here yet, we generate a shareable
-			// confirmation text from the form input (the real invite link is a Phase-22
-			// P2P transport concern per D-08). Share the authority name as confirmation.
-			const confirmationText = JSON.stringify({
-				authority: name,
-				domainName: domainName || undefined,
-				network: networkName || undefined,
+			// GAP-3: the builder commit creates the authority on networkEngine.
+			// For the first-authority shoe-in this authority becomes the network's
+			// primary authority; resolve it via getDetails().network.primaryAuthorityId
+			// and open an authority engine for it so we can mint a REAL invite whose
+			// share text carries the ephemeral invitePrivate (the paste-to-accept path
+			// requires real key material — a confirmation-only object leaves
+			// parsed.invitePrivate undefined). D-08 stubs only the network SEND hop,
+			// not the local invite-key creation.
+			const details = await networkEngine.getDetails();
+			const newAuthorityId = details.network.primaryAuthorityId;
+			if (!newAuthorityId) {
+				setErrorMessage("Could not resolve the new authority — invite not created.");
+				return;
+			}
+			const authorityEngine = await networkEngine.openAuthority(newAuthorityId);
+
+			// createAuthorityInvite is synchronous and returns an AuthorityInviteShare
+			// containing the ephemeral invitePrivate (one-time only — D-05/D-27).
+			const authorityInvite = (authorityEngine as IAuthorityEngine).createAuthorityInvite(name);
+
+			// D-01/D-03/D-04: device signer callback — the engine computes
+			// Digest(InviteSlot.Cid) internally and passes the bytes to this callback
+			// (engine-authoritative, D-03). The private key never crosses into
+			// vote-engine (D-01). scope 'iad' for authority invites (saveInviteWithSigning).
+			const signer = await createDeviceSigner(user.name);
+			await (authorityEngine as IAuthorityEngine).saveInviteWithSigning(
+				authorityInvite,
+				"iad" as Scope,
+				signer,
+			);
+
+			// D-05: render the one-time invite material as text for Copy-to-clipboard
+			// share. Include invitePrivate so the invitee can paste and accept (D-06).
+			const sharePayload = JSON.stringify({
+				invitePrivate: authorityInvite.invitePrivate,
+				inviteKey: authorityInvite.inviteKey,
+				inviteSignature: authorityInvite.inviteSignature,
+				expiration: authorityInvite.expiration,
+				type: authorityInvite.type,
+				name: authorityInvite.name,
 			});
-			setShareText(confirmationText);
+			setShareText(sharePayload);
 			// D-08: do NOT navigate away immediately — keep screen so Copy affordance shows.
 		} catch (error) {
 			console.error("createAuthority error:", error);
@@ -202,10 +233,12 @@ export default function AuthorityInvitationScreen() {
 				}
 			}
 			await engine.respondToInvite(invitationId ?? "", true, invitePrivate);
+			// GAP-2: navigate ONLY on success — the InviteResult is now written.
+			navigation.goBack();
 		} catch (error) {
 			console.error("Error responding to invite:", error);
+			setErrorMessage(error instanceof Error ? error.message : String(error));
 		}
-		navigation.goBack();
 	};
 
 	const onDecline = async () => {
@@ -222,10 +255,12 @@ export default function AuthorityInvitationScreen() {
 			}
 			// T-21-11-03: decline calls the SAME signed respondToInvite path (D-09).
 			await engine.respondToInvite(invitationId ?? "", false, invitePrivate);
+			// GAP-2: navigate ONLY on success — the InviteResult is now written.
+			navigation.goBack();
 		} catch (error) {
 			console.error("Error responding to invite:", error);
+			setErrorMessage(error instanceof Error ? error.message : String(error));
 		}
-		navigation.goBack();
 	};
 
 	if (mode === "send") {
@@ -392,6 +427,12 @@ export default function AuthorityInvitationScreen() {
 					/>
 				</View>
 			</ScrollView>
+			{/* GAP-2: surface respondToInvite failures inline in accept mode */}
+			{errorMessage ? (
+				<ThemedText type="small" style={{ color: colors.error }}>
+					{errorMessage}
+				</ThemedText>
+			) : null}
 			<SignatureTaskFooter
 				onAccept={onAccept}
 				onReject={onDecline}
