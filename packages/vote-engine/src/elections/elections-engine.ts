@@ -740,6 +740,154 @@ export class ElectionsEngine implements IElectionsEngine {
     return nonce
   }
 
+  /**
+   * DEBUG-ONLY seed: inserts ≥1 pending signature Task (AdminSignatureTaskExtension)
+   * and ≥1 pending release-key Task (ReleaseKeyTaskExtension) for `userId`, using
+   * real Authority, Admin, and Election data already present in the DB.
+   *
+   * This method is NOT on IElectionsEngine — it is a concrete-class-only debug helper.
+   * Screens access it via `(engine as any).debugSeedPendingTasks(userId)` behind a
+   * __DEV__ guard; it must NEVER ship in a release path.
+   *
+   * Idempotency: if pending tasks already exist for `userId` of the target type,
+   * skip that seed (do not duplicate).
+   *
+   * Seeding strategy follows the established test-fixture pattern from signing.spec.ts:
+   *   - For signature task: ProposedAdmin + AdminSigning + BEGIN Task + AdminSignatureTaskExtension COMMIT
+   *     (explicit transaction so deferred ExtensionExists / TaskIdValid see sibling rows at COMMIT).
+   *   - For release-key task: BEGIN Task + ReleaseKeyTaskExtension COMMIT (same pattern).
+   *
+   * @returns An object describing what was seeded (taskId or null if skipped).
+   */
+  async debugSeedPendingTasks (userId: string): Promise<{ signatureTaskId: string | null; releaseKeyTaskId: string | null }> {
+    this.requireCtx('debugSeedPendingTasks')
+    const ctx = this.ctx!
+
+    // ----- Guard: skip signature seed if a pending 'admin' signature task already exists for this user -----
+    const existingSignatureTask = await ctx.db
+      .prepare(`select Id from Task where UserId = :userId and Type = 'signature' and SignatureType = 'admin' and IsCompleted = 0 limit 1`)
+      .get({ userId })
+
+    let signatureTaskId: string | null = null
+
+    if (!existingSignatureTask) {
+      // 1. Find the first Authority and its CurrentAdmin.EffectiveAt.
+      const authorityRow = await ctx.db
+        .prepare('select AuthorityId, EffectiveAt from CurrentAdmin limit 1')
+        .get({})
+      if (!authorityRow) {
+        throw new Error('debugSeedPendingTasks: No CurrentAdmin found — create a network + authority first')
+      }
+      const authorityId = authorityRow.AuthorityId as string
+      const adminEffectiveAt = authorityRow.EffectiveAt as string
+
+      // 2. Seed ProposedAdmin so AdminSignatureTaskExtension.AdminEffectiveAtValid and
+      //    MutationValid's Digest formula can resolve. Use a fresh tid for the Digest.
+      const tid = Date.now()
+      const thresholdPolicies = '[]'
+      const now = nowCanonicalDatetime()
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const nonce: string = (globalThis as any).crypto.randomUUID()
+      signatureTaskId = (globalThis as any).crypto.randomUUID()
+
+      // ProposedAdmin may already exist for this EffectiveAt — insert or ignore.
+      // We need a dummy signer key for the context fields that have IsUserValid checks.
+      // Since context.IsSignatureValid = true bypasses the real signature CHECK, we can
+      // use a placeholder hex key (32 zeros = 64 hex chars, valid secp256k1 scalar format).
+      const placeholderKey = '0'.repeat(66)
+      const placeholderSig = '0'.repeat(128)
+      try {
+        await ctx.db.exec(
+          `insert into ProposedAdmin (AuthorityId, EffectiveAt, ThresholdPolicies)
+           with context IsUserValid = true, Tid = :tid, now = :now,
+                        UserId = :userId, UserKey = :signerKey, Signature = :signature
+           values (:authorityId, :adminEffectiveAt, :thresholdPolicies)`,
+          { authorityId, adminEffectiveAt, thresholdPolicies, tid, now, userId, signerKey: placeholderKey, signature: placeholderSig }
+        )
+      } catch {
+        // ProposedAdmin may already exist for this (AuthorityId, EffectiveAt) PK — treat as idempotent.
+      }
+
+      // 3. Insert AdminSigning with the 4-arg Digest matching AdminSignatureTaskExtension.MutationValid.
+      //    Do NOT call sign() so AdminSignature stays absent — MutationValid's "not exists AdminSignature
+      //    for uncompleted task" gate would block the extension insert if the signing was already complete.
+      await ctx.db.exec(
+        `insert into AdminSigning (Nonce, AuthorityId, AdminEffectiveAt, Scope, Digest, UserId, SignerKey, Signature)
+         with context now = :now, IsSignatureValid = true, IsSignerKeyValid = true
+         values (:nonce, :authorityId, :adminEffectiveAt, 'rad',
+                 Digest(:tid, :authorityId, :adminEffectiveAt, :thresholdPolicies),
+                 :userId, :signerKey, :signature)`,
+        { nonce, authorityId, adminEffectiveAt, thresholdPolicies, tid, now, userId, signerKey: placeholderKey, signature: placeholderSig }
+      )
+
+      // 4. Insert Task + AdminSignatureTaskExtension in one explicit transaction so the
+      //    deferred ExtensionExists (Task) and TaskIdValid (extension) checks see each other at COMMIT.
+      await ctx.db.exec('BEGIN')
+      try {
+        await ctx.db.exec(
+          `insert into Task (Id, UserId, Type, SignatureType, SigningNonce, IsCompleted)
+           with context IsMutationValid = true, Tid = :tid
+           values (:id, :userId, 'signature', 'admin', :nonce, 0)`,
+          { id: signatureTaskId, userId, nonce, tid }
+        )
+        await ctx.db.exec(
+          `insert into AdminSignatureTaskExtension (TaskId, AuthorityId, AdminEffectiveAt)
+           with context Tid = :tid
+           values (:taskId, :authorityId, :adminEffectiveAt)`,
+          { taskId: signatureTaskId, authorityId, adminEffectiveAt, tid }
+        )
+        await ctx.db.exec('COMMIT')
+      } catch (err) {
+        await ctx.db.exec('ROLLBACK')
+        throw err
+      }
+    }
+
+    // ----- Guard: skip release-key seed if a pending release-key task already exists for this user -----
+    const existingReleaseKeyTask = await ctx.db
+      .prepare(`select Id from Task where UserId = :userId and Type = 'release-key' and IsCompleted = 0 limit 1`)
+      .get({ userId })
+
+    let releaseKeyTaskId: string | null = null
+
+    if (!existingReleaseKeyTask) {
+      // 5. Find the first committed Election to satisfy ReleaseKeyTaskExtension.ElectionIdValid.
+      const electionRow = await ctx.db
+        .prepare('select Id from Election limit 1')
+        .get({})
+      if (!electionRow) {
+        throw new Error('debugSeedPendingTasks: No Election found — create a network + authority + election first')
+      }
+      const electionId = electionRow.Id as string
+
+      const rkTid = Date.now()
+      releaseKeyTaskId = (globalThis as any).crypto.randomUUID() // eslint-disable-line @typescript-eslint/no-explicit-any
+
+      // 6. Insert Task + ReleaseKeyTaskExtension in one explicit transaction.
+      await ctx.db.exec('BEGIN')
+      try {
+        await ctx.db.exec(
+          `insert into Task (Id, UserId, Type, IsCompleted)
+           with context IsMutationValid = true, Tid = :tid
+           values (:id, :userId, 'release-key', 0)`,
+          { id: releaseKeyTaskId, userId, tid: rkTid }
+        )
+        await ctx.db.exec(
+          `insert into ReleaseKeyTaskExtension (TaskId, ElectionId, ElectionRevision)
+           with context Tid = :tid
+           values (:taskId, :electionId, 0)`,
+          { taskId: releaseKeyTaskId, electionId, tid: rkTid }
+        )
+        await ctx.db.exec('COMMIT')
+      } catch (err) {
+        await ctx.db.exec('ROLLBACK')
+        throw err
+      }
+    }
+
+    return { signatureTaskId, releaseKeyTaskId }
+  }
+
   // ---------- builder factories ----------
 
   buildCreateElection (): IElectionsCreateElectionBuilder {

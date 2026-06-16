@@ -36,6 +36,7 @@ export default function SettingsScreen() {
 	const [currentNetwork, setCurrentNetwork] = useState<string | null>(null);
 	const [userEngine, setUserEngine] = useState<IUserEngine | null>(null);
 	const [currentUser, setCurrentUser] = useState<User | null>(null);
+	const [seedStatus, setSeedStatus] = useState<string | null>(null);
 	const { colors } = useTheme() as ExtendedTheme;
 	const { t } = useTranslation();
 	const { getEngine } = useApp();
@@ -167,6 +168,24 @@ export default function SettingsScreen() {
 		}, [defaultUserEngine])
 	);
 
+	// DEBUG-ONLY: seed pending tasks for the device user so Tasks list/badge light up.
+	// Guarded by __DEV__ at render time — never shown in a release build.
+	// Approach B (debug seed): inserts AdminSignatureTaskExtension + ReleaseKeyTaskExtension
+	// using real Authority/Election rows already present in the DB.
+	const handleDebugSeedTasks = async () => {
+		if (!currentUser) {
+			setSeedStatus(t("seedTasksNoUser", { defaultValue: "No device user — connect to a network first" }));
+			return;
+		}
+		try {
+			const electionsEng = await getEngine<any>("elections");
+			await (electionsEng as any).debugSeedPendingTasks(currentUser.id);
+			setSeedStatus(t("debugSeedTasksSuccess"));
+		} catch (err) {
+			setSeedStatus(t("debugSeedTasksError") + String(err));
+		}
+	};
+
 	return (
 		<View style={styles.content}>
 			<View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -292,6 +311,21 @@ export default function SettingsScreen() {
 						navigation.navigate("ScreenScaffoldsDebug");
 					}}
 				/>
+				{__DEV__ && (
+					<>
+						<CustomButton
+							title={t("debugSeedTasksTitle")}
+							icon="vial"
+							size="thin"
+							onPress={handleDebugSeedTasks}
+						/>
+						{seedStatus ? (
+							<ThemedText type="default" style={styles.noUserText}>
+								{seedStatus}
+							</ThemedText>
+						) : null}
+					</>
+				)}
 			</View>
 		</View>
 	);
