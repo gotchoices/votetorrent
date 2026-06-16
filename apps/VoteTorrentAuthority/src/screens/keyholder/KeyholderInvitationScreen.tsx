@@ -80,26 +80,30 @@ export function KeyholderInvitationScreen() {
 
 			// Build the ephemeral secp256k1 key material for this keyholder invite.
 			// AUTH-01 (D-01): hex-encoded secp256k1 key material at the screen surface.
-			// The signing of the invite fields happens engine-side; the screen only generates
-			// the ephemeral key pair and includes invitePrivate in the share text (D-06).
-			// The inviteSignature is a placeholder because the current inviteKeyholder engine
-			// impl (Phase 5 placeholder) does not validate InviteSignature — this will be
-			// replaced by a createKeyholderInvite engine method in Phase 22 when full
-			// keyholder InviteSlot + InviteResult flow is wired (D-08 boundary).
+			// The screen only generates the ephemeral key pair and includes invitePrivate
+			// in the share text (D-06).
+			//
+			// WR-04: there is NO real keyholder-invite signature yet. The current
+			// inviteKeyholder engine impl uses InviteSignature = null SQL-side; a real
+			// keyholder-invite signature is produced engine-side by the forthcoming
+			// createKeyholderInvite engine method (the same boundary that already mints
+			// authority/officer invite signatures). We therefore do NOT fabricate a
+			// signature value here — no placeholder is stored or shared. The
+			// KeyholderInvite type requires inviteSignature: string, so we pass an empty
+			// string (the engine ignores it) rather than a fake 128-char zero string.
 			const invitePrivateBytes = secp256k1.utils.randomSecretKey();
 			const invitePrivate = bytesToHex(invitePrivateBytes);
 			const inviteKey = bytesToHex(secp256k1.getPublicKey(invitePrivateBytes));
 			const type = "k" as const;
 			const expiration = new Date(Date.now() + 60 * 60 * 1000).toISOString(); // 1 hour
-			// Placeholder inviteSignature — engine does not validate for keyholder invites
-			// in the Phase 5 placeholder implementation (INSERT uses InviteSignature = null).
-			const inviteSignature = "0".repeat(128);
 
 			const keyholderInvite: KeyholderInvite = {
 				type,
 				expiration,
 				inviteKey,
-				inviteSignature,
+				// No fabricated signature — produced engine-side once createKeyholderInvite
+				// lands; inviteKeyholder ignores this field (InviteSignature = null SQL-side).
+				inviteSignature: "",
 				name,
 			};
 
@@ -112,10 +116,11 @@ export function KeyholderInvitationScreen() {
 
 			// D-05: render the one-time invite material as text for Copy-to-clipboard share.
 			// Include the invitePrivate so the invitee can paste and accept (D-06).
+			// WR-04: no inviteSignature is shared — the invitee reconstructs from
+			// invitePrivate; no placeholder signature is propagated.
 			const sharePayload = JSON.stringify({
 				invitePrivate,
 				inviteKey,
-				inviteSignature,
 				expiration,
 				type,
 				name,
@@ -143,10 +148,12 @@ export function KeyholderInvitationScreen() {
 			}
 			// T-21-11-03: accept calls the SIGNED respondToInvite path (D-09).
 			await engine.respondToInvite(invitationId ?? "", true, invitePrivate);
+			// GAP-2: navigate ONLY on success — the InviteResult is now written.
+			navigation.goBack();
 		} catch (error) {
 			console.error("Error responding to invite:", error);
+			setErrorMessage(error instanceof Error ? error.message : String(error));
 		}
-		navigation.goBack();
 	};
 
 	const onDecline = async () => {
@@ -163,10 +170,12 @@ export function KeyholderInvitationScreen() {
 			}
 			// T-21-11-03: decline calls the SAME signed respondToInvite path (D-09).
 			await engine.respondToInvite(invitationId ?? "", false, invitePrivate);
+			// GAP-2: navigate ONLY on success — the InviteResult is now written.
+			navigation.goBack();
 		} catch (error) {
 			console.error("Error responding to invite:", error);
+			setErrorMessage(error instanceof Error ? error.message : String(error));
 		}
-		navigation.goBack();
 	};
 
 	if (mode === "send") {
@@ -253,6 +262,12 @@ export function KeyholderInvitationScreen() {
 					/>
 				</View>
 			</ScrollView>
+			{/* GAP-2: surface respondToInvite failures inline in accept mode */}
+			{errorMessage ? (
+				<ThemedText type="small" style={{ color: colors.error }}>
+					{errorMessage}
+				</ThemedText>
+			) : null}
 			<SignatureTaskFooter
 				onAccept={onAccept}
 				onReject={onDecline}

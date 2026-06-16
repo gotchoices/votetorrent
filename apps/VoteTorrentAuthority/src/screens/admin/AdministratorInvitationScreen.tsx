@@ -162,10 +162,12 @@ export default function AdministratorInvitationScreen() {
 				true,
 				invitePrivate,
 			);
+			// GAP-2: navigate ONLY on success — the InviteResult is now written.
+			navigation.goBack();
 		} catch (error) {
 			console.error("Error responding to invite:", error);
+			setErrorMessage(error instanceof Error ? error.message : String(error));
 		}
-		navigation.goBack();
 	};
 
 	const onDecline = async () => {
@@ -186,10 +188,12 @@ export default function AdministratorInvitationScreen() {
 				false,
 				invitePrivate,
 			);
+			// GAP-2: navigate ONLY on success — the InviteResult is now written.
+			navigation.goBack();
 		} catch (error) {
 			console.error("Error responding to invite:", error);
+			setErrorMessage(error instanceof Error ? error.message : String(error));
 		}
-		navigation.goBack();
 	};
 
 	if (mode === "send") {
@@ -320,6 +324,12 @@ export default function AdministratorInvitationScreen() {
 					)}
 				</View>
 			</ScrollView>
+			{/* GAP-2: surface respondToInvite failures inline in accept mode */}
+			{errorMessage ? (
+				<ThemedText type="small" style={{ color: colors.error }}>
+					{errorMessage}
+				</ThemedText>
+			) : null}
 			<SignatureTaskFooter
 				onAccept={onAccept}
 				onReject={onDecline}
