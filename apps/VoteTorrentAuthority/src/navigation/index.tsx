@@ -22,6 +22,7 @@ import type { NavigationProp } from "./types";
 import AddNetworkScreen from "../screens/networks/AddNetworkScreen";
 import HostingScreen from "../screens/networks/HostingScreen";
 import { useApp } from "../providers/AppProvider";
+import { useTaskCount } from "../hooks/useTaskCount";
 import EditOfficerScreen from "../screens/admin/EditOfficerScreen";
 import { ThemedText } from "../components/ThemedText";
 import { INetworkEngine } from "@votetorrent/vote-core";
@@ -136,6 +137,7 @@ function useTabHeaderOptions(tab?: string) {
 const TabNavigator = () => {
 	const { colors } = useTheme() as ExtendedTheme;
 	const { t } = useTranslation();
+	const taskCount = useTaskCount();
 
 	return (
 		<Tab.Navigator
@@ -182,7 +184,7 @@ const TabNavigator = () => {
 				component={TasksScreen}
 				options={{
 					...useTabHeaderOptions("tasks"),
-					tabBarBadge: 3,
+					tabBarBadge: taskCount > 0 ? taskCount : undefined,
 				}}
 			/>
 			<Tab.Screen
