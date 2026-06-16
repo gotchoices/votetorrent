@@ -601,7 +601,7 @@ describe('UserEngine', () => {
   // ENG-07 — connectDevice phase-gate (Phase 22)
   // -----------------------------------------------------------------------
   describe('connectDevice', () => {
-    it('throws FeatureNotAvailableError naming Phase 22', async () => {
+    it('throws FeatureNotAvailableError without naming a phase number (D-15)', async () => {
       const user = makeUser({ id: 'cd-user-1' })
       const engine = new UserEngine(user)
       let caught: unknown
@@ -611,7 +611,8 @@ describe('UserEngine', () => {
         caught = err
       }
       expect(caught).to.be.instanceOf(FeatureNotAvailableError)
-      expect((caught as FeatureNotAvailableError).message).to.include('Phase 22')
+      // D-15: user-facing error strings must not name a GSD phase number.
+      expect((caught as FeatureNotAvailableError).message).to.not.match(/Phase\s*\d+/i)
     })
   })
 
