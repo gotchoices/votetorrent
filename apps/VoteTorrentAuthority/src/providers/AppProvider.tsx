@@ -76,6 +76,17 @@ export function AppProvider({ children }: PropsWithChildren) {
 						const defaultUserEng = await factory.getEngine<IDefaultUserEngine>("defaultUser");
 						const defaultUser = await defaultUserEng.get();
 						const user = await getOrCreateDeviceUser(defaultUser?.name ?? "Device User");
+						// D-19: Persist a DefaultUser record at boot if one does not yet exist.
+						// DefaultUserEngine.get() (LocalStorage key 'defaultUser') is a DIFFERENT
+						// store from the network ctx.user resolved above. SettingsScreen reads
+						// DefaultUser via defaultUserEngine.get(); without this set() the screen
+						// always shows "No default user found" even after ctx.user is bound.
+						// Guard: only write when absent (idempotent — a user who later edits their
+						// name via DefaultUserScreen is never overwritten on subsequent boots).
+						// Set ONLY { name }; do NOT copy private key material into DefaultUser.
+						if (defaultUser === undefined) {
+							await defaultUserEng.set({ name: user.name });
+						}
 						// Bind the resolved user into the factory BEFORE getEngine("network", ...) so
 						// the factory's internal open() (which wins for the hash) also uses the real user.
 						factory.setCurrentUser(user);
