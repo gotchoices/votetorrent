@@ -150,7 +150,7 @@ export class MockElectionEngine implements IElectionEngine {
 		_keyholder: KeyholderInvite,
 		_electionId: string,
 	): Promise<void> {
-		throw new FeatureNotAvailableError('revokeKeyholder — available in Phase 21 (signing pipeline)');
+		throw new FeatureNotAvailableError('revokeKeyholder is not available in the mock engine');
 	}
 
 	buildProposeBallot(): IElectionProposeBallotBuilder {

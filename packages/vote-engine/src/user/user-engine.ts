@@ -172,7 +172,7 @@ export class UserEngine implements IUserEngine {
 
   async connectDevice (): Promise<DeviceAdvertisement> {
     // ENG-07 phase-gate: connectDevice requires P2P fabric (UKEY-04, Phase 22).
-    throw new FeatureNotAvailableError('connectDevice — available in Phase 22 (P2P fabric)')
+    throw new FeatureNotAvailableError('connectDevice — requires a paired device (P2P not available)')
   }
 
   /**
