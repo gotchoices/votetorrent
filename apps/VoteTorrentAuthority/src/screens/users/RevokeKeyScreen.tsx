@@ -55,16 +55,18 @@ export function RevokeKeyScreen() {
 		try {
 			// D-01: createDeviceSigner closes over the private key app-side —
 			// only the resulting Signature crosses into vote-engine.
-			// D-03: the callback signs EXACTLY the bytes handed to it; we sign a
-			// representative revoke payload tied to the selected keys and user.
 			// WR-10: secp256k1.sign called with v2 defaults (prehash:true) inside signer.
+			// CR-05/UKEY-02: do NOT precompute a single combined-keys signature here —
+			// each key is signed at revoke time over its own revokeKey:userId:thisKey
+			// payload so the signature is bound to that specific key. We only validate
+			// the device signer is available and gate the confirmation UX. For the
+			// "Signed: <signature>" display we sign the FIRST selected key (per-key form),
+			// never a combined-keys payload.
 			const signer = await createDeviceSigner(user.name);
-			const keysHex = Array.from(selectedKeys).sort().join(",");
-			const payloadBytes = utf8ToBytes(
-				`revokeKey:${user.id}:${keysHex}`
-			);
-			const sig = await signer(payloadBytes);
-			setRealSignature(sig);
+			const firstKey = Array.from(selectedKeys)[0];
+			const previewBytes = utf8ToBytes(`revokeKey:${user.id}:${firstKey}`);
+			const previewSig = await signer(previewBytes);
+			setRealSignature(previewSig);
 			setIsSigned(true);
 		} catch (error) {
 			setErrorMessage(error instanceof Error ? error.message : String(error));
@@ -74,12 +76,21 @@ export function RevokeKeyScreen() {
 	const handleRevoke = async () => {
 		setErrorMessage("");
 		try {
-			if (!realSignature) {
+			if (!isSigned) {
 				setErrorMessage("Signature is required — please sign before revoking.");
 				return;
 			}
+			// CR-05/UKEY-02: sign each key at revoke time over revokeKey:userId:thisKey
+			// so every revocation carries its OWN signature bound to that key — never a
+			// single combined-key signature reused across keys. Aligns the screen with
+			// the engine test's per-key revokeKey:${key} form.
+			const signer = await createDeviceSigner(user.name);
 			await Promise.all(
-				Array.from(selectedKeys).map((key) => userEngine.revokeKey(key, realSignature))
+				Array.from(selectedKeys).map(async (key) => {
+					const payloadBytes = utf8ToBytes(`revokeKey:${user.id}:${key}`);
+					const perKeySignature = await signer(payloadBytes);
+					await userEngine.revokeKey(key, perKeySignature);
+				})
 			);
 			navigation.goBack();
 		} catch (error) {
