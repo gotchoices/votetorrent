@@ -851,14 +851,25 @@ export class ElectionsEngine implements IElectionsEngine {
     let releaseKeyTaskId: string | null = null
 
     if (!existingReleaseKeyTask) {
-      // 5. Find the first committed Election to satisfy ReleaseKeyTaskExtension.ElectionIdValid.
+      // 5. Find an Election that has an ElectionRevision row (revision 0) so
+      //    ReleaseKeyTaskExtension.ElectionRevisionValid can be satisfied.
+      //    Prefer elections with a future RevisionDeadline for UAT-8 countdown.
       const electionRow = await ctx.db
-        .prepare('select Id from Election limit 1')
+        .prepare(
+          `select E.Id, ER.Revision
+             from Election E join ElectionRevision ER on ER.ElectionId = E.Id and ER.Revision = 0
+             order by E.RevisionDeadline desc
+             limit 1`
+        )
         .get({})
       if (!electionRow) {
-        throw new Error('debugSeedPendingTasks: No Election found — create a network + authority + election first')
+        throw new Error(
+          'debugSeedPendingTasks: No Election with ElectionRevision found — ' +
+          'create an election via the Elections flow first (the creation pipeline inserts revision 0)'
+        )
       }
       const electionId = electionRow.Id as string
+      const electionRevision = electionRow.Revision as number  // always 0
 
       const rkTid = Date.now()
       releaseKeyTaskId = (globalThis as any).crypto.randomUUID() // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -875,8 +886,8 @@ export class ElectionsEngine implements IElectionsEngine {
         await ctx.db.exec(
           `insert into ReleaseKeyTaskExtension (TaskId, ElectionId, ElectionRevision)
            with context Tid = :tid
-           values (:taskId, :electionId, 0)`,
-          { taskId: releaseKeyTaskId, electionId, tid: rkTid }
+           values (:taskId, :electionId, :electionRevision)`,
+          { taskId: releaseKeyTaskId, electionId, electionRevision, tid: rkTid }
         )
         await ctx.db.exec('COMMIT')
       } catch (err) {
