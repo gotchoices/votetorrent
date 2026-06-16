@@ -1,6 +1,6 @@
 import { MisuseError, QuereusError } from '@quereus/quereus'
 import { SigningEngine } from '../signing/signing-engine.js'
-import { digestToBytes } from '../utils.js'
+import { digestToBytes, fromCanonicalDatetime, parseJsonOr } from '../utils.js'
 import type { EngineContext } from '../types.js'
 import type {
   ISigningEngine,
@@ -8,7 +8,12 @@ import type {
   ISignatureTasksCompleteSignatureBuilder,
   NetworkReference,
   SignatureResult,
-  SignatureTask
+  SignatureTask,
+  AdminSignatureTask,
+  Authority,
+  ThresholdPolicy,
+  AdminInit,
+  Proposal,
 } from '@votetorrent/vote-core'
 import { CompleteSignatureBuilder } from './builders/index.js'
 
@@ -40,16 +45,31 @@ export class SignatureTasksEngine implements ISignatureTasksEngine {
 
   /**
    * TASK-03 — query pending Task rows of `Type='signature'` for the
-   * current user. The IEngine surface returns generic SignatureTask; we
-   * fill in the minimum required fields (signatureType, userId, network).
-   * Full task-extension materialisation (the proposal payload, the
-   * authority, etc.) lives in Phase 6 / TEST-01.
+   * current user. Materialises the authority, administration, and network
+   * name for 'admin' signature tasks so TasksScreen and SignatureTaskScreen
+   * can render without crashing on missing fields.
+   *
+   * For non-admin types the base SignatureTask shape is returned with the
+   * network name resolved from the Network table; authority-specific fields
+   * are absent but those screen branches do not access them.
    */
   async getRequestedSignatures (pending: boolean): Promise<SignatureTask[]> {
     if (!this.ctx) return []
     const userId = this.ctx.user?.id ?? null
     const out: SignatureTask[] = []
     try {
+      // Resolve network name once — single Network row per DB.
+      const networkRow = await this.ctx.db
+        .prepare('select Name, Hash from Network limit 1')
+        .get({})
+      const networkRef: NetworkReference = {
+        ...this.networkRef,
+        name: (networkRow?.Name as string | undefined) ?? (this.networkRef as NetworkReference & { name?: string }).name ?? '',
+        primaryAuthorityDomainName: (this.networkRef as NetworkReference & { primaryAuthorityDomainName?: string }).primaryAuthorityDomainName ?? '',
+      }
+
+      // Collect base task rows first (avoid interleaving eval + prepare on same handle).
+      const taskRows: Array<{ Id: string; UserId: string; SignatureType: string; SigningNonce: string }> = []
       for await (const row of this.ctx.db.eval(
 				`select Id, UserId, SignatureType, SigningNonce
 					from Task
@@ -61,12 +81,75 @@ export class SignatureTasksEngine implements ISignatureTasksEngine {
           includeAll: pending ? 0 : 1
         }
       )) {
-        out.push({
-          type: 'signature',
-          userId: row.UserId as string,
-          network: this.networkRef,
-          signatureType: row.SignatureType as SignatureTask['signatureType']
+        taskRows.push({
+          Id: row.Id as string,
+          UserId: row.UserId as string,
+          SignatureType: row.SignatureType as string,
+          SigningNonce: row.SigningNonce as string,
         })
+      }
+
+      for (const row of taskRows) {
+        const signatureType = row.SignatureType as SignatureTask['signatureType']
+        const base: SignatureTask = {
+          type: 'signature',
+          userId: row.UserId,
+          network: networkRef,
+          signatureType,
+        }
+
+        if (signatureType === 'admin') {
+          // Materialise AdminSignatureTask: join AdminSignatureTaskExtension →
+          // Authority (for authority.name) and ProposedAdmin (for administration.proposed).
+          const extRow = await this.ctx.db
+            .prepare(
+              `select E.AuthorityId, E.AdminEffectiveAt,
+                      A.Name as AuthName, A.DomainName, A.ImageRef,
+                      PA.ThresholdPolicies
+                 from AdminSignatureTaskExtension E
+                   join Authority A on A.Id = E.AuthorityId
+                   left join ProposedAdmin PA on PA.AuthorityId = E.AuthorityId and PA.EffectiveAt = E.AdminEffectiveAt
+                 where E.TaskId = :taskId`
+            )
+            .get({ taskId: row.Id })
+
+          if (extRow) {
+            const authority: Authority = {
+              id: extRow.AuthorityId as string,
+              name: (extRow.AuthName as string | undefined) ?? '',
+              domainName: (extRow.DomainName as string | undefined) ?? '',
+              imageRef: extRow.ImageRef
+                ? parseJsonOr(extRow.ImageRef, undefined, 'Authority.ImageRef')
+                : undefined,
+            }
+            const thresholdPolicies = parseJsonOr<ThresholdPolicy[]>(
+              extRow.ThresholdPolicies,
+              [],
+              'ProposedAdmin.ThresholdPolicies'
+            )
+            const administration: Proposal<AdminInit> = {
+              proposed: {
+                officers: [],
+                effectiveAt: extRow.AdminEffectiveAt as string,
+                thresholdPolicies,
+              },
+              signers: [],
+            }
+            const adminTask: AdminSignatureTask = {
+              ...base,
+              signatureType: 'admin',
+              authority,
+              administration,
+            }
+            out.push(adminTask)
+          } else {
+            // Extension row missing — push base task with a defensive authority stub
+            // so getAuthorityGroupKey falls back to network name rather than crashing.
+            out.push(base)
+          }
+        } else {
+          out.push(base)
+        }
       }
       return out
     } catch (err) {

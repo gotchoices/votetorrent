@@ -28,9 +28,10 @@ function getAuthorityGroupKey(task: ReleaseKeyTask | SignatureTask): string {
 	if (task.type === "signature") {
 		switch (task.signatureType) {
 			case "admin":
-				return (task as AdminSignatureTask).authority.name;
+				// Defensive: authority may be absent if materialisation failed; fall back to network name.
+				return (task as AdminSignatureTask).authority?.name ?? task.network.name;
 			case "authority":
-				return (task as AuthoritySignatureTask).authority.proposed.name;
+				return (task as AuthoritySignatureTask).authority?.proposed?.name ?? task.network.name;
 			case "network":
 			case "election":
 			case "election-revision":
