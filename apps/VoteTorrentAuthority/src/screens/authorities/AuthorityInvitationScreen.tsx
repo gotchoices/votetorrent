@@ -4,7 +4,6 @@ import { ScrollView, StyleSheet, View } from "react-native";
 import { ExtendedTheme, useNavigation, useRoute, useTheme } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type {
-	AdminInit,
 	IAuthorityEngine,
 	IDefaultUserEngine,
 	IInvitationEngine,
@@ -14,7 +13,6 @@ import type {
 	SentAuthorityInvite,
 } from "@votetorrent/vote-core";
 import { INetworkEngine } from "@votetorrent/vote-core";
-import { NetworkCreateAuthorityBuilder } from "@votetorrent/vote-engine";
 import Clipboard from "@react-native-clipboard/clipboard";
 import { ThemedText } from "../../components/ThemedText";
 import { ChipButton } from "../../components/ChipButton";
@@ -100,8 +98,8 @@ export default function AuthorityInvitationScreen() {
 		loadInvite();
 	}, [mode, invitationId, getEngine]);
 
-	// INV-02: PRESERVED real onSend (NetworkCreateAuthorityBuilder path).
-	// D-05: a Copy-to-clipboard share is added after a successful commit.
+	// INV-02: onSend invites onto the network's EXISTING primary authority.
+	// D-05: a Copy-to-clipboard share is added after a successful send.
 	const onSend = async () => {
 		// 16-08 item 4: clear any prior error so a retry starts clean.
 		setErrorMessage("");
@@ -119,13 +117,11 @@ export default function AuthorityInvitationScreen() {
 			// Re-open the network via networksEngine.open(ref, user) directly so the
 			// returned NetworkEngine has ctx.user set (bypasses the factory cache).
 			if (!networksEngine) {
-				console.error("onSend: networksEngine not yet initialized");
 				setErrorMessage("Networks engine not yet initialized — please wait and try again.");
 				return;
 			}
 			const recentRefs = await (networksEngine as INetworksEngine).getRecentNetworks();
 			if (!recentRefs || recentRefs.length === 0) {
-				console.error("onSend: no recent network found — create a network first");
 				setErrorMessage("No network found — create a network first.");
 				return;
 			}
@@ -133,53 +129,13 @@ export default function AuthorityInvitationScreen() {
 			// Re-open with the real user attached so ctx.user is non-null in the engine.
 			const networkEngine = await (networksEngine as INetworksEngine).open(networkRef, user);
 
-			// Synthesize AdminInit: default admin/officers to the current device user
-			// with a sensible threshold policy covering the 3 primary governance scopes (D-04).
-			// Threshold of 1 is correct for a single-admin first-authority shoe-in (v1.2 scope).
-			const admin: AdminInit = {
-				officers: [
-					{
-						init: {
-							name: user.name,
-							title: "Chair",
-							scopes: ["rn", "rad", "iad", "uai", "mel", "ceb"],
-						},
-					},
-				],
-				effectiveAt: Date.now(),
-				thresholdPolicies: [
-					{ policy: "rn", threshold: 1 },
-					{ policy: "mel", threshold: 1 },
-					{ policy: "ceb", threshold: 1 },
-				],
-			};
-
-			// Route through v1.1 NetworkCreateAuthorityBuilder (D-03).
-			// commit() with no options → first-authority shoe-in path (no inviteSlotCid).
-			const builder = new NetworkCreateAuthorityBuilder(networkEngine)
-				.setAuthority({ name, domainName })
-				.setAdmin(admin);
-			if (!builder.isValid()) {
-				console.error("onSend: validation errors", builder.errors());
-				setErrorMessage(
-					builder.errors().map((e) => e.message).join("\n") || "Validation failed.",
-				);
-				return;
-			}
-			await builder.commit();
-
-			// GAP-3: the builder commit creates the authority on networkEngine.
-			// For the first-authority shoe-in this authority becomes the network's
-			// primary authority; resolve it via getDetails().network.primaryAuthorityId
-			// and open an authority engine for it so we can mint a REAL invite whose
-			// share text carries the ephemeral invitePrivate (the paste-to-accept path
-			// requires real key material — a confirmation-only object leaves
-			// parsed.invitePrivate undefined). D-08 stubs only the network SEND hop,
-			// not the local invite-key creation.
+			// Resolve the network's EXISTING primary authority — do not create a second one.
+			// Authority.InsertValid Branch 1 requires the authority to be the only one; creating
+			// a second authority on a network that already has a primary would fail the CHECK.
 			const details = await networkEngine.getDetails();
 			const newAuthorityId = details.network.primaryAuthorityId;
 			if (!newAuthorityId) {
-				setErrorMessage("Could not resolve the new authority — invite not created.");
+				setErrorMessage("Could not resolve the network's authority — invite not created.");
 				return;
 			}
 			const authorityEngine = await networkEngine.openAuthority(newAuthorityId);
@@ -212,7 +168,7 @@ export default function AuthorityInvitationScreen() {
 			setShareText(sharePayload);
 			// D-08: do NOT navigate away immediately — keep screen so Copy affordance shows.
 		} catch (error) {
-			console.error("createAuthority error:", error);
+			console.warn("AuthorityInvitationScreen send failed:", error);
 			setErrorMessage(error instanceof Error ? error.message : String(error));
 			return;
 		}
@@ -236,7 +192,7 @@ export default function AuthorityInvitationScreen() {
 			// GAP-2: navigate ONLY on success — the InviteResult is now written.
 			navigation.goBack();
 		} catch (error) {
-			console.error("Error responding to invite:", error);
+			console.error("onAccept respondToInvite error:", error);
 			setErrorMessage(error instanceof Error ? error.message : String(error));
 		}
 	};
@@ -258,7 +214,7 @@ export default function AuthorityInvitationScreen() {
 			// GAP-2: navigate ONLY on success — the InviteResult is now written.
 			navigation.goBack();
 		} catch (error) {
-			console.error("Error responding to invite:", error);
+			console.error("onDecline respondToInvite error:", error);
 			setErrorMessage(error instanceof Error ? error.message : String(error));
 		}
 	};
