@@ -1555,13 +1555,69 @@ describe('NetworkEngine', () => {
 		// relay endpoints, and estimatedNodes is an honest lower-bound floor
 		// (>= serverCount). When real P2P telemetry lands (Phase 22) estimatedNodes
 		// can exceed serverCount without this test needing to be "fixed" back to
-		// strict equality. TODO(Phase 22): tighten once live node telemetry exists.
+		// strict equality.
 		it('returns serverCount equal to the relay count and estimatedNodes >= serverCount', async () => {
 			const { engine } = await createNetworkEngine();
 			const stats = await engine.getStatistics();
 			expect(stats.serverCount).to.be.a('number').greaterThan(0);
 			// estimatedNodes is a documented lower-bound floor, never below serverCount.
 			expect(stats.estimatedNodes).to.be.at.least(stats.serverCount);
+		});
+
+		// ENG-05: live peer count via injected getPeerCount callback (Phase 22)
+		it('returns estimatedNodes = max(serverCount, connectedPeers) when getPeerCount callback returns N > serverCount', async () => {
+			const { engine: baseEngine, ref } = await createNetworkEngine();
+			// Access the internal ctx through the base engine to reconstruct with a callback.
+			// We access it via the underlying engine's ctx by re-opening through NetworksEngine.
+			// Simpler: just call getStatistics on an engine that was constructed with a getPeerCount.
+			// We need to get the ctx — use the fact that createNetworkEngine uses networksEngine internally.
+			// Instead, create a raw NetworkEngine using makeDbOnlyNetworkEngine which wraps createNetworkEngine ctx.
+			// Actually, we need a real Network row. Use createNetworkEngine context directly.
+			// NetworkEngine constructor is exported — use it with the ctx from createNetworkEngine.
+			// We grab the base engine stats to learn serverCount, then construct with callback.
+			const baseStats = await baseEngine.getStatistics();
+			const serverCount = baseStats.serverCount;
+			// Reconstruct a NetworkEngine with getPeerCount returning serverCount + 50.
+			// We need the ctx — it's private, so we re-run createNetworkEngine to get ctx directly.
+			await AsyncStorage.clear();
+			await AsyncStorage.setItem('recentNetworks', []);
+			const networksEngine2 = new NetworksEngine(AsyncStorage);
+			const user2 = makeUser();
+			const networkInit2 = makeNetworkInit(); // 1 relay → serverCount=1
+			await networksEngine2.create(networkInit2, user2);
+			const recents2 = (await AsyncStorage.getItem<NetworkReference[]>('recentNetworks')) ?? [];
+			const ref2 = recents2[0]!;
+			const ctx2 = networksEngine2.getEstablishedContext(ref2.hash)!;
+			const getPeerCount = () => 99;
+			const engineWithCallback = new NetworkEngine(ref2, AsyncStorage, ctx2, getPeerCount);
+			const stats = await engineWithCallback.getStatistics();
+			// serverCount = 1 relay; connectedPeers = 99; estimatedNodes = max(1, 99) = 99
+			expect(stats.serverCount).to.equal(serverCount);
+			expect(stats.estimatedNodes).to.equal(99);
+		});
+
+		it('falls back to relay-count heuristic (estimatedNodes = serverCount) when no getPeerCount callback is provided', async () => {
+			const { engine } = await createNetworkEngine();
+			const stats = await engine.getStatistics();
+			// No callback — heuristic fallback: estimatedNodes = serverCount
+			expect(stats.estimatedNodes).to.equal(stats.serverCount);
+		});
+
+		it('falls back to relay-count heuristic when getPeerCount callback returns 0', async () => {
+			await AsyncStorage.clear();
+			await AsyncStorage.setItem('recentNetworks', []);
+			const networksEngine3 = new NetworksEngine(AsyncStorage);
+			const user3 = makeUser();
+			const networkInit3 = makeNetworkInit();
+			await networksEngine3.create(networkInit3, user3);
+			const recents3 = (await AsyncStorage.getItem<NetworkReference[]>('recentNetworks')) ?? [];
+			const ref3 = recents3[0]!;
+			const ctx3 = networksEngine3.getEstablishedContext(ref3.hash)!;
+			const getPeerCount = () => 0;
+			const engine = new NetworkEngine(ref3, AsyncStorage, ctx3, getPeerCount);
+			const stats = await engine.getStatistics();
+			// connectedPeers=0 → max(serverCount, 0) = serverCount
+			expect(stats.estimatedNodes).to.equal(stats.serverCount);
 		});
 	});
 
