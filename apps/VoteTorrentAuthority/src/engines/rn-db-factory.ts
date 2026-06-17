@@ -1,8 +1,9 @@
 /**
  * RN persistent DbFactory — LevelDB-backed Quereus Database for Android/Hermes.
  *
- * D-03: This file is the ONLY place `rn-leveldb` and `@optimystic/db-p2p-storage-rn`
- * are imported in the entire project. They MUST NOT appear under packages/vote-engine/.
+ * D-03: This file is the ONLY place `rn-leveldb`, `@optimystic/db-p2p-storage-rn`,
+ * and (for the strand-backed path) `@serfab/cadre-core` are imported for DbFactory
+ * purposes. They MUST NOT appear under packages/vote-engine/.
  *
  * Both packages are pre-installed in apps/VoteTorrentAuthority/package.json and
  * spike-validated on-device (spikes 005 + 008). Registry-audited in Plan 14-02
@@ -16,7 +17,9 @@ import { LevelDB, LevelDBWriteBatch } from 'rn-leveldb';
 import { openOptimysticRNDb, LevelDBRawStorage } from '@optimystic/db-p2p-storage-rn';
 import { Database, registerPlugin } from '@quereus/quereus';
 import { register as optimysticPlugin } from '@optimystic/quereus-plugin-optimystic';
+import { VOTETORRENT_SCHEMA_SQL } from '@votetorrent/vote-engine/rn';
 import type { DbFactory } from '@votetorrent/vote-engine';
+import type { StrandConfig, StrandInstance } from '@serfab/cadre-core';
 
 /**
  * Concrete DbFactory for the RN app layer.
@@ -73,3 +76,66 @@ export const rnDbFactory: DbFactory = async (networkHash: string) => {
 
   return db;
 };
+
+/**
+ * Minimal addStrand-capable seam — satisfied structurally by `CadreNode`.
+ *
+ * Injected (rather than reaching for a module-level singleton) so the
+ * strand-backed factory is unit-testable with a fake node. CadreNode's
+ * `getControlNode()` returns `Libp2p | null`; we only read `getConnections()`.
+ */
+export interface StrandHost {
+	addStrand(config: StrandConfig): Promise<StrandInstance>;
+	getControlNode(): { getConnections(): readonly unknown[] } | null;
+}
+
+/**
+ * Strand-backed DbFactory (P2P-03 / D-07 / D-14).
+ *
+ * Returns a `DbFactory` that, instead of opening a standalone LevelDB-backed
+ * Quereus Database, attaches a CadreNode strand for the network and hands back
+ * the strand's Quereus Database. The strand owns the vtab + transactor, so there
+ * is NO registerPlugin / setDefaultVtab call on this path — cadre-core applies
+ * the sApp schema (wrapped in `declare schema App { ... }`) during addStrand.
+ *
+ * D-05: strandId is derived directly from the network hash — already unique per
+ *       network, so it doubles as the strandId with no extra mapping structure.
+ * D-07: mode is peer-gated EXPLICITLY. Omitting it defaults to 'networked', which
+ *       hangs a solo node (the network transactor waits for peer round-trips).
+ *       'bootstrap' routes schema apply + writes through the local transactor.
+ * D-14: after `getDatabase()`, `setSchemaPath(['App','main'])` makes bare engine
+ *       SQL table names (e.g. `Network`) resolve to `App.Network` first, with
+ *       `main` as the fallback for SchemaVersion / TidSequence. One call fixes
+ *       the entire SQL tier — zero engine query rewrites.
+ *
+ * Ordering (Pitfall 3): never read `strand.database` before `await addStrand`
+ * resolves — cadre-core awaits the strand DB's internal initialize() and returns
+ * only once the database is safe to access.
+ */
+export function createStrandDbFactory(node: StrandHost): DbFactory {
+	return async (networkHash: string) => {
+		// D-05: the network hash is already unique per network — use it as the strandId.
+		const strandId = networkHash;
+
+		// D-07: check for peers BEFORE addStrand and pass the mode literal explicitly.
+		const hasPeers = (node.getControlNode()?.getConnections().length ?? 0) > 0;
+
+		const strand = await node.addStrand({
+			strandRow: { Id: strandId, MemberPrivateKey: null, Type: 'o' },
+			sAppConfig: {
+				id: 'org.votetorrent',
+				version: '1.0.0',
+				schema: VOTETORRENT_SCHEMA_SQL,
+				latencyHint: 'interactive',
+			},
+			mode: hasPeers ? 'networked' : 'bootstrap',
+		});
+
+		// Safe only after addStrand resolves (Pitfall 3). `database` is present once
+		// the strand is active/idle, which addStrand guarantees on return.
+		const db = strand.database!.getDatabase();
+		db.setSchemaPath(['App', 'main']); // D-14 transparency — never omit (Pitfall 2).
+
+		return db;
+	};
+}

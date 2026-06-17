@@ -7,6 +7,7 @@ import { EngineFactory } from "../engines/engine-factory";
 import { LocalStorageReact } from "@votetorrent/vote-engine/rn";
 import { rnDbFactory } from "../engines/rn-db-factory";
 import { getOrCreateDeviceUser } from "../engines/device-user";
+import { useCadreNode } from "./CadreNodeProvider";
 
 interface AppContextType {
 	networksEngine?: INetworksEngine;
@@ -55,6 +56,15 @@ export function AppProvider({ children }: PropsWithChildren) {
 	const hasEngine = useCallback((engineName: string) => {
 		return engineFactoryRef.current?.hasEngine(engineName) ?? false;
 	}, []);
+
+	// ENG-05: register the CadreNode live peer-count source with the factory so
+	// NetworkEngine.getStatistics reports connected peers. connectedPeers is keyed
+	// by strandId (== networkHash, D-05); it is a stable callback from the provider,
+	// so this effect runs once after the CadreNodeProvider mounts.
+	const { connectedPeers } = useCadreNode();
+	useEffect(() => {
+		engineFactoryRef.current?.setGetPeerCount(connectedPeers);
+	}, [connectedPeers]);
 
 	useEffect(() => {
 		async function initialize() {

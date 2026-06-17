@@ -43,9 +43,22 @@ export class EngineFactory {
 	/** The resolved device user to bind into ctx on every internal open() call. */
 	private currentUser: User | undefined
 
+	/**
+	 * ENG-05: live peer-count source, keyed by strandId (== networkHash, D-05).
+	 * Registered by CadreNodeProvider after the CadreNode boots. When set, the
+	 * network engine reports connected peers in getStatistics; absent, it falls
+	 * back to the relay-count heuristic.
+	 */
+	private getPeerCount: ((strandId: string) => number) | undefined
+
 	/** Called by AppProvider after resolving the device user, before getEngine("network"). */
 	setCurrentUser(user: User | undefined): void {
 		this.currentUser = user
+	}
+
+	/** Called by CadreNodeProvider after boot to wire live peer counts into NetworkEngine. */
+	setGetPeerCount(getPeerCount: (strandId: string) => number): void {
+		this.getPeerCount = getPeerCount
 	}
 
 	constructor(
@@ -178,7 +191,17 @@ export class EngineFactory {
 				}
 				// Q3 open question 3: auto-open so screen-initiated network resolution works.
 				// Thread the resolved device user so ctx.user is a real User after boot.
-				const networkEngine = await this.networksEngine.open(ref, this.currentUser)
+				// ENG-05: forward a live peer-count closure keyed by this network's hash
+				// (== strandId, D-05) so NetworkEngine.getStatistics reports connected peers.
+				// The closure reads getPeerCount lazily at call time, so it picks up the
+				// CadreNodeProvider registration even if it lands after open().
+				const peerCount = (): number => this.getPeerCount?.(ref.hash) ?? 0
+				const networkEngine = await this.networksEngine.open(
+					ref,
+					this.currentUser,
+					true,
+					peerCount,
+				)
 				this.currentNetworkHash = ref.hash
 				return networkEngine
 			}

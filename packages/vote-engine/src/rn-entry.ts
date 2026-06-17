@@ -29,3 +29,8 @@ export { H16 } from './utils.js'
 // instead of carrying an inline copy that could silently drift.
 export { DIGEST_VECTORS } from './database/digest-vectors.js'
 export type { DigestVector } from './database/digest-vectors.js'
+// Single source of truth for the votetorrent schema DDL (generated from
+// vote-core/schema/votetorrent.qsql). The app-layer strand-backed DbFactory
+// passes this into CadreNode.addStrand's sAppConfig.schema (P2P-03) so the
+// strand DB and the LevelDB path declare the SAME schema — no drift.
+export { VOTETORRENT_SCHEMA_SQL } from './database/schema-sql.js'

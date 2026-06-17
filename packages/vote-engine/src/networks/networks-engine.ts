@@ -263,6 +263,13 @@ export class NetworksEngine implements INetworksEngine {
 		ref: NetworkReference,
 		user: User | undefined,
 		storeAsRecent: boolean = true,
+		/**
+		 * ENG-05: optional live peer-count callback forwarded into the NetworkEngine
+		 * so getStatistics can report connected peers. Plain (() => number) — D-03:
+		 * no @serfab/@optimystic import enters packages/vote-engine; the app layer
+		 * supplies the closure.
+		 */
+		getPeerCount?: () => number,
 	): Promise<INetworkEngine> {
 		// D-06: cache-first — single live handle per store.
 		const cached = this.contexts.get(ref.hash);
@@ -276,7 +283,7 @@ export class NetworksEngine implements INetworksEngine {
 			// observe one consistent ctx.user for this network.
 			const ctx: EngineContext = { ...cached, user };
 			this.contexts.set(ref.hash, ctx);
-			const qNetworkEngine = new NetworkEngine(ref, this.localStorage, ctx);
+			const qNetworkEngine = new NetworkEngine(ref, this.localStorage, ctx, getPeerCount);
 			if (storeAsRecent) {
 				const recentNetworks: NetworkReference[] =
 					(await this.localStorage.getItem('recentNetworks')) ?? [];
@@ -349,7 +356,7 @@ export class NetworksEngine implements INetworksEngine {
 
 		const ctx: EngineContext = { db, user };
 		this.contexts.set(ref.hash, ctx);
-		const qNetworkEngine = new NetworkEngine(ref, this.localStorage, ctx);
+		const qNetworkEngine = new NetworkEngine(ref, this.localStorage, ctx, getPeerCount);
 		if (storeAsRecent) {
 			const recentNetworks: NetworkReference[] =
 				(await this.localStorage.getItem('recentNetworks')) ?? [];
