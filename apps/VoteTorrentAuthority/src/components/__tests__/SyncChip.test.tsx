@@ -34,6 +34,13 @@ jest.mock(
 // Mock react-native-vector-icons (not available in jest environment)
 jest.mock('react-native-vector-icons/FontAwesome6', () => 'FontAwesome6');
 
+// Mock react-i18next: no i18next instance is initialized in this isolated unit
+// test, so the real useTranslation would throw. The label copy is incidental to
+// these assertions (which verify the icon/state mapping), so t echoes the key.
+jest.mock('react-i18next', () => ({
+  useTranslation: () => ({ t: (key: string) => key }),
+}));
+
 // Mock @react-navigation/native theme hook
 jest.mock('@react-navigation/native', () => ({
   useTheme: () => ({
@@ -61,6 +68,18 @@ const SyncChip = SyncChipModule?.SyncChip ?? SyncChipModule?.default;
 // P2P-07: SyncChip event-driven state mapping
 // ---------------------------------------------------------------------------
 
+// React 19's react-test-renderer only flushes the initial render — and returns a
+// non-null toJSON() — when create() runs inside act(). Without it, toJSON() is null
+// for ANY component. This helper wraps create() so the assertions below inspect the
+// real tree (behavioral expectations are unchanged).
+function renderChip(): renderer.ReactTestRenderer {
+  let tr!: renderer.ReactTestRenderer;
+  renderer.act(() => {
+    tr = renderer.create(<SyncChip />);
+  });
+  return tr;
+}
+
 describe('SyncChip — P2P-07', () => {
   afterEach(() => {
     jest.clearAllMocks();
@@ -68,7 +87,7 @@ describe('SyncChip — P2P-07', () => {
 
   it('renders a wifi icon (connected state) when syncState is "connected"', () => {
     (useCadreNode as jest.Mock).mockReturnValue({ syncState: 'connected', node: null, connectedPeers: jest.fn() });
-    const tree = renderer.create(<SyncChip />).toJSON();
+    const tree = renderChip().toJSON();
     const treeStr = JSON.stringify(tree);
     // Icon name should be wifi (connected state)
     expect(treeStr).toMatch(/wifi/i);
@@ -78,7 +97,7 @@ describe('SyncChip — P2P-07', () => {
 
   it('renders an activity-indicator style icon when syncState is "syncing"', () => {
     (useCadreNode as jest.Mock).mockReturnValue({ syncState: 'syncing', node: null, connectedPeers: jest.fn() });
-    const tree = renderer.create(<SyncChip />).toJSON();
+    const tree = renderChip().toJSON();
     const treeStr = JSON.stringify(tree);
     // In syncing state the icon name should reference rotation/activity (e.g. 'rotate' or 'sync' or 'spinner')
     expect(treeStr).toMatch(/sync|rotate|spinner|activity/i);
@@ -86,7 +105,7 @@ describe('SyncChip — P2P-07', () => {
 
   it('renders a wifi-slash icon (offline state) when syncState is "offline"', () => {
     (useCadreNode as jest.Mock).mockReturnValue({ syncState: 'offline', node: null, connectedPeers: jest.fn() });
-    const tree = renderer.create(<SyncChip />).toJSON();
+    const tree = renderChip().toJSON();
     const treeStr = JSON.stringify(tree);
     expect(treeStr).toMatch(/wifi-slash/i);
   });
@@ -94,14 +113,14 @@ describe('SyncChip — P2P-07', () => {
   it('does not call setInterval (no polling — D-10)', () => {
     const setIntervalSpy = jest.spyOn(global, 'setInterval');
     (useCadreNode as jest.Mock).mockReturnValue({ syncState: 'connected', node: null, connectedPeers: jest.fn() });
-    renderer.create(<SyncChip />);
+    renderChip();
     expect(setIntervalSpy).not.toHaveBeenCalled();
     setIntervalSpy.mockRestore();
   });
 
   it('uses useCadreNode hook to read syncState (not props, not polling)', () => {
     (useCadreNode as jest.Mock).mockReturnValue({ syncState: 'offline', node: null, connectedPeers: jest.fn() });
-    renderer.create(<SyncChip />);
+    renderChip();
     expect(useCadreNode).toHaveBeenCalled();
   });
 });
