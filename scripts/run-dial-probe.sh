@@ -90,6 +90,7 @@ restore_flags() {
 // Static import ONLY — dynamic require() breaks Metro (Phase 16-07 lesson).
 export const PROOF_ENABLED = false;
 export const DIAL_PROBE_ENABLED = false;
+export const REPLICATION_PROOF_ENABLED = false;
 EOF
 }
 
