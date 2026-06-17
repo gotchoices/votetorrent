@@ -8,6 +8,7 @@ import {BallotDraftProvider} from './src/screens/ballots/providers/BallotDraftPr
 import {darkTheme, lightTheme} from './src/theme/themes';
 import {useColorScheme} from 'react-native';
 import {AppProvider} from './src/providers/AppProvider';
+import {CadreNodeProvider} from './src/providers/CadreNodeProvider';
 import {SettingsProvider} from './src/providers/SettingsProvider';
 
 export default function App() {
@@ -25,6 +26,7 @@ export default function App() {
 	return (
 		<SafeAreaProvider>
 			<SettingsProvider>
+			<CadreNodeProvider>
 			<AppProvider>
 				<NavigationContainer
 					theme={colorScheme === 'dark' ? darkTheme : lightTheme}>
@@ -37,6 +39,7 @@ export default function App() {
 					</BallotDraftProvider>
 				</NavigationContainer>
 			</AppProvider>
+			</CadreNodeProvider>
 			</SettingsProvider>
 		</SafeAreaProvider>
 	);
