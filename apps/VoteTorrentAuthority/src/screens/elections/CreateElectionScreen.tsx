@@ -18,6 +18,7 @@ import { ElectionType } from "@votetorrent/vote-core";
 import type { IElectionsEngine, INetworkEngine, ElectionInit } from "@votetorrent/vote-core";
 import { ElectionsCreateElectionBuilder, peekNextElectionTid } from "@votetorrent/vote-engine";
 import { createDeviceSigner } from "../../engines/device-signer";
+import { mapElectionError } from "./election-error-messages";
 
 // Phase 9 plan 09-12 (ELECUI-03) — Single-scroll New Election form.
 // Phase 20 plan 20-06 (EUI-02, EUI-03) — type radio + per-field inline validation.
@@ -43,6 +44,10 @@ export function CreateElectionScreen() {
 		ballotsFinal: "",
 		releasingKeys: "",
 		votingStarts: "",
+		tallyingStarts: "",
+		validation: "",
+		certificationStarts: "",
+		closed: "",
 		keyholders: [],
 		threshold: 1,
 		tags: [],
@@ -91,15 +96,15 @@ export function CreateElectionScreen() {
 		// EUI-03 (D-06/D-07): validate required fields before proceeding to engine call.
 		// Validate ONLY title + the two visible date fields (RESEARCH OQ2 — ballotDeadline stays auto-computed).
 		if (!coreTitle.trim()) {
-			setTitleError("Title is required");
+			setTitleError(t("errTitleRequired"));
 			return;
 		}
 		if (!coreDate.trim()) {
-			setDateError("Election date is required");
+			setDateError(t("errElectionDateRequired"));
 			return;
 		}
 		if (!coreRevisionDeadline.trim()) {
-			setRevisionDeadlineError("Revision deadline is required");
+			setRevisionDeadlineError(t("errRevisionDeadlineRequired"));
 			return;
 		}
 
@@ -126,20 +131,38 @@ export function CreateElectionScreen() {
 			const signer = await createDeviceSigner("Device User");
 
 			const now = Date.now();
+			const day = 24 * 60 * 60 * 1000;
 			const parseDateOrFallback = (s: string, fallbackMs: number): number =>
 				s.trim() ? new Date(s).getTime() || fallbackMs : fallbackMs;
+
+			// Resolve the full 7-event timeline ONCE so the builder payload and the
+			// revision-signing seam below sign an IDENTICAL timeline (the digests must match).
+			// The back-half events (tallying → closed) now come from the form when set, and
+			// otherwise default RELATIVE TO votingStarts — not `now` — so pushing the voting
+			// date out keeps votingStarts < tallyingStarts < certificationStarts satisfied
+			// (the ElectionsCreateElectionBuilder cross-field rule that previously broke).
+			const resolvedVotingStarts = parseDateOrFallback(revision.votingStarts, now + 10 * day);
+			const resolvedTimeline = {
+				registrationEnds: parseDateOrFallback(revision.registrationEnds, now + 2 * day),
+				ballotsFinal: parseDateOrFallback(revision.ballotsFinal, now + 5 * day),
+				votingStarts: resolvedVotingStarts,
+				tallyingStarts: parseDateOrFallback(revision.tallyingStarts, resolvedVotingStarts + 4 * day),
+				validation: parseDateOrFallback(revision.validation, resolvedVotingStarts + 5 * day),
+				certificationStarts: parseDateOrFallback(revision.certificationStarts, resolvedVotingStarts + 6 * day),
+				closed: parseDateOrFallback(revision.closed, resolvedVotingStarts + 7 * day),
+			};
 
 			// WR-05: the two required core date fields must actually PARSE — do not let an
 			// unparseable string silently fall back to a fabricated now+N-days timeline in
 			// the signed, immutable election. Surface a field error instead.
 			const parsedCoreDate = new Date(coreDate).getTime();
 			if (Number.isNaN(parsedCoreDate)) {
-				setDateError(t("invalidDate"));
+				setDateError(t("errElectionDateInvalid"));
 				return;
 			}
 			const parsedRevisionDeadline = new Date(coreRevisionDeadline).getTime();
 			if (Number.isNaN(parsedRevisionDeadline)) {
-				setRevisionDeadlineError(t("invalidDate"));
+				setRevisionDeadlineError(t("errRevisionDeadlineInvalid"));
 				return;
 			}
 
@@ -152,6 +175,29 @@ export function CreateElectionScreen() {
 			const electionBallotDeadline = now + 10 * 24 * 60 * 60 * 1000;
 			// EUI-03 (D-06): validated non-empty above — trim() only, no silent default
 			const electionTitle = coreTitle.trim();
+
+			// Deadline coherence — catch these BEFORE the engine so the user gets a
+			// friendly, field-level message instead of a raw SQL CHECK
+			// (RevisionDeadline ≤ Date / BallotDeadlineValid) or a builder TIMELINE_ORDER error.
+			if (electionRevisionDeadline > electionDate) {
+				setRevisionDeadlineError(t("errRevisionDeadlineAfterDate"));
+				return;
+			}
+			if (electionBallotDeadline > electionDate) {
+				setDateError(
+					t("errElectionDateTooSoon", {
+						date: new Date(electionBallotDeadline).toLocaleDateString(),
+					})
+				);
+				return;
+			}
+			if (
+				resolvedTimeline.votingStarts >= resolvedTimeline.tallyingStarts ||
+				resolvedTimeline.tallyingStarts >= resolvedTimeline.certificationStarts
+			) {
+				setErrorMessage(t("errTimelineOrder"));
+				return;
+			}
 
 			// Assemble the full payload via the v1.1 builder (D-03 / FACT-02)
 			const builder = new ElectionsCreateElectionBuilder(electionsEngine)
@@ -179,24 +225,7 @@ export function CreateElectionScreen() {
 						inviteSignature: "",
 						digest: "",
 					})),
-					timeline: {
-						registrationEnds: parseDateOrFallback(
-							revision.registrationEnds,
-							now + 2 * 24 * 60 * 60 * 1000
-						),
-						ballotsFinal: parseDateOrFallback(
-							revision.ballotsFinal,
-							now + 5 * 24 * 60 * 60 * 1000
-						),
-						votingStarts: parseDateOrFallback(
-							revision.votingStarts,
-							now + 10 * 24 * 60 * 60 * 1000
-						),
-						tallyingStarts: now + 14 * 24 * 60 * 60 * 1000,
-						validation: now + 15 * 24 * 60 * 60 * 1000,
-						certificationStarts: now + 16 * 24 * 60 * 60 * 1000,
-						closed: now + 17 * 24 * 60 * 60 * 1000,
-					},
+					timeline: resolvedTimeline,
 					keyholderThreshold: Math.max(0, Math.trunc(revision.threshold)),
 				});
 
@@ -231,15 +260,8 @@ export function CreateElectionScreen() {
 			// peekNextElectionTid is imported statically from @votetorrent/vote-engine at top of file.
 			const pastRevTs = now - 1000;
 			const revTid = peekNextElectionTid() + 1;
-			const revisionTimeline = {
-				registrationEnds: parseDateOrFallback(revision.registrationEnds, now + 2 * 24 * 60 * 60 * 1000),
-				ballotsFinal: parseDateOrFallback(revision.ballotsFinal, now + 5 * 24 * 60 * 60 * 1000),
-				votingStarts: parseDateOrFallback(revision.votingStarts, now + 10 * 24 * 60 * 60 * 1000),
-				tallyingStarts: now + 14 * 24 * 60 * 60 * 1000,
-				validation: now + 15 * 24 * 60 * 60 * 1000,
-				certificationStarts: now + 16 * 24 * 60 * 60 * 1000,
-				closed: now + 17 * 24 * 60 * 60 * 1000,
-			};
+			// Same object the builder payload signs — must be identical (digest parity).
+			const revisionTimeline = resolvedTimeline;
 			const revisionSigningNonce = await (electionsEngine as unknown as {
 				seedElectionRevisionSigning(
 					electionId: string,
@@ -276,7 +298,7 @@ export function CreateElectionScreen() {
 			await electionsEngine.createElection(payload, { signingNonce, revisionSigningNonce });
 		} catch (err) {
 			console.error("createElection error:", err);
-			setErrorMessage(err instanceof Error ? err.message : String(err));
+			setErrorMessage(mapElectionError(err, t));
 			return;
 		}
 		navigation.goBack();

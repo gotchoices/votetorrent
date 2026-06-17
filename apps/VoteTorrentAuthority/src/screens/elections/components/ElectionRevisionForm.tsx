@@ -19,6 +19,10 @@ export type ElectionRevisionFormValue = {
 	ballotsFinal: string;
 	releasingKeys: string;
 	votingStarts: string;
+	tallyingStarts: string;
+	validation: string;
+	certificationStarts: string;
+	closed: string;
 	keyholders: string[];
 	threshold: number;
 	tags: string[];
@@ -40,7 +44,8 @@ interface ElectionRevisionFormProps {
  * can embed this inside its own ScrollView with its own PROPOSE footer.
  *
  * Sections (top→bottom, per Figma #15/#17):
- *   1. Timeline date-rows (registration ends, ballots final, releasing keys, voting starts)
+ *   1. Timeline date-rows (registration ends, ballots final, releasing keys,
+ *      voting starts, tallying starts, validation, certification starts, closed)
  *   2. Key holders list + trash per row + IMPORT + ADD KEY HOLDER chips
  *   3. Threshold Policy — single Stepper row + adjacent "of M" suffix
  *   4. Tags dropdown + removable chip list
@@ -136,6 +141,30 @@ export function ElectionRevisionForm({
 					title={t("votingStarts")}
 					value={value.votingStarts}
 					onChange={(v) => set({ votingStarts: v })}
+					placeholder={t("selectDate")}
+				/>
+				<DateField
+					title={t("tallyingStarts")}
+					value={value.tallyingStarts}
+					onChange={(v) => set({ tallyingStarts: v })}
+					placeholder={t("selectDate")}
+				/>
+				<DateField
+					title={t("validation")}
+					value={value.validation}
+					onChange={(v) => set({ validation: v })}
+					placeholder={t("selectDate")}
+				/>
+				<DateField
+					title={t("certificationStarts")}
+					value={value.certificationStarts}
+					onChange={(v) => set({ certificationStarts: v })}
+					placeholder={t("selectDate")}
+				/>
+				<DateField
+					title={t("closed")}
+					value={value.closed}
+					onChange={(v) => set({ closed: v })}
 					placeholder={t("selectDate")}
 				/>
 			</View>

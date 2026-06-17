@@ -14,6 +14,7 @@ import { ElectionRevisionForm, ElectionRevisionFormValue } from "./components/El
 import { useApp } from "../../providers/AppProvider";
 import { ElectionType } from "@votetorrent/vote-core";
 import type { IElectionEngine, IElectionsEngine, ElectionInit, ElectionDetails } from "@votetorrent/vote-core";
+import { mapElectionError } from "./election-error-messages";
 
 // Phase 9 plan 09-13 (ELECUI-04) — Election Revision form (Screen C, Figma #16/#17).
 // Phase 20 plan 20-06 (EUI-01, EUI-02) — wire real adjustElection from single cached load.
@@ -51,6 +52,10 @@ export default function EditElectionScreen() {
 		ballotsFinal: "",
 		releasingKeys: "",
 		votingStarts: "",
+		tallyingStarts: "",
+		validation: "",
+		certificationStarts: "",
+		closed: "",
 		keyholders: [],
 		threshold: 1,
 		tags: [],
@@ -104,8 +109,35 @@ export default function EditElectionScreen() {
 				return;
 			}
 			const now = Date.now();
+			const day = 24 * 60 * 60 * 1000;
 			const parseDateOrFallback = (s: string, fallbackMs: number): number =>
 				s.trim() ? new Date(s).getTime() || fallbackMs : fallbackMs;
+
+			// Back-half timeline events (tallying → closed) come from the form when set,
+			// otherwise default RELATIVE TO votingStarts — not `now` — so the
+			// votingStarts < tallyingStarts < certificationStarts ordering holds for any
+			// reasonable voting date (mirrors CreateElectionScreen).
+			const resolvedVotingStarts = parseDateOrFallback(revision.votingStarts, now + 11 * day);
+			const resolvedTimeline = {
+				registrationEnds: parseDateOrFallback(revision.registrationEnds, now + 3 * day),
+				ballotsFinal: parseDateOrFallback(revision.ballotsFinal, now + 6 * day),
+				votingStarts: resolvedVotingStarts,
+				tallyingStarts: parseDateOrFallback(revision.tallyingStarts, resolvedVotingStarts + 4 * day),
+				validation: parseDateOrFallback(revision.validation, resolvedVotingStarts + 5 * day),
+				certificationStarts: parseDateOrFallback(revision.certificationStarts, resolvedVotingStarts + 6 * day),
+				closed: parseDateOrFallback(revision.closed, resolvedVotingStarts + 7 * day),
+			};
+
+			// Friendly timeline guard BEFORE adjustElection — voting must precede tallying,
+			// and tallying must precede certification (avoids a raw engine ordering error).
+			if (
+				resolvedTimeline.votingStarts >= resolvedTimeline.tallyingStarts ||
+				resolvedTimeline.tallyingStarts >= resolvedTimeline.certificationStarts
+			) {
+				setErrorMessage(t("errTimelineOrder"));
+				setProposing(false);
+				return;
+			}
 
 			const init: ElectionInit = {
 				election: {
@@ -136,24 +168,7 @@ export default function EditElectionScreen() {
 						inviteSignature: "",
 						digest: "",
 					})),
-					timeline: {
-						registrationEnds: parseDateOrFallback(
-							revision.registrationEnds,
-							now + 3 * 24 * 60 * 60 * 1000
-						),
-						ballotsFinal: parseDateOrFallback(
-							revision.ballotsFinal,
-							now + 6 * 24 * 60 * 60 * 1000
-						),
-						votingStarts: parseDateOrFallback(
-							revision.votingStarts,
-							now + 11 * 24 * 60 * 60 * 1000
-						),
-						tallyingStarts: now + 15 * 24 * 60 * 60 * 1000,
-						validation: now + 16 * 24 * 60 * 60 * 1000,
-						certificationStarts: now + 17 * 24 * 60 * 60 * 1000,
-						closed: now + 18 * 24 * 60 * 60 * 1000,
-					},
+					timeline: resolvedTimeline,
 					keyholderThreshold: Math.max(0, Math.trunc(revision.threshold)),
 				},
 			};
@@ -163,8 +178,8 @@ export default function EditElectionScreen() {
 			navigation.goBack();
 		} catch (err) {
 			console.error("adjustElection error:", err);
-			// D-19 (SC6): surface error inline instead of silently failing
-			setErrorMessage(err instanceof Error ? err.message : String(err));
+			// D-19 (SC6): surface a friendly error inline instead of a raw engine/SQL message
+			setErrorMessage(mapElectionError(err, t));
 		} finally {
 			setProposing(false);
 		}
