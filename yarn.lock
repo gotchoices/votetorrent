@@ -4225,7 +4225,7 @@ __metadata:
 
 "@optimystic/quereus-plugin-optimystic@patch:@optimystic/quereus-plugin-optimystic@npm%3A0.13.5#~/.yarn/patches/@optimystic-quereus-plugin-optimystic-npm-0.13.5-6fbe2eccab.patch":
   version: 0.13.5
-  resolution: "@optimystic/quereus-plugin-optimystic@patch:@optimystic/quereus-plugin-optimystic@npm%3A0.13.5#~/.yarn/patches/@optimystic-quereus-plugin-optimystic-npm-0.13.5-6fbe2eccab.patch::version=0.13.5&hash=ad6136"
+  resolution: "@optimystic/quereus-plugin-optimystic@patch:@optimystic/quereus-plugin-optimystic@npm%3A0.13.5#~/.yarn/patches/@optimystic-quereus-plugin-optimystic-npm-0.13.5-6fbe2eccab.patch::version=0.13.5&hash=257bd3"
   dependencies:
     "@chainsafe/libp2p-gossipsub": "npm:^14.1.2"
     "@chainsafe/libp2p-yamux": "npm:^8.0.1"
@@ -4244,7 +4244,7 @@ __metadata:
     uint8arrays: "npm:^5.1.0"
   peerDependencies:
     "@quereus/quereus": ^0.16.2
-  checksum: 10c0/1402b60248861691367add9066993ebe76a972b80796afa595df463cb4b7ebebc7576b4873b2094f0ebfcd1abec4404b07db448fa0d1fc33cb3f5fcb55afbf85
+  checksum: 10c0/37ad0de788d63a0155ce264a78d8df4367b84daa0b28d9ecee78e8d445b5363c80917e7fb5818c2b528966b0e126240f8f7eb95188a3ee4b261ea982c31a9091
   languageName: node
   linkType: hard
 

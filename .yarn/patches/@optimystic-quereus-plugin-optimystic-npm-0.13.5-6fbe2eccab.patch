@@ -1,5 +1,5 @@
 diff --git a/dist/chunk-HPFDTDHY.js b/dist/chunk-HPFDTDHY.js
-index 1cf4a77398acc282bc9763757dfce403d175b8d1..30a145f7d1fc84987926f6b7ff5d356037f8442f 100644
+index 1cf4a77398acc282bc9763757dfce403d175b8d1..d4acd0684fe53309469c2140088921b0f9a3f189 100644
 --- a/dist/chunk-HPFDTDHY.js
 +++ b/dist/chunk-HPFDTDHY.js
 @@ -1485,11 +1485,11 @@ var OptimysticVirtualTable = class extends VirtualTable {
@@ -16,8 +16,26 @@ index 1cf4a77398acc282bc9763757dfce403d175b8d1..30a145f7d1fc84987926f6b7ff5d3560
        } else if (filterInfo.idxNum === 2) {
          yield* this.executeRangeQuery(filterInfo);
        } else if (filterInfo.idxNum >= 10) {
+@@ -1687,7 +1687,7 @@ var OptimysticVirtualTable = class extends VirtualTable {
+             throw new Error("UPDATE requires old key values");
+           }
+           {
+-            const oldKey = this.rowCodec.extractPrimaryKey(oldKeyValues);
++            const oldKey = oldKeyValues.length > 1 ? this.rowCodec.createPrimaryKey(oldKeyValues) : this.rowCodec.extractPrimaryKey(oldKeyValues);
+             const newKey = this.rowCodec.extractPrimaryKey(values);
+             const encodedRow = this.rowCodec.encodeRow(values);
+             if (oldKey !== newKey) {
+@@ -1712,7 +1712,7 @@ var OptimysticVirtualTable = class extends VirtualTable {
+             throw new Error("DELETE requires old key values");
+           }
+           {
+-            const deleteKey = this.rowCodec.extractPrimaryKey(oldKeyValues);
++            const deleteKey = oldKeyValues.length > 1 ? this.rowCodec.createPrimaryKey(oldKeyValues) : this.rowCodec.extractPrimaryKey(oldKeyValues);
+             await this.collection.replace([[deleteKey, void 0]]);
+             await this.indexManager.deleteIndexEntries(oldKeyValues, deleteKey, txnState == null ? void 0 : txnState.transactor);
+             (_b = this.statisticsCollector) == null ? void 0 : _b.decrementRowCount();
 diff --git a/src/optimystic-module.ts b/src/optimystic-module.ts
-index d9c5e9e4b1023dcba15792ef9eb0f90dd5f10559..ef5395a4585ba467c24f5137164fae2f373daf45 100644
+index d9c5e9e4b1023dcba15792ef9eb0f90dd5f10559..de05d160b12e112a1cb5077b7d0fb5d2cd5f9ae7 100644
 --- a/src/optimystic-module.ts
 +++ b/src/optimystic-module.ts
 @@ -330,13 +330,13 @@ export class OptimysticVirtualTable extends VirtualTable {
@@ -36,3 +54,21 @@ index d9c5e9e4b1023dcba15792ef9eb0f90dd5f10559..ef5395a4585ba467c24f5137164fae2f
        } else if (filterInfo.idxNum === 2) {
          // Legacy: Range query on primary key
          yield* this.executeRangeQuery(filterInfo);
+@@ -596,7 +596,7 @@ export class OptimysticVirtualTable extends VirtualTable {
+             throw new Error('UPDATE requires old key values');
+           }
+           {
+-            const oldKey = this.rowCodec.extractPrimaryKey(oldKeyValues);
++            const oldKey = oldKeyValues.length > 1 ? this.rowCodec.createPrimaryKey(oldKeyValues) : this.rowCodec.extractPrimaryKey(oldKeyValues);
+             const newKey = this.rowCodec.extractPrimaryKey(values);
+             const encodedRow = this.rowCodec.encodeRow(values);
+ 
+@@ -629,7 +629,7 @@ export class OptimysticVirtualTable extends VirtualTable {
+             throw new Error('DELETE requires old key values');
+           }
+           {
+-            const deleteKey = this.rowCodec.extractPrimaryKey(oldKeyValues);
++            const deleteKey = oldKeyValues.length > 1 ? this.rowCodec.createPrimaryKey(oldKeyValues) : this.rowCodec.extractPrimaryKey(oldKeyValues);
+ 
+             // Delete from main table
+             await this.collection.replace([[deleteKey, undefined]]);
