@@ -47,7 +47,9 @@ export class NetworkEngine implements INetworkEngine {
   constructor (
     public readonly init: NetworkReference,
     private readonly localStorage: ILocalStorage,
-    private readonly ctx: EngineContext
+    private readonly ctx: EngineContext,
+    /** ENG-05: optional live peer-count callback injected from the app layer (D-03: no @serfab/@optimystic import enters packages/vote-engine). */
+    private readonly getPeerCount?: () => number
   ) {}
 
   /** This is used for a new authority when responding to an invite, not when made as part of a network creation */
@@ -1087,15 +1089,12 @@ export class NetworkEngine implements INetworkEngine {
       if (!nRow) throw new Error('Network not found')
       const relays = parseJsonOr<string[]>(nRow.Relays, [], 'Network.Relays')
       const serverCount = relays.length
-      // estimatedNodes is an honest lower-bound floor derived from the count
-      // of known relay endpoints. Pending Phase 22 live P2P telemetry, this
-      // equals serverCount rather than zero (D-07: honest floor, not zero).
-      // WR-07: the contract is `estimatedNodes >= serverCount` (a floor), not
-      // strict equality — once Phase 22 telemetry lands estimatedNodes becomes a
-      // real estimate that can exceed serverCount. The test asserts the floor
-      // contract, not implementation-equals-itself.
-      // TODO(Phase 22): replace the relay-count floor with live node telemetry.
-      return { serverCount, estimatedNodes: serverCount }
+      // ENG-05: use live peer count from injected callback when available.
+      // D-03: getPeerCount is a plain (() => number) callback — no @serfab/@optimystic import enters vote-engine.
+      // Fallback: relay-count heuristic (honest lower-bound floor per WR-07 / D-07).
+      // When callback is absent or returns 0, estimatedNodes = serverCount (the pre-Phase-22 floor).
+      const connectedPeers = this.getPeerCount?.() ?? 0
+      return { serverCount, estimatedNodes: Math.max(serverCount, connectedPeers) }
     } catch (err) {
       if (err instanceof QuereusError) {
         throw new Error(`Quereus error (code ${err.code}): ${err.message}`)
