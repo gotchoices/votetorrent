@@ -22,3 +22,8 @@ runPersistenceProof();
 // __DEV__ && DIAL_PROBE_ENABLED (see proof-flags.generated.ts). Logs under [dial-probe].
 import {runDialProbe} from './src/engines/dial-probe';
 runDialProbe();
+
+// Dev-only symmetric replication proof. Fire-and-forget; no-op unless
+// __DEV__ && REPLICATION_PROOF_ENABLED (see proof-flags.generated.ts). Logs under [replication-proof].
+import {runReplicationProof} from './src/engines/replication-proof-runner';
+runReplicationProof();
