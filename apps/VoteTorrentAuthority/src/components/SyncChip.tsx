@@ -18,7 +18,10 @@ import {useCadreNode} from '../providers/CadreNodeProvider';
  * State → presentation:
  *   'connected' → green  'wifi'        icon + Connected label
  *   'syncing'   → orange 'rotate'      icon + Syncing label
- *   'offline'   → red    'wifi-slash'  icon + Offline label
+ *   'offline'   → red    'link-slash'  icon + Offline label
+ *
+ * Note: icon names must exist in the FontAwesome6 *Free* glyphmap — 'wifi-slash'
+ * is Pro-only and renders as a tofu "?" glyph, so 'link-slash' is used for offline.
  */
 export function SyncChip() {
 	const {colors} = useTheme() as ExtendedTheme;
@@ -28,7 +31,7 @@ export function SyncChip() {
 	const presentation = {
 		connected: {icon: 'wifi', color: colors.success, label: t('syncConnected')},
 		syncing: {icon: 'rotate', color: colors.warning, label: t('syncSyncing')},
-		offline: {icon: 'wifi-slash', color: colors.error, label: t('syncOffline')},
+		offline: {icon: 'link-slash', color: colors.error, label: t('syncOffline')},
 	}[syncState];
 
 	return (

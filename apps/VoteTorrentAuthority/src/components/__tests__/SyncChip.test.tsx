@@ -9,7 +9,7 @@
  * Design invariants asserted here:
  *   - 'connected'  → renders a green wifi icon
  *   - 'syncing'    → renders an orange activity indicator icon
- *   - 'offline'    → renders a red wifi-slash icon
+ *   - 'offline'    → renders a red link-slash icon
  *   - Sync state is driven by mocked useCadreNode() hook (event-driven, D-10)
  *   - No setInterval / polling (D-10 hard requirement)
  */
@@ -91,8 +91,8 @@ describe('SyncChip — P2P-07', () => {
     const treeStr = JSON.stringify(tree);
     // Icon name should be wifi (connected state)
     expect(treeStr).toMatch(/wifi/i);
-    // Should NOT have wifi-slash (offline icon)
-    expect(treeStr).not.toMatch(/wifi-slash/i);
+    // Should NOT have link-slash (offline icon)
+    expect(treeStr).not.toMatch(/link-slash/i);
   });
 
   it('renders an activity-indicator style icon when syncState is "syncing"', () => {
@@ -103,11 +103,12 @@ describe('SyncChip — P2P-07', () => {
     expect(treeStr).toMatch(/sync|rotate|spinner|activity/i);
   });
 
-  it('renders a wifi-slash icon (offline state) when syncState is "offline"', () => {
+  it('renders a link-slash icon (offline state) when syncState is "offline"', () => {
     (useCadreNode as jest.Mock).mockReturnValue({ syncState: 'offline', node: null, connectedPeers: jest.fn() });
     const tree = renderChip().toJSON();
     const treeStr = JSON.stringify(tree);
-    expect(treeStr).toMatch(/wifi-slash/i);
+    // 'wifi-slash' is FontAwesome6 Pro-only (renders as tofu); offline uses the free 'link-slash'.
+    expect(treeStr).toMatch(/link-slash/i);
   });
 
   it('does not call setInterval (no polling — D-10)', () => {
