@@ -54,6 +54,14 @@ const PROOF_NETWORK_STORE = 'replication-proof-strand';
 // reads CONTROL_ADDR at boot; Plan 04 writes the real address before bundling (D-07).
 const CONTROL_ADDR = '/ip4/10.0.2.2/tcp/0/ws/p2p/UPDATE_AFTER_DRONE_RESTART';
 
+// In solo bootstrap mode (harness Step 1) the drone address has not been injected yet,
+// so CONTROL_ADDR is still the placeholder. Its /p2p/<id> tail is not a valid peerId and
+// crashes libp2p's Bootstrap discovery (peerIdFromString). Boot with NO bootstrap node
+// while the placeholder is present — the runner is genuinely solo (CF-02 bootstrap mode),
+// creates the proof network, and emits strandId=. The harness re-bundles with the real
+// drone multiaddr for the networked run (Step 4), at which point this resolves to [CONTROL_ADDR].
+const BOOTSTRAP_NODES = CONTROL_ADDR.includes('UPDATE_AFTER_DRONE_RESTART') ? [] : [CONTROL_ADDR];
+
 // Poll constants (consistent with dial-probe.ts connection-poll shape).
 // PEER_POLL_MAX: 3 ticks × 1 s = 3 s peer-connection wait (exits early when peers appear).
 //   On a real device with a live drone the peer handshake typically completes within 1–2 s.
@@ -93,7 +101,7 @@ export async function runReplicationProof(): Promise<void> {
 
     node = new CadreNode({
       privateKey,
-      controlNetwork: { partyId: 'votetorrent', bootstrapNodes: [CONTROL_ADDR] },
+      controlNetwork: { partyId: 'votetorrent', bootstrapNodes: BOOTSTRAP_NODES },
       profile: 'transaction',
       strandFilter: { mode: 'all' },
       storage: { provider: () => new LevelDBRawStorage(rnDb) },
