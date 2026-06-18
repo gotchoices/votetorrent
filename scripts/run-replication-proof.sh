@@ -59,6 +59,19 @@ FLAG_FILE="apps/VoteTorrentAuthority/src/engines/proof-flags.generated.ts"
 # The runner reads CONTROL_ADDR from this file (D-07 automated injection); restored on EXIT.
 CONFIG_FILE="apps/VoteTorrentAuthority/src/engines/replication-proof-runner.ts"
 
+# Extract a marker's VALUE from a multi-arg console.log logcat line. The runner emits
+# markers as `L('key=', value)`, so logcat renders `'key=', 'strValue'` (strings) or
+# `'key=', 42` (numbers) — the value is a SEPARATE quoted/bare token after the marker,
+# not space-adjacent. Pull the first token after `<key>=`, stripping surrounding
+# quotes/commas/whitespace. Handles both quoted-string and bare-number values.
+# Usage: extract_marker_value "<logcat line>" "<key>"   (key WITHOUT the trailing '=')
+extract_marker_value() {
+  printf '%s\n' "$1" \
+    | sed -E "s/.*${2}=//" \
+    | sed -E "s/^[',[:space:]]+//" \
+    | sed -E "s/[',[:space:]].*//"
+}
+
 # PROBE_STARTED: 0 until [replication-proof] starting is observed on Peer A (networked run).
 # DRONE_PID: set when the drone is launched; used to kill it in restore_flags().
 PROBE_STARTED=0
@@ -150,7 +163,7 @@ if [ -z "${STRAND_LINE}" ]; then
   exit 1
 fi
 echo "[run-replication-proof] Captured strandId line: ${STRAND_LINE}"
-STRAND_ID=$(echo "${STRAND_LINE}" | grep -o 'strandId=[^ ]*' | cut -d= -f2)
+STRAND_ID=$(extract_marker_value "${STRAND_LINE}" "strandId")
 if [ -z "${STRAND_ID}" ]; then
   echo "[run-replication-proof] ERROR: could not extract strandId from: ${STRAND_LINE}" >&2
   exit 1
@@ -170,8 +183,18 @@ else
   exit 1
 fi
 
+# Resolve the Node 22 binary path in the FOREGROUND. `nvm exec 22 ... &` fails with
+# "v22 not installed" when backgrounded (nvm's version resolution breaks in a `&`
+# subshell), so we resolve the explicit binary with `nvm which 22` here and background
+# that binary directly — no nvm call in the backgrounded subshell.
+NODE22=$(nvm which 22 2>/dev/null || true)
+if [ -z "${NODE22}" ] || [ ! -x "${NODE22}" ]; then
+  echo "[run-replication-proof] ERROR: Node 22 not found via 'nvm which 22' — run 'nvm install 22'" >&2
+  exit 1
+fi
+
 DRONE_LOG=$(mktemp /tmp/drone-ready-XXXXXX.log)
-STRAND_ID="${STRAND_ID}" nvm exec 22 node packages/p2p-probe-host/drone.mjs > "${DRONE_LOG}" 2>&1 &
+STRAND_ID="${STRAND_ID}" "${NODE22}" packages/p2p-probe-host/drone.mjs > "${DRONE_LOG}" 2>&1 &
 DRONE_PID=$!
 echo "[run-replication-proof] Drone launched (PID ${DRONE_PID}), waiting for READY line ..."
 
@@ -263,7 +286,7 @@ if [ -z "${PEER_ID_LINE_BEFORE}" ]; then
   echo "[run-replication-proof] ERROR: peerId= marker not seen on Peer A before force-stop" >&2
   exit 1
 fi
-ID_BEFORE=$(echo "${PEER_ID_LINE_BEFORE}" | grep -o 'peerId=[^ ,]*' | cut -d= -f2)
+ID_BEFORE=$(extract_marker_value "${PEER_ID_LINE_BEFORE}" "peerId")
 echo "[run-replication-proof] peerId before: ${ID_BEFORE}"
 
 # Force-stop Peer A, clear logcat, relaunch, and capture peerId again.
@@ -281,7 +304,7 @@ if [ -z "${PEER_ID_LINE_AFTER}" ]; then
   echo "[run-replication-proof] ERROR: peerId= marker not seen on Peer A after force-stop relaunch" >&2
   exit 1
 fi
-ID_AFTER=$(echo "${PEER_ID_LINE_AFTER}" | grep -o 'peerId=[^ ,]*' | cut -d= -f2)
+ID_AFTER=$(extract_marker_value "${PEER_ID_LINE_AFTER}" "peerId")
 echo "[run-replication-proof] peerId after:  ${ID_AFTER}"
 
 if [ "${ID_BEFORE}" != "${ID_AFTER}" ]; then
@@ -293,7 +316,7 @@ echo "[run-replication-proof] D-05 PASS: peerId stable across restart (${ID_AFTE
 # ── D-06: peers >= 1 ───────────────────────────────────────────────────────────
 echo "[run-replication-proof] D-06: waiting for peers= marker on Peer A ..."
 PEERS_LINE=$(wait_for_logcat_line "${PEERS_MARKER}" "${LOGCAT_TIMEOUT}" "[run-replication-proof]" "peers" "-s emulator-5554")
-N=$(echo "${PEERS_LINE}" | grep -o 'peers=[0-9]*' | cut -d= -f2 || true)
+N=$(extract_marker_value "${PEERS_LINE}" "peers")
 if [ -z "${N}" ] || [ "${N}" -lt 1 ]; then
   echo "[run-replication-proof] FAIL: peer count < 1 (peers=${N}) (D-06 / ENG-05)" >&2
   exit 1
