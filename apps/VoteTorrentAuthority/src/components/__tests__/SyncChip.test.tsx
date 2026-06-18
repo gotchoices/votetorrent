@@ -111,7 +111,7 @@ describe('SyncChip — P2P-07', () => {
   });
 
   it('does not call setInterval (no polling — D-10)', () => {
-    const setIntervalSpy = jest.spyOn(global, 'setInterval');
+    const setIntervalSpy = jest.spyOn(globalThis, 'setInterval');
     (useCadreNode as jest.Mock).mockReturnValue({ syncState: 'connected', node: null, connectedPeers: jest.fn() });
     renderChip();
     expect(setIntervalSpy).not.toHaveBeenCalled();
