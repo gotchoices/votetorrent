@@ -61,10 +61,15 @@ export function AppProvider({ children }: PropsWithChildren) {
 	// NetworkEngine.getStatistics reports connected peers. connectedPeers is keyed
 	// by strandId (== networkHash, D-05); it is a stable callback from the provider,
 	// so this effect runs once after the CadreNodeProvider mounts.
-	const { connectedPeers } = useCadreNode();
+	// D-04: setNode wires the booted CadreNode into the factory's lazy-dispatch DbFactory
+	// (P2P-06 / SC1 no regression). This is also the precondition for the live-node
+	// peerId marker the proof asserts (P2P-04 / D-05). node is null until the CadreNode
+	// boots → rnDbFactory remains active until that point (solo-safe).
+	const { connectedPeers, node } = useCadreNode();
 	useEffect(() => {
 		engineFactoryRef.current?.setGetPeerCount(connectedPeers);
-	}, [connectedPeers]);
+		engineFactoryRef.current?.setNode(node);
+	}, [connectedPeers, node]);
 
 	useEffect(() => {
 		async function initialize() {
