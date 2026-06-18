@@ -271,7 +271,46 @@ describe('runReplicationProof — marker emissions', () => {
     // Restore the spy on push
     jest.restoreAllMocks();
 
-    // Re-acquire runReplicationProof for subsequent tests (mocks still intact).
+    // Re-acquire runReplicationProof for subsequent tests.
+    // The gate test (test 1) used jest.resetModules() + overrode the flag mock with `false`.
+    // That override persists in jest's mock registry and the stale `false` module is cached.
+    // Re-register the `true` flag mock + clear the module cache so the next require loads a
+    // fresh module with the correct enabled=true flag for the verdict test (test 5).
+    jest.resetModules();
+    jest.mock('../proof-flags.generated', () => ({ REPLICATION_PROOF_ENABLED: true }));
+    jest.mock('rn-leveldb', () => ({ LevelDB: class {}, LevelDBWriteBatch: class {} }), { virtual: true });
+    jest.mock(
+      '@optimystic/db-p2p-storage-rn',
+      () => ({
+        openOptimysticRNDb: jest.fn(() => ({})),
+        LevelDBRawStorage: class {},
+        loadOrCreateRNPeerKey: jest.fn(async () => ({ type: 'Ed25519' })),
+      }),
+      { virtual: true },
+    );
+    jest.mock('@quereus/quereus', () => ({ Database: class {}, registerPlugin: jest.fn() }), { virtual: true });
+    jest.mock('@optimystic/quereus-plugin-optimystic', () => ({ register: jest.fn() }), { virtual: true });
+    jest.mock(
+      '@votetorrent/vote-engine/rn',
+      () => ({ VOTETORRENT_SCHEMA_SQL: 'declare schema main {}' }),
+      { virtual: true },
+    );
+    jest.mock(
+      '@serfab/cadre-core',
+      () => {
+        class FakeCadreNode {
+          start = jest.fn(async () => {});
+          stop = jest.fn(async () => {});
+          peerId = { toString: () => 'fakePeerIdABC123' };
+          getControlNode() { return { getConnections: () => [] }; }
+        }
+        return { CadreNode: FakeCadreNode };
+      },
+      { virtual: true },
+    );
+    jest.mock('@libp2p/websockets', () => ({ webSockets: () => ({}) }), { virtual: true });
+    jest.mock('@libp2p/circuit-relay-v2', () => ({ circuitRelayTransport: () => ({}) }), { virtual: true });
+    jest.mock('@multiformats/multiaddr', () => ({ multiaddr: (s: string) => ({ toString: () => s }) }), { virtual: true });
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     ({ runReplicationProof } = require('../replication-proof-runner'));
   });
