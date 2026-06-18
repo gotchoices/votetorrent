@@ -23,12 +23,21 @@
  *
  * Exit: Ctrl-C (SIGINT) or `kill <pid>` (SIGTERM) — both gracefully stop the node.
  */
+import { readFileSync } from 'node:fs';
 import { CadreNode } from '@serfab/cadre-core';
 import { MemoryRawStorage } from '@optimystic/db-p2p';
 import { webSockets } from '@libp2p/websockets';
 
 const PARTY_ID = 'probe-party'; // must match CONTROL_ADDR in dial-probe.ts
 const L = (...a) => console.log('[drone]', ...a);
+
+// P2P-06: the same votetorrent.qsql DDL the device peers apply via
+// VOTETORRENT_SCHEMA_SQL (vote-engine re-export, generated from this file). The
+// drone MUST host the identical schema so its strand is compatible with peers A/B.
+const VOTETORRENT_QSQL = readFileSync(
+  new URL('../vote-core/schema/votetorrent.qsql', import.meta.url),
+  'utf8',
+);
 
 const node = new CadreNode({
   controlNetwork: { partyId: PARTY_ID, bootstrapNodes: [] },
@@ -55,6 +64,26 @@ const addrs = node.getControlNode().getMultiaddrs().map(m => m.toString());
 L('control peerId =', node.peerId?.toString());
 L('control addrs  =', JSON.stringify(addrs));
 L('READY — update CONTROL_ADDR in dial-probe.ts with the /ip4/10.0.2.2/tcp/<PORT>/ws/p2p/<PEER_ID> addr above, then run ./scripts/run-dial-probe.sh');
+
+// P2P-06 replication proof: host the VoteTorrent strand so transaction-profile
+// peers A and B can replicate through this always-on storage cadre (D-01/D-02
+// Option-B topology). strandId is the KNOWN test-network hash (== networkHash,
+// D-05) exported by Peer A's created network and passed in via STRAND_ID.
+// mode:'bootstrap' — the drone starts solo and transitions naturally as peers
+// connect (T-22-14: 'networked' solo would hang). The storage profile +
+// MemoryRawStorage are kept (dev/test tooling, D-02 — ephemeral store is fine).
+const STRAND_ID = process.env.STRAND_ID ?? 'UPDATE_WITH_TEST_NETWORK_HASH';
+await node.addStrand({
+  strandRow: { Id: STRAND_ID, MemberPrivateKey: null, Type: 'o' },
+  sAppConfig: {
+    id: 'org.votetorrent',
+    version: '1.0.0',
+    schema: VOTETORRENT_QSQL,
+    latencyHint: 'interactive',
+  },
+  mode: 'bootstrap',
+});
+L(`[replication-proof] strand started, strandId=${STRAND_ID}`);
 
 // IN-15 (17-REVIEW): handle SIGTERM (plain `kill <pid>`) as well as SIGINT
 // (Ctrl-C) so both stop paths shut the node down gracefully.
