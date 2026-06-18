@@ -103,7 +103,7 @@ jest.mock(
 );
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const { CadreNodeProvider, useCadreNode } = require('../CadreNodeProvider');
+const { CadreNodeProvider, useCadreNode, resolveBootstrapNodes } = require('../CadreNodeProvider');
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -240,5 +240,33 @@ describe('CadreNodeProvider — P2P-02 boot invariants', () => {
         renderer.create(<Orphan />);
       });
     }).toThrow('useCadreNode must be used within a CadreNodeProvider');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// resolveBootstrapNodes — placeholder-aware bootstrap config (GAP 1, P2P-02).
+//
+// The committed default CONTROL_ADDR contains the placeholder sentinel
+// 'UPDATE_AFTER_DRONE_RESTART', which libp2p Bootstrap rejects via
+// peerIdFromString → InvalidParametersError, aborting node.start() and showing
+// a red boot toast on every cold start (UAT Test 1 root cause). The helper
+// returns [] for the placeholder/unset (boot solo — valid, no throw) and
+// [addr] for a real address (real P2P path preserved).
+// ---------------------------------------------------------------------------
+describe('resolveBootstrapNodes — placeholder-aware bootstrap (P2P-02, GAP 1)', () => {
+  it('returns [] for the committed placeholder containing UPDATE_AFTER_DRONE_RESTART', () => {
+    expect(
+      resolveBootstrapNodes('/ip4/10.0.2.2/tcp/0/ws/p2p/UPDATE_AFTER_DRONE_RESTART'),
+    ).toEqual([]);
+  });
+
+  it('returns [] for an empty / unset address', () => {
+    expect(resolveBootstrapNodes('')).toEqual([]);
+    expect(resolveBootstrapNodes(undefined as unknown as string)).toEqual([]);
+  });
+
+  it('returns the real address in a single-element array (real P2P path preserved)', () => {
+    const real = '/ip4/10.0.2.2/tcp/52345/ws/p2p/12D3KooWReal';
+    expect(resolveBootstrapNodes(real)).toEqual([real]);
   });
 });

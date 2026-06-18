@@ -46,9 +46,36 @@ export function useCadreNode(): CadreNodeContextType {
 // Update CONTROL_ADDR after each drone restart (drone prints this on startup).
 // Example: '/ip4/10.0.2.2/tcp/52345/ws/p2p/12D3KooW...'
 // This constant is used for the control network bootstrap address.
+//
+// Leaving the placeholder in place now boots SOLO (no bootstrap peers) — a valid
+// offline/solo node that does NOT crash. Paste the drone's real /p2p address here
+// to re-enable the bootstrap dial (the real P2P path). See resolveBootstrapNodes.
 // ---------------------------------------------------------------------------
 const CONTROL_ADDR = '/ip4/10.0.2.2/tcp/0/ws/p2p/UPDATE_AFTER_DRONE_RESTART';
 const PARTY_ID = 'votetorrent';
+
+// Sentinel embedded in the committed default address. libp2p Bootstrap calls
+// peerIdFromString() on the trailing /p2p/<id> segment; this placeholder is not a
+// valid peerId and throws InvalidParametersError, aborting node.start(). Treat it
+// (and an empty/unset address) as "no bootstrap peer configured".
+const BOOTSTRAP_PLACEHOLDER = 'UPDATE_AFTER_DRONE_RESTART';
+
+/**
+ * resolveBootstrapNodes — placeholder-aware bootstrap config selection (P2P-02).
+ *
+ * Pure + exported for unit testing without booting a real (ESM-only) CadreNode.
+ *
+ * Returns [] when the address is empty/unset OR still contains the placeholder
+ * sentinel — booting a CadreNode with an empty bootstrapNodes array is the valid
+ * offline/solo case and does NOT throw (clean cold start, no red toast). Returns
+ * [addr] for a real address so the bootstrap dial / real P2P path stays reachable.
+ */
+export function resolveBootstrapNodes(addr: string): string[] {
+  if (!addr || addr.includes(BOOTSTRAP_PLACEHOLDER)) {
+    return [];
+  }
+  return [addr];
+}
 
 // ---------------------------------------------------------------------------
 // Provider
@@ -95,7 +122,7 @@ export function CadreNodeProvider({ children }: PropsWithChildren) {
 
         localNode = new CadreNode({
           privateKey,
-          controlNetwork: { partyId: PARTY_ID, bootstrapNodes: [CONTROL_ADDR] },
+          controlNetwork: { partyId: PARTY_ID, bootstrapNodes: resolveBootstrapNodes(CONTROL_ADDR) },
           profile: 'transaction',
           strandFilter: { mode: 'all' },
           storage: { provider: () => new LevelDBRawStorage(db) },
