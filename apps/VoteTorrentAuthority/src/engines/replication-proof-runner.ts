@@ -175,10 +175,16 @@ export async function runReplicationProof(): Promise<void> {
 
       // Use VOTETORRENT_SCHEMA_SQL to satisfy the import (tree-shaken in release).
       void VOTETORRENT_SCHEMA_SQL;
-      // Authority first-insert shoe-in: Id + Name only; default (null) signing context. 'Authority'
-      // resolves to 'App.Authority' via the setSchemaPath set by createStrandDbFactory (D-14).
+      // Authority first-insert shoe-in. Every VoteTorrent table is context-gated, so the
+      // mutation MUST carry the signing context envelope via Quereus's inline
+      // `with context <var> = <value>` clause (mirrors NetworksEngine.createNetwork's TX1).
+      // The shoe-in branch needs SigningNonce/InviteSignature null + count(*)=1 (the per-run
+      // wipe guarantees the empty table). 'Authority' resolves to 'App.Authority' via the
+      // setSchemaPath set by createStrandDbFactory (D-14).
       await strandDb.exec(
-        `INSERT OR IGNORE INTO Authority (Id, Name) VALUES ('${proofAuthId}', '${proofNetworkName}')`,
+        `insert into Authority (Id, Name)
+          with context SigningNonce = null, InviteSlotCid = null, InviteSignature = null, Tid = 0
+          values ('${proofAuthId}', '${proofNetworkName}');`,
       );
     } catch (writeErr) {
       // Write phase error — log the error; proof continues to the read phase which will FAIL.
