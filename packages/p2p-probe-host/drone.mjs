@@ -74,6 +74,12 @@ await node.start();
 const addrs = node.getControlNode().getMultiaddrs().map(m => m.toString());
 L('control peerId =', node.peerId?.toString());
 L('control addrs  =', JSON.stringify(addrs));
+// Machine-readable address line for the replication-proof harness (D-07 auto-injection).
+// The human READY line below is a TEMPLATE with literal <PORT>/<PEER_ID> placeholders —
+// scripts must parse THIS line, not that one. Prefer the loopback ws multiaddr; the harness
+// rewrites 127.0.0.1 → 10.0.2.2 for the Android emulator host mapping.
+const proofWsAddr = addrs.find(a => a.includes('/ip4/127.0.0.1/') && a.includes('/ws')) ?? addrs[0] ?? '';
+L('PROOF_WS_ADDR=' + proofWsAddr);
 L('READY — update CONTROL_ADDR in dial-probe.ts with the /ip4/10.0.2.2/tcp/<PORT>/ws/p2p/<PEER_ID> addr above, then run ./scripts/run-dial-probe.sh');
 
 // P2P-06 replication proof: host the VoteTorrent strand so transaction-profile

@@ -208,9 +208,11 @@ while [ "${ELAPSED}" -lt "${DRONE_READY_TIMEOUT}" ]; do
     rm -f "${DRONE_LOG}"
     exit 1
   fi
-  READY_LINE=$(grep -m1 'READY' "${DRONE_LOG}" 2>/dev/null || true)
-  if [ -n "${READY_LINE}" ]; then
-    DRONE_ADDR=$(echo "${READY_LINE}" | grep -o '/ip4/[^ ]*/ws/p2p/[^ ]*' || true)
+  # Parse the machine-readable PROOF_WS_ADDR= line — NOT the human 'READY' instruction
+  # line, which contains a literal /ip4/10.0.2.2/tcp/<PORT>/ws/p2p/<PEER_ID> TEMPLATE.
+  ADDR_LINE=$(grep -m1 'PROOF_WS_ADDR=' "${DRONE_LOG}" 2>/dev/null || true)
+  if [ -n "${ADDR_LINE}" ]; then
+    DRONE_ADDR=$(echo "${ADDR_LINE}" | grep -o '/ip4/[^ ]*/ws/p2p/[^ ]*' || true)
     break
   fi
   sleep 1
@@ -234,7 +236,9 @@ trap 'restore_flags; git checkout -- '"${CONFIG_FILE}"' 2>/dev/null || true' EXI
 
 # Replace the CONTROL_ADDR placeholder line in the runner with the real drone address.
 # The device emulator reaches the host at 10.0.2.2; replace the host IP in the addr.
-DRONE_ADDR_FOR_DEVICE=$(echo "${DRONE_ADDR}" | sed 's|/ip4/0\.0\.0\.0/|/ip4/10.0.2.2/|')
+# The drone emits its loopback (127.0.0.1) ws multiaddr; the Android emulator reaches the
+# host loopback at 10.0.2.2. Rewrite either loopback/wildcard host to the emulator alias.
+DRONE_ADDR_FOR_DEVICE=$(echo "${DRONE_ADDR}" | sed -e 's|/ip4/127\.0\.0\.1/|/ip4/10.0.2.2/|' -e 's|/ip4/0\.0\.0\.0/|/ip4/10.0.2.2/|')
 # Use a temp marker that is not a regex special char.
 python3 - "${CONFIG_FILE}" "${DRONE_ADDR_FOR_DEVICE}" << 'PYEOF'
 import sys
