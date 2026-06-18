@@ -137,11 +137,33 @@ export async function runReplicationProof(): Promise<void> {
       L('WARN wipe failed (continuing, determinism may be reduced):', wipeErr);
     }
 
-    // ── 4. WRITE: create proof network via strand-backed factory path (Pitfall 7 / D-14) ─────
+    // ── 4. WAIT for peers FIRST, so the strand factory selects 'networked' mode ─────────────
+    // createStrandDbFactory picks bootstrap (local) vs networked by peer presence AT CALL TIME.
+    // The write MUST happen after the drone connection is established, or it commits to the
+    // local bootstrap transactor and never replicates. In the harness's solo Step-1 boot no
+    // peer ever appears (peers=0) — that run only needs the strandId= handshake marker; its
+    // FAIL verdict is ignored by the harness. In the networked Step-4 run the drone connects
+    // and peerCount becomes >= 1, so the subsequent write goes through the networked transactor.
+    const cn = node.getControlNode();
+    for (let i = 0; i < PEER_POLL_MAX && (cn?.getConnections().length ?? 0) === 0; i++) {
+      await new Promise<void>(r => setTimeout(r, POLL_INTERVAL_MS));
+    }
+    const peerCount = cn?.getConnections().length ?? 0;
+    // D-06 / ENG-05: live peer-count marker — logged once (pass or timeout).
+    L('peers=', peerCount);
+
+    // ── 5. WRITE: create the strand (correct mode now known) + insert the proof row ──────────
     // createStrandDbFactory(node) calls setSchemaPath(['App','main']) internally so bare SQL
     // table names resolve without rewriting engine queries (D-14). The strand factory is used
     // — not the local rnDbFactory and not a bare Quereus Database constructor call (Pitfall 7).
+    //
+    // Write target = Authority, NOT Network: Network is a singleton (`primary key ()`) gated by
+    // a valid PrimaryAuthorityId + signing context. Authority's first-insert is a "shoe-in"
+    // (context.SigningNonce/InviteSignature null AND count(*)=1) — satisfied by the fresh
+    // per-run wipe — and it is multi-row (PK=Id), so each peer can write its own uniquely-keyed
+    // row and read the other's. This is a pure strand-replication proof, not a semantic write.
     let strandDb: Awaited<ReturnType<ReturnType<typeof createStrandDbFactory>>> | undefined;
+    const proofAuthId = `repl-auth-${peerTail}`;
     try {
       const strandDbFactory = createStrandDbFactory(node as Parameters<typeof createStrandDbFactory>[0]);
       // The shared strand ID is the PROOF_NETWORK_STORE constant; both peers join the same strand.
@@ -151,14 +173,12 @@ export async function runReplicationProof(): Promise<void> {
       // Log OQ3 handshake marker before the write so the harness can capture it.
       L('strandId=', PROOF_NETWORK_STORE);
 
-      // Write the uniquely-named proof network via the strand-backed Quereus DB.
-      // setSchemaPath(['App','main']) is already set by createStrandDbFactory so 'Network'
-      // resolves to 'App.Network' without any query rewrite (D-14).
-      const networkId = `proof-${peerTail}`;
       // Use VOTETORRENT_SCHEMA_SQL to satisfy the import (tree-shaken in release).
       void VOTETORRENT_SCHEMA_SQL;
+      // Authority first-insert shoe-in: Id + Name only; default (null) signing context. 'Authority'
+      // resolves to 'App.Authority' via the setSchemaPath set by createStrandDbFactory (D-14).
       await strandDb.exec(
-        `INSERT OR IGNORE INTO Network (Id, Name, Location, ElectionCount, AuthorityId) VALUES ('${networkId}', '${proofNetworkName}', '', 0, '')`,
+        `INSERT OR IGNORE INTO Authority (Id, Name) VALUES ('${proofAuthId}', '${proofNetworkName}')`,
       );
     } catch (writeErr) {
       // Write phase error — log the error; proof continues to the read phase which will FAIL.
@@ -169,19 +189,10 @@ export async function runReplicationProof(): Promise<void> {
       }
     }
 
-    // ── 5. WAIT for peers: poll getConnections() up to PEER_POLL_MAX ticks ─────────────────
-    const cn = node.getControlNode();
-    for (let i = 0; i < PEER_POLL_MAX && (cn?.getConnections().length ?? 0) === 0; i++) {
-      await new Promise<void>(r => setTimeout(r, POLL_INTERVAL_MS));
-    }
-    const peerCount = cn?.getConnections().length ?? 0;
-    // D-06 / ENG-05: live peer-count marker — logged once (pass or timeout).
-    L('peers=', peerCount);
-
-    // ── 6. READ: bounded poll for the OTHER peer's proof network ────────────────────────────
-    // The other peer writes `replication-test-<theirTail>` (theirTail ≠ peerTail).
-    // Any `replication-test-*` row that does NOT end with `-${peerTail}` proves cross-peer
-    // strand replication succeeded (D-01 symmetric proof — no role flag).
+    // ── 6. READ: bounded poll for the OTHER peer's proof Authority row ───────────────────────
+    // The other peer writes Authority Id `repl-auth-<theirTail>` (theirTail ≠ peerTail).
+    // Any `repl-auth-*` row that is NOT this peer's own proves cross-peer strand replication
+    // succeeded (D-01 symmetric proof — no role flag).
     //
     // OPTIMIZATION: if peerCount === 0 after the peer-wait, skip the read poll entirely and
     // emit FAIL immediately. No peers → no replication is possible within the poll window;
@@ -196,9 +207,9 @@ export async function runReplicationProof(): Promise<void> {
           try {
             // `eval` yields rows lazily via AsyncIterableIterator (no `all` on Database).
             for await (const row of readDb.eval(
-              `SELECT Name FROM Network WHERE Name LIKE 'replication-test-%' AND Name != '${proofNetworkName}'`,
+              `SELECT Id FROM Authority WHERE Id LIKE 'repl-auth-%' AND Id != '${proofAuthId}'`,
             )) {
-              if (row && row['Name']) {
+              if (row && row['Id']) {
                 verdict = true;
                 break;
               }
