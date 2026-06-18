@@ -31,12 +31,35 @@ jest.mock('@quereus/quereus', () => ({ Database: class {}, registerPlugin: jest.
 jest.mock('@optimystic/quereus-plugin-optimystic', () => ({ register: jest.fn() }), {
   virtual: true,
 });
-jest.mock('@votetorrent/vote-engine/rn', () => ({ VOTETORRENT_SCHEMA_SQL: 'declare schema main {}' }), {
-  virtual: true,
-});
+// `capturedDbFactory` is `mock`-prefixed (via the name) to satisfy jest hoisting rules.
+// NetworksEngine records the DbFactory passed to its constructor so dispatch tests can
+// invoke that captured factory and assert which underlying path ran.
+let mockCapturedDbFactory: ((hash: string) => Promise<unknown>) | undefined;
+
+jest.mock(
+  '@votetorrent/vote-engine/rn',
+  () => {
+    class NetworksEngine {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      constructor(_localStorage: any, dbFactory: (hash: string) => Promise<unknown>) {
+        mockCapturedDbFactory = dbFactory;
+      }
+      // Minimal stub — open() and create() not needed for dispatch tests.
+    }
+    class LocalStorageReact {}
+    return {
+      VOTETORRENT_SCHEMA_SQL: 'declare schema main {}',
+      NetworksEngine,
+      LocalStorageReact,
+    };
+  },
+  { virtual: true },
+);
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { createStrandDbFactory } = require('../rn-db-factory');
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { EngineFactory } = require('../engine-factory');
 
 // ---------------------------------------------------------------------------
 // Fakes: a strand DB whose bare table names resolve, and a CadreNode seam.
@@ -144,5 +167,76 @@ describe('createStrandDbFactory — P2P-03 / D-14 / D-07', () => {
       Type: 'o',
     });
     expect(config.sAppConfig.schema).toBe('declare schema main {}');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// EngineFactory setNode dispatch — D-04
+//
+// RED until Plan 02 adds `setNode(node: StrandHost | null): void` to EngineFactory
+// and updates the constructor's DbFactory to dispatch lazily.
+//
+// Pattern: reuses `makeFakeNode` from above (lines 59–83). Spies on the
+// `rnDbFactory` arg passed to the constructor; asserts which path the lazy
+// DbFactory dispatches to when invoked with a network hash.
+//
+// The `mockCapturedDbFactory` variable (above, `mock`-prefixed) captures the
+// DbFactory that EngineFactory passes to its internal NetworksEngine at
+// construction time, so each test can invoke it directly.
+// ---------------------------------------------------------------------------
+
+describe('EngineFactory setNode dispatch — D-04', () => {
+  beforeEach(() => {
+    // Reset the captured factory before each test.
+    mockCapturedDbFactory = undefined;
+  });
+
+  it('uses rnDbFactory when node is null (solo / SC1 no regression)', async () => {
+    // Create a spy that represents the local RN factory (what is passed as the 2nd ctor arg).
+    const rnDbFactorySpy = jest.fn(async (_hash: string) => ({ type: 'rnDb' }));
+    // Spy on createStrandDbFactory to confirm it is NOT called on the local path.
+    const createStrandSpy = jest.spyOn({ createStrandDbFactory }, 'createStrandDbFactory');
+
+    // Construct EngineFactory — this triggers the NetworksEngine constructor which
+    // records the lazy DbFactory into mockCapturedDbFactory.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const factory = new EngineFactory(new (require('@votetorrent/vote-engine/rn').LocalStorageReact)(), rnDbFactorySpy);
+
+    // Do NOT call setNode (or explicitly pass null) — solo path.
+    // If setNode exists, calling setNode(null) should also keep the rnDb path.
+    if (typeof factory.setNode === 'function') {
+      factory.setNode(null);
+    }
+
+    // Invoke the captured lazy DbFactory (the one actually wired into NetworksEngine).
+    expect(mockCapturedDbFactory).toBeDefined();
+    await mockCapturedDbFactory!('abc123hash');
+
+    // The local rnDbFactory spy must have been reached.
+    expect(rnDbFactorySpy).toHaveBeenCalledWith('abc123hash');
+    // createStrandDbFactory must NOT have been invoked.
+    expect(createStrandSpy).not.toHaveBeenCalled();
+
+    createStrandSpy.mockRestore();
+    void factory; // suppress unused-var lint
+  });
+
+  it('uses createStrandDbFactory(node) when node is set and USE_LOCAL_DB_FACTORY=false', async () => {
+    const rnDbFactorySpy = jest.fn(async (_hash: string) => ({ type: 'rnDb' }));
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const factory = new EngineFactory(new (require('@votetorrent/vote-engine/rn').LocalStorageReact)(), rnDbFactorySpy);
+
+    // Provide a real fake node — makeFakeNode() is defined above (lines 59–83).
+    const fakeNode = makeFakeNode();
+    // Call setNode(fakeNode) — RED: EngineFactory.setNode does not exist yet.
+    factory.setNode(fakeNode);
+
+    expect(mockCapturedDbFactory).toBeDefined();
+    await mockCapturedDbFactory!('networkhash456');
+
+    // The strand path: fakeNode.addStrand must have been called (not rnDbFactory).
+    expect(fakeNode.addStrand).toHaveBeenCalled();
+    expect(rnDbFactorySpy).not.toHaveBeenCalled();
   });
 });
