@@ -12,12 +12,14 @@
 # anchoring the cwd to the repo root:
 #   . scripts/lib/logcat-wait.sh
 
-# wait_for_logcat_line PATTERN TIMEOUT_S LOG_PREFIX WHAT
+# wait_for_logcat_line PATTERN TIMEOUT_S LOG_PREFIX WHAT [ADB_DEVICE]
 #
 #   PATTERN    — extended regex passed to `adb logcat -e` / `grep`
 #   TIMEOUT_S  — max seconds to wait for a matching line
 #   LOG_PREFIX — script tag for error messages (e.g. "[vtest02]")
 #   WHAT       — human label for error messages (e.g. "marker", "verdict")
+#   ADB_DEVICE — optional ADB device selector (e.g. "-s emulator-5554"); defaults
+#                to empty (uses the default ADB device — backward-compatible)
 #
 # Prints the first matching logcat line to stdout (empty if none arrived
 # within TIMEOUT_S — the caller distinguishes timeout from match by testing
@@ -28,7 +30,7 @@
 # Portability: prefers GNU timeout, then gtimeout (Homebrew coreutils), then a
 # bounded 5 s-interval poll loop (macOS hosts without coreutils).
 wait_for_logcat_line() {
-  local pattern="$1" timeout_s="$2" prefix="$3" what="$4"
+  local pattern="$1" timeout_s="$2" prefix="$3" what="$4" adb_dev="${5:-}"
   local line="" status=0 timeout_bin elapsed
 
   timeout_bin=$(command -v timeout || command -v gtimeout || true)
@@ -50,7 +52,7 @@ wait_for_logcat_line() {
     # AFTER the target line was matched. Accepted: the capture is still
     # correct, only slower; killing adb eagerly would complicate this helper.
     set +e
-    line=$("${timeout_bin}" "${timeout_s}" adb logcat -e "${pattern}" | head -1; exit "${PIPESTATUS[0]}")
+    line=$("${timeout_bin}" "${timeout_s}" adb ${adb_dev} logcat -e "${pattern}" | head -1; exit "${PIPESTATUS[0]}")
     status=$?
     set -e
     if [ -z "${line}" ] && [ "${status}" -ne 124 ]; then
@@ -63,7 +65,7 @@ wait_for_logcat_line() {
     while [ "${elapsed}" -lt "${timeout_s}" ]; do
       # WR-22: an adb failure here previously degraded to silently polling nothing.
       set +e
-      line=$(adb logcat -d | grep "${pattern}" | head -1; exit "${PIPESTATUS[0]}")
+      line=$(adb ${adb_dev} logcat -d | grep "${pattern}" | head -1; exit "${PIPESTATUS[0]}")
       status=$?
       set -e
       # WR-23 (17-REVIEW): only fatal when the capture is EMPTY — mirrors the

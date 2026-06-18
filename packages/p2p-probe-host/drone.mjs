@@ -28,7 +28,7 @@ import { CadreNode } from '@serfab/cadre-core';
 import { MemoryRawStorage } from '@optimystic/db-p2p';
 import { webSockets } from '@libp2p/websockets';
 
-const PARTY_ID = 'probe-party'; // must match CONTROL_ADDR in dial-probe.ts
+const PARTY_ID = 'votetorrent'; // aligned with CadreNodeProvider.tsx line 55 (OQ1 conservative fix)
 const L = (...a) => console.log('[drone]', ...a);
 
 // P2P-06: the same votetorrent.qsql DDL the device peers apply via
