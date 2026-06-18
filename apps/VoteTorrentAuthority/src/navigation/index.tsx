@@ -14,7 +14,8 @@ import TasksScreen from "../screens/tasks/TasksScreen";
 import AuthoritiesScreen from "../screens/authorities/AuthoritiesScreen";
 import SettingsScreen from "../screens/settings/SettingsScreen";
 import { ChipButton } from "../components/ChipButton";
-import { Pressable, StyleSheet, Text } from "react-native";
+import { SyncChip } from "../components/SyncChip";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import { ExtendedTheme, useNavigation, StackActions, useFocusEffect } from "@react-navigation/native";
 import { useTheme } from "@react-navigation/native";
 import NetworksScreen from "../screens/networks/NetworksScreen";
@@ -121,12 +122,19 @@ function useTabHeaderOptions(tab?: string) {
 			</Pressable>
 		),
 		headerRight: () => (
-			<Pressable
-				style={styles.headerButton}
-				onPress={() => navigation.navigate("Home", { screen: "Settings" })}
-			>
-				<FontAwesome6 name="circle-user" size={24} color={colors.text} />
-			</Pressable>
+			<View style={styles.headerRightContainer}>
+				{/* Global event-driven sync chip — rendered under CadreNodeProvider
+				    (header lives inside the navigator, which App.tsx nests inside
+				    CadreNodeProvider), so useCadreNode() resolves. Single app-wide chip
+				    in the persistent tab header chrome (P2P-07). */}
+				<SyncChip />
+				<Pressable
+					style={styles.headerButton}
+					onPress={() => navigation.navigate("Home", { screen: "Settings" })}
+				>
+					<FontAwesome6 name="circle-user" size={24} color={colors.text} />
+				</Pressable>
+			</View>
 		),
 		headerTitle: () =>
 			tab === "tasks" ? <ThemedText type="header">{t("allNetworks")}</ThemedText> : <HeaderTitle />,
@@ -226,6 +234,11 @@ const styles = StyleSheet.create({
 		padding: 8,
 		marginHorizontal: 4,
 		marginVertical: -2,
+	},
+	headerRightContainer: {
+		flexDirection: "row",
+		alignItems: "center",
+		gap: 6,
 	},
 	tabLetter: {
 		fontSize: 22,
