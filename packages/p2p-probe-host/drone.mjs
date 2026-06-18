@@ -34,10 +34,21 @@ const L = (...a) => console.log('[drone]', ...a);
 // P2P-06: the same votetorrent.qsql DDL the device peers apply via
 // VOTETORRENT_SCHEMA_SQL (vote-engine re-export, generated from this file). The
 // drone MUST host the identical schema so its strand is compatible with peers A/B.
-const VOTETORRENT_QSQL = readFileSync(
+const VOTETORRENT_QSQL_RAW = readFileSync(
   new URL('../vote-core/schema/votetorrent.qsql', import.meta.url),
   'utf8',
 );
+
+// cadre-core's StrandDatabase.executeSchema() wraps the sApp schema as
+// `declare schema App { ${schema} } apply schema App;`. votetorrent.qsql is itself
+// wrapped in `declare schema main { ... } apply schema main;`, so passing it verbatim
+// nests invalidly and Quereus throws `got '}'`. Strip the outer wrapper so only the
+// inner DDL is hosted — identical to the device peers' createStrandDbFactory, keeping
+// the drone's strand schema-compatible. qsql has no `main.`-qualified refs (clean strip).
+const VOTETORRENT_QSQL = VOTETORRENT_QSQL_RAW
+  .replace(/^\s*declare\s+schema\s+\w+\s*\{/, '')
+  .replace(/\}\s*apply\s+schema\s+\w+\s*;\s*$/, '')
+  .trim();
 
 const node = new CadreNode({
   controlNetwork: { partyId: PARTY_ID, bootstrapNodes: [] },

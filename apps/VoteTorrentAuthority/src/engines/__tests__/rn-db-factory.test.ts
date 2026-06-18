@@ -48,7 +48,7 @@ jest.mock(
     }
     class LocalStorageReact {}
     return {
-      VOTETORRENT_SCHEMA_SQL: 'declare schema main {}',
+      VOTETORRENT_SCHEMA_SQL: 'declare schema main {\n\ttable Network ( Id text );\n}\napply schema main;',
       NetworksEngine,
       LocalStorageReact,
     };
@@ -166,7 +166,10 @@ describe('createStrandDbFactory — P2P-03 / D-14 / D-07', () => {
       MemberPrivateKey: null,
       Type: 'o',
     });
-    expect(config.sAppConfig.schema).toBe('declare schema main {}');
+    // The factory strips the `declare schema main { ... } apply schema main;` wrapper
+    // so cadre-core (which re-wraps under `declare schema App { ... }`) does not nest
+    // invalidly. Only the inner DDL is passed.
+    expect(config.sAppConfig.schema).toBe('table Network ( Id text );');
   });
 });
 

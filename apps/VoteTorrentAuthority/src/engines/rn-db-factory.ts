@@ -21,6 +21,18 @@ import { VOTETORRENT_SCHEMA_SQL } from '@votetorrent/vote-engine/rn';
 import type { DbFactory } from '@votetorrent/vote-engine';
 import type { StrandConfig, StrandInstance } from '@serfab/cadre-core';
 
+// cadre-core's StrandDatabase.executeSchema() wraps the sApp schema as
+// `declare schema App { ${schema} } apply schema App;`. VOTETORRENT_SCHEMA_SQL is
+// itself wrapped in `declare schema main { ... } apply schema main;`, so passing it
+// verbatim nests invalidly and Quereus throws `got '}'`. Strip the outer wrapper so
+// only the inner DDL is handed to addStrand; cadre-core re-wraps it under `App` and
+// setSchemaPath(['App','main']) resolves bare engine table names (D-14). qsql has no
+// `main.`-qualified references, so the strip is clean.
+const VOTETORRENT_INNER_DDL = VOTETORRENT_SCHEMA_SQL
+	.replace(/^\s*declare\s+schema\s+\w+\s*\{/, '')
+	.replace(/\}\s*apply\s+schema\s+\w+\s*;\s*$/, '')
+	.trim();
+
 /**
  * Concrete DbFactory for the RN app layer.
  *
@@ -125,7 +137,7 @@ export function createStrandDbFactory(node: StrandHost): DbFactory {
 			sAppConfig: {
 				id: 'org.votetorrent',
 				version: '1.0.0',
-				schema: VOTETORRENT_SCHEMA_SQL,
+				schema: VOTETORRENT_INNER_DDL,
 				latencyHint: 'interactive',
 			},
 			mode: hasPeers ? 'networked' : 'bootstrap',
