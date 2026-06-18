@@ -33,6 +33,9 @@ import {
 	LocalStorageReact,
 } from '@votetorrent/vote-engine/rn'
 import type { DbFactory, EngineContext, ElectionSubject } from '@votetorrent/vote-engine/rn'
+import { rnDbFactory, createStrandDbFactory } from './rn-db-factory'
+import type { StrandHost } from './rn-db-factory'
+import { USE_LOCAL_DB_FACTORY } from './proof-flags.generated'
 
 export class EngineFactory {
 	private readonly networksEngine: NetworksEngine
@@ -61,13 +64,36 @@ export class EngineFactory {
 		this.getPeerCount = getPeerCount
 	}
 
+	/**
+	 * D-04: The booted CadreNode (mirrors setGetPeerCount pattern).
+	 * When non-null AND USE_LOCAL_DB_FACTORY is false, the DbFactory delegates to
+	 * createStrandDbFactory(node); otherwise falls back to rnDbFactory (solo-safe).
+	 * Set by AppProvider in the same useEffect that registers setGetPeerCount.
+	 */
+	private node: StrandHost | null = null
+
+	/** Called by AppProvider when the CadreNode boots (mirrors setGetPeerCount / D-04). */
+	setNode(node: StrandHost | null): void {
+		this.node = node
+	}
+
 	constructor(
 		private readonly localStorage: LocalStorageReact,
 		private readonly rnDbFactory: DbFactory,
 	) {
 		// Construct NetworksEngine once — it owns the per-network ctx lifecycle (Phase-14 seam).
 		// Never call rnDbFactory directly from the factory (Pitfall 2 / T-15-03-05).
-		this.networksEngine = new NetworksEngine(localStorage, rnDbFactory)
+		//
+		// D-04: lazy-dispatch DbFactory — delegates to createStrandDbFactory(node) when a
+		// node is set and the __DEV__ escape hatch USE_LOCAL_DB_FACTORY is false;
+		// otherwise falls back to the injected rnDbFactory (solo-safe / SC1 no regression).
+		// RESEARCH Pitfall 1: never call createStrandDbFactory(null) — guard on this.node truthy.
+		this.networksEngine = new NetworksEngine(localStorage, async (networkHash: string) => {
+			if (this.node && !(__DEV__ && USE_LOCAL_DB_FACTORY)) {
+				return createStrandDbFactory(this.node)(networkHash)
+			}
+			return this.rnDbFactory(networkHash)
+		})
 	}
 
 	/** Expose the shared NetworksEngine for initialize() in AppProvider. */
