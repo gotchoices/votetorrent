@@ -57,9 +57,9 @@ loses the composite-PK patch.
 | `@optimystic/db-core` | `portal:../Optimystic/packages/db-core` | portal |
 | `@optimystic/db-p2p` | `portal:../Optimystic/packages/db-p2p` | portal |
 | `@optimystic/db-p2p-storage-rn` | `portal:../Optimystic/packages/db-p2p-storage-rn` | portal |
-| `@quereus/quereus` | `3.3.0` (published) | **PUBLISHED — load-bearing boundary** |
-| `@optimystic/quereus-plugin-crypto` | `0.13.5` (published) | **PUBLISHED — load-bearing boundary** |
-| `@optimystic/quereus-plugin-optimystic` | `0.13.5` (published, patched) | **PUBLISHED — load-bearing boundary** |
+| `@quereus/quereus` | `3.3.0` (published) | **PUBLISHED** — in the app + `packages/vote-engine` manifests |
+| `@optimystic/quereus-plugin-optimystic` | `0.13.5` (published, patched) | **PUBLISHED** — app dep `^0.13.5`; root `resolutions` carries the composite-PK patch |
+| `@optimystic/quereus-plugin-crypto` | `0.13.5` (published) | **PUBLISHED** — `packages/vote-engine` dep only (not in the app manifest) |
 
 **Rationale for keeping quereus + the two plugins published:**
 The portal-source types in `../sereus` target quereus `~0.16.2`. Portalling

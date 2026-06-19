@@ -123,13 +123,19 @@ if [ "${BUNDLE_EXIT}" -ne 0 ]; then
   exit 1
 fi
 
-# Count the number of Metro module definitions (__d() calls) as bundle evidence.
-if [ -f "${BUNDLE_OUT}" ]; then
-  MODULE_COUNT=$(grep -c '__d(' "${BUNDLE_OUT}" 2>/dev/null || echo "0")
-  echo "[verify-portal-adoption] Step 2 PASS: Metro bundle exited 0 (module count: ${MODULE_COUNT} __d() defines)"
-else
-  echo "[verify-portal-adoption] Step 2 PASS: Metro bundle exited 0 (bundle written to ${BUNDLE_OUT})"
+# A zero exit with no bundle artifact is a false PASS — treat a missing/empty
+# bundle as a Step 2 failure (WR-03).
+if [ ! -s "${BUNDLE_OUT}" ]; then
+  echo "[verify-portal-adoption] Step 2 FAIL: Metro exited 0 but no bundle was written to ${BUNDLE_OUT}" >&2
+  echo "[verify-portal-adoption] ========== PORTAL ADOPTION GATE: FAIL ==========" >&2
+  exit 1
 fi
+
+# Count the number of Metro module definitions (__d() calls) as bundle evidence.
+# `grep -c` already prints 0 and exits 1 on no match, so swallow the exit with
+# `|| true` rather than `|| echo 0` (which would emit a doubled "0", WR-02).
+MODULE_COUNT=$(grep -c '__d(' "${BUNDLE_OUT}" || true)
+echo "[verify-portal-adoption] Step 2 PASS: Metro bundle exited 0 (module count: ${MODULE_COUNT} __d() defines)"
 
 # ── STEP 3: VOTE-ENGINE SUITE (SC2, D-08) ────────────────────────────────────
 #
@@ -139,18 +145,25 @@ fi
 echo "[verify-portal-adoption] Step 3: vote-engine suite ..."
 TEST_LOG=/tmp/vt-test.log
 
+# Capture the suite exit code WITHOUT letting `set -e` abort before the
+# reporting block below runs (CR-01). pipefail makes the subshell inherit
+# yarn/Mocha's non-zero exit through the `tee` pipe.
+TEST_EXIT=0
+set +e
 (
   cd packages/vote-engine
   yarn test 2>&1 | tee "${TEST_LOG}"
 )
+TEST_EXIT=$?
+set -e
 
 # Parse Mocha summary lines from the tee output.
 PASSING=$(grep -Eo "[0-9]+ passing" "${TEST_LOG}" | head -1 || true)
 # Look for a non-zero failing count. Mocha emits "  N failing" with leading spaces.
-FAILING=$(grep -E "^\s+[0-9]+ failing" "${TEST_LOG}" || true)
+FAILING=$(grep -E "^[[:space:]]+[0-9]+ failing" "${TEST_LOG}" || true)
 
-if [ -n "${FAILING}" ]; then
-  echo "[verify-portal-adoption] Step 3 FAIL: vote-engine suite has failures: ${FAILING}" >&2
+if [ -n "${FAILING}" ] || [ "${TEST_EXIT}" -ne 0 ]; then
+  echo "[verify-portal-adoption] Step 3 FAIL: vote-engine suite failed (exit ${TEST_EXIT})${FAILING:+: ${FAILING}}" >&2
   echo "[verify-portal-adoption] See ${TEST_LOG} for full output" >&2
   echo "[verify-portal-adoption] ========== PORTAL ADOPTION GATE: FAIL ==========" >&2
   exit 1
@@ -170,8 +183,9 @@ echo "[verify-portal-adoption] Step 3 PASS: vote-engine suite ${PASSING}, 0 fail
 # Two checks:
 #   4a. Run yarn lint:peers (the existing Phase-13 guard) — exits non-zero on unexpected
 #       peer-boundary violations.
-#   4b. Grep apps/VoteTorrentAuthority/package.json to assert @quereus/quereus and both
-#       quereus-plugin-* entries do NOT carry a portal: prefix — they must stay published.
+#   4b. Grep apps/VoteTorrentAuthority/package.json to assert @quereus/quereus and the
+#       @optimystic/quereus-plugin-* entry (the app manifest carries one: -optimystic)
+#       do NOT carry a portal: prefix — they must stay published.
 
 echo "[verify-portal-adoption] Step 4: published/portal boundary check ..."
 
