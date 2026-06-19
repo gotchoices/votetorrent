@@ -49,9 +49,9 @@
 		"@optimystic/db-core": "portal:../Optimystic/packages/db-core",
 		"@optimystic/db-p2p": "portal:../Optimystic/packages/db-p2p",
 		"@optimystic/db-p2p-storage-rn": "portal:../Optimystic/packages/db-p2p-storage-rn",
-		"@optimystic/quereus-plugin-optimystic": "portal:../Optimystic/packages/quereus-plugin-optimystic",
 		"@multiformats/multiaddr": "13.0.1",
-		"p2p-fret": "npm:^0.4.0"
+		"p2p-fret": "npm:^0.4.0",
+		"@optimystic/quereus-plugin-optimystic": "patch:@optimystic/quereus-plugin-optimystic@npm%3A0.13.5#~/.yarn/patches/@optimystic-quereus-plugin-optimystic-npm-0.13.5-6fbe2eccab.patch"
 	},
 	"packageManager": "yarn@4.7.0"
 }

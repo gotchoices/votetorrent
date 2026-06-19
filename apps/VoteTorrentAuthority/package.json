@@ -24,7 +24,7 @@
 		"@optimystic/db-core": "portal:../../../Optimystic/packages/db-core",
 		"@optimystic/db-p2p": "portal:../../../Optimystic/packages/db-p2p",
 		"@optimystic/db-p2p-storage-rn": "portal:../../../Optimystic/packages/db-p2p-storage-rn",
-		"@optimystic/quereus-plugin-optimystic": "portal:../../../Optimystic/packages/quereus-plugin-optimystic",
+		"@optimystic/quereus-plugin-optimystic": "^0.13.5",
 		"@quereus/quereus": "3.3.0",
 		"@react-native-async-storage/async-storage": "^2.1.2",
 		"@react-native-clipboard/clipboard": "^1.16.3",

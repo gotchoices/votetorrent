@@ -224,6 +224,26 @@ if (typeof Symbol !== 'undefined' && typeof Symbol.asyncIterator === 'undefined'
   }
 }
 
+// 8b. Intl.PluralRules (English-only) — spike 010/011: the newer optimystic line (0.13.6)
+//     pulls `moat-maker`, which constructs `new Intl.PluralRules(...)` at module scope for
+//     ordinal error formatting. Bare RN 0.78 Hermes's Intl build lacks PluralRules, so without
+//     this the first import of the optimystic stack throws at module load. (Lifted from the
+//     sereus-chat reference app, which added it for the same reason.)
+if (typeof Intl !== 'undefined' && typeof Intl.PluralRules === 'undefined') {
+  const ordinal = n => {
+    const m10 = n % 10, m100 = n % 100;
+    if (m10 === 1 && m100 !== 11) return 'one';
+    if (m10 === 2 && m100 !== 12) return 'two';
+    if (m10 === 3 && m100 !== 13) return 'few';
+    return 'other';
+  };
+  Intl.PluralRules = class PluralRules {
+    constructor(_locale, options) { this._type = options?.type === 'ordinal' ? 'ordinal' : 'cardinal'; }
+    select(n) { return this._type === 'ordinal' ? ordinal(n) : (n === 1 ? 'one' : 'other'); }
+    resolvedOptions() { return {type: this._type, locale: 'en'}; }
+  };
+}
+
 // 9. EventTarget / CustomEvent
 import 'event-target-polyfill';
 if (typeof globalThis.CustomEvent === 'undefined') {

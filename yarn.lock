@@ -4368,9 +4368,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@optimystic/quereus-plugin-optimystic@portal:../Optimystic/packages/quereus-plugin-optimystic::locator=votetorrent%40workspace%3A.":
-  version: 0.0.0-use.local
-  resolution: "@optimystic/quereus-plugin-optimystic@portal:../Optimystic/packages/quereus-plugin-optimystic::locator=votetorrent%40workspace%3A."
+"@optimystic/quereus-plugin-optimystic@npm:0.13.5":
+  version: 0.13.5
+  resolution: "@optimystic/quereus-plugin-optimystic@npm:0.13.5"
   dependencies:
     "@chainsafe/libp2p-gossipsub": "npm:^14.1.2"
     "@chainsafe/libp2p-yamux": "npm:^8.0.1"
@@ -4382,15 +4382,41 @@ __metadata:
     "@libp2p/noise": "npm:^1.0.1"
     "@libp2p/tcp": "npm:^11.0.10"
     "@noble/hashes": "npm:^2.0.1"
-    "@optimystic/db-core": "workspace:^"
-    "@optimystic/db-p2p": "workspace:^"
+    "@optimystic/db-core": "npm:^0.13.5"
+    "@optimystic/db-p2p": "npm:^0.13.5"
     debug: "npm:^4.4.3"
     libp2p: "npm:^3.1.3"
     uint8arrays: "npm:^5.1.0"
   peerDependencies:
     "@quereus/quereus": ^0.16.2
+  checksum: 10c0/6742a770a532e0672597bf7df2956a3a6ecfb0fdc924a8458fad86346132f1ebf9f9163b86ee83da3d4452ac28ae1bfcc7c6590a1fb2959b7a4ec1fee27171f4
   languageName: node
-  linkType: soft
+  linkType: hard
+
+"@optimystic/quereus-plugin-optimystic@patch:@optimystic/quereus-plugin-optimystic@npm%3A0.13.5#~/.yarn/patches/@optimystic-quereus-plugin-optimystic-npm-0.13.5-6fbe2eccab.patch":
+  version: 0.13.5
+  resolution: "@optimystic/quereus-plugin-optimystic@patch:@optimystic/quereus-plugin-optimystic@npm%3A0.13.5#~/.yarn/patches/@optimystic-quereus-plugin-optimystic-npm-0.13.5-6fbe2eccab.patch::version=0.13.5&hash=257bd3"
+  dependencies:
+    "@chainsafe/libp2p-gossipsub": "npm:^14.1.2"
+    "@chainsafe/libp2p-yamux": "npm:^8.0.1"
+    "@libp2p/bootstrap": "npm:^12.0.11"
+    "@libp2p/crypto": "npm:^5.1.13"
+    "@libp2p/identify": "npm:^4.0.10"
+    "@libp2p/interface": "npm:^3.1.0"
+    "@libp2p/kad-dht": "npm:^16.1.3"
+    "@libp2p/noise": "npm:^1.0.1"
+    "@libp2p/tcp": "npm:^11.0.10"
+    "@noble/hashes": "npm:^2.0.1"
+    "@optimystic/db-core": "npm:^0.13.5"
+    "@optimystic/db-p2p": "npm:^0.13.5"
+    debug: "npm:^4.4.3"
+    libp2p: "npm:^3.1.3"
+    uint8arrays: "npm:^5.1.0"
+  peerDependencies:
+    "@quereus/quereus": ^0.16.2
+  checksum: 10c0/37ad0de788d63a0155ce264a78d8df4367b84daa0b28d9ecee78e8d445b5363c80917e7fb5818c2b528966b0e126240f8f7eb95188a3ee4b261ea982c31a9091
+  languageName: node
+  linkType: hard
 
 "@phenomnomnominal/tsquery@npm:^5.0.0":
   version: 5.0.1
@@ -20636,7 +20662,7 @@ __metadata:
     "@optimystic/db-core": "portal:../../../Optimystic/packages/db-core"
     "@optimystic/db-p2p": "portal:../../../Optimystic/packages/db-p2p"
     "@optimystic/db-p2p-storage-rn": "portal:../../../Optimystic/packages/db-p2p-storage-rn"
-    "@optimystic/quereus-plugin-optimystic": "portal:../../../Optimystic/packages/quereus-plugin-optimystic"
+    "@optimystic/quereus-plugin-optimystic": "npm:^0.13.5"
     "@quereus/quereus": "npm:3.3.0"
     "@react-native-async-storage/async-storage": "npm:^2.1.2"
     "@react-native-clipboard/clipboard": "npm:^1.16.3"
