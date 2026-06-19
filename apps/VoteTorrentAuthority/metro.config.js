@@ -19,7 +19,23 @@ const {getDefaultConfig, mergeConfig} = require('@react-native/metro-config');
 
 const projectRoot = __dirname;
 const workspaceRoot = path.resolve(projectRoot, '../..');
+// spike 010: the portal: deps point at sibling monorepo source one level ABOVE
+// the votetorrent workspace (…/VOTETORRENT/{Optimystic,sereus}). Metro will not
+// read files outside its watched roots, so the super-root must be watched and
+// each portal'd package aliased to its source dir.
+const superRoot = path.resolve(projectRoot, '../../..');
 const emptyShim = path.resolve(projectRoot, 'polyfills/empty.js');
+
+// Canonical package name → monorepo source dir (portal targets).
+const portalSourceModules = {
+  '@serfab/cadre-core': path.resolve(superRoot, 'sereus/packages/cadre-core'),
+  '@serfab/quereus-plugin-sereus': path.resolve(superRoot, 'sereus/packages/quereus-plugin-sereus'),
+  '@serfab/strand-proto': path.resolve(superRoot, 'sereus/packages/strand-proto'),
+  '@optimystic/db-core': path.resolve(superRoot, 'Optimystic/packages/db-core'),
+  '@optimystic/db-p2p': path.resolve(superRoot, 'Optimystic/packages/db-p2p'),
+  '@optimystic/db-p2p-storage-rn': path.resolve(superRoot, 'Optimystic/packages/db-p2p-storage-rn'),
+  '@optimystic/quereus-plugin-optimystic': path.resolve(superRoot, 'Optimystic/packages/quereus-plugin-optimystic'),
+};
 
 // --- browser-field maps (load each package's `browser` field and redirect Node file
 //     paths to their .browser.js variants). Metro ignores object-form browser fields when
@@ -83,11 +99,15 @@ const libp2pCryptoBrowserMap = Object.assign(
 
 const config = {
   projectRoot,
-  watchFolders: [workspaceRoot],
+  watchFolders: [workspaceRoot, superRoot],
   resolver: {
     nodeModulesPaths,
+    // portal: deps are symlinks into the sibling monorepo source (spike 010) —
+    // Metro must follow them or @optimystic/* / @serfab/* won't resolve.
+    unstable_enableSymlinks: true,
     unstable_enablePackageExports: true, // already on in VoteTorrent's config; required for cadre-core's exports map
     extraNodeModules: {
+      ...portalSourceModules,
       // Node builtins libp2p / optimystic / quereus pull transitively:
       'node:os': path.resolve(projectRoot, 'polyfills/node-os.js'),
       'node:stream': require.resolve('readable-stream'),
@@ -107,9 +127,23 @@ const config = {
 
 const merged = mergeConfig(getDefaultConfig(projectRoot), config);
 
-// Wrap resolveRequest to apply the @libp2p/crypto browser rewrite.
+// spike 010: @multiformats/multiaddr v13 (the pinned major) dropped the `/convert`
+// subpath that @chainsafe/libp2p-gossipsub still imports. v13 has no convertToString
+// at all, so redirect the subpath to a v12.5.1 copy installed under an npm alias
+// (no conflict with the pinned v13 — its only relative import is ./registry.js, which
+// stays inside the v12 package). Mirrors sereus-chat's metro resolveRequest redirect.
+const multiaddrConvertV12 = path.resolve(
+  projectRoot,
+  'node_modules/@multiformats/multiaddr-v12/dist/src/convert.js',
+);
+
+// Wrap resolveRequest to apply the @multiformats/multiaddr/convert redirect and the
+// @libp2p/crypto browser rewrite.
 const upstreamResolveRequest = merged.resolver.resolveRequest;
 merged.resolver.resolveRequest = (context, moduleName, platform) => {
+  if (moduleName === '@multiformats/multiaddr/convert') {
+    return {type: 'sourceFile', filePath: multiaddrConvertV12};
+  }
   const resolved = upstreamResolveRequest
     ? upstreamResolveRequest(context, moduleName, platform)
     : context.resolveRequest(context, moduleName, platform);
