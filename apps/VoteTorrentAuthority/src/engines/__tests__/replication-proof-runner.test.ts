@@ -51,9 +51,10 @@ jest.mock(
 jest.mock('@quereus/quereus', () => ({ Database: class {}, registerPlugin: jest.fn() }), {
   virtual: true,
 });
-jest.mock('@optimystic/quereus-plugin-optimystic', () => ({ register: jest.fn() }), {
-  virtual: true,
-});
+// ADD: new quereus plugin mocks required by the updated rn-db-factory solo path (D-06 / STORE-01)
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+jest.mock('@quereus/plugin-react-native-leveldb', () => ({ ReactNativeLevelDBProvider: jest.fn() }), { virtual: true });
+jest.mock('@quereus/store', () => ({ createIsolatedStoreModule: jest.fn(() => ({})) }), { virtual: true });
 jest.mock(
   '@votetorrent/vote-engine/rn',
   () => ({ VOTETORRENT_SCHEMA_SQL: 'declare schema main {}' }),

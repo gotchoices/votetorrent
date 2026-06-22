@@ -20,17 +20,32 @@
 jest.mock('rn-leveldb', () => ({ LevelDB: class {}, LevelDBWriteBatch: class {} }), {
   virtual: true,
 });
-jest.mock(
-  '@optimystic/db-p2p-storage-rn',
-  () => ({ openOptimysticRNDb: jest.fn(), LevelDBRawStorage: class {} }),
-  { virtual: true },
-);
-jest.mock('@quereus/quereus', () => ({ Database: class {}, registerPlugin: jest.fn() }), {
-  virtual: true,
-});
-jest.mock('@optimystic/quereus-plugin-optimystic', () => ({ register: jest.fn() }), {
-  virtual: true,
-});
+// UPDATED @quereus/quereus mock — Database is a jest.fn() constructor so .mock.instances
+// tracks created instances. Each instance gets per-instance jest.fn() method spies so the
+// test can assert registerModule, setDefaultVtabName, setSchemaPath calls on the specific DB.
+jest.mock('@quereus/quereus', () => {
+  const DatabaseMock = jest.fn(function(this: Record<string, jest.Mock>) {
+    this.registerModule = jest.fn();
+    this.setDefaultVtabName = jest.fn();
+    this.setSchemaPath = jest.fn();    // keep — strand path tests use this
+    this.exec = jest.fn().mockResolvedValue(undefined);
+    this.prepare = jest.fn().mockReturnValue({ all: jest.fn().mockResolvedValue([]) });
+  });
+  return {
+    Database: DatabaseMock,
+    // registerPlugin no longer called by solo path; kept for forward compat / strand path.
+    registerPlugin: jest.fn(),
+  };
+}, { virtual: true });
+
+// ADD: new plugin mocks for the solo @quereus/plugin-react-native-leveldb path
+// Use jest.fn() as a constructor spy — jest is in the allowed scope list.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+jest.mock('@quereus/plugin-react-native-leveldb', () => ({ ReactNativeLevelDBProvider: jest.fn() }), { virtual: true });
+
+jest.mock('@quereus/store', () => ({
+  createIsolatedStoreModule: jest.fn(() => ({ /* stub VirtualTableModule */ })),
+}), { virtual: true });
 // `capturedDbFactory` is `mock`-prefixed (via the name) to satisfy jest hoisting rules.
 // NetworksEngine records the DbFactory passed to its constructor so dispatch tests can
 // invoke that captured factory and assert which underlying path ran.
@@ -57,7 +72,7 @@ jest.mock(
 );
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const { createStrandDbFactory } = require('../rn-db-factory');
+const { createStrandDbFactory, rnDbFactory } = require('../rn-db-factory');
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { EngineFactory } = require('../engine-factory');
 
@@ -241,5 +256,78 @@ describe('EngineFactory setNode dispatch — D-04', () => {
     // The strand path: fakeNode.addStrand must have been called (not rnDbFactory).
     expect(fakeNode.addStrand).toHaveBeenCalled();
     expect(rnDbFactorySpy).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// STORE-01 / D-04 / D-06: solo rnDbFactory — no-cast provider path
+//
+// Asserts that the new solo factory:
+//   - constructs ReactNativeLevelDBProvider with votetorrent-q2-<hash> databaseName
+//   - calls db.registerModule('store', storeModule) — NO cast
+//   - calls db.setDefaultVtabName('store')
+//   - does NOT call registerPlugin (no-cast path confirmed)
+//   - does NOT call db.setSchemaPath (solo path only; strand path owns setSchemaPath)
+// ---------------------------------------------------------------------------
+
+describe('rnDbFactory — STORE-01 / D-04 / D-06', () => {
+  it('constructs ReactNativeLevelDBProvider with votetorrent-q2-<hash> databaseName', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { ReactNativeLevelDBProvider } = require('@quereus/plugin-react-native-leveldb');
+
+    await rnDbFactory('abc123');
+
+    expect(ReactNativeLevelDBProvider).toHaveBeenCalledTimes(1);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const config = (ReactNativeLevelDBProvider as jest.Mock).mock.calls[0][0];
+    expect(config.databaseName).toBe('votetorrent-q2-abc123');
+    expect(typeof config.openFn).toBe('function');
+    expect(config.WriteBatch).toBeDefined();
+  });
+
+  it('calls db.registerModule("store", storeModule) — no cast', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { Database } = require('@quereus/quereus');
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { createIsolatedStoreModule } = require('@quereus/store');
+
+    await rnDbFactory('abc123');
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const dbInstance = (Database as jest.Mock).mock.instances[0];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const stubModule = (createIsolatedStoreModule as jest.Mock).mock.results[0].value;
+    expect(dbInstance.registerModule).toHaveBeenCalledWith('store', stubModule);
+  });
+
+  it('calls db.setDefaultVtabName("store") — required for USING-less schema', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { Database } = require('@quereus/quereus');
+
+    await rnDbFactory('abc123');
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const dbInstance = (Database as jest.Mock).mock.instances[0];
+    expect(dbInstance.setDefaultVtabName).toHaveBeenCalledWith('store');
+  });
+
+  it('does NOT call registerPlugin — no-cast path confirmed', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { registerPlugin } = require('@quereus/quereus');
+
+    await rnDbFactory('abc123');
+
+    expect(registerPlugin).not.toHaveBeenCalled();
+  });
+
+  it('does NOT call db.setSchemaPath — solo path only; strand path owns setSchemaPath', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { Database } = require('@quereus/quereus');
+
+    await rnDbFactory('abc123');
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const dbInstance = (Database as jest.Mock).mock.instances[0];
+    expect(dbInstance.setSchemaPath).not.toHaveBeenCalled();
   });
 });

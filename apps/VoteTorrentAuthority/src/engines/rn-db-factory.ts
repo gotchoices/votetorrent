@@ -1,22 +1,20 @@
 /**
  * RN persistent DbFactory — LevelDB-backed Quereus Database for Android/Hermes.
  *
- * D-03: This file is the ONLY place `rn-leveldb`, `@optimystic/db-p2p-storage-rn`,
- * and (for the strand-backed path) `@serfab/cadre-core` are imported for DbFactory
- * purposes. They MUST NOT appear under packages/vote-engine/.
+ * D-03: This file is the ONLY place `rn-leveldb`, `@quereus/plugin-react-native-leveldb`,
+ * and (for the strand-backed path) `@optimystic/db-p2p-storage-rn` + `@serfab/cadre-core`
+ * are imported for DbFactory purposes. They MUST NOT appear under packages/vote-engine/.
  *
- * Both packages are pre-installed in apps/VoteTorrentAuthority/package.json and
- * spike-validated on-device (spikes 005 + 008). Registry-audited in Plan 14-02
- * legitimacy checkpoint (APPROVED):
- *   - rn-leveldb@3.11.0: github.com/gotchoices/rn-leveldb, author GreenTriangle
- *   - @optimystic/db-p2p-storage-rn@0.13.5: github.com/gotchoices/optimystic,
- *     author Got Choices Foundation — same gotchoices org as VoteTorrent
+ * Solo path: @quereus/plugin-react-native-leveldb@3.3.0 + @quereus/store@3.3.0
+ *   (published, version-aligned with pinned @quereus/quereus@3.3.0; D-01/D-02).
+ *   rn-leveldb@3.11: github.com/gotchoices/rn-leveldb — registry-audited Plan 14-02 (APPROVED).
+ * Strand path: @optimystic/db-p2p-storage-rn@portal (unchanged; cadre-core/CadreNodeProvider).
  */
 
 import { LevelDB, LevelDBWriteBatch } from 'rn-leveldb';
-import { openOptimysticRNDb, LevelDBRawStorage } from '@optimystic/db-p2p-storage-rn';
-import { Database, registerPlugin } from '@quereus/quereus';
-import { register as optimysticPlugin } from '@optimystic/quereus-plugin-optimystic';
+import { ReactNativeLevelDBProvider } from '@quereus/plugin-react-native-leveldb';
+import { createIsolatedStoreModule } from '@quereus/store';
+import { Database } from '@quereus/quereus';
 import { VOTETORRENT_SCHEMA_SQL } from '@votetorrent/vote-engine/rn';
 import type { DbFactory } from '@votetorrent/vote-engine';
 import type { StrandConfig, StrandInstance } from '@serfab/cadre-core';
@@ -34,57 +32,47 @@ const VOTETORRENT_INNER_DDL = VOTETORRENT_SCHEMA_SQL
 	.trim();
 
 /**
- * Concrete DbFactory for the RN app layer.
+ * Concrete DbFactory for the RN app layer — Quereus-native LevelDB via
+ * @quereus/plugin-react-native-leveldb@3.3.0 (D-01/D-02: published, version-aligned).
  *
- * Opens a per-network LevelDB store named `votetorrent-<networkHash>` using the
- * spike-008 validated openOptimysticRNDb recipe, then wires the resulting
- * LevelDBRawStorage as the backing store of the Quereus Database via the
- * quereus-plugin-optimystic `register()` function with `rawStorageFactory`
- * and `transactor: 'local'`. This is the direct store-vtab path confirmed by
- * the quereus 3.3.0 API in Plan 14-01 (db.registerModule post-construction
- * via registerPlugin + db.setDefaultVtabName + db.setDefaultVtabArgs).
- *
- * D-04/D-11: Store name derived from network hash; rn-leveldb default = app-private
- *            internal storage (not SD card / world-readable).
- * D-13: No try/catch fallback — open errors propagate to the engine's error handler.
- *       There is intentionally NO silent fallback to a bare in-memory new Database().
- * D-14: No destroyDB call — the on-disk store stays on disk and re-attaches if
- *       re-opened; forget-network / recents removal does NOT delete the LevelDB store.
+ * D-04: store name 'votetorrent-q2-<networkHash>' provides a clean break from the
+ *       old optimystic per-table layout; the 'q2' prefix signals quereus-native v2
+ *       storage format. Zero collision with any old 'votetorrent-<networkHash>' stores.
+ * D-06: The old optimystic DI dance (raw storage factory + plugin registration cast)
+ *       is fully removed. db.registerModule accepts AnyVirtualTableModule directly
+ *       — no as-unknown-as-SqlValue cast needed.
+ * D-11: rn-leveldb default path = app-private internal storage (not SD card).
+ * D-13: No try/catch fallback — open errors propagate. No in-memory new Database() fallback.
+ * D-14: No destroyDB — on-disk store persists and re-attaches on reopen.
  */
 export const rnDbFactory: DbFactory = async (networkHash: string) => {
-  // D-04/D-11: store name keyed by network hash; fixed-length hex output → safe as store key
-  const storeName = `votetorrent-${networkHash}`;
+  // D-04: version-bumped store name — zero collision with old 'votetorrent-<networkHash>'
+  const databaseName = `votetorrent-q2-${networkHash}`;
 
-  // Spike-008 VALIDATED recipe (cadre-runtime-ondevice.md §1)
-  const rnDb = openOptimysticRNDb({
+  const provider = new ReactNativeLevelDBProvider({
     openFn: (n: string, c: boolean, e: boolean) => new LevelDB(n, c, e),
     WriteBatch: LevelDBWriteBatch,
-    name: storeName,
+    databaseName,
+    createIfMissing: true,
   });
 
-  const rawStorage = new LevelDBRawStorage(rnDb);
+  // createIsolatedStoreModule wraps provider with snapshot isolation (default: true).
+  // Provider owns all per-table file management; no legacy DI intermediary needed.
+  const storeModule = createIsolatedStoreModule({ provider });
 
-  // quereus 3.3.0 Database constructor takes no arguments (Plan 14-01 confirmed).
-  // Vtab registration is post-construction:
-  //   1. registerPlugin wires the OptimysticModule with rawStorageFactory → auxData
-  //   2. setDefaultVtabName tells Quereus to use 'optimystic' for schema-less tables
-  //   3. setDefaultVtabArgs tells the module to use the 'local' (single-node) transactor
+  // quereus 3.3.0 Database constructor takes no arguments (confirmed Plan 14-01, unchanged).
   const db = new Database();
 
-  // Register the optimystic vtab module with the LevelDB-backed rawStorageFactory.
-  // The 'local' transactor uses rawStorageFactory when supplied (per plugin source
-  // line 124: `options.rawStorageFactory?.() ?? new MemoryRawStorage()`).
-  // rawStorageFactory is a function (not a SqlValue), so it must be cast through
-  // `unknown` — the plugin extracts it at runtime via `typeof aux["rawStorageFactory"]
-  // === "function"` (plugin chunk line 1892). The registerPlugin config type is
-  // Record<string,SqlValue> for simple primitives, but the optimystic plugin
-  // intentionally accepts function-valued auxData for DI.
-  await registerPlugin(db, optimysticPlugin, {
-    rawStorageFactory: () => rawStorage,
-  } as unknown as Record<string, import('@quereus/quereus').SqlValue>);
+  // No cast — db.registerModule accepts AnyVirtualTableModule (vs registerPlugin's Record<string,SqlValue>).
+  db.registerModule('store', storeModule);
 
-  db.setDefaultVtabName('optimystic');
-  db.setDefaultVtabArgs({ transactor: 'local' });
+  // REQUIRED: VOTETORRENT_SCHEMA_SQL has zero USING clauses (grep confirmed 0 matches).
+  // Without this, Quereus routes schema-less table creation to in-memory, not LevelDB.
+  db.setDefaultVtabName('store');
+
+  // NO db.setDefaultVtabArgs — 'store' module has no transactor args;
+  //   isolation is handled internally by createIsolatedStoreModule.
+  // NO db.setSchemaPath — that is the strand path only (D-14).
 
   return db;
 };
