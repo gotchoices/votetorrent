@@ -4491,7 +4491,33 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@quereus/quereus@npm:3.3.0, @quereus/quereus@npm:^3.2.1":
+"@quereus/isolation@npm:3.3.0, @quereus/isolation@npm:^3.3.0":
+  version: 3.3.0
+  resolution: "@quereus/isolation@npm:3.3.0"
+  dependencies:
+    "@quereus/quereus": "npm:^3.3.0"
+  peerDependencies:
+    "@quereus/quereus": ^3.3.0
+  checksum: 10c0/26399cc5182bedc64d6b348dfb93f9c5bb54c18c6040035cb55c537ff33d08b681d7c83ef72f9fe5a1b9c3115964debd6550ea219f2efada2ed1bc675d7d5450
+  languageName: node
+  linkType: hard
+
+"@quereus/plugin-react-native-leveldb@npm:3.3.0":
+  version: 3.3.0
+  resolution: "@quereus/plugin-react-native-leveldb@npm:3.3.0"
+  dependencies:
+    "@quereus/quereus": "npm:^3.3.0"
+    "@quereus/store": "npm:^3.3.0"
+  peerDependencies:
+    "@quereus/isolation": ^3.3.0
+    "@quereus/quereus": ^3.3.0
+    "@quereus/store": ^3.3.0
+    rn-leveldb: ^3.11.0
+  checksum: 10c0/d7b0cf0da1efc29c27a2be7745c96c9cb801aec0187057680d88c11939475cfc5d0410c44215413de002d88b108747bc70b1d30c250da3b5171fc5fcbfae65c5
+  languageName: node
+  linkType: hard
+
+"@quereus/quereus@npm:3.3.0, @quereus/quereus@npm:^3.2.1, @quereus/quereus@npm:^3.3.0":
   version: 3.3.0
   resolution: "@quereus/quereus@npm:3.3.0"
   dependencies:
@@ -4502,6 +4528,19 @@ __metadata:
     temporal-polyfill: "npm:^0.3.0"
     uint8arrays: "npm:^5.1.0"
   checksum: 10c0/313983be6402873de08758a951c02df24f25035e1af5d68741653af2b0e6da26593ad96f00c411504fe6a57f7d44cb939a0a6cf2b45662f3c5868d651022413a
+  languageName: node
+  linkType: hard
+
+"@quereus/store@npm:3.3.0, @quereus/store@npm:^3.3.0":
+  version: 3.3.0
+  resolution: "@quereus/store@npm:3.3.0"
+  dependencies:
+    "@quereus/isolation": "npm:^3.3.0"
+    "@quereus/quereus": "npm:^3.3.0"
+  peerDependencies:
+    "@quereus/isolation": ^3.3.0
+    "@quereus/quereus": ^3.3.0
+  checksum: 10c0/196961e65013c9f47262bf6ba65a3c58d920d7c29a1fb05277de267bedebb36f5afac76e3134d23e678d5ae76acfd2b1903df4646d49ea908964e2909e9f93d7
   languageName: node
   linkType: hard
 
@@ -20663,7 +20702,10 @@ __metadata:
     "@optimystic/db-p2p": "portal:../../../Optimystic/packages/db-p2p"
     "@optimystic/db-p2p-storage-rn": "portal:../../../Optimystic/packages/db-p2p-storage-rn"
     "@optimystic/quereus-plugin-optimystic": "npm:^0.13.5"
+    "@quereus/isolation": "npm:3.3.0"
+    "@quereus/plugin-react-native-leveldb": "npm:3.3.0"
     "@quereus/quereus": "npm:3.3.0"
+    "@quereus/store": "npm:3.3.0"
     "@react-native-async-storage/async-storage": "npm:^2.1.2"
     "@react-native-clipboard/clipboard": "npm:^1.16.3"
     "@react-native-community/cli": "npm:^15.1.0"

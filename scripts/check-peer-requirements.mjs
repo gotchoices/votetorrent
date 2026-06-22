@@ -18,6 +18,8 @@
  *      the DETAIL tree enumerates EVERY consumer explicitly, including ones the folded
  *      "… and N other dependency" summary hides. It unions all observed
  *      @optimystic/quereus-plugin-<name>@npm:<version> descriptors from those detail trees.
+ *      Note: patch-installed packages appear as @patch:... in detail trees; CONSUMER_ANY_RE
+ *      is used for the presence check, CONSUMER_RE for KNOWN_ALLOWED comparisons.
  *   4. Compares that expanded observed set against KNOWN_ALLOWED.
  *   5. Exits non-zero if any UNEXPECTED descriptor is found, OR if a folded summary line's
  *      detail drill-down cannot be enumerated (fail closed). Exits 0 on the happy path.
@@ -75,6 +77,14 @@ const FAIL_MARKER = '✘';
 // charset (digits, letters, dot, hyphen) so prerelease/build versions are captured
 // verbatim rather than truncated (closes the WR-01/WR-02 fail-open holes).
 const CONSUMER_RE = /@optimystic\/quereus-plugin-[a-z0-9-]+@npm:[0-9A-Za-z.-]+/g;
+
+// Broader match for any @optimystic/quereus-plugin-* consumer descriptor, regardless
+// of protocol (@npm:, @patch:, @portal:, etc.). Used only for the fail-close presence
+// check in folded detail trees — CONSUMER_RE (npm-only) is still used for KNOWN_ALLOWED
+// comparisons. Needed because @optimystic/quereus-plugin-optimystic is installed via a
+// yarn patch (descriptor form: @patch:@optimystic/quereus-plugin-optimystic@npm%3A0.13.5#...)
+// rather than bare @npm:, so CONSUMER_RE alone misses it in detail trees (D-26-fix-01).
+const CONSUMER_ANY_RE = /@optimystic\/quereus-plugin-[a-z0-9-]+@/g;
 
 // Detect a folded summary line ("… and N other dependency/dependencies").
 const FOLD_RE = /and\s+\d+\s+other\s+dependenc(?:y|ies)/i;
@@ -140,8 +150,10 @@ async function main() {
     // Fail-closed fallback: a folded summary line whose detail tree could not be
     // enumerated by name must NOT slip through — a folded @optimystic/quereus-plugin-*
     // mismatch could be hiding there.
+    // Use CONSUMER_ANY_RE (protocol-agnostic) for the presence check so that patch-
+    // installed packages (whose descriptor is @patch:... not @npm:...) are still seen.
     if (isFolded) {
-      const detailMatches = detail ? detail.match(CONSUMER_RE) : null;
+      const detailMatches = detail ? detail.match(CONSUMER_ANY_RE) : null;
       if (!detailMatches || detailMatches.length === 0) {
         process.stderr.write(
           `[lint:peers] ERROR: a folded @optimystic/quereus-plugin-* peer mismatch ` +
