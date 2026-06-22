@@ -1,6 +1,17 @@
 import { bytesToHex } from '@noble/curves/utils.js';
 import { secp256k1 } from '@noble/curves/secp256k1.js';
 import { sha256 } from '@noble/hashes/sha2';
+
+// D-06 (Phase 28): Permanent production boot guard — verify-side noble binding check.
+// Mirrors device-signer.ts assertion (D-05). Catches a re-split on the verify side.
+// NEVER make this __DEV__-only — a release-build regression must be caught.
+if (typeof secp256k1.verify !== 'function') {
+  throw new Error(
+    '@noble/curves secp256k1.verify did not resolve to a function — ' +
+    'got ' + typeof secp256k1.verify + '. Metro/Hermes multi-copy binding bug detected.'
+  )
+}
+
 import { MisuseError, QuereusError } from '@quereus/quereus';
 import { Temporal } from 'temporal-polyfill';
 import { SigningEngine } from '../signing/signing-engine.js';

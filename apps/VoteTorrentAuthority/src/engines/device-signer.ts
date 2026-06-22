@@ -28,6 +28,18 @@ import { bytesToHex, hexToBytes } from '@noble/curves/utils.js'
 import type { Signature } from '@votetorrent/vote-core'
 import { getOrCreateDeviceUser, getDevicePrivKeyHex } from './device-user'
 
+// D-05 (Phase 28): Permanent production boot guard — fail loud if the wrong
+// @noble/curves instance was bound by Metro/Hermes (multi-copy binding bug).
+// This check MUST stay at module load, not inside createDeviceSigner, so a
+// re-split surfaces on the first require() of this module, not at first sign call.
+// NEVER make this __DEV__-only — a release-build regression must be caught.
+if (typeof secp256k1.sign !== 'function') {
+  throw new Error(
+    '@noble/curves secp256k1.sign did not resolve to a function — ' +
+    'got ' + typeof secp256k1.sign + '. Metro/Hermes multi-copy binding bug detected.'
+  )
+}
+
 /**
  * App-layer sign callback type: receives canonical digest bytes from the engine
  * and returns a `Signature { signerUserId, signerKey, signature }`.
