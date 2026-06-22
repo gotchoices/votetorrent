@@ -11,3 +11,4 @@ export const PROOF_ENABLED = false;
 export const DIAL_PROBE_ENABLED = false;
 export const REPLICATION_PROOF_ENABLED = false;
 export const USE_LOCAL_DB_FACTORY = false;
+export const SIGNING_PROOF_ENABLED = false;

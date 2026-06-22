@@ -27,3 +27,8 @@ runDialProbe();
 // __DEV__ && REPLICATION_PROOF_ENABLED (see proof-flags.generated.ts). Logs under [replication-proof].
 import {runReplicationProof} from './src/engines/replication-proof-runner';
 runReplicationProof();
+
+// Phase 28 (D-07 / SIGN-04) dev-only signing round-trip proof. Fire-and-forget; no-op unless
+// __DEV__ && SIGNING_PROOF_ENABLED (see proof-flags.generated.ts). Logs under [spike013].
+import {runSigningProofRunner} from './src/engines/signing-proof-runner';
+runSigningProofRunner();
