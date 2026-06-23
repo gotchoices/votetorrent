@@ -1,0 +1,37 @@
+diff --git a/dist/src/schema/schema-differ.js b/dist/src/schema/schema-differ.js
+index eae0a539e908451e141779508a079206a9193aa2..edcc305a48b85b0622c0849cbd765fa4c1c234c6 100644
+--- a/dist/src/schema/schema-differ.js
++++ b/dist/src/schema/schema-differ.js
+@@ -138,7 +138,7 @@ export function computeSchemaDiff(declaredSchema, actualCatalog, policy = 'allow
+     // Views: creates / drops
+     for (const [name, declaredView] of declaredViews) {
+         if (!viewRenames.pairs.has(name)) {
+-            diff.viewsToCreate.push(createViewToString(declaredView.viewStmt));
++            diff.viewsToCreate.push(createViewToString(applyViewDefaults(declaredView.viewStmt, targetSchemaName)));
+         }
+     }
+     for (const [name] of actualViews) {
+@@ -310,6 +310,23 @@ function enforceRequireHint(kind, creates, drops) {
+ /**
+  * Applies schema-level defaults (schema name, default vtab module) to a table statement
+  */
++function applyViewDefaults(viewStmt, targetSchemaName) {
++    // Mirror applyTableDefaults/applyIndexDefaults: qualify the view with the target
++    // schema so `apply schema App { view X }` creates App.X (not main.X). Without this,
++    // unqualified views default to 'main' (create-view.js), so a CHECK constraint on an
++    // App table resolving a sibling view against its own schema path ('App') fails with
++    // "Table 'X' not found in schema path: App".
++    if (targetSchemaName && targetSchemaName !== 'main' && !viewStmt.view.schema) {
++        return {
++            ...viewStmt,
++            view: {
++                ...viewStmt.view,
++                schema: targetSchemaName
++            }
++        };
++    }
++    return viewStmt;
++}
+ function applyTableDefaults(tableStmt, targetSchemaName, defaultVtabModule, defaultVtabArgs) {
+     let result = tableStmt;
+     // Apply schema name if not main and not already specified

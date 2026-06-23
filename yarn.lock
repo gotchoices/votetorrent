@@ -4471,7 +4471,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@quereus/quereus@npm:3.3.0, @quereus/quereus@npm:^3.2.1, @quereus/quereus@npm:^3.3.0":
+"@quereus/quereus@npm:3.3.0":
   version: 3.3.0
   resolution: "@quereus/quereus@npm:3.3.0"
   dependencies:
@@ -4482,6 +4482,20 @@ __metadata:
     temporal-polyfill: "npm:^0.3.0"
     uint8arrays: "npm:^5.1.0"
   checksum: 10c0/313983be6402873de08758a951c02df24f25035e1af5d68741653af2b0e6da26593ad96f00c411504fe6a57f7d44cb939a0a6cf2b45662f3c5868d651022413a
+  languageName: node
+  linkType: hard
+
+"@quereus/quereus@patch:@quereus/quereus@npm%3A3.3.0#~/.yarn/patches/@quereus-quereus-npm-3.3.0-5d38946b35.patch":
+  version: 3.3.0
+  resolution: "@quereus/quereus@patch:@quereus/quereus@npm%3A3.3.0#~/.yarn/patches/@quereus-quereus-npm-3.3.0-5d38946b35.patch::version=3.3.0&hash=7463a6"
+  dependencies:
+    debug: "npm:^4.4.3"
+    fast-json-patch: "npm:^3.1.1"
+    inheritree: "npm:^0.3.4"
+    moat-maker: "npm:^2.2.0"
+    temporal-polyfill: "npm:^0.3.0"
+    uint8arrays: "npm:^5.1.0"
+  checksum: 10c0/3bc656061d815aec0e02cefd25f88826f1517e39c2590d858791204c90ec842bb1fbea9a03e311985292ad94dd6cce4fa73875333f5e4158429c2332e75c2702
   languageName: node
   linkType: hard
 
@@ -6117,7 +6131,7 @@ __metadata:
     "@noble/curves": "npm:2.2.0"
     "@noble/hashes": "npm:2.2.0"
     "@optimystic/quereus-plugin-crypto": "npm:^0.14.0"
-    "@quereus/quereus": "npm:3.3.0"
+    "@quereus/quereus": "patch:@quereus/quereus@npm%3A3.3.0#~/.yarn/patches/@quereus-quereus-npm-3.3.0-5d38946b35.patch"
     "@react-native-async-storage/async-storage": "npm:^2.1.2"
     "@types/mocha": "npm:^10.0.10"
     "@types/node": "npm:^22.13.10"
@@ -20631,7 +20645,7 @@ __metadata:
     "@optimystic/quereus-plugin-optimystic": "npm:^0.13.5"
     "@quereus/isolation": "npm:3.3.0"
     "@quereus/plugin-react-native-leveldb": "npm:3.3.0"
-    "@quereus/quereus": "npm:3.3.0"
+    "@quereus/quereus": "patch:@quereus/quereus@npm%3A3.3.0#~/.yarn/patches/@quereus-quereus-npm-3.3.0-5d38946b35.patch"
     "@quereus/store": "npm:3.3.0"
     "@react-native-async-storage/async-storage": "npm:^2.1.2"
     "@react-native-clipboard/clipboard": "npm:^1.16.3"

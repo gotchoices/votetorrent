@@ -54,7 +54,9 @@
 		"@optimystic/quereus-plugin-optimystic": "patch:@optimystic/quereus-plugin-optimystic@npm%3A0.13.5#~/.yarn/patches/@optimystic-quereus-plugin-optimystic-npm-0.13.5-6fbe2eccab.patch",
 		"@noble/curves": "2.2.0",
 		"@noble/hashes": "2.2.0",
-		"@libp2p/crypto": "5.1.20"
+		"@libp2p/crypto": "5.1.20",
+		"@quereus/quereus@npm:^3.3.0": "patch:@quereus/quereus@npm%3A3.3.0#~/.yarn/patches/@quereus-quereus-npm-3.3.0-5d38946b35.patch",
+		"@quereus/quereus@npm:^3.2.1": "patch:@quereus/quereus@npm%3A3.3.0#~/.yarn/patches/@quereus-quereus-npm-3.3.0-5d38946b35.patch"
 	},
 	"packageManager": "yarn@4.7.0",
 	"engines": {
