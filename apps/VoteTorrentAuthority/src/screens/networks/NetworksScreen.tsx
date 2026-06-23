@@ -1,5 +1,5 @@
-import { ExtendedTheme, useTheme, useNavigation } from "@react-navigation/native";
-import React, { useCallback, useEffect, useLayoutEffect, useState } from "react";
+import { ExtendedTheme, useTheme, useNavigation, useFocusEffect } from "@react-navigation/native";
+import React, { useCallback, useLayoutEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ScrollView, StyleSheet, TouchableOpacity, View } from "react-native";
 import { multiaddr } from "@multiformats/multiaddr";
@@ -73,16 +73,28 @@ export default function NetworksScreen() {
 		setJoinError(t("qrScanUnavailable"));
 	}, [t]);
 
-	useEffect(() => {
-		async function loadNetworks() {
-			if (!networksEngine) {
-				return;
+	// Re-query recent networks whenever this screen regains focus (not just on
+	// mount / engine change) — otherwise a network created via AddNetwork and
+	// navigated-back-from would not appear until an app restart, since the engine
+	// reference is unchanged. useFocusEffect fires on every focus.
+	useFocusEffect(
+		useCallback(() => {
+			let cancelled = false;
+			async function loadNetworks() {
+				if (!networksEngine) {
+					return;
+				}
+				const networkRefs = await networksEngine.getRecentNetworks();
+				if (!cancelled) {
+					setRecentNetworkRefs(networkRefs);
+				}
 			}
-			const networkRefs = await networksEngine.getRecentNetworks();
-			setRecentNetworkRefs(networkRefs);
-		}
-		loadNetworks();
-	}, [networksEngine]);
+			loadNetworks();
+			return () => {
+				cancelled = true;
+			};
+		}, [networksEngine]),
+	);
 
 	// Phase 7 D-14: headerRight via useLayoutEffect (avoids first-frame flicker).
 	useLayoutEffect(() => {
