@@ -1,9 +1,7 @@
-import { createHash } from 'crypto';
 import { VOTETORRENT_SCHEMA_SQL } from './schema-sql.js';
 import type { Database } from '@quereus/quereus';
 import {
 	registerPlugin,
-	TEXT_TYPE,
 	BOOLEAN_TYPE,
 	createScalarFunction,
 	FunctionFlags,
@@ -11,7 +9,7 @@ import {
 import type { SqlValue } from '@quereus/quereus';
 // @ts-ignore TS2307 — exports subpath, see comment below
 import cryptoPlugin from '@optimystic/quereus-plugin-crypto/plugin';
-import { SignatureValid as jsSignatureValid } from '@optimystic/quereus-plugin-crypto';
+import { verify as jsSignatureValid } from '@optimystic/quereus-plugin-crypto';
 
 async function registerCustomFunctions(db: Database): Promise<void> {
 	const signatureValidSchema = createScalarFunction(
@@ -60,27 +58,6 @@ async function registerCustomFunctions(db: Database): Promise<void> {
 	);
 	db.registerFunction(isoDatetimeSchema);
 
-	const digestSchema = createScalarFunction(
-		{
-			name: 'Digest',
-			numArgs: -1,
-			flags: FunctionFlags.DETERMINISTIC,
-			returnType: {
-				typeClass: 'scalar',
-				logicalType: TEXT_TYPE,
-				nullable: true,
-				isReadOnly: true,
-			},
-		},
-		(...args: SqlValue[]) => {
-			const parts = args.map((a) =>
-				a === null || a === undefined ? '' : String(a),
-			);
-			const concat = parts.join('|');
-			return createHash('sha256').update(concat).digest('base64url');
-		},
-	);
-	db.registerFunction(digestSchema);
 }
 
 /**
@@ -90,9 +67,15 @@ async function registerCustomFunctions(db: Database): Promise<void> {
  *
  * Phase 14 D-07: separated from DDL so that re-attach paths call this without
  * triggering schema creation.
+ *
+ * Phase 29 (SIGN-05): the local `Digest` UDF (|‐join sha256) has been removed.
+ * The canonical injective `digest` from @optimystic/quereus-plugin-crypto@^0.14.0
+ * is registered here with explicit { algorithm: 'sha256', encoding: 'base64url' }
+ * config (D-02 single-source). ALL stored digest values from the old implementation
+ * are incompatible with the new encoding — fresh DB reset + re-sign required.
  */
 export async function registerDbPlugins(db: Database): Promise<void> {
-	await registerPlugin(db, cryptoPlugin);
+	await registerPlugin(db, cryptoPlugin, { algorithm: 'sha256', encoding: 'base64url' });
 	await registerCustomFunctions(db);
 }
 
