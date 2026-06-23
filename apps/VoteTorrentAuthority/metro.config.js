@@ -19,22 +19,24 @@ const {getDefaultConfig, mergeConfig} = require('@react-native/metro-config');
 
 const projectRoot = __dirname;
 const workspaceRoot = path.resolve(projectRoot, '../..');
-// spike 010: the portal: deps point at sibling monorepo source one level ABOVE
-// the votetorrent workspace (…/VOTETORRENT/{Optimystic,sereus}). Metro will not
-// read files outside its watched roots, so the super-root must be watched and
-// each portal'd package aliased to its source dir.
+// The portal: deps are now VENDORED in-repo at votetorrent/vendor/ (spike 014 option C) —
+// no longer sibling source above the workspace. vendor/ lives under workspaceRoot, which Metro
+// already watches, so no super-root watch is needed for portal resolution. superRoot is retained
+// only as a harmless watch root for any remaining out-of-tree dev scenarios.
 const superRoot = path.resolve(projectRoot, '../../..');
+const vendorRoot = path.resolve(workspaceRoot, 'vendor');
 const emptyShim = path.resolve(projectRoot, 'polyfills/empty.js');
 
-// Canonical package name → monorepo source dir (portal targets).
+// Canonical package name → in-repo vendored dir (portal targets).
+// @optimystic/quereus-plugin-optimystic is PUBLISHED (patched) — it resolves from node_modules,
+// so it is intentionally NOT aliased here (keeps the build free of any sibling-source path).
 const portalSourceModules = {
-  '@serfab/cadre-core': path.resolve(superRoot, 'sereus/packages/cadre-core'),
-  '@serfab/quereus-plugin-sereus': path.resolve(superRoot, 'sereus/packages/quereus-plugin-sereus'),
-  '@serfab/strand-proto': path.resolve(superRoot, 'sereus/packages/strand-proto'),
-  '@optimystic/db-core': path.resolve(superRoot, 'Optimystic/packages/db-core'),
-  '@optimystic/db-p2p': path.resolve(superRoot, 'Optimystic/packages/db-p2p'),
-  '@optimystic/db-p2p-storage-rn': path.resolve(superRoot, 'Optimystic/packages/db-p2p-storage-rn'),
-  '@optimystic/quereus-plugin-optimystic': path.resolve(superRoot, 'Optimystic/packages/quereus-plugin-optimystic'),
+  '@serfab/cadre-core': path.resolve(vendorRoot, '@serfab/cadre-core'),
+  '@serfab/quereus-plugin-sereus': path.resolve(vendorRoot, '@serfab/quereus-plugin-sereus'),
+  '@serfab/strand-proto': path.resolve(vendorRoot, '@serfab/strand-proto'),
+  '@optimystic/db-core': path.resolve(vendorRoot, '@optimystic/db-core'),
+  '@optimystic/db-p2p': path.resolve(vendorRoot, '@optimystic/db-p2p'),
+  '@optimystic/db-p2p-storage-rn': path.resolve(vendorRoot, '@optimystic/db-p2p-storage-rn'),
 };
 
 // --- browser-field maps (load each package's `browser` field and redirect Node file
