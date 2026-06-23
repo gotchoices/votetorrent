@@ -79,7 +79,7 @@ describe('Canonical digest binding (Wave-0 Nyquist scaffolds)', () => {
   // D-06: canonical binding verified by behavior (RED until Plan 29-02)
   // ---------------------------------------------------------------------------
 
-  it('D-06: Digest("hello") is a non-empty string and NOT the old |‐join SHA-256 (RED until Plan 29-02 lands canonical plugin)', async () => {
+  it('D-06: Digest("hello") equals the regenerated canonical vector AND differs from old |‐join SHA-256', async () => {
     // Use the 'single-string' vector (args: ['hello']) from DIGEST_VECTORS —
     // D-02: the vector is the single source of truth; do not inline independently.
     const vec = DIGEST_VECTORS.find((v) => v.label === 'single-string')
@@ -92,10 +92,14 @@ describe('Canonical digest binding (Wave-0 Nyquist scaffolds)', () => {
     // Shape assertion: must return a non-empty string.
     expect(row?.d, 'Digest("hello") must return a non-empty string').to.be.a('string').and.have.length.greaterThan(0)
 
-    // Canonical identity assertion: the returned value must NOT equal the old |‐join SHA-256.
-    // This assertion is RED today (the local digestSchema UDF returns the old value)
-    // and turns GREEN in Plan 29-02 when the canonical plugin is registered instead.
-    expect(row?.d, 'Digest("hello") must NOT equal the old |‐join SHA-256 — if this fails, the stale UDF is still active').to.not.equal(OLD_PIJOIN_HELLO)
+    // Canonical equality assertion (D-02/D-06 GREEN gate — Plan 29-03):
+    // The returned value must equal the regenerated canonical expected from DIGEST_VECTORS.
+    // This proves binding-by-behavior: the live Digest() and the fixture agree.
+    expect(row?.d, 'Digest("hello") must equal the canonical injective vector expected (DIGEST_VECTORS["single-string"])').to.equal(vec!.expected)
+
+    // Inequality assertion: must NOT equal the old |‐join SHA-256 value.
+    // If this fails, the stale UDF is still active — the plugin swap did not take effect.
+    expect(row?.d, 'Digest("hello") must NOT equal the old |‐join SHA-256 — plugin swap must be active').to.not.equal(OLD_PIJOIN_HELLO)
   })
 
   // ---------------------------------------------------------------------------

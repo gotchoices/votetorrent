@@ -45,6 +45,28 @@ describe('Digest cross-runtime parity (DEBT-04)', () => {
     })
   }
 
+  // SC2 injectivity assertions — these pairs MUST produce different digests.
+  // Proves the canonical encodeFields encoding eliminates the SIGN-05 collision class.
+
+  it('SC2: Digest("a|b","c") !== Digest("a","b|c") — delimiter in payload injective', async () => {
+    const r1 = (await db.prepare('select Digest(:a0, :a1) as d').get({ a0: 'a|b', a1: 'c' })) as { d: unknown }
+    const r2 = (await db.prepare('select Digest(:a0, :a1) as d').get({ a0: 'a', a1: 'b|c' })) as { d: unknown }
+    expect(r1.d, 'Digest("a|b","c") must be a non-empty string').to.be.a('string').and.have.length.greaterThan(0)
+    expect(r1.d).to.not.equal(r2.d)
+  })
+
+  it('SC2: Digest("x", NULL) !== Digest("x", "") — NULL vs empty string injective', async () => {
+    const r1 = (await db.prepare('select Digest(:a0, :a1) as d').get({ a0: 'x', a1: null })) as { d: unknown }
+    const r2 = (await db.prepare('select Digest(:a0, :a1) as d').get({ a0: 'x', a1: '' })) as { d: unknown }
+    expect(r1.d).to.not.equal(r2.d)
+  })
+
+  it('SC2: Digest(1, "a") !== Digest("1", "a") — integer vs string injective', async () => {
+    const r1 = (await db.prepare('select Digest(:a0, :a1) as d').get({ a0: 1, a1: 'a' })) as { d: unknown }
+    const r2 = (await db.prepare('select Digest(:a0, :a1) as d').get({ a0: '1', a1: 'a' })) as { d: unknown }
+    expect(r1.d).to.not.equal(r2.d)
+  })
+
   // Lock the no-arg .digest() → Uint8Array contract (multiformats / D-05).
   //
   // On Node this exercises the standard `crypto.createHash()` path; on Hermes
