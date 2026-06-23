@@ -87,6 +87,10 @@ typings/
 dist
 out
 
+# Vendored portal packages ship prebuilt dist — keep them tracked (overrides the `dist` rule above).
+!vendor/**/dist
+!vendor/**/dist/**
+
 .planning
 
 .claude

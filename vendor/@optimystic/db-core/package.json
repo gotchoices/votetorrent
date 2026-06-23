@@ -1,0 +1,73 @@
+{
+  "name": "@optimystic/db-core",
+  "version": "0.13.5",
+  "type": "module",
+  "description": "Core database functionality for Optimystic",
+  "main": "dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
+  "files": [
+    "src",
+    "dist",
+    "!dist/test",
+    "!**/*.tsbuildinfo"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "import": "./dist/src/index.js"
+    },
+    "./test": {
+      "types": "./dist/test/test-transactor.d.ts",
+      "import": "./dist/test/test-transactor.js"
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/gotchoices/optimystic.git",
+    "directory": "packages/db-core"
+  },
+  "author": "Got Choices Foundation",
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "optimystic",
+    "database",
+    "core",
+    "distributed",
+    "transactional",
+    "acid"
+  ],
+  "scripts": {
+    "clean": "rimraf dist",
+    "build": "tsc",
+    "test": "node --import ./register.mjs node_modules/mocha/bin/mocha.js \"test/**/*.spec.ts\" --colors --reporter min",
+    "test:verbose": "node --import ./register.mjs node_modules/mocha/bin/mocha.js \"test/**/*.spec.ts\" --colors --reporter spec"
+  },
+  "devDependencies": {
+    "@libp2p/crypto": "^5.1.13",
+    "@libp2p/interface": "^3.2.4",
+    "@libp2p/peer-id": "^6.0.4",
+    "@libp2p/peer-id-factory": "^4.2.4",
+    "@multiformats/multiaddr": "^13.0.1",
+    "@types/chai": "^5.2.3",
+    "@types/chai-as-promised": "^8.0.2",
+    "@types/debug": "^4.1.12",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^25.1.0",
+    "chai": "^6.2.2",
+    "chai-as-promised": "^8.0.2",
+    "fast-check": "^4.7.0",
+    "mocha": "^11.7.5",
+    "rimraf": "^6.1.2",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "@noble/hashes": "^2.0.1",
+    "debug": "^4.4.3",
+    "multiformats": "^13.4.2",
+    "uint8arrays": "^5.1.0"
+  }
+}

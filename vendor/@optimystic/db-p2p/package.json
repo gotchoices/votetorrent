@@ -1,0 +1,98 @@
+{
+  "name": "@optimystic/db-p2p",
+  "version": "0.13.6",
+  "type": "module",
+  "description": "P2P database functionality for Optimystic",
+  "main": "dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
+  "files": [
+    "src",
+    "dist",
+    "!dist/test",
+    "!**/*.tsbuildinfo"
+  ],
+  "exports": {
+    ".": {
+      "react-native": {
+        "types": "./dist/src/rn.d.ts",
+        "import": "./dist/src/rn.js"
+      },
+      "types": "./dist/src/index.d.ts",
+      "import": "./dist/src/index.js"
+    },
+    "./rn": {
+      "types": "./dist/src/rn.d.ts",
+      "import": "./dist/src/rn.js"
+    },
+    "./testing": {
+      "types": "./dist/src/testing/index.d.ts",
+      "import": "./dist/src/testing/index.js"
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/gotchoices/optimystic.git",
+    "directory": "packages/db-p2p"
+  },
+  "author": "Got Choices Foundation",
+  "license": "MIT",
+  "keywords": [
+    "optimystic",
+    "database",
+    "p2p",
+    "peer-to-peer",
+    "libp2p",
+    "distributed",
+    "dht",
+    "gossipsub"
+  ],
+  "scripts": {
+    "clean": "rimraf dist",
+    "build": "tsc",
+    "test": "node --import ./register.mjs node_modules/mocha/bin/mocha.js \"test/**/*.spec.ts\" --colors --reporter min",
+    "test:verbose": "node --import ./register.mjs node_modules/mocha/bin/mocha.js \"test/**/*.spec.ts\" --colors --reporter spec",
+    "test:integration": "OPTIMYSTIC_INTEGRATION=1 node --import ./register.mjs node_modules/mocha/bin/mocha.js \"test/**/*.integration.spec.ts\" --colors --reporter spec"
+  },
+  "devDependencies": {
+    "@types/chai": "^5.2.3",
+    "@types/debug": "^4.1.12",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^25.1.0",
+    "chai": "^6.2.2",
+    "mocha": "^11.7.5",
+    "rimraf": "^6.1.2",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "@chainsafe/libp2p-gossipsub": "^14.1.2",
+    "@chainsafe/libp2p-noise": "^17.0.0",
+    "@chainsafe/libp2p-yamux": "^8.0.1",
+    "@libp2p/autonat": "^3.0.21",
+    "@libp2p/bootstrap": "^12.0.11",
+    "@libp2p/circuit-relay-v2": "^4.1.3",
+    "@libp2p/crypto": "^5.1.19",
+    "@libp2p/dcutr": "^3.0.21",
+    "@libp2p/identify": "^4.0.10",
+    "@libp2p/interface": "^3.1.0",
+    "@libp2p/kad-dht": "^16.1.3",
+    "@libp2p/peer-id": "^6.0.4",
+    "@libp2p/ping": "^3.0.10",
+    "@libp2p/tcp": "^11.0.10",
+    "@libp2p/websockets": "^10.1.3",
+    "@multiformats/multiaddr": "^13.0.1",
+    "@optimystic/db-core": "workspace:^",
+    "async-mutex": "^0.5.0",
+    "debug": "^4.4.3",
+    "it-all": "^3.0.9",
+    "it-length-prefixed": "^10.0.1",
+    "it-pipe": "^3.0.1",
+    "it-pushable": "^3.2.3",
+    "libp2p": "^3.1.3",
+    "multiformats": "^13.4.2",
+    "p2p-fret": "^0.5.0",
+    "protons-runtime": "^6.0.0",
+    "uint8arraylist": "^2.4.8",
+    "uint8arrays": "^5.1.0"
+  }
+}
