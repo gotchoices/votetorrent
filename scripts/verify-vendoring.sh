@@ -107,7 +107,7 @@ if [ "${SKIP_INSTALL}" -eq 1 ]; then
   echo "[verify-vendoring] Step 1: yarn install — SKIPPED (--skip-install)"
 else
   echo "[verify-vendoring] Step 1: yarn install ..."
-  if yarn install; then
+  if yarn install --immutable; then
     echo "[verify-vendoring] Step 1 PASS: yarn install exited 0"
   else
     echo "[verify-vendoring] Step 1 FAIL: yarn install exited non-zero" >&2
@@ -186,7 +186,7 @@ fi
 echo "[verify-vendoring] Step 3b: connectionGater canary in vendor/@serfab/cadre-core/dist ..."
 
 CADRE_DIST="vendor/@serfab/cadre-core/dist"
-if grep -rl "connectionGater" "${CADRE_DIST}" | grep -qE "(cadre-node|strand-instance-manager)"; then
+if grep -rl --include='*.js' "connectionGater" "${CADRE_DIST}" | grep -qE '(cadre-node|strand-instance-manager)\.js$'; then
   echo "[verify-vendoring] Step 3b PASS: connectionGater present in ${CADRE_DIST}"
 else
   echo "[verify-vendoring] Step 3b FAIL: connectionGater NOT found in ${CADRE_DIST}" >&2
