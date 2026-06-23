@@ -3188,22 +3188,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@libp2p/crypto@npm:^5.0.0, @libp2p/crypto@npm:^5.1.10, @libp2p/crypto@npm:^5.1.13, @libp2p/crypto@npm:^5.1.18, @libp2p/crypto@npm:^5.1.8, @libp2p/crypto@npm:^5.1.9":
-  version: 5.1.18
-  resolution: "@libp2p/crypto@npm:5.1.18"
-  dependencies:
-    "@libp2p/interface": "npm:^3.2.2"
-    "@noble/curves": "npm:^2.0.1"
-    "@noble/hashes": "npm:^2.0.1"
-    multiformats: "npm:^13.4.0"
-    protons-runtime: "npm:^6.0.1"
-    uint8arraylist: "npm:^2.4.8"
-    uint8arrays: "npm:^5.1.0"
-  checksum: 10c0/54337998965ca0863b7e6a17dc66b91146a072615adc527ecb6e5ffbd022a2e0c09ece13ba5dff311a2430f34dd7722d96efc5a5c7c66df0a1321c8d2d6961ff
-  languageName: node
-  linkType: hard
-
-"@libp2p/crypto@npm:^5.1.19, @libp2p/crypto@npm:^5.1.20":
+"@libp2p/crypto@npm:5.1.20":
   version: 5.1.20
   resolution: "@libp2p/crypto@npm:5.1.20"
   dependencies:
@@ -6129,8 +6114,8 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@votetorrent/vote-engine@workspace:packages/vote-engine"
   dependencies:
-    "@noble/curves": "npm:^2"
-    "@noble/hashes": "npm:^1.8.0"
+    "@noble/curves": "npm:2.2.0"
+    "@noble/hashes": "npm:2.2.0"
     "@optimystic/quereus-plugin-crypto": "npm:^0.14.0"
     "@quereus/quereus": "npm:3.3.0"
     "@react-native-async-storage/async-storage": "npm:^2.1.2"

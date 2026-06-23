@@ -53,7 +53,8 @@
 		"p2p-fret": "npm:^0.4.0",
 		"@optimystic/quereus-plugin-optimystic": "patch:@optimystic/quereus-plugin-optimystic@npm%3A0.13.5#~/.yarn/patches/@optimystic-quereus-plugin-optimystic-npm-0.13.5-6fbe2eccab.patch",
 		"@noble/curves": "2.2.0",
-		"@noble/hashes": "2.2.0"
+		"@noble/hashes": "2.2.0",
+		"@libp2p/crypto": "5.1.20"
 	},
 	"packageManager": "yarn@4.7.0",
 	"engines": {

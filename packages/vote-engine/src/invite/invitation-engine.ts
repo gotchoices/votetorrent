@@ -1,6 +1,6 @@
 import { bytesToHex, hexToBytes } from '@noble/curves/utils.js'
 import { secp256k1 } from '@noble/curves/secp256k1.js'
-import { sha256 } from '@noble/hashes/sha2'
+import { sha256 } from '@noble/hashes/sha2.js'
 import { MisuseError, QuereusError } from '@quereus/quereus'
 import type { EngineContext } from '../types.js'
 import { nowCanonicalDatetime } from '../utils.js'

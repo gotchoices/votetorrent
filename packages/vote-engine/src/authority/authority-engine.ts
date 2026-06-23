@@ -1,6 +1,6 @@
 import { bytesToHex } from '@noble/curves/utils.js';
 import { secp256k1 } from '@noble/curves/secp256k1.js';
-import { sha256 } from '@noble/hashes/sha2';
+import { sha256 } from '@noble/hashes/sha2.js';
 
 // D-06 (Phase 28): Permanent production boot guard — verify-side noble binding check.
 // Mirrors device-signer.ts assertion (D-05). Catches a re-split on the verify side.

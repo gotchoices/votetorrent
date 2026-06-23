@@ -1,5 +1,6 @@
 import { bytesToHex, hexToBytes } from '@noble/curves/utils.js'
-import { sha256 } from '@noble/hashes/sha2'
+import { sha256 } from '@noble/hashes/sha2.js'
+import { utf8ToBytes } from '@noble/hashes/utils.js'
 
 // sql data validation helpers
 export const asText = (value: unknown, field: string): string => {
@@ -70,7 +71,9 @@ export function digestToBytes (d: unknown): Uint8Array {
 
 // H16 hash function
 export function H16 (input: string): string {
-  const hash = sha256(input)
+  // noble/hashes v2 requires bytes (v1 accepted strings and applied utf8ToBytes
+  // internally); sha256(utf8ToBytes(input)) is byte-identical to the v1 result.
+  const hash = sha256(utf8ToBytes(input))
   // Take first 16 bytes (128 bits) and convert to hex string
   return Array.from(hash.slice(0, 16))
     .map((b) => b.toString(16).padStart(2, '0'))

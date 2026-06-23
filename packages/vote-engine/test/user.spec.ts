@@ -9,7 +9,7 @@ import {
 } from '@votetorrent/vote-core'
 import { bytesToHex, hexToBytes } from '@noble/curves/utils.js'
 import { secp256k1 } from '@noble/curves/secp256k1.js'
-import { sha256 } from '@noble/hashes/sha2'
+import { sha256 } from '@noble/hashes/sha2.js'
 import { UserCreateBuilder } from '../src/user/builders/user-create-builder.js'
 import { UserAddKeyBuilder } from '../src/user/builders/user-add-key-builder.js'
 import { UserReviseBuilder } from '../src/user/builders/user-revise-builder.js'

@@ -1,7 +1,7 @@
 import { expect } from 'chai'
 import { bytesToHex } from '@noble/curves/utils.js'
 import { secp256k1 } from '@noble/curves/secp256k1.js'
-import { sha256 } from '@noble/hashes/sha2'
+import { sha256 } from '@noble/hashes/sha2.js'
 import { InvitationEngine } from '../src/invite/invitation-engine.js'
 import { AsyncStorage } from './shims/react-native.js'
 import {

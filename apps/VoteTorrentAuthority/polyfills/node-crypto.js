@@ -4,8 +4,8 @@
 //   import crypto from 'crypto';
 //   crypto.createHash('sha256').update(input).digest()
 
-import { sha256 } from '@noble/hashes/sha2';
-import { sha512 } from '@noble/hashes/sha2';
+import { sha256 } from '@noble/hashes/sha2.js';
+import { sha512 } from '@noble/hashes/sha2.js';
 
 const hashFns = {
 	'sha256': sha256,

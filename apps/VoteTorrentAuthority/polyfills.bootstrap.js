@@ -49,7 +49,7 @@ if (globalThis.crypto && typeof globalThis.crypto.randomUUID !== 'function') {
 //    SubtleCrypto method is installed as a throwing stub that NAMES the gap so
 //    such a failure is immediately diagnosable instead of latent.
 if (globalThis.crypto && !globalThis.crypto.subtle) {
-  const {sha256, sha512} = require('@noble/hashes/sha2');
+  const {sha256, sha512} = require('@noble/hashes/sha2.js');
   const notPolyfilled = name =>
     function () {
       return Promise.reject(

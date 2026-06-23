@@ -1,7 +1,7 @@
 import { Database } from '@quereus/quereus'
 import { bytesToHex } from '@noble/curves/utils.js'
 import { secp256k1 } from '@noble/curves/secp256k1.js'
-import { sha256 } from '@noble/hashes/sha2'
+import { sha256 } from '@noble/hashes/sha2.js'
 import { ElectionType, UserKeyType } from '@votetorrent/vote-core'
 import { expect } from 'chai'
 import { AuthorityEngine } from '../src/authority/authority-engine'
