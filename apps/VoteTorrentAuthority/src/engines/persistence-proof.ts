@@ -37,6 +37,7 @@ import { NetworksEngine, ElectionsEngine, peekNextElectionTid, H16, LocalStorage
 import type { DbFactory } from '@votetorrent/vote-engine/rn';
 import { rnDbFactory } from './rn-db-factory';
 import { getOrCreateDeviceUser, getDevicePrivKeyHex } from './device-user';
+import { createDeviceSigner } from './device-signer';
 
 // ---------------------------------------------------------------------------
 // AsyncStorage keys used by the proof harness
@@ -192,15 +193,21 @@ export async function runFullChainWritePhase(
     throw new Error('[proof] full-chain write: user has no active key');
   }
 
+  // D-01 key boundary: the engine signing seams take an app-layer `sign` callback —
+  // the device private key NEVER crosses into vote-engine. createDeviceSigner closes
+  // over the stored key and calls secp256k1.sign with @noble v2 defaults (prehash:true,
+  // WR-10). (Earlier proof-harness builds passed privKeyHex positionally, which the
+  // post-Phase-21 callback signature interprets as the `sign` arg — "sign is not a
+  // function".) The signature's signerUserId/signerKey are derived inside the callback.
+  const sign = await createDeviceSigner('Proof Runner');
+
   const electionsEngine = new ElectionsEngine(ctx);
   const signingNonce = await (electionsEngine as unknown as {
     seedElectionSigning(
       electionFields: { id: string; authorityId: string; title: string; date: number; revisionDeadline: number; ballotDeadline: number; type: ElectionType },
-      privKeyHex: string,
-      signerUserId: string,
-      signerKey: string,
+      sign: (digest: Uint8Array) => Promise<import('@votetorrent/vote-core').Signature>,
     ): Promise<string>;
-  }).seedElectionSigning(electionFields, privKeyHex, user.id, signerKey);
+  }).seedElectionSigning(electionFields, sign);
   console.log('[proof] full-chain write: election signing seam complete, nonce=' + signingNonce);
 
   // Step 4b: sign the initial ElectionRevision (Revision=0).
@@ -241,12 +248,10 @@ export async function runFullChainWritePhase(
         keyholderThreshold: number;
       },
       tid: number,
-      privKeyHex: string,
-      signerUserId: string,
-      signerKey: string,
+      sign: (digest: Uint8Array) => Promise<import('@votetorrent/vote-core').Signature>,
     ): Promise<string>;
   }).seedElectionRevisionSigning(
-    electionId, authorityId, revisionFields, revTid, privKeyHex, user.id, signerKey,
+    electionId, authorityId, revisionFields, revTid, sign,
   );
   console.log('[proof] full-chain write: revision signing seam complete, revNonce=' + revisionSigningNonce);
 
