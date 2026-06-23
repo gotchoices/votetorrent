@@ -32,9 +32,12 @@
  * lists each consumer as its own branch, so the guard sees the full surface.
  * (`--json` is NOT supported by this yarn 4.7.0 subcommand.)
  *
- * On the reconciled tree (quereus 3.3.0, @optimystic family 0.13.5) the full known-allowed
- * @optimystic/quereus-plugin-* surface is BOTH:
- *   @optimystic/quereus-plugin-crypto@npm:0.13.5
+ * Phase 29 (SIGN-05): packages/vote-engine bumped quereus-plugin-crypto to ^0.14.0
+ * (resolves to 0.14.1). Other workspace consumers (cadre-core, quereus-plugin-sereus
+ * portals) still depend on 0.13.5 transitively. On the reconciled tree (quereus 3.3.0)
+ * the full known-allowed @optimystic/quereus-plugin-* surface is ALL THREE:
+ *   @optimystic/quereus-plugin-crypto@npm:0.13.5  — portal workspaces (unchanged)
+ *   @optimystic/quereus-plugin-crypto@npm:0.14.1  — vote-engine (upgraded)
  *   @optimystic/quereus-plugin-optimystic@npm:0.13.5
  * (the optimystic plugin was previously folded into cadre-core's summary and invisible;
  * the detail drill-down now surfaces it).
@@ -59,13 +62,18 @@ const execAsync = promisify(exec);
 // descriptors that are currently expected to appear as ✘ in
 // `yarn explain peer-requirements` (across the EXPANDED detail trees).
 //
-// On the reconciled tree (quereus 3.3.0, @optimystic family 0.13.5) both
-// plugins peer-want ~0.16.2 against the in-use 3.3.0:
-//   @optimystic/quereus-plugin-crypto@npm:0.13.5
-//   @optimystic/quereus-plugin-optimystic@npm:0.13.5
+// Phase 29 (SIGN-05): @optimystic/quereus-plugin-crypto bumped in
+// packages/vote-engine from 0.13.5 → ^0.14.0 (resolves to 0.14.1 on npm).
+// Other workspace consumers (@serfab/cadre-core, @serfab/quereus-plugin-sereus
+// portals) still depend on 0.13.5 transitively and produce their own ✘ lines.
+// The reconciled tree therefore has BOTH 0.13.5 and 0.14.1 as expected mismatches:
+//   @optimystic/quereus-plugin-crypto@npm:0.13.5  — cadre-core / quereus-plugin-sereus portals
+//   @optimystic/quereus-plugin-crypto@npm:0.14.1  — vote-engine (upgraded)
+//   @optimystic/quereus-plugin-optimystic@npm:0.13.5  — VoteTorrentAuthority
 // ---------------------------------------------------------------------------
 const KNOWN_ALLOWED = new Set([
   '@optimystic/quereus-plugin-crypto@npm:0.13.5',
+  '@optimystic/quereus-plugin-crypto@npm:0.14.1',
   '@optimystic/quereus-plugin-optimystic@npm:0.13.5',
 ]);
 
