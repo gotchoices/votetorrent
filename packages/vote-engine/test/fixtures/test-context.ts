@@ -223,7 +223,7 @@ export async function seedElectionSigning (
       nonce,
       authorityId,
       adminEffectiveAt,
-      tid: String(tid),
+      tid: tid, // INTEGER — must be a JS number (not String(tid)): canonical Digest(TAG_INT) vs TEXT causes InsertValid mismatch
       id: e.id,
       title: e.title,
       date: toCanonicalDatetime(e.date),
