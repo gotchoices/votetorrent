@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from "react";
 import type { PropsWithChildren } from "react";
-import type { INetworksEngine, IDefaultUserEngine } from "@votetorrent/vote-core";
+import type { INetworksEngine, IDefaultUserEngine, NetworkReference } from "@votetorrent/vote-core";
 import { ActivityIndicator, Text, TouchableOpacity, View } from "react-native";
 import { hideSplash } from "react-native-splash-view";
 import { EngineFactory } from "../engines/engine-factory";
@@ -15,6 +15,15 @@ interface AppContextType {
 	hasEngine: (engineName: string) => boolean;
 	isInitialized: boolean;
 	hasNetwork: boolean;
+	/**
+	 * Make `networkRef` the active/current network for this session WITHOUT requiring
+	 * an app restart. Mirrors the boot re-attach: bind the device user, open the network
+	 * (cache-first — safe for a just-created or a recent network), re-point the engine
+	 * factory, and flip `hasNetwork` so gated screens (Elections/Authorities) render.
+	 * Previously selection only took effect on the next boot (hasNetwork was set only in
+	 * the init effect), so a freshly-created or just-selected network appeared "not selected".
+	 */
+	selectNetwork: (networkRef: NetworkReference) => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType | null>(null);
@@ -55,6 +64,21 @@ export function AppProvider({ children }: PropsWithChildren) {
 	// hasEngine delegates to factory's cache (SWAP-01).
 	const hasEngine = useCallback((engineName: string) => {
 		return engineFactoryRef.current?.hasEngine(engineName) ?? false;
+	}, []);
+
+	// Activate a network at runtime (create / picker "Select") without a reboot.
+	// Mirrors the boot re-attach block below so behavior is identical to a restart.
+	const selectNetwork = useCallback(async (networkRef: NetworkReference) => {
+		const factory = engineFactoryRef.current!;
+		const defaultUserEng = await factory.getEngine<IDefaultUserEngine>("defaultUser");
+		const defaultUser = await defaultUserEng.get();
+		const user = await getOrCreateDeviceUser(defaultUser?.name ?? "Device User");
+		factory.setCurrentUser(user);
+		// open() is cache-first (D-06): a just-created network hits the cache; a recent
+		// network re-attaches. It also writes networkRef to the recentNetworks list.
+		await factory.getNetworksEngine().open(networkRef, user);
+		await factory.getEngine("network", networkRef);
+		setHasNetwork(true);
 	}, []);
 
 	// ENG-05: register the CadreNode live peer-count source with the factory so
@@ -189,6 +213,7 @@ export function AppProvider({ children }: PropsWithChildren) {
 				hasEngine,
 				isInitialized,
 				hasNetwork,
+				selectNetwork,
 			}}
 		>
 			{children}

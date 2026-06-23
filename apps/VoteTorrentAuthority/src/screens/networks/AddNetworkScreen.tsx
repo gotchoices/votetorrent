@@ -13,14 +13,14 @@ import { globalStyles } from "../../theme/styles";
 import { CustomTextInput } from "../../components/CustomTextInput";
 import { useApp } from "../../providers/AppProvider";
 import { getOrCreateDeviceUser } from "../../engines/device-user";
-import type { IDefaultUserEngine, INetworkEngine, INetworksEngine, NetworkInit, NetworkReference } from "@votetorrent/vote-core";
+import type { IDefaultUserEngine, INetworksEngine, NetworkInit, NetworkReference } from "@votetorrent/vote-core";
 import { ElectionType } from "@votetorrent/vote-core";
 import type { RootStackParamList } from "../../navigation/types";
 
 export default function AddNetworkScreen() {
 	const { colors } = useTheme() as ExtendedTheme;
 	const { t } = useTranslation();
-	const { getEngine, networksEngine } = useApp();
+	const { getEngine, networksEngine, selectNetwork } = useApp();
 	const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 	const [networkName, setNetworkName] = useState("");
 	const [networkImageUrl, setNetworkImageUrl] = useState("");
@@ -148,7 +148,11 @@ export default function AddNetworkScreen() {
 			// This allows sibling engines (elections, signing, etc.) to resolve the
 			// established ctx immediately after create without a separate open().
 			const networkRef = (networkEngine as unknown as { init: NetworkReference }).init;
-			await getEngine<INetworkEngine>("network", networkRef);
+			// Auto-select the just-created network: bind it AND flip hasNetwork so the
+			// app lands on the populated network home instead of "No network selected".
+			// (selectNetwork re-establishes currentNetworkHash like the old getEngine call,
+			// plus sets hasNetwork — Pitfall 4 still satisfied via its internal getEngine.)
+			await selectNetwork(networkRef);
 		} catch (err) {
 			console.error("handleCreate error:", err);
 			setErrorMessage(err instanceof Error ? err.message : String(err));

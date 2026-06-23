@@ -35,7 +35,7 @@ export function NetworkDetailsScreen() {
 	const [primaryAuthorityEngine, setPrimaryAuthorityEngine] = useState<IAuthorityEngine>();
 	const [primaryAuthorityDetails, setPrimaryAuthorityDetails] = useState<AuthorityDetails>();
 	const [primaryAuthorityAdmin, setPrimaryAuthorityAdmin] = useState<AdminDetails>();
-	const { getEngine } = useApp();
+	const { getEngine, selectNetwork } = useApp();
 	const { t } = useTranslation();
 	const { colors } = useTheme() as ExtendedTheme;
 	const navigation = useNavigation<NavigationProp>();
@@ -131,7 +131,10 @@ export function NetworkDetailsScreen() {
 	// resolve against the now-selected network.
 	const handleSelectNetwork = async () => {
 		try {
-			await getEngine<INetworkEngine>("network", networkRef as NetworkReference);
+			// selectNetwork() binds the network AND flips AppProvider.hasNetwork so the
+			// gated screens (Elections/Authorities) render immediately — previously this
+			// only re-pointed the engine, leaving hasNetwork false until the next reboot.
+			await selectNetwork(networkRef as NetworkReference);
 			navigation.goBack();
 		} catch (error) {
 			console.error("Failed to select network:", error);
