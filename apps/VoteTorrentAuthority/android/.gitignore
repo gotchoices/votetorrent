@@ -1,0 +1,4 @@
+
+# Release signing keystore — never commit (regenerate per vendor/VENDOR.md / BUILD note)
+*.keystore
+!debug.keystore
