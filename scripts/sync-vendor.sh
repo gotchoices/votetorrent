@@ -111,7 +111,7 @@ echo "[sync-vendor] Step 3 PASS: @serfab/cadre-core synced"
 
 echo "[sync-vendor] Step 4: asserting connectionGater canary in re-synced cadre-core dist ..."
 CADRE_DIST="vendor/@serfab/cadre-core/dist"
-if grep -rl "connectionGater" "${CADRE_DIST}" | grep -qE "(cadre-node|strand-instance-manager)"; then
+if grep -rl --include='*.js' "connectionGater" "${CADRE_DIST}" | grep -qE '(cadre-node|strand-instance-manager)\.js$'; then
   echo "[sync-vendor] Step 4 PASS: connectionGater present in ${CADRE_DIST}"
 else
   echo "[sync-vendor] Step 4 FAIL: connectionGater NOT found in ${CADRE_DIST} after sync." >&2
