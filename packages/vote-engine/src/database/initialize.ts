@@ -27,10 +27,19 @@ async function registerCustomFunctions(db: Database): Promise<void> {
 		(digest: SqlValue, signature: SqlValue, publicKey: SqlValue) => {
 			if (!digest || !signature || !publicKey) return false;
 			try {
+				// Phase 29 WR-01: `verify` defaults all encodings to 'base64url', but
+				// VoteTorrent feeds a base64url digest (the `Digest()` output) with a
+				// HEX signature and HEX public key (see signing builders / fixtures/keys.ts).
+				// Pin the encodings explicitly so SQL-level signature validation succeeds
+				// for real signatures once the schema's `-- TODO fix signature` is wired up.
 				return jsSignatureValid(
 					String(digest),
 					String(signature),
 					String(publicKey),
+					'secp256k1',
+					'base64url', // inputEncoding — digest is base64url (Digest() output)
+					'hex', // sigEncoding — signatures are hex-encoded
+					'hex', // keyEncoding — public keys are hex-encoded
 				);
 			} catch {
 				return false;
