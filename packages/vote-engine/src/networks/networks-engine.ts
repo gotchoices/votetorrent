@@ -393,12 +393,40 @@ export class NetworksEngine implements INetworksEngine {
 	private async createContext(user: User | undefined, hash: string): Promise<EngineContext> {
 		const db = await this.dbFactory(hash);           // D-01: factory, not new Database()
 		await registerDbPlugins(db);                     // D-07: always-run (plugins/functions)
-		const initialized = await isSchemaInitialized(db); // D-08: sentinel check
-		if (!initialized) {
-			await initDB(db);                            // D-07: DDL only on fresh store
-			await ensureTidSequence(db);                 // D-12: create TidSequence table
-			await writeSchemaVersionMarker(db);          // D-08: plant the marker
+
+		// REL-01 strand-aware gate: detect whether the Database already had the App schema
+		// applied by StrandDatabase.initialize() (cadre-core strand path).
+		//
+		// 'App' → strand path: StrandDatabase.executeSchema() ran `declare schema App { <DDL> }
+		//         apply schema App;` before handing the handle to this factory. Running initDB
+		//         here would declare a SECOND `main` schema over the same tree://default/{table}
+		//         LevelDB collections, causing dual-Table ownership and stalling every subsequent
+		//         INSERT (release-build infinite spinner / hang).
+		//         FIX: skip initDB entirely; run only the idempotent marker helpers.
+		//
+		// 'main' / absent → rnDbFactory path (dev / in-memory): no prior schema declaration.
+		//         Fall through to the existing isSchemaInitialized/initDB gate verbatim.
+		//
+		// Mirrors the open() guard at line ~334 which uses hasDeclaredSchema('main')
+		// for the re-attach check — same pattern, different schema name (Pitfall 1: use
+		// 'App' not 'main'; 'main' would never match on the strand path and the bug persists).
+		const isStrandDb = db.declaredSchemaManager.hasDeclaredSchema('App');
+
+		if (isStrandDb) {
+			// Strand path: App schema already applied — skip initDB (no second main declaration).
+			// Plant only the idempotent markers so isSchemaInitialized and readTidCounter work.
+			await ensureTidSequence(db);                 // D-12: create TidSequence table (idempotent)
+			await writeSchemaVersionMarker(db);          // D-08: plant the SchemaVersion marker
+		} else {
+			// rnDbFactory path (dev / in-memory): existing logic verbatim (D-08/D-07/D-12).
+			const initialized = await isSchemaInitialized(db); // D-08: sentinel check
+			if (!initialized) {
+				await initDB(db);                        // D-07: DDL only on fresh store
+				await ensureTidSequence(db);             // D-12: create TidSequence table
+				await writeSchemaVersionMarker(db);      // D-08: plant the marker
+			}
 		}
+
 		const seed = await readTidCounter(db);           // D-12: seed per-context Tid
 		this.tidCounters.set(hash, seed);
 		const ctx: EngineContext = { db, user };
