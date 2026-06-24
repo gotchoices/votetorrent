@@ -116,6 +116,13 @@ export interface NetworkConfig {
      */
     connectionGater?: unknown;
     /**
+     * Strand-cohort bootstrap multiaddrs forwarded as `bootstrapNodes` to each
+     * per-strand libp2p node so strand nodes join an existing cohort instead of
+     * forming an isolated 1-node ring (REPL-01). Empty/unset ⇒ bootstrap-mode
+     * solo strand (today's behavior; never hangs a solo node).
+     */
+    strandBootstrapNodes?: string[];
+    /**
      * Enable circuit relay server - allows this node to relay connections for other peers.
      * When undefined, defaults to true for storage profile nodes (they typically have
      * better connectivity and uptime), false for transaction profile nodes.

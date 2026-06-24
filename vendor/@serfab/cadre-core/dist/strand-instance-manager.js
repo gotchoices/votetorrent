@@ -89,8 +89,8 @@ class StrandInstanceManager {
       const node = await createLibp2pNode({
         port: 0,
         // Random port
-        bootstrapNodes: [],
-        // Will be populated from strand cohort
+        bootstrapNodes: config.network?.strandBootstrapNodes ?? [],
+        // cohort bootstrap forward (REPL-01)
         networkName: `strand-${strandId}`,
         storage: strandStorage,
         fretProfile: config.profile === "storage" ? "core" : "edge",
