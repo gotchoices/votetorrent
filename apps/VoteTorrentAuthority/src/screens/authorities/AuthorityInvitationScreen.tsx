@@ -336,7 +336,7 @@ export default function AuthorityInvitationScreen() {
 						placeholder={t("optionalImageAddress")}
 						onChangeText={setImageUrl}
 						isImageUrlField={true}
-						makePermanentPressed={() => console.log("makePermanent stub")}
+						makePermanentPressed={undefined}
 					/>
 					<CustomTextInput
 						title={t("domainName")}

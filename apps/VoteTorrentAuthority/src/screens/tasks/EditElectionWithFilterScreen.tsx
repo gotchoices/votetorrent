@@ -16,10 +16,7 @@ export default function EditElectionWithFilterScreen() {
 		navigation.setOptions({ title: t("editElectionWithFilterTitle") });
 	}, [navigation, t]);
 
-	const onGotIt = () => {
-		console.log("editElectionWithFilter-gotIt");
-		navigation.goBack();
-	};
+	const onGotIt = undefined;
 
 	return (
 		<View style={styles.content}>
@@ -33,6 +30,7 @@ export default function EditElectionWithFilterScreen() {
 					title={t("editElectionWithFilterGotIt")}
 					backgroundColor={colors.success}
 					size="thin"
+					disabled={true}
 					onPress={onGotIt}
 				/>
 			</Footer>

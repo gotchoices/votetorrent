@@ -16,15 +16,9 @@ export default function EditRevisionFormScreen() {
 		navigation.setOptions({ title: t("editRevisionFormTitle") });
 	}, [navigation, t]);
 
-	const onResend = () => {
-		console.log("editRevisionForm-resend");
-		navigation.goBack();
-	};
+	const onResend = undefined;
 
-	const onDismissRequest = () => {
-		console.log("editRevisionForm-dismissRequest");
-		navigation.goBack();
-	};
+	const onDismissRequest = undefined;
 
 	return (
 		<View style={styles.content}>
@@ -42,6 +36,7 @@ export default function EditRevisionFormScreen() {
 					backgroundColor={colors.accent}
 					size="thin"
 					flex={true}
+					disabled={true}
 					onPress={onResend}
 				/>
 				<CustomButton
@@ -49,6 +44,7 @@ export default function EditRevisionFormScreen() {
 					backgroundColor={colors.accent}
 					size="thin"
 					flex={true}
+					disabled={true}
 					onPress={onDismissRequest}
 				/>
 			</Footer>

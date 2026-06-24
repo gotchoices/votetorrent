@@ -43,7 +43,6 @@ export default function HostingScreen() {
 						title={t('configuration')}
 						placeholder={t('serverConfigurationPlaceholder')}
 						icon="share-nodes"
-						onIconPress={() => console.log('Share')}
 					/>
 					<ThemedText style={styles.instructionsText}>
 						{t('seeInstructions')}{' '}

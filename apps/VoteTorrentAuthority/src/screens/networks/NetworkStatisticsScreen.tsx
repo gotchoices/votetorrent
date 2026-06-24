@@ -81,10 +81,7 @@ export default function NetworkStatisticsScreen() {
 						title={t("addServers")}
 						icon="circle-plus"
 						backgroundColor={colors.accent}
-						onPress={() => {
-							console.log("addServers stub");
-							navigation.goBack();
-						}}
+						disabled={true}
 					/>
 				</View>
 			</ScrollView>

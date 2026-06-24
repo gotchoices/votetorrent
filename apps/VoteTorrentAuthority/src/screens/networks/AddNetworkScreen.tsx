@@ -304,7 +304,8 @@ export default function AddNetworkScreen() {
 							<ChipButton
 								label={t("import")}
 								icon="circle-plus"
-								onPress={() => console.log("Import")}
+								disabled={true}
+								onPress={undefined}
 							/>
 						</View>
 						{relayAddresses.map((address, index) => (

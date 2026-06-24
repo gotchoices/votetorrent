@@ -187,9 +187,7 @@ export function NetworkDetailsScreen() {
 					icon="share-nodes"
 					backgroundColor={colors.accent}
 					size="thin"
-					onPress={() =>
-						console.log("share network stub", networkDetails?.network.name)
-					}
+					disabled={true}
 				/>
 				{/* Phase 8 plan 08-06 (D-12): STATISTICS entry — navigates to the
 				    standalone NetworkStatisticsScreen (NETUI-05, Figma frame 1425:1448). */}
