@@ -15,6 +15,7 @@ import { NetworksEngine } from '../../src/networks/networks-engine.js'
 import { randomTestKeyPair } from './keys.js'
 import { AsyncStorage } from '../shims/react-native.js'
 import type { EngineContext } from '../../src/types.js'
+import type { DbFactory } from '../../src/types.js'
 import type {
   Authority,
   AuthorityInviteInvokes,
@@ -265,10 +266,11 @@ export interface TestNetworkContext {
 export async function createTestNetwork (overrides?: {
   user?: Partial<User>
   network?: Partial<NetworkInit>
+  dbFactory?: DbFactory
 }): Promise<TestNetworkContext> {
   await AsyncStorage.clear()
   await AsyncStorage.setItem('recentNetworks', [])
-  const networksEngine = new NetworksEngine(AsyncStorage)
+  const networksEngine = new NetworksEngine(AsyncStorage, overrides?.dbFactory)
   const user = makeTestUser(overrides?.user)
   const networkInit = makeTestNetworkInit(overrides?.network)
   const networkEngine = await networksEngine.create(networkInit, user)
