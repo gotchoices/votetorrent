@@ -21,6 +21,7 @@ import {
   initDB,
   registerDbPlugins,
 } from '../src/database/initialize.js'
+import { VOTETORRENT_SCHEMA_SQL } from '../src/database/schema-sql.js'
 import type {
   User,
   NetworkInit,
@@ -930,5 +931,121 @@ describe('NetworksEngine — factory DI and persistence seam (Phase 14)', () => 
     // The handle must be cached (D-06)
     const contexts = (engine as unknown as { contexts: Map<string, EngineContext> }).contexts;
     expect(contexts.has('already-declared-hash'), 'already-declared handle must be cached after open()').to.equal(true);
+  });
+
+  // --------------------------------------------------------------------------
+  // REL-01 strand-path createContext regression tests
+  // --------------------------------------------------------------------------
+  //
+  // Background: In release builds NetworksEngine.createContext() is called on a
+  // Database that StrandDatabase.initialize() already applied the App schema to
+  // (via `declare schema App { <inner DDL> } apply schema App;`). The old gate
+  // relied on isSchemaInitialized(db) which always returns false on the strand
+  // path (no SchemaVersion row yet), so initDB always ran — declaring the `main`
+  // schema on top of an already-App-declared catalog. Dual-Table ownership of the
+  // same tree://default/{table} LevelDB collections stalls every subsequent INSERT
+  // (infinite spinner / hang in release builds).
+  //
+  // These tests reproduce that exact scenario using an in-memory Database with
+  // the strand path simulated: run `declare schema App { <inner DDL> } apply schema App;`
+  // (matching what StrandDatabase.executeSchema does), then hand it to NetworksEngine
+  // via a DbFactory closure, call create(), and assert:
+  //   (a) no error thrown
+  //   (b) initDB (main schema) was NOT triggered — hasDeclaredSchema('main') stays false
+  //   (c) SchemaVersion marker IS planted — isSchemaInitialized returns true
+  //   (d) TidSequence IS planted — readTidCounter does not throw
+  //
+  // The rnDbFactory-path (non-strand) unchanged assertion is also included so that
+  // the PERSIST-02 behavior is locked as a tripwire.
+
+  describe('REL-01 strand-path createContext', () => {
+    // Strip the outer `declare schema main { ... } apply schema main;` wrapper from
+    // the bundled schema SQL — exactly the same regex used in rn-db-factory.ts — so
+    // only the inner DDL remains. StrandDatabase.executeSchema wraps it as:
+    //   `declare schema App { <inner DDL> } apply schema App;`
+    // and calls setSchemaPath(['App', 'main']) so bare table names resolve.
+    const VOTETORRENT_INNER_DDL = VOTETORRENT_SCHEMA_SQL
+      .replace(/^\s*declare\s+schema\s+\w+\s*\{/, '')
+      .replace(/\}\s*apply\s+schema\s+\w+\s*;\s*$/, '')
+      .trim();
+
+    /**
+     * Simulate a strand-path Database: runs App-schema declaration + apply,
+     * then sets the schema path so bare table names resolve under App.
+     * This mirrors exactly what StrandDatabase.initialize() + executeSchema() leave behind.
+     */
+    async function makeStrandDb(): Promise<Database> {
+      const db = new Database();
+      await registerDbPlugins(db);
+      await db.exec(`declare schema App { ${VOTETORRENT_INNER_DDL} } apply schema App;`);
+      db.setSchemaPath(['App', 'main']);
+      return db;
+    }
+
+    beforeEach(async () => {
+      await AsyncStorage.clear();
+      await AsyncStorage.setItem('recentNetworks', []);
+    });
+
+    it('createContext skips initDB on a strand-declared (App) handle (REL-01)', async () => {
+      // Given: a Database already in the strand-declared (App) state.
+      const db = await makeStrandDb();
+      // Pre-condition: App is declared, main is NOT declared.
+      expect(db.declaredSchemaManager.hasDeclaredSchema('App'), 'App should be declared before create()').to.equal(true);
+      expect(db.declaredSchemaManager.hasDeclaredSchema('main'), 'main must NOT be declared before create()').to.equal(false);
+
+      const factory: DbFactory = async (_hash: string) => db;
+      const engine = new NetworksEngine(AsyncStorage, factory);
+
+      let caughtError: unknown;
+      try {
+        await engine.create(makePhase14NetworkInit(), makePhase14User());
+      } catch (err) {
+        caughtError = err;
+      }
+
+      expect(caughtError, 'create() must not throw on a strand-declared (App) handle (REL-01)').to.equal(undefined);
+      // Key assertion: initDB was NOT triggered on the strand-declared handle.
+      // If initDB ran, it would run `declare schema main { ... }` and hasDeclaredSchema('main')
+      // would become true — which is the bug that causes the double-init hang.
+      expect(db.declaredSchemaManager.hasDeclaredSchema('main'), 'main schema must NOT be declared after create() on App-declared handle — initDB must have been skipped (REL-01)').to.equal(false);
+    });
+
+    it('createContext plants markers on the strand path (REL-01)', async () => {
+      // Given: same strand-declared handle.
+      const db = await makeStrandDb();
+      const factory: DbFactory = async (_hash: string) => db;
+      const engine = new NetworksEngine(AsyncStorage, factory);
+
+      await engine.create(makePhase14NetworkInit(), makePhase14User());
+
+      // SchemaVersion marker must be planted (ensureTidSequence + writeSchemaVersionMarker must have run).
+      const initialized = await isSchemaInitialized(db);
+      expect(initialized, 'isSchemaInitialized must return true after create() on strand path — SchemaVersion row planted (REL-01)').to.equal(true);
+
+      // TidSequence must be planted and readable.
+      let tidError: unknown;
+      let tid: number | undefined;
+      try {
+        tid = await readTidCounter(db);
+      } catch (err) {
+        tidError = err;
+      }
+      expect(tidError, 'readTidCounter must not throw after create() on strand path — TidSequence row planted (REL-01)').to.equal(undefined);
+      expect(tid, 'TidCounter must be a positive integer after create() on strand path (REL-01)').to.be.a('number').greaterThanOrEqual(1);
+    });
+
+    it('createContext rnDbFactory path unchanged (REL-01 regression guard)', async () => {
+      // Given: a fresh Database with NO App declaration (the rnDbFactory / in-memory path).
+      const db = new Database();
+      const factory: DbFactory = async (_hash: string) => db;
+      const engine = new NetworksEngine(AsyncStorage, factory);
+
+      await engine.create(makePhase14NetworkInit(), makePhase14User());
+
+      // On the non-strand path, initDB MUST have run (declares schema main).
+      // If the strand gate mistakenly fires here (false positive), main would be absent.
+      expect(db.declaredSchemaManager.hasDeclaredSchema('main'), 'main schema must be declared after create() on the rnDbFactory path — initDB must have run (REL-01 regression guard)').to.equal(true);
+    });
   });
 })
