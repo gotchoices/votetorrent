@@ -49,18 +49,30 @@ const CADRE_STORE = 'votetorrent-cadre-probe-replication';
 // destroyDB targets ONLY 'votetorrent-' + PROOF_NETWORK_STORE (D-03 / T-23-03-02).
 const PROOF_NETWORK_STORE = 'replication-proof-strand';
 
-// Control address — the drone's ws multiaddr. The harness (Plan 04) injects this via a
-// generated config; for now use the same placeholder shape as dial-probe.ts. The runner
-// reads CONTROL_ADDR at boot; Plan 04 writes the real address before bundling (D-07).
+// Control address — the drone's control-node ws multiaddr. The harness injects this per-run
+// (D-07 automated injection). Placeholder boots solo (no crash — CF-02 bootstrap mode).
 const CONTROL_ADDR = '/ip4/10.0.2.2/tcp/0/ws/p2p/UPDATE_AFTER_DRONE_RESTART';
 
+// Strand-cohort bootstrap address — the drone's strand-node ws multiaddr. The harness
+// injects this per-run (REPL-01 / 23-06). Separate from CONTROL_ADDR — these are DIFFERENT
+// libp2p nodes on the drone with different ephemeral ports (Pitfall 2). Placeholder boots
+// strand solo (empty strandBootstrapNodes → bootstrap mode, no crash — P2P-03 no regression).
+const STRAND_BOOTSTRAP_ADDR = '/ip4/10.0.2.2/tcp/0/ws/p2p/UPDATE_AFTER_DRONE_RESTART';
+
+// resolveBootstrapNodes — placeholder-aware address resolver (mirrors CadreNodeProvider).
+// Returns [] for empty/unset OR placeholder (safe solo boot), [addr] for a real address.
+const BOOTSTRAP_PLACEHOLDER = 'UPDATE_AFTER_DRONE_RESTART';
+function resolveBootstrapNodes(addr: string): string[] {
+  if (!addr || addr.includes(BOOTSTRAP_PLACEHOLDER)) {
+    return [];
+  }
+  return [addr];
+}
+
 // In solo bootstrap mode (harness Step 1) the drone address has not been injected yet,
-// so CONTROL_ADDR is still the placeholder. Its /p2p/<id> tail is not a valid peerId and
-// crashes libp2p's Bootstrap discovery (peerIdFromString). Boot with NO bootstrap node
-// while the placeholder is present — the runner is genuinely solo (CF-02 bootstrap mode),
-// creates the proof network, and emits strandId=. The harness re-bundles with the real
-// drone multiaddr for the networked run (Step 4), at which point this resolves to [CONTROL_ADDR].
-const BOOTSTRAP_NODES = CONTROL_ADDR.includes('UPDATE_AFTER_DRONE_RESTART') ? [] : [CONTROL_ADDR];
+// so CONTROL_ADDR is still the placeholder. Boot with NO bootstrap node — the runner is
+// genuinely solo (CF-02 bootstrap mode), creates the proof network, and emits strandId=.
+const BOOTSTRAP_NODES = resolveBootstrapNodes(CONTROL_ADDR);
 
 // Poll constants (consistent with dial-probe.ts connection-poll shape).
 // PEER_POLL_MAX: 3 ticks × 1 s = 3 s peer-connection wait (exits early when peers appear).
@@ -110,9 +122,11 @@ export async function runReplicationProof(): Promise<void> {
         transports: [webSockets(), circuitRelayTransport()],
         listenAddrs: [],
         // Permissive gater — dev probe only (matches dial-probe.ts / cadre-runtime-ondevice.md).
-        // Cast: cadre-core's NetworkConfig type doesn't declare connectionGater yet (upstream gap);
-        // the cadre-core patch forwards it into createLibp2pNode at runtime (spike 009 fix).
+        // Cast needed for connectionGater (upstream gap); strandBootstrapNodes is typed by 23-05.
         connectionGater: { denyDialMultiaddr: async () => false },
+        // REPL-01: strand-cohort bootstrap — the drone's strand-node multiaddr (injected per-run).
+        // Placeholder → [] → strand boots solo (CF-02 bootstrap mode; P2P-03 no regression).
+        strandBootstrapNodes: resolveBootstrapNodes(STRAND_BOOTSTRAP_ADDR),
       } as any,
       hibernation: { enabled: false },
     });
@@ -151,6 +165,12 @@ export async function runReplicationProof(): Promise<void> {
     const peerCount = cn?.getConnections().length ?? 0;
     // D-06 / ENG-05: live peer-count marker — logged once (pass or timeout).
     L('peers=', peerCount);
+
+    // REPL-01: strand-cohort size marker — emitted before the read poll so a mis-wire
+    // (strandPeers=0) fails fast with a clear diagnostic (Pitfall 2).
+    // strandId here is PROOF_NETWORK_STORE (the strand the runner joined).
+    const strandPeersN = (node as InstanceType<typeof CadreNode> & { getStrand?: (id: string) => { connectedPeers?: number } | undefined }).getStrand?.(PROOF_NETWORK_STORE)?.connectedPeers ?? 0;
+    L('strandPeers=', strandPeersN);
 
     // ── 5. WRITE: create the strand (correct mode now known) + insert the proof row ──────────
     // createStrandDbFactory(node) calls setSchemaPath(['App','main']) internally so bare SQL

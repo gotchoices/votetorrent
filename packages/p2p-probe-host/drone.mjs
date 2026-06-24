@@ -101,6 +101,17 @@ await node.addStrand({
   mode: 'bootstrap',
 });
 L(`[replication-proof] strand started, strandId=${STRAND_ID}`);
+// Advertise the drone's strand-node listen multiaddr so the harness can inject it
+// into the runner's STRAND_BOOTSTRAP_ADDR and peers can dial the strand cohort.
+// Mirrors the PROOF_WS_ADDR= control-node advertisement above (D-07 pattern, REPL-01).
+const strand = node.getStrand(STRAND_ID);
+const strandAddrs = strand?.libp2pNode?.getMultiaddrs?.().map(m => m.toString()) ?? [];
+const strandWs = strandAddrs.find(a => a.includes('/ip4/127.0.0.1/') && a.includes('/ws')) ?? strandAddrs[0] ?? '';
+if (!strandWs) {
+  L('PROOF_STRAND_ADDR_MISSING — strand node has no listen multiaddr');
+} else {
+  L('PROOF_STRAND_ADDR=' + strandWs);
+}
 
 // IN-15 (17-REVIEW): handle SIGTERM (plain `kill <pid>`) as well as SIGINT
 // (Ctrl-C) so both stop paths shut the node down gracefully.
