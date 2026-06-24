@@ -43,15 +43,22 @@ export function useCadreNode(): CadreNodeContextType {
 }
 
 // ---------------------------------------------------------------------------
-// Update CONTROL_ADDR after each drone restart (drone prints this on startup).
-// Example: '/ip4/10.0.2.2/tcp/52345/ws/p2p/12D3KooW...'
-// This constant is used for the control network bootstrap address.
+// NETOP-04: configurable control and strand bootstrap addresses.
 //
-// Leaving the placeholder in place now boots SOLO (no bootstrap peers) — a valid
-// offline/solo node that does NOT crash. Paste the drone's real /p2p address here
-// to re-enable the bootstrap dial (the real P2P path). See resolveBootstrapNodes.
+// These constants are the sole configurable inputs for peer reachability.
+// Leaving both as placeholders boots SOLO (no bootstrap peers) — a valid
+// offline/solo node that does NOT crash (resolveBootstrapNodes returns []).
+//
+// For the P2P-06 replication proof, the harness overwrites these lines per-run
+// (D-07 pattern, run-replication-proof.sh) and git-checkouts CONFIG_FILE on EXIT.
+// For a production build, a join flow (NETOP-03) supplies the real addresses.
+//
+// CONTROL_ADDR: drone's control-node ws multiaddr (for the control network).
+// STRAND_BOOTSTRAP_ADDR: drone's strand-node ws multiaddr (for cohort formation).
+// These are DIFFERENT libp2p nodes on the drone with different ephemeral ports (Pitfall 2).
 // ---------------------------------------------------------------------------
 const CONTROL_ADDR = '/ip4/10.0.2.2/tcp/0/ws/p2p/UPDATE_AFTER_DRONE_RESTART';
+const STRAND_BOOTSTRAP_ADDR = '/ip4/10.0.2.2/tcp/0/ws/p2p/UPDATE_AFTER_DRONE_RESTART';
 const PARTY_ID = 'votetorrent';
 
 // Sentinel embedded in the committed default address. libp2p Bootstrap calls
@@ -132,10 +139,13 @@ export function CadreNodeProvider({ children }: PropsWithChildren) {
             listenAddrs: [],
             // Permissive gater — allows loopback / emulator host dials (D-11).
             // Per-strand enrollment gating is v2.x scope.
-            // Cast needed: connectionGater is accepted at runtime by cadre-core's
-            // createLibp2pNode but is not currently reflected in NetworkConfig typings.
-            // Same pattern as dial-probe.ts (spike-validated on-device).
+            // Cast needed for connectionGater (cadre-core upstream gap); strandBootstrapNodes
+            // is typed by 23-05 (NetworkConfig.strandBootstrapNodes?: string[]).
             connectionGater: { denyDialMultiaddr: async () => false },
+            // NETOP-04: strand-cohort bootstrap — the drone's strand-node multiaddr.
+            // Placeholder/unset → [] → strand boots solo without crashing (P2P-03 no regression).
+            // For the proof, harness injects a real STRAND_BOOTSTRAP_ADDR per-run.
+            strandBootstrapNodes: resolveBootstrapNodes(STRAND_BOOTSTRAP_ADDR),
           } as any,
           hibernation: { enabled: false },
         });

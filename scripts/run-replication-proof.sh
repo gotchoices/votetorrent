@@ -200,7 +200,14 @@ echo "[run-replication-proof] Drone launched (PID ${DRONE_PID}), waiting for REA
 
 # Wait for READY line in drone stdout, extract ws multiaddr.
 DRONE_ADDR=""
+STRAND_ADDR=""
 ELAPSED=0
+# Wait for BOTH the control addr (PROOF_WS_ADDR=) AND the strand addr
+# (PROOF_STRAND_ADDR= or PROOF_STRAND_ADDR_MISSING) before reading the log.
+# The drone emits PROOF_STRAND_ADDR= AFTER await node.addStrand(...) resolves,
+# which is strictly later than PROOF_WS_ADDR=; a one-shot grep at the PROOF_WS_ADDR=
+# break races and yields an empty STRAND_ADDR (Pitfall 3 guard).
+# We defer rm -f "${DRONE_LOG}" until after both addresses are captured.
 while [ "${ELAPSED}" -lt "${DRONE_READY_TIMEOUT}" ]; do
   if ! kill -0 "${DRONE_PID}" 2>/dev/null; then
     echo "[run-replication-proof] ERROR: drone process exited before emitting READY (PID ${DRONE_PID})" >&2
@@ -210,14 +217,36 @@ while [ "${ELAPSED}" -lt "${DRONE_READY_TIMEOUT}" ]; do
   fi
   # Parse the machine-readable PROOF_WS_ADDR= line — NOT the human 'READY' instruction
   # line, which contains a literal /ip4/10.0.2.2/tcp/<PORT>/ws/p2p/<PEER_ID> TEMPLATE.
-  ADDR_LINE=$(grep -m1 'PROOF_WS_ADDR=' "${DRONE_LOG}" 2>/dev/null || true)
-  if [ -n "${ADDR_LINE}" ]; then
-    DRONE_ADDR=$(echo "${ADDR_LINE}" | grep -o '/ip4/[^ ]*/ws/p2p/[^ ]*' || true)
-    break
+  if [ -z "${DRONE_ADDR}" ]; then
+    ADDR_LINE=$(grep -m1 'PROOF_WS_ADDR=' "${DRONE_LOG}" 2>/dev/null || true)
+    if [ -n "${ADDR_LINE}" ]; then
+      DRONE_ADDR=$(echo "${ADDR_LINE}" | grep -o '/ip4/[^ ]*/ws/p2p/[^ ]*' || true)
+    fi
+  fi
+  # Also wait for the strand-node address (emitted after addStrand resolves).
+  if [ -n "${DRONE_ADDR}" ] && [ -z "${STRAND_ADDR}" ]; then
+    STRAND_LINE_RAW=$(grep -m1 'PROOF_STRAND_ADDR' "${DRONE_LOG}" 2>/dev/null || true)
+    if [ -n "${STRAND_LINE_RAW}" ]; then
+      if echo "${STRAND_LINE_RAW}" | grep -q 'PROOF_STRAND_ADDR_MISSING'; then
+        echo "[run-replication-proof] ERROR: drone strand node has no listen multiaddr (PROOF_STRAND_ADDR_MISSING)" >&2
+        cat "${DRONE_LOG}" >&2
+        rm -f "${DRONE_LOG}"
+        exit 1
+      fi
+      STRAND_ADDR=$(echo "${STRAND_LINE_RAW}" | grep -o '/ip4/[^ ]*/ws/p2p/[^ ]*' || true)
+      if [ -z "${STRAND_ADDR}" ]; then
+        echo "[run-replication-proof] ERROR: PROOF_STRAND_ADDR= emitted but no valid multiaddr parsed" >&2
+        cat "${DRONE_LOG}" >&2
+        rm -f "${DRONE_LOG}"
+        exit 1
+      fi
+      break
+    fi
   fi
   sleep 1
   ELAPSED=$((ELAPSED + 1))
 done
+# Now safe to remove the drone log — both addresses have been captured (or timed out).
 rm -f "${DRONE_LOG}"
 
 if [ -z "${DRONE_ADDR}" ]; then
@@ -225,6 +254,12 @@ if [ -z "${DRONE_ADDR}" ]; then
   exit 1
 fi
 echo "[run-replication-proof] Drone READY addr: ${DRONE_ADDR}"
+
+if [ -z "${STRAND_ADDR}" ]; then
+  echo "[run-replication-proof] ERROR: drone did not emit PROOF_STRAND_ADDR= within ${DRONE_READY_TIMEOUT}s" >&2
+  exit 1
+fi
+echo "[run-replication-proof] Drone strand addr: ${STRAND_ADDR}"
 
 # Inject the drone's ws multiaddr into the runner (D-07). The runner reads CONTROL_ADDR
 # at the top of replication-proof-runner.ts; we rewrite just that constant line.
@@ -234,25 +269,37 @@ echo "[run-replication-proof] Drone READY addr: ${DRONE_ADDR}"
 # shellcheck disable=SC2064
 trap 'restore_flags; git checkout -- '"${CONFIG_FILE}"' 2>/dev/null || true' EXIT
 
-# Replace the CONTROL_ADDR placeholder line in the runner with the real drone address.
+# Replace the CONTROL_ADDR placeholder line in the runner with the real drone control address.
 # The device emulator reaches the host at 10.0.2.2; replace the host IP in the addr.
 # The drone emits its loopback (127.0.0.1) ws multiaddr; the Android emulator reaches the
 # host loopback at 10.0.2.2. Rewrite either loopback/wildcard host to the emulator alias.
 DRONE_ADDR_FOR_DEVICE=$(echo "${DRONE_ADDR}" | sed -e 's|/ip4/127\.0\.0\.1/|/ip4/10.0.2.2/|' -e 's|/ip4/0\.0\.0\.0/|/ip4/10.0.2.2/|')
+# Apply the same host-IP rewrite for the strand address (Pitfall 2: separate addresses, separate nodes).
+STRAND_ADDR_FOR_DEVICE=$(echo "${STRAND_ADDR}" | sed -e 's|/ip4/127\.0\.0\.1/|/ip4/10.0.2.2/|' -e 's|/ip4/0\.0\.0\.0/|/ip4/10.0.2.2/|')
 # Use a temp marker that is not a regex special char.
-python3 - "${CONFIG_FILE}" "${DRONE_ADDR_FOR_DEVICE}" << 'PYEOF'
+python3 - "${CONFIG_FILE}" "${DRONE_ADDR_FOR_DEVICE}" "${STRAND_ADDR_FOR_DEVICE}" << 'PYEOF'
 import sys
-path, addr = sys.argv[1], sys.argv[2]
+path, control_addr, strand_addr = sys.argv[1], sys.argv[2], sys.argv[3]
 content = open(path).read()
 import re
+# Inject CONTROL_ADDR (control-network bootstrap — drone's control node).
 new_content = re.sub(
     r"(const CONTROL_ADDR = ')[^']*(')",
-    r"\g<1>" + addr + r"\g<2>",
+    r"\g<1>" + control_addr + r"\g<2>",
     content,
     count=1,
 )
+# Inject STRAND_BOOTSTRAP_ADDR (strand-cohort bootstrap — drone's strand node).
+# SEPARATE constant from CONTROL_ADDR — different libp2p nodes / ephemeral ports (Pitfall 2).
+new_content = re.sub(
+    r"(const STRAND_BOOTSTRAP_ADDR = ')[^']*(')",
+    r"\g<1>" + strand_addr + r"\g<2>",
+    new_content,
+    count=1,
+)
 open(path, 'w').write(new_content)
-print(f"[run-replication-proof] CONTROL_ADDR in runner injected: {addr}")
+print(f"[run-replication-proof] CONTROL_ADDR in runner injected: {control_addr}")
+print(f"[run-replication-proof] STRAND_BOOTSTRAP_ADDR in runner injected: {strand_addr}")
 PYEOF
 
 # ── STEP 4: RELAUNCH BOTH PEERS NETWORKED for the symmetric proof run ─────────
@@ -326,6 +373,28 @@ if [ -z "${N}" ] || [ "${N}" -lt 1 ]; then
   exit 1
 fi
 echo "[run-replication-proof] D-06 PASS: peers=${N} (>= 1)"
+
+# ── REPL-01: strandPeers cohort-formation signal (bounded poll, warn-and-continue) ─
+# The strandPeers=N marker from the runner reports the strand-cohort peer count.
+# This is the strand-cohort formation signal (distinct from the control-network peers=N above).
+# Bounded poll: pass as soon as N >= 1 (research states cohort-formed = strandPeers >= 1).
+# A transient or sustained N < 2 is NOT a hard gate — emit a REPL-01 WARNING and continue
+# to the verdict poll (the both-peer REPLICATION VERDICT is authoritative on PASS/FAIL).
+# A never-emitted marker (wiring broken) IS a hard FAIL + exit 1 (Pitfall 2 fast-fail).
+STRAND_PEERS_MARKER='\[replication-proof\].*strandPeers='
+echo "[run-replication-proof] REPL-01: waiting for strandPeers= marker on Peer A ..."
+STRAND_PEERS_LINE=$(wait_for_logcat_line "${STRAND_PEERS_MARKER}" "${LOGCAT_TIMEOUT}" "[run-replication-proof]" "strandPeers" "-s emulator-5554")
+if [ -z "${STRAND_PEERS_LINE}" ]; then
+  echo "[run-replication-proof] FAIL: strandPeers= marker never emitted on Peer A — strand wiring broken (REPL-01); check STRAND_BOOTSTRAP_ADDR injection" >&2
+  exit 1
+fi
+SP=$(extract_marker_value "${STRAND_PEERS_LINE}" "strandPeers")
+echo "[run-replication-proof] REPL-01: strandPeers=${SP} on Peer A"
+if [ -z "${SP}" ] || [ "${SP}" -lt 1 ]; then
+  echo "[run-replication-proof] WARNING: strandPeers=${SP} < 1 (REPL-01) — strand cohort not yet formed on Peer A; continuing to verdict (verdict is authoritative)" >&2
+else
+  echo "[run-replication-proof] REPL-01 cohort signal: strandPeers=${SP} >= 1 on Peer A"
+fi
 
 # ── BOTH-PEER VERDICT (D-01) ──────────────────────────────────────────────────
 # Poll BOTH serials. A and B emit REPLICATION VERDICT independently.
