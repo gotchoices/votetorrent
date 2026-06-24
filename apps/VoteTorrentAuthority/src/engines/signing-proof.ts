@@ -26,23 +26,23 @@ const PROOF_DIGEST  = new Uint8Array(32).fill(0xab)
  * device-signer.ts:61 exactly (WR-10).
  */
 export async function runSigningProof(): Promise<{ passed: boolean }> {
-  console.log('[spike013] signing proof: starting')
+  console.info('[spike013] signing proof: starting')
   try {
     // Sign the known vector — v2 defaults (prehash:true). NO options object (WR-10).
     const sigBytes = secp256k1.sign(PROOF_DIGEST, PROOF_PRIVKEY)
     const sigHex = bytesToHex(sigBytes)
-    console.log('[spike013] sign ok, sigHex length=', sigHex.length)
+    console.info('[spike013] sign ok, sigHex length=', sigHex.length)
 
     // Derive the public key and verify
     const pubKeyBytes = secp256k1.getPublicKey(PROOF_PRIVKEY)
     const valid = secp256k1.verify(sigBytes, PROOF_DIGEST, pubKeyBytes)
     const passed = valid === true
-    console.log('[spike013] verify =', valid, '—', passed ? 'PASS' : 'FAIL')
-    console.log('[spike013] ========== SIGNING VERDICT:', passed ? 'PASS' : 'FAIL', '==========')
+    console.info('[spike013] verify =', valid, '—', passed ? 'PASS' : 'FAIL')
+    console.info('[spike013] ========== SIGNING VERDICT:', passed ? 'PASS' : 'FAIL', '==========')
     return { passed }
   } catch (e) {
     console.error('[spike013] FATAL —', e)
-    console.log('[spike013] ========== SIGNING VERDICT: FAIL ==========')
+    console.info('[spike013] ========== SIGNING VERDICT: FAIL ==========')
     return { passed: false }
   }
 }

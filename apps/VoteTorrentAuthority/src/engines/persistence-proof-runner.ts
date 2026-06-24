@@ -84,29 +84,29 @@ export async function runPersistenceProof(node?: StrandHost): Promise<void> {
       }
 
       // ---- FULL-CHAIN WRITE PHASE (first launch / after `pm clear`) ----
-      console.log('[proof] ========== BOOT: WRITE PHASE (no saved state) ==========');
+      console.info('[proof] ========== BOOT: WRITE PHASE (no saved state) ==========');
 
       // T-16-14: use the REAL device user — never the fake PROOF_USER key.
       const user = await getOrCreateDeviceUser('Proof Runner');
       const engine = makeProofEngine(node);
       const { networkRef, authorityId, electionId, db } = await runFullChainWritePhase(engine, user);
-      console.log(
+      console.info(
         `[proof] WRITE COMPLETE — hash=${networkRef.hash} authorityId=${authorityId} electionId=${electionId}`,
       );
       // Crypto on the freshly-initialized on-device store (also re-run post-restart).
       await assertCryptoFunctions(db);
-      console.log(
+      console.info(
         '[proof] NEXT STEP → adb shell am force-stop org.votetorrent.authority, then relaunch the app',
       );
-      console.log('[proof] ========== WRITE PHASE DONE ==========');
+      console.info('[proof] ========== WRITE PHASE DONE ==========');
     } else {
       // ---- FULL-CHAIN READ PHASE (after force-stop + relaunch) ----
-      console.log('[proof] ========== BOOT: READ PHASE (saved state present) ==========');
+      console.info('[proof] ========== BOOT: READ PHASE (saved state present) ==========');
 
       const user = await getOrCreateDeviceUser('Proof Runner');
       const engine = makeProofEngine(node);
       const result = await runFullChainReadPhase(engine, user);
-      console.log(
+      console.info(
         `[proof] READ COMPLETE — passed=${result.passed} network=${result.networkCount} authority=${result.authorityCount} election=${result.electionCount}`,
       );
 
@@ -127,7 +127,7 @@ export async function runPersistenceProof(node?: StrandHost): Promise<void> {
       // This log line is the VTEST-02 evidence (D-08) — byte-identical to the script grep target.
       // digestParity.allPassed folds into the overall verdict so a parity failure flips PASS→FAIL.
       const verdict = result.passed && crypto.allPassed && digestParity.allPassed;
-      console.log(
+      console.info(
         `[proof] ========== FULL-CHAIN VERDICT: ${verdict ? 'PASS' : 'FAIL'} ` +
           `(network=${result.networkCount},authority=${result.authorityCount},election=${result.electionCount},crypto=${crypto.allPassed},digestParity=${digestParity.allPassed}) ==========`,
       );

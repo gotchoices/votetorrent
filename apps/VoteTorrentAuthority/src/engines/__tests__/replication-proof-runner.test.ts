@@ -206,7 +206,7 @@ describe('runReplicationProof — gate behavior', () => {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const { runReplicationProof: runDisabled } = require('../replication-proof-runner');
 
-    const consoleSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    const consoleSpy = jest.spyOn(console, 'info').mockImplementation(() => {});
     await runDisabled();
 
     // No [replication-proof]-tagged console.log call should have occurred.
@@ -228,7 +228,7 @@ describe('runReplicationProof — gate behavior', () => {
 
 describe('runReplicationProof — marker emissions', () => {
   it('emits [replication-proof] starting when enabled', async () => {
-    const consoleSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    const consoleSpy = jest.spyOn(console, 'info').mockImplementation(() => {});
 
     await runReplicationProof();
 
@@ -244,7 +244,7 @@ describe('runReplicationProof — marker emissions', () => {
   });
 
   it('emits peerId= marker with the fake peer id (D-05 / P2P-04)', async () => {
-    const consoleSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    const consoleSpy = jest.spyOn(console, 'info').mockImplementation(() => {});
 
     await runReplicationProof();
 
@@ -279,7 +279,7 @@ describe('runReplicationProof — marker emissions', () => {
       return realPush.apply(this, args);
     });
 
-    const consoleSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    const consoleSpy = jest.spyOn(console, 'info').mockImplementation(() => {});
 
     await runReplicationProof();
 
@@ -339,7 +339,7 @@ describe('runReplicationProof — marker emissions', () => {
   });
 
   it('emits a REPLICATION VERDICT line', async () => {
-    const consoleSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    const consoleSpy = jest.spyOn(console, 'info').mockImplementation(() => {});
 
     await runReplicationProof();
 
@@ -374,7 +374,7 @@ describe('REPL-01 strand cohort markers', () => {
       return realPush.apply(this, args);
     });
 
-    const consoleSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    const consoleSpy = jest.spyOn(console, 'info').mockImplementation(() => {});
 
     await runReplicationProof();
 
@@ -434,7 +434,7 @@ describe('REPL-01 strand cohort markers', () => {
     mockConstructedNodes.length = 0;
     mockCapturedConfigs.length = 0;
 
-    const consoleSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    const consoleSpy = jest.spyOn(console, 'info').mockImplementation(() => {});
 
     await runReplicationProof();
 

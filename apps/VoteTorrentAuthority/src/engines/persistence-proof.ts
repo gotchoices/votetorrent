@@ -135,7 +135,7 @@ export async function runFullChainWritePhase(
   networksEngine: NetworksEngine,
   user: User,
 ): Promise<{ networkRef: NetworkReference; authorityId: string; electionId: string; db: Database }> {
-  console.log('[proof] full-chain write phase: starting');
+  console.info('[proof] full-chain write phase: starting');
 
   // WR-14 (17-REVIEW): persist the attempt marker BEFORE any store mutation so a
   // partial failure (anything between step 1 and step 6 throwing) is detectable
@@ -144,7 +144,7 @@ export async function runFullChainWritePhase(
 
   // Step 1: create the network — Network + primary Authority + Admin/Officer/User/UserKey rows.
   const networkEngine = await networksEngine.create(PROOF_NETWORK_INIT, user);
-  console.log('[proof] full-chain write: network created');
+  console.info('[proof] full-chain write: network created');
 
   // Retrieve the NetworkReference from AsyncStorage (set by create() via recentNetworks).
   const recents: NetworkReference[] = JSON.parse(
@@ -159,7 +159,7 @@ export async function runFullChainWritePhase(
   // NetworksEngine.create() already created the primary authority via PROOF_NETWORK_INIT).
   const details = await networkEngine.getDetails();
   const authorityId: string = details.network.primaryAuthorityId;
-  console.log(`[proof] full-chain write: authorityId=${authorityId}`);
+  console.info(`[proof] full-chain write: authorityId=${authorityId}`);
 
   // Step 3: get the same EngineContext that create() used (single store handle — Pitfall 5).
   // Never call rnDbFactory() a second time here; getEstablishedContext returns the cached handle.
@@ -209,7 +209,7 @@ export async function runFullChainWritePhase(
       sign: (digest: Uint8Array) => Promise<import('@votetorrent/vote-core').Signature>,
     ): Promise<string>;
   }).seedElectionSigning(electionFields, sign);
-  console.log('[proof] full-chain write: election signing seam complete, nonce=' + signingNonce);
+  console.info('[proof] full-chain write: election signing seam complete, nonce=' + signingNonce);
 
   // Step 4b: sign the initial ElectionRevision (Revision=0).
   // revTid = election tid + 1 (createElection consumes T for Election, T+1 for revision).
@@ -254,7 +254,7 @@ export async function runFullChainWritePhase(
   }).seedElectionRevisionSigning(
     electionId, authorityId, revisionFields, revTid, sign,
   );
-  console.log('[proof] full-chain write: revision signing seam complete, revNonce=' + revisionSigningNonce);
+  console.info('[proof] full-chain write: revision signing seam complete, revNonce=' + revisionSigningNonce);
 
   // Step 5: create the election row + ElectionRevision (Revision=0, MutationValid satisfied).
   await electionsEngine.createElection(
@@ -268,7 +268,7 @@ export async function runFullChainWritePhase(
     },
     { signingNonce, revisionSigningNonce },
   );
-  console.log('[proof] full-chain write: election created, id=' + electionId);
+  console.info('[proof] full-chain write: election created, id=' + electionId);
 
   // Step 6: persist the full-chain reference for the read phase (survives force-stop).
   const chainRef = { networkRef, authorityId, electionId };
@@ -285,7 +285,7 @@ export async function runFullChainWritePhase(
   const networkCount = ((await db.prepare('select count(*) as n from Network').get()) as { n: number } | undefined)?.n ?? 0;
   const authorityCount = ((await db.prepare('select count(*) as n from Authority').get()) as { n: number } | undefined)?.n ?? 0;
   const electionCount = ((await db.prepare('select count(*) as n from Election').get()) as { n: number } | undefined)?.n ?? 0;
-  console.log(
+  console.info(
     `[proof] full-chain write DONE — hash=${networkRef.hash} Network=${networkCount} Authority=${authorityCount} Election=${electionCount}`,
   );
 
@@ -310,7 +310,7 @@ export async function runFullChainReadPhase(
   networksEngine: NetworksEngine,
   user: User,
 ): Promise<{ passed: boolean; networkCount: number; authorityCount: number; electionCount: number }> {
-  console.log('[proof] full-chain read phase: loading chain ref from AsyncStorage');
+  console.info('[proof] full-chain read phase: loading chain ref from AsyncStorage');
 
   const chainRefJson = await AsyncStorage.getItem(PROOF_CHAIN_REF_KEY);
   if (!chainRefJson) {
@@ -319,7 +319,7 @@ export async function runFullChainReadPhase(
   const chainRef: { networkRef: NetworkReference; authorityId: string; electionId: string } =
     JSON.parse(chainRefJson);
 
-  console.log(`[proof] full-chain read: re-attaching to store for hash=${chainRef.networkRef.hash}`);
+  console.info(`[proof] full-chain read: re-attaching to store for hash=${chainRef.networkRef.hash}`);
 
   // open() on a fresh process: cache miss → factory-direct re-attach (D-05 rebind guard).
   // The engine re-declares the schema on the fresh handle, binding the persisted LevelDB data.
@@ -340,7 +340,7 @@ export async function runFullChainReadPhase(
   const passed = networkCount >= 1 && authorityCount >= 1 && electionCount >= 1;
 
   if (passed) {
-    console.log(
+    console.info(
       `[proof] full-chain read PASS — Network=${networkCount} Authority=${authorityCount} Election=${electionCount}`,
     );
   } else {
@@ -391,7 +391,7 @@ export async function assertCryptoFunctions(
   h16Ok: boolean;
   allPassed: boolean;
 }> {
-  console.log('[proof] crypto assertions: starting');
+  console.info('[proof] crypto assertions: starting');
 
   // 1. Digest — registered custom SQL function (initialize.ts:65-85).
   //    On the real on-device SQL path Digest returns a 32-byte BLOB (Uint8Array,
@@ -402,7 +402,7 @@ export async function assertCryptoFunctions(
     | undefined;
   const digestVal = digestRow?.v;
   const digestOk = isNonEmptyDigest(digestVal);
-  console.log(`[proof] Digest('a','b','c') = ${JSON.stringify(digestVal)} — ${digestOk ? 'PASS' : 'FAIL'}`);
+  console.info(`[proof] Digest('a','b','c') = ${JSON.stringify(digestVal)} — ${digestOk ? 'PASS' : 'FAIL'}`);
 
   // 2. SignatureValid — registered custom SQL function (initialize.ts:19-44).
   //    Invalid inputs (empty strings) must return false / 0.
@@ -411,7 +411,7 @@ export async function assertCryptoFunctions(
     | undefined;
   const svVal = svRow?.v;
   const signatureValidOk = svVal === false || svVal === 0;
-  console.log(`[proof] SignatureValid('','','') = ${JSON.stringify(svVal)} — ${signatureValidOk ? 'PASS' : 'FAIL'}`);
+  console.info(`[proof] SignatureValid('','','') = ${JSON.stringify(svVal)} — ${signatureValidOk ? 'PASS' : 'FAIL'}`);
 
   // 3. isISODatetime — registered custom SQL function (initialize.ts:46-63).
   //    A valid ISO-8601 UTC string must return true.
@@ -420,17 +420,17 @@ export async function assertCryptoFunctions(
     | undefined;
   const isoVal = isoRow?.v;
   const isISODatetimeOk = isoVal === true || isoVal === 1;
-  console.log(`[proof] isISODatetime('2026-01-01T00:00:00Z') = ${JSON.stringify(isoVal)} — ${isISODatetimeOk ? 'PASS' : 'FAIL'}`);
+  console.info(`[proof] isISODatetime('2026-01-01T00:00:00Z') = ${JSON.stringify(isoVal)} — ${isISODatetimeOk ? 'PASS' : 'FAIL'}`);
 
   // 4. H16 — JS-only utility (packages/vote-engine/src/utils.ts).
   //    NOT a SQL function — assert via JS call only.  Must return a 32-char hex string
   //    (16 bytes × 2 hex chars per byte).
   const h16Val: string = H16('test-network-id');
   const h16Ok = typeof h16Val === 'string' && h16Val.length === 32 && /^[0-9a-f]+$/.test(h16Val);
-  console.log(`[proof] H16('test-network-id') = ${h16Val} — ${h16Ok ? 'PASS' : 'FAIL'}`);
+  console.info(`[proof] H16('test-network-id') = ${h16Val} — ${h16Ok ? 'PASS' : 'FAIL'}`);
 
   const allPassed = digestOk && signatureValidOk && isISODatetimeOk && h16Ok;
-  console.log(`[proof] crypto assertions: ${allPassed ? 'ALL PASSED' : 'SOME FAILED'}`);
+  console.info(`[proof] crypto assertions: ${allPassed ? 'ALL PASSED' : 'SOME FAILED'}`);
 
   return { digestOk, signatureValidOk, isISODatetimeOk, h16Ok, allPassed };
 }
@@ -460,7 +460,7 @@ export async function assertCryptoFunctions(
 export async function assertDigestParity(
   db: Database,
 ): Promise<{ allPassed: boolean; failures: string[] }> {
-  console.log('[proof] digest parity assertions: starting');
+  console.info('[proof] digest parity assertions: starting');
   const failures: string[] = [];
 
   for (const vec of DIGEST_VECTORS) {
@@ -492,7 +492,7 @@ export async function assertDigestParity(
   }
 
   const allPassed = failures.length === 0;
-  console.log(`[proof] digest parity: ${allPassed ? 'ALL PASSED' : `FAILED: ${failures.join('; ')}`}`);
+  console.info(`[proof] digest parity: ${allPassed ? 'ALL PASSED' : `FAILED: ${failures.join('; ')}`}`);
   return { allPassed, failures };
 }
 

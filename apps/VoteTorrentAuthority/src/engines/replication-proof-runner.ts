@@ -39,7 +39,7 @@ import { createStrandDbFactory } from './rn-db-factory';
 
 // Multi-arg form — REQUIRED so logcat renders '[replication-proof]', 'msg' and the
 // harness `.*` grep matches. (STATE.md v2.0 Phase 17 Plan 06 lesson.)
-const L = (...a: unknown[]) => console.log('[replication-proof]', ...a);
+const L = (...a: unknown[]) => console.info('[replication-proof]', ...a);
 
 // Distinct store name for the proof runner's own CadreNode identity (OQ2).
 // NEVER 'votetorrent-cadre-node' — that store holds the stable peerId (D-05 / T-23-03-02).
