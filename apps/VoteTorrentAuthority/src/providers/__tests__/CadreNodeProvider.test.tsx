@@ -269,4 +269,22 @@ describe('resolveBootstrapNodes — placeholder-aware bootstrap (P2P-02, GAP 1)'
     const real = '/ip4/10.0.2.2/tcp/52345/ws/p2p/12D3KooWReal';
     expect(resolveBootstrapNodes(real)).toEqual([real]);
   });
+
+  // NETOP-04 strand-address regression lock: resolveBootstrapNodes must work
+  // identically for strand-bootstrap addrs (same function, same semantics).
+  it('NETOP-04: returns [addr] for a real strand multiaddr (strand-address path preserved)', () => {
+    const strandAddr = '/ip4/10.0.2.2/tcp/54321/ws/p2p/12D3KooWStrand';
+    expect(resolveBootstrapNodes(strandAddr)).toEqual([strandAddr]);
+  });
+
+  it('NETOP-04: returns [] for the STRAND_BOOTSTRAP_ADDR placeholder (solo-safe, no crash)', () => {
+    expect(
+      resolveBootstrapNodes('/ip4/10.0.2.2/tcp/0/ws/p2p/UPDATE_AFTER_DRONE_RESTART'),
+    ).toEqual([]);
+  });
+
+  it('NETOP-04: returns [] for empty/unset strand bootstrap addr (default solo boot)', () => {
+    expect(resolveBootstrapNodes('')).toEqual([]);
+    expect(resolveBootstrapNodes(undefined as unknown as string)).toEqual([]);
+  });
 });

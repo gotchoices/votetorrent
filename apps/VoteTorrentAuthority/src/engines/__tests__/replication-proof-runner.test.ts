@@ -24,12 +24,18 @@ type FakeConnection = Record<string, unknown>;
 // `mock`-prefixed so jest's hoisted module factory can reference it.
 const mockConstructedNodes: FakeCadreNode[] = [];
 
+// Captures the CadreNode constructor config for each constructed instance.
+// Task-1 RED: asserts network.strandBootstrapNodes forwarding.
+const mockCapturedConfigs: Array<Record<string, unknown>> = [];
+
 interface FakeCadreNode {
   start: jest.Mock;
   stop: jest.Mock;
   peerId: { toString: () => string };
   getControlNode: () => { getConnections: () => FakeConnection[] };
+  getStrand: (id: string) => { connectedPeers: number } | undefined;
   _setConnections: (conns: FakeConnection[]) => void;
+  _setStrandPeers: (n: number) => void;
 }
 
 // --- mock the module-load-time native/runtime deps so importing the runner is safe ---
@@ -63,6 +69,8 @@ jest.mock(
 
 // CadreNode mock — mirroring CadreNodeProvider.test.tsx lines 44–80.
 // FakeCadreNode is `mock`-prefixed (via mockConstructedNodes) per jest hoisting rules.
+// Extended for Task 1 RED: captures constructor config in mockCapturedConfigs and exposes
+// getStrand(id) returning a configurable connectedPeers via _setStrandPeers().
 jest.mock(
   '@serfab/cadre-core',
   () => {
@@ -71,10 +79,15 @@ jest.mock(
       public stop = jest.fn(async () => {});
       public peerId = { toString: () => 'fakePeerIdABC123' };
       private _connections: FakeConnection[] = [];
+      private _strandPeers: number = 0;
 
-      constructor() {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      constructor(config?: any) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         mockConstructedNodes.push(this as any);
+        // Capture the full constructor config so tests can assert network.strandBootstrapNodes.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        mockCapturedConfigs.push(config as any);
       }
 
       getControlNode() {
@@ -83,8 +96,16 @@ jest.mock(
         };
       }
 
+      getStrand(_id: string) {
+        return { connectedPeers: this._strandPeers };
+      }
+
       _setConnections(conns: FakeConnection[]) {
         this._connections = conns;
+      }
+
+      _setStrandPeers(n: number) {
+        this._strandPeers = n;
       }
     }
     return { CadreNode: FakeCadreNode };
@@ -119,6 +140,7 @@ let { runReplicationProof } = require('../replication-proof-runner');
 
 beforeEach(() => {
   mockConstructedNodes.length = 0;
+  mockCapturedConfigs.length = 0;
   jest.clearAllMocks();
 });
 
@@ -329,5 +351,103 @@ describe('runReplicationProof — marker emissions', () => {
     expect(verdictCall).toBeDefined();
 
     consoleSpy.mockRestore();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// REPL-01 strand cohort markers (RED until Task 2 implements them)
+// ---------------------------------------------------------------------------
+
+describe('REPL-01 strand cohort markers', () => {
+  it('emits a strandPeers=N marker when the strand reports connectedPeers >= 1 (RED until Task 2)', async () => {
+    mockConstructedNodes.length = 0;
+    mockCapturedConfigs.length = 0;
+
+    // Intercept push so we can prime _setStrandPeers before the runner reads it.
+    const realPush = Array.prototype.push;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    jest.spyOn(mockConstructedNodes as any, 'push').mockImplementation(function (...args: any[]) {
+      const node = args[0] as FakeCadreNode;
+      // Give the node both a connection (so peerCount >= 1) and strand peers.
+      node._setConnections([{}]);
+      node._setStrandPeers(1);
+      return realPush.apply(this, args);
+    });
+
+    const consoleSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+
+    await runReplicationProof();
+
+    // Assert a strandPeers= marker was emitted.
+    const strandPeersCall = consoleSpy.mock.calls.find(
+      (args) =>
+        args[0] === '[replication-proof]' &&
+        args.join(' ').includes('strandPeers='),
+    );
+    expect(strandPeersCall).toBeDefined();
+
+    consoleSpy.mockRestore();
+    jest.restoreAllMocks();
+
+    // Refresh runReplicationProof for subsequent tests (mirrors the peers= test pattern).
+    jest.resetModules();
+    jest.mock('../proof-flags.generated', () => ({ REPLICATION_PROOF_ENABLED: true }));
+    jest.mock('rn-leveldb', () => ({ LevelDB: class {}, LevelDBWriteBatch: class {} }), { virtual: true });
+    jest.mock('@optimystic/db-p2p-storage-rn', () => ({
+      openOptimysticRNDb: jest.fn(() => ({})),
+      LevelDBRawStorage: class {},
+      loadOrCreateRNPeerKey: jest.fn(async () => ({ type: 'Ed25519' })),
+    }), { virtual: true });
+    jest.mock('@quereus/quereus', () => ({ Database: class {}, registerPlugin: jest.fn() }), { virtual: true });
+    jest.mock('@quereus/plugin-react-native-leveldb', () => ({ ReactNativeLevelDBProvider: jest.fn() }), { virtual: true });
+    jest.mock('@quereus/store', () => ({ createIsolatedStoreModule: jest.fn(() => ({})) }), { virtual: true });
+    jest.mock('@votetorrent/vote-engine/rn', () => ({ VOTETORRENT_SCHEMA_SQL: 'declare schema main {}' }), { virtual: true });
+    jest.mock('@serfab/cadre-core', () => {
+      class FakeCadreNode {
+        public start = jest.fn(async () => {});
+        public stop = jest.fn(async () => {});
+        public peerId = { toString: () => 'fakePeerIdABC123' };
+        private _connections: FakeConnection[] = [];
+        private _strandPeers: number = 0;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        constructor(config?: any) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          mockConstructedNodes.push(this as any);
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          mockCapturedConfigs.push(config as any);
+        }
+        getControlNode() { return { getConnections: () => this._connections }; }
+        getStrand(_id: string) { return { connectedPeers: this._strandPeers }; }
+        _setConnections(conns: FakeConnection[]) { this._connections = conns; }
+        _setStrandPeers(n: number) { this._strandPeers = n; }
+      }
+      return { CadreNode: FakeCadreNode };
+    }, { virtual: true });
+    jest.mock('@libp2p/websockets', () => ({ webSockets: () => ({}) }), { virtual: true });
+    jest.mock('@libp2p/circuit-relay-v2', () => ({ circuitRelayTransport: () => ({}) }), { virtual: true });
+    jest.mock('@multiformats/multiaddr', () => ({ multiaddr: (s: string) => ({ toString: () => s }) }), { virtual: true });
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    ({ runReplicationProof } = require('../replication-proof-runner'));
+  });
+
+  it('constructs CadreNode with network.strandBootstrapNodes = resolveBootstrapNodes(STRAND_BOOTSTRAP_ADDR) (RED until Task 2)', async () => {
+    mockConstructedNodes.length = 0;
+    mockCapturedConfigs.length = 0;
+
+    const consoleSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+
+    await runReplicationProof();
+
+    consoleSpy.mockRestore();
+
+    // Assert the first captured config has a network.strandBootstrapNodes array.
+    // When STRAND_BOOTSTRAP_ADDR is the placeholder, resolveBootstrapNodes returns []
+    // (solo-safe). The field must be present (not undefined).
+    expect(mockCapturedConfigs.length).toBeGreaterThan(0);
+    const cfg = mockCapturedConfigs[0] as { network?: { strandBootstrapNodes?: string[] } };
+    expect(cfg).toBeDefined();
+    expect(cfg?.network).toBeDefined();
+    // strandBootstrapNodes must be an array (placeholder → []).
+    expect(Array.isArray(cfg?.network?.strandBootstrapNodes)).toBe(true);
   });
 });
