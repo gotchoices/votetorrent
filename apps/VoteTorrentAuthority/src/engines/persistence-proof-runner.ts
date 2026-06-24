@@ -28,6 +28,7 @@ import {
   PROOF_CHAIN_REF_KEY,
   PROOF_WRITE_ATTEMPTED_KEY,
 } from './persistence-proof';
+import type { StrandHost } from './rn-db-factory';
 import { getOrCreateDeviceUser } from './device-user';
 import { runRnEntrySmoke } from './rn-entry-smoke';
 // Static import only — dynamic require() breaks Metro (Phase 16-07 lesson).
@@ -42,8 +43,16 @@ import { PROOF_ENABLED, DIAL_PROBE_ENABLED } from './proof-flags.generated';
 /**
  * Boot entry point. Fire-and-forget from index.js after the app registers.
  * Never throws — any failure is logged as `[proof] FATAL` so the app still boots.
+ *
+ * @param node  Optional StrandHost (e.g. a live CadreNode from useCadreNode()).
+ *              When provided, makeProofEngine(node) drives createStrandDbFactory,
+ *              exercising the strand createContext path for VER-04 verification.
+ *              When omitted (the default — including the index.js boot call),
+ *              makeProofEngine() falls back to rnDbFactory (existing behaviour).
+ *              Note: the CadreNode has not booted yet at the index.js call site,
+ *              so the boot invocation correctly passes no argument.
  */
-export async function runPersistenceProof(): Promise<void> {
+export async function runPersistenceProof(node?: StrandHost): Promise<void> {
   if (!(__DEV__ && PROOF_ENABLED)) {
     return;
   }
@@ -79,7 +88,7 @@ export async function runPersistenceProof(): Promise<void> {
 
       // T-16-14: use the REAL device user — never the fake PROOF_USER key.
       const user = await getOrCreateDeviceUser('Proof Runner');
-      const engine = makeProofEngine();
+      const engine = makeProofEngine(node);
       const { networkRef, authorityId, electionId, db } = await runFullChainWritePhase(engine, user);
       console.log(
         `[proof] WRITE COMPLETE — hash=${networkRef.hash} authorityId=${authorityId} electionId=${electionId}`,
@@ -95,7 +104,7 @@ export async function runPersistenceProof(): Promise<void> {
       console.log('[proof] ========== BOOT: READ PHASE (saved state present) ==========');
 
       const user = await getOrCreateDeviceUser('Proof Runner');
-      const engine = makeProofEngine();
+      const engine = makeProofEngine(node);
       const result = await runFullChainReadPhase(engine, user);
       console.log(
         `[proof] READ COMPLETE — passed=${result.passed} network=${result.networkCount} authority=${result.authorityCount} election=${result.electionCount}`,
