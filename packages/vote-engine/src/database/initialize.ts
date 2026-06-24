@@ -127,28 +127,29 @@ export async function initDB(db: Database): Promise<void> {
 		throw error;
 	}
 
-	// Declare the SchemaVersion table catalog (NO version row) as part of every
+	// Declare the SchemaInit table catalog (NO initialized row) as part of every
 	// schema init. initDB only ever runs on a fresh/undeclared handle (create() and
 	// open()'s re-attach guard both gate on this), so this consistently binds the
-	// SchemaVersion catalog on both the create path and the persistent re-attach path
+	// SchemaInit catalog on both the create path and the persistent re-attach path
 	// — a fresh Quereus handle does not auto-restore the catalog from LevelDB. The
-	// version ROW remains create()-only (writeSchemaVersionMarker), so a genuinely
-	// uninitialized store still has an EMPTY SchemaVersion and open() throws (D-05).
-	await ensureSchemaVersionCatalog(db);
+	// initialized ROW remains create()-only (markSchemaInitialized), so a genuinely
+	// uninitialized store still has an EMPTY SchemaInit and open() throws (D-05).
+	await ensureSchemaInitCatalog(db);
 }
 
 /**
- * Check whether the database has been initialized (i.e., SchemaVersion table
- * exists and has at least one row). Returns false on a fresh/empty store.
+ * Check whether the database has been initialized (i.e., SchemaInit table
+ * exists and has a boolean-flag row with Initialized = 1). Returns false on
+ * a fresh/empty store.
  *
  * Phase 14 D-08: used as a gate to decide whether to run DDL on re-attach.
  */
 export async function isSchemaInitialized(db: Database): Promise<boolean> {
 	try {
-		// Point lookup on the primary key (Version=1), NOT a full table scan:
+		// Point lookup on the primary key (Initialized=1), NOT a full table scan:
 		// the Optimystic/LevelDB vtab's full-scan path aborts under "concurrent
 		// mutations", whereas a PK equality routes to a safe point lookup.
-		const row = await db.prepare('select Version from SchemaVersion where Version = 1').get();
+		const row = await db.prepare('select Initialized from SchemaInit where Initialized = 1').get();
 		return row !== undefined && row !== null;
 	} catch {
 		return false; // Table absent = fresh store
@@ -156,39 +157,45 @@ export async function isSchemaInitialized(db: Database): Promise<boolean> {
 }
 
 /**
- * Re-declare the SchemaVersion table catalog on a handle WITHOUT inserting a
- * marker row.
+ * Re-declare the SchemaInit table catalog on a handle WITHOUT inserting the
+ * boolean initialized flag row.
  *
  * Phase 14-04 follow-up (14-03 on-device gap): a fresh Quereus handle on an
  * existing LevelDB store does NOT auto-restore the table catalog (the documented
  * re-attach root cause). open()'s re-attach guard re-runs initDB (rebinds the
  * domain tables) and ensureTidSequence (rebinds TidSequence), but nothing
- * re-declared SchemaVersion — so isSchemaInitialized's `select … from
- * SchemaVersion` hit an undeclared table → false → open() wrongly threw
+ * re-declared SchemaInit — so isSchemaInitialized's `select … from
+ * SchemaInit` hit an undeclared table → false → open() wrongly threw
  * "use create() first" even on a correctly-persisted store.
  *
  * Re-declaring with `create table if not exists` (NO insert) non-destructively
- * rebinds the persisted Version=1 row on the LevelDB backend, so an initialized
- * store passes the gate after restart. On a genuinely uninitialized store the
- * catalog binds to an EMPTY table, so isSchemaInitialized still returns false
- * and open() still throws — D-05 intent preserved.
+ * rebinds the persisted Initialized=1 row on the LevelDB backend, so an
+ * initialized store passes the gate after restart. On a genuinely uninitialized
+ * store the catalog binds to an EMPTY table, so isSchemaInitialized still
+ * returns false and open() still throws — D-05 intent preserved.
  */
-export async function ensureSchemaVersionCatalog(db: Database): Promise<void> {
+export async function ensureSchemaInitCatalog(db: Database): Promise<void> {
 	await db.exec(
-		'create table if not exists SchemaVersion (Version integer primary key);',
+		'create table if not exists SchemaInit (Initialized integer primary key);',
 	);
 }
 
 /**
- * Write the schema-version marker after DDL is applied on a fresh store.
- * Creates the SchemaVersion table (if absent) and inserts version 1.
+ * Write the schema-init boolean flag after DDL is applied on a fresh store.
+ * Creates the SchemaInit table (if absent) and inserts the initialized flag
+ * using INSERT OR IGNORE — making this call idempotent (safe to call multiple
+ * times on the same handle, e.g. on strand store re-create paths).
  *
  * Phase 14 D-08/D-10: placed in TS, NOT in votetorrent.qsql, so the schema
- * stays backend-agnostic.
+ * stays backend-agnostic. Versionless boolean semantics: a present row
+ * Initialized = 1 means "schema initialized" — no version number.
+ *
+ * CR-01 fix: INSERT OR IGNORE means a second call (e.g. strand store re-create)
+ * does not throw a PK-uniqueness violation.
  */
-export async function writeSchemaVersionMarker(db: Database): Promise<void> {
-	await ensureSchemaVersionCatalog(db);
-	await db.exec('insert into SchemaVersion (Version) values (1);');
+export async function markSchemaInitialized(db: Database): Promise<void> {
+	await ensureSchemaInitCatalog(db);
+	await db.exec('insert or ignore into SchemaInit (Initialized) values (1);');
 }
 
 /**
@@ -241,14 +248,14 @@ export async function incrementTidCounter(db: Database): Promise<void> {
  * registration plumbing stays in one place.
  *
  * Phase 14 backward-compat wrapper (D-07/SC4): composed from registerDbPlugins +
- * initDB + ensureTidSequence + writeSchemaVersionMarker. The in-memory path is
+ * initDB + ensureTidSequence + markSchemaInitialized. The in-memory path is
  * always fresh, so these always-run together. Existing callers need zero changes.
  */
 export async function prepareDb(db: Database): Promise<void> {
 	await registerDbPlugins(db);
 	await initDB(db);
 	await ensureTidSequence(db);
-	await writeSchemaVersionMarker(db);
+	await markSchemaInitialized(db);
 }
 
 export default initDB;

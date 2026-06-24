@@ -20,7 +20,7 @@ import {
 	registerDbPlugins,
 	initDB,
 	isSchemaInitialized,
-	writeSchemaVersionMarker,
+	markSchemaInitialized,
 	ensureTidSequence,
 	readTidCounter,
 	incrementTidCounter,
@@ -333,15 +333,15 @@ export class NetworksEngine implements INetworksEngine {
 		//   persistent genuinely uninitialized      → initDB runs (creates vtab bindings) → D-05 gate throws (no marker)
 		if (!db.declaredSchemaManager.hasDeclaredSchema('main')) {
 			await initDB(db);           // declare schema main {...} + apply: creates vtab bindings, binds LevelDB data.
-			// initDB also declares the SchemaVersion catalog (NO row) — 14-03 on-device fix: a fresh Quereus
+			// initDB also declares the SchemaInit catalog (NO row) — 14-03 on-device fix: a fresh Quereus
 			// handle does not auto-restore the catalog from LevelDB, so isSchemaInitialized's marker lookup
 			// would otherwise hit an undeclared table → false → wrongly throw on a correctly-persisted store.
 			await ensureTidSequence(db); // idempotent INSERT OR IGNORE — safe to re-run
 		}
 
-		// D-05/D-08: if the store has no schema-version marker, it is uninitialized — THROW.
-		// initDB binds the catalog but does NOT write a SchemaVersion marker (that is create()'s
-		// job via writeSchemaVersionMarker). So a truly uninitialized store still throws here.
+		// D-05/D-08: if the store has no schema-init flag, it is uninitialized — THROW.
+		// initDB binds the catalog but does NOT write a SchemaInit flag (that is create()'s
+		// job via markSchemaInitialized). So a truly uninitialized store still throws here.
 		const initialized = await isSchemaInitialized(db);
 		if (!initialized) {
 			throw new Error(
@@ -415,15 +415,18 @@ export class NetworksEngine implements INetworksEngine {
 		if (isStrandDb) {
 			// Strand path: App schema already applied — skip initDB (no second main declaration).
 			// Plant only the idempotent markers so isSchemaInitialized and readTidCounter work.
+			// Both ensureTidSequence and markSchemaInitialized use INSERT OR IGNORE — fully
+			// idempotent, so a second createContext() on an already-initialized strand store
+			// (CR-01 fix) does not throw a PK-uniqueness violation.
 			await ensureTidSequence(db);                 // D-12: create TidSequence table (idempotent)
-			await writeSchemaVersionMarker(db);          // D-08: plant the SchemaVersion marker
+			await markSchemaInitialized(db);             // D-08: plant the SchemaInit flag (idempotent)
 		} else {
 			// rnDbFactory path (dev / in-memory): existing logic verbatim (D-08/D-07/D-12).
 			const initialized = await isSchemaInitialized(db); // D-08: sentinel check
 			if (!initialized) {
 				await initDB(db);                        // D-07: DDL only on fresh store
 				await ensureTidSequence(db);             // D-12: create TidSequence table
-				await writeSchemaVersionMarker(db);      // D-08: plant the marker
+				await markSchemaInitialized(db);         // D-08: plant the SchemaInit flag
 			}
 		}
 

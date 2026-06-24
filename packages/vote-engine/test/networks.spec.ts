@@ -16,6 +16,7 @@ import { randomTestKeyPair } from './fixtures/keys.js'
 import { AsyncStorage } from './shims/react-native'
 import {
   isSchemaInitialized,
+  markSchemaInitialized,
   readTidCounter,
   prepareDb,
   initDB,
@@ -692,16 +693,16 @@ describe('NetworksEngine — factory DI and persistence seam (Phase 14)', () => 
   });
 
   // --------------------------------------------------------------------------
-  // D-08 sentinel tests (schema-version marker)
+  // D-08 sentinel tests (schema-init flag)
   // --------------------------------------------------------------------------
 
-  it('schema-version marker absent on fresh db → isSchemaInitialized returns false (D-08)', async () => {
+  it('schema-init flag absent on fresh db → isSchemaInitialized returns false (D-08)', async () => {
     const db = new Database();
     const initialized = await isSchemaInitialized(db);
     expect(initialized).to.equal(false);
   });
 
-  it('schema-version marker present after prepareDb → isSchemaInitialized returns true (D-08)', async () => {
+  it('schema-init flag present after prepareDb → isSchemaInitialized returns true (D-08)', async () => {
     const db = new Database();
     await prepareDb(db);
     const initialized = await isSchemaInitialized(db);
@@ -748,7 +749,7 @@ describe('NetworksEngine — factory DI and persistence seam (Phase 14)', () => 
     let secondCallCount = 0;
     const reattachFactory: DbFactory = async (_h: string) => {
       secondCallCount++;
-      return persistedDb; // already has schema + SchemaVersion
+      return persistedDb; // already has schema + SchemaInit flag
     };
     const newEngine = new NetworksEngine(AsyncStorage, reattachFactory);
 
@@ -765,7 +766,7 @@ describe('NetworksEngine — factory DI and persistence seam (Phase 14)', () => 
   it('open() on cache MISS with UNINITIALIZED store THROWS (D-05) — initDB runs before gate but marker absent', async () => {
     // 14-04: the hasDeclaredSchema guard means initDB now runs BEFORE the D-05 gate when
     // the handle lacks the declaration (hasDeclaredSchema=false). But initDB does NOT write
-    // a SchemaVersion marker — that is create()'s job. So an uninitialized store still throws.
+    // a SchemaInit flag — that is create()'s job. So an uninitialized store still throws.
     const { factory, getExecCount } = makeUninitializedFactory();
     const engine = new NetworksEngine(AsyncStorage, factory);
 
@@ -788,7 +789,7 @@ describe('NetworksEngine — factory DI and persistence seam (Phase 14)', () => 
 
     // 14-04 contract: initDB runs (hasDeclaredSchema was false → exec is called at least once).
     // D-05 intent is preserved: the store still throws because isSchemaInitialized returns false
-    // (no SchemaVersion marker — only create() writes that via writeSchemaVersionMarker).
+    // (no SchemaInit flag — only create() writes that via markSchemaInitialized).
     expect(getExecCount(), 'open() runs initDB exec on uninitialized store (14-04 guard)').to.be.greaterThan(0);
 
     // The store must NOT be cached — a subsequent call with the same hash goes to factory again
@@ -941,7 +942,7 @@ describe('NetworksEngine — factory DI and persistence seam (Phase 14)', () => 
   // Database that StrandDatabase.initialize() already applied the App schema to
   // (via `declare schema App { <inner DDL> } apply schema App;`). The old gate
   // relied on isSchemaInitialized(db) which always returns false on the strand
-  // path (no SchemaVersion row yet), so initDB always ran — declaring the `main`
+  // path (no SchemaInit row yet), so initDB always ran — declaring the `main`
   // schema on top of an already-App-declared catalog. Dual-Table ownership of the
   // same tree://default/{table} LevelDB collections stalls every subsequent INSERT
   // (infinite spinner / hang in release builds).
@@ -952,7 +953,7 @@ describe('NetworksEngine — factory DI and persistence seam (Phase 14)', () => 
   // via a DbFactory closure, call create(), and assert:
   //   (a) no error thrown
   //   (b) initDB (main schema) was NOT triggered — hasDeclaredSchema('main') stays false
-  //   (c) SchemaVersion marker IS planted — isSchemaInitialized returns true
+  //   (c) SchemaInit flag IS planted — isSchemaInitialized returns true
   //   (d) TidSequence IS planted — readTidCounter does not throw
   //
   // The rnDbFactory-path (non-strand) unchanged assertion is also included so that
@@ -1019,9 +1020,9 @@ describe('NetworksEngine — factory DI and persistence seam (Phase 14)', () => 
 
       await engine.create(makePhase14NetworkInit(), makePhase14User());
 
-      // SchemaVersion marker must be planted (ensureTidSequence + writeSchemaVersionMarker must have run).
+      // SchemaInit flag must be planted (ensureTidSequence + markSchemaInitialized must have run).
       const initialized = await isSchemaInitialized(db);
-      expect(initialized, 'isSchemaInitialized must return true after create() on strand path — SchemaVersion row planted (REL-01)').to.equal(true);
+      expect(initialized, 'isSchemaInitialized must return true after create() on strand path — SchemaInit flag planted (REL-01)').to.equal(true);
 
       // TidSequence must be planted and readable.
       let tidError: unknown;
@@ -1046,6 +1047,38 @@ describe('NetworksEngine — factory DI and persistence seam (Phase 14)', () => 
       // On the non-strand path, initDB MUST have run (declares schema main).
       // If the strand gate mistakenly fires here (false positive), main would be absent.
       expect(db.declaredSchemaManager.hasDeclaredSchema('main'), 'main schema must be declared after create() on the rnDbFactory path — initDB must have run (REL-01 regression guard)').to.equal(true);
+    });
+
+    it('markSchemaInitialized is idempotent — second call on same handle does not throw (CR-01)', async () => {
+      // CR-01 direct contract lock: markSchemaInitialized uses INSERT OR IGNORE, so
+      // calling it twice on the same Database (simulating a strand store re-create)
+      // must not throw a PK-uniqueness violation.
+      //
+      // This is the root fix for the strand-path re-create failure: the strand branch
+      // in createContext() calls markSchemaInitialized() unconditionally (no
+      // isSchemaInitialized gate), so a second createContext() on an already-initialized
+      // store previously threw "UNIQUE constraint failed: SchemaVersion.Version".
+      const db = await makeStrandDb();
+
+      // First call — plants the SchemaInit flag.
+      let firstError: unknown;
+      try {
+        await markSchemaInitialized(db);
+      } catch (err) {
+        firstError = err;
+      }
+      expect(firstError, 'first markSchemaInitialized call must not throw').to.equal(undefined);
+      expect(await isSchemaInitialized(db), 'isSchemaInitialized must be true after first call').to.equal(true);
+
+      // Second call — must be a no-op (INSERT OR IGNORE), NOT a PK violation.
+      let secondError: unknown;
+      try {
+        await markSchemaInitialized(db);
+      } catch (err) {
+        secondError = err;
+      }
+      expect(secondError, 'second markSchemaInitialized call must not throw (CR-01 idempotency)').to.equal(undefined);
+      expect(await isSchemaInitialized(db), 'isSchemaInitialized must still be true after second call').to.equal(true);
     });
   });
 })
