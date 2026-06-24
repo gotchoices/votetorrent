@@ -35,7 +35,8 @@ import { ElectionType } from '@votetorrent/vote-core';
 // package.json exports + unstable_enablePackageExports: true in metro.config.js.
 import { NetworksEngine, ElectionsEngine, peekNextElectionTid, H16, LocalStorageReact, DIGEST_VECTORS } from '@votetorrent/vote-engine/rn';
 import type { DbFactory } from '@votetorrent/vote-engine/rn';
-import { rnDbFactory } from './rn-db-factory';
+import { rnDbFactory, createStrandDbFactory } from './rn-db-factory';
+import type { StrandHost } from './rn-db-factory';
 import { getOrCreateDeviceUser, getDevicePrivKeyHex } from './device-user';
 import { createDeviceSigner } from './device-signer';
 
@@ -502,13 +503,27 @@ export async function assertDigestParity(
 // ---------------------------------------------------------------------------
 
 /**
- * Create a real NetworksEngine wired to rnDbFactory + LocalStorageReact.
- * Intended for dev/proof invocation only.
+ * Create a real NetworksEngine for dev/proof invocation only.
+ *
+ * @param node  Optional StrandHost (e.g. a live CadreNode). When provided, the
+ *              engine's DbFactory uses createStrandDbFactory(node), exercising the
+ *              strand createContext path (VER-04). When omitted, falls back to
+ *              rnDbFactory (existing behaviour — backward compatible).
+ *
+ *              Note: a node-aware caller (e.g. under useCadreNode()) may invoke
+ *              makeProofEngine(node) to drive the strand path for VER-04 verification.
+ *              The boot-time runPersistenceProof() call with no argument preserves
+ *              the rnDbFactory path — the CadreNode has not booted yet at that point.
  */
-export function makeProofEngine(): NetworksEngine {
+export function makeProofEngine(node?: StrandHost): NetworksEngine {
   const factory: DbFactory = async (networkHash: string) => {
-    const db = await rnDbFactory(networkHash);
-    lastProofDb = db; // capture the engine's actual handle for queries
+    let db: Database;
+    if (node) {
+      db = await createStrandDbFactory(node)(networkHash);
+    } else {
+      db = await rnDbFactory(networkHash);
+    }
+    lastProofDb = db; // capture the engine's actual handle for queries — BOTH branches (Pitfall 5)
     return db;
   };
   return new NetworksEngine(makeLocalStorage(), factory);
