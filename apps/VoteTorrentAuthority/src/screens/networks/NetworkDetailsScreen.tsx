@@ -113,7 +113,7 @@ export function NetworkDetailsScreen() {
 				const details = await authorityEngine.getDetails();
 				setPrimaryAuthorityDetails(details);
 				const administration = await authorityEngine.getAdminDetails();
-				console.log("administration", administration);
+				console.info("administration", administration);
 				setPrimaryAuthorityAdmin(administration);
 			} catch (error) {
 				console.error("Failed to load primary authority details:", error);

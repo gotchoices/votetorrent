@@ -157,7 +157,7 @@ export default function SettingsScreen() {
 				if (defaultUserEngine) {
 					const defaultUser = await defaultUserEngine.get();
 					if (defaultUser) {
-						console.log("Refetched defaultUser on focus:", defaultUser);
+						console.info("Refetched defaultUser on focus:", defaultUser);
 						setDefaultUser(defaultUser);
 					} else {
 						setDefaultUser(null);
