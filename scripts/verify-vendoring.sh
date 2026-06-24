@@ -196,6 +196,28 @@ else
   exit 1
 fi
 
+# ── STEP 3c: strandBootstrapNodes CANARY (REPL-01) ──────────────────────────
+#
+# Assert the strandBootstrapNodes cohort-bootstrap forward is baked into the
+# vendored cadre-core dist (strand-instance-manager.js specifically). This edit
+# MUST travel with every re-vendored cadre-core just like the connectionGater
+# forward; if absent, every strand is an isolated 1-node ring and coordinator-repo
+# never broadcasts (the root-cause blocker REPL-01).
+
+echo "[verify-vendoring] Step 3c: strandBootstrapNodes canary in vendor/@serfab/cadre-core/dist ..."
+
+if grep -rl --include='*.js' "strandBootstrapNodes" "${CADRE_DIST}" | grep -qE 'strand-instance-manager\.js$'; then
+  echo "[verify-vendoring] Step 3c PASS: strandBootstrapNodes present in ${CADRE_DIST}/strand-instance-manager.js"
+else
+  echo "[verify-vendoring] Step 3c FAIL: strandBootstrapNodes NOT found in ${CADRE_DIST}/strand-instance-manager.js" >&2
+  echo "[verify-vendoring]   Re-apply the strandBootstrapNodes forward (REPL-01) before re-vendoring:" >&2
+  echo "[verify-vendoring]   In strand-instance-manager.js replace 'bootstrapNodes: []' with" >&2
+  echo "[verify-vendoring]   'bootstrapNodes: config.network?.strandBootstrapNodes ?? []'" >&2
+  echo "[verify-vendoring]   and add 'strandBootstrapNodes?: string[]' to NetworkConfig in types.d.ts." >&2
+  echo "[verify-vendoring] ========== VENDORING GATE: FAIL ==========" >&2
+  exit 1
+fi
+
 # ── FINAL VERDICT ─────────────────────────────────────────────────────────────
 
 echo "[verify-vendoring] ========== VENDORING GATE: PASS =========="

@@ -21,9 +21,16 @@ entries in the root `package.json` `resolutions`.
 | `@optimystic/db-p2p-storage-rn` | Optimystic | `0e26fffa06771e618da76ce7ee875c153f596d71` |
 
 > The `sereus` tree was **dirty** at vendor time — it carries source edits not yet committed upstream.
-> The most important is the **`connectionGater` forward** (spike 011), which is baked into the vendored
-> `@serfab/cadre-core/dist/cadre-node.js` + `strand-instance-manager.js` and `types.d.ts`. This edit
-> MUST travel with any re-vendored cadre-core.
+> The most important are the edits listed below, which MUST travel with any re-vendored cadre-core:
+>
+> - **`connectionGater` forward** (spike 011) — baked into `dist/cadre-node.js` and
+>   `dist/strand-instance-manager.js` + `dist/types.d.ts`. Without it, React Native peers
+>   cannot dial insecure-ws / private addresses.
+>
+> - **`strandBootstrapNodes` forward** (REPL-01) — baked into `dist/strand-instance-manager.js`
+>   and `dist/types.d.ts`. Replaces the `bootstrapNodes: []` TODO so strand nodes read
+>   `config.network?.strandBootstrapNodes ?? []` and can join a cohort. Without it, every
+>   strand is an isolated 1-node ring and `coordinator-repo` never broadcasts.
 
 ## Rebuild steps (when re-syncing from upstream)
 
@@ -35,6 +42,10 @@ The sereus monorepo ships these three without a committed `dist`, so re-vendorin
    `tsc -p tsconfig.build.json --emitDeclarationOnly --declaration`
    and ensure the `connectionGater` forward is present in `dist/cadre-node.js`,
    `dist/strand-instance-manager.js`, and `dist/types.d.ts`.
+   Also ensure the `strandBootstrapNodes` forward (REPL-01) is present in
+   `dist/strand-instance-manager.js` and `dist/types.d.ts`
+   (`bootstrapNodes: config.network?.strandBootstrapNodes ?? []` and
+   `strandBootstrapNodes?: string[]` in `NetworkConfig`).
 3. `@optimystic/db-*` — git-clean with committed `dist`; copy `dist/` + `package.json` as-is.
 
 Then copy each `dist/` + `package.json` into `vendor/<scope>/<pkg>/` and `yarn install`.
