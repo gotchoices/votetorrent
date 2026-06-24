@@ -30,6 +30,7 @@
 		"ios": "yarn workspace votetorrent-authority ios",
 		"all": "yarn workspace votetorrent-authority ios && yarn workspace votetorrent-authority android",
 		"lint:peers": "node scripts/check-peer-requirements.mjs",
+		"lint:stubs": "bash scripts/lint-stubs.sh",
 		"postinstall": "node scripts/check-peer-requirements.mjs"
 	},
 	"devDependencies": {
