@@ -82,7 +82,7 @@ export function CreateElectionScreen() {
 					setAuthorityName(details.network.name);
 				}
 			} catch (error) {
-				console.error("Error loading authority for election:", error);
+				console.warn("Error loading authority for election:", error);
 			}
 		}
 		loadAuthority();
@@ -280,7 +280,7 @@ export function CreateElectionScreen() {
 			// so the detail / revise screens can display them. See local-keyholders.ts.
 			await saveLocalKeyholders(electionId, cleanKeyholders);
 		} catch (err) {
-			console.error("createElection error:", err);
+			console.warn("createElection error:", err);
 			setErrorMessage(mapElectionError(err, t));
 			return;
 		}
@@ -382,11 +382,7 @@ export function CreateElectionScreen() {
 			</ScrollView>
 
 			{/* ── PROPOSE footer ───────────────────────────────────────────── */}
-			{errorMessage ? (
-				<ThemedText type="small" style={{ color: colors.error }}>
-					{errorMessage}
-				</ThemedText>
-			) : null}
+			<InlineError message={errorMessage} />
 			<Footer>
 				<CustomButton
 					title={t("propose")}

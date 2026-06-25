@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Image, ScrollView, StyleSheet, View } from "react-native";
 import { ChipButton } from "../../components/ChipButton";
 import { ThemedText } from "../../components/ThemedText";
+import { InlineError } from "../../components/InlineError";
 import type {
 	Authority,
 	IAuthorityEngine,
@@ -40,8 +41,10 @@ export default function AuthorityDetailsScreen() {
 	const [officers, setOfficers] = useState<Officer[]>([]);
 	const [inviteSearch, setInviteSearch] = useState("");
 	const [invitedAuthorities, setInvitedAuthorities] = useState<InvitedAuthority[]>([]);
+	const [errorMessage, setErrorMessage] = useState("");
 
 	const handlePinToggle = async () => {
+		setErrorMessage("");
 		try {
 			if (pinned) {
 				await networkEngine?.unpinAuthority(authority.id);
@@ -50,12 +53,14 @@ export default function AuthorityDetailsScreen() {
 			}
 			setPinned(!pinned);
 		} catch (error) {
-			console.error("Error toggling authority pin:", error);
+			console.warn("Error toggling authority pin:", error);
+			setErrorMessage(error instanceof Error ? error.message : String(error));
 		}
 	};
 
 	useEffect(() => {
 		async function loadEngines() {
+			setErrorMessage("");
 			try {
 				const engine = await getEngine("network");
 				setNetworkEngine(engine as INetworkEngine);
@@ -64,7 +69,8 @@ export default function AuthorityDetailsScreen() {
 					setAuthorityEngine(authorityEngine);
 				}
 			} catch (error) {
-				console.error("Error loading engines:", error);
+				console.warn("Error loading engines:", error);
+				setErrorMessage(error instanceof Error ? error.message : String(error));
 			}
 		}
 		loadEngines();
@@ -83,9 +89,10 @@ export default function AuthorityDetailsScreen() {
 				const details = await authorityEngine.getAdminDetails();
 				setAdminDetails(details);
 			} catch (error) {
-				console.error("Error checking pinned status:", error);
+				console.warn("Error checking pinned status:", error);
 				setPinned(false);
 				setAdminDetails(null);
+				setErrorMessage(error instanceof Error ? error.message : String(error));
 			}
 		}
 		getAuthorityData();
@@ -136,9 +143,10 @@ export default function AuthorityDetailsScreen() {
 				await Promise.all(userEnginePromises);
 				setOfficerUsers(userMap);
 			} catch (error) {
-				console.error("Error fetching users:", error);
+				console.warn("Error fetching users:", error);
 				setOfficers([]);
 				setOfficerUsers(new Map());
+				setErrorMessage(error instanceof Error ? error.message : String(error));
 			}
 		}
 		getUsers();
@@ -154,7 +162,8 @@ export default function AuthorityDetailsScreen() {
 			try {
 				setInvitedAuthorities((await fn.call(authorityEngine)) ?? []);
 			} catch (error) {
-				console.error("Error loading invited authorities:", error);
+				console.warn("Error loading invited authorities:", error);
+				setErrorMessage(error instanceof Error ? error.message : String(error));
 			}
 		}
 		loadInvited();
@@ -178,6 +187,7 @@ export default function AuthorityDetailsScreen() {
 
 	return (
 		<ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 32 }}>
+			<InlineError message={errorMessage} />
 			<View style={styles.section}>
 				<View style={styles.imageContainer}>
 					<Image source={{ uri: authority.imageRef?.url }} style={styles.authorityImage} />

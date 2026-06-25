@@ -12,6 +12,7 @@ import type { Authority, INetworkEngine } from "@votetorrent/vote-core";
 import { NoNetwork } from "../../components/NoNetwork";
 import { useApp } from "../../providers/AppProvider";
 import { globalStyles } from "../../theme/styles";
+import { InlineError } from "../../components/InlineError";
 
 export default function AuthoritiesScreen() {
 	const { t } = useTranslation();
@@ -24,9 +25,11 @@ export default function AuthoritiesScreen() {
 	const [isLoading, setIsLoading] = useState(true);
 	const [pinnedAuthorities, setPinnedAuthorities] = useState<Authority[]>([]);
 	const [networkEngine, setNetworkEngine] = useState<INetworkEngine | null>(null);
+	const [errorMessage, setErrorMessage] = useState("");
 
 	const loadAuthorities = useCallback(async () => {
 		if (!networkEngine) return;
+		setErrorMessage("");
 		try {
 			setIsLoading(true);
 			const pinned = await networkEngine.getPinnedAuthorities();
@@ -39,7 +42,8 @@ export default function AuthoritiesScreen() {
 				)
 			);
 		} catch (error) {
-			console.error("Error loading authorities:", error);
+			console.warn("Error loading authorities:", error);
+			setErrorMessage(error instanceof Error ? error.message : String(error));
 		} finally {
 			setIsLoading(false);
 		}
@@ -48,11 +52,13 @@ export default function AuthoritiesScreen() {
 	useEffect(() => {
 		async function initializeNetworkEngine() {
 			if (!hasNetwork) return;
+			setErrorMessage("");
 			try {
 				const engine = await getEngine<INetworkEngine>("network");
 				setNetworkEngine(engine);
 			} catch (error) {
-				console.error("Failed to initialize network engine:", error);
+				console.warn("Failed to initialize network engine:", error);
+				setErrorMessage(error instanceof Error ? error.message : String(error));
 			}
 		}
 		initializeNetworkEngine();
@@ -72,6 +78,7 @@ export default function AuthoritiesScreen() {
 	const handlePinToggle = useCallback(
 		async (authority: Authority) => {
 			if (!networkEngine) return;
+			setErrorMessage("");
 			try {
 				const isPinned = pinnedAuthorities.some((a) => a.id === authority.id);
 
@@ -93,7 +100,8 @@ export default function AuthoritiesScreen() {
 					)
 				);
 			} catch (error) {
-				console.error("Error toggling authority pin:", error);
+				console.warn("Error toggling authority pin:", error);
+				setErrorMessage(error instanceof Error ? error.message : String(error));
 			}
 		},
 		[networkEngine, pinnedAuthorities, searchText]
@@ -132,6 +140,7 @@ export default function AuthoritiesScreen() {
 
 	return (
 		<ScrollView style={styles.container}>
+			<InlineError message={errorMessage} />
 			{pinnedAuthorities.length > 0 ? (
 				pinnedAuthorities.map((authority: Authority) => (
 					<InfoCard
