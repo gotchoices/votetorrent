@@ -82,6 +82,7 @@ export default function ElectionDetailsScreen() {
 	useFocusEffect(
 		useCallback(() => {
 			const loadBallots = async () => {
+				setErrorMessage(""); // clear stale error before reload so transient failures don't persist
 				try {
 					if (electionEngine) {
 						const summaries = await electionEngine.getBallots();
