@@ -34,6 +34,7 @@ export default function AuthorityDetailScreen() {
 	}, [navigation, t]);
 
 	const onResend = async () => {
+		if (loading) return; // re-entrancy guard: prevent concurrent engine calls on rapid double-press
 		setErrorMessage("");
 		setLoading(true);
 		try {
@@ -49,6 +50,7 @@ export default function AuthorityDetailScreen() {
 	};
 
 	const onCancelInvitation = async () => {
+		if (loading) return; // re-entrancy guard: prevent concurrent engine calls on rapid double-press
 		setErrorMessage("");
 		setLoading(true);
 		try {
