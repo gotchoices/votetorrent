@@ -16,6 +16,7 @@ import { getOrCreateDeviceUser } from "../../engines/device-user";
 import type { IDefaultUserEngine, INetworksEngine, NetworkInit, NetworkReference } from "@votetorrent/vote-core";
 import { ElectionType } from "@votetorrent/vote-core";
 import type { RootStackParamList } from "../../navigation/types";
+import { InlineError } from "../../components/InlineError";
 
 export default function AddNetworkScreen() {
 	const { colors } = useTheme() as ExtendedTheme;
@@ -326,11 +327,7 @@ export default function AddNetworkScreen() {
 				) : null}
 			</ScrollView>
 
-			{errorMessage ? (
-				<ThemedText type="small" style={{ color: colors.error }}>
-					{errorMessage}
-				</ThemedText>
-			) : null}
+			<InlineError message={errorMessage} />
 			<Footer>
 				<CustomButton
 					title={t("create")}

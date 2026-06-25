@@ -27,6 +27,7 @@ import {
 	ProposedChange,
 	ProposedChangesCard,
 } from "./components/ProposedChangesCard";
+import { InlineError } from "../../components/InlineError";
 
 export function NetworkDetailsScreen() {
 	const { networkRef } = useRoute().params as { networkRef: NetworkReference };
@@ -35,6 +36,8 @@ export function NetworkDetailsScreen() {
 	const [primaryAuthorityEngine, setPrimaryAuthorityEngine] = useState<IAuthorityEngine>();
 	const [primaryAuthorityDetails, setPrimaryAuthorityDetails] = useState<AuthorityDetails>();
 	const [primaryAuthorityAdmin, setPrimaryAuthorityAdmin] = useState<AdminDetails>();
+	const [loadError, setLoadError] = useState("");
+	const [selectError, setSelectError] = useState("");
 	const { getEngine, selectNetwork } = useApp();
 	const { t } = useTranslation();
 	const { colors } = useTheme() as ExtendedTheme;
@@ -43,13 +46,15 @@ export function NetworkDetailsScreen() {
 
 	useEffect(() => {
 		const loadNetwork = async () => {
+			setLoadError("");
 			try {
 				const engine = await getEngine<INetworkEngine>("network", networkRef as NetworkReference);
 				setNetworkEngine(engine);
 				const details = await engine.getDetails();
 				setNetworkDetails(details);
 			} catch (error) {
-				console.error("Failed to load network details:", error);
+				console.warn("Failed to load network details:", error);
+				setLoadError(error instanceof Error ? error.message : String(error));
 			}
 		};
 		loadNetwork();
@@ -116,7 +121,8 @@ export function NetworkDetailsScreen() {
 				console.info("administration", administration);
 				setPrimaryAuthorityAdmin(administration);
 			} catch (error) {
-				console.error("Failed to load primary authority details:", error);
+				console.warn("Failed to load primary authority details:", error);
+				setLoadError(error instanceof Error ? error.message : String(error));
 			}
 		};
 		loadPrimaryAuthority();
@@ -130,6 +136,7 @@ export function NetworkDetailsScreen() {
 	// needed. Then return to the network home; sibling screens (Elections/Authorities/Create)
 	// resolve against the now-selected network.
 	const handleSelectNetwork = async () => {
+		setSelectError("");
 		try {
 			// selectNetwork() binds the network AND flips AppProvider.hasNetwork so the
 			// gated screens (Elections/Authorities) render immediately — previously this
@@ -137,7 +144,8 @@ export function NetworkDetailsScreen() {
 			await selectNetwork(networkRef as NetworkReference);
 			navigation.goBack();
 		} catch (error) {
-			console.error("Failed to select network:", error);
+			console.warn("Failed to select network:", error);
+			setSelectError(error instanceof Error ? error.message : String(error));
 		}
 	};
 
@@ -146,6 +154,7 @@ export function NetworkDetailsScreen() {
 			style={styles.container}
 			contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}
 		>
+			<InlineError message={loadError} />
 			<View style={styles.section}>
 				<ThemedText type="header">{networkDetails?.network.name}</ThemedText>
 				<CustomButton
@@ -155,6 +164,7 @@ export function NetworkDetailsScreen() {
 					backgroundColor={colors.success}
 					onPress={handleSelectNetwork}
 				/>
+				<InlineError message={selectError} />
 				{networkDetails && primaryAuthorityDetails && (
 					<NetworkDetailsComponent
 						details={networkDetails}
