@@ -20,6 +20,7 @@ import {
 import type { NavigationProp } from "../../navigation/types";
 import { globalStyles } from "../../theme/styles";
 import { useSettings } from "../../providers/SettingsProvider";
+import { InlineError } from "../../components/InlineError";
 
 const LANGUAGES: { code: 'en' | 'es'; label: string }[] = [
 	{ code: 'en', label: 'English' },
@@ -37,6 +38,7 @@ export default function SettingsScreen() {
 	const [userEngine, setUserEngine] = useState<IUserEngine | null>(null);
 	const [currentUser, setCurrentUser] = useState<User | null>(null);
 	const [seedStatus, setSeedStatus] = useState<string | null>(null);
+	const [settingsError, setSettingsError] = useState("");
 	const { colors } = useTheme() as ExtendedTheme;
 	const { t } = useTranslation();
 	const { getEngine } = useApp();
@@ -83,7 +85,8 @@ export default function SettingsScreen() {
 					setNetworkEngine(networkEngineResult as INetworkEngine);
 				}
 			} catch (error) {
-				console.error("Failed to load base engines:", error);
+				console.warn("Failed to load base engines:", error);
+				setSettingsError(error instanceof Error ? error.message : String(error));
 			}
 		};
 		loadBaseEngines();
@@ -117,7 +120,8 @@ export default function SettingsScreen() {
 					setUserEngine(null);
 				}
 			} catch (error) {
-				console.error("Failed to get current user engine:", error);
+				console.warn("Failed to get current user engine:", error);
+				setSettingsError(error instanceof Error ? error.message : String(error));
 				setUserEngine(null);
 			}
 		};
@@ -142,7 +146,8 @@ export default function SettingsScreen() {
 						setCurrentUser(null);
 					}
 				} catch (error) {
-					console.error("Failed to get user summary:", error);
+					console.warn("Failed to get user summary:", error);
+					setSettingsError(error instanceof Error ? error.message : String(error));
 					setCurrentUser(null);
 				}
 			};
@@ -188,6 +193,7 @@ export default function SettingsScreen() {
 
 	return (
 		<View style={styles.content}>
+			<InlineError message={settingsError} />
 			<View style={[styles.container, { backgroundColor: colors.background }]}>
 				<View style={[styles.helpIconsRow, { zIndex: 10 }]}>
 					<ThemedText type="default">{t('language')}</ThemedText>

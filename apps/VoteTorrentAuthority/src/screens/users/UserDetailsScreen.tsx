@@ -9,6 +9,7 @@ import {
 } from "@react-navigation/native";
 import { User, IUserEngine, UserHistory } from "@votetorrent/vote-core";
 import { ThemedText } from "../../components/ThemedText";
+import { InlineError } from "../../components/InlineError";
 import { useTranslation } from "react-i18next";
 import { CustomButton } from "../../components/CustomButton";
 import { useState, useCallback } from "react";
@@ -29,6 +30,7 @@ export function UserDetailsScreen() {
 
 	const [user, setUser] = useState<User>(initialUser);
 	const [isLoadingUser, setIsLoadingUser] = useState(false);
+	const [loadError, setLoadError] = useState("");
 
 	const [userHistoryList, setUserHistoryList] = useState<UserHistory[]>([]);
 	const [isLoadingHistory, setIsLoadingHistory] = useState(false);
@@ -47,7 +49,8 @@ export function UserDetailsScreen() {
 						console.warn("User not found after refetch:", initialUser.id);
 					}
 				} catch (error) {
-					console.error("Failed to fetch latest user data:", error);
+					console.warn("Failed to fetch latest user data:", error);
+					setLoadError(error instanceof Error ? error.message : String(error));
 				} finally {
 					setIsLoadingUser(false);
 				}
@@ -68,7 +71,8 @@ export function UserDetailsScreen() {
 					const historyArray = await asyncIterableToArray(historyIterable);
 					setUserHistoryList(historyArray);
 				} catch (error) {
-					console.error("Failed to fetch user history:", error);
+					console.warn("Failed to fetch user history:", error);
+					setLoadError(error instanceof Error ? error.message : String(error));
 				} finally {
 					setIsLoadingHistory(false);
 				}
@@ -80,6 +84,7 @@ export function UserDetailsScreen() {
 
 	return (
 		<ScrollView style={styles.container}>
+			<InlineError message={loadError} />
 			<View style={styles.imageContainer}>
 				<Image source={{ uri: (user as any).image?.url }} style={styles.image} />
 			</View>

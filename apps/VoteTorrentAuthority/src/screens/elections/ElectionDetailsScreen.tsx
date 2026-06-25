@@ -4,8 +4,9 @@ import { ExtendedTheme, useRoute, useTheme, useNavigation, useFocusEffect } from
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTranslation } from "react-i18next";
 import { ThemedText } from "../../components/ThemedText";
-import type { BallotSummary, ElectionDetails, IElectionEngine, ElectionRevisionSignatureTask } from "@votetorrent/vote-core";
+import type { BallotSummary, ElectionDetails, IElectionEngine, ElectionRevisionSignatureTask, KeyholderInvite } from "@votetorrent/vote-core";
 import { globalStyles } from "../../theme/styles";
+import { InlineError } from "../../components/InlineError";
 import { ElectionDetailsBlock } from "./components/ElectionDetailsBlock";
 import { ElectionTimelineList } from "./components/ElectionTimelineList";
 import { ChipButton } from "../../components/ChipButton";
@@ -14,6 +15,7 @@ import { CustomButton } from "../../components/CustomButton";
 import { CustomTextInput } from "../../components/CustomTextInput";
 import { InfoCard } from "../../components/InfoCard";
 import { formatDate } from "../../utils/displayUtils";
+import { getLocalKeyholders } from "../../engines/local-keyholders";
 import type { NavigationProp } from "../../navigation/types";
 
 /**
@@ -48,10 +50,26 @@ export default function ElectionDetailsScreen() {
 			try {
 				if (electionEngine) {
 					const details = await electionEngine.getElectionDetails();
+					// TEMP scaffold (delete with cadre P2P invite flow): the engine does
+					// not persist keyholders yet, so merge locally-stored names into the
+					// revision projections so the count + cards render. See local-keyholders.ts.
+					const names = await getLocalKeyholders(details.election.id);
+					if (names.length) {
+						// current is ElectionRevision -> InviteStatus<SentKeyholderInvite>[]
+						if (details.current.keyholders.length === 0) {
+							details.current.keyholders = names.map((name) => ({ invite: { name } }));
+						}
+						// proposed.proposed is ElectionRevisionInit -> KeyholderInvite[]
+						if (details.proposed && details.proposed.proposed.keyholders.length === 0) {
+							details.proposed.proposed.keyholders = names.map(
+								(name): KeyholderInvite => ({ name, type: "k", expiration: "0", inviteKey: "", inviteSignature: "" })
+							);
+						}
+					}
 					setElectionDetails(details);
 				}
 			} catch (error) {
-				console.error("Error loading election details:", error);
+				console.warn("Error loading election details:", error);
 				setErrorMessage(error instanceof Error ? error.message : String(error));
 			}
 		};
@@ -70,7 +88,7 @@ export default function ElectionDetailsScreen() {
 						setBallots(summaries);
 					}
 				} catch (error) {
-					console.error("Error loading ballots:", error);
+					console.warn("Error loading ballots:", error);
 					setErrorMessage(error instanceof Error ? error.message : String(error));
 				}
 			};
@@ -112,11 +130,9 @@ export default function ElectionDetailsScreen() {
 			contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}>
 
 			{/* SC6 error state — surfaces load failures inline (D-19) */}
-			{errorMessage ? (
-				<View style={styles.section}>
-					<ThemedText type="small" style={{ color: colors.error }}>{errorMessage}</ThemedText>
-				</View>
-			) : null}
+			<View style={styles.section}>
+				<InlineError message={errorMessage} />
+			</View>
 
 			{/* 1. Immutable core block (title + Authority/Type/Date + Core Signature) */}
 			<View style={styles.section}>

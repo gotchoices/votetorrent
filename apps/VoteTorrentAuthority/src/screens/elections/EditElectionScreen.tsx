@@ -14,7 +14,9 @@ import { ElectionRevisionForm, ElectionRevisionFormValue } from "./components/El
 import { useApp } from "../../providers/AppProvider";
 import { ElectionType } from "@votetorrent/vote-core";
 import type { IElectionEngine, IElectionsEngine, ElectionInit, ElectionDetails } from "@votetorrent/vote-core";
+import { getLocalKeyholders, saveLocalKeyholders } from "../../engines/local-keyholders";
 import { mapElectionError } from "./election-error-messages";
+import { InlineError } from "../../components/InlineError";
 
 // Phase 9 plan 09-13 (ELECUI-04) — Election Revision form (Screen C, Figma #16/#17).
 // Phase 20 plan 20-06 (EUI-01, EUI-02) — wire real adjustElection from single cached load.
@@ -72,8 +74,32 @@ export default function EditElectionScreen() {
 				setDetails(loaded);
 				// Seed electionType from the loaded election (user can then change it via radio)
 				setElectionType(loaded.election.type);
+				// Seed revision form from the current revision so all fields are pre-populated.
+				// Keyholder names live at kh.invite.name (InviteStatus<SentKeyholderInvite>).
+				// Timeline numbers are Unix ms → convert to ISO strings for DateField.
+				const cur = loaded.current;
+				const toISO = (ms: number | undefined): string =>
+					ms != null && ms > 0 ? new Date(ms).toISOString() : "";
+				setRevision({
+					registrationEnds: toISO(cur.timeline.registrationEnds),
+					ballotsFinal: toISO(cur.timeline.ballotsFinal),
+					// releasingKeys has no ElectionEvent counterpart — leave blank (same as create)
+					releasingKeys: "",
+					votingStarts: toISO(cur.timeline.votingStarts),
+					tallyingStarts: toISO(cur.timeline.tallyingStarts),
+					validation: toISO(cur.timeline.validation),
+					certificationStarts: toISO(cur.timeline.certificationStarts),
+					closed: toISO(cur.timeline.closed),
+					// TEMP scaffold: engine returns []; fall back to locally-stored names.
+					keyholders: cur.keyholders.length
+						? cur.keyholders.map((kh) => kh.invite.name)
+						: await getLocalKeyholders(loaded.election.id),
+					threshold: cur.keyholderThreshold,
+					tags: cur.tags ?? [],
+					instructions: cur.instructions ?? "",
+				});
 			} catch (error) {
-				console.error("Error loading election for edit:", error);
+				console.warn("Error loading election for edit:", error);
 				setErrorMessage(error instanceof Error ? error.message : String(error));
 			}
 		}
@@ -174,10 +200,13 @@ export default function EditElectionScreen() {
 			};
 			// No seedElectionSigning — adjustElection is non-signing (D-01, RESEARCH Pattern 1)
 			await electionsEngine.adjustElection(init);
+			// TEMP scaffold (delete with cadre P2P invite flow): persist the latest
+			// keyholder names locally so the detail / revise screens display them.
+			await saveLocalKeyholders(details.election.id, cleanKeyholders);
 			// goBack only on success (D-19 — NOT after the catch)
 			navigation.goBack();
 		} catch (err) {
-			console.error("adjustElection error:", err);
+			console.warn("adjustElection error:", err);
 			// D-19 (SC6): surface a friendly error inline instead of a raw engine/SQL message
 			setErrorMessage(mapElectionError(err, t));
 		} finally {
@@ -271,11 +300,7 @@ export default function EditElectionScreen() {
 			</ScrollView>
 
 			{/* ── SC6 / D-19: inline error above footer ────────────────────────── */}
-			{errorMessage ? (
-				<ThemedText type="small" style={{ color: colors.error }}>
-					{errorMessage}
-				</ThemedText>
-			) : null}
+			<InlineError message={errorMessage} />
 
 			{/* ── PROPOSE footer ────────────────────────────────────────────────── */}
 			<Footer>

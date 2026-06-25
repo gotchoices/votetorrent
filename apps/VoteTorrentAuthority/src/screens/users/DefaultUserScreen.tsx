@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { CustomTextInput } from "../../components/CustomTextInput";
 import { CustomButton } from "../../components/CustomButton";
 import { Footer } from "../../components/Footer";
+import { InlineError } from "../../components/InlineError";
 import { globalStyles } from "../../theme/styles";
 import type { DefaultUser } from "@votetorrent/vote-core";
 import { IDefaultUserEngine } from "@votetorrent/vote-core";
@@ -20,14 +21,16 @@ export function DefaultUserScreen() {
 
 	const [defaultUserState, setDefaultUserState] = useState<DefaultUser>(defaultUser);
 	const [edited, setEdited] = useState(false);
+	const [errorMessage, setErrorMessage] = useState("");
 
 	const handleSave = async () => {
+		setErrorMessage("");
 		try {
 			await defaultUserEngine.set(defaultUserState);
 			navigation.goBack();
 		} catch (error) {
-			console.error("Error saving default user:", error);
-			//TODO: Show an alert to the user
+			console.warn("Error saving default user:", error);
+			setErrorMessage(error instanceof Error ? error.message : String(error));
 		}
 	};
 
@@ -72,6 +75,7 @@ export function DefaultUserScreen() {
 					/>
 				)}
 			</ScrollView>
+			<InlineError message={errorMessage} />
 			<Footer>
 				<CustomButton
 					title={t("save")}
