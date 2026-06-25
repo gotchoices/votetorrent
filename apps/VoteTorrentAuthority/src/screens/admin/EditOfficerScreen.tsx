@@ -16,6 +16,7 @@ import FontAwesome6 from "react-native-vector-icons/FontAwesome6";
 import type { RootStackParamList } from "../../navigation/types";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { CustomTextInput } from "../../components/CustomTextInput";
+import { InlineError } from "../../components/InlineError";
 import { globalStyles } from "../../theme/styles";
 import { createDeviceSigner } from "../../engines/device-signer";
 import { getOrCreateDeviceUser } from "../../engines/device-user";
@@ -63,14 +64,15 @@ export default function EditOfficerScreen() {
 						setUser(u ?? null);
 						setName(u?.name ?? "");
 					} catch (userError) {
-						console.error("Error loading user for officer:", userError);
+						console.warn("Error loading user for officer:", userError);
 						setName("");
 					}
 					setTitle(foundOfficer.title);
 					setScopes(foundOfficer.scopes);
 				}
 			} catch (error) {
-				console.error("Error loading officer:", error);
+				console.warn("Error loading officer:", error);
+				setErrorMessage(error instanceof Error ? error.message : String(error));
 			}
 		}
 		loadOfficer();
@@ -277,11 +279,7 @@ export default function EditOfficerScreen() {
 				</View>
 			</ScrollView>
 
-			{errorMessage ? (
-				<ThemedText type="small" style={{ color: colors.error }}>
-					{errorMessage}
-				</ThemedText>
-			) : null}
+			<InlineError message={errorMessage} />
 			<Footer>
 				<CustomButton
 					title={t("save")}

@@ -17,6 +17,7 @@ import { ThemedText } from "../../components/ThemedText";
 import { CustomButton } from "../../components/CustomButton";
 import { Footer } from "../../components/Footer";
 import { CustomTextInput } from "../../components/CustomTextInput";
+import { InlineError } from "../../components/InlineError";
 import { SignatureTaskFooter } from "../../components/SignatureTaskFooter";
 import type { RootStackParamList } from "../../navigation/types";
 import { useApp } from "../../providers/AppProvider";
@@ -62,7 +63,8 @@ export function KeyholderInvitationScreen() {
 				const status = await engine.getKeyholderInvite(invitationId);
 				setInvite(status);
 			} catch (error) {
-				console.error("Error loading keyholder invite:", error);
+				console.warn("Error loading keyholder invite:", error);
+				setErrorMessage(error instanceof Error ? error.message : String(error));
 			}
 		}
 		loadInvite();
@@ -128,7 +130,7 @@ export function KeyholderInvitationScreen() {
 			setShareText(sharePayload);
 			// D-08: do NOT navigate away immediately — keep screen so Copy affordance shows.
 		} catch (error) {
-			console.error("onSend error:", error);
+			console.warn("onSend error:", error);
 			setErrorMessage(error instanceof Error ? error.message : String(error));
 		}
 	};
@@ -151,7 +153,7 @@ export function KeyholderInvitationScreen() {
 			// GAP-2: navigate ONLY on success — the InviteResult is now written.
 			navigation.goBack();
 		} catch (error) {
-			console.error("Error responding to invite:", error);
+			console.warn("Error responding to invite:", error);
 			setErrorMessage(error instanceof Error ? error.message : String(error));
 		}
 	};
@@ -173,7 +175,7 @@ export function KeyholderInvitationScreen() {
 			// GAP-2: navigate ONLY on success — the InviteResult is now written.
 			navigation.goBack();
 		} catch (error) {
-			console.error("Error responding to invite:", error);
+			console.warn("Error responding to invite:", error);
 			setErrorMessage(error instanceof Error ? error.message : String(error));
 		}
 	};
@@ -210,11 +212,7 @@ export function KeyholderInvitationScreen() {
 						) : null}
 
 						{/* Pattern B error display */}
-						{errorMessage ? (
-							<ThemedText type="small" style={{ color: colors.error }}>
-								{errorMessage}
-							</ThemedText>
-						) : null}
+						<InlineError message={errorMessage} />
 					</View>
 				</ScrollView>
 				{!shareText ? (
@@ -263,11 +261,7 @@ export function KeyholderInvitationScreen() {
 				</View>
 			</ScrollView>
 			{/* GAP-2: surface respondToInvite failures inline in accept mode */}
-			{errorMessage ? (
-				<ThemedText type="small" style={{ color: colors.error }}>
-					{errorMessage}
-				</ThemedText>
-			) : null}
+			<InlineError message={errorMessage} />
 			<SignatureTaskFooter
 				onAccept={onAccept}
 				onReject={onDecline}
