@@ -104,6 +104,13 @@ export default function AuthorityInvitationScreen() {
 	const onSend = async () => {
 		// 16-08 item 4: clear any prior error so a retry starts clean.
 		setErrorMessage("");
+		// Required-field guard: an empty authority name would otherwise generate an
+		// invite with a blank name and silently flip to the share state. Surface it
+		// inline (same pattern as the engine guards below) instead of proceeding.
+		if (!name.trim()) {
+			setErrorMessage(t("errAuthorityNameRequired"));
+			return;
+		}
 		try {
 			// Resolve device identity (D-02 / generate-on-first-run) — needed to
 			// populate ctx.user so Officer.UserIdValid passes (Pitfall 2 / T-16-05).

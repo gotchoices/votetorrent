@@ -118,21 +118,69 @@ export function CadreNodeProvider({ children }: PropsWithChildren) {
 
     async function bootNode() {
       try {
-        // Separate store for the control peer identity — 'votetorrent-cadre-node'
-        // gives a stable peerId across app restarts (D-06 / T-22-04).
-        const db = openOptimysticRNDb({
+        // Peer-identity store — 'votetorrent-cadre-node' gives a stable peerId
+        // across app restarts (D-06 / T-22-04). This handle is used ONLY for
+        // loadOrCreateRNPeerKey; block storage is per-scope (see below).
+        const identityDb = openOptimysticRNDb({
           openFn: (n, c, e) => new LevelDB(n, c, e),
           WriteBatch: LevelDBWriteBatch,
           name: 'votetorrent-cadre-node',
         });
-        const privateKey = await loadOrCreateRNPeerKey(db);
+        const privateKey = await loadOrCreateRNPeerKey(identityDb);
+
+        // ISO-01 (cross-network isolation fix): the storage provider MUST open a
+        // DISTINCT LevelDB per scope, keyed by the id cadre-core passes in.
+        //
+        // Root cause it fixes: the optimystic plugin maps every table to the
+        // collection URI `tree://default/{TableName}`
+        // (quereus-plugin-optimystic chunk-HPFDTDHY.js:1885) and caches the local
+        // transactor under the key `local:libp2p` (getTransactorKey — no
+        // networkName/strandId). Neither the collection URI nor the transactor key
+        // carries the strandId. The ONLY thing that isolates one strand's blocks
+        // from another's is the LevelDBRawStorage instance (the underlying LevelDB
+        // directory). cadre-core is built for exactly this: it calls
+        // `provider(strandId)` per strand (strand-instance-manager.js:21) and
+        // `provider('control')` for the control DB (cadre-node.js:180).
+        //
+        // The previous `() => new LevelDBRawStorage(db)` IGNORED that argument and
+        // returned one shared LevelDB, so EVERY network's Authority/Officer/Admin
+        // rows landed in the same `tree://default/Authority` keyspace. The
+        // first-network "shoe-in" InsertValid branch requires
+        // `(select count(*) from Authority) = 1`, which only holds for the very
+        // first network on a fresh install — every subsequent create saw count >= 2
+        // and failed `QuereusError: CHECK constraint failed: InsertValid`
+        // (confirmed on-device 2026-06-25: pre-create counts User=1 Authority=3
+        // Admin=1, then Authority 3->4 within the txn → read-your-own-writes works,
+        // the count was simply contaminated by prior networks).
+        //
+        // Fix: open (and cache) one LevelDB per scope id. The id is the strand hash
+        // (H16 hex) or the literal 'control'; both are filesystem-safe, but
+        // sanitize defensively to match cadre-core's own getStrandStoragePath
+        // convention (replace(/[^a-zA-Z0-9-]/g, '_')).
+        const storageDbs = new Map<string, ReturnType<typeof openOptimysticRNDb>>();
+        const getScopedRawStorage = (scopeId: string): LevelDBRawStorage => {
+          const safeId = scopeId.replace(/[^a-zA-Z0-9-]/g, '_');
+          let scopedDb = storageDbs.get(safeId);
+          if (!scopedDb) {
+            scopedDb = openOptimysticRNDb({
+              openFn: (n, c, e) => new LevelDB(n, c, e),
+              WriteBatch: LevelDBWriteBatch,
+              name: `votetorrent-strand-${safeId}`,
+            });
+            storageDbs.set(safeId, scopedDb);
+          }
+          return new LevelDBRawStorage(scopedDb);
+        };
 
         localNode = new CadreNode({
           privateKey,
           controlNetwork: { partyId: PARTY_ID, bootstrapNodes: resolveBootstrapNodes(CONTROL_ADDR) },
           profile: 'transaction',
           strandFilter: { mode: 'all' },
-          storage: { provider: () => new LevelDBRawStorage(db) },
+          // ISO-01: per-scope storage. cadre-core invokes provider(scopeId) with the
+          // strandId for each strand and 'control' for the control DB — one distinct
+          // LevelDB per scope isolates each network's collections.
+          storage: { provider: (scopeId: string) => getScopedRawStorage(scopeId) },
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           network: {
             transports: [webSockets(), circuitRelayTransport()],

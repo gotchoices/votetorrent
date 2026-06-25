@@ -40,6 +40,11 @@ export default function AddNetworkScreen() {
 	// the network is always created single-authority, so no toggle state is kept.
 	// 16-08 item 4: surface the ACTUAL submit failure inline (not just console.error).
 	const [errorMessage, setErrorMessage] = useState<string>("");
+	// network-create-release-hang: track the in-flight create so the CREATE button shows
+	// progress + is disabled during the (potentially slow / device-stalling) commit. Without
+	// this the screen looks frozen for the whole `builder.commit()` await — indistinguishable
+	// from a hang.
+	const [creating, setCreating] = useState(false);
 	const scrollViewRef = useRef<ScrollView>(null);
 
 	const toggleAdvanced = () => {
@@ -72,6 +77,24 @@ export default function AddNetworkScreen() {
 		// Phase 22: media-pin to content-addressed storage (CID) — not yet implemented.
 	};
 
+	// network-create-release-hang: on real devices `builder.commit()` (strand/cadre/libp2p
+	// network creation) can stall indefinitely with no error, leaving the screen frozen.
+	// Race every create step against a timeout so an indefinite hang surfaces an actionable
+	// inline error instead of an infinite silent spinner. The underlying promise can't be
+	// cancelled, but the UI recovers and the user can retry.
+	const CREATE_TIMEOUT_MS = 45000;
+	const withTimeout = <T,>(p: Promise<T>, label: string): Promise<T> => {
+		return Promise.race([
+			p,
+			new Promise<T>((_resolve, reject) =>
+				setTimeout(
+					() => reject(new Error(t("networkCreateTimeout", { step: label }))),
+					CREATE_TIMEOUT_MS,
+				),
+			),
+		]);
+	};
+
 	const handleCreate = async () => {
 		// 16-08 item 4: clear any prior error so a retry starts clean.
 		setErrorMessage("");
@@ -81,6 +104,7 @@ export default function AddNetworkScreen() {
 			setErrorMessage(t("mustSignBeforeCreating"));
 			return;
 		}
+		setCreating(true);
 		try {
 			// Resolve NetworksEngine — available directly from AppProvider context (D-03).
 			if (!networksEngine) {
@@ -135,12 +159,24 @@ export default function AddNetworkScreen() {
 			const builder = networksEng.buildCreate().update({ networkInit, user });
 			if (!builder.isValid()) {
 				console.error("handleCreate: validation errors", builder.errors());
+				const relayMissing = builder.errors().some((e) => e.path === "networkInit.relays");
 				setErrorMessage(
-					builder.errors().map((e) => e.message).join("\n") || "Validation failed.",
+					// network-create-release-hang: replace the raw "networkInit.relays must not be
+					// empty" engine string with discoverable guidance (the relay field lives under
+					// Advanced → ADD RELAY). Other validation errors fall through unchanged.
+					relayMissing
+						? t("errRelayRequired")
+						: builder.errors().map((e) => e.message).join("\n") || t("validationFailed"),
 				);
+				if (relayMissing) setShowAdvanced(true);
 				return;
 			}
-			const networkEngine = await builder.commit();
+			// network-create-release-hang: instrument each create step so on-device logcat
+			// pinpoints where a real-device hang occurs (console.info is allowed by the VER-01
+			// stub guard). Race against a timeout so an indefinite stall surfaces an error.
+			console.info("[network-create] commit() start", { network: networkName });
+			const networkEngine = await withTimeout(builder.commit(), "commit");
+			console.info("[network-create] commit() done");
 
 			// Pitfall 4: re-establish currentNetworkHash in the factory by calling
 			// getEngine("network", ref) with the full NetworkReference that the concrete
@@ -153,11 +189,17 @@ export default function AddNetworkScreen() {
 			// app lands on the populated network home instead of "No network selected".
 			// (selectNetwork re-establishes currentNetworkHash like the old getEngine call,
 			// plus sets hasNetwork — Pitfall 4 still satisfied via its internal getEngine.)
-			await selectNetwork(networkRef);
+			console.info("[network-create] selectNetwork() start");
+			await withTimeout(selectNetwork(networkRef), "select");
+			console.info("[network-create] selectNetwork() done");
 		} catch (err) {
 			console.error("handleCreate error:", err);
 			setErrorMessage(err instanceof Error ? err.message : String(err));
 			return;
+		} finally {
+			// Always clear the in-flight flag so the button re-enables on error/timeout
+			// (on success the screen unmounts via goBack, so this is a harmless no-op).
+			setCreating(false);
 		}
 		navigation.goBack();
 	};
@@ -330,10 +372,11 @@ export default function AddNetworkScreen() {
 			<InlineError message={errorMessage} />
 			<Footer>
 				<CustomButton
-					title={t("create")}
-					icon="floppy-disk"
+					title={creating ? t("creating") : t("create")}
+					icon={creating ? "spinner" : "floppy-disk"}
 					backgroundColor={colors.success}
 					forceDarkText={true}
+					disabled={creating}
 					onPress={handleCreate}
 				/>
 			</Footer>
