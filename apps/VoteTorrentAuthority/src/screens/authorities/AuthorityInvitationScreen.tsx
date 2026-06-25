@@ -15,6 +15,7 @@ import type {
 import { INetworkEngine } from "@votetorrent/vote-core";
 import Clipboard from "@react-native-clipboard/clipboard";
 import { ThemedText } from "../../components/ThemedText";
+import { InlineError } from "../../components/InlineError";
 import { ChipButton } from "../../components/ChipButton";
 import { CustomButton } from "../../components/CustomButton";
 import { CustomTextInput } from "../../components/CustomTextInput";
@@ -262,11 +263,7 @@ export default function AuthorityInvitationScreen() {
 						) : null}
 					</View>
 				</ScrollView>
-				{errorMessage ? (
-					<ThemedText type="small" style={{ color: colors.error }}>
-						{errorMessage}
-					</ThemedText>
-				) : null}
+				<InlineError message={errorMessage} />
 				{!shareText ? (
 					<Footer>
 						<CustomButton
@@ -384,11 +381,7 @@ export default function AuthorityInvitationScreen() {
 				</View>
 			</ScrollView>
 			{/* GAP-2: surface respondToInvite failures inline in accept mode */}
-			{errorMessage ? (
-				<ThemedText type="small" style={{ color: colors.error }}>
-					{errorMessage}
-				</ThemedText>
-			) : null}
+			<InlineError message={errorMessage} />
 			<SignatureTaskFooter
 				onAccept={onAccept}
 				onReject={onDecline}
