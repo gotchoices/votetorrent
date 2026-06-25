@@ -31,11 +31,13 @@ FOUND_FILES=""
 # Find all .tsx files under screens/, excluding the dev-only scaffold.
 while IFS= read -r f; do
   # Perl full-file slurp + multiline match:
-  # \w+(Press|Pressed)\s*=\s*\{[^}]*console\.log  (not .logInfo/.logWarn/.logError)
+  # \w+(Press|Pressed)\s*=\s*\{.*?console\.log  (not .logInfo/.logWarn/.logError)
+  # Non-greedy .*? in /s (DOTALL) mode crosses newlines AND nested { } braces so
+  # a console.log inside a nested block (e.g. if (x) { console.log(...) }) is caught.
   # The negative lookahead ensures console.info/warn/error are NOT flagged.
   if perl -0777 -e '
     my $src = do { local $/; <STDIN> };
-    if ($src =~ /\w+(?:Press|Pressed)\s*=\s*\{[^}]*console\.log(?!Error|Info|Warn)/s) {
+    if ($src =~ /\w+(?:Press|Pressed)\s*=\s*\{.*?console\.log(?!Error|Info|Warn)/s) {
       exit 0;   # match found → exit 0 so the shell knows to flag it
     }
     exit 1;     # no match → exit 1 so shell knows it is clean
@@ -53,8 +55,9 @@ fi
 echo "ERROR: stub console.log handler(s) found in the following files:"
 for f in $FOUND_FILES; do
   echo "  $f"
-  # Print matching lines for context (single-line grep for line numbers)
-  grep -Pn '\w+(?:Press|Pressed)\s*=.*console\.log' "$f" 2>/dev/null || \
+  # Print matching lines for context (single-line grep for line numbers).
+  # Use perl -ne for portability — BSD grep (macOS) does not support -P (PCRE).
+  perl -ne 'print "$.: $_" if /\w+(?:Press|Pressed)\s*=.*console\.log/' "$f" 2>/dev/null || \
     grep -n 'console\.log' "$f" || true
 done
 echo ""
