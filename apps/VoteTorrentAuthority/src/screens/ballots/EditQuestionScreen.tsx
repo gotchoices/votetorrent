@@ -7,6 +7,7 @@ import { ThemedText } from "../../components/ThemedText";
 import { CustomTextInput } from "../../components/CustomTextInput";
 import { ChipButton } from "../../components/ChipButton";
 import { InfoCard } from "../../components/InfoCard";
+import { InlineError } from "../../components/InlineError";
 import QuestionTypeSelector from "./components/QuestionTypeSelector";
 import { Stepper } from "../../components/Stepper";
 import { ToggleRow } from "../../components/ToggleRow";
@@ -19,6 +20,10 @@ import type { Option, Question } from "@votetorrent/vote-core";
 import React, { useEffect, useState } from "react";
 
 type QuestionType = Question["type"];
+
+// Question types that select/rank/score among discrete options — require ≥2 options to be valid.
+// Text questions are exempt (free-response, legitimately 0 options).
+const CHOICE_BASED_TYPES: QuestionType[] = ["select", "rank", "score"];
 
 /**
  * EditQuestionScreen — polish for BALUI-03 (Figma frame 57:574).
@@ -61,6 +66,7 @@ export function EditQuestionScreen() {
 	);
 	const [type, setType] = useState<QuestionType>(existingQuestion?.type ?? "select");
 	const [options, setOptions] = useState<Option[]>(existingQuestion?.options ?? []);
+	const [errorMessage, setErrorMessage] = useState("");
 
 	// Selection Limits + additional Question fields (09-07: BALUI-03 parity)
 	const [optionMin, setOptionMin] = useState<number>(existingQuestion?.optionRange?.min ?? 1);
@@ -156,6 +162,11 @@ export function EditQuestionScreen() {
 	const canSave = code.trim().length > 0 || title.trim().length > 0;
 
 	const handleSave = () => {
+		setErrorMessage("");
+		if (CHOICE_BASED_TYPES.includes(type) && options.length < 2) {
+			setErrorMessage(t("questionNeedsTwoOptions"));
+			return;
+		}
 		const assembled: Question = {
 			code: code || `q-${Date.now()}`,
 			title,
@@ -235,6 +246,7 @@ export function EditQuestionScreen() {
 							onPress={handleAddOption}
 						/>
 					</View>
+					<InlineError message={errorMessage} />
 				</View>
 
 				{/* G8: Selection Limits — Min + Max side-by-side in one row */}

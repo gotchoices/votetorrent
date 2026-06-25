@@ -379,6 +379,7 @@ const resources = {
 			question: 'Question',
 			option: 'Option',
 			addOption: 'Add Option',
+			questionNeedsTwoOptions: 'Choice questions need at least two options.',
 			rank: 'Rank',
 			score: 'Score',
 			text: 'Text',
@@ -820,6 +821,7 @@ const resources = {
 			question: 'Pregunta', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
 			option: 'Opción', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
 			addOption: 'Agregar Opción', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			questionNeedsTwoOptions: 'Las preguntas de opción necesitan al menos dos opciones.',
 			rank: 'Rango', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
 			score: 'Puntuación', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
 			text: 'Texto', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
