@@ -11,6 +11,7 @@ import { useBallotDraft } from "./providers/BallotDraftProvider";
 import { BallotTemplateForm } from "./components/BallotTemplateForm";
 import { CustomButton } from "../../components/CustomButton";
 import { ThemedText } from "../../components/ThemedText";
+import { InlineError } from "../../components/InlineError";
 import type { Ballot, Question } from "@votetorrent/vote-core";
 
 /**
@@ -119,7 +120,7 @@ export default function CreateBallotScreen() {
 			await electionEngine.proposeBallot(ballot);
 			navigation.goBack();
 		} catch (error) {
-			console.error("proposeBallot error", error);
+			console.warn("proposeBallot error", error);
 			setErrorMessage(error instanceof Error ? error.message : String(error));
 		} finally {
 			setProposing(false);
@@ -170,13 +171,7 @@ export default function CreateBallotScreen() {
 				onAddQuestion={handleAddQuestion}
 				onEditQuestion={handleEditQuestion}
 			/>
-			{errorMessage ? (
-				<View style={{ paddingHorizontal: 16, paddingBottom: 8 }}>
-					<ThemedText type="small" style={{ color: colors.error }}>
-						{errorMessage}
-					</ThemedText>
-				</View>
-			) : null}
+			<InlineError message={errorMessage} />
 			{/* Footer: PROPOSE — owned by screen so create vs edit can wire own handlers */}
 			<View style={[globalStyles.footer, { backgroundColor: colors.card, paddingBottom: insets.bottom + 16 }]}>
 				<CustomButton

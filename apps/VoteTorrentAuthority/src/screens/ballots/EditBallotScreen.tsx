@@ -12,6 +12,7 @@ import { useBallotDraft } from "./providers/BallotDraftProvider";
 import { BallotTemplateForm } from "./components/BallotTemplateForm";
 import { CustomButton } from "../../components/CustomButton";
 import { ThemedText } from "../../components/ThemedText";
+import { InlineError } from "../../components/InlineError";
 import type { Ballot } from "@votetorrent/vote-core";
 
 /**
@@ -36,6 +37,7 @@ const EditBallotScreen = () => {
 	const electionEngine = (route.params as any)?.electionEngine;
 	const ballotId = (route.params as any)?.ballotId;
 	const readOnly = route.params?.readOnly === true;
+	const [loadError, setLoadError] = useState("");
 	const [errorMessage, setErrorMessage] = useState("");
 	const [proposing, setProposing] = useState(false);
 	const { ballotDraft, setBallotDraft, addQuestion, updateQuestion, removeQuestion } = useBallotDraft();
@@ -69,7 +71,8 @@ const EditBallotScreen = () => {
 					} as any);
 				}
 			} catch (error) {
-				console.error("getBallotDetails error", error);
+				console.warn("getBallotDetails error", error);
+				setLoadError(error instanceof Error ? error.message : String(error));
 			}
 		};
 		loadBallot();
@@ -130,7 +133,7 @@ const EditBallotScreen = () => {
 			await electionEngine.proposeBallot(ballot);
 			navigation.goBack();
 		} catch (error) {
-			console.error("proposeBallot error", error);
+			console.warn("proposeBallot error", error);
 			setErrorMessage(error instanceof Error ? error.message : String(error));
 		} finally {
 			setProposing(false);
@@ -181,13 +184,8 @@ const EditBallotScreen = () => {
 				onAddQuestion={handleAddQuestion}
 				onEditQuestion={handleEditQuestion}
 			/>
-			{errorMessage ? (
-				<View style={{ paddingHorizontal: 16, paddingBottom: 8 }}>
-					<ThemedText type="small" style={{ color: colors.error }}>
-						{errorMessage}
-					</ThemedText>
-				</View>
-			) : null}
+			<InlineError message={loadError} />
+			<InlineError message={errorMessage} />
 			{/* Footer: PROPOSE — hidden in readOnly (preview) mode */}
 			{!readOnly && (
 				<View style={[globalStyles.footer, { backgroundColor: colors.card, paddingBottom: insets.bottom + 16 }]}>

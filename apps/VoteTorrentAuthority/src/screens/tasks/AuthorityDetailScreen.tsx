@@ -13,6 +13,7 @@ import { globalStyles } from "../../theme/styles";
 import { ThemedText } from "../../components/ThemedText";
 import { CustomButton } from "../../components/CustomButton";
 import { Footer } from "../../components/Footer";
+import { InlineError } from "../../components/InlineError";
 import type { RootStackParamList } from "../../navigation/types";
 import { useApp } from "../../providers/AppProvider";
 
@@ -40,7 +41,7 @@ export default function AuthorityDetailScreen() {
 			await engine.resendInvite(slotCid);
 			navigation.goBack();
 		} catch (err) {
-			console.error("authorityDetail-resend error:", err);
+			console.warn("authorityDetail-resend error:", err);
 			setErrorMessage(err instanceof Error ? err.message : String(err));
 		} finally {
 			setLoading(false);
@@ -55,7 +56,7 @@ export default function AuthorityDetailScreen() {
 			await engine.cancelInvite(slotCid);
 			navigation.goBack();
 		} catch (err) {
-			console.error("authorityDetail-cancelInvitation error:", err);
+			console.warn("authorityDetail-cancelInvitation error:", err);
 			setErrorMessage(err instanceof Error ? err.message : String(err));
 		} finally {
 			setLoading(false);
@@ -71,13 +72,9 @@ export default function AuthorityDetailScreen() {
 				<View style={styles.section}>
 					<ThemedText type="default">{t("authorityDetailBodySecondary")}</ThemedText>
 				</View>
-				{errorMessage ? (
-					<View style={styles.section}>
-						<ThemedText type="small" style={{ color: colors.error }}>
-							{errorMessage}
-						</ThemedText>
-					</View>
-				) : null}
+				<View style={styles.section}>
+					<InlineError message={errorMessage} />
+				</View>
 			</ScrollView>
 			<Footer row>
 				<CustomButton
