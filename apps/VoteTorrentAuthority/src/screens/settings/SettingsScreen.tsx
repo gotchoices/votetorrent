@@ -98,8 +98,13 @@ export default function SettingsScreen() {
 				setCurrentNetwork(null);
 				return;
 			}
-			const networkDetails = await networkEngine.getDetails();
-			setCurrentNetwork(networkDetails.network.name);
+			try {
+				const networkDetails = await networkEngine.getDetails();
+				setCurrentNetwork(networkDetails.network.name);
+			} catch (error) {
+				console.warn("Failed to load network name:", error);
+				setSettingsError(error instanceof Error ? error.message : String(error));
+			}
 		};
 		loadNetworkName();
 	}, [networkEngine]);
