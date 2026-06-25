@@ -19,8 +19,9 @@ import { ElectionRevisionSignatureTaskDetails } from "./components/ElectionRevis
 import { BallotSignatureTaskDetails } from "./components/BallotSignatureTaskDetails";
 import { SignatureTaskFooter } from "../../components/SignatureTaskFooter";
 import { ThemedText } from "../../components/ThemedText";
+import { InlineError } from "../../components/InlineError";
 import { useTranslation } from "react-i18next";
-import { useNavigation, useRoute, useTheme, ExtendedTheme } from "@react-navigation/native";
+import { useNavigation, useRoute } from "@react-navigation/native";
 import { useApp } from "../../providers/AppProvider";
 import { createDeviceSigner } from "../../engines/device-signer";
 
@@ -36,7 +37,6 @@ const titleKey: Record<SignatureTask["signatureType"], string> = {
 export default function SignatureTaskScreen() {
 	const { task } = useRoute().params as { task: SignatureTask };
 	const { t } = useTranslation();
-	const { colors } = useTheme() as ExtendedTheme;
 	const navigation = useNavigation();
 	const { getEngine } = useApp();
 	const isNetwork = task.signatureType === "network";
@@ -61,7 +61,7 @@ export default function SignatureTaskScreen() {
 			await engine.completeSignature(task, { isAccepted: true, signature });
 			navigation.goBack();
 		} catch (err) {
-			console.error("sign error:", err);
+			console.warn("sign error:", err);
 			setErrorMessage(err instanceof Error ? err.message : String(err));
 			return;
 		}
@@ -81,7 +81,7 @@ export default function SignatureTaskScreen() {
 			});
 			navigation.goBack();
 		} catch (err) {
-			console.error("reject error:", err);
+			console.warn("reject error:", err);
 			setErrorMessage(err instanceof Error ? err.message : String(err));
 			return;
 		}
@@ -109,11 +109,7 @@ export default function SignatureTaskScreen() {
 					<BallotSignatureTaskDetails task={task as BallotSignatureTask} />
 				)}
 			</ScrollView>
-			{errorMessage ? (
-				<ThemedText style={{ color: colors.error, marginHorizontal: 16, marginBottom: 8 }}>
-					{errorMessage}
-				</ThemedText>
-			) : null}
+			<InlineError message={errorMessage} />
 			<SignatureTaskFooter
 				onAccept={sign}
 				onReject={reject}

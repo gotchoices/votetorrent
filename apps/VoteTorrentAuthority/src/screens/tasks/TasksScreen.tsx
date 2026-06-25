@@ -1,4 +1,4 @@
-import React, { useEffect, useLayoutEffect, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useState } from "react";
 import { View, StyleSheet, ScrollView } from "react-native";
 import { ExtendedTheme, useTheme } from "@react-navigation/native";
 import { globalStyles } from "../../theme/styles";
@@ -15,8 +15,9 @@ import {
 } from "@votetorrent/vote-core";
 import TaskCard from "./components/TaskCard";
 import type { NavigationProp } from "../../navigation/types";
-import { useNavigation } from "@react-navigation/native";
+import { useNavigation, useFocusEffect } from "@react-navigation/native";
 import FontAwesome6 from "react-native-vector-icons/FontAwesome6";
+import { InlineError } from "../../components/InlineError";
 
 // Resolve the authority grouping key for a task. Falls back to the network
 // name when an authority-specific name is not accessible on the task type
@@ -49,32 +50,38 @@ export default function TasksScreen() {
 	const { getEngine } = useApp();
 	const [releaseKeyTasks, setReleaseKeyTasks] = useState<ReleaseKeyTask[]>();
 	const [signatureTasks, setSignatureTasks] = useState<SignatureTask[]>();
+	const [loadError, setLoadError] = useState("");
 	const navigation = useNavigation<NavigationProp>();
 
 	useLayoutEffect(() => {
 		navigation.setOptions({ title: t("allNetworks") });
 	}, [navigation, t]);
 
-	useEffect(() => {
-		async function loadTasksEngines() {
-			try {
-				const [keyTasksEngine, signatureTasksEngine] = await Promise.all([
-					getEngine<IKeysTasksEngine>("keysTasksEngine"),
-					getEngine<ISignatureTasksEngine>("signatureTasksEngine"),
-				]);
+	const loadTasksEngines = useCallback(async () => {
+		setLoadError("");
+		try {
+			const [keyTasksEngine, signatureTasksEngine] = await Promise.all([
+				getEngine<IKeysTasksEngine>("keysTasksEngine"),
+				getEngine<ISignatureTasksEngine>("signatureTasksEngine"),
+			]);
 
-				const [keysToRelease, requestedSignatures] = await Promise.all([
-					keyTasksEngine.getKeysToRelease(true),
-					signatureTasksEngine.getRequestedSignatures(true),
-				]);
-				setReleaseKeyTasks(keysToRelease);
-				setSignatureTasks(requestedSignatures);
-			} catch (error) {
-				console.error("Error in loadTasksEngines:", error);
-			}
+			const [keysToRelease, requestedSignatures] = await Promise.all([
+				keyTasksEngine.getKeysToRelease(true),
+				signatureTasksEngine.getRequestedSignatures(true),
+			]);
+			setReleaseKeyTasks(keysToRelease);
+			setSignatureTasks(requestedSignatures);
+		} catch (error) {
+			console.error("Error in loadTasksEngines:", error);
+			setLoadError(error instanceof Error ? error.message : String(error));
 		}
-		loadTasksEngines();
 	}, [getEngine]);
+
+	useFocusEffect(
+		useCallback(() => {
+			loadTasksEngines();
+		}, [loadTasksEngines])
+	);
 
 	const isEmpty =
 		releaseKeyTasks !== undefined &&
@@ -85,6 +92,7 @@ export default function TasksScreen() {
 	if (isEmpty) {
 		return (
 			<View style={styles.emptyState}>
+				<InlineError message={loadError} />
 				<FontAwesome6 name="clipboard-list" size={48} color={colors.textSecondary} />
 				<ThemedText type="title">{t("noTasks")}</ThemedText>
 				<ThemedText type="default">{t("noTasksHelper")}</ThemedText>
@@ -118,6 +126,7 @@ export default function TasksScreen() {
 
 	return (
 		<ScrollView style={styles.container}>
+			<InlineError message={loadError} />
 			{Array.from(grouped.entries()).map(([authorityName, tasks]) => (
 				<View key={authorityName} style={styles.section}>
 					<ThemedText type="title">{authorityName}</ThemedText>
