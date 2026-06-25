@@ -69,12 +69,21 @@ export class ElectionEngine implements IElectionEngine {
    */
   async getBallotDetails (id: string): Promise<BallotDetails> {
     try {
-      const ballotRow = await this.ctx.db
+      // Try finalized Ballot first; fall back to ProposedBallot for proposed-only Ids.
+      let ballotRow = await this.ctx.db
         .prepare(
 					`select Id, ElectionId, AuthorityId, Description, Districts
 						from Ballot where Id = :ballotId`
         )
         .get({ ballotId: id })
+      if (!ballotRow) {
+        ballotRow = await this.ctx.db
+          .prepare(
+						`select Id, ElectionId, AuthorityId, Description, Districts
+							from ProposedBallot where Id = :ballotId`
+          )
+          .get({ ballotId: id })
+      }
       if (!ballotRow) {
         throw new Error(`Ballot ${id} not found`)
       }
@@ -141,19 +150,38 @@ export class ElectionEngine implements IElectionEngine {
   }
 
   async getBallots (): Promise<BallotSummary[]> {
-    const out: BallotSummary[] = []
+    // Build a Map keyed by Id — finalized Ballot rows take precedence over
+    // ProposedBallot rows (schema note qsql:695: ProposedBallot.Id may equal
+    // a finalized Ballot.Id, so de-dup is required).
+    const byId = new Map<string, BallotSummary>()
     try {
+      // Seed with finalized Ballot rows.
       for await (const row of this.ctx.db.eval(
 				`select Id, ElectionId, AuthorityId from Ballot where ElectionId = :electionId`,
         { electionId: this.election.id }
       )) {
-        out.push({
-          id: row.Id as string,
+        const id = row.Id as string
+        byId.set(id, {
+          id,
           electionId: row.ElectionId as string,
           authorityId: row.AuthorityId as string
         })
       }
-      return out
+      // Add ProposedBallot rows only if Id is not already present (finalized preferred).
+      for await (const row of this.ctx.db.eval(
+				`select Id, ElectionId, AuthorityId from ProposedBallot where ElectionId = :electionId`,
+        { electionId: this.election.id }
+      )) {
+        const id = row.Id as string
+        if (!byId.has(id)) {
+          byId.set(id, {
+            id,
+            electionId: row.ElectionId as string,
+            authorityId: row.AuthorityId as string
+          })
+        }
+      }
+      return [...byId.values()]
     } catch (err) {
       this.rethrow(err, 'getBallots')
     }
