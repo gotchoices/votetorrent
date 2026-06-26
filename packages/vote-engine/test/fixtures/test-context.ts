@@ -917,3 +917,67 @@ export async function seedQuestion (
 
   return { questionCode: q.code }
 }
+
+// ---------------------------------------------------------------------------
+// Layer-3: seedProposedBallot helper (Phase 31-01)
+// ---------------------------------------------------------------------------
+
+export interface SeedProposedBallotResult {
+  ballotId: string
+}
+
+/**
+ * Seed a `ProposedBallot` draft (with a real `Questions` JSON blob) by calling
+ * the engine's `proposeBallot`. Distinct from `seedBallot`, which composes
+ * AdminSigning + Ballot INSERT for a FINALIZED ballot.
+ *
+ * This helper exercises the real propose path — tests that rely on
+ * `submitBallotForConfirmation` must start here, not with `seedBallot`.
+ *
+ * Default question: one `'select'` question (verified-safe per Pitfall 5 /
+ * quereus#21) with two options — the ≥2-option count is load-bearing for
+ * 31-03 Task 3's per-option readability assertion.
+ *
+ * T-31-01 mitigation: Questions JSON is constructed from the canonical
+ * Question[] shape so downstream digest matches. Tid is bound as a JS number
+ * inside proposeBallot itself (election-engine.ts nextTid++) — callers do not
+ * need to manage the Tid.
+ */
+export async function seedProposedBallot (
+  elec: TestElectionContext,
+  ballotId: string = 'proposed-ballot-1'
+): Promise<SeedProposedBallotResult> {
+  // Resolve the election id from the DB (electionEngine.election is private).
+  const authorityId = elec.authority.id
+  const electionRow = await elec.ctx.db
+    .prepare('select Id from Election where AuthorityId = :authorityId limit 1')
+    .get({ authorityId })
+  if (!electionRow) throw new Error('seedProposedBallot: Election not found for authority')
+  const electionId = electionRow.Id as string
+
+  // Default ballot: one 'select' question with 2 options (≥2 required by D-07 and the
+  // per-option readability assertion in 31-03 Task 3).
+  const ballot: import('@votetorrent/vote-core').Ballot = {
+    id: ballotId,
+    electionId,
+    authorityId,
+    description: 'Test Proposed Ballot',
+    districts: [],
+    questions: [
+      {
+        code: 'Q1',
+        title: 'Test Question',
+        instructions: 'Choose one option.',
+        type: 'select',
+        options: [
+          { code: 'A', title: 'Option A' },
+          { code: 'B', title: 'Option B' },
+        ],
+      },
+    ],
+  }
+
+  await elec.electionEngine.proposeBallot(ballot)
+
+  return { ballotId }
+}
