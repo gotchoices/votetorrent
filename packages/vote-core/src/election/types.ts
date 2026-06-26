@@ -22,6 +22,12 @@ export interface IElectionEngine {
     keyholder: KeyholderInvite,
     electionId: string
   ): Promise<void>
+  /** D-03: Creates the ballot SignatureTask (+ BallotSignatureTaskExtension + unsigned AdminSigning) so officers can sign the proposed ballot. */
+  submitBallotForConfirmation(ballotId: string): Promise<void>
+  /** D-05: Deletes the pending Task + BallotSignatureTaskExtension, unlocking the proposed ballot for editing. */
+  withdrawBallotConfirmation(ballotId: string): Promise<void>
+  /** D-05 / D-09: Returns the edit-lock state (locked = pending Task exists) and confirmation state (confirmed = finalized Ballot exists). */
+  getBallotConfirmationState(ballotId: string): Promise<{ locked: boolean; confirmed: boolean }>
   buildProposeBallot(): IElectionProposeBallotBuilder
   buildProposeRevision(): IElectionProposeRevisionBuilder
   buildInviteKeyholder(): IElectionInviteKeyholderBuilder
