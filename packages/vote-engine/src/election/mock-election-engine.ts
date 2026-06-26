@@ -31,12 +31,47 @@ import { ElectionRevokeKeyholderBuilder } from './builders/election-revoke-keyho
 const MOCK_DAY_MS = 24 * 60 * 60 * 1000;
 const MOCK_NOW = Date.now();
 
+/**
+ * Shared confirmation-state object for the mock engines (D-10, 31-04).
+ *
+ * MockElectionEngine and MockSignatureTasksEngine both hold a reference to the
+ * SAME instance so that completeSignature on the tasks engine can flip the ballot
+ * from 'submitted' to 'confirmed' — mirroring the real finalize path.
+ *
+ * Usage in tests:
+ *   const confirmState = new MockBallotConfirmationState();
+ *   const electionEngine = new MockElectionEngine(confirmState);
+ *   const tasksEngine = new MockSignatureTasksEngine(electionEngine);
+ *
+ * The app's EngineFactory constructs the REAL engines; mocks are paired only in
+ * test code (compliance.spec.ts + RTL tests).
+ */
+export class MockBallotConfirmationState {
+	private state: Map<string, 'proposed' | 'submitted' | 'confirmed'> = new Map();
+
+	get(ballotId: string): 'proposed' | 'submitted' | 'confirmed' {
+		return this.state.get(ballotId) ?? 'proposed';
+	}
+
+	set(ballotId: string, value: 'proposed' | 'submitted' | 'confirmed'): void {
+		this.state.set(ballotId, value);
+	}
+}
+
 export class MockElectionEngine implements IElectionEngine {
 	// Phase 9 plan 09-09 (G12) — stateful in-memory ballot store. Starts EMPTY
 	// so the ElectionDetails empty-state shows before any template is created.
 	// AppProvider caches the engine instance, so this array persists across
 	// navigations within a session (the intended persistence vehicle).
 	private ballots: Ballot[] = [];
+
+	// 31-04: shared confirmation-state — injectable so MockSignatureTasksEngine
+	// can call markBallotConfirmed on the same state object.
+	private confirmationState: MockBallotConfirmationState;
+
+	constructor(confirmationState?: MockBallotConfirmationState) {
+		this.confirmationState = confirmationState ?? new MockBallotConfirmationState();
+	}
 
 	async getBallotDetails(id: string): Promise<BallotDetails> {
 		// Return the stored ballot if found; fall back to a safe stub so
@@ -153,22 +188,44 @@ export class MockElectionEngine implements IElectionEngine {
 		throw new FeatureNotAvailableError('revokeKeyholder is not available in the mock engine');
 	}
 
-	// ---------- confirm-path stubs (31-02 / 31-04 implementation targets) ----------
-	// Wave 0 stubs: declared on IElectionEngine (31-01), full mock parity in 31-04.
+	// ---------- confirm-path (D-10 mock parity, 31-04) ----------
+	// Real in-memory behavior mirroring the real engine's submit → confirm → finalize → withdraw flow.
 
-	// eslint-disable-next-line @typescript-eslint/no-unused-vars
-	async submitBallotForConfirmation(_ballotId: string): Promise<void> {
-		throw new FeatureNotAvailableError('submitBallotForConfirmation is not yet available in the mock engine — planned in Phase 31-04');
+	async submitBallotForConfirmation(ballotId: string): Promise<void> {
+		const current = this.confirmationState.get(ballotId);
+		if (current === 'submitted') {
+			throw new Error(`Ballot ${ballotId} is already submitted for confirmation`);
+		}
+		if (current === 'confirmed') {
+			throw new Error(`Ballot ${ballotId} is already confirmed`);
+		}
+		// D-04 parity: ProposedBallot (this.ballots entry) is retained — only the state flag changes.
+		this.confirmationState.set(ballotId, 'submitted');
 	}
 
-	// eslint-disable-next-line @typescript-eslint/no-unused-vars
-	async withdrawBallotConfirmation(_ballotId: string): Promise<void> {
-		throw new FeatureNotAvailableError('withdrawBallotConfirmation is not yet available in the mock engine — planned in Phase 31-04');
+	async withdrawBallotConfirmation(ballotId: string): Promise<void> {
+		const current = this.confirmationState.get(ballotId);
+		if (current !== 'submitted') {
+			throw new Error(`Ballot ${ballotId} is not currently submitted (state: ${current})`);
+		}
+		this.confirmationState.set(ballotId, 'proposed');
 	}
 
-	// eslint-disable-next-line @typescript-eslint/no-unused-vars
-	async getBallotConfirmationState(_ballotId: string): Promise<{ locked: boolean; confirmed: boolean }> {
-		throw new FeatureNotAvailableError('getBallotConfirmationState is not yet available in the mock engine — planned in Phase 31-04');
+	async getBallotConfirmationState(ballotId: string): Promise<{ locked: boolean; confirmed: boolean }> {
+		const state = this.confirmationState.get(ballotId);
+		return {
+			locked: state === 'submitted',
+			confirmed: state === 'confirmed',
+		};
+	}
+
+	/**
+	 * markBallotConfirmed — called by MockSignatureTasksEngine.completeSignature
+	 * when a ballot task is accepted (simulating real finalizeBallot).
+	 * D-04: ProposedBallot is retained in this.ballots after confirm.
+	 */
+	markBallotConfirmed(ballotId: string): void {
+		this.confirmationState.set(ballotId, 'confirmed');
 	}
 
 	buildProposeBallot(): IElectionProposeBallotBuilder {
