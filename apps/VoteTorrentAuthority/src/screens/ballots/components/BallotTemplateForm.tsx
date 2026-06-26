@@ -29,8 +29,13 @@ interface BallotTemplateFormProps {
 	onDistrictsChange: (next: string[]) => void;
 	/** Questions list */
 	questions: Question[];
-	onAddQuestion: () => void;
-	onEditQuestion: (code: string) => void;
+	onAddQuestion?: () => void;
+	onEditQuestion?: (code: string) => void;
+	/**
+	 * D-05: when true all edit controls are disabled (ballot is locked for confirmation).
+	 * The form renders in read-only mode — no authority/description/question edits.
+	 */
+	disabled?: boolean;
 }
 
 /**
@@ -63,6 +68,7 @@ export function BallotTemplateForm({
 	questions,
 	onAddQuestion,
 	onEditQuestion,
+	disabled = false,
 }: BallotTemplateFormProps) {
 	const { colors } = useTheme() as ExtendedTheme;
 	const { t } = useTranslation();
@@ -78,7 +84,7 @@ export function BallotTemplateForm({
 	};
 
 	const handleDropdownToggle = () => {
-		if (authorityOptions.length > 0) {
+		if (authorityOptions.length > 0 && !disabled) {
 			setDropdownOpen((prev) => !prev);
 		}
 	};
@@ -154,8 +160,9 @@ export function BallotTemplateForm({
 				<CustomTextInput
 					title={t("description")}
 					value={description}
-					onChangeText={onDescriptionChange}
+					onChangeText={disabled ? undefined : onDescriptionChange}
 					placeholder={t("description")}
+					editable={!disabled}
 				/>
 			</View>
 
@@ -173,16 +180,18 @@ export function BallotTemplateForm({
 							{ label: t("type"), value: q.type },
 						]}
 						icon="chevron-right"
-						onPress={() => onEditQuestion(q.code)}
+						onPress={disabled || !onEditQuestion ? undefined : () => onEditQuestion(q.code)}
 					/>
 				))}
-				<View style={styles.addButtonContainer}>
-					<ChipButton
-						label={t("addQuestion")}
-						icon="circle-plus"
-						onPress={onAddQuestion}
-					/>
-				</View>
+				{!disabled && onAddQuestion && (
+					<View style={styles.addButtonContainer}>
+						<ChipButton
+							label={t("addQuestion")}
+							icon="circle-plus"
+							onPress={onAddQuestion}
+						/>
+					</View>
+				)}
 			</View>
 
 			{/* 5. Districts / Groups editor */}

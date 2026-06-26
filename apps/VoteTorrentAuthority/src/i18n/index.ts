@@ -446,6 +446,11 @@ const resources = {
 			// Phase 11 plan 11-01 (D-11) — en mirrors added for es orphan keys (create/revise)
 			create: 'Create', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
 			revise: 'Revise', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			// D-03/D-05/D-09 ballot confirmation actions (31-05)
+			submitForConfirmation: 'Submit for confirmation',
+			withdrawConfirmation: 'Withdraw',
+			statusProposed: 'Proposed',
+			statusConfirmed: 'Confirmed',
 			// Debug seed keys — debug-only affordance; never appears in release UI
 			debugSeedTasksTitle: 'Seed Pending Tasks (Debug)',
 			debugSeedTasksSuccess: 'Pending tasks seeded — check Tasks tab',
@@ -884,6 +889,11 @@ const resources = {
 			keyholderInvitation: 'Invitación de Custodio', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
 			debugKeyholderInvitationSend: 'Invitación de Custodio (Enviar)', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
 			debugKeyholderInvitationAccept: 'Invitación de Custodio (Aceptar)', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			// D-03/D-05/D-09 ballot confirmation actions (31-05)
+			submitForConfirmation: 'Enviar para confirmación',
+			withdrawConfirmation: 'Retirar',
+			statusProposed: 'Propuesto',
+			statusConfirmed: 'Confirmado',
 			// Debug seed keys — Spanish mirrors
 			debugSeedTasksTitle: 'Sembrar Tareas Pendientes (Debug)',
 			debugSeedTasksSuccess: 'Tareas pendientes sembradas — ver pestaña Tareas',

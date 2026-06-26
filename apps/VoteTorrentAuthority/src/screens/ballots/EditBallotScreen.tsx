@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { View } from "react-native";
-import { ExtendedTheme, useTheme, useNavigation, useRoute } from "@react-navigation/native";
+import { ExtendedTheme, useTheme, useNavigation, useRoute, useFocusEffect } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTranslation } from "react-i18next";
 import type { Question } from "@votetorrent/vote-core";
@@ -41,6 +41,7 @@ const EditBallotScreen = () => {
 	const [loadError, setLoadError] = useState("");
 	const [errorMessage, setErrorMessage] = useState("");
 	const [proposing, setProposing] = useState(false);
+	const [confirmationLocked, setConfirmationLocked] = useState(false);
 	const [authorities, setAuthorities] = useState<Authority[]>([]);
 	const { ballotDraft, setBallotDraft, addQuestion, updateQuestion, removeQuestion } = useBallotDraft();
 
@@ -113,6 +114,23 @@ const EditBallotScreen = () => {
 		loadBallot();
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [ballotId]);
+
+	// D-05: poll confirmation lock state on every focus so an edit screen opened
+	// while a confirmation is pending shows the correct locked UI immediately.
+	useFocusEffect(
+		useCallback(() => {
+			if (!electionEngine || !ballotId) return;
+			const checkLock = async () => {
+				try {
+					const state = await electionEngine.getBallotConfirmationState(ballotId);
+					setConfirmationLocked(state.locked);
+				} catch (error) {
+					console.warn("getBallotConfirmationState error", error);
+				}
+			};
+			checkLock();
+		}, [electionEngine, ballotId])
+	);
 
 	// Carry-back from EditQuestionScreen SAVE: when editing an existing template,
 	// EditQuestion popTos here with the assembled `question`. Merge it into the
@@ -203,6 +221,9 @@ const EditBallotScreen = () => {
 		} as any);
 	};
 
+	// D-05: edit is blocked when the ballot has a pending confirmation task.
+	const editingDisabled = readOnly || confirmationLocked;
+
 	return (
 		<View style={globalStyles.content}>
 			<BallotTemplateForm
@@ -216,13 +237,14 @@ const EditBallotScreen = () => {
 				districts={ballotDraft.districts ?? []}
 				onDistrictsChange={handleDistrictsChange}
 				questions={ballotDraft.questions ?? []}
-				onAddQuestion={handleAddQuestion}
-				onEditQuestion={handleEditQuestion}
+				onAddQuestion={editingDisabled ? undefined : handleAddQuestion}
+				onEditQuestion={editingDisabled ? undefined : handleEditQuestion}
+				disabled={editingDisabled}
 			/>
 			<InlineError message={loadError} />
 			<InlineError message={errorMessage} />
-			{/* Footer: PROPOSE — hidden in readOnly (preview) mode */}
-			{!readOnly && (
+			{/* Footer: PROPOSE — hidden in readOnly (preview) mode or when locked. */}
+			{!readOnly && !confirmationLocked && (
 				<View style={[globalStyles.footer, { backgroundColor: colors.card, paddingBottom: insets.bottom + 16 }]}>
 					<CustomButton
 						title={t("propose")}
