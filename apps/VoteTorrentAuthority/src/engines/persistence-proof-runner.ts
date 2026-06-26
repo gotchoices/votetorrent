@@ -21,6 +21,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   makeProofEngine,
   runFullChainWritePhase,
+  runBallotQuestionProof,
+  runBallotQuestionReadProof,
   runFullChainReadPhase,
   assertCryptoFunctions,
   assertDigestParity,
@@ -28,6 +30,7 @@ import {
   PROOF_CHAIN_REF_KEY,
   PROOF_WRITE_ATTEMPTED_KEY,
 } from './persistence-proof';
+import type { NetworkReference } from '@votetorrent/vote-core';
 import type { StrandHost } from './rn-db-factory';
 import { getOrCreateDeviceUser } from './device-user';
 import { runRnEntrySmoke } from './rn-entry-smoke';
@@ -93,6 +96,9 @@ export async function runPersistenceProof(node?: StrandHost): Promise<void> {
       console.info(
         `[proof] WRITE COMPLETE — hash=${networkRef.hash} authorityId=${authorityId} electionId=${electionId}`,
       );
+      // MBY-260626: ballot question round-trip (proposeBallot → getBallotDetails)
+      // on the same on-device engine/store, in this same boot (no force-stop needed).
+      await runBallotQuestionProof(engine, networkRef, authorityId, electionId);
       // Crypto on the freshly-initialized on-device store (also re-run post-restart).
       await assertCryptoFunctions(db);
       console.info(
@@ -122,14 +128,31 @@ export async function runPersistenceProof(node?: StrandHost): Promise<void> {
       // Digest() and compare to Node-pinned expected base64url strings.
       const digestParity = await assertDigestParity(db);
 
+      // MBY-260626 ballot regression check: re-read the ballot proposed in the
+      // WRITE phase from the re-attached store and assert its questions survived
+      // the restart. Reuses the chain ref the read phase already loaded.
+      const chainRefJson = await AsyncStorage.getItem(PROOF_CHAIN_REF_KEY);
+      const chainRef = chainRefJson
+        ? (JSON.parse(chainRefJson) as { networkRef: NetworkReference; authorityId: string; electionId: string })
+        : undefined;
+      const ballot = chainRef
+        ? await runBallotQuestionReadProof(
+            engine,
+            chainRef.networkRef,
+            chainRef.authorityId,
+            chainRef.electionId,
+          )
+        : { passed: false, details: 'noChainRef' };
+
       // Emit the single verdict line that run-vtest02.sh polls for via:
       //   VERDICT_TAG='\[proof\] ========== FULL-CHAIN VERDICT'
       // This log line is the VTEST-02 evidence (D-08) — byte-identical to the script grep target.
-      // digestParity.allPassed folds into the overall verdict so a parity failure flips PASS→FAIL.
-      const verdict = result.passed && crypto.allPassed && digestParity.allPassed;
+      // digestParity.allPassed and ballot.passed fold into the overall verdict so a
+      // parity OR ballot-questions regression flips PASS→FAIL.
+      const verdict = result.passed && crypto.allPassed && digestParity.allPassed && ballot.passed;
       console.info(
         `[proof] ========== FULL-CHAIN VERDICT: ${verdict ? 'PASS' : 'FAIL'} ` +
-          `(network=${result.networkCount},authority=${result.authorityCount},election=${result.electionCount},crypto=${crypto.allPassed},digestParity=${digestParity.allPassed}) ==========`,
+          `(network=${result.networkCount},authority=${result.authorityCount},election=${result.electionCount},crypto=${crypto.allPassed},digestParity=${digestParity.allPassed},ballotQuestions=${ballot.passed}) ==========`,
       );
     }
   } catch (err) {

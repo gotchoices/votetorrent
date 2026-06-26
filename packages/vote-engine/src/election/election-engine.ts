@@ -79,7 +79,7 @@ export class ElectionEngine implements IElectionEngine {
       if (!ballotRow) {
         ballotRow = await this.ctx.db
           .prepare(
-						`select Id, ElectionId, AuthorityId, Description, Districts
+						`select Id, ElectionId, AuthorityId, Description, Districts, Questions
 							from ProposedBallot where Id = :ballotId`
           )
           .get({ ballotId: id })
@@ -87,50 +87,66 @@ export class ElectionEngine implements IElectionEngine {
       if (!ballotRow) {
         throw new Error(`Ballot ${id} not found`)
       }
+
+      // For a ProposedBallot row, questions are stored as a JSON blob in the
+      // Questions column (the ProposedQuestion table's BallotIdValid constraint
+      // references the finalized Ballot table, making per-row inserts unusable
+      // during the proposed phase). For a finalized Ballot row the Questions
+      // column is absent, so we fall through to the per-row Question table query.
+      const isProposed = ballotRow.Questions !== undefined
+
       const questions: Question[] = []
-      for await (const q of this.ctx.db.eval(
+
+      if (isProposed) {
+        // Read questions from the JSON blob stored in ProposedBallot.Questions.
+        const parsed = parseJsonOr<Question[]>(ballotRow.Questions, [], 'ProposedBallot.Questions')
+        questions.push(...parsed)
+      } else {
+        for await (const q of this.ctx.db.eval(
 				`select Code, Title, Instructions, DependsOn, Type, OptionRange, ScoreRange,
 					Grouping, Sequence, Required
 					from Question where BallotId = :ballotId`,
-        { ballotId: id }
-      )) {
-        const options: Option[] = []
-        for await (const o of this.ctx.db.eval(
+          { ballotId: id }
+        )) {
+          const options: Option[] = []
+          for await (const o of this.ctx.db.eval(
 					`select Code, Sequence, Title, Details, InfoURL, Image, Video
 						from Option where BallotId = :ballotId and QuestionCode = :code`,
-          { ballotId: id, code: q.Code as string }
-        )) {
-          options.push({
-            code: o.Code as string,
-            title: o.Title as string,
-            details: (o.Details as string | undefined) ?? undefined,
-            infoURL: (o.InfoURL as string | undefined) ?? undefined,
-            image: parseJsonOr(o.Image, undefined, 'Option.Image'),
-            video: parseJsonOr(o.Video, undefined, 'Option.Video')
+            { ballotId: id, code: q.Code as string }
+          )) {
+            options.push({
+              code: o.Code as string,
+              title: o.Title as string,
+              details: (o.Details as string | undefined) ?? undefined,
+              infoURL: (o.InfoURL as string | undefined) ?? undefined,
+              image: parseJsonOr(o.Image, undefined, 'Option.Image'),
+              video: parseJsonOr(o.Video, undefined, 'Option.Video')
+            })
+          }
+          questions.push({
+            code: q.Code as string,
+            title: q.Title as string,
+            instructions: q.Instructions as string,
+            dependsOn: parseJsonOr(q.DependsOn, undefined, 'Question.DependsOn'),
+            options,
+            type: q.Type as Question['type'],
+            optionRange: parseJsonOr(
+              q.OptionRange,
+              undefined,
+              'Question.OptionRange'
+            ),
+            scoreRange: parseJsonOr(
+              q.ScoreRange,
+              undefined,
+              'Question.ScoreRange'
+            ),
+            group: (q.Grouping as string | undefined) ?? undefined,
+            sequence: (q.Sequence as number | undefined) ?? undefined,
+            required: (q.Required as boolean | undefined) ?? true
           })
         }
-        questions.push({
-          code: q.Code as string,
-          title: q.Title as string,
-          instructions: q.Instructions as string,
-          dependsOn: parseJsonOr(q.DependsOn, undefined, 'Question.DependsOn'),
-          options,
-          type: q.Type as Question['type'],
-          optionRange: parseJsonOr(
-            q.OptionRange,
-            undefined,
-            'Question.OptionRange'
-          ),
-          scoreRange: parseJsonOr(
-            q.ScoreRange,
-            undefined,
-            'Question.ScoreRange'
-          ),
-          group: (q.Grouping as string | undefined) ?? undefined,
-          sequence: (q.Sequence as number | undefined) ?? undefined,
-          required: (q.Required as boolean | undefined) ?? true
-        })
       }
+
       const ballot: Ballot = {
         id: ballotRow.Id as string,
         electionId: ballotRow.ElectionId as string,
@@ -375,12 +391,13 @@ export class ElectionEngine implements IElectionEngine {
     const signerKey = this.ctx.user?.activeKeys?.[0]?.key ?? null
     try {
       await this.ctx.db.exec(
-				`insert into ProposedBallot (
+				`insert or replace into ProposedBallot (
 					Id,
 					ElectionId,
 					AuthorityId,
 					Description,
-					Districts
+					Districts,
+					Questions
 				)
 				with context UserId = :userId, UserKey = :userKey, Signature = :signature, Tid = ${tid}, now = :now, IsUserValid = true
 				values (
@@ -388,7 +405,8 @@ export class ElectionEngine implements IElectionEngine {
 					:electionId,
 					:authorityId,
 					:description,
-					:districts
+					:districts,
+					:questions
 				)`,
         {
           id: ballot.id,
@@ -396,6 +414,9 @@ export class ElectionEngine implements IElectionEngine {
           authorityId: ballot.authorityId,
           description: ballot.description,
           districts: JSON.stringify(ballot.districts),
+          questions: ballot.questions && ballot.questions.length > 0
+            ? JSON.stringify(ballot.questions)
+            : null,
           userId: this.ctx.user?.id ?? null,
           userKey: signerKey,
           signature: null,

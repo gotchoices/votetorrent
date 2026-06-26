@@ -11,9 +11,9 @@ import { globalStyles } from "../../theme/styles";
 import { useBallotDraft } from "./providers/BallotDraftProvider";
 import { BallotTemplateForm } from "./components/BallotTemplateForm";
 import { CustomButton } from "../../components/CustomButton";
-import { ThemedText } from "../../components/ThemedText";
 import { InlineError } from "../../components/InlineError";
-import type { Ballot } from "@votetorrent/vote-core";
+import { useApp } from "../../providers/AppProvider";
+import type { Authority, Ballot, INetworkEngine } from "@votetorrent/vote-core";
 
 /**
  * EditBallotScreen — Ballot Template frame (Figma 57:490) in edit/populated mode.
@@ -37,9 +37,11 @@ const EditBallotScreen = () => {
 	const electionEngine = (route.params as any)?.electionEngine;
 	const ballotId = (route.params as any)?.ballotId;
 	const readOnly = route.params?.readOnly === true;
+	const { getEngine } = useApp();
 	const [loadError, setLoadError] = useState("");
 	const [errorMessage, setErrorMessage] = useState("");
 	const [proposing, setProposing] = useState(false);
+	const [authorities, setAuthorities] = useState<Authority[]>([]);
 	const { ballotDraft, setBallotDraft, addQuestion, updateQuestion, removeQuestion } = useBallotDraft();
 
 	// Seed the draft with electionId from route params (edit mode entry point)
@@ -49,6 +51,39 @@ const EditBallotScreen = () => {
 		}
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [electionId]);
+
+	// Load the real authorities so the dropdown stores a valid Authority.Id (the
+	// ProposedBallot.AuthorityIdValid CHECK requires the id to exist in the
+	// Authority table). Includes the primary/network-creator authority.
+	const [primaryAuthorityId, setPrimaryAuthorityId] = useState("");
+	useEffect(() => {
+		async function loadAuthorities() {
+			try {
+				const engine = await getEngine<INetworkEngine>("network");
+				if (!engine) return;
+				const cursor = await engine.getAuthoritiesByName(undefined);
+				setAuthorities(cursor.buffer);
+				const details = await engine.getDetails();
+				if (details?.network?.primaryAuthorityId) {
+					setPrimaryAuthorityId(details.network.primaryAuthorityId);
+				}
+			} catch (error) {
+				console.warn("Error loading authorities for ballot:", error);
+			}
+		}
+		loadAuthorities();
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [getEngine]);
+
+	// Default to the primary authority ONLY when the loaded ballot has no authority
+	// (the getBallotDetails effect already seeds `authority` from the existing
+	// ballot's authorityId, so this never clobbers an existing selection).
+	useEffect(() => {
+		if (primaryAuthorityId && !(ballotDraft as any).authority) {
+			setBallotDraft({ ...ballotDraft, authority: primaryAuthorityId } as any);
+		}
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [primaryAuthorityId, (ballotDraft as any).authority]);
 
 	// G12 edit/upsert: load existing ballot from engine on mount so the form
 	// pre-populates AND the draft retains the SAME id for upsert on PROPOSE.
@@ -175,7 +210,7 @@ const EditBallotScreen = () => {
 				electionDate={electionDate}
 				authority={(ballotDraft as any).authority ?? ""}
 				onAuthorityChange={handleAuthorityChange}
-				authorityOptions={[t("mockAuthorityA"), t("mockAuthorityB")]}
+				authorityOptions={authorities.map((a) => ({ id: a.id, name: a.name }))}
 				description={ballotDraft.description ?? ""}
 				onDescriptionChange={handleDescriptionChange}
 				districts={ballotDraft.districts ?? []}

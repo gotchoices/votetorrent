@@ -697,6 +697,7 @@ declare schema main
 		AuthorityId text, -- authority that created the ballot
 		Description text, -- description of the ballot
 		Districts text, -- json array of strings
+		Questions text null, -- json array of Question objects (persisted alongside the ballot header so questions survive the proposed phase)
 		constraint ElectionIdValid check on insert, update (exists (select 1 from Election E where E.Id = new.ElectionId)),
 		constraint AuthorityIdValid check on insert, update (exists (select 1 from Authority A where A.Id = new.AuthorityId)),
 		constraint UserValid check (context.IsUserValid = true)

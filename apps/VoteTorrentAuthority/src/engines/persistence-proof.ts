@@ -28,12 +28,12 @@
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { Database } from '@quereus/quereus';
-import type { NetworkReference, User, NetworkInit, Scope } from '@votetorrent/vote-core';
+import type { NetworkReference, User, NetworkInit, Scope, Ballot } from '@votetorrent/vote-core';
 import { ElectionType } from '@votetorrent/vote-core';
 // @votetorrent/vote-engine/rn is the single sanctioned import path for real engine
 // classes in the RN app layer (D-04). Metro resolves it via the `./rn` subpath in
 // package.json exports + unstable_enablePackageExports: true in metro.config.js.
-import { NetworksEngine, ElectionsEngine, peekNextElectionTid, H16, LocalStorageReact, DIGEST_VECTORS } from '@votetorrent/vote-engine/rn';
+import { NetworksEngine, ElectionsEngine, ElectionEngine, peekNextElectionTid, H16, LocalStorageReact, DIGEST_VECTORS } from '@votetorrent/vote-engine/rn';
 import type { DbFactory } from '@votetorrent/vote-engine/rn';
 import { rnDbFactory, createStrandDbFactory } from './rn-db-factory';
 import type { StrandHost } from './rn-db-factory';
@@ -57,6 +57,12 @@ export const PROOF_CHAIN_REF_KEY = 'proof:fullChainRef';
 // discriminant — re-running networksEngine.create() would fail repeatedly.
 // The runner detects this and tells the operator to `pm clear` instead.
 export const PROOF_WRITE_ATTEMPTED_KEY = 'proof:writeAttempted';
+
+// MBY-260626 ballot regression check: WRITE phase records the proposed ballot's
+// id + its same-process round-trip result here so the READ phase (post
+// force-stop) can re-read the SAME ballot from the re-attached store and fold a
+// durable cross-restart questions-persisted check into the FULL-CHAIN VERDICT.
+export const PROOF_BALLOT_REF_KEY = 'proof:ballotRef';
 
 // ---------------------------------------------------------------------------
 // Minimal LocalStorage wrapper (delegates to AsyncStorage)
@@ -290,6 +296,166 @@ export async function runFullChainWritePhase(
   );
 
   return { networkRef, authorityId, electionId, db };
+}
+
+// ---------------------------------------------------------------------------
+// Ballot question round-trip proof (MBY-260626 verification)
+// ---------------------------------------------------------------------------
+
+/**
+ * BALLOT QUESTION ROUND-TRIP: verify proposed-ballot questions survive the
+ * write+read paths on-device (Hermes/Quereus), exercising the exact fix that
+ * added ProposedBallot.Questions JSON persistence.
+ *
+ * Single-process (no force-stop needed): propose a ballot carrying questions
+ * via the REAL ElectionEngine.proposeBallot(), then
+ *   - WRITE side: raw `select Questions from ProposedBallot` confirms the JSON
+ *     blob was actually persisted (proves proposeBallot no longer drops them).
+ *   - READ side: ElectionEngine.getBallotDetails() must return the same
+ *     questions deserialized from that blob (proves the proposed fallback path
+ *     reads them back instead of only the finalized Question table).
+ *
+ * Emits a single `[proof] ========== BALLOT VERDICT: PASS|FAIL ...` line.
+ */
+export async function runBallotQuestionProof(
+  networksEngine: NetworksEngine,
+  networkRef: NetworkReference,
+  authorityId: string,
+  electionId: string,
+): Promise<{ passed: boolean; details: string }> {
+  console.info('[proof] ballot question round-trip: starting');
+
+  const ctx = networksEngine.getEstablishedContext(networkRef.hash);
+  if (!ctx) {
+    throw new Error('[proof] ballot proof: no established context for hash=' + networkRef.hash);
+  }
+  // ElectionSubject is just { id, authorityId }; proposeBallot/getBallotDetails
+  // operate on ctx.db only (same construction the app uses in engine-factory.ts).
+  const engine = new ElectionEngine({ id: electionId, authorityId }, ctx);
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const ballotId: string = (globalThis as any).crypto.randomUUID();
+  const ballot: Ballot = {
+    id: ballotId,
+    electionId,
+    authorityId,
+    description: 'Proof ballot — question round-trip',
+    districts: ['D1'],
+    questions: [
+      {
+        code: 'q1',
+        title: 'Favorite color?',
+        instructions: 'Pick one',
+        type: 'select',
+        options: [
+          { code: 'o1', title: 'Red' },
+          { code: 'o2', title: 'Blue' },
+        ],
+        optionRange: { min: 1, max: 1 },
+        sequence: 0,
+        required: true,
+      },
+      {
+        code: 'q2',
+        title: 'Any comments?',
+        instructions: 'Free text',
+        type: 'text',
+        options: [],
+        sequence: 1,
+        required: false,
+      },
+    ],
+  };
+  const expectedCount = ballot.questions.length;
+
+  // WRITE side — propose the ballot (carries the questions).
+  await engine.proposeBallot(ballot);
+
+  // Raw DB check: the Questions JSON column must hold the serialized array.
+  const db = getLastProofDb();
+  const rawRow = db
+    ? ((await db
+        .prepare('select Questions from ProposedBallot where Id = :id')
+        .get({ id: ballotId })) as { Questions: string | null } | undefined)
+    : undefined;
+  const rawJson = rawRow?.Questions ?? null;
+  const rawQuestionCount = rawJson ? (JSON.parse(rawJson) as unknown[]).length : 0;
+  console.info(
+    `[proof] ballot write-side: ProposedBallot.Questions persisted=${rawJson !== null} ` +
+      `(${rawJson?.length ?? 0} chars, ${rawQuestionCount} questions)`,
+  );
+
+  // READ side — getBallotDetails must deserialize the questions back.
+  const detailsResult = await engine.getBallotDetails(ballotId);
+  const readQuestions = detailsResult.ballot.questions ?? [];
+  console.info(`[proof] ballot read-side: getBallotDetails returned ${readQuestions.length} questions`);
+
+  // Assertions.
+  const writeOk = rawQuestionCount === expectedCount;
+  const readLenOk = readQuestions.length === expectedCount;
+  const q1 = readQuestions.find((q) => q.code === 'q1');
+  const q1Ok = !!q1 && q1.title === 'Favorite color?' && (q1.options?.length ?? 0) === 2;
+  const q2 = readQuestions.find((q) => q.code === 'q2');
+  const q2Ok = !!q2 && q2.type === 'text';
+  const passed = writeOk && readLenOk && q1Ok && q2Ok;
+
+  const details =
+    `writePersisted=${writeOk}(${rawQuestionCount}/${expectedCount}) ` +
+    `readCount=${readQuestions.length}/${expectedCount} q1=${q1Ok} q2=${q2Ok}`;
+  console.info(`[proof] ========== BALLOT VERDICT: ${passed ? 'PASS' : 'FAIL'} (${details}) ==========`);
+
+  // Record the ballot id + expected count so the READ phase can re-read the SAME
+  // ballot from the re-attached store (durable cross-restart check).
+  await AsyncStorage.setItem(
+    PROOF_BALLOT_REF_KEY,
+    JSON.stringify({ ballotId, expectedCount, sameProcessPassed: passed }),
+  );
+
+  return { passed, details };
+}
+
+/**
+ * BALLOT READ-BACK (post force-stop): re-read the ballot proposed during the
+ * WRITE phase from the RE-ATTACHED on-device store and assert its questions
+ * survived the process restart. Stronger than the same-process round-trip — it
+ * proves the JSON blob is durably persisted in LevelDB, not just live in a warm
+ * handle. Folds into the FULL-CHAIN VERDICT so a regression fails run-vtest02.sh.
+ *
+ * Must be called AFTER runFullChainReadPhase (which open()s + re-attaches the
+ * store and establishes the context this reuses).
+ */
+export async function runBallotQuestionReadProof(
+  networksEngine: NetworksEngine,
+  networkRef: NetworkReference,
+  authorityId: string,
+  electionId: string,
+): Promise<{ passed: boolean; details: string }> {
+  const refJson = await AsyncStorage.getItem(PROOF_BALLOT_REF_KEY);
+  if (!refJson) {
+    console.error('[proof] ballot read-back: no ballot ref saved — WRITE phase did not run the ballot proof');
+    return { passed: false, details: 'noBallotRef' };
+  }
+  const { ballotId, expectedCount } = JSON.parse(refJson) as {
+    ballotId: string;
+    expectedCount: number;
+    sameProcessPassed: boolean;
+  };
+
+  const ctx = networksEngine.getEstablishedContext(networkRef.hash);
+  if (!ctx) {
+    console.error('[proof] ballot read-back: no established context after open() for hash=' + networkRef.hash);
+    return { passed: false, details: 'noContext' };
+  }
+  const engine = new ElectionEngine({ id: electionId, authorityId }, ctx);
+
+  const detailsResult = await engine.getBallotDetails(ballotId);
+  const readQuestions = detailsResult.ballot.questions ?? [];
+  const passed = readQuestions.length === expectedCount;
+  const details = `durableReadCount=${readQuestions.length}/${expectedCount}`;
+  console.info(
+    `[proof] ballot read-back (post-restart): getBallotDetails returned ${readQuestions.length} questions — ${passed ? 'PASS' : 'FAIL'}`,
+  );
+  return { passed, details };
 }
 
 // ---------------------------------------------------------------------------

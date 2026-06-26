@@ -137,6 +137,16 @@ export function EditQuestionScreen() {
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [removeOptionCode]);
 
+	// Clear the "needs ≥2 options" error reactively: once the question is no
+	// longer in the invalid state (enough options added, or type switched to a
+	// non-choice type), the error must disappear without a second SAVE press.
+	// Only ever clears — the error is set exclusively by handleSave's attempt.
+	useEffect(() => {
+		if (!(CHOICE_BASED_TYPES.includes(type) && options.length < 2)) {
+			setErrorMessage("");
+		}
+	}, [type, options.length]);
+
 	const handleAddOption = () => {
 		navigation.navigate("EditQuestionOption", {
 			questionCode: code || `q-${Date.now()}`,

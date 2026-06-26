@@ -16,11 +16,11 @@ interface BallotTemplateFormProps {
 	/** Election context passed from route params */
 	electionTitle?: string;
 	electionDate?: string;
-	/** Authority dropdown */
+	/** Authority dropdown — `authority` is the stored authority id */
 	authority: string;
 	onAuthorityChange: (v: string) => void;
-	/** For v1.1 a simple list of options to cycle through */
-	authorityOptions?: string[];
+	/** Real authorities to choose from: display `name`, store `id` */
+	authorityOptions?: Array<{ id: string; name: string }>;
 	/** Description field */
 	description: string;
 	onDescriptionChange: (v: string) => void;
@@ -69,8 +69,11 @@ export function BallotTemplateForm({
 	const insets = useSafeAreaInsets();
 	const [dropdownOpen, setDropdownOpen] = useState(false);
 
-	const handleAuthoritySelect = (option: string) => {
-		onAuthorityChange(option);
+	// `authority` stores the selected authority id; show its name in the row.
+	const selectedName = authorityOptions.find((o) => o.id === authority)?.name ?? "";
+
+	const handleAuthoritySelect = (optionId: string) => {
+		onAuthorityChange(optionId);
 		setDropdownOpen(false);
 	};
 
@@ -115,10 +118,10 @@ export function BallotTemplateForm({
 					<ThemedText
 						style={[
 							styles.dropdownText,
-							{ color: authority ? colors.text : colors.textSecondary },
+							{ color: selectedName ? colors.text : colors.textSecondary },
 						]}
 					>
-						{authority || t("authorityPlaceholder")}
+						{selectedName || t("authorityPlaceholder")}
 					</ThemedText>
 					<FontAwesome6 name="chevron-down" size={16} color={colors.text} />
 				</TouchableOpacity>
@@ -131,15 +134,15 @@ export function BallotTemplateForm({
 					>
 						{authorityOptions.map((option) => (
 							<TouchableOpacity
-								key={option}
-								onPress={() => handleAuthoritySelect(option)}
+								key={option.id}
+								onPress={() => handleAuthoritySelect(option.id)}
 								style={[
 									styles.dropdownItem,
 									{ borderBottomColor: colors.border },
-									option === authority && { backgroundColor: colors.accent },
+									option.id === authority && { backgroundColor: colors.accent },
 								]}
 							>
-								<ThemedText>{option}</ThemedText>
+								<ThemedText>{option.name}</ThemedText>
 							</TouchableOpacity>
 						))}
 					</View>
