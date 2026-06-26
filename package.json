@@ -57,7 +57,8 @@
 		"@noble/hashes": "2.2.0",
 		"@libp2p/crypto": "5.1.20",
 		"@quereus/quereus@npm:^3.3.0": "patch:@quereus/quereus@npm%3A3.3.0#~/.yarn/patches/@quereus-quereus-npm-3.3.0-5d38946b35.patch",
-		"@quereus/quereus@npm:^3.2.1": "patch:@quereus/quereus@npm%3A3.3.0#~/.yarn/patches/@quereus-quereus-npm-3.3.0-5d38946b35.patch"
+		"@quereus/quereus@npm:^3.2.1": "patch:@quereus/quereus@npm%3A3.3.0#~/.yarn/patches/@quereus-quereus-npm-3.3.0-5d38946b35.patch",
+		"@chainsafe/libp2p-gossipsub@npm:^14.1.2": "patch:@chainsafe/libp2p-gossipsub@npm%3A14.1.2#~/.yarn/patches/@chainsafe-libp2p-gossipsub-npm-14.1.2-8e35f26afb.patch"
 	},
 	"packageManager": "yarn@4.7.0",
 	"engines": {
