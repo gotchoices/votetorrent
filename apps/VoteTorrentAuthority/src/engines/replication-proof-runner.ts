@@ -237,6 +237,11 @@ export async function runReplicationProof(): Promise<void> {
       if (!strandDb) {
         L('strandId=', PROOF_NETWORK_STORE);
       }
+      // Robust diagnostic (Phase 30): addStrand can throw during distributed schema init when
+      // the strand cohort has not formed (strandPeers=0), before the success-path emit above is
+      // reached. Always emit the live strandPeers= marker so the harness gate sees the real
+      // cohort signal (0) rather than "marker never emitted".
+      L('strandPeers=', readStrandPeers());
     }
 
     // ── 6. READ: bounded poll for the OTHER peer's proof Authority row ───────────────────────
