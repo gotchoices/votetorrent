@@ -37,6 +37,31 @@ export const parseJsonOr = <T>(
 }
 
 /**
+ * Parse a PostgreSQL-style integer-pair range stored in the DB as `{min, max}`.
+ *
+ * The `Question.OptionRange` and `Question.ScoreRange` columns use the
+ * schema default `'{1, 1}'` (PostgreSQL set/range notation). This is NOT
+ * JSON — JSON arrays use square brackets. This helper converts the stored
+ * `{a, b}` string to `{ min: number, max: number }`, returning `undefined`
+ * for null/undefined inputs so callers get the right optional-field type.
+ *
+ * Parsing rules:
+ *   - `null` / `undefined`  → `undefined`
+ *   - `{min, max}`          → `{ min: number, max: number }`
+ *   - anything else         → throws (field name included for diagnostics)
+ */
+export const parsePgRange = (
+  value: unknown,
+  field: string
+): { min: number; max: number } | undefined => {
+  if (value === null || value === undefined) return undefined
+  const s = value.toString().trim()
+  const m = /^\{(\s*-?\d+)\s*,\s*(-?\d+\s*)\}$/.exec(s)
+  if (!m) throw new Error(`${field} has invalid range format: ${s}`)
+  return { min: Number(m[1]), max: Number(m[2]) }
+}
+
+/**
  * Convert `Digest()` output to bytes for the app-layer sign callback (WR-01, 17-REVIEW).
  *
  * Discriminates hex vs base64url by SHAPE (exact length + alphabet), NOT by

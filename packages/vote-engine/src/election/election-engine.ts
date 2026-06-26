@@ -1,5 +1,5 @@
 import { MisuseError, QuereusError } from '@quereus/quereus'
-import { fromCanonicalDatetime, nowCanonicalDatetime, parseJsonOr } from '../utils.js'
+import { fromCanonicalDatetime, nowCanonicalDatetime, parseJsonOr, parsePgRange } from '../utils.js'
 import type { EngineContext } from '../types.js'
 import type {
   Ballot,
@@ -119,12 +119,40 @@ export class ElectionEngine implements IElectionEngine {
         const parsed = parseJsonOr<Question[]>(ballotRow.Questions, [], 'ProposedBallot.Questions')
         questions.push(...parsed)
       } else {
+        // For finalized ballots, ProposedBallot is retained (D-04) and its Questions
+        // JSON is the option fallback when Option table rows are absent. This handles
+        // the Quereus 3.3.0 deferred-constraint bug that prevents Option INSERT
+        // (Option.MutationValid's 3-table EXISTS subquery always returns false in the
+        // deferred evaluator even when the identical standalone SELECT returns true).
+        // Once the Quereus bug is fixed, Option INSERTs will be restored in
+        // finalizeBallot and this fallback becomes a harmless no-op.
+        const pbFallbackRow = await this.ctx.db
+          .prepare(
+            `select Questions from ProposedBallot where Id = :ballotId`
+          )
+          .get({ ballotId: id })
+        const pbQuestions = pbFallbackRow
+          ? parseJsonOr<Question[]>(pbFallbackRow.Questions, [], 'ProposedBallot.Questions')
+          : []
+        const pbQuestionsByCode = new Map(pbQuestions.map(pq => [pq.code, pq]))
+
+        // Collect all Question rows first (avoids nested concurrent Quereus cursors
+        // on the same DB connection — a second eval() opened inside a for-await loop
+        // deadlocks in Quereus 3.3.0 when both cursors share the same DB handle).
+        type RawQuestion = Record<string, unknown>
+        const rawQuestions: RawQuestion[] = []
         for await (const q of this.ctx.db.eval(
 				`select Code, Title, Instructions, DependsOn, Type, OptionRange, ScoreRange,
 					Grouping, Sequence, Required
 					from Question where BallotId = :ballotId`,
           { ballotId: id }
         )) {
+          rawQuestions.push(q as RawQuestion)
+        }
+
+        // Now iterate raw rows sequentially — outer cursor is fully consumed so
+        // Option cursor can open without Quereus concurrency issues.
+        for (const q of rawQuestions) {
           const options: Option[] = []
           for await (const o of this.ctx.db.eval(
 					`select Code, Sequence, Title, Details, InfoURL, Image, Video
@@ -140,6 +168,23 @@ export class ElectionEngine implements IElectionEngine {
               video: parseJsonOr(o.Video, undefined, 'Option.Video')
             })
           }
+          // Fallback: if Option table has no rows (Quereus 3.3.0 deferred-constraint
+          // bug prevents insertion), read options from ProposedBallot.Questions JSON.
+          if (options.length === 0) {
+            const pbQ = pbQuestionsByCode.get(q.Code as string)
+            if (pbQ?.options) {
+              for (const o of pbQ.options) {
+                options.push({
+                  code: o.code,
+                  title: o.title,
+                  details: o.details,
+                  infoURL: o.infoURL,
+                  image: o.image,
+                  video: o.video,
+                })
+              }
+            }
+          }
           questions.push({
             code: q.Code as string,
             title: q.Title as string,
@@ -147,16 +192,10 @@ export class ElectionEngine implements IElectionEngine {
             dependsOn: parseJsonOr(q.DependsOn, undefined, 'Question.DependsOn'),
             options,
             type: q.Type as Question['type'],
-            optionRange: parseJsonOr(
-              q.OptionRange,
-              undefined,
-              'Question.OptionRange'
-            ),
-            scoreRange: parseJsonOr(
-              q.ScoreRange,
-              undefined,
-              'Question.ScoreRange'
-            ),
+            // OptionRange and ScoreRange are stored in PostgreSQL range notation
+            // `{min, max}`, NOT as JSON — use parsePgRange, not parseJsonOr.
+            optionRange: parsePgRange(q.OptionRange, 'Question.OptionRange'),
+            scoreRange: parsePgRange(q.ScoreRange, 'Question.ScoreRange'),
             group: (q.Grouping as string | undefined) ?? undefined,
             sequence: (q.Sequence as number | undefined) ?? undefined,
             required: (q.Required as boolean | undefined) ?? true
