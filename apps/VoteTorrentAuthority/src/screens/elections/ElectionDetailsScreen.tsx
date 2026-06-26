@@ -39,6 +39,8 @@ export default function ElectionDetailsScreen() {
 	const { electionEngine } = useRoute().params as { electionEngine: IElectionEngine };
 	const [electionDetails, setElectionDetails] = useState<ElectionDetails | null>(null);
 	const [ballots, setBallots] = useState<BallotSummary[]>([]);
+	// D-09: confirmation state per ballot — { locked, confirmed } keyed by ballot id
+	const [ballotConfirmationStates, setBallotConfirmationStates] = useState<Record<string, { locked: boolean; confirmed: boolean }>>({});
 	const [moreOpen, setMoreOpen] = useState(false);
 	const [errorMessage, setErrorMessage] = useState("");
 	const { colors } = useTheme() as ExtendedTheme;
@@ -79,6 +81,8 @@ export default function ElectionDetailsScreen() {
 
 	// G2/G12: Refresh ballot list on every focus so newly proposed templates appear
 	// immediately on return from CreateBallot/EditBallot.
+	// D-09: Also refresh confirmation states on focus so Proposed/Confirmed badge
+	// updates when the user returns from the Tasks inbox after signing.
 	useFocusEffect(
 		useCallback(() => {
 			const loadBallots = async () => {
@@ -87,6 +91,18 @@ export default function ElectionDetailsScreen() {
 					if (electionEngine) {
 						const summaries = await electionEngine.getBallots();
 						setBallots(summaries);
+						// D-09: fetch confirmation state for each ballot to drive the badge.
+						const stateEntries = await Promise.all(
+							summaries.map(async (b) => {
+								try {
+									const cs = await electionEngine.getBallotConfirmationState(b.id);
+									return [b.id, cs] as const;
+								} catch {
+									return [b.id, { locked: false, confirmed: false }] as const;
+								}
+							})
+						);
+						setBallotConfirmationStates(Object.fromEntries(stateEntries));
 					}
 				} catch (error) {
 					console.warn("Error loading ballots:", error);
@@ -314,23 +330,30 @@ export default function ElectionDetailsScreen() {
 			<View style={styles.section}>
 				<ThemedText type="title">{t("ballotTemplates")}</ThemedText>
 				{ballots.length > 0 ? (
-					ballots.map((ballot) => (
-						<InfoCard
-							key={ballot.id}
-							title={ballot.authorityId || t("ballotTemplate")}
-							subtitle={t("questionsLabel") + ": —"}
-							icon="chevron-right"
-							onPress={() =>
-								navigation.navigate("EditBallot", {
-									electionId: election.id,
-									electionTitle: election.title,
-									electionDate: formatDate(election.revisionDeadline),
-									ballotId: ballot.id,
-									electionEngine,
-								} as any)
-							}
-						/>
-					))
+					ballots.map((ballot) => {
+						// D-09: render a Proposed/Confirmed status badge driven by getBallotConfirmationState.
+						const cs = ballotConfirmationStates[ballot.id];
+						const statusLabel = cs?.confirmed
+							? t("statusConfirmed")
+							: t("statusProposed");
+						return (
+							<InfoCard
+								key={ballot.id}
+								title={ballot.authorityId || t("ballotTemplate")}
+								subtitle={statusLabel}
+								icon="chevron-right"
+								onPress={() =>
+									navigation.navigate("EditBallot", {
+										electionId: election.id,
+										electionTitle: election.title,
+										electionDate: formatDate(election.revisionDeadline),
+										ballotId: ballot.id,
+										electionEngine,
+									} as any)
+								}
+							/>
+						);
+					})
 				) : (
 					<>
 						<ThemedText type="small">{t("noBallotYet")}</ThemedText>
