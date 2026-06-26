@@ -195,7 +195,7 @@ export class ElectionEngine implements IElectionEngine {
             // OptionRange and ScoreRange are stored in PostgreSQL range notation
             // `{min, max}`, NOT as JSON — use parsePgRange, not parseJsonOr.
             optionRange: parsePgRange(q.OptionRange, 'Question.OptionRange'),
-            scoreRange: parsePgRange(q.ScoreRange, 'Question.ScoreRange'),
+            scoreRange: parsePgRange(q.ScoreRange, 'Question.ScoreRange') as { min: number; max: number; step: number } | undefined,
             group: (q.Grouping as string | undefined) ?? undefined,
             sequence: (q.Sequence as number | undefined) ?? undefined,
             required: (q.Required as boolean | undefined) ?? true
