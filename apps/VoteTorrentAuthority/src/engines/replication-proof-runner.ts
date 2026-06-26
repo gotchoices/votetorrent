@@ -85,6 +85,11 @@ const BOOTSTRAP_NODES = resolveBootstrapNodes(CONTROL_ADDR);
 const PEER_POLL_MAX = 3;
 const REPL_POLL_MAX = 120;
 const POLL_INTERVAL_MS = 1000;
+// STRAND_PEER_POLL_MAX: 10 ticks × 1 s = 10 s strand-cohort connection wait (Fix A, Phase 30).
+//   The write below opens an Optimystic cluster stream to the drone's strand node; that stream
+//   resets ("0/N super-majority") if the strand transport has not connected yet. Wait for the
+//   LIVE strand connection (getConnections().length >= 1) before writing. Exits early on connect.
+const STRAND_PEER_POLL_MAX = 10;
 
 /**
  * Boot entry point.  Fire-and-forget from index.js after AppRegistry.registerComponent.
@@ -169,7 +174,27 @@ export async function runReplicationProof(): Promise<void> {
     // REPL-01: strand-cohort size marker — emitted before the read poll so a mis-wire
     // (strandPeers=0) fails fast with a clear diagnostic (Pitfall 2).
     // strandId here is PROOF_NETWORK_STORE (the strand the runner joined).
-    const strandPeersN = (node as InstanceType<typeof CadreNode> & { getStrand?: (id: string) => { connectedPeers?: number } | undefined }).getStrand?.(PROOF_NETWORK_STORE)?.connectedPeers ?? 0;
+    //
+    // Fix A (Phase 30): read the LIVE strand libp2p connection count via getConnections(),
+    // NOT cadre-core's stale strand peer-count field — that field is initialized to 0 and
+    // never updated (a dead counter), which made strandPeers always read 0 even when the
+    // cohort was forming. getConnections().length is the live transport signal.
+    const readStrandPeers = (): number =>
+      (node as InstanceType<typeof CadreNode> & {
+        getStrand?: (id: string) => { libp2pNode?: { getConnections?: () => unknown[] } } | undefined;
+      }).getStrand?.(PROOF_NETWORK_STORE)?.libp2pNode?.getConnections?.().length ?? 0;
+
+    // Fix A (Phase 30): the write below opens an Optimystic cluster stream to the drone's strand
+    // node; that stream resets (→ "0/N super-majority") if the strand-cohort transport has not
+    // connected yet. Wait (bounded) for the LIVE strand connection BEFORE the write — but only
+    // when a control peer is present (the harness's solo Step-1 boot has peers=0 and is expected
+    // to emit strandPeers=0 and FAIL, which the harness ignores).
+    if (peerCount > 0) {
+      for (let i = 0; i < STRAND_PEER_POLL_MAX && readStrandPeers() === 0; i++) {
+        await new Promise<void>(r => setTimeout(r, POLL_INTERVAL_MS));
+      }
+    }
+    const strandPeersN = readStrandPeers();
     L('strandPeers=', strandPeersN);
 
     // ── 5. WRITE: create the strand (correct mode now known) + insert the proof row ──────────
