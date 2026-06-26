@@ -620,6 +620,25 @@ export class ElectionEngine implements IElectionEngine {
     }
   }
 
+  // ---------- confirm-path methods (31-02 implementation targets) ----------
+  // Wave 0 stubs: declared on IElectionEngine (31-01), implemented in 31-02.
+  // Tests in ballot-confirm.spec.ts are expected RED until 31-02 is executed.
+
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  async submitBallotForConfirmation (_ballotId: string): Promise<void> {
+    throw new Error('ElectionEngine.submitBallotForConfirmation: not yet implemented — planned in Phase 31-02')
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  async withdrawBallotConfirmation (_ballotId: string): Promise<void> {
+    throw new Error('ElectionEngine.withdrawBallotConfirmation: not yet implemented — planned in Phase 31-02')
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  async getBallotConfirmationState (_ballotId: string): Promise<{ locked: boolean; confirmed: boolean }> {
+    throw new Error('ElectionEngine.getBallotConfirmationState: not yet implemented — planned in Phase 31-02')
+  }
+
   // ---------- builder factories ----------
 
   buildProposeBallot (): IElectionProposeBallotBuilder {
