@@ -183,6 +183,31 @@ function reloadRunnerFullMock(): void {
   jest.mock('@libp2p/websockets', () => ({ webSockets: () => ({}) }), { virtual: true });
   jest.mock('@libp2p/circuit-relay-v2', () => ({ circuitRelayTransport: () => ({}) }), { virtual: true });
   jest.mock('@multiformats/multiaddr', () => ({ multiaddr: (s: string) => ({ toString: () => s }) }), { virtual: true });
+  // Fix A (Phase 30): the strandPeers wait loop now runs AFTER the strand is created in the write
+  // phase (createStrandDbFactory → addStrand). Mock rn-db-factory so the write phase succeeds (the
+  // real factory calls node.addStrand, which the FakeCadreNode mock does not implement) and the
+  // runner reaches the wait loop + strandPeers= emit. eval yields one row so the read poll exits fast.
+  jest.mock('../rn-db-factory', () => ({
+    createStrandDbFactory: () => async () => ({
+      exec: async () => undefined,
+      // Manual async-iterable (NOT an async generator — jest.mock factories forbid the
+      // _wrapAsyncGenerator babel helper). Yields exactly one foreign row so the read poll
+      // sets verdict=true and exits on the first tick.
+      eval: () => {
+        let sent = false;
+        return {
+          [Symbol.asyncIterator]() {
+            return {
+              next: async () =>
+                sent
+                  ? { done: true, value: undefined }
+                  : ((sent = true), { done: false, value: { Id: 'repl-auth-otherpeer' } }),
+            };
+          },
+        };
+      },
+    }),
+  }));
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   ({ runReplicationProof } = require('../replication-proof-runner'));
 }

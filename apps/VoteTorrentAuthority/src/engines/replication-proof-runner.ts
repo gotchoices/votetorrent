@@ -171,31 +171,16 @@ export async function runReplicationProof(): Promise<void> {
     // D-06 / ENG-05: live peer-count marker — logged once (pass or timeout).
     L('peers=', peerCount);
 
-    // REPL-01: strand-cohort size marker — emitted before the read poll so a mis-wire
-    // (strandPeers=0) fails fast with a clear diagnostic (Pitfall 2).
-    // strandId here is PROOF_NETWORK_STORE (the strand the runner joined).
-    //
-    // Fix A (Phase 30): read the LIVE strand libp2p connection count via getConnections(),
-    // NOT cadre-core's stale strand peer-count field — that field is initialized to 0 and
-    // never updated (a dead counter), which made strandPeers always read 0 even when the
-    // cohort was forming. getConnections().length is the live transport signal.
+    // REPL-01: live strand-cohort connection reader (Fix A, Phase 30).
+    // Reads the LIVE strand libp2p connection count via getConnections() — NOT cadre-core's
+    // stale strand peer-count field (initialized to 0, never updated → always read 0).
+    // IMPORTANT: the strand does not exist until addStrand runs in the write phase below, so
+    // getStrand(PROOF_NETWORK_STORE) is undefined HERE — the bounded wait + strandPeers= marker
+    // are emitted AFTER the strand is created (see section 5), not before.
     const readStrandPeers = (): number =>
       (node as InstanceType<typeof CadreNode> & {
         getStrand?: (id: string) => { libp2pNode?: { getConnections?: () => unknown[] } } | undefined;
       }).getStrand?.(PROOF_NETWORK_STORE)?.libp2pNode?.getConnections?.().length ?? 0;
-
-    // Fix A (Phase 30): the write below opens an Optimystic cluster stream to the drone's strand
-    // node; that stream resets (→ "0/N super-majority") if the strand-cohort transport has not
-    // connected yet. Wait (bounded) for the LIVE strand connection BEFORE the write — but only
-    // when a control peer is present (the harness's solo Step-1 boot has peers=0 and is expected
-    // to emit strandPeers=0 and FAIL, which the harness ignores).
-    if (peerCount > 0) {
-      for (let i = 0; i < STRAND_PEER_POLL_MAX && readStrandPeers() === 0; i++) {
-        await new Promise<void>(r => setTimeout(r, POLL_INTERVAL_MS));
-      }
-    }
-    const strandPeersN = readStrandPeers();
-    L('strandPeers=', strandPeersN);
 
     // ── 5. WRITE: create the strand (correct mode now known) + insert the proof row ──────────
     // createStrandDbFactory(node) calls setSchemaPath(['App','main']) internally so bare SQL
@@ -217,6 +202,20 @@ export async function runReplicationProof(): Promise<void> {
 
       // Log OQ3 handshake marker before the write so the harness can capture it.
       L('strandId=', PROOF_NETWORK_STORE);
+
+      // Fix A (Phase 30): the strand node now EXISTS (addStrand resolved) and is dialing its
+      // strandBootstrapNodes (the drone's strand addr). Wait (bounded) for the LIVE strand
+      // connection >= 1 BEFORE the DDL write — the Authority insert opens an Optimystic cluster
+      // stream to the drone's strand node, which resets (→ "0/N super-majority") if the cohort
+      // transport has not connected yet. Only wait when a control peer is present (the solo
+      // Step-1 boot has peers=0 → strandPeers=0 → FAIL, which the harness ignores).
+      if (peerCount > 0) {
+        for (let i = 0; i < STRAND_PEER_POLL_MAX && readStrandPeers() === 0; i++) {
+          await new Promise<void>(r => setTimeout(r, POLL_INTERVAL_MS));
+        }
+      }
+      // REPL-01: live strand-cohort size marker, emitted AFTER addStrand + the bounded wait.
+      L('strandPeers=', readStrandPeers());
 
       // Use VOTETORRENT_SCHEMA_SQL to satisfy the import (tree-shaken in release).
       void VOTETORRENT_SCHEMA_SQL;
