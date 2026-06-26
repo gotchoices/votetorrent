@@ -5297,6 +5297,17 @@ __metadata:
   languageName: node
   linkType: soft
 
+"@serfab/strand-proto@portal:./vendor/@serfab/strand-proto::locator=votetorrent%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@serfab/strand-proto@portal:./vendor/@serfab/strand-proto::locator=votetorrent%40workspace%3A."
+  dependencies:
+    "@multiformats/multiaddr": "npm:^12.5.1"
+    it-length-prefixed: "npm:^10.0.1"
+    it-pipe: "npm:^3.0.1"
+    libp2p: "npm:^3.1.3"
+  languageName: node
+  linkType: soft
+
 "@sideway/address@npm:^4.1.5":
   version: 4.1.5
   resolution: "@sideway/address@npm:4.1.5"
@@ -16500,6 +16511,7 @@ __metadata:
     "@libp2p/websockets": "npm:^10"
     "@optimystic/db-p2p": "npm:0.13.5"
     "@serfab/cadre-core": "npm:^0.7.1"
+    "@serfab/strand-proto": "portal:../../vendor/@serfab/strand-proto"
   languageName: unknown
   linkType: soft
 

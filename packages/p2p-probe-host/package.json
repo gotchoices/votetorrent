@@ -10,6 +10,7 @@
   "dependencies": {
     "@libp2p/websockets": "^10",
     "@optimystic/db-p2p": "0.13.5",
-    "@serfab/cadre-core": "^0.7.1"
+    "@serfab/cadre-core": "^0.7.1",
+    "@serfab/strand-proto": "portal:../../vendor/@serfab/strand-proto"
   }
 }
