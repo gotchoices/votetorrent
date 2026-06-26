@@ -24,6 +24,7 @@ import {
 	ensureTidSequence,
 	readTidCounter,
 	incrementTidCounter,
+	declareViewsInMain,
 } from '../database/initialize.js';
 import { NetworksCreateBuilder } from './builders/index.js';
 
@@ -354,6 +355,16 @@ export class NetworksEngine implements INetworksEngine {
 		const seed = await readTidCounter(db);
 		this.tidCounters.set(ref.hash, seed);
 
+		// STRAND-VIEWS fix (re-attach path): on the strand path cadre-core applies the
+		// schema under `App`, so views live in App and unqualified view references fail
+		// (Quereus resolves views only against the current schema `main`, not the path).
+		// Re-declare views in `main` (idempotent) so engine reads resolve after re-attach.
+		// No-op safety: on the in-memory/rnDbFactory path the views already live in `main`
+		// (initDB declared schema main), so `create view if not exists` does nothing.
+		if (db.declaredSchemaManager.hasDeclaredSchema('App')) {
+			await declareViewsInMain(db);
+		}
+
 		const ctx: EngineContext = { db, user };
 		this.contexts.set(ref.hash, ctx);
 		const qNetworkEngine = new NetworkEngine(ref, this.localStorage, ctx, getPeerCount);
@@ -420,6 +431,13 @@ export class NetworksEngine implements INetworksEngine {
 			// (CR-01 fix) does not throw a PK-uniqueness violation.
 			await ensureTidSequence(db);                 // D-12: create TidSequence table (idempotent)
 			await markSchemaInitialized(db);             // D-08: plant the SchemaInit flag (idempotent)
+			// STRAND-VIEWS fix: cadre-core applies the schema under `App`, so all views
+			// live in App. Quereus resolves UNQUALIFIED views only against the current
+			// schema (`main`), not the schema path — so `select ... from CurrentAdmin`
+			// throws "not found in schema path: App, main" even though App.CurrentAdmin
+			// exists. Re-declare every view in `main` (idempotent) so unqualified engine
+			// queries (authority/signing/user/elections engines) resolve on the strand.
+			await declareViewsInMain(db);                // STRAND-VIEWS: views in main for unqualified reads
 		} else {
 			// rnDbFactory path (dev / in-memory): existing logic verbatim (D-08/D-07/D-12).
 			const initialized = await isSchemaInitialized(db); // D-08: sentinel check

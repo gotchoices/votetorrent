@@ -4487,7 +4487,7 @@ __metadata:
 
 "@quereus/quereus@patch:@quereus/quereus@npm%3A3.3.0#~/.yarn/patches/@quereus-quereus-npm-3.3.0-5d38946b35.patch":
   version: 3.3.0
-  resolution: "@quereus/quereus@patch:@quereus/quereus@npm%3A3.3.0#~/.yarn/patches/@quereus-quereus-npm-3.3.0-5d38946b35.patch::version=3.3.0&hash=7463a6"
+  resolution: "@quereus/quereus@patch:@quereus/quereus@npm%3A3.3.0#~/.yarn/patches/@quereus-quereus-npm-3.3.0-5d38946b35.patch::version=3.3.0&hash=792d1b"
   dependencies:
     debug: "npm:^4.4.3"
     fast-json-patch: "npm:^3.1.1"
@@ -4495,7 +4495,7 @@ __metadata:
     moat-maker: "npm:^2.2.0"
     temporal-polyfill: "npm:^0.3.0"
     uint8arrays: "npm:^5.1.0"
-  checksum: 10c0/3bc656061d815aec0e02cefd25f88826f1517e39c2590d858791204c90ec842bb1fbea9a03e311985292ad94dd6cce4fa73875333f5e4158429c2332e75c2702
+  checksum: 10c0/cd751bfe745d6d4957f51927f4c4678362559c3561ca10ec9738cb68a9a2a728e39ae5e53be473c32acb8ed2e86820a3bd0c38c372bf2250e2102666d003e041
   languageName: node
   linkType: hard
 

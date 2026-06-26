@@ -105,7 +105,7 @@ export interface StrandHost {
  *       'bootstrap' routes schema apply + writes through the local transactor.
  * D-14: after `getDatabase()`, `setSchemaPath(['App','main'])` makes bare engine
  *       SQL table names (e.g. `Network`) resolve to `App.Network` first, with
- *       `main` as the fallback for SchemaVersion / TidSequence. One call fixes
+ *       `main` as the fallback for SchemaInit / TidSequence. One call fixes
  *       the entire SQL tier — zero engine query rewrites.
  *
  * Ordering (Pitfall 3): never read `strand.database` before `await addStrand`

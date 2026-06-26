@@ -239,6 +239,53 @@ export async function incrementTidCounter(db: Database): Promise<void> {
 }
 
 /**
+ * STRAND-VIEWS fix (strand-views-not-materialized): re-declare every schema VIEW
+ * in the `main` schema so unqualified view references resolve on the strand path.
+ *
+ * Root cause: cadre-core's StrandDatabase.executeSchema() applies the schema under
+ * `App` (`declare schema App { ... } apply schema App;`), so all views are created
+ * in the `App` schema. Quereus's UNQUALIFIED relation resolution is ASYMMETRIC:
+ * TABLE references walk the full schema path (`findTable(name, undefined, schemaPath)`
+ * — schema-resolution.js), but VIEW references in the planner use ONLY the current
+ * schema name (select.js: `getView(db.schemaManager.getCurrentSchemaName(), name)`).
+ * On the strand the current schema is `main`, so `getView('main', 'CurrentAdmin')`
+ * misses the App view and the query throws
+ * `Table 'CurrentAdmin' not found in schema path: App, main`. Tables resolve
+ * (path-searched) but every table-referencing view (CurrentAdmin, etc.) does not.
+ *
+ * Fix: after the strand's App schema is applied, also create each view in `main`
+ * (`create view if not exists main.<Name> as <body>`). The view bodies reference
+ * base tables by bare name; those resolve through the strand's schema path
+ * (`['App','main']`) at the view's plan time, so a `main` view over `App` tables
+ * works. Unqualified reads then find the view in the current (`main`) schema. This
+ * is path-independent: on the in-memory / rnDbFactory path the views already live in
+ * `main`, so `create view if not exists` is a harmless no-op there.
+ *
+ * View bodies are extracted from the bundled VOTETORRENT_SCHEMA_SQL (single source of
+ * truth — no drift). Each view is a single top-level `view NAME as <SELECT...>;`
+ * statement with no internal `;`, so a non-greedy match to the first `;` is safe.
+ * Per-view creation is wrapped in try/catch so one malformed view body (e.g. the
+ * pre-existing AcceptedInvite, which references an out-of-scope column and was already
+ * non-functional) cannot abort declaration of the working views.
+ */
+export async function declareViewsInMain(db: Database): Promise<void> {
+	const VIEW_RE = /\bview\s+(\w+)\s+as\b([\s\S]*?);/gi;
+	let match: RegExpExecArray | null;
+	while ((match = VIEW_RE.exec(VOTETORRENT_SCHEMA_SQL)) !== null) {
+		const name = match[1];
+		const body = match[2]?.trim();
+		if (!name || !body) continue;
+		try {
+			await db.exec(`create view if not exists main.${name} as ${body};`);
+		} catch (error) {
+			// A malformed view body (pre-existing, query-time-only failure) must not
+			// block the other views. The broken view was already unusable; swallow.
+			console.warn(`declareViewsInMain: skipped view ${name}:`, error);
+		}
+	}
+}
+
+/**
  * Prepare a fresh Quereus database for VoteTorrent use: register the crypto
  * plugin (so schema constraint references to `Digest`, `SignatureValid`,
  * etc. resolve), then load the schema via `initDB`.
