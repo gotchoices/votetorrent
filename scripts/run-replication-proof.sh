@@ -391,7 +391,11 @@ fi
 SP=$(extract_marker_value "${STRAND_PEERS_LINE}" "strandPeers")
 echo "[run-replication-proof] REPL-01: strandPeers=${SP} on Peer A"
 if [ -z "${SP}" ] || [ "${SP}" -lt 1 ]; then
-  echo "[run-replication-proof] WARNING: strandPeers=${SP} < 1 (REPL-01) — strand cohort not yet formed on Peer A; continuing to verdict (verdict is authoritative)" >&2
+  # Phase 30: the runner now waits (bounded) for the LIVE strand connection before emitting
+  # strandPeers=, so a sustained strandPeers=${SP} < 1 is a genuine cohort-formation failure —
+  # fail fast here instead of warn-and-continue into a 120s verdict timeout (REPL-01).
+  echo "[run-replication-proof] FAIL: strandPeers=${SP} < 1 (REPL-01) — strand cohort did not form on Peer A after the runner's bounded wait; aborting before the verdict poll" >&2
+  exit 1
 else
   echo "[run-replication-proof] REPL-01 cohort signal: strandPeers=${SP} >= 1 on Peer A"
 fi
