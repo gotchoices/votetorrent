@@ -31,6 +31,23 @@ import { ElectionRevokeKeyholderBuilder } from './builders/election-revoke-keyho
 // the v2 persistence milestone (PERSIST-01).
 let nextTid = 1
 
+/**
+ * Fixed ballot-header Tid for the `AdminSigning` digest at submit time.
+ *
+ * There is NO persisted Tid/Sequence column on `Task` or `AdminSigning`
+ * (Task's Tid is write-context only; AdminSigning persists only the computed
+ * Digest). The Tid baked into the ballot-header digest therefore CANNOT be
+ * read back at finalize.
+ *
+ * Mechanism: use a fixed JS-number constant — exactly the proven `seedBallot`
+ * spine (`Digest(1, …)` at test-context.ts:726 / `Tid = 1` at :754).
+ * 31-03 imports and reuses this same constant so submit and finalize produce
+ * the same byte-identical digest. Bind as a JS NUMBER (never String()):
+ * canonical Digest uses TAG_INT; String() would create a TEXT tag and the
+ * digest would not match (Pitfall 2 / test-context.ts:227).
+ */
+export const BALLOT_HEADER_TID = 1
+
 /** Minimal Election identifier the engine is constructed against. */
 export interface ElectionSubject {
   id: string
@@ -620,23 +637,230 @@ export class ElectionEngine implements IElectionEngine {
     }
   }
 
-  // ---------- confirm-path methods (31-02 implementation targets) ----------
-  // Wave 0 stubs: declared on IElectionEngine (31-01), implemented in 31-02.
-  // Tests in ballot-confirm.spec.ts are expected RED until 31-02 is executed.
+  // ---------- confirm-path methods (31-02 implementation) ----------
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  async submitBallotForConfirmation (_ballotId: string): Promise<void> {
-    throw new Error('ElectionEngine.submitBallotForConfirmation: not yet implemented — planned in Phase 31-02')
+  /**
+   * D-03/D-07/D-06 — Submit a ProposedBallot for authority confirmation.
+   *
+   * 1. Read the ProposedBallot row.
+   * 2. Re-validate ballot invariants (D-07): non-empty description, ≥1 question,
+   *    ≥2 options for 'select'-type questions. Throw before any write on failure.
+   * 3. Resolve AdminEffectiveAt from CurrentAdmin.
+   * 4. Insert an UNSIGNED AdminSigning('ceb') with the canonical ballot-header
+   *    digest. Uses BALLOT_HEADER_TID (a fixed constant, not nextTid++) so
+   *    31-03's finalize can reproduce the identical digest without reading Tid
+   *    from any persisted column (Pitfall 2). Do NOT call sign() here — the
+   *    AdminSigning must stay unsigned until completeSignature (Pitfall 1).
+   * 5. Atomically BEGIN → Task(signature/ballot) → BallotSignatureTaskExtension → COMMIT.
+   *    BallotSignatureTaskExtension.MutationValid recomputes Digest(BALLOT_HEADER_TID, …)
+   *    from ProposedBallot and must match the AdminSigning.Digest inserted above.
+   *
+   * D-06: no distinct-signer check — self-confirm is the intended single-authority path.
+   */
+  async submitBallotForConfirmation (ballotId: string): Promise<void> {
+    try {
+      // Step 1: read the ProposedBallot row
+      const ballotRow = await this.ctx.db
+        .prepare(
+          `select Id, ElectionId, AuthorityId, Description, Districts, Questions
+           from ProposedBallot where Id = :ballotId`
+        )
+        .get({ ballotId }) as {
+          Id: string
+          ElectionId: string
+          AuthorityId: string
+          Description: string
+          Districts: string
+          Questions: string | null
+        } | undefined
+
+      if (!ballotRow) {
+        throw new Error(`ProposedBallot not found: ${ballotId}`)
+      }
+
+      // Step 2: re-validate invariants (D-07)
+      // 2a. Non-empty description
+      if (typeof ballotRow.Description !== 'string' || ballotRow.Description.trim() === '') {
+        throw new Error('submitBallotForConfirmation: ballot description must be non-empty (D-07)')
+      }
+
+      // 2b. Parse questions and check ≥1 question
+      const questions: Question[] = parseJsonOr(ballotRow.Questions, [], 'Questions')
+      if (!Array.isArray(questions) || questions.length === 0) {
+        throw new Error('submitBallotForConfirmation: ballot must have at least one question (D-07)')
+      }
+
+      // 2c. ≥2 options for 'select'-type questions
+      for (const q of questions) {
+        if (q.type === 'select') {
+          if (!Array.isArray(q.options) || q.options.length < 2) {
+            throw new Error(
+              `submitBallotForConfirmation: select question "${q.code}" must have at least 2 options (D-07)`
+            )
+          }
+        }
+      }
+
+      // Step 3: resolve AdminEffectiveAt from CurrentAdmin
+      const adminRow = await this.ctx.db
+        .prepare('select EffectiveAt from CurrentAdmin where AuthorityId = :authorityId')
+        .get({ authorityId: this.election.authorityId }) as { EffectiveAt: number | string } | undefined
+
+      if (!adminRow) {
+        throw new Error('submitBallotForConfirmation: CurrentAdmin not found for authority')
+      }
+      const adminEffectiveAt = adminRow.EffectiveAt
+
+      // Prepare signing-session values
+      const nonce = (globalThis as { crypto: { randomUUID: () => string } }).crypto.randomUUID()
+      const userId = this.ctx.user?.id ?? null
+      // Placeholder key/sig values — the AdminSigning schema gates on IsSignerKeyValid and
+      // IsSignatureValid context flags (which we set to true); real crypto is provided at
+      // completeSignature (31-03). The AdminSigning.Signature column is NOT NULL, so we
+      // need a non-null placeholder — mirroring the pattern in elections-engine.ts:810-811.
+      const signerKey = this.ctx.user?.activeKeys?.[0]?.key ?? '0'.repeat(66)
+      const placeholderSig = '0'.repeat(128)
+      const now = nowCanonicalDatetime()
+
+      // Task + extension use nextTid++ (per-write in-memory counter, per this file's convention)
+      // but the header digest is pinned to BALLOT_HEADER_TID (the fixed constant, not nextTid++)
+      const taskTid = nextTid++
+      const taskId = (globalThis as { crypto: { randomUUID: () => string } }).crypto.randomUUID()
+
+      // Step 4: insert UNSIGNED AdminSigning('ceb') — do NOT call sign() (Pitfall 1)
+      // Bind Description and Districts from the ProposedBallot row so submit and
+      // finalize produce byte-identical digests (Pitfall 2).
+      // Bind BALLOT_HEADER_TID as a JS number (never String()) — TAG_INT vs TEXT (Pitfall 2).
+      await this.ctx.db.exec(
+        `insert into AdminSigning (Nonce, AuthorityId, AdminEffectiveAt, Scope, Digest, UserId, SignerKey, Signature)
+         with context now = :now, IsSignatureValid = true, IsSignerKeyValid = true
+         values (:nonce, :authorityId, :adminEffectiveAt, 'ceb',
+                 Digest(:headerTid, :id, :electionId, :authorityId, :description, :districts),
+                 :userId, :signerKey, :signature)`,
+        {
+          nonce,
+          authorityId: this.election.authorityId,
+          adminEffectiveAt,
+          headerTid: BALLOT_HEADER_TID,
+          id: ballotRow.Id,
+          electionId: ballotRow.ElectionId,
+          description: ballotRow.Description,
+          districts: ballotRow.Districts,
+          userId,
+          signerKey,
+          signature: placeholderSig,
+          now,
+        }
+      )
+
+      // Step 5: atomically insert Task + BallotSignatureTaskExtension
+      // BallotSignatureTaskExtension.MutationValid recomputes Digest(context.Tid, …) from
+      // ProposedBallot and must match AdminSigning.Digest — pass BALLOT_HEADER_TID as context.Tid.
+      await this.ctx.db.exec('BEGIN')
+      try {
+        await this.ctx.db.exec(
+          `insert into Task (Id, UserId, Type, SignatureType, SigningNonce, IsCompleted)
+           with context IsMutationValid = true, Tid = :tid
+           values (:id, :userId, 'signature', 'ballot', :nonce, 0)`,
+          { id: taskId, userId, nonce, tid: taskTid }
+        )
+        await this.ctx.db.exec(
+          `insert into BallotSignatureTaskExtension (TaskId, BallotId)
+           with context Tid = :tid
+           values (:taskId, :ballotId)`,
+          { taskId, ballotId, tid: BALLOT_HEADER_TID }
+        )
+        await this.ctx.db.exec('COMMIT')
+      } catch (err) {
+        await this.ctx.db.exec('ROLLBACK')
+        throw err
+      }
+    } catch (err) {
+      this.rethrow(err, 'submitBallotForConfirmation')
+    }
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  async withdrawBallotConfirmation (_ballotId: string): Promise<void> {
-    throw new Error('ElectionEngine.withdrawBallotConfirmation: not yet implemented — planned in Phase 31-02')
+  /**
+   * D-05 — Withdraw a pending ballot confirmation, deleting the Task and
+   * BallotSignatureTaskExtension so the ProposedBallot becomes editable again.
+   *
+   * Delete order: Task first, then BallotSignatureTaskExtension.
+   * `BallotSignatureTaskExtension.DeleteValid` passes when the Task does NOT
+   * exist OR the Task is completed — so deleting the Task first satisfies the
+   * "not exists Task" condition, making the extension delete pass.
+   *
+   * The orphaned UNSIGNED AdminSigning row is left in place (harmless — no
+   * AdminSignature will ever reference it once the Task is gone).
+   */
+  async withdrawBallotConfirmation (ballotId: string): Promise<void> {
+    try {
+      const userId = this.ctx.user?.id ?? null
+      const tid = nextTid++
+
+      await this.ctx.db.exec('BEGIN')
+      try {
+        // Delete Task first (makes DeleteValid pass on the extension — "not exists Task")
+        await this.ctx.db.exec(
+          `delete from Task
+           where Id in (
+             select T.Id from Task T
+               join BallotSignatureTaskExtension B on B.TaskId = T.Id
+               where B.BallotId = :ballotId
+                 and T.UserId = :userId
+                 and T.Type = 'signature'
+                 and T.SignatureType = 'ballot'
+                 and T.IsCompleted = 0
+           )`,
+          { ballotId, userId }
+        )
+
+        // Delete extension (now passes DeleteValid because Task no longer exists)
+        await this.ctx.db.exec(
+          `delete from BallotSignatureTaskExtension
+           where BallotId = :ballotId`,
+          { ballotId, tid }
+        )
+
+        await this.ctx.db.exec('COMMIT')
+      } catch (err) {
+        await this.ctx.db.exec('ROLLBACK')
+        throw err
+      }
+    } catch (err) {
+      this.rethrow(err, 'withdrawBallotConfirmation')
+    }
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  async getBallotConfirmationState (_ballotId: string): Promise<{ locked: boolean; confirmed: boolean }> {
-    throw new Error('ElectionEngine.getBallotConfirmationState: not yet implemented — planned in Phase 31-02')
+  /**
+   * D-05/D-09 — Report the lock and confirmed state of a ProposedBallot.
+   *
+   * `locked` = a pending (IsCompleted=0) ballot Task exists.
+   * `confirmed` = a finalized Ballot row exists for this id.
+   */
+  async getBallotConfirmationState (ballotId: string): Promise<{ locked: boolean; confirmed: boolean }> {
+    try {
+      const lockRow = await this.ctx.db
+        .prepare(
+          `select 1 as exists_ from Task T
+             join BallotSignatureTaskExtension B on B.TaskId = T.Id
+             where B.BallotId = :ballotId
+               and T.Type = 'signature'
+               and T.SignatureType = 'ballot'
+               and T.IsCompleted = 0`
+        )
+        .get({ ballotId })
+
+      const confirmedRow = await this.ctx.db
+        .prepare('select 1 as exists_ from Ballot where Id = :ballotId')
+        .get({ ballotId })
+
+      return {
+        locked: lockRow !== undefined,
+        confirmed: confirmedRow !== undefined,
+      }
+    } catch (err) {
+      this.rethrow(err, 'getBallotConfirmationState')
+    }
   }
 
   // ---------- builder factories ----------

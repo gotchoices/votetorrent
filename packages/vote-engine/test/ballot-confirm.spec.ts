@@ -64,7 +64,7 @@ describe('submitBallotForConfirmation — creates Task + extension + unsigned Ad
       )
       .get({ userId: elec.user.id })
     expect(taskRow, 'Task with signatureType=ballot must exist after submit').to.not.be.undefined
-    expect(taskRow?.IsCompleted, 'Task must be incomplete after submit').to.equal(0)
+    expect(taskRow?.IsCompleted, 'Task must be incomplete after submit').to.satisfy((v: unknown) => v === 0 || v === false, 'expected IsCompleted to be 0 or false')
   })
 
   it('creates a BallotSignatureTaskExtension row linking to the ProposedBallot', async () => {
