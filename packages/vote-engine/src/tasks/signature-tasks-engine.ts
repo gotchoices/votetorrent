@@ -216,23 +216,53 @@ export class SignatureTasksEngine implements ISignatureTasksEngine {
     // to. The caller could supply it directly, but the IEngine surface
     // (SignatureTask) does not expose it; we look it up by (UserId,
     // SignatureType, !IsCompleted).
-    const taskRow = await this.ctx!.db
-      .prepare(
-				`select Id, SigningNonce from Task
-					where UserId = :userId
-						and Type = 'signature'
-						and SignatureType = :signatureType
-						and IsCompleted = 0
-					limit 1`
-      )
-      .get({
-        userId: task.userId,
-        signatureType: task.signatureType
-      })
-    if (!taskRow) {
-      throw new Error(
-				`SignatureTasksEngine.completeSignature: no pending task for user=${task.userId} signatureType=${task.signatureType}`
-      )
+    // D-05 / CR-01: For ballot tasks, scope the lookup by the ballot id
+    // carried on the BallotSignatureTask so that with >=2 pending ballot
+    // tasks the correct task row (and therefore the correct AdminSigning
+    // digest) is resolved — not an arbitrary LIMIT-1 row.
+    let taskRow: { Id: string; SigningNonce: string } | undefined
+    if (task.signatureType === 'ballot') {
+      const ballotId = (task as BallotSignatureTask).ballot.proposed.id
+      taskRow = await this.ctx!.db
+        .prepare(
+          `select Task.Id, Task.SigningNonce from Task
+            join BallotSignatureTaskExtension E on E.TaskId = Task.Id
+            where Task.UserId = :userId
+              and Task.Type = 'signature'
+              and Task.SignatureType = :signatureType
+              and Task.IsCompleted = 0
+              and E.BallotId = :ballotId
+            limit 1`
+        )
+        .get({
+          userId: task.userId,
+          signatureType: task.signatureType,
+          ballotId,
+        }) as { Id: string; SigningNonce: string } | undefined
+      if (!taskRow) {
+        throw new Error(
+          `SignatureTasksEngine.completeSignature: no pending ballot task for user=${task.userId} ballotId=${ballotId}`
+        )
+      }
+    } else {
+      taskRow = await this.ctx!.db
+        .prepare(
+          `select Id, SigningNonce from Task
+            where UserId = :userId
+              and Type = 'signature'
+              and SignatureType = :signatureType
+              and IsCompleted = 0
+            limit 1`
+        )
+        .get({
+          userId: task.userId,
+          signatureType: task.signatureType,
+        }) as { Id: string; SigningNonce: string } | undefined
+      if (!taskRow) {
+        throw new Error(
+          `SignatureTasksEngine.completeSignature: no pending task for user=${task.userId} signatureType=${task.signatureType}`
+        )
+      }
     }
     const nonce = taskRow.SigningNonce as string
 
@@ -460,23 +490,53 @@ export class SignatureTasksEngine implements ISignatureTasksEngine {
    */
   async getSignatureDigest (task: SignatureTask): Promise<Uint8Array> {
     this.requireCtx('getSignatureDigest')
-    const taskRow = await this.ctx!.db
-      .prepare(
-        `select Id, SigningNonce from Task
-          where UserId = :userId
-            and Type = 'signature'
-            and SignatureType = :signatureType
-            and IsCompleted = 0
-          limit 1`
-      )
-      .get({
-        userId: task.userId,
-        signatureType: task.signatureType
-      })
-    if (!taskRow) {
-      throw new Error(
-        `SignatureTasksEngine.getSignatureDigest: no pending task for user=${task.userId} signatureType=${task.signatureType}`
-      )
+    // D-05 / CR-01: For ballot tasks, scope the lookup by the ballot id
+    // carried on the BallotSignatureTask so that with >=2 pending ballot
+    // tasks the correct AdminSigning.Digest is returned — not an arbitrary
+    // LIMIT-1 row.
+    let taskRow: { Id: string; SigningNonce: string } | undefined
+    if (task.signatureType === 'ballot') {
+      const ballotId = (task as BallotSignatureTask).ballot.proposed.id
+      taskRow = await this.ctx!.db
+        .prepare(
+          `select Task.Id, Task.SigningNonce from Task
+            join BallotSignatureTaskExtension E on E.TaskId = Task.Id
+            where Task.UserId = :userId
+              and Task.Type = 'signature'
+              and Task.SignatureType = :signatureType
+              and Task.IsCompleted = 0
+              and E.BallotId = :ballotId
+            limit 1`
+        )
+        .get({
+          userId: task.userId,
+          signatureType: task.signatureType,
+          ballotId,
+        }) as { Id: string; SigningNonce: string } | undefined
+      if (!taskRow) {
+        throw new Error(
+          `SignatureTasksEngine.getSignatureDigest: no pending ballot task for user=${task.userId} ballotId=${ballotId}`
+        )
+      }
+    } else {
+      taskRow = await this.ctx!.db
+        .prepare(
+          `select Id, SigningNonce from Task
+            where UserId = :userId
+              and Type = 'signature'
+              and SignatureType = :signatureType
+              and IsCompleted = 0
+            limit 1`
+        )
+        .get({
+          userId: task.userId,
+          signatureType: task.signatureType,
+        }) as { Id: string; SigningNonce: string } | undefined
+      if (!taskRow) {
+        throw new Error(
+          `SignatureTasksEngine.getSignatureDigest: no pending task for user=${task.userId} signatureType=${task.signatureType}`
+        )
+      }
     }
     const nonce = taskRow.SigningNonce as string
     const signingRow = await this.ctx!.db

@@ -22,7 +22,7 @@ import {
   addTestElection,
   seedProposedBallot,
 } from './fixtures/test-context.js'
-import type { SignatureTask } from '@votetorrent/vote-core'
+import type { BallotSignatureTask, SignatureTask } from '@votetorrent/vote-core'
 
 // ---------------------------------------------------------------------------
 // Shared setup helper: create a test network/authority/election
@@ -42,6 +42,26 @@ function makeNetworkRef () {
     relays: [] as string[],
     primaryAuthorityDomainName: 'test.example',
   }
+}
+
+/**
+ * Get the BallotSignatureTask for a specific ballot from getRequestedSignatures.
+ * Required by the D-05/CR-01 fix: completeSignature and getSignatureDigest now
+ * scope the task-row lookup by the ballot id carried on the BallotSignatureTask,
+ * so callers must pass a proper BallotSignatureTask (not a bare SignatureTask).
+ */
+async function getBallotTask (
+  engine: SignatureTasksEngine,
+  ballotId: string
+): Promise<BallotSignatureTask> {
+  const tasks = await engine.getRequestedSignatures(true)
+  const found = tasks.find(
+    t => t.signatureType === 'ballot' && (t as BallotSignatureTask).ballot?.proposed?.id === ballotId
+  ) as BallotSignatureTask | undefined
+  if (!found) {
+    throw new Error(`getBallotTask: no pending BallotSignatureTask for ballotId=${ballotId}`)
+  }
+  return found
 }
 
 // ---------------------------------------------------------------------------
@@ -258,12 +278,7 @@ describe('confirm via completeSignature — signs, then inserts Ballot + Questio
     const { bytesToHex } = await import('@noble/curves/utils.js')
 
     const engine = new SignatureTasksEngine(makeNetworkRef(), elec.ctx)
-    const task: SignatureTask = {
-      type: 'signature',
-      userId: elec.user.id,
-      network: makeNetworkRef(),
-      signatureType: 'ballot',
-    }
+    const task = await getBallotTask(engine, ballotId)
 
     const digest = await engine.getSignatureDigest(task)
     const privKey = secp.utils.randomSecretKey()
@@ -299,12 +314,7 @@ describe('finalize — orders Ballot before questions; promoted rows readable vi
     const { bytesToHex } = await import('@noble/curves/utils.js')
 
     const engine = new SignatureTasksEngine(makeNetworkRef(), elec.ctx)
-    const task: SignatureTask = {
-      type: 'signature',
-      userId: elec.user.id,
-      network: makeNetworkRef(),
-      signatureType: 'ballot',
-    }
+    const task = await getBallotTask(engine, ballotId)
 
     const digest = await engine.getSignatureDigest(task)
     const privKey = secp.utils.randomSecretKey()
@@ -338,12 +348,7 @@ describe('per-option readability — getBallotDetails returns select question wi
     const { bytesToHex } = await import('@noble/curves/utils.js')
 
     const engine = new SignatureTasksEngine(makeNetworkRef(), elec.ctx)
-    const task: SignatureTask = {
-      type: 'signature',
-      userId: elec.user.id,
-      network: makeNetworkRef(),
-      signatureType: 'ballot',
-    }
+    const task = await getBallotTask(engine, ballotId)
 
     const digest = await engine.getSignatureDigest(task)
     const privKey = secp.utils.randomSecretKey()
@@ -381,12 +386,7 @@ describe('post-confirm state — ProposedBallot retained; getBallots returns fin
     const { bytesToHex } = await import('@noble/curves/utils.js')
 
     const engine = new SignatureTasksEngine(makeNetworkRef(), elec.ctx)
-    const task: SignatureTask = {
-      type: 'signature',
-      userId: elec.user.id,
-      network: makeNetworkRef(),
-      signatureType: 'ballot',
-    }
+    const task = await getBallotTask(engine, ballotId)
 
     const digest = await engine.getSignatureDigest(task)
     const privKey = secp.utils.randomSecretKey()
@@ -484,12 +484,7 @@ describe('self-confirm — proposer == signer succeeds (D-06)', () => {
     const { bytesToHex } = await import('@noble/curves/utils.js')
 
     const engine = new SignatureTasksEngine(makeNetworkRef(), elec.ctx)
-    const task: SignatureTask = {
-      type: 'signature',
-      userId: elec.user.id, // same user as proposer
-      network: makeNetworkRef(),
-      signatureType: 'ballot',
-    }
+    const task = await getBallotTask(engine, ballotId) // same user as proposer
 
     const digest = await engine.getSignatureDigest(task)
     const privKey = secp.utils.randomSecretKey()
@@ -530,12 +525,7 @@ describe('task visibility — completed Task absent from getRequestedSignatures(
     const { secp256k1: secp } = await import('@noble/curves/secp256k1.js')
     const { bytesToHex } = await import('@noble/curves/utils.js')
 
-    const task: SignatureTask = {
-      type: 'signature',
-      userId: elec.user.id,
-      network: makeNetworkRef(),
-      signatureType: 'ballot',
-    }
+    const task = await getBallotTask(engine, ballotId)
 
     const digest = await engine.getSignatureDigest(task)
     const privKey = secp.utils.randomSecretKey()
@@ -569,12 +559,7 @@ describe('SIGN-04: device-signer secp256k1 sign round-trip via completeSignature
     const { bytesToHex } = await import('@noble/curves/utils.js')
 
     const engine = new SignatureTasksEngine(makeNetworkRef(), elec.ctx)
-    const task: SignatureTask = {
-      type: 'signature',
-      userId: elec.user.id,
-      network: makeNetworkRef(),
-      signatureType: 'ballot',
-    }
+    const task = await getBallotTask(engine, ballotId)
 
     // Step 1: getSignatureDigest returns Uint8Array (SIGN-04)
     const digest = await engine.getSignatureDigest(task)
