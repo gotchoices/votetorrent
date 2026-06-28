@@ -461,16 +461,31 @@ export class SignatureTasksEngine implements ISignatureTasksEngine {
         }
       )
 
-      // Step 4: per-option promotion — INSERT AFTER the parent Question.
-      // NOTE: Option.MutationValid uses a 3-table EXISTS subquery (AdminSignature JOIN
-      // AdminSigning JOIN Ballot) that fails in Quereus 3.3.0's deferred constraint
-      // evaluator even when a standalone SELECT of the identical predicate returns true.
-      // This is a confirmed Quereus bug (#21-adjacent, deferred subquery context issue).
-      // Workaround: skip Option row INSERTs here; options remain readable via
-      // ProposedBallot.Questions JSON (D-04 — ProposedBallot is never deleted).
-      // getBallotDetails falls back to ProposedBallot.Questions for options when the
-      // Option table has 0 rows for a question. Remove this comment and restore the
-      // INSERT loop once Quereus deferred-constraint subquery evaluation is fixed.
+      // Step 4: per-option promotion — DEFERRED (D-08 sourced-DEFER / 31-07-SUMMARY.md).
+      //
+      // ROOT CAUSE (verified 2026-06-28, Quereus 3.3.0):
+      //   Option.Sequence is declared as `Sequence number` (not `Sequence integer null`).
+      //   Quereus stores any JavaScript number bound to a `number`-typed column as a blob
+      //   (e.g. integer 0 is stored as the raw bytes [0x30] = ASCII "0"), NOT as an integer.
+      //   When the deferred MutationValid CHECK fires at COMMIT time, it reads `new.Sequence`
+      //   from the stored blob and computes:
+      //     Digest(context.Tid, new.BallotId, new.QuestionCode, new.Code, blob("0"), ...)
+      //   This differs from the AdminSigning Digest computed at INSERT time with integer 0:
+      //     Digest(1, :ballotId, :questionCode, :code, 0, ...)
+      //   → SHA256 mismatch → CHECK constraint failed: MutationValid.
+      //
+      //   The Question table uses `Sequence integer null` (nullable integer). We pass null
+      //   for sequence, so `null` == `null` in both AdminSigning Digest and deferred MutationValid
+      //   → no mismatch → Question INSERT works. Option's `number` NOT-NULL column type is the
+      //   unique blocker: any non-null integer stored in a `number` column loses type fidelity
+      //   through Quereus's vtab storage, breaking the Digest round-trip.
+      //
+      // WORKAROUND: options remain readable via ProposedBallot.Questions JSON (D-04 —
+      //   ProposedBallot is never deleted). getBallotDetails falls back to that JSON for options.
+      //
+      // FIX REQUIRED: either (a) change Option.Sequence schema type from `number` to `integer null`
+      //   + handle NOT NULL / optional sequence logic, OR (b) patch Quereus to preserve integer
+      //   type fidelity through `number`-typed vtab columns. Track as D-08-OPT-DEFER.
     }
     // D-04: ProposedBallot is NOT deleted — retained for history.
   }
