@@ -372,6 +372,56 @@ describe('per-option readability — getBallotDetails returns select question wi
 })
 
 // ---------------------------------------------------------------------------
+// D-08 — Option ROWS promoted into the per-row Option table (NOT the JSON fallback)
+// This queries the Option table DIRECTLY to prove real promotion, distinguishing
+// real rows from the ProposedBallot.Questions JSON fallback. Against the pre-fix
+// skipped-Option code it would find 0 rows and FAIL; with the integer-null schema
+// fix + restored INSERT loop it finds the 2 seeded rows and passes.
+// ---------------------------------------------------------------------------
+
+describe('D-08 — Option rows promoted into the per-row Option table after finalize (not JSON fallback)', () => {
+  it('the per-row Option table contains the seeded option rows (A, B) for Q1 after finalize', async () => {
+    const elec = await setupElection()
+    // seedProposedBallot defaults to a 'select' question 'Q1' with options 'A' and 'B'
+    const { ballotId } = await seedProposedBallot(elec)
+
+    await elec.electionEngine.submitBallotForConfirmation(ballotId)
+
+    const { secp256k1: secp } = await import('@noble/curves/secp256k1.js')
+    const { bytesToHex } = await import('@noble/curves/utils.js')
+
+    const engine = new SignatureTasksEngine(makeNetworkRef(), elec.ctx)
+    const task = await getBallotTask(engine, ballotId)
+
+    const digest = await engine.getSignatureDigest(task)
+    const privKey = secp.utils.randomSecretKey()
+    const sigBytes = secp.sign(digest, privKey) as unknown as Uint8Array
+    const pubHex = bytesToHex(secp.getPublicKey(privKey))
+
+    await engine.completeSignature(task, {
+      isAccepted: true,
+      signature: { signerUserId: elec.user.id, signerKey: pubHex, signature: bytesToHex(sigBytes) },
+    })
+
+    // Query the per-row Option table DIRECTLY — NOT getBallotDetails (which has the JSON fallback).
+    const optionRows: Array<{ Code: string; Sequence: unknown }> = []
+    for await (const row of elec.ctx.db.eval(
+      "select Code, Sequence from Option where BallotId = :ballotId and QuestionCode = 'Q1'",
+      { ballotId }
+    )) {
+      optionRows.push({ Code: row.Code as string, Sequence: row.Sequence })
+    }
+
+    const codes = optionRows.map(r => r.Code)
+    expect(
+      optionRows.length,
+      'the per-row Option table must contain >=2 real rows for Q1 after finalize (D-08, not JSON fallback)'
+    ).to.be.greaterThanOrEqual(2)
+    expect(codes, 'Option row codes must include the seeded options A and B').to.include.members(['A', 'B'])
+  })
+})
+
+// ---------------------------------------------------------------------------
 // D-04: ProposedBallot retained; getBallots returns finalized winner as single entry
 // ---------------------------------------------------------------------------
 

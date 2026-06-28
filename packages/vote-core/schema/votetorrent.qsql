@@ -772,7 +772,7 @@ declare schema main
 		BallotId text, -- references Ballot.Id
 		QuestionCode text, -- references Question.Code
 		Code text, -- code of the option
-		Sequence number, -- how to order the options within the question, lower numbers are shown first, equal numbers are randomized within the grouping
+		Sequence integer null, -- how to order the options within the question, lower numbers are shown first, equal numbers are randomized within the grouping
 		Title text, -- title of the option
 		Details text null, -- details of the option
 		InfoURL text null, -- info URL of the option
@@ -823,7 +823,7 @@ declare schema main
 		BallotId text, -- references ProposedBallot.Id
 		QuestionCode text, -- references ProposedQuestion.Code
 		Code text, -- code of the option
-		Sequence number, -- how to order the options within the question, lower numbers are shown first, equal numbers are randomized within the grouping
+		Sequence integer null, -- how to order the options within the question, lower numbers are shown first, equal numbers are randomized within the grouping
 		Title text, -- title of the option
 		Details text null, -- details of the option
 		InfoURL text null, -- info URL of the option

@@ -1,6 +1,6 @@
 import { MisuseError, QuereusError } from '@quereus/quereus'
 import { SigningEngine } from '../signing/signing-engine.js'
-import { digestToBytes, fromCanonicalDatetime, nowCanonicalDatetime, parseJsonOr } from '../utils.js'
+import { digestToBytes, nowCanonicalDatetime, parseJsonOr } from '../utils.js'
 import type { EngineContext } from '../types.js'
 import type {
   ISigningEngine,
@@ -461,31 +461,102 @@ export class SignatureTasksEngine implements ISignatureTasksEngine {
         }
       )
 
-      // Step 4: per-option promotion — DEFERRED (D-08 sourced-DEFER / 31-07-SUMMARY.md).
+      // Step 4: per-option promotion — INSERT AFTER the parent Question (D-08, CLOSED).
       //
-      // ROOT CAUSE (verified 2026-06-28, Quereus 3.3.0):
-      //   Option.Sequence is declared as `Sequence number` (not `Sequence integer null`).
-      //   Quereus stores any JavaScript number bound to a `number`-typed column as a blob
-      //   (e.g. integer 0 is stored as the raw bytes [0x30] = ASCII "0"), NOT as an integer.
-      //   When the deferred MutationValid CHECK fires at COMMIT time, it reads `new.Sequence`
-      //   from the stored blob and computes:
-      //     Digest(context.Tid, new.BallotId, new.QuestionCode, new.Code, blob("0"), ...)
-      //   This differs from the AdminSigning Digest computed at INSERT time with integer 0:
-      //     Digest(1, :ballotId, :questionCode, :code, 0, ...)
-      //   → SHA256 mismatch → CHECK constraint failed: MutationValid.
+      // D-08 was previously deferred because Option.Sequence was declared `Sequence number`,
+      // and Quereus 3.3.0 coerces any JS integer bound to a `number`-typed column to a blob
+      // in vtab storage. The deferred MutationValid CHECK then read that blob and recomputed a
+      // different Digest than the integer-valued Digest stored in AdminSigning at INSERT time,
+      // failing the constraint. The schema fix (Option.Sequence → `integer null`, matching the
+      // Question table and the table's own SequenceValid `typeof = 'integer'` check) makes an
+      // integer round-trip as an integer, so the AdminSigning Digest and the deferred
+      // MutationValid Digest now match. (The `number`→`integer null` change is a no-cost
+      // correction — no Option rows were ever persisted before this fix.)
       //
-      //   The Question table uses `Sequence integer null` (nullable integer). We pass null
-      //   for sequence, so `null` == `null` in both AdminSigning Digest and deferred MutationValid
-      //   → no mismatch → Question INSERT works. Option's `number` NOT-NULL column type is the
-      //   unique blocker: any non-null integer stored in a `number` column loses type fidelity
-      //   through Quereus's vtab storage, breaking the Digest round-trip.
-      //
-      // WORKAROUND: options remain readable via ProposedBallot.Questions JSON (D-04 —
-      //   ProposedBallot is never deleted). getBallotDetails falls back to that JSON for options.
-      //
-      // FIX REQUIRED: either (a) change Option.Sequence schema type from `number` to `integer null`
-      //   + handle NOT NULL / optional sequence logic, OR (b) patch Quereus to preserve integer
-      //   type fidelity through `number`-typed vtab columns. Track as D-08-OPT-DEFER.
+      // Option.MutationValid digest: Digest(context.Tid, new.BallotId, new.QuestionCode,
+      //   new.Code, new.Sequence, new.Title, new.Details, new.InfoURL, new.Image, new.Video).
+      // Each Option INSERT is a separate db.exec call (parent Ballot/Question already committed).
+      const qOptions = q.options ?? []
+      for (let oi = 0; oi < qOptions.length; oi++) {
+        const o = qOptions[oi]!
+        const oSequence = oi
+        const oDetails = o.details ?? null
+        const oInfoURL = o.infoURL ?? null
+        const oImage = o.image ? JSON.stringify(o.image) : null
+        const oVideo = o.video ? JSON.stringify(o.video) : null
+
+        // Step 4a: per-option AdminSigning('ceb') with the 10-arg Option digest
+        const oNonce = (globalThis as { crypto: { randomUUID: () => string } }).crypto.randomUUID()
+        try {
+          await this.ctx!.db.exec(
+            `insert into AdminSigning (
+              Nonce, AuthorityId, AdminEffectiveAt, Scope, Digest, UserId, SignerKey, Signature
+            )
+            with context now = :now, IsSignatureValid = true, IsSignerKeyValid = true
+            values (
+              :nonce, :authorityId, :adminEffectiveAt, 'ceb',
+              Digest(1, :ballotId, :questionCode, :code, :sequence, :title, :details, :infoURL, :image, :video),
+              :userId, :signerKey, :signature
+            )`,
+            {
+              nonce: oNonce,
+              authorityId: pbRow.AuthorityId,
+              adminEffectiveAt,
+              ballotId,
+              questionCode: q.code,
+              code: o.code,
+              sequence: oSequence,
+              title: o.title,
+              details: oDetails,
+              infoURL: oInfoURL,
+              image: oImage,
+              video: oVideo,
+              userId: this.ctx!.user?.id ?? null,
+              signerKey: this.ctx!.user?.activeKeys?.[0]?.key ?? '0'.repeat(66),
+              signature: '0'.repeat(128),
+              now,
+            }
+          )
+        } catch (err) {
+          this.rethrow(err, 'finalizeBallot (option AdminSigning)')
+        }
+
+        // Step 4b: sign to create AdminSignature (threshold=1 auto-completes)
+        const oSig = {
+          signerUserId: this.ctx!.user?.id ?? '',
+          signerKey: this.ctx!.user?.activeKeys?.[0]?.key ?? '0'.repeat(66),
+          signature: '0'.repeat(128),
+        }
+        await this.signingEngine!.sign(oNonce, oSig)
+
+        // Step 4c: INSERT Option row (Ballot + parent Question already exist — constraints satisfied)
+        try {
+          await this.ctx!.db.exec(
+            `insert into Option (
+              BallotId, QuestionCode, Code, Sequence, Title, Details, InfoURL, Image, Video
+            )
+            with context SigningNonce = :nonce, Tid = 1, now = :now
+            values (
+              :ballotId, :questionCode, :code, :sequence, :title, :details, :infoURL, :image, :video
+            )`,
+            {
+              nonce: oNonce,
+              ballotId,
+              questionCode: q.code,
+              code: o.code,
+              sequence: oSequence,
+              title: o.title,
+              details: oDetails,
+              infoURL: oInfoURL,
+              image: oImage,
+              video: oVideo,
+              now,
+            }
+          )
+        } catch (err) {
+          this.rethrow(err, 'finalizeBallot (option)')
+        }
+      }
     }
     // D-04: ProposedBallot is NOT deleted — retained for history.
   }
