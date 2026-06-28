@@ -618,3 +618,105 @@ it.skip('multi-type ballot (rank/score/text) questions can be confirmed (quereus
   // Until then, only 'select' type questions are verified safe.
   throw new Error('Not implemented: multi-type ballot support pending quereus#21 fix')
 })
+
+// ---------------------------------------------------------------------------
+// CR-01 / D-05 — multi-pending-task regression test
+// Reproduces the LIMIT-1 signed-digest-drift bug: with >=2 pending ballot tasks
+// for one officer, completeSignature and getSignatureDigest must resolve the
+// task for the ballot they were handed (not an arbitrary row).
+// ---------------------------------------------------------------------------
+
+describe('CR-01 / D-05 — multi-pending-task: completeSignature and getSignatureDigest resolve the correct ballot', () => {
+  it('with two pending ballot tasks, getSignatureDigest and completeSignature target the specified ballot (not LIMIT-1)', async () => {
+    const elec = await setupElection()
+
+    // Seed TWO ProposedBallots for the same officer
+    const { ballotId: ballotIdA } = await seedProposedBallot(elec, 'proposed-ballot-A')
+    const { ballotId: ballotIdB } = await seedProposedBallot(elec, 'proposed-ballot-B')
+
+    // Submit both for confirmation → two pending ballot Tasks for the same user
+    await elec.electionEngine.submitBallotForConfirmation(ballotIdA)
+    await elec.electionEngine.submitBallotForConfirmation(ballotIdB)
+
+    const engine = new SignatureTasksEngine(makeNetworkRef(), elec.ctx)
+
+    // getRequestedSignatures returns both tasks
+    const allTasks = await engine.getRequestedSignatures(true)
+    const ballotTasks = allTasks.filter(t => t.signatureType === 'ballot') as BallotSignatureTask[]
+    expect(ballotTasks.length, 'exactly two pending ballot tasks must exist for the same user').to.equal(2)
+
+    // Identify task A and task B by ballot id
+    const taskA = ballotTasks.find(t => t.ballot.proposed.id === ballotIdA)
+    const taskB = ballotTasks.find(t => t.ballot.proposed.id === ballotIdB)
+    expect(taskA, 'must find task for ballot A').to.not.be.undefined
+    expect(taskB, 'must find task for ballot B').to.not.be.undefined
+
+    // getSignatureDigest for task B must differ from task A
+    // (each ballot has its own AdminSigning row with a distinct Digest)
+    const digestA = await engine.getSignatureDigest(taskA!)
+    const digestB = await engine.getSignatureDigest(taskB!)
+    expect(
+      Buffer.from(digestA).toString('hex'),
+      'getSignatureDigest for ballot A must differ from ballot B (each has a distinct AdminSigning digest)'
+    ).to.not.equal(Buffer.from(digestB).toString('hex'))
+
+    // Verify getSignatureDigest(taskB) matches the AdminSigning.Digest for ballot B's nonce
+    const taskBRow = await elec.ctx.db
+      .prepare(
+        `select Task.SigningNonce from Task
+          join BallotSignatureTaskExtension E on E.TaskId = Task.Id
+          where Task.UserId = :userId and Task.SignatureType = 'ballot' and Task.IsCompleted = 0 and E.BallotId = :ballotId`
+      )
+      .get({ userId: elec.user.id, ballotId: ballotIdB })
+    expect(taskBRow, 'Task row for ballot B must exist').to.not.be.undefined
+    const nonceB = taskBRow!.SigningNonce as string
+    const adminSigningRow = await elec.ctx.db
+      .prepare('select Digest from AdminSigning where Nonce = :nonce')
+      .get({ nonce: nonceB })
+    expect(adminSigningRow, 'AdminSigning row for ballot B must exist').to.not.be.undefined
+    const { digestToBytes } = await import('../src/utils.js')
+    const expectedDigestB = digestToBytes(adminSigningRow!.Digest as string)
+    expect(
+      Buffer.from(digestB).toString('hex'),
+      'getSignatureDigest(taskB) must equal the AdminSigning.Digest for ballot B'
+    ).to.equal(Buffer.from(expectedDigestB).toString('hex'))
+
+    // completeSignature(taskB) must finalize ballot B specifically
+    const { secp256k1: secp } = await import('@noble/curves/secp256k1.js')
+    const { bytesToHex } = await import('@noble/curves/utils.js')
+    const privKey = secp.utils.randomSecretKey()
+    const sigBytes = secp.sign(digestB, privKey) as unknown as Uint8Array
+    const pubHex = bytesToHex(secp.getPublicKey(privKey))
+
+    await engine.completeSignature(taskB!, {
+      isAccepted: true,
+      signature: { signerUserId: elec.user.id, signerKey: pubHex, signature: bytesToHex(sigBytes) },
+    })
+
+    // Assert: Ballot row with Id='proposed-ballot-B' was inserted
+    const ballotBRow = await elec.ctx.db
+      .prepare('select Id from Ballot where Id = :id')
+      .get({ id: ballotIdB })
+    expect(ballotBRow, 'Ballot row for ballot B must exist after completeSignature(taskB)').to.not.be.undefined
+
+    // Assert: No Ballot row for 'proposed-ballot-A' (ballot A not finalized)
+    const ballotARow = await elec.ctx.db
+      .prepare('select Id from Ballot where Id = :id')
+      .get({ id: ballotIdA })
+    expect(ballotARow, 'Ballot row for ballot A must NOT exist (only ballot B was finalized)').to.be.undefined
+
+    // Assert: ballot A's Task is still pending (IsCompleted = 0)
+    const taskARow = await elec.ctx.db
+      .prepare(
+        `select Task.Id, Task.IsCompleted from Task
+          join BallotSignatureTaskExtension E on E.TaskId = Task.Id
+          where Task.UserId = :userId and Task.SignatureType = 'ballot' and E.BallotId = :ballotId`
+      )
+      .get({ userId: elec.user.id, ballotId: ballotIdA })
+    expect(taskARow, 'Task row for ballot A must still exist').to.not.be.undefined
+    expect(
+      taskARow!.IsCompleted,
+      'ballot A Task must remain pending (IsCompleted = 0) after ballot B was finalized'
+    ).to.satisfy((v: unknown) => v === 0 || v === false, 'expected IsCompleted to be 0 or false')
+  })
+})
