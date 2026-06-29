@@ -468,7 +468,7 @@ declare schema main
 		select IR.SlotCid, IR.IsAccepted, IR.Digest, IR.InviteSignature, SIG.Scope
 			from InviteResult IR
 			join InviteSlot S on S.Cid = IR.SlotCid
-			join AdminSigning SIG on SIG.SigningNonce = S.SigningNonce
+			join AdminSigning SIG on SIG.Nonce = S.SigningNonce
 			where IR.IsAccepted;
 
 	view UserKeyType as
