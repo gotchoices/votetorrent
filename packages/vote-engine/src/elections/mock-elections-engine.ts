@@ -11,6 +11,8 @@ import type {
 	IElectionsEngine,
 	ElectionType,
 	Proposal,
+	ElectionCoreInit,
+	Signature,
 } from '@votetorrent/vote-core';
 
 // Helper function to get Unix timestamp
@@ -197,5 +199,31 @@ export class MockElectionsEngine implements IElectionsEngine {
 		// In a real scenario, it would likely take the electionId or summary
 		// to fetch/manage the specific election's details.
 		return new MockElectionEngine();
+	}
+
+	// DEBT-02: stub implementations — MockElectionsEngine is UI-layer only;
+	// these seed methods are only called from tests against the real engine.
+	async seedElectionSigning(
+		_electionFields: Pick<ElectionCoreInit, 'id' | 'authorityId' | 'title' | 'date' | 'revisionDeadline' | 'ballotDeadline' | 'type'>,
+		_sign: (digest: Uint8Array) => Promise<Signature>
+	): Promise<string> {
+		throw new Error('MockElectionsEngine.seedElectionSigning: not implemented in mock');
+	}
+
+	async seedElectionRevisionSigning(
+		_electionId: string,
+		_authorityId: string,
+		_revision: {
+			revision: number
+			revisionTimestamp: number
+			tags: string[]
+			instructions: string
+			timeline: Record<string, number>
+			keyholderThreshold: number
+		},
+		_tid: number,
+		_sign: (digest: Uint8Array) => Promise<Signature>
+	): Promise<string> {
+		throw new Error('MockElectionsEngine.seedElectionRevisionSigning: not implemented in mock');
 	}
 }
