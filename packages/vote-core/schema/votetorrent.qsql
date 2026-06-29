@@ -423,16 +423,22 @@ declare schema main
 
 	index InviteSlotSigningNonce on InviteSlot (SigningNonce, Cid);
 
-	-- A single signing can encompass a batch of Invite slots, so validate the whole batch at once
-	-- D-03 (Phase 33): rewritten as inner-join form — fires only when AdminSigning IS present but
-	-- has a mismatched Digest. InviteSlot INSERT (before AdminSigning) does not trigger a false
-	-- violation because the inner join returns nothing when AdminSigning is absent.
+	-- A single signing can encompass a batch of Invite slots, so validate the whole batch at once.
+	-- D-03 (Phase 33): rewritten to inner-join form that fires only when AdminSigning IS present but
+	-- no InviteSlot in the batch matches the Digest. This allows:
+	--   (a) InviteSlot INSERT before AdminSigning — inner join finds no AdminSigning → no violation.
+	--   (b) resendInvite — fresh slot reuses the original SigningNonce; AdminSigning.Digest = Digest(orig.Cid)
+	--       matches the original slot in the batch → no violation (whole batch is covered).
+	--   (c) mismatched AdminSigning Digest — no InviteSlot in the batch matches → violation.
 	-- Eliminates the SND derived alias that quereus 4.x per-tuple residual resolveAttribute
 	-- cannot carry into run context (same Digest(I.Cid) UDF call, same Cid argument, D-03).
 	assertion InviteSlotSigningValid check (not exists (
 		select 1 from InviteSlot I
 			inner join AdminSigning SIG on SIG.Nonce = I.SigningNonce
-				where SIG.Digest != Digest(I.Cid)
+				where not exists (
+					select 1 from InviteSlot I2
+						where I2.SigningNonce = I.SigningNonce and SIG.Digest = Digest(I2.Cid)
+				)
 	));
 
 	-- Acceptance or rejection of Invite, created before resulting object
