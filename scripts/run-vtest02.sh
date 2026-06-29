@@ -90,6 +90,12 @@ export const PROOF_ENABLED = true;
 export const DIAL_PROBE_ENABLED = false;
 EOF
 
+# D-11: Fresh LevelDB reset — isolates the 4.x proof from any 3.x-written data.
+# Restart-persistence is still proven within 4.x (write → relaunch → read).
+echo "[vtest02] Resetting LevelDB stores (D-11) ..."
+adb shell run-as org.votetorrent.authority \
+  find /data/data/org.votetorrent.authority/files -name "votetorrent-q2-*" -exec rm -rf {} + 2>/dev/null || true
+
 echo "[vtest02] Force-stopping ${PACKAGE} ..."
 adb shell am force-stop "${PACKAGE}"
 sleep 2

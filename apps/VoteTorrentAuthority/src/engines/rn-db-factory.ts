@@ -5,8 +5,8 @@
  * and (for the strand-backed path) `@optimystic/db-p2p-storage-rn` + `@serfab/cadre-core`
  * are imported for DbFactory purposes. They MUST NOT appear under packages/vote-engine/.
  *
- * Solo path: @quereus/plugin-react-native-leveldb@3.3.0 + @quereus/store@3.3.0
- *   (published, version-aligned with pinned @quereus/quereus@3.3.0; D-01/D-02).
+ * Solo path: @quereus/plugin-react-native-leveldb@4.2.1 + @quereus/store@4.2.1
+ *   (published, version-aligned with pinned @quereus/quereus@4.2.1; D-01/D-02).
  *   rn-leveldb@3.11: github.com/gotchoices/rn-leveldb — registry-audited Plan 14-02 (APPROVED).
  * Strand path: @optimystic/db-p2p-storage-rn@portal (unchanged; cadre-core/CadreNodeProvider).
  */
@@ -33,7 +33,7 @@ const VOTETORRENT_INNER_DDL = VOTETORRENT_SCHEMA_SQL
 
 /**
  * Concrete DbFactory for the RN app layer — Quereus-native LevelDB via
- * @quereus/plugin-react-native-leveldb@3.3.0 (D-01/D-02: published, version-aligned).
+ * @quereus/plugin-react-native-leveldb@4.2.1 (D-01/D-02: published, version-aligned).
  *
  * D-04: store name 'votetorrent-q2-<networkHash>' provides a clean break from the
  *       old optimystic per-table layout; the 'q2' prefix signals quereus-native v2
@@ -60,7 +60,7 @@ export const rnDbFactory: DbFactory = async (networkHash: string) => {
   // Provider owns all per-table file management; no legacy DI intermediary needed.
   const storeModule = createIsolatedStoreModule({ provider });
 
-  // quereus 3.3.0 Database constructor takes no arguments (confirmed Plan 14-01, unchanged).
+  // quereus 4.2.1 Database constructor takes no arguments (confirmed Plan 14-01, unchanged).
   const db = new Database();
 
   // No cast — db.registerModule accepts AnyVirtualTableModule (vs registerPlugin's Record<string,SqlValue>).
