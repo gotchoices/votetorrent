@@ -4411,20 +4411,6 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@quereus/quereus@npm:^3.2.1":
-  version: 3.3.0
-  resolution: "@quereus/quereus@npm:3.3.0"
-  dependencies:
-    debug: "npm:^4.4.3"
-    fast-json-patch: "npm:^3.1.1"
-    inheritree: "npm:^0.3.4"
-    moat-maker: "npm:^2.2.0"
-    temporal-polyfill: "npm:^0.3.0"
-    uint8arrays: "npm:^5.1.0"
-  checksum: 10c0/313983be6402873de08758a951c02df24f25035e1af5d68741653af2b0e6da26593ad96f00c411504fe6a57f7d44cb939a0a6cf2b45662f3c5868d651022413a
-  languageName: node
-  linkType: hard
-
 "@quereus/quereus@patch:@quereus/quereus@npm%3A4.2.1#~/.yarn/patches/@quereus-quereus-npm-4.2.1-64e8a4bca7.patch":
   version: 4.2.1
   resolution: "@quereus/quereus@patch:@quereus/quereus@npm%3A4.2.1#~/.yarn/patches/@quereus-quereus-npm-4.2.1-64e8a4bca7.patch::version=4.2.1&hash=37e157"
@@ -11618,13 +11604,6 @@ __metadata:
     once: "npm:^1.3.0"
     wrappy: "npm:1"
   checksum: 10c0/7faca22584600a9dc5b9fca2cd5feb7135ac8c935449837b315676b4c90aa4f391ec4f42240178244b5a34e8bede1948627fda392ca3191522fc46b34e985ab2
-  languageName: node
-  linkType: hard
-
-"inheritree@npm:^0.3.4":
-  version: 0.3.4
-  resolution: "inheritree@npm:0.3.4"
-  checksum: 10c0/31c3791c5d140a04c952ccd9ca8db05bc5a5cfbc89cd6b966f483e5548819f084a9d1776a4f8e2d31c5da5f627c383a8ef62a5ae228ee3625fb3889811c97c27
   languageName: node
   linkType: hard
 
