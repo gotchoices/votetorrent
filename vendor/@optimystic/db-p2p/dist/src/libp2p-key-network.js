@@ -1,3 +1,4 @@
+import { isPeerId } from '@libp2p/interface';
 import { toString as u8ToString } from 'uint8arrays';
 import { peerIdFromString } from '@libp2p/peer-id';
 import { multiaddr } from '@multiformats/multiaddr';
@@ -234,7 +235,15 @@ export class Libp2pKeyPeerNetwork {
         return undefined;
     }
     connect(peerId, protocol, options) {
-        const conns = (this.libp2p.getConnections?.(peerId) ?? []);
+        // db-core's IPeerNetwork contract types peers structurally ({ toString, equals }),
+        // so a non-branded stub can arrive here — notably NetworkTransactor builds its
+        // cluster/nominee list via db-core's structural `peerIdFromString`, which omits
+        // the `Symbol.for('@libp2p/peer-id')` brand. libp2p's getConnections()/dialProtocol()
+        // run isPeerId() on the argument; a stub fails that check, is treated as a multiaddr,
+        // and throws at `multiaddrs[0].getComponents()` on a cold dial. Re-brand to a real
+        // PeerId at this boundary (the single dial chokepoint) so the cold-dial path resolves.
+        const dialPeer = isPeerId(peerId) ? peerId : peerIdFromString(peerId.toString());
+        const conns = (this.libp2p.getConnections?.(dialPeer) ?? []);
         // Filter to only-open connections so a closing/closed entry that libp2p
         // hasn't yet evicted from its index doesn't get picked up here.
         const open = conns.find(c => c?.status === 'open' && typeof c?.newStream === 'function');
@@ -254,7 +263,7 @@ export class Libp2pKeyPeerNetwork {
         // dial — without this, libp2p falls back to its built-in dial timeout
         // (default ~30s) and the caller's tighter deadline is decorative.
         const dialOptions = { runOnLimitedConnection: true, negotiateFully: false, signal: options?.signal };
-        return this.libp2p.dialProtocol(peerId, [protocol], dialOptions);
+        return this.libp2p.dialProtocol(dialPeer, [protocol], dialOptions);
     }
     getFret() {
         const svc = this.libp2p.services?.fret;
