@@ -1036,18 +1036,22 @@ describe('AuthorityEngine', () => {
       expect((caught as Error)?.message).to.include('IdImmutable')
     })
 
-    // WR-20 (17-REVIEW): skipped — conditional assertion was vacuous.
-    it.skip('should require an Admin row to exist when inserting an Authority (AdminRequired) — BLOCKED on quereus#23', async () => {
-      await AsyncStorage.clear()
-      const db = new Database()
-      await prepareDb(db)
+    // WR-20 (17-REVIEW): rewritten — Authority.AdminRequired is check on update, not on
+    // insert. Original body used INSERT (wrong op); new body uses UPDATE after removing
+    // the Admin row, confirmed rejecting on quereus@4.2.1.
+    it('should require an Admin row to exist for Authority updates (AdminRequired) — confirmed on quereus@4.2.1', async () => {
+      const { authority, authorityEngine } = await createNetworkAndAuthority()
+      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
+      // Remove the Admin row for this authority — Admin has no CantDelete constraint.
+      await ctx.db.exec(
+        'delete from Admin with context Tid = 9, SigningNonce = null, InviteSlotCid = null, InviteSignature = null where AuthorityId = :id',
+        { id: authority.id }
+      )
       let caught: unknown
       try {
-        await db.exec(
-          `insert into Authority (Id, Name, DomainName, ImageRef)
-           with context Tid = 1, SigningNonce = null, InviteSlotCid = null, InviteSignature = null
-           values (:id, 'NoAdmin', 'na.example', null)`,
-          { id: crypto.randomUUID() }
+        await ctx.db.exec(
+          'update Authority with context Tid = 9, SigningNonce = null, InviteSlotCid = null, InviteSignature = null set Name = :n where Id = :id',
+          { n: 'Renamed', id: authority.id }
         )
       } catch (err) {
         caught = err
@@ -1097,29 +1101,30 @@ describe('AuthorityEngine', () => {
   // 9. Schema Constraints - Admin Table
   // -----------------------------------------------------------------------
   describe('schema constraints - Admin table', () => {
-    // WR-20 (17-REVIEW): skipped — conditional assertion was vacuous.
-    it.skip('should require at least one Officer with rad scope when inserting Admin (OfficerRequired) — BLOCKED on quereus#23', async () => {
-      await AsyncStorage.clear()
-      await AsyncStorage.setItem('recentNetworks', [])
+    // WR-20 (17-REVIEW): rewritten — Admin.OfficerRequired is check on update, not on
+    // insert. Original body used INSERT via create() (wrong op); new body inserts a second
+    // Admin row (shoe-in path, different EffectiveAt, no corresponding Officer) then UPDATEs
+    // it, confirmed rejecting on quereus@4.2.1.
+    it('should require at least one Officer with rad scope for Admin updates (OfficerRequired) — confirmed on quereus@4.2.1', async () => {
+      const { authority, authorityEngine } = await createNetworkAndAuthority()
+      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
+      // Insert a second Admin row for the same authority with a different EffectiveAt.
+      // Shoe-in path is available: only one authority exists, no SigningNonce, no invite.
+      // No Officer exists for this new EffectiveAt, so OfficerRequired will fire on UPDATE.
+      const newEffectiveAt = Date.now() + 99_000
+      await ctx.db.exec(
+        `insert into Admin (AuthorityId, EffectiveAt, ThresholdPolicies)
+         with context Tid = 9, SigningNonce = null, InviteSlotCid = null, InviteSignature = null
+         values (:id, :e, '[]')`,
+        { id: authority.id, e: newEffectiveAt }
+      )
       let caught: unknown
       try {
-        await new NetworksEngine(AsyncStorage).create(
-          makeNetworkInit({
-            admin: {
-              officers: [
-                {
-                  init: {
-                    name: 'No-Rad',
-                    title: 'Chair',
-                    scopes: ['mel'] as Scope[]
-                  }
-                }
-              ],
-              effectiveAt: Date.now(),
-              thresholdPolicies: []
-            }
-          }),
-          makeUser()
+        await ctx.db.exec(
+          `update Admin with context Tid = 9, SigningNonce = null, InviteSlotCid = null, InviteSignature = null
+           set ThresholdPolicies = '[]'
+           where AuthorityId = :id and EffectiveAt = :e`,
+          { id: authority.id, e: newEffectiveAt }
         )
       } catch (err) {
         caught = err
@@ -1519,11 +1524,42 @@ describe('AuthorityEngine', () => {
       expect(caught).to.be.instanceOf(Error)
     })
 
-    // WR-20 (17-REVIEW): skipped — conditional assertion was vacuous.
-    it.skip('should reject deletion of a ProposedOfficer (CantDelete) — BLOCKED on quereus#23', async () => {
-      const { authorityEngine } = await createNetworkAndAuthority()
+    // WR-20 (17-REVIEW): rewritten — ProposedOfficer.CantDelete fires only when at least
+    // one row is deleted. Original body deleted from an empty table (0 rows matched, check
+    // never evaluated). New body seeds ProposedAdmin + ProposedOfficer first, then deletes,
+    // confirmed rejecting on quereus@4.2.1.
+    it('should reject deletion of a ProposedOfficer (CantDelete) — confirmed on quereus@4.2.1', async () => {
+      const { authority, authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
       const sig = makeRealSignature('user-1')
+      const proposedAt = Date.now()
+      // Seed a ProposedAdmin so AdminValid on ProposedOfficer passes.
+      await ctx.db.exec(
+        `insert into ProposedAdmin (AuthorityId, EffectiveAt, ThresholdPolicies)
+         with context UserId = :uid, UserKey = :pubKey, Signature = :sig, Tid = 9, now = ${Date.now()}, IsUserValid = true
+         values (:id, :e, '[]')`,
+        {
+          uid: 'user-1',
+          pubKey: sig.signerKey,
+          sig: sig.signature,
+          id: authority.id,
+          e: proposedAt
+        }
+      )
+      // Seed a ProposedOfficer row so the CantDelete check can evaluate.
+      await ctx.db.exec(
+        `insert into ProposedOfficer (AuthorityId, AdminEffectiveAt, ProposedName, Title, Scopes)
+         with context UserId = :uid, UserKey = :pubKey, Signature = :sig, Tid = 9, now = ${Date.now()}, IsUserValid = true
+         values (:id, :e, 'New Officer', 'Chair', '["rad"]')`,
+        {
+          uid: 'user-1',
+          pubKey: sig.signerKey,
+          sig: sig.signature,
+          id: authority.id,
+          e: proposedAt
+        }
+      )
+      // Attempt delete — CantDelete fires because at least one row is matched.
       let caught: unknown
       try {
         await ctx.db.exec(
