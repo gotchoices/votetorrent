@@ -2194,12 +2194,13 @@ describe('AuthorityEngine', () => {
         userId: undefined,
         userInit: undefined
       } as never)
-      // Sweep: when createAuthority(...) accepts InviteSlotCid context, run
-      // it here and assert a new Authority row exists.
+      // WR-05 (34-REVIEW): assert the InviteResult is keyed by THIS slot's Cid
+      // (not just that some row exists), consuming the previously-dead slotCid
+      // binding and discriminating the post-state instead of a bare count(*)>0.
       const row = await ctx.db
-        .prepare('select count(*) as n from InviteResult')
-        .get({})
-      expect(Number(row?.n)).to.be.greaterThan(0)
+        .prepare('select count(*) as n from InviteResult where SlotCid = :cid')
+        .get({ cid: slotCid })
+      expect(Number(row?.n), 'expected an InviteResult keyed by the consumed slot Cid').to.be.greaterThan(0)
     })
 
     it('should prevent reuse of an already-claimed invite slot', async () => {
@@ -2233,6 +2234,12 @@ describe('AuthorityEngine', () => {
         caught = err
       }
       expect(caught).to.not.equal(undefined)
+      // WR-05 (34-REVIEW): consume the previously-dead slotCid binding — the
+      // blocked re-claim must leave exactly one InviteResult for this slot.
+      const after = await ctx.db
+        .prepare('select count(*) as n from InviteResult where SlotCid = :cid')
+        .get({ cid: slotCid })
+      expect(Number(after?.n), 'reuse must not create a second InviteResult for the slot').to.equal(1)
     })
 
     it('should create InviteResult marking acceptance with digest and invite signature', async () => {
@@ -2377,6 +2384,12 @@ describe('AuthorityEngine', () => {
         caught = err
       }
       expect(caught).to.not.equal(undefined)
+      // WR-05 (34-REVIEW): consume the previously-dead slotCid binding — the
+      // blocked re-claim must leave exactly one InviteResult for this slot.
+      const after = await ctx.db
+        .prepare('select count(*) as n from InviteResult where SlotCid = :cid')
+        .get({ cid: slotCid })
+      expect(Number(after?.n), 'reuse must not create a second InviteResult for the officer slot').to.equal(1)
     })
   })
 })
