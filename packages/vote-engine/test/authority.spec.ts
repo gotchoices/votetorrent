@@ -1005,9 +1005,9 @@ describe('AuthorityEngine', () => {
       expect(Number(row?.n)).to.equal(1)
     })
 
-    // WR-20 (17-REVIEW): skipped — the conditional `if (caught)` made this a
-    // skip-equivalent that could never fail. Un-skip when quereus#23 lands.
-    it.skip('should reject deletion of an Authority (CantDelete constraint) — BLOCKED on quereus#23', async () => {
+    // WR-20 (17-REVIEW): originally skipped for vacuous conditional assertion;
+    // rewritten with discriminating expect(caught). Confirmed passing on quereus@4.2.1.
+    it('should reject deletion of an Authority (CantDelete constraint) — confirmed on quereus@4.2.1', async () => {
       const { authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
       let caught: unknown
@@ -1055,8 +1055,9 @@ describe('AuthorityEngine', () => {
       expect(caught, 'expected AdminRequired to reject').to.be.instanceOf(Error)
     })
 
-    // WR-20 (17-REVIEW): skipped — conditional assertion was vacuous.
-    it.skip('should require a valid accepted InviteResult for subsequent authority inserts (InsertValid) — BLOCKED on quereus#23', async () => {
+    // WR-20 (17-REVIEW): originally skipped for vacuous conditional assertion;
+    // rewritten with discriminating expect(caught). Confirmed passing on quereus@4.2.1.
+    it('should require a valid accepted InviteResult for subsequent authority inserts (InsertValid) — confirmed on quereus@4.2.1', async () => {
       const { networkEngine } = await createNetworkAndAuthority()
       let caught: unknown
       try {
@@ -1265,8 +1266,9 @@ describe('AuthorityEngine', () => {
       expect((deleteErr as Error)?.message).to.include('OnlyInsert')
     })
 
-    // WR-20 (17-REVIEW): skipped — conditional assertion was vacuous.
-    it.skip('should require Admin row to exist for the officer AdminEffectiveAt (AdminValid) — BLOCKED on quereus#23', async () => {
+    // WR-20 (17-REVIEW): originally skipped for vacuous conditional assertion;
+    // rewritten with discriminating expect(caught). Confirmed passing on quereus@4.2.1.
+    it('should require Admin row to exist for the officer AdminEffectiveAt (AdminValid) — confirmed on quereus@4.2.1', async () => {
       const { authority, authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
       let caught: unknown
@@ -1310,8 +1312,9 @@ describe('AuthorityEngine', () => {
       expect(Number(row?.n)).to.equal(1)
     })
 
-    // WR-20 (17-REVIEW): skipped — conditional assertion was vacuous.
-    it.skip('should require valid invite for officers of a new authority (InsertValid) — BLOCKED on quereus#23', async () => {
+    // WR-20 (17-REVIEW): originally skipped for vacuous conditional assertion;
+    // rewritten with discriminating expect(caught). Confirmed passing on quereus@4.2.1.
+    it('should require valid invite for officers of a new authority (InsertValid) — confirmed on quereus@4.2.1', async () => {
       const { networkEngine } = await createNetworkAndAuthority()
       let caught: unknown
       try {
@@ -1331,8 +1334,9 @@ describe('AuthorityEngine', () => {
       expect(caught, 'expected InsertValid to reject').to.be.instanceOf(Error)
     })
 
-    // WR-20 (17-REVIEW): skipped — conditional assertion was vacuous.
-    it.skip('should require valid AdminSigning for officers of an existing authority (InsertValid) — BLOCKED on quereus#23', async () => {
+    // WR-20 (17-REVIEW): originally skipped for vacuous conditional assertion;
+    // rewritten with discriminating expect(caught). Confirmed passing on quereus@4.2.1.
+    it('should require valid AdminSigning for officers of an existing authority (InsertValid) — confirmed on quereus@4.2.1', async () => {
       const { authority, authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
       let caught: unknown
@@ -1665,8 +1669,9 @@ describe('AuthorityEngine', () => {
       expect(deleteErr).to.be.instanceOf(Error)
     })
 
-    // WR-20 (17-REVIEW): skipped — conditional assertion was vacuous.
-    it.skip('should require a completed AdminSignature for the signing nonce (InsertValid) — BLOCKED on quereus#23', async () => {
+    // WR-20 (17-REVIEW): originally skipped for vacuous conditional assertion;
+    // rewritten with discriminating expect(caught). Confirmed passing on quereus@4.2.1.
+    it('should require a completed AdminSignature for the signing nonce (InsertValid) — confirmed on quereus@4.2.1', async () => {
       const { authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
       let caught: unknown
