@@ -259,8 +259,9 @@ describe('ElectionsEngine', () => {
       expect((caught as Error)?.message).to.include('no EngineContext bound')
     })
 
-    // BLOCKED on quereus#23 — ProposedElection.UserValid CHECK joins
-    // through Officer + UserKey, both seeded only via NetworksEngine.create.
+    // ProposedElection.UserValid CHECK joins through Officer + UserKey, both
+    // seeded via NetworksEngine.create (createPopulatedContext). Passes on
+    // quereus@4.2.1 (the historical quereus#23 block is resolved on 4.x).
     it('INSERTs a ProposedElection row gated by Officer scope mel', async () => {
       const { ctx } = await createPopulatedContext()
       const engine = new ElectionsEngine(ctx)
@@ -593,7 +594,8 @@ describe('ElectionEngine', () => {
   })
 
   describe('revokeKeyholder', () => {
-    // BLOCKED on quereus#23 — Keyholder rows can't be seeded today.
+    // Keyholder rows are seeded via createPopulatedContext. Passes on
+    // quereus@4.2.1 (the historical quereus#23 block is resolved on 4.x).
     it('DELETEs a Keyholder row', async () => {
       const { ctx } = await createPopulatedContext()
       const engine = new ElectionEngine(
