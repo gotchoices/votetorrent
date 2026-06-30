@@ -433,14 +433,11 @@ describe('ElectionEngine', () => {
   // ELEC-07 — addQuestion (ProposedQuestion INSERT) — class-only method
   // -----------------------------------------------------------------------
   describe('addQuestion', () => {
-    // BLOCKED by quereus 3.3.0 / 4.x rejecting explicit NULL
-    // binding against `OptionRange text default '{1, 1}'` and
-    // `Required boolean default true` (NOT NULL constraint failed).
-    // Fix in Plan 34-03 Task 2 (D-04): addQuestion will conditionally omit
+    // Fixed in Phase 34 (D-04): addQuestion now conditionally omits
     // OptionRange/Required from the INSERT column list when the caller
     // supplies no value, letting the DB default apply.
     // See: https://github.com/gotchoices/quereus/issues/26
-    it.skip('INSERTs a ProposedQuestion row — BLOCKED: quereus 4.x rejects explicit null binding against a `default X` column (ProposedQuestion.OptionRange / .Required). Engine fix pending (D-04).', async () => {
+    it('INSERTs a ProposedQuestion row', async () => {
       const net = await createTestNetwork()
       const auth = await addTestAuthority(net)
       const elec = await addTestElection(auth)
@@ -449,20 +446,43 @@ describe('ElectionEngine', () => {
         { id: 'election-1', authorityId: auth.authority.id },
         elec.ctx
       )
-      const q: Question = {
+
+      // Case 1: No optionRange / required supplied — DB defaults apply.
+      // Previously failed with NOT NULL constraint on OptionRange (#26).
+      const q1: Question = {
         code: 'q1',
         title: 'Q1',
         instructions: 'pick one',
         options: [],
         type: 'select'
       }
-      await engine.addQuestion(ballotId, q)
-      const row = await elec.ctx.db
-        .prepare(
-          'select Code from ProposedQuestion where BallotId = :id and Code = :c'
-        )
+      await engine.addQuestion(ballotId, q1)
+      const row1 = await elec.ctx.db
+        .prepare('select Code from ProposedQuestion where BallotId = :id and Code = :c')
         .get({ id: ballotId, c: 'q1' })
-      expect(row?.Code).to.equal('q1')
+      expect(row1?.Code, 'ProposedQuestion row must be persisted').to.equal('q1')
+
+      // Case 2: D-04 regression guard — a caller-supplied non-null OptionRange
+      // must round-trip to the stored row and must NOT be silently dropped by
+      // the conditional-column rewrite.
+      const q2: Question = {
+        code: 'q2',
+        title: 'Q2',
+        instructions: 'rank them',
+        options: [],
+        type: 'rank',
+        optionRange: { min: 1, max: 3 },
+        required: false
+      }
+      await engine.addQuestion(ballotId, q2)
+      const row2 = await elec.ctx.db
+        .prepare('select Code, OptionRange, Required from ProposedQuestion where BallotId = :id and Code = :c')
+        .get({ id: ballotId, c: 'q2' })
+      expect(row2?.Code, 'second ProposedQuestion row must be persisted').to.equal('q2')
+      expect(row2?.OptionRange, 'D-04 guard: caller-supplied OptionRange must round-trip').to.equal(JSON.stringify({ min: 1, max: 3 }))
+      expect(row2?.Required, 'D-04 guard: caller-supplied Required=false must round-trip').to.satisfy(
+        (v: unknown) => v === 0 || v === false, 'expected Required to be 0 or false'
+      )
     })
   })
 

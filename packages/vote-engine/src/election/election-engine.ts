@@ -488,9 +488,15 @@ export class ElectionEngine implements IElectionEngine {
    * ELEC-07 (class-only — not on IElectionEngine) — INSERT a
    * ProposedQuestion row. The QuestionType view ({select, rank, score,
    * text}) is checked at insert via `Type in (select Code from
-   * QuestionType)`. Under [quereus#21](https://github.com/gotchoices/quereus/issues/21)
-   * (VIEW union-all returns only the first row), any value other than
-   * 'select' silently fails the CHECK.
+   * QuestionType)`.
+   *
+   * D-04 (Phase 34-03): OptionRange and Required are conditionally omitted
+   * from the INSERT column list when the caller supplies no value. Binding
+   * explicit `null` to columns declared `default X` (without a `null`
+   * keyword) triggers NOT NULL on quereus 4.x; omitting them lets the DB
+   * default apply. ProposedQuestion has no Digest(...) CHECKs, so this
+   * change is Digest-byte-safe.
+   * See: https://github.com/gotchoices/quereus/issues/26
    */
   async addQuestion (
     ballotId: string,
@@ -498,34 +504,36 @@ export class ElectionEngine implements IElectionEngine {
   ): Promise<void> {
     const tid = nextTid++
     const signerKey = this.ctx.user?.activeKeys?.[0]?.key ?? null
+
+    // Build column list and params dynamically for columns with DB defaults
+    // that must not receive an explicit null bind (Rule: never bind null to
+    // a `default X` column without a `null` keyword — omit the column so
+    // the DB default applies).
+    const extraCols: string[] = []
+    const extraParams: Record<string, unknown> = {}
+
+    if (question.optionRange != null) {
+      extraCols.push('OptionRange')
+      extraParams.optionRange = JSON.stringify(question.optionRange)
+    }
+    if (question.required != null) {
+      extraCols.push('Required')
+      extraParams.required = question.required
+    }
+
+    const baseCols = ['BallotId', 'Code', 'Title', 'Instructions', 'DependsOn', 'Type', 'ScoreRange', 'Grouping', 'Sequence']
+    const baseVals = [':ballotId', ':code', ':title', ':instructions', ':dependsOn', ':type', ':scoreRange', ':grouping', ':sequence']
+    const colList = [...baseCols, ...extraCols].join(',\n\t\t\t\t\t')
+    const valList = [...baseVals, ...extraCols.map(c => `:${c[0].toLowerCase() + c.slice(1)}`)].join(',\n\t\t\t\t\t')
+
     try {
       await this.ctx.db.exec(
 				`insert into ProposedQuestion (
-					BallotId,
-					Code,
-					Title,
-					Instructions,
-					DependsOn,
-					Type,
-					OptionRange,
-					ScoreRange,
-					Grouping,
-					Sequence,
-					Required
+					${colList}
 				)
 				with context UserId = :userId, UserKey = :userKey, Signature = :signature, Tid = ${tid}, now = :now, IsMutationValid = true
 				values (
-					:ballotId,
-					:code,
-					:title,
-					:instructions,
-					:dependsOn,
-					:type,
-					:optionRange,
-					:scoreRange,
-					:grouping,
-					:sequence,
-					:required
+					${valList}
 				)`,
         {
           ballotId,
@@ -536,19 +544,16 @@ export class ElectionEngine implements IElectionEngine {
             ? JSON.stringify(question.dependsOn)
             : null,
           type: question.type,
-          optionRange: question.optionRange
-            ? JSON.stringify(question.optionRange)
-            : null,
           scoreRange: question.scoreRange
             ? JSON.stringify(question.scoreRange)
             : null,
           grouping: question.group ?? null,
           sequence: question.sequence ?? null,
-          required: question.required ?? true,
           userId: this.ctx.user?.id ?? null,
           userKey: signerKey,
           signature: null,
-          now: nowCanonicalDatetime()
+          now: nowCanonicalDatetime(),
+          ...extraParams
         }
       )
     } catch (err) {
