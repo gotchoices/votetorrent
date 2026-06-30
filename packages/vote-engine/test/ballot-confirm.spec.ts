@@ -163,13 +163,16 @@ describe('submitBallotForConfirmation — re-validates invariants at submit (D-0
       }
     )
 
-    let threw = false
+    // WR-04 (34-REVIEW): assert the rejection is the D-07 invariant, not any
+    // throw — a bare threw flag also passes on a seed/parse/CurrentAdmin error.
+    let err: unknown
     try {
       await elec.electionEngine.submitBallotForConfirmation(badBallotId)
-    } catch {
-      threw = true
+    } catch (e) {
+      err = e
     }
-    expect(threw, 'submitBallotForConfirmation must reject a ballot with empty description (D-07)').to.be.true
+    expect(err, 'submitBallotForConfirmation must reject a ballot with empty description').to.be.instanceOf(Error)
+    expect((err as Error).message, 'rejection must be the D-07 description invariant, not a setup error').to.include('(D-07)')
   })
 
   it('rejects a ballot with no questions', async () => {
@@ -195,13 +198,15 @@ describe('submitBallotForConfirmation — re-validates invariants at submit (D-0
       }
     )
 
-    let threw = false
+    // WR-04 (34-REVIEW): assert the rejection is the D-07 invariant, not any throw.
+    let err: unknown
     try {
       await elec.electionEngine.submitBallotForConfirmation(badBallotId)
-    } catch {
-      threw = true
+    } catch (e) {
+      err = e
     }
-    expect(threw, 'submitBallotForConfirmation must reject a ballot with no questions (D-07)').to.be.true
+    expect(err, 'submitBallotForConfirmation must reject a ballot with no questions').to.be.instanceOf(Error)
+    expect((err as Error).message, 'rejection must be the D-07 question invariant, not a setup error').to.include('(D-07)')
   })
 
   it('rejects a select-type question with fewer than 2 options', async () => {
@@ -228,13 +233,15 @@ describe('submitBallotForConfirmation — re-validates invariants at submit (D-0
       }
     )
 
-    let threw = false
+    // WR-04 (34-REVIEW): assert the rejection is the D-07 invariant, not any throw.
+    let err: unknown
     try {
       await elec.electionEngine.submitBallotForConfirmation(badBallotId)
-    } catch {
-      threw = true
+    } catch (e) {
+      err = e
     }
-    expect(threw, 'submitBallotForConfirmation must reject a select question with <2 options (D-07)').to.be.true
+    expect(err, 'submitBallotForConfirmation must reject a select question with <2 options').to.be.instanceOf(Error)
+    expect((err as Error).message, 'rejection must be the D-07 options invariant, not a setup error').to.include('(D-07)')
   })
 })
 
