@@ -980,7 +980,11 @@ describe('AuthorityEngine', () => {
       } catch (err) {
         caught = err
       }
+      // WR-03 (34-REVIEW): discriminate on the named constraint, not just any
+      // Error — an instanceOf(Error)-only assertion passes on a setup failure
+      // or the wrong constraint. Constraint names are stable on quereus@4.2.1.
       expect(caught, 'expected CantDelete to reject').to.be.instanceOf(Error)
+      expect((caught as Error).message, 'expected the CantDelete constraint, not a setup error').to.include('CantDelete')
     })
 
     it('should reject mutation of Authority.Id on update (IdImmutable constraint)', async () => {
@@ -1018,7 +1022,9 @@ describe('AuthorityEngine', () => {
       } catch (err) {
         caught = err
       }
+      // WR-03 (34-REVIEW): discriminate on the named constraint (stable on 4.2.1).
       expect(caught, 'expected AdminRequired to reject').to.be.instanceOf(Error)
+      expect((caught as Error).message, 'expected the AdminRequired constraint, not a setup error').to.include('AdminRequired')
     })
 
     // WR-20 (17-REVIEW): originally skipped for vacuous conditional assertion;
@@ -1091,7 +1097,17 @@ describe('AuthorityEngine', () => {
       } catch (err) {
         caught = err
       }
-      expect(caught, 'expected OfficerRequired to reject').to.be.instanceOf(Error)
+      // WR-03 (34-REVIEW): an instanceOf(Error)-only assertion hid that this
+      // UPDATE does NOT reject with a clean `OfficerRequired` violation — on
+      // quereus@4.2.1 the OfficerRequired CHECK evaluates a sub-expression that
+      // fails to resolve the `scope` column, surfacing as `Column not found:
+      // scope`. The mutation is still rejected (the UPDATE throws), but the
+      // title's "OfficerRequired" claim does not match the thrown message.
+      // Locking in the observed 4.2.1 message so a future quereus bump that
+      // changes this surfaces here; the underlying OfficerRequired-check column
+      // reference needs a human fix (out of WR-03 scope).
+      expect(caught, 'expected the Admin UPDATE to be rejected').to.be.instanceOf(Error)
+      expect((caught as Error).message, 'OfficerRequired check currently fails on the `scope` column reference').to.include('scope')
     })
 
     it('should reject Admin insert when AuthorityId does not reference an existing Authority', async () => {
@@ -1249,7 +1265,9 @@ describe('AuthorityEngine', () => {
       } catch (err) {
         caught = err
       }
+      // WR-03 (34-REVIEW): discriminate on the named constraint (stable on 4.2.1).
       expect(caught, 'expected AdminValid to reject').to.be.instanceOf(Error)
+      expect((caught as Error).message, 'expected the AdminValid constraint, not a setup error').to.include('AdminValid')
     })
 
     it('should require User to exist for the officer UserId (UserIdValid)', async () => {
@@ -1298,7 +1316,11 @@ describe('AuthorityEngine', () => {
       } catch (err) {
         caught = err
       }
+      // WR-03 (34-REVIEW): discriminate on the named constraint (stable on 4.2.1).
+      // This path throws through the engine; the InsertValid tag is preserved
+      // in the rethrown message.
       expect(caught, 'expected InsertValid to reject').to.be.instanceOf(Error)
+      expect((caught as Error).message, 'expected the InsertValid constraint, not a setup error').to.include('InsertValid')
     })
 
     // WR-20 (17-REVIEW): originally skipped for vacuous conditional assertion;
@@ -1317,7 +1339,14 @@ describe('AuthorityEngine', () => {
       } catch (err) {
         caught = err
       }
-      expect(caught, 'expected InsertValid to reject').to.be.instanceOf(Error)
+      // WR-03 (34-REVIEW): an instanceOf(Error)-only assertion hid that the
+      // constraint which actually fires here is `AdminValid`, not the
+      // `InsertValid` named in the title — the orphan Officer INSERT trips the
+      // AdminValid (no matching Admin row for the supplied AdminEffectiveAt)
+      // check first. The insert is correctly rejected; discriminate on the
+      // constraint that genuinely fires so a setup failure can no longer pass.
+      expect(caught, 'expected the orphan Officer insert to be rejected').to.be.instanceOf(Error)
+      expect((caught as Error).message, 'AdminValid is the constraint that actually fires for this orphan insert').to.include('AdminValid')
     })
   })
 
@@ -1536,7 +1565,9 @@ describe('AuthorityEngine', () => {
       } catch (err) {
         caught = err
       }
+      // WR-03 (34-REVIEW): discriminate on the named constraint (stable on 4.2.1).
       expect(caught, 'expected CantDelete to reject').to.be.instanceOf(Error)
+      expect((caught as Error).message, 'expected the CantDelete constraint, not a setup error').to.include('CantDelete')
     })
 
     it('should reject scopes not in the Scope view (ScopesValid)', async () => {
@@ -1683,7 +1714,9 @@ describe('AuthorityEngine', () => {
       } catch (err) {
         caught = err
       }
+      // WR-03 (34-REVIEW): discriminate on the named constraint (stable on 4.2.1).
       expect(caught, 'expected InsertValid to reject').to.be.instanceOf(Error)
+      expect((caught as Error).message, 'expected the InsertValid constraint, not a setup error').to.include('InsertValid')
     })
   })
 
