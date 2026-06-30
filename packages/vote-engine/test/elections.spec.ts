@@ -433,21 +433,14 @@ describe('ElectionEngine', () => {
   // ELEC-07 — addQuestion (ProposedQuestion INSERT) — class-only method
   // -----------------------------------------------------------------------
   describe('addQuestion', () => {
-    // CONTEXT.md (Group F) predicted the prior DependsOn-NOT-NULL skip
-    // annotation was obsolete and that the only real blocker was the
-    // missing Ballot row. After Plan 12.3-03 (`seedBallot`) resolved the
-    // Ballot-row gap, the test was re-attempted and revealed that the
-    // BLOCKED on a Quereus bug confirmed in 3.3.0: binding explicit NULL
-    // (via :param or SQL literal) to a column declared with a non-NULL
-    // `default X` throws `NOT NULL constraint failed`. ProposedQuestion has
-    // two such columns — `OptionRange text default '{1, 1}'` and
-    // `Required boolean default true` — and the engine binds null/false to
-    // both. The error message names a nullable sibling (`DependsOn`) which
-    // is what produced the original misdiagnosis. See repro spec
-    // test/quereus-repros/text-null-column.spec.ts (D1–D3) and issue draft
-    // .planning/quick/260528-001-quereus-not-null-text-null-column/issues/
-    // default-column-rejects-explicit-null.md.
-    it.skip('INSERTs a ProposedQuestion row — BLOCKED: quereus 3.3.0 rejects explicit null binding against a `default X` column (ProposedQuestion.OptionRange / .Required); error message misleadingly names DependsOn', async () => {
+    // BLOCKED by quereus 3.3.0 / 4.x rejecting explicit NULL
+    // binding against `OptionRange text default '{1, 1}'` and
+    // `Required boolean default true` (NOT NULL constraint failed).
+    // Fix in Plan 34-03 Task 2 (D-04): addQuestion will conditionally omit
+    // OptionRange/Required from the INSERT column list when the caller
+    // supplies no value, letting the DB default apply.
+    // See: https://github.com/gotchoices/quereus/issues/26
+    it.skip('INSERTs a ProposedQuestion row — BLOCKED: quereus 4.x rejects explicit null binding against a `default X` column (ProposedQuestion.OptionRange / .Required). Engine fix pending (D-04).', async () => {
       const net = await createTestNetwork()
       const auth = await addTestAuthority(net)
       const elec = await addTestElection(auth)
@@ -641,18 +634,33 @@ describe('KeysTasksEngine', () => {
       expect((caught as Error)?.message).to.include('no EngineContext bound')
     })
 
-    it.skip('marks a release-key Task as completed — BLOCKED: QuereusError CHECK constraint failed: ReleaseKeyTaskExtension.TaskIdValid fires at commit (DeferredConstraintQueue) and does not see the sibling Task row inserted in the same db.exec batch. Phase 12.4 CR-02 + CR-03 schema fixes are not the root cause (ReleaseKey CHECK was already valid pre-Phase-12.4); the actual blocker is the deferred-CHECK visibility semantics in quereus 3.3.0 for sibling rows inserted within the same batch.', async () => {
+    it('marks a release-key Task as completed', async () => {
       const net = await createTestNetwork()
       const auth = await addTestAuthority(net)
       const elCtx = await addTestElection(auth)
-      await elCtx.ctx.db.exec(
-        `insert into ReleaseKeyTaskExtension (TaskId, ElectionId, ElectionRevision)
-         with context Tid = 1
-         values ('task-rk-1', 'election-1', 0);
-         insert into Task (Id, UserId, Type, IsCompleted)
-         with context IsMutationValid = true, Tid = 1
-         values ('task-rk-1', 'user-1', 'release-key', 0);`
-      )
+      // Seed Task + Extension in an explicit BEGIN/COMMIT transaction (D-03).
+      // Both deferred CHECKs (ExtensionExists on Task, TaskIdValid on Extension)
+      // fire at COMMIT time when both rows are present, satisfying the mutual
+      // cross-reference. Separate auto-committing execs fail because each exec
+      // commits before the other row exists. Pattern mirrors production code in
+      // ElectionsEngine.debugSeedPendingTasks (elections-engine.ts:907-925).
+      await elCtx.ctx.db.exec('BEGIN')
+      try {
+        await elCtx.ctx.db.exec(
+          `insert into Task (Id, UserId, Type, IsCompleted)
+           with context IsMutationValid = true, Tid = 1
+           values ('task-rk-1', 'user-1', 'release-key', 0);`
+        )
+        await elCtx.ctx.db.exec(
+          `insert into ReleaseKeyTaskExtension (TaskId, ElectionId, ElectionRevision)
+           with context Tid = 1
+           values ('task-rk-1', 'election-1', 0);`
+        )
+        await elCtx.ctx.db.exec('COMMIT')
+      } catch (err) {
+        await elCtx.ctx.db.exec('ROLLBACK')
+        throw err
+      }
       const engine = new KeysTasksEngine(makeNetworkRef(), elCtx.ctx)
       const task = {
         type: 'release-key' as const,
@@ -740,55 +748,85 @@ describe('SignatureTasksEngine', () => {
       expect((caught as Error)?.message).to.include('no pending task')
     })
 
-    it.skip('invokes SigningEngine.sign and marks the Task complete — BLOCKED: QuereusError CHECK constraint failed: AdminSignatureTaskExtension.TaskIdValid fires at commit (DeferredConstraintQueue) and does not see the sibling Task row inserted in the same db.exec batch, even with the post-Phase 12.4 CR-02 compound discriminator (T.Type=signature and T.SignatureType=admin). The CR-02 fix is necessary but not sufficient; the actual blocker is the deferred-CHECK visibility semantics in quereus 3.3.0 for sibling rows in one batch.', async () => {
+    it('invokes SigningEngine.sign and marks the Task complete', async () => {
       const net = await createTestNetwork()
       const auth = await addTestAuthority(net)
-      // Seed a separate AdminSigning row for the signature task
       const taskNonce = crypto.randomUUID()
+      const authorityId = auth.authority.id
+      const userId = auth.user.id
+      const signerKey = auth.user.activeKeys[0]!.key
+      // Use a tid that matches what MutationValid will see (context.Tid in AdminSignatureTaskExtension).
+      const tid = Date.now()
+      const now = Date.now()
+      const placeholderSig = 'a'.repeat(128)
+      const thresholdPolicies = '[]'
+
       const adminRow = await auth.ctx.db
         .prepare('select EffectiveAt from CurrentAdmin where AuthorityId = :authorityId')
-        .get({ authorityId: auth.authority.id })
+        .get({ authorityId })
       if (!adminRow) throw new Error('CurrentAdmin not found')
+      const adminEffectiveAt = adminRow.EffectiveAt as number | string
+
+      // 1. Ensure ProposedAdmin exists — required by AdminSignatureTaskExtension.MutationValid.
+      //    Pattern from production ElectionsEngine.debugSeedPendingTasks (elections-engine.ts:819-829).
+      try {
+        await auth.ctx.db.exec(
+          `insert into ProposedAdmin (AuthorityId, EffectiveAt, ThresholdPolicies)
+           with context IsUserValid = true, Tid = :tid, now = :now,
+                        UserId = :userId, UserKey = :signerKey, Signature = :sig
+           values (:authorityId, :adminEffectiveAt, :thresholdPolicies)`,
+          { authorityId, adminEffectiveAt, thresholdPolicies, tid, now, userId, signerKey, sig: placeholderSig }
+        )
+      } catch {
+        // Idempotent — ProposedAdmin already exists for this (AuthorityId, EffectiveAt) PK.
+      }
+
+      // 2. Seed AdminSigning with Digest(tid, authorityId, adminEffectiveAt, thresholdPolicies)
+      //    — the 4-arg form that MutationValid expects. Pattern from elections-engine.ts:836-843.
       await auth.ctx.db.exec(
         `insert into AdminSigning (Nonce, AuthorityId, AdminEffectiveAt, Scope, Digest, UserId, SignerKey, Signature)
          with context now = :now, IsSignatureValid = true, IsSignerKeyValid = true
          values (:nonce, :authorityId, :adminEffectiveAt, 'rad',
-                 Digest(:authorityId, :adminEffectiveAt, '[]'),
-                 :userId, :signerKey, :signature)`,
-        {
-          nonce: taskNonce,
-          authorityId: auth.authority.id,
-          adminEffectiveAt: adminRow.EffectiveAt as number | string,
-          userId: auth.user.id,
-          signerKey: auth.user.activeKeys[0]!.key,
-          signature: 'a'.repeat(128),
-          now: Date.now()
-        }
+                 Digest(:tid, :authorityId, :adminEffectiveAt, :thresholdPolicies),
+                 :userId, :signerKey, :sig)`,
+        { nonce: taskNonce, authorityId, adminEffectiveAt, thresholdPolicies, tid, now, userId, signerKey, sig: placeholderSig }
       )
-      // Seed AdminSignatureTaskExtension first (its TaskIdValid is deferred),
-      // then Task (its ExtensionExists sees the extension row).
-      await auth.ctx.db.exec(
-        `insert into AdminSignatureTaskExtension (TaskId, AuthorityId, AdminEffectiveAt)
-         with context Tid = 1
-         values ('task-sig-1', :authorityId, :adminEffectiveAt);
-         insert into Task (Id, UserId, Type, SignatureType, SigningNonce, IsCompleted)
-         with context IsMutationValid = true, Tid = 1
-         values ('task-sig-1', 'user-1', 'signature', 'admin', :nonce, 0);`,
-        { nonce: taskNonce, authorityId: auth.authority.id, adminEffectiveAt: adminRow.EffectiveAt as number | string }
-      )
+
+      // 3. Seed Task + Extension in an explicit BEGIN/COMMIT transaction (D-03).
+      //    Both deferred CHECKs (ExtensionExists on Task, TaskIdValid on Extension)
+      //    fire at COMMIT time when both rows are present. Pattern from elections-engine.ts:845-868.
+      await auth.ctx.db.exec('BEGIN')
+      try {
+        await auth.ctx.db.exec(
+          `insert into Task (Id, UserId, Type, SignatureType, SigningNonce, IsCompleted)
+           with context IsMutationValid = true, Tid = :tid
+           values ('task-sig-1', :userId, 'signature', 'admin', :nonce, 0)`,
+          { tid, userId, nonce: taskNonce }
+        )
+        await auth.ctx.db.exec(
+          `insert into AdminSignatureTaskExtension (TaskId, AuthorityId, AdminEffectiveAt)
+           with context Tid = :tid
+           values ('task-sig-1', :authorityId, :adminEffectiveAt)`,
+          { tid, authorityId, adminEffectiveAt }
+        )
+        await auth.ctx.db.exec('COMMIT')
+      } catch (err) {
+        await auth.ctx.db.exec('ROLLBACK')
+        throw err
+      }
       const engine = new SignatureTasksEngine(makeNetworkRef(), auth.ctx)
       const task: SignatureTask = {
         type: 'signature',
-        userId: 'user-1',
+        userId,
         network: makeNetworkRef(),
         signatureType: 'admin'
       }
       const result: SignatureResult = {
         isAccepted: true,
         signature: {
-          signature: 'a'.repeat(128),
-          signerKey: auth.user.activeKeys[0]!.key,
-          signerUserId: 'user-1'
+          signature: placeholderSig,
+          signerKey,
+          signerUserId: userId
         }
       }
       await engine.completeSignature(task, result)
@@ -828,25 +866,41 @@ describe('OnboardingTasksEngine', () => {
       expect((caught as Error)?.message).to.include('no EngineContext bound')
     })
 
-    it.skip('marks an onboarding Task as completed — BLOCKED: QuereusError CHECK constraint failed: OnboardingTaskExtension.TaskIdValid fires at commit (DeferredConstraintQueue) and does not see the sibling Task row inserted in the same db.exec batch. Phase 12.4 CR-02 + CR-03 schema fixes are not the root cause (Onboarding CHECK was already valid pre-Phase-12.4); the actual blocker is the deferred-CHECK visibility semantics in quereus 3.3.0 for sibling rows in one batch.', async () => {
+    it('marks an onboarding Task as completed', async () => {
       const net = await createTestNetwork()
       await net.ctx.db.exec(
         `insert into Onboarding (Id) with context Tid = 1 values ('onboarding-1')`
       )
-      await net.ctx.db.exec(
-        `insert into OnboardingTaskExtension (TaskId, OnboardingId)
-         with context Tid = 1
-         values ('task-1', 'onboarding-1');
-         insert into Task (Id, UserId, Type, IsCompleted)
-         with context IsMutationValid = true, Tid = 1
-         values ('task-1', 'user-1', 'onboarding', 0);`
-      )
+      // Seed Task + Extension in an explicit BEGIN/COMMIT transaction (D-03).
+      // Both deferred CHECKs (ExtensionExists on Task, TaskIdValid on Extension)
+      // fire at COMMIT time when both rows are present. Pattern mirrors production
+      // code in ElectionsEngine.debugSeedPendingTasks (elections-engine.ts:907-925).
+      await net.ctx.db.exec('BEGIN')
+      try {
+        await net.ctx.db.exec(
+          `insert into Task (Id, UserId, Type, IsCompleted)
+           with context IsMutationValid = true, Tid = 1
+           values ('task-1', 'user-1', 'onboarding', 0);`
+        )
+        await net.ctx.db.exec(
+          `insert into OnboardingTaskExtension (TaskId, OnboardingId)
+           with context Tid = 1
+           values ('task-1', 'onboarding-1');`
+        )
+        await net.ctx.db.exec('COMMIT')
+      } catch (err) {
+        await net.ctx.db.exec('ROLLBACK')
+        throw err
+      }
       const engine = new OnboardingTasksEngine(net.ctx)
       await engine.setOnboardingTaskCompleted('task-1')
       const row = await net.ctx.db
         .prepare('select IsCompleted from Task where Id = :id')
         .get({ id: 'task-1' })
-      expect(row?.IsCompleted).to.equal(1)
+      // quereus returns boolean true for IsCompleted = 1 on boolean columns
+      expect(row?.IsCompleted, 'Task must be marked completed').to.satisfy(
+        (v: unknown) => v === 1 || v === true, 'expected IsCompleted to be 1 or true'
+      )
     })
   })
 })
