@@ -657,16 +657,87 @@ describe('SIGN-04: device-signer secp256k1 sign round-trip via completeSignature
 })
 
 // ---------------------------------------------------------------------------
-// FLAG: ACCEPTED OUT-OF-SCOPE — multi-type ballot quereus#21 deferral
+// multi-type ballot confirmation — quereus#21 confirmed fixed on 4.2.1
 // ---------------------------------------------------------------------------
 
-// FLAG: ACCEPTED OUT-OF-SCOPE — verify rank/score/text ballots against quereus 3.3.0 (quereus#21) in a later phase;
-// beachhead is 'select' only. This skip is intentional: the QuestionType VIEW union-all returns only the
-// first row ('select') under quereus#21, causing non-select types to silently fail the CHECK constraint.
-it.skip('multi-type ballot (rank/score/text) questions can be confirmed (quereus#21 — deferred)', async () => {
-  // This test will be unskipped in a later phase once quereus#21 is resolved (>= quereus 3.3.0 fix).
-  // Until then, only 'select' type questions are verified safe.
-  throw new Error('Not implemented: multi-type ballot support pending quereus#21 fix')
+// quereus#21 (QuestionType VIEW returning only the first row) is fixed on quereus@4.2.1.
+// The QuestionType VIEW now returns all four types (select, rank, score, text), so the
+// TypeValid CHECK no longer rejects non-select question types.
+it('multi-type ballot (rank/score/text) questions can be confirmed', async () => {
+  const elec = await setupElection()
+
+  // Resolve the election id from the DB (electionEngine.election is private).
+  const authorityId = elec.authority.id
+  const electionRow = await elec.ctx.db
+    .prepare('select Id from Election where AuthorityId = :authorityId limit 1')
+    .get({ authorityId })
+  if (!electionRow) throw new Error('multi-type ballot test: Election not found')
+  const electionId = electionRow.Id as string
+
+  // Seed a ProposedBallot with rank, score, and text questions.
+  // proposeBallot stores questions as JSON in ProposedBallot.Questions — the TypeValid CHECK
+  // fires on the canonical Question table; finalizeBallot promotes ProposedBallot questions
+  // into Question rows where TypeValid checks Type in (select Code from QuestionType).
+  const ballotId = 'multi-type-ballot-1'
+  await elec.electionEngine.proposeBallot({
+    id: ballotId,
+    electionId,
+    authorityId,
+    description: 'Multi-type ballot for TypeValid confirmation test',
+    districts: [],
+    questions: [
+      {
+        code: 'RANK1',
+        title: 'Rank the candidates',
+        instructions: 'Order by preference.',
+        type: 'rank',
+        options: [
+          { code: 'A', title: 'Alice' },
+          { code: 'B', title: 'Bob' },
+        ],
+      },
+      {
+        code: 'SCORE1',
+        title: 'Score the proposal',
+        instructions: 'Rate from 1 to 10.',
+        type: 'score',
+      },
+      {
+        code: 'TEXT1',
+        title: 'Additional comments',
+        instructions: 'Enter your comments.',
+        type: 'text',
+      },
+    ],
+  })
+
+  // Submit for confirmation — creates a ballot Task + BallotSignatureTaskExtension.
+  await elec.electionEngine.submitBallotForConfirmation(ballotId)
+
+  // Sign and complete using the same secp256k1 + getBallotTask + completeSignature
+  // flow as the self-confirm analog (lines 525–555).
+  const { secp256k1: secp } = await import('@noble/curves/secp256k1.js')
+  const { bytesToHex } = await import('@noble/curves/utils.js')
+
+  const engine = new SignatureTasksEngine(makeNetworkRef(), elec.ctx)
+  const task = await getBallotTask(engine, ballotId)
+
+  const digest = await engine.getSignatureDigest(task)
+  const privKey = secp.utils.randomSecretKey()
+  const sigBytes = secp.sign(digest, privKey) as unknown as Uint8Array
+  const pubHex = bytesToHex(secp.getPublicKey(privKey))
+
+  // Must not throw a TypeValid rejection — rank/score/text are all valid on quereus@4.2.1.
+  await engine.completeSignature(task, {
+    isAccepted: true,
+    signature: { signerUserId: elec.user.id, signerKey: pubHex, signature: bytesToHex(sigBytes) },
+  })
+
+  // Assert the Ballot confirmation row exists (finalizeBallot promoted the ProposedBallot).
+  const ballotRow = await elec.ctx.db
+    .prepare('select Id from Ballot where Id = :id')
+    .get({ id: ballotId })
+  expect(ballotRow, 'Ballot row must exist after multi-type ballot confirmation (no TypeValid rejection)').to.not.be.undefined
 })
 
 // ---------------------------------------------------------------------------
