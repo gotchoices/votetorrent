@@ -154,7 +154,6 @@ describe('AuthorityEngine', () => {
       expect(details.authority.domainName).to.equal('authority.example.com')
     })
 
-    // BLOCKED on quereus#23 (CantDelete on INSERT)
     it('should return imageRef when set on the authority', async () => {
       const { authorityEngine } = await createNetworkAndAuthority()
       const details = await authorityEngine.getDetails()
@@ -163,18 +162,12 @@ describe('AuthorityEngine', () => {
       expect(details.authority).to.have.property('imageRef')
     })
 
-    // BLOCKED on quereus#23 (CantDelete on INSERT)
     it('should return undefined imageRef when not set', async () => {
       const { authorityEngine } = await createNetworkAndAuthority()
       const details = await authorityEngine.getDetails()
       expect(details.authority.imageRef).to.equal(undefined)
     })
 
-    // BLOCKED on quereus#23 (CantDelete on INSERT) — Plan 03-04 does not seed
-    // ProposedAuthority directly because the schema's ProposedAuthority
-    // CHECK constraints would themselves trip on the same upstream bugs.
-    // Phase 6 will cover the full flow with proposal seeding once upstream
-    // is unblocked.
     it('should include proposed authority details when a proposal exists', async () => {
       const { authorityEngine, authority } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
@@ -199,7 +192,6 @@ describe('AuthorityEngine', () => {
       expect(details.proposed?.proposed?.name).to.equal('Proposed Name')
     })
 
-    // BLOCKED on quereus#23 (CantDelete on INSERT)
     it('should return undefined proposed when no authority proposal exists', async () => {
       const { authorityEngine } = await createNetworkAndAuthority()
       const details = await authorityEngine.getDetails()
@@ -211,8 +203,6 @@ describe('AuthorityEngine', () => {
   // 2. Admin Details
   // -----------------------------------------------------------------------
   describe('getAdminDetails', () => {
-    // BLOCKED on quereus#23 (CantDelete on INSERT) — all rows depend on the
-    // create() batch succeeding.
     it('should return admin with correct id, authorityId, and effectiveAt', async () => {
       const { authority, authorityEngine } = await createNetworkAndAuthority()
       const details = await authorityEngine.getAdminDetails()
@@ -226,7 +216,6 @@ describe('AuthorityEngine', () => {
       expect(details.admin.effectiveAt).to.not.equal(undefined)
     })
 
-    // BLOCKED on quereus#23
     it('should return the current admin officers with userId, title, and scopes', async () => {
       const { authorityEngine } = await createNetworkAndAuthority()
       const details = await authorityEngine.getAdminDetails()
@@ -237,7 +226,6 @@ describe('AuthorityEngine', () => {
       expect(officer.scopes).to.be.an('array').that.includes('rad')
     })
 
-    // BLOCKED on quereus#23
     it('should parse thresholdPolicies from JSON stored in the Admin row', async () => {
       const { authorityEngine } = await createNetworkAndAuthority()
       const details = await authorityEngine.getAdminDetails()
@@ -246,7 +234,6 @@ describe('AuthorityEngine', () => {
       ])
     })
 
-    // BLOCKED on quereus#23 — needs ProposedAdmin row, which requires create()
     it('should return proposed admin details when a ProposedAdmin exists', async () => {
       const { authority, authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
@@ -269,7 +256,6 @@ describe('AuthorityEngine', () => {
       expect(details.proposed).to.not.equal(undefined)
     })
 
-    // BLOCKED on quereus#23
     it('should return proposed officers from ProposedOfficer rows', async () => {
       const { authority, authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
@@ -308,11 +294,6 @@ describe('AuthorityEngine', () => {
       expect(proposedOfficers).to.be.an('array').with.length.greaterThan(0)
     })
 
-    // BLOCKED on quereus#23 — even the "no admin row" path needs a populated
-    // db to demonstrate the AUTH-04 null guard against a bound-but-missing
-    // authority id. Pure construction of an AuthorityEngine against an empty
-    // db would also trip quereus#23 because prepareDb itself runs INSERTs
-    // through the schema's deferred-constraint queue.
     it('should throw Admin not found when the AuthorityEngine is bound to an unknown authority id', async () => {
       const { authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
@@ -333,8 +314,6 @@ describe('AuthorityEngine', () => {
   // 3. Propose Admin
   // -----------------------------------------------------------------------
   describe('proposeAdmin', () => {
-    // BLOCKED on quereus#23 — proposeAdmin inserts into ProposedAdmin which
-    // requires an existing Admin row from create().
     it('should insert a ProposedAdmin row with authorityId, effectiveAt, and thresholdPolicies', async () => {
       const { authority, authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
@@ -355,7 +334,6 @@ describe('AuthorityEngine', () => {
       expect(Number(row?.n)).to.equal(1)
     })
 
-    // BLOCKED on quereus#23
     it('should serialize thresholdPolicies as JSON', async () => {
       const { authority, authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
@@ -393,7 +371,6 @@ describe('AuthorityEngine', () => {
       expect(JSON.parse(row!.ThresholdPolicies as string)).to.deep.equal(policies)
     })
 
-    // BLOCKED on quereus#23
     it('should start a signing session with scope rad', async () => {
       const { authority, authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
@@ -488,7 +465,6 @@ describe('AuthorityEngine', () => {
       }
     })
 
-    // BLOCKED on quereus#23
     it('should use the first signer as the instigator of the signing session', async () => {
       const { authority, authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
@@ -522,7 +498,6 @@ describe('AuthorityEngine', () => {
       expect(row?.UserId).to.equal('user-1')
     })
 
-    // BLOCKED on quereus#23
     it('should propagate Quereus constraint errors with descriptive messages', async () => {
       // A proposeAdmin call with a wildly invalid EffectiveAt should surface
       // a constraint-named error wrapped by the engine's QuereusError catch.
@@ -658,7 +633,6 @@ describe('AuthorityEngine', () => {
   // 6. Save Invite with Signing
   // -----------------------------------------------------------------------
   describe('saveInviteWithSigning', () => {
-    // BLOCKED on quereus#23 — all flows depend on create() succeeding.
     it('should start a signing session using the authority id and invite digest', async () => {
       const { authority, authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
@@ -673,7 +647,6 @@ describe('AuthorityEngine', () => {
       expect(row?.Digest).to.match(/^[A-Za-z0-9_-]{43}$/)
     })
 
-    // BLOCKED on quereus#23
     it('should save an authority invite to InviteSlot when type is "au"', async () => {
       const { authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
@@ -686,7 +659,6 @@ describe('AuthorityEngine', () => {
       expect(row?.Name).to.equal('InviteCorp')
     })
 
-    // BLOCKED on quereus#23
     it('should save an officer invite to InviteSlot when type is "of"', async () => {
       const { authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
@@ -703,7 +675,6 @@ describe('AuthorityEngine', () => {
       expect(row?.Name).to.equal('Officer X')
     })
 
-    // BLOCKED on quereus#23
     it('should use scope "iad" for authority invites', async () => {
       const { authority, authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
@@ -718,7 +689,6 @@ describe('AuthorityEngine', () => {
       expect(row?.Scope).to.equal('iad')
     })
 
-    // BLOCKED on quereus#23
     it('should use scope "rad" for officer invites', async () => {
       const { authority, authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
@@ -737,7 +707,6 @@ describe('AuthorityEngine', () => {
       expect(row?.Scope).to.equal('rad')
     })
 
-    // BLOCKED on quereus#23
     it('should compute CID as Digest of invite fields and nonce', async () => {
       // CidValid CHECK in the schema: Cid = Digest(Name, Expiration,
       // InviteKey, InviteSignature, SigningNonce). saveInviteWithSigning
@@ -754,7 +723,6 @@ describe('AuthorityEngine', () => {
       expect(row?.Cid).to.be.a('string').with.length.greaterThan(0)
     })
 
-    // BLOCKED on quereus#23
     it('should store expiration, inviteKey, and inviteSignature in InviteSlot', async () => {
       const { authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
@@ -776,14 +744,12 @@ describe('AuthorityEngine', () => {
   // 7. Get Authority Invites
   // -----------------------------------------------------------------------
   describe('getAuthorityInvites', () => {
-    // BLOCKED on quereus#23 — needs a populated db from create().
     it('should return an empty array when no authority invites exist', async () => {
       const { authorityEngine } = await createNetworkAndAuthority()
       const invites = await authorityEngine.getAuthorityInvites()
       expect(invites).to.be.an('array').with.length(0)
     })
 
-    // BLOCKED on quereus#23
     it('should return sent invites with name and type "au"', async () => {
       const { authorityEngine } = await createNetworkAndAuthority()
       const invite = authorityEngine.createAuthorityInvite('Sent Inv')
@@ -817,7 +783,6 @@ describe('AuthorityEngine', () => {
       expect((found as { result?: { isAccepted?: boolean } } | undefined)?.result?.isAccepted).to.equal(true)
     })
 
-    // BLOCKED on quereus#23 (same chain — needs a seeded InviteSlot row).
     it('should include InviteResult when an invite has been rejected', async () => {
       const { networkEngine, authorityEngine } = await createNetworkAndAuthority()
       const invite = authorityEngine.createAuthorityInvite('Rejected')
@@ -836,7 +801,6 @@ describe('AuthorityEngine', () => {
       expect((found as { result?: { isAccepted?: boolean } } | undefined)?.result?.isAccepted).to.equal(false)
     })
 
-    // BLOCKED on quereus#23
     it('should return undefined result when invite has not been responded to', async () => {
       const { authorityEngine } = await createNetworkAndAuthority()
       const invite = authorityEngine.createAuthorityInvite('NoResponse')
@@ -847,7 +811,6 @@ describe('AuthorityEngine', () => {
       expect((found as { result?: unknown } | undefined)?.result).to.equal(undefined)
     })
 
-    // BLOCKED on quereus#23
     it('should only return invites scoped to "iad" for the current authority', async () => {
       const { authorityEngine } = await createNetworkAndAuthority()
       const auInvite = authorityEngine.createAuthorityInvite('AuthorityScoped')
@@ -981,22 +944,21 @@ describe('AuthorityEngine', () => {
   // -----------------------------------------------------------------------
   // 8-19. Schema Constraints + Lifecycle + Invitation Flows
   //
-  // Each `it.skip` below was a body-less `it('...')` placeholder. All
-  // assertions in these blocks are schema-level invariants requiring a
-  // populated DB (Authority + Admin + Officer + Network rows seeded via
-  // NetworksEngine.create()). Every such seed trips
-  // https://github.com/gotchoices/quereus/issues/23 (CantDelete on INSERT)
-  // today, so every placeholder is annotated `it.skip` + bug link rather
-  // than left body-less. When #23 ships, sweep this section: replace
-  // `it.skip` with `it` and fill the body using the same per-INSERT
-  // context-envelope pattern AuthorityEngine + NetworksEngine establish.
+  // These tests assert schema-level invariants requiring a populated DB
+  // (Authority + Admin + Officer + Network rows seeded via
+  // NetworksEngine.create()). Previously blocked on github.com/gotchoices/quereus/issues/23 (fixed on 4.x) (CantDelete
+  // on INSERT) — that bug is fixed on quereus@4.2.1. All 9 github.com/gotchoices/quereus/issues/23 (fixed on 4.x)
+  // skipped tests were un-skipped in Phase 34-02: 6 as-is (assertions
+  // already discriminating), 3 rewritten to target the correct DML op
+  // (check on update / check on delete). Stale BLOCKED annotations below
+  // are historical; tests are all active and passing on quereus@4.2.1.
   // -----------------------------------------------------------------------
 
   // -----------------------------------------------------------------------
   // 8. Schema Constraints - Authority Table
   // -----------------------------------------------------------------------
   describe('schema constraints - Authority table', () => {
-    it('should allow the very first authority without an invite or signing nonce — BLOCKED on quereus#23', async () => {
+    it('should allow the very first authority without an invite or signing nonce', async () => {
       const { authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
       const row = await ctx.db
@@ -1021,7 +983,7 @@ describe('AuthorityEngine', () => {
       expect(caught, 'expected CantDelete to reject').to.be.instanceOf(Error)
     })
 
-    it('should reject mutation of Authority.Id on update (IdImmutable constraint) — BLOCKED on quereus#23', async () => {
+    it('should reject mutation of Authority.Id on update (IdImmutable constraint)', async () => {
       const { authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
       let caught: unknown
@@ -1081,7 +1043,7 @@ describe('AuthorityEngine', () => {
       expect(caught, 'expected InsertValid to reject').to.be.instanceOf(Error)
     })
 
-    it('should validate update using AdminSignature with scope uai (UpdateValid) — BLOCKED on quereus#23', async () => {
+    it('should validate update using AdminSignature with scope uai (UpdateValid)', async () => {
       const { authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
       let caught: unknown
@@ -1132,7 +1094,7 @@ describe('AuthorityEngine', () => {
       expect(caught, 'expected OfficerRequired to reject').to.be.instanceOf(Error)
     })
 
-    it('should reject Admin insert when AuthorityId does not reference an existing Authority — BLOCKED on quereus#23', async () => {
+    it('should reject Admin insert when AuthorityId does not reference an existing Authority', async () => {
       const { authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
       let caught: unknown
@@ -1168,7 +1130,7 @@ describe('AuthorityEngine', () => {
       expect(msg).to.match(/EffectiveAtValid|Type conversion failed/)
     })
 
-    it('should allow initial admin for very first authority without invite or signing (MutationValid) — BLOCKED on quereus#23', async () => {
+    it('should allow initial admin for very first authority without invite or signing (MutationValid)', async () => {
       const { authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
       const row = await ctx.db
@@ -1177,7 +1139,7 @@ describe('AuthorityEngine', () => {
       expect(Number(row?.n)).to.equal(1)
     })
 
-    it('should require valid invite for admin of a new (non-first) authority (MutationValid) — BLOCKED on quereus#23', async () => {
+    it('should require valid invite for admin of a new (non-first) authority (MutationValid)', async () => {
       const { networkEngine } = await createNetworkAndAuthority()
       let caught: unknown
       try {
@@ -1198,7 +1160,7 @@ describe('AuthorityEngine', () => {
       expect(msg).to.match(/MutationValid|InsertValid/)
     })
 
-    it('should require valid AdminSignature for admin update of existing authority (MutationValid) — BLOCKED on quereus#23', async () => {
+    it('should require valid AdminSignature for admin update of existing authority (MutationValid)', async () => {
       const { authority, authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
       let caught: unknown
@@ -1222,7 +1184,7 @@ describe('AuthorityEngine', () => {
   // 10. Schema Constraints - Officer Table
   // -----------------------------------------------------------------------
   describe('schema constraints - Officer table', () => {
-    it('should reject Officer with scopes not in the Scope view (ScopesValid) — BLOCKED on quereus#23', async () => {
+    it('should reject Officer with scopes not in the Scope view (ScopesValid)', async () => {
       const { authority, authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
       let caught: unknown
@@ -1244,7 +1206,7 @@ describe('AuthorityEngine', () => {
       expect(caught).to.be.instanceOf(Error)
     })
 
-    it('should reject Officer update or delete (OnlyInsert constraint) — BLOCKED on quereus#23', async () => {
+    it('should reject Officer update or delete (OnlyInsert constraint)', async () => {
       const { authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
       let updateErr: unknown
@@ -1290,7 +1252,7 @@ describe('AuthorityEngine', () => {
       expect(caught, 'expected AdminValid to reject').to.be.instanceOf(Error)
     })
 
-    it('should require User to exist for the officer UserId (UserIdValid) — BLOCKED on quereus#23', async () => {
+    it('should require User to exist for the officer UserId (UserIdValid)', async () => {
       const { authority, authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
       let caught: unknown
@@ -1308,7 +1270,7 @@ describe('AuthorityEngine', () => {
       expect(caught).to.be.instanceOf(Error)
     })
 
-    it('should allow initial officer for very first authority without invite or signing (InsertValid) — BLOCKED on quereus#23', async () => {
+    it('should allow initial officer for very first authority without invite or signing (InsertValid)', async () => {
       const { authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
       const row = await ctx.db
@@ -1363,7 +1325,7 @@ describe('AuthorityEngine', () => {
   // 11. Schema Constraints - ProposedAuthority Table
   // -----------------------------------------------------------------------
   describe('schema constraints - ProposedAuthority table', () => {
-    it('should require the authority to exist (AuthorityExists) — BLOCKED on quereus#23', async () => {
+    it('should require the authority to exist (AuthorityExists)', async () => {
       const { authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
       const sig = makeRealSignature('user-1')
@@ -1385,7 +1347,7 @@ describe('AuthorityEngine', () => {
       expect((caught as Error)?.message).to.include('AuthorityExists')
     })
 
-    it('should require a valid officer with uai scope and matching signature (UserValid) — BLOCKED on quereus#23', async () => {
+    it('should require a valid officer with uai scope and matching signature (UserValid)', async () => {
       const { authority, authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
       let caught: unknown
@@ -1407,7 +1369,7 @@ describe('AuthorityEngine', () => {
   // 12. Schema Constraints - ProposedAdmin Table
   // -----------------------------------------------------------------------
   describe('schema constraints - ProposedAdmin table', () => {
-    it('should require the authority to exist (AuthorityIdValid) — BLOCKED on quereus#23', async () => {
+    it('should require the authority to exist (AuthorityIdValid)', async () => {
       const { authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
       const sig = makeRealSignature('user-1')
@@ -1455,7 +1417,7 @@ describe('AuthorityEngine', () => {
       expect(msg).to.match(/EffectiveAtValid|Type conversion failed/)
     })
 
-    it('should require a valid officer with rad scope and matching signature (UserValid) — BLOCKED on quereus#23', async () => {
+    it('should require a valid officer with rad scope and matching signature (UserValid)', async () => {
       const { authority, authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
       let caught: unknown
@@ -1477,7 +1439,7 @@ describe('AuthorityEngine', () => {
   // 13. Schema Constraints - ProposedOfficer Table
   // -----------------------------------------------------------------------
   describe('schema constraints - ProposedOfficer table', () => {
-    it('should require the authority to exist (AuthorityIdValid) — BLOCKED on quereus#23', async () => {
+    it('should require the authority to exist (AuthorityIdValid)', async () => {
       const { authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
       const sig = makeRealSignature('user-1')
@@ -1500,7 +1462,7 @@ describe('AuthorityEngine', () => {
       expect((caught as Error)?.message).to.include('AuthorityIdValid')
     })
 
-    it('should require a ProposedAdmin to exist for the officer AdminEffectiveAt (AdminValid) — BLOCKED on quereus#23', async () => {
+    it('should require a ProposedAdmin to exist for the officer AdminEffectiveAt (AdminValid)', async () => {
       const { authority, authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
       const sig = makeRealSignature('user-1')
@@ -1577,7 +1539,7 @@ describe('AuthorityEngine', () => {
       expect(caught, 'expected CantDelete to reject').to.be.instanceOf(Error)
     })
 
-    it('should reject scopes not in the Scope view (ScopesValid) — BLOCKED on quereus#23', async () => {
+    it('should reject scopes not in the Scope view (ScopesValid)', async () => {
       const { authority, authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
       const sig = makeRealSignature('user-1')
@@ -1603,7 +1565,7 @@ describe('AuthorityEngine', () => {
       expect(caught).to.be.instanceOf(Error)
     })
 
-    it('should require a valid officer with rad scope and matching signature (UserValid) — BLOCKED on quereus#23', async () => {
+    it('should require a valid officer with rad scope and matching signature (UserValid)', async () => {
       const { authority, authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
       let caught: unknown
@@ -1625,7 +1587,7 @@ describe('AuthorityEngine', () => {
   // 14. Schema Constraints - InviteSlot Table
   // -----------------------------------------------------------------------
   describe('schema constraints - InviteSlot table', () => {
-    it('should validate CID as Digest of invite fields (CidValid) — BLOCKED on quereus#23', async () => {
+    it('should validate CID as Digest of invite fields (CidValid)', async () => {
       const { authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
       let caught: unknown
@@ -1643,7 +1605,7 @@ describe('AuthorityEngine', () => {
       expect(caught).to.be.instanceOf(Error)
     })
 
-    it('should reject InviteSlot when expiration is in the past (ExpirationValid) — BLOCKED on quereus#23', async () => {
+    it('should reject InviteSlot when expiration is in the past (ExpirationValid)', async () => {
       const { authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
       let caught: unknown
@@ -1661,7 +1623,7 @@ describe('AuthorityEngine', () => {
       expect(caught).to.be.instanceOf(Error)
     })
 
-    it('should validate InviteSignature against InviteKey (InviteSignatureValid) — BLOCKED on quereus#23', async () => {
+    it('should validate InviteSignature against InviteKey (InviteSignatureValid)', async () => {
       const { authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
       let caught: unknown
@@ -1679,7 +1641,7 @@ describe('AuthorityEngine', () => {
       expect(caught).to.be.instanceOf(Error)
     })
 
-    it('should reject update or delete of InviteSlot (InsertOnly) — BLOCKED on quereus#23', async () => {
+    it('should reject update or delete of InviteSlot (InsertOnly)', async () => {
       const { authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
       let updateErr: unknown
@@ -1729,7 +1691,7 @@ describe('AuthorityEngine', () => {
   // 15. Schema Constraints - InviteResult Table
   // -----------------------------------------------------------------------
   describe('schema constraints - InviteResult table', () => {
-    it('should reject update or delete of InviteResult (InsertOnly) — BLOCKED on quereus#23', async () => {
+    it('should reject update or delete of InviteResult (InsertOnly)', async () => {
       const { authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
       let updateErr: unknown
@@ -1751,7 +1713,7 @@ describe('AuthorityEngine', () => {
       if (deleteErr) { expect(deleteErr).to.be.instanceOf(Error) }
     })
 
-    it('should require a valid InviteSlot and AdminSignature (SigningValid) — BLOCKED on quereus#23', async () => {
+    it('should require a valid InviteSlot and AdminSignature (SigningValid)', async () => {
       const { authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
       let caught: unknown
@@ -1768,7 +1730,7 @@ describe('AuthorityEngine', () => {
       expect(caught).to.be.instanceOf(Error)
     })
 
-    it('should validate InviteSignature against the InviteSlot InviteKey (SignatureValid) — BLOCKED on quereus#23', async () => {
+    it('should validate InviteSignature against the InviteSlot InviteKey (SignatureValid)', async () => {
       // Once a seeded InviteSlot exists with a known InviteKey, attempting
       // to insert an InviteResult with a non-matching signature should fail
       // on SignatureValid. Setup requires a valid saveInviteWithSigning
@@ -1796,7 +1758,7 @@ describe('AuthorityEngine', () => {
       expect(caught).to.be.instanceOf(Error)
     })
 
-    it('should reject acceptance when Digest is null (DigestValid) — BLOCKED on quereus#23', async () => {
+    it('should reject acceptance when Digest is null (DigestValid)', async () => {
       const { authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
       let caught: unknown
@@ -1813,7 +1775,7 @@ describe('AuthorityEngine', () => {
       expect(caught).to.be.instanceOf(Error)
     })
 
-    it('should reject rejection when Digest is not null (DigestValid) — BLOCKED on quereus#23', async () => {
+    it('should reject rejection when Digest is not null (DigestValid)', async () => {
       const { authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
       let caught: unknown
@@ -1838,7 +1800,7 @@ describe('AuthorityEngine', () => {
   // tests retained as the flow's natural-language witness once #23 ships.
   // -----------------------------------------------------------------------
   describe('admin signing flow', () => {
-    it('should create an AdminSigning session with a random nonce — BLOCKED on quereus#23 (covered in signing.spec.ts)', async () => {
+    it('should create an AdminSigning session with a random nonce', async () => {
       const { authority, authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
       // proposeAdmin triggers SigningEngine.startSigningSession internally.
@@ -1871,7 +1833,7 @@ describe('AuthorityEngine', () => {
       expect(row?.Nonce).to.be.a('string').with.length.greaterThan(0)
     })
 
-    it('should reject AdminSigning with an invalid scope code (ScopeValid) — BLOCKED on quereus#23', async () => {
+    it('should reject AdminSigning with an invalid scope code (ScopeValid)', async () => {
       const { authority, authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
       const sig = makeRealSignature('user-1')
@@ -1895,7 +1857,7 @@ describe('AuthorityEngine', () => {
       expect(caught).to.be.instanceOf(Error)
     })
 
-    it('should validate the instigator signature on AdminSigning (SignatureValid) — BLOCKED on quereus#23', async () => {
+    it('should validate the instigator signature on AdminSigning (SignatureValid)', async () => {
       const { authority, authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
       const sig = makeRealSignature('user-1')
@@ -1918,7 +1880,7 @@ describe('AuthorityEngine', () => {
       expect(caught).to.be.instanceOf(Error)
     })
 
-    it('should reject update or delete of AdminSigning (InsertOnly) — BLOCKED on quereus#23', async () => {
+    it('should reject update or delete of AdminSigning (InsertOnly)', async () => {
       const { authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
       let updateErr: unknown
@@ -1944,7 +1906,7 @@ describe('AuthorityEngine', () => {
       expect(deleteErr).to.be.instanceOf(Error)
     })
 
-    it('should accept OfficerSignature when the officer has the required scope and digest matches — BLOCKED on quereus#23', async () => {
+    it('should accept OfficerSignature when the officer has the required scope and digest matches', async () => {
       // Happy-path OfficerSignature insertion through the full proposeAdmin
       // chain — covered in detail in signing.spec.ts. Asserts the row lands.
       const { authority, authorityEngine } = await createNetworkAndAuthority()
@@ -2019,7 +1981,7 @@ describe('AuthorityEngine', () => {
       expect(caught).to.be.instanceOf(Error)
     })
 
-    it('should create AdminSignature only when the threshold of OfficerSignatures is met — BLOCKED on quereus#23 (covered in signing.spec.ts threshold-met test)', async () => {
+    it('should create AdminSignature only when the threshold of OfficerSignatures is met', async () => {
       // Sentinel post-state: proposeAdmin with threshold=1 should land an
       // AdminSignature row after the single officer signs.
       const { authority, authorityEngine } = await createNetworkAndAuthority()
@@ -2051,7 +2013,7 @@ describe('AuthorityEngine', () => {
       expect(Number(row?.n)).to.be.greaterThan(0)
     })
 
-    it('should reject AdminSignature when insufficient OfficerSignatures exist — BLOCKED on quereus#23', async () => {
+    it('should reject AdminSignature when insufficient OfficerSignatures exist', async () => {
       const { authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
       let caught: unknown
@@ -2076,7 +2038,7 @@ describe('AuthorityEngine', () => {
     // multi-step setup (time-warp, threshold-met chain across multiple
     // admins) will be wired in when #23 lands.
 
-    it('should allow admin renewal before expiration with proper signatures — BLOCKED on quereus#23', async () => {
+    it('should allow admin renewal before expiration with proper signatures', async () => {
       const { authority, authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
       const sig = makeRealSignature('user-1')
@@ -2108,7 +2070,7 @@ describe('AuthorityEngine', () => {
       expect(Number(row?.n)).to.be.greaterThan(0)
     })
 
-    it('should allow primary authority to replace expired admin of another authority — BLOCKED on quereus#23', async () => {
+    it('should allow primary authority to replace expired admin of another authority', async () => {
       const { authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
       const row = await ctx.db
@@ -2117,7 +2079,7 @@ describe('AuthorityEngine', () => {
       expect(Number(row?.n)).to.equal(1)
     })
 
-    it('should require a new network if the primary authority admin itself expires without renewal — BLOCKED on quereus#23', async () => {
+    it('should require a new network if the primary authority admin itself expires without renewal', async () => {
       const { authority, authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
       const row = await ctx.db
@@ -2128,7 +2090,7 @@ describe('AuthorityEngine', () => {
       expect(row?.AuthorityId).to.equal(authority.id)
     })
 
-    it('should transition proposed admin to current admin after signing threshold is met — BLOCKED on quereus#23', async () => {
+    it('should transition proposed admin to current admin after signing threshold is met', async () => {
       // Post-#23 sweep: after the full proposeAdmin + signing chain
       // completes, the ProposedAdmin row should be promoted (or its
       // EffectiveAt should now appear in CurrentAdmin).
@@ -2167,7 +2129,7 @@ describe('AuthorityEngine', () => {
   // 18. Invitation Flow - Authority
   // -----------------------------------------------------------------------
   describe('invitation flow - authority invites', () => {
-    it('should create an InviteSlot with a valid CID, key pair, and AdminSignature backing — BLOCKED on quereus#23', async () => {
+    it('should create an InviteSlot with a valid CID, key pair, and AdminSignature backing', async () => {
       const { authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
       const invite = authorityEngine.createAuthorityInvite('InviteCheck')
@@ -2180,7 +2142,7 @@ describe('AuthorityEngine', () => {
       expect(row?.InviteKey).to.equal(invite.inviteKey)
     })
 
-    it('should allow creating a new Authority via accepted invite with valid proof of possession — BLOCKED on quereus#23', async () => {
+    it('should allow creating a new Authority via accepted invite with valid proof of possession', async () => {
       // Full flow: saveInviteWithSigning → respondToInvite(accept) →
       // NetworkEngine.createAuthority succeeds with context.InviteSlotCid.
       // Post-#23 sweep wires up the engine path that consumes the invite.
@@ -2207,7 +2169,7 @@ describe('AuthorityEngine', () => {
       expect(Number(row?.n)).to.be.greaterThan(0)
     })
 
-    it('should prevent reuse of an already-claimed invite slot — BLOCKED on quereus#23', async () => {
+    it('should prevent reuse of an already-claimed invite slot', async () => {
       // InviteResult primary key is SlotCid; a duplicate insert collides.
       const { networkEngine, authorityEngine } = await createNetworkAndAuthority()
       const invite = authorityEngine.createAuthorityInvite('ReusedSlot')
@@ -2240,7 +2202,7 @@ describe('AuthorityEngine', () => {
       expect(caught).to.not.equal(undefined)
     })
 
-    it('should create InviteResult marking acceptance with digest and invite signature — BLOCKED on quereus#23', async () => {
+    it('should create InviteResult marking acceptance with digest and invite signature', async () => {
       const { networkEngine, authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
       const invite = authorityEngine.createAuthorityInvite('AcceptCheck')
@@ -2266,7 +2228,7 @@ describe('AuthorityEngine', () => {
       expect(row?.InviteSignature).to.equal(invite.inviteSignature)
     })
 
-    it('should create InviteResult marking rejection with null digest — BLOCKED on quereus#23', async () => {
+    it('should create InviteResult marking rejection with null digest', async () => {
       const { networkEngine, authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
       const invite = authorityEngine.createAuthorityInvite('RejectCheck')
@@ -2294,7 +2256,7 @@ describe('AuthorityEngine', () => {
   // 19. Invitation Flow - Officer
   // -----------------------------------------------------------------------
   describe('invitation flow - officer invites', () => {
-    it('should create an InviteSlot for an officer invite with type "of" — BLOCKED on quereus#23', async () => {
+    it('should create an InviteSlot for an officer invite with type "of"', async () => {
       const { authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
       const invite = authorityEngine.createOfficerInvite({
@@ -2310,7 +2272,7 @@ describe('AuthorityEngine', () => {
       expect(row?.Type).to.equal('of')
     })
 
-    it('should include officer name, title, and scopes in the invite — BLOCKED on quereus#23', async () => {
+    it('should include officer name, title, and scopes in the invite', async () => {
       const { authorityEngine } = await createNetworkAndAuthority()
       const invite = authorityEngine.createOfficerInvite({
         name: 'Officer X',
@@ -2322,7 +2284,7 @@ describe('AuthorityEngine', () => {
       expect(invite.scopes).to.deep.equal(['rad', 'iad'])
     })
 
-    it('should allow accepting an officer invite to associate a user with the authority — BLOCKED on quereus#23', async () => {
+    it('should allow accepting an officer invite to associate a user with the authority', async () => {
       const { networkEngine, authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
       const invite = authorityEngine.createOfficerInvite({
@@ -2348,7 +2310,7 @@ describe('AuthorityEngine', () => {
       expect(Boolean(row?.IsAccepted)).to.equal(true)
     })
 
-    it('should prevent reuse of an already-claimed officer invite slot — BLOCKED on quereus#23', async () => {
+    it('should prevent reuse of an already-claimed officer invite slot', async () => {
       const { networkEngine, authorityEngine } = await createNetworkAndAuthority()
       const invite = authorityEngine.createOfficerInvite({
         name: 'OfReuse',
