@@ -239,7 +239,13 @@ describe('Digest/SignatureValid live CHECK coverage (DIG-03-a / D-05)', function
     // 'WRONG TITLE' produces a different Digest than 'DIG-03 Election'.
     // Election.InsertValid's Digest mismatch triggers the constraint violation —
     // proving the scalar evaluates correctly inside the CHECK path on quereus 4.x.
-    let threw = false
+    //
+    // WR-01 (35-REVIEW): assert the THROWN MESSAGE names the InsertValid
+    // constraint — a bare `threw === true` passes on ANY error (setup failure,
+    // a different constraint, a column-resolution error) and would not prove the
+    // Digest CHECK actually fired. This matches the suite's discriminating
+    // convention (authority.spec.ts:1333, Phase 34 f50b50d WR-03).
+    let caught: unknown
     try {
       await db.exec(
         `insert into Election (Id, AuthorityId, Title, Date, RevisionDeadline, BallotDeadline, Type)
@@ -255,10 +261,14 @@ describe('Digest/SignatureValid live CHECK coverage (DIG-03-a / D-05)', function
           type: SEED_ELECTION_TYPE,
         },
       )
-    } catch {
-      threw = true
+    } catch (err) {
+      caught = err
     }
-    expect(threw, 'Election.InsertValid CHECK must REJECT a row whose Digest does NOT match AdminSigning.Digest').to.equal(true)
+    expect(caught, 'Election.InsertValid CHECK must REJECT a row whose Digest does NOT match AdminSigning.Digest').to.be.instanceOf(Error)
+    expect(
+      (caught as Error).message,
+      'expected the InsertValid Digest mismatch, not a setup/other-constraint error',
+    ).to.include('InsertValid')
   })
 
   // -------------------------------------------------------------------------

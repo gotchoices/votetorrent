@@ -20,7 +20,10 @@
  *
  * NOTE: If `votetorrent.qsql` is ever edited, `schema-sql.ts` MUST be regenerated
  * (the Hermes runtime loads the generated string, not the .qsql source directly).
- * Editing the .qsql alone is a silent no-op on Hermes.
+ * Editing the .qsql alone is a silent no-op on Hermes. WR-02 (35-REVIEW): this
+ * lock therefore scans BOTH artifacts — the .qsql source AND the generated
+ * runtime string — so a stale/un-regenerated or hand-edited schema-sql.ts that
+ * carries a bare `number` column is caught even when the .qsql is clean.
  */
 
 import { expect } from 'chai'
@@ -30,32 +33,54 @@ import { fileURLToPath } from 'node:url'
 
 const testDir = dirname(fileURLToPath(import.meta.url))
 
-// Path to the canonical schema source (NOT schema-sql.ts — the .qsql is the
-// human-readable single source of truth; schema-sql.ts is generated from it).
+// Path to the canonical schema source (the .qsql is the human-readable single
+// source of truth) and to the generated string the Hermes runtime actually loads.
 const QSQL_PATH = join(testDir, '../../vote-core/schema/votetorrent.qsql')
+const GENERATED_PATH = join(testDir, '../src/database/schema-sql.ts')
+
+// Scan newline-delimited schema text for bare `number` column declarations.
+// Active lines only — strip full-line comments (lines beginning with optional
+// whitespace then `--`) so prose like "lower numbers are shown first" or
+// "-- Sequence number" cannot false-positive. The regex matches a column
+// declaration of the form `<indent> <ColumnName> number <ws|comma|)|EOL>`:
+//   Catches:  `  Sequence number null`, `  Foo number,`, `  Bar number)`
+//   Does NOT match:
+//     - `-- Sequence number` (stripped above)
+//     - `SomeNumberField integer` (type token is `integer`, not `number`)
+//     - `NumberRequiredTSAs integer` (column name contains "Number", type integer)
+//     - `typeof(new.NumberRequiredTSAs) = 'integer'` (not a column declaration)
+// IN-01 (35-REVIEW): the `)` terminator also flags a trailing `Bar number)`.
+function findBareNumberColumns (schemaText: string): string[] {
+  return schemaText
+    .split('\n')
+    .filter(line => !/^\s*--/.test(line))
+    .filter(line => /^\s+\w+\s+number(\s|,|\)|$)/.test(line))
+}
 
 describe('schema number-type regression lock (DIG-03-b / D-07)', () => {
-  it('no active column declarations use bare "number" type (Digest coercion class)', () => {
+  it('no active column declarations use bare "number" type in votetorrent.qsql (Digest coercion class)', () => {
     const qsql = readFileSync(QSQL_PATH, 'utf8')
-
-    // Active lines only — strip full-line comments (lines beginning with
-    // optional whitespace then `--`). This ensures prose like "lower numbers
-    // are shown first" or "-- Sequence number" cannot false-positive.
-    const activeLines = qsql.split('\n').filter(line => !/^\s*--/.test(line))
-
-    // Match column declarations of the form:
-    //   <indent> <ColumnName> number <whitespace|comma|EOL>
-    // Catches:  `  Sequence number null`, `  Foo number,`, `  Bar number`
-    // Does NOT match:
-    //   - `-- Sequence number` (stripped above)
-    //   - `SomeNumberField integer` (word before type is `integer`, not `number`)
-    //   - `NumberRequiredTSAs integer` (column name contains "Number", type is integer)
-    //   - `typeof(new.NumberRequiredTSAs) = 'integer'` (not a column declaration)
-    const violations = activeLines.filter(line => /^\s+\w+\s+number(\s|,|$)/.test(line))
+    const violations = findBareNumberColumns(qsql)
 
     expect(
       violations,
-      `Found ${violations.length} bare 'number' column declaration(s) — Digest coercion class risk:\n  ${violations.join('\n  ')}`,
+      `Found ${violations.length} bare 'number' column declaration(s) in votetorrent.qsql — Digest coercion class risk:\n  ${violations.join('\n  ')}`,
+    ).to.have.length(0)
+  })
+
+  it('no bare "number" column in the generated schema-sql.ts (the runtime artifact Hermes loads)', () => {
+    // schema-sql.ts is a JSON-escaped single-line string export: real newlines
+    // and tabs appear as the literal sequences `\n` / `\t`. Un-escape them so the
+    // same line-based scan as the .qsql applies symmetrically.
+    const generated = readFileSync(GENERATED_PATH, 'utf8')
+      .replace(/\\n/g, '\n')
+      .replace(/\\t/g, '\t')
+    const violations = findBareNumberColumns(generated)
+
+    expect(
+      violations,
+      `Found ${violations.length} bare 'number' column declaration(s) in the generated schema-sql.ts — `
+      + `regenerate it from votetorrent.qsql (editing the .qsql alone is a silent no-op on Hermes):\n  ${violations.join('\n  ')}`,
     ).to.have.length(0)
   })
 })
