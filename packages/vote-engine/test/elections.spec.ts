@@ -479,7 +479,10 @@ describe('ElectionEngine', () => {
         .prepare('select Code, OptionRange, Required from ProposedQuestion where BallotId = :id and Code = :c')
         .get({ id: ballotId, c: 'q2' })
       expect(row2?.Code, 'second ProposedQuestion row must be persisted').to.equal('q2')
-      expect(row2?.OptionRange, 'D-04 guard: caller-supplied OptionRange must round-trip').to.equal(JSON.stringify({ min: 1, max: 3 }))
+      // D-04 guard: OptionRange must be stored in PostgreSQL range notation
+      // (`{min, max}`), the encoding the canonical read path (parsePgRange) and
+      // the DB default `'{1, 1}'` both use — NOT JSON (WR-01, 34-REVIEW).
+      expect(row2?.OptionRange, 'D-04 guard: caller-supplied OptionRange must round-trip').to.equal('{1, 3}')
       expect(row2?.Required, 'D-04 guard: caller-supplied Required=false must round-trip').to.satisfy(
         (v: unknown) => v === 0 || v === false, 'expected Required to be 0 or false'
       )

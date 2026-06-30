@@ -1,5 +1,5 @@
 import { MisuseError, QuereusError } from '@quereus/quereus'
-import { fromCanonicalDatetime, nowCanonicalDatetime, parseJsonOr, parsePgRange } from '../utils.js'
+import { formatPgRange, fromCanonicalDatetime, nowCanonicalDatetime, parseJsonOr, parsePgRange } from '../utils.js'
 import type { EngineContext } from '../types.js'
 import type {
   Ballot,
@@ -505,26 +505,33 @@ export class ElectionEngine implements IElectionEngine {
     const tid = nextTid++
     const signerKey = this.ctx.user?.activeKeys?.[0]?.key ?? null
 
-    // Build column list and params dynamically for columns with DB defaults
-    // that must not receive an explicit null bind (Rule: never bind null to
-    // a `default X` column without a `null` keyword — omit the column so
-    // the DB default applies).
-    const extraCols: string[] = []
-    const extraParams: Record<string, unknown> = {}
+    // Build column list and params for columns with DB defaults that must not
+    // receive an explicit null bind (Rule: never bind null to a `default X`
+    // column without a `null` keyword — omit the column so the DB default
+    // applies). Each optional column is described by a single { col, ph, key,
+    // val } descriptor so the column name, placeholder, and param key cannot
+    // drift apart (WR-02).
+    //
+    // OptionRange is written in PostgreSQL range notation (`{min, max}`) via
+    // formatPgRange, NOT JSON — the canonical read path (getBallotDetails →
+    // parsePgRange) and the DB default `'{1, 1}'` both use range notation, so
+    // a JSON encoding would be unreadable on the way back out (WR-01).
+    const optional = ([
+      question.optionRange != null && {
+        col: 'OptionRange', ph: ':optionRange', key: 'optionRange', val: formatPgRange(question.optionRange)
+      },
+      question.required != null && {
+        col: 'Required', ph: ':required', key: 'required', val: question.required
+      }
+    ].filter(Boolean) as Array<{ col: string; ph: string; key: string; val: unknown }>)
 
-    if (question.optionRange != null) {
-      extraCols.push('OptionRange')
-      extraParams.optionRange = JSON.stringify(question.optionRange)
-    }
-    if (question.required != null) {
-      extraCols.push('Required')
-      extraParams.required = question.required
-    }
+    const extraParams: Record<string, unknown> = {}
+    for (const o of optional) extraParams[o.key] = o.val
 
     const baseCols = ['BallotId', 'Code', 'Title', 'Instructions', 'DependsOn', 'Type', 'ScoreRange', 'Grouping', 'Sequence']
     const baseVals = [':ballotId', ':code', ':title', ':instructions', ':dependsOn', ':type', ':scoreRange', ':grouping', ':sequence']
-    const colList = [...baseCols, ...extraCols].join(',\n\t\t\t\t\t')
-    const valList = [...baseVals, ...extraCols.map(c => `:${c[0].toLowerCase() + c.slice(1)}`)].join(',\n\t\t\t\t\t')
+    const colList = [...baseCols, ...optional.map(o => o.col)].join(',\n\t\t\t\t\t')
+    const valList = [...baseVals, ...optional.map(o => o.ph)].join(',\n\t\t\t\t\t')
 
     try {
       await this.ctx.db.exec(

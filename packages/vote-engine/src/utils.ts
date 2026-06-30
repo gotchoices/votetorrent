@@ -62,6 +62,19 @@ export const parsePgRange = (
 }
 
 /**
+ * Format an integer-pair range into the PostgreSQL-style `{min, max}` notation
+ * the DB stores for `Question.OptionRange` / `Question.ScoreRange`.
+ *
+ * This is the inverse of `parsePgRange`: the two MUST agree on the wire format
+ * so a value written by the engine can be read back by `parsePgRange` without
+ * throwing. Do NOT use `JSON.stringify` here — JSON arrays/objects use square
+ * brackets / quoted keys, which `parsePgRange` (and the DB default `'{1, 1}'`)
+ * reject. Output matches the DB default spacing (`{1, 1}`).
+ */
+export const formatPgRange = (range: { min: number; max: number }): string =>
+  `{${range.min}, ${range.max}}`
+
+/**
  * Convert `Digest()` output to bytes for the app-layer sign callback (WR-01, 17-REVIEW).
  *
  * Discriminates hex vs base64url by SHAPE (exact length + alphabet), NOT by
