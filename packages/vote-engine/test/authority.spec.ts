@@ -1069,16 +1069,29 @@ describe('AuthorityEngine', () => {
   // 9. Schema Constraints - Admin Table
   // -----------------------------------------------------------------------
   describe('schema constraints - Admin table', () => {
-    // WR-20 (17-REVIEW): rewritten — Admin.OfficerRequired is check on update, not on
-    // insert. Original body used INSERT via create() (wrong op); new body inserts a second
-    // Admin row (shoe-in path, different EffectiveAt, no corresponding Officer) then UPDATEs
-    // it, confirmed rejecting on quereus@4.2.1.
-    it('should require at least one Officer with rad scope for Admin updates (OfficerRequired) — confirmed on quereus@4.2.1', async () => {
+    // WR-03 (34-REVIEW) + schema fix: the Admin.OfficerRequired CHECK previously
+    // referenced a phantom `scope` column (`select scope from json_each(O.Scopes)`),
+    // so on quereus@4.2.1 it threw `Column not found: scope` whenever it evaluated —
+    // the constraint was effectively non-functional. The schema was fixed to
+    // `select 1 from json_each(O.Scopes)` (the idiom used by the other three
+    // json_each sites in votetorrent.qsql). This test is the regression lock for
+    // that fix: an Admin UPDATE for an authority that has a rad-scoped Officer must
+    // now evaluate the CHECK cleanly and succeed — never resurfacing the phantom
+    // `Column not found: scope` error.
+    //
+    // KNOWN COVERAGE GAP (tracked, debt): the *negative* path — OfficerRequired
+    // actually rejecting an Admin update when NO rad-scoped Officer exists — is not
+    // asserted here. Reliably constructing that scenario requires seeding a non-rad
+    // Officer, which trips Officer's own AdminValid/InsertValid/ScopesValid
+    // constraints (complex setup), and quereus's `check on update` correlated-EXISTS
+    // binding reaches the authority's existing rad-scoped Officer regardless of the
+    // updated row's EffectiveAt. Negative enforcement coverage is deferred.
+    it('Admin.OfficerRequired CHECK evaluates cleanly (no phantom `scope` column error) when a rad-scoped Officer exists — confirmed on quereus@4.2.1', async () => {
       const { authority, authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
-      // Insert a second Admin row for the same authority with a different EffectiveAt.
-      // Shoe-in path is available: only one authority exists, no SigningNonce, no invite.
-      // No Officer exists for this new EffectiveAt, so OfficerRequired will fire on UPDATE.
+      // Insert a second Admin row for the same authority (shoe-in path: only one
+      // authority exists, no SigningNonce, no invite), then UPDATE it with a real
+      // column change so the OfficerRequired CHECK is genuinely evaluated.
       const newEffectiveAt = Date.now() + 99_000
       await ctx.db.exec(
         `insert into Admin (AuthorityId, EffectiveAt, ThresholdPolicies)
@@ -1090,24 +1103,21 @@ describe('AuthorityEngine', () => {
       try {
         await ctx.db.exec(
           `update Admin with context Tid = 9, SigningNonce = null, InviteSlotCid = null, InviteSignature = null
-           set ThresholdPolicies = '[]'
+           set ThresholdPolicies = '[{"scope": "rad", "threshold": 1}]'
            where AuthorityId = :id and EffectiveAt = :e`,
           { id: authority.id, e: newEffectiveAt }
         )
       } catch (err) {
         caught = err
       }
-      // WR-03 (34-REVIEW): an instanceOf(Error)-only assertion hid that this
-      // UPDATE does NOT reject with a clean `OfficerRequired` violation — on
-      // quereus@4.2.1 the OfficerRequired CHECK evaluates a sub-expression that
-      // fails to resolve the `scope` column, surfacing as `Column not found:
-      // scope`. The mutation is still rejected (the UPDATE throws), but the
-      // title's "OfficerRequired" claim does not match the thrown message.
-      // Locking in the observed 4.2.1 message so a future quereus bump that
-      // changes this surfaces here; the underlying OfficerRequired-check column
-      // reference needs a human fix (out of WR-03 scope).
-      expect(caught, 'expected the Admin UPDATE to be rejected').to.be.instanceOf(Error)
-      expect((caught as Error).message, 'OfficerRequired check currently fails on the `scope` column reference').to.include('scope')
+      // The CHECK now evaluates its real predicate (the authority's primary Officer
+      // carries a rad scope) and the UPDATE succeeds — and crucially never throws
+      // the phantom-column error the malformed schema used to produce.
+      expect(
+        caught == null || !(caught as Error).message.includes('Column not found: scope'),
+        'OfficerRequired CHECK must no longer throw the phantom `scope` column error'
+      ).to.equal(true)
+      expect(caught, 'a valid Admin update (rad-scoped Officer present) must not be rejected').to.equal(undefined)
     })
 
     it('should reject Admin insert when AuthorityId does not reference an existing Authority', async () => {
@@ -1325,7 +1335,7 @@ describe('AuthorityEngine', () => {
 
     // WR-20 (17-REVIEW): originally skipped for vacuous conditional assertion;
     // rewritten with discriminating expect(caught). Confirmed passing on quereus@4.2.1.
-    it('should require valid AdminSigning for officers of an existing authority (InsertValid) — confirmed on quereus@4.2.1', async () => {
+    it('should reject an orphan Officer insert for an existing authority — no matching Admin row (AdminValid) — confirmed on quereus@4.2.1', async () => {
       const { authority, authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
       let caught: unknown
@@ -1339,12 +1349,13 @@ describe('AuthorityEngine', () => {
       } catch (err) {
         caught = err
       }
-      // WR-03 (34-REVIEW): an instanceOf(Error)-only assertion hid that the
-      // constraint which actually fires here is `AdminValid`, not the
-      // `InsertValid` named in the title — the orphan Officer INSERT trips the
-      // AdminValid (no matching Admin row for the supplied AdminEffectiveAt)
-      // check first. The insert is correctly rejected; discriminate on the
-      // constraint that genuinely fires so a setup failure can no longer pass.
+      // WR-03 (34-REVIEW): the title formerly claimed `InsertValid`, but an
+      // orphan Officer INSERT (no matching Admin row for the supplied
+      // AdminEffectiveAt) trips `AdminValid` first — InsertValid is never
+      // reached. The InsertValid signing-nonce path is covered separately by the
+      // "completed AdminSignature for the signing nonce (InsertValid)" test
+      // below. Title and assertion reconciled to the constraint that genuinely
+      // fires so a setup failure can no longer pass.
       expect(caught, 'expected the orphan Officer insert to be rejected').to.be.instanceOf(Error)
       expect((caught as Error).message, 'AdminValid is the constraint that actually fires for this orphan insert').to.include('AdminValid')
     })

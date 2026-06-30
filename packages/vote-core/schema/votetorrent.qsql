@@ -96,7 +96,7 @@ declare schema main
 		primary key (AuthorityId, EffectiveAt),
 		constraint OfficerRequired check on update (
 			exists (select 1 from Officer O where O.AuthorityId = new.AuthorityId and O.AdminEffectiveAt = new.EffectiveAt
-				and exists (select scope from json_each(O.Scopes) where value = 'rad')
+				and exists (select 1 from json_each(O.Scopes) where value = 'rad')
 			)
 		),
 		constraint AuthorityIdValid check (exists (select 1 from Authority A where A.Id = new.AuthorityId)),
