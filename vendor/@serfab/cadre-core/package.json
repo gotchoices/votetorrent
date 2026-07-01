@@ -68,7 +68,7 @@
     "@optimystic/db-p2p": "^0.13.5",
     "@optimystic/quereus-plugin-crypto": "^0.13.5",
     "@optimystic/quereus-plugin-optimystic": "^0.13.5",
-    "@quereus/quereus": "^3.2.1",
+    "@quereus/quereus": "^4.2.1",
     "@serfab/quereus-plugin-sereus": "workspace:^",
     "debug": "^4.4.3",
     "libp2p": "^3.1.3",
