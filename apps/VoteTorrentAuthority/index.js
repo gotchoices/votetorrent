@@ -32,3 +32,10 @@ runReplicationProof();
 // __DEV__ && SIGNING_PROOF_ENABLED (see proof-flags.generated.ts). Logs under [spike013].
 import {runSigningProofRunner} from './src/engines/signing-proof-runner';
 runSigningProofRunner();
+
+// Phase 37 (STR-02) dev-only on-device strand persistence proof. Fire-and-forget; no-op
+// unless __DEV__ && STRAND_PERSISTENCE_PROOF_ENABLED (see proof-flags.generated.ts). Boots its
+// own bootstrap/solo CadreNode and calls the existing runPersistenceProof(node), which emits
+// the FULL-CHAIN VERDICT line under [proof]. Logs its own boot markers under [strand-persistence-proof].
+import {runStrandPersistenceProof} from './src/engines/strand-persistence-proof-runner';
+runStrandPersistenceProof();

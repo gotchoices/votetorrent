@@ -75,6 +75,10 @@ restore_flags() {
 // Static import ONLY — dynamic require() breaks Metro (Phase 16-07 lesson).
 export const PROOF_ENABLED = false;
 export const DIAL_PROBE_ENABLED = false;
+export const REPLICATION_PROOF_ENABLED = false;
+export const USE_LOCAL_DB_FACTORY = false;
+export const SIGNING_PROOF_ENABLED = false;
+export const STRAND_PERSISTENCE_PROOF_ENABLED = false;
 EOF
 }
 trap restore_flags EXIT
@@ -82,12 +86,20 @@ trap restore_flags EXIT
 # D-18/D-19: Write the generated flag file before launch so PROOF_ENABLED=true and
 # DIAL_PROBE_ENABLED=false are bundled into the Metro-served JS.
 # The dial probe is kept off during a proof run (D-19).
-echo "[vtest02] Writing proof-flags.generated.ts (PROOF_ENABLED=true, DIAL_PROBE_ENABLED=false) ..."
+# Phase 37 (D-05): STRAND_PERSISTENCE_PROOF_ENABLED=true also flips this run into strand mode —
+# the app boots its own bootstrap/solo CadreNode (strand-persistence-proof-runner.ts) and calls
+# the SAME runPersistenceProof(node) that PROOF_ENABLED's solo rnDbFactory path already exercises;
+# the verdict poll below is unchanged either way.
+echo "[vtest02] Writing proof-flags.generated.ts (PROOF_ENABLED=true, DIAL_PROBE_ENABLED=false, STRAND_PERSISTENCE_PROOF_ENABLED=true) ..."
 cat > "${FLAG_FILE}" << 'EOF'
 // proof-flags.generated.ts — written by run-vtest02.sh before launch (D-18).
 // DO NOT commit this override (EXIT trap restores the committed default-false baseline).
 export const PROOF_ENABLED = true;
 export const DIAL_PROBE_ENABLED = false;
+export const REPLICATION_PROOF_ENABLED = false;
+export const USE_LOCAL_DB_FACTORY = false;
+export const SIGNING_PROOF_ENABLED = false;
+export const STRAND_PERSISTENCE_PROOF_ENABLED = true;
 EOF
 
 # D-11: Fresh LevelDB reset — isolates the 4.x proof from any 3.x-written data.
@@ -95,6 +107,13 @@ EOF
 echo "[vtest02] Resetting LevelDB stores (D-11) ..."
 adb shell run-as org.votetorrent.authority \
   find /data/data/org.votetorrent.authority/files -name "votetorrent-q2-*" -exec rm -rf {} + 2>/dev/null || true
+
+# Phase 37 (D-05/D-06): the strand persistence proof runner boots its OWN CadreNode store
+# (votetorrent-cadre-probe-persistence) — the votetorrent-q2-* glob above does NOT cover it
+# (per project_strand_storage_per_network_isolation memory — a shared handle contaminates
+# count(*) across paths). Reset it too so the strand proof starts from a fresh slate.
+adb shell run-as org.votetorrent.authority \
+  find /data/data/org.votetorrent.authority/files -name "votetorrent-cadre-probe-persistence*" -exec rm -rf {} + 2>/dev/null || true
 
 echo "[vtest02] Force-stopping ${PACKAGE} ..."
 adb shell am force-stop "${PACKAGE}"
