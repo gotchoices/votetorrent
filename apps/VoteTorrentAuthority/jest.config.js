@@ -1,5 +1,15 @@
 module.exports = {
   preset: 'react-native',
+  // cadre-core-node.smoke.spec.ts (STR-02 D-12/D-13) is a dedicated
+  // Node-environment test that imports the REAL @serfab/cadre-core with no
+  // virtual mock — it must run ONLY under jest.node.config.js (testEnvironment
+  // 'node', no RN preset). Excluded here so the RN preset's default resolver
+  // (which has no mapper/mock for a real @serfab/cadre-core load) doesn't pick
+  // it up and fail with a spurious "Cannot find module" (D-13 isolation).
+  testPathIgnorePatterns: [
+    '<rootDir>/node_modules/',
+    '<rootDir>/src/engines/__tests__/cadre-core-node.smoke.spec.ts',
+  ],
   // Allow Babel to transform ESM-only workspace packages and quereus packages
   // so tests can import them without ESM/CJS resolver failures.
   // Includes: @quereus/* (quereus engine), @optimystic/* (plugin), @votetorrent/* (workspace),
