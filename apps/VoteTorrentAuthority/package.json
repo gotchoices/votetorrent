@@ -9,6 +9,7 @@
 		"lint": "eslint .",
 		"start": "react-native start",
 		"test": "jest",
+		"test:node": "jest --config jest.node.config.js",
 		"build": "bin/build.sh",
 		"clean": "rm -rf node_modules"
 	},
