@@ -35,9 +35,6 @@ import type {
 // Using AsyncStorage shim for local storage
 
 describe('NetworksEngine', () => {
-  // BLOCKED on https://github.com/gotchoices/quereus/issues/23 — Network's
-  // `CantDelete check on delete (false)` fires on INSERT in Quereus 2.9.0/
-  // 3.1.1. Whole-flow test depends on create() succeeding.
   it('should exercise create, clearRecentNetworks, getRecentNetworks, and open', async () => {
     // Ensure recentNetworks starts as an empty array for spread operations in create()
     await AsyncStorage.setItem('recentNetworks', [])
@@ -239,11 +236,6 @@ describe('NetworksEngine', () => {
     }).contexts.get(hash)
   }
 
-  // BLOCKED on https://github.com/gotchoices/quereus/issues/23
-  // — `check on delete (false)` fires on INSERT in Quereus 2.9.0 / 3.1.1,
-  // tripping Network.CantDelete during the create() batch. When the
-  // upstream fix ships, remove `.skip` and the row-level read below
-  // becomes a passing assertion.
   it('NET-01: create() binds the UserKey insert to the PubKey column and caches the EngineContext', async () => {
     await AsyncStorage.setItem('recentNetworks', [])
     const engine = new NetworksEngine(AsyncStorage)
@@ -260,19 +252,15 @@ describe('NetworksEngine', () => {
       undefined
     )
 
-    // Plan 03-05 NET-01 row-level assertion (restored — will pass once
-    // quereus#23 lands): the UserKey row written by create() must round-trip
-    // through `select PubKey from UserKey where UserId = :userId` and equal
-    // the hex pubkey the engine bound on insert.
+    // Plan 03-05 NET-01 row-level assertion: the UserKey row written by
+    // create() must round-trip through `select PubKey from UserKey where
+    // UserId = :userId` and equal the hex pubkey the engine bound on insert.
     const row = await ctx!.db
       .prepare(`select PubKey from UserKey where UserId = :userId`)
       .get({ userId: user.id })
     expect(row?.['PubKey'], 'UserKey.PubKey should round-trip the inserted hex').to.equal(publicHex)
   })
 
-  // BLOCKED on https://github.com/gotchoices/quereus/issues/23 (same
-  // CantDelete-on-INSERT trip as NET-01). Restored row-level read of the
-  // User row becomes a passing assertion once #23 lands.
   it('NET-02/NET-03: open() reuses the cached EngineContext.db instance from create()', async () => {
     await AsyncStorage.setItem('recentNetworks', [])
     const engine = new NetworksEngine(AsyncStorage)
@@ -301,9 +289,9 @@ describe('NetworksEngine', () => {
     expect(ctxAfterOpen).to.not.equal(undefined)
     expect(ctxAfterOpen!.db).to.equal(ctxAfterCreate!.db)
 
-    // Plan 03-05 NET-02 row-level assertion (restored — will pass once
-    // quereus#23 lands): the User row written by create() must round-trip
-    // through `select Name from User where Id = :userId`.
+    // Plan 03-05 NET-02 row-level assertion: the User row written by
+    // create() must round-trip through `select Name from User where
+    // Id = :userId`.
     const userRow = await ctxAfterOpen!.db
       .prepare(`select Name from User where Id = :userId`)
       .get({ userId: user.id })
@@ -336,9 +324,8 @@ describe('NetworksEngine', () => {
     )
   })
 
-  // BLOCKED on https://github.com/gotchoices/quereus/issues/23 (CantDelete
-  // fires on INSERT). NET-04 itself only tests LocalStorage, but it gates
-  // on a successful create() call which trips #23.
+  // NET-04 itself only tests LocalStorage, but it gates on a successful
+  // create() call.
   it('NET-04: getRecentNetworks() round-trips through LocalStorage after create()', async () => {
     await AsyncStorage.setItem('recentNetworks', [])
     const engine = new NetworksEngine(AsyncStorage)

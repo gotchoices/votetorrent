@@ -97,10 +97,7 @@ function makeNetworkInit (): NetworkInit {
 }
 
 // Constructs a UserEngine bound to a DB context produced by
-// NetworksEngine.create(). All call sites of this helper are bug-blocked
-// on quereus#23 today (CantDelete fires on INSERT during the create()
-// batch); the helper exists so the body of each `it.skip` reads naturally
-// and converts to passing assertions the moment #23 ships.
+// NetworksEngine.create().
 async function createUserEngineForExistingNetwork (): Promise<{
   engine: UserEngine
   ctx: EngineContext
@@ -128,9 +125,8 @@ async function createUserEngineForExistingNetwork (): Promise<{
   return { engine, ctx, user }
 }
 
-// Pure-schema-only DB. Loads the schema but performs no INSERTs (so it
-// does not trip quereus#23) — useful for constructor/argument-shape tests
-// that do not need a populated DB.
+// Pure-schema-only DB. Loads the schema but performs no INSERTs — useful
+// for constructor/argument-shape tests that do not need a populated DB.
 async function makeDbOnlyUserEngine (
   overrides?: Partial<User>
 ): Promise<{ engine: UserEngine, ctx: EngineContext, user: User }> {
@@ -161,9 +157,6 @@ describe('UserEngine', () => {
       expect(summary?.activeKeys).to.be.an('array').with.length(1)
     })
 
-    // BLOCKED on https://github.com/gotchoices/quereus/issues/23 —
-    // createUserEngineForExistingNetwork() depends on NetworksEngine.create()
-    // succeeding, which trips CantDelete on INSERT in Quereus 3.1.1.
     it('returns the User row read from the DB when a context is bound', async () => {
       const { engine, user } = await createUserEngineForExistingNetwork()
       const summary = await engine.getSummary()
@@ -171,8 +164,8 @@ describe('UserEngine', () => {
       expect(summary?.name).to.equal(user.name)
     })
 
-    // BLOCKED on quereus#23 (same chain — needs a populated DB to assert
-    // the undefined branch is reachable via missing id).
+    // Needs a populated DB to assert the undefined branch is reachable via
+    // a missing id.
     it('returns undefined when the bound user id has no row', async () => {
       const { ctx } = await createUserEngineForExistingNetwork()
       const ghost = makeUser({ id: 'never-existed-user' })
@@ -186,8 +179,6 @@ describe('UserEngine', () => {
   // USER-02 — create
   // -----------------------------------------------------------------------
   describe('create', () => {
-    // BLOCKED on quereus#23 — User.CantDelete (`check on delete (false)`)
-    // fires on the INSERT, same chain as networks-engine.create().
     it('inserts a User row and an initial UserKey row with hex pubkey', async () => {
       const { engine, ctx, user } = await makeDbOnlyUserEngine()
       const { publicHex } = randomTestKeyPair()
@@ -251,7 +242,6 @@ describe('UserEngine', () => {
   // USER-04 — revise
   // -----------------------------------------------------------------------
   describe('revise', () => {
-    // BLOCKED on quereus#23 — depends on a User row produced by create().
     // EXPECTED-RED-UNTIL-IMPL UKEY-01 (revise real-signature engine binding)
     it('updates User name and imageRef; committed signature is not a placeholder (UKEY-01 / SIGN-01)', async () => {
       // The test supplies a REAL secp256k1 signature for the revise operation.
@@ -327,8 +317,6 @@ describe('UserEngine', () => {
   // USER-05 — addKey
   // -----------------------------------------------------------------------
   describe('addKey', () => {
-    // BLOCKED on quereus#23 — UserKey CHECK pipeline (UserIdValid +
-    // SignatureValid) needs a User row, which create() can't seed today.
     it('inserts a UserKey row with the per-INSERT context envelope', async () => {
       const { engine, ctx, user } = await createUserEngineForExistingNetwork()
       const { publicHex } = randomTestKeyPair()
@@ -440,10 +428,7 @@ describe('UserEngine', () => {
   // USER-06 — revokeKey
   // -----------------------------------------------------------------------
   describe('revokeKey', () => {
-    // BLOCKED on quereus#23 — UserKey.DeleteValid is `check on delete`,
-    // which is *exactly* the constraint pattern the upstream bug breaks.
-    // The DELETE will fail today on the buggy check-on-delete trip even
-    // though the row to delete may not exist; once #23 lands, this test
+    // UserKey.DeleteValid is a `check on delete` constraint; this test
     // exercises the schema's intended "not-the-last-key" guard.
     // EXPECTED-RED-UNTIL-IMPL UKEY-02 (revokeKey real-signature engine binding)
     it('deletes a UserKey row by hex pubkey; committed event signature is not a placeholder (UKEY-02 / SIGN-01)', async () => {
@@ -549,11 +534,7 @@ describe('UserEngine', () => {
     // cached EngineContext produced by createUserEngineForExistingNetwork
     // — same shape as network.spec.ts §11. Both require a seeded
     // InviteSlot + AdminSignature for the InviteResult CHECK constraints,
-    // so they remain bug-blocked on quereus#23.
-
-    // BLOCKED on quereus#23 — seeding an InviteSlot + AdminSignature row
-    // is required for the InviteResult CHECK constraints to pass, and
-    // both require a populated DB from create().
+    // and a populated DB from create().
     it('inserts an InviteResult row for an accepted invite', async () => {
       const { ctx } = await createUserEngineForExistingNetwork()
       const networkEngine = new NetworkEngine(
@@ -835,10 +816,9 @@ describe('UserEngine', () => {
     // WR-02: the deny-by-default contract (officer under a future-dated admin or
     // an authority with no effective admin returns false) cannot be seeded as a
     // unit test today: a raw Admin/Officer INSERT with a custom EffectiveAt trips
-    // the InsertValid CHECK (the quereus#23 family — the same gap that BLOCKs the
-    // constraint tests elsewhere in this suite). The deny-by-default behavior is
-    // instead documented in the isPrivileged docstring; pin a real test once a
-    // signing-context-bearing seed path for custom-dated admins is available.
+    // the InsertValid CHECK. The deny-by-default behavior is instead documented
+    // in the isPrivileged docstring; pin a real test once a signing-context-
+    // bearing seed path for custom-dated admins is available.
   })
 })
 

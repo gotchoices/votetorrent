@@ -81,9 +81,9 @@ function makeNetworkInit (): NetworkInit {
   }
 }
 
-// Pure schema-only DB. Loads the schema but performs no INSERTs (so it
-// does not trip quereus#23) — useful for the AUTH-06 binding-shape and
-// not-found-throws tests that don't need a populated DB.
+// Pure schema-only DB. Loads the schema but performs no INSERTs — useful
+// for the AUTH-06 binding-shape and not-found-throws tests that don't need
+// a populated DB.
 async function makeDbOnlyContext (): Promise<{ ctx: EngineContext, user: User }> {
   const db = new Database()
   await prepareDb(db)
@@ -93,7 +93,6 @@ async function makeDbOnlyContext (): Promise<{ ctx: EngineContext, user: User }>
 }
 
 // Reaches into a NetworksEngine for a populated EngineContext after create().
-// All call sites are bug-blocked on quereus#23 today.
 async function createPopulatedContext (): Promise<{
   ctx: EngineContext
   user: User
@@ -143,7 +142,7 @@ describe('SigningEngine', () => {
       // Pure-guard path: startSigningSession first runs a SELECT against
       // CurrentAdmin JOIN Officer. With an empty schema-only DB, this
       // returns no row → the implementation throws 'Admin not found'.
-      // No INSERT is attempted, so quereus#23 is not in play.
+      // No INSERT is attempted.
       const { ctx, user } = await makeDbOnlyContext()
       const engine = new SigningEngine(ctx)
       const sig = makeSignature(user.id)
@@ -161,9 +160,6 @@ describe('SigningEngine', () => {
       expect((caught as Error)?.message).to.include('Admin not found')
     })
 
-    // BLOCKED on https://github.com/gotchoices/quereus/issues/23 —
-    // startSigningSession INSERTs into AdminSigning which trips
-    // CantDelete on INSERT (same chain as NetworksEngine.create()).
     // Test asserts: a nonce is returned (UUID format), thresholdReached
     // honours the single-officer-threshold-policy seed.
     it('returns a nonce and propagates threshold result from sign()', async () => {
@@ -188,7 +184,6 @@ describe('SigningEngine', () => {
       expect(result.thresholdReached).to.be.a('boolean')
     })
 
-    // BLOCKED on quereus#23 — same chain.
     it('INSERTs an AdminSigning row with the scope, digest, and signer fields', async () => {
       const { ctx, user } = await createPopulatedContext()
       const engine = new SigningEngine(ctx)
@@ -218,7 +213,6 @@ describe('SigningEngine', () => {
       expect(row?.SignerKey).to.equal(sig.signerKey)
     })
 
-    // BLOCKED on quereus#23 — same chain.
     it('rejects an invalid scope via AdminSigning.ScopeValid', async () => {
       const { ctx, user } = await createPopulatedContext()
       const engine = new SigningEngine(ctx)
@@ -253,7 +247,7 @@ describe('SigningEngine', () => {
     // AUTH-06 contract guard: the engine source binds `signerKey:` (not the
     // pre-Plan 03-03 `key:`). Verify the source as-written contains the
     // `:signerKey` SQL placeholder and the matching JS bind site. This is
-    // a static check — no DB execution — and so does NOT trip quereus#23.
+    // a static check — no DB execution.
     it('binds the signerKey parameter (AUTH-06 contract — no DB execution)', async () => {
       const fs = await import('fs')
       const path = await import('path')
@@ -311,9 +305,6 @@ describe('SigningEngine', () => {
       expect(src).to.include('D-17')
     })
 
-    // BLOCKED on https://github.com/gotchoices/quereus/issues/23 —
-    // sign() INSERTs into OfficerSignature which trips CantDelete on
-    // INSERT in Quereus 3.1.1.
     it('INSERTs an OfficerSignature row keyed by SigningNonce', async () => {
       const { ctx, user } = await createPopulatedContext()
       const engine = new SigningEngine(ctx)
@@ -336,8 +327,7 @@ describe('SigningEngine', () => {
       expect(row?.UserId).to.equal(user.id)
     })
 
-    // BLOCKED on quereus#23 — same chain. Threshold-met path triggers the
-    // AdminSignature INSERT branch.
+    // Threshold-met path triggers the AdminSignature INSERT branch.
     it('inserts an AdminSignature row once the threshold is met', async () => {
       const { ctx, user } = await createPopulatedContext()
       const engine = new SigningEngine(ctx)
@@ -359,9 +349,9 @@ describe('SigningEngine', () => {
       expect(row?.SigningNonce).to.equal(nonce)
     })
 
-    // BLOCKED on quereus#23 — same chain. Idempotent-completion branch:
-    // calling sign() a second time after the threshold is reached should
-    // treat the PK collision as success (D-17), not as an error.
+    // Idempotent-completion branch: calling sign() a second time after the
+    // threshold is reached should treat the PK collision as success (D-17),
+    // not as an error.
     it('is idempotent on duplicate threshold completion (D-17 PK collision is benign)', async () => {
       const { ctx, user } = await createPopulatedContext()
       const engine = new SigningEngine(ctx)
@@ -389,9 +379,6 @@ describe('SigningEngine', () => {
       expect(second).to.equal(true)
     })
 
-    // BLOCKED on quereus#23 — sign() relies on a pre-existing AdminSigning
-    // row to look up the scope. Without #23, no AdminSigning row can be
-    // seeded, so the read-side path is unreachable today.
     it('reads scope and threshold from the AdminSigning + Admin join', async () => {
       // Seed an AdminSigning row with scope=rad (matches the seeded
       // ThresholdPolicies entry { policy: 'rad', threshold: 1 }), then
