@@ -198,7 +198,11 @@ export class ElectionEngine implements IElectionEngine {
             scoreRange: parsePgRange(q.ScoreRange, 'Question.ScoreRange') as { min: number; max: number; step: number } | undefined,
             group: (q.Grouping as string | undefined) ?? undefined,
             sequence: (q.Sequence as number | undefined) ?? undefined,
-            required: (q.Required as boolean | undefined) ?? true
+            // Required is now `integer default 1` (37-04 / D-05b re-attach fix —
+            // was `boolean default true`, which broke quereus-4.x re-attach
+            // reconcile). Coerce the persisted 0/1 integer to boolean; null/
+            // undefined preserves the historical default-true.
+            required: q.Required == null ? true : !!Number(q.Required)
           })
         }
       }

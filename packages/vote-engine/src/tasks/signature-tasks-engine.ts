@@ -386,7 +386,13 @@ export class SignatureTasksEngine implements ISignatureTasksEngine {
       const scoreRange = q.scoreRange ? JSON.stringify(q.scoreRange) : null
       const grouping = q.group ?? null
       const sequence = q.sequence ?? null
-      const required = q.required ?? true
+      // Required is now `integer default 1` (37-04 / D-05b re-attach fix — was
+      // `boolean default true`). Bind an integer 0/1 (not a JS boolean) into
+      // BOTH the Digest call below and the Question INSERT so the recomputed
+      // Question.MutationValid Digest matches the AdminSigning Digest — the
+      // same single-source-of-truth pattern as the number-column Digest
+      // coercion class (see schema-type-regression.spec.ts).
+      const required = (q.required ?? true) ? 1 : 0
       // Select beachhead — only 'select' type supported (Pitfall 5 / quereus#21 deferral).
       const questionType = (q.type === 'select') ? 'select' : q.type
 

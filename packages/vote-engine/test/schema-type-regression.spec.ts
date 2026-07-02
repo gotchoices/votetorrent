@@ -1,5 +1,7 @@
 /**
  * schema-type-regression.spec.ts — DIG-03-b / D-07: number-column regression lock.
+ * Also carries the 37-04 boolean-default-column regression lock (re-attach
+ * ALTER-COLUMN coercion class — see below).
  *
  * Static-analysis regression lock (D-07): scans `votetorrent.qsql` for bare `number`
  * column declarations and FAILS CI if any are found. Current state is clean (all
@@ -24,6 +26,24 @@
  * lock therefore scans BOTH artifacts — the .qsql source AND the generated
  * runtime string — so a stale/un-regenerated or hand-edited schema-sql.ts that
  * carries a bare `number` column is caught even when the .qsql is clean.
+ *
+ * Boolean-default coercion class (37-04 / D-05b, D-15): on Hermes / quereus 4.x,
+ * re-attach re-executes the declarative schema to rebind catalogs, and quereus 4.x's
+ * declarative differ spuriously diffs `boolean default <literal>` columns, emitting
+ * an unsupported `ALTER TABLE ... ALTER COLUMN ... SET DEFAULT` that the LevelDB-backed
+ * vtab rejects — breaking the WRITE -> force-stop -> relaunch -> READ persistence
+ * proof on both the strand and solo paths. Integer-default columns
+ * (e.g. `NumberRequiredTSAs integer default 0`) reconcile cleanly. Declaring such
+ * columns `integer default <0|1>` instead of `boolean default <true|false>` avoids
+ * the coercion entirely. See: 37-DIAGNOSIS-boolean-default-reattach.md and
+ * [[project-quereus-v4-reattach-boolean-default-alter-column]] in project memory.
+ *
+ * One-time audit (current state clean):
+ *   - `Question.Required boolean default true` (×2) -> `integer default 1`.
+ *   - `Task.IsCompleted boolean default false` -> `integer default 0`.
+ *   - `with context ( ... boolean )` clauses are constraint context params, not
+ *     stored columns, and do NOT trigger the re-attach ALTER — intentionally NOT
+ *     matched by this lock (no `default` token on those clauses).
  */
 
 import { expect } from 'chai'
@@ -57,6 +77,24 @@ function findBareNumberColumns (schemaText: string): string[] {
     .filter(line => /^\s+\w+\s+number(\s|,|\)|$)/.test(line))
 }
 
+// Scan newline-delimited schema text for `boolean default <literal>` column
+// declarations — the re-attach ALTER-COLUMN coercion class (37-04 / D-05b, D-15).
+// Active lines only — strip full-line comments as above. The regex matches a
+// column declaration of the form `<indent> <ColumnName> boolean default ...`:
+//   Catches:  `  Required boolean default true,`, `  IsCompleted boolean default false,`
+//   Does NOT match:
+//     - `-- Required boolean default true` (stripped above)
+//     - `with context ( ... SomeFlag boolean, ... )` (no `default` token on the
+//       context-param clause itself — these are constraint context params, not
+//       stored columns, and do NOT trigger the re-attach ALTER)
+//     - a bare `boolean` context param with no default (e.g. `Foo boolean null`)
+function findBooleanDefaultColumns (schemaText: string): string[] {
+  return schemaText
+    .split('\n')
+    .filter(line => !/^\s*--/.test(line))
+    .filter(line => /^\s+\w+\s+boolean\s+default\b/.test(line))
+}
+
 describe('schema number-type regression lock (DIG-03-b / D-07)', () => {
   it('no active column declarations use bare "number" type in votetorrent.qsql (Digest coercion class)', () => {
     const qsql = readFileSync(QSQL_PATH, 'utf8')
@@ -80,6 +118,32 @@ describe('schema number-type regression lock (DIG-03-b / D-07)', () => {
     expect(
       violations,
       `Found ${violations.length} bare 'number' column declaration(s) in the generated schema-sql.ts — `
+      + `regenerate it from votetorrent.qsql (editing the .qsql alone is a silent no-op on Hermes):\n  ${violations.join('\n  ')}`,
+    ).to.have.length(0)
+  })
+})
+
+describe('schema boolean-default-column regression lock (37-04 / D-05b, D-15)', () => {
+  it('no active column declarations use "boolean default <literal>" in votetorrent.qsql (re-attach ALTER-COLUMN coercion class)', () => {
+    const qsql = readFileSync(QSQL_PATH, 'utf8')
+    const violations = findBooleanDefaultColumns(qsql)
+
+    expect(
+      violations,
+      `Found ${violations.length} 'boolean default <literal>' column declaration(s) in votetorrent.qsql — `
+      + `quereus-4.x re-attach ALTER-COLUMN coercion class risk (see 37-DIAGNOSIS-boolean-default-reattach.md):\n  ${violations.join('\n  ')}`,
+    ).to.have.length(0)
+  })
+
+  it('no "boolean default <literal>" column in the generated schema-sql.ts (the runtime artifact Hermes loads)', () => {
+    const generated = readFileSync(GENERATED_PATH, 'utf8')
+      .replace(/\\n/g, '\n')
+      .replace(/\\t/g, '\t')
+    const violations = findBooleanDefaultColumns(generated)
+
+    expect(
+      violations,
+      `Found ${violations.length} 'boolean default <literal>' column declaration(s) in the generated schema-sql.ts — `
       + `regenerate it from votetorrent.qsql (editing the .qsql alone is a silent no-op on Hermes):\n  ${violations.join('\n  ')}`,
     ).to.have.length(0)
   })

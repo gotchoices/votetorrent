@@ -804,7 +804,8 @@ export interface SeedQuestionResult {
  * INSERT.
  *
  * Quereus 3.3.0 NULL-bug bypass: the schema declares
- * `OptionRange text default '{1, 1}'` and `Required boolean default true`.
+ * `OptionRange text default '{1, 1}'` and `Required integer default 1`
+ * (37-04 / D-05b re-attach fix — was `boolean default true`).
  * Quereus 3.3.0 incorrectly rejects NULL-bound writes to default-valued
  * columns (tracked at 260528-001-quereus-not-null-text-null-column).
  * This helper resolves both defaults JS-side BEFORE building the
@@ -830,7 +831,13 @@ export async function seedQuestion (
   const scoreRange = q.scoreRange ?? null
   const grouping = q.grouping ?? null
   const sequence = q.sequence ?? null
-  const required = q.required ?? true
+  // Required is now `integer default 1` (37-04 / D-05b re-attach fix — was
+  // `boolean default true`). Bind an integer 0/1 (not a JS boolean) into
+  // BOTH the Digest call (Step 2) and the Question INSERT (Step 4) so the
+  // recomputed Question.MutationValid Digest matches the AdminSigning
+  // Digest — same single-source-of-truth pattern as the OptionRange/
+  // ScoreRange defaults above.
+  const required = (q.required ?? true) ? 1 : 0
 
   // ---- Step 1: Resolve CurrentAdmin.EffectiveAt for the authority
   const authorityId = elec.authority.id

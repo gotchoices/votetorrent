@@ -722,7 +722,7 @@ declare schema main
 		ScoreRange text null, -- json object { min: number, max: number, step: number }
 		Grouping text null, -- grouping (hierarchy) of the question (group is a reserved word)
 		Sequence integer null, -- sequence of the question within the group
-		Required boolean default true, -- whether the question is required
+		Required integer default 1, -- whether the question is required
 		primary key (BallotId, Code),
 		constraint BallotIdValid check on insert, update (exists (select 1 from Ballot B where B.Id = new.BallotId)),
 		constraint BallotIdImmutable check on update (new.BallotId = old.BallotId),
@@ -768,7 +768,7 @@ declare schema main
 		ScoreRange text null, -- json object { min: number, max: number, step: number }
 		Grouping text null, -- grouping (hierarchy) of the question (group is a reserved word)
 		Sequence integer null, -- sequence of the question within the group
-		Required boolean default true, -- whether the question is required
+		Required integer default 1, -- whether the question is required
 		constraint BallotIdValid check (exists (select 1 from Ballot B where B.Id = new.BallotId)),
 		constraint TypeValid check (Type in (select Code from QuestionType)),
 		constraint MutationValid check on insert, update (context.IsMutationValid = true)
@@ -866,7 +866,7 @@ declare schema main
 		Type text, -- references TaskType(Code)
 		SignatureType text null, -- references SignatureType(Code) only used for signature tasks
 		SigningNonce text null, -- references AdminSigning.Nonce only used for signature tasks
-		IsCompleted boolean default false, -- whether the task has been completed
+		IsCompleted integer default 0, -- whether the task has been completed
 		constraint UserIdValid check (exists (select 1 from User U where U.Id = new.UserId)),
 		constraint TypeValid check (Type in (select Code from TaskType)),
 		constraint SignatureTypeValid check (SignatureType in (select Code from SignatureType) or SignatureType is null),
