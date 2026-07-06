@@ -73,13 +73,23 @@ const execAsync = promisify(exec);
 // Phase 33 (UPG-03): quereus bumped from 3.3.0 → 4.2.1 (64e8a4bca7 patch).
 // After the 4.x bump, @optimystic/quereus-plugin-optimystic@npm:0.13.5
 // DISAPPEARED from the observed mismatch set (its peer range is now satisfied
-// by the resolved 4.2.1 copy). Only the two crypto mismatches remain:
+// by the resolved 4.2.1 copy). Only the two crypto mismatches remained:
 //   @optimystic/quereus-plugin-crypto@npm:0.13.5  — cadre-core / quereus-plugin-sereus portals
 //   @optimystic/quereus-plugin-crypto@npm:0.14.1  — vote-engine (upgraded)
-// (Observed empirically via `yarn explain peer-requirements` after 4.x install.)
+//
+// Phase 36 (CID-01, D-01): the two vendored @serfab/* portals
+// (cadre-core, quereus-plugin-sereus) had their @optimystic/quereus-plugin-crypto
+// range widened from ^0.13.5 → ^0.14.0, so ALL consumers now resolve the single
+// 0.14.1 copy. The @npm:0.13.5 crypto mismatch DISAPPEARED entirely (confirmed:
+// `grep -c '@optimystic/quereus-plugin-crypto@npm:0.13' yarn.lock` == 0,
+// `yarn why` shows one resolved 0.14.1 copy across all consumer paths). The
+// dual-copy exception is retired; only the single crypto mismatch remains:
+//   @optimystic/quereus-plugin-crypto@npm:0.14.1  — all consumers (the pre-existing
+//     ^0.16.2 peer wart against crypto-plugin's OWN internal quereus-version scheme,
+//     unrelated to @quereus/quereus 4.2.1 — see .yarnrc.yml)
+// (Observed empirically via `yarn explain peer-requirements` after the 0.14 repin.)
 // ---------------------------------------------------------------------------
 const KNOWN_ALLOWED = new Set([
-  '@optimystic/quereus-plugin-crypto@npm:0.13.5',
   '@optimystic/quereus-plugin-crypto@npm:0.14.1',
 ]);
 

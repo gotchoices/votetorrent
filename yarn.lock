@@ -4221,19 +4221,6 @@ __metadata:
   languageName: node
   linkType: soft
 
-"@optimystic/quereus-plugin-crypto@npm:^0.13.5":
-  version: 0.13.5
-  resolution: "@optimystic/quereus-plugin-crypto@npm:0.13.5"
-  dependencies:
-    "@noble/curves": "npm:^2.0.1"
-    "@noble/hashes": "npm:^2.0.1"
-    uint8arrays: "npm:^5.1.0"
-  peerDependencies:
-    "@quereus/quereus": ^0.16.2
-  checksum: 10c0/7576855b52b2f07f9cce71f498ffaca6725b213d90b893b2568faac3d06fc17d93823c9f55c42c5df6353d6c9e54ac51943087794621a3cb3fe5d5ff87f2ee7b
-  languageName: node
-  linkType: hard
-
 "@optimystic/quereus-plugin-crypto@npm:^0.14.0":
   version: 0.14.1
   resolution: "@optimystic/quereus-plugin-crypto@npm:0.14.1"
@@ -5195,7 +5182,7 @@ __metadata:
     "@multiformats/multiaddr": "npm:^12.5.1"
     "@optimystic/db-core": "npm:^0.13.5"
     "@optimystic/db-p2p": "npm:^0.13.5"
-    "@optimystic/quereus-plugin-crypto": "npm:^0.13.5"
+    "@optimystic/quereus-plugin-crypto": "npm:^0.14.0"
     "@optimystic/quereus-plugin-optimystic": "npm:^0.13.5"
     "@quereus/quereus": "npm:^4.2.1"
     "@serfab/quereus-plugin-sereus": "workspace:^"
@@ -5216,7 +5203,7 @@ __metadata:
     "@optimystic/db-p2p": "npm:^0.13.5"
     "@optimystic/db-p2p-storage-fs": "npm:^0.13.5"
     "@optimystic/db-p2p-storage-web": "npm:^0.13.5"
-    "@optimystic/quereus-plugin-crypto": "npm:^0.13.5"
+    "@optimystic/quereus-plugin-crypto": "npm:^0.14.0"
     "@optimystic/quereus-plugin-optimystic": "npm:^0.13.5"
     "@quereus/quereus": "npm:^4.2.1"
     debug: "npm:^4.4.3"
