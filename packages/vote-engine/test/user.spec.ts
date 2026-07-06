@@ -551,8 +551,8 @@ describe('UserEngine', () => {
       const fakeInvite = { inviteKey: fakeInviteKey, type: 'au' as const, expiration: '0', inviteSignature: 'a'.repeat(128) }
       await ctx.db.exec(
         `INSERT INTO InviteSlot (Cid, Type, Name, Expiration, InviteKey, InviteSignature, SigningNonce)
-         WITH CONTEXT Tid = 1, IsCidValid = true, IsSignatureValid = true, IsInsertValid = true, now = datetime('now', '-1 day')
-         VALUES (Digest(:inviteKey, :type), :type, 'test', :expiration, :inviteKey, :inviteSignature, 'test-nonce-1')`,
+         WITH CONTEXT Tid = 1, IsSignatureValid = true, IsInsertValid = true, now = datetime('now', '-1 day')
+         VALUES (cid(Digest(:expiration, :inviteKey, :inviteSignature, 'test', 'test-nonce-1', :type)), :type, 'test', :expiration, :inviteKey, :inviteSignature, 'test-nonce-1')`,
         { inviteKey: fakeInviteKey, type: 'au', expiration: '2099-12-31T23:59:59', inviteSignature: 'a'.repeat(128) }
       )
       await networkEngine.respondToInvite({
@@ -587,8 +587,8 @@ describe('UserEngine', () => {
       const fakeInvite = { inviteKey: fakeInviteKey, type: 'au' as const, expiration: '0', inviteSignature: 'b'.repeat(128) }
       await ctx.db.exec(
         `INSERT INTO InviteSlot (Cid, Type, Name, Expiration, InviteKey, InviteSignature, SigningNonce)
-         WITH CONTEXT Tid = 1, IsCidValid = true, IsSignatureValid = true, IsInsertValid = true, now = datetime('now', '-1 day')
-         VALUES (Digest(:inviteKey, :type), :type, 'test', :expiration, :inviteKey, :inviteSignature, 'test-nonce-2')`,
+         WITH CONTEXT Tid = 1, IsSignatureValid = true, IsInsertValid = true, now = datetime('now', '-1 day')
+         VALUES (cid(Digest(:expiration, :inviteKey, :inviteSignature, 'test', 'test-nonce-2', :type)), :type, 'test', :expiration, :inviteKey, :inviteSignature, 'test-nonce-2')`,
         { inviteKey: fakeInviteKey, type: 'au', expiration: '2099-12-31T23:59:59', inviteSignature: 'b'.repeat(128) }
       )
       await networkEngine.respondToInvite({

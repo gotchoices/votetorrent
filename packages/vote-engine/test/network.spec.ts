@@ -1627,8 +1627,8 @@ describe('NetworkEngine', () => {
 			const fakeInvite = { inviteKey: fakeInviteKey, type: 'au' as const, expiration: '0', inviteSignature: 'a'.repeat(128) };
 			await ctx.db.exec(
 				`INSERT INTO InviteSlot (Cid, Type, Name, Expiration, InviteKey, InviteSignature, SigningNonce)
-				 WITH CONTEXT Tid = 1, IsCidValid = true, IsSignatureValid = true, IsInsertValid = true, now = datetime('now', '-1 day')
-				 VALUES (Digest(:inviteKey, :type), :type, 'test', :expiration, :inviteKey, :inviteSignature, 'test-nonce-1')`,
+				 WITH CONTEXT Tid = 1, IsSignatureValid = true, IsInsertValid = true, now = datetime('now', '-1 day')
+				 VALUES (cid(Digest(:expiration, :inviteKey, :inviteSignature, 'test', 'test-nonce-1', :type)), :type, 'test', :expiration, :inviteKey, :inviteSignature, 'test-nonce-1')`,
 				{ inviteKey: fakeInviteKey, type: 'au', expiration: '2099-12-31T23:59:59', inviteSignature: 'a'.repeat(128) }
 			);
 			await engine.respondToInvite({
@@ -1663,8 +1663,8 @@ describe('NetworkEngine', () => {
 			const fakeInvite = { inviteKey: fakeInviteKey, type: 'au' as const, expiration: '0', inviteSignature: 'a'.repeat(128) };
 			await ctx.db.exec(
 				`INSERT INTO InviteSlot (Cid, Type, Name, Expiration, InviteKey, InviteSignature, SigningNonce)
-				 WITH CONTEXT Tid = 1, IsCidValid = true, IsSignatureValid = true, IsInsertValid = true, now = datetime('now', '-1 day')
-				 VALUES (Digest(:inviteKey, :type), :type, 'test', :expiration, :inviteKey, :inviteSignature, 'test-nonce-multi')`,
+				 WITH CONTEXT Tid = 1, IsSignatureValid = true, IsInsertValid = true, now = datetime('now', '-1 day')
+				 VALUES (cid(Digest(:expiration, :inviteKey, :inviteSignature, 'test', 'test-nonce-multi', :type)), :type, 'test', :expiration, :inviteKey, :inviteSignature, 'test-nonce-multi')`,
 				{ inviteKey: fakeInviteKey, type: 'au', expiration: '2099-12-31T23:59:59', inviteSignature: 'a'.repeat(128) }
 			);
 			// Officers passed in deliberately mixed (non-sorted) order. By
@@ -1703,8 +1703,8 @@ describe('NetworkEngine', () => {
 			const fakeInvite = { inviteKey: fakeInviteKey, type: 'au' as const, expiration: '0', inviteSignature: 'b'.repeat(128) };
 			await ctx.db.exec(
 				`INSERT INTO InviteSlot (Cid, Type, Name, Expiration, InviteKey, InviteSignature, SigningNonce)
-				 WITH CONTEXT Tid = 1, IsCidValid = true, IsSignatureValid = true, IsInsertValid = true, now = datetime('now', '-1 day')
-				 VALUES (Digest(:inviteKey, :type), :type, 'test', :expiration, :inviteKey, :inviteSignature, 'test-nonce-2')`,
+				 WITH CONTEXT Tid = 1, IsSignatureValid = true, IsInsertValid = true, now = datetime('now', '-1 day')
+				 VALUES (cid(Digest(:expiration, :inviteKey, :inviteSignature, 'test', 'test-nonce-2', :type)), :type, 'test', :expiration, :inviteKey, :inviteSignature, 'test-nonce-2')`,
 				{ inviteKey: fakeInviteKey, type: 'au', expiration: '2099-12-31T23:59:59', inviteSignature: 'b'.repeat(128) }
 			);
 			await engine.respondToInvite({
@@ -3311,8 +3311,8 @@ describe('NetworkRespondToInviteBuilder', () => {
 		const fakeInviteKey = 'r'.repeat(66);
 		await ctx.db.exec(
 			`INSERT INTO InviteSlot (Cid, Type, Name, Expiration, InviteKey, InviteSignature, SigningNonce)
-			 WITH CONTEXT Tid = 1, IsCidValid = true, IsSignatureValid = true, IsInsertValid = true, now = datetime('now', '-1 day')
-			 VALUES (Digest(:inviteKey, :type), :type, 'test', :expiration, :inviteKey, :inviteSignature, 'test-nonce-rb1')`,
+			 WITH CONTEXT Tid = 1, IsSignatureValid = true, IsInsertValid = true, now = datetime('now', '-1 day')
+			 VALUES (cid(Digest(:expiration, :inviteKey, :inviteSignature, 'test', 'test-nonce-rb1', :type)), :type, 'test', :expiration, :inviteKey, :inviteSignature, 'test-nonce-rb1')`,
 			{ inviteKey: fakeInviteKey, type: 'au', expiration: '2099-12-31T23:59:59', inviteSignature: 'r'.repeat(128) }
 		);
 		const invite: InviteAction<unknown> = {
@@ -3348,8 +3348,8 @@ describe('NetworkRespondToInviteBuilder', () => {
 		const fakeInviteKey = 's'.repeat(66);
 		await ctx.db.exec(
 			`INSERT INTO InviteSlot (Cid, Type, Name, Expiration, InviteKey, InviteSignature, SigningNonce)
-			 WITH CONTEXT Tid = 1, IsCidValid = true, IsSignatureValid = true, IsInsertValid = true, now = datetime('now', '-1 day')
-			 VALUES (Digest(:inviteKey, :type), :type, 'test', :expiration, :inviteKey, :inviteSignature, 'test-nonce-rb2')`,
+			 WITH CONTEXT Tid = 1, IsSignatureValid = true, IsInsertValid = true, now = datetime('now', '-1 day')
+			 VALUES (cid(Digest(:expiration, :inviteKey, :inviteSignature, 'test', 'test-nonce-rb2', :type)), :type, 'test', :expiration, :inviteKey, :inviteSignature, 'test-nonce-rb2')`,
 			{ inviteKey: fakeInviteKey, type: 'au', expiration: '2099-12-31T23:59:59', inviteSignature: 's'.repeat(128) }
 		);
 		const invite: InviteAction<unknown> = {
@@ -3403,8 +3403,8 @@ describe('NetworkRespondToInviteBuilder', () => {
 		const fakeInviteKey1 = 't'.repeat(66);
 		await ctx1.db.exec(
 			`INSERT INTO InviteSlot (Cid, Type, Name, Expiration, InviteKey, InviteSignature, SigningNonce)
-			 WITH CONTEXT Tid = 1, IsCidValid = true, IsSignatureValid = true, IsInsertValid = true, now = datetime('now', '-1 day')
-			 VALUES (Digest(:inviteKey, :type), :type, 'test', :expiration, :inviteKey, :inviteSignature, 'test-nonce-eq1')`,
+			 WITH CONTEXT Tid = 1, IsSignatureValid = true, IsInsertValid = true, now = datetime('now', '-1 day')
+			 VALUES (cid(Digest(:expiration, :inviteKey, :inviteSignature, 'test', 'test-nonce-eq1', :type)), :type, 'test', :expiration, :inviteKey, :inviteSignature, 'test-nonce-eq1')`,
 			{ inviteKey: fakeInviteKey1, type: 'au', expiration: '2099-12-31T23:59:59', inviteSignature: 't'.repeat(128) }
 		);
 		const invite1: InviteAction<unknown> = {
@@ -3423,8 +3423,8 @@ describe('NetworkRespondToInviteBuilder', () => {
 		const fakeInviteKey2 = 'u'.repeat(66);
 		await ctx2.db.exec(
 			`INSERT INTO InviteSlot (Cid, Type, Name, Expiration, InviteKey, InviteSignature, SigningNonce)
-			 WITH CONTEXT Tid = 1, IsCidValid = true, IsSignatureValid = true, IsInsertValid = true, now = datetime('now', '-1 day')
-			 VALUES (Digest(:inviteKey, :type), :type, 'test', :expiration, :inviteKey, :inviteSignature, 'test-nonce-eq2')`,
+			 WITH CONTEXT Tid = 1, IsSignatureValid = true, IsInsertValid = true, now = datetime('now', '-1 day')
+			 VALUES (cid(Digest(:expiration, :inviteKey, :inviteSignature, 'test', 'test-nonce-eq2', :type)), :type, 'test', :expiration, :inviteKey, :inviteSignature, 'test-nonce-eq2')`,
 			{ inviteKey: fakeInviteKey2, type: 'au', expiration: '2099-12-31T23:59:59', inviteSignature: 'u'.repeat(128) }
 		);
 		const invite2: InviteAction<unknown> = {

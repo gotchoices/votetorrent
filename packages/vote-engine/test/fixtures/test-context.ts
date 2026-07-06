@@ -625,9 +625,9 @@ export async function seedKeyholderInvite (
         InviteSignature,
         SigningNonce
       )
-      with context Tid = :tid, now = :now, IsSignatureValid = true, IsInsertValid = true, IsCidValid = true
+      with context Tid = :tid, now = :now, IsSignatureValid = true, IsInsertValid = true
       values (
-        Digest(:expiration, :inviteKey, :inviteSignature, :name, :nonce, :type),
+        cid(Digest(:expiration, :inviteKey, :inviteSignature, :name, :nonce, :type)),
         :type,
         :name,
         :expiration,

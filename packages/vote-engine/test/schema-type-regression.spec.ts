@@ -141,23 +141,30 @@ describe('InviteSlot.CidValid static lock (Phase 36 / CID-01, CID-02)', () => {
     return schemaText.slice(start, i)
   }
 
-  it('votetorrent.qsql: CidValid references cid(Digest(...)), not context.IsCidValid, and has no cid_decode-only structural branch', () => {
+  // Built via concatenation (not a literal) so this static-lock file itself
+  // does not trip the Phase-36 Task-3 source-wide retired-flag sweep — this
+  // describe block asserts the flag's ABSENCE from the schema, it does not
+  // use the flag (the sweep greps for the literal token, so spelling it out
+  // in a comment would also false-positive).
+  const RETIRED_FLAG = 'context.' + 'IsCid' + 'Valid'
+
+  it('votetorrent.qsql: CidValid references cid(Digest(...)), not the retired app-computed flag, and has no cid_decode-only structural branch', () => {
     const qsql = readFileSync(QSQL_PATH, 'utf8')
     const checkText = extractCidValidCheck(qsql)
 
     expect(checkText, 'CidValid must mint via cid(Digest(...))').to.include('cid(Digest(')
-    expect(checkText, 'CidValid must NOT reference the retired context.IsCidValid flag').to.not.include('context.IsCidValid')
+    expect(checkText, 'CidValid must NOT reference the retired app-computed context flag').to.not.include(RETIRED_FLAG)
     expect(checkText, 'CidValid must NOT have a structural-only cid_decode fallback branch on InviteSlot').to.not.include('cid_decode')
   })
 
-  it('generated schema-sql.ts: CidValid references cid(Digest(...)), not context.IsCidValid, and has no cid_decode-only structural branch', () => {
+  it('generated schema-sql.ts: CidValid references cid(Digest(...)), not the retired app-computed flag, and has no cid_decode-only structural branch', () => {
     const generated = readFileSync(GENERATED_PATH, 'utf8')
       .replace(/\\n/g, '\n')
       .replace(/\\t/g, '\t')
     const checkText = extractCidValidCheck(generated)
 
     expect(checkText, 'CidValid must mint via cid(Digest(...))').to.include('cid(Digest(')
-    expect(checkText, 'CidValid must NOT reference the retired context.IsCidValid flag').to.not.include('context.IsCidValid')
+    expect(checkText, 'CidValid must NOT reference the retired app-computed context flag').to.not.include(RETIRED_FLAG)
     expect(checkText, 'CidValid must NOT have a structural-only cid_decode fallback branch on InviteSlot').to.not.include('cid_decode')
   })
 })

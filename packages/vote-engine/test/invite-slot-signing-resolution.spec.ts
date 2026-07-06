@@ -137,9 +137,9 @@ describe('InviteSlotSigningValid assertion resolution (Phase 33 — 4.x fix)', f
          Cid, Type, Name, Expiration, InviteKey, InviteSignature, SigningNonce
        )
        with context Tid = :tid, now = :now, IsSignatureValid = true,
-                    IsInsertValid = true, IsCidValid = true
+                    IsInsertValid = true
        values (
-         Digest(:expiration, :inviteKey, :inviteSignature, :name, :nonce, :type),
+         cid(Digest(:expiration, :inviteKey, :inviteSignature, :name, :nonce, :type)),
          :type, :name, :expiration, :inviteKey, :inviteSignature, :nonce
        )`,
       {
@@ -233,9 +233,9 @@ describe('InviteSlotSigningValid assertion resolution (Phase 33 — 4.x fix)', f
            Cid, Type, Name, Expiration, InviteKey, InviteSignature, SigningNonce
          )
          with context Tid = :tid, now = :now, IsSignatureValid = true,
-                      IsInsertValid = true, IsCidValid = true
+                      IsInsertValid = true
          values (
-           Digest(:expiration, :inviteKey, :inviteSignature, :name, :nonce, :type),
+           cid(Digest(:expiration, :inviteKey, :inviteSignature, :name, :nonce, :type)),
            :type, :name, :expiration, :inviteKey, :inviteSignature, :nonce
          )`,
         {
