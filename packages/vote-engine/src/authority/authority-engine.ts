@@ -571,6 +571,11 @@ export class AuthorityEngine implements IAuthorityEngine {
 	 * old→new and there is no auto-supersede — both old and new may legitimately
 	 * appear in the pending list. Returns the new slot's Cid.
 	 *
+	 * D-03 Option B (Phase 36): the resend salt is persisted as a real
+	 * `InviteSlot.ResendSalt` column (not just fed into the Digest arg list) so
+	 * the schema's CidValid CHECK can fully re-derive this row's Cid from its
+	 * own columns alone — no structural-only acceptance window for resend rows.
+	 *
 	 * Throws when the original slot does not exist.
 	 */
 	async resendInvite(slotCid: string): Promise<string> {
@@ -598,17 +603,19 @@ export class AuthorityEngine implements IAuthorityEngine {
 					Expiration,
 					InviteKey,
 					InviteSignature,
-					SigningNonce
+					SigningNonce,
+					ResendSalt
 					)
-					with context Tid = ${tid}, now = :now, IsSignatureValid = true, IsInsertValid = true, IsCidValid = true
+					with context Tid = ${tid}, now = :now, IsSignatureValid = true, IsInsertValid = true
 				values (
-					Digest(:expiration, :inviteKey, :inviteSignature, :name, :nonce, :type, :resendSalt),
+					cid(Digest(:expiration, :inviteKey, :inviteSignature, :name, :nonce, :type, :resendSalt)),
 					:type,
 					:name,
 					:expiration,
 					:inviteKey,
 					:inviteSignature,
-					:nonce
+					:nonce,
+					:resendSalt
 					)`,
 				{
 					type: orig.Type as string,
@@ -717,9 +724,9 @@ export class AuthorityEngine implements IAuthorityEngine {
 					InviteSignature,
 					SigningNonce
 					)
-					with context Tid = :tid, now = :now, IsSignatureValid = true, IsInsertValid = true, IsCidValid = true
+					with context Tid = :tid, now = :now, IsSignatureValid = true, IsInsertValid = true
 					values (
-						Digest(:expiration, :inviteKey, :inviteSignature, :name, :nonce),
+						cid(Digest(:expiration, :inviteKey, :inviteSignature, :name, :nonce)),
 						:type,
 						:name,
 						:expiration,
@@ -765,9 +772,9 @@ export class AuthorityEngine implements IAuthorityEngine {
 					InviteSignature,
 					SigningNonce
 					)
-				with context Tid = :tid, now = :now, IsSignatureValid = true, IsInsertValid = true, IsCidValid = true
+				with context Tid = :tid, now = :now, IsSignatureValid = true, IsInsertValid = true
 				values (
-					Digest(:expiration, :inviteKey, :inviteSignature, :name, :nonce, :type),
+					cid(Digest(:expiration, :inviteKey, :inviteSignature, :name, :nonce, :type)),
 					:type,
 					:name,
 					:expiration,
