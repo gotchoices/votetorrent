@@ -412,14 +412,31 @@ declare schema main
 		InviteKey text, -- public key of temporary Invite key pair
 		InviteSignature text,
 		SigningNonce text, -- AdminSigning.Nonce, shows admin approval including scope (implies the type of invite, e.g. authority, officer, keyholder, registrant)
-		constraint CidValid check (context.IsCidValid = true),
+		ResendSalt text null, -- D-03 Option B (Phase 36): resendInvite's salt (resend|tid|now), persisted so the resend row's Cid is fully re-derivable; null for normal (au/of) invites
+		-- D-02/D-03 (Phase 36): Cid is minted as an IPLD CIDv1 via cid(Digest(...)) at all
+		-- 3 authority-engine.ts producer sites (au/of/resend). TOTAL content
+		-- re-derivation — no structural-only acceptance branch on InviteSlot: every
+		-- row's Cid must equal cid(Digest(...)) recomputed from that row's OWN
+		-- persisted columns. Branches are keyed on ResendSalt null/not-null so the
+		-- per-mint-site field-list asymmetry is preserved (Type is NOT normalized):
+		--   au (5-field):     Cid = cid(Digest(Expiration, InviteKey, InviteSignature, Name, SigningNonce))
+		--   of (6-field):     Cid = cid(Digest(Expiration, InviteKey, InviteSignature, Name, SigningNonce, Type))
+		--   resend (7-field): Cid = cid(Digest(Expiration, InviteKey, InviteSignature, Name, SigningNonce, Type, ResendSalt))
+		constraint CidValid check (
+			(ResendSalt is null and (
+				Cid = cid(Digest(Expiration, InviteKey, InviteSignature, Name, SigningNonce))
+				or Cid = cid(Digest(Expiration, InviteKey, InviteSignature, Name, SigningNonce, Type))
+			))
+			or (ResendSalt is not null
+				and Cid = cid(Digest(Expiration, InviteKey, InviteSignature, Name, SigningNonce, Type, ResendSalt)))
+		),
 		constraint TypeValid check (Type in (select Code from InviteType)),
 		constraint ExpirationValid check (Expiration > context.now),
 		constraint InviteSignatureValid check (context.IsSignatureValid = true),
 		constraint InsertOnly check on update, delete (false),
 		constraint InsertValid check on insert (context.IsInsertValid = true)
 	)
-		with context ( Tid int, now datetime, IsSignatureValid boolean, IsInsertValid boolean, IsCidValid boolean );
+		with context ( Tid int, now datetime, IsSignatureValid boolean, IsInsertValid boolean );
 
 	index InviteSlotSigningNonce on InviteSlot (SigningNonce, Cid);
 
@@ -455,6 +472,11 @@ declare schema main
 			(not IsAccepted and new.Digest is null)
 				or (IsAccepted and new.Digest is not null)
 		),
+		-- D-03 structural fallback (Phase 36): SlotCid is a reference to InviteSlot.Cid,
+		-- not schema-reconstructable here — enforce structural CIDv1 raw-codec shape only.
+		-- cast(...as text) required: json_extract's JSON-typed return is not directly
+		-- =-comparable to a bare TEXT literal (36-01 Probe 3b finding).
+		constraint SlotCidValid check ( cast(json_extract(cid_decode(SlotCid), '$.codec') as text) = 'raw' )
 	)
 		with context ( IsSigningValid boolean, IsSignatureValid boolean );
 
@@ -467,6 +489,8 @@ declare schema main
 		SlotCid text primary key, -- references InviteSlot(Cid)
 		CancelledAt datetime,
 		constraint SlotExists check on insert (exists (select 1 from InviteSlot S where S.Cid = new.SlotCid)),
+		-- D-03 structural fallback (Phase 36): see InviteResult.SlotCidValid comment.
+		constraint SlotCidValid check ( cast(json_extract(cid_decode(SlotCid), '$.codec') as text) = 'raw' ),
 		constraint InsertOnly check on update, delete (false)
 	)
 		with context ( Tid int, now datetime );

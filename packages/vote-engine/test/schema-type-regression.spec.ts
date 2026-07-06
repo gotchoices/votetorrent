@@ -123,6 +123,45 @@ describe('schema number-type regression lock (DIG-03-b / D-07)', () => {
   })
 })
 
+describe('InviteSlot.CidValid static lock (Phase 36 / CID-01, CID-02)', () => {
+  // Extract the CidValid constraint's check-expression text from a schema string
+  // (raw .qsql or un-escaped generated). Scans forward from the `constraint
+  // CidValid check (` anchor and balances parens to find the matching close, so
+  // the multi-line/multi-branch body is captured whole regardless of formatting.
+  function extractCidValidCheck (schemaText: string): string {
+    const anchor = 'constraint CidValid check ('
+    const start = schemaText.indexOf(anchor)
+    expect(start, 'CidValid constraint anchor not found in schema text').to.be.greaterThan(-1)
+    let depth = 1
+    let i = start + anchor.length
+    for (; i < schemaText.length && depth > 0; i++) {
+      if (schemaText[i] === '(') depth++
+      else if (schemaText[i] === ')') depth--
+    }
+    return schemaText.slice(start, i)
+  }
+
+  it('votetorrent.qsql: CidValid references cid(Digest(...)), not context.IsCidValid, and has no cid_decode-only structural branch', () => {
+    const qsql = readFileSync(QSQL_PATH, 'utf8')
+    const checkText = extractCidValidCheck(qsql)
+
+    expect(checkText, 'CidValid must mint via cid(Digest(...))').to.include('cid(Digest(')
+    expect(checkText, 'CidValid must NOT reference the retired context.IsCidValid flag').to.not.include('context.IsCidValid')
+    expect(checkText, 'CidValid must NOT have a structural-only cid_decode fallback branch on InviteSlot').to.not.include('cid_decode')
+  })
+
+  it('generated schema-sql.ts: CidValid references cid(Digest(...)), not context.IsCidValid, and has no cid_decode-only structural branch', () => {
+    const generated = readFileSync(GENERATED_PATH, 'utf8')
+      .replace(/\\n/g, '\n')
+      .replace(/\\t/g, '\t')
+    const checkText = extractCidValidCheck(generated)
+
+    expect(checkText, 'CidValid must mint via cid(Digest(...))').to.include('cid(Digest(')
+    expect(checkText, 'CidValid must NOT reference the retired context.IsCidValid flag').to.not.include('context.IsCidValid')
+    expect(checkText, 'CidValid must NOT have a structural-only cid_decode fallback branch on InviteSlot').to.not.include('cid_decode')
+  })
+})
+
 describe('schema boolean-default-column regression lock (37-04 / D-05b, D-15)', () => {
   it('no active column declarations use "boolean default <literal>" in votetorrent.qsql (re-attach ALTER-COLUMN coercion class)', () => {
     const qsql = readFileSync(QSQL_PATH, 'utf8')
