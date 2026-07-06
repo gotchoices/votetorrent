@@ -417,16 +417,14 @@ declare schema main
 		-- 3 authority-engine.ts producer sites (au/of/resend). TOTAL content
 		-- re-derivation — no structural-only acceptance branch on InviteSlot: every
 		-- row's Cid must equal cid(Digest(...)) recomputed from that row's OWN
-		-- persisted columns. Branches are keyed on ResendSalt null/not-null so the
-		-- per-mint-site field-list asymmetry is preserved (Type is NOT normalized):
-		--   au (5-field):     Cid = cid(Digest(Expiration, InviteKey, InviteSignature, Name, SigningNonce))
-		--   of (6-field):     Cid = cid(Digest(Expiration, InviteKey, InviteSignature, Name, SigningNonce, Type))
+		-- persisted columns. Branches are keyed on ResendSalt null/not-null. Both
+		-- au and of are 6-field (Type-bound, WR-01 fix — Type is no longer
+		-- normalized out of the au branch's re-derivation):
+		--   au/of (6-field):  Cid = cid(Digest(Expiration, InviteKey, InviteSignature, Name, SigningNonce, Type))
 		--   resend (7-field): Cid = cid(Digest(Expiration, InviteKey, InviteSignature, Name, SigningNonce, Type, ResendSalt))
 		constraint CidValid check (
-			(ResendSalt is null and (
-				Cid = cid(Digest(Expiration, InviteKey, InviteSignature, Name, SigningNonce))
-				or Cid = cid(Digest(Expiration, InviteKey, InviteSignature, Name, SigningNonce, Type))
-			))
+			(ResendSalt is null
+				and Cid = cid(Digest(Expiration, InviteKey, InviteSignature, Name, SigningNonce, Type)))
 			or (ResendSalt is not null
 				and Cid = cid(Digest(Expiration, InviteKey, InviteSignature, Name, SigningNonce, Type, ResendSalt)))
 		),

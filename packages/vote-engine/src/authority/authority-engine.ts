@@ -726,7 +726,7 @@ export class AuthorityEngine implements IAuthorityEngine {
 					)
 					with context Tid = :tid, now = :now, IsSignatureValid = true, IsInsertValid = true
 					values (
-						cid(Digest(:expiration, :inviteKey, :inviteSignature, :name, :nonce)),
+						cid(Digest(:expiration, :inviteKey, :inviteSignature, :name, :nonce, :type)),
 						:type,
 						:name,
 						:expiration,

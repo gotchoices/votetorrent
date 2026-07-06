@@ -14,14 +14,20 @@
  * that Option B (persisting ResendSalt) was chosen specifically to avoid
  * (T-36-02).
  *
- * SCOPE: only the 3 InviteSlot mint field-list branches (au 5-field, of/au
- * 6-field, resend 7-field) and the 2 SlotCid reference columns. No full
+ * SCOPE: only the 3 InviteSlot mint field-list branches (au/of 6-field,
+ * resend 7-field) and the 2 SlotCid reference columns. No full
  * Authority/Admin/Officer bootstrap chain is required — the
  * `InviteSlotSigningValid` batch assertion only fires when a MATCHING
  * `AdminSigning` row exists for a probe's `SigningNonce`; none of these
  * probes insert one, so the assertion's inner join finds nothing and never
  * interferes (mirrors the "InviteSlot INSERT before AdminSigning" no-op
  * branch documented on the assertion itself).
+ *
+ * WR-01 (code-review gap, Phase 36): the au branch was originally 5-field
+ * (Type-less), so a row inserted out-of-band with a Type inconsistent with
+ * what was hashed could pass CidValid. Fixed by binding Type into the au
+ * mint site's Digest call (now identical 6-field shape to of) — see (f)/(g)
+ * below for the explicit old-5-field-rejected / new-6-field-accepted proof.
  *
  * BINDING CONVENTION: Quereus bind keys have NO colon prefix (see
  * digest-check-coverage.spec.ts header comment).
@@ -125,17 +131,20 @@ describe('CidValid / SlotCidValid live CHECK coverage (CID-02, T-36-02, T-36-03)
   })
 
   // -------------------------------------------------------------------------
-  // (a) accept-normal: correctly-derived au-branch (5-field) Cid, ResendSalt null
+  // (a) accept-normal: correctly-derived au-branch (6-field, Type-bound) Cid,
+  // ResendSalt null. WR-01 fix: au is now 6-field (Type-bound), same shape as
+  // of — see (f)/(g) below for the explicit old-5-field-rejected regression.
   // -------------------------------------------------------------------------
-  it('(a) accept-normal: a correctly-derived 5-field (au) Cid is ACCEPTED', async () => {
+  it('(a) accept-normal: a correctly-derived 6-field (au) Cid is ACCEPTED', async () => {
     const name = 'Coverage Normal Au'
     const nonce = 'cid-cov-nonce-a'
     const inviteSignature = 'a'.repeat(128)
-    const cid = await mintCid(db, [SEED_EXPIRATION, inviteKey, inviteSignature, name, nonce])
+    const type = 'au'
+    const cid = await mintCid(db, [SEED_EXPIRATION, inviteKey, inviteSignature, name, nonce, type])
 
     let threw = false
     try {
-      await insertInviteSlot(db, { cid, type: 'au', name, expiration: SEED_EXPIRATION, inviteKey, inviteSignature, nonce })
+      await insertInviteSlot(db, { cid, type, name, expiration: SEED_EXPIRATION, inviteKey, inviteSignature, nonce })
     } catch {
       threw = true
     }
@@ -248,6 +257,65 @@ describe('CidValid / SlotCidValid live CHECK coverage (CID-02, T-36-02, T-36-03)
       (caught as Error).message,
       'expected the CidValid constraint, not a setup/other-constraint error',
     ).to.include('CidValid')
+  })
+
+  // -------------------------------------------------------------------------
+  // (f) WR-01 regression: au-branch Type binding — a 5-field (Type-less)
+  // re-derivation is no longer accepted; only the 6-field (Type-bound)
+  // re-derivation is. Proves the au branch is bound to Type, so a row
+  // inserted out-of-band with a Type inconsistent with what was hashed
+  // can no longer pass CidValid.
+  // -------------------------------------------------------------------------
+  it('(f) WR-01: an au row whose Cid is the OLD 5-field (Type-less) re-derivation is REJECTED by CidValid', async () => {
+    const name = 'Coverage WR-01 Old 5-field'
+    const nonce = 'cid-cov-nonce-f'
+    const inviteSignature = 'f'.repeat(128)
+
+    // Hand-computed 5-field Cid — the pre-fix au mint-site shape (no Type
+    // bound into the Digest). Must now be REJECTED since CidValid's
+    // ResendSalt-is-null branch only accepts the 6-field (Type-bound) form.
+    const oldFiveFieldCid = await mintCid(db, [SEED_EXPIRATION, inviteKey, inviteSignature, name, nonce])
+
+    let caught: unknown
+    try {
+      await insertInviteSlot(db, {
+        cid: oldFiveFieldCid,
+        type: 'au',
+        name,
+        expiration: SEED_EXPIRATION,
+        inviteKey,
+        inviteSignature,
+        nonce,
+      })
+    } catch (err) {
+      caught = err
+    }
+    expect(caught, 'a 5-field (Type-less) au Cid must be REJECTED post-WR-01 — Type must be bound into the re-derivation').to.be.instanceOf(Error)
+    expect(
+      (caught as Error).message,
+      'expected the CidValid constraint, not a setup/other-constraint error',
+    ).to.include('CidValid')
+  })
+
+  // -------------------------------------------------------------------------
+  // (g) WR-01 regression: the correctly-derived 6-field (Type-bound) au Cid
+  // is ACCEPTED — this is the current (post-fix) au mint-site shape.
+  // -------------------------------------------------------------------------
+  it('(g) WR-01: an au row whose Cid is the NEW 6-field (Type-bound) re-derivation is ACCEPTED', async () => {
+    const name = 'Coverage WR-01 New 6-field'
+    const nonce = 'cid-cov-nonce-g'
+    const inviteSignature = 'g'.repeat(128)
+    const type = 'au'
+
+    const sixFieldCid = await mintCid(db, [SEED_EXPIRATION, inviteKey, inviteSignature, name, nonce, type])
+
+    let threw = false
+    try {
+      await insertInviteSlot(db, { cid: sixFieldCid, type, name, expiration: SEED_EXPIRATION, inviteKey, inviteSignature, nonce })
+    } catch {
+      threw = true
+    }
+    expect(threw, 'the 6-field (Type-bound) au Cid — the current mint-site shape — must be ACCEPTED').to.equal(false)
   })
 
   // -------------------------------------------------------------------------
