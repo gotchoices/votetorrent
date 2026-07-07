@@ -1,6 +1,6 @@
 import { pipe } from 'it-pipe';
 import { decode as lpDecode, encode as lpEncode } from 'it-length-prefixed';
-import { peersEqual } from '../peer-utils.js';
+import { peersEqual, toBrandedPeerId } from '../peer-utils.js';
 import { sha256 } from 'multiformats/hashes/sha2';
 import { encodePeers } from './redirect.js';
 import { createLogger } from '../logger.js';
@@ -72,7 +72,7 @@ export class RepoService {
         const libp2p = this.components.libp2p;
         if (!libp2p?.getConnections)
             return [];
-        const conns = libp2p.getConnections(peerId) ?? [];
+        const conns = libp2p.getConnections(toBrandedPeerId(peerId)) ?? [];
         const addrs = [];
         for (const c of conns) {
             const addr = c.remoteAddr?.toString?.();

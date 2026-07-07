@@ -8,6 +8,7 @@ import { bootstrap } from '@libp2p/bootstrap';
 import { circuitRelayServer } from '@libp2p/circuit-relay-v2';
 import { peerIdFromString } from '@libp2p/peer-id';
 import { generateKeyPair } from '@libp2p/crypto/keys';
+import { toBrandedPeerId } from './peer-utils.js';
 import { clusterService } from './cluster/service.js';
 import { repoService } from './repo/service.js';
 import { StorageRepo } from './storage/storage-repo.js';
@@ -292,7 +293,7 @@ export async function createLibp2pNodeBase(options, defaults) {
             fretAdapter.setArachnodeInfo(arachnodeInfo);
             log?.('Announced Arachnode membership: Ring %d', arachnodeInfo.ringDepth);
             // Setup restoration coordinator with FRET adapter
-            const restorationCoordinatorV2 = new RestorationCoordinator(fretAdapter, { connect: (pid, protocol) => node.dialProtocol(pid, [protocol]) }, `/optimystic/${options.networkName}`, node.peerId.toString());
+            const restorationCoordinatorV2 = new RestorationCoordinator(fretAdapter, { connect: (pid, protocol) => node.dialProtocol(toBrandedPeerId(pid), [protocol]) }, `/optimystic/${options.networkName}`, node.peerId.toString());
             // Update restore callback to use new coordinator
             const newRestoreCallback = async (blockId, rev) => {
                 return await restorationCoordinatorV2.restore(blockId, rev);

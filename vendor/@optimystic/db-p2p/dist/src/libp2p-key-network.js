@@ -4,6 +4,7 @@ import { peerIdFromString } from '@libp2p/peer-id';
 import { multiaddr } from '@multiformats/multiaddr';
 import { hashKey } from 'p2p-fret';
 import { createLogger, verbose } from './logger.js';
+import { toBrandedPeerId } from './peer-utils.js';
 /**
  * Error codes surfaced by {@link Libp2pKeyPeerNetwork.findCoordinator}. Callers
  * (notably the batch-retry logic in `NetworkTransactor`) can inspect `.code`
@@ -242,7 +243,7 @@ export class Libp2pKeyPeerNetwork {
         // run isPeerId() on the argument; a stub fails that check, is treated as a multiaddr,
         // and throws at `multiaddrs[0].getComponents()` on a cold dial. Re-brand to a real
         // PeerId at this boundary (the single dial chokepoint) so the cold-dial path resolves.
-        const dialPeer = isPeerId(peerId) ? peerId : peerIdFromString(peerId.toString());
+        const dialPeer = toBrandedPeerId(peerId);
         const conns = (this.libp2p.getConnections?.(dialPeer) ?? []);
         // Filter to only-open connections so a closing/closed entry that libp2p
         // hasn't yet evicted from its index doesn't get picked up here.
