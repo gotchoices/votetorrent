@@ -212,7 +212,7 @@ fi
 # (createLogger's actual base is optimystic:db-p2p:*, NOT the bare db-p2p:* RESEARCH.md cited).
 # DRONE_LOG is retained through the FULL run (no rm -f below) — only the EXIT trap removes it.
 DRONE_LOG=$(mktemp /tmp/drone-full-run-XXXXXX.log)
-DEBUG="optimystic:db-p2p:*:error,libp2p:*:error,sereus:cadre:*:error" STRAND_ID="${STRAND_ID}" "${NODE22}" packages/p2p-probe-host/drone.mjs > "${DRONE_LOG}" 2>&1 &
+DEBUG="optimystic:db-p2p:*:error,db-p2p:*:error,libp2p:*:error,sereus:cadre:*:error" STRAND_ID="${STRAND_ID}" "${NODE22}" packages/p2p-probe-host/drone.mjs > "${DRONE_LOG}" 2>&1 &
 DRONE_PID=$!
 echo "[run-replication-proof] Drone launched (PID ${DRONE_PID}, DEBUG= cluster-error logging armed), waiting for READY line ..."
 
@@ -453,21 +453,30 @@ VERDICT_A=$(wait_for_logcat_line "${VERDICT_TAG}" "${LOGCAT_TIMEOUT}" "[run-repl
 echo "[run-replication-proof] Polling REPLICATION VERDICT on emulator-5556 (${LOGCAT_TIMEOUT}s) ..."
 VERDICT_B=$(wait_for_logcat_line "${VERDICT_TAG}" "${LOGCAT_TIMEOUT}" "[run-replication-proof]" "verdict-B" "-s emulator-5556")
 
+# ── D-08: cluster-error capture (diagnose-first, P2P-09) ─────────────────────
+# MUST run BEFORE the verdict-empty guard below: a verdict TIMEOUT (empty
+# VERDICT_A/B) IS the P2P-09 failure mode (the receiving peer's stream-abort
+# hangs the consensus round so no verdict is emitted). Running the capture after
+# an `exit 1` on empty verdicts would skip it on the exact case it exists to
+# diagnose — and the EXIT trap then deletes DRONE_LOG. Persist a copy out of the
+# auto-deleted /tmp path so the full server-side error survives for inspection.
+echo "[run-replication-proof] D-08: capturing drone log for the real cluster-protocol error ..."
+if [ -n "${DRONE_LOG}" ] && [ -f "${DRONE_LOG}" ]; then
+  cp "${DRONE_LOG}" /tmp/drone-p2p09-capture.log 2>/dev/null \
+    && echo "[run-replication-proof] D-08: drone log preserved at /tmp/drone-p2p09-capture.log (survives EXIT-trap cleanup)" >&2
+  if grep -qi "error handling cluster protocol message" "${DRONE_LOG}" 2>/dev/null; then
+    echo "[run-replication-proof] D-08 CAPTURED cluster protocol error (candidate #1 confirmed):" >&2
+    grep -i "error handling cluster protocol message" "${DRONE_LOG}" >&2
+  else
+    echo "[run-replication-proof] D-08: no 'error handling cluster protocol message' line in drone log — inspect /tmp/drone-p2p09-capture.log for candidates #2-#5" >&2
+  fi
+else
+  echo "[run-replication-proof] D-08: drone log unavailable (drone may not have launched)" >&2
+fi
+
 if [ -z "${VERDICT_A}" ] || [ -z "${VERDICT_B}" ]; then
   echo "[run-replication-proof] ERROR: one or both peers did not emit a verdict within ${LOGCAT_TIMEOUT}s — FAIL" >&2
   exit 1
-fi
-
-# ── D-08: post-verdict cluster-error capture (diagnose-first, P2P-09) ────────
-# Runs regardless of PASS/FAIL — grep the retained drone log for the real
-# server-side exception cluster/service.js's catch-all converts into the generic
-# libp2p StreamResetError ("The stream has been reset") the peers observe.
-echo "[run-replication-proof] D-08: checking drone log for the real cluster-protocol error ..."
-if grep -qi "error handling cluster protocol message" "${DRONE_LOG}" 2>/dev/null; then
-  echo "[run-replication-proof] D-08 CAPTURED cluster protocol error (candidate #1 confirmed):" >&2
-  grep -i "error handling cluster protocol message" "${DRONE_LOG}" >&2
-else
-  echo "[run-replication-proof] D-08: no server-side cluster error observed — check candidates #2-#5" >&2
 fi
 
 if echo "${VERDICT_A}" | grep -q "FAIL" || echo "${VERDICT_B}" | grep -q "FAIL"; then
