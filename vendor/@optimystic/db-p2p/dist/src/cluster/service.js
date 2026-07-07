@@ -95,8 +95,22 @@ export class ClusterService {
                 await stream.close();
             }
             catch (err) {
+                // 38-04 (P2P-09 diagnose-first): SURFACE the real error to the log (this
+                // is where the on-device drone-log capture reads it), then do NOT convert a
+                // member-side processing failure into a contentless StreamResetError. The
+                // previous unconditional stream.abort(err) reached the initiating peer only
+                // as the generic "The stream has been reset" (masking the true cause) AND
+                // hung the entire consensus round on a reset stream. Close the stream
+                // gracefully so the caller sees a clean end (a bounded non-response for this
+                // member) instead of a reset; fall back to abort only if the graceful close
+                // itself fails. Errors are surfaced (logged), never silently swallowed (V5).
                 this.log.error('error handling cluster protocol message from %p - %e', peerId, err);
-                stream.abort(err instanceof Error ? err : new Error(String(err)));
+                try {
+                    await stream.close();
+                }
+                catch {
+                    stream.abort(err instanceof Error ? err : new Error(String(err)));
+                }
             }
         })();
     }

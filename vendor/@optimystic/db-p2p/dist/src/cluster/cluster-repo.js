@@ -495,20 +495,46 @@ export class ClusterMember {
                 // Check for stale revisions before allowing consensus
                 if (pendRequest.rev !== undefined) {
                     const blockIds = blockIdsForTransforms(pendRequest.transforms);
-                    // Get block states to check latest revisions
-                    const blockResults = await this.storageRepo.get({ blockIds });
-                    for (const blockId of blockIds) {
-                        const blockResult = blockResults[blockId];
-                        const latestRev = blockResult?.state?.latest?.rev;
-                        if (latestRev !== undefined && latestRev >= pendRequest.rev) {
-                            log('cluster-member:validation-stale-revision', {
-                                messageHash: record.messageHash,
-                                blockId,
-                                requestedRev: pendRequest.rev,
-                                latestRev
-                            });
-                            return { valid: false, reason: `stale revision: block ${blockId} at rev ${latestRev}, requested rev ${pendRequest.rev}` };
+                    // 38-04 (P2P-09 diagnose-first, captured on-device 2026-07-07): the
+                    // staleness read below throws "Failed to find materialized block <id>
+                    // for revision N" (BlockStorage.materializeBlock) when a cohort member
+                    // has no locally-materialized content for the block — the expected state
+                    // for a NEW block being created via distributed consensus. That throw
+                    // propagated up through cluster.update() to ClusterService and was
+                    // converted into a contentless StreamResetError ("The stream has been
+                    // reset") the initiating peer observed, hanging the whole consensus round.
+                    // Staleness detection is a local optimization: a member that cannot
+                    // read its own block state simply cannot determine staleness, so it must
+                    // DEFER to normal validation/consensus rather than crash the stream.
+                    // Surface the real error to the drone log (not swallowed), then continue.
+                    try {
+                        // Get block states to check latest revisions
+                        const blockResults = await this.storageRepo.get({ blockIds });
+                        for (const blockId of blockIds) {
+                            const blockResult = blockResults[blockId];
+                            const latestRev = blockResult?.state?.latest?.rev;
+                            if (latestRev !== undefined && latestRev >= pendRequest.rev) {
+                                log('cluster-member:validation-stale-revision', {
+                                    messageHash: record.messageHash,
+                                    blockId,
+                                    requestedRev: pendRequest.rev,
+                                    latestRev
+                                });
+                                return { valid: false, reason: `stale revision: block ${blockId} at rev ${latestRev}, requested rev ${pendRequest.rev}` };
+                            }
                         }
+                    }
+                    catch (err) {
+                        // No locally-materialized state to compare against — cannot determine
+                        // staleness locally. Do NOT fail consensus on this basis; defer to the
+                        // custom validator below. Fail-safe: worst case is an extra approval
+                        // that the validator/quorum still gates (consensus SAFETY preserved).
+                        log('cluster-member:staleness-check-unavailable', {
+                            messageHash: record.messageHash,
+                            blockIds,
+                            requestedRev: pendRequest.rev,
+                            error: err instanceof Error ? err.message : String(err)
+                        });
                     }
                 }
                 // Run custom validator if configured
