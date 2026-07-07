@@ -27,7 +27,36 @@ export class StorageRepo {
                     }
                 }
             }
-            const blockRev = await blockStorage.getBlock(context?.rev);
+            // 38-07 (P2P-11): narrow drone-side materialize-defer — see 38-04-SUMMARY
+            // "Attempted-and-reverted: storage-repo.js" for why a blanket get()-level
+            // catch is NOT used here (it broke solo bootstrap strand creation across 3
+            // runs). This guard is scoped to ONLY the materialize read below, mirroring
+            // the already-landed cluster-repo.js:498 validatePendOperations defer analog:
+            // a cohort member with no locally-materialized state for a NEW block cannot
+            // determine its content, so it defers (blockRev stays undefined, falling
+            // through to the existing `if (!blockRev) return [blockId, { state: {} }];`
+            // empty-state path below) instead of letting the throw propagate up through
+            // cluster.update() into a StreamResetError. Surfaces the real error via the
+            // module `log` first — never silently swallowed (V5). Only the
+            // "Failed to find materialized block" class is caught; anything else
+            // re-throws so unrelated failures still surface. The creation-path
+            // `Pending action <id> not found` throw a few lines below is OUTSIDE this
+            // try/catch and remains reachable and un-caught (load-bearing on the
+            // creation path — this is exactly what the reverted broad catch swallowed).
+            let blockRev;
+            try {
+                blockRev = await blockStorage.getBlock(context?.rev);
+            }
+            catch (err) {
+                const message = err instanceof Error ? err.message : String(err);
+                if (message.includes('Failed to find materialized block')) {
+                    log('get:materialize-defer blockId=%s err=%s', blockId, message);
+                    blockRev = undefined;
+                }
+                else {
+                    throw err;
+                }
+            }
             // Include pending action if requested — handled first so a pending-only
             // insert (no committed revision yet) can still be served by applying the
             // pending transform to an undefined prior block.
