@@ -61,6 +61,13 @@ const CONTROL_ADDR = '/ip4/10.0.2.2/tcp/0/ws/p2p/UPDATE_AFTER_DRONE_RESTART';
 // strand solo (empty strandBootstrapNodes → bootstrap mode, no crash — P2P-03 no regression).
 const STRAND_BOOTSTRAP_ADDR = '/ip4/10.0.2.2/tcp/0/ws/p2p/UPDATE_AFTER_DRONE_RESTART';
 
+// 38-05 (D-04 n=4 topology): SECOND drone's strand-node ws multiaddr (drone-B). The
+// harness injects this per-run alongside STRAND_BOOTSTRAP_ADDR — both drones join the
+// SAME strand as full voting members, so the emulator's strand cohort must dial both.
+// Placeholder-aware exactly like STRAND_BOOTSTRAP_ADDR (boots with drone-B omitted if
+// unset, no crash — backward compatible with a single-drone run).
+const STRAND_BOOTSTRAP_ADDR_B = '/ip4/10.0.2.2/tcp/0/ws/p2p/UPDATE_AFTER_DRONE_RESTART';
+
 // resolveBootstrapNodes — placeholder-aware address resolver (mirrors CadreNodeProvider).
 // Returns [] for empty/unset OR placeholder (safe solo boot), [addr] for a real address.
 const BOOTSTRAP_PLACEHOLDER = 'UPDATE_AFTER_DRONE_RESTART';
@@ -136,9 +143,15 @@ export async function runReplicationProof(): Promise<void> {
         // Permissive gater — dev probe only (matches dial-probe.ts / cadre-runtime-ondevice.md).
         // Cast needed for connectionGater (upstream gap); strandBootstrapNodes is typed by 23-05.
         connectionGater: { denyDialMultiaddr: async () => false },
-        // REPL-01: strand-cohort bootstrap — the drone's strand-node multiaddr (injected per-run).
-        // Placeholder → [] → strand boots solo (CF-02 bootstrap mode; P2P-03 no regression).
-        strandBootstrapNodes: resolveBootstrapNodes(STRAND_BOOTSTRAP_ADDR),
+        // REPL-01: strand-cohort bootstrap — the drones' strand-node multiaddrs (injected
+        // per-run). 38-05 (D-04 n=4): both drone-A and drone-B addrs are included so the
+        // emulator dials BOTH voting-member drones; each is independently placeholder-aware
+        // (resolveBootstrapNodes → [] for an unset/placeholder addr), so a single-drone run
+        // (drone-B addr left as placeholder) degrades cleanly to the pre-38-05 behavior.
+        strandBootstrapNodes: [
+          ...resolveBootstrapNodes(STRAND_BOOTSTRAP_ADDR),
+          ...resolveBootstrapNodes(STRAND_BOOTSTRAP_ADDR_B),
+        ],
       } as any,
       hibernation: { enabled: false },
     });

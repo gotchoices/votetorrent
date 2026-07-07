@@ -87,6 +87,11 @@ STRAND_ID=""
 # D-08: initialized empty so restore_flags() (which may run under `set -u` before the
 # drone is ever launched, e.g. on a Step-1 failure) can safely test it unset.
 DRONE_LOG=""
+# 38-05 (D-04 n=4 topology): SECOND drone (drone-B) state — mirrors DRONE_PID/DRONE_LOG.
+# Initialized empty so restore_flags() can safely test them unset (e.g. drone-B never
+# launched because drone-A failed first).
+DRONE_B_PID=""
+DRONE_B_LOG=""
 
 # WR-03 (17-REVIEW): restore the committed default-false flag file on EXIT
 # (PASS, FAIL, or set -e abort) so the probe-enabled override never leaks
@@ -97,11 +102,20 @@ restore_flags() {
     kill "${DRONE_PID}" 2>/dev/null || true
     echo "[run-replication-proof] Drone PID ${DRONE_PID} killed" >&2
   fi
+  # 38-05 (D-04 n=4 topology): kill drone-B alongside drone-A.
+  if [ -n "${DRONE_B_PID}" ]; then
+    kill "${DRONE_B_PID}" 2>/dev/null || true
+    echo "[run-replication-proof] Drone-B PID ${DRONE_B_PID} killed" >&2
+  fi
   # D-08 (diagnose-first): DRONE_LOG is deliberately retained through the ENTIRE run
   # (no rm -f before the verdict poll) so the drone's real cluster-protocol error is
   # captured, not discarded. This EXIT trap is the ONLY place it is removed.
   if [ -n "${DRONE_LOG}" ]; then
     rm -f "${DRONE_LOG}" 2>/dev/null || true
+  fi
+  # 38-05: drone-B's log is retained through the run the same way (only removed here).
+  if [ -n "${DRONE_B_LOG}" ]; then
+    rm -f "${DRONE_B_LOG}" 2>/dev/null || true
   fi
   if [ "${PROBE_STARTED}" -eq 0 ]; then
     echo "[run-replication-proof] WARNING: restoring flags before [replication-proof] starting observed — app may have fetched a flags-disabled bundle (probe silent no-op); re-run" >&2
@@ -282,6 +296,74 @@ if [ -z "${STRAND_ADDR}" ]; then
 fi
 echo "[run-replication-proof] Drone strand addr: ${STRAND_ADDR}"
 
+# ── STEP 3b: LAUNCH DRONE-B (38-05 / D-04 n=4 topology) ─────────────────────
+# SECOND drone process, cross-bootstrapped to drone-A's control AND strand
+# multiaddrs — exactly the wiring 38-02's two-drone-smoke.mjs proved (peerCount=3
+# there; here it grows the strand cohort to n=4 alongside the 2 emulators).
+# Cross-bootstrap uses the drone's own loopback (127.0.0.1) addrs, NOT the
+# device-rewritten 10.0.2.2 addrs below — drone-A and drone-B are both host-side
+# Node processes talking to each other directly over loopback (Pitfall 2: distinct
+# host-loopback vs emulator-alias address spaces).
+echo "[run-replication-proof] Step 3b: launching drone-B (cross-bootstrapped to drone-A) with STRAND_ID=${STRAND_ID} under Node 22 ..."
+DRONE_B_LOG=$(mktemp /tmp/drone-b-full-run-XXXXXX.log)
+DEBUG="optimystic:db-p2p:*:error,db-p2p:*:error,libp2p:*:error,sereus:cadre:*:error" \
+  STRAND_ID="${STRAND_ID}" \
+  DRONE_BOOTSTRAP_CONTROL_ADDR="${DRONE_ADDR}" \
+  DRONE_BOOTSTRAP_STRAND_ADDR="${STRAND_ADDR}" \
+  "${NODE22}" packages/p2p-probe-host/drone.mjs > "${DRONE_B_LOG}" 2>&1 &
+DRONE_B_PID=$!
+echo "[run-replication-proof] Drone-B launched (PID ${DRONE_B_PID}, DEBUG= cluster-error logging armed, cross-bootstrapped to drone-A), waiting for READY line ..."
+
+DRONE_B_ADDR=""
+STRAND_B_ADDR=""
+ELAPSED=0
+while [ "${ELAPSED}" -lt "${DRONE_READY_TIMEOUT}" ]; do
+  if ! kill -0 "${DRONE_B_PID}" 2>/dev/null; then
+    echo "[run-replication-proof] ERROR: drone-B process exited before emitting READY (PID ${DRONE_B_PID})" >&2
+    cat "${DRONE_B_LOG}" >&2
+    exit 1
+  fi
+  if [ -z "${DRONE_B_ADDR}" ]; then
+    ADDR_LINE_B=$(grep -m1 'PROOF_WS_ADDR=' "${DRONE_B_LOG}" 2>/dev/null || true)
+    if [ -n "${ADDR_LINE_B}" ]; then
+      DRONE_B_ADDR=$(echo "${ADDR_LINE_B}" | grep -o '/ip4/[^ ]*/ws/p2p/[^ ]*' || true)
+    fi
+  fi
+  if [ -n "${DRONE_B_ADDR}" ] && [ -z "${STRAND_B_ADDR}" ]; then
+    STRAND_B_LINE_RAW=$(grep -m1 'PROOF_STRAND_ADDR' "${DRONE_B_LOG}" 2>/dev/null || true)
+    if [ -n "${STRAND_B_LINE_RAW}" ]; then
+      if echo "${STRAND_B_LINE_RAW}" | grep -q 'PROOF_STRAND_ADDR_MISSING'; then
+        echo "[run-replication-proof] ERROR: drone-B strand node has no listen multiaddr (PROOF_STRAND_ADDR_MISSING)" >&2
+        cat "${DRONE_B_LOG}" >&2
+        exit 1
+      fi
+      STRAND_B_ADDR=$(echo "${STRAND_B_LINE_RAW}" | grep -o '/ip4/[^ ]*/ws/p2p/[^ ]*' || true)
+      if [ -z "${STRAND_B_ADDR}" ]; then
+        echo "[run-replication-proof] ERROR: drone-B PROOF_STRAND_ADDR= emitted but no valid multiaddr parsed" >&2
+        cat "${DRONE_B_LOG}" >&2
+        exit 1
+      fi
+      break
+    fi
+  fi
+  sleep 1
+  ELAPSED=$((ELAPSED + 1))
+done
+# D-08 (mirrored for drone-B): DRONE_B_LOG is NOT removed here — retained through the
+# full run; only the EXIT trap removes it.
+
+if [ -z "${DRONE_B_ADDR}" ]; then
+  echo "[run-replication-proof] ERROR: drone-B did not emit a READY ws multiaddr within ${DRONE_READY_TIMEOUT}s" >&2
+  exit 1
+fi
+echo "[run-replication-proof] Drone-B READY addr: ${DRONE_B_ADDR}"
+
+if [ -z "${STRAND_B_ADDR}" ]; then
+  echo "[run-replication-proof] ERROR: drone-B did not emit PROOF_STRAND_ADDR= within ${DRONE_READY_TIMEOUT}s" >&2
+  exit 1
+fi
+echo "[run-replication-proof] Drone-B strand addr: ${STRAND_B_ADDR}"
+
 # Inject the drone's ws multiaddr into the runner (D-07). The runner reads CONTROL_ADDR
 # at the top of replication-proof-runner.ts; we rewrite just that constant line.
 # The EXIT trap calls restore_flags which git-checkouts the FLAG_FILE; for CONFIG_FILE
@@ -294,23 +376,27 @@ trap 'restore_flags; git checkout -- '"${CONFIG_FILE}"' 2>/dev/null || true' EXI
 # The device emulator reaches the host at 10.0.2.2; replace the host IP in the addr.
 # The drone emits its loopback (127.0.0.1) ws multiaddr; the Android emulator reaches the
 # host loopback at 10.0.2.2. Rewrite either loopback/wildcard host to the emulator alias.
+# Only drone-A's control addr is injected (CONTROL_ADDR) — the control network is
+# unaffected by the n=4 strand-cohort growth (D-04); only the strand cohort (below)
+# needs both drones' addresses.
 DRONE_ADDR_FOR_DEVICE=$(echo "${DRONE_ADDR}" | sed -e 's|/ip4/127\.0\.0\.1/|/ip4/10.0.2.2/|' -e 's|/ip4/0\.0\.0\.0/|/ip4/10.0.2.2/|')
-# Apply the same host-IP rewrite for the strand address (Pitfall 2: separate addresses, separate nodes).
+# Apply the same host-IP rewrite for the strand addresses (Pitfall 2: separate addresses, separate nodes).
 STRAND_ADDR_FOR_DEVICE=$(echo "${STRAND_ADDR}" | sed -e 's|/ip4/127\.0\.0\.1/|/ip4/10.0.2.2/|' -e 's|/ip4/0\.0\.0\.0/|/ip4/10.0.2.2/|')
+STRAND_B_ADDR_FOR_DEVICE=$(echo "${STRAND_B_ADDR}" | sed -e 's|/ip4/127\.0\.0\.1/|/ip4/10.0.2.2/|' -e 's|/ip4/0\.0\.0\.0/|/ip4/10.0.2.2/|')
 # Use a temp marker that is not a regex special char.
-python3 - "${CONFIG_FILE}" "${DRONE_ADDR_FOR_DEVICE}" "${STRAND_ADDR_FOR_DEVICE}" << 'PYEOF'
+python3 - "${CONFIG_FILE}" "${DRONE_ADDR_FOR_DEVICE}" "${STRAND_ADDR_FOR_DEVICE}" "${STRAND_B_ADDR_FOR_DEVICE}" << 'PYEOF'
 import sys
-path, control_addr, strand_addr = sys.argv[1], sys.argv[2], sys.argv[3]
+path, control_addr, strand_addr, strand_addr_b = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 content = open(path).read()
 import re
-# Inject CONTROL_ADDR (control-network bootstrap — drone's control node).
+# Inject CONTROL_ADDR (control-network bootstrap — drone-A's control node).
 new_content = re.sub(
     r"(const CONTROL_ADDR = ')[^']*(')",
     r"\g<1>" + control_addr + r"\g<2>",
     content,
     count=1,
 )
-# Inject STRAND_BOOTSTRAP_ADDR (strand-cohort bootstrap — drone's strand node).
+# Inject STRAND_BOOTSTRAP_ADDR (strand-cohort bootstrap — drone-A's strand node).
 # SEPARATE constant from CONTROL_ADDR — different libp2p nodes / ephemeral ports (Pitfall 2).
 new_content = re.sub(
     r"(const STRAND_BOOTSTRAP_ADDR = ')[^']*(')",
@@ -318,9 +404,18 @@ new_content = re.sub(
     new_content,
     count=1,
 )
+# 38-05 (D-04 n=4): inject STRAND_BOOTSTRAP_ADDR_B (strand-cohort bootstrap — drone-B's
+# strand node) so the emulator's strand cohort dials BOTH voting-member drones.
+new_content = re.sub(
+    r"(const STRAND_BOOTSTRAP_ADDR_B = ')[^']*(')",
+    r"\g<1>" + strand_addr_b + r"\g<2>",
+    new_content,
+    count=1,
+)
 open(path, 'w').write(new_content)
 print(f"[run-replication-proof] CONTROL_ADDR in runner injected: {control_addr}")
 print(f"[run-replication-proof] STRAND_BOOTSTRAP_ADDR in runner injected: {strand_addr}")
+print(f"[run-replication-proof] STRAND_BOOTSTRAP_ADDR_B in runner injected: {strand_addr_b}")
 PYEOF
 
 # ── STEP 4: RELAUNCH BOTH PEERS NETWORKED for the symmetric proof run ─────────
@@ -475,6 +570,20 @@ if [ -n "${DRONE_LOG}" ] && [ -f "${DRONE_LOG}" ]; then
   fi
 else
   echo "[run-replication-proof] D-08: drone log unavailable (drone may not have launched)" >&2
+fi
+
+# 38-05 (D-04 n=4 topology): mirror the D-08 capture for drone-B.
+if [ -n "${DRONE_B_LOG}" ] && [ -f "${DRONE_B_LOG}" ]; then
+  cp "${DRONE_B_LOG}" /tmp/drone-b-p2p09-capture.log 2>/dev/null \
+    && echo "[run-replication-proof] D-08: drone-B log preserved at /tmp/drone-b-p2p09-capture.log (survives EXIT-trap cleanup)" >&2
+  if grep -qi "error handling cluster protocol message" "${DRONE_B_LOG}" 2>/dev/null; then
+    echo "[run-replication-proof] D-08 CAPTURED cluster protocol error on drone-B (candidate #1 confirmed):" >&2
+    grep -i "error handling cluster protocol message" "${DRONE_B_LOG}" >&2
+  else
+    echo "[run-replication-proof] D-08: no 'error handling cluster protocol message' line in drone-B log — inspect /tmp/drone-b-p2p09-capture.log for candidates #2-#5" >&2
+  fi
+else
+  echo "[run-replication-proof] D-08: drone-B log unavailable (drone-B may not have launched)" >&2
 fi
 
 if [ -z "${VERDICT_A}" ] || [ -z "${VERDICT_B}" ]; then
