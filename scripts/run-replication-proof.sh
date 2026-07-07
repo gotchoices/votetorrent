@@ -49,6 +49,10 @@ PROBE_MARKER='\[replication-proof\].*starting'
 STRAND_ID_MARKER='\[replication-proof\].*strandId='
 PEER_ID_MARKER='\[replication-proof\].*peerId='
 PEERS_MARKER='\[replication-proof\].*peers='
+# D-09: relay-reservation READY marker (P2P-08). Gates the START of the networked
+# replication run + every post-relaunch continuation (D-10) — the runner emits this
+# unconditionally (true/false) after a bounded getMultiaddrs()/p2p-circuit poll.
+RELAY_READY_MARKER='\[replication-proof\].*relayReservation='
 LOGCAT_TIMEOUT=180  # seconds: longer than dial-probe to account for two emulators +
                     # replication latency (A writes → drone → B reads)
 MARKER_TIMEOUT=90   # seconds to wait for [replication-proof] starting marker
@@ -77,6 +81,9 @@ extract_marker_value() {
 PROBE_STARTED=0
 DRONE_PID=""
 STRAND_ID=""
+# D-08: initialized empty so restore_flags() (which may run under `set -u` before the
+# drone is ever launched, e.g. on a Step-1 failure) can safely test it unset.
+DRONE_LOG=""
 
 # WR-03 (17-REVIEW): restore the committed default-false flag file on EXIT
 # (PASS, FAIL, or set -e abort) so the probe-enabled override never leaks
@@ -86,6 +93,12 @@ restore_flags() {
   if [ -n "${DRONE_PID}" ]; then
     kill "${DRONE_PID}" 2>/dev/null || true
     echo "[run-replication-proof] Drone PID ${DRONE_PID} killed" >&2
+  fi
+  # D-08 (diagnose-first): DRONE_LOG is deliberately retained through the ENTIRE run
+  # (no rm -f before the verdict poll) so the drone's real cluster-protocol error is
+  # captured, not discarded. This EXIT trap is the ONLY place it is removed.
+  if [ -n "${DRONE_LOG}" ]; then
+    rm -f "${DRONE_LOG}" 2>/dev/null || true
   fi
   if [ "${PROBE_STARTED}" -eq 0 ]; then
     echo "[run-replication-proof] WARNING: restoring flags before [replication-proof] starting observed — app may have fetched a flags-disabled bundle (probe silent no-op); re-run" >&2
@@ -193,10 +206,15 @@ if [ -z "${NODE22}" ] || [ ! -x "${NODE22}" ]; then
   exit 1
 fi
 
-DRONE_LOG=$(mktemp /tmp/drone-ready-XXXXXX.log)
-STRAND_ID="${STRAND_ID}" "${NODE22}" packages/p2p-probe-host/drone.mjs > "${DRONE_LOG}" 2>&1 &
+# D-08 (diagnose-first): DEBUG= arms the drone's namespace-gated cluster-protocol error
+# logging (cluster/service.js's this.log.error('error handling cluster protocol message...'))
+# — OFF by default otherwise. Namespace corrected per 38-02-SUMMARY.md's runtime finding
+# (createLogger's actual base is optimystic:db-p2p:*, NOT the bare db-p2p:* RESEARCH.md cited).
+# DRONE_LOG is retained through the FULL run (no rm -f below) — only the EXIT trap removes it.
+DRONE_LOG=$(mktemp /tmp/drone-full-run-XXXXXX.log)
+DEBUG="optimystic:db-p2p:*:error,libp2p:*:error,sereus:cadre:*:error" STRAND_ID="${STRAND_ID}" "${NODE22}" packages/p2p-probe-host/drone.mjs > "${DRONE_LOG}" 2>&1 &
 DRONE_PID=$!
-echo "[run-replication-proof] Drone launched (PID ${DRONE_PID}), waiting for READY line ..."
+echo "[run-replication-proof] Drone launched (PID ${DRONE_PID}, DEBUG= cluster-error logging armed), waiting for READY line ..."
 
 # Wait for READY line in drone stdout, extract ws multiaddr.
 DRONE_ADDR=""
@@ -207,12 +225,13 @@ ELAPSED=0
 # The drone emits PROOF_STRAND_ADDR= AFTER await node.addStrand(...) resolves,
 # which is strictly later than PROOF_WS_ADDR=; a one-shot grep at the PROOF_WS_ADDR=
 # break races and yields an empty STRAND_ADDR (Pitfall 3 guard).
-# We defer rm -f "${DRONE_LOG}" until after both addresses are captured.
+# D-08: DRONE_LOG is NEVER rm -f'd here (or anywhere before the verdict poll) — it is
+# retained through the full run so the real consensus-round cluster error is captured;
+# the EXIT trap (restore_flags) is the ONLY place it is removed.
 while [ "${ELAPSED}" -lt "${DRONE_READY_TIMEOUT}" ]; do
   if ! kill -0 "${DRONE_PID}" 2>/dev/null; then
     echo "[run-replication-proof] ERROR: drone process exited before emitting READY (PID ${DRONE_PID})" >&2
     cat "${DRONE_LOG}" >&2
-    rm -f "${DRONE_LOG}"
     exit 1
   fi
   # Parse the machine-readable PROOF_WS_ADDR= line — NOT the human 'READY' instruction
@@ -230,14 +249,12 @@ while [ "${ELAPSED}" -lt "${DRONE_READY_TIMEOUT}" ]; do
       if echo "${STRAND_LINE_RAW}" | grep -q 'PROOF_STRAND_ADDR_MISSING'; then
         echo "[run-replication-proof] ERROR: drone strand node has no listen multiaddr (PROOF_STRAND_ADDR_MISSING)" >&2
         cat "${DRONE_LOG}" >&2
-        rm -f "${DRONE_LOG}"
         exit 1
       fi
       STRAND_ADDR=$(echo "${STRAND_LINE_RAW}" | grep -o '/ip4/[^ ]*/ws/p2p/[^ ]*' || true)
       if [ -z "${STRAND_ADDR}" ]; then
         echo "[run-replication-proof] ERROR: PROOF_STRAND_ADDR= emitted but no valid multiaddr parsed" >&2
         cat "${DRONE_LOG}" >&2
-        rm -f "${DRONE_LOG}"
         exit 1
       fi
       break
@@ -246,8 +263,9 @@ while [ "${ELAPSED}" -lt "${DRONE_READY_TIMEOUT}" ]; do
   sleep 1
   ELAPSED=$((ELAPSED + 1))
 done
-# Now safe to remove the drone log — both addresses have been captured (or timed out).
-rm -f "${DRONE_LOG}"
+# D-08: the drone log is NOT removed here — both addresses have been captured (or timed
+# out), but the log must survive through the real consensus round for the post-verdict
+# cluster-error grep below. Only the EXIT trap removes DRONE_LOG.
 
 if [ -z "${DRONE_ADDR}" ]; then
   echo "[run-replication-proof] ERROR: drone did not emit a READY ws multiaddr within ${DRONE_READY_TIMEOUT}s" >&2
@@ -329,6 +347,27 @@ fi
 echo "[run-replication-proof] Networked start marker seen on Peer A: ${MARKER_LINE}"
 PROBE_STARTED=1
 
+# ── D-09: relay-READY gate — gates the START of the replication run on the relay
+# reservation being observed on BOTH peers (P2P-08). Both emulators run the same
+# replication-proof-runner.ts, so both independently poll getMultiaddrs()/p2p-circuit
+# and emit relayReservation= (true|false) unconditionally — wait for the marker line
+# itself (its presence, not its boolean value) on each serial, mirroring the existing
+# PROBE_MARKER/STRAND_ID_MARKER gating shape.
+echo "[run-replication-proof] D-09: waiting for relayReservation= marker on emulator-5554 (networked run) ..."
+RELAY_LINE_A=$(wait_for_logcat_line "${RELAY_READY_MARKER}" "${MARKER_TIMEOUT}" "[run-replication-proof]" "relay-ready-A" "-s emulator-5554")
+if [ -z "${RELAY_LINE_A}" ]; then
+  echo "[run-replication-proof] ERROR: relayReservation= marker never appeared on emulator-5554 (networked run) — relay reservation not established (P2P-08)" >&2
+  exit 1
+fi
+echo "[run-replication-proof] D-09: relay-READY on emulator-5554: ${RELAY_LINE_A}"
+echo "[run-replication-proof] D-09: waiting for relayReservation= marker on emulator-5556 (networked run) ..."
+RELAY_LINE_B=$(wait_for_logcat_line "${RELAY_READY_MARKER}" "${MARKER_TIMEOUT}" "[run-replication-proof]" "relay-ready-B" "-s emulator-5556")
+if [ -z "${RELAY_LINE_B}" ]; then
+  echo "[run-replication-proof] ERROR: relayReservation= marker never appeared on emulator-5556 (networked run) — relay reservation not established (P2P-08)" >&2
+  exit 1
+fi
+echo "[run-replication-proof] D-09: relay-READY on emulator-5556: ${RELAY_LINE_B}"
+
 # ── D-05: peerId stability — capture before/after a Peer-A force-stop relaunch ─
 # Peer A must emit the same peerId before and after a force-stop (P2P-04 / Test 4).
 echo "[run-replication-proof] D-05: capturing peerId on Peer A before force-stop ..."
@@ -348,6 +387,13 @@ adb -s emulator-5554 shell monkey -p "${PACKAGE}" -c android.intent.category.LAU
 
 # Wait for starting marker on the D-05 relaunch.
 wait_for_logcat_line "${PROBE_MARKER}" "${MARKER_TIMEOUT}" "[run-replication-proof]" "marker-d05-relaunch" "-s emulator-5554" > /dev/null
+
+# ── D-10: re-reserve-on-relaunch — the force-stop killed the process AND its relay
+# reservation; the relaunched runner must re-establish it before we trust any dial
+# that follows. Re-gate on the SAME RELAY_READY_MARKER, same idiom as the D-09 gate.
+echo "[run-replication-proof] D-10: waiting for relayReservation= marker on Peer A after D-05 relaunch ..."
+wait_for_logcat_line "${RELAY_READY_MARKER}" "${MARKER_TIMEOUT}" "[run-replication-proof]" "relay-ready-d05-relaunch" "-s emulator-5554" > /dev/null
+echo "[run-replication-proof] D-10: relay reservation re-established on Peer A after D-05 relaunch"
 
 echo "[run-replication-proof] D-05: capturing peerId on Peer A after force-stop relaunch ..."
 PEER_ID_LINE_AFTER=$(wait_for_logcat_line "${PEER_ID_MARKER}" "${MARKER_TIMEOUT}" "[run-replication-proof]" "peerId-after" "-s emulator-5554")
@@ -410,6 +456,18 @@ VERDICT_B=$(wait_for_logcat_line "${VERDICT_TAG}" "${LOGCAT_TIMEOUT}" "[run-repl
 if [ -z "${VERDICT_A}" ] || [ -z "${VERDICT_B}" ]; then
   echo "[run-replication-proof] ERROR: one or both peers did not emit a verdict within ${LOGCAT_TIMEOUT}s — FAIL" >&2
   exit 1
+fi
+
+# ── D-08: post-verdict cluster-error capture (diagnose-first, P2P-09) ────────
+# Runs regardless of PASS/FAIL — grep the retained drone log for the real
+# server-side exception cluster/service.js's catch-all converts into the generic
+# libp2p StreamResetError ("The stream has been reset") the peers observe.
+echo "[run-replication-proof] D-08: checking drone log for the real cluster-protocol error ..."
+if grep -qi "error handling cluster protocol message" "${DRONE_LOG}" 2>/dev/null; then
+  echo "[run-replication-proof] D-08 CAPTURED cluster protocol error (candidate #1 confirmed):" >&2
+  grep -i "error handling cluster protocol message" "${DRONE_LOG}" >&2
+else
+  echo "[run-replication-proof] D-08: no server-side cluster error observed — check candidates #2-#5" >&2
 fi
 
 if echo "${VERDICT_A}" | grep -q "FAIL" || echo "${VERDICT_B}" | grep -q "FAIL"; then
