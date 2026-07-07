@@ -56,7 +56,10 @@ RELAY_READY_MARKER='\[replication-proof\].*relayReservation='
 LOGCAT_TIMEOUT=180  # seconds: longer than dial-probe to account for two emulators +
                     # replication latency (A writes → drone → B reads)
 MARKER_TIMEOUT=90   # seconds to wait for [replication-proof] starting marker
-STRAND_TIMEOUT=60   # seconds to wait for strandId= marker from bootstrap-mode Peer A
+STRAND_TIMEOUT=120  # seconds to wait for strandId= marker from bootstrap-mode Peer A
+                    # (bumped from 60: the always-on relay-reservation poll added ~16s to
+                    #  the bootstrap critical path and long-lived emulators materialize the
+                    #  strand DB more slowly; strand creation itself still completes ~20-25s)
 DRONE_READY_TIMEOUT=30  # seconds to wait for drone READY line
 FLAG_FILE="apps/VoteTorrentAuthority/src/engines/proof-flags.generated.ts"
 # The generated config file that carries CONTROL_ADDR for the replication proof runner.

@@ -180,8 +180,20 @@ export class RepoService {
                 await stream.close();
             }
             catch (err) {
+                // 38-04 (P2P-09 diagnose-first): mirror the cluster/service.js fix — SURFACE
+                // the real error (logged) then close the stream gracefully instead of a
+                // blanket stream.abort(). The repo handler otherwise reset the stream while
+                // propagating the (expected at n=3) "Failed to get super-majority" result,
+                // reaching the initiating peer as a masking "The stream has been reset"
+                // alongside the real cause. Fall back to abort only if the graceful close
+                // itself fails. Errors are surfaced, never silently swallowed (V5).
                 this.log.error('error handling repo protocol message from %p - %e', peerId, err);
-                stream.abort(err instanceof Error ? err : new Error(String(err)));
+                try {
+                    await stream.close();
+                }
+                catch {
+                    stream.abort(err instanceof Error ? err : new Error(String(err)));
+                }
             }
         })();
     }
