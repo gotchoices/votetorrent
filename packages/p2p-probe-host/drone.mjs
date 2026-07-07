@@ -50,8 +50,20 @@ const VOTETORRENT_QSQL = VOTETORRENT_QSQL_RAW
   .replace(/\}\s*apply\s+schema\s+\w+\s*;\s*$/, '')
   .trim();
 
+// 38-05 (D-04 n=4 topology): cross-bootstrap parameterization so a SECOND drone
+// process (drone-B) can bootstrap into drone-A's control network AND strand cohort,
+// exactly as 38-02's two-drone-smoke.mjs proved (drone-B's controlNetwork.bootstrapNodes
+// + network.strandBootstrapNodes pointed at drone-A's addrs). drone-A itself launches
+// with these unset (empty defaults) — it remains the first bootstrap peer. Follows the
+// existing `process.env.X ?? default` pattern used by STRAND_ID below.
+const DRONE_BOOTSTRAP_CONTROL_ADDR = process.env.DRONE_BOOTSTRAP_CONTROL_ADDR ?? '';
+const DRONE_BOOTSTRAP_STRAND_ADDR = process.env.DRONE_BOOTSTRAP_STRAND_ADDR ?? '';
+
 const node = new CadreNode({
-  controlNetwork: { partyId: PARTY_ID, bootstrapNodes: [] },
+  controlNetwork: {
+    partyId: PARTY_ID,
+    bootstrapNodes: DRONE_BOOTSTRAP_CONTROL_ADDR ? [DRONE_BOOTSTRAP_CONTROL_ADDR] : [],
+  },
   profile: 'storage',
   strandFilter: { mode: 'all' },
   storage: { provider: () => new MemoryRawStorage() },
@@ -66,6 +78,7 @@ const node = new CadreNode({
     // WS dial proof (P2P-01) needs no relay. Phase 22 relay work must extend
     // the yarn patch to forward a relay option (and re-add it here) instead
     // of relying on this config key.
+    ...(DRONE_BOOTSTRAP_STRAND_ADDR && { strandBootstrapNodes: [DRONE_BOOTSTRAP_STRAND_ADDR] }),
   },
   hibernation: { enabled: false },
 });

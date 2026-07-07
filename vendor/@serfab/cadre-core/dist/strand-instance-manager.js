@@ -95,7 +95,7 @@ class StrandInstanceManager {
         storage: strandStorage,
         fretProfile: config.profile === "storage" ? "core" : "edge",
         relay: enableRelay,
-        clusterSize: 3,
+        clusterSize: 4,
         clusterPolicy: {
           allowDownsize: true,
           sizeTolerance: 0.5
