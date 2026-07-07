@@ -17,6 +17,19 @@
 #            D-01 (both-PASS): BOTH emulators must emit REPLICATION VERDICT: PASS.
 #
 # Usage    : ./scripts/run-replication-proof.sh
+#            Env vars (all optional):
+#              FRESH_EMULATOR=1|0  — (default 1) wipe both emulators to a clean app
+#                                    slate (pm clear + a votetorrent-* LevelDB store
+#                                    wipe, D-11 idiom) before Step 1. Set to 0 to skip
+#                                    (e.g. re-running immediately after a clean pass).
+#
+# 38-07 (route-forward from 38-05, all 8 prior runs died at a force-stop/relaunch
+# marker-timeout checkpoint): checkpoint marker timeouts are raised (see
+# MARKER_TIMEOUT/STRAND_TIMEOUT/DRONE_READY_TIMEOUT below), the D-05 Peer-A relaunch
+# and the networked both-peer relaunch route through a local `relaunch_and_wait`
+# helper that retries the force-stop/relaunch once (2 attempts total) on a transient
+# marker miss instead of `set -e`-aborting the whole run, and the run starts from the
+# FRESH_EMULATOR precondition above.
 #
 # Prerequisites:
 #   - adb must be in PATH (Android SDK Platform Tools)
@@ -28,7 +41,8 @@
 # Exit codes:
 #   0  — REPLICATION VERDICT: PASS (both peers) — both emulators passed
 #   1  — REPLICATION VERDICT: FAIL, missing strandId/READY addr, D-05 mismatch,
-#         D-06 peer count < 1, or no verdict within timeout
+#         D-06 peer count < 1, or no verdict within timeout (incl. after both
+#         relaunch_and_wait attempts miss their marker)
 #
 
 set -euo pipefail
@@ -41,6 +55,60 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 . scripts/lib/logcat-wait.sh
 
 PACKAGE="org.votetorrent.authority"
+
+# 38-07: local relaunch-retry helper — kept in THIS script (not logcat-wait.sh,
+# which run-vtest02.sh also sources; editing the shared helper risks a D-11
+# solo/strand regression). All 8 prior 38-05 runs died at a force-stop/relaunch
+# marker-timeout checkpoint (`set -e`-abort on the FIRST miss). This wraps a
+# force-stop + logcat-clear + relaunch + wait_for_logcat_line cycle under a
+# temporarily relaxed `set +e` so a transient marker-timeout returns non-zero
+# instead of aborting, then retries the whole cycle once more (2 attempts total)
+# before giving up.
+#
+# Usage: relaunch_and_wait SERIAL PATTERN TIMEOUT_S WHAT [SECOND_SERIAL]
+#   SERIAL         — the adb serial whose marker is waited on (e.g. emulator-5554)
+#   PATTERN        — logcat pattern passed to wait_for_logcat_line
+#   TIMEOUT_S      — seconds to wait per attempt
+#   WHAT           — human label for wait_for_logcat_line's own error messages
+#   SECOND_SERIAL  — optional: also force-stop/clear/relaunch this serial on every
+#                    attempt (the networked both-peer relaunch needs both devices up
+#                    together before either's marker is meaningful), but only SERIAL's
+#                    marker is waited on.
+#
+# Echoes the matched logcat line to stdout (same contract as wait_for_logcat_line);
+# prints nothing (empty) if both attempts miss — callers must check for an empty
+# result exactly as they already do for a bare wait_for_logcat_line call.
+relaunch_and_wait() {
+  local serial="$1" pattern="$2" timeout_s="$3" what="$4" second_serial="${5:-}"
+  local attempt line status
+  for attempt in 1 2; do
+    echo "[run-replication-proof] relaunch_and_wait: attempt ${attempt}/2 for '${what}' on ${serial}$([ -n "${second_serial}" ] && echo " (+ ${second_serial})") ..." >&2
+    adb -s "${serial}" shell am force-stop "${PACKAGE}"
+    if [ -n "${second_serial}" ]; then
+      adb -s "${second_serial}" shell am force-stop "${PACKAGE}"
+    fi
+    sleep 2
+    adb -s "${serial}" logcat -c
+    if [ -n "${second_serial}" ]; then
+      adb -s "${second_serial}" logcat -c
+    fi
+    adb -s "${serial}" shell monkey -p "${PACKAGE}" -c android.intent.category.LAUNCHER 1
+    if [ -n "${second_serial}" ]; then
+      adb -s "${second_serial}" shell monkey -p "${PACKAGE}" -c android.intent.category.LAUNCHER 1
+    fi
+    set +e
+    line=$(wait_for_logcat_line "${pattern}" "${timeout_s}" "[run-replication-proof]" "${what}" "-s ${serial}")
+    status=$?
+    set -e
+    if [ -n "${line}" ]; then
+      printf '%s\n' "${line}"
+      return 0
+    fi
+    echo "[run-replication-proof] relaunch_and_wait: attempt ${attempt}/2 MISSED '${what}' on ${serial} (status=${status})" >&2
+  done
+  echo "[run-replication-proof] relaunch_and_wait: both attempts missed '${what}' on ${serial} — giving up" >&2
+  return 0
+}
 # replication-proof logs via multi-arg console.log('[replication-proof]', ...) —
 # RN logcat renders each arg quoted and comma-separated. Patterns tolerate the
 # quote/comma between tag and message (same as run-dial-probe.sh).
@@ -55,12 +123,17 @@ PEERS_MARKER='\[replication-proof\].*peers='
 RELAY_READY_MARKER='\[replication-proof\].*relayReservation='
 LOGCAT_TIMEOUT=180  # seconds: longer than dial-probe to account for two emulators +
                     # replication latency (A writes → drone → B reads)
-MARKER_TIMEOUT=90   # seconds to wait for [replication-proof] starting marker
-STRAND_TIMEOUT=120  # seconds to wait for strandId= marker from bootstrap-mode Peer A
-                    # (bumped from 60: the always-on relay-reservation poll added ~16s to
-                    #  the bootstrap critical path and long-lived emulators materialize the
-                    #  strand DB more slowly; strand creation itself still completes ~20-25s)
-DRONE_READY_TIMEOUT=30  # seconds to wait for drone READY line
+MARKER_TIMEOUT=180  # seconds to wait for [replication-proof] starting marker
+                    # (38-07: raised from 90 — the D-05/networked-relaunch checkpoints
+                    #  that killed all 8 prior 38-05 runs need headroom for a Metro
+                    #  rebundle race + slow long-lived-emulator relaunch, on top of the
+                    #  new relaunch_and_wait retry)
+STRAND_TIMEOUT=240  # seconds to wait for strandId= marker from bootstrap-mode Peer A
+                    # (38-07: raised from 120 — was bumped from 60 in 38-04 for the
+                    #  always-on relay-reservation poll + slow strand materialization;
+                    #  raised again for the same long-lived-emulator slowness that
+                    #  stalled the D-05 checkpoint in 38-05)
+DRONE_READY_TIMEOUT=60  # seconds to wait for drone READY line (38-07: raised from 30)
 FLAG_FILE="apps/VoteTorrentAuthority/src/engines/proof-flags.generated.ts"
 # The generated config file that carries CONTROL_ADDR for the replication proof runner.
 # The runner reads CONTROL_ADDR from this file (D-07 automated injection); restored on EXIT.
@@ -148,6 +221,30 @@ EOF
 # WR-21: install the trap only now — immediately before the first flag-file
 # write, the first action the trap exists to undo.
 trap restore_flags EXIT
+
+# ── Fresh-emulator precondition (38-07 / D-05 route-forward) ─────────────────
+# All 8 prior 38-05 runs died at a force-stop/relaunch marker-timeout checkpoint;
+# long-lived emulators accumulate wedged app/LevelDB state that makes Metro
+# rebundle races and relaunch markers flakier over successive runs
+# (38-05-SUMMARY.md "Environmental flakiness"). Start every run from a genuinely
+# fresh app slate on BOTH emulators: `pm clear` (mirrors the 38-05 de-wedge) THEN
+# an explicit `votetorrent-*` LevelDB store wipe via `run-as ... rm -rf` (mirrors
+# the D-11 reset idiom in run-vtest02.sh — defense-in-depth in case `pm clear`
+# leaves residue; per-network isolation memory: a shared/stale LevelDB handle
+# contaminates state across runs). Gated behind FRESH_EMULATOR so a caller can
+# skip it (e.g. re-running immediately after a clean pass).
+FRESH_EMULATOR="${FRESH_EMULATOR:-1}"
+if [ "${FRESH_EMULATOR}" = "1" ]; then
+  echo "[run-replication-proof] Fresh-emulator precondition: pm clear + votetorrent-* LevelDB wipe on both emulators (FRESH_EMULATOR=1) ..."
+  for serial in emulator-5554 emulator-5556; do
+    adb -s "${serial}" shell pm clear "${PACKAGE}" > /dev/null 2>&1 || true
+    adb -s "${serial}" shell run-as "${PACKAGE}" \
+      find /data/data/"${PACKAGE}"/files -name "votetorrent-*" -exec rm -rf {} + 2>/dev/null || true
+  done
+  echo "[run-replication-proof] Fresh-emulator precondition complete."
+else
+  echo "[run-replication-proof] Fresh-emulator precondition SKIPPED (FRESH_EMULATOR=0)."
+fi
 
 # ── STEP 0: Write the enabled flag file ──────────────────────────────────────
 # Metro picks up the change on the next bundle request (force-stop clears stale JS cache).
@@ -423,23 +520,15 @@ PYEOF
 # now reachable, createStrandDbFactory selects CF-02 networked mode on both peers.
 PROBE_STARTED=0  # reset sentinel before the real networked run
 
-echo "[run-replication-proof] Step 4: relaunching BOTH peers networked ..."
-adb -s emulator-5554 shell am force-stop "${PACKAGE}"
-adb -s emulator-5556 shell am force-stop "${PACKAGE}"
-sleep 2
-# Pitfall 4: clear stale logcat ring buffers on BOTH devices before networked relaunch.
-adb -s emulator-5554 logcat -c
-adb -s emulator-5556 logcat -c
-echo "[run-replication-proof] Relaunching ${PACKAGE} on emulator-5554 (Peer A — networked) ..."
-adb -s emulator-5554 shell monkey -p "${PACKAGE}" -c android.intent.category.LAUNCHER 1
-echo "[run-replication-proof] Relaunching ${PACKAGE} on emulator-5556 (Peer B — networked) ..."
-adb -s emulator-5556 shell monkey -p "${PACKAGE}" -c android.intent.category.LAUNCHER 1
-
-# Wait for the proof-start marker on Peer A (networked run).
-echo "[run-replication-proof] Waiting up to ${MARKER_TIMEOUT}s for [replication-proof] starting marker on emulator-5554 (networked run) ..."
-MARKER_LINE=$(wait_for_logcat_line "${PROBE_MARKER}" "${MARKER_TIMEOUT}" "[run-replication-proof]" "marker" "-s emulator-5554")
+# 38-07: force-stop + clear logcat + relaunch BOTH peers, waiting for Peer A's
+# starting marker, routed through relaunch_and_wait (bounded 2-attempt retry —
+# re-issues the force-stop/relaunch on BOTH devices if the marker misses). This
+# is one of the exact checkpoints where prior 38-05 runs died on a transient
+# Metro-rebundle/emulator-slowness marker timeout.
+echo "[run-replication-proof] Step 4: relaunching BOTH peers networked (via relaunch_and_wait, bounded retry) ..."
+MARKER_LINE=$(relaunch_and_wait "emulator-5554" "${PROBE_MARKER}" "${MARKER_TIMEOUT}" "marker" "emulator-5556")
 if [ -z "${MARKER_LINE}" ]; then
-  echo "[run-replication-proof] ERROR: [replication-proof] never started on Peer A (networked run) — Metro rebundle likely in flight; re-run" >&2
+  echo "[run-replication-proof] ERROR: [replication-proof] never started on Peer A (networked run) after 2 relaunch_and_wait attempts — Metro rebundle likely in flight; re-run" >&2
   exit 1
 fi
 echo "[run-replication-proof] Networked start marker seen on Peer A: ${MARKER_LINE}"
@@ -477,14 +566,17 @@ fi
 ID_BEFORE=$(extract_marker_value "${PEER_ID_LINE_BEFORE}" "peerId")
 echo "[run-replication-proof] peerId before: ${ID_BEFORE}"
 
-# Force-stop Peer A, clear logcat, relaunch, and capture peerId again.
-adb -s emulator-5554 shell am force-stop "${PACKAGE}"
-sleep 2
-adb -s emulator-5554 logcat -c
-adb -s emulator-5554 shell monkey -p "${PACKAGE}" -c android.intent.category.LAUNCHER 1
-
-# Wait for starting marker on the D-05 relaunch.
-wait_for_logcat_line "${PROBE_MARKER}" "${MARKER_TIMEOUT}" "[run-replication-proof]" "marker-d05-relaunch" "-s emulator-5554" > /dev/null
+# 38-07: force-stop + clear logcat + relaunch Peer A, waiting for the starting
+# marker, routed through relaunch_and_wait (bounded 2-attempt retry) — this exact
+# checkpoint is where the best 38-05 run died (relaunched Peer A's starting/relay
+# markers never re-emitted within the old 90s window; see 38-05-SUMMARY.md
+# "Where it stopped").
+D05_MARKER_LINE=$(relaunch_and_wait "emulator-5554" "${PROBE_MARKER}" "${MARKER_TIMEOUT}" "marker-d05-relaunch")
+if [ -z "${D05_MARKER_LINE}" ]; then
+  echo "[run-replication-proof] ERROR: [replication-proof] starting marker never appeared on Peer A after the D-05 relaunch (both relaunch_and_wait attempts missed)" >&2
+  exit 1
+fi
+echo "[run-replication-proof] D-05 relaunch start marker seen: ${D05_MARKER_LINE}"
 
 # ── D-10: re-reserve-on-relaunch — the force-stop killed the process AND its relay
 # reservation; the relaunched runner must re-establish it before we trust any dial
