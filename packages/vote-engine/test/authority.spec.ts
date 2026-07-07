@@ -918,6 +918,46 @@ describe('AuthorityEngine', () => {
       expect(pending).to.include(newCid)
     })
 
+    // WR-02 regression: a SECOND resend on an already-resent chain used to
+    // discover its Cid via a non-unique `Cid <> :origCid` SELECT, which
+    // matched every prior row once the chain had 3+ entries and could
+    // non-deterministically return a stale Cid (~40% reproduced). The fix
+    // pre-computes the new row's Cid deterministically before the INSERT
+    // and returns it directly, so this must now be 100% deterministic.
+    it('resendInvite twice on the same chain returns the genuinely newly-inserted third Cid, not a stale one', async () => {
+      const { authorityEngine, ctx, inviteSlotCid: origCid } = await seedPendingInvite()
+
+      const resend1Cid = await authorityEngine.resendInvite(origCid)
+      expect(resend1Cid).to.not.equal(origCid)
+
+      const resend2Cid = await authorityEngine.resendInvite(resend1Cid)
+
+      // Must be distinct from BOTH prior Cids in the chain.
+      expect(resend2Cid).to.not.equal(origCid)
+      expect(resend2Cid).to.not.equal(resend1Cid)
+
+      // Must actually be present in InviteSlot with a non-null ResendSalt
+      // and the same nonce/signature reused verbatim (A2 — no new signing
+      // round), proving it is the freshly-inserted third row, not a stale
+      // lookup hit.
+      const orig = await ctx.db
+        .prepare('select SigningNonce, InviteSignature from InviteSlot where Cid = :cid')
+        .get({ cid: origCid }) as { SigningNonce: string, InviteSignature: string }
+      const row = await ctx.db
+        .prepare('select Cid, SigningNonce, InviteSignature, ResendSalt from InviteSlot where Cid = :cid')
+        .get({ cid: resend2Cid }) as { Cid: string, SigningNonce: string, InviteSignature: string, ResendSalt: string | null }
+      expect(row?.Cid, 'the second resend must have actually inserted a third row').to.equal(resend2Cid)
+      expect(row.SigningNonce).to.equal(orig.SigningNonce)
+      expect(row.InviteSignature).to.equal(orig.InviteSignature)
+      expect(row.ResendSalt, 'a genuine resend row must persist a non-null ResendSalt').to.be.a('string').and.have.length.greaterThan(0)
+
+      // All three generations remain independently present (no auto-supersede).
+      const pending = await authorityEngine.getPendingInviteCids()
+      expect(pending).to.include(origCid)
+      expect(pending).to.include(resend1Cid)
+      expect(pending).to.include(resend2Cid)
+    })
+
     it('cancelInvite throws when the slot does not exist', async () => {
       const { authorityEngine } = await seedPendingInvite()
       let threw = false

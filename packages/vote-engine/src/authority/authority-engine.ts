@@ -591,6 +591,27 @@ export class AuthorityEngine implements IAuthorityEngine {
 			}
 			const tid = nextTid++;
 			const now = nowCanonicalDatetime();
+			const resendSalt = `resend|${tid}|${now}`;
+			// WR-02: pre-compute the new row's Cid deterministically (same
+			// 7-field order the CidValid resend branch re-derives) instead of
+			// discovering it via a post-insert SELECT. Once a SigningNonce
+			// chain has 3+ rows, `Cid <> :origCid` matches more than one row
+			// and a non-unique lookup can non-deterministically return a
+			// stale Cid from an earlier resend in the chain.
+			const newCidRow = await this.ctx.db
+				.prepare(
+					`select cid(Digest(:expiration, :inviteKey, :inviteSignature, :name, :nonce, :type, :resendSalt)) as c`,
+				)
+				.get({
+					expiration: orig.Expiration as string,
+					inviteKey: orig.InviteKey as string,
+					inviteSignature: orig.InviteSignature as string,
+					name: orig.Name as string,
+					nonce: orig.SigningNonce as string,
+					type: orig.Type as string,
+					resendSalt,
+				});
+			const newCid = newCidRow!.c as string;
 			// Fresh, unique Cid: same fields as the original PLUS the resend
 			// timestamp and Tid salt, so the Digest (and therefore the Cid PK)
 			// differs from the original while the approval-bearing SigningNonce /
@@ -608,7 +629,7 @@ export class AuthorityEngine implements IAuthorityEngine {
 					)
 					with context Tid = ${tid}, now = :now, IsSignatureValid = true, IsInsertValid = true
 				values (
-					cid(Digest(:expiration, :inviteKey, :inviteSignature, :name, :nonce, :type, :resendSalt)),
+					:cid,
 					:type,
 					:name,
 					:expiration,
@@ -618,30 +639,18 @@ export class AuthorityEngine implements IAuthorityEngine {
 					:resendSalt
 					)`,
 				{
+					cid: newCid,
 					type: orig.Type as string,
 					name: orig.Name as string,
 					expiration: orig.Expiration as string,
 					inviteKey: orig.InviteKey as string,
 					inviteSignature: orig.InviteSignature as string,
 					nonce: orig.SigningNonce as string,
-					resendSalt: `resend|${tid}|${now}`,
+					resendSalt,
 					now,
 				},
 			);
-			const newRow = await this.ctx.db
-				.prepare(
-					`select Cid from InviteSlot
-						where SigningNonce = :nonce and InviteSignature = :inviteSignature and Cid <> :origCid`,
-				)
-				.get({
-					nonce: orig.SigningNonce as string,
-					inviteSignature: orig.InviteSignature as string,
-					origCid: slotCid,
-				});
-			if (!newRow) {
-				throw new Error('resendInvite: fresh InviteSlot not found after insert');
-			}
-			return newRow.Cid as string;
+			return newCid;
 		} catch (err) {
 			this.rethrow(err, 'resendInvite');
 		}
