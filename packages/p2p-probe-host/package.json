@@ -8,6 +8,7 @@
     "start": "node drone.mjs"
   },
   "dependencies": {
+    "@libp2p/circuit-relay-v2": "^4",
     "@libp2p/websockets": "^10",
     "@optimystic/db-p2p": "0.13.5",
     "@serfab/cadre-core": "^0.7.1",
