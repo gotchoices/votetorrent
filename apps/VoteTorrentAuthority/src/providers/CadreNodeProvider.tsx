@@ -184,7 +184,11 @@ export function CadreNodeProvider({ children }: PropsWithChildren) {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           network: {
             transports: [webSockets(), circuitRelayTransport()],
-            listenAddrs: [],
+            // D-03: always-on relay reservation-seeking (P2P-08 drone-relay path).
+            // '/p2p-circuit' triggers @libp2p/circuit-relay-v2's ReservationStore to
+            // proactively request+hold a reservation against any connected relay
+            // (the drone) — one code path, no proof-gating flag.
+            listenAddrs: ['/p2p-circuit'],
             // Permissive gater — allows loopback / emulator host dials (D-11).
             // Per-strand enrollment gating is v2.x scope.
             // Cast needed for connectionGater (cadre-core upstream gap); strandBootstrapNodes

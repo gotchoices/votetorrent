@@ -19,6 +19,8 @@
  * Markers emitted (multi-arg — logcat grep must use .* between tag and message):
  *   [replication-proof] starting
  *   [replication-proof] peerId=<id>          (D-05 / P2P-04)
+ *   [replication-proof] relayReservation=<true|false>  (D-09 relay-READY; 38-02-locked
+ *                                             observable: getMultiaddrs()/p2p-circuit poll)
  *   [replication-proof] strandId=<hash>      (OQ3 handshake)
  *   [replication-proof] peers=N              (D-06 / ENG-05)
  *   [replication-proof] ========== REPLICATION VERDICT: PASS|FAIL ==========
@@ -90,6 +92,11 @@ const POLL_INTERVAL_MS = 1000;
 //   resets ("0/N super-majority") if the strand transport has not connected yet. Wait for the
 //   LIVE strand connection (getConnections().length >= 1) before writing. Exits early on connect.
 const STRAND_PEER_POLL_MAX = 10;
+// RELAY_POLL_MAX: 10 ticks × 1 s = 10 s relay-reservation wait (D-09). 38-02's Node-only
+// smoke measured the /p2p-circuit reservation completing in ~1.3s against a live drone
+// relay, so 10s is a generous bound; emitted unconditionally (true or false) after the
+// bounded wait — never blocks indefinitely, mirrors the strandPeers= polling shape.
+const RELAY_POLL_MAX = 10;
 
 /**
  * Boot entry point.  Fire-and-forget from index.js after AppRegistry.registerComponent.
@@ -145,6 +152,19 @@ export async function runReplicationProof(): Promise<void> {
     // Derive unique per-peer suffix for the proof network name (last 8 chars of peerId).
     const peerTail = peerId.length >= 8 ? peerId.slice(-8) : peerId;
     const proofNetworkName = `replication-test-${peerTail}`;
+
+    // ── 2b. D-09: relay-reservation READY marker (P2P-08 close confirmation) ────────────────
+    // Locked observable (38-02 Wave-0 smoke, self:peer:update never fired in that run):
+    // poll node.getMultiaddrs() for a '/p2p-circuit' entry. Bounded wait, then emit
+    // UNCONDITIONALLY (true on success, false on timeout) — never string-interpolated, always
+    // the multi-arg L(...) form — so the harness's wait_for_logcat_line can key off the marker
+    // regardless of whether the reservation actually completed (mirrors strandPeers= below).
+    const hasRelayReservation = (): boolean =>
+      (node?.getMultiaddrs() ?? []).some((ma) => ma.toString().includes('/p2p-circuit'));
+    for (let i = 0; i < RELAY_POLL_MAX && !hasRelayReservation(); i++) {
+      await new Promise<void>(r => setTimeout(r, POLL_INTERVAL_MS));
+    }
+    L('relayReservation=', hasRelayReservation());
 
     // ── 3. D-03 fresh-state wipe — per-network store ONLY, try/catch, never silent (A1) ─────
     // NEVER call LevelDB.destroyDB('votetorrent-cadre-node') — the peerId store must survive.
