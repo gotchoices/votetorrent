@@ -1,5 +1,6 @@
 import debug from "debug";
 import { createLibp2pNode } from "@optimystic/db-p2p";
+import { multiaddr } from "@multiformats/multiaddr";
 import { StrandDatabase } from "./strand-database.js";
 import { assertSchemaSignature } from "./schema-verification.js";
 const log = debug("sereus:cadre:strand-manager");
@@ -115,6 +116,48 @@ class StrandInstanceManager {
       });
       timing("[startStrand:%s] createLibp2pNode: %dms", strandId, Math.round(performance.now() - t0));
       instance.libp2pNode = node;
+      // T-38-14: @libp2p/bootstrap (registered above via `bootstrapNodes`)
+      // fires exactly ONE dial attempt per configured peer, ~1s after node
+      // start, with no automatic retry (this libp2p version has no
+      // auto-dial-to-minConnections mechanism — 38-14-STRAND-CONNECTION-
+      // DIAGNOSIS.md §3). If a target strand-cohort peer is not yet ready on
+      // that single attempt (the most-supported explanation for the
+      // observed strandPeers=0 wall — diagnosis §5), the strand node is left
+      // with zero live cohort connections for the rest of its lifetime.
+      // Actively (re)dial each configured strandBootstrapNodes address in
+      // parallel, bounded and fire-and-forget — run ALONGSIDE (not instead
+      // of) the existing @libp2p/bootstrap registration, never blocks
+      // startStrand()'s own resolution, and is a no-op when the list is
+      // empty (bootstrap-mode/solo strands, e.g. drone-A).
+      const strandBootstrapAddrs = config.network?.strandBootstrapNodes ?? [];
+      if (strandBootstrapAddrs.length > 0) {
+        const dialStrandBootstrapPeers = async () => {
+          const STRAND_BOOTSTRAP_DIAL_ATTEMPTS = 4;
+          const STRAND_BOOTSTRAP_DIAL_RETRY_MS = 750;
+          await Promise.all(strandBootstrapAddrs.map(async (addr) => {
+            for (let attempt = 0; attempt < STRAND_BOOTSTRAP_DIAL_ATTEMPTS; attempt++) {
+              try {
+                await node.dial(multiaddr(addr));
+                log("Strand %s bootstrap dial succeeded (attempt %d): %s", strandId, attempt + 1, addr);
+                return;
+              } catch (err) {
+                log(
+                  "Strand %s bootstrap dial attempt %d/%d failed for %s: %s",
+                  strandId,
+                  attempt + 1,
+                  STRAND_BOOTSTRAP_DIAL_ATTEMPTS,
+                  addr,
+                  err instanceof Error ? err.message : String(err)
+                );
+                if (attempt < STRAND_BOOTSTRAP_DIAL_ATTEMPTS - 1) {
+                  await new Promise((resolve) => setTimeout(resolve, STRAND_BOOTSTRAP_DIAL_RETRY_MS));
+                }
+              }
+            }
+          }));
+        };
+        void dialStrandBootstrapPeers();
+      }
       t0 = performance.now();
       const strandDb = new StrandDatabase({
         strandId,
