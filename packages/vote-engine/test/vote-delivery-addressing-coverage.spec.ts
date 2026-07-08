@@ -60,7 +60,10 @@ const KNOWN_DIRECT_ADDR_MARKER = 'hasKnownDirectAddr'
 // The load-bearing 38-18 fix marker — the corrected relayConn discovery predicate.
 const DIRECT_FIELD_MARKER = 'c' + '.direct === true'
 // The stale predicate this plan retires — must be ABSENT after the fix lands.
-const STALE_TRANSIENT_MARKER = 'c' + '.transient'
+// (The exact old comparison, not a bare substring — so a documentation comment
+// that merely mentions the retired field name by way of explanation does not
+// itself trip this assertion.)
+const STALE_TRANSIENT_MARKER = 'c' + '.transient === false'
 const SUPER_MAJORITY_MARKER = 'superMajorityThreshold'
 
 /** Extract the exact body of `connect()` — from its signature up to (not including)

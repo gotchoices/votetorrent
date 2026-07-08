@@ -305,10 +305,23 @@ export class Libp2pKeyPeerNetwork {
             // unreachable peer (the NAT'd emulator<->emulator case).
             hasKnownDirectAddr = false;
         }
+        // 38-18: `c.direct` is the version-correct @libp2p/interface Connection
+        // field for "this is a genuine direct connection, not a circuit-relay
+        // hop" (see 38-18-VOTE-DELIVERY-ADDRESSING-DIAGNOSIS.md §2-3). The
+        // predicate previously checked here never matched ANY connection on
+        // this libp2p version (that legacy field does not exist at all on the
+        // installed Connection type — it was replaced by `limits`/`direct`),
+        // so `relayConn` could never be found and every cold-dial to a
+        // genuinely address-less peer (the NAT'd-emulator case) fell straight
+        // through to the bare dialProtocol(dialPeer, ...) throw below ("no
+        // valid addresses for peer", the dominant 920x/38x class in the 38-17
+        // device capture). Correcting the field name lets drone-A reuse an
+        // already-open, direct (non-relayed) connection to another cohort
+        // member (e.g. drone-B) as the relay hop.
         const relayConn = hasKnownDirectAddr
             ? undefined
             : (this.libp2p.getConnections?.() ?? []).find((c) => c?.status === 'open'
-                && c.transient === false
+                && c.direct === true
                 && c.remotePeer?.toString?.() !== dialPeerIdStr
                 && c.remoteAddr != null);
         if (relayConn) {
