@@ -110,6 +110,26 @@ clipped at 28-40px in the mock, an authoring shortcut, not a considered value).
 | `body` | 16 | 22 | 16px | 18px | MATCH-ish | Body/labels/links/tab labels. Figma's literal 18px line-height already exceeds its 16px font-size (ratio 1.125x); our 22px (1.375x) is a slightly looser but non-clipping choice — flagged DIVERGE-in-spirit since the exact number differs, but the *direction* (lineHeight > fontSize) matches Figma here unlike the larger steps. |
 | `caption` | 16 | 20 | 16px | 18px | DIVERGE | "N/M questions completed" — slightly tighter than `body` at the same font size. |
 
+## Component radii (promoted from SC2 review — Phase 38 Plan 02 Task 3)
+
+Corner-radius scale added to `themes.ts` as a sibling token to `type` (exposed on
+`ExtendedTheme.radii`) so Phase 39-43 style radii from `theme/` and never inline a corner radius
+(SC4/D-07). All **NEW** — Authority has no radii scale (its `cardSurface` radius `16` exists only as
+an inline style value in `styles.ts`). RN clamps `borderRadius` to half the shorter side, so `pill`
+fully-rounds any height.
+
+| Token | Value | Figma node | Flag | Notes |
+|---|---|---|---|---|
+| `radii.sm` | `8` | — | NEW | Small chips / insets; general small-radius step. |
+| `radii.md` | `12` | 2764:1181 | NEW | Outline buttons — "Save & Exit" rounded rectangle. |
+| `radii.lg` | `16` | 2761:1125 / 2764:1181 | NEW | Cards — matches `globalStyles.cardSurface` borderRadius (kept consistent, not a second value). |
+| `radii.pill` | `999` | 2761:1125 / 2764:1181 | NEW | Fully-rounded — progress bars (Home/Ballot) and primary CTAs ("Vote now" / "Continue Voting" / "Review & Submit Ballot"). RN clamps to half-height: the 8px progress bar renders 4px, CTAs render as pills. |
+
+*Origin:* the SC2 parity render initially drew square progress bars/buttons; the reviewer flagged the
+mismatch against Figma's rounded pills (blocking checkpoint). Rather than leave those radii to die
+with the discarded scratch render (D-14), they were promoted to these tokens (D-07: add to `theme/`,
+never inline in screens).
+
 ## Typography family (D-09)
 
 `fonts` block mirrors Authority's shape exactly (`System` family, weights 400/500/700/900).

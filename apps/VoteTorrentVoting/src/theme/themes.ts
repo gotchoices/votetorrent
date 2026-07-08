@@ -42,6 +42,18 @@ export const type = {
 	caption: { fontSize: 16, lineHeight: 20 }, // "N/M questions completed" — Figma: 16px/18px(DIVERGE, slightly tighter)
 } as const;
 
+// Component corner radii, promoted from the SC2 parity render (Phase 38 Plan 02 Task 3 review) so
+// later screen phases (39-43) style radii from theme/ and never inline a corner radius (SC4/D-07).
+// NEW — Authority has no radii scale (its cardSurface radius 16 lives only as an inline style
+// value). RN clamps borderRadius to half the shorter side, so `pill` fully-rounds any height
+// (8px progress bar → 4px effective; ~44px CTA → ~22px).
+export const radii = {
+	sm: 8, // small chips / insets
+	md: 12, // outline buttons — Figma 2764:1181 "Save & Exit" rounded-rect · NEW
+	lg: 16, // cards — matches globalStyles.cardSurface borderRadius (Figma 2761:1125 / 2764:1181)
+	pill: 999, // fully-rounded — progress bars + primary CTAs ("Vote now"/"Continue Voting"/"Review & Submit") · Figma 2761:1125 / 2764:1181 · NEW
+} as const;
+
 // D-02/D-15: mirror Authority's ExtendedTheme augmentation shape 1:1 (18 shared color keys +
 // fonts), extended with the new Voting-only roles (D-06) and a top-level `type` scale key
 // (sibling to colors/fonts, per RESEARCH Pattern 2 — NOT nested inside colors/fonts).
@@ -75,6 +87,7 @@ declare module '@react-navigation/native' {
 		};
 		fonts: typeof fonts;
 		type: typeof type;
+		radii: typeof radii;
 	};
 }
 
@@ -108,6 +121,7 @@ export const lightTheme: ExtendedTheme = {
 	},
 	fonts,
 	type,
+	radii,
 };
 
 // D-11: dark is derived from Voting's OWN light tokens above via ONE documented transform —
@@ -146,4 +160,5 @@ export const darkTheme: ExtendedTheme = {
 	},
 	fonts,
 	type,
+	radii,
 };

@@ -1,4 +1,4 @@
-import { lightTheme, darkTheme, type } from '../themes';
+import { lightTheme, darkTheme, type, radii } from '../themes';
 
 // WCAG relative-luminance contrast-ratio helper — test-only, plain pure function,
 // per 38-RESEARCH.md §Code Examples (not shipped as runtime code).
@@ -112,5 +112,21 @@ describe('themes (theme/themes.ts)', () => {
 		expect(lightTheme.fonts).toBeDefined();
 		expect(darkTheme.fonts).toBeDefined();
 		expect(lightTheme.fonts).toBe(darkTheme.fonts);
+	});
+
+	// Component radii (promoted from the SC2 parity review) — a monotonic scale exposed on both
+	// themes so Phase 39-43 style corner radii from theme/ (SC4/D-07), never inline.
+	it('exposes a radii scale (sm/md/lg/pill) of ascending numbers', () => {
+		for (const key of ['sm', 'md', 'lg', 'pill'] as const) {
+			expect(typeof radii[key]).toBe('number');
+		}
+		expect(radii.md).toBeGreaterThanOrEqual(radii.sm);
+		expect(radii.lg).toBeGreaterThanOrEqual(radii.md);
+		expect(radii.pill).toBeGreaterThan(radii.lg); // pill is the fully-rounded sentinel
+	});
+
+	it('both themes carry the shared radii scale', () => {
+		expect(lightTheme.radii).toBe(radii);
+		expect(darkTheme.radii).toBe(radii);
 	});
 });
