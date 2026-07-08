@@ -139,7 +139,20 @@ export async function runReplicationProof(): Promise<void> {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       network: {
         transports: [webSockets(), circuitRelayTransport()],
-        listenAddrs: [],
+        // 38-20 gap-closure fix: this runner boots its OWN CadreNode (never
+        // CadreNodeProvider's), so it needs the SAME D-03 always-on relay-client
+        // posture CadreNodeProvider.tsx already carries. An empty listenAddrs
+        // array means libp2p's transportManager.listen() is never invoked for
+        // '/p2p-circuit', so @libp2p/circuit-relay-v2's ReservationStore never
+        // calls reserveRelay() — pendingReservations stays empty forever and
+        // every auto-discovered-relay reservation attempt throws
+        // HadEnoughRelaysError (silently swallowed), so no RESERVE request is
+        // ever sent to the drone (relayReservation= reports false, and the
+        // strand node's hop-connect is later denied NO_RESERVATION). Since this
+        // same network.listenAddrs value is forwarded unmodified to BOTH the
+        // control node and the strand node, arming it here closes both the
+        // observable and the actual consensus-blocking wall in one change.
+        listenAddrs: ['/p2p-circuit'],
         // Permissive gater — dev probe only (matches dial-probe.ts / cadre-runtime-ondevice.md).
         // Cast needed for connectionGater (upstream gap); strandBootstrapNodes is typed by 23-05.
         connectionGater: { denyDialMultiaddr: async () => false },
