@@ -134,6 +134,11 @@ STRAND_TIMEOUT=240  # seconds to wait for strandId= marker from bootstrap-mode P
                     #  raised again for the same long-lived-emulator slowness that
                     #  stalled the D-05 checkpoint in 38-05)
 DRONE_READY_TIMEOUT=60  # seconds to wait for drone READY line (38-07: raised from 30)
+STRAND_PEERS_TIMEOUT=300  # seconds to wait for the REPL-01 strandPeers= marker (38-14:
+                    # dedicated timeout, raised above LOGCAT_TIMEOUT=180 — 38-13 observed
+                    # the write-phase strandPeers= emit at ~183s, ~3s AFTER the shared
+                    # LOGCAT_TIMEOUT expired, so the script died before reaching the
+                    # both-peer verdict poll and the trailing D-08 drone-side log capture)
 FLAG_FILE="apps/VoteTorrentAuthority/src/engines/proof-flags.generated.ts"
 # The generated config file that carries CONTROL_ADDR for the replication proof runner.
 # The runner reads CONTROL_ADDR from this file (D-07 automated injection); restored on EXIT.
@@ -618,8 +623,8 @@ echo "[run-replication-proof] D-06 PASS: peers=${N} (>= 1)"
 # to the verdict poll (the both-peer REPLICATION VERDICT is authoritative on PASS/FAIL).
 # A never-emitted marker (wiring broken) IS a hard FAIL + exit 1 (Pitfall 2 fast-fail).
 STRAND_PEERS_MARKER='\[replication-proof\].*strandPeers='
-echo "[run-replication-proof] REPL-01: waiting for strandPeers= marker on Peer A ..."
-STRAND_PEERS_LINE=$(wait_for_logcat_line "${STRAND_PEERS_MARKER}" "${LOGCAT_TIMEOUT}" "[run-replication-proof]" "strandPeers" "-s emulator-5554")
+echo "[run-replication-proof] REPL-01: waiting for strandPeers= marker on Peer A (timeout ${STRAND_PEERS_TIMEOUT}s) ..."
+STRAND_PEERS_LINE=$(wait_for_logcat_line "${STRAND_PEERS_MARKER}" "${STRAND_PEERS_TIMEOUT}" "[run-replication-proof]" "strandPeers" "-s emulator-5554")
 if [ -z "${STRAND_PEERS_LINE}" ]; then
   echo "[run-replication-proof] FAIL: strandPeers= marker never emitted on Peer A — strand wiring broken (REPL-01); check STRAND_BOOTSTRAP_ADDR injection" >&2
   exit 1
