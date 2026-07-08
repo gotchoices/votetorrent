@@ -628,16 +628,37 @@ export class ClusterMember {
                         const isIdempotentSelfPend = !result.missing?.length
                             && !!result.pending?.length
                             && result.pending.every(p => p.actionId === operation.pend.actionId);
-                        if (isIdempotentSelfPend) {
+                        // 38-16 (P2P-11 multi-peer concurrent-pend race, diagnosed in
+                        // 38-16-CONSENSUS-RACE-DIAGNOSIS.md §2/§3): under a LIVE multi-peer
+                        // cohort the 305x-repeating drone-A "stale revision" flood on ONE
+                        // action ID (38-15 D-08 capture) is this exact action's OWN
+                        // already-committed revision landing in result.missing — not a
+                        // foreign-writer conflict. storage-repo.js pend()'s `missing`
+                        // computation (~120-136) has NO self-action exclusion, unlike
+                        // commit()'s alreadyDone partition (latest.rev===request.rev &&
+                        // latest.actionId===request.actionId, storage-repo.js:215-218). The
+                        // 38-10 fix above only guarded result.pending; narrowly extend the
+                        // SAME idempotent-self pattern to result.missing: if EVERY missing
+                        // entry's actionId equals this action's own actionId (this action's
+                        // own prior commit already landed here — nothing genuinely
+                        // conflicting advanced the block), treat it as already-satisfied. A
+                        // missing entry for ANY DIFFERENT actionId (a real multi-writer
+                        // conflict) still throws unchanged — safety preserved (T-38-16-01).
+                        const isIdempotentSelfMissing = !!result.missing?.length
+                            && result.missing.every(m => m.actionId === operation.pend.actionId);
+                        if (isIdempotentSelfPend || isIdempotentSelfMissing) {
                             log('cluster-member:consensus-pend-idempotent-self', {
                                 messageHash: record.messageHash,
                                 actionId: operation.pend.actionId,
-                                pendingCount: result.pending.length
+                                pendingCount: result.pending?.length ?? 0,
+                                missingCount: result.missing?.length ?? 0,
+                                viaMissing: isIdempotentSelfMissing
                             });
-                            // Treat as already-pended for this consensus round — do NOT throw;
-                            // the pending transform this action saved on a prior attempt stands,
-                            // so the later commit-phase precondition (a pending action exists for
-                            // this actionId) is satisfied. Continue to the next operation.
+                            // Treat as already-pended/already-committed for this consensus
+                            // round — do NOT throw; either the pending transform this action
+                            // saved on a prior attempt stands (isIdempotentSelfPend), or this
+                            // action's own commit already landed here (isIdempotentSelfMissing,
+                            // 38-16). Continue to the next operation.
                             continue;
                         }
                         log('cluster-member:consensus-pend-failed', {
