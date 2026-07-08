@@ -264,6 +264,39 @@ export class Libp2pKeyPeerNetwork {
         // dial — without this, libp2p falls back to its built-in dial timeout
         // (default ~30s) and the caller's tighter deadline is decorative.
         const dialOptions = { runOnLimitedConnection: true, negotiateFully: false, signal: options?.signal };
+        // P2P-11/38-09: NAT'd peers (e.g. two Android emulators each behind their
+        // own 10.0.2.2) have no direct route to each other and no address for
+        // `dialPeer` in the peerStore — the automatic /p2p-circuit relay
+        // reservation is confirmed inert on-device (relayReservation=false,
+        // 38-08), so libp2p's dialProtocol(dialPeer, ...) below would throw
+        // "The dial request has no valid addresses for peer" (the #1 drone error,
+        // 540/~1137 occurrences in the 38-08 n=4 capture — see
+        // 38-09-ADDRESSING-DIAGNOSIS.md). Before falling through to the bare
+        // dial, look for an existing OPEN, non-transient (direct) connection to
+        // some OTHER peer — structurally, this is a peer capable of acting as a
+        // relay hop (in the n=4 harness topology this resolves to the shared
+        // drone, since it is the only peer either emulator holds a direct
+        // connection to; no drone-specific assumption is made here). If found,
+        // dial a constructed `/p2p-circuit` multiaddr through it instead of the
+        // bare PeerId, keeping the same dialOptions (runOnLimitedConnection
+        // already required for circuit-relay streams, same negotiateFully/signal).
+        const dialPeerIdStr = dialPeer.toString();
+        const relayConn = (this.libp2p.getConnections?.() ?? []).find((c) => c?.status === 'open'
+            && c.transient === false
+            && c.remotePeer?.toString?.() !== dialPeerIdStr
+            && c.remoteAddr != null);
+        if (relayConn) {
+            try {
+                const circuitAddr = multiaddr(`${relayConn.remoteAddr.toString()}/p2p-circuit/p2p/${dialPeerIdStr}`);
+                return this.libp2p.dialProtocol(circuitAddr, [protocol], dialOptions);
+            }
+            catch (err) {
+                // Malformed relay multiaddr (should not happen for a live
+                // connection's own remoteAddr) — fall through to the bare dial
+                // below rather than masking a genuinely unexpected error.
+                this.log('connect:circuit-multiaddr-construction-failed peer=%s %o', dialPeerIdStr.substring(0, 12), err);
+            }
+        }
         return this.libp2p.dialProtocol(dialPeer, [protocol], dialOptions);
     }
     getFret() {
