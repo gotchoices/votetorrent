@@ -30,8 +30,9 @@ const fonts = {
 
 // D-08: named type scale (font-size + line-height), a deliberate departure from Authority's
 // "sizes inline per component" pattern. Sizes are lifted from 38-FIGMA-EXTRACT.md's type table;
-// line-heights use a ~1.15-1.25x ratio instead of Figma's flat literal `18px` on every size
-// (Pitfall 3 — copying 18px onto 28-40px text visually clips/overlaps in RN rendering).
+// line-heights use a ~1.2-1.375x ratio (≈1.2-1.25x on display/h1/h2/h3/caption, 1.3x on h4,
+// 1.375x on body) instead of Figma's flat literal `18px` on every size (Pitfall 3 — copying 18px
+// onto 28-40px text visually clips/overlaps in RN rendering).
 export const type = {
 	display: { fontSize: 40, lineHeight: 48 }, // countdown timer ("06:05:02") — Figma: 40px/18px(DIVERGE, clipped literal)
 	h1: { fontSize: 32, lineHeight: 40 }, // network title ("Utah Network") — Figma: 32px/18px(DIVERGE)

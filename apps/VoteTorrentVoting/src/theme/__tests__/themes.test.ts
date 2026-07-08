@@ -48,6 +48,60 @@ const SHARED_KEYS = [
 
 const NEW_ROLES = ['link', 'progressFill', 'progressTrack', 'secondaryButtonSurface'] as const;
 
+// Golden values — the exact hex documented in theme/TOKENS.md (D-05). Pinning these here (the same
+// deep-equal guard styles.test.ts uses for footer/cardSurface) turns any silent drift between
+// themes.ts and the reconciliation table into a failing test. If a token value legitimately changes,
+// update themes.ts, TOKENS.md, AND this map together.
+const EXPECTED_LIGHT: Record<string, string> = {
+	primary: '#2196f3',
+	background: '#fbfbfb',
+	surface: '#fcfcfc',
+	card: '#ffffff',
+	text: '#000000',
+	textSecondary: '#7d7d7d',
+	border: '#e5e5e5',
+	notification: '#FF3B30',
+	secondary: '#000000',
+	accent: '#d9d9d9',
+	error: '#971d1d',
+	warning: '#bcb600',
+	contrast: '#262626',
+	success: '#4caf50',
+	dark: '#000000',
+	light: '#ffffff',
+	important: '#e8e3ad',
+	muted: '#9e9e9e',
+	link: '#2196f3',
+	progressFill: '#34c759',
+	progressTrack: '#e5e5e5',
+	secondaryButtonSurface: '#f5f5f5',
+};
+
+const EXPECTED_DARK: Record<string, string> = {
+	primary: '#237ec7',
+	background: '#141414',
+	surface: '#141414',
+	card: '#141414',
+	text: '#ebebeb',
+	textSecondary: '#828282',
+	border: '#1a1a1a',
+	notification: '#ba1e15',
+	secondary: '#ebebeb',
+	accent: '#262626',
+	error: '#d07a7a',
+	warning: '#ece756',
+	contrast: '#d9d9d9',
+	success: '#699a6b',
+	dark: '#ebebeb',
+	light: '#141414',
+	important: '#474421',
+	muted: '#616161',
+	link: '#237ec7',
+	progressFill: '#51b269',
+	progressTrack: '#1a1a1a',
+	secondaryButtonSurface: '#141414',
+};
+
 describe('themes (theme/themes.ts)', () => {
 	// D-02: key completeness — every shared Authority color role is present in both themes.
 	it('lightTheme.colors exposes all 18 shared Authority keys', () => {
@@ -70,6 +124,16 @@ describe('themes (theme/themes.ts)', () => {
 			expect(lightTheme.colors[role]).toBeDefined();
 			expect(darkTheme.colors[role]).toBeDefined();
 		}
+	});
+
+	// D-05 sync guard: pin every token's exact hex to the value documented in TOKENS.md, so
+	// themes.ts cannot drift out of sync with the reconciliation table (or gain/lose a key) silently.
+	it('lightTheme.colors are value-pinned to the documented TOKENS.md hex values', () => {
+		expect(lightTheme.colors).toEqual(EXPECTED_LIGHT);
+	});
+
+	it('darkTheme.colors are value-pinned to the documented TOKENS.md hex values', () => {
+		expect(darkTheme.colors).toEqual(EXPECTED_DARK);
 	});
 
 	// D-08 / Pitfall 3: type scale steps have numeric fontSize + lineHeight, and lineHeight is
