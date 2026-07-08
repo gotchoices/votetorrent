@@ -62,6 +62,12 @@ export default function BallotScreen() {
 					<Text style={{color: colors.primary}}>Open Candidate Info (dev)</Text>
 				</Pressable>
 			</View>
+
+			{__DEV__ ? (
+				<Text style={[styles.devLine, {color: colors.muted, fontSize: typeScale.caption.fontSize}]}>
+					isInitialized: {String(isInitialized)}
+				</Text>
+			) : null}
 		</View>
 	);
 }
@@ -86,5 +92,9 @@ const styles = StyleSheet.create({
 	triggerButton: {
 		alignItems: 'center',
 		paddingVertical: 8,
+	},
+	devLine: {
+		textAlign: 'center',
+		marginBottom: 8,
 	},
 });
