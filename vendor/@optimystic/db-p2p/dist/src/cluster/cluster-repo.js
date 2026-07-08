@@ -604,6 +604,42 @@ export class ClusterMember {
                 else if ('pend' in operation) {
                     const result = await this.storageRepo.pend(operation.pend);
                     if (!result.success) {
+                        // 38-10 (P2P-11 stale-revision/pend-race, diagnosed in
+                        // 38-10-CONSENSUS-DIAGNOSIS.md): StorageRepo.pend() returns
+                        // { success:false } WITHOUT a `reason` in two distinct cases,
+                        // which the old `?? 'stale revision'` default collapsed into one
+                        // mislabeled throw (308 occurrences in the 38-08 n=4 capture):
+                        //   (a) result.missing — a GENUINE stale/conflicting prior revision
+                        //       exists (storage-repo.js latest.rev>=request.rev path). This
+                        //       is a real safety rejection and MUST still throw (T-38-10-01).
+                        //   (b) result.pending — a pending action already exists for one of
+                        //       the blocks. On a consensus RETRY (coordinator-repo.js in-line
+                        //       + scheduled retries re-deliver the identical record; and this
+                        //       method's own catch below un-marks executedTransactions "so it
+                        //       can be retried"), that pending entry can be THIS EXACT action's
+                        //       own prior partial pend — an idempotent self-pend, not a real
+                        //       conflict. StorageRepo.commit() already recognizes the parallel
+                        //       idempotent case (latest.actionId===request.actionId "already
+                        //       done, skip"); pend() never did. Narrowly relax ONLY that case:
+                        //       every reported pending entry belongs to this same actionId AND
+                        //       there is no `missing` (no genuine stale revision). Any pending
+                        //       entry for a DIFFERENT actionId, or any `missing`, still throws —
+                        //       consensus SAFETY and the super-majority quorum gate preserved.
+                        const isIdempotentSelfPend = !result.missing?.length
+                            && !!result.pending?.length
+                            && result.pending.every(p => p.actionId === operation.pend.actionId);
+                        if (isIdempotentSelfPend) {
+                            log('cluster-member:consensus-pend-idempotent-self', {
+                                messageHash: record.messageHash,
+                                actionId: operation.pend.actionId,
+                                pendingCount: result.pending.length
+                            });
+                            // Treat as already-pended for this consensus round — do NOT throw;
+                            // the pending transform this action saved on a prior attempt stands,
+                            // so the later commit-phase precondition (a pending action exists for
+                            // this actionId) is satisfied. Continue to the next operation.
+                            continue;
+                        }
                         log('cluster-member:consensus-pend-failed', {
                             messageHash: record.messageHash,
                             actionId: operation.pend.actionId,
