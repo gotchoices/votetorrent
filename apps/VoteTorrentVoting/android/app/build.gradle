@@ -54,7 +54,7 @@ react {
     autolinkLibrariesWithApp()
 
     project.ext.vectoricons = [
-        iconFontNames: [ 'FontAwesome6.ttf' ]
+        iconFontNames: [ 'FontAwesome6_Solid.ttf', 'FontAwesome6_Regular.ttf', 'FontAwesome6_Brands.ttf' ]
     ]
 
     apply from: "../../node_modules/react-native-vector-icons/fonts.gradle"
