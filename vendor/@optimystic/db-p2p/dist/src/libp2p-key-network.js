@@ -235,7 +235,7 @@ export class Libp2pKeyPeerNetwork {
             this.coordinatorCache.delete(k);
         return undefined;
     }
-    connect(peerId, protocol, options) {
+    async connect(peerId, protocol, options) {
         // db-core's IPeerNetwork contract types peers structurally ({ toString, equals }),
         // so a non-branded stub can arrive here — notably NetworkTransactor builds its
         // cluster/nominee list via db-core's structural `peerIdFromString`, which omits
@@ -281,10 +281,36 @@ export class Libp2pKeyPeerNetwork {
         // bare PeerId, keeping the same dialOptions (runOnLimitedConnection
         // already required for circuit-relay streams, same negotiateFully/signal).
         const dialPeerIdStr = dialPeer.toString();
-        const relayConn = (this.libp2p.getConnections?.() ?? []).find((c) => c?.status === 'open'
-            && c.transient === false
-            && c.remotePeer?.toString?.() !== dialPeerIdStr
-            && c.remoteAddr != null);
+        // 38-12 guard-tightening: the circuit-dial rewrite below must fire ONLY
+        // when `dialPeer` has NO known directly-dialable address. In the n=4
+        // harness the drone voters (drone-A/drone-B) are directly reachable —
+        // their real ws multiaddrs are in the peerStore via strand-bootstrap
+        // discovery even when no live connection exists yet — so without this
+        // check the cold-dial branch hijacked those direct dials onto the drone's
+        // inert /p2p-circuit relay ("No response received" -> 1/4 approvals;
+        // 38-11-SUMMARY / 38-12-RELAY-DIAGNOSIS.md §3). If the peerStore holds any
+        // non-circuit address for `dialPeer`, skip the circuit rewrite and let the
+        // bare dialProtocol(dialPeer, ...) below establish the direct connection.
+        let hasKnownDirectAddr = false;
+        try {
+            const known = await this.libp2p.peerStore.get(dialPeer);
+            hasKnownDirectAddr = (known?.addresses ?? []).some((a) => {
+                const s = a?.multiaddr?.toString?.() ?? '';
+                return s.length > 0 && !s.includes('/p2p-circuit');
+            });
+        }
+        catch {
+            // peerStore has no record for this peer (NotFoundError) — treat as
+            // address-less so the circuit branch can still serve a genuinely
+            // unreachable peer (the NAT'd emulator<->emulator case).
+            hasKnownDirectAddr = false;
+        }
+        const relayConn = hasKnownDirectAddr
+            ? undefined
+            : (this.libp2p.getConnections?.() ?? []).find((c) => c?.status === 'open'
+                && c.transient === false
+                && c.remotePeer?.toString?.() !== dialPeerIdStr
+                && c.remoteAddr != null);
         if (relayConn) {
             try {
                 const circuitAddr = multiaddr(`${relayConn.remoteAddr.toString()}/p2p-circuit/p2p/${dialPeerIdStr}`);

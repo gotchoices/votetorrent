@@ -106,7 +106,12 @@ class StrandInstanceManager {
         ...config.privateKey && { privateKey: config.privateKey },
         ...config.network?.transports && { transports: config.network.transports },
         ...config.network?.listenAddrs && { listenAddrs: config.network.listenAddrs },
-        ...config.network?.connectionGater && { connectionGater: config.network.connectionGater }
+        ...config.network?.connectionGater && { connectionGater: config.network.connectionGater },
+        // T-38-12-01: the strand node is where replication/relay traffic flows,
+        // so when the storage profile turns its relay server on (relay:
+        // enableRelay above) its circuitRelayServer() MUST be bounded too —
+        // forward the same relayServerInit from the network config.
+        ...config.network?.relayServerInit && { relayServerInit: config.network.relayServerInit }
       });
       timing("[startStrand:%s] createLibp2pNode: %dms", strandId, Math.round(performance.now() - t0));
       instance.libp2pNode = node;

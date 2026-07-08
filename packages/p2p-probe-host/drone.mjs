@@ -70,14 +70,24 @@ const node = new CadreNode({
   network: {
     transports: [webSockets()],
     listenAddrs: ['/ip4/0.0.0.0/tcp/0/ws'], // ephemeral — avoids EADDRINUSE
-    // WR-19 (17-REVIEW): `enableRelay: true` removed — cadre-core's libp2p
-    // options builder forwards only privateKey/transports/listenAddrs/
-    // connectionGater from this network config (see the yarn patch hunk in
-    // .yarn/patches/@serfab-cadre-core-npm-0.7.1-518fb48136.patch), so the
-    // flag was a silent no-op: no relay service was ever started. The direct
-    // WS dial proof (P2P-01) needs no relay. Phase 22 relay work must extend
-    // the yarn patch to forward a relay option (and re-add it here) instead
-    // of relying on this config key.
+    // The storage profile turns the circuit-relay-v2 relay server ON
+    // (createControlNode/startStrand derive `relay: profile === 'storage'` in
+    // the consumed vendored cadre-core, wiring circuitRelayServer() at
+    // libp2p-node-base.js). The prior WR-19 note — that the options builder
+    // forwarded only privateKey/transports/listenAddrs/connectionGater so an
+    // `enableRelay` key was a silent no-op — is now stale: the builder forwards
+    // `relayServerInit` too (T-38-12-01 transplant). Supply BOUNDED reservation
+    // limits so the relay does not run on the unlimited @libp2p/circuit-relay-v2
+    // defaults (dev-harness infra only, not shipped).
+    relayServerInit: {
+      reservations: {
+        maxReservations: 32, // n=4 mesh + headroom (circuit-relay-v2 default is 15)
+        defaultDurationLimit: 2 * 60 * 1000, // 2 min per reservation
+        defaultDataLimit: BigInt(1 << 17), // 128 KiB per reservation
+      },
+      maxInboundHopStreams: 64,
+      maxOutboundStopStreams: 64,
+    },
     ...(DRONE_BOOTSTRAP_STRAND_ADDR && { strandBootstrapNodes: [DRONE_BOOTSTRAP_STRAND_ADDR] }),
   },
   hibernation: { enabled: false },

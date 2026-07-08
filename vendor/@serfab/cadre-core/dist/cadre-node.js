@@ -191,7 +191,12 @@ class CadreNode {
       ...privateKey && { privateKey },
       ...network?.transports && { transports: network.transports },
       ...network?.listenAddrs && { listenAddrs: network.listenAddrs },
-      ...network?.connectionGater && { connectionGater: network.connectionGater }
+      ...network?.connectionGater && { connectionGater: network.connectionGater },
+      // T-38-12-01: when the storage profile turns the relay server on
+      // (relay: enableRelay above), forward a bounded relayServerInit so
+      // circuitRelayServer() runs with reservation/data/duration limits instead
+      // of the unlimited circuit-relay-v2 defaults (DoS surface).
+      ...network?.relayServerInit && { relayServerInit: network.relayServerInit }
     };
     return await createLibp2pNode(nodeOptions);
   }
