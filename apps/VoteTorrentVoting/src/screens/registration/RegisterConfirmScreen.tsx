@@ -46,12 +46,17 @@ export default function RegisterConfirmScreen() {
 		.filter(line => line.length > 0)
 		.join(', ');
 
+	// draft.party is the stable party KEY ('democratic'|'republican'|'independent'|'other'), or ''
+	// if unselected — resolve to the current-locale label here at the display site (D-06 gap
+	// closure) so switching languages re-localizes this row instead of showing a stale label.
+	const partyLabel = draft.party ? t('form.party.' + draft.party) : '';
+
 	const rows: Array<{key: string; labelKey: string; value: string}> = [
 		{key: 'fullName', labelKey: 'form.review.fullName', value: fullName},
 		{key: 'dob', labelKey: 'form.review.dob', value: draft.dob},
 		{key: 'email', labelKey: 'form.review.email', value: draft.email},
 		{key: 'phone', labelKey: 'form.review.phone', value: draft.phone},
-		{key: 'party', labelKey: 'form.review.party', value: draft.party},
+		{key: 'party', labelKey: 'form.review.party', value: partyLabel},
 		{key: 'address', labelKey: 'form.review.address', value: address},
 	];
 

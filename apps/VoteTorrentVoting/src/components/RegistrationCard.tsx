@@ -103,6 +103,11 @@ export function RegistrationCard({
 
 	const fullName = `${draft.firstName} ${draft.lastName}`.trim();
 	const validThrough = computeValidThrough(registeredAt);
+	// draft.party is the stable party KEY, or '' if unselected — resolve to the current-locale
+	// label here at the display site (D-06 gap closure) so switching languages re-localizes the
+	// identity line instead of showing a label captured in whatever language was active at
+	// selection time.
+	const partyLabel = draft.party ? t('form.party.' + draft.party) : '';
 
 	return (
 		<View>
@@ -145,7 +150,7 @@ export function RegistrationCard({
 							lineHeight: typeScale.body.lineHeight,
 						},
 					]}>
-					{t('registered.identityLine', {fullName, party: draft.party, dob: draft.dob})}
+					{t('registered.identityLine', {fullName, party: partyLabel, dob: draft.dob})}
 				</Text>
 				<View
 					style={[

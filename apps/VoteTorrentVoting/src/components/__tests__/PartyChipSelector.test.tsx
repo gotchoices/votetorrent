@@ -2,6 +2,10 @@
  * Unit tests for PartyChipSelector (REG-03) — a hand-rolled 4-chip single-select row.
  * Presentational-only: `options`/`value`/`onChange` props in, no internal selection state.
  * Selection state lives entirely in the caller (RegistrationDraftProvider, D-03).
+ *
+ * Manual-QA gap-closure (Phase 41 re-verification): select/compare now happen by stable KEY
+ * (option.key), not the localized label, so a language switch after selection doesn't leave a
+ * stale-language party string in the draft.
  */
 import React from 'react';
 import renderer from 'react-test-renderer';
@@ -23,7 +27,7 @@ const OPTIONS = [
 
 const activeRenderers: renderer.ReactTestRenderer[] = [];
 
-function renderSelector(value: string, onChange: (label: string) => void = jest.fn()) {
+function renderSelector(value: string, onChange: (key: string) => void = jest.fn()) {
 	let tr!: renderer.ReactTestRenderer;
 	renderer.act(() => {
 		tr = renderer.create(withTheme(<PartyChipSelector options={OPTIONS} value={value} onChange={onChange} />));
@@ -50,7 +54,7 @@ describe('PartyChipSelector (REG-03)', () => {
 		});
 	});
 
-	it('tapping a chip calls onChange with that chip label', () => {
+	it('tapping a chip calls onChange with that chip KEY (not its localized label)', () => {
 		const onChange = jest.fn();
 		const tr = renderSelector('', onChange);
 
@@ -60,11 +64,11 @@ describe('PartyChipSelector (REG-03)', () => {
 		});
 
 		expect(onChange).toHaveBeenCalledTimes(1);
-		expect(onChange).toHaveBeenCalledWith('Republican Party');
+		expect(onChange).toHaveBeenCalledWith('republican');
 	});
 
-	it('marks exactly one chip selected when value matches a label', () => {
-		const tr = renderSelector('Republican Party');
+	it('marks exactly one chip selected when value matches a KEY', () => {
+		const tr = renderSelector('republican');
 
 		const chips = tr.root.findAllByType(Pressable, {deep: false});
 		const selected = chips.filter(chip => chip.props.testID?.startsWith('party-chip-') && chip.props.accessibilityState?.selected);

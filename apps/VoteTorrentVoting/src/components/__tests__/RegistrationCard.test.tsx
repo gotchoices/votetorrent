@@ -19,11 +19,13 @@ function withTheme(children: React.ReactNode) {
 	return <ThemeProvider value={lightTheme}>{children}</ThemeProvider>;
 }
 
+// party is the stable KEY ('democratic'), not a localized label — RegistrationCard resolves
+// it to the current-locale label at render time (Manual-QA gap-closure, Phase 41).
 const REGISTERED_DRAFT: RegistrationDraft = {
 	...EMPTY_DRAFT,
 	firstName: 'John',
 	lastName: 'Smith',
-	party: 'Democratic Party',
+	party: 'democratic',
 	dob: '1/23/01',
 };
 
@@ -96,6 +98,21 @@ describe('RegistrationCard (REG-01/REG-05)', () => {
 				cta.props.onPress();
 			});
 			expect(onUpdateRegistration).toHaveBeenCalledTimes(1);
+		});
+
+		// Manual-QA gap-closure (Phase 41 re-verification): party is a stable KEY resolved via
+		// t('form.party.' + key) at this display site — with no party selected (''), the guard
+		// must render an empty value rather than the broken t('form.party.') string.
+		it('renders an empty party segment in the identity line when draft.party is unselected (empty-key guard)', () => {
+			const tr = renderCard({
+				isRegistered: true,
+				draft: {...REGISTERED_DRAFT, party: ''},
+				registeredAt: FIXED_REGISTERED_AT,
+			});
+
+			const identityLine = tr.root.findByProps({testID: 'registration-card-identity-line'});
+			const identityText = JSON.stringify(identityLine.props.children);
+			expect(identityText).not.toContain('form.party.');
 		});
 
 		it('fires onHelp from the (?) help affordance', () => {

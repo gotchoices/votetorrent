@@ -92,13 +92,13 @@ describe('RegisterAddressPartyScreen (REG-03, Step 2)', () => {
 		expect(tr.root.findByProps({testID: 'party-chip-other'})).toBeDefined();
 	});
 
-	it('selecting a party chip calls updateField(party, resolved label)', () => {
+	it('selecting a party chip calls updateField(party, stable key) — not the localized label', () => {
 		const tr = renderScreen();
 		const chip = tr.root.findByProps({testID: 'party-chip-republican'});
 		renderer.act(() => {
 			chip.props.onPress();
 		});
-		expect(mockUpdateField).toHaveBeenCalledWith('party', 'Republican Party');
+		expect(mockUpdateField).toHaveBeenCalledWith('party', 'republican');
 	});
 
 	it('Back fires navigation.goBack()', () => {

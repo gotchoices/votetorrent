@@ -32,7 +32,12 @@ export interface RegistrationDraft {
 	addressLine1: string;
 	addressLine2: string; // optional, may be empty string
 	addressLine3: string; // optional, may be empty string
-	party: string; // resolved party label, or '' if unselected
+	// Stable party KEY ('democratic'|'republican'|'independent'|'other'), or '' if unselected.
+	// Manual-QA gap-closure (Phase 41 re-verification): previously stored the LOCALIZED LABEL
+	// captured at selection time, so switching languages left stale-language text in the
+	// review/identity-line display sites. Storing the key instead keeps the draft
+	// locale-independent — display sites resolve `t('form.party.' + party)` at render time.
+	party: string;
 }
 
 export const EMPTY_DRAFT: RegistrationDraft = {

@@ -46,6 +46,8 @@ jest.mock('../../../providers/VotingAppProvider', () => ({
 	useVotingApp: () => ({isInitialized: true, setIsRegistered: mockSetIsRegistered}),
 }));
 
+// party is the stable KEY ('republican'), not a localized label — RegisterConfirmScreen
+// resolves it to the current-locale label at render time (Manual-QA gap-closure, Phase 41).
 const draft = {
 	firstName: 'Jane',
 	lastName: 'Doe',
@@ -55,7 +57,7 @@ const draft = {
 	addressLine1: '123 Main St',
 	addressLine2: '',
 	addressLine3: 'Salt Lake City, UT',
-	party: 'Republican Party',
+	party: 'republican',
 };
 
 jest.mock('../../../providers/RegistrationDraftProvider', () => ({
@@ -128,5 +130,21 @@ describe('RegisterConfirmScreen (REG-03, Step 3)', () => {
 		expect(scrollViews[0].findAllByProps({testID: 'register-submit'}).length).toBe(0);
 		expect(tr.root.findByProps({testID: 'register-back'})).toBeDefined();
 		expect(tr.root.findByProps({testID: 'register-submit'})).toBeDefined();
+	});
+
+	// Manual-QA gap-closure (Phase 41 re-verification): party is a stable KEY resolved via
+	// t('form.party.' + key) at this display site — with no party selected (''), the guard must
+	// render an empty value rather than the broken t('form.party.') string.
+	it('renders an empty party review row when draft.party is unselected (empty-key guard)', () => {
+		const originalParty = draft.party;
+		draft.party = '';
+		try {
+			const tr = renderScreen();
+			const text = JSON.stringify(tr.toJSON());
+			expect(text).not.toContain('form.party.');
+			expect(tr.root.findByProps({testID: 'register-review-party'})).toBeDefined();
+		} finally {
+			draft.party = originalParty;
+		}
 	});
 });

@@ -7,7 +7,14 @@
  * Presentational-only — options/value/onChange props in, no internal selection state; the
  * caller (RegistrationDraftProvider, D-03) owns the selected value. Does NOT call
  * useVotingApp()/useNavigation(). Single-select radio behavior: tapping a chip calls
- * onChange(option.label); the 4 option labels/i18n resolution are the caller's responsibility.
+ * onChange(option.key) — the stable, locale-independent party KEY, not the localized label.
+ * `value` is compared against `option.key` too, so selection survives a language change (the
+ * caller's draft never stores a language-specific string). The 4 option LABELS are still
+ * i18n-resolved by the caller and rendered here for display only.
+ *
+ * Manual-QA gap-closure (Phase 41 re-verification): previously selected/compared by label,
+ * so switching languages after selecting a party left the draft holding the stale-language
+ * label ("Independent" staying in place of "Independiente" after switching to Spanish).
  */
 import React from 'react';
 import {Pressable, StyleSheet, Text, View} from 'react-native';
@@ -21,8 +28,10 @@ export interface PartyChipOption {
 
 export interface PartyChipSelectorProps {
 	options: PartyChipOption[];
+	/** The stable party KEY (e.g. 'democratic'), or '' if unselected — never a localized label. */
 	value: string;
-	onChange: (label: string) => void;
+	/** Called with the selected option's stable KEY (option.key), not its localized label. */
+	onChange: (key: string) => void;
 }
 
 export function PartyChipSelector({options, value, onChange}: PartyChipSelectorProps) {
@@ -31,14 +40,14 @@ export function PartyChipSelector({options, value, onChange}: PartyChipSelectorP
 	return (
 		<View style={styles.row}>
 			{options.map(option => {
-				const selected = value === option.label;
+				const selected = value === option.key;
 				return (
 					<Pressable
 						key={option.key}
 						testID={`party-chip-${option.key}`}
 						accessibilityRole="radio"
 						accessibilityState={{selected}}
-						onPress={() => onChange(option.label)}
+						onPress={() => onChange(option.key)}
 						style={[
 							styles.chip,
 							{
