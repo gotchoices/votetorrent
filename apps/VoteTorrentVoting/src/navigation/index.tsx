@@ -28,9 +28,15 @@ import HomeScreen from '../screens/home/HomeScreen';
 import ValidationDetailsScreen from '../screens/home/ValidationDetailsScreen';
 import BallotScreen from '../screens/ballot/BallotScreen';
 import RegistrationScreen from '../screens/registration/RegistrationScreen';
+import DeviceAttestationScreen from '../screens/registration/DeviceAttestationScreen';
+import RegisterPersonalScreen from '../screens/registration/RegisterPersonalScreen';
+import RegisterAddressPartyScreen from '../screens/registration/RegisterAddressPartyScreen';
+import RegisterConfirmScreen from '../screens/registration/RegisterConfirmScreen';
+import ConfirmationScreen from '../screens/registration/ConfirmationScreen';
 import ScanScreen from '../screens/scan/ScanScreen';
 import SettingsScreen from '../screens/settings/SettingsScreen';
 import PlaceholderModal from '../components/PlaceholderModal';
+import {RegistrationDraftProvider} from '../providers/RegistrationDraftProvider';
 
 // CloseButton (D-16) — byte-identical mechanics to Authority's `navigation/index.tsx` CloseButton
 // (lines 249-256): a Pressable with hitSlop=8 wrapping a FontAwesome6 "xmark" glyph, calling the
@@ -119,40 +125,62 @@ function VoteStackNavigator() {
 	);
 }
 
-// --- Registration stack (D-09): root + 2 modal routes ---
+// --- Registration stack (D-09): root + form steps + DeviceAttestation/Confirmation (full-bleed,
+// see Pitfall 3) + RegistrationInfo help modal. Wrapped in RegistrationDraftProvider (Pattern 2)
+// so RegistrationHome's registered card and all form steps share one draft instance.
 const RegistrationStack = createNativeStackNavigator<RegistrationStackParamList>();
 
 function RegistrationStackNavigator() {
 	const {t} = useTranslation('registration');
 
 	return (
-		<RegistrationStack.Navigator>
-			<RegistrationStack.Screen
-				name="RegistrationHome"
-				component={RegistrationScreen}
-				options={{title: t('headerTitle')}}
-			/>
-			<RegistrationStack.Screen
-				name="DeviceAttestation"
-				component={PlaceholderModal}
-				options={({navigation}) => ({
-					title: t('deviceAttestationTitle'),
-					presentation: 'modal',
-					headerBackVisible: false,
-					headerLeft: () => <CloseButton onPress={() => navigation.goBack()} />,
-				})}
-			/>
-			<RegistrationStack.Screen
-				name="Confirmation"
-				component={PlaceholderModal}
-				options={({navigation}) => ({
-					title: t('confirmationTitle'),
-					presentation: 'modal',
-					headerBackVisible: false,
-					headerLeft: () => <CloseButton onPress={() => navigation.goBack()} />,
-				})}
-			/>
-		</RegistrationStack.Navigator>
+		<RegistrationDraftProvider>
+			<RegistrationStack.Navigator>
+				<RegistrationStack.Screen
+					name="RegistrationHome"
+					component={RegistrationScreen}
+					options={{title: t('headerTitle')}}
+				/>
+				{/* 41-RESEARCH.md Pitfall 3: real screen, headerShown:false — NOT presentation:'modal'
+				    + CloseButton (full-bleed timed interstitial, no swipe-dismiss). */}
+				<RegistrationStack.Screen
+					name="DeviceAttestation"
+					component={DeviceAttestationScreen}
+					options={{headerShown: false}}
+				/>
+				<RegistrationStack.Screen
+					name="RegisterPersonal"
+					component={RegisterPersonalScreen}
+					options={{title: t('formHeaderTitle')}}
+				/>
+				<RegistrationStack.Screen
+					name="RegisterAddressParty"
+					component={RegisterAddressPartyScreen}
+					options={{title: t('formHeaderTitle')}}
+				/>
+				<RegistrationStack.Screen
+					name="RegisterConfirm"
+					component={RegisterConfirmScreen}
+					options={{title: t('confirmHeaderTitle')}}
+				/>
+				{/* Pitfall 3: real screen, headerShown:false — NOT presentation:'modal' + CloseButton. */}
+				<RegistrationStack.Screen
+					name="Confirmation"
+					component={ConfirmationScreen}
+					options={{headerShown: false}}
+				/>
+				<RegistrationStack.Screen
+					name="RegistrationInfo"
+					component={PlaceholderModal}
+					options={({navigation}) => ({
+						title: t('headerTitle'),
+						presentation: 'modal',
+						headerBackVisible: false,
+						headerLeft: () => <CloseButton onPress={() => navigation.goBack()} />,
+					})}
+				/>
+			</RegistrationStack.Navigator>
+		</RegistrationDraftProvider>
 	);
 }
 
