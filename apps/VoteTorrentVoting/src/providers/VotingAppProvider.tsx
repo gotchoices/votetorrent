@@ -32,6 +32,20 @@ export function VotingAppProvider({children}: PropsWithChildren) {
 	// so Phase 40's __DEV__ cycler can drive it.
 	const [lifecycleState, setLifecycleState] = useState<LifecycleState>('Upcoming');
 
+	// REG-01/REG-04: sync registration-status pair mirroring lifecycleState (Pattern 3) — NOT
+	// routed through getElection(), there is no per-state merge step for a plain boolean.
+	const [isRegistered, setIsRegisteredState] = useState(false);
+	const [registeredAt, setRegisteredAt] = useState<string | null>(null);
+
+	const setIsRegistered = useCallback((value: boolean) => {
+		setIsRegisteredState(value);
+		if (value) {
+			// Freeze the confirm-time timestamp (RESEARCH Anti-Patterns) — the registered card's
+			// valid-through date is derived from this, not recomputed per render.
+			setRegisteredAt(new Date().toISOString());
+		}
+	}, []);
+
 	useEffect(() => {
 		// Instant this phase — no real async boot work yet (D-01/D-02: no EngineFactory, no
 		// CadreNode, no re-attach). The gate exists so screens/tests exercise the same
@@ -63,6 +77,9 @@ export function VotingAppProvider({children}: PropsWithChildren) {
 				lifecycleState,
 				setLifecycleState,
 				getElection,
+				isRegistered,
+				setIsRegistered,
+				registeredAt,
 			}}>
 			{children}
 		</VotingAppContext.Provider>

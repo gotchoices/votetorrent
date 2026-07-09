@@ -109,4 +109,18 @@ export interface VotingAppContextType {
 	lifecycleState: LifecycleState;
 	setLifecycleState: (state: LifecycleState) => void;
 	getElection: () => Promise<MockElection>;
+	/**
+	 * Whether the current voter is registered. Gates ONLY the Registration-tab card's
+	 * not-registered/registered branch — never the Vote flow (HOME-02). Plain synchronous
+	 * boolean (not a Promise), mirroring lifecycleState rather than the async getElection() shape.
+	 */
+	isRegistered: boolean;
+	/**
+	 * Flips isRegistered and, when set to true, freezes `registeredAt` to the confirm-time ISO
+	 * timestamp (RESEARCH Anti-Patterns — the registered card's valid-through date is derived
+	 * from this frozen value, not recomputed per render).
+	 */
+	setIsRegistered: (value: boolean) => void;
+	/** Confirm-time ISO-8601 timestamp set by setIsRegistered(true); null until then. */
+	registeredAt: string | null;
 }
