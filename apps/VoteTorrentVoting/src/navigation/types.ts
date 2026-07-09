@@ -22,11 +22,18 @@ export type VoteStackParamList = {
 	ValidationDetails: undefined;
 };
 
-// Registration tab: root + Device Attestation + Confirmation modals.
+// Registration tab: root + Device Attestation + Confirmation modals + the 3 form-step
+// routes (RegisterPersonal/RegisterAddressParty/RegisterConfirm, 41-06/07/08) + the
+// RegistrationInfo help modal (41-08). All `undefined` — draft state lives in
+// `RegistrationDraftProvider`, not navigation params (RESEARCH Pattern 1/2).
 export type RegistrationStackParamList = {
 	RegistrationHome: undefined;
 	DeviceAttestation: undefined;
 	Confirmation: undefined;
+	RegisterPersonal: undefined;
+	RegisterAddressParty: undefined;
+	RegisterConfirm: undefined;
+	RegistrationInfo: undefined;
 };
 
 // Scan tab: single root screen, no modals.
