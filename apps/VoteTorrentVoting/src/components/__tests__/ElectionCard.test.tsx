@@ -55,13 +55,29 @@ type Callbacks = Partial<{
 	onLearnAboutElection: () => void;
 }>;
 
+// Renderers created per test are tracked and unmounted in afterEach — states with a countdown
+// (Upcoming/ReleasingKeys/Validation) mount a real setInterval (CountdownTimer uses real timers
+// here, not jest.useFakeTimers()); leaving it mounted past the test would keep firing after the
+// test file's module registry is torn down.
+const activeRenderers: renderer.ReactTestRenderer[] = [];
+
 function renderCard(election: MockElection, callbacks: Callbacks = {}) {
 	let tr!: renderer.ReactTestRenderer;
 	renderer.act(() => {
 		tr = renderer.create(withTheme(<ElectionCard election={election} {...callbacks} />));
 	});
+	activeRenderers.push(tr);
 	return tr;
 }
+
+afterEach(() => {
+	while (activeRenderers.length) {
+		const tr = activeRenderers.pop()!;
+		renderer.act(() => {
+			tr.unmount();
+		});
+	}
+});
 
 describe('ElectionCard (HOME-01/02/03)', () => {
 	it.each(LIFECYCLE_ORDER)('renders the prescribed pieces for the %s state', state => {
@@ -81,11 +97,14 @@ describe('ElectionCard (HOME-01/02/03)', () => {
 			expect(icons.length).toBe(1);
 		}
 
-		const countdowns = tr.root.findAllByType(CountdownTimer);
-		const progresses = tr.root.findAllByType(ProgressBar);
-		const voteNow = tr.root.findAllByProps({testID: 'election-card-vote-now'});
-		const viewValidationDetails = tr.root.findAllByProps({testID: 'election-card-view-validation-details'});
-		const learnLink = tr.root.findAllByProps({testID: 'election-card-learn-link'});
+		// {deep: false} stops descending once a branch matches — Pressable is a memo(forwardRef(...))
+		// composite, so an un-scoped deep search would also match its internal forwardRef/host-View
+		// layers and over-count a single logical element several times over.
+		const countdowns = tr.root.findAllByType(CountdownTimer, {deep: false});
+		const progresses = tr.root.findAllByType(ProgressBar, {deep: false});
+		const voteNow = tr.root.findAllByProps({testID: 'election-card-vote-now'}, {deep: false});
+		const viewValidationDetails = tr.root.findAllByProps({testID: 'election-card-view-validation-details'}, {deep: false});
+		const learnLink = tr.root.findAllByProps({testID: 'election-card-learn-link'}, {deep: false});
 
 		if (state === 'Open') {
 			expect(countdowns.length).toBe(1);
@@ -144,8 +163,8 @@ describe('ElectionCard (HOME-01/02/03)', () => {
 		const validationTr = renderCard(electionFor('Validation'));
 		const validationDetailsTr = renderCard(electionFor('ValidationDetails'));
 
-		expect(validationTr.root.findAllByProps({testID: 'election-card-view-validation-details'}).length).toBe(0);
-		expect(validationDetailsTr.root.findAllByProps({testID: 'election-card-view-validation-details'}).length).toBe(1);
+		expect(validationTr.root.findAllByProps({testID: 'election-card-view-validation-details'}, {deep: false}).length).toBe(0);
+		expect(validationDetailsTr.root.findAllByProps({testID: 'election-card-view-validation-details'}, {deep: false}).length).toBe(1);
 	});
 
 	it('ReleasingKeys and Validation render distinct icon glyph AND color (SC2)', () => {
