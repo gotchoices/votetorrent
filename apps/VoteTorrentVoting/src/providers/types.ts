@@ -42,9 +42,13 @@ export const LIFECYCLE_ORDER: readonly LifecycleState[] = [
  * data layer holds identifiers/values, the i18n layer holds user-facing strings).
  */
 export interface ValidationCheck {
-	/** i18n key resolving to this check's name (e.g. `home.validationDetails.check1.name`). */
+	/**
+	 * Bare (no namespace prefix) i18n key resolving to this check's name within the `home`
+	 * namespace (e.g. `validationDetails.check1.name`) — resolved via `t(nameKey)` from a
+	 * `useTranslation('home')` call.
+	 */
 	nameKey: string;
-	/** i18n key resolving to this check's result copy (e.g. `home.validationDetails.check1.result`). */
+	/** Bare i18n key resolving to this check's result copy (e.g. `validationDetails.check1.result`). */
 	resultKey: string;
 	/** Elapsed time for this check, in seconds (mock timing data, per-state fixture-sourced). */
 	elapsedSeconds: number;

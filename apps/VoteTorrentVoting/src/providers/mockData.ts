@@ -33,22 +33,28 @@ const MINUTE_MS = 60 * 1000;
  * Check 3's elapsed time has no documented Figma value (RESEARCH Assumption A4) — `1.1` is a
  * plausible non-canonical placeholder, tagged here rather than presented as Figma-verified.
  */
+// Keys are bare (no `home.` namespace prefix) — `useTranslation('home')`'s `t()` resolves
+// flat dotted keys directly against the active `home` namespace (keySeparator: false, no
+// nsSeparator match without a colon); a leading `home.` prefix here would fail to resolve
+// (Rule 1 fix, discovered while wiring ValidationDetailsScreen — verified via direct i18next
+// probe that 'home.validationDetails.check1.name' does not resolve but
+// 'validationDetails.check1.name' does).
 const VALIDATION_EVIDENCE: ValidationCheck[] = [
 	{
-		nameKey: 'home.validationDetails.check1.name',
-		resultKey: 'home.validationDetails.check1.result',
+		nameKey: 'validationDetails.check1.name',
+		resultKey: 'validationDetails.check1.result',
 		elapsedSeconds: 5.3,
 		verified: true,
 	},
 	{
-		nameKey: 'home.validationDetails.check2.name',
-		resultKey: 'home.validationDetails.check2.result',
+		nameKey: 'validationDetails.check2.name',
+		resultKey: 'validationDetails.check2.result',
 		elapsedSeconds: 0.2,
 		verified: true,
 	},
 	{
-		nameKey: 'home.validationDetails.check3.name',
-		resultKey: 'home.validationDetails.check3.result',
+		nameKey: 'validationDetails.check3.name',
+		resultKey: 'validationDetails.check3.result',
 		// [ASSUMED] placeholder — no documented Figma elapsed time for check 3 (RESEARCH A4).
 		elapsedSeconds: 1.1,
 		verified: false,
