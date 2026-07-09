@@ -83,18 +83,18 @@ relaunch_and_wait() {
   local attempt line status
   for attempt in 1 2; do
     echo "[run-replication-proof] relaunch_and_wait: attempt ${attempt}/2 for '${what}' on ${serial}$([ -n "${second_serial}" ] && echo " (+ ${second_serial})") ..." >&2
-    adb -s "${serial}" shell am force-stop "${PACKAGE}"
+    adb -s "${serial}" shell am force-stop "${PACKAGE}" >&2
     if [ -n "${second_serial}" ]; then
-      adb -s "${second_serial}" shell am force-stop "${PACKAGE}"
+      adb -s "${second_serial}" shell am force-stop "${PACKAGE}" >&2
     fi
     sleep 2
-    adb -s "${serial}" logcat -c
+    adb -s "${serial}" logcat -c >&2
     if [ -n "${second_serial}" ]; then
-      adb -s "${second_serial}" logcat -c
+      adb -s "${second_serial}" logcat -c >&2
     fi
-    adb -s "${serial}" shell monkey -p "${PACKAGE}" -c android.intent.category.LAUNCHER 1
+    adb -s "${serial}" shell monkey -p "${PACKAGE}" -c android.intent.category.LAUNCHER 1 >&2
     if [ -n "${second_serial}" ]; then
-      adb -s "${second_serial}" shell monkey -p "${PACKAGE}" -c android.intent.category.LAUNCHER 1
+      adb -s "${second_serial}" shell monkey -p "${PACKAGE}" -c android.intent.category.LAUNCHER 1 >&2
     fi
     set +e
     line=$(wait_for_logcat_line "${pattern}" "${timeout_s}" "[run-replication-proof]" "${what}" "-s ${serial}")
