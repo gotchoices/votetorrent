@@ -16,11 +16,29 @@ function withTheme(children: React.ReactNode) {
 	return <ThemeProvider value={lightTheme}>{children}</ThemeProvider>;
 }
 
+const activeRenderers: renderer.ReactTestRenderer[] = [];
+
+function renderInput(children: React.ReactNode) {
+	let tr!: renderer.ReactTestRenderer;
+	renderer.act(() => {
+		tr = renderer.create(withTheme(children));
+	});
+	activeRenderers.push(tr);
+	return tr;
+}
+
+afterEach(() => {
+	while (activeRenderers.length) {
+		const tr = activeRenderers.pop()!;
+		renderer.act(() => {
+			tr.unmount();
+		});
+	}
+});
+
 describe('LabeledTextInput (REG-03)', () => {
 	it('renders the label text and the TextInput bound to the given value', () => {
-		const tr = renderer.create(
-			withTheme(<LabeledTextInput label="First Name" value="Jane" onChangeText={jest.fn()} />),
-		);
+		const tr = renderInput(<LabeledTextInput label="First Name" value="Jane" onChangeText={jest.fn()} />);
 
 		expect(tr.root.findByProps({children: 'First Name'})).toBeTruthy();
 		const input = tr.root.findByType(TextInput);
@@ -29,7 +47,7 @@ describe('LabeledTextInput (REG-03)', () => {
 
 	it('firing onChangeText calls the passed callback once with the typed value, write-through with no internal buffer', () => {
 		const onChangeText = jest.fn();
-		const tr = renderer.create(withTheme(<LabeledTextInput label="First Name" value="Jane" onChangeText={onChangeText} />));
+		const tr = renderInput(<LabeledTextInput label="First Name" value="Jane" onChangeText={onChangeText} />);
 
 		const input = tr.root.findByType(TextInput);
 		renderer.act(() => {
@@ -41,10 +59,8 @@ describe('LabeledTextInput (REG-03)', () => {
 	});
 
 	it('carries testID through to the TextInput so screens can target fields', () => {
-		const tr = renderer.create(
-			withTheme(
-				<LabeledTextInput label="First Name" value="" onChangeText={jest.fn()} testID="register-first-name" />,
-			),
+		const tr = renderInput(
+			<LabeledTextInput label="First Name" value="" onChangeText={jest.fn()} testID="register-first-name" />,
 		);
 
 		const input = tr.root.findByType(TextInput);
