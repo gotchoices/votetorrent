@@ -75,6 +75,67 @@ const resources = {
 			headerTitle: 'Registration',
 			deviceAttestationTitle: 'Verifying Your Device',
 			confirmationTitle: "You're All Set",
+			// Phase 41 (REG-01..05) — flat dotted keys, transcribed verbatim from
+			// 41-UI-SPEC.md's Copywriting Contract. `[AUTHORED]` strings noted in the
+			// contract are marked below for traceability.
+			'notRegistered.heading': 'You are not registered',
+			'notRegistered.body':
+				'To participate in the Utah Network you will need to register',
+			'notRegistered.cta': 'Register now',
+			'registered.heading': "You're registered to vote",
+			'registered.body': 'You have successfully registered for the Utah Network',
+			'registered.identityLine': '{{fullName}}: {{party}} {{dob}}',
+			'registered.validThrough': 'Valid through {{validThrough}}',
+			'registered.updatePrompt':
+				'Have you recently made any changes to your personal info?',
+			'registered.updateCta': 'Update registration',
+			'deviceAttestation.heading': 'Verifying your device...',
+			// [AUTHORED]
+			'deviceAttestation.caption': 'Confirming your device is secure',
+			'form.sectionTitle': 'Register for the Utah Network',
+			'form.firstName': 'First Name',
+			'form.lastName': 'Last Name',
+			'form.dob': 'Date of Birth',
+			'form.email': 'Email',
+			'form.phone': 'Phone Number',
+			// [AUTHORED]
+			'form.dobPlaceholder': 'MM/DD/YYYY',
+			// [AUTHORED]
+			'form.continueCta': 'Continue',
+			// [AUTHORED]
+			'form.backCta': 'Back',
+			// [AUTHORED]
+			'form.submitCta': 'Submit Registration',
+			// [AUTHORED]
+			'form.stepLabel': 'Step {{step}} of 3',
+			'form.addressLine1': 'Address line 1',
+			'form.addressLine2': 'Address line 2 (optional)',
+			'form.addressLine3': 'Address line 3 (optional)',
+			'form.selectParty': 'Select Your Party',
+			// [AUTHORED]
+			'form.party.democratic': 'Democratic Party',
+			// [AUTHORED]
+			'form.party.republican': 'Republican Party',
+			// [AUTHORED]
+			'form.party.independent': 'Independent',
+			// [AUTHORED]
+			'form.party.other': 'Other',
+			'form.confirmInstruction': 'Check to ensure all information is correct',
+			'form.review.fullName': 'Full Name',
+			'form.review.dob': 'Date of Birth',
+			'form.review.email': 'Email',
+			'form.review.phone': 'Phone Number',
+			'form.review.party': 'Registered Party',
+			'form.review.address': 'Address',
+			'confirmation.heading': "You're all set!",
+			'confirmation.body': 'Confirm your registration with Face ID',
+			// [AUTHORED]
+			'confirmation.cta': 'Confirm with Face ID',
+			// [AUTHORED]
+			'confirmation.caption': 'Look at your device to confirm',
+			// [AUTHORED] — native-stack header titles for the form-step routes (41-08).
+			formHeaderTitle: 'Register',
+			confirmHeaderTitle: 'Confirm',
 		},
 		scan: {
 			headerTitle: 'Scan',
@@ -149,6 +210,51 @@ const resources = {
 			headerTitle: 'Registro',
 			deviceAttestationTitle: 'Verificando Tu Dispositivo',
 			confirmationTitle: 'Todo Listo',
+			'notRegistered.heading': 'No estás registrado',
+			'notRegistered.body':
+				'Para participar en la Red de Utah necesitarás registrarte',
+			'notRegistered.cta': 'Regístrate ahora',
+			'registered.heading': 'Estás registrado para votar',
+			'registered.body': 'Te has registrado exitosamente en la Red de Utah',
+			'registered.identityLine': '{{fullName}}: {{party}} {{dob}}',
+			'registered.validThrough': 'Válido hasta {{validThrough}}',
+			'registered.updatePrompt':
+				'¿Has hecho cambios recientes en tu información personal?',
+			'registered.updateCta': 'Actualizar registro',
+			'deviceAttestation.heading': 'Verificando tu dispositivo...',
+			'deviceAttestation.caption': 'Confirmando que tu dispositivo es seguro',
+			'form.sectionTitle': 'Regístrate en la Red de Utah',
+			'form.firstName': 'Nombre',
+			'form.lastName': 'Apellido',
+			'form.dob': 'Fecha de Nacimiento',
+			'form.email': 'Correo Electrónico',
+			'form.phone': 'Número de Teléfono',
+			'form.dobPlaceholder': 'MM/DD/AAAA',
+			'form.continueCta': 'Continuar',
+			'form.backCta': 'Atrás',
+			'form.submitCta': 'Enviar Registro',
+			'form.stepLabel': 'Paso {{step}} de 3',
+			'form.addressLine1': 'Dirección línea 1',
+			'form.addressLine2': 'Dirección línea 2 (opcional)',
+			'form.addressLine3': 'Dirección línea 3 (opcional)',
+			'form.selectParty': 'Selecciona Tu Partido',
+			'form.party.democratic': 'Partido Demócrata',
+			'form.party.republican': 'Partido Republicano',
+			'form.party.independent': 'Independiente',
+			'form.party.other': 'Otro',
+			'form.confirmInstruction': 'Verifica que toda la información sea correcta',
+			'form.review.fullName': 'Nombre Completo',
+			'form.review.dob': 'Fecha de Nacimiento',
+			'form.review.email': 'Correo Electrónico',
+			'form.review.phone': 'Número de Teléfono',
+			'form.review.party': 'Partido Registrado',
+			'form.review.address': 'Dirección',
+			'confirmation.heading': '¡Todo listo!',
+			'confirmation.body': 'Confirma tu registro con Face ID',
+			'confirmation.cta': 'Confirmar con Face ID',
+			'confirmation.caption': 'Mira tu dispositivo para confirmar',
+			formHeaderTitle: 'Registrarse',
+			confirmHeaderTitle: 'Confirmar',
 		},
 		scan: {
 			headerTitle: 'Escanear',
