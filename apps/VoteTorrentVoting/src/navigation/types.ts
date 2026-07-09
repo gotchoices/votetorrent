@@ -10,7 +10,8 @@
  * together by 39-07's RootNavigator.
  */
 
-// Vote tab: Home root + Ballot pushed + the 4 question/info modals (D-09 topology).
+// Vote tab: Home root + Ballot pushed + the 4 question/info modals (D-09 topology) +
+// ValidationDetails (HOME-03/D-11 trust-story drill-in, plain push — not a modal).
 export type VoteStackParamList = {
 	Home: undefined;
 	Ballot: undefined;
@@ -18,6 +19,7 @@ export type VoteStackParamList = {
 	ElectionInfo: undefined;
 	OfficeInfo: undefined;
 	CandidateInfo: undefined;
+	ValidationDetails: undefined;
 };
 
 // Registration tab: root + Device Attestation + Confirmation modals.

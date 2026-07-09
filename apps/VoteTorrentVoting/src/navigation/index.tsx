@@ -25,6 +25,7 @@ import type {
 	VoteStackParamList,
 } from './types';
 import HomeScreen from '../screens/home/HomeScreen';
+import ValidationDetailsScreen from '../screens/home/ValidationDetailsScreen';
 import BallotScreen from '../screens/ballot/BallotScreen';
 import RegistrationScreen from '../screens/registration/RegistrationScreen';
 import ScanScreen from '../screens/scan/ScanScreen';
@@ -66,6 +67,13 @@ function VoteStackNavigator() {
 				name="Ballot"
 				component={BallotScreen}
 				options={{title: tBallot('headerTitle')}}
+			/>
+			{/* HOME-03/D-11: plain push (default header, back chevron), matching Ballot's own
+			    registration exactly — NOT a modal (RESEARCH Anti-Patterns: no breadcrumb component). */}
+			<VoteStack.Screen
+				name="ValidationDetails"
+				component={ValidationDetailsScreen}
+				options={{title: tHome('validationDetailsTitle')}}
 			/>
 			<VoteStack.Screen
 				name="IndividualQuestion"
