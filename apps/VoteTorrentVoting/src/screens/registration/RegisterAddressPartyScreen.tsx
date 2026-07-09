@@ -6,9 +6,15 @@
  * Step 3 with the draft fully preserved either way.
  *
  * Both footer CTAs are always enabled (D-02 mock-permissive — no required-field validation).
+ *
+ * Manual-QA gap-closure (Phase 41 re-verification): shares the same overflow risk pattern
+ * confirmed on `RegisterConfirmScreen` (3 address fields + party chip row can exceed the
+ * height available above the bottom tab bar) — the scrollable content now wraps in a
+ * `ScrollView` (flex:1), with the footer Back/Continue row as a sibling BELOW it (not
+ * scrolled), so the footer always renders fully above the tab bar.
  */
 import React from 'react';
-import {Pressable, StyleSheet, Text, View} from 'react-native';
+import {Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
 import {useNavigation, useTheme} from '@react-navigation/native';
 import type {ExtendedTheme} from '@react-navigation/native';
 import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
@@ -44,46 +50,11 @@ export default function RegisterAddressPartyScreen() {
 
 	return (
 		<View style={[globalStyles.container, styles.screen, {backgroundColor: colors.background}]}>
-			<StepProgressBar step={2} />
-			<Text
-				style={[
-					styles.sectionTitle,
-					{
-						color: colors.text,
-						fontFamily: fonts.medium.fontFamily,
-						fontWeight: fonts.medium.fontWeight,
-						fontSize: typeScale.h4.fontSize,
-						lineHeight: typeScale.h4.lineHeight,
-					},
-				]}>
-				{t('form.sectionTitle')}
-			</Text>
-
-			<View style={styles.fieldGroup}>
-				<LabeledTextInput
-					testID="register-address-1"
-					label={t('form.addressLine1')}
-					value={draft.addressLine1}
-					onChangeText={v => updateField('addressLine1', v)}
-				/>
-				<LabeledTextInput
-					testID="register-address-2"
-					label={t('form.addressLine2')}
-					value={draft.addressLine2}
-					onChangeText={v => updateField('addressLine2', v)}
-				/>
-				<LabeledTextInput
-					testID="register-address-3"
-					label={t('form.addressLine3')}
-					value={draft.addressLine3}
-					onChangeText={v => updateField('addressLine3', v)}
-				/>
-			</View>
-
-			<View style={styles.fieldGroup}>
+			<ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
+				<StepProgressBar step={2} />
 				<Text
 					style={[
-						styles.partyLabel,
+						styles.sectionTitle,
 						{
 							color: colors.text,
 							fontFamily: fonts.medium.fontFamily,
@@ -92,14 +63,51 @@ export default function RegisterAddressPartyScreen() {
 							lineHeight: typeScale.h4.lineHeight,
 						},
 					]}>
-					{t('form.selectParty')}
+					{t('form.sectionTitle')}
 				</Text>
-				<PartyChipSelector
-					options={partyOptions}
-					value={draft.party}
-					onChange={v => updateField('party', v)}
-				/>
-			</View>
+
+				<View style={styles.fieldGroup}>
+					<LabeledTextInput
+						testID="register-address-1"
+						label={t('form.addressLine1')}
+						value={draft.addressLine1}
+						onChangeText={v => updateField('addressLine1', v)}
+					/>
+					<LabeledTextInput
+						testID="register-address-2"
+						label={t('form.addressLine2')}
+						value={draft.addressLine2}
+						onChangeText={v => updateField('addressLine2', v)}
+					/>
+					<LabeledTextInput
+						testID="register-address-3"
+						label={t('form.addressLine3')}
+						value={draft.addressLine3}
+						onChangeText={v => updateField('addressLine3', v)}
+					/>
+				</View>
+
+				<View style={styles.fieldGroup}>
+					<Text
+						style={[
+							styles.partyLabel,
+							{
+								color: colors.text,
+								fontFamily: fonts.medium.fontFamily,
+								fontWeight: fonts.medium.fontWeight,
+								fontSize: typeScale.h4.fontSize,
+								lineHeight: typeScale.h4.lineHeight,
+							},
+						]}>
+						{t('form.selectParty')}
+					</Text>
+					<PartyChipSelector
+						options={partyOptions}
+						value={draft.party}
+						onChange={v => updateField('party', v)}
+					/>
+				</View>
+			</ScrollView>
 
 			<View style={[globalStyles.footerButtonsContainer, styles.footer]}>
 				<Pressable
@@ -130,6 +138,12 @@ export default function RegisterAddressPartyScreen() {
 const styles = StyleSheet.create({
 	screen: {
 		flex: 1,
+	},
+	scroll: {
+		flex: 1,
+	},
+	scrollContent: {
+		flexGrow: 1,
 	},
 	sectionTitle: {
 		marginTop: 24, // lg spacing token

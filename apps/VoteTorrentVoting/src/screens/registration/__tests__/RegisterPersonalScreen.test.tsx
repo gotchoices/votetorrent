@@ -7,6 +7,7 @@
  */
 import React from 'react';
 import renderer from 'react-test-renderer';
+import {ScrollView} from 'react-native';
 import '../../../i18n'; // initializes the global i18next instance useTranslation() reads from
 
 const mockNavigate = jest.fn();
@@ -103,5 +104,15 @@ describe('RegisterPersonalScreen (REG-03, Step 1)', () => {
 			cta.props.onPress();
 		});
 		expect(mockNavigate).toHaveBeenCalledWith('RegisterAddressParty');
+	});
+
+	// Manual-QA gap-closure (Phase 41 re-verification): defensive ScrollView wrap so field
+	// content can't get clipped by the bottom tab bar on smaller viewports (same overflow risk
+	// pattern confirmed on RegisterConfirmScreen).
+	it('renders the form content inside a ScrollView', () => {
+		const tr = renderScreen();
+		const scrollViews = tr.root.findAllByType(ScrollView);
+		expect(scrollViews.length).toBe(1);
+		expect(scrollViews[0].findAllByProps({testID: 'register-continue'}).length).toBeGreaterThan(0);
 	});
 });

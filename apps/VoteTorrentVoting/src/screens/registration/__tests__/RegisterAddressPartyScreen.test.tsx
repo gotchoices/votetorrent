@@ -7,6 +7,7 @@
  */
 import React from 'react';
 import renderer from 'react-test-renderer';
+import {ScrollView} from 'react-native';
 import '../../../i18n'; // initializes the global i18next instance useTranslation() reads from
 
 const mockNavigate = jest.fn();
@@ -128,5 +129,19 @@ describe('RegisterAddressPartyScreen (REG-03, Step 2)', () => {
 			address1.props.onChangeText('123 Main St');
 		});
 		expect(mockUpdateField).toHaveBeenCalledWith('addressLine1', '123 Main St');
+	});
+
+	// Manual-QA gap-closure (Phase 41 re-verification): the footer Back/Continue row must stay a
+	// sibling OUTSIDE the ScrollView (not scrolled away), mirroring the RegisterConfirmScreen fix,
+	// so it's always reachable above the bottom tab bar regardless of content height.
+	it('renders address/party content inside a ScrollView, with register-back/register-continue as siblings outside it', () => {
+		const tr = renderScreen();
+		const scrollViews = tr.root.findAllByType(ScrollView);
+		expect(scrollViews.length).toBe(1);
+		expect(scrollViews[0].findAllByProps({testID: 'party-chip-democratic'}).length).toBeGreaterThan(0);
+		expect(scrollViews[0].findAllByProps({testID: 'register-back'}).length).toBe(0);
+		expect(scrollViews[0].findAllByProps({testID: 'register-continue'}).length).toBe(0);
+		expect(tr.root.findByProps({testID: 'register-back'})).toBeDefined();
+		expect(tr.root.findByProps({testID: 'register-continue'})).toBeDefined();
 	});
 });

@@ -8,6 +8,7 @@
  */
 import React from 'react';
 import renderer from 'react-test-renderer';
+import {ScrollView} from 'react-native';
 import '../../../i18n'; // initializes the global i18next instance useTranslation() reads from
 
 const mockNavigate = jest.fn();
@@ -109,5 +110,23 @@ describe('RegisterConfirmScreen (REG-03, Step 3)', () => {
 		});
 		expect(mockNavigate).toHaveBeenCalledWith('Confirmation');
 		expect(mockSetIsRegistered).not.toHaveBeenCalled();
+	});
+
+	// Manual-QA gap-closure (Phase 41 re-verification): the footer Back/Submit row was clipped
+	// by the bottom tab bar because the review content rendered inside a single non-scrolling
+	// View. Assert the review rows live inside a ScrollView, and the footer buttons are siblings
+	// OUTSIDE it (not scrolled away), so Submit stays reachable regardless of review-content height.
+	it('renders review rows inside a ScrollView, with register-back/register-submit as siblings outside it', () => {
+		const tr = renderScreen();
+		const scrollViews = tr.root.findAllByType(ScrollView);
+		expect(scrollViews.length).toBe(1);
+
+		const reviewRow = tr.root.findByProps({testID: 'register-review-fullName'});
+		expect(scrollViews[0].findAllByProps({testID: 'register-review-fullName'})).toContain(reviewRow);
+
+		expect(scrollViews[0].findAllByProps({testID: 'register-back'}).length).toBe(0);
+		expect(scrollViews[0].findAllByProps({testID: 'register-submit'}).length).toBe(0);
+		expect(tr.root.findByProps({testID: 'register-back'})).toBeDefined();
+		expect(tr.root.findByProps({testID: 'register-submit'})).toBeDefined();
 	});
 });

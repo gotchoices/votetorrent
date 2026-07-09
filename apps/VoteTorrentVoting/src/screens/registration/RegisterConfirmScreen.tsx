@@ -7,9 +7,16 @@
  * Submit navigates to `Confirmation` but deliberately does NOT flip `isRegistered` — that only
  * happens on Confirmation's own Face-ID tap (D-05). This screen intentionally does NOT
  * destructure `setIsRegistered` from `useVotingApp()`.
+ *
+ * Manual-QA gap-closure (Phase 41 re-verification): the 6 review rows + progress + instruction
+ * previously rendered inside a single non-scrolling `<View>`, so on-device the footer Back/Submit
+ * row was clipped to a ~28px sliver above the bottom tab bar (near-untappable Submit). The
+ * review content (StepProgressBar + instruction + rowList) now scrolls inside a `ScrollView`
+ * (flex:1); the footer action row is a sibling BELOW the ScrollView (not scrolled), so it always
+ * renders fully above the tab bar regardless of review-content height.
  */
 import React from 'react';
-import {Pressable, StyleSheet, Text, View} from 'react-native';
+import {Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
 import {useNavigation, useTheme} from '@react-navigation/native';
 import type {ExtendedTheme} from '@react-navigation/native';
 import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
@@ -50,56 +57,58 @@ export default function RegisterConfirmScreen() {
 
 	return (
 		<View style={[globalStyles.container, styles.screen, {backgroundColor: colors.background}]}>
-			<StepProgressBar step={3} />
-			<Text
-				style={[
-					styles.instruction,
-					{
-						color: colors.textSecondary,
-						fontFamily: fonts.regular.fontFamily,
-						fontWeight: fonts.regular.fontWeight,
-						fontSize: typeScale.body.fontSize,
-						lineHeight: typeScale.body.lineHeight,
-					},
-				]}>
-				{t('form.confirmInstruction')}
-			</Text>
+			<ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
+				<StepProgressBar step={3} />
+				<Text
+					style={[
+						styles.instruction,
+						{
+							color: colors.textSecondary,
+							fontFamily: fonts.regular.fontFamily,
+							fontWeight: fonts.regular.fontWeight,
+							fontSize: typeScale.body.fontSize,
+							lineHeight: typeScale.body.lineHeight,
+						},
+					]}>
+					{t('form.confirmInstruction')}
+				</Text>
 
-			<View style={styles.rowList}>
-				{rows.map(row => (
-					<View
-						key={row.key}
-						testID={`register-review-${row.key}`}
-						style={[globalStyles.cardSurface, {backgroundColor: colors.card}]}>
-						<Text
-							style={[
-								styles.rowLabel,
-								{
-									color: colors.textSecondary,
-									fontFamily: fonts.regular.fontFamily,
-									fontWeight: fonts.regular.fontWeight,
-									fontSize: typeScale.caption.fontSize,
-									lineHeight: typeScale.caption.lineHeight,
-								},
-							]}>
-							{t(row.labelKey)}
-						</Text>
-						<Text
-							style={[
-								styles.rowValue,
-								{
-									color: colors.text,
-									fontFamily: fonts.regular.fontFamily,
-									fontWeight: fonts.regular.fontWeight,
-									fontSize: typeScale.body.fontSize,
-									lineHeight: typeScale.body.lineHeight,
-								},
-							]}>
-							{row.value}
-						</Text>
-					</View>
-				))}
-			</View>
+				<View style={styles.rowList}>
+					{rows.map(row => (
+						<View
+							key={row.key}
+							testID={`register-review-${row.key}`}
+							style={[globalStyles.cardSurface, {backgroundColor: colors.card}]}>
+							<Text
+								style={[
+									styles.rowLabel,
+									{
+										color: colors.textSecondary,
+										fontFamily: fonts.regular.fontFamily,
+										fontWeight: fonts.regular.fontWeight,
+										fontSize: typeScale.caption.fontSize,
+										lineHeight: typeScale.caption.lineHeight,
+									},
+								]}>
+								{t(row.labelKey)}
+							</Text>
+							<Text
+								style={[
+									styles.rowValue,
+									{
+										color: colors.text,
+										fontFamily: fonts.regular.fontFamily,
+										fontWeight: fonts.regular.fontWeight,
+										fontSize: typeScale.body.fontSize,
+										lineHeight: typeScale.body.lineHeight,
+									},
+								]}>
+								{row.value}
+							</Text>
+						</View>
+					))}
+				</View>
+			</ScrollView>
 
 			<View style={[globalStyles.footerButtonsContainer, styles.footer]}>
 				<Pressable
@@ -130,6 +139,12 @@ export default function RegisterConfirmScreen() {
 const styles = StyleSheet.create({
 	screen: {
 		flex: 1,
+	},
+	scroll: {
+		flex: 1,
+	},
+	scrollContent: {
+		flexGrow: 1,
 	},
 	instruction: {
 		marginTop: 16, // md spacing token

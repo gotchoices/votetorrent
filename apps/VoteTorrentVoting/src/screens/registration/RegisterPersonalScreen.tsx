@@ -7,9 +7,15 @@
  *
  * Continue is always enabled (D-02 mock-permissive — no required-field validation blocks
  * advancing).
+ *
+ * Manual-QA gap-closure (Phase 41 re-verification): shares the same overflow risk pattern
+ * confirmed on `RegisterConfirmScreen` (5 stacked `LabeledTextInput` fields can exceed the
+ * height available above the bottom tab bar on smaller viewports) — wrapped the field content
+ * in a `ScrollView` (flex:1) as a defensive, zero-regression measure (behaves identically to a
+ * plain View when content already fits).
  */
 import React from 'react';
-import {Pressable, StyleSheet, Text, View} from 'react-native';
+import {Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
 import {useNavigation, useTheme} from '@react-navigation/native';
 import type {ExtendedTheme} from '@react-navigation/native';
 import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
@@ -36,64 +42,66 @@ export default function RegisterPersonalScreen() {
 
 	return (
 		<View style={[globalStyles.container, styles.screen, {backgroundColor: colors.background}]}>
-			<StepProgressBar step={1} />
-			<Text
-				style={[
-					styles.sectionTitle,
-					{
-						color: colors.text,
-						fontFamily: fonts.medium.fontFamily,
-						fontWeight: fonts.medium.fontWeight,
-						fontSize: typeScale.h4.fontSize,
-						lineHeight: typeScale.h4.lineHeight,
-					},
-				]}>
-				{t('form.sectionTitle')}
-			</Text>
+			<ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
+				<StepProgressBar step={1} />
+				<Text
+					style={[
+						styles.sectionTitle,
+						{
+							color: colors.text,
+							fontFamily: fonts.medium.fontFamily,
+							fontWeight: fonts.medium.fontWeight,
+							fontSize: typeScale.h4.fontSize,
+							lineHeight: typeScale.h4.lineHeight,
+						},
+					]}>
+					{t('form.sectionTitle')}
+				</Text>
 
-			<View style={styles.fieldGroup}>
-				<LabeledTextInput
-					testID="register-first-name"
-					label={t('form.firstName')}
-					value={draft.firstName}
-					onChangeText={v => updateField('firstName', v)}
-				/>
-				<LabeledTextInput
-					testID="register-last-name"
-					label={t('form.lastName')}
-					value={draft.lastName}
-					onChangeText={v => updateField('lastName', v)}
-				/>
-				<LabeledTextInput
-					testID="register-dob"
-					label={t('form.dob')}
-					value={draft.dob}
-					placeholder={t('form.dobPlaceholder')}
-					onChangeText={v => updateField('dob', v)}
-				/>
-			</View>
+				<View style={styles.fieldGroup}>
+					<LabeledTextInput
+						testID="register-first-name"
+						label={t('form.firstName')}
+						value={draft.firstName}
+						onChangeText={v => updateField('firstName', v)}
+					/>
+					<LabeledTextInput
+						testID="register-last-name"
+						label={t('form.lastName')}
+						value={draft.lastName}
+						onChangeText={v => updateField('lastName', v)}
+					/>
+					<LabeledTextInput
+						testID="register-dob"
+						label={t('form.dob')}
+						value={draft.dob}
+						placeholder={t('form.dobPlaceholder')}
+						onChangeText={v => updateField('dob', v)}
+					/>
+				</View>
 
-			<View style={styles.fieldGroup}>
-				<LabeledTextInput
-					testID="register-email"
-					label={t('form.email')}
-					value={draft.email}
-					onChangeText={v => updateField('email', v)}
-				/>
-				<LabeledTextInput
-					testID="register-phone"
-					label={t('form.phone')}
-					value={draft.phone}
-					onChangeText={v => updateField('phone', v)}
-				/>
-			</View>
+				<View style={styles.fieldGroup}>
+					<LabeledTextInput
+						testID="register-email"
+						label={t('form.email')}
+						value={draft.email}
+						onChangeText={v => updateField('email', v)}
+					/>
+					<LabeledTextInput
+						testID="register-phone"
+						label={t('form.phone')}
+						value={draft.phone}
+						onChangeText={v => updateField('phone', v)}
+					/>
+				</View>
 
-			<Pressable
-				testID="register-continue"
-				onPress={() => navigation.navigate('RegisterAddressParty')}
-				style={[styles.continueCta, {backgroundColor: colors.primary, borderRadius: radii.pill}]}>
-				<Text style={[styles.continueLabel, {color: colors.light}]}>{t('form.continueCta')}</Text>
-			</Pressable>
+				<Pressable
+					testID="register-continue"
+					onPress={() => navigation.navigate('RegisterAddressParty')}
+					style={[styles.continueCta, {backgroundColor: colors.primary, borderRadius: radii.pill}]}>
+					<Text style={[styles.continueLabel, {color: colors.light}]}>{t('form.continueCta')}</Text>
+				</Pressable>
+			</ScrollView>
 		</View>
 	);
 }
@@ -101,6 +109,12 @@ export default function RegisterPersonalScreen() {
 const styles = StyleSheet.create({
 	screen: {
 		flex: 1,
+	},
+	scroll: {
+		flex: 1,
+	},
+	scrollContent: {
+		flexGrow: 1,
 	},
 	sectionTitle: {
 		marginTop: 24, // lg spacing token
