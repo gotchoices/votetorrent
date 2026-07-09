@@ -85,4 +85,22 @@ describe('VotingAppProvider / useVotingApp (SHELL-03, D-01)', () => {
 		const election = await result;
 		expect(election.lifecycleState).toBe('Upcoming');
 	});
+
+	it('getElection() merges the per-state LIFECYCLE_CONTENT entry after setLifecycleState (HOME-02 regression guard, Phase 40)', async () => {
+		const {captured} = renderProvider();
+		await flushBoot();
+
+		renderer.act(() => {
+			captured.value!.setLifecycleState('ReleasingKeys');
+		});
+		const releasingKeys = await captured.value!.getElection();
+		expect(releasingKeys.keysReleased).toBe(3);
+		expect(releasingKeys.keysTotal).toBe(5);
+
+		renderer.act(() => {
+			captured.value!.setLifecycleState('ValidationDetails');
+		});
+		const validationDetails = await captured.value!.getElection();
+		expect(validationDetails.evidence).toHaveLength(3);
+	});
 });

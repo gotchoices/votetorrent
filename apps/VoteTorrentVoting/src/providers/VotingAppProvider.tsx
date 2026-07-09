@@ -14,7 +14,7 @@ import React, {createContext, useCallback, useContext, useEffect, useState} from
 import type {PropsWithChildren} from 'react';
 import {ActivityIndicator, View} from 'react-native';
 import type {LifecycleState, MockElection, VotingAppContextType} from './types';
-import {mockElection} from './mockData';
+import {LIFECYCLE_CONTENT, mockElection} from './mockData';
 
 const VotingAppContext = createContext<VotingAppContextType | null>(null);
 
@@ -41,9 +41,11 @@ export function VotingAppProvider({children}: PropsWithChildren) {
 
 	// Async even though the data is in-memory — mirrors the shape a real engine's read method
 	// would have (D-01 swap-fidelity investment). Reflects the current lifecycleState so
-	// consumers reading through getElection() stay in sync with the __DEV__ cycler.
+	// consumers reading through getElection() stay in sync with the __DEV__ cycler, merging in
+	// that state's per-state LIFECYCLE_CONTENT entry (Phase 40, RESEARCH Pitfall 1) — still a
+	// single async read point, no second context method (D-01 swap-fidelity).
 	const getElection = useCallback(async (): Promise<MockElection> => {
-		return {...mockElection, lifecycleState};
+		return {...mockElection, lifecycleState, ...LIFECYCLE_CONTENT[lifecycleState]};
 	}, [lifecycleState]);
 
 	if (!isInitialized) {
