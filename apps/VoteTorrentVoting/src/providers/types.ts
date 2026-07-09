@@ -36,19 +36,64 @@ export const LIFECYCLE_ORDER: readonly LifecycleState[] = [
 ];
 
 /**
- * Future-engine-shaped mock election — mirrors the fields a real `vote-core` election read
- * would expose (id, title, lifecycle state), plus mock progress/countdown fields the Home
- * screen's placeholder needs this phase.
+ * A single evidence row for the Validation Details drill-in (HOME-03/D-11). Mirrors what a real
+ * `vote-core` validation-report row would expose (a check identity, its outcome, timing, and
+ * completion status) — the name/result are i18n KEYS, not literal copy (SHELL-03 spirit: the
+ * data layer holds identifiers/values, the i18n layer holds user-facing strings).
  */
-export interface MockElection {
+export interface ValidationCheck {
+	/** i18n key resolving to this check's name (e.g. `home.validationDetails.check1.name`). */
+	nameKey: string;
+	/** i18n key resolving to this check's result copy (e.g. `home.validationDetails.check1.result`). */
+	resultKey: string;
+	/** Elapsed time for this check, in seconds (mock timing data, per-state fixture-sourced). */
+	elapsedSeconds: number;
+	/** Whether this check has completed verification, or is still pending. */
+	verified: boolean;
+}
+
+/**
+ * The per-lifecycle-state content that varies across the `__DEV__` cycler (RESEARCH Pitfall 1).
+ * A flat `MockElection` cannot represent "3/5 keys released" (ReleasingKeys) and "5/5 keys
+ * released" (Validation) simultaneously — both would have to live on the same static fields of
+ * the same object. Instead, one `LifecycleContent` entry per state is merged into the resolved
+ * election by `getElection()` (`providers/mockData.ts`'s `LIFECYCLE_CONTENT` map). All fields are
+ * optional because not every state uses every field (e.g. `ReviewSelections`/`Complete` show no
+ * countdown or progress — RESEARCH Pitfall 4/A3).
+ */
+export interface LifecycleContent {
+	/** ISO-8601 countdown target, for states whose card shows a countdown. */
+	countdownTarget?: string;
+	/** Progress ratio (0-1), for states whose card shows a progress bar (Open only, per D-10). */
+	progress?: number;
+	/** Number of election keys released so far (ReleasingKeys/Validation). */
+	keysReleased?: number;
+	/** Total number of election keys required (ReleasingKeys/Validation). */
+	keysTotal?: number;
+	/** Number of validation checks completed so far (Validation/ValidationDetails). */
+	checksComplete?: number;
+	/** Total number of validation checks (Validation/ValidationDetails). */
+	checksTotal?: number;
+	/** Validation fingerprint string (ValidationDetails), e.g. mock "Birddog133". */
+	fingerprint?: string;
+	/** Whether the election has been certified (Complete). */
+	certified?: boolean;
+	/** Per-check evidence rows for the Validation Details drill-in (ValidationDetails). */
+	evidence?: ValidationCheck[];
+}
+
+/**
+ * Future-engine-shaped mock election — the base identity (id, title, lifecycle state) a real
+ * `vote-core` election read would expose, intersected with the current lifecycle state's
+ * `LifecycleContent` (merged in by `getElection()`). This is the single shape every downstream
+ * screen consumes — the eventual real-engine swap stays DI-only (D-01) because the merged shape
+ * never changes, only what populates it does.
+ */
+export type MockElection = {
 	id: string;
 	title: string;
 	lifecycleState: LifecycleState;
-	/** ISO-8601 countdown target for the Home screen's placeholder countdown display. */
-	countdownTarget: string;
-	/** Mock progress ratio (0-1) for lifecycle states that show a progress indicator. */
-	progress: number;
-}
+} & LifecycleContent;
 
 /**
  * The provider's context shape. Read methods are async (Promise-returning) even though the
