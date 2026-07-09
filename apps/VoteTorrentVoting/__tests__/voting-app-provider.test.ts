@@ -103,4 +103,38 @@ describe('VotingAppProvider / useVotingApp (SHELL-03, D-01)', () => {
 		const validationDetails = await captured.value!.getElection();
 		expect(validationDetails.evidence).toHaveLength(3);
 	});
+
+	it('isRegistered defaults to false and registeredAt is null after boot (REG-01)', async () => {
+		const {captured} = renderProvider();
+		await flushBoot();
+		expect(captured.value!.isRegistered).toBe(false);
+		expect(captured.value!.registeredAt).toBeNull();
+	});
+
+	it('setIsRegistered(true) flips isRegistered and freezes registeredAt as a non-null ISO string (REG-04)', async () => {
+		const {captured} = renderProvider();
+		await flushBoot();
+
+		renderer.act(() => {
+			captured.value!.setIsRegistered(true);
+		});
+		expect(captured.value!.isRegistered).toBe(true);
+		expect(typeof captured.value!.registeredAt).toBe('string');
+		expect(Number.isNaN(Date.parse(captured.value!.registeredAt as string))).toBe(false);
+	});
+
+	it('setIsRegistered(false) sets isRegistered back to false', async () => {
+		const {captured} = renderProvider();
+		await flushBoot();
+
+		renderer.act(() => {
+			captured.value!.setIsRegistered(true);
+		});
+		expect(captured.value!.isRegistered).toBe(true);
+
+		renderer.act(() => {
+			captured.value!.setIsRegistered(false);
+		});
+		expect(captured.value!.isRegistered).toBe(false);
+	});
 });
