@@ -38,7 +38,8 @@ afterEach(() => {
 function fillCount(tr: renderer.ReactTestRenderer, fillColor: string) {
 	return [1, 2, 3].filter(n => {
 		const segment = tr.root.findByProps({testID: `step-segment-${n}`});
-		const flatStyle = [].concat(segment.props.style).reduce((acc, s) => ({...acc, ...s}), {});
+		const styleArray: Record<string, unknown>[] = ([] as Record<string, unknown>[]).concat(segment.props.style);
+		const flatStyle = styleArray.reduce((acc, s) => ({...acc, ...s}), {} as Record<string, unknown>);
 		return flatStyle.backgroundColor === fillColor;
 	}).length;
 }
