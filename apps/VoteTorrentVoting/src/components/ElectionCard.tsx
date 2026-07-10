@@ -124,6 +124,22 @@ export function ElectionCard({election, onVoteNow, onViewValidationDetails, onLe
 				{election.title}
 			</Text>
 
+			{/* Figma: "Learn about this election" sits directly beneath the election title. */}
+			{display.showAction === 'vote' ? (
+				<Pressable
+					testID="election-card-learn-link"
+					onPress={onLearnAboutElection}
+					style={styles.learnLink}>
+					<Text
+						style={[
+							styles.learnLinkText,
+							{color: colors.link, fontSize: typeScale.caption.fontSize, lineHeight: typeScale.caption.lineHeight},
+						]}>
+						{t('learnAboutElection')}
+					</Text>
+				</Pressable>
+			) : null}
+
 			<View style={styles.summaryRow}>
 				{display.icon ? (
 					<FontAwesome6
@@ -177,21 +193,6 @@ export function ElectionCard({election, onVoteNow, onViewValidationDetails, onLe
 					</Text>
 					<ProgressBar progress={election.progress ?? 0} />
 				</View>
-			) : null}
-
-			{display.showAction === 'vote' ? (
-				<Pressable
-					testID="election-card-learn-link"
-					onPress={onLearnAboutElection}
-					style={styles.learnLink}>
-					<Text
-						style={[
-							styles.learnLinkText,
-							{color: colors.link, fontSize: typeScale.caption.fontSize, lineHeight: typeScale.caption.lineHeight},
-						]}>
-						{t('learnAboutElection')}
-					</Text>
-				</Pressable>
 			) : null}
 
 			{display.showAction === 'vote' ? (
@@ -256,7 +257,8 @@ const styles = StyleSheet.create({
 	},
 	learnLink: {
 		alignSelf: 'flex-start',
-		marginTop: 16,
+		marginTop: 2, // snug under the title (Figma)
+		marginBottom: 12,
 	},
 	learnLinkText: {
 		textDecorationLine: 'underline',
