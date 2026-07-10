@@ -22,6 +22,7 @@ import {Pressable, StyleSheet, Text, View} from 'react-native';
 import {useTheme} from '@react-navigation/native';
 import type {ExtendedTheme} from '@react-navigation/native';
 import FontAwesome6 from 'react-native-vector-icons/FontAwesome6';
+import {globalStyles} from '../theme/styles';
 
 export interface Candidate {
 	id: string;
@@ -57,31 +58,19 @@ export function CandidateSelector({candidates, selectedIds, voteFor, onToggle, l
 						accessibilityState={{selected, disabled: disabledLook}}
 						onPress={() => onToggle(candidate.id)}
 						style={[
+							globalStyles.cardSurface,
 							styles.row,
 							{
-								borderColor: selected ? colors.success : colors.border,
+								backgroundColor: colors.card,
 								opacity: disabledLook ? 0.5 : 1,
 							},
 						]}>
-						<FontAwesome6
-							name={
-								voteFor === 1
-									? selected
-										? 'circle-check'
-										: 'circle'
-									: selected
-										? 'square-check'
-										: 'square'
-							}
-							size={20}
-							color={selected ? colors.success : colors.muted}
-						/>
 						<View style={styles.textCol}>
 							<Text
 								style={{
 									color: colors.text,
-									fontFamily: fonts.medium.fontFamily,
-									fontWeight: fonts.medium.fontWeight,
+									fontFamily: fonts.bold.fontFamily,
+									fontWeight: fonts.bold.fontWeight,
 									fontSize: typeScale.body.fontSize,
 									lineHeight: typeScale.body.lineHeight,
 								}}>
@@ -119,6 +108,21 @@ export function CandidateSelector({candidates, selectedIds, voteFor, onToggle, l
 								</Pressable>
 							) : null}
 						</View>
+
+						{/* Radio / checkbox indicator on the RIGHT (Figma). */}
+						<FontAwesome6
+							name={
+								voteFor === 1
+									? selected
+										? 'circle-check'
+										: 'circle'
+									: selected
+										? 'square-check'
+										: 'square'
+							}
+							size={22}
+							color={selected ? colors.success : colors.muted}
+						/>
 					</Pressable>
 				);
 			})}
@@ -129,18 +133,13 @@ export function CandidateSelector({candidates, selectedIds, voteFor, onToggle, l
 export default CandidateSelector;
 
 const styles = StyleSheet.create({
-	list: {
-		gap: 8, // sm/8px gap between rows
-	},
+	// Inter-card spacing comes from globalStyles.cardSurface's own margins (elevated shadow card).
+	list: {},
 	row: {
 		flexDirection: 'row',
 		alignItems: 'center',
-		gap: 12,
+		gap: 16,
 		minHeight: 44, // >=44px touch target
-		borderWidth: 1,
-		borderRadius: 12,
-		paddingHorizontal: 16,
-		paddingVertical: 12,
 	},
 	textCol: {
 		flex: 1,
