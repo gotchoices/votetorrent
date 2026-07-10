@@ -13,8 +13,8 @@
 import React, {createContext, useCallback, useContext, useEffect, useState} from 'react';
 import type {PropsWithChildren} from 'react';
 import {ActivityIndicator, View} from 'react-native';
-import type {LifecycleState, MockElection, VotingAppContextType} from './types';
-import {LIFECYCLE_CONTENT, mockElection} from './mockData';
+import type {LifecycleState, MockBallot, MockElection, VotingAppContextType} from './types';
+import {LIFECYCLE_CONTENT, mockBallot, mockElection} from './mockData';
 
 const VotingAppContext = createContext<VotingAppContextType | null>(null);
 
@@ -46,6 +46,11 @@ export function VotingAppProvider({children}: PropsWithChildren) {
 		}
 	}, []);
 
+	// VOTE-04/D-08: sync voted-status flag, mirroring isRegistered — a flag read directly in a
+	// JSX branch condition (ElectionCard's Open-state CTA) needs no Promise/loading state and no
+	// timestamp companion (unlike isRegistered/registeredAt).
+	const [hasVoted, setHasVoted] = useState(false);
+
 	useEffect(() => {
 		// Instant this phase — no real async boot work yet (D-01/D-02: no EngineFactory, no
 		// CadreNode, no re-attach). The gate exists so screens/tests exercise the same
@@ -61,6 +66,12 @@ export function VotingAppProvider({children}: PropsWithChildren) {
 	const getElection = useCallback(async (): Promise<MockElection> => {
 		return {...mockElection, lifecycleState, ...LIFECYCLE_CONTENT[lifecycleState]};
 	}, [lifecycleState]);
+
+	// VOTE-01/02, D-02: mirrors getElection()'s async-read shape, but simpler — no per-state
+	// merge (mockBallot's content doesn't vary by lifecycle state this phase, RESEARCH Pattern 3).
+	const getBallot = useCallback(async (): Promise<MockBallot> => {
+		return mockBallot;
+	}, []);
 
 	if (!isInitialized) {
 		return (
@@ -80,6 +91,9 @@ export function VotingAppProvider({children}: PropsWithChildren) {
 				isRegistered,
 				setIsRegistered,
 				registeredAt,
+				getBallot,
+				hasVoted,
+				setHasVoted,
 			}}>
 			{children}
 		</VotingAppContext.Provider>

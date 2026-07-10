@@ -161,4 +161,19 @@ export interface VotingAppContextType {
 	setIsRegistered: (value: boolean) => void;
 	/** Confirm-time ISO-8601 timestamp set by setIsRegistered(true); null until then. */
 	registeredAt: string | null;
+	/**
+	 * Async read of the current election's mock ballot (Phase 42, VOTE-01/02, D-02) — mirrors
+	 * `getElection()`'s swap-fidelity shape (D-01). No per-lifecycle-state merge, unlike
+	 * `getElection()` (RESEARCH Pattern 3).
+	 */
+	getBallot: () => Promise<MockBallot>;
+	/**
+	 * Whether the current voter has submitted their ballot this session (Phase 42, VOTE-04,
+	 * D-08). Gates ONLY the Home Open-card CTA treatment ("Vote now" → "You voted"), never a new
+	 * `LifecycleState`. Plain synchronous boolean, mirroring `isRegistered` rather than
+	 * `getElection()`'s async shape.
+	 */
+	hasVoted: boolean;
+	/** Flips hasVoted. No timestamp companion (unlike setIsRegistered/registeredAt, D-08). */
+	setHasVoted: (value: boolean) => void;
 }
