@@ -186,6 +186,9 @@ const resources = {
 		},
 		scan: {
 			headerTitle: 'Scan',
+			// [AUTHORED] — branded "not available yet" placeholder copy (43-01, SCAN-01/I18N-01).
+			notAvailableTitle: 'QR scanning coming soon',
+			notAvailableBody: "QR code scanning isn't available yet — it's coming in a future update.",
 		},
 		settings: {
 			headerTitle: 'Settings',
@@ -343,6 +346,9 @@ const resources = {
 		},
 		scan: {
 			headerTitle: 'Escanear',
+			notAvailableTitle: 'Escaneo QR próximamente',
+			notAvailableBody:
+				'El escaneo de códigos QR aún no está disponible — llegará en una próxima actualización.',
 		},
 		settings: {
 			headerTitle: 'Ajustes',
