@@ -100,6 +100,44 @@ export type MockElection = {
 } & LifecycleContent;
 
 /**
+ * A single ballot candidate (Phase 42, VOTE-01/02, D-02/D-03). `nameKey`/`partyKey` are i18n
+ * KEYS resolved within the `ballot` namespace (e.g. `t(candidate.nameKey)`), not literal
+ * copy — mirrors `ValidationCheck.nameKey`/`resultKey`'s i18n-key-not-literal convention above
+ * (SHELL-03 spirit: the data layer holds identifiers, the i18n layer holds user-facing strings).
+ */
+export interface Candidate {
+	id: string;
+	nameKey: string;
+	partyKey: string;
+}
+
+/**
+ * A single ballot office/question (Phase 42, VOTE-01/02, D-02/D-03/D-04). `titleKey` is an i18n
+ * key (same convention as `Candidate`). `jurisdiction` drives the Ballot Page's Federal/State
+ * display-time grouping (RESEARCH Pattern 3 — a flat, order-stable `offices` array is the single
+ * source of truth; grouping is a filter, never a split array, so Next/Previous can walk one
+ * index space). `voteFor` drives both the "Vote for N" modal header and radio-(1)-vs-capped-
+ * checkbox-(>1) rendering (D-03) — the `voteFor` cap is the ONLY selection constraint.
+ */
+export interface Office {
+	id: string;
+	titleKey: string;
+	jurisdiction: 'Federal' | 'State';
+	voteFor: number;
+	candidates: Candidate[];
+}
+
+/**
+ * The mock ballot for the current election (Phase 42, VOTE-01, D-02). Served async via
+ * `getBallot()` on `VotingAppContextType`, mirroring `getElection()`'s swap-fidelity shape
+ * (D-01) — no per-lifecycle-state merge, unlike `MockElection` (RESEARCH Pattern 3).
+ */
+export interface MockBallot {
+	electionId: string;
+	offices: Office[];
+}
+
+/**
  * The provider's context shape. Read methods are async (Promise-returning) even though the
  * backing data is in-memory this phase — a deliberate swap-fidelity investment (D-01) so the
  * eventual real-engine wiring becomes DI-only, not a rewrite of every screen.

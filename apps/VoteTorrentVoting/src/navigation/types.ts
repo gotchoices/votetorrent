@@ -20,6 +20,10 @@ export type VoteStackParamList = {
 	OfficeInfo: undefined;
 	CandidateInfo: undefined;
 	ValidationDetails: undefined;
+	// Phase 42 (VOTE-04, D-05) — per-office selection summary + final Submit. All `undefined`
+	// like every other entry above: selection state (selectionMap, currentQuestionIndex) lives
+	// on BallotSelectionProvider, never a navigation param.
+	ReviewSubmit: undefined;
 };
 
 // Registration tab: root + Device Attestation + Confirmation modals + the 3 form-step
