@@ -1,19 +1,13 @@
 /**
- * RegistrationCard (REG-01/REG-05) — the single presentational card that branches across the
- * not-registered / registered states, driven by the `isRegistered` prop (mirrors ElectionCard's
- * `STATE_DISPLAY`-lookup discipline, but here a simple boolean branch — only 2 states, not 7).
+ * RegistrationCard (REG-01/REG-05) — the not-registered / registered card, restyled to the Figma
+ * frames: a RED card for not-registered and a GREEN card for registered (both white text), with a
+ * yellow "Valid through" badge on the registered card and a separate light-grey "Update
+ * registration" card below it (blue CTA). Brand fills come from theme tokens (registerNegative /
+ * registerPositive / validBadge).
  *
- * Pure presentational (`isRegistered`/`draft`/`registeredAt` props + callback props) — does NOT
- * call `useVotingApp()` or `useNavigation()` (RESEARCH.md Anti-Patterns / this plan's
- * presentational-component constraint), so both states are unit-testable directly with fixture
- * props, no provider/navigator required. `RegistrationScreen` (41-08) owns the provider/draft
- * reads and maps these callbacks to real navigation.
- *
- * D-06 form→card loop: the registered variant's identity line is interpolated from the passed
- * `draft` (not static placeholder copy), and its valid-through badge is a computed mock date
- * FROZEN from `registeredAt` (41-RESEARCH.md Pattern 3) — `computeValidThrough` parses
- * `registeredAt` once and adds 1 year, so the badge does not silently drift across re-renders as
- * "today + 1 year" would (RESEARCH Anti-Patterns).
+ * Pure presentational (props + callbacks) — no useVotingApp()/useNavigation(). The registered
+ * identity line is interpolated from `draft`; the valid-through badge is FROZEN from `registeredAt`
+ * via computeValidThrough (parses once, +1 year — never drifts as "today + 1 year" would).
  */
 import React from 'react';
 import {Pressable, StyleSheet, Text, View} from 'react-native';
@@ -33,12 +27,7 @@ export interface RegistrationCardProps {
 	onHelp?: () => void;
 }
 
-/**
- * Parses `registeredAt`, adds 1 year (native `Date.setFullYear`, no date library — RESEARCH
- * "Don't Hand-Roll" explicitly rejects pulling in date-fns/dayjs for one computation), and
- * formats as `MM/DD/YY`. Frozen from the passed `registeredAt` — never recomputed as
- * "today + 1 year" (that would drift on every render, RESEARCH Anti-Patterns).
- */
+/** Parses `registeredAt`, adds 1 year, formats `MM/DD/YY`. Frozen from the passed value. */
 export function computeValidThrough(registeredAt: string | null): string {
 	if (!registeredAt) {
 		return '';
@@ -64,16 +53,16 @@ export function RegistrationCard({
 
 	if (!isRegistered) {
 		return (
-			<View style={[globalStyles.cardSurface, {backgroundColor: colors.card}]}>
+			<View style={[globalStyles.cardSurface, styles.brandCard, {backgroundColor: colors.registerNegative}]}>
 				<Text
 					style={[
 						styles.heading,
 						{
-							color: colors.text,
-							fontFamily: fonts.medium.fontFamily,
-							fontWeight: fonts.medium.fontWeight,
-							fontSize: typeScale.h2.fontSize,
-							lineHeight: typeScale.h2.lineHeight,
+							color: colors.light,
+							fontFamily: fonts.bold.fontFamily,
+							fontWeight: fonts.bold.fontWeight,
+							fontSize: typeScale.h4.fontSize,
+							lineHeight: typeScale.h4.lineHeight,
 						},
 					]}>
 					{t('notRegistered.heading')}
@@ -82,20 +71,29 @@ export function RegistrationCard({
 					style={[
 						styles.body,
 						{
-							color: colors.textSecondary,
+							color: colors.light,
 							fontFamily: fonts.regular.fontFamily,
 							fontWeight: fonts.regular.fontWeight,
 							fontSize: typeScale.body.fontSize,
 							lineHeight: typeScale.body.lineHeight,
 						},
 					]}>
-					{t('notRegistered.body')}
+					{t('notRegistered.body')}{' '}
+					<Text testID="registration-card-help" onPress={onHelp}>
+						<FontAwesome6 name="circle-question" size={15} color={colors.light} />
+					</Text>
 				</Text>
 				<Pressable
 					testID="registration-card-register-now"
 					onPress={onRegisterNow}
-					style={[styles.actionButton, {backgroundColor: colors.primary, borderRadius: radii.pill}]}>
-					<Text style={[styles.actionLabel, {color: colors.light}]}>{t('notRegistered.cta')}</Text>
+					style={[styles.actionButton, styles.translucentButton, {borderRadius: radii.pill}]}>
+					<Text
+						style={[
+							styles.actionLabel,
+							{color: colors.light, fontFamily: fonts.medium.fontFamily, fontWeight: fonts.medium.fontWeight},
+						]}>
+						{t('notRegistered.cta')}
+					</Text>
 				</Pressable>
 			</View>
 		);
@@ -103,24 +101,24 @@ export function RegistrationCard({
 
 	const fullName = `${draft.firstName} ${draft.lastName}`.trim();
 	const validThrough = computeValidThrough(registeredAt);
-	// draft.party is the stable party KEY, or '' if unselected — resolve to the current-locale
-	// label here at the display site (D-06 gap closure) so switching languages re-localizes the
-	// identity line instead of showing a label captured in whatever language was active at
-	// selection time.
 	const partyLabel = draft.party ? t('form.party.' + draft.party) : '';
+	// Only render the identity line once the draft carries real data — otherwise the
+	// interpolated template collapses to a stray ": " separator (e.g. the dev toggle,
+	// which flips isRegistered without populating a draft).
+	const hasIdentity = fullName.length > 0 || partyLabel.length > 0 || draft.dob.length > 0;
 
 	return (
 		<View>
-			<View style={[globalStyles.cardSurface, {backgroundColor: colors.card}]}>
+			<View style={[globalStyles.cardSurface, styles.brandCard, {backgroundColor: colors.registerPositive}]}>
 				<Text
 					style={[
 						styles.heading,
 						{
-							color: colors.text,
-							fontFamily: fonts.medium.fontFamily,
-							fontWeight: fonts.medium.fontWeight,
-							fontSize: typeScale.h2.fontSize,
-							lineHeight: typeScale.h2.lineHeight,
+							color: colors.light,
+							fontFamily: fonts.bold.fontFamily,
+							fontWeight: fonts.bold.fontWeight,
+							fontSize: typeScale.h4.fontSize,
+							lineHeight: typeScale.h4.lineHeight,
 						},
 					]}>
 					{t('registered.heading')}
@@ -129,7 +127,7 @@ export function RegistrationCard({
 					style={[
 						styles.body,
 						{
-							color: colors.textSecondary,
+							color: colors.light,
 							fontFamily: fonts.regular.fontFamily,
 							fontWeight: fonts.regular.fontWeight,
 							fontSize: typeScale.body.fontSize,
@@ -138,33 +136,35 @@ export function RegistrationCard({
 					]}>
 					{t('registered.body')}
 				</Text>
-				<Text
-					testID="registration-card-identity-line"
-					style={[
-						styles.identityLine,
-						{
-							color: colors.text,
-							fontFamily: fonts.medium.fontFamily,
-							fontWeight: fonts.medium.fontWeight,
-							fontSize: typeScale.body.fontSize,
-							lineHeight: typeScale.body.lineHeight,
-						},
-					]}>
-					{t('registered.identityLine', {fullName, party: partyLabel, dob: draft.dob})}
-				</Text>
+				{hasIdentity ? (
+					<Text
+						testID="registration-card-identity-line"
+						style={[
+							styles.identityLine,
+							{
+								color: colors.light,
+								fontFamily: fonts.regular.fontFamily,
+								fontWeight: fonts.regular.fontWeight,
+								fontSize: typeScale.body.fontSize,
+								lineHeight: typeScale.body.lineHeight,
+							},
+						]}>
+						{t('registered.identityLine', {fullName, party: partyLabel, dob: draft.dob})}
+					</Text>
+				) : null}
 				<View
 					style={[
 						styles.validThroughBadge,
-						{backgroundColor: colors.secondaryButtonSurface, borderRadius: radii.pill},
+						{backgroundColor: colors.validBadge, borderRadius: radii.pill},
 					]}>
 					<Text
 						testID="registration-card-valid-through"
 						style={[
 							styles.validThroughText,
 							{
-								color: colors.textSecondary,
-								fontFamily: fonts.regular.fontFamily,
-								fontWeight: fonts.regular.fontWeight,
+								color: colors.light,
+								fontFamily: fonts.medium.fontFamily,
+								fontWeight: fonts.medium.fontWeight,
 								fontSize: typeScale.caption.fontSize,
 								lineHeight: typeScale.caption.lineHeight,
 							},
@@ -174,36 +174,36 @@ export function RegistrationCard({
 				</View>
 			</View>
 
-			<View style={[globalStyles.cardSurface, styles.updateBlock, {backgroundColor: colors.card}]}>
-				<Pressable testID="registration-card-help" onPress={onHelp} style={styles.helpIcon}>
-					<FontAwesome6 name="circle-question" size={16} color={colors.muted} />
-				</Pressable>
-				<Text
-					style={[
-						styles.body,
-						{
-							color: colors.text,
-							fontFamily: fonts.regular.fontFamily,
-							fontWeight: fonts.regular.fontWeight,
-							fontSize: typeScale.body.fontSize,
-							lineHeight: typeScale.body.lineHeight,
-						},
-					]}>
-					{t('registered.updatePrompt')}
-				</Text>
+			<View style={[globalStyles.cardSurface, styles.updateBlock, {backgroundColor: colors.secondaryButtonSurface}]}>
+				<View style={styles.updatePromptRow}>
+					<Pressable testID="registration-card-help" onPress={onHelp} hitSlop={8}>
+						<FontAwesome6 name="circle-question" size={22} color={colors.text} />
+					</Pressable>
+					<Text
+						style={[
+							styles.updatePrompt,
+							{
+								color: colors.text,
+								fontFamily: fonts.regular.fontFamily,
+								fontWeight: fonts.regular.fontWeight,
+								fontSize: typeScale.body.fontSize,
+								lineHeight: typeScale.body.lineHeight,
+							},
+						]}>
+						{t('registered.updatePrompt')}
+					</Text>
+				</View>
 				<Pressable
 					testID="registration-card-update"
 					onPress={onUpdateRegistration}
-					style={[
-						styles.actionButton,
-						styles.actionButtonOutline,
-						{
-							backgroundColor: colors.secondaryButtonSurface,
-							borderColor: colors.primary,
-							borderRadius: radii.pill,
-						},
-					]}>
-					<Text style={[styles.actionLabel, {color: colors.primary}]}>{t('registered.updateCta')}</Text>
+					style={[styles.actionButton, {backgroundColor: colors.primary, borderRadius: radii.pill}]}>
+					<Text
+						style={[
+							styles.actionLabel,
+							{color: colors.light, fontFamily: fonts.medium.fontFamily, fontWeight: fonts.medium.fontWeight},
+						]}>
+						{t('registered.updateCta')}
+					</Text>
 				</Pressable>
 			</View>
 		</View>
@@ -213,43 +213,51 @@ export function RegistrationCard({
 export default RegistrationCard;
 
 const styles = StyleSheet.create({
+	brandCard: {
+		paddingVertical: 20,
+		paddingHorizontal: 20,
+	},
 	heading: {
-		marginBottom: 8, // sm spacing token
+		marginBottom: 8,
 	},
 	body: {
-		marginTop: 16, // md spacing token
+		marginTop: 8,
 	},
 	identityLine: {
-		marginTop: 24, // lg spacing token
+		marginTop: 16,
 	},
 	validThroughBadge: {
-		marginTop: 8, // sm spacing token
-		alignSelf: 'flex-start',
-		paddingVertical: 4,
-		paddingHorizontal: 12,
+		marginTop: 16,
+		alignSelf: 'flex-end',
+		paddingVertical: 6,
+		paddingHorizontal: 14,
 	},
 	validThroughText: {},
 	updateBlock: {
-		marginTop: 24, // lg spacing token
+		marginTop: 16,
+		paddingVertical: 20,
+		paddingHorizontal: 20,
 	},
-	helpIcon: {
-		position: 'absolute',
-		top: 16,
-		right: 16,
-		zIndex: 1,
+	updatePromptRow: {
+		flexDirection: 'row',
+		alignItems: 'center',
+		gap: 12,
+	},
+	updatePrompt: {
+		flex: 1,
+	},
+	translucentButton: {
+		backgroundColor: 'rgba(255, 255, 255, 0.25)',
 	},
 	actionButton: {
-		marginTop: 24, // lg spacing token
-		minHeight: 44, // minimum touch target
+		marginTop: 20,
+		minHeight: 48,
 		alignItems: 'center',
 		justifyContent: 'center',
 		paddingHorizontal: 24,
-	},
-	actionButtonOutline: {
-		borderWidth: 1,
-		marginTop: 16, // md spacing token (per UI-SPEC block 2)
+		paddingVertical: 12,
 	},
 	actionLabel: {
-		fontWeight: '600',
+		textAlign: 'center',
 	},
 });

@@ -46,7 +46,15 @@ const SHARED_KEYS = [
 	'muted',
 ] as const;
 
-const NEW_ROLES = ['link', 'progressFill', 'progressTrack', 'secondaryButtonSurface'] as const;
+const NEW_ROLES = [
+	'link',
+	'progressFill',
+	'progressTrack',
+	'secondaryButtonSurface',
+	'registerNegative',
+	'registerPositive',
+	'validBadge',
+] as const;
 
 // Golden values — the exact hex documented in theme/TOKENS.md (D-05). Pinning these here (the same
 // deep-equal guard styles.test.ts uses for footer/cardSurface) turns any silent drift between
@@ -75,6 +83,9 @@ const EXPECTED_LIGHT: Record<string, string> = {
 	progressFill: '#34c759',
 	progressTrack: '#e5e5e5',
 	secondaryButtonSurface: '#f5f5f5',
+	registerNegative: '#ef5644',
+	registerPositive: '#3ebd5d',
+	validBadge: '#e6c200',
 };
 
 const EXPECTED_DARK: Record<string, string> = {
@@ -100,6 +111,9 @@ const EXPECTED_DARK: Record<string, string> = {
 	progressFill: '#51b269',
 	progressTrack: '#1a1a1a',
 	secondaryButtonSurface: '#141414',
+	registerNegative: '#ef5644',
+	registerPositive: '#3ebd5d',
+	validBadge: '#e6c200',
 };
 
 describe('themes (theme/themes.ts)', () => {

@@ -13,6 +13,7 @@ import {useNavigation, useTheme} from '@react-navigation/native';
 import type {ExtendedTheme} from '@react-navigation/native';
 import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
 import {useTranslation} from 'react-i18next';
+import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {useVotingApp} from '../../providers/VotingAppProvider';
 import {useRegistrationDraft} from '../../providers/RegistrationDraftProvider';
 import {RegisterFormHeader} from '../../components/RegisterFormHeader';
@@ -40,6 +41,7 @@ export default function RegisterAddressPartyScreen() {
 	const navigation = useNavigation<RegisterAddressPartyNavigationProp>();
 	const {colors, fonts, type: typeScale, radii} = useTheme() as ExtendedTheme;
 	const {t} = useTranslation('registration');
+	const insets = useSafeAreaInsets();
 
 	const [errors, setErrors] = useState<Partial<Record<AddressPartyField, FieldError>>>({});
 
@@ -60,7 +62,12 @@ export default function RegisterAddressPartyScreen() {
 	};
 
 	return (
-		<View style={[globalStyles.container, styles.screen, {backgroundColor: colors.background}]}>
+		<View
+			style={[
+				globalStyles.container,
+				styles.screen,
+				{backgroundColor: colors.background, paddingBottom: insets.bottom + 12},
+			]}>
 			<ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
 				<RegisterFormHeader
 					title={t('formHeaderTitle')}

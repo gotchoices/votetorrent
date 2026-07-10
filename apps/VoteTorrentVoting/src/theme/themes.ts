@@ -85,6 +85,11 @@ declare module '@react-navigation/native' {
 			progressFill: string;
 			progressTrack: string;
 			secondaryButtonSurface: string;
+			// --- Registration-tab card brand fills (Figma not-registered / registered cards).
+			// Constant across light + dark: these are brand card fills, not surfaces that invert. ---
+			registerNegative: string;
+			registerPositive: string;
+			validBadge: string;
 		};
 		fonts: typeof fonts;
 		type: typeof type;
@@ -119,6 +124,10 @@ export const lightTheme: ExtendedTheme = {
 		progressFill: '#34c759', // Figma #34c759 · 2761:1125/2764:1181 (progress-bar fill) · NEW · Open Q1: kept distinct from `success` (#4caf50) — progress-fill (iOS green) and selected-value green are two separate roles, not one to canonicalize
 		progressTrack: '#e5e5e5', // Figma #e5e5e5 · 2761:1125 (Home progress-bar track) · NEW · Open Q1: Home's #e5e5e5 is the track fill; Ballot's #7d7d7d is the track's BORDER (mapped to `textSecondary`/`border` roles), not a second track-fill value
 		secondaryButtonSurface: '#f5f5f5', // Figma #f5f5f5 · 2761:1125 ("Save & Exit" outline-button background) · NEW · no equivalent Authority role
+		// Registration-tab card brand fills (Figma not-registered/registered cards) — constant across themes.
+		registerNegative: '#ef5644', // not-registered card (coral red)
+		registerPositive: '#3ebd5d', // registered card (green)
+		validBadge: '#e6c200', // "Valid through" badge (yellow)
 	},
 	fonts,
 	type,
@@ -158,6 +167,10 @@ export const darkTheme: ExtendedTheme = {
 		progressFill: '#51b269', // derived from light.progressFill #34c759 via HSL invert+desat(-20)
 		progressTrack: '#1a1a1a', // derived from light.progressTrack #e5e5e5 via HSL invert(L→8)+desat(-20)
 		secondaryButtonSurface: '#141414', // derived from light.secondaryButtonSurface #f5f5f5 via HSL invert(L→8)+desat(-20)
+		// Brand card fills — kept identical to light (a red/green/yellow brand card does not invert).
+		registerNegative: '#ef5644',
+		registerPositive: '#3ebd5d',
+		validBadge: '#e6c200',
 	},
 	fonts,
 	type,

@@ -17,6 +17,8 @@ const resources = {
 			tabSettings: 'Settings',
 			placeholderBody: "This screen isn't built yet — check back in a future update.",
 			close: 'Close',
+			networkName: 'Utah Network',
+			notifications: 'Notifications',
 		},
 		home: {
 			headerTitle: 'Vote',
@@ -213,6 +215,8 @@ const resources = {
 			tabSettings: 'Ajustes',
 			placeholderBody: 'Esta pantalla aún no está lista — vuelve a consultar más adelante.',
 			close: 'Cerrar',
+			networkName: 'Utah Network',
+			notifications: 'Notificaciones',
 		},
 		home: {
 			headerTitle: 'Votar',

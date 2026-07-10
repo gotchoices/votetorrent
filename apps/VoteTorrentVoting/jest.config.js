@@ -10,6 +10,7 @@ module.exports = {
   ],
   moduleNameMapper: {
     '^react-native-localize$': '<rootDir>/__mocks__/react-native-localize.js',
+    '^react-native-safe-area-context$': '<rootDir>/__mocks__/react-native-safe-area-context.js',
     '^@react-native-async-storage/async-storage$': '<rootDir>/node_modules/@react-native-async-storage/async-storage/jest/async-storage-mock.js',
   },
 };

@@ -149,10 +149,11 @@ function RegistrationStackNavigator() {
 	return (
 		<RegistrationDraftProvider>
 			<RegistrationStack.Navigator>
+				{/* headerShown:false — RegistrationScreen renders the branded blue NetworkHeader itself. */}
 				<RegistrationStack.Screen
 					name="RegistrationHome"
 					component={RegistrationScreen}
-					options={{title: t('headerTitle')}}
+					options={{headerShown: false}}
 				/>
 				{/* 41-RESEARCH.md Pitfall 3: real screen, headerShown:false — NOT presentation:'modal'
 				    + CloseButton (full-bleed timed interstitial, no swipe-dismiss). */}
