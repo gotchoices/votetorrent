@@ -25,6 +25,7 @@ function renderRow(props: Partial<React.ComponentProps<typeof OfficeRow>> = {}) 
 		title: 'U.S. Senate',
 		selectionSummary: 'Not yet answered',
 		hasSelection: false,
+		learnLabel: 'Learn about this office',
 		onOpen: jest.fn(),
 		onLearnAboutOffice: jest.fn(),
 		...props,
@@ -62,6 +63,11 @@ describe('OfficeRow (VOTE-01)', () => {
 		const summaryText = tr.root.findByProps({children: 'Alice Adams'});
 		const flatStyle = Object.assign({}, ...[summaryText.props.style].flat(Infinity).filter(Boolean));
 		expect(flatStyle.color).toBe(lightTheme.colors.success);
+	});
+
+	it('renders the caller-resolved learn-link label', () => {
+		const {tr} = renderRow({learnLabel: 'Learn about this office'});
+		expect(tr.root.findByProps({children: 'Learn about this office'})).toBeTruthy();
 	});
 
 	it('tapping the row calls onOpen()', () => {
