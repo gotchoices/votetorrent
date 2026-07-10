@@ -137,4 +137,41 @@ describe('VotingAppProvider / useVotingApp (SHELL-03, D-01)', () => {
 		});
 		expect(captured.value!.isRegistered).toBe(false);
 	});
+
+	// Phase 42 (VOTE-01/04, D-01/D-02) — getBallot()/hasVoted/setHasVoted extension.
+	it('getBallot() resolves a MockBallot with offices present, each tagged jurisdiction + voteFor (D-02)', async () => {
+		const {captured} = renderProvider();
+		await flushBoot();
+
+		const result = captured.value!.getBallot();
+		expect(result).toBeInstanceOf(Promise);
+		const ballot = await result;
+		expect(ballot.offices.length).toBeGreaterThan(0);
+		for (const office of ballot.offices) {
+			expect(['Federal', 'State']).toContain(office.jurisdiction);
+			expect(typeof office.voteFor).toBe('number');
+		}
+	});
+
+	it('hasVoted defaults false after boot, with no registeredAt-style timestamp companion (D-08)', async () => {
+		const {captured} = renderProvider();
+		await flushBoot();
+		expect(captured.value!.hasVoted).toBe(false);
+		expect((captured.value as unknown as Record<string, unknown>).votedAt).toBeUndefined();
+	});
+
+	it('setHasVoted(true) flips hasVoted to true; setHasVoted(false) flips it back (D-08)', async () => {
+		const {captured} = renderProvider();
+		await flushBoot();
+
+		renderer.act(() => {
+			captured.value!.setHasVoted(true);
+		});
+		expect(captured.value!.hasVoted).toBe(true);
+
+		renderer.act(() => {
+			captured.value!.setHasVoted(false);
+		});
+		expect(captured.value!.hasVoted).toBe(false);
+	});
 });
