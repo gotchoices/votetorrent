@@ -19,10 +19,10 @@ import type {ExtendedTheme} from '@react-navigation/native';
 import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
 import {useTranslation} from 'react-i18next';
 import {useVotingApp} from '../../providers/VotingAppProvider';
-import {useBallotSelection} from '../../providers/BallotSelectionProvider';
+import {useBallotSelection, resolveSelectionSummary} from '../../providers/BallotSelectionProvider';
 import {globalStyles} from '../../theme/styles';
 import type {VoteStackParamList} from '../../navigation/types';
-import type {Candidate, MockBallot} from '../../providers/types';
+import type {MockBallot} from '../../providers/types';
 
 type ReviewSubmitNavigationProp = NativeStackNavigationProp<VoteStackParamList, 'ReviewSubmit'>;
 
@@ -51,18 +51,6 @@ export default function ReviewSubmitScreen() {
 	}, [getBallot]);
 
 	const offices = ballot?.offices ?? [];
-
-	const resolveSelectionSummary = (officeId: string, candidates: Candidate[]) => {
-		const selectedIds = selectionMap[officeId] ?? [];
-		if (selectedIds.length === 0) {
-			return t('notYetAnswered');
-		}
-		return selectedIds
-			.map(id => candidates.find(candidate => candidate.id === id))
-			.filter((candidate): candidate is Candidate => Boolean(candidate))
-			.map(candidate => t(candidate.nameKey))
-			.join(', ');
-	};
 
 	const handleSubmit = () => {
 		// No real signing/persistence — a visual mock only (D-08, threat T-42-02).
@@ -97,7 +85,12 @@ export default function ReviewSubmitScreen() {
 			<ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
 				<View style={styles.rowList}>
 					{offices.map(office => {
-						const hasSelection = (selectionMap[office.id]?.length ?? 0) > 0;
+						const {summary, hasSelection} = resolveSelectionSummary(
+							office.id,
+							office.candidates,
+							selectionMap,
+							t,
+						);
 						return (
 							<View
 								key={office.id}
@@ -127,7 +120,7 @@ export default function ReviewSubmitScreen() {
 											lineHeight: typeScale.body.lineHeight,
 										},
 									]}>
-									{resolveSelectionSummary(office.id, office.candidates)}
+									{summary}
 								</Text>
 							</View>
 						);

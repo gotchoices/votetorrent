@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useCallback } from 'react';
 import type { PropsWithChildren } from 'react';
-import type { Office } from './types';
+import type { Candidate, Office } from './types';
 
 /**
  * BallotSelectionProvider — the Vote-stack-scoped, session-only in-memory selection Context
@@ -117,4 +117,31 @@ export function computeCompletedCount(
 ): { completed: number; total: number } {
 	const completed = offices.filter((o) => (selectionMap[o.id]?.length ?? 0) > 0).length;
 	return { completed, total: offices.length };
+}
+
+/**
+ * Resolves an office's selection summary (42-REVIEW WR-02/IN-02) — the joined localized names of
+ * every selected candidate, or the localized `notYetAnswered` fallback when the office has no
+ * selection — plus `hasSelection`, derived from the SAME `selectedIds` lookup rather than being
+ * recomputed independently by each call site. Previously duplicated verbatim between
+ * `BallotScreen` and `ReviewSubmitScreen`; centralized here alongside `computeCompletedCount`,
+ * the codebase's established convention for shared selectionMap-derived logic.
+ */
+export function resolveSelectionSummary(
+	officeId: string,
+	candidates: Candidate[],
+	selectionMap: Record<string, string[]>,
+	t: (key: string) => string,
+): { summary: string; hasSelection: boolean } {
+	const selectedIds = selectionMap[officeId] ?? [];
+	const hasSelection = selectedIds.length > 0;
+	if (!hasSelection) {
+		return { summary: t('notYetAnswered'), hasSelection };
+	}
+	const summary = selectedIds
+		.map((id) => candidates.find((candidate) => candidate.id === id))
+		.filter((candidate): candidate is Candidate => Boolean(candidate))
+		.map((candidate) => t(candidate.nameKey))
+		.join(', ');
+	return { summary, hasSelection };
 }

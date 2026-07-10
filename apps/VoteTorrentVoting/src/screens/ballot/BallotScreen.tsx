@@ -19,12 +19,16 @@ import type {ExtendedTheme} from '@react-navigation/native';
 import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
 import {useTranslation} from 'react-i18next';
 import {useVotingApp} from '../../providers/VotingAppProvider';
-import {useBallotSelection, computeCompletedCount} from '../../providers/BallotSelectionProvider';
+import {
+	useBallotSelection,
+	computeCompletedCount,
+	resolveSelectionSummary,
+} from '../../providers/BallotSelectionProvider';
 import {ProgressBar} from '../../components/ProgressBar';
 import {OfficeRow} from '../../components/OfficeRow';
 import {globalStyles} from '../../theme/styles';
 import type {VoteStackParamList} from '../../navigation/types';
-import type {Candidate, MockBallot, Office} from '../../providers/types';
+import type {MockBallot, Office} from '../../providers/types';
 
 type BallotNavigationProp = NativeStackNavigationProp<VoteStackParamList, 'Ballot'>;
 
@@ -57,37 +61,33 @@ export default function BallotScreen() {
 	const {completed, total} = computeCompletedCount(offices, selectionMap);
 	const progress = total > 0 ? completed / total : 0;
 
-	const resolveSelectionSummary = (officeId: string, candidates: Candidate[]) => {
-		const selectedIds = selectionMap[officeId] ?? [];
-		if (selectedIds.length === 0) {
-			return t('notYetAnswered');
-		}
-		return selectedIds
-			.map(id => candidates.find(candidate => candidate.id === id))
-			.filter((candidate): candidate is Candidate => Boolean(candidate))
-			.map(candidate => t(candidate.nameKey))
-			.join(', ');
-	};
-
 	const renderOfficeSection = (jurisdiction: Office['jurisdiction']) =>
 		offices
 			.filter(office => office.jurisdiction === jurisdiction)
-			.map(office => (
-				<OfficeRow
-					key={office.id}
-					title={t(office.titleKey)}
-					selectionSummary={resolveSelectionSummary(office.id, office.candidates)}
-					hasSelection={(selectionMap[office.id]?.length ?? 0) > 0}
-					learnLabel={t('learnAboutOffice')}
-					onOpen={() => {
-						// Pattern 5: set the flat index BEFORE navigating — currentQuestionIndex
-						// lives on BallotSelectionProvider, not a route param.
-						setCurrentQuestionIndex(offices.indexOf(office));
-						navigation.navigate('IndividualQuestion');
-					}}
-					onLearnAboutOffice={() => navigation.navigate('OfficeInfo')}
-				/>
-			));
+			.map(office => {
+				const {summary, hasSelection} = resolveSelectionSummary(
+					office.id,
+					office.candidates,
+					selectionMap,
+					t,
+				);
+				return (
+					<OfficeRow
+						key={office.id}
+						title={t(office.titleKey)}
+						selectionSummary={summary}
+						hasSelection={hasSelection}
+						learnLabel={t('learnAboutOffice')}
+						onOpen={() => {
+							// Pattern 5: set the flat index BEFORE navigating — currentQuestionIndex
+							// lives on BallotSelectionProvider, not a route param.
+							setCurrentQuestionIndex(offices.indexOf(office));
+							navigation.navigate('IndividualQuestion');
+						}}
+						onLearnAboutOffice={() => navigation.navigate('OfficeInfo')}
+					/>
+				);
+			});
 
 	return (
 		<View style={[globalStyles.container, styles.screen, {backgroundColor: colors.background}]}>
