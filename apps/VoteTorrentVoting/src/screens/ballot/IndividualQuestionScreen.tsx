@@ -18,12 +18,13 @@
  * on the Ballot Page, not a re-opened modal at the last question. "Learn about this candidate" is
  * an unconditional link to `CandidateInfo` (VOTE-03).
  */
-import React from 'react';
+import React, {useLayoutEffect} from 'react';
 import {Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
 import {useNavigation, useTheme} from '@react-navigation/native';
 import type {ExtendedTheme} from '@react-navigation/native';
 import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
 import {useTranslation} from 'react-i18next';
+import FontAwesome6 from 'react-native-vector-icons/FontAwesome6';
 import {useVotingApp} from '../../providers/VotingAppProvider';
 import {useBallotSelection} from '../../providers/BallotSelectionProvider';
 import {CandidateSelector} from '../../components/CandidateSelector';
@@ -48,12 +49,21 @@ export default function IndividualQuestionScreen() {
 	} = useBallotSelection();
 	const {colors, fonts, type: typeScale, radii} = useTheme() as ExtendedTheme;
 	const {t} = useTranslation('ballot');
+	const {t: tCommon} = useTranslation('common');
 	const navigation = useNavigation<IndividualQuestionNavigationProp>();
 	// 42-REVIEW IN-01: shared live-guarded fetch-on-mount effect, extracted out of the screen.
 	const {ballot} = useBallot(getBallot);
 
 	const offices = ballot?.offices ?? [];
 	const office = offices[currentQuestionIndex];
+	// Figma: the modal header shows the current office name, not a generic "Individual Question".
+	// setOptions from the screen because the header title must track currentQuestionIndex (Pitfall 6).
+	const officeTitle = office ? t(office.titleKey) : '';
+	useLayoutEffect(() => {
+		if (officeTitle) {
+			navigation.setOptions({title: officeTitle});
+		}
+	}, [navigation, officeTitle]);
 
 	if (!office) {
 		// Still loading (or an out-of-range index) — render the bare screen shell, nothing more.
@@ -78,6 +88,52 @@ export default function IndividualQuestionScreen() {
 	return (
 		<View style={[globalStyles.container, styles.screen, {backgroundColor: colors.background}]}>
 			<ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
+				{/* Breadcrumb (Figma): Home › Ballot › {office} — Home to the Vote root, Ballot back
+					out of this modal question. */}
+				<View style={styles.breadcrumb}>
+					<Pressable testID="question-breadcrumb-home" onPress={() => navigation.popToTop()} hitSlop={6}>
+						<Text
+							style={[
+								styles.crumb,
+								{
+									color: colors.textSecondary,
+									fontSize: typeScale.caption.fontSize,
+									lineHeight: typeScale.caption.lineHeight,
+								},
+							]}>
+							{tCommon('breadcrumb.home')}
+						</Text>
+					</Pressable>
+					<FontAwesome6 name="chevron-right" size={10} color={colors.textSecondary} />
+					<Pressable testID="question-breadcrumb-ballot" onPress={() => navigation.goBack()} hitSlop={6}>
+						<Text
+							style={[
+								styles.crumb,
+								{
+									color: colors.textSecondary,
+									fontSize: typeScale.caption.fontSize,
+									lineHeight: typeScale.caption.lineHeight,
+								},
+							]}>
+							{tCommon('breadcrumb.ballot')}
+						</Text>
+					</Pressable>
+					<FontAwesome6 name="chevron-right" size={10} color={colors.textSecondary} />
+					<Text
+						style={[
+							styles.crumb,
+							{
+								color: colors.text,
+								fontFamily: fonts.medium.fontFamily,
+								fontWeight: fonts.medium.fontWeight,
+								fontSize: typeScale.caption.fontSize,
+								lineHeight: typeScale.caption.lineHeight,
+							},
+						]}>
+						{officeTitle}
+					</Text>
+				</View>
+
 				<Text
 					style={[
 						styles.heading,
@@ -159,6 +215,13 @@ const styles = StyleSheet.create({
 	scrollContent: {
 		flexGrow: 1,
 	},
+	breadcrumb: {
+		flexDirection: 'row',
+		alignItems: 'center',
+		gap: 8,
+		marginBottom: 16,
+	},
+	crumb: {},
 	heading: {
 		marginBottom: 16, // md spacing token
 	},
