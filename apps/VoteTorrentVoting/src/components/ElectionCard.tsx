@@ -98,9 +98,10 @@ export interface ElectionCardProps {
 	onVoteNow?: () => void;
 	onViewValidationDetails?: () => void;
 	onLearnAboutElection?: () => void;
+	hasVoted?: boolean;
 }
 
-export function ElectionCard({election, onVoteNow, onViewValidationDetails, onLearnAboutElection}: ElectionCardProps) {
+export function ElectionCard({election, onVoteNow, onViewValidationDetails, onLearnAboutElection, hasVoted}: ElectionCardProps) {
 	const {colors, fonts, type: typeScale, radii} = useTheme() as ExtendedTheme;
 	const {t} = useTranslation('home');
 
@@ -194,12 +195,20 @@ export function ElectionCard({election, onVoteNow, onViewValidationDetails, onLe
 			) : null}
 
 			{display.showAction === 'vote' ? (
-				<Pressable
-					testID="election-card-vote-now"
-					onPress={onVoteNow}
-					style={[styles.actionButton, {backgroundColor: colors.primary, borderRadius: radii.pill}]}>
-					<Text style={[styles.actionLabel, {color: colors.light}]}>{t('voteNowCta')}</Text>
-				</Pressable>
+				hasVoted ? (
+					<View
+						testID="election-card-voted"
+						style={[styles.actionButton, styles.actionButtonOutline, {backgroundColor: colors.secondaryButtonSurface, borderColor: colors.muted, borderRadius: radii.pill}]}>
+						<Text style={[styles.actionLabel, {color: colors.muted}]}>{t('votedCta')}</Text>
+					</View>
+				) : (
+					<Pressable
+						testID="election-card-vote-now"
+						onPress={onVoteNow}
+						style={[styles.actionButton, {backgroundColor: colors.primary, borderRadius: radii.pill}]}>
+						<Text style={[styles.actionLabel, {color: colors.light}]}>{t('voteNowCta')}</Text>
+					</Pressable>
+				)
 			) : null}
 
 			{display.showAction === 'validationDetails' ? (

@@ -61,10 +61,10 @@ type Callbacks = Partial<{
 // test file's module registry is torn down.
 const activeRenderers: renderer.ReactTestRenderer[] = [];
 
-function renderCard(election: MockElection, callbacks: Callbacks = {}) {
+function renderCard(election: MockElection, callbacks: Callbacks = {}, hasVoted?: boolean) {
 	let tr!: renderer.ReactTestRenderer;
 	renderer.act(() => {
-		tr = renderer.create(withTheme(<ElectionCard election={election} {...callbacks} />));
+		tr = renderer.create(withTheme(<ElectionCard election={election} hasVoted={hasVoted} {...callbacks} />));
 	});
 	activeRenderers.push(tr);
 	return tr;
@@ -178,5 +178,39 @@ describe('ElectionCard (HOME-01/02/03)', () => {
 		expect(validationIcon.props.name).toBe('lock-open');
 		expect(releasingKeysIcon.props.name).not.toBe(validationIcon.props.name);
 		expect(releasingKeysIcon.props.color).not.toBe(validationIcon.props.color);
+	});
+
+	describe('hasVoted (VOTE-04 / D-08 Home CTA reflection)', () => {
+		it('hasVoted omitted on the Open state renders the vote-now Pressable unchanged (no voted pill)', () => {
+			const tr = renderCard(electionFor('Open'));
+
+			expect(tr.root.findAllByProps({testID: 'election-card-vote-now'}, {deep: false}).length).toBe(1);
+			expect(tr.root.findAllByProps({testID: 'election-card-voted'}, {deep: false}).length).toBe(0);
+		});
+
+		it('hasVoted=false on the Open state renders the vote-now Pressable unchanged (no voted pill)', () => {
+			const tr = renderCard(electionFor('Open'), {} as Callbacks, false);
+
+			expect(tr.root.findAllByProps({testID: 'election-card-vote-now'}, {deep: false}).length).toBe(1);
+			expect(tr.root.findAllByProps({testID: 'election-card-voted'}, {deep: false}).length).toBe(0);
+		});
+
+		it('hasVoted=true on the Open state renders the disabled voted pill instead of vote-now', () => {
+			const tr = renderCard(electionFor('Open'), {}, true);
+
+			const votedPill = tr.root.findAllByProps({testID: 'election-card-voted'}, {deep: false});
+			expect(votedPill.length).toBe(1);
+			expect(votedPill[0].props.onPress).toBeUndefined();
+			expect(tr.root.findAllByProps({testID: 'election-card-vote-now'}, {deep: false}).length).toBe(0);
+		});
+
+		it('hasVoted=true on a non-Open state is unaffected (no voted pill, no vote-now)', () => {
+			const tr = renderCard(electionFor('ValidationDetails'), {}, true);
+
+			expect(tr.root.findAllByProps({testID: 'election-card-voted'}, {deep: false}).length).toBe(0);
+			expect(tr.root.findAllByProps({testID: 'election-card-vote-now'}, {deep: false}).length).toBe(0);
+			// The ValidationDetails action is untouched by hasVoted.
+			expect(tr.root.findAllByProps({testID: 'election-card-view-validation-details'}, {deep: false}).length).toBe(1);
+		});
 	});
 });
