@@ -207,32 +207,32 @@ export default function BallotScreen() {
 					</Text>
 					<View style={styles.officeList}>{renderOfficeSection('State')}</View>
 				</View>
-			</ScrollView>
 
-			{/* D-07: Save & Exit + Review & Submit, stacked full-width (Figma), reusing
-				globalStyles.footer's exact elevation/shadow values verbatim (VOTE-01/38 D-16). */}
-			<View style={[globalStyles.footer, styles.footer, {backgroundColor: colors.card}]}>
-				<Pressable
-					testID="ballot-save-exit"
-					onPress={() => navigation.popToTop()}
-					style={[
-						styles.footerButton,
-						styles.saveExitButton,
-						{
-							backgroundColor: colors.secondaryButtonSurface,
-							borderColor: colors.primary,
-							borderRadius: radii.pill,
-						},
-					]}>
-					<Text style={[styles.footerButtonLabel, {color: colors.primary}]}>{t('saveExitCta')}</Text>
-				</Pressable>
-				<Pressable
-					testID="ballot-review-submit"
-					onPress={() => navigation.navigate('ReviewSubmit')}
-					style={[styles.footerButton, {backgroundColor: colors.primary, borderRadius: radii.pill}]}>
-					<Text style={[styles.footerButtonLabel, {color: colors.light}]}>{t('reviewCta')}</Text>
-				</Pressable>
-			</View>
+				{/* D-07: Save & Exit + Review & Submit, stacked full-width at the END of the page
+					content (Figma) — scrolls with the ballot, not a fixed footer bar. */}
+				<View style={styles.footer}>
+					<Pressable
+						testID="ballot-save-exit"
+						onPress={() => navigation.popToTop()}
+						style={[
+							styles.footerButton,
+							styles.saveExitButton,
+							{
+								backgroundColor: colors.secondaryButtonSurface,
+								borderColor: colors.primary,
+								borderRadius: radii.pill,
+							},
+						]}>
+						<Text style={[styles.footerButtonLabel, {color: colors.primary}]}>{t('saveExitCta')}</Text>
+					</Pressable>
+					<Pressable
+						testID="ballot-review-submit"
+						onPress={() => navigation.navigate('ReviewSubmit')}
+						style={[styles.footerButton, {backgroundColor: colors.primary, borderRadius: radii.pill}]}>
+						<Text style={[styles.footerButtonLabel, {color: colors.light}]}>{t('reviewCta')}</Text>
+					</Pressable>
+				</View>
+			</ScrollView>
 		</View>
 	);
 }
@@ -277,6 +277,8 @@ const styles = StyleSheet.create({
 	},
 	footer: {
 		gap: 12,
+		marginTop: 8,
+		paddingBottom: 16,
 	},
 	footerButton: {
 		minHeight: 48,
