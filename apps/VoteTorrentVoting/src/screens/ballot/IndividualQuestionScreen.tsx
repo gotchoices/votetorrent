@@ -6,7 +6,7 @@
  * Reads `getBallot()` from `useVotingApp()` (SHELL-03/D-06 gate — satisfies
  * `no-inline-mock-imports.test.ts`'s "every screen calls useVotingApp(" rule; also supplies the
  * offices this screen renders) and `currentQuestionIndex`/`selectionMap`/`toggleCandidate`/
- * `goToPreviousQuestion`/`setCurrentQuestionIndex` from `useBallotSelection()`. The question
+ * `goToPreviousQuestion`/`goToNextQuestion` from `useBallotSelection()`. The question
  * position is provider-held state, never a route param (42-RESEARCH.md Pattern 5 — every
  * `ParamList` entry across all 4 tab stacks stays `undefined`).
  *
@@ -44,7 +44,7 @@ export default function IndividualQuestionScreen() {
 		selectionMap,
 		toggleCandidate,
 		goToPreviousQuestion,
-		setCurrentQuestionIndex,
+		goToNextQuestion,
 	} = useBallotSelection();
 	const {colors, fonts, type: typeScale, radii} = useTheme() as ExtendedTheme;
 	const {t} = useTranslation('ballot');
@@ -82,7 +82,10 @@ export default function IndividualQuestionScreen() {
 			navigation.replace('ReviewSubmit');
 			return;
 		}
-		setCurrentQuestionIndex(currentQuestionIndex + 1);
+		// 42-REVIEW WR-01: route through the provider's clamp-safe, functional-update
+		// goToNextQuestion(offices) rather than a render-scope-read setCurrentQuestionIndex(...)
+		// increment (stale-closure/double-fire footgun).
+		goToNextQuestion(offices);
 	};
 
 	return (
