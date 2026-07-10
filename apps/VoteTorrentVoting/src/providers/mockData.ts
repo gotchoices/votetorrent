@@ -1,4 +1,12 @@
-import type {LifecycleContent, LifecycleState, MockElection, ValidationCheck} from './types';
+import type {
+	Candidate,
+	LifecycleContent,
+	LifecycleState,
+	MockBallot,
+	MockElection,
+	Office,
+	ValidationCheck,
+} from './types';
 
 /**
  * App-local seed fixture for VotingAppProvider (D-04). This is the ONLY module holding literal
@@ -111,4 +119,83 @@ export const LIFECYCLE_CONTENT: Record<LifecycleState, LifecycleContent> = {
 	Complete: {
 		certified: true,
 	},
+};
+
+/**
+ * The mock ballot (Phase 42, VOTE-01/02, D-02). `42-FIGMA-EXTRACT.md`'s "What was NOT captured"
+ * item 1 confirms no fresh Figma pull captured a literal Ballot Page office/candidate list this
+ * session (Starter-plan rate limit, same constraint as Phases 40/41) — every office/candidate
+ * below is `[ASSUMED]` content authored to plausibly match "offices grouped Federal/State,
+ * party-labeled candidates, a per-office voteFor count" (D-02/D-03), not transcribed from a
+ * live pull. Flat `offices` array (RESEARCH Pattern 3) — Federal/State grouping is a display-time
+ * filter over this one order-stable array, never a split `{federal, state}` shape, so
+ * `currentQuestionIndex` (BallotSelectionProvider, Plan 42-02+) can walk a single index space.
+ *
+ * Mixed voteFor by design (must-haves): US Senate/US House/Governor/State Senate are all
+ * `voteFor: 1` (radio); State Board of Education is `voteFor: 2` (capped checkbox) — so both
+ * CandidateSelector variants are demonstrable downstream.
+ */
+export const mockBallot: MockBallot = {
+	electionId: mockElection.id,
+	offices: [
+		// [ASSUMED] Federal — US Senate, voteFor 1 (radio).
+		{
+			id: 'office-us-senate',
+			titleKey: 'office.usSenate',
+			jurisdiction: 'Federal',
+			voteFor: 1,
+			candidates: [
+				{id: 'cand-us-senate-diana', nameKey: 'candidate.usSenate.diana', partyKey: 'candidateParty.democratic'},
+				{id: 'cand-us-senate-marcus', nameKey: 'candidate.usSenate.marcus', partyKey: 'candidateParty.republican'},
+				{id: 'cand-us-senate-elena', nameKey: 'candidate.usSenate.elena', partyKey: 'candidateParty.independent'},
+			] satisfies Candidate[],
+		},
+		// [ASSUMED] Federal — US House, District 2, voteFor 1 (radio).
+		{
+			id: 'office-us-house',
+			titleKey: 'office.usHouse',
+			jurisdiction: 'Federal',
+			voteFor: 1,
+			candidates: [
+				{id: 'cand-us-house-james', nameKey: 'candidate.usHouse.james', partyKey: 'candidateParty.democratic'},
+				{id: 'cand-us-house-laura', nameKey: 'candidate.usHouse.laura', partyKey: 'candidateParty.republican'},
+			] satisfies Candidate[],
+		},
+		// [ASSUMED] State — Governor, voteFor 1 (radio).
+		{
+			id: 'office-governor',
+			titleKey: 'office.governor',
+			jurisdiction: 'State',
+			voteFor: 1,
+			candidates: [
+				{id: 'cand-governor-priya', nameKey: 'candidate.governor.priya', partyKey: 'candidateParty.democratic'},
+				{id: 'cand-governor-robert', nameKey: 'candidate.governor.robert', partyKey: 'candidateParty.republican'},
+			] satisfies Candidate[],
+		},
+		// [ASSUMED] State — State Board of Education, voteFor 2 (capped checkbox) — the
+		// voteFor>1 demonstration office (must-haves).
+		{
+			id: 'office-state-board-education',
+			titleKey: 'office.stateBoardEducation',
+			jurisdiction: 'State',
+			voteFor: 2,
+			candidates: [
+				{id: 'cand-sboe-angela', nameKey: 'candidate.stateBoardEducation.angela', partyKey: 'candidateParty.nonpartisan'},
+				{id: 'cand-sboe-brian', nameKey: 'candidate.stateBoardEducation.brian', partyKey: 'candidateParty.nonpartisan'},
+				{id: 'cand-sboe-cynthia', nameKey: 'candidate.stateBoardEducation.cynthia', partyKey: 'candidateParty.nonpartisan'},
+				{id: 'cand-sboe-david', nameKey: 'candidate.stateBoardEducation.david', partyKey: 'candidateParty.nonpartisan'},
+			] satisfies Candidate[],
+		},
+		// [ASSUMED] State — State Senate, District 8, voteFor 1 (radio).
+		{
+			id: 'office-state-senate',
+			titleKey: 'office.stateSenate',
+			jurisdiction: 'State',
+			voteFor: 1,
+			candidates: [
+				{id: 'cand-state-senate-maria', nameKey: 'candidate.stateSenate.maria', partyKey: 'candidateParty.democratic'},
+				{id: 'cand-state-senate-thomas', nameKey: 'candidate.stateSenate.thomas', partyKey: 'candidateParty.republican'},
+			] satisfies Candidate[],
+		},
+	] satisfies Office[],
 };
