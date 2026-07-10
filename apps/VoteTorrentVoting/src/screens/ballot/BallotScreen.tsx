@@ -1,73 +1,192 @@
 /**
- * BallotScreen — pushed within the Vote stack (D-08 topology; not its own tab). Placeholder stub
- * this phase: reads through `useVotingApp()` (D-06 / SHELL-03), renders the generic
- * `common.placeholderBody` copy, and exposes modal-open triggers for the 3 modals it owns
- * (`IndividualQuestion`, `OfficeInfo`, `CandidateInfo`) so they're reachable on device once 39-07
- * wires the RootNavigator (SHELL-02).
+ * BallotScreen — the real Ballot Page (VOTE-01/VOTE-03), pushed within the Vote stack (D-08
+ * topology; not its own tab). Reads through `useVotingApp()` (D-06/SHELL-03) for `getBallot()`
+ * and through `useBallotSelection()` (Phase 42 Pattern 1/4/5) for `selectionMap` /
+ * `setCurrentQuestionIndex`.
  *
- * Real Ballot content (offices grouped Federal/State, progress, Save & Exit / Review & Submit)
- * lands in Phase 42.
+ * Renders offices grouped into Federal/State sections (a display-time filter over the flat,
+ * order-stable `offices` array — RESEARCH Pattern 3), a live "N/M questions completed" indicator
+ * derived from `selectionMap` via `computeCompletedCount` on every render (never a stored
+ * counter, D-04), a per-office `OfficeRow` (tap opens Individual Question after setting the flat
+ * `currentQuestionIndex`, Pattern 5), an election-level "Learn about this election" link
+ * (VOTE-03), and a footer with Save & Exit (`popToTop()`, selections retained, D-07) + Review &
+ * Submit (Open Question 2 — both rendered together in the Ballot Page footer).
  */
-import React from 'react';
-import {Pressable, StyleSheet, Text, View} from 'react-native';
+import React, {useEffect, useState} from 'react';
+import {Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
 import {useNavigation, useTheme} from '@react-navigation/native';
 import type {ExtendedTheme} from '@react-navigation/native';
 import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
 import {useTranslation} from 'react-i18next';
-import FontAwesome6 from 'react-native-vector-icons/FontAwesome6';
 import {useVotingApp} from '../../providers/VotingAppProvider';
+import {useBallotSelection, computeCompletedCount} from '../../providers/BallotSelectionProvider';
+import {ProgressBar} from '../../components/ProgressBar';
+import {OfficeRow} from '../../components/OfficeRow';
 import {globalStyles} from '../../theme/styles';
 import type {VoteStackParamList} from '../../navigation/types';
+import type {Candidate, MockBallot, Office} from '../../providers/types';
 
 type BallotNavigationProp = NativeStackNavigationProp<VoteStackParamList, 'Ballot'>;
 
 export default function BallotScreen() {
-	// D-06/SHELL-03: every placeholder screen routes through useVotingApp() — no inline mockData import.
-	const {isInitialized} = useVotingApp();
-	const {colors, fonts, type: typeScale} = useTheme() as ExtendedTheme;
-	const {t: tCommon} = useTranslation('common');
+	// D-06/SHELL-03: every screen routes through useVotingApp() — no inline mockData import.
+	const {getBallot} = useVotingApp();
+	const {selectionMap, setCurrentQuestionIndex} = useBallotSelection();
+	const {colors, fonts, type: typeScale, radii} = useTheme() as ExtendedTheme;
+	const {t} = useTranslation('ballot');
+	const {t: tHome} = useTranslation('home');
 	const navigation = useNavigation<BallotNavigationProp>();
+	const [ballot, setBallot] = useState<MockBallot | null>(null);
+
+	// Fetch on mount — mirrors HomeScreen's getElection().then(setElection) async-read-into-state
+	// pattern, live-guarded against a post-unmount setState.
+	useEffect(() => {
+		let live = true;
+		getBallot().then(result => {
+			if (live) {
+				setBallot(result);
+			}
+		});
+		return () => {
+			live = false;
+		};
+	}, [getBallot]);
+
+	const offices = ballot?.offices ?? [];
+	// D-04: derived every render from selectionMap, never a stored counter.
+	const {completed, total} = computeCompletedCount(offices, selectionMap);
+	const progress = total > 0 ? completed / total : 0;
+
+	const resolveSelectionSummary = (officeId: string, candidates: Candidate[]) => {
+		const selectedIds = selectionMap[officeId] ?? [];
+		if (selectedIds.length === 0) {
+			return t('notYetAnswered');
+		}
+		return selectedIds
+			.map(id => candidates.find(candidate => candidate.id === id))
+			.filter((candidate): candidate is Candidate => Boolean(candidate))
+			.map(candidate => t(candidate.nameKey))
+			.join(', ');
+	};
+
+	const renderOfficeSection = (jurisdiction: Office['jurisdiction']) =>
+		offices
+			.filter(office => office.jurisdiction === jurisdiction)
+			.map(office => (
+				<OfficeRow
+					key={office.id}
+					title={t(office.titleKey)}
+					selectionSummary={resolveSelectionSummary(office.id, office.candidates)}
+					hasSelection={(selectionMap[office.id]?.length ?? 0) > 0}
+					learnLabel={t('learnAboutOffice')}
+					onOpen={() => {
+						// Pattern 5: set the flat index BEFORE navigating — currentQuestionIndex
+						// lives on BallotSelectionProvider, not a route param.
+						setCurrentQuestionIndex(offices.indexOf(office));
+						navigation.navigate('IndividualQuestion');
+					}}
+					onLearnAboutOffice={() => navigation.navigate('OfficeInfo')}
+				/>
+			));
 
 	return (
 		<View style={[globalStyles.container, styles.screen, {backgroundColor: colors.background}]}>
-			<View style={styles.centerColumn}>
-				<FontAwesome6 name="list-check" size={48} color={colors.muted} />
-				<Text
+			<ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
+				<View style={styles.progressSection}>
+					<Text
+						style={[
+							styles.progressLabel,
+							{
+								color: colors.textSecondary,
+								fontFamily: fonts.medium.fontFamily,
+								fontWeight: fonts.medium.fontWeight,
+								fontSize: typeScale.h4.fontSize,
+								lineHeight: typeScale.h4.lineHeight,
+							},
+						]}>
+						{t('progressLabel', {completed, total})}
+					</Text>
+					<ProgressBar progress={progress} />
+				</View>
+
+				{/* VOTE-03: election-level info entry point, unconditional (Open Question 1),
+					mirrors ElectionCard's onLearnAboutElection -> navigate('ElectionInfo') callback. */}
+				<Pressable
+					testID="ballot-learn-election"
+					onPress={() => navigation.navigate('ElectionInfo')}
+					style={styles.learnLink}>
+					<Text
+						style={[
+							styles.learnLinkText,
+							{
+								color: colors.link,
+								fontSize: typeScale.caption.fontSize,
+								lineHeight: typeScale.caption.lineHeight,
+							},
+						]}>
+						{tHome('learnAboutElection')}
+					</Text>
+				</Pressable>
+
+				<View style={globalStyles.section}>
+					<Text
+						style={[
+							styles.sectionTitle,
+							{
+								color: colors.text,
+								fontFamily: fonts.medium.fontFamily,
+								fontWeight: fonts.medium.fontWeight,
+								fontSize: typeScale.h4.fontSize,
+								lineHeight: typeScale.h4.lineHeight,
+							},
+						]}>
+						{t('federalSection')}
+					</Text>
+					<View style={styles.officeList}>{renderOfficeSection('Federal')}</View>
+				</View>
+
+				<View style={globalStyles.section}>
+					<Text
+						style={[
+							styles.sectionTitle,
+							{
+								color: colors.text,
+								fontFamily: fonts.medium.fontFamily,
+								fontWeight: fonts.medium.fontWeight,
+								fontSize: typeScale.h4.fontSize,
+								lineHeight: typeScale.h4.lineHeight,
+							},
+						]}>
+						{t('stateSection')}
+					</Text>
+					<View style={styles.officeList}>{renderOfficeSection('State')}</View>
+				</View>
+			</ScrollView>
+
+			{/* D-07: Save & Exit + Review & Submit, side by side (Open Question 2), reusing
+				globalStyles.footer's exact elevation/shadow values verbatim (VOTE-01/38 D-16). */}
+			<View style={[globalStyles.footer, styles.footerRow, {backgroundColor: colors.card}]}>
+				<Pressable
+					testID="ballot-save-exit"
+					onPress={() => navigation.popToTop()}
 					style={[
-						styles.placeholderBody,
+						styles.footerButton,
+						styles.saveExitButton,
 						{
-							color: colors.textSecondary,
-							fontFamily: fonts.regular.fontFamily,
-							fontWeight: fonts.regular.fontWeight,
-							fontSize: typeScale.body.fontSize,
-							lineHeight: typeScale.body.lineHeight,
+							backgroundColor: colors.secondaryButtonSurface,
+							borderColor: colors.primary,
+							borderRadius: radii.md,
 						},
 					]}>
-					{tCommon('placeholderBody')}
-				</Text>
-			</View>
-
-			<View style={styles.triggers}>
-				<Pressable
-					onPress={() => navigation.navigate('IndividualQuestion')}
-					style={styles.triggerButton}>
-					<Text style={{color: colors.primary}}>Open Individual Question (dev)</Text>
-				</Pressable>
-				<Pressable onPress={() => navigation.navigate('OfficeInfo')} style={styles.triggerButton}>
-					<Text style={{color: colors.primary}}>Open Office Info (dev)</Text>
+					<Text style={[styles.footerButtonLabel, {color: colors.primary}]}>{t('saveExitCta')}</Text>
 				</Pressable>
 				<Pressable
-					onPress={() => navigation.navigate('CandidateInfo')}
-					style={styles.triggerButton}>
-					<Text style={{color: colors.primary}}>Open Candidate Info (dev)</Text>
+					testID="ballot-review-submit"
+					onPress={() => navigation.navigate('ReviewSubmit')}
+					style={[styles.footerButton, {backgroundColor: colors.primary, borderRadius: radii.pill}]}>
+					<Text style={[styles.footerButtonLabel, {color: colors.light}]}>{t('reviewCta')}</Text>
 				</Pressable>
 			</View>
-
-			{__DEV__ ? (
-				<Text style={[styles.devLine, {color: colors.muted, fontSize: typeScale.caption.fontSize}]}>
-					isInitialized: {String(isInitialized)}
-				</Text>
-			) : null}
 		</View>
 	);
 }
@@ -76,25 +195,49 @@ const styles = StyleSheet.create({
 	screen: {
 		flex: 1,
 	},
-	centerColumn: {
+	scroll: {
 		flex: 1,
+	},
+	scrollContent: {
+		flexGrow: 1,
+	},
+	progressSection: {
+		gap: 8, // sm spacing token
+	},
+	progressLabel: {
+		marginBottom: 4,
+	},
+	learnLink: {
+		alignSelf: 'flex-start',
+		marginTop: 16,
+		minHeight: 44, // >=44px touch target
 		justifyContent: 'center',
-		alignItems: 'center',
-		gap: 24, // lg spacing token (39-UI-SPEC.md Spacing Scale)
 	},
-	placeholderBody: {
-		textAlign: 'center',
+	learnLinkText: {
+		textDecorationLine: 'underline',
 	},
-	triggers: {
-		gap: 8,
+	sectionTitle: {
 		marginBottom: 16,
 	},
-	triggerButton: {
-		alignItems: 'center',
-		paddingVertical: 8,
+	officeList: {
+		gap: 12,
 	},
-	devLine: {
-		textAlign: 'center',
-		marginBottom: 8,
+	footerRow: {
+		flexDirection: 'row',
+		gap: 16,
+	},
+	footerButton: {
+		flex: 1,
+		minHeight: 44, // minimum touch target
+		alignItems: 'center',
+		justifyContent: 'center',
+		paddingHorizontal: 24,
+		paddingVertical: 12,
+	},
+	saveExitButton: {
+		borderWidth: 1,
+	},
+	footerButtonLabel: {
+		fontWeight: '600',
 	},
 });
