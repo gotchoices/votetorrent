@@ -69,7 +69,11 @@ export default function RegisterPersonalScreen() {
 			style={[
 				globalStyles.container,
 				styles.screen,
-				{backgroundColor: colors.background, paddingBottom: insets.bottom + 12},
+				{
+					backgroundColor: colors.background,
+					paddingTop: insets.top + 16,
+					paddingBottom: insets.bottom + 12,
+				},
 			]}>
 			<ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
 				<RegisterFormHeader
