@@ -10,16 +10,16 @@
  * `useNavigation()` itself (RESEARCH.md Anti-Patterns).
  */
 import React, {useEffect, useState} from 'react';
-import {Pressable, StyleSheet, Text, View} from 'react-native';
+import {Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
 import {useNavigation, useTheme} from '@react-navigation/native';
 import type {ExtendedTheme} from '@react-navigation/native';
 import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
 import {useVotingApp} from '../../providers/VotingAppProvider';
 import {LIFECYCLE_ORDER} from '../../providers/types';
 import type {MockElection} from '../../providers/types';
-import {globalStyles} from '../../theme/styles';
 import type {VoteStackParamList} from '../../navigation/types';
 import {ElectionCard} from '../../components/ElectionCard';
+import {NetworkHeader} from '../../components/NetworkHeader';
 
 type HomeNavigationProp = NativeStackNavigationProp<VoteStackParamList, 'Home'>;
 
@@ -52,25 +52,29 @@ export default function HomeScreen() {
 	};
 
 	return (
-		<View style={[globalStyles.container, styles.screen, {backgroundColor: colors.background}]}>
-			{isInitialized && election ? (
-				<ElectionCard
-					election={election}
-					onVoteNow={() => navigation.navigate('Ballot')}
-					onViewValidationDetails={() => navigation.navigate('ValidationDetails')}
-					onLearnAboutElection={() => navigation.navigate('ElectionInfo')}
-					hasVoted={hasVoted}
-				/>
-			) : null}
+		<View style={[styles.screen, {backgroundColor: colors.background}]}>
+			<NetworkHeader />
 
-			{/* D-03: __DEV__-gated lifecycle-state cycler — never ships to release builds. */}
-			{__DEV__ && isInitialized ? (
-				<Pressable onPress={nextLifecycleState} style={styles.devCycler}>
-					<Text style={{color: colors.muted, fontSize: typeScale.caption.fontSize}}>
-						Next state: {lifecycleState}
-					</Text>
-				</Pressable>
-			) : null}
+			<ScrollView contentContainerStyle={styles.content}>
+				{isInitialized && election ? (
+					<ElectionCard
+						election={election}
+						onVoteNow={() => navigation.navigate('Ballot')}
+						onViewValidationDetails={() => navigation.navigate('ValidationDetails')}
+						onLearnAboutElection={() => navigation.navigate('ElectionInfo')}
+						hasVoted={hasVoted}
+					/>
+				) : null}
+
+				{/* D-03: __DEV__-gated lifecycle-state cycler — never ships to release builds. */}
+				{__DEV__ && isInitialized ? (
+					<Pressable onPress={nextLifecycleState} style={styles.devCycler}>
+						<Text style={{color: colors.muted, fontSize: typeScale.caption.fontSize}}>
+							Next state: {lifecycleState}
+						</Text>
+					</Pressable>
+				) : null}
+			</ScrollView>
 		</View>
 	);
 }
@@ -78,6 +82,9 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
 	screen: {
 		flex: 1,
+	},
+	content: {
+		padding: 16,
 	},
 	devCycler: {
 		alignSelf: 'center',

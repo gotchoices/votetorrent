@@ -69,10 +69,11 @@ function VoteStackNavigator() {
 	return (
 		<BallotSelectionProvider>
 			<VoteStack.Navigator>
+				{/* headerShown:false — HomeScreen renders the branded blue NetworkHeader itself. */}
 				<VoteStack.Screen
 					name="Home"
 					component={HomeScreen}
-					options={{title: tHome('headerTitle')}}
+					options={{headerShown: false}}
 				/>
 				<VoteStack.Screen
 					name="Ballot"
