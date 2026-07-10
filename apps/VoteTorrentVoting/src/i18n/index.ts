@@ -152,7 +152,13 @@ const resources = {
 			// [AUTHORED]
 			'form.backCta': 'Back',
 			// [AUTHORED]
-			'form.submitCta': 'Submit Registration',
+			'form.submitCta': 'Submit',
+			// [AUTHORED] — inline field-validation messages (REG-03 validation, added post-QA)
+			'form.errors.required': 'This field is required',
+			'form.errors.email': 'Enter a valid email address',
+			'form.errors.phone': 'Enter a valid phone number',
+			'form.errors.dob': 'Enter your date of birth as MM/DD/YYYY',
+			'form.errors.party': 'Select your party',
 			// [AUTHORED]
 			'form.stepLabel': 'Step {{step}} of 3',
 			'form.addressLine1': 'Address line 1',
@@ -320,7 +326,12 @@ const resources = {
 			'form.dobPlaceholder': 'MM/DD/AAAA',
 			'form.continueCta': 'Continuar',
 			'form.backCta': 'Atrás',
-			'form.submitCta': 'Enviar Registro',
+			'form.submitCta': 'Enviar',
+			'form.errors.required': 'Este campo es obligatorio',
+			'form.errors.email': 'Introduce un correo electrónico válido',
+			'form.errors.phone': 'Introduce un número de teléfono válido',
+			'form.errors.dob': 'Introduce tu fecha de nacimiento como MM/DD/AAAA',
+			'form.errors.party': 'Selecciona tu partido',
 			'form.stepLabel': 'Paso {{step}} de 3',
 			'form.addressLine1': 'Dirección línea 1',
 			'form.addressLine2': 'Dirección línea 2 (opcional)',

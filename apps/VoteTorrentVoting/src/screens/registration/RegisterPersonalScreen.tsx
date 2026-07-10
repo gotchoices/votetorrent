@@ -1,20 +1,18 @@
 /**
- * RegisterPersonalScreen — Register form Step 1 · Personal (REG-03, `2868:1522`). First of the
- * 3 pushed form-step routes (RESEARCH Pattern 1): each field binds write-through directly to the
- * shared `RegistrationDraftProvider` instance via `updateField` — NO local `useState` buffer
- * (RESEARCH Anti-Patterns) — so Back/Continue across all 3 steps always sees the same durable
- * draft. `StepProgressBar step={1}` is hardcoded per screen (not derived from route params).
+ * RegisterPersonalScreen — Register form Step 1 · Personal (REG-03, Figma `2868:1522`). Full-bleed
+ * (headerShown:false; the bottom tab bar is hidden across the whole form flow, see navigation/
+ * index.tsx) so the register form reads as one continuous, un-interruptible process.
  *
- * Continue is always enabled (D-02 mock-permissive — no required-field validation blocks
- * advancing).
+ * Layout matches the Figma frame: an in-content RegisterFormHeader (back-arrow top-left, close
+ * top-right, "Register" title + subtitle + step dots), then two grouped field cards
+ * ({First, Last, DOB} and {Email, Phone}) with placeholder labels, then a full-width Continue.
  *
- * Manual-QA gap-closure (Phase 41 re-verification): shares the same overflow risk pattern
- * confirmed on `RegisterConfirmScreen` (5 stacked `LabeledTextInput` fields can exceed the
- * height available above the bottom tab bar on smaller viewports) — wrapped the field content
- * in a `ScrollView` (flex:1) as a defensive, zero-regression measure (behaves identically to a
- * plain View when content already fits).
+ * Fields bind write-through to the shared RegistrationDraftProvider (no local buffer). DOB is a
+ * masked MM/DD/YYYY text field (the app has no date-picker package — DOB is its only date input).
+ * Continue now VALIDATES (required + email/phone/dob format) and only advances when the step is
+ * valid, surfacing inline field errors otherwise.
  */
-import React from 'react';
+import React, {useState} from 'react';
 import {Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
 import {useNavigation, useTheme} from '@react-navigation/native';
 import type {ExtendedTheme} from '@react-navigation/native';
@@ -22,9 +20,16 @@ import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
 import {useTranslation} from 'react-i18next';
 import {useVotingApp} from '../../providers/VotingAppProvider';
 import {useRegistrationDraft} from '../../providers/RegistrationDraftProvider';
-import {LabeledTextInput} from '../../components/LabeledTextInput';
-import {StepProgressBar} from '../../components/StepProgressBar';
+import {RegisterFormHeader} from '../../components/RegisterFormHeader';
+import {FieldGroupCard, FieldRow} from '../../components/FieldGroup';
 import {globalStyles} from '../../theme/styles';
+import {
+	maskDateInput,
+	validatePersonal,
+	hasErrors,
+	type PersonalField,
+	type FieldError,
+} from '../../utils/registrationForm';
 import type {RegistrationStackParamList} from '../../navigation/types';
 
 type RegisterPersonalNavigationProp = NativeStackNavigationProp<
@@ -40,68 +45,106 @@ export default function RegisterPersonalScreen() {
 	const {colors, fonts, type: typeScale, radii} = useTheme() as ExtendedTheme;
 	const {t} = useTranslation('registration');
 
+	const [errors, setErrors] = useState<Partial<Record<PersonalField, FieldError>>>({});
+
+	const errText = (f: PersonalField): string | undefined =>
+		errors[f] ? t('form.errors.' + errors[f]) : undefined;
+
+	// Update a field and clear its error (re-validated on the next Continue attempt).
+	const bind = (field: PersonalField) => (v: string) => {
+		updateField(field, v);
+		if (errors[field]) setErrors(e => ({...e, [field]: undefined}));
+	};
+
+	const onContinue = () => {
+		const errs = validatePersonal(draft);
+		setErrors(errs);
+		if (!hasErrors(errs)) navigation.navigate('RegisterAddressParty');
+	};
+
 	return (
 		<View style={[globalStyles.container, styles.screen, {backgroundColor: colors.background}]}>
 			<ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
-				<StepProgressBar step={1} />
-				<Text
-					style={[
-						styles.sectionTitle,
-						{
-							color: colors.text,
-							fontFamily: fonts.medium.fontFamily,
-							fontWeight: fonts.medium.fontWeight,
-							fontSize: typeScale.h4.fontSize,
-							lineHeight: typeScale.h4.lineHeight,
-						},
-					]}>
-					{t('form.sectionTitle')}
-				</Text>
+				<RegisterFormHeader
+					title={t('formHeaderTitle')}
+					subtitle={t('form.sectionTitle')}
+					step={1}
+					onBack={() => navigation.goBack()}
+					onClose={() => navigation.popToTop()}
+				/>
 
-				<View style={styles.fieldGroup}>
-					<LabeledTextInput
-						testID="register-first-name"
-						label={t('form.firstName')}
-						value={draft.firstName}
-						onChangeText={v => updateField('firstName', v)}
-					/>
-					<LabeledTextInput
-						testID="register-last-name"
-						label={t('form.lastName')}
-						value={draft.lastName}
-						onChangeText={v => updateField('lastName', v)}
-					/>
-					<LabeledTextInput
-						testID="register-dob"
-						label={t('form.dob')}
-						value={draft.dob}
-						placeholder={t('form.dobPlaceholder')}
-						onChangeText={v => updateField('dob', v)}
-					/>
+				<View style={styles.groups}>
+					<FieldGroupCard>
+						<FieldRow
+							testID="register-first-name"
+							placeholder={t('form.firstName')}
+							value={draft.firstName}
+							onChangeText={bind('firstName')}
+							autoCapitalize="words"
+							error={errText('firstName')}
+						/>
+						<FieldRow
+							testID="register-last-name"
+							placeholder={t('form.lastName')}
+							value={draft.lastName}
+							onChangeText={bind('lastName')}
+							autoCapitalize="words"
+							error={errText('lastName')}
+						/>
+						<FieldRow
+							testID="register-dob"
+							placeholder={t('form.dobPlaceholder')}
+							value={draft.dob}
+							onChangeText={v => bind('dob')(maskDateInput(v))}
+							keyboardType="number-pad"
+							maxLength={10}
+							error={errText('dob')}
+						/>
+					</FieldGroupCard>
+
+					<View style={styles.groupGap}>
+						<FieldGroupCard>
+							<FieldRow
+								testID="register-email"
+								placeholder={t('form.email')}
+								value={draft.email}
+								onChangeText={bind('email')}
+								keyboardType="email-address"
+								autoCapitalize="none"
+								error={errText('email')}
+							/>
+							<FieldRow
+								testID="register-phone"
+								placeholder={t('form.phone')}
+								value={draft.phone}
+								onChangeText={bind('phone')}
+								keyboardType="phone-pad"
+								error={errText('phone')}
+							/>
+						</FieldGroupCard>
+					</View>
 				</View>
+			</ScrollView>
 
-				<View style={styles.fieldGroup}>
-					<LabeledTextInput
-						testID="register-email"
-						label={t('form.email')}
-						value={draft.email}
-						onChangeText={v => updateField('email', v)}
-					/>
-					<LabeledTextInput
-						testID="register-phone"
-						label={t('form.phone')}
-						value={draft.phone}
-						onChangeText={v => updateField('phone', v)}
-					/>
-				</View>
-
+			<View style={styles.footer}>
 				<Pressable
 					testID="register-continue"
-					onPress={() => navigation.navigate('RegisterAddressParty')}
-					style={[styles.continueCta, {backgroundColor: colors.primary, borderRadius: radii.pill}]}>
-					<Text style={[styles.continueLabel, {color: colors.light}]}>{t('form.continueCta')}</Text>
+					onPress={onContinue}
+					style={[styles.cta, {backgroundColor: colors.primary, borderRadius: radii.pill}]}>
+					<Text
+						style={[
+							styles.ctaLabel,
+							{
+								color: colors.light,
+								fontFamily: fonts.medium.fontFamily,
+								fontWeight: fonts.medium.fontWeight,
+								fontSize: typeScale.body.fontSize,
+							},
+						]}>
+						{t('form.continueCta')}
+					</Text>
 				</Pressable>
-			</ScrollView>
+			</View>
 		</View>
 	);
 }
@@ -116,21 +159,23 @@ const styles = StyleSheet.create({
 	scrollContent: {
 		flexGrow: 1,
 	},
-	sectionTitle: {
-		marginTop: 24, // lg spacing token
+	groups: {
+		marginTop: 24, // lg — space below the header/dots
 	},
-	fieldGroup: {
-		marginTop: 24, // lg spacing token
+	groupGap: {
+		marginTop: 16, // md — gap between the two field-group cards
 	},
-	continueCta: {
-		marginTop: 24, // lg spacing token
-		minHeight: 44, // minimum touch target
+	footer: {
+		paddingTop: 16,
+	},
+	cta: {
+		minHeight: 52,
 		alignItems: 'center',
 		justifyContent: 'center',
 		paddingHorizontal: 24,
-		paddingVertical: 12,
+		paddingVertical: 14,
 	},
-	continueLabel: {
-		fontWeight: '600',
+	ctaLabel: {
+		textAlign: 'center',
 	},
 });

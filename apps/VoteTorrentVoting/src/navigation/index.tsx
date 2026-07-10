@@ -15,7 +15,8 @@ import {createBottomTabNavigator} from '@react-navigation/bottom-tabs';
 import {createNativeStackNavigator} from '@react-navigation/native-stack';
 import FontAwesome6 from 'react-native-vector-icons/FontAwesome6';
 import {useTranslation} from 'react-i18next';
-import {ExtendedTheme, useTheme} from '@react-navigation/native';
+import {ExtendedTheme, getFocusedRouteNameFromRoute, useTheme} from '@react-navigation/native';
+import type {RouteProp} from '@react-navigation/native';
 import {Pressable, StyleSheet} from 'react-native';
 import type {
 	RegistrationStackParamList,
@@ -160,20 +161,22 @@ function RegistrationStackNavigator() {
 					component={DeviceAttestationScreen}
 					options={{headerShown: false}}
 				/>
+				{/* Form steps are full-bleed (headerShown:false) — each renders its own
+				    RegisterFormHeader (back-arrow / close / title / subtitle / step dots). */}
 				<RegistrationStack.Screen
 					name="RegisterPersonal"
 					component={RegisterPersonalScreen}
-					options={{title: t('formHeaderTitle')}}
+					options={{headerShown: false}}
 				/>
 				<RegistrationStack.Screen
 					name="RegisterAddressParty"
 					component={RegisterAddressPartyScreen}
-					options={{title: t('formHeaderTitle')}}
+					options={{headerShown: false}}
 				/>
 				<RegistrationStack.Screen
 					name="RegisterConfirm"
 					component={RegisterConfirmScreen}
-					options={{title: t('confirmHeaderTitle')}}
+					options={{headerShown: false}}
 				/>
 				{/* Pitfall 3: real screen, headerShown:false — NOT presentation:'modal' + CloseButton. */}
 				<RegistrationStack.Screen
@@ -230,6 +233,25 @@ function SettingsStackNavigator() {
 	);
 }
 
+// Registration-tab routes that HIDE the bottom tab bar: the register form is one continuous,
+// un-interruptible process, so the user must not be able to tab away mid-flow and break it. The
+// tab bar shows only on the RegistrationHome root (getFocusedRouteNameFromRoute → undefined on the
+// tab's first focus, i.e. the root — treated as visible).
+const REGISTRATION_FULLSCREEN_ROUTES = [
+	'DeviceAttestation',
+	'RegisterPersonal',
+	'RegisterAddressParty',
+	'RegisterConfirm',
+	'Confirmation',
+];
+
+function registrationTabBarStyle(route: RouteProp<RootTabParamList, 'Registration'>) {
+	const focused = getFocusedRouteNameFromRoute(route) ?? 'RegistrationHome';
+	return REGISTRATION_FULLSCREEN_ROUTES.includes(focused)
+		? ({display: 'none'} as const)
+		: undefined;
+}
+
 // --- RootNavigator: the bottom Tab.Navigator itself (D-08), 4 tabs in D-09 locked order ---
 const Tab = createBottomTabNavigator<RootTabParamList>();
 
@@ -263,13 +285,15 @@ export function RootNavigator() {
 			<Tab.Screen
 				name="Registration"
 				component={RegistrationStackNavigator}
-				options={{
+				options={({route}) => ({
 					headerShown: false,
 					tabBarLabel: t('tabRegistration'),
 					tabBarIcon: ({color, size}) => (
 						<FontAwesome6 name="user-plus" size={size} color={color} />
 					),
-				}}
+					// Hide the tab bar while inside the register form flow (continuous process).
+					tabBarStyle: registrationTabBarStyle(route),
+				})}
 			/>
 			<Tab.Screen
 				name="Scan"

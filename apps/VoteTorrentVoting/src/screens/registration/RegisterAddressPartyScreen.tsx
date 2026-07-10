@@ -1,19 +1,13 @@
 /**
- * RegisterAddressPartyScreen — Register form Step 2 · Address + Party (REG-03, `2891:1542`).
- * Second of the 3 pushed form-step routes (RESEARCH Pattern 1). Address fields + party selection
- * bind write-through directly to the shared `RegistrationDraftProvider` instance — NO local
- * `useState` buffer (RESEARCH Anti-Patterns) — so Back returns to Step 1 and Continue advances to
- * Step 3 with the draft fully preserved either way.
+ * RegisterAddressPartyScreen — Register form Step 2 · Address + Party (REG-03, Figma `2891:1542`).
+ * Full-bleed (headerShown:false, tab bar hidden). Matches the Figma frame: RegisterFormHeader,
+ * one grouped card of the three address lines, then "Select Your Party" as a DROPDOWN (not chips),
+ * then a full-width Continue. The old footer Back button is gone — Back is the header arrow.
  *
- * Both footer CTAs are always enabled (D-02 mock-permissive — no required-field validation).
- *
- * Manual-QA gap-closure (Phase 41 re-verification): shares the same overflow risk pattern
- * confirmed on `RegisterConfirmScreen` (3 address fields + party chip row can exceed the
- * height available above the bottom tab bar) — the scrollable content now wraps in a
- * `ScrollView` (flex:1), with the footer Back/Continue row as a sibling BELOW it (not
- * scrolled), so the footer always renders fully above the tab bar.
+ * Fields bind write-through to the shared RegistrationDraftProvider. Party stores the stable KEY.
+ * Continue validates (address line 1 + party required) and only advances when valid.
  */
-import React from 'react';
+import React, {useState} from 'react';
 import {Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
 import {useNavigation, useTheme} from '@react-navigation/native';
 import type {ExtendedTheme} from '@react-navigation/native';
@@ -21,11 +15,17 @@ import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
 import {useTranslation} from 'react-i18next';
 import {useVotingApp} from '../../providers/VotingAppProvider';
 import {useRegistrationDraft} from '../../providers/RegistrationDraftProvider';
-import {LabeledTextInput} from '../../components/LabeledTextInput';
-import {StepProgressBar} from '../../components/StepProgressBar';
-import {PartyChipSelector} from '../../components/PartyChipSelector';
-import type {PartyChipOption} from '../../components/PartyChipSelector';
+import {RegisterFormHeader} from '../../components/RegisterFormHeader';
+import {FieldGroupCard, FieldRow} from '../../components/FieldGroup';
+import {PartyDropdown} from '../../components/PartyDropdown';
+import type {PartyOption} from '../../components/PartyDropdown';
 import {globalStyles} from '../../theme/styles';
+import {
+	validateAddressParty,
+	hasErrors,
+	type AddressPartyField,
+	type FieldError,
+} from '../../utils/registrationForm';
 import type {RegistrationStackParamList} from '../../navigation/types';
 
 type RegisterAddressPartyNavigationProp = NativeStackNavigationProp<
@@ -41,94 +41,94 @@ export default function RegisterAddressPartyScreen() {
 	const {colors, fonts, type: typeScale, radii} = useTheme() as ExtendedTheme;
 	const {t} = useTranslation('registration');
 
-	const partyOptions: PartyChipOption[] = [
+	const [errors, setErrors] = useState<Partial<Record<AddressPartyField, FieldError>>>({});
+
+	const errText = (f: AddressPartyField): string | undefined =>
+		errors[f] ? t('form.errors.' + errors[f]) : undefined;
+
+	const partyOptions: PartyOption[] = [
 		{key: 'democratic', label: t('form.party.democratic')},
 		{key: 'republican', label: t('form.party.republican')},
 		{key: 'independent', label: t('form.party.independent')},
 		{key: 'other', label: t('form.party.other')},
 	];
 
+	const onContinue = () => {
+		const errs = validateAddressParty(draft);
+		setErrors(errs);
+		if (!hasErrors(errs)) navigation.navigate('RegisterConfirm');
+	};
+
 	return (
 		<View style={[globalStyles.container, styles.screen, {backgroundColor: colors.background}]}>
 			<ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
-				<StepProgressBar step={2} />
-				<Text
-					style={[
-						styles.sectionTitle,
-						{
-							color: colors.text,
-							fontFamily: fonts.medium.fontFamily,
-							fontWeight: fonts.medium.fontWeight,
-							fontSize: typeScale.h4.fontSize,
-							lineHeight: typeScale.h4.lineHeight,
-						},
-					]}>
-					{t('form.sectionTitle')}
-				</Text>
+				<RegisterFormHeader
+					title={t('formHeaderTitle')}
+					subtitle={t('form.sectionTitle')}
+					step={2}
+					onBack={() => navigation.goBack()}
+					onClose={() => navigation.popToTop()}
+				/>
 
-				<View style={styles.fieldGroup}>
-					<LabeledTextInput
-						testID="register-address-1"
-						label={t('form.addressLine1')}
-						value={draft.addressLine1}
-						onChangeText={v => updateField('addressLine1', v)}
-					/>
-					<LabeledTextInput
-						testID="register-address-2"
-						label={t('form.addressLine2')}
-						value={draft.addressLine2}
-						onChangeText={v => updateField('addressLine2', v)}
-					/>
-					<LabeledTextInput
-						testID="register-address-3"
-						label={t('form.addressLine3')}
-						value={draft.addressLine3}
-						onChangeText={v => updateField('addressLine3', v)}
-					/>
-				</View>
+				<View style={styles.groups}>
+					<FieldGroupCard>
+						<FieldRow
+							testID="register-address-1"
+							placeholder={t('form.addressLine1')}
+							value={draft.addressLine1}
+							onChangeText={v => {
+								updateField('addressLine1', v);
+								if (errors.addressLine1) setErrors(e => ({...e, addressLine1: undefined}));
+							}}
+							error={errText('addressLine1')}
+						/>
+						<FieldRow
+							testID="register-address-2"
+							placeholder={t('form.addressLine2')}
+							value={draft.addressLine2}
+							onChangeText={v => updateField('addressLine2', v)}
+						/>
+						<FieldRow
+							testID="register-address-3"
+							placeholder={t('form.addressLine3')}
+							value={draft.addressLine3}
+							onChangeText={v => updateField('addressLine3', v)}
+						/>
+					</FieldGroupCard>
 
-				<View style={styles.fieldGroup}>
-					<Text
-						style={[
-							styles.partyLabel,
-							{
-								color: colors.text,
-								fontFamily: fonts.medium.fontFamily,
-								fontWeight: fonts.medium.fontWeight,
-								fontSize: typeScale.h4.fontSize,
-								lineHeight: typeScale.h4.lineHeight,
-							},
-						]}>
-						{t('form.selectParty')}
-					</Text>
-					<PartyChipSelector
-						options={partyOptions}
-						value={draft.party}
-						onChange={v => updateField('party', v)}
-					/>
+					<View style={styles.groupGap}>
+						<PartyDropdown
+							testID="register-party"
+							options={partyOptions}
+							value={draft.party}
+							placeholder={t('form.selectParty')}
+							onChange={v => {
+								updateField('party', v);
+								if (errors.party) setErrors(e => ({...e, party: undefined}));
+							}}
+							error={errText('party')}
+						/>
+					</View>
 				</View>
 			</ScrollView>
 
-			<View style={[globalStyles.footerButtonsContainer, styles.footer]}>
-				<Pressable
-					testID="register-back"
-					onPress={() => navigation.goBack()}
-					style={[
-						styles.footerButton,
-						styles.backButton,
-						{
-							backgroundColor: colors.secondaryButtonSurface,
-							borderColor: colors.primary,
-							borderRadius: radii.pill,
-						},
-					]}>
-					<Text style={[styles.footerButtonLabel, {color: colors.primary}]}>{t('form.backCta')}</Text>
-				</Pressable>
+			<View style={styles.footer}>
 				<Pressable
 					testID="register-continue"
-					onPress={() => navigation.navigate('RegisterConfirm')}
-					style={[styles.footerButton, {backgroundColor: colors.primary, borderRadius: radii.pill}]}>
-					<Text style={[styles.footerButtonLabel, {color: colors.light}]}>{t('form.continueCta')}</Text>
+					onPress={onContinue}
+					style={[styles.cta, {backgroundColor: colors.primary, borderRadius: radii.pill}]}>
+					<Text
+						style={[
+							styles.ctaLabel,
+							{
+								color: colors.light,
+								fontFamily: fonts.medium.fontFamily,
+								fontWeight: fonts.medium.fontWeight,
+								fontSize: typeScale.body.fontSize,
+							},
+						]}>
+						{t('form.continueCta')}
+					</Text>
 				</Pressable>
 			</View>
 		</View>
@@ -145,30 +145,23 @@ const styles = StyleSheet.create({
 	scrollContent: {
 		flexGrow: 1,
 	},
-	sectionTitle: {
-		marginTop: 24, // lg spacing token
+	groups: {
+		marginTop: 24,
 	},
-	fieldGroup: {
-		marginTop: 24, // lg spacing token
-	},
-	partyLabel: {
-		marginBottom: 8, // sm spacing token
+	groupGap: {
+		marginTop: 16,
 	},
 	footer: {
-		marginTop: 24, // lg spacing token
+		paddingTop: 16,
 	},
-	footerButton: {
-		flex: 1,
-		minHeight: 44, // minimum touch target
+	cta: {
+		minHeight: 52,
 		alignItems: 'center',
 		justifyContent: 'center',
 		paddingHorizontal: 24,
-		paddingVertical: 12,
+		paddingVertical: 14,
 	},
-	backButton: {
-		borderWidth: 1,
-	},
-	footerButtonLabel: {
-		fontWeight: '600',
+	ctaLabel: {
+		textAlign: 'center',
 	},
 });

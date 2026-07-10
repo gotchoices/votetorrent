@@ -3,7 +3,7 @@ This file contains the global styles for the app.
 Global styles should only be used in cases where styles will be used on many screens.
 */
 
-import { StyleSheet } from 'react-native';
+import { Platform, StyleSheet } from 'react-native';
 
 // Raw style-object map (the literal passed to StyleSheet.create) exported so tests
 // can deep-equal footer/cardSurface values without resolving RN StyleSheet numeric IDs.
@@ -52,14 +52,25 @@ export const globalStyleDefs = {
 		paddingHorizontal: 16,
 		marginVertical: 10,
 		marginHorizontal: 4,
-		shadowColor: '#000',
-		shadowOffset: {
-			width: 0,
-			height: 6,
-		},
-		shadowOpacity: 0.18,
-		shadowRadius: 18,
-		elevation: 8,
+		// Rounded shadow that follows the border radius on BOTH platforms. RN 0.78 now honors the
+		// iOS `shadow*` props on Android too, where they paint a RECTANGULAR box that ignores
+		// `borderRadius` (the reported "card shadow looks like a rectangle" bug). So the iOS shadow
+		// is scoped to iOS only; Android uses `elevation`, whose shadow clips to the rounded outline.
+		...Platform.select({
+			ios: {
+				shadowColor: '#000',
+				shadowOffset: {
+					width: 0,
+					height: 6,
+				},
+				shadowOpacity: 0.18,
+				shadowRadius: 18,
+			},
+			android: {
+				elevation: 8,
+			},
+			default: {},
+		}),
 	},
 };
 

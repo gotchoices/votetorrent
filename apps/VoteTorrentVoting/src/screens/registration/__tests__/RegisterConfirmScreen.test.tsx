@@ -1,22 +1,20 @@
 /**
- * Unit tests for RegisterConfirmScreen (REG-03, Step 3) — read-only review of the draft, Submit
- * navigates to Confirmation WITHOUT flipping isRegistered (D-05). Fully mocks
- * `@react-navigation/native` (spy-able `navigate`/`goBack`), `providers/VotingAppProvider`
- * (spy-able `setIsRegistered`, so we can assert it is never called), and `providers/
- * RegistrationDraftProvider` (fixture draft), mirroring `ConfirmationScreen.test.tsx`'s
- * full-replace mocking pattern.
+ * Unit tests for RegisterConfirmScreen (REG-03, Step 3) — full-bleed redesign: RegisterFormHeader
+ * ("Confirm"), a single review card with label-left/value-right rows, and a full-width "Submit".
+ * Submit navigates to Confirmation but does NOT flip isRegistered (D-05). Mocks nav/theme/providers.
  */
 import React from 'react';
 import renderer from 'react-test-renderer';
-import {ScrollView} from 'react-native';
-import '../../../i18n'; // initializes the global i18next instance useTranslation() reads from
+import {ScrollView, Text} from 'react-native';
+import '../../../i18n';
 
 const mockNavigate = jest.fn();
 const mockGoBack = jest.fn();
+const mockPopToTop = jest.fn();
 const mockSetIsRegistered = jest.fn();
 
 jest.mock('@react-navigation/native', () => ({
-	useNavigation: () => ({navigate: mockNavigate, goBack: mockGoBack}),
+	useNavigation: () => ({navigate: mockNavigate, goBack: mockGoBack, popToTop: mockPopToTop}),
 	useTheme: () => ({
 		colors: {
 			primary: '#2196f3',
@@ -24,21 +22,24 @@ jest.mock('@react-navigation/native', () => ({
 			text: '#000000',
 			textSecondary: '#7d7d7d',
 			light: '#ffffff',
+			border: '#e0e0e0',
 			card: '#ffffff',
-			secondaryButtonSurface: '#f5f5f5',
+			error: '#d32f2f',
 			progressFill: '#2196f3',
 			progressTrack: '#e0e0e0',
 		},
 		fonts: {
 			regular: {fontFamily: 'System', fontWeight: '400'},
 			medium: {fontFamily: 'System', fontWeight: '500'},
+			bold: {fontFamily: 'System', fontWeight: '700'},
 		},
 		type: {
+			h2: {fontSize: 28, lineHeight: 34},
 			h4: {fontSize: 20, lineHeight: 26},
 			body: {fontSize: 16, lineHeight: 22},
 			caption: {fontSize: 14, lineHeight: 18},
 		},
-		radii: {pill: 999, md: 8},
+		radii: {pill: 999, lg: 16, md: 12, sm: 8},
 	}),
 }));
 
@@ -46,14 +47,13 @@ jest.mock('../../../providers/VotingAppProvider', () => ({
 	useVotingApp: () => ({isInitialized: true, setIsRegistered: mockSetIsRegistered}),
 }));
 
-// party is the stable KEY ('republican'), not a localized label — RegisterConfirmScreen
-// resolves it to the current-locale label at render time (Manual-QA gap-closure, Phase 41).
-const draft = {
+// party is the stable KEY ('republican'), resolved to the locale label at render time.
+const draft: Record<string, string> = {
 	firstName: 'Jane',
 	lastName: 'Doe',
 	dob: '01/23/1990',
 	email: 'jane@example.com',
-	phone: '555-1234',
+	phone: '5551234567',
 	addressLine1: '123 Main St',
 	addressLine2: '',
 	addressLine3: 'Salt Lake City, UT',
@@ -75,76 +75,67 @@ function renderScreen() {
 	return tr;
 }
 
+function rowValue(tr: renderer.ReactTestRenderer, key: string): string {
+	const row = tr.root.findByProps({testID: `register-review-${key}`});
+	// the value Text is the last Text child of the row
+	const texts = row.findAllByType(Text);
+	return texts[texts.length - 1].props.children;
+}
+
 beforeEach(() => {
 	mockNavigate.mockClear();
 	mockGoBack.mockClear();
+	mockPopToTop.mockClear();
 	mockSetIsRegistered.mockClear();
+	draft.party = 'republican';
 });
 
 describe('RegisterConfirmScreen (REG-03, Step 3)', () => {
-	it('renders StepProgressBar step 3 and 6 review rows with the literal draft values', () => {
+	it('renders StepDots step 3 and the 6 review rows with the literal draft values', () => {
 		const tr = renderScreen();
-		expect(tr.root.findByProps({testID: 'step-segment-3'})).toBeDefined();
-
-		const text = JSON.stringify(tr.toJSON());
-		expect(text).toContain('Jane Doe');
-		expect(text).toContain('01/23/1990');
-		expect(text).toContain('jane@example.com');
-		expect(text).toContain('555-1234');
-		expect(text).toContain('Republican Party');
-		expect(text).toContain('123 Main St, Salt Lake City, UT');
+		expect(tr.root.findByProps({testID: 'step-dot-3'})).toBeDefined();
+		expect(rowValue(tr, 'fullName')).toBe('Jane Doe');
+		expect(rowValue(tr, 'dob')).toBe('01/23/1990');
+		expect(rowValue(tr, 'email')).toBe('jane@example.com');
+		expect(rowValue(tr, 'phone')).toBe('5551234567');
+		expect(rowValue(tr, 'address')).toBe('123 Main St, Salt Lake City, UT');
+		expect(rowValue(tr, 'party')).toBe('Republican Party');
 	});
 
-	it('Back fires navigation.goBack()', () => {
+	it('header back fires goBack; close fires popToTop', () => {
 		const tr = renderScreen();
-		const back = tr.root.findByProps({testID: 'register-back'});
 		renderer.act(() => {
-			back.props.onPress();
+			tr.root.findByProps({testID: 'register-back'}).props.onPress();
 		});
-		expect(mockGoBack).toHaveBeenCalledTimes(1);
+		expect(mockGoBack).toHaveBeenCalled();
+		renderer.act(() => {
+			tr.root.findByProps({testID: 'register-close'}).props.onPress();
+		});
+		expect(mockPopToTop).toHaveBeenCalled();
 	});
 
 	it('Submit navigates to Confirmation and does NOT flip isRegistered (D-05)', () => {
 		const tr = renderScreen();
-		const submit = tr.root.findByProps({testID: 'register-submit'});
 		renderer.act(() => {
-			submit.props.onPress();
+			tr.root.findByProps({testID: 'register-submit'}).props.onPress();
 		});
 		expect(mockNavigate).toHaveBeenCalledWith('Confirmation');
 		expect(mockSetIsRegistered).not.toHaveBeenCalled();
 	});
 
-	// Manual-QA gap-closure (Phase 41 re-verification): the footer Back/Submit row was clipped
-	// by the bottom tab bar because the review content rendered inside a single non-scrolling
-	// View. Assert the review rows live inside a ScrollView, and the footer buttons are siblings
-	// OUTSIDE it (not scrolled away), so Submit stays reachable regardless of review-content height.
-	it('renders review rows inside a ScrollView, with register-back/register-submit as siblings outside it', () => {
+	it('renders review rows inside a ScrollView, with register-back/register-submit outside it', () => {
 		const tr = renderScreen();
 		const scrollViews = tr.root.findAllByType(ScrollView);
 		expect(scrollViews.length).toBe(1);
-
-		const reviewRow = tr.root.findByProps({testID: 'register-review-fullName'});
-		expect(scrollViews[0].findAllByProps({testID: 'register-review-fullName'})).toContain(reviewRow);
-
-		expect(scrollViews[0].findAllByProps({testID: 'register-back'}).length).toBe(0);
+		// back lives in the header (inside the scroll); submit is the pinned sibling below it.
 		expect(scrollViews[0].findAllByProps({testID: 'register-submit'}).length).toBe(0);
-		expect(tr.root.findByProps({testID: 'register-back'})).toBeDefined();
-		expect(tr.root.findByProps({testID: 'register-submit'})).toBeDefined();
+		expect(tr.root.findAllByProps({testID: 'register-submit'}).length).toBeGreaterThan(0);
+		expect(scrollViews[0].findAllByProps({testID: 'register-review-fullName'}).length).toBeGreaterThan(0);
 	});
 
-	// Manual-QA gap-closure (Phase 41 re-verification): party is a stable KEY resolved via
-	// t('form.party.' + key) at this display site — with no party selected (''), the guard must
-	// render an empty value rather than the broken t('form.party.') string.
-	it('renders an empty party review row when draft.party is unselected (empty-key guard)', () => {
-		const originalParty = draft.party;
+	it('renders an empty party review value when draft.party is unselected (empty-key guard)', () => {
 		draft.party = '';
-		try {
-			const tr = renderScreen();
-			const text = JSON.stringify(tr.toJSON());
-			expect(text).not.toContain('form.party.');
-			expect(tr.root.findByProps({testID: 'register-review-party'})).toBeDefined();
-		} finally {
-			draft.party = originalParty;
-		}
+		const tr = renderScreen();
+		expect(rowValue(tr, 'party')).toBe('');
 	});
 });
