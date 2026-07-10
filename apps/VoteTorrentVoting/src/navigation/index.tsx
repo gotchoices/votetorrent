@@ -27,6 +27,8 @@ import type {
 import HomeScreen from '../screens/home/HomeScreen';
 import ValidationDetailsScreen from '../screens/home/ValidationDetailsScreen';
 import BallotScreen from '../screens/ballot/BallotScreen';
+import IndividualQuestionScreen from '../screens/ballot/IndividualQuestionScreen';
+import ReviewSubmitScreen from '../screens/ballot/ReviewSubmitScreen';
 import RegistrationScreen from '../screens/registration/RegistrationScreen';
 import DeviceAttestationScreen from '../screens/registration/DeviceAttestationScreen';
 import RegisterPersonalScreen from '../screens/registration/RegisterPersonalScreen';
@@ -37,6 +39,7 @@ import ScanScreen from '../screens/scan/ScanScreen';
 import SettingsScreen from '../screens/settings/SettingsScreen';
 import PlaceholderModal from '../components/PlaceholderModal';
 import {RegistrationDraftProvider} from '../providers/RegistrationDraftProvider';
+import {BallotSelectionProvider} from '../providers/BallotSelectionProvider';
 
 // CloseButton (D-16) — byte-identical mechanics to Authority's `navigation/index.tsx` CloseButton
 // (lines 249-256): a Pressable with hitSlop=8 wrapping a FontAwesome6 "xmark" glyph, calling the
@@ -63,65 +66,74 @@ function VoteStackNavigator() {
 	const {t: tBallot} = useTranslation('ballot');
 
 	return (
-		<VoteStack.Navigator>
-			<VoteStack.Screen
-				name="Home"
-				component={HomeScreen}
-				options={{title: tHome('headerTitle')}}
-			/>
-			<VoteStack.Screen
-				name="Ballot"
-				component={BallotScreen}
-				options={{title: tBallot('headerTitle')}}
-			/>
-			{/* HOME-03/D-11: plain push (default header, back chevron), matching Ballot's own
-			    registration exactly — NOT a modal (RESEARCH Anti-Patterns: no breadcrumb component). */}
-			<VoteStack.Screen
-				name="ValidationDetails"
-				component={ValidationDetailsScreen}
-				options={{title: tHome('validationDetailsTitle')}}
-			/>
-			<VoteStack.Screen
-				name="IndividualQuestion"
-				component={PlaceholderModal}
-				options={({navigation}) => ({
-					title: tBallot('individualQuestionTitle'),
-					presentation: 'modal',
-					headerBackVisible: false,
-					headerLeft: () => <CloseButton onPress={() => navigation.goBack()} />,
-				})}
-			/>
-			<VoteStack.Screen
-				name="ElectionInfo"
-				component={PlaceholderModal}
-				options={({navigation}) => ({
-					title: tHome('electionInfoTitle'),
-					presentation: 'modal',
-					headerBackVisible: false,
-					headerLeft: () => <CloseButton onPress={() => navigation.goBack()} />,
-				})}
-			/>
-			<VoteStack.Screen
-				name="OfficeInfo"
-				component={PlaceholderModal}
-				options={({navigation}) => ({
-					title: tBallot('officeInfoTitle'),
-					presentation: 'modal',
-					headerBackVisible: false,
-					headerLeft: () => <CloseButton onPress={() => navigation.goBack()} />,
-				})}
-			/>
-			<VoteStack.Screen
-				name="CandidateInfo"
-				component={PlaceholderModal}
-				options={({navigation}) => ({
-					title: tBallot('candidateInfoTitle'),
-					presentation: 'modal',
-					headerBackVisible: false,
-					headerLeft: () => <CloseButton onPress={() => navigation.goBack()} />,
-				})}
-			/>
-		</VoteStack.Navigator>
+		<BallotSelectionProvider>
+			<VoteStack.Navigator>
+				<VoteStack.Screen
+					name="Home"
+					component={HomeScreen}
+					options={{title: tHome('headerTitle')}}
+				/>
+				<VoteStack.Screen
+					name="Ballot"
+					component={BallotScreen}
+					options={{title: tBallot('headerTitle')}}
+				/>
+				{/* HOME-03/D-11: plain push (default header, back chevron), matching Ballot's own
+				    registration exactly — NOT a modal (RESEARCH Anti-Patterns: no breadcrumb component). */}
+				<VoteStack.Screen
+					name="ValidationDetails"
+					component={ValidationDetailsScreen}
+					options={{title: tHome('validationDetailsTitle')}}
+				/>
+				<VoteStack.Screen
+					name="IndividualQuestion"
+					component={IndividualQuestionScreen}
+					options={({navigation}) => ({
+						title: tBallot('individualQuestionTitle'),
+						presentation: 'modal',
+						headerBackVisible: false,
+						headerLeft: () => <CloseButton onPress={() => navigation.goBack()} />,
+					})}
+				/>
+				{/* VOTE-04/D-05: plain push (default header, back chevron) — mirrors ValidationDetails,
+				    NOT a modal. Selection state lives on BallotSelectionProvider, not a route param. */}
+				<VoteStack.Screen
+					name="ReviewSubmit"
+					component={ReviewSubmitScreen}
+					options={{title: tBallot('reviewSubmitTitle')}}
+				/>
+				<VoteStack.Screen
+					name="ElectionInfo"
+					component={PlaceholderModal}
+					options={({navigation}) => ({
+						title: tHome('electionInfoTitle'),
+						presentation: 'modal',
+						headerBackVisible: false,
+						headerLeft: () => <CloseButton onPress={() => navigation.goBack()} />,
+					})}
+				/>
+				<VoteStack.Screen
+					name="OfficeInfo"
+					component={PlaceholderModal}
+					options={({navigation}) => ({
+						title: tBallot('officeInfoTitle'),
+						presentation: 'modal',
+						headerBackVisible: false,
+						headerLeft: () => <CloseButton onPress={() => navigation.goBack()} />,
+					})}
+				/>
+				<VoteStack.Screen
+					name="CandidateInfo"
+					component={PlaceholderModal}
+					options={({navigation}) => ({
+						title: tBallot('candidateInfoTitle'),
+						presentation: 'modal',
+						headerBackVisible: false,
+						headerLeft: () => <CloseButton onPress={() => navigation.goBack()} />,
+					})}
+				/>
+			</VoteStack.Navigator>
+		</BallotSelectionProvider>
 	);
 }
 
