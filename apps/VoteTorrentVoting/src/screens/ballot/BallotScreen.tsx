@@ -12,7 +12,7 @@
  * (VOTE-03), and a footer with Save & Exit (`popToTop()`, selections retained, D-07) + Review &
  * Submit (Open Question 2 — both rendered together in the Ballot Page footer).
  */
-import React, {useEffect, useState} from 'react';
+import React from 'react';
 import {Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
 import {useNavigation, useTheme} from '@react-navigation/native';
 import type {ExtendedTheme} from '@react-navigation/native';
@@ -27,8 +27,9 @@ import {
 import {ProgressBar} from '../../components/ProgressBar';
 import {OfficeRow} from '../../components/OfficeRow';
 import {globalStyles} from '../../theme/styles';
+import {useBallot} from '../../hooks/useBallot';
 import type {VoteStackParamList} from '../../navigation/types';
-import type {MockBallot, Office} from '../../providers/types';
+import type {Office} from '../../providers/types';
 
 type BallotNavigationProp = NativeStackNavigationProp<VoteStackParamList, 'Ballot'>;
 
@@ -40,21 +41,8 @@ export default function BallotScreen() {
 	const {t} = useTranslation('ballot');
 	const {t: tHome} = useTranslation('home');
 	const navigation = useNavigation<BallotNavigationProp>();
-	const [ballot, setBallot] = useState<MockBallot | null>(null);
-
-	// Fetch on mount — mirrors HomeScreen's getElection().then(setElection) async-read-into-state
-	// pattern, live-guarded against a post-unmount setState.
-	useEffect(() => {
-		let live = true;
-		getBallot().then(result => {
-			if (live) {
-				setBallot(result);
-			}
-		});
-		return () => {
-			live = false;
-		};
-	}, [getBallot]);
+	// 42-REVIEW IN-01: shared live-guarded fetch-on-mount effect, extracted out of the screen.
+	const {ballot} = useBallot(getBallot);
 
 	const offices = ballot?.offices ?? [];
 	// D-04: derived every render from selectionMap, never a stored counter.

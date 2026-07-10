@@ -18,7 +18,7 @@
  * on the Ballot Page, not a re-opened modal at the last question. "Learn about this candidate" is
  * an unconditional link to `CandidateInfo` (VOTE-03).
  */
-import React, {useEffect, useState} from 'react';
+import React from 'react';
 import {Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
 import {useNavigation, useTheme} from '@react-navigation/native';
 import type {ExtendedTheme} from '@react-navigation/native';
@@ -28,8 +28,8 @@ import {useVotingApp} from '../../providers/VotingAppProvider';
 import {useBallotSelection} from '../../providers/BallotSelectionProvider';
 import {CandidateSelector} from '../../components/CandidateSelector';
 import {globalStyles} from '../../theme/styles';
+import {useBallot} from '../../hooks/useBallot';
 import type {VoteStackParamList} from '../../navigation/types';
-import type {MockBallot} from '../../providers/types';
 
 type IndividualQuestionNavigationProp = NativeStackNavigationProp<
 	VoteStackParamList,
@@ -49,21 +49,8 @@ export default function IndividualQuestionScreen() {
 	const {colors, fonts, type: typeScale, radii} = useTheme() as ExtendedTheme;
 	const {t} = useTranslation('ballot');
 	const navigation = useNavigation<IndividualQuestionNavigationProp>();
-	const [ballot, setBallot] = useState<MockBallot | null>(null);
-
-	// Fetch on mount — mirrors BallotScreen's getBallot().then(setBallot) async-read-into-state
-	// pattern, live-guarded against a post-unmount setState.
-	useEffect(() => {
-		let live = true;
-		getBallot().then(result => {
-			if (live) {
-				setBallot(result);
-			}
-		});
-		return () => {
-			live = false;
-		};
-	}, [getBallot]);
+	// 42-REVIEW IN-01: shared live-guarded fetch-on-mount effect, extracted out of the screen.
+	const {ballot} = useBallot(getBallot);
 
 	const offices = ballot?.offices ?? [];
 	const office = offices[currentQuestionIndex];

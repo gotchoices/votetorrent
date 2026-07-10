@@ -12,7 +12,7 @@
  * separate confirmation route exists this phase (RESEARCH Assumption A5). No real signing or
  * persistence is invoked anywhere in this file (D-08 / threat T-42-02, accepted-low).
  */
-import React, {useEffect, useState} from 'react';
+import React, {useState} from 'react';
 import {Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
 import {useNavigation, useTheme} from '@react-navigation/native';
 import type {ExtendedTheme} from '@react-navigation/native';
@@ -21,8 +21,8 @@ import {useTranslation} from 'react-i18next';
 import {useVotingApp} from '../../providers/VotingAppProvider';
 import {useBallotSelection, resolveSelectionSummary} from '../../providers/BallotSelectionProvider';
 import {globalStyles} from '../../theme/styles';
+import {useBallot} from '../../hooks/useBallot';
 import type {VoteStackParamList} from '../../navigation/types';
-import type {MockBallot} from '../../providers/types';
 
 type ReviewSubmitNavigationProp = NativeStackNavigationProp<VoteStackParamList, 'ReviewSubmit'>;
 
@@ -33,22 +33,9 @@ export default function ReviewSubmitScreen() {
 	const {colors, fonts, type: typeScale, radii} = useTheme() as ExtendedTheme;
 	const {t} = useTranslation('ballot');
 	const navigation = useNavigation<ReviewSubmitNavigationProp>();
-	const [ballot, setBallot] = useState<MockBallot | null>(null);
+	// 42-REVIEW IN-01: shared live-guarded fetch-on-mount effect, extracted out of the screen.
+	const {ballot} = useBallot(getBallot);
 	const [submitted, setSubmitted] = useState(false);
-
-	// Fetch on mount — mirrors BallotScreen's getBallot().then(setBallot) async-read-into-state
-	// pattern, live-guarded against a post-unmount setState.
-	useEffect(() => {
-		let live = true;
-		getBallot().then(result => {
-			if (live) {
-				setBallot(result);
-			}
-		});
-		return () => {
-			live = false;
-		};
-	}, [getBallot]);
 
 	const offices = ballot?.offices ?? [];
 
