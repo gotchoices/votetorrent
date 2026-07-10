@@ -25,7 +25,7 @@ type HomeNavigationProp = NativeStackNavigationProp<VoteStackParamList, 'Home'>;
 
 export default function HomeScreen() {
 	// D-06/SHELL-03: every screen routes through useVotingApp() — no inline mockData import.
-	const {isInitialized, lifecycleState, setLifecycleState, getElection} = useVotingApp();
+	const {isInitialized, lifecycleState, setLifecycleState, getElection, hasVoted} = useVotingApp();
 	const {colors, type: typeScale} = useTheme() as ExtendedTheme;
 	const navigation = useNavigation<HomeNavigationProp>();
 	const [election, setElection] = useState<MockElection | null>(null);
@@ -59,6 +59,7 @@ export default function HomeScreen() {
 					onVoteNow={() => navigation.navigate('Ballot')}
 					onViewValidationDetails={() => navigation.navigate('ValidationDetails')}
 					onLearnAboutElection={() => navigation.navigate('ElectionInfo')}
+					hasVoted={hasVoted}
 				/>
 			) : null}
 
