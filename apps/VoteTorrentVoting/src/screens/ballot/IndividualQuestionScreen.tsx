@@ -121,7 +121,7 @@ export default function IndividualQuestionScreen() {
 				</Pressable>
 			</ScrollView>
 
-			<View style={[globalStyles.footerButtonsContainer, styles.footer]}>
+			<View style={styles.footer}>
 				{!isFirst && (
 					<Pressable
 						testID="question-previous"
@@ -173,14 +173,14 @@ const styles = StyleSheet.create({
 	},
 	footer: {
 		marginTop: 24, // lg spacing token
+		gap: 12,
 	},
 	footerButton: {
-		flex: 1,
-		minHeight: 44, // minimum touch target
+		minHeight: 48,
 		alignItems: 'center',
 		justifyContent: 'center',
 		paddingHorizontal: 24,
-		paddingVertical: 12,
+		paddingVertical: 14,
 	},
 	previousButton: {
 		borderWidth: 1,
