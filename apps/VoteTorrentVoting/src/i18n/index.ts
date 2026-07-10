@@ -19,6 +19,8 @@ const resources = {
 			close: 'Close',
 			networkName: 'Utah Network',
 			notifications: 'Notifications',
+			'breadcrumb.home': 'Home',
+			'breadcrumb.ballot': 'Ballot',
 		},
 		home: {
 			headerTitle: 'Vote',
@@ -89,7 +91,7 @@ const resources = {
 			'learnAboutOffice': 'Learn about this office',
 			'learnAboutCandidate': 'Learn about this candidate',
 			'federalSection': 'Federal',
-			'stateSection': 'State',
+			'stateSection': 'State (UT)',
 			'reviewSubmitTitle': 'Review & Submit',
 			// Party labels (D-02/D-03) — own ballot-namespace keys, not a cross-namespace reuse of
 			// registration.form.party.* (RESEARCH Pattern 3 — each namespace stays independently
@@ -217,6 +219,8 @@ const resources = {
 			close: 'Cerrar',
 			networkName: 'Utah Network',
 			notifications: 'Notificaciones',
+			'breadcrumb.home': 'Inicio',
+			'breadcrumb.ballot': 'Papeleta',
 		},
 		home: {
 			headerTitle: 'Votar',
@@ -279,7 +283,7 @@ const resources = {
 			'learnAboutOffice': 'Conoce más sobre este cargo',
 			'learnAboutCandidate': 'Conoce más sobre este candidato',
 			'federalSection': 'Federal',
-			'stateSection': 'Estatal',
+			'stateSection': 'Estatal (UT)',
 			'reviewSubmitTitle': 'Revisar y enviar',
 			'candidateParty.democratic': 'Partido Demócrata',
 			'candidateParty.republican': 'Partido Republicano',

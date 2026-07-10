@@ -53,16 +53,21 @@ describe('OfficeRow (VOTE-01)', () => {
 		expect(tr.root.findByProps({children: 'U.S. Senate'})).toBeTruthy();
 	});
 
-	it('renders the "Not yet answered" placeholder when hasSelection is false', () => {
+	it('shows the chevron (and no selection summary) when hasSelection is false', () => {
 		const {tr} = renderRow({selectionSummary: 'Not yet answered', hasSelection: false});
-		expect(tr.root.findByProps({children: 'Not yet answered'})).toBeTruthy();
+		// Figma: an unanswered office shows only the chevron affordance — no summary copy.
+		expect(tr.root.findByProps({testID: 'office-row-chevron'})).toBeTruthy();
+		expect(tr.root.findAllByProps({testID: 'office-row-selection'})).toHaveLength(0);
+		expect(tr.root.findAllByProps({testID: 'office-row-check'})).toHaveLength(0);
 	});
 
-	it('renders the selected candidate name(s) when hasSelection is true, in colors.success', () => {
+	it('renders the selected candidate name(s) + green check when hasSelection is true, in colors.success', () => {
 		const {tr} = renderRow({selectionSummary: 'Alice Adams', hasSelection: true});
 		const summaryText = tr.root.findByProps({children: 'Alice Adams'});
 		const flatStyle = Object.assign({}, ...[summaryText.props.style].flat(Infinity).filter(Boolean));
 		expect(flatStyle.color).toBe(lightTheme.colors.success);
+		expect(tr.root.findByProps({testID: 'office-row-check'})).toBeTruthy();
+		expect(tr.root.findAllByProps({testID: 'office-row-chevron'})).toHaveLength(0);
 	});
 
 	it('renders the caller-resolved learn-link label', () => {

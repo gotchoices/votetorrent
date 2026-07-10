@@ -1,23 +1,23 @@
 /**
  * BallotScreen — the real Ballot Page (VOTE-01/VOTE-03), pushed within the Vote stack (D-08
- * topology; not its own tab). Reads through `useVotingApp()` (D-06/SHELL-03) for `getBallot()`
- * and through `useBallotSelection()` (Phase 42 Pattern 1/4/5) for `selectionMap` /
+ * topology; not its own tab). Reads through `useVotingApp()` (D-06/SHELL-03) for `getElection()` /
+ * `getBallot()` and through `useBallotSelection()` (Phase 42 Pattern 1/4/5) for `selectionMap` /
  * `setCurrentQuestionIndex`.
  *
- * Renders offices grouped into Federal/State sections (a display-time filter over the flat,
- * order-stable `offices` array — RESEARCH Pattern 3), a live "N/M questions completed" indicator
- * derived from `selectionMap` via `computeCompletedCount` on every render (never a stored
- * counter, D-04), a per-office `OfficeRow` (tap opens Individual Question after setting the flat
- * `currentQuestionIndex`, Pattern 5), an election-level "Learn about this election" link
- * (VOTE-03), and a footer with Save & Exit (`popToTop()`, selections retained, D-07) + Review &
- * Submit (Open Question 2 — both rendered together in the Ballot Page footer).
+ * Layout matches the Figma Ballot frame (2764:1181): the native header title is set to the election
+ * name, a "Home › Ballot" breadcrumb sits at the top of the scroll, a full-width "Continue Voting"
+ * CTA jumps to the first unanswered question, a green progress bar + "N/M questions completed"
+ * label follows, then offices grouped into Federal / State (UT) sections rendered as `OfficeRow`
+ * cards (chevron when unanswered, green check + selection summary when answered). The footer stacks
+ * two full-width buttons: Save & Exit (outline, `popToTop()`) over Review & Submit Ballot (solid).
  */
-import React from 'react';
+import React, {useEffect, useLayoutEffect, useState} from 'react';
 import {Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
 import {useNavigation, useTheme} from '@react-navigation/native';
 import type {ExtendedTheme} from '@react-navigation/native';
 import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
 import {useTranslation} from 'react-i18next';
+import FontAwesome6 from 'react-native-vector-icons/FontAwesome6';
 import {useVotingApp} from '../../providers/VotingAppProvider';
 import {
 	useBallotSelection,
@@ -29,25 +29,53 @@ import {OfficeRow} from '../../components/OfficeRow';
 import {globalStyles} from '../../theme/styles';
 import {useBallot} from '../../hooks/useBallot';
 import type {VoteStackParamList} from '../../navigation/types';
-import type {Office} from '../../providers/types';
+import type {MockElection, Office} from '../../providers/types';
 
 type BallotNavigationProp = NativeStackNavigationProp<VoteStackParamList, 'Ballot'>;
 
 export default function BallotScreen() {
 	// D-06/SHELL-03: every screen routes through useVotingApp() — no inline mockData import.
-	const {getBallot} = useVotingApp();
+	const {getElection, getBallot} = useVotingApp();
 	const {selectionMap, setCurrentQuestionIndex} = useBallotSelection();
 	const {colors, fonts, type: typeScale, radii} = useTheme() as ExtendedTheme;
 	const {t} = useTranslation('ballot');
-	const {t: tHome} = useTranslation('home');
+	const {t: tCommon} = useTranslation('common');
 	const navigation = useNavigation<BallotNavigationProp>();
 	// 42-REVIEW IN-01: shared live-guarded fetch-on-mount effect, extracted out of the screen.
 	const {ballot} = useBallot(getBallot);
+	const [election, setElection] = useState<MockElection | null>(null);
+
+	// Fetch the election once so the native header can read its title (Figma: the header shows the
+	// election name, not a generic "Ballot" label).
+	useEffect(() => {
+		let live = true;
+		getElection().then(result => {
+			if (live) {
+				setElection(result);
+			}
+		});
+		return () => {
+			live = false;
+		};
+	}, [getElection]);
+
+	useLayoutEffect(() => {
+		if (election?.title) {
+			navigation.setOptions({title: election.title});
+		}
+	}, [navigation, election?.title]);
 
 	const offices = ballot?.offices ?? [];
 	// D-04: derived every render from selectionMap, never a stored counter.
 	const {completed, total} = computeCompletedCount(offices, selectionMap);
 	const progress = total > 0 ? completed / total : 0;
+
+	// Continue Voting jumps to the first unanswered office (or the first office if all answered).
+	const onContinueVoting = () => {
+		const firstUnanswered = offices.findIndex(office => !(selectionMap[office.id]?.length));
+		setCurrentQuestionIndex(firstUnanswered >= 0 ? firstUnanswered : 0);
+		navigation.navigate('IndividualQuestion');
+	};
 
 	const renderOfficeSection = (jurisdiction: Office['jurisdiction']) =>
 		offices
@@ -80,41 +108,71 @@ export default function BallotScreen() {
 	return (
 		<View style={[globalStyles.container, styles.screen, {backgroundColor: colors.background}]}>
 			<ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
+				{/* Breadcrumb (Figma): Home › Ballot — Home returns to the Vote stack root. */}
+				<View style={styles.breadcrumb}>
+					<Pressable testID="ballot-breadcrumb-home" onPress={() => navigation.popToTop()} hitSlop={6}>
+						<Text
+							style={[
+								styles.crumb,
+								{
+									color: colors.textSecondary,
+									fontSize: typeScale.caption.fontSize,
+									lineHeight: typeScale.caption.lineHeight,
+								},
+							]}>
+							{tCommon('breadcrumb.home')}
+						</Text>
+					</Pressable>
+					<FontAwesome6 name="chevron-right" size={10} color={colors.textSecondary} />
+					<Text
+						style={[
+							styles.crumb,
+							{
+								color: colors.text,
+								fontFamily: fonts.medium.fontFamily,
+								fontWeight: fonts.medium.fontWeight,
+								fontSize: typeScale.caption.fontSize,
+								lineHeight: typeScale.caption.lineHeight,
+							},
+						]}>
+						{tCommon('breadcrumb.ballot')}
+					</Text>
+				</View>
+
+				<Pressable
+					testID="ballot-continue-voting"
+					onPress={onContinueVoting}
+					style={[styles.continueCta, {backgroundColor: colors.primary, borderRadius: radii.pill}]}>
+					<Text
+						style={[
+							styles.continueLabel,
+							{
+								color: colors.light,
+								fontFamily: fonts.medium.fontFamily,
+								fontWeight: fonts.medium.fontWeight,
+								fontSize: typeScale.body.fontSize,
+							},
+						]}>
+						{t('continueVotingCta')}
+					</Text>
+				</Pressable>
+
 				<View style={styles.progressSection}>
+					<ProgressBar progress={progress} />
 					<Text
 						style={[
 							styles.progressLabel,
 							{
 								color: colors.textSecondary,
-								fontFamily: fonts.medium.fontFamily,
-								fontWeight: fonts.medium.fontWeight,
-								fontSize: typeScale.h4.fontSize,
-								lineHeight: typeScale.h4.lineHeight,
+								fontFamily: fonts.regular.fontFamily,
+								fontWeight: fonts.regular.fontWeight,
+								fontSize: typeScale.body.fontSize,
+								lineHeight: typeScale.body.lineHeight,
 							},
 						]}>
 						{t('progressLabel', {completed, total})}
 					</Text>
-					<ProgressBar progress={progress} />
 				</View>
-
-				{/* VOTE-03: election-level info entry point, unconditional (Open Question 1),
-					mirrors ElectionCard's onLearnAboutElection -> navigate('ElectionInfo') callback. */}
-				<Pressable
-					testID="ballot-learn-election"
-					onPress={() => navigation.navigate('ElectionInfo')}
-					style={styles.learnLink}>
-					<Text
-						style={[
-							styles.learnLinkText,
-							{
-								color: colors.link,
-								fontSize: typeScale.caption.fontSize,
-								lineHeight: typeScale.caption.lineHeight,
-							},
-						]}>
-						{tHome('learnAboutElection')}
-					</Text>
-				</Pressable>
 
 				<View style={globalStyles.section}>
 					<Text
@@ -151,9 +209,9 @@ export default function BallotScreen() {
 				</View>
 			</ScrollView>
 
-			{/* D-07: Save & Exit + Review & Submit, side by side (Open Question 2), reusing
+			{/* D-07: Save & Exit + Review & Submit, stacked full-width (Figma), reusing
 				globalStyles.footer's exact elevation/shadow values verbatim (VOTE-01/38 D-16). */}
-			<View style={[globalStyles.footer, styles.footerRow, {backgroundColor: colors.card}]}>
+			<View style={[globalStyles.footer, styles.footer, {backgroundColor: colors.card}]}>
 				<Pressable
 					testID="ballot-save-exit"
 					onPress={() => navigation.popToTop()}
@@ -163,7 +221,7 @@ export default function BallotScreen() {
 						{
 							backgroundColor: colors.secondaryButtonSurface,
 							borderColor: colors.primary,
-							borderRadius: radii.md,
+							borderRadius: radii.pill,
 						},
 					]}>
 					<Text style={[styles.footerButtonLabel, {color: colors.primary}]}>{t('saveExitCta')}</Text>
@@ -189,38 +247,43 @@ const styles = StyleSheet.create({
 	scrollContent: {
 		flexGrow: 1,
 	},
+	breadcrumb: {
+		flexDirection: 'row',
+		alignItems: 'center',
+		gap: 8,
+		marginBottom: 16,
+	},
+	crumb: {},
+	continueCta: {
+		minHeight: 48,
+		alignItems: 'center',
+		justifyContent: 'center',
+		paddingHorizontal: 24,
+		paddingVertical: 14,
+	},
+	continueLabel: {
+		textAlign: 'center',
+	},
 	progressSection: {
 		gap: 8, // sm spacing token
+		marginTop: 20,
 	},
-	progressLabel: {
-		marginBottom: 4,
-	},
-	learnLink: {
-		alignSelf: 'flex-start',
-		marginTop: 16,
-		minHeight: 44, // >=44px touch target
-		justifyContent: 'center',
-	},
-	learnLinkText: {
-		textDecorationLine: 'underline',
-	},
+	progressLabel: {},
 	sectionTitle: {
 		marginBottom: 16,
 	},
 	officeList: {
 		gap: 12,
 	},
-	footerRow: {
-		flexDirection: 'row',
-		gap: 16,
+	footer: {
+		gap: 12,
 	},
 	footerButton: {
-		flex: 1,
-		minHeight: 44, // minimum touch target
+		minHeight: 48,
 		alignItems: 'center',
 		justifyContent: 'center',
 		paddingHorizontal: 24,
-		paddingVertical: 12,
+		paddingVertical: 14,
 	},
 	saveExitButton: {
 		borderWidth: 1,
