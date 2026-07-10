@@ -34,9 +34,13 @@ export interface CandidateSelectorProps {
 	selectedIds: string[];
 	voteFor: number;
 	onToggle: (candidateId: string) => void;
+	/** Caller-resolved (i18n) "Learn about this candidate" link text. Link renders only when set. */
+	learnLabel?: string;
+	/** Opens the candidate-info dialog for the tapped candidate (caller owns dialog state). */
+	onLearnAboutCandidate?: (candidateId: string) => void;
 }
 
-export function CandidateSelector({candidates, selectedIds, voteFor, onToggle}: CandidateSelectorProps) {
+export function CandidateSelector({candidates, selectedIds, voteFor, onToggle, learnLabel, onLearnAboutCandidate}: CandidateSelectorProps) {
 	const {colors, fonts, type: typeScale} = useTheme() as ExtendedTheme;
 	const atCap = voteFor > 1 && selectedIds.length >= voteFor;
 
@@ -93,6 +97,27 @@ export function CandidateSelector({candidates, selectedIds, voteFor, onToggle}: 
 								}}>
 								{candidate.party}
 							</Text>
+							{/* Figma: "Learn about this candidate" lives inside the candidate card. Nested
+								Pressable so tapping it opens the info dialog without toggling selection. */}
+							{learnLabel && onLearnAboutCandidate ? (
+								<Pressable
+									testID={`candidate-learn-${candidate.id}`}
+									onPress={() => onLearnAboutCandidate(candidate.id)}
+									hitSlop={6}
+									style={styles.learnLink}>
+									<Text
+										style={{
+											color: colors.link,
+											fontFamily: fonts.regular.fontFamily,
+											fontWeight: fonts.regular.fontWeight,
+											fontSize: typeScale.caption.fontSize,
+											lineHeight: typeScale.caption.lineHeight,
+											textDecorationLine: 'underline',
+										}}>
+										{learnLabel}
+									</Text>
+								</Pressable>
+							) : null}
 						</View>
 					</Pressable>
 				);
@@ -119,5 +144,9 @@ const styles = StyleSheet.create({
 	},
 	textCol: {
 		flex: 1,
+	},
+	learnLink: {
+		alignSelf: 'flex-start',
+		marginTop: 6,
 	},
 });

@@ -157,15 +157,20 @@ describe('IndividualQuestionScreen (VOTE-02)', () => {
 		expect(navRef.getCurrentRoute()?.name).toBe('ReviewSubmit');
 	});
 
-	it('"Learn about this candidate" navigates to CandidateInfo', async () => {
-		const {tr, navRef} = renderScreen();
+	it('"Learn about this candidate" (in-card) opens the Candidate Info dialog', async () => {
+		const {tr} = renderScreen();
 		await flushBoot();
 
-		const learnLink = tr.root.findByProps({testID: 'question-learn-candidate'});
+		const firstCandidateId = mockBallot.offices[0].candidates[0].id;
+		// Dialog is closed until the in-card link is tapped.
+		expect(tr.root.findAllByProps({testID: 'info-dialog'})).toHaveLength(0);
+
+		const learnLink = tr.root.findByProps({testID: `candidate-learn-${firstCandidateId}`});
 		renderer.act(() => {
 			learnLink.props.onPress();
 		});
 
-		expect(navRef.getCurrentRoute()?.name).toBe('CandidateInfo');
+		expect(tr.root.findByProps({testID: 'info-dialog'})).toBeTruthy();
+		expect(JSON.stringify(tr.toJSON())).toContain('Candidate Info');
 	});
 });

@@ -14,12 +14,14 @@ import {Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
 import {useNavigation, useTheme} from '@react-navigation/native';
 import type {ExtendedTheme} from '@react-navigation/native';
 import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
+import {useTranslation} from 'react-i18next';
 import {useVotingApp} from '../../providers/VotingAppProvider';
 import {LIFECYCLE_ORDER} from '../../providers/types';
 import type {MockElection} from '../../providers/types';
 import type {VoteStackParamList} from '../../navigation/types';
 import {ElectionCard} from '../../components/ElectionCard';
 import {NetworkHeader} from '../../components/NetworkHeader';
+import {InfoDialog} from '../../components/InfoDialog';
 
 type HomeNavigationProp = NativeStackNavigationProp<VoteStackParamList, 'Home'>;
 
@@ -27,8 +29,11 @@ export default function HomeScreen() {
 	// D-06/SHELL-03: every screen routes through useVotingApp() — no inline mockData import.
 	const {isInitialized, lifecycleState, setLifecycleState, getElection, hasVoted} = useVotingApp();
 	const {colors, type: typeScale} = useTheme() as ExtendedTheme;
+	const {t} = useTranslation('home');
+	const {t: tCommon} = useTranslation('common');
 	const navigation = useNavigation<HomeNavigationProp>();
 	const [election, setElection] = useState<MockElection | null>(null);
+	const [electionInfoVisible, setElectionInfoVisible] = useState(false);
 
 	// Fetch on mount and re-fetch whenever lifecycleState changes — getElection's identity
 	// changes with lifecycleState (VotingAppProvider's useCallback([lifecycleState]) shape), so
@@ -61,7 +66,7 @@ export default function HomeScreen() {
 						election={election}
 						onVoteNow={() => navigation.navigate('Ballot')}
 						onViewValidationDetails={() => navigation.navigate('ValidationDetails')}
-						onLearnAboutElection={() => navigation.navigate('ElectionInfo')}
+						onLearnAboutElection={() => setElectionInfoVisible(true)}
 						hasVoted={hasVoted}
 					/>
 				) : null}
@@ -75,6 +80,15 @@ export default function HomeScreen() {
 					</Pressable>
 				) : null}
 			</ScrollView>
+
+			<InfoDialog
+				visible={electionInfoVisible}
+				title={t('electionInfo.title')}
+				subtitle={t('electionInfo.subtitle')}
+				body={t('electionInfo.body')}
+				closeLabel={tCommon('close')}
+				onClose={() => setElectionInfoVisible(false)}
+			/>
 		</View>
 	);
 }

@@ -162,27 +162,34 @@ describe('ballot navigation flow (VOTE-01/02/03)', () => {
 		expect(capturedSelection.value!.selectionMap[firstOffice.id]).toEqual([firstCandidateId]);
 	});
 
-	it('office row "Learn about this office" navigates to OfficeInfo (VOTE-03)', async () => {
-		const {tr, navRef} = renderFlow('Ballot');
+	it('office row "Learn about this office" opens the Office Info dialog (VOTE-03)', async () => {
+		const {tr} = renderFlow('Ballot');
 		await flushBoot();
+
+		expect(tr.root.findAllByProps({testID: 'info-dialog'})).toHaveLength(0);
 
 		const learnLink = tr.root.findAllByProps({testID: 'office-row-learn'})[0];
 		renderer.act(() => {
 			learnLink.props.onPress();
 		});
 
-		expect(navRef.getCurrentRoute()?.name).toBe('OfficeInfo');
+		expect(tr.root.findByProps({testID: 'info-dialog'})).toBeTruthy();
+		expect(JSON.stringify(tr.toJSON())).toContain('Office Info');
 	});
 
-	it('"Learn about this candidate" navigates to CandidateInfo (VOTE-03)', async () => {
-		const {tr, navRef} = renderFlow('IndividualQuestion');
+	it('"Learn about this candidate" (in-card) opens the Candidate Info dialog (VOTE-03)', async () => {
+		const {tr} = renderFlow('IndividualQuestion');
 		await flushBoot();
 
-		const learnLink = tr.root.findByProps({testID: 'question-learn-candidate'});
+		const firstCandidateId = mockBallot.offices[0].candidates[0].id;
+		expect(tr.root.findAllByProps({testID: 'info-dialog'})).toHaveLength(0);
+
+		const learnLink = tr.root.findByProps({testID: `candidate-learn-${firstCandidateId}`});
 		renderer.act(() => {
 			learnLink.props.onPress();
 		});
 
-		expect(navRef.getCurrentRoute()?.name).toBe('CandidateInfo');
+		expect(tr.root.findByProps({testID: 'info-dialog'})).toBeTruthy();
+		expect(JSON.stringify(tr.toJSON())).toContain('Candidate Info');
 	});
 });

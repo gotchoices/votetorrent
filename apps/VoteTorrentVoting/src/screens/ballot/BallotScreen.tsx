@@ -26,6 +26,7 @@ import {
 } from '../../providers/BallotSelectionProvider';
 import {ProgressBar} from '../../components/ProgressBar';
 import {OfficeRow} from '../../components/OfficeRow';
+import {InfoDialog} from '../../components/InfoDialog';
 import {globalStyles} from '../../theme/styles';
 import {useBallot} from '../../hooks/useBallot';
 import type {VoteStackParamList} from '../../navigation/types';
@@ -44,6 +45,7 @@ export default function BallotScreen() {
 	// 42-REVIEW IN-01: shared live-guarded fetch-on-mount effect, extracted out of the screen.
 	const {ballot} = useBallot(getBallot);
 	const [election, setElection] = useState<MockElection | null>(null);
+	const [officeInfoVisible, setOfficeInfoVisible] = useState(false);
 
 	// Fetch the election once so the native header can read its title (Figma: the header shows the
 	// election name, not a generic "Ballot" label).
@@ -100,7 +102,7 @@ export default function BallotScreen() {
 							setCurrentQuestionIndex(offices.indexOf(office));
 							navigation.navigate('IndividualQuestion');
 						}}
-						onLearnAboutOffice={() => navigation.navigate('OfficeInfo')}
+						onLearnAboutOffice={() => setOfficeInfoVisible(true)}
 					/>
 				);
 			});
@@ -233,6 +235,15 @@ export default function BallotScreen() {
 					</Pressable>
 				</View>
 			</ScrollView>
+
+			<InfoDialog
+				visible={officeInfoVisible}
+				title={t('officeInfo.title')}
+				subtitle={t('officeInfo.subtitle')}
+				body={t('officeInfo.body')}
+				closeLabel={tCommon('close')}
+				onClose={() => setOfficeInfoVisible(false)}
+			/>
 		</View>
 	);
 }

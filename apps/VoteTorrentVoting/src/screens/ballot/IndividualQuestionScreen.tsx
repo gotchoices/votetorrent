@@ -18,7 +18,7 @@
  * on the Ballot Page, not a re-opened modal at the last question. "Learn about this candidate" is
  * an unconditional link to `CandidateInfo` (VOTE-03).
  */
-import React, {useLayoutEffect} from 'react';
+import React, {useLayoutEffect, useState} from 'react';
 import {Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
 import {useNavigation, useTheme} from '@react-navigation/native';
 import type {ExtendedTheme} from '@react-navigation/native';
@@ -28,6 +28,7 @@ import FontAwesome6 from 'react-native-vector-icons/FontAwesome6';
 import {useVotingApp} from '../../providers/VotingAppProvider';
 import {useBallotSelection} from '../../providers/BallotSelectionProvider';
 import {CandidateSelector} from '../../components/CandidateSelector';
+import {InfoDialog} from '../../components/InfoDialog';
 import {globalStyles} from '../../theme/styles';
 import {useBallot} from '../../hooks/useBallot';
 import type {VoteStackParamList} from '../../navigation/types';
@@ -53,6 +54,7 @@ export default function IndividualQuestionScreen() {
 	const navigation = useNavigation<IndividualQuestionNavigationProp>();
 	// 42-REVIEW IN-01: shared live-guarded fetch-on-mount effect, extracted out of the screen.
 	const {ballot} = useBallot(getBallot);
+	const [candidateInfoVisible, setCandidateInfoVisible] = useState(false);
 
 	const offices = ballot?.offices ?? [];
 	const office = offices[currentQuestionIndex];
@@ -157,24 +159,9 @@ export default function IndividualQuestionScreen() {
 					selectedIds={selectionMap[office.id] ?? []}
 					voteFor={office.voteFor}
 					onToggle={candidateId => toggleCandidate(office.id, candidateId, office.voteFor)}
+					learnLabel={t('learnAboutCandidate')}
+					onLearnAboutCandidate={() => setCandidateInfoVisible(true)}
 				/>
-
-				<Pressable
-					testID="question-learn-candidate"
-					onPress={() => navigation.navigate('CandidateInfo')}
-					style={styles.learnLink}>
-					<Text
-						style={[
-							styles.learnLinkText,
-							{
-								color: colors.link,
-								fontSize: typeScale.caption.fontSize,
-								lineHeight: typeScale.caption.lineHeight,
-							},
-						]}>
-						{t('learnAboutCandidate')}
-					</Text>
-				</Pressable>
 			</ScrollView>
 
 			<View style={styles.footer}>
@@ -201,6 +188,15 @@ export default function IndividualQuestionScreen() {
 					<Text style={[styles.footerButtonLabel, {color: colors.light}]}>{t('nextCta')}</Text>
 				</Pressable>
 			</View>
+
+			<InfoDialog
+				visible={candidateInfoVisible}
+				title={t('candidateInfo.title')}
+				subtitle={t('candidateInfo.subtitle')}
+				body={t('candidateInfo.body')}
+				closeLabel={tCommon('close')}
+				onClose={() => setCandidateInfoVisible(false)}
+			/>
 		</View>
 	);
 }
@@ -224,15 +220,6 @@ const styles = StyleSheet.create({
 	crumb: {},
 	heading: {
 		marginBottom: 16, // md spacing token
-	},
-	learnLink: {
-		alignSelf: 'flex-start',
-		marginTop: 16,
-		minHeight: 44, // >=44px touch target
-		justifyContent: 'center',
-	},
-	learnLinkText: {
-		textDecorationLine: 'underline',
 	},
 	footer: {
 		marginTop: 24, // lg spacing token
