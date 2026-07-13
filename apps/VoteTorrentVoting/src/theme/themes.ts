@@ -146,27 +146,32 @@ export const darkTheme: ExtendedTheme = {
 	dark: true,
 	colors: {
 		primary: '#237ec7', // derived from light.primary #2196f3 via HSL invert(L→8)+desat(-20)
-		background: '#141414', // derived from light.background #fbfbfb via HSL invert(L→8)+desat(-20)
-		surface: '#141414', // derived from light.surface #fcfcfc via HSL invert(L→8)+desat(-20) — collapses near light.background/card since all three are near-white in light (expected consequence of one mechanical transform, D-11)
-		card: '#141414', // derived from light.card #ffffff via HSL invert(L→8)+desat(-20)
+		// D-11-OVERRIDE (2026-07-13 dark-mode-contrast-fixes): the raw mechanical transform floored
+		// background/surface/card all to #141414 (all three near-white in light → same L=8 clamp),
+		// collapsing card elevation to zero — on-device, cards were invisible against the page.
+		// Replaced with a hand-tuned 3-step dark elevation ramp (base < surface < card). text/bg and
+		// text/card contrast stay well above AA (≈16:1 / ≈14:1, verified in themes.test.ts).
+		background: '#0d0d0d', // base layer (darkest) — was #141414
+		surface: '#1c1c1c', // elevated surface — was #141414
+		card: '#1e1e1e', // cards read above the page — was #141414
 		text: '#ebebeb', // derived from light.text #000000 via HSL invert(L→92)+desat(-20)
 		textSecondary: '#828282', // derived from light.textSecondary #7d7d7d via HSL invert+desat (near self-inverse — source L is already mid-range)
-		border: '#1a1a1a', // derived from light.border #e5e5e5 via HSL invert(L→8)+desat(-20)
+		border: '#333333', // D-11-OVERRIDE: was #1a1a1a (invisible against #141414 surfaces) — bumped so dividers/outlines/progress-track border read in dark mode
 		notification: '#ba1e15', // derived from light.notification #FF3B30 via HSL invert+desat(-20)
-		secondary: '#ebebeb', // derived from light.secondary #000000 via HSL invert(L→92)+desat(-20)
+		secondary: '#ebebeb', // derived from light.secondary #000000 via HSL invert(L→92)+desat(-20) (mirrors text; no on-color foreground usage)
 		accent: '#262626', // derived from light.accent #d9d9d9 via HSL invert+desat(-20)
 		error: '#d07a7a', // derived from light.error #971d1d via HSL invert+desat(-20)
 		warning: '#ece756', // derived from light.warning #bcb600 via HSL invert+desat(-20)
 		contrast: '#d9d9d9', // derived from light.contrast #262626 via HSL invert+desat(-20)
 		success: '#699a6b', // derived from light.success #4caf50 via HSL invert+desat(-20)
-		dark: '#ebebeb', // derived from light.dark #000000 via HSL invert(L→92)+desat(-20)
-		light: '#141414', // derived from light.light #ffffff via HSL invert(L→8)+desat(-20)
+		dark: '#000000', // D-11-OVERRIDE: absolute anchor — must NOT invert. `dark`/`light` are fixed on-color foreground/background anchors (used ON saturated fills), not surfaces that flip with the theme. Was wrongly inverted to #ebebeb.
+		light: '#ffffff', // D-11-OVERRIDE: absolute anchor — must NOT invert. Consumed at 20 sites as the foreground ON saturated/branded fills (header on primary, "Vote now"/footer CTAs on primary, selected language pill, red/green registration cards, office check icon). Inverting it to #141414 rendered all of them near-black-on-color (failed contrast).
 		important: '#474421', // derived from light.important #e8e3ad via HSL invert+desat(-20)
 		muted: '#616161', // derived from light.muted #9e9e9e via HSL invert+desat(-20)
 		link: '#237ec7', // derived from light.link #2196f3 via HSL invert(L→8)+desat(-20) (= dark.primary, same source hex)
 		progressFill: '#51b269', // derived from light.progressFill #34c759 via HSL invert+desat(-20)
-		progressTrack: '#1a1a1a', // derived from light.progressTrack #e5e5e5 via HSL invert(L→8)+desat(-20)
-		secondaryButtonSurface: '#141414', // derived from light.secondaryButtonSurface #f5f5f5 via HSL invert(L→8)+desat(-20)
+		progressTrack: '#2a2a2a', // D-11-OVERRIDE: was #1a1a1a (invisible on #141414) — raised to read as an unfilled track against the new card/bg ramp
+		secondaryButtonSurface: '#2a2a2a', // D-11-OVERRIDE: was #141414 (indistinguishable from bg) — raised so outline buttons / the Registration update block / the unselected language pill read as filled interactive surfaces
 		// Brand card fills — kept identical to light (a red/green/yellow brand card does not invert).
 		registerNegative: '#ef5644',
 		registerPositive: '#3ebd5d',

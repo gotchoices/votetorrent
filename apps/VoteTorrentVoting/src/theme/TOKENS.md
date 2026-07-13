@@ -40,22 +40,32 @@ different value (Figma wins per D-01) · `NEW` = role Authority doesn't have.
 
 ## Dark theme (light-derived, D-11 — NO Figma dark frames exist per Plan 01's D-10 verdict: 12 Mode=Light variants, 0 Mode=Dark)
 
-**Transform (one, applied to every token above):** HSL-lightness-invert + partial desaturation —
+**Transform (base):** HSL-lightness-invert + partial desaturation —
 `newL = clamp(100 - lightL, 8, 92)`, `newS = max(0, lightS - 20)` (Material Design guidance: ~20pt
 less saturation in dark mode), clamped away from pure black (`8`) / pure white (`92`). Computed
 once during authoring, pasted as literal hex into `themes.ts` (no runtime computation). Does **not**
 reuse any Authority dark value (Pitfall 2 — Authority's dark theme is a hand-tuned, non-formulaic
 mix and its light values differ from Voting's Figma-derived ones anyway).
 
+**D-11-OVERRIDE (2026-07-13, `dark-mode-contrast-fixes`):** on-device dark-mode review found the
+pure mechanical transform produced two usability failures, so 8 tokens are now hand-tuned exceptions
+(marked ⬆ below), NOT outputs of the formula:
+1. **Absolute anchors `light`/`dark` must not invert.** `light` is consumed as the foreground ON
+   saturated/branded fills (header/CTA/pill/registration-card text + icons, 20 sites); inverting it
+   to `#141414` rendered them near-black-on-color (failed contrast). Restored to `#ffffff` / `#000000`.
+2. **Elevation collapse.** `background`/`surface`/`card` all floored to `#141414` (all near-white in
+   light → same `L=8` clamp), and `border`/`progressTrack` to `#1a1a1a` — cards were invisible against
+   the page. Replaced with a visible dark elevation ramp + raised interactive/track surfaces.
+
 | Token | Light source | Dark value | Notes |
 |---|---|---|---|
 | `primary` | `#2196f3` | `#237ec7` | |
-| `background` | `#fbfbfb` | `#141414` | |
-| `surface` | `#fcfcfc` | `#141414` | Collapses to the same value as `background`/`card` — `background`/`surface`/`card` are all near-white in light (L 98-100), so the shared floor clamp (`newL=8`) produces near-identical dark values. Expected consequence of applying one mechanical transform uniformly (D-11), not a bug. |
-| `card` | `#ffffff` | `#141414` | See `surface` note above. |
+| `background` | `#fbfbfb` | `#0d0d0d` ⬆ | OVERRIDE: base layer of the dark elevation ramp (darkest). Was `#141414`. |
+| `surface` | `#fcfcfc` | `#1c1c1c` ⬆ | OVERRIDE: elevated surface. Was `#141414`. |
+| `card` | `#ffffff` | `#1e1e1e` ⬆ | OVERRIDE: cards read above the page. Was `#141414` (collapsed onto background → invisible cards). |
 | `text` | `#000000` | `#ebebeb` | |
 | `textSecondary` | `#7d7d7d` | `#828282` | Near self-inverse — source lightness is already mid-range. |
-| `border` | `#e5e5e5` | `#1a1a1a` | |
+| `border` | `#e5e5e5` | `#333333` ⬆ | OVERRIDE: dividers/outlines/progress-track border. Was `#1a1a1a` (invisible on `#141414`). |
 | `notification` | `#FF3B30` | `#ba1e15` | |
 | `secondary` | `#000000` | `#ebebeb` | |
 | `accent` | `#d9d9d9` | `#262626` | |
@@ -63,20 +73,20 @@ mix and its light values differ from Voting's Figma-derived ones anyway).
 | `warning` | `#bcb600` | `#ece756` | |
 | `contrast` | `#262626` | `#d9d9d9` | |
 | `success` | `#4caf50` | `#699a6b` | |
-| `dark` | `#000000` | `#ebebeb` | |
-| `light` | `#ffffff` | `#141414` | |
+| `dark` | `#000000` | `#000000` ⬆ | OVERRIDE: absolute anchor — must NOT invert (fixed on-color foreground/background). Was wrongly inverted to `#ebebeb`. |
+| `light` | `#ffffff` | `#ffffff` ⬆ | OVERRIDE: absolute anchor — foreground ON saturated fills (header/CTA/pill/registration text + icons). Was wrongly inverted to `#141414` → near-black-on-color. |
 | `important` | `#e8e3ad` | `#474421` | |
 | `muted` | `#9e9e9e` | `#616161` | |
 | `link` | `#2196f3` | `#237ec7` | Same source hex as `primary` (Open Q1 canonicalization), so shares its derived dark value. |
 | `progressFill` | `#34c759` | `#51b269` | |
-| `progressTrack` | `#e5e5e5` | `#1a1a1a` | |
-| `secondaryButtonSurface` | `#f5f5f5` | `#141414` | |
+| `progressTrack` | `#e5e5e5` | `#2a2a2a` ⬆ | OVERRIDE: unfilled track. Was `#1a1a1a` (invisible on `#141414`). |
+| `secondaryButtonSurface` | `#f5f5f5` | `#2a2a2a` ⬆ | OVERRIDE: filled interactive surface (outline buttons / Registration update block / unselected language pill). Was `#141414` (indistinguishable from bg). |
 
 **WCAG AA contrast verification (D-12, substitutes for a Figma dark screenshot since none exists):**
 measured in `__tests__/themes.test.ts` via a W3C relative-luminance `contrastRatio` helper —
-`contrastRatio(dark.text #ebebeb, dark.background #141414)` and
-`contrastRatio(dark.text #ebebeb, dark.card #141414)` both measure **≈15.45:1**, well above the
-4.5:1 AA threshold for body text. No lightness nudge was required.
+`contrastRatio(dark.text #ebebeb, dark.background #0d0d0d)` ≈ **16.4:1** and
+`contrastRatio(dark.text #ebebeb, dark.card #1e1e1e)` ≈ **14.1:1**, both well above the
+4.5:1 AA threshold for body text.
 
 ## Open Q1 — resolved Figma internal inconsistencies
 
