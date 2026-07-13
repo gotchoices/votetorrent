@@ -1,15 +1,15 @@
 diff --git a/dist/src/runtime/emit/schema-declarative.js b/dist/src/runtime/emit/schema-declarative.js
-index 73175da197620ff1b31c3445629f306984dc0fb9..22a537add73a4d3fdd51fa8159698f35fbef148d 100644
+index 354c9c91535197a18fc0f4b5b6d6fb9502445b7e..841a4ea1151b10f685fef8c407e0fd2e509977a8 100644
 --- a/dist/src/runtime/emit/schema-declarative.js
 +++ b/dist/src/runtime/emit/schema-declarative.js
-@@ -268,6 +268,19 @@ export function emitExplainSchema(plan, _ctx) {
+@@ -307,6 +307,19 @@ export function emitExplainSchema(plan, _ctx) {
   * pay nothing — they're filtered out before the loop.
   */
  async function runBatchedMigrationLoop(db, schemaName, migrationStatements) {
 +    // VoteTorrent patch: when applying a non-main schema (e.g. 'App'), temporarily
 +    // prepend the target schema to the schema_path so that CREATE VIEW body validation
 +    // can resolve unqualified table references (e.g. `from Admin`) against the target
-+    // schema where the tables were just created. 4.2.1 eagerly validates the view body
++    // schema where the tables were just created. 4.x eagerly validates the view body
 +    // at CREATE VIEW plan time (unlike 3.3.0 which deferred validation); without this
 +    // the body references fail with "Table 'X' not found in schema path: App".
 +    // We restore the original schema_path after the migration loop.
@@ -22,7 +22,7 @@ index 73175da197620ff1b31c3445629f306984dc0fb9..22a537add73a4d3fdd51fa8159698f35
      const startedModules = await beginSchemaBatchAll(db, schemaName);
      let loopError;
      try {
-@@ -289,6 +302,10 @@ async function runBatchedMigrationLoop(db, schemaName, migrationStatements) {
+@@ -328,6 +341,10 @@ async function runBatchedMigrationLoop(db, schemaName, migrationStatements) {
      }
      finally {
          await endSchemaBatchAll(startedModules, db, schemaName, loopError);

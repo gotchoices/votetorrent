@@ -57,8 +57,8 @@
 	"dependencies": {
 		"@noble/curves": "2.2.0",
 		"@noble/hashes": "2.2.0",
-		"@optimystic/quereus-plugin-crypto": "^0.14.0",
-		"@quereus/quereus": "patch:@quereus/quereus@npm%3A4.2.1#~/.yarn/patches/@quereus-quereus-npm-4.2.1-64e8a4bca7.patch",
+		"@optimystic/quereus-plugin-crypto": "^0.14.1",
+		"@quereus/quereus": "^4.3.1",
 		"@react-native-async-storage/async-storage": "^2.1.2",
 		"@votetorrent/vote-core": "^0.0.1",
 		"react": "19.0.0",

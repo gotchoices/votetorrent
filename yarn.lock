@@ -4221,7 +4221,7 @@ __metadata:
   languageName: node
   linkType: soft
 
-"@optimystic/quereus-plugin-crypto@npm:^0.14.0":
+"@optimystic/quereus-plugin-crypto@npm:^0.14.0, @optimystic/quereus-plugin-crypto@npm:^0.14.1":
   version: 0.14.1
   resolution: "@optimystic/quereus-plugin-crypto@npm:0.14.1"
   dependencies:
@@ -4358,35 +4358,35 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@quereus/isolation@npm:4.2.1":
-  version: 4.2.1
-  resolution: "@quereus/isolation@npm:4.2.1"
+"@quereus/isolation@npm:4.3.1":
+  version: 4.3.1
+  resolution: "@quereus/isolation@npm:4.3.1"
   dependencies:
-    "@quereus/quereus": "npm:^4.2.1"
+    "@quereus/quereus": "npm:^4.3.1"
   peerDependencies:
-    "@quereus/quereus": ^4.2.1
-  checksum: 10c0/c32b957ff95adbc05aa67a9be644021094e04e835fdf4ee1ac87e5475eeee7d6f5b1c87337d9c8f3f7e30d4f0301ca684becd2e7a4a7e57b8b8340653925f049
+    "@quereus/quereus": ^4.3.1
+  checksum: 10c0/2c83c17aa103fa94cb79f8cb2c060960ae7f40793d169cbd53c7b7c46142d077d34b8917247266a41599c53e6c2d6e18b56dc9c0b4ee82cdf9fb5e891b80baa7
   languageName: node
   linkType: hard
 
-"@quereus/plugin-react-native-leveldb@npm:4.2.1":
-  version: 4.2.1
-  resolution: "@quereus/plugin-react-native-leveldb@npm:4.2.1"
+"@quereus/plugin-react-native-leveldb@npm:^4.3.1":
+  version: 4.3.1
+  resolution: "@quereus/plugin-react-native-leveldb@npm:4.3.1"
   dependencies:
-    "@quereus/quereus": "npm:^4.2.1"
-    "@quereus/store": "npm:^4.2.1"
+    "@quereus/quereus": "npm:^4.3.1"
+    "@quereus/store": "npm:^4.3.1"
   peerDependencies:
-    "@quereus/isolation": ^4.2.1
-    "@quereus/quereus": ^4.2.1
-    "@quereus/store": ^4.2.1
+    "@quereus/isolation": ^4.3.1
+    "@quereus/quereus": ^4.3.1
+    "@quereus/store": ^4.3.1
     rn-leveldb: ^3.11.0
-  checksum: 10c0/4c9d14b3aaa774f34d6e6a32cf060ca764dc06502f2ca07a9f426703856209d0d459cf1f03f387be011e60b78e98685f5a391233370b3ceedfc1940032828e29
+  checksum: 10c0/2d74eed5ab00c2588e390489b3f29fffa44f32c0dd9c74055efe5b0b0aa54720c58a87159f4820424e9fd3dea6ab4d91538dcb78081ad256a00aded5708dfbc1
   languageName: node
   linkType: hard
 
-"@quereus/quereus@npm:4.2.1":
-  version: 4.2.1
-  resolution: "@quereus/quereus@npm:4.2.1"
+"@quereus/quereus@npm:4.3.1":
+  version: 4.3.1
+  resolution: "@quereus/quereus@npm:4.3.1"
   dependencies:
     debug: "npm:^4.4.3"
     fast-json-patch: "npm:^3.1.1"
@@ -4394,13 +4394,13 @@ __metadata:
     moat-maker: "npm:^2.2.0"
     temporal-polyfill: "npm:^0.3.0"
     uint8arrays: "npm:^6.1.1"
-  checksum: 10c0/4d6e527a039d4432ef43c8b2fd6ed424e312a85ec5e21f279b9490aa7e3979dfd3fc1a1e012d63018b46538d5daf7a857d164d59ac62aa45d9eed1384c6b8969
+  checksum: 10c0/76395602df68487a35bf587c453918c26fb865db6dcf2752df454d94ce60b794bfbef7e5a7cfc49f96d4c95f8bb38a29564fbf794ae9649ba9544cd068ffb767
   languageName: node
   linkType: hard
 
-"@quereus/quereus@patch:@quereus/quereus@npm%3A4.2.1#~/.yarn/patches/@quereus-quereus-npm-4.2.1-64e8a4bca7.patch":
-  version: 4.2.1
-  resolution: "@quereus/quereus@patch:@quereus/quereus@npm%3A4.2.1#~/.yarn/patches/@quereus-quereus-npm-4.2.1-64e8a4bca7.patch::version=4.2.1&hash=37e157"
+"@quereus/quereus@patch:@quereus/quereus@npm%3A4.3.1#~/.yarn/patches/@quereus-quereus-npm-4.3.1-6814ac0861.patch":
+  version: 4.3.1
+  resolution: "@quereus/quereus@patch:@quereus/quereus@npm%3A4.3.1#~/.yarn/patches/@quereus-quereus-npm-4.3.1-6814ac0861.patch::version=4.3.1&hash=e68d40"
   dependencies:
     debug: "npm:^4.4.3"
     fast-json-patch: "npm:^3.1.1"
@@ -4408,20 +4408,20 @@ __metadata:
     moat-maker: "npm:^2.2.0"
     temporal-polyfill: "npm:^0.3.0"
     uint8arrays: "npm:^6.1.1"
-  checksum: 10c0/9c276d7ed331ce57a4606460c4dec54be9760c8b4efd297488193b734507de6156e9286f66cce5205a7c09b3a21ad5d966fb28e31b38a88d27decb04246eaf9b
+  checksum: 10c0/5c81b39c1cedc3de0b7daf0cf03c6324b7866892c0226c80b494bebde9669380f34a32ccd7203e94ef83774a23f020a321826e5a2e580e41d9446d20137424e9
   languageName: node
   linkType: hard
 
-"@quereus/store@npm:4.2.1":
-  version: 4.2.1
-  resolution: "@quereus/store@npm:4.2.1"
+"@quereus/store@npm:4.3.1":
+  version: 4.3.1
+  resolution: "@quereus/store@npm:4.3.1"
   dependencies:
-    "@quereus/isolation": "npm:^4.2.1"
-    "@quereus/quereus": "npm:^4.2.1"
+    "@quereus/isolation": "npm:^4.3.1"
+    "@quereus/quereus": "npm:^4.3.1"
   peerDependencies:
-    "@quereus/isolation": ^4.2.1
-    "@quereus/quereus": ^4.2.1
-  checksum: 10c0/dd5ef55128221af4c8d1a192e5a8ec2e21492e733c7a304d21f270ce11294a1936ad4a254f06b037d37caad11e1c31960790a5eb97fcf5d1b15c47b337ad38f8
+    "@quereus/isolation": ^4.3.1
+    "@quereus/quereus": ^4.3.1
+  checksum: 10c0/dd23c98ee598b7012fde79adcb46891aec9738b5030d178deaa0c8bd0e64d33b77bd0f344d7f5ec53b7c63979aaa5703eb4da473241732bdb6d21364c95c7118
   languageName: node
   linkType: hard
 
@@ -6054,8 +6054,8 @@ __metadata:
   dependencies:
     "@noble/curves": "npm:2.2.0"
     "@noble/hashes": "npm:2.2.0"
-    "@optimystic/quereus-plugin-crypto": "npm:^0.14.0"
-    "@quereus/quereus": "patch:@quereus/quereus@npm%3A4.2.1#~/.yarn/patches/@quereus-quereus-npm-4.2.1-64e8a4bca7.patch"
+    "@optimystic/quereus-plugin-crypto": "npm:^0.14.1"
+    "@quereus/quereus": "npm:^4.3.1"
     "@react-native-async-storage/async-storage": "npm:^2.1.2"
     "@types/mocha": "npm:^10.0.10"
     "@types/node": "npm:^22.13.10"
@@ -16423,8 +16423,8 @@ __metadata:
   dependencies:
     "@libp2p/circuit-relay-v2": "npm:^4"
     "@libp2p/websockets": "npm:^10"
-    "@optimystic/db-p2p": "npm:0.13.5"
-    "@serfab/cadre-core": "npm:^0.7.1"
+    "@optimystic/db-p2p": "portal:../../vendor/@optimystic/db-p2p"
+    "@serfab/cadre-core": "portal:../../vendor/@serfab/cadre-core"
     "@serfab/strand-proto": "portal:../../vendor/@serfab/strand-proto"
   languageName: unknown
   linkType: soft
@@ -18178,13 +18178,13 @@ __metadata:
   languageName: node
   linkType: hard
 
-"rn-leveldb@npm:^3.11":
-  version: 3.11.0
-  resolution: "rn-leveldb@npm:3.11.0"
+"rn-leveldb@npm:^3.11.1":
+  version: 3.11.1
+  resolution: "rn-leveldb@npm:3.11.1"
   peerDependencies:
     react: "*"
     react-native: "*"
-  checksum: 10c0/120ec7db0af7591b256f400295f18055a14f490b392ea183b62d16b833019001b246a90e210f8e842d090e005f91230fdd6cf46ea80b634566dc3d798add9bb8
+  checksum: 10c0/cae970200a065ff16b93200362cd7fdec2ea91776f5d006e7c3c2a07057cbece11e8f919bbf0f1b1fd0891c5b3c1b360d9c18c767cc953c365400cd15700bb66
   languageName: node
   linkType: hard
 
@@ -20565,14 +20565,14 @@ __metadata:
     "@multiformats/multiaddr-v12": "npm:@multiformats/multiaddr@12.5.1"
     "@noble/curves": "npm:^2"
     "@noble/hashes": "npm:^2"
-    "@optimystic/db-core": "portal:../../vendor/@optimystic/db-core"
-    "@optimystic/db-p2p": "portal:../../vendor/@optimystic/db-p2p"
-    "@optimystic/db-p2p-storage-rn": "portal:../../vendor/@optimystic/db-p2p-storage-rn"
-    "@optimystic/quereus-plugin-optimystic": "npm:^0.13.5"
-    "@quereus/isolation": "npm:4.2.1"
-    "@quereus/plugin-react-native-leveldb": "npm:4.2.1"
-    "@quereus/quereus": "patch:@quereus/quereus@npm%3A4.2.1#~/.yarn/patches/@quereus-quereus-npm-4.2.1-64e8a4bca7.patch"
-    "@quereus/store": "npm:4.2.1"
+    "@optimystic/db-core": "npm:^0.14.1"
+    "@optimystic/db-p2p": "npm:^0.14.1"
+    "@optimystic/db-p2p-storage-rn": "npm:^0.14.1"
+    "@optimystic/quereus-plugin-optimystic": "npm:^0.14.1"
+    "@quereus/isolation": "npm:^4.3.1"
+    "@quereus/plugin-react-native-leveldb": "npm:^4.3.1"
+    "@quereus/quereus": "npm:^4.3.1"
+    "@quereus/store": "npm:^4.3.1"
     "@react-native-async-storage/async-storage": "npm:^2.1.2"
     "@react-native-clipboard/clipboard": "npm:^1.16.3"
     "@react-native-community/cli": "npm:^15.1.0"
@@ -20588,7 +20588,7 @@ __metadata:
     "@react-navigation/bottom-tabs": "npm:^7.0.0"
     "@react-navigation/native": "npm:^7.0.0"
     "@react-navigation/native-stack": "npm:^7.0.0"
-    "@serfab/cadre-core": "portal:../../vendor/@serfab/cadre-core"
+    "@serfab/cadre-core": "npm:^0.8.1"
     "@types/jest": "npm:^29.5.13"
     "@types/react": "npm:^19.0.0"
     "@types/react-native-vector-icons": "npm:^6.4.18"
@@ -20618,7 +20618,7 @@ __metadata:
     react-native-vector-icons: "npm:^10.0.0"
     react-test-renderer: "npm:19.0.0"
     readable-stream: "npm:^4.7.0"
-    rn-leveldb: "npm:^3.11"
+    rn-leveldb: "npm:^3.11.1"
     typescript: "npm:5.0.4"
     web-streams-polyfill: "npm:^4.3.0"
   languageName: unknown
