@@ -26,13 +26,14 @@ describe('globalStyles (theme/styles.ts)', () => {
 		});
 	});
 
-	// The shadow is scoped per-platform (Platform.select resolves one branch at module load) so it
-	// follows the rounded corners instead of painting a rectangle behind the card (RN 0.78 Android
-	// honors iOS shadow* props as a rectangular box — see styles.ts). Assert a shadow exists without
-	// coupling the test to which platform branch the jest env resolved.
-	it('cardSurface applies a rounded, platform-appropriate shadow', () => {
+	// The shadow uses the CSS-like `boxShadow` prop (RN 0.78 + New Architecture honors it on BOTH
+	// platforms), producing a soft, rounded, blended shadow that follows the corners — unlike Android
+	// `elevation`, which reads as a hard rectangular strip (see styles.ts). Assert a non-empty
+	// boxShadow exists without coupling the test to its exact offset/blur/alpha values.
+	it('cardSurface applies a rounded boxShadow', () => {
 		const cs = globalStyleDefs.cardSurface as Record<string, unknown>;
-		expect('elevation' in cs || 'shadowRadius' in cs).toBe(true);
+		expect(typeof cs.boxShadow).toBe('string');
+		expect(cs.boxShadow as string).not.toHaveLength(0);
 	});
 
 	it('exposes the shared-shell keys ported from Authority', () => {
