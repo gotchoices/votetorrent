@@ -116,7 +116,7 @@ const styles = StyleSheet.create({
 	toggleRow: {
 		flexDirection: 'row',
 		alignSelf: 'flex-start',
-		overflow: 'hidden',
+		gap: 8, // separate the two segment pills so they don't read as one merged control
 	},
 	segment: {
 		minHeight: 44,
