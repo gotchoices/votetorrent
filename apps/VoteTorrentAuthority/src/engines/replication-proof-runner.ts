@@ -23,6 +23,9 @@
  *                                             observable: getMultiaddrs()/p2p-circuit poll)
  *   [replication-proof] strandId=<hash>      (OQ3 handshake)
  *   [replication-proof] peers=N              (D-06 / ENG-05)
+ *   [replication-proof] strandPeers=N        (REPL-01 strand-cohort connection count)
+ *   [replication-proof] relayAddrsPerDrone=[...], relayAddrsPerDroneCount=N  (D-04 per-drone
+ *                                             relay-reservation instrumentation)
  *   [replication-proof] ========== REPLICATION VERDICT: PASS|FAIL ==========
  *
  * Fire-and-forget from index.js. Never throws — all errors caught and logged.
@@ -262,6 +265,18 @@ export async function runReplicationProof(): Promise<void> {
         getStrand?: (id: string) => { libp2pNode?: { getConnections?: () => unknown[] } } | undefined;
       }).getStrand?.(PROOF_NETWORK_STORE)?.libp2pNode?.getConnections?.().length ?? 0;
 
+    // D-04 (41-02): per-drone relay-reservation instrumentation, mirroring readStrandPeers()'s
+    // shape. Reads the STRAND node's OWN /p2p-circuit multiaddrs (distinct from the control-node
+    // relayReservation= marker above) so a wall-#8-class per-drone reservation asymmetry is
+    // caught from run #1 instead of a later costly device run. Only meaningful once the strand
+    // node exists (after addStrand resolves, section 5 below) — mirrors readStrandPeers().
+    const readStrandRelayAddrs = (): string[] =>
+      ((node as InstanceType<typeof CadreNode> & {
+        getStrand?: (id: string) => { libp2pNode?: { getMultiaddrs?: () => unknown[] } } | undefined;
+      }).getStrand?.(PROOF_NETWORK_STORE)?.libp2pNode?.getMultiaddrs?.() ?? [])
+        .map((ma) => String(ma))
+        .filter((addr) => addr.includes('/p2p-circuit'));
+
     // ── 5. WRITE: create the strand (correct mode now known) + insert the proof row ──────────
     // createStrandDbFactory(node) calls setSchemaPath(['App','main']) internally so bare SQL
     // table names resolve without rewriting engine queries (D-14). The strand factory is used
@@ -296,6 +311,11 @@ export async function runReplicationProof(): Promise<void> {
       }
       // REPL-01: live strand-cohort size marker, emitted AFTER addStrand + the bounded wait.
       L('strandPeers=', readStrandPeers());
+      // D-04: per-drone relay-reservation marker, emitted alongside strandPeers= (the strand
+      // node now exists). Expect ONE /p2p-circuit multiaddr PER drone reserved with (2 for the
+      // n=4 topology) after the D-05 fix — length is logged too so a per-drone count is
+      // greppable without parsing the array.
+      L('relayAddrsPerDrone=', readStrandRelayAddrs(), 'relayAddrsPerDroneCount=', readStrandRelayAddrs().length);
 
       // Use VOTETORRENT_SCHEMA_SQL to satisfy the import (tree-shaken in release).
       void VOTETORRENT_SCHEMA_SQL;
@@ -322,6 +342,8 @@ export async function runReplicationProof(): Promise<void> {
       // reached. Always emit the live strandPeers= marker so the harness gate sees the real
       // cohort signal (0) rather than "marker never emitted".
       L('strandPeers=', readStrandPeers());
+      // D-04: mirror the per-drone relay marker on the failure path too, for the same reason.
+      L('relayAddrsPerDrone=', readStrandRelayAddrs(), 'relayAddrsPerDroneCount=', readStrandRelayAddrs().length);
     }
 
     // ── 6. READ: bounded poll for the OTHER peer's proof Authority row ───────────────────────

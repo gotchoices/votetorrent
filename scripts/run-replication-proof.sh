@@ -121,6 +121,11 @@ PEERS_MARKER='\[replication-proof\].*peers='
 # replication run + every post-relaunch continuation (D-10) — the runner emits this
 # unconditionally (true/false) after a bounded getMultiaddrs()/p2p-circuit poll.
 RELAY_READY_MARKER='\[replication-proof\].*relayReservation='
+# D-04 (41-02): per-drone relay-reservation instrumentation marker. Emitted by the runner
+# alongside strandPeers= (once the strand node exists), reporting the /p2p-circuit
+# multiaddrs actually reserved with each known drone — so a wall-#8-class per-drone
+# reservation asymmetry is visible from run #1 without waiting for a FAIL verdict.
+RELAY_ADDRS_PER_DRONE_MARKER='\[replication-proof\].*relayAddrsPerDrone='
 LOGCAT_TIMEOUT=180  # seconds: longer than dial-probe to account for two emulators +
                     # replication latency (A writes → drone → B reads)
 MARKER_TIMEOUT=180  # seconds to wait for [replication-proof] starting marker
@@ -139,6 +144,10 @@ STRAND_PEERS_TIMEOUT=300  # seconds to wait for the REPL-01 strandPeers= marker 
                     # the write-phase strandPeers= emit at ~183s, ~3s AFTER the shared
                     # LOGCAT_TIMEOUT expired, so the script died before reaching the
                     # both-peer verdict poll and the trailing D-08 drone-side log capture)
+RELAY_ADDRS_PER_DRONE_TIMEOUT=300  # seconds to wait for the D-04 relayAddrsPerDrone= marker —
+                    # emitted at the SAME point in the runner as strandPeers= (immediately
+                    # after, both success and failure paths), so sized identically to
+                    # STRAND_PEERS_TIMEOUT to avoid racing that same emit point
 FLAG_FILE="apps/VoteTorrentAuthority/src/engines/proof-flags.generated.ts"
 # The generated config file that carries CONTROL_ADDR for the replication proof runner.
 # The runner reads CONTROL_ADDR from this file (D-07 automated injection); restored on EXIT.
@@ -639,6 +648,27 @@ if [ -z "${SP}" ] || [ "${SP}" -lt 1 ]; then
   exit 1
 else
   echo "[run-replication-proof] REPL-01 cohort signal: strandPeers=${SP} >= 1 on Peer A"
+fi
+
+# ── D-04: per-drone relay-reservation instrumentation (diagnostic, non-gating) ──
+# Captures the relayAddrsPerDrone= marker on BOTH peers so a wall-#8-class per-drone
+# reservation asymmetry (reserved with only ONE drone instead of both) is visible from
+# run #1, without waiting for a costly FAIL verdict to investigate. Diagnostic only —
+# does NOT gate the run (warn-and-continue on a miss), since the both-peer REPLICATION
+# VERDICT below remains the authoritative PASS/FAIL signal.
+echo "[run-replication-proof] D-04: waiting for relayAddrsPerDrone= marker on emulator-5554 (timeout ${RELAY_ADDRS_PER_DRONE_TIMEOUT}s) ..."
+RELAY_ADDRS_LINE_A=$(wait_for_logcat_line "${RELAY_ADDRS_PER_DRONE_MARKER}" "${RELAY_ADDRS_PER_DRONE_TIMEOUT}" "[run-replication-proof]" "relay-addrs-per-drone-A" "-s emulator-5554")
+if [ -n "${RELAY_ADDRS_LINE_A}" ]; then
+  echo "[run-replication-proof] D-04: relayAddrsPerDrone= on emulator-5554: ${RELAY_ADDRS_LINE_A}"
+else
+  echo "[run-replication-proof] D-04 WARNING: relayAddrsPerDrone= marker never appeared on emulator-5554 (diagnostic only, not gating)" >&2
+fi
+echo "[run-replication-proof] D-04: waiting for relayAddrsPerDrone= marker on emulator-5556 (timeout ${RELAY_ADDRS_PER_DRONE_TIMEOUT}s) ..."
+RELAY_ADDRS_LINE_B=$(wait_for_logcat_line "${RELAY_ADDRS_PER_DRONE_MARKER}" "${RELAY_ADDRS_PER_DRONE_TIMEOUT}" "[run-replication-proof]" "relay-addrs-per-drone-B" "-s emulator-5556")
+if [ -n "${RELAY_ADDRS_LINE_B}" ]; then
+  echo "[run-replication-proof] D-04: relayAddrsPerDrone= on emulator-5556: ${RELAY_ADDRS_LINE_B}"
+else
+  echo "[run-replication-proof] D-04 WARNING: relayAddrsPerDrone= marker never appeared on emulator-5556 (diagnostic only, not gating)" >&2
 fi
 
 # ── BOTH-PEER VERDICT (D-01) ──────────────────────────────────────────────────
