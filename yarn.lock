@@ -4131,34 +4131,35 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@optimystic/db-core@portal:./vendor/@optimystic/db-core::locator=votetorrent%40workspace%3A.":
-  version: 0.0.0-use.local
-  resolution: "@optimystic/db-core@portal:./vendor/@optimystic/db-core::locator=votetorrent%40workspace%3A."
+"@optimystic/db-core@npm:^0.14.1":
+  version: 0.14.1
+  resolution: "@optimystic/db-core@npm:0.14.1"
   dependencies:
     "@noble/hashes": "npm:^2.0.1"
     debug: "npm:^4.4.3"
     multiformats: "npm:^13.4.2"
     uint8arrays: "npm:^5.1.0"
-  languageName: node
-  linkType: soft
-
-"@optimystic/db-p2p-storage-fs@npm:^0.13.5":
-  version: 0.13.5
-  resolution: "@optimystic/db-p2p-storage-fs@npm:0.13.5"
-  dependencies:
-    "@optimystic/db-core": "npm:^0.13.5"
-    "@optimystic/db-p2p": "npm:^0.13.5"
-    debug: "npm:^4.4.3"
-  checksum: 10c0/7f5aad12109345ff4777782519ab0b5c7c867023d97912ebaabb25951a9893c43c8905fd75ea83ca28ba68d49fd20c14b27862ed7dda3cd45c1183f6fc674b49
+  checksum: 10c0/8b038a6751216bb81ce7fd3d624e5937a81631087db091b23022bc5162d4b95e4661a8a6118797784f1e7834db8592b101bf7ad1e32f7a9d7cf4d2cee45655cf
   languageName: node
   linkType: hard
 
-"@optimystic/db-p2p-storage-rn@portal:./vendor/@optimystic/db-p2p-storage-rn::locator=votetorrent%40workspace%3A.":
-  version: 0.0.0-use.local
-  resolution: "@optimystic/db-p2p-storage-rn@portal:./vendor/@optimystic/db-p2p-storage-rn::locator=votetorrent%40workspace%3A."
+"@optimystic/db-p2p-storage-fs@npm:^0.14.1":
+  version: 0.14.1
+  resolution: "@optimystic/db-p2p-storage-fs@npm:0.14.1"
   dependencies:
-    "@optimystic/db-core": "workspace:^"
-    "@optimystic/db-p2p": "workspace:^"
+    "@optimystic/db-core": "npm:^0.14.1"
+    "@optimystic/db-p2p": "npm:^0.14.1"
+    debug: "npm:^4.4.3"
+  checksum: 10c0/7d298ee6a233eedf1305a2be65eae5379b61ad30358b9e7f135c9dcc4ab84fd99ed4652e5f352221aa02d53b075a063691a5f8d17d19263cc9d35cabd54a7ff8
+  languageName: node
+  linkType: hard
+
+"@optimystic/db-p2p-storage-rn@npm:^0.14.1":
+  version: 0.14.1
+  resolution: "@optimystic/db-p2p-storage-rn@npm:0.14.1"
+  dependencies:
+    "@optimystic/db-core": "npm:^0.14.1"
+    "@optimystic/db-p2p": "npm:^0.14.1"
     debug: "npm:^4.4.3"
   peerDependencies:
     "@libp2p/crypto": ^5.1.13
@@ -4167,27 +4168,28 @@ __metadata:
   peerDependenciesMeta:
     rn-leveldb:
       optional: false
+  checksum: 10c0/af6ce26f884a978a7ffe297e9d331f2ce83741aa5602ecd4e0d0eceee7918d87a7008d5e84f5189b5fe9ccf6eeab40f55deb7f7a41ba6707cf2b33c3cdfd4a20
   languageName: node
-  linkType: soft
+  linkType: hard
 
-"@optimystic/db-p2p-storage-web@npm:^0.13.5":
-  version: 0.13.5
-  resolution: "@optimystic/db-p2p-storage-web@npm:0.13.5"
+"@optimystic/db-p2p-storage-web@npm:^0.14.1":
+  version: 0.14.1
+  resolution: "@optimystic/db-p2p-storage-web@npm:0.14.1"
   dependencies:
-    "@optimystic/db-core": "npm:^0.13.5"
-    "@optimystic/db-p2p": "npm:^0.13.5"
+    "@optimystic/db-core": "npm:^0.14.1"
+    "@optimystic/db-p2p": "npm:^0.14.1"
     debug: "npm:^4.4.3"
     idb: "npm:^8.0.3"
   peerDependencies:
     "@libp2p/crypto": ^5.1.13
     "@libp2p/interface": ^3.1.0
-  checksum: 10c0/a57894cd8be021ddc411d12f9f6e8526161025dbb0e0b7098ccc8a417cd88391050ea43772de32853beaafd7d55f1e76dada6f66f2fbebc3f54f78094dea0498
+  checksum: 10c0/50c3112a75f124a15498b23263fed0b49f784a0de599e4a23a366e82526fa57a67450bb7cdc90f1549d8deb9839b896f8f5077c0f556c5372bd97477b8aeab52
   languageName: node
   linkType: hard
 
-"@optimystic/db-p2p@portal:./vendor/@optimystic/db-p2p::locator=votetorrent%40workspace%3A.":
-  version: 0.0.0-use.local
-  resolution: "@optimystic/db-p2p@portal:./vendor/@optimystic/db-p2p::locator=votetorrent%40workspace%3A."
+"@optimystic/db-p2p@npm:^0.14.1":
+  version: 0.14.1
+  resolution: "@optimystic/db-p2p@npm:0.14.1"
   dependencies:
     "@chainsafe/libp2p-gossipsub": "npm:^14.1.2"
     "@chainsafe/libp2p-noise": "npm:^17.0.0"
@@ -4205,7 +4207,7 @@ __metadata:
     "@libp2p/tcp": "npm:^11.0.10"
     "@libp2p/websockets": "npm:^10.1.3"
     "@multiformats/multiaddr": "npm:^13.0.1"
-    "@optimystic/db-core": "workspace:^"
+    "@optimystic/db-core": "npm:^0.14.1"
     async-mutex: "npm:^0.5.0"
     debug: "npm:^4.4.3"
     it-all: "npm:^3.0.9"
@@ -4218,10 +4220,11 @@ __metadata:
     protons-runtime: "npm:^6.0.0"
     uint8arraylist: "npm:^2.4.8"
     uint8arrays: "npm:^5.1.0"
+  checksum: 10c0/7bafe08f4d01f8de7824088847d4d2aa815c8fefd10982dfd4a9532c9abe376f44aeaafcbf59644a4d7379c7b4df1a016e99001e4be8178a9d8f390bc13c794c
   languageName: node
-  linkType: soft
+  linkType: hard
 
-"@optimystic/quereus-plugin-crypto@npm:^0.14.0, @optimystic/quereus-plugin-crypto@npm:^0.14.1":
+"@optimystic/quereus-plugin-crypto@npm:^0.14.1":
   version: 0.14.1
   resolution: "@optimystic/quereus-plugin-crypto@npm:0.14.1"
   dependencies:
@@ -4235,9 +4238,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@optimystic/quereus-plugin-optimystic@npm:0.13.5":
-  version: 0.13.5
-  resolution: "@optimystic/quereus-plugin-optimystic@npm:0.13.5"
+"@optimystic/quereus-plugin-optimystic@npm:^0.14.1":
+  version: 0.14.1
+  resolution: "@optimystic/quereus-plugin-optimystic@npm:0.14.1"
   dependencies:
     "@chainsafe/libp2p-gossipsub": "npm:^14.1.2"
     "@chainsafe/libp2p-yamux": "npm:^8.0.1"
@@ -4249,39 +4252,14 @@ __metadata:
     "@libp2p/noise": "npm:^1.0.1"
     "@libp2p/tcp": "npm:^11.0.10"
     "@noble/hashes": "npm:^2.0.1"
-    "@optimystic/db-core": "npm:^0.13.5"
-    "@optimystic/db-p2p": "npm:^0.13.5"
+    "@optimystic/db-core": "npm:^0.14.1"
+    "@optimystic/db-p2p": "npm:^0.14.1"
     debug: "npm:^4.4.3"
     libp2p: "npm:^3.1.3"
     uint8arrays: "npm:^5.1.0"
   peerDependencies:
     "@quereus/quereus": ^0.16.2
-  checksum: 10c0/6742a770a532e0672597bf7df2956a3a6ecfb0fdc924a8458fad86346132f1ebf9f9163b86ee83da3d4452ac28ae1bfcc7c6590a1fb2959b7a4ec1fee27171f4
-  languageName: node
-  linkType: hard
-
-"@optimystic/quereus-plugin-optimystic@patch:@optimystic/quereus-plugin-optimystic@npm%3A0.13.5#~/.yarn/patches/@optimystic-quereus-plugin-optimystic-npm-0.13.5-6fbe2eccab.patch":
-  version: 0.13.5
-  resolution: "@optimystic/quereus-plugin-optimystic@patch:@optimystic/quereus-plugin-optimystic@npm%3A0.13.5#~/.yarn/patches/@optimystic-quereus-plugin-optimystic-npm-0.13.5-6fbe2eccab.patch::version=0.13.5&hash=257bd3"
-  dependencies:
-    "@chainsafe/libp2p-gossipsub": "npm:^14.1.2"
-    "@chainsafe/libp2p-yamux": "npm:^8.0.1"
-    "@libp2p/bootstrap": "npm:^12.0.11"
-    "@libp2p/crypto": "npm:^5.1.13"
-    "@libp2p/identify": "npm:^4.0.10"
-    "@libp2p/interface": "npm:^3.1.0"
-    "@libp2p/kad-dht": "npm:^16.1.3"
-    "@libp2p/noise": "npm:^1.0.1"
-    "@libp2p/tcp": "npm:^11.0.10"
-    "@noble/hashes": "npm:^2.0.1"
-    "@optimystic/db-core": "npm:^0.13.5"
-    "@optimystic/db-p2p": "npm:^0.13.5"
-    debug: "npm:^4.4.3"
-    libp2p: "npm:^3.1.3"
-    uint8arrays: "npm:^5.1.0"
-  peerDependencies:
-    "@quereus/quereus": ^0.16.2
-  checksum: 10c0/37ad0de788d63a0155ce264a78d8df4367b84daa0b28d9ecee78e8d445b5363c80917e7fb5818c2b528966b0e126240f8f7eb95188a3ee4b261ea982c31a9091
+  checksum: 10c0/8714c2b34811b7c0cda6e63cc3adaa34128f351aed00f2a921db92062f22cb18fa4e2c7914fac9fc2147afe8024b2d6354a2667ff0b141577a53297c0395942d
   languageName: node
   linkType: hard
 
@@ -5172,54 +5150,57 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@serfab/cadre-core@portal:./vendor/@serfab/cadre-core::locator=votetorrent%40workspace%3A.":
-  version: 0.0.0-use.local
-  resolution: "@serfab/cadre-core@portal:./vendor/@serfab/cadre-core::locator=votetorrent%40workspace%3A."
+"@serfab/cadre-core@npm:^0.8.1":
+  version: 0.8.1
+  resolution: "@serfab/cadre-core@npm:0.8.1"
   dependencies:
     "@libp2p/crypto": "npm:^5.1.13"
     "@libp2p/interface": "npm:^3.1.0"
     "@libp2p/peer-id": "npm:^6.0.4"
     "@multiformats/multiaddr": "npm:^12.5.1"
-    "@optimystic/db-core": "npm:^0.13.5"
-    "@optimystic/db-p2p": "npm:^0.13.5"
-    "@optimystic/quereus-plugin-crypto": "npm:^0.14.0"
-    "@optimystic/quereus-plugin-optimystic": "npm:^0.13.5"
+    "@optimystic/db-core": "npm:^0.14.1"
+    "@optimystic/db-p2p": "npm:^0.14.1"
+    "@optimystic/quereus-plugin-crypto": "npm:^0.14.1"
+    "@optimystic/quereus-plugin-optimystic": "npm:^0.14.1"
     "@quereus/quereus": "npm:^4.2.1"
-    "@serfab/quereus-plugin-sereus": "workspace:^"
+    "@serfab/quereus-plugin-sereus": "npm:^0.8.1"
     debug: "npm:^4.4.3"
     libp2p: "npm:^3.1.3"
     uint8arrays: "npm:^5.1.0"
+  checksum: 10c0/4db5a33ddb88cd9ff079aad7db3c3483535fd7a1b797ccaab81e1e802882b47b74b9ca0a8bc287ad540922424ded5220b7afcf851ca9a46902ce19513b30e3c4
   languageName: node
-  linkType: soft
+  linkType: hard
 
-"@serfab/quereus-plugin-sereus@portal:./vendor/@serfab/quereus-plugin-sereus::locator=votetorrent%40workspace%3A.":
-  version: 0.0.0-use.local
-  resolution: "@serfab/quereus-plugin-sereus@portal:./vendor/@serfab/quereus-plugin-sereus::locator=votetorrent%40workspace%3A."
+"@serfab/quereus-plugin-sereus@npm:^0.8.1":
+  version: 0.8.1
+  resolution: "@serfab/quereus-plugin-sereus@npm:0.8.1"
   dependencies:
     "@libp2p/circuit-relay-v2": "npm:^4.1.3"
     "@libp2p/interface": "npm:^3.1.0"
     "@libp2p/websockets": "npm:^10.1.3"
-    "@optimystic/db-core": "npm:^0.13.5"
-    "@optimystic/db-p2p": "npm:^0.13.5"
-    "@optimystic/db-p2p-storage-fs": "npm:^0.13.5"
-    "@optimystic/db-p2p-storage-web": "npm:^0.13.5"
-    "@optimystic/quereus-plugin-crypto": "npm:^0.14.0"
-    "@optimystic/quereus-plugin-optimystic": "npm:^0.13.5"
+    "@optimystic/db-core": "npm:^0.14.1"
+    "@optimystic/db-p2p": "npm:^0.14.1"
+    "@optimystic/db-p2p-storage-fs": "npm:^0.14.1"
+    "@optimystic/db-p2p-storage-web": "npm:^0.14.1"
+    "@optimystic/quereus-plugin-crypto": "npm:^0.14.1"
+    "@optimystic/quereus-plugin-optimystic": "npm:^0.14.1"
     "@quereus/quereus": "npm:^4.2.1"
     debug: "npm:^4.4.3"
+  checksum: 10c0/13d2425f8d0c05ed184be86bb0283c10884ed71c996c835fa4bab016d20e9114888ec2ac07cccbaa157b158daa44226c43118556b5a97431143572f1e3a6b8de
   languageName: node
-  linkType: soft
+  linkType: hard
 
-"@serfab/strand-proto@portal:./vendor/@serfab/strand-proto::locator=votetorrent%40workspace%3A.":
-  version: 0.0.0-use.local
-  resolution: "@serfab/strand-proto@portal:./vendor/@serfab/strand-proto::locator=votetorrent%40workspace%3A."
+"@serfab/strand-proto@npm:^0.8.1":
+  version: 0.8.1
+  resolution: "@serfab/strand-proto@npm:0.8.1"
   dependencies:
     "@multiformats/multiaddr": "npm:^12.5.1"
     it-length-prefixed: "npm:^10.0.1"
     it-pipe: "npm:^3.0.1"
     libp2p: "npm:^3.1.3"
+  checksum: 10c0/1d9356bc702bf2cab488d822ab11ff8d391c19e122c49189f66b78b719c551a06e3961105ffcb5cac20814fcc8c827415185a72433e14beb990e14a5a89f04bc
   languageName: node
-  linkType: soft
+  linkType: hard
 
 "@sideway/address@npm:^4.1.5":
   version: 4.1.5
@@ -16423,9 +16404,9 @@ __metadata:
   dependencies:
     "@libp2p/circuit-relay-v2": "npm:^4"
     "@libp2p/websockets": "npm:^10"
-    "@optimystic/db-p2p": "portal:../../vendor/@optimystic/db-p2p"
-    "@serfab/cadre-core": "portal:../../vendor/@serfab/cadre-core"
-    "@serfab/strand-proto": "portal:../../vendor/@serfab/strand-proto"
+    "@optimystic/db-p2p": "npm:^0.14.1"
+    "@serfab/cadre-core": "npm:^0.8.1"
+    "@serfab/strand-proto": "npm:^0.8.1"
   languageName: unknown
   linkType: soft
 

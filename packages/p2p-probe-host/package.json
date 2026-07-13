@@ -10,8 +10,8 @@
   "dependencies": {
     "@libp2p/circuit-relay-v2": "^4",
     "@libp2p/websockets": "^10",
-    "@optimystic/db-p2p": "portal:../../vendor/@optimystic/db-p2p",
-    "@serfab/cadre-core": "portal:../../vendor/@serfab/cadre-core",
-    "@serfab/strand-proto": "portal:../../vendor/@serfab/strand-proto"
+    "@optimystic/db-p2p": "^0.14.1",
+    "@serfab/cadre-core": "^0.8.1",
+    "@serfab/strand-proto": "^0.8.1"
   }
 }

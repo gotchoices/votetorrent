@@ -1,3 +1,0 @@
-export declare function ensured<K extends string | number | symbol, V>(map: Record<K, V>, key: K, makeNew: () => Exclude<V, undefined>, existing?: (existing: Exclude<V, undefined>) => void): Exclude<V, undefined>;
-export declare function ensuredMap<K extends string | number | symbol, V>(map: Map<K, V>, key: K, makeNew: () => Exclude<V, undefined>, existing?: (existing: Exclude<V, undefined>) => void): Exclude<V, undefined>;
-//# sourceMappingURL=ensured.d.ts.map
