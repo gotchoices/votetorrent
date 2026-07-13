@@ -175,4 +175,31 @@ merged.resolver.resolveRequest = (context, moduleName, platform) => {
 	return resolved;
 };
 
+// 40-03 (PUB-03 on-device boot blocker): Metro's `inlineRequires` transform defers evaluation
+// of side-effect-free, `const`-only ESM modules until their first property read. Published
+// @serfab/cadre-core@0.8.1's `control-schema.js` is exactly this shape — a single
+// `export const CONTROL_SCHEMA = \`...\`` with NO imports — so under Hermes (dev bundle, lazy=true)
+// its module body was never evaluated before `ControlDatabase.loadSchema()` read `CONTROL_SCHEMA`,
+// yielding `undefined` and crashing quereus 4.3.1's lexer (`isAtEnd` → `.length` of undefined),
+// blocking EVERY CadreNode boot on-device. This did NOT reproduce on Node (40-02 RELAY SMOKE: PASS)
+// because Node evaluates the static ESM import eagerly. Forcing `inlineRequires: false` makes the
+// top-of-module require eager so the schema module evaluates before loadSchema runs. Diagnosed by
+// on-device instrumentation: an explicit `require('./control-schema.js')` at the use site made the
+// module evaluate and CONTROL_SCHEMA resolve to its 12617-char string. We WRAP the default
+// getTransformOptions (rather than replacing it) so experimentalImportSupport and every other
+// RN 0.78 default is preserved — only inlineRequires is flipped.
+const upstreamGetTransformOptions = merged.transformer.getTransformOptions;
+merged.transformer.getTransformOptions = async (entryPoints, options, getDependenciesOf) => {
+	const base = upstreamGetTransformOptions
+		? await upstreamGetTransformOptions(entryPoints, options, getDependenciesOf)
+		: {};
+	return {
+		...base,
+		transform: {
+			...(base.transform || {}),
+			inlineRequires: false,
+		},
+	};
+};
+
 module.exports = merged;

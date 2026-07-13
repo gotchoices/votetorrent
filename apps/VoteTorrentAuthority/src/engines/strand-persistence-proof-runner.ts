@@ -84,6 +84,15 @@ export async function runStrandPersistenceProof(): Promise<void> {
       // placeholders here; cross-peer is explicitly out of scope for this proof.
       controlNetwork: { partyId: 'votetorrent', bootstrapNodes: [] },
       profile: 'transaction',
+      // 40-03 (PUB-03): published @serfab/cadre-core@0.8.1 added a fail-closed sApp-schema
+      // signature policy (requireSignedSchemas defaults true) — an unsigned sAppConfig is
+      // rejected at strand bring-up with SchemaVerificationError('missing signature'). This
+      // solo persistence-proof harness applies the unsigned votetorrent demo schema
+      // (rn-db-factory sAppConfig has id:'org.votetorrent' + no signature), so relax the
+      // policy for the proof node — the documented dev/test relaxation ("unsigned demo
+      // schemas"). Production sApp-schema signing (id = author ed25519 pubkey + signSchema())
+      // is a separate productionization task, out of this solo-boot/persistence proof's scope.
+      requireSignedSchemas: false,
       strandFilter: { mode: 'all' },
       storage: { provider: () => new LevelDBRawStorage(rnDb) },
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
