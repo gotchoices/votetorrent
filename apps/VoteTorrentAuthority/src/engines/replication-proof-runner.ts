@@ -83,6 +83,21 @@ function resolveBootstrapNodes(addr: string): string[] {
 // genuinely solo (CF-02 bootstrap mode), creates the proof network, and emits strandId=.
 const BOOTSTRAP_NODES = resolveBootstrapNodes(CONTROL_ADDR);
 
+// D-05 (41-02, P2P-11 wall #8 fix): relay-qualified per-drone listenAddrs. One
+// `${addr}/p2p-circuit` entry per KNOWN drone (drone-A + drone-B) routes through
+// @libp2p/circuit-relay-v2's 'configured' reservation path (RESEARCH Pattern 1),
+// which bypasses the one-slot 'discovered' cap that capped the emulator at a
+// reservation with only ONE drone (41-01 Node gate reproduced this exactly).
+// Each drone's addr is independently placeholder-aware via resolveBootstrapNodes
+// (mirrors strandBootstrapNodes below) — a single-drone / solo run degrades to []
+// or [one entry], never a crash. Probe 1 (41-01): cadre-core forwards ONE shared
+// network object to the control node AND every strand, so this ONE array must
+// carry BOTH drones' qualified addrs (no per-node-type override exists).
+const STRAND_RELAY_LISTEN_ADDRS = [
+  ...resolveBootstrapNodes(STRAND_BOOTSTRAP_ADDR),
+  ...resolveBootstrapNodes(STRAND_BOOTSTRAP_ADDR_B),
+].map((addr) => `${addr}/p2p-circuit`);
+
 // Poll constants (consistent with dial-probe.ts connection-poll shape).
 // PEER_POLL_MAX: 3 ticks × 1 s = 3 s peer-connection wait (exits early when peers appear).
 //   On a real device with a live drone the peer handshake typically completes within 1–2 s.
@@ -138,10 +153,29 @@ export async function runReplicationProof(): Promise<void> {
       storage: { provider: () => new LevelDBRawStorage(rnDb) },
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       network: {
-        transports: [webSockets(), circuitRelayTransport()],
-        // 38-20 gap-closure fix: this runner boots its OWN CadreNode (never
+        transports: [
+          webSockets(),
+          // D-10: cast by the global transportSymbol, not structural type — the
+          // sereus-chat pattern for multi-copy @libp2p/interface brand-skew
+          // (Probe 4, 41-01: not load-bearing on Node's single-copy graph but
+          // re-verified at Metro/Hermes on device).
+          circuitRelayTransport({
+            // PROBE 5 (41-01, EXERCISED): N relay-qualified listenAddrs ALONE do
+            // NOT yield N reservations under the default circuitRelayTransport() —
+            // DEFAULT_RESERVATION_CONCURRENCY=1 serializes the reserve queue and
+            // drops any 2nd+ reservation via reserveQueue.clear(). Size concurrency
+            // to the number of known drones actually driving
+            // STRAND_RELAY_LISTEN_ADDRS below (never less than 1) — proven on Node
+            // to close the wall #8 asymmetry (bare=1 relay, qualified+concurrency=2
+            // relays).
+            reservationConcurrency: Math.max(1, STRAND_RELAY_LISTEN_ADDRS.length),
+          }) as unknown as ReturnType<typeof webSockets>,
+        ],
+        // 38-20/41-02: this runner boots its OWN CadreNode (never
         // CadreNodeProvider's), so it needs the SAME D-03 always-on relay-client
-        // posture CadreNodeProvider.tsx already carries. An empty listenAddrs
+        // posture CadreNodeProvider.tsx carries, now relay-qualified per known
+        // drone (D-05, P2P-11 wall #8 fix) instead of the bare '/p2p-circuit'
+        // sentinel — see STRAND_RELAY_LISTEN_ADDRS above. An empty listenAddrs
         // array means libp2p's transportManager.listen() is never invoked for
         // '/p2p-circuit', so @libp2p/circuit-relay-v2's ReservationStore never
         // calls reserveRelay() — pendingReservations stays empty forever and
@@ -152,7 +186,7 @@ export async function runReplicationProof(): Promise<void> {
         // same network.listenAddrs value is forwarded unmodified to BOTH the
         // control node and the strand node, arming it here closes both the
         // observable and the actual consensus-blocking wall in one change.
-        listenAddrs: ['/p2p-circuit'],
+        listenAddrs: STRAND_RELAY_LISTEN_ADDRS,
         // Permissive gater — dev probe only (matches dial-probe.ts / cadre-runtime-ondevice.md).
         // Cast needed for connectionGater (upstream gap); strandBootstrapNodes is typed by 23-05.
         connectionGater: { denyDialMultiaddr: async () => false },

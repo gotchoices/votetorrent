@@ -84,6 +84,18 @@ export function resolveBootstrapNodes(addr: string): string[] {
   return [addr];
 }
 
+// D-05 (41-02, P2P-11 wall #8 fix): relay-qualified per-drone listenAddrs.
+// One `${addr}/p2p-circuit` entry per KNOWN drone routes through
+// @libp2p/circuit-relay-v2's 'configured' reservation path (RESEARCH Pattern 1),
+// which bypasses the one-slot 'discovered' cap that capped the emulator at a
+// reservation with only ONE drone. Routed through the SAME placeholder-aware
+// resolveBootstrapNodes guard used for strandBootstrapNodes below, so a solo/
+// placeholder boot yields [] (degraded, not a crash) — never a bare
+// template-string concat over an unresolved constant.
+const STRAND_RELAY_LISTEN_ADDRS = resolveBootstrapNodes(STRAND_BOOTSTRAP_ADDR).map(
+  (addr) => `${addr}/p2p-circuit`,
+);
+
 // ---------------------------------------------------------------------------
 // Provider
 // ---------------------------------------------------------------------------
@@ -183,12 +195,29 @@ export function CadreNodeProvider({ children }: PropsWithChildren) {
           storage: { provider: (scopeId: string) => getScopedRawStorage(scopeId) },
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           network: {
-            transports: [webSockets(), circuitRelayTransport()],
-            // D-03: always-on relay reservation-seeking (P2P-08 drone-relay path).
-            // '/p2p-circuit' triggers @libp2p/circuit-relay-v2's ReservationStore to
-            // proactively request+hold a reservation against any connected relay
-            // (the drone) — one code path, no proof-gating flag.
-            listenAddrs: ['/p2p-circuit'],
+            transports: [
+              webSockets(),
+              // D-10: cast by the global transportSymbol, not structural type — the
+              // sereus-chat pattern for multi-copy @libp2p/interface brand-skew
+              // (Probe 4, 41-01: not load-bearing on Node's single-copy graph but
+              // re-verified at Metro/Hermes on device).
+              circuitRelayTransport({
+                // PROBE 5 (41-01, EXERCISED): N relay-qualified listenAddrs ALONE do
+                // NOT yield N reservations under the default circuitRelayTransport() —
+                // DEFAULT_RESERVATION_CONCURRENCY=1 serializes the reserve queue and
+                // drops any 2nd+ reservation via reserveQueue.clear(). Size concurrency
+                // to the number of known drones actually driving
+                // STRAND_RELAY_LISTEN_ADDRS below (never less than 1).
+                reservationConcurrency: Math.max(1, STRAND_RELAY_LISTEN_ADDRS.length),
+              }) as unknown as ReturnType<typeof webSockets>,
+            ],
+            // D-03/D-05: always-on relay reservation-seeking (P2P-08 drone-relay
+            // path), now relay-qualified per known drone (P2P-11 wall #8 fix) instead
+            // of the bare '/p2p-circuit' sentinel — see STRAND_RELAY_LISTEN_ADDRS
+            // above. Each qualified entry proactively requests+holds a reservation
+            // against its target drone via @libp2p/circuit-relay-v2's 'configured'
+            // path — one code path, no proof-gating flag.
+            listenAddrs: STRAND_RELAY_LISTEN_ADDRS,
             // Permissive gater — allows loopback / emulator host dials (D-11).
             // Per-strand enrollment gating is v2.x scope.
             // Cast needed for connectionGater (cadre-core upstream gap); strandBootstrapNodes
