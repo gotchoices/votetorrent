@@ -84,7 +84,15 @@ function extractHandleConsensusBody (src: string): string {
   return src.slice(start, end)
 }
 
-describe('P2P-11/38-10: idempotent-self-pend recognition in handleConsensus (stale-revision/pend-race fix)', () => {
+// SUPERSEDED (Phase 40-02, PUB-01/PUB-02 de-vendoring): this spec locks Phase 38's
+// hand-patched `vendor/@optimystic/db-p2p` dist source, which no longer exists now
+// that VT consumes it from published npm (@optimystic/db-p2p@0.14.1 does not carry
+// this fix upstream). Cross-peer replication (P2P-11) is out of Phase 40's scope and
+// was still FAIL as of 38-21 even with this fix live — Phase 41 owns re-diagnosing/
+// re-patching against the de-vendored baseline. Skipped rather than deleted to
+// preserve the historical static-lock shape for that future re-patch. See
+// 40-02-SUMMARY.md.
+describe.skip('P2P-11/38-10: idempotent-self-pend recognition in handleConsensus (stale-revision/pend-race fix)', () => {
   it('cluster-repo.js exists at the expected vendored-dist path', () => {
     expect(existsSync(CLUSTER_REPO_PATH), `Expected ${CLUSTER_REPO_PATH} to exist`).to.equal(true)
   })

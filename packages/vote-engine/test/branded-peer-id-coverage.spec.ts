@@ -46,7 +46,14 @@ const HELPER_CALL_MARKER = 'toBrandedPeerId' + '('
 const BARE_DIAL_PROTOCOL = 'node.dialProtocol' + '(pid, [protocol])'
 const BARE_GET_CONNECTIONS = 'getConnections' + '(peerId)'
 
-describe('P2P-10/D-06: branded PeerId coverage across all 3 vendored dial sites', () => {
+// SUPERSEDED (Phase 40-02, PUB-01/PUB-02 de-vendoring): this spec locks Phase 38's
+// hand-patched `vendor/@optimystic/db-p2p` dist source, which no longer exists now
+// that VT consumes it from published npm (@optimystic/db-p2p@0.14.1 does not carry
+// this hardening upstream). Cross-peer replication (P2P-10/P2P-11) is out of Phase
+// 40's scope — Phase 41 owns re-diagnosing/re-patching against the de-vendored
+// baseline. Skipped rather than deleted to preserve the historical static-lock
+// shape for that future re-patch. See 40-02-SUMMARY.md.
+describe.skip('P2P-10/D-06: branded PeerId coverage across all 3 vendored dial sites', () => {
   it('peer-utils.js exports toBrandedPeerId()', () => {
     const src = readFileSync(PEER_UTILS_PATH, 'utf8')
     expect(

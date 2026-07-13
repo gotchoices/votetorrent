@@ -81,7 +81,16 @@ function extractBetween (src: string, open: string, close: string, path: string)
   return src.slice(start, end)
 }
 
-describe('P2P-11/38-12: relay-functional cross-peer reachability (tightened guard + bounded relayServerInit)', () => {
+// SUPERSEDED (Phase 40-02, PUB-01/PUB-02 de-vendoring): this spec locks Phase 38's
+// hand-patched `vendor/@optimystic/db-p2p` + `vendor/@serfab/cadre-core` dist source,
+// which no longer exists now that VT consumes those packages from published npm
+// (@serfab/cadre-core@0.8.1, @optimystic/db-p2p@0.14.1 — neither carries this P2P-11
+// fix upstream). Cross-peer replication (P2P-11) is out of Phase 40's scope and was
+// still FAIL as of 38-21 even with this fix live — Phase 41 owns re-diagnosing/
+// re-patching (likely via a `yarn patch` on the published dist) against the
+// de-vendored baseline. Skipped rather than deleted to preserve the historical
+// static-lock shape for that future re-patch. See 40-02-SUMMARY.md.
+describe.skip('P2P-11/38-12: relay-functional cross-peer reachability (tightened guard + bounded relayServerInit)', () => {
   it('the vendored-dist source files exist at the expected transplant paths', () => {
     expect(existsSync(KEY_NETWORK_PATH), `Expected ${KEY_NETWORK_PATH}`).to.equal(true)
     expect(existsSync(CADRE_NODE_PATH), `Expected ${CADRE_NODE_PATH}`).to.equal(true)
