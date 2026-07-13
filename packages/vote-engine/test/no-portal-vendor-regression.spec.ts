@@ -140,7 +140,7 @@ describe('no-portal / no-vendor regression (PUB-01 / PUB-02)', () => {
       expect(
         distinct[0],
         `Resolved ${pkg} version must start with ${expectedPrefix}, got ${distinct[0]}`
-      ).to.match(new RegExp(`^${expectedPrefix.replace('.', '\\.')}`))
+      ).to.match(new RegExp(`^${expectedPrefix.replace(/\./g, '\\.')}`))
     }
   })
 })
