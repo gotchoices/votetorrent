@@ -4187,7 +4187,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@optimystic/db-p2p@npm:^0.14.1":
+"@optimystic/db-p2p@npm:0.14.1":
   version: 0.14.1
   resolution: "@optimystic/db-p2p@npm:0.14.1"
   dependencies:
@@ -4221,6 +4221,43 @@ __metadata:
     uint8arraylist: "npm:^2.4.8"
     uint8arrays: "npm:^5.1.0"
   checksum: 10c0/7bafe08f4d01f8de7824088847d4d2aa815c8fefd10982dfd4a9532c9abe376f44aeaafcbf59644a4d7379c7b4df1a016e99001e4be8178a9d8f390bc13c794c
+  languageName: node
+  linkType: hard
+
+"@optimystic/db-p2p@patch:@optimystic/db-p2p@npm%3A0.14.1#~/.yarn/patches/@optimystic-db-p2p-npm-0.14.1-d92453d5ee.patch":
+  version: 0.14.1
+  resolution: "@optimystic/db-p2p@patch:@optimystic/db-p2p@npm%3A0.14.1#~/.yarn/patches/@optimystic-db-p2p-npm-0.14.1-d92453d5ee.patch::version=0.14.1&hash=ea0514"
+  dependencies:
+    "@chainsafe/libp2p-gossipsub": "npm:^14.1.2"
+    "@chainsafe/libp2p-noise": "npm:^17.0.0"
+    "@chainsafe/libp2p-yamux": "npm:^8.0.1"
+    "@libp2p/autonat": "npm:^3.0.21"
+    "@libp2p/bootstrap": "npm:^12.0.11"
+    "@libp2p/circuit-relay-v2": "npm:^4.1.3"
+    "@libp2p/crypto": "npm:^5.1.19"
+    "@libp2p/dcutr": "npm:^3.0.21"
+    "@libp2p/identify": "npm:^4.0.10"
+    "@libp2p/interface": "npm:^3.1.0"
+    "@libp2p/kad-dht": "npm:^16.1.3"
+    "@libp2p/peer-id": "npm:^6.0.4"
+    "@libp2p/ping": "npm:^3.0.10"
+    "@libp2p/tcp": "npm:^11.0.10"
+    "@libp2p/websockets": "npm:^10.1.3"
+    "@multiformats/multiaddr": "npm:^13.0.1"
+    "@optimystic/db-core": "npm:^0.14.1"
+    async-mutex: "npm:^0.5.0"
+    debug: "npm:^4.4.3"
+    it-all: "npm:^3.0.9"
+    it-length-prefixed: "npm:^10.0.1"
+    it-pipe: "npm:^3.0.1"
+    it-pushable: "npm:^3.2.3"
+    libp2p: "npm:^3.1.3"
+    multiformats: "npm:^13.4.2"
+    p2p-fret: "npm:^0.5.0"
+    protons-runtime: "npm:^6.0.0"
+    uint8arraylist: "npm:^2.4.8"
+    uint8arrays: "npm:^5.1.0"
+  checksum: 10c0/123ebdad020f8e40b3765bd138f309eb1d3fd8db6ffe75ea653e0e3a2cc6a4da3718665a4e522ead08b88875b5500850f5e0eeaeb137988f9352b7fcec3678bc
   languageName: node
   linkType: hard
 
@@ -16404,7 +16441,7 @@ __metadata:
   dependencies:
     "@libp2p/circuit-relay-v2": "npm:^4"
     "@libp2p/websockets": "npm:^10"
-    "@optimystic/db-p2p": "npm:^0.14.1"
+    "@optimystic/db-p2p": "patch:@optimystic/db-p2p@npm%3A0.14.1#~/.yarn/patches/@optimystic-db-p2p-npm-0.14.1-d92453d5ee.patch"
     "@serfab/cadre-core": "npm:^0.8.1"
     "@serfab/strand-proto": "npm:^0.8.1"
   languageName: unknown
@@ -20547,7 +20584,7 @@ __metadata:
     "@noble/curves": "npm:^2"
     "@noble/hashes": "npm:^2"
     "@optimystic/db-core": "npm:^0.14.1"
-    "@optimystic/db-p2p": "npm:^0.14.1"
+    "@optimystic/db-p2p": "patch:@optimystic/db-p2p@npm%3A0.14.1#~/.yarn/patches/@optimystic-db-p2p-npm-0.14.1-d92453d5ee.patch"
     "@optimystic/db-p2p-storage-rn": "npm:^0.14.1"
     "@optimystic/quereus-plugin-optimystic": "npm:^0.14.1"
     "@quereus/isolation": "npm:^4.3.1"

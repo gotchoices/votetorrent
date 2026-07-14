@@ -48,7 +48,6 @@
 		"@serfab/quereus-plugin-sereus": "^0.8.1",
 		"@serfab/strand-proto": "^0.8.1",
 		"@optimystic/db-core": "^0.14.1",
-		"@optimystic/db-p2p": "^0.14.1",
 		"@optimystic/db-p2p-storage-rn": "^0.14.1",
 		"@multiformats/multiaddr": "13.0.1",
 		"p2p-fret": "npm:^0.4.0",
@@ -59,7 +58,8 @@
 		"@quereus/store": "4.3.1",
 		"@quereus/isolation": "4.3.1",
 		"@chainsafe/libp2p-gossipsub@npm:^14.1.2": "patch:@chainsafe/libp2p-gossipsub@npm%3A14.1.2#~/.yarn/patches/@chainsafe-libp2p-gossipsub-npm-14.1.2-8e35f26afb.patch",
-		"@quereus/quereus": "patch:@quereus/quereus@npm%3A4.3.1#~/.yarn/patches/@quereus-quereus-npm-4.3.1-6814ac0861.patch"
+		"@quereus/quereus": "patch:@quereus/quereus@npm%3A4.3.1#~/.yarn/patches/@quereus-quereus-npm-4.3.1-6814ac0861.patch",
+		"@optimystic/db-p2p@npm:^0.14.1": "patch:@optimystic/db-p2p@npm%3A0.14.1#~/.yarn/patches/@optimystic-db-p2p-npm-0.14.1-d92453d5ee.patch"
 	},
 	"packageManager": "yarn@4.7.0",
 	"engines": {

@@ -1,0 +1,33 @@
+diff --git a/dist/src/libp2p-node-base.js b/dist/src/libp2p-node-base.js
+index f19e490a4b55c89883135add9960ba7366f90f3b..1d352c84939deae1991e1648e099620b65696761 100644
+--- a/dist/src/libp2p-node-base.js
++++ b/dist/src/libp2p-node-base.js
+@@ -1,7 +1,7 @@
+ import { createLibp2p } from 'libp2p';
+ import { noise } from '@chainsafe/libp2p-noise';
+ import { yamux } from '@chainsafe/libp2p-yamux';
+-import { identify } from '@libp2p/identify';
++import { identify, identifyPush } from '@libp2p/identify';
+ import { ping } from '@libp2p/ping';
+ import { dcutr } from '@libp2p/dcutr';
+ import { autoNAT } from '@libp2p/autonat';
+@@ -164,6 +164,19 @@ export async function createLibp2pNodeBase(options, defaults) {
+             identify: identify({
+                 protocolPrefix: `/optimystic/${options.networkName}`
+             }),
++            // VoteTorrent patch (41-04): identify() alone only exchanges address info at
++            // connection-open time. A relay-only (NAT'd) peer's circuit-relay-v2 reservation
++            // typically completes AFTER its first connection to a sibling (the connection is
++            // what requests the reservation in the first place), so without identifyPush the
++            // sibling's peerStore never learns the peer's relay-routed dial-back address --
++            // a later re-dial by peer id (e.g. after the original connection drops) throws
++            // "no valid addresses for peer" even though the peer IS reachable through the
++            // relay. identifyPush listens for the local 'self:peer:update' event (fired by
++            // AddressManager once the reservation's 'listening' event lands) and proactively
++            // pushes the updated address list to every already-connected peer.
++            identifyPush: identifyPush({
++                protocolPrefix: `/optimystic/${options.networkName}`
++            }),
+             ping: ping(),
+             // DCUtR (hole-punch) upgrades relayed node↔node connections to direct
+             // ones; AutoNAT learns this node's public reachability via peer dial-back.
