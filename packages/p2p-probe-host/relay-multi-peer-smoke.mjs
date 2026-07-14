@@ -69,16 +69,48 @@
  * formula, and the @libp2p/interface single-copy count) are printed as labeled, source-cited
  * log lines — diagnostic reads + assertions only, no product/vendored code is touched.
  *
+ * Phase-41-04 addition — STRAND-COHORT SMOKE (D-02, drives REAL strand-cohort formation, not
+ * just relay reservation): after the reservation modes above, a fresh 2-drone + 2-relay-client
+ * topology is booted where both clients are CONTROL-bootstrapped to both drones (so
+ * `resolveCohortSeed`'s strand-addr RPC — see below — has live control connections to query)
+ * AND carry the D-05 relay-qualified `network.listenAddrs`/`reservationConcurrency` posture
+ * (the exact shape `replication-proof-runner.ts`/`CadreNodeProvider.tsx` ship). Each client then
+ * calls `addStrand()` on the SAME strand the drones host and polls
+ * `getStrand(STRAND_ID)?.libp2pNode?.getConnections()?.length` (the runner's exact
+ * `readStrandPeers` accessor) until `strandPeers>0` or a bounded timeout.
+ *
+ * SOURCE-READ FINDING (not in the 41-01/41-02 static research — read directly from the
+ * INSTALLED `@serfab/cadre-core@0.8.1` dist this session): the `network.strandBootstrapNodes`
+ * field VT's app config still sets is DEAD on this substrate. `NetworkConfig`
+ * (`dist/types.d.ts:107-172`) has NO `strandBootstrapNodes` field at all (retired), and
+ * `StrandInstanceManager.buildStrandRuntime` (`dist/strand-instance-manager.js:165`) sources its
+ * `createLibp2pNode({ bootstrapNodes, ... })` call from `config.bootstrapNodes` — which
+ * `CadreNode.launchStrand` (`dist/cadre-node.js:1909-1928`) populates from
+ * `resolveCohortSeed(strandId)` (`:1943-1957`), NOT from any caller-supplied strand-bootstrap
+ * list. `resolveCohortSeed` queries the CONTROL network's already-connected `CadrePeer` siblings
+ * and RPCs each one over the control mesh via `collectStrandAddrs`/`STRAND_ADDR_PROTOCOL`
+ * (`dist/strand-addr-protocol.js`, protocol id `/sereus/strand-addr/1.0.0`) asking "what are your
+ * live strand-`X` multiaddrs?" — the responder answers with
+ * `orderSignalingFirst(node.getMultiaddrs())` (`cadre-node.js:1961-1972`, relay/`p2p-circuit`
+ * addrs ordered first). This REPLACES the old static-address strand-bootstrap model entirely; a
+ * strand joiner needs ONLY a live CONTROL connection to a sibling that already runs the strand —
+ * no manual strand-address wiring is read by cadre-core at all on this substrate.
+ *
  * Usage:
  *   cd packages/p2p-probe-host
  *   node relay-multi-peer-smoke.mjs                  # runs BOTH modes (default)
  *   LISTEN_MODE=bare node relay-multi-peer-smoke.mjs      # bare mode only
  *   LISTEN_MODE=qualified node relay-multi-peer-smoke.mjs # qualified mode only
+ *   LISTEN_MODE=none node relay-multi-peer-smoke.mjs      # skip both reservation modes (isolates the strand-cohort gate)
+ *   STRAND_COHORT_SMOKE=skip node relay-multi-peer-smoke.mjs # skip the strand-cohort gate
  *
  * Exit 0 + "MULTI-PEER RELAY SMOKE: PASS" when (bare-mode clients reserve with exactly 1
  * drone each) AND (qualified-mode clients reserve with 2 drones each); exit 1 +
  * "MULTI-PEER RELAY SMOKE: FAIL <reason>" otherwise — a FAIL here is a precise pre-device
- * blocker, not a signal to proceed to the emulator run.
+ * blocker, not a signal to proceed to the emulator run. The STRAND-COHORT SMOKE verdict is
+ * printed ADDITIONALLY and does NOT change the process exit code (D-02: a Node FAIL there is
+ * only decisive once the diagnosis doc below adjudicates whether the wall is Node-reproducible
+ * or an emulator-NAT-only surface — see 41-04-STRAND-COHORT-DIAGNOSIS.md).
  */
 import { CadreNode } from '@serfab/cadre-core';
 import { MemoryRawStorage } from '@optimystic/db-p2p';
@@ -120,10 +152,56 @@ create table Probe (
 
 const REQUESTED_MODE = process.env.LISTEN_MODE;
 const MODES_TO_RUN =
-  REQUESTED_MODE === 'bare' || REQUESTED_MODE === 'qualified' ? [REQUESTED_MODE] : ['bare', 'qualified'];
+  REQUESTED_MODE === 'bare' || REQUESTED_MODE === 'qualified'
+    ? [REQUESTED_MODE]
+    : REQUESTED_MODE === 'none'
+      ? [] // isolates the STRAND-COHORT SMOKE gate below for fast standalone diagnosis
+      : ['bare', 'qualified'];
+const RUN_STRAND_COHORT_SMOKE = process.env.STRAND_COHORT_SMOKE !== 'skip';
+
+const STRAND_COHORT_TIMEOUT_MS = 45_000;
+const STRAND_COHORT_POLL_INTERVAL_MS = 500;
 
 let exitCode = 1;
 let currentNodes = [];
+
+// ── Phase-41-04 signal instrumentation ──────────────────────────────────────────────────────
+// Tallies the THREE 41-03 signals (drone D-08 histogram classes) as they surface on Node,
+// via global unhandledRejection/uncaughtException hooks — the gossipsub `fns.shift` throw and
+// the FRET `UnsupportedProtocolError` both originate deep inside async protocol-negotiation
+// paths this harness never calls directly, so a global catch is the only reliable capture point
+// (mirrors how the device D-08 histogram was built from raw logcat, not from an app-level try/catch).
+const signalCounts = {
+  noValidAddresses: 0,
+  gossipsubFnsShift: 0,
+  fretUnsupportedProtocol: 0,
+  fretMalformedDoubleSlash: 0,
+};
+
+function classifySignal(err) {
+  const msg = (err && err.message) || String(err);
+  const name = (err && err.name) || '';
+  if (/no valid addresses for peer/i.test(msg)) {
+    signalCounts.noValidAddresses++;
+    return;
+  }
+  if (/fns\.shift is not a function/.test(msg)) {
+    signalCounts.gossipsubFnsShift++;
+    return;
+  }
+  if (name === 'UnsupportedProtocolError' || /could not negotiate/i.test(msg)) {
+    signalCounts.fretUnsupportedProtocol++;
+    if (msg.includes('//optimystic') || /\/\/optimystic/.test(msg)) {
+      signalCounts.fretMalformedDoubleSlash++;
+    }
+  }
+}
+
+// Non-fatal by design (mirrors the device capture — a thrown protocol error must not crash the
+// harness process, exactly as it does not crash the app on-device). Registered once, globally,
+// for the whole run (all three modes + the strand-cohort gate) so nothing is missed.
+process.on('unhandledRejection', (reason) => classifySignal(reason));
+process.on('uncaughtException', (err) => classifySignal(err));
 
 function pickLoopbackWs(addrs) {
   return addrs.find((a) => a.includes('/ip4/127.0.0.1/') && a.includes('/ws')) ?? addrs[0] ?? '';
@@ -430,6 +508,154 @@ function printProbeFindings() {
   );
 }
 
+// ── Phase-41-04 Task 1: STRAND-COHORT SMOKE ─────────────────────────────────────────────────
+// SIGNAL (a): each strand node's own advertised multiaddrs — flags whether a `/p2p-circuit`
+// relay-routed dial-back addr is present vs. only a direct (NAT-vulnerable on-device) addr.
+function logStrandAdvertisedAddrs(name, node, strandId) {
+  let addrs = [];
+  try {
+    addrs = (node.getStrand?.(strandId)?.libp2pNode?.getMultiaddrs?.() ?? []).map((m) => m.toString());
+  } catch {
+    addrs = [];
+  }
+  const hasCircuit = addrs.some((a) => a.includes('/p2p-circuit'));
+  L(
+    `SIGNAL(a) ${name} strand-node advertised multiaddrs (relayRouted=${hasCircuit}):`,
+    JSON.stringify(addrs),
+  );
+}
+
+// D-05-shaped relay-client: control-bootstrapped to BOTH drones (so resolveCohortSeed's
+// strand-addr RPC — see file header finding — has live control connections to query) AND
+// carrying the exact `replication-proof-runner.ts`/`CadreNodeProvider.tsx` network posture
+// (qualified per-drone `${strandAddr}/p2p-circuit` listenAddrs + `reservationConcurrency`).
+function newStrandCohortClient(droneAControlAddr, droneBControlAddr, droneAStrandAddr, droneBStrandAddr) {
+  const listenAddrs = [droneAStrandAddr, droneBStrandAddr].map((a) => `${a}/p2p-circuit`);
+  return new CadreNode({
+    controlNetwork: {
+      partyId: PARTY_ID,
+      bootstrapNodes: [droneAControlAddr, droneBControlAddr],
+    },
+    profile: 'transaction',
+    strandFilter: { mode: 'all' },
+    requireSignedSchemas: false,
+    storage: { provider: () => new MemoryRawStorage() },
+    network: {
+      transports: [webSockets(), circuitRelayTransport({ reservationConcurrency: 2 })],
+      listenAddrs,
+      connectionGater: { denyDialMultiaddr: async () => false },
+    },
+    hibernation: { enabled: false },
+  });
+}
+
+// Joins the shared strand (mode omitted -> 'networked', mirrors two-drone-smoke.mjs's solo-peer
+// and the app's real addStrand call) then polls the runner's EXACT readStrandPeers accessor
+// (getStrand(id)?.libp2pNode?.getConnections()?.length) until strandPeers>0 or a bound.
+async function joinStrandAndPollCohort(client, name) {
+  try {
+    await withTimeout(
+      client.addStrand({
+        strandRow: { Id: STRAND_ID, MemberPrivateKey: null, Type: 'o' },
+        sAppConfig: { id: SAPP_ID, version: '1.0.0', schema: MINIMAL_SCHEMA, latencyHint: 'interactive' },
+      }),
+      ADD_STRAND_TIMEOUT_MS,
+      `${name} addStrand (cohort)`,
+    );
+  } catch (e) {
+    L(`${name} addStrand (cohort) rejected (tolerated — strandPeers poll still runs):`, e?.message ?? String(e));
+  }
+
+  const readStrandPeers = () => client.getStrand?.(STRAND_ID)?.libp2pNode?.getConnections?.()?.length ?? 0;
+
+  const pollStart = Date.now();
+  let strandPeers = readStrandPeers();
+  while (Date.now() - pollStart < STRAND_COHORT_TIMEOUT_MS && strandPeers === 0) {
+    await new Promise((r) => setTimeout(r, STRAND_COHORT_POLL_INTERVAL_MS));
+    strandPeers = readStrandPeers();
+  }
+  L(`${name} strandPeers=`, strandPeers, `(after ${Date.now() - pollStart}ms)`);
+  return { name, strandPeers };
+}
+
+async function runStrandCohortSmoke() {
+  L('===== STRAND-COHORT SMOKE — booting fresh topology (D-05-shaped clients) =====');
+  const nodes = [];
+  currentNodes = nodes;
+
+  const droneA = await bootDrone('drone-A[cohort]', undefined, undefined);
+  nodes.push(['drone-A', droneA.drone]);
+  const droneB = await bootDrone('drone-B[cohort]', droneA.controlAddr, droneA.strandAddr);
+  nodes.push(['drone-B', droneB.drone]);
+
+  // SIGNAL (a) baseline: the drones' OWN strand addrs (not NAT'd — expected direct-reachable).
+  logStrandAdvertisedAddrs('drone-A', droneA.drone, STRAND_ID);
+  logStrandAdvertisedAddrs('drone-B', droneB.drone, STRAND_ID);
+
+  // EXERCISED FINDING (Task 1, this session — not anticipated by the plan/research): a
+  // 'transaction' client whose network.listenAddrs is EXCLUSIVELY qualified `/p2p-circuit`
+  // entries (the exact app-shaped posture — no direct listen address at all, since control and
+  // strand share ONE network object per Probe 1) throws `CadreControl.AuthorityKey` founding-DDL
+  // errors ("Protocol selection failed" / "Failed to get super-majority") on EVERY attempt when
+  // it is among the FIRST 'transaction' peers to join a freshly-created control party — reproduced
+  // deterministically (6 retries / ~9s, and again with a direct-listen "genesis" peer settling the
+  // party first — the retry/genesis combination occasionally drove the underlying
+  // RestorationCoordinator into a slow, unbounded `[Ring 8] restoring block` retry loop instead of
+  // failing fast, which is unsuitable for a committed, bounded Node gate). A separate isolated
+  // single-peer diagnostic (drone dialing a lone relay-only client BACK through its own reservation
+  // via `/ipfs/ping/1.0.0`) proved the circuit-relay-v2 dial-back mechanism itself is sound on
+  // Node (~200ms). The founding-DDL race is therefore TOLERATED here (single attempt, like the
+  // bare/qualified reservation gates above) rather than retried — this keeps the gate fast and
+  // deterministic; the diagnosis doc adjudicates the mechanism findings from the isolated probes.
+  const clientA = newStrandCohortClient(droneA.controlAddr, droneB.controlAddr, droneA.strandAddr, droneB.strandAddr);
+  nodes.push(['client-A', clientA]);
+  const clientB = newStrandCohortClient(droneA.controlAddr, droneB.controlAddr, droneA.strandAddr, droneB.strandAddr);
+  nodes.push(['client-B', clientB]);
+
+  // Sequential (not Promise.all) — mirrors runMode()'s clientA-then-clientB ordering so the two
+  // clients' founding attempts do not additionally race each other.
+  for (const [name, client] of [['client-A', clientA], ['client-B', clientB]]) {
+    try {
+      await client.start();
+      L(`${name} start() succeeded`);
+    } catch (e) {
+      L(`${name} start() rejected (tolerated — founding-DDL cold-start race, see file header):`, e?.message ?? String(e));
+    }
+  }
+  L('STRAND-COHORT SMOKE: clients started (control-bootstrapped to both drones), joining strand', STRAND_ID);
+
+  const [resultA, resultB] = await Promise.all([
+    joinStrandAndPollCohort(clientA, 'client-A'),
+    joinStrandAndPollCohort(clientB, 'client-B'),
+  ]);
+
+  // SIGNAL (a) under test: the CLIENTS' OWN strand addrs, post-join — the primary 41-03
+  // hypothesis is that this is empty/direct-only (no /p2p-circuit) despite the qualified
+  // listenAddrs above, OR that it IS relay-routed but siblings never dial it back (a different
+  // locus — see the diagnosis doc for the adjudication of which one the evidence supports).
+  logStrandAdvertisedAddrs('client-A', clientA, STRAND_ID);
+  logStrandAdvertisedAddrs('client-B', clientB, STRAND_ID);
+
+  await stopNodes(nodes);
+  currentNodes = [];
+
+  const pass = resultA.strandPeers > 0 && resultB.strandPeers > 0;
+  L(
+    'STRAND-COHORT SMOKE:', pass ? 'PASS' : 'FAIL',
+    `client-A=strandPeers:${resultA.strandPeers}`,
+    `client-B=strandPeers:${resultB.strandPeers}`,
+  );
+  L(
+    'STRAND-COHORT SIGNALS (b)/(c) [Task 1] — process-wide tallies across the whole run so far:',
+    `noValidAddresses=${signalCounts.noValidAddresses}`,
+    `gossipsubFnsShift=${signalCounts.gossipsubFnsShift}`,
+    `fretUnsupportedProtocol=${signalCounts.fretUnsupportedProtocol}`,
+    `fretMalformedDoubleSlash=${signalCounts.fretMalformedDoubleSlash}`,
+  );
+
+  return pass;
+}
+
 async function main() {
   const results = [];
   for (const mode of MODES_TO_RUN) {
@@ -437,6 +663,18 @@ async function main() {
   }
 
   printProbeFindings();
+
+  if (RUN_STRAND_COHORT_SMOKE) {
+    try {
+      await runStrandCohortSmoke();
+    } catch (e) {
+      // Non-gating (see file header) — a hard crash in the cohort gate must not take down the
+      // MULTI-PEER RELAY SMOKE verdict computed above; report it as a FAIL and move on.
+      L('STRAND-COHORT SMOKE: FAIL (harness error)', e?.stack ?? String(e));
+    }
+  } else {
+    L('STRAND-COHORT SMOKE: skipped (STRAND_COHORT_SMOKE=skip)');
+  }
 
   const bareResult = results.find((r) => r.mode === 'bare');
   const qualifiedResult = results.find((r) => r.mode === 'qualified');
