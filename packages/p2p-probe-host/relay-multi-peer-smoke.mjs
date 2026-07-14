@@ -113,9 +113,10 @@
  * or an emulator-NAT-only surface — see 41-04-STRAND-COHORT-DIAGNOSIS.md).
  */
 import { CadreNode } from '@serfab/cadre-core';
-import { MemoryRawStorage } from '@optimystic/db-p2p';
+import { MemoryRawStorage, createLibp2pNode } from '@optimystic/db-p2p';
 import { webSockets } from '@libp2p/websockets';
 import { circuitRelayTransport } from '@libp2p/circuit-relay-v2';
+import { multiaddr } from '@multiformats/multiaddr';
 
 const L = (...a) => console.log('[relay-multi-peer-smoke]', ...a);
 
@@ -621,6 +622,217 @@ async function attemptFretNegotiation(clientA, clientB, resultA, resultB) {
   }
 }
 
+// ── Phase-41-08 addition — REGISTRAR-SKEW SMOKE ─────────────────────────────────────────────
+// The 41-07 device route-forward named the multi-copy `@libp2p/interface` registrar skew as the
+// PRIME SUSPECT for the residual strand FRET inbound-handler negotiability wall (node.handle()'s
+// registrar diverging from the one the inbound-stream upgrader consults). 41-04/41-06's
+// STRAND-COHORT/FRET-NEGOTIATION probes both SKIP on Node (the control-layer founding cold-start
+// blocks addStrand() before a real cohort ever forms, per D-02) -- this probe sidesteps that
+// entirely by building ONE (then a SECOND) strand-config libp2p node directly via the SAME
+// `createLibp2pNode` path `strand-instance-manager.js buildStrandRuntime` uses (networkName
+// `strand-<probe-id>`, strand fretProfile), with NO CadreNode/control-layer wrapper at all --
+// exactly the plan's authorized D-02 workaround. Two checks:
+//   (1) DIRECT dial (no relay): builds node A + node B, node B bootstraps directly to node A's
+//       ws multiaddr (native autoDial, Probe 2 precedent), then node B dials node A's FRET
+//       `ping` protocol. This is the literal registrar-identity question the plan's must-haves
+//       ask: does node.handle()'s registrar (queried via node.getProtocols(), which delegates to
+//       `this.components.registrar.getProtocols()`, IDENTICAL to what the inbound upgrader
+//       consults, libp2p/dist/src/connection.js:156/179) match what the inbound negotiation
+//       resolves? PASS here, on the SAME single-copy @libp2p/interface topology the whole probe
+//       host and the RN app share (Probe 4), FALSIFIES the multi-copy-registrar-skew hypothesis
+//       as the mechanism (see 41-08-FRET-REGISTRAR-SKEW-DIAGNOSIS.md for the full source trace:
+//       Registrar is a single class owned by the single-copy `libp2p` package; `@libp2p/interface`
+//       exports only types + two `Symbol.for()`-keyed capability tags -- no registrar-brand state
+//       a second copy could diverge on).
+//   (2) RELAYED sub-check (additive, non-gating): a THIRD node stands up a circuit-relay-v2
+//       relay server; both edge nodes take relay-qualified reservations (mirrors the device's
+//       NAT-only strand-cohort reachability path) and dial each other ONLY via the resulting
+//       `/p2p-circuit` address. This is the check that actually surfaces the real, Node-reproducible
+//       defect this plan's Task 2 fixes: libp2p@3.3.2's Connection.newStream() throws
+//       LimitedConnectionError for ANY protocol-stream open over a connection whose `.limits` is
+//       non-null UNLESS `{ runOnLimitedConnection: true }` is passed -- which none of p2p-fret's
+//       five outbound RPC senders did, pre-patch. Prints its own verdict line; does not gate the
+//       primary REGISTRAR-SKEW SMOKE verdict (mirrors STRAND-COHORT/FRET-NEGOTIATION SMOKE's own
+//       non-gating posture).
+const REGISTRAR_PROBE_NETWORK_NAME = 'strand-registrar-skew-probe';
+const REGISTRAR_PROBE_PING_PROTOCOL = `/optimystic/${REGISTRAR_PROBE_NETWORK_NAME}/fret/1.0.0/ping`;
+
+function pickAnyWs(addrs) {
+  return addrs.find((a) => a.includes('/ws')) ?? addrs[0] ?? '';
+}
+
+async function runRegistrarSkewDirectDialCheck() {
+  let nodeA;
+  let nodeB;
+  try {
+    nodeA = await createLibp2pNode({
+      disableTcp: true,
+      wsPort: 0,
+      networkName: REGISTRAR_PROBE_NETWORK_NAME,
+      fretProfile: 'core',
+      clusterSize: 3,
+    });
+    await nodeA.start();
+    const aProtocols = nodeA.getProtocols();
+    const aHasPing = aProtocols.includes(REGISTRAR_PROBE_PING_PROTOCOL);
+    L(
+      'REGISTRAR-SKEW SMOKE: nodeA.getProtocols() (registrar.getProtocols(), the SAME accessor',
+      'the inbound upgrader queries, connection.js:156) includes FRET ping handler?',
+      aHasPing,
+    );
+    if (!aHasPing) {
+      L('REGISTRAR-SKEW SMOKE: FAIL (node.handle() did not register the FRET ping protocol at all)');
+      return { pass: false, detail: 'ping protocol missing from registrar.getProtocols() after start()' };
+    }
+
+    const bootstrapAddr = pickAnyWs(nodeA.getMultiaddrs().map((m) => m.toString()));
+    nodeB = await createLibp2pNode({
+      disableTcp: true,
+      wsPort: 0,
+      networkName: REGISTRAR_PROBE_NETWORK_NAME,
+      fretProfile: 'core',
+      clusterSize: 3,
+      bootstrapNodes: [bootstrapAddr],
+    });
+    await nodeB.start();
+
+    const deadline = Date.now() + 10_000;
+    let connected = false;
+    while (Date.now() < deadline) {
+      if (nodeB.getConnections(nodeA.peerId).length > 0) {
+        connected = true;
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    if (!connected) {
+      L('REGISTRAR-SKEW SMOKE: FAIL (nodeB never auto-dialed nodeA within 10s)');
+      return { pass: false, detail: 'no connection formed' };
+    }
+
+    const stream = await withTimeout(
+      nodeB.dialProtocol(nodeA.peerId, [REGISTRAR_PROBE_PING_PROTOCOL]),
+      10_000,
+      'REGISTRAR-SKEW SMOKE direct dial',
+    );
+    await stream.close();
+    L(
+      `REGISTRAR-SKEW SMOKE: PASS negotiated=${REGISTRAR_PROBE_PING_PROTOCOL}`,
+      '-- node.handle()\'s registrar and the inbound-negotiation registrar resolve the SAME',
+      'object on the strand build path (multi-copy @libp2p/interface registrar-skew FALSIFIED as',
+      'the mechanism for this direct-dial topology; see 41-08-FRET-REGISTRAR-SKEW-DIAGNOSIS.md).',
+    );
+    return { pass: true, detail: `negotiated=${REGISTRAR_PROBE_PING_PROTOCOL}` };
+  } catch (e) {
+    L(`REGISTRAR-SKEW SMOKE: FAIL (${e?.name ?? ''} ${e?.message ?? String(e)})`);
+    return { pass: false, detail: e?.message ?? String(e) };
+  } finally {
+    if (nodeB) {
+      try {
+        await nodeB.stop();
+      } catch {}
+    }
+    if (nodeA) {
+      try {
+        await nodeA.stop();
+      } catch {}
+    }
+  }
+}
+
+// Additive, non-gating sub-check: reproduces (and, once Task 2's patch lands, proves fixed) the
+// LimitedConnectionError defect on a relay-only topology -- the actual reachability shape between
+// two NAT'd strand-cohort members on-device (mirrors D-05's relay-qualified listenAddrs posture).
+async function runRegistrarSkewRelaySubCheck() {
+  let relay;
+  let nodeA;
+  let nodeB;
+  try {
+    relay = await createLibp2pNode({
+      disableTcp: true,
+      wsPort: 0,
+      networkName: REGISTRAR_PROBE_NETWORK_NAME,
+      fretProfile: 'core',
+      clusterSize: 3,
+      relay: true,
+    });
+    await relay.start();
+    const relayWsAddr = pickAnyWs(relay.getMultiaddrs().map((m) => m.toString()));
+
+    const newEdgeNode = async () => {
+      const node = await createLibp2pNode({
+        disableTcp: true,
+        networkName: REGISTRAR_PROBE_NETWORK_NAME,
+        fretProfile: 'edge',
+        clusterSize: 3,
+        bootstrapNodes: [relayWsAddr],
+        transports: [webSockets(), circuitRelayTransport({ reservationConcurrency: 1 })],
+        listenAddrs: [`${relayWsAddr}/p2p-circuit`],
+      });
+      await node.start();
+      return node;
+    };
+    nodeA = await newEdgeNode();
+    nodeB = await newEdgeNode();
+
+    const deadline = Date.now() + 15_000;
+    let aReserved = false;
+    let bReserved = false;
+    while (Date.now() < deadline && !(aReserved && bReserved)) {
+      aReserved = nodeA.getMultiaddrs().some((m) => m.toString().includes('/p2p-circuit'));
+      bReserved = nodeB.getMultiaddrs().some((m) => m.toString().includes('/p2p-circuit'));
+      if (!(aReserved && bReserved)) await new Promise((r) => setTimeout(r, 100));
+    }
+    if (!(aReserved && bReserved)) {
+      L('REGISTRAR-SKEW RELAY SUB-CHECK: FAIL (relay reservations never formed within 15s)');
+      return;
+    }
+
+    const nodeAViaRelay = nodeA
+      .getMultiaddrs()
+      .map((m) => m.toString())
+      .find((a) => a.includes('/p2p-circuit'));
+    await nodeB.dial(multiaddr(nodeAViaRelay));
+
+    const stream = await withTimeout(
+      nodeB.dialProtocol(nodeA.peerId, [REGISTRAR_PROBE_PING_PROTOCOL], { runOnLimitedConnection: true }),
+      10_000,
+      'REGISTRAR-SKEW RELAY SUB-CHECK dial',
+    );
+    await stream.close();
+    L(
+      `REGISTRAR-SKEW RELAY SUB-CHECK: PASS negotiated=${REGISTRAR_PROBE_PING_PROTOCOL} over a`,
+      'relayed (circuit-relay-v2 limited) connection with runOnLimitedConnection:true -- the',
+      "Task-2 fix's exact shape (p2p-fret's five outbound RPC senders now pass this option; without",
+      'it this same topology throws LimitedConnectionError, reproduced during this diagnosis).',
+    );
+  } catch (e) {
+    L(`REGISTRAR-SKEW RELAY SUB-CHECK: FAIL (${e?.name ?? ''} ${e?.message ?? String(e)})`);
+  } finally {
+    if (nodeB) {
+      try {
+        await nodeB.stop();
+      } catch {}
+    }
+    if (nodeA) {
+      try {
+        await nodeA.stop();
+      } catch {}
+    }
+    if (relay) {
+      try {
+        await relay.stop();
+      } catch {}
+    }
+  }
+}
+
+async function runRegistrarSkewSmoke() {
+  L('===== REGISTRAR-SKEW SMOKE — direct strand-config node dial (D-02 workaround, no CadreNode) =====');
+  await runRegistrarSkewDirectDialCheck();
+  await runRegistrarSkewRelaySubCheck();
+}
+
 async function runStrandCohortSmoke() {
   L('===== STRAND-COHORT SMOKE — booting fresh topology (D-05-shaped clients) =====');
   const nodes = [];
@@ -708,6 +920,14 @@ async function main() {
   }
 
   printProbeFindings();
+
+  try {
+    await runRegistrarSkewSmoke();
+  } catch (e) {
+    // Non-gating (mirrors STRAND-COHORT/FRET-NEGOTIATION SMOKE) -- a hard crash here must not
+    // take down the MULTI-PEER RELAY SMOKE verdict computed above.
+    L('REGISTRAR-SKEW SMOKE: FAIL (harness error)', e?.stack ?? String(e));
+  }
 
   if (RUN_STRAND_COHORT_SMOKE) {
     try {
