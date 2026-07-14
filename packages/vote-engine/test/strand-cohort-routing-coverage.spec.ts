@@ -25,6 +25,21 @@
  * Does NOT resurrect any of the 8 `describe.skip`'d Phase-38 vendor-path specs (Pitfall 3 — they
  * `readFileSync` a `vendor/` path Phase 40 deleted). All markers are built by string concatenation
  * so this spec's own prose can never self-satisfy an assertion it defines.
+ *
+ * 41-06 EXTENSION: the device n=4 re-prove (41-05) with the identifyPush patch live shifted the
+ * dominant wall to the p2p-fret strand-discovery protocol layer — FRET `UnsupportedProtocolError`
+ * jumped ~6x -> 77x, plus a malformed `//optimystic/strand-<id>/id/1.0.0` double-slash (6x).
+ * 41-06's diagnosis (41-06-FRET-NEGOTIATION-DIAGNOSIS.md) root-caused the double-slash to
+ * `@optimystic/db-p2p` passing an already-slash-prefixed `protocolPrefix` into `@libp2p/identify`
+ * (which itself prepends another leading slash), and found a real async-completeness gap in
+ * `p2p-fret`: `registerRpcHandlers()` never awaited its four fire-and-forget `node.handle(...)`
+ * registrations, so the Startable `start()` chain could resolve before the FRET handlers'
+ * `peerStore` advertisement had actually settled. The fix is TWO yarn-patches: the existing
+ * `@optimystic/db-p2p` patch EXTENDED with the single-slash `protocolPrefix` correction
+ * (identifyPush kept, unchanged in behavior), and a NEW sibling `p2p-fret` patch making
+ * `registerPing`/`registerNeighbors`/`registerMaybeAct`/`registerLeave` return their
+ * `node.handle()` promise and `FretService.start()` await `registerRpcHandlers()`. This extension
+ * locks BOTH new hunks + BOTH resolution entries — a silent revert of either must fail this spec.
  */
 
 import { expect } from 'chai'
@@ -76,6 +91,25 @@ const IDENTIFY_PUSH_SERVICE_MARKER = 'identifyPush' + ': identifyPush('
 const DB_P2P_PATCH_PREFIX = '@optimystic-db-p2p-npm-'
 const DB_P2P_RESOLUTION_KEY_FRAGMENT = '@optimystic/db-p2p'
 const PATCH_PROTOCOL_MARKER = 'patch' + ':'
+
+// 41-06: malformed `//` id double-slash fix markers — the CORRECTED (single-slash) protocolPrefix
+// value, as it appears on an ADDED (`+`) diff line, built by concatenation so this spec's own
+// prose (which quotes both the malformed and corrected forms above) can never self-satisfy it.
+const CORRECTED_PROTOCOL_PREFIX_ADDED_LINE =
+  '+' + '                protocolPrefix: ' + '`optimystic/${options.networkName}`'
+// The retired malformed shape (leading-slash protocolPrefix fed to identify/identifyPush) — this
+// must NOT remain on any ADDED line (it legitimately still appears on the REMOVED `-` context
+// line the diff carries, which is fine and expected).
+const MALFORMED_PROTOCOL_PREFIX_ADDED_LINE =
+  '+' + '                protocolPrefix: ' + '`/optimystic/${options.networkName}`'
+
+// 41-06: p2p-fret async-completeness fix markers.
+const P2P_FRET_PATCH_PREFIX = 'p2p-fret-npm-'
+const P2P_FRET_RESOLUTION_KEY = 'p2p-fret'
+const RETURN_NODE_HANDLE_MARKER = 'return' + ' node.handle('
+const AWAIT_REGISTER_RPC_HANDLERS_MARKER = 'await' + ' this.registerRpcHandlers()'
+const ASYNC_REGISTER_RPC_HANDLERS_MARKER = 'async' + ' registerRpcHandlers()'
+const VOID_NODE_HANDLE_ADDED_LINE = '+' + '    void node.handle('
 
 // Built via concatenation so this spec's own source is not itself a hit.
 const PHASE_41_04_MARKER = '41' + '-04'
@@ -146,6 +180,18 @@ function findDbP2pPatchFile (): string | undefined {
   if (!existsSync(YARN_PATCHES_DIR)) return undefined
   const entries = readdirSync(YARN_PATCHES_DIR)
   return entries.find((f) => f.startsWith(DB_P2P_PATCH_PREFIX) && f.endsWith('.patch'))
+}
+
+/** Find the (single) committed p2p-fret yarn-patch file, or undefined if absent. */
+function findP2pFretPatchFile (): string | undefined {
+  if (!existsSync(YARN_PATCHES_DIR)) return undefined
+  const entries = readdirSync(YARN_PATCHES_DIR)
+  return entries.find((f) => f.startsWith(P2P_FRET_PATCH_PREFIX) && f.endsWith('.patch'))
+}
+
+/** Count how many lines of `src` are exactly (or start with, after trimming) `marker`. */
+function countMatchingLines (src: string, marker: string): number {
+  return src.split('\n').filter((line) => line.includes(marker)).length
 }
 
 describe('P2P-11/41-04: strand-cohort NoValidAddressesError fix — app-side parity intact + identifyPush yarn-patch present', () => {
@@ -224,6 +270,124 @@ describe('P2P-11/41-04: strand-cohort NoValidAddressesError fix — app-side par
     expect(
       offenders,
       `Expected no runtime line to carry a GSD phase number; found: ${JSON.stringify(offenders)}`
+    ).to.have.length(0)
+  })
+})
+
+describe('P2P-11/41-06: FRET strand-discovery negotiation gap — malformed // id double-slash fix + p2p-fret async-completeness fix present', () => {
+  it('the committed @optimystic/db-p2p patch corrects the malformed // id double-slash for BOTH identify and identifyPush', () => {
+    const patchFile = findDbP2pPatchFile()
+    expect(patchFile, 'Expected the db-p2p patch file to exist (see prior describe block)').to.not.equal(undefined)
+    const patchSrc = readFileSync(join(YARN_PATCHES_DIR, patchFile as string), 'utf8')
+
+    // Exactly two ADDED lines carry the corrected (single-slash) protocolPrefix value — one for
+    // identify, one for identifyPush. A silent revert of either would drop this count to 1 or 0.
+    expect(
+      countMatchingLines(patchSrc, CORRECTED_PROTOCOL_PREFIX_ADDED_LINE),
+      'Expected exactly 2 added lines with the corrected single-slash protocolPrefix ' +
+      '(identify + identifyPush) — a silent revert of either would change this count'
+    ).to.equal(2)
+
+    // The retired malformed (leading-slash) form must NOT remain on any ADDED line — it is
+    // expected and fine as a REMOVED (`-`) context line (that is simply the diff showing what
+    // was fixed), but must not have been silently re-introduced as a new addition.
+    expect(
+      countMatchingLines(patchSrc, MALFORMED_PROTOCOL_PREFIX_ADDED_LINE),
+      'Expected NO added line to re-introduce the malformed leading-slash protocolPrefix value'
+    ).to.equal(0)
+
+    // identifyPush (41-04) stays intact alongside the 41-06 double-slash fix.
+    expect(
+      patchSrc.includes(IDENTIFY_PUSH_IMPORT_MARKER) && patchSrc.includes(IDENTIFY_PUSH_SERVICE_MARKER),
+      'Expected the 41-04 identifyPush hunk to remain present alongside the 41-06 double-slash fix'
+    ).to.equal(true)
+  })
+
+  it('a p2p-fret yarn-patch is committed under .yarn/patches/', () => {
+    const patchFile = findP2pFretPatchFile()
+    expect(
+      patchFile,
+      `Expected a ${P2P_FRET_PATCH_PREFIX}*.patch file under ${YARN_PATCHES_DIR}`
+    ).to.not.equal(undefined)
+  })
+
+  it('the committed p2p-fret patch closes the FRET-registration async-completeness gap', () => {
+    const patchFile = findP2pFretPatchFile()
+    expect(patchFile, 'Expected the p2p-fret patch file to exist (see prior test)').to.not.equal(undefined)
+    const patchSrc = readFileSync(join(YARN_PATCHES_DIR, patchFile as string), 'utf8')
+
+    // All four register*() call sites now return (not void-discard) their node.handle() promise.
+    expect(
+      countMatchingLines(patchSrc, RETURN_NODE_HANDLE_MARKER),
+      'Expected register*() functions to return their node.handle(...) registration promise ' +
+      '(ping.js/leave.js/maybe-act.js each return it directly; neighbors.js collects both into ' +
+      'a Promise.all-awaited array — this count covers the three direct `return node.handle(` sites)'
+    ).to.be.greaterThan(0)
+
+    // No ADDED line resurrects the fire-and-forget `void node.handle(...)` pattern.
+    expect(
+      countMatchingLines(patchSrc, VOID_NODE_HANDLE_ADDED_LINE),
+      'Expected NO added line to reintroduce a fire-and-forget `void node.handle(...)` registration'
+    ).to.equal(0)
+
+    // FretService.registerRpcHandlers() is now async and start() awaits it.
+    expect(
+      patchSrc.includes(ASYNC_REGISTER_RPC_HANDLERS_MARKER),
+      'Expected FretService.registerRpcHandlers() to be declared async'
+    ).to.equal(true)
+    expect(
+      patchSrc.includes(AWAIT_REGISTER_RPC_HANDLERS_MARKER),
+      'Expected FretService.start() to await registerRpcHandlers() (was a synchronous, ' +
+      'non-awaited call)'
+    ).to.equal(true)
+  })
+
+  it('root package.json resolves p2p-fret through the committed patch protocol (not a bare semver)', () => {
+    const rootPackageJson = JSON.parse(readFileSync(ROOT_PACKAGE_JSON_PATH, 'utf8')) as {
+      resolutions?: Record<string, string>
+    }
+    const resolutions = rootPackageJson.resolutions ?? {}
+    // p2p-fret is resolved via the BARE (unqualified) key — a range-scoped key would be silently
+    // shadowed by it (41-06 diagnosis §7 finding), so assert on the exact bare key only.
+    const target = resolutions[P2P_FRET_RESOLUTION_KEY]
+    expect(
+      target,
+      `Expected a root package.json resolutions entry for the bare "${P2P_FRET_RESOLUTION_KEY}" key`
+    ).to.not.equal(undefined)
+    expect(
+      (target as string).startsWith(PATCH_PROTOCOL_MARKER),
+      `Expected the ${P2P_FRET_RESOLUTION_KEY} resolution to target a patch: protocol reference ` +
+      `(found: ${target}) — a plain semver pin would silently drop the async-completeness fix`
+    ).to.equal(true)
+  })
+
+  it('no GSD phase number appears in a runtime-emitted string of either yarn-patch', () => {
+    const dbP2pPatchFile = findDbP2pPatchFile()
+    const p2pFretPatchFile = findP2pFretPatchFile()
+    expect(dbP2pPatchFile, 'Expected the db-p2p patch file to exist').to.not.equal(undefined)
+    expect(p2pFretPatchFile, 'Expected the p2p-fret patch file to exist').to.not.equal(undefined)
+    // Patch comments carry phase markers (e.g. "VoteTorrent patch (41-06)") by design/convention —
+    // those are comment lines, not runtime-emitted strings. Only ADDED, non-comment source lines
+    // matter here; neither patch's added CODE lines (as opposed to its comments) reference a
+    // phase number at all, so this simply confirms no phase-number literal leaked into a
+    // string/template-literal a running node would ever log or throw.
+    const addedNonCommentLines = (patchSrc: string): string[] =>
+      patchSrc
+        .split('\n')
+        .filter((l) => l.startsWith('+'))
+        .map((l) => l.slice(1)) // strip the diff `+` marker before comment-sniffing
+        .filter((l) => {
+          const t = l.trim()
+          return t.length > 0 && !t.startsWith('//') && !t.startsWith('/*') && !t.startsWith('*')
+        })
+    const dbP2pAddedCodeLines = addedNonCommentLines(readFileSync(join(YARN_PATCHES_DIR, dbP2pPatchFile as string), 'utf8'))
+    const p2pFretAddedCodeLines = addedNonCommentLines(readFileSync(join(YARN_PATCHES_DIR, p2pFretPatchFile as string), 'utf8'))
+    const offenders = [...dbP2pAddedCodeLines, ...p2pFretAddedCodeLines].filter(
+      (l) => l.includes(PHASE_41_04_MARKER) || l.includes('41' + '-06')
+    )
+    expect(
+      offenders,
+      `Expected no added CODE line (non-comment) to carry a GSD phase number; found: ${JSON.stringify(offenders)}`
     ).to.have.length(0)
   })
 })
