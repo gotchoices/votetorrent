@@ -152,6 +152,14 @@ export async function runReplicationProof(): Promise<void> {
       privateKey,
       controlNetwork: { partyId: 'votetorrent', bootstrapNodes: BOOTSTRAP_NODES },
       profile: 'transaction',
+      // Published @serfab/cadre-core@0.8.1 added a fail-closed sApp-schema signature
+      // policy (requireSignedSchemas defaults true): an unsigned sAppConfig is rejected
+      // at strand bring-up with SchemaVerificationError('missing signature'). This proof
+      // runner applies the unsigned votetorrent demo schema (sAppConfig id:'org.votetorrent',
+      // no signature), so relax the policy for the proof node — the documented dev/test
+      // relaxation, at parity with strand-persistence-proof-runner.ts. Production sApp-schema
+      // signing (id = author ed25519 pubkey + signSchema()) is a separate productionization task.
+      requireSignedSchemas: false,
       strandFilter: { mode: 'all' },
       storage: { provider: () => new LevelDBRawStorage(rnDb) },
       // eslint-disable-next-line @typescript-eslint/no-explicit-any

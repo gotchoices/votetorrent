@@ -65,8 +65,14 @@ const node = new CadreNode({
     bootstrapNodes: DRONE_BOOTSTRAP_CONTROL_ADDR ? [DRONE_BOOTSTRAP_CONTROL_ADDR] : [],
   },
   profile: 'storage',
+  // Published @serfab/cadre-core@0.8.1 enforces a fail-closed sApp-schema signature
+  // policy (requireSignedSchemas defaults true): the unsigned org.votetorrent demo
+  // schema this drone hosts is rejected at strand bring-up with
+  // SchemaVerificationError('missing signature'). Relax the policy for this dev-harness
+  // drone — the documented dev/test relaxation, at parity with the app's proof runners
+  // (replication-proof-runner.ts / strand-persistence-proof-runner.ts).
+  requireSignedSchemas: false,
   strandFilter: { mode: 'all' },
-  storage: { provider: () => new MemoryRawStorage() },
   network: {
     transports: [webSockets()],
     listenAddrs: ['/ip4/0.0.0.0/tcp/0/ws'], // ephemeral — avoids EADDRINUSE
