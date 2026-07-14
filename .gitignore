@@ -119,5 +119,5 @@ figmaToken.txt
 # Local overrides written by run-vtest02.sh / run-dial-probe.sh are restored
 # to the default-false content by each script's EXIT trap.
 
-
 vendor
+scratchpad/
