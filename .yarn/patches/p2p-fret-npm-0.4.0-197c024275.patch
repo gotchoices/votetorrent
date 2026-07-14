@@ -1,5 +1,5 @@
 diff --git a/dist/src/rpc/leave.js b/dist/src/rpc/leave.js
-index f790c9790092dab9fe7c072a2c07c28161d6c8e3..62650459559d340256c010185180ad31ffadd827 100644
+index f790c9790092dab9fe7c072a2c07c28161d6c8e3..a7aa1427345b4e9bee41c7bb98c0ad9f527754e7 100644
 --- a/dist/src/rpc/leave.js
 +++ b/dist/src/rpc/leave.js
 @@ -16,8 +16,10 @@ function sanitizeReplacements(ids) {
@@ -14,8 +14,30 @@ index f790c9790092dab9fe7c072a2c07c28161d6c8e3..62650459559d340256c010185180ad31
          try {
              const bytes = await readAllBounded(stream, 4096);
              const msg = await decodeJson(bytes);
+@@ -31,16 +33,19 @@ export function registerLeave(node, onLeave, protocol = PROTOCOL_LEAVE) {
+         }
+     });
+ }
++// VoteTorrent patch (41-08): pass runOnLimitedConnection so this dial does not throw
++// LimitedConnectionError over a relayed (circuit-relay-v2 "limited") connection — see
++// rpc/neighbors.js's patch comment for the full mechanism/citation.
+ export async function sendLeave(node, peerIdStr, notice, protocol = PROTOCOL_LEAVE) {
+     const pid = peerIdFromString(peerIdStr);
+     const conns = node.getConnections(pid);
+     let stream;
+     try {
+         if (conns.length > 0) {
+-            stream = await conns[0].newStream([protocol]);
++            stream = await conns[0].newStream([protocol], { runOnLimitedConnection: true });
+         }
+         else {
+-            stream = await node.dialProtocol(pid, [protocol]);
++            stream = await node.dialProtocol(pid, [protocol], { runOnLimitedConnection: true });
+         }
+         stream.send(await encodeJson(notice));
+         await stream.close();
 diff --git a/dist/src/rpc/maybe-act.js b/dist/src/rpc/maybe-act.js
-index ae616df8bc1f2001614a10199caf7e258b598d40..538efd5d14e54f253b5a7727f54a910ae38dcca5 100644
+index ae616df8bc1f2001614a10199caf7e258b598d40..6924d8abb6d806d42aeac03639cafc50592384a8 100644
 --- a/dist/src/rpc/maybe-act.js
 +++ b/dist/src/rpc/maybe-act.js
 @@ -2,8 +2,10 @@ import { peerIdFromString } from '@libp2p/peer-id';
@@ -30,8 +52,30 @@ index ae616df8bc1f2001614a10199caf7e258b598d40..538efd5d14e54f253b5a7727f54a910a
          try {
              const bytes = await readAllBounded(stream, maxBytes);
              const msg = await decodeJson(bytes);
+@@ -16,16 +18,19 @@ export function registerMaybeAct(node, handle, protocol = PROTOCOL_MAYBE_ACT, ma
+         }
+     });
+ }
++// VoteTorrent patch (41-08): pass runOnLimitedConnection so this dial does not throw
++// LimitedConnectionError over a relayed (circuit-relay-v2 "limited") connection — see
++// rpc/neighbors.js's patch comment for the full mechanism/citation.
+ export async function sendMaybeAct(node, peerIdStr, msg, protocol = PROTOCOL_MAYBE_ACT) {
+     const pid = peerIdFromString(peerIdStr);
+     const conns = node.getConnections(pid);
+     let stream;
+     try {
+         if (conns.length > 0) {
+-            stream = await conns[0].newStream([protocol]);
++            stream = await conns[0].newStream([protocol], { runOnLimitedConnection: true });
+         }
+         else {
+-            stream = await node.dialProtocol(pid, [protocol]);
++            stream = await node.dialProtocol(pid, [protocol], { runOnLimitedConnection: true });
+         }
+         stream.send(await encodeJson(msg));
+         await stream.close();
 diff --git a/dist/src/rpc/neighbors.js b/dist/src/rpc/neighbors.js
-index 8624f3a83ec28162696eb86460835abb537b1d23..d6c72b270daabbc025a17c3c9735e13c7af1c8d5 100644
+index 8624f3a83ec28162696eb86460835abb537b1d23..fbd2fd2a1ac8601e665d652f299da1a114d58e67 100644
 --- a/dist/src/rpc/neighbors.js
 +++ b/dist/src/rpc/neighbors.js
 @@ -2,19 +2,25 @@ import { peerIdFromString } from '@libp2p/peer-id';
@@ -72,7 +116,7 @@ index 8624f3a83ec28162696eb86460835abb537b1d23..d6c72b270daabbc025a17c3c9735e13c
              try {
                  const bytes = await readAllBounded(stream, maxBytes);
                  const snap = await decodeJson(bytes);
-@@ -25,8 +31,9 @@ export function registerNeighbors(node, getSnapshot, onAnnounce, protocols = { P
+@@ -25,9 +31,25 @@ export function registerNeighbors(node, getSnapshot, onAnnounce, protocols = { P
              catch (err) {
                  log.error('neighbors announce handler error - %e', err);
              }
@@ -81,10 +125,44 @@ index 8624f3a83ec28162696eb86460835abb537b1d23..d6c72b270daabbc025a17c3c9735e13c
      }
 +    await Promise.all(registrations);
  }
++// VoteTorrent patch (41-08): pass `{ runOnLimitedConnection: true }` on every outbound FRET
++// stream open. Root cause (41-08-FRET-REGISTRAR-SKEW-DIAGNOSIS.md): libp2p@3.3.2's
++// `Connection.newStream()` (dist/src/connection.js:81-83) throws
++// `LimitedConnectionError: Cannot open protocol stream on limited connection` for ANY stream
++// open attempt over a connection whose `.limits` is non-null — i.e. a circuit-relay-v2 "hop"
++// (relayed) connection, the ONLY reachability path between two NAT'd strand-cohort members
++// on-device. Confirmed live this session (Node): a 3-node harness (1 relay + 2 relay-only edge
++// nodes) throws exactly this error on a FRET ping dial over the relayed connection WITHOUT this
++// option, and negotiates successfully WITH it. This is additive/narrower than the multi-copy
++// `@libp2p/interface` registrar-skew hypothesis the 41-07 route-forward named as the prime
++// suspect — that hypothesis was FALSIFIED at the source (registrar.js is a single class owned
++// by the single-copy `libp2p` package; `@libp2p/interface` exports only types + two
++// `Symbol.for()`-keyed capability tags, no registrar-brand state) and empirically (this same
++// harness negotiates FRET ping correctly over BOTH a direct dial and a relayed dial once this
++// option is supplied).
  export async function fetchNeighbors(node, peerIdOrStr, protocol = PROTOCOL_NEIGHBORS) {
      const pid = peerIdFromString(peerIdOrStr);
+     const conns = node.getConnections(pid);
+@@ -37,7 +59,7 @@ export async function fetchNeighbors(node, peerIdOrStr, protocol = PROTOCOL_NEIG
+     }
+     let stream;
+     try {
+-        stream = await conns[0].newStream([protocol]);
++        stream = await conns[0].newStream([protocol], { runOnLimitedConnection: true });
+         const bytes = await readAllBounded(stream, 128 * 1024);
+         const res = await decodeJson(bytes);
+         if ('busy' in res && res.busy) {
+@@ -66,7 +88,7 @@ export async function announceNeighbors(node, peerIdOrStr, snapshot, protocol =
+     }
+     let stream;
+     try {
+-        stream = await conns[0].newStream([protocol]);
++        stream = await conns[0].newStream([protocol], { runOnLimitedConnection: true });
+         stream.send(await encodeJson(snapshot));
+         await stream.close();
+     }
 diff --git a/dist/src/rpc/ping.js b/dist/src/rpc/ping.js
-index 6869bc9b004f20136b1f35beb3283af2227f90b6..da091bdeb35c2773fdeac36ec28957c821dd1cbf 100644
+index 6869bc9b004f20136b1f35beb3283af2227f90b6..571aa349c7fbb6478e908fe44a3f5719703dd940 100644
 --- a/dist/src/rpc/ping.js
 +++ b/dist/src/rpc/ping.js
 @@ -5,8 +5,15 @@ const log = createLogger('rpc:ping');
@@ -104,6 +182,25 @@ index 6869bc9b004f20136b1f35beb3283af2227f90b6..da091bdeb35c2773fdeac36ec28957c8
          if (getSizeEstimate) {
              try {
                  const sizeInfo = await getSizeEstimate();
+@@ -38,11 +45,16 @@ export async function sendPing(node, peer, protocol = PROTOCOL_PING) {
+     let stream;
+     try {
+         const conns = node.getConnections(pid);
++        // VoteTorrent patch (41-08): pass runOnLimitedConnection so this dial does not throw
++        // LimitedConnectionError when the only reachable connection to `peer` is a
++        // circuit-relay-v2 "limited" hop connection (the sole reachability path between NAT'd
++        // strand-cohort members on-device) — see rpc/neighbors.js's patch comment for the full
++        // mechanism/citation.
+         if (conns.length > 0) {
+-            stream = await conns[0].newStream([protocol]);
++            stream = await conns[0].newStream([protocol], { runOnLimitedConnection: true });
+         }
+         else {
+-            stream = await node.dialProtocol(pid, [protocol]);
++            stream = await node.dialProtocol(pid, [protocol], { runOnLimitedConnection: true });
+         }
+         const bytes = await readAllBounded(stream, 1024);
+         const rttMs = Math.max(0, Date.now() - start);
 diff --git a/dist/src/service/fret-service.js b/dist/src/service/fret-service.js
 index aa6c9fe33c6a46060107186c41b737fef4da7f41..a5b84c7350f64b2215cd3c774a8f6fb3ad55c1dd 100644
 --- a/dist/src/service/fret-service.js
