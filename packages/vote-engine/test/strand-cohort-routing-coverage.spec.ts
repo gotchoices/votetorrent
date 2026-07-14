@@ -40,6 +40,23 @@
  * `registerPing`/`registerNeighbors`/`registerMaybeAct`/`registerLeave` return their
  * `node.handle()` promise and `FretService.start()` await `registerRpcHandlers()`. This extension
  * locks BOTH new hunks + BOTH resolution entries — a silent revert of either must fail this spec.
+ *
+ * 41-08 EXTENSION: the device n=4 re-prove (41-07) with the 41-06 fixes live left the wall
+ * PARTIALLY closed — the malformed `//id` double-slash was confirmed gone (6x -> 0x) but the
+ * well-formed FRET `fret/1.0.0/{ping,neighbors}` handlers were STILL not negotiable
+ * (`UnsupportedProtocolError` 89x). 41-07's route-forward named the multi-copy
+ * `@libp2p/interface` registrar skew as the prime suspect; 41-08's diagnosis
+ * (41-08-FRET-REGISTRAR-SKEW-DIAGNOSIS.md) FALSIFIED that hypothesis (Registrar is a
+ * single-copy `libp2p`-owned class; `@libp2p/interface` exports only types + two
+ * `Symbol.for()`-keyed capability tags) and instead found + reproduced a REAL defect: none of
+ * `p2p-fret`'s five outbound RPC senders (`sendPing`, `fetchNeighbors`, `announceNeighbors`,
+ * `sendMaybeAct`, `sendLeave`) passed `{ runOnLimitedConnection: true }`, so every FRET dial over
+ * a circuit-relay-v2 "limited" connection (the on-device NAT-only reachability shape between
+ * strand-cohort members) threw `LimitedConnectionError` before multistream-select ever ran. The
+ * fix EXTENDS the same `p2p-fret` patch (41-06's async-completeness hunks kept byte-identical)
+ * with `runOnLimitedConnection: true` at all eight call-site branches across the five senders.
+ * This extension locks the new hunk — a silent revert would reopen the relay-only FRET-dial wall
+ * without any other signal changing.
  */
 
 import { expect } from 'chai'
@@ -110,6 +127,11 @@ const RETURN_NODE_HANDLE_MARKER = 'return' + ' node.handle('
 const AWAIT_REGISTER_RPC_HANDLERS_MARKER = 'await' + ' this.registerRpcHandlers()'
 const ASYNC_REGISTER_RPC_HANDLERS_MARKER = 'async' + ' registerRpcHandlers()'
 const VOID_NODE_HANDLE_ADDED_LINE = '+' + '    void node.handle('
+
+// 41-08: registrar-skew diagnosis fix markers — p2p-fret's outbound RPC senders now pass
+// `runOnLimitedConnection: true` so a FRET dial over a circuit-relay-v2 limited connection does
+// not throw LimitedConnectionError before multistream-select ever runs.
+const RUN_ON_LIMITED_CONNECTION_MARKER = 'runOnLimitedConnection' + ': true'
 
 // Built via concatenation so this spec's own source is not itself a hit.
 const PHASE_41_04_MARKER = '41' + '-04'
@@ -192,6 +214,28 @@ function findP2pFretPatchFile (): string | undefined {
 /** Count how many lines of `src` are exactly (or start with, after trimming) `marker`. */
 function countMatchingLines (src: string, marker: string): number {
   return src.split('\n').filter((line) => line.includes(marker)).length
+}
+
+/**
+ * ADDED (`+`), non-comment lines of a unified diff patch — a fix's own explanatory comment
+ * (which may legitimately quote the same code shape it introduces, e.g. inside backticks) must
+ * not false-satisfy a CODE-presence assertion. Reused by both the phase-number-leak check and
+ * the 41-08 runOnLimitedConnection count below.
+ */
+function addedNonCommentLines (patchSrc: string): string[] {
+  return patchSrc
+    .split('\n')
+    .filter((l) => l.startsWith('+'))
+    .map((l) => l.slice(1)) // strip the diff `+` marker before comment-sniffing
+    .filter((l) => {
+      const t = l.trim()
+      return t.length > 0 && !t.startsWith('//') && !t.startsWith('/*') && !t.startsWith('*')
+    })
+}
+
+/** Count ADDED non-comment lines containing `marker` — the CODE-presence counterpart to countMatchingLines. */
+function countAddedCodeLinesMatching (patchSrc: string, marker: string): number {
+  return addedNonCommentLines(patchSrc).filter((l) => l.includes(marker)).length
 }
 
 describe('P2P-11/41-04: strand-cohort NoValidAddressesError fix — app-side parity intact + identifyPush yarn-patch present', () => {
@@ -371,23 +415,97 @@ describe('P2P-11/41-06: FRET strand-discovery negotiation gap — malformed // i
     // matter here; neither patch's added CODE lines (as opposed to its comments) reference a
     // phase number at all, so this simply confirms no phase-number literal leaked into a
     // string/template-literal a running node would ever log or throw.
-    const addedNonCommentLines = (patchSrc: string): string[] =>
-      patchSrc
-        .split('\n')
-        .filter((l) => l.startsWith('+'))
-        .map((l) => l.slice(1)) // strip the diff `+` marker before comment-sniffing
-        .filter((l) => {
-          const t = l.trim()
-          return t.length > 0 && !t.startsWith('//') && !t.startsWith('/*') && !t.startsWith('*')
-        })
     const dbP2pAddedCodeLines = addedNonCommentLines(readFileSync(join(YARN_PATCHES_DIR, dbP2pPatchFile as string), 'utf8'))
     const p2pFretAddedCodeLines = addedNonCommentLines(readFileSync(join(YARN_PATCHES_DIR, p2pFretPatchFile as string), 'utf8'))
     const offenders = [...dbP2pAddedCodeLines, ...p2pFretAddedCodeLines].filter(
-      (l) => l.includes(PHASE_41_04_MARKER) || l.includes('41' + '-06')
+      (l) => l.includes(PHASE_41_04_MARKER) || l.includes('41' + '-06') || l.includes('41' + '-08')
     )
     expect(
       offenders,
       `Expected no added CODE line (non-comment) to carry a GSD phase number; found: ${JSON.stringify(offenders)}`
+    ).to.have.length(0)
+  })
+})
+
+describe('P2P-11/41-08: FRET strand registrar-skew — runOnLimitedConnection fix present (all three prior patches kept)', () => {
+  it('the committed p2p-fret patch passes runOnLimitedConnection:true on every outbound RPC dial (8 call-site branches across 5 senders)', () => {
+    const patchFile = findP2pFretPatchFile()
+    expect(patchFile, 'Expected the p2p-fret patch file to exist (see prior describe block)').to.not.equal(undefined)
+    const patchSrc = readFileSync(join(YARN_PATCHES_DIR, patchFile as string), 'utf8')
+
+    // sendPing (2 branches), fetchNeighbors (1), announceNeighbors (1), sendMaybeAct (2),
+    // sendLeave (2) = 8 ADDED code lines. Counted on ADDED non-comment lines only — one of this
+    // patch's own explanatory comments quotes the marker inside backticks, which must not
+    // false-satisfy this CODE-presence count (the 38-18 false-positive-comment lesson).
+    expect(
+      countAddedCodeLinesMatching(patchSrc, RUN_ON_LIMITED_CONNECTION_MARKER),
+      'Expected exactly 8 added CODE lines passing runOnLimitedConnection:true (2 each for ' +
+      'sendPing/sendMaybeAct/sendLeave, 1 each for fetchNeighbors/announceNeighbors) — a silent ' +
+      'revert of any call site would change this count and reopen the relay-only FRET-dial wall'
+    ).to.equal(8)
+  })
+
+  it('all three prior patches (41-04 identifyPush, 41-06 single-slash, 41-06 async-completeness) remain present alongside the 41-08 fix', () => {
+    const dbP2pPatchFile = findDbP2pPatchFile()
+    const p2pFretPatchFile = findP2pFretPatchFile()
+    expect(dbP2pPatchFile, 'Expected the db-p2p patch file to exist').to.not.equal(undefined)
+    expect(p2pFretPatchFile, 'Expected the p2p-fret patch file to exist').to.not.equal(undefined)
+    const dbP2pPatchSrc = readFileSync(join(YARN_PATCHES_DIR, dbP2pPatchFile as string), 'utf8')
+    const p2pFretPatchSrc = readFileSync(join(YARN_PATCHES_DIR, p2pFretPatchFile as string), 'utf8')
+
+    // 41-04 identifyPush + 41-06 single-slash (same db-p2p patch, untouched by this plan).
+    expect(
+      dbP2pPatchSrc.includes(IDENTIFY_PUSH_IMPORT_MARKER) && dbP2pPatchSrc.includes(IDENTIFY_PUSH_SERVICE_MARKER),
+      'Expected the 41-04 identifyPush hunk to remain present'
+    ).to.equal(true)
+    expect(
+      countMatchingLines(dbP2pPatchSrc, CORRECTED_PROTOCOL_PREFIX_ADDED_LINE),
+      'Expected the 41-06 single-slash protocolPrefix fix to remain present (2 added lines)'
+    ).to.equal(2)
+
+    // 41-06 async-completeness (same p2p-fret patch this plan extends).
+    expect(
+      p2pFretPatchSrc.includes(ASYNC_REGISTER_RPC_HANDLERS_MARKER) && p2pFretPatchSrc.includes(AWAIT_REGISTER_RPC_HANDLERS_MARKER),
+      'Expected the 41-06 async-completeness fix (async registerRpcHandlers + awaited start()) to remain present'
+    ).to.equal(true)
+    expect(
+      countMatchingLines(p2pFretPatchSrc, VOID_NODE_HANDLE_ADDED_LINE),
+      'Expected NO added line to reintroduce the retired fire-and-forget void node.handle(...) pattern'
+    ).to.equal(0)
+  })
+
+  it('root package.json still resolves p2p-fret through the (single, bare) committed patch protocol', () => {
+    const rootPackageJson = JSON.parse(readFileSync(ROOT_PACKAGE_JSON_PATH, 'utf8')) as {
+      resolutions?: Record<string, string>
+    }
+    const resolutions = rootPackageJson.resolutions ?? {}
+    // Exactly one p2p-fret-shaped resolution key (the bare key) — a range-scoped sibling key
+    // (silently shadowed by the bare key per 41-06's diagnosis §7 finding, re-confirmed by this
+    // plan's own yarn patch-commit workflow auto-adding one) must NOT be present.
+    const p2pFretKeys = Object.keys(resolutions).filter(
+      (key) => key === P2P_FRET_RESOLUTION_KEY || key.startsWith(P2P_FRET_RESOLUTION_KEY + '@')
+    )
+    expect(
+      p2pFretKeys,
+      `Expected exactly one p2p-fret resolution key (the bare "${P2P_FRET_RESOLUTION_KEY}"); ` +
+      `found: ${JSON.stringify(p2pFretKeys)} — a range-scoped sibling key would be silently shadowed`
+    ).to.deep.equal([P2P_FRET_RESOLUTION_KEY])
+    const target = resolutions[P2P_FRET_RESOLUTION_KEY] as string
+    expect(
+      target.startsWith(PATCH_PROTOCOL_MARKER),
+      `Expected the ${P2P_FRET_RESOLUTION_KEY} resolution to target a patch: protocol reference ` +
+      `(found: ${target}) — a plain semver pin would silently drop the runOnLimitedConnection fix`
+    ).to.equal(true)
+  })
+
+  it('no GSD phase number appears in a runtime-emitted (added, non-comment) string of the p2p-fret patch', () => {
+    const p2pFretPatchFile = findP2pFretPatchFile()
+    expect(p2pFretPatchFile, 'Expected the p2p-fret patch file to exist').to.not.equal(undefined)
+    const p2pFretAddedCodeLines = addedNonCommentLines(readFileSync(join(YARN_PATCHES_DIR, p2pFretPatchFile as string), 'utf8'))
+    const offenders = p2pFretAddedCodeLines.filter((l) => l.includes('41' + '-08'))
+    expect(
+      offenders,
+      `Expected no added CODE line (non-comment) to carry the 41-08 phase marker; found: ${JSON.stringify(offenders)}`
     ).to.have.length(0)
   })
 })
