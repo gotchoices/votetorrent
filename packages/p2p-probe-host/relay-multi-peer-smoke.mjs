@@ -578,6 +578,49 @@ async function joinStrandAndPollCohort(client, name) {
   return { name, strandPeers };
 }
 
+// ── Phase-41-06 addition — FRET-NEGOTIATION SMOKE ───────────────────────────────────────────
+// Extends the STRAND-COHORT SMOKE gate (D-02) to the FRET protocol-negotiation layer itself:
+// once (and only if) both clients' strand nodes report `strandPeers>0` (a live cohort exists),
+// attempt a REAL dial of one FRET sub-protocol (`ping`) from one strand node directly to the
+// other's, printing the negotiated protocol string on success. This is the ONE additional
+// signal 41-06 needed beyond 41-04's strandPeers poll: 41-04/41-05 pinned the wall to FRET's
+// OWN sub-protocols failing to negotiate even where transport-level connections succeed, so a
+// direct protocol-level dial (not merely "are peers connected") is the decisive Node check.
+// Per D-02, if the cohort never forms (both `strandPeers` stay 0 — the control-layer cold-start
+// artifact 41-04 diagnosed and this session re-confirmed unchanged, see file header + the 41-06
+// diagnosis doc) there is nothing to negotiate: the verdict is SKIP, not FAIL, and the gap is
+// diagnosed from installed-dist source + the 41-05 device captures instead (non-gating, does
+// not affect MULTI-PEER RELAY SMOKE's exit code, mirrors STRAND-COHORT SMOKE's own posture).
+async function attemptFretNegotiation(clientA, clientB, resultA, resultB) {
+  if (!(resultA.strandPeers > 0 && resultB.strandPeers > 0)) {
+    L(
+      'FRET-NEGOTIATION SMOKE: SKIP (strand cohort never formed on Node -- blocked by the',
+      'control-layer founding cold-start artifact identified in 41-04 SS1, re-confirmed unchanged',
+      'this session; not Node-reproducible per D-02 -- see 41-06-FRET-NEGOTIATION-DIAGNOSIS.md',
+      'for the installed-dist source + 41-05 device-capture diagnosis)',
+    );
+    return;
+  }
+  try {
+    const strandANode = clientA.getStrand?.(STRAND_ID)?.libp2pNode;
+    const strandBNode = clientB.getStrand?.(STRAND_ID)?.libp2pNode;
+    if (!strandANode || !strandBNode) {
+      L('FRET-NEGOTIATION SMOKE: FAIL (strand libp2p node handle unavailable post-join)');
+      return;
+    }
+    const pingProtocol = `/optimystic/strand-${STRAND_ID}/fret/1.0.0/ping`;
+    const stream = await withTimeout(
+      strandANode.dialProtocol(strandBNode.peerId, [pingProtocol]),
+      10_000,
+      'FRET-NEGOTIATION SMOKE dial',
+    );
+    await stream.close();
+    L(`FRET-NEGOTIATION SMOKE: PASS negotiated=${pingProtocol}`);
+  } catch (e) {
+    L(`FRET-NEGOTIATION SMOKE: FAIL (${e?.message ?? String(e)})`);
+  }
+}
+
 async function runStrandCohortSmoke() {
   L('===== STRAND-COHORT SMOKE — booting fresh topology (D-05-shaped clients) =====');
   const nodes = [];
@@ -628,6 +671,8 @@ async function runStrandCohortSmoke() {
     joinStrandAndPollCohort(clientA, 'client-A'),
     joinStrandAndPollCohort(clientB, 'client-B'),
   ]);
+
+  await attemptFretNegotiation(clientA, clientB, resultA, resultB);
 
   // SIGNAL (a) under test: the CLIENTS' OWN strand addrs, post-join — the primary 41-03
   // hypothesis is that this is empty/direct-only (no /p2p-circuit) despite the qualified
