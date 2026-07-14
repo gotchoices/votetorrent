@@ -1,5 +1,5 @@
 diff --git a/dist/src/libp2p-node-base.js b/dist/src/libp2p-node-base.js
-index f19e490a4b55c89883135add9960ba7366f90f3b..1d352c84939deae1991e1648e099620b65696761 100644
+index f19e490a4b55c89883135add9960ba7366f90f3b..2b6e8d4b02f348548eb20f866f91f4440e2125f3 100644
 --- a/dist/src/libp2p-node-base.js
 +++ b/dist/src/libp2p-node-base.js
 @@ -1,7 +1,7 @@
@@ -11,10 +11,27 @@ index f19e490a4b55c89883135add9960ba7366f90f3b..1d352c84939deae1991e1648e099620b
  import { ping } from '@libp2p/ping';
  import { dcutr } from '@libp2p/dcutr';
  import { autoNAT } from '@libp2p/autonat';
-@@ -164,6 +164,19 @@ export async function createLibp2pNodeBase(options, defaults) {
+@@ -161,8 +161,34 @@ export async function createLibp2pNodeBase(options, defaults) {
+         connectionEncrypters: [noise()],
+         streamMuxers: [yamux()],
+         services: {
++            // VoteTorrent patch (41-06): @libp2p/identify's Identify/IdentifyPush constructors
++            // build their protocol string as `/${protocolPrefix}/id[/push]/<version>` (they
++            // ALWAYS prepend a leading slash — identify.js:16, identify-push.js:20; the
++            // documented default is the bare 'ipfs', utils.js:11 `protocolPrefix: 'ipfs'`).
++            // Passing an ALREADY-slash-prefixed value here (`/optimystic/${networkName}`)
++            // therefore yielded a malformed DOUBLE-SLASH protocol string
++            // (`//optimystic/strand-<id>/id/1.0.0`) — a genuine published-package string-
++            // construction footgun (device-observed 41-05 D-08 histogram, 6x). Strip the
++            // leading slash so both identify and identifyPush negotiate the intended
++            // single-slash `/optimystic/<networkName>/id[/push]/1.0.0`. Every OTHER service
++            // below (cluster/repo/sync/blockTransfer) builds its OWN protocol string directly
++            // via template literal (`${protocolPrefix}/repo/1.0.0`, no library-side prepend) —
++            // those are NOT affected and keep the leading-slash `protocolPrefix` value.
              identify: identify({
-                 protocolPrefix: `/optimystic/${options.networkName}`
-             }),
+-                protocolPrefix: `/optimystic/${options.networkName}`
++                protocolPrefix: `optimystic/${options.networkName}`
++            }),
 +            // VoteTorrent patch (41-04): identify() alone only exchanges address info at
 +            // connection-open time. A relay-only (NAT'd) peer's circuit-relay-v2 reservation
 +            // typically completes AFTER its first connection to a sibling (the connection is
@@ -26,8 +43,7 @@ index f19e490a4b55c89883135add9960ba7366f90f3b..1d352c84939deae1991e1648e099620b
 +            // AddressManager once the reservation's 'listening' event lands) and proactively
 +            // pushes the updated address list to every already-connected peer.
 +            identifyPush: identifyPush({
-+                protocolPrefix: `/optimystic/${options.networkName}`
-+            }),
++                protocolPrefix: `optimystic/${options.networkName}`
+             }),
              ping: ping(),
              // DCUtR (hole-punch) upgrades relayed node↔node connections to direct
-             // ones; AutoNAT learns this node's public reachability via peer dial-back.

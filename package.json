@@ -50,7 +50,7 @@
 		"@optimystic/db-core": "^0.14.1",
 		"@optimystic/db-p2p-storage-rn": "^0.14.1",
 		"@multiformats/multiaddr": "13.0.1",
-		"p2p-fret": "npm:^0.4.0",
+		"p2p-fret": "patch:p2p-fret@npm%3A0.4.0#~/.yarn/patches/p2p-fret-npm-0.4.0-197c024275.patch",
 		"@optimystic/quereus-plugin-optimystic": "^0.14.1",
 		"@noble/curves": "2.2.0",
 		"@noble/hashes": "2.2.0",

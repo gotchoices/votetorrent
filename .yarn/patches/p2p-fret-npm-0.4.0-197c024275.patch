@@ -1,0 +1,155 @@
+diff --git a/dist/src/rpc/leave.js b/dist/src/rpc/leave.js
+index f790c9790092dab9fe7c072a2c07c28161d6c8e3..62650459559d340256c010185180ad31ffadd827 100644
+--- a/dist/src/rpc/leave.js
++++ b/dist/src/rpc/leave.js
+@@ -16,8 +16,10 @@ function sanitizeReplacements(ids) {
+     }
+     return valid.length > 0 ? valid : undefined;
+ }
++// VoteTorrent patch (41-06): return (and let the caller await) the registration promise instead
++// of firing with `void` — see rpc/ping.js's patch comment for the full rationale.
+ export function registerLeave(node, onLeave, protocol = PROTOCOL_LEAVE) {
+-    void node.handle(protocol, async (stream) => {
++    return node.handle(protocol, async (stream) => {
+         try {
+             const bytes = await readAllBounded(stream, 4096);
+             const msg = await decodeJson(bytes);
+diff --git a/dist/src/rpc/maybe-act.js b/dist/src/rpc/maybe-act.js
+index ae616df8bc1f2001614a10199caf7e258b598d40..538efd5d14e54f253b5a7727f54a910ae38dcca5 100644
+--- a/dist/src/rpc/maybe-act.js
++++ b/dist/src/rpc/maybe-act.js
+@@ -2,8 +2,10 @@ import { peerIdFromString } from '@libp2p/peer-id';
+ import { PROTOCOL_MAYBE_ACT, encodeJson, decodeJson, readAllBounded } from './protocols.js';
+ import { createLogger } from '../logger.js';
+ const log = createLogger('rpc:maybeAct');
++// VoteTorrent patch (41-06): return (and let the caller await) the registration promise instead
++// of firing with `void` — see rpc/ping.js's patch comment for the full rationale.
+ export function registerMaybeAct(node, handle, protocol = PROTOCOL_MAYBE_ACT, maxBytes = 512 * 1024) {
+-    void node.handle(protocol, async (stream) => {
++    return node.handle(protocol, async (stream) => {
+         try {
+             const bytes = await readAllBounded(stream, maxBytes);
+             const msg = await decodeJson(bytes);
+diff --git a/dist/src/rpc/neighbors.js b/dist/src/rpc/neighbors.js
+index 8624f3a83ec28162696eb86460835abb537b1d23..d6c72b270daabbc025a17c3c9735e13c7af1c8d5 100644
+--- a/dist/src/rpc/neighbors.js
++++ b/dist/src/rpc/neighbors.js
+@@ -2,19 +2,25 @@ import { peerIdFromString } from '@libp2p/peer-id';
+ import { PROTOCOL_NEIGHBORS, PROTOCOL_NEIGHBORS_ANNOUNCE, encodeJson, decodeJson, readAllBounded, } from './protocols.js';
+ import { createLogger } from '../logger.js';
+ const log = createLogger('rpc:neighbors');
+-export function registerNeighbors(node, getSnapshot, onAnnounce, protocols = { PROTOCOL_NEIGHBORS, PROTOCOL_NEIGHBORS_ANNOUNCE }, maxBytes = 128 * 1024) {
+-    void node.handle(protocols.PROTOCOL_NEIGHBORS, async (stream) => {
+-        try {
+-            const snap = await getSnapshot();
+-            stream.send(await encodeJson(snap));
+-            await stream.close();
+-        }
+-        catch (err) {
+-            log.error('neighbors handler error - %e', err);
+-        }
+-    });
++// VoteTorrent patch (41-06): return the registration promise(s) instead of firing with `void`
++// (see rpc/ping.js's patch comment for the full rationale) so the caller can await BOTH
++// handlers being fully registered (handlers map insert + peerStore.merge advertisement) before
++// declaring the FRET service started.
++export async function registerNeighbors(node, getSnapshot, onAnnounce, protocols = { PROTOCOL_NEIGHBORS, PROTOCOL_NEIGHBORS_ANNOUNCE }, maxBytes = 128 * 1024) {
++    const registrations = [
++        node.handle(protocols.PROTOCOL_NEIGHBORS, async (stream) => {
++            try {
++                const snap = await getSnapshot();
++                stream.send(await encodeJson(snap));
++                await stream.close();
++            }
++            catch (err) {
++                log.error('neighbors handler error - %e', err);
++            }
++        }),
++    ];
+     if (onAnnounce) {
+-        void node.handle(protocols.PROTOCOL_NEIGHBORS_ANNOUNCE, async (stream) => {
++        registrations.push(node.handle(protocols.PROTOCOL_NEIGHBORS_ANNOUNCE, async (stream) => {
+             try {
+                 const bytes = await readAllBounded(stream, maxBytes);
+                 const snap = await decodeJson(bytes);
+@@ -25,8 +31,9 @@ export function registerNeighbors(node, getSnapshot, onAnnounce, protocols = { P
+             catch (err) {
+                 log.error('neighbors announce handler error - %e', err);
+             }
+-        });
++        }));
+     }
++    await Promise.all(registrations);
+ }
+ export async function fetchNeighbors(node, peerIdOrStr, protocol = PROTOCOL_NEIGHBORS) {
+     const pid = peerIdFromString(peerIdOrStr);
+diff --git a/dist/src/rpc/ping.js b/dist/src/rpc/ping.js
+index 6869bc9b004f20136b1f35beb3283af2227f90b6..da091bdeb35c2773fdeac36ec28957c821dd1cbf 100644
+--- a/dist/src/rpc/ping.js
++++ b/dist/src/rpc/ping.js
+@@ -5,8 +5,15 @@ const log = createLogger('rpc:ping');
+ function isBusy(res) {
+     return typeof res === 'object' && res !== null && 'busy' in res && res.busy === true;
+ }
++// VoteTorrent patch (41-06): return (and let the caller await) the node.handle() registration
++// promise instead of firing it with `void`. registrar.handle() (libp2p dist/src/registrar.js)
++// synchronously inserts the handler into its local map but then AWAITS peerStore.merge() to
++// advertise the protocol — a fire-and-forget caller lets FretService.start() (and therefore
++// the whole Startable service's start(), which components.start() awaits before the node goes
++// live) resolve before that merge lands, leaving a real window where a peer that dials
++// immediately after connecting can race the still-in-flight protocol registration/advertisement.
+ export function registerPing(node, protocol = PROTOCOL_PING, getSizeEstimate) {
+-    void node.handle(protocol, async (stream) => {
++    return node.handle(protocol, async (stream) => {
+         if (getSizeEstimate) {
+             try {
+                 const sizeInfo = await getSizeEstimate();
+diff --git a/dist/src/service/fret-service.js b/dist/src/service/fret-service.js
+index aa6c9fe33c6a46060107186c41b737fef4da7f41..a5b84c7350f64b2215cd3c774a8f6fb3ad55c1dd 100644
+--- a/dist/src/service/fret-service.js
++++ b/dist/src/service/fret-service.js
+@@ -175,7 +175,16 @@ export class FretService {
+     }
+     async start() {
+         await this.seedFromPeerStore();
+-        this.registerRpcHandlers();
++        // VoteTorrent patch (41-06): AWAIT registration (was a synchronous, non-awaited call
++        // over four internally fire-and-forget `void node.handle(...)` registrations). start()
++        // is the Startable lifecycle method components.start() awaits for every service before
++        // libp2p reports the node "started" — without this await, the node could begin accepting
++        // connections from siblings that immediately negotiate FRET sub-protocols before the
++        // registrar's handler map + peerStore protocol advertisement (registrar.handle() awaits
++        // peerStore.merge() internally) had actually finished, a real (if narrow) window for
++        // "could not negotiate ...fret/1.0.0/*" against a technically-not-yet-fully-registered
++        // handler. See rpc/ping.js's patch comment for the full mechanism.
++        await this.registerRpcHandlers();
+         // Defer proactive announce to after first stabilization tick (table is richer)
+         this.startStabilizationLoop();
+         if (this.mode === 'active')
+@@ -245,13 +254,19 @@ export class FretService {
+     maxBytesNeighbors() { return this.cfg.profile === 'core' ? 128 * 1024 : 64 * 1024; }
+     maxBytesMaybeAct() { return this.cfg.profile === 'core' ? 512 * 1024 : 256 * 1024; }
+     // RPC registration
+-    registerRpcHandlers() {
+-        registerNeighbors(this.node, async () => this.handleNeighborsRequest(), (from, snap) => {
+-            void this.mergeAnnounceSnapshot(from, snap);
+-        }, this.protocols, this.maxBytesNeighbors());
+-        registerMaybeAct(this.node, async (msg) => this.handleMaybeAct(msg), this.protocols.PROTOCOL_MAYBE_ACT, this.maxBytesMaybeAct());
+-        registerLeave(this.node, async (notice) => this.handleLeave(notice), this.protocols.PROTOCOL_LEAVE);
+-        registerPing(this.node, this.protocols.PROTOCOL_PING, () => this.handlePingRequest());
++    // VoteTorrent patch (41-06): now async — awaits all four handler registrations (each
++    // register*() below now returns its node.handle() promise instead of `void`-ing it) so the
++    // caller (start(), also patched) can be sure every FRET protocol handler is FULLY registered
++    // (registrar map insert + peerStore advertisement) before the service reports started.
++    async registerRpcHandlers() {
++        await Promise.all([
++            registerNeighbors(this.node, async () => this.handleNeighborsRequest(), (from, snap) => {
++                void this.mergeAnnounceSnapshot(from, snap);
++            }, this.protocols, this.maxBytesNeighbors()),
++            registerMaybeAct(this.node, async (msg) => this.handleMaybeAct(msg), this.protocols.PROTOCOL_MAYBE_ACT, this.maxBytesMaybeAct()),
++            registerLeave(this.node, async (notice) => this.handleLeave(notice), this.protocols.PROTOCOL_LEAVE),
++            registerPing(this.node, this.protocols.PROTOCOL_PING, () => this.handlePingRequest()),
++        ]);
+     }
+     async handleNeighborsRequest() {
+         if (!this.bucketNeighbors.tryTake()) {
