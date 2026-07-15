@@ -117,6 +117,7 @@ import { MemoryRawStorage, createLibp2pNode } from '@optimystic/db-p2p';
 import { webSockets } from '@libp2p/websockets';
 import { circuitRelayTransport } from '@libp2p/circuit-relay-v2';
 import { multiaddr } from '@multiformats/multiaddr';
+import { generateKeyPair } from '@libp2p/crypto/keys';
 
 const L = (...a) => console.log('[relay-multi-peer-smoke]', ...a);
 
@@ -833,6 +834,281 @@ async function runRegistrarSkewSmoke() {
   await runRegistrarSkewRelaySubCheck();
 }
 
+// ── Phase-41-10 addition — STRAND-RELAY-ROUTING SMOKE ───────────────────────────────────────
+// 41-09's device residual localized the strand-cohort wall to strand-node relay-ADDRESS
+// ROUTING across the emulator NAT (relayAddrsPerDrone=0, NoValidAddressesError 56x,
+// UnsupportedProtocolError 52x) despite the CONTROL network forming fine (relayReservation=true,
+// peers=3). This probe answers the plan's Task 1 questions with TWO Node-provable checks, using
+// the SAME D-02 workaround as REGISTRAR-SKEW SMOKE (createLibp2pNode directly, no CadreNode
+// wrapper, no control-layer founding cold-start):
+//
+//   CHECK 1 (config-divergence, REQUIRED by the plan's must-haves): builds ONE relay + ONE
+//   strand-config node (networkName `strand-<id>`, fretProfile 'edge') carrying the exact
+//   app-shaped relay-qualified listenAddrs posture (`${relayAddr}/p2p-circuit`, mirrors
+//   `STRAND_RELAY_LISTEN_ADDRS` in replication-proof-runner.ts:99-102 /
+//   CadreNodeProvider.tsx:95), then polls getMultiaddrs()/addresses.listen for the resulting
+//   `/p2p-circuit` entry. This proves whether a strand-config node that IS given relay-qualified
+//   listenAddrs actually advertises them — the config-divergence half the plan's D-02 caveat says
+//   Node CAN prove (contrast an UNqualified strand node, which reserves nothing).
+//
+//   CHECK 2 (NET-NEW this session, NOT anticipated by the plan/RESEARCH — decisive,
+//   Node-reproduced): reproduces the mechanism this diagnosis actually found by reading
+//   cadre-node.js + the installed @libp2p/circuit-relay-v2 server dist: `CadreNode`'s CONTROL
+//   node and every per-strand libp2p node instance SHARE THE SAME PeerId (confirmed source
+//   comment, strand-addr-protocol.js:4-10 "even though both share the same peerId") AND share
+//   ONE `network.transports`/`network.listenAddrs` object verbatim (cadre-node.js:171
+//   `this.config = config`; cadre-node.js:497-499 forwards it to the control node's OWN
+//   createLibp2pNode call; cadre-node.js:1916 `network: this.config.network` forwards the
+//   IDENTICAL object into `launchStrand`/`strandManager.startStrand`; strand-instance-manager.js
+//   :179-180 conditionally forwards `config.network.transports`/`config.network.listenAddrs`
+//   into the strand's OWN `createLibp2pNode` call) — so BOTH nodes independently reserve a
+//   `/p2p-circuit` slot at the SAME relay (the drone) using the SAME PeerId. The relay SERVER's
+//   `@libp2p/circuit-relay-v2` `ReservationStore` (server/reservation-store.js:20 `trackedPeerMap`,
+//   :25-27 `reserve(peer, addr, limit)` keyed SOLELY by `peer`) and its HOP-CONNECT delivery path
+//   (server/index.js:230 `connectionManager.getConnections(dstPeer)`, :236
+//   `const destinationConnection = connections[0]`) cannot distinguish the control node's
+//   connection from the strand node's connection — both present the SAME `dstPeer`. This check
+//   builds TWO edge nodes sharing ONE generated Ed25519 keypair (mirrors the app's shared
+//   identity), both reserving through the SAME relay under DIFFERENT `networkName`s
+//   (`control-mimic` / `strand-mimic`, so each registers its OWN, DISTINCT FRET protocol
+//   strings), then dials a THIRD sibling node's stream THROUGH the shared PeerId's relay circuit
+//   address, requesting the `strand-mimic`-only FRET ping protocol. A byte-perfect reproduction
+//   of the 41-09 device signal (`UnsupportedProtocolError: Protocol selection failed - could not
+//   negotiate /optimystic/strand-mimic/fret/1.0.0/ping`) CONFIRMS the hop-connect delivered the
+//   relayed stream to the WRONG (control-mimic) connection — verified directly by ALSO dialing
+//   the `control-mimic`-only protocol via the exact same circuit address and observing it
+//   SUCCEED. Non-gating (mirrors REGISTRAR-SKEW SMOKE's own posture) — prints its own verdict
+//   line and does not affect MULTI-PEER RELAY SMOKE's exit code.
+const STRAND_RELAY_ROUTING_NETWORK_NAME = 'strand-relay-routing-probe';
+
+async function runStrandRelayRoutingConfigCheck() {
+  let relay;
+  let strandNode;
+  try {
+    relay = await createLibp2pNode({
+      disableTcp: true,
+      wsPort: 0,
+      networkName: `${STRAND_RELAY_ROUTING_NETWORK_NAME}-relay`,
+      fretProfile: 'core',
+      clusterSize: 3,
+      relay: true,
+    });
+    await relay.start();
+    const relayWsAddr = pickAnyWs(relay.getMultiaddrs().map((m) => m.toString()));
+
+    // Mirrors STRAND_RELAY_LISTEN_ADDRS's shape exactly: one `${relayAddr}/p2p-circuit` entry
+    // per known relay/drone, paired with `reservationConcurrency` sized to the relay count
+    // (replication-proof-runner.ts:99-102/182, CadreNodeProvider.tsx:95/211).
+    strandNode = await createLibp2pNode({
+      disableTcp: true,
+      networkName: `strand-${STRAND_RELAY_ROUTING_NETWORK_NAME}`,
+      fretProfile: 'edge',
+      clusterSize: 3,
+      bootstrapNodes: [relayWsAddr],
+      transports: [webSockets(), circuitRelayTransport({ reservationConcurrency: 1 })],
+      listenAddrs: [`${relayWsAddr}/p2p-circuit`],
+    });
+    await strandNode.start();
+
+    const deadline = Date.now() + 15_000;
+    let circuitAddrs = [];
+    while (Date.now() < deadline && circuitAddrs.length === 0) {
+      circuitAddrs = strandNode.getMultiaddrs().map((m) => m.toString()).filter((a) => a.includes('/p2p-circuit'));
+      if (circuitAddrs.length === 0) await new Promise((r) => setTimeout(r, 100));
+    }
+
+    if (circuitAddrs.length > 0) {
+      L(
+        `STRAND-RELAY-ROUTING SMOKE: PASS strand-config node's addresses.listen carries`,
+        `${circuitAddrs.length} relay-qualified /p2p-circuit addr(s) when given relay-qualified`,
+        'listenAddrs (config-divergence half PROVEN on Node/loopback):',
+        JSON.stringify(circuitAddrs),
+      );
+    } else {
+      L(
+        'STRAND-RELAY-ROUTING SMOKE: FAIL strand-config node reserved NO /p2p-circuit addr within',
+        '15s despite relay-qualified listenAddrs — config does not reach addresses.listen on this',
+        'installed dist (see 41-10-STRAND-RELAY-ROUTING-DIAGNOSIS.md)',
+      );
+    }
+  } catch (e) {
+    L(
+      'STRAND-RELAY-ROUTING SMOKE: SKIP (Node/loopback could not bring up a strand-config node —',
+      `${e?.name ?? ''} ${e?.message ?? String(e)}; this is the D-02 caveat: the emulator-NAT`,
+      'address-routing failure itself is NOT Node-reproducible, only the config-divergence half',
+      'is — see 41-10-STRAND-RELAY-ROUTING-DIAGNOSIS.md)',
+    );
+  } finally {
+    if (strandNode) {
+      try {
+        await strandNode.stop();
+      } catch {}
+    }
+    if (relay) {
+      try {
+        await relay.stop();
+      } catch {}
+    }
+  }
+}
+
+// Additive, non-gating, NET-NEW sub-check (see the section header above): reproduces the
+// shared-PeerId relay-reservation/hop-connect collision this diagnosis found by reading
+// cadre-node.js + @libp2p/circuit-relay-v2's server dist, decisively on Node/loopback (no NAT
+// required — this is a shared-identity design property, not a NAT-routing property).
+async function runStrandRelayRoutingSharedIdentitySubCheck() {
+  let relay;
+  let controlMimic;
+  let strandMimic;
+  let sibling;
+  try {
+    relay = await createLibp2pNode({
+      disableTcp: true,
+      wsPort: 0,
+      networkName: `${STRAND_RELAY_ROUTING_NETWORK_NAME}-shared-identity-relay`,
+      fretProfile: 'core',
+      clusterSize: 3,
+      relay: true,
+    });
+    await relay.start();
+    const relayWsAddr = pickAnyWs(relay.getMultiaddrs().map((m) => m.toString()));
+
+    // The SAME generated keypair is passed to BOTH edge nodes below — mirrors
+    // cadre-node.js:1919 (`privateKey: this.identityKey`), the shared identity every
+    // per-strand libp2p node reuses from the CadreNode's own control identity.
+    const sharedKey = await generateKeyPair('Ed25519');
+    const newEdgeNode = async (networkName) => {
+      const node = await createLibp2pNode({
+        disableTcp: true,
+        networkName,
+        fretProfile: 'edge',
+        clusterSize: 3,
+        privateKey: sharedKey,
+        bootstrapNodes: [relayWsAddr],
+        transports: [webSockets(), circuitRelayTransport({ reservationConcurrency: 1 })],
+        listenAddrs: [`${relayWsAddr}/p2p-circuit`],
+      });
+      await node.start();
+      return node;
+    };
+    controlMimic = await newEdgeNode('control-mimic');
+    strandMimic = await newEdgeNode('strand-mimic');
+
+    if (controlMimic.peerId.toString() !== strandMimic.peerId.toString()) {
+      L('STRAND-RELAY-ROUTING SHARED-IDENTITY SUB-CHECK: FAIL (mimic nodes did not share a PeerId — harness bug)');
+      return;
+    }
+
+    const deadline = Date.now() + 15_000;
+    let aReserved = false;
+    let bReserved = false;
+    while (Date.now() < deadline && !(aReserved && bReserved)) {
+      aReserved = controlMimic.getMultiaddrs().some((m) => m.toString().includes('/p2p-circuit'));
+      bReserved = strandMimic.getMultiaddrs().some((m) => m.toString().includes('/p2p-circuit'));
+      if (!(aReserved && bReserved)) await new Promise((r) => setTimeout(r, 100));
+    }
+    if (!(aReserved && bReserved)) {
+      L('STRAND-RELAY-ROUTING SHARED-IDENTITY SUB-CHECK: FAIL (both same-PeerId mimics never reserved within 15s)');
+      return;
+    }
+
+    sibling = await createLibp2pNode({
+      disableTcp: true,
+      wsPort: 0,
+      networkName: `${STRAND_RELAY_ROUTING_NETWORK_NAME}-sibling`,
+      fretProfile: 'edge',
+      clusterSize: 3,
+    });
+    await sibling.start();
+
+    const circuitAddr = strandMimic.getMultiaddrs().map((m) => m.toString()).find((a) => a.includes('/p2p-circuit'));
+    await sibling.dial(multiaddr(circuitAddr));
+
+    const strandOnlyProtocol = '/optimystic/strand-mimic/fret/1.0.0/ping';
+    const controlOnlyProtocol = '/optimystic/control-mimic/fret/1.0.0/ping';
+
+    let strandProtocolNegotiated = false;
+    try {
+      const stream = await withTimeout(
+        sibling.dialProtocol(strandMimic.peerId, [strandOnlyProtocol], { runOnLimitedConnection: true }),
+        10_000,
+        'STRAND-RELAY-ROUTING shared-identity dial (strand-only protocol)',
+      );
+      await stream.close();
+      strandProtocolNegotiated = true;
+    } catch {
+      strandProtocolNegotiated = false;
+    }
+
+    let controlProtocolNegotiated = false;
+    try {
+      const stream2 = await withTimeout(
+        sibling.dialProtocol(strandMimic.peerId, [controlOnlyProtocol], { runOnLimitedConnection: true }),
+        10_000,
+        'STRAND-RELAY-ROUTING shared-identity dial (control-only protocol)',
+      );
+      await stream2.close();
+      controlProtocolNegotiated = true;
+    } catch {
+      controlProtocolNegotiated = false;
+    }
+
+    if (!strandProtocolNegotiated && controlProtocolNegotiated) {
+      L(
+        'STRAND-RELAY-ROUTING SHARED-IDENTITY SUB-CHECK: CONFIRMED — dialing the shared PeerId via',
+        "strand-mimic's OWN advertised /p2p-circuit addr negotiated control-mimic's protocol",
+        `(${controlOnlyProtocol}) but FAILED to negotiate strand-mimic's OWN protocol`,
+        `(${strandOnlyProtocol}, UnsupportedProtocolError) -- the relay's hop-connect`,
+        '(server/index.js:230 connectionManager.getConnections(dstPeer), :236 connections[0])',
+        "delivered the relayed stream to the control-mimic connection, keyed only by the SHARED",
+        'PeerId. This reproduces the 41-09 device UnsupportedProtocolError class byte-for-byte',
+        'on Node/loopback -- no NAT required (see 41-10-STRAND-RELAY-ROUTING-DIAGNOSIS.md).',
+      );
+    } else if (strandProtocolNegotiated) {
+      L(
+        'STRAND-RELAY-ROUTING SHARED-IDENTITY SUB-CHECK: NOT REPRODUCED this run (strand-mimic',
+        'protocol negotiated successfully) -- hop-connect happened to route to the strand-mimic',
+        'connection this time; the collision is a connections[0] ordering race, not deterministic',
+        'per-run (see diagnosis doc for the adjudication).',
+      );
+    } else {
+      L(
+        'STRAND-RELAY-ROUTING SHARED-IDENTITY SUB-CHECK: INCONCLUSIVE (neither protocol negotiated',
+        '-- relay/hop-connect infrastructure issue, not the collision mechanism itself)',
+      );
+    }
+  } catch (e) {
+    L(`STRAND-RELAY-ROUTING SHARED-IDENTITY SUB-CHECK: FAIL (${e?.name ?? ''} ${e?.message ?? String(e)})`);
+  } finally {
+    if (sibling) {
+      try {
+        await sibling.stop();
+      } catch {}
+    }
+    if (controlMimic) {
+      try {
+        await controlMimic.stop();
+      } catch {}
+    }
+    if (strandMimic) {
+      try {
+        await strandMimic.stop();
+      } catch {}
+    }
+    if (relay) {
+      try {
+        await relay.stop();
+      } catch {}
+    }
+  }
+}
+
+async function runStrandRelayRoutingSmoke() {
+  L('===== STRAND-RELAY-ROUTING SMOKE — config-divergence + shared-identity relay-collision probes (D-02 workaround) =====');
+  await runStrandRelayRoutingConfigCheck();
+  await runStrandRelayRoutingSharedIdentitySubCheck();
+}
+
 async function runStrandCohortSmoke() {
   L('===== STRAND-COHORT SMOKE — booting fresh topology (D-05-shaped clients) =====');
   const nodes = [];
@@ -927,6 +1203,14 @@ async function main() {
     // Non-gating (mirrors STRAND-COHORT/FRET-NEGOTIATION SMOKE) -- a hard crash here must not
     // take down the MULTI-PEER RELAY SMOKE verdict computed above.
     L('REGISTRAR-SKEW SMOKE: FAIL (harness error)', e?.stack ?? String(e));
+  }
+
+  try {
+    await runStrandRelayRoutingSmoke();
+  } catch (e) {
+    // Non-gating (mirrors REGISTRAR-SKEW/STRAND-COHORT/FRET-NEGOTIATION SMOKE) -- a hard crash
+    // here must not take down the MULTI-PEER RELAY SMOKE verdict computed above.
+    L('STRAND-RELAY-ROUTING SMOKE: FAIL (harness error)', e?.stack ?? String(e));
   }
 
   if (RUN_STRAND_COHORT_SMOKE) {
