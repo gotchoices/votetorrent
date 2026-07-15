@@ -53,10 +53,24 @@
  * `sendMaybeAct`, `sendLeave`) passed `{ runOnLimitedConnection: true }`, so every FRET dial over
  * a circuit-relay-v2 "limited" connection (the on-device NAT-only reachability shape between
  * strand-cohort members) threw `LimitedConnectionError` before multistream-select ever ran. The
- * fix EXTENDS the same `p2p-fret` patch (41-06's async-completeness hunks kept byte-identical)
- * with `runOnLimitedConnection: true` at all eight call-site branches across the five senders.
- * This extension locks the new hunk — a silent revert would reopen the relay-only FRET-dial wall
- * without any other signal changing.
+ * fix (at the time) EXTENDED the same `p2p-fret` patch (41-06's async-completeness hunks kept
+ * byte-identical) with `runOnLimitedConnection: true` at all eight call-site branches across the
+ * five senders.
+ *
+ * 260715-keg ADOPTION (patch dropped in favor of `p2p-fret ^0.6.0`): a Node relay-gate experiment
+ * (`relay-multi-peer-smoke.mjs`, 2026-07-15) proved unpatched `p2p-fret@0.6.0` forms the strand
+ * cohort (STRAND-COHORT SMOKE PASS, `strandPeers 2/2`, reproducible 3/3) where the hand-patched
+ * `0.4.0` cannot (FAIL, `strandPeers 0/0`). `0.6.0`'s `openRpcStream()` centralizes stream opening
+ * with `{ runOnLimitedConnection: true, negotiateFully: false }` and prefers direct-over-limited —
+ * carrying the 41-08 `runOnLimitedConnection` fix AND additional cohort-formation fixes upstream.
+ * The local `p2p-fret-npm-0.4.0-*.patch` (41-06's async-completeness hunks + the 41-08
+ * runOnLimitedConnection hunks) is RETIRED entirely — dropped in favor of a bare `^0.6.0`
+ * resolution. This spec section inverts to lock the NEW reality: NO p2p-fret patch exists under
+ * `.yarn/patches/`, and the root `package.json` bare `p2p-fret` resolution key targets a bare
+ * (non-`patch:`) semver range `>=0.6.0` — a silent revert to the retired `0.4.0` patch string
+ * fails these assertions immediately (it starts with the `patch:` protocol marker). The
+ * `@optimystic/db-p2p` patch (identifyPush + single-slash protocolPrefix) is UNAFFECTED and stays
+ * locked exactly as before.
  */
 
 import { expect } from 'chai'
@@ -120,18 +134,13 @@ const CORRECTED_PROTOCOL_PREFIX_ADDED_LINE =
 const MALFORMED_PROTOCOL_PREFIX_ADDED_LINE =
   '+' + '                protocolPrefix: ' + '`/optimystic/${options.networkName}`'
 
-// 41-06: p2p-fret async-completeness fix markers.
+// p2p-fret patch-file naming prefix — used by findP2pFretPatchFile() to assert its ABSENCE
+// under the 260715-keg ^0.6.0 adoption (no patch content markers survive; the patch is retired).
 const P2P_FRET_PATCH_PREFIX = 'p2p-fret-npm-'
 const P2P_FRET_RESOLUTION_KEY = 'p2p-fret'
-const RETURN_NODE_HANDLE_MARKER = 'return' + ' node.handle('
-const AWAIT_REGISTER_RPC_HANDLERS_MARKER = 'await' + ' this.registerRpcHandlers()'
-const ASYNC_REGISTER_RPC_HANDLERS_MARKER = 'async' + ' registerRpcHandlers()'
-const VOID_NODE_HANDLE_ADDED_LINE = '+' + '    void node.handle('
-
-// 41-08: registrar-skew diagnosis fix markers — p2p-fret's outbound RPC senders now pass
-// `runOnLimitedConnection: true` so a FRET dial over a circuit-relay-v2 limited connection does
-// not throw LimitedConnectionError before multistream-select ever runs.
-const RUN_ON_LIMITED_CONNECTION_MARKER = 'runOnLimitedConnection' + ': true'
+// 260715-keg: the bare-semver resolution the p2p-fret key must now target — `>=0.6.0`, not the
+// `patch:` protocol. Checked via a non-`patch:` prefix + a `^0.<minor>.` shape with minor >= 6.
+const P2P_FRET_MIN_MINOR = 6
 
 // Built via concatenation so this spec's own source is not itself a hit.
 const PHASE_41_04_MARKER = '41' + '-04'
@@ -211,6 +220,31 @@ function findP2pFretPatchFile (): string | undefined {
   return entries.find((f) => f.startsWith(P2P_FRET_PATCH_PREFIX) && f.endsWith('.patch'))
 }
 
+/**
+ * 260715-keg: assert a root package.json resolution target is a BARE (non-`patch:`) semver range
+ * whose `0.x` minor is `>= P2P_FRET_MIN_MINOR` — the shape the p2p-fret key must have now that the
+ * local patch is retired in favor of an upstream version bump. A silent revert to the `0.4.0`
+ * patch string fails the first check (it starts with `patch:`); a revert to a bare `0.4.0`/`0.5.0`
+ * would fail the second (minor < 6).
+ */
+function assertBareResolutionAtLeastMinor (target: string, packageLabel: string, minMinor: number): void {
+  expect(
+    target.startsWith(PATCH_PROTOCOL_MARKER),
+    `Expected the ${packageLabel} resolution to NOT target a patch: protocol reference ` +
+    `(found: ${target}) — the local patch is retired in favor of an upstream version bump`
+  ).to.equal(false)
+  const match = /^\^?0\.(\d+)\./.exec(target)
+  expect(
+    match,
+    `Expected the ${packageLabel} resolution to be a bare 0.x semver range (found: ${target})`
+  ).to.not.equal(null)
+  const minor = Number((match as RegExpExecArray)[1])
+  expect(
+    minor >= minMinor,
+    `Expected the ${packageLabel} resolution minor version to be >= ${minMinor} (found: ${target})`
+  ).to.equal(true)
+}
+
 /** Count how many lines of `src` are exactly (or start with, after trimming) `marker`. */
 function countMatchingLines (src: string, marker: string): number {
   return src.split('\n').filter((line) => line.includes(marker)).length
@@ -219,8 +253,7 @@ function countMatchingLines (src: string, marker: string): number {
 /**
  * ADDED (`+`), non-comment lines of a unified diff patch — a fix's own explanatory comment
  * (which may legitimately quote the same code shape it introduces, e.g. inside backticks) must
- * not false-satisfy a CODE-presence assertion. Reused by both the phase-number-leak check and
- * the 41-08 runOnLimitedConnection count below.
+ * not false-satisfy a CODE-presence assertion. Used by the phase-number-leak checks below.
  */
 function addedNonCommentLines (patchSrc: string): string[] {
   return patchSrc
@@ -231,11 +264,6 @@ function addedNonCommentLines (patchSrc: string): string[] {
       const t = l.trim()
       return t.length > 0 && !t.startsWith('//') && !t.startsWith('/*') && !t.startsWith('*')
     })
-}
-
-/** Count ADDED non-comment lines containing `marker` — the CODE-presence counterpart to countMatchingLines. */
-function countAddedCodeLinesMatching (patchSrc: string, marker: string): number {
-  return addedNonCommentLines(patchSrc).filter((l) => l.includes(marker)).length
 }
 
 describe('P2P-11/41-04: strand-cohort NoValidAddressesError fix — app-side parity intact + identifyPush yarn-patch present', () => {
@@ -318,7 +346,7 @@ describe('P2P-11/41-04: strand-cohort NoValidAddressesError fix — app-side par
   })
 })
 
-describe('P2P-11/41-06: FRET strand-discovery negotiation gap — malformed // id double-slash fix + p2p-fret async-completeness fix present', () => {
+describe('P2P-11/41-06: FRET strand-discovery negotiation gap — malformed // id double-slash fix present; p2p-fret patch dropped for bare ^0.6.0 (260715-keg)', () => {
   it('the committed @optimystic/db-p2p patch corrects the malformed // id double-slash for BOTH identify and identifyPush', () => {
     const patchFile = findDbP2pPatchFile()
     expect(patchFile, 'Expected the db-p2p patch file to exist (see prior describe block)').to.not.equal(undefined)
@@ -347,77 +375,56 @@ describe('P2P-11/41-06: FRET strand-discovery negotiation gap — malformed // i
     ).to.equal(true)
   })
 
-  it('a p2p-fret yarn-patch is committed under .yarn/patches/', () => {
+  it('260715-keg: NO p2p-fret yarn-patch exists under .yarn/patches/ (patch dropped in favor of ^0.6.0)', () => {
     const patchFile = findP2pFretPatchFile()
     expect(
       patchFile,
-      `Expected a ${P2P_FRET_PATCH_PREFIX}*.patch file under ${YARN_PATCHES_DIR}`
-    ).to.not.equal(undefined)
+      `Expected NO ${P2P_FRET_PATCH_PREFIX}*.patch file under ${YARN_PATCHES_DIR} — a silent ` +
+      're-add of the retired 0.4.0 patch (or any stub matching this prefix) fails here'
+    ).to.equal(undefined)
   })
 
-  it('the committed p2p-fret patch closes the FRET-registration async-completeness gap', () => {
-    const patchFile = findP2pFretPatchFile()
-    expect(patchFile, 'Expected the p2p-fret patch file to exist (see prior test)').to.not.equal(undefined)
-    const patchSrc = readFileSync(join(YARN_PATCHES_DIR, patchFile as string), 'utf8')
-
-    // All four register*() call sites now return (not void-discard) their node.handle() promise.
-    expect(
-      countMatchingLines(patchSrc, RETURN_NODE_HANDLE_MARKER),
-      'Expected register*() functions to return their node.handle(...) registration promise ' +
-      '(ping.js/leave.js/maybe-act.js each return it directly; neighbors.js collects both into ' +
-      'a Promise.all-awaited array — this count covers the three direct `return node.handle(` sites)'
-    ).to.be.greaterThan(0)
-
-    // No ADDED line resurrects the fire-and-forget `void node.handle(...)` pattern.
-    expect(
-      countMatchingLines(patchSrc, VOID_NODE_HANDLE_ADDED_LINE),
-      'Expected NO added line to reintroduce a fire-and-forget `void node.handle(...)` registration'
-    ).to.equal(0)
-
-    // FretService.registerRpcHandlers() is now async and start() awaits it.
-    expect(
-      patchSrc.includes(ASYNC_REGISTER_RPC_HANDLERS_MARKER),
-      'Expected FretService.registerRpcHandlers() to be declared async'
-    ).to.equal(true)
-    expect(
-      patchSrc.includes(AWAIT_REGISTER_RPC_HANDLERS_MARKER),
-      'Expected FretService.start() to await registerRpcHandlers() (was a synchronous, ' +
-      'non-awaited call)'
-    ).to.equal(true)
-  })
-
-  it('root package.json resolves p2p-fret through the committed patch protocol (not a bare semver)', () => {
+  it('260715-keg: root package.json resolves the bare p2p-fret key to a bare >=0.6.0 semver (not the patch protocol)', () => {
     const rootPackageJson = JSON.parse(readFileSync(ROOT_PACKAGE_JSON_PATH, 'utf8')) as {
       resolutions?: Record<string, string>
     }
     const resolutions = rootPackageJson.resolutions ?? {}
-    // p2p-fret is resolved via the BARE (unqualified) key — a range-scoped key would be silently
-    // shadowed by it (41-06 diagnosis §7 finding), so assert on the exact bare key only.
     const target = resolutions[P2P_FRET_RESOLUTION_KEY]
     expect(
       target,
       `Expected a root package.json resolutions entry for the bare "${P2P_FRET_RESOLUTION_KEY}" key`
     ).to.not.equal(undefined)
-    expect(
-      (target as string).startsWith(PATCH_PROTOCOL_MARKER),
-      `Expected the ${P2P_FRET_RESOLUTION_KEY} resolution to target a patch: protocol reference ` +
-      `(found: ${target}) — a plain semver pin would silently drop the async-completeness fix`
-    ).to.equal(true)
+    assertBareResolutionAtLeastMinor(target as string, P2P_FRET_RESOLUTION_KEY, P2P_FRET_MIN_MINOR)
   })
 
-  it('no GSD phase number appears in a runtime-emitted string of either yarn-patch', () => {
+  it('260715-keg: keeps exactly one bare p2p-fret resolution key (no range-scoped sibling)', () => {
+    const rootPackageJson = JSON.parse(readFileSync(ROOT_PACKAGE_JSON_PATH, 'utf8')) as {
+      resolutions?: Record<string, string>
+    }
+    const resolutions = rootPackageJson.resolutions ?? {}
+    // A range-scoped sibling key (e.g. `p2p-fret@npm:^0.5.0`) would be silently shadowed by the
+    // bare key (41-06 diagnosis §7 finding, re-confirmed by 41-08's own yarn patch-commit
+    // workflow auto-adding one) — this must never regress.
+    const p2pFretKeys = Object.keys(resolutions).filter(
+      (key) => key === P2P_FRET_RESOLUTION_KEY || key.startsWith(P2P_FRET_RESOLUTION_KEY + '@')
+    )
+    expect(
+      p2pFretKeys,
+      `Expected exactly one p2p-fret resolution key (the bare "${P2P_FRET_RESOLUTION_KEY}"); ` +
+      `found: ${JSON.stringify(p2pFretKeys)} — a range-scoped sibling key would be silently shadowed`
+    ).to.deep.equal([P2P_FRET_RESOLUTION_KEY])
+  })
+
+  it('no GSD phase number appears in a runtime-emitted string of the db-p2p yarn-patch (p2p-fret patch no longer exists)', () => {
     const dbP2pPatchFile = findDbP2pPatchFile()
-    const p2pFretPatchFile = findP2pFretPatchFile()
     expect(dbP2pPatchFile, 'Expected the db-p2p patch file to exist').to.not.equal(undefined)
-    expect(p2pFretPatchFile, 'Expected the p2p-fret patch file to exist').to.not.equal(undefined)
     // Patch comments carry phase markers (e.g. "VoteTorrent patch (41-06)") by design/convention —
     // those are comment lines, not runtime-emitted strings. Only ADDED, non-comment source lines
-    // matter here; neither patch's added CODE lines (as opposed to its comments) reference a
-    // phase number at all, so this simply confirms no phase-number literal leaked into a
+    // matter here; the patch's added CODE lines (as opposed to its comments) reference no phase
+    // number at all, so this simply confirms no phase-number literal leaked into a
     // string/template-literal a running node would ever log or throw.
     const dbP2pAddedCodeLines = addedNonCommentLines(readFileSync(join(YARN_PATCHES_DIR, dbP2pPatchFile as string), 'utf8'))
-    const p2pFretAddedCodeLines = addedNonCommentLines(readFileSync(join(YARN_PATCHES_DIR, p2pFretPatchFile as string), 'utf8'))
-    const offenders = [...dbP2pAddedCodeLines, ...p2pFretAddedCodeLines].filter(
+    const offenders = dbP2pAddedCodeLines.filter(
       (l) => l.includes(PHASE_41_04_MARKER) || l.includes('41' + '-06') || l.includes('41' + '-08')
     )
     expect(
@@ -427,31 +434,11 @@ describe('P2P-11/41-06: FRET strand-discovery negotiation gap — malformed // i
   })
 })
 
-describe('P2P-11/41-08: FRET strand registrar-skew — runOnLimitedConnection fix present (all three prior patches kept)', () => {
-  it('the committed p2p-fret patch passes runOnLimitedConnection:true on every outbound RPC dial (8 call-site branches across 5 senders)', () => {
-    const patchFile = findP2pFretPatchFile()
-    expect(patchFile, 'Expected the p2p-fret patch file to exist (see prior describe block)').to.not.equal(undefined)
-    const patchSrc = readFileSync(join(YARN_PATCHES_DIR, patchFile as string), 'utf8')
-
-    // sendPing (2 branches), fetchNeighbors (1), announceNeighbors (1), sendMaybeAct (2),
-    // sendLeave (2) = 8 ADDED code lines. Counted on ADDED non-comment lines only — one of this
-    // patch's own explanatory comments quotes the marker inside backticks, which must not
-    // false-satisfy this CODE-presence count (the 38-18 false-positive-comment lesson).
-    expect(
-      countAddedCodeLinesMatching(patchSrc, RUN_ON_LIMITED_CONNECTION_MARKER),
-      'Expected exactly 8 added CODE lines passing runOnLimitedConnection:true (2 each for ' +
-      'sendPing/sendMaybeAct/sendLeave, 1 each for fetchNeighbors/announceNeighbors) — a silent ' +
-      'revert of any call site would change this count and reopen the relay-only FRET-dial wall'
-    ).to.equal(8)
-  })
-
-  it('all three prior patches (41-04 identifyPush, 41-06 single-slash, 41-06 async-completeness) remain present alongside the 41-08 fix', () => {
+describe('P2P-11/41-08: FRET strand registrar-skew — runOnLimitedConnection fix now carried by p2p-fret ^0.6.0 upstream (260715-keg; db-p2p patch kept)', () => {
+  it('260715-keg: the db-p2p half (identifyPush + single-slash protocolPrefix) is the only surviving "prior patch present" assertion', () => {
     const dbP2pPatchFile = findDbP2pPatchFile()
-    const p2pFretPatchFile = findP2pFretPatchFile()
     expect(dbP2pPatchFile, 'Expected the db-p2p patch file to exist').to.not.equal(undefined)
-    expect(p2pFretPatchFile, 'Expected the p2p-fret patch file to exist').to.not.equal(undefined)
     const dbP2pPatchSrc = readFileSync(join(YARN_PATCHES_DIR, dbP2pPatchFile as string), 'utf8')
-    const p2pFretPatchSrc = readFileSync(join(YARN_PATCHES_DIR, p2pFretPatchFile as string), 'utf8')
 
     // 41-04 identifyPush + 41-06 single-slash (same db-p2p patch, untouched by this plan).
     expect(
@@ -463,25 +450,20 @@ describe('P2P-11/41-08: FRET strand registrar-skew — runOnLimitedConnection fi
       'Expected the 41-06 single-slash protocolPrefix fix to remain present (2 added lines)'
     ).to.equal(2)
 
-    // 41-06 async-completeness (same p2p-fret patch this plan extends).
+    // The p2p-fret patch (41-06 async-completeness + 41-08 runOnLimitedConnection) is RETIRED —
+    // that fix now lives upstream in p2p-fret ^0.6.0's openRpcStream(), not in a local patch file.
     expect(
-      p2pFretPatchSrc.includes(ASYNC_REGISTER_RPC_HANDLERS_MARKER) && p2pFretPatchSrc.includes(AWAIT_REGISTER_RPC_HANDLERS_MARKER),
-      'Expected the 41-06 async-completeness fix (async registerRpcHandlers + awaited start()) to remain present'
-    ).to.equal(true)
-    expect(
-      countMatchingLines(p2pFretPatchSrc, VOID_NODE_HANDLE_ADDED_LINE),
-      'Expected NO added line to reintroduce the retired fire-and-forget void node.handle(...) pattern'
-    ).to.equal(0)
+      findP2pFretPatchFile(),
+      'Expected NO p2p-fret patch file to exist — the runOnLimitedConnection + async-completeness ' +
+      'fixes are superseded by the ^0.6.0 version bump'
+    ).to.equal(undefined)
   })
 
-  it('root package.json still resolves p2p-fret through the (single, bare) committed patch protocol', () => {
+  it('260715-keg: p2p-fret still resolves to a bare >=0.6.0 semver (carries the runOnLimitedConnection + cohort-formation fixes upstream)', () => {
     const rootPackageJson = JSON.parse(readFileSync(ROOT_PACKAGE_JSON_PATH, 'utf8')) as {
       resolutions?: Record<string, string>
     }
     const resolutions = rootPackageJson.resolutions ?? {}
-    // Exactly one p2p-fret-shaped resolution key (the bare key) — a range-scoped sibling key
-    // (silently shadowed by the bare key per 41-06's diagnosis §7 finding, re-confirmed by this
-    // plan's own yarn patch-commit workflow auto-adding one) must NOT be present.
     const p2pFretKeys = Object.keys(resolutions).filter(
       (key) => key === P2P_FRET_RESOLUTION_KEY || key.startsWith(P2P_FRET_RESOLUTION_KEY + '@')
     )
@@ -491,21 +473,6 @@ describe('P2P-11/41-08: FRET strand registrar-skew — runOnLimitedConnection fi
       `found: ${JSON.stringify(p2pFretKeys)} — a range-scoped sibling key would be silently shadowed`
     ).to.deep.equal([P2P_FRET_RESOLUTION_KEY])
     const target = resolutions[P2P_FRET_RESOLUTION_KEY] as string
-    expect(
-      target.startsWith(PATCH_PROTOCOL_MARKER),
-      `Expected the ${P2P_FRET_RESOLUTION_KEY} resolution to target a patch: protocol reference ` +
-      `(found: ${target}) — a plain semver pin would silently drop the runOnLimitedConnection fix`
-    ).to.equal(true)
-  })
-
-  it('no GSD phase number appears in a runtime-emitted (added, non-comment) string of the p2p-fret patch', () => {
-    const p2pFretPatchFile = findP2pFretPatchFile()
-    expect(p2pFretPatchFile, 'Expected the p2p-fret patch file to exist').to.not.equal(undefined)
-    const p2pFretAddedCodeLines = addedNonCommentLines(readFileSync(join(YARN_PATCHES_DIR, p2pFretPatchFile as string), 'utf8'))
-    const offenders = p2pFretAddedCodeLines.filter((l) => l.includes('41' + '-08'))
-    expect(
-      offenders,
-      `Expected no added CODE line (non-comment) to carry the 41-08 phase marker; found: ${JSON.stringify(offenders)}`
-    ).to.have.length(0)
+    assertBareResolutionAtLeastMinor(target, P2P_FRET_RESOLUTION_KEY, P2P_FRET_MIN_MINOR)
   })
 })
