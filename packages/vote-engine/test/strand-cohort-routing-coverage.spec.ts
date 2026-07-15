@@ -71,6 +71,24 @@
  * fails these assertions immediately (it starts with the `patch:` protocol marker). The
  * `@optimystic/db-p2p` patch (identifyPush + single-slash protocolPrefix) is UNAFFECTED and stays
  * locked exactly as before.
+ *
+ * 41-10 EXTENSION (diagnosis-only — NO new patch/resolution): the 41-09 device n=4 re-prove on
+ * the `^0.6.0` substrate localized the residual wall to strand-node relay-ADDRESS ROUTING across
+ * the emulator NAT (`relayAddrsPerDrone=0`, `NoValidAddressesError` 56x, `UnsupportedProtocolError`
+ * 52x) despite the control network forming fine. 41-10's diagnosis
+ * (41-10-STRAND-RELAY-ROUTING-DIAGNOSIS.md) REFUTES the prime suspect (the app's relay-qualified
+ * `STRAND_RELAY_LISTEN_ADDRS` does reach the strand node's `addresses.listen` — traced file:line
+ * through `cadre-node.js`/`strand-instance-manager.js`/`libp2p-node-base.js`) and instead
+ * CONFIRMS, via a Node/loopback reproduction, a shared-PeerId relay-reservation/hop-connect
+ * collision: the control node and every per-strand libp2p node instance share one PeerId and dial
+ * the same relay, and `@libp2p/circuit-relay-v2`'s server-side reservation store + hop-connect
+ * delivery are keyed solely by PeerId — a sibling's hop-connect meant for the strand node's own
+ * connection can be delivered to the control node's connection instead. This extension locks the
+ * presence of the new `STRAND-RELAY-ROUTING SMOKE` Node-gate probe added to
+ * `relay-multi-peer-smoke.js` (the config-divergence check + the shared-identity collision
+ * sub-check) — a silent revert of either would remove this diagnosis's regression coverage with
+ * no other signal changing. NO new patch/resolution assertion is added (no fix landed this plan);
+ * all prior db-p2p-patch + p2p-fret-^0.6.0-no-patch + app-parity assertions above stay unchanged.
  */
 
 import { expect } from 'chai'
@@ -97,6 +115,9 @@ const PROOF_RUNNER_PATH = join(
 )
 const ROOT_PACKAGE_JSON_PATH = join(REPO_ROOT, 'package.json')
 const YARN_PATCHES_DIR = join(REPO_ROOT, '.yarn', 'patches')
+const RELAY_MULTI_PEER_SMOKE_PATH = join(
+  REPO_ROOT, 'packages', 'p2p-probe-host', 'relay-multi-peer-smoke.js'
+)
 
 // Markers built by concatenation so this spec's own prose cannot satisfy them.
 const NETWORK_OPEN = 'network' + ': {'
@@ -144,6 +165,22 @@ const P2P_FRET_MIN_MINOR = 6
 
 // Built via concatenation so this spec's own source is not itself a hit.
 const PHASE_41_04_MARKER = '41' + '-04'
+
+// 41-10: the STRAND-RELAY-ROUTING Node-gate probe markers (relay-multi-peer-smoke.js). Built by
+// concatenation so this spec's own prose (which quotes the same strings above, in the file
+// header comment) can never self-satisfy an assertion built against the PROBE FILE's source.
+const STRAND_RELAY_ROUTING_FN_MARKER = 'async function runStrandRelayRouting' + 'ConfigCheck'
+const STRAND_RELAY_ROUTING_SUBCHECK_FN_MARKER =
+  'async function runStrandRelayRoutingShared' + 'IdentitySubCheck'
+const STRAND_RELAY_ROUTING_SMOKE_FN_MARKER = 'async function runStrandRelayRouting' + 'Smoke'
+const STRAND_RELAY_ROUTING_VERDICT_MARKER = 'STRAND' + '-RELAY-ROUTING SMOKE' + ':'
+const STRAND_RELAY_ROUTING_SUBCHECK_VERDICT_MARKER =
+  'STRAND' + '-RELAY-ROUTING SHARED-IDENTITY SUB-CHECK' + ':'
+const CREATE_LIBP2P_NODE_CALL_MARKER = 'createLibp2pNode' + '('
+const GET_MULTIADDRS_CIRCUIT_MARKER = 'getMultiaddrs' + '()' + '.map'
+const CIRCUIT_SUFFIX_MARKER = '/p2p' + '-circuit'
+const SHARED_KEYPAIR_MARKER = 'generateKeyPair' + "('Ed25519')"
+const SHARED_PEERID_ASSERT_MARKER = 'controlMimic.peerId.toString()' + ' !== ' + 'strandMimic.peerId.toString()'
 
 /** Slice the `network: { ... }` config body (open marker -> next top-level close marker). */
 function extractNetworkBody (src: string, path: string): string {
@@ -248,6 +285,22 @@ function assertBareResolutionAtLeastMinor (target: string, packageLabel: string,
 /** Count how many lines of `src` are exactly (or start with, after trimming) `marker`. */
 function countMatchingLines (src: string, marker: string): number {
   return src.split('\n').filter((line) => line.includes(marker)).length
+}
+
+/**
+ * 41-10: slice a named function's body out of `relay-multi-peer-smoke.js` — from its
+ * `async function <name>` declaration up to the next top-level `async function` declaration (or
+ * EOF). Mirrors `extractNetworkBody`'s open-marker/next-marker slicing so a marker assertion is
+ * scoped to THIS probe's own code, not merely "appears somewhere in the file" (which the file
+ * header's prose describing the probe would otherwise satisfy).
+ */
+function extractFunctionBody (src: string, startMarker: string, label: string): string {
+  const start = src.indexOf(startMarker)
+  expect(start, `Expected to find "${startMarker}" in ${label}`).to.be.greaterThan(-1)
+  const nextFnStart = src.indexOf('async function ', start + startMarker.length)
+  const end = nextFnStart === -1 ? src.length : nextFnStart
+  expect(end, `Expected to find the end of "${startMarker}" in ${label}`).to.be.greaterThan(start)
+  return src.slice(start, end)
 }
 
 /**
@@ -475,4 +528,107 @@ describe('P2P-11/41-08: FRET strand registrar-skew — runOnLimitedConnection fi
     const target = resolutions[P2P_FRET_RESOLUTION_KEY] as string
     assertBareResolutionAtLeastMinor(target, P2P_FRET_RESOLUTION_KEY, P2P_FRET_MIN_MINOR)
   })
+})
+
+describe('P2P-11/41-10: strand-relay-routing diagnosis — Node D-02 gate probe present (diagnosis-only, no new patch)', () => {
+  it('relay-multi-peer-smoke.js exists at the expected path', () => {
+    expect(existsSync(RELAY_MULTI_PEER_SMOKE_PATH), `Expected ${RELAY_MULTI_PEER_SMOKE_PATH}`).to.equal(true)
+  })
+
+  it('the STRAND-RELAY-ROUTING config-divergence check function is present and inspects a strand-config createLibp2pNode\'s getMultiaddrs()/p2p-circuit addresses', () => {
+    const src = readFileSync(RELAY_MULTI_PEER_SMOKE_PATH, 'utf8')
+    const body = stripCommentLines(
+      extractFunctionBody(src, STRAND_RELAY_ROUTING_FN_MARKER, 'relay-multi-peer-smoke.js')
+    )
+    expect(
+      body.includes(CREATE_LIBP2P_NODE_CALL_MARKER),
+      'Expected the STRAND-RELAY-ROUTING config-divergence check to build a strand-config node ' +
+      'directly via createLibp2pNode (the D-02 workaround, no CadreNode wrapper)'
+    ).to.equal(true)
+    expect(
+      body.includes(CIRCUIT_SUFFIX_MARKER),
+      'Expected the STRAND-RELAY-ROUTING config-divergence check to inspect the strand node\'s ' +
+      'advertised addresses for a relay-qualified /p2p-circuit entry'
+    ).to.equal(true)
+    expect(
+      body.includes(STRAND_RELAY_ROUTING_VERDICT_MARKER),
+      'Expected the STRAND-RELAY-ROUTING config-divergence check to print a ' +
+      '"STRAND-RELAY-ROUTING SMOKE:" verdict line'
+    ).to.equal(true)
+  })
+
+  it('the STRAND-RELAY-ROUTING shared-identity sub-check function is present and reproduces the shared-PeerId relay collision', () => {
+    const src = readFileSync(RELAY_MULTI_PEER_SMOKE_PATH, 'utf8')
+    const body = stripCommentLines(
+      extractFunctionBody(src, STRAND_RELAY_ROUTING_SUBCHECK_FN_MARKER, 'relay-multi-peer-smoke.js')
+    )
+    expect(
+      body.includes(SHARED_KEYPAIR_MARKER),
+      'Expected the shared-identity sub-check to construct one generated Ed25519 keypair shared ' +
+      'by both mimic nodes (mirrors CadreNode\'s shared control/strand identity)'
+    ).to.equal(true)
+    expect(
+      body.includes(SHARED_PEERID_ASSERT_MARKER),
+      'Expected the shared-identity sub-check to assert the two mimic nodes share one PeerId'
+    ).to.equal(true)
+    expect(
+      body.includes(CREATE_LIBP2P_NODE_CALL_MARKER),
+      'Expected the shared-identity sub-check to build its mimic/sibling nodes directly via ' +
+      'createLibp2pNode (the D-02 workaround)'
+    ).to.equal(true)
+    expect(
+      body.includes(STRAND_RELAY_ROUTING_SUBCHECK_VERDICT_MARKER),
+      'Expected the shared-identity sub-check to print a ' +
+      '"STRAND-RELAY-ROUTING SHARED-IDENTITY SUB-CHECK:" verdict line'
+    ).to.equal(true)
+  })
+
+  it('the STRAND-RELAY-ROUTING smoke entry point wires both checks into main() (retained verdicts must not regress)', () => {
+    const src = readFileSync(RELAY_MULTI_PEER_SMOKE_PATH, 'utf8')
+    const body = stripCommentLines(
+      extractFunctionBody(src, STRAND_RELAY_ROUTING_SMOKE_FN_MARKER, 'relay-multi-peer-smoke.js')
+    )
+    expect(
+      body.includes('runStrandRelayRouting' + 'ConfigCheck()'),
+      'Expected runStrandRelayRoutingSmoke() to call the config-divergence check'
+    ).to.equal(true)
+    expect(
+      body.includes('runStrandRelayRoutingShared' + 'IdentitySubCheck()'),
+      'Expected runStrandRelayRoutingSmoke() to call the shared-identity sub-check'
+    ).to.equal(true)
+    // The retained prior verdicts (MULTI-PEER RELAY / STRAND-COHORT / FRET-NEGOTIATION /
+    // REGISTRAR-SKEW) must still be present in the whole file — a regression would drop one.
+    const stripped = stripCommentLines(src)
+    for (const priorVerdict of [
+      'MULTI' + '-PEER RELAY SMOKE' + ':',
+      'STRAND' + '-COHORT SMOKE' + ':',
+      'FRET' + '-NEGOTIATION SMOKE' + ':',
+      'REGISTRAR' + '-SKEW SMOKE' + ':',
+    ]) {
+      expect(
+        stripped.includes(priorVerdict),
+        `Expected the retained verdict "${priorVerdict}" to remain present in relay-multi-peer-smoke.js`
+      ).to.equal(true)
+    }
+  })
+
+  it('the diagnosis doc is present and cites the key installed-dist + app-source file:line anchors', () => {
+    const diagnosisPath = join(
+      REPO_ROOT, '.planning', 'phases', '41-multi-peer-relay-close-published-substrate',
+      '41-10-STRAND-RELAY-ROUTING-DIAGNOSIS.md'
+    )
+    expect(existsSync(diagnosisPath), `Expected ${diagnosisPath}`).to.equal(true)
+    const doc = readFileSync(diagnosisPath, 'utf8')
+    for (const anchor of [
+      'strand-instance-manager.js',
+      'libp2p-node-base.js',
+      'replication-proof-runner.ts',
+      'CadreNodeProvider.tsx',
+      'listenAddrs',
+      'identifyPush',
+    ]) {
+      expect(doc.includes(anchor), `Expected the diagnosis doc to cite "${anchor}"`).to.equal(true)
+    }
+  })
+
 })
