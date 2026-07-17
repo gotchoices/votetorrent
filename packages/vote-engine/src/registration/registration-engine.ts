@@ -90,6 +90,23 @@ function toDeferredCheckDatetime (input: Timestamp | string): string {
 }
 
 /**
+ * T-42-06 (found via TDD): a plain `select ... from Registrant` READ of the
+ * `Expiration` datetime column comes back Z-STRIPPED (Quereus normalizes
+ * `datetime`-typed column reads through the same wall-clock representation
+ * the deferred-check snapshot uses — see `toDeferredCheckDatetime`'s doc
+ * comment — even for a non-deferred, immediate SELECT). Re-stamping an
+ * UNCHANGED Expiration value read back from the DB (e.g. `changeStatus`
+ * leaving Expiration untouched) must NOT re-parse it through `new Date()`
+ * (which treats a Z-less ISO string as LOCAL time, silently shifting the
+ * instant by the host's UTC offset — see `fromCanonicalDatetime`'s doc
+ * comment for the same JS `Date` pitfall) — it must have `Z` appended
+ * directly, preserving the exact stored wall-clock digits as UTC.
+ */
+function reZuluDatetime (stored: string): string {
+  return stored.endsWith('Z') ? stored : `${stored}Z`
+}
+
+/**
  * RegistrationEngine — Phase 42-03 (D-01/D-02/D-15/D-18/D-21) implementation.
  *
  * Unwired `(ctx?: EngineContext)` constructor per the `ElectionsEngine`
@@ -626,26 +643,95 @@ export class RegistrationEngine implements IRegistrationEngine {
     // no-op — see 42-07.
   }
 
-  // ---------- out of scope this plan (owned by 42-06/42-07) ----------
+  // ---------- ElectionRegistrant roster (authority-only, D-17) ----------
 
-  async changeStatus (_registrantId: string, _status: RegistrantStatus, _signatureOrCallback: SignatureOrCallback): Promise<void> {
-    throw new Error('RegistrationEngine.changeStatus: not yet implemented — owned by Phase 42-06')
+  /**
+   * D-17: authority-only roster enrollment. `ElectionRegistrant` is `NoUpdate`
+   * (no update method exists, deliberately — see `IRegistrationEngine`'s doc
+   * comment) — insert/delete are the only mutations. `InsertValid` requires a
+   * `vrg`-scoped AdminSignature over `Digest(Tid, ElectionId, RegistrantId)`;
+   * there is NO self-enroll code path — the officer's `sign` callback is the
+   * sole authorization route (`RegistrantIdValid`/`RegistrantNotExpired`
+   * independently gate eligibility at the schema layer).
+   */
+  async enrollElectionRegistrant (electionId: string, registrantId: string, signatureOrCallback: SignatureOrCallback): Promise<void> {
+    this.requireCtx('enrollElectionRegistrant')
+    const ctx = this.ctx!
+    try {
+      const authorityId = await this.resolveRegistrantAuthorityId(registrantId, 'enrollElectionRegistrant')
+      const tid = nextRegistrationTid++
+      const digestExpr = 'select Digest(:tid, :electionId, :registrantId) as d'
+      const digestParams = { tid, electionId, registrantId }
+      const nonce = await seedSignedMutation(ctx, authorityId, 'vrg', tid, digestExpr, digestParams, this.resolveSign(signatureOrCallback))
+
+      await ctx.db.exec(
+        `insert into ElectionRegistrant (ElectionId, RegistrantId)
+         with context SigningNonce = :signingNonce, Tid = ${tid}, now = :now
+         values (:electionId, :registrantId)`,
+        { electionId, registrantId, signingNonce: nonce, now: nowCanonicalDatetime() }
+      )
+    } catch (err) {
+      this.rethrow(err, 'enrollElectionRegistrant')
+    }
   }
 
-  async changeExpiration (_registrantId: string, _expiration: string, _signatureOrCallback: SignatureOrCallback): Promise<void> {
-    throw new Error('RegistrationEngine.changeExpiration: not yet implemented — owned by Phase 42-06')
-  }
+  /**
+   * D-17: authority-only roster removal. `DeleteValid` requires a `vrg`-
+   * scoped AdminSignature over `Digest(Tid, ElectionId, RegistrantId, 'delete')`
+   * — the literal `'delete'` sentinel is a SQL literal inside the digest
+   * expression, not a bound param (matches the schema's own formula verbatim).
+   */
+  async removeElectionRegistrant (electionId: string, registrantId: string, signatureOrCallback: SignatureOrCallback): Promise<void> {
+    this.requireCtx('removeElectionRegistrant')
+    const ctx = this.ctx!
+    try {
+      const authorityId = await this.resolveRegistrantAuthorityId(registrantId, 'removeElectionRegistrant')
+      const tid = nextRegistrationTid++
+      const digestExpr = "select Digest(:tid, :electionId, :registrantId, 'delete') as d"
+      const digestParams = { tid, electionId, registrantId }
+      const nonce = await seedSignedMutation(ctx, authorityId, 'vrg', tid, digestExpr, digestParams, this.resolveSign(signatureOrCallback))
 
-  async enrollElectionRegistrant (_electionId: string, _registrantId: string, _signatureOrCallback: SignatureOrCallback): Promise<void> {
-    throw new Error('RegistrationEngine.enrollElectionRegistrant: not yet implemented — owned by Phase 42-06')
-  }
-
-  async removeElectionRegistrant (_electionId: string, _registrantId: string, _signatureOrCallback: SignatureOrCallback): Promise<void> {
-    throw new Error('RegistrationEngine.removeElectionRegistrant: not yet implemented — owned by Phase 42-06')
+      await ctx.db.exec(
+        `delete from ElectionRegistrant
+         with context SigningNonce = :signingNonce, Tid = ${tid}, now = :now
+         where ElectionId = :electionId and RegistrantId = :registrantId`,
+        { electionId, registrantId, signingNonce: nonce, now: nowCanonicalDatetime() }
+      )
+    } catch (err) {
+      this.rethrow(err, 'removeElectionRegistrant')
+    }
   }
 
   async getElectionRegistrants (_electionId: string): Promise<ElectionRegistrant[]> {
     return []
+  }
+
+  // ---------- Permissive registrant lifecycle (D-16) ----------
+
+  /**
+   * D-16: change Status ('a'|'s'|'r'). Deliberately NO transition guard beyond
+   * the schema's own `StatusValid` enum membership check — any direction is
+   * allowed; the `vrg` AdminSignature is the sole control (`MutationValid`).
+   */
+  async changeStatus (registrantId: string, status: RegistrantStatus, signatureOrCallback: SignatureOrCallback): Promise<void> {
+    try {
+      await this.updateRegistrantRow(registrantId, { status }, signatureOrCallback, 'changeStatus')
+    } catch (err) {
+      this.rethrow(err, 'changeStatus')
+    }
+  }
+
+  /**
+   * D-16: renewal — change Expiration under a fresh `vrg`-signed mutation.
+   * `ExpirationFuture` is `check on insert` ONLY — an update to ANY Expiration
+   * value (including one `ExpirationFuture` would reject on insert) succeeds.
+   */
+  async changeExpiration (registrantId: string, expiration: string, signatureOrCallback: SignatureOrCallback): Promise<void> {
+    try {
+      await this.updateRegistrantRow(registrantId, { expiration }, signatureOrCallback, 'changeExpiration')
+    } catch (err) {
+      this.rethrow(err, 'changeExpiration')
+    }
   }
 
   async addElectionRegistrationField (_field: ElectionRegistrationField, _signatureOrCallback: SignatureOrCallback): Promise<void> {
@@ -658,6 +744,99 @@ export class RegistrationEngine implements IRegistrationEngine {
 
   async getElectionRegistrationFields (_electionId: string): Promise<ElectionRegistrationField[]> {
     return []
+  }
+
+  // ---------- 42-06 helpers ----------
+
+  /** Resolve a Registrant's owning AuthorityId (needed to seed the vrg ceremony's CurrentAdmin lookup). */
+  private async resolveRegistrantAuthorityId (registrantId: string, method: string): Promise<string> {
+    const ctx = this.ctx!
+    const row = await ctx.db
+      .prepare('select AuthorityId from Registrant where Id = :registrantId')
+      .get({ registrantId })
+    if (!row) {
+      throw new Error(`${method}: Registrant not found for registrantId=${registrantId}`)
+    }
+    return asText(row.AuthorityId, 'Registrant.AuthorityId')
+  }
+
+  /**
+   * Shared UPDATE ceremony for `changeStatus`/`changeExpiration` — retargets
+   * `createRegistrant`'s dual-signing pattern (row-level SignatureValid proof
+   * + the vrg AdminSigning/AdminSignature MutationValid ceremony) to an
+   * UPDATE. Only Status/Expiration/SignorKey/Signature are ever written —
+   * Id/AuthorityId/*Cid stay untouched (IdImmutable/AuthorityIdImmutable).
+   */
+  private async updateRegistrantRow (
+    registrantId: string,
+    changes: { status?: RegistrantStatus; expiration?: Timestamp | string },
+    signatureOrCallback: SignatureOrCallback,
+    method: string
+  ): Promise<void> {
+    this.requireCtx(method)
+    const ctx = this.ctx!
+    const currentRow = await ctx.db
+      .prepare('select AuthorityId, PrivateCid, PublicCid, SelectiveCid, Status, Expiration from Registrant where Id = :registrantId')
+      .get({ registrantId })
+    if (!currentRow) {
+      throw new Error(`${method}: Registrant not found for registrantId=${registrantId}`)
+    }
+    const authorityId = asText(currentRow.AuthorityId, 'Registrant.AuthorityId')
+    const privateCid = asText(currentRow.PrivateCid, 'Registrant.PrivateCid')
+    const publicCid = currentRow.PublicCid == null ? null : asText(currentRow.PublicCid, 'Registrant.PublicCid')
+    const selectiveCid = currentRow.SelectiveCid == null ? null : asText(currentRow.SelectiveCid, 'Registrant.SelectiveCid')
+    const status = changes.status ?? (asText(currentRow.Status, 'Registrant.Status') as RegistrantStatus)
+    const expiration = changes.expiration !== undefined
+      ? toIsoZDatetime(changes.expiration)
+      : reZuluDatetime(currentRow.Expiration as string)
+
+    const tid = nextRegistrationTid++
+
+    // 1. Row-level signor signature (D-19) — SAME 7-field formula as createRegistrant's SignatureValid.
+    const rowDigestRow = await ctx.db
+      .prepare('select Digest(:id, :authorityId, :privateCid, :publicCid, :selectiveCid, :status, :expiration) as d')
+      .get({ id: registrantId, authorityId, privateCid, publicCid, selectiveCid, status, expiration })
+    if (!rowDigestRow || rowDigestRow.d == null) {
+      throw new Error(`${method}: Digest() returned null for row-level signature — crypto plugin not registered?`)
+    }
+    const rowDigestBytes = digestToBytes(rowDigestRow.d)
+    const rowSignature = await this.resolveSign(signatureOrCallback)(rowDigestBytes)
+
+    // 2. AdminSigning ceremony ('vrg') — MutationValid's 10-field formula (Tid,
+    //    Id, AuthorityId, PrivateCid, PublicCid, SelectiveCid, Status,
+    //    Expiration, SignorKey, Signature) — deferred-check-coerced Expiration
+    //    (see toDeferredCheckDatetime's doc comment / T-42-03).
+    const expirationForDeferredCheck = toDeferredCheckDatetime(expiration)
+    const digestExpr = 'select Digest(:tid, :id, :authorityId, :privateCid, :publicCid, :selectiveCid, :status, :expirationDeferred, :rowSignorKey, :rowSignature) as d'
+    const digestParams = {
+      tid,
+      id: registrantId,
+      authorityId,
+      privateCid,
+      publicCid,
+      selectiveCid,
+      status,
+      expirationDeferred: expirationForDeferredCheck,
+      rowSignorKey: rowSignature.signerKey,
+      rowSignature: rowSignature.signature
+    }
+    const nonce = await seedSignedMutation(ctx, authorityId, 'vrg', tid, digestExpr, digestParams, this.resolveSign(signatureOrCallback))
+
+    await ctx.db.exec(
+      `update Registrant
+       with context SigningNonce = :signingNonce, Tid = ${tid}, now = :now
+       set Status = :status, Expiration = :expiration, SignorKey = :signorKey, Signature = :signature
+       where Id = :id`,
+      {
+        id: registrantId,
+        status,
+        expiration,
+        signorKey: rowSignature.signerKey,
+        signature: rowSignature.signature,
+        signingNonce: nonce,
+        now: nowCanonicalDatetime()
+      }
+    )
   }
 
   // ---------- helpers ----------

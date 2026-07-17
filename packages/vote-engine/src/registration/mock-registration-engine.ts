@@ -27,6 +27,8 @@ export class MockRegistrationEngine implements IRegistrationEngine {
   private readonly registrants = new Map<string, Registrant>()
   private readonly registrantPublics = new Map<string, RegistrantPublic>()
   private readonly registrantPrivates = new Map<string, RegistrantPrivate>()
+  /** D-17: authority-only roster — in-memory parity for ElectionRegistrant, keyed by `${electionId}${registrantId}`. */
+  private readonly electionRegistrants = new Set<string>()
 
   buildRegister (): IRegistrationRegisterBuilder {
     return new RegistrationRegisterBuilder(this)
@@ -89,20 +91,32 @@ export class MockRegistrationEngine implements IRegistrationEngine {
     throw new Error('MockRegistrationEngine.getRegistrantSelective: not implemented in mock (owned by Phase 42-08)')
   }
 
-  async changeStatus (_registrantId: string, _status: RegistrantStatus, _signatureOrCallback: SignatureOrCallback): Promise<void> {
-    throw new Error('MockRegistrationEngine.changeStatus: not implemented in mock (owned by Phase 42-06)')
+  /** D-16: permissive — no transition guard, mirrors the real engine's lack of one. */
+  async changeStatus (registrantId: string, status: RegistrantStatus, _signatureOrCallback: SignatureOrCallback): Promise<void> {
+    const existing = this.registrants.get(registrantId)
+    if (!existing) {
+      throw new Error(`MockRegistrationEngine.changeStatus: Registrant not found for registrantId=${registrantId}`)
+    }
+    this.registrants.set(registrantId, { ...existing, status })
   }
 
-  async changeExpiration (_registrantId: string, _expiration: string, _signatureOrCallback: SignatureOrCallback): Promise<void> {
-    throw new Error('MockRegistrationEngine.changeExpiration: not implemented in mock (owned by Phase 42-06)')
+  /** D-16: permissive — any Expiration value succeeds (no insert-only future check on update). */
+  async changeExpiration (registrantId: string, expiration: string, _signatureOrCallback: SignatureOrCallback): Promise<void> {
+    const existing = this.registrants.get(registrantId)
+    if (!existing) {
+      throw new Error(`MockRegistrationEngine.changeExpiration: Registrant not found for registrantId=${registrantId}`)
+    }
+    this.registrants.set(registrantId, { ...existing, expiration })
   }
 
-  async enrollElectionRegistrant (_electionId: string, _registrantId: string, _signatureOrCallback: SignatureOrCallback): Promise<void> {
-    throw new Error('MockRegistrationEngine.enrollElectionRegistrant: not implemented in mock (owned by Phase 42-06)')
+  /** D-17: authority-only roster — in-memory Set add, no signing. */
+  async enrollElectionRegistrant (electionId: string, registrantId: string, _signatureOrCallback: SignatureOrCallback): Promise<void> {
+    this.electionRegistrants.add(`${electionId}${registrantId}`)
   }
 
-  async removeElectionRegistrant (_electionId: string, _registrantId: string, _signatureOrCallback: SignatureOrCallback): Promise<void> {
-    throw new Error('MockRegistrationEngine.removeElectionRegistrant: not implemented in mock (owned by Phase 42-06)')
+  /** D-17: authority-only roster — in-memory Set delete, no signing. */
+  async removeElectionRegistrant (electionId: string, registrantId: string, _signatureOrCallback: SignatureOrCallback): Promise<void> {
+    this.electionRegistrants.delete(`${electionId}${registrantId}`)
   }
 
   async getElectionRegistrants (_electionId: string): Promise<ElectionRegistrant[]> {

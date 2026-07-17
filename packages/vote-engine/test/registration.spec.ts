@@ -27,8 +27,9 @@ import type { Signature } from '@votetorrent/vote-core'
 import { RegistrationEngine } from '../src/registration/registration-engine.js'
 import { MockRegistrationEngine } from '../src/registration/mock-registration-engine.js'
 import { RegistrationRegisterBuilder } from '../src/registration/builders/registration-register-builder.js'
-import { createTestNetwork, addTestAuthority, seedSignedMutation as seedSignedMutationFixture } from './fixtures/test-context.js'
+import { createTestNetwork, addTestAuthority, addTestElection, seedSignedMutation as seedSignedMutationFixture } from './fixtures/test-context.js'
 import { randomTestKeyPair } from './fixtures/keys.js'
+import { digestToBytes, toCanonicalDatetime } from '../src/utils.js'
 import type { EngineContext } from '../src/types.js'
 import type { TestAuthorityContext } from './fixtures/test-context.js'
 
@@ -118,6 +119,81 @@ async function computePrivateCid (
     .prepare('select cid(Digest(:registrantId, :expiration, :privateDetails)) as c')
     .get({ registrantId, expiration, privateDetails: JSON.stringify(input.details) })
   return row!.c as string
+}
+
+/** Resolve the single Election row seeded by addTestElection() for this authority. */
+async function resolveElectionId (ctx: EngineContext, authorityId: string): Promise<string> {
+  const row = await ctx.db
+    .prepare('select Id from Election where AuthorityId = :authorityId limit 1')
+    .get({ authorityId })
+  if (!row) throw new Error('resolveElectionId: Election not found for authority')
+  return row.Id as string
+}
+
+/**
+ * Task-1-only test fixture helper: raw-updates a Registrant's Status/
+ * Expiration bypassing RegistrationEngine.changeStatus/changeExpiration
+ * (Task 2's own methods — this file's Task-1 describe block must stand on
+ * its own since it is committed/verified before Task 2 lands). Mirrors the
+ * exact dual-signing ceremony RegistrationEngine.createRegistrant/
+ * updateRegistrantRow use (row-level SignatureValid + vrg MutationValid).
+ *
+ * Expiration inputs are rounded to whole seconds so the deferred-check
+ * coercion (Z-strip + Temporal minimal-fraction serialization, T-42-03) is
+ * trivially satisfied by the plain `toCanonicalDatetime` (no-Z, no-fraction)
+ * form — avoiding the need to reproduce registration-engine.ts's private
+ * `toDeferredCheckDatetime` helper here.
+ */
+async function rawUpdateRegistrant (
+  auth: TestAuthorityContext,
+  registrantId: string,
+  changes: { status?: string; expirationMs?: number },
+  sign: (digest: Uint8Array) => Promise<Signature>,
+  /** Ceremony scope override — 'vrg' (correct) unless testing the D-16 sole-control reject path. */
+  scope: 'vrg' | 'rad' = 'vrg'
+): Promise<void> {
+  const ctx = auth.ctx
+  const current = await ctx.db
+    .prepare('select AuthorityId, PrivateCid, PublicCid, SelectiveCid, Status, Expiration from Registrant where Id = :registrantId')
+    .get({ registrantId })
+  if (!current) throw new Error('rawUpdateRegistrant: Registrant not found')
+  const authorityId = current.AuthorityId as string
+  const privateCid = current.PrivateCid as string
+  const publicCid = (current.PublicCid as string | null) ?? null
+  const selectiveCid = (current.SelectiveCid as string | null) ?? null
+  const status = changes.status ?? (current.Status as string)
+  const alignedMs = changes.expirationMs !== undefined ? Math.floor(changes.expirationMs / 1000) * 1000 : undefined
+  const expiration = alignedMs !== undefined ? new Date(alignedMs).toISOString() : (current.Expiration as string)
+  const expirationDeferred = alignedMs !== undefined
+    ? new Date(alignedMs).toISOString().slice(0, 19)
+    : toCanonicalDatetime(current.Expiration as string)
+
+  const rowDigestRow = await ctx.db
+    .prepare('select Digest(:id, :authorityId, :privateCid, :publicCid, :selectiveCid, :status, :expiration) as d')
+    .get({ id: registrantId, authorityId, privateCid, publicCid, selectiveCid, status, expiration })
+  const rowSignature = await sign(digestToBytes(rowDigestRow!.d))
+
+  const tid = Date.now() + Math.floor(Math.random() * 100_000)
+  const digestExpr = 'select Digest(:tid, :id, :authorityId, :privateCid, :publicCid, :selectiveCid, :status, :expirationDeferred, :rowSignorKey, :rowSignature) as d'
+  const digestParams = {
+    tid, id: registrantId, authorityId, privateCid, publicCid, selectiveCid, status,
+    expirationDeferred,
+    rowSignorKey: rowSignature.signerKey,
+    rowSignature: rowSignature.signature
+  }
+  const { nonce } = await seedSignedMutationFixture(ctx, authorityId, scope, tid, digestExpr, digestParams, auth.user)
+
+  await ctx.db.exec(
+    `update Registrant
+     with context SigningNonce = :signingNonce, Tid = ${tid}, now = :now
+     set Status = :status, Expiration = :expiration, SignorKey = :signorKey, Signature = :signature
+     where Id = :id`,
+    {
+      id: registrantId, status, expiration,
+      signorKey: rowSignature.signerKey, signature: rowSignature.signature,
+      signingNonce: nonce, now: new Date().toISOString().slice(0, 19)
+    }
+  )
 }
 
 // ===========================================================================
@@ -601,6 +677,304 @@ describe('registration Cid integrity (D-15)', () => {
       expect(registrant!.authorityId).to.equal('authority-mock')
       const publicRow = await mock.getRegistrantPublic(registrantId)
       expect(publicRow!.lastName).to.equal('Parity')
+    })
+  })
+})
+
+// ===========================================================================
+// ElectionRegistrant roster (authority-only, D-17) — Phase 42-06 Task 1
+// ===========================================================================
+
+describe('ElectionRegistrant roster (authority-only, D-17)', () => {
+  it('enrollElectionRegistrant creates exactly one row for (electionId, registrantId)', async () => {
+    const { auth, engine, sign } = await setupRegistrationTest()
+    const elec = await addTestElection(auth)
+    const electionId = await resolveElectionId(elec.ctx, elec.authority.id)
+    const registrantId = nextRegistrantId()
+    await engine.createRegistrant(
+      { id: registrantId, authorityId: auth.authority.id, privateCid: 'test-private-cid', expiration: FUTURE_EXPIRATION },
+      sign
+    )
+
+    await engine.enrollElectionRegistrant(electionId, registrantId, sign)
+
+    const ctx = (engine as unknown as { ctx: EngineContext }).ctx
+    const row = await ctx.db
+      .prepare('select count(*) as n from ElectionRegistrant where ElectionId = :electionId and RegistrantId = :registrantId')
+      .get({ electionId, registrantId })
+    expect(Number(row?.n)).to.equal(1)
+  })
+
+  it('removeElectionRegistrant deletes the row (count back to 0) after enroll', async () => {
+    const { auth, engine, sign } = await setupRegistrationTest()
+    const elec = await addTestElection(auth)
+    const electionId = await resolveElectionId(elec.ctx, elec.authority.id)
+    const registrantId = nextRegistrantId()
+    await engine.createRegistrant(
+      { id: registrantId, authorityId: auth.authority.id, privateCid: 'test-private-cid', expiration: FUTURE_EXPIRATION },
+      sign
+    )
+    await engine.enrollElectionRegistrant(electionId, registrantId, sign)
+
+    await engine.removeElectionRegistrant(electionId, registrantId, sign)
+
+    const ctx = (engine as unknown as { ctx: EngineContext }).ctx
+    const row = await ctx.db
+      .prepare('select count(*) as n from ElectionRegistrant where ElectionId = :electionId and RegistrantId = :registrantId')
+      .get({ electionId, registrantId })
+    expect(Number(row?.n)).to.equal(0)
+  })
+
+  it('rejects enrolling a registrant whose Status != a (RegistrantIdValid)', async () => {
+    const { auth, engine, sign } = await setupRegistrationTest()
+    const elec = await addTestElection(auth)
+    const electionId = await resolveElectionId(elec.ctx, elec.authority.id)
+    const registrantId = nextRegistrantId()
+    await engine.createRegistrant(
+      { id: registrantId, authorityId: auth.authority.id, privateCid: 'test-private-cid', status: 's', expiration: FUTURE_EXPIRATION },
+      sign
+    )
+
+    let threw = false
+    try {
+      await engine.enrollElectionRegistrant(electionId, registrantId, sign)
+    } catch {
+      threw = true
+    }
+    expect(threw, 'expected enrolling a suspended (Status=s) registrant to be rejected by RegistrantIdValid').to.be.true
+  })
+
+  it('rejects enrolling a registrant whose Expiration <= now (RegistrantNotExpired)', async () => {
+    const { auth, engine, sign } = await setupRegistrationTest()
+    const elec = await addTestElection(auth)
+    const electionId = await resolveElectionId(elec.ctx, elec.authority.id)
+    const registrantId = nextRegistrantId()
+    // ExpirationFuture is insert-only — insert with a future Expiration, then
+    // raw-update it into the past (update bypasses ExpirationFuture, D-16),
+    // producing an active-but-expired registrant WITHOUT depending on Task 2's
+    // own changeExpiration method (this describe block is verified standalone).
+    await engine.createRegistrant(
+      { id: registrantId, authorityId: auth.authority.id, privateCid: 'test-private-cid', expiration: Date.now() + 60_000 },
+      sign
+    )
+    await rawUpdateRegistrant(auth, registrantId, { expirationMs: Date.now() - 60_000 }, sign)
+
+    let threw = false
+    try {
+      await engine.enrollElectionRegistrant(electionId, registrantId, sign)
+    } catch {
+      threw = true
+    }
+    expect(threw, 'expected enrolling an expired registrant to be rejected by RegistrantNotExpired').to.be.true
+  })
+
+  it('rejects an enroll whose ceremony produced a NON-vrg scope — authority-only, no self-enroll path (D-17)', async () => {
+    const { auth, engine, sign } = await setupRegistrationTest()
+    const elec = await addTestElection(auth)
+    const electionId = await resolveElectionId(elec.ctx, elec.authority.id)
+    const registrantId = nextRegistrantId()
+    await engine.createRegistrant(
+      { id: registrantId, authorityId: auth.authority.id, privateCid: 'test-private-cid', expiration: FUTURE_EXPIRATION },
+      sign
+    )
+    const ctx = (engine as unknown as { ctx: EngineContext }).ctx
+
+    const tid = Date.now() + Math.floor(Math.random() * 100_000)
+    const digestExpr = 'select Digest(:tid, :electionId, :registrantId) as d'
+    const digestParams = { tid, electionId, registrantId }
+    // Sign the ceremony under 'rad' (wrong scope for ElectionRegistrant, which requires 'vrg').
+    const { nonce } = await seedSignedMutationFixture(auth.ctx, auth.authority.id, 'rad', tid, digestExpr, digestParams, auth.user)
+
+    let threw = false
+    try {
+      await ctx.db.exec(
+        `insert into ElectionRegistrant (ElectionId, RegistrantId)
+         with context SigningNonce = :signingNonce, Tid = ${tid}, now = :now
+         values (:electionId, :registrantId)`,
+        { electionId, registrantId, signingNonce: nonce, now: new Date().toISOString().slice(0, 19) }
+      )
+    } catch {
+      threw = true
+    }
+    expect(threw, 'expected the rad-scoped ceremony to be rejected by ElectionRegistrant.InsertValid (requires vrg) — no self-enroll path').to.be.true
+
+    const row = await ctx.db
+      .prepare('select count(*) as n from ElectionRegistrant where ElectionId = :electionId and RegistrantId = :registrantId')
+      .get({ electionId, registrantId })
+    expect(Number(row?.n)).to.equal(0)
+  })
+
+  describe('MockRegistrationEngine parity', () => {
+    it('enroll adds and remove deletes the in-memory roster entry', async () => {
+      const mock = new MockRegistrationEngine()
+      const dummySign = async (): Promise<Signature> => ({ signerUserId: 'u', signerKey: 'k', signature: 's' })
+      const electionId = 'election-mock-1'
+      const registrantId = 'registrant-mock-1'
+
+      await mock.enrollElectionRegistrant(electionId, registrantId, dummySign)
+      await mock.removeElectionRegistrant(electionId, registrantId, dummySign)
+      // No public read method to assert against directly (getElectionRegistrants
+      // stays a [] stub, out of this plan's scope) — parity is exercised by the
+      // fact that both calls resolve without throwing (matches the real
+      // engine's insert-then-delete-succeeds shape).
+    })
+  })
+})
+
+// ===========================================================================
+// Permissive registrant lifecycle (D-16) — Phase 42-06 Task 2
+// ===========================================================================
+
+describe('Permissive registrant lifecycle (D-16)', () => {
+  it('allows all six a/s/r transitions with no directional guard', async () => {
+    const { auth, engine, sign } = await setupRegistrationTest()
+    const registrantId = nextRegistrantId()
+    await engine.createRegistrant(
+      { id: registrantId, authorityId: auth.authority.id, privateCid: 'test-private-cid', expiration: FUTURE_EXPIRATION },
+      sign
+    )
+    const ctx = (engine as unknown as { ctx: EngineContext }).ctx
+
+    const transitions: Array<'a' | 's' | 'r'> = ['s', 'a', 'r', 'a', 's', 'r']
+    for (const next of transitions) {
+      await engine.changeStatus(registrantId, next, sign)
+      const row = await ctx.db.prepare('select Status from Registrant where Id = :id').get({ id: registrantId })
+      expect(row?.Status).to.equal(next)
+    }
+  })
+
+  it('renewRegistrant (changeExpiration) updates to a fresh future Expiration', async () => {
+    const { auth, engine, sign } = await setupRegistrationTest()
+    const registrantId = nextRegistrantId()
+    await engine.createRegistrant(
+      { id: registrantId, authorityId: auth.authority.id, privateCid: 'test-private-cid', expiration: FUTURE_EXPIRATION },
+      sign
+    )
+    const ctx = (engine as unknown as { ctx: EngineContext }).ctx
+
+    const newFuture = FUTURE_EXPIRATION + 86_400_000
+    const newFutureIso = new Date(newFuture).toISOString()
+    await engine.changeExpiration(registrantId, newFutureIso, sign)
+
+    // A plain SELECT of a `datetime` column comes back Z-stripped (Quereus
+    // column-read normalization, T-42-06) — compare by instant, not raw string.
+    const row = await ctx.db.prepare('select Expiration from Registrant where Id = :id').get({ id: registrantId })
+    const stored = row!.Expiration as string
+    const storedMs = new Date(stored.endsWith('Z') ? stored : `${stored}Z`).getTime()
+    expect(storedMs).to.equal(newFuture)
+  })
+
+  it('renewRegistrant (changeExpiration) to an already-elapsed value STILL succeeds on update (insert-only ExpirationFuture does not fire)', async () => {
+    const { auth, engine, sign } = await setupRegistrationTest()
+    const registrantId = nextRegistrantId()
+    await engine.createRegistrant(
+      { id: registrantId, authorityId: auth.authority.id, privateCid: 'test-private-cid', expiration: FUTURE_EXPIRATION },
+      sign
+    )
+    const ctx = (engine as unknown as { ctx: EngineContext }).ctx
+
+    const elapsed = Date.now() - 3_600_000
+    await engine.changeExpiration(registrantId, new Date(elapsed).toISOString(), sign)
+
+    const row = await ctx.db.prepare('select Expiration from Registrant where Id = :id').get({ id: registrantId })
+    expect(row?.Expiration).to.be.a('string')
+  })
+
+  it('rejects a status change whose ceremony did not produce a valid vrg AdminSignature (sole-control proof, D-16)', async () => {
+    const { auth, sign } = await setupRegistrationTest()
+    const registrantId = nextRegistrantId()
+    const engine = new RegistrationEngine(auth.ctx)
+    await engine.createRegistrant(
+      { id: registrantId, authorityId: auth.authority.id, privateCid: 'test-private-cid', expiration: FUTURE_EXPIRATION },
+      sign
+    )
+
+    let threw = false
+    try {
+      // Wrong scope ('rad' instead of 'vrg') — MutationValid must reject.
+      await rawUpdateRegistrant(auth, registrantId, { status: 's' }, sign, 'rad')
+    } catch {
+      threw = true
+    }
+    expect(threw, 'expected a non-vrg-scoped ceremony to be rejected by MutationValid — the AdminSignature is the sole control').to.be.true
+  })
+
+  it('rejects a status change whose inline SignorKey/Signature does not verify over the new field values (SignatureValid)', async () => {
+    const { auth, engine, sign } = await setupRegistrationTest()
+    const registrantId = nextRegistrantId()
+    await engine.createRegistrant(
+      { id: registrantId, authorityId: auth.authority.id, privateCid: 'test-private-cid', expiration: FUTURE_EXPIRATION },
+      sign
+    )
+    // Align Expiration to a whole-second boundary via the REAL changeExpiration
+    // method first, so the deferred-check coercion (Z-strip + Temporal minimal-
+    // fraction serialization, T-42-03) is trivially satisfied by plain
+    // toCanonicalDatetime below — isolating SignatureValid as the ONLY reason
+    // this raw update is rejected (not an incidental MutationValid mismatch).
+    const alignedFuture = Math.floor((Date.now() + 365 * 86_400_000) / 1000) * 1000
+    await engine.changeExpiration(registrantId, new Date(alignedFuture).toISOString(), sign)
+    const ctx = (engine as unknown as { ctx: EngineContext }).ctx
+
+    const current = await ctx.db
+      .prepare('select AuthorityId, PrivateCid, PublicCid, SelectiveCid, Status, Expiration from Registrant where Id = :id')
+      .get({ id: registrantId })
+    const authorityId = current!.AuthorityId as string
+    const privateCid = current!.PrivateCid as string
+    const status = 's'
+    const expiration = current!.Expiration as string
+    const bogusSignorKey = 'b'.repeat(66)
+    const bogusSignature = 'c'.repeat(128)
+
+    const tid = Date.now() + Math.floor(Math.random() * 100_000)
+    const digestExpr = 'select Digest(:tid, :id, :authorityId, :privateCid, :publicCid, :selectiveCid, :status, :expirationDeferred, :rowSignorKey, :rowSignature) as d'
+    const digestParams = {
+      tid, id: registrantId, authorityId, privateCid, publicCid: null, selectiveCid: null, status,
+      expirationDeferred: toCanonicalDatetime(expiration),
+      rowSignorKey: bogusSignorKey,
+      rowSignature: bogusSignature
+    }
+    const { nonce } = await seedSignedMutationFixture(auth.ctx, authorityId, 'vrg', tid, digestExpr, digestParams, auth.user)
+
+    let threw = false
+    try {
+      await ctx.db.exec(
+        `update Registrant
+         with context SigningNonce = :signingNonce, Tid = ${tid}, now = :now
+         set Status = :status, SignorKey = :signorKey, Signature = :signature
+         where Id = :id`,
+        { status, signorKey: bogusSignorKey, signature: bogusSignature, signingNonce: nonce, now: new Date().toISOString().slice(0, 19), id: registrantId }
+      )
+    } catch {
+      threw = true
+    }
+    expect(threw, 'expected a non-verifying SignorKey/Signature to be rejected by SignatureValid').to.be.true
+  })
+
+  describe('MockRegistrationEngine parity', () => {
+    it('changeStatus/changeExpiration mutate the in-memory record with no transition guard', async () => {
+      const mock = new MockRegistrationEngine()
+      const dummySig: Signature = { signature: 'a'.repeat(128), signerKey: 'b'.repeat(66), signerUserId: 'user-1' }
+      const registrantId = nextRegistrantId()
+      await mock.register(
+        {
+          registrant: { id: registrantId, authorityId: 'authority-mock', expiration: FUTURE_EXPIRATION },
+          private: { expiration: FUTURE_EXPIRATION, details: [] }
+        },
+        dummySig
+      )
+
+      await mock.changeStatus(registrantId, 'r', dummySig)
+      let row = await mock.getRegistrant(registrantId)
+      expect(row!.status).to.equal('r')
+
+      await mock.changeStatus(registrantId, 'a', dummySig)
+      row = await mock.getRegistrant(registrantId)
+      expect(row!.status).to.equal('a')
+
+      const newExpiration = FUTURE_EXPIRATION + 1000
+      await mock.changeExpiration(registrantId, new Date(newExpiration).toISOString(), dummySig)
+      row = await mock.getRegistrant(registrantId)
+      expect(row!.expiration).to.equal(new Date(newExpiration).toISOString())
     })
   })
 })
