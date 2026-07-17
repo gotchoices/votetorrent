@@ -184,6 +184,9 @@ describe('AssociationEngine', () => {
       const association = await engine.getAssociation(registrantId, deviceKey)
       expect(association).to.not.be.undefined
       expect(association!.attestationCid).to.be.a('string').with.length.greaterThan(0)
+      // CR-02: a datetime-column read-back is Z-stripped by Quereus; getAssociation must
+      // re-stamp Expiration so a caller's `new Date(expiration)` reads UTC, not host-local time.
+      expect(association!.expiration, 'getAssociation must return a Z-suffixed UTC datetime (CR-02)').to.match(/Z$/)
     })
 
     it('carries deviceHash through to the public Association row when supplied', async () => {

@@ -582,7 +582,7 @@ export class RegistrationEngine implements IRegistrationEngine {
         publicCid: row.PublicCid == null ? undefined : asText(row.PublicCid, 'Registrant.PublicCid'),
         selectiveCid: row.SelectiveCid == null ? undefined : asText(row.SelectiveCid, 'Registrant.SelectiveCid'),
         status: asText(row.Status, 'Registrant.Status') as RegistrantStatus,
-        expiration: row.Expiration as string,
+        expiration: reZuluDatetime(row.Expiration as string),
         signorKey: asText(row.SignorKey, 'Registrant.SignorKey'),
         signature: asText(row.Signature, 'Registrant.Signature')
       }
@@ -675,7 +675,7 @@ export class RegistrationEngine implements IRegistrationEngine {
       return {
         cid: asText(row.Cid, 'RegistrantPrivate.Cid'),
         registrantId: asText(row.RegistrantId, 'RegistrantPrivate.RegistrantId'),
-        expiration: row.Expiration as string,
+        expiration: reZuluDatetime(row.Expiration as string),
         privateDetails: parseJsonOr<PrivateDetail[]>(row.PrivateDetails, [], 'RegistrantPrivate.PrivateDetails')
       }
     } catch (err) {
@@ -694,7 +694,7 @@ export class RegistrationEngine implements IRegistrationEngine {
       return {
         cid: asText(row.Cid, 'RegistrantSelective.Cid'),
         registrantId: asText(row.RegistrantId, 'RegistrantSelective.RegistrantId'),
-        expiration: row.Expiration as string,
+        expiration: reZuluDatetime(row.Expiration as string),
         selectiveDetails: parseJsonOr<SelectiveLeaf[]>(row.SelectiveDetails, [], 'RegistrantSelective.SelectiveDetails')
       }
     } catch (err) {

@@ -464,7 +464,10 @@ export class AssociationEngine implements IAssociationEngine {
         deviceKey: asText(row.DeviceKey, 'Association.DeviceKey'),
         deviceHash: row.DeviceHash == null ? undefined : asText(row.DeviceHash, 'Association.DeviceHash'),
         attestationCid: row.AttestationCid == null ? undefined : asText(row.AttestationCid, 'Association.AttestationCid'),
-        expiration: row.Expiration as string,
+        // CR-02: a datetime-column read-back is Z-stripped (Quereus canonical form); re-stamp
+        // it to UTC via toIsoZDatetime (which appends `Z` to the bare form) rather than
+        // returning the ambiguous string a caller's `new Date(...)` would misread as local time.
+        expiration: toIsoZDatetime(row.Expiration as string),
         signorKey: asText(row.SignorKey, 'Association.SignorKey'),
         signature: asText(row.Signature, 'Association.Signature')
       }
