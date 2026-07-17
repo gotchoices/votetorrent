@@ -94,6 +94,37 @@ export interface SaltedLeaf {
   salt: string
 }
 
+/**
+ * Alias for {@link SaltedLeaf}, mirroring the crypto plugin's own `SaltedLeaf`
+ * naming (`@optimystic/quereus-plugin-crypto/src/sd.ts`) at the Register-flow
+ * selective-disclosure surface (D-11/D-12/D-13/D-14) — the stored, salted
+ * `{ name, value, salt }` shape returned by `getDisclosedSelective` (both the
+ * revealed `disclosed` leaves and, structurally, the withheld ones before
+ * they're reduced to opaque hidden digests).
+ */
+export type SelectiveLeaf = SaltedLeaf
+
+/**
+ * One caller-supplied selective-disclosure field input for the Register flow
+ * (D-13). Deliberately carries NO `salt` — the engine generates a fresh
+ * `random_bytes` (>=128 bits) salt per leaf at commit time; a caller-supplied
+ * salt would defeat the "authority alone can enforce uniqueness / freshness"
+ * property `assertUniqueNames`/`requireSaltBytes` rely on authority-side.
+ */
+export interface SelectiveFieldInput {
+  name: string
+  value: string | number | boolean
+}
+
+/**
+ * Draft payload for the Register flow's optional selective-disclosure tier
+ * (D-11/D-12/D-13) — an ORDERED list of `{ name, value }` field inputs, salts
+ * omitted (engine-generated). Duplicate names are rejected before the DB
+ * ceremony (D-13); an absent or empty list means no `RegistrantSelective`
+ * row is ever created (Pitfall 3 — `set_commit` is never invoked on NULL).
+ */
+export type RegisterSelectivePayload = SelectiveFieldInput[]
+
 /** ********* RegistrantSelective (authority-held, insert-only, 'vrg'-signed) ***********/
 export interface RegistrantSelective {
   /** Content-addressed CIDv1 of this record: cid(set_commit(SelectiveDetails)) */
@@ -106,6 +137,45 @@ export interface RegistrantSelective {
 
   /** json array of flat { name, value, salt } salted leaves (SaltedLeaf[]) */
   selectiveDetails?: SaltedLeaf[]
+}
+
+/**
+ * Result of `getDisclosedSelective` (D-14) — a per-field disclosure of a
+ * registrant's `RegistrantSelective` set, filtered by `ElectionDisclosurePolicy`
+ * for the caller's audience. `root` is the BARE `set_commit(SelectiveDetails)`
+ * value (base64url) that `setVerify(root, { disclosed, hidden })` checks
+ * against — NOT the `cid()`-wrapped `SelectiveCid` (`cid` is included purely
+ * for linkage back to `Registrant.selectiveCid` / the `RegistrantSelective`
+ * row). `disclosed` carries the revealed `(name, value, salt)` triples;
+ * `hidden` carries only opaque leaf digests (base64url) of the withheld
+ * leaves — no name, no value, no salt ever crosses this boundary.
+ */
+export interface DisclosedSelective {
+  cid: string
+  root: string
+  disclosed: SelectiveLeaf[]
+  hidden: string[]
+}
+
+/** DisclosureAudience(Code) — which recipients a selective field may be revealed to. */
+export type DisclosureAudience = 'district' | 'everyone'
+
+/**
+ * Election policy: which `RegistrantSelective` field names may be disclosed,
+ * and to which audience (D-14). Companion to `ElectionRegistrationField` —
+ * same 'mel'-signed, election-keyed shape. Delivery/filtering of disclosed
+ * data to recipients is handled off-schema by `getDisclosedSelective` at
+ * query time (no on-network disclosure record).
+ */
+export interface ElectionDisclosurePolicy {
+  /** references Election.id */
+  electionId: string
+
+  /** a top-level attribute name within RegistrantSelective.SelectiveDetails */
+  fieldName: string
+
+  /** references DisclosureAudience(Code) */
+  audience: DisclosureAudience
 }
 
 /** ********* ElectionRegistrant (roster, authority-only 'vrg'-signed insert/delete) ***********/
@@ -171,8 +241,14 @@ export interface RegisterInit {
     details: PrivateDetail[]
   }
 
+  /**
+   * D-11/D-12/D-13: optional selective-disclosure tier. `details` carries
+   * PLAIN `{ name, value }` field inputs — no salt (engine-generated, D-13).
+   * Absent or empty means no `RegistrantSelective` row is created at all
+   * (Pitfall 3: `set_commit` is never invoked on NULL/absent details).
+   */
   selective?: {
     expiration: Timestamp | string
-    details: SaltedLeaf[]
+    details: RegisterSelectivePayload
   }
 }

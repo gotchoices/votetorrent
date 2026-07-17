@@ -1,6 +1,7 @@
 import type { Signature } from '../common/index.js'
 import type { IBuilder } from '../common/builder.js'
 import type {
+  DisclosedSelective,
   ElectionRegistrant,
   ElectionRegistrationField,
   RegisterInit,
@@ -40,6 +41,16 @@ export interface IRegistrationEngine {
 
   /** Selective tier read — authority-side, full (undisclosed) record. */
   getRegistrantSelective(registrantId: string): Promise<RegistrantSelective | undefined>
+
+  /**
+   * D-14: reveal a per-field subset of a registrant's selective-disclosure
+   * set, filtered by `ElectionDisclosurePolicy` for `audience` (or the
+   * 'everyone' audience). Returns `null` when the registrant has no
+   * `RegistrantSelective` row. The returned `{ disclosed, hidden }` subset
+   * independently verifies against `root` via the crypto plugin's
+   * `setVerify` — withheld leaves never appear as more than opaque digests.
+   */
+  getDisclosedSelective(electionId: string, registrantId: string, audience: string): Promise<DisclosedSelective | null>
 
   /**
    * D-16: change Status ('a' | 's' | 'r'). Status transitions stay permissive —
