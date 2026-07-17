@@ -246,6 +246,92 @@ export async function seedElectionSigning (
 }
 
 // ---------------------------------------------------------------------------
+// Layer-2.5b: generic seedSignedMutation fixture (Phase 42 Plan 02)
+// ---------------------------------------------------------------------------
+
+/**
+ * Generic AdminSigning + AdminSignature seed fixture — the test-fixture twin
+ * of `src/signing/signed-mutation.ts`'s `seedSignedMutation` production
+ * helper. Mirrors `seedElectionSigning`'s shape (resolve CurrentAdmin ->
+ * insert AdminSigning -> SigningEngine.sign) but is parameterized like the
+ * production helper so downstream registration/association/authority-config
+ * specs can seed the vrg/mel/cap ceremonies without an app-layer signing key
+ * — `makeTestSignature(user)` stands in for the production `sign` callback.
+ *
+ * `digestExpr` is a `select <Digest(...)> as d`-shaped SQL expression matching
+ * the target table's own InsertValid/MutationValid/DeleteValid CHECK field
+ * order EXACTLY (same fidelity requirement as the production helper);
+ * `digestParams` supplies its bind params and MUST NOT use the reserved
+ * names this fixture itself binds: `nonce`, `authorityId`, `adminEffectiveAt`,
+ * `scope`, `userId`, `signerKey`, `signature`, `now`.
+ *
+ * @returns The signing nonce to pass to the caller's row-insert method
+ *   (`with context SigningNonce = :nonce, Tid = ${tid}`).
+ */
+export async function seedSignedMutation (
+  ctx: EngineContext,
+  authorityId: string,
+  scope: Scope,
+  tid: number,
+  digestExpr: string,
+  digestParams: Record<string, unknown>,
+  user: User
+): Promise<{ nonce: string }> {
+  const nonce = crypto.randomUUID()
+  const sig = makeTestSignature(user)
+
+  // Resolve CurrentAdmin.EffectiveAt for the authority
+  const adminRow = await ctx.db
+    .prepare('select EffectiveAt from CurrentAdmin where AuthorityId = :authorityId')
+    .get({ authorityId })
+  if (!adminRow) throw new Error(`seedSignedMutation: CurrentAdmin not found for authorityId=${authorityId}`)
+  const adminEffectiveAt = adminRow.EffectiveAt as number | string
+
+  // Insert AdminSigning — embeds the SAME digestExpr so the stored Digest matches
+  // whatever a subsequent direct SELECT (or the row's own CHECK) recomputes.
+  await ctx.db.exec(
+    `insert into AdminSigning (
+      Nonce,
+      AuthorityId,
+      AdminEffectiveAt,
+      Scope,
+      Digest,
+      UserId,
+      SignerKey,
+      Signature
+    )
+    with context now = :now, IsSignatureValid = true, IsSignerKeyValid = true
+    values (
+      :nonce,
+      :authorityId,
+      :adminEffectiveAt,
+      :scope,
+      (${digestExpr}),
+      :userId,
+      :signerKey,
+      :signature
+    )`,
+    {
+      ...digestParams,
+      nonce,
+      authorityId,
+      adminEffectiveAt,
+      scope,
+      userId: user.id,
+      signerKey: sig.signerKey,
+      signature: sig.signature,
+      now: nowCanonicalDatetime(),
+    }
+  )
+
+  // Call sign() to create OfficerSignature and trigger AdminSignature (threshold=1)
+  const signing = new SigningEngine(ctx)
+  await signing.sign(nonce, sig)
+
+  return { nonce }
+}
+
+// ---------------------------------------------------------------------------
 // Layer-1: TestNetworkContext
 // ---------------------------------------------------------------------------
 
