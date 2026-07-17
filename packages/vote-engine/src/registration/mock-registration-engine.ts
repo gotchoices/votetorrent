@@ -29,6 +29,8 @@ export class MockRegistrationEngine implements IRegistrationEngine {
   private readonly registrantPrivates = new Map<string, RegistrantPrivate>()
   /** D-17: authority-only roster — in-memory parity for ElectionRegistrant, keyed by `${electionId}${registrantId}`. */
   private readonly electionRegistrants = new Set<string>()
+  /** D-08/D-10: in-memory parity for ElectionRegistrationField policy, keyed by `${electionId}/${fieldName}`. */
+  private readonly electionRegistrationFields = new Map<string, ElectionRegistrationField>()
 
   buildRegister (): IRegistrationRegisterBuilder {
     return new RegistrationRegisterBuilder(this)
@@ -123,15 +125,17 @@ export class MockRegistrationEngine implements IRegistrationEngine {
     return []
   }
 
-  async addElectionRegistrationField (_field: ElectionRegistrationField, _signatureOrCallback: SignatureOrCallback): Promise<void> {
-    throw new Error('MockRegistrationEngine.addElectionRegistrationField: not implemented in mock (owned by Phase 42-07)')
+  /** D-08/D-10: policy declaration — in-memory Map add, no signing. */
+  async addElectionRegistrationField (field: ElectionRegistrationField, _signatureOrCallback: SignatureOrCallback): Promise<void> {
+    this.electionRegistrationFields.set(`${field.electionId}/${field.fieldName}`, field)
   }
 
-  async removeElectionRegistrationField (_electionId: string, _fieldName: string, _signatureOrCallback: SignatureOrCallback): Promise<void> {
-    throw new Error('MockRegistrationEngine.removeElectionRegistrationField: not implemented in mock (owned by Phase 42-07)')
+  /** D-08/D-10: policy removal — in-memory Map delete, no signing. */
+  async removeElectionRegistrationField (electionId: string, fieldName: string, _signatureOrCallback: SignatureOrCallback): Promise<void> {
+    this.electionRegistrationFields.delete(`${electionId}/${fieldName}`)
   }
 
-  async getElectionRegistrationFields (_electionId: string): Promise<ElectionRegistrationField[]> {
-    return []
+  async getElectionRegistrationFields (electionId: string): Promise<ElectionRegistrationField[]> {
+    return [...this.electionRegistrationFields.values()].filter((f) => f.electionId === electionId)
   }
 }

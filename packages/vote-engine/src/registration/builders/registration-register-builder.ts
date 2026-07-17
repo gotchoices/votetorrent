@@ -30,6 +30,7 @@ import {
 type SignatureOrCallback = Signature | ((digest: Uint8Array) => Promise<Signature>)
 
 type Draft = {
+  electionId?: RegisterInit['electionId']
   registrant?: RegisterInit['registrant']
   public?: RegisterInit['public']
   private?: RegisterInit['private']
@@ -45,6 +46,7 @@ export class RegistrationRegisterBuilder implements IRegistrationRegisterBuilder
   private committed = false
 
   private static readonly VALIDATORS: readonly DraftValidator[] = [
+    RegistrationRegisterBuilder.validateElectionId,
     RegistrationRegisterBuilder.validateRegistrant,
     RegistrationRegisterBuilder.validatePrivate,
     RegistrationRegisterBuilder.validateSignatureOrCallback
@@ -56,6 +58,26 @@ export class RegistrationRegisterBuilder implements IRegistrationRegisterBuilder
   ) {}
 
   // ---- per-setter validators ----
+
+  /**
+   * D-10 (42-07): `electionId` is OPTIONAL on the Draft (a submission with
+   * no election context has no field policy to enforce against — see
+   * `field-policy.ts`'s `validateFieldPolicy`) — this validator only checks
+   * well-formedness WHEN present (non-empty string), mirroring
+   * `validateRegistrant`'s "absent is fine, malformed is not" shape.
+   */
+  private static validateElectionId (draft: Readonly<Draft>): BuilderError[] {
+    if (draft.electionId === undefined || draft.electionId === null) return []
+    if (typeof draft.electionId !== 'string' || draft.electionId.trim() === '') {
+      return [{
+        path: 'electionId',
+        code: 'INVALID',
+        message: 'electionId must be a non-empty string when present',
+        kind: 'per-setter'
+      }]
+    }
+    return []
+  }
 
   private static validateRegistrant (draft: Readonly<Draft>): BuilderError[] {
     if (draft.registrant === undefined || draft.registrant === null) return []
@@ -126,6 +148,11 @@ export class RegistrationRegisterBuilder implements IRegistrationRegisterBuilder
 
   // ---- setters (additive convenience — not part of IRegistrationRegisterBuilder) ----
 
+  /** D-10 (42-07): scope the submission to an election's ElectionRegistrationField policy. Optional. */
+  setElectionId (electionId: RegisterInit['electionId']): this {
+    return new RegistrationRegisterBuilder(this.engine, { ...this.draft, electionId }) as this
+  }
+
   setRegistrant (registrant: RegisterInit['registrant']): this {
     return new RegistrationRegisterBuilder(this.engine, { ...this.draft, registrant }) as this
   }
@@ -172,6 +199,7 @@ export class RegistrationRegisterBuilder implements IRegistrationRegisterBuilder
       throw new BuilderValidationError(allErrors)
     }
     return {
+      electionId: this.draft.electionId,
       registrant: this.draft.registrant!,
       public: this.draft.public,
       private: this.draft.private!,
@@ -260,6 +288,7 @@ export class RegistrationRegisterBuilder implements IRegistrationRegisterBuilder
   fromPayload (payload: RegisterInit): this {
     return new RegistrationRegisterBuilder(this.engine, {
       ...this.draft,
+      electionId: payload.electionId,
       registrant: payload.registrant,
       public: payload.public,
       private: payload.private,

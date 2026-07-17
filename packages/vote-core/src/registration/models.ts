@@ -143,8 +143,16 @@ export interface ElectionRegistrationField {
  * Draft payload for the Register builder (D-02). Carries the Registrant core
  * fields plus the optional Public/Private/Selective tier payloads; `private`
  * is required because Registrant.PrivateCid is never null on the schema.
+ *
+ * `electionId` (D-10, 42-07) scopes the submission to the ElectionRegistrationField
+ * policy the engine enforces at Register time (D-09) — optional so a
+ * submission with no election context (no field policy to enforce against)
+ * behaves exactly as before this field was added.
  */
 export interface RegisterInit {
+  /** references Election.id — when present, gates the submission against that election's ElectionRegistrationField policy (D-09/D-10) */
+  electionId?: string
+
   registrant: {
     id: string
     authorityId: string

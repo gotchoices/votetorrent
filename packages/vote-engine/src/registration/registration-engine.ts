@@ -2,6 +2,7 @@ import { MisuseError, QuereusError } from '@quereus/quereus'
 import { digestToBytes, nowCanonicalDatetime, parseJsonOr, asText } from '../utils.js'
 import { seedSignedMutation } from '../signing/signed-mutation.js'
 import { RegistrationRegisterBuilder } from './builders/registration-register-builder.js'
+import { validateFieldPolicy } from './field-policy.js'
 import type { EngineContext } from '../types.js'
 import type {
   ElectionRegistrant,
@@ -577,6 +578,14 @@ export class RegistrationEngine implements IRegistrationEngine {
     if (init.selective) {
       throw new Error('RegistrationEngine.register: selective payload (RegistrantSelective) is out of scope for this plan — owned by Phase 42-08 (D-11)')
     }
+    // D-09: engine-side field-policy enforcement runs BEFORE any DB ceremony —
+    // there is NO schema CHECK backstop (deliberate gap, RESEARCH V5). Only
+    // runs when the submission carries an electionId (D-10 election-scoped
+    // policy) — a submission with no electionId has no policy to enforce
+    // against and proceeds exactly as before this plan.
+    if (init.electionId) {
+      await validateFieldPolicy(ctx, init.electionId, init)
+    }
     const registrantId = init.registrant.id
     try {
       await ctx.db.exec('BEGIN')
@@ -620,9 +629,6 @@ export class RegistrationEngine implements IRegistrationEngine {
           { ownsTransaction: false }
         )
 
-        // D-09 seam (intentionally a no-op this plan — 42-07 owns enforcement).
-        this.applyFieldPolicy(init)
-
         await ctx.db.exec('COMMIT')
       } catch (innerErr) {
         await ctx.db.exec('ROLLBACK')
@@ -631,16 +637,6 @@ export class RegistrationEngine implements IRegistrationEngine {
     } catch (err) {
       this.rethrow(err, 'register')
     }
-  }
-
-  /**
-   * D-09 seam: Register-time Required-field enforcement against
-   * `ElectionRegistrationField` policy. Intentionally a NO-OP this plan —
-   * the schema only DECLARES the policy (deliberate no-CHECK backstop);
-   * 42-07 implements the actual query + rejection here.
-   */
-  private applyFieldPolicy (_init: RegisterInit): void {
-    // no-op — see 42-07.
   }
 
   // ---------- ElectionRegistrant roster (authority-only, D-17) ----------
@@ -734,16 +730,112 @@ export class RegistrationEngine implements IRegistrationEngine {
     }
   }
 
-  async addElectionRegistrationField (_field: ElectionRegistrationField, _signatureOrCallback: SignatureOrCallback): Promise<void> {
-    throw new Error('RegistrationEngine.addElectionRegistrationField: not yet implemented — owned by Phase 42-07')
+  /**
+   * D-08/D-10: election-keyed, `mel`-signed policy declaration — the
+   * `ElectionDisclosurePolicy` twin. `AuthorityId` for the ceremony is
+   * resolved from the OWNING election row (`Election.AuthorityId`), matching
+   * the schema's own `join Election E on E.Id = new.ElectionId` +
+   * `A.AuthorityId = E.AuthorityId` clause. Tier/Requirement are TEXT codes
+   * validated against the `RegistrantTier`/`FieldRequirement` enum views by
+   * the schema's own `TierValid`/`RequirementValid` CHECKs — this method
+   * does not re-validate them app-side (D-08 single source of truth).
+   */
+  async addElectionRegistrationField (field: ElectionRegistrationField, signatureOrCallback: SignatureOrCallback): Promise<void> {
+    this.requireCtx('addElectionRegistrationField')
+    const ctx = this.ctx!
+    try {
+      const authorityId = await this.resolveElectionAuthorityId(field.electionId, 'addElectionRegistrationField')
+      const tid = nextRegistrationTid++
+      const digestExpr = 'select Digest(:tid, :electionId, :fieldName, :tier, :requirement) as d'
+      const digestParams = { tid, electionId: field.electionId, fieldName: field.fieldName, tier: field.tier, requirement: field.requirement }
+      const nonce = await seedSignedMutation(ctx, authorityId, 'mel', tid, digestExpr, digestParams, this.resolveSign(signatureOrCallback))
+
+      await ctx.db.exec(
+        `insert into ElectionRegistrationField (ElectionId, FieldName, Tier, Requirement)
+         with context SigningNonce = :signingNonce, Tid = ${tid}
+         values (:electionId, :fieldName, :tier, :requirement)`,
+        {
+          electionId: field.electionId,
+          fieldName: field.fieldName,
+          tier: field.tier,
+          requirement: field.requirement,
+          signingNonce: nonce
+        }
+      )
+    } catch (err) {
+      this.rethrow(err, 'addElectionRegistrationField')
+    }
   }
 
-  async removeElectionRegistrationField (_electionId: string, _fieldName: string, _signatureOrCallback: SignatureOrCallback): Promise<void> {
-    throw new Error('RegistrationEngine.removeElectionRegistrationField: not yet implemented — owned by Phase 42-07')
+  /**
+   * D-08/D-10: policy removal. `DeleteValid` re-derives
+   * `Digest(Tid, old.ElectionId, old.FieldName, old.Tier, old.Requirement, 'delete')`
+   * — unlike `AuthorityPeer`/`PollingDevice` (whose whole row IS the PK), this
+   * table carries Tier/Requirement DATA beyond its `(ElectionId, FieldName)`
+   * PK, so the ceremony digest must read the row's CURRENT Tier/Requirement
+   * back from the DB before computing the delete digest.
+   */
+  async removeElectionRegistrationField (electionId: string, fieldName: string, signatureOrCallback: SignatureOrCallback): Promise<void> {
+    this.requireCtx('removeElectionRegistrationField')
+    const ctx = this.ctx!
+    try {
+      const authorityId = await this.resolveElectionAuthorityId(electionId, 'removeElectionRegistrationField')
+      const existing = await ctx.db
+        .prepare('select Tier, Requirement from ElectionRegistrationField where ElectionId = :electionId and FieldName = :fieldName')
+        .get({ electionId, fieldName })
+      if (!existing) {
+        throw new Error(`removeElectionRegistrationField: ElectionRegistrationField not found for electionId=${electionId}, fieldName=${fieldName}`)
+      }
+      const tier = asText(existing.Tier, 'ElectionRegistrationField.Tier')
+      const requirement = asText(existing.Requirement, 'ElectionRegistrationField.Requirement')
+      const tid = nextRegistrationTid++
+      const digestExpr = "select Digest(:tid, :electionId, :fieldName, :tier, :requirement, 'delete') as d"
+      const digestParams = { tid, electionId, fieldName, tier, requirement }
+      const nonce = await seedSignedMutation(ctx, authorityId, 'mel', tid, digestExpr, digestParams, this.resolveSign(signatureOrCallback))
+
+      await ctx.db.exec(
+        `delete from ElectionRegistrationField
+         with context SigningNonce = :signingNonce, Tid = ${tid}
+         where ElectionId = :electionId and FieldName = :fieldName`,
+        { electionId, fieldName, signingNonce: nonce }
+      )
+    } catch (err) {
+      this.rethrow(err, 'removeElectionRegistrationField')
+    }
   }
 
-  async getElectionRegistrationFields (_electionId: string): Promise<ElectionRegistrationField[]> {
-    return []
+  async getElectionRegistrationFields (electionId: string): Promise<ElectionRegistrationField[]> {
+    if (!this.ctx) return []
+    const ctx = this.ctx
+    const out: ElectionRegistrationField[] = []
+    try {
+      for await (const row of ctx.db.eval(
+        'select ElectionId, FieldName, Tier, Requirement from ElectionRegistrationField where ElectionId = :electionId',
+        { electionId }
+      )) {
+        out.push({
+          electionId: asText(row.ElectionId, 'ElectionRegistrationField.ElectionId'),
+          fieldName: asText(row.FieldName, 'ElectionRegistrationField.FieldName'),
+          tier: asText(row.Tier, 'ElectionRegistrationField.Tier') as ElectionRegistrationField['tier'],
+          requirement: asText(row.Requirement, 'ElectionRegistrationField.Requirement') as ElectionRegistrationField['requirement']
+        })
+      }
+      return out
+    } catch (err) {
+      this.rethrow(err, 'getElectionRegistrationFields')
+    }
+  }
+
+  /** Resolve an Election's owning AuthorityId (needed to seed the vrg/mel ceremony's CurrentAdmin lookup). */
+  private async resolveElectionAuthorityId (electionId: string, method: string): Promise<string> {
+    const ctx = this.ctx!
+    const row = await ctx.db
+      .prepare('select AuthorityId from Election where Id = :electionId')
+      .get({ electionId })
+    if (!row) {
+      throw new Error(`${method}: Election not found for electionId=${electionId}`)
+    }
+    return asText(row.AuthorityId, 'Election.AuthorityId')
   }
 
   // ---------- 42-06 helpers ----------
