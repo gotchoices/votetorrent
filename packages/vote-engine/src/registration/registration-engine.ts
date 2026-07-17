@@ -1,21 +1,27 @@
 import { MisuseError, QuereusError } from '@quereus/quereus'
+import { setDisclose } from '@optimystic/quereus-plugin-crypto'
 import { digestToBytes, nowCanonicalDatetime, parseJsonOr, asText } from '../utils.js'
 import { seedSignedMutation } from '../signing/signed-mutation.js'
 import { RegistrationRegisterBuilder } from './builders/registration-register-builder.js'
 import { validateFieldPolicy } from './field-policy.js'
 import type { EngineContext } from '../types.js'
 import type {
+  DisclosedSelective,
+  DisclosureAudience,
+  ElectionDisclosurePolicy,
   ElectionRegistrant,
   ElectionRegistrationField,
   IRegistrationEngine,
   IRegistrationRegisterBuilder,
   PrivateDetail,
   RegisterInit,
+  RegisterSelectivePayload,
   Registrant,
   RegistrantPrivate,
   RegistrantPublic,
   RegistrantSelective,
   RegistrantStatus,
+  SelectiveLeaf,
   Signature,
   Timestamp
 } from '@votetorrent/vote-core'
@@ -174,6 +180,52 @@ export class RegistrationEngine implements IRegistrationEngine {
       throw new Error('computeRegistrantPrivateCid: cid(Digest(...)) returned null — crypto plugin not registered?')
     }
     return row.c as string
+  }
+
+  /**
+   * RegistrantSelective.CidValid: Cid = cid(set_commit(SelectiveDetails)) — the
+   * DB computes the root (never hand-rolled in JS) so it byte-matches the
+   * schema's own re-derivation. Unlike RegistrantPublic/Private's CidValid,
+   * this formula does NOT include RegistrantId (schema's own formula, verbatim).
+   */
+  private async computeRegistrantSelectiveCid (selectiveDetailsJson: string): Promise<string> {
+    const ctx = this.ctx!
+    const row = await ctx.db
+      .prepare('select cid(set_commit(:details)) as c')
+      .get({ details: selectiveDetailsJson })
+    if (!row || row.c == null) {
+      throw new Error('computeRegistrantSelectiveCid: cid(set_commit(...)) returned null — crypto plugin not registered?')
+    }
+    return row.c as string
+  }
+
+  /**
+   * D-13: turn caller-supplied `{name, value}` field inputs into engine-
+   * generated `SelectiveLeaf[]` — a fresh SQL `random_bytes` (>=128 bits)
+   * salt per leaf, NEVER a JS ad-hoc RNG. Duplicate names and an empty/
+   * missing salt are rejected BEFORE any DB ceremony runs: the duplicate
+   * check runs first (pure, no DB call) so a caller never pays for salt
+   * generation on a payload that's going to be rejected anyway.
+   */
+  private async buildSelectiveLeaves (fields: RegisterSelectivePayload): Promise<SelectiveLeaf[]> {
+    const ctx = this.ctx!
+    const seen = new Set<string>()
+    for (const field of fields) {
+      if (seen.has(field.name)) {
+        throw new Error(`register: duplicate selective field name '${field.name}' (D-13)`)
+      }
+      seen.add(field.name)
+    }
+    const leaves: SelectiveLeaf[] = []
+    for (const field of fields) {
+      const saltRow = await ctx.db.prepare('select random_bytes(128) as s').get({})
+      const salt = saltRow?.s == null ? '' : String(saltRow.s)
+      if (!salt) {
+        throw new Error(`register: engine could not obtain a non-empty salt for selective field '${field.name}' (D-13)`)
+      }
+      leaves.push({ name: field.name, value: field.value, salt })
+    }
+    return leaves
   }
 
   // ---------- tier create methods ----------
@@ -435,6 +487,85 @@ export class RegistrationEngine implements IRegistrationEngine {
     }
   }
 
+  /**
+   * Shared insert path for `RegistrantSelective` — accepts PRECOMPUTED leaves
+   * (with their engine-generated salts already fixed) + the matching Cid.
+   * `register()`'s Cids-before-parent step and this row-level insert MUST
+   * share the IDENTICAL leaf set: salts are random, so recomputing them here
+   * would silently produce a Cid that no longer matches the one already
+   * embedded in `Registrant.SelectiveCid` (Pitfall 4 variant unique to the
+   * salted-set construction — Digest()-based tiers don't have this hazard
+   * since their Cid formula is pure/deterministic over the same inputs).
+   */
+  private async insertRegistrantSelectiveRow (
+    registrantId: string,
+    expiration: Timestamp | string,
+    leaves: SelectiveLeaf[],
+    cid: string,
+    signatureOrCallback: SignatureOrCallback,
+    options?: { ownsTransaction?: boolean }
+  ): Promise<RegistrantSelective> {
+    const ctx = this.ctx!
+    const tid = nextRegistrationTid++
+    const registrantRow = await ctx.db
+      .prepare('select AuthorityId from Registrant where Id = :registrantId')
+      .get({ registrantId })
+    if (!registrantRow) {
+      throw new Error(`createRegistrantSelective: Registrant not found for registrantId=${registrantId}`)
+    }
+    const authorityId = asText(registrantRow.AuthorityId, 'Registrant.AuthorityId')
+    const expirationZ = toIsoZDatetime(expiration)
+    const selectiveDetailsJson = JSON.stringify(leaves)
+
+    // InsertValid contains a subquery (exists(...)) -> DEFERRED check -> its
+    // new.Expiration snapshot is Z-stripped (see toDeferredCheckDatetime).
+    const expirationForDeferredCheck = toDeferredCheckDatetime(expiration)
+    const digestExpr = 'select Digest(:tid, :cid, :registrantId, :expirationDeferred, :selectiveDetails) as d'
+    const digestParams = { tid, cid, registrantId, expirationDeferred: expirationForDeferredCheck, selectiveDetails: selectiveDetailsJson }
+    const nonce = await seedSignedMutation(ctx, authorityId, 'vrg', tid, digestExpr, digestParams, this.resolveSign(signatureOrCallback), options)
+
+    await ctx.db.exec(
+      `insert into RegistrantSelective (Cid, RegistrantId, Expiration, SelectiveDetails)
+       with context SigningNonce = :signingNonce, Tid = ${tid}, now = :now
+       values (:cid, :registrantId, :expiration, :selectiveDetails)`,
+      {
+        cid,
+        registrantId,
+        expiration: expirationZ,
+        selectiveDetails: selectiveDetailsJson,
+        signingNonce: nonce,
+        now: nowCanonicalDatetime()
+      }
+    )
+
+    return { cid, registrantId, expiration, selectiveDetails: leaves }
+  }
+
+  /**
+   * Insert a `RegistrantSelective` tier row (authority-held, insert-only,
+   * flat salted-leaf set commitment, D-11/D-12/D-13). Standalone/additive
+   * counterpart to `createRegistrantPublic`/`createRegistrantPrivate` — the
+   * Register flow's own selective branch (in `register()` below) generates
+   * its leaves + Cid via the SAME `buildSelectiveLeaves`/
+   * `computeRegistrantSelectiveCid` helpers but does NOT call this method
+   * directly (it needs the leaves/Cid BEFORE the parent Registrant insert —
+   * see `insertRegistrantSelectiveRow`'s doc comment).
+   */
+  async createRegistrantSelective (
+    input: { registrantId: string; expiration: Timestamp | string; fields: RegisterSelectivePayload },
+    signatureOrCallback: SignatureOrCallback,
+    options?: { ownsTransaction?: boolean }
+  ): Promise<RegistrantSelective> {
+    this.requireCtx('createRegistrantSelective')
+    try {
+      const leaves = await this.buildSelectiveLeaves(input.fields)
+      const cid = await this.computeRegistrantSelectiveCid(JSON.stringify(leaves))
+      return await this.insertRegistrantSelectiveRow(input.registrantId, input.expiration, leaves, cid, signatureOrCallback, options)
+    } catch (err) {
+      this.rethrow(err, 'createRegistrantSelective')
+    }
+  }
+
   // ---------- reads ----------
 
   async getRegistrant (registrantId: string): Promise<Registrant | undefined> {
@@ -552,9 +683,71 @@ export class RegistrationEngine implements IRegistrationEngine {
     }
   }
 
-  /** Out of scope this plan — RegistrantSelective lands in Phase 42-08 (D-11/D-12/D-13). */
-  async getRegistrantSelective (_registrantId: string): Promise<RegistrantSelective | undefined> {
-    throw new Error('RegistrationEngine.getRegistrantSelective: not yet implemented — owned by Phase 42-08')
+  /** Authority-side, full (undisclosed) RegistrantSelective read (D-11/D-12/D-13). */
+  async getRegistrantSelective (registrantId: string): Promise<RegistrantSelective | undefined> {
+    if (!this.ctx) return undefined
+    try {
+      const row = await this.ctx.db
+        .prepare('select Cid, RegistrantId, Expiration, SelectiveDetails from RegistrantSelective where RegistrantId = :registrantId')
+        .get({ registrantId })
+      if (!row) return undefined
+      return {
+        cid: asText(row.Cid, 'RegistrantSelective.Cid'),
+        registrantId: asText(row.RegistrantId, 'RegistrantSelective.RegistrantId'),
+        expiration: row.Expiration as string,
+        selectiveDetails: parseJsonOr<SelectiveLeaf[]>(row.SelectiveDetails, [], 'RegistrantSelective.SelectiveDetails')
+      }
+    } catch (err) {
+      this.rethrow(err, 'getRegistrantSelective')
+    }
+  }
+
+  /**
+   * D-14: off-schema read (JS only — no SQL set_verify) revealing only the
+   * `ElectionDisclosurePolicy`-permitted subset of a registrant's selective
+   * set for `audience` (or the 'everyone' audience). Withheld leaves are
+   * reduced to opaque digests by the plugin's own `setDisclose` — their raw
+   * `value`/`salt` NEVER cross this boundary, and `SelectiveDetails` is never
+   * logged (Information Disclosure mitigation, T-42-08-05). Returns `null`
+   * when the registrant has no `RegistrantSelective` row at all.
+   */
+  async getDisclosedSelective (electionId: string, registrantId: string, audience: string): Promise<DisclosedSelective | null> {
+    this.requireCtx('getDisclosedSelective')
+    const ctx = this.ctx!
+    try {
+      const row = await ctx.db
+        .prepare('select Cid, SelectiveDetails from RegistrantSelective where RegistrantId = :registrantId')
+        .get({ registrantId })
+      if (!row) return null
+      const cid = asText(row.Cid, 'RegistrantSelective.Cid')
+      const leaves = parseJsonOr<SelectiveLeaf[]>(row.SelectiveDetails, [], 'RegistrantSelective.SelectiveDetails')
+
+      const permitted = new Set<string>()
+      for await (const policyRow of ctx.db.eval(
+        'select FieldName from ElectionDisclosurePolicy where ElectionId = :electionId and (Audience = :audience or Audience = :everyone)',
+        { electionId, audience, everyone: 'everyone' }
+      )) {
+        permitted.add(asText(policyRow.FieldName, 'ElectionDisclosurePolicy.FieldName'))
+      }
+
+      const { disclosed, hidden } = setDisclose(leaves, [...permitted])
+      const disclosedOut: SelectiveLeaf[] = disclosed.map((leaf) => ({
+        name: leaf.name,
+        value: leaf.value as SelectiveLeaf['value'],
+        salt: typeof leaf.salt === 'string' ? leaf.salt : asText(leaf.salt, 'salt')
+      }))
+
+      const selectiveDetailsText = asText(row.SelectiveDetails, 'RegistrantSelective.SelectiveDetails')
+      const rootRow = await ctx.db.prepare('select set_commit(:details) as r').get({ details: selectiveDetailsText })
+      if (!rootRow || rootRow.r == null) {
+        throw new Error('getDisclosedSelective: set_commit(...) returned null — crypto plugin not registered?')
+      }
+      const root = asText(rootRow.r, 'set_commit root')
+
+      return { cid, root, disclosed: disclosedOut, hidden: [...hidden] }
+    } catch (err) {
+      this.rethrow(err, 'getDisclosedSelective')
+    }
   }
 
   // ---------- Register builder ----------
@@ -564,20 +757,18 @@ export class RegistrationEngine implements IRegistrationEngine {
   }
 
   /**
-   * D-02/Pitfall 4: the multi-row Register ceremony. Computes BOTH tier Cids
-   * BEFORE the `Registrant` insert (its PrivateCid/PublicCid columns are
-   * NOT NULL and must already carry the tier's derived Cid), inserts the
-   * parent `Registrant` row, THEN inserts the tier rows (each independently
-   * re-deriving the SAME deterministic Cid and running its OWN `vrg`
-   * ceremony) — all inside one BEGIN/COMMIT/ROLLBACK envelope so a partial
-   * failure never strands an orphaned `Registrant`.
+   * D-02/Pitfall 4: the multi-row Register ceremony. Computes ALL tier Cids
+   * BEFORE the `Registrant` insert (its PrivateCid/PublicCid/SelectiveCid
+   * columns are NOT NULL-or-precomputed and must already carry the tier's
+   * derived Cid), inserts the parent `Registrant` row, THEN inserts the tier
+   * rows (each independently re-deriving the SAME deterministic Cid — or,
+   * for the selective tier, reusing the SAME engine-generated leaves — and
+   * running its OWN `vrg` ceremony) — all inside one BEGIN/COMMIT/ROLLBACK
+   * envelope so a partial failure never strands an orphaned `Registrant`.
    */
   async register (init: RegisterInit, signatureOrCallback: SignatureOrCallback): Promise<void> {
     this.requireCtx('register')
     const ctx = this.ctx!
-    if (init.selective) {
-      throw new Error('RegistrationEngine.register: selective payload (RegistrantSelective) is out of scope for this plan — owned by Phase 42-08 (D-11)')
-    }
     // D-09: engine-side field-policy enforcement runs BEFORE any DB ceremony —
     // there is NO schema CHECK backstop (deliberate gap, RESEARCH V5). Only
     // runs when the submission carries an electionId (D-10 election-scoped
@@ -586,6 +777,20 @@ export class RegistrationEngine implements IRegistrationEngine {
     if (init.electionId) {
       await validateFieldPolicy(ctx, init.electionId, init)
     }
+
+    // D-11/D-12/D-13: validate + generate the selective leaves BEFORE the DB
+    // ceremony (BEGIN) — duplicate-name/empty-salt rejection must never open
+    // a transaction. Pitfall 3: the "payload provided" and "insert a
+    // RegistrantSelective row" gates are the SAME — only a non-empty
+    // `selective.details` list enters this branch; an absent/empty payload
+    // never touches `set_commit` and `Registrant.SelectiveCid` stays NULL.
+    let selectiveLeaves: SelectiveLeaf[] | undefined
+    let selectiveCid: string | undefined
+    if (init.selective && init.selective.details.length > 0) {
+      selectiveLeaves = await this.buildSelectiveLeaves(init.selective.details)
+      selectiveCid = await this.computeRegistrantSelectiveCid(JSON.stringify(selectiveLeaves))
+    }
+
     const registrantId = init.registrant.id
     try {
       await ctx.db.exec('BEGIN')
@@ -611,6 +816,7 @@ export class RegistrationEngine implements IRegistrationEngine {
             authorityId: init.registrant.authorityId,
             privateCid,
             publicCid,
+            selectiveCid,
             expiration: init.registrant.expiration
           },
           signatureOrCallback,
@@ -628,6 +834,16 @@ export class RegistrationEngine implements IRegistrationEngine {
           signatureOrCallback,
           { ownsTransaction: false }
         )
+        if (selectiveLeaves && selectiveCid) {
+          await this.insertRegistrantSelectiveRow(
+            registrantId,
+            init.selective!.expiration,
+            selectiveLeaves,
+            selectiveCid,
+            signatureOrCallback,
+            { ownsTransaction: false }
+          )
+        }
 
         await ctx.db.exec('COMMIT')
       } catch (innerErr) {
@@ -823,6 +1039,98 @@ export class RegistrationEngine implements IRegistrationEngine {
       return out
     } catch (err) {
       this.rethrow(err, 'getElectionRegistrationFields')
+    }
+  }
+
+  // ---------- ElectionDisclosurePolicy (D-14, additive — declares which selective ----------
+  // ---------- fields getDisclosedSelective may reveal, and to which audience) ----------
+
+  /**
+   * D-14: election policy declaring which `RegistrantSelective` field names
+   * may be disclosed, and to which audience ('district' | 'everyone').
+   * Companion to `ElectionRegistrationField` (42-07) — the SAME 'mel'-scoped,
+   * election-keyed ceremony shape (`AuthorityId` resolved from the OWNING
+   * `Election` row). Additive (not part of `IRegistrationEngine`, mirroring
+   * `createRegistrant*`'s additive-CRUD precedent) — `getDisclosedSelective`
+   * is the interface's disclosure-facing READ; this is the policy-declaring
+   * WRITE those rows need to exist at all (the schema only declares the
+   * table + its CHECKs, it does not seed policy rows).
+   */
+  async addElectionDisclosurePolicy (policy: ElectionDisclosurePolicy, signatureOrCallback: SignatureOrCallback): Promise<void> {
+    this.requireCtx('addElectionDisclosurePolicy')
+    const ctx = this.ctx!
+    try {
+      const authorityId = await this.resolveElectionAuthorityId(policy.electionId, 'addElectionDisclosurePolicy')
+      const tid = nextRegistrationTid++
+      const digestExpr = 'select Digest(:tid, :electionId, :fieldName, :audience) as d'
+      const digestParams = { tid, electionId: policy.electionId, fieldName: policy.fieldName, audience: policy.audience }
+      const nonce = await seedSignedMutation(ctx, authorityId, 'mel', tid, digestExpr, digestParams, this.resolveSign(signatureOrCallback))
+
+      await ctx.db.exec(
+        `insert into ElectionDisclosurePolicy (ElectionId, FieldName, Audience)
+         with context SigningNonce = :signingNonce, Tid = ${tid}
+         values (:electionId, :fieldName, :audience)`,
+        { electionId: policy.electionId, fieldName: policy.fieldName, audience: policy.audience, signingNonce: nonce }
+      )
+    } catch (err) {
+      this.rethrow(err, 'addElectionDisclosurePolicy')
+    }
+  }
+
+  /**
+   * D-14: policy removal. `DeleteValid` re-derives
+   * `Digest(Tid, old.ElectionId, old.FieldName, old.Audience, 'delete')` — this
+   * table carries `Audience` DATA beyond its `(ElectionId, FieldName)` PK, so
+   * the ceremony digest must read the row's CURRENT Audience back from the DB
+   * first (same shape as `removeElectionRegistrationField`'s Tier/Requirement
+   * re-read).
+   */
+  async removeElectionDisclosurePolicy (electionId: string, fieldName: string, signatureOrCallback: SignatureOrCallback): Promise<void> {
+    this.requireCtx('removeElectionDisclosurePolicy')
+    const ctx = this.ctx!
+    try {
+      const authorityId = await this.resolveElectionAuthorityId(electionId, 'removeElectionDisclosurePolicy')
+      const existing = await ctx.db
+        .prepare('select Audience from ElectionDisclosurePolicy where ElectionId = :electionId and FieldName = :fieldName')
+        .get({ electionId, fieldName })
+      if (!existing) {
+        throw new Error(`removeElectionDisclosurePolicy: ElectionDisclosurePolicy not found for electionId=${electionId}, fieldName=${fieldName}`)
+      }
+      const audience = asText(existing.Audience, 'ElectionDisclosurePolicy.Audience')
+      const tid = nextRegistrationTid++
+      const digestExpr = "select Digest(:tid, :electionId, :fieldName, :audience, 'delete') as d"
+      const digestParams = { tid, electionId, fieldName, audience }
+      const nonce = await seedSignedMutation(ctx, authorityId, 'mel', tid, digestExpr, digestParams, this.resolveSign(signatureOrCallback))
+
+      await ctx.db.exec(
+        `delete from ElectionDisclosurePolicy
+         with context SigningNonce = :signingNonce, Tid = ${tid}
+         where ElectionId = :electionId and FieldName = :fieldName`,
+        { electionId, fieldName, signingNonce: nonce }
+      )
+    } catch (err) {
+      this.rethrow(err, 'removeElectionDisclosurePolicy')
+    }
+  }
+
+  async getElectionDisclosurePolicies (electionId: string): Promise<ElectionDisclosurePolicy[]> {
+    if (!this.ctx) return []
+    const ctx = this.ctx
+    const out: ElectionDisclosurePolicy[] = []
+    try {
+      for await (const row of ctx.db.eval(
+        'select ElectionId, FieldName, Audience from ElectionDisclosurePolicy where ElectionId = :electionId',
+        { electionId }
+      )) {
+        out.push({
+          electionId: asText(row.ElectionId, 'ElectionDisclosurePolicy.ElectionId'),
+          fieldName: asText(row.FieldName, 'ElectionDisclosurePolicy.FieldName'),
+          audience: asText(row.Audience, 'ElectionDisclosurePolicy.Audience') as DisclosureAudience
+        })
+      }
+      return out
+    } catch (err) {
+      this.rethrow(err, 'getElectionDisclosurePolicies')
     }
   }
 

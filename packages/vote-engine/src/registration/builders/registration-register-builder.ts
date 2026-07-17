@@ -49,6 +49,7 @@ export class RegistrationRegisterBuilder implements IRegistrationRegisterBuilder
     RegistrationRegisterBuilder.validateElectionId,
     RegistrationRegisterBuilder.validateRegistrant,
     RegistrationRegisterBuilder.validatePrivate,
+    RegistrationRegisterBuilder.validateSelective,
     RegistrationRegisterBuilder.validateSignatureOrCallback
   ]
 
@@ -112,6 +113,43 @@ export class RegistrationRegisterBuilder implements IRegistrationRegisterBuilder
         message: 'private must have an expiration and a details array',
         kind: 'per-setter'
       }]
+    }
+    return []
+  }
+
+  /**
+   * D-13: reject duplicate selective field names NOW, at build time, so the
+   * reject path is deterministic before the engine ever runs the DB
+   * ceremony (mirrors the plugin's own `assertUniqueNames` — a duplicate
+   * name is a builder-detectable defect, not something the engine needs to
+   * generate salts to discover).
+   */
+  private static validateSelective (draft: Readonly<Draft>): BuilderError[] {
+    if (draft.selective === undefined || draft.selective === null) return []
+    const s = draft.selective
+    if (
+      typeof s !== 'object' || Array.isArray(s) ||
+      s.expiration === undefined || s.expiration === null ||
+      !Array.isArray(s.details)
+    ) {
+      return [{
+        path: 'selective',
+        code: 'INVALID',
+        message: 'selective must have an expiration and a details array',
+        kind: 'per-setter'
+      }]
+    }
+    const seen = new Set<string>()
+    for (const field of s.details) {
+      if (seen.has(field.name)) {
+        return [{
+          path: 'selective.details',
+          code: 'DUPLICATE',
+          message: `duplicate selective field name '${field.name}' (D-13)`,
+          kind: 'per-setter'
+        }]
+      }
+      seen.add(field.name)
     }
     return []
   }
