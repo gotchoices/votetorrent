@@ -1,4 +1,5 @@
 import type { Scope, Signature } from '@votetorrent/vote-core'
+import type { SqlValue } from '@quereus/quereus'
 import type { EngineContext } from '../types.js'
 import { digestToBytes, nowCanonicalDatetime } from '../utils.js'
 import { SigningEngine } from './signing-engine.js'
@@ -60,7 +61,7 @@ export async function seedSignedMutation (
 
   // 2. Compute the Digest via the caller-supplied expression — bytes IDENTICAL to what the
   //    target table's own InsertValid/MutationValid/DeleteValid CHECK will recompute.
-  const digestRow = await ctx.db.prepare(digestExpr).get(digestParams)
+  const digestRow = await ctx.db.prepare(digestExpr).get(digestParams as Record<string, SqlValue>)
   if (!digestRow || digestRow.d == null) {
     throw new Error('seedSignedMutation: Digest() returned null — crypto plugin not registered?')
   }
@@ -100,7 +101,7 @@ export async function seedSignedMutation (
       :signature
     )`,
     {
-      ...digestParams,
+      ...(digestParams as Record<string, SqlValue>),
       nonce,
       authorityId,
       adminEffectiveAt,
