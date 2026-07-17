@@ -24,10 +24,23 @@ export class SigningEngine implements ISigningEngine {
 	}
 
 	async sign(nonce: string, signature: Signature): Promise<boolean> {
+		// Phase 42-03: Quereus's transaction model is FLAT (a nested explicit
+		// BEGIN inside an already-explicit transaction throws "Cannot begin
+		// transaction: already in a transaction" — no true SAVEPOINT-style
+		// nesting for this call shape). Callers that need this method's work
+		// to be part of a LARGER atomic ceremony (e.g. RegistrationEngine.
+		// register()'s multi-row Cids-before-parent envelope) start their OWN
+		// outer BEGIN first; when that's the case, `db.getAutocommit()` is
+		// already false here, and this method must NOT issue its own nested
+		// BEGIN/COMMIT/ROLLBACK — the outer caller owns the commit/rollback
+		// boundary. Standalone callers (the overwhelming majority) see
+		// IDENTICAL behavior to before (getAutocommit() is true, so this
+		// method's own BEGIN/COMMIT/ROLLBACK envelope still applies).
+		const ownsTransaction = this.ctx.db.getAutocommit();
 		try {
 			// AUTH-08: BEGIN/COMMIT/ROLLBACK envelope around OfficerSignature
 			// insert + threshold check + (optional) AdminSignature insert.
-			await this.ctx.db.exec('BEGIN');
+			if (ownsTransaction) await this.ctx.db.exec('BEGIN');
 			try {
 				// AUTH-06: bind :signerKey (not :key) — the previous binding silently
 				// dropped the signer's public key. The SQL placeholder is :signerKey;
@@ -102,7 +115,7 @@ export class SigningEngine implements ISigningEngine {
 							'insert into AdminSignature (SigningNonce) with context IsSignatureValid = true values (:nonce)',
 							{ nonce },
 						);
-						await this.ctx.db.exec('COMMIT');
+						if (ownsTransaction) await this.ctx.db.exec('COMMIT');
 						return true;
 					} catch (pkErr) {
 						// D-17: PK violation on AdminSignature.SigningNonce means a
@@ -112,7 +125,7 @@ export class SigningEngine implements ISigningEngine {
 						// satisfied, so the only reachable ConstraintError here is a
 						// PK collision.
 						if (pkErr instanceof ConstraintError) {
-							await this.ctx.db.exec('ROLLBACK');
+							if (ownsTransaction) await this.ctx.db.exec('ROLLBACK');
 							console.warn(
 								`SigningEngine.sign: threshold already reached for nonce ${nonce}; AdminSignature row exists.`,
 							);
@@ -121,11 +134,11 @@ export class SigningEngine implements ISigningEngine {
 						throw pkErr;
 					}
 				} else {
-					await this.ctx.db.exec('COMMIT');
+					if (ownsTransaction) await this.ctx.db.exec('COMMIT');
 					return false;
 				}
 			} catch (innerErr) {
-				await this.ctx.db.exec('ROLLBACK');
+				if (ownsTransaction) await this.ctx.db.exec('ROLLBACK');
 				throw innerErr;
 			}
 		} catch (err) {
