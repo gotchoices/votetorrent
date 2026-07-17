@@ -1202,8 +1202,10 @@ declare schema main
 		constraint InsertValid check on insert (
 			exists (
 				select 1 from AdminSignature ASig join AdminSigning A on A.Nonce = ASig.SigningNonce
+					join Registrant R on R.Id = new.RegistrantId
 					where A.Nonce = context.SigningNonce
 						and A.Scope = 'vrg'
+						and A.AuthorityId = R.AuthorityId
 						and A.Digest = Digest(
 							context.Tid, new.Cid, new.RegistrantId, new.LastName, new.FirstName, new.District, new.ExtraFields
 						)
@@ -1234,8 +1236,10 @@ declare schema main
 		constraint InsertValid check on insert (
 			exists (
 				select 1 from AdminSignature ASig join AdminSigning A on A.Nonce = ASig.SigningNonce
+					join Registrant R on R.Id = new.RegistrantId
 					where A.Nonce = context.SigningNonce
 						and A.Scope = 'vrg'
+						and A.AuthorityId = R.AuthorityId
 						and A.Digest = Digest(
 							context.Tid, new.Cid, new.RegistrantId, new.Expiration, new.PrivateDetails
 						)
@@ -1269,8 +1273,10 @@ declare schema main
 		constraint InsertValid check on insert (
 			exists (
 				select 1 from AdminSignature ASig join AdminSigning A on A.Nonce = ASig.SigningNonce
+					join Registrant R on R.Id = new.RegistrantId
 					where A.Nonce = context.SigningNonce
 						and A.Scope = 'vrg'
+						and A.AuthorityId = R.AuthorityId
 						and A.Digest = Digest(
 							context.Tid, new.Cid, new.RegistrantId, new.Expiration, new.SelectiveDetails
 						)
@@ -1289,8 +1295,10 @@ declare schema main
 		constraint InsertValid check on insert (
 			exists (
 				select 1 from AdminSignature ASig join AdminSigning A on A.Nonce = ASig.SigningNonce
+					join Registrant R on R.Id = new.RegistrantId
 					where A.Nonce = context.SigningNonce
 						and A.Scope = 'vrg'
+						and A.AuthorityId = R.AuthorityId
 						and A.Digest = Digest(
 							context.Tid, new.ElectionId, new.RegistrantId
 						)
@@ -1299,8 +1307,10 @@ declare schema main
 		constraint DeleteValid check on delete (
 			exists (
 				select 1 from AdminSignature ASig join AdminSigning A on A.Nonce = ASig.SigningNonce
+					join Registrant R on R.Id = old.RegistrantId
 					where A.Nonce = context.SigningNonce
 						and A.Scope = 'vrg'
+						and A.AuthorityId = R.AuthorityId
 						and A.Digest = Digest(
 							context.Tid, old.ElectionId, old.RegistrantId, 'delete'
 						)
@@ -1377,8 +1387,10 @@ declare schema main
 		constraint InsertValid check on insert (
 			exists (
 				select 1 from AdminSignature ASig join AdminSigning A on A.Nonce = ASig.SigningNonce
+					join Registrant R on R.Id = new.RegistrantId
 					where A.Nonce = context.SigningNonce
 						and A.Scope = 'vrg'
+						and A.AuthorityId = R.AuthorityId
 						and A.Digest = Digest(
 							context.Tid, new.RegistrantId, new.DeviceKey, new.DeviceHash, new.AttestationCid, new.Expiration, new.SignorKey, new.Signature
 						)
@@ -1388,8 +1400,10 @@ declare schema main
 		constraint DeleteValid check on delete (
 			exists (
 				select 1 from AdminSignature ASig join AdminSigning A on A.Nonce = ASig.SigningNonce
+					join Registrant R on R.Id = old.RegistrantId
 					where A.Nonce = context.SigningNonce
 						and A.Scope = 'vrg'
+						and A.AuthorityId = R.AuthorityId
 						and A.Digest = Digest(
 							context.Tid, old.RegistrantId, old.DeviceKey, 'delete'
 						)

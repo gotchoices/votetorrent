@@ -23,11 +23,11 @@ import {
   BuilderAlreadyCommittedError,
   BuilderValidationError
 } from '@votetorrent/vote-core'
-import type { Signature } from '@votetorrent/vote-core'
+import type { Signature, Scope } from '@votetorrent/vote-core'
 import { RegistrationEngine } from '../src/registration/registration-engine.js'
 import { MockRegistrationEngine } from '../src/registration/mock-registration-engine.js'
 import { RegistrationRegisterBuilder } from '../src/registration/builders/registration-register-builder.js'
-import { createTestNetwork, addTestAuthority, addTestElection, seedSignedMutation as seedSignedMutationFixture } from './fixtures/test-context.js'
+import { createTestNetwork, addTestAuthority, addTestElection, seedAuthorityInvite, seedSignedMutation as seedSignedMutationFixture } from './fixtures/test-context.js'
 import { randomTestKeyPair } from './fixtures/keys.js'
 import { digestToBytes, toCanonicalDatetime } from '../src/utils.js'
 import type { EngineContext } from '../src/types.js'
@@ -222,6 +222,10 @@ describe('RegistrationEngine', () => {
       expect(row).to.not.be.undefined
       expect(row!.authorityId).to.equal(auth.authority.id)
       expect(row!.status).to.equal('a')
+      // CR-02: a datetime-column read-back is Z-stripped by Quereus; the engine must
+      // re-stamp it so callers' `new Date(expiration)` reads UTC, not host-local time.
+      expect(row!.expiration, 'getRegistrant must return a Z-suffixed UTC datetime (CR-02)').to.match(/Z$/)
+      expect(new Date(row!.expiration).getTime(), 'the re-stamped expiration must parse to the same future instant').to.be.closeTo(FUTURE_EXPIRATION, 1000)
     })
 
     it('authorizes the Registrant mutation via a vrg-scoped AdminSigning row', async () => {
@@ -797,6 +801,75 @@ describe('ElectionRegistrant roster (authority-only, D-17)', () => {
       threw = true
     }
     expect(threw, 'expected the rad-scoped ceremony to be rejected by ElectionRegistrant.InsertValid (requires vrg) — no self-enroll path').to.be.true
+
+    const row = await ctx.db
+      .prepare('select count(*) as n from ElectionRegistrant where ElectionId = :electionId and RegistrantId = :registrantId')
+      .get({ electionId, registrantId })
+    expect(Number(row?.n)).to.equal(0)
+  })
+
+  // CR-01 (42-REVIEW / 42-VERIFICATION): the `vrg`-scoped ceremony that authorizes a
+  // registration-tier mutation must belong to the authority that OWNS the target Registrant,
+  // not merely be *some* valid `vrg` signing in the network. Before the fix, `InsertValid`
+  // matched any `vrg` AdminSigning by Digest alone — so a DIFFERENT authority's admin could
+  // forge roster/registration/association data for a registrant it does not own (a cross-tenant
+  // authorization bypass). The `join Registrant R ... and A.AuthorityId = R.AuthorityId` clause
+  // closes it. ElectionRegistrant is the simplest-digest exemplar; the same clause guards
+  // RegistrantPublic/RegistrantPrivate/RegistrantSelective/Association identically.
+  it('rejects an enroll whose vrg ceremony belongs to a DIFFERENT authority than the registrant owner (CR-01 cross-tenant bypass)', async () => {
+    const { auth, engine, sign } = await setupRegistrationTest()
+    const elec = await addTestElection(auth)
+    const electionId = await resolveElectionId(elec.ctx, elec.authority.id)
+    const registrantId = nextRegistrantId()
+    // Registrant R is owned by authority A (auth.authority.id).
+    await engine.createRegistrant(
+      { id: registrantId, authorityId: auth.authority.id, privateCid: 'test-private-cid', expiration: FUTURE_EXPIRATION },
+      sign
+    )
+    const ctx = (engine as unknown as { ctx: EngineContext }).ctx
+
+    // Materialize a genuine SECOND authority B in the same network via the real invite flow,
+    // with its own Admin + Officer (so B can legitimately produce a `vrg` AdminSigning).
+    const inviteCtx = await seedAuthorityInvite(auth, {
+      name: 'Forger Authority',
+      domainName: 'forger.example.com',
+      officers: [{ userId: auth.user.id, title: 'Chair', scopes: JSON.stringify(['rad']) }]
+    })
+    await auth.networkEngine.createAuthority(
+      { name: 'Forger Authority', domainName: 'forger.example.com' },
+      {
+        officers: [{ init: { name: 'Officer Forger', title: 'Chair', scopes: ['rad'] as Scope[] } }],
+        effectiveAt: inviteCtx.adminEffectiveAt,
+        thresholdPolicies: [{ policy: 'rad', threshold: 1 }]
+      },
+      { inviteSlotCid: inviteCtx.inviteSlotCid, inviteSignature: 'a'.repeat(128) }
+    )
+    const forgerRow = await ctx.db
+      .prepare('select Id from Authority where Name = :n')
+      .get({ n: 'Forger Authority' })
+    const forgerAuthorityId = forgerRow!.Id as string
+    expect(forgerAuthorityId).to.be.a('string').and.not.equal(auth.authority.id)
+
+    // Authority B seeds a fully-valid `vrg` AdminSigning/AdminSignature over the EXACT enroll
+    // digest — the forgery attempt. The ceremony itself is legitimate under B; only the
+    // ownership binding (B != R's authority A) must stop the roster insert.
+    const tid = Date.now() + Math.floor(Math.random() * 100_000)
+    const digestExpr = 'select Digest(:tid, :electionId, :registrantId) as d'
+    const digestParams = { tid, electionId, registrantId }
+    const { nonce } = await seedSignedMutationFixture(ctx, forgerAuthorityId, 'vrg', tid, digestExpr, digestParams, auth.user)
+
+    let threw = false
+    try {
+      await ctx.db.exec(
+        `insert into ElectionRegistrant (ElectionId, RegistrantId)
+         with context SigningNonce = :signingNonce, Tid = ${tid}, now = :now
+         values (:electionId, :registrantId)`,
+        { electionId, registrantId, signingNonce: nonce, now: new Date().toISOString().slice(0, 19) }
+      )
+    } catch {
+      threw = true
+    }
+    expect(threw, 'expected a vrg ceremony under a DIFFERENT authority to be rejected by ElectionRegistrant.InsertValid (CR-01 authority-ownership binding)').to.be.true
 
     const row = await ctx.db
       .prepare('select count(*) as n from ElectionRegistrant where ElectionId = :electionId and RegistrantId = :registrantId')
