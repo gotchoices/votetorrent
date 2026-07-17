@@ -23,20 +23,33 @@ export class SigningEngine implements ISigningEngine {
 		return crypto.randomUUID();
 	}
 
-	async sign(nonce: string, signature: Signature): Promise<boolean> {
+	async sign(nonce: string, signature: Signature, options?: { ownsTransaction?: boolean }): Promise<boolean> {
 		// Phase 42-03: Quereus's transaction model is FLAT (a nested explicit
 		// BEGIN inside an already-explicit transaction throws "Cannot begin
 		// transaction: already in a transaction" — no true SAVEPOINT-style
 		// nesting for this call shape). Callers that need this method's work
 		// to be part of a LARGER atomic ceremony (e.g. RegistrationEngine.
 		// register()'s multi-row Cids-before-parent envelope) start their OWN
-		// outer BEGIN first; when that's the case, `db.getAutocommit()` is
-		// already false here, and this method must NOT issue its own nested
-		// BEGIN/COMMIT/ROLLBACK — the outer caller owns the commit/rollback
-		// boundary. Standalone callers (the overwhelming majority) see
-		// IDENTICAL behavior to before (getAutocommit() is true, so this
-		// method's own BEGIN/COMMIT/ROLLBACK envelope still applies).
-		const ownsTransaction = this.ctx.db.getAutocommit();
+		// outer BEGIN first and pass `{ ownsTransaction: false }` explicitly —
+		// this method then must NOT issue its own nested BEGIN/COMMIT/ROLLBACK,
+		// the outer caller owns the commit/rollback boundary.
+		//
+		// T-42-03 (Phase 42-03): an earlier draft of this guard auto-detected
+		// via `this.ctx.db.getAutocommit()` instead of an explicit caller flag.
+		// It was replaced with this explicit opt-in because auto-detecting the
+		// ambient transaction state from inside a shared helper is inherently
+		// fragile (relies on precise knowledge of Quereus's autocommit/implicit-
+		// transaction bookkeeping) — an explicit flag removes that ambiguity
+		// entirely. Default `ownsTransaction: true` preserves IDENTICAL behavior
+		// for every pre-existing caller (zero regression risk); only
+		// `register()`'s internal ceremony calls opt in to `false`. (The actual
+		// root cause of the flaky-test hunt that surfaced this call site was a
+		// SEPARATE bug — a datetime-precision mismatch in the digest fed to the
+		// deferred CHECK, fixed in `registration-engine.ts`'s
+		// `toDeferredCheckDatetime` — this transaction-composability guard is
+		// independently correct and required for `register()`'s multi-row
+		// ceremony regardless.)
+		const ownsTransaction = options?.ownsTransaction ?? true;
 		try {
 			// AUTH-08: BEGIN/COMMIT/ROLLBACK envelope around OfficerSignature
 			// insert + threshold check + (optional) AdminSignature insert.

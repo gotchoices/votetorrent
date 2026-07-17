@@ -54,21 +54,39 @@ function toIsoZDatetime (input: Timestamp | string): string {
 }
 
 /**
- * T-42-03 (found via TDD): Quereus's DEFERRED CHECK constraints (any CHECK
- * containing a subquery — `MutationValid`/`InsertValid`/`RegistrantCidMatch`/
- * `RegistrantIdValid` all qualify, per `needsDeferred = containsSubquery(...)`
- * in `constraint-builder.js`) re-derive `new.*` from a COERCED snapshot
+ * T-42-03 (found via TDD — a genuinely flaky-test hunt, ~10% intrinsic
+ * failure rate reproduced via a 150-iteration stress spec): Quereus's
+ * DEFERRED CHECK constraints (any CHECK containing a subquery —
+ * `MutationValid`/`InsertValid`/`RegistrantCidMatch`/`RegistrantIdValid` all
+ * qualify, per `needsDeferred = containsSubquery(...)` in
+ * `constraint-builder.js`) re-derive `new.*` from a COERCED snapshot
  * (`coerceNewSection` in `constraint-check.js`, GitHub quereus#25) — for a
- * `datetime` column this round-trips through `Temporal.PlainDateTime`,
- * which STRIPS the trailing `Z` (`DATETIME_TYPE.parse` in
- * `temporal-types.js`). IMMEDIATE (non-deferred) CHECKs like `ExpirationValid`/
- * `SignatureValid`/`CidValid` see the RAW pre-coercion (Z-suffixed) value.
- * So the digest fed into the `vrg` AdminSigning ceremony (compared against a
- * DEFERRED check) must use the Z-STRIPPED form, while the actual bound INSERT
- * value (and any IMMEDIATE check's digest) keeps the Z-suffixed form.
+ * `datetime` column this round-trips through `Temporal.PlainDateTime`
+ * (`DATETIME_TYPE.parse` in `temporal-types.js`), which does TWO things a
+ * naive Z-strip does NOT replicate:
+ *   1. Drops the trailing `Z` entirely (bare wall-clock PlainDateTime).
+ *   2. Serializes the fractional-seconds part at MINIMAL precision — trailing
+ *      zero digits are dropped (`.930` -> `.93`, `.700` -> `.7`, `.000` -> the
+ *      whole fractional part is dropped, not just zero-padded). A naive
+ *      `.replace(/Z$/, '')` on `Date.toISOString()`'s ALWAYS-3-digit output
+ *      preserves those trailing zeros, producing a BYTE-DIFFERENT string from
+ *      what Quereus's own deferred-check snapshot sees whenever the epoch-ms
+ *      timestamp's last digit happens to be `0` — empirically ~10% of random
+ *      timestamps (confirmed via a 5000-sample comparison against
+ *      `temporal-polyfill`'s own `Instant.from(iso).toZonedDateTimeISO('UTC')
+ *      .toPlainDateTime().toString()`), matching the exact stress-test flake
+ *      rate observed before this fix.
+ * IMMEDIATE (non-deferred) CHECKs like `ExpirationValid`/`SignatureValid`/
+ * `CidValid` see the RAW pre-coercion (Z-suffixed, always-3-digit) value —
+ * unaffected. Only the digest fed into the `vrg` AdminSigning ceremony
+ * (compared against a DEFERRED check) needs this minimal-precision form.
  */
 function toDeferredCheckDatetime (input: Timestamp | string): string {
-  return toIsoZDatetime(input).replace(/Z$/, '')
+  let s = toIsoZDatetime(input).replace(/Z$/, '')
+  if (s.includes('.')) {
+    s = s.replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '')
+  }
+  return s
 }
 
 /**
@@ -167,7 +185,8 @@ export class RegistrationEngine implements IRegistrationEngine {
       status?: RegistrantStatus
       expiration: Timestamp | string
     },
-    signatureOrCallback: SignatureOrCallback
+    signatureOrCallback: SignatureOrCallback,
+    options?: { ownsTransaction?: boolean }
   ): Promise<Registrant> {
     this.requireCtx('createRegistrant')
     const ctx = this.ctx!
@@ -229,7 +248,8 @@ export class RegistrationEngine implements IRegistrationEngine {
         tid,
         digestExpr,
         digestParams,
-        this.resolveSign(signatureOrCallback)
+        this.resolveSign(signatureOrCallback),
+        options
       )
 
       await ctx.db.exec(
@@ -282,7 +302,8 @@ export class RegistrationEngine implements IRegistrationEngine {
       district?: string
       extraFields?: Record<string, unknown>
     },
-    signatureOrCallback: SignatureOrCallback
+    signatureOrCallback: SignatureOrCallback,
+    options?: { ownsTransaction?: boolean }
   ): Promise<RegistrantPublic> {
     this.requireCtx('createRegistrantPublic')
     const ctx = this.ctx!
@@ -312,7 +333,7 @@ export class RegistrationEngine implements IRegistrationEngine {
         district,
         extraFields: extraFieldsJson
       }
-      const nonce = await seedSignedMutation(ctx, authorityId, 'vrg', tid, digestExpr, digestParams, this.resolveSign(signatureOrCallback))
+      const nonce = await seedSignedMutation(ctx, authorityId, 'vrg', tid, digestExpr, digestParams, this.resolveSign(signatureOrCallback), options)
 
       await ctx.db.exec(
         `insert into RegistrantPublic (Cid, RegistrantId, LastName, FirstName, District, ExtraFields)
@@ -348,7 +369,8 @@ export class RegistrationEngine implements IRegistrationEngine {
    */
   async createRegistrantPrivate (
     input: { registrantId: string; expiration: Timestamp | string; details: PrivateDetail[] },
-    signatureOrCallback: SignatureOrCallback
+    signatureOrCallback: SignatureOrCallback,
+    options?: { ownsTransaction?: boolean }
   ): Promise<RegistrantPrivate> {
     this.requireCtx('createRegistrantPrivate')
     const ctx = this.ctx!
@@ -373,7 +395,7 @@ export class RegistrationEngine implements IRegistrationEngine {
       const expirationForDeferredCheck = toDeferredCheckDatetime(input.expiration)
       const digestExpr = 'select Digest(:tid, :cid, :registrantId, :expirationDeferred, :privateDetails) as d'
       const digestParams = { tid, cid, registrantId: input.registrantId, expirationDeferred: expirationForDeferredCheck, privateDetails: privateDetailsJson }
-      const nonce = await seedSignedMutation(ctx, authorityId, 'vrg', tid, digestExpr, digestParams, this.resolveSign(signatureOrCallback))
+      const nonce = await seedSignedMutation(ctx, authorityId, 'vrg', tid, digestExpr, digestParams, this.resolveSign(signatureOrCallback), options)
 
       await ctx.db.exec(
         `insert into RegistrantPrivate (Cid, RegistrantId, Expiration, PrivateDetails)
@@ -553,6 +575,10 @@ export class RegistrationEngine implements IRegistrationEngine {
         })
 
         // Parent row first, carrying the pre-computed Cids (own vrg ceremony).
+        // `{ ownsTransaction: false }`: register() already owns the outer BEGIN
+        // above — Quereus's transaction model is flat (no nested BEGIN), so the
+        // inner ceremony's SigningEngine.sign() must NOT start its own nested
+        // transaction (see SigningEngine.sign()'s doc comment / T-42-03).
         await this.createRegistrant(
           {
             id: registrantId,
@@ -561,18 +587,20 @@ export class RegistrationEngine implements IRegistrationEngine {
             publicCid,
             expiration: init.registrant.expiration
           },
-          signatureOrCallback
+          signatureOrCallback,
+          { ownsTransaction: false }
         )
 
         // Tier rows after — each recomputes the SAME deterministic Cid and runs
         // its OWN vrg ceremony (Pitfall 4); RegistrantCidMatch now finds the
         // just-committed parent Cid.
         if (init.public) {
-          await this.createRegistrantPublic({ registrantId, ...init.public }, signatureOrCallback)
+          await this.createRegistrantPublic({ registrantId, ...init.public }, signatureOrCallback, { ownsTransaction: false })
         }
         await this.createRegistrantPrivate(
           { registrantId, expiration: init.private.expiration, details: init.private.details },
-          signatureOrCallback
+          signatureOrCallback,
+          { ownsTransaction: false }
         )
 
         // D-09 seam (intentionally a no-op this plan — 42-07 owns enforcement).

@@ -38,6 +38,12 @@ import { SigningEngine } from './signing-engine.js'
  * @param sign - App-layer signing callback: receives the canonical digest bytes (Uint8Array,
  *   computed via SQL `Digest()`/`digestExpr`) and returns a `Signature`. The private key stays
  *   app-side (D-01) — this helper never sees it.
+ * @param options.ownsTransaction - Pass `false` when this call is already inside
+ *   an outer `BEGIN`/`COMMIT`/`ROLLBACK` envelope (e.g. a multi-row Register
+ *   ceremony) so the internal `SigningEngine.sign()` does not issue its own
+ *   nested transaction (Quereus's transaction model is flat, not nested).
+ *   Defaults to `true` (this function's own transaction) — every pre-42-03
+ *   caller is unaffected.
  * @returns The signing nonce to pass to the caller's row-insert method
  *   (`with context SigningNonce = :nonce, Tid = ${tid}`).
  */
@@ -48,7 +54,8 @@ export async function seedSignedMutation (
   tid: number,
   digestExpr: string,
   digestParams: Record<string, unknown>,
-  sign: (digest: Uint8Array) => Promise<Signature>
+  sign: (digest: Uint8Array) => Promise<Signature>,
+  options?: { ownsTransaction?: boolean }
 ): Promise<string> {
   // 1. Resolve CurrentAdmin.EffectiveAt for the authority.
   const adminRow = await ctx.db
@@ -114,7 +121,9 @@ export async function seedSignedMutation (
   )
 
   // 6. Drive OfficerSignature + AdminSignature via SigningEngine (threshold=1 -> AdminSignature auto-created).
-  await new SigningEngine(ctx).sign(nonce, signature)
+  //    `options.ownsTransaction` propagates the caller's transaction-composability
+  //    intent (Phase 42-03 register() ceremony — see SigningEngine.sign()'s doc comment).
+  await new SigningEngine(ctx).sign(nonce, signature, options)
 
   // 7. Return the nonce for the caller to pass to the actual row-insert method.
   return nonce
