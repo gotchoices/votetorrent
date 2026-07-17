@@ -496,3 +496,127 @@ describe('AssociationAssociateBuilder', () => {
     expect(input.attestation.deviceId).to.equal(attestation.deviceId)
   })
 })
+
+// ===========================================================================
+// Association trust boundaries (Task 3)
+// ===========================================================================
+
+describe('Association trust boundaries', () => {
+  it('T-42-01: a forged/altered field on the Association insert is rejected by InsertValid re-derivation — no row lands', async () => {
+    const { auth, registrantId, sign } = await setupAssociationTest()
+    const deviceKey = nextDeviceKey()
+    const honestDeviceHash = 'honest-hash-value'
+    const forgedDeviceHash = 'forged-hash-value'
+    const expiration = new Date(Date.now() + 3_600_000).toISOString()
+
+    // Real row-level signature over the HONEST field set (SignatureValid's own digest formula).
+    const rowDigestRow = await auth.ctx.db
+      .prepare('select Digest(:registrantId, :deviceKey, :deviceHash, :attestationCid, :expiration) as d')
+      .get({ registrantId, deviceKey, deviceHash: honestDeviceHash, attestationCid: null, expiration })
+    const realSig = await sign(digestToBytes(rowDigestRow!.d))
+
+    // Seed the 'vrg' AdminSigning ceremony's digest around the HONEST DeviceHash.
+    const tid = Date.now() + Math.floor(Math.random() * 100_000)
+    const digestExpr = 'select Digest(:tid, :registrantId, :deviceKey, :deviceHash, :attestationCid, :expiration, :rowSignorKey, :rowSignature) as d'
+    const digestParams = {
+      tid,
+      registrantId,
+      deviceKey,
+      deviceHash: honestDeviceHash,
+      attestationCid: null,
+      expiration,
+      rowSignorKey: realSig.signerKey,
+      rowSignature: realSig.signature
+    }
+    const { nonce } = await seedSignedMutationFixture(auth.ctx, auth.authority.id, 'vrg', tid, digestExpr, digestParams, auth.user)
+
+    let caught: unknown
+    try {
+      // Attempt the insert with a FORGED DeviceHash — the stored AdminSigning.Digest
+      // (computed above with the honest value) will not match InsertValid's re-derivation.
+      await auth.ctx.db.exec(
+        `insert into Association (RegistrantId, DeviceKey, DeviceHash, AttestationCid, Expiration, SignorKey, Signature)
+         with context SigningNonce = :nonce, Tid = ${tid}, now = :now
+         values (:registrantId, :deviceKey, :deviceHash, null, :expiration, :signorKey, :signature)`,
+        {
+          registrantId,
+          deviceKey,
+          deviceHash: forgedDeviceHash,
+          expiration,
+          signorKey: realSig.signerKey,
+          signature: realSig.signature,
+          nonce,
+          now: nowCanonicalDatetime()
+        }
+      )
+    } catch (err) {
+      caught = err
+    }
+    expect(caught, 'expected the forged-field insert to be rejected').to.be.instanceOf(Error)
+
+    const row = await auth.ctx.db
+      .prepare('select count(*) as n from Association where RegistrantId = :registrantId and DeviceKey = :deviceKey')
+      .get({ registrantId, deviceKey })
+    expect(Number(row?.n)).to.equal(0)
+  })
+
+  it('T-42-02: a challenge nonce cannot be redirected to a different (RegistrantId, DeviceKey) pair', async () => {
+    const { registrantId, engine, sign } = await setupAssociationTest()
+    const deviceKeyA = nextDeviceKey()
+    const deviceKeyB = nextDeviceKey()
+    const challenge = await engine.issueAttestationChallenge(registrantId, deviceKeyA, FUTURE_CHALLENGE_EXPIRATION, sign)
+
+    let threw = false
+    try {
+      // Attempt to answer the SAME nonce for a DIFFERENT deviceKey — the engine's
+      // (nonce, registrantId, deviceKey) lookup must fail to find a bound challenge.
+      await engine.associate({ registrantId, deviceKey: deviceKeyB, nonce: challenge.nonce, attestation: makeDeviceAttestation() }, sign)
+    } catch {
+      threw = true
+    }
+    expect(threw, 'expected the redirected nonce to be rejected').to.be.true
+  })
+
+  it('T-42-03: the public Association read surface exposes at most DeviceHash — never AssociationPrivate.DeviceId', async () => {
+    const { registrantId, engine, sign } = await setupAssociationTest()
+    const deviceKey = nextDeviceKey()
+    const challenge = await engine.issueAttestationChallenge(registrantId, deviceKey, FUTURE_CHALLENGE_EXPIRATION, sign)
+    const attestation = makeDeviceAttestation()
+    const deviceHash = sha256Hex(attestation.deviceId)
+
+    await engine.associate({ registrantId, deviceKey, deviceHash, nonce: challenge.nonce, attestation }, sign)
+
+    const association = await engine.getAssociation(registrantId, deviceKey)
+    expect(association).to.not.be.undefined
+    expect(association).to.not.have.property('deviceId')
+    expect(Object.keys(association!).sort()).to.deep.equal(
+      ['attestationCid', 'deviceHash', 'deviceKey', 'expiration', 'registrantId', 'signature', 'signorKey'].sort()
+    )
+    expect(association!.deviceHash).to.equal(deviceHash)
+    expect(association!.deviceHash).to.not.equal(attestation.deviceId)
+  })
+
+  it('T-42-04: without a PollingDevice waiver, a second registrant reusing a DeviceId is rejected (explicit re-assertion)', async () => {
+    const { auth, registrantId: registrantA, engine, sign } = await setupAssociationTest()
+    const registrationEngine = new RegistrationEngine(auth.ctx)
+    const registrantB = nextRegistrantId()
+    await registrationEngine.createRegistrant(
+      { id: registrantB, authorityId: auth.authority.id, privateCid: 'assoc-test-private-cid-t42-04', expiration: FUTURE_REGISTRANT_EXPIRATION },
+      sign
+    )
+    const sharedDeviceId = `shared-device-t42-04-${Date.now()}`
+    const deviceKeyA = nextDeviceKey()
+    const challengeA = await engine.issueAttestationChallenge(registrantA, deviceKeyA, FUTURE_CHALLENGE_EXPIRATION, sign)
+    await engine.associate({ registrantId: registrantA, deviceKey: deviceKeyA, nonce: challengeA.nonce, attestation: makeDeviceAttestation({ deviceId: sharedDeviceId }) }, sign)
+
+    const deviceKeyB = nextDeviceKey()
+    const challengeB = await engine.issueAttestationChallenge(registrantB, deviceKeyB, FUTURE_CHALLENGE_EXPIRATION, sign)
+    let threw = false
+    try {
+      await engine.associate({ registrantId: registrantB, deviceKey: deviceKeyB, nonce: challengeB.nonce, attestation: makeDeviceAttestation({ deviceId: sharedDeviceId }) }, sign)
+    } catch {
+      threw = true
+    }
+    expect(threw, 'expected device-uniqueness to reject the unwaived reuse').to.be.true
+  })
+})
