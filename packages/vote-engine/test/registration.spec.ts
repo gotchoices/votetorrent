@@ -10,8 +10,10 @@
  *   - Task 2: RegistrationRegisterBuilder (KIND='registration.register')
  *     multi-row Cids-before-parent ceremony inside one BEGIN/COMMIT/ROLLBACK
  *     (Pitfall 4); rollback-on-partial-failure; builder validation/serialization.
- *   (Task 3 — positive+negative cid(Digest(...)) CHECK exercise, ExtraFields
- *   read round-trip, mock/real parity, full-suite floor gate — lands separately.)
+ *   - Task 3: positive + negative cid(Digest(...)) CHECK exercise (D-15) for
+ *     RegistrantPublic and RegistrantPrivate; ExtraFields read round-trip;
+ *     mock/real parity; full-suite floor gate (verified via the plan's own
+ *     `yarn test` command, not asserted inline here).
  */
 
 import { expect } from 'chai'
@@ -458,5 +460,147 @@ describe('RegistrationRegisterBuilder', () => {
     const input = restored.toEngineInput()
     expect(input.registrant.id).to.equal(registrantId)
     expect(input.public?.lastName).to.equal('Voter')
+  })
+})
+
+// ===========================================================================
+// registration Cid integrity (D-15) + ExtraFields read path + mock parity (Task 3)
+// ===========================================================================
+
+describe('registration Cid integrity (D-15)', () => {
+  it('rejects a RegistrantPublic row whose stored Cid does not match the actual field values (CidValid)', async () => {
+    const { auth, engine, sign } = await setupRegistrationTest()
+    const registrantId = nextRegistrantId()
+    await engine.createRegistrant(
+      { id: registrantId, authorityId: auth.authority.id, privateCid: 'test-private-cid', expiration: FUTURE_EXPIRATION },
+      sign
+    )
+    const ctx = (engine as unknown as { ctx: EngineContext }).ctx
+
+    // Cid computed for LastName='Original', but the row we insert carries LastName='Tampered'.
+    const cidRow = await ctx.db
+      .prepare('select cid(Digest(:registrantId, :lastName, :firstName, :district, :extraFields)) as c')
+      .get({ registrantId, lastName: 'Original', firstName: null, district: null, extraFields: null })
+    const cid = cidRow!.c as string
+    const tid = Date.now()
+
+    // Seed a vrg AdminSigning ceremony matching the TAMPERED row values (so InsertValid
+    // passes) — isolating CidValid as the ONLY constraint that should reject this insert.
+    const { nonce } = await seedSignedMutationFixture(
+      auth.ctx,
+      auth.authority.id,
+      'vrg',
+      tid,
+      'select Digest(:tid, :cid, :registrantId, :lastName, :firstName, :district, :extraFields) as d',
+      { tid, cid, registrantId, lastName: 'Tampered', firstName: null, district: null, extraFields: null },
+      auth.user
+    )
+
+    let threw = false
+    try {
+      await ctx.db.exec(
+        `insert into RegistrantPublic (Cid, RegistrantId, LastName, FirstName, District, ExtraFields)
+         with context SigningNonce = :signingNonce, Tid = ${tid}
+         values (:cid, :registrantId, :lastName, :firstName, :district, :extraFields)`,
+        { cid, registrantId, lastName: 'Tampered', firstName: null, district: null, extraFields: null, signingNonce: nonce }
+      )
+    } catch {
+      threw = true
+    }
+    expect(threw, 'expected CidValid to reject a Cid that does not match the tampered LastName').to.be.true
+  })
+
+  it('rejects a RegistrantPrivate row whose stored Cid does not match the actual field values (CidValid)', async () => {
+    const { auth, engine, sign } = await setupRegistrationTest()
+    const registrantId = nextRegistrantId()
+    await engine.createRegistrant(
+      { id: registrantId, authorityId: auth.authority.id, privateCid: 'test-private-cid', expiration: FUTURE_EXPIRATION },
+      sign
+    )
+    const ctx = (engine as unknown as { ctx: EngineContext }).ctx
+
+    const expiration = new Date(FUTURE_EXPIRATION).toISOString().slice(0, 19)
+    const originalDetails = JSON.stringify([{ name: 'k', value: 'original' }])
+    const tamperedDetails = JSON.stringify([{ name: 'k', value: 'tampered' }])
+
+    const cidRow = await ctx.db
+      .prepare('select cid(Digest(:registrantId, :expiration, :privateDetails)) as c')
+      .get({ registrantId, expiration, privateDetails: originalDetails })
+    const cid = cidRow!.c as string
+    const tid = Date.now() + 1
+
+    const { nonce } = await seedSignedMutationFixture(
+      auth.ctx,
+      auth.authority.id,
+      'vrg',
+      tid,
+      'select Digest(:tid, :cid, :registrantId, :expiration, :privateDetails) as d',
+      { tid, cid, registrantId, expiration, privateDetails: tamperedDetails },
+      auth.user
+    )
+
+    let threw = false
+    try {
+      await ctx.db.exec(
+        `insert into RegistrantPrivate (Cid, RegistrantId, Expiration, PrivateDetails)
+         with context SigningNonce = :signingNonce, Tid = ${tid}, now = :now
+         values (:cid, :registrantId, :expiration, :privateDetails)`,
+        { cid, registrantId, expiration, privateDetails: tamperedDetails, signingNonce: nonce, now: new Date().toISOString().slice(0, 19) }
+      )
+    } catch {
+      threw = true
+    }
+    expect(threw, 'expected CidValid to reject a Cid that does not match the tampered PrivateDetails').to.be.true
+  })
+
+  it('ExtraFields read round-trip: resolves a fixed column AND an ExtraFields key, and enumerates all extra keys (D-18/D-21)', async () => {
+    const { auth, engine, sign } = await setupRegistrationTest()
+    const registrantId = nextRegistrantId()
+    const ctx = (engine as unknown as { ctx: EngineContext }).ctx
+    const publicInput = { district: 'D-42', extraFields: { PartyCode: 'GRN', BallotLanguage: 'en' } }
+    const publicCid = await computePublicCid(ctx, registrantId, publicInput)
+    await engine.createRegistrant(
+      { id: registrantId, authorityId: auth.authority.id, privateCid: 'test-private-cid', publicCid, expiration: FUTURE_EXPIRATION },
+      sign
+    )
+    await engine.createRegistrantPublic({ registrantId, ...publicInput }, sign)
+
+    const publicRow = await engine.getRegistrantPublic(registrantId)
+    expect(publicRow!.district).to.equal('D-42')
+    expect(publicRow!.extraFields).to.deep.equal({ PartyCode: 'GRN', BallotLanguage: 'en' })
+
+    const fixedViaField = await engine.getRegistrantPublicField(registrantId, 'District')
+    expect(fixedViaField).to.equal('D-42')
+
+    const extraViaField = await engine.getRegistrantPublicField(registrantId, 'PartyCode')
+    expect(extraViaField).to.equal('GRN')
+
+    const keys = await engine.getRegistrantPublicExtraFieldKeys(registrantId)
+    expect(keys.sort()).to.deep.equal(['BallotLanguage', 'PartyCode'].sort())
+  })
+
+  describe('mock/real parity', () => {
+    it('MockRegistrationEngine exposes the same IRegistrationEngine surface (buildRegister + tier reads)', async () => {
+      const mock = new MockRegistrationEngine()
+      const builder = mock.buildRegister()
+      expect(builder).to.be.instanceOf(RegistrationRegisterBuilder)
+      expect(typeof builder.commit).to.equal('function')
+
+      const registrantId = nextRegistrantId()
+      const dummySig: Signature = { signature: 'a'.repeat(128), signerKey: 'b'.repeat(66), signerUserId: 'user-1' }
+      await mock.register(
+        {
+          registrant: { id: registrantId, authorityId: 'authority-mock', expiration: FUTURE_EXPIRATION },
+          public: { lastName: 'Parity', district: 'D-5' },
+          private: { expiration: FUTURE_EXPIRATION, details: [] }
+        },
+        dummySig
+      )
+      const registrant = await mock.getRegistrant(registrantId)
+      expect(registrant).to.not.be.undefined
+      expect(registrant!.authorityId).to.equal('authority-mock')
+      const publicRow = await mock.getRegistrantPublic(registrantId)
+      expect(publicRow!.lastName).to.equal('Parity')
+    })
   })
 })
