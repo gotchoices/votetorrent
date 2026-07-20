@@ -1,8 +1,11 @@
 import { expect } from 'chai'
 import type { Signature } from '@votetorrent/vote-core'
+import { digest as pluginDigest, sign as pluginSign } from '@optimystic/quereus-plugin-crypto'
 import { seedSignedMutation } from '../../src/signing/signed-mutation.js'
 import { peekNextElectionTid } from '../../src/elections/elections-engine.js'
 import { toCanonicalDatetime } from '../../src/utils.js'
+import { verifySig } from '../../src/database/initialize.js'
+import { randomTestKeyPair } from '../fixtures/keys.js'
 import {
   addTestAuthority,
   createTestNetwork,
@@ -17,6 +20,57 @@ import {
 // on the (wave-3) registration tables.
 const ELECTION_DIGEST_EXPR =
   'select Digest(:tid, :id, :authorityId, :title, :date, :revisionDeadline, :ballotDeadline, :type) as d'
+
+describe('verifySig', () => {
+  // D-14 unit triad — the shared verification primitive extracted in
+  // 999.1-06, backing both the SQL `SignatureValid` UDF and future TS call
+  // sites (plans 07/08/09). Uses the plugin's OWN `digest`/`sign` helpers so
+  // the fixtures exercise the exact base64url-digest/hex-sig/hex-key
+  // encoding convention `verifySig` expects (Pitfall 6) — no hand-fabricated
+  // signatures.
+  it('returns true for a genuinely-signed base64url digest (valid case)', () => {
+    const { privateHex, publicHex } = randomTestKeyPair()
+    const digestB64url = pluginDigest(['verifySig-fixture', 1, true], 'sha256', 'base64url') as string
+    const sigHex = pluginSign(digestB64url, privateHex, 'secp256k1', 'base64url', 'hex', 'hex') as string
+
+    expect(verifySig(digestB64url, sigHex, publicHex)).to.equal(true)
+  })
+
+  it('returns false when the same digest is checked against a wrong/other signature (invalid case)', () => {
+    const { privateHex, publicHex } = randomTestKeyPair()
+    const other = randomTestKeyPair()
+    const digestB64url = pluginDigest(['verifySig-fixture', 2, true], 'sha256', 'base64url') as string
+    // Sign with a DIFFERENT private key — the resulting signature does not
+    // verify against `publicHex` (the "wrong signature" case).
+    const wrongSigHex = pluginSign(digestB64url, other.privateHex, 'secp256k1', 'base64url', 'hex', 'hex') as string
+
+    expect(verifySig(digestB64url, wrongSigHex, publicHex)).to.equal(false)
+    // Sanity: the genuinely-matching signature for THIS digest still verifies true.
+    const rightSigHex = pluginSign(digestB64url, privateHex, 'secp256k1', 'base64url', 'hex', 'hex') as string
+    expect(verifySig(digestB64url, rightSigHex, publicHex)).to.equal(true)
+  })
+
+  it('returns false when the digest is byte-tampered after signing, with the otherwise-valid signature (tampered case)', () => {
+    const { privateHex, publicHex } = randomTestKeyPair()
+    const digestB64url = pluginDigest(['verifySig-fixture', 3, true], 'sha256', 'base64url') as string
+    const sigHex = pluginSign(digestB64url, privateHex, 'secp256k1', 'base64url', 'hex', 'hex') as string
+    // A different digest (distinct field tuple) stands in for a tampered
+    // digest — the same signature, computed over the original digest, must
+    // not verify against this one.
+    const tamperedDigestB64url = pluginDigest(['verifySig-fixture', 4, true], 'sha256', 'base64url') as string
+
+    expect(verifySig(tamperedDigestB64url, sigHex, publicHex)).to.equal(false)
+  })
+
+  it('returns false (never throws) for falsy digest/signature/key inputs', () => {
+    const { publicHex } = randomTestKeyPair()
+    expect(verifySig(null, 'aa', publicHex)).to.equal(false)
+    expect(verifySig('', 'aa', publicHex)).to.equal(false)
+    expect(verifySig('digest', null, publicHex)).to.equal(false)
+    expect(verifySig('digest', 'aa', null)).to.equal(false)
+    expect(verifySig(null, null, null)).to.equal(false)
+  })
+})
 
 describe('signed-mutation', () => {
   it('produces a Digest byte-identical to seedElectionSigning for the same inputs (generalization fidelity)', async () => {
