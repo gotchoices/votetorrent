@@ -1,7 +1,15 @@
 import { QuereusError, MisuseError } from '@quereus/quereus'
 import { AuthorityEngine } from '../authority/authority-engine.js'
 import { UserEngine } from '../user/user-engine.js'
-import { asText, fromCanonicalDatetime, nowCanonicalDatetime, parseJsonOr, toCanonicalDatetime } from '../utils.js'
+import {
+  asText,
+  fromCanonicalDatetime,
+  inviteResultSignedBytes,
+  nowCanonicalDatetime,
+  parseJsonOr,
+  toCanonicalDatetime,
+  verifyAdHocInviteSignature,
+} from '../utils.js'
 import type { EngineContext } from '../types.js'
 import type {
   Authority,
@@ -998,6 +1006,24 @@ export class NetworkEngine implements INetworkEngine {
           return ua < ub ? -1 : ua > ub ? 1 : 0
         })
         const firstOfficer = sortedOfficers[0]!
+        // 999.1 R-03 — DOCUMENTED LIMITATION (not a fabricated `true`): the
+        // A1 LOCKED encoding requires digestToken = the exact value written
+        // to InviteResult.Digest, which for this branch embeds
+        // `generatedAuthorityId` — a fresh `crypto.randomUUID()` minted
+        // INSIDE this method, after `invite.inviteSignature` was already
+        // produced by the caller. No pre-image of that id can exist at
+        // signing time, so `inviteSignature` cannot cryptographically commit
+        // to it — the caller cannot know a value the engine hasn't generated
+        // yet (a genuine architectural gap in this call path, pre-existing
+        // the 999.1 phase; the previous hardcoded `context.IsSignatureValid
+        // = true` stub silently masked it). A real check here would ALWAYS
+        // reject every legitimate accept — fixing it properly needs a
+        // vote-core `InviteAction` shape change (e.g. letting the caller
+        // supply/commit the id before signing, or a sign-callback pattern
+        // like `saveInviteWithSigning`'s D-03/D-04) — out of this plan's
+        // scope (Rule 4 — architectural). Tracked in the 999.1-09 SUMMARY.
+        // The non-authority branch below has no such gap (its digestToken
+        // is fully caller-known ahead of time) and IS verified for real.
         await this.ctx.db.exec(
 					`insert into InviteResult (
 						SlotCid,
@@ -1032,7 +1058,7 @@ export class NetworkEngine implements INetworkEngine {
             officerTitle: firstOfficer.title,
             officerScopes: firstOfficer.scopes,
             inviteSignature: invite.inviteSignature,
-            invokedId
+            invokedId,
           }
         )
       } else {
@@ -1044,6 +1070,14 @@ export class NetworkEngine implements INetworkEngine {
         const resultDigest = invite.isAccepted
           ? JSON.stringify(invite.invokes)
           : null
+        // 999.1 R-03: same A1 LOCKED domain as the authority-accepted branch
+        // above, with digestToken = the plain resultDigest (or 'null' for a
+        // decline — inviteResultSignedBytes applies that coalesce).
+        const isSignatureValid = verifyAdHocInviteSignature(
+          inviteResultSignedBytes({ slotCid, digestToken: resultDigest ?? 'null', accept: invite.isAccepted }),
+          invite.inviteSignature,
+          invite.invite.inviteKey,
+        )
         await this.ctx.db.exec(
 					`insert into InviteResult (
 						SlotCid,
@@ -1052,7 +1086,7 @@ export class NetworkEngine implements INetworkEngine {
 						InviteSignature,
 						InvokedId
 					)
-					with context IsSigningValid = true, IsSignatureValid = true
+					with context IsSigningValid = true, IsSignatureValid = :isSignatureValid
 					values (
 						:slotCid,
 						:isAccepted,
@@ -1065,7 +1099,8 @@ export class NetworkEngine implements INetworkEngine {
             isAccepted: invite.isAccepted,
             digest: resultDigest,
             inviteSignature: invite.inviteSignature,
-            invokedId
+            invokedId,
+            isSignatureValid,
           }
         )
       }

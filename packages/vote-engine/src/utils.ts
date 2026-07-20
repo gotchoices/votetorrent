@@ -1,6 +1,7 @@
 import { bytesToHex, hexToBytes } from '@noble/curves/utils.js'
 import { sha256 } from '@noble/hashes/sha2.js'
 import { utf8ToBytes } from '@noble/hashes/utils.js'
+import { verifySig } from './database/initialize.js'
 
 // sql data validation helpers
 export const asText = (value: unknown, field: string): string => {
@@ -105,6 +106,86 @@ export function digestToBytes (d: unknown): Uint8Array {
     return Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))
   }
   throw new Error(`digestToBytes: unrecognized Digest() output shape: len=${d.length}`)
+}
+
+/**
+ * Inverse of `digestToBytes`'s base64url branch — encode raw bytes as
+ * unpadded base64url. Used to feed a locally-computed sha256 hash into
+ * `verifySig()`, which (matching the SQL `SignatureValid` UDF's contract)
+ * expects its `digest` argument as base64url.
+ *
+ * 999.1 D-11/D-12: added for the InviteSlot/InviteResult engine-side
+ * verifySig carve-out (R-03) — the FIRST base64url encoder in vote-engine
+ * (all prior digest handling was decode-only, since `Digest()` output came
+ * from SQL).
+ */
+export function bytesToBase64url (bytes: Uint8Array): string {
+  let binary = ''
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]!)
+  const b64 = btoa(binary)
+  return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+}
+
+/**
+ * Reproduce `AuthorityEngine.createAuthorityInvite`'s exact signed-bytes
+ * domain (999.1 R-03 carve-out — an ad-hoc pipe-joined `TextEncoder` byte
+ * string, NOT the canonical SQL `Digest()`). Field order MUST match the
+ * producer verbatim: `[type, name, expiration].join('|')`.
+ */
+export function authorityInviteSignedBytes (fields: { type: string; name: string; expiration: string }): Uint8Array {
+  return new TextEncoder().encode([fields.type, fields.name, fields.expiration].join('|'))
+}
+
+/**
+ * Reproduce `AuthorityEngine.createOfficerInvite`'s exact signed-bytes
+ * domain (999.1 R-03 carve-out). Field order MUST match the producer
+ * verbatim: `[name, title, JSON.stringify(scopes), type, expiration,
+ * inviteKey].join('|')`.
+ */
+export function officerInviteSignedBytes (fields: {
+  name: string
+  title: string
+  scopes: unknown
+  type: string
+  expiration: string
+  inviteKey: string
+}): Uint8Array {
+  return new TextEncoder().encode(
+    [fields.name, fields.title, JSON.stringify(fields.scopes), fields.type, fields.expiration, fields.inviteKey].join('|')
+  )
+}
+
+/**
+ * Reproduce `InvitationEngine.respondToInvite`'s A1 LOCKED ENCODING
+ * signed-bytes domain for `InviteResult.InviteSignature`:
+ * `[slotCid, digestToken, String(accept)].join('|')`, where `digestToken`
+ * is the value being written to `InviteResult.Digest` coerced to a string
+ * (or the literal `'null'` for a decline, whose `Digest` column is null).
+ */
+export function inviteResultSignedBytes (fields: { slotCid: string; digestToken: string; accept: boolean }): Uint8Array {
+  return new TextEncoder().encode([fields.slotCid, fields.digestToken, String(fields.accept)].join('|'))
+}
+
+/**
+ * Verify a secp256k1 signature over an ad-hoc (non-canonical-`Digest()`)
+ * byte domain — the InviteSlot/InviteResult 999.1 R-03 engine-side carve-out
+ * (D-11/D-12's original "engine-side" approach, scoped to just these two
+ * signature sites). Hashes `signedBytes` once (matching the producer's
+ * `secp256k1.sign(sha256(signedBytes), invitePrivateBytes)` call — noble v2's
+ * `prehash:true` default applies the SECOND sha256 inside both `sign()` and
+ * `verify()`), base64url-encodes the result, and delegates to the shared
+ * `verifySig()` primitive (same encoding contract as the in-schema
+ * `SignatureValid` UDF: digest base64url, signature/key hex — Pitfall 6, a
+ * mismatch here silently fails closed).
+ */
+export function verifyAdHocInviteSignature (
+  signedBytes: Uint8Array,
+  signatureHex: string | null | undefined,
+  signerKeyHex: string | null | undefined
+): boolean {
+  if (!signatureHex || !signerKeyHex) return false
+  const digestB64url = bytesToBase64url(sha256(signedBytes))
+  return verifySig(digestB64url, signatureHex, signerKeyHex)
 }
 
 // H16 hash function

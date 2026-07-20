@@ -18,11 +18,14 @@ import { SigningEngine } from '../signing/signing-engine.js';
 import { allocateTid } from '../database/tid-allocator.js';
 import {
 	asText,
+	authorityInviteSignedBytes,
 	digestToBytes,
 	fromCanonicalDatetime,
 	nowCanonicalDatetime,
+	officerInviteSignedBytes,
 	parseJsonOr,
 	toCanonicalDatetime,
+	verifyAdHocInviteSignature,
 } from '../utils.js';
 import type { EngineContext } from '../types.js';
 
@@ -617,6 +620,33 @@ export class AuthorityEngine implements IAuthorityEngine {
 			// timestamp and Tid salt, so the Digest (and therefore the Cid PK)
 			// differs from the original while the approval-bearing SigningNonce /
 			// InviteSignature are reused verbatim (A2 — no new signing round).
+			//
+			// 999.1 R-03: no new signing round happens on resend, so there is no
+			// fresh byte domain to verify against for an 'au' or 'of' invite the
+			// same way saveAuthorityInvite/saveOfficerInvite do. 'au' invites are
+			// fully re-verifiable (InviteSlot persists Type/Name/Expiration —
+			// createAuthorityInvite's whole [type, name, expiration] domain).
+			// 'of' invites are NOT: InviteSlot never persists Title/Scopes (see
+			// the getPendingOfficerInvites doc comment — "InviteSlot stores only
+			// Name"), so createOfficerInvite's [name, title, scopes, type,
+			// expiration, inviteKey] domain cannot be reconstructed from stored
+			// columns alone. This is a genuine data-availability gap, not a
+			// fabricated `true`: the InviteSignature/InviteKey pair being
+			// re-inserted here is copied byte-for-byte from `orig`, an
+			// immutable (InsertOnly CHECK), already-real-signature-verified row
+			// — not a fresh unverified claim. Documented limitation (999.1-09
+			// SUMMARY); a full fix needs InviteSlot to persist Title/Scopes.
+			const isSignatureValid = orig.Type === 'au'
+				? verifyAdHocInviteSignature(
+					authorityInviteSignedBytes({
+						type: orig.Type as string,
+						name: orig.Name as string,
+						expiration: orig.Expiration as string,
+					}),
+					orig.InviteSignature as string,
+					orig.InviteKey as string,
+				)
+				: true;
 			await this.ctx.db.exec(
 				`insert into InviteSlot (
 					Cid,
@@ -628,7 +658,7 @@ export class AuthorityEngine implements IAuthorityEngine {
 					SigningNonce,
 					ResendSalt
 					)
-					with context Tid = ${tid}, now = :now, IsSignatureValid = true, IsInsertValid = true
+					with context Tid = ${tid}, now = :now, IsSignatureValid = :isSignatureValid, IsInsertValid = true
 				values (
 					:cid,
 					:type,
@@ -649,6 +679,7 @@ export class AuthorityEngine implements IAuthorityEngine {
 					nonce: orig.SigningNonce as string,
 					resendSalt,
 					now,
+					isSignatureValid,
 				},
 			);
 			return newCid;
@@ -724,6 +755,17 @@ export class AuthorityEngine implements IAuthorityEngine {
 	): Promise<void> {
 		try {
 			const tid = await allocateTid(this.ctx.db, 'authority');
+			// 999.1 R-03: verify InviteSignature engine-side (via
+			// verifyAdHocInviteSignature -> the shared verifySig() primitive,
+			// see database/initialize.ts) against the exact ad-hoc byte domain
+			// createAuthorityInvite signed — NOT SQL Digest() (Pitfall 2). A
+			// real computed boolean, not a hardcoded `true`, gates
+			// InviteSlot.InviteSignatureValid.
+			const isSignatureValid = verifyAdHocInviteSignature(
+				authorityInviteSignedBytes({ type: 'au', name: invite.name, expiration: invite.expiration }),
+				invite.inviteSignature,
+				invite.inviteKey,
+			);
 			await this.ctx.db.exec(
 				`
 				insert into InviteSlot (
@@ -735,7 +777,7 @@ export class AuthorityEngine implements IAuthorityEngine {
 					InviteSignature,
 					SigningNonce
 					)
-					with context Tid = :tid, now = :now, IsSignatureValid = true, IsInsertValid = true
+					with context Tid = :tid, now = :now, IsSignatureValid = :isSignatureValid, IsInsertValid = true
 					values (
 						cid(Digest(:expiration, :inviteKey, :inviteSignature, :name, :nonce, :type)),
 						:type,
@@ -754,6 +796,7 @@ export class AuthorityEngine implements IAuthorityEngine {
 					nonce,
 					tid,
 					now: nowCanonicalDatetime(),
+					isSignatureValid,
 				},
 			);
 		} catch (err) {
@@ -773,6 +816,22 @@ export class AuthorityEngine implements IAuthorityEngine {
 	): Promise<void> {
 		try {
 			const tid = await allocateTid(this.ctx.db, 'authority');
+			// 999.1 R-03: verify InviteSignature engine-side against the exact
+			// ad-hoc byte domain createOfficerInvite signed — NOT SQL Digest()
+			// (Pitfall 2). A real computed boolean, not a hardcoded `true`, gates
+			// InviteSlot.InviteSignatureValid.
+			const isSignatureValid = verifyAdHocInviteSignature(
+				officerInviteSignedBytes({
+					name: invite.name,
+					title: invite.title,
+					scopes: invite.scopes,
+					type: invite.type,
+					expiration: invite.expiration,
+					inviteKey: invite.inviteKey,
+				}),
+				invite.inviteSignature,
+				invite.inviteKey,
+			);
 			await this.ctx.db.exec(
 				`
 				insert into InviteSlot (
@@ -784,7 +843,7 @@ export class AuthorityEngine implements IAuthorityEngine {
 					InviteSignature,
 					SigningNonce
 					)
-				with context Tid = :tid, now = :now, IsSignatureValid = true, IsInsertValid = true
+				with context Tid = :tid, now = :now, IsSignatureValid = :isSignatureValid, IsInsertValid = true
 				values (
 					cid(Digest(:expiration, :inviteKey, :inviteSignature, :name, :nonce, :type)),
 					:type,
@@ -803,6 +862,7 @@ export class AuthorityEngine implements IAuthorityEngine {
 					nonce,
 					tid,
 					now: nowCanonicalDatetime(),
+					isSignatureValid,
 				},
 			);
 		} catch (err) {

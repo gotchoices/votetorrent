@@ -19,7 +19,7 @@ import { NetworkProposeRevisionBuilder } from '../src/network/builders/network-p
 import { NetworkRespondToInviteBuilder } from '../src/network/builders/network-respond-to-invite-builder';
 import { NetworksEngine } from '../src/networks/networks-engine';
 import type { EngineContext } from '../src/types.js';
-import { createTestNetwork, addTestAuthority, addTestElection, seedAuthorityInvite, seedUserInvite } from './fixtures/test-context.js';
+import { createTestNetwork, addTestAuthority, addTestElection, seedAuthorityInvite, seedUserInvite, signInviteResult } from './fixtures/test-context.js';
 import { randomTestKeyPair } from './fixtures/keys.js';
 import { AsyncStorage } from './shims/react-native';
 import type {
@@ -1743,7 +1743,10 @@ describe('NetworkEngine', () => {
 		it('inserts an InviteResult row with null digest for a rejected invite', async () => {
 			const { engine } = await createNetworkEngine();
 			const ctx = (engine as unknown as { ctx: EngineContext }).ctx;
-			const fakeInviteKey = 'j'.repeat(66);
+			// 999.1 R-03: a rejection hits the non-authority branch, which IS
+			// verified for real — needs a real secp256k1 keypair (not the
+			// structural 'j'-repeat placeholder) so a real signature can be produced.
+			const { privateHex: fakeInvitePrivate, publicHex: fakeInviteKey } = randomTestKeyPair();
 			const fakeInvite = { inviteKey: fakeInviteKey, type: 'au' as const, expiration: '0', inviteSignature: 'b'.repeat(128) };
 			await ctx.db.exec(
 				`INSERT INTO InviteSlot (Cid, Type, Name, Expiration, InviteKey, InviteSignature, SigningNonce)
@@ -1751,11 +1754,13 @@ describe('NetworkEngine', () => {
 				 VALUES (cid(Digest(:expiration, :inviteKey, :inviteSignature, 'test', 'test-nonce-2', :type)), :type, 'test', :expiration, :inviteKey, :inviteSignature, 'test-nonce-2')`,
 				{ inviteKey: fakeInviteKey, type: 'au', expiration: '2099-12-31T23:59:59', inviteSignature: 'b'.repeat(128) }
 			);
+			const slotRowForSig = await ctx.db.prepare('SELECT Cid FROM InviteSlot WHERE InviteKey = :k AND Type = :t').get({ k: fakeInviteKey, t: 'au' });
+			const inviteSignature = signInviteResult(fakeInvitePrivate, slotRowForSig!.Cid as string, 'null', false);
 			await engine.respondToInvite({
 				invite: fakeInvite,
 				isAccepted: false,
 				invokes: undefined,
-				inviteSignature: 'b'.repeat(128),
+				inviteSignature,
 				userId: undefined,
 				userInit: undefined,
 			} as never);

@@ -10,7 +10,7 @@ import { NetworksEngine } from '../src/networks/networks-engine'
 import { nowCanonicalDatetime, toCanonicalDatetime, digestToBytes } from '../src/utils.js'
 import type { EngineContext } from '../src/types.js'
 import { randomTestKeyPair } from './fixtures/keys.js'
-import { createTestNetwork, addTestAuthority, seedUserInvite, makeDistinctTestUser } from './fixtures/test-context.js'
+import { createTestNetwork, addTestAuthority, seedUserInvite, makeDistinctTestUser, signInviteResult } from './fixtures/test-context.js'
 import { AsyncStorage } from './shims/react-native'
 import type {
   User,
@@ -808,11 +808,19 @@ describe('AuthorityEngine', () => {
       const invite = authorityEngine.createAuthorityInvite('Rejected')
       const sig = makeRealSignCallback('user-1', invite.inviteKey)
       await authorityEngine.saveInviteWithSigning(invite, 'iad', sig)
+      // 999.1 R-03: a rejection hits NetworkEngine.respondToInvite's
+      // non-authority branch, which IS verified for real — sign the A1
+      // LOCKED domain with the invite's own one-time private key.
+      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
+      const slotRow = await ctx.db
+        .prepare('select Cid from InviteSlot where InviteKey = :inviteKey')
+        .get({ inviteKey: invite.inviteKey }) as { Cid: string }
+      const inviteSignature = signInviteResult(invite.invitePrivate, slotRow.Cid, 'null', false)
       await networkEngine.respondToInvite({
         invite,
         isAccepted: false,
         invokes: undefined,
-        inviteSignature: invite.inviteSignature,
+        inviteSignature,
         userId: undefined,
         userInit: undefined
       } as never)
@@ -2353,11 +2361,13 @@ describe('AuthorityEngine', () => {
       await authorityEngine.saveInviteWithSigning(invite, 'iad', sig)
       const slotRow = await ctx.db.prepare('SELECT Cid FROM InviteSlot WHERE InviteKey = :k').get({ k: invite.inviteKey })
       const slotCid = slotRow!.Cid as string
+      // 999.1 R-03: sign the A1 LOCKED domain for real (rejection => non-authority branch).
+      const inviteSignature = signInviteResult(invite.invitePrivate, slotCid, 'null', false)
       await networkEngine.respondToInvite({
         invite,
         isAccepted: false,
         invokes: undefined,
-        inviteSignature: invite.inviteSignature,
+        inviteSignature,
         userId: undefined,
         userInit: undefined
       } as never)
@@ -2413,11 +2423,15 @@ describe('AuthorityEngine', () => {
       await authorityEngine.saveInviteWithSigning(invite, 'rad', sig)
       const slotRow = await ctx.db.prepare('SELECT Cid FROM InviteSlot WHERE InviteKey = :k').get({ k: invite.inviteKey })
       const slotCid = slotRow!.Cid as string
+      // 999.1 R-03: non-authority accepted branch — digestToken is
+      // JSON.stringify(invokes), matching network-engine.ts's resultDigest.
+      const invokes = { officer: { userId: 'user-2', title: 'Inspector' } }
+      const inviteSignature = signInviteResult(invite.invitePrivate, slotCid, JSON.stringify(invokes), true)
       await networkEngine.respondToInvite({
         invite,
         isAccepted: true,
-        invokes: { officer: { userId: 'user-2', title: 'Inspector' } },
-        inviteSignature: invite.inviteSignature,
+        invokes,
+        inviteSignature,
         userId: 'user-2',
         userInit: undefined
       } as never)
@@ -2439,21 +2453,23 @@ describe('AuthorityEngine', () => {
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
       const slotRow = await ctx.db.prepare('SELECT Cid FROM InviteSlot WHERE InviteKey = :k').get({ k: invite.inviteKey })
       const slotCid = slotRow!.Cid as string
+      const invokes1 = { officer: { userId: 'user-3', title: 'A' } }
       await networkEngine.respondToInvite({
         invite,
         isAccepted: true,
-        invokes: { officer: { userId: 'user-3', title: 'A' } },
-        inviteSignature: invite.inviteSignature,
+        invokes: invokes1,
+        inviteSignature: signInviteResult(invite.invitePrivate, slotCid, JSON.stringify(invokes1), true),
         userId: 'user-3',
         userInit: undefined
       } as never)
       let caught: unknown
       try {
+        const invokes2 = { officer: { userId: 'user-4', title: 'B' } }
         await networkEngine.respondToInvite({
           invite,
           isAccepted: true,
-          invokes: { officer: { userId: 'user-4', title: 'B' } },
-          inviteSignature: invite.inviteSignature,
+          invokes: invokes2,
+          inviteSignature: signInviteResult(invite.invitePrivate, slotCid, JSON.stringify(invokes2), true),
           userId: 'user-4',
           userInit: undefined
         } as never)

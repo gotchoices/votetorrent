@@ -10,7 +10,8 @@
 import { ElectionEvent, ElectionType, UserKeyType } from '@votetorrent/vote-core'
 import { secp256k1 } from '@noble/curves/secp256k1.js'
 import { bytesToHex, hexToBytes } from '@noble/curves/utils.js'
-import { nowCanonicalDatetime, toCanonicalDatetime, digestToBytes } from '../../src/utils.js'
+import { sha256 } from '@noble/hashes/sha2.js'
+import { nowCanonicalDatetime, toCanonicalDatetime, digestToBytes, inviteResultSignedBytes } from '../../src/utils.js'
 import { ElectionsEngine, peekNextElectionTid } from '../../src/elections/elections-engine.js'
 import { SigningEngine } from '../../src/signing/signing-engine.js'
 import { NetworksEngine } from '../../src/networks/networks-engine.js'
@@ -34,6 +35,41 @@ import type {
   Signature,
   User,
 } from '@votetorrent/vote-core'
+
+// ---------------------------------------------------------------------------
+// 999.1-09 (R-03): NetworkEngine.respondToInvite's InviteResult.InviteSignature
+// CHECK is now verified engine-side for real (verifyAdHocInviteSignature). Test
+// fixtures that previously fabricated `inviteSignature: 'a'.repeat(128)` must
+// now sign a REAL secp256k1 signature over the A1 LOCKED byte domain using the
+// invite's own `invitePrivate` key. These helpers mirror
+// `NetworkEngine.respondToInvite`'s signing/digest logic exactly (same field
+// order, same `digest()` plugin export) so a fixture-produced signature
+// verifies against the engine's own recomputation.
+// ---------------------------------------------------------------------------
+
+/**
+ * Sign an InviteResult over the A1 LOCKED byte domain
+ * ([slotCid, digestToken, String(accept)].join('|')) with the invite's own
+ * one-time private key — mirrors `network-engine.ts respondToInvite`'s
+ * `verifyAdHocInviteSignature` verification target exactly.
+ */
+export function signInviteResult (
+  invitePrivateHex: string,
+  slotCid: string,
+  digestToken: string,
+  accept: boolean
+): string {
+  const signedBytes = inviteResultSignedBytes({ slotCid, digestToken, accept })
+  return bytesToHex(secp256k1.sign(sha256(signedBytes), hexToBytes(invitePrivateHex)))
+}
+
+// NOTE: NetworkEngine.respondToInvite's AUTHORITY-ACCEPTED branch (invoking
+// createAuthority) is NOT wired to a real `verifyAdHocInviteSignature` check
+// — see the "999.1 R-03 — DOCUMENTED LIMITATION" comment at that call site in
+// `network-engine.ts`. Its InviteResult.Digest embeds a server-generated
+// `crypto.randomUUID()` unknown to the caller at signing time, so no fixture
+// (real or fake) can pre-sign it; `seedAuthorityInvite` below keeps its
+// existing placeholder `inviteSignature` for that reason.
 
 // ---------------------------------------------------------------------------
 // Layer-0: fixture factories
