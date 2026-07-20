@@ -64,6 +64,13 @@ export const PROOF_WRITE_ATTEMPTED_KEY = 'proof:writeAttempted';
 // durable cross-restart questions-persisted check into the FULL-CHAIN VERDICT.
 export const PROOF_BALLOT_REF_KEY = 'proof:ballotRef';
 
+// Phase 999.1 D-15: WRITE phase records the persisted 'elections' namespace
+// TidHighWater observed right after the full-chain write's createElection() call.
+// The device-attended TID-REISSUE recheck (post force-stop + backward clock jump)
+// reads this baseline back and asserts the NEXT allocation strictly exceeds it —
+// the real Hermes/LevelDB clock-skew no-reissue proof.
+export const PROOF_TID_REISSUE_BASELINE_KEY = 'proof:tidReissueBaseline';
+
 // ---------------------------------------------------------------------------
 // Minimal LocalStorage wrapper (delegates to AsyncStorage)
 // ---------------------------------------------------------------------------
@@ -295,6 +302,18 @@ export async function runFullChainWritePhase(
     `[proof] full-chain write DONE — hash=${networkRef.hash} Network=${networkCount} Authority=${authorityCount} Election=${electionCount}`,
   );
 
+  // Phase 999.1 D-15 baseline: record the 'elections' namespace TidHighWater right
+  // after this phase's createElection() call (which reserved the T/T+1 pair via the
+  // shared allocateTid(db, 'elections', ...)). This is the "prior max Tid" the
+  // device-attended TID-REISSUE recheck (runTidReissueRecheckPhase, below) asserts
+  // strictly exceeds after a force-stop + backward device-clock jump + relaunch.
+  const tidHighWaterRow = (await db
+    .prepare('select HighWater from TidHighWater where Namespace = :ns')
+    .get({ ns: 'elections' })) as { HighWater: number } | undefined;
+  const priorMaxTid = tidHighWaterRow?.HighWater ?? 0;
+  await AsyncStorage.setItem(PROOF_TID_REISSUE_BASELINE_KEY, String(priorMaxTid));
+  console.info(`[proof] full-chain write: recorded D-15 TID-REISSUE baseline (elections HighWater=${priorMaxTid})`);
+
   return { networkRef, authorityId, electionId, db };
 }
 
@@ -516,6 +535,184 @@ export async function runFullChainReadPhase(
   }
 
   return { passed, networkCount, authorityCount, electionCount };
+}
+
+// ---------------------------------------------------------------------------
+// Phase 999.1 D-15 — on-device Tid no-reissue recheck (device-attended)
+// ---------------------------------------------------------------------------
+
+/**
+ * TID-REISSUE RECHECK: the on-device, real Hermes/LevelDB confirmation of the
+ * durable Tid allocator's no-reissue guarantee (D-15) across the documented real
+ * clock-skew vector.
+ *
+ * Device-attended procedure this phase is designed to run inside:
+ *  1. runFullChainWritePhase() runs first — creates a mutation (an Election via
+ *     the real signing seam) and records the prior-max 'elections' TidHighWater
+ *     under PROOF_TID_REISSUE_BASELINE_KEY.
+ *  2. Operator force-stops the app WITHOUT clearing data (`am force-stop`, no
+ *     `pm clear`) — the existing full-chain "restart" protocol.
+ *  3. Operator rolls the device clock BACKWARD past the recorded prior-max Tid
+ *     (the real clock-skew gotcha this proof targets).
+ *  4. Operator relaunches the app; this phase runs: re-attaches to the SAME
+ *     persisted LevelDB store (via networksEngine.open() → rnDbFactory, D-05
+ *     rebind guard — Pitfall 5) and attempts another allocation/mutation (a
+ *     second, distinct Election through the real signing seam, consuming the
+ *     SAME 'elections' allocator namespace).
+ *  5. Asserts the newly-observed 'elections' TidHighWater is STRICTLY GREATER
+ *     than the recorded prior max — the durable allocator must never reissue a
+ *     consumed Tid, even though Date.now() now reads BEFORE that prior max.
+ *
+ * This duplicates (rather than shares/refactors) the election-creation steps
+ * from runFullChainWritePhase so this phase stays independently self-contained
+ * and the existing full-chain write phase is left completely untouched
+ * (additive extension, not a harness-architecture rewrite).
+ *
+ * Emits a single greppable verdict line (see the `passed ? 'PASS' : 'FAIL'`
+ * console.info near the end of this function) so the device driver script can
+ * gate on it exactly like the other proof-verdict markers in this file.
+ */
+export async function runTidReissueRecheckPhase(
+  networksEngine: NetworksEngine,
+  user: User,
+): Promise<{ passed: boolean; priorMaxTid: number; newMaxTid: number }> {
+  console.info('[proof] TID-REISSUE recheck: starting');
+
+  const chainRefJson = await AsyncStorage.getItem(PROOF_CHAIN_REF_KEY);
+  const baselineStr = await AsyncStorage.getItem(PROOF_TID_REISSUE_BASELINE_KEY);
+  if (!chainRefJson || baselineStr === null) {
+    throw new Error(
+      '[proof] TID-REISSUE recheck: missing chain ref or D-15 baseline — run runFullChainWritePhase first',
+    );
+  }
+  const chainRef: { networkRef: NetworkReference; authorityId: string; electionId: string } =
+    JSON.parse(chainRefJson);
+  const priorMaxTid = Number(baselineStr);
+
+  // Re-attach to the SAME persisted LevelDB store post force-stop/clock-rollback.
+  // open() is idempotent if runFullChainReadPhase already attached this boot
+  // (cache hit) — safe to call again so this phase stays independently invokable.
+  await networksEngine.open(chainRef.networkRef, user);
+  const ctx = networksEngine.getEstablishedContext(chainRef.networkRef.hash);
+  if (!ctx) {
+    throw new Error(
+      '[proof] TID-REISSUE recheck: no established context after open() for hash=' + chainRef.networkRef.hash,
+    );
+  }
+  // Phase 14 D-05 schema-rebind lesson: use the captured handle, never a second
+  // rnDbFactory() call (Pitfall 5).
+  const db = getLastProofDb();
+  if (!db) {
+    throw new Error('[proof] TID-REISSUE recheck: no captured db handle after open()');
+  }
+
+  const privKeyHex = await getDevicePrivKeyHex();
+  if (!privKeyHex) {
+    throw new Error('[proof] TID-REISSUE recheck: device private key not found — call getOrCreateDeviceUser first');
+  }
+  const signerKey = user.activeKeys?.[0]?.key;
+  if (!signerKey) {
+    throw new Error('[proof] TID-REISSUE recheck: user has no active key');
+  }
+  const sign = await createDeviceSigner('Proof Runner (TID-REISSUE)');
+  const electionsEngine = new ElectionsEngine(ctx);
+
+  const now = Date.now();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const secondElectionId: string = (globalThis as any).crypto.randomUUID();
+  const electionFields = {
+    id: secondElectionId,
+    authorityId: chainRef.authorityId,
+    title: 'Proof Election TID-REISSUE',
+    date: now + 30 * 24 * 60 * 60 * 1000,
+    revisionDeadline: now + 25 * 24 * 60 * 60 * 1000,
+    ballotDeadline: now + 28 * 24 * 60 * 60 * 1000,
+    type: ElectionType.adhoc,
+  };
+
+  const signingNonce = await (electionsEngine as unknown as {
+    seedElectionSigning(
+      electionFields: { id: string; authorityId: string; title: string; date: number; revisionDeadline: number; ballotDeadline: number; type: ElectionType },
+      sign: (digest: Uint8Array) => Promise<import('@votetorrent/vote-core').Signature>,
+    ): Promise<string>;
+  }).seedElectionSigning(electionFields, sign);
+  console.info('[proof] TID-REISSUE recheck: election signing seam complete, nonce=' + signingNonce);
+
+  const pastRevTs = now - 1000;
+  const revisionFields = {
+    revision: 0,
+    revisionTimestamp: pastRevTs,
+    tags: ['proof', 'tid-reissue'],
+    instructions: '# Proof Election TID-REISSUE',
+    timeline: {
+      registrationEnds: now + 2 * 86400000,
+      ballotsFinal: now + 5 * 86400000,
+      votingStarts: now + 10 * 86400000,
+      tallyingStarts: now + 14 * 86400000,
+      validation: now + 15 * 86400000,
+      certificationStarts: now + 16 * 86400000,
+      closed: now + 17 * 86400000,
+    },
+    keyholderThreshold: 0,
+  };
+  // peekNextElectionTid() points at T (this election's tid) — +1 gives the revision tid.
+  const revTid = peekNextElectionTid() + 1;
+  const revisionSigningNonce = await (electionsEngine as unknown as {
+    seedElectionRevisionSigning(
+      electionId: string,
+      authorityId: string,
+      revision: {
+        revision: number;
+        revisionTimestamp: number;
+        tags: string[];
+        instructions: string;
+        timeline: Record<string, number>;
+        keyholderThreshold: number;
+      },
+      tid: number,
+      sign: (digest: Uint8Array) => Promise<import('@votetorrent/vote-core').Signature>,
+    ): Promise<string>;
+  }).seedElectionRevisionSigning(
+    secondElectionId, chainRef.authorityId, revisionFields, revTid, sign,
+  );
+  console.info('[proof] TID-REISSUE recheck: revision signing seam complete, revNonce=' + revisionSigningNonce);
+
+  // The actual re-allocation/mutation attempt: createElection() consumes a fresh
+  // T/T+1 pair from the SAME 'elections' TidHighWater row this store already holds.
+  await electionsEngine.createElection(
+    {
+      election: electionFields,
+      revision: {
+        electionId: secondElectionId,
+        ...revisionFields,
+        keyholders: [],
+      },
+    },
+    { signingNonce, revisionSigningNonce },
+  );
+  console.info('[proof] TID-REISSUE recheck: second election created, id=' + secondElectionId);
+
+  const newRow = (await db
+    .prepare('select HighWater from TidHighWater where Namespace = :ns')
+    .get({ ns: 'elections' })) as { HighWater: number } | undefined;
+  const newMaxTid = newRow?.HighWater ?? 0;
+  // D-15 no-reissue assertion: the newly-allocated Tid must STRICTLY exceed the
+  // prior max recorded before the force-stop + backward clock jump — never a
+  // repeat, even though Date.now() may now read below priorMaxTid.
+  const passed = newMaxTid > priorMaxTid;
+
+  if (passed) {
+    console.info(`[proof] TID-REISSUE recheck PASS — priorMaxTid=${priorMaxTid} newMaxTid=${newMaxTid}`);
+  } else {
+    console.error(
+      `[proof] TID-REISSUE recheck FAIL — priorMaxTid=${priorMaxTid} newMaxTid=${newMaxTid} (Tid was reissued or did not advance)`,
+    );
+  }
+  console.info(
+    `[proof] ========== TID-REISSUE VERDICT: ${passed ? 'PASS' : 'FAIL'} (priorMaxTid=${priorMaxTid}, newMaxTid=${newMaxTid}) ==========`,
+  );
+
+  return { passed, priorMaxTid, newMaxTid };
 }
 
 // ---------------------------------------------------------------------------
