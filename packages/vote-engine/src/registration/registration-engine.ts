@@ -1,6 +1,7 @@
 import { setDisclose } from '@optimystic/quereus-plugin-crypto'
 import { digestToBytes, nowCanonicalDatetime, parseJsonOr, asText } from '../utils.js'
 import { seedSignedMutation } from '../signing/signed-mutation.js'
+import { allocateTid } from '../database/tid-allocator.js'
 import { toIsoZDatetime, toDeferredCheckDatetime, reZuluDatetime, resolveSign as resolveSignHelper, requireCtx as requireCtxHelper, rethrow as rethrowHelper } from '../signing/ceremony-helpers.js'
 import { RegistrationRegisterBuilder } from './builders/registration-register-builder.js'
 import { validateFieldPolicy } from './field-policy.js'
@@ -34,14 +35,13 @@ import type {
  */
 type SignatureOrCallback = Signature | ((digest: Uint8Array) => Promise<Signature>)
 
-// Phase 42-03 — module-scoped monotonic Tid counter for RegistrationEngine
-// mutations, mirroring ElectionsEngine's `nextTid`/`peekNextElectionTid()`
-// pattern (elections-engine.ts:45-48). Same WR-16/WR-25 heuristic caveats
-// apply (seeded from Date.now(), not store-reconciled).
-let nextRegistrationTid = Date.now()
-
-/** For test use only — returns the Tid that the next RegistrationEngine mutation will use. */
-export function peekNextRegistrationTid (): number { return nextRegistrationTid }
+// 999.1 D-01/D-02: RegistrationEngine mutations allocate Tids through the
+// shared durable, peer-safe allocator (`../database/tid-allocator.js`,
+// namespace 'registration') instead of a process-local `Date.now()` counter
+// — closes the restart/multi-peer Tid-collision replay window this module
+// previously carried (superseded the retired `nextRegistrationTid`/
+// `peekNextRegistrationTid()` pair; see `tid-allocator.ts`'s `peekTid` for
+// the equivalent introspection hook).
 
 // WR-01/WR-04 (42-REVIEW): the datetime + ceremony helpers were consolidated
 // into ../signing/ceremony-helpers.js so the three Phase-42 engines share ONE
@@ -193,7 +193,7 @@ export class RegistrationEngine implements IRegistrationEngine {
   ): Promise<Registrant> {
     this.requireCtx('createRegistrant')
     const ctx = this.ctx!
-    const tid = nextRegistrationTid++
+    const tid = await allocateTid(ctx.db, 'registration')
     try {
       const status = input.status ?? 'a'
       const expiration = toIsoZDatetime(input.expiration)
@@ -310,7 +310,7 @@ export class RegistrationEngine implements IRegistrationEngine {
   ): Promise<RegistrantPublic> {
     this.requireCtx('createRegistrantPublic')
     const ctx = this.ctx!
-    const tid = nextRegistrationTid++
+    const tid = await allocateTid(ctx.db, 'registration')
     try {
       const registrantRow = await ctx.db
         .prepare('select AuthorityId from Registrant where Id = :registrantId')
@@ -377,7 +377,7 @@ export class RegistrationEngine implements IRegistrationEngine {
   ): Promise<RegistrantPrivate> {
     this.requireCtx('createRegistrantPrivate')
     const ctx = this.ctx!
-    const tid = nextRegistrationTid++
+    const tid = await allocateTid(ctx.db, 'registration')
     try {
       const registrantRow = await ctx.db
         .prepare('select AuthorityId from Registrant where Id = :registrantId')
@@ -439,7 +439,7 @@ export class RegistrationEngine implements IRegistrationEngine {
     options?: { ownsTransaction?: boolean }
   ): Promise<RegistrantSelective> {
     const ctx = this.ctx!
-    const tid = nextRegistrationTid++
+    const tid = await allocateTid(ctx.db, 'registration')
     const registrantRow = await ctx.db
       .prepare('select AuthorityId from Registrant where Id = :registrantId')
       .get({ registrantId })
@@ -818,7 +818,7 @@ export class RegistrationEngine implements IRegistrationEngine {
     const ctx = this.ctx!
     try {
       const authorityId = await this.resolveRegistrantAuthorityId(registrantId, 'enrollElectionRegistrant')
-      const tid = nextRegistrationTid++
+      const tid = await allocateTid(ctx.db, 'registration')
       const digestExpr = 'select Digest(:tid, :electionId, :registrantId) as d'
       const digestParams = { tid, electionId, registrantId }
       const nonce = await seedSignedMutation(ctx, authorityId, 'vrg', tid, digestExpr, digestParams, this.resolveSign(signatureOrCallback))
@@ -845,7 +845,7 @@ export class RegistrationEngine implements IRegistrationEngine {
     const ctx = this.ctx!
     try {
       const authorityId = await this.resolveRegistrantAuthorityId(registrantId, 'removeElectionRegistrant')
-      const tid = nextRegistrationTid++
+      const tid = await allocateTid(ctx.db, 'registration')
       const digestExpr = "select Digest(:tid, :electionId, :registrantId, 'delete') as d"
       const digestParams = { tid, electionId, registrantId }
       const nonce = await seedSignedMutation(ctx, authorityId, 'vrg', tid, digestExpr, digestParams, this.resolveSign(signatureOrCallback))
@@ -908,7 +908,7 @@ export class RegistrationEngine implements IRegistrationEngine {
     const ctx = this.ctx!
     try {
       const authorityId = await this.resolveElectionAuthorityId(field.electionId, 'addElectionRegistrationField')
-      const tid = nextRegistrationTid++
+      const tid = await allocateTid(ctx.db, 'registration')
       const digestExpr = 'select Digest(:tid, :electionId, :fieldName, :tier, :requirement) as d'
       const digestParams = { tid, electionId: field.electionId, fieldName: field.fieldName, tier: field.tier, requirement: field.requirement }
       const nonce = await seedSignedMutation(ctx, authorityId, 'mel', tid, digestExpr, digestParams, this.resolveSign(signatureOrCallback))
@@ -951,7 +951,7 @@ export class RegistrationEngine implements IRegistrationEngine {
       }
       const tier = asText(existing.Tier, 'ElectionRegistrationField.Tier')
       const requirement = asText(existing.Requirement, 'ElectionRegistrationField.Requirement')
-      const tid = nextRegistrationTid++
+      const tid = await allocateTid(ctx.db, 'registration')
       const digestExpr = "select Digest(:tid, :electionId, :fieldName, :tier, :requirement, 'delete') as d"
       const digestParams = { tid, electionId, fieldName, tier, requirement }
       const nonce = await seedSignedMutation(ctx, authorityId, 'mel', tid, digestExpr, digestParams, this.resolveSign(signatureOrCallback))
@@ -1008,7 +1008,7 @@ export class RegistrationEngine implements IRegistrationEngine {
     const ctx = this.ctx!
     try {
       const authorityId = await this.resolveElectionAuthorityId(policy.electionId, 'addElectionDisclosurePolicy')
-      const tid = nextRegistrationTid++
+      const tid = await allocateTid(ctx.db, 'registration')
       const digestExpr = 'select Digest(:tid, :electionId, :fieldName, :audience) as d'
       const digestParams = { tid, electionId: policy.electionId, fieldName: policy.fieldName, audience: policy.audience }
       const nonce = await seedSignedMutation(ctx, authorityId, 'mel', tid, digestExpr, digestParams, this.resolveSign(signatureOrCallback))
@@ -1044,7 +1044,7 @@ export class RegistrationEngine implements IRegistrationEngine {
         throw new Error(`removeElectionDisclosurePolicy: ElectionDisclosurePolicy not found for electionId=${electionId}, fieldName=${fieldName}`)
       }
       const audience = asText(existing.Audience, 'ElectionDisclosurePolicy.Audience')
-      const tid = nextRegistrationTid++
+      const tid = await allocateTid(ctx.db, 'registration')
       const digestExpr = "select Digest(:tid, :electionId, :fieldName, :audience, 'delete') as d"
       const digestParams = { tid, electionId, fieldName, audience }
       const nonce = await seedSignedMutation(ctx, authorityId, 'mel', tid, digestExpr, digestParams, this.resolveSign(signatureOrCallback))
@@ -1137,7 +1137,7 @@ export class RegistrationEngine implements IRegistrationEngine {
       ? toIsoZDatetime(changes.expiration)
       : reZuluDatetime(currentRow.Expiration as string)
 
-    const tid = nextRegistrationTid++
+    const tid = await allocateTid(ctx.db, 'registration')
 
     // 1. Row-level signor signature (D-19) — SAME 7-field formula as createRegistrant's SignatureValid.
     const rowDigestRow = await ctx.db

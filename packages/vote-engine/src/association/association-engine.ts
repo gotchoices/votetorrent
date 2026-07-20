@@ -3,6 +3,7 @@ import { sha256 } from '@noble/hashes/sha2.js'
 import { utf8ToBytes } from '@noble/hashes/utils.js'
 import { asText, digestToBytes, nowCanonicalDatetime } from '../utils.js'
 import { seedSignedMutation } from '../signing/signed-mutation.js'
+import { allocateTid } from '../database/tid-allocator.js'
 import { toIsoZDatetime, toDeferredCheckDatetime, resolveSign as resolveSignHelper, requireCtx as requireCtxHelper, rethrow as rethrowHelper } from '../signing/ceremony-helpers.js'
 import { StubAttestationVerifier } from './stub-attestation-verifier.js'
 import { AssociationAssociateBuilder } from './builders/association-associate-builder.js'
@@ -26,14 +27,13 @@ import type {
  */
 type SignatureOrCallback = Signature | ((digest: Uint8Array) => Promise<Signature>)
 
-// Phase 42-04 — module-scoped monotonic Tid counter for AssociationEngine
-// mutations, mirroring ElectionsEngine/RegistrationEngine's `nextTid`/`peek*`
-// pattern. Same WR-16/WR-25 heuristic caveats apply (seeded from Date.now(),
-// not store-reconciled).
-let nextAssociationTid = Date.now()
-
-/** For test use only — returns the Tid the next AssociationEngine mutation will use. */
-export function peekNextAssociationTid (): number { return nextAssociationTid }
+// 999.1 D-01/D-02: AssociationEngine mutations allocate Tids through the
+// shared durable, peer-safe allocator (`../database/tid-allocator.js`,
+// namespace 'association') instead of a process-local `Date.now()` counter
+// — closes the restart/multi-peer Tid-collision replay window this module
+// previously carried (superseded the retired `nextAssociationTid`/
+// `peekNextAssociationTid()` pair; see `tid-allocator.ts`'s `peekTid` for
+// the equivalent introspection hook).
 
 // WR-01/WR-04 (42-REVIEW): datetime + ceremony helpers consolidated into
 // ../signing/ceremony-helpers.js (shared by all three Phase-42 engines).
@@ -118,7 +118,7 @@ export class AssociationEngine implements IAssociationEngine {
   ): Promise<AttestationChallenge> {
     this.requireCtx('issueAttestationChallenge')
     const ctx = this.ctx!
-    const tid = nextAssociationTid++
+    const tid = await allocateTid(ctx.db, 'association')
     try {
       const registrantRow = await ctx.db
         .prepare('select AuthorityId from Registrant where Id = :registrantId')
@@ -167,7 +167,7 @@ export class AssociationEngine implements IAssociationEngine {
   async removeAttestationChallenge (nonce: string, signatureOrCallback: SignatureOrCallback): Promise<void> {
     this.requireCtx('removeAttestationChallenge')
     const ctx = this.ctx!
-    const tid = nextAssociationTid++
+    const tid = await allocateTid(ctx.db, 'association')
     try {
       const row = await ctx.db
         .prepare('select AuthorityId from AttestationChallenge where Nonce = :nonce')
@@ -301,7 +301,7 @@ export class AssociationEngine implements IAssociationEngine {
         })
 
         // ---- Association (public row) FIRST — AssociationCidMatch (below) needs it. ----
-        const associationTid = nextAssociationTid++
+        const associationTid = await allocateTid(ctx.db, 'association')
         const rowDigestRow = await ctx.db
           .prepare('select Digest(:registrantId, :deviceKey, :deviceHash, :attestationCid, :expiration) as d')
           .get({ registrantId, deviceKey, deviceHash: deviceHash ?? null, attestationCid: cid, expiration })
@@ -353,7 +353,7 @@ export class AssociationEngine implements IAssociationEngine {
         // NOTE: `challengeNonce` (not `nonce`) — avoids the seedSignedMutation reserved-bind
         // collision (see issueAttestationChallenge's doc comment); this is the AttestationChallenge
         // nonce this attestation answered, stored in AssociationPrivate.Nonce.
-        const privateTid = nextAssociationTid++
+        const privateTid = await allocateTid(ctx.db, 'association')
         const privateDigestExpr = 'select Digest(:tid, :cid, :registrantId, :deviceKey, :deviceId, :attestationTimeDeferred, :challengeNonce, :attestationDetails, :expirationDeferred) as d'
         const privateDigestParams = {
           tid: privateTid,
@@ -436,7 +436,7 @@ export class AssociationEngine implements IAssociationEngine {
   async removeAssociation (registrantId: string, deviceKey: string, signatureOrCallback: SignatureOrCallback): Promise<void> {
     this.requireCtx('removeAssociation')
     const ctx = this.ctx!
-    const tid = nextAssociationTid++
+    const tid = await allocateTid(ctx.db, 'association')
     try {
       const existing = await ctx.db
         .prepare('select 1 as found from Association where RegistrantId = :registrantId and DeviceKey = :deviceKey')
