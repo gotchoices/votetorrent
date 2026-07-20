@@ -472,6 +472,23 @@ declare schema main
 		constraint ExpirationValid check (Expiration > context.now),
 		constraint InviteSignatureValid check (context.IsSignatureValid = true),
 		constraint InsertOnly check on update, delete (false),
+		-- D-13 (999.1-09, explicit deferral — evaluated, not silently left):
+		-- CidValid already re-derives EVERY persisted column from the row's own
+		-- content (total re-derivation, no structural-only branch — see the
+		-- comment above), TypeValid/ExpirationValid/InviteSignatureValid cover
+		-- the remaining columns, and the PK (Cid) makes duplicate rows
+		-- impossible. The one candidate structural fold considered — "the
+		-- row's SigningNonce refers to an EXISTING AdminSigning" (mirroring
+		-- Authority.InsertValid's/User.InsertValid's EXISTS-boolean idiom) —
+		-- is NOT foldable: authority-engine.ts's saveInviteWithSigning
+		-- comment documents the mandatory insert order "nonce first,
+		-- InviteSlots second, AdminSigning (startSigningSession) third", so
+		-- AdminSigning legitimately does NOT exist yet at InviteSlot
+		-- insert-time on the normal path (InviteSlotSigningValid's own D-03
+		-- comment confirms this ordering is allowed). Requiring it here would
+		-- break every legitimate invite. No other cheap real condition was
+		-- found within this plan's budget, so this stays a context passthrough
+		-- (the producer side already validates via CidValid's re-derivation).
 		constraint InsertValid check on insert (context.IsInsertValid = true)
 	)
 		with context ( Tid int, now datetime, IsSignatureValid boolean, IsInsertValid boolean );
