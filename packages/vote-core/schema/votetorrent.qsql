@@ -229,10 +229,25 @@ declare schema main
 					and O.AdminEffectiveAt = new.AdminEffectiveAt
 					and O.AuthorityId = new.AuthorityId
 		)),
+		-- 999.1 D-13: SignerKeyValid stays a stub — a real EXISTS-against-UserKey fold would need every
+		-- producer (real + placeholder) to bind a currently-registered UserKey.PubKey, which is not
+		-- guaranteed across today's call sites (some device/test keys are never inserted into UserKey);
+		-- deferred, tracked here rather than silently closed.
 		constraint SignerKeyValid check (context.IsSignerKeyValid = true),
-		constraint SignatureValid check (context.IsSignatureValid = true)
+		-- 999.1 R-02: real in-schema verification via the SignatureValid UDF (same seam initialize.ts's
+		-- verifySig() registers, shared with Registrant/Association). IsPlaceholderSignature is a narrow,
+		-- explicit escape hatch for the carried DEBT-11 ad-hoc/system-derived signing ceremonies
+		-- (election-engine.ts submitBallotForConfirmation's initially-unsigned header row,
+		-- signature-tasks-engine.ts finalizeBallot's per-question/option rows, elections-engine.ts
+		-- debugSeedPendingTasks) that intentionally carry no real crypto — those call sites are the ONLY
+		-- ones permitted to bind IsPlaceholderSignature = true; every other producer leaves it at its
+		-- default (false) and must supply a real, verifiable signature.
+		constraint SignatureValid check (
+			context.IsPlaceholderSignature = true
+				or SignatureValid(new.Digest, new.Signature, new.SignerKey)
+		)
 	)
-		with context ( now datetime, IsSignatureValid boolean, IsSignerKeyValid boolean ); -- TODO fix signature
+		with context ( now datetime, IsSignerKeyValid boolean, IsPlaceholderSignature boolean );
 
 	index AdminSigningDigest on AdminSigning (Digest);
 
@@ -244,18 +259,34 @@ declare schema main
 		Signature text,	-- User's signature of the digest
 		primary key (SigningNonce, UserId),
 		constraint InsertOnly check on update, delete (false),
-		-- Key is valid for the user and the UserId is valid
+		-- 999.1 D-13: Key/Officer validity stay stubs — same deferral rationale as
+		-- AdminSigning.SignerKeyValid (tracked, not closed this plan).
 		constraint SignerKeyValid check (context.IsSignerKeyValid = true),
 		constraint OfficerValid check (context.IsOfficerValid = true),
-		constraint SignatureValid check (context.IsSignatureValid = true)
+		-- 999.1 R-02: verifies the officer's signature against the referenced AdminSigning session's
+		-- own Digest (the officer counter-signs the session digest, not a private per-officer digest).
+		-- IsPlaceholderSignature: the same narrow DEBT-11 carve-out as AdminSigning.SignatureValid,
+		-- propagated through the shared SigningEngine.sign() seam.
+		constraint SignatureValid check (
+			context.IsPlaceholderSignature = true
+				or SignatureValid(
+					(select Digest from AdminSigning where Nonce = new.SigningNonce),
+					new.Signature,
+					new.SignerKey
+				)
+		)
 	)
-		with context ( now datetime, IsSignatureValid boolean, IsSignerKeyValid boolean, IsOfficerValid boolean );
+		with context ( now datetime, IsSignerKeyValid boolean, IsOfficerValid boolean, IsPlaceholderSignature boolean );
 
 	-- The final Admin signature output - only exists if required threshold of signatures are met - exists to avoid long validation
 	table AdminSignature (
 		SigningNonce text primary key,
 		constraint InsertOnly check on update, delete (false),
-		-- Satisfies the threshold policies of the Admin for the given scope
+		-- 999.1 R-06: gates on the REAL `signatureCount >= threshold` boolean the producer computes in TS
+		-- (signing-engine.ts SigningEngine.sign()) and binds here — no longer a hardcoded literal.
+		-- AdminSignature has no Digest/Signature/SignerKey columns (verified live: only a SigningNonce
+		-- PK), so there is nothing on the row itself for SignatureValid() to re-verify — the threshold
+		-- boolean IS the real value being gated.
 		constraint SignatureValid check (context.IsSignatureValid = true)
 	)
 		with context ( IsSignatureValid boolean );
