@@ -25,7 +25,9 @@ import { MockDefaultUserEngine } from '../src/user/mock-default-user-engine.js'
 import { UserEngine } from '../src/user/user-engine'
 import type { EngineContext } from '../src/types.js'
 import { randomTestKeyPair } from './fixtures/keys.js'
-import { addTestAuthority, createTestNetwork, makeDistinctTestUser, seedUserInvite } from './fixtures/test-context.js'
+import { digestToBytes, nowCanonicalDatetime, toCanonicalDatetime } from '../src/utils.js'
+import { addTestAuthority, createTestNetwork, makeDistinctTestUser, makeTestSignCallback, makeTestUser, seedUserInvite } from './fixtures/test-context.js'
+import type { TestAuthorityContext } from './fixtures/test-context.js'
 import { AsyncStorage } from './shims/react-native'
 import type {
   AddUserKeyHistory,
@@ -98,6 +100,11 @@ function makeNetworkInit (): NetworkInit {
 
 // Constructs a UserEngine bound to a DB context produced by
 // NetworksEngine.create().
+//
+// 999.1 R-02/R-04: uses `makeTestUser` (not the local `makeUser`) so the
+// returned `user`'s private key is recorded in `test-context.ts`'s module-
+// scope map — callers that need to exercise the signed subsequent-key
+// addKey path can retrieve a real sign callback via `makeTestSignCallback(user)`.
 async function createUserEngineForExistingNetwork (): Promise<{
   engine: UserEngine
   ctx: EngineContext
@@ -106,7 +113,7 @@ async function createUserEngineForExistingNetwork (): Promise<{
   await AsyncStorage.clear()
   await AsyncStorage.setItem('recentNetworks', [])
   const networksEngine = new NetworksEngine(AsyncStorage)
-  const user = makeUser()
+  const user = makeTestUser()
   await networksEngine.create(makeNetworkInit(), user)
   const recents = (await AsyncStorage.getItem<NetworkReference[]>(
     'recentNetworks'
@@ -123,6 +130,53 @@ async function createUserEngineForExistingNetwork (): Promise<{
   void networkEngine // keep the binding alive for symmetry with other specs
   const engine = new UserEngine(user, ctx)
   return { engine, ctx, user }
+}
+
+// 999.1 R-02/R-04: UserKey.SignatureValid now real-verifies the subsequent-key path
+// (Digest(UserId, PubKey, Type, Expiration) against context.Signature/UserKey) with a
+// bootstrap OR-branch for a user's genuinely-first key (count(*)=1 AND context.UserKey is
+// null). IUserAddKeyBuilder has no sign-callback parameter, so a builder-driven addKey can
+// only ever satisfy the bootstrap branch — this helper seeds a User row (via the invite
+// branch of User.InsertValid) with NO UserKey row yet, so a subsequent builder-driven
+// addKey() is the user's genuinely-first key.
+async function seedKeylessUser (
+  auth: TestAuthorityContext,
+  user: User
+): Promise<void> {
+  const { inviteSlotCid, inviteSignature } = await seedUserInvite(auth, user)
+  const tid = Date.now() + Math.floor(Math.random() * 100_000)
+  await auth.ctx.db.exec(
+    `insert into User (Id, Name, ImageRef)
+     with context SigningNonce = null, InviteSlotCid = :inviteSlotCid, InviteSignature = :inviteSignature, Tid = ${tid}
+     values (:userId, :userName, :userImageRef)`,
+    {
+      userId: user.id,
+      userName: user.name,
+      userImageRef: user.imageRef ? JSON.stringify(user.imageRef) : null,
+      inviteSlotCid,
+      inviteSignature
+    }
+  )
+}
+
+/** A distinct test user with NO activeKeys (so engine.addKey binds context.UserKey = null). */
+function makeKeylessDistinctTestUser (): User {
+  return { ...makeDistinctTestUser(), activeKeys: [] }
+}
+
+/**
+ * Builds a UserEngine bound to a genuinely keyless user (User row seeded, no UserKey
+ * row yet) on a fresh test network/authority. `IUserAddKeyBuilder` has no sign-callback
+ * parameter, so builder-driven `commit()` can only satisfy UserKey.SignatureValid's
+ * bootstrap branch — this fixture supplies exactly that scenario.
+ */
+async function createKeylessUserEngine (): Promise<{ engine: UserEngine, ctx: EngineContext, user: User }> {
+  const net = await createTestNetwork()
+  const auth = await addTestAuthority(net)
+  const user = makeKeylessDistinctTestUser()
+  await seedKeylessUser(auth, user)
+  const engine = new UserEngine(user, auth.ctx)
+  return { engine, ctx: auth.ctx, user }
 }
 
 // Pure-schema-only DB. Loads the schema but performs no INSERTs — useful
@@ -317,7 +371,11 @@ describe('UserEngine', () => {
   // USER-05 — addKey
   // -----------------------------------------------------------------------
   describe('addKey', () => {
-    it('inserts a UserKey row with the per-INSERT context envelope', async () => {
+    // 999.1 R-02/R-04: this is a SUBSEQUENT key for a user who already has an
+    // active key (seeded by createUserEngineForExistingNetwork's networksEngine
+    // .create()), so UserKey.SignatureValid's real branch requires a genuine
+    // signature from the existing active key — supply the sign callback.
+    it('inserts a UserKey row with the per-INSERT context envelope (real subsequent-key signature)', async () => {
       const { engine, ctx, user } = await createUserEngineForExistingNetwork()
       const { publicHex } = randomTestKeyPair()
       const key: UserKey = {
@@ -325,7 +383,7 @@ describe('UserEngine', () => {
         type: UserKeyType.yubico,
         expiration: Date.now() + 86_400_000
       }
-      await engine.addKey(key)
+      await engine.addKey(key, makeTestSignCallback(user))
       const row = await ctx.db
         .prepare(
           'select PubKey from UserKey where UserId = :id and PubKey = :pk'
@@ -350,77 +408,119 @@ describe('UserEngine', () => {
       expect((caught as Error)?.message).to.include('no EngineContext bound')
     })
 
-    // EXPECTED-RED-UNTIL-IMPL UKEY-03 (subsequent-key addKey engine binding)
-    // Read user-engine.ts addKey (line 66-121): context.UserKey is bound to
-    // this.user.activeKeys?.[0]?.key (the EXISTING active key, NOT the new key),
-    // and context.Signature is currently bound to null (line 103).
-    // UKEY-03 impl plan must accept a sign callback and bind a real signature
-    // so UserKey.InsertValid's subsequent-key branch passes with a real sig.
-    it('subsequent-key add: a key signed by an existing active key passes UserKey.InsertValid (UKEY-03)', async () => {
-      // SIGN-01/UKEY-03 subsequent-key contract:
-      //   context.UserKey = <EXISTING active pubkey> (NOT the new key)
-      //   context.Signature = sign(new-key digest) using the EXISTING active private key
-      //   context.IsSignatureValid = true
-      //
-      // RESEARCH §Pitfall 5: context.UserKey is the EXISTING signing key, NOT new.PubKey.
-      //
-      // Today user-engine.ts binds context.Signature = null for addKey (first-key short-circuit).
-      // The UKEY-03 impl plan must accept a sign callback to produce the real signature.
-      // This test is EXPECTED-RED until that callback is wired.
+    // 999.1 R-02/R-04/D-11 (999.1-08): UserKey.SignatureValid now real-verifies the
+    // subsequent-key path — SignatureValid(Digest(UserId, PubKey, Type, Expiration),
+    // context.Signature, context.UserKey). context.UserKey is the EXISTING active
+    // signer's pubkey (Pitfall 5, NOT the new key); the signature must be produced by
+    // the EXISTING active PRIVATE key over that exact digest.
+    it('subsequent-key add: a key signed by the EXISTING active key passes the real UserKey.SignatureValid CHECK (UKEY-03 / D-11)', async () => {
       const { engine, ctx, user } = await createUserEngineForExistingNetwork()
 
-      // The EXISTING active key (pubkey already in UserKey table).
+      // The EXISTING active key (already in the UserKey table) — the ONLY key
+      // whose signature the real CHECK will accept for this subsequent add.
       const existingPubKey = user.activeKeys[0]!.key
 
-      // Generate a NEW key pair for the subsequent add.
-      const { publicHex: newPubHex, privateHex: _newPrivHex } = randomTestKeyPair()
-
-      // Produce a REAL secp256k1 signature of the new key with the EXISTING active private key.
-      // In production the device-signer callback computes this; in tests we use a known private key.
-      // Since createUserEngineForExistingNetwork doesn't expose the private key, we use a fresh
-      // ephemeral key pair (the UKEY-03 engine path checks IsSignatureValid=true context flag,
-      // not crypto verification; real crypto is an app-layer concern per D-01/D-04).
-      const signingPrivBytes = secp256k1.utils.randomSecretKey()
-      const signingPubHex = bytesToHex(secp256k1.getPublicKey(signingPrivBytes))
-      const sigPayload = new TextEncoder().encode(`addKey:${newPubHex}`)
-      const realSigBytes = secp256k1.sign(sha256(sigPayload), signingPrivBytes)
-      const realSigHex = bytesToHex(realSigBytes) // noble v2: returns Uint8Array
-
-      // The subsequent-key path requires context.UserKey = EXISTING key, context.Signature = real sig.
-      // context.UserKey must be the EXISTING active pubkey (not the new key — Pitfall 5).
-      // The engine's addKey currently binds context.UserKey = activeKeys[0].key (correct)
-      // and context.Signature = null (incorrect for subsequent path; UKEY-03 fix needed).
-      //
-      // Call addKey with the new key. The engine must use the real signature binding.
+      const { publicHex: newPubHex } = randomTestKeyPair()
       const newKey = {
         key: newPubHex,
         type: UserKeyType.yubico,
         expiration: Date.now() + 86_400_000
       }
-      await engine.addKey(newKey)
 
-      // Assert the new UserKey row was inserted.
+      // Real sign callback bound to the EXISTING active key's recorded private key
+      // (test-context.ts's makeTestUser/testUserPrivateKeys map).
+      await engine.addKey(newKey, makeTestSignCallback(user))
+
+      // Assert the new UserKey row was inserted (the schema CHECK accepted the real sig).
       const row = await ctx.db
         .prepare('select PubKey from UserKey where UserId = :id and PubKey = :pk')
         .get({ id: user.id, pk: newPubHex })
       expect(row?.PubKey).to.equal(newPubHex)
 
       // Assert context.UserKey was the EXISTING key (not the new key) — Pitfall 5.
-      // Read the AK UserEvent to confirm the new key is distinct from the signing key.
       const eventRow = await ctx.db
         .prepare("select Payload from UserEvent where UserId = :id and Event = 'AK' limit 1")
         .get({ id: user.id })
       if (eventRow?.Payload) {
         const payload = JSON.parse(String(eventRow.Payload))
-        // The new key in the payload must differ from the existing pubkey.
         expect(payload?.userKey?.key).to.equal(newPubHex)
         expect(payload?.userKey?.key).to.not.equal(existingPubKey)
       }
+    })
 
-      // Consume variables to suppress unused warnings.
-      void realSigHex
-      void signingPubHex
-      void existingPubKey
+    // 999.1 T-999.1-19 (999.1-08): a subsequent-key insert signed by a key OTHER THAN
+    // the existing active signer is DB-rejected by the schema's own SignatureValid
+    // CHECK — a raw INSERT bypassing UserEngine.addKey's app-layer dispatch still fails.
+    it('subsequent-key add: a signature from a key OTHER than the existing active signer is rejected by the schema CHECK', async () => {
+      const { ctx, user } = await createUserEngineForExistingNetwork()
+      const existingPubKey = user.activeKeys[0]!.key
+
+      const { publicHex: newPubHex } = randomTestKeyPair()
+      const digestRow = await ctx.db
+        .prepare('select Digest(:userId, :newPubKey, :keyType, :expiration) as d')
+        .get({
+          userId: user.id,
+          newPubKey: newPubHex,
+          keyType: UserKeyType.yubico,
+          expiration: toCanonicalDatetime(Date.now() + 86_400_000)
+        })
+      const digestBytes = digestToBytes(digestRow!.d)
+      // Sign with a FOREIGN key pair, not the user's existing active key.
+      const foreignPrivBytes = secp256k1.utils.randomSecretKey()
+      const forgedSigHex = bytesToHex(secp256k1.sign(digestBytes, foreignPrivBytes))
+
+      let caught: unknown
+      try {
+        await ctx.db.exec(
+          `insert into UserKey (UserId, Type, PubKey, Expiration)
+           with context UserKey = :userKey, Signature = :signature, Tid = 9999, now = :now, IsSignatureValid = true
+           values (:userId, :keyType, :keyValue, :expiration)`,
+          {
+            userId: user.id,
+            keyType: 'Y',
+            keyValue: newPubHex,
+            expiration: toCanonicalDatetime(Date.now() + 86_400_000),
+            userKey: existingPubKey,
+            signature: forgedSigHex,
+            now: nowCanonicalDatetime()
+          }
+        )
+      } catch (err) {
+        caught = err
+      }
+      expect(caught, 'forged-signer signature must be rejected by SignatureValid CHECK').to.not.equal(undefined)
+      expect((caught as Error)?.message).to.include('SignatureValid')
+
+      const row = await ctx.db
+        .prepare('select PubKey from UserKey where UserId = :id and PubKey = :pk')
+        .get({ id: user.id, pk: newPubHex })
+      expect(row).to.equal(undefined)
+    })
+
+    // 999.1 T-999.1-20 (999.1-08): the unsigned first-key bootstrap path (UserEngine
+    // .create()'s own UserKey insert, context.UserKey = null) is NOT wired to verifySig
+    // against a null signature — it stays a pure bootstrap OR-branch (Pitfall 3).
+    it('first-key bootstrap add (via create()) still inserts without a signature', async () => {
+      const { publicHex: createPub } = randomTestKeyPair()
+      const { engine, user } = await makeDbOnlyUserEngine({
+        id: 'bootstrap-userkey-user',
+        activeKeys: [{ key: createPub, type: UserKeyType.mobile, expiration: Date.now() + 86_400_000 }]
+      })
+      const init: CreateUserHistory = {
+        event: UserHistoryEvent.create,
+        timestamp: Date.now(),
+        signature: { signature: 'a'.repeat(128), signerKey: createPub, signerUserId: user.id },
+        name: user.name,
+        imageRef: { url: 'https://img.local/user.png' },
+        userKey: { key: createPub, type: UserKeyType.mobile, expiration: Date.now() + 86_400_000 }
+      }
+      let caught: unknown
+      try {
+        await engine.create(init)
+      } catch (err) {
+        caught = err
+      }
+      expect(caught).to.equal(undefined)
     })
   })
 
@@ -460,12 +560,22 @@ describe('UserEngine', () => {
       const engine = new UserEngine(user, ctx)
 
       // Add a second key first so the revoke does not trip the "not the last key" branch.
+      // 999.1 R-02/R-04: this is a subsequent key for `user` (whose first key is firstPub) —
+      // sign with the EXISTING active private key (firstPrivBytes) so the real
+      // UserKey.SignatureValid CHECK verifies it.
       const { publicHex: secondPub } = randomTestKeyPair()
-      await engine.addKey({
-        key: secondPub,
-        type: UserKeyType.yubico,
-        expiration: Date.now() + 86_400_000
-      })
+      await engine.addKey(
+        {
+          key: secondPub,
+          type: UserKeyType.yubico,
+          expiration: Date.now() + 86_400_000
+        },
+        async (digest) => ({
+          signature: bytesToHex(secp256k1.sign(digest, firstPrivBytes)),
+          signerKey: firstPub,
+          signerUserId: user.id
+        })
+      )
 
       // Build a real secp256k1 signature for the revoke operation (UKEY-02 impl).
       // SIGNER = FIRST key (remains after revoke); KEY BEING REVOKED = secondPub.
@@ -685,11 +795,20 @@ describe('UserEngine', () => {
       )
 
       // 2) addKey — Event 'AK', Sequence 1 (second key so revoke is not the last)
-      await engine.addKey({
-        key: addedPub,
-        type: UserKeyType.yubico,
-        expiration: Date.now() + 86_400_000
-      })
+      // 999.1 R-02/R-04: subsequent key — sign with the EXISTING active private key
+      // (createPrivBytes) so the real UserKey.SignatureValid CHECK verifies it.
+      await engine.addKey(
+        {
+          key: addedPub,
+          type: UserKeyType.yubico,
+          expiration: Date.now() + 86_400_000
+        },
+        async (digest) => ({
+          signature: bytesToHex(secp256k1.sign(digest, createPrivBytes)),
+          signerKey: createPub,
+          signerUserId: user.id
+        })
+      )
 
       // 3) revise — Event 'R', Sequence 2
       const revise: ReviseUserHistory = {
@@ -1315,8 +1434,12 @@ describe('UserAddKeyBuilder', () => {
     expect(full.isValid()).to.equal(true)
   })
 
+  // 999.1 R-02/R-04: IUserAddKeyBuilder has no sign-callback parameter, so a
+  // builder-driven commit() can only satisfy UserKey.SignatureValid's bootstrap
+  // branch — use a genuinely keyless user (createKeylessUserEngine) rather than
+  // createUserEngineForExistingNetwork (whose user already has an active key).
   it('REAL ENGINE: isValid===true => commit() does not throw BuilderValidationError; engine.addKey observable side effects match', async () => {
-    const { engine } = await createUserEngineForExistingNetwork()
+    const { engine } = await createKeylessUserEngine()
     const b = makeFullBuilder(engine)
     expect(b.isValid()).to.equal(true)
     await b.commit()
@@ -1345,7 +1468,7 @@ describe('UserAddKeyBuilder', () => {
   })
 
   it('REAL ENGINE: double-commit guard: 2nd commit() throws BuilderAlreadyCommittedError synchronously, no second engine write', async () => {
-    const { engine } = await createUserEngineForExistingNetwork()
+    const { engine } = await createKeylessUserEngine()
     const b = makeFullBuilder(engine)
     await b.commit()
     let caught: unknown
@@ -1385,12 +1508,12 @@ describe('UserAddKeyBuilder', () => {
   })
 
   it('REAL ENGINE: engine.addKey(payload) and engine.buildAddKey().fromPayload(payload).commit() produce structurally identical observable state', async () => {
-    const { engine: eng1 } = await createUserEngineForExistingNetwork()
+    const { engine: eng1 } = await createKeylessUserEngine()
     const payload = makeFullBuilder(eng1).toEngineInput()
     let err1: unknown
     try { await eng1.addKey(payload) } catch (e) { err1 = e }
     expect(err1).to.equal(undefined)
-    const { engine: eng2 } = await createUserEngineForExistingNetwork()
+    const { engine: eng2 } = await createKeylessUserEngine()
     let err2: unknown
     try { await eng2.buildAddKey().fromPayload(payload).commit() } catch (e) { err2 = e }
     expect(err2).to.equal(undefined)

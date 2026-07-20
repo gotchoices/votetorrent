@@ -145,6 +145,11 @@ export class NetworksEngine implements INetworksEngine {
 				with context SigningNonce = null, InviteSlotCid = null, InviteSignature = null, Tid = ${tid}
 				values (:userId, :userName, :userImageRef);
 
+				-- 999.1 R-02/D-11 (999.1-08 audit): genuinely-first-key bootstrap for the network's
+				-- founding user (context.UserKey = null) — satisfies UserKey.SignatureValid's
+				-- bootstrap OR-branch (count(*) = 1 and context.UserKey is null) without a
+				-- fabricated signature (Pitfall 3). IsSignatureValid stays true/inert: the schema
+				-- CHECK no longer consumes it for UserKey, kept only for binding compatibility.
 				insert into UserKey (
 					UserId,
 					Type,

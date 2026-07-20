@@ -9,7 +9,7 @@ import { expect } from 'chai';
 import { secp256k1 } from '@noble/curves/secp256k1.js';
 import { bytesToHex, hexToBytes } from '@noble/curves/utils.js';
 import { prepareDb } from '../src/database/initialize';
-import { nowCanonicalDatetime, digestToBytes } from '../src/utils.js';
+import { nowCanonicalDatetime, digestToBytes, toCanonicalDatetime } from '../src/utils.js';
 import { NetworkEngine } from '../src/network/network-engine';
 import { MockNetworkEngine } from '../src/network/mock-network-engine';
 import { NetworkCreateAuthorityBuilder } from '../src/network/builders/network-create-authority-builder';
@@ -101,18 +101,28 @@ function makeNetworkInit(overrides?: Partial<NetworkInit>): NetworkInit {
 async function createNetworkEngine(): Promise<{
 	engine: INetworkEngine;
 	ref: NetworkReference;
+	// 999.1 R-02/R-04: expose the founding user + its private key so callers that
+	// need to raw-seed a SUBSEQUENT UserKey row can produce a real signature
+	// satisfying UserKey.SignatureValid's real branch.
+	user: User;
+	userPrivateHex: string;
 }> {
 	await AsyncStorage.clear();
 	await AsyncStorage.setItem('recentNetworks', []);
 	const networksEngine = new NetworksEngine(AsyncStorage);
-	const user = makeUser();
+	const { privateHex, publicHex } = randomTestKeyPair();
+	const user = makeUser({
+		activeKeys: [
+			{ key: publicHex, type: UserKeyType.mobile, expiration: Date.now() + 86_400_000 },
+		],
+	});
 	const networkInit = makeNetworkInit();
 	const engine = await networksEngine.create(networkInit, user);
 	const recents =
 		(await AsyncStorage.getItem<NetworkReference[]>('recentNetworks')) ?? [];
 	const ref = recents[0];
 	if (!ref) throw new Error('No network reference found after create');
-	return { engine, ref };
+	return { engine, ref, user, userPrivateHex: privateHex };
 }
 
 // Construct a NetworkEngine bound to a schema-only DB (no INSERTs run).
@@ -1443,16 +1453,30 @@ describe('NetworkEngine', () => {
 		});
 
 		it('should include only non-expired active keys in the returned user', async () => {
-			const { engine } = await createNetworkEngine();
+			const { engine, userPrivateHex } = await createNetworkEngine();
 			const ctx = (engine as unknown as { ctx: EngineContext }).ctx;
+			const live = (ctx.user?.activeKeys ?? [])[0]!.key;
+			// 999.1 R-02/R-04: this is a SUBSEQUENT UserKey for 'user-1' (who already has
+			// the `live` key) — UserKey.SignatureValid's real branch requires a genuine
+			// signature from `live`'s private key over Digest(UserId, PubKey, Type,
+			// Expiration). Use the SAME canonical-string Expiration for both the Digest()
+			// computation and the stored value (mirrors UserEngine.addKey's own convention).
+			const expCanon = toCanonicalDatetime(Date.now() - 60_000);
+			const digestRow = await ctx.db
+				.prepare('select Digest(:userId, :newPubKey, :keyType, :expiration) as d')
+				.get({ userId: 'user-1', newPubKey: 'expired-key', keyType: 'M', expiration: expCanon });
+			const sigHex = bytesToHex(
+				secp256k1.sign(digestToBytes(digestRow!.d), hexToBytes(userPrivateHex)),
+			);
 			// Insert an expired UserKey alongside the live one.
 			await ctx.db.exec(
 				`insert into UserKey (UserId, Type, PubKey, Expiration)
-         with context UserKey = :live, Signature = null, Tid = 9, now = :insertNow, IsSignatureValid = true
+         with context UserKey = :live, Signature = :signature, Tid = 9, now = :insertNow, IsSignatureValid = true
          values ('user-1', 'M', 'expired-key', :exp)`,
 				{
-					live: (ctx.user?.activeKeys ?? [])[0]!.key,
-					exp: Date.now() - 60_000,
+					live,
+					signature: sigHex,
+					exp: expCanon,
 					insertNow: Date.now() - 120_000,
 				},
 			);

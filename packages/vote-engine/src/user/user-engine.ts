@@ -60,15 +60,26 @@ export class UserEngine implements IUserEngine {
    * `context.Signature`.
    *
    * Dispatches on CALLBACK PRESENCE (not key count):
-   * - No `sign` callback → unchanged behavior (existing first-key/no-callback
-   *   path). Binds `context.UserKey = existing active pubkey`, `Signature = null`,
-   *   `IsSignatureValid = true`. The existing test stays green.
+   * - No `sign` callback → bootstrap path (genuinely-first-key only — 999.1
+   *   R-02/D-11). Binds `context.UserKey = existing active pubkey` (null for a
+   *   real first key), `Signature = null`. `UserKey.SignatureValid`'s bootstrap
+   *   OR-branch only passes when this is ALSO the user's first key
+   *   (`count(*) = 1 and context.UserKey is null`) — a no-callback call on a
+   *   user who already has an active key is DB-rejected (no fabricated
+   *   signature is ever asserted for it).
    * - `sign` callback provided → signed subsequent-key path (UKEY-03 / D-14).
    *   The engine computes a SQL `Digest(userId, newPubKey, keyType, expirationCanon)`,
    *   converts to bytes via the shared `digestToBytes`, calls the callback with
    *   those bytes, then binds `context.UserKey = existing active pubkey` (NOT the
-   *   new key — RESEARCH §Pitfall 5), `context.Signature = real signature`, and
-   *   `IsSignatureValid = true` so `UserKey.InsertValid`'s subsequent branch passes.
+   *   new key — RESEARCH §Pitfall 5) and `context.Signature = real signature` so
+   *   `UserKey.SignatureValid`'s real branch (999.1 R-02/D-11) verifies it via the
+   *   shared `SignatureValid` UDF.
+   *
+   * 999.1 R-04: `context.IsSignatureValid` is bound to the actual bootstrap/signed
+   * dispatch (`sign === undefined`) rather than a hardcoded `true` — the schema CHECK
+   * no longer consumes this field for UserKey (kept declared only for other raw-SQL
+   * seeders' backward-compatible binding), so no producer accepting a real signature
+   * asserts a fabricated always-true boolean.
    *
    * The device private key NEVER enters this engine (D-01/D-04): `addKey` receives
    * a sign callback, not `privKeyHex`. The new key cannot authorize its own insertion.
@@ -128,7 +139,7 @@ export class UserEngine implements IUserEngine {
 					PubKey,
 					Expiration
 				)
-				with context UserKey = :userKey, Signature = :signature, Tid = ${tid}, now = :now, IsSignatureValid = true
+				with context UserKey = :userKey, Signature = :signature, Tid = ${tid}, now = :now, IsSignatureValid = :isSignatureValid
 				values (:userId, :keyType, :keyValue, :expiration);
 
 				insert into UserEvent (UserId, Tid, Sequence, Event, Timestamp, Signature, Payload)
@@ -151,9 +162,11 @@ export class UserEngine implements IUserEngine {
           // When sign is absent: signerKey may be null (first-key path).
           // When sign is present: signerKey is the existing authorized signer (guard above).
           userKey: signerKey,
-          // Without sign callback: null (no-callback unchanged path, first-key short-circuit).
+          // Without sign callback: null (no-callback bootstrap path).
           // With sign callback: real secp256k1 hex signature from the existing active key.
           signature: boundSignature,
+          // 999.1 R-04: honest per-branch value, not a hardcoded true (see doc comment above).
+          isSignatureValid: sign === undefined,
           now: nowCanonicalDatetime(),
           // D-14/D-15/D-16: append-only AddUserKeyHistory event in the same batch (same Tid).
           // Payload carries the UserKey with raw epoch-ms expiration (Pitfall 5).
