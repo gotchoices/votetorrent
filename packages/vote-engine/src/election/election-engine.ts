@@ -25,11 +25,7 @@ import { ElectionProposeBallotBuilder } from './builders/election-propose-ballot
 import { ElectionProposeRevisionBuilder } from './builders/election-propose-revision-builder.js'
 import { ElectionInviteKeyholderBuilder } from './builders/election-invite-keyholder-builder.js'
 import { ElectionRevokeKeyholderBuilder } from './builders/election-revoke-keyholder-builder.js'
-
-// Phase 05 ELEC-03..08 — monotonic Tid counter for ElectionEngine batches.
-// Same shape as NetworksEngine/UserEngine/ElectionsEngine. Re-evaluate at
-// the v2 persistence milestone (PERSIST-01).
-let nextTid = 1
+import { allocateTid } from '../database/tid-allocator.js'
 
 /**
  * Fixed ballot-header Tid for the `AdminSigning` digest at submit time.
@@ -398,7 +394,7 @@ export class ElectionEngine implements IElectionEngine {
    * UserKey matching `context.UserKey` + SignatureValid.
    */
   async proposeRevision (revision: ElectionRevisionInit): Promise<void> {
-    const tid = nextTid++
+    const tid = await allocateTid(this.ctx.db, 'election')
     const signerKey = this.ctx.user?.activeKeys?.[0]?.key ?? null
     try {
       await this.ctx.db.exec(
@@ -447,7 +443,7 @@ export class ElectionEngine implements IElectionEngine {
    * once the proposal is accepted.
    */
   async proposeBallot (ballot: Ballot): Promise<void> {
-    const tid = nextTid++
+    const tid = await allocateTid(this.ctx.db, 'election')
     const signerKey = this.ctx.user?.activeKeys?.[0]?.key ?? null
     try {
       await this.ctx.db.exec(
@@ -506,7 +502,7 @@ export class ElectionEngine implements IElectionEngine {
     ballotId: string,
     question: Question
   ): Promise<void> {
-    const tid = nextTid++
+    const tid = await allocateTid(this.ctx.db, 'election')
     const signerKey = this.ctx.user?.activeKeys?.[0]?.key ?? null
 
     // Build column list and params for columns with DB defaults that must not
@@ -582,7 +578,7 @@ export class ElectionEngine implements IElectionEngine {
     option: Option,
     sequence: number
   ): Promise<void> {
-    const tid = nextTid++
+    const tid = await allocateTid(this.ctx.db, 'election')
     const signerKey = this.ctx.user?.activeKeys?.[0]?.key ?? null
     try {
       await this.ctx.db.exec(
@@ -640,7 +636,7 @@ export class ElectionEngine implements IElectionEngine {
     keyholder: KeyholderInvite,
     electionId: string
   ): Promise<void> {
-    const tid = nextTid++
+    const tid = await allocateTid(this.ctx.db, 'election')
     // The KeyholderInvite carries the invite details; the Keyholder row
     // itself is bound to the invited user once they accept. For Phase 5
     // this method inserts a placeholder Keyholder row pinned to the
@@ -676,7 +672,7 @@ export class ElectionEngine implements IElectionEngine {
     keyholder: KeyholderInvite,
     electionId: string
   ): Promise<void> {
-    const tid = nextTid++
+    const tid = await allocateTid(this.ctx.db, 'election')
     try {
       await this.ctx.db.exec(
 				`delete from Keyholder
@@ -702,7 +698,7 @@ export class ElectionEngine implements IElectionEngine {
    *    ≥2 options for 'select'-type questions. Throw before any write on failure.
    * 3. Resolve AdminEffectiveAt from CurrentAdmin.
    * 4. Insert an UNSIGNED AdminSigning('ceb') with the canonical ballot-header
-   *    digest. Uses BALLOT_HEADER_TID (a fixed constant, not nextTid++) so
+   *    digest. Uses BALLOT_HEADER_TID (a fixed constant, not allocateTid()) so
    *    31-03's finalize can reproduce the identical digest without reading Tid
    *    from any persisted column (Pitfall 2). Do NOT call sign() here — the
    *    AdminSigning must stay unsigned until completeSignature (Pitfall 1).
@@ -777,9 +773,10 @@ export class ElectionEngine implements IElectionEngine {
       const placeholderSig = '0'.repeat(128)
       const now = nowCanonicalDatetime()
 
-      // Task + extension use nextTid++ (per-write in-memory counter, per this file's convention)
-      // but the header digest is pinned to BALLOT_HEADER_TID (the fixed constant, not nextTid++)
-      const taskTid = nextTid++
+      // Task + extension allocate through the shared durable allocator (D-01), but the
+      // header digest is pinned to BALLOT_HEADER_TID (the fixed constant, D-04 — never
+      // routed through the allocator).
+      const taskTid = await allocateTid(this.ctx.db, 'election')
       const taskId = (globalThis as { crypto: { randomUUID: () => string } }).crypto.randomUUID()
 
       // Step 4: insert UNSIGNED AdminSigning('ceb') — do NOT call sign() (Pitfall 1)
@@ -850,7 +847,7 @@ export class ElectionEngine implements IElectionEngine {
   async withdrawBallotConfirmation (ballotId: string): Promise<void> {
     try {
       const userId = this.ctx.user?.id ?? null
-      const tid = nextTid++
+      const tid = await allocateTid(this.ctx.db, 'election')
 
       await this.ctx.db.exec('BEGIN')
       try {
