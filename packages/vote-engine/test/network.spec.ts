@@ -6,8 +6,10 @@ import {
 	UserKeyType,
 } from '@votetorrent/vote-core';
 import { expect } from 'chai';
+import { secp256k1 } from '@noble/curves/secp256k1.js';
+import { bytesToHex, hexToBytes } from '@noble/curves/utils.js';
 import { prepareDb } from '../src/database/initialize';
-import { nowCanonicalDatetime } from '../src/utils.js';
+import { nowCanonicalDatetime, digestToBytes } from '../src/utils.js';
 import { NetworkEngine } from '../src/network/network-engine';
 import { MockNetworkEngine } from '../src/network/mock-network-engine';
 import { NetworkCreateAuthorityBuilder } from '../src/network/builders/network-create-authority-builder';
@@ -52,6 +54,17 @@ function makeUser(overrides?: Partial<User>): User {
 		],
 		...overrides,
 	};
+}
+
+/**
+ * 999.1 R-02: sign a base64url SQL Digest() output for real (secp256k1, @noble/curves v2
+ * default prehash:true) — AdminSigning/OfficerSignature.SignatureValid now verifies the
+ * actual bytes via the in-schema UDF, so a dummy fixed-string signature no longer suffices.
+ */
+function realSignDigest(digestBase64url: string): { pubKeyHex: string; sigHex: string } {
+	const { privateHex, publicHex } = randomTestKeyPair();
+	const sigHex = bytesToHex(secp256k1.sign(digestToBytes(digestBase64url), hexToBytes(privateHex)));
+	return { pubKeyHex: publicHex, sigHex };
 }
 
 function makeNetworkInit(overrides?: Partial<NetworkInit>): NetworkInit {
@@ -1077,21 +1090,24 @@ describe('NetworkEngine', () => {
 				.get({ authorityId: details.network.primaryAuthorityId });
 			if (!adminRow) throw new Error('CurrentAdmin row not found for primary authority');
 			const adminEffectiveAt = adminRow.EffectiveAt as string;
-			// Seed an AdminSigning row with scope rn. Real digest/signature
-			// production lives in SigningEngine; here we assert the row lands.
+			// Seed an AdminSigning row with scope rn. 999.1 R-02: Digest/Signature must be a
+			// genuine matching pair now that SignatureValid verifies for real.
 			const nonce = 'nonce-' + crypto.randomUUID();
+			const digestRow = await ctx.db.prepare(`select Digest('digest-rn') as d`).get({});
+			const digestB64 = digestRow!.d as string;
+			const { pubKeyHex, sigHex } = realSignDigest(digestB64);
 			await ctx.db.exec(
 				`insert into AdminSigning (Nonce, AuthorityId, AdminEffectiveAt, Scope, Digest, UserId, SignerKey, Signature)
-         with context now = :now, IsSignatureValid = true, IsSignerKeyValid = true
+         with context now = :now, IsSignerKeyValid = true, IsPlaceholderSignature = false
          values (:nonce, :authId, :effAt, 'rn', :digest, :uid, :pubKey, :sig)`,
 				{
 					nonce: nonce,
 					authId: details.network.primaryAuthorityId,
 					effAt: adminEffectiveAt,
-					digest: 'digest-rn',
+					digest: digestB64,
 					uid: ctx.user?.id ?? 'user-1',
-					pubKey: (ctx.user?.activeKeys ?? [])[0]!.key,
-					sig: 'a'.repeat(128),
+					pubKey: pubKeyHex,
+					sig: sigHex,
 					now: nowCanonicalDatetime(),
 				},
 			);
@@ -1109,7 +1125,7 @@ describe('NetworkEngine', () => {
 			try {
 				await ctx.db.exec(
 					`insert into AdminSigning (Nonce, AuthorityId, AdminEffectiveAt, Scope, Digest, UserId, SignerKey, Signature)
-           with context now = ${Date.now()}, IsSignatureValid = true, IsSignerKeyValid = true
+           with context now = ${Date.now()}, IsSignerKeyValid = true, IsPlaceholderSignature = false
            values (:nonce, :authId, :effAt, 'xx', :digest, :uid, :pubKey, :sig)`,
 					{
 						nonce: 'bad-scope-nonce',
@@ -1136,7 +1152,7 @@ describe('NetworkEngine', () => {
 			try {
 				await ctx.db.exec(
 					`insert into AdminSigning (Nonce, AuthorityId, AdminEffectiveAt, Scope, Digest, UserId, SignerKey, Signature)
-           with context now = ${Date.now()}, IsSignatureValid = true, IsSignerKeyValid = true
+           with context now = ${Date.now()}, IsSignerKeyValid = true, IsPlaceholderSignature = false
            values ('bad-sig-nonce', :authId, :effAt, 'rn', 'd', :uid, :pubKey, 'deadbeef')`,
 					{
 						authId: details.network.primaryAuthorityId,
@@ -1179,21 +1195,25 @@ describe('NetworkEngine', () => {
 				.get({ authorityId: details.network.primaryAuthorityId });
 			if (!adminRow) throw new Error('CurrentAdmin row not found for primary authority');
 			const adminEffectiveAt = adminRow.EffectiveAt as string;
-			// Seed AdminSigning first (real signature production deferred to
-			// SigningEngine; this stub asserts the SignatureValid CHECK fires
-			// on a deliberately-wrong OfficerSignature).
+			// Seed a REAL AdminSigning first (999.1 R-02: SignatureValid now verifies for real,
+			// so the parent row must carry a genuine signature) — then insert a deliberately
+			// wrong OfficerSignature and expect the CHECK to reject it.
 			const nonce = 'os-mismatch-' + crypto.randomUUID();
+			const asDigestRow = await ctx.db.prepare(`select Digest('d-true') as d`).get({});
+			const asDigestB64 = asDigestRow!.d as string;
+			const { pubKeyHex: asPubKey, sigHex: asSig } = realSignDigest(asDigestB64);
 			await ctx.db.exec(
 				`insert into AdminSigning (Nonce, AuthorityId, AdminEffectiveAt, Scope, Digest, UserId, SignerKey, Signature)
-         with context now = :now, IsSignatureValid = true, IsSignerKeyValid = true
-         values (:nonce, :authId, :effAt, 'rn', 'd-true', :uid, :pubKey, :sig)`,
+         with context now = :now, IsSignerKeyValid = true, IsPlaceholderSignature = false
+         values (:nonce, :authId, :effAt, 'rn', :digest, :uid, :pubKey, :sig)`,
 				{
 					nonce: nonce,
 					authId: details.network.primaryAuthorityId,
 					effAt: adminEffectiveAt,
+					digest: asDigestB64,
 					uid: ctx.user?.id ?? 'user-1',
-					pubKey: (ctx.user?.activeKeys ?? [])[0]!.key,
-					sig: 'a'.repeat(128),
+					pubKey: asPubKey,
+					sig: asSig,
 					now: nowCanonicalDatetime(),
 				},
 			);
@@ -1201,7 +1221,7 @@ describe('NetworkEngine', () => {
 			try {
 				await ctx.db.exec(
 					`insert into OfficerSignature (SigningNonce, UserId, SignerKey, Signature)
-           with context now = :now, IsSignatureValid = false, IsSignerKeyValid = true, IsOfficerValid = true
+           with context now = :now, IsSignerKeyValid = true, IsOfficerValid = true, IsPlaceholderSignature = false
            values (:nonce, :uid, :pubKey, 'wrong-sig')`,
 					{
 						nonce: nonce,

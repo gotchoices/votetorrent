@@ -96,7 +96,7 @@ export async function seedSignedMutation (
       SignerKey,
       Signature
     )
-    with context now = :now, IsSignatureValid = true, IsSignerKeyValid = true
+    with context now = :now, IsSignerKeyValid = true, IsPlaceholderSignature = false
     values (
       :nonce,
       :authorityId,

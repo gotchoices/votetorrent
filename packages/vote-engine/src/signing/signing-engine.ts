@@ -23,7 +23,11 @@ export class SigningEngine implements ISigningEngine {
 		return crypto.randomUUID();
 	}
 
-	async sign(nonce: string, signature: Signature, options?: { ownsTransaction?: boolean }): Promise<boolean> {
+	async sign(
+		nonce: string,
+		signature: Signature,
+		options?: { ownsTransaction?: boolean; isPlaceholderSignature?: boolean },
+	): Promise<boolean> {
 		// Phase 42-03: Quereus's transaction model is FLAT (a nested explicit
 		// BEGIN inside an already-explicit transaction throws "Cannot begin
 		// transaction: already in a transaction" — no true SAVEPOINT-style
@@ -50,6 +54,12 @@ export class SigningEngine implements ISigningEngine {
 		// independently correct and required for `register()`'s multi-row
 		// ceremony regardless.)
 		const ownsTransaction = options?.ownsTransaction ?? true;
+		// 999.1 R-02/R-04: `isPlaceholderSignature` propagates the narrow, explicit DEBT-11
+		// escape hatch (schema's IsPlaceholderSignature context flag) — ONLY the known
+		// system-derived callers (SignatureTasksEngine.finalizeBallot's per-question/option
+		// rows) pass true. Every other caller (real officer-supplied Signature) defaults to
+		// false, so OfficerSignature.SignatureValid's UDF actually verifies the signature.
+		const isPlaceholderSignature = options?.isPlaceholderSignature ?? false;
 		try {
 			// AUTH-08: BEGIN/COMMIT/ROLLBACK envelope around OfficerSignature
 			// insert + threshold check + (optional) AdminSignature insert.
@@ -65,7 +75,7 @@ export class SigningEngine implements ISigningEngine {
 						SignerKey,
 						Signature
 					)
-					with context now = :now, IsSignatureValid = true, IsSignerKeyValid = true, IsOfficerValid = true
+					with context now = :now, IsSignerKeyValid = true, IsOfficerValid = true, IsPlaceholderSignature = :isPlaceholderSignature
 					values (
 						:nonce,
 						:userId,
@@ -78,6 +88,7 @@ export class SigningEngine implements ISigningEngine {
 						signerKey: signature.signerKey,
 						signature: signature.signature,
 						now: nowCanonicalDatetime(),
+						isPlaceholderSignature,
 					},
 				);
 
@@ -122,11 +133,15 @@ export class SigningEngine implements ISigningEngine {
 
 				const threshold = Number(thresholdRes?.threshold) || 1;
 
-				if (signatureCount >= threshold) {
+				const thresholdMet = signatureCount >= threshold;
+				if (thresholdMet) {
 					try {
+						// 999.1 R-06: bind the REAL computed threshold boolean (not a literal `true`) —
+						// AdminSignature has no Digest/Signature/SignerKey columns to re-verify, so this
+						// TS-computed value IS the thing SignatureValid gates on.
 						await this.ctx.db.exec(
-							'insert into AdminSignature (SigningNonce) with context IsSignatureValid = true values (:nonce)',
-							{ nonce },
+							'insert into AdminSignature (SigningNonce) with context IsSignatureValid = :thresholdMet values (:nonce)',
+							{ nonce, thresholdMet },
 						);
 						if (ownsTransaction) await this.ctx.db.exec('COMMIT');
 						return true;
@@ -235,7 +250,7 @@ export class SigningEngine implements ISigningEngine {
 						SignerKey,
 						Signature
 					)
-					with context now = :now, IsSignatureValid = true, IsSignerKeyValid = true
+					with context now = :now, IsSignerKeyValid = true, IsPlaceholderSignature = false
 					values (
 						:nonce,
 						:authorityId,
@@ -272,7 +287,7 @@ export class SigningEngine implements ISigningEngine {
 						SignerKey,
 						Signature
 					)
-					with context now = :now, IsSignatureValid = true, IsSignerKeyValid = true
+					with context now = :now, IsSignerKeyValid = true, IsPlaceholderSignature = false
 					values (
 						:nonce,
 						:authorityId,

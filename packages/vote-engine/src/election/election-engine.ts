@@ -765,10 +765,12 @@ export class ElectionEngine implements IElectionEngine {
       // Prepare signing-session values
       const nonce = (globalThis as { crypto: { randomUUID: () => string } }).crypto.randomUUID()
       const userId = this.ctx.user?.id ?? null
-      // Placeholder key/sig values — the AdminSigning schema gates on IsSignerKeyValid and
-      // IsSignatureValid context flags (which we set to true); real crypto is provided at
-      // completeSignature (31-03). The AdminSigning.Signature column is NOT NULL, so we
-      // need a non-null placeholder — mirroring the pattern in elections-engine.ts:810-811.
+      // Placeholder key/sig values — 999.1 R-02/R-04 (DEBT-11): this row is InsertOnly and
+      // NEVER updated with a real Signature; the officer's real crypto arrives later at
+      // completeSignature (31-03) as a SEPARATE OfficerSignature row, not a mutation of this
+      // one. AdminSigning.SignatureValid must take the explicit IsPlaceholderSignature escape
+      // hatch. The AdminSigning.Signature column is NOT NULL, so we need a non-null placeholder
+      // — mirroring the pattern in elections-engine.ts's debugSeedPendingTasks.
       const signerKey = this.ctx.user?.activeKeys?.[0]?.key ?? '0'.repeat(66)
       const placeholderSig = '0'.repeat(128)
       const now = nowCanonicalDatetime()
@@ -785,7 +787,7 @@ export class ElectionEngine implements IElectionEngine {
       // Bind BALLOT_HEADER_TID as a JS number (never String()) — TAG_INT vs TEXT (Pitfall 2).
       await this.ctx.db.exec(
         `insert into AdminSigning (Nonce, AuthorityId, AdminEffectiveAt, Scope, Digest, UserId, SignerKey, Signature)
-         with context now = :now, IsSignatureValid = true, IsSignerKeyValid = true
+         with context now = :now, IsSignerKeyValid = true, IsPlaceholderSignature = true
          values (:nonce, :authorityId, :adminEffectiveAt, 'ceb',
                  Digest(:headerTid, :id, :electionId, :authorityId, :description, :districts),
                  :userId, :signerKey, :signature)`,

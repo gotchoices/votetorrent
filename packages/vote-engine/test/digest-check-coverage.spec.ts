@@ -28,9 +28,11 @@
 
 import { Database } from '@quereus/quereus'
 import { expect } from 'chai'
+import { secp256k1 } from '@noble/curves/secp256k1.js'
+import { bytesToHex, hexToBytes } from '@noble/curves/utils.js'
 import { prepareDb } from '../src/database/initialize.js'
 import { randomTestKeyPair } from './fixtures/keys.js'
-import { toCanonicalDatetime } from '../src/utils.js'
+import { toCanonicalDatetime, digestToBytes } from '../src/utils.js'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -81,11 +83,14 @@ describe('Digest/SignatureValid live CHECK coverage (DIG-03-a / D-05)', function
 
   let db: Database
   let publicHex: string
+  let privateHex: string
 
   before(async () => {
     db = new Database()
     await prepareDb(db)
-    publicHex = randomTestKeyPair().publicHex
+    const kp = randomTestKeyPair()
+    publicHex = kp.publicHex
+    privateHex = kp.privateHex
   })
 
   // -------------------------------------------------------------------------
@@ -150,27 +155,43 @@ describe('Digest/SignatureValid live CHECK coverage (DIG-03-a / D-05)', function
     //    parameter, so Quereus encodes it as TAG_INT (0x01). If Tid were passed as a
     //    string it would be TAG_TEXT (0x03) — Digest('42',…) ≠ Digest(42,…).
     //    This mirrors what createElection() does (`Tid = ${tid}` in the SQL template).
+    // 999.1 R-02: compute the real AdminSigning Digest first, then sign it for real —
+    // the schema's SignatureValid UDF now verifies these bytes (same seam as
+    // Election.InsertValid's own Digest, which is what this suite is really testing).
+    const adminSigningDigestParams = {
+      authorityId: SEED_AUTHORITY_ID,
+      electionId: SEED_ELECTION_ID,
+      title: SEED_ELECTION_TITLE,
+      electionDate: SEED_ELECTION_DATE,
+      revDeadline: SEED_REV_DEADLINE,
+      ballotDeadline: SEED_BALLOT_DEADLINE,
+      type: SEED_ELECTION_TYPE,
+    }
+    const adminSigningDigestRow = await db
+      .prepare(
+        `select Digest(${SEED_TID}, :electionId, :authorityId, :title, :electionDate, :revDeadline, :ballotDeadline, :type) as d`,
+      )
+      .get(adminSigningDigestParams)
+    const adminSigningDigest = adminSigningDigestRow!.d as string
+    const adminSigningSig = bytesToHex(
+      secp256k1.sign(digestToBytes(adminSigningDigest), hexToBytes(privateHex)),
+    )
+
     await db.exec(
       `insert into AdminSigning (Nonce, AuthorityId, AdminEffectiveAt, Scope, Digest, UserId, SignerKey, Signature)
-       with context now = :now, IsSignatureValid = true, IsSignerKeyValid = true
+       with context now = :now, IsSignerKeyValid = true, IsPlaceholderSignature = false
        values (
          :nonce, :authorityId, :effectiveAt, 'mel',
          Digest(${SEED_TID}, :electionId, :authorityId, :title, :electionDate, :revDeadline, :ballotDeadline, :type),
          'user-dig03', :pubKey, :signature
        )`,
       {
+        ...adminSigningDigestParams,
         nonce: SEED_NONCE,
         now: SEED_NOW_FUTURE,
-        authorityId: SEED_AUTHORITY_ID,
         effectiveAt: SEED_ADMIN_EFFECTIVE_AT,
-        electionId: SEED_ELECTION_ID,
-        title: SEED_ELECTION_TITLE,
-        electionDate: SEED_ELECTION_DATE,
-        revDeadline: SEED_REV_DEADLINE,
-        ballotDeadline: SEED_BALLOT_DEADLINE,
-        type: SEED_ELECTION_TYPE,
         pubKey: publicHex,
-        signature: 'a'.repeat(128),
+        signature: adminSigningSig,
       },
     )
 

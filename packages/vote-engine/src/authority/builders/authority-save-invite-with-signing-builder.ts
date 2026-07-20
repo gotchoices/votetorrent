@@ -21,7 +21,8 @@ import {
   BuilderValidationError
 } from '@votetorrent/vote-core'
 
-type Draft = { invite?: AuthorityInvite | OfficerInvite; scope?: Scope; signature?: Signature }
+type SignatureOrCallback = Signature | ((digest: Uint8Array) => Promise<Signature>)
+type Draft = { invite?: AuthorityInvite | OfficerInvite; scope?: Scope; signature?: SignatureOrCallback }
 type DraftValidator = (draft: Readonly<Draft>) => BuilderError[]
 
 export class AuthoritySaveInviteWithSigningBuilder implements IAuthoritySaveInviteWithSigningBuilder {
@@ -80,6 +81,11 @@ export class AuthoritySaveInviteWithSigningBuilder implements IAuthoritySaveInvi
 
   private static validateSignature (draft: Readonly<Draft>): BuilderError[] {
     if (draft.signature === undefined || draft.signature === null) return []
+    // 999.1 R-02: signature may be a completed Signature object OR a
+    // per-digest sign callback (device-signer pattern — the engine computes
+    // the real row Digest and invokes the callback with those exact bytes).
+    // Mirrors AssociationAssociateBuilder's signatureOrCallback validation.
+    if (typeof draft.signature === 'function') return []
     if (
       typeof draft.signature !== 'object' ||
       Array.isArray(draft.signature) ||
@@ -90,7 +96,7 @@ export class AuthoritySaveInviteWithSigningBuilder implements IAuthoritySaveInvi
       return [{
         path: 'signature',
         code: 'INVALID',
-        message: 'signature must have non-empty signature, signerKey, and signerUserId',
+        message: 'signature must be a function or a Signature with non-empty signature, signerKey, and signerUserId',
         kind: 'per-setter'
       }]
     }
@@ -117,15 +123,15 @@ export class AuthoritySaveInviteWithSigningBuilder implements IAuthoritySaveInvi
     return new AuthoritySaveInviteWithSigningBuilder(this.engine, { ...this.draft, scope }) as this
   }
 
-  setSignature (signature: Signature): this {
+  setSignature (signature: SignatureOrCallback): this {
     return new AuthoritySaveInviteWithSigningBuilder(this.engine, { ...this.draft, signature }) as this
   }
 
-  build (): { invite: AuthorityInvite | OfficerInvite; scope: Scope; signature: Signature } {
+  build (): { invite: AuthorityInvite | OfficerInvite; scope: Scope; signature: SignatureOrCallback } {
     return this.toEngineInput()
   }
 
-  toEngineInput (): { invite: AuthorityInvite | OfficerInvite; scope: Scope; signature: Signature } {
+  toEngineInput (): { invite: AuthorityInvite | OfficerInvite; scope: Scope; signature: SignatureOrCallback } {
     const errors = this.runValidators()
     const missing = this.missingFields()
     if (errors.length > 0 || missing.length > 0) {
@@ -188,7 +194,7 @@ export class AuthoritySaveInviteWithSigningBuilder implements IAuthoritySaveInvi
     return Object.freeze(missing)
   }
 
-  update (partial: Partial<{ invite: AuthorityInvite | OfficerInvite; scope: Scope; signature: Signature }>): this {
+  update (partial: Partial<{ invite: AuthorityInvite | OfficerInvite; scope: Scope; signature: SignatureOrCallback }>): this {
     return new AuthoritySaveInviteWithSigningBuilder(this.engine, { ...this.draft, ...partial }) as this
   }
 
@@ -212,7 +218,7 @@ export class AuthoritySaveInviteWithSigningBuilder implements IAuthoritySaveInvi
     // Reserved no-op per CONTEXT.md
   }
 
-  fromPayload (payload: { invite: AuthorityInvite | OfficerInvite; scope: Scope; signature: Signature }): this {
+  fromPayload (payload: { invite: AuthorityInvite | OfficerInvite; scope: Scope; signature: SignatureOrCallback }): this {
     return new AuthoritySaveInviteWithSigningBuilder(this.engine, {
       invite: payload.invite,
       scope: payload.scope,

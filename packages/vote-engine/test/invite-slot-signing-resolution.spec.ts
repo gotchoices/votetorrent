@@ -29,10 +29,9 @@
  */
 
 import { expect } from 'chai'
-import { createTestNetwork, addTestAuthority } from './fixtures/test-context.js'
+import { createTestNetwork, addTestAuthority, makeTestSignCallback, signTestDigest } from './fixtures/test-context.js'
 import type { TestAuthorityContext } from './fixtures/test-context.js'
 import { nowCanonicalDatetime } from '../src/utils.js'
-import { makeTestSignature } from './fixtures/test-context.js'
 import { SigningEngine } from '../src/signing/signing-engine.js'
 import type { Scope } from '@votetorrent/vote-core'
 
@@ -69,14 +68,16 @@ describe('InviteSlotSigningValid assertion resolution (Phase 33 — 4.x fix)', f
       scopes: ['rad'] as Scope[],
     })
 
-    const sig = makeTestSignature(auth.user)
+    // 999.1 R-02: real per-digest sign callback — saveInviteWithSigning computes the
+    // InviteSlot Digest engine-side and calls this with the actual bytes.
+    const signCallback = makeTestSignCallback(auth.user)
 
     // Before the schema fix this throws:
     //   QuereusError: No row context found for column Digest
     // After the fix it must resolve cleanly.
     let errorThrown: Error | undefined
     try {
-      await auth.authorityEngine.saveInviteWithSigning(officerInvite, 'rad' as Scope, sig)
+      await auth.authorityEngine.saveInviteWithSigning(officerInvite, 'rad' as Scope, signCallback)
     } catch (e) {
       errorThrown = e as Error
     }
@@ -89,13 +90,13 @@ describe('InviteSlotSigningValid assertion resolution (Phase 33 — 4.x fix)', f
 
     const authorityInvite = auth.authorityEngine.createAuthorityInvite('Second Authority')
 
-    const sig = makeTestSignature(auth.user)
+    const signCallback = makeTestSignCallback(auth.user)
 
     // Both authority invite and officer invite paths call saveInviteWithSigning
     // and both fire InviteSlotSigningValid.
     let errorThrown: Error | undefined
     try {
-      await auth.authorityEngine.saveInviteWithSigning(authorityInvite, 'iad' as Scope, sig)
+      await auth.authorityEngine.saveInviteWithSigning(authorityInvite, 'iad' as Scope, signCallback)
     } catch (e) {
       errorThrown = e as Error
     }
@@ -121,7 +122,6 @@ describe('InviteSlotSigningValid assertion resolution (Phase 33 — 4.x fix)', f
     // Step 1: create a fresh signing nonce
     const signing = new SigningEngine(auth.ctx)
     const nonce = signing.generateSigningNonce()
-    const sig = makeTestSignature(auth.user)
 
     // Step 2: create a real OfficerInvite share so we have valid key material
     const officerInvite = auth.authorityEngine.createOfficerInvite({
@@ -163,7 +163,15 @@ describe('InviteSlotSigningValid assertion resolution (Phase 33 — 4.x fix)', f
 
     // Step 5: insert an AdminSigning whose Digest is WRONG (does not match
     // Digest(InviteSlot.Cid)). This must violate InviteSlotSigningValid.
-    const wrongDigest = 'a'.repeat(64) // 64-char hex that is not the real Digest
+    // 999.1 R-02: SignatureValid now verifies for real, so `wrongDigest` must be a
+    // genuine SQL Digest() output (real base64url shape) signed for real — otherwise
+    // SignatureValid (not InviteSlotSigningValid) would be the constraint that fires,
+    // and this test asserts specifically on the InviteSlotSigningValid message.
+    const wrongDigestRow = await auth.ctx.db
+      .prepare(`select Digest('not-the-real-invite-slot-cid') as d`)
+      .get({})
+    const wrongDigest = wrongDigestRow!.d as string
+    const sig = signTestDigest(auth.user, wrongDigest)
 
     let errorThrown: Error | undefined
     try {
@@ -171,7 +179,7 @@ describe('InviteSlotSigningValid assertion resolution (Phase 33 — 4.x fix)', f
         `insert into AdminSigning (
            Nonce, AuthorityId, AdminEffectiveAt, Scope, Digest, UserId, SignerKey, Signature
          )
-         with context now = :now, IsSignatureValid = true, IsSignerKeyValid = true
+         with context now = :now, IsSignerKeyValid = true, IsPlaceholderSignature = false
          values (:nonce, :authorityId, :adminEffectiveAt, 'rad', :digest, :userId, :signerKey, :signature)`,
         {
           nonce,
@@ -261,7 +269,11 @@ describe('InviteSlotSigningValid assertion resolution (Phase 33 — 4.x fix)', f
       .get({ authorityId: auth.authority.id })
     if (!adminRow) throw new Error('CurrentAdmin not found')
 
-    const sig = makeTestSignature(auth.user)
+    // 999.1 R-02: real digest-then-sign — SignatureValid must pass so the test can
+    // isolate InviteSlotSigningValid's batch-level boundary behavior.
+    const digestARow = await auth.ctx.db.prepare('select Digest(:cidA) as d').get({ cidA: slotA.Cid as string })
+    const digestA = digestARow!.d as string
+    const sig = signTestDigest(auth.user, digestA)
 
     // AdminSigning.Digest = Digest(A.Cid) — matches A, not B.
     let errorThrown: Error | undefined
@@ -270,7 +282,7 @@ describe('InviteSlotSigningValid assertion resolution (Phase 33 — 4.x fix)', f
         `insert into AdminSigning (
            Nonce, AuthorityId, AdminEffectiveAt, Scope, Digest, UserId, SignerKey, Signature
          )
-         with context now = :now, IsSignatureValid = true, IsSignerKeyValid = true
+         with context now = :now, IsSignerKeyValid = true, IsPlaceholderSignature = false
          values (:nonce, :authorityId, :adminEffectiveAt, 'rad', Digest(:cidA), :userId, :signerKey, :signature)`,
         {
           nonce,

@@ -527,10 +527,10 @@ export class ElectionsEngine implements IElectionsEngine {
    * 6. Call `SigningEngine.sign()` → OfficerSignature → (threshold=1) → AdminSignature.
    * 7. Return the nonce so the screen can pass it to `createElection(payload, { signingNonce })`.
    *
-   * The `IsSignatureValid = true` context flag is the seedElectionSigning pattern
-   * (same as test/fixtures/test-context.ts); it is acceptable because the stored
-   * `Signature` value IS a genuine secp256k1 signature over the correct Digest —
-   * `OfficerSignature.SignatureValid` will verify the real crypto (D-01).
+   * 999.1 R-02: the AdminSigning insert no longer binds a hardcoded IsSignatureValid — the
+   * schema's `SignatureValid(new.Digest, new.Signature, new.SignerKey)` UDF verifies the
+   * stored `Signature` directly, and it IS a genuine secp256k1 signature over the correct
+   * Digest (D-01). `OfficerSignature.SignatureValid` verifies the same real crypto downstream.
    *
    * @param electionFields - The core election fields (id, authorityId, title, date,
    *   revisionDeadline, ballotDeadline, type) — must match exactly what the builder
@@ -603,8 +603,9 @@ export class ElectionsEngine implements IElectionsEngine {
     const signature = await sign(digestBytes)
 
     // 5. Generate nonce and insert AdminSigning with the election-specific Digest.
-    //    `IsSignatureValid = true` mirrors the seedElectionSigning test-fixture pattern;
-    //    OfficerSignature.SignatureValid will still verify the genuine secp256k1 signature.
+    //    999.1 R-02: AdminSigning.SignatureValid now verifies `signature` (a genuine
+    //    secp256k1 signature) via the in-schema UDF; OfficerSignature.SignatureValid verifies
+    //    the same real crypto downstream.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const nonce: string = (globalThis as any).crypto.randomUUID()
     const now = nowCanonicalDatetime()
@@ -620,7 +621,7 @@ export class ElectionsEngine implements IElectionsEngine {
         SignerKey,
         Signature
       )
-      with context now = :now, IsSignatureValid = true, IsSignerKeyValid = true
+      with context now = :now, IsSignerKeyValid = true, IsPlaceholderSignature = false
       values (
         :nonce,
         :authorityId,
@@ -760,7 +761,7 @@ export class ElectionsEngine implements IElectionsEngine {
         SignerKey,
         Signature
       )
-      with context now = :now, IsSignatureValid = true, IsSignerKeyValid = true
+      with context now = :now, IsSignerKeyValid = true, IsPlaceholderSignature = false
       values (
         :nonce,
         :authorityId,
@@ -864,8 +865,9 @@ export class ElectionsEngine implements IElectionsEngine {
       const tid = await allocateTid(ctx.db, 'elections')
       const now = nowCanonicalDatetime()
 
-      // Placeholder key/sig values satisfy the AdminSigning context checks
-      // (IsSignerKeyValid = true, IsSignatureValid = true) without real crypto.
+      // Placeholder key/sig values — 999.1 R-02/R-04 (DEBT-11): this debug-only seed helper
+      // never calls sign(), so AdminSigning.SignatureValid must take the explicit
+      // IsPlaceholderSignature escape hatch rather than a real verifiable signature.
       const placeholderKey = '0'.repeat(66)
       const placeholderSig = '0'.repeat(128)
 
@@ -894,7 +896,7 @@ export class ElectionsEngine implements IElectionsEngine {
       //    MutationValid's "not exists AdminSignature for uncompleted task" gate passes.
       await ctx.db.exec(
         `insert into AdminSigning (Nonce, AuthorityId, AdminEffectiveAt, Scope, Digest, UserId, SignerKey, Signature)
-         with context now = :now, IsSignatureValid = true, IsSignerKeyValid = true
+         with context now = :now, IsSignerKeyValid = true, IsPlaceholderSignature = true
          values (:nonce, :authorityId, :adminEffectiveAt, 'rad',
                  Digest(:tid, :authorityId, :adminEffectiveAt, :thresholdPolicies),
                  :userId, :signerKey, :signature)`,

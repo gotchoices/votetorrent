@@ -7,6 +7,8 @@ import {
   UserKeyType
 } from '@votetorrent/vote-core'
 import { expect } from 'chai'
+import { secp256k1 } from '@noble/curves/secp256k1.js'
+import { bytesToHex, hexToBytes } from '@noble/curves/utils.js'
 import { prepareDb } from '../src/database/initialize'
 import { ElectionEngine } from '../src/election/election-engine'
 import { ElectionsEngine } from '../src/elections/elections-engine'
@@ -20,6 +22,7 @@ import { SignatureTasksEngine } from '../src/tasks/signature-tasks-engine'
 import type { EngineContext } from '../src/types.js'
 import { createTestNetwork, addTestAuthority, addTestElection, seedBallot, seedQuestion, seedElectionSigning, makeElectionInit as makeElectionInitFromFixture, makeTestSignature } from './fixtures/test-context.js'
 import { peekNextElectionTid } from '../src/elections/elections-engine.js'
+import { digestToBytes } from '../src/utils.js'
 import { randomTestKeyPair } from './fixtures/keys.js'
 import { AsyncStorage } from './shims/react-native'
 import type {
@@ -808,9 +811,13 @@ describe('SignatureTasksEngine', () => {
 
       // 2. Seed AdminSigning with Digest(tid, authorityId, adminEffectiveAt, thresholdPolicies)
       //    — the 4-arg form that MutationValid expects. Pattern from elections-engine.ts:836-843.
+      // 999.1 R-02/R-04: this row is created BEFORE the officer actually signs (the task is
+      // "pending" until completeSignature runs) — same DEBT-11 shape as
+      // elections-engine.ts's debugSeedPendingTasks, so it takes the explicit
+      // IsPlaceholderSignature escape hatch rather than a real signature.
       await auth.ctx.db.exec(
         `insert into AdminSigning (Nonce, AuthorityId, AdminEffectiveAt, Scope, Digest, UserId, SignerKey, Signature)
-         with context now = :now, IsSignatureValid = true, IsSignerKeyValid = true
+         with context now = :now, IsSignerKeyValid = true, IsPlaceholderSignature = true
          values (:nonce, :authorityId, :adminEffectiveAt, 'rad',
                  Digest(:tid, :authorityId, :adminEffectiveAt, :thresholdPolicies),
                  :userId, :signerKey, :sig)`,
@@ -846,11 +853,20 @@ describe('SignatureTasksEngine', () => {
         network: makeNetworkRef(),
         signatureType: 'admin'
       }
+      // 999.1 R-02: completeSignature drives a REAL OfficerSignature insert — the schema's
+      // SignatureValid UDF verifies it against AdminSigning's actual Digest, so this must be
+      // a genuine secp256k1 signature over that digest (not the placeholder above).
+      const digestRow = await auth.ctx.db
+        .prepare('select Digest from AdminSigning where Nonce = :nonce')
+        .get({ nonce: taskNonce })
+      const digestB64 = digestRow!.Digest as string
+      const { privateHex, publicHex } = randomTestKeyPair()
+      const realSig = bytesToHex(secp256k1.sign(digestToBytes(digestB64), hexToBytes(privateHex)))
       const result: SignatureResult = {
         isAccepted: true,
         signature: {
-          signature: placeholderSig,
-          signerKey,
+          signature: realSig,
+          signerKey: publicHex,
           signerUserId: userId
         }
       }

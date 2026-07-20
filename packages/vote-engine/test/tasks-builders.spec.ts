@@ -7,6 +7,8 @@
  */
 
 import { expect } from 'chai'
+import { secp256k1 } from '@noble/curves/secp256k1.js'
+import { bytesToHex, hexToBytes } from '@noble/curves/utils.js'
 import {
   BuilderAlreadyCommittedError,
   BuilderValidationError
@@ -30,6 +32,8 @@ import { KeysTasksEngine } from '../src/tasks/keys-tasks-engine.js'
 import { OnboardingTasksEngine } from '../src/tasks/onboarding-tasks-engine.js'
 import { SignatureTasksEngine } from '../src/tasks/signature-tasks-engine.js'
 import { createTestNetwork, addTestAuthority } from './fixtures/test-context.js'
+import { randomTestKeyPair } from './fixtures/keys.js'
+import { digestToBytes } from '../src/utils.js'
 
 // ---- Stub engine factories (minimal interface satisfaction) ----
 
@@ -308,7 +312,9 @@ describe('CompleteSignatureBuilder', () => {
       primaryAuthorityDomainName: 'authority.example.com'
     }
     const task = makeSignatureTask()   // userId='user-1', signatureType='admin'
-    const result = makeSignatureResult()
+    // 999.1 R-02: no longer using the shared makeSignatureResult() dummy — each
+    // seedPendingTask() call below builds its own real per-digest SignatureResult
+    // (the schema's SignatureValid UDF now verifies these bytes for real).
     const taskNonce = crypto.randomUUID()
     const placeholderSig = 'a'.repeat(128)
     const thresholdPolicies = '[]'
@@ -343,15 +349,32 @@ describe('CompleteSignatureBuilder', () => {
         // Idempotent — ProposedAdmin already exists for this (AuthorityId, EffectiveAt) PK.
       }
 
-      // Step 2: seed AdminSigning (required by AdminSignatureTaskExtension.MutationValid)
+      // Step 2: seed AdminSigning (required by AdminSignatureTaskExtension.MutationValid).
+      // 999.1 R-02/R-04: this row is created BEFORE the officer actually signs (the task
+      // is "pending" until completeSignature runs) — same DEBT-11 shape as
+      // elections-engine.ts's debugSeedPendingTasks, so it takes the explicit
+      // IsPlaceholderSignature escape hatch rather than a real signature.
       await ctx.db.exec(
         `insert into AdminSigning (Nonce, AuthorityId, AdminEffectiveAt, Scope, Digest, UserId, SignerKey, Signature)
-         with context now = :now, IsSignatureValid = true, IsSignerKeyValid = true
+         with context now = :now, IsSignerKeyValid = true, IsPlaceholderSignature = true
          values (:nonce, :authorityId, :adminEffectiveAt, 'rad',
                  Digest(:tid, :authorityId, :adminEffectiveAt, :thresholdPolicies),
                  :userId, :signerKey, :sig)`,
         { nonce: taskNonce, authorityId, adminEffectiveAt, thresholdPolicies, tid, now, userId, signerKey, sig: placeholderSig }
       )
+
+      // Compute the REAL AdminSigning.Digest so completeSignature()'s OfficerSignature
+      // insert (999.1 R-02: verifies against this Digest via the UDF) can be signed for real.
+      const digestRow = await ctx.db
+        .prepare('select Digest from AdminSigning where Nonce = :nonce')
+        .get({ nonce: taskNonce })
+      const digestB64 = digestRow!.Digest as string
+      const { privateHex, publicHex } = randomTestKeyPair()
+      const realSig = bytesToHex(secp256k1.sign(digestToBytes(digestB64), hexToBytes(privateHex)))
+      const realResult: SignatureResult = {
+        isAccepted: true,
+        signature: { signature: realSig, signerKey: publicHex, signerUserId: userId }
+      }
 
       // Step 3: seed Task + AdminSignatureTaskExtension in an explicit BEGIN/COMMIT
       // transaction. Both deferred CHECKs (ExtensionExists on Task, TaskIdValid on
@@ -378,13 +401,13 @@ describe('CompleteSignatureBuilder', () => {
         throw err
       }
 
-      return { ctx, ref: auth.ref }
+      return { ctx, ref: auth.ref, result: realResult }
     }
 
     // ---- Direct path ----
-    const { ctx: ctx1, ref: ref1 } = await seedPendingTask('task-sig-direct')
+    const { ctx: ctx1, ref: ref1, result: result1 } = await seedPendingTask('task-sig-direct')
     const eng1 = new SignatureTasksEngine(ref1, ctx1)
-    await eng1.completeSignature(task, result)
+    await eng1.completeSignature(task, result1)
     const row1 = await ctx1.db
       .prepare('select IsCompleted from Task where Id = :id')
       .get({ id: 'task-sig-direct' })
@@ -393,9 +416,9 @@ describe('CompleteSignatureBuilder', () => {
     )
 
     // ---- Builder path ----
-    const { ctx: ctx2, ref: ref2 } = await seedPendingTask('task-sig-builder')
+    const { ctx: ctx2, ref: ref2, result: result2 } = await seedPendingTask('task-sig-builder')
     const eng2 = new SignatureTasksEngine(ref2, ctx2)
-    await eng2.buildCompleteSignature().setTask(task).setResult(result).commit()
+    await eng2.buildCompleteSignature().setTask(task).setResult(result2).commit()
     const row2 = await ctx2.db
       .prepare('select IsCompleted from Task where Id = :id')
       .get({ id: 'task-sig-builder' })

@@ -5,6 +5,8 @@ import {
   UserKeyType
 } from '@votetorrent/vote-core'
 import { expect } from 'chai'
+import { secp256k1 } from '@noble/curves/secp256k1.js'
+import { bytesToHex, hexToBytes } from '@noble/curves/utils.js'
 import { prepareDb } from '../src/database/initialize'
 import { NetworksEngine } from '../src/networks/networks-engine'
 import { SigningEngine } from '../src/signing/signing-engine'
@@ -14,7 +16,7 @@ import { MockSigningEngine } from '../src/signing/mock-signing-engine'
 import { SigningSignBuilder } from '../src/signing/builders/signing-sign-builder.js'
 import { SigningStartSigningSessionBuilder } from '../src/signing/builders/signing-start-signing-session-builder.js'
 import { createTestNetwork, addTestAuthority, addTestElection, makeTestSignature } from './fixtures/test-context.js'
-import { nowCanonicalDatetime } from '../src/utils.js'
+import { nowCanonicalDatetime, digestToBytes } from '../src/utils.js'
 import type { EngineContext } from '../src/types.js'
 import { randomTestKeyPair } from './fixtures/keys.js'
 import { AsyncStorage } from './shims/react-native'
@@ -122,6 +124,39 @@ function makeSignature (signerUserId: string): Signature {
   }
 }
 
+/**
+ * 999.1 R-02: real per-digest signature for `startSigningSession` (PATH A, digestArgs !==
+ * null — no callback form exists on this method, see ISigningEngine.startSigningSession).
+ * Reproduces the exact `Digest(:authorityId, :effectiveAt, :thresholdPolicies)` formula
+ * `SigningEngine.startSigningSession` computes engine-side, then signs it for real —
+ * AdminSigning.SignatureValid now verifies these bytes via the in-schema UDF.
+ */
+async function realSignAdminDigest (
+  ctx: EngineContext,
+  authorityId: string,
+  digestArgs: AdminDigestArgs,
+  signerUserId: string
+): Promise<Signature> {
+  const row = await ctx.db
+    .prepare('select Digest(:authorityId, :effectiveAt, :thresholdPolicies) as d')
+    .get({ authorityId, effectiveAt: digestArgs.effectiveAt, thresholdPolicies: digestArgs.thresholdPolicies })
+  const digestB64 = row!.d as string
+  const { privateHex, publicHex } = randomTestKeyPair()
+  const sigHex = bytesToHex(secp256k1.sign(digestToBytes(digestB64), hexToBytes(privateHex)))
+  return { signerUserId, signerKey: publicHex, signature: sigHex }
+}
+
+/**
+ * 999.1 R-02: real signature over an ALREADY-COMPUTED base64url Digest() output (e.g. an
+ * AdminSigning.Digest re-read from the DB) — for OfficerSignature.SignatureValid, which
+ * verifies against the referenced AdminSigning session's Digest rather than recomputing one.
+ */
+function signTestDigestWithFreshKey (signerUserId: string, digestB64: string): Signature {
+  const { privateHex, publicHex } = randomTestKeyPair()
+  const sigHex = bytesToHex(secp256k1.sign(digestToBytes(digestB64), hexToBytes(privateHex)))
+  return { signerUserId, signerKey: publicHex, signature: sigHex }
+}
+
 // ===========================================================================
 // SigningEngine — TEST-02
 // ===========================================================================
@@ -169,11 +204,7 @@ describe('SigningEngine', () => {
         .prepare('select Id from Authority limit 1')
         .get({})
       const authorityId = authRow!.Id as string
-      const sig: Signature = {
-        signerUserId: user.id,
-        signerKey: user.activeKeys[0]!.key,
-        signature: 'a'.repeat(128)
-      }
+      const sig = await realSignAdminDigest(ctx, authorityId, testDigestArgs, user.id)
       const result = await engine.startSigningSession(
         authorityId,
         testDigestArgs,
@@ -191,11 +222,7 @@ describe('SigningEngine', () => {
         .prepare('select Id from Authority limit 1')
         .get({})
       const authorityId = authRow!.Id as string
-      const sig: Signature = {
-        signerUserId: user.id,
-        signerKey: user.activeKeys[0]!.key,
-        signature: 'a'.repeat(128)
-      }
+      const sig = await realSignAdminDigest(ctx, authorityId, testDigestArgs, user.id)
       const { nonce } = await engine.startSigningSession(
         authorityId,
         testDigestArgs,
@@ -220,11 +247,7 @@ describe('SigningEngine', () => {
         .prepare('select Id from Authority limit 1')
         .get({})
       const authorityId = authRow!.Id as string
-      const sig: Signature = {
-        signerUserId: user.id,
-        signerKey: user.activeKeys[0]!.key,
-        signature: 'a'.repeat(128)
-      }
+      const sig = await realSignAdminDigest(ctx, authorityId, testDigestArgs, user.id)
       let caught: unknown
       try {
         await engine.startSigningSession(
@@ -310,11 +333,7 @@ describe('SigningEngine', () => {
       const engine = new SigningEngine(ctx)
       const authRow = await ctx.db.prepare('select Id from Authority limit 1').get({})
       const authorityId = authRow!.Id as string
-      const sig: Signature = {
-        signerUserId: user.id,
-        signerKey: user.activeKeys[0]!.key,
-        signature: 'a'.repeat(128)
-      }
+      const sig = await realSignAdminDigest(ctx, authorityId, testDigestArgs, user.id)
       // Create an AdminSigning session first so sign() has a row to read scope from
       const { nonce } = await engine.startSigningSession(authorityId, testDigestArgs, 'rad', sig)
       // sign() with the nonce from startSigningSession (which already called sign internally)
@@ -333,11 +352,7 @@ describe('SigningEngine', () => {
       const engine = new SigningEngine(ctx)
       const authRow = await ctx.db.prepare('select Id from Authority limit 1').get({})
       const authorityId = authRow!.Id as string
-      const sig: Signature = {
-        signerUserId: user.id,
-        signerKey: user.activeKeys[0]!.key,
-        signature: 'a'.repeat(128)
-      }
+      const sig = await realSignAdminDigest(ctx, authorityId, testDigestArgs, user.id)
       // startSigningSession creates AdminSigning + calls sign() internally
       const { nonce, thresholdReached } = await engine.startSigningSession(authorityId, testDigestArgs, 'rad', sig)
       expect(thresholdReached).to.equal(true)
@@ -357,11 +372,7 @@ describe('SigningEngine', () => {
       const engine = new SigningEngine(ctx)
       const authRow = await ctx.db.prepare('select Id from Authority limit 1').get({})
       const authorityId = authRow!.Id as string
-      const sig: Signature = {
-        signerUserId: user.id,
-        signerKey: user.activeKeys[0]!.key,
-        signature: 'a'.repeat(128)
-      }
+      const sig = await realSignAdminDigest(ctx, authorityId, testDigestArgs, user.id)
       // startSigningSession creates AdminSigning + calls sign() internally
       const { nonce, thresholdReached: first } = await engine.startSigningSession(authorityId, testDigestArgs, 'rad', sig)
       expect(first).to.equal(true)
@@ -390,11 +401,7 @@ describe('SigningEngine', () => {
       const engine = new SigningEngine(ctx)
       const authRow = await ctx.db.prepare('select Id from Authority limit 1').get({})
       const authorityId = authRow!.Id as string
-      const sig1: Signature = {
-        signerUserId: user.id,
-        signerKey: user.activeKeys[0]!.key,
-        signature: 'a'.repeat(128)
-      }
+      const sig1 = await realSignAdminDigest(ctx, authorityId, testDigestArgs, user.id)
       // Officer 1 crosses the threshold (=1): AdminSignature row is created.
       const { nonce, thresholdReached } = await engine.startSigningSession(authorityId, testDigestArgs, 'rad', sig1)
       expect(thresholdReached).to.equal(true)
@@ -407,11 +414,12 @@ describe('SigningEngine', () => {
       // Officer 2 (distinct UserId) signs the SAME nonce. Their OfficerSignature
       // inserts cleanly (distinct PK), the count re-crosses the threshold, and
       // the AdminSignature insert collides on its existing PK → the WR-02 branch.
-      const sig2: Signature = {
-        signerUserId: 'user-2-wr02',
-        signerKey: randomTestKeyPair().publicHex,
-        signature: 'b'.repeat(128)
-      }
+      // 999.1 R-02: OfficerSignature.SignatureValid verifies against the SAME
+      // AdminSigning.Digest sig1 signed above — sign a real signature over it too.
+      const adminSigningDigestRow = await ctx.db
+        .prepare('select Digest from AdminSigning where Nonce = :nonce')
+        .get({ nonce })
+      const sig2 = signTestDigestWithFreshKey('user-2-wr02', adminSigningDigestRow!.Digest as string)
       const result = await engine.sign(nonce, sig2)
       expect(result, 'threshold is already met, so sign() reports success').to.equal(true)
 
@@ -443,11 +451,7 @@ describe('SigningEngine', () => {
         .prepare('select Id from Authority limit 1')
         .get({})
       const authorityId = authRow!.Id as string
-      const sig: Signature = {
-        signerUserId: user.id,
-        signerKey: user.activeKeys[0]!.key,
-        signature: 'a'.repeat(128)
-      }
+      const sig = await realSignAdminDigest(ctx, authorityId, testDigestArgs, user.id)
       const { nonce, thresholdReached } = await engine.startSigningSession(
         authorityId,
         testDigestArgs,
@@ -531,9 +535,13 @@ describe('getSignatureDigest + completeSignature round-trip', () => {
       }
     )
 
+    // 999.1 R-02/R-04: this row is created BEFORE the officer actually signs (the task is
+    // "pending" until completeSignature runs with a real secp256k1 key, below) — same
+    // DEBT-11 shape as elections-engine.ts's debugSeedPendingTasks — so it takes the
+    // explicit IsPlaceholderSignature escape hatch.
     await auth.ctx.db.exec(
       `insert into AdminSigning (Nonce, AuthorityId, AdminEffectiveAt, Scope, Digest, UserId, SignerKey, Signature)
-       with context now = :now, IsSignatureValid = true, IsSignerKeyValid = true
+       with context now = :now, IsSignerKeyValid = true, IsPlaceholderSignature = true
        values (:nonce, :authorityId, :adminEffectiveAt, 'rad',
                Digest(:tid, :authorityId, :adminEffectiveAt, :thresholdPolicies),
                :userId, :signerKey, :signature)`,
@@ -772,9 +780,13 @@ describe('completeSignature reject-branch (D-12)', () => {
     //   Digest(context.Tid, PA.AuthorityId, PA.EffectiveAt, PA.ThresholdPolicies)
     // We do NOT call sign() here — AdminSignature must be absent when the extension is inserted
     // (the extension's MutationValid "not exists AdminSignature for uncompleted task" gate).
+    // 999.1 R-02/R-04: this row is created BEFORE the officer actually signs (mirrors
+    // the DEBT-11 shape used elsewhere — the officer's real decision arrives via
+    // completeSignature, not at seed time) — takes the explicit IsPlaceholderSignature
+    // escape hatch rather than a real signature.
     await auth.ctx.db.exec(
       `insert into AdminSigning (Nonce, AuthorityId, AdminEffectiveAt, Scope, Digest, UserId, SignerKey, Signature)
-       with context now = :now, IsSignatureValid = true, IsSignerKeyValid = true
+       with context now = :now, IsSignerKeyValid = true, IsPlaceholderSignature = true
        values (:nonce, :authorityId, :adminEffectiveAt, 'rad',
                Digest(:tid, :authorityId, :adminEffectiveAt, :thresholdPolicies),
                :userId, :signerKey, :signature)`,
@@ -890,7 +902,12 @@ describe('completeSignature reject-branch (D-12)', () => {
       network: networkRef,
       signatureType: 'admin'
     }
-    const sig = makeTestSignature(auth.user)
+    // 999.1 R-02: completeSignature's accept path drives a REAL OfficerSignature insert —
+    // sign the seeded AdminSigning's actual Digest for real.
+    const acceptDigestRow = await auth.ctx.db
+      .prepare('select Digest from AdminSigning where Nonce = :nonce')
+      .get({ nonce })
+    const sig = signTestDigestWithFreshKey(auth.user.id, acceptDigestRow!.Digest as string)
     const acceptResult = { isAccepted: true, signature: sig }
 
     await tasksEngine.completeSignature(task, acceptResult)
@@ -1141,7 +1158,7 @@ describe('SigningSignBuilder', () => {
     const eng1 = new SigningEngine(ctx1)
     const authRow1 = await ctx1.db.prepare('select Id from Authority limit 1').get({})
     const authorityId1 = authRow1!.Id as string
-    const sig1 = makeSignature(user1.id)
+    const sig1 = await realSignAdminDigest(ctx1, authorityId1, testDigestArgs, user1.id)
     const sessionA = await eng1.startSigningSession(authorityId1, testDigestArgs, 'rad', sig1)
     expect(sessionA).to.have.property('nonce')
     expect(sessionA).to.have.property('thresholdReached')
@@ -1167,7 +1184,7 @@ describe('SigningSignBuilder', () => {
     const eng2 = new SigningEngine(ctx2)
     const authRow2 = await ctx2.db.prepare('select Id from Authority limit 1').get({})
     const authorityId2 = authRow2!.Id as string
-    const sig2 = makeSignature(user2.id)
+    const sig2 = await realSignAdminDigest(ctx2, authorityId2, testDigestArgs, user2.id)
     const sessionB = await eng2.buildStartSigningSession()
       .fromPayload({ authorityId: authorityId2, digestArgs: testDigestArgs, scope: 'rad', signature: sig2 })
       .commit()
@@ -1343,7 +1360,7 @@ describe('SigningStartSigningSessionBuilder', () => {
     const eng1 = new SigningEngine(ctx1)
     const authRow1 = await ctx1.db.prepare('select Id from Authority limit 1').get({})
     const authorityId1 = authRow1!.Id as string
-    const sig1 = makeSignature(user1.id)
+    const sig1 = await realSignAdminDigest(ctx1, authorityId1, testDigestArgs, user1.id)
     const directResult = await eng1.startSigningSession(authorityId1, testDigestArgs, 'rad', sig1)
     expect(directResult).to.have.property('nonce')
     expect(directResult).to.have.property('thresholdReached')
@@ -1353,7 +1370,7 @@ describe('SigningStartSigningSessionBuilder', () => {
     const eng2 = new SigningEngine(ctx2)
     const authRow2 = await ctx2.db.prepare('select Id from Authority limit 1').get({})
     const authorityId2 = authRow2!.Id as string
-    const sig2 = makeSignature(user2.id)
+    const sig2 = await realSignAdminDigest(ctx2, authorityId2, testDigestArgs, user2.id)
     const builderResult = await eng2.buildStartSigningSession()
       .fromPayload({ authorityId: authorityId2, digestArgs: testDigestArgs, scope: 'rad', signature: sig2 })
       .commit()

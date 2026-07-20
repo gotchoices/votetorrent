@@ -1,6 +1,8 @@
 import { expect } from 'chai'
 import type { Signature } from '@votetorrent/vote-core'
 import { digest as pluginDigest, sign as pluginSign } from '@optimystic/quereus-plugin-crypto'
+import { secp256k1 } from '@noble/curves/secp256k1.js'
+import { bytesToHex, hexToBytes } from '@noble/curves/utils.js'
 import { seedSignedMutation } from '../../src/signing/signed-mutation.js'
 import { peekNextElectionTid } from '../../src/elections/elections-engine.js'
 import { toCanonicalDatetime } from '../../src/utils.js'
@@ -95,10 +97,14 @@ describe('signed-mutation', () => {
     const { nonce: refNonce } = await seedElectionSigning(auth.ctx, auth.authority.id, init, auth.user, tid)
 
     // Generalized helper path — same inputs, same scope.
+    // 999.1 R-02: sign the ACTUAL digest bytes for real (AdminSigning.SignatureValid now
+    // verifies them via the UDF) — makeTestSignature's fixed dummy no longer suffices.
     let receivedDigest: Uint8Array | undefined
+    const { privateHex, publicHex } = randomTestKeyPair()
     const sign = async (digest: Uint8Array): Promise<Signature> => {
       receivedDigest = digest
-      return makeTestSignature(auth.user)
+      const sigHex = bytesToHex(secp256k1.sign(digest, hexToBytes(privateHex)))
+      return { signerUserId: auth.user.id, signerKey: publicHex, signature: sigHex }
     }
     const helperNonce = await seedSignedMutation(
       auth.ctx,

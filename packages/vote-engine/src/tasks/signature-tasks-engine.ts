@@ -401,7 +401,7 @@ export class SignatureTasksEngine implements ISignatureTasksEngine {
         `insert into AdminSigning (
           Nonce, AuthorityId, AdminEffectiveAt, Scope, Digest, UserId, SignerKey, Signature
         )
-        with context now = :now, IsSignatureValid = true, IsSignerKeyValid = true
+        with context now = :now, IsSignerKeyValid = true, IsPlaceholderSignature = true
         values (
           :nonce, :authorityId, :adminEffectiveAt, 'ceb',
           Digest(1, :ballotId, :code, :title, :instructions, :dependsOn, :type, :optionRange, :scoreRange, :grouping, :sequence, :required),
@@ -430,12 +430,15 @@ export class SignatureTasksEngine implements ISignatureTasksEngine {
       )
 
       // Step 3b: sign to create AdminSignature (threshold=1 auto-completes)
+      // 999.1 R-02/R-04 (DEBT-11): mechanical per-question materialization of content the
+      // officer already approved once at the ballot-header level — no fresh officer decision
+      // here, so this stays a placeholder signature (isPlaceholderSignature: true).
       const qSig = {
         signerUserId: this.ctx!.user?.id ?? '',
         signerKey: this.ctx!.user?.activeKeys?.[0]?.key ?? '0'.repeat(66),
         signature: '0'.repeat(128),
       }
-      await this.signingEngine!.sign(qNonce, qSig)
+      await this.signingEngine!.sign(qNonce, qSig, { isPlaceholderSignature: true })
 
       // Step 3c: INSERT Question row (Ballot must already exist — BallotIdValid constraint, D-08)
       await this.ctx!.db.exec(
@@ -496,7 +499,7 @@ export class SignatureTasksEngine implements ISignatureTasksEngine {
             `insert into AdminSigning (
               Nonce, AuthorityId, AdminEffectiveAt, Scope, Digest, UserId, SignerKey, Signature
             )
-            with context now = :now, IsSignatureValid = true, IsSignerKeyValid = true
+            with context now = :now, IsSignerKeyValid = true, IsPlaceholderSignature = true
             values (
               :nonce, :authorityId, :adminEffectiveAt, 'ceb',
               Digest(1, :ballotId, :questionCode, :code, :sequence, :title, :details, :infoURL, :image, :video),
@@ -526,12 +529,13 @@ export class SignatureTasksEngine implements ISignatureTasksEngine {
         }
 
         // Step 4b: sign to create AdminSignature (threshold=1 auto-completes)
+        // 999.1 R-02/R-04 (DEBT-11): same mechanical-materialization rationale as qSig above.
         const oSig = {
           signerUserId: this.ctx!.user?.id ?? '',
           signerKey: this.ctx!.user?.activeKeys?.[0]?.key ?? '0'.repeat(66),
           signature: '0'.repeat(128),
         }
-        await this.signingEngine!.sign(oNonce, oSig)
+        await this.signingEngine!.sign(oNonce, oSig, { isPlaceholderSignature: true })
 
         // Step 4c: INSERT Option row (Ballot + parent Question already exist — constraints satisfied)
         try {

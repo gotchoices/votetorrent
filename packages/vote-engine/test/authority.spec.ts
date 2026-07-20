@@ -1,5 +1,5 @@
 import { Database } from '@quereus/quereus'
-import { bytesToHex } from '@noble/curves/utils.js'
+import { bytesToHex, hexToBytes } from '@noble/curves/utils.js'
 import { secp256k1 } from '@noble/curves/secp256k1.js'
 import { sha256 } from '@noble/hashes/sha2.js'
 import { ElectionType, UserKeyType } from '@votetorrent/vote-core'
@@ -7,7 +7,7 @@ import { expect } from 'chai'
 import { AuthorityEngine } from '../src/authority/authority-engine'
 import { prepareDb } from '../src/database/initialize'
 import { NetworksEngine } from '../src/networks/networks-engine'
-import { nowCanonicalDatetime, toCanonicalDatetime } from '../src/utils.js'
+import { nowCanonicalDatetime, toCanonicalDatetime, digestToBytes } from '../src/utils.js'
 import type { EngineContext } from '../src/types.js'
 import { randomTestKeyPair } from './fixtures/keys.js'
 import { createTestNetwork, addTestAuthority, seedUserInvite, makeDistinctTestUser } from './fixtures/test-context.js'
@@ -108,12 +108,32 @@ async function createNetworkAndAuthority (): Promise<{
 // AUTH-01: real hex-encoded secp256k1 signature for test inputs.
 // Generates a fresh keypair, signs sha256(digestText ?? signerUserId), and
 // returns the hex shapes contractually required by the engine.
+//
+// 999.1 R-02: this signs ARBITRARY bytes (sha256 of digestText/signerUserId), NOT the
+// actual row Digest the schema's SignatureValid UDF now verifies — kept only for
+// negative-test / structural-equality call sites that never reach the UDF (or
+// deliberately want a mismatched signature). Any call site that flows into
+// `proposeAdmin`/`saveInviteWithSigning` MUST use `makeRealSignCallback` instead, since
+// those methods compute the real digest engine-side and need to sign THAT.
 function makeRealSignature (signerUserId: string, digestText?: string): Signature {
   const { privateHex, publicHex } = randomTestKeyPair()
   const privBytes = Uint8Array.from(privateHex.match(/.{2}/g)!.map((b) => parseInt(b, 16)))
   const digestBytes = sha256(new TextEncoder().encode(digestText ?? signerUserId))
   const sig = bytesToHex(secp256k1.sign(digestBytes, privBytes))
   return { signerUserId, signerKey: publicHex, signature: sig }
+}
+
+/**
+ * 999.1 R-02: real per-digest sign callback for `proposeAdmin`/`saveInviteWithSigning`
+ * (both compute the actual row Digest engine-side and invoke this with the real bytes).
+ */
+function makeRealSignCallback (signerUserId: string, _unusedDigestTextArg?: string): (digest: Uint8Array) => Promise<Signature> {
+  const { privateHex, publicHex } = randomTestKeyPair()
+  const privBytes = hexToBytes(privateHex)
+  return async (digest: Uint8Array): Promise<Signature> => {
+    const sigHex = bytesToHex(secp256k1.sign(digest, privBytes))
+    return { signerUserId, signerKey: publicHex, signature: sigHex }
+  }
 }
 
 // Construct a minimal AuthorityEngine that has a real Database (so the
@@ -317,7 +337,7 @@ describe('AuthorityEngine', () => {
     it('should insert a ProposedAdmin row with authorityId, effectiveAt, and thresholdPolicies', async () => {
       const { authority, authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
-      const sig = makeRealSignature('user-1')
+      const sig = makeRealSignCallback('user-1')
       const effectiveAt = Date.now() + 60_000
       const proposal: Proposal<AdminInit> = {
         proposed: {
@@ -337,7 +357,7 @@ describe('AuthorityEngine', () => {
     it('should serialize thresholdPolicies as JSON', async () => {
       const { authority, authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
-      const sig = makeRealSignature('user-1')
+      const sig = makeRealSignCallback('user-1')
       const effectiveAt = Date.now() + 60_000
       const policies = [
         { policy: 'rad' as Scope, threshold: 2 },
@@ -374,7 +394,7 @@ describe('AuthorityEngine', () => {
     it('should start a signing session with scope rad', async () => {
       const { authority, authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
-      const sig = makeRealSignature('user-1')
+      const sig = makeRealSignCallback('user-1')
       await authorityEngine.proposeAdmin(
         {
           proposed: {
@@ -448,7 +468,7 @@ describe('AuthorityEngine', () => {
     // before the DB call. Runs against a freshly-prepared empty db.
     it('should throw when no signers are provided in the proposal', async () => {
       const { authorityEngine } = await makeDbOnlyAuthorityEngine()
-      const sig = makeRealSignature('user-1')
+      const sig = makeRealSignCallback('user-1')
       const proposal: Proposal<AdminInit> = {
         proposed: {
           officers: [],
@@ -468,7 +488,7 @@ describe('AuthorityEngine', () => {
     it('should use the first signer as the instigator of the signing session', async () => {
       const { authority, authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
-      const sig = makeRealSignature('user-1')
+      const sig = makeRealSignCallback('user-1')
       await authorityEngine.proposeAdmin(
         {
           proposed: {
@@ -502,7 +522,7 @@ describe('AuthorityEngine', () => {
       // A proposeAdmin call with a wildly invalid EffectiveAt should surface
       // a constraint-named error wrapped by the engine's QuereusError catch.
       const { authority, authorityEngine } = await createNetworkAndAuthority()
-      const sig = makeRealSignature('user-1')
+      const sig = makeRealSignCallback('user-1')
       let caught: unknown
       try {
         await authorityEngine.proposeAdmin(
@@ -637,7 +657,7 @@ describe('AuthorityEngine', () => {
       const { authority, authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
       const invite = authorityEngine.createAuthorityInvite('InviteCorp')
-      const sig = makeRealSignature('user-1', invite.inviteKey)
+      const sig = makeRealSignCallback('user-1', invite.inviteKey)
       await authorityEngine.saveInviteWithSigning(invite, 'iad', sig)
       const row = await ctx.db
         .prepare(
@@ -651,7 +671,7 @@ describe('AuthorityEngine', () => {
       const { authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
       const invite = authorityEngine.createAuthorityInvite('InviteCorp')
-      const sig = makeRealSignature('user-1', invite.inviteKey)
+      const sig = makeRealSignCallback('user-1', invite.inviteKey)
       await authorityEngine.saveInviteWithSigning(invite, 'iad', sig)
       const row = await ctx.db
         .prepare('select Name from InviteSlot where Name = :n')
@@ -667,7 +687,7 @@ describe('AuthorityEngine', () => {
         title: 'Inspector',
         scopes: ['rad'] as Scope[]
       })
-      const sig = makeRealSignature('user-1', invite.inviteKey)
+      const sig = makeRealSignCallback('user-1', invite.inviteKey)
       await authorityEngine.saveInviteWithSigning(invite, 'rad', sig)
       const row = await ctx.db
         .prepare('select Name from InviteSlot where Name = :n')
@@ -679,7 +699,7 @@ describe('AuthorityEngine', () => {
       const { authority, authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
       const invite = authorityEngine.createAuthorityInvite('IADCorp')
-      const sig = makeRealSignature('user-1', invite.inviteKey)
+      const sig = makeRealSignCallback('user-1', invite.inviteKey)
       await authorityEngine.saveInviteWithSigning(invite, 'iad', sig)
       const row = await ctx.db
         .prepare(
@@ -697,7 +717,7 @@ describe('AuthorityEngine', () => {
         title: 'Inspector',
         scopes: ['rad'] as Scope[]
       })
-      const sig = makeRealSignature('user-1', invite.inviteKey)
+      const sig = makeRealSignCallback('user-1', invite.inviteKey)
       await authorityEngine.saveInviteWithSigning(invite, 'rad', sig)
       const row = await ctx.db
         .prepare(
@@ -715,7 +735,7 @@ describe('AuthorityEngine', () => {
       const { authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
       const invite = authorityEngine.createAuthorityInvite('CidCheck')
-      const sig = makeRealSignature('user-1', invite.inviteKey)
+      const sig = makeRealSignCallback('user-1', invite.inviteKey)
       await authorityEngine.saveInviteWithSigning(invite, 'iad', sig)
       const row = await ctx.db
         .prepare('select Cid from InviteSlot where Name = :n')
@@ -727,7 +747,7 @@ describe('AuthorityEngine', () => {
       const { authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
       const invite = authorityEngine.createAuthorityInvite('FieldCheck')
-      const sig = makeRealSignature('user-1', invite.inviteKey)
+      const sig = makeRealSignCallback('user-1', invite.inviteKey)
       await authorityEngine.saveInviteWithSigning(invite, 'iad', sig)
       const row = await ctx.db
         .prepare(
@@ -753,7 +773,7 @@ describe('AuthorityEngine', () => {
     it('should return sent invites with name and type "au"', async () => {
       const { authorityEngine } = await createNetworkAndAuthority()
       const invite = authorityEngine.createAuthorityInvite('Sent Inv')
-      const sig = makeRealSignature('user-1', invite.inviteKey)
+      const sig = makeRealSignCallback('user-1', invite.inviteKey)
       await authorityEngine.saveInviteWithSigning(invite, 'iad', sig)
       const invites = await authorityEngine.getAuthorityInvites()
       expect(invites).to.have.length.greaterThan(0)
@@ -768,7 +788,7 @@ describe('AuthorityEngine', () => {
     it('should include InviteResult when an invite has been accepted', async () => {
       const { networkEngine, authorityEngine } = await createNetworkAndAuthority()
       const invite = authorityEngine.createAuthorityInvite('Accepted')
-      const sig = makeRealSignature('user-1', invite.inviteKey)
+      const sig = makeRealSignCallback('user-1', invite.inviteKey)
       await authorityEngine.saveInviteWithSigning(invite, 'iad', sig)
       await networkEngine.respondToInvite({
         invite,
@@ -786,7 +806,7 @@ describe('AuthorityEngine', () => {
     it('should include InviteResult when an invite has been rejected', async () => {
       const { networkEngine, authorityEngine } = await createNetworkAndAuthority()
       const invite = authorityEngine.createAuthorityInvite('Rejected')
-      const sig = makeRealSignature('user-1', invite.inviteKey)
+      const sig = makeRealSignCallback('user-1', invite.inviteKey)
       await authorityEngine.saveInviteWithSigning(invite, 'iad', sig)
       await networkEngine.respondToInvite({
         invite,
@@ -804,7 +824,7 @@ describe('AuthorityEngine', () => {
     it('should return undefined result when invite has not been responded to', async () => {
       const { authorityEngine } = await createNetworkAndAuthority()
       const invite = authorityEngine.createAuthorityInvite('NoResponse')
-      const sig = makeRealSignature('user-1', invite.inviteKey)
+      const sig = makeRealSignCallback('user-1', invite.inviteKey)
       await authorityEngine.saveInviteWithSigning(invite, 'iad', sig)
       const invites = await authorityEngine.getAuthorityInvites()
       const found = invites.find((i) => i.invite.name === 'NoResponse')
@@ -814,14 +834,14 @@ describe('AuthorityEngine', () => {
     it('should only return invites scoped to "iad" for the current authority', async () => {
       const { authorityEngine } = await createNetworkAndAuthority()
       const auInvite = authorityEngine.createAuthorityInvite('AuthorityScoped')
-      const auSig = makeRealSignature('user-1', auInvite.inviteKey)
+      const auSig = makeRealSignCallback('user-1', auInvite.inviteKey)
       await authorityEngine.saveInviteWithSigning(auInvite, 'iad', auSig)
       const ofInvite = authorityEngine.createOfficerInvite({
         name: 'OfficerScoped',
         title: 'Inspector',
         scopes: ['rad'] as Scope[]
       })
-      const ofSig = makeRealSignature('user-1', ofInvite.inviteKey)
+      const ofSig = makeRealSignCallback('user-1', ofInvite.inviteKey)
       await authorityEngine.saveInviteWithSigning(ofInvite, 'rad', ofSig)
       const invites = await authorityEngine.getAuthorityInvites()
       // Only the 'au' (iad-scoped) invite should appear in the authority list.
@@ -1821,7 +1841,7 @@ describe('AuthorityEngine', () => {
       // round-trip; the assertion shape is documented.
       const { authorityEngine } = await createNetworkAndAuthority()
       const invite = authorityEngine.createAuthorityInvite('SigCheck')
-      const sig = makeRealSignature('user-1', invite.inviteKey)
+      const sig = makeRealSignCallback('user-1', invite.inviteKey)
       await authorityEngine.saveInviteWithSigning(invite, 'iad', sig)
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
       const slot = await ctx.db
@@ -1888,7 +1908,7 @@ describe('AuthorityEngine', () => {
       const { authority, authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
       // proposeAdmin triggers SigningEngine.startSigningSession internally.
-      const sig = makeRealSignature('user-1')
+      const sig = makeRealSignCallback('user-1')
       await authorityEngine.proposeAdmin(
         {
           proposed: {
@@ -1995,7 +2015,7 @@ describe('AuthorityEngine', () => {
       // chain — covered in detail in signing.spec.ts. Asserts the row lands.
       const { authority, authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
-      const sig = makeRealSignature('user-1')
+      const sig = makeRealSignCallback('user-1')
       await authorityEngine.proposeAdmin(
         {
           proposed: {
@@ -2027,7 +2047,6 @@ describe('AuthorityEngine', () => {
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
       const userId = ctx.user?.id ?? 'user-1'
       const signerKey = (ctx.user?.activeKeys ?? [])[0]?.key ?? ''
-      const sig = makeRealSignature(userId)
       const nonce = 'mismatch-' + crypto.randomUUID()
       // Query CurrentAdmin.EffectiveAt for the seeded authority (canonical-string).
       const adminRow = await ctx.db
@@ -2035,17 +2054,24 @@ describe('AuthorityEngine', () => {
         .get({ authorityId: authority.id })
       if (!adminRow) throw new Error('CurrentAdmin row not found for seeded authority')
       const adminEffectiveAt = adminRow.EffectiveAt as string
+      // 999.1 R-02: seed a REAL AdminSigning (SignatureValid now verifies for real) so the
+      // OfficerSignature negative case below isolates its OWN SignatureValid rejection.
+      const asDigestRow = await ctx.db.prepare(`select Digest('real-digest') as d`).get({})
+      const asDigest = asDigestRow!.d as string
+      const { privateHex: asPrivHex, publicHex: asPubKey } = randomTestKeyPair()
+      const asSig = bytesToHex(secp256k1.sign(digestToBytes(asDigest), hexToBytes(asPrivHex)))
       await ctx.db.exec(
         `insert into AdminSigning (Nonce, AuthorityId, AdminEffectiveAt, Scope, Digest, UserId, SignerKey, Signature)
-         with context now = :now, IsSignatureValid = true, IsSignerKeyValid = true
-         values (:n, :id, :e, 'rad', 'real-digest', :uid, :pubKey, :sig)`,
+         with context now = :now, IsSignerKeyValid = true, IsPlaceholderSignature = false
+         values (:n, :id, :e, 'rad', :digest, :uid, :pubKey, :sig)`,
         {
           n: nonce,
           id: authority.id,
           e: adminEffectiveAt,
+          digest: asDigest,
           uid: userId,
-          pubKey: signerKey,
-          sig: sig.signature,
+          pubKey: asPubKey,
+          sig: asSig,
           now: nowCanonicalDatetime()
         }
       )
@@ -2053,7 +2079,7 @@ describe('AuthorityEngine', () => {
       try {
         await ctx.db.exec(
           `insert into OfficerSignature (SigningNonce, UserId, SignerKey, Signature)
-           with context now = :now
+           with context now = :now, IsSignerKeyValid = true, IsOfficerValid = true, IsPlaceholderSignature = false
            values (:n, :uid, :pubKey, 'wrong-sig')`,
           { n: nonce, uid: userId, pubKey: signerKey, now: nowCanonicalDatetime() }
         )
@@ -2061,7 +2087,7 @@ describe('AuthorityEngine', () => {
         caught = err
       }
       // SignatureValid CHECK rejects 'wrong-sig' that does not validate over
-      // the AdminSigning.Digest 'real-digest'.
+      // the AdminSigning.Digest.
       expect(caught).to.be.instanceOf(Error)
     })
 
@@ -2070,7 +2096,7 @@ describe('AuthorityEngine', () => {
       // AdminSignature row after the single officer signs.
       const { authority, authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
-      const sig = makeRealSignature('user-1')
+      const sig = makeRealSignCallback('user-1')
       await authorityEngine.proposeAdmin(
         {
           proposed: {
@@ -2125,7 +2151,7 @@ describe('AuthorityEngine', () => {
     it('should allow admin renewal before expiration with proper signatures', async () => {
       const { authority, authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
-      const sig = makeRealSignature('user-1')
+      const sig = makeRealSignCallback('user-1')
       await authorityEngine.proposeAdmin(
         {
           proposed: {
@@ -2180,7 +2206,7 @@ describe('AuthorityEngine', () => {
       // EffectiveAt should now appear in CurrentAdmin).
       const { authority, authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
-      const sig = makeRealSignature('user-1')
+      const sig = makeRealSignCallback('user-1')
       const newEffectiveAt = Date.now() + 60_000
       await authorityEngine.proposeAdmin(
         {
@@ -2217,7 +2243,7 @@ describe('AuthorityEngine', () => {
       const { authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
       const invite = authorityEngine.createAuthorityInvite('InviteCheck')
-      const sig = makeRealSignature('user-1', invite.inviteKey)
+      const sig = makeRealSignCallback('user-1', invite.inviteKey)
       await authorityEngine.saveInviteWithSigning(invite, 'iad', sig)
       const row = await ctx.db
         .prepare('select Cid, InviteKey from InviteSlot where Name = :n')
@@ -2232,7 +2258,7 @@ describe('AuthorityEngine', () => {
       // Post-#23 sweep wires up the engine path that consumes the invite.
       const { networkEngine, authorityEngine } = await createNetworkAndAuthority()
       const invite = authorityEngine.createAuthorityInvite('NewAuthority')
-      const sig = makeRealSignature('user-1', invite.inviteKey)
+      const sig = makeRealSignCallback('user-1', invite.inviteKey)
       await authorityEngine.saveInviteWithSigning(invite, 'iad', sig)
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
       const slotRow = await ctx.db.prepare('SELECT Cid FROM InviteSlot WHERE InviteKey = :k').get({ k: invite.inviteKey })
@@ -2258,7 +2284,7 @@ describe('AuthorityEngine', () => {
       // InviteResult primary key is SlotCid; a duplicate insert collides.
       const { networkEngine, authorityEngine } = await createNetworkAndAuthority()
       const invite = authorityEngine.createAuthorityInvite('ReusedSlot')
-      const sig = makeRealSignature('user-1', invite.inviteKey)
+      const sig = makeRealSignCallback('user-1', invite.inviteKey)
       await authorityEngine.saveInviteWithSigning(invite, 'iad', sig)
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
       const slotRow = await ctx.db.prepare('SELECT Cid FROM InviteSlot WHERE InviteKey = :k').get({ k: invite.inviteKey })
@@ -2297,7 +2323,7 @@ describe('AuthorityEngine', () => {
       const { networkEngine, authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
       const invite = authorityEngine.createAuthorityInvite('AcceptCheck')
-      const sig = makeRealSignature('user-1', invite.inviteKey)
+      const sig = makeRealSignCallback('user-1', invite.inviteKey)
       await authorityEngine.saveInviteWithSigning(invite, 'iad', sig)
       const slotRow = await ctx.db.prepare('SELECT Cid FROM InviteSlot WHERE InviteKey = :k').get({ k: invite.inviteKey })
       const slotCid = slotRow!.Cid as string
@@ -2323,7 +2349,7 @@ describe('AuthorityEngine', () => {
       const { networkEngine, authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
       const invite = authorityEngine.createAuthorityInvite('RejectCheck')
-      const sig = makeRealSignature('user-1', invite.inviteKey)
+      const sig = makeRealSignCallback('user-1', invite.inviteKey)
       await authorityEngine.saveInviteWithSigning(invite, 'iad', sig)
       const slotRow = await ctx.db.prepare('SELECT Cid FROM InviteSlot WHERE InviteKey = :k').get({ k: invite.inviteKey })
       const slotCid = slotRow!.Cid as string
@@ -2355,7 +2381,7 @@ describe('AuthorityEngine', () => {
         title: 'Inspector',
         scopes: ['rad'] as Scope[]
       })
-      const sig = makeRealSignature('user-1', invite.inviteKey)
+      const sig = makeRealSignCallback('user-1', invite.inviteKey)
       await authorityEngine.saveInviteWithSigning(invite, 'rad', sig)
       const row = await ctx.db
         .prepare('select Type from InviteSlot where Name = :n')
@@ -2383,7 +2409,7 @@ describe('AuthorityEngine', () => {
         title: 'Inspector',
         scopes: ['rad'] as Scope[]
       })
-      const sig = makeRealSignature('user-1', invite.inviteKey)
+      const sig = makeRealSignCallback('user-1', invite.inviteKey)
       await authorityEngine.saveInviteWithSigning(invite, 'rad', sig)
       const slotRow = await ctx.db.prepare('SELECT Cid FROM InviteSlot WHERE InviteKey = :k').get({ k: invite.inviteKey })
       const slotCid = slotRow!.Cid as string
@@ -2408,7 +2434,7 @@ describe('AuthorityEngine', () => {
         title: 'Inspector',
         scopes: ['rad'] as Scope[]
       })
-      const sig = makeRealSignature('user-1', invite.inviteKey)
+      const sig = makeRealSignCallback('user-1', invite.inviteKey)
       await authorityEngine.saveInviteWithSigning(invite, 'rad', sig)
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
       const slotRow = await ctx.db.prepare('SELECT Cid FROM InviteSlot WHERE InviteKey = :k').get({ k: invite.inviteKey })
@@ -2846,13 +2872,30 @@ describe('AuthorityProposeAdminBuilder', () => {
   it('REAL ENGINE equivalence smoke: engine.proposeAdmin(admin, signature) vs builder.fromPayload(...).commit()', async () => {
     const { authorityEngine: eng1 } = await createNetworkAndAuthority()
     const admin = makeAdminProposal()
-    const sig = makeRealSignature('user-1')
+    const sig1 = makeRealSignCallback('user-1')
     let err1: unknown
-    try { await eng1.proposeAdmin(admin, sig) } catch (e) { err1 = e }
+    try { await eng1.proposeAdmin(admin, sig1) } catch (e) { err1 = e }
     expect(err1).to.equal(undefined)
-    const { authorityEngine: eng2 } = await createNetworkAndAuthority()
+
+    const { authorityEngine: eng2, authority: authority2 } = await createNetworkAndAuthority()
+    // 999.1 R-02: AuthorityProposeAdminBuilder's Draft.signature is a serializable
+    // Signature object (D-01.1 "serializable drafts via toJSON/fromJSON"), not the
+    // engine's callback union — so the builder path needs a concrete, real signature
+    // over the actual digest, computed the same way proposeAdmin computes it engine-side.
+    const ctx2 = (eng2 as unknown as { ctx: EngineContext }).ctx
+    const effectiveAtCanon = toCanonicalDatetime(admin.proposed.effectiveAt)
+    const thresholdPoliciesJson = JSON.stringify(admin.proposed.thresholdPolicies)
+    const digestRow2 = await ctx2.db
+      .prepare('select Digest(:authorityId, :effectiveAt, :thresholdPolicies) as d')
+      .get({ authorityId: authority2.id, effectiveAt: effectiveAtCanon, thresholdPolicies: thresholdPoliciesJson })
+    const { privateHex: priv2, publicHex: pub2 } = randomTestKeyPair()
+    const realSig2: Signature = {
+      signerUserId: 'user-1',
+      signerKey: pub2,
+      signature: bytesToHex(secp256k1.sign(digestToBytes(digestRow2!.d as string), hexToBytes(priv2)))
+    }
     let err2: unknown
-    try { await eng2.buildProposeAdmin().fromPayload({ admin, signature: sig }).commit() } catch (e) { err2 = e }
+    try { await eng2.buildProposeAdmin().fromPayload({ admin, signature: realSig2 }).commit() } catch (e) { err2 = e }
     expect(err2).to.equal(undefined)
   })
 })
@@ -2957,7 +3000,7 @@ describe('AuthoritySaveInviteWithSigningBuilder', () => {
   it('REAL ENGINE equivalence smoke: engine.saveInviteWithSigning(invite, scope, signature) vs builder.fromPayload(...).commit()', async () => {
     const { authorityEngine: eng1 } = await createNetworkAndAuthority()
     const invite1 = eng1.createAuthorityInvite('Invite1')
-    const sig = makeRealSignature('user-1')
+    const sig = makeRealSignCallback('user-1')
     let err1: unknown
     try { await eng1.saveInviteWithSigning(invite1, 'iad', sig) } catch (e) { err1 = e }
     expect(err1).to.equal(undefined)

@@ -68,7 +68,7 @@ import { expect } from 'chai'
 import { secp256k1 } from '@noble/curves/secp256k1.js'
 import { sha256 } from '@noble/hashes/sha2.js'
 import { hexToBytes } from '@noble/curves/utils.js'
-import { createTestNetwork, addTestAuthority, makeTestSignature } from './fixtures/test-context.js'
+import { createTestNetwork, addTestAuthority, makeTestSignCallback } from './fixtures/test-context.js'
 import type { TestAuthorityContext } from './fixtures/test-context.js'
 import { InvitationEngine } from '../src/invite/invitation-engine.js'
 import { DIGEST_VECTORS } from './fixtures/digest-vectors.js'
@@ -129,11 +129,11 @@ describe('CID-03: signed surface embedding a real CIDv1 Cid (Phase 36 Plan 03)',
     const officerInvite = auth.authorityEngine.createOfficerInvite({
       name: 'Signed Surface Officer', title: 'Member', scopes: ['rad'] as Scope[],
     })
-    const sig = makeTestSignature(auth.user)
+    const signCallback = makeTestSignCallback(auth.user)
 
     let errorThrown: Error | undefined
     try {
-      await auth.authorityEngine.saveInviteWithSigning(officerInvite, 'rad' as Scope, sig)
+      await auth.authorityEngine.saveInviteWithSigning(officerInvite, 'rad' as Scope, signCallback)
     } catch (e) {
       errorThrown = e as Error
     }
@@ -152,11 +152,11 @@ describe('CID-03: signed surface embedding a real CIDv1 Cid (Phase 36 Plan 03)',
   it('InviteSlotSigningValid resolves end-to-end with a real CIDv1 InviteSlot.Cid (authority invite path)', async () => {
     const auth = await setup()
     const authorityInvite = auth.authorityEngine.createAuthorityInvite('Signed Surface Authority')
-    const sig = makeTestSignature(auth.user)
+    const signCallback = makeTestSignCallback(auth.user)
 
     let errorThrown: Error | undefined
     try {
-      await auth.authorityEngine.saveInviteWithSigning(authorityInvite, 'iad' as Scope, sig)
+      await auth.authorityEngine.saveInviteWithSigning(authorityInvite, 'iad' as Scope, signCallback)
     } catch (e) {
       errorThrown = e as Error
     }
@@ -179,8 +179,8 @@ describe('CID-03: signed surface embedding a real CIDv1 Cid (Phase 36 Plan 03)',
     const officerInvite = auth.authorityEngine.createOfficerInvite({
       name: 'Signed Surface Acceptor', title: 'Member', scopes: ['rad'] as Scope[],
     })
-    const sig = makeTestSignature(auth.user)
-    await auth.authorityEngine.saveInviteWithSigning(officerInvite, 'rad' as Scope, sig)
+    const signCallback = makeTestSignCallback(auth.user)
+    await auth.authorityEngine.saveInviteWithSigning(officerInvite, 'rad' as Scope, signCallback)
 
     const slotRow = await auth.ctx.db
       .prepare('select Cid from InviteSlot where InviteKey = :inviteKey')
@@ -231,8 +231,8 @@ describe('CID-03: signed surface embedding a real CIDv1 Cid (Phase 36 Plan 03)',
     const officerInvite = auth.authorityEngine.createOfficerInvite({
       name: 'Signed Surface Cancellee', title: 'Member', scopes: ['rad'] as Scope[],
     })
-    const sig = makeTestSignature(auth.user)
-    await auth.authorityEngine.saveInviteWithSigning(officerInvite, 'rad' as Scope, sig)
+    const signCallback = makeTestSignCallback(auth.user)
+    await auth.authorityEngine.saveInviteWithSigning(officerInvite, 'rad' as Scope, signCallback)
 
     const slotRow = await auth.ctx.db
       .prepare('select Cid from InviteSlot where InviteKey = :inviteKey')
