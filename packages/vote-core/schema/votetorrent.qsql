@@ -5,6 +5,15 @@ declare schema main
 		select 'o' as Code, 'Official' as Name
 		union all select 'a' as Code, 'Adhoc' as Name;
 
+	-- Internal allocator table (999.1 D-05): durable, namespace-keyed Tid high-water mark.
+	-- Never user-supplied, so it carries no signature/context CHECKs. PK is Namespace so every
+	-- allocator read/write is a point lookup (where Namespace = :ns), never a full scan --
+	-- mirrors the LevelDB-vtab-safety discipline of the legacy TidSequence table.
+	table TidHighWater (
+		Namespace text primary key,
+		HighWater integer not null
+	);
+
 	table Network (
 		Id text, -- 32 byte random id
 		Hash text, -- H16(Id)
@@ -577,6 +586,7 @@ declare schema main
 	-- (D-16). Non-signing this phase: no IsSignatureValid/IsUserValid context CHECK.
 	table UserEvent (
 		UserId text,
+		Tid integer null, -- 999.1 D-06/D-08/R-05: queryable Tid backstop; back-derives coalesce(max(Tid),-1)+1
 		Sequence integer not null, -- per-user monotonic ordering key (coalesce(max(Sequence),-1)+1)
 		Event text, -- 'C' | 'R' | 'AK' | 'RK' (UserHistoryEvent)
 		Timestamp datetime, -- nowCanonicalDatetime()
