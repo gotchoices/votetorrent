@@ -986,7 +986,7 @@ describe('ElectionsCreateElectionBuilder', () => {
     const engine = new ElectionsEngine(auth.ctx)
     const init = makeElectionInit({ authorityId: auth.authority.id })
     init.revision.keyholderThreshold = 0
-    const tid = peekNextElectionTid()
+    const tid = await peekNextElectionTid(auth.ctx.db)
     const { nonce } = await seedElectionSigning(auth.ctx, auth.authority.id, init, auth.user, tid)
     const b = new ElectionsCreateElectionBuilder(engine).fromPayload(init)
     expect(b.isValid()).to.equal(true)
@@ -1015,7 +1015,7 @@ describe('ElectionsCreateElectionBuilder', () => {
     const engine = new ElectionsEngine(auth.ctx)
     const init = makeElectionInit({ authorityId: auth.authority.id })
     init.revision.keyholderThreshold = 0
-    const tid = peekNextElectionTid()
+    const tid = await peekNextElectionTid(auth.ctx.db)
     const { nonce } = await seedElectionSigning(auth.ctx, auth.authority.id, init, auth.user, tid)
     const b = new ElectionsCreateElectionBuilder(engine).fromPayload(init)
     await b.commit({ signingNonce: nonce })
@@ -1053,7 +1053,7 @@ describe('ElectionsCreateElectionBuilder', () => {
     const eng1 = new ElectionsEngine(auth1.ctx)
     const initDirect = makeElectionInit({ authorityId: auth1.authority.id })
     initDirect.revision.keyholderThreshold = 0
-    const tid1 = peekNextElectionTid()
+    const tid1 = await peekNextElectionTid(auth1.ctx.db)
     const { nonce: nonce1 } = await seedElectionSigning(auth1.ctx, auth1.authority.id, initDirect, auth1.user, tid1)
     await eng1.createElection(initDirect, { signingNonce: nonce1 })  // direct path — no throw
     // Builder path
@@ -1062,7 +1062,7 @@ describe('ElectionsCreateElectionBuilder', () => {
     const eng2 = new ElectionsEngine(auth2.ctx)
     const initBuilder = makeElectionInit({ authorityId: auth2.authority.id })
     initBuilder.revision.keyholderThreshold = 0
-    const tid2 = peekNextElectionTid()
+    const tid2 = await peekNextElectionTid(auth2.ctx.db)
     const { nonce: nonce2 } = await seedElectionSigning(auth2.ctx, auth2.authority.id, initBuilder, auth2.user, tid2)
     await new ElectionsCreateElectionBuilder(eng2).fromPayload(initBuilder).commit({ signingNonce: nonce2 })  // builder — no throw
   })

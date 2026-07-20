@@ -24,7 +24,7 @@ describe('signed-mutation', () => {
     const auth = await addTestAuthority(net)
     const init = makeElectionInit({ authorityId: auth.authority.id })
     const e = init.election
-    const tid = peekNextElectionTid()
+    const tid = await peekNextElectionTid(auth.ctx.db)
 
     const digestParams = {
       tid,
@@ -79,7 +79,7 @@ describe('signed-mutation', () => {
   it('throws a descriptive error when CurrentAdmin is missing for the authority', async () => {
     const net = await createTestNetwork()
     const auth = await addTestAuthority(net)
-    const tid = peekNextElectionTid()
+    const tid = await peekNextElectionTid(auth.ctx.db)
 
     let threw = false
     try {

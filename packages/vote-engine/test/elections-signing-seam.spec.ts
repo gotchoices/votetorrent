@@ -158,7 +158,7 @@ describe('Real-seam: seedElectionSigning → createElection through InsertValid'
     }
 
     // Capture the tid BEFORE calling seedElectionSigning so we can compare digests.
-    const tid = peekNextElectionTid()
+    const tid = await peekNextElectionTid(auth.ctx.db)
 
     const sign = makeSignCallback(privateHex, auth.user.id, auth.user.activeKeys[0]!.key)
     const signingNonce = await electionsEngine.seedElectionSigning(electionFields, sign)
@@ -249,8 +249,8 @@ describe('Real-seam: seedElectionSigning → createElection through InsertValid'
     const signingNonce = await electionsEngine.seedElectionSigning(electionFields, sign)
 
     // Step 2: sign the ElectionRevision row.
-    // revTid = peekNextElectionTid() + 1 — Election consumes T, revision consumes T+1.
-    const revTid = peekNextElectionTid() + 1
+    // revTid = (await peekNextElectionTid(db)) + 1 — Election consumes T, revision consumes T+1.
+    const revTid = (await peekNextElectionTid(auth.ctx.db)) + 1
     const revisionSigningNonce = await (electionsEngine as unknown as SeedRevisionSeam).seedElectionRevisionSigning(
       e.id,
       e.authorityId,

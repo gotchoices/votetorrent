@@ -405,7 +405,7 @@ export interface TestElectionContext extends TestAuthorityContext {
 export async function addTestElection (auth: TestAuthorityContext): Promise<TestElectionContext> {
   const electionsEngine = new ElectionsEngine(auth.ctx)
   const init = makeElectionInit({ authorityId: auth.authority.id })
-  const tid = peekNextElectionTid()
+  const tid = await peekNextElectionTid(auth.ctx.db)
   const { nonce } = await seedElectionSigning(auth.ctx, auth.authority.id, init, auth.user, tid)
   await electionsEngine.createElection(init, { signingNonce: nonce })
 
