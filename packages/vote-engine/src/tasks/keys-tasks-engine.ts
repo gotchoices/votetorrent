@@ -13,9 +13,7 @@ import type {
   ReleaseKeyTask
 } from '@votetorrent/vote-core'
 import { CompleteKeyReleaseBuilder } from './builders/index.js'
-
-// Phase 05 TASK-01/02 — monotonic Tid counter for KeysTasksEngine batches.
-let nextTid = 1
+import { allocateTid } from '../database/tid-allocator.js'
 
 /**
  * KeysTasksEngine — Phase 05 (TASK-01, TASK-02) implementation.
@@ -173,7 +171,7 @@ export class KeysTasksEngine implements IKeysTasksEngine {
    */
   async completeKeyRelease (task: ReleaseKeyTask): Promise<void> {
     this.requireCtx('completeKeyRelease')
-    const tid = nextTid++
+    const tid = await allocateTid(this.ctx!.db, 'keys-tasks')
     try {
       await this.ctx!.db.exec(
 				`update Task

@@ -20,9 +20,7 @@ import type {
 } from '@votetorrent/vote-core'
 import { BALLOT_HEADER_TID } from '../election/election-engine.js'
 import { CompleteSignatureBuilder } from './builders/index.js'
-
-// Phase 05 TASK-03/04 — monotonic Tid counter for SignatureTasksEngine.
-let nextTid = 1
+import { allocateTid } from '../database/tid-allocator.js'
 
 /**
  * SignatureTasksEngine — Phase 05 (TASK-03, TASK-04) implementation.
@@ -286,7 +284,7 @@ export class SignatureTasksEngine implements ISignatureTasksEngine {
     }
 
     // Mark the task complete (unconditional — both accept and reject close the task).
-    const tid = nextTid++
+    const tid = await allocateTid(this.ctx!.db, 'signature-tasks')
     try {
       await this.ctx!.db.exec(
 				`update Task
