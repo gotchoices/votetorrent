@@ -10,6 +10,7 @@ import type { SqlValue } from '@quereus/quereus';
 // @ts-ignore TS2307 — exports subpath, see comment below
 import cryptoPlugin from '@optimystic/quereus-plugin-crypto/plugin';
 import { verify as jsSignatureValid } from '@optimystic/quereus-plugin-crypto';
+import { allocateTid, peekTid } from './tid-allocator.js';
 
 async function registerCustomFunctions(db: Database): Promise<void> {
 	const signatureValidSchema = createScalarFunction(
@@ -163,10 +164,13 @@ export async function isSchemaInitialized(db: Database): Promise<boolean> {
  * Phase 14-04 follow-up (14-03 on-device gap): a fresh Quereus handle on an
  * existing LevelDB store does NOT auto-restore the table catalog (the documented
  * re-attach root cause). open()'s re-attach guard re-runs initDB (rebinds the
- * domain tables) and ensureTidSequence (rebinds TidSequence), but nothing
- * re-declared SchemaInit — so isSchemaInitialized's `select … from
- * SchemaInit` hit an undeclared table → false → open() wrongly threw
- * "use create() first" even on a correctly-persisted store.
+ * domain tables), but nothing re-declared SchemaInit — so isSchemaInitialized's
+ * `select … from SchemaInit` hit an undeclared table → false → open() wrongly
+ * threw "use create() first" even on a correctly-persisted store.
+ * (999.1: this comment originally also credited "ensureTidSequence (rebinds
+ * TidSequence)" — that trio is retired; the shared tid-allocator's TidHighWater
+ * table is schema-declared and self-healing per handle, see readTidCounter
+ * below.)
  *
  * Re-declaring with `create table if not exists` (NO insert) non-destructively
  * rebinds the persisted Initialized=1 row on the LevelDB backend, so an
@@ -199,43 +203,47 @@ export async function markSchemaInitialized(db: Database): Promise<void> {
 }
 
 /**
- * Ensure the TidSequence table exists and has its initial row.
- * Safe to run on a fresh store only (always-run on in-memory path since it
- * is always fresh; on the persistent path this is part of first-time DDL).
+ * RETIRED (Phase 999.1 D-02/D-07/D-09/D-10): the fixed-`Id = 1` `TidSequence`
+ * table + this trio (`ensureTidSequence`/`readTidCounter`/`incrementTidCounter`)
+ * are superseded by the namespace-keyed shared allocator in `tid-allocator.ts`
+ * (`TidHighWater { Namespace text primary key, HighWater integer not null }`,
+ * declared in `votetorrent.qsql`). `NetworksEngine` now calls `allocateTid(ctx.db,
+ * 'networks')` directly and no longer routes through this trio (see
+ * `networks-engine.ts`).
  *
- * Phase 14 D-12: monotonic per-context Tid counter seeded from persisted state.
+ * These three functions are kept ONLY as thin backward-compat shims — delegating
+ * onto the allocator's `'networks'` namespace — because `networks.spec.ts` still
+ * exercises `readTidCounter`/`prepareDb` directly by name (test-surface stability,
+ * not a production call path). No `src/` caller besides this file may call them;
+ * new production code MUST call `allocateTid`/`peekTid` directly.
+ */
+
+/**
+ * Shim: no-op today (`TidHighWater` is schema-declared, and `tid-allocator.ts`
+ * defensively creates it per-handle on first use). Kept for prepareDb's historical
+ * call shape / any external caller still invoking it by name.
  */
 export async function ensureTidSequence(db: Database): Promise<void> {
-	// Id primary key (fixed at 1) so reads/updates are PK point lookups, not full
-	// table scans. The Optimystic/LevelDB vtab aborts full scans under "concurrent
-	// mutations"; PK equality routes to the safe point-lookup path (D-12 on-device).
-	await db.exec(
-		`create table if not exists TidSequence (Id integer primary key, NextTid integer not null);
-		 insert or ignore into TidSequence (Id, NextTid) values (1, 1);`,
-	);
+	await peekTid(db, 'networks'); // triggers the allocator's defensive create-if-not-exists guard
 }
 
 /**
- * Read the current NextTid value from the persisted TidSequence table.
- * Defaults to 1 if the table is empty or absent (should not happen after
- * ensureTidSequence, but safe fallback).
- *
- * Phase 14 D-12.
+ * Shim: returns the Tid the next `allocateTid(db, 'networks')` call would
+ * return, WITHOUT consuming it — same "next value" semantics the retired
+ * `TidSequence.NextTid` column had.
  */
 export async function readTidCounter(db: Database): Promise<number> {
-	// PK point lookup (Id=1), not a full scan — see ensureTidSequence.
-	const row = await db.prepare('select NextTid from TidSequence where Id = 1').get();
-	return (row?.['NextTid'] as number | null) ?? 1;
+	return peekTid(db, 'networks');
 }
 
 /**
- * Advance the persisted TidSequence counter by 1 after consuming a Tid.
- *
- * Phase 14 D-12: ensures the on-disk counter is monotonic across restarts.
+ * Shim: retired no-op. The allocator's `allocateTid()` persists its own
+ * reservation atomically — there is no separate "increment after use" step to
+ * perform anymore. Kept only so any lingering caller does not hard-crash;
+ * `NetworksEngine` no longer calls this (see `networks-engine.ts`).
  */
-export async function incrementTidCounter(db: Database): Promise<void> {
-	// PK-scoped update (Id=1), not a full scan — see ensureTidSequence.
-	await db.exec('update TidSequence set NextTid = NextTid + 1 where Id = 1');
+export async function incrementTidCounter(_db: Database): Promise<void> {
+	// Intentionally a no-op — allocateTid() already persisted the reservation.
 }
 
 /**
@@ -295,13 +303,17 @@ export async function declareViewsInMain(db: Database): Promise<void> {
  * registration plumbing stays in one place.
  *
  * Phase 14 backward-compat wrapper (D-07/SC4): composed from registerDbPlugins +
- * initDB + ensureTidSequence + markSchemaInitialized. The in-memory path is
- * always fresh, so these always-run together. Existing callers need zero changes.
+ * initDB + markSchemaInitialized. The in-memory path is always fresh, so these
+ * always-run together. Existing callers need zero changes.
+ *
+ * 999.1: the `ensureTidSequence(db)` step this wrapper used to run is dropped —
+ * `TidHighWater` is now schema-declared (applied by `initDB` above), and the
+ * shared allocator (`tid-allocator.ts`) defensively creates it per-handle on
+ * first use anyway, so there is nothing left for a separate ensure step to do.
  */
 export async function prepareDb(db: Database): Promise<void> {
 	await registerDbPlugins(db);
 	await initDB(db);
-	await ensureTidSequence(db);
 	await markSchemaInitialized(db);
 }
 
