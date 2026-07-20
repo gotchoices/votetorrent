@@ -15,6 +15,7 @@ if (typeof secp256k1.verify !== 'function') {
 import { MisuseError, QuereusError } from '@quereus/quereus';
 import { Temporal } from 'temporal-polyfill';
 import { SigningEngine } from '../signing/signing-engine.js';
+import { allocateTid } from '../database/tid-allocator.js';
 import {
 	asText,
 	digestToBytes,
@@ -25,15 +26,12 @@ import {
 } from '../utils.js';
 import type { EngineContext } from '../types.js';
 
-// WR-16 (17-REVIEW): seeded from the epoch-ms clock to reduce the chance that
-// a relaunched process attached to a persisted store re-issues Tids consumed
-// by a previous run (see the full rationale on the ElectionsEngine counter).
-// WR-25 (17-REVIEW): this is a HEURISTIC, not a guarantee — allocation bursts
-// faster than 1/ms (counter outruns the clock; a restart inside that window
-// re-issues Tids) and device clock rollback both silently defeat it, and
-// neither condition is detected. PERSIST-01 must replace this with
-// store-reconciled allocation seeded from a persisted high-water mark.
-let nextTid = Date.now();
+// Phase 999.1 D-01/D-02 — Tids for AuthorityEngine mutations are allocated
+// through the shared durable, peer-safe allocator (`tid-allocator.ts`,
+// namespace 'authority') instead of a process-local `Date.now()`-seeded
+// counter. See tid-allocator.ts for the D-07 hybrid seed / D-09
+// reserve-before-use / D-10 per-namespace serialization rationale that
+// replaces the WR-16/WR-25 heuristic this module used to carry.
 import type {
 	AdminDetails,
 	AdminDigestArgs,
@@ -417,7 +415,7 @@ export class AuthorityEngine implements IAuthorityEngine {
 			throw new Error('Failed to propose admin: No initial signer');
 		}
 		const effectiveAtCanon = toCanonicalDatetime(admin.proposed.effectiveAt);
-		const tid = nextTid++;
+		const tid = await allocateTid(this.ctx.db, 'authority');
 		try {
 			// D-03/D-04: resolve the concrete Signature.
 			// If a sign callback is provided, compute the canonical digest engine-side
@@ -550,9 +548,12 @@ export class AuthorityEngine implements IAuthorityEngine {
 			if (!slot) {
 				throw new Error(`InviteSlot not found: ${slotCid}`);
 			}
+			// Allocate to a local first, then interpolate (the site sits inside a
+			// `with context` string, not a bound param).
+			const tid = await allocateTid(this.ctx.db, 'authority');
 			await this.ctx.db.exec(
 				`insert into InviteCancellation (SlotCid, CancelledAt)
-					with context Tid = ${nextTid++}, now = :now
+					with context Tid = ${tid}, now = :now
 				values (:slotCid, :now)`,
 				{ slotCid, now: nowCanonicalDatetime() },
 			);
@@ -589,7 +590,7 @@ export class AuthorityEngine implements IAuthorityEngine {
 			if (!orig) {
 				throw new Error(`InviteSlot not found: ${slotCid}`);
 			}
-			const tid = nextTid++;
+			const tid = await allocateTid(this.ctx.db, 'authority');
 			const now = nowCanonicalDatetime();
 			const resendSalt = `resend|${tid}|${now}`;
 			// WR-02: pre-compute the new row's Cid deterministically (same
@@ -722,6 +723,7 @@ export class AuthorityEngine implements IAuthorityEngine {
 		nonce: string,
 	): Promise<void> {
 		try {
+			const tid = await allocateTid(this.ctx.db, 'authority');
 			await this.ctx.db.exec(
 				`
 				insert into InviteSlot (
@@ -750,7 +752,7 @@ export class AuthorityEngine implements IAuthorityEngine {
 					inviteKey: invite.inviteKey,
 					inviteSignature: invite.inviteSignature,
 					nonce,
-					tid: nextTid++,
+					tid,
 					now: nowCanonicalDatetime(),
 				},
 			);
@@ -770,6 +772,7 @@ export class AuthorityEngine implements IAuthorityEngine {
 		nonce: string,
 	): Promise<void> {
 		try {
+			const tid = await allocateTid(this.ctx.db, 'authority');
 			await this.ctx.db.exec(
 				`
 				insert into InviteSlot (
@@ -798,7 +801,7 @@ export class AuthorityEngine implements IAuthorityEngine {
 					inviteKey: invite.inviteKey,
 					inviteSignature: invite.inviteSignature,
 					nonce,
-					tid: nextTid++,
+					tid,
 					now: nowCanonicalDatetime(),
 				},
 			);

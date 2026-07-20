@@ -7,14 +7,15 @@ import type {
 import type { EngineContext } from '../types.js'
 import { seedSignedMutation } from '../signing/signed-mutation.js'
 import { resolveSign as resolveSignHelper, requireCtx as requireCtxHelper, rethrow as rethrowHelper } from '../signing/ceremony-helpers.js'
+import { allocateTid } from '../database/tid-allocator.js'
 
 type SignatureOrCallback = Signature | ((digest: Uint8Array) => Promise<Signature>)
 
-// Phase 42-05 (D-01) — monotonic Tid counter for AuthorityConfigEngine
-// mutations, mirroring ElectionsEngine/RegistrationEngine/AssociationEngine's
-// counter seeded from the epoch-ms clock (WR-16/WR-25 rationale applies
-// identically here — see elections-engine.ts for the full write-up).
-let nextTid = Date.now()
+// Phase 999.1 D-01/D-02 — Tids for AuthorityConfigEngine mutations are
+// allocated through the shared durable, peer-safe allocator
+// (`tid-allocator.ts`, namespace 'authority-config') instead of a
+// process-local `Date.now()`-seeded counter (the former 42-05 WR-16/WR-25
+// heuristic — see elections-engine.ts for the full write-up it replaces).
 
 /**
  * AuthorityConfigEngine — Phase 42-05 (D-01) implementation.
@@ -45,7 +46,7 @@ export class AuthorityConfigEngine implements IAuthorityConfigEngine {
   ): Promise<void> {
     this.requireCtx('addAuthorityPeer')
     const ctx = this.ctx!
-    const tid = nextTid++
+    const tid = await allocateTid(ctx.db, 'authority-config')
     try {
       const nonce = await seedSignedMutation(
         ctx,
@@ -74,7 +75,7 @@ export class AuthorityConfigEngine implements IAuthorityConfigEngine {
   ): Promise<void> {
     this.requireCtx('removeAuthorityPeer')
     const ctx = this.ctx!
-    const tid = nextTid++
+    const tid = await allocateTid(ctx.db, 'authority-config')
     try {
       const nonce = await seedSignedMutation(
         ctx,
@@ -123,7 +124,7 @@ export class AuthorityConfigEngine implements IAuthorityConfigEngine {
   ): Promise<void> {
     this.requireCtx('addPollingDevice')
     const ctx = this.ctx!
-    const tid = nextTid++
+    const tid = await allocateTid(ctx.db, 'authority-config')
     try {
       const nonce = await seedSignedMutation(
         ctx,
@@ -152,7 +153,7 @@ export class AuthorityConfigEngine implements IAuthorityConfigEngine {
   ): Promise<void> {
     this.requireCtx('removePollingDevice')
     const ctx = this.ctx!
-    const tid = nextTid++
+    const tid = await allocateTid(ctx.db, 'authority-config')
     try {
       const nonce = await seedSignedMutation(
         ctx,
