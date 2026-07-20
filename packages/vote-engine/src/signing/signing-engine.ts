@@ -138,9 +138,16 @@ export class SigningEngine implements ISigningEngine {
 						// satisfied, so the only reachable ConstraintError here is a
 						// PK collision.
 						if (pkErr instanceof ConstraintError) {
-							if (ownsTransaction) await this.ctx.db.exec('ROLLBACK');
+							// WR-02 (42-REVIEW): the redundant AdminSignature insert is correctly
+							// skipped, but this call already inserted a genuine OfficerSignature row
+							// above (:61-82) — THIS officer's audit evidence — which must NOT be
+							// discarded. COMMIT (not ROLLBACK) so the OfficerSignature persists; the
+							// pre-existing AdminSignature already satisfies SignatureValid, so the
+							// threshold outcome is unchanged. The prior ROLLBACK here silently
+							// dropped the officer's signature while still reporting success.
+							if (ownsTransaction) await this.ctx.db.exec('COMMIT');
 							console.warn(
-								`SigningEngine.sign: threshold already reached for nonce ${nonce}; AdminSignature row exists.`,
+								`SigningEngine.sign: threshold already reached for nonce ${nonce}; AdminSignature row exists (this officer's OfficerSignature was still recorded).`,
 							);
 							return true;
 						}

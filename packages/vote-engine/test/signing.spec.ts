@@ -379,6 +379,60 @@ describe('SigningEngine', () => {
       expect(second).to.equal(true)
     })
 
+    // WR-02 (42-REVIEW): when a SECOND, distinct officer signs after the
+    // AdminSignature row already exists (the concurrent threshold-crossing
+    // shape), sign() hits the AdminSignature PK-collision branch. That branch
+    // must COMMIT — preserving this officer's freshly-inserted OfficerSignature
+    // (their audit evidence) — not ROLLBACK it. A prior ROLLBACK here silently
+    // dropped the officer's signature while still returning true.
+    it('preserves a second officer\'s OfficerSignature when the AdminSignature already exists (WR-02: no silent audit-row drop)', async () => {
+      const { ctx, user } = await createPopulatedContext()
+      const engine = new SigningEngine(ctx)
+      const authRow = await ctx.db.prepare('select Id from Authority limit 1').get({})
+      const authorityId = authRow!.Id as string
+      const sig1: Signature = {
+        signerUserId: user.id,
+        signerKey: user.activeKeys[0]!.key,
+        signature: 'a'.repeat(128)
+      }
+      // Officer 1 crosses the threshold (=1): AdminSignature row is created.
+      const { nonce, thresholdReached } = await engine.startSigningSession(authorityId, testDigestArgs, 'rad', sig1)
+      expect(thresholdReached).to.equal(true)
+
+      const beforeOfficer = await ctx.db
+        .prepare('select count(*) as n from OfficerSignature where SigningNonce = :nonce')
+        .get({ nonce })
+      expect(Number(beforeOfficer?.n)).to.equal(1)
+
+      // Officer 2 (distinct UserId) signs the SAME nonce. Their OfficerSignature
+      // inserts cleanly (distinct PK), the count re-crosses the threshold, and
+      // the AdminSignature insert collides on its existing PK → the WR-02 branch.
+      const sig2: Signature = {
+        signerUserId: 'user-2-wr02',
+        signerKey: randomTestKeyPair().publicHex,
+        signature: 'b'.repeat(128)
+      }
+      const result = await engine.sign(nonce, sig2)
+      expect(result, 'threshold is already met, so sign() reports success').to.equal(true)
+
+      // The WR-02 fix: officer 2's OfficerSignature must PERSIST (count now 2),
+      // not have been rolled back with the redundant AdminSignature insert.
+      const afterOfficer = await ctx.db
+        .prepare('select count(*) as n from OfficerSignature where SigningNonce = :nonce')
+        .get({ nonce })
+      expect(Number(afterOfficer?.n), 'officer 2\'s signature must survive (pre-fix ROLLBACK dropped it)').to.equal(2)
+      const officer2 = await ctx.db
+        .prepare('select UserId from OfficerSignature where SigningNonce = :nonce and UserId = :uid')
+        .get({ nonce, uid: 'user-2-wr02' })
+      expect(officer2?.UserId).to.equal('user-2-wr02')
+
+      // And exactly one AdminSignature row still exists (idempotent completion).
+      const adminSigCount = await ctx.db
+        .prepare('select count(*) as n from AdminSignature where SigningNonce = :nonce')
+        .get({ nonce })
+      expect(Number(adminSigCount?.n)).to.equal(1)
+    })
+
     it('reads scope and threshold from the AdminSigning + Admin join', async () => {
       // Seed an AdminSigning row with scope=rad (matches the seeded
       // ThresholdPolicies entry { policy: 'rad', threshold: 1 }), then
