@@ -12,6 +12,37 @@ import cryptoPlugin from '@optimystic/quereus-plugin-crypto/plugin';
 import { verify as jsSignatureValid } from '@optimystic/quereus-plugin-crypto';
 import { allocateTid, peekTid } from './tid-allocator.js';
 
+/**
+ * Verify a signature over a digest against a signer's public key.
+ *
+ * 999.1 D-11/D-12: extracted from the inline `SignatureValid` UDF closure
+ * (Phase 29 WR-01) so BOTH the in-schema SQL UDF AND any TS call site
+ * (engine-side carve-outs, e.g. plan 09's InviteSlot/InviteResult) share one
+ * implementation. This is the exact body of the prior closure — no
+ * behavioral change for the two existing live CHECKs (Registrant,
+ * Association) that already call `SignatureValid`.
+ *
+ * Phase 29 WR-01 encoding convention (do NOT alter — 999.1 Pitfall 6, a
+ * mismatch silently fails closed): `digest` is base64url (the `Digest()` SQL
+ * output), `signature` and `signerKey` are hex-encoded.
+ */
+export function verifySig(digest: SqlValue, signature: SqlValue, signerKey: SqlValue): boolean {
+	if (!digest || !signature || !signerKey) return false;
+	try {
+		return jsSignatureValid(
+			String(digest),
+			String(signature),
+			String(signerKey),
+			'secp256k1',
+			'base64url', // inputEncoding — digest is base64url (Digest() output)
+			'hex', // sigEncoding — signatures are hex-encoded
+			'hex', // keyEncoding — public keys are hex-encoded
+		);
+	} catch {
+		return false;
+	}
+}
+
 async function registerCustomFunctions(db: Database): Promise<void> {
 	const signatureValidSchema = createScalarFunction(
 		{
@@ -25,27 +56,7 @@ async function registerCustomFunctions(db: Database): Promise<void> {
 				isReadOnly: true,
 			},
 		},
-		(digest: SqlValue, signature: SqlValue, publicKey: SqlValue) => {
-			if (!digest || !signature || !publicKey) return false;
-			try {
-				// Phase 29 WR-01: `verify` defaults all encodings to 'base64url', but
-				// VoteTorrent feeds a base64url digest (the `Digest()` output) with a
-				// HEX signature and HEX public key (see signing builders / fixtures/keys.ts).
-				// Pin the encodings explicitly so SQL-level signature validation succeeds
-				// for real signatures once the schema's `-- TODO fix signature` is wired up.
-				return jsSignatureValid(
-					String(digest),
-					String(signature),
-					String(publicKey),
-					'secp256k1',
-					'base64url', // inputEncoding — digest is base64url (Digest() output)
-					'hex', // sigEncoding — signatures are hex-encoded
-					'hex', // keyEncoding — public keys are hex-encoded
-				);
-			} catch {
-				return false;
-			}
-		},
+		(digest: SqlValue, signature: SqlValue, publicKey: SqlValue) => verifySig(digest, signature, publicKey),
 	);
 	db.registerFunction(signatureValidSchema);
 
