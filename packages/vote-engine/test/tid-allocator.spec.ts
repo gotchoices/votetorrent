@@ -10,6 +10,28 @@ import { prepareDb } from '../src/database/initialize.js'
 // implements tid-allocator.ts (not a later task) so this file's existence proves
 // the module is genuinely exercised, not vacuously matched.
 
+// D-14/R-01 (plan 10): the full in-scope namespace list — every engine's
+// `allocateTid(ctx.db, '<ns>')` call site landed across plans 02-05, plus the
+// folded `networks` namespace (R-01's `TidSequence` -> `TidHighWater`
+// generalization). Cross-checked against a live grep of every
+// `allocateTid(...)` call site in `packages/vote-engine/src` (excluding
+// tests/dist): elections, authority, authority-config, registration,
+// association, user, election, keys-tasks, onboarding-tasks, signature-tasks,
+// networks — 11 namespaces total.
+const ALL_NAMESPACES = [
+  'elections',
+  'authority',
+  'authority-config',
+  'registration',
+  'association',
+  'user',
+  'election',
+  'keys-tasks',
+  'onboarding-tasks',
+  'signature-tasks',
+  'networks',
+] as const
+
 describe('tid-allocator', () => {
   describe('allocateTid — first allocation on a fresh namespace', () => {
     it('returns a value >= Date.now()+1 and upserts TidHighWater[ns] to that value (reserve-before-use)', async () => {
@@ -74,51 +96,78 @@ describe('tid-allocator', () => {
     })
   })
 
-  describe('allocateTid — D-14 restart: never reissues a consumed Tid', () => {
-    it('after a "restart" (fresh call state, same persisted Database handle) the next allocateTid resumes above the persisted HighWater', async () => {
-      const db = new Database()
-      await prepareDb(db)
-      const ns = 'tid-allocator-restart'
-      // Persist a HighWater far beyond the current wall clock so "resumes above it"
-      // is meaningfully proven by the persisted table, not incidentally true because
-      // Date.now() alone would already exceed it.
-      const futureHighWater = Date.now() + 10_000_000
-      await db.exec(
-        'insert into TidHighWater (Namespace, HighWater) values (:ns, :hw) on conflict (Namespace) do update set HighWater = :hw;',
-        { ns, hw: futureHighWater },
-      )
+  // D-14/R-01 acceptance matrix: every in-scope namespace must prove BOTH
+  // restart no-reissue AND backward-clock-rollback no-reissue (D-07: the
+  // persisted table beats the wall clock). Table-driven so adding a namespace
+  // to the allocator's caller set is a one-line addition here.
+  for (const ns of ALL_NAMESPACES) {
+    describe(`allocateTid — D-14 restart: never reissues a consumed Tid [ns=${ns}]`, () => {
+      it('after a "restart" (fresh call state, same persisted Database handle) the next allocateTid resumes above the persisted HighWater', async () => {
+        const db = new Database()
+        await prepareDb(db)
+        const namespace = `tid-allocator-restart-${ns}`
+        // Persist a HighWater far beyond the current wall clock so "resumes above it"
+        // is meaningfully proven by the persisted table, not incidentally true because
+        // Date.now() alone would already exceed it.
+        const futureHighWater = Date.now() + 10_000_000
+        await db.exec(
+          'insert into TidHighWater (Namespace, HighWater) values (:ns, :hw) on conflict (Namespace) do update set HighWater = :hw;',
+          { ns: namespace, hw: futureHighWater },
+        )
 
-      // "Restart" = fresh module/call state against the SAME persisted Database
-      // handle (networks.spec.ts:844 technique). The allocator holds no cross-call
-      // TS-side cache — every allocateTid call reads HighWater fresh from `db` —
-      // so calling allocateTid here on the SAME handle already exercises the exact
-      // restart contract: it must never reissue anything <= futureHighWater.
-      const next = await allocateTid(db, ns)
-      expect(next, 'restart must resume strictly above the persisted HighWater').to.be.greaterThan(futureHighWater)
-    })
-  })
+        // "Restart" = fresh module/call state against the SAME persisted Database
+        // handle (networks.spec.ts:844 technique). The allocator holds no cross-call
+        // TS-side cache — every allocateTid call reads HighWater fresh from `db` —
+        // so calling allocateTid here on the SAME handle already exercises the exact
+        // restart contract: it must never reissue anything <= futureHighWater.
+        const next = await allocateTid(db, namespace)
+        expect(next, `[ns=${ns}] restart must resume strictly above the persisted HighWater`).to.be.greaterThan(futureHighWater)
+      })
 
-  describe('allocateTid — D-14 clock-rollback: the table wins over the wall clock (D-07)', () => {
-    it('a mocked Date.now below the persisted HighWater still advances past it', async () => {
-      const db = new Database()
-      await prepareDb(db)
-      const ns = 'tid-allocator-clock-rollback'
-      const persistedHighWater = Date.now() + 5_000_000
-      await db.exec(
-        'insert into TidHighWater (Namespace, HighWater) values (:ns, :hw) on conflict (Namespace) do update set HighWater = :hw;',
-        { ns, hw: persistedHighWater },
-      )
+      if (ns === 'elections') {
+        it('[ns=elections] restart also holds for the count=2 T/T+1 adjacency reservation', async () => {
+          const db = new Database()
+          await prepareDb(db)
+          const namespace = `tid-allocator-restart-${ns}-pair`
+          const futureHighWater = Date.now() + 10_000_000
+          await db.exec(
+            'insert into TidHighWater (Namespace, HighWater) values (:ns, :hw) on conflict (Namespace) do update set HighWater = :hw;',
+            { ns: namespace, hw: futureHighWater },
+          )
 
-      const realNow = Date.now
-      Date.now = () => persistedHighWater - 1_000_000 // clock rolled back well below the persisted high-water
-      try {
-        const next = await allocateTid(db, ns)
-        expect(next, 'clock rollback must not let allocateTid reissue a value <= the persisted HighWater').to.be.greaterThan(persistedHighWater)
-      } finally {
-        Date.now = realNow
+          const t = await allocateTid(db, namespace, 2)
+          expect(t, '[ns=elections] restart count=2 block start must be strictly above the persisted HighWater').to.be.greaterThan(futureHighWater)
+
+          const row = await db
+            .prepare('select HighWater from TidHighWater where Namespace = :ns')
+            .get({ ns: namespace })
+          expect(row?.['HighWater'], '[ns=elections] restart count=2 must reserve the adjacent pair [t, t+1]').to.equal(t + 1)
+        })
       }
     })
-  })
+
+    describe(`allocateTid — D-14 clock-rollback: the table wins over the wall clock (D-07) [ns=${ns}]`, () => {
+      it('a mocked Date.now below the persisted HighWater still advances past it', async () => {
+        const db = new Database()
+        await prepareDb(db)
+        const namespace = `tid-allocator-clock-rollback-${ns}`
+        const persistedHighWater = Date.now() + 5_000_000
+        await db.exec(
+          'insert into TidHighWater (Namespace, HighWater) values (:ns, :hw) on conflict (Namespace) do update set HighWater = :hw;',
+          { ns: namespace, hw: persistedHighWater },
+        )
+
+        const realNow = Date.now
+        Date.now = () => persistedHighWater - 1_000_000 // clock rolled back well below the persisted high-water
+        try {
+          const next = await allocateTid(db, namespace)
+          expect(next, `[ns=${ns}] clock rollback must not let allocateTid reissue a value <= the persisted HighWater`).to.be.greaterThan(persistedHighWater)
+        } finally {
+          Date.now = realNow
+        }
+      })
+    })
+  }
 
   describe('peekTid', () => {
     it('reads the next Tid without consuming it (no persist)', async () => {
