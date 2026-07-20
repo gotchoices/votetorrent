@@ -671,7 +671,7 @@ describe('UserEngine', () => {
       //    own event write is proven by the db-only create+grep acceptance).
       await ctx.db.exec(
         `insert into UserEvent (UserId, Sequence, Event, Timestamp, Signature, Payload)
-         with context Tid = 1, now = :now
+         with context CtxTid = 1, now = :now
          values (:userId, 0, 'C', :now, null, :payload)`,
         {
           userId: user.id,

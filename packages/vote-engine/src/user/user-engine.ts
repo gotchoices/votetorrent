@@ -131,7 +131,7 @@ export class UserEngine implements IUserEngine {
 				values (:userId, :keyType, :keyValue, :expiration);
 
 				insert into UserEvent (UserId, Sequence, Event, Timestamp, Signature, Payload)
-				with context Tid = ${tid}, now = :now
+				with context CtxTid = ${tid}, now = :now
 				values (
 					:userId,
 					coalesce((select max(Sequence) from UserEvent where UserId = :userId), -1) + 1,
@@ -210,7 +210,7 @@ export class UserEngine implements IUserEngine {
 				values (:userId, :keyType, :keyValue, :expiration);
 
 				insert into UserEvent (UserId, Sequence, Event, Timestamp, Signature, Payload)
-				with context Tid = ${tid}, now = :now
+				with context CtxTid = ${tid}, now = :now
 				values (
 					:userId,
 					coalesce((select max(Sequence) from UserEvent where UserId = :userId), -1) + 1,
@@ -417,7 +417,7 @@ export class UserEngine implements IUserEngine {
 				where Id = :userId;
 
 				insert into UserEvent (UserId, Sequence, Event, Timestamp, Signature, Payload)
-				with context Tid = ${tid}, now = :now
+				with context CtxTid = ${tid}, now = :now
 				values (
 					:userId,
 					coalesce((select max(Sequence) from UserEvent where UserId = :userId), -1) + 1,
@@ -477,7 +477,7 @@ export class UserEngine implements IUserEngine {
 				where UserId = :userId and PubKey = :pubKey;
 
 				insert into UserEvent (UserId, Sequence, Event, Timestamp, Signature, Payload)
-				with context Tid = ${tid}, now = :now
+				with context CtxTid = ${tid}, now = :now
 				values (
 					:userId,
 					coalesce((select max(Sequence) from UserEvent where UserId = :userId), -1) + 1,

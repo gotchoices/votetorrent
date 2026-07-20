@@ -597,7 +597,13 @@ declare schema main
 		constraint EventValid check (Event in ('C','R','AK','RK')),
 		constraint InsertOnly check on update, delete (false)
 	)
-		with context ( Tid int, now datetime );
+		-- 999.1: context param renamed Tid -> CtxTid to avoid a Quereus
+		-- RegisteredScope symbol collision with the new persisted `Tid` column above (both a
+		-- bare column and a bare context param named `Tid` in the same table register into the
+		-- same INSERT compile scope -> "Symbol 'tid' already exists in the same scope"). No CHECK
+		-- constraint references context.Tid yet (Phase 21 signature-CHECK addition should use
+		-- context.CtxTid on this table specifically).
+		with context ( CtxTid int, now datetime );
 
 	table Election (
 		Id text primary key, -- 32 byte random id
