@@ -1,9 +1,9 @@
-import { MisuseError, QuereusError } from '@quereus/quereus'
 import { bytesToHex } from '@noble/curves/utils.js'
 import { sha256 } from '@noble/hashes/sha2.js'
 import { utf8ToBytes } from '@noble/hashes/utils.js'
 import { asText, digestToBytes, nowCanonicalDatetime } from '../utils.js'
 import { seedSignedMutation } from '../signing/signed-mutation.js'
+import { toIsoZDatetime, toDeferredCheckDatetime, resolveSign as resolveSignHelper, requireCtx as requireCtxHelper, rethrow as rethrowHelper } from '../signing/ceremony-helpers.js'
 import { StubAttestationVerifier } from './stub-attestation-verifier.js'
 import { AssociationAssociateBuilder } from './builders/association-associate-builder.js'
 import type { EngineContext } from '../types.js'
@@ -15,8 +15,7 @@ import type {
   IAssociationAssociateBuilder,
   IAssociationEngine,
   IAttestationVerifier,
-  Signature,
-  Timestamp
+  Signature
 } from '@votetorrent/vote-core'
 
 /**
@@ -36,49 +35,8 @@ let nextAssociationTid = Date.now()
 /** For test use only — returns the Tid the next AssociationEngine mutation will use. */
 export function peekNextAssociationTid (): number { return nextAssociationTid }
 
-/**
- * AttestationChallenge/Association/AssociationPrivate's `ExpirationValid`/
- * `AttestationTimeValid` CHECKs require `isISODatetime(...) and like('%Z', ...)`
- * — a trailing `Z` is MANDATORY, the same convention `RegistrationEngine`
- * uses for `Registrant`/`RegistrantPrivate`/`RegistrantSelective`.Expiration
- * (see registration-engine.ts's `toIsoZDatetime` doc comment). Do NOT reuse
- * the shared no-`Z` `toCanonicalDatetime` for these columns.
- */
-function toIsoZDatetime (input: Timestamp | string): string {
-  if (typeof input === 'number') return new Date(input).toISOString()
-  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/.test(input)) return input
-  // Quereus's canonical stored form (what a plain `select ... from AttestationChallenge`
-  // read-back gives for a datetime column, as opposed to the Z-suffixed value we WROTE) is
-  // UTC with the trailing `Z` stripped and fractional seconds at minimal precision. Append
-  // `Z` directly rather than re-parsing through `new Date(...)`, which would misinterpret the
-  // bare string as LOCAL time (mirrors utils.ts's `fromCanonicalDatetime` convention) and
-  // silently shift the instant by the host's UTC offset.
-  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?$/.test(input)) return `${input}Z`
-  const parsed = new Date(input)
-  if (!Number.isNaN(parsed.getTime())) return parsed.toISOString()
-  return input
-}
-
-/**
- * Deferred-CHECK-aware datetime coercion (T-42-03 class, ported from
- * `registration-engine.ts`'s `toDeferredCheckDatetime`). Any CHECK containing
- * a subquery — `AttestationChallenge.InsertValid`, `Association.InsertValid`,
- * `AssociationPrivate.InsertValid`/`AssociationCidMatch`/`ChallengeValid` all
- * qualify — is DEFERRED in Quereus and re-derives `new.*` from a
- * `Temporal.PlainDateTime`-coerced snapshot: the trailing `Z` is dropped AND
- * fractional seconds are serialized at MINIMAL precision (trailing zero
- * digits dropped). The `vrg` AdminSigning ceremony digest for these tables'
- * datetime columns MUST use this coerced form; every IMMEDIATE (non-deferred)
- * CHECK — `ExpirationValid`, `AttestationTimeValid`, `CidValid`,
- * `SignatureValid` — sees the RAW Z-suffixed, always-3-digit value instead.
- */
-function toDeferredCheckDatetime (input: Timestamp | string): string {
-  let s = toIsoZDatetime(input).replace(/Z$/, '')
-  if (s.includes('.')) {
-    s = s.replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '')
-  }
-  return s
-}
+// WR-01/WR-04 (42-REVIEW): datetime + ceremony helpers consolidated into
+// ../signing/ceremony-helpers.js (shared by all three Phase-42 engines).
 
 /** sha256(deviceId) hex-encoded — matches `PollingDevice.DeviceHash`/`Association.DeviceHash`'s documented "sha256 hash of the device ID" convention. */
 function sha256Hex (input: string): string {
@@ -116,11 +74,9 @@ export class AssociationEngine implements IAssociationEngine {
     private readonly verifier: IAttestationVerifier = new StubAttestationVerifier()
   ) {}
 
-  /** Normalizes the Signature|callback union into a single callback shape. */
+  /** Normalizes the Signature|callback union into a single callback shape (WR-04: shared). */
   private resolveSign (signatureOrCallback: SignatureOrCallback): (digest: Uint8Array) => Promise<Signature> {
-    return typeof signatureOrCallback === 'function'
-      ? signatureOrCallback
-      : async () => signatureOrCallback
+    return resolveSignHelper(signatureOrCallback)
   }
 
   // ---------- Cid compute helper (pure, no insert — Pitfall 4) ----------
@@ -515,20 +471,10 @@ export class AssociationEngine implements IAssociationEngine {
   // ---------- helpers ----------
 
   private requireCtx (method: string): void {
-    if (!this.ctx) {
-      throw new Error(`AssociationEngine.${method}: no EngineContext bound — construct with (ctx) for DB-backed methods`)
-    }
+    requireCtxHelper(this.ctx, 'AssociationEngine', method)
   }
 
   private rethrow (err: unknown, method: string): never {
-    if (err instanceof QuereusError) {
-      throw new Error(`Quereus error (code ${err.code}): ${err.message}`)
-    } else if (err instanceof MisuseError) {
-      throw new Error(`API misuse: ${err.message}`)
-    } else if (err instanceof Error) {
-      throw new Error(`AssociationEngine.${method}: ${err.message}`)
-    } else {
-      throw new Error(`AssociationEngine.${method}: unknown error: ${String(err)}`)
-    }
+    return rethrowHelper(err, 'AssociationEngine', method)
   }
 }

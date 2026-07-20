@@ -1,4 +1,3 @@
-import { MisuseError, QuereusError } from '@quereus/quereus'
 import type {
   AuthorityPeer,
   IAuthorityConfigEngine,
@@ -7,6 +6,7 @@ import type {
 } from '@votetorrent/vote-core'
 import type { EngineContext } from '../types.js'
 import { seedSignedMutation } from '../signing/signed-mutation.js'
+import { resolveSign as resolveSignHelper, requireCtx as requireCtxHelper, rethrow as rethrowHelper } from '../signing/ceremony-helpers.js'
 
 type SignatureOrCallback = Signature | ((digest: Uint8Array) => Promise<Signature>)
 
@@ -203,28 +203,14 @@ export class AuthorityConfigEngine implements IAuthorityConfigEngine {
    * a callback that just returns it; a callback param passes through as-is.
    */
   private resolveSign (signatureOrCallback: SignatureOrCallback): (digest: Uint8Array) => Promise<Signature> {
-    return typeof signatureOrCallback === 'function'
-      ? signatureOrCallback
-      : async () => signatureOrCallback
+    return resolveSignHelper(signatureOrCallback)
   }
 
   private requireCtx (method: string): void {
-    if (!this.ctx) {
-      throw new Error(
-        `AuthorityConfigEngine.${method}: no EngineContext bound — construct with (ctx) for DB-backed methods`
-      )
-    }
+    requireCtxHelper(this.ctx, 'AuthorityConfigEngine', method)
   }
 
   private rethrow (err: unknown, method: string): never {
-    if (err instanceof QuereusError) {
-      throw new Error(`Quereus error (code ${err.code}): ${err.message}`)
-    } else if (err instanceof MisuseError) {
-      throw new Error(`API misuse: ${err.message}`)
-    } else if (err instanceof Error) {
-      throw new Error(`AuthorityConfigEngine.${method}: ${err.message}`)
-    } else {
-      throw new Error(`AuthorityConfigEngine.${method}: unknown error: ${String(err)}`)
-    }
+    return rethrowHelper(err, 'AuthorityConfigEngine', method)
   }
 }

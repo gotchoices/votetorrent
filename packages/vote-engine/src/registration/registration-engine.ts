@@ -1,7 +1,7 @@
-import { MisuseError, QuereusError } from '@quereus/quereus'
 import { setDisclose } from '@optimystic/quereus-plugin-crypto'
 import { digestToBytes, nowCanonicalDatetime, parseJsonOr, asText } from '../utils.js'
 import { seedSignedMutation } from '../signing/signed-mutation.js'
+import { toIsoZDatetime, toDeferredCheckDatetime, reZuluDatetime, resolveSign as resolveSignHelper, requireCtx as requireCtxHelper, rethrow as rethrowHelper } from '../signing/ceremony-helpers.js'
 import { RegistrationRegisterBuilder } from './builders/registration-register-builder.js'
 import { validateFieldPolicy } from './field-policy.js'
 import type { EngineContext } from '../types.js'
@@ -43,75 +43,10 @@ let nextRegistrationTid = Date.now()
 /** For test use only — returns the Tid that the next RegistrationEngine mutation will use. */
 export function peekNextRegistrationTid (): number { return nextRegistrationTid }
 
-/**
- * Registrant/RegistrantPrivate/RegistrantSelective's `ExpirationValid` CHECK
- * requires `isISODatetime(Expiration) and like('%Z', Expiration)` — a
- * trailing `Z` is MANDATORY (verified against `initialize.ts`'s `isISODatetime`
- * regex: `/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/`). This is a NEW
- * convention unique to the Phase 42 registration tables — every other
- * `datetime` column in the schema uses `toCanonicalDatetime`'s no-`Z` form.
- * Do NOT reuse `toCanonicalDatetime` for these Expiration columns.
- */
-function toIsoZDatetime (input: Timestamp | string): string {
-  if (typeof input === 'number') return new Date(input).toISOString()
-  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/.test(input)) return input
-  const parsed = new Date(input)
-  if (!Number.isNaN(parsed.getTime())) return parsed.toISOString()
-  return input
-}
-
-/**
- * T-42-03 (found via TDD — a genuinely flaky-test hunt, ~10% intrinsic
- * failure rate reproduced via a 150-iteration stress spec): Quereus's
- * DEFERRED CHECK constraints (any CHECK containing a subquery —
- * `MutationValid`/`InsertValid`/`RegistrantCidMatch`/`RegistrantIdValid` all
- * qualify, per `needsDeferred = containsSubquery(...)` in
- * `constraint-builder.js`) re-derive `new.*` from a COERCED snapshot
- * (`coerceNewSection` in `constraint-check.js`, GitHub quereus#25) — for a
- * `datetime` column this round-trips through `Temporal.PlainDateTime`
- * (`DATETIME_TYPE.parse` in `temporal-types.js`), which does TWO things a
- * naive Z-strip does NOT replicate:
- *   1. Drops the trailing `Z` entirely (bare wall-clock PlainDateTime).
- *   2. Serializes the fractional-seconds part at MINIMAL precision — trailing
- *      zero digits are dropped (`.930` -> `.93`, `.700` -> `.7`, `.000` -> the
- *      whole fractional part is dropped, not just zero-padded). A naive
- *      `.replace(/Z$/, '')` on `Date.toISOString()`'s ALWAYS-3-digit output
- *      preserves those trailing zeros, producing a BYTE-DIFFERENT string from
- *      what Quereus's own deferred-check snapshot sees whenever the epoch-ms
- *      timestamp's last digit happens to be `0` — empirically ~10% of random
- *      timestamps (confirmed via a 5000-sample comparison against
- *      `temporal-polyfill`'s own `Instant.from(iso).toZonedDateTimeISO('UTC')
- *      .toPlainDateTime().toString()`), matching the exact stress-test flake
- *      rate observed before this fix.
- * IMMEDIATE (non-deferred) CHECKs like `ExpirationValid`/`SignatureValid`/
- * `CidValid` see the RAW pre-coercion (Z-suffixed, always-3-digit) value —
- * unaffected. Only the digest fed into the `vrg` AdminSigning ceremony
- * (compared against a DEFERRED check) needs this minimal-precision form.
- */
-function toDeferredCheckDatetime (input: Timestamp | string): string {
-  let s = toIsoZDatetime(input).replace(/Z$/, '')
-  if (s.includes('.')) {
-    s = s.replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '')
-  }
-  return s
-}
-
-/**
- * T-42-06 (found via TDD): a plain `select ... from Registrant` READ of the
- * `Expiration` datetime column comes back Z-STRIPPED (Quereus normalizes
- * `datetime`-typed column reads through the same wall-clock representation
- * the deferred-check snapshot uses — see `toDeferredCheckDatetime`'s doc
- * comment — even for a non-deferred, immediate SELECT). Re-stamping an
- * UNCHANGED Expiration value read back from the DB (e.g. `changeStatus`
- * leaving Expiration untouched) must NOT re-parse it through `new Date()`
- * (which treats a Z-less ISO string as LOCAL time, silently shifting the
- * instant by the host's UTC offset — see `fromCanonicalDatetime`'s doc
- * comment for the same JS `Date` pitfall) — it must have `Z` appended
- * directly, preserving the exact stored wall-clock digits as UTC.
- */
-function reZuluDatetime (stored: string): string {
-  return stored.endsWith('Z') ? stored : `${stored}Z`
-}
+// WR-01/WR-04 (42-REVIEW): the datetime + ceremony helpers were consolidated
+// into ../signing/ceremony-helpers.js so the three Phase-42 engines share ONE
+// canonical copy (the divergent registration copy of toIsoZDatetime that lost
+// the bare-ISO read-back branch was WR-01). See that module for the doc comments.
 
 /**
  * RegistrationEngine — Phase 42-03 (D-01/D-02/D-15/D-18/D-21) implementation.
@@ -134,11 +69,9 @@ export class RegistrationEngine implements IRegistrationEngine {
 
   // ---------- signing helpers ----------
 
-  /** Normalizes the Signature|callback union into a single callback shape. */
+  /** Normalizes the Signature|callback union into a single callback shape (WR-04: shared). */
   private resolveSign (signatureOrCallback: SignatureOrCallback): (digest: Uint8Array) => Promise<Signature> {
-    return typeof signatureOrCallback === 'function'
-      ? signatureOrCallback
-      : async () => signatureOrCallback
+    return resolveSignHelper(signatureOrCallback)
   }
 
   // ---------- Cid compute helpers (pure, no insert — Pitfall 4: Cids-before-parent) ----------
@@ -775,6 +708,20 @@ export class RegistrationEngine implements IRegistrationEngine {
     // policy) — a submission with no electionId has no policy to enforce
     // against and proceeds exactly as before this plan.
     if (init.electionId) {
+      // WR-03 (42-REVIEW): the election whose field policy governs this
+      // submission MUST belong to the same authority that is registering this
+      // person. Without this check, a caller could pass an electionId owned by
+      // an unrelated authority — enforcing that authority's policy, or (worse)
+      // silently passing validation against a policy-less election while the
+      // caller's own election carries a stricter one. Mirrors CR-01's
+      // authority-ownership discipline at the engine layer (field policy has no
+      // schema CHECK backstop per D-09, so this IS the only guard).
+      const electionAuthorityId = await this.resolveElectionAuthorityId(init.electionId, 'register')
+      if (electionAuthorityId !== init.registrant.authorityId) {
+        throw new Error(
+          `RegistrationEngine.register: electionId ${init.electionId} belongs to authority ${electionAuthorityId}, not the registrant's authority ${init.registrant.authorityId} — cross-authority registration is not permitted`
+        )
+      }
       await validateFieldPolicy(ctx, init.electionId, init)
     }
 
@@ -1242,20 +1189,10 @@ export class RegistrationEngine implements IRegistrationEngine {
   // ---------- helpers ----------
 
   private requireCtx (method: string): void {
-    if (!this.ctx) {
-      throw new Error(`RegistrationEngine.${method}: no EngineContext bound — construct with (ctx) for DB-backed methods`)
-    }
+    requireCtxHelper(this.ctx, 'RegistrationEngine', method)
   }
 
   private rethrow (err: unknown, method: string): never {
-    if (err instanceof QuereusError) {
-      throw new Error(`Quereus error (code ${err.code}): ${err.message}`)
-    } else if (err instanceof MisuseError) {
-      throw new Error(`API misuse: ${err.message}`)
-    } else if (err instanceof Error) {
-      throw new Error(`RegistrationEngine.${method}: ${err.message}`)
-    } else {
-      throw new Error(`RegistrationEngine.${method}: unknown error: ${String(err)}`)
-    }
+    return rethrowHelper(err, 'RegistrationEngine', method)
   }
 }

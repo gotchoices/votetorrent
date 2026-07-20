@@ -206,6 +206,37 @@ describe('field policy enforcement', () => {
     expect(registrant, 'no partial Registrant row after a policy rejection').to.be.undefined
   })
 
+  // WR-03 (42-REVIEW): register() must reject a submission whose electionId
+  // belongs to a DIFFERENT authority than the registrant — otherwise an
+  // unrelated authority's field policy would govern (or a policy-less election
+  // would silently bypass the caller's own stricter policy). The check fires
+  // BEFORE any DB ceremony, so no partial row is written.
+  it('rejects a submission whose electionId belongs to a different authority than the registrant (WR-03 cross-authority)', async () => {
+    const { engine, sign, electionId } = await setupFieldPolicyTest()
+    // electionId is owned by the test's authority A; the registrant claims a
+    // different authority. (The registrant.authorityId need not exist — the
+    // ownership mismatch is caught before the signing ceremony ever runs.)
+    const registrantId = nextRegistrantId()
+    let threw: Error | undefined
+    try {
+      await engine.register(
+        {
+          electionId,
+          registrant: { id: registrantId, authorityId: 'some-other-authority-wr03', expiration: FUTURE_EXPIRATION },
+          private: { expiration: FUTURE_EXPIRATION, details: [] }
+        },
+        sign
+      )
+    } catch (err) {
+      threw = err as Error
+    }
+    expect(threw, 'expected register() to reject a cross-authority electionId').to.not.be.undefined
+    expect(threw!.message, 'error should name the cross-authority cause').to.match(/cross-authority/i)
+
+    const registrant = await engine.getRegistrant(registrantId)
+    expect(registrant, 'no partial Registrant row after a cross-authority rejection').to.be.undefined
+  })
+
   it('rejects a submission furnishing a Required private field in the wrong tier (public ExtraFields)', async () => {
     const { auth, engine, sign, electionId } = await setupFieldPolicyTest()
     await engine.addElectionRegistrationField({ electionId, fieldName: 'ssn', tier: 'private', requirement: 'required' }, sign)
