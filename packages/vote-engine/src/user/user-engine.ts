@@ -1,6 +1,7 @@
 import { MisuseError, QuereusError } from '@quereus/quereus'
 import { FeatureNotAvailableError, UserHistoryEvent } from '@votetorrent/vote-core'
 import { digestToBytes, fromCanonicalDatetime, nowCanonicalDatetime, parseJsonOr, toCanonicalDatetime } from '../utils.js'
+import { allocateTid } from '../database/tid-allocator.js'
 import type { EngineContext } from '../types.js'
 import type {
   CreateUserHistory,
@@ -27,11 +28,11 @@ import {
   UserRevokeKeyBuilder
 } from './builders/index.js'
 
-// Phase 04 USER-02/04/05/06: monotonic Tid counter for UserEngine batches.
-// Local to this module — mirrors NetworksEngine's pattern. Re-evaluate at
-// the v2 persistence milestone (PERSIST-01) — a process-local counter can
-// collide with stored Tids once DBs persist across runs.
-let nextTid = 1
+// 999.1 D-01: UserEngine mutations allocate Tids through the shared durable,
+// peer-safe allocator (`../database/tid-allocator.js`, namespace 'user')
+// instead of the retired `let nextTid = 1` process-local counter — this was
+// the sharpest replay edge in the phase's threat register (a `=1`-seeded
+// counter restarting at 1 every process, per T-999.1-09).
 
 /**
  * UserEngine — Phase 04 (USER-01..USER-08) implementation.
@@ -74,7 +75,7 @@ export class UserEngine implements IUserEngine {
    */
   async addKey (key: UserKey, sign?: (digest: Uint8Array) => Promise<Signature>): Promise<void> {
     this.requireCtx('addKey')
-    const tid = nextTid++
+    const tid = await allocateTid(this.ctx!.db, 'user')
     // EXISTING active pubkey — bound to context.UserKey in BOTH paths.
     // Per RESEARCH §Pitfall 5: this MUST be the EXISTING key, never key.key.
     const signerKey = this.user.activeKeys?.[0]?.key ?? null
@@ -130,10 +131,11 @@ export class UserEngine implements IUserEngine {
 				with context UserKey = :userKey, Signature = :signature, Tid = ${tid}, now = :now, IsSignatureValid = true
 				values (:userId, :keyType, :keyValue, :expiration);
 
-				insert into UserEvent (UserId, Sequence, Event, Timestamp, Signature, Payload)
+				insert into UserEvent (UserId, Tid, Sequence, Event, Timestamp, Signature, Payload)
 				with context CtxTid = ${tid}, now = :now
 				values (
 					:userId,
+					${tid},
 					coalesce((select max(Sequence) from UserEvent where UserId = :userId), -1) + 1,
 					'AK',
 					:now,
@@ -187,7 +189,7 @@ export class UserEngine implements IUserEngine {
     options?: { inviteSlotCid?: string; inviteSignature?: string }
   ): Promise<void> {
     this.requireCtx('create')
-    const tid = nextTid++
+    const tid = await allocateTid(this.ctx!.db, 'user')
     const imageRefJson = userInit.imageRef ? JSON.stringify(userInit.imageRef) : null
     try {
       await this.ctx!.db.exec(
@@ -209,10 +211,11 @@ export class UserEngine implements IUserEngine {
 				with context UserKey = null, Signature = null, Tid = ${tid}, now = :now, IsSignatureValid = true
 				values (:userId, :keyType, :keyValue, :expiration);
 
-				insert into UserEvent (UserId, Sequence, Event, Timestamp, Signature, Payload)
+				insert into UserEvent (UserId, Tid, Sequence, Event, Timestamp, Signature, Payload)
 				with context CtxTid = ${tid}, now = :now
 				values (
 					:userId,
+					${tid},
 					coalesce((select max(Sequence) from UserEvent where UserId = :userId), -1) + 1,
 					'C',
 					:now,
@@ -403,7 +406,7 @@ export class UserEngine implements IUserEngine {
     if (userRevise.event !== UserHistoryEvent.revise) {
       throw new Error('revise: ReviseUserHistory.event must be "revise"')
     }
-    const tid = nextTid++
+    const tid = await allocateTid(this.ctx!.db, 'user')
     const signerKey = userRevise.signature?.signerKey ?? null
     const signature = userRevise.signature?.signature ?? null
     const imageRefJson = userRevise.info.imageRef
@@ -416,10 +419,11 @@ export class UserEngine implements IUserEngine {
 					set Name = :name, ImageRef = :imageRef
 				where Id = :userId;
 
-				insert into UserEvent (UserId, Sequence, Event, Timestamp, Signature, Payload)
+				insert into UserEvent (UserId, Tid, Sequence, Event, Timestamp, Signature, Payload)
 				with context CtxTid = ${tid}, now = :now
 				values (
 					:userId,
+					${tid},
 					coalesce((select max(Sequence) from UserEvent where UserId = :userId), -1) + 1,
 					'R',
 					:now,
@@ -464,7 +468,7 @@ export class UserEngine implements IUserEngine {
    */
   async revokeKey (keyToRevoke: string, signature: Signature): Promise<void> {
     this.requireCtx('revokeKey')
-    const tid = nextTid++
+    const tid = await allocateTid(this.ctx!.db, 'user')
     // context.UserKey = the public key that produced the revoke signature (signature.signerKey),
     // so verify(signature, digest, context.UserKey) succeeds once UserKey.SignatureValid is
     // activated (SC#7 / UKEY-02). Fall back to the subject's first active key only when
@@ -476,10 +480,11 @@ export class UserEngine implements IUserEngine {
 				with context UserKey = :userKey, Signature = :signature, Tid = ${tid}, now = :now, IsSignatureValid = true
 				where UserId = :userId and PubKey = :pubKey;
 
-				insert into UserEvent (UserId, Sequence, Event, Timestamp, Signature, Payload)
+				insert into UserEvent (UserId, Tid, Sequence, Event, Timestamp, Signature, Payload)
 				with context CtxTid = ${tid}, now = :now
 				values (
 					:userId,
+					${tid},
 					coalesce((select max(Sequence) from UserEvent where UserId = :userId), -1) + 1,
 					'RK',
 					:now,
