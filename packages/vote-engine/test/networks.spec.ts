@@ -22,6 +22,7 @@ import {
   initDB,
   registerDbPlugins,
 } from '../src/database/initialize.js'
+import { peekTid } from '../src/database/tid-allocator.js'
 import { VOTETORRENT_SCHEMA_SQL } from '../src/database/schema-sql.js'
 import type {
   User,
@@ -841,12 +842,16 @@ describe('NetworksEngine — factory DI and persistence seam (Phase 14)', () => 
     expect(ddlExecCount, 'open() on initialized store must not run any DDL exec').to.equal(0);
   });
 
-  it('nextTid seeded from TidSequence on re-attach (D-12)', async () => {
-    // Build an initialized db with a known TidSequence value
+  it("nextTid resumes above TidHighWater['networks'] on re-attach (999.1 D-02/D-07/D-09, was D-12)", async () => {
+    // Build an initialized db and persist a known TidHighWater value for the 'networks'
+    // namespace — the shared allocator's durable mechanism that replaced the retired
+    // TidSequence table (R-01: NetworksEngine is now just one more allocator namespace).
     const persistedDb = new Database();
     await prepareDb(persistedDb);
-    // Manually advance TidSequence to a recognizable value
-    await persistedDb.exec('update TidSequence set NextTid = 42');
+    await persistedDb.exec(
+      "insert into TidHighWater (Namespace, HighWater) values ('networks', 42) " +
+        'on conflict (Namespace) do update set HighWater = 42;',
+    );
 
     const reattachFactory: DbFactory = async (_hash: string) => persistedDb;
     const engine = new NetworksEngine(AsyncStorage, reattachFactory);
@@ -859,9 +864,11 @@ describe('NetworksEngine — factory DI and persistence seam (Phase 14)', () => 
 
     await engine.open(ref, makePhase14User(), false);
 
-    // The tidCounters Map should now reflect the seeded value (42)
-    const tidCounters = (engine as unknown as { tidCounters: Map<string, number> }).tidCounters;
-    expect(tidCounters.get('tid-seed-hash'), 'Tid seeded from persisted TidSequence value').to.equal(42);
+    // Fresh engine, SAME persisted Database handle (re-attach): the next allocation for
+    // this namespace must resume above the persisted high-water, never reissuing an
+    // already-consumed Tid — asserted against TidHighWater, not the retired TidSequence.
+    const nextTid = await peekTid(persistedDb, 'networks');
+    expect(nextTid, 'Tid resumes from persisted TidHighWater value, not reissued').to.be.greaterThan(42);
   });
 
   // --------------------------------------------------------------------------

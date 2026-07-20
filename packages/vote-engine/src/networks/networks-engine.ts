@@ -22,10 +22,9 @@ import {
 	isSchemaInitialized,
 	markSchemaInitialized,
 	ensureTidSequence,
-	readTidCounter,
-	incrementTidCounter,
 	declareViewsInMain,
 } from '../database/initialize.js';
+import { allocateTid } from '../database/tid-allocator.js';
 import { NetworksCreateBuilder } from './builders/index.js';
 
 // D-02: default in-memory factory — keeps all 581 existing tests passing unchanged.
@@ -37,9 +36,6 @@ export class NetworksEngine implements INetworksEngine {
 	// Lifetime is bound to this NetworksEngine instance (AppProvider owns one).
 	// D-11: no eviction in v1.0 — revisit at the v2 persistence milestone.
 	private readonly contexts = new Map<string, EngineContext>();
-
-	// D-12: per-context monotonic Tid counter seeded from TidSequence on create/attach.
-	private readonly tidCounters = new Map<string, number>();
 
 	constructor(
 		private readonly localStorage: LocalStorage,
@@ -97,11 +93,10 @@ export class NetworksEngine implements INetworksEngine {
 			throw new Error('Failed to create network: User key is required');
 		}
 
-		// D-12: per-context Tid from tidCounters Map (seeded in createContext).
-		const tid = this.tidCounters.get(networkHash)!;
-		this.tidCounters.set(networkHash, tid + 1);
-		// Persist the bumped counter so re-attach resumes from the right value.
-		await incrementTidCounter(ctx.db);
+		// 999.1 D-02/D-09: shared durable allocator, 'networks' namespace —
+		// reserve-before-use persist happens inside allocateTid, before the
+		// db.exec(insert ...) below consumes the returned tid.
+		const tid = await allocateTid(ctx.db, 'networks');
 
 		const params = {
 			networkId,
@@ -350,10 +345,9 @@ export class NetworksEngine implements INetworksEngine {
 			);
 		}
 
-		// Re-attach (store exists + initialized): seed Tid from persisted counter (D-12),
-		// then cache the single live handle (D-06).
-		const seed = await readTidCounter(db);
-		this.tidCounters.set(ref.hash, seed);
+		// Re-attach (store exists + initialized): cache the single live handle (D-06).
+		// 999.1 D-02/D-07: no separate seed step — the shared allocator reads
+		// TidHighWater lazily on the first allocateTid(ctx.db, 'networks') call.
 
 		// STRAND-VIEWS fix (re-attach path): on the strand path cadre-core applies the
 		// schema under `App`, so views live in App and unqualified view references fail
@@ -448,8 +442,8 @@ export class NetworksEngine implements INetworksEngine {
 			}
 		}
 
-		const seed = await readTidCounter(db);           // D-12: seed per-context Tid
-		this.tidCounters.set(hash, seed);
+		// 999.1 D-02/D-07: no separate seed step — the shared allocator reads
+		// TidHighWater lazily on the first allocateTid(ctx.db, 'networks') call.
 		const ctx: EngineContext = { db, user };
 		return ctx;
 	}
