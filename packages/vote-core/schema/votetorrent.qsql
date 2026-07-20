@@ -603,7 +603,28 @@ declare schema main
 					-- and not the last key for the user
 					and exists (select 1 from UserKey K where K.UserId = old.UserId and K.PubKey <> old.PubKey)
 		),
-		constraint SignatureValid check (context.IsSignatureValid = true),
+		-- 999.1 R-02/D-11/Pitfall 3: real in-schema verification via the shared SignatureValid UDF,
+		-- gated by a bootstrap discriminant that MIRRORS InsertValid's own first branch exactly
+		-- (first key for this user AND no existing signer bound in context). The bootstrap branch
+		-- intentionally does NOT call SignatureValid against a null signature -- it stays a plain
+		-- boolean short-circuit so the most-tested first-key path never depends on crypto. Every
+		-- subsequent-key insert must carry a real signature from the EXISTING active signer
+		-- (context.UserKey) over Digest(UserId, PubKey, Type, Expiration) -- the exact formula
+		-- UserEngine.addKey's sign-callback path computes (see user-engine.ts addKey doc comment).
+		-- IsSignatureValid stays declared (unused by this CHECK) for backward-compatible binding
+		-- from other raw-SQL seeders across the suite; producers accepting a real signature no
+		-- longer assert it hardcoded true (R-04) -- see UserEngine.addKey.
+		constraint SignatureValid check (
+			(
+				(select count(*) from UserKey K where K.UserId = new.UserId) = 1
+				and context.UserKey is null
+			)
+			or SignatureValid(
+				Digest(new.UserId, new.PubKey, new.Type, new.Expiration),
+				context.Signature,
+				context.UserKey
+			)
+		),
 		constraint NoUpdate check on update (false),
 		constraint ExpirationFuture check (Expiration > context.now)
 	)
