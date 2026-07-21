@@ -105,6 +105,53 @@ async function createNetworkAndAuthority (): Promise<{
   }
 }
 
+// 39-04 (DEBT-09, OfficerRequired negative-enforcement coverage): identical to
+// createNetworkAndAuthority above, but the founding Officer's scopes deliberately
+// EXCLUDE 'rad' — so no Officer row anywhere for this authority carries a rad
+// scope. Used to construct a deterministic Admin.OfficerRequired CHECK reject.
+async function createNetworkAndAuthorityWithoutRadOfficer (): Promise<{
+  networkEngine: INetworkEngine
+  authorityEngine: IAuthorityEngine
+  authority: Authority
+}> {
+  await AsyncStorage.clear()
+  await AsyncStorage.setItem('recentNetworks', [])
+  const networksEngine = new NetworksEngine(AsyncStorage)
+  const user = makeUser()
+  const networkInit = makeNetworkInit({
+    admin: {
+      officers: [
+        {
+          init: {
+            name: 'Admin A',
+            title: 'Chair',
+            // No 'rad' — deliberately excluded (this is the whole point of the fixture).
+            scopes: ['rn', 'iad', 'uai', 'mel'] as Scope[]
+          }
+        }
+      ],
+      effectiveAt: Date.now(),
+      thresholdPolicies: [{ policy: 'uai', threshold: 1 }]
+    }
+  })
+  const networkEngine = await networksEngine.create(networkInit, user)
+  const recents = (await AsyncStorage.getItem<NetworkReference[]>('recentNetworks')) ?? []
+  const ref = recents[0]
+  if (!ref) throw new Error('No network reference found after create')
+
+  // Open the primary authority created during network creation
+  const details = await networkEngine.getDetails()
+  const authorityId = details.network.primaryAuthorityId
+  const authorityEngine = await networkEngine.openAuthority(authorityId)
+  const authorityDetails = await authorityEngine.getDetails()
+
+  return {
+    networkEngine,
+    authorityEngine,
+    authority: authorityDetails.authority
+  }
+}
+
 // AUTH-01: real hex-encoded secp256k1 signature for test inputs.
 // Generates a fresh keypair, signs sha256(digestText ?? signerUserId), and
 // returns the hex shapes contractually required by the engine.
@@ -1147,13 +1194,15 @@ describe('AuthorityEngine', () => {
     // now evaluate the CHECK cleanly and succeed — never resurfacing the phantom
     // `Column not found: scope` error.
     //
-    // KNOWN COVERAGE GAP (tracked, debt): the *negative* path — OfficerRequired
-    // actually rejecting an Admin update when NO rad-scoped Officer exists — is not
-    // asserted here. Reliably constructing that scenario requires seeding a non-rad
-    // Officer, which trips Officer's own AdminValid/InsertValid/ScopesValid
-    // constraints (complex setup), and quereus's `check on update` correlated-EXISTS
-    // binding reaches the authority's existing rad-scoped Officer regardless of the
-    // updated row's EffectiveAt. Negative enforcement coverage is deferred.
+    // 39-04 (DEBT-09, todo 2026-06-30-officerrequired-negative-enforcement-coverage):
+    // the KNOWN COVERAGE GAP previously noted here (the *negative* path — this
+    // CHECK actually rejecting an Admin update when NO rad-scoped Officer exists)
+    // is now closed by the paired test immediately below — see that test's own
+    // comment for the setup (an authority whose founding Officer excludes 'rad')
+    // and the D-09 pitfall that made this class of test silently vacuous (a raw
+    // JS-number EffectiveAt parameter never matches the canonicalized stored
+    // `datetime` value, so the UPDATE becomes a silent zero-row no-op — the CHECK
+    // is never actually evaluated either way. `toCanonicalDatetime()` fixes it).
     it('Admin.OfficerRequired CHECK evaluates cleanly (no phantom `scope` column error) when a rad-scoped Officer exists — confirmed on quereus@4.2.1', async () => {
       const { authority, authorityEngine } = await createNetworkAndAuthority()
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
@@ -1186,6 +1235,44 @@ describe('AuthorityEngine', () => {
         'OfficerRequired CHECK must no longer throw the phantom `scope` column error'
       ).to.equal(true)
       expect(caught, 'a valid Admin update (rad-scoped Officer present) must not be rejected').to.equal(undefined)
+    })
+
+    // 39-04 (DEBT-09, todo 2026-06-30-officerrequired-negative-enforcement-coverage):
+    // the negative path. Uses createNetworkAndAuthorityWithoutRadOfficer — an
+    // authority whose ONLY (founding) Officer row carries scopes excluding 'rad'.
+    // No Officer row anywhere for this authority — at any AdminEffectiveAt — has
+    // a rad scope, so Admin.OfficerRequired's `exists (... value = 'rad')` must be
+    // false for every possible correlation the CHECK could bind to (whether it
+    // correlates strictly on new.EffectiveAt or, per the quereus behavior noted in
+    // the regression-lock test above, reaches any Officer row for the authority).
+    // Mirrors the positive test's shoe-in insert + UPDATE shape exactly (D-06 setup
+    // parity) so this is a true apples-to-apples negative counterpart.
+    it('Admin.OfficerRequired CHECK rejects an Admin update when NO rad-scoped Officer exists for the authority', async () => {
+      const { authority, authorityEngine } = await createNetworkAndAuthorityWithoutRadOfficer()
+      const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
+      // D-09 pitfall: EffectiveAt is a `datetime` column — the WHERE-clause parameter
+      // must be canonicalized (toCanonicalDatetime) or the UPDATE matches zero rows
+      // (a silent no-op, not a genuine CHECK evaluation either way).
+      const newEffectiveAt = toCanonicalDatetime(Date.now() + 99_000)
+      await ctx.db.exec(
+        `insert into Admin (AuthorityId, EffectiveAt, ThresholdPolicies)
+         with context Tid = 9, SigningNonce = null, InviteSlotCid = null, InviteSignature = null
+         values (:id, :e, '[]')`,
+        { id: authority.id, e: newEffectiveAt }
+      )
+      let caught: unknown
+      try {
+        await ctx.db.exec(
+          `update Admin with context Tid = 9, SigningNonce = null, InviteSlotCid = null, InviteSignature = null
+           set ThresholdPolicies = '[{"scope": "uai", "threshold": 1}]'
+           where AuthorityId = :id and EffectiveAt = :e`,
+          { id: authority.id, e: newEffectiveAt }
+        )
+      } catch (err) {
+        caught = err
+      }
+      expect(caught, 'Admin update must be REJECTED — this authority has no rad-scoped Officer').to.be.instanceOf(Error)
+      expect((caught as Error).message).to.include('OfficerRequired')
     })
 
     it('should reject Admin insert when AuthorityId does not reference an existing Authority', async () => {
