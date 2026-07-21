@@ -246,9 +246,12 @@ export async function runFullChainWritePhase(
     },
     keyholderThreshold: 0,
   };
-  // peekNextElectionTid() still points to T (election tid) — +1 gives the revision tid.
+  // peekNextElectionTid(db) still points to T (election tid) — +1 gives the revision tid.
   // (peekNextElectionTid is imported statically from @votetorrent/vote-engine/rn above.)
-  const revTid = peekNextElectionTid() + 1;
+  // 999.1 D-01/D-02: peekNextElectionTid is now namespace-allocator-backed — async and
+  // scoped to a caller-supplied `db` handle (no more module-level zero-arg counter). Use
+  // ctx.db (the SAME handle the engine's create() used — Pitfall 5, never a second handle).
+  const revTid = (await peekNextElectionTid(ctx.db)) + 1;
   const revisionSigningNonce = await (electionsEngine as unknown as {
     seedElectionRevisionSigning(
       electionId: string,
@@ -655,8 +658,10 @@ export async function runTidReissueRecheckPhase(
     },
     keyholderThreshold: 0,
   };
-  // peekNextElectionTid() points at T (this election's tid) — +1 gives the revision tid.
-  const revTid = peekNextElectionTid() + 1;
+  // peekNextElectionTid(db) points at T (this election's tid) — +1 gives the revision tid.
+  // 999.1 D-01/D-02: async, namespace-allocator-backed — use the captured `db` handle
+  // (Pitfall 5, never a second rnDbFactory() call).
+  const revTid = (await peekNextElectionTid(db)) + 1;
   const revisionSigningNonce = await (electionsEngine as unknown as {
     seedElectionRevisionSigning(
       electionId: string,

@@ -16,7 +16,7 @@ import { ElectionRevisionForm, ElectionRevisionFormValue } from "./components/El
 import { useApp } from "../../providers/AppProvider";
 import { ElectionType } from "@votetorrent/vote-core";
 import type { IElectionsEngine, INetworkEngine, ElectionInit } from "@votetorrent/vote-core";
-import { ElectionsCreateElectionBuilder, peekNextElectionTid } from "@votetorrent/vote-engine";
+import { ElectionsCreateElectionBuilder } from "@votetorrent/vote-engine";
 import { createDeviceSigner } from "../../engines/device-signer";
 import { saveLocalKeyholders } from "../../engines/local-keyholders";
 import { mapElectionError } from "./election-error-messages";
@@ -248,11 +248,15 @@ export function CreateElectionScreen() {
 			);
 
 			// Sign the ElectionRevision row (Revision=0) via the companion seam.
-			// revTid = peekNextElectionTid() + 1 (Election consumes T, revision consumes T+1).
-			// pastRevTs = now - 1000 — must be PAST and identical to what builder.setRevision received.
-			// peekNextElectionTid is imported statically from @votetorrent/vote-engine at top of file.
+			// revTid = (await electionsEngine.peekNextTid()) + 1 (Election consumes T, revision
+			// consumes T+1). pastRevTs = now - 1000 — must be PAST and identical to what
+			// builder.setRevision received.
+			// 999.1 D-15 fix: peekNextTid() is an IElectionsEngine interface method (delegates
+			// to the namespace-allocator-backed peekNextElectionTid(db) internally) — the screen
+			// never holds a raw Database handle, so it cannot call the standalone
+			// peekNextElectionTid(db) function directly.
 			const pastRevTs = now - 1000;
-			const revTid = peekNextElectionTid() + 1;
+			const revTid = (await electionsEngine.peekNextTid()) + 1;
 			// Same object the builder payload signs — must be identical (digest parity).
 			const revisionTimeline = resolvedTimeline;
 			const revisionSigningNonce = await electionsEngine.seedElectionRevisionSigning(

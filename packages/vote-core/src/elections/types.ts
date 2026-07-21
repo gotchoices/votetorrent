@@ -38,6 +38,16 @@ export interface IElectionsEngine {
     tid: number,
     sign: (digest: Uint8Array) => Promise<Signature>
   ): Promise<string>
+
+  // 999.1 D-15 fix: expose the pending/peeked 'elections' Tid (the value
+  // `seedElectionSigning` already peeked and `createElection` will consume as T)
+  // so callers can compute `T + 1` for `seedElectionRevisionSigning` WITHOUT
+  // needing direct access to the concrete engine's `Database` handle (the
+  // interface boundary never leaked `db` to app-layer callers). Idempotent:
+  // returns the SAME pending value seedElectionSigning already reserved/peeked
+  // for this engine's context (see tid-allocator.ts `reserveOrPeekElectionTidPair`
+  // caching), it does not allocate a new one.
+  peekNextTid(): Promise<number>
 }
 
 export interface IElectionsCreateElectionBuilder extends IBuilder<ElectionInit, void> {

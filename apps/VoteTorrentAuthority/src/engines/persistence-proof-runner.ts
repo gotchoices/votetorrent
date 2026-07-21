@@ -24,6 +24,7 @@ import {
   runBallotQuestionProof,
   runBallotQuestionReadProof,
   runFullChainReadPhase,
+  runTidReissueRecheckPhase,
   assertCryptoFunctions,
   assertDigestParity,
   getLastProofDb,
@@ -154,6 +155,18 @@ export async function runPersistenceProof(node?: StrandHost): Promise<void> {
         `[proof] ========== FULL-CHAIN VERDICT: ${verdict ? 'PASS' : 'FAIL'} ` +
           `(network=${result.networkCount},authority=${result.authorityCount},election=${result.electionCount},crypto=${crypto.allPassed},digestParity=${digestParity.allPassed},ballotQuestions=${ballot.passed}) ==========`,
       );
+
+      // Phase 999.1 D-15: durable-Tid no-reissue recheck on the re-attached store.
+      // Runs AFTER the full-chain verdict and in its own try/catch so a recheck
+      // failure cannot mask the existing PERSIST/D-16 evidence above. Emits its own
+      // `[proof] ========== TID-REISSUE VERDICT: PASS|FAIL ...` line — the greppable
+      // D-15 device evidence (requires a backward device-clock jump between the WRITE
+      // phase and this relaunch to be a meaningful clock-skew proof).
+      try {
+        await runTidReissueRecheckPhase(engine, user);
+      } catch (reissueErr) {
+        console.error('[proof] ========== TID-REISSUE VERDICT: FAIL (recheck threw) ==========', reissueErr);
+      }
     }
   } catch (err) {
     console.error('[proof] FATAL —', err);

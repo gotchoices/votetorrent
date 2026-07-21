@@ -109,6 +109,19 @@ export class ElectionsEngine implements IElectionsEngine {
   constructor (private readonly ctx?: EngineContext) {}
 
   /**
+   * 999.1 D-15 fix: interface-level peek so app-layer callers (which only ever
+   * hold an `IElectionsEngine`, never the concrete `Database` handle) can
+   * compute `T + 1` for `seedElectionRevisionSigning` without needing `db`.
+   * Delegates to the SAME `peekNextElectionTid(db)` `seedElectionSigning`
+   * already calls — idempotent (returns the cached pending pair's start if one
+   * is already reserved for this context's `db`, else reserves fresh).
+   */
+  async peekNextTid (): Promise<number> {
+    this.requireCtx('peekNextTid')
+    return peekNextElectionTid(this.ctx!.db)
+  }
+
+  /**
    * ELEC-05 (narrative) / `adjustElection` (interface) — INSERT a
    * ProposedElection row. The schema's ProposedElection.UserValid CHECK
    * gates on an Officer with scope 'mel', a non-expired UserKey matching

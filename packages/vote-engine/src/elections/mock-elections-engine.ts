@@ -226,4 +226,8 @@ export class MockElectionsEngine implements IElectionsEngine {
 	): Promise<string> {
 		throw new Error('MockElectionsEngine.seedElectionRevisionSigning: not implemented in mock');
 	}
+
+	async peekNextTid(): Promise<number> {
+		throw new Error('MockElectionsEngine.peekNextTid: not implemented in mock');
+	}
 }
