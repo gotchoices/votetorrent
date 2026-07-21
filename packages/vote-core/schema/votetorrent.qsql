@@ -723,6 +723,13 @@ declare schema main
 		Instructions text, -- markdown instructions for the election
 		Timeline text, -- json object { [ElectionEvent]: datetime }
 		KeyholderThreshold integer, -- number of keyholders required to sign the election
+		-- 39-02 D-04 Gap 1/2: create-time keyholder invitees, persisted name-only
+		-- (a JSON array of SentKeyholderInvite-shaped { name } objects, or the
+		-- caller's full KeyholderInvite[] payload verbatim). UNSIGNED and
+		-- deliberately excluded from the MutationValid Digest tuple below (A1) —
+		-- these are pending invitees, not yet-signed keyholder commitments. The
+		-- signed binding is the separate inviteKeyholder -> Keyholder flow.
+		Keyholders text null,
 		constraint ElectionIdValid check (exists (select 1 from Election E where E.Id = new.ElectionId)),
 		constraint ElectionIdImmutable check on update (new.ElectionId = old.ElectionId),
 		constraint BeforeRevisionDeadline check (exists (select 1 from Election E where E.Id = new.ElectionId and E.RevisionDeadline > context.now)),
@@ -756,6 +763,11 @@ declare schema main
 		Instructions text, -- markdown instructions for the election
 		Timeline text, -- json object { [ElectionEvent]: datetime }
 		KeyholderThreshold integer, -- number of keyholders required to sign the election
+		-- 39-02 D-04: sibling column to ElectionRevision.Keyholders (see there).
+		-- proposeRevision does not currently write this column (out of this
+		-- plan's Gap 1 scope, which targets createElection only) -- reads
+		-- correctly fall back to an empty set via the shared parse helper.
+		Keyholders text null,
 		constraint ElectionIdValid check (
 			exists (select 1 from Election E where E.Id = new.ElectionId)
 				or -- the election is still being proposed

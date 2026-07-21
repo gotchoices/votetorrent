@@ -333,11 +333,21 @@ export class ElectionsEngine implements IElectionsEngine {
       // < Election.RevisionDeadline). Do NOT generate a fresh Date.now() here; that would diverge
       // from the timestamp the seam already signed, reproducing the 16-06 digest-mismatch class.
       const revTimestamp = toCanonicalDatetime(r.revisionTimestamp)
+      // 39-02 D-04 Gap 1 fix: persist the create-time keyholder invitees
+      // (r.keyholders) into the new UNSIGNED ElectionRevision.Keyholders
+      // column. Deliberately NOT added to seedElectionRevisionSigning's
+      // Digest tuple (A1, see the comment there) — these are pending
+      // invitee names, not signed keyholder commitments. Byte-consistent
+      // with the Gap 2 read-back projections (JSON.parse of this exact
+      // JSON.stringify output). KEY-P2P-01 (future work): once the signed
+      // invite flow lands, keyholder invitees will be persisted via the
+      // signed inviteKeyholder path instead of this unsigned column.
+      const keyholders = JSON.stringify(r.keyholders ?? [])
       try {
         await this.ctx!.db.exec(
-          `insert into ElectionRevision (ElectionId, Revision, RevisionTimestamp, Tags, Instructions, Timeline, KeyholderThreshold)
+          `insert into ElectionRevision (ElectionId, Revision, RevisionTimestamp, Tags, Instructions, Timeline, KeyholderThreshold, Keyholders)
           with context SigningNonce = :signingNonce, Tid = ${revTid}, now = :now
-          values (:electionId, 0, :revTimestamp, :tags, :instructions, :timeline, :keyholderThreshold)`,
+          values (:electionId, 0, :revTimestamp, :tags, :instructions, :timeline, :keyholderThreshold, :keyholders)`,
           {
             signingNonce: options.revisionSigningNonce,
             electionId: e.id,
@@ -346,6 +356,7 @@ export class ElectionsEngine implements IElectionsEngine {
             instructions: r.instructions,
             timeline,
             keyholderThreshold: r.keyholderThreshold,
+            keyholders,
             now: nowCanonicalDatetime(),
           }
         )
@@ -718,6 +729,17 @@ export class ElectionsEngine implements IElectionsEngine {
     this.requireCtx('seedElectionRevisionSigning')
     const ctx = this.ctx!
 
+    // 39-02 D-04 (A1, deliberate — NOT a silent omission): the digest computed
+    // below intentionally does NOT include the revision's keyholder invitees
+    // (ElectionRevision.Keyholders, Gap 1). Create-time keyholder names are
+    // pending invitees, not yet-signed keyholder commitments — the signed
+    // binding is the separate inviteKeyholder -> Keyholder flow. Adding
+    // keyholders to this signed digest would ripple into the schema's
+    // MutationValid Digest tuple (votetorrent.qsql ElectionRevision) and
+    // every existing revision-signing test; out of scope for this fix.
+    // KEY-P2P-01 (future work) is the tracked follow-up for a signed
+    // keyholder-invite flow.
+    //
     // 1. Resolve CurrentAdmin.EffectiveAt for the authority (same as seedElectionSigning).
     const adminRow = await ctx.db
       .prepare('select EffectiveAt from CurrentAdmin where AuthorityId = :authorityId')
