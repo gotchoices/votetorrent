@@ -40,6 +40,7 @@ import type {
   ElectionType,
   ElectionCoreInit,
   ElectionRevisionInit,
+  KeyholderInvite,
   UserKey,
   Timestamp,
   UserKeyType,
@@ -592,7 +593,7 @@ export class NetworkEngine implements INetworkEngine {
           .prepare(
 						`
 						select
-							ElectionId, Revision, RevisionTimestamp, Tags, Instructions, Timeline, KeyholderThreshold
+							ElectionId, Revision, RevisionTimestamp, Tags, Instructions, Timeline, KeyholderThreshold, Keyholders
 						from ElectionRevision
 						where ElectionId = :id
 					`
@@ -609,7 +610,8 @@ export class NetworkEngine implements INetworkEngine {
               'ElectionRevision.Tags'
             ),
             instructions: revRow.Instructions as string,
-            keyholders: [], // fix this
+            // 39-02 D-04 Gap 2: read the persisted create-time keyholder invitees back.
+            keyholders: parseJsonOr<KeyholderInvite[]>(revRow.Keyholders, [], 'ElectionRevision.Keyholders'),
             timeline: parseJsonOr<Record<ElectionEvent, number>>(
               revRow.Timeline,
               {

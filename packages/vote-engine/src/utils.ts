@@ -2,6 +2,7 @@ import { bytesToHex, hexToBytes } from '@noble/curves/utils.js'
 import { sha256 } from '@noble/hashes/sha2.js'
 import { utf8ToBytes } from '@noble/hashes/utils.js'
 import { verifySig } from './database/initialize.js'
+import type { InviteStatus, SentKeyholderInvite } from '@votetorrent/vote-core'
 
 // sql data validation helpers
 export const asText = (value: unknown, field: string): string => {
@@ -35,6 +36,25 @@ export const parseJsonOr = <T>(
   } catch {
     throw new Error(`${field} has invalid JSON`)
   }
+}
+
+/**
+ * 39-02 D-04 Gap 2 — parse a persisted `ElectionRevision(.Keyholders)` /
+ * `ProposedElectionRevision(.Keyholders)` JSON column into the
+ * `ElectionRevision.keyholders: Array<InviteStatus<SentKeyholderInvite>>`
+ * projection shape. The column stores whatever `KeyholderInvite[]`-shaped
+ * (or bare `SentKeyholderInvite[]`) array the create path serialized —
+ * either way every element carries at least a `name` field, which is all
+ * this projection needs. These are pending (unresolved) create-time
+ * invitees, so `result` is always omitted — acceptance flows through the
+ * separate signed `inviteKeyholder` -> `Keyholder` path, not this column.
+ */
+export const parseKeyholdersAsInviteStatus = (
+  value: unknown,
+  field: string
+): Array<InviteStatus<SentKeyholderInvite>> => {
+  const raw = parseJsonOr<Array<{ name?: string }>>(value, [], field)
+  return raw.map((kh) => ({ invite: { name: kh.name ?? '' } }))
 }
 
 /**

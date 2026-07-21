@@ -12,6 +12,7 @@ import type {
   ElectionSummary,
   ElectionType,
   IElectionEngine,
+  KeyholderInvite,
   IElectionsAdjustElectionBuilder,
   IElectionsCreateElectionBuilder,
   IElectionsEngine,
@@ -464,7 +465,7 @@ export class ElectionsEngine implements IElectionsEngine {
         // cast that crashed consumers at `proposal.proposed.revision.*`.
         const revRow = await this.ctx.db
           .prepare(
-						`select Revision, RevisionTimestamp, Tags, Instructions, Timeline, KeyholderThreshold
+						`select Revision, RevisionTimestamp, Tags, Instructions, Timeline, KeyholderThreshold, Keyholders
 							from ProposedElectionRevision where ElectionId = :id`
           )
           .get({ id: core.id })
@@ -487,9 +488,10 @@ export class ElectionsEngine implements IElectionsEngine {
           revisionTimestamp: fromCanonicalDatetime(revRow.RevisionTimestamp as string | number),
           tags: parseJsonOr<string[]>(revRow.Tags, [], 'ProposedElectionRevision.Tags'),
           instructions: revRow.Instructions as string,
-          // ProposedElectionRevision persists no keyholder invites; []
-          // mirrors ElectionEngine.getRevisions' projection of this field.
-          keyholders: [],
+          // 39-02 D-04 Gap 2: proposeRevision does not currently write this
+          // column (out of this plan's Gap 1 scope) — falls back to [] via
+          // the shared parser rather than a hardcoded literal.
+          keyholders: parseJsonOr<KeyholderInvite[]>(revRow.Keyholders, [], 'ProposedElectionRevision.Keyholders'),
           timeline: parseJsonOr<Record<ElectionEvent, number>>(
             revRow.Timeline,
             {} as Record<ElectionEvent, number>,

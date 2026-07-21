@@ -1,5 +1,5 @@
 import { MisuseError, QuereusError } from '@quereus/quereus'
-import { formatPgRange, fromCanonicalDatetime, nowCanonicalDatetime, parseJsonOr, parsePgRange } from '../utils.js'
+import { formatPgRange, fromCanonicalDatetime, nowCanonicalDatetime, parseJsonOr, parseKeyholdersAsInviteStatus, parsePgRange } from '../utils.js'
 import type { EngineContext } from '../types.js'
 import type {
   Ballot,
@@ -289,7 +289,7 @@ export class ElectionEngine implements IElectionEngine {
       // Current revision: highest Revision number.
       const revRow = await this.ctx.db
         .prepare(
-					`select ElectionId, Revision, RevisionTimestamp, Tags, Instructions, Timeline, KeyholderThreshold
+					`select ElectionId, Revision, RevisionTimestamp, Tags, Instructions, Timeline, KeyholderThreshold, Keyholders
 						from ElectionRevision
 						where ElectionId = :electionId
 						order by Revision desc
@@ -307,7 +307,9 @@ export class ElectionEngine implements IElectionEngine {
         revisionTimestamp: [fromCanonicalDatetime(revRow.RevisionTimestamp as string)],
         tags: parseJsonOr<string[]>(revRow.Tags, [], 'ElectionRevision.Tags'),
         instructions: revRow.Instructions as string,
-        keyholders: [], // Populated by the Keyholder/InviteSlot join in TEST-01.
+        // 39-02 D-04 Gap 2: read the persisted create-time keyholder invitees
+        // back (this is the primary DEBT-10 getElectionDetails path).
+        keyholders: parseKeyholdersAsInviteStatus(revRow.Keyholders, 'ElectionRevision.Keyholders'),
         timeline: parseJsonOr<Record<ElectionEvent, number>>(
           revRow.Timeline,
           {} as Record<ElectionEvent, number>,
@@ -319,7 +321,7 @@ export class ElectionEngine implements IElectionEngine {
       // Proposed revision (if any).
       const proposedRow = await this.ctx.db
         .prepare(
-					`select ElectionId, Revision, RevisionTimestamp, Tags, Instructions, Timeline, KeyholderThreshold
+					`select ElectionId, Revision, RevisionTimestamp, Tags, Instructions, Timeline, KeyholderThreshold, Keyholders
 						from ProposedElectionRevision
 						where ElectionId = :electionId`
         )
@@ -336,7 +338,10 @@ export class ElectionEngine implements IElectionEngine {
             'ProposedElectionRevision.Tags'
           ),
           instructions: proposedRow.Instructions as string,
-          keyholders: [],
+          // 39-02 D-04 Gap 2: proposeRevision does not currently write this
+          // column (out of this plan's Gap 1 scope) — falls back to [] via
+          // the shared parser rather than a hardcoded literal.
+          keyholders: parseJsonOr<KeyholderInvite[]>(proposedRow.Keyholders, [], 'ProposedElectionRevision.Keyholders'),
           timeline: parseJsonOr<Record<ElectionEvent, number>>(
             proposedRow.Timeline,
             {} as Record<ElectionEvent, number>,
@@ -361,7 +366,7 @@ export class ElectionEngine implements IElectionEngine {
     const out: ElectionRevision[] = []
     try {
       for await (const row of this.ctx.db.eval(
-				`select ElectionId, Revision, RevisionTimestamp, Tags, Instructions, Timeline, KeyholderThreshold
+				`select ElectionId, Revision, RevisionTimestamp, Tags, Instructions, Timeline, KeyholderThreshold, Keyholders
 					from ElectionRevision
 					where ElectionId = :electionId
 					order by Revision asc`,
@@ -373,7 +378,8 @@ export class ElectionEngine implements IElectionEngine {
           revisionTimestamp: [fromCanonicalDatetime(row.RevisionTimestamp as string)],
           tags: parseJsonOr<string[]>(row.Tags, [], 'ElectionRevision.Tags'),
           instructions: row.Instructions as string,
-          keyholders: [],
+          // 39-02 D-04 Gap 2: read the persisted create-time keyholder invitees back.
+          keyholders: parseKeyholdersAsInviteStatus(row.Keyholders, 'ElectionRevision.Keyholders'),
           timeline: parseJsonOr<Record<ElectionEvent, number>>(
             row.Timeline,
             {} as Record<ElectionEvent, number>,
