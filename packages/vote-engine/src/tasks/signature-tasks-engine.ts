@@ -1,4 +1,5 @@
 import { MisuseError, QuereusError } from '@quereus/quereus'
+import type { SqlValue } from '@quereus/quereus'
 import { SigningEngine } from '../signing/signing-engine.js'
 import { digestToBytes, nowCanonicalDatetime, parseJsonOr } from '../utils.js'
 import type { EngineContext } from '../types.js'
@@ -427,26 +428,17 @@ export class SignatureTasksEngine implements ISignatureTasksEngine {
         sequence,
         required,
       }
-      let qUserId = this.ctx!.user?.id ?? null
-      let qSignerKey = this.ctx!.user?.activeKeys?.[0]?.key ?? '0'.repeat(66)
-      let qSignature = '0'.repeat(128)
-      let qIsPlaceholder = true
-      if (sign) {
-        const qDigestRow = await this.ctx!.db
-          .prepare(
-            'select Digest(1, :ballotId, :code, :title, :instructions, :dependsOn, :type, :optionRange, :scoreRange, :grouping, :sequence, :required) as d'
-          )
-          .get(qDigestArgs)
-        if (!qDigestRow || qDigestRow.d == null) {
-          throw new Error('SignatureTasksEngine.finalizeBallot: Question Digest() returned null')
-        }
-        const qDigestBytes = digestToBytes(qDigestRow.d)
-        const qRealSig = await sign(qDigestBytes)
-        qUserId = qRealSig.signerUserId
-        qSignerKey = qRealSig.signerKey
-        qSignature = qRealSig.signature
-        qIsPlaceholder = false
-      }
+      const {
+        userId: qUserId,
+        signerKey: qSignerKey,
+        signature: qSignature,
+        isPlaceholder: qIsPlaceholder,
+      } = await this.resolveRowSignature(
+        'select Digest(1, :ballotId, :code, :title, :instructions, :dependsOn, :type, :optionRange, :scoreRange, :grouping, :sequence, :required) as d',
+        qDigestArgs,
+        'Question',
+        sign
+      )
       const qNonce = (globalThis as { crypto: { randomUUID: () => string } }).crypto.randomUUID()
       await this.ctx!.db.exec(
         `insert into AdminSigning (
@@ -551,26 +543,17 @@ export class SignatureTasksEngine implements ISignatureTasksEngine {
           image: oImage,
           video: oVideo,
         }
-        let oUserId = this.ctx!.user?.id ?? null
-        let oSignerKey = this.ctx!.user?.activeKeys?.[0]?.key ?? '0'.repeat(66)
-        let oSignature = '0'.repeat(128)
-        let oIsPlaceholder = true
-        if (sign) {
-          const oDigestRow = await this.ctx!.db
-            .prepare(
-              'select Digest(1, :ballotId, :questionCode, :code, :sequence, :title, :details, :infoURL, :image, :video) as d'
-            )
-            .get(oDigestArgs)
-          if (!oDigestRow || oDigestRow.d == null) {
-            throw new Error('SignatureTasksEngine.finalizeBallot: Option Digest() returned null')
-          }
-          const oDigestBytes = digestToBytes(oDigestRow.d)
-          const oRealSig = await sign(oDigestBytes)
-          oUserId = oRealSig.signerUserId
-          oSignerKey = oRealSig.signerKey
-          oSignature = oRealSig.signature
-          oIsPlaceholder = false
-        }
+        const {
+          userId: oUserId,
+          signerKey: oSignerKey,
+          signature: oSignature,
+          isPlaceholder: oIsPlaceholder,
+        } = await this.resolveRowSignature(
+          'select Digest(1, :ballotId, :questionCode, :code, :sequence, :title, :details, :infoURL, :image, :video) as d',
+          oDigestArgs,
+          'Option',
+          sign
+        )
         const oNonce = (globalThis as { crypto: { randomUUID: () => string } }).crypto.randomUUID()
         try {
           await this.ctx!.db.exec(
@@ -725,6 +708,44 @@ export class SignatureTasksEngine implements ISignatureTasksEngine {
   }
 
   // ---------- helpers ----------
+
+  /**
+   * IN-01 (39-REVIEW): shared real-vs-placeholder signature resolution for
+   * finalizeBallot's per-Question and per-Option AdminSigning rows. Extracted
+   * from what was previously two near-identical inline `let`-block copies —
+   * behavior-preserving: the digest SQL and arg map passed in by each call
+   * site are unchanged from the original inline code, so the signed digest
+   * bytes and persisted Digest remain byte-for-byte identical to before.
+   *
+   * When `sign` is supplied, computes the row's canonical Digest via SQL,
+   * invokes the caller's per-digest signer, and returns a REAL signature with
+   * `isPlaceholder: false`. Otherwise falls back to the legacy placeholder
+   * (documented category-① path — e.g. `debugSeedPendingTasks`).
+   */
+  private async resolveRowSignature (
+    digestSql: string,
+    digestArgs: Record<string, SqlValue>,
+    rowLabel: string,
+    sign?: (digest: Uint8Array) => Promise<Signature>
+  ): Promise<{ userId: string | null; signerKey: string; signature: string; isPlaceholder: boolean }> {
+    let userId = this.ctx!.user?.id ?? null
+    let signerKey = this.ctx!.user?.activeKeys?.[0]?.key ?? '0'.repeat(66)
+    let signature = '0'.repeat(128)
+    let isPlaceholder = true
+    if (sign) {
+      const digestRow = await this.ctx!.db.prepare(digestSql).get(digestArgs)
+      if (!digestRow || digestRow.d == null) {
+        throw new Error(`SignatureTasksEngine.finalizeBallot: ${rowLabel} Digest() returned null`)
+      }
+      const digestBytes = digestToBytes(digestRow.d)
+      const realSig = await sign(digestBytes)
+      userId = realSig.signerUserId
+      signerKey = realSig.signerKey
+      signature = realSig.signature
+      isPlaceholder = false
+    }
+    return { userId, signerKey, signature, isPlaceholder }
+  }
 
   private requireCtx (method: string): void {
     if (!this.ctx) {
