@@ -18,8 +18,9 @@ import { NetworkUnpinAuthorityBuilder } from '../src/network/builders/network-un
 import { NetworkProposeRevisionBuilder } from '../src/network/builders/network-propose-revision-builder';
 import { NetworkRespondToInviteBuilder } from '../src/network/builders/network-respond-to-invite-builder';
 import { NetworksEngine } from '../src/networks/networks-engine';
+import { ElectionsEngine } from '../src/elections/elections-engine';
 import type { EngineContext } from '../src/types.js';
-import { createTestNetwork, addTestAuthority, addTestElection, seedAuthorityInvite, seedUserInvite, signInviteResult } from './fixtures/test-context.js';
+import { createTestNetwork, addTestAuthority, addTestElection, seedAuthorityInvite, seedUserInvite, signInviteResult, makeElectionInit } from './fixtures/test-context.js';
 import { randomTestKeyPair } from './fixtures/keys.js';
 import { AsyncStorage } from './shims/react-native';
 import type {
@@ -28,6 +29,7 @@ import type {
 	AuthorityInit,
 	InviteAction,
 	INetworkEngine,
+	KeyholderInvite,
 	NetworkInit,
 	NetworkReference,
 	NetworkRevision,
@@ -1655,6 +1657,70 @@ describe('NetworkEngine', () => {
 			expect(found).to.exist;
 			expect(found?.authorityName).to.equal(auth.authority.name);
 			expect(found?.title).to.equal('Test Election');
+		});
+	});
+
+	// -----------------------------------------------------------------------
+	// 10.6. getProposedElections — WR-01 (39-REVIEW) regression
+	// -----------------------------------------------------------------------
+	describe('getProposedElections', () => {
+		it('returns [] when there are no ProposedElection rows', async () => {
+			const net = await createTestNetwork();
+			const proposed = await net.networkEngine.getProposedElections();
+			expect(proposed).to.deep.equal([]);
+		});
+
+		// WR-01 (39-REVIEW): NetworkEngine.getProposedElections previously
+		// looked up the per-proposal revision in `ElectionRevision` (whose
+		// ElectionIdValid CHECK requires a row in `Election`), which a genuine
+		// ProposedElection never satisfies — the revision lookup always came
+		// back empty and the trailing `.filter` silently dropped every real
+		// proposal. Seeding a proposal via ElectionsEngine.adjustElection (the
+		// same path used by the real create-proposal flow) and asserting a
+		// non-empty result with the persisted keyholders read back proves the
+		// fix reads `ProposedElectionRevision` instead.
+		it('returns a genuinely proposed election with its keyholders (regression for ElectionRevision/ProposedElectionRevision mismatch)', async () => {
+			const net = await createTestNetwork();
+			const auth = await addTestAuthority(net);
+			const electionsEngine = new ElectionsEngine(net.ctx);
+			const init = makeElectionInit({ id: 'proposed-election-1', authorityId: auth.authority.id });
+			init.revision.electionId = init.election.id;
+			await electionsEngine.adjustElection(init);
+
+			// adjustElection's ProposedElectionRevision INSERT does not currently
+			// write the Keyholders column (39-02 D-04 Gap 2, out of WR-01's scope
+			// — proposeRevision/adjustElection writes are a separate gap). Persist
+			// it directly here so this test exercises the READ side (the WR-01
+			// fix) of the Keyholders round-trip against a real
+			// ProposedElectionRevision row, matching how ElectionsEngine's own
+			// getProposedElections reads this column back.
+			const keyholders: KeyholderInvite[] = [{
+				type: 'k',
+				expiration: toCanonicalDatetime(Date.now() + 7 * 86_400_000),
+				inviteKey: 'a'.repeat(66),
+				inviteSignature: 'b'.repeat(128),
+				name: 'Keyholder Two',
+			}];
+			await net.ctx.db.exec(
+				`update ProposedElectionRevision
+					with context UserId = :userId, UserKey = :userKey, Signature = :signature, Tid = 0, now = :now, IsUserValid = true
+					set Keyholders = :keyholders
+					where ElectionId = :id`,
+				{
+					keyholders: JSON.stringify(keyholders),
+					id: 'proposed-election-1',
+					userId: net.user.id,
+					userKey: net.user.activeKeys?.[0]?.key ?? null,
+					signature: null,
+					now: nowCanonicalDatetime(),
+				}
+			);
+
+			const proposed = await net.networkEngine.getProposedElections();
+			expect(proposed).to.have.lengthOf(1);
+			const proposal = proposed.find(p => p.proposed.election.id === 'proposed-election-1');
+			expect(proposal).to.exist;
+			expect(proposal?.proposed.revision.keyholders).to.deep.equal(keyholders);
 		});
 	});
 

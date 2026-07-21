@@ -594,7 +594,7 @@ export class NetworkEngine implements INetworkEngine {
 						`
 						select
 							ElectionId, Revision, RevisionTimestamp, Tags, Instructions, Timeline, KeyholderThreshold, Keyholders
-						from ElectionRevision
+						from ProposedElectionRevision
 						where ElectionId = :id
 					`
           )
@@ -607,11 +607,11 @@ export class NetworkEngine implements INetworkEngine {
             tags: parseJsonOr<string[]>(
               revRow.Tags,
               [],
-              'ElectionRevision.Tags'
+              'ProposedElectionRevision.Tags'
             ),
             instructions: revRow.Instructions as string,
             // 39-02 D-04 Gap 2: read the persisted create-time keyholder invitees back.
-            keyholders: parseJsonOr<KeyholderInvite[]>(revRow.Keyholders, [], 'ElectionRevision.Keyholders'),
+            keyholders: parseJsonOr<KeyholderInvite[]>(revRow.Keyholders, [], 'ProposedElectionRevision.Keyholders'),
             timeline: parseJsonOr<Record<ElectionEvent, number>>(
               revRow.Timeline,
               {
@@ -623,7 +623,7 @@ export class NetworkEngine implements INetworkEngine {
                 certificationStarts: 0,
                 closed: 0
               },
-              'ElectionRevision.Timeline'
+              'ProposedElectionRevision.Timeline'
             ),
             keyholderThreshold: revRow.KeyholderThreshold as number
           })
