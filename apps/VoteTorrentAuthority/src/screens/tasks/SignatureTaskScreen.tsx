@@ -62,8 +62,14 @@ export default function SignatureTaskScreen() {
 			// already-unlocked device private key (device-signer.ts) — re-invocable
 			// with no additional user decision — so it doubles as the reusable
 			// per-digest `sign` callback finalizeBallot uses to REAL-sign each
-			// promoted per-row Question/Option AdminSigning digest.
-			await engine.completeSignature(task, { isAccepted: true, signature, sign: signer });
+			// promoted per-row Question/Option AdminSigning digest. Only `ballot`
+			// signature tasks drive finalizeBallot (IN-02, 39-REVIEW), so `sign` is
+			// narrowed to that type — a no-op for every other signatureType.
+			await engine.completeSignature(task, {
+				isAccepted: true,
+				signature,
+				sign: task.signatureType === "ballot" ? signer : undefined,
+			});
 			navigation.goBack();
 		} catch (err) {
 			console.warn("sign error:", err);
