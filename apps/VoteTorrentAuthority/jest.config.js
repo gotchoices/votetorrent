@@ -9,18 +9,31 @@ module.exports = {
   testPathIgnorePatterns: [
     '<rootDir>/node_modules/',
     '<rootDir>/src/engines/__tests__/cadre-core-node.smoke.spec.ts',
+    // Phase 39 plan 39-04 (Pitfall 4): replication-proof-runner.test.ts is a Phase 41
+    // P2P-track artifact (cross-peer replication). Phase 41 is PAUSED (P2P-11 open at
+    // 41-11); this Phase 39 app-Jest gate scopes to the 3 in-scope suites only and does
+    // NOT attempt to make the P2P runner pass — that is out of scope here.
+    '<rootDir>/src/engines/__tests__/replication-proof-runner.test.ts',
   ],
   // Allow Babel to transform ESM-only workspace packages and quereus packages
   // so tests can import them without ESM/CJS resolver failures.
   // Includes: @quereus/* (quereus engine), @optimystic/* (plugin), @votetorrent/* (workspace),
   // @noble/* (@optimystic/quereus-plugin-crypto peer), inheritree + moat-maker (quereus deps),
-  // multiformats (ESM-only dep of @optimystic/quereus-plugin-crypto).
+  // multiformats (ESM-only dep of @optimystic/quereus-plugin-crypto),
+  // @react-navigation (ESM-only; App.test.tsx imports NavigationContainer from it).
   transformIgnorePatterns: [
-    'node_modules/(?!((jest-)?react-native|@react-native(-community)?|@quereus|@optimystic|@votetorrent|@noble|inheritree|moat-maker|multiformats|@serfab)/)',
+    'node_modules/(?!((jest-)?react-native|@react-native(-community)?|@react-navigation|@quereus|@optimystic|@votetorrent|@noble|inheritree|moat-maker|multiformats|@serfab)/)',
   ],
   moduleNameMapper: {
     '^react-native-localize$': '<rootDir>/__mocks__/react-native-localize.js',
     '^@optimystic/db-p2p$': '<rootDir>/__mocks__/@optimystic/db-p2p.js',
+    // Phase 39 plan 39-04 (DEBT-09 app-Jest gate) — native TurboModules pulled in
+    // transitively by App.test.tsx's full navigation tree (every screen module is
+    // eagerly required by src/navigation/index.tsx, not lazily).
+    '^@react-native-clipboard/clipboard$': '<rootDir>/__mocks__/@react-native-clipboard/clipboard.js',
+    '^@react-native-community/datetimepicker$': '<rootDir>/__mocks__/@react-native-community/datetimepicker.js',
+    '^react-native-vector-icons/FontAwesome$': '<rootDir>/__mocks__/react-native-vector-icons/FontAwesome.js',
+    '^@multiformats/multiaddr$': '<rootDir>/__mocks__/@multiformats/multiaddr.js',
     // Allow importing vote-engine test fixtures from the app workspace Jest suite.
     // The package exports field blocks subpath access; this mapper resolves the TS source directly.
     '^@votetorrent/vote-engine/test/fixtures/test-context$':
@@ -58,6 +71,12 @@ module.exports = {
     '^@babel/runtime/(.*)$': '<rootDir>/node_modules/@babel/runtime/$1',
     // @quereus/isolation — ESM-only dep of @quereus/store; no "require" condition in exports map.
     '^@quereus/isolation$': '<rootDir>/node_modules/@quereus/isolation/dist/src/index.js',
+    // @quereus/plugin-react-native-leveldb — ESM-only ("import"-only exports map, no
+    // "require" condition); App.test.tsx now reaches AppProvider → engine-factory →
+    // rn-db-factory.ts, which imports it directly (Phase 39 plan 39-04, unmasked by the
+    // @react-navigation transformIgnorePatterns fix).
+    '^@quereus/plugin-react-native-leveldb$':
+      '<rootDir>/node_modules/@quereus/plugin-react-native-leveldb/dist/src/index.js',
     // @react-native-async-storage/async-storage — native module that cannot load under Jest's
     // Node environment. Map to the provided jest mock so compliance-strand.spec.ts can import
     // @votetorrent/vote-engine/rn (which exports LocalStorageReact that imports AsyncStorage).

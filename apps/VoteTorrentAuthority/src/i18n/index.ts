@@ -455,6 +455,11 @@ const resources = {
 			debugSeedTasksTitle: 'Seed Pending Tasks (Debug)',
 			debugSeedTasksSuccess: 'Pending tasks seeded — check Tasks tab',
 			debugSeedTasksError: 'Seed failed: ',
+			// Phase 39 plan 39-04 (DEBT-09 app-Jest gate) — DistrictsGroupsEditor range fields.
+			from: 'From',
+			to: 'To',
+			add: 'Add',
+			cancel: 'Cancel',
 		},
 	},
 	es: {
@@ -898,6 +903,11 @@ const resources = {
 			debugSeedTasksTitle: 'Sembrar Tareas Pendientes (Debug)',
 			debugSeedTasksSuccess: 'Tareas pendientes sembradas — ver pestaña Tareas',
 			debugSeedTasksError: 'Error al sembrar: ',
+			// Phase 39 plan 39-04 (DEBT-09 app-Jest gate) — DistrictsGroupsEditor range fields.
+			from: 'Desde',
+			to: 'Hasta',
+			add: 'Agregar',
+			cancel: 'Cancelar',
 		},
 	},
 };
