@@ -58,7 +58,12 @@ export default function SignatureTaskScreen() {
 			const digest = await engine.getSignatureDigest(task);
 			const signer = await createDeviceSigner("Device User");
 			const signature = await signer(digest);
-			await engine.completeSignature(task, { isAccepted: true, signature });
+			// 39-03 (DEBT-11, D-06): `signer` is a plain in-memory closure over the
+			// already-unlocked device private key (device-signer.ts) — re-invocable
+			// with no additional user decision — so it doubles as the reusable
+			// per-digest `sign` callback finalizeBallot uses to REAL-sign each
+			// promoted per-row Question/Option AdminSigning digest.
+			await engine.completeSignature(task, { isAccepted: true, signature, sign: signer });
 			navigation.goBack();
 		} catch (err) {
 			console.warn("sign error:", err);

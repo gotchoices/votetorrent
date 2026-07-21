@@ -61,4 +61,20 @@ export type BallotSignatureTask = SignatureTask & {
 export interface SignatureResult {
   isAccepted: boolean
   signature: Signature
+  /**
+   * 39-03 (DEBT-11, D-06 resolution 1): OPTIONAL reusable per-digest signing
+   * callback. The header `signature` above covers only the ballot-task's own
+   * header digest; when supplied, this callback lets `finalizeBallot` sign
+   * EACH promoted per-row Question/Option `AdminSigning` digest for real
+   * (IsPlaceholderSignature = false) instead of the legacy placeholder.
+   *
+   * The device-signer closure this wraps (`createDeviceSigner`,
+   * apps/VoteTorrentAuthority/src/engines/device-signer.ts) is a plain
+   * in-memory function closing over the already-unlocked private key — it is
+   * re-invocable with no additional user decision per call, so per-row
+   * real-signing does not require N fresh officer approvals. Optional so
+   * existing callers (tests, the reject path, any caller that only exercises
+   * the header-signature ceremony) remain byte-identical.
+   */
+  sign?: (digest: Uint8Array) => Promise<Signature>
 }

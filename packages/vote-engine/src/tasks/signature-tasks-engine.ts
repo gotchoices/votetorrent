@@ -17,6 +17,7 @@ import type {
   Proposal,
   Ballot,
   Question,
+  Signature,
 } from '@votetorrent/vote-core'
 import { BALLOT_HEADER_TID } from '../election/election-engine.js'
 import { CompleteSignatureBuilder } from './builders/index.js'
@@ -277,7 +278,11 @@ export class SignatureTasksEngine implements ISignatureTasksEngine {
     // This runs BEFORE the Task-complete update so options are promoted before the Task closes.
     if (result.isAccepted && task.signatureType === 'ballot') {
       try {
-        await this.finalizeBallot(taskRow.Id as string, nonce)
+        // 39-03 (DEBT-11, D-06): thread the caller's optional reusable
+        // per-digest signing callback into finalizeBallot so per-row
+        // Question/Option AdminSigning rows can carry a REAL signature
+        // instead of the legacy placeholder (see SignatureResult.sign doc).
+        await this.finalizeBallot(taskRow.Id as string, nonce, result.sign)
       } catch (err) {
         this.rethrow(err, 'completeSignature (finalize)')
       }
@@ -312,7 +317,11 @@ export class SignatureTasksEngine implements ISignatureTasksEngine {
    * D-04: ProposedBallot is NOT deleted.
    * Pitfall 3: Ballot.MutationValid gates on BallotDeadline > now (schema-enforced).
    */
-  private async finalizeBallot (taskId: string, headerNonce: string): Promise<void> {
+  private async finalizeBallot (
+    taskId: string,
+    headerNonce: string,
+    sign?: (digest: Uint8Array) => Promise<Signature>
+  ): Promise<void> {
     // Resolve the BallotId by joining to BallotSignatureTaskExtension.
     const extRow = await this.ctx!.db
       .prepare('select BallotId from BallotSignatureTaskExtension where TaskId = :taskId')
@@ -396,12 +405,54 @@ export class SignatureTasksEngine implements ISignatureTasksEngine {
 
       // Step 3a: per-question AdminSigning('ceb') with 12-arg Question digest
       // (matches Question.MutationValid at qsql:725-734).
+      //
+      // 39-03 (DEBT-11, D-06 resolution 1): when the caller supplies a reusable
+      // per-digest `sign` callback (mirrors seedElectionRevisionSigning's own
+      // compute-Digest-via-SQL -> await sign(bytes) -> bind pattern), produce a
+      // REAL secp256k1 signature over this row's own canonical Digest and bind
+      // IsPlaceholderSignature = false so AdminSigning.SignatureValid (999.1-07)
+      // actually verifies it. Only fall back to the legacy placeholder when no
+      // callback is supplied (documented category-① path for callers that have
+      // not yet threaded one — e.g. `debugSeedPendingTasks`).
+      const qDigestArgs = {
+        ballotId,
+        code: q.code,
+        title: q.title,
+        instructions: q.instructions,
+        dependsOn,
+        type: questionType,
+        optionRange,
+        scoreRange,
+        grouping,
+        sequence,
+        required,
+      }
+      let qUserId = this.ctx!.user?.id ?? null
+      let qSignerKey = this.ctx!.user?.activeKeys?.[0]?.key ?? '0'.repeat(66)
+      let qSignature = '0'.repeat(128)
+      let qIsPlaceholder = true
+      if (sign) {
+        const qDigestRow = await this.ctx!.db
+          .prepare(
+            'select Digest(1, :ballotId, :code, :title, :instructions, :dependsOn, :type, :optionRange, :scoreRange, :grouping, :sequence, :required) as d'
+          )
+          .get(qDigestArgs)
+        if (!qDigestRow || qDigestRow.d == null) {
+          throw new Error('SignatureTasksEngine.finalizeBallot: Question Digest() returned null')
+        }
+        const qDigestBytes = digestToBytes(qDigestRow.d)
+        const qRealSig = await sign(qDigestBytes)
+        qUserId = qRealSig.signerUserId
+        qSignerKey = qRealSig.signerKey
+        qSignature = qRealSig.signature
+        qIsPlaceholder = false
+      }
       const qNonce = (globalThis as { crypto: { randomUUID: () => string } }).crypto.randomUUID()
       await this.ctx!.db.exec(
         `insert into AdminSigning (
           Nonce, AuthorityId, AdminEffectiveAt, Scope, Digest, UserId, SignerKey, Signature
         )
-        with context now = :now, IsSignerKeyValid = true, IsPlaceholderSignature = true
+        with context now = :now, IsSignerKeyValid = true, IsPlaceholderSignature = :isPlaceholderSignature
         values (
           :nonce, :authorityId, :adminEffectiveAt, 'ceb',
           Digest(1, :ballotId, :code, :title, :instructions, :dependsOn, :type, :optionRange, :scoreRange, :grouping, :sequence, :required),
@@ -411,34 +462,26 @@ export class SignatureTasksEngine implements ISignatureTasksEngine {
           nonce: qNonce,
           authorityId: pbRow.AuthorityId,
           adminEffectiveAt,
-          ballotId,
-          code: q.code,
-          title: q.title,
-          instructions: q.instructions,
-          dependsOn,
-          type: questionType,
-          optionRange,
-          scoreRange,
-          grouping,
-          sequence,
-          required,
-          userId: this.ctx!.user?.id ?? null,
-          signerKey: this.ctx!.user?.activeKeys?.[0]?.key ?? '0'.repeat(66),
-          signature: '0'.repeat(128),
+          ...qDigestArgs,
+          userId: qUserId,
+          signerKey: qSignerKey,
+          signature: qSignature,
+          isPlaceholderSignature: qIsPlaceholder,
           now,
         }
       )
 
       // Step 3b: sign to create AdminSignature (threshold=1 auto-completes)
-      // 999.1 R-02/R-04 (DEBT-11): mechanical per-question materialization of content the
-      // officer already approved once at the ballot-header level — no fresh officer decision
-      // here, so this stays a placeholder signature (isPlaceholderSignature: true).
+      // 999.1 R-02/R-04 (DEBT-11): same real-vs-placeholder branch as above — the
+      // OfficerSignature counter-signature verifies against this SAME AdminSigning
+      // Digest (OfficerSignature.SignatureValid), so reuse the identical signature
+      // bytes when real-signed.
       const qSig = {
-        signerUserId: this.ctx!.user?.id ?? '',
-        signerKey: this.ctx!.user?.activeKeys?.[0]?.key ?? '0'.repeat(66),
-        signature: '0'.repeat(128),
+        signerUserId: qUserId ?? '',
+        signerKey: qSignerKey,
+        signature: qSignature,
       }
-      await this.signingEngine!.sign(qNonce, qSig, { isPlaceholderSignature: true })
+      await this.signingEngine!.sign(qNonce, qSig, { isPlaceholderSignature: qIsPlaceholder })
 
       // Step 3c: INSERT Question row (Ballot must already exist — BallotIdValid constraint, D-08)
       await this.ctx!.db.exec(
@@ -493,13 +536,48 @@ export class SignatureTasksEngine implements ISignatureTasksEngine {
         const oVideo = o.video ? JSON.stringify(o.video) : null
 
         // Step 4a: per-option AdminSigning('ceb') with the 10-arg Option digest
+        //
+        // 39-03 (DEBT-11, D-06 resolution 1): same real-vs-placeholder branch as the
+        // Question path above — real-sign when the caller supplied a `sign` callback,
+        // else fall back to the documented placeholder.
+        const oDigestArgs = {
+          ballotId,
+          questionCode: q.code,
+          code: o.code,
+          sequence: oSequence,
+          title: o.title,
+          details: oDetails,
+          infoURL: oInfoURL,
+          image: oImage,
+          video: oVideo,
+        }
+        let oUserId = this.ctx!.user?.id ?? null
+        let oSignerKey = this.ctx!.user?.activeKeys?.[0]?.key ?? '0'.repeat(66)
+        let oSignature = '0'.repeat(128)
+        let oIsPlaceholder = true
+        if (sign) {
+          const oDigestRow = await this.ctx!.db
+            .prepare(
+              'select Digest(1, :ballotId, :questionCode, :code, :sequence, :title, :details, :infoURL, :image, :video) as d'
+            )
+            .get(oDigestArgs)
+          if (!oDigestRow || oDigestRow.d == null) {
+            throw new Error('SignatureTasksEngine.finalizeBallot: Option Digest() returned null')
+          }
+          const oDigestBytes = digestToBytes(oDigestRow.d)
+          const oRealSig = await sign(oDigestBytes)
+          oUserId = oRealSig.signerUserId
+          oSignerKey = oRealSig.signerKey
+          oSignature = oRealSig.signature
+          oIsPlaceholder = false
+        }
         const oNonce = (globalThis as { crypto: { randomUUID: () => string } }).crypto.randomUUID()
         try {
           await this.ctx!.db.exec(
             `insert into AdminSigning (
               Nonce, AuthorityId, AdminEffectiveAt, Scope, Digest, UserId, SignerKey, Signature
             )
-            with context now = :now, IsSignerKeyValid = true, IsPlaceholderSignature = true
+            with context now = :now, IsSignerKeyValid = true, IsPlaceholderSignature = :isPlaceholderSignature
             values (
               :nonce, :authorityId, :adminEffectiveAt, 'ceb',
               Digest(1, :ballotId, :questionCode, :code, :sequence, :title, :details, :infoURL, :image, :video),
@@ -509,18 +587,11 @@ export class SignatureTasksEngine implements ISignatureTasksEngine {
               nonce: oNonce,
               authorityId: pbRow.AuthorityId,
               adminEffectiveAt,
-              ballotId,
-              questionCode: q.code,
-              code: o.code,
-              sequence: oSequence,
-              title: o.title,
-              details: oDetails,
-              infoURL: oInfoURL,
-              image: oImage,
-              video: oVideo,
-              userId: this.ctx!.user?.id ?? null,
-              signerKey: this.ctx!.user?.activeKeys?.[0]?.key ?? '0'.repeat(66),
-              signature: '0'.repeat(128),
+              ...oDigestArgs,
+              userId: oUserId,
+              signerKey: oSignerKey,
+              signature: oSignature,
+              isPlaceholderSignature: oIsPlaceholder,
               now,
             }
           )
@@ -529,13 +600,14 @@ export class SignatureTasksEngine implements ISignatureTasksEngine {
         }
 
         // Step 4b: sign to create AdminSignature (threshold=1 auto-completes)
-        // 999.1 R-02/R-04 (DEBT-11): same mechanical-materialization rationale as qSig above.
+        // 999.1 R-02/R-04 (DEBT-11): reuse the same real signature bytes as the
+        // AdminSigning row above (OfficerSignature verifies against that same Digest).
         const oSig = {
-          signerUserId: this.ctx!.user?.id ?? '',
-          signerKey: this.ctx!.user?.activeKeys?.[0]?.key ?? '0'.repeat(66),
-          signature: '0'.repeat(128),
+          signerUserId: oUserId ?? '',
+          signerKey: oSignerKey,
+          signature: oSignature,
         }
-        await this.signingEngine!.sign(oNonce, oSig, { isPlaceholderSignature: true })
+        await this.signingEngine!.sign(oNonce, oSig, { isPlaceholderSignature: oIsPlaceholder })
 
         // Step 4c: INSERT Option row (Ballot + parent Question already exist — constraints satisfied)
         try {
