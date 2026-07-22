@@ -70,7 +70,13 @@ export async function verifyPlayIntegrity (
     const innerJws = new TextDecoder().decode(plaintext)
 
     const verificationKey = await keyProvider.getVerificationKey()
-    const { payload: verifiedPayload } = await compactVerify(innerJws, verificationKey)
+    // CR-01: pin the JWS signature algorithm to ES256. Without an `algorithms`
+    // allowlist, jose honors whatever `alg` the attacker names in the JWS
+    // header — including `HS256`, which turns the (public / placeholder)
+    // verification key bytes into an HMAC secret (algorithm-confusion forgery).
+    // The key MUST also be a real EC public key (see key-provider.ts), never a
+    // raw Uint8Array, so a symmetric HMAC path is structurally impossible.
+    const { payload: verifiedPayload } = await compactVerify(innerJws, verificationKey, { algorithms: ['ES256'] })
     payload = JSON.parse(new TextDecoder().decode(verifiedPayload)) as DecodedIntegrityPayload
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)

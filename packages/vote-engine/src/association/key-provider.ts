@@ -1,3 +1,4 @@
+import { importSPKI } from 'jose'
 import type { CryptoKey } from 'jose'
 
 /**
@@ -29,11 +30,18 @@ export interface IIntegrityKeyProvider {
   getDecryptionKey (): Promise<Uint8Array>
 
   /**
-   * The ES256 public key used to verify the inner JWS signature. Either the
-   * raw SPKI-encoded public-key bytes (a `LocalConfigKeyProvider`'s shape)
-   * or an already-imported `CryptoKey` (a test double's shape, or a
-   * provider backed by a platform keystore that only exposes imported
-   * keys) — `jose`'s `compactVerify` accepts both directly.
+   * The ES256 public key used to verify the inner JWS signature — an
+   * already-imported EC public `CryptoKey`, NEVER raw `Uint8Array` SPKI bytes.
+   *
+   * IN-01/CR-01: jose's `compactVerify` does NOT accept a raw SPKI
+   * `Uint8Array` as an ES256 public key — it treats any `Uint8Array` key as a
+   * symmetric HMAC secret, which both (a) cannot verify a genuine ES256
+   * signature and (b) enables an `HS256` algorithm-confusion forgery. A
+   * conforming provider therefore imports the key (e.g. via `importSPKI(pem,
+   * 'ES256')`) and returns the resulting `CryptoKey`. The union still admits
+   * `Uint8Array` only so a misconfigured/legacy provider is representable —
+   * `verifyPlayIntegrity` pins `{ algorithms: ['ES256'] }`, so a `Uint8Array`
+   * key is rejected (fail-closed) rather than silently HMAC-verified.
    */
   getVerificationKey (): Promise<Uint8Array | CryptoKey>
 }
@@ -50,6 +58,12 @@ function base64ToBytes (b64: string): Uint8Array {
   return new Uint8Array(Buffer.from(b64, 'base64'))
 }
 
+/** Wrap base64-encoded SPKI DER bytes as a PEM string for `importSPKI`. */
+function pemFromSpkiBase64 (verificationKeyBase64: string): string {
+  const body = verificationKeyBase64.replace(/\s+/g, '').match(/.{1,64}/g)?.join('\n') ?? ''
+  return `-----BEGIN PUBLIC KEY-----\n${body}\n-----END PUBLIC KEY-----\n`
+}
+
 /**
  * `LocalConfigKeyProvider` — reads Play Console key material from a local
  * config object. This is the real, currently-shipping implementation of
@@ -63,7 +77,10 @@ export class LocalConfigKeyProvider implements IIntegrityKeyProvider {
     return base64ToBytes(this.config.decryptionKeyBase64)
   }
 
-  async getVerificationKey (): Promise<Uint8Array> {
-    return base64ToBytes(this.config.verificationKeyBase64)
+  async getVerificationKey (): Promise<CryptoKey> {
+    // CR-01/IN-01: import the SPKI as a real EC public key so `compactVerify`
+    // performs genuine ES256 verification — never returning raw bytes that
+    // jose would treat as a symmetric HMAC secret.
+    return importSPKI(pemFromSpkiBase64(this.config.verificationKeyBase64), 'ES256')
   }
 }

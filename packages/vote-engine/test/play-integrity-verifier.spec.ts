@@ -22,6 +22,7 @@ import type { AttestationChallenge } from '@votetorrent/vote-core'
 import { verifyPlayIntegrity } from '../src/association/verifiers/play-integrity.js'
 import {
   buildDefaultSyntheticPayload,
+  buildForgedHs256Jwe,
   buildSyntheticJwe,
   generateSyntheticJweKeyMaterial,
   type SyntheticJwePayloadOverrides
@@ -65,6 +66,25 @@ describe('verifyPlayIntegrity (D-01/D-02/D-06/D-09)', () => {
     const { jwe, keyProvider } = await buildTokenFor(challenge)
     const result = await verifyPlayIntegrity(jwe, challenge, keyProvider)
     expect(result.ok).to.equal(true)
+  })
+
+  it('rejects an HS256 algorithm-confusion forgery signed with the verification-key bytes (CR-01 regression)', async () => {
+    const challenge = makeChallenge()
+    const keys = await generateSyntheticJweKeyMaterial()
+    // The raw SPKI bytes of the ES256 public key — exactly what a naive
+    // `LocalConfigKeyProvider` would hand `jose` as the "verification key",
+    // and what an attacker who knows the (public / placeholder) key can use as
+    // an HMAC secret. An otherwise-PASS payload isolates the algorithm as the
+    // ONLY thing that can reject this token.
+    const spkiBytes = new Uint8Array(await crypto.subtle.exportKey('spki', keys.verificationPublicKey as unknown as globalThis.CryptoKey))
+    const payload = buildDefaultSyntheticPayload({ nonce: boundNonce(challenge) })
+    const forgedJwe = await buildForgedHs256Jwe(payload, keys.decryptionKey, spkiBytes)
+    // A deliberately-vulnerable provider that returns the raw key bytes: only
+    // an ES256 algorithm allowlist + real EC-public-key import can save us.
+    const keyProvider = { getDecryptionKey: async () => keys.decryptionKey, getVerificationKey: async () => spkiBytes }
+
+    const result = await verifyPlayIntegrity(forgedJwe, challenge, keyProvider)
+    expect(result.ok).to.equal(false)
   })
 
   it('rejects a tampered ciphertext', async () => {

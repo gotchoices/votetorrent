@@ -102,6 +102,29 @@ export async function buildSyntheticJwe (
   return overrides?.tamperCiphertext === true ? tamperCompactJweCiphertext(compactJwe) : compactJwe
 }
 
+/**
+ * Build an ALGORITHM-CONFUSION attack token (CR-01 regression): the inner JWS
+ * is HMAC-signed (`alg: HS256`) using `hmacSecretBytes` — the exact raw bytes a
+ * naive verifier would hand `jose` as an "ES256 public key" — then wrapped in a
+ * normal A256KW/A256GCM compact JWE under `decryptionKey`. A correct verifier
+ * (real EC public key + `{ algorithms: ['ES256'] }`) MUST reject it; a verifier
+ * that omits the algorithm allowlist and passes a raw `Uint8Array` key treats
+ * those bytes as an HMAC secret and ACCEPTS the forgery.
+ */
+export async function buildForgedHs256Jwe (
+  payload: SyntheticIntegrityPayload,
+  decryptionKey: Uint8Array,
+  hmacSecretBytes: Uint8Array
+): Promise<string> {
+  const innerJws = await new CompactSign(new TextEncoder().encode(JSON.stringify(payload)))
+    .setProtectedHeader({ alg: 'HS256' })
+    .sign(hmacSecretBytes)
+
+  return new CompactEncrypt(new TextEncoder().encode(innerJws))
+    .setProtectedHeader({ alg: 'A256KW', enc: 'A256GCM' })
+    .encrypt(decryptionKey)
+}
+
 /** Flip a byte in a compact JWE's ciphertext segment (index 3 of the 5 dot-separated parts) — breaks A256GCM's auth tag, so decryption must fail. */
 function tamperCompactJweCiphertext (compactJwe: string): string {
   const parts = compactJwe.split('.')
