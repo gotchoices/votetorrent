@@ -148,6 +148,41 @@ describe("EngineFactory buildEngine('association') — D-12/D-13/D-14", () => {
 		});
 	});
 
+	it('FAILS CLOSED by default when Play Console keys are not provisioned (flag=false, empty keys) — CR-03', async () => {
+		jest.doMock('../proof-flags.generated', () => ({
+			USE_LOCAL_DB_FACTORY: false,
+			USE_STUB_ATTESTATION_VERIFIER: false,
+		}));
+		// Unprovisioned (empty) Play Console keys — the committed default state.
+		jest.doMock('../attestation-keys.generated', () => ({
+			PLAY_CONSOLE_DECRYPTION_KEY_BASE64: '',
+			PLAY_CONSOLE_VERIFICATION_KEY_BASE64: '',
+			EXPECTED_APP_PACKAGE: 'org.votetorrent.authority',
+			EXPECTED_APP_CERT_SHA256_DIGESTS: [],
+		}));
+
+		const { factory } = buildFactoryWithEstablishedCtx();
+		await expect(factory.getEngine('association')).rejects.toThrow(/fail-closed|not provisioned/i);
+	});
+
+	it('still uses the stub under the __DEV__ dev gate even when keys are unprovisioned (flag=true, empty keys)', async () => {
+		jest.doMock('../proof-flags.generated', () => ({
+			USE_LOCAL_DB_FACTORY: false,
+			USE_STUB_ATTESTATION_VERIFIER: true,
+		}));
+		jest.doMock('../attestation-keys.generated', () => ({
+			PLAY_CONSOLE_DECRYPTION_KEY_BASE64: '',
+			PLAY_CONSOLE_VERIFICATION_KEY_BASE64: '',
+			EXPECTED_APP_PACKAGE: 'org.votetorrent.authority',
+			EXPECTED_APP_CERT_SHA256_DIGESTS: [],
+		}));
+
+		const { factory, rn } = buildFactoryWithEstablishedCtx();
+		const engine = await factory.getEngine('association');
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		expect((engine as any).verifier).toBeInstanceOf(rn.StubAttestationVerifier);
+	});
+
 	it('constructs StubAttestationVerifier ONLY under the explicit __DEV__ dev gate (flag=true)', async () => {
 		jest.doMock('../proof-flags.generated', () => ({
 			USE_LOCAL_DB_FACTORY: false,

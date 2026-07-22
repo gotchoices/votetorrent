@@ -43,7 +43,12 @@ import type { StrandHost } from './rn-db-factory'
 import { USE_LOCAL_DB_FACTORY, USE_STUB_ATTESTATION_VERIFIER } from './proof-flags.generated'
 import { PINNED_HARDWARE_ROOTS_DER } from './attestation-roots.generated'
 import { REVOKED_ATTESTATION_SERIALS } from './attestation-status.generated'
-import { EXPECTED_APP_PACKAGE, EXPECTED_APP_CERT_SHA256_DIGESTS } from './attestation-keys.generated'
+import {
+	EXPECTED_APP_PACKAGE,
+	EXPECTED_APP_CERT_SHA256_DIGESTS,
+	PLAY_CONSOLE_DECRYPTION_KEY_BASE64,
+	PLAY_CONSOLE_VERIFICATION_KEY_BASE64,
+} from './attestation-keys.generated'
 
 export class EngineFactory {
 	private readonly networksEngine: NetworksEngine
@@ -90,16 +95,21 @@ export class EngineFactory {
 	 * decrypt+verify a classic-API token offline. Constructed once, app-lifetime
 	 * (mirrors `networksEngine`'s once-per-factory lifecycle).
 	 *
-	 * PLACEHOLDER key material until real per-app Play Console keys are
-	 * provisioned (D-10, tracked in SETUP.md) — the decryption/verification
-	 * key bytes below are NOT real Google-issued secrets. Swapping in the
-	 * real keys is a config-only change (`LocalConfigKeyProviderConfig`);
-	 * this seam's shape never changes (D-12).
+	 * CR-03: the keys come from bundled config (attestation-keys.generated.ts).
+	 * They are EMPTY until real per-app Play Console keys are provisioned (D-10,
+	 * SETUP.md). While unprovisioned, `playConsoleKeysProvisioned` is false and
+	 * the 'association' case FAILS CLOSED rather than constructing a real
+	 * verifier with non-functional (formerly committed all-zero) key material.
+	 * Swapping in real keys is a config-only change (D-12).
 	 */
 	private readonly integrityKeyProvider = new LocalConfigKeyProvider({
-		decryptionKeyBase64: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
-		verificationKeyBase64: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
+		decryptionKeyBase64: PLAY_CONSOLE_DECRYPTION_KEY_BASE64,
+		verificationKeyBase64: PLAY_CONSOLE_VERIFICATION_KEY_BASE64,
 	})
+
+	/** CR-03: true only when BOTH Play Console keys are present (non-empty) — gates the real verifier. */
+	private readonly playConsoleKeysProvisioned =
+		PLAY_CONSOLE_DECRYPTION_KEY_BASE64.length > 0 && PLAY_CONSOLE_VERIFICATION_KEY_BASE64.length > 0
 
 	/**
 	 * CR-04/WR-03: the injected app-identity pin BOTH attestation halves enforce
@@ -336,15 +346,24 @@ export class EngineFactory {
 				// silent prod fallback. The gate lives HERE in the factory, never
 				// inside AssociationEngine/PlayIntegrityVerifier (D-12 seam-never-changes).
 				const ctx = this.requireEstablishedCtx()
-				const verifier: IAttestationVerifier =
-					__DEV__ && USE_STUB_ATTESTATION_VERIFIER
-						? new StubAttestationVerifier()
-						: new PlayIntegrityVerifier(
-								this.integrityKeyProvider,
-								PINNED_HARDWARE_ROOTS_DER,
-								this.expectedAppIdentity,
-								REVOKED_ATTESTATION_SERIALS,
-							)
+				const useStub = __DEV__ && USE_STUB_ATTESTATION_VERIFIER
+				// CR-03: fail closed. The real verifier must never run on a
+				// production path with absent/placeholder Play Console key material —
+				// that path can neither verify real Google tokens nor (pre-CR-01/02)
+				// resist a forged token minted under the public placeholder keys.
+				if (!useStub && !this.playConsoleKeysProvisioned) {
+					throw new Error(
+						'EngineFactory: device-attestation verifier fail-closed — Play Console key material is not provisioned. Provision the real per-app keys (see SETUP.md) or enable the dev stub gate (__DEV__ && USE_STUB_ATTESTATION_VERIFIER).',
+					)
+				}
+				const verifier: IAttestationVerifier = useStub
+					? new StubAttestationVerifier()
+					: new PlayIntegrityVerifier(
+							this.integrityKeyProvider,
+							PINNED_HARDWARE_ROOTS_DER,
+							this.expectedAppIdentity,
+							REVOKED_ATTESTATION_SERIALS,
+						)
 				return new AssociationEngine(ctx, verifier)
 			}
 
