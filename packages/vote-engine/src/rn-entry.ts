@@ -22,6 +22,14 @@ export { SignatureTasksEngine } from './tasks/signature-tasks-engine.js'
 export { OnboardingTasksEngine } from './tasks/onboarding-tasks-engine.js'
 export { InvitationEngine } from './invite/invitation-engine.js'
 export { LocalStorageReact } from './local-storage-react.js'
+// Phase 43 (D-13/D-14): the device-attestation seam — EngineFactory's
+// 'association' case imports these to construct the real verifier by
+// default, dev-gated to the stub (never a silent prod fallback).
+export { AssociationEngine } from './association/association-engine.js'
+export { PlayIntegrityVerifier } from './association/play-integrity-verifier.js'
+export { StubAttestationVerifier } from './association/stub-attestation-verifier.js'
+export { LocalConfigKeyProvider } from './association/key-provider.js'
+export type { IIntegrityKeyProvider } from './association/key-provider.js'
 export type { DbFactory, EngineContext } from './types.js'
 export { H16 } from './utils.js'
 // WR-15 (17-REVIEW): single source of truth for the DEBT-04 digest golden
