@@ -25,6 +25,7 @@ import type { AttestationChallenge } from '@votetorrent/vote-core'
 import { verifyKeyAttestation } from '../src/association/verifiers/key-attestation.js'
 import { generateTestRootCa } from './fixtures/attestation/test-root-ca.js'
 import { buildSyntheticKeyDescription } from './fixtures/attestation/synthetic-key-description.js'
+import { SYNTHETIC_EXPECTED_APP_IDENTITY } from './fixtures/attestation/synthetic-jwe.js'
 
 const hasher = resolveHasher('sha256')
 const encode = resolveOutputEncoder('base64url')
@@ -56,7 +57,7 @@ describe('verifyKeyAttestation (D-01/D-02/D-06/D-09)', () => {
       attestationChallenge: boundChallengeBytes(challenge)
     })
 
-    const result = await verifyKeyAttestation(chainDer, challenge, [new Uint8Array(root.cert.rawData)], new Set<string>())
+    const result = await verifyKeyAttestation(chainDer, challenge, [new Uint8Array(root.cert.rawData)], new Set<string>(), SYNTHETIC_EXPECTED_APP_IDENTITY)
     expect(result.ok).to.equal(true)
   })
 
@@ -69,7 +70,7 @@ describe('verifyKeyAttestation (D-01/D-02/D-06/D-09)', () => {
       attestationChallenge: boundChallengeBytes(challenge)
     })
 
-    const result = await verifyKeyAttestation(chainDer, challenge, [new Uint8Array(root.cert.rawData)], new Set<string>())
+    const result = await verifyKeyAttestation(chainDer, challenge, [new Uint8Array(root.cert.rawData)], new Set<string>(), SYNTHETIC_EXPECTED_APP_IDENTITY)
     expect(result.ok).to.equal(true)
   })
 
@@ -83,7 +84,7 @@ describe('verifyKeyAttestation (D-01/D-02/D-06/D-09)', () => {
       useKeyMintSchema: true
     })
 
-    const result = await verifyKeyAttestation(chainDer, challenge, [new Uint8Array(root.cert.rawData)], new Set<string>())
+    const result = await verifyKeyAttestation(chainDer, challenge, [new Uint8Array(root.cert.rawData)], new Set<string>(), SYNTHETIC_EXPECTED_APP_IDENTITY)
     expect(result.ok).to.equal(true)
   })
 
@@ -96,7 +97,7 @@ describe('verifyKeyAttestation (D-01/D-02/D-06/D-09)', () => {
       attestationChallenge: boundChallengeBytes(challenge)
     })
 
-    const result = await verifyKeyAttestation(chainDer, challenge, [new Uint8Array(root.cert.rawData)], new Set<string>())
+    const result = await verifyKeyAttestation(chainDer, challenge, [new Uint8Array(root.cert.rawData)], new Set<string>(), SYNTHETIC_EXPECTED_APP_IDENTITY)
     expect(result.ok).to.equal(false)
     expect(result.reason).to.match(/software|security.*level/i)
   })
@@ -111,7 +112,7 @@ describe('verifyKeyAttestation (D-01/D-02/D-06/D-09)', () => {
       attestationChallenge: boundChallengeBytes(challenge)
     })
 
-    const result = await verifyKeyAttestation(chainDer, challenge, [new Uint8Array(unrelatedPinnedRoot.cert.rawData)], new Set<string>())
+    const result = await verifyKeyAttestation(chainDer, challenge, [new Uint8Array(unrelatedPinnedRoot.cert.rawData)], new Set<string>(), SYNTHETIC_EXPECTED_APP_IDENTITY)
     expect(result.ok).to.equal(false)
     expect(result.reason).to.match(/root|chain|path/i)
   })
@@ -126,7 +127,7 @@ describe('verifyKeyAttestation (D-01/D-02/D-06/D-09)', () => {
       extensionOnNonLeafOnly: true
     })
 
-    const result = await verifyKeyAttestation(chainDer, challenge, [new Uint8Array(root.cert.rawData)], new Set<string>())
+    const result = await verifyKeyAttestation(chainDer, challenge, [new Uint8Array(root.cert.rawData)], new Set<string>(), SYNTHETIC_EXPECTED_APP_IDENTITY)
     expect(result.ok).to.equal(false)
     expect(result.reason).to.match(/leaf|extension/i)
   })
@@ -140,7 +141,7 @@ describe('verifyKeyAttestation (D-01/D-02/D-06/D-09)', () => {
       attestationChallenge: new TextEncoder().encode('not-the-bound-challenge')
     })
 
-    const result = await verifyKeyAttestation(chainDer, challenge, [new Uint8Array(root.cert.rawData)], new Set<string>())
+    const result = await verifyKeyAttestation(chainDer, challenge, [new Uint8Array(root.cert.rawData)], new Set<string>(), SYNTHETIC_EXPECTED_APP_IDENTITY)
     expect(result.ok).to.equal(false)
     expect(result.reason).to.match(/challenge|digest|binding/i)
   })
@@ -155,8 +156,53 @@ describe('verifyKeyAttestation (D-01/D-02/D-06/D-09)', () => {
     })
     const revokedSerials = new Set<string>([serials.leaf])
 
-    const result = await verifyKeyAttestation(chainDer, challenge, [new Uint8Array(root.cert.rawData)], revokedSerials)
+    const result = await verifyKeyAttestation(chainDer, challenge, [new Uint8Array(root.cert.rawData)], revokedSerials, SYNTHETIC_EXPECTED_APP_IDENTITY)
     expect(result.ok).to.equal(false)
     expect(result.reason).to.match(/revoked|suspended/)
+  })
+
+  it('rejects a leaf whose attestationApplicationId names a DIFFERENT app package (WR-03 wrong-app)', async () => {
+    const root = await generateTestRootCa()
+    const challenge = makeChallenge()
+    const { chainDer } = await buildSyntheticKeyDescription({
+      root,
+      securityLevel: SecurityLevel.trustedEnvironment,
+      attestationChallenge: boundChallengeBytes(challenge),
+      appPackageName: 'com.other.playapp'
+    })
+
+    const result = await verifyKeyAttestation(chainDer, challenge, [new Uint8Array(root.cert.rawData)], new Set<string>(), SYNTHETIC_EXPECTED_APP_IDENTITY)
+    expect(result.ok).to.equal(false)
+    expect(result.reason).to.match(/attestationApplicationId|package|app/i)
+  })
+
+  it('rejects a leaf whose attestationApplicationId signature digest is not allowlisted (WR-03 wrong signing cert)', async () => {
+    const root = await generateTestRootCa()
+    const challenge = makeChallenge()
+    const { chainDer } = await buildSyntheticKeyDescription({
+      root,
+      securityLevel: SecurityLevel.trustedEnvironment,
+      attestationChallenge: boundChallengeBytes(challenge),
+      appSignatureDigests: [new Uint8Array(32).fill(0x11)]
+    })
+
+    const result = await verifyKeyAttestation(chainDer, challenge, [new Uint8Array(root.cert.rawData)], new Set<string>(), SYNTHETIC_EXPECTED_APP_IDENTITY)
+    expect(result.ok).to.equal(false)
+    expect(result.reason).to.match(/signature|digest|certificate/i)
+  })
+
+  it('rejects a leaf with no attestationApplicationId at all (WR-03 no app binding)', async () => {
+    const root = await generateTestRootCa()
+    const challenge = makeChallenge()
+    const { chainDer } = await buildSyntheticKeyDescription({
+      root,
+      securityLevel: SecurityLevel.trustedEnvironment,
+      attestationChallenge: boundChallengeBytes(challenge),
+      omitAttestationApplicationId: true
+    })
+
+    const result = await verifyKeyAttestation(chainDer, challenge, [new Uint8Array(root.cert.rawData)], new Set<string>(), SYNTHETIC_EXPECTED_APP_IDENTITY)
+    expect(result.ok).to.equal(false)
+    expect(result.reason).to.match(/attestationApplicationId|app/i)
   })
 })

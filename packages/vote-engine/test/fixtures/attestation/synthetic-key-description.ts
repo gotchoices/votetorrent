@@ -17,6 +17,8 @@
 import 'reflect-metadata'
 import { AsnConvert, OctetString } from '@peculiar/asn1-schema'
 import {
+  AttestationApplicationId,
+  AttestationPackageInfo,
   AuthorizationList,
   KeyDescription,
   KeyMintKeyDescription,
@@ -27,6 +29,7 @@ import {
 import { Extension } from '@peculiar/x509'
 import type { CryptoKey } from 'jose'
 import { issueCert, type TestCertificate } from './test-root-ca.js'
+import { SYNTHETIC_APP_PACKAGE, SYNTHETIC_SIGNING_CERT_SHA256 } from './synthetic-jwe.js'
 
 export { SecurityLevel } from '@peculiar/asn1-android'
 
@@ -45,6 +48,12 @@ export interface SyntheticKeyDescriptionOptions {
   extensionOnNonLeafOnly?: boolean
   /** Whether to interpose an intermediate CA between the leaf and the root. Default true (the realistic KeyStore.getCertificateChain() shape). */
   includeIntermediate?: boolean
+  /** The package name embedded in the software-enforced `attestationApplicationId`. Defaults to `SYNTHETIC_APP_PACKAGE`; override to exercise the WR-03 wrong-app negative. */
+  appPackageName?: string
+  /** The signing-cert SHA-256 digests embedded in `attestationApplicationId`. Defaults to `[SYNTHETIC_SIGNING_CERT_SHA256]`; override to exercise the WR-03 wrong-signature negative. */
+  appSignatureDigests?: Uint8Array[]
+  /** Omit the `attestationApplicationId` entirely — exercises the WR-03 "no app binding" negative. */
+  omitAttestationApplicationId?: boolean
 }
 
 export interface SyntheticKeyDescriptionResult {
@@ -56,11 +65,29 @@ export interface SyntheticKeyDescriptionResult {
   leafPublicKey: CryptoKey
 }
 
-/** Build the ASN.1 `KeyDescription` (or `KeyMintKeyDescription`) extension carrying `securityLevel` + `attestationChallenge`. */
-function buildKeyDescriptionExtension (options: Pick<SyntheticKeyDescriptionOptions, 'securityLevel' | 'attestationChallenge' | 'useKeyMintSchema'>): Extension {
+/** Build the software-enforced `attestationApplicationId` OCTET STRING (DER of AttestationApplicationId) naming the app package + its signing-cert digests. */
+function buildAttestationApplicationId (packageName: string, signatureDigests: Uint8Array[]): OctetString {
+  const der = AsnConvert.serialize(new AttestationApplicationId({
+    packageInfos: [new AttestationPackageInfo({ packageName: new OctetString(new TextEncoder().encode(packageName)), version: 1 })],
+    signatureDigests: signatureDigests.map((digest) => new OctetString(digest))
+  }))
+  return new OctetString(der)
+}
+
+/** Build the ASN.1 `KeyDescription` (or `KeyMintKeyDescription`) extension carrying `securityLevel` + `attestationChallenge` + the software-enforced app-identity binding. */
+function buildKeyDescriptionExtension (options: Pick<SyntheticKeyDescriptionOptions, 'securityLevel' | 'attestationChallenge' | 'useKeyMintSchema' | 'appPackageName' | 'appSignatureDigests' | 'omitAttestationApplicationId'>): Extension {
   const attestationChallenge = new OctetString(options.attestationChallenge)
   const uniqueId = new OctetString(new Uint8Array(0))
-  const softwareEnforced = new AuthorizationList({})
+  const softwareEnforced = new AuthorizationList(
+    options.omitAttestationApplicationId === true
+      ? {}
+      : {
+        attestationApplicationId: buildAttestationApplicationId(
+          options.appPackageName ?? SYNTHETIC_APP_PACKAGE,
+          options.appSignatureDigests ?? [SYNTHETIC_SIGNING_CERT_SHA256]
+        )
+      }
+  )
   const teeEnforced = new AuthorizationList({})
 
   const der = options.useKeyMintSchema === true

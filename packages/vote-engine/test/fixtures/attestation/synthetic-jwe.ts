@@ -12,6 +12,7 @@
 import { CompactEncrypt, CompactSign, compactDecrypt, compactVerify } from 'jose'
 import type { CryptoKey } from 'jose'
 import { decode as base64urlDecode, encode as base64urlEncode } from 'jose/base64url'
+import { certDigestBytesToHex, type ExpectedAppIdentity } from '../../../src/association/verifiers/app-identity.js'
 
 /** The decrypted-and-verified classic-API payload shape (RESEARCH.md Pattern 1). */
 export interface SyntheticIntegrityPayload {
@@ -33,6 +34,24 @@ export interface SyntheticJwePayloadOverrides {
 
 const DEFAULT_PACKAGE_NAME = 'org.votetorrent.authority'
 
+/**
+ * A fixed synthetic signing-certificate SHA-256 digest (32 bytes) shared by
+ * BOTH attestation halves' fixtures — the Play Integrity payload carries its
+ * base64url form; the key attestation's `attestationApplicationId` carries the
+ * raw bytes — so a single `ExpectedAppIdentity` allowlist matches both.
+ */
+export const SYNTHETIC_SIGNING_CERT_SHA256 = new Uint8Array(32).fill(0xab)
+/** The Play-Integrity-shaped (URL-safe base64) form of the synthetic signing-cert digest. */
+export const SYNTHETIC_CERT_DIGEST_BASE64URL = base64urlEncode(SYNTHETIC_SIGNING_CERT_SHA256)
+/** The package name the synthetic fixtures pin to (== `DEFAULT_PACKAGE_NAME`). */
+export const SYNTHETIC_APP_PACKAGE = DEFAULT_PACKAGE_NAME
+
+/** The injected app-identity pin the real verifier is constructed with in tests, matching the synthetic fixtures' defaults. */
+export const SYNTHETIC_EXPECTED_APP_IDENTITY: ExpectedAppIdentity = {
+  packageName: SYNTHETIC_APP_PACKAGE,
+  certificateSha256Digests: [certDigestBytesToHex(SYNTHETIC_SIGNING_CERT_SHA256)]
+}
+
 /** Build a PASS-shaped decrypted payload with sensible defaults, overridable per field for D-09 negative fixtures. */
 export function buildDefaultSyntheticPayload (overrides?: SyntheticJwePayloadOverrides): SyntheticIntegrityPayload {
   const requestPackageName = overrides?.requestPackageName ?? DEFAULT_PACKAGE_NAME
@@ -45,7 +64,7 @@ export function buildDefaultSyntheticPayload (overrides?: SyntheticJwePayloadOve
     appIntegrity: {
       appRecognitionVerdict: overrides?.appRecognitionVerdict ?? 'PLAY_RECOGNIZED',
       packageName: overrides?.appPackageName ?? requestPackageName,
-      certificateSha256Digest: ['synthetic-cert-sha256-digest']
+      certificateSha256Digest: [SYNTHETIC_CERT_DIGEST_BASE64URL]
     },
     deviceIntegrity: {
       deviceRecognitionVerdict: overrides?.deviceRecognitionVerdict ?? ['MEETS_DEVICE_INTEGRITY']

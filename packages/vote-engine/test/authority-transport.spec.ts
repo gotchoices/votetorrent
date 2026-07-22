@@ -24,7 +24,7 @@ import { LocalAuthorityTransport } from '../src/association/transport/local-auth
 import { RegistrationEngine } from '../src/registration/registration-engine.js'
 import { createTestNetwork, addTestAuthority } from './fixtures/test-context.js'
 import { randomTestKeyPair } from './fixtures/keys.js'
-import { generateSyntheticJweKeyMaterial } from './fixtures/attestation/synthetic-jwe.js'
+import { generateSyntheticJweKeyMaterial, SYNTHETIC_EXPECTED_APP_IDENTITY } from './fixtures/attestation/synthetic-jwe.js'
 import { generateTestRootCa } from './fixtures/attestation/test-root-ca.js'
 import { buildSyntheticDeviceAttestation } from './fixtures/attestation/synthetic-device-attestation.js'
 
@@ -74,7 +74,7 @@ describe('authority-transport (D-11/D-03): full round-trip against the real Play
       getDecryptionKey: async () => jweKeys.decryptionKey,
       getVerificationKey: async () => jweKeys.verificationPublicKey
     }
-    const verifier = new PlayIntegrityVerifier(keyProvider, [new Uint8Array(testRoot.cert.rawData)])
+    const verifier = new PlayIntegrityVerifier(keyProvider, [new Uint8Array(testRoot.cert.rawData)], SYNTHETIC_EXPECTED_APP_IDENTITY)
     const engine = new AssociationEngine(auth.ctx, verifier)
     const transport = new LocalAuthorityTransport(engine)
 
@@ -119,7 +119,7 @@ describe('authority-transport (D-11/D-03): full round-trip against the real Play
       getDecryptionKey: async () => jweKeys.decryptionKey,
       getVerificationKey: async () => jweKeys.verificationPublicKey
     }
-    const verifier = new PlayIntegrityVerifier(keyProvider, [new Uint8Array(testRoot.cert.rawData)])
+    const verifier = new PlayIntegrityVerifier(keyProvider, [new Uint8Array(testRoot.cert.rawData)], SYNTHETIC_EXPECTED_APP_IDENTITY)
     const engine = new AssociationEngine(auth.ctx, verifier)
     const transport = new LocalAuthorityTransport(engine)
 
@@ -170,7 +170,7 @@ describe('authority-transport (D-11/D-03): full round-trip against the real Play
       getDecryptionKey: async () => jweKeys.decryptionKey,
       getVerificationKey: async () => jweKeys.verificationPublicKey
     }
-    const verifier = new PlayIntegrityVerifier(keyProvider, [new Uint8Array(testRoot.cert.rawData)])
+    const verifier = new PlayIntegrityVerifier(keyProvider, [new Uint8Array(testRoot.cert.rawData)], SYNTHETIC_EXPECTED_APP_IDENTITY)
     const engine = new AssociationEngine(auth.ctx, verifier)
     const transport = new LocalAuthorityTransport(engine)
 
@@ -221,7 +221,7 @@ describe('authority-transport (D-11/D-03): full round-trip against the real Play
       getDecryptionKey: async () => jweKeys.decryptionKey,
       getVerificationKey: async () => jweKeys.verificationPublicKey
     }
-    const verifier = new PlayIntegrityVerifier(keyProvider, [new Uint8Array(testRoot.cert.rawData)])
+    const verifier = new PlayIntegrityVerifier(keyProvider, [new Uint8Array(testRoot.cert.rawData)], SYNTHETIC_EXPECTED_APP_IDENTITY)
     const engine = new AssociationEngine(auth.ctx, verifier)
     const transport = new LocalAuthorityTransport(engine)
 

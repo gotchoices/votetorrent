@@ -25,6 +25,7 @@ import {
   buildForgedHs256Jwe,
   buildSyntheticJwe,
   generateSyntheticJweKeyMaterial,
+  SYNTHETIC_EXPECTED_APP_IDENTITY,
   type SyntheticJwePayloadOverrides
 } from './fixtures/attestation/synthetic-jwe.js'
 
@@ -64,7 +65,7 @@ describe('verifyPlayIntegrity (D-01/D-02/D-06/D-09)', () => {
   it('returns ok:true for a PASS token bound to Digest(nonce, deviceKey)', async () => {
     const challenge = makeChallenge()
     const { jwe, keyProvider } = await buildTokenFor(challenge)
-    const result = await verifyPlayIntegrity(jwe, challenge, keyProvider)
+    const result = await verifyPlayIntegrity(jwe, challenge, keyProvider, SYNTHETIC_EXPECTED_APP_IDENTITY)
     expect(result.ok).to.equal(true)
   })
 
@@ -83,7 +84,7 @@ describe('verifyPlayIntegrity (D-01/D-02/D-06/D-09)', () => {
     // an ES256 algorithm allowlist + real EC-public-key import can save us.
     const keyProvider = { getDecryptionKey: async () => keys.decryptionKey, getVerificationKey: async () => spkiBytes }
 
-    const result = await verifyPlayIntegrity(forgedJwe, challenge, keyProvider)
+    const result = await verifyPlayIntegrity(forgedJwe, challenge, keyProvider, SYNTHETIC_EXPECTED_APP_IDENTITY)
     expect(result.ok).to.equal(false)
   })
 
@@ -103,7 +104,7 @@ describe('verifyPlayIntegrity (D-01/D-02/D-06/D-09)', () => {
     let result: Awaited<ReturnType<typeof verifyPlayIntegrity>> | undefined
     let threw = false
     try {
-      result = await verifyPlayIntegrity(jwe, challenge, keyProvider)
+      result = await verifyPlayIntegrity(jwe, challenge, keyProvider, SYNTHETIC_EXPECTED_APP_IDENTITY)
     } catch {
       threw = true
     }
@@ -119,7 +120,7 @@ describe('verifyPlayIntegrity (D-01/D-02/D-06/D-09)', () => {
     const jwe = await buildSyntheticJwe(payload, keys, { tamperCiphertext: true })
     const keyProvider = { getDecryptionKey: async () => keys.decryptionKey, getVerificationKey: async () => keys.verificationPublicKey }
 
-    const result = await verifyPlayIntegrity(jwe, challenge, keyProvider)
+    const result = await verifyPlayIntegrity(jwe, challenge, keyProvider, SYNTHETIC_EXPECTED_APP_IDENTITY)
     expect(result.ok).to.equal(false)
     expect(result.reason).to.match(/decrypt|tamper|integrity/i)
   })
@@ -132,7 +133,7 @@ describe('verifyPlayIntegrity (D-01/D-02/D-06/D-09)', () => {
     const jwe = await buildSyntheticJwe(payload, keys, { signingKey: wrongKeys.signingPrivateKey })
     const keyProvider = { getDecryptionKey: async () => keys.decryptionKey, getVerificationKey: async () => keys.verificationPublicKey }
 
-    const result = await verifyPlayIntegrity(jwe, challenge, keyProvider)
+    const result = await verifyPlayIntegrity(jwe, challenge, keyProvider, SYNTHETIC_EXPECTED_APP_IDENTITY)
     expect(result.ok).to.equal(false)
     expect(result.reason).to.match(/sign|verify|key/i)
   })
@@ -143,15 +144,40 @@ describe('verifyPlayIntegrity (D-01/D-02/D-06/D-09)', () => {
       requestPackageName: 'org.votetorrent.authority',
       appPackageName: 'com.attacker.relay'
     })
-    const result = await verifyPlayIntegrity(jwe, challenge, keyProvider)
+    const result = await verifyPlayIntegrity(jwe, challenge, keyProvider, SYNTHETIC_EXPECTED_APP_IDENTITY)
     expect(result.ok).to.equal(false)
     expect(result.reason).to.match(/package/i)
+  })
+
+  it('rejects a genuine-but-DIFFERENT app whose token is internally consistent (CR-04 wrong-app relay)', async () => {
+    // requestPackageName === appIntegrity.packageName (internally consistent),
+    // so the internal-consistency check passes — but it is NOT our authority
+    // app, so the CR-04 package pin must reject it.
+    const challenge = makeChallenge()
+    const { jwe, keyProvider } = await buildTokenFor(challenge, { requestPackageName: 'com.other.playapp' })
+    const result = await verifyPlayIntegrity(jwe, challenge, keyProvider, SYNTHETIC_EXPECTED_APP_IDENTITY)
+    expect(result.ok).to.equal(false)
+    expect(result.reason).to.match(/expected authority app package|package/i)
+  })
+
+  it('rejects when appIntegrity.certificateSha256Digest is not on the allowlist (CR-04 wrong signing cert)', async () => {
+    const challenge = makeChallenge()
+    const keys = await generateSyntheticJweKeyMaterial()
+    const payload = buildDefaultSyntheticPayload({ nonce: boundNonce(challenge) })
+    // Present a digest the allowlist does not contain (a different signing key).
+    payload.appIntegrity.certificateSha256Digest = ['Zm9yZ2VkLWNlcnQtZGlnZXN0']
+    const jwe = await buildSyntheticJwe(payload, keys)
+    const keyProvider = { getDecryptionKey: async () => keys.decryptionKey, getVerificationKey: async () => keys.verificationPublicKey }
+
+    const result = await verifyPlayIntegrity(jwe, challenge, keyProvider, SYNTHETIC_EXPECTED_APP_IDENTITY)
+    expect(result.ok).to.equal(false)
+    expect(result.reason).to.match(/certificate|digest|signing/i)
   })
 
   it('rejects when appRecognitionVerdict is not PLAY_RECOGNIZED', async () => {
     const challenge = makeChallenge()
     const { jwe, keyProvider } = await buildTokenFor(challenge, { appRecognitionVerdict: 'UNRECOGNIZED' })
-    const result = await verifyPlayIntegrity(jwe, challenge, keyProvider)
+    const result = await verifyPlayIntegrity(jwe, challenge, keyProvider, SYNTHETIC_EXPECTED_APP_IDENTITY)
     expect(result.ok).to.equal(false)
     expect(result.reason).to.match(/app.*recogni|verdict/i)
   })
@@ -159,7 +185,7 @@ describe('verifyPlayIntegrity (D-01/D-02/D-06/D-09)', () => {
   it('rejects deviceRecognitionVerdict = FAILS_DEVICE_INTEGRITY (D-02)', async () => {
     const challenge = makeChallenge()
     const { jwe, keyProvider } = await buildTokenFor(challenge, { deviceRecognitionVerdict: ['FAILS_DEVICE_INTEGRITY'] })
-    const result = await verifyPlayIntegrity(jwe, challenge, keyProvider)
+    const result = await verifyPlayIntegrity(jwe, challenge, keyProvider, SYNTHETIC_EXPECTED_APP_IDENTITY)
     expect(result.ok).to.equal(false)
     expect(result.reason).to.match(/device.*integrity|verdict/i)
   })
@@ -167,7 +193,7 @@ describe('verifyPlayIntegrity (D-01/D-02/D-06/D-09)', () => {
   it('rejects deviceRecognitionVerdict = [MEETS_BASIC_INTEGRITY] only — below the balanced bar (D-02)', async () => {
     const challenge = makeChallenge()
     const { jwe, keyProvider } = await buildTokenFor(challenge, { deviceRecognitionVerdict: ['MEETS_BASIC_INTEGRITY'] })
-    const result = await verifyPlayIntegrity(jwe, challenge, keyProvider)
+    const result = await verifyPlayIntegrity(jwe, challenge, keyProvider, SYNTHETIC_EXPECTED_APP_IDENTITY)
     expect(result.ok).to.equal(false)
     expect(result.reason).to.match(/device.*integrity|verdict/i)
   })
@@ -175,7 +201,7 @@ describe('verifyPlayIntegrity (D-01/D-02/D-06/D-09)', () => {
   it('rejects deviceRecognitionVerdict = [MEETS_VIRTUAL_INTEGRITY] — emulator signal, below the balanced bar (D-02)', async () => {
     const challenge = makeChallenge()
     const { jwe, keyProvider } = await buildTokenFor(challenge, { deviceRecognitionVerdict: ['MEETS_VIRTUAL_INTEGRITY'] })
-    const result = await verifyPlayIntegrity(jwe, challenge, keyProvider)
+    const result = await verifyPlayIntegrity(jwe, challenge, keyProvider, SYNTHETIC_EXPECTED_APP_IDENTITY)
     expect(result.ok).to.equal(false)
     expect(result.reason).to.match(/device.*integrity|verdict/i)
   })
@@ -184,7 +210,7 @@ describe('verifyPlayIntegrity (D-01/D-02/D-06/D-09)', () => {
     const challenge = makeChallenge()
     const staleTimestampMillis = String(Date.now() - 10 * 60_000) // 10 minutes old
     const { jwe, keyProvider } = await buildTokenFor(challenge, { timestampMillis: staleTimestampMillis })
-    const result = await verifyPlayIntegrity(jwe, challenge, keyProvider)
+    const result = await verifyPlayIntegrity(jwe, challenge, keyProvider, SYNTHETIC_EXPECTED_APP_IDENTITY)
     expect(result.ok).to.equal(false)
     expect(result.reason).to.match(/stale|expired|fresh|timestamp/i)
   })
@@ -196,7 +222,7 @@ describe('verifyPlayIntegrity (D-01/D-02/D-06/D-09)', () => {
     const jwe = await buildSyntheticJwe(payload, keys)
     const keyProvider = { getDecryptionKey: async () => keys.decryptionKey, getVerificationKey: async () => keys.verificationPublicKey }
 
-    const result = await verifyPlayIntegrity(jwe, challenge, keyProvider)
+    const result = await verifyPlayIntegrity(jwe, challenge, keyProvider, SYNTHETIC_EXPECTED_APP_IDENTITY)
     expect(result.ok).to.equal(false)
     expect(result.reason).to.match(/nonce|digest|binding/i)
   })

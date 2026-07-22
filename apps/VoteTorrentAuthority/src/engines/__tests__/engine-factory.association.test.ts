@@ -46,10 +46,12 @@ jest.mock(
 		class PlayIntegrityVerifier {
 			keyProvider: any;
 			roots: any;
+			appIdentity: any;
 			revoked: any;
-			constructor(keyProvider: any, roots: any, revoked: any) {
+			constructor(keyProvider: any, roots: any, appIdentity: any, revoked: any) {
 				this.keyProvider = keyProvider;
 				this.roots = roots;
+				this.appIdentity = appIdentity;
 				this.revoked = revoked;
 			}
 		}
@@ -92,6 +94,17 @@ jest.mock('../attestation-roots.generated', () => ({
 jest.mock('../attestation-status.generated', () => ({
 	REVOKED_ATTESTATION_SERIALS: new Set(['deadbeef']),
 }));
+// Stub the bundled app-identity + Play Console key snapshot. `EXPECTED_APP_*`
+// pin the token/key to this app (CR-04/WR-03). The Play Console keys are
+// PROVISIONED here (non-empty) so the default 'association' path builds the
+// real verifier rather than failing closed (CR-03) — the fail-closed branch is
+// exercised by its own test via jest.doMock below.
+jest.mock('../attestation-keys.generated', () => ({
+	PLAY_CONSOLE_DECRYPTION_KEY_BASE64: 'ZGVjcnlwdGlvbi1rZXktcHJvdmlzaW9uZWQ=',
+	PLAY_CONSOLE_VERIFICATION_KEY_BASE64: 'dmVyaWZpY2F0aW9uLWtleS1wcm92aXNpb25lZA==',
+	EXPECTED_APP_PACKAGE: 'org.votetorrent.authority',
+	EXPECTED_APP_CERT_SHA256_DIGESTS: ['abc123'],
+}));
 
 describe("EngineFactory buildEngine('association') — D-12/D-13/D-14", () => {
 	afterEach(() => {
@@ -128,6 +141,11 @@ describe("EngineFactory buildEngine('association') — D-12/D-13/D-14", () => {
 		// Pinned roots + revoked serials are injected — never fetched at verify-time.
 		expect(injectedVerifier.roots).toEqual([new Uint8Array([1, 2, 3])]);
 		expect(injectedVerifier.revoked).toEqual(new Set(['deadbeef']));
+		// CR-04/WR-03: the app-identity pin (package + cert-digest allowlist) is injected.
+		expect(injectedVerifier.appIdentity).toEqual({
+			packageName: 'org.votetorrent.authority',
+			certificateSha256Digests: ['abc123'],
+		});
 	});
 
 	it('constructs StubAttestationVerifier ONLY under the explicit __DEV__ dev gate (flag=true)', async () => {

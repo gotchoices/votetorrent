@@ -2,6 +2,7 @@ import { compactDecrypt, compactVerify } from 'jose'
 import type { AttestationChallenge, AttestationVerification } from '@votetorrent/vote-core'
 import type { IIntegrityKeyProvider } from '../key-provider.js'
 import { recomputeChallengeDigest } from './digest-binding.js'
+import { certDigestBase64ToHex, type ExpectedAppIdentity } from './app-identity.js'
 
 /**
  * play-integrity.ts — offline classic-API Google Play Integrity verification
@@ -91,7 +92,8 @@ function validateDecodedShape (payload: unknown): string | undefined {
 export async function verifyPlayIntegrity (
   jweCompact: string,
   challenge: AttestationChallenge,
-  keyProvider: IIntegrityKeyProvider
+  keyProvider: IIntegrityKeyProvider,
+  expectedAppIdentity: ExpectedAppIdentity
 ): Promise<AttestationVerification> {
   let payload: DecodedIntegrityPayload
 
@@ -130,6 +132,26 @@ export async function verifyPlayIntegrity (
 
   if (requestDetails.requestPackageName !== appIntegrity.packageName) {
     return { ok: false, reason: `requestDetails.requestPackageName ('${requestDetails.requestPackageName}') does not match appIntegrity.packageName ('${appIntegrity.packageName}')` }
+  }
+
+  // CR-04: pin the token to THIS app — not merely internally consistent. A
+  // different Play-recognized app minting a token that carries the bound nonce
+  // must be rejected (anti-relay, D-06/D-09).
+  if (appIntegrity.packageName !== expectedAppIdentity.packageName) {
+    return { ok: false, reason: `appIntegrity.packageName ('${appIntegrity.packageName}') is not the expected authority app package ('${expectedAppIdentity.packageName}')` }
+  }
+
+  const allowedCertDigests = new Set(expectedAppIdentity.certificateSha256Digests)
+  const presentedCertDigests = appIntegrity.certificateSha256Digest ?? []
+  const certDigestMatches = presentedCertDigests.some((digest) => {
+    try {
+      return allowedCertDigests.has(certDigestBase64ToHex(digest))
+    } catch {
+      return false
+    }
+  })
+  if (!certDigestMatches) {
+    return { ok: false, reason: 'appIntegrity.certificateSha256Digest does not match any allowlisted signing-certificate digest for this app' }
   }
 
   if (appIntegrity.appRecognitionVerdict !== 'PLAY_RECOGNIZED') {

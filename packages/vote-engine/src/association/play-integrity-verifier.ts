@@ -2,6 +2,7 @@ import type { AttestationChallenge, AttestationVerification, DeviceAttestation, 
 import type { IIntegrityKeyProvider } from './key-provider.js'
 import { verifyPlayIntegrity } from './verifiers/play-integrity.js'
 import { verifyKeyAttestation } from './verifiers/key-attestation.js'
+import type { ExpectedAppIdentity } from './verifiers/app-identity.js'
 
 /**
  * PlayIntegrityVerifier — the real `IAttestationVerifier` implementation
@@ -23,6 +24,7 @@ export class PlayIntegrityVerifier implements IAttestationVerifier {
   constructor (
     private readonly keyProvider: IIntegrityKeyProvider,
     private readonly pinnedHardwareRoots: Uint8Array[],
+    private readonly expectedAppIdentity: ExpectedAppIdentity,
     private readonly revokedSerials: Set<string> = new Set<string>()
   ) {}
 
@@ -32,11 +34,11 @@ export class PlayIntegrityVerifier implements IAttestationVerifier {
       return { ok: false, reason: 'attestation carries no Android platform details' }
     }
 
-    const piResult = await verifyPlayIntegrity(android.safetyNetAttestation, challenge, this.keyProvider)
+    const piResult = await verifyPlayIntegrity(android.safetyNetAttestation, challenge, this.keyProvider, this.expectedAppIdentity)
     if (!piResult.ok) return piResult
 
     const certChainDer = attestation.certificateChain.map((cert) => new Uint8Array(Buffer.from(cert, 'base64')))
-    const keyAttResult = await verifyKeyAttestation(certChainDer, challenge, this.pinnedHardwareRoots, this.revokedSerials)
+    const keyAttResult = await verifyKeyAttestation(certChainDer, challenge, this.pinnedHardwareRoots, this.revokedSerials, this.expectedAppIdentity)
     if (!keyAttResult.ok) return keyAttResult
 
     return { ok: true }

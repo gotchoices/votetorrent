@@ -19,6 +19,7 @@
  */
 
 import type { NetworkReference, User, IAttestationVerifier } from '@votetorrent/vote-core'
+import type { ExpectedAppIdentity } from '@votetorrent/vote-engine/rn'
 import {
 	NetworksEngine,
 	NetworkEngine,
@@ -42,6 +43,7 @@ import type { StrandHost } from './rn-db-factory'
 import { USE_LOCAL_DB_FACTORY, USE_STUB_ATTESTATION_VERIFIER } from './proof-flags.generated'
 import { PINNED_HARDWARE_ROOTS_DER } from './attestation-roots.generated'
 import { REVOKED_ATTESTATION_SERIALS } from './attestation-status.generated'
+import { EXPECTED_APP_PACKAGE, EXPECTED_APP_CERT_SHA256_DIGESTS } from './attestation-keys.generated'
 
 export class EngineFactory {
 	private readonly networksEngine: NetworksEngine
@@ -98,6 +100,17 @@ export class EngineFactory {
 		decryptionKeyBase64: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
 		verificationKeyBase64: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
 	})
+
+	/**
+	 * CR-04/WR-03: the injected app-identity pin BOTH attestation halves enforce
+	 * — the token/key must name THIS authority app (package + signing-cert
+	 * digest), not merely "some genuine Play app on a genuine device". Bundled
+	 * config (attestation-keys.generated.ts), swappable without a code change.
+	 */
+	private readonly expectedAppIdentity: ExpectedAppIdentity = {
+		packageName: EXPECTED_APP_PACKAGE,
+		certificateSha256Digests: EXPECTED_APP_CERT_SHA256_DIGESTS,
+	}
 
 	constructor(
 		private readonly localStorage: LocalStorageReact,
@@ -329,6 +342,7 @@ export class EngineFactory {
 						: new PlayIntegrityVerifier(
 								this.integrityKeyProvider,
 								PINNED_HARDWARE_ROOTS_DER,
+								this.expectedAppIdentity,
 								REVOKED_ATTESTATION_SERIALS,
 							)
 				return new AssociationEngine(ctx, verifier)
