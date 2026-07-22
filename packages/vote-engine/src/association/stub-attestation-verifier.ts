@@ -4,6 +4,10 @@ import type { AttestationChallenge, AttestationVerification, DeviceAttestation, 
  * StubAttestationVerifier — Node-testable `IAttestationVerifier` seam stub
  * (D-07).
  *
+ * The real implementation lives in `play-integrity-verifier.ts`
+ * (`PlayIntegrityVerifier`, Phase 43); this stub is now the D-14 dev-gate
+ * fallback (`USE_STUB_ATTESTATION_VERIFIER`), not the only implementation.
+ *
  * Real platform verification — cert-chain-to-root validation (iOS App
  * Attest), statement/signature validity (Android Play Integrity /
  * SafetyNet), and full replay protection beyond nonce matching — is
