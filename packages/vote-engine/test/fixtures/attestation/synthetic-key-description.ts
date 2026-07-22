@@ -36,8 +36,10 @@ export { SecurityLevel } from '@peculiar/asn1-android'
 export interface SyntheticKeyDescriptionOptions {
   /** The test root (from `generateTestRootCa()`) the synthetic chain is issued under. */
   root: TestCertificate
-  /** D-02 balanced-bar security level under test. */
+  /** D-02 balanced-bar security level under test (the ATTESTATION security level). */
   securityLevel: SecurityLevel
+  /** The ATTESTED KEY's own keymaster/KeyMint security level. Defaults to `securityLevel`; set independently to exercise the WR-01 "TEE-attested but software-backed key" negative. */
+  keymasterSecurityLevel?: SecurityLevel
   /** The bytes embedded as `KeyDescription.attestationChallenge` — normally `utf8(base64url(Digest(nonce, deviceKey)))` per the plan's wire-format convention; override to a wrong value to exercise the D-06 negative. */
   attestationChallenge: Uint8Array
   /** Override the leaf cert's serial number (hex). Enables building a matching `revokedSerials` set in a spec. */
@@ -75,8 +77,9 @@ function buildAttestationApplicationId (packageName: string, signatureDigests: U
 }
 
 /** Build the ASN.1 `KeyDescription` (or `KeyMintKeyDescription`) extension carrying `securityLevel` + `attestationChallenge` + the software-enforced app-identity binding. */
-function buildKeyDescriptionExtension (options: Pick<SyntheticKeyDescriptionOptions, 'securityLevel' | 'attestationChallenge' | 'useKeyMintSchema' | 'appPackageName' | 'appSignatureDigests' | 'omitAttestationApplicationId'>): Extension {
+function buildKeyDescriptionExtension (options: Pick<SyntheticKeyDescriptionOptions, 'securityLevel' | 'keymasterSecurityLevel' | 'attestationChallenge' | 'useKeyMintSchema' | 'appPackageName' | 'appSignatureDigests' | 'omitAttestationApplicationId'>): Extension {
   const attestationChallenge = new OctetString(options.attestationChallenge)
+  const keymasterSecurityLevel = options.keymasterSecurityLevel ?? options.securityLevel
   const uniqueId = new OctetString(new Uint8Array(0))
   const softwareEnforced = new AuthorizationList(
     options.omitAttestationApplicationId === true
@@ -95,7 +98,7 @@ function buildKeyDescriptionExtension (options: Pick<SyntheticKeyDescriptionOpti
       attestationVersion: Version.keyMint2,
       attestationSecurityLevel: options.securityLevel,
       keyMintVersion: 200,
-      keyMintSecurityLevel: options.securityLevel,
+      keyMintSecurityLevel: keymasterSecurityLevel,
       attestationChallenge,
       uniqueId,
       softwareEnforced,
@@ -105,7 +108,7 @@ function buildKeyDescriptionExtension (options: Pick<SyntheticKeyDescriptionOpti
       attestationVersion: Version.KM4,
       attestationSecurityLevel: options.securityLevel,
       keymasterVersion: 4,
-      keymasterSecurityLevel: options.securityLevel,
+      keymasterSecurityLevel,
       attestationChallenge,
       uniqueId,
       softwareEnforced,

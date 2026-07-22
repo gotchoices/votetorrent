@@ -145,8 +145,16 @@ export async function verifyKeyAttestation (
     const attestationChallengeBytes = new Uint8Array(keyDescription.attestationChallenge.buffer)
 
     // 3. D-02 balanced bar: TEE or StrongBox required, Software rejected.
+    // `attestationSecurityLevel` describes where the ATTESTATION was produced.
     if (attestationSecurityLevel === SecurityLevel.software) {
       return { ok: false, reason: 'key attestation security level is Software-backed; TEE or StrongBox required' }
+    }
+    // WR-01: also gate `keymasterSecurityLevel` (KeyMint `keyMintSecurityLevel`),
+    // which describes where the ATTESTED KEY ITSELF lives. A key can be
+    // software-backed while attested by a TEE — both must be non-Software to
+    // assert the voting key is genuinely hardware-backed.
+    if (keyDescription.keymasterSecurityLevel === SecurityLevel.software) {
+      return { ok: false, reason: 'attested key keymaster/KeyMint security level is Software-backed; the key itself must live in TEE or StrongBox' }
     }
 
     // 4. D-06 anti-relay binding (Phase 44's D-06 — distinct from

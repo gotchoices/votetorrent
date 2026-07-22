@@ -102,6 +102,21 @@ describe('verifyKeyAttestation (D-01/D-02/D-06/D-09)', () => {
     expect(result.reason).to.match(/software|security.*level/i)
   })
 
+  it('rejects a TEE-ATTESTED but SOFTWARE-backed key (WR-01 — keymaster/KeyMint level gated too)', async () => {
+    const root = await generateTestRootCa()
+    const challenge = makeChallenge()
+    const { chainDer } = await buildSyntheticKeyDescription({
+      root,
+      securityLevel: SecurityLevel.trustedEnvironment,
+      keymasterSecurityLevel: SecurityLevel.software,
+      attestationChallenge: boundChallengeBytes(challenge)
+    })
+
+    const result = await verifyKeyAttestation(chainDer, challenge, [new Uint8Array(root.cert.rawData)], new Set<string>(), SYNTHETIC_EXPECTED_APP_IDENTITY)
+    expect(result.ok).to.equal(false)
+    expect(result.reason).to.match(/software|security.*level|keymaster|keymint/i)
+  })
+
   it('rejects a chain that does not terminate at a pinned root (forged/untrusted root)', async () => {
     const untrustedRoot = await generateTestRootCa()
     const unrelatedPinnedRoot = await generateTestRootCa()
