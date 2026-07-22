@@ -37,6 +37,37 @@ interface DecodedIntegrityPayload {
   accountDetails?: { accountsSignedIn: string[] }
 }
 
+function isRecord (value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+/**
+ * WR-02: validate the decoded (verified) payload has the exact shape this
+ * verifier reads BEFORE any field access, so a signer emitting a differently
+ * shaped payload (schema drift, a missing field) yields a structured
+ * `{ ok:false, reason }` rather than a `TypeError` (e.g. `.includes` on
+ * `undefined`) that would propagate as an unhandled rejection — the class
+ * contract is "never throws for adversarial input".
+ */
+function validateDecodedShape (payload: unknown): string | undefined {
+  if (!isRecord(payload)) return 'decoded Play Integrity payload is not an object'
+
+  const { requestDetails, appIntegrity, deviceIntegrity } = payload
+  if (!isRecord(requestDetails)) return 'payload.requestDetails is missing or not an object'
+  if (typeof requestDetails.requestPackageName !== 'string') return 'payload.requestDetails.requestPackageName is missing or not a string'
+  if (typeof requestDetails.nonce !== 'string') return 'payload.requestDetails.nonce is missing or not a string'
+  if (typeof requestDetails.timestampMillis !== 'string') return 'payload.requestDetails.timestampMillis is missing or not a string'
+
+  if (!isRecord(appIntegrity)) return 'payload.appIntegrity is missing or not an object'
+  if (typeof appIntegrity.appRecognitionVerdict !== 'string') return 'payload.appIntegrity.appRecognitionVerdict is missing or not a string'
+  if (typeof appIntegrity.packageName !== 'string') return 'payload.appIntegrity.packageName is missing or not a string'
+
+  if (!isRecord(deviceIntegrity)) return 'payload.deviceIntegrity is missing or not an object'
+  if (!Array.isArray(deviceIntegrity.deviceRecognitionVerdict)) return 'payload.deviceIntegrity.deviceRecognitionVerdict is missing or not an array'
+
+  return undefined
+}
+
 /**
  * Verify a classic-API Play Integrity compact JWE-of-JWS token offline
  * against an issued `AttestationChallenge`.
@@ -88,6 +119,11 @@ export async function verifyPlayIntegrity (
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     return { ok: false, reason: `Play Integrity token decrypt/verify failed: ${message}` }
+  }
+
+  const shapeError = validateDecodedShape(payload)
+  if (shapeError !== undefined) {
+    return { ok: false, reason: `Play Integrity payload shape invalid: ${shapeError}` }
   }
 
   const { requestDetails, appIntegrity, deviceIntegrity } = payload

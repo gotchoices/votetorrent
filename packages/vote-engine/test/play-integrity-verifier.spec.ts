@@ -87,6 +87,31 @@ describe('verifyPlayIntegrity (D-01/D-02/D-06/D-09)', () => {
     expect(result.ok).to.equal(false)
   })
 
+  it('returns ok:false (never throws) for a verified-but-malformed payload missing deviceIntegrity (WR-02)', async () => {
+    const challenge = makeChallenge()
+    const keys = await generateSyntheticJweKeyMaterial()
+    // A correctly-signed token whose payload is missing `deviceIntegrity`
+    // entirely — the pre-WR-02 code would `.includes` on `undefined` and throw.
+    const malformed = {
+      requestDetails: { requestPackageName: 'org.votetorrent.authority', nonce: boundNonce(challenge), timestampMillis: String(Date.now()) },
+      appIntegrity: { appRecognitionVerdict: 'PLAY_RECOGNIZED', packageName: 'org.votetorrent.authority', certificateSha256Digest: ['synthetic-cert-sha256-digest'] }
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const jwe = await buildSyntheticJwe(malformed as any, keys)
+    const keyProvider = { getDecryptionKey: async () => keys.decryptionKey, getVerificationKey: async () => keys.verificationPublicKey }
+
+    let result: Awaited<ReturnType<typeof verifyPlayIntegrity>> | undefined
+    let threw = false
+    try {
+      result = await verifyPlayIntegrity(jwe, challenge, keyProvider)
+    } catch {
+      threw = true
+    }
+    expect(threw, 'verifyPlayIntegrity must not throw on a malformed payload').to.equal(false)
+    expect(result?.ok).to.equal(false)
+    expect(result?.reason).to.match(/shape|deviceIntegrity|invalid/i)
+  })
+
   it('rejects a tampered ciphertext', async () => {
     const challenge = makeChallenge()
     const keys = await generateSyntheticJweKeyMaterial()
