@@ -66,7 +66,14 @@ export async function verifyPlayIntegrity (
 
   try {
     const decryptionKey = await keyProvider.getDecryptionKey()
-    const { plaintext } = await compactDecrypt(jweCompact, decryptionKey)
+    // CR-02: pin the JWE key-management + content-encryption algorithms to the
+    // fixed classic-API wire contract (A256KW / A256GCM). Without these
+    // allowlists jose honors any `alg`/`enc` the attacker names in the
+    // protected header — a downgrade/confusion barrier removed for free.
+    const { plaintext } = await compactDecrypt(jweCompact, decryptionKey, {
+      keyManagementAlgorithms: ['A256KW'],
+      contentEncryptionAlgorithms: ['A256GCM']
+    })
     const innerJws = new TextDecoder().decode(plaintext)
 
     const verificationKey = await keyProvider.getVerificationKey()
