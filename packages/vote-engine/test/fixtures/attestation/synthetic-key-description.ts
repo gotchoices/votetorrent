@@ -20,6 +20,7 @@ import {
   AttestationApplicationId,
   AttestationPackageInfo,
   AuthorizationList,
+  IntegerSet,
   KeyDescription,
   KeyMintKeyDescription,
   SecurityLevel,
@@ -56,6 +57,10 @@ export interface SyntheticKeyDescriptionOptions {
   appSignatureDigests?: Uint8Array[]
   /** Omit the `attestationApplicationId` entirely — exercises the WR-03 "no app binding" negative. */
   omitAttestationApplicationId?: boolean
+  /** The hardware-enforced key `origin`. Defaults to KM_ORIGIN_GENERATED (0); set to e.g. 2 (imported) to exercise the WR-04 negative. */
+  origin?: number
+  /** The hardware-enforced key `purpose` set. Defaults to [SIGN(2)]; override (e.g. [VERIFY(3)]) to exercise the WR-04 no-sign negative. */
+  purpose?: number[]
 }
 
 export interface SyntheticKeyDescriptionResult {
@@ -77,7 +82,7 @@ function buildAttestationApplicationId (packageName: string, signatureDigests: U
 }
 
 /** Build the ASN.1 `KeyDescription` (or `KeyMintKeyDescription`) extension carrying `securityLevel` + `attestationChallenge` + the software-enforced app-identity binding. */
-function buildKeyDescriptionExtension (options: Pick<SyntheticKeyDescriptionOptions, 'securityLevel' | 'keymasterSecurityLevel' | 'attestationChallenge' | 'useKeyMintSchema' | 'appPackageName' | 'appSignatureDigests' | 'omitAttestationApplicationId'>): Extension {
+function buildKeyDescriptionExtension (options: Pick<SyntheticKeyDescriptionOptions, 'securityLevel' | 'keymasterSecurityLevel' | 'attestationChallenge' | 'useKeyMintSchema' | 'appPackageName' | 'appSignatureDigests' | 'omitAttestationApplicationId' | 'origin' | 'purpose'>): Extension {
   const attestationChallenge = new OctetString(options.attestationChallenge)
   const keymasterSecurityLevel = options.keymasterSecurityLevel ?? options.securityLevel
   const uniqueId = new OctetString(new Uint8Array(0))
@@ -91,7 +96,12 @@ function buildKeyDescriptionExtension (options: Pick<SyntheticKeyDescriptionOpti
         )
       }
   )
-  const teeEnforced = new AuthorizationList({})
+  // Hardware-enforced list: default to a hardware-GENERATED, SIGN-capable key
+  // (the PASS shape the WR-04 gate requires).
+  const teeEnforced = new AuthorizationList({
+    origin: options.origin ?? 0, // KM_ORIGIN_GENERATED
+    purpose: new IntegerSet(options.purpose ?? [2]) // KeyPurpose.SIGN
+  })
 
   const der = options.useKeyMintSchema === true
     ? AsnConvert.serialize(new KeyMintKeyDescription({

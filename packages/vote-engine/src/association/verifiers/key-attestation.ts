@@ -36,6 +36,10 @@ import { certDigestBytesToHex, type ExpectedAppIdentity } from './app-identity.j
 
 const ATTESTATION_EXTENSION_OID = '1.3.6.1.4.1.11129.2.1.17'
 
+// Android Keymaster/KeyMint tag values (hardware-enforced AuthorizationList).
+const KM_ORIGIN_GENERATED = 0 // key was generated in secure hardware (not imported/derived)
+const KM_PURPOSE_SIGN = 2 // KeyPurpose.SIGN — the voting key must be usable for signing
+
 /**
  * Normalize an `X509Certificate.serialNumber` hex string (uppercase, no
  * `0x` prefix, as returned by `@peculiar/x509`) to lowercase hex with any
@@ -190,6 +194,20 @@ export async function verifyKeyAttestation (
     const attestedSignatureDigests = attestationApplicationId.signatureDigests.map((digest) => certDigestBytesToHex(asBytes(digest)))
     if (!attestedSignatureDigests.some((hex) => allowedCertDigests.has(hex))) {
       return { ok: false, reason: 'attestationApplicationId signature digest does not match any allowlisted signing-certificate digest for this app (WR-03)' }
+    }
+
+    // 4c. WR-04: assert the attested key was hardware-GENERATED (not imported)
+    // and is authorized for SIGNing — read from the HARDWARE-enforced list
+    // (`teeEnforced`; KeyMint `hardwareEnforced`, normalized above). An imported
+    // key could otherwise satisfy the TEE/StrongBox bar without being
+    // hardware-generated.
+    const hardwareEnforced = keyDescription.teeEnforced
+    if (hardwareEnforced?.origin !== KM_ORIGIN_GENERATED) {
+      return { ok: false, reason: `attested key origin (${String(hardwareEnforced?.origin)}) is not KM_ORIGIN_GENERATED — the key was not generated in secure hardware (imported/derived keys are rejected)` }
+    }
+    const hardwarePurposes = hardwareEnforced.purpose !== undefined ? Array.from(hardwareEnforced.purpose) : []
+    if (!hardwarePurposes.includes(KM_PURPOSE_SIGN)) {
+      return { ok: false, reason: `attested key hardware-enforced purpose [${hardwarePurposes.join(', ')}] does not include SIGN` }
     }
 
     // 5. Offline revoked/suspended-serial rejection (T-43-08) — every cert

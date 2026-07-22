@@ -206,6 +206,36 @@ describe('verifyKeyAttestation (D-01/D-02/D-06/D-09)', () => {
     expect(result.reason).to.match(/signature|digest|certificate/i)
   })
 
+  it('rejects an IMPORTED key (origin !== KM_ORIGIN_GENERATED) — WR-04', async () => {
+    const root = await generateTestRootCa()
+    const challenge = makeChallenge()
+    const { chainDer } = await buildSyntheticKeyDescription({
+      root,
+      securityLevel: SecurityLevel.trustedEnvironment,
+      attestationChallenge: boundChallengeBytes(challenge),
+      origin: 2 // KM_ORIGIN_IMPORTED
+    })
+
+    const result = await verifyKeyAttestation(chainDer, challenge, [new Uint8Array(root.cert.rawData)], new Set<string>(), SYNTHETIC_EXPECTED_APP_IDENTITY)
+    expect(result.ok).to.equal(false)
+    expect(result.reason).to.match(/origin|generated|imported/i)
+  })
+
+  it('rejects a key whose hardware-enforced purpose does not include SIGN (WR-04)', async () => {
+    const root = await generateTestRootCa()
+    const challenge = makeChallenge()
+    const { chainDer } = await buildSyntheticKeyDescription({
+      root,
+      securityLevel: SecurityLevel.trustedEnvironment,
+      attestationChallenge: boundChallengeBytes(challenge),
+      purpose: [3] // KeyPurpose.VERIFY only — not SIGN
+    })
+
+    const result = await verifyKeyAttestation(chainDer, challenge, [new Uint8Array(root.cert.rawData)], new Set<string>(), SYNTHETIC_EXPECTED_APP_IDENTITY)
+    expect(result.ok).to.equal(false)
+    expect(result.reason).to.match(/purpose|sign/i)
+  })
+
   it('rejects a leaf with no attestationApplicationId at all (WR-03 no app binding)', async () => {
     const root = await generateTestRootCa()
     const challenge = makeChallenge()
