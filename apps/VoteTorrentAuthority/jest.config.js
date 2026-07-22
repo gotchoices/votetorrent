@@ -20,9 +20,11 @@ module.exports = {
   // Includes: @quereus/* (quereus engine), @optimystic/* (plugin), @votetorrent/* (workspace),
   // @noble/* (@optimystic/quereus-plugin-crypto peer), inheritree + moat-maker (quereus deps),
   // multiformats (ESM-only dep of @optimystic/quereus-plugin-crypto),
-  // @react-navigation (ESM-only; App.test.tsx imports NavigationContainer from it).
+  // @react-navigation (ESM-only; App.test.tsx imports NavigationContainer from it),
+  // jose (ESM-only, no CJS build at all in v6.x — @votetorrent/vote-engine/rn now
+  // transitively pulls it in via association/verifiers/play-integrity.ts, Phase 43).
   transformIgnorePatterns: [
-    'node_modules/(?!((jest-)?react-native|@react-native(-community)?|@react-navigation|@quereus|@optimystic|@votetorrent|@noble|inheritree|moat-maker|multiformats|@serfab)/)',
+    'node_modules/(?!((jest-)?react-native|@react-native(-community)?|@react-navigation|@quereus|@optimystic|@votetorrent|@noble|inheritree|moat-maker|multiformats|@serfab|jose)/)',
   ],
   moduleNameMapper: {
     '^react-native-localize$': '<rootDir>/__mocks__/react-native-localize.js',

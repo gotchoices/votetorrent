@@ -18,7 +18,7 @@
  * which is cache-first (T-15-03-05 / Pitfall 2).
  */
 
-import type { NetworkReference, User } from '@votetorrent/vote-core'
+import type { NetworkReference, User, IAttestationVerifier } from '@votetorrent/vote-core'
 import {
 	NetworksEngine,
 	NetworkEngine,
@@ -31,11 +31,17 @@ import {
 	OnboardingTasksEngine,
 	InvitationEngine,
 	LocalStorageReact,
+	AssociationEngine,
+	PlayIntegrityVerifier,
+	StubAttestationVerifier,
+	LocalConfigKeyProvider,
 } from '@votetorrent/vote-engine/rn'
 import type { DbFactory, EngineContext, ElectionSubject } from '@votetorrent/vote-engine/rn'
 import { rnDbFactory, createStrandDbFactory } from './rn-db-factory'
 import type { StrandHost } from './rn-db-factory'
-import { USE_LOCAL_DB_FACTORY } from './proof-flags.generated'
+import { USE_LOCAL_DB_FACTORY, USE_STUB_ATTESTATION_VERIFIER } from './proof-flags.generated'
+import { PINNED_HARDWARE_ROOTS_DER } from './attestation-roots.generated'
+import { REVOKED_ATTESTATION_SERIALS } from './attestation-status.generated'
 
 export class EngineFactory {
 	private readonly networksEngine: NetworksEngine
@@ -76,6 +82,22 @@ export class EngineFactory {
 	setNode(node: StrandHost | null): void {
 		this.node = node
 	}
+
+	/**
+	 * D-04b: the Play Console key material `PlayIntegrityVerifier` needs to
+	 * decrypt+verify a classic-API token offline. Constructed once, app-lifetime
+	 * (mirrors `networksEngine`'s once-per-factory lifecycle).
+	 *
+	 * PLACEHOLDER key material until real per-app Play Console keys are
+	 * provisioned (D-10, tracked in SETUP.md) — the decryption/verification
+	 * key bytes below are NOT real Google-issued secrets. Swapping in the
+	 * real keys is a config-only change (`LocalConfigKeyProviderConfig`);
+	 * this seam's shape never changes (D-12).
+	 */
+	private readonly integrityKeyProvider = new LocalConfigKeyProvider({
+		decryptionKeyBase64: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
+		verificationKeyBase64: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
+	})
 
 	constructor(
 		private readonly localStorage: LocalStorageReact,
@@ -293,6 +315,23 @@ export class EngineFactory {
 			case 'invitations': {
 				const ctx = this.requireEstablishedCtx()
 				return new InvitationEngine(ctx)
+			}
+
+			case 'association': {
+				// D-12/D-13/D-14: the real PlayIntegrityVerifier is the DEFAULT — the
+				// stub is selected ONLY under an explicit __DEV__ dev gate, never a
+				// silent prod fallback. The gate lives HERE in the factory, never
+				// inside AssociationEngine/PlayIntegrityVerifier (D-12 seam-never-changes).
+				const ctx = this.requireEstablishedCtx()
+				const verifier: IAttestationVerifier =
+					__DEV__ && USE_STUB_ATTESTATION_VERIFIER
+						? new StubAttestationVerifier()
+						: new PlayIntegrityVerifier(
+								this.integrityKeyProvider,
+								PINNED_HARDWARE_ROOTS_DER,
+								REVOKED_ATTESTATION_SERIALS,
+							)
+				return new AssociationEngine(ctx, verifier)
 			}
 
 			default:

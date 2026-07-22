@@ -62,10 +62,23 @@ jest.mock(
       // Minimal stub — open() and create() not needed for dispatch tests.
     }
     class LocalStorageReact {}
+    // Phase 43 (D-13/D-14): EngineFactory's class-field `integrityKeyProvider`
+    // constructs a `LocalConfigKeyProvider` at object-construction time — this
+    // virtual mock must provide a stand-in so `new EngineFactory(...)` doesn't
+    // throw here (this test only exercises the DbFactory dispatch seam, not
+    // the association verifier seam — see engine-factory.association.test.ts).
+    class LocalConfigKeyProvider {}
+    class AssociationEngine {}
+    class PlayIntegrityVerifier {}
+    class StubAttestationVerifier {}
     return {
       VOTETORRENT_SCHEMA_SQL: 'declare schema main {\n\ttable Network ( Id text );\n}\napply schema main;',
       NetworksEngine,
       LocalStorageReact,
+      LocalConfigKeyProvider,
+      AssociationEngine,
+      PlayIntegrityVerifier,
+      StubAttestationVerifier,
     };
   },
   { virtual: true },
