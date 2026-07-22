@@ -66,12 +66,16 @@ interface LocalConfigKeyProviderConfig {
 }
 ```
 
-Today, `apps/VoteTorrentAuthority/src/engines/engine-factory.ts` constructs
-its `integrityKeyProvider` field with **placeholder (all-zero) base64 key
-material** — clearly labeled inline as a placeholder pending this setup step.
-`PlayIntegrityVerifier` will reject every real Google Play Integrity token
-against these placeholder keys (the JWE decrypt will fail) until they are
-replaced with the real values from step 1.4.
+Today, `apps/VoteTorrentAuthority/src/engines/attestation-keys.generated.ts`
+ships the two key fields (`PLAY_CONSOLE_DECRYPTION_KEY_BASE64`,
+`PLAY_CONSOLE_VERIFICATION_KEY_BASE64`) as **empty strings** — the committed
+default is UNPROVISIONED, not a usable secret. Because the keys are absent,
+`engine-factory.ts`'s `'association'` case **fails closed**: it refuses to
+construct the real `PlayIntegrityVerifier` (throwing at construction) unless
+the explicit `__DEV__ && USE_STUB_ATTESTATION_VERIFIER` dev gate is active.
+This replaced an earlier all-zero placeholder-key default, which — combined
+with the pre-fix verifier — allowed a full Play Integrity bypass (CR-01/CR-03).
+The verifier stays fail-closed until you supply the real values from step 1.4.
 
 **Do this:**
 
@@ -82,10 +86,15 @@ replaced with the real values from step 1.4.
    holding a safe/placeholder default, with the real value supplied outside
    version control at build/deploy time — e.g. an environment variable, a
    secrets manager, or a local `.gitignore`'d config file read at app-start).
-3. Wire the real values into `LocalConfigKeyProviderConfig`'s two fields at
-   the point `engine-factory.ts` constructs `LocalConfigKeyProvider`. This is
-   a config-only change — the seam's shape (`IIntegrityKeyProvider`) never
-   changes, so no verifier code needs to be touched.
+3. Supply the real values as the two exported constants
+   `PLAY_CONSOLE_DECRYPTION_KEY_BASE64` and `PLAY_CONSOLE_VERIFICATION_KEY_BASE64`
+   in `apps/VoteTorrentAuthority/src/engines/attestation-keys.generated.ts`
+   (or via the out-of-band secure-config mechanism from step 2) — `engine-factory.ts`
+   reads them into `LocalConfigKeyProviderConfig` when it constructs
+   `LocalConfigKeyProvider`. Once both are non-empty the `'association'` case
+   stops failing closed and builds the real verifier. This is a config-only
+   change — the seam's shape (`IIntegrityKeyProvider`) never changes, so no
+   verifier code needs to be touched.
 
 ## 4. Pinned hardware root + revoked-serial snapshots (D-04 offline posture)
 
