@@ -1,3 +1,5 @@
+import type { CryptoKey } from 'jose'
+
 /**
  * key-provider.ts — the Play Console key-material seam (D-04b).
  *
@@ -26,8 +28,14 @@ export interface IIntegrityKeyProvider {
   /** The symmetric A256KW/A256GCM key used to decrypt the outer JWE. */
   getDecryptionKey (): Promise<Uint8Array>
 
-  /** The ES256 public key used to verify the inner JWS signature. */
-  getVerificationKey (): Promise<Uint8Array>
+  /**
+   * The ES256 public key used to verify the inner JWS signature. Either the
+   * raw SPKI-encoded public-key bytes (a `LocalConfigKeyProvider`'s shape)
+   * or an already-imported `CryptoKey` (a test double's shape, or a
+   * provider backed by a platform keystore that only exposes imported
+   * keys) — `jose`'s `compactVerify` accepts both directly.
+   */
+  getVerificationKey (): Promise<Uint8Array | CryptoKey>
 }
 
 /** Base64-encoded Play Console key material, as read from local config. */
