@@ -9,12 +9,12 @@ import type { PropsWithChildren } from 'react';
  * instead of BallotDraftProvider's per-entity add/update/remove set — the registration
  * draft is flat, not a nested array (see 41-RESEARCH.md Pattern 2).
  *
- * Held in-memory React state ONLY (D-03) — never persisted to AsyncStorage/SecureStore/
- * disk, and never logged. This draft is never explicitly cleared after a successful
- * submission (D-06): the registered card and Update-registration pre-fill (D-04) both
- * read from this same never-cleared draft instance. `resetDraft` is exposed for parity
- * with `BallotDraftProvider`'s completeness but is unused by any screen this phase
- * (RESEARCH Pattern 2).
+ * Held in-memory React state ONLY — never persisted to AsyncStorage/SecureStore/disk, and
+ * never logged. The draft is cleared on an app restart (no resume-across-restart) and on an
+ * explicit `clearDraft()` call (the canonical name; `resetDraft` is kept as a backward-compatible
+ * alias — both reset in-memory state only). Encrypted-at-rest, resume-across-restart draft
+ * persistence (D-06) is DEFERRED to a future feature — this keeps the voter app aligned with
+ * `BallotSelectionProvider`'s T-42-01 no-PII-to-disk posture with no exception needed.
  *
  * App-local only — does NOT import from `vote-core` (D-04) and does NOT call
  * `useVotingApp()` (this is a provider, not a screen; it intentionally lives outside
@@ -55,6 +55,9 @@ export const EMPTY_DRAFT: RegistrationDraft = {
 export interface RegistrationDraftContextType {
 	draft: RegistrationDraft;
 	updateField: (field: keyof RegistrationDraft, value: string) => void;
+	/** Resets the in-memory draft to EMPTY_DRAFT. Canonical name — called by the 44-08 submit-success flow. */
+	clearDraft: () => void;
+	/** @deprecated alias for `clearDraft` — kept for backward compatibility. */
 	resetDraft: () => void;
 }
 
@@ -75,10 +78,12 @@ export function RegistrationDraftProvider({ children }: PropsWithChildren) {
 		setDraft((prev) => ({ ...prev, [field]: value }));
 	}, []);
 
-	const resetDraft = useCallback(() => setDraft(EMPTY_DRAFT), []);
+	const clearDraft = useCallback(() => setDraft(EMPTY_DRAFT), []);
+	// `resetDraft` is a backward-compatible alias — same in-memory-only reset, no persistence.
+	const resetDraft = clearDraft;
 
 	return (
-		<RegistrationDraftContext.Provider value={{ draft, updateField, resetDraft }}>
+		<RegistrationDraftContext.Provider value={{ draft, updateField, clearDraft, resetDraft }}>
 			{children}
 		</RegistrationDraftContext.Provider>
 	);

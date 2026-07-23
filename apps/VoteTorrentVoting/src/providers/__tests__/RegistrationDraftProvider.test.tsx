@@ -90,7 +90,7 @@ describe('RegistrationDraftProvider / useRegistrationDraft (REG-03, D-03)', () =
 		expect(captured.value!.draft.lastName).toBe('Doe');
 	});
 
-	it('resetDraft() after edits returns draft deep-equal to EMPTY_DRAFT', () => {
+	it('resetDraft() after edits returns draft deep-equal to EMPTY_DRAFT (backward-compatible alias)', () => {
 		const { captured } = renderProvider();
 
 		renderer.act(() => {
@@ -106,5 +106,47 @@ describe('RegistrationDraftProvider / useRegistrationDraft (REG-03, D-03)', () =
 		});
 
 		expect(captured.value!.draft).toEqual(EMPTY_DRAFT);
+	});
+
+	it('clearDraft() after edits resets all fields to EMPTY_DRAFT (D-06 deferred — in-memory only)', () => {
+		const { captured } = renderProvider();
+
+		renderer.act(() => {
+			captured.value!.updateField('firstName', 'Jane');
+		});
+		renderer.act(() => {
+			captured.value!.updateField('lastName', 'Doe');
+		});
+		renderer.act(() => {
+			captured.value!.updateField('party', 'independent');
+		});
+		expect(captured.value!.draft).not.toEqual(EMPTY_DRAFT);
+
+		renderer.act(() => {
+			captured.value!.clearDraft();
+		});
+
+		expect(captured.value!.draft).toEqual(EMPTY_DRAFT);
+	});
+});
+
+describe('RegistrationDraftProvider source (D-06 deferred — no persistence API)', () => {
+	it('does not import react-native-keychain, AsyncStorage, or any other persistence API', () => {
+		const fs = require('fs');
+		const path = require('path');
+		const source: string = fs.readFileSync(
+			path.resolve(__dirname, '../RegistrationDraftProvider.tsx'),
+			'utf8',
+		);
+		// Only import/require statements matter here — the file's own doc-comment legitimately
+		// *mentions* these names to explain that persistence is intentionally NOT used.
+		const importLines = source
+			.split('\n')
+			.filter((line) => /^\s*import\b/.test(line) || /\brequire\(/.test(line));
+		const importedSource = importLines.join('\n');
+		expect(importedSource).not.toMatch(/react-native-keychain/);
+		expect(importedSource).not.toMatch(/async-storage/i);
+		expect(importedSource).not.toMatch(/AsyncStorage/);
+		expect(importedSource).not.toMatch(/SecureStore/);
 	});
 });
