@@ -30,6 +30,10 @@ import type {NetworkInit, Scope, Signature, User} from '@votetorrent/vote-core';
 import type {NetworksEngine} from '@votetorrent/vote-engine/rn';
 import type {DevSeedResult} from '../../engines/dev-seed';
 
+// This test drives real NetworksEngine.create()/open() DB operations (not pure UI rendering),
+// so give it headroom above Jest's 5000ms default on a loaded CI/dev machine.
+jest.setTimeout(20000);
+
 // Mirrors App.tsx's nesting (CadreNodeProvider wraps VotingAppProvider) with an inert
 // pass-through — this test proves VotingAppProvider's OWN plumbing, not a real CadreNode boot.
 jest.mock('../CadreNodeProvider', () => ({
