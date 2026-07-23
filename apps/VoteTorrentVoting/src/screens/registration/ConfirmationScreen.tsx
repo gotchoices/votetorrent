@@ -136,6 +136,11 @@ export default function ConfirmationScreen() {
 			const challengeExpiration = new Date(expiration).toISOString();
 
 			// Pattern 4 tier mapping — name -> public, contact/dob/address -> private, party -> selective.
+			// WR-04: only furnish details that actually have a value. Furnishing an empty
+			// {name, value:''} entry would satisfy the engine's name-presence check for a
+			// policy-Required private field (e.g. a blank required email), letting a blank
+			// required field slip past field-policy enforcement. Dropping empties means a
+			// blank required field is genuinely absent, so validateFieldPolicy rejects it.
 			const privateDetails: PrivateDetail[] = [
 				{name: 'dob', value: draft.dob},
 				{name: 'email', value: draft.email},
@@ -143,7 +148,7 @@ export default function ConfirmationScreen() {
 				{name: 'addressLine1', value: draft.addressLine1},
 				{name: 'addressLine2', value: draft.addressLine2},
 				{name: 'addressLine3', value: draft.addressLine3},
-			];
+			].filter(detail => detail.value !== '');
 
 			const init: RegisterInit = {
 				electionId: seededElectionId,

@@ -145,10 +145,13 @@ const sampleDraft = {
 	addressLine3: '',
 	party: 'democratic',
 };
+// Mutable so individual tests can vary the draft (e.g. a blank required field for WR-04);
+// reset to a fresh copy of sampleDraft in beforeEach.
+let mockDraft = {...sampleDraft};
 
 jest.mock('../../../providers/RegistrationDraftProvider', () => ({
 	useRegistrationDraft: () => ({
-		draft: sampleDraft,
+		draft: mockDraft,
 		clearDraft: mockClearDraft,
 	}),
 }));
@@ -194,6 +197,7 @@ beforeEach(() => {
 	callOrder.length = 0;
 	capturedAttestation = undefined;
 	registerInits.length = 0;
+	mockDraft = {...sampleDraft};
 });
 
 describe('ConfirmationScreen (REG-04/D-05)', () => {
@@ -254,6 +258,24 @@ describe('ConfirmationScreen (REG-04/D-05)', () => {
 
 		expect(registerInits).toHaveLength(2);
 		expect(registerInits[0].registrant.id).toBe(registerInits[1].registrant.id);
+	});
+
+	it('does not furnish a blank required field to register (WR-04 — empty required rejected by policy)', async () => {
+		// A blank required private field (email) must NOT be furnished as {name:'email', value:''}
+		// — that would satisfy the engine's name-presence check and slip past policy. With the
+		// empty entry dropped, email is genuinely absent, so validateFieldPolicy rejects it.
+		mockDraft = {...sampleDraft, email: '', phone: ''};
+
+		const tr = renderScreen();
+		await pressConfirm(tr);
+
+		expect(registerInits).toHaveLength(1);
+		const details = registerInits[0].private.details as Array<{name: string; value: string}>;
+		const names = details.map(d => d.name);
+		expect(names).not.toContain('email');
+		expect(names).not.toContain('phone');
+		// No furnished detail is ever an empty-valued placeholder.
+		expect(details.every(d => d.value !== '')).toBe(true);
 	});
 
 	it('renders an error and does not pop when a later step (associate commit) rejects', async () => {
