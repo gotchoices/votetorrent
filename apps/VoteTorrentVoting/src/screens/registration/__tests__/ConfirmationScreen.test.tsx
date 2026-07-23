@@ -48,8 +48,14 @@ const mockGetDetails = jest.fn(async () => ({
 }));
 const mockNetworkEngine = {getDetails: mockGetDetails};
 
-const mockRegister = jest.fn(async () => {
+// Capture every RegisterInit the ceremony submits, so tests can assert the stable
+// registrantId (WR-02) and the furnished field details (WR-04).
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const registerInits: any[] = [];
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const mockRegister = jest.fn(async (init: any) => {
 	callOrder.push('register');
+	registerInits.push(init);
 });
 const mockRegistrationEngine = {register: mockRegister};
 
@@ -187,6 +193,7 @@ beforeEach(() => {
 	mockCommit.mockClear();
 	callOrder.length = 0;
 	capturedAttestation = undefined;
+	registerInits.length = 0;
 });
 
 describe('ConfirmationScreen (REG-04/D-05)', () => {
@@ -234,6 +241,19 @@ describe('ConfirmationScreen (REG-04/D-05)', () => {
 		expect(mockPopToTop).not.toHaveBeenCalled();
 		// The ceremony must not have proceeded past the failed step.
 		expect(callOrder).toEqual([]);
+	});
+
+	it('reuses the same registrantId across a retry (WR-02 — no duplicate/orphaned Registrant rows)', async () => {
+		// First attempt: register() succeeds but the later associate commit rejects, so the
+		// ceremony fails mid-flight and the CTA becomes "Try Again".
+		mockCommit.mockRejectedValueOnce(new Error('associate failed: transient'));
+
+		const tr = renderScreen();
+		await pressConfirm(tr); // attempt 1 — register ok, commit fails
+		await pressConfirm(tr); // attempt 2 — retry of the SAME submission
+
+		expect(registerInits).toHaveLength(2);
+		expect(registerInits[0].registrant.id).toBe(registerInits[1].registrant.id);
 	});
 
 	it('renders an error and does not pop when a later step (associate commit) rejects', async () => {

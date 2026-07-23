@@ -34,7 +34,7 @@
  * `AppProvider.tsx`'s "Try Again" button shape) — no nav, no draft clear, so the user can retry
  * with their data intact (T-44-23).
  */
-import React, {useState} from 'react';
+import React, {useRef, useState} from 'react';
 import {Pressable, StyleSheet, Text, View} from 'react-native';
 import {useNavigation, useTheme} from '@react-navigation/native';
 import type {ExtendedTheme} from '@react-navigation/native';
@@ -89,6 +89,14 @@ export default function ConfirmationScreen() {
 	const [isSubmitting, setIsSubmitting] = useState(false);
 	const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
+	// WR-02: one registrantId per registration attempt (this mounted ceremony), minted
+	// once and reused on every "Try Again" retry. A fresh id on each retry would re-run
+	// register() with a new id after a mid-ceremony failure — orphaning the already-
+	// committed Registrant row and duplicating rows on repeated retries. A brand-new
+	// registration is a fresh mount (popToTop unmounts this screen), so the ref resets
+	// naturally without leaking the prior attempt's id.
+	const registrantIdRef = useRef<string | null>(null);
+
 	async function onConfirm() {
 		if (isSubmitting) {
 			return;
@@ -111,8 +119,12 @@ export default function ConfirmationScreen() {
 			const deviceUser = await getOrCreateDeviceUser('Device User');
 			const deviceKey = deviceUser.activeKeys[0]!.key;
 
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any
-			const registrantId: string = (globalThis as any).crypto.randomUUID();
+			// WR-02: mint the registrantId once per attempt and reuse it on retry.
+			if (registrantIdRef.current === null) {
+				// eslint-disable-next-line @typescript-eslint/no-explicit-any
+				registrantIdRef.current = (globalThis as any).crypto.randomUUID();
+			}
+			const registrantId: string = registrantIdRef.current;
 			const expiration = Date.now() + TEN_YEARS_MS;
 			const challengeExpiration = new Date(expiration).toISOString();
 
