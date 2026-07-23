@@ -127,11 +127,12 @@ export default function ConfirmationScreen() {
 			const deviceKey = deviceUser.activeKeys[0]!.key;
 
 			// WR-02: mint the registrantId once per attempt and reuse it on retry.
-			if (registrantIdRef.current === null) {
+			let registrantId = registrantIdRef.current;
+			if (registrantId === null) {
 				// eslint-disable-next-line @typescript-eslint/no-explicit-any
-				registrantIdRef.current = (globalThis as any).crypto.randomUUID();
+				registrantId = (globalThis as any).crypto.randomUUID() as string;
+				registrantIdRef.current = registrantId;
 			}
-			const registrantId: string = registrantIdRef.current;
 			const expiration = Date.now() + TEN_YEARS_MS;
 			const challengeExpiration = new Date(expiration).toISOString();
 
