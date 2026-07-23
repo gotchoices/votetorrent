@@ -137,6 +137,11 @@ export function VotingAppProvider({children}: PropsWithChildren) {
 						// Clear any initError from a previous failed attempt so the error
 						// screen is not shown when a retry succeeds.
 						setInitError(null);
+						// Deterministic boot marker: the real dev-seed + network open
+						// succeeded, so the app is about to render Home against the real
+						// engine. Consumed as the logcat PASS token by the on-device
+						// cold-start smoke (scripts/voting-boot-smoke.sh). Additive only.
+						console.log('[voting-boot] VotingAppProvider isInitialized');
 					} catch (seedError) {
 						// D-15 parity: surface the recoverable error; spinner resolves to an
 						// error view. NEVER fall back to a silent empty in-memory network.
