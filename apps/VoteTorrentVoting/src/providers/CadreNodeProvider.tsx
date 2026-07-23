@@ -190,6 +190,18 @@ export function CadreNodeProvider({ children }: PropsWithChildren) {
           privateKey,
           controlNetwork: { partyId: PARTY_ID, bootstrapNodes: resolveBootstrapNodes(CONTROL_ADDR) },
           profile: 'transaction',
+          // Published @serfab/cadre-core@0.8.1 added a fail-closed sApp-schema signature
+          // policy (requireSignedSchemas defaults true): the unsigned `org.votetorrent`
+          // demo schema (rn-db-factory sAppConfig has id:'org.votetorrent' + no signature)
+          // is rejected at strand bring-up with SchemaVerificationError('missing
+          // signature'), which surfaces on-device as `seedDevNetwork failed`. Relax the
+          // policy in DEV only — the documented dev/test relaxation for the unsigned demo
+          // schema, at parity with the authority app's proof runners
+          // (strand-persistence-proof-runner.ts / replication-proof-runner.ts) and the
+          // p2p-probe dev harness. Production sApp-schema signing (id = author ed25519
+          // pubkey + signSchema()) is a separate productionization task. Discovered by the
+          // 44-10 on-device boot proof (jest is blind — it does not boot a real CadreNode).
+          requireSignedSchemas: !__DEV__,
           strandFilter: { mode: 'all' },
           // ISO-01: per-scope storage. cadre-core invokes provider(scopeId) with the
           // strandId for each strand and 'control' for the control DB — one distinct
