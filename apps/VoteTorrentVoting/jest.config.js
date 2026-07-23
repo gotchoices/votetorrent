@@ -28,5 +28,36 @@ module.exports = {
       '<rootDir>/node_modules/@votetorrent/vote-engine/dist/index.js',
     '^@votetorrent/vote-engine/rn$':
       '<rootDir>/node_modules/@votetorrent/vote-engine/dist/rn-entry.js',
+    // Phase 44 plan 44-06 (Rule 3 — blocking-issue fix): the engine barrels above
+    // transitively require these ESM-only ("import"-condition-only exports, no
+    // "require"/"default" fallback) packages — Jest's default CJS resolver cannot
+    // find them without an explicit redirect to their physical dist entry. Mirrors
+    // apps/VoteTorrentAuthority/jest.config.js's identical fix (39-04 precedent) —
+    // same package versions (root-resolutions-pinned), copied verbatim.
+    '^@quereus/quereus$':
+      '<rootDir>/node_modules/@quereus/quereus/dist/src/index.js',
+    '^@quereus/quereus/(.*)$':
+      '<rootDir>/node_modules/@quereus/quereus/dist/src/$1',
+    '^@quereus/store$':
+      '<rootDir>/node_modules/@quereus/store/dist/src/index.js',
+    '^@quereus/isolation$':
+      '<rootDir>/node_modules/@quereus/isolation/dist/src/index.js',
+    '^@optimystic/quereus-plugin-crypto$':
+      '<rootDir>/node_modules/@optimystic/quereus-plugin-crypto/dist/index.js',
+    '^@optimystic/quereus-plugin-crypto/plugin$':
+      '<rootDir>/node_modules/@optimystic/quereus-plugin-crypto/dist/plugin.js',
+    '^inheritree$': '<rootDir>/node_modules/inheritree/dist/index.js',
+    '^moat-maker$': '<rootDir>/node_modules/moat-maker/build/index.js',
+    '^@noble/curves$': '<rootDir>/node_modules/@noble/curves/index.js',
+    '^@noble/curves/(.*)$': '<rootDir>/node_modules/@noble/curves/$1',
+    '^@noble/hashes$': '<rootDir>/node_modules/@noble/hashes/index.js',
+    '^@noble/hashes/(.*)$': '<rootDir>/node_modules/@noble/hashes/$1',
+    '^@babel/runtime/(.*)$': '<rootDir>/node_modules/@babel/runtime/$1',
+    '^multiformats/cid$': '<rootDir>/node_modules/multiformats/dist/src/cid.js',
+    '^multiformats/bases/base16$': '<rootDir>/node_modules/multiformats/dist/src/bases/base16.js',
+    '^multiformats/bases/base32$': '<rootDir>/node_modules/multiformats/dist/src/bases/base32.js',
+    '^multiformats/bases/base58$': '<rootDir>/node_modules/multiformats/dist/src/bases/base58.js',
+    '^multiformats/bases/base64$': '<rootDir>/node_modules/multiformats/dist/src/bases/base64.js',
+    '^multiformats/hashes/digest$': '<rootDir>/node_modules/multiformats/dist/src/hashes/digest.js',
   },
 };
