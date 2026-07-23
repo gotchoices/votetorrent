@@ -5,8 +5,9 @@
  *   (a) StubAttestationProducer(challenge, deviceKey) resolves a DeviceAttestation
  *       whose platformDetails.nonce round-trips challenge.nonce and whose
  *       platformDetails.type === 'Android'.
- *   (b) resolveAttestationProducer() returns StubAttestationProducer when __DEV__
- *       is true, regardless of whether a real producer was supplied.
+ *   (b) resolveAttestationProducer() prefers a supplied real producer even when
+ *       __DEV__ is true (real producer wins — Phase 45 drop-in), and falls back to
+ *       StubAttestationProducer only when no real producer is supplied.
  *   (c) resolveAttestationProducer()'s real-branch THROWS when __DEV__ is false and
  *       no real producer is supplied (fail-closed, CR-03 posture) — never silently
  *       returns the stub.
@@ -71,13 +72,13 @@ describe('attestation-producer — D-03 producer seam', () => {
 			expect(producer).toBe(StubAttestationProducer)
 		})
 
-		it('still returns StubAttestationProducer when __DEV__ is true even if a real producer IS supplied', () => {
+		it('returns the supplied real producer even when __DEV__ is true (real producer wins — Phase 45 drop-in)', () => {
 			;(globalThis as { __DEV__?: boolean }).__DEV__ = true
 			const realProducer: AttestationProducer = jest.fn()
 
 			const producer = resolveAttestationProducer(realProducer)
 
-			expect(producer).toBe(StubAttestationProducer)
+			expect(producer).toBe(realProducer)
 		})
 
 		it('THROWS when __DEV__ is false and no real producer is supplied (fail-closed, CR-03)', () => {

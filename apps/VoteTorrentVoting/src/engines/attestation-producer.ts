@@ -64,19 +64,24 @@ export const StubAttestationProducer: AttestationProducer = async (
 
 /**
  * Resolve the `AttestationProducer` to use, gated the SAME way as
- * `USE_STUB_ATTESTATION_VERIFIER`: `__DEV__`-only returns the stub; the real-branch
- * throws a clear "real attestation producer not provided" error (fail-closed, CR-03
- * posture) rather than silently falling back to the stub. Phase 45 flips one branch
- * (supplies `realProducer`) to make this a pure drop-in — no other call site changes.
+ * `USE_STUB_ATTESTATION_VERIFIER` (fail-closed, CR-03 posture). Precedence:
+ *
+ *   1. A supplied real producer ALWAYS wins — regardless of `__DEV__` — so Phase 45
+ *      can exercise/A-B its `RealAttestationProducer` in a debug build (the "pure
+ *      drop-in, no other call site changes" contract, D-03).
+ *   2. Otherwise, in `__DEV__` fall back to the dev-only `StubAttestationProducer`
+ *      (the current on-device behavior — no real producer exists yet).
+ *   3. Otherwise (release build, no real producer) THROW rather than silently
+ *      returning the stub — the documented spoofing mitigation is real, not claimed.
  */
 export function resolveAttestationProducer(realProducer?: AttestationProducer): AttestationProducer {
+	if (realProducer !== undefined) {
+		return realProducer
+	}
 	if (__DEV__) {
 		return StubAttestationProducer
 	}
-	if (realProducer === undefined) {
-		throw new Error(
-			'attestation-producer: real attestation producer not provided outside __DEV__ — fail-closed (CR-03 posture). Phase 45 must supply a RealAttestationProducer.',
-		)
-	}
-	return realProducer
+	throw new Error(
+		'attestation-producer: real attestation producer not provided outside __DEV__ — fail-closed (CR-03 posture). Phase 45 must supply a RealAttestationProducer.',
+	)
 }

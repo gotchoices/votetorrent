@@ -53,7 +53,7 @@ import type {
 import {useVotingApp} from '../../providers/VotingAppProvider';
 import {useRegistrationDraft} from '../../providers/RegistrationDraftProvider';
 import {getOrCreateDeviceUser} from '../../engines/device-user';
-import {StubAttestationProducer} from '../../engines/attestation-producer';
+import {resolveAttestationProducer} from '../../engines/attestation-producer';
 import {globalStyles} from '../../theme/styles';
 import type {RegistrationStackParamList} from '../../navigation/types';
 
@@ -150,7 +150,11 @@ export default function ConfirmationScreen() {
 				challengeExpiration,
 				sign,
 			);
-			const attestation = await StubAttestationProducer(challenge, deviceKey);
+			// CR-01/D-03: resolve the producer through the fail-closed gate — a real
+			// producer wins, else the stub under __DEV__, else throw in a release build.
+			// Phase 45 drops its RealAttestationProducer into this exact seam.
+			const produceAttestation = resolveAttestationProducer();
+			const attestation = await produceAttestation(challenge, deviceKey);
 
 			// (5) Step 3 — the real associate ceremony, committing the stub attestation.
 			await (associationEngine.buildAssociate() as unknown as AssociateBuilderChain)
