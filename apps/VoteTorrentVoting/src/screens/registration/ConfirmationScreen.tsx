@@ -108,6 +108,13 @@ export default function ConfirmationScreen() {
 				throw new Error('Device signer is not ready yet — please wait for setup to finish and try again.');
 			}
 
+			// WR-03: register() only enforces field policy when init.electionId is set
+			// (validateFieldPolicy is skipped otherwise). Fail closed rather than submit a
+			// registration with field-policy enforcement silently disabled.
+			if (!seededElectionId) {
+				throw new Error('No election configured — cannot register (field policy would be unenforced).');
+			}
+
 			// The seeded network's founding-officer authority (dev-seed.ts, 44-06) — resolved from
 			// the already-established network context, never hand-rolled.
 			const networkEngine = await getEngine<INetworkEngine>('network');
