@@ -16,10 +16,17 @@
  * package's real `lib/module` ESM build, which the RN Jest preset's transformIgnorePatterns
  * doesn't allow-list. `useTheme` is never invoked here — this test drives `handleLanguageChange`
  * directly, not the rendered component.
+ *
+ * Phase 44-07 (D-02/D-04): `providers/VotingAppProvider` is also mocked (manual Jest mock at
+ * `src/providers/__mocks__/VotingAppProvider.tsx`) so importing `SettingsScreen.tsx` (which calls
+ * `useVotingApp()`) doesn't transitively pull in the real `CadreNodeProvider` (real
+ * `@serfab/cadre-core` + `@optimystic/db-p2p-storage-rn`, ESM-only native deps this Jest RN
+ * environment cannot resolve).
  */
 jest.mock('@react-navigation/native', () => ({
 	useTheme: () => ({colors: {}, fonts: {}, type: {}, radii: {}}),
 }));
+jest.mock('../src/providers/VotingAppProvider');
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import i18n from '../src/i18n';

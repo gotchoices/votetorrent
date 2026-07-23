@@ -1,14 +1,28 @@
 /**
- * App-local, future-engine-shaped interfaces for VoteTorrentVoting's mock provider (D-04).
+ * App-local, future-engine-shaped interfaces for VoteTorrentVoting's provider (D-04).
  *
- * These shapes deliberately mirror what a future `vote-core` election read surface would look
- * like (id, title, lifecycle state, async reads) so that swapping VotingAppProvider's mock
- * implementation for a real engine later is DI-only, not a rewrite of every screen (D-01).
+ * The election/ballot lifecycle shapes below deliberately mirror what a future `vote-core`
+ * election read surface would look like (id, title, lifecycle state, async reads) so that
+ * swapping their mock backing for a real engine later is DI-only, not a rewrite of every
+ * screen (D-01). They stay mock-data-backed this phase (Phase 44 scope is the registration
+ * flow only, per 44-CONTEXT.md's Phase Boundary — the election/ballot read surface is a later
+ * phase's concern).
+ *
+ * Phase 44 (D-02/D-04/D-07): `VotingAppContextType` now ALSO carries the real composition
+ * root's surface (`getEngine`/`hasEngine`/`selectNetwork`/`hasNetwork`) mirroring the authority
+ * app's `AppProvider`, plus the D-07 dev-seeded `seededElectionId`/`sign` the register seam
+ * (44-08) reads. The three former registration/voted-status mock booleans (and their setters)
+ * are REMOVED from this context — the real registration flow (real `Registrant` rows via
+ * `RegistrationEngine`) replaces them; any screen that still needs a local registered/voted flag
+ * now owns it as component-local state (see `RegistrationScreen.tsx`/`HomeScreen.tsx`/
+ * `ReviewSubmitScreen.tsx`).
  *
  * Voter/Registration/Ballot-selection shapes that have no `vote-core` analog stay app-local
  * here — they are NOT promoted to `vote-core` this phase (D-04, REQUIREMENTS Out of Scope).
- * This module must never import from `vote-core`.
+ * This module must never import from `vote-core` (a bare `NetworkReference`/`Signature` type
+ * import is fine — those are pure type-only re-exports, not a runtime dependency on vote-core).
  */
+import type {NetworkReference, Signature} from '@votetorrent/vote-core';
 
 /**
  * The 7-state election lifecycle, in canonical order (D-03). Phase 40's `__DEV__` cycler steps
@@ -138,9 +152,16 @@ export interface MockBallot {
 }
 
 /**
- * The provider's context shape. Read methods are async (Promise-returning) even though the
- * backing data is in-memory this phase — a deliberate swap-fidelity investment (D-01) so the
- * eventual real-engine wiring becomes DI-only, not a rewrite of every screen.
+ * The provider's context shape. Election/ballot read methods are async (Promise-returning) even
+ * though the backing data is in-memory this phase — a deliberate swap-fidelity investment (D-01)
+ * so the eventual real-engine wiring for THAT surface becomes DI-only, not a rewrite of every
+ * screen.
+ *
+ * Phase 44 (D-02/D-04): the composition-root surface below (`getEngine`/`hasEngine`/
+ * `selectNetwork`/`hasNetwork`) is REAL — it delegates to a real `EngineFactory` + booted
+ * `CadreNode`, mirroring the authority app's `AppProvider`. `seededElectionId`/`sign` are
+ * captured from the D-07 dev-seed's return and are only populated in `__DEV__` (undefined
+ * otherwise — there is no production join flow yet, P2P-11 stays paused).
  */
 export interface VotingAppContextType {
 	isInitialized: boolean;
@@ -148,32 +169,39 @@ export interface VotingAppContextType {
 	setLifecycleState: (state: LifecycleState) => void;
 	getElection: () => Promise<MockElection>;
 	/**
-	 * Whether the current voter is registered. Gates ONLY the Registration-tab card's
-	 * not-registered/registered branch — never the Vote flow (HOME-02). Plain synchronous
-	 * boolean (not a Promise), mirroring lifecycleState rather than the async getElection() shape.
-	 */
-	isRegistered: boolean;
-	/**
-	 * Flips isRegistered and, when set to true, freezes `registeredAt` to the confirm-time ISO
-	 * timestamp (RESEARCH Anti-Patterns — the registered card's valid-through date is derived
-	 * from this frozen value, not recomputed per render).
-	 */
-	setIsRegistered: (value: boolean) => void;
-	/** Confirm-time ISO-8601 timestamp set by setIsRegistered(true); null until then. */
-	registeredAt: string | null;
-	/**
 	 * Async read of the current election's mock ballot (Phase 42, VOTE-01/02, D-02) — mirrors
 	 * `getElection()`'s swap-fidelity shape (D-01). No per-lifecycle-state merge, unlike
 	 * `getElection()` (RESEARCH Pattern 3).
 	 */
 	getBallot: () => Promise<MockBallot>;
 	/**
-	 * Whether the current voter has submitted their ballot this session (Phase 42, VOTE-04,
-	 * D-08). Gates ONLY the Home Open-card CTA treatment ("Vote now" → "You voted"), never a new
-	 * `LifecycleState`. Plain synchronous boolean, mirroring `isRegistered` rather than
-	 * `getElection()`'s async shape.
+	 * True once the D-07 seeded/most-recent network has been re-attached (or the seeding attempt
+	 * has resolved, success or failure) — mirrors the authority `AppProvider`'s `hasNetwork`,
+	 * gating the recoverable error view (`initError && !hasNetwork`).
 	 */
-	hasVoted: boolean;
-	/** Flips hasVoted. No timestamp companion (unlike setIsRegistered/registeredAt, D-08). */
-	setHasVoted: (value: boolean) => void;
+	hasNetwork: boolean;
+	/**
+	 * Real engine accessor — delegates to the `EngineFactory` this provider owns via `useRef`.
+	 * Mirrors the authority app's `AppProvider.getEngine` (D-02/D-04).
+	 */
+	getEngine: <T>(engineName: string, initParams?: unknown) => Promise<T>;
+	/** True if the named engine is already cached in the factory. Mirrors `AppProvider.hasEngine`. */
+	hasEngine: (engineName: string) => boolean;
+	/**
+	 * Make `networkRef` the active/current network for this session without an app restart.
+	 * Mirrors the authority app's `AppProvider.selectNetwork` (D-02/D-04).
+	 */
+	selectNetwork: (networkRef: NetworkReference) => Promise<void>;
+	/**
+	 * The D-07 dev-seeded election's id, captured from `seedDevNetwork`'s return — pass as
+	 * `RegisterInit.electionId` (44-08) so `validateFieldPolicy` enforces the seeded policy.
+	 * Only set in `__DEV__`; `undefined` otherwise (no production join flow yet).
+	 */
+	seededElectionId: string | undefined;
+	/**
+	 * The SAME device signer used both as the dev-seed's founding-officer key and as
+	 * `register()`'s `signatureOrCallback` (44-08) — one identity, two roles (D-05). Only set in
+	 * `__DEV__`; `undefined` otherwise.
+	 */
+	sign: ((digest: Uint8Array) => Promise<Signature>) | undefined;
 }

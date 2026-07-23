@@ -8,6 +8,13 @@
  * HomeScreen remains the only `useVotingApp()` caller on this surface (SHELL-03) — `ElectionCard`
  * is presentational (election prop + navigation callback props), never reading the provider or
  * `useNavigation()` itself (RESEARCH.md Anti-Patterns).
+ *
+ * Phase 44-07 (D-02): `hasVoted` is no longer a `useVotingApp()` context field (the mock booleans
+ * were removed alongside the registration-flow real-engine swap) — it is now local, session-only
+ * component state, mirroring `ReviewSubmitScreen`'s own local `submitted` flag. This is a
+ * deliberate, documented simplification (not a silent regression): Phase 44's scope is the
+ * registration flow only (44-CONTEXT.md Phase Boundary), so cross-screen vote-status sync via a
+ * shared real engine read is deferred to the phase that swaps the ballot/vote surface for real.
  */
 import React, {useEffect, useState} from 'react';
 import {Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
@@ -27,13 +34,15 @@ type HomeNavigationProp = NativeStackNavigationProp<VoteStackParamList, 'Home'>;
 
 export default function HomeScreen() {
 	// D-06/SHELL-03: every screen routes through useVotingApp() — no inline mockData import.
-	const {isInitialized, lifecycleState, setLifecycleState, getElection, hasVoted} = useVotingApp();
+	const {isInitialized, lifecycleState, setLifecycleState, getElection} = useVotingApp();
 	const {colors, type: typeScale} = useTheme() as ExtendedTheme;
 	const {t} = useTranslation('home');
 	const {t: tCommon} = useTranslation('common');
 	const navigation = useNavigation<HomeNavigationProp>();
 	const [election, setElection] = useState<MockElection | null>(null);
 	const [electionInfoVisible, setElectionInfoVisible] = useState(false);
+	// Phase 44-07 (D-02): local session-only flag — see file header comment.
+	const [hasVoted] = useState(false);
 
 	// Fetch on mount and re-fetch whenever lifecycleState changes — getElection's identity
 	// changes with lifecycleState (VotingAppProvider's useCallback([lifecycleState]) shape), so

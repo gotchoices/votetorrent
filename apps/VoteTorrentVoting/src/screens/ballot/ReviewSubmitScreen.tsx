@@ -7,10 +7,16 @@
  *
  * "Continue Voting" is a plain `navigation.goBack()` — returns to whichever screen pushed
  * `ReviewSubmit` (either `Ballot` directly or `IndividualQuestion` via `replace`, 42-RESEARCH.md
- * Pattern 7). "Submit" sets local `submitted` screen state AND calls `setHasVoted(true)`, swapping
- * the summary + footer buttons for an inline mock confirmation (`t('submittedConfirmation')`) — no
- * separate confirmation route exists this phase (RESEARCH Assumption A5). No real signing or
- * persistence is invoked anywhere in this file (D-08 / threat T-42-02, accepted-low).
+ * Pattern 7). "Submit" sets local `submitted` screen state, swapping the summary + footer buttons
+ * for an inline mock confirmation (`t('submittedConfirmation')`) — no separate confirmation route
+ * exists this phase (RESEARCH Assumption A5). No real signing or persistence is invoked anywhere
+ * in this file (D-08 / threat T-42-02, accepted-low).
+ *
+ * Phase 44-07 (D-02): the mock `setHasVoted(true)` context call is REMOVED (the mock booleans were
+ * removed alongside the registration-flow real-engine swap) — `submitted` (already local) is now
+ * the sole source of truth for this screen's own confirmation view; `HomeScreen`'s `hasVoted` is
+ * separately local, so this deliberately no longer syncs cross-screen (documented simplification —
+ * see `HomeScreen.tsx`'s file header comment).
  */
 import React, {useState} from 'react';
 import {Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
@@ -28,7 +34,7 @@ type ReviewSubmitNavigationProp = NativeStackNavigationProp<VoteStackParamList, 
 
 export default function ReviewSubmitScreen() {
 	// D-06/SHELL-03: every screen routes through useVotingApp() — no inline mockData import.
-	const {getBallot, setHasVoted} = useVotingApp();
+	const {getBallot} = useVotingApp();
 	const {selectionMap} = useBallotSelection();
 	const {colors, fonts, type: typeScale, radii} = useTheme() as ExtendedTheme;
 	const {t} = useTranslation('ballot');
@@ -42,7 +48,6 @@ export default function ReviewSubmitScreen() {
 	const handleSubmit = () => {
 		// No real signing/persistence — a visual mock only (D-08, threat T-42-02).
 		setSubmitted(true);
-		setHasVoted(true);
 	};
 
 	if (submitted) {

@@ -4,12 +4,19 @@
  * generic `common.placeholderBody` copy. Mounts inside VotingAppProvider + ThemeProvider (this
  * screen calls useVotingApp()/useTheme()). No lifecycle-state dependency and no fetch-on-mount,
  * so a single synchronous renderer.act() suffices — no flush() ticks needed.
+ *
+ * Phase 44-07 (D-02/D-04): `VotingAppProvider` is now a real composition root requiring a
+ * `CadreNodeProvider` ancestor — this screen-level test has no need to exercise that boot, so it
+ * uses the manual Jest mock at `providers/__mocks__/VotingAppProvider.tsx` (mirrors the authority
+ * app's App.test.tsx inert-mock convention).
  */
 import React from 'react';
 import renderer from 'react-test-renderer';
 import {Text} from 'react-native';
 import {ThemeProvider} from '@react-navigation/native';
 import '../../../i18n'; // initializes the global i18next instance useTranslation() reads from
+
+jest.mock('../../../providers/VotingAppProvider');
 import {VotingAppProvider} from '../../../providers/VotingAppProvider';
 import {lightTheme} from '../../../theme/themes';
 import ScanScreen from '../ScanScreen';

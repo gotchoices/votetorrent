@@ -1,23 +1,29 @@
 /**
  * ReviewSubmitScreen.test.tsx (VOTE-04, TDD RED->GREEN) — mounts a real NavigationContainer + real
- * VotingAppProvider + real BallotSelectionProvider around a minimal native-stack harness (the real
- * `BallotScreen` + real `ReviewSubmitScreen`, reached by pressing Ballot's own "Review & Submit"
- * button — mirrors BallotScreen.test.tsx's real-provider harness, driving navigation through real
- * UI rather than pushing routes via a nav ref directly) so `getBallot()`'s real `mockBallot`
- * offices resolve and `hasVoted` reflects through a captured `VotingAppProvider` context.
+ * BallotSelectionProvider around a minimal native-stack harness (the real `BallotScreen` + real
+ * `ReviewSubmitScreen`, reached by pressing Ballot's own "Review & Submit" button — mirrors
+ * BallotScreen.test.tsx's real-provider harness, driving navigation through real UI rather than
+ * pushing routes via a nav ref directly) so `getBallot()`'s real `mockBallot` offices resolve.
  *
  * Covers 42-RESEARCH.md's Pattern 2/7 for VOTE-04: per-office summary (notYetAnswered placeholder
- * / selected candidate name), Submit flips `hasVoted` + shows an inline mock confirmation,
- * "Continue Voting" goes back to the Ballot Page.
+ * / selected candidate name), Submit shows an inline mock confirmation, "Continue Voting" goes
+ * back to the Ballot Page.
+ *
+ * Phase 44-07 (D-02/D-04): `VotingAppProvider` is now a real composition root requiring a
+ * `CadreNodeProvider` ancestor, and the mock `hasVoted`/`setHasVoted` context fields this test
+ * previously asserted are REMOVED (`ReviewSubmitScreen`'s own local `submitted` flag is now the
+ * sole source of truth for its confirmation view — see `ReviewSubmitScreen.tsx`'s file header
+ * comment). Uses the manual Jest mock at providers/__mocks__/VotingAppProvider.tsx for
+ * `getBallot()`.
  */
 import React from 'react';
 import renderer from 'react-test-renderer';
 import {NavigationContainer, createNavigationContainerRef} from '@react-navigation/native';
 import type {ParamListBase} from '@react-navigation/native';
 import {createNativeStackNavigator} from '@react-navigation/native-stack';
-import {VotingAppProvider, useVotingApp} from '../../../providers/VotingAppProvider';
+jest.mock('../../../providers/VotingAppProvider');
+import {VotingAppProvider} from '../../../providers/VotingAppProvider';
 import {BallotSelectionProvider, useBallotSelection} from '../../../providers/BallotSelectionProvider';
-import type {VotingAppContextType} from '../../../providers/types';
 import type {BallotSelectionContextType} from '../../../providers/BallotSelectionProvider';
 import {mockBallot} from '../../../providers/mockData';
 import BallotScreen from '../BallotScreen';
@@ -41,14 +47,9 @@ function DummyScreen() {
 const Stack = createNativeStackNavigator();
 
 function renderScreen() {
-	const capturedApp: {value: VotingAppContextType | null} = {value: null};
 	const capturedSelection: {value: BallotSelectionContextType | null} = {value: null};
 	const navRef = createNavigationContainerRef<ParamListBase>();
 
-	function AppProbe() {
-		capturedApp.value = useVotingApp();
-		return null;
-	}
 	function SelectionProbe() {
 		capturedSelection.value = useBallotSelection();
 		return null;
@@ -59,7 +60,6 @@ function renderScreen() {
 		tr = renderer.create(
 			<NavigationContainer ref={navRef} theme={lightTheme}>
 				<VotingAppProvider>
-					<AppProbe />
 					<BallotSelectionProvider>
 						<SelectionProbe />
 						<Stack.Navigator initialRouteName="Ballot" screenOptions={{headerShown: false}}>
@@ -74,7 +74,7 @@ function renderScreen() {
 			</NavigationContainer>,
 		);
 	});
-	return {tr, capturedApp, capturedSelection, navRef};
+	return {tr, capturedSelection, navRef};
 }
 
 function openReviewSubmit(tr: renderer.ReactTestRenderer) {
@@ -122,20 +122,19 @@ describe('ReviewSubmitScreen (VOTE-04)', () => {
 		expect(navRef.getCurrentRoute()?.name).toBe('Ballot');
 	});
 
-	it('"Submit" flips hasVoted true and shows the inline mock confirmation', async () => {
-		const {tr, capturedApp} = renderScreen();
+	it('"Submit" shows the inline mock confirmation (local submitted state, D-02)', async () => {
+		const {tr} = renderScreen();
 		await flushBoot();
 
 		openReviewSubmit(tr);
 		await flushBoot();
-		expect(capturedApp.value!.hasVoted).toBe(false);
+		expect(tr.root.findAllByProps({testID: 'review-confirmation'})).toHaveLength(0);
 
 		const submitButton = tr.root.findByProps({testID: 'review-submit'});
 		renderer.act(() => {
 			submitButton.props.onPress();
 		});
 
-		expect(capturedApp.value!.hasVoted).toBe(true);
 		expect(tr.root.findByProps({testID: 'review-confirmation'})).toBeTruthy();
 		expect(JSON.stringify(tr.toJSON())).toContain('Your ballot was submitted');
 	});

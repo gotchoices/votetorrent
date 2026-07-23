@@ -1,14 +1,21 @@
 /**
  * RegistrationScreen — Registration tab root. Renders the branded blue NetworkHeader (Figma) then
- * the not-registered / registered RegistrationCard, reading isRegistered/registeredAt from
- * useVotingApp() and draft from useRegistrationDraft(). Card callbacks map to navigation:
- * Register now -> DeviceAttestation, Update registration -> RegisterPersonal, (?) help ->
- * RegistrationInfo.
+ * the not-registered / registered RegistrationCard, reading draft from useRegistrationDraft().
+ * Card callbacks map to navigation: Register now -> DeviceAttestation, Update registration ->
+ * RegisterPersonal, (?) help -> RegistrationInfo.
+ *
+ * Phase 44-07 (D-02): `isRegistered`/`registeredAt` are no longer `useVotingApp()` context fields
+ * (the mock booleans were removed alongside the registration-flow real-engine swap) — they are now
+ * local, session-only component state (same shape/behavior as the old context setter: flipping
+ * true freezes `registeredAt` to the confirm-time ISO timestamp). This is a deliberate, documented
+ * simplification: deriving real registration status from the engine's `Registrant` rows is a later
+ * phase's concern (44-CONTEXT.md Phase Boundary scopes this phase to the registration FLOW, not
+ * the status-read surface).
  *
  * headerShown:false for RegistrationHome (navigation/index.tsx) — NetworkHeader replaces the plain
  * native header. A __DEV__-gated isRegistered toggle is kept for manual QA (compiled out of release).
  */
-import React from 'react';
+import React, {useCallback, useState} from 'react';
 import {Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
 import {useNavigation, useTheme} from '@react-navigation/native';
 import type {ExtendedTheme} from '@react-navigation/native';
@@ -26,8 +33,17 @@ type RegistrationNavigationProp = NativeStackNavigationProp<
 
 export default function RegistrationScreen() {
 	// D-06/SHELL-03: every screen routes through useVotingApp() — no inline mockData import.
-	const {isInitialized, isRegistered, setIsRegistered, registeredAt} = useVotingApp();
+	const {isInitialized} = useVotingApp();
 	const {draft} = useRegistrationDraft();
+	// Phase 44-07 (D-02): local session-only state — see file header comment.
+	const [isRegistered, setIsRegisteredState] = useState(false);
+	const [registeredAt, setRegisteredAt] = useState<string | null>(null);
+	const setIsRegistered = useCallback((value: boolean) => {
+		setIsRegisteredState(value);
+		if (value) {
+			setRegisteredAt(new Date().toISOString());
+		}
+	}, []);
 	const {colors, type: typeScale} = useTheme() as ExtendedTheme;
 	const navigation = useNavigation<RegistrationNavigationProp>();
 

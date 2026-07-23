@@ -14,6 +14,10 @@ import React from 'react';
 import renderer from 'react-test-renderer';
 import {NavigationContainer} from '@react-navigation/native';
 import {createNativeStackNavigator} from '@react-navigation/native-stack';
+// Phase 44-07 (D-02/D-04): VotingAppProvider is now a real composition root requiring a
+// CadreNodeProvider ancestor — this ballot-flow test has no need to exercise that boot, so it
+// uses the manual Jest mock at providers/__mocks__/VotingAppProvider.tsx.
+jest.mock('../../../providers/VotingAppProvider');
 import {VotingAppProvider} from '../../../providers/VotingAppProvider';
 import {BallotSelectionProvider} from '../../../providers/BallotSelectionProvider';
 import {mockBallot} from '../../../providers/mockData';

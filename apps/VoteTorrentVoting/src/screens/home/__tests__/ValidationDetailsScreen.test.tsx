@@ -10,6 +10,12 @@ import renderer from 'react-test-renderer';
 import {Text} from 'react-native';
 import {ThemeProvider} from '@react-navigation/native';
 import '../../../i18n'; // initializes the global i18next instance useTranslation() reads from
+// Phase 44-07 (D-02/D-04): VotingAppProvider is now a real composition root requiring a
+// CadreNodeProvider ancestor — this screen-level test has no need to exercise that boot, so it
+// uses the manual Jest mock at providers/__mocks__/VotingAppProvider.tsx (its lifecycleState/
+// setLifecycleState are real, stateful mock context — this Harness's setLifecycleState call
+// still drives the rendered evidence).
+jest.mock('../../../providers/VotingAppProvider');
 import {VotingAppProvider, useVotingApp} from '../../../providers/VotingAppProvider';
 import {lightTheme} from '../../../theme/themes';
 import ValidationDetailsScreen from '../ValidationDetailsScreen';

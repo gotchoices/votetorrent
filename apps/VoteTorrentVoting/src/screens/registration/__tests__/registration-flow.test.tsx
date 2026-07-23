@@ -12,21 +12,27 @@
  *    populated — no separate pre-fill logic, same never-cleared draft instance.
  *
  * Follows 41-RESEARCH.md's "Testing the write-through + Back/Continue draft preservation" Code
- * Example (renderer.act + `tr.root.findByProps({testID}).props.onChangeText/onPress`) and
- * `__tests__/voting-app-provider.test.ts`'s Probe-component context-capture + `flushBoot`
- * convention — no `@testing-library/react-native` dependency (not installed).
+ * Example (renderer.act + `tr.root.findByProps({testID}).props.onChangeText/onPress`) and the
+ * Probe-component context-capture + `flushBoot` convention — no `@testing-library/react-native`
+ * dependency (not installed).
+ *
+ * Phase 44-07 (D-02/D-04): `VotingAppProvider` is now a real composition root requiring a
+ * `CadreNodeProvider` ancestor, and its `setIsRegistered` mock setter is REMOVED —
+ * `RegistrationScreen` now owns `isRegistered`/`registeredAt` as local component state, driven via
+ * its existing `__DEV__`-gated dev-toggle (testID `registration-dev-toggle`) instead of a context
+ * setter. Uses the manual Jest mock at providers/__mocks__/VotingAppProvider.tsx.
  */
 import React from 'react';
 import renderer from 'react-test-renderer';
 import {NavigationContainer, createNavigationContainerRef} from '@react-navigation/native';
 import type {ParamListBase} from '@react-navigation/native';
 import {createNativeStackNavigator} from '@react-navigation/native-stack';
-import {VotingAppProvider, useVotingApp} from '../../../providers/VotingAppProvider';
+jest.mock('../../../providers/VotingAppProvider');
+import {VotingAppProvider} from '../../../providers/VotingAppProvider';
 import {
 	RegistrationDraftProvider,
 	useRegistrationDraft,
 } from '../../../providers/RegistrationDraftProvider';
-import type {VotingAppContextType} from '../../../providers/types';
 import type {RegistrationDraftContextType} from '../../../providers/RegistrationDraftProvider';
 import RegistrationScreen from '../RegistrationScreen';
 import RegisterPersonalScreen from '../RegisterPersonalScreen';
@@ -52,14 +58,9 @@ function DummyScreen() {
 const Stack = createNativeStackNavigator();
 
 function renderFlow(initialRouteName: 'RegistrationHome' | 'RegisterPersonal') {
-	const capturedApp: {value: VotingAppContextType | null} = {value: null};
 	const capturedDraft: {value: RegistrationDraftContextType | null} = {value: null};
 	const navRef = createNavigationContainerRef<ParamListBase>();
 
-	function AppProbe() {
-		capturedApp.value = useVotingApp();
-		return null;
-	}
 	function DraftProbe() {
 		capturedDraft.value = useRegistrationDraft();
 		return null;
@@ -70,7 +71,6 @@ function renderFlow(initialRouteName: 'RegistrationHome' | 'RegisterPersonal') {
 		tr = renderer.create(
 			<NavigationContainer ref={navRef} theme={lightTheme}>
 				<VotingAppProvider>
-					<AppProbe />
 					<RegistrationDraftProvider>
 						<DraftProbe />
 						<Stack.Navigator
@@ -87,7 +87,7 @@ function renderFlow(initialRouteName: 'RegistrationHome' | 'RegisterPersonal') {
 			</NavigationContainer>,
 		);
 	});
-	return {tr, capturedApp, capturedDraft, navRef};
+	return {tr, capturedDraft, navRef};
 }
 
 describe('registration navigation flow (REG-03/REG-05)', () => {
@@ -116,16 +116,21 @@ describe('registration navigation flow (REG-03/REG-05)', () => {
 	});
 
 	it('Update registration re-entry navigates to RegisterPersonal (skipping DeviceAttestation) with the draft still populated (REG-05, D-04)', async () => {
-		const {tr, capturedApp, capturedDraft, navRef} = renderFlow('RegistrationHome');
+		const {tr, capturedDraft, navRef} = renderFlow('RegistrationHome');
 		await flushBoot();
 
-		// Populate the draft and flip isRegistered directly on the shared context instances
-		// (mirrors having previously completed the form + confirmed) — D-04: no separate
+		// Populate the draft directly on the shared context instance (mirrors having previously
+		// completed the form) and flip RegistrationScreen's local isRegistered flag via its own
+		// __DEV__-gated dev-toggle (Phase 44-07: isRegistered is no longer a VotingAppProvider
+		// context setter — see RegistrationScreen.tsx's file header comment) — D-04: no separate
 		// pre-fill logic exists, so this is the only setup this test needs.
 		renderer.act(() => {
 			capturedDraft.value!.updateField('firstName', 'Existing');
 			capturedDraft.value!.updateField('lastName', 'Voter');
-			capturedApp.value!.setIsRegistered(true);
+		});
+		const devToggle = tr.root.findByProps({testID: 'registration-dev-toggle'});
+		renderer.act(() => {
+			devToggle.props.onPress();
 		});
 
 		const updateBtn = tr.root.findByProps({testID: 'registration-card-update'});

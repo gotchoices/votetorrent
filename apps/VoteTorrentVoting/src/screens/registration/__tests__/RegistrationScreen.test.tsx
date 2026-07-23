@@ -6,6 +6,12 @@
  * fixture provider state without mounting either real provider — mirrors
  * `RegistrationCard.test.tsx`'s theme-wrapping convention and
  * `DeviceAttestationScreen.test.tsx`'s navigation-mock convention.
+ *
+ * Phase 44-07 (D-02): `isRegistered`/`registeredAt`/`setIsRegistered` are no longer
+ * `useVotingApp()` context fields — `RegistrationScreen` now owns them as local component state,
+ * driven via its own `__DEV__`-gated dev-toggle (testID `registration-dev-toggle`) rather than a
+ * mocked context setter (see `RegistrationScreen.tsx`'s file header comment). The mocked
+ * `useVotingApp` now only needs to supply `isInitialized`.
  */
 import React from 'react';
 import renderer from 'react-test-renderer';
@@ -25,13 +31,15 @@ jest.mock('@react-navigation/native', () => {
 	};
 });
 
-jest.mock('../../../providers/VotingAppProvider', () => {
-	const actual = jest.requireActual('../../../providers/VotingAppProvider');
-	return {
-		...actual,
-		useVotingApp: jest.fn(),
-	};
-});
+// Phase 44-07 (D-02/D-04): do NOT jest.requireActual the real VotingAppProvider module here —
+// it now transitively imports CadreNodeProvider (real @serfab/cadre-core +
+// @optimystic/db-p2p-storage-rn, ESM-only native deps this Jest RN environment cannot resolve).
+// This test never renders <VotingAppProvider> (only RegistrationScreen's useVotingApp() call,
+// mocked below), so a plain inert stand-in is sufficient.
+jest.mock('../../../providers/VotingAppProvider', () => ({
+	useVotingApp: jest.fn(),
+	VotingAppProvider: ({children}: {children: React.ReactNode}) => children,
+}));
 
 jest.mock('../../../providers/RegistrationDraftProvider', () => {
 	const actual = jest.requireActual('../../../providers/RegistrationDraftProvider');
@@ -49,16 +57,9 @@ const RegistrationScreen = require('../RegistrationScreen').default;
 const mockUseVotingApp = useVotingApp as jest.Mock;
 const mockUseRegistrationDraft = useRegistrationDraft as jest.Mock;
 
-function setProviderState(overrides: {
-	isRegistered?: boolean;
-	registeredAt?: string | null;
-	draft?: RegistrationDraft;
-}) {
+function setProviderState(overrides: {draft?: RegistrationDraft} = {}) {
 	mockUseVotingApp.mockReturnValue({
 		isInitialized: true,
-		isRegistered: overrides.isRegistered ?? false,
-		setIsRegistered: jest.fn(),
-		registeredAt: overrides.registeredAt ?? null,
 	});
 	mockUseRegistrationDraft.mockReturnValue({
 		draft: overrides.draft ?? EMPTY_DRAFT,
@@ -79,13 +80,22 @@ function renderScreen() {
 	return tr;
 }
 
+/** Presses RegistrationScreen's own __DEV__-gated dev-toggle to flip local isRegistered true
+ * (Phase 44-07: isRegistered is local component state, not a mocked context field). */
+function flipToRegistered(tr: renderer.ReactTestRenderer) {
+	const toggle = tr.root.findByProps({testID: 'registration-dev-toggle'});
+	renderer.act(() => {
+		toggle.props.onPress();
+	});
+}
+
 describe('RegistrationScreen (REG-01/REG-05)', () => {
 	beforeEach(() => {
 		mockNavigate.mockClear();
 	});
 
 	it('not-registered: Register-now CTA navigates to DeviceAttestation', () => {
-		setProviderState({isRegistered: false});
+		setProviderState();
 		const tr = renderScreen();
 
 		const cta = tr.root.findByProps({testID: 'registration-card-register-now'});
@@ -96,12 +106,9 @@ describe('RegistrationScreen (REG-01/REG-05)', () => {
 	});
 
 	it('registered: Update CTA navigates to RegisterPersonal (NOT DeviceAttestation, D-04)', () => {
-		setProviderState({
-			isRegistered: true,
-			registeredAt: '2025-01-01T00:00:00.000Z',
-			draft: {...EMPTY_DRAFT, firstName: 'Jane', lastName: 'Doe'},
-		});
+		setProviderState({draft: {...EMPTY_DRAFT, firstName: 'Jane', lastName: 'Doe'}});
 		const tr = renderScreen();
+		flipToRegistered(tr);
 
 		const cta = tr.root.findByProps({testID: 'registration-card-update'});
 		renderer.act(() => {
@@ -112,8 +119,9 @@ describe('RegistrationScreen (REG-01/REG-05)', () => {
 	});
 
 	it('registered: help (?) navigates to RegistrationInfo', () => {
-		setProviderState({isRegistered: true, registeredAt: '2025-01-01T00:00:00.000Z'});
+		setProviderState();
 		const tr = renderScreen();
+		flipToRegistered(tr);
 
 		const helpButton = tr.root.findByProps({testID: 'registration-card-help'});
 		renderer.act(() => {
@@ -123,7 +131,7 @@ describe('RegistrationScreen (REG-01/REG-05)', () => {
 	});
 
 	it('contains no Phase-39 dev-trigger Pressables', () => {
-		setProviderState({isRegistered: false});
+		setProviderState();
 		const tr = renderScreen();
 		const text = JSON.stringify(tr.toJSON());
 		expect(text).not.toContain('Open Device Attestation (dev)');
