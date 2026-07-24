@@ -43,6 +43,15 @@ export interface AttestationChallenge {
   /** Device voting public key this challenge is bound to */
   deviceKey: string
 
+  /**
+   * references Election.id — which election this challenge is for (D-14b,
+   * Pitfall 2). OPTIONAL in 45-03: additive, not yet threaded through
+   * IAssociationEngine.issueAttestationChallenge or welded into the schema's
+   * InsertValid Digest — both land atomically in 45-04. Existing callers that
+   * don't set it stay valid.
+   */
+  electionId?: string
+
   /** Short TTL */
   expiration: Timestamp | string
 }

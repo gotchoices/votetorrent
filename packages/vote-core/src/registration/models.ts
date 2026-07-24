@@ -178,6 +178,21 @@ export interface ElectionDisclosurePolicy {
   audience: DisclosureAudience
 }
 
+/**
+ * Election policy: whether this election requires device attestation to Associate (D-14a/b).
+ * Single row per election (admin-signed 'mel', keyed by electionId alone). Companion to
+ * ElectionDisclosurePolicy/ElectionRegistrationField (same 'mel'-signed, election-keyed shape).
+ * Fail-closed enforcement (no row => attestation required) is engine-side at the associate()
+ * read (45-04) — this interface only describes the stored policy row itself.
+ */
+export interface ElectionAttestationPolicy {
+  /** references Election.id */
+  electionId: string
+
+  /** true = attestation required (fail-closed default), false = not required */
+  attestationRequired: boolean
+}
+
 /** ********* ElectionRegistrant (roster, authority-only 'vrg'-signed insert/delete) ***********/
 export interface ElectionRegistrant {
   /** references Election.id */
