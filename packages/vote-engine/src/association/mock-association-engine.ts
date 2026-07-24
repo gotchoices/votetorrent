@@ -29,7 +29,8 @@ export class MockAssociationEngine implements IAssociationEngine {
     registrantId: string,
     deviceKey: string,
     expiration: string,
-    _signatureOrCallback: SignatureOrCallback
+    _signatureOrCallback: SignatureOrCallback,
+    electionId?: string
   ): Promise<AttestationChallenge> {
     const nonce = crypto.randomUUID()
     const challenge: AttestationChallenge = {
@@ -37,6 +38,7 @@ export class MockAssociationEngine implements IAssociationEngine {
       authorityId: 'mock-authority',
       registrantId,
       deviceKey,
+      electionId,
       expiration
     }
     this.challenges.set(nonce, challenge)

@@ -10,12 +10,23 @@ import type { AssociateInit, Association, AttestationChallenge, DeviceAttestatio
 type SignatureOrCallback = Signature | ((digest: Uint8Array) => Promise<Signature>)
 
 export interface IAssociationEngine {
-  /** D-03: authority issues a one-time nonce-bound challenge before Associate. */
+  /**
+   * D-03: authority issues a one-time nonce-bound challenge before Associate.
+   *
+   * `electionId` (D-14a) is an OPTIONAL, trailing parameter binding this
+   * challenge to a specific election — welded into the schema's
+   * `InsertValid` `Digest(...)` (and the engine's matching `digestExpr`) so a
+   * challenge issued for one election cannot satisfy another's attestation
+   * policy (T-45-03). Omitted / `undefined` binds a null `ElectionId`, which
+   * `associate()`'s fail-closed policy gate (Assumption A5) always treats as
+   * attestation-required.
+   */
   issueAttestationChallenge(
     registrantId: string,
     deviceKey: string,
     expiration: string,
-    signatureOrCallback: SignatureOrCallback
+    signatureOrCallback: SignatureOrCallback,
+    electionId?: string
   ): Promise<AttestationChallenge>
 
   /** D-03: authority deletes a consumed/expired challenge. */

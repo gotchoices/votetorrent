@@ -29,11 +29,21 @@ import { MockAssociationEngine } from '../src/association/mock-association-engin
 import { StubAttestationVerifier } from '../src/association/stub-attestation-verifier.js'
 import { AssociationAssociateBuilder } from '../src/association/builders/association-associate-builder.js'
 import { RegistrationEngine } from '../src/registration/registration-engine.js'
-import { createTestNetwork, addTestAuthority, seedAuthorityInvite, seedSignedMutation as seedSignedMutationFixture } from './fixtures/test-context.js'
+import { createTestNetwork, addTestAuthority, addTestElection, seedAuthorityInvite, seedSignedMutation as seedSignedMutationFixture } from './fixtures/test-context.js'
 import { randomTestKeyPair } from './fixtures/keys.js'
 import { digestToBytes, nowCanonicalDatetime } from '../src/utils.js'
 import { toIsoZDatetime, toDeferredCheckDatetime } from '../src/signing/ceremony-helpers.js'
 import type { TestAuthorityContext } from './fixtures/test-context.js'
+import type { EngineContext } from '../src/types.js'
+
+/** Resolve the single Election row seeded by addTestElection() for this authority (mirrors attestation-policy.spec.ts). */
+async function resolveElectionId (ctx: EngineContext, authorityId: string): Promise<string> {
+  const row = await ctx.db
+    .prepare('select Id from Election where AuthorityId = :authorityId limit 1')
+    .get({ authorityId })
+  if (!row) throw new Error('resolveElectionId: Election not found for authority')
+  return row.Id as string
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -160,6 +170,25 @@ describe('AssociationEngine', () => {
         .prepare('select count(*) as n from AttestationChallenge where Nonce = :nonce')
         .get({ nonce: challenge.nonce })
       expect(Number(row?.n)).to.equal(0)
+    })
+
+    // D-14a (45-04): the schema's welded `AttestationChallenge.InsertValid` Digest(...) and the
+    // engine's digestExpr must include `ElectionId` in the identical slot — proved by a 4-arg
+    // (null-electionId) insert still passing InsertValid (above tests already exercise that path)
+    // AND a 5-arg call round-tripping a non-null electionId through the DB row + returned object.
+    it('a 5-arg call with electionId round-trips ElectionId through the DB row and the returned object (D-14a digest weld)', async () => {
+      const { auth, registrantId, engine, sign } = await setupAssociationTest()
+      const elec = await addTestElection(auth)
+      const electionId = await resolveElectionId(elec.ctx, elec.authority.id)
+      const deviceKey = nextDeviceKey()
+
+      const challenge = await engine.issueAttestationChallenge(registrantId, deviceKey, FUTURE_CHALLENGE_EXPIRATION, sign, electionId)
+      expect(challenge.electionId).to.equal(electionId)
+
+      const row = await auth.ctx.db
+        .prepare('select ElectionId from AttestationChallenge where Nonce = :nonce')
+        .get({ nonce: challenge.nonce })
+      expect(row?.ElectionId).to.equal(electionId)
     })
   })
 

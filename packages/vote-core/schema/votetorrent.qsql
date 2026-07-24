@@ -1431,11 +1431,10 @@ declare schema main
 		AuthorityId text, -- issuing authority
 		RegistrantId text, -- registrant this challenge is bound to
 		DeviceKey text, -- device voting public key this challenge is bound to
-		ElectionId text null, -- ADDITIVE (45-03): which election this challenge is for; NOT yet welded into
-			-- InsertValid's Digest (Pitfall 2 atomicity) -- the digest weld + issueAttestationChallenge's
-			-- coordinated digestExpr change are owned by 45-04, landing together with the schema CHECK
-			-- supersession. Left absent from every CHECK here so existing (pre-45-04) challenge inserts,
-			-- which never set ElectionId, stay valid.
+		ElectionId text null, -- which election this challenge is for (D-14a); welded into
+			-- InsertValid's Digest below, lockstep with AssociationEngine.issueAttestationChallenge's
+			-- digestExpr (45-04). Nullable so a null-electionId challenge still binds :electionId=null
+			-- and passes InsertValid identically on both sides.
 		Expiration datetime, -- short TTL
 		constraint AuthorityIdValid check (exists (select 1 from Authority A where A.Id = new.AuthorityId)),
 		constraint RegistrantIdValid check (exists (select 1 from Registrant R where R.Id = new.RegistrantId and R.Status = 'a')),
@@ -1448,7 +1447,7 @@ declare schema main
 						and A.AuthorityId = new.AuthorityId
 						and A.Scope = 'vrg'
 						and A.Digest = Digest(
-							context.Tid, new.Nonce, new.AuthorityId, new.RegistrantId, new.DeviceKey, new.Expiration
+							context.Tid, new.Nonce, new.AuthorityId, new.RegistrantId, new.DeviceKey, new.ElectionId, new.Expiration
 						)
 			)
 		),

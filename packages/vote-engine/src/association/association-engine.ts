@@ -114,7 +114,8 @@ export class AssociationEngine implements IAssociationEngine {
     registrantId: string,
     deviceKey: string,
     expiration: string,
-    signatureOrCallback: SignatureOrCallback
+    signatureOrCallback: SignatureOrCallback,
+    electionId?: string
   ): Promise<AttestationChallenge> {
     this.requireCtx('issueAttestationChallenge')
     const ctx = this.ctx!
@@ -132,32 +133,39 @@ export class AssociationEngine implements IAssociationEngine {
       const nonce: string = (globalThis as any).crypto.randomUUID()
       const expirationZ = toIsoZDatetime(expiration)
       const expirationDeferred = toDeferredCheckDatetime(expirationZ)
+      const electionIdValue = electionId ?? null
 
       // NOTE: bind names `challengeNonce`/`challengeAuthorityId` (NOT `nonce`/`authorityId`) —
       // seedSignedMutation reserves `nonce`/`authorityId`/etc for ITS OWN ceremony bind params
       // and would silently overwrite a same-named digestParams entry (T-42-03 bug class found
       // via TDD on 42-03's RegistrationEngine: a `signature` key collided there; here the
-      // colliding keys would have been the challenge's own Nonce/AuthorityId).
-      const digestExpr = 'select Digest(:tid, :challengeNonce, :challengeAuthorityId, :registrantId, :deviceKey, :expirationDeferred) as d'
-      const digestParams = { tid, challengeNonce: nonce, challengeAuthorityId: authorityId, registrantId, deviceKey, expirationDeferred }
+      // colliding keys would have been the challenge's own Nonce/AuthorityId). `electionId`
+      // does NOT collide with seedSignedMutation's reserved set (nonce/authorityId/signature).
+      //
+      // D-14a: `:electionId` sits in the IDENTICAL slot (between deviceKey and expiration) as
+      // the schema's welded `AttestationChallenge.InsertValid` `Digest(...)` — both sides MUST
+      // move together (45-04 atomicity requirement); a slot mismatch fails every insert.
+      const digestExpr = 'select Digest(:tid, :challengeNonce, :challengeAuthorityId, :registrantId, :deviceKey, :electionId, :expirationDeferred) as d'
+      const digestParams = { tid, challengeNonce: nonce, challengeAuthorityId: authorityId, registrantId, deviceKey, electionId: electionIdValue, expirationDeferred }
       const signingNonce = await seedSignedMutation(ctx, authorityId, 'vrg', tid, digestExpr, digestParams, this.resolveSign(signatureOrCallback))
 
       await ctx.db.exec(
-        `insert into AttestationChallenge (Nonce, AuthorityId, RegistrantId, DeviceKey, Expiration)
+        `insert into AttestationChallenge (Nonce, AuthorityId, RegistrantId, DeviceKey, ElectionId, Expiration)
          with context SigningNonce = :signingNonce, Tid = ${tid}, now = :now
-         values (:nonce, :authorityId, :registrantId, :deviceKey, :expiration)`,
+         values (:nonce, :authorityId, :registrantId, :deviceKey, :electionId, :expiration)`,
         {
           nonce,
           authorityId,
           registrantId,
           deviceKey,
+          electionId: electionIdValue,
           expiration: expirationZ,
           signingNonce,
           now: nowCanonicalDatetime()
         }
       )
 
-      return { nonce, authorityId, registrantId, deviceKey, expiration: expirationZ }
+      return { nonce, authorityId, registrantId, deviceKey, electionId: electionIdValue ?? undefined, expiration: expirationZ }
     } catch (err) {
       this.rethrow(err, 'issueAttestationChallenge')
     }
@@ -232,7 +240,7 @@ export class AssociationEngine implements IAssociationEngine {
 
     const challengeRow = await ctx.db
       .prepare(
-        'select Nonce, AuthorityId, RegistrantId, DeviceKey, Expiration from AttestationChallenge where Nonce = :nonce and RegistrantId = :registrantId and DeviceKey = :deviceKey'
+        'select Nonce, AuthorityId, RegistrantId, DeviceKey, ElectionId, Expiration from AttestationChallenge where Nonce = :nonce and RegistrantId = :registrantId and DeviceKey = :deviceKey'
       )
       .get({ nonce, registrantId, deviceKey })
     if (!challengeRow) {
@@ -245,6 +253,9 @@ export class AssociationEngine implements IAssociationEngine {
       authorityId: asText(challengeRow.AuthorityId, 'AttestationChallenge.AuthorityId'),
       registrantId: asText(challengeRow.RegistrantId, 'AttestationChallenge.RegistrantId'),
       deviceKey: asText(challengeRow.DeviceKey, 'AttestationChallenge.DeviceKey'),
+      // D-14a: null (unset) ElectionId reads back as undefined — associate()'s policy gate
+      // (below) treats a missing electionId as fail-closed attestation-required (Assumption A5).
+      electionId: challengeRow.ElectionId == null ? undefined : asText(challengeRow.ElectionId, 'AttestationChallenge.ElectionId'),
       // Read back from a plain SELECT — Quereus's stored canonical form lacks the
       // trailing `Z` (see `toIsoZDatetime`'s doc comment); re-Z-suffix it here so the
       // verifier (and every downstream expiration/digest computation) sees the
