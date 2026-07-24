@@ -10,3 +10,8 @@
 // the voter app has no dev-proof-runner harness and hardcodes StubAttestationVerifier
 // unconditionally in engine-factory.ts (no gate to select).
 export const USE_LOCAL_DB_FACTORY = false;
+
+// D-12 independent Play-Integrity-leg stub toggle (real-key + stub-PI test tier).
+// __DEV__-gated (see attestation-producer.ts's resolvePlayIntegrityEnabled); committed
+// default false (real) — never commit an enabled override.
+export const USE_STUB_PLAY_INTEGRITY = false;

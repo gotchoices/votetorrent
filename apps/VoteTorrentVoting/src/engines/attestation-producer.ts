@@ -18,7 +18,9 @@
  * T-44-08 (Spoofing, mitigate) / T-45-05-04 (CR-03): the stub producer is reachable
  * ONLY when `__DEV__` is true. Outside `__DEV__`, `resolveAttestationProducer()`
  * (with no real producer supplied) returns the REAL producer via
- * `createRealAttestationProducer({ enablePlayIntegrity: true })` — never the stub —
+ * `createRealAttestationProducer({ enablePlayIntegrity: resolvePlayIntegrityEnabled() })`
+ * (real by default; D-12 independent stub tier via `USE_STUB_PLAY_INTEGRITY`) — never
+ * the stub —
  * mirroring the authority app's `USE_STUB_ATTESTATION_VERIFIER` / CR-03 fail-closed
  * posture (`apps/VoteTorrentAuthority/src/engines/engine-factory.ts`'s `'association'`
  * case).
@@ -26,6 +28,7 @@
 
 import type { AttestationChallenge, DeviceAttestation } from '@votetorrent/vote-core'
 import { createRealAttestationProducer } from '@votetorrent/attestation-native'
+import { USE_STUB_PLAY_INTEGRITY } from './proof-flags.generated'
 
 /**
  * A device-side attestation producer (D-11 two-step seam):
@@ -73,6 +76,18 @@ export const StubAttestationProducer: AttestationProducer = {
 }
 
 /**
+ * D-12: the SINGLE named source of truth for the native `enablePlayIntegrity` gate
+ * value. Mirrors the `!(__DEV__ && USE_LOCAL_DB_FACTORY)` idiom in engine-factory.ts —
+ * real (`true`) by default; only `__DEV__ && USE_STUB_PLAY_INTEGRITY === true` disables
+ * the Play Integrity leg (the "real-key + stub-PI" tier). A release build always
+ * evaluates to `true` regardless of the flag's value — it can never weaken production.
+ * Independent of `resolveAttestationProducer`'s stub-selection precedence below.
+ */
+export function resolvePlayIntegrityEnabled(): boolean {
+	return !(__DEV__ && USE_STUB_PLAY_INTEGRITY)
+}
+
+/**
  * Resolve the `AttestationProducer` to use, gated the SAME way as
  * `USE_STUB_ATTESTATION_VERIFIER` (fail-closed, CR-03 posture). Precedence:
  *
@@ -92,6 +107,5 @@ export function resolveAttestationProducer(realProducer?: AttestationProducer): 
 	if (__DEV__) {
 		return StubAttestationProducer
 	}
-	// 45-08 replaces this default with resolvePlayIntegrityEnabled()
-	return createRealAttestationProducer({ enablePlayIntegrity: true })
+	return createRealAttestationProducer({ enablePlayIntegrity: resolvePlayIntegrityEnabled() })
 }
