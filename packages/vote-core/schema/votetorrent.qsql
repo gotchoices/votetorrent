@@ -1431,6 +1431,11 @@ declare schema main
 		AuthorityId text, -- issuing authority
 		RegistrantId text, -- registrant this challenge is bound to
 		DeviceKey text, -- device voting public key this challenge is bound to
+		ElectionId text null, -- ADDITIVE (45-03): which election this challenge is for; NOT yet welded into
+			-- InsertValid's Digest (Pitfall 2 atomicity) -- the digest weld + issueAttestationChallenge's
+			-- coordinated digestExpr change are owned by 45-04, landing together with the schema CHECK
+			-- supersession. Left absent from every CHECK here so existing (pre-45-04) challenge inserts,
+			-- which never set ElectionId, stay valid.
 		Expiration datetime, -- short TTL
 		constraint AuthorityIdValid check (exists (select 1 from Authority A where A.Id = new.AuthorityId)),
 		constraint RegistrantIdValid check (exists (select 1 from Registrant R where R.Id = new.RegistrantId and R.Status = 'a')),
@@ -1723,6 +1728,39 @@ declare schema main
 		with context ( SigningNonce text, Tid int );
 
 	index ElectionDisclosurePolicyElection on ElectionDisclosurePolicy (ElectionId);
+
+	-- Election policy: whether this election requires device attestation to Associate (D-14a/b).
+	-- Single row per election (PK = ElectionId); 'mel'-signed, mirrors ElectionRegistrationField/
+	-- ElectionDisclosurePolicy. AttestationRequired MUST stay `integer default` (NEVER `boolean
+	-- default` -- Quereus v4 re-attach ALTER COLUMN landmine, project_quereus_v4_reattach_boolean_
+	-- default_alter_column). Fail-closed default (1 = attestation required); enforcement of the
+	-- fail-closed no-row-means-required posture is engine-side at the associate() read (45-04).
+	table ElectionAttestationPolicy (
+		ElectionId text primary key, -- references Election.Id
+		AttestationRequired integer default 1, -- 1 = attestation required (safe/fail-closed default), 0 = not required
+		constraint ElectionIdValid check (exists (select 1 from Election E where E.Id = new.ElectionId)),
+		constraint MutationValid check on insert, update (
+			exists (
+				select 1 from AdminSignature ASig join AdminSigning A on A.Nonce = ASig.SigningNonce
+					join Election E on E.Id = new.ElectionId
+					where A.Nonce = context.SigningNonce
+						and A.AuthorityId = E.AuthorityId
+						and A.Scope = 'mel'
+						and A.Digest = Digest(context.Tid, new.ElectionId, new.AttestationRequired)
+			)
+		),
+		constraint DeleteValid check on delete (
+			exists (
+				select 1 from AdminSignature ASig join AdminSigning A on A.Nonce = ASig.SigningNonce
+					join Election E on E.Id = old.ElectionId
+					where A.Nonce = context.SigningNonce
+						and A.AuthorityId = E.AuthorityId
+						and A.Scope = 'mel'
+						and A.Digest = Digest(context.Tid, old.ElectionId, old.AttestationRequired, 'delete')
+			)
+		)
+	)
+		with context ( SigningNonce text, Tid int );
 }
 
 apply schema main;
