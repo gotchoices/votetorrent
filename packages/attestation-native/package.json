@@ -19,8 +19,23 @@
 			"javaPackageName": "org.votetorrent.attestationnative"
 		}
 	},
+	"scripts": {
+		"tsc": "tsc --noEmit"
+	},
+	"dependencies": {
+		"@optimystic/quereus-plugin-crypto": "^0.14.1",
+		"@votetorrent/vote-core": "workspace:*"
+	},
 	"peerDependencies": {
 		"react": "*",
 		"react-native": "*"
+	},
+	"devDependencies": {
+		"@react-native/typescript-config": "0.78.0",
+		"@types/jest": "^29.5.13",
+		"@types/node": "^22",
+		"react": "19.0.0",
+		"react-native": "0.78.0",
+		"typescript": "5.0.4"
 	}
 }
