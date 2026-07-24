@@ -230,3 +230,88 @@ dependency class.
 Until every box above is checked, the verifier remains code-complete and
 proven on Node via the synthetic harness, with real end-to-end device
 verification deferred per D-10.
+
+## 7. Voter-app producer setup (Play Integrity leg + on-device proof)
+
+This section covers what the **producer** side (the voter app,
+`apps/VoteTorrentVoting`) needs before the Pixel 8 on-device proof can pass
+against the verifier documented in §§1-6 above. It is config + docs only —
+no verifier code changes.
+
+### 7a. Play Console / Cloud prereqs for REAL Play Integrity
+
+The voter app (`apps/VoteTorrentVoting`, `applicationId com.votetorrentvoting`)
+must itself be registered on Play Console — on the **internal-testing
+track** — with the Play Integrity API enabled and its Cloud project linked,
+following the same flow as §1/§2 above (that registration is for the app
+that CONSUMES tokens on Play Console's side; the voter app is the one that
+PRODUCES them and must be the one carrying the listing). Real Play Integrity
+verdicts are unavailable until that internal-testing listing exists — until
+then, real on-device proof runs use the stubbed Play Integrity leg described
+in §7b (deferred per D-01).
+
+### 7b. The independent Play-Integrity proof-flag (D-12)
+
+An independent, `__DEV__`-gated JS proof-flag —
+`USE_STUB_PLAY_INTEGRITY`, in
+`apps/VoteTorrentVoting/src/engines/proof-flags.generated.ts` — feeds the
+native `enablePlayIntegrity` gate. Committed default is `false` (real). The
+gate is `!(__DEV__ && USE_STUB_PLAY_INTEGRITY)`: a release build ALWAYS
+evaluates this to `true` regardless of the flag's committed or locally
+edited value, so the flag can never weaken a release build — flipping it
+only ever affects a `__DEV__` build.
+
+This flag is **independent** of the overall `resolveAttestationProducer`
+stub gate (`apps/VoteTorrentVoting/src/engines/attestation-producer.ts`).
+Flipping `USE_STUB_PLAY_INTEGRITY` to `true` in a `__DEV__` build disables/
+stubs ONLY the Play Integrity leg — the hardware key-attestation leg still
+runs for real against the real Keystore/StrongBox/TEE. This is the
+**real-key + stub-PI** test tier (D-01): it lets the Pixel 8 proof exercise
+real hardware key attestation before the Play Console internal-testing
+listing (§7a) exists.
+
+As with `USE_LOCAL_DB_FACTORY` (the analogous pattern already in
+`proof-flags.generated.ts`), never commit an enabled (`true`) override.
+
+### 7c. The dev-stub→real flip
+
+To run real Play Integrity end-to-end: (1) register the Play Console app per
+§7a, (2) provision the two verifier-side keys per §3, (3) leave
+`USE_STUB_PLAY_INTEGRITY = false` (the committed default) in a build that
+also is NOT running with the overall stub producer active (i.e. not
+`__DEV__`, or `__DEV__` with a real producer explicitly supplied per
+`resolveAttestationProducer`'s precedence).
+
+### 7d. EXPECTED_APP_PACKAGE correction (Pitfall 1, on the D-01 proof critical path)
+
+`apps/VoteTorrentAuthority/src/engines/attestation-keys.generated.ts` pins
+the VOTER app's package name and signing-certificate digest (it is the
+producer's identity the verifier's WR-03 app-identity gate checks) — it
+MUST read `EXPECTED_APP_PACKAGE = 'com.votetorrentvoting'` with a populated
+`EXPECTED_APP_CERT_SHA256_DIGESTS` (not left as the Phase-43 placeholder
+`'org.votetorrent.authority'` with an empty digest array), or the Pixel 8
+proof fails the WR-03 app-identity gate before it ever reaches the
+Play-Integrity/key-attestation logic. This correction ships as part of this
+same plan (config-only; the verifier itself is untouched).
+
+### 7e. Pinned-root re-fetch (Pitfall 7)
+
+Google rotated the hardware attestation root effective **Feb 1 2026** — a
+"Key Attestation CA1" now co-signs chains that a stale single-root snapshot
+will reject with "no verifiable certificate chain path to a pinned Google
+hardware root," even for a genuinely valid Pixel 8 attestation. Immediately
+before running the Pixel 8 proof, re-run §4a's
+`curl https://android.googleapis.com/attestation/root` regeneration
+procedure and re-verify/re-embed the current root set — do not rely on
+whatever snapshot happens to already be committed.
+
+Add to §6's summary checklist:
+
+- [ ] Voter app registered on Play Console internal-testing track (§7a) —
+      or deliberately deferred with `USE_STUB_PLAY_INTEGRITY` posture noted
+- [ ] `EXPECTED_APP_PACKAGE` corrected to `com.votetorrentvoting` with a
+      populated `EXPECTED_APP_CERT_SHA256_DIGESTS` (§7d)
+- [ ] Pinned attestation root re-fetched immediately before the Pixel 8
+      proof (§7e / §4a)
+- [ ] `USE_STUB_PLAY_INTEGRITY` posture confirmed for the intended proof
+      tier (real-PI vs. real-key + stub-PI) before running the proof
