@@ -349,6 +349,99 @@ describe('AssociationEngine', () => {
     })
   })
 
+  describe('associate — election-terms attestation gate (D-14c/D-14e, A5 fail-closed)', () => {
+    /** A verifier that always rejects — proves whether verify() was called at all. */
+    const rejectingVerifier: IAttestationVerifier = {
+      async verify (): Promise<AttestationVerification> {
+        return { ok: false, reason: 'rejecting-verifier (attestation gate test)' }
+      }
+    }
+
+    it('AttestationRequired=0: associate() SUCCEEDS with a rejecting verifier (verify skipped), writes minimal AssociationPrivate + non-null AttestationCid', async () => {
+      const { auth, registrantId, sign } = await setupAssociationTest()
+      const elec = await addTestElection(auth)
+      const electionId = await resolveElectionId(elec.ctx, elec.authority.id)
+      const registrationEngine = new RegistrationEngine(auth.ctx)
+      await registrationEngine.setElectionAttestationPolicy(electionId, false, sign)
+
+      const engine = new AssociationEngine(auth.ctx, rejectingVerifier)
+      const deviceKey = nextDeviceKey()
+      const challenge = await engine.issueAttestationChallenge(registrantId, deviceKey, FUTURE_CHALLENGE_EXPIRATION, sign, electionId)
+      const attestation = makeDeviceAttestation()
+
+      await engine.associate({ registrantId, deviceKey, nonce: challenge.nonce, attestation }, sign)
+
+      const privateCount = await auth.ctx.db
+        .prepare('select count(*) as n from AssociationPrivate where RegistrantId = :registrantId and DeviceKey = :deviceKey')
+        .get({ registrantId, deviceKey })
+      expect(Number(privateCount?.n)).to.equal(1)
+
+      const cidRow = await auth.ctx.db
+        .prepare('select AttestationCid from Association where RegistrantId = :registrantId and DeviceKey = :deviceKey')
+        .get({ registrantId, deviceKey })
+      expect(cidRow?.AttestationCid).to.be.a('string').with.length.greaterThan(0)
+    })
+
+    it('AttestationRequired=1: associate() THROWS with a rejecting verifier (verify called)', async () => {
+      const { auth, registrantId, sign } = await setupAssociationTest()
+      const elec = await addTestElection(auth)
+      const electionId = await resolveElectionId(elec.ctx, elec.authority.id)
+      const registrationEngine = new RegistrationEngine(auth.ctx)
+      await registrationEngine.setElectionAttestationPolicy(electionId, true, sign)
+
+      const engine = new AssociationEngine(auth.ctx, rejectingVerifier)
+      const deviceKey = nextDeviceKey()
+      const challenge = await engine.issueAttestationChallenge(registrantId, deviceKey, FUTURE_CHALLENGE_EXPIRATION, sign, electionId)
+      const attestation = makeDeviceAttestation()
+
+      let threw = false
+      try {
+        await engine.associate({ registrantId, deviceKey, nonce: challenge.nonce, attestation }, sign)
+      } catch {
+        threw = true
+      }
+      expect(threw, 'expected associate() to throw when AttestationRequired=1 with a rejecting verifier').to.be.true
+    })
+
+    it('no policy row (unconfigured election): associate() THROWS with a rejecting verifier (fail-closed, A5)', async () => {
+      const { auth, registrantId, sign } = await setupAssociationTest()
+      const elec = await addTestElection(auth)
+      const electionId = await resolveElectionId(elec.ctx, elec.authority.id)
+      // Deliberately no setElectionAttestationPolicy call — no row exists for electionId.
+
+      const engine = new AssociationEngine(auth.ctx, rejectingVerifier)
+      const deviceKey = nextDeviceKey()
+      const challenge = await engine.issueAttestationChallenge(registrantId, deviceKey, FUTURE_CHALLENGE_EXPIRATION, sign, electionId)
+      const attestation = makeDeviceAttestation()
+
+      let threw = false
+      try {
+        await engine.associate({ registrantId, deviceKey, nonce: challenge.nonce, attestation }, sign)
+      } catch {
+        threw = true
+      }
+      expect(threw, 'expected associate() to throw when no policy row exists (fail-closed, A5)').to.be.true
+    })
+
+    it('null-electionId challenge (electionId omitted from issueAttestationChallenge): associate() THROWS with a rejecting verifier (fail-closed)', async () => {
+      const { auth, registrantId, sign } = await setupAssociationTest()
+
+      const engine = new AssociationEngine(auth.ctx, rejectingVerifier)
+      const deviceKey = nextDeviceKey()
+      // No electionId arg — challenge.electionId will be undefined.
+      const challenge = await engine.issueAttestationChallenge(registrantId, deviceKey, FUTURE_CHALLENGE_EXPIRATION, sign)
+      const attestation = makeDeviceAttestation()
+
+      let threw = false
+      try {
+        await engine.associate({ registrantId, deviceKey, nonce: challenge.nonce, attestation }, sign)
+      } catch {
+        threw = true
+      }
+      expect(threw, 'expected associate() to throw when the challenge carries a null electionId (fail-closed)').to.be.true
+    })
+  })
+
   describe('MockAssociationEngine parity', () => {
     it('exposes the same IAssociationEngine surface (buildAssociate + issue/associate/get) without a DB', async () => {
       const mock = new MockAssociationEngine()

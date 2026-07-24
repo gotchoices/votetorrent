@@ -263,12 +263,24 @@ export class AssociationEngine implements IAssociationEngine {
       expiration: toIsoZDatetime(challengeRow.Expiration as string)
     }
 
+    // D-14c/A5/CR-03 (LOCKED, fail-closed): read the election's attestation policy and skip
+    // verifier.verify() ONLY when a policy row exists AND AttestationRequired is exactly 0.
+    // No row (unconfigured election), a null challenge.electionId, or any non-zero/unexpected
+    // value ⇒ attestation is REQUIRED. A failure in this SELECT itself propagates (rejects
+    // associate()) rather than silently skipping — fail-closed by rejection, never by omission.
+    const policyRow = await ctx.db
+      .prepare('select AttestationRequired from ElectionAttestationPolicy where ElectionId = :electionId')
+      .get({ electionId: challenge.electionId ?? null })
+    const attestationRequired = policyRow == null || Number(policyRow.AttestationRequired) !== 0
+
     // D-07 seam — verify BEFORE opening any transaction; no row written on rejection.
-    const verification: AttestationVerification = await this.verifier.verify(challenge, attestation)
-    if (!verification.ok) {
-      throw new Error(
-        `AssociationEngine.associate: attestation verification failed${verification.reason ? `: ${verification.reason}` : ''}`
-      )
+    if (attestationRequired) {
+      const verification: AttestationVerification = await this.verifier.verify(challenge, attestation)
+      if (!verification.ok) {
+        throw new Error(
+          `AssociationEngine.associate: attestation verification failed${verification.reason ? `: ${verification.reason}` : ''}`
+        )
+      }
     }
 
     // D-06 device-uniqueness (authority-side — needs the private DeviceId).
