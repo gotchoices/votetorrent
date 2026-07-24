@@ -1,42 +1,46 @@
 /**
- * ConfirmationScreen (REG-04/D-05/D-07) — the Face-ID confirmation screen. The "Confirm with
- * Face ID" tap IS the deliberate confirming gesture (D-05), not decorative or an auto-advance.
- * `navigation.popToTop()` clears the whole `DeviceAttestation → RegisterPersonal →
+ * ConfirmationScreen (REG-04/D-03/D-05/D-07/D-09/D-11) — the Face-ID confirmation screen. The
+ * "Confirm with Face ID" tap IS the deliberate confirming gesture (D-05), not decorative or an
+ * auto-advance. `navigation.popToTop()` clears the whole `DeviceAttestation → RegisterPersonal →
  * RegisterAddressParty → RegisterConfirm → Confirmation` chain in one call (41-RESEARCH.md
  * Pattern 5) — NOT `navigate('RegistrationHome')`, which would leave that entire chain on the
- * back stack. No native biometric module (D-07); no auto-advance on this screen (unlike
- * DeviceAttestation), since D-05 requires the explicit tap.
+ * back stack.
  *
- * Phase 44-08 (the phase's capstone plan) — the CONFIRMING TAP now drives the REAL signed
- * registration + association ceremony end-to-end, per the research resolution of Pitfall 4 /
- * Open Question 1: navigation order is UNCHANGED, `DeviceAttestationScreen` stays a pure visual
- * interstitial, and ALL real engine calls are deferred to THIS screen's tap — a real
- * `registrantId` does not exist until `register()` runs.
+ * Phase 45-06 (this plan) — the CONFIRMING TAP drives the REAL signed registration + association
+ * ceremony bound to the hardware **P-256** device key (D-03), with the D-11 two-step producer
+ * seam driven in the correct order and the D-09 three-way failure UX wired:
  *
- * The 5-step ceremony (44-PATTERNS.md):
- *   1. Map the shared draft (`useRegistrationDraft().draft`) onto `RegisterInit` tiers —
+ * The ceremony (order matters, D-11):
+ *   1. `provisionDeviceKey()` — resolves the hardware-backed P-256 public key BEFORE `register()`.
+ *      Idempotent against the same stable key alias `DeviceAttestationScreen`'s pre-register
+ *      capability probe already used, so this does NOT prompt biometric and does NOT create a
+ *      second hardware key.
+ *   2. Map the shared draft (`useRegistrationDraft().draft`) onto `RegisterInit` tiers —
  *      firstName/lastName -> public, dob/email/phone/address -> private `PrivateDetail[]`,
- *      party -> selective (D-13, only when non-empty) — with `electionId` set to the D-07
- *      seeded election id (`useVotingApp().seededElectionId`) so `validateFieldPolicy` fires
- *      (D-08/D-09).
- *   2. `RegistrationEngine.register(init, sign)` with the device signer
- *      (`useVotingApp().sign` — the SAME founding-officer/device identity 44-06 seeded, never
- *      the CadreNode peer key).
- *   3. `AssociationEngine.issueAttestationChallenge(registrantId, deviceKey, expiration, sign)`.
- *   4. The D-03/D-11 two-step attestation producer (`provisionDeviceKey()` then
- *      `produce(challenge)`) answers the challenge with a `DeviceAttestation` — the
- *      dev-only `StubAttestationProducer` under `__DEV__`, else Phase 45's real
- *      producer (`createRealAttestationProducer`) via `resolveAttestationProducer`.
- *   5. `AssociationEngine.buildAssociate()...setAttestation(stub)...commit()`.
+ *      party -> selective (D-13, only when non-empty) — with `electionId` set to the D-07 seeded
+ *      election id (`useVotingApp().seededElectionId`) so `validateFieldPolicy` fires (D-08/D-09).
+ *   3. `RegistrationEngine.register(init, sign)` with the device signer (`useVotingApp().sign` —
+ *      the SAME founding-officer/device identity 44-06 seeded, never the CadreNode peer key).
+ *      The secp256k1 identity key (`getOrCreateDeviceUser`) stays the registration SIGNING key
+ *      via `sign` — it is never the attested DeviceKey (D-03).
+ *   4. `AssociationEngine.issueAttestationChallenge(registrantId, p256DeviceKey, expiration, sign,
+ *      seededElectionId)` — the P-256 key from step 1, `seededElectionId` threaded as the
+ *      trailing arg (45-04's D-14a signature).
+ *   5. `producer.produce(challenge)` — the D-11 second step; this is where BiometricPrompt fires
+ *      ("Confirm with Face ID", D-06/D-15/D-16 biometric-last).
+ *   6. `AssociationEngine.buildAssociate()...setDeviceKey(p256DeviceKey)...commit()`.
  *
- * On full success: `useRegistrationDraft().clearDraft()` (T-42-01c submit-path wipe, pairs with
- * 44-05's abandon-path wipe) then `navigation.popToTop()`. On ANY thrown step: an inline error
- * message renders and the CTA becomes a retry affordance (mirrors
- * `AppProvider.tsx`'s "Try Again" button shape) — no nav, no draft clear, so the user can retry
- * with their data intact (T-44-23).
+ * On full success: `useRegistrationDraft().clearDraft()` (T-42-01c submit-path wipe) then
+ * `navigation.popToTop()`. On ANY thrown step, `classifyAttestationFailure(err)` (D-09) drives
+ * the failure UX: `'recoverable-action'` (e.g. biometrics not enrolled) renders a setup prompt
+ * that deep-links to system enrollment plus a "Try Again" retry reusing the same `registrantId`
+ * (WR-02); `'recoverable-transient'` renders a generic "Try again" retry; `'terminal'`
+ * (release-only — never reachable under `__DEV__`, see `attestation-failure.ts`) renders a
+ * terminal message with NO retry CTA. Classified copy is generic by design (T-45-06-04) — raw
+ * reject codes / internal error messages never reach the UI.
  */
 import React, {useRef, useState} from 'react';
-import {Pressable, StyleSheet, Text, View} from 'react-native';
+import {Linking, Pressable, StyleSheet, Text, View} from 'react-native';
 import {useNavigation, useTheme} from '@react-navigation/native';
 import type {ExtendedTheme} from '@react-navigation/native';
 import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
@@ -55,6 +59,7 @@ import {useVotingApp} from '../../providers/VotingAppProvider';
 import {useRegistrationDraft} from '../../providers/RegistrationDraftProvider';
 import {getOrCreateDeviceUser} from '../../engines/device-user';
 import {resolveAttestationProducer} from '../../engines/attestation-producer';
+import {classifyAttestationFailure, type AttestationFailureClass} from '../../engines/attestation-failure';
 import {globalStyles} from '../../theme/styles';
 import type {RegistrationStackParamList} from '../../navigation/types';
 
@@ -88,7 +93,7 @@ export default function ConfirmationScreen() {
 	const {t} = useTranslation('registration');
 
 	const [isSubmitting, setIsSubmitting] = useState(false);
-	const [errorMessage, setErrorMessage] = useState<string | null>(null);
+	const [failureClass, setFailureClass] = useState<AttestationFailureClass | null>(null);
 
 	// WR-02: one registrantId per registration attempt (this mounted ceremony), minted
 	// once and reused on every "Try Again" retry. A fresh id on each retry would re-run
@@ -103,7 +108,7 @@ export default function ConfirmationScreen() {
 			return;
 		}
 		setIsSubmitting(true);
-		setErrorMessage(null);
+		setFailureClass(null);
 		try {
 			if (!sign) {
 				throw new Error('Device signer is not ready yet — please wait for setup to finish and try again.');
@@ -116,16 +121,24 @@ export default function ConfirmationScreen() {
 				throw new Error('No election configured — cannot register (field policy would be unenforced).');
 			}
 
+			// D-11: resolve the producer once and provision the hardware P-256 key BEFORE
+			// register() — idempotent against the same stable key alias
+			// DeviceAttestationScreen's pre-register capability probe already used, so this
+			// does NOT prompt biometric (biometric fires later, inside produce()) and does
+			// NOT create a second hardware key.
+			const producer = resolveAttestationProducer();
+			const {publicKey: p256DeviceKey} = await producer.provisionDeviceKey();
+
 			// The seeded network's founding-officer authority (dev-seed.ts, 44-06) — resolved from
 			// the already-established network context, never hand-rolled.
 			const networkEngine = await getEngine<INetworkEngine>('network');
 			const details = await networkEngine.getDetails();
 			const authorityId = details.network.primaryAuthorityId;
 
-			// The SAME device identity used as the signer (device-user.ts) — its public key is the
-			// association's DeviceKey (D-05/D-07). Idempotent: returns the already-persisted user.
-			const deviceUser = await getOrCreateDeviceUser('Device User');
-			const deviceKey = deviceUser.activeKeys[0]!.key;
+			// The SAME device identity used as the signer (device-user.ts). Its secp256k1 key
+			// remains the registration SIGNING key (via `sign`) — it is NEVER the attested
+			// DeviceKey; `p256DeviceKey` (provisioned above) is the attested device key (D-03).
+			await getOrCreateDeviceUser('Device User');
 
 			// WR-02: mint the registrantId once per attempt and reuse it on retry.
 			let registrantId = registrantIdRef.current;
@@ -168,27 +181,25 @@ export default function ConfirmationScreen() {
 			const registrationEngine = await getEngine<IRegistrationEngine>('registration');
 			await registrationEngine.register(init, sign);
 
-			// (2)-(4) Step 2 — challenge, then the D-03 stub attestation producer answers it.
+			// (2) Step 2 — the election-terms-bound challenge, keyed to the P-256 device key
+			// (D-03) with the seeded electionId threaded as the trailing arg (D-11 / 45-04).
 			const associationEngine = await getEngine<IAssociationEngine>('association');
 			const challenge = await associationEngine.issueAttestationChallenge(
 				registrantId,
-				deviceKey,
+				p256DeviceKey,
 				challengeExpiration,
 				sign,
+				seededElectionId,
 			);
-			// CR-01/D-03/D-11: resolve the producer through the fail-closed gate — a real
-			// producer wins, else the stub under __DEV__, else the real producer outside
-			// __DEV__ (never the stub, CR-03). 45-05 reshaped the seam into the D-11
-			// two-step call (provisionDeviceKey() then produce(challenge)); the ceremony
-			// ORDER here is otherwise unchanged (45-06 owns any reordering).
-			const attestationProducer = resolveAttestationProducer();
-			await attestationProducer.provisionDeviceKey();
-			const attestation = await attestationProducer.produce(challenge);
 
-			// (5) Step 3 — the real associate ceremony, committing the stub attestation.
+			// (3) Step 3 — the D-11 second producer step answers the challenge; this is the
+			// "Confirm with Face ID" biometric step (D-06/D-15/D-16 biometric-last).
+			const attestation = await producer.produce(challenge);
+
+			// (4) Step 4 — the real associate ceremony, binding the P-256 device key (D-03).
 			await (associationEngine.buildAssociate() as unknown as AssociateBuilderChain)
 				.setRegistrantId(registrantId)
-				.setDeviceKey(deviceKey)
+				.setDeviceKey(p256DeviceKey)
 				.setNonce(challenge.nonce)
 				.setAttestation(attestation)
 				.setSignatureOrCallback(sign)
@@ -199,11 +210,40 @@ export default function ConfirmationScreen() {
 			navigation.popToTop();
 		} catch (err) {
 			console.error('ConfirmationScreen: registration ceremony failed:', err);
-			setErrorMessage(err instanceof Error ? err.message : String(err));
+			// D-09/T-45-06-04: classify to a generic UX class — raw reject codes / internal
+			// error messages never reach the UI.
+			setFailureClass(classifyAttestationFailure(err));
 		} finally {
 			setIsSubmitting(false);
 		}
 	}
+
+	/**
+	 * D-09 recoverable-action remediation: deep-link to Android's biometric enrollment
+	 * settings. Falls back to the general security-settings screen if the specific
+	 * enrollment intent isn't resolvable on this device/OS version.
+	 */
+	async function handleSetupDeviceUnlock() {
+		try {
+			await Linking.sendIntent('android.settings.BIOMETRIC_ENROLL');
+		} catch (err) {
+			console.error('ConfirmationScreen: BIOMETRIC_ENROLL intent failed, falling back to security settings:', err);
+			try {
+				await Linking.sendIntent('android.settings.SECURITY_SETTINGS');
+			} catch (fallbackErr) {
+				console.error('ConfirmationScreen: SECURITY_SETTINGS fallback intent also failed:', fallbackErr);
+			}
+		}
+	}
+
+	const errorCopy =
+		failureClass === 'recoverable-action'
+			? t('confirmation.error.biometricNotEnrolled')
+			: failureClass === 'terminal'
+				? t('confirmation.error.terminal')
+				: failureClass === 'recoverable-transient'
+					? t('confirmation.error.transient')
+					: null;
 
 	return (
 		<View style={[globalStyles.container, styles.screen, {backgroundColor: colors.background}]}>
@@ -250,7 +290,7 @@ export default function ConfirmationScreen() {
 					]}>
 					{t('confirmation.caption')}
 				</Text>
-				{errorMessage ? (
+				{errorCopy ? (
 					<Text
 						testID="confirmation-error"
 						style={[
@@ -263,18 +303,36 @@ export default function ConfirmationScreen() {
 								lineHeight: typeScale.body.lineHeight,
 							},
 						]}>
-						{errorMessage}
+						{errorCopy}
 					</Text>
 				) : null}
-				<Pressable
-					testID="confirmation-confirm-face-id"
-					onPress={onConfirm}
-					disabled={isSubmitting}
-					style={[styles.cta, {backgroundColor: colors.primary, borderRadius: radii.pill}]}>
-					<Text style={[styles.ctaLabel, {color: colors.light}]}>
-						{errorMessage ? 'Try Again' : t('confirmation.cta')}
-					</Text>
-				</Pressable>
+				{failureClass === 'terminal' ? null : failureClass === 'recoverable-action' ? (
+					<>
+						<Pressable
+							testID="confirmation-setup-cta"
+							onPress={handleSetupDeviceUnlock}
+							style={[styles.cta, {backgroundColor: colors.primary, borderRadius: radii.pill}]}>
+							<Text style={[styles.ctaLabel, {color: colors.light}]}>{t('confirmation.error.setupCta')}</Text>
+						</Pressable>
+						<Pressable
+							testID="confirmation-retry-cta"
+							onPress={onConfirm}
+							disabled={isSubmitting}
+							style={[styles.retryCta, {borderColor: colors.primary, borderRadius: radii.pill}]}>
+							<Text style={[styles.ctaLabel, {color: colors.primary}]}>Try Again</Text>
+						</Pressable>
+					</>
+				) : (
+					<Pressable
+						testID="confirmation-confirm-face-id"
+						onPress={onConfirm}
+						disabled={isSubmitting}
+						style={[styles.cta, {backgroundColor: colors.primary, borderRadius: radii.pill}]}>
+						<Text style={[styles.ctaLabel, {color: colors.light}]}>
+							{errorCopy ? 'Try Again' : t('confirmation.cta')}
+						</Text>
+					</Pressable>
+				)}
 			</View>
 		</View>
 	);
@@ -313,6 +371,14 @@ const styles = StyleSheet.create({
 		alignItems: 'center',
 		justifyContent: 'center',
 		paddingHorizontal: 24,
+	},
+	retryCta: {
+		marginTop: 16, // md spacing token
+		minHeight: 44, // minimum touch target
+		alignItems: 'center',
+		justifyContent: 'center',
+		paddingHorizontal: 24,
+		borderWidth: 1,
 	},
 	ctaLabel: {
 		fontWeight: '600',

@@ -107,7 +107,7 @@ describe('DeviceAttestationScreen (REG-02/D-07/D-08/D-10/D-11)', () => {
 		expect(mockReplace).toHaveBeenCalledTimes(1);
 	});
 
-	it("terminal-class rejection with __DEV__ false renders the terminal wall and does NOT advance", async () => {
+	it('terminal-class rejection with __DEV__ false renders the terminal wall and does NOT advance', async () => {
 		(globalThis as {__DEV__?: boolean}).__DEV__ = false;
 		mockProvisionDeviceKey.mockRejectedValue({code: 'NO_STRONGBOX_OR_TEE'});
 

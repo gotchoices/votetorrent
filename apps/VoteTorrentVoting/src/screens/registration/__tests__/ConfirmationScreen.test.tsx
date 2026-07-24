@@ -1,20 +1,23 @@
 /**
- * Unit tests for ConfirmationScreen (REG-04/D-05) — the Face-ID confirming tap. Fully mocks
- * `@react-navigation/native` (spy-able `popToTop`), `providers/VotingAppProvider`,
- * `providers/RegistrationDraftProvider`, and `engines/device-user` so the real ceremony can be
- * exercised without a real navigator/provider/engine tree, mirroring Authority's
- * `NetworksScreen.bootstrap.test.tsx` full-replace mocking pattern.
+ * Unit tests for ConfirmationScreen (REG-04/D-03/D-05/D-09/D-11) — the Face-ID confirming tap.
+ * Fully mocks `@react-navigation/native` (spy-able `popToTop`), `providers/VotingAppProvider`,
+ * `providers/RegistrationDraftProvider`, `engines/device-user`, and `engines/attestation-producer`
+ * (D-11 two-step seam) so the real ceremony can be exercised without a real navigator/provider/
+ * engine tree, mirroring Authority's `NetworksScreen.bootstrap.test.tsx` full-replace mocking
+ * pattern.
  *
- * Phase 44-08 (the phase's capstone plan): the mock `setIsRegistered`/plain-`popToTop` assertions
- * are REPLACED by assertions on the real register -> issueAttestationChallenge -> setAttestation
- * (D-03 stub) -> associate-commit call ORDER, plus the success (clearDraft + popToTop) and
- * failure (error rendered, no clearDraft/popToTop) paths.
+ * Phase 45-06 (this plan) — asserts the reordered/rebound ceremony: `provisionDeviceKey` runs
+ * BEFORE `register`/`issueAttestationChallenge`; `issueAttestationChallenge` and `setDeviceKey`
+ * both receive the P-256 pubkey (never the secp256k1 `activeKeys[0]` key); `seededElectionId` is
+ * threaded as the trailing arg; and the D-09 three-way failure UX (recoverable-action /
+ * recoverable-transient / terminal) renders the correct classified copy + CTA shape.
  */
 import React from 'react';
 import renderer from 'react-test-renderer';
 import '../../../i18n'; // initializes the global i18next instance useTranslation() reads from
 
 const mockPopToTop = jest.fn();
+const mockSendIntent = jest.fn(async (..._args: unknown[]) => undefined);
 
 jest.mock('@react-navigation/native', () => ({
 	useNavigation: () => ({popToTop: mockPopToTop}),
@@ -39,6 +42,10 @@ jest.mock('@react-navigation/native', () => ({
 	}),
 }));
 
+jest.mock('react-native/Libraries/Linking/Linking', () => ({
+	sendIntent: (...args: unknown[]) => mockSendIntent(...args),
+}));
+
 // ---- Mocked engine boundary (D-02/D-05): getEngine('network'|'registration'|'association') ----
 
 const callOrder: string[] = [];
@@ -60,18 +67,40 @@ const mockRegister = jest.fn(async (init: any) => {
 const mockRegistrationEngine = {register: mockRegister};
 
 const CHALLENGE_NONCE = 'challenge-nonce-abc';
-const mockIssueAttestationChallenge = jest.fn(async (registrantId: string, deviceKey: string) => {
-	callOrder.push('issueAttestationChallenge');
-	return {
-		nonce: CHALLENGE_NONCE,
-		authorityId: 'authority-1',
-		registrantId,
-		deviceKey,
-		expiration: '2100-01-01T00:00:00Z',
-	};
-});
+const P256_PUB = 'P256_PUB';
+const SEEDED_ELECTION_ID = 'election-1';
 
-let capturedAttestation: unknown;
+interface IssueChallengeCall {
+	registrantId: string;
+	deviceKey: string;
+	expiration: string;
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	signatureOrCallback: any;
+	electionId?: string;
+}
+const issueChallengeCalls: IssueChallengeCall[] = [];
+const mockIssueAttestationChallenge = jest.fn(
+	async (
+		registrantId: string,
+		deviceKey: string,
+		expiration: string,
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		signatureOrCallback: any,
+		electionId?: string,
+	) => {
+		callOrder.push('issueAttestationChallenge');
+		issueChallengeCalls.push({registrantId, deviceKey, expiration, signatureOrCallback, electionId});
+		return {
+			nonce: CHALLENGE_NONCE,
+			authorityId: 'authority-1',
+			registrantId,
+			deviceKey,
+			expiration: '2100-01-01T00:00:00Z',
+		};
+	},
+);
+
+let capturedSetDeviceKey: unknown;
 const mockCommit = jest.fn(async () => {
 	callOrder.push('associate.commit');
 });
@@ -88,13 +117,12 @@ interface MockAssociateBuilder {
 function makeAssociateBuilder(): MockAssociateBuilder {
 	const builder: MockAssociateBuilder = {
 		setRegistrantId: jest.fn((_registrantId: string) => builder),
-		setDeviceKey: jest.fn((_deviceKey: string) => builder),
-		setNonce: jest.fn((_nonce: string) => builder),
-		setAttestation: jest.fn((attestation: unknown) => {
-			callOrder.push('setAttestation');
-			capturedAttestation = attestation;
+		setDeviceKey: jest.fn((deviceKey: string) => {
+			capturedSetDeviceKey = deviceKey;
 			return builder;
 		}),
+		setNonce: jest.fn((_nonce: string) => builder),
+		setAttestation: jest.fn((_attestation: unknown) => builder),
 		setSignatureOrCallback: jest.fn((_signatureOrCallback: unknown) => builder),
 		commit: mockCommit,
 	};
@@ -127,7 +155,7 @@ const mockSign = jest.fn(async () => ({
 
 jest.mock('../../../providers/VotingAppProvider', () => ({
 	useVotingApp: () => ({
-		seededElectionId: 'election-1',
+		seededElectionId: SEEDED_ELECTION_ID,
 		sign: mockSign,
 		getEngine: mockGetEngine,
 	}),
@@ -156,12 +184,35 @@ jest.mock('../../../providers/RegistrationDraftProvider', () => ({
 	}),
 }));
 
+const mockGetOrCreateDeviceUser = jest.fn(async (..._args: unknown[]) => ({
+	id: 'device-user-1',
+	name: 'Dev Voter',
+	activeKeys: [{key: 'SECP256K1_DEVICE_KEY_MUST_NOT_BE_USED', type: 'mobile', expiration: 9999999999999}],
+}));
 jest.mock('../../../engines/device-user', () => ({
-	getOrCreateDeviceUser: jest.fn(async () => ({
-		id: 'device-user-1',
-		name: 'Dev Voter',
-		activeKeys: [{key: 'device-pub-key', type: 'mobile', expiration: 9999999999999}],
-	})),
+	getOrCreateDeviceUser: (...args: unknown[]) => mockGetOrCreateDeviceUser(...args),
+}));
+
+const mockProvisionDeviceKey = jest.fn(async () => {
+	callOrder.push('provisionDeviceKey');
+	return {publicKey: P256_PUB};
+});
+const mockProduce = jest.fn(async (challenge: {nonce: string}) => {
+	callOrder.push('produce');
+	return {
+		publicKey: P256_PUB,
+		deviceId: 'DEVICE_ID',
+		attestationTime: Date.now(),
+		certificateChain: ['CERT'],
+		platformDetails: {type: 'Android' as const, safetyNetAttestation: 'x', keystorePublicKey: P256_PUB, nonce: challenge.nonce},
+	};
+});
+const mockResolveAttestationProducer = jest.fn((..._args: unknown[]) => ({
+	provisionDeviceKey: mockProvisionDeviceKey,
+	produce: mockProduce,
+}));
+jest.mock('../../../engines/attestation-producer', () => ({
+	resolveAttestationProducer: (...args: unknown[]) => mockResolveAttestationProducer(...args),
 }));
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -175,11 +226,14 @@ function renderScreen() {
 	return tr;
 }
 
-async function pressConfirm(tr: renderer.ReactTestRenderer) {
-	const cta = tr.root.findByProps({testID: 'confirmation-confirm-face-id'});
+async function pressConfirm(tr: renderer.ReactTestRenderer, testID = 'confirmation-confirm-face-id') {
+	const cta = tr.root.findByProps({testID});
 	await renderer.act(async () => {
 		cta.props.onPress();
-		// Flush the ceremony's chained microtasks (register -> challenge -> associate).
+		// Flush the ceremony's chained microtasks (provisionDeviceKey -> register -> challenge
+		// -> produce -> associate commit).
+		await Promise.resolve();
+		await Promise.resolve();
 		await Promise.resolve();
 		await Promise.resolve();
 		await Promise.resolve();
@@ -194,13 +248,32 @@ beforeEach(() => {
 	mockRegister.mockClear();
 	mockIssueAttestationChallenge.mockClear();
 	mockCommit.mockClear();
+	mockProvisionDeviceKey.mockClear();
+	mockProduce.mockClear();
+	mockGetOrCreateDeviceUser.mockClear();
+	mockSendIntent.mockClear();
+	mockProvisionDeviceKey.mockImplementation(async () => {
+		callOrder.push('provisionDeviceKey');
+		return {publicKey: P256_PUB};
+	});
+	mockProduce.mockImplementation(async (challenge: {nonce: string}) => {
+		callOrder.push('produce');
+		return {
+			publicKey: P256_PUB,
+			deviceId: 'DEVICE_ID',
+			attestationTime: Date.now(),
+			certificateChain: ['CERT'],
+			platformDetails: {type: 'Android' as const, safetyNetAttestation: 'x', keystorePublicKey: P256_PUB, nonce: challenge.nonce},
+		};
+	});
 	callOrder.length = 0;
-	capturedAttestation = undefined;
+	capturedSetDeviceKey = undefined;
 	registerInits.length = 0;
+	issueChallengeCalls.length = 0;
 	mockDraft = {...sampleDraft};
 });
 
-describe('ConfirmationScreen (REG-04/D-05)', () => {
+describe('ConfirmationScreen (REG-04/D-03/D-05/D-09/D-11)', () => {
 	it("renders the 'You're all set!' heading and the confirm CTA", () => {
 		const tr = renderScreen();
 		const text = JSON.stringify(tr.toJSON());
@@ -216,35 +289,56 @@ describe('ConfirmationScreen (REG-04/D-05)', () => {
 	});
 
 	it(
-		'pressing the CTA drives register -> issueAttestationChallenge -> setAttestation(stub) -> ' +
-			'associate commit, then clears the draft and pops to top (D-05 confirming gesture)',
+		'pressing the CTA drives provisionDeviceKey -> register -> issueAttestationChallenge -> ' +
+			'produce -> associate commit, then clears the draft and pops to top (D-05/D-11)',
 		async () => {
 			const tr = renderScreen();
 			await pressConfirm(tr);
 
-			expect(callOrder).toEqual(['register', 'issueAttestationChallenge', 'setAttestation', 'associate.commit']);
+			expect(callOrder).toEqual([
+				'provisionDeviceKey',
+				'register',
+				'issueAttestationChallenge',
+				'produce',
+				'associate.commit',
+			]);
 			expect(mockClearDraft).toHaveBeenCalledTimes(1);
 			expect(mockPopToTop).toHaveBeenCalledTimes(1);
-			// The stub attestation passed to setAttestation must carry the challenge nonce (T-44-09).
-			expect((capturedAttestation as {platformDetails: {nonce: string}}).platformDetails.nonce).toBe(
-				CHALLENGE_NONCE,
-			);
 		},
 	);
 
-	it('renders an error and retry affordance when register() rejects — no clearDraft/popToTop', async () => {
+	it('binds the challenge + association DeviceKey to the P-256 provisioned key, never the secp256k1 activeKeys[0] key (D-03)', async () => {
+		const tr = renderScreen();
+		await pressConfirm(tr);
+
+		expect(issueChallengeCalls).toHaveLength(1);
+		expect(issueChallengeCalls[0].deviceKey).toBe(P256_PUB);
+		expect(issueChallengeCalls[0].deviceKey).not.toBe('SECP256K1_DEVICE_KEY_MUST_NOT_BE_USED');
+		expect(capturedSetDeviceKey).toBe(P256_PUB);
+	});
+
+	it('threads sign as arg 4 and seededElectionId as the trailing arg 5 to issueAttestationChallenge (D-11/45-04)', async () => {
+		const tr = renderScreen();
+		await pressConfirm(tr);
+
+		expect(issueChallengeCalls).toHaveLength(1);
+		expect(issueChallengeCalls[0].signatureOrCallback).toBe(mockSign);
+		expect(issueChallengeCalls[0].electionId).toBe(SEEDED_ELECTION_ID);
+	});
+
+	it('renders a transient-error retry affordance when register() rejects — no clearDraft/popToTop', async () => {
 		mockRegister.mockRejectedValueOnce(new Error('register failed: field policy violation'));
 
 		const tr = renderScreen();
 		await pressConfirm(tr);
 
 		const text = JSON.stringify(tr.toJSON());
-		expect(text).toContain('register failed: field policy violation');
+		expect(text).toContain('Something went wrong verifying your device. Try again.');
 		expect(text).toContain('Try Again');
 		expect(mockClearDraft).not.toHaveBeenCalled();
 		expect(mockPopToTop).not.toHaveBeenCalled();
 		// The ceremony must not have proceeded past the failed step.
-		expect(callOrder).toEqual([]);
+		expect(callOrder).toEqual(['provisionDeviceKey']);
 	});
 
 	it('reuses the same registrantId across a retry (WR-02 — no duplicate/orphaned Registrant rows)', async () => {
@@ -278,17 +372,95 @@ describe('ConfirmationScreen (REG-04/D-05)', () => {
 		expect(details.every(d => d.value !== '')).toBe(true);
 	});
 
-	it('renders an error and does not pop when a later step (associate commit) rejects', async () => {
+	it('renders a transient-error retry affordance when a later step (associate commit) rejects', async () => {
 		mockCommit.mockRejectedValueOnce(new Error('associate failed: attestation verification failed'));
 
 		const tr = renderScreen();
 		await pressConfirm(tr);
 
 		const text = JSON.stringify(tr.toJSON());
-		expect(text).toContain('associate failed: attestation verification failed');
+		expect(text).toContain('Something went wrong verifying your device. Try again.');
 		expect(mockClearDraft).not.toHaveBeenCalled();
 		expect(mockPopToTop).not.toHaveBeenCalled();
 		// The ceremony reached (and attempted) the associate commit before rejecting.
-		expect(callOrder).toEqual(['register', 'issueAttestationChallenge', 'setAttestation']);
+		expect(callOrder).toEqual(['provisionDeviceKey', 'register', 'issueAttestationChallenge', 'produce']);
+	});
+
+	describe('D-09 three-way failure UX', () => {
+		it('NO_BIOMETRICS_ENROLLED renders the setup prompt + deep-link CTA, and a separate retry — no clearDraft/popToTop', async () => {
+			mockProduce.mockRejectedValueOnce({code: 'NO_BIOMETRICS_ENROLLED'});
+
+			const tr = renderScreen();
+			await pressConfirm(tr);
+
+			const text = JSON.stringify(tr.toJSON());
+			expect(text).toContain('Set up fingerprint or face unlock to continue');
+			expect(text).toContain('Set up device unlock');
+			expect(mockClearDraft).not.toHaveBeenCalled();
+			expect(mockPopToTop).not.toHaveBeenCalled();
+
+			const setupCta = tr.root.findByProps({testID: 'confirmation-setup-cta'});
+			await renderer.act(async () => {
+				setupCta.props.onPress();
+				await Promise.resolve();
+				await Promise.resolve();
+			});
+			expect(mockSendIntent).toHaveBeenCalledWith('android.settings.BIOMETRIC_ENROLL');
+
+			// The existing retry affordance re-runs onConfirm reusing the same registrantId.
+			const retryCta = tr.root.findByProps({testID: 'confirmation-retry-cta'});
+			expect(retryCta).toBeDefined();
+		});
+
+		it('falls back to SECURITY_SETTINGS when BIOMETRIC_ENROLL intent fails', async () => {
+			mockProduce.mockRejectedValueOnce({code: 'NO_BIOMETRICS_ENROLLED'});
+			mockSendIntent.mockImplementationOnce(async () => {
+				throw new Error('intent not resolvable');
+			});
+
+			const tr = renderScreen();
+			await pressConfirm(tr);
+
+			const setupCta = tr.root.findByProps({testID: 'confirmation-setup-cta'});
+			await renderer.act(async () => {
+				setupCta.props.onPress();
+				await Promise.resolve();
+				await Promise.resolve();
+				await Promise.resolve();
+			});
+
+			expect(mockSendIntent).toHaveBeenNthCalledWith(1, 'android.settings.BIOMETRIC_ENROLL');
+			expect(mockSendIntent).toHaveBeenNthCalledWith(2, 'android.settings.SECURITY_SETTINGS');
+		});
+
+		it("a transient-class code (e.g. LOCKOUT) renders the generic transient copy with a 'Try Again' retry", async () => {
+			mockProduce.mockRejectedValueOnce({code: 'LOCKOUT'});
+
+			const tr = renderScreen();
+			await pressConfirm(tr);
+
+			const text = JSON.stringify(tr.toJSON());
+			expect(text).toContain('Something went wrong verifying your device. Try again.');
+			expect(text).toContain('Try Again');
+			const cta = tr.root.findByProps({testID: 'confirmation-confirm-face-id'});
+			expect(cta).toBeDefined();
+		});
+
+		it('a terminal-class code (release build, __DEV__ false) renders the terminal wall with NO retry CTA', async () => {
+			const originalDev = (globalThis as {__DEV__?: boolean}).__DEV__;
+			(globalThis as {__DEV__?: boolean}).__DEV__ = false;
+			mockProvisionDeviceKey.mockRejectedValueOnce({code: 'NO_STRONGBOX_OR_TEE'});
+
+			const tr = renderScreen();
+			await pressConfirm(tr);
+
+			const text = JSON.stringify(tr.toJSON());
+			expect(text).toContain("This device can't be used to vote");
+			expect(tr.root.findAllByProps({testID: 'confirmation-confirm-face-id'})).toHaveLength(0);
+			expect(tr.root.findAllByProps({testID: 'confirmation-retry-cta'})).toHaveLength(0);
+			expect(tr.root.findAllByProps({testID: 'confirmation-setup-cta'})).toHaveLength(0);
+
+			(globalThis as {__DEV__?: boolean}).__DEV__ = originalDev;
+		});
 	});
 });
