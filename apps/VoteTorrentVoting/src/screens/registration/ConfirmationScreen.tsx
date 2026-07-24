@@ -23,9 +23,10 @@
  *      (`useVotingApp().sign` — the SAME founding-officer/device identity 44-06 seeded, never
  *      the CadreNode peer key).
  *   3. `AssociationEngine.issueAttestationChallenge(registrantId, deviceKey, expiration, sign)`.
- *   4. The D-03 `StubAttestationProducer` answers the challenge with a `DeviceAttestation`
- *      (the phase's ONE clearly-marked stub — Phase 45 drops a `RealAttestationProducer` into
- *      this exact seam).
+ *   4. The D-03/D-11 two-step attestation producer (`provisionDeviceKey()` then
+ *      `produce(challenge)`) answers the challenge with a `DeviceAttestation` — the
+ *      dev-only `StubAttestationProducer` under `__DEV__`, else Phase 45's real
+ *      producer (`createRealAttestationProducer`) via `resolveAttestationProducer`.
  *   5. `AssociationEngine.buildAssociate()...setAttestation(stub)...commit()`.
  *
  * On full success: `useRegistrationDraft().clearDraft()` (T-42-01c submit-path wipe, pairs with
@@ -175,11 +176,14 @@ export default function ConfirmationScreen() {
 				challengeExpiration,
 				sign,
 			);
-			// CR-01/D-03: resolve the producer through the fail-closed gate — a real
-			// producer wins, else the stub under __DEV__, else throw in a release build.
-			// Phase 45 drops its RealAttestationProducer into this exact seam.
-			const produceAttestation = resolveAttestationProducer();
-			const attestation = await produceAttestation(challenge, deviceKey);
+			// CR-01/D-03/D-11: resolve the producer through the fail-closed gate — a real
+			// producer wins, else the stub under __DEV__, else the real producer outside
+			// __DEV__ (never the stub, CR-03). 45-05 reshaped the seam into the D-11
+			// two-step call (provisionDeviceKey() then produce(challenge)); the ceremony
+			// ORDER here is otherwise unchanged (45-06 owns any reordering).
+			const attestationProducer = resolveAttestationProducer();
+			await attestationProducer.provisionDeviceKey();
+			const attestation = await attestationProducer.produce(challenge);
 
 			// (5) Step 3 — the real associate ceremony, committing the stub attestation.
 			await (associationEngine.buildAssociate() as unknown as AssociateBuilderChain)

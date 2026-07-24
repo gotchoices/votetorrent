@@ -1,65 +1,75 @@
 /**
- * attestation-producer.ts — D-03 device-side attestation PRODUCER seam (Phase 44-03).
+ * attestation-producer.ts — D-03/D-11 device-side attestation PRODUCER seam
+ * (Phase 44-03, reshaped to the two-step seam in Phase 45-05).
  *
- * This is the boundary between "the stub screens compute a `DeviceAttestation`" and
- * "that value is handed to `AssociationAssociateBuilder.setAttestation(...)`". It is
- * the phase's one genuinely net-new interface: `44-PATTERNS.md` confirms neither app
- * has a prior instance of a *producer* type (only the pre-existing *verifier* seam,
- * `StubAttestationVerifier` / `USE_STUB_ATTESTATION_VERIFIER`, has an analog).
+ * This is the boundary between "the screens drive attestation production" and
+ * "that value is handed to `AssociationAssociateBuilder.setAttestation(...)`".
+ * `44-PATTERNS.md` confirms neither app has a prior instance of a *producer* type
+ * (only the pre-existing *verifier* seam, `StubAttestationVerifier` /
+ * `USE_STUB_ATTESTATION_VERIFIER`, has an analog).
  *
- * Phase 45 drops a `RealAttestationProducer` implementing the IDENTICAL
- * `AttestationProducer` type into this seam — no navigation/engine re-wiring, per
- * D-03's explicit requirement. Do NOT wire this module into any screen here (44-08
- * does the wiring) and do NOT construct AssociationEngine here.
+ * D-11 two-step seam: `provisionDeviceKey()` generates/returns the hardware-backed
+ * P-256 public key BEFORE the authority-issued challenge exists; `produce(challenge)`
+ * then answers that challenge. Phase 45's `createRealAttestationProducer` (from
+ * `@votetorrent/attestation-native`) implements this exact shape — no navigation/
+ * engine re-wiring here (44-08/45-06 own the screen wiring; do NOT construct
+ * AssociationEngine here).
  *
- * T-44-08 (Spoofing, mitigate): the stub producer is reachable ONLY when `__DEV__`
- * is true. A non-`__DEV__` build calling `resolveAttestationProducer()` without a
- * real producer supplied THROWS instead of silently returning the stub — mirroring
- * the authority app's `USE_STUB_ATTESTATION_VERIFIER` / CR-03 fail-closed posture
- * (`apps/VoteTorrentAuthority/src/engines/engine-factory.ts`'s `'association'` case).
- *
- * T-44-09 (Tampering, accept): only `challenge.nonce` is threaded through the stub
- * this phase. The real `Digest(nonce, deviceKey)` anti-relay welding is Phase 45's
- * contract (43-CONTEXT.md D-06) — deferred, not silently omitted.
+ * T-44-08 (Spoofing, mitigate) / T-45-05-04 (CR-03): the stub producer is reachable
+ * ONLY when `__DEV__` is true. Outside `__DEV__`, `resolveAttestationProducer()`
+ * (with no real producer supplied) returns the REAL producer via
+ * `createRealAttestationProducer({ enablePlayIntegrity: true })` — never the stub —
+ * mirroring the authority app's `USE_STUB_ATTESTATION_VERIFIER` / CR-03 fail-closed
+ * posture (`apps/VoteTorrentAuthority/src/engines/engine-factory.ts`'s `'association'`
+ * case).
  */
 
 import type { AttestationChallenge, DeviceAttestation } from '@votetorrent/vote-core'
+import { createRealAttestationProducer } from '@votetorrent/attestation-native'
 
 /**
- * A device-side attestation producer: given the authority-issued challenge and the
- * device's voting public key, produces the platform `DeviceAttestation` answering
- * that challenge. Phase 45's `RealAttestationProducer` (Play Integrity token +
- * hardware Keystore key attestation) implements this exact type.
+ * A device-side attestation producer (D-11 two-step seam):
+ *   (1) `provisionDeviceKey()` — generates/returns the hardware-backed P-256 public
+ *       key BEFORE the challenge is issued.
+ *   (2) `produce(challenge)` — answers an already-issued challenge bound to that key.
+ * Phase 45's real producer (Play Integrity token + hardware Keystore key attestation)
+ * implements this exact shape.
  */
-export type AttestationProducer = (
-	challenge: AttestationChallenge,
-	deviceKey: string,
-) => Promise<DeviceAttestation>
+export interface AttestationProducer {
+	provisionDeviceKey(): Promise<{ publicKey: string }>
+	produce(challenge: AttestationChallenge): Promise<DeviceAttestation>
+}
 
 /**
  * StubAttestationProducer — dev-only `AttestationProducer` implementation.
  *
- * Synthesizes a `DeviceAttestation` whose `platformDetails.nonce` round-trips the
- * issued `challenge.nonce` (the only real-world invariant `StubAttestationVerifier`
- * checks), with deterministic, clearly-non-real placeholder cert/key/deviceId
- * values. Never used outside `__DEV__` (see `resolveAttestationProducer` below).
+ * `provisionDeviceKey()` returns a clearly-non-real placeholder public key.
+ * `produce(challenge)` synthesizes a `DeviceAttestation` whose `platformDetails.nonce`
+ * round-trips the RAW issued `challenge.nonce` (the only real-world invariant
+ * `StubAttestationVerifier` checks — never BOUND_DIGEST here, Pitfall 5), with
+ * deterministic, clearly-non-real placeholder cert/key/deviceId values. Never used
+ * outside `__DEV__` (see `resolveAttestationProducer` below).
  */
-export const StubAttestationProducer: AttestationProducer = async (
-	challenge: AttestationChallenge,
-	deviceKey: string,
-): Promise<DeviceAttestation> => {
-	return {
-		publicKey: deviceKey,
-		deviceId: `STUB_DEVICE_ID_${challenge.registrantId}`,
-		attestationTime: Date.now(),
-		certificateChain: ['STUB_CERTIFICATE_PLACEHOLDER_NOT_REAL'],
-		platformDetails: {
-			type: 'Android',
-			safetyNetAttestation: 'STUB_SAFETYNET_ATTESTATION_PLACEHOLDER_NOT_REAL',
-			keystorePublicKey: deviceKey,
-			nonce: challenge.nonce,
-		},
-	}
+export const StubAttestationProducer: AttestationProducer = {
+	async provisionDeviceKey(): Promise<{ publicKey: string }> {
+		return { publicKey: 'STUB_DEVICE_PUBLIC_KEY_PLACEHOLDER_NOT_REAL' }
+	},
+
+	async produce(challenge: AttestationChallenge): Promise<DeviceAttestation> {
+		const deviceKey = challenge.deviceKey
+		return {
+			publicKey: deviceKey,
+			deviceId: `STUB_DEVICE_ID_${challenge.registrantId}`,
+			attestationTime: Date.now(),
+			certificateChain: ['STUB_CERTIFICATE_PLACEHOLDER_NOT_REAL'],
+			platformDetails: {
+				type: 'Android',
+				safetyNetAttestation: 'STUB_SAFETYNET_ATTESTATION_PLACEHOLDER_NOT_REAL',
+				keystorePublicKey: deviceKey,
+				nonce: challenge.nonce,
+			},
+		}
+	},
 }
 
 /**
@@ -67,12 +77,13 @@ export const StubAttestationProducer: AttestationProducer = async (
  * `USE_STUB_ATTESTATION_VERIFIER` (fail-closed, CR-03 posture). Precedence:
  *
  *   1. A supplied real producer ALWAYS wins — regardless of `__DEV__` — so Phase 45
- *      can exercise/A-B its `RealAttestationProducer` in a debug build (the "pure
- *      drop-in, no other call site changes" contract, D-03).
+ *      can exercise/A-B its real producer in a debug build (the "pure drop-in, no
+ *      other call site changes" contract, D-03).
  *   2. Otherwise, in `__DEV__` fall back to the dev-only `StubAttestationProducer`
- *      (the current on-device behavior — no real producer exists yet).
- *   3. Otherwise (release build, no real producer) THROW rather than silently
- *      returning the stub — the documented spoofing mitigation is real, not claimed.
+ *      (unchanged from Phase 44 — stub-only-in-DEV spoofing posture).
+ *   3. Otherwise (release build, no real producer supplied) return the REAL producer
+ *      via `createRealAttestationProducer` — never the stub. This preserves CR-03:
+ *      the stub is STILL only reachable when `__DEV__` is true.
  */
 export function resolveAttestationProducer(realProducer?: AttestationProducer): AttestationProducer {
 	if (realProducer !== undefined) {
@@ -81,7 +92,6 @@ export function resolveAttestationProducer(realProducer?: AttestationProducer): 
 	if (__DEV__) {
 		return StubAttestationProducer
 	}
-	throw new Error(
-		'attestation-producer: real attestation producer not provided outside __DEV__ — fail-closed (CR-03 posture). Phase 45 must supply a RealAttestationProducer.',
-	)
+	// 45-08 replaces this default with resolvePlayIntegrityEnabled()
+	return createRealAttestationProducer({ enablePlayIntegrity: true })
 }

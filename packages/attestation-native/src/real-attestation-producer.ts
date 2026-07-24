@@ -86,18 +86,34 @@ function getNative(): NativeAttestationSpec {
 }
 
 /**
+ * `TextEncoder`/`btoa` ARE globals on Hermes/RN and Node (used as bare globals elsewhere in the
+ * codebase — e.g. `packages/vote-engine/src/utils.ts`'s `bytesToBase64url` — proven available
+ * on-device; RN/Hermes has no `Buffer`, but these two are proven present). This package ships
+ * SOURCE directly (no build step) and is type-checked as part of MULTIPLE consuming programs with
+ * different `compilerOptions.types` (this package's own `tsconfig.json` includes `"node"`; the
+ * app's `@react-native/typescript-config`-based program does not) — a bare, undeclared-ambient
+ * reference to `TextEncoder`/`btoa` fails to compile under the latter. Accessing them via a
+ * `globalThis` cast (rather than declaring ambient globals, which would collide with `@types/node`
+ * wherever it IS present) compiles identically under both.
+ */
+type Base64GlobalEnv = {
+	TextEncoder: new () => { encode(input: string): Uint8Array }
+	btoa: (data: string) => string
+}
+const { TextEncoder: TextEncoderCtor, btoa: btoaFn } = globalThis as unknown as Base64GlobalEnv
+
+/**
  * Base64-encode the UTF-8 bytes of a string (STANDARD alphabet, no URL-safe substitution) — the
  * native side decodes this with `Base64.decode(boundDigestUtf8Base64, Base64.NO_WRAP)`
  * (`AttestationNativeModule.kt`), which expects the standard `+`/`/` alphabet, not base64url.
  * Mirrors `packages/vote-engine/src/utils.ts`'s `bytesToBase64url` pattern (minus the URL-safe
- * substitution) — `btoa` is the established, device-proven global for this in the codebase
- * (RN/Hermes has no `Buffer`, but `btoa`/`atob` are proven available on-device).
+ * substitution).
  */
 function base64FromUtf8(value: string): string {
-	const bytes = new TextEncoder().encode(value)
+	const bytes = new TextEncoderCtor().encode(value)
 	let binary = ''
 	for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]!)
-	return btoa(binary)
+	return btoaFn(binary)
 }
 
 /** Package-local two-method producer shape (D-08 — structurally, not nominally, typed). */
