@@ -9,6 +9,7 @@ import type { EngineContext } from '../types.js'
 import type {
   DisclosedSelective,
   DisclosureAudience,
+  ElectionAttestationPolicy,
   ElectionDisclosurePolicy,
   ElectionRegistrant,
   ElectionRegistrationField,
@@ -1078,6 +1079,61 @@ export class RegistrationEngine implements IRegistrationEngine {
       return out
     } catch (err) {
       this.rethrow(err, 'getElectionDisclosurePolicies')
+    }
+  }
+
+  // ---------- ElectionAttestationPolicy (D-14b, additive -- declares whether an ----------
+  // ---------- election requires device attestation to Associate; consumed by 45-04's ----------
+  // ---------- associate() ceremony) ----------
+
+  /**
+   * D-14b: election policy declaring whether device attestation is required to Associate.
+   * Single row per election (PK = ElectionId alone, unlike ElectionRegistrationField's
+   * append-only (ElectionId, FieldName) PK) -- an UPSERT via `insert or replace`
+   * (Quereus-supported, precedented by `election-engine.ts`'s `proposeBallot`
+   * `insert or replace into ProposedBallot`). Same 'mel'-scoped, election-keyed
+   * ceremony shape as addElectionRegistrationField/addElectionDisclosurePolicy
+   * (`AuthorityId` resolved from the OWNING `Election` row). The digest arg order
+   * (`Tid, ElectionId, AttestationRequired`) MUST match the table's own `MutationValid`
+   * CHECK exactly.
+   */
+  async setElectionAttestationPolicy (electionId: string, attestationRequired: boolean, signatureOrCallback: SignatureOrCallback): Promise<void> {
+    this.requireCtx('setElectionAttestationPolicy')
+    const ctx = this.ctx!
+    try {
+      const authorityId = await this.resolveElectionAuthorityId(electionId, 'setElectionAttestationPolicy')
+      const tid = await allocateTid(ctx.db, 'registration')
+      const requiredInt = attestationRequired ? 1 : 0
+      const digestExpr = 'select Digest(:tid, :electionId, :attestationRequired) as d'
+      const digestParams = { tid, electionId, attestationRequired: requiredInt }
+      const nonce = await seedSignedMutation(ctx, authorityId, 'mel', tid, digestExpr, digestParams, this.resolveSign(signatureOrCallback))
+
+      await ctx.db.exec(
+        `insert or replace into ElectionAttestationPolicy (ElectionId, AttestationRequired)
+         with context SigningNonce = :signingNonce, Tid = ${tid}
+         values (:electionId, :attestationRequired)`,
+        { electionId, attestationRequired: requiredInt, signingNonce: nonce }
+      )
+    } catch (err) {
+      this.rethrow(err, 'setElectionAttestationPolicy')
+    }
+  }
+
+  /** D-14b: read the stored attestation-required flag for an election; undefined when no policy row exists. */
+  async getElectionAttestationPolicy (electionId: string): Promise<ElectionAttestationPolicy | undefined> {
+    if (!this.ctx) return undefined
+    const ctx = this.ctx
+    try {
+      const row = await ctx.db
+        .prepare('select ElectionId, AttestationRequired from ElectionAttestationPolicy where ElectionId = :electionId')
+        .get({ electionId })
+      if (!row) return undefined
+      return {
+        electionId: asText(row.ElectionId, 'ElectionAttestationPolicy.ElectionId'),
+        attestationRequired: Number(row.AttestationRequired) !== 0
+      }
+    } catch (err) {
+      this.rethrow(err, 'getElectionAttestationPolicy')
     }
   }
 
