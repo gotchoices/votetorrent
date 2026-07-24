@@ -154,6 +154,11 @@ const resources = {
 			'deviceAttestation.heading': 'Verifying your device...',
 			// [AUTHORED]
 			'deviceAttestation.caption': 'Confirming your device is secure',
+			// [AUTHORED] — Phase 45-06 (D-09) terminal capability-probe wall.
+			'deviceAttestation.terminalHeading': "This device can't be used to vote",
+			// [AUTHORED]
+			'deviceAttestation.terminalBody':
+				'This device lacks the secure hardware required to protect a vote, so it cannot be used to register.',
 			'form.sectionTitle': 'Register for the Utah Network',
 			'form.firstName': 'First Name',
 			'form.lastName': 'Last Name',
@@ -201,6 +206,14 @@ const resources = {
 			'confirmation.cta': 'Confirm with Face ID',
 			// [AUTHORED]
 			'confirmation.caption': 'Look at your device to confirm',
+			// [AUTHORED] — Phase 45-06 (D-09) three-way attestation failure UX.
+			'confirmation.error.biometricNotEnrolled': 'Set up fingerprint or face unlock to continue',
+			// [AUTHORED]
+			'confirmation.error.setupCta': 'Set up device unlock',
+			// [AUTHORED]
+			'confirmation.error.transient': 'Something went wrong verifying your device. Try again.',
+			// [AUTHORED]
+			'confirmation.error.terminal': "This device can't be used to vote",
 			// [AUTHORED] — native-stack header titles for the form-step routes (41-08).
 			formHeaderTitle: 'Register',
 			confirmHeaderTitle: 'Confirm',
@@ -347,6 +360,9 @@ const resources = {
 			'registered.updateCta': 'Actualizar registro',
 			'deviceAttestation.heading': 'Verificando tu dispositivo...',
 			'deviceAttestation.caption': 'Confirmando que tu dispositivo es seguro',
+			'deviceAttestation.terminalHeading': 'Este dispositivo no se puede usar para votar',
+			'deviceAttestation.terminalBody':
+				'Este dispositivo no cuenta con el hardware seguro necesario para proteger un voto, por lo que no se puede usar para registrarte.',
 			'form.sectionTitle': 'Regístrate en la Red de Utah',
 			'form.firstName': 'Nombre',
 			'form.lastName': 'Apellido',
@@ -382,6 +398,10 @@ const resources = {
 			'confirmation.body': 'Confirma tu registro con Face ID',
 			'confirmation.cta': 'Confirmar con Face ID',
 			'confirmation.caption': 'Mira tu dispositivo para confirmar',
+			'confirmation.error.biometricNotEnrolled': 'Configura el desbloqueo por huella o rostro para continuar',
+			'confirmation.error.setupCta': 'Configurar desbloqueo del dispositivo',
+			'confirmation.error.transient': 'Algo salió mal al verificar tu dispositivo. Inténtalo de nuevo.',
+			'confirmation.error.terminal': 'Este dispositivo no se puede usar para votar',
 			formHeaderTitle: 'Registrarse',
 			confirmHeaderTitle: 'Confirmar',
 		},
