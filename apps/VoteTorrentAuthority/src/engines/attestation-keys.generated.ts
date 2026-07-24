@@ -24,7 +24,21 @@ export const PLAY_CONSOLE_DECRYPTION_KEY_BASE64 = '';
 /** Base64-encoded Play Console ES256 SPKI verification public key. Empty = not provisioned (fail closed). */
 export const PLAY_CONSOLE_VERIFICATION_KEY_BASE64 = '';
 
-/** The authority app's package name both attestation halves must be pinned to. */
-export const EXPECTED_APP_PACKAGE = 'org.votetorrent.authority';
-/** Lowercase-hex raw SHA-256 digests of the authority app's accepted signing certificate(s). Empty until provisioned. */
-export const EXPECTED_APP_CERT_SHA256_DIGESTS: string[] = [];
+/**
+ * The VOTER app's package name (the attestation PRODUCER) both attestation halves must
+ * be pinned to — NOT the authority app's own package. This corrects the Phase-43
+ * placeholder value (the authority app's own package name, pinned here in error), which
+ * would fail-closed reject the real voter app's tokens/keys (WR-03).
+ */
+export const EXPECTED_APP_PACKAGE = 'com.votetorrentvoting';
+/**
+ * Lowercase-hex raw SHA-256 digests of the voter app's accepted signing certificate(s),
+ * no colons. Currently the voter app's `debug.keystore` cert (androiddebugkey) — this
+ * project's `apps/VoteTorrentVoting/android/app/build.gradle` also reuses the debug
+ * signingConfig for release, so this single digest currently covers both build types.
+ * A production release with its own dedicated keystore must append that cert's digest
+ * here as an additional array element.
+ */
+export const EXPECTED_APP_CERT_SHA256_DIGESTS: string[] = [
+	'fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c',
+];
