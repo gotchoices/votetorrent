@@ -12,6 +12,18 @@ module.exports = {
     'node_modules/(?!((jest-)?react-native|@react-native(-community)?|@react-navigation|react-native-vector-icons|@quereus|@optimystic|@votetorrent|@noble|inheritree|moat-maker|multiformats|@serfab|jose)/)',
   ],
   moduleNameMapper: {
+    // Phase 45 plan 45-07 (Rule 3 — blocking): `packages/attestation-native` declares its own
+    // `react-native`/`react`/`@react-native/typescript-config` devDependencies (45-05's Rule-3
+    // tsc-infra fix), which gives it its OWN local `node_modules/react-native` copy under
+    // `nmHoistingLimits: workspaces`. Node/jest module resolution walks UP from the requiring
+    // file, so `packages/attestation-native/src/specs/NativeAttestation.ts`'s `import {
+    // TurboModuleRegistry } from 'react-native'` resolves to that PRIVATE copy — a different
+    // module identity than the app's own `react-native` (and than the one this test file's own
+    // `jest.mock('react-native', ...)` intercepts), so `TurboModuleRegistry.getEnforcing` inside
+    // the package hits the REAL (unmocked) module and throws `__fbBatchedBridgeConfig is not
+    // set`. Redirecting every `react-native` require to the single app-hoisted copy closes the
+    // multi-copy binding gap — same class of fix as the @noble/hashes/@quereus entries below.
+    '^react-native$': '<rootDir>/node_modules/react-native/index.js',
     '^react-native-localize$': '<rootDir>/__mocks__/react-native-localize.js',
     '^react-native-safe-area-context$': '<rootDir>/__mocks__/react-native-safe-area-context.js',
     '^@react-native-async-storage/async-storage$': '<rootDir>/node_modules/@react-native-async-storage/async-storage/jest/async-storage-mock.js',
