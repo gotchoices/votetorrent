@@ -275,12 +275,21 @@ As with `USE_LOCAL_DB_FACTORY` (the analogous pattern already in
 
 ### 7c. The dev-stub→real flip
 
+`resolveAttestationProducer()`'s actual precedence is four rungs, in order:
+(1) a supplied `realProducer` argument — always wins, but neither
+`ConfirmationScreen` nor `DeviceAttestationScreen` ever supplies one, so this
+rung is not reachable through the app's own call sites; (2)
+`resolveRealProducerForced()` (`__DEV__ && USE_REAL_ATTESTATION_PRODUCER`,
+§7f below) — the REAL producer, reachable from a `__DEV__` build; (3) the
+`__DEV__` stub (`StubAttestationProducer`, Phase 44 default); (4) the release
+real producer.
+
 To run real Play Integrity end-to-end: (1) register the Play Console app per
 §7a, (2) provision the two verifier-side keys per §3, (3) leave
 `USE_STUB_PLAY_INTEGRITY = false` (the committed default) in a build that
-also is NOT running with the overall stub producer active (i.e. not
-`__DEV__`, or `__DEV__` with a real producer explicitly supplied per
-`resolveAttestationProducer`'s precedence).
+also is NOT running with the overall stub producer active — i.e. either a
+release build (rung 4), or a `__DEV__` build with `USE_REAL_ATTESTATION_PRODUCER
+= true` (rung 2, §7f).
 
 ### 7d. EXPECTED_APP_PACKAGE correction (Pitfall 1, on the D-01 proof critical path)
 
@@ -305,6 +314,47 @@ before running the Pixel 8 proof, re-run §4a's
 procedure and re-verify/re-embed the current root set — do not rely on
 whatever snapshot happens to already be committed.
 
+### 7f. The debug-build real-key + stub-PI recipe (USE_REAL_ATTESTATION_PRODUCER)
+
+**Why it exists.** An on-device proof needs a `__DEV__` build so Metro
+live-reload stays active while iterating — but before this flag existed,
+`__DEV__` ALSO unconditionally forced `resolveAttestationProducer()` onto
+`StubAttestationProducer` (§7c's rung 3), making every hardware attestation
+leg unreachable from any build that also had live-reload. Meanwhile a
+release build reaches the real producer (rung 4), but also forces the real
+Play Integrity network call — deferred per D-01 (no Play Console app /
+Cloud project yet). No build configuration satisfied the D-12 "real-key +
+stub-PI" tier until this flag was added. The 45-09 on-device proof log
+recognized the stub path empirically: `provisionDeviceKey` returning in
+~40 ms and `produce()` in ~2 ms with **no BiometricPrompt ever presented**
+is dispositive that a stub, not real hardware, was exercised — use that
+same signature to sanity-check a proof run before trusting its result.
+
+**The recipe.** In
+`apps/VoteTorrentVoting/src/engines/proof-flags.generated.ts`, set BOTH:
+
+```ts
+export const USE_REAL_ATTESTATION_PRODUCER = true;
+export const USE_STUB_PLAY_INTEGRITY = true;
+```
+
+Then build and install a **debug** build (`:app:installDebug`), run the
+proof (real hardware key generation + attestation + BiometricPrompt, with
+the Play Integrity leg stubbed), and afterwards `git checkout` the file
+before committing anything else — never commit either flag as `true`.
+
+**The safety property.** `resolveRealProducerForced()` (§7c rung 2) is
+`__DEV__ && USE_REAL_ATTESTATION_PRODUCER` — in a release build `__DEV__` is
+`false`, so this expression evaluates to `false` regardless of what value
+the flag file holds, committed or locally edited. A release build's
+behavior is therefore completely unaffected by this flag's existence: it
+can never let a release build skip real hardware attestation, and it can
+never let a release build reach `StubAttestationProducer` (CR-03 /
+T-45-05-04 hold unconditionally).
+
+As with `USE_LOCAL_DB_FACTORY` and `USE_STUB_PLAY_INTEGRITY`, never commit
+an enabled (`true`) override of `USE_REAL_ATTESTATION_PRODUCER`.
+
 Add to §6's summary checklist:
 
 - [ ] Voter app registered on Play Console internal-testing track (§7a) —
@@ -315,3 +365,4 @@ Add to §6's summary checklist:
       proof (§7e / §4a)
 - [ ] `USE_STUB_PLAY_INTEGRITY` posture confirmed for the intended proof
       tier (real-PI vs. real-key + stub-PI) before running the proof
+- [ ] `USE_REAL_ATTESTATION_PRODUCER` reverted to `false` after any on-device proof run (§7f)
