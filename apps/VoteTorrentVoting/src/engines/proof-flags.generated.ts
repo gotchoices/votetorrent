@@ -15,3 +15,13 @@ export const USE_LOCAL_DB_FACTORY = false;
 // __DEV__-gated (see attestation-producer.ts's resolvePlayIntegrityEnabled); committed
 // default false (real) — never commit an enabled override.
 export const USE_STUB_PLAY_INTEGRITY = false;
+
+// 45-09-gap / D-12 forced-real-producer toggle. Forces resolveAttestationProducer()
+// to select the REAL producer (createRealAttestationProducer) from INSIDE a __DEV__
+// build, so a debug build with Metro live-reload can exercise real hardware key
+// attestation — combine with USE_STUB_PLAY_INTEGRITY=true for the D-12 real-key +
+// stub-PI tier. __DEV__-gated (see attestation-producer.ts's resolveRealProducerForced):
+// a release build evaluates the gate to false no matter what this file holds, so it is
+// provably inert outside __DEV__ and can never weaken CR-03 / T-45-05-04. Committed
+// default false — never commit an enabled override.
+export const USE_REAL_ATTESTATION_PRODUCER = false;
