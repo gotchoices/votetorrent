@@ -10,6 +10,7 @@ import androidx.biometric.BiometricPrompt
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import com.facebook.react.bridge.ReactApplicationContext
+import com.facebook.react.bridge.UiThreadUtil
 import java.security.KeyPairGenerator
 import java.security.KeyStore
 import java.security.PrivateKey
@@ -135,10 +136,20 @@ class KeyAttestationHelper(private val reactContext: ReactApplicationContext) {
 			.setNegativeButtonText("Cancel")
 			.build()
 
-		val biometricPrompt = BiometricPrompt(
-			activity,
-			ContextCompat.getMainExecutor(reactContext),
-			object : BiometricPrompt.AuthenticationCallback() {
+		// 45-11 DEVICE FINDING — BiometricPrompt's constructor attaches a Fragment to the
+		// FragmentActivity's FragmentManager, and `authenticate()` commits it. BOTH must run on
+		// the main/UI thread. This helper is invoked from the TurboModule's calling thread (the
+		// native-modules thread), so constructing the prompt here threw
+		// `Must be called from main thread of fragment host` and no prompt was ever presented.
+		// `ContextCompat.getMainExecutor(...)` below only routes the CALLBACKS to main — it does
+		// NOT affect the construction or the authenticate() call, which is why this went unnoticed.
+		// Jest is structurally blind to this; 45-09 never reached it because the stub producer
+		// short-circuited produce() entirely.
+		UiThreadUtil.runOnUiThread {
+			val biometricPrompt = BiometricPrompt(
+				activity,
+				ContextCompat.getMainExecutor(reactContext),
+				object : BiometricPrompt.AuthenticationCallback() {
 				override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
 					// A successful prompt IS the cryptographic proof of a fresh biometric check
 					// (D-06). For key ATTESTATION (not ballot signing) the cert chain itself does
@@ -164,13 +175,14 @@ class KeyAttestationHelper(private val reactContext: ReactApplicationContext) {
 					onError(code, RuntimeException(errString.toString()))
 				}
 
-				override fun onAuthenticationFailed() {
-					// Biometric mismatch — a retry, NOT an error. BiometricPrompt itself
-					// re-prompts the user; nothing to surface to JS here.
-				}
-			},
-		)
-		biometricPrompt.authenticate(promptInfo, cryptoObject)
+					override fun onAuthenticationFailed() {
+						// Biometric mismatch — a retry, NOT an error. BiometricPrompt itself
+						// re-prompts the user; nothing to surface to JS here.
+					}
+				},
+			)
+			biometricPrompt.authenticate(promptInfo, cryptoObject)
+		}
 	}
 
 	/** (3) D-15b — export leaf+intermediates only; drop the trailing root (verifier pins its own). */
