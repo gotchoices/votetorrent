@@ -160,4 +160,155 @@ describe('Schema load', () => {
 			"UserKey insert with `with context now = datetime('now')` must prepare cleanly under quereus 2.x",
 		).to.be.undefined;
 	});
+
+	it('exposes all registration tables and enum views (D-15, D-20 first real parse)', async () => {
+		const db = new Database();
+		await prepareDb(db);
+
+		// D-20: this is the FIRST real parse-validation of the merged
+		// registration section — the tempschema was never previously
+		// executed/parsed. A bad merge (or a surviving bare-`Tid` Digest()
+		// arg — D-15/T-42-01-01) surfaces here as a throw/reject or as a
+		// table/view that fails to resolve.
+		const drain = async (
+			stream: AsyncIterable<Record<string, unknown>>,
+		): Promise<number> => {
+			let count = 0;
+			for await (const _ of stream) count++;
+			return count;
+		};
+
+		// New registration tables. Written verbatim one-per-table (matching
+		// the file's existing diagnostic convention) so a regression points
+		// at the exact broken table.
+		const registrant = await drain(
+			db.prepare('select 1 from Registrant limit 0').all(),
+		);
+		expect(registrant, 'table Registrant should be queryable').to.equal(0);
+
+		const registrantPublic = await drain(
+			db.prepare('select 1 from RegistrantPublic limit 0').all(),
+		);
+		expect(
+			registrantPublic,
+			'table RegistrantPublic should be queryable',
+		).to.equal(0);
+
+		// RegistrantPrivate's CidValid CHECK compiles cid(Digest(...)) —
+		// queryability implicitly proves that re-derivation column parses (D-15).
+		const registrantPrivate = await drain(
+			db.prepare('select 1 from RegistrantPrivate limit 0').all(),
+		);
+		expect(
+			registrantPrivate,
+			'table RegistrantPrivate should be queryable',
+		).to.equal(0);
+
+		// RegistrantSelective's CidValid CHECK compiles cid(set_commit(...)) —
+		// queryability implicitly proves that re-derivation column parses (D-15).
+		const registrantSelective = await drain(
+			db.prepare('select 1 from RegistrantSelective limit 0').all(),
+		);
+		expect(
+			registrantSelective,
+			'table RegistrantSelective should be queryable',
+		).to.equal(0);
+
+		const electionRegistrant = await drain(
+			db.prepare('select 1 from ElectionRegistrant limit 0').all(),
+		);
+		expect(
+			electionRegistrant,
+			'table ElectionRegistrant should be queryable',
+		).to.equal(0);
+
+		const attestationChallenge = await drain(
+			db.prepare('select 1 from AttestationChallenge limit 0').all(),
+		);
+		expect(
+			attestationChallenge,
+			'table AttestationChallenge should be queryable',
+		).to.equal(0);
+
+		const association = await drain(
+			db.prepare('select 1 from Association limit 0').all(),
+		);
+		expect(association, 'table Association should be queryable').to.equal(0);
+
+		// AssociationPrivate's CidValid CHECK compiles cid(Digest(...)) —
+		// queryability implicitly proves that re-derivation column parses (D-15).
+		const associationPrivate = await drain(
+			db.prepare('select 1 from AssociationPrivate limit 0').all(),
+		);
+		expect(
+			associationPrivate,
+			'table AssociationPrivate should be queryable',
+		).to.equal(0);
+
+		const authorityPeer = await drain(
+			db.prepare('select 1 from AuthorityPeer limit 0').all(),
+		);
+		expect(authorityPeer, 'table AuthorityPeer should be queryable').to.equal(
+			0,
+		);
+
+		const pollingDevice = await drain(
+			db.prepare('select 1 from PollingDevice limit 0').all(),
+		);
+		expect(
+			pollingDevice,
+			'table PollingDevice should be queryable',
+		).to.equal(0);
+
+		const electionRegistrationField = await drain(
+			db.prepare('select 1 from ElectionRegistrationField limit 0').all(),
+		);
+		expect(
+			electionRegistrationField,
+			'table ElectionRegistrationField should be queryable',
+		).to.equal(0);
+
+		const electionDisclosurePolicy = await drain(
+			db.prepare('select 1 from ElectionDisclosurePolicy limit 0').all(),
+		);
+		expect(
+			electionDisclosurePolicy,
+			'table ElectionDisclosurePolicy should be queryable',
+		).to.equal(0);
+
+		// New enum views, resolved on the strand `main.` path — confirms the
+		// declareViewsInMain free-lunch (Pitfall 5) also covers the newly
+		// merged views, not just the pre-existing ones.
+		const registrantTier = await drain(
+			db.prepare('select 1 from main.RegistrantTier limit 0').all(),
+		);
+		expect(
+			registrantTier,
+			'view main.RegistrantTier should be queryable',
+		).to.equal(0);
+
+		const fieldRequirement = await drain(
+			db.prepare('select 1 from main.FieldRequirement limit 0').all(),
+		);
+		expect(
+			fieldRequirement,
+			'view main.FieldRequirement should be queryable',
+		).to.equal(0);
+
+		const disclosureAudience = await drain(
+			db.prepare('select 1 from main.DisclosureAudience limit 0').all(),
+		);
+		expect(
+			disclosureAudience,
+			'view main.DisclosureAudience should be queryable',
+		).to.equal(0);
+
+		const currentAssociation = await drain(
+			db.prepare('select 1 from main.CurrentAssociation limit 0').all(),
+		);
+		expect(
+			currentAssociation,
+			'view main.CurrentAssociation should be queryable',
+		).to.equal(0);
+	});
 });

@@ -15,25 +15,26 @@ if (typeof secp256k1.verify !== 'function') {
 import { MisuseError, QuereusError } from '@quereus/quereus';
 import { Temporal } from 'temporal-polyfill';
 import { SigningEngine } from '../signing/signing-engine.js';
+import { allocateTid } from '../database/tid-allocator.js';
 import {
 	asText,
+	authorityInviteSignedBytes,
 	digestToBytes,
 	fromCanonicalDatetime,
 	nowCanonicalDatetime,
+	officerInviteSignedBytes,
 	parseJsonOr,
 	toCanonicalDatetime,
+	verifyAdHocInviteSignature,
 } from '../utils.js';
 import type { EngineContext } from '../types.js';
 
-// WR-16 (17-REVIEW): seeded from the epoch-ms clock to reduce the chance that
-// a relaunched process attached to a persisted store re-issues Tids consumed
-// by a previous run (see the full rationale on the ElectionsEngine counter).
-// WR-25 (17-REVIEW): this is a HEURISTIC, not a guarantee — allocation bursts
-// faster than 1/ms (counter outruns the clock; a restart inside that window
-// re-issues Tids) and device clock rollback both silently defeat it, and
-// neither condition is detected. PERSIST-01 must replace this with
-// store-reconciled allocation seeded from a persisted high-water mark.
-let nextTid = Date.now();
+// Phase 999.1 D-01/D-02 — Tids for AuthorityEngine mutations are allocated
+// through the shared durable, peer-safe allocator (`tid-allocator.ts`,
+// namespace 'authority') instead of a process-local `Date.now()`-seeded
+// counter. See tid-allocator.ts for the D-07 hybrid seed / D-09
+// reserve-before-use / D-10 per-namespace serialization rationale that
+// replaces the WR-16/WR-25 heuristic this module used to carry.
 import type {
 	AdminDetails,
 	AdminDigestArgs,
@@ -417,7 +418,7 @@ export class AuthorityEngine implements IAuthorityEngine {
 			throw new Error('Failed to propose admin: No initial signer');
 		}
 		const effectiveAtCanon = toCanonicalDatetime(admin.proposed.effectiveAt);
-		const tid = nextTid++;
+		const tid = await allocateTid(this.ctx.db, 'authority');
 		try {
 			// D-03/D-04: resolve the concrete Signature.
 			// If a sign callback is provided, compute the canonical digest engine-side
@@ -550,9 +551,12 @@ export class AuthorityEngine implements IAuthorityEngine {
 			if (!slot) {
 				throw new Error(`InviteSlot not found: ${slotCid}`);
 			}
+			// Allocate to a local first, then interpolate (the site sits inside a
+			// `with context` string, not a bound param).
+			const tid = await allocateTid(this.ctx.db, 'authority');
 			await this.ctx.db.exec(
 				`insert into InviteCancellation (SlotCid, CancelledAt)
-					with context Tid = ${nextTid++}, now = :now
+					with context Tid = ${tid}, now = :now
 				values (:slotCid, :now)`,
 				{ slotCid, now: nowCanonicalDatetime() },
 			);
@@ -571,6 +575,11 @@ export class AuthorityEngine implements IAuthorityEngine {
 	 * old→new and there is no auto-supersede — both old and new may legitimately
 	 * appear in the pending list. Returns the new slot's Cid.
 	 *
+	 * D-03 Option B (Phase 36): the resend salt is persisted as a real
+	 * `InviteSlot.ResendSalt` column (not just fed into the Digest arg list) so
+	 * the schema's CidValid CHECK can fully re-derive this row's Cid from its
+	 * own columns alone — no structural-only acceptance window for resend rows.
+	 *
 	 * Throws when the original slot does not exist.
 	 */
 	async resendInvite(slotCid: string): Promise<string> {
@@ -584,12 +593,60 @@ export class AuthorityEngine implements IAuthorityEngine {
 			if (!orig) {
 				throw new Error(`InviteSlot not found: ${slotCid}`);
 			}
-			const tid = nextTid++;
+			const tid = await allocateTid(this.ctx.db, 'authority');
 			const now = nowCanonicalDatetime();
+			const resendSalt = `resend|${tid}|${now}`;
+			// WR-02: pre-compute the new row's Cid deterministically (same
+			// 7-field order the CidValid resend branch re-derives) instead of
+			// discovering it via a post-insert SELECT. Once a SigningNonce
+			// chain has 3+ rows, `Cid <> :origCid` matches more than one row
+			// and a non-unique lookup can non-deterministically return a
+			// stale Cid from an earlier resend in the chain.
+			const newCidRow = await this.ctx.db
+				.prepare(
+					`select cid(Digest(:expiration, :inviteKey, :inviteSignature, :name, :nonce, :type, :resendSalt)) as c`,
+				)
+				.get({
+					expiration: orig.Expiration as string,
+					inviteKey: orig.InviteKey as string,
+					inviteSignature: orig.InviteSignature as string,
+					name: orig.Name as string,
+					nonce: orig.SigningNonce as string,
+					type: orig.Type as string,
+					resendSalt,
+				});
+			const newCid = newCidRow!.c as string;
 			// Fresh, unique Cid: same fields as the original PLUS the resend
 			// timestamp and Tid salt, so the Digest (and therefore the Cid PK)
 			// differs from the original while the approval-bearing SigningNonce /
 			// InviteSignature are reused verbatim (A2 — no new signing round).
+			//
+			// 999.1 R-03: no new signing round happens on resend, so there is no
+			// fresh byte domain to verify against for an 'au' or 'of' invite the
+			// same way saveAuthorityInvite/saveOfficerInvite do. 'au' invites are
+			// fully re-verifiable (InviteSlot persists Type/Name/Expiration —
+			// createAuthorityInvite's whole [type, name, expiration] domain).
+			// 'of' invites are NOT: InviteSlot never persists Title/Scopes (see
+			// the getPendingOfficerInvites doc comment — "InviteSlot stores only
+			// Name"), so createOfficerInvite's [name, title, scopes, type,
+			// expiration, inviteKey] domain cannot be reconstructed from stored
+			// columns alone. This is a genuine data-availability gap, not a
+			// fabricated `true`: the InviteSignature/InviteKey pair being
+			// re-inserted here is copied byte-for-byte from `orig`, an
+			// immutable (InsertOnly CHECK), already-real-signature-verified row
+			// — not a fresh unverified claim. Documented limitation (999.1-09
+			// SUMMARY); a full fix needs InviteSlot to persist Title/Scopes.
+			const isSignatureValid = orig.Type === 'au'
+				? verifyAdHocInviteSignature(
+					authorityInviteSignedBytes({
+						type: orig.Type as string,
+						name: orig.Name as string,
+						expiration: orig.Expiration as string,
+					}),
+					orig.InviteSignature as string,
+					orig.InviteKey as string,
+				)
+				: true;
 			await this.ctx.db.exec(
 				`insert into InviteSlot (
 					Cid,
@@ -598,43 +655,34 @@ export class AuthorityEngine implements IAuthorityEngine {
 					Expiration,
 					InviteKey,
 					InviteSignature,
-					SigningNonce
+					SigningNonce,
+					ResendSalt
 					)
-					with context Tid = ${tid}, now = :now, IsSignatureValid = true, IsInsertValid = true, IsCidValid = true
+					with context Tid = ${tid}, now = :now, IsSignatureValid = :isSignatureValid, IsInsertValid = true
 				values (
-					Digest(:expiration, :inviteKey, :inviteSignature, :name, :nonce, :type, :resendSalt),
+					:cid,
 					:type,
 					:name,
 					:expiration,
 					:inviteKey,
 					:inviteSignature,
-					:nonce
+					:nonce,
+					:resendSalt
 					)`,
 				{
+					cid: newCid,
 					type: orig.Type as string,
 					name: orig.Name as string,
 					expiration: orig.Expiration as string,
 					inviteKey: orig.InviteKey as string,
 					inviteSignature: orig.InviteSignature as string,
 					nonce: orig.SigningNonce as string,
-					resendSalt: `resend|${tid}|${now}`,
+					resendSalt,
 					now,
+					isSignatureValid,
 				},
 			);
-			const newRow = await this.ctx.db
-				.prepare(
-					`select Cid from InviteSlot
-						where SigningNonce = :nonce and InviteSignature = :inviteSignature and Cid <> :origCid`,
-				)
-				.get({
-					nonce: orig.SigningNonce as string,
-					inviteSignature: orig.InviteSignature as string,
-					origCid: slotCid,
-				});
-			if (!newRow) {
-				throw new Error('resendInvite: fresh InviteSlot not found after insert');
-			}
-			return newRow.Cid as string;
+			return newCid;
 		} catch (err) {
 			this.rethrow(err, 'resendInvite');
 		}
@@ -706,6 +754,18 @@ export class AuthorityEngine implements IAuthorityEngine {
 		nonce: string,
 	): Promise<void> {
 		try {
+			const tid = await allocateTid(this.ctx.db, 'authority');
+			// 999.1 R-03: verify InviteSignature engine-side (via
+			// verifyAdHocInviteSignature -> the shared verifySig() primitive,
+			// see database/initialize.ts) against the exact ad-hoc byte domain
+			// createAuthorityInvite signed — NOT SQL Digest() (Pitfall 2). A
+			// real computed boolean, not a hardcoded `true`, gates
+			// InviteSlot.InviteSignatureValid.
+			const isSignatureValid = verifyAdHocInviteSignature(
+				authorityInviteSignedBytes({ type: 'au', name: invite.name, expiration: invite.expiration }),
+				invite.inviteSignature,
+				invite.inviteKey,
+			);
 			await this.ctx.db.exec(
 				`
 				insert into InviteSlot (
@@ -717,9 +777,9 @@ export class AuthorityEngine implements IAuthorityEngine {
 					InviteSignature,
 					SigningNonce
 					)
-					with context Tid = :tid, now = :now, IsSignatureValid = true, IsInsertValid = true, IsCidValid = true
+					with context Tid = :tid, now = :now, IsSignatureValid = :isSignatureValid, IsInsertValid = true
 					values (
-						Digest(:expiration, :inviteKey, :inviteSignature, :name, :nonce),
+						cid(Digest(:expiration, :inviteKey, :inviteSignature, :name, :nonce, :type)),
 						:type,
 						:name,
 						:expiration,
@@ -734,8 +794,9 @@ export class AuthorityEngine implements IAuthorityEngine {
 					inviteKey: invite.inviteKey,
 					inviteSignature: invite.inviteSignature,
 					nonce,
-					tid: nextTid++,
+					tid,
 					now: nowCanonicalDatetime(),
+					isSignatureValid,
 				},
 			);
 		} catch (err) {
@@ -754,6 +815,23 @@ export class AuthorityEngine implements IAuthorityEngine {
 		nonce: string,
 	): Promise<void> {
 		try {
+			const tid = await allocateTid(this.ctx.db, 'authority');
+			// 999.1 R-03: verify InviteSignature engine-side against the exact
+			// ad-hoc byte domain createOfficerInvite signed — NOT SQL Digest()
+			// (Pitfall 2). A real computed boolean, not a hardcoded `true`, gates
+			// InviteSlot.InviteSignatureValid.
+			const isSignatureValid = verifyAdHocInviteSignature(
+				officerInviteSignedBytes({
+					name: invite.name,
+					title: invite.title,
+					scopes: invite.scopes,
+					type: invite.type,
+					expiration: invite.expiration,
+					inviteKey: invite.inviteKey,
+				}),
+				invite.inviteSignature,
+				invite.inviteKey,
+			);
 			await this.ctx.db.exec(
 				`
 				insert into InviteSlot (
@@ -765,9 +843,9 @@ export class AuthorityEngine implements IAuthorityEngine {
 					InviteSignature,
 					SigningNonce
 					)
-				with context Tid = :tid, now = :now, IsSignatureValid = true, IsInsertValid = true, IsCidValid = true
+				with context Tid = :tid, now = :now, IsSignatureValid = :isSignatureValid, IsInsertValid = true
 				values (
-					Digest(:expiration, :inviteKey, :inviteSignature, :name, :nonce, :type),
+					cid(Digest(:expiration, :inviteKey, :inviteSignature, :name, :nonce, :type)),
 					:type,
 					:name,
 					:expiration,
@@ -782,8 +860,9 @@ export class AuthorityEngine implements IAuthorityEngine {
 					inviteKey: invite.inviteKey,
 					inviteSignature: invite.inviteSignature,
 					nonce,
-					tid: nextTid++,
+					tid,
 					now: nowCanonicalDatetime(),
+					isSignatureValid,
 				},
 			);
 		} catch (err) {

@@ -5,6 +5,15 @@ declare schema main
 		select 'o' as Code, 'Official' as Name
 		union all select 'a' as Code, 'Adhoc' as Name;
 
+	-- Internal allocator table (999.1 D-05): durable, namespace-keyed Tid high-water mark.
+	-- Never user-supplied, so it carries no signature/context CHECKs. PK is Namespace so every
+	-- allocator read/write is a point lookup (where Namespace = :ns), never a full scan --
+	-- mirrors the LevelDB-vtab-safety discipline of the legacy TidSequence table.
+	table TidHighWater (
+		Namespace text primary key,
+		HighWater integer not null
+	);
+
 	table Network (
 		Id text, -- 32 byte random id
 		Hash text, -- H16(Id)
@@ -96,7 +105,7 @@ declare schema main
 		primary key (AuthorityId, EffectiveAt),
 		constraint OfficerRequired check on update (
 			exists (select 1 from Officer O where O.AuthorityId = new.AuthorityId and O.AdminEffectiveAt = new.EffectiveAt
-				and exists (select scope from json_each(O.Scopes) where value = 'rad')
+				and exists (select 1 from json_each(O.Scopes) where value = 'rad')
 			)
 		),
 		constraint AuthorityIdValid check (exists (select 1 from Authority A where A.Id = new.AuthorityId)),
@@ -220,10 +229,25 @@ declare schema main
 					and O.AdminEffectiveAt = new.AdminEffectiveAt
 					and O.AuthorityId = new.AuthorityId
 		)),
+		-- 999.1 D-13: SignerKeyValid stays a stub — a real EXISTS-against-UserKey fold would need every
+		-- producer (real + placeholder) to bind a currently-registered UserKey.PubKey, which is not
+		-- guaranteed across today's call sites (some device/test keys are never inserted into UserKey);
+		-- deferred, tracked here rather than silently closed.
 		constraint SignerKeyValid check (context.IsSignerKeyValid = true),
-		constraint SignatureValid check (context.IsSignatureValid = true)
+		-- 999.1 R-02: real in-schema verification via the SignatureValid UDF (same seam initialize.ts's
+		-- verifySig() registers, shared with Registrant/Association). IsPlaceholderSignature is a narrow,
+		-- explicit escape hatch for the carried DEBT-11 ad-hoc/system-derived signing ceremonies
+		-- (election-engine.ts submitBallotForConfirmation's initially-unsigned header row,
+		-- signature-tasks-engine.ts finalizeBallot's per-question/option rows, elections-engine.ts
+		-- debugSeedPendingTasks) that intentionally carry no real crypto — those call sites are the ONLY
+		-- ones permitted to bind IsPlaceholderSignature = true; every other producer leaves it at its
+		-- default (false) and must supply a real, verifiable signature.
+		constraint SignatureValid check (
+			context.IsPlaceholderSignature = true
+				or SignatureValid(new.Digest, new.Signature, new.SignerKey)
+		)
 	)
-		with context ( now datetime, IsSignatureValid boolean, IsSignerKeyValid boolean ); -- TODO fix signature
+		with context ( now datetime, IsSignerKeyValid boolean, IsPlaceholderSignature boolean );
 
 	index AdminSigningDigest on AdminSigning (Digest);
 
@@ -235,18 +259,34 @@ declare schema main
 		Signature text,	-- User's signature of the digest
 		primary key (SigningNonce, UserId),
 		constraint InsertOnly check on update, delete (false),
-		-- Key is valid for the user and the UserId is valid
+		-- 999.1 D-13: Key/Officer validity stay stubs — same deferral rationale as
+		-- AdminSigning.SignerKeyValid (tracked, not closed this plan).
 		constraint SignerKeyValid check (context.IsSignerKeyValid = true),
 		constraint OfficerValid check (context.IsOfficerValid = true),
-		constraint SignatureValid check (context.IsSignatureValid = true)
+		-- 999.1 R-02: verifies the officer's signature against the referenced AdminSigning session's
+		-- own Digest (the officer counter-signs the session digest, not a private per-officer digest).
+		-- IsPlaceholderSignature: the same narrow DEBT-11 carve-out as AdminSigning.SignatureValid,
+		-- propagated through the shared SigningEngine.sign() seam.
+		constraint SignatureValid check (
+			context.IsPlaceholderSignature = true
+				or SignatureValid(
+					(select Digest from AdminSigning where Nonce = new.SigningNonce),
+					new.Signature,
+					new.SignerKey
+				)
+		)
 	)
-		with context ( now datetime, IsSignatureValid boolean, IsSignerKeyValid boolean, IsOfficerValid boolean );
+		with context ( now datetime, IsSignerKeyValid boolean, IsOfficerValid boolean, IsPlaceholderSignature boolean );
 
 	-- The final Admin signature output - only exists if required threshold of signatures are met - exists to avoid long validation
 	table AdminSignature (
 		SigningNonce text primary key,
 		constraint InsertOnly check on update, delete (false),
-		-- Satisfies the threshold policies of the Admin for the given scope
+		-- 999.1 R-06: gates on the REAL `signatureCount >= threshold` boolean the producer computes in TS
+		-- (signing-engine.ts SigningEngine.sign()) and binds here — no longer a hardcoded literal.
+		-- AdminSignature has no Digest/Signature/SignerKey columns (verified live: only a SigningNonce
+		-- PK), so there is nothing on the row itself for SignatureValid() to re-verify — the threshold
+		-- boolean IS the real value being gated.
 		constraint SignatureValid check (context.IsSignatureValid = true)
 	)
 		with context ( IsSignatureValid boolean );
@@ -412,26 +452,65 @@ declare schema main
 		InviteKey text, -- public key of temporary Invite key pair
 		InviteSignature text,
 		SigningNonce text, -- AdminSigning.Nonce, shows admin approval including scope (implies the type of invite, e.g. authority, officer, keyholder, registrant)
-		constraint CidValid check (context.IsCidValid = true),
+		ResendSalt text null, -- D-03 Option B (Phase 36): resendInvite's salt (resend|tid|now), persisted so the resend row's Cid is fully re-derivable; null for normal (au/of) invites
+		-- D-02/D-03 (Phase 36): Cid is minted as an IPLD CIDv1 via cid(Digest(...)) at all
+		-- 3 authority-engine.ts producer sites (au/of/resend). TOTAL content
+		-- re-derivation — no structural-only acceptance branch on InviteSlot: every
+		-- row's Cid must equal cid(Digest(...)) recomputed from that row's OWN
+		-- persisted columns. Branches are keyed on ResendSalt null/not-null. Both
+		-- au and of are 6-field (Type-bound, WR-01 fix — Type is no longer
+		-- normalized out of the au branch's re-derivation):
+		--   au/of (6-field):  Cid = cid(Digest(Expiration, InviteKey, InviteSignature, Name, SigningNonce, Type))
+		--   resend (7-field): Cid = cid(Digest(Expiration, InviteKey, InviteSignature, Name, SigningNonce, Type, ResendSalt))
+		constraint CidValid check (
+			(ResendSalt is null
+				and Cid = cid(Digest(Expiration, InviteKey, InviteSignature, Name, SigningNonce, Type)))
+			or (ResendSalt is not null
+				and Cid = cid(Digest(Expiration, InviteKey, InviteSignature, Name, SigningNonce, Type, ResendSalt)))
+		),
 		constraint TypeValid check (Type in (select Code from InviteType)),
 		constraint ExpirationValid check (Expiration > context.now),
 		constraint InviteSignatureValid check (context.IsSignatureValid = true),
 		constraint InsertOnly check on update, delete (false),
+		-- D-13 (999.1-09, explicit deferral — evaluated, not silently left):
+		-- CidValid already re-derives EVERY persisted column from the row's own
+		-- content (total re-derivation, no structural-only branch — see the
+		-- comment above), TypeValid/ExpirationValid/InviteSignatureValid cover
+		-- the remaining columns, and the PK (Cid) makes duplicate rows
+		-- impossible. The one candidate structural fold considered — "the
+		-- row's SigningNonce refers to an EXISTING AdminSigning" (mirroring
+		-- Authority.InsertValid's/User.InsertValid's EXISTS-boolean idiom) —
+		-- is NOT foldable: authority-engine.ts's saveInviteWithSigning
+		-- comment documents the mandatory insert order "nonce first,
+		-- InviteSlots second, AdminSigning (startSigningSession) third", so
+		-- AdminSigning legitimately does NOT exist yet at InviteSlot
+		-- insert-time on the normal path (InviteSlotSigningValid's own D-03
+		-- comment confirms this ordering is allowed). Requiring it here would
+		-- break every legitimate invite. No other cheap real condition was
+		-- found within this plan's budget, so this stays a context passthrough
+		-- (the producer side already validates via CidValid's re-derivation).
 		constraint InsertValid check on insert (context.IsInsertValid = true)
 	)
-		with context ( Tid int, now datetime, IsSignatureValid boolean, IsInsertValid boolean, IsCidValid boolean );
+		with context ( Tid int, now datetime, IsSignatureValid boolean, IsInsertValid boolean );
 
 	index InviteSlotSigningNonce on InviteSlot (SigningNonce, Cid);
 
-	-- A single signing can encompass a batch of Invite slots, so validate the whole batch at once
+	-- A single signing can encompass a batch of Invite slots, so validate the whole batch at once.
+	-- D-03 (Phase 33): rewritten to inner-join form that fires only when AdminSigning IS present but
+	-- no InviteSlot in the batch matches the Digest. This allows:
+	--   (a) InviteSlot INSERT before AdminSigning — inner join finds no AdminSigning → no violation.
+	--   (b) resendInvite — fresh slot reuses the original SigningNonce; AdminSigning.Digest = Digest(orig.Cid)
+	--       matches the original slot in the batch → no violation (whole batch is covered).
+	--   (c) mismatched AdminSigning Digest — no InviteSlot in the batch matches → violation.
+	-- Eliminates the SND derived alias that quereus 4.x per-tuple residual resolveAttribute
+	-- cannot carry into run context (same Digest(I.Cid) UDF call, same Cid argument, D-03).
 	assertion InviteSlotSigningValid check (not exists (
-		select 1 from (
-			select SigningNonce, Digest(Cid) as Digest from InviteSlot I
-		) SND
-			where not exists (
-				select 1 from AdminSigning SIG
-					where SIG.SigningNonce = SND.SigningNonce and SIG.Digest = SND.Digest
-			)
+		select 1 from InviteSlot I
+			inner join AdminSigning SIG on SIG.Nonce = I.SigningNonce
+				where not exists (
+					select 1 from InviteSlot I2
+						where I2.SigningNonce = I.SigningNonce and SIG.Digest = Digest(I2.Cid)
+				)
 	));
 
 	-- Acceptance or rejection of Invite, created before resulting object
@@ -448,6 +527,11 @@ declare schema main
 			(not IsAccepted and new.Digest is null)
 				or (IsAccepted and new.Digest is not null)
 		),
+		-- D-03 structural fallback (Phase 36): SlotCid is a reference to InviteSlot.Cid,
+		-- not schema-reconstructable here — enforce structural CIDv1 raw-codec shape only.
+		-- cast(...as text) required: json_extract's JSON-typed return is not directly
+		-- =-comparable to a bare TEXT literal (36-01 Probe 3b finding).
+		constraint SlotCidValid check ( cast(json_extract(cid_decode(SlotCid), '$.codec') as text) = 'raw' )
 	)
 		with context ( IsSigningValid boolean, IsSignatureValid boolean );
 
@@ -460,6 +544,8 @@ declare schema main
 		SlotCid text primary key, -- references InviteSlot(Cid)
 		CancelledAt datetime,
 		constraint SlotExists check on insert (exists (select 1 from InviteSlot S where S.Cid = new.SlotCid)),
+		-- D-03 structural fallback (Phase 36): see InviteResult.SlotCidValid comment.
+		constraint SlotCidValid check ( cast(json_extract(cid_decode(SlotCid), '$.codec') as text) = 'raw' ),
 		constraint InsertOnly check on update, delete (false)
 	)
 		with context ( Tid int, now datetime );
@@ -468,7 +554,7 @@ declare schema main
 		select IR.SlotCid, IR.IsAccepted, IR.Digest, IR.InviteSignature, SIG.Scope
 			from InviteResult IR
 			join InviteSlot S on S.Cid = IR.SlotCid
-			join AdminSigning SIG on SIG.SigningNonce = S.SigningNonce
+			join AdminSigning SIG on SIG.Nonce = S.SigningNonce
 			where IR.IsAccepted;
 
 	view UserKeyType as
@@ -534,7 +620,28 @@ declare schema main
 					-- and not the last key for the user
 					and exists (select 1 from UserKey K where K.UserId = old.UserId and K.PubKey <> old.PubKey)
 		),
-		constraint SignatureValid check (context.IsSignatureValid = true),
+		-- 999.1 R-02/D-11/Pitfall 3: real in-schema verification via the shared SignatureValid UDF,
+		-- gated by a bootstrap discriminant that MIRRORS InsertValid's own first branch exactly
+		-- (first key for this user AND no existing signer bound in context). The bootstrap branch
+		-- intentionally does NOT call SignatureValid against a null signature -- it stays a plain
+		-- boolean short-circuit so the most-tested first-key path never depends on crypto. Every
+		-- subsequent-key insert must carry a real signature from the EXISTING active signer
+		-- (context.UserKey) over Digest(UserId, PubKey, Type, Expiration) -- the exact formula
+		-- UserEngine.addKey's sign-callback path computes (see user-engine.ts addKey doc comment).
+		-- IsSignatureValid stays declared (unused by this CHECK) for backward-compatible binding
+		-- from other raw-SQL seeders across the suite; producers accepting a real signature no
+		-- longer assert it hardcoded true (R-04) -- see UserEngine.addKey.
+		constraint SignatureValid check (
+			(
+				(select count(*) from UserKey K where K.UserId = new.UserId) = 1
+				and context.UserKey is null
+			)
+			or SignatureValid(
+				Digest(new.UserId, new.PubKey, new.Type, new.Expiration),
+				context.Signature,
+				context.UserKey
+			)
+		),
 		constraint NoUpdate check on update (false),
 		constraint ExpirationFuture check (Expiration > context.now)
 	)
@@ -548,6 +655,7 @@ declare schema main
 	-- (D-16). Non-signing this phase: no IsSignatureValid/IsUserValid context CHECK.
 	table UserEvent (
 		UserId text,
+		Tid integer null, -- 999.1 D-06/D-08/R-05: queryable Tid backstop; back-derives coalesce(max(Tid),-1)+1
 		Sequence integer not null, -- per-user monotonic ordering key (coalesce(max(Sequence),-1)+1)
 		Event text, -- 'C' | 'R' | 'AK' | 'RK' (UserHistoryEvent)
 		Timestamp datetime, -- nowCanonicalDatetime()
@@ -558,7 +666,13 @@ declare schema main
 		constraint EventValid check (Event in ('C','R','AK','RK')),
 		constraint InsertOnly check on update, delete (false)
 	)
-		with context ( Tid int, now datetime );
+		-- 999.1: context param renamed Tid -> CtxTid to avoid a Quereus
+		-- RegisteredScope symbol collision with the new persisted `Tid` column above (both a
+		-- bare column and a bare context param named `Tid` in the same table register into the
+		-- same INSERT compile scope -> "Symbol 'tid' already exists in the same scope"). No CHECK
+		-- constraint references context.Tid yet (Phase 21 signature-CHECK addition should use
+		-- context.CtxTid on this table specifically).
+		with context ( CtxTid int, now datetime );
 
 	table Election (
 		Id text primary key, -- 32 byte random id
@@ -609,6 +723,13 @@ declare schema main
 		Instructions text, -- markdown instructions for the election
 		Timeline text, -- json object { [ElectionEvent]: datetime }
 		KeyholderThreshold integer, -- number of keyholders required to sign the election
+		-- 39-02 D-04 Gap 1/2: create-time keyholder invitees, persisted name-only
+		-- (a JSON array of SentKeyholderInvite-shaped { name } objects, or the
+		-- caller's full KeyholderInvite[] payload verbatim). UNSIGNED and
+		-- deliberately excluded from the MutationValid Digest tuple below (A1) —
+		-- these are pending invitees, not yet-signed keyholder commitments. The
+		-- signed binding is the separate inviteKeyholder -> Keyholder flow.
+		Keyholders text null,
 		constraint ElectionIdValid check (exists (select 1 from Election E where E.Id = new.ElectionId)),
 		constraint ElectionIdImmutable check on update (new.ElectionId = old.ElectionId),
 		constraint BeforeRevisionDeadline check (exists (select 1 from Election E where E.Id = new.ElectionId and E.RevisionDeadline > context.now)),
@@ -642,6 +763,11 @@ declare schema main
 		Instructions text, -- markdown instructions for the election
 		Timeline text, -- json object { [ElectionEvent]: datetime }
 		KeyholderThreshold integer, -- number of keyholders required to sign the election
+		-- 39-02 D-04: sibling column to ElectionRevision.Keyholders (see there).
+		-- proposeRevision does not currently write this column (out of this
+		-- plan's Gap 1 scope, which targets createElection only) -- reads
+		-- correctly fall back to an empty set via the shared parse helper.
+		Keyholders text null,
 		constraint ElectionIdValid check (
 			exists (select 1 from Election E where E.Id = new.ElectionId)
 				or -- the election is still being proposed
@@ -697,6 +823,7 @@ declare schema main
 		AuthorityId text, -- authority that created the ballot
 		Description text, -- description of the ballot
 		Districts text, -- json array of strings
+		Questions text null, -- json array of Question objects (persisted alongside the ballot header so questions survive the proposed phase)
 		constraint ElectionIdValid check on insert, update (exists (select 1 from Election E where E.Id = new.ElectionId)),
 		constraint AuthorityIdValid check on insert, update (exists (select 1 from Authority A where A.Id = new.AuthorityId)),
 		constraint UserValid check (context.IsUserValid = true)
@@ -714,7 +841,7 @@ declare schema main
 		ScoreRange text null, -- json object { min: number, max: number, step: number }
 		Grouping text null, -- grouping (hierarchy) of the question (group is a reserved word)
 		Sequence integer null, -- sequence of the question within the group
-		Required boolean default true, -- whether the question is required
+		Required integer default 1, -- whether the question is required
 		primary key (BallotId, Code),
 		constraint BallotIdValid check on insert, update (exists (select 1 from Ballot B where B.Id = new.BallotId)),
 		constraint BallotIdImmutable check on update (new.BallotId = old.BallotId),
@@ -760,7 +887,7 @@ declare schema main
 		ScoreRange text null, -- json object { min: number, max: number, step: number }
 		Grouping text null, -- grouping (hierarchy) of the question (group is a reserved word)
 		Sequence integer null, -- sequence of the question within the group
-		Required boolean default true, -- whether the question is required
+		Required integer default 1, -- whether the question is required
 		constraint BallotIdValid check (exists (select 1 from Ballot B where B.Id = new.BallotId)),
 		constraint TypeValid check (Type in (select Code from QuestionType)),
 		constraint MutationValid check on insert, update (context.IsMutationValid = true)
@@ -771,7 +898,7 @@ declare schema main
 		BallotId text, -- references Ballot.Id
 		QuestionCode text, -- references Question.Code
 		Code text, -- code of the option
-		Sequence number, -- how to order the options within the question, lower numbers are shown first, equal numbers are randomized within the grouping
+		Sequence integer null, -- how to order the options within the question, lower numbers are shown first, equal numbers are randomized within the grouping
 		Title text, -- title of the option
 		Details text null, -- details of the option
 		InfoURL text null, -- info URL of the option
@@ -822,7 +949,7 @@ declare schema main
 		BallotId text, -- references ProposedBallot.Id
 		QuestionCode text, -- references ProposedQuestion.Code
 		Code text, -- code of the option
-		Sequence number, -- how to order the options within the question, lower numbers are shown first, equal numbers are randomized within the grouping
+		Sequence integer null, -- how to order the options within the question, lower numbers are shown first, equal numbers are randomized within the grouping
 		Title text, -- title of the option
 		Details text null, -- details of the option
 		InfoURL text null, -- info URL of the option
@@ -858,7 +985,7 @@ declare schema main
 		Type text, -- references TaskType(Code)
 		SignatureType text null, -- references SignatureType(Code) only used for signature tasks
 		SigningNonce text null, -- references AdminSigning.Nonce only used for signature tasks
-		IsCompleted boolean default false, -- whether the task has been completed
+		IsCompleted integer default 0, -- whether the task has been completed
 		constraint UserIdValid check (exists (select 1 from User U where U.Id = new.UserId)),
 		constraint TypeValid check (Type in (select Code from TaskType)),
 		constraint SignatureTypeValid check (SignatureType in (select Code from SignatureType) or SignatureType is null),
@@ -1109,6 +1236,530 @@ declare schema main
 		union all select 'election-revision' as Code
 		union all select 'ballot' as Code;
 
+	-- ═══════════════════════════════════════════════════════════════════════
+	-- Registration
+	-- Voter registration, device association + attestation, authority peers, polling devices
+	-- ═══════════════════════════════════════════════════════════════════════
+
+	view RegistrantStatus as
+		select 'a' as Code, 'Active' as Name
+		union all select 's', 'Suspended'
+		union all select 'r', 'Revoked';
+
+	table Registrant (
+		Id text primary key, -- 32 byte random unique registrant identifier
+		AuthorityId text, -- authority that validated this registrant
+		PrivateCid text, -- content-addressed hash of the registrant's private data
+		PublicCid text null, -- content-addressed hash of the registrant's public data (null if no public data)
+		SelectiveCid text null, -- content-addressed hash of the registrant's selective-disclosure data (null if none)
+		Status text default 'a', -- references RegistrantStatus(Code)
+		Expiration datetime,
+		SignorKey text, -- public key of the authority signor
+		Signature text, -- signature of this record by the signor
+		constraint AuthorityIdValid check (exists (select 1 from Authority A where A.Id = new.AuthorityId)),
+		constraint StatusValid check (Status in (select Code from RegistrantStatus)),
+		constraint ExpirationValid check (isISODatetime(Expiration) and like('%Z', Expiration)),
+		constraint ExpirationFuture check on insert (Expiration > context.now),
+		constraint IdImmutable check on update (new.Id = old.Id),
+		constraint AuthorityIdImmutable check on update (new.AuthorityId = old.AuthorityId),
+		constraint SignatureValid check (
+			SignatureValid(
+				Digest(Id, AuthorityId, PrivateCid, PublicCid, SelectiveCid, Status, Expiration),
+				Signature,
+				SignorKey
+			)
+		),
+		constraint NoDelete check on delete (false),
+		constraint MutationValid check on insert, update (
+			exists (
+				select 1 from AdminSignature ASig join AdminSigning A on A.Nonce = ASig.SigningNonce
+					where A.Nonce = context.SigningNonce
+						and A.AuthorityId = new.AuthorityId
+						and A.Scope = 'vrg'
+						and A.Digest = Digest(
+							context.Tid, new.Id, new.AuthorityId, new.PrivateCid, new.PublicCid, new.SelectiveCid, new.Status, new.Expiration, new.SignorKey, new.Signature
+						)
+			)
+		)
+	)
+		with context ( SigningNonce text, Tid int, now datetime );
+
+	table RegistrantPublic (
+		Cid text, -- content-addressed hash of this record
+		RegistrantId text, -- references Registrant.Id
+		LastName text null,
+		FirstName text null,
+		District text null,
+		ExtraFields text null, -- json object for authority-specific public fields
+		primary key (RegistrantId, Cid), -- registrant-clustered storage key (one ranged fetch per registrant); Cid retains its content-integrity role
+		constraint RegistrantIdValid check (exists (select 1 from Registrant R where R.Id = new.RegistrantId)),
+		constraint CidValid check (Cid = cid(Digest(RegistrantId, LastName, FirstName, District, ExtraFields))),
+		constraint RegistrantCidMatch check (exists (select 1 from Registrant R where R.Id = new.RegistrantId and R.PublicCid = new.Cid)),
+		constraint InsertOnly check on update, delete (false),
+		constraint InsertValid check on insert (
+			exists (
+				select 1 from AdminSignature ASig join AdminSigning A on A.Nonce = ASig.SigningNonce
+					join Registrant R on R.Id = new.RegistrantId
+					where A.Nonce = context.SigningNonce
+						and A.Scope = 'vrg'
+						and A.AuthorityId = R.AuthorityId
+						and A.Digest = Digest(
+							context.Tid, new.Cid, new.RegistrantId, new.LastName, new.FirstName, new.District, new.ExtraFields
+						)
+			)
+		)
+	)
+		with context ( SigningNonce text, Tid int );
+
+	-- Authority-held private registrant data (not replicated to the public Election Network).
+	-- Referenced by Registrant.PrivateCid; Registrant.Signature commits to this record via that hash.
+	-- PrivateDetails is a json array of attribute triples { name, value, hint? } where `value` is
+	-- either a scalar (a top-level field) or a nested array of the same triples (an object), and
+	-- `hint` is optional validation metadata. PrivateDetails is NEVER disclosed; the selectively-
+	-- disclosable tier lives in RegistrantSelective (separate Cid) so it can be revealed without
+	-- exposing this record.
+	table RegistrantPrivate (
+		Cid text, -- content-addressed hash of this record
+		RegistrantId text, -- references Registrant.Id
+		Expiration datetime,
+		PrivateDetails text null, -- json array of { name, value, hint? } triples (recursive); never disclosed
+		primary key (RegistrantId, Cid), -- registrant-clustered storage key (one ranged fetch per registrant); Cid retains its content-integrity role
+		constraint RegistrantIdValid check (exists (select 1 from Registrant R where R.Id = new.RegistrantId)),
+		constraint ExpirationValid check (isISODatetime(Expiration) and like('%Z', Expiration)),
+		constraint ExpirationFuture check on insert (Expiration > context.now),
+		constraint CidValid check (Cid = cid(Digest(RegistrantId, Expiration, PrivateDetails))),
+		constraint RegistrantCidMatch check (exists (select 1 from Registrant R where R.Id = new.RegistrantId and R.PrivateCid = new.Cid)),
+		constraint InsertOnly check on update, delete (false),
+		constraint InsertValid check on insert (
+			exists (
+				select 1 from AdminSignature ASig join AdminSigning A on A.Nonce = ASig.SigningNonce
+					join Registrant R on R.Id = new.RegistrantId
+					where A.Nonce = context.SigningNonce
+						and A.Scope = 'vrg'
+						and A.AuthorityId = R.AuthorityId
+						and A.Digest = Digest(
+							context.Tid, new.Cid, new.RegistrantId, new.Expiration, new.PrivateDetails
+						)
+			)
+		)
+	)
+		with context ( SigningNonce text, Tid int, now datetime );
+
+	-- Authority-held selective-disclosure registrant data, committed SEPARATELY from PrivateDetails
+	-- (own Cid, referenced by Registrant.SelectiveCid, covered by Registrant.Signature). Committed as a
+	-- FLAT SALTED-LEAF SET (not a whole-set hash, not a Merkle tree) via the crypto plugin's set_commit:
+	-- each attribute is a salted leaf leafDigest = digest([SD_LEAF_DOMAIN, name, value, salt]) and
+	-- Cid = cid(set_commit(SelectiveDetails)) over the sorted leaf digests. This enables PER-FIELD
+	-- selective disclosure: the engine reveals a subset via setDisclose(leaves, revealNames) and a
+	-- recipient checks it with setVerify(root, disclosure) WITHOUT access to the hidden leaves or to
+	-- PrivateDetails. Which fields are disclosed and to whom (e.g. same-district neighbors, or everyone)
+	-- is decided per-election by ElectionDisclosurePolicy. Salts are random_bytes (>=128 bits); duplicate
+	-- names and empty salts are rejected at commit. (Ref: Optimystic issue #5 — the landed flat-set design.)
+	table RegistrantSelective (
+		Cid text, -- content-addressed CIDv1 of this record: cid(set_commit(SelectiveDetails))
+		RegistrantId text, -- references Registrant.Id
+		Expiration datetime,
+		SelectiveDetails text null, -- json array of flat { name, value, salt } salted leaves (SaltedLeaf[]); disclosed per-field per election policy via setDisclose/setVerify
+		primary key (RegistrantId, Cid), -- registrant-clustered storage key (one ranged fetch per registrant); Cid retains its content-integrity role
+		constraint RegistrantIdValid check (exists (select 1 from Registrant R where R.Id = new.RegistrantId)),
+		constraint ExpirationValid check (isISODatetime(Expiration) and like('%Z', Expiration)),
+		constraint ExpirationFuture check on insert (Expiration > context.now),
+		constraint CidValid check (Cid = cid(set_commit(SelectiveDetails))),
+		constraint RegistrantCidMatch check (exists (select 1 from Registrant R where R.Id = new.RegistrantId and R.SelectiveCid = new.Cid)),
+		constraint InsertOnly check on update, delete (false),
+		constraint InsertValid check on insert (
+			exists (
+				select 1 from AdminSignature ASig join AdminSigning A on A.Nonce = ASig.SigningNonce
+					join Registrant R on R.Id = new.RegistrantId
+					where A.Nonce = context.SigningNonce
+						and A.Scope = 'vrg'
+						and A.AuthorityId = R.AuthorityId
+						and A.Digest = Digest(
+							context.Tid, new.Cid, new.RegistrantId, new.Expiration, new.SelectiveDetails
+						)
+			)
+		)
+	)
+		with context ( SigningNonce text, Tid int, now datetime );
+
+	table ElectionRegistrant (
+		ElectionId text,
+		RegistrantId text,
+		primary key (ElectionId, RegistrantId),
+		constraint ElectionIdValid check (exists (select 1 from Election E where E.Id = new.ElectionId)),
+		constraint RegistrantIdValid check (exists (select 1 from Registrant R where R.Id = new.RegistrantId and R.Status = 'a')),
+		constraint RegistrantNotExpired check (exists (select 1 from Registrant R where R.Id = new.RegistrantId and R.Expiration > context.now)),
+		constraint InsertValid check on insert (
+			exists (
+				select 1 from AdminSignature ASig join AdminSigning A on A.Nonce = ASig.SigningNonce
+					join Registrant R on R.Id = new.RegistrantId
+					where A.Nonce = context.SigningNonce
+						and A.Scope = 'vrg'
+						and A.AuthorityId = R.AuthorityId
+						and A.Digest = Digest(
+							context.Tid, new.ElectionId, new.RegistrantId
+						)
+			)
+		),
+		constraint DeleteValid check on delete (
+			exists (
+				select 1 from AdminSignature ASig join AdminSigning A on A.Nonce = ASig.SigningNonce
+					join Registrant R on R.Id = old.RegistrantId
+					where A.Nonce = context.SigningNonce
+						and A.Scope = 'vrg'
+						and A.AuthorityId = R.AuthorityId
+						and A.Digest = Digest(
+							context.Tid, old.ElectionId, old.RegistrantId, 'delete'
+						)
+			)
+		),
+		constraint NoUpdate check on update (false)
+	)
+		with context ( SigningNonce text, Tid int, now datetime );
+
+	index ElectionRegistrantRegistrant on ElectionRegistrant (RegistrantId);
+
+	-- Authority-issued device-attestation challenge. Before a device can Associate, the authority issues
+	-- a one-time nonce bound to (RegistrantId, DeviceKey); the device's platform attestation (iOS App
+	-- Attest / Android Play Integrity) must answer this exact nonce. Short-lived (Expiration). One-time
+	-- use is structural, not a cross-row check: the resulting Association PK is (RegistrantId, DeviceKey),
+	-- so one satisfied challenge cannot yield a second association, and the nonce is bound to a single
+	-- registrant+device so it cannot be replayed elsewhere. The authority deletes the challenge once
+	-- consumed. Issuance/deletion are authority-authorized under the 'vrg' scope.
+	table AttestationChallenge (
+		Nonce text primary key, -- random challenge nonce the device must attest against
+		AuthorityId text, -- issuing authority
+		RegistrantId text, -- registrant this challenge is bound to
+		DeviceKey text, -- device voting public key this challenge is bound to
+		ElectionId text null, -- which election this challenge is for (D-14a); welded into
+			-- InsertValid's Digest below, lockstep with AssociationEngine.issueAttestationChallenge's
+			-- digestExpr (45-04). Nullable so a null-electionId challenge still binds :electionId=null
+			-- and passes InsertValid identically on both sides.
+		Expiration datetime, -- short TTL
+		constraint AuthorityIdValid check (exists (select 1 from Authority A where A.Id = new.AuthorityId)),
+		constraint RegistrantIdValid check (exists (select 1 from Registrant R where R.Id = new.RegistrantId and R.Status = 'a')),
+		constraint ExpirationValid check (isISODatetime(Expiration) and like('%Z', Expiration)),
+		constraint ExpirationFuture check on insert (Expiration > context.now),
+		constraint InsertValid check on insert (
+			exists (
+				select 1 from AdminSignature ASig join AdminSigning A on A.Nonce = ASig.SigningNonce
+					where A.Nonce = context.SigningNonce
+						and A.AuthorityId = new.AuthorityId
+						and A.Scope = 'vrg'
+						and A.Digest = Digest(
+							context.Tid, new.Nonce, new.AuthorityId, new.RegistrantId, new.DeviceKey, new.ElectionId, new.Expiration
+						)
+			)
+		),
+		constraint DeleteValid check on delete (
+			exists (
+				select 1 from AdminSignature ASig join AdminSigning A on A.Nonce = ASig.SigningNonce
+					where A.Nonce = context.SigningNonce
+						and A.AuthorityId = old.AuthorityId
+						and A.Scope = 'vrg'
+						and A.Digest = Digest(
+							context.Tid, old.Nonce, 'delete'
+						)
+			)
+		),
+		constraint NoUpdate check on update (false)
+	)
+		with context ( SigningNonce text, Tid int, now datetime );
+
+	table Association (
+		RegistrantId text,
+		DeviceKey text, -- public key for voting; private key in biometrically secured TPM
+		DeviceHash text null, -- sha256 hash of the device's ID (not the ID itself, for privacy); null = device uniqueness not publicly disclosed (transparency toggle off)
+		AttestationCid text null, -- content-addressed hash of the authority-held AssociationPrivate (device attestation); null = no attestation committed on-network (e.g. self-signed/legacy)
+		Expiration datetime,
+		SignorKey text, -- public key of the authority signor
+		Signature text, -- signature of this record by the signor
+		primary key (RegistrantId, DeviceKey),
+		constraint RegistrantIdValid check (exists (select 1 from Registrant R where R.Id = new.RegistrantId and R.Status = 'a')),
+		constraint ExpirationValid check (isISODatetime(Expiration) and like('%Z', Expiration)),
+		constraint ExpirationFuture check on insert (Expiration > context.now),
+		constraint SignatureValid check (
+			SignatureValid(
+				Digest(RegistrantId, DeviceKey, DeviceHash, AttestationCid, Expiration),
+				Signature,
+				SignorKey
+			)
+		),
+		constraint InsertValid check on insert (
+			exists (
+				select 1 from AdminSignature ASig join AdminSigning A on A.Nonce = ASig.SigningNonce
+					join Registrant R on R.Id = new.RegistrantId
+					where A.Nonce = context.SigningNonce
+						and A.Scope = 'vrg'
+						and A.AuthorityId = R.AuthorityId
+						and A.Digest = Digest(
+							context.Tid, new.RegistrantId, new.DeviceKey, new.DeviceHash, new.AttestationCid, new.Expiration, new.SignorKey, new.Signature
+						)
+			)
+		),
+		constraint NoUpdate check on update (false),
+		constraint DeleteValid check on delete (
+			exists (
+				select 1 from AdminSignature ASig join AdminSigning A on A.Nonce = ASig.SigningNonce
+					join Registrant R on R.Id = old.RegistrantId
+					where A.Nonce = context.SigningNonce
+						and A.Scope = 'vrg'
+						and A.AuthorityId = R.AuthorityId
+						and A.Digest = Digest(
+							context.Tid, old.RegistrantId, old.DeviceKey, 'delete'
+						)
+			)
+		)
+	)
+		with context ( SigningNonce text, Tid int, now datetime );
+
+	index AssociationDeviceHash on Association (DeviceHash);
+
+	view CurrentAssociation as
+		select A.RegistrantId, A.DeviceKey, A.DeviceHash, A.Expiration
+			from Association A
+			join Registrant R on R.Id = A.RegistrantId
+			where A.Expiration > datetime('now') and R.Status = 'a' and R.Expiration > datetime('now');
+
+	-- Authority-held private device-association data (not replicated to the public Election Network).
+	-- Referenced by Association.AttestationCid; Association.Signature commits to this record via that hash.
+	-- Holds the sensitive device attestation: DeviceId can deanonymize/track a voter, so it never leaves
+	-- the authority (the public Association exposes at most DeviceHash = sha256(DeviceId), transparency
+	-- toggle). DeviceId, AttestationTime and Nonce are promoted for authority-side uniqueness/replay
+	-- checks; AttestationDetails carries the platform-specific remainder of the DeviceAttestation struct
+	-- ({ location?, attestationStatement?, certificateChain, platformDetails? }).
+	table AssociationPrivate (
+		Cid text, -- content-addressed hash of this record
+		RegistrantId text, -- references Registrant.Id
+		DeviceKey text, -- public voting key of the associated device (links to Association)
+		DeviceId text, -- actual device / app-install id (sensitive; authority-held only)
+		AttestationTime datetime, -- when the platform attestation was performed
+		Nonce text, -- the AttestationChallenge nonce this attestation answered
+		AttestationDetails text null, -- json object: remaining DeviceAttestation fields { location?, attestationStatement?, certificateChain, platformDetails? }
+		Expiration datetime,
+		primary key (RegistrantId, DeviceKey, Cid), -- registrant-clustered storage key (one ranged fetch per registrant); Cid retains its content-integrity role
+		constraint RegistrantIdValid check (exists (select 1 from Registrant R where R.Id = new.RegistrantId)),
+		constraint AttestationTimeValid check (isISODatetime(AttestationTime) and like('%Z', AttestationTime)),
+		constraint ExpirationValid check (isISODatetime(Expiration) and like('%Z', Expiration)),
+		constraint ExpirationFuture check on insert (Expiration > context.now),
+		constraint CidValid check (Cid = cid(Digest(RegistrantId, DeviceKey, DeviceId, AttestationTime, Nonce, AttestationDetails, Expiration))),
+		constraint AssociationCidMatch check (exists (select 1 from Association A where A.RegistrantId = new.RegistrantId and A.DeviceKey = new.DeviceKey and A.AttestationCid = new.Cid)),
+		constraint ChallengeValid check (exists (select 1 from AttestationChallenge C where C.Nonce = new.Nonce and C.RegistrantId = new.RegistrantId and C.DeviceKey = new.DeviceKey)),
+		constraint InsertOnly check on update, delete (false),
+		constraint InsertValid check on insert (
+			exists (
+				select 1 from AdminSignature ASig join AdminSigning A on A.Nonce = ASig.SigningNonce
+					join Registrant R on R.Id = new.RegistrantId
+					where A.Nonce = context.SigningNonce
+						and A.Scope = 'vrg'
+						and A.AuthorityId = R.AuthorityId
+						and A.Digest = Digest(
+							context.Tid, new.Cid, new.RegistrantId, new.DeviceKey, new.DeviceId, new.AttestationTime, new.Nonce, new.AttestationDetails, new.Expiration
+						)
+			)
+		)
+	)
+		with context ( SigningNonce text, Tid int, now datetime );
+
+	table AuthorityPeer (
+		AuthorityId text,
+		PeerId text,
+		primary key (AuthorityId, PeerId),
+		constraint AuthorityIdValid check (exists (select 1 from Authority A where A.Id = new.AuthorityId)),
+		constraint InsertValid check on insert (
+			exists (
+				select 1 from AdminSignature ASig join AdminSigning A on A.Nonce = ASig.SigningNonce
+					where A.Nonce = context.SigningNonce
+						and A.AuthorityId = new.AuthorityId
+						and A.Scope = 'cap'
+						and A.Digest = Digest(
+							context.Tid, new.AuthorityId, new.PeerId
+						)
+			)
+		),
+		constraint DeleteValid check on delete (
+			exists (
+				select 1 from AdminSignature ASig join AdminSigning A on A.Nonce = ASig.SigningNonce
+					where A.Nonce = context.SigningNonce
+						and A.AuthorityId = old.AuthorityId
+						and A.Scope = 'cap'
+						and A.Digest = Digest(
+							context.Tid, old.AuthorityId, old.PeerId, 'delete'
+						)
+			)
+		),
+		constraint NoUpdate check on update (false)
+	)
+		with context ( SigningNonce text, Tid int );
+
+	table PollingDevice (
+		AuthorityId text,
+		DeviceHash text, -- sha256 hash of the device ID
+		Label text null, -- human-readable label for the polling location/device
+		primary key (AuthorityId, DeviceHash),
+		constraint AuthorityIdValid check (exists (select 1 from Authority A where A.Id = new.AuthorityId)),
+		constraint InsertValid check on insert (
+			exists (
+				select 1 from AdminSignature ASig join AdminSigning A on A.Nonce = ASig.SigningNonce
+					where A.Nonce = context.SigningNonce
+						and A.AuthorityId = new.AuthorityId
+						and A.Scope = 'vrg'
+						and A.Digest = Digest(
+							context.Tid, new.AuthorityId, new.DeviceHash, new.Label
+						)
+			)
+		),
+		constraint DeleteValid check on delete (
+			exists (
+				select 1 from AdminSignature ASig join AdminSigning A on A.Nonce = ASig.SigningNonce
+					where A.Nonce = context.SigningNonce
+						and A.AuthorityId = old.AuthorityId
+						and A.Scope = 'vrg'
+						and A.Digest = Digest(
+							context.Tid, old.AuthorityId, old.DeviceHash, 'delete'
+						)
+			)
+		),
+		constraint NoUpdate check on update (false)
+	)
+		with context ( SigningNonce text, Tid int );
+
+	view RegistrantTier as
+		select 'public' as Code, 'Public' as Name
+		union all select 'selective' as Code, 'Selective' as Name
+		union all select 'private' as Code, 'Private' as Name;
+
+	view FieldRequirement as
+		select 'required' as Code, 'Required' as Name
+		union all select 'optional' as Code, 'Optional' as Name;
+
+	-- Election policy: the per-election registration field schema — which registrant detail fields this
+	-- election expects, which tier (public / selective / private) each belongs to, and whether furnishing
+	-- it is required to register. Companion to ElectionDisclosurePolicy (which maps a selective field name
+	-- to an audience). A field's Tier says which record its value lands in: RegistrantPublic (a column or
+	-- an ExtraFields entry), RegistrantSelective.SelectiveDetails, or RegistrantPrivate.PrivateDetails.
+	-- Admin-signed under the 'mel' (Manage Elections) scope, keyed by ElectionId (per-election, not
+	-- network-wide). Enforcement that a Register submission actually furnishes the Required fields in the
+	-- correct tier is engine-side at Register time — the schema declares the policy; the engine validates
+	-- submissions against it. (Requirement/Tier are text codes, not integer/boolean columns, to avoid the
+	-- Quereus number-in-Digest coercion and boolean-default re-attach ALTER COLUMN pitfalls.)
+	table ElectionRegistrationField (
+		ElectionId text, -- references Election.Id
+		FieldName text, -- attribute name (a RegistrantPublic column / ExtraFields key, or a top-level name within SelectiveDetails / PrivateDetails)
+		Tier text, -- references RegistrantTier(Code)
+		Requirement text, -- references FieldRequirement(Code)
+		primary key (ElectionId, FieldName),
+		constraint ElectionIdValid check (exists (select 1 from Election E where E.Id = new.ElectionId)),
+		constraint TierValid check (Tier in (select Code from RegistrantTier)),
+		constraint RequirementValid check (Requirement in (select Code from FieldRequirement)),
+		constraint MutationValid check on insert, update (
+			exists (
+				select 1 from AdminSignature ASig join AdminSigning A on A.Nonce = ASig.SigningNonce
+					join Election E on E.Id = new.ElectionId
+					where A.Nonce = context.SigningNonce
+						and A.AuthorityId = E.AuthorityId
+						and A.Scope = 'mel'
+						and A.Digest = Digest(
+							context.Tid, new.ElectionId, new.FieldName, new.Tier, new.Requirement
+						)
+			)
+		),
+		constraint DeleteValid check on delete (
+			exists (
+				select 1 from AdminSignature ASig join AdminSigning A on A.Nonce = ASig.SigningNonce
+					join Election E on E.Id = old.ElectionId
+					where A.Nonce = context.SigningNonce
+						and A.AuthorityId = E.AuthorityId
+						and A.Scope = 'mel'
+						and A.Digest = Digest(
+							context.Tid, old.ElectionId, old.FieldName, old.Tier, old.Requirement, 'delete'
+						)
+			)
+		)
+	)
+		with context ( SigningNonce text, Tid int );
+
+	index ElectionRegistrationFieldElection on ElectionRegistrationField (ElectionId);
+
+	view DisclosureAudience as
+		select 'district' as Code, 'Same district (neighboring voters)' as Name
+		union all select 'everyone' as Code, 'Everyone' as Name;
+
+	-- Election policy: which RegistrantSelective field/object names may be disclosed, and to which
+	-- audience, for a given election. The selective set itself is committed authority-side
+	-- (RegistrantSelective / Registrant.SelectiveCid); this table only declares the disclosure
+	-- intent per election (keyed by ElectionId). Delivery/filtering of disclosed data to
+	-- recipients is handled off-schema by the engine/app at query time (no on-network disclosure
+	-- record). Whole-set commitment (option B) means a disclosed subset is authority-vouched, not
+	-- independently verifiable against SelectiveCid.
+	table ElectionDisclosurePolicy (
+		ElectionId text, -- references Election.Id
+		FieldName text, -- a top-level attribute name within RegistrantSelective.SelectiveDetails
+		Audience text, -- references DisclosureAudience(Code)
+		primary key (ElectionId, FieldName),
+		constraint ElectionIdValid check (exists (select 1 from Election E where E.Id = new.ElectionId)),
+		constraint AudienceValid check (Audience in (select Code from DisclosureAudience)),
+		constraint MutationValid check on insert, update (
+			exists (
+				select 1 from AdminSignature ASig join AdminSigning A on A.Nonce = ASig.SigningNonce
+					join Election E on E.Id = new.ElectionId
+					where A.Nonce = context.SigningNonce
+						and A.AuthorityId = E.AuthorityId
+						and A.Scope = 'mel'
+						and A.Digest = Digest(
+							context.Tid, new.ElectionId, new.FieldName, new.Audience
+						)
+			)
+		),
+		constraint DeleteValid check on delete (
+			exists (
+				select 1 from AdminSignature ASig join AdminSigning A on A.Nonce = ASig.SigningNonce
+					join Election E on E.Id = old.ElectionId
+					where A.Nonce = context.SigningNonce
+						and A.AuthorityId = E.AuthorityId
+						and A.Scope = 'mel'
+						and A.Digest = Digest(
+							context.Tid, old.ElectionId, old.FieldName, old.Audience, 'delete'
+						)
+			)
+		)
+	)
+		with context ( SigningNonce text, Tid int );
+
+	index ElectionDisclosurePolicyElection on ElectionDisclosurePolicy (ElectionId);
+
+	-- Election policy: whether this election requires device attestation to Associate (D-14a/b).
+	-- Single row per election (PK = ElectionId); 'mel'-signed, mirrors ElectionRegistrationField/
+	-- ElectionDisclosurePolicy. AttestationRequired MUST stay `integer default` (NEVER `boolean
+	-- default` -- Quereus v4 re-attach ALTER COLUMN landmine, project_quereus_v4_reattach_boolean_
+	-- default_alter_column). Fail-closed default (1 = attestation required); enforcement of the
+	-- fail-closed no-row-means-required posture is engine-side at the associate() read (45-04).
+	table ElectionAttestationPolicy (
+		ElectionId text primary key, -- references Election.Id
+		AttestationRequired integer default 1, -- 1 = attestation required (safe/fail-closed default), 0 = not required
+		constraint ElectionIdValid check (exists (select 1 from Election E where E.Id = new.ElectionId)),
+		constraint MutationValid check on insert, update (
+			exists (
+				select 1 from AdminSignature ASig join AdminSigning A on A.Nonce = ASig.SigningNonce
+					join Election E on E.Id = new.ElectionId
+					where A.Nonce = context.SigningNonce
+						and A.AuthorityId = E.AuthorityId
+						and A.Scope = 'mel'
+						and A.Digest = Digest(context.Tid, new.ElectionId, new.AttestationRequired)
+			)
+		),
+		constraint DeleteValid check on delete (
+			exists (
+				select 1 from AdminSignature ASig join AdminSigning A on A.Nonce = ASig.SigningNonce
+					join Election E on E.Id = old.ElectionId
+					where A.Nonce = context.SigningNonce
+						and A.AuthorityId = E.AuthorityId
+						and A.Scope = 'mel'
+						and A.Digest = Digest(context.Tid, old.ElectionId, old.AttestationRequired, 'delete')
+			)
+		)
+	)
+		with context ( SigningNonce text, Tid int );
 }
 
 apply schema main;

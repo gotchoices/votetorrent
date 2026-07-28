@@ -143,12 +143,9 @@ export default function NetworksScreen() {
 							/>
 						</View>
 						<View style={styles.iconContainer}>
-							<TouchableOpacity
-								style={styles.iconButton}
-								onPress={() => console.log("Share network:", networkRef.name)}
-							>
-								<FontAwesome6 name="share-nodes" size={20} color={colors.text} />
-							</TouchableOpacity>
+							<View style={[styles.iconButton, { opacity: 0.4 }]}>
+							<FontAwesome6 name="share-nodes" size={20} color={colors.text} />
+						</View>
 							<TouchableOpacity
 								style={styles.iconButton}
 								onPress={() => navigation.navigate("Hosting", { networkRef })}
@@ -170,7 +167,7 @@ export default function NetworksScreen() {
 					title={t("useLocation")}
 					backgroundColor={colors.important}
 					forceDarkText={true}
-					onPress={() => console.log("Use location")}
+					disabled={true}
 				/>
 			</View>
 

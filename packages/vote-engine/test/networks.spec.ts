@@ -16,11 +16,14 @@ import { randomTestKeyPair } from './fixtures/keys.js'
 import { AsyncStorage } from './shims/react-native'
 import {
   isSchemaInitialized,
+  markSchemaInitialized,
   readTidCounter,
   prepareDb,
   initDB,
   registerDbPlugins,
 } from '../src/database/initialize.js'
+import { peekTid } from '../src/database/tid-allocator.js'
+import { VOTETORRENT_SCHEMA_SQL } from '../src/database/schema-sql.js'
 import type {
   User,
   NetworkInit,
@@ -33,9 +36,6 @@ import type {
 // Using AsyncStorage shim for local storage
 
 describe('NetworksEngine', () => {
-  // BLOCKED on https://github.com/gotchoices/quereus/issues/23 — Network's
-  // `CantDelete check on delete (false)` fires on INSERT in Quereus 2.9.0/
-  // 3.1.1. Whole-flow test depends on create() succeeding.
   it('should exercise create, clearRecentNetworks, getRecentNetworks, and open', async () => {
     // Ensure recentNetworks starts as an empty array for spread operations in create()
     await AsyncStorage.setItem('recentNetworks', [])
@@ -237,11 +237,6 @@ describe('NetworksEngine', () => {
     }).contexts.get(hash)
   }
 
-  // BLOCKED on https://github.com/gotchoices/quereus/issues/23
-  // — `check on delete (false)` fires on INSERT in Quereus 2.9.0 / 3.1.1,
-  // tripping Network.CantDelete during the create() batch. When the
-  // upstream fix ships, remove `.skip` and the row-level read below
-  // becomes a passing assertion.
   it('NET-01: create() binds the UserKey insert to the PubKey column and caches the EngineContext', async () => {
     await AsyncStorage.setItem('recentNetworks', [])
     const engine = new NetworksEngine(AsyncStorage)
@@ -258,19 +253,15 @@ describe('NetworksEngine', () => {
       undefined
     )
 
-    // Plan 03-05 NET-01 row-level assertion (restored — will pass once
-    // quereus#23 lands): the UserKey row written by create() must round-trip
-    // through `select PubKey from UserKey where UserId = :userId` and equal
-    // the hex pubkey the engine bound on insert.
+    // Plan 03-05 NET-01 row-level assertion: the UserKey row written by
+    // create() must round-trip through `select PubKey from UserKey where
+    // UserId = :userId` and equal the hex pubkey the engine bound on insert.
     const row = await ctx!.db
       .prepare(`select PubKey from UserKey where UserId = :userId`)
       .get({ userId: user.id })
     expect(row?.['PubKey'], 'UserKey.PubKey should round-trip the inserted hex').to.equal(publicHex)
   })
 
-  // BLOCKED on https://github.com/gotchoices/quereus/issues/23 (same
-  // CantDelete-on-INSERT trip as NET-01). Restored row-level read of the
-  // User row becomes a passing assertion once #23 lands.
   it('NET-02/NET-03: open() reuses the cached EngineContext.db instance from create()', async () => {
     await AsyncStorage.setItem('recentNetworks', [])
     const engine = new NetworksEngine(AsyncStorage)
@@ -299,9 +290,9 @@ describe('NetworksEngine', () => {
     expect(ctxAfterOpen).to.not.equal(undefined)
     expect(ctxAfterOpen!.db).to.equal(ctxAfterCreate!.db)
 
-    // Plan 03-05 NET-02 row-level assertion (restored — will pass once
-    // quereus#23 lands): the User row written by create() must round-trip
-    // through `select Name from User where Id = :userId`.
+    // Plan 03-05 NET-02 row-level assertion: the User row written by
+    // create() must round-trip through `select Name from User where
+    // Id = :userId`.
     const userRow = await ctxAfterOpen!.db
       .prepare(`select Name from User where Id = :userId`)
       .get({ userId: user.id })
@@ -334,9 +325,8 @@ describe('NetworksEngine', () => {
     )
   })
 
-  // BLOCKED on https://github.com/gotchoices/quereus/issues/23 (CantDelete
-  // fires on INSERT). NET-04 itself only tests LocalStorage, but it gates
-  // on a successful create() call which trips #23.
+  // NET-04 itself only tests LocalStorage, but it gates on a successful
+  // create() call.
   it('NET-04: getRecentNetworks() round-trips through LocalStorage after create()', async () => {
     await AsyncStorage.setItem('recentNetworks', [])
     const engine = new NetworksEngine(AsyncStorage)
@@ -691,16 +681,16 @@ describe('NetworksEngine — factory DI and persistence seam (Phase 14)', () => 
   });
 
   // --------------------------------------------------------------------------
-  // D-08 sentinel tests (schema-version marker)
+  // D-08 sentinel tests (schema-init flag)
   // --------------------------------------------------------------------------
 
-  it('schema-version marker absent on fresh db → isSchemaInitialized returns false (D-08)', async () => {
+  it('schema-init flag absent on fresh db → isSchemaInitialized returns false (D-08)', async () => {
     const db = new Database();
     const initialized = await isSchemaInitialized(db);
     expect(initialized).to.equal(false);
   });
 
-  it('schema-version marker present after prepareDb → isSchemaInitialized returns true (D-08)', async () => {
+  it('schema-init flag present after prepareDb → isSchemaInitialized returns true (D-08)', async () => {
     const db = new Database();
     await prepareDb(db);
     const initialized = await isSchemaInitialized(db);
@@ -747,7 +737,7 @@ describe('NetworksEngine — factory DI and persistence seam (Phase 14)', () => 
     let secondCallCount = 0;
     const reattachFactory: DbFactory = async (_h: string) => {
       secondCallCount++;
-      return persistedDb; // already has schema + SchemaVersion
+      return persistedDb; // already has schema + SchemaInit flag
     };
     const newEngine = new NetworksEngine(AsyncStorage, reattachFactory);
 
@@ -764,7 +754,7 @@ describe('NetworksEngine — factory DI and persistence seam (Phase 14)', () => 
   it('open() on cache MISS with UNINITIALIZED store THROWS (D-05) — initDB runs before gate but marker absent', async () => {
     // 14-04: the hasDeclaredSchema guard means initDB now runs BEFORE the D-05 gate when
     // the handle lacks the declaration (hasDeclaredSchema=false). But initDB does NOT write
-    // a SchemaVersion marker — that is create()'s job. So an uninitialized store still throws.
+    // a SchemaInit flag — that is create()'s job. So an uninitialized store still throws.
     const { factory, getExecCount } = makeUninitializedFactory();
     const engine = new NetworksEngine(AsyncStorage, factory);
 
@@ -787,7 +777,7 @@ describe('NetworksEngine — factory DI and persistence seam (Phase 14)', () => 
 
     // 14-04 contract: initDB runs (hasDeclaredSchema was false → exec is called at least once).
     // D-05 intent is preserved: the store still throws because isSchemaInitialized returns false
-    // (no SchemaVersion marker — only create() writes that via writeSchemaVersionMarker).
+    // (no SchemaInit flag — only create() writes that via markSchemaInitialized).
     expect(getExecCount(), 'open() runs initDB exec on uninitialized store (14-04 guard)').to.be.greaterThan(0);
 
     // The store must NOT be cached — a subsequent call with the same hash goes to factory again
@@ -852,12 +842,16 @@ describe('NetworksEngine — factory DI and persistence seam (Phase 14)', () => 
     expect(ddlExecCount, 'open() on initialized store must not run any DDL exec').to.equal(0);
   });
 
-  it('nextTid seeded from TidSequence on re-attach (D-12)', async () => {
-    // Build an initialized db with a known TidSequence value
+  it("nextTid resumes above TidHighWater['networks'] on re-attach (999.1 D-02/D-07/D-09, was D-12)", async () => {
+    // Build an initialized db and persist a known TidHighWater value for the 'networks'
+    // namespace — the shared allocator's durable mechanism that replaced the retired
+    // TidSequence table (R-01: NetworksEngine is now just one more allocator namespace).
     const persistedDb = new Database();
     await prepareDb(persistedDb);
-    // Manually advance TidSequence to a recognizable value
-    await persistedDb.exec('update TidSequence set NextTid = 42');
+    await persistedDb.exec(
+      "insert into TidHighWater (Namespace, HighWater) values ('networks', 42) " +
+        'on conflict (Namespace) do update set HighWater = 42;',
+    );
 
     const reattachFactory: DbFactory = async (_hash: string) => persistedDb;
     const engine = new NetworksEngine(AsyncStorage, reattachFactory);
@@ -870,9 +864,11 @@ describe('NetworksEngine — factory DI and persistence seam (Phase 14)', () => 
 
     await engine.open(ref, makePhase14User(), false);
 
-    // The tidCounters Map should now reflect the seeded value (42)
-    const tidCounters = (engine as unknown as { tidCounters: Map<string, number> }).tidCounters;
-    expect(tidCounters.get('tid-seed-hash'), 'Tid seeded from persisted TidSequence value').to.equal(42);
+    // Fresh engine, SAME persisted Database handle (re-attach): the next allocation for
+    // this namespace must resume above the persisted high-water, never reissuing an
+    // already-consumed Tid — asserted against TidHighWater, not the retired TidSequence.
+    const nextTid = await peekTid(persistedDb, 'networks');
+    expect(nextTid, 'Tid resumes from persisted TidHighWater value, not reissued').to.be.greaterThan(42);
   });
 
   // --------------------------------------------------------------------------
@@ -930,5 +926,153 @@ describe('NetworksEngine — factory DI and persistence seam (Phase 14)', () => 
     // The handle must be cached (D-06)
     const contexts = (engine as unknown as { contexts: Map<string, EngineContext> }).contexts;
     expect(contexts.has('already-declared-hash'), 'already-declared handle must be cached after open()').to.equal(true);
+  });
+
+  // --------------------------------------------------------------------------
+  // REL-01 strand-path createContext regression tests
+  // --------------------------------------------------------------------------
+  //
+  // Background: In release builds NetworksEngine.createContext() is called on a
+  // Database that StrandDatabase.initialize() already applied the App schema to
+  // (via `declare schema App { <inner DDL> } apply schema App;`). The old gate
+  // relied on isSchemaInitialized(db) which always returns false on the strand
+  // path (no SchemaInit row yet), so initDB always ran — declaring the `main`
+  // schema on top of an already-App-declared catalog. Dual-Table ownership of the
+  // same tree://default/{table} LevelDB collections stalls every subsequent INSERT
+  // (infinite spinner / hang in release builds).
+  //
+  // These tests reproduce that exact scenario using an in-memory Database with
+  // the strand path simulated: run `declare schema App { <inner DDL> } apply schema App;`
+  // (matching what StrandDatabase.executeSchema does), then hand it to NetworksEngine
+  // via a DbFactory closure, call create(), and assert:
+  //   (a) no error thrown
+  //   (b) initDB (main schema) was NOT triggered — hasDeclaredSchema('main') stays false
+  //   (c) SchemaInit flag IS planted — isSchemaInitialized returns true
+  //   (d) TidSequence IS planted — readTidCounter does not throw
+  //
+  // The rnDbFactory-path (non-strand) unchanged assertion is also included so that
+  // the PERSIST-02 behavior is locked as a tripwire.
+
+  describe('REL-01 strand-path createContext', () => {
+    // Strip the outer `declare schema main { ... } apply schema main;` wrapper from
+    // the bundled schema SQL — exactly the same regex used in rn-db-factory.ts — so
+    // only the inner DDL remains. StrandDatabase.executeSchema wraps it as:
+    //   `declare schema App { <inner DDL> } apply schema App;`
+    // and calls setSchemaPath(['App', 'main']) so bare table names resolve.
+    const VOTETORRENT_INNER_DDL = VOTETORRENT_SCHEMA_SQL
+      .replace(/^\s*declare\s+schema\s+\w+\s*\{/, '')
+      .replace(/\}\s*apply\s+schema\s+\w+\s*;\s*$/, '')
+      .trim();
+
+    /**
+     * Simulate a strand-path Database: runs App-schema declaration + apply,
+     * then sets the schema path so bare table names resolve under App.
+     * This mirrors exactly what StrandDatabase.initialize() + executeSchema() leave behind.
+     */
+    async function makeStrandDb(): Promise<Database> {
+      const db = new Database();
+      await registerDbPlugins(db);
+      await db.exec(`declare schema App { ${VOTETORRENT_INNER_DDL} } apply schema App;`);
+      db.setSchemaPath(['App', 'main']);
+      return db;
+    }
+
+    beforeEach(async () => {
+      await AsyncStorage.clear();
+      await AsyncStorage.setItem('recentNetworks', []);
+    });
+
+    it('createContext skips initDB on a strand-declared (App) handle (REL-01)', async () => {
+      // Given: a Database already in the strand-declared (App) state.
+      const db = await makeStrandDb();
+      // Pre-condition: App is declared, main is NOT declared.
+      expect(db.declaredSchemaManager.hasDeclaredSchema('App'), 'App should be declared before create()').to.equal(true);
+      expect(db.declaredSchemaManager.hasDeclaredSchema('main'), 'main must NOT be declared before create()').to.equal(false);
+
+      const factory: DbFactory = async (_hash: string) => db;
+      const engine = new NetworksEngine(AsyncStorage, factory);
+
+      let caughtError: unknown;
+      try {
+        await engine.create(makePhase14NetworkInit(), makePhase14User());
+      } catch (err) {
+        caughtError = err;
+      }
+
+      expect(caughtError, 'create() must not throw on a strand-declared (App) handle (REL-01)').to.equal(undefined);
+      // Key assertion: initDB was NOT triggered on the strand-declared handle.
+      // If initDB ran, it would run `declare schema main { ... }` and hasDeclaredSchema('main')
+      // would become true — which is the bug that causes the double-init hang.
+      expect(db.declaredSchemaManager.hasDeclaredSchema('main'), 'main schema must NOT be declared after create() on App-declared handle — initDB must have been skipped (REL-01)').to.equal(false);
+    });
+
+    it('createContext plants markers on the strand path (REL-01)', async () => {
+      // Given: same strand-declared handle.
+      const db = await makeStrandDb();
+      const factory: DbFactory = async (_hash: string) => db;
+      const engine = new NetworksEngine(AsyncStorage, factory);
+
+      await engine.create(makePhase14NetworkInit(), makePhase14User());
+
+      // SchemaInit flag must be planted (ensureTidSequence + markSchemaInitialized must have run).
+      const initialized = await isSchemaInitialized(db);
+      expect(initialized, 'isSchemaInitialized must return true after create() on strand path — SchemaInit flag planted (REL-01)').to.equal(true);
+
+      // TidSequence must be planted and readable.
+      let tidError: unknown;
+      let tid: number | undefined;
+      try {
+        tid = await readTidCounter(db);
+      } catch (err) {
+        tidError = err;
+      }
+      expect(tidError, 'readTidCounter must not throw after create() on strand path — TidSequence row planted (REL-01)').to.equal(undefined);
+      expect(tid, 'TidCounter must be a positive integer after create() on strand path (REL-01)').to.be.a('number').greaterThanOrEqual(1);
+    });
+
+    it('createContext rnDbFactory path unchanged (REL-01 regression guard)', async () => {
+      // Given: a fresh Database with NO App declaration (the rnDbFactory / in-memory path).
+      const db = new Database();
+      const factory: DbFactory = async (_hash: string) => db;
+      const engine = new NetworksEngine(AsyncStorage, factory);
+
+      await engine.create(makePhase14NetworkInit(), makePhase14User());
+
+      // On the non-strand path, initDB MUST have run (declares schema main).
+      // If the strand gate mistakenly fires here (false positive), main would be absent.
+      expect(db.declaredSchemaManager.hasDeclaredSchema('main'), 'main schema must be declared after create() on the rnDbFactory path — initDB must have run (REL-01 regression guard)').to.equal(true);
+    });
+
+    it('markSchemaInitialized is idempotent — second call on same handle does not throw (CR-01)', async () => {
+      // CR-01 direct contract lock: markSchemaInitialized uses INSERT OR IGNORE, so
+      // calling it twice on the same Database (simulating a strand store re-create)
+      // must not throw a PK-uniqueness violation.
+      //
+      // This is the root fix for the strand-path re-create failure: the strand branch
+      // in createContext() calls markSchemaInitialized() unconditionally (no
+      // isSchemaInitialized gate), so a second createContext() on an already-initialized
+      // store previously threw "UNIQUE constraint failed: SchemaVersion.Version".
+      const db = await makeStrandDb();
+
+      // First call — plants the SchemaInit flag.
+      let firstError: unknown;
+      try {
+        await markSchemaInitialized(db);
+      } catch (err) {
+        firstError = err;
+      }
+      expect(firstError, 'first markSchemaInitialized call must not throw').to.equal(undefined);
+      expect(await isSchemaInitialized(db), 'isSchemaInitialized must be true after first call').to.equal(true);
+
+      // Second call — must be a no-op (INSERT OR IGNORE), NOT a PK violation.
+      let secondError: unknown;
+      try {
+        await markSchemaInitialized(db);
+      } catch (err) {
+        secondError = err;
+      }
+      expect(secondError, 'second markSchemaInitialized call must not throw (CR-01 idempotency)').to.equal(undefined);
+      expect(await isSchemaInitialized(db), 'isSchemaInitialized must still be true after second call').to.equal(true);
+    });
   });
 })

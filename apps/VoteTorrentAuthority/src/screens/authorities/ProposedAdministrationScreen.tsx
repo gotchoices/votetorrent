@@ -28,6 +28,7 @@ import { ChipButton } from "../../components/ChipButton";
 import { CustomButton } from "../../components/CustomButton";
 import { Footer } from "../../components/Footer";
 import { InfoCard } from "../../components/InfoCard";
+import { InlineError } from "../../components/InlineError";
 import { ThresholdPolicyRow } from "./components/ThresholdPolicyRow";
 import { globalStyles } from "../../theme/styles";
 import type { RootStackParamList } from "../../navigation/types";
@@ -130,7 +131,7 @@ export default function ProposedAdministrationScreen() {
 									userMap.set(s.existing!.userId, summary);
 								}
 							} catch (e) {
-								console.error(
+								console.warn(
 									"Error loading user for officer:",
 									e
 								);
@@ -143,7 +144,8 @@ export default function ProposedAdministrationScreen() {
 					setOfficerUsers(userMap);
 				}
 			} catch (e) {
-				console.error("Error loading proposed administration:", e);
+				console.warn("Error loading proposed administration:", e);
+				if (!cancelled) setErrorMessage(e instanceof Error ? e.message : String(e));
 			} finally {
 				if (!cancelled) setIsLoading(false);
 			}
@@ -319,11 +321,7 @@ export default function ProposedAdministrationScreen() {
 			</ScrollView>
 
 			{/* ADM-02: PROPOSE footer — wired to real proposeAdmin with device-signer Signature */}
-			{errorMessage ? (
-				<ThemedText type="small" style={{ color: colors.error }}>
-					{errorMessage}
-				</ThemedText>
-			) : null}
+			<InlineError message={errorMessage} />
 			<Footer>
 				<CustomButton
 					title={t("propose")}

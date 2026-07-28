@@ -13,6 +13,7 @@ import { globalStyles } from "../../theme/styles";
 import { ThemedText } from "../../components/ThemedText";
 import { CustomButton } from "../../components/CustomButton";
 import { Footer } from "../../components/Footer";
+import { InlineError } from "../../components/InlineError";
 import type { RootStackParamList } from "../../navigation/types";
 import { useApp } from "../../providers/AppProvider";
 
@@ -40,7 +41,7 @@ export default function ProposedRevisionScreen() {
 			await engine.resendRevision(name, revision);
 			navigation.goBack();
 		} catch (err) {
-			console.error("proposedRevision-resendRequest error:", err);
+			console.warn("proposedRevision-resendRequest error:", err);
 			setErrorMessage(err instanceof Error ? err.message : String(err));
 		} finally {
 			setLoading(false);
@@ -55,7 +56,7 @@ export default function ProposedRevisionScreen() {
 			await engine.cancelRevision(name, revision);
 			navigation.goBack();
 		} catch (err) {
-			console.error("proposedRevision-cancelRequest error:", err);
+			console.warn("proposedRevision-cancelRequest error:", err);
 			setErrorMessage(err instanceof Error ? err.message : String(err));
 		} finally {
 			setLoading(false);
@@ -71,13 +72,9 @@ export default function ProposedRevisionScreen() {
 				<View style={styles.section}>
 					<ThemedText type="default">{t("proposedRevisionBodySecondary")}</ThemedText>
 				</View>
-				{errorMessage ? (
-					<View style={styles.section}>
-						<ThemedText type="small" style={{ color: colors.error }}>
-							{errorMessage}
-						</ThemedText>
-					</View>
-				) : null}
+				<View style={styles.section}>
+					<InlineError message={errorMessage} />
+				</View>
 			</ScrollView>
 			<Footer row>
 				<CustomButton

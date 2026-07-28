@@ -158,7 +158,7 @@ describe('device-signer contract', () => {
     }
 
     // Peek the tid BEFORE calling seedElectionSigning — the engine peeks the same value.
-    const tid = peekNextElectionTid()
+    const tid = await peekNextElectionTid(auth.ctx.db)
 
     const signingNonce = await electionsEngine.seedElectionSigning(electionFields, sign)
 

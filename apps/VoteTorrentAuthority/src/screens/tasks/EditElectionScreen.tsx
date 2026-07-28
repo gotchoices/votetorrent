@@ -16,15 +16,9 @@ export default function EditElectionScreen() {
 		navigation.setOptions({ title: t("editElectionTitle") });
 	}, [navigation, t]);
 
-	const onResend = () => {
-		console.log("editElection-resend");
-		navigation.goBack();
-	};
+	const onResend = undefined;
 
-	const onBackToTasks = () => {
-		console.log("editElection-backToTasks");
-		navigation.goBack();
-	};
+	const onBackToTasks = undefined;
 
 	return (
 		<View style={styles.content}>
@@ -42,6 +36,7 @@ export default function EditElectionScreen() {
 					backgroundColor={colors.accent}
 					size="thin"
 					flex={true}
+					disabled={true}
 					onPress={onResend}
 				/>
 				<CustomButton
@@ -49,6 +44,7 @@ export default function EditElectionScreen() {
 					backgroundColor={colors.success}
 					size="thin"
 					flex={true}
+					disabled={true}
 					onPress={onBackToTasks}
 				/>
 			</Footer>

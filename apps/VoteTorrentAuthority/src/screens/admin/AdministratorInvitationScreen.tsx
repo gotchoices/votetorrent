@@ -20,6 +20,7 @@ import { CustomButton } from "../../components/CustomButton";
 import { CustomTextInput } from "../../components/CustomTextInput";
 import { Footer } from "../../components/Footer";
 import { InfoCard } from "../../components/InfoCard";
+import { InlineError } from "../../components/InlineError";
 import { SignatureTaskFooter } from "../../components/SignatureTaskFooter";
 import type { RootStackParamList } from "../../navigation/types";
 import { useApp } from "../../providers/AppProvider";
@@ -62,7 +63,7 @@ export default function AdministratorInvitationScreen() {
 				const details = await engine?.getDetails();
 				if (details?.network?.name) setNetworkName(details.network.name);
 			} catch (error) {
-				console.error("Error loading network for invitation:", error);
+				console.warn("Error loading network for invitation:", error);
 			}
 		}
 		loadNetwork();
@@ -82,7 +83,8 @@ export default function AdministratorInvitationScreen() {
 				const status = await engine.getOfficerInvite(invitationId);
 				setInvite(status);
 			} catch (error) {
-				console.error("Error loading officer invite:", error);
+				console.warn("Error loading officer invite:", error);
+				setErrorMessage(error instanceof Error ? error.message : String(error));
 			}
 		}
 		loadInvite();
@@ -136,7 +138,7 @@ export default function AdministratorInvitationScreen() {
 			setShareText(sharePayload);
 			// D-08: do NOT navigate away immediately — keep screen so Copy affordance shows.
 		} catch (error) {
-			console.error("onSend error:", error);
+			console.warn("onSend error:", error);
 			setErrorMessage(error instanceof Error ? error.message : String(error));
 		}
 	};
@@ -165,7 +167,7 @@ export default function AdministratorInvitationScreen() {
 			// GAP-2: navigate ONLY on success — the InviteResult is now written.
 			navigation.goBack();
 		} catch (error) {
-			console.error("Error responding to invite:", error);
+			console.warn("Error responding to invite (accept):", error);
 			setErrorMessage(error instanceof Error ? error.message : String(error));
 		}
 	};
@@ -191,7 +193,7 @@ export default function AdministratorInvitationScreen() {
 			// GAP-2: navigate ONLY on success — the InviteResult is now written.
 			navigation.goBack();
 		} catch (error) {
-			console.error("Error responding to invite:", error);
+			console.warn("Error responding to invite (decline):", error);
 			setErrorMessage(error instanceof Error ? error.message : String(error));
 		}
 	};
@@ -229,11 +231,7 @@ export default function AdministratorInvitationScreen() {
 						) : null}
 
 						{/* Pattern B error display */}
-						{errorMessage ? (
-							<ThemedText type="small" style={{ color: colors.error }}>
-								{errorMessage}
-							</ThemedText>
-						) : null}
+						<InlineError message={errorMessage} />
 					</View>
 				</ScrollView>
 				{!shareText ? (
@@ -325,11 +323,7 @@ export default function AdministratorInvitationScreen() {
 				</View>
 			</ScrollView>
 			{/* GAP-2: surface respondToInvite failures inline in accept mode */}
-			{errorMessage ? (
-				<ThemedText type="small" style={{ color: colors.error }}>
-					{errorMessage}
-				</ThemedText>
-			) : null}
+			<InlineError message={errorMessage} />
 			<SignatureTaskFooter
 				onAccept={onAccept}
 				onReject={onDecline}

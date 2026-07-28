@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { View } from "react-native";
-import { ExtendedTheme, useTheme, useNavigation, useRoute } from "@react-navigation/native";
+import { ExtendedTheme, useTheme, useNavigation, useRoute, useFocusEffect } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTranslation } from "react-i18next";
 import type { Question } from "@votetorrent/vote-core";
@@ -11,8 +11,9 @@ import { globalStyles } from "../../theme/styles";
 import { useBallotDraft } from "./providers/BallotDraftProvider";
 import { BallotTemplateForm } from "./components/BallotTemplateForm";
 import { CustomButton } from "../../components/CustomButton";
-import { ThemedText } from "../../components/ThemedText";
-import type { Ballot } from "@votetorrent/vote-core";
+import { InlineError } from "../../components/InlineError";
+import { useApp } from "../../providers/AppProvider";
+import type { Authority, Ballot, INetworkEngine } from "@votetorrent/vote-core";
 
 /**
  * EditBallotScreen — Ballot Template frame (Figma 57:490) in edit/populated mode.
@@ -36,8 +37,12 @@ const EditBallotScreen = () => {
 	const electionEngine = (route.params as any)?.electionEngine;
 	const ballotId = (route.params as any)?.ballotId;
 	const readOnly = route.params?.readOnly === true;
+	const { getEngine } = useApp();
+	const [loadError, setLoadError] = useState("");
 	const [errorMessage, setErrorMessage] = useState("");
 	const [proposing, setProposing] = useState(false);
+	const [confirmationLocked, setConfirmationLocked] = useState(false);
+	const [authorities, setAuthorities] = useState<Authority[]>([]);
 	const { ballotDraft, setBallotDraft, addQuestion, updateQuestion, removeQuestion } = useBallotDraft();
 
 	// Seed the draft with electionId from route params (edit mode entry point)
@@ -47,6 +52,39 @@ const EditBallotScreen = () => {
 		}
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [electionId]);
+
+	// Load the real authorities so the dropdown stores a valid Authority.Id (the
+	// ProposedBallot.AuthorityIdValid CHECK requires the id to exist in the
+	// Authority table). Includes the primary/network-creator authority.
+	const [primaryAuthorityId, setPrimaryAuthorityId] = useState("");
+	useEffect(() => {
+		async function loadAuthorities() {
+			try {
+				const engine = await getEngine<INetworkEngine>("network");
+				if (!engine) return;
+				const cursor = await engine.getAuthoritiesByName(undefined);
+				setAuthorities(cursor.buffer);
+				const details = await engine.getDetails();
+				if (details?.network?.primaryAuthorityId) {
+					setPrimaryAuthorityId(details.network.primaryAuthorityId);
+				}
+			} catch (error) {
+				console.warn("Error loading authorities for ballot:", error);
+			}
+		}
+		loadAuthorities();
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [getEngine]);
+
+	// Default to the primary authority ONLY when the loaded ballot has no authority
+	// (the getBallotDetails effect already seeds `authority` from the existing
+	// ballot's authorityId, so this never clobbers an existing selection).
+	useEffect(() => {
+		if (primaryAuthorityId && !(ballotDraft as any).authority) {
+			setBallotDraft({ ...ballotDraft, authority: primaryAuthorityId } as any);
+		}
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [primaryAuthorityId, (ballotDraft as any).authority]);
 
 	// G12 edit/upsert: load existing ballot from engine on mount so the form
 	// pre-populates AND the draft retains the SAME id for upsert on PROPOSE.
@@ -69,12 +107,30 @@ const EditBallotScreen = () => {
 					} as any);
 				}
 			} catch (error) {
-				console.error("getBallotDetails error", error);
+				console.warn("getBallotDetails error", error);
+				setLoadError(error instanceof Error ? error.message : String(error));
 			}
 		};
 		loadBallot();
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [ballotId]);
+
+	// D-05: poll confirmation lock state on every focus so an edit screen opened
+	// while a confirmation is pending shows the correct locked UI immediately.
+	useFocusEffect(
+		useCallback(() => {
+			if (!electionEngine || !ballotId) return;
+			const checkLock = async () => {
+				try {
+					const state = await electionEngine.getBallotConfirmationState(ballotId);
+					setConfirmationLocked(state.locked);
+				} catch (error) {
+					console.warn("getBallotConfirmationState error", error);
+				}
+			};
+			checkLock();
+		}, [electionEngine, ballotId])
+	);
 
 	// Carry-back from EditQuestionScreen SAVE: when editing an existing template,
 	// EditQuestion popTos here with the assembled `question`. Merge it into the
@@ -130,7 +186,7 @@ const EditBallotScreen = () => {
 			await electionEngine.proposeBallot(ballot);
 			navigation.goBack();
 		} catch (error) {
-			console.error("proposeBallot error", error);
+			console.warn("proposeBallot error", error);
 			setErrorMessage(error instanceof Error ? error.message : String(error));
 		} finally {
 			setProposing(false);
@@ -165,6 +221,9 @@ const EditBallotScreen = () => {
 		} as any);
 	};
 
+	// D-05: edit is blocked when the ballot has a pending confirmation task.
+	const editingDisabled = readOnly || confirmationLocked;
+
 	return (
 		<View style={globalStyles.content}>
 			<BallotTemplateForm
@@ -172,24 +231,20 @@ const EditBallotScreen = () => {
 				electionDate={electionDate}
 				authority={(ballotDraft as any).authority ?? ""}
 				onAuthorityChange={handleAuthorityChange}
-				authorityOptions={[t("mockAuthorityA"), t("mockAuthorityB")]}
+				authorityOptions={authorities.map((a) => ({ id: a.id, name: a.name }))}
 				description={ballotDraft.description ?? ""}
 				onDescriptionChange={handleDescriptionChange}
 				districts={ballotDraft.districts ?? []}
 				onDistrictsChange={handleDistrictsChange}
 				questions={ballotDraft.questions ?? []}
-				onAddQuestion={handleAddQuestion}
-				onEditQuestion={handleEditQuestion}
+				onAddQuestion={editingDisabled ? undefined : handleAddQuestion}
+				onEditQuestion={editingDisabled ? undefined : handleEditQuestion}
+				disabled={editingDisabled}
 			/>
-			{errorMessage ? (
-				<View style={{ paddingHorizontal: 16, paddingBottom: 8 }}>
-					<ThemedText type="small" style={{ color: colors.error }}>
-						{errorMessage}
-					</ThemedText>
-				</View>
-			) : null}
-			{/* Footer: PROPOSE — hidden in readOnly (preview) mode */}
-			{!readOnly && (
+			<InlineError message={loadError} />
+			<InlineError message={errorMessage} />
+			{/* Footer: PROPOSE — hidden in readOnly (preview) mode or when locked. */}
+			{!readOnly && !confirmationLocked && (
 				<View style={[globalStyles.footer, { backgroundColor: colors.card, paddingBottom: insets.bottom + 16 }]}>
 					<CustomButton
 						title={t("propose")}

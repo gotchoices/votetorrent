@@ -8,8 +8,10 @@
     "start": "node drone.mjs"
   },
   "dependencies": {
+    "@libp2p/circuit-relay-v2": "^4",
     "@libp2p/websockets": "^10",
-    "@optimystic/db-p2p": "0.13.5",
-    "@serfab/cadre-core": "^0.7.1"
+    "@optimystic/db-p2p": "patch:@optimystic/db-p2p@npm%3A0.14.1#~/.yarn/patches/@optimystic-db-p2p-npm-0.14.1-d92453d5ee.patch",
+    "@serfab/cadre-core": "^0.8.1",
+    "@serfab/strand-proto": "^0.8.1"
   }
 }

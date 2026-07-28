@@ -143,7 +143,7 @@ describe('Canonical digest binding (Wave-0 Nyquist scaffolds)', () => {
     }
 
     // Capture the tid BEFORE calling seedElectionSigning so we know which integer to recompute.
-    const tid = peekNextElectionTid()
+    const tid = await peekNextElectionTid(auth.ctx.db)
 
     const sign = makeSignCallback(privateHex, auth.user.id, auth.user.activeKeys[0]!.key)
     const signingNonce = await electionsEngine.seedElectionSigning(electionFields, sign)

@@ -1,6 +1,8 @@
 import { MisuseError, QuereusError } from '@quereus/quereus'
 import { ElectionEngine } from '../election/election-engine.js'
 import { digestToBytes, fromCanonicalDatetime, nowCanonicalDatetime, parseJsonOr, toCanonicalDatetime } from '../utils.js'
+import { allocateTid } from '../database/tid-allocator.js'
+import type { Database } from '@quereus/quereus'
 import type { EngineContext } from '../types.js'
 import type {
   ElectionCoreInit,
@@ -10,6 +12,7 @@ import type {
   ElectionSummary,
   ElectionType,
   IElectionEngine,
+  KeyholderInvite,
   IElectionsAdjustElectionBuilder,
   IElectionsCreateElectionBuilder,
   IElectionsEngine,
@@ -20,32 +23,72 @@ import { ElectionsCreateElectionBuilder } from './builders/elections-create-elec
 import { ElectionsAdjustElectionBuilder } from './builders/elections-adjust-election-builder.js'
 import { SigningEngine } from '../signing/signing-engine.js'
 
-// Phase 05 ELEC-01/02 — monotonic Tid counter for ElectionsEngine batches.
-// WR-16 (17-REVIEW): DBs now persist across process restarts (Phase 17 proof
-// harness), so a counter restarting at 1 would re-issue Tids already consumed
-// by a previous process — defeating Tid's replay-protection role ("an update
-// can't be repeated with the same credentials"). Tids are NOT queryable from
-// the store (they live only inside persisted signature digests), so seeding
-// from the store is impossible; instead the counter is seeded from the
-// epoch-ms clock at module load. Increments stay sequential within a process,
-// preserving the createElection T / T+1 revision-tid contract and
-// peekNextElectionTid().
+// Phase 999.1 D-01/D-02/D-03 — Tids for ElectionsEngine batches are allocated
+// through the shared durable, peer-safe allocator (`tid-allocator.ts`,
+// namespace 'elections') instead of a process-local `Date.now()`-seeded
+// counter. See tid-allocator.ts for the D-07 hybrid seed / D-09
+// reserve-before-use / D-10 per-namespace serialization rationale that
+// replaces the WR-16/WR-25 heuristic this module used to carry.
 //
-// WR-25 (17-REVIEW): this seed is a HEURISTIC, not a guarantee. Two unguarded
-// failure modes can silently re-issue consumed Tids:
-//   1. Allocation bursts faster than 1/ms — each nextTid++ advances the
-//      counter 1 ms ahead of the wall clock, so a burst of N allocations lets
-//      the counter outrun the clock by N ms; a process restart within that
-//      window reseeds BELOW already-issued Tids.
-//   2. Device clock rollback (manual change, NTP correction — common on
-//      emulators) reseeds the counter below previously issued Tids.
-// Nothing detects either condition today. PERSIST-01 must replace this with
-// store-reconciled allocation seeded from a persisted high-water mark:
-// nextTid = max(Date.now(), storedHighWater + 1), updated on allocation.
-let nextTid = Date.now()
+// [Deviation — Rule 1 auto-fix bug, 999.1-03] The elections byte-alignment
+// contract (documented on createElection below) requires that whatever Tid a
+// caller peeks BEFORE signing is the EXACT Tid createElection later consumes
+// — with NO drift, even across the async gap of a real signing round-trip.
+// The shared allocator's `peekTid` is explicitly NOT safe for this: it
+// recomputes `max(persisted, Date.now())` fresh on every call (no persist),
+// so on a namespace's first-ever allocation (every fresh test/network DB —
+// no persisted TidHighWater row yet) a peek and a LATER independent allocate
+// can each observe a different Date.now() and diverge, silently breaking the
+// signed Digest's Tid vs the INSERT's context.Tid (InsertValid CHECK fails).
+// Fix: this module reserves the T/T+1 pair EAGERLY (via allocateTid, which
+// IS persist-before-return/durable per D-09) the first time either
+// `peekNextElectionTid` or `seedElectionSigning` asks for it, and caches the
+// reservation per-`Database`-handle until `createElection` consumes it. A
+// second peek before consumption returns the SAME cached pair (still
+// peek-safe — no re-reservation); `createElection` called with no prior peek
+// falls back to a fresh `allocateTid(db, 'elections', 2)` reservation.
+const pendingElectionTidPairs = new WeakMap<Database, number>()
 
-/** For test use only — returns the Tid that the next createElection() call will use. */
-export function peekNextElectionTid (): number { return nextTid }
+/**
+ * Reserve (durably, via `allocateTid`) the next `[T, T+1]` 'elections' Tid
+ * pair for `db` if one is not already pending, and return its start `T`.
+ * A pending reservation is NOT re-reserved — repeated calls before
+ * `consumeElectionTidPair` return the same cached `T` (peek-stable).
+ */
+async function reserveOrPeekElectionTidPair (db: Database): Promise<number> {
+  const cached = pendingElectionTidPairs.get(db)
+  if (cached !== undefined) return cached
+  const start = await allocateTid(db, 'elections', 2)
+  pendingElectionTidPairs.set(db, start)
+  return start
+}
+
+/**
+ * Consume the pending 'elections' Tid pair reserved for `db` (from a prior
+ * `peekNextElectionTid`/`seedElectionSigning` call), or reserve a fresh pair
+ * if none is pending (e.g. `createElection` called with no preceding peek).
+ */
+async function consumeElectionTidPair (db: Database): Promise<number> {
+  const cached = pendingElectionTidPairs.get(db)
+  if (cached !== undefined) {
+    pendingElectionTidPairs.delete(db)
+    return cached
+  }
+  return allocateTid(db, 'elections', 2)
+}
+
+/**
+ * For test use only — returns the Tid that the next `createElection()` call
+ * will use, WITHOUT allocating a NEW reservation (a pending reservation, if
+ * any, is reused — see `reserveOrPeekElectionTidPair` above). Backed by the
+ * shared allocator (999.1 D-01) — mirrors the pre-existing
+ * `peekNextElectionTid()` test hook's contract, now async and scoped to a
+ * caller-supplied `db` handle (the allocator holds no cross-call TS-side
+ * state of its own — see tid-allocator.ts).
+ */
+export async function peekNextElectionTid (db: Database): Promise<number> {
+  return reserveOrPeekElectionTidPair(db)
+}
 
 // digestToBytes promoted to packages/vote-engine/src/utils.ts (WR-01 single source of truth).
 // Imported above from '../utils.js'.
@@ -67,6 +110,19 @@ export class ElectionsEngine implements IElectionsEngine {
   constructor (private readonly ctx?: EngineContext) {}
 
   /**
+   * 999.1 D-15 fix: interface-level peek so app-layer callers (which only ever
+   * hold an `IElectionsEngine`, never the concrete `Database` handle) can
+   * compute `T + 1` for `seedElectionRevisionSigning` without needing `db`.
+   * Delegates to the SAME `peekNextElectionTid(db)` `seedElectionSigning`
+   * already calls — idempotent (returns the cached pending pair's start if one
+   * is already reserved for this context's `db`, else reserves fresh).
+   */
+  async peekNextTid (): Promise<number> {
+    this.requireCtx('peekNextTid')
+    return peekNextElectionTid(this.ctx!.db)
+  }
+
+  /**
    * ELEC-05 (narrative) / `adjustElection` (interface) — INSERT a
    * ProposedElection row. The schema's ProposedElection.UserValid CHECK
    * gates on an Officer with scope 'mel', a non-expired UserKey matching
@@ -74,7 +130,7 @@ export class ElectionsEngine implements IElectionsEngine {
    */
   async adjustElection (election: ElectionInit): Promise<void> {
     this.requireCtx('adjustElection')
-    const tid = nextTid++
+    const tid = await allocateTid(this.ctx!.db, 'elections')
     const e = election.election
     // IN-24 (17-REVIEW): the revision row belongs to THIS proposal — a
     // mismatched revision.electionId would key the revision elsewhere
@@ -141,7 +197,7 @@ export class ElectionsEngine implements IElectionsEngine {
       // Serialization mirrors ElectionEngine.proposeRevision exactly; the
       // schema's ElectionIdValid accepts an ElectionId that references the
       // ProposedElection row inserted above.
-      const revTid = nextTid++
+      const revTid = await allocateTid(this.ctx!.db, 'elections')
       const r = election.revision
       await this.ctx!.db.exec(
 				`insert into ProposedElectionRevision (
@@ -201,10 +257,14 @@ export class ElectionsEngine implements IElectionsEngine {
    * the constraint pattern that quereus#23 breaks today on INSERT.
    */
   /**
-   * Byte-alignment contract for the revision insert (T-16-21 mitigation):
-   * The Election row uses tid = nextTid++ (call it T).
-   * The ElectionRevision row uses revTid = nextTid++ = T + 1.
-   * seedElectionRevisionSigning MUST be called with tid = peekNextElectionTid() + 1
+   * Byte-alignment contract for the revision insert (T-16-21 mitigation,
+   * re-anchored on the 999.1 D-01/D-03 shared allocator):
+   * `allocateTid(db, 'elections', 2)` reserves the contiguous pair `[T, T+1]`
+   * in ONE mutex hold — the Election row uses T, the ElectionRevision row
+   * uses T + 1. Because the pair is reserved atomically under the allocator's
+   * per-namespace lock (D-10), a concurrent 'elections' allocation can never
+   * slip between the two and break adjacency (D-03).
+   * seedElectionRevisionSigning MUST be called with tid = (peekNextElectionTid(db) + 1)
    * AFTER seedElectionSigning (which peeks at T) but BEFORE createElection (which
    * consumes T then T+1). This guarantees the seam's signed revTid equals the INSERT's
    * context.Tid. The caller controls revisionTimestamp — pass the SAME past epoch ms
@@ -213,7 +273,18 @@ export class ElectionsEngine implements IElectionsEngine {
    */
   async createElection (election: ElectionInit, options?: { signingNonce?: string; revisionSigningNonce?: string }): Promise<void> {
     this.requireCtx('createElection')
-    const tid = nextTid++
+    // D-03: consume the T/T+1 pair reserved as ONE count=2 block (either the
+    // pending reservation a prior peekNextElectionTid/seedElectionSigning
+    // already made — the common byte-alignment-contract path, see the deviation
+    // note on `pendingElectionTidPairs` above — or, if none is pending, a fresh
+    // reservation right here). Either way the pair is reserved atomically under
+    // the allocator's per-namespace lock (D-10), so a concurrent 'elections'
+    // allocation can never slip between T and T+1. `revTid` is only consumed
+    // below when a revision is actually inserted; if the caller omits revision
+    // data, T+1 is a harmless unconsumed reservation (Tid is never a
+    // PK/unique/index — D-09).
+    const tid = await consumeElectionTidPair(this.ctx!.db)
+    const revTid = tid + 1
     const e = election.election
     try {
       await this.ctx!.db.exec(
@@ -255,7 +326,6 @@ export class ElectionsEngine implements IElectionsEngine {
     // Insert the initial ElectionRevision (Revision = 0) if revision data and nonce are provided.
     // Skipped if either is absent (back-compat for callers that intentionally omit the revision).
     if (election.revision && options?.revisionSigningNonce) {
-      const revTid = nextTid++
       const r = election.revision
       // Serialize tags/timeline with JSON.stringify — byte-identical to seedElectionRevisionSigning binds.
       const tags = JSON.stringify(r.tags)
@@ -264,11 +334,21 @@ export class ElectionsEngine implements IElectionsEngine {
       // < Election.RevisionDeadline). Do NOT generate a fresh Date.now() here; that would diverge
       // from the timestamp the seam already signed, reproducing the 16-06 digest-mismatch class.
       const revTimestamp = toCanonicalDatetime(r.revisionTimestamp)
+      // 39-02 D-04 Gap 1 fix: persist the create-time keyholder invitees
+      // (r.keyholders) into the new UNSIGNED ElectionRevision.Keyholders
+      // column. Deliberately NOT added to seedElectionRevisionSigning's
+      // Digest tuple (A1, see the comment there) — these are pending
+      // invitee names, not signed keyholder commitments. Byte-consistent
+      // with the Gap 2 read-back projections (JSON.parse of this exact
+      // JSON.stringify output). KEY-P2P-01 (future work): once the signed
+      // invite flow lands, keyholder invitees will be persisted via the
+      // signed inviteKeyholder path instead of this unsigned column.
+      const keyholders = JSON.stringify(r.keyholders ?? [])
       try {
         await this.ctx!.db.exec(
-          `insert into ElectionRevision (ElectionId, Revision, RevisionTimestamp, Tags, Instructions, Timeline, KeyholderThreshold)
+          `insert into ElectionRevision (ElectionId, Revision, RevisionTimestamp, Tags, Instructions, Timeline, KeyholderThreshold, Keyholders)
           with context SigningNonce = :signingNonce, Tid = ${revTid}, now = :now
-          values (:electionId, 0, :revTimestamp, :tags, :instructions, :timeline, :keyholderThreshold)`,
+          values (:electionId, 0, :revTimestamp, :tags, :instructions, :timeline, :keyholderThreshold, :keyholders)`,
           {
             signingNonce: options.revisionSigningNonce,
             electionId: e.id,
@@ -277,6 +357,7 @@ export class ElectionsEngine implements IElectionsEngine {
             instructions: r.instructions,
             timeline,
             keyholderThreshold: r.keyholderThreshold,
+            keyholders,
             now: nowCanonicalDatetime(),
           }
         )
@@ -384,7 +465,7 @@ export class ElectionsEngine implements IElectionsEngine {
         // cast that crashed consumers at `proposal.proposed.revision.*`.
         const revRow = await this.ctx.db
           .prepare(
-						`select Revision, RevisionTimestamp, Tags, Instructions, Timeline, KeyholderThreshold
+						`select Revision, RevisionTimestamp, Tags, Instructions, Timeline, KeyholderThreshold, Keyholders
 							from ProposedElectionRevision where ElectionId = :id`
           )
           .get({ id: core.id })
@@ -407,9 +488,10 @@ export class ElectionsEngine implements IElectionsEngine {
           revisionTimestamp: fromCanonicalDatetime(revRow.RevisionTimestamp as string | number),
           tags: parseJsonOr<string[]>(revRow.Tags, [], 'ProposedElectionRevision.Tags'),
           instructions: revRow.Instructions as string,
-          // ProposedElectionRevision persists no keyholder invites; []
-          // mirrors ElectionEngine.getRevisions' projection of this field.
-          keyholders: [],
+          // 39-02 D-04 Gap 2: proposeRevision does not currently write this
+          // column (out of this plan's Gap 1 scope) — falls back to [] via
+          // the shared parser rather than a hardcoded literal.
+          keyholders: parseJsonOr<KeyholderInvite[]>(revRow.Keyholders, [], 'ProposedElectionRevision.Keyholders'),
           timeline: parseJsonOr<Record<ElectionEvent, number>>(
             revRow.Timeline,
             {} as Record<ElectionEvent, number>,
@@ -471,10 +553,10 @@ export class ElectionsEngine implements IElectionsEngine {
    * 6. Call `SigningEngine.sign()` → OfficerSignature → (threshold=1) → AdminSignature.
    * 7. Return the nonce so the screen can pass it to `createElection(payload, { signingNonce })`.
    *
-   * The `IsSignatureValid = true` context flag is the seedElectionSigning pattern
-   * (same as test/fixtures/test-context.ts); it is acceptable because the stored
-   * `Signature` value IS a genuine secp256k1 signature over the correct Digest —
-   * `OfficerSignature.SignatureValid` will verify the real crypto (D-01).
+   * 999.1 R-02: the AdminSigning insert no longer binds a hardcoded IsSignatureValid — the
+   * schema's `SignatureValid(new.Digest, new.Signature, new.SignerKey)` UDF verifies the
+   * stored `Signature` directly, and it IS a genuine secp256k1 signature over the correct
+   * Digest (D-01). `OfficerSignature.SignatureValid` verifies the same real crypto downstream.
    *
    * @param electionFields - The core election fields (id, authorityId, title, date,
    *   revisionDeadline, ballotDeadline, type) — must match exactly what the builder
@@ -503,8 +585,8 @@ export class ElectionsEngine implements IElectionsEngine {
     }
     const adminEffectiveAt = adminRow.EffectiveAt as string | number
 
-    // 2. Peek the Tid that createElection() will use (peek — do NOT increment)
-    const tid = peekNextElectionTid()
+    // 2. Peek the Tid that createElection() will use (peek — do NOT consume)
+    const tid = await peekNextElectionTid(ctx.db)
 
     // Convert date fields to the canonical datetime string form the schema expects,
     // matching exactly what createElection passes to the Election INSERT.
@@ -547,8 +629,9 @@ export class ElectionsEngine implements IElectionsEngine {
     const signature = await sign(digestBytes)
 
     // 5. Generate nonce and insert AdminSigning with the election-specific Digest.
-    //    `IsSignatureValid = true` mirrors the seedElectionSigning test-fixture pattern;
-    //    OfficerSignature.SignatureValid will still verify the genuine secp256k1 signature.
+    //    999.1 R-02: AdminSigning.SignatureValid now verifies `signature` (a genuine
+    //    secp256k1 signature) via the in-schema UDF; OfficerSignature.SignatureValid verifies
+    //    the same real crypto downstream.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const nonce: string = (globalThis as any).crypto.randomUUID()
     const now = nowCanonicalDatetime()
@@ -564,7 +647,7 @@ export class ElectionsEngine implements IElectionsEngine {
         SignerKey,
         Signature
       )
-      with context now = :now, IsSignatureValid = true, IsSignerKeyValid = true
+      with context now = :now, IsSignerKeyValid = true, IsPlaceholderSignature = false
       values (
         :nonce,
         :authorityId,
@@ -622,10 +705,11 @@ export class ElectionsEngine implements IElectionsEngine {
    *     what the ElectionRevision INSERT binds in Task 2.
    *   - `timeline`     binds as `JSON.stringify(revision.timeline)` — same byte-identity.
    *
-   * The `revTid` used here is `peekNextElectionTid() + 1` because `createElection`
-   * consumes `nextTid++` for the Election row first, then `nextTid++` for the revision.
-   * Callers MUST call seedElectionSigning (which peeks at `peekNextElectionTid()`) BEFORE
-   * calling this method so the +1 offset is stable.
+   * The `revTid` used here is `(await peekNextElectionTid(db)) + 1` because
+   * `createElection` reserves the T/T+1 pair via `allocateTid(db, 'elections', 2)`
+   * — the Election row consumes T, the revision row consumes T + 1 (D-03).
+   * Callers MUST call seedElectionSigning (which peeks at `peekNextElectionTid(db)`)
+   * BEFORE calling this method so the +1 offset is stable.
    *
    * @returns A DISTINCT nonce (different from the election-row nonce) for the caller
    *   to pass to `createElection(payload, { signingNonce, revisionSigningNonce })`.
@@ -647,6 +731,17 @@ export class ElectionsEngine implements IElectionsEngine {
     this.requireCtx('seedElectionRevisionSigning')
     const ctx = this.ctx!
 
+    // 39-02 D-04 (A1, deliberate — NOT a silent omission): the digest computed
+    // below intentionally does NOT include the revision's keyholder invitees
+    // (ElectionRevision.Keyholders, Gap 1). Create-time keyholder names are
+    // pending invitees, not yet-signed keyholder commitments — the signed
+    // binding is the separate inviteKeyholder -> Keyholder flow. Adding
+    // keyholders to this signed digest would ripple into the schema's
+    // MutationValid Digest tuple (votetorrent.qsql ElectionRevision) and
+    // every existing revision-signing test; out of scope for this fix.
+    // KEY-P2P-01 (future work) is the tracked follow-up for a signed
+    // keyholder-invite flow.
+    //
     // 1. Resolve CurrentAdmin.EffectiveAt for the authority (same as seedElectionSigning).
     const adminRow = await ctx.db
       .prepare('select EffectiveAt from CurrentAdmin where AuthorityId = :authorityId')
@@ -703,7 +798,7 @@ export class ElectionsEngine implements IElectionsEngine {
         SignerKey,
         Signature
       )
-      with context now = :now, IsSignatureValid = true, IsSignerKeyValid = true
+      with context now = :now, IsSignerKeyValid = true, IsPlaceholderSignature = false
       values (
         :nonce,
         :authorityId,
@@ -799,14 +894,17 @@ export class ElectionsEngine implements IElectionsEngine {
       const nonce: string = (globalThis as any).crypto.randomUUID()
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       signatureTaskId = (globalThis as any).crypto.randomUUID()
-      // tid is used ONLY in the AdminSigning Digest and the Task/Extension context.Tid; it is
-      // NOT the global Tid counter — it just needs to be a distinct integer for this call so
-      // Digest(...) produces a unique value. Date.now() satisfies that.
-      const tid = Date.now()
+      // 999.1 D-01: tid is used in the AdminSigning Digest and the Task/Extension
+      // context.Tid — a re-seed helper, not createElection, but still routed through
+      // the shared durable allocator ('elections' namespace) rather than the wall
+      // clock, so a restart/clock-rollback cannot re-issue a value already consumed
+      // by a real 'elections' allocation elsewhere in this process.
+      const tid = await allocateTid(ctx.db, 'elections')
       const now = nowCanonicalDatetime()
 
-      // Placeholder key/sig values satisfy the AdminSigning context checks
-      // (IsSignerKeyValid = true, IsSignatureValid = true) without real crypto.
+      // Placeholder key/sig values — 999.1 R-02/R-04 (DEBT-11): this debug-only seed helper
+      // never calls sign(), so AdminSigning.SignatureValid must take the explicit
+      // IsPlaceholderSignature escape hatch rather than a real verifiable signature.
       const placeholderKey = '0'.repeat(66)
       const placeholderSig = '0'.repeat(128)
 
@@ -835,7 +933,7 @@ export class ElectionsEngine implements IElectionsEngine {
       //    MutationValid's "not exists AdminSignature for uncompleted task" gate passes.
       await ctx.db.exec(
         `insert into AdminSigning (Nonce, AuthorityId, AdminEffectiveAt, Scope, Digest, UserId, SignerKey, Signature)
-         with context now = :now, IsSignatureValid = true, IsSignerKeyValid = true
+         with context now = :now, IsSignerKeyValid = true, IsPlaceholderSignature = true
          values (:nonce, :authorityId, :adminEffectiveAt, 'rad',
                  Digest(:tid, :authorityId, :adminEffectiveAt, :thresholdPolicies),
                  :userId, :signerKey, :signature)`,
@@ -901,7 +999,9 @@ export class ElectionsEngine implements IElectionsEngine {
       // Generate fresh IDs — a new UUID Task id prevents PK collisions with the prior completed task.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       releaseKeyTaskId = (globalThis as any).crypto.randomUUID()
-      const rkTid = Date.now()
+      // 999.1 D-01: same re-seed-helper rationale as the signature-task tid above —
+      // route through the shared allocator instead of the wall clock.
+      const rkTid = await allocateTid(ctx.db, 'elections')
 
       // 7. Insert Task + ReleaseKeyTaskExtension in one explicit transaction.
       await ctx.db.exec('BEGIN')

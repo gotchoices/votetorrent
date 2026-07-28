@@ -16,10 +16,7 @@ export default function ProposedElectionScreen() {
 		navigation.setOptions({ title: t("proposedElectionTitle") });
 	}, [navigation, t]);
 
-	const onBackToTasks = () => {
-		console.log("proposedElection-backToTasks");
-		navigation.goBack();
-	};
+	const onBackToTasks = undefined;
 
 	return (
 		<View style={styles.content}>
@@ -33,6 +30,7 @@ export default function ProposedElectionScreen() {
 					title={t("proposedElectionBackToTasks")}
 					backgroundColor={colors.success}
 					size="thin"
+					disabled={true}
 					onPress={onBackToTasks}
 				/>
 			</Footer>

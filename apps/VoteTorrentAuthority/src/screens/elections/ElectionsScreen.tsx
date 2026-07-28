@@ -17,6 +17,7 @@ import { ElectionCard } from "./components/ElectionCard";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NavigationProp } from "../../navigation/types";
 import { ThemedText } from "../../components/ThemedText";
+import { InlineError } from "../../components/InlineError";
 
 /**
  * ElectionsScreen — three stacked sections per Phase 9 D-13:
@@ -36,6 +37,7 @@ export const ElectionsScreen = () => {
 	const [elections, setElections] = useState<ElectionSummary[]>([]);
 	const [proposedElections, setProposedElections] = useState<Proposal<ElectionInit>[]>([]);
 	const [electionHistory, setElectionHistory] = useState<ElectionSummary[]>([]);
+	const [loadError, setLoadError] = useState("");
 	const { t } = useTranslation();
 
 	useEffect(() => {
@@ -63,7 +65,8 @@ export const ElectionsScreen = () => {
 				setProposedElections(proposed);
 				setElectionHistory(history);
 			} catch (error) {
-				console.error("Error loading elections:", error);
+				console.warn("Error loading elections:", error);
+				setLoadError(error instanceof Error ? error.message : String(error));
 			}
 		}
 		initializeElectionsEngine();
@@ -89,7 +92,8 @@ export const ElectionsScreen = () => {
 					setProposedElections(proposed);
 					setElectionHistory(history);
 				} catch (error) {
-					console.error("Error reloading elections on focus:", error);
+					console.warn("Error reloading elections on focus:", error);
+					setLoadError(error instanceof Error ? error.message : String(error));
 				}
 			}
 			reloadElections();
@@ -111,6 +115,7 @@ export const ElectionsScreen = () => {
 
 	return (
 		<ScrollView style={styles.container}>
+			<InlineError message={loadError} />
 			{/* Section 1: Active / Future elections — no header per D-13 */}
 			<View style={styles.section}>
 				{elections.length > 0 ? (

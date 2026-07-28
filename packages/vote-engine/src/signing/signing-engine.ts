@@ -23,11 +23,47 @@ export class SigningEngine implements ISigningEngine {
 		return crypto.randomUUID();
 	}
 
-	async sign(nonce: string, signature: Signature): Promise<boolean> {
+	async sign(
+		nonce: string,
+		signature: Signature,
+		options?: { ownsTransaction?: boolean; isPlaceholderSignature?: boolean },
+	): Promise<boolean> {
+		// Phase 42-03: Quereus's transaction model is FLAT (a nested explicit
+		// BEGIN inside an already-explicit transaction throws "Cannot begin
+		// transaction: already in a transaction" — no true SAVEPOINT-style
+		// nesting for this call shape). Callers that need this method's work
+		// to be part of a LARGER atomic ceremony (e.g. RegistrationEngine.
+		// register()'s multi-row Cids-before-parent envelope) start their OWN
+		// outer BEGIN first and pass `{ ownsTransaction: false }` explicitly —
+		// this method then must NOT issue its own nested BEGIN/COMMIT/ROLLBACK,
+		// the outer caller owns the commit/rollback boundary.
+		//
+		// T-42-03 (Phase 42-03): an earlier draft of this guard auto-detected
+		// via `this.ctx.db.getAutocommit()` instead of an explicit caller flag.
+		// It was replaced with this explicit opt-in because auto-detecting the
+		// ambient transaction state from inside a shared helper is inherently
+		// fragile (relies on precise knowledge of Quereus's autocommit/implicit-
+		// transaction bookkeeping) — an explicit flag removes that ambiguity
+		// entirely. Default `ownsTransaction: true` preserves IDENTICAL behavior
+		// for every pre-existing caller (zero regression risk); only
+		// `register()`'s internal ceremony calls opt in to `false`. (The actual
+		// root cause of the flaky-test hunt that surfaced this call site was a
+		// SEPARATE bug — a datetime-precision mismatch in the digest fed to the
+		// deferred CHECK, fixed in `registration-engine.ts`'s
+		// `toDeferredCheckDatetime` — this transaction-composability guard is
+		// independently correct and required for `register()`'s multi-row
+		// ceremony regardless.)
+		const ownsTransaction = options?.ownsTransaction ?? true;
+		// 999.1 R-02/R-04: `isPlaceholderSignature` propagates the narrow, explicit DEBT-11
+		// escape hatch (schema's IsPlaceholderSignature context flag) — ONLY the known
+		// system-derived callers (SignatureTasksEngine.finalizeBallot's per-question/option
+		// rows) pass true. Every other caller (real officer-supplied Signature) defaults to
+		// false, so OfficerSignature.SignatureValid's UDF actually verifies the signature.
+		const isPlaceholderSignature = options?.isPlaceholderSignature ?? false;
 		try {
 			// AUTH-08: BEGIN/COMMIT/ROLLBACK envelope around OfficerSignature
 			// insert + threshold check + (optional) AdminSignature insert.
-			await this.ctx.db.exec('BEGIN');
+			if (ownsTransaction) await this.ctx.db.exec('BEGIN');
 			try {
 				// AUTH-06: bind :signerKey (not :key) — the previous binding silently
 				// dropped the signer's public key. The SQL placeholder is :signerKey;
@@ -39,7 +75,7 @@ export class SigningEngine implements ISigningEngine {
 						SignerKey,
 						Signature
 					)
-					with context now = :now, IsSignatureValid = true, IsSignerKeyValid = true, IsOfficerValid = true
+					with context now = :now, IsSignerKeyValid = true, IsOfficerValid = true, IsPlaceholderSignature = :isPlaceholderSignature
 					values (
 						:nonce,
 						:userId,
@@ -52,6 +88,7 @@ export class SigningEngine implements ISigningEngine {
 						signerKey: signature.signerKey,
 						signature: signature.signature,
 						now: nowCanonicalDatetime(),
+						isPlaceholderSignature,
 					},
 				);
 
@@ -96,13 +133,17 @@ export class SigningEngine implements ISigningEngine {
 
 				const threshold = Number(thresholdRes?.threshold) || 1;
 
-				if (signatureCount >= threshold) {
+				const thresholdMet = signatureCount >= threshold;
+				if (thresholdMet) {
 					try {
+						// 999.1 R-06: bind the REAL computed threshold boolean (not a literal `true`) —
+						// AdminSignature has no Digest/Signature/SignerKey columns to re-verify, so this
+						// TS-computed value IS the thing SignatureValid gates on.
 						await this.ctx.db.exec(
-							'insert into AdminSignature (SigningNonce) with context IsSignatureValid = true values (:nonce)',
-							{ nonce },
+							'insert into AdminSignature (SigningNonce) with context IsSignatureValid = :thresholdMet values (:nonce)',
+							{ nonce, thresholdMet },
 						);
-						await this.ctx.db.exec('COMMIT');
+						if (ownsTransaction) await this.ctx.db.exec('COMMIT');
 						return true;
 					} catch (pkErr) {
 						// D-17: PK violation on AdminSignature.SigningNonce means a
@@ -112,20 +153,27 @@ export class SigningEngine implements ISigningEngine {
 						// satisfied, so the only reachable ConstraintError here is a
 						// PK collision.
 						if (pkErr instanceof ConstraintError) {
-							await this.ctx.db.exec('ROLLBACK');
+							// WR-02 (42-REVIEW): the redundant AdminSignature insert is correctly
+							// skipped, but this call already inserted a genuine OfficerSignature row
+							// above (:61-82) — THIS officer's audit evidence — which must NOT be
+							// discarded. COMMIT (not ROLLBACK) so the OfficerSignature persists; the
+							// pre-existing AdminSignature already satisfies SignatureValid, so the
+							// threshold outcome is unchanged. The prior ROLLBACK here silently
+							// dropped the officer's signature while still reporting success.
+							if (ownsTransaction) await this.ctx.db.exec('COMMIT');
 							console.warn(
-								`SigningEngine.sign: threshold already reached for nonce ${nonce}; AdminSignature row exists.`,
+								`SigningEngine.sign: threshold already reached for nonce ${nonce}; AdminSignature row exists (this officer's OfficerSignature was still recorded).`,
 							);
 							return true;
 						}
 						throw pkErr;
 					}
 				} else {
-					await this.ctx.db.exec('COMMIT');
+					if (ownsTransaction) await this.ctx.db.exec('COMMIT');
 					return false;
 				}
 			} catch (innerErr) {
-				await this.ctx.db.exec('ROLLBACK');
+				if (ownsTransaction) await this.ctx.db.exec('ROLLBACK');
 				throw innerErr;
 			}
 		} catch (err) {
@@ -202,7 +250,7 @@ export class SigningEngine implements ISigningEngine {
 						SignerKey,
 						Signature
 					)
-					with context now = :now, IsSignatureValid = true, IsSignerKeyValid = true
+					with context now = :now, IsSignerKeyValid = true, IsPlaceholderSignature = false
 					values (
 						:nonce,
 						:authorityId,
@@ -239,7 +287,7 @@ export class SigningEngine implements ISigningEngine {
 						SignerKey,
 						Signature
 					)
-					with context now = :now, IsSignatureValid = true, IsSignerKeyValid = true
+					with context now = :now, IsSignerKeyValid = true, IsPlaceholderSignature = false
 					values (
 						:nonce,
 						:authorityId,

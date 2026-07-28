@@ -1,0 +1,29 @@
+diff --git a/dist/src/utils/multiaddr.js b/dist/src/utils/multiaddr.js
+index d72dbc15a1d4cbb7303fa670d2554449cd902a77..d856406b9c7fbe9afdc796df7a3e3811acec6c0d 100644
+--- a/dist/src/utils/multiaddr.js
++++ b/dist/src/utils/multiaddr.js
+@@ -1,4 +1,7 @@
+-import { convertToString } from '@multiformats/multiaddr/convert';
++// Patched (23-08) for @multiformats/multiaddr v13 compatibility: v13 removed the
++// `./convert` subpath export and Multiaddr#tuples(). getComponents() exists on both
++// v12 and v13 and already returns the decoded string value for ip4/ip6, so this is
++// version-agnostic and needs no convert import.
+ // Protocols https://github.com/multiformats/multiaddr/blob/master/protocols.csv
+ // code  size  name
+ // 4     32    ip4
+@@ -9,12 +12,11 @@ var Protocol;
+     Protocol[Protocol["ip6"] = 41] = "ip6";
+ })(Protocol || (Protocol = {}));
+ export function multiaddrToIPStr(multiaddr) {
+-    for (const tuple of multiaddr.tuples()) {
+-        switch (tuple[0]) {
++    for (const component of multiaddr.getComponents()) {
++        switch (component.code) {
+             case Protocol.ip4:
+             case Protocol.ip6:
+-                // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+-                return convertToString(tuple[0], tuple[1]);
++                return component.value ?? null;
+             default:
+                 break;
+         }

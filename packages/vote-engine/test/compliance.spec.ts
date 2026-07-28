@@ -20,6 +20,7 @@
 
 import { Database } from '@quereus/quereus'
 import { ElectionType, UserKeyType } from '@votetorrent/vote-core'
+import type { SignatureResult } from '@votetorrent/vote-core'
 import { expect } from 'chai'
 import { prepareDb } from '../src/database/initialize'
 import {
@@ -28,6 +29,8 @@ import {
   addTestElection,
 } from './fixtures/test-context.js'
 import { AsyncStorage } from './shims/react-native.js'
+import { MockElectionEngine, MockBallotConfirmationState } from '../src/election/mock-election-engine.js'
+import { MockSignatureTasksEngine } from '../src/tasks/mock-signature-tasks-engine.js'
 
 // ---------------------------------------------------------------------------
 // FLOW-01: NetworksEngine.create() persisted-row compliance
@@ -429,5 +432,87 @@ describe('VTEST-01: Surfaced read-model compliance (D-06)', () => {
       expect(field.value, `${field.name} is not null`).to.not.equal(null)
       expect(field.value, `${field.name} is a non-empty string`).to.be.a('string').that.is.not.empty
     }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// MOCK-PARITY-01: MockElectionEngine + MockSignatureTasksEngine submit→confirm parity (D-10, 31-04)
+// ---------------------------------------------------------------------------
+
+describe('MOCK-PARITY-01: mock confirm-path parity (D-10)', () => {
+  const BALLOT_ID = 'mock-ballot-id'
+
+  it('MOCK-PARITY-01 MockElectionEngine exposes submitBallotForConfirmation, withdrawBallotConfirmation, getBallotConfirmationState', () => {
+    const electionEngine = new MockElectionEngine()
+    expect(typeof electionEngine.submitBallotForConfirmation, 'submitBallotForConfirmation is a function').to.equal('function')
+    expect(typeof electionEngine.withdrawBallotConfirmation, 'withdrawBallotConfirmation is a function').to.equal('function')
+    expect(typeof electionEngine.getBallotConfirmationState, 'getBallotConfirmationState is a function').to.equal('function')
+  })
+
+  it('MOCK-PARITY-01 MockSignatureTasksEngine exposes getRequestedSignatures, completeSignature, getSignatureDigest', () => {
+    const tasksEngine = new MockSignatureTasksEngine()
+    expect(typeof tasksEngine.getRequestedSignatures, 'getRequestedSignatures is a function').to.equal('function')
+    expect(typeof tasksEngine.completeSignature, 'completeSignature is a function').to.equal('function')
+    expect(typeof tasksEngine.getSignatureDigest, 'getSignatureDigest is a function').to.equal('function')
+  })
+
+  it('MOCK-PARITY-01 submitBallotForConfirmation sets locked=true, confirmed=false', async () => {
+    const confirmState = new MockBallotConfirmationState()
+    const electionEngine = new MockElectionEngine(confirmState)
+
+    await electionEngine.submitBallotForConfirmation(BALLOT_ID)
+    const state = await electionEngine.getBallotConfirmationState(BALLOT_ID)
+
+    expect(state.locked, 'locked is true after submit').to.be.true
+    expect(state.confirmed, 'confirmed is false after submit').to.be.false
+  })
+
+  it('MOCK-PARITY-01 withdraw reverts to unlocked (locked=false, confirmed=false)', async () => {
+    const confirmState = new MockBallotConfirmationState()
+    const electionEngine = new MockElectionEngine(confirmState)
+
+    await electionEngine.submitBallotForConfirmation(BALLOT_ID)
+    await electionEngine.withdrawBallotConfirmation(BALLOT_ID)
+    const state = await electionEngine.getBallotConfirmationState(BALLOT_ID)
+
+    expect(state.locked, 'locked is false after withdraw').to.be.false
+    expect(state.confirmed, 'confirmed is false after withdraw').to.be.false
+  })
+
+  it('MOCK-PARITY-01 accepted ballot task: confirmed=true and task leaves getRequestedSignatures inbox (D-09/D-10)', async () => {
+    // Wire both mocks via the shared election engine reference (NOT via EngineFactory).
+    const confirmState = new MockBallotConfirmationState()
+    const electionEngine = new MockElectionEngine(confirmState)
+    const tasksEngine = new MockSignatureTasksEngine(electionEngine)
+
+    // Submit the ballot (sets state to 'submitted').
+    await electionEngine.submitBallotForConfirmation(BALLOT_ID)
+
+    // Verify locked before confirm.
+    const stateBefore = await electionEngine.getBallotConfirmationState(BALLOT_ID)
+    expect(stateBefore.locked, 'locked before finalize').to.be.true
+    expect(stateBefore.confirmed, 'not yet confirmed before finalize').to.be.false
+
+    // Find the ballot signature task (MOCK_BALLOT_SIGNATURE_TASK is in the default pending list).
+    const tasksBefore = await tasksEngine.getRequestedSignatures(true)
+    const ballotTask = tasksBefore.find((t) => t.signatureType === 'ballot')
+    expect(ballotTask, 'ballot task exists in pending inbox').to.not.be.undefined
+
+    // Complete the ballot task (accepted = true) — simulates finalizeBallot.
+    const acceptResult: SignatureResult = {
+      isAccepted: true,
+      signature: { signature: 'mock-sig', signerKey: 'mock-key', signerUserId: 'mock-user' }
+    }
+    await tasksEngine.completeSignature(ballotTask!, acceptResult)
+
+    // Task must leave the inbox (D-09).
+    const tasksAfter = await tasksEngine.getRequestedSignatures(true)
+    const ballotTaskAfter = tasksAfter.find((t) => t.signatureType === 'ballot')
+    expect(ballotTaskAfter, 'ballot task removed from inbox after confirm').to.be.undefined
+
+    // Ballot state must flip to confirmed (D-10).
+    const stateAfter = await electionEngine.getBallotConfirmationState(BALLOT_ID)
+    expect(stateAfter.locked, 'locked is false after confirm').to.be.false
+    expect(stateAfter.confirmed, 'confirmed is true after finalize').to.be.true
   })
 })

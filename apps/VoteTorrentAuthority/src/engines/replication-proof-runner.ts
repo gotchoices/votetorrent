@@ -19,8 +19,13 @@
  * Markers emitted (multi-arg — logcat grep must use .* between tag and message):
  *   [replication-proof] starting
  *   [replication-proof] peerId=<id>          (D-05 / P2P-04)
+ *   [replication-proof] relayReservation=<true|false>  (D-09 relay-READY; 38-02-locked
+ *                                             observable: getMultiaddrs()/p2p-circuit poll)
  *   [replication-proof] strandId=<hash>      (OQ3 handshake)
  *   [replication-proof] peers=N              (D-06 / ENG-05)
+ *   [replication-proof] strandPeers=N        (REPL-01 strand-cohort connection count)
+ *   [replication-proof] relayAddrsPerDrone=[...], relayAddrsPerDroneCount=N  (D-04 per-drone
+ *                                             relay-reservation instrumentation)
  *   [replication-proof] ========== REPLICATION VERDICT: PASS|FAIL ==========
  *
  * Fire-and-forget from index.js. Never throws — all errors caught and logged.
@@ -39,7 +44,7 @@ import { createStrandDbFactory } from './rn-db-factory';
 
 // Multi-arg form — REQUIRED so logcat renders '[replication-proof]', 'msg' and the
 // harness `.*` grep matches. (STATE.md v2.0 Phase 17 Plan 06 lesson.)
-const L = (...a: unknown[]) => console.log('[replication-proof]', ...a);
+const L = (...a: unknown[]) => console.info('[replication-proof]', ...a);
 
 // Distinct store name for the proof runner's own CadreNode identity (OQ2).
 // NEVER 'votetorrent-cadre-node' — that store holds the stable peerId (D-05 / T-23-03-02).
@@ -49,18 +54,52 @@ const CADRE_STORE = 'votetorrent-cadre-probe-replication';
 // destroyDB targets ONLY 'votetorrent-' + PROOF_NETWORK_STORE (D-03 / T-23-03-02).
 const PROOF_NETWORK_STORE = 'replication-proof-strand';
 
-// Control address — the drone's ws multiaddr. The harness (Plan 04) injects this via a
-// generated config; for now use the same placeholder shape as dial-probe.ts. The runner
-// reads CONTROL_ADDR at boot; Plan 04 writes the real address before bundling (D-07).
+// Control address — the drone's control-node ws multiaddr. The harness injects this per-run
+// (D-07 automated injection). Placeholder boots solo (no crash — CF-02 bootstrap mode).
 const CONTROL_ADDR = '/ip4/10.0.2.2/tcp/0/ws/p2p/UPDATE_AFTER_DRONE_RESTART';
 
+// Strand-cohort bootstrap address — the drone's strand-node ws multiaddr. The harness
+// injects this per-run (REPL-01 / 23-06). Separate from CONTROL_ADDR — these are DIFFERENT
+// libp2p nodes on the drone with different ephemeral ports (Pitfall 2). Placeholder boots
+// strand solo (empty strandBootstrapNodes → bootstrap mode, no crash — P2P-03 no regression).
+const STRAND_BOOTSTRAP_ADDR = '/ip4/10.0.2.2/tcp/0/ws/p2p/UPDATE_AFTER_DRONE_RESTART';
+
+// 38-05 (D-04 n=4 topology): SECOND drone's strand-node ws multiaddr (drone-B). The
+// harness injects this per-run alongside STRAND_BOOTSTRAP_ADDR — both drones join the
+// SAME strand as full voting members, so the emulator's strand cohort must dial both.
+// Placeholder-aware exactly like STRAND_BOOTSTRAP_ADDR (boots with drone-B omitted if
+// unset, no crash — backward compatible with a single-drone run).
+const STRAND_BOOTSTRAP_ADDR_B = '/ip4/10.0.2.2/tcp/0/ws/p2p/UPDATE_AFTER_DRONE_RESTART';
+
+// resolveBootstrapNodes — placeholder-aware address resolver (mirrors CadreNodeProvider).
+// Returns [] for empty/unset OR placeholder (safe solo boot), [addr] for a real address.
+const BOOTSTRAP_PLACEHOLDER = 'UPDATE_AFTER_DRONE_RESTART';
+function resolveBootstrapNodes(addr: string): string[] {
+  if (!addr || addr.includes(BOOTSTRAP_PLACEHOLDER)) {
+    return [];
+  }
+  return [addr];
+}
+
 // In solo bootstrap mode (harness Step 1) the drone address has not been injected yet,
-// so CONTROL_ADDR is still the placeholder. Its /p2p/<id> tail is not a valid peerId and
-// crashes libp2p's Bootstrap discovery (peerIdFromString). Boot with NO bootstrap node
-// while the placeholder is present — the runner is genuinely solo (CF-02 bootstrap mode),
-// creates the proof network, and emits strandId=. The harness re-bundles with the real
-// drone multiaddr for the networked run (Step 4), at which point this resolves to [CONTROL_ADDR].
-const BOOTSTRAP_NODES = CONTROL_ADDR.includes('UPDATE_AFTER_DRONE_RESTART') ? [] : [CONTROL_ADDR];
+// so CONTROL_ADDR is still the placeholder. Boot with NO bootstrap node — the runner is
+// genuinely solo (CF-02 bootstrap mode), creates the proof network, and emits strandId=.
+const BOOTSTRAP_NODES = resolveBootstrapNodes(CONTROL_ADDR);
+
+// D-05 (41-02, P2P-11 wall #8 fix): relay-qualified per-drone listenAddrs. One
+// `${addr}/p2p-circuit` entry per KNOWN drone (drone-A + drone-B) routes through
+// @libp2p/circuit-relay-v2's 'configured' reservation path (RESEARCH Pattern 1),
+// which bypasses the one-slot 'discovered' cap that capped the emulator at a
+// reservation with only ONE drone (41-01 Node gate reproduced this exactly).
+// Each drone's addr is independently placeholder-aware via resolveBootstrapNodes
+// (mirrors strandBootstrapNodes below) — a single-drone / solo run degrades to []
+// or [one entry], never a crash. Probe 1 (41-01): cadre-core forwards ONE shared
+// network object to the control node AND every strand, so this ONE array must
+// carry BOTH drones' qualified addrs (no per-node-type override exists).
+const STRAND_RELAY_LISTEN_ADDRS = [
+  ...resolveBootstrapNodes(STRAND_BOOTSTRAP_ADDR),
+  ...resolveBootstrapNodes(STRAND_BOOTSTRAP_ADDR_B),
+].map((addr) => `${addr}/p2p-circuit`);
 
 // Poll constants (consistent with dial-probe.ts connection-poll shape).
 // PEER_POLL_MAX: 3 ticks × 1 s = 3 s peer-connection wait (exits early when peers appear).
@@ -73,6 +112,16 @@ const BOOTSTRAP_NODES = CONTROL_ADDR.includes('UPDATE_AFTER_DRONE_RESTART') ? []
 const PEER_POLL_MAX = 3;
 const REPL_POLL_MAX = 120;
 const POLL_INTERVAL_MS = 1000;
+// STRAND_PEER_POLL_MAX: 10 ticks × 1 s = 10 s strand-cohort connection wait (Fix A, Phase 30).
+//   The write below opens an Optimystic cluster stream to the drone's strand node; that stream
+//   resets ("0/N super-majority") if the strand transport has not connected yet. Wait for the
+//   LIVE strand connection (getConnections().length >= 1) before writing. Exits early on connect.
+const STRAND_PEER_POLL_MAX = 10;
+// RELAY_POLL_MAX: 10 ticks × 1 s = 10 s relay-reservation wait (D-09). 38-02's Node-only
+// smoke measured the /p2p-circuit reservation completing in ~1.3s against a live drone
+// relay, so 10s is a generous bound; emitted unconditionally (true or false) after the
+// bounded wait — never blocks indefinitely, mirrors the strandPeers= polling shape.
+const RELAY_POLL_MAX = 10;
 
 /**
  * Boot entry point.  Fire-and-forget from index.js after AppRegistry.registerComponent.
@@ -103,16 +152,64 @@ export async function runReplicationProof(): Promise<void> {
       privateKey,
       controlNetwork: { partyId: 'votetorrent', bootstrapNodes: BOOTSTRAP_NODES },
       profile: 'transaction',
+      // Published @serfab/cadre-core@0.8.1 added a fail-closed sApp-schema signature
+      // policy (requireSignedSchemas defaults true): an unsigned sAppConfig is rejected
+      // at strand bring-up with SchemaVerificationError('missing signature'). This proof
+      // runner applies the unsigned votetorrent demo schema (sAppConfig id:'org.votetorrent',
+      // no signature), so relax the policy for the proof node — the documented dev/test
+      // relaxation, at parity with strand-persistence-proof-runner.ts. Production sApp-schema
+      // signing (id = author ed25519 pubkey + signSchema()) is a separate productionization task.
+      requireSignedSchemas: false,
       strandFilter: { mode: 'all' },
       storage: { provider: () => new LevelDBRawStorage(rnDb) },
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       network: {
-        transports: [webSockets(), circuitRelayTransport()],
-        listenAddrs: [],
+        transports: [
+          webSockets(),
+          // D-10: cast by the global transportSymbol, not structural type — the
+          // sereus-chat pattern for multi-copy @libp2p/interface brand-skew
+          // (Probe 4, 41-01: not load-bearing on Node's single-copy graph but
+          // re-verified at Metro/Hermes on device).
+          circuitRelayTransport({
+            // PROBE 5 (41-01, EXERCISED): N relay-qualified listenAddrs ALONE do
+            // NOT yield N reservations under the default circuitRelayTransport() —
+            // DEFAULT_RESERVATION_CONCURRENCY=1 serializes the reserve queue and
+            // drops any 2nd+ reservation via reserveQueue.clear(). Size concurrency
+            // to the number of known drones actually driving
+            // STRAND_RELAY_LISTEN_ADDRS below (never less than 1) — proven on Node
+            // to close the wall #8 asymmetry (bare=1 relay, qualified+concurrency=2
+            // relays).
+            reservationConcurrency: Math.max(1, STRAND_RELAY_LISTEN_ADDRS.length),
+          }) as unknown as ReturnType<typeof webSockets>,
+        ],
+        // 38-20/41-02: this runner boots its OWN CadreNode (never
+        // CadreNodeProvider's), so it needs the SAME D-03 always-on relay-client
+        // posture CadreNodeProvider.tsx carries, now relay-qualified per known
+        // drone (D-05, P2P-11 wall #8 fix) instead of the bare '/p2p-circuit'
+        // sentinel — see STRAND_RELAY_LISTEN_ADDRS above. An empty listenAddrs
+        // array means libp2p's transportManager.listen() is never invoked for
+        // '/p2p-circuit', so @libp2p/circuit-relay-v2's ReservationStore never
+        // calls reserveRelay() — pendingReservations stays empty forever and
+        // every auto-discovered-relay reservation attempt throws
+        // HadEnoughRelaysError (silently swallowed), so no RESERVE request is
+        // ever sent to the drone (relayReservation= reports false, and the
+        // strand node's hop-connect is later denied NO_RESERVATION). Since this
+        // same network.listenAddrs value is forwarded unmodified to BOTH the
+        // control node and the strand node, arming it here closes both the
+        // observable and the actual consensus-blocking wall in one change.
+        listenAddrs: STRAND_RELAY_LISTEN_ADDRS,
         // Permissive gater — dev probe only (matches dial-probe.ts / cadre-runtime-ondevice.md).
-        // Cast: cadre-core's NetworkConfig type doesn't declare connectionGater yet (upstream gap);
-        // the cadre-core patch forwards it into createLibp2pNode at runtime (spike 009 fix).
+        // Cast needed for connectionGater (upstream gap); strandBootstrapNodes is typed by 23-05.
         connectionGater: { denyDialMultiaddr: async () => false },
+        // REPL-01: strand-cohort bootstrap — the drones' strand-node multiaddrs (injected
+        // per-run). 38-05 (D-04 n=4): both drone-A and drone-B addrs are included so the
+        // emulator dials BOTH voting-member drones; each is independently placeholder-aware
+        // (resolveBootstrapNodes → [] for an unset/placeholder addr), so a single-drone run
+        // (drone-B addr left as placeholder) degrades cleanly to the pre-38-05 behavior.
+        strandBootstrapNodes: [
+          ...resolveBootstrapNodes(STRAND_BOOTSTRAP_ADDR),
+          ...resolveBootstrapNodes(STRAND_BOOTSTRAP_ADDR_B),
+        ],
       } as any,
       hibernation: { enabled: false },
     });
@@ -126,6 +223,19 @@ export async function runReplicationProof(): Promise<void> {
     // Derive unique per-peer suffix for the proof network name (last 8 chars of peerId).
     const peerTail = peerId.length >= 8 ? peerId.slice(-8) : peerId;
     const proofNetworkName = `replication-test-${peerTail}`;
+
+    // ── 2b. D-09: relay-reservation READY marker (P2P-08 close confirmation) ────────────────
+    // Locked observable (38-02 Wave-0 smoke, self:peer:update never fired in that run):
+    // poll node.getMultiaddrs() for a '/p2p-circuit' entry. Bounded wait, then emit
+    // UNCONDITIONALLY (true on success, false on timeout) — never string-interpolated, always
+    // the multi-arg L(...) form — so the harness's wait_for_logcat_line can key off the marker
+    // regardless of whether the reservation actually completed (mirrors strandPeers= below).
+    const hasRelayReservation = (): boolean =>
+      (node?.getMultiaddrs() ?? []).some((ma) => ma.toString().includes('/p2p-circuit'));
+    for (let i = 0; i < RELAY_POLL_MAX && !hasRelayReservation(); i++) {
+      await new Promise<void>(r => setTimeout(r, POLL_INTERVAL_MS));
+    }
+    L('relayReservation=', hasRelayReservation());
 
     // ── 3. D-03 fresh-state wipe — per-network store ONLY, try/catch, never silent (A1) ─────
     // NEVER call LevelDB.destroyDB('votetorrent-cadre-node') — the peerId store must survive.
@@ -152,6 +262,29 @@ export async function runReplicationProof(): Promise<void> {
     // D-06 / ENG-05: live peer-count marker — logged once (pass or timeout).
     L('peers=', peerCount);
 
+    // REPL-01: live strand-cohort connection reader (Fix A, Phase 30).
+    // Reads the LIVE strand libp2p connection count via getConnections() — NOT cadre-core's
+    // stale strand peer-count field (initialized to 0, never updated → always read 0).
+    // IMPORTANT: the strand does not exist until addStrand runs in the write phase below, so
+    // getStrand(PROOF_NETWORK_STORE) is undefined HERE — the bounded wait + strandPeers= marker
+    // are emitted AFTER the strand is created (see section 5), not before.
+    const readStrandPeers = (): number =>
+      (node as InstanceType<typeof CadreNode> & {
+        getStrand?: (id: string) => { libp2pNode?: { getConnections?: () => unknown[] } } | undefined;
+      }).getStrand?.(PROOF_NETWORK_STORE)?.libp2pNode?.getConnections?.().length ?? 0;
+
+    // D-04 (41-02): per-drone relay-reservation instrumentation, mirroring readStrandPeers()'s
+    // shape. Reads the STRAND node's OWN /p2p-circuit multiaddrs (distinct from the control-node
+    // relayReservation= marker above) so a wall-#8-class per-drone reservation asymmetry is
+    // caught from run #1 instead of a later costly device run. Only meaningful once the strand
+    // node exists (after addStrand resolves, section 5 below) — mirrors readStrandPeers().
+    const readStrandRelayAddrs = (): string[] =>
+      ((node as InstanceType<typeof CadreNode> & {
+        getStrand?: (id: string) => { libp2pNode?: { getMultiaddrs?: () => unknown[] } } | undefined;
+      }).getStrand?.(PROOF_NETWORK_STORE)?.libp2pNode?.getMultiaddrs?.() ?? [])
+        .map((ma) => String(ma))
+        .filter((addr) => addr.includes('/p2p-circuit'));
+
     // ── 5. WRITE: create the strand (correct mode now known) + insert the proof row ──────────
     // createStrandDbFactory(node) calls setSchemaPath(['App','main']) internally so bare SQL
     // table names resolve without rewriting engine queries (D-14). The strand factory is used
@@ -173,6 +306,25 @@ export async function runReplicationProof(): Promise<void> {
       // Log OQ3 handshake marker before the write so the harness can capture it.
       L('strandId=', PROOF_NETWORK_STORE);
 
+      // Fix A (Phase 30): the strand node now EXISTS (addStrand resolved) and is dialing its
+      // strandBootstrapNodes (the drone's strand addr). Wait (bounded) for the LIVE strand
+      // connection >= 1 BEFORE the DDL write — the Authority insert opens an Optimystic cluster
+      // stream to the drone's strand node, which resets (→ "0/N super-majority") if the cohort
+      // transport has not connected yet. Only wait when a control peer is present (the solo
+      // Step-1 boot has peers=0 → strandPeers=0 → FAIL, which the harness ignores).
+      if (peerCount > 0) {
+        for (let i = 0; i < STRAND_PEER_POLL_MAX && readStrandPeers() === 0; i++) {
+          await new Promise<void>(r => setTimeout(r, POLL_INTERVAL_MS));
+        }
+      }
+      // REPL-01: live strand-cohort size marker, emitted AFTER addStrand + the bounded wait.
+      L('strandPeers=', readStrandPeers());
+      // D-04: per-drone relay-reservation marker, emitted alongside strandPeers= (the strand
+      // node now exists). Expect ONE /p2p-circuit multiaddr PER drone reserved with (2 for the
+      // n=4 topology) after the D-05 fix — length is logged too so a per-drone count is
+      // greppable without parsing the array.
+      L('relayAddrsPerDrone=', readStrandRelayAddrs(), 'relayAddrsPerDroneCount=', readStrandRelayAddrs().length);
+
       // Use VOTETORRENT_SCHEMA_SQL to satisfy the import (tree-shaken in release).
       void VOTETORRENT_SCHEMA_SQL;
       // Authority first-insert shoe-in. Every VoteTorrent table is context-gated, so the
@@ -193,6 +345,13 @@ export async function runReplicationProof(): Promise<void> {
       if (!strandDb) {
         L('strandId=', PROOF_NETWORK_STORE);
       }
+      // Robust diagnostic (Phase 30): addStrand can throw during distributed schema init when
+      // the strand cohort has not formed (strandPeers=0), before the success-path emit above is
+      // reached. Always emit the live strandPeers= marker so the harness gate sees the real
+      // cohort signal (0) rather than "marker never emitted".
+      L('strandPeers=', readStrandPeers());
+      // D-04: mirror the per-drone relay marker on the failure path too, for the same reason.
+      L('relayAddrsPerDrone=', readStrandRelayAddrs(), 'relayAddrsPerDroneCount=', readStrandRelayAddrs().length);
     }
 
     // ── 6. READ: bounded poll for the OTHER peer's proof Authority row ───────────────────────

@@ -3,7 +3,7 @@ import { secp256k1 } from '@noble/curves/secp256k1.js'
 import { sha256 } from '@noble/hashes/sha2.js'
 import { MisuseError, QuereusError } from '@quereus/quereus'
 import type { EngineContext } from '../types.js'
-import { nowCanonicalDatetime } from '../utils.js'
+import { inviteResultSignedBytes, nowCanonicalDatetime, verifyAdHocInviteSignature } from '../utils.js'
 import type {
   IInvitationEngine,
   InviteStatus,
@@ -250,9 +250,11 @@ export class InvitationEngine implements IInvitationEngine {
 
     try {
       // Step 1: Resolve the slot to confirm it exists (fail fast with a clear error).
+      // InviteKey is also read here (999.1 R-03) — it is the verifying key for the
+      // engine-side InviteResult.InviteSignature check below.
       const slotRow = await this.ctx.db
-        .prepare('SELECT Cid FROM InviteSlot WHERE Cid = :slotCid')
-        .get({ slotCid }) as { Cid: string } | undefined
+        .prepare('SELECT Cid, InviteKey FROM InviteSlot WHERE Cid = :slotCid')
+        .get({ slotCid }) as { Cid: string; InviteKey: string } | undefined
       if (!slotRow) {
         throw new Error(`InviteSlot not found for Cid: ${slotCid}`)
       }
@@ -294,10 +296,20 @@ export class InvitationEngine implements IInvitationEngine {
       //   sig = bytesToHex(secp256k1.sign(sha256(signedBytes), invitePrivBytes))
       //   noble v2 defaults: prehash:true means actual signed domain = sha256(sha256(signedBytes))
       //   NEVER pass { prehash: false } — WR-10
-      const signedBytes = new TextEncoder().encode(
-        [slotCid, digestToken, String(accept)].join('|')
-      )
+      const signedBytes = inviteResultSignedBytes({ slotCid, digestToken, accept })
       const inviteSignature = bytesToHex(secp256k1.sign(sha256(signedBytes), invitePrivBytes))
+
+      // 999.1 R-03: verify the signature engine-side against the exact A1
+      // LOCKED byte domain above (NOT SQL Digest() — Pitfall 2), using the
+      // slot's own InviteKey. When `invitePrivate` was not supplied (the
+      // documented offline/test path above), the signature is intentionally
+      // NOT bound to the slot's key — there is no real signature to verify
+      // (a legitimate no-signature-required path, not a fabricated `true`;
+      // see the doc comment on invitePrivBytes above), so IsSignatureValid
+      // stays `true` for that branch only.
+      const isSignatureValid = invitePrivate !== undefined
+        ? verifyAdHocInviteSignature(signedBytes, inviteSignature, slotRow.InviteKey)
+        : true
 
       // Step 5: INSERT InviteResult with context flags (mirrors network-engine.ts:1046-1060,
       // non-authority branch). The AdminSigning row was already committed by
@@ -310,7 +322,7 @@ export class InvitationEngine implements IInvitationEngine {
           InviteSignature,
           InvokedId
         )
-        with context IsSigningValid = true, IsSignatureValid = true
+        with context IsSigningValid = true, IsSignatureValid = :isSignatureValid
         values (
           :slotCid,
           :isAccepted,
@@ -324,6 +336,7 @@ export class InvitationEngine implements IInvitationEngine {
           digest: digestValue,
           inviteSignature,
           invokedId: invokedId ?? null,
+          isSignatureValid,
         }
       )
 

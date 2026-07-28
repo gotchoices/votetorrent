@@ -19,8 +19,9 @@ import { ElectionRevisionSignatureTaskDetails } from "./components/ElectionRevis
 import { BallotSignatureTaskDetails } from "./components/BallotSignatureTaskDetails";
 import { SignatureTaskFooter } from "../../components/SignatureTaskFooter";
 import { ThemedText } from "../../components/ThemedText";
+import { InlineError } from "../../components/InlineError";
 import { useTranslation } from "react-i18next";
-import { useNavigation, useRoute, useTheme, ExtendedTheme } from "@react-navigation/native";
+import { useNavigation, useRoute } from "@react-navigation/native";
 import { useApp } from "../../providers/AppProvider";
 import { createDeviceSigner } from "../../engines/device-signer";
 
@@ -36,7 +37,6 @@ const titleKey: Record<SignatureTask["signatureType"], string> = {
 export default function SignatureTaskScreen() {
 	const { task } = useRoute().params as { task: SignatureTask };
 	const { t } = useTranslation();
-	const { colors } = useTheme() as ExtendedTheme;
 	const navigation = useNavigation();
 	const { getEngine } = useApp();
 	const isNetwork = task.signatureType === "network";
@@ -58,10 +58,21 @@ export default function SignatureTaskScreen() {
 			const digest = await engine.getSignatureDigest(task);
 			const signer = await createDeviceSigner("Device User");
 			const signature = await signer(digest);
-			await engine.completeSignature(task, { isAccepted: true, signature });
+			// 39-03 (DEBT-11, D-06): `signer` is a plain in-memory closure over the
+			// already-unlocked device private key (device-signer.ts) — re-invocable
+			// with no additional user decision — so it doubles as the reusable
+			// per-digest `sign` callback finalizeBallot uses to REAL-sign each
+			// promoted per-row Question/Option AdminSigning digest. Only `ballot`
+			// signature tasks drive finalizeBallot (IN-02, 39-REVIEW), so `sign` is
+			// narrowed to that type — a no-op for every other signatureType.
+			await engine.completeSignature(task, {
+				isAccepted: true,
+				signature,
+				sign: task.signatureType === "ballot" ? signer : undefined,
+			});
 			navigation.goBack();
 		} catch (err) {
-			console.error("sign error:", err);
+			console.warn("sign error:", err);
 			setErrorMessage(err instanceof Error ? err.message : String(err));
 			return;
 		}
@@ -81,7 +92,7 @@ export default function SignatureTaskScreen() {
 			});
 			navigation.goBack();
 		} catch (err) {
-			console.error("reject error:", err);
+			console.warn("reject error:", err);
 			setErrorMessage(err instanceof Error ? err.message : String(err));
 			return;
 		}
@@ -109,11 +120,7 @@ export default function SignatureTaskScreen() {
 					<BallotSignatureTaskDetails task={task as BallotSignatureTask} />
 				)}
 			</ScrollView>
-			{errorMessage ? (
-				<ThemedText style={{ color: colors.error, marginHorizontal: 16, marginBottom: 8 }}>
-					{errorMessage}
-				</ThemedText>
-			) : null}
+			<InlineError message={errorMessage} />
 			<SignatureTaskFooter
 				onAccept={sign}
 				onReject={reject}

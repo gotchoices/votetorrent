@@ -5,127 +5,141 @@ This document outlines the administration subsystem for the VoteTorrent platform
 ## Core Structures
 
 ### Authority
+
 The Authority represents an organization that can create and manage elections.
 
-| Field | Description |
-|-------|-------------|
-| SID | Content ID (CID) of the initial administration. This serves as the unique identifier for the Authority. |
-| Name | Human-readable name of the Authority. |
-| ImageURL/CID | URL or Content ID pointing to the Authority's logo or image. |
-| Domain Name | The domain associated with the Authority. |
-| Signatures | Array of Signature objects validating the Authority. |
+| Field        | Description                                                                                             |
+| ------------ | ------------------------------------------------------------------------------------------------------- |
+| SID          | Content ID (CID) of the initial administration. This serves as the unique identifier for the Authority. |
+| Name         | Human-readable name of the Authority.                                                                   |
+| ImageURL/CID | URL or Content ID pointing to the Authority's logo or image.                                            |
+| Domain Name  | The domain associated with the Authority.                                                               |
+| Signatures   | Array of Signature objects validating the Authority.                                                    |
 
 ### Administration
+
 The Administration represents the current administrative state of an Authority.
 
-| Field | Description |
-|-------|-------------|
-| CID | Content ID (hash) that uniquely identifies this Administration. |
-| AuthoritySID | Reference to the Authority this Administration belongs to (same as CID for initial administration). |
-| Administrators[] | Array of Administrator objects who have administrative privileges. |
-| Expiration | Timestamp when this Administration expires and must be renewed. |
-| Signatures | Array of Signature objects validating this Administration. |
+| Field            | Description                                                                                         |
+| ---------------- | --------------------------------------------------------------------------------------------------- |
+| CID              | Content ID (hash) that uniquely identifies this Administration.                                     |
+| AuthoritySID     | Reference to the Authority this Administration belongs to (same as CID for initial administration). |
+| Administrators[] | Array of Administrator objects who have administrative privileges.                                  |
+| Expiration       | Timestamp when this Administration expires and must be renewed.                                     |
+| Signatures       | Array of Signature objects validating this Administration.                                          |
 
 ### Administrator
+
 Administrators are individuals with specific privileges within an Administration.
 
-| Field | Description |
-|-------|-------------|
-| CID | Content ID uniquely identifying this Administrator. |
-| Key | Public key used to verify the Administrator's signatures. |
-| Name | Human-readable name of the Administrator. |
-| Title | Official title or role of the Administrator. |
-| Scopes[] | Array of privilege scopes granted to this Administrator. |
-| ImageUrl/CID | URL or Content ID pointing to the Administrator's photo or avatar. |
-| Signatures | Array of Signature objects validating this Administrator. |
+| Field         | Description                                                                      |
+| ------------- | -------------------------------------------------------------------------------- |
+| CID           | Content ID uniquely identifying this Administrator.                              |
+| Key           | Public key used to verify the Administrator's signatures.                        |
+| Name          | Human-readable name of the Administrator.                                        |
+| Title         | Official title or role of the Administrator.                                     |
+| Scopes[]      | Array of privilege scopes granted to this Administrator.                         |
+| ImageUrl/CID  | URL or Content ID pointing to the Administrator's photo or avatar.               |
+| Signatures    | Array of Signature objects validating this Administrator.                        |
 | InvitationCID | CID of the invitation that led to this Administrator's creation (if applicable). |
 
 ### AuthorityPeer
+
 Represents peer nodes that can act on behalf of an Authority for certain automated operations.
 
-| Field | Description |
-|-------|-------------|
-| AuthoritySID | Reference to the Authority this peer belongs to. |
-| PeersIDs | List of peer node identifiers that can act for this Authority. |
-| Signatures | Array of Signature objects validating this peer relationship. |
+| Field       | Description                                                    |
+| ----------- | -------------------------------------------------------------- |
+| AuthorityId | Reference to the Authority this peer belongs to.               |
+| PeerId      | A single peer node identifier that can act for this Authority. |
+
+Stored **normalized** — one row per `(AuthorityId, PeerId)` (composite primary key). Peers are added or removed individually via Administrator-signed inserts/deletes carrying the **Configure Authority Peers** scope, rather than as a single list with one inline `Signatures` array.
 
 ### Signature
+
 Represents a cryptographic signature validating a record.
 
-| Field | Description |
-|-------|-------------|
+| Field            | Description                                          |
+| ---------------- | ---------------------------------------------------- |
 | AdministratorCID | CID of the Administrator who created this signature. |
-| Timestamp | When the signature was created. |
-| Value | The cryptographic signature value. |
+| Timestamp        | When the signature was created.                      |
+| Value            | The cryptographic signature value.                   |
 
 ### Invitation
+
 Represents a public record of an invitation for a new Administrator or Authority.
 
-| Field | Description |
-|-------|-------------|
-| CID | Content ID uniquely identifying this Invitation. |
-| Type | "Administrator" or "Authority" - indicates the type of invitation. |
-| AuthoritySID | SID of the Authority issuing the invitation. |
-| TargetPublicKeyHash | Optional hash of the target's public key if known in advance. |
-| InvitationNonce | Random value used to prevent correlation of invitations with their acceptances. |
-| PublicInviteToken | Public verification token used to validate the invitation acceptance. |
-| ProposedScopes[] | Array of privilege scopes proposed for the new Administrator or Authority. |
-| ProposedName | Suggested name for the new Administrator or Authority. |
-| ProposedDomain | For Authority invitations: suggested domain for the new Authority. |
-| Expiration | Timestamp when this invitation expires. |
-| Signatures | Array of Signature objects from Administrators with appropriate invitation scopes. |
-| UsedBy | CID of the entity that used this invitation (only populated after use). |
+| Field               | Description                                                                        |
+| ------------------- | ---------------------------------------------------------------------------------- |
+| CID                 | Content ID uniquely identifying this Invitation.                                   |
+| Type                | "Administrator" or "Authority" - indicates the type of invitation.                 |
+| AuthoritySID        | SID of the Authority issuing the invitation.                                       |
+| TargetPublicKeyHash | Optional hash of the target's public key if known in advance.                      |
+| InvitationNonce     | Random value used to prevent correlation of invitations with their acceptances.    |
+| PublicInviteToken   | Public verification token used to validate the invitation acceptance.              |
+| ProposedScopes[]    | Array of privilege scopes proposed for the new Administrator or Authority.         |
+| ProposedName        | Suggested name for the new Administrator or Authority.                             |
+| ProposedDomain      | For Authority invitations: suggested domain for the new Authority.                 |
+| Expiration          | Timestamp when this invitation expires.                                            |
+| Signatures          | Array of Signature objects from Administrators with appropriate invitation scopes. |
+| UsedBy              | CID of the entity that used this invitation (only populated after use).            |
 
 ### AdministratorAcceptance
+
 Represents an Administrator's acceptance of an invitation.
 
-| Field | Description |
-|-------|-------------|
-| CID | Content ID uniquely identifying this acceptance. |
-| InvitationCID | CID of the invitation being accepted. |
-| AdministratorKey | Public key of the new Administrator. |
-| AdministratorName | Name of the new Administrator. |
-| AdministratorTitle | Title of the new Administrator. |
-| AcceptedScopes[] | Array of scopes the Administrator is accepting. |
-| ImageUrl/CID | URL or Content ID pointing to the Administrator's photo or avatar. |
-| ProofOfPossession | Cryptographic proof that the acceptor possessed the private invitation token. |
-| Signature | Signature from the new Administrator's private key, confirming acceptance of the scopes and role. |
+| Field              | Description                                                                                       |
+| ------------------ | ------------------------------------------------------------------------------------------------- |
+| CID                | Content ID uniquely identifying this acceptance.                                                  |
+| InvitationCID      | CID of the invitation being accepted.                                                             |
+| AdministratorKey   | Public key of the new Administrator.                                                              |
+| AdministratorName  | Name of the new Administrator.                                                                    |
+| AdministratorTitle | Title of the new Administrator.                                                                   |
+| AcceptedScopes[]   | Array of scopes the Administrator is accepting.                                                   |
+| ImageUrl/CID       | URL or Content ID pointing to the Administrator's photo or avatar.                                |
+| ProofOfPossession  | Cryptographic proof that the acceptor possessed the private invitation token.                     |
+| Signature          | Signature from the new Administrator's private key, confirming acceptance of the scopes and role. |
 
 ### AuthorityAcceptance
+
 Represents the acceptance of an invitation to form a new Authority.
 
-| Field | Description |
-|-------|-------------|
-| CID | Content ID uniquely identifying this acceptance. |
-| InvitationCID | CID of the invitation being accepted. |
-| AuthorityName | Name of the new Authority. |
-| DomainName | Domain name of the new Authority. |
-| InitialAdministratorKey | Public key of the initial Administrator. |
-| InitialAdministratorName | Name of the initial Administrator. |
-| InitialAdministratorTitle | Title of the initial Administrator. |
-| InitialAdministratorScopes[] | Array of scopes for the initial Administrator. |
-| ProofOfPossession | Cryptographic proof that the acceptor possessed the private invitation token. |
-| Signature | Signature from the initial Administrator's private key. |
+| Field                        | Description                                                                   |
+| ---------------------------- | ----------------------------------------------------------------------------- |
+| CID                          | Content ID uniquely identifying this acceptance.                              |
+| InvitationCID                | CID of the invitation being accepted.                                         |
+| AuthorityName                | Name of the new Authority.                                                    |
+| DomainName                   | Domain name of the new Authority.                                             |
+| InitialAdministratorKey      | Public key of the initial Administrator.                                      |
+| InitialAdministratorName     | Name of the initial Administrator.                                            |
+| InitialAdministratorTitle    | Title of the initial Administrator.                                           |
+| InitialAdministratorScopes[] | Array of scopes for the initial Administrator.                                |
+| ProofOfPossession            | Cryptographic proof that the acceptor possessed the private invitation token. |
+| Signature                    | Signature from the initial Administrator's private key.                       |
 
 ## Operational Model
 
 ### Network Foundation
+
 - The voting network uses a P2P Kademlia distributed hash table (DHT) architecture.
 - The primary Authority's SID (the CID of its initial administration) is encoded directly into the protocol.
 - This establishes the root of trust for the entire network.
 
 ### Administrative Actions
+
 - All actions performed by an Administration require signatures from the relevant Administrators.
 - Each Administrator has a set of scopes (claims), representing individual privileges.
 - Network or Authority policy establishes how many applicable Administrator signatures are required for each scope.
 - Signatures are compound structures, composed of the appropriate claims and the required number of signatures.
 
 ### Authority Relationships
+
 - The primary Authority invites other Authorities to join the network.
 - This creates a hierarchical trust model while maintaining decentralized operations.
 
 ### Administrative Powers
+
 With signatures from Administrators possessing the appropriate scopes, an Administration can:
+
 - Revise or replace the Administration
 - Validate registrations
 - Invite other Authorities
@@ -137,11 +151,13 @@ With signatures from Administrators possessing the appropriate scopes, an Admini
 - And other administrative functions
 
 ### Administration Lifecycle
+
 - Administrators must hand off or revise the Administration before it expires.
 - If not updated before expiration, the primary Authority must replace the Administration.
 - If the primary Authority fails to replace its Administration before expiration, the network loses legitimacy and a new network must be formed.
 
 ### Security Model
+
 - All related records have signatures to legitimize them, from the appropriate Administrators.
 - Administrators are always people, and their signatures come from hardware security modules (HSMs) or secure enclaves in their devices.
 - Some operations, such as approving device Associations for Registrants, may be automated.
@@ -273,4 +289,3 @@ Signature = {
 ```
 
 All validation is performed using public network structures, with private data never exposed on the network.
-

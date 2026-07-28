@@ -29,7 +29,7 @@ import { DIAL_PROBE_ENABLED } from './proof-flags.generated';
 // Example: '/ip4/10.0.2.2/tcp/52345/ws/p2p/12D3KooW...'
 const CONTROL_ADDR = '/ip4/10.0.2.2/tcp/0/ws/p2p/UPDATE_AFTER_DRONE_RESTART';
 
-const L = (...a: unknown[]) => console.log('[dial-probe]', ...a);
+const L = (...a: unknown[]) => console.info('[dial-probe]', ...a);
 
 /**
  * Boot entry point. Fire-and-forget from index.js (or persistence-proof-runner.ts)

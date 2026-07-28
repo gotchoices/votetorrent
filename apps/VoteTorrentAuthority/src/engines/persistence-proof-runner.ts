@@ -21,13 +21,18 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   makeProofEngine,
   runFullChainWritePhase,
+  runBallotQuestionProof,
+  runBallotQuestionReadProof,
   runFullChainReadPhase,
+  runTidReissueRecheckPhase,
   assertCryptoFunctions,
   assertDigestParity,
   getLastProofDb,
   PROOF_CHAIN_REF_KEY,
   PROOF_WRITE_ATTEMPTED_KEY,
 } from './persistence-proof';
+import type { NetworkReference } from '@votetorrent/vote-core';
+import type { StrandHost } from './rn-db-factory';
 import { getOrCreateDeviceUser } from './device-user';
 import { runRnEntrySmoke } from './rn-entry-smoke';
 // Static import only — dynamic require() breaks Metro (Phase 16-07 lesson).
@@ -42,8 +47,16 @@ import { PROOF_ENABLED, DIAL_PROBE_ENABLED } from './proof-flags.generated';
 /**
  * Boot entry point. Fire-and-forget from index.js after the app registers.
  * Never throws — any failure is logged as `[proof] FATAL` so the app still boots.
+ *
+ * @param node  Optional StrandHost (e.g. a live CadreNode from useCadreNode()).
+ *              When provided, makeProofEngine(node) drives createStrandDbFactory,
+ *              exercising the strand createContext path for VER-04 verification.
+ *              When omitted (the default — including the index.js boot call),
+ *              makeProofEngine() falls back to rnDbFactory (existing behaviour).
+ *              Note: the CadreNode has not booted yet at the index.js call site,
+ *              so the boot invocation correctly passes no argument.
  */
-export async function runPersistenceProof(): Promise<void> {
+export async function runPersistenceProof(node?: StrandHost): Promise<void> {
   if (!(__DEV__ && PROOF_ENABLED)) {
     return;
   }
@@ -75,29 +88,32 @@ export async function runPersistenceProof(): Promise<void> {
       }
 
       // ---- FULL-CHAIN WRITE PHASE (first launch / after `pm clear`) ----
-      console.log('[proof] ========== BOOT: WRITE PHASE (no saved state) ==========');
+      console.info('[proof] ========== BOOT: WRITE PHASE (no saved state) ==========');
 
       // T-16-14: use the REAL device user — never the fake PROOF_USER key.
       const user = await getOrCreateDeviceUser('Proof Runner');
-      const engine = makeProofEngine();
+      const engine = makeProofEngine(node);
       const { networkRef, authorityId, electionId, db } = await runFullChainWritePhase(engine, user);
-      console.log(
+      console.info(
         `[proof] WRITE COMPLETE — hash=${networkRef.hash} authorityId=${authorityId} electionId=${electionId}`,
       );
+      // MBY-260626: ballot question round-trip (proposeBallot → getBallotDetails)
+      // on the same on-device engine/store, in this same boot (no force-stop needed).
+      await runBallotQuestionProof(engine, networkRef, authorityId, electionId);
       // Crypto on the freshly-initialized on-device store (also re-run post-restart).
       await assertCryptoFunctions(db);
-      console.log(
+      console.info(
         '[proof] NEXT STEP → adb shell am force-stop org.votetorrent.authority, then relaunch the app',
       );
-      console.log('[proof] ========== WRITE PHASE DONE ==========');
+      console.info('[proof] ========== WRITE PHASE DONE ==========');
     } else {
       // ---- FULL-CHAIN READ PHASE (after force-stop + relaunch) ----
-      console.log('[proof] ========== BOOT: READ PHASE (saved state present) ==========');
+      console.info('[proof] ========== BOOT: READ PHASE (saved state present) ==========');
 
       const user = await getOrCreateDeviceUser('Proof Runner');
-      const engine = makeProofEngine();
+      const engine = makeProofEngine(node);
       const result = await runFullChainReadPhase(engine, user);
-      console.log(
+      console.info(
         `[proof] READ COMPLETE — passed=${result.passed} network=${result.networkCount} authority=${result.authorityCount} election=${result.electionCount}`,
       );
 
@@ -113,15 +129,44 @@ export async function runPersistenceProof(): Promise<void> {
       // Digest() and compare to Node-pinned expected base64url strings.
       const digestParity = await assertDigestParity(db);
 
+      // MBY-260626 ballot regression check: re-read the ballot proposed in the
+      // WRITE phase from the re-attached store and assert its questions survived
+      // the restart. Reuses the chain ref the read phase already loaded.
+      const chainRefJson = await AsyncStorage.getItem(PROOF_CHAIN_REF_KEY);
+      const chainRef = chainRefJson
+        ? (JSON.parse(chainRefJson) as { networkRef: NetworkReference; authorityId: string; electionId: string })
+        : undefined;
+      const ballot = chainRef
+        ? await runBallotQuestionReadProof(
+            engine,
+            chainRef.networkRef,
+            chainRef.authorityId,
+            chainRef.electionId,
+          )
+        : { passed: false, details: 'noChainRef' };
+
       // Emit the single verdict line that run-vtest02.sh polls for via:
       //   VERDICT_TAG='\[proof\] ========== FULL-CHAIN VERDICT'
       // This log line is the VTEST-02 evidence (D-08) — byte-identical to the script grep target.
-      // digestParity.allPassed folds into the overall verdict so a parity failure flips PASS→FAIL.
-      const verdict = result.passed && crypto.allPassed && digestParity.allPassed;
-      console.log(
+      // digestParity.allPassed and ballot.passed fold into the overall verdict so a
+      // parity OR ballot-questions regression flips PASS→FAIL.
+      const verdict = result.passed && crypto.allPassed && digestParity.allPassed && ballot.passed;
+      console.info(
         `[proof] ========== FULL-CHAIN VERDICT: ${verdict ? 'PASS' : 'FAIL'} ` +
-          `(network=${result.networkCount},authority=${result.authorityCount},election=${result.electionCount},crypto=${crypto.allPassed},digestParity=${digestParity.allPassed}) ==========`,
+          `(network=${result.networkCount},authority=${result.authorityCount},election=${result.electionCount},crypto=${crypto.allPassed},digestParity=${digestParity.allPassed},ballotQuestions=${ballot.passed}) ==========`,
       );
+
+      // Phase 999.1 D-15: durable-Tid no-reissue recheck on the re-attached store.
+      // Runs AFTER the full-chain verdict and in its own try/catch so a recheck
+      // failure cannot mask the existing PERSIST/D-16 evidence above. Emits its own
+      // `[proof] ========== TID-REISSUE VERDICT: PASS|FAIL ...` line — the greppable
+      // D-15 device evidence (requires a backward device-clock jump between the WRITE
+      // phase and this relaunch to be a meaningful clock-skew proof).
+      try {
+        await runTidReissueRecheckPhase(engine, user);
+      } catch (reissueErr) {
+        console.error('[proof] ========== TID-REISSUE VERDICT: FAIL (recheck threw) ==========', reissueErr);
+      }
     }
   } catch (err) {
     console.error('[proof] FATAL —', err);

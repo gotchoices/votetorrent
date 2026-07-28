@@ -53,6 +53,6 @@ export function runRnEntrySmoke(): boolean {
     LocalStorageReact,
   ];
   const allDefined = exports.every(e => typeof e === 'function');
-  console.log('[rn-smoke] All /rn exports resolve on Hermes:', allDefined ? 'PASS' : 'FAIL');
+  console.info('[rn-smoke] All /rn exports resolve on Hermes:', allDefined ? 'PASS' : 'FAIL');
   return allDefined;
 }

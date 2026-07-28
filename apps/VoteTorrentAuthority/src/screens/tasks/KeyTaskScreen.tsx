@@ -10,6 +10,7 @@ import { CustomButton } from "../../components/CustomButton";
 import { Footer } from "../../components/Footer";
 import { IKeysTasksEngine, ReleaseKeyTask } from "@votetorrent/vote-core";
 import { useApp } from "../../providers/AppProvider";
+import { InlineError } from "../../components/InlineError";
 
 export default function KeyTaskScreen() {
 	const { task } = useRoute().params as { task: ReleaseKeyTask };
@@ -66,7 +67,7 @@ export default function KeyTaskScreen() {
 			await engine.completeKeyRelease(task);
 			navigation.goBack();
 		} catch (err) {
-			console.error("releaseKey error:", err);
+			console.warn("releaseKey error:", err);
 			setErrorMessage(err instanceof Error ? err.message : String(err));
 			return;
 		}
@@ -158,11 +159,7 @@ export default function KeyTaskScreen() {
 					) : null}
 				</View>
 			</ScrollView>
-			{errorMessage ? (
-				<ThemedText style={{ color: colors.error, marginHorizontal: 16, marginBottom: 8 }}>
-					{errorMessage}
-				</ThemedText>
-			) : null}
+			<InlineError message={errorMessage} />
 			<Footer>
 				<CustomButton
 					title={t("release")}

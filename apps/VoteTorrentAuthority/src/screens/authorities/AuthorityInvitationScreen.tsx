@@ -15,6 +15,7 @@ import type {
 import { INetworkEngine } from "@votetorrent/vote-core";
 import Clipboard from "@react-native-clipboard/clipboard";
 import { ThemedText } from "../../components/ThemedText";
+import { InlineError } from "../../components/InlineError";
 import { ChipButton } from "../../components/ChipButton";
 import { CustomButton } from "../../components/CustomButton";
 import { CustomTextInput } from "../../components/CustomTextInput";
@@ -103,6 +104,13 @@ export default function AuthorityInvitationScreen() {
 	const onSend = async () => {
 		// 16-08 item 4: clear any prior error so a retry starts clean.
 		setErrorMessage("");
+		// Required-field guard: an empty authority name would otherwise generate an
+		// invite with a blank name and silently flip to the share state. Surface it
+		// inline (same pattern as the engine guards below) instead of proceeding.
+		if (!name.trim()) {
+			setErrorMessage(t("errAuthorityNameRequired"));
+			return;
+		}
 		try {
 			// Resolve device identity (D-02 / generate-on-first-run) — needed to
 			// populate ctx.user so Officer.UserIdValid passes (Pitfall 2 / T-16-05).
@@ -262,11 +270,7 @@ export default function AuthorityInvitationScreen() {
 						) : null}
 					</View>
 				</ScrollView>
-				{errorMessage ? (
-					<ThemedText type="small" style={{ color: colors.error }}>
-						{errorMessage}
-					</ThemedText>
-				) : null}
+				<InlineError message={errorMessage} />
 				{!shareText ? (
 					<Footer>
 						<CustomButton
@@ -336,7 +340,7 @@ export default function AuthorityInvitationScreen() {
 						placeholder={t("optionalImageAddress")}
 						onChangeText={setImageUrl}
 						isImageUrlField={true}
-						makePermanentPressed={() => console.log("makePermanent stub")}
+						makePermanentPressed={undefined}
 					/>
 					<CustomTextInput
 						title={t("domainName")}
@@ -384,11 +388,7 @@ export default function AuthorityInvitationScreen() {
 				</View>
 			</ScrollView>
 			{/* GAP-2: surface respondToInvite failures inline in accept mode */}
-			{errorMessage ? (
-				<ThemedText type="small" style={{ color: colors.error }}>
-					{errorMessage}
-				</ThemedText>
-			) : null}
+			<InlineError message={errorMessage} />
 			<SignatureTaskFooter
 				onAccept={onAccept}
 				onReject={onDecline}

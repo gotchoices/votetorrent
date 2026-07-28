@@ -80,18 +80,30 @@ jest.mock('react-i18next', () => ({
 }));
 
 // Navigation theme + hooks.
-jest.mock('@react-navigation/native', () => ({
-  useTheme: () => ({
-    colors: {
-      primary: '#007AFF',
-      error: '#FF3B30',
-      important: '#FF9500',
-      text: '#000000',
-      textSecondary: '#888888',
+jest.mock('@react-navigation/native', () => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const ReactForMock = require('react');
+  return {
+    useTheme: () => ({
+      colors: {
+        primary: '#007AFF',
+        error: '#FF3B30',
+        important: '#FF9500',
+        text: '#000000',
+        textSecondary: '#888888',
+      },
+    }),
+    useNavigation: () => ({ navigate: jest.fn(), setOptions: jest.fn() }),
+    // NetworksScreen re-loads recent networks on focus. A real navigation focus
+    // fires exactly once on initial mount (no navigation container in this test
+    // harness ever blurs/refocuses) — mirror that via a plain mount-only effect,
+    // rather than invoking the callback directly during render (which would
+    // violate the rules of hooks / setState-during-render and can loop).
+    useFocusEffect: (cb: () => void | (() => void)) => {
+      ReactForMock.useEffect(() => cb(), []);
     },
-  }),
-  useNavigation: () => ({ navigate: jest.fn(), setOptions: jest.fn() }),
-}));
+  };
+});
 
 jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),

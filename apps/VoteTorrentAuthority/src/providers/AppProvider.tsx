@@ -99,6 +99,23 @@ export function AppProvider({ children }: PropsWithChildren) {
 		async function initialize() {
 			try {
 				const factory = engineFactoryRef.current!;
+
+				// RE-ATTACH FIX: Synchronise the current CadreNode state into the factory
+				// before any DbFactory call. The lazy-dispatch DbFactory selects strand vs
+				// solo based on factory.node AT CALL TIME. On cold start, the setNode
+				// effect (dep: [connectedPeers, node]) fires before this effect (effects
+				// run in declaration order) — but because CadreNode.start() is async,
+				// node is still null on the first render and may only become non-null after
+				// this effect has already completed. Adding `node` to this effect's dep
+				// array causes it to re-fire when CadreNode boots; calling setNode(node)
+				// here ensures the factory uses the strand DbFactory for the re-attach
+				// open() call, matching the factory path used during the original create().
+				// Without this, create() (user finished the form AFTER CadreNode booted)
+				// used createStrandDbFactory while cold-start re-attach used rnDbFactory —
+				// two different storage backends — leaving isSchemaInitialized false on the
+				// rnDbFactory side → "Network not opened in this session — use create() first".
+				factory.setNode(node);
+
 				const networksEng = factory.getNetworksEngine();
 
 				// Attempt to re-attach to the most recently used network.
@@ -133,6 +150,10 @@ export function AppProvider({ children }: PropsWithChildren) {
 						await factory.getEngine("network", network);
 						// Pitfall 4: setHasNetwork is called by AppProvider (not the factory).
 						setHasNetwork(true);
+						// RE-ATTACH FIX: clear any initError from a previous failed attempt so
+						// the error screen is not shown when re-attach succeeds on the retry
+						// triggered by the node dep change (CadreNode boot race).
+						setInitError(null);
 					} catch (reattachError) {
 						// D-15: surface the recoverable error; spinner resolves to an error view.
 						console.error("Re-attach failed:", reattachError);
@@ -157,7 +178,15 @@ export function AppProvider({ children }: PropsWithChildren) {
 
 		initialize();
 		// CR-02: re-run when initNonce changes so "Try Again" can re-attempt init.
-	}, [initNonce]);
+		// RE-ATTACH FIX: also re-run when node changes (null → CadreNode instance)
+		// so that the factory's DbFactory dispatch is re-evaluated with the correct
+		// node state before the re-attach open() call. This fixes the race where
+		// cold-start initialize() ran with node=null (using rnDbFactory) while
+		// create() ran after CadreNode booted (using createStrandDbFactory) —
+		// different storage backends causing isSchemaInitialized to return false.
+		// NetworksEngine.open() is cache-first (D-06) so re-running on a
+		// successfully-attached network is a cheap no-op (cache hit, no DDL).
+	}, [initNonce, node]);
 
 	// D-15: only show the spinner while initialization is truly pending.
 	if (!isInitialized) {

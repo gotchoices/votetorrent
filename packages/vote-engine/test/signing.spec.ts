@@ -5,6 +5,8 @@ import {
   UserKeyType
 } from '@votetorrent/vote-core'
 import { expect } from 'chai'
+import { secp256k1 } from '@noble/curves/secp256k1.js'
+import { bytesToHex, hexToBytes } from '@noble/curves/utils.js'
 import { prepareDb } from '../src/database/initialize'
 import { NetworksEngine } from '../src/networks/networks-engine'
 import { SigningEngine } from '../src/signing/signing-engine'
@@ -14,7 +16,7 @@ import { MockSigningEngine } from '../src/signing/mock-signing-engine'
 import { SigningSignBuilder } from '../src/signing/builders/signing-sign-builder.js'
 import { SigningStartSigningSessionBuilder } from '../src/signing/builders/signing-start-signing-session-builder.js'
 import { createTestNetwork, addTestAuthority, addTestElection, makeTestSignature } from './fixtures/test-context.js'
-import { nowCanonicalDatetime } from '../src/utils.js'
+import { nowCanonicalDatetime, digestToBytes } from '../src/utils.js'
 import type { EngineContext } from '../src/types.js'
 import { randomTestKeyPair } from './fixtures/keys.js'
 import { AsyncStorage } from './shims/react-native'
@@ -81,9 +83,9 @@ function makeNetworkInit (): NetworkInit {
   }
 }
 
-// Pure schema-only DB. Loads the schema but performs no INSERTs (so it
-// does not trip quereus#23) — useful for the AUTH-06 binding-shape and
-// not-found-throws tests that don't need a populated DB.
+// Pure schema-only DB. Loads the schema but performs no INSERTs — useful
+// for the AUTH-06 binding-shape and not-found-throws tests that don't need
+// a populated DB.
 async function makeDbOnlyContext (): Promise<{ ctx: EngineContext, user: User }> {
   const db = new Database()
   await prepareDb(db)
@@ -93,7 +95,6 @@ async function makeDbOnlyContext (): Promise<{ ctx: EngineContext, user: User }>
 }
 
 // Reaches into a NetworksEngine for a populated EngineContext after create().
-// All call sites are bug-blocked on quereus#23 today.
 async function createPopulatedContext (): Promise<{
   ctx: EngineContext
   user: User
@@ -123,6 +124,39 @@ function makeSignature (signerUserId: string): Signature {
   }
 }
 
+/**
+ * 999.1 R-02: real per-digest signature for `startSigningSession` (PATH A, digestArgs !==
+ * null — no callback form exists on this method, see ISigningEngine.startSigningSession).
+ * Reproduces the exact `Digest(:authorityId, :effectiveAt, :thresholdPolicies)` formula
+ * `SigningEngine.startSigningSession` computes engine-side, then signs it for real —
+ * AdminSigning.SignatureValid now verifies these bytes via the in-schema UDF.
+ */
+async function realSignAdminDigest (
+  ctx: EngineContext,
+  authorityId: string,
+  digestArgs: AdminDigestArgs,
+  signerUserId: string
+): Promise<Signature> {
+  const row = await ctx.db
+    .prepare('select Digest(:authorityId, :effectiveAt, :thresholdPolicies) as d')
+    .get({ authorityId, effectiveAt: digestArgs.effectiveAt, thresholdPolicies: digestArgs.thresholdPolicies })
+  const digestB64 = row!.d as string
+  const { privateHex, publicHex } = randomTestKeyPair()
+  const sigHex = bytesToHex(secp256k1.sign(digestToBytes(digestB64), hexToBytes(privateHex)))
+  return { signerUserId, signerKey: publicHex, signature: sigHex }
+}
+
+/**
+ * 999.1 R-02: real signature over an ALREADY-COMPUTED base64url Digest() output (e.g. an
+ * AdminSigning.Digest re-read from the DB) — for OfficerSignature.SignatureValid, which
+ * verifies against the referenced AdminSigning session's Digest rather than recomputing one.
+ */
+function signTestDigestWithFreshKey (signerUserId: string, digestB64: string): Signature {
+  const { privateHex, publicHex } = randomTestKeyPair()
+  const sigHex = bytesToHex(secp256k1.sign(digestToBytes(digestB64), hexToBytes(privateHex)))
+  return { signerUserId, signerKey: publicHex, signature: sigHex }
+}
+
 // ===========================================================================
 // SigningEngine — TEST-02
 // ===========================================================================
@@ -143,7 +177,7 @@ describe('SigningEngine', () => {
       // Pure-guard path: startSigningSession first runs a SELECT against
       // CurrentAdmin JOIN Officer. With an empty schema-only DB, this
       // returns no row → the implementation throws 'Admin not found'.
-      // No INSERT is attempted, so quereus#23 is not in play.
+      // No INSERT is attempted.
       const { ctx, user } = await makeDbOnlyContext()
       const engine = new SigningEngine(ctx)
       const sig = makeSignature(user.id)
@@ -161,9 +195,6 @@ describe('SigningEngine', () => {
       expect((caught as Error)?.message).to.include('Admin not found')
     })
 
-    // BLOCKED on https://github.com/gotchoices/quereus/issues/23 —
-    // startSigningSession INSERTs into AdminSigning which trips
-    // CantDelete on INSERT (same chain as NetworksEngine.create()).
     // Test asserts: a nonce is returned (UUID format), thresholdReached
     // honours the single-officer-threshold-policy seed.
     it('returns a nonce and propagates threshold result from sign()', async () => {
@@ -173,11 +204,7 @@ describe('SigningEngine', () => {
         .prepare('select Id from Authority limit 1')
         .get({})
       const authorityId = authRow!.Id as string
-      const sig: Signature = {
-        signerUserId: user.id,
-        signerKey: user.activeKeys[0]!.key,
-        signature: 'a'.repeat(128)
-      }
+      const sig = await realSignAdminDigest(ctx, authorityId, testDigestArgs, user.id)
       const result = await engine.startSigningSession(
         authorityId,
         testDigestArgs,
@@ -188,7 +215,6 @@ describe('SigningEngine', () => {
       expect(result.thresholdReached).to.be.a('boolean')
     })
 
-    // BLOCKED on quereus#23 — same chain.
     it('INSERTs an AdminSigning row with the scope, digest, and signer fields', async () => {
       const { ctx, user } = await createPopulatedContext()
       const engine = new SigningEngine(ctx)
@@ -196,11 +222,7 @@ describe('SigningEngine', () => {
         .prepare('select Id from Authority limit 1')
         .get({})
       const authorityId = authRow!.Id as string
-      const sig: Signature = {
-        signerUserId: user.id,
-        signerKey: user.activeKeys[0]!.key,
-        signature: 'a'.repeat(128)
-      }
+      const sig = await realSignAdminDigest(ctx, authorityId, testDigestArgs, user.id)
       const { nonce } = await engine.startSigningSession(
         authorityId,
         testDigestArgs,
@@ -218,7 +240,6 @@ describe('SigningEngine', () => {
       expect(row?.SignerKey).to.equal(sig.signerKey)
     })
 
-    // BLOCKED on quereus#23 — same chain.
     it('rejects an invalid scope via AdminSigning.ScopeValid', async () => {
       const { ctx, user } = await createPopulatedContext()
       const engine = new SigningEngine(ctx)
@@ -226,11 +247,7 @@ describe('SigningEngine', () => {
         .prepare('select Id from Authority limit 1')
         .get({})
       const authorityId = authRow!.Id as string
-      const sig: Signature = {
-        signerUserId: user.id,
-        signerKey: user.activeKeys[0]!.key,
-        signature: 'a'.repeat(128)
-      }
+      const sig = await realSignAdminDigest(ctx, authorityId, testDigestArgs, user.id)
       let caught: unknown
       try {
         await engine.startSigningSession(
@@ -253,7 +270,7 @@ describe('SigningEngine', () => {
     // AUTH-06 contract guard: the engine source binds `signerKey:` (not the
     // pre-Plan 03-03 `key:`). Verify the source as-written contains the
     // `:signerKey` SQL placeholder and the matching JS bind site. This is
-    // a static check — no DB execution — and so does NOT trip quereus#23.
+    // a static check — no DB execution.
     it('binds the signerKey parameter (AUTH-06 contract — no DB execution)', async () => {
       const fs = await import('fs')
       const path = await import('path')
@@ -311,19 +328,12 @@ describe('SigningEngine', () => {
       expect(src).to.include('D-17')
     })
 
-    // BLOCKED on https://github.com/gotchoices/quereus/issues/23 —
-    // sign() INSERTs into OfficerSignature which trips CantDelete on
-    // INSERT in Quereus 3.1.1.
     it('INSERTs an OfficerSignature row keyed by SigningNonce', async () => {
       const { ctx, user } = await createPopulatedContext()
       const engine = new SigningEngine(ctx)
       const authRow = await ctx.db.prepare('select Id from Authority limit 1').get({})
       const authorityId = authRow!.Id as string
-      const sig: Signature = {
-        signerUserId: user.id,
-        signerKey: user.activeKeys[0]!.key,
-        signature: 'a'.repeat(128)
-      }
+      const sig = await realSignAdminDigest(ctx, authorityId, testDigestArgs, user.id)
       // Create an AdminSigning session first so sign() has a row to read scope from
       const { nonce } = await engine.startSigningSession(authorityId, testDigestArgs, 'rad', sig)
       // sign() with the nonce from startSigningSession (which already called sign internally)
@@ -336,18 +346,13 @@ describe('SigningEngine', () => {
       expect(row?.UserId).to.equal(user.id)
     })
 
-    // BLOCKED on quereus#23 — same chain. Threshold-met path triggers the
-    // AdminSignature INSERT branch.
+    // Threshold-met path triggers the AdminSignature INSERT branch.
     it('inserts an AdminSignature row once the threshold is met', async () => {
       const { ctx, user } = await createPopulatedContext()
       const engine = new SigningEngine(ctx)
       const authRow = await ctx.db.prepare('select Id from Authority limit 1').get({})
       const authorityId = authRow!.Id as string
-      const sig: Signature = {
-        signerUserId: user.id,
-        signerKey: user.activeKeys[0]!.key,
-        signature: 'a'.repeat(128)
-      }
+      const sig = await realSignAdminDigest(ctx, authorityId, testDigestArgs, user.id)
       // startSigningSession creates AdminSigning + calls sign() internally
       const { nonce, thresholdReached } = await engine.startSigningSession(authorityId, testDigestArgs, 'rad', sig)
       expect(thresholdReached).to.equal(true)
@@ -359,19 +364,15 @@ describe('SigningEngine', () => {
       expect(row?.SigningNonce).to.equal(nonce)
     })
 
-    // BLOCKED on quereus#23 — same chain. Idempotent-completion branch:
-    // calling sign() a second time after the threshold is reached should
-    // treat the PK collision as success (D-17), not as an error.
+    // Idempotent-completion branch: calling sign() a second time after the
+    // threshold is reached should treat the PK collision as success (D-17),
+    // not as an error.
     it('is idempotent on duplicate threshold completion (D-17 PK collision is benign)', async () => {
       const { ctx, user } = await createPopulatedContext()
       const engine = new SigningEngine(ctx)
       const authRow = await ctx.db.prepare('select Id from Authority limit 1').get({})
       const authorityId = authRow!.Id as string
-      const sig: Signature = {
-        signerUserId: user.id,
-        signerKey: user.activeKeys[0]!.key,
-        signature: 'a'.repeat(128)
-      }
+      const sig = await realSignAdminDigest(ctx, authorityId, testDigestArgs, user.id)
       // startSigningSession creates AdminSigning + calls sign() internally
       const { nonce, thresholdReached: first } = await engine.startSigningSession(authorityId, testDigestArgs, 'rad', sig)
       expect(first).to.equal(true)
@@ -389,9 +390,57 @@ describe('SigningEngine', () => {
       expect(second).to.equal(true)
     })
 
-    // BLOCKED on quereus#23 — sign() relies on a pre-existing AdminSigning
-    // row to look up the scope. Without #23, no AdminSigning row can be
-    // seeded, so the read-side path is unreachable today.
+    // WR-02 (42-REVIEW): when a SECOND, distinct officer signs after the
+    // AdminSignature row already exists (the concurrent threshold-crossing
+    // shape), sign() hits the AdminSignature PK-collision branch. That branch
+    // must COMMIT — preserving this officer's freshly-inserted OfficerSignature
+    // (their audit evidence) — not ROLLBACK it. A prior ROLLBACK here silently
+    // dropped the officer's signature while still returning true.
+    it('preserves a second officer\'s OfficerSignature when the AdminSignature already exists (WR-02: no silent audit-row drop)', async () => {
+      const { ctx, user } = await createPopulatedContext()
+      const engine = new SigningEngine(ctx)
+      const authRow = await ctx.db.prepare('select Id from Authority limit 1').get({})
+      const authorityId = authRow!.Id as string
+      const sig1 = await realSignAdminDigest(ctx, authorityId, testDigestArgs, user.id)
+      // Officer 1 crosses the threshold (=1): AdminSignature row is created.
+      const { nonce, thresholdReached } = await engine.startSigningSession(authorityId, testDigestArgs, 'rad', sig1)
+      expect(thresholdReached).to.equal(true)
+
+      const beforeOfficer = await ctx.db
+        .prepare('select count(*) as n from OfficerSignature where SigningNonce = :nonce')
+        .get({ nonce })
+      expect(Number(beforeOfficer?.n)).to.equal(1)
+
+      // Officer 2 (distinct UserId) signs the SAME nonce. Their OfficerSignature
+      // inserts cleanly (distinct PK), the count re-crosses the threshold, and
+      // the AdminSignature insert collides on its existing PK → the WR-02 branch.
+      // 999.1 R-02: OfficerSignature.SignatureValid verifies against the SAME
+      // AdminSigning.Digest sig1 signed above — sign a real signature over it too.
+      const adminSigningDigestRow = await ctx.db
+        .prepare('select Digest from AdminSigning where Nonce = :nonce')
+        .get({ nonce })
+      const sig2 = signTestDigestWithFreshKey('user-2-wr02', adminSigningDigestRow!.Digest as string)
+      const result = await engine.sign(nonce, sig2)
+      expect(result, 'threshold is already met, so sign() reports success').to.equal(true)
+
+      // The WR-02 fix: officer 2's OfficerSignature must PERSIST (count now 2),
+      // not have been rolled back with the redundant AdminSignature insert.
+      const afterOfficer = await ctx.db
+        .prepare('select count(*) as n from OfficerSignature where SigningNonce = :nonce')
+        .get({ nonce })
+      expect(Number(afterOfficer?.n), 'officer 2\'s signature must survive (pre-fix ROLLBACK dropped it)').to.equal(2)
+      const officer2 = await ctx.db
+        .prepare('select UserId from OfficerSignature where SigningNonce = :nonce and UserId = :uid')
+        .get({ nonce, uid: 'user-2-wr02' })
+      expect(officer2?.UserId).to.equal('user-2-wr02')
+
+      // And exactly one AdminSignature row still exists (idempotent completion).
+      const adminSigCount = await ctx.db
+        .prepare('select count(*) as n from AdminSignature where SigningNonce = :nonce')
+        .get({ nonce })
+      expect(Number(adminSigCount?.n)).to.equal(1)
+    })
+
     it('reads scope and threshold from the AdminSigning + Admin join', async () => {
       // Seed an AdminSigning row with scope=rad (matches the seeded
       // ThresholdPolicies entry { policy: 'rad', threshold: 1 }), then
@@ -402,11 +451,7 @@ describe('SigningEngine', () => {
         .prepare('select Id from Authority limit 1')
         .get({})
       const authorityId = authRow!.Id as string
-      const sig: Signature = {
-        signerUserId: user.id,
-        signerKey: user.activeKeys[0]!.key,
-        signature: 'a'.repeat(128)
-      }
+      const sig = await realSignAdminDigest(ctx, authorityId, testDigestArgs, user.id)
       const { nonce, thresholdReached } = await engine.startSigningSession(
         authorityId,
         testDigestArgs,
@@ -490,9 +535,13 @@ describe('getSignatureDigest + completeSignature round-trip', () => {
       }
     )
 
+    // 999.1 R-02/R-04: this row is created BEFORE the officer actually signs (the task is
+    // "pending" until completeSignature runs with a real secp256k1 key, below) — same
+    // DEBT-11 shape as elections-engine.ts's debugSeedPendingTasks — so it takes the
+    // explicit IsPlaceholderSignature escape hatch.
     await auth.ctx.db.exec(
       `insert into AdminSigning (Nonce, AuthorityId, AdminEffectiveAt, Scope, Digest, UserId, SignerKey, Signature)
-       with context now = :now, IsSignatureValid = true, IsSignerKeyValid = true
+       with context now = :now, IsSignerKeyValid = true, IsPlaceholderSignature = true
        values (:nonce, :authorityId, :adminEffectiveAt, 'rad',
                Digest(:tid, :authorityId, :adminEffectiveAt, :thresholdPolicies),
                :userId, :signerKey, :signature)`,
@@ -731,9 +780,13 @@ describe('completeSignature reject-branch (D-12)', () => {
     //   Digest(context.Tid, PA.AuthorityId, PA.EffectiveAt, PA.ThresholdPolicies)
     // We do NOT call sign() here — AdminSignature must be absent when the extension is inserted
     // (the extension's MutationValid "not exists AdminSignature for uncompleted task" gate).
+    // 999.1 R-02/R-04: this row is created BEFORE the officer actually signs (mirrors
+    // the DEBT-11 shape used elsewhere — the officer's real decision arrives via
+    // completeSignature, not at seed time) — takes the explicit IsPlaceholderSignature
+    // escape hatch rather than a real signature.
     await auth.ctx.db.exec(
       `insert into AdminSigning (Nonce, AuthorityId, AdminEffectiveAt, Scope, Digest, UserId, SignerKey, Signature)
-       with context now = :now, IsSignatureValid = true, IsSignerKeyValid = true
+       with context now = :now, IsSignerKeyValid = true, IsPlaceholderSignature = true
        values (:nonce, :authorityId, :adminEffectiveAt, 'rad',
                Digest(:tid, :authorityId, :adminEffectiveAt, :thresholdPolicies),
                :userId, :signerKey, :signature)`,
@@ -849,7 +902,12 @@ describe('completeSignature reject-branch (D-12)', () => {
       network: networkRef,
       signatureType: 'admin'
     }
-    const sig = makeTestSignature(auth.user)
+    // 999.1 R-02: completeSignature's accept path drives a REAL OfficerSignature insert —
+    // sign the seeded AdminSigning's actual Digest for real.
+    const acceptDigestRow = await auth.ctx.db
+      .prepare('select Digest from AdminSigning where Nonce = :nonce')
+      .get({ nonce })
+    const sig = signTestDigestWithFreshKey(auth.user.id, acceptDigestRow!.Digest as string)
     const acceptResult = { isAccepted: true, signature: sig }
 
     await tasksEngine.completeSignature(task, acceptResult)
@@ -1100,7 +1158,7 @@ describe('SigningSignBuilder', () => {
     const eng1 = new SigningEngine(ctx1)
     const authRow1 = await ctx1.db.prepare('select Id from Authority limit 1').get({})
     const authorityId1 = authRow1!.Id as string
-    const sig1 = makeSignature(user1.id)
+    const sig1 = await realSignAdminDigest(ctx1, authorityId1, testDigestArgs, user1.id)
     const sessionA = await eng1.startSigningSession(authorityId1, testDigestArgs, 'rad', sig1)
     expect(sessionA).to.have.property('nonce')
     expect(sessionA).to.have.property('thresholdReached')
@@ -1126,7 +1184,7 @@ describe('SigningSignBuilder', () => {
     const eng2 = new SigningEngine(ctx2)
     const authRow2 = await ctx2.db.prepare('select Id from Authority limit 1').get({})
     const authorityId2 = authRow2!.Id as string
-    const sig2 = makeSignature(user2.id)
+    const sig2 = await realSignAdminDigest(ctx2, authorityId2, testDigestArgs, user2.id)
     const sessionB = await eng2.buildStartSigningSession()
       .fromPayload({ authorityId: authorityId2, digestArgs: testDigestArgs, scope: 'rad', signature: sig2 })
       .commit()
@@ -1302,7 +1360,7 @@ describe('SigningStartSigningSessionBuilder', () => {
     const eng1 = new SigningEngine(ctx1)
     const authRow1 = await ctx1.db.prepare('select Id from Authority limit 1').get({})
     const authorityId1 = authRow1!.Id as string
-    const sig1 = makeSignature(user1.id)
+    const sig1 = await realSignAdminDigest(ctx1, authorityId1, testDigestArgs, user1.id)
     const directResult = await eng1.startSigningSession(authorityId1, testDigestArgs, 'rad', sig1)
     expect(directResult).to.have.property('nonce')
     expect(directResult).to.have.property('thresholdReached')
@@ -1312,7 +1370,7 @@ describe('SigningStartSigningSessionBuilder', () => {
     const eng2 = new SigningEngine(ctx2)
     const authRow2 = await ctx2.db.prepare('select Id from Authority limit 1').get({})
     const authorityId2 = authRow2!.Id as string
-    const sig2 = makeSignature(user2.id)
+    const sig2 = await realSignAdminDigest(ctx2, authorityId2, testDigestArgs, user2.id)
     const builderResult = await eng2.buildStartSigningSession()
       .fromPayload({ authorityId: authorityId2, digestArgs: testDigestArgs, scope: 'rad', signature: sig2 })
       .commit()

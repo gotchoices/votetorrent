@@ -120,6 +120,24 @@ else
   exit 1
 fi
 
+# ── STEP 4b: strandBootstrapNodes CANARY (REPL-01) ──────────────────────────
+#
+# The strandBootstrapNodes forward (REPL-01) is a source-level edit that MUST
+# travel with every re-synced cadre-core dist. Without it, every strand is an
+# isolated 1-node ring and coordinator-repo never broadcasts across peers.
+
+echo "[sync-vendor] Step 4b: asserting strandBootstrapNodes canary in re-synced cadre-core dist ..."
+if grep -rl --include='*.js' "strandBootstrapNodes" "${CADRE_DIST}" | grep -qE 'strand-instance-manager\.js$'; then
+  echo "[sync-vendor] Step 4b PASS: strandBootstrapNodes present in ${CADRE_DIST}/strand-instance-manager.js"
+else
+  echo "[sync-vendor] Step 4b FAIL: strandBootstrapNodes NOT found in ${CADRE_DIST}/strand-instance-manager.js after sync." >&2
+  echo "[sync-vendor] The sereus working tree must have the strandBootstrapNodes forward (REPL-01) applied before re-syncing." >&2
+  echo "[sync-vendor] In strand-instance-manager.ts: bootstrapNodes: config.bootstrapNodes ?? config.network?.strandBootstrapNodes ?? []" >&2
+  echo "[sync-vendor] In types.ts: add strandBootstrapNodes?: string[] to NetworkConfig." >&2
+  echo "[sync-vendor] See vendor/VENDOR.md for details." >&2
+  exit 1
+fi
+
 # ── STEP 5: REMINDER — update VENDOR.md source-commit line ──────────────────
 
 SEREUS_HEAD=$(git -C "${SEREUS_ROOT}" rev-parse HEAD 2>/dev/null || echo "unknown")

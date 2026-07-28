@@ -26,6 +26,6 @@ export async function runSigningProofRunner(): Promise<void> {
     await runSigningProof()
   } catch (err) {
     console.error('[spike013] FATAL —', err)
-    console.log('[spike013] ========== SIGNING VERDICT: FAIL ==========')
+    console.info('[spike013] ========== SIGNING VERDICT: FAIL ==========')
   }
 }

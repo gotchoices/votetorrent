@@ -1,5 +1,5 @@
 import { MisuseError, QuereusError } from '@quereus/quereus'
-import { fromCanonicalDatetime, parseJsonOr } from '../utils.js'
+import { fromCanonicalDatetime, parseJsonOr, parseKeyholdersAsInviteStatus } from '../utils.js'
 import type { EngineContext } from '../types.js'
 import type {
   ElectionCore,
@@ -13,9 +13,7 @@ import type {
   ReleaseKeyTask
 } from '@votetorrent/vote-core'
 import { CompleteKeyReleaseBuilder } from './builders/index.js'
-
-// Phase 05 TASK-01/02 — monotonic Tid counter for KeysTasksEngine batches.
-let nextTid = 1
+import { allocateTid } from '../database/tid-allocator.js'
 
 /**
  * KeysTasksEngine — Phase 05 (TASK-01, TASK-02) implementation.
@@ -92,7 +90,7 @@ export class KeysTasksEngine implements IKeysTasksEngine {
         // Materialise ElectionRevision from ElectionRevision table.
         const revRow = await this.ctx.db
           .prepare(
-            `select Revision, RevisionTimestamp, Tags, Instructions, Timeline, KeyholderThreshold
+            `select Revision, RevisionTimestamp, Tags, Instructions, Timeline, KeyholderThreshold, Keyholders
                from ElectionRevision where ElectionId = :id and Revision = :revision`
           )
           .get({ id: row.ElectionId, revision: row.ElectionRevision })
@@ -126,7 +124,8 @@ export class KeysTasksEngine implements IKeysTasksEngine {
               revisionTimestamp: [fromCanonicalDatetime(revRow.RevisionTimestamp as string)],
               tags: parseJsonOr<string[]>(revRow.Tags, [], 'ElectionRevision.Tags'),
               instructions: (revRow.Instructions as string | undefined) ?? '',
-              keyholders: [],
+              // 39-02 D-04 Gap 2: read the persisted create-time keyholder invitees back.
+              keyholders: parseKeyholdersAsInviteStatus(revRow.Keyholders, 'ElectionRevision.Keyholders'),
               timeline: parseJsonOr<Record<ElectionEvent, number>>(
                 revRow.Timeline,
                 {} as Record<ElectionEvent, number>,
@@ -140,7 +139,9 @@ export class KeysTasksEngine implements IKeysTasksEngine {
               revisionTimestamp: [],
               tags: [],
               instructions: '',
-              keyholders: [],
+              // No revision row exists at all — legitimately empty (no
+              // literal hardcode; parsed via the shared helper for consistency).
+              keyholders: parseKeyholdersAsInviteStatus(undefined, 'ElectionRevision.Keyholders'),
               timeline: {} as Record<ElectionEvent, number>,
               keyholderThreshold: 1,
             }
@@ -173,7 +174,7 @@ export class KeysTasksEngine implements IKeysTasksEngine {
    */
   async completeKeyRelease (task: ReleaseKeyTask): Promise<void> {
     this.requireCtx('completeKeyRelease')
-    const tid = nextTid++
+    const tid = await allocateTid(this.ctx!.db, 'keys-tasks')
     try {
       await this.ctx!.db.exec(
 				`update Task

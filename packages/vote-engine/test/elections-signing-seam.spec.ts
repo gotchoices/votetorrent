@@ -158,7 +158,7 @@ describe('Real-seam: seedElectionSigning → createElection through InsertValid'
     }
 
     // Capture the tid BEFORE calling seedElectionSigning so we can compare digests.
-    const tid = peekNextElectionTid()
+    const tid = await peekNextElectionTid(auth.ctx.db)
 
     const sign = makeSignCallback(privateHex, auth.user.id, auth.user.activeKeys[0]!.key)
     const signingNonce = await electionsEngine.seedElectionSigning(electionFields, sign)
@@ -249,8 +249,8 @@ describe('Real-seam: seedElectionSigning → createElection through InsertValid'
     const signingNonce = await electionsEngine.seedElectionSigning(electionFields, sign)
 
     // Step 2: sign the ElectionRevision row.
-    // revTid = peekNextElectionTid() + 1 — Election consumes T, revision consumes T+1.
-    const revTid = peekNextElectionTid() + 1
+    // revTid = (await peekNextElectionTid(db)) + 1 — Election consumes T, revision consumes T+1.
+    const revTid = (await peekNextElectionTid(auth.ctx.db)) + 1
     const revisionSigningNonce = await (electionsEngine as unknown as SeedRevisionSeam).seedElectionRevisionSigning(
       e.id,
       e.authorityId,
@@ -280,5 +280,50 @@ describe('Real-seam: seedElectionSigning → createElection through InsertValid'
     const electionEngine = await electionsEngine.openElection(e.id)
     const details = await electionEngine.getElectionDetails()
     expect(details.current.revision, 'getElectionDetails.current.revision').to.equal(0)
+  })
+
+  it('Test D — IElectionsEngine.peekNextTid() (999.1 D-15 fix) matches the standalone peekNextElectionTid(db) an app-layer caller cannot call directly', async () => {
+    // Regression lock for the D-15 stale-dist bug: app-layer screens (e.g.
+    // CreateElectionScreen.tsx) only ever hold an IElectionsEngine — never the
+    // concrete engine's raw Database handle — so they cannot call the standalone
+    // peekNextElectionTid(db) function directly (that call site used to be a
+    // stale zero-arg call against a pre-999.1 legacy API, masked by an unbuilt
+    // vote-engine dist). peekNextTid() is the interface-level fix: it must
+    // delegate to the SAME pending/peeked value peekNextElectionTid(db) reports,
+    // with no separate allocation.
+    const net = await createTestNetwork({})
+    const auth = await addTestAuthority(net)
+    const electionsEngine = new ElectionsEngine(auth.ctx)
+
+    const { privateHex, publicHex } = randomTestKeyPair()
+    auth.user.activeKeys = [
+      {
+        key: publicHex,
+        type: UserKeyType.mobile,
+        expiration: Date.now() + 86_400_000,
+      },
+    ]
+
+    const init = makeElectionInit({ authorityId: auth.authority.id })
+    const { election: e } = init
+    const electionFields = {
+      id: e.id,
+      authorityId: e.authorityId,
+      title: e.title,
+      date: e.date,
+      revisionDeadline: e.revisionDeadline,
+      ballotDeadline: e.ballotDeadline,
+      type: e.type,
+    }
+    const sign = makeSignCallback(privateHex, auth.user.id, auth.user.activeKeys[0]!.key)
+
+    // seedElectionSigning peeks/reserves the pending 'elections' Tid pair internally.
+    await electionsEngine.seedElectionSigning(electionFields, sign)
+
+    // Both the interface method AND the standalone function must observe the
+    // SAME pending value (idempotent peek — no double allocation).
+    const viaInterface = await electionsEngine.peekNextTid()
+    const viaStandalone = await peekNextElectionTid(auth.ctx.db)
+    expect(viaInterface, 'peekNextTid() vs peekNextElectionTid(db)').to.equal(viaStandalone)
   })
 })

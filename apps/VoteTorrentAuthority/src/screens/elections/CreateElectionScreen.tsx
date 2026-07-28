@@ -16,8 +16,9 @@ import { ElectionRevisionForm, ElectionRevisionFormValue } from "./components/El
 import { useApp } from "../../providers/AppProvider";
 import { ElectionType } from "@votetorrent/vote-core";
 import type { IElectionsEngine, INetworkEngine, ElectionInit } from "@votetorrent/vote-core";
-import { ElectionsCreateElectionBuilder, peekNextElectionTid } from "@votetorrent/vote-engine";
+import { ElectionsCreateElectionBuilder } from "@votetorrent/vote-engine";
 import { createDeviceSigner } from "../../engines/device-signer";
+import { saveLocalKeyholders } from "../../engines/local-keyholders";
 import { mapElectionError } from "./election-error-messages";
 
 // Phase 9 plan 09-12 (ELECUI-03) — Single-scroll New Election form.
@@ -81,7 +82,7 @@ export function CreateElectionScreen() {
 					setAuthorityName(details.network.name);
 				}
 			} catch (error) {
-				console.error("Error loading authority for election:", error);
+				console.warn("Error loading authority for election:", error);
 			}
 		}
 		loadAuthority();
@@ -233,15 +234,7 @@ export function CreateElectionScreen() {
 			// the signer callback closes over the device private key app-side (D-01).
 			// Pass the SAME election fields (id, authorityId, title, date, ...) so the seam's
 			// internal AdminSigning.Digest matches what createElection's Election.InsertValid computes.
-			const signingNonce = await (electionsEngine as unknown as {
-				seedElectionSigning(
-					fields: {
-						id: string; authorityId: string; title: string;
-						date: number; revisionDeadline: number; ballotDeadline: number; type: string;
-					},
-					sign: (digest: Uint8Array) => Promise<{ signerUserId: string; signerKey: string; signature: string }>
-				): Promise<string>;
-			}).seedElectionSigning(
+			const signingNonce = await electionsEngine.seedElectionSigning(
 				{
 					id: electionId,
 					authorityId,
@@ -255,29 +248,18 @@ export function CreateElectionScreen() {
 			);
 
 			// Sign the ElectionRevision row (Revision=0) via the companion seam.
-			// revTid = peekNextElectionTid() + 1 (Election consumes T, revision consumes T+1).
-			// pastRevTs = now - 1000 — must be PAST and identical to what builder.setRevision received.
-			// peekNextElectionTid is imported statically from @votetorrent/vote-engine at top of file.
+			// revTid = (await electionsEngine.peekNextTid()) + 1 (Election consumes T, revision
+			// consumes T+1). pastRevTs = now - 1000 — must be PAST and identical to what
+			// builder.setRevision received.
+			// 999.1 D-15 fix: peekNextTid() is an IElectionsEngine interface method (delegates
+			// to the namespace-allocator-backed peekNextElectionTid(db) internally) — the screen
+			// never holds a raw Database handle, so it cannot call the standalone
+			// peekNextElectionTid(db) function directly.
 			const pastRevTs = now - 1000;
-			const revTid = peekNextElectionTid() + 1;
+			const revTid = (await electionsEngine.peekNextTid()) + 1;
 			// Same object the builder payload signs — must be identical (digest parity).
 			const revisionTimeline = resolvedTimeline;
-			const revisionSigningNonce = await (electionsEngine as unknown as {
-				seedElectionRevisionSigning(
-					electionId: string,
-					authorityId: string,
-					revision: {
-						revision: number;
-						revisionTimestamp: number;
-						tags: string[];
-						instructions: string;
-						timeline: Record<string, number>;
-						keyholderThreshold: number;
-					},
-					tid: number,
-					sign: (digest: Uint8Array) => Promise<{ signerUserId: string; signerKey: string; signature: string }>,
-				): Promise<string>;
-			}).seedElectionRevisionSigning(
+			const revisionSigningNonce = await electionsEngine.seedElectionRevisionSigning(
 				electionId,
 				authorityId,
 				{
@@ -296,8 +278,13 @@ export function CreateElectionScreen() {
 			// ElectionsCreateElectionBuilder.commit() does NOT forward signingNonce (RESEARCH FQ3 option a).
 			const payload = builder.build();
 			await electionsEngine.createElection(payload, { signingNonce, revisionSigningNonce });
+
+			// TEMP scaffold (delete with cadre P2P invite flow): the engine does not
+			// persist keyholder names yet, so stash them locally keyed by election id
+			// so the detail / revise screens can display them. See local-keyholders.ts.
+			await saveLocalKeyholders(electionId, cleanKeyholders);
 		} catch (err) {
-			console.error("createElection error:", err);
+			console.warn("createElection error:", err);
 			setErrorMessage(mapElectionError(err, t));
 			return;
 		}
@@ -399,11 +386,7 @@ export function CreateElectionScreen() {
 			</ScrollView>
 
 			{/* ── PROPOSE footer ───────────────────────────────────────────── */}
-			{errorMessage ? (
-				<ThemedText type="small" style={{ color: colors.error }}>
-					{errorMessage}
-				</ThemedText>
-			) : null}
+			<InlineError message={errorMessage} />
 			<Footer>
 				<CustomButton
 					title={t("propose")}

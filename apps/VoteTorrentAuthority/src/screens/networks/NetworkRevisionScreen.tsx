@@ -18,6 +18,7 @@ import { CustomButton } from "../../components/CustomButton";
 import { Footer } from "../../components/Footer";
 import { CustomTextInput } from "../../components/CustomTextInput";
 import { ThemedText } from "../../components/ThemedText";
+import { InlineError } from "../../components/InlineError";
 import { useApp } from "../../providers/AppProvider";
 import { globalStyles } from "../../theme/styles";
 import type { NavigationProp } from "../../navigation/types";
@@ -61,7 +62,8 @@ export default function NetworkRevisionScreen() {
 				const tsas = details.network.policies.timestampAuthorities;
 				setTsaUrls(tsas.length > 0 ? tsas.map(tsa => tsa.url) : [""]);
 			} catch (error) {
-				console.error("Failed to load network details for revision:", error);
+				console.warn("Failed to load network details for revision:", error);
+				setErrorMessage(error instanceof Error ? error.message : String(error));
 			}
 		};
 		load();
@@ -113,7 +115,7 @@ export default function NetworkRevisionScreen() {
 			});
 			navigation.goBack();
 		} catch (error) {
-			console.error("networkRevision-propose error:", error);
+			console.warn("networkRevision-propose error:", error);
 			setErrorMessage(error instanceof Error ? error.message : String(error));
 		} finally {
 			setProposing(false);
@@ -225,13 +227,9 @@ export default function NetworkRevisionScreen() {
 						onChangeText={setNumberRequiredTSAs}
 					/>
 				</View>
-				{errorMessage ? (
-					<View style={styles.section}>
-						<ThemedText type="small" style={{ color: colors.error }}>
-							{errorMessage}
-						</ThemedText>
-					</View>
-				) : null}
+				<View style={styles.section}>
+					<InlineError message={errorMessage} />
+				</View>
 			</ScrollView>
 
 			<Footer>

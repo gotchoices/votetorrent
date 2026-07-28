@@ -1,1 +1,0 @@
-{"version":3,"file":"i-cluster.d.ts","sourceRoot":"","sources":["../../../src/cluster/i-cluster.ts"],"names":[],"mappings":"AAAA,OAAO,KAAK,EAAE,aAAa,EAAE,MAAM,cAAc,CAAC;AAElD,MAAM,MAAM,QAAQ,GAAG;IACtB,MAAM,CAAC,MAAM,EAAE,aAAa,GAAG,OAAO,CAAC,aAAa,CAAC,CAAC;CACtD,CAAA"}

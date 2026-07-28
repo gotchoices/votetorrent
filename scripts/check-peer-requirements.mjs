@@ -34,13 +34,16 @@
  *
  * Phase 29 (SIGN-05): packages/vote-engine bumped quereus-plugin-crypto to ^0.14.0
  * (resolves to 0.14.1). Other workspace consumers (cadre-core, quereus-plugin-sereus
- * portals) still depend on 0.13.5 transitively. On the reconciled tree (quereus 3.3.0)
- * the full known-allowed @optimystic/quereus-plugin-* surface is ALL THREE:
+ * portals) still depend on 0.13.5 transitively. On the 3.3.0 tree the full surface was:
  *   @optimystic/quereus-plugin-crypto@npm:0.13.5  — portal workspaces (unchanged)
  *   @optimystic/quereus-plugin-crypto@npm:0.14.1  — vote-engine (upgraded)
  *   @optimystic/quereus-plugin-optimystic@npm:0.13.5
  * (the optimystic plugin was previously folded into cadre-core's summary and invisible;
  * the detail drill-down now surfaces it).
+ *
+ * Phase 33 (UPG-03): quereus bumped to 4.2.1 (64e8a4bca7 patch). The optimystic plugin
+ * mismatch DISAPPEARED on the 4.x tree (its peer range is satisfied by the 4.2.1 copy).
+ * KNOWN_ALLOWED updated empirically to reflect the two remaining crypto mismatches.
  *
  * To update the allow-list (e.g. when upstream @optimystic releases a clean version that
  * peers on @quereus/quereus 3.x — D-02 removal trigger):
@@ -66,15 +69,28 @@ const execAsync = promisify(exec);
 // packages/vote-engine from 0.13.5 → ^0.14.0 (resolves to 0.14.1 on npm).
 // Other workspace consumers (@serfab/cadre-core, @serfab/quereus-plugin-sereus
 // portals) still depend on 0.13.5 transitively and produce their own ✘ lines.
-// The reconciled tree therefore has BOTH 0.13.5 and 0.14.1 as expected mismatches:
+//
+// Phase 33 (UPG-03): quereus bumped from 3.3.0 → 4.2.1 (64e8a4bca7 patch).
+// After the 4.x bump, @optimystic/quereus-plugin-optimystic@npm:0.13.5
+// DISAPPEARED from the observed mismatch set (its peer range is now satisfied
+// by the resolved 4.2.1 copy). Only the two crypto mismatches remained:
 //   @optimystic/quereus-plugin-crypto@npm:0.13.5  — cadre-core / quereus-plugin-sereus portals
 //   @optimystic/quereus-plugin-crypto@npm:0.14.1  — vote-engine (upgraded)
-//   @optimystic/quereus-plugin-optimystic@npm:0.13.5  — VoteTorrentAuthority
+//
+// Phase 36 (CID-01, D-01): the two vendored @serfab/* portals
+// (cadre-core, quereus-plugin-sereus) had their @optimystic/quereus-plugin-crypto
+// range widened from ^0.13.5 → ^0.14.0, so ALL consumers now resolve the single
+// 0.14.1 copy. The @npm:0.13.5 crypto mismatch DISAPPEARED entirely (confirmed:
+// `grep -c '@optimystic/quereus-plugin-crypto@npm:0.13' yarn.lock` == 0,
+// `yarn why` shows one resolved 0.14.1 copy across all consumer paths). The
+// dual-copy exception is retired; only the single crypto mismatch remains:
+//   @optimystic/quereus-plugin-crypto@npm:0.14.1  — all consumers (the pre-existing
+//     ^0.16.2 peer wart against crypto-plugin's OWN internal quereus-version scheme,
+//     unrelated to @quereus/quereus 4.2.1 — see .yarnrc.yml)
+// (Observed empirically via `yarn explain peer-requirements` after the 0.14 repin.)
 // ---------------------------------------------------------------------------
 const KNOWN_ALLOWED = new Set([
-  '@optimystic/quereus-plugin-crypto@npm:0.13.5',
   '@optimystic/quereus-plugin-crypto@npm:0.14.1',
-  '@optimystic/quereus-plugin-optimystic@npm:0.13.5',
 ]);
 
 // The ✘ marker (U+2718)

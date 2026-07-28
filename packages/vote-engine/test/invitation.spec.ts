@@ -46,10 +46,10 @@ describe('InvitationEngine', () => {
     //
     // The authorityEngine exposes createAuthorityInvite + saveInviteWithSigning to
     // insert InviteSlot only — omitting respondToInvite keeps it pending.
-    const { makeTestSignature } = await import('./fixtures/test-context.js')
+    const { makeTestSignCallback } = await import('./fixtures/test-context.js')
     const inviteShare = auth.authorityEngine.createAuthorityInvite('Test Authority')
-    const sig = makeTestSignature(auth.user)
-    await auth.authorityEngine.saveInviteWithSigning(inviteShare, 'iad' as any, sig)
+    const signCallback = makeTestSignCallback(auth.user)
+    await auth.authorityEngine.saveInviteWithSigning(inviteShare, 'iad' as any, signCallback)
 
     const engine = new InvitationEngine(auth.ctx)
     const invites: Array<InviteStatus<SentAuthorityInvite>> = await engine.getPendingAuthorityInvites()
@@ -176,9 +176,9 @@ describe('InvitationEngine', () => {
       `insert into InviteSlot (
           Cid, Type, Name, Expiration, InviteKey, InviteSignature, SigningNonce
         )
-        with context Tid = :tid, now = :now, IsSignatureValid = true, IsInsertValid = true, IsCidValid = true
+        with context Tid = :tid, now = :now, IsSignatureValid = true, IsInsertValid = true
         values (
-          Digest(:expiration, :inviteKey, :inviteSignature, :name, :nonce, :type),
+          cid(Digest(:expiration, :inviteKey, :inviteSignature, :name, :nonce, :type)),
           :type, :name, :expiration, :inviteKey, :inviteSignature, :nonce
         )`,
       {
@@ -201,12 +201,18 @@ describe('InvitationEngine', () => {
     const slotCid = slotRow!.Cid as string
 
     // Satisfy InviteSlotSigningValid — AdminSigning over this nonce (PATH B).
-    const { makeTestSignature } = await import('./fixtures/test-context.js')
+    // 999.1 R-02: startSigningSession takes a completed Signature (no callback form),
+    // so compute the real Digest(Cid) first (the same subquery PATH B embeds) and sign
+    // it for real — SignatureValid now verifies these bytes.
+    const { signTestDigest } = await import('./fixtures/test-context.js')
+    const slotDigestRow = await auth.ctx.db
+      .prepare('select Digest(Cid) as d from InviteSlot where SigningNonce = :nonce')
+      .get({ nonce })
     await signing.startSigningSession(
       auth.authority.id,
       null,
       'rad' as any,
-      makeTestSignature(auth.user),
+      signTestDigest(auth.user, slotDigestRow!.d as string),
       nonce
     )
 
@@ -260,7 +266,7 @@ describe('InvitationEngine', () => {
     // Insert the expired InviteSlot. The ExpirationValid CHECK gates on `context.now`
     // vs Expiration. We bind now to a date BEFORE the expiration so the INSERT passes.
     const seedNow = new Date(Date.now() - 2 * 86_400_000).toISOString()
-    const { makeTestSignature } = await import('./fixtures/test-context.js')
+    const { signTestDigest } = await import('./fixtures/test-context.js')
     const share = auth.authorityEngine.createOfficerInvite({
       name: 'Expired Officer',
       title: 'Member',
@@ -271,9 +277,9 @@ describe('InvitationEngine', () => {
       `insert into InviteSlot (
           Cid, Type, Name, Expiration, InviteKey, InviteSignature, SigningNonce
         )
-        with context Tid = :tid, now = :now, IsSignatureValid = true, IsInsertValid = true, IsCidValid = true
+        with context Tid = :tid, now = :now, IsSignatureValid = true, IsInsertValid = true
         values (
-          Digest(:expiration, :inviteKey, :inviteSignature, :name, :nonce, :type),
+          cid(Digest(:expiration, :inviteKey, :inviteSignature, :name, :nonce, :type)),
           :type, :name, :expiration, :inviteKey, :inviteSignature, :nonce
         )`,
       {
@@ -296,11 +302,15 @@ describe('InvitationEngine', () => {
     const expiredCid = slotRow!.Cid as string
 
     // Satisfy InviteSlotSigningValid so the row is otherwise valid.
+    // 999.1 R-02: real digest-then-sign (see the decline-path test above for rationale).
+    const slotDigestRow = await auth.ctx.db
+      .prepare('select Digest(Cid) as d from InviteSlot where SigningNonce = :nonce')
+      .get({ nonce })
     await signing.startSigningSession(
       auth.authority.id,
       null,
       'rad' as any,
-      makeTestSignature(auth.user),
+      signTestDigest(auth.user, slotDigestRow!.d as string),
       nonce
     )
 

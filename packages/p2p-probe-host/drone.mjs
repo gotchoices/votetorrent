@@ -50,22 +50,51 @@ const VOTETORRENT_QSQL = VOTETORRENT_QSQL_RAW
   .replace(/\}\s*apply\s+schema\s+\w+\s*;\s*$/, '')
   .trim();
 
+// 38-05 (D-04 n=4 topology): cross-bootstrap parameterization so a SECOND drone
+// process (drone-B) can bootstrap into drone-A's control network AND strand cohort,
+// exactly as 38-02's two-drone-smoke.mjs proved (drone-B's controlNetwork.bootstrapNodes
+// + network.strandBootstrapNodes pointed at drone-A's addrs). drone-A itself launches
+// with these unset (empty defaults) — it remains the first bootstrap peer. Follows the
+// existing `process.env.X ?? default` pattern used by STRAND_ID below.
+const DRONE_BOOTSTRAP_CONTROL_ADDR = process.env.DRONE_BOOTSTRAP_CONTROL_ADDR ?? '';
+const DRONE_BOOTSTRAP_STRAND_ADDR = process.env.DRONE_BOOTSTRAP_STRAND_ADDR ?? '';
+
 const node = new CadreNode({
-  controlNetwork: { partyId: PARTY_ID, bootstrapNodes: [] },
+  controlNetwork: {
+    partyId: PARTY_ID,
+    bootstrapNodes: DRONE_BOOTSTRAP_CONTROL_ADDR ? [DRONE_BOOTSTRAP_CONTROL_ADDR] : [],
+  },
   profile: 'storage',
+  // Published @serfab/cadre-core@0.8.1 enforces a fail-closed sApp-schema signature
+  // policy (requireSignedSchemas defaults true): the unsigned org.votetorrent demo
+  // schema this drone hosts is rejected at strand bring-up with
+  // SchemaVerificationError('missing signature'). Relax the policy for this dev-harness
+  // drone — the documented dev/test relaxation, at parity with the app's proof runners
+  // (replication-proof-runner.ts / strand-persistence-proof-runner.ts).
+  requireSignedSchemas: false,
   strandFilter: { mode: 'all' },
-  storage: { provider: () => new MemoryRawStorage() },
   network: {
     transports: [webSockets()],
     listenAddrs: ['/ip4/0.0.0.0/tcp/0/ws'], // ephemeral — avoids EADDRINUSE
-    // WR-19 (17-REVIEW): `enableRelay: true` removed — cadre-core's libp2p
-    // options builder forwards only privateKey/transports/listenAddrs/
-    // connectionGater from this network config (see the yarn patch hunk in
-    // .yarn/patches/@serfab-cadre-core-npm-0.7.1-518fb48136.patch), so the
-    // flag was a silent no-op: no relay service was ever started. The direct
-    // WS dial proof (P2P-01) needs no relay. Phase 22 relay work must extend
-    // the yarn patch to forward a relay option (and re-add it here) instead
-    // of relying on this config key.
+    // The storage profile turns the circuit-relay-v2 relay server ON
+    // (createControlNode/startStrand derive `relay: profile === 'storage'` in
+    // the consumed vendored cadre-core, wiring circuitRelayServer() at
+    // libp2p-node-base.js). The prior WR-19 note — that the options builder
+    // forwarded only privateKey/transports/listenAddrs/connectionGater so an
+    // `enableRelay` key was a silent no-op — is now stale: the builder forwards
+    // `relayServerInit` too (T-38-12-01 transplant). Supply BOUNDED reservation
+    // limits so the relay does not run on the unlimited @libp2p/circuit-relay-v2
+    // defaults (dev-harness infra only, not shipped).
+    relayServerInit: {
+      reservations: {
+        maxReservations: 32, // n=4 mesh + headroom (circuit-relay-v2 default is 15)
+        defaultDurationLimit: 2 * 60 * 1000, // 2 min per reservation
+        defaultDataLimit: BigInt(1 << 17), // 128 KiB per reservation
+      },
+      maxInboundHopStreams: 64,
+      maxOutboundStopStreams: 64,
+    },
+    ...(DRONE_BOOTSTRAP_STRAND_ADDR && { strandBootstrapNodes: [DRONE_BOOTSTRAP_STRAND_ADDR] }),
   },
   hibernation: { enabled: false },
 });
@@ -101,6 +130,17 @@ await node.addStrand({
   mode: 'bootstrap',
 });
 L(`[replication-proof] strand started, strandId=${STRAND_ID}`);
+// Advertise the drone's strand-node listen multiaddr so the harness can inject it
+// into the runner's STRAND_BOOTSTRAP_ADDR and peers can dial the strand cohort.
+// Mirrors the PROOF_WS_ADDR= control-node advertisement above (D-07 pattern, REPL-01).
+const strand = node.getStrand(STRAND_ID);
+const strandAddrs = strand?.libp2pNode?.getMultiaddrs?.().map(m => m.toString()) ?? [];
+const strandWs = strandAddrs.find(a => a.includes('/ip4/127.0.0.1/') && a.includes('/ws')) ?? strandAddrs[0] ?? '';
+if (!strandWs) {
+  L('PROOF_STRAND_ADDR_MISSING — strand node has no listen multiaddr');
+} else {
+  L('PROOF_STRAND_ADDR=' + strandWs);
+}
 
 // IN-15 (17-REVIEW): handle SIGTERM (plain `kill <pid>`) as well as SIGINT
 // (Ctrl-C) so both stop paths shut the node down gracefully.

@@ -19,25 +19,16 @@ const { getDefaultConfig, mergeConfig } = require("@react-native/metro-config");
 
 const projectRoot = __dirname;
 const workspaceRoot = path.resolve(projectRoot, "../..");
-// The portal: deps are now VENDORED in-repo at votetorrent/vendor/ (spike 014 option C) —
-// no longer sibling source above the workspace. vendor/ lives under workspaceRoot, which Metro
-// already watches, so no super-root watch is needed for portal resolution. superRoot is retained
-// only as a harmless watch root for any remaining out-of-tree dev scenarios.
+// 40-03 (T-40-07 cleanup): the portal:./vendor/ consumption model (spike 014 option C) was
+// retired in 40-02 — the 6 @serfab/@optimystic packages are now consumed PUBLISHED from
+// node_modules, and vendor/ was rm -rf'd. The old `portalSourceModules` extraNodeModules alias
+// (removed here) pointed at vendor/@serfab/... and vendor/@optimystic/... dirs that no longer
+// exist; a stale Metro cache reset alone would NOT have cleared this static alias, so it is
+// deleted rather than left as dead config — the real guarantee that no vendor/ path can ever
+// resolve again (T-40-07). superRoot is retained only as a harmless watch root for any
+// remaining out-of-tree dev scenarios.
 const superRoot = path.resolve(projectRoot, "../../..");
-const vendorRoot = path.resolve(workspaceRoot, "vendor");
 const emptyShim = path.resolve(projectRoot, "polyfills/empty.js");
-
-// Canonical package name → in-repo vendored dir (portal targets).
-// @optimystic/quereus-plugin-optimystic is PUBLISHED (patched) — it resolves from node_modules,
-// so it is intentionally NOT aliased here (keeps the build free of any sibling-source path).
-const portalSourceModules = {
-	"@serfab/cadre-core": path.resolve(vendorRoot, "@serfab/cadre-core"),
-	"@serfab/quereus-plugin-sereus": path.resolve(vendorRoot, "@serfab/quereus-plugin-sereus"),
-	"@serfab/strand-proto": path.resolve(vendorRoot, "@serfab/strand-proto"),
-	"@optimystic/db-core": path.resolve(vendorRoot, "@optimystic/db-core"),
-	"@optimystic/db-p2p": path.resolve(vendorRoot, "@optimystic/db-p2p"),
-	"@optimystic/db-p2p-storage-rn": path.resolve(vendorRoot, "@optimystic/db-p2p-storage-rn"),
-};
 
 // --- browser-field maps (load each package's `browser` field and redirect Node file
 //     paths to their .browser.js variants). Metro ignores object-form browser fields when
@@ -121,7 +112,6 @@ const config = {
 		unstable_enablePackageExports: true, // already on in VoteTorrent's config; required for cadre-core's exports map
 
 		extraNodeModules: {
-			...portalSourceModules,
 			// Node builtins libp2p / optimystic / quereus pull transitively:
 			"node:os": path.resolve(projectRoot, "polyfills/node-os.js"),
 			"node:stream": require.resolve("readable-stream"),
@@ -129,6 +119,19 @@ const config = {
 			"node:crypto": path.resolve(projectRoot, "polyfills/node-crypto.js"),
 			"node:net": emptyShim,
 			"node:tls": emptyShim,
+			// 40-03 (T-40-09 bundle build blocker): published @serfab/cadre-core@0.8.1 added a
+			// server-only push-notification seam (push-notifier.js) that cadre-node.js reaches
+			// via a dynamic `await import('./push-notifier.js')` inside a function that only
+			// runs when FCM/APNs credentials are configured (never true for this RN client).
+			// Metro still needs to statically RESOLVE every module reachable via `import()` to
+			// bundle it into RN's single monolithic output (dynamic import is not code-split on
+			// RN), so its transitive `node:http2` import (push-notifier-apns.js) must resolve to
+			// SOMETHING at bundle time even though the code path never executes on-device. Empty
+			// stub mirrors the existing net/tls precedent for Node builtins that are imported but
+			// never actually called from an RN code path. Package did not carry this import prior
+			// to the 0.8.0->0.8.1 bump (confirmed absent from the pre-de-vendor vendored copy).
+			"node:http2": emptyShim,
+			http2: emptyShim,
 			os: path.resolve(projectRoot, "polyfills/node-os.js"),
 			stream: require.resolve("readable-stream"),
 			buffer: require.resolve("buffer"),
@@ -170,6 +173,33 @@ merged.resolver.resolveRequest = (context, moduleName, platform) => {
 		return { type: "sourceFile", filePath: libp2pCryptoBrowserMap[resolved.filePath] };
 	}
 	return resolved;
+};
+
+// 40-03 (PUB-03 on-device boot blocker): Metro's `inlineRequires` transform defers evaluation
+// of side-effect-free, `const`-only ESM modules until their first property read. Published
+// @serfab/cadre-core@0.8.1's `control-schema.js` is exactly this shape — a single
+// `export const CONTROL_SCHEMA = \`...\`` with NO imports — so under Hermes (dev bundle, lazy=true)
+// its module body was never evaluated before `ControlDatabase.loadSchema()` read `CONTROL_SCHEMA`,
+// yielding `undefined` and crashing quereus 4.3.1's lexer (`isAtEnd` → `.length` of undefined),
+// blocking EVERY CadreNode boot on-device. This did NOT reproduce on Node (40-02 RELAY SMOKE: PASS)
+// because Node evaluates the static ESM import eagerly. Forcing `inlineRequires: false` makes the
+// top-of-module require eager so the schema module evaluates before loadSchema runs. Diagnosed by
+// on-device instrumentation: an explicit `require('./control-schema.js')` at the use site made the
+// module evaluate and CONTROL_SCHEMA resolve to its 12617-char string. We WRAP the default
+// getTransformOptions (rather than replacing it) so experimentalImportSupport and every other
+// RN 0.78 default is preserved — only inlineRequires is flipped.
+const upstreamGetTransformOptions = merged.transformer.getTransformOptions;
+merged.transformer.getTransformOptions = async (entryPoints, options, getDependenciesOf) => {
+	const base = upstreamGetTransformOptions
+		? await upstreamGetTransformOptions(entryPoints, options, getDependenciesOf)
+		: {};
+	return {
+		...base,
+		transform: {
+			...(base.transform || {}),
+			inlineRequires: false,
+		},
+	};
 };
 
 module.exports = merged;

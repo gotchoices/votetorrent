@@ -1,4 +1,4 @@
-import React, { useLayoutEffect } from "react";
+import React, { useLayoutEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ScrollView, StyleSheet, TouchableOpacity, View } from "react-native";
 import FontAwesome6 from "react-native-vector-icons/FontAwesome6";
@@ -7,6 +7,7 @@ import type { Authority, INetworkEngine, Officer } from "@votetorrent/vote-core"
 import { scopeDescriptions } from "@votetorrent/vote-core";
 import { ThemedText } from "../../components/ThemedText";
 import { InfoCard } from "../../components/InfoCard";
+import { InlineError } from "../../components/InlineError";
 import { useApp } from "../../providers/AppProvider";
 import type { NavigationProp } from "../../navigation/types";
 import { globalStyles } from "../../theme/styles";
@@ -24,9 +25,12 @@ export default function OfficerDetailsScreen() {
 		authority: Authority;
 	};
 
+	const [errorMessage, setErrorMessage] = useState("");
+
 	// User/SID card → the user's profile (Figma frames: User detail). Resolve the
 	// user + its engine from the network engine, then hand both to UserDetails.
 	const handleOpenUser = async () => {
+		setErrorMessage("");
 		try {
 			const networkEngine = await getEngine<INetworkEngine>("network");
 			const userEngine = await networkEngine?.getUser(officer.userId);
@@ -35,7 +39,8 @@ export default function OfficerDetailsScreen() {
 				navigation.navigate("UserDetails", { user, userEngine });
 			}
 		} catch (error) {
-			console.error("Error opening user from officer detail:", error);
+			console.warn("Error opening user from officer detail:", error);
+			setErrorMessage(error instanceof Error ? error.message : String(error));
 		}
 	};
 
@@ -85,6 +90,7 @@ export default function OfficerDetailsScreen() {
 					icon="chevron-right"
 					onPress={handleOpenUser}
 				/>
+				<InlineError message={errorMessage} />
 			</View>
 
 			{/* Invitation section */}

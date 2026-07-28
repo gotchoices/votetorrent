@@ -1,6 +1,7 @@
 import { MisuseError, QuereusError } from '@quereus/quereus'
 import { FeatureNotAvailableError, UserHistoryEvent } from '@votetorrent/vote-core'
 import { digestToBytes, fromCanonicalDatetime, nowCanonicalDatetime, parseJsonOr, toCanonicalDatetime } from '../utils.js'
+import { allocateTid } from '../database/tid-allocator.js'
 import type { EngineContext } from '../types.js'
 import type {
   CreateUserHistory,
@@ -27,11 +28,11 @@ import {
   UserRevokeKeyBuilder
 } from './builders/index.js'
 
-// Phase 04 USER-02/04/05/06: monotonic Tid counter for UserEngine batches.
-// Local to this module — mirrors NetworksEngine's pattern. Re-evaluate at
-// the v2 persistence milestone (PERSIST-01) — a process-local counter can
-// collide with stored Tids once DBs persist across runs.
-let nextTid = 1
+// 999.1 D-01: UserEngine mutations allocate Tids through the shared durable,
+// peer-safe allocator (`../database/tid-allocator.js`, namespace 'user')
+// instead of the retired `let nextTid = 1` process-local counter — this was
+// the sharpest replay edge in the phase's threat register (a `=1`-seeded
+// counter restarting at 1 every process, per T-999.1-09).
 
 /**
  * UserEngine — Phase 04 (USER-01..USER-08) implementation.
@@ -59,22 +60,33 @@ export class UserEngine implements IUserEngine {
    * `context.Signature`.
    *
    * Dispatches on CALLBACK PRESENCE (not key count):
-   * - No `sign` callback → unchanged behavior (existing first-key/no-callback
-   *   path). Binds `context.UserKey = existing active pubkey`, `Signature = null`,
-   *   `IsSignatureValid = true`. The existing test stays green.
+   * - No `sign` callback → bootstrap path (genuinely-first-key only — 999.1
+   *   R-02/D-11). Binds `context.UserKey = existing active pubkey` (null for a
+   *   real first key), `Signature = null`. `UserKey.SignatureValid`'s bootstrap
+   *   OR-branch only passes when this is ALSO the user's first key
+   *   (`count(*) = 1 and context.UserKey is null`) — a no-callback call on a
+   *   user who already has an active key is DB-rejected (no fabricated
+   *   signature is ever asserted for it).
    * - `sign` callback provided → signed subsequent-key path (UKEY-03 / D-14).
    *   The engine computes a SQL `Digest(userId, newPubKey, keyType, expirationCanon)`,
    *   converts to bytes via the shared `digestToBytes`, calls the callback with
    *   those bytes, then binds `context.UserKey = existing active pubkey` (NOT the
-   *   new key — RESEARCH §Pitfall 5), `context.Signature = real signature`, and
-   *   `IsSignatureValid = true` so `UserKey.InsertValid`'s subsequent branch passes.
+   *   new key — RESEARCH §Pitfall 5) and `context.Signature = real signature` so
+   *   `UserKey.SignatureValid`'s real branch (999.1 R-02/D-11) verifies it via the
+   *   shared `SignatureValid` UDF.
+   *
+   * 999.1 R-04: `context.IsSignatureValid` is bound to the actual bootstrap/signed
+   * dispatch (`sign === undefined`) rather than a hardcoded `true` — the schema CHECK
+   * no longer consumes this field for UserKey (kept declared only for other raw-SQL
+   * seeders' backward-compatible binding), so no producer accepting a real signature
+   * asserts a fabricated always-true boolean.
    *
    * The device private key NEVER enters this engine (D-01/D-04): `addKey` receives
    * a sign callback, not `privKeyHex`. The new key cannot authorize its own insertion.
    */
   async addKey (key: UserKey, sign?: (digest: Uint8Array) => Promise<Signature>): Promise<void> {
     this.requireCtx('addKey')
-    const tid = nextTid++
+    const tid = await allocateTid(this.ctx!.db, 'user')
     // EXISTING active pubkey — bound to context.UserKey in BOTH paths.
     // Per RESEARCH §Pitfall 5: this MUST be the EXISTING key, never key.key.
     const signerKey = this.user.activeKeys?.[0]?.key ?? null
@@ -127,13 +139,14 @@ export class UserEngine implements IUserEngine {
 					PubKey,
 					Expiration
 				)
-				with context UserKey = :userKey, Signature = :signature, Tid = ${tid}, now = :now, IsSignatureValid = true
+				with context UserKey = :userKey, Signature = :signature, Tid = ${tid}, now = :now, IsSignatureValid = :isSignatureValid
 				values (:userId, :keyType, :keyValue, :expiration);
 
-				insert into UserEvent (UserId, Sequence, Event, Timestamp, Signature, Payload)
-				with context Tid = ${tid}, now = :now
+				insert into UserEvent (UserId, Tid, Sequence, Event, Timestamp, Signature, Payload)
+				with context CtxTid = ${tid}, now = :now
 				values (
 					:userId,
+					${tid},
 					coalesce((select max(Sequence) from UserEvent where UserId = :userId), -1) + 1,
 					'AK',
 					:now,
@@ -149,9 +162,11 @@ export class UserEngine implements IUserEngine {
           // When sign is absent: signerKey may be null (first-key path).
           // When sign is present: signerKey is the existing authorized signer (guard above).
           userKey: signerKey,
-          // Without sign callback: null (no-callback unchanged path, first-key short-circuit).
+          // Without sign callback: null (no-callback bootstrap path).
           // With sign callback: real secp256k1 hex signature from the existing active key.
           signature: boundSignature,
+          // 999.1 R-04: honest per-branch value, not a hardcoded true (see doc comment above).
+          isSignatureValid: sign === undefined,
           now: nowCanonicalDatetime(),
           // D-14/D-15/D-16: append-only AddUserKeyHistory event in the same batch (same Tid).
           // Payload carries the UserKey with raw epoch-ms expiration (Pitfall 5).
@@ -187,7 +202,7 @@ export class UserEngine implements IUserEngine {
     options?: { inviteSlotCid?: string; inviteSignature?: string }
   ): Promise<void> {
     this.requireCtx('create')
-    const tid = nextTid++
+    const tid = await allocateTid(this.ctx!.db, 'user')
     const imageRefJson = userInit.imageRef ? JSON.stringify(userInit.imageRef) : null
     try {
       await this.ctx!.db.exec(
@@ -209,10 +224,11 @@ export class UserEngine implements IUserEngine {
 				with context UserKey = null, Signature = null, Tid = ${tid}, now = :now, IsSignatureValid = true
 				values (:userId, :keyType, :keyValue, :expiration);
 
-				insert into UserEvent (UserId, Sequence, Event, Timestamp, Signature, Payload)
-				with context Tid = ${tid}, now = :now
+				insert into UserEvent (UserId, Tid, Sequence, Event, Timestamp, Signature, Payload)
+				with context CtxTid = ${tid}, now = :now
 				values (
 					:userId,
+					${tid},
 					coalesce((select max(Sequence) from UserEvent where UserId = :userId), -1) + 1,
 					'C',
 					:now,
@@ -403,7 +419,7 @@ export class UserEngine implements IUserEngine {
     if (userRevise.event !== UserHistoryEvent.revise) {
       throw new Error('revise: ReviseUserHistory.event must be "revise"')
     }
-    const tid = nextTid++
+    const tid = await allocateTid(this.ctx!.db, 'user')
     const signerKey = userRevise.signature?.signerKey ?? null
     const signature = userRevise.signature?.signature ?? null
     const imageRefJson = userRevise.info.imageRef
@@ -416,10 +432,11 @@ export class UserEngine implements IUserEngine {
 					set Name = :name, ImageRef = :imageRef
 				where Id = :userId;
 
-				insert into UserEvent (UserId, Sequence, Event, Timestamp, Signature, Payload)
-				with context Tid = ${tid}, now = :now
+				insert into UserEvent (UserId, Tid, Sequence, Event, Timestamp, Signature, Payload)
+				with context CtxTid = ${tid}, now = :now
 				values (
 					:userId,
+					${tid},
 					coalesce((select max(Sequence) from UserEvent where UserId = :userId), -1) + 1,
 					'R',
 					:now,
@@ -464,7 +481,7 @@ export class UserEngine implements IUserEngine {
    */
   async revokeKey (keyToRevoke: string, signature: Signature): Promise<void> {
     this.requireCtx('revokeKey')
-    const tid = nextTid++
+    const tid = await allocateTid(this.ctx!.db, 'user')
     // context.UserKey = the public key that produced the revoke signature (signature.signerKey),
     // so verify(signature, digest, context.UserKey) succeeds once UserKey.SignatureValid is
     // activated (SC#7 / UKEY-02). Fall back to the subject's first active key only when
@@ -476,10 +493,11 @@ export class UserEngine implements IUserEngine {
 				with context UserKey = :userKey, Signature = :signature, Tid = ${tid}, now = :now, IsSignatureValid = true
 				where UserId = :userId and PubKey = :pubKey;
 
-				insert into UserEvent (UserId, Sequence, Event, Timestamp, Signature, Payload)
-				with context Tid = ${tid}, now = :now
+				insert into UserEvent (UserId, Tid, Sequence, Event, Timestamp, Signature, Payload)
+				with context CtxTid = ${tid}, now = :now
 				values (
 					:userId,
+					${tid},
 					coalesce((select max(Sequence) from UserEvent where UserId = :userId), -1) + 1,
 					'RK',
 					:now,

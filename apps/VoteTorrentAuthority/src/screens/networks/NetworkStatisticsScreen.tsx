@@ -13,6 +13,7 @@ import { useApp } from "../../providers/AppProvider";
 import { globalStyles } from "../../theme/styles";
 import type { NavigationProp } from "../../navigation/types";
 import type { INetworkEngine } from "@votetorrent/vote-core";
+import { InlineError } from "../../components/InlineError";
 
 /**
  * NetworkStatisticsScreen (Phase 8 plan 08-06, NETUI-05, D-15).
@@ -32,6 +33,7 @@ export default function NetworkStatisticsScreen() {
 		estimatedNodes: number;
 		serverCount: number;
 	} | null>(null);
+	const [loadError, setLoadError] = useState("");
 
 	useLayoutEffect(() => {
 		navigation.setOptions({ title: t("statistics") });
@@ -39,12 +41,14 @@ export default function NetworkStatisticsScreen() {
 
 	useEffect(() => {
 		const load = async () => {
+			setLoadError("");
 			try {
 				const engine = await getEngine<INetworkEngine>("network");
 				const s = await engine.getStatistics();
 				setStats(s);
 			} catch (error) {
-				console.error("Failed to load network statistics:", error);
+				console.warn("Failed to load network statistics:", error);
+				setLoadError(error instanceof Error ? error.message : String(error));
 			}
 		};
 		load();
@@ -53,6 +57,7 @@ export default function NetworkStatisticsScreen() {
 	return (
 		<View style={styles.content}>
 			<ScrollView style={styles.container}>
+				<InlineError message={loadError} />
 				<View style={styles.section}>
 					<ThemedText type="title" style={styles.sectionTitle}>
 						{t("statistics")}
@@ -81,10 +86,7 @@ export default function NetworkStatisticsScreen() {
 						title={t("addServers")}
 						icon="circle-plus"
 						backgroundColor={colors.accent}
-						onPress={() => {
-							console.log("addServers stub");
-							navigation.goBack();
-						}}
+						disabled={true}
 					/>
 				</View>
 			</ScrollView>

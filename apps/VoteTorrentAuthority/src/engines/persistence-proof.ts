@@ -28,14 +28,15 @@
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { Database } from '@quereus/quereus';
-import type { NetworkReference, User, NetworkInit, Scope } from '@votetorrent/vote-core';
+import type { NetworkReference, User, NetworkInit, Scope, Ballot } from '@votetorrent/vote-core';
 import { ElectionType } from '@votetorrent/vote-core';
 // @votetorrent/vote-engine/rn is the single sanctioned import path for real engine
 // classes in the RN app layer (D-04). Metro resolves it via the `./rn` subpath in
 // package.json exports + unstable_enablePackageExports: true in metro.config.js.
-import { NetworksEngine, ElectionsEngine, peekNextElectionTid, H16, LocalStorageReact, DIGEST_VECTORS } from '@votetorrent/vote-engine/rn';
+import { NetworksEngine, ElectionsEngine, ElectionEngine, peekNextElectionTid, H16, LocalStorageReact, DIGEST_VECTORS } from '@votetorrent/vote-engine/rn';
 import type { DbFactory } from '@votetorrent/vote-engine/rn';
-import { rnDbFactory } from './rn-db-factory';
+import { rnDbFactory, createStrandDbFactory } from './rn-db-factory';
+import type { StrandHost } from './rn-db-factory';
 import { getOrCreateDeviceUser, getDevicePrivKeyHex } from './device-user';
 import { createDeviceSigner } from './device-signer';
 
@@ -56,6 +57,19 @@ export const PROOF_CHAIN_REF_KEY = 'proof:fullChainRef';
 // discriminant — re-running networksEngine.create() would fail repeatedly.
 // The runner detects this and tells the operator to `pm clear` instead.
 export const PROOF_WRITE_ATTEMPTED_KEY = 'proof:writeAttempted';
+
+// MBY-260626 ballot regression check: WRITE phase records the proposed ballot's
+// id + its same-process round-trip result here so the READ phase (post
+// force-stop) can re-read the SAME ballot from the re-attached store and fold a
+// durable cross-restart questions-persisted check into the FULL-CHAIN VERDICT.
+export const PROOF_BALLOT_REF_KEY = 'proof:ballotRef';
+
+// Phase 999.1 D-15: WRITE phase records the persisted 'elections' namespace
+// TidHighWater observed right after the full-chain write's createElection() call.
+// The device-attended TID-REISSUE recheck (post force-stop + backward clock jump)
+// reads this baseline back and asserts the NEXT allocation strictly exceeds it —
+// the real Hermes/LevelDB clock-skew no-reissue proof.
+export const PROOF_TID_REISSUE_BASELINE_KEY = 'proof:tidReissueBaseline';
 
 // ---------------------------------------------------------------------------
 // Minimal LocalStorage wrapper (delegates to AsyncStorage)
@@ -134,7 +148,7 @@ export async function runFullChainWritePhase(
   networksEngine: NetworksEngine,
   user: User,
 ): Promise<{ networkRef: NetworkReference; authorityId: string; electionId: string; db: Database }> {
-  console.log('[proof] full-chain write phase: starting');
+  console.info('[proof] full-chain write phase: starting');
 
   // WR-14 (17-REVIEW): persist the attempt marker BEFORE any store mutation so a
   // partial failure (anything between step 1 and step 6 throwing) is detectable
@@ -143,7 +157,7 @@ export async function runFullChainWritePhase(
 
   // Step 1: create the network — Network + primary Authority + Admin/Officer/User/UserKey rows.
   const networkEngine = await networksEngine.create(PROOF_NETWORK_INIT, user);
-  console.log('[proof] full-chain write: network created');
+  console.info('[proof] full-chain write: network created');
 
   // Retrieve the NetworkReference from AsyncStorage (set by create() via recentNetworks).
   const recents: NetworkReference[] = JSON.parse(
@@ -158,7 +172,7 @@ export async function runFullChainWritePhase(
   // NetworksEngine.create() already created the primary authority via PROOF_NETWORK_INIT).
   const details = await networkEngine.getDetails();
   const authorityId: string = details.network.primaryAuthorityId;
-  console.log(`[proof] full-chain write: authorityId=${authorityId}`);
+  console.info(`[proof] full-chain write: authorityId=${authorityId}`);
 
   // Step 3: get the same EngineContext that create() used (single store handle — Pitfall 5).
   // Never call rnDbFactory() a second time here; getEstablishedContext returns the cached handle.
@@ -208,7 +222,7 @@ export async function runFullChainWritePhase(
       sign: (digest: Uint8Array) => Promise<import('@votetorrent/vote-core').Signature>,
     ): Promise<string>;
   }).seedElectionSigning(electionFields, sign);
-  console.log('[proof] full-chain write: election signing seam complete, nonce=' + signingNonce);
+  console.info('[proof] full-chain write: election signing seam complete, nonce=' + signingNonce);
 
   // Step 4b: sign the initial ElectionRevision (Revision=0).
   // revTid = election tid + 1 (createElection consumes T for Election, T+1 for revision).
@@ -232,9 +246,12 @@ export async function runFullChainWritePhase(
     },
     keyholderThreshold: 0,
   };
-  // peekNextElectionTid() still points to T (election tid) — +1 gives the revision tid.
+  // peekNextElectionTid(db) still points to T (election tid) — +1 gives the revision tid.
   // (peekNextElectionTid is imported statically from @votetorrent/vote-engine/rn above.)
-  const revTid = peekNextElectionTid() + 1;
+  // 999.1 D-01/D-02: peekNextElectionTid is now namespace-allocator-backed — async and
+  // scoped to a caller-supplied `db` handle (no more module-level zero-arg counter). Use
+  // ctx.db (the SAME handle the engine's create() used — Pitfall 5, never a second handle).
+  const revTid = (await peekNextElectionTid(ctx.db)) + 1;
   const revisionSigningNonce = await (electionsEngine as unknown as {
     seedElectionRevisionSigning(
       electionId: string,
@@ -253,7 +270,7 @@ export async function runFullChainWritePhase(
   }).seedElectionRevisionSigning(
     electionId, authorityId, revisionFields, revTid, sign,
   );
-  console.log('[proof] full-chain write: revision signing seam complete, revNonce=' + revisionSigningNonce);
+  console.info('[proof] full-chain write: revision signing seam complete, revNonce=' + revisionSigningNonce);
 
   // Step 5: create the election row + ElectionRevision (Revision=0, MutationValid satisfied).
   await electionsEngine.createElection(
@@ -267,7 +284,7 @@ export async function runFullChainWritePhase(
     },
     { signingNonce, revisionSigningNonce },
   );
-  console.log('[proof] full-chain write: election created, id=' + electionId);
+  console.info('[proof] full-chain write: election created, id=' + electionId);
 
   // Step 6: persist the full-chain reference for the read phase (survives force-stop).
   const chainRef = { networkRef, authorityId, electionId };
@@ -284,11 +301,183 @@ export async function runFullChainWritePhase(
   const networkCount = ((await db.prepare('select count(*) as n from Network').get()) as { n: number } | undefined)?.n ?? 0;
   const authorityCount = ((await db.prepare('select count(*) as n from Authority').get()) as { n: number } | undefined)?.n ?? 0;
   const electionCount = ((await db.prepare('select count(*) as n from Election').get()) as { n: number } | undefined)?.n ?? 0;
-  console.log(
+  console.info(
     `[proof] full-chain write DONE — hash=${networkRef.hash} Network=${networkCount} Authority=${authorityCount} Election=${electionCount}`,
   );
 
+  // Phase 999.1 D-15 baseline: record the 'elections' namespace TidHighWater right
+  // after this phase's createElection() call (which reserved the T/T+1 pair via the
+  // shared allocateTid(db, 'elections', ...)). This is the "prior max Tid" the
+  // device-attended TID-REISSUE recheck (runTidReissueRecheckPhase, below) asserts
+  // strictly exceeds after a force-stop + backward device-clock jump + relaunch.
+  const tidHighWaterRow = (await db
+    .prepare('select HighWater from TidHighWater where Namespace = :ns')
+    .get({ ns: 'elections' })) as { HighWater: number } | undefined;
+  const priorMaxTid = tidHighWaterRow?.HighWater ?? 0;
+  await AsyncStorage.setItem(PROOF_TID_REISSUE_BASELINE_KEY, String(priorMaxTid));
+  console.info(`[proof] full-chain write: recorded D-15 TID-REISSUE baseline (elections HighWater=${priorMaxTid})`);
+
   return { networkRef, authorityId, electionId, db };
+}
+
+// ---------------------------------------------------------------------------
+// Ballot question round-trip proof (MBY-260626 verification)
+// ---------------------------------------------------------------------------
+
+/**
+ * BALLOT QUESTION ROUND-TRIP: verify proposed-ballot questions survive the
+ * write+read paths on-device (Hermes/Quereus), exercising the exact fix that
+ * added ProposedBallot.Questions JSON persistence.
+ *
+ * Single-process (no force-stop needed): propose a ballot carrying questions
+ * via the REAL ElectionEngine.proposeBallot(), then
+ *   - WRITE side: raw `select Questions from ProposedBallot` confirms the JSON
+ *     blob was actually persisted (proves proposeBallot no longer drops them).
+ *   - READ side: ElectionEngine.getBallotDetails() must return the same
+ *     questions deserialized from that blob (proves the proposed fallback path
+ *     reads them back instead of only the finalized Question table).
+ *
+ * Emits a single `[proof] ========== BALLOT VERDICT: PASS|FAIL ...` line.
+ */
+export async function runBallotQuestionProof(
+  networksEngine: NetworksEngine,
+  networkRef: NetworkReference,
+  authorityId: string,
+  electionId: string,
+): Promise<{ passed: boolean; details: string }> {
+  console.info('[proof] ballot question round-trip: starting');
+
+  const ctx = networksEngine.getEstablishedContext(networkRef.hash);
+  if (!ctx) {
+    throw new Error('[proof] ballot proof: no established context for hash=' + networkRef.hash);
+  }
+  // ElectionSubject is just { id, authorityId }; proposeBallot/getBallotDetails
+  // operate on ctx.db only (same construction the app uses in engine-factory.ts).
+  const engine = new ElectionEngine({ id: electionId, authorityId }, ctx);
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const ballotId: string = (globalThis as any).crypto.randomUUID();
+  const ballot: Ballot = {
+    id: ballotId,
+    electionId,
+    authorityId,
+    description: 'Proof ballot — question round-trip',
+    districts: ['D1'],
+    questions: [
+      {
+        code: 'q1',
+        title: 'Favorite color?',
+        instructions: 'Pick one',
+        type: 'select',
+        options: [
+          { code: 'o1', title: 'Red' },
+          { code: 'o2', title: 'Blue' },
+        ],
+        optionRange: { min: 1, max: 1 },
+        sequence: 0,
+        required: true,
+      },
+      {
+        code: 'q2',
+        title: 'Any comments?',
+        instructions: 'Free text',
+        type: 'text',
+        options: [],
+        sequence: 1,
+        required: false,
+      },
+    ],
+  };
+  const expectedCount = ballot.questions.length;
+
+  // WRITE side — propose the ballot (carries the questions).
+  await engine.proposeBallot(ballot);
+
+  // Raw DB check: the Questions JSON column must hold the serialized array.
+  const db = getLastProofDb();
+  const rawRow = db
+    ? ((await db
+        .prepare('select Questions from ProposedBallot where Id = :id')
+        .get({ id: ballotId })) as { Questions: string | null } | undefined)
+    : undefined;
+  const rawJson = rawRow?.Questions ?? null;
+  const rawQuestionCount = rawJson ? (JSON.parse(rawJson) as unknown[]).length : 0;
+  console.info(
+    `[proof] ballot write-side: ProposedBallot.Questions persisted=${rawJson !== null} ` +
+      `(${rawJson?.length ?? 0} chars, ${rawQuestionCount} questions)`,
+  );
+
+  // READ side — getBallotDetails must deserialize the questions back.
+  const detailsResult = await engine.getBallotDetails(ballotId);
+  const readQuestions = detailsResult.ballot.questions ?? [];
+  console.info(`[proof] ballot read-side: getBallotDetails returned ${readQuestions.length} questions`);
+
+  // Assertions.
+  const writeOk = rawQuestionCount === expectedCount;
+  const readLenOk = readQuestions.length === expectedCount;
+  const q1 = readQuestions.find((q) => q.code === 'q1');
+  const q1Ok = !!q1 && q1.title === 'Favorite color?' && (q1.options?.length ?? 0) === 2;
+  const q2 = readQuestions.find((q) => q.code === 'q2');
+  const q2Ok = !!q2 && q2.type === 'text';
+  const passed = writeOk && readLenOk && q1Ok && q2Ok;
+
+  const details =
+    `writePersisted=${writeOk}(${rawQuestionCount}/${expectedCount}) ` +
+    `readCount=${readQuestions.length}/${expectedCount} q1=${q1Ok} q2=${q2Ok}`;
+  console.info(`[proof] ========== BALLOT VERDICT: ${passed ? 'PASS' : 'FAIL'} (${details}) ==========`);
+
+  // Record the ballot id + expected count so the READ phase can re-read the SAME
+  // ballot from the re-attached store (durable cross-restart check).
+  await AsyncStorage.setItem(
+    PROOF_BALLOT_REF_KEY,
+    JSON.stringify({ ballotId, expectedCount, sameProcessPassed: passed }),
+  );
+
+  return { passed, details };
+}
+
+/**
+ * BALLOT READ-BACK (post force-stop): re-read the ballot proposed during the
+ * WRITE phase from the RE-ATTACHED on-device store and assert its questions
+ * survived the process restart. Stronger than the same-process round-trip — it
+ * proves the JSON blob is durably persisted in LevelDB, not just live in a warm
+ * handle. Folds into the FULL-CHAIN VERDICT so a regression fails run-vtest02.sh.
+ *
+ * Must be called AFTER runFullChainReadPhase (which open()s + re-attaches the
+ * store and establishes the context this reuses).
+ */
+export async function runBallotQuestionReadProof(
+  networksEngine: NetworksEngine,
+  networkRef: NetworkReference,
+  authorityId: string,
+  electionId: string,
+): Promise<{ passed: boolean; details: string }> {
+  const refJson = await AsyncStorage.getItem(PROOF_BALLOT_REF_KEY);
+  if (!refJson) {
+    console.error('[proof] ballot read-back: no ballot ref saved — WRITE phase did not run the ballot proof');
+    return { passed: false, details: 'noBallotRef' };
+  }
+  const { ballotId, expectedCount } = JSON.parse(refJson) as {
+    ballotId: string;
+    expectedCount: number;
+    sameProcessPassed: boolean;
+  };
+
+  const ctx = networksEngine.getEstablishedContext(networkRef.hash);
+  if (!ctx) {
+    console.error('[proof] ballot read-back: no established context after open() for hash=' + networkRef.hash);
+    return { passed: false, details: 'noContext' };
+  }
+  const engine = new ElectionEngine({ id: electionId, authorityId }, ctx);
+
+  const detailsResult = await engine.getBallotDetails(ballotId);
+  const readQuestions = detailsResult.ballot.questions ?? [];
+  const passed = readQuestions.length === expectedCount;
+  const details = `durableReadCount=${readQuestions.length}/${expectedCount}`;
+  console.info(
+    `[proof] ballot read-back (post-restart): getBallotDetails returned ${readQuestions.length} questions — ${passed ? 'PASS' : 'FAIL'}`,
+  );
+  return { passed, details };
 }
 
 // ---------------------------------------------------------------------------
@@ -309,7 +498,7 @@ export async function runFullChainReadPhase(
   networksEngine: NetworksEngine,
   user: User,
 ): Promise<{ passed: boolean; networkCount: number; authorityCount: number; electionCount: number }> {
-  console.log('[proof] full-chain read phase: loading chain ref from AsyncStorage');
+  console.info('[proof] full-chain read phase: loading chain ref from AsyncStorage');
 
   const chainRefJson = await AsyncStorage.getItem(PROOF_CHAIN_REF_KEY);
   if (!chainRefJson) {
@@ -318,7 +507,7 @@ export async function runFullChainReadPhase(
   const chainRef: { networkRef: NetworkReference; authorityId: string; electionId: string } =
     JSON.parse(chainRefJson);
 
-  console.log(`[proof] full-chain read: re-attaching to store for hash=${chainRef.networkRef.hash}`);
+  console.info(`[proof] full-chain read: re-attaching to store for hash=${chainRef.networkRef.hash}`);
 
   // open() on a fresh process: cache miss → factory-direct re-attach (D-05 rebind guard).
   // The engine re-declares the schema on the fresh handle, binding the persisted LevelDB data.
@@ -339,7 +528,7 @@ export async function runFullChainReadPhase(
   const passed = networkCount >= 1 && authorityCount >= 1 && electionCount >= 1;
 
   if (passed) {
-    console.log(
+    console.info(
       `[proof] full-chain read PASS — Network=${networkCount} Authority=${authorityCount} Election=${electionCount}`,
     );
   } else {
@@ -349,6 +538,186 @@ export async function runFullChainReadPhase(
   }
 
   return { passed, networkCount, authorityCount, electionCount };
+}
+
+// ---------------------------------------------------------------------------
+// Phase 999.1 D-15 — on-device Tid no-reissue recheck (device-attended)
+// ---------------------------------------------------------------------------
+
+/**
+ * TID-REISSUE RECHECK: the on-device, real Hermes/LevelDB confirmation of the
+ * durable Tid allocator's no-reissue guarantee (D-15) across the documented real
+ * clock-skew vector.
+ *
+ * Device-attended procedure this phase is designed to run inside:
+ *  1. runFullChainWritePhase() runs first — creates a mutation (an Election via
+ *     the real signing seam) and records the prior-max 'elections' TidHighWater
+ *     under PROOF_TID_REISSUE_BASELINE_KEY.
+ *  2. Operator force-stops the app WITHOUT clearing data (`am force-stop`, no
+ *     `pm clear`) — the existing full-chain "restart" protocol.
+ *  3. Operator rolls the device clock BACKWARD past the recorded prior-max Tid
+ *     (the real clock-skew gotcha this proof targets).
+ *  4. Operator relaunches the app; this phase runs: re-attaches to the SAME
+ *     persisted LevelDB store (via networksEngine.open() → rnDbFactory, D-05
+ *     rebind guard — Pitfall 5) and attempts another allocation/mutation (a
+ *     second, distinct Election through the real signing seam, consuming the
+ *     SAME 'elections' allocator namespace).
+ *  5. Asserts the newly-observed 'elections' TidHighWater is STRICTLY GREATER
+ *     than the recorded prior max — the durable allocator must never reissue a
+ *     consumed Tid, even though Date.now() now reads BEFORE that prior max.
+ *
+ * This duplicates (rather than shares/refactors) the election-creation steps
+ * from runFullChainWritePhase so this phase stays independently self-contained
+ * and the existing full-chain write phase is left completely untouched
+ * (additive extension, not a harness-architecture rewrite).
+ *
+ * Emits a single greppable verdict line (see the `passed ? 'PASS' : 'FAIL'`
+ * console.info near the end of this function) so the device driver script can
+ * gate on it exactly like the other proof-verdict markers in this file.
+ */
+export async function runTidReissueRecheckPhase(
+  networksEngine: NetworksEngine,
+  user: User,
+): Promise<{ passed: boolean; priorMaxTid: number; newMaxTid: number }> {
+  console.info('[proof] TID-REISSUE recheck: starting');
+
+  const chainRefJson = await AsyncStorage.getItem(PROOF_CHAIN_REF_KEY);
+  const baselineStr = await AsyncStorage.getItem(PROOF_TID_REISSUE_BASELINE_KEY);
+  if (!chainRefJson || baselineStr === null) {
+    throw new Error(
+      '[proof] TID-REISSUE recheck: missing chain ref or D-15 baseline — run runFullChainWritePhase first',
+    );
+  }
+  const chainRef: { networkRef: NetworkReference; authorityId: string; electionId: string } =
+    JSON.parse(chainRefJson);
+  const priorMaxTid = Number(baselineStr);
+
+  // Re-attach to the SAME persisted LevelDB store post force-stop/clock-rollback.
+  // open() is idempotent if runFullChainReadPhase already attached this boot
+  // (cache hit) — safe to call again so this phase stays independently invokable.
+  await networksEngine.open(chainRef.networkRef, user);
+  const ctx = networksEngine.getEstablishedContext(chainRef.networkRef.hash);
+  if (!ctx) {
+    throw new Error(
+      '[proof] TID-REISSUE recheck: no established context after open() for hash=' + chainRef.networkRef.hash,
+    );
+  }
+  // Phase 14 D-05 schema-rebind lesson: use the captured handle, never a second
+  // rnDbFactory() call (Pitfall 5).
+  const db = getLastProofDb();
+  if (!db) {
+    throw new Error('[proof] TID-REISSUE recheck: no captured db handle after open()');
+  }
+
+  const privKeyHex = await getDevicePrivKeyHex();
+  if (!privKeyHex) {
+    throw new Error('[proof] TID-REISSUE recheck: device private key not found — call getOrCreateDeviceUser first');
+  }
+  const signerKey = user.activeKeys?.[0]?.key;
+  if (!signerKey) {
+    throw new Error('[proof] TID-REISSUE recheck: user has no active key');
+  }
+  const sign = await createDeviceSigner('Proof Runner (TID-REISSUE)');
+  const electionsEngine = new ElectionsEngine(ctx);
+
+  const now = Date.now();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const secondElectionId: string = (globalThis as any).crypto.randomUUID();
+  const electionFields = {
+    id: secondElectionId,
+    authorityId: chainRef.authorityId,
+    title: 'Proof Election TID-REISSUE',
+    date: now + 30 * 24 * 60 * 60 * 1000,
+    revisionDeadline: now + 25 * 24 * 60 * 60 * 1000,
+    ballotDeadline: now + 28 * 24 * 60 * 60 * 1000,
+    type: ElectionType.adhoc,
+  };
+
+  const signingNonce = await (electionsEngine as unknown as {
+    seedElectionSigning(
+      electionFields: { id: string; authorityId: string; title: string; date: number; revisionDeadline: number; ballotDeadline: number; type: ElectionType },
+      sign: (digest: Uint8Array) => Promise<import('@votetorrent/vote-core').Signature>,
+    ): Promise<string>;
+  }).seedElectionSigning(electionFields, sign);
+  console.info('[proof] TID-REISSUE recheck: election signing seam complete, nonce=' + signingNonce);
+
+  const pastRevTs = now - 1000;
+  const revisionFields = {
+    revision: 0,
+    revisionTimestamp: pastRevTs,
+    tags: ['proof', 'tid-reissue'],
+    instructions: '# Proof Election TID-REISSUE',
+    timeline: {
+      registrationEnds: now + 2 * 86400000,
+      ballotsFinal: now + 5 * 86400000,
+      votingStarts: now + 10 * 86400000,
+      tallyingStarts: now + 14 * 86400000,
+      validation: now + 15 * 86400000,
+      certificationStarts: now + 16 * 86400000,
+      closed: now + 17 * 86400000,
+    },
+    keyholderThreshold: 0,
+  };
+  // peekNextElectionTid(db) points at T (this election's tid) — +1 gives the revision tid.
+  // 999.1 D-01/D-02: async, namespace-allocator-backed — use the captured `db` handle
+  // (Pitfall 5, never a second rnDbFactory() call).
+  const revTid = (await peekNextElectionTid(db)) + 1;
+  const revisionSigningNonce = await (electionsEngine as unknown as {
+    seedElectionRevisionSigning(
+      electionId: string,
+      authorityId: string,
+      revision: {
+        revision: number;
+        revisionTimestamp: number;
+        tags: string[];
+        instructions: string;
+        timeline: Record<string, number>;
+        keyholderThreshold: number;
+      },
+      tid: number,
+      sign: (digest: Uint8Array) => Promise<import('@votetorrent/vote-core').Signature>,
+    ): Promise<string>;
+  }).seedElectionRevisionSigning(
+    secondElectionId, chainRef.authorityId, revisionFields, revTid, sign,
+  );
+  console.info('[proof] TID-REISSUE recheck: revision signing seam complete, revNonce=' + revisionSigningNonce);
+
+  // The actual re-allocation/mutation attempt: createElection() consumes a fresh
+  // T/T+1 pair from the SAME 'elections' TidHighWater row this store already holds.
+  await electionsEngine.createElection(
+    {
+      election: electionFields,
+      revision: {
+        electionId: secondElectionId,
+        ...revisionFields,
+        keyholders: [],
+      },
+    },
+    { signingNonce, revisionSigningNonce },
+  );
+  console.info('[proof] TID-REISSUE recheck: second election created, id=' + secondElectionId);
+
+  const newRow = (await db
+    .prepare('select HighWater from TidHighWater where Namespace = :ns')
+    .get({ ns: 'elections' })) as { HighWater: number } | undefined;
+  const newMaxTid = newRow?.HighWater ?? 0;
+  // D-15 no-reissue assertion: the newly-allocated Tid must STRICTLY exceed the
+  // prior max recorded before the force-stop + backward clock jump — never a
+  // repeat, even though Date.now() may now read below priorMaxTid.
+  const passed = newMaxTid > priorMaxTid;
+
+  if (passed) {
+    console.info(`[proof] TID-REISSUE recheck PASS — priorMaxTid=${priorMaxTid} newMaxTid=${newMaxTid}`);
+  } else {
+    console.error(
+      `[proof] TID-REISSUE recheck FAIL — priorMaxTid=${priorMaxTid} newMaxTid=${newMaxTid} (Tid was reissued or did not advance)`,
+    );
+  }
+  console.info(
+    `[proof] ========== TID-REISSUE VERDICT: ${passed ? 'PASS' : 'FAIL'} (priorMaxTid=${priorMaxTid}, newMaxTid=${newMaxTid}) ==========`,
+  );
+
+  return { passed, priorMaxTid, newMaxTid };
 }
 
 // ---------------------------------------------------------------------------
@@ -390,7 +759,7 @@ export async function assertCryptoFunctions(
   h16Ok: boolean;
   allPassed: boolean;
 }> {
-  console.log('[proof] crypto assertions: starting');
+  console.info('[proof] crypto assertions: starting');
 
   // 1. Digest — registered custom SQL function (initialize.ts:65-85).
   //    On the real on-device SQL path Digest returns a 32-byte BLOB (Uint8Array,
@@ -401,7 +770,7 @@ export async function assertCryptoFunctions(
     | undefined;
   const digestVal = digestRow?.v;
   const digestOk = isNonEmptyDigest(digestVal);
-  console.log(`[proof] Digest('a','b','c') = ${JSON.stringify(digestVal)} — ${digestOk ? 'PASS' : 'FAIL'}`);
+  console.info(`[proof] Digest('a','b','c') = ${JSON.stringify(digestVal)} — ${digestOk ? 'PASS' : 'FAIL'}`);
 
   // 2. SignatureValid — registered custom SQL function (initialize.ts:19-44).
   //    Invalid inputs (empty strings) must return false / 0.
@@ -410,7 +779,7 @@ export async function assertCryptoFunctions(
     | undefined;
   const svVal = svRow?.v;
   const signatureValidOk = svVal === false || svVal === 0;
-  console.log(`[proof] SignatureValid('','','') = ${JSON.stringify(svVal)} — ${signatureValidOk ? 'PASS' : 'FAIL'}`);
+  console.info(`[proof] SignatureValid('','','') = ${JSON.stringify(svVal)} — ${signatureValidOk ? 'PASS' : 'FAIL'}`);
 
   // 3. isISODatetime — registered custom SQL function (initialize.ts:46-63).
   //    A valid ISO-8601 UTC string must return true.
@@ -419,17 +788,17 @@ export async function assertCryptoFunctions(
     | undefined;
   const isoVal = isoRow?.v;
   const isISODatetimeOk = isoVal === true || isoVal === 1;
-  console.log(`[proof] isISODatetime('2026-01-01T00:00:00Z') = ${JSON.stringify(isoVal)} — ${isISODatetimeOk ? 'PASS' : 'FAIL'}`);
+  console.info(`[proof] isISODatetime('2026-01-01T00:00:00Z') = ${JSON.stringify(isoVal)} — ${isISODatetimeOk ? 'PASS' : 'FAIL'}`);
 
   // 4. H16 — JS-only utility (packages/vote-engine/src/utils.ts).
   //    NOT a SQL function — assert via JS call only.  Must return a 32-char hex string
   //    (16 bytes × 2 hex chars per byte).
   const h16Val: string = H16('test-network-id');
   const h16Ok = typeof h16Val === 'string' && h16Val.length === 32 && /^[0-9a-f]+$/.test(h16Val);
-  console.log(`[proof] H16('test-network-id') = ${h16Val} — ${h16Ok ? 'PASS' : 'FAIL'}`);
+  console.info(`[proof] H16('test-network-id') = ${h16Val} — ${h16Ok ? 'PASS' : 'FAIL'}`);
 
   const allPassed = digestOk && signatureValidOk && isISODatetimeOk && h16Ok;
-  console.log(`[proof] crypto assertions: ${allPassed ? 'ALL PASSED' : 'SOME FAILED'}`);
+  console.info(`[proof] crypto assertions: ${allPassed ? 'ALL PASSED' : 'SOME FAILED'}`);
 
   return { digestOk, signatureValidOk, isISODatetimeOk, h16Ok, allPassed };
 }
@@ -459,7 +828,7 @@ export async function assertCryptoFunctions(
 export async function assertDigestParity(
   db: Database,
 ): Promise<{ allPassed: boolean; failures: string[] }> {
-  console.log('[proof] digest parity assertions: starting');
+  console.info('[proof] digest parity assertions: starting');
   const failures: string[] = [];
 
   for (const vec of DIGEST_VECTORS) {
@@ -491,7 +860,7 @@ export async function assertDigestParity(
   }
 
   const allPassed = failures.length === 0;
-  console.log(`[proof] digest parity: ${allPassed ? 'ALL PASSED' : `FAILED: ${failures.join('; ')}`}`);
+  console.info(`[proof] digest parity: ${allPassed ? 'ALL PASSED' : `FAILED: ${failures.join('; ')}`}`);
   return { allPassed, failures };
 }
 
@@ -502,13 +871,27 @@ export async function assertDigestParity(
 // ---------------------------------------------------------------------------
 
 /**
- * Create a real NetworksEngine wired to rnDbFactory + LocalStorageReact.
- * Intended for dev/proof invocation only.
+ * Create a real NetworksEngine for dev/proof invocation only.
+ *
+ * @param node  Optional StrandHost (e.g. a live CadreNode). When provided, the
+ *              engine's DbFactory uses createStrandDbFactory(node), exercising the
+ *              strand createContext path (VER-04). When omitted, falls back to
+ *              rnDbFactory (existing behaviour — backward compatible).
+ *
+ *              Note: a node-aware caller (e.g. under useCadreNode()) may invoke
+ *              makeProofEngine(node) to drive the strand path for VER-04 verification.
+ *              The boot-time runPersistenceProof() call with no argument preserves
+ *              the rnDbFactory path — the CadreNode has not booted yet at that point.
  */
-export function makeProofEngine(): NetworksEngine {
+export function makeProofEngine(node?: StrandHost): NetworksEngine {
   const factory: DbFactory = async (networkHash: string) => {
-    const db = await rnDbFactory(networkHash);
-    lastProofDb = db; // capture the engine's actual handle for queries
+    let db: Database;
+    if (node) {
+      db = await createStrandDbFactory(node)(networkHash);
+    } else {
+      db = await rnDbFactory(networkHash);
+    }
+    lastProofDb = db; // capture the engine's actual handle for queries — BOTH branches (Pitfall 5)
     return db;
   };
   return new NetworksEngine(makeLocalStorage(), factory);

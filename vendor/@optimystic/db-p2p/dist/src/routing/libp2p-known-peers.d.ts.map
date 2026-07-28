@@ -1,1 +1,0 @@
-{"version":3,"file":"libp2p-known-peers.d.ts","sourceRoot":"","sources":["../../../src/routing/libp2p-known-peers.ts"],"names":[],"mappings":"AAAA,OAAO,KAAK,EAAE,MAAM,EAAE,MAAM,QAAQ,CAAA;AAEpC,OAAO,KAAK,EAAE,SAAS,EAAE,MAAM,qBAAqB,CAAA;AAEpD,wBAAgB,eAAe,CAAC,MAAM,EAAE,MAAM,GAAG,SAAS,EAAE,CAmB3D"}

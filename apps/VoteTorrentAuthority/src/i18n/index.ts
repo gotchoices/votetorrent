@@ -97,6 +97,11 @@ const resources = {
 			mustSignBeforeCreating: 'You must sign before creating the network.',
 			atLeastOneKeyholderRequired: 'At least one keyholder is required.',
 			invalidDate: 'Please enter a valid date.',
+			errAuthorityNameRequired: 'Please enter an authority name.',
+			creating: 'Creating…',
+			networkCreateTimeout: 'Network creation timed out at the {{step}} step. Check your connection and try again.',
+			errRelayRequired: 'Add at least one relay address under Advanced → Add Relay before creating the network.',
+			validationFailed: 'Validation failed.',
 			errTitleRequired: 'Please enter an election title.',
 			errElectionDateRequired: 'Please choose an election date.',
 			errRevisionDeadlineRequired: 'Please choose a revision deadline.',
@@ -374,6 +379,7 @@ const resources = {
 			question: 'Question',
 			option: 'Option',
 			addOption: 'Add Option',
+			questionNeedsTwoOptions: 'Choice questions need at least two options.',
 			rank: 'Rank',
 			score: 'Score',
 			text: 'Text',
@@ -440,10 +446,20 @@ const resources = {
 			// Phase 11 plan 11-01 (D-11) — en mirrors added for es orphan keys (create/revise)
 			create: 'Create', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
 			revise: 'Revise', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			// D-03/D-05/D-09 ballot confirmation actions (31-05)
+			submitForConfirmation: 'Submit for confirmation',
+			withdrawConfirmation: 'Withdraw',
+			statusProposed: 'Proposed',
+			statusConfirmed: 'Confirmed',
 			// Debug seed keys — debug-only affordance; never appears in release UI
 			debugSeedTasksTitle: 'Seed Pending Tasks (Debug)',
 			debugSeedTasksSuccess: 'Pending tasks seeded — check Tasks tab',
 			debugSeedTasksError: 'Seed failed: ',
+			// Phase 39 plan 39-04 (DEBT-09 app-Jest gate) — DistrictsGroupsEditor range fields.
+			from: 'From',
+			to: 'To',
+			add: 'Add',
+			cancel: 'Cancel',
 		},
 	},
 	es: {
@@ -540,6 +556,11 @@ const resources = {
 			mustSignBeforeCreating: 'Debe firmar antes de crear la red.',
 			atLeastOneKeyholderRequired: 'Se requiere al menos un custodio.',
 			invalidDate: 'Ingrese una fecha válida.',
+			errAuthorityNameRequired: 'Ingrese un nombre de autoridad.',
+			creating: 'Creando…',
+			networkCreateTimeout: 'La creación de la red expiró en el paso {{step}}. Verifique su conexión e inténtelo de nuevo.',
+			errRelayRequired: 'Agregue al menos una dirección de relay en Avanzado → Agregar relay antes de crear la red.',
+			validationFailed: 'Error de validación.',
 			errTitleRequired: 'Ingrese un título para la elección.',
 			errElectionDateRequired: 'Elija una fecha para la elección.',
 			errRevisionDeadlineRequired: 'Elija una fecha límite de revisión.',
@@ -810,6 +831,7 @@ const resources = {
 			question: 'Pregunta', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
 			option: 'Opción', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
 			addOption: 'Agregar Opción', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			questionNeedsTwoOptions: 'Las preguntas de opción necesitan al menos dos opciones.',
 			rank: 'Rango', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
 			score: 'Puntuación', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
 			text: 'Texto', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
@@ -872,10 +894,20 @@ const resources = {
 			keyholderInvitation: 'Invitación de Custodio', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
 			debugKeyholderInvitationSend: 'Invitación de Custodio (Enviar)', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
 			debugKeyholderInvitationAccept: 'Invitación de Custodio (Aceptar)', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			// D-03/D-05/D-09 ballot confirmation actions (31-05)
+			submitForConfirmation: 'Enviar para confirmación',
+			withdrawConfirmation: 'Retirar',
+			statusProposed: 'Propuesto',
+			statusConfirmed: 'Confirmado',
 			// Debug seed keys — Spanish mirrors
 			debugSeedTasksTitle: 'Sembrar Tareas Pendientes (Debug)',
 			debugSeedTasksSuccess: 'Tareas pendientes sembradas — ver pestaña Tareas',
 			debugSeedTasksError: 'Error al sembrar: ',
+			// Phase 39 plan 39-04 (DEBT-09 app-Jest gate) — DistrictsGroupsEditor range fields.
+			from: 'Desde',
+			to: 'Hasta',
+			add: 'Agregar',
+			cancel: 'Cancelar',
 		},
 	},
 };

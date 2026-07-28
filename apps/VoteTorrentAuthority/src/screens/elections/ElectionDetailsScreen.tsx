@@ -4,8 +4,9 @@ import { ExtendedTheme, useRoute, useTheme, useNavigation, useFocusEffect } from
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTranslation } from "react-i18next";
 import { ThemedText } from "../../components/ThemedText";
-import type { BallotSummary, ElectionDetails, IElectionEngine, ElectionRevisionSignatureTask } from "@votetorrent/vote-core";
+import type { BallotSummary, ElectionDetails, IElectionEngine, ElectionRevisionSignatureTask, KeyholderInvite } from "@votetorrent/vote-core";
 import { globalStyles } from "../../theme/styles";
+import { InlineError } from "../../components/InlineError";
 import { ElectionDetailsBlock } from "./components/ElectionDetailsBlock";
 import { ElectionTimelineList } from "./components/ElectionTimelineList";
 import { ChipButton } from "../../components/ChipButton";
@@ -14,6 +15,7 @@ import { CustomButton } from "../../components/CustomButton";
 import { CustomTextInput } from "../../components/CustomTextInput";
 import { InfoCard } from "../../components/InfoCard";
 import { formatDate } from "../../utils/displayUtils";
+import { getLocalKeyholders } from "../../engines/local-keyholders";
 import type { NavigationProp } from "../../navigation/types";
 
 /**
@@ -37,6 +39,8 @@ export default function ElectionDetailsScreen() {
 	const { electionEngine } = useRoute().params as { electionEngine: IElectionEngine };
 	const [electionDetails, setElectionDetails] = useState<ElectionDetails | null>(null);
 	const [ballots, setBallots] = useState<BallotSummary[]>([]);
+	// D-09: confirmation state per ballot — { locked, confirmed } keyed by ballot id
+	const [ballotConfirmationStates, setBallotConfirmationStates] = useState<Record<string, { locked: boolean; confirmed: boolean }>>({});
 	const [moreOpen, setMoreOpen] = useState(false);
 	const [errorMessage, setErrorMessage] = useState("");
 	const { colors } = useTheme() as ExtendedTheme;
@@ -48,10 +52,26 @@ export default function ElectionDetailsScreen() {
 			try {
 				if (electionEngine) {
 					const details = await electionEngine.getElectionDetails();
+					// TEMP scaffold (delete with cadre P2P invite flow): the engine does
+					// not persist keyholders yet, so merge locally-stored names into the
+					// revision projections so the count + cards render. See local-keyholders.ts.
+					const names = await getLocalKeyholders(details.election.id);
+					if (names.length) {
+						// current is ElectionRevision -> InviteStatus<SentKeyholderInvite>[]
+						if (details.current.keyholders.length === 0) {
+							details.current.keyholders = names.map((name) => ({ invite: { name } }));
+						}
+						// proposed.proposed is ElectionRevisionInit -> KeyholderInvite[]
+						if (details.proposed && details.proposed.proposed.keyholders.length === 0) {
+							details.proposed.proposed.keyholders = names.map(
+								(name): KeyholderInvite => ({ name, type: "k", expiration: "0", inviteKey: "", inviteSignature: "" })
+							);
+						}
+					}
 					setElectionDetails(details);
 				}
 			} catch (error) {
-				console.error("Error loading election details:", error);
+				console.warn("Error loading election details:", error);
 				setErrorMessage(error instanceof Error ? error.message : String(error));
 			}
 		};
@@ -61,16 +81,31 @@ export default function ElectionDetailsScreen() {
 
 	// G2/G12: Refresh ballot list on every focus so newly proposed templates appear
 	// immediately on return from CreateBallot/EditBallot.
+	// D-09: Also refresh confirmation states on focus so Proposed/Confirmed badge
+	// updates when the user returns from the Tasks inbox after signing.
 	useFocusEffect(
 		useCallback(() => {
 			const loadBallots = async () => {
+				setErrorMessage(""); // clear stale error before reload so transient failures don't persist
 				try {
 					if (electionEngine) {
 						const summaries = await electionEngine.getBallots();
 						setBallots(summaries);
+						// D-09: fetch confirmation state for each ballot to drive the badge.
+						const stateEntries = await Promise.all(
+							summaries.map(async (b) => {
+								try {
+									const cs = await electionEngine.getBallotConfirmationState(b.id);
+									return [b.id, cs] as const;
+								} catch {
+									return [b.id, { locked: false, confirmed: false }] as const;
+								}
+							})
+						);
+						setBallotConfirmationStates(Object.fromEntries(stateEntries));
 					}
 				} catch (error) {
-					console.error("Error loading ballots:", error);
+					console.warn("Error loading ballots:", error);
 					setErrorMessage(error instanceof Error ? error.message : String(error));
 				}
 			};
@@ -112,11 +147,9 @@ export default function ElectionDetailsScreen() {
 			contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}>
 
 			{/* SC6 error state — surfaces load failures inline (D-19) */}
-			{errorMessage ? (
-				<View style={styles.section}>
-					<ThemedText type="small" style={{ color: colors.error }}>{errorMessage}</ThemedText>
-				</View>
-			) : null}
+			<View style={styles.section}>
+				<InlineError message={errorMessage} />
+			</View>
 
 			{/* 1. Immutable core block (title + Authority/Type/Date + Core Signature) */}
 			<View style={styles.section}>
@@ -297,23 +330,30 @@ export default function ElectionDetailsScreen() {
 			<View style={styles.section}>
 				<ThemedText type="title">{t("ballotTemplates")}</ThemedText>
 				{ballots.length > 0 ? (
-					ballots.map((ballot) => (
-						<InfoCard
-							key={ballot.id}
-							title={ballot.authorityId || t("ballotTemplate")}
-							subtitle={t("questionsLabel") + ": —"}
-							icon="chevron-right"
-							onPress={() =>
-								navigation.navigate("EditBallot", {
-									electionId: election.id,
-									electionTitle: election.title,
-									electionDate: formatDate(election.revisionDeadline),
-									ballotId: ballot.id,
-									electionEngine,
-								} as any)
-							}
-						/>
-					))
+					ballots.map((ballot) => {
+						// D-09: render a Proposed/Confirmed status badge driven by getBallotConfirmationState.
+						const cs = ballotConfirmationStates[ballot.id];
+						const statusLabel = cs?.confirmed
+							? t("statusConfirmed")
+							: t("statusProposed");
+						return (
+							<InfoCard
+								key={ballot.id}
+								title={ballot.authorityId || t("ballotTemplate")}
+								subtitle={statusLabel}
+								icon="chevron-right"
+								onPress={() =>
+									navigation.navigate("EditBallot", {
+										electionId: election.id,
+										electionTitle: election.title,
+										electionDate: formatDate(election.revisionDeadline),
+										ballotId: ballot.id,
+										electionEngine,
+									} as any)
+								}
+							/>
+						);
+					})
 				) : (
 					<>
 						<ThemedText type="small">{t("noBallotYet")}</ThemedText>
