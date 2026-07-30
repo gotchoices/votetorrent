@@ -7,14 +7,18 @@ import { AsyncStorage } from './shims/react-native.js'
 import {
   createTestNetwork,
   addTestAuthority,
+  addTestElection,
+  bumpElectionRevision,
   seedAuthorityInvite,
   seedUserInvite,
   seedKeyholderInvite,
   makeDistinctTestUser,
+  makeTestSignCallback,
 } from './fixtures/test-context.js'
 import { nowCanonicalDatetime } from '../src/utils.js'
 import type {
   InviteStatus,
+  KeyholderInvite,
   SentOfficerInvite,
   SentAuthorityInvite,
   SentKeyholderInvite,
@@ -328,5 +332,159 @@ describe('InvitationEngine', () => {
     const expiredInPending = pending.some((inv) => inv.invite.name === 'Expired Officer')
     expect(expiredInPending, 'expired invite must not appear in pending list').to.equal(false)
     void expiredCid // referenced for clarity; the assertion uses name above
+  })
+})
+
+// ===========================================================================
+// second-keyholder-invite-unique regression (2026-07-30)
+//
+// This bug shipped precisely because no test covered a SECOND keyholder
+// invite to the same election revision — see the debug session's Decision
+// section for the 5 required cases below. `ElectionEngine.inviteKeyholder()`
+// used to insert directly into `Keyholder` keyed by the INVITING admin's own
+// UserId (constant across every invite), so the 2nd+ invite always collided
+// on `Keyholder`'s `(ElectionId, ElectionRevision, UserId)` primary key. The
+// fix moves the write to a signed `InviteSlot` (Type='k') at send-time and
+// mints the real `User` + `Keyholder` rows at ACCEPT time
+// (`InvitationEngine.respondToInvite`).
+// ===========================================================================
+
+describe('second-keyholder-invite-unique regression (2026-07-30)', () => {
+  const ELECTION_ID = 'election-1' // addTestElection's makeElectionInit default id
+
+  function makeKeyholderInvite (name: string): KeyholderInvite {
+    return {
+      name,
+      type: 'k',
+      expiration: new Date(Date.now() + 3_600_000).toISOString(),
+      inviteKey: 'k'.repeat(66),
+      // Empty inviteSignature hits the documented send-side carve-out (no
+      // createKeyholderInvite factory yet) rather than real secp256k1
+      // verification against fixture-garbage hex.
+      inviteSignature: '',
+    }
+  }
+
+  /** Read back the Cid of a keyholder InviteSlot by its Name (unique per test). */
+  async function keyholderSlotCid (ctx: { db: import('../src/types.js').EngineContext['db'] }, name: string): Promise<string> {
+    const row = await ctx.db
+      .prepare("select Cid from InviteSlot where Type = 'k' and Name = :name")
+      .get({ name })
+    if (!row) throw new Error(`keyholderSlotCid: no InviteSlot found for name=${name}`)
+    return row.Cid as string
+  }
+
+  it('two invites with different names to the same election revision both succeed', async () => {
+    const net = await createTestNetwork()
+    const auth = await addTestAuthority(net)
+    const elec = await addTestElection(auth)
+
+    // Neither call should throw — this is the exact reported failure (2nd invite
+    // used to collide on Keyholder's primary key).
+    await elec.electionEngine.inviteKeyholder(makeKeyholderInvite('Alice Keyholder'), ELECTION_ID, makeTestSignCallback(auth.user))
+    await elec.electionEngine.inviteKeyholder(makeKeyholderInvite('Bob Keyholder'), ELECTION_ID, makeTestSignCallback(auth.user))
+
+    const names: string[] = []
+    for await (const row of elec.ctx.db.eval(
+      "select Name from InviteSlot where Type = 'k' and ElectionId = :electionId",
+      { electionId: ELECTION_ID }
+    )) {
+      names.push(row.Name as string)
+    }
+    expect(names.sort()).to.deep.equal(['Alice Keyholder', 'Bob Keyholder'])
+  })
+
+  it('both appear as pending via getKeyholderInvite()', async () => {
+    const net = await createTestNetwork()
+    const auth = await addTestAuthority(net)
+    const elec = await addTestElection(auth)
+
+    await elec.electionEngine.inviteKeyholder(makeKeyholderInvite('Alice Keyholder'), ELECTION_ID, makeTestSignCallback(auth.user))
+    await elec.electionEngine.inviteKeyholder(makeKeyholderInvite('Bob Keyholder'), ELECTION_ID, makeTestSignCallback(auth.user))
+
+    const aliceCid = await keyholderSlotCid(elec.ctx, 'Alice Keyholder')
+    const bobCid = await keyholderSlotCid(elec.ctx, 'Bob Keyholder')
+
+    const engine = new InvitationEngine(elec.ctx)
+    const alice = await engine.getKeyholderInvite(aliceCid)
+    const bob = await engine.getKeyholderInvite(bobCid)
+
+    expect(alice, 'Alice invite should be readable').to.not.be.undefined
+    expect(alice!.invite.name).to.equal('Alice Keyholder')
+    expect(alice!.result, 'Alice invite is still pending (no InviteResult yet)').to.be.undefined
+
+    expect(bob, 'Bob invite should be readable').to.not.be.undefined
+    expect(bob!.invite.name).to.equal('Bob Keyholder')
+    expect(bob!.result, 'Bob invite is still pending (no InviteResult yet)').to.be.undefined
+  })
+
+  it('accept-time: accepting one invite produces exactly one User + one Keyholder row bound to the correct election revision', async () => {
+    const net = await createTestNetwork()
+    const auth = await addTestAuthority(net)
+    const elec = await addTestElection(auth)
+
+    await elec.electionEngine.inviteKeyholder(makeKeyholderInvite('Alice Keyholder'), ELECTION_ID, makeTestSignCallback(auth.user))
+    const aliceCid = await keyholderSlotCid(elec.ctx, 'Alice Keyholder')
+
+    const userCountBefore = (await elec.ctx.db.prepare('select count(*) as c from User').get())!.c as number
+    const keyholderCountBefore = (await elec.ctx.db.prepare('select count(*) as c from Keyholder').get())!.c as number
+
+    const engine = new InvitationEngine(elec.ctx)
+    await engine.respondToInvite(aliceCid, true)
+
+    const userCountAfter = (await elec.ctx.db.prepare('select count(*) as c from User').get())!.c as number
+    const keyholderCountAfter = (await elec.ctx.db.prepare('select count(*) as c from Keyholder').get())!.c as number
+    expect(userCountAfter - userCountBefore, 'exactly one new User row').to.equal(1)
+    expect(keyholderCountAfter - keyholderCountBefore, 'exactly one new Keyholder row').to.equal(1)
+
+    const khRow = await elec.ctx.db
+      .prepare('select ElectionId, ElectionRevision, UserId from Keyholder where ElectionId = :electionId')
+      .get({ electionId: ELECTION_ID })
+    expect(khRow, 'Keyholder row bound to the election').to.not.be.undefined
+    expect(khRow!.ElectionId).to.equal(ELECTION_ID)
+    expect(khRow!.ElectionRevision).to.equal(0)
+
+    const userRow = await elec.ctx.db
+      .prepare('select Id, Name from User where Id = :id')
+      .get({ id: khRow!.UserId as string })
+    expect(userRow, 'the minted User row exists').to.not.be.undefined
+    expect(userRow!.Name).to.equal('Alice Keyholder')
+  })
+
+  it('a third invite still succeeds', async () => {
+    const net = await createTestNetwork()
+    const auth = await addTestAuthority(net)
+    const elec = await addTestElection(auth)
+
+    await elec.electionEngine.inviteKeyholder(makeKeyholderInvite('Keyholder One'), ELECTION_ID, makeTestSignCallback(auth.user))
+    await elec.electionEngine.inviteKeyholder(makeKeyholderInvite('Keyholder Two'), ELECTION_ID, makeTestSignCallback(auth.user))
+    // Guards against a new single-slot or off-by-one assumption sneaking back in.
+    await elec.electionEngine.inviteKeyholder(makeKeyholderInvite('Keyholder Three'), ELECTION_ID, makeTestSignCallback(auth.user))
+
+    const countRow = await elec.ctx.db
+      .prepare("select count(*) as c from InviteSlot where Type = 'k' and ElectionId = :electionId")
+      .get({ electionId: ELECTION_ID })
+    expect(countRow!.c).to.equal(3)
+  })
+
+  it('a non-zero election revision works', async () => {
+    const net = await createTestNetwork()
+    const auth = await addTestAuthority(net)
+    const elec = await addTestElection(auth)
+
+    const bumpedRevision = await bumpElectionRevision(elec)
+    expect(bumpedRevision).to.equal(1)
+
+    await elec.electionEngine.inviteKeyholder(makeKeyholderInvite('Carol Keyholder'), ELECTION_ID, makeTestSignCallback(auth.user))
+    const carolCid = await keyholderSlotCid(elec.ctx, 'Carol Keyholder')
+
+    const engine = new InvitationEngine(elec.ctx)
+    await engine.respondToInvite(carolCid, true)
+
+    const khRow = await elec.ctx.db
+      .prepare('select ElectionRevision from Keyholder where ElectionId = :electionId')
+      .get({ electionId: ELECTION_ID })
+    expect(khRow, 'Keyholder row exists for the bumped revision').to.not.be.undefined
+    expect(khRow!.ElectionRevision, 'Keyholder binds to the CURRENT (non-zero) revision, not a stale/hardcoded 0').to.equal(1)
   })
 })
