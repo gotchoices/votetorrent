@@ -14,6 +14,11 @@
  * (Play Integrity: URL-safe/standard base64 string; key attestation:
  * `attestationApplicationId` raw OCTET STRING bytes) — compare consistently.
  */
+
+// `Buffer` is NOT a Hermes global (see ../../utils.ts) — import it from the `buffer`
+// module, which metro.config.js aliases and both apps declare as a dependency.
+import { Buffer } from 'buffer'
+
 export interface ExpectedAppIdentity {
   /** The app package name both attestation halves must be pinned to (e.g. 'org.votetorrent.authority'). */
   packageName: string
