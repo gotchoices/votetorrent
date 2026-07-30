@@ -89,8 +89,12 @@ const execAsync = promisify(exec);
 //     unrelated to @quereus/quereus 4.2.1 — see .yarnrc.yml)
 // (Observed empirically via `yarn explain peer-requirements` after the 0.14 repin.)
 // ---------------------------------------------------------------------------
+// v4.4 bump (2026-07-28): @optimystic/* family bumped 0.14.1 → 0.16.3 (all aligned)
+// alongside cadre-core 0.9.0 + quereus 4.4.1. The crypto-plugin peer wart is the SAME
+// known-suppressed `^0.16.2` mismatch against the plugin's own internal quereus-version
+// scheme (unrelated to @quereus/quereus 4.4.1) — only the resolved version moved.
 const KNOWN_ALLOWED = new Set([
-  '@optimystic/quereus-plugin-crypto@npm:0.14.1',
+  '@optimystic/quereus-plugin-crypto@npm:0.16.3',
 ]);
 
 // The ✘ marker (U+2718)

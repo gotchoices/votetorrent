@@ -1103,10 +1103,151 @@ async function runStrandRelayRoutingSharedIdentitySubCheck() {
   }
 }
 
+// ── Phase-41-11 addition — STRAND-RELAY-ROUTING DISTINCT-RELAY FIX check ─────────────────────
+// Proves the 41-11 fix (the additive cadre-core `strandNetwork` override, authored as a
+// yarn-patch this session) on Node/loopback — the inverse of the SHARED-IDENTITY sub-check
+// above. The collision the sub-check reproduces exists because the control node and the strand
+// node share ONE PeerId AND reserve at the SAME relay, so the relay server's hop-connect
+// (server/index.js:230-236 connections[0], keyed solely by PeerId) can deliver a sibling's
+// strand-directed stream to the control connection. The fix gives the strand node a DISTINCT
+// relay target from the control node's (app-side: `network` → drone CONTROL relay,
+// `strandNetwork` → drone STRAND relay; 41-10 diagnosis §5). Modeled here at the
+// `createLibp2pNode` level (the same D-02 workaround the sub-check uses): control-mimic reserves
+// at relay-CONTROL, strand-mimic reserves at relay-STRAND — DIFFERENT relay servers, still ONE
+// shared PeerId. Because relay-STRAND holds ONLY the strand-mimic connection for that PeerId,
+// a sibling dialing strand-mimic's OWN /p2p-circuit addr negotiates strand-mimic's OWN protocol:
+// the collision is GONE. Deterministic (no connections[0] ordering race — each relay has exactly
+// one connection per PeerId). Non-gating (mirrors the other STRAND-RELAY-ROUTING probes) —
+// prints its own verdict line and does not affect MULTI-PEER RELAY SMOKE's exit code.
+async function runStrandRelayRoutingDistinctRelayFixCheck() {
+  let relayControl;
+  let relayStrand;
+  let controlMimic;
+  let strandMimic;
+  let sibling;
+  try {
+    const newRelay = async (suffix) => {
+      const r = await createLibp2pNode({
+        disableTcp: true,
+        wsPort: 0,
+        networkName: `${STRAND_RELAY_ROUTING_NETWORK_NAME}-fix-${suffix}-relay`,
+        fretProfile: 'core',
+        clusterSize: 3,
+        relay: true,
+      });
+      await r.start();
+      return r;
+    };
+    relayControl = await newRelay('control');
+    relayStrand = await newRelay('strand');
+    const relayControlAddr = pickAnyWs(relayControl.getMultiaddrs().map((m) => m.toString()));
+    const relayStrandAddr = pickAnyWs(relayStrand.getMultiaddrs().map((m) => m.toString()));
+
+    // The SAME generated keypair for BOTH edge nodes (mirrors cadre-node.js:1919
+    // `privateKey: this.identityKey`, the shared identity — identical to the sub-check above).
+    const sharedKey = await generateKeyPair('Ed25519');
+    const newEdgeNode = async (networkName, relayAddr) => {
+      const node = await createLibp2pNode({
+        disableTcp: true,
+        networkName,
+        fretProfile: 'edge',
+        clusterSize: 3,
+        privateKey: sharedKey,
+        bootstrapNodes: [relayAddr],
+        transports: [webSockets(), circuitRelayTransport({ reservationConcurrency: 1 })],
+        // THE FIX: each node reserves at its OWN, DISTINCT relay (control→relayControl,
+        // strand→relayStrand) — exactly what the app's `network`/`strandNetwork` split supplies.
+        listenAddrs: [`${relayAddr}/p2p-circuit`],
+      });
+      await node.start();
+      return node;
+    };
+    controlMimic = await newEdgeNode('control-mimic', relayControlAddr);
+    strandMimic = await newEdgeNode('strand-mimic', relayStrandAddr);
+
+    if (controlMimic.peerId.toString() !== strandMimic.peerId.toString()) {
+      L('STRAND-RELAY-ROUTING DISTINCT-RELAY FIX: FAIL (mimic nodes did not share a PeerId — harness bug)');
+      return;
+    }
+
+    const deadline = Date.now() + 15_000;
+    let cReserved = false;
+    let sReserved = false;
+    while (Date.now() < deadline && !(cReserved && sReserved)) {
+      cReserved = controlMimic.getMultiaddrs().some((m) => m.toString().includes('/p2p-circuit'));
+      sReserved = strandMimic.getMultiaddrs().some((m) => m.toString().includes('/p2p-circuit'));
+      if (!(cReserved && sReserved)) await new Promise((r) => setTimeout(r, 100));
+    }
+    if (!(cReserved && sReserved)) {
+      L('STRAND-RELAY-ROUTING DISTINCT-RELAY FIX: FAIL (same-PeerId mimics never reserved at their distinct relays within 15s)');
+      return;
+    }
+
+    sibling = await createLibp2pNode({
+      disableTcp: true,
+      wsPort: 0,
+      networkName: `${STRAND_RELAY_ROUTING_NETWORK_NAME}-fix-sibling`,
+      fretProfile: 'edge',
+      clusterSize: 3,
+    });
+    await sibling.start();
+
+    // Dial the shared PeerId via strand-mimic's OWN advertised /p2p-circuit addr — which routes
+    // through relayStrand, where ONLY the strand-mimic connection exists for that PeerId.
+    const strandCircuitAddr = strandMimic
+      .getMultiaddrs()
+      .map((m) => m.toString())
+      .find((a) => a.includes('/p2p-circuit'));
+    await sibling.dial(multiaddr(strandCircuitAddr));
+
+    const strandOnlyProtocol = '/optimystic/strand-mimic/fret/1.0.0/ping';
+
+    let strandProtocolNegotiated = false;
+    try {
+      const stream = await withTimeout(
+        sibling.dialProtocol(strandMimic.peerId, [strandOnlyProtocol], { runOnLimitedConnection: true }),
+        10_000,
+        'STRAND-RELAY-ROUTING distinct-relay fix dial (strand-only protocol)',
+      );
+      await stream.close();
+      strandProtocolNegotiated = true;
+    } catch {
+      strandProtocolNegotiated = false;
+    }
+
+    if (strandProtocolNegotiated) {
+      L(
+        'STRAND-RELAY-ROUTING DISTINCT-RELAY FIX: PASS — dialing the shared PeerId via strand-mimic\'s',
+        `OWN /p2p-circuit addr (routed through the DISTINCT strand relay) negotiated strand-mimic's`,
+        `OWN protocol (${strandOnlyProtocol}). The shared-relay collision the SHARED-IDENTITY`,
+        'sub-check reproduces is GONE once control and strand reserve at DISTINCT relays — the',
+        'cadre-core strandNetwork override (41-11 fix), proven on Node/loopback, no NAT required.',
+      );
+    } else {
+      L(
+        'STRAND-RELAY-ROUTING DISTINCT-RELAY FIX: FAIL (strand-mimic\'s OWN protocol still did not',
+        'negotiate over its distinct strand relay — the distinct-relay fix did not resolve the',
+        'collision on this run; see 41-10-STRAND-RELAY-ROUTING-DIAGNOSIS.md §5)',
+      );
+    }
+  } catch (e) {
+    L(`STRAND-RELAY-ROUTING DISTINCT-RELAY FIX: FAIL (${e?.name ?? ''} ${e?.message ?? String(e)})`);
+  } finally {
+    for (const n of [sibling, controlMimic, strandMimic, relayStrand, relayControl]) {
+      if (n) {
+        try {
+          await n.stop();
+        } catch {}
+      }
+    }
+  }
+}
+
 async function runStrandRelayRoutingSmoke() {
-  L('===== STRAND-RELAY-ROUTING SMOKE — config-divergence + shared-identity relay-collision probes (D-02 workaround) =====');
+  L('===== STRAND-RELAY-ROUTING SMOKE — config-divergence + shared-identity relay-collision + distinct-relay fix probes (D-02 workaround) =====');
   await runStrandRelayRoutingConfigCheck();
   await runStrandRelayRoutingSharedIdentitySubCheck();
+  await runStrandRelayRoutingDistinctRelayFixCheck();
 }
 
 async function runStrandCohortSmoke() {

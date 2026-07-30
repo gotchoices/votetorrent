@@ -34,7 +34,8 @@
  */
 
 import { LevelDB, LevelDBWriteBatch } from 'rn-leveldb';
-import { openOptimysticRNDb, LevelDBRawStorage, loadOrCreateRNPeerKey } from '@optimystic/db-p2p-storage-rn';
+import { openOptimysticRNDb, loadOrCreateRNPeerKey } from '@optimystic/db-p2p-storage-rn';
+import { createScopedRnStorageProvider } from './storage-guard';
 import { CadreNode } from '@serfab/cadre-core';
 import { webSockets } from '@libp2p/websockets';
 import { circuitRelayTransport } from '@libp2p/circuit-relay-v2';
@@ -101,6 +102,17 @@ const STRAND_RELAY_LISTEN_ADDRS = [
   ...resolveBootstrapNodes(STRAND_BOOTSTRAP_ADDR_B),
 ].map((addr) => `${addr}/p2p-circuit`);
 
+// P2P-11 (41-11, wall #9 — shared-PeerId strand-relay collision): the control node reserves
+// through the drone's CONTROL relay, a DISTINCT relay identity from the strand node's STRAND
+// relay (strandNetwork below). Two separate relay servers ⇒ each circuit-relay-v2 server holds
+// only ONE connection per this peer's (shared) PeerId, so hop-connect (server/index.js:230-236
+// connections[0]) can no longer misroute strand streams to the control connection (41-10
+// diagnosis §5 — the cadre-core strandNetwork patch unlocks the per-node-type override Probe 1
+// proved did not exist before). Placeholder-aware (degrades to [] — no crash, solo boot).
+const CONTROL_RELAY_LISTEN_ADDRS = resolveBootstrapNodes(CONTROL_ADDR).map(
+  (addr) => `${addr}/p2p-circuit`,
+);
+
 // Poll constants (consistent with dial-probe.ts connection-poll shape).
 // PEER_POLL_MAX: 3 ticks × 1 s = 3 s peer-connection wait (exits early when peers appear).
 //   On a real device with a live drone the peer handshake typically completes within 1–2 s.
@@ -161,8 +173,10 @@ export async function runReplicationProof(): Promise<void> {
       // signing (id = author ed25519 pubkey + signSchema()) is a separate productionization task.
       requireSignedSchemas: false,
       strandFilter: { mode: 'all' },
-      storage: { provider: () => new LevelDBRawStorage(rnDb) },
+      // ISO-01 per-scope storage + persistence guardrail (aligned with the app providers).
+      storage: { provider: createScopedRnStorageProvider('votetorrent-replication-strand') },
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      // CONTROL node network — reserves through the drone's CONTROL relay (P2P-11 41-11).
       network: {
         transports: [
           webSockets(),
@@ -171,35 +185,39 @@ export async function runReplicationProof(): Promise<void> {
           // (Probe 4, 41-01: not load-bearing on Node's single-copy graph but
           // re-verified at Metro/Hermes on device).
           circuitRelayTransport({
-            // PROBE 5 (41-01, EXERCISED): N relay-qualified listenAddrs ALONE do
-            // NOT yield N reservations under the default circuitRelayTransport() —
-            // DEFAULT_RESERVATION_CONCURRENCY=1 serializes the reserve queue and
-            // drops any 2nd+ reservation via reserveQueue.clear(). Size concurrency
-            // to the number of known drones actually driving
-            // STRAND_RELAY_LISTEN_ADDRS below (never less than 1) — proven on Node
-            // to close the wall #8 asymmetry (bare=1 relay, qualified+concurrency=2
-            // relays).
+            // PROBE 5 (41-01, EXERCISED): N relay-qualified listenAddrs ALONE do NOT
+            // yield N reservations under the default circuitRelayTransport() —
+            // DEFAULT_RESERVATION_CONCURRENCY=1 serializes+drops. Size concurrency to
+            // the number of known control relays driving CONTROL_RELAY_LISTEN_ADDRS.
+            reservationConcurrency: Math.max(1, CONTROL_RELAY_LISTEN_ADDRS.length),
+          }) as unknown as ReturnType<typeof webSockets>,
+        ],
+        // 38-20/41-02: this runner boots its OWN CadreNode (never CadreNodeProvider's),
+        // so it needs the SAME D-03 always-on relay-client posture, relay-qualified — but
+        // scoped to the drone's CONTROL relay (P2P-11 41-11 wall #9). An empty listenAddrs
+        // array means libp2p's transportManager.listen() is never invoked for
+        // '/p2p-circuit', so @libp2p/circuit-relay-v2's ReservationStore never calls
+        // reserveRelay() (relayReservation=false, hop-connect later denied NO_RESERVATION).
+        // The STRAND relay moves to strandNetwork below (the cadre-core strandNetwork patch),
+        // so the control and strand libp2p nodes no longer reserve at the SAME relay under
+        // this peer's shared PeerId — the wall #9 collision.
+        listenAddrs: CONTROL_RELAY_LISTEN_ADDRS,
+        // Permissive gater — dev probe only (matches dial-probe.ts / cadre-runtime-ondevice.md).
+        connectionGater: { denyDialMultiaddr: async () => false },
+      } as any,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      // STRAND node network override (cadre-core strandNetwork patch, P2P-11 41-11): the
+      // per-strand libp2p node reserves through the drones' STRAND relays — a DISTINCT relay
+      // identity from the control node above — closing the shared-PeerId hop-connect collision
+      // (41-10 diagnosis §5). Unset ⇒ strands would reuse `network` (the pre-fix collision).
+      strandNetwork: {
+        transports: [
+          webSockets(),
+          circuitRelayTransport({
             reservationConcurrency: Math.max(1, STRAND_RELAY_LISTEN_ADDRS.length),
           }) as unknown as ReturnType<typeof webSockets>,
         ],
-        // 38-20/41-02: this runner boots its OWN CadreNode (never
-        // CadreNodeProvider's), so it needs the SAME D-03 always-on relay-client
-        // posture CadreNodeProvider.tsx carries, now relay-qualified per known
-        // drone (D-05, P2P-11 wall #8 fix) instead of the bare '/p2p-circuit'
-        // sentinel — see STRAND_RELAY_LISTEN_ADDRS above. An empty listenAddrs
-        // array means libp2p's transportManager.listen() is never invoked for
-        // '/p2p-circuit', so @libp2p/circuit-relay-v2's ReservationStore never
-        // calls reserveRelay() — pendingReservations stays empty forever and
-        // every auto-discovered-relay reservation attempt throws
-        // HadEnoughRelaysError (silently swallowed), so no RESERVE request is
-        // ever sent to the drone (relayReservation= reports false, and the
-        // strand node's hop-connect is later denied NO_RESERVATION). Since this
-        // same network.listenAddrs value is forwarded unmodified to BOTH the
-        // control node and the strand node, arming it here closes both the
-        // observable and the actual consensus-blocking wall in one change.
         listenAddrs: STRAND_RELAY_LISTEN_ADDRS,
-        // Permissive gater — dev probe only (matches dial-probe.ts / cadre-runtime-ondevice.md).
-        // Cast needed for connectionGater (upstream gap); strandBootstrapNodes is typed by 23-05.
         connectionGater: { denyDialMultiaddr: async () => false },
         // REPL-01: strand-cohort bootstrap — the drones' strand-node multiaddrs (injected
         // per-run). 38-05 (D-04 n=4): both drone-A and drone-B addrs are included so the

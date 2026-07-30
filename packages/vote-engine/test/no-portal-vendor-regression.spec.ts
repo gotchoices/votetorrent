@@ -125,7 +125,7 @@ describe('no-portal / no-vendor regression (PUB-01 / PUB-02)', () => {
   })
 
   // PUB-01-c — the 6 packages resolve to their published version lines.
-  it('PUB-01-c: the 6 de-vendored packages resolve to published versions (@serfab 0.8.x, @optimystic/db-* 0.14.x)', () => {
+  it('PUB-01-c: the 6 de-vendored packages resolve to published versions (@serfab 0.9.x, @optimystic/db-* 0.17.x)', () => {
     for (const pkg of DEVENDORED_PACKAGES) {
       const versions = resolvedVersionsFor(lock, pkg)
       expect(versions.length, `expected at least one resolved ${pkg} block in yarn.lock`).to.be.greaterThan(0)
@@ -136,7 +136,7 @@ describe('no-portal / no-vendor regression (PUB-01 / PUB-02)', () => {
         `Expected a single resolved ${pkg} version, found ${distinct.length}: ${distinct.join(', ')}`
       ).to.equal(1)
 
-      const expectedPrefix = pkg.startsWith('@serfab/') ? '0.8.' : '0.14.'
+      const expectedPrefix = pkg.startsWith('@serfab/') ? '0.9.' : '0.17.'
       expect(
         distinct[0],
         `Resolved ${pkg} version must start with ${expectedPrefix}, got ${distinct[0]}`

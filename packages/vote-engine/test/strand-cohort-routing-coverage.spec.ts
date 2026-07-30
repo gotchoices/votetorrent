@@ -250,6 +250,26 @@ function findDbP2pPatchFile (): string | undefined {
   return entries.find((f) => f.startsWith(DB_P2P_PATCH_PREFIX) && f.endsWith('.patch'))
 }
 
+/**
+ * Resolve an installed @optimystic/db-p2p's `dist/src/libp2p-node-base.js`, or undefined.
+ * The workspace is nohoist'd, so db-p2p lands in per-workspace node_modules rather than the
+ * repo root; check each known consumer in turn. Any copy proves the invariant — the lockfile
+ * resolves db-p2p to a single version (asserted by the published-stack-lock spec).
+ */
+function resolveDbP2pNodeBase (): string | undefined {
+  const candidates = [
+    join(REPO_ROOT, 'packages', 'p2p-probe-host'),
+    join(REPO_ROOT, 'apps', 'VoteTorrentAuthority'),
+    join(REPO_ROOT, 'apps', 'VoteTorrentVoting'),
+    REPO_ROOT,
+  ]
+  for (const base of candidates) {
+    const p = join(base, 'node_modules', '@optimystic', 'db-p2p', 'dist', 'src', 'libp2p-node-base.js')
+    if (existsSync(p)) return p
+  }
+  return undefined
+}
+
 /** Find the (single) committed p2p-fret yarn-patch file, or undefined if absent. */
 function findP2pFretPatchFile (): string | undefined {
   if (!existsSync(YARN_PATCHES_DIR)) return undefined
@@ -341,37 +361,48 @@ describe('P2P-11/41-04: strand-cohort NoValidAddressesError fix — app-side par
     expect(() => assertStrandRelayRoutingIntact(PROOF_RUNNER_PATH, 'replication-proof-runner.ts')).to.not.throw()
   })
 
-  it('a @optimystic/db-p2p yarn-patch is committed under .yarn/patches/', () => {
-    const patchFile = findDbP2pPatchFile()
+  // The identifyPush + slash-stripped-protocolPrefix fixes were carried by a local
+  // yarn-patch against @optimystic/db-p2p@0.14.1 (phases 41-04 / 41-06). Upstream
+  // ABSORBED both in 0.16.3 — its dist/src/libp2p-node-base.js imports identifyPush,
+  // registers the service, and passes the slash-stripped `optimystic/<network>` prefix
+  // to identify/identifyPush while keeping the slash-prefixed form for every other
+  // service. The patch was therefore retired rather than forward-ported.
+  //
+  // These guards deliberately assert against the INSTALLED PACKAGE rather than a patch
+  // file: the invariant that matters is "the shipped db-p2p registers identifyPush",
+  // and checking the resolved dist proves that whether the fix arrives via patch or
+  // upstream. A patch-file check would now pass vacuously off an orphaned patch file.
+  it('the resolved @optimystic/db-p2p registers identifyPush alongside identify()', () => {
+    const nodeBase = resolveDbP2pNodeBase()
     expect(
-      patchFile,
-      `Expected a @optimystic-db-p2p-*.patch file under ${YARN_PATCHES_DIR}`
+      nodeBase,
+      'Expected to resolve @optimystic/db-p2p dist/src/libp2p-node-base.js from an installed copy'
     ).to.not.equal(undefined)
-  })
-
-  it('the committed @optimystic/db-p2p patch registers identifyPush alongside identify()', () => {
-    const patchFile = findDbP2pPatchFile()
-    expect(patchFile, 'Expected the db-p2p patch file to exist (see prior test)').to.not.equal(undefined)
-    const patchSrc = readFileSync(join(YARN_PATCHES_DIR, patchFile as string), 'utf8')
+    const src = readFileSync(nodeBase as string, 'utf8')
     expect(
-      patchSrc.includes(IDENTIFY_PUSH_IMPORT_MARKER),
-      'Expected the db-p2p patch to import identifyPush alongside identify from @libp2p/identify'
+      src.includes(IDENTIFY_PUSH_IMPORT_MARKER),
+      'Expected the installed db-p2p to import identifyPush alongside identify from @libp2p/identify (41-04 fix)'
     ).to.equal(true)
     expect(
-      patchSrc.includes(IDENTIFY_PUSH_SERVICE_MARKER),
-      'Expected the db-p2p patch to register an identifyPush service in the shared services map'
+      src.includes(IDENTIFY_PUSH_SERVICE_MARKER),
+      'Expected the installed db-p2p to register an identifyPush service in the shared services map (41-04 fix)'
+    ).to.equal(true)
+    expect(
+      src.includes('protocolPrefix: `optimystic/${options.networkName}`'),
+      'Expected the installed db-p2p to pass the slash-STRIPPED protocolPrefix to identify/identifyPush ' +
+      '(41-06 fix — a leading slash yields the malformed double-slash `//optimystic/...` protocol string)'
     ).to.equal(true)
   })
 
-  it('root package.json resolves @optimystic/db-p2p through the committed patch protocol (not a bare semver)', () => {
+  it('root package.json pins @optimystic/db-p2p at >= 0.16.3 (the release that upstreamed the identifyPush fix)', () => {
     const rootPackageJson = JSON.parse(readFileSync(ROOT_PACKAGE_JSON_PATH, 'utf8')) as {
       resolutions?: Record<string, string>
     }
     const resolutions = rootPackageJson.resolutions ?? {}
     // Exact match on the db-p2p package itself — a substring `.includes()` would also match the
-    // SIBLING `@optimystic/db-p2p-storage-rn` package (a different resolution entry, bare semver
-    // by design), so require the key to be exactly the fragment or the fragment plus a version
-    // qualifier (`@npm:...`), never a longer package name.
+    // SIBLING `@optimystic/db-p2p-storage-rn` package (a different resolution entry), so require
+    // the key to be exactly the fragment or the fragment plus a version qualifier (`@npm:...`),
+    // never a longer package name.
     const dbP2pEntry = Object.entries(resolutions).find(
       ([key]) => key === DB_P2P_RESOLUTION_KEY_FRAGMENT || key.startsWith(DB_P2P_RESOLUTION_KEY_FRAGMENT + '@')
     )
@@ -380,10 +411,11 @@ describe('P2P-11/41-04: strand-cohort NoValidAddressesError fix — app-side par
       `Expected a root package.json resolutions entry for ${DB_P2P_RESOLUTION_KEY_FRAGMENT}`
     ).to.not.equal(undefined)
     const [, target] = dbP2pEntry as [string, string]
+    const minor = /^\^?0\.(\d+)\./.exec(target)
     expect(
-      target.startsWith(PATCH_PROTOCOL_MARKER),
-      `Expected the ${DB_P2P_RESOLUTION_KEY_FRAGMENT} resolution to target a patch: protocol ` +
-      `reference (found: ${target}) — a plain semver pin would silently drop the identifyPush fix`
+      minor !== null && Number(minor[1]) >= 16,
+      `Expected the ${DB_P2P_RESOLUTION_KEY_FRAGMENT} resolution to target >= 0.16.x (found: ${target}) — ` +
+      'earlier lines predate the upstreamed identifyPush/protocolPrefix fixes and would need the retired yarn-patch'
     ).to.equal(true)
   })
 

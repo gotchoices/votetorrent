@@ -17,7 +17,8 @@
  */
 
 import { LevelDB, LevelDBWriteBatch } from 'rn-leveldb';
-import { openOptimysticRNDb, LevelDBRawStorage, loadOrCreateRNPeerKey } from '@optimystic/db-p2p-storage-rn';
+import { openOptimysticRNDb, loadOrCreateRNPeerKey } from '@optimystic/db-p2p-storage-rn';
+import { createScopedRnStorageProvider } from './storage-guard';
 import { CadreNode } from '@serfab/cadre-core';
 import { webSockets } from '@libp2p/websockets';
 import { circuitRelayTransport } from '@libp2p/circuit-relay-v2';
@@ -59,7 +60,8 @@ export async function runDialProbe(): Promise<void> {
       controlNetwork: { partyId: 'probe-party', bootstrapNodes: [CONTROL_ADDR] },
       profile: 'transaction',
       strandFilter: { mode: 'all' },
-      storage: { provider: () => new LevelDBRawStorage(db) },
+      // ISO-01 per-scope storage + persistence guardrail (aligned with the app providers).
+      storage: { provider: createScopedRnStorageProvider('votetorrent-dialprobe-strand') },
       network: {
         transports: [webSockets(), circuitRelayTransport()],
         listenAddrs: [],

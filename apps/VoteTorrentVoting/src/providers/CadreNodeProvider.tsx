@@ -7,7 +7,8 @@
 import React, { createContext, useContext, useEffect, useState, useRef, useCallback } from "react";
 import type { PropsWithChildren } from "react";
 import { LevelDB, LevelDBWriteBatch } from 'rn-leveldb';
-import { openOptimysticRNDb, LevelDBRawStorage, loadOrCreateRNPeerKey } from '@optimystic/db-p2p-storage-rn';
+import { openOptimysticRNDb, loadOrCreateRNPeerKey } from '@optimystic/db-p2p-storage-rn';
+import { createScopedRnStorageProvider } from '../engines/storage-guard';
 import { CadreNode } from '@serfab/cadre-core';
 import { webSockets } from '@libp2p/websockets';
 import { circuitRelayTransport } from '@libp2p/circuit-relay-v2';
@@ -96,6 +97,17 @@ const STRAND_RELAY_LISTEN_ADDRS = resolveBootstrapNodes(STRAND_BOOTSTRAP_ADDR).m
   (addr) => `${addr}/p2p-circuit`,
 );
 
+// P2P-11 (41-11, wall #9 — shared-PeerId strand-relay collision): the control node reserves
+// through the drone's CONTROL relay, a DISTINCT relay identity from the strand node's STRAND
+// relay (strandNetwork below). Two separate relay servers ⇒ each circuit-relay-v2 server holds
+// only ONE connection per this peer's (shared) PeerId, so hop-connect (server/index.js:230-236
+// connections[0]) can no longer misroute strand-directed streams to the control connection
+// (41-10-STRAND-RELAY-ROUTING-DIAGNOSIS.md §5). Placeholder-aware exactly like
+// STRAND_RELAY_LISTEN_ADDRS — a solo/placeholder boot degrades to [] (no crash).
+const CONTROL_RELAY_LISTEN_ADDRS = resolveBootstrapNodes(CONTROL_ADDR).map(
+  (addr) => `${addr}/p2p-circuit`,
+);
+
 // ---------------------------------------------------------------------------
 // Provider
 // ---------------------------------------------------------------------------
@@ -171,20 +183,8 @@ export function CadreNodeProvider({ children }: PropsWithChildren) {
         // (H16 hex) or the literal 'control'; both are filesystem-safe, but
         // sanitize defensively to match cadre-core's own getStrandStoragePath
         // convention (replace(/[^a-zA-Z0-9-]/g, '_')).
-        const storageDbs = new Map<string, ReturnType<typeof openOptimysticRNDb>>();
-        const getScopedRawStorage = (scopeId: string): LevelDBRawStorage => {
-          const safeId = scopeId.replace(/[^a-zA-Z0-9-]/g, '_');
-          let scopedDb = storageDbs.get(safeId);
-          if (!scopedDb) {
-            scopedDb = openOptimysticRNDb({
-              openFn: (n, c, e) => new LevelDB(n, c, e),
-              WriteBatch: LevelDBWriteBatch,
-              name: `votetorrent-voting-strand-${safeId}`,
-            });
-            storageDbs.set(safeId, scopedDb);
-          }
-          return new LevelDBRawStorage(scopedDb);
-        };
+        // ISO-01 per-scope storage + release-build persistence guardrail — see engines/storage-guard.ts.
+        const scopedStorageProvider = createScopedRnStorageProvider('votetorrent-voting-strand');
 
         localNode = new CadreNode({
           privateKey,
@@ -213,8 +213,9 @@ export function CadreNodeProvider({ children }: PropsWithChildren) {
           // ISO-01: per-scope storage. cadre-core invokes provider(scopeId) with the
           // strandId for each strand and 'control' for the control DB — one distinct
           // LevelDB per scope isolates each network's collections.
-          storage: { provider: (scopeId: string) => getScopedRawStorage(scopeId) },
+          storage: { provider: scopedStorageProvider },
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          // CONTROL node network — reserves through the drone's CONTROL relay (P2P-11 41-11).
           network: {
             transports: [
               webSockets(),
@@ -227,22 +228,34 @@ export function CadreNodeProvider({ children }: PropsWithChildren) {
                 // NOT yield N reservations under the default circuitRelayTransport() —
                 // DEFAULT_RESERVATION_CONCURRENCY=1 serializes the reserve queue and
                 // drops any 2nd+ reservation via reserveQueue.clear(). Size concurrency
-                // to the number of known drones actually driving
-                // STRAND_RELAY_LISTEN_ADDRS below (never less than 1).
+                // to the number of known control relays driving CONTROL_RELAY_LISTEN_ADDRS
+                // (never less than 1).
+                reservationConcurrency: Math.max(1, CONTROL_RELAY_LISTEN_ADDRS.length),
+              }) as unknown as ReturnType<typeof webSockets>,
+            ],
+            // D-03/D-05: always-on relay reservation-seeking (P2P-08 drone-relay path),
+            // relay-qualified — but scoped to the drone's CONTROL relay (P2P-11 41-11).
+            // The STRAND relay moves to strandNetwork below, so the control and strand
+            // libp2p nodes no longer collide at one relay under this peer's shared PeerId.
+            listenAddrs: CONTROL_RELAY_LISTEN_ADDRS,
+            // Permissive gater — allows loopback / emulator host dials (D-11).
+            // Per-strand enrollment gating is v2.x scope.
+            connectionGater: { denyDialMultiaddr: async () => false },
+          } as any,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          // STRAND node network override (cadre-core strandNetwork patch, P2P-11 41-11):
+          // per-strand libp2p nodes use THIS config instead of `network` above, reserving
+          // through the drone's STRAND relay — a DISTINCT relay identity from the control
+          // node — closing the shared-PeerId hop-connect collision (41-10 diagnosis §5).
+          // Unset ⇒ strands would reuse `network` (the pre-fix collision).
+          strandNetwork: {
+            transports: [
+              webSockets(),
+              circuitRelayTransport({
                 reservationConcurrency: Math.max(1, STRAND_RELAY_LISTEN_ADDRS.length),
               }) as unknown as ReturnType<typeof webSockets>,
             ],
-            // D-03/D-05: always-on relay reservation-seeking (P2P-08 drone-relay
-            // path), now relay-qualified per known drone (P2P-11 wall #8 fix) instead
-            // of the bare '/p2p-circuit' sentinel — see STRAND_RELAY_LISTEN_ADDRS
-            // above. Each qualified entry proactively requests+holds a reservation
-            // against its target drone via @libp2p/circuit-relay-v2's 'configured'
-            // path — one code path, no proof-gating flag.
             listenAddrs: STRAND_RELAY_LISTEN_ADDRS,
-            // Permissive gater — allows loopback / emulator host dials (D-11).
-            // Per-strand enrollment gating is v2.x scope.
-            // Cast needed for connectionGater (cadre-core upstream gap); strandBootstrapNodes
-            // is typed by 23-05 (NetworkConfig.strandBootstrapNodes?: string[]).
             connectionGater: { denyDialMultiaddr: async () => false },
             // NETOP-04: strand-cohort bootstrap — the drone's strand-node multiaddr.
             // Placeholder/unset → [] → strand boots solo without crashing (P2P-03 no regression).

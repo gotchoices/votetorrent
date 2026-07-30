@@ -36,7 +36,8 @@
  */
 
 import { LevelDB, LevelDBWriteBatch } from 'rn-leveldb';
-import { openOptimysticRNDb, LevelDBRawStorage, loadOrCreateRNPeerKey } from '@optimystic/db-p2p-storage-rn';
+import { openOptimysticRNDb, loadOrCreateRNPeerKey } from '@optimystic/db-p2p-storage-rn';
+import { createScopedRnStorageProvider } from './storage-guard';
 import { CadreNode } from '@serfab/cadre-core';
 import { webSockets } from '@libp2p/websockets';
 import { circuitRelayTransport } from '@libp2p/circuit-relay-v2';
@@ -94,7 +95,8 @@ export async function runStrandPersistenceProof(): Promise<void> {
       // is a separate productionization task, out of this solo-boot/persistence proof's scope.
       requireSignedSchemas: false,
       strandFilter: { mode: 'all' },
-      storage: { provider: () => new LevelDBRawStorage(rnDb) },
+      // ISO-01 per-scope storage + persistence guardrail (aligned with the app providers).
+      storage: { provider: createScopedRnStorageProvider('votetorrent-persistence-strand') },
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       network: {
         transports: [webSockets(), circuitRelayTransport()],
