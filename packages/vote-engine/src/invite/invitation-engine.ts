@@ -4,6 +4,7 @@ import { sha256 } from '@noble/hashes/sha2.js'
 import { MisuseError, QuereusError } from '@quereus/quereus'
 import type { EngineContext } from '../types.js'
 import { inviteResultSignedBytes, nowCanonicalDatetime, verifyAdHocInviteSignature } from '../utils.js'
+import { allocateTid } from '../database/tid-allocator.js'
 import type {
   IInvitationEngine,
   InviteStatus,
@@ -251,13 +252,30 @@ export class InvitationEngine implements IInvitationEngine {
     try {
       // Step 1: Resolve the slot to confirm it exists (fail fast with a clear error).
       // InviteKey is also read here (999.1 R-03) — it is the verifying key for the
-      // engine-side InviteResult.InviteSignature check below.
+      // engine-side InviteResult.InviteSignature check below. Type/Name/ElectionId/
+      // InviteSignature (of the InviteSlot itself) are read for the keyholder
+      // accept-time User+Keyholder minting below (second-keyholder-invite-unique fix).
       const slotRow = await this.ctx.db
-        .prepare('SELECT Cid, InviteKey FROM InviteSlot WHERE Cid = :slotCid')
-        .get({ slotCid }) as { Cid: string; InviteKey: string } | undefined
+        .prepare('SELECT Cid, InviteKey, Type, Name, ElectionId, InviteSignature FROM InviteSlot WHERE Cid = :slotCid')
+        .get({ slotCid }) as {
+          Cid: string
+          InviteKey: string
+          Type: string
+          Name: string
+          ElectionId: string | null
+          InviteSignature: string | null
+        } | undefined
       if (!slotRow) {
         throw new Error(`InviteSlot not found for Cid: ${slotCid}`)
       }
+
+      // second-keyholder-invite-unique fix: an accepted keyholder ('k') invite mints a
+      // NEW User (there is no existing identity for a name-only invitee pre-acceptance)
+      // — reserve its id up front, mirroring NetworkEngine.respondToInvite's authority-
+      // invite id reservation, so the same id can be persisted into
+      // InviteResult.InvokedId AND used for the User/Keyholder INSERTs below.
+      const isKeyholderAccept = accept && slotRow.Type === 'k'
+      const mintedUserId = isKeyholderAccept ? (invokedId ?? crypto.randomUUID()) : undefined
 
       // Step 2: Determine Digest column value.
       // Accept (INV-04): Digest must be non-null (DigestValid schema constraint).
@@ -335,7 +353,7 @@ export class InvitationEngine implements IInvitationEngine {
           isAccepted: accept,
           digest: digestValue,
           inviteSignature,
-          invokedId: invokedId ?? null,
+          invokedId: mintedUserId ?? invokedId ?? null,
           isSignatureValid,
         }
       )
@@ -344,6 +362,68 @@ export class InvitationEngine implements IInvitationEngine {
       // The local InviteResult write above is the only real action this phase.
       // Transport-level authenticity for the cross-device exchange will be
       // implemented in the P2P transport phase.
+
+      // second-keyholder-invite-unique fix: mint the real User + Keyholder rows an
+      // accepted keyholder invite promises. This is the ONLY type-specific branch in
+      // this method today — officer ('of') and authority ('au') invites still stop at
+      // the InviteResult write above (their downstream object creation lives in
+      // NetworkEngine.respondToInvite, a separate engine).
+      //
+      // Two-insert batch, deliberately DIFFERENT context envelopes per table:
+      //   User:      InviteSlotCid + InviteSignature bound (satisfies User.InsertValid's
+      //              invite-bound branch: `I.Cid = context.InviteSlotCid and
+      //              I.InviteSignature = context.InviteSignature` — reusing the InviteSlot's
+      //              OWN InviteSignature column, which may legitimately be '' per the
+      //              documented send-side carve-out).
+      //   Keyholder: SigningNonce/InviteSlotCid/InviteSignature all NULL (satisfies
+      //              Keyholder.InsertValid, which requires exactly that — Keyholder rows
+      //              are inserted post-signing, not as part of the AdminSignature pipeline).
+      // Same `db.exec` batch so User.UserValid/UserKeyValid-adjacent cross-table CHECKs
+      // (Keyholder.UserIdValid: `exists (select 1 from User U where U.Id = new.UserId)`)
+      // resolve against the deferred-constraint queue at batch end, not per-statement.
+      //
+      // ElectionRevision is resolved FRESH here (not persisted on InviteSlot at send-time)
+      // so the Keyholder row always binds to the CURRENT revision, never a stale one
+      // captured when the invite was sent — this is also where the old hardcoded
+      // `revision: 0` bug (election-engine.ts's prior inviteKeyholder) is genuinely fixed,
+      // not just relocated.
+      if (isKeyholderAccept && mintedUserId) {
+        if (!slotRow.ElectionId) {
+          throw new Error(`respondToInvite: keyholder InviteSlot ${slotCid} has no ElectionId`)
+        }
+        const revRow = await this.ctx.db
+          .prepare('SELECT Revision FROM ElectionRevision WHERE ElectionId = :electionId')
+          .get({ electionId: slotRow.ElectionId }) as { Revision: number } | undefined
+        if (!revRow) {
+          throw new Error(`respondToInvite: no ElectionRevision found for election ${slotRow.ElectionId}`)
+        }
+        const tid = await allocateTid(this.ctx.db, 'user')
+        await this.ctx.db.exec(
+          `insert into User (
+            Id,
+            Name,
+            ImageRef
+          )
+          with context SigningNonce = null, InviteSlotCid = :inviteSlotCid, InviteSignature = :userInviteSignature, Tid = ${tid}
+          values (:userId, :userName, null);
+
+          insert into Keyholder (
+            ElectionId,
+            ElectionRevision,
+            UserId
+          )
+          with context SigningNonce = null, InviteSlotCid = null, InviteSignature = null, Tid = ${tid}
+          values (:electionId, :revision, :userId);`,
+          {
+            inviteSlotCid: slotCid,
+            userInviteSignature: slotRow.InviteSignature,
+            userId: mintedUserId,
+            userName: slotRow.Name,
+            electionId: slotRow.ElectionId,
+            revision: revRow.Revision,
+          }
+        )
+      }
 
     } catch (err) {
       this.rethrow(err, 'respondToInvite')

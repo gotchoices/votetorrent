@@ -123,10 +123,18 @@ export class ElectionsEngine implements IElectionsEngine {
   }
 
   /**
-   * ELEC-05 (narrative) / `adjustElection` (interface) — INSERT a
-   * ProposedElection row. The schema's ProposedElection.UserValid CHECK
-   * gates on an Officer with scope 'mel', a non-expired UserKey matching
-   * `context.UserKey`, and a SignatureValid call over the row digest.
+   * ELEC-05 (narrative) / `adjustElection` (interface) — UPSERT the
+   * ProposedElection + ProposedElectionRevision pair for an election. The
+   * schema's ProposedElection.UserValid CHECK gates on an Officer with scope
+   * 'mel', a non-expired UserKey matching `context.UserKey`, and a
+   * SignatureValid call over the row digest.
+   *
+   * A proposal is a *pending* amendment keyed by `ProposedElection.Id`
+   * (primary key), so re-proposing for the same election REPLACES the
+   * outstanding proposal rather than inserting a second one. Blind-INSERTing
+   * (the pre-fix behaviour) made the second revise of any election fail with
+   * `UNIQUE constraint failed: ProposedElection PK`, which the authority app
+   * could only surface as a generic "could not save" message.
    */
   async adjustElection (election: ElectionInit): Promise<void> {
     this.requireCtx('adjustElection')
@@ -150,8 +158,25 @@ export class ElectionsEngine implements IElectionsEngine {
       // mirrors the AUTH-08 envelope in SigningEngine.sign.
       await this.ctx!.db.exec('BEGIN')
       try {
+      // Does an outstanding proposal already exist for this election? If so
+      // the pair is UPDATEd in place (same PKs, same dependents) instead of
+      // re-INSERTed — see the upsert rationale on the method doc above.
+      const existingCore = await this.ctx!.db
+        .prepare('select Id from ProposedElection where Id = :id')
+        .get({ id: e.id })
       await this.ctx!.db.exec(
-				`insert into ProposedElection (
+        existingCore
+					? `update ProposedElection
+						with context UserId = :userId, UserKey = :userKey, Signature = :signature, Tid = ${tid}, now = :now, IsUserValid = true
+						set
+							AuthorityId = :authorityId,
+							Title = :title,
+							Date = :date,
+							RevisionDeadline = :revisionDeadline,
+							BallotDeadline = :ballotDeadline,
+							Type = :type
+						where Id = :id`
+					: `insert into ProposedElection (
 					Id,
 					AuthorityId,
 					Title,
@@ -199,15 +224,31 @@ export class ElectionsEngine implements IElectionsEngine {
       // ProposedElection row inserted above.
       const revTid = await allocateTid(this.ctx!.db, 'elections')
       const r = election.revision
+      const existingRev = await this.ctx!.db
+        .prepare('select ElectionId from ProposedElectionRevision where ElectionId = :id')
+        .get({ id: r.electionId })
       await this.ctx!.db.exec(
-				`insert into ProposedElectionRevision (
+        existingRev
+					? `update ProposedElectionRevision
+						with context UserId = :userId, UserKey = :userKey, Signature = :signature, Tid = ${revTid}, now = :now, IsUserValid = true
+						set
+							Revision = :revision,
+							RevisionTimestamp = :revisionTimestamp,
+							Tags = :tags,
+							Instructions = :instructions,
+							Timeline = :timeline,
+							KeyholderThreshold = :keyholderThreshold,
+							Keyholders = :keyholders
+						where ElectionId = :electionId`
+					: `insert into ProposedElectionRevision (
 					ElectionId,
 					Revision,
 					RevisionTimestamp,
 					Tags,
 					Instructions,
 					Timeline,
-					KeyholderThreshold
+					KeyholderThreshold,
+					Keyholders
 				)
 				with context UserId = :userId, UserKey = :userKey, Signature = :signature, Tid = ${revTid}, now = :now, IsUserValid = true
 				values (
@@ -217,7 +258,8 @@ export class ElectionsEngine implements IElectionsEngine {
 					:tags,
 					:instructions,
 					:timeline,
-					:keyholderThreshold
+					:keyholderThreshold,
+					:keyholders
 				)`,
         {
           electionId: r.electionId,
@@ -227,6 +269,12 @@ export class ElectionsEngine implements IElectionsEngine {
           instructions: r.instructions,
           timeline: JSON.stringify(r.timeline),
           keyholderThreshold: r.keyholderThreshold,
+          // 39-02 D-04 Gap 2 sibling: persist the proposal's keyholder
+          // invitees into the UNSIGNED ProposedElectionRevision.Keyholders
+          // column that getProposedElections already reads back. Without
+          // this write, keyholders edited on a revision were silently
+          // dropped by the engine (the app compensated with a local cache).
+          keyholders: JSON.stringify(r.keyholders ?? []),
           userId: this.ctx!.user?.id ?? null,
           userKey: signerKey,
           signature: null,

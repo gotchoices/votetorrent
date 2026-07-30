@@ -4,6 +4,7 @@ import { ScrollView, StyleSheet, View } from "react-native";
 import { ExtendedTheme, useNavigation, useRoute, useTheme } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type {
+	IDefaultUserEngine,
 	IElectionEngine,
 	IInvitationEngine,
 	InviteStatus,
@@ -21,6 +22,7 @@ import { InlineError } from "../../components/InlineError";
 import { SignatureTaskFooter } from "../../components/SignatureTaskFooter";
 import type { RootStackParamList } from "../../navigation/types";
 import { useApp } from "../../providers/AppProvider";
+import { createDeviceSigner } from "../../engines/device-signer";
 import { globalStyles } from "../../theme/styles";
 
 type KeyholderInvitationParams = {
@@ -113,8 +115,16 @@ export function KeyholderInvitationScreen() {
 			const electionDetails = await electionEngine.getElectionDetails();
 			const electionId = electionDetails.election.id;
 
+			// second-keyholder-invite-unique fix: inviteKeyholder now writes a signed
+			// InviteSlot (Type='k') and requires the admin's approval signature — same
+			// D-01/D-03/D-04 device-signer pattern AuthorityInvitationScreen uses for
+			// saveInviteWithSigning. The private key never crosses into vote-engine.
+			const defaultUserEng = await getEngine<IDefaultUserEngine>("defaultUser");
+			const defaultUser = await defaultUserEng.get();
+			const signer = await createDeviceSigner(defaultUser?.name ?? "Device User");
+
 			// Call the un-gated inviteKeyholder (21-05 removed the FeatureNotAvailableError gate).
-			await electionEngine.inviteKeyholder(keyholderInvite, electionId);
+			await electionEngine.inviteKeyholder(keyholderInvite, electionId, signer);
 
 			// D-05: render the one-time invite material as text for Copy-to-clipboard share.
 			// Include the invitePrivate so the invitee can paste and accept (D-06).

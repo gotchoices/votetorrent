@@ -20,7 +20,7 @@ import { KeysTasksEngine } from '../src/tasks/keys-tasks-engine'
 import { OnboardingTasksEngine } from '../src/tasks/onboarding-tasks-engine'
 import { SignatureTasksEngine } from '../src/tasks/signature-tasks-engine'
 import type { EngineContext } from '../src/types.js'
-import { createTestNetwork, addTestAuthority, addTestElection, seedBallot, seedQuestion, seedElectionSigning, makeElectionInit as makeElectionInitFromFixture, makeTestSignature } from './fixtures/test-context.js'
+import { createTestNetwork, addTestAuthority, addTestElection, seedBallot, seedQuestion, seedElectionSigning, makeElectionInit as makeElectionInitFromFixture, makeTestSignature, makeTestSignCallback } from './fixtures/test-context.js'
 import { peekNextElectionTid } from '../src/elections/elections-engine.js'
 import { digestToBytes } from '../src/utils.js'
 import { randomTestKeyPair } from './fixtures/keys.js'
@@ -273,6 +273,51 @@ describe('ElectionsEngine', () => {
         .prepare('select Id from ProposedElection where Id = :id')
         .get({ id: 'election-1' })
       expect(row?.Id).to.equal('election-1')
+    })
+
+    // Regression: a SECOND revise of the same election used to blind-INSERT
+    // over the existing proposal's primary key and die with
+    // "UNIQUE constraint failed: ProposedElection PK" — surfaced in the
+    // authority app as a generic "could not save the election" message.
+    // The proposal pair is now upserted, so re-proposing REPLACES the
+    // outstanding proposal (including its edited keyholder list).
+    it('re-proposing REPLACES the outstanding proposal instead of failing on the PK', async () => {
+      const net = await createTestNetwork()
+      const auth = await addTestAuthority(net)
+      const elCtx = await addTestElection(auth)
+      const engine = new ElectionsEngine(elCtx.ctx)
+      const first = makeElectionInit()
+      first.revision.keyholders = [{ name: 'T' } as unknown as KeyholderInvite]
+      await engine.adjustElection(first)
+
+      const second: ElectionInit = {
+        election: { ...first.election, title: 'Second Proposal' },
+        revision: {
+          ...first.revision,
+          revision: first.revision.revision + 1,
+          keyholders: [
+            { name: 'T' },
+            { name: 'Y' },
+            { name: '44' }
+          ] as unknown as KeyholderInvite[]
+        }
+      }
+      await engine.adjustElection(second)
+
+      const core = await elCtx.ctx.db
+        .prepare('select Id, Title from ProposedElection where Id = :id')
+        .get({ id: first.election.id })
+      expect(core?.Title).to.equal('Second Proposal')
+
+      const ids: unknown[] = []
+      for await (const row of elCtx.ctx.db.eval('select Id from ProposedElection')) ids.push(row)
+      expect(ids.length).to.equal(1)
+
+      const proposals = await engine.getProposedElections()
+      expect(proposals.length).to.equal(1)
+      expect(proposals[0]!.proposed.revision.revision).to.equal(first.revision.revision + 1)
+      // Keyholders edited on a revision are persisted (were previously dropped).
+      expect(proposals[0]!.proposed.revision.keyholders.map((k) => k.name)).to.deep.equal(['T', 'Y', '44'])
     })
   })
 
@@ -575,24 +620,30 @@ describe('ElectionEngine', () => {
   // inviteKeyholder / revokeKeyholder
   // -----------------------------------------------------------------------
   describe('inviteKeyholder', () => {
-    it('INSERTs a Keyholder row', async () => {
+    // second-keyholder-invite-unique fix: inviteKeyholder now INSERTs a signed
+    // InviteSlot (Type='k') keyed to the target election, instead of writing
+    // directly into Keyholder (the real User + Keyholder rows are minted at
+    // ACCEPT time — see InvitationEngine.respondToInvite / invitation.spec.ts).
+    it('INSERTs an InviteSlot row (Type=k) bound to the election', async () => {
       const net = await createTestNetwork()
       const auth = await addTestAuthority(net)
       const elCtx = await addTestElection(auth)
       const kh: KeyholderInvite = {
         name: 'KH1',
-        type: 'au',
-        expiration: '0',
+        type: 'k',
+        expiration: new Date(Date.now() + 3_600_000).toISOString(),
         inviteKey: 'k'.repeat(66),
-        inviteSignature: 's'.repeat(128),
+        // Empty inviteSignature hits the documented send-side carve-out.
+        inviteSignature: '',
       }
-      await elCtx.electionEngine.inviteKeyholder(kh, 'election-1')
+      await elCtx.electionEngine.inviteKeyholder(kh, 'election-1', makeTestSignCallback(auth.user))
       const row = await elCtx.ctx.db
         .prepare(
-          'select UserId from Keyholder where ElectionId = :id limit 1'
+          "select Name, ElectionId from InviteSlot where Type = 'k' and ElectionId = :id limit 1"
         )
         .get({ id: 'election-1' })
-      expect(row?.UserId).to.be.a('string')
+      expect(row?.Name).to.equal('KH1')
+      expect(row?.ElectionId).to.equal('election-1')
     })
   })
 

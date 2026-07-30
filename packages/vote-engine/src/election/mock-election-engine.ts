@@ -10,6 +10,7 @@ import type {
 	IElectionProposeRevisionBuilder,
 	IElectionRevokeKeyholderBuilder,
 	KeyholderInvite,
+	Signature,
 } from '@votetorrent/vote-core';
 import { ElectionEvent, ElectionType, FeatureNotAvailableError } from '@votetorrent/vote-core';
 import { ElectionInviteKeyholderBuilder } from './builders/election-invite-keyholder-builder.js';
@@ -164,6 +165,7 @@ export class MockElectionEngine implements IElectionEngine {
 	async inviteKeyholder(
 		_keyholder: KeyholderInvite,
 		_electionId: string,
+		_signatureOrCallback: Signature | ((digest: Uint8Array) => Promise<Signature>),
 	): Promise<void> {
 		return Promise.resolve();
 	}

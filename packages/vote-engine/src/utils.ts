@@ -157,6 +157,21 @@ export function authorityInviteSignedBytes (fields: { type: string; name: string
 }
 
 /**
+ * Reproduce a keyholder invite's ad-hoc signed-bytes domain (999.1 R-03
+ * carve-out), mirroring `authorityInviteSignedBytes` — keyholder invites
+ * carry no officer-only title/scopes fields, so the domain is the same
+ * 3-field `[type, name, expiration].join('|')` shape. There is no
+ * `createKeyholderInvite` factory yet (see `KeyholderInvitationScreen.tsx`'s
+ * WR-04 comment) producing a REAL signature over this domain client-side, so
+ * `ElectionEngine.inviteKeyholder` only calls this to verify a signature when
+ * the caller supplies a non-empty one; an empty `inviteSignature` (today's
+ * screen path) is a documented, narrow carve-out — not a fabricated `true`.
+ */
+export function keyholderInviteSignedBytes (fields: { type: string; name: string; expiration: string }): Uint8Array {
+  return new TextEncoder().encode([fields.type, fields.name, fields.expiration].join('|'))
+}
+
+/**
  * Reproduce `AuthorityEngine.createOfficerInvite`'s exact signed-bytes
  * domain (999.1 R-03 carve-out). Field order MUST match the producer
  * verbatim: `[name, title, JSON.stringify(scopes), type, expiration,

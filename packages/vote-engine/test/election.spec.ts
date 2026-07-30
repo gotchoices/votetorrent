@@ -18,7 +18,7 @@ import { ElectionRevokeKeyholderBuilder } from '../src/election/builders/electio
 import { ElectionEngine } from '../src/election/election-engine.js'
 import type { ElectionSubject } from '../src/election/election-engine.js'
 import { MockElectionEngine } from '../src/election/mock-election-engine.js'
-import { createTestNetwork, addTestAuthority, addTestElection } from './fixtures/test-context.js'
+import { createTestNetwork, addTestAuthority, addTestElection, makeTestSignCallback } from './fixtures/test-context.js'
 import type {
   Ballot,
   ElectionRevisionInit,
@@ -98,13 +98,22 @@ function makeElectionRevisionInit (overrides?: Partial<ElectionRevisionInit>): E
 function makeKeyholderInvite (overrides?: Partial<KeyholderInvite>): KeyholderInvite {
   return {
     name: 'KH1',
-    type: 'au',
-    expiration: '0',
+    type: 'k',
+    // second-keyholder-invite-unique fix: inviteKeyholder now INSERTs a real InviteSlot
+    // row, so Expiration must satisfy ExpirationValid (Expiration > context.now) — the
+    // pre-fix placeholder '0' is no longer schema-legal now that this path is exercised.
+    expiration: new Date(Date.now() + 3_600_000).toISOString(),
     inviteKey: 'k'.repeat(66),
-    inviteSignature: 's'.repeat(128),
+    // Empty inviteSignature hits the documented send-side carve-out (no
+    // createKeyholderInvite factory yet — see keyholderInviteSignedBytes doc comment)
+    // rather than tripping real secp256k1 verification against fixture-garbage hex.
+    inviteSignature: '',
     ...overrides
   } as KeyholderInvite
 }
+
+/** A fixed, well-formed (but non-cryptographic) Signature fixture for stub-engine builder tests that never touch real SQL verification. */
+const dummySignature = { signature: 'a'.repeat(128), signerKey: 'b'.repeat(66), signerUserId: 'user-1' }
 
 // ===========================================================================
 // ElectionProposeBallotBuilder — BUILD-ELEC-02
@@ -369,11 +378,11 @@ describe('ElectionProposeRevisionBuilder', () => {
 describe('ElectionInviteKeyholderBuilder', () => {
   const stubEngine = makeStubElectionEngine()
 
-  it('empty builder is invalid with missingFields=[keyholder, electionId]', () => {
+  it('empty builder is invalid with missingFields=[keyholder, electionId, signatureOrCallback]', () => {
     const b = new ElectionInviteKeyholderBuilder(stubEngine)
     expect(b.isValid()).to.equal(false)
     const paths = b.missingFields().map(m => m.path)
-    expect(paths).to.deep.equal(['keyholder', 'electionId'])
+    expect(paths).to.deep.equal(['keyholder', 'electionId', 'signatureOrCallback'])
   })
 
   it('per-setter validation rejects empty keyholder.name', () => {
@@ -387,7 +396,7 @@ describe('ElectionInviteKeyholderBuilder', () => {
     const b = new ElectionInviteKeyholderBuilder(stubEngine)
       .setKeyholder(makeKeyholderInvite())
     const missing = b.missingFields().map(m => m.path)
-    expect(missing).to.deep.equal(['electionId'])
+    expect(missing).to.deep.equal(['electionId', 'signatureOrCallback'])
   })
 
   it('REAL ENGINE: isValid===true => commit() does not throw BuilderValidationError', async () => {
@@ -395,14 +404,15 @@ describe('ElectionInviteKeyholderBuilder', () => {
     const auth = await addTestAuthority(net)
     const elCtx = await addTestElection(auth)
     const engine = new ElectionEngine({ id: 'election-1', authorityId: auth.authority.id }, elCtx.ctx)
-    const b = new ElectionInviteKeyholderBuilder(engine).fromPayload({ keyholder: makeKeyholderInvite(), electionId: 'election-1' })
+    const signatureOrCallback = makeTestSignCallback(auth.user)
+    const b = new ElectionInviteKeyholderBuilder(engine).fromPayload({ keyholder: makeKeyholderInvite(), electionId: 'election-1', signatureOrCallback })
     expect(b.isValid()).to.equal(true)
     await b.commit()
   })
 
   it('round-trip serialization', () => {
     const b = new ElectionInviteKeyholderBuilder(stubEngine)
-      .fromPayload({ keyholder: makeKeyholderInvite(), electionId: 'e1' })
+      .fromPayload({ keyholder: makeKeyholderInvite(), electionId: 'e1', signatureOrCallback: dummySignature })
     const json = b.toJSON()
     const parsed = JSON.parse(JSON.stringify(json))
     expect(parsed).to.deep.equal(json)
@@ -415,7 +425,8 @@ describe('ElectionInviteKeyholderBuilder', () => {
     const auth = await addTestAuthority(net)
     const elCtx = await addTestElection(auth)
     const engine = new ElectionEngine({ id: 'election-1', authorityId: auth.authority.id }, elCtx.ctx)
-    const b = new ElectionInviteKeyholderBuilder(engine).fromPayload({ keyholder: makeKeyholderInvite(), electionId: 'election-1' })
+    const signatureOrCallback = makeTestSignCallback(auth.user)
+    const b = new ElectionInviteKeyholderBuilder(engine).fromPayload({ keyholder: makeKeyholderInvite(), electionId: 'election-1', signatureOrCallback })
     await b.commit()
     let caught: unknown
     try { b.commit() } catch (err) { caught = err }
@@ -424,7 +435,7 @@ describe('ElectionInviteKeyholderBuilder', () => {
 
   it('toEngineInput shape + incomplete rejection', () => {
     const b = new ElectionInviteKeyholderBuilder(stubEngine)
-      .fromPayload({ keyholder: makeKeyholderInvite(), electionId: 'e1' })
+      .fromPayload({ keyholder: makeKeyholderInvite(), electionId: 'e1', signatureOrCallback: dummySignature })
     const input = b.toEngineInput()
     expect(input.keyholder.name).to.equal('KH1')
     expect(input.electionId).to.equal('e1')
@@ -434,29 +445,29 @@ describe('ElectionInviteKeyholderBuilder', () => {
 
   it('SC4 DB-FREE stub: isValid===true => commit() no-throw + double-commit guard', async () => {
     const b = new ElectionInviteKeyholderBuilder(stubEngine)
-      .fromPayload({ keyholder: makeKeyholderInvite(), electionId: 'e1' })
+      .fromPayload({ keyholder: makeKeyholderInvite(), electionId: 'e1', signatureOrCallback: dummySignature })
     expect(b.isValid()).to.equal(true)
     await b.commit()
     expect(() => b.commit()).to.throw(BuilderAlreadyCommittedError)
   })
 
   it('REAL ENGINE: equivalence smoke: engine.inviteKeyholder(payload) vs builder.fromPayload(payload).commit()', async () => {
-    const payload = { keyholder: makeKeyholderInvite(), electionId: 'election-1' }
     // Direct path
     const net1 = await createTestNetwork()
     const auth1 = await addTestAuthority(net1)
     const elCtx1 = await addTestElection(auth1)
     const engine1 = new ElectionEngine({ id: 'election-1', authorityId: auth1.authority.id }, elCtx1.ctx)
     let err1: unknown
-    try { await engine1.inviteKeyholder(payload.keyholder, payload.electionId) } catch (e) { err1 = e }
+    try { await engine1.inviteKeyholder(makeKeyholderInvite(), 'election-1', makeTestSignCallback(auth1.user)) } catch (e) { err1 = e }
     expect(err1).to.equal(undefined)
     // Builder path
     const net2 = await createTestNetwork()
     const auth2 = await addTestAuthority(net2)
     const elCtx2 = await addTestElection(auth2)
     const engine2 = new ElectionEngine({ id: 'election-1', authorityId: auth2.authority.id }, elCtx2.ctx)
+    const payload2 = { keyholder: makeKeyholderInvite(), electionId: 'election-1', signatureOrCallback: makeTestSignCallback(auth2.user) }
     let err2: unknown
-    try { await engine2.buildInviteKeyholder().fromPayload(payload).commit() } catch (e) { err2 = e }
+    try { await engine2.buildInviteKeyholder().fromPayload(payload2).commit() } catch (e) { err2 = e }
     expect(err2).to.equal(undefined)
   })
 
@@ -580,15 +591,18 @@ describe('ElectionEngine — inviteKeyholder real-path (INV-03)', () => {
 
     const keyholder: KeyholderInvite = {
       name: 'Test Keyholder',
-      type: 'au',
+      type: 'k',
       expiration: new Date(Date.now() + 86_400_000).toISOString(),
       inviteKey: 'k'.repeat(66),
-      inviteSignature: 's'.repeat(128),
+      // Empty inviteSignature hits the documented send-side carve-out (see
+      // keyholderInviteSignedBytes doc comment) rather than tripping real
+      // secp256k1 verification against fixture-garbage hex.
+      inviteSignature: '',
     }
 
     let caught: unknown
     try {
-      await engine.inviteKeyholder(keyholder, 'election-1')
+      await engine.inviteKeyholder(keyholder, 'election-1', makeTestSignCallback(auth.user))
     } catch (err) {
       caught = err
     }

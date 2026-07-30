@@ -1,3 +1,4 @@
+import type { Signature } from '../common/signature.js'
 import type {
   Ballot,
   BallotDetails,
@@ -12,9 +13,21 @@ export interface IElectionEngine {
   getBallotDetails(id: string): Promise<BallotDetails>
   getBallots(): Promise<BallotSummary[]>
   getElectionDetails(): Promise<ElectionDetails>
+  /**
+   * second-keyholder-invite-unique fix: INSERTs a signed `InviteSlot`
+   * (Type='k') mirroring `AuthorityEngine.saveAuthorityInvite`/
+   * `saveOfficerInvite` — it no longer writes the `Keyholder` table directly
+   * at send-time (that row is minted at ACCEPT time, see
+   * `InvitationEngine.respondToInvite`). `signatureOrCallback` mirrors
+   * `AuthorityEngine.saveInviteWithSigning`: either a completed `Signature`
+   * (test fixtures) or a device-signer callback receiving the
+   * engine-computed digest bytes (the caller's private key never crosses
+   * into the engine).
+   */
   inviteKeyholder(
     keyholder: KeyholderInvite,
-    electionId: string
+    electionId: string,
+    signatureOrCallback: Signature | ((digest: Uint8Array) => Promise<Signature>)
   ): Promise<void>
   proposeBallot(ballot: Ballot): Promise<void>
   proposeRevision(revision: ElectionRevisionInit): Promise<void>
@@ -42,8 +55,8 @@ export interface IElectionProposeRevisionBuilder extends IBuilder<ElectionRevisi
   fromPayload(payload: ElectionRevisionInit): this
 }
 
-export interface IElectionInviteKeyholderBuilder extends IBuilder<{ keyholder: KeyholderInvite; electionId: string }, void> {
-  fromPayload(payload: { keyholder: KeyholderInvite; electionId: string }): this
+export interface IElectionInviteKeyholderBuilder extends IBuilder<{ keyholder: KeyholderInvite; electionId: string; signatureOrCallback: Signature | ((digest: Uint8Array) => Promise<Signature>) }, void> {
+  fromPayload(payload: { keyholder: KeyholderInvite; electionId: string; signatureOrCallback: Signature | ((digest: Uint8Array) => Promise<Signature>) }): this
 }
 
 export interface IElectionRevokeKeyholderBuilder extends IBuilder<{ keyholder: KeyholderInvite; electionId: string }, void> {

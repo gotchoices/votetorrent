@@ -11,7 +11,7 @@ import { ElectionEvent, ElectionType, UserKeyType } from '@votetorrent/vote-core
 import { secp256k1 } from '@noble/curves/secp256k1.js'
 import { bytesToHex, hexToBytes } from '@noble/curves/utils.js'
 import { sha256 } from '@noble/hashes/sha2.js'
-import { nowCanonicalDatetime, toCanonicalDatetime, digestToBytes, inviteResultSignedBytes } from '../../src/utils.js'
+import { nowCanonicalDatetime, toCanonicalDatetime, fromCanonicalDatetime, digestToBytes, inviteResultSignedBytes } from '../../src/utils.js'
 import { ElectionsEngine, peekNextElectionTid } from '../../src/elections/elections-engine.js'
 import { SigningEngine } from '../../src/signing/signing-engine.js'
 import { NetworksEngine } from '../../src/networks/networks-engine.js'
@@ -599,6 +599,112 @@ export async function addTestElection (auth: TestAuthorityContext): Promise<Test
 
   const electionEngine = await electionsEngine.openElection(init.election.id)
   return { ...auth, electionsEngine, electionEngine }
+}
+
+// ---------------------------------------------------------------------------
+// Layer-3: bumpElectionRevision helper (second-keyholder-invite-unique fix)
+// ---------------------------------------------------------------------------
+
+/**
+ * Bump an `addTestElection`-seeded election's `ElectionRevision.Revision` by
+ * one, via a real signed UPDATE (mirrors `addTestElection`'s own signed
+ * INSERT spine — fresh AdminSigning('mel') + SigningEngine.sign +
+ * `update ElectionRevision ... where ElectionId`). There is no engine method
+ * that performs this UPDATE yet (`ElectionEngine.proposeRevision` only
+ * inserts into `ProposedElectionRevision`), so this fixture composes the raw
+ * SQL directly — the same pattern `seedBallot`/`seedQuestion` use for rows
+ * with no production write path yet.
+ *
+ * Used by `invitation.spec.ts`'s "non-zero election revision" regression
+ * test (second-keyholder-invite-unique Decision item: covers the
+ * `revision: 0` hardcode fix).
+ *
+ * @returns The new (bumped) revision number.
+ */
+export async function bumpElectionRevision (elec: TestElectionContext): Promise<number> {
+  const authorityId = elec.authority.id
+  const revRow = await elec.ctx.db
+    .prepare(
+      `select ElectionId, Revision, RevisionTimestamp, Tags, Instructions, Timeline, KeyholderThreshold
+         from ElectionRevision
+         where ElectionId = (select Id from Election where AuthorityId = :authorityId limit 1)`
+    )
+    .get({ authorityId })
+  if (!revRow) throw new Error('bumpElectionRevision: ElectionRevision not found for authority')
+
+  const electionId = revRow.ElectionId as string
+  const oldRevision = revRow.Revision as number
+  const newRevision = oldRevision + 1
+  // RevisionTimestampValidUpdate requires new.RevisionTimestamp > old.RevisionTimestamp;
+  // RevisionTimestampValid requires new.RevisionTimestamp < context.now (and < RevisionDeadline).
+  // Derive both from the OLD persisted timestamp (not wall-clock `Date.now()`) so this holds
+  // even when the whole test runs faster than 1ms of real elapsed time.
+  // fromCanonicalDatetime (not bare `new Date()`) — the persisted canonical string has
+  // no 'Z' suffix, so a bare `new Date()` parse treats it as LOCAL time (Pitfall 2:
+  // desyncs the ordering on any non-UTC host timezone).
+  const oldTimestampMs = fromCanonicalDatetime(revRow.RevisionTimestamp as string)
+  const newRevisionTimestamp = toCanonicalDatetime(oldTimestampMs + 1000)
+  const now = toCanonicalDatetime(oldTimestampMs + 2000)
+
+  const digestParams = {
+    electionId,
+    revision: newRevision,
+    revTimestamp: newRevisionTimestamp,
+    tags: revRow.Tags as string,
+    instructions: revRow.Instructions as string,
+    timeline: revRow.Timeline as string,
+    keyholderThreshold: revRow.KeyholderThreshold as number,
+  }
+  const tid = await peekNextElectionTid(elec.ctx.db) + 1
+  const digestRow = await elec.ctx.db
+    .prepare(
+      'select Digest(:tid, :electionId, :revision, :revTimestamp, :tags, :instructions, :timeline, :keyholderThreshold) as d'
+    )
+    .get({ ...digestParams, tid })
+  if (!digestRow || digestRow.d == null) throw new Error('bumpElectionRevision: Digest() returned null')
+  const sig = signTestDigest(elec.user, digestRow.d as string)
+
+  const adminRow = await elec.ctx.db
+    .prepare('select EffectiveAt from CurrentAdmin where AuthorityId = :authorityId')
+    .get({ authorityId })
+  if (!adminRow) throw new Error('bumpElectionRevision: CurrentAdmin not found')
+  const adminEffectiveAt = adminRow.EffectiveAt as number | string
+
+  const nonce = crypto.randomUUID()
+  await elec.ctx.db.exec(
+    `insert into AdminSigning (
+      Nonce, AuthorityId, AdminEffectiveAt, Scope, Digest, UserId, SignerKey, Signature
+    )
+    with context now = :now, IsSignerKeyValid = true, IsPlaceholderSignature = false
+    values (
+      :nonce, :authorityId, :adminEffectiveAt, 'mel',
+      Digest(:tid, :electionId, :revision, :revTimestamp, :tags, :instructions, :timeline, :keyholderThreshold),
+      :userId, :signerKey, :signature
+    )`,
+    {
+      ...digestParams,
+      tid,
+      nonce,
+      authorityId,
+      adminEffectiveAt,
+      userId: elec.user.id,
+      signerKey: sig.signerKey,
+      signature: sig.signature,
+      now,
+    }
+  )
+  const signing = new SigningEngine(elec.ctx)
+  await signing.sign(nonce, sig)
+
+  await elec.ctx.db.exec(
+    `update ElectionRevision
+      with context SigningNonce = :nonce, Tid = ${tid}, now = :now
+      set Revision = :revision, RevisionTimestamp = :revTimestamp
+      where ElectionId = :electionId`,
+    { ...digestParams, nonce, now }
+  )
+
+  return newRevision
 }
 
 // ---------------------------------------------------------------------------
