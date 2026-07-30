@@ -12,6 +12,7 @@ import { BallotTemplateForm } from "./components/BallotTemplateForm";
 import { CustomButton } from "../../components/CustomButton";
 import { InlineError } from "../../components/InlineError";
 import { useApp } from "../../providers/AppProvider";
+import { loadAuthoritiesWithRetry } from "../../utils/loadAuthoritiesWithRetry";
 import type { Authority, Ballot, INetworkEngine, Question } from "@votetorrent/vote-core";
 
 /**
@@ -76,8 +77,10 @@ export default function CreateBallotScreen() {
 			try {
 				const engine = await getEngine<INetworkEngine>("network");
 				if (!engine) return;
-				const cursor = await engine.getAuthoritiesByName(undefined);
-				setAuthorities(cursor.buffer);
+				// ballot-authority-empty fix: retry a zero-row result — see
+				// loadAuthoritiesWithRetry for the strand-replication-race rationale.
+				const buffer = await loadAuthoritiesWithRetry(engine);
+				setAuthorities(buffer);
 				const details = await engine.getDetails();
 				if (details?.network?.primaryAuthorityId) {
 					setPrimaryAuthorityId(details.network.primaryAuthorityId);
