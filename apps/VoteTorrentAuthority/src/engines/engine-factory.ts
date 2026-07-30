@@ -50,6 +50,41 @@ import {
 	PLAY_CONSOLE_VERIFICATION_KEY_BASE64,
 } from './attestation-keys.generated'
 
+/**
+ * Thrown when an engine is requested before any network has been opened.
+ *
+ * This is an EXPECTED state, not a failure: on first run (and after leaving a
+ * network) there is legitimately no network context yet. The message stays
+ * developer-facing because it is a real invariant guard and shows up in logs —
+ * but screens MUST NOT render it. Use `isNoNetworkEstablishedError()` to detect
+ * this case and show the friendly "choose a network" empty state instead
+ * (see components/NoNetwork.tsx). Rendering `error.message` here is what put
+ * `EngineFactory: Network context not established — call getEngine(...)` on the
+ * Tasks and Settings tabs.
+ */
+export class NoNetworkEstablishedError extends Error {
+	readonly noNetworkEstablished = true as const
+
+	constructor(message: string) {
+		super(message)
+		this.name = 'NoNetworkEstablishedError'
+	}
+}
+
+/**
+ * True when `error` means "no network selected yet" — the expected first-run
+ * state that should surface as an empty state, not an error banner. Structural
+ * check (not `instanceof`) so it survives the module duplication that Metro's
+ * multi-root resolution can produce on-device.
+ */
+export function isNoNetworkEstablishedError(error: unknown): boolean {
+	return (
+		typeof error === 'object' &&
+		error !== null &&
+		(error as {noNetworkEstablished?: unknown}).noNetworkEstablished === true
+	)
+}
+
 export class EngineFactory {
 	private readonly networksEngine: NetworksEngine
 	/** Cache keyed by engineName (+ ':' + JSON(initParams) for param-keyed engines). */
@@ -256,7 +291,7 @@ export class EngineFactory {
 						? ({ hash: this.currentNetworkHash } as NetworkReference)
 						: undefined)
 				if (ref === undefined) {
-					throw new Error(
+					throw new NoNetworkEstablishedError(
 						'EngineFactory: no network established — call getEngine("network", ref) during init',
 					)
 				}
@@ -381,13 +416,13 @@ export class EngineFactory {
 	 */
 	private requireEstablishedCtx(): EngineContext {
 		if (this.currentNetworkHash === undefined) {
-			throw new Error(
+			throw new NoNetworkEstablishedError(
 				'EngineFactory: Network context not established — call getEngine("network", ref) first',
 			)
 		}
 		const ctx = this.networksEngine.getEstablishedContext(this.currentNetworkHash)
 		if (ctx === undefined) {
-			throw new Error(
+			throw new NoNetworkEstablishedError(
 				`EngineFactory: Network context not established for hash ${this.currentNetworkHash} — call getEngine("network", ref) first`,
 			)
 		}
