@@ -1,5 +1,8 @@
 import { importSPKI } from 'jose'
 import type { CryptoKey } from 'jose'
+// `Buffer` is NOT a Hermes global (see ../utils.ts) — import it from the `buffer`
+// module, which metro.config.js aliases and both apps declare as a dependency.
+import { Buffer } from 'buffer'
 
 /**
  * key-provider.ts — the Play Console key-material seam (D-04b).

@@ -18,6 +18,8 @@ import type { NavigationProp } from "../../navigation/types";
 import { useNavigation, useFocusEffect } from "@react-navigation/native";
 import FontAwesome6 from "react-native-vector-icons/FontAwesome6";
 import { InlineError } from "../../components/InlineError";
+import { NoNetwork } from "../../components/NoNetwork";
+import { isNoNetworkEstablishedError } from "../../engines/engine-factory";
 
 // Resolve the authority grouping key for a task. Falls back to the network
 // name when an authority-specific name is not accessible on the task type
@@ -51,6 +53,10 @@ export default function TasksScreen() {
 	const [releaseKeyTasks, setReleaseKeyTasks] = useState<ReleaseKeyTask[]>();
 	const [signatureTasks, setSignatureTasks] = useState<SignatureTask[]>();
 	const [loadError, setLoadError] = useState("");
+	// Distinct from loadError: "no network selected yet" is the expected first-run
+	// state, so it renders the friendly <NoNetwork /> empty state rather than an
+	// error banner carrying an internal EngineFactory message.
+	const [hasNetwork, setHasNetwork] = useState(true);
 	const navigation = useNavigation<NavigationProp>();
 
 	useLayoutEffect(() => {
@@ -59,6 +65,7 @@ export default function TasksScreen() {
 
 	const loadTasksEngines = useCallback(async () => {
 		setLoadError("");
+		setHasNetwork(true);
 		try {
 			const [keyTasksEngine, signatureTasksEngine] = await Promise.all([
 				getEngine<IKeysTasksEngine>("keysTasksEngine"),
@@ -72,6 +79,11 @@ export default function TasksScreen() {
 			setReleaseKeyTasks(keysToRelease);
 			setSignatureTasks(requestedSignatures);
 		} catch (error) {
+			if (isNoNetworkEstablishedError(error)) {
+				// Expected on first run / after leaving a network — not an error.
+				setHasNetwork(false);
+				return;
+			}
 			console.error("Error in loadTasksEngines:", error);
 			setLoadError(error instanceof Error ? error.message : String(error));
 		}
@@ -82,6 +94,13 @@ export default function TasksScreen() {
 			loadTasksEngines();
 		}, [loadTasksEngines])
 	);
+
+	// Matches ElectionsScreen/AuthoritiesScreen: no network selected is an empty
+	// state, not a failure. Checked before isEmpty so the friendly prompt wins
+	// over "no tasks" (which would wrongly imply the network had been consulted).
+	if (!hasNetwork) {
+		return <NoNetwork />;
+	}
 
 	const isEmpty =
 		releaseKeyTasks !== undefined &&

@@ -3,6 +3,9 @@ import type { IIntegrityKeyProvider } from './key-provider.js'
 import { verifyPlayIntegrity } from './verifiers/play-integrity.js'
 import { verifyKeyAttestation } from './verifiers/key-attestation.js'
 import type { ExpectedAppIdentity } from './verifiers/app-identity.js'
+// `Buffer` is NOT a Hermes global (see ../utils.ts) — import it from the `buffer`
+// module, which metro.config.js aliases and both apps declare as a dependency.
+import { Buffer } from 'buffer'
 
 /**
  * PlayIntegrityVerifier — the real `IAttestationVerifier` implementation

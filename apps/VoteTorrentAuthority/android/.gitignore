@@ -2,3 +2,7 @@
 # Release signing keystore — never commit (regenerate per vendor/VENDOR.md / BUILD note)
 *.keystore
 !debug.keystore
+# Also ignore SUFFIXED keystore copies (e.g. release.keystore.orphaned-<date> left behind
+# by a key rotation). `*.keystore` does NOT match these — anything after the extension
+# defeats the glob — so without this line a `git add -A` would commit a private signing key.
+*.keystore.*

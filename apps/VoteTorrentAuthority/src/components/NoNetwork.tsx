@@ -15,6 +15,9 @@ export function NoNetwork() {
 			<TouchableOpacity style={styles.backButton}>
 				<FontAwesome6 name="arrow-up" size={24} color={colors.text} />
 			</TouchableOpacity>
+			<ThemedText type="title" style={styles.title}>
+				{t('noNetworkTitle')}
+			</ThemedText>
 			<ThemedText type="default" style={styles.text}>
 				{t('noNetwork')}
 			</ThemedText>
@@ -27,6 +30,10 @@ const localStyles = StyleSheet.create({
 		position: 'relative',
 		left: 8,
 		padding: 8
+	},
+	title: {
+		textAlign: 'center',
+		marginBottom: 8
 	},
 	text: {
 		textAlign: 'center'

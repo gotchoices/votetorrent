@@ -201,7 +201,14 @@ export function CadreNodeProvider({ children }: PropsWithChildren) {
           // p2p-probe dev harness. Production sApp-schema signing (id = author ed25519
           // pubkey + signSchema()) is a separate productionization task. Discovered by the
           // 44-10 on-device boot proof (jest is blind — it does not boot a real CadreNode).
-          requireSignedSchemas: !__DEV__,
+          // Was `!__DEV__`, which relaxed the policy for debug builds only and therefore
+          // left RELEASE builds hitting SchemaVerificationError('missing signature') —
+          // the unsigned `org.votetorrent` schema never became signed, so the release
+          // branch was permanently broken rather than merely strict. sApp-schema signing
+          // is now disabled outright for VoteTorrent (see the authority app's
+          // CadreNodeProvider for the full upstream trace): it was never a project
+          // requirement, only an upstream cadre-core@0.8.1 fail-closed default.
+          requireSignedSchemas: false,
           strandFilter: { mode: 'all' },
           // ISO-01: per-scope storage. cadre-core invokes provider(scopeId) with the
           // strandId for each strand and 'control' for the control DB — one distinct

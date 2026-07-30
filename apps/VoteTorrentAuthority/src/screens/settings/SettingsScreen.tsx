@@ -21,6 +21,7 @@ import type { NavigationProp } from "../../navigation/types";
 import { globalStyles } from "../../theme/styles";
 import { useSettings } from "../../providers/SettingsProvider";
 import { InlineError } from "../../components/InlineError";
+import { isNoNetworkEstablishedError } from "../../engines/engine-factory";
 
 const LANGUAGES: { code: 'en' | 'es'; label: string }[] = [
 	{ code: 'en', label: 'English' },
@@ -43,6 +44,19 @@ export default function SettingsScreen() {
 	const { t } = useTranslation();
 	const { getEngine } = useApp();
 	const navigation = useNavigation<NavigationProp>();
+
+	// Settings is reachable before any network exists, and its Language / help-icon
+	// controls work fine without one — so "no network selected" is expected here and
+	// must not paint an error banner carrying an internal EngineFactory message.
+	// Unlike the Tasks tab we do NOT swap in <NoNetwork />: that would hide the
+	// network-independent controls the user came here to change. Real failures still
+	// surface. The network-scoped sections below already handle a null engine.
+	const reportSettingsError = useCallback((error: unknown) => {
+		if (isNoNetworkEstablishedError(error)) {
+			return;
+		}
+		setSettingsError(error instanceof Error ? error.message : String(error));
+	}, []);
 
 	const handleLanguageChange = async (lang: 'en' | 'es') => {
 		await i18n.changeLanguage(lang);
@@ -86,11 +100,11 @@ export default function SettingsScreen() {
 				}
 			} catch (error) {
 				console.warn("Failed to load base engines:", error);
-				setSettingsError(error instanceof Error ? error.message : String(error));
+				reportSettingsError(error);
 			}
 		};
 		loadBaseEngines();
-	}, [getEngine, defaultUserEngine, networkEngine]);
+	}, [getEngine, defaultUserEngine, networkEngine, reportSettingsError]);
 
 	useEffect(() => {
 		const loadNetworkName = async () => {
@@ -103,11 +117,11 @@ export default function SettingsScreen() {
 				setCurrentNetwork(networkDetails.network.name);
 			} catch (error) {
 				console.warn("Failed to load network name:", error);
-				setSettingsError(error instanceof Error ? error.message : String(error));
+				reportSettingsError(error);
 			}
 		};
 		loadNetworkName();
-	}, [networkEngine]);
+	}, [networkEngine, reportSettingsError]);
 
 	useEffect(() => {
 		const loadUserEngine = async () => {
@@ -126,13 +140,13 @@ export default function SettingsScreen() {
 				}
 			} catch (error) {
 				console.warn("Failed to get current user engine:", error);
-				setSettingsError(error instanceof Error ? error.message : String(error));
+				reportSettingsError(error);
 				setUserEngine(null);
 			}
 		};
 
 		loadUserEngine();
-	}, [networkEngine]);
+	}, [networkEngine, reportSettingsError]);
 
 	useFocusEffect(
 		useCallback(() => {
@@ -152,13 +166,13 @@ export default function SettingsScreen() {
 					}
 				} catch (error) {
 					console.warn("Failed to get user summary:", error);
-					setSettingsError(error instanceof Error ? error.message : String(error));
+					reportSettingsError(error);
 					setCurrentUser(null);
 				}
 			};
 
 			loadUserSummary();
-		}, [userEngine])
+		}, [userEngine, reportSettingsError])
 	);
 
 	useFocusEffect(
