@@ -154,12 +154,34 @@ const multiaddrConvertV12 = path.resolve(
 	"node_modules/@multiformats/multiaddr-v12/dist/src/convert.js"
 );
 
-// Wrap resolveRequest to apply the @multiformats/multiaddr/convert redirect and the
-// @libp2p/crypto browser rewrite.
+// tslib's package.json `exports` map has NO `require` condition — only `module`/`import`/
+// `default`, where the RN-platform-relevant `import` branch's nested `default` points at the
+// ESM `tslib.es6.mjs`. Under `unstable_enablePackageExports: true` (MANDATORY for cadre-core's
+// own exports map — do NOT disable), Metro's exports-conditions resolution steers EVERY
+// `require("tslib")` in the tree — CJS consumers like the engine's @peculiar/asn1-* build's
+// `tslib_1.__decorate(...)` and other transitive `require("tslib")` callers (e.g. tsyringe's
+// esm5 build's `__extends(`) — to that ESM variant. The CJS interop wrapper Metro/Hermes
+// produces for the .mjs does not expose the helpers the same way, so `tslib_1.<helper>` reads
+// `undefined` and throws `Cannot read property '<helper>' of undefined` during eager module
+// eval (inlineRequires:false, see below), aborting boot before AppRegistry.registerComponent.
+// Verified on this app: the release APK crashed with `[runtime not ready]: TypeError: Cannot
+// read property '__extends' of undefined` (SIGABRT on mqt_v_js) until this redirect was added.
+// Fix: force EVERY `require("tslib")` / `import ... from "tslib"` to resolve to the concrete
+// CJS UMD build (`tslib/tslib.js`), which exports all helpers as plain functions on the module
+// object regardless of how the caller destructures them. Package/symbol-agnostic on purpose.
+// Do NOT delete this branch; removing it reopens the on-device crash.
+// Ported from apps/VoteTorrentVoting/metro.config.js (44-09, D-04).
+const tslibUmdPath = require.resolve("tslib/tslib.js", { paths: nodeModulesPaths });
+
+// Wrap resolveRequest to apply the @multiformats/multiaddr/convert redirect, the tslib
+// CJS UMD redirect, and the @libp2p/crypto browser rewrite.
 const upstreamResolveRequest = merged.resolver.resolveRequest;
 merged.resolver.resolveRequest = (context, moduleName, platform) => {
 	if (moduleName === "@multiformats/multiaddr/convert") {
 		return { type: "sourceFile", filePath: multiaddrConvertV12 };
+	}
+	if (moduleName === "tslib") {
+		return { type: "sourceFile", filePath: tslibUmdPath };
 	}
 	const resolved = upstreamResolveRequest
 		? upstreamResolveRequest(context, moduleName, platform)
