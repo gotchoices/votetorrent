@@ -188,6 +188,27 @@ export function CadreNodeProvider({ children }: PropsWithChildren) {
           privateKey,
           controlNetwork: { partyId: PARTY_ID, bootstrapNodes: resolveBootstrapNodes(CONTROL_ADDR) },
           profile: 'transaction',
+          // sApp-schema signing is DISABLED for VoteTorrent — a deliberate project
+          // decision, not an oversight.
+          //
+          // This policy was never a VoteTorrent requirement. It arrived as an UPSTREAM
+          // fail-closed default when the project de-vendored to published
+          // @serfab/cadre-core@0.8.1 (d67a649, 2026-07-13): cadre-core's
+          // strand-instance-manager.js:101 does `config.requireSignedSchemas ?? true`
+          // and calls assertSchemaSignature(), which throws
+          // SchemaVerificationError('missing signature') for any sAppConfig without a
+          // `signature` field. VoteTorrent's schema (rn-db-factory.ts sAppConfig:
+          // id 'org.votetorrent' v1.0.0) has no signature, so EVERY network creation
+          // failed with "Failed to create database context: SchemaVerificationError"
+          // (networks-engine.ts:59) — reproduced on-device in the release APK.
+          //
+          // Setting it to a literal `false` (NOT `!__DEV__`) is what "remove entirely"
+          // requires: `!__DEV__` evaluates to TRUE in a release build, so it only ever
+          // relaxed the policy for debug builds and left release permanently broken.
+          // The relaxation excuses ONLY an absent signature — cadre-core still rejects a
+          // present-but-invalid one (schema-verification.js:82) — so a signed schema
+          // would still be verified if VoteTorrent ever adopts signing.
+          requireSignedSchemas: false,
           strandFilter: { mode: 'all' },
           // ISO-01: per-scope storage. cadre-core invokes provider(scopeId) with the
           // strandId for each strand and 'control' for the control DB — one distinct
