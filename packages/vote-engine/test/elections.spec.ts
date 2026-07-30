@@ -274,6 +274,51 @@ describe('ElectionsEngine', () => {
         .get({ id: 'election-1' })
       expect(row?.Id).to.equal('election-1')
     })
+
+    // Regression: a SECOND revise of the same election used to blind-INSERT
+    // over the existing proposal's primary key and die with
+    // "UNIQUE constraint failed: ProposedElection PK" — surfaced in the
+    // authority app as a generic "could not save the election" message.
+    // The proposal pair is now upserted, so re-proposing REPLACES the
+    // outstanding proposal (including its edited keyholder list).
+    it('re-proposing REPLACES the outstanding proposal instead of failing on the PK', async () => {
+      const net = await createTestNetwork()
+      const auth = await addTestAuthority(net)
+      const elCtx = await addTestElection(auth)
+      const engine = new ElectionsEngine(elCtx.ctx)
+      const first = makeElectionInit()
+      first.revision.keyholders = [{ name: 'T' } as unknown as KeyholderInvite]
+      await engine.adjustElection(first)
+
+      const second: ElectionInit = {
+        election: { ...first.election, title: 'Second Proposal' },
+        revision: {
+          ...first.revision,
+          revision: first.revision.revision + 1,
+          keyholders: [
+            { name: 'T' },
+            { name: 'Y' },
+            { name: '44' }
+          ] as unknown as KeyholderInvite[]
+        }
+      }
+      await engine.adjustElection(second)
+
+      const core = await elCtx.ctx.db
+        .prepare('select Id, Title from ProposedElection where Id = :id')
+        .get({ id: first.election.id })
+      expect(core?.Title).to.equal('Second Proposal')
+
+      const ids: unknown[] = []
+      for await (const row of elCtx.ctx.db.eval('select Id from ProposedElection')) ids.push(row)
+      expect(ids.length).to.equal(1)
+
+      const proposals = await engine.getProposedElections()
+      expect(proposals.length).to.equal(1)
+      expect(proposals[0]!.proposed.revision.revision).to.equal(first.revision.revision + 1)
+      // Keyholders edited on a revision are persisted (were previously dropped).
+      expect(proposals[0]!.proposed.revision.keyholders.map((k) => k.name)).to.deep.equal(['T', 'Y', '44'])
+    })
   })
 
   // -----------------------------------------------------------------------
