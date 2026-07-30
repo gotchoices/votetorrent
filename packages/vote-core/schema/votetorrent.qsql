@@ -61,7 +61,12 @@ declare schema main
 		union all select 'uai' as Code, 'Update Authority Information' as Name
 		union all select 'ceb' as Code, 'Create/Edit ballot templates' as Name
 		union all select 'mel' as Code, 'Manage Elections' as Name
-		union all select 'cap' as Code, 'Configure Authority Peers' as Name;
+		union all select 'cap' as Code, 'Configure Authority Peers' as Name
+		-- second-keyholder-invite-unique fix (2026-07-30): dedicated scope for admin
+		-- approval of a keyholder InviteSlot, mirroring 'iad' (invite authorities) /
+		-- 'rad' (invite officers via the Admin threshold) — keyholder invites get
+		-- their own approval scope rather than overloading 'mel'.
+		union all select 'ik' as Code, 'Invite Keyholders' as Name;
 
 	table Authority (
 		Id text primary key, -- 32 byte random id
@@ -453,20 +458,32 @@ declare schema main
 		InviteSignature text,
 		SigningNonce text, -- AdminSigning.Nonce, shows admin approval including scope (implies the type of invite, e.g. authority, officer, keyholder, registrant)
 		ResendSalt text null, -- D-03 Option B (Phase 36): resendInvite's salt (resend|tid|now), persisted so the resend row's Cid is fully re-derivable; null for normal (au/of) invites
+		-- second-keyholder-invite-unique fix (2026-07-30): the election a Type='k'
+		-- (keyholder) invite is FOR. null for au/of/r invites. Required so that
+		-- InvitationEngine.respondToInvite can resolve which Election/ElectionRevision
+		-- to bind the accept-time Keyholder row to, given only the InviteSlot Cid — the
+		-- ElectionRevision (a mutable, monotonically-increasing column, not a separate
+		-- row per revision) is deliberately NOT persisted here and is instead resolved
+		-- FRESH from ElectionRevision at accept-time, so an invite always binds to the
+		-- CURRENT revision rather than a possibly-stale one captured at send-time.
+		ElectionId text null,
 		-- D-02/D-03 (Phase 36): Cid is minted as an IPLD CIDv1 via cid(Digest(...)) at all
-		-- 3 authority-engine.ts producer sites (au/of/resend). TOTAL content
-		-- re-derivation — no structural-only acceptance branch on InviteSlot: every
-		-- row's Cid must equal cid(Digest(...)) recomputed from that row's OWN
-		-- persisted columns. Branches are keyed on ResendSalt null/not-null. Both
-		-- au and of are 6-field (Type-bound, WR-01 fix — Type is no longer
-		-- normalized out of the au branch's re-derivation):
-		--   au/of (6-field):  Cid = cid(Digest(Expiration, InviteKey, InviteSignature, Name, SigningNonce, Type))
-		--   resend (7-field): Cid = cid(Digest(Expiration, InviteKey, InviteSignature, Name, SigningNonce, Type, ResendSalt))
+		-- 3 authority-engine.ts producer sites (au/of/resend), PLUS the keyholder (k)
+		-- producer site (ElectionEngine.inviteKeyholder). TOTAL content re-derivation —
+		-- no structural-only acceptance branch on InviteSlot: every row's Cid must equal
+		-- cid(Digest(...)) recomputed from that row's OWN persisted columns. Branches are
+		-- keyed on ResendSalt null/not-null, and (mutually exclusive with ResendSalt —
+		-- resendInvite never handles Type='k') ElectionId null/not-null:
+		--   au/of (6-field):        Cid = cid(Digest(Expiration, InviteKey, InviteSignature, Name, SigningNonce, Type))
+		--   resend (7-field):       Cid = cid(Digest(Expiration, InviteKey, InviteSignature, Name, SigningNonce, Type, ResendSalt))
+		--   keyholder (7-field):    Cid = cid(Digest(ElectionId, Expiration, InviteKey, InviteSignature, Name, SigningNonce, Type))
 		constraint CidValid check (
-			(ResendSalt is null
+			(ResendSalt is null and ElectionId is null
 				and Cid = cid(Digest(Expiration, InviteKey, InviteSignature, Name, SigningNonce, Type)))
 			or (ResendSalt is not null
 				and Cid = cid(Digest(Expiration, InviteKey, InviteSignature, Name, SigningNonce, Type, ResendSalt)))
+			or (ElectionId is not null
+				and Cid = cid(Digest(ElectionId, Expiration, InviteKey, InviteSignature, Name, SigningNonce, Type)))
 		),
 		constraint TypeValid check (Type in (select Code from InviteType)),
 		constraint ExpirationValid check (Expiration > context.now),

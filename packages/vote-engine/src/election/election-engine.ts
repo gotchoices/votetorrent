@@ -1,5 +1,5 @@
 import { MisuseError, QuereusError } from '@quereus/quereus'
-import { formatPgRange, fromCanonicalDatetime, nowCanonicalDatetime, parseJsonOr, parseKeyholdersAsInviteStatus, parsePgRange } from '../utils.js'
+import { digestToBytes, formatPgRange, fromCanonicalDatetime, keyholderInviteSignedBytes, nowCanonicalDatetime, parseJsonOr, parseKeyholdersAsInviteStatus, parsePgRange, verifyAdHocInviteSignature } from '../utils.js'
 import type { EngineContext } from '../types.js'
 import type {
   Ballot,
@@ -16,9 +16,11 @@ import type {
   IElectionProposeBallotBuilder,
   IElectionProposeRevisionBuilder,
   IElectionRevokeKeyholderBuilder,
+  ISigningEngine,
   KeyholderInvite,
   Option,
   Question,
+  Signature,
   Timestamp
 } from '@votetorrent/vote-core'
 import { ElectionProposeBallotBuilder } from './builders/election-propose-ballot-builder.js'
@@ -26,6 +28,7 @@ import { ElectionProposeRevisionBuilder } from './builders/election-propose-revi
 import { ElectionInviteKeyholderBuilder } from './builders/election-invite-keyholder-builder.js'
 import { ElectionRevokeKeyholderBuilder } from './builders/election-revoke-keyholder-builder.js'
 import { allocateTid } from '../database/tid-allocator.js'
+import { SigningEngine } from '../signing/signing-engine.js'
 
 /**
  * Fixed ballot-header Tid for the `AdminSigning` digest at submit time.
@@ -72,7 +75,8 @@ export interface ElectionSubject {
 export class ElectionEngine implements IElectionEngine {
   constructor (
     private readonly election: ElectionSubject,
-    private readonly ctx: EngineContext
+    private readonly ctx: EngineContext,
+    private readonly signingEngine: ISigningEngine = new SigningEngine(ctx)
   ) {}
 
   /**
@@ -633,37 +637,126 @@ export class ElectionEngine implements IElectionEngine {
   }
 
   /**
-   * ELEC-06b — INSERT a Keyholder row tied to (ElectionId, ElectionRevision,
-   * UserId). The schema's Keyholder.InsertValid requires the per-row
-   * Signing context fields to be null (Keyholder rows are inserted
-   * post-signing, not as part of the AdminSignature pipeline).
+   * second-keyholder-invite-unique fix — INSERT a signed `InviteSlot`
+   * (Type='k') for a keyholder invite and wire the admin-approval signing
+   * ceremony (`SigningEngine.startSigningSession`), mirroring
+   * `AuthorityEngine.saveOfficerInvite`/`saveAuthorityInvite` +
+   * `saveInviteWithSigning`'s pipeline: nonce first, InviteSlot second,
+   * AdminSigning/AdminSignature third.
+   *
+   * Fixes debug session `second-keyholder-invite-unique`: the prior
+   * implementation inserted directly into `Keyholder` keyed by
+   * `this.ctx.user?.id` (the INVITING admin's own id, constant across every
+   * invite) with a hardcoded `revision: 0`, so a 2nd invite always collided
+   * on `Keyholder`'s `(ElectionId, ElectionRevision, UserId)` primary key.
+   * `Keyholder.UserIdValid` also requires an EXISTING `User` row, and
+   * `User.InsertValid` requires a real `InviteSlot` + `InviteSignature` to
+   * mint one — there is no schema-legal way to persist a name-only invitee
+   * directly into `Keyholder`. The real `User` + `Keyholder` rows are now
+   * minted at ACCEPT time (see `InvitationEngine.respondToInvite`'s
+   * keyholder-invite branch), once a genuine `InviteSlot`/`InviteResult`
+   * pair exists to satisfy those two CHECKs. This method only writes the
+   * pending `InviteSlot` — it never touches `Keyholder` at send-time, and no
+   * longer hardcodes `revision: 0` (the real current revision is instead
+   * resolved FRESH at accept-time from `ElectionRevision`, keyed off the new
+   * `InviteSlot.ElectionId` column this method now populates).
+   *
+   * Scope: 'ik' (Invite Keyholders) — a dedicated admin-approval scope,
+   * mirroring 'iad'/'rad' for authority/officer invites.
+   *
+   * `signatureOrCallback` mirrors `AuthorityEngine.saveInviteWithSigning`:
+   * either a completed `Signature` (test fixtures) or a device-signer
+   * callback invoked with the engine-computed `Digest(Cid)` bytes (the
+   * caller's private key never crosses into vote-engine).
+   *
+   * `keyholder.inviteSignature` (the invite's OWN ad-hoc signature, distinct
+   * from `signatureOrCallback` above) is verified for real when non-empty;
+   * an empty value is a documented, narrow carve-out (see
+   * `keyholderInviteSignedBytes` doc comment / `KeyholderInvitationScreen.tsx`
+   * WR-04) until a `createKeyholderInvite` factory exists to produce one
+   * client-side, the same way `createOfficerInvite`/`createAuthorityInvite` do.
    */
   async inviteKeyholder (
     keyholder: KeyholderInvite,
-    electionId: string
+    electionId: string,
+    signatureOrCallback: Signature | ((digest: Uint8Array) => Promise<Signature>)
   ): Promise<void> {
-    const tid = await allocateTid(this.ctx.db, 'election')
-    // The KeyholderInvite carries the invite details; the Keyholder row
-    // itself is bound to the invited user once they accept. For Phase 5
-    // this method inserts a placeholder Keyholder row pinned to the
-    // election + the inviting user; the full flow with InviteSlot +
-    // InviteResult joining happens in Phase 6 / TEST-01.
-    const userId =
-      this.ctx.user?.id ?? `pending-${keyholder.inviteKey.slice(0, 8)}`
     try {
+      const nonce = this.signingEngine.generateSigningNonce()
+      const tid = await allocateTid(this.ctx.db, 'election')
+
+      const isSignatureValid = keyholder.inviteSignature
+        ? verifyAdHocInviteSignature(
+            keyholderInviteSignedBytes({
+              type: keyholder.type,
+              name: keyholder.name,
+              expiration: keyholder.expiration
+            }),
+            keyholder.inviteSignature,
+            keyholder.inviteKey
+          )
+        : true
+
       await this.ctx.db.exec(
-				`insert into Keyholder (
-					ElectionId,
-					ElectionRevision,
-					UserId
-				)
-				with context SigningNonce = null, InviteSlotCid = null, InviteSignature = null, Tid = ${tid}
-				values (:electionId, :revision, :userId)`,
+        `insert into InviteSlot (
+          Cid,
+          Type,
+          Name,
+          Expiration,
+          InviteKey,
+          InviteSignature,
+          SigningNonce,
+          ElectionId
+        )
+        with context Tid = :tid, now = :now, IsSignatureValid = :isSignatureValid, IsInsertValid = true
+        values (
+          cid(Digest(:electionId, :expiration, :inviteKey, :inviteSignature, :name, :nonce, :type)),
+          :type,
+          :name,
+          :expiration,
+          :inviteKey,
+          :inviteSignature,
+          :nonce,
+          :electionId
+        )`,
         {
-          electionId,
-          revision: 0,
-          userId
+          type: 'k',
+          name: keyholder.name,
+          expiration: keyholder.expiration,
+          inviteKey: keyholder.inviteKey,
+          inviteSignature: keyholder.inviteSignature,
+          nonce,
+          tid,
+          now: nowCanonicalDatetime(),
+          isSignatureValid,
+          electionId
         }
+      )
+
+      // D-03/D-04: resolve the concrete Signature exactly like
+      // saveInviteWithSigning — compute the InviteSlot's digest engine-side
+      // and hand the bytes to the callback (device-signer never sees a raw
+      // key), or use the caller-supplied completed Signature directly.
+      let signature: Signature
+      if (typeof signatureOrCallback === 'function') {
+        const digestRow = await this.ctx.db
+          .prepare('select Digest(Cid) as d from InviteSlot where SigningNonce = :nonce')
+          .get({ nonce })
+        if (!digestRow || digestRow.d == null) {
+          throw new Error('inviteKeyholder: Digest() returned null — crypto plugin not registered?')
+        }
+        const digestBytes = digestToBytes(digestRow.d)
+        signature = await signatureOrCallback(digestBytes)
+      } else {
+        signature = signatureOrCallback
+      }
+
+      await this.signingEngine.startSigningSession(
+        this.election.authorityId,
+        null,
+        'ik',
+        signature,
+        nonce
       )
     } catch (err) {
       this.rethrow(err, 'inviteKeyholder')

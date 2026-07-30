@@ -20,7 +20,7 @@ import { KeysTasksEngine } from '../src/tasks/keys-tasks-engine'
 import { OnboardingTasksEngine } from '../src/tasks/onboarding-tasks-engine'
 import { SignatureTasksEngine } from '../src/tasks/signature-tasks-engine'
 import type { EngineContext } from '../src/types.js'
-import { createTestNetwork, addTestAuthority, addTestElection, seedBallot, seedQuestion, seedElectionSigning, makeElectionInit as makeElectionInitFromFixture, makeTestSignature } from './fixtures/test-context.js'
+import { createTestNetwork, addTestAuthority, addTestElection, seedBallot, seedQuestion, seedElectionSigning, makeElectionInit as makeElectionInitFromFixture, makeTestSignature, makeTestSignCallback } from './fixtures/test-context.js'
 import { peekNextElectionTid } from '../src/elections/elections-engine.js'
 import { digestToBytes } from '../src/utils.js'
 import { randomTestKeyPair } from './fixtures/keys.js'
@@ -575,24 +575,30 @@ describe('ElectionEngine', () => {
   // inviteKeyholder / revokeKeyholder
   // -----------------------------------------------------------------------
   describe('inviteKeyholder', () => {
-    it('INSERTs a Keyholder row', async () => {
+    // second-keyholder-invite-unique fix: inviteKeyholder now INSERTs a signed
+    // InviteSlot (Type='k') keyed to the target election, instead of writing
+    // directly into Keyholder (the real User + Keyholder rows are minted at
+    // ACCEPT time — see InvitationEngine.respondToInvite / invitation.spec.ts).
+    it('INSERTs an InviteSlot row (Type=k) bound to the election', async () => {
       const net = await createTestNetwork()
       const auth = await addTestAuthority(net)
       const elCtx = await addTestElection(auth)
       const kh: KeyholderInvite = {
         name: 'KH1',
-        type: 'au',
-        expiration: '0',
+        type: 'k',
+        expiration: new Date(Date.now() + 3_600_000).toISOString(),
         inviteKey: 'k'.repeat(66),
-        inviteSignature: 's'.repeat(128),
+        // Empty inviteSignature hits the documented send-side carve-out.
+        inviteSignature: '',
       }
-      await elCtx.electionEngine.inviteKeyholder(kh, 'election-1')
+      await elCtx.electionEngine.inviteKeyholder(kh, 'election-1', makeTestSignCallback(auth.user))
       const row = await elCtx.ctx.db
         .prepare(
-          'select UserId from Keyholder where ElectionId = :id limit 1'
+          "select Name, ElectionId from InviteSlot where Type = 'k' and ElectionId = :id limit 1"
         )
         .get({ id: 'election-1' })
-      expect(row?.UserId).to.be.a('string')
+      expect(row?.Name).to.equal('KH1')
+      expect(row?.ElectionId).to.equal('election-1')
     })
   })
 

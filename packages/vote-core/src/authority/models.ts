@@ -162,6 +162,10 @@ export type Scope =
  | 'ceb'
  | 'mel'
  | 'cap'
+ // second-keyholder-invite-unique fix (2026-07-30): dedicated admin-approval
+ // scope for keyholder InviteSlot signing (mirrors 'iad'/'rad' for authority/
+ // officer invites) — see schema/votetorrent.qsql's `view Scope`.
+ | 'ik'
 
 export const scopeDescriptions: Record<string, string> = {
   rn: 'Revise Network',
@@ -171,5 +175,6 @@ export const scopeDescriptions: Record<string, string> = {
   uai: 'Update Authority Information',
   ceb: 'Create/Edit ballot templates',
   mel: 'Manage Elections',
-  cap: 'Configure Authority Peers'
+  cap: 'Configure Authority Peers',
+  ik: 'Invite Keyholders'
 }
