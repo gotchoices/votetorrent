@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { ScrollView, StyleSheet, TouchableOpacity, View } from "react-native";
 import { ExtendedTheme, useTheme } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -78,6 +78,22 @@ export function BallotTemplateForm({
 	// `authority` stores the selected authority id; show its name in the row.
 	const selectedName = authorityOptions.find((o) => o.id === authority)?.name ?? "";
 
+	// A ballot carries its own AuthorityId (Ballot.MutationValid requires a 'ceb'
+	// signature from an admin of *that* authority, independent of the election's
+	// authority), so the field always exists in the model. But when the network
+	// has exactly one authority there is nothing to choose — collapse the picker
+	// to a read-only label rather than making the operator open a one-item list.
+	const soleOption = authorityOptions.length === 1 ? authorityOptions[0] : undefined;
+
+	// Committing the value matters, not just displaying it: a collapsed label
+	// showing a name while the draft still holds "" would fail AuthorityIdValid
+	// at propose time.
+	useEffect(() => {
+		if (soleOption && !authority && !disabled) {
+			onAuthorityChange(soleOption.id);
+		}
+	}, [soleOption, authority, disabled, onAuthorityChange]);
+
 	const handleAuthoritySelect = (optionId: string) => {
 		onAuthorityChange(optionId);
 		setDropdownOpen(false);
@@ -114,24 +130,37 @@ export function BallotTemplateForm({
 				<ThemedText type="defaultSemiBold" style={styles.sectionTitle}>
 					{t("authority")}
 				</ThemedText>
-				<TouchableOpacity
-					onPress={handleDropdownToggle}
-					style={[
-						styles.dropdownRow,
-						{ backgroundColor: colors.card, borderColor: colors.border },
-					]}
-				>
-					<ThemedText
+				{soleOption ? (
+					<View
 						style={[
-							styles.dropdownText,
-							{ color: selectedName ? colors.text : colors.textSecondary },
+							styles.dropdownRow,
+							{ backgroundColor: colors.card, borderColor: colors.border },
 						]}
 					>
-						{selectedName || t("authorityPlaceholder")}
-					</ThemedText>
-					<FontAwesome6 name="chevron-down" size={16} color={colors.text} />
-				</TouchableOpacity>
-				{dropdownOpen && authorityOptions.length > 0 && (
+						<ThemedText style={[styles.dropdownText, { color: colors.text }]}>
+							{soleOption.name}
+						</ThemedText>
+					</View>
+				) : (
+					<TouchableOpacity
+						onPress={handleDropdownToggle}
+						style={[
+							styles.dropdownRow,
+							{ backgroundColor: colors.card, borderColor: colors.border },
+						]}
+					>
+						<ThemedText
+							style={[
+								styles.dropdownText,
+								{ color: selectedName ? colors.text : colors.textSecondary },
+							]}
+						>
+							{selectedName || t("authorityPlaceholder")}
+						</ThemedText>
+						<FontAwesome6 name="chevron-down" size={16} color={colors.text} />
+					</TouchableOpacity>
+				)}
+				{dropdownOpen && !soleOption && authorityOptions.length > 0 && (
 					<View
 						style={[
 							styles.dropdownList,
