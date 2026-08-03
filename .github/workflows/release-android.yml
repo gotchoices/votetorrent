@@ -141,6 +141,21 @@ jobs:
       - name: Install workspace dependencies
         run: yarn install --immutable
 
+      # Workspace packages publish their entrypoints from dist/ (e.g.
+      # @votetorrent/vote-engine exports ./rn -> ./dist/rn-entry.js), and dist/
+      # is gitignored. A clean CI checkout therefore has no dist/, and Metro
+      # fails with "Unable to resolve module @votetorrent/vote-engine/rn"
+      # during :app:createBundleReleaseJsAndAssets. Local builds only work
+      # because dist/ is already on disk. Build topologically so each package
+      # is compiled after the packages it depends on.
+      #
+      # Scoped to packages/* on purpose: apps/* must NOT be built here.
+      # votetorrent-authority's `build` script is bin/build.sh, which shells
+      # into gradle — that would run an unsigned, unconfigured Android build
+      # from inside the dependency step, before signing is set up.
+      - name: Build workspace packages
+        run: yarn workspaces foreach -At --include 'packages/*' run build
+
       - name: Install Android SDK components
         run: |
           set -euo pipefail
