@@ -220,12 +220,12 @@ jobs:
       - name: Build release APK
         working-directory: ${{ matrix.app.dir }}/android
         env:
-          VOTETORRENT_STORE_FILE: release.keystore
-          VOTETORRENT_STORE_PASSWORD: ${{ secrets[format('{0}_KEYSTORE_PASSWORD', matrix.app.secret_prefix)] }}
-          AUTHORITY_KEY_ALIAS: ${{ secrets[format('{0}_KEY_ALIAS', matrix.app.secret_prefix)] }}
-          AUTHORITY_KEY_PASSWORD: ${{ secrets[format('{0}_KEY_PASSWORD', matrix.app.secret_prefix)] }}
-          VOTING_KEY_ALIAS: ${{ secrets[format('{0}_KEY_ALIAS', matrix.app.secret_prefix)] }}
-          VOTING_KEY_PASSWORD: ${{ secrets[format('{0}_KEY_PASSWORD', matrix.app.secret_prefix)] }}
+          STORE_FILE_VOTETORRENT: release.keystore
+          PASSWORD_STORE_VOTETORRENT: ${{ secrets[format('{0}_KEYSTORE_PASSWORD', matrix.app.secret_prefix)] }}
+          KEY_ALIAS_AUTHORITY: ${{ secrets[format('{0}_KEY_ALIAS', matrix.app.secret_prefix)] }}
+          PASSWORD_KEY_AUTHORITY: ${{ secrets[format('{0}_KEY_PASSWORD', matrix.app.secret_prefix)] }}
+          KEY_ALIAS_VOTER: ${{ secrets[format('{0}_KEY_ALIAS', matrix.app.secret_prefix)] }}
+          PASSWORD_KEY_VOTER: ${{ secrets[format('{0}_KEY_PASSWORD', matrix.app.secret_prefix)] }}
         run: ./gradlew assembleRelease --no-daemon --console=plain
 
       # D-06 gate 3: never publish a debug-signed APK, even if a secret was

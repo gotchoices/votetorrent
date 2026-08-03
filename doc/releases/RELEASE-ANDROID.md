@@ -151,7 +151,7 @@ To build a signed release locally:
 ```bash
 cd apps/VoteTorrentVoting/android
 set -a; . ~/.votetorrent/release-keys/voting.env; set +a
-export VOTETORRENT_STORE_PASSWORD="$VOTING_KEYSTORE_PASSWORD"
+export PASSWORD_STORE_VOTETORRENT="$VOTING_KEYSTORE_PASSWORD"
 ./gradlew assembleRelease
 ```
 
@@ -182,19 +182,33 @@ To reproduce CI's signing locally (e.g. to sanity-check a keystore before
 uploading its secrets), export the same env vars the workflow sets, then run
 `./gradlew assembleRelease` from the relevant `android/` directory:
 
+Both apps share `STORE_FILE_VOTETORRENT` / `PASSWORD_STORE_VOTETORRENT` and add
+their own key password, so one exported set covers both. Note that gradle's
+`file()` does **not** expand `~` — export an absolute path (fastlane does expand
+it; see below).
+
 ```bash
-export VOTETORRENT_STORE_FILE=release.keystore
-export VOTETORRENT_STORE_PASSWORD='...'
+export STORE_FILE_VOTETORRENT="$HOME/path/to/votetorrent.keystore"
+export PASSWORD_STORE_VOTETORRENT='...'
+export PASSWORD_KEY_AUTHORITY='...'
+export PASSWORD_KEY_VOTER='...'
 
-# For Voting:
-export VOTING_KEY_ALIAS=org.votetorrent.voting
-export VOTING_KEY_PASSWORD='...'
-cd apps/VoteTorrentVoting/android && ./gradlew assembleRelease
-
-# For Authority:
-export AUTHORITY_KEY_ALIAS=org.votetorrent.authority
-export AUTHORITY_KEY_PASSWORD='...'
+cd apps/VoteTorrentVoting/android   && ./gradlew assembleRelease
 cd apps/VoteTorrentAuthority/android && ./gradlew assembleRelease
+```
+
+`KEY_ALIAS_AUTHORITY` and `KEY_ALIAS_VOTER` are optional overrides; they default
+to `org.votetorrent.authority` and `org.votetorrent.voter`.
+
+For Authority, prefer the fastlane lanes — they validate the environment and
+prove both passwords against the keystore before starting a build, and refuse to
+call a debug-signed APK a release. See
+[apps/VoteTorrentAuthority/BUILD-RELEASE.md](../../apps/VoteTorrentAuthority/BUILD-RELEASE.md):
+
+```bash
+cd apps/VoteTorrentAuthority/android
+bundle exec fastlane android verify_keystore
+bundle exec fastlane android build_apk
 ```
 
 Debug builds (`assembleDebug`, `yarn android`, `yarn android:voting`) need

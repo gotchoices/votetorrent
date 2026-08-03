@@ -1,0 +1,6 @@
+# fastlane run artifacts
+report.xml
+Preview.html
+screenshots/
+test_output/
+README.md

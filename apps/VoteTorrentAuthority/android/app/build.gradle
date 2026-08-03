@@ -98,11 +98,19 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
+        // Driven entirely by environment variables — see ../../BUILD-RELEASE.md.
+        // Both VoteTorrent apps share one keystore (STORE_FILE_VOTETORRENT) but hold
+        // their own key inside it, so only the key password/alias vars are per-app.
+        //
+        //   STORE_FILE_VOTETORRENT      absolute path to the shared keystore
+        //   PASSWORD_STORE_VOTETORRENT  keystore password
+        //   PASSWORD_KEY_AUTHORITY      password for this app's key
+        //   KEY_ALIAS_AUTHORITY         optional alias override
         release {
-            keyAlias System.getenv("AUTHORITY_KEY_ALIAS") ?: "org.votetorrent.authority"
-            keyPassword System.getenv("AUTHORITY_KEY_PASSWORD")
-            storeFile file(System.getenv("VOTETORRENT_STORE_FILE") ?: "release.keystore")
-            storePassword System.getenv("VOTETORRENT_STORE_PASSWORD")
+            keyAlias System.getenv("KEY_ALIAS_AUTHORITY") ?: "org.votetorrent.authority"
+            keyPassword System.getenv("PASSWORD_KEY_AUTHORITY")
+            storeFile file(System.getenv("STORE_FILE_VOTETORRENT") ?: "release.keystore")
+            storePassword System.getenv("PASSWORD_STORE_VOTETORRENT")
         }
     }
     buildTypes {

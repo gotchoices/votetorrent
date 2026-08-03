@@ -83,9 +83,13 @@ android {
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
+    // namespace is the internal R-class/BuildConfig package and must match the
+    // `package` declaration in MainActivity.kt / MainApplication.kt. It is not
+    // the published identity — applicationId is, and it is permanent once the
+    // app ships, so the two are allowed to differ.
     namespace "com.votetorrentvoting"
     defaultConfig {
-        applicationId "com.votetorrentvoting"
+        applicationId "org.votetorrent.voter"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
@@ -98,11 +102,19 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
+        // Driven entirely by environment variables — see doc/releases/RELEASE-ANDROID.md.
+        // Both VoteTorrent apps share one keystore (STORE_FILE_VOTETORRENT) but hold
+        // their own key inside it, so only the key password/alias vars are per-app.
+        //
+        //   STORE_FILE_VOTETORRENT      absolute path to the shared keystore
+        //   PASSWORD_STORE_VOTETORRENT  keystore password
+        //   PASSWORD_KEY_VOTER          password for this app's key
+        //   KEY_ALIAS_VOTER             optional alias override
         release {
-            keyAlias System.getenv("VOTING_KEY_ALIAS") ?: "org.votetorrent.voting"
-            keyPassword System.getenv("VOTING_KEY_PASSWORD")
-            storeFile file(System.getenv("VOTETORRENT_STORE_FILE") ?: "release.keystore")
-            storePassword System.getenv("VOTETORRENT_STORE_PASSWORD")
+            keyAlias System.getenv("KEY_ALIAS_VOTER") ?: "org.votetorrent.voter"
+            keyPassword System.getenv("PASSWORD_KEY_VOTER")
+            storeFile file(System.getenv("STORE_FILE_VOTETORRENT") ?: "release.keystore")
+            storePassword System.getenv("PASSWORD_STORE_VOTETORRENT")
         }
     }
     buildTypes {
