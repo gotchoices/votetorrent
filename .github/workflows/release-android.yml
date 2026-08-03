@@ -174,15 +174,15 @@ jobs:
           set -euo pipefail
           FAIL=0
           if [ -z "$KEYSTORE_BASE64" ]; then
-            echo "::error::Missing repository secret ${{ matrix.app.secret_prefix }}_KEYSTORE_BASE64 — see docs/RELEASE-ANDROID.md"
+            echo "::error::Missing repository secret ${{ matrix.app.secret_prefix }}_KEYSTORE_BASE64 — see doc/releases/RELEASE-ANDROID.md"
             FAIL=1
           fi
           if [ -z "$KEYSTORE_PASSWORD" ]; then
-            echo "::error::Missing repository secret ${{ matrix.app.secret_prefix }}_KEYSTORE_PASSWORD — see docs/RELEASE-ANDROID.md"
+            echo "::error::Missing repository secret ${{ matrix.app.secret_prefix }}_KEYSTORE_PASSWORD — see doc/releases/RELEASE-ANDROID.md"
             FAIL=1
           fi
           if [ -z "$KEY_PASSWORD" ]; then
-            echo "::error::Missing repository secret ${{ matrix.app.secret_prefix }}_KEY_PASSWORD — see docs/RELEASE-ANDROID.md"
+            echo "::error::Missing repository secret ${{ matrix.app.secret_prefix }}_KEY_PASSWORD — see doc/releases/RELEASE-ANDROID.md"
             FAIL=1
           fi
           if [ "$FAIL" -ne 0 ]; then
@@ -209,7 +209,7 @@ jobs:
             KEYTOOL_CMD=(keytool -list -keystore "$KEYSTORE_PATH" -storepass "$STORE_PASSWORD")
           fi
           if ! "${KEYTOOL_CMD[@]}" >/dev/null 2>&1; then
-            echo "::error::keytool could not open the ${{ matrix.app.name }} keystore — wrong ${{ matrix.app.secret_prefix }}_KEYSTORE_PASSWORD or ${{ matrix.app.secret_prefix }}_KEY_ALIAS, see docs/RELEASE-ANDROID.md"
+            echo "::error::keytool could not open the ${{ matrix.app.name }} keystore — wrong ${{ matrix.app.secret_prefix }}_KEYSTORE_PASSWORD or ${{ matrix.app.secret_prefix }}_KEY_ALIAS, see doc/releases/RELEASE-ANDROID.md"
             exit 1
           fi
 

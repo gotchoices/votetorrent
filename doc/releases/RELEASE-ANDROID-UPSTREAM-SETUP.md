@@ -48,7 +48,7 @@ The workflow does not exist upstream yet. It arrives via a PR from the fork
 .github/workflows/release-android.yml          the workflow
 apps/VoteTorrentVoting/android/app/build.gradle real release signingConfig (was debug-signed)
 apps/VoteTorrentVoting/android/.gitignore       blocks committing a keystore
-docs/RELEASE-ANDROID.md                         the operating runbook
+doc/releases/RELEASE-ANDROID.md                         the operating runbook
 ```
 
 Merge that PR into your default branch **before** the tag push in step 5.
@@ -60,7 +60,7 @@ Two things to know about branch placement:
 - **`workflow_dispatch` (the manual "Run workflow" button) requires the workflow on the
   default branch.** Until it's merged there, the button does not appear.
 
-One repo-specific note: `docs/RELEASE-ANDROID.md` currently documents the *fork's*
+One repo-specific note: `doc/releases/RELEASE-ANDROID.md` currently documents the *fork's*
 permalinks. Once releases are cut upstream, update those URLs to `gotchoices`. The
 workflow itself needs no edit — it builds its URLs from `${{ github.repository }}`.
 
@@ -298,7 +298,7 @@ survive a failed build.
 
 ## Reference
 
-- `docs/RELEASE-ANDROID.md` — day-to-day operating runbook
+- `doc/releases/RELEASE-ANDROID.md` — day-to-day operating runbook
 - Working reference implementation: `inspirions/votetorrent`, validated end-to-end on
   2026-08-03 (both apps published, permalinks serving correctly-signed APKs, cross-app
   survival confirmed)

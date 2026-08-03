@@ -19,7 +19,7 @@ its URLs from `${{ github.repository }}` — so if release duty ever moves upstr
 `gotchoices/votetorrent`, only these documented links need updating, not the workflow.
 
 > Standing this pipeline up on a different repository (e.g. upstream
-> `gotchoices/votetorrent`)? See **[docs/RELEASE-ANDROID-UPSTREAM-SETUP.md](./RELEASE-ANDROID-UPSTREAM-SETUP.md)**
+> `gotchoices/votetorrent`)? See **[doc/releases/RELEASE-ANDROID-UPSTREAM-SETUP.md](./RELEASE-ANDROID-UPSTREAM-SETUP.md)**
 > — an admin-facing checklist covering the signing-key decision, the eight secrets,
 > verification, and the two CI-only failure modes already fixed here.
 
