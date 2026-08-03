@@ -3,6 +3,12 @@
  * Concrete ElectionInviteKeyholderBuilder implementing
  * IElectionInviteKeyholderBuilder as an additive layer over
  * ElectionEngine.inviteKeyholder.
+ *
+ * second-keyholder-invite-unique fix: `signatureOrCallback` was added
+ * alongside `keyholder`/`electionId` when `inviteKeyholder` was rewired to
+ * mirror AuthorityEngine.saveInviteWithSigning's signing ceremony. The
+ * validator/setter/draft shape below mirrors
+ * `AuthoritySaveInviteWithSigningBuilder`'s `signature` field exactly.
  */
 
 import type {
@@ -11,17 +17,23 @@ import type {
   IElectionInviteKeyholderBuilder,
   KeyholderInvite,
   MissingField,
-  SerializedBuilder
+  SerializedBuilder,
+  Signature
 } from '@votetorrent/vote-core'
 import {
   BuilderAlreadyCommittedError,
   BuilderValidationError
 } from '@votetorrent/vote-core'
 
+type SignatureOrCallback = Signature | ((digest: Uint8Array) => Promise<Signature>)
+
 interface Draft {
   keyholder?: KeyholderInvite
   electionId?: string
+  signatureOrCallback?: SignatureOrCallback
 }
+
+type EngineInput = { keyholder: KeyholderInvite; electionId: string; signatureOrCallback: SignatureOrCallback }
 
 type FrozenDraft = Readonly<Draft>
 type DraftValidator = (draft: FrozenDraft) => BuilderError[]
@@ -34,7 +46,8 @@ export class ElectionInviteKeyholderBuilder implements IElectionInviteKeyholderB
 
   private static readonly VALIDATORS: readonly DraftValidator[] = [
     ElectionInviteKeyholderBuilder.validateKeyholder,
-    ElectionInviteKeyholderBuilder.validateElectionId
+    ElectionInviteKeyholderBuilder.validateElectionId,
+    ElectionInviteKeyholderBuilder.validateSignatureOrCallback
   ]
 
   constructor (
@@ -64,6 +77,30 @@ export class ElectionInviteKeyholderBuilder implements IElectionInviteKeyholderB
     return []
   }
 
+  private static validateSignatureOrCallback (draft: FrozenDraft): BuilderError[] {
+    if (draft.signatureOrCallback === undefined || draft.signatureOrCallback === null) return []
+    // signatureOrCallback may be a completed Signature object OR a per-digest
+    // sign callback (device-signer pattern) — mirrors
+    // AuthoritySaveInviteWithSigningBuilder.validateSignature.
+    if (typeof draft.signatureOrCallback === 'function') return []
+    const sig = draft.signatureOrCallback
+    if (
+      typeof sig !== 'object' ||
+      Array.isArray(sig) ||
+      typeof sig.signature !== 'string' || sig.signature.trim() === '' ||
+      typeof sig.signerKey !== 'string' || sig.signerKey.trim() === '' ||
+      typeof sig.signerUserId !== 'string' || sig.signerUserId.trim() === ''
+    ) {
+      return [{
+        path: 'signatureOrCallback',
+        code: 'INVALID',
+        message: 'signatureOrCallback must be a function or a Signature with non-empty signature, signerKey, and signerUserId',
+        kind: 'per-setter'
+      }]
+    }
+    return []
+  }
+
   private runValidators (): readonly BuilderError[] {
     const errors: BuilderError[] = []
     for (const validator of ElectionInviteKeyholderBuilder.VALIDATORS) {
@@ -82,13 +119,17 @@ export class ElectionInviteKeyholderBuilder implements IElectionInviteKeyholderB
     return new ElectionInviteKeyholderBuilder(this.engine, { ...this.draft, electionId }) as this
   }
 
-  // ---- IBuilder<{ keyholder; electionId }, void> surface ----
+  setSignatureOrCallback (signatureOrCallback: SignatureOrCallback): this {
+    return new ElectionInviteKeyholderBuilder(this.engine, { ...this.draft, signatureOrCallback }) as this
+  }
 
-  build (): { keyholder: KeyholderInvite; electionId: string } {
+  // ---- IBuilder<{ keyholder; electionId; signatureOrCallback }, void> surface ----
+
+  build (): EngineInput {
     return this.toEngineInput()
   }
 
-  toEngineInput (): { keyholder: KeyholderInvite; electionId: string } {
+  toEngineInput (): EngineInput {
     const errors = this.runValidators()
     const missing = this.missingFields()
     if (errors.length > 0 || missing.length > 0) {
@@ -100,7 +141,8 @@ export class ElectionInviteKeyholderBuilder implements IElectionInviteKeyholderB
     }
     return {
       keyholder: this.draft.keyholder!,
-      electionId: this.draft.electionId!
+      electionId: this.draft.electionId!,
+      signatureOrCallback: this.draft.signatureOrCallback!
     }
   }
 
@@ -110,7 +152,7 @@ export class ElectionInviteKeyholderBuilder implements IElectionInviteKeyholderB
     }
     const input = this.toEngineInput()
     this.committed = true
-    return this.engine.inviteKeyholder(input.keyholder, input.electionId)
+    return this.engine.inviteKeyholder(input.keyholder, input.electionId, input.signatureOrCallback)
   }
 
   isValid (): boolean {
@@ -134,10 +176,11 @@ export class ElectionInviteKeyholderBuilder implements IElectionInviteKeyholderB
     const missing: MissingField[] = []
     if (this.draft.keyholder === undefined) missing.push({ path: 'keyholder', reason: 'required' })
     if (this.draft.electionId === undefined) missing.push({ path: 'electionId', reason: 'required' })
+    if (this.draft.signatureOrCallback === undefined) missing.push({ path: 'signatureOrCallback', reason: 'required' })
     return Object.freeze(missing)
   }
 
-  update (partial: Partial<{ keyholder: KeyholderInvite; electionId: string }>): this {
+  update (partial: Partial<EngineInput>): this {
     return new ElectionInviteKeyholderBuilder(this.engine, { ...this.draft, ...partial }) as this
   }
 
@@ -159,10 +202,11 @@ export class ElectionInviteKeyholderBuilder implements IElectionInviteKeyholderB
 
   dispose (): void {}
 
-  fromPayload (payload: { keyholder: KeyholderInvite; electionId: string }): this {
+  fromPayload (payload: EngineInput): this {
     return new ElectionInviteKeyholderBuilder(this.engine, {
       keyholder: payload.keyholder,
-      electionId: payload.electionId
+      electionId: payload.electionId,
+      signatureOrCallback: payload.signatureOrCallback
     }) as this
   }
 

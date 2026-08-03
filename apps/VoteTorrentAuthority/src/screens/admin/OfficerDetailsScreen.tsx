@@ -1,86 +1,139 @@
-import React from "react";
+import React, { useLayoutEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Image, ScrollView, StyleSheet, View } from "react-native";
-import { ThemedText } from "../../components/ThemedText";
-import type { Officer } from "@votetorrent/vote-core";
-import { useRoute } from "@react-navigation/native";
+import { ScrollView, StyleSheet, TouchableOpacity, View } from "react-native";
+import FontAwesome6 from "react-native-vector-icons/FontAwesome6";
+import { ExtendedTheme, useNavigation, useRoute, useTheme } from "@react-navigation/native";
+import type { Authority, INetworkEngine, Officer } from "@votetorrent/vote-core";
 import { scopeDescriptions } from "@votetorrent/vote-core";
+import { ThemedText } from "../../components/ThemedText";
+import { InfoCard } from "../../components/InfoCard";
+import { InlineError } from "../../components/InlineError";
+import { useApp } from "../../providers/AppProvider";
+import type { NavigationProp } from "../../navigation/types";
 import { globalStyles } from "../../theme/styles";
 
 export default function OfficerDetailsScreen() {
 	const { t } = useTranslation();
-	const { officer } = useRoute().params as { officer: Officer };
+	const { colors } = useTheme() as ExtendedTheme;
+	const navigation = useNavigation<NavigationProp>();
+	const { getEngine } = useApp();
+	// `Officer` (vote-core authority/models.ts) has no name/imageRef; the route
+	// optionally carries the resolved user name. SID = officer.userId.
+	const { officer, userName, authority } = useRoute().params as {
+		officer: Officer & { imageRef?: { url: string } };
+		userName?: string;
+		authority: Authority;
+	};
+
+	const [errorMessage, setErrorMessage] = useState("");
+
+	// User/SID card → the user's profile (Figma frames: User detail). Resolve the
+	// user + its engine from the network engine, then hand both to UserDetails.
+	const handleOpenUser = async () => {
+		setErrorMessage("");
+		try {
+			const networkEngine = await getEngine<INetworkEngine>("network");
+			const userEngine = await networkEngine?.getUser(officer.userId);
+			const user = await userEngine?.getSummary();
+			if (userEngine && user) {
+				navigation.navigate("UserDetails", { user, userEngine });
+			}
+		} catch (error) {
+			console.warn("Error opening user from officer detail:", error);
+			setErrorMessage(error instanceof Error ? error.message : String(error));
+		}
+	};
+
+	// Invitation card → the Administrator editor (Figma frame 12 / EditOfficer).
+	const handleOpenInvitation = () => {
+		navigation.navigate("EditOfficer", { authority, officerId: officer.userId });
+	};
+
+	// D-05: header label is "Administrator", not "Officer".
+	useLayoutEffect(() => {
+		navigation.setOptions({ title: t("administrator") });
+	}, [navigation, t]);
 
 	if (!officer) {
 		return null;
 	}
 
-	const officerDetails = [
-		{ label: t("title"), value: officer.title },
-		{ label: t("userId"), value: officer.userId },
-	];
+	const displayName = userName ?? officer.userId;
+	const permissions = officer.scopes
+		.map((scope) => scopeDescriptions[scope] ?? t(`scope_${scope}`))
+		.join(", ");
 
 	return (
-		<ScrollView style={styles.container}>
+		<ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 24 }}>
 			<View style={styles.section}>
-				<View style={styles.imageContainer}>
-					{officer.imageRef && (
-						<Image source={{ uri: officer.imageRef.url }} style={styles.administratorImage} />
-					)}
+				{/* Name / Title / Permissions — inline text block (Figma frame 13) */}
+				<View style={styles.detail}>
+					<ThemedText type="defaultSemiBold">{t("name")}: </ThemedText>
+					<ThemedText>{displayName}</ThemedText>
 				</View>
-				{officerDetails.map((field) => (
-					<View key={field.label} style={styles.field}>
-						<ThemedText type="defaultSemiBold">{field.label}: </ThemedText>
-						<ThemedText>{field.value}</ThemedText>
+				<View style={styles.detail}>
+					<ThemedText type="defaultSemiBold">{t("title")}: </ThemedText>
+					<ThemedText>{officer.title}</ThemedText>
+				</View>
+				<View style={styles.detail}>
+					<ThemedText type="defaultSemiBold">{t("permissions")}: </ThemedText>
+					<ThemedText style={styles.permissions}>{permissions}</ThemedText>
+				</View>
+
+				{/* User card → user profile */}
+				<InfoCard
+					image={officer.imageRef?.url ? { uri: officer.imageRef.url } : undefined}
+					additionalInfo={[
+						{ label: t("user"), value: displayName },
+						{ label: t("sid"), value: officer.userId },
+					]}
+					icon="chevron-right"
+					onPress={handleOpenUser}
+				/>
+				<InlineError message={errorMessage} />
+			</View>
+
+			{/* Invitation section */}
+			<View style={styles.section}>
+				<ThemedText type="title">{t("invitation")}</ThemedText>
+				<TouchableOpacity
+						style={[styles.invitationCard, { backgroundColor: colors.card }]}
+						onPress={handleOpenInvitation}
+					>
+					<View style={styles.invitationContent}>
+						<ThemedText type="cardTitle">{displayName}</ThemedText>
+						<ThemedText type="defaultSemiBold" style={{ color: colors.success }}>
+							{t("accepted")}
+						</ThemedText>
 					</View>
-				))}
-				<View style={styles.scopesSection}>
-					<ThemedText type="defaultSemiBold" style={styles.scopesTitle}>
-						{t("scopes")}:
-					</ThemedText>
-					{officer.scopes.map((scope) => (
-						<View key={scope} style={styles.scopeItem}>
-							<ThemedText style={styles.bullet}>•</ThemedText>
-							<ThemedText style={styles.scopeDescription}>{scopeDescriptions[scope]}</ThemedText>
-						</View>
-					))}
-				</View>
+					<FontAwesome6 name="chevron-right" size={18} color={colors.text} />
+				</TouchableOpacity>
 			</View>
 		</ScrollView>
 	);
 }
 
 const localStyles = StyleSheet.create({
-	imageContainer: {
-		position: "relative",
-		width: 200,
-		height: 200,
-		alignSelf: "center",
-		marginVertical: 16,
-	},
-	administratorImage: {
-		width: "100%",
-		height: "100%",
-		borderRadius: 8,
-	},
-	field: {
+	detail: {
 		flexDirection: "row",
+		marginVertical: 1,
 	},
-	scopesSection: {
-		marginTop: 16,
-	},
-	scopesTitle: {
-		marginBottom: 8,
-	},
-	scopeItem: {
-		flexDirection: "row",
-		marginBottom: 4,
-	},
-	bullet: {
-		marginRight: 8,
-	},
-	scopeDescription: {
+	permissions: {
 		flex: 1,
+		flexWrap: "wrap",
+	},
+	invitationCard: {
+		// Match the InfoCard surface above (shadow/elevation) so the invitation
+		// reads as a card per Figma frame 13 — the bare backgroundColor was
+		// invisible against the light screen background.
+		...globalStyles.cardSurface,
+		flexDirection: "row",
+		alignItems: "center",
+		justifyContent: "space-between",
+	},
+	invitationContent: {
+		flex: 1,
+		gap: 4,
 	},
 });
 

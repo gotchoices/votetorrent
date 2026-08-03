@@ -1,0 +1,71 @@
+buildscript {
+    ext.safeExtGet = {prop, fallback ->
+        rootProject.ext.has(prop) ? rootProject.ext.get(prop) : fallback
+    }
+    repositories {
+        google()
+        gradlePluginPortal()
+    }
+    dependencies {
+        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:${safeExtGet("kotlinVersion", "2.0.21")}")
+        classpath("com.android.tools.build:gradle:8.13.0")
+    }
+}
+
+def isNewArchitectureEnabled() {
+    return project.hasProperty("newArchEnabled") && project.newArchEnabled == "true"
+}
+
+apply plugin: "com.android.library"
+apply plugin: "kotlin-android"
+
+if (isNewArchitectureEnabled()) {
+    apply plugin: "com.facebook.react"
+}
+
+android {
+    namespace "org.votetorrent.attestationnative"
+
+    buildToolsVersion safeExtGet("buildToolsVersion", "35.0.0")
+    compileSdkVersion safeExtGet("compileSdkVersion", 35)
+
+    buildFeatures {
+        buildConfig true
+    }
+    defaultConfig {
+        buildConfigField("boolean", "IS_NEW_ARCHITECTURE_ENABLED", isNewArchitectureEnabled().toString())
+        minSdkVersion safeExtGet("minSdkVersion", 24)
+        targetSdkVersion safeExtGet("targetSdkVersion", 35)
+    }
+    lintOptions {
+        abortOnError false
+    }
+    // New-arch-only module (VoteTorrentVoting is newArchEnabled=true; per 45-RESEARCH
+    // "Alternatives Considered" we deliberately drop the oldarch/src/oldarch split
+    // react-native-localize carries for broader third-party compat) — all Kotlin
+    // sources live under the default main sourceSet (src/main/java), no extra dirs.
+}
+
+repositories {
+    maven {
+        // All of React Native (JS, Obj-C sources, Android binaries) is installed from npm.
+        // NOTE: this module is included as a Gradle subproject of the consuming app (via
+        // autolinking), so $rootDir resolves to the CONSUMING APP's android/ dir at build
+        // time (e.g. apps/VoteTorrentVoting/android) — mirrors react-native-localize's own
+        // build.gradle verbatim, not a path relative to this package's own location.
+        url("$rootDir/../node_modules/react-native/android")
+    }
+    google()
+    mavenCentral()
+}
+
+dependencies {
+    //noinspection GradleDynamicVersion
+    implementation "com.facebook.react:react-native:+" // From node_modules
+
+    // D-05: call Google's official native SDKs directly — no third-party npm wrapper.
+    // Versions VERIFIED against live Google Maven maven-metadata.xml (45-RESEARCH
+    // Standard Stack) — do not bump/guess.
+    implementation "com.google.android.play:integrity:1.6.0"
+    implementation "androidx.biometric:biometric:1.1.0"
+}

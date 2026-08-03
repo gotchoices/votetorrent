@@ -9,15 +9,17 @@ interface CollapsibleSectionProps {
 	children: React.ReactNode;
 	searchPlaceholder?: string;
 	onSearch?: (text: string) => void;
+	defaultExpanded?: boolean;
 }
 
 export function CollapsibleSection({
 	title,
 	children,
 	searchPlaceholder = 'Search...',
-	onSearch
+	onSearch,
+	defaultExpanded = false
 }: CollapsibleSectionProps) {
-	const [isExpanded, setIsExpanded] = useState(false);
+	const [isExpanded, setIsExpanded] = useState(defaultExpanded);
 	const [searchText, setSearchText] = useState('');
 	const {colors} = useTheme();
 

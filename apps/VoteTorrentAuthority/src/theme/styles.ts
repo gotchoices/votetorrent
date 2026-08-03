@@ -39,4 +39,24 @@ export const globalStyles = StyleSheet.create({
 		gap: 16,
 		paddingHorizontal: 20,
 	},
+	// Shared visual shell for all "card" surfaces (InfoCard, ElectionCard,
+	// KeyholderCard, TaskCard). Per-component backgroundColor is applied
+	// dynamically from theme.colors.card. Shadow is intentionally soft and
+	// wide so it diffuses around the rounded corners on both platforms
+	// instead of reading as a hard strip below the card.
+	cardSurface: {
+		borderRadius: 16,
+		paddingVertical: 16,
+		paddingHorizontal: 16,
+		marginVertical: 10,
+		marginHorizontal: 4,
+		shadowColor: '#000',
+		shadowOffset: {
+			width: 0,
+			height: 6,
+		},
+		shadowOpacity: 0.18,
+		shadowRadius: 18,
+		elevation: 8,
+	},
 });

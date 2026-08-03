@@ -39,6 +39,17 @@ export class MockAuthorityEngine implements IAuthorityEngine {
   private readonly proposedAuthority?: Proposal<AuthorityInit> // Unused by current mock methods but part of interface/state
   // private isSlcoAuthority: boolean = false; // No longer needed
 
+  // Authorities whose mock keeps a proposed administration. All other seeded
+  // authorities return adminDetails.proposed === undefined so the "Revise
+  // Administration" button gate (!adminDetails?.proposed) on AuthorityDetails
+  // evaluates true. Closes Phase 8 UAT gap 14 (gap-closure plan 08-07 Task 4).
+  // Names MUST match packages/vote-engine/src/mock-data.ts MOCK_AUTHORITIES[*].name
+  // verbatim (case-sensitive).
+  private static readonly AUTHORITIES_WITH_PROPOSAL = new Set<string>([
+    'Salt Lake County',
+    'State of Utah'
+  ])
+
   constructor (private readonly authority: Authority) {
     // Always initialize using the shared administration template
     const detailsCopy = JSON.parse(
@@ -49,7 +60,11 @@ export class MockAuthorityEngine implements IAuthorityEngine {
     // **Important**: Set the correct authorityId for this specific instance
     this.admin.authorityId = this.authority.id
 
-    this.proposedAdmin = detailsCopy.proposed
+    this.proposedAdmin = MockAuthorityEngine.AUTHORITIES_WITH_PROPOSAL.has(
+      this.authority.name
+    )
+      ? detailsCopy.proposed
+      : undefined
   }
 
   createOfficerInvite (init: OfficerInit): OfficerInviteShare {
@@ -68,6 +83,18 @@ export class MockAuthorityEngine implements IAuthorityEngine {
     throw new Error('Method not implemented.')
   }
 
+  // SURF-03 (D-05): compile-time parity counterparts. Trivial — the mock does
+  // not back a real Quereus store, so cancel logs + resolves and resend returns
+  // a stub Cid. The real behavior lives in AuthorityEngine (vote-engine).
+  async cancelInvite (slotCid: string): Promise<void> {
+    console.log(`MockAuthorityEngine: cancelInvite(${slotCid}) for ${this.authority.name}.`)
+  }
+
+  async resendInvite (slotCid: string): Promise<string> {
+    console.log(`MockAuthorityEngine: resendInvite(${slotCid}) for ${this.authority.name}.`)
+    return `mock-resent-${slotCid}`
+  }
+
   async getAdminDetails (): Promise<AdminDetails> {
     // Return the instance-specific administration details
     return {
@@ -83,7 +110,7 @@ export class MockAuthorityEngine implements IAuthorityEngine {
     }
   }
 
-  async proposeAdmin (adminProposal: Proposal<AdminInit>, _signature: Signature): Promise<void> {
+  async proposeAdmin (adminProposal: Proposal<AdminInit>, _signatureOrCallback: Signature | ((digest: Uint8Array) => Promise<Signature>)): Promise<void> {
     // Update the instance's proposed administration directly
     this.proposedAdmin = JSON.parse(JSON.stringify(adminProposal))
     console.log(
