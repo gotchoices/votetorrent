@@ -18,6 +18,11 @@ signing secrets live (see section 3). The workflow itself is repo-agnostic — i
 its URLs from `${{ github.repository }}` — so if release duty ever moves upstream to
 `gotchoices/votetorrent`, only these documented links need updating, not the workflow.
 
+> Standing this pipeline up on a different repository (e.g. upstream
+> `gotchoices/votetorrent`)? See **[doc/releases/RELEASE-ANDROID-UPSTREAM-SETUP.md](./RELEASE-ANDROID-UPSTREAM-SETUP.md)**
+> — an admin-facing checklist covering the signing-key decision, the eight secrets,
+> verification, and the two CI-only failure modes already fixed here.
+
 Why these URLs and not GitHub's built-in
 `https://github.com/<repo>/releases/latest/download/<asset>` shortcut: that
 form resolves to the newest non-prerelease release across **all** tags in the

@@ -117,12 +117,44 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-          cache: yarn
 
-      - name: Install workspace dependencies
+      # Corepack MUST be enabled before anything invokes `yarn`. setup-node's
+      # `cache: yarn` cannot be used here: it shells out to `yarn cache dir`
+      # from inside the action, using the runner's global Yarn 1.22.22, which
+      # hard-errors against this repo's `packageManager: yarn@4.7.0` pin. So we
+      # enable Corepack ourselves and cache the Yarn 4 global cache explicitly.
+      - name: Enable Corepack (pinned Yarn 4.7.0)
         run: |
           corepack enable
-          yarn install --immutable
+          yarn --version
+
+      - name: Cache Yarn global cache
+        uses: actions/cache@v4
+        with:
+          # .yarnrc.yml sets enableGlobalCache: true, so downloads land in the
+          # global folder rather than a per-project .yarn/cache.
+          path: ~/.yarn/berry/cache
+          key: ${{ runner.os }}-yarn-${{ hashFiles('yarn.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-yarn-
+
+      - name: Install workspace dependencies
+        run: yarn install --immutable
+
+      # Workspace packages publish their entrypoints from dist/ (e.g.
+      # @votetorrent/vote-engine exports ./rn -> ./dist/rn-entry.js), and dist/
+      # is gitignored. A clean CI checkout therefore has no dist/, and Metro
+      # fails with "Unable to resolve module @votetorrent/vote-engine/rn"
+      # during :app:createBundleReleaseJsAndAssets. Local builds only work
+      # because dist/ is already on disk. Build topologically so each package
+      # is compiled after the packages it depends on.
+      #
+      # Scoped to packages/* on purpose: apps/* must NOT be built here.
+      # votetorrent-authority's `build` script is bin/build.sh, which shells
+      # into gradle — that would run an unsigned, unconfigured Android build
+      # from inside the dependency step, before signing is set up.
+      - name: Build workspace packages
+        run: yarn workspaces foreach -At --include 'packages/*' run build
 
       - name: Install Android SDK components
         run: |
@@ -142,15 +174,15 @@ jobs:
           set -euo pipefail
           FAIL=0
           if [ -z "$KEYSTORE_BASE64" ]; then
-            echo "::error::Missing repository secret ${{ matrix.app.secret_prefix }}_KEYSTORE_BASE64 — see docs/RELEASE-ANDROID.md"
+            echo "::error::Missing repository secret ${{ matrix.app.secret_prefix }}_KEYSTORE_BASE64 — see doc/releases/RELEASE-ANDROID.md"
             FAIL=1
           fi
           if [ -z "$KEYSTORE_PASSWORD" ]; then
-            echo "::error::Missing repository secret ${{ matrix.app.secret_prefix }}_KEYSTORE_PASSWORD — see docs/RELEASE-ANDROID.md"
+            echo "::error::Missing repository secret ${{ matrix.app.secret_prefix }}_KEYSTORE_PASSWORD — see doc/releases/RELEASE-ANDROID.md"
             FAIL=1
           fi
           if [ -z "$KEY_PASSWORD" ]; then
-            echo "::error::Missing repository secret ${{ matrix.app.secret_prefix }}_KEY_PASSWORD — see docs/RELEASE-ANDROID.md"
+            echo "::error::Missing repository secret ${{ matrix.app.secret_prefix }}_KEY_PASSWORD — see doc/releases/RELEASE-ANDROID.md"
             FAIL=1
           fi
           if [ "$FAIL" -ne 0 ]; then
@@ -177,7 +209,7 @@ jobs:
             KEYTOOL_CMD=(keytool -list -keystore "$KEYSTORE_PATH" -storepass "$STORE_PASSWORD")
           fi
           if ! "${KEYTOOL_CMD[@]}" >/dev/null 2>&1; then
-            echo "::error::keytool could not open the ${{ matrix.app.name }} keystore — wrong ${{ matrix.app.secret_prefix }}_KEYSTORE_PASSWORD or ${{ matrix.app.secret_prefix }}_KEY_ALIAS, see docs/RELEASE-ANDROID.md"
+            echo "::error::keytool could not open the ${{ matrix.app.name }} keystore — wrong ${{ matrix.app.secret_prefix }}_KEYSTORE_PASSWORD or ${{ matrix.app.secret_prefix }}_KEY_ALIAS, see doc/releases/RELEASE-ANDROID.md"
             exit 1
           fi
 
