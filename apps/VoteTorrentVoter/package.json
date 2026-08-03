@@ -2,14 +2,19 @@
   "name": "votetorrent-voter",
   "version": "0.0.1",
   "private": true,
-  "description": "Voting app for casting votes in VoteTorrent elections",
+  "description": "Voter app for casting votes in VoteTorrent elections",
   "scripts": {
     "android": "react-native run-android",
     "ios": "react-native run-ios",
     "lint": "eslint .",
     "start": "react-native start",
     "test": "jest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "verify:keystore": "cd android && bundle exec fastlane android verify_keystore",
+    "prepare:workspace": "cd android && bundle exec fastlane android prepare",
+    "build:debug": "cd android && bundle exec fastlane android build_debug",
+    "build:apk": "cd android && bundle exec fastlane android build_apk",
+    "build:aab": "cd android && bundle exec fastlane android build_aab"
   },
   "dependencies": {
     "@libp2p/circuit-relay-v2": "^4",

@@ -1,10 +1,10 @@
-# VoteTorrent Authority — Android build lanes
+# VoteTorrent Voter — Android build lanes
 #
 # Signing env (shared keystore, per-app key):
 #   STORE_FILE_VOTETORRENT      path to the shared VoteTorrent keystore (~ is expanded)
 #   PASSWORD_STORE_VOTETORRENT  keystore password
-#   PASSWORD_KEY_AUTHORITY      password for this app's key inside that keystore
-#   KEY_ALIAS_AUTHORITY         optional; defaults to org.votetorrent.authority
+#   PASSWORD_KEY_VOTER          password for this app's key inside that keystore
+#   KEY_ALIAS_VOTER             optional; defaults to org.votetorrent.voter
 #
 # Lanes:
 #   fastlane android verify_keystore  — prove the env/keystore without building (seconds)
@@ -13,7 +13,7 @@
 #   fastlane android build_apk        — signed release APK with the real app id
 #   fastlane android build_aab        — signed release bundle for the Play Store
 #
-# The heavy lifting is shared with the Voter app — see scripts/fastlane/vt_signing.rb.
+# The heavy lifting is shared with the Authority app — see scripts/fastlane/vt_signing.rb.
 
 default_platform(:android)
 
@@ -25,8 +25,8 @@ REPO_ROOT    = File.expand_path("../../../..", FASTLANE_DIR)
 require File.join(REPO_ROOT, "scripts", "fastlane", "vt_signing")
 
 APP = VtSigning::App.new(
-  name: "authority",
-  default_alias: "org.votetorrent.authority",
+  name: "voter",
+  default_alias: "org.votetorrent.voter",
   android_dir: ANDROID_DIR,
   app_dir: APP_DIR,
   repo_root: REPO_ROOT,

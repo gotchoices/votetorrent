@@ -39,8 +39,10 @@ the key alias and key password are per-app. The `release` signingConfig in
 | `PASSWORD_KEY_AUTHORITY` | password for this app's key |
 | `KEY_ALIAS_AUTHORITY` | optional; defaults to `org.votetorrent.authority` |
 
-The Voting app uses the same first two vars plus `PASSWORD_KEY_VOTER` /
-`KEY_ALIAS_VOTER`, so one exported set covers both apps.
+The Voter app has an identical set of lanes (`apps/VoteTorrentVoter/android/fastlane`)
+and uses the same first two vars plus `PASSWORD_KEY_VOTER` / `KEY_ALIAS_VOTER`, so
+one exported set covers both apps. Both Fastfiles are thin wrappers over the shared
+[`scripts/fastlane/vt_signing.rb`](../../scripts/fastlane/vt_signing.rb).
 
 Keystores are **never committed** — `android/.gitignore` excludes `*.keystore`
 (and suffixed copies) but whitelists `debug.keystore`.
