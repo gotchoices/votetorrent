@@ -10,8 +10,13 @@ These two URLs are the deliverable: paste them into docs, QR codes, or chat.
 They never change, and each is updated independently of the other app's
 release cadence.
 
-* **Voting:** `https://github.com/gotchoices/votetorrent/releases/download/latest-voting/votetorrent-voting-latest.apk`
-* **Authority:** `https://github.com/gotchoices/votetorrent/releases/download/latest-authority/votetorrent-authority-latest.apk`
+* **Voting:** `https://github.com/inspirions/votetorrent/releases/download/latest-voting/votetorrent-voting-latest.apk`
+* **Authority:** `https://github.com/inspirions/votetorrent/releases/download/latest-authority/votetorrent-authority-latest.apk`
+
+Releases are cut from the **`inspirions/votetorrent`** fork, because that is where the
+signing secrets live (see section 3). The workflow itself is repo-agnostic — it builds
+its URLs from `${{ github.repository }}` — so if release duty ever moves upstream to
+`gotchoices/votetorrent`, only these documented links need updating, not the workflow.
 
 Why these URLs and not GitHub's built-in
 `https://github.com/<repo>/releases/latest/download/<asset>` shortcut: that
@@ -76,10 +81,17 @@ repository.
 > the Authority password (never stored on disk), and proving both passwords with
 > `keytool -list` before uploading anything.
 >
-> **Setting Actions secrets requires ADMIN on the repo.** As of 2026-08-03 the
-> `aarashrestha` account has only `READ` on `gotchoices/votetorrent`, so both the
-> script and any direct `gh secret set` fail with HTTP 403. Run it from an account with
-> admin (`gh auth switch`) or hand it to the repo owner. The table below is the manual
+> **Which repo.** Set these on **`inspirions/votetorrent`** — the fork that cuts
+> releases. The `aarashrestha` account has `ADMIN` there, but only `READ` on upstream
+> `gotchoices/votetorrent`, where any `gh secret set` returns HTTP 403. The script
+> defaults to the upstream repo, so override it:
+>
+> ```bash
+> REPO=inspirions/votetorrent ~/.votetorrent/release-keys/set-github-secrets.sh
+> ```
+>
+> (The script currently hardcodes `REPO=gotchoices/votetorrent` on line 13 — change that
+> line, or export `REPO` after making it overridable.) The table below is the manual
 > fallback.
 
 | Secret | App | Source |
@@ -115,7 +127,7 @@ Or set the secret directly with the `gh` CLI, without going through the
 clipboard:
 
 ```bash
-gh secret set AUTHORITY_KEYSTORE_BASE64 --repo gotchoices/votetorrent \
+gh secret set AUTHORITY_KEYSTORE_BASE64 --repo inspirions/votetorrent \
   < <(base64 -i apps/VoteTorrentAuthority/android/app/release.keystore)
 ```
 
