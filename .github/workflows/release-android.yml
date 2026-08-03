@@ -117,12 +117,29 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-          cache: yarn
 
-      - name: Install workspace dependencies
+      # Corepack MUST be enabled before anything invokes `yarn`. setup-node's
+      # `cache: yarn` cannot be used here: it shells out to `yarn cache dir`
+      # from inside the action, using the runner's global Yarn 1.22.22, which
+      # hard-errors against this repo's `packageManager: yarn@4.7.0` pin. So we
+      # enable Corepack ourselves and cache the Yarn 4 global cache explicitly.
+      - name: Enable Corepack (pinned Yarn 4.7.0)
         run: |
           corepack enable
-          yarn install --immutable
+          yarn --version
+
+      - name: Cache Yarn global cache
+        uses: actions/cache@v4
+        with:
+          # .yarnrc.yml sets enableGlobalCache: true, so downloads land in the
+          # global folder rather than a per-project .yarn/cache.
+          path: ~/.yarn/berry/cache
+          key: ${{ runner.os }}-yarn-${{ hashFiles('yarn.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-yarn-
+
+      - name: Install workspace dependencies
+        run: yarn install --immutable
 
       - name: Install Android SDK components
         run: |
