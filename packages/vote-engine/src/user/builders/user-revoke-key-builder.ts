@@ -2,6 +2,10 @@
  * Phase 07 -- BUILD-USER-01 / FOUND-01..03 / FACT-02..04 / VALID-01..03 /
  * SER-01,02,04. Concrete UserRevokeKeyBuilder implementing
  * IUserRevokeKeyBuilder as an additive layer over UserEngine.revokeKey.
+ *
+ * Phase 21 (UKEY-02): revokeKey now requires a device Signature. The builder
+ * stores the Signature via `setSignature(sig)` and passes it to the engine
+ * on commit(). A missing Signature is reported as a missingField.
  */
 
 import type {
@@ -9,7 +13,8 @@ import type {
   IUserEngine,
   IUserRevokeKeyBuilder,
   MissingField,
-  SerializedBuilder
+  SerializedBuilder,
+  Signature
 } from '@votetorrent/vote-core'
 import {
   BuilderAlreadyCommittedError,
@@ -31,6 +36,8 @@ export class UserRevokeKeyBuilder implements IUserRevokeKeyBuilder {
 
   private committed = false
   private cachedOutput: void | undefined = undefined
+  /** Device Signature supplied by the screen via setSignature(). Not serialized. */
+  private _signature: Signature | undefined = undefined
 
   private static readonly VALIDATORS: readonly DraftValidator[] = [
     UserRevokeKeyBuilder.validateKey
@@ -72,6 +79,16 @@ export class UserRevokeKeyBuilder implements IUserRevokeKeyBuilder {
     return new UserRevokeKeyBuilder(this.engine, { ...this.draft, key }) as this
   }
 
+  /**
+   * Supply the device Signature obtained from createDeviceSigner before calling commit().
+   * The Signature is held in memory only — it is not included in toJSON() serialization.
+   */
+  setSignature (sig: Signature): this {
+    const clone = new UserRevokeKeyBuilder(this.engine, { ...this.draft }) as this
+    ;(clone as unknown as UserRevokeKeyBuilder)._signature = sig
+    return clone
+  }
+
   build (): string {
     return this.toEngineInput()
   }
@@ -98,9 +115,17 @@ export class UserRevokeKeyBuilder implements IUserRevokeKeyBuilder {
     if (this.committed) {
       throw new BuilderAlreadyCommittedError(UserRevokeKeyBuilder.KIND)
     }
-    this.toEngineInput() // validate before committing
+    if (!this._signature) {
+      throw new BuilderValidationError([{
+        path: 'signature',
+        code: 'MISSING',
+        message: 'Device Signature is required — call setSignature(sig) before commit()',
+        kind: 'per-setter'
+      }])
+    }
+    this.toEngineInput() // validate key before committing
     this.committed = true
-    const result = this.engine.revokeKey(this.toEngineInput())
+    const result = this.engine.revokeKey(this.toEngineInput(), this._signature)
     this.cachedOutput = undefined
     return result
   }

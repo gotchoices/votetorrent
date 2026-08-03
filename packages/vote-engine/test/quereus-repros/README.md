@@ -23,8 +23,12 @@ stage 7 into two independent bugs once isolated.
 | `stage-6-check-on-delete.spec.ts` | Bug C — `check on delete (expr)` fires on INSERT (and other ops) | 2 | High — blocks 4 insert paths in production schema | [quereus#23](https://github.com/gotchoices/quereus/issues/23) |
 | `stage-7-in-subquery.spec.ts` | Bug A — VIEW with `union all` returns only the first row | A1–A3 | Critical — silent data loss; subsumes Plan 03-05 "stage 3" | [quereus#21](https://github.com/gotchoices/quereus/issues/21) |
 | `stage-7-in-subquery.spec.ts` | Bug B — `X not in (subquery)` in CHECK always evaluates as false | B1–B3 | High — schema cannot express negative-membership constraints | [quereus#22](https://github.com/gotchoices/quereus/issues/22) |
+| `optimystic-composite-pk-delete.spec.ts` | Plugin bug — `DELETE`/`UPDATE` is a silent no-op for tables with a **composite** PRIMARY KEY (Optimystic backend) | 4 | High — every composite-PK delete/update silently affects 0 rows while reporting success | gotchoices/optimystic _(pending)_ |
 
-All three confirmed present in Quereus **2.9.0** and **3.1.1** (latest as of 2026-05-22).
+The three Quereus-core bugs (A/B/C) were confirmed present in Quereus **2.9.0** and **3.1.1**; bug C
+(quereus#23) is now **fixed** in **3.x** — its `stage-6` spec asserts correct behavior. The composite-PK
+no-op is a **plugin** bug (`@optimystic/quereus-plugin-optimystic@0.13.5`), NOT Quereus core — core
+DELETE works on `@quereus/quereus@3.3.0` (in-memory).
 
 ### Retired (not a bug)
 
@@ -218,6 +222,50 @@ the CHECK fails.
 The positive form `check (X in (subquery))` against a real table works
 correctly (see sub-test B3), so the issue is specific to the `not in`
 path or the boolean coercion of its result inside CHECK eval.
+
+---
+
+### Issue (PLUGIN): `DELETE`/`UPDATE` is a silent no-op for composite-PK tables
+
+**Repo:** https://github.com/gotchoices/optimystic — `packages/quereus-plugin-optimystic`
+(`@optimystic/quereus-plugin-optimystic@0.13.5`). **Not** Quereus core.
+
+**File:** `packages/vote-engine/test/quereus-repros/optimystic-composite-pk-delete.spec.ts`
+**Full writeup:** `.planning/quick/260617-ji0-create-github-issue-for-optimystic-plugi/issues/optimystic-composite-pk-delete-update.md`
+
+**Summary**
+
+For a table whose PRIMARY KEY spans more than one column, `DELETE` and key-identifying `UPDATE`
+silently affect zero rows and return `{status:"ok"}`. `INSERT`/`SELECT` are correct.
+
+**Root cause**
+
+Quereus core passes `oldKeyValues` to the vtab `update()` as a COMPACTED, PK-only array in PK order
+(`@quereus/quereus dist/src/runtime/emit/dml-executor.js:142`:
+`pkColumnIndicesInSchema.map(idx => existingRow[idx])`). The plugin's
+`RowCodec.extractPrimaryKey(row)` (`dist/chunk-HPFDTDHY.js:820`) indexes by ABSOLUTE schema column
+index `row[pkCol.index]`. For `UserKey(UserId@0, Type@1, PubKey@2, Expiration@3)` PK `(UserId, PubKey)`,
+the compacted `[UserId, PubKey]` is read at indices 0 and 2 → index 2 is `undefined` → the PubKey part
+collapses to a NULL sentinel → the delete/update key ≠ the stored key → `collection.replace([[wrongKey,
+undefined]])` masks a non-existent key. Same composite-PK class already patched for READS
+(`.yarn/patches/@optimystic-...-6fbe2eccab.patch` → `executePointLookup` → `createPrimaryKey(args)`);
+the delete/update path was missed.
+
+**Fix**
+
+In `update()`, derive the key from the compacted `oldKeyValues` with `createPrimaryKey(oldKeyValues)`
+(positional mapping) instead of `extractPrimaryKey(oldKeyValues)`, for both the delete (`~1715`) and
+update (`~1690`) branches — mirroring the read-path patch.
+
+**Downstream impact**
+
+VoteTorrent key revocation (`delete from UserKey where UserId=? and PubKey=?`) records a real signed
+`RK` event but never removes the key — the revoked key stays active across restarts (Phase 21 UAT
+Test 5). Any composite-PK table is affected.
+
+**Note on the convention:** this is a mechanism-level repro against the exported `RowCodec` (no storage
+backend needed). When the plugin's `update()` is fixed to use `createPrimaryKey`, the end-to-end no-op
+disappears; the repro's BUG/FIX assertions document exactly what changed and why.
 
 ---
 

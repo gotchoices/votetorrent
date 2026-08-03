@@ -1,4 +1,6 @@
 import { ExtendedTheme, useTheme } from "@react-navigation/native";
+import { useNavigation } from "@react-navigation/native";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import React, { useState, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { ScrollView, StyleSheet, TouchableOpacity, View, Image } from "react-native";
@@ -6,12 +8,21 @@ import { ThemedText } from "../../components/ThemedText";
 import FontAwesome6 from "react-native-vector-icons/FontAwesome6";
 import { ChipButton } from "../../components/ChipButton";
 import { CustomButton } from "../../components/CustomButton";
+import { Footer } from "../../components/Footer";
 import { globalStyles } from "../../theme/styles";
 import { CustomTextInput } from "../../components/CustomTextInput";
+import { useApp } from "../../providers/AppProvider";
+import { getOrCreateDeviceUser } from "../../engines/device-user";
+import type { IDefaultUserEngine, INetworksEngine, NetworkInit, NetworkReference } from "@votetorrent/vote-core";
+import { ElectionType } from "@votetorrent/vote-core";
+import type { RootStackParamList } from "../../navigation/types";
+import { InlineError } from "../../components/InlineError";
 
 export default function AddNetworkScreen() {
 	const { colors } = useTheme() as ExtendedTheme;
 	const { t } = useTranslation();
+	const { getEngine, networksEngine, selectNetwork } = useApp();
+	const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 	const [networkName, setNetworkName] = useState("");
 	const [networkImageUrl, setNetworkImageUrl] = useState("");
 	const [authorityName, setAuthorityName] = useState("");
@@ -22,6 +33,18 @@ export default function AddNetworkScreen() {
 	const [isSigned, setIsSigned] = useState(false);
 	const [showAdvanced, setShowAdvanced] = useState(false);
 	const [relayAddresses, setRelayAddresses] = useState([""]);
+	// Election Characteristics (Figma "New Network" frame) — keyholder usage and
+	// single-vs-multiple authority.
+	const [useKeyholders, setUseKeyholders] = useState(true);
+	// CR-01: single-vs-multiple authority is not yet representable in NetworkInit;
+	// the network is always created single-authority, so no toggle state is kept.
+	// 16-08 item 4: surface the ACTUAL submit failure inline (not just console.error).
+	const [errorMessage, setErrorMessage] = useState<string>("");
+	// network-create-release-hang: track the in-flight create so the CREATE button shows
+	// progress + is disabled during the (potentially slow / device-stalling) commit. Without
+	// this the screen looks frozen for the whole `builder.commit()` await — indistinguishable
+	// from a hang.
+	const [creating, setCreating] = useState(false);
 	const scrollViewRef = useRef<ScrollView>(null);
 
 	const toggleAdvanced = () => {
@@ -51,8 +74,134 @@ export default function AddNetworkScreen() {
 	};
 
 	const handleMakePermanent = () => {
-		//TODO: Implement make permanent
-		console.log("Make permanent");
+		// Phase 22: media-pin to content-addressed storage (CID) — not yet implemented.
+	};
+
+	// network-create-release-hang: on real devices `builder.commit()` (strand/cadre/libp2p
+	// network creation) can stall indefinitely with no error, leaving the screen frozen.
+	// Race every create step against a timeout so an indefinite hang surfaces an actionable
+	// inline error instead of an infinite silent spinner. The underlying promise can't be
+	// cancelled, but the UI recovers and the user can retry.
+	const CREATE_TIMEOUT_MS = 45000;
+	const withTimeout = <T,>(p: Promise<T>, label: string): Promise<T> => {
+		return Promise.race([
+			p,
+			new Promise<T>((_resolve, reject) =>
+				setTimeout(
+					() => reject(new Error(t("networkCreateTimeout", { step: label }))),
+					CREATE_TIMEOUT_MS,
+				),
+			),
+		]);
+	};
+
+	const handleCreate = async () => {
+		// 16-08 item 4: clear any prior error so a retry starts clean.
+		setErrorMessage("");
+		// CR-01: the "Sign" affordance gates creation of a signed permanent record.
+		// Do not create the network unless the administrator has signed.
+		if (!isSigned) {
+			setErrorMessage(t("mustSignBeforeCreating"));
+			return;
+		}
+		setCreating(true);
+		try {
+			// Resolve NetworksEngine — available directly from AppProvider context (D-03).
+			if (!networksEngine) {
+				console.error("handleCreate: networksEngine not yet initialized");
+				setErrorMessage("Networks engine not yet initialized — please wait and try again.");
+				return;
+			}
+			const networksEng = networksEngine as INetworksEngine;
+
+			// Resolve device identity (D-02 / generate-on-first-run).
+			const defaultUserEng = await getEngine<IDefaultUserEngine>("defaultUser");
+			const defaultUser = await defaultUserEng.get();
+			const user = await getOrCreateDeviceUser(defaultUser?.name ?? "Device User");
+
+			// Assemble NetworkInit from the 11 form-state fields (D-03).
+			// ThresholdPolicy uses `policy` field (not `scope`) per vote-core interface.
+			const networkInit: NetworkInit = {
+				name: networkName,
+				imageUrl: networkImageUrl || undefined,
+				relays: relayAddresses.filter(Boolean),
+				primaryAuthority: {
+					name: authorityName,
+					domainName: domainName,
+				},
+				admin: {
+					officers: [
+						{
+							init: {
+								name: adminName,
+								title: adminTitle,
+								scopes: ["rn", "rad", "iad", "uai", "mel", "ceb"],
+							},
+						},
+					],
+					effectiveAt: Date.now(),
+					thresholdPolicies: [
+						{ policy: "rn", threshold: 1 },
+						{ policy: "mel", threshold: 1 },
+						{ policy: "ceb", threshold: 1 },
+					],
+				},
+				policies: {
+					timestampAuthorities: [],
+					numberRequiredTSAs: 0,
+					electionType: useKeyholders ? ElectionType.official : ElectionType.adhoc,
+				},
+			};
+
+			// Route through v1.1 NetworksCreateBuilder (D-03).
+			// INetworksCreateBuilder.update() is the typed API for setting both fields
+			// (setNetworkInit/setUser are on the concrete class, not the interface).
+			const builder = networksEng.buildCreate().update({ networkInit, user });
+			if (!builder.isValid()) {
+				console.error("handleCreate: validation errors", builder.errors());
+				const relayMissing = builder.errors().some((e) => e.path === "networkInit.relays");
+				setErrorMessage(
+					// network-create-release-hang: replace the raw "networkInit.relays must not be
+					// empty" engine string with discoverable guidance (the relay field lives under
+					// Advanced → ADD RELAY). Other validation errors fall through unchanged.
+					relayMissing
+						? t("errRelayRequired")
+						: builder.errors().map((e) => e.message).join("\n") || t("validationFailed"),
+				);
+				if (relayMissing) setShowAdvanced(true);
+				return;
+			}
+			// network-create-release-hang: instrument each create step so on-device logcat
+			// pinpoints where a real-device hang occurs (console.info is allowed by the VER-01
+			// stub guard). Race against a timeout so an indefinite stall surfaces an error.
+			console.info("[network-create] commit() start", { network: networkName });
+			const networkEngine = await withTimeout(builder.commit(), "commit");
+			console.info("[network-create] commit() done");
+
+			// Pitfall 4: re-establish currentNetworkHash in the factory by calling
+			// getEngine("network", ref) with the full NetworkReference that the concrete
+			// NetworkEngine exposes via its `init` property. INetworkEngine does not
+			// declare `init` in the interface, so we access it via a cast.
+			// This allows sibling engines (elections, signing, etc.) to resolve the
+			// established ctx immediately after create without a separate open().
+			const networkRef = (networkEngine as unknown as { init: NetworkReference }).init;
+			// Auto-select the just-created network: bind it AND flip hasNetwork so the
+			// app lands on the populated network home instead of "No network selected".
+			// (selectNetwork re-establishes currentNetworkHash like the old getEngine call,
+			// plus sets hasNetwork — Pitfall 4 still satisfied via its internal getEngine.)
+			console.info("[network-create] selectNetwork() start");
+			await withTimeout(selectNetwork(networkRef), "select");
+			console.info("[network-create] selectNetwork() done");
+		} catch (err) {
+			console.error("handleCreate error:", err);
+			setErrorMessage(err instanceof Error ? err.message : String(err));
+			return;
+		} finally {
+			// Always clear the in-flight flag so the button re-enables on error/timeout
+			// (on success the screen unmounts via goBack, so this is a harmless no-op).
+			setCreating(false);
+		}
+		navigation.goBack();
 	};
 
 	return (
@@ -79,6 +228,47 @@ export default function AddNetworkScreen() {
 							resizeMode="cover"
 						/>
 					) : null}
+				</View>
+
+				<View style={styles.section}>
+					<ThemedText type="defaultSemiBold" style={styles.sectionTitle}>
+						{t("electionCharacteristics")}
+					</ThemedText>
+					<View style={styles.characteristicsGrid}>
+						<TouchableOpacity
+							style={styles.radioOption}
+							onPress={() => setUseKeyholders(true)}
+						>
+							<View style={[styles.radioOuter, { borderColor: useKeyholders ? colors.primary : colors.textSecondary }]}>
+								{useKeyholders && <View style={[styles.radioInner, { backgroundColor: colors.primary }]} />}
+							</View>
+							<ThemedText style={styles.radioLabel}>{t("useKeyholders")}</ThemedText>
+						</TouchableOpacity>
+						<TouchableOpacity
+							style={styles.radioOption}
+							onPress={() => setUseKeyholders(false)}
+						>
+							<View style={[styles.radioOuter, { borderColor: !useKeyholders ? colors.primary : colors.textSecondary }]}>
+								{!useKeyholders && <View style={[styles.radioInner, { backgroundColor: colors.primary }]} />}
+							</View>
+							<ThemedText style={styles.radioLabel}>{t("noKeyholders")}</ThemedText>
+						</TouchableOpacity>
+					</View>
+					{/* CR-01: NetworkInit can only represent a single primary authority, so
+					    the multi-authority option is disabled (rather than a live control
+					    that silently drops the user's choice). Single authority is always used. */}
+					<View style={styles.characteristicsGrid}>
+						<View style={styles.radioOption}>
+							<View style={[styles.radioOuter, { borderColor: colors.primary }]}>
+								<View style={[styles.radioInner, { backgroundColor: colors.primary }]} />
+							</View>
+							<ThemedText style={styles.radioLabel}>{t("singleAuthority")}</ThemedText>
+						</View>
+						<View style={[styles.radioOption, { opacity: 0.4 }]}>
+							<View style={[styles.radioOuter, { borderColor: colors.textSecondary }]} />
+							<ThemedText style={styles.radioLabel}>{t("multipleAuthorityNotYetSupported")}</ThemedText>
+						</View>
+					</View>
 				</View>
 
 				<View style={styles.section}>
@@ -114,7 +304,7 @@ export default function AddNetworkScreen() {
 
 				<View style={styles.section}>
 					<ThemedText type="title" style={styles.sectionTitle}>
-						{t("initialOfficer")}
+						{t("initialAdministrator")}
 					</ThemedText>
 					<CustomTextInput
 						title={t("name")}
@@ -157,7 +347,8 @@ export default function AddNetworkScreen() {
 							<ChipButton
 								label={t("import")}
 								icon="circle-plus"
-								onPress={() => console.log("Import")}
+								disabled={true}
+								onPress={undefined}
 							/>
 						</View>
 						{relayAddresses.map((address, index) => (
@@ -178,15 +369,17 @@ export default function AddNetworkScreen() {
 				) : null}
 			</ScrollView>
 
-			<View style={[styles.footer, { backgroundColor: colors.card }]}>
+			<InlineError message={errorMessage} />
+			<Footer>
 				<CustomButton
-					title={t("create")}
-					icon="floppy-disk"
+					title={creating ? t("creating") : t("create")}
+					icon={creating ? "spinner" : "floppy-disk"}
 					backgroundColor={colors.success}
 					forceDarkText={true}
-					onPress={() => console.log("Create network")}
+					disabled={creating}
+					onPress={handleCreate}
 				/>
-			</View>
+			</Footer>
 		</View>
 	);
 }
@@ -216,6 +409,32 @@ const localStyles = StyleSheet.create({
 		marginTop: 8,
 		height: 200,
 		borderRadius: 16,
+	},
+	characteristicsGrid: {
+		flexDirection: "row",
+		marginTop: 12,
+	},
+	radioOption: {
+		flexDirection: "row",
+		alignItems: "center",
+		flex: 1,
+	},
+	radioOuter: {
+		width: 20,
+		height: 20,
+		borderRadius: 10,
+		borderWidth: 2,
+		alignItems: "center",
+		justifyContent: "center",
+		marginRight: 8,
+	},
+	radioInner: {
+		width: 10,
+		height: 10,
+		borderRadius: 5,
+	},
+	radioLabel: {
+		flex: 1,
 	},
 	signButton: {
 		flexDirection: "row",
