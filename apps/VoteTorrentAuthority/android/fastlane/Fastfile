@@ -11,6 +11,7 @@
 #   fastlane android prepare          — yarn install + build the workspace packages
 #   fastlane android build_debug      — debug-signed APK, needs none of the above vars
 #   fastlane android build_apk        — signed release APK with the real app id
+#   fastlane android build_apk_dev    — release-mode APK signed with the DEBUG key
 #   fastlane android build_aab        — signed release bundle for the Play Store
 #
 # The heavy lifting is shared with the Voter app — see scripts/fastlane/vt_signing.rb.
@@ -65,6 +66,17 @@ platform :android do
     APP.require_workspace!
     gradle(task: "assembleRelease", project_dir: ANDROID_DIR)
     APP.report(APP.artifact_path("apk/release/app-release.apk"), "RELEASE APK", verify_release_signature: true)
+  end
+
+  desc "Build a release-mode APK signed with the DEBUG key (no keystore needed)"
+  lane :build_apk_dev do
+    APP.warn_if_signing_env_present!
+    APP.require_workspace!
+    # Unset so app/build.gradle takes its debug-key fallback branch.
+    ENV.delete("STORE_FILE_VOTETORRENT")
+    gradle(task: "assembleRelease", project_dir: ANDROID_DIR)
+    APP.report(APP.artifact_path("apk/release/app-release.apk"), "RELEASE-MODE APK (debug-signed)", verify_release_signature: false)
+    UI.important("Signed with the DEBUG key — installable for testing, NOT publishable.")
   end
 
   desc "Build a signed release App Bundle (.aab) for the Play Store"

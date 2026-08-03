@@ -1,128 +1,108 @@
-# Android release builds
+# Android builds and releases
 
-Signed release APKs for both React Native apps (`votetorrent-voter` and
-`votetorrent-authority`) are built and published by
-[`.github/workflows/release-android.yml`](../../.github/workflows/release-android.yml).
+There are two distinct things here, and keeping them separate is the whole design:
 
-For **local** builds — including the fastlane lanes that validate your signing
-environment before starting a 10-minute gradle run — see
-[apps/VoteTorrentAuthority/BUILD-RELEASE.md](../../apps/VoteTorrentAuthority/BUILD-RELEASE.md).
+| | Who | Key | Publishable |
+|---|---|---|---|
+| **Verification builds** | CI, on every push — [`build-android.yml`](../../.github/workflows/build-android.yml) | debug (committed) | no |
+| **Release builds** | the key holder, locally | the real VoteTorrent keystore | yes |
 
-## 1. Shareable permalinks
+**The signing key never leaves the key holder's machine.** No keystore is uploaded
+to GitHub, no signing secrets exist on the repository, and CI cannot produce a
+publishable artifact even if it wanted to.
 
-These two URLs are the deliverable: paste them into docs, QR codes, or chat.
-They never change, and each is updated independently of the other app's
-release cadence.
+## 1. Verification builds (automatic, no key)
 
-* **Voter:** `https://github.com/gotchoices/votetorrent/releases/download/latest-voter/votetorrent-voter-latest.apk`
-* **Authority:** `https://github.com/gotchoices/votetorrent/releases/download/latest-authority/votetorrent-authority-latest.apk`
+Every push and pull request builds **release-variant** APKs for both apps and
+attaches them as workflow artifacts (Actions → the run → Artifacts, kept 14 days).
 
-The workflow is repo-agnostic — it builds its URLs from `${{ github.repository }}` —
-so if release duty ever moves, only these documented links need updating.
+Release variant rather than debug, on purpose: the release path is where this
+project's bugs have actually lived — the Metro production bundle and the Hermes
+compile (`99ddcf0`, `7f430ae`, `599dda6`). A debug build skips JS bundling
+entirely and loads from a Metro dev server, so it cannot catch any of them. The
+workflow explicitly fails if the APK comes out without `assets/index.android.bundle`.
 
-Why these URLs and not GitHub's built-in
-`https://github.com/<repo>/releases/latest/download/<asset>` shortcut: that
-form resolves to the newest non-prerelease release across **all** tags in the
-repo. Because Voter and Authority are released independently and on different
-cadences, an Authority-only release would silently 404 the Voter permalink (and
-vice versa). Instead, each app's workflow leg force-moves its own `latest-voter` /
-`latest-authority` tag to the commit it just built and re-uploads a version-free
-asset name with `--clobber`. The permalink depends on nothing but the tag name
-and the asset name, so it is stable by construction.
+With no `STORE_FILE_VOTETORRENT` in the environment, `apps/*/android/app/build.gradle`
+falls back to the committed debug key. The resulting APK installs and runs
+standalone, so it is genuinely testable — it simply carries a different app
+identity and must never be published.
 
-The `latest-voter` and `latest-authority` releases are marked
-`--prerelease --latest=false`, so they never hijack the "Latest" badge or
-`/releases/latest` — the real versioned release always holds that spot.
-
-## 2. How to cut a release
-
-Tag prefix selects which app(s) build. `workflow_dispatch` overrides.
-
-| Trigger | Builds |
-|---|---|
-| `voter-v*` (e.g. `voter-v0.2.0`) | Voter only |
-| `authority-v*` (e.g. `authority-v0.0.4`) | Authority only |
-| `v*` (e.g. `v1.2.3`) | Both |
-| Manual `workflow_dispatch` with `apps: both\|voter\|authority` | as chosen |
+Anyone can produce the same thing locally:
 
 ```bash
-git tag voter-v0.2.0     && git push origin voter-v0.2.0      # Voter only
-git tag authority-v0.0.4 && git push origin authority-v0.0.4  # Authority only
-git tag v1.2.3           && git push origin v1.2.3            # Both
+cd apps/VoteTorrentVoter          # or VoteTorrentAuthority
+yarn build:apk:dev
 ```
 
-The tag-prefix `case` in the workflow tests `voter-v*` and `authority-v*`
-**before** the bare `v*` branch, because `v*` as a glob also matches
-`voter-v0.2.0`. Reordering those branches would misclassify a single-app
-release as "both".
+## 2. Release builds (manual, key required)
 
-To build without cutting a version tag, run the workflow manually from the
-Actions tab. A manual run uploads a workflow artifact and still refreshes the
-rolling permalink, but does **not** create a versioned GitHub Release.
+Only the key holder can make one. See
+[apps/VoteTorrentAuthority/BUILD-RELEASE.md](../../apps/VoteTorrentAuthority/BUILD-RELEASE.md)
+for the full signing setup.
 
-## 3. Repository secrets
+```bash
+export STORE_FILE_VOTETORRENT="$HOME/path/to/votetorrent.keystore"
+export PASSWORD_STORE_VOTETORRENT='...'
+export PASSWORD_KEY_AUTHORITY='...'
+export PASSWORD_KEY_VOTER='...'
 
-Both apps' keys live in **one** keystore, so the keystore and its store password
-are shared and only the key password is per-app. The secret names are identical
-to the environment variables used for local builds — there is no translation
-layer between what you export in a shell and what CI reads.
+cd apps/VoteTorrentAuthority && yarn verify:keystore && yarn build:apk
+cd ../VoteTorrentVoter        && yarn verify:keystore && yarn build:apk
+```
 
-Create these as **repository-level** secrets:
-**Settings → Secrets and variables → Actions → "New repository secret"**.
+`build_apk` runs `apksigner verify` on the result and **fails** if the APK carries
+the debug certificate, so a missing or misspelled env var can never yield a
+silently debug-signed "release".
 
-| Secret | Required | Value |
+## 3. Publishing
+
+Three separate places hold artifacts, and it is worth keeping them straight:
+
+| Where | What lives there | Updated by |
 |---|---|---|
-| `KEYSTORE_BASE64_VOTETORRENT` | yes | base64 of the shared keystore |
-| `PASSWORD_STORE_VOTETORRENT` | yes | keystore password |
-| `PASSWORD_KEY_AUTHORITY` | yes | password for the Authority key |
-| `PASSWORD_KEY_VOTER` | yes | password for the Voter key |
-| `KEY_ALIAS_AUTHORITY` | no | defaults to `org.votetorrent.authority` |
-| `KEY_ALIAS_VOTER` | no | defaults to `org.votetorrent.voter` |
+| your disk | `android/app/build/outputs/apk/release/app-release.apk` | `yarn build:apk` |
+| GitHub Releases | the `.apk` files people download | `gh release upload` |
+| votetorrent.org | `web/join.html` — the *page* holding the download links | `web/publish` (scp) |
 
-Encode the keystore and set it without going through the clipboard:
+votetorrent.org hosts the **page**; GitHub hosts the **files**. The download
+links in `join.html` point at
+`github.com/gotchoices/votetorrent/releases/download/...`, so an APK never
+touches the web server.
+
+Upload a locally built APK to the rolling per-app release:
 
 ```bash
-gh secret set KEYSTORE_BASE64_VOTETORRENT --repo gotchoices/votetorrent \
-  < <(base64 -i "$STORE_FILE_VOTETORRENT")
-
-gh secret set PASSWORD_STORE_VOTETORRENT --repo gotchoices/votetorrent
-gh secret set PASSWORD_KEY_AUTHORITY     --repo gotchoices/votetorrent
-gh secret set PASSWORD_KEY_VOTER         --repo gotchoices/votetorrent
+gh release upload latest-voter     <path-to-voter-apk>     --clobber
+gh release upload latest-authority <path-to-authority-apk> --clobber
 ```
 
-(On Linux use `base64 -w0` instead of `base64 -i`.)
+Create a rolling release first if it does not exist yet:
 
-Keystores are **never committed** — `apps/*/android/.gitignore` blocks
-`*.keystore` and suffixed copies. Do not override that with `git add -f`.
+```bash
+gh release create latest-voter --prerelease --latest=false \
+  --title "Rolling: latest Voter APK" --notes "Always the newest Voter APK."
+```
 
-## 4. Signing gates
+`--prerelease --latest=false` keeps these rolling tags from hijacking the
+"Latest" badge on the Releases page.
 
-The workflow refuses to publish an incorrectly signed APK, in three stages:
+Then, only if the HTML changed:
 
-1. **Preflight** — fails immediately on a missing secret, rather than 20 minutes
-   into a gradle build.
-2. **Decode and prove** — runs [`scripts/VerifyKeystore.java`](../../scripts/VerifyKeystore.java),
-   which drives the same `KeyStore` API the Android Gradle Plugin uses, and
-   proves the store password, the alias, and the key password before building.
+```bash
+cd web && ./publish html
+```
 
-   This deliberately avoids `keytool`. On a PKCS12 keystore `keytool` discards
-   `-keypass` and substitutes the store password
-   ([JDK-8008292](https://bugs.openjdk.org/browse/JDK-8008292), Won't Fix), so
-   `keytool -list` proves nothing about the key password — and it fails outright
-   on a keystore that gradle signs with perfectly well. See BUILD-RELEASE.md for
-   the full explanation.
-3. **Verify APK signature** — `apksigner verify --print-certs` on the output,
-   refusing to publish anything carrying the debug certificate.
-
-## 5. Changing the signing key or application id
+## 4. Changing the signing key or application id
 
 Both are **permanent** once an app is published. Android treats a build signed
 with a different key, or carrying a different `applicationId`, as a different
 app: existing users cannot update in place and must uninstall and reinstall.
 
-Back up the keystore and its password somewhere durable (a password manager,
-not this repo) before doing anything else with them. Losing the key means the
-app can never be updated in place again.
+Back up the keystore and its password somewhere durable (a password manager, not
+this repo). Losing the key means the app can never be updated in place again.
+
+Keystores are never committed — `apps/*/android/.gitignore` blocks `*.keystore`
+and suffixed copies. Do not override that with `git add -f`.
 
 When the Voter app's signing key or application id changes, update the pinned
 values in

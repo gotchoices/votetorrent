@@ -16,7 +16,7 @@
 //
 // Passwords arrive via the environment, never argv, so they stay out of `ps`.
 //
-// Shared by the fastlane signing lanes and .github/workflows/release-android.yml.
+// Used by the fastlane signing lanes (scripts/fastlane/vt_signing.rb).
 // Run with JDK 11+ single-file source launch: java scripts/VerifyKeystore.java <file> <alias>
 // Emits KEY=VALUE lines on stdout; always exits 0 unless it cannot run at all.
 

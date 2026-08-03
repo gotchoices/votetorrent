@@ -147,6 +147,15 @@ module VtSigning
       File.join(android_dir, "app", "build", "outputs", relative)
     end
 
+    # A release build with no signing env: identical Metro production bundle and
+    # Hermes compile, signed with the committed debug key. Installable and
+    # testable, but a different app identity, so never publishable.
+    def warn_if_signing_env_present!
+      return if ENV["STORE_FILE_VOTETORRENT"].to_s.strip.empty?
+      UI.important("STORE_FILE_VOTETORRENT is set, but this lane deliberately builds with the DEBUG key.")
+      UI.important("Use `build_apk` if you meant to sign with the real key.")
+    end
+
     def report(path, label, verify_release_signature:)
       UI.user_error!("Build reported success but #{path} does not exist.") unless File.exist?(path)
 

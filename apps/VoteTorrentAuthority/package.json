@@ -15,6 +15,7 @@
 		"prepare:workspace": "cd android && bundle exec fastlane android prepare",
 		"build:debug": "cd android && bundle exec fastlane android build_debug",
 		"build:apk": "cd android && bundle exec fastlane android build_apk",
+		"build:apk:dev": "cd android && bundle exec fastlane android build_apk_dev",
 		"build:aab": "cd android && bundle exec fastlane android build_aab",
 		"clean": "rm -rf node_modules"
 	},

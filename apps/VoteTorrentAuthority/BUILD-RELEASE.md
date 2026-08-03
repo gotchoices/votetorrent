@@ -4,13 +4,38 @@ Builds run through fastlane, from `android/`. All lanes are thin wrappers around
 `./gradlew` — nothing is injected that a plain gradle invocation with the same
 environment wouldn't do.
 
-| Lane | What it does |
-|------|--------------|
-| `verify_keystore` | proves the signing env works, in seconds, without building |
-| `prepare` | `yarn install` + builds the workspace packages |
-| `build_debug` | debug-signed APK; needs **no** signing env |
-| `build_apk` | signed release APK, app id `org.votetorrent.authority` |
-| `build_aab` | signed release `.aab` for the Play Store |
+| Lane | Needs the keystore? | What it does |
+|------|---|--------------|
+| `verify_keystore` | yes | proves the signing env works, in seconds, without building |
+| `prepare` | no | `yarn install` + builds the workspace packages |
+| `build_debug` | no | debug-signed APK; needs a running Metro server to start |
+| `build_apk_dev` | **no** | release-mode APK signed with the DEBUG key — installable, not publishable |
+| `build_apk` | yes | signed release APK, app id `org.votetorrent.authority` — publishable |
+| `build_aab` | yes | signed release `.aab` for the Play Store |
+
+Or from the app directory: `yarn verify:keystore`, `yarn build:apk`, `yarn build:apk:dev`,
+`yarn build:debug`, `yarn build:aab`, `yarn prepare:workspace`.
+
+## Who needs the keystore
+
+Only whoever publishes. Everyone else — contributors, contractors, CI — uses
+`build_apk_dev`, which produces a **genuine release-mode build**: same Metro
+production bundle, same Hermes compile, same ProGuard settings. The only
+difference is the signature.
+
+That matters, because this project's bugs have historically lived in exactly
+that release path and are invisible in a debug build (`99ddcf0` release APK
+bundle + Hermes boot, `7f430ae` babel plugin for on-device bundling, `599dda6`
+missing workspace `dist/`). A debug build skips JS bundling entirely — it loads
+from a Metro dev server — so it cannot catch any of them.
+
+The trade-off: a debug-signed APK is a different app identity, so switching
+between it and a real signed build requires uninstalling first. It must never be
+published, and `build_apk` enforces that by running `apksigner verify` and
+refusing to ship anything carrying the debug certificate.
+
+`.github/workflows/build-android.yml` builds both apps this way on every push,
+with no secrets of any kind.
 
 ## Prerequisites
 
@@ -38,6 +63,18 @@ the key alias and key password are per-app. The `release` signingConfig in
 | `PASSWORD_STORE_VOTETORRENT` | keystore password |
 | `PASSWORD_KEY_AUTHORITY` | password for this app's key |
 | `KEY_ALIAS_AUTHORITY` | optional; defaults to `org.votetorrent.authority` |
+
+**`STORE_FILE_VOTETORRENT` is the switch.** When it is set, release builds use
+the real key. When it is absent, `build.gradle` falls back to the committed debug
+key and logs:
+
+```
+[signing] STORE_FILE_VOTETORRENT is not set — release builds will be signed with
+the DEBUG key and are NOT publishable.
+```
+
+So `./gradlew assembleRelease` works for everyone, and only the key holder can
+produce a publishable artifact.
 
 The Voter app has an identical set of lanes (`apps/VoteTorrentVoter/android/fastlane`)
 and uses the same first two vars plus `PASSWORD_KEY_VOTER` / `KEY_ALIAS_VOTER`, so
