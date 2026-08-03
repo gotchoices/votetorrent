@@ -98,15 +98,19 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
+        release {
+            keyAlias System.getenv("VOTING_KEY_ALIAS") ?: "org.votetorrent.voting"
+            keyPassword System.getenv("VOTING_KEY_PASSWORD")
+            storeFile file(System.getenv("VOTETORRENT_STORE_FILE") ?: "release.keystore")
+            storePassword System.getenv("VOTETORRENT_STORE_PASSWORD")
+        }
     }
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
         }
         release {
-            // Caution! In production, you need to generate your own keystore file.
-            // see https://reactnative.dev/docs/signed-apk-android.
-            signingConfig signingConfigs.debug
+            signingConfig signingConfigs.release
             minifyEnabled enableProguardInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
         }
