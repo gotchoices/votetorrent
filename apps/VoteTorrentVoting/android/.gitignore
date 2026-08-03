@@ -1,5 +1,5 @@
 
-# Release signing keystore — never commit (regenerate per docs/RELEASE-ANDROID.md)
+# Release signing keystore — never commit (regenerate per doc/releases/RELEASE-ANDROID.md)
 *.keystore
 !debug.keystore
 # Also ignore SUFFIXED keystore copies (e.g. release.keystore.orphaned-<date> left behind

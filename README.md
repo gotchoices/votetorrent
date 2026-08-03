@@ -39,7 +39,7 @@ These will be available in the Apple App Store and Google Play Store.
 ### Releases
 
 Signed Android release APKs are built by CI and published to permanent
-per-app download links — see [docs/RELEASE-ANDROID.md](docs/RELEASE-ANDROID.md)
+per-app download links — see [doc/releases/RELEASE-ANDROID.md](doc/releases/RELEASE-ANDROID.md)
 for the release process and repository secret setup.
 
 * [Voting APK (latest)](https://github.com/inspirions/votetorrent/releases/download/latest-voting/votetorrent-voting-latest.apk)
