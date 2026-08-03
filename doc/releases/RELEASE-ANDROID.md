@@ -10,18 +10,24 @@ These two URLs are the deliverable: paste them into docs, QR codes, or chat.
 They never change, and each is updated independently of the other app's
 release cadence.
 
-* **Voting:** `https://github.com/inspirions/votetorrent/releases/download/latest-voting/votetorrent-voting-latest.apk`
-* **Authority:** `https://github.com/inspirions/votetorrent/releases/download/latest-authority/votetorrent-authority-latest.apk`
+* **Voting:** `https://github.com/gotchoices/votetorrent/releases/download/latest-voting/votetorrent-voting-latest.apk`
+* **Authority:** `https://github.com/gotchoices/votetorrent/releases/download/latest-authority/votetorrent-authority-latest.apk`
 
-Releases are cut from the **`inspirions/votetorrent`** fork, because that is where the
-signing secrets live (see section 3). The workflow itself is repo-agnostic — it builds
-its URLs from `${{ github.repository }}` — so if release duty ever moves upstream to
-`gotchoices/votetorrent`, only these documented links need updating, not the workflow.
+Releases are cut from **`gotchoices/votetorrent`**, which is the canonical release
+channel. The workflow itself is repo-agnostic — it builds its URLs from
+`${{ github.repository }}` — so a fork that sets its own signing secrets gets working
+permalinks against its own namespace with no edit to the workflow; only these documented
+links are repo-specific.
 
-> Standing this pipeline up on a different repository (e.g. upstream
-> `gotchoices/votetorrent`)? See **[doc/releases/RELEASE-ANDROID-UPSTREAM-SETUP.md](./RELEASE-ANDROID-UPSTREAM-SETUP.md)**
-> — an admin-facing checklist covering the signing-key decision, the eight secrets,
-> verification, and the two CI-only failure modes already fixed here.
+> The pipeline was originally built and validated on the `inspirions/votetorrent` fork,
+> where `voting-v0.1.0` and `authority-v0.1.0` were published on 2026-08-03. Those fork
+> permalinks still resolve, but they are **not** the ones to share — use the
+> `gotchoices` URLs above.
+
+> Standing this pipeline up on another repository? See
+> **[doc/releases/RELEASE-ANDROID-UPSTREAM-SETUP.md](./RELEASE-ANDROID-UPSTREAM-SETUP.md)**
+> — a checklist covering the signing-key decision, the eight secrets, verification, and
+> the two CI-only failure modes already fixed here.
 
 Why these URLs and not GitHub's built-in
 `https://github.com/<repo>/releases/latest/download/<asset>` shortcut: that
@@ -50,21 +56,21 @@ Tag prefix selects which app(s) build. `workflow_dispatch` overrides.
 | `v*` (e.g. `v1.2.3`) | Both |
 | Manual `workflow_dispatch` with `apps: both\|voting\|authority` | as chosen |
 
-The remote in this clone is named `gotchoices`, not `origin` — use that name
-when pushing tags:
+Push the tag to whichever remote points at `gotchoices/votetorrent` — `origin` in a
+direct clone, but often `upstream` in a clone of a fork. Substitute accordingly:
 
 ```bash
 # Voting only
 git tag voting-v0.1.0
-git push gotchoices voting-v0.1.0
+git push origin voting-v0.1.0
 
 # Authority only
 git tag authority-v0.0.4
-git push gotchoices authority-v0.0.4
+git push origin authority-v0.0.4
 
 # Both apps, coordinated release
 git tag v1.2.3
-git push gotchoices v1.2.3
+git push origin v1.2.3
 ```
 
 To build without cutting a version tag (e.g. to sanity-check signing or grab
@@ -75,29 +81,30 @@ still refreshes the rolling permalink for the chosen app(s), but it does
 
 ## 3. Repository secrets (required)
 
-All eight secrets below must be created as **repository-level** secrets:
-**Settings -> Secrets and variables -> Actions -> "New repository secret"**.
-Organization secrets are **not available** on this account, so nothing in the
-workflow may rely on them — every secret must be created individually on this
-repository.
+All eight secrets below must be created as **repository-level** secrets on
+`gotchoices/votetorrent`. Organization secrets are **not available** to this project, so
+nothing in the workflow may rely on them — every secret must be created individually on
+the repository.
 
-> **Fastest path:** run `~/.votetorrent/release-keys/set-github-secrets.sh`. It sets
-> all eight in one go, reading the Voting credentials from `voting.env`, prompting for
-> the Authority password (never stored on disk), and proving both passwords with
-> `keytool -list` before uploading anything.
+> **Which access you need.** Repository **write** is sufficient. The Actions secrets API
+> is gated on collaborator access, not admin, so `gh secret set --repo
+> gotchoices/votetorrent` works at write level — verified 2026-08-03 by setting and
+> deleting a throwaway secret with a non-admin account.
 >
-> **Which repo.** Set these on **`inspirions/votetorrent`** — the fork that cuts
-> releases. The `aarashrestha` account has `ADMIN` there, but only `READ` on upstream
-> `gotchoices/votetorrent`, where any `gh secret set` returns HTTP 403. The script
-> defaults to the upstream repo, so override it:
+> The **Settings -> Secrets and variables -> Actions** *UI* is a different matter: that
+> page lives under repository Settings and is admin-only. If you cannot open it, that
+> does not mean you cannot set the secrets — use `gh secret set`.
 >
-> ```bash
-> REPO=inspirions/votetorrent ~/.votetorrent/release-keys/set-github-secrets.sh
-> ```
->
-> (The script currently hardcodes `REPO=gotchoices/votetorrent` on line 13 — change that
-> line, or export `REPO` after making it overridable.) The table below is the manual
-> fallback.
+> One step in this setup genuinely does require admin: reading or changing the repo's
+> Actions policy (`GET /actions/permissions` returns 403 below admin). See
+> [RELEASE-ANDROID-UPSTREAM-SETUP.md](./RELEASE-ANDROID-UPSTREAM-SETUP.md) §4.
+
+> **Fastest path**, if you are the release manager holding the keys: run
+> `~/.votetorrent/release-keys/set-github-secrets.sh`. It sets all eight in one go,
+> reading the Voting credentials from `voting.env`, prompting for the Authority password
+> (never stored on disk), and proving both passwords with `keytool -list` before
+> uploading anything. It defaults to `REPO=gotchoices/votetorrent`, which is now the
+> correct target — no override needed. The table below is the manual fallback.
 
 | Secret | App | Source |
 |---|---|---|
@@ -132,19 +139,32 @@ Or set the secret directly with the `gh` CLI, without going through the
 clipboard:
 
 ```bash
-gh secret set AUTHORITY_KEYSTORE_BASE64 --repo inspirions/votetorrent \
+gh secret set AUTHORITY_KEYSTORE_BASE64 --repo gotchoices/votetorrent \
   < <(base64 -i apps/VoteTorrentAuthority/android/app/release.keystore)
 ```
 
 ## 4. The Voting keystore
 
-**Already generated (2026-08-03).** It lives outside the repo at
-`~/.votetorrent/release-keys/voting-release.keystore` (PKCS12, RSA-2048, alias
-`org.votetorrent.voting`, valid to 2053-12-19, cert SHA-256
-`5C:48:5C:01:F4:2D:34:B8:A9:36:82:DF:F3:5B:99:93:A0:7B:D9:F0:73:4D:54:C8:63:30:8B:C8:28:C8:2B:4E`).
-Its password is in `~/.votetorrent/release-keys/voting.env`; see
-`~/.votetorrent/release-keys/CREDENTIALS.md` for the full record. That directory is
+**Already generated (2026-08-03)** — PKCS12, RSA-2048, alias `org.votetorrent.voting`,
+valid to 2053-12-19, cert SHA-256
+`5C:48:5C:01:F4:2D:34:B8:A9:36:82:DF:F3:5B:99:93:A0:7B:D9:F0:73:4D:54:C8:63:30:8B:C8:28:C8:2B:4E`.
+
+Record that fingerprint: it is what a published Voting APK must match under
+`apksigner verify --print-certs`, and it is the only copy of the key's identity that
+exists outside the keystore itself.
+
+**The keystore is on the release manager's machine only**, outside the repo at
+`~/.votetorrent/release-keys/voting-release.keystore`, with its password in
+`voting.env` and the full record in `CREDENTIALS.md` alongside it. That directory is
 mode 700 and is **not** backed up automatically — back it up.
+
+It is deliberately not recoverable from anywhere else. GitHub Actions secrets are
+write-only: once `VOTING_KEYSTORE_BASE64` is set, no API call, workflow, or admin can
+read it back. A published APK carries only the public certificate, not the private key.
+So if you need these credentials on a second machine — to stand the pipeline up on
+another repository, for instance — they must be transferred from the holder through a
+password manager's secure-share, an encrypted archive, or in person. Never email, Slack,
+or paste them into an issue, PR, or chat.
 
 To build a signed release locally:
 
