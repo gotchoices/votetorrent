@@ -1,41 +1,20 @@
-import { View, StyleSheet } from "react-native";
-import { globalStyles } from "../../../theme/styles";
-import { ThemedText } from "../../../components/ThemedText";
 import { useTranslation } from "react-i18next";
 import type { BallotSignatureTask } from "@votetorrent/vote-core";
+import { SignatureTaskBody } from "./SignatureTaskBody";
 
 export function BallotSignatureTaskDetails({ task }: { task: BallotSignatureTask }) {
 	const { t } = useTranslation();
 	return (
-		<View style={[styles.section, styles.detailContainer]}>
-			<View style={styles.detail}>
-				<ThemedText type="defaultSemiBold">{t("type")}: </ThemedText>
-				<ThemedText>{task.type}</ThemedText>
-			</View>
-			<View style={styles.detail}>
-				<ThemedText type="defaultSemiBold">{t("network")}: </ThemedText>
-				<ThemedText>{task.network.name}</ThemedText>
-			</View>
-			<View style={styles.detail}>
-				<ThemedText type="defaultSemiBold">{t("userId")}: </ThemedText>
-				<ThemedText>{task.userId}</ThemedText>
-			</View>
-			<View style={styles.detail}>
-				<ThemedText type="defaultSemiBold">{t("ballot")}: </ThemedText>
-				<ThemedText>{task.ballot.proposed.description}</ThemedText>
-			</View>
-		</View>
+		<SignatureTaskBody
+			sections={[
+				{
+					title: t("proposal"),
+					rows: [
+						{ label: t("network"), value: task.network.name },
+						{ label: t("description"), value: task.ballot.proposed.description },
+					],
+				},
+			]}
+		/>
 	);
 }
-
-const localStyles = StyleSheet.create({
-	detailContainer: {
-		width: "100%",
-	},
-	detail: {
-		flexDirection: "row",
-		gap: 4,
-	},
-});
-
-const styles = { ...globalStyles, ...localStyles };

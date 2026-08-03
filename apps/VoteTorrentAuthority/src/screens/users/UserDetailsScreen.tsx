@@ -1,4 +1,4 @@
-import { View, ScrollView, StyleSheet, Image, TouchableOpacity } from "react-native";
+import { View, ScrollView, StyleSheet, Image } from "react-native";
 import { globalStyles } from "../../theme/styles";
 import {
 	useRoute,
@@ -9,12 +9,13 @@ import {
 } from "@react-navigation/native";
 import { User, IUserEngine, UserHistory } from "@votetorrent/vote-core";
 import { ThemedText } from "../../components/ThemedText";
+import { InlineError } from "../../components/InlineError";
 import { useTranslation } from "react-i18next";
 import { CustomButton } from "../../components/CustomButton";
-import FontAwesome6 from "react-native-vector-icons/FontAwesome6";
 import { useState, useCallback } from "react";
 import { getKeyTypeDisplayName, formatDate } from "../../utils/displayUtils";
 import HistoryEvent from "../../components/HistoryEvent";
+import { CollapsibleSection } from "../../components/CollapsibleSection";
 import { asyncIterableToArray } from "../../utils/dataUtils";
 import type { NavigationProp } from "../../navigation/types";
 
@@ -29,8 +30,8 @@ export function UserDetailsScreen() {
 
 	const [user, setUser] = useState<User>(initialUser);
 	const [isLoadingUser, setIsLoadingUser] = useState(false);
+	const [loadError, setLoadError] = useState("");
 
-	const [showHistory, setShowHistory] = useState(false);
 	const [userHistoryList, setUserHistoryList] = useState<UserHistory[]>([]);
 	const [isLoadingHistory, setIsLoadingHistory] = useState(false);
 
@@ -48,7 +49,8 @@ export function UserDetailsScreen() {
 						console.warn("User not found after refetch:", initialUser.id);
 					}
 				} catch (error) {
-					console.error("Failed to fetch latest user data:", error);
+					console.warn("Failed to fetch latest user data:", error);
+					setLoadError(error instanceof Error ? error.message : String(error));
 				} finally {
 					setIsLoadingUser(false);
 				}
@@ -69,7 +71,8 @@ export function UserDetailsScreen() {
 					const historyArray = await asyncIterableToArray(historyIterable);
 					setUserHistoryList(historyArray);
 				} catch (error) {
-					console.error("Failed to fetch user history:", error);
+					console.warn("Failed to fetch user history:", error);
+					setLoadError(error instanceof Error ? error.message : String(error));
 				} finally {
 					setIsLoadingHistory(false);
 				}
@@ -79,14 +82,11 @@ export function UserDetailsScreen() {
 		}, [initialUser?.id, userEngine])
 	);
 
-	const toggleHistory = () => {
-		setShowHistory(!showHistory);
-	};
-
 	return (
 		<ScrollView style={styles.container}>
+			<InlineError message={loadError} />
 			<View style={styles.imageContainer}>
-				<Image source={{ uri: user.image?.url }} style={styles.image} />
+				<Image source={{ uri: (user as any).image?.url }} style={styles.image} />
 			</View>
 
 			<View style={[styles.section, styles.detailContainer]}>
@@ -101,14 +101,14 @@ export function UserDetailsScreen() {
 				<View style={styles.detail}>
 					<ThemedText type="defaultSemiBold">{t("imageUrl")}: </ThemedText>
 					<ThemedText style={styles.imageUrl} numberOfLines={1} ellipsizeMode="tail">
-						{user.image?.url ?? "N/A"}
+						{(user as any).image?.url ?? "N/A"}
 					</ThemedText>
 				</View>
 			</View>
 
 			<View>
 				<ThemedText type="subtitle" style={styles.activeKeysTitle}>
-					{t("activeKeys", "Active Keys")}:{" "}
+					{t("activeKeys")}:{" "}
 				</ThemedText>
 				<View style={styles.keysListContainer}>
 					{user.activeKeys.length > 0 ? (
@@ -130,7 +130,7 @@ export function UserDetailsScreen() {
 							</View>
 						))
 					) : (
-						<ThemedText style={styles.noKeysText}>No active keys found.</ThemedText>
+						<ThemedText style={styles.noKeysText}>{t("noActiveKeysFound")}</ThemedText>
 					)}
 				</View>
 			</View>
@@ -165,28 +165,17 @@ export function UserDetailsScreen() {
 				/>
 			</View>
 
-			<TouchableOpacity style={styles.historyHeader} onPress={toggleHistory}>
-				<FontAwesome6
-					name={showHistory ? "chevron-down" : "chevron-right"}
-					size={14}
-					color={colors.text}
-				/>
-				<ThemedText type="title">{t("history")}</ThemedText>
-			</TouchableOpacity>
-
-			{showHistory && (
-				<View style={styles.section}>
-					{isLoadingHistory ? (
-						<ThemedText>{t("loading", "Loading...")}</ThemedText>
-					) : userHistoryList.length > 0 ? (
-						userHistoryList.map((historyItem, index) => (
-							<HistoryEvent key={index} userHistory={historyItem} />
-						))
-					) : (
-						<ThemedText>{t("noHistoryFound", "No history found.")}</ThemedText>
-					)}
-				</View>
-			)}
+			<CollapsibleSection title={t("history")}>
+				{isLoadingHistory ? (
+					<ThemedText>{t("loading")}</ThemedText>
+				) : userHistoryList.length > 0 ? (
+					userHistoryList.map((historyItem, index) => (
+						<HistoryEvent key={index} userHistory={historyItem} />
+					))
+				) : (
+					<ThemedText>{t("noHistoryFound")}</ThemedText>
+				)}
+			</CollapsibleSection>
 		</ScrollView>
 	);
 }
@@ -239,12 +228,6 @@ const localStyles = StyleSheet.create({
 	},
 	detail: {
 		flexDirection: "row",
-	},
-	historyHeader: {
-		flexDirection: "row",
-		alignItems: "center",
-		gap: 16,
-		marginBottom: 16,
 	},
 });
 

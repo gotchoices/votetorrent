@@ -8,13 +8,17 @@
 // Phase 12.1 — Wave 1 deliverable.
 
 import { ElectionEvent, ElectionType, UserKeyType } from '@votetorrent/vote-core'
-import { nowCanonicalDatetime, toCanonicalDatetime } from '../../src/utils.js'
+import { secp256k1 } from '@noble/curves/secp256k1.js'
+import { bytesToHex, hexToBytes } from '@noble/curves/utils.js'
+import { sha256 } from '@noble/hashes/sha2.js'
+import { nowCanonicalDatetime, toCanonicalDatetime, fromCanonicalDatetime, digestToBytes, inviteResultSignedBytes } from '../../src/utils.js'
 import { ElectionsEngine, peekNextElectionTid } from '../../src/elections/elections-engine.js'
 import { SigningEngine } from '../../src/signing/signing-engine.js'
 import { NetworksEngine } from '../../src/networks/networks-engine.js'
 import { randomTestKeyPair } from './keys.js'
 import { AsyncStorage } from '../shims/react-native.js'
 import type { EngineContext } from '../../src/types.js'
+import type { DbFactory } from '../../src/types.js'
 import type {
   Authority,
   AuthorityInviteInvokes,
@@ -33,17 +37,64 @@ import type {
 } from '@votetorrent/vote-core'
 
 // ---------------------------------------------------------------------------
+// 999.1-09 (R-03): NetworkEngine.respondToInvite's InviteResult.InviteSignature
+// CHECK is now verified engine-side for real (verifyAdHocInviteSignature). Test
+// fixtures that previously fabricated `inviteSignature: 'a'.repeat(128)` must
+// now sign a REAL secp256k1 signature over the A1 LOCKED byte domain using the
+// invite's own `invitePrivate` key. These helpers mirror
+// `NetworkEngine.respondToInvite`'s signing/digest logic exactly (same field
+// order, same `digest()` plugin export) so a fixture-produced signature
+// verifies against the engine's own recomputation.
+// ---------------------------------------------------------------------------
+
+/**
+ * Sign an InviteResult over the A1 LOCKED byte domain
+ * ([slotCid, digestToken, String(accept)].join('|')) with the invite's own
+ * one-time private key — mirrors `network-engine.ts respondToInvite`'s
+ * `verifyAdHocInviteSignature` verification target exactly.
+ */
+export function signInviteResult (
+  invitePrivateHex: string,
+  slotCid: string,
+  digestToken: string,
+  accept: boolean
+): string {
+  const signedBytes = inviteResultSignedBytes({ slotCid, digestToken, accept })
+  return bytesToHex(secp256k1.sign(sha256(signedBytes), hexToBytes(invitePrivateHex)))
+}
+
+// NOTE: NetworkEngine.respondToInvite's AUTHORITY-ACCEPTED branch (invoking
+// createAuthority) is NOT wired to a real `verifyAdHocInviteSignature` check
+// — see the "999.1 R-03 — DOCUMENTED LIMITATION" comment at that call site in
+// `network-engine.ts`. Its InviteResult.Digest embeds a server-generated
+// `crypto.randomUUID()` unknown to the caller at signing time, so no fixture
+// (real or fake) can pre-sign it; `seedAuthorityInvite` below keeps its
+// existing placeholder `inviteSignature` for that reason.
+
+// ---------------------------------------------------------------------------
 // Layer-0: fixture factories
 // ---------------------------------------------------------------------------
+
+// 999.1 R-02/R-04: AdminSigning/OfficerSignature's SignatureValid CHECK now runs the real
+// SignatureValid() UDF (verifySig) instead of a hardcoded `context.IsSignatureValid = true`
+// stub, so fixture signatures must be genuine secp256k1 signatures over the actual row Digest,
+// not a fixed dummy string. `testUserPrivateKeys` retains each fixture user's private scalar
+// (discarded before this plan) keyed by user.id, so `makeTestSignature`/`signTestDigest` can
+// sign for real. Module-scope map is safe here: mocha runs this suite serially (no --parallel),
+// and every `makeTestUser`/`makeDistinctTestUser` call overwrites its id's entry with a fresh
+// key before the next signing round in the SAME test.
+const testUserPrivateKeys = new Map<string, string>()
 
 /**
  * Create a User fixture with a real secp256k1 hex-encoded public key.
  * Uses randomTestKeyPair() so the key passes the DB's secp256k1 CHECK.
  */
 export function makeTestUser (overrides?: Partial<User>): User {
-  const { publicHex } = randomTestKeyPair()
+  const { privateHex, publicHex } = randomTestKeyPair()
+  const id = overrides?.id ?? 'user-1'
+  testUserPrivateKeys.set(id, privateHex)
   return {
-    id: 'user-1',
+    id,
     name: 'Test User',
     imageRef: { url: 'https://img.local/user.png' },
     activeKeys: [
@@ -58,9 +109,60 @@ export function makeTestUser (overrides?: Partial<User>): User {
 }
 
 /**
+ * 999.1 R-02: sign a SQL `Digest()` output (base64url) for real, using the private key
+ * recorded for `user` by `makeTestUser`/`makeDistinctTestUser`. @noble/curves v2 default
+ * (prehash:true) — matches the `verifySig()`/`SignatureValid` UDF's expectation, same
+ * convention already established by association.spec.ts/registration.spec.ts's `makeRealSigner`.
+ */
+export function signTestDigest (user: User, digestBase64url: string): Signature {
+  const privateHex = testUserPrivateKeys.get(user.id)
+  if (!privateHex) {
+    throw new Error(
+      `signTestDigest: no private key recorded for user.id=${user.id} — was this user created via makeTestUser/makeDistinctTestUser?`
+    )
+  }
+  const privBytes = hexToBytes(privateHex)
+  const digestBytes = digestToBytes(digestBase64url)
+  const sig = secp256k1.sign(digestBytes, privBytes)
+  return {
+    signature: bytesToHex(sig),
+    signerKey: user.activeKeys[0]!.key,
+    signerUserId: user.id,
+  }
+}
+
+/**
+ * 999.1 R-02: real secp256k1 sign callback over caller-supplied digest bytes — for engine
+ * methods that accept `(digest: Uint8Array) => Promise<Signature>` (e.g.
+ * `AuthorityEngine.saveInviteWithSigning`) and compute the digest internally.
+ */
+export function makeTestSignCallback (user: User): (digest: Uint8Array) => Promise<Signature> {
+  const privateHex = testUserPrivateKeys.get(user.id)
+  if (!privateHex) {
+    throw new Error(
+      `makeTestSignCallback: no private key recorded for user.id=${user.id} — was this user created via makeTestUser/makeDistinctTestUser?`
+    )
+  }
+  const privBytes = hexToBytes(privateHex)
+  return async (digest: Uint8Array): Promise<Signature> => {
+    const sig = secp256k1.sign(digest, privBytes)
+    return {
+      signature: bytesToHex(sig),
+      signerKey: user.activeKeys[0]!.key,
+      signerUserId: user.id,
+    }
+  }
+}
+
+/**
  * Create a Signature fixture from the given user's first active key.
- * Uses a dummy 128-char hex signature since the DB bypasses crypto
- * validation via IsSignatureValid = true context (D-02).
+ *
+ * 999.1 R-02: DEPRECATED for any AdminSigning/OfficerSignature insert — the schema now
+ * verifies the signature for real, and a fixed dummy string can never match a varying
+ * per-row Digest. Kept only for non-AdminSigning context flags that still gate on a
+ * literal boolean (e.g. InviteSlot's `IsSignatureValid`, UserKey's `Signature` column check)
+ * where the DB never re-verifies the bytes. New AdminSigning/OfficerSignature call sites
+ * MUST use `signTestDigest`/`makeTestSignCallback` instead.
  */
 export function makeTestSignature (user: User): Signature {
   return {
@@ -76,9 +178,11 @@ export function makeTestSignature (user: User): Signature {
  * with the 'user-1' seeded by createTestNetwork() (D-07).
  */
 export function makeDistinctTestUser (): User {
-  const { publicHex } = randomTestKeyPair()
+  const { privateHex, publicHex } = randomTestKeyPair()
+  const id = crypto.randomUUID()
+  testUserPrivateKeys.set(id, privateHex)
   return {
-    id: crypto.randomUUID(),
+    id,
     name: 'Distinct Test User',
     imageRef: { url: 'https://img.local/user2.png' },
     activeKeys: [
@@ -187,7 +291,6 @@ export async function seedElectionSigning (
 ): Promise<{ nonce: string }> {
   const nonce = crypto.randomUUID()
   const e = electionInit.election
-  const sig = makeTestSignature(user)
 
   // Resolve CurrentAdmin.EffectiveAt for the authority
   const adminRow = await ctx.db
@@ -195,6 +298,24 @@ export async function seedElectionSigning (
     .get({ authorityId })
   if (!adminRow) throw new Error('seedElectionSigning: CurrentAdmin not found')
   const adminEffectiveAt = adminRow.EffectiveAt as number | string
+
+  const digestParams = {
+    tid: tid, // INTEGER — must be a JS number (not String(tid)): canonical Digest(TAG_INT) vs TEXT causes InsertValid mismatch
+    id: e.id,
+    authorityId,
+    title: e.title,
+    date: toCanonicalDatetime(e.date),
+    revisionDeadline: toCanonicalDatetime(e.revisionDeadline),
+    ballotDeadline: toCanonicalDatetime(e.ballotDeadline),
+    type: e.type,
+  }
+  // 999.1 R-02: compute the REAL digest first (same expression the INSERT below embeds) so
+  // `sig` is a genuine secp256k1 signature the schema's SignatureValid UDF can verify.
+  const digestRow = await ctx.db
+    .prepare('select Digest(:tid, :id, :authorityId, :title, :date, :revisionDeadline, :ballotDeadline, :type) as d')
+    .get(digestParams)
+  if (!digestRow || digestRow.d == null) throw new Error('seedElectionSigning: Digest() returned null')
+  const sig = signTestDigest(user, digestRow.d as string)
 
   // Insert AdminSigning with election-specific Digest matching Election.InsertValid
   await ctx.db.exec(
@@ -208,7 +329,7 @@ export async function seedElectionSigning (
       SignerKey,
       Signature
     )
-    with context now = :now, IsSignatureValid = true, IsSignerKeyValid = true
+    with context now = :now, IsSignerKeyValid = true, IsPlaceholderSignature = false
     values (
       :nonce,
       :authorityId,
@@ -220,16 +341,101 @@ export async function seedElectionSigning (
       :signature
     )`,
     {
+      ...digestParams,
+      nonce,
+      adminEffectiveAt,
+      userId: user.id,
+      signerKey: sig.signerKey,
+      signature: sig.signature,
+      now: nowCanonicalDatetime(),
+    }
+  )
+
+  // Call sign() to create OfficerSignature and trigger AdminSignature (threshold=1)
+  const signing = new SigningEngine(ctx)
+  await signing.sign(nonce, sig)
+
+  return { nonce }
+}
+
+// ---------------------------------------------------------------------------
+// Layer-2.5b: generic seedSignedMutation fixture (Phase 42 Plan 02)
+// ---------------------------------------------------------------------------
+
+/**
+ * Generic AdminSigning + AdminSignature seed fixture — the test-fixture twin
+ * of `src/signing/signed-mutation.ts`'s `seedSignedMutation` production
+ * helper. Mirrors `seedElectionSigning`'s shape (resolve CurrentAdmin ->
+ * insert AdminSigning -> SigningEngine.sign) but is parameterized like the
+ * production helper so downstream registration/association/authority-config
+ * specs can seed the vrg/mel/cap ceremonies without an app-layer signing key
+ * — 999.1 R-02: `signTestDigest(user, ...)` produces a genuine secp256k1 signature over the
+ * real Digest, standing in for the production `sign` callback (the schema now verifies it).
+ *
+ * `digestExpr` is a `select <Digest(...)> as d`-shaped SQL expression matching
+ * the target table's own InsertValid/MutationValid/DeleteValid CHECK field
+ * order EXACTLY (same fidelity requirement as the production helper);
+ * `digestParams` supplies its bind params and MUST NOT use the reserved
+ * names this fixture itself binds: `nonce`, `authorityId`, `adminEffectiveAt`,
+ * `scope`, `userId`, `signerKey`, `signature`, `now`.
+ *
+ * @returns The signing nonce to pass to the caller's row-insert method
+ *   (`with context SigningNonce = :nonce, Tid = ${tid}`).
+ */
+export async function seedSignedMutation (
+  ctx: EngineContext,
+  authorityId: string,
+  scope: Scope,
+  tid: number,
+  digestExpr: string,
+  digestParams: Record<string, unknown>,
+  user: User
+): Promise<{ nonce: string }> {
+  const nonce = crypto.randomUUID()
+
+  // Resolve CurrentAdmin.EffectiveAt for the authority
+  const adminRow = await ctx.db
+    .prepare('select EffectiveAt from CurrentAdmin where AuthorityId = :authorityId')
+    .get({ authorityId })
+  if (!adminRow) throw new Error(`seedSignedMutation: CurrentAdmin not found for authorityId=${authorityId}`)
+  const adminEffectiveAt = adminRow.EffectiveAt as number | string
+
+  // 999.1 R-02: compute the REAL digest first via the caller's own expression, then sign it
+  // for real — the schema's SignatureValid UDF now verifies these bytes.
+  const digestRow = await ctx.db.prepare(digestExpr).get(digestParams as Record<string, string | number | null>)
+  if (!digestRow || digestRow.d == null) throw new Error('seedSignedMutation: Digest() returned null')
+  const sig = signTestDigest(user, digestRow.d as string)
+
+  // Insert AdminSigning — embeds the SAME digestExpr so the stored Digest matches
+  // whatever a subsequent direct SELECT (or the row's own CHECK) recomputes.
+  await ctx.db.exec(
+    `insert into AdminSigning (
+      Nonce,
+      AuthorityId,
+      AdminEffectiveAt,
+      Scope,
+      Digest,
+      UserId,
+      SignerKey,
+      Signature
+    )
+    with context now = :now, IsSignerKeyValid = true, IsPlaceholderSignature = false
+    values (
+      :nonce,
+      :authorityId,
+      :adminEffectiveAt,
+      :scope,
+      (${digestExpr}),
+      :userId,
+      :signerKey,
+      :signature
+    )`,
+    {
+      ...digestParams,
       nonce,
       authorityId,
       adminEffectiveAt,
-      tid: String(tid),
-      id: e.id,
-      title: e.title,
-      date: toCanonicalDatetime(e.date),
-      revisionDeadline: toCanonicalDatetime(e.revisionDeadline),
-      ballotDeadline: toCanonicalDatetime(e.ballotDeadline),
-      type: e.type,
+      scope,
       userId: user.id,
       signerKey: sig.signerKey,
       signature: sig.signature,
@@ -265,10 +471,11 @@ export interface TestNetworkContext {
 export async function createTestNetwork (overrides?: {
   user?: Partial<User>
   network?: Partial<NetworkInit>
+  dbFactory?: DbFactory
 }): Promise<TestNetworkContext> {
   await AsyncStorage.clear()
   await AsyncStorage.setItem('recentNetworks', [])
-  const networksEngine = new NetworksEngine(AsyncStorage)
+  const networksEngine = new NetworksEngine(AsyncStorage, overrides?.dbFactory)
   const user = makeTestUser(overrides?.user)
   const networkInit = makeTestNetworkInit(overrides?.network)
   const networkEngine = await networksEngine.create(networkInit, user)
@@ -317,14 +524,13 @@ export interface TestElectionContext extends TestAuthorityContext {
 export async function addTestElection (auth: TestAuthorityContext): Promise<TestElectionContext> {
   const electionsEngine = new ElectionsEngine(auth.ctx)
   const init = makeElectionInit({ authorityId: auth.authority.id })
-  const tid = peekNextElectionTid()
+  const tid = await peekNextElectionTid(auth.ctx.db)
   const { nonce } = await seedElectionSigning(auth.ctx, auth.authority.id, init, auth.user, tid)
   await electionsEngine.createElection(init, { signingNonce: nonce })
 
   // Also seed ElectionRevision (revision 0) so tests that need getElectionDetails work.
   // The ElectionRevision.MutationValid CHECK requires its own AdminSignature pipeline.
   const revNonce = crypto.randomUUID()
-  const revSig = makeTestSignature(auth.user)
   const adminRow = await auth.ctx.db
     .prepare('select EffectiveAt from CurrentAdmin where AuthorityId = :authorityId')
     .get({ authorityId: auth.authority.id })
@@ -334,26 +540,35 @@ export async function addTestElection (auth: TestAuthorityContext): Promise<Test
   const revTags = JSON.stringify(init.revision.tags)
   const revTimeline = JSON.stringify(init.revision.timeline)
 
+  const revDigestParams = {
+    electionId: init.election.id,
+    revTimestamp,
+    tags: revTags,
+    instructions: init.revision.instructions,
+    timeline: revTimeline,
+    keyholderThreshold: init.revision.keyholderThreshold,
+  }
+  const revDigestRow = await auth.ctx.db
+    .prepare('select Digest(1, :electionId, 0, :revTimestamp, :tags, :instructions, :timeline, :keyholderThreshold) as d')
+    .get(revDigestParams)
+  if (!revDigestRow || revDigestRow.d == null) throw new Error('addTestElection: revision Digest() returned null')
+  const revSig = signTestDigest(auth.user, revDigestRow.d as string)
+
   await auth.ctx.db.exec(
     `insert into AdminSigning (
       Nonce, AuthorityId, AdminEffectiveAt, Scope, Digest, UserId, SignerKey, Signature
     )
-    with context now = :now, IsSignatureValid = true, IsSignerKeyValid = true
+    with context now = :now, IsSignerKeyValid = true, IsPlaceholderSignature = false
     values (
       :nonce, :authorityId, :adminEffectiveAt, 'mel',
       Digest(1, :electionId, 0, :revTimestamp, :tags, :instructions, :timeline, :keyholderThreshold),
       :userId, :signerKey, :signature
     )`,
     {
+      ...revDigestParams,
       nonce: revNonce,
       authorityId: auth.authority.id,
       adminEffectiveAt,
-      electionId: init.election.id,
-      revTimestamp,
-      tags: revTags,
-      instructions: init.revision.instructions,
-      timeline: revTimeline,
-      keyholderThreshold: init.revision.keyholderThreshold,
       userId: auth.user.id,
       signerKey: revSig.signerKey,
       signature: revSig.signature,
@@ -384,6 +599,112 @@ export async function addTestElection (auth: TestAuthorityContext): Promise<Test
 
   const electionEngine = await electionsEngine.openElection(init.election.id)
   return { ...auth, electionsEngine, electionEngine }
+}
+
+// ---------------------------------------------------------------------------
+// Layer-3: bumpElectionRevision helper (second-keyholder-invite-unique fix)
+// ---------------------------------------------------------------------------
+
+/**
+ * Bump an `addTestElection`-seeded election's `ElectionRevision.Revision` by
+ * one, via a real signed UPDATE (mirrors `addTestElection`'s own signed
+ * INSERT spine — fresh AdminSigning('mel') + SigningEngine.sign +
+ * `update ElectionRevision ... where ElectionId`). There is no engine method
+ * that performs this UPDATE yet (`ElectionEngine.proposeRevision` only
+ * inserts into `ProposedElectionRevision`), so this fixture composes the raw
+ * SQL directly — the same pattern `seedBallot`/`seedQuestion` use for rows
+ * with no production write path yet.
+ *
+ * Used by `invitation.spec.ts`'s "non-zero election revision" regression
+ * test (second-keyholder-invite-unique Decision item: covers the
+ * `revision: 0` hardcode fix).
+ *
+ * @returns The new (bumped) revision number.
+ */
+export async function bumpElectionRevision (elec: TestElectionContext): Promise<number> {
+  const authorityId = elec.authority.id
+  const revRow = await elec.ctx.db
+    .prepare(
+      `select ElectionId, Revision, RevisionTimestamp, Tags, Instructions, Timeline, KeyholderThreshold
+         from ElectionRevision
+         where ElectionId = (select Id from Election where AuthorityId = :authorityId limit 1)`
+    )
+    .get({ authorityId })
+  if (!revRow) throw new Error('bumpElectionRevision: ElectionRevision not found for authority')
+
+  const electionId = revRow.ElectionId as string
+  const oldRevision = revRow.Revision as number
+  const newRevision = oldRevision + 1
+  // RevisionTimestampValidUpdate requires new.RevisionTimestamp > old.RevisionTimestamp;
+  // RevisionTimestampValid requires new.RevisionTimestamp < context.now (and < RevisionDeadline).
+  // Derive both from the OLD persisted timestamp (not wall-clock `Date.now()`) so this holds
+  // even when the whole test runs faster than 1ms of real elapsed time.
+  // fromCanonicalDatetime (not bare `new Date()`) — the persisted canonical string has
+  // no 'Z' suffix, so a bare `new Date()` parse treats it as LOCAL time (Pitfall 2:
+  // desyncs the ordering on any non-UTC host timezone).
+  const oldTimestampMs = fromCanonicalDatetime(revRow.RevisionTimestamp as string)
+  const newRevisionTimestamp = toCanonicalDatetime(oldTimestampMs + 1000)
+  const now = toCanonicalDatetime(oldTimestampMs + 2000)
+
+  const digestParams = {
+    electionId,
+    revision: newRevision,
+    revTimestamp: newRevisionTimestamp,
+    tags: revRow.Tags as string,
+    instructions: revRow.Instructions as string,
+    timeline: revRow.Timeline as string,
+    keyholderThreshold: revRow.KeyholderThreshold as number,
+  }
+  const tid = await peekNextElectionTid(elec.ctx.db) + 1
+  const digestRow = await elec.ctx.db
+    .prepare(
+      'select Digest(:tid, :electionId, :revision, :revTimestamp, :tags, :instructions, :timeline, :keyholderThreshold) as d'
+    )
+    .get({ ...digestParams, tid })
+  if (!digestRow || digestRow.d == null) throw new Error('bumpElectionRevision: Digest() returned null')
+  const sig = signTestDigest(elec.user, digestRow.d as string)
+
+  const adminRow = await elec.ctx.db
+    .prepare('select EffectiveAt from CurrentAdmin where AuthorityId = :authorityId')
+    .get({ authorityId })
+  if (!adminRow) throw new Error('bumpElectionRevision: CurrentAdmin not found')
+  const adminEffectiveAt = adminRow.EffectiveAt as number | string
+
+  const nonce = crypto.randomUUID()
+  await elec.ctx.db.exec(
+    `insert into AdminSigning (
+      Nonce, AuthorityId, AdminEffectiveAt, Scope, Digest, UserId, SignerKey, Signature
+    )
+    with context now = :now, IsSignerKeyValid = true, IsPlaceholderSignature = false
+    values (
+      :nonce, :authorityId, :adminEffectiveAt, 'mel',
+      Digest(:tid, :electionId, :revision, :revTimestamp, :tags, :instructions, :timeline, :keyholderThreshold),
+      :userId, :signerKey, :signature
+    )`,
+    {
+      ...digestParams,
+      tid,
+      nonce,
+      authorityId,
+      adminEffectiveAt,
+      userId: elec.user.id,
+      signerKey: sig.signerKey,
+      signature: sig.signature,
+      now,
+    }
+  )
+  const signing = new SigningEngine(elec.ctx)
+  await signing.sign(nonce, sig)
+
+  await elec.ctx.db.exec(
+    `update ElectionRevision
+      with context SigningNonce = :nonce, Tid = ${tid}, now = :now
+      set Revision = :revision, RevisionTimestamp = :revTimestamp
+      where ElectionId = :electionId`,
+    { ...digestParams, nonce, now }
+  )
+
+  return newRevision
 }
 
 // ---------------------------------------------------------------------------
@@ -459,11 +780,12 @@ export async function seedAuthorityInvite (
   // Step a: generate a real secp256k1 invite key pair
   const inviteShare = auth.authorityEngine.createAuthorityInvite(authorityName)
 
-  // Step b: build signature from the test user
-  const sig = makeTestSignature(auth.user)
+  // Step b: 999.1 R-02 — a real sign callback; saveInviteWithSigning computes the InviteSlot
+  // Digest engine-side and calls this with the actual digest bytes (D-03/D-04).
+  const signCallback = makeTestSignCallback(auth.user)
 
   // Step c: saveInviteWithSigning inserts InviteSlot + AdminSigning + AdminSignature
-  await auth.authorityEngine.saveInviteWithSigning(inviteShare, 'iad' as Scope, sig)
+  await auth.authorityEngine.saveInviteWithSigning(inviteShare, 'iad' as Scope, signCallback)
 
   // Step d: query the InviteSlot CID back from the DB
   const slotRow = await auth.ctx.db
@@ -547,12 +869,13 @@ export async function seedUserInvite (
   // Step a: build an OfficerInviteShare with a real one-time secp256k1 key pair
   const officerInvite = auth.authorityEngine.createOfficerInvite(officerInit)
 
-  // Step b: signature from the seeded admin user (validated via context.IsSignatureValid)
-  const sig = makeTestSignature(auth.user)
+  // Step b: 999.1 R-02 — a real sign callback from the seeded admin user (the
+  // AdminSigning.SignatureValid UDF now verifies this for real).
+  const signCallback = makeTestSignCallback(auth.user)
 
   // Step c: saveInviteWithSigning inserts InviteSlot + AdminSigning + AdminSignature
   //         (scope 'rad' matches the seeded admin's threshold policy in makeTestNetworkInit)
-  await auth.authorityEngine.saveInviteWithSigning(officerInvite, 'rad' as Scope, sig)
+  await auth.authorityEngine.saveInviteWithSigning(officerInvite, 'rad' as Scope, signCallback)
 
   // Step d: query the InviteSlot CID back from the DB so the caller can
   //         bind it (alongside the original InviteSignature) into the
@@ -564,6 +887,110 @@ export async function seedUserInvite (
   const inviteSlotCid = slotRow.Cid as string
 
   return { inviteSlotCid, inviteSignature: officerInvite.inviteSignature }
+}
+
+// ---------------------------------------------------------------------------
+// Layer-2.5: seedKeyholderInvite primitive (Phase 19-05, SURF-05)
+// ---------------------------------------------------------------------------
+
+export interface SeedKeyholderInviteResult {
+  /** Cid of the seeded Type='k' InviteSlot row */
+  inviteSlotCid: string
+  /** Name stored on the InviteSlot row (= SentKeyholderInvite.name) */
+  name: string
+}
+
+/**
+ * Seed a keyholder-scope (Type='k') InviteSlot so `getKeyholderInvite(cid)`
+ * has a row to read. There is no `createKeyholderInvite` engine method, so we
+ * mirror `AuthorityEngine.saveOfficerInvite` inline with `Type='k'`:
+ *
+ *   1. reuse `createOfficerInvite` for a real one-time secp256k1 key pair +
+ *      InviteSignature (the slot's CHECKs gate on `context.Is*Valid = true`,
+ *      not on re-derived field values, so the officer-shaped share is fine);
+ *   2. raw-INSERT the InviteSlot with `Type='k'` under a fresh SigningNonce;
+ *   3. call `startSigningSession(authorityId, null, 'rad', sig, nonce)` (D-17
+ *      PATH B) so the matching AdminSigning row satisfies the batch-level
+ *      `InviteSlotSigningValid` assertion (`Digest(Cid) WHERE SigningNonce`).
+ *
+ * Stops at the InviteSlot step (no InviteResult) — `getKeyholderInvite`'s
+ * LEFT JOIN leaves `result` undefined, which is the load-only read this phase
+ * proves.
+ */
+export async function seedKeyholderInvite (
+  auth: TestAuthorityContext,
+  overrides?: { name?: string }
+): Promise<SeedKeyholderInviteResult> {
+  const name = overrides?.name ?? 'Some Keyholder'
+
+  // Step a: real one-time secp256k1 key material + InviteSignature.
+  const share = auth.authorityEngine.createOfficerInvite({
+    name,
+    title: 'Keyholder',
+    scopes: ['rad'] as Scope[],
+  })
+
+  // Step b: a fresh nonce the AdminSigning (step d) will sign over.
+  const signing = new SigningEngine(auth.ctx)
+  const nonce = signing.generateSigningNonce()
+
+  // Step c: raw InviteSlot insert with Type='k' (mirrors saveOfficerInvite,
+  // retargeting the type). Cid is the SQL Digest over the slot fields.
+  await auth.ctx.db.exec(
+    `insert into InviteSlot (
+        Cid,
+        Type,
+        Name,
+        Expiration,
+        InviteKey,
+        InviteSignature,
+        SigningNonce
+      )
+      with context Tid = :tid, now = :now, IsSignatureValid = true, IsInsertValid = true
+      values (
+        cid(Digest(:expiration, :inviteKey, :inviteSignature, :name, :nonce, :type)),
+        :type,
+        :name,
+        :expiration,
+        :inviteKey,
+        :inviteSignature,
+        :nonce
+      )`,
+    {
+      type: 'k',
+      name,
+      expiration: share.expiration,
+      inviteKey: share.inviteKey,
+      inviteSignature: share.inviteSignature,
+      nonce,
+      tid: Date.now(),
+      now: nowCanonicalDatetime(),
+    }
+  )
+
+  // Step d: AdminSigning (PATH B) over the InviteSlot tagged with this nonce —
+  // satisfies the InviteSlotSigningValid batch assertion.
+  // 999.1 R-02: startSigningSession takes a completed Signature (no callback form), so
+  // compute the real digest first (same subquery PATH B embeds) and sign it for real.
+  const slotDigestRow = await auth.ctx.db
+    .prepare('select Digest(Cid) as d from InviteSlot where SigningNonce = :nonce')
+    .get({ nonce })
+  if (!slotDigestRow || slotDigestRow.d == null) throw new Error('seedKeyholderInvite: InviteSlot Digest() returned null')
+  await signing.startSigningSession(
+    auth.authority.id,
+    null,
+    'rad' as Scope,
+    signTestDigest(auth.user, slotDigestRow.d as string),
+    nonce
+  )
+
+  // Step e: read the Cid back so the caller can pass it to getKeyholderInvite.
+  const slotRow = await auth.ctx.db
+    .prepare('select Cid from InviteSlot where InviteKey = :inviteKey and Type = :type')
+    .get({ inviteKey: share.inviteKey, type: 'k' })
+  if (!slotRow) throw new Error('seedKeyholderInvite: InviteSlot not found after insert')
+
+  return { inviteSlotCid: slotRow.Cid as string, name }
 }
 
 // ---------------------------------------------------------------------------
@@ -608,7 +1035,6 @@ export async function seedBallot (
 
   // ---- Step 1: AdminSigning (scope='ceb') with the Ballot's digest formula
   const nonce = crypto.randomUUID()
-  const sig = makeTestSignature(elec.user)
 
   const adminRow = await elec.ctx.db
     .prepare('select EffectiveAt from CurrentAdmin where AuthorityId = :authorityId')
@@ -616,24 +1042,27 @@ export async function seedBallot (
   if (!adminRow) throw new Error('seedBallot: CurrentAdmin not found')
   const adminEffectiveAt = adminRow.EffectiveAt as number | string
 
+  const ballotDigestParams = { id: ballotId, electionId, authorityId, description, districts }
+  const ballotDigestRow = await elec.ctx.db
+    .prepare('select Digest(1, :id, :electionId, :authorityId, :description, :districts) as d')
+    .get(ballotDigestParams)
+  if (!ballotDigestRow || ballotDigestRow.d == null) throw new Error('seedBallot: Digest() returned null')
+  const sig = signTestDigest(elec.user, ballotDigestRow.d as string)
+
   await elec.ctx.db.exec(
     `insert into AdminSigning (
       Nonce, AuthorityId, AdminEffectiveAt, Scope, Digest, UserId, SignerKey, Signature
     )
-    with context now = :now, IsSignatureValid = true, IsSignerKeyValid = true
+    with context now = :now, IsSignerKeyValid = true, IsPlaceholderSignature = false
     values (
       :nonce, :authorityId, :adminEffectiveAt, 'ceb',
       Digest(1, :id, :electionId, :authorityId, :description, :districts),
       :userId, :signerKey, :signature
     )`,
     {
+      ...ballotDigestParams,
       nonce,
-      authorityId,
       adminEffectiveAt,
-      id: ballotId,
-      electionId,
-      description,
-      districts,
       userId: elec.user.id,
       signerKey: sig.signerKey,
       signature: sig.signature,
@@ -704,7 +1133,8 @@ export interface SeedQuestionResult {
  * INSERT.
  *
  * Quereus 3.3.0 NULL-bug bypass: the schema declares
- * `OptionRange text default '{1, 1}'` and `Required boolean default true`.
+ * `OptionRange text default '{1, 1}'` and `Required integer default 1`
+ * (37-04 / D-05b re-attach fix — was `boolean default true`).
  * Quereus 3.3.0 incorrectly rejects NULL-bound writes to default-valued
  * columns (tracked at 260528-001-quereus-not-null-text-null-column).
  * This helper resolves both defaults JS-side BEFORE building the
@@ -730,7 +1160,13 @@ export async function seedQuestion (
   const scoreRange = q.scoreRange ?? null
   const grouping = q.grouping ?? null
   const sequence = q.sequence ?? null
-  const required = q.required ?? true
+  // Required is now `integer default 1` (37-04 / D-05b re-attach fix — was
+  // `boolean default true`). Bind an integer 0/1 (not a JS boolean) into
+  // BOTH the Digest call (Step 2) and the Question INSERT (Step 4) so the
+  // recomputed Question.MutationValid Digest matches the AdminSigning
+  // Digest — same single-source-of-truth pattern as the OptionRange/
+  // ScoreRange defaults above.
+  const required = (q.required ?? true) ? 1 : 0
 
   // ---- Step 1: Resolve CurrentAdmin.EffectiveAt for the authority
   const authorityId = elec.authority.id
@@ -743,33 +1179,43 @@ export async function seedQuestion (
   // ---- Step 2: AdminSigning (scope='ceb') with the 12-arg Question digest
   //              formula matching Question.MutationValid at qsql:672-682.
   const nonce = crypto.randomUUID()
-  const sig = makeTestSignature(elec.user)
+
+  const qDigestParams = {
+    ballotId,
+    code: q.code,
+    title: q.title,
+    instructions: q.instructions,
+    dependsOn,
+    type: q.type,
+    optionRange,
+    scoreRange,
+    grouping,
+    sequence,
+    required,
+  }
+  const qDigestRow = await elec.ctx.db
+    .prepare(
+      'select Digest(1, :ballotId, :code, :title, :instructions, :dependsOn, :type, :optionRange, :scoreRange, :grouping, :sequence, :required) as d'
+    )
+    .get(qDigestParams)
+  if (!qDigestRow || qDigestRow.d == null) throw new Error('seedQuestion: Digest() returned null')
+  const sig = signTestDigest(elec.user, qDigestRow.d as string)
 
   await elec.ctx.db.exec(
     `insert into AdminSigning (
       Nonce, AuthorityId, AdminEffectiveAt, Scope, Digest, UserId, SignerKey, Signature
     )
-    with context now = :now, IsSignatureValid = true, IsSignerKeyValid = true
+    with context now = :now, IsSignerKeyValid = true, IsPlaceholderSignature = false
     values (
       :nonce, :authorityId, :adminEffectiveAt, 'ceb',
       Digest(1, :ballotId, :code, :title, :instructions, :dependsOn, :type, :optionRange, :scoreRange, :grouping, :sequence, :required),
       :userId, :signerKey, :signature
     )`,
     {
+      ...qDigestParams,
       nonce,
       authorityId,
       adminEffectiveAt,
-      ballotId,
-      code: q.code,
-      title: q.title,
-      instructions: q.instructions,
-      dependsOn,
-      type: q.type,
-      optionRange,
-      scoreRange,
-      grouping,
-      sequence,
-      required,
       userId: elec.user.id,
       signerKey: sig.signerKey,
       signature: sig.signature,
@@ -816,4 +1262,68 @@ export async function seedQuestion (
   )
 
   return { questionCode: q.code }
+}
+
+// ---------------------------------------------------------------------------
+// Layer-3: seedProposedBallot helper (Phase 31-01)
+// ---------------------------------------------------------------------------
+
+export interface SeedProposedBallotResult {
+  ballotId: string
+}
+
+/**
+ * Seed a `ProposedBallot` draft (with a real `Questions` JSON blob) by calling
+ * the engine's `proposeBallot`. Distinct from `seedBallot`, which composes
+ * AdminSigning + Ballot INSERT for a FINALIZED ballot.
+ *
+ * This helper exercises the real propose path — tests that rely on
+ * `submitBallotForConfirmation` must start here, not with `seedBallot`.
+ *
+ * Default question: one `'select'` question (verified-safe per Pitfall 5 /
+ * quereus#21) with two options — the ≥2-option count is load-bearing for
+ * 31-03 Task 3's per-option readability assertion.
+ *
+ * T-31-01 mitigation: Questions JSON is constructed from the canonical
+ * Question[] shape so downstream digest matches. Tid is bound as a JS number
+ * inside proposeBallot itself (election-engine.ts nextTid++) — callers do not
+ * need to manage the Tid.
+ */
+export async function seedProposedBallot (
+  elec: TestElectionContext,
+  ballotId: string = 'proposed-ballot-1'
+): Promise<SeedProposedBallotResult> {
+  // Resolve the election id from the DB (electionEngine.election is private).
+  const authorityId = elec.authority.id
+  const electionRow = await elec.ctx.db
+    .prepare('select Id from Election where AuthorityId = :authorityId limit 1')
+    .get({ authorityId })
+  if (!electionRow) throw new Error('seedProposedBallot: Election not found for authority')
+  const electionId = electionRow.Id as string
+
+  // Default ballot: one 'select' question with 2 options (≥2 required by D-07 and the
+  // per-option readability assertion in 31-03 Task 3).
+  const ballot: import('@votetorrent/vote-core').Ballot = {
+    id: ballotId,
+    electionId,
+    authorityId,
+    description: 'Test Proposed Ballot',
+    districts: [],
+    questions: [
+      {
+        code: 'Q1',
+        title: 'Test Question',
+        instructions: 'Choose one option.',
+        type: 'select',
+        options: [
+          { code: 'A', title: 'Option A' },
+          { code: 'B', title: 'Option B' },
+        ],
+      },
+    ],
+  }
+
+  await elec.electionEngine.proposeBallot(ballot)
+
+  return { ballotId }
 }

@@ -3,6 +3,7 @@ import { Database, MisuseError, QuereusError } from '@quereus/quereus';
 import { NetworkEngine } from '../network/network-engine.js';
 import { H16, nowCanonicalDatetime, toCanonicalDatetime } from '../utils.js';
 import type { EngineContext } from '../types.js';
+import type { DbFactory } from '../types.js';
 import type {
 	LocalStorage,
 	INetworkEngine,
@@ -10,16 +11,25 @@ import type {
 	NetworkReference,
 	User,
 } from '@votetorrent/vote-core';
-import type { INetworksEngine, INetworksCreateBuilder } from '@votetorrent/vote-core';
-import { prepareDb } from '../database/initialize.js';
+import type {
+	INetworksEngine,
+	INetworksCreateBuilder,
+} from '@votetorrent/vote-core';
+
+import {
+	registerDbPlugins,
+	initDB,
+	isSchemaInitialized,
+	markSchemaInitialized,
+	ensureTidSequence,
+	declareViewsInMain,
+} from '../database/initialize.js';
+import { allocateTid } from '../database/tid-allocator.js';
 import { NetworksCreateBuilder } from './builders/index.js';
 
-// Plan 03-05 Q1 — monotonic counter for Tid generation. Same Tid bound across
-// every INSERT in a single create() batch (matches the schema's "one logical
-// transaction = one Tid" framing). Re-evaluate at v2 persistence milestone
-// (PERSIST-01): a process-local counter that resets to 1 on restart can
-// collide with stored Tids once DBs persist across runs.
-let nextTid = 1;
+// D-02: default in-memory factory — keeps all 581 existing tests passing unchanged.
+// Lives at module scope (not inside the class) so it is a stable default parameter.
+const inMemoryFactory: DbFactory = async (_hash: string) => new Database();
 
 export class NetworksEngine implements INetworksEngine {
 	// D-07: per-instance hash→EngineContext cache.
@@ -27,16 +37,24 @@ export class NetworksEngine implements INetworksEngine {
 	// D-11: no eviction in v1.0 — revisit at the v2 persistence milestone.
 	private readonly contexts = new Map<string, EngineContext>();
 
-	constructor(private readonly localStorage: LocalStorage) {}
+	constructor(
+		private readonly localStorage: LocalStorage,
+		private readonly dbFactory: DbFactory = inMemoryFactory,
+	) {}
 
 	async clearRecentNetworks(): Promise<void> {
-		this.localStorage.removeItem('recentNetworks');
+		// WR-04: await the async storage write so callers observe a settled state.
+		await this.localStorage.removeItem('recentNetworks');
 	}
 
 	async create(networkInit: NetworkInit, user: User): Promise<INetworkEngine> {
+		// Compute networkHash early so we can pass it to createContext (D-01).
+		const networkId = crypto.randomUUID().toString();
+		const networkHash = H16(networkId);
+
 		let ctx: EngineContext;
 		try {
-			ctx = await this.createContext(user);
+			ctx = await this.createContext(user, networkHash);
 		} catch (error) {
 			throw new Error('Failed to create database context: ' + error);
 		}
@@ -61,9 +79,7 @@ export class NetworksEngine implements INetworksEngine {
 			? JSON.stringify(user.imageRef)
 			: null;
 
-		const networkId = randomUUID().toString();
-		const primaryAuthorityId = randomUUID().toString();
-		const networkHash = H16(networkId);
+		const primaryAuthorityId = crypto.randomUUID().toString();
 
 		const firstOfficer = networkInit.admin.officers?.[0];
 		if (!firstOfficer?.init) {
@@ -77,8 +93,10 @@ export class NetworksEngine implements INetworksEngine {
 			throw new Error('Failed to create network: User key is required');
 		}
 
-		// Plan 03-05 Q1: one Tid per create() batch.
-		const tid = nextTid++;
+		// 999.1 D-02/D-09: shared durable allocator, 'networks' namespace —
+		// reserve-before-use persist happens inside allocateTid, before the
+		// db.exec(insert ...) below consumes the returned tid.
+		const tid = await allocateTid(ctx.db, 'networks');
 
 		const params = {
 			networkId,
@@ -127,6 +145,11 @@ export class NetworksEngine implements INetworksEngine {
 				with context SigningNonce = null, InviteSlotCid = null, InviteSignature = null, Tid = ${tid}
 				values (:userId, :userName, :userImageRef);
 
+				-- 999.1 R-02/D-11 (999.1-08 audit): genuinely-first-key bootstrap for the network's
+				-- founding user (context.UserKey = null) — satisfies UserKey.SignatureValid's
+				-- bootstrap OR-branch (count(*) = 1 and context.UserKey is null) without a
+				-- fabricated signature (Pitfall 3). IsSignatureValid stays true/inert: the schema
+				-- CHECK no longer consumes it for UserKey, kept only for binding compatibility.
 				insert into UserKey (
 					UserId,
 					Type,
@@ -209,9 +232,8 @@ export class NetworksEngine implements INetworksEngine {
 			}
 		}
 
-		// D-08: cache the freshly-built EngineContext so subsequent open()
-		// calls return a NetworkEngine bound to the same in-memory Database
-		// (the only place Database instances are constructed in production).
+		// Cache the freshly-built EngineContext so subsequent open() calls return
+		// a NetworkEngine bound to the same Database (single live handle, D-06).
 		this.contexts.set(networkHash, ctx);
 
 		// Update recent networks list
@@ -224,7 +246,9 @@ export class NetworksEngine implements INetworksEngine {
 		};
 		const recentNetworks: NetworkReference[] =
 			(await this.localStorage.getItem('recentNetworks')) ?? [];
-		this.localStorage.setItem('recentNetworks', [
+		// WR-04: await so the recents write is durable before create() returns
+		// (and before the persistence proof / AppProvider reads recentNetworks).
+		await this.localStorage.setItem('recentNetworks', [
 			...recentNetworks,
 			networkRef,
 		]);
@@ -240,42 +264,191 @@ export class NetworksEngine implements INetworksEngine {
 		ref: NetworkReference,
 		user: User | undefined,
 		storeAsRecent: boolean = true,
+		/**
+		 * ENG-05: optional live peer-count callback forwarded into the NetworkEngine
+		 * so getStatistics can report connected peers. Plain (() => number) — D-03:
+		 * no @serfab/@optimystic import enters packages/vote-engine; the app layer
+		 * supplies the closure.
+		 */
+		getPeerCount?: () => number,
 	): Promise<INetworkEngine> {
-		// D-09/D-10: open() reads from the per-instance cache. The cached
-		// EngineContext.db is shared verbatim; the caller-supplied `user`
-		// is injected into a fresh wrapper without mutating the cached ctx
-		// (Claude's-discretion bullet on cache-context user field).
+		// D-06: cache-first — single live handle per store.
 		const cached = this.contexts.get(ref.hash);
-		if (!cached) {
+		if (cached) {
+			// WR-03: keep a single source of truth for ctx.user. Previously the
+			// per-call ctx (with the freshly-supplied user) was returned to the
+			// NetworkEngine but was NOT written back into this.contexts, so
+			// siblings reading via getEstablishedContext() saw the ORIGINAL cached
+			// ctx whose user could differ from what this open() call established.
+			// Write the per-call ctx back so the NetworkEngine and all siblings
+			// observe one consistent ctx.user for this network.
+			const ctx: EngineContext = { ...cached, user };
+			this.contexts.set(ref.hash, ctx);
+			const qNetworkEngine = new NetworkEngine(ref, this.localStorage, ctx, getPeerCount);
+			if (storeAsRecent) {
+				const recentNetworks: NetworkReference[] =
+					(await this.localStorage.getItem('recentNetworks')) ?? [];
+				if (recentNetworks.find((network) => network.hash === ref.hash)) {
+					// WR-04: await to remove the read-before-write race on recentNetworks.
+					await this.localStorage.setItem('recentNetworks', [
+						ref,
+						...recentNetworks.filter((network) => network.hash !== ref.hash),
+					]);
+				} else {
+					await this.localStorage.setItem('recentNetworks', [ref, ...recentNetworks]);
+				}
+			}
+			return qNetworkEngine;
+		}
+
+		// D-05: cache miss — re-attach ONLY if an initialized store already exists.
+		// open() MUST NOT route through createContext() (that path runs DDL and would
+		// silently fabricate a fresh empty DB for an unknown hash). Call the factory
+		// DIRECTLY, register plugins (no DDL), then gate on the schema-version marker.
+		// D-13: hard fail — do NOT fall back to new Database() on a factory open error.
+		let db: Database;
+		try {
+			db = await this.dbFactory(ref.hash);
+		} catch (error) {
+			throw new Error(
+				'Network not opened in this session — use create() first: ' + error,
+			);
+		}
+
+		// Always-run: register plugins and custom functions (per-Database-instance, not persisted).
+		await registerDbPlugins(db);
+
+		// Cross-backend-safe re-attach guard (14-04 — narrows D-05/D-07 with on-device evidence).
+		// See patches/optimystic-quereus-plugin-composite-pk.md (second finding).
+		//
+		// hasDeclaredSchema('main') is false on ANY fresh handle (new process restart OR new
+		// in-memory Database()). Running initDB on an already-declared handle triggers the
+		// Quereus schema-differ to emit ALTER COLUMN DROP NOT NULL on a PK column, which then
+		// throws "Cannot DROP NOT NULL on PRIMARY KEY column 'DependsOn'" — breaking the
+		// in-memory suite. So initDB must ONLY run when the handle lacks the declaration.
+		//
+		// Correctness matrix:
+		//   fresh in-memory (never declared)        → initDB runs (creates tables)  → D-05 gate throws (no marker)
+		//   in-memory already prepared same session → initDB SKIPPED (already declared) → gate passes → re-attach OK
+		//   persistent fresh handle (restart)       → initDB runs (binds LevelDB vtab catalog) → gate passes if initialized
+		//   persistent genuinely uninitialized      → initDB runs (creates vtab bindings) → D-05 gate throws (no marker)
+		if (!db.declaredSchemaManager.hasDeclaredSchema('main')) {
+			await initDB(db);           // declare schema main {...} + apply: creates vtab bindings, binds LevelDB data.
+			// initDB also declares the SchemaInit catalog (NO row) — 14-03 on-device fix: a fresh Quereus
+			// handle does not auto-restore the catalog from LevelDB, so isSchemaInitialized's marker lookup
+			// would otherwise hit an undeclared table → false → wrongly throw on a correctly-persisted store.
+			await ensureTidSequence(db); // idempotent INSERT OR IGNORE — safe to re-run
+		}
+
+		// D-05/D-08: if the store has no schema-init flag, it is uninitialized — THROW.
+		// initDB binds the catalog but does NOT write a SchemaInit flag (that is create()'s
+		// job via markSchemaInitialized). So a truly uninitialized store still throws here.
+		const initialized = await isSchemaInitialized(db);
+		if (!initialized) {
 			throw new Error(
 				'Network not opened in this session — use create() first',
 			);
 		}
-		const ctx: EngineContext = { ...cached, user };
-		const qNetworkEngine = new NetworkEngine(ref, this.localStorage, ctx);
+
+		// Re-attach (store exists + initialized): cache the single live handle (D-06).
+		// 999.1 D-02/D-07: no separate seed step — the shared allocator reads
+		// TidHighWater lazily on the first allocateTid(ctx.db, 'networks') call.
+
+		// STRAND-VIEWS fix (re-attach path): on the strand path cadre-core applies the
+		// schema under `App`, so views live in App and unqualified view references fail
+		// (Quereus resolves views only against the current schema `main`, not the path).
+		// Re-declare views in `main` (idempotent) so engine reads resolve after re-attach.
+		// No-op safety: on the in-memory/rnDbFactory path the views already live in `main`
+		// (initDB declared schema main), so `create view if not exists` does nothing.
+		if (db.declaredSchemaManager.hasDeclaredSchema('App')) {
+			await declareViewsInMain(db);
+		}
+
+		const ctx: EngineContext = { db, user };
+		this.contexts.set(ref.hash, ctx);
+		const qNetworkEngine = new NetworkEngine(ref, this.localStorage, ctx, getPeerCount);
 		if (storeAsRecent) {
 			const recentNetworks: NetworkReference[] =
 				(await this.localStorage.getItem('recentNetworks')) ?? [];
 			if (recentNetworks.find((network) => network.hash === ref.hash)) {
-				this.localStorage.setItem('recentNetworks', [
+				await this.localStorage.setItem('recentNetworks', [
 					ref,
 					...recentNetworks.filter((network) => network.hash !== ref.hash),
 				]);
 			} else {
-				this.localStorage.setItem('recentNetworks', [ref, ...recentNetworks]);
+				await this.localStorage.setItem('recentNetworks', [ref, ...recentNetworks]);
 			}
 		}
 		return qNetworkEngine;
 	}
 
-	buildCreate (): INetworksCreateBuilder {
+	buildCreate(): INetworksCreateBuilder {
 		return new NetworksCreateBuilder(this);
 	}
 
-	private async createContext(user: User | undefined): Promise<EngineContext> {
-		const db = new Database();
-		// Register crypto plugin then load schema (Phase 2 D-02 / D-02b option (b)).
-		await prepareDb(db);
+	/**
+	 * D-10: single minimal accessor for the EngineFactory to read the established
+	 * context after open() or create(). Does NOT expose ctx.db to screens — only
+	 * the factory holds the returned reference.
+	 *
+	 * Returns undefined if no context has been established for the given hash
+	 * (caller must call open() or create() first).
+	 */
+	getEstablishedContext(networkHash: string): EngineContext | undefined {
+		return this.contexts.get(networkHash);
+	}
+
+	// D-01: factory-backed createContext — this is the CREATE path. DDL runs here
+	// on fresh stores (isSchemaInitialized gate). open() MUST NOT call this method.
+	private async createContext(user: User | undefined, hash: string): Promise<EngineContext> {
+		const db = await this.dbFactory(hash);           // D-01: factory, not new Database()
+		await registerDbPlugins(db);                     // D-07: always-run (plugins/functions)
+
+		// REL-01 strand-aware gate: detect whether the Database already had the App schema
+		// applied by StrandDatabase.initialize() (cadre-core strand path).
+		//
+		// 'App' → strand path: StrandDatabase.executeSchema() ran `declare schema App { <DDL> }
+		//         apply schema App;` before handing the handle to this factory. Running initDB
+		//         here would declare a SECOND `main` schema over the same tree://default/{table}
+		//         LevelDB collections, causing dual-Table ownership and stalling every subsequent
+		//         INSERT (release-build infinite spinner / hang).
+		//         FIX: skip initDB entirely; run only the idempotent marker helpers.
+		//
+		// 'main' / absent → rnDbFactory path (dev / in-memory): no prior schema declaration.
+		//         Fall through to the existing isSchemaInitialized/initDB gate verbatim.
+		//
+		// Mirrors the open() guard at line ~334 which uses hasDeclaredSchema('main')
+		// for the re-attach check — same pattern, different schema name (Pitfall 1: use
+		// 'App' not 'main'; 'main' would never match on the strand path and the bug persists).
+		const isStrandDb = db.declaredSchemaManager.hasDeclaredSchema('App');
+
+		if (isStrandDb) {
+			// Strand path: App schema already applied — skip initDB (no second main declaration).
+			// Plant only the idempotent markers so isSchemaInitialized and readTidCounter work.
+			// Both ensureTidSequence and markSchemaInitialized use INSERT OR IGNORE — fully
+			// idempotent, so a second createContext() on an already-initialized strand store
+			// (CR-01 fix) does not throw a PK-uniqueness violation.
+			await ensureTidSequence(db);                 // D-12: create TidSequence table (idempotent)
+			await markSchemaInitialized(db);             // D-08: plant the SchemaInit flag (idempotent)
+			// STRAND-VIEWS fix: cadre-core applies the schema under `App`, so all views
+			// live in App. Quereus resolves UNQUALIFIED views only against the current
+			// schema (`main`), not the schema path — so `select ... from CurrentAdmin`
+			// throws "not found in schema path: App, main" even though App.CurrentAdmin
+			// exists. Re-declare every view in `main` (idempotent) so unqualified engine
+			// queries (authority/signing/user/elections engines) resolve on the strand.
+			await declareViewsInMain(db);                // STRAND-VIEWS: views in main for unqualified reads
+		} else {
+			// rnDbFactory path (dev / in-memory): existing logic verbatim (D-08/D-07/D-12).
+			const initialized = await isSchemaInitialized(db); // D-08: sentinel check
+			if (!initialized) {
+				await initDB(db);                        // D-07: DDL only on fresh store
+				await ensureTidSequence(db);             // D-12: create TidSequence table
+				await markSchemaInitialized(db);         // D-08: plant the SchemaInit flag
+			}
+		}
+
+		// 999.1 D-02/D-07: no separate seed step — the shared allocator reads
+		// TidHighWater lazily on the first allocateTid(ctx.db, 'networks') call.
 		const ctx: EngineContext = { db, user };
 		return ctx;
 	}

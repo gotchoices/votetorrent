@@ -1,7 +1,15 @@
 import { QuereusError, MisuseError } from '@quereus/quereus'
 import { AuthorityEngine } from '../authority/authority-engine.js'
 import { UserEngine } from '../user/user-engine.js'
-import { asText, fromCanonicalDatetime, nowCanonicalDatetime, parseJsonOr, toCanonicalDatetime } from '../utils.js'
+import {
+  asText,
+  fromCanonicalDatetime,
+  inviteResultSignedBytes,
+  nowCanonicalDatetime,
+  parseJsonOr,
+  toCanonicalDatetime,
+  verifyAdHocInviteSignature,
+} from '../utils.js'
 import type { EngineContext } from '../types.js'
 import type {
   Authority,
@@ -25,7 +33,6 @@ import type {
   ElectionEvent,
   ElectionInit,
   ElectionSummary,
-  IElectionEngine,
   AdminInit,
   AuthorityInit,
   AuthorityInviteInvokes,
@@ -33,6 +40,7 @@ import type {
   ElectionType,
   ElectionCoreInit,
   ElectionRevisionInit,
+  KeyholderInvite,
   UserKey,
   Timestamp,
   UserKeyType,
@@ -48,7 +56,9 @@ export class NetworkEngine implements INetworkEngine {
   constructor (
     public readonly init: NetworkReference,
     private readonly localStorage: ILocalStorage,
-    private readonly ctx: EngineContext
+    private readonly ctx: EngineContext,
+    /** ENG-05: optional live peer-count callback injected from the app layer (D-03: no @serfab/@optimystic import enters packages/vote-engine). */
+    private readonly getPeerCount?: () => number
   ) {}
 
   /** This is used for a new authority when responding to an invite, not when made as part of a network creation */
@@ -233,15 +243,57 @@ export class NetworkEngine implements INetworkEngine {
     }
   }
 
-  async createElection (election: ElectionInit): Promise<void> {
-    throw new Error('Not implemented')
-  }
-
-  /** Returns all authorities that match the name */
+  /** Returns all authorities that match the name (ENG-01/D-11).
+   *
+   * Security note: `name` is wrapped into the pattern ('%' + name + '%')
+   * and bound as :pattern via the params object — never concatenated into
+   * the SQL string (T-18-04 mitigated). PAGE_SIZE is a compile-time constant
+   * inlined into the SQL (Quereus does not support bound parameters for LIMIT).
+   *
+   * WR-01: a caller-supplied name containing LIKE metacharacters (`%`, `_`)
+   * would otherwise be interpreted as a wildcard — `a_b` would match `aXb`, and
+   * `%` would match every authority. Quereus' LIKE has NO ESCAPE clause and no
+   * escape character (see @quereus util/patterns.ts `simpleLike`), so escaping
+   * cannot be expressed in SQL. Instead the LIKE stays as a (case-sensitive)
+   * index-friendly prefilter and the results are post-filtered in JS to require
+   * the literal substring, so `%`/`_` are matched literally. This is a
+   * correctness/robustness fix, not injection — the value was already bound as
+   * :pattern. NOTE: the LIMIT is applied in SQL before the JS post-filter, so a
+   * page can under-fill when wildcard-only matches are dropped; this mirrors the
+   * pre-existing single-page pagination contract. */
   async getAuthoritiesByName (
     name: string | undefined
   ): Promise<Cursor<Authority>> {
-    throw new Error('Not implemented')
+    const PAGE_SIZE = 20
+    const pattern = name ? '%' + name + '%' : '%'
+    const buffer: Authority[] = []
+    try {
+      for await (const row of this.ctx.db.eval(
+        `SELECT Id, Name, DomainName, ImageRef FROM Authority WHERE Name LIKE :pattern ORDER BY Name ASC LIMIT ${PAGE_SIZE} OFFSET 0`,
+        { pattern }
+      )) {
+        const rowName = row.Name as string
+        // WR-01: drop rows that matched only because `%`/`_` in `name` acted as
+        // wildcards. A literal substring check makes the search faithful to the
+        // caller's input. Case-sensitive to match Quereus' (non-`i`) LIKE.
+        if (name && !rowName.includes(name)) continue
+        buffer.push({
+          id: row.Id as string,
+          name: rowName,
+          domainName: asText(row.DomainName, 'Authority.DomainName'),
+          imageRef: parseJsonOr<ImageRef | undefined>(row.ImageRef, undefined, 'Authority.ImageRef')
+        })
+      }
+      return { buffer, firstBOF: true, lastEOF: buffer.length < PAGE_SIZE, offset: 0 }
+    } catch (err) {
+      if (err instanceof QuereusError) {
+        throw new Error(`Quereus error (code ${err.code}): ${err.message}`)
+      } else if (err instanceof MisuseError) {
+        throw new Error(`API misuse: ${err.message}`)
+      } else {
+        throw new Error(`Unknown error getting authorities: ${err}`)
+      }
+    }
   }
 
   async getCurrentUser (): Promise<IUserEngine | undefined> {
@@ -296,9 +348,15 @@ export class NetworkEngine implements INetworkEngine {
         .prepare(
 					`
 						select
-							Name, ImageRef, Relays, TimestampAuthorities, NumberRequiredTSAs, ElectionType
-						from ProposedNetwork
+							Name, Revision, ImageRef, Relays, TimestampAuthorities, NumberRequiredTSAs, ElectionType
+						from ProposedNetwork P
 						where Name = :name
+							and not exists (
+								select 1 from RevisionCancellation C
+								where C.Name = P.Name and C.Revision = P.Revision
+							)
+						order by Revision desc
+						limit 1
 					`
         )
         .get({ name: network.name })
@@ -371,7 +429,12 @@ export class NetworkEngine implements INetworkEngine {
           : undefined
       }
     } catch (error) {
-      throw new Error('Network not found')
+      // WR-05: preserve the genuine missing-row signal but stop masking every
+      // other failure (bad ImageRef JSON, asText null, Quereus errors, a missing
+      // primary authority) as a benign "Network not found". Only the explicit
+      // not-found throw keeps that message; everything else surfaces with context.
+      if (error instanceof Error && error.message === 'Network not found') throw error
+      throw new Error(`Failed to load network details: ${String(error)}`)
     }
   }
 
@@ -486,7 +549,11 @@ export class NetworkEngine implements INetworkEngine {
         )
       }
     } catch (error) {
-      throw new Error('Network not found')
+      // WR-05: preserve the genuine missing-row signal but stop masking every
+      // other failure (bad ImageRef JSON, asText null, Quereus errors, a missing
+      // primary authority) as a benign "Network not found".
+      if (error instanceof Error && error.message === 'Network not found') throw error
+      throw new Error(`Failed to load network summary: ${String(error)}`)
     }
   }
 
@@ -526,8 +593,8 @@ export class NetworkEngine implements INetworkEngine {
           .prepare(
 						`
 						select
-							ElectionId, Revision, RevisionTimestamp, Tags, Instructions, Timeline, KeyholderThreshold
-						from ElectionRevision
+							ElectionId, Revision, RevisionTimestamp, Tags, Instructions, Timeline, KeyholderThreshold, Keyholders
+						from ProposedElectionRevision
 						where ElectionId = :id
 					`
           )
@@ -540,10 +607,11 @@ export class NetworkEngine implements INetworkEngine {
             tags: parseJsonOr<string[]>(
               revRow.Tags,
               [],
-              'ElectionRevision.Tags'
+              'ProposedElectionRevision.Tags'
             ),
             instructions: revRow.Instructions as string,
-            keyholders: [], // fix this
+            // 39-02 D-04 Gap 2: read the persisted create-time keyholder invitees back.
+            keyholders: parseJsonOr<KeyholderInvite[]>(revRow.Keyholders, [], 'ProposedElectionRevision.Keyholders'),
             timeline: parseJsonOr<Record<ElectionEvent, number>>(
               revRow.Timeline,
               {
@@ -555,7 +623,7 @@ export class NetworkEngine implements INetworkEngine {
                 certificationStarts: 0,
                 closed: 0
               },
-              'ElectionRevision.Timeline'
+              'ProposedElectionRevision.Timeline'
             ),
             keyholderThreshold: revRow.KeyholderThreshold as number
           })
@@ -631,7 +699,39 @@ export class NetworkEngine implements INetworkEngine {
     cursor: Cursor<Authority>,
     forward: boolean
   ): Promise<Cursor<Authority>> {
-    throw new Error('Not implemented')
+    // NOTE: The Cursor shape carries no `name` field — the name filter used
+    // in getAuthoritiesByName cannot be recovered from the cursor. Per
+    // RESEARCH Pattern 2 / Open Question 1, nextAuthoritiesByName pages the
+    // full Authority set (LIKE '%') rather than re-applying the original
+    // search filter. This is an intentional decision for this phase; a future
+    // phase can extend the Cursor shape or the interface if per-name paging
+    // is required.
+    const PAGE_SIZE = 20
+    const newOffset = forward ? cursor.offset + PAGE_SIZE : Math.max(0, cursor.offset - PAGE_SIZE)
+    const buffer: Authority[] = []
+    try {
+      for await (const row of this.ctx.db.eval(
+        // PAGE_SIZE and offset are inlined: Quereus does not support bound parameters
+        // for LIMIT/OFFSET integer expressions — only string/value params are supported.
+        `SELECT Id, Name, DomainName, ImageRef FROM Authority ORDER BY Name ASC LIMIT ${PAGE_SIZE} OFFSET ${newOffset}`
+      )) {
+        buffer.push({
+          id: row.Id as string,
+          name: row.Name as string,
+          domainName: asText(row.DomainName, 'Authority.DomainName'),
+          imageRef: parseJsonOr<ImageRef | undefined>(row.ImageRef, undefined, 'Authority.ImageRef')
+        })
+      }
+      return { buffer, firstBOF: newOffset === 0, lastEOF: buffer.length < PAGE_SIZE, offset: newOffset }
+    } catch (err) {
+      if (err instanceof QuereusError) {
+        throw new Error(`Quereus error (code ${err.code}): ${err.message}`)
+      } else if (err instanceof MisuseError) {
+        throw new Error(`API misuse: ${err.message}`)
+      } else {
+        throw new Error(`Unknown error in nextAuthoritiesByName: ${err}`)
+      }
+    }
   }
 
   async openAuthority (
@@ -668,10 +768,6 @@ export class NetworkEngine implements INetworkEngine {
         throw new Error(`Unknown error opening authority: ${err}`)
       }
     }
-  }
-
-  async openElection (electionId: string): Promise<IElectionEngine> {
-    throw new Error('Not implemented')
   }
 
   async pinAuthority (authority: Authority): Promise<void> {
@@ -716,6 +812,94 @@ export class NetworkEngine implements INetworkEngine {
       )
     } catch (error) {
       throw new Error('Failed to propose revision: ' + error)
+    }
+  }
+
+  /**
+   * SURF-04 (D-09, NON-signing): withdraw a proposed network revision by
+   * inserting an append-only RevisionCancellation marker keyed by (Name,
+   * Revision). The ProposedNetwork row is never mutated/deleted — the marker
+   * is justified by append-only audit consistency (NOT a CantDelete on
+   * ProposedNetwork; it has none). `revision` is bound as a NUMBER so the
+   * (Name, Revision) PK join is exact (OpenQ 3 / T-19-12). The marker's
+   * ProposalExists CHECK (Plan 19-01) rejects a marker for a non-existent
+   * proposal; we additionally guard in TS for a clearer error message.
+   */
+  async cancelRevision (name: string, revision: number): Promise<void> {
+    try {
+      const existing = await this.ctx.db
+        .prepare(
+					`select 1 from ProposedNetwork where Name = :name and Revision = :revision`
+        )
+        .get({ name, revision })
+      if (!existing) {
+        throw new Error(
+					`No proposed revision found for (${name}, ${revision})`
+        )
+      }
+      await this.ctx.db.exec(
+				`insert into RevisionCancellation (Name, Revision, CancelledAt)
+					with context Tid = 0, now = :now
+					values (:name, :revision, :now)`,
+				{
+				  name,
+				  revision,
+				  now: nowCanonicalDatetime()
+				}
+      )
+    } catch (error) {
+      throw new Error('Failed to cancel revision: ' + error)
+    }
+  }
+
+  /**
+   * SURF-04 (D-09, NON-signing): re-emit a proposed network revision as a
+   * FRESH ProposedNetwork row at coalesce(max(Revision), -1) + 1 for Name
+   * (no auto-supersede — old/cancelled proposals are untouched). Reuses the
+   * original (Name, Revision) row's fields. Returns the new Revision number.
+   * `revision` is bound as a NUMBER for an exact PK lookup of the source row.
+   */
+  async resendRevision (name: string, revision: number): Promise<number> {
+    try {
+      const source = await this.ctx.db
+        .prepare(
+					`select
+							ImageRef, Relays, TimestampAuthorities, NumberRequiredTSAs, ElectionType
+						from ProposedNetwork where Name = :name and Revision = :revision`
+        )
+        .get({ name, revision })
+      if (!source) {
+        throw new Error(
+					`No proposed revision found for (${name}, ${revision})`
+        )
+      }
+      const userKey = this.ctx.user?.activeKeys?.[0]?.key ?? null
+      await this.ctx.db.exec(
+				`insert into ProposedNetwork
+					(Name, Revision, ImageRef, Relays, TimestampAuthorities, NumberRequiredTSAs, ElectionType)
+				with context UserId = :userId, UserKey = :userKey, Signature = null, Tid = 0, now = :now, IsUserValid = true
+				values
+					(:name, coalesce((select max(Revision) from ProposedNetwork where Name = :name), -1) + 1, :imageRef, :relays, :timestampAuthorities, :numberRequiredTSAs, :electionType)`,
+				{
+				  name,
+				  imageRef: source.ImageRef as string | null,
+				  relays: source.Relays as string,
+				  timestampAuthorities: source.TimestampAuthorities as string,
+				  numberRequiredTSAs: source.NumberRequiredTSAs as number,
+				  electionType: source.ElectionType as string,
+				  userId: this.ctx.user?.id ?? null,
+				  userKey,
+				  now: nowCanonicalDatetime()
+				}
+      )
+      const newRow = await this.ctx.db
+        .prepare(
+					`select max(Revision) as MaxRevision from ProposedNetwork where Name = :name`
+        )
+        .get({ name })
+      return Number(newRow?.MaxRevision)
+    } catch (error) {
+      throw new Error('Failed to resend revision: ' + error)
     }
   }
 
@@ -811,10 +995,37 @@ export class NetworkEngine implements INetworkEngine {
         // localeCompare is locale-sensitive; binary `<`/`>` matches quereus TEXT
         // ordering and keeps the bound first-officer identity consistent across
         // engine and schema.
-        const sortedOfficers = [...invokesOfficers].sort(
-          (a, b) => a.userId < b.userId ? -1 : a.userId > b.userId ? 1 : 0
-        )
+        // WR-06: coalesce null/undefined userId to '' BEFORE comparing, identical
+        // to createAuthority's sort (lines ~122-124). Bare `a.userId < b.userId`
+        // against a null yields false/false and produces an unstable ordering that
+        // can select a different first officer than createAuthority — the two sites
+        // would then bind divergent InviteResult.Digest values and trip
+        // Admin.MutationValid. Keeping the coalescing identical preserves the D-09
+        // byte-for-byte agreement.
+        const sortedOfficers = [...invokesOfficers].sort((a, b) => {
+          const ua = a.userId ?? ''
+          const ub = b.userId ?? ''
+          return ua < ub ? -1 : ua > ub ? 1 : 0
+        })
         const firstOfficer = sortedOfficers[0]!
+        // 999.1 R-03 — DOCUMENTED LIMITATION (not a fabricated `true`): the
+        // A1 LOCKED encoding requires digestToken = the exact value written
+        // to InviteResult.Digest, which for this branch embeds
+        // `generatedAuthorityId` — a fresh `crypto.randomUUID()` minted
+        // INSIDE this method, after `invite.inviteSignature` was already
+        // produced by the caller. No pre-image of that id can exist at
+        // signing time, so `inviteSignature` cannot cryptographically commit
+        // to it — the caller cannot know a value the engine hasn't generated
+        // yet (a genuine architectural gap in this call path, pre-existing
+        // the 999.1 phase; the previous hardcoded `context.IsSignatureValid
+        // = true` stub silently masked it). A real check here would ALWAYS
+        // reject every legitimate accept — fixing it properly needs a
+        // vote-core `InviteAction` shape change (e.g. letting the caller
+        // supply/commit the id before signing, or a sign-callback pattern
+        // like `saveInviteWithSigning`'s D-03/D-04) — out of this plan's
+        // scope (Rule 4 — architectural). Tracked in the 999.1-09 SUMMARY.
+        // The non-authority branch below has no such gap (its digestToken
+        // is fully caller-known ahead of time) and IS verified for real.
         await this.ctx.db.exec(
 					`insert into InviteResult (
 						SlotCid,
@@ -849,7 +1060,7 @@ export class NetworkEngine implements INetworkEngine {
             officerTitle: firstOfficer.title,
             officerScopes: firstOfficer.scopes,
             inviteSignature: invite.inviteSignature,
-            invokedId
+            invokedId,
           }
         )
       } else {
@@ -861,6 +1072,14 @@ export class NetworkEngine implements INetworkEngine {
         const resultDigest = invite.isAccepted
           ? JSON.stringify(invite.invokes)
           : null
+        // 999.1 R-03: same A1 LOCKED domain as the authority-accepted branch
+        // above, with digestToken = the plain resultDigest (or 'null' for a
+        // decline — inviteResultSignedBytes applies that coalesce).
+        const isSignatureValid = verifyAdHocInviteSignature(
+          inviteResultSignedBytes({ slotCid, digestToken: resultDigest ?? 'null', accept: invite.isAccepted }),
+          invite.inviteSignature,
+          invite.invite.inviteKey,
+        )
         await this.ctx.db.exec(
 					`insert into InviteResult (
 						SlotCid,
@@ -869,7 +1088,7 @@ export class NetworkEngine implements INetworkEngine {
 						InviteSignature,
 						InvokedId
 					)
-					with context IsSigningValid = true, IsSignatureValid = true
+					with context IsSigningValid = true, IsSignatureValid = :isSignatureValid
 					values (
 						:slotCid,
 						:isAccepted,
@@ -882,7 +1101,8 @@ export class NetworkEngine implements INetworkEngine {
             isAccepted: invite.isAccepted,
             digest: resultDigest,
             inviteSignature: invite.inviteSignature,
-            invokedId
+            invokedId,
+            isSignatureValid,
           }
         )
       }
@@ -896,6 +1116,31 @@ export class NetworkEngine implements INetworkEngine {
       }
     }
     return invokedId ?? ''
+  }
+
+  async getStatistics (): Promise<{ estimatedNodes: number; serverCount: number }> {
+    try {
+      const nRow = await this.ctx.db
+        .prepare('SELECT Relays FROM Network WHERE Hash = :hash LIMIT 1')
+        .get({ hash: this.init.hash })
+      if (!nRow) throw new Error('Network not found')
+      const relays = parseJsonOr<string[]>(nRow.Relays, [], 'Network.Relays')
+      const serverCount = relays.length
+      // ENG-05: use live peer count from injected callback when available.
+      // D-03: getPeerCount is a plain (() => number) callback — no @serfab/@optimystic import enters vote-engine.
+      // Fallback: relay-count heuristic (honest lower-bound floor per WR-07 / D-07).
+      // When callback is absent or returns 0, estimatedNodes = serverCount (the pre-Phase-22 floor).
+      const connectedPeers = this.getPeerCount?.() ?? 0
+      return { serverCount, estimatedNodes: Math.max(serverCount, connectedPeers) }
+    } catch (err) {
+      if (err instanceof QuereusError) {
+        throw new Error(`Quereus error (code ${err.code}): ${err.message}`)
+      } else if (err instanceof MisuseError) {
+        throw new Error(`API misuse: ${err.message}`)
+      } else {
+        throw new Error(`Unknown error in getStatistics: ${err}`)
+      }
+    }
   }
 
   async unpinAuthority (authorityId: string): Promise<void> {

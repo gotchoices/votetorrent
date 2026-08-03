@@ -5,6 +5,7 @@ import FontAwesome6 from 'react-native-vector-icons/FontAwesome6';
 import {ExtendedTheme, useTheme} from '@react-navigation/native';
 import {useState, useEffect} from 'react';
 import {useTranslation} from 'react-i18next';
+import {useSettings} from '../providers/SettingsProvider';
 
 /*
 This component is used to easily enforce a standard input style across the app.
@@ -24,6 +25,7 @@ interface CustomTextInputProps extends TextInputProps {
 
 export function CustomTextInput(props: CustomTextInputProps) {
 	const {colors} = useTheme() as ExtendedTheme;
+	const {showHelpIcons} = useSettings();
 	const [value, setValue] = useState(props.value || '');
 	const {t} = useTranslation();
 
@@ -49,7 +51,7 @@ export function CustomTextInput(props: CustomTextInputProps) {
 					{props.isImageUrlField && (
 						<View style={styles.imageButtons}>
 							<ChipButton label={t('makePermanent')} onPress={props.makePermanentPressed} />
-							<FontAwesome6 name="circle-info" size={16} color={colors.text} onPress={props.onIconPress} />
+							{showHelpIcons && <FontAwesome6 name="circle-info" size={16} color={colors.text} onPress={props.onIconPress} />}
 						</View>
 					)}
 				</View>

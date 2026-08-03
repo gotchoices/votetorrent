@@ -1,41 +1,130 @@
-import React, { useEffect, useState } from "react";
-import { View, ScrollView, StyleSheet, TouchableOpacity } from "react-native";
-import { ExtendedTheme, useRoute, useTheme, useNavigation } from "@react-navigation/native";
+import React, { useCallback, useEffect, useState } from "react";
+import { View, ScrollView, StyleSheet, Share } from "react-native";
+import { ExtendedTheme, useRoute, useTheme, useNavigation, useFocusEffect } from "@react-navigation/native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTranslation } from "react-i18next";
 import { ThemedText } from "../../components/ThemedText";
-import type { ElectionDetails, IElectionEngine } from "@votetorrent/vote-core";
+import type { BallotSummary, ElectionDetails, IElectionEngine, ElectionRevisionSignatureTask, KeyholderInvite } from "@votetorrent/vote-core";
 import { globalStyles } from "../../theme/styles";
+import { InlineError } from "../../components/InlineError";
 import { ElectionDetailsBlock } from "./components/ElectionDetailsBlock";
+import { ElectionTimelineList } from "./components/ElectionTimelineList";
 import { ChipButton } from "../../components/ChipButton";
 import { KeyholderCard } from "./components/KeyholderCard";
 import { CustomButton } from "../../components/CustomButton";
-import FontAwesome6 from "react-native-vector-icons/FontAwesome6";
+import { CustomTextInput } from "../../components/CustomTextInput";
+import { InfoCard } from "../../components/InfoCard";
+import { formatDate } from "../../utils/displayUtils";
+import { getLocalKeyholders } from "../../engines/local-keyholders";
+import type { NavigationProp } from "../../navigation/types";
 
+/**
+ * ElectionDetailsScreen — Figma parity #13/#18/#19 per Phase 9 plan 09-14.
+ *
+ * Render order (top → bottom):
+ *   1.  ElectionDetailsBlock — immutable core (title, Authority, Type, Date-time, Core Sig)
+ *   2.  Current revision section (Revision #N + date, Tags, Timeline text list,
+ *       Keyholder Policy, Revision Signature, PREVIEW chip)
+ *   3.  Keyholders — Sent/Unsent cards + chevron
+ *   4.  REVISE ELECTION / CLONE ELECTION actions
+ *   5.  Proposed Revision block (conditional — only when electionDetails.proposed exists)
+ *       · revision header, tags, timeline text list, keyholder policy
+ *       · signing rows per keyholder (SIGN accent / SHARE warning CustomButton pills)
+ *       · ADJUST REVISION → EditElectionRevision
+ *   6.  Ballot Templates section (one InfoCard per template with Questions subtitle)
+ *   7.  More section (collapsible) + filter-authorities input
+ */
 export default function ElectionDetailsScreen() {
 	const { t } = useTranslation();
 	const { electionEngine } = useRoute().params as { electionEngine: IElectionEngine };
 	const [electionDetails, setElectionDetails] = useState<ElectionDetails | null>(null);
-	const [showMore, setShowMore] = useState(false);
+	const [ballots, setBallots] = useState<BallotSummary[]>([]);
+	// D-09: confirmation state per ballot — { locked, confirmed } keyed by ballot id
+	const [ballotConfirmationStates, setBallotConfirmationStates] = useState<Record<string, { locked: boolean; confirmed: boolean }>>({});
+	const [moreOpen, setMoreOpen] = useState(false);
+	const [errorMessage, setErrorMessage] = useState("");
 	const { colors } = useTheme() as ExtendedTheme;
-	const navigation = useNavigation();
+	const navigation = useNavigation<NavigationProp>();
+	const insets = useSafeAreaInsets();
 
 	useEffect(() => {
 		const loadElectionDetails = async () => {
 			try {
 				if (electionEngine) {
 					const details = await electionEngine.getElectionDetails();
+					// TEMP scaffold (delete with cadre P2P invite flow): the engine does
+					// not persist keyholders yet, so merge locally-stored names into the
+					// revision projections so the count + cards render. See local-keyholders.ts.
+					const names = await getLocalKeyholders(details.election.id);
+					if (names.length) {
+						// current is ElectionRevision -> InviteStatus<SentKeyholderInvite>[]
+						if (details.current.keyholders.length === 0) {
+							details.current.keyholders = names.map((name) => ({ invite: { name } }));
+						}
+						// proposed.proposed is ElectionRevisionInit -> KeyholderInvite[]
+						if (details.proposed && details.proposed.proposed.keyholders.length === 0) {
+							details.proposed.proposed.keyholders = names.map(
+								(name): KeyholderInvite => ({ name, type: "k", expiration: "0", inviteKey: "", inviteSignature: "" })
+							);
+						}
+					}
 					setElectionDetails(details);
 				}
 			} catch (error) {
-				console.error("Error loading election details:", error);
+				console.warn("Error loading election details:", error);
+				setErrorMessage(error instanceof Error ? error.message : String(error));
 			}
 		};
 
 		loadElectionDetails();
 	}, [electionEngine]);
 
-	const toggleShowMore = () => {
-		setShowMore(!showMore);
+	// G2/G12: Refresh ballot list on every focus so newly proposed templates appear
+	// immediately on return from CreateBallot/EditBallot.
+	// D-09: Also refresh confirmation states on focus so Proposed/Confirmed badge
+	// updates when the user returns from the Tasks inbox after signing.
+	useFocusEffect(
+		useCallback(() => {
+			const loadBallots = async () => {
+				setErrorMessage(""); // clear stale error before reload so transient failures don't persist
+				try {
+					if (electionEngine) {
+						const summaries = await electionEngine.getBallots();
+						setBallots(summaries);
+						// D-09: fetch confirmation state for each ballot to drive the badge.
+						const stateEntries = await Promise.all(
+							summaries.map(async (b) => {
+								try {
+									const cs = await electionEngine.getBallotConfirmationState(b.id);
+									return [b.id, cs] as const;
+								} catch {
+									return [b.id, { locked: false, confirmed: false }] as const;
+								}
+							})
+						);
+						setBallotConfirmationStates(Object.fromEntries(stateEntries));
+					}
+				} catch (error) {
+					console.warn("Error loading ballots:", error);
+					setErrorMessage(error instanceof Error ? error.message : String(error));
+				}
+			};
+			loadBallots();
+		}, [electionEngine])
+	);
+
+	const handleShare = async (election: ElectionDetails["election"], proposed: ElectionDetails["proposed"], current: ElectionDetails["current"]) => {
+		try {
+			const message = [
+				`Election: ${election.title}`,
+				`Revision: #${proposed?.proposed.revision ?? current.revision}`,
+				`Authority: ${election.authorityId}`,
+				`Date: ${formatDate(election.date)}`,
+			].join("\n");
+			await Share.share({ message });
+		} catch (err) {
+			setErrorMessage(err instanceof Error ? err.message : String(err));
+		}
 	};
 
 	if (!electionDetails) {
@@ -46,88 +135,278 @@ export default function ElectionDetailsScreen() {
 		);
 	}
 
+	const { election, current, proposed } = electionDetails;
+	const revisionSignature = (current as any).signature?.signature as string | undefined;
+	const revisionDate = Array.isArray(current.revisionTimestamp) && current.revisionTimestamp.length > 0
+		? (current.revisionTimestamp[0] as unknown as number)
+		: election.date;
+
 	return (
-		<ScrollView style={styles.container}>
+		<ScrollView
+			style={styles.container}
+			contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}>
+
+			{/* SC6 error state — surfaces load failures inline (D-19) */}
+			<View style={styles.section}>
+				<InlineError message={errorMessage} />
+			</View>
+
+			{/* 1. Immutable core block (title + Authority/Type/Date + Core Signature) */}
 			<View style={styles.section}>
 				<ElectionDetailsBlock electionDetails={electionDetails} />
-				<View style={styles.buttonContainer}>
-					<ChipButton label={t("preview")} onPress={() => {}} />
-				</View>
 			</View>
 
+			{/* 2. Current revision section — rendered ONCE here */}
+			<View style={styles.section}>
+				<View style={styles.detail}>
+					<ThemedText type="defaultSemiBold">{t("revision")}: </ThemedText>
+					<ThemedText>#{current.revision} - {formatDate(revisionDate)}</ThemedText>
+				</View>
+				<View style={styles.detail}>
+					<ThemedText type="defaultSemiBold">{t("tags")}: </ThemedText>
+					<ThemedText>{current.tags.join(", ")}</ThemedText>
+				</View>
+
+				{/* Timeline — text list per Decision 2 */}
+				<ThemedText type="defaultSemiBold" style={styles.sectionLabel}>{t("timeline")}</ThemedText>
+				<ElectionTimelineList timeline={current.timeline} />
+
+				<View style={styles.detail}>
+					<ThemedText type="defaultSemiBold">{t("keyholderPolicy")}: </ThemedText>
+					<ThemedText>{current.keyholderThreshold} of {current.keyholders.length}</ThemedText>
+				</View>
+
+				{revisionSignature ? (
+					<View style={styles.detail}>
+						<ThemedText type="defaultSemiBold">{t("revisionSignature")}: </ThemedText>
+						<ThemedText numberOfLines={1} ellipsizeMode="middle">{revisionSignature}</ThemedText>
+					</View>
+				) : null}
+
+				{/* PREVIEW chip — EUI-05/D-09: navigate to EditBallot in read-only mode.
+				    WR-07: only show the single top-level PREVIEW when there is exactly
+				    one template — otherwise it would silently preview only ballots[0].
+				    With multiple templates the per-template cards below are the
+				    unambiguous per-ballot entry points. */}
+				{ballots.length === 1 ? (
+					<ChipButton
+						label={t("previewBallots")}
+						onPress={() => {
+							navigation.navigate("EditBallot", {
+								electionId: election.id,
+								electionTitle: election.title,
+								electionDate: formatDate(election.revisionDeadline),
+								ballotId: ballots[0].id,
+								electionEngine,
+								readOnly: true,
+							} as any);
+						}}
+					/>
+				) : null}
+			</View>
+
+			{/* 3. Keyholders — Sent/Unsent + chevron */}
 			<View style={styles.section}>
 				<ThemedText type="defaultSemiBold">{t("keyholders")}</ThemedText>
-				{electionDetails.current.keyholders.map((keyholder) => (
+				{current.keyholders.map((keyholder, index) => (
 					<KeyholderCard
-						key={keyholder.slot.invite.slot.invite.name}
+						key={keyholder.invite?.name ?? `keyholder-${index}`}
 						invitationStatus={keyholder}
-						onPress={() => {}}
+						onPress={() => navigation.navigate("Keyholder", { keyholder, electionEngine })}
 					/>
 				))}
+				<CustomButton
+					title={t("invite")}
+					icon="paper-plane"
+					backgroundColor={colors.accent}
+					size="thin"
+					onPress={() => navigation.navigate("KeyholderInvitation", { mode: "send", electionEngine })}
+				/>
 			</View>
 
+			{/* 4. REVISE / CLONE actions */}
 			<View style={styles.section}>
 				<CustomButton
 					title={t("reviseElection")}
 					size="thin"
 					icon="pencil"
 					backgroundColor={colors.accent}
-					onPress={() => {}}
+					onPress={() => navigation.navigate("EditElectionRevision", { electionEngine })}
 				/>
 				<CustomButton
 					title={t("cloneElection")}
 					size="thin"
 					icon="copy"
 					backgroundColor={colors.accent}
-					onPress={() => {}}
+					disabled={true}
+					onPress={() => {/* Phase 21 */}}
 				/>
 			</View>
 
+			{/* 5. Proposed Revision block — conditional */}
+			{electionDetails.proposed && (
+				<View style={styles.section}>
+					<ThemedText type="defaultSemiBold">{t("proposedRevisionHeader")}</ThemedText>
+
+					<View style={styles.detail}>
+						<ThemedText type="defaultSemiBold">{t("revision")}: </ThemedText>
+						<ThemedText>#{proposed!.proposed.revision}</ThemedText>
+					</View>
+					<View style={styles.detail}>
+						<ThemedText type="defaultSemiBold">{t("tags")}: </ThemedText>
+						<ThemedText>{proposed!.proposed.tags.join(", ")}</ThemedText>
+					</View>
+
+					<ThemedText type="defaultSemiBold" style={styles.sectionLabel}>{t("timeline")}</ThemedText>
+					<ElectionTimelineList timeline={proposed!.proposed.timeline} />
+
+					<View style={styles.detail}>
+						<ThemedText type="defaultSemiBold">{t("keyholderPolicy")}: </ThemedText>
+						<ThemedText>{proposed!.proposed.keyholderThreshold} of {proposed!.proposed.keyholders.length}</ThemedText>
+					</View>
+
+					{/* Signing rows — one per proposed keyholder */}
+					{proposed!.proposed.keyholders.map((holder, idx) => {
+						// EUI-04 (D-02): navigation-only task object; real signing is Phase 21.
+						// Mirrors TasksScreen.tsx:129 navigate("SignatureTask", { task }) shape.
+						const signatureTask: ElectionRevisionSignatureTask = {
+							type: "signature",
+							signatureType: "election-revision",
+							// network and userId are not available on this screen; Phase 21 will
+							// source the real task from the task queue (navigation-only this phase).
+							network: { hash: "", name: election.authorityId, primaryAuthorityDomainName: election.authorityId, relays: [] },
+							userId: "",
+							election: {
+								proposed: {
+									election: {
+										id: election.id,
+										authorityId: election.authorityId,
+										title: election.title,
+										type: election.type,
+										date: election.date,
+										revisionDeadline: election.revisionDeadline,
+										ballotDeadline: election.ballotDeadline,
+									},
+									revision: proposed!.proposed,
+								},
+								signers: [],
+							},
+						};
+						return (
+							<View key={holder.name ?? `proposed-holder-${idx}`} style={styles.signingRow}>
+								<ThemedText type="defaultSemiBold" style={styles.holderName}>{holder.name}</ThemedText>
+								<View style={styles.signingPills}>
+									<CustomButton
+										title={t("signRevision")}
+										size="thin"
+										icon="signature"
+										backgroundColor={colors.accent}
+										onPress={() => navigation.navigate("SignatureTask", { task: signatureTask })}
+									/>
+									<CustomButton
+										title={t("shareRevision")}
+										size="thin"
+										icon="share-nodes"
+										backgroundColor={colors.warning}
+										onPress={() => handleShare(election, proposed, current)}
+									/>
+								</View>
+							</View>
+						);
+					})}
+
+					{/* ADJUST REVISION → EditElectionRevision */}
+					<CustomButton
+						title={t("adjustRevision")}
+						size="thin"
+						icon="pencil"
+						backgroundColor={colors.accent}
+						onPress={() => navigation.navigate("EditElectionRevision", { electionEngine })}
+					/>
+				</View>
+			)}
+
+			{/* 6. Ballot Templates section */}
 			<View style={styles.section}>
 				<ThemedText type="title">{t("ballotTemplates")}</ThemedText>
-				<ThemedText type="small">{t("noAssociatedAuthoritiesHaveTemplates")}</ThemedText>
+				{ballots.length > 0 ? (
+					ballots.map((ballot) => {
+						// D-09: render a Proposed/Confirmed status badge driven by getBallotConfirmationState.
+						const cs = ballotConfirmationStates[ballot.id];
+						const statusLabel = cs?.confirmed
+							? t("statusConfirmed")
+							: t("statusProposed");
+						return (
+							<InfoCard
+								key={ballot.id}
+								title={ballot.authorityId || t("ballotTemplate")}
+								subtitle={statusLabel}
+								icon="chevron-right"
+								onPress={() =>
+									navigation.navigate("EditBallot", {
+										electionId: election.id,
+										electionTitle: election.title,
+										electionDate: formatDate(election.revisionDeadline),
+										ballotId: ballot.id,
+										electionEngine,
+									} as any)
+								}
+							/>
+						);
+					})
+				) : (
+					<>
+						<ThemedText type="small">{t("noBallotYet")}</ThemedText>
+						<CustomButton
+							title={t("createBallotTemplate")}
+							size="thin"
+							icon="plus"
+							backgroundColor={colors.accent}
+							onPress={() =>
+								navigation.navigate("CreateBallot", {
+									electionId: election.id,
+									electionTitle: election.title,
+									electionDate: formatDate(election.revisionDeadline),
+									electionEngine,
+								} as any)
+							}
+						/>
+					</>
+				)}
 			</View>
 
+			{/* 7. More section (collapsible) + filter-authorities input */}
 			<View style={styles.section}>
-				<ThemedText type="title">{t("pendingBallotTemplates")}</ThemedText>
-				<ThemedText type="small">{t("noAssociatedAuthoritiesHaveTemplates")}</ThemedText>
-			</View>
-
-			<View style={styles.section}>
-				<TouchableOpacity style={styles.moreHeader} onPress={toggleShowMore}>
-					<FontAwesome6
-						name={showMore ? "chevron-down" : "chevron-right"}
-						size={14}
-						color={colors.text}
+				<ChipButton label={t("more")} onPress={() => setMoreOpen((v) => !v)} />
+				{moreOpen && (
+					<CustomTextInput
+						placeholder={t("filterAuthoritiesField")}
 					/>
-					<ThemedText type="title">{t("more")}</ThemedText>
-				</TouchableOpacity>
-				{showMore && <ThemedText type="small">{t("noBallotTemplates")}</ThemedText>}
-			</View>
-
-			<View style={styles.section}>
-				<CustomButton
-					title={t("createBallotTemplate")}
-					size="thin"
-					icon="plus"
-					backgroundColor={colors.accent}
-					onPress={() => navigation.navigate("EditBallot")}
-				/>
+				)}
 			</View>
 		</ScrollView>
 	);
 }
 
 const localStyles = StyleSheet.create({
-	buttonContainer: {
+	detail: {
 		flexDirection: "row",
-		justifyContent: "flex-end",
+		flexWrap: "wrap",
+		marginVertical: 2,
 	},
-	moreHeader: {
+	sectionLabel: {
+		marginTop: 8,
+		marginBottom: 2,
+	},
+	signingRow: {
+		marginVertical: 6,
+	},
+	holderName: {
+		marginBottom: 4,
+	},
+	signingPills: {
 		flexDirection: "row",
-		alignItems: "center",
-		gap: 16,
-		marginBottom: 16,
+		gap: 8,
 	},
 });
 

@@ -1,0 +1,154 @@
+/**
+ * packages/p2p-probe-host/drone.mjs — Phase 17 P2P-01 dial-proof host drone.
+ *
+ * Committed, repeatable dev tooling (Phase 22 reuse).  Ported from spike 009.
+ *
+ * A storage-profile CadreNode that listens on an ephemeral WebSocket address so
+ * the Android emulator can dial it (emulator reaches the host at 10.0.2.2).
+ * Boots, prints the control peerId + ws multiaddr, then stays alive.
+ *
+ * Prerequisites:
+ *   This package is a normal yarn workspace — `yarn install` at the repo root installs its deps.
+ *   The root `resolutions` pin uint8arrays only for ^5 ranges (Hermes/quereus compat), so
+ *   @multiformats/multiaddr's ^6 requirement resolves to a real v6 and strict Node ESM works.
+ *   The yarn-patched @serfab/cadre-core (connectionGater pass-through) is what resolves here.
+ *
+ * Usage:
+ *   cd packages/p2p-probe-host
+ *   nvm use 22
+ *   node drone.mjs
+ *
+ *   Copy the printed ws multiaddr + peerId into CONTROL_ADDR in dial-probe.ts,
+ *   then run ./scripts/run-dial-probe.sh.
+ *
+ * Exit: Ctrl-C (SIGINT) or `kill <pid>` (SIGTERM) — both gracefully stop the node.
+ */
+import { readFileSync } from 'node:fs';
+import { CadreNode } from '@serfab/cadre-core';
+import { MemoryRawStorage } from '@optimystic/db-p2p';
+import { webSockets } from '@libp2p/websockets';
+
+const PARTY_ID = 'votetorrent'; // aligned with CadreNodeProvider.tsx line 55 (OQ1 conservative fix)
+const L = (...a) => console.log('[drone]', ...a);
+
+// P2P-06: the same votetorrent.qsql DDL the device peers apply via
+// VOTETORRENT_SCHEMA_SQL (vote-engine re-export, generated from this file). The
+// drone MUST host the identical schema so its strand is compatible with peers A/B.
+const VOTETORRENT_QSQL_RAW = readFileSync(
+  new URL('../vote-core/schema/votetorrent.qsql', import.meta.url),
+  'utf8',
+);
+
+// cadre-core's StrandDatabase.executeSchema() wraps the sApp schema as
+// `declare schema App { ${schema} } apply schema App;`. votetorrent.qsql is itself
+// wrapped in `declare schema main { ... } apply schema main;`, so passing it verbatim
+// nests invalidly and Quereus throws `got '}'`. Strip the outer wrapper so only the
+// inner DDL is hosted — identical to the device peers' createStrandDbFactory, keeping
+// the drone's strand schema-compatible. qsql has no `main.`-qualified refs (clean strip).
+const VOTETORRENT_QSQL = VOTETORRENT_QSQL_RAW
+  .replace(/^\s*declare\s+schema\s+\w+\s*\{/, '')
+  .replace(/\}\s*apply\s+schema\s+\w+\s*;\s*$/, '')
+  .trim();
+
+// 38-05 (D-04 n=4 topology): cross-bootstrap parameterization so a SECOND drone
+// process (drone-B) can bootstrap into drone-A's control network AND strand cohort,
+// exactly as 38-02's two-drone-smoke.mjs proved (drone-B's controlNetwork.bootstrapNodes
+// + network.strandBootstrapNodes pointed at drone-A's addrs). drone-A itself launches
+// with these unset (empty defaults) — it remains the first bootstrap peer. Follows the
+// existing `process.env.X ?? default` pattern used by STRAND_ID below.
+const DRONE_BOOTSTRAP_CONTROL_ADDR = process.env.DRONE_BOOTSTRAP_CONTROL_ADDR ?? '';
+const DRONE_BOOTSTRAP_STRAND_ADDR = process.env.DRONE_BOOTSTRAP_STRAND_ADDR ?? '';
+
+const node = new CadreNode({
+  controlNetwork: {
+    partyId: PARTY_ID,
+    bootstrapNodes: DRONE_BOOTSTRAP_CONTROL_ADDR ? [DRONE_BOOTSTRAP_CONTROL_ADDR] : [],
+  },
+  profile: 'storage',
+  // Published @serfab/cadre-core@0.8.1 enforces a fail-closed sApp-schema signature
+  // policy (requireSignedSchemas defaults true): the unsigned org.votetorrent demo
+  // schema this drone hosts is rejected at strand bring-up with
+  // SchemaVerificationError('missing signature'). Relax the policy for this dev-harness
+  // drone — the documented dev/test relaxation, at parity with the app's proof runners
+  // (replication-proof-runner.ts / strand-persistence-proof-runner.ts).
+  requireSignedSchemas: false,
+  strandFilter: { mode: 'all' },
+  network: {
+    transports: [webSockets()],
+    listenAddrs: ['/ip4/0.0.0.0/tcp/0/ws'], // ephemeral — avoids EADDRINUSE
+    // The storage profile turns the circuit-relay-v2 relay server ON
+    // (createControlNode/startStrand derive `relay: profile === 'storage'` in
+    // the consumed vendored cadre-core, wiring circuitRelayServer() at
+    // libp2p-node-base.js). The prior WR-19 note — that the options builder
+    // forwarded only privateKey/transports/listenAddrs/connectionGater so an
+    // `enableRelay` key was a silent no-op — is now stale: the builder forwards
+    // `relayServerInit` too (T-38-12-01 transplant). Supply BOUNDED reservation
+    // limits so the relay does not run on the unlimited @libp2p/circuit-relay-v2
+    // defaults (dev-harness infra only, not shipped).
+    relayServerInit: {
+      reservations: {
+        maxReservations: 32, // n=4 mesh + headroom (circuit-relay-v2 default is 15)
+        defaultDurationLimit: 2 * 60 * 1000, // 2 min per reservation
+        defaultDataLimit: BigInt(1 << 17), // 128 KiB per reservation
+      },
+      maxInboundHopStreams: 64,
+      maxOutboundStopStreams: 64,
+    },
+    ...(DRONE_BOOTSTRAP_STRAND_ADDR && { strandBootstrapNodes: [DRONE_BOOTSTRAP_STRAND_ADDR] }),
+  },
+  hibernation: { enabled: false },
+});
+
+await node.start();
+const addrs = node.getControlNode().getMultiaddrs().map(m => m.toString());
+L('control peerId =', node.peerId?.toString());
+L('control addrs  =', JSON.stringify(addrs));
+// Machine-readable address line for the replication-proof harness (D-07 auto-injection).
+// The human READY line below is a TEMPLATE with literal <PORT>/<PEER_ID> placeholders —
+// scripts must parse THIS line, not that one. Prefer the loopback ws multiaddr; the harness
+// rewrites 127.0.0.1 → 10.0.2.2 for the Android emulator host mapping.
+const proofWsAddr = addrs.find(a => a.includes('/ip4/127.0.0.1/') && a.includes('/ws')) ?? addrs[0] ?? '';
+L('PROOF_WS_ADDR=' + proofWsAddr);
+L('READY — update CONTROL_ADDR in dial-probe.ts with the /ip4/10.0.2.2/tcp/<PORT>/ws/p2p/<PEER_ID> addr above, then run ./scripts/run-dial-probe.sh');
+
+// P2P-06 replication proof: host the VoteTorrent strand so transaction-profile
+// peers A and B can replicate through this always-on storage cadre (D-01/D-02
+// Option-B topology). strandId is the KNOWN test-network hash (== networkHash,
+// D-05) exported by Peer A's created network and passed in via STRAND_ID.
+// mode:'bootstrap' — the drone starts solo and transitions naturally as peers
+// connect (T-22-14: 'networked' solo would hang). The storage profile +
+// MemoryRawStorage are kept (dev/test tooling, D-02 — ephemeral store is fine).
+const STRAND_ID = process.env.STRAND_ID ?? 'UPDATE_WITH_TEST_NETWORK_HASH';
+await node.addStrand({
+  strandRow: { Id: STRAND_ID, MemberPrivateKey: null, Type: 'o' },
+  sAppConfig: {
+    id: 'org.votetorrent',
+    version: '1.0.0',
+    schema: VOTETORRENT_QSQL,
+    latencyHint: 'interactive',
+  },
+  mode: 'bootstrap',
+});
+L(`[replication-proof] strand started, strandId=${STRAND_ID}`);
+// Advertise the drone's strand-node listen multiaddr so the harness can inject it
+// into the runner's STRAND_BOOTSTRAP_ADDR and peers can dial the strand cohort.
+// Mirrors the PROOF_WS_ADDR= control-node advertisement above (D-07 pattern, REPL-01).
+const strand = node.getStrand(STRAND_ID);
+const strandAddrs = strand?.libp2pNode?.getMultiaddrs?.().map(m => m.toString()) ?? [];
+const strandWs = strandAddrs.find(a => a.includes('/ip4/127.0.0.1/') && a.includes('/ws')) ?? strandAddrs[0] ?? '';
+if (!strandWs) {
+  L('PROOF_STRAND_ADDR_MISSING — strand node has no listen multiaddr');
+} else {
+  L('PROOF_STRAND_ADDR=' + strandWs);
+}
+
+// IN-15 (17-REVIEW): handle SIGTERM (plain `kill <pid>`) as well as SIGINT
+// (Ctrl-C) so both stop paths shut the node down gracefully.
+for (const sig of ['SIGINT', 'SIGTERM']) {
+  process.on(sig, async () => {
+    L(`${sig} — stopping...`);
+    await node.stop();
+    process.exit(0);
+  });
+}
+setInterval(() => {}, 1 << 30); // stay alive

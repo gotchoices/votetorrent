@@ -27,6 +27,7 @@ import type {
   KeyholderInvite,
   Ballot
 } from '@votetorrent/vote-core'
+import type { MockElectionEngine } from '../election/mock-election-engine.js'
 
 // Mock ID
 const MOCK_USER_ID: string = 'mock-user-id-sig-123'
@@ -249,15 +250,47 @@ const MOCK_PENDING_SIGNATURE_TASKS: SignatureTask[] = [
 
 export class MockSignatureTasksEngine implements ISignatureTasksEngine {
   private pendingTasks: SignatureTask[] = [...MOCK_PENDING_SIGNATURE_TASKS]
-  constructor () {}
+
+  /**
+   * Optional reference to the paired MockElectionEngine (D-10, 31-04).
+   *
+   * When provided, completeSignature calls electionEngine.markBallotConfirmed
+   * on accepted ballot tasks, simulating the real finalizeBallot path so the
+   * ballot state flips Proposed→Confirmed and the task leaves the inbox.
+   *
+   * Wire this in tests (compliance + RTL) by passing the same MockElectionEngine
+   * instance to both constructors — NOT via the app's EngineFactory, which
+   * constructs the real engines.
+   */
+  private electionEngine?: MockElectionEngine
+
+  constructor (electionEngine?: MockElectionEngine) {
+    this.electionEngine = electionEngine
+  }
 
   async completeSignature (
     task: SignatureTask,
     result: SignatureResult
   ): Promise<void> {
-    this.pendingTasks = this.pendingTasks.filter((t) => {
-      return t !== task
-    })
+    // Remove the task from the pending inbox (already done in prior impl).
+    this.pendingTasks = this.pendingTasks.filter((t) => t !== task)
+
+    // 31-04 mock finalize simulation (D-10/D-09):
+    // When the completed task is a ballot task that was accepted, flip the paired
+    // ballot to 'confirmed' via the markBallotConfirmed hook on MockElectionEngine.
+    // This mirrors the real engine's completeSignature → finalizeBallot path.
+    if (
+      task.signatureType === 'ballot' &&
+      result.isAccepted &&
+      this.electionEngine != null
+    ) {
+      const ballotTask = task as BallotSignatureTask
+      const ballotId = ballotTask.ballot?.proposed?.id
+      if (ballotId != null) {
+        this.electionEngine.markBallotConfirmed(ballotId)
+      }
+    }
+
     return Promise.resolve()
   }
 
@@ -270,5 +303,16 @@ export class MockSignatureTasksEngine implements ISignatureTasksEngine {
       return Promise.resolve([...this.pendingTasks])
     }
     return Promise.resolve([])
+  }
+
+  /**
+   * Mock parity for `ISignatureTasksEngine.getSignatureDigest` (D-03).
+   *
+   * Returns a deterministic mock `Uint8Array` keyed by `task.signatureType`
+   * so `compliance.spec.ts` mock-parity assertions hold and the mock-backed
+   * app path resolves the method. No key material is involved (D-01/D-03).
+   */
+  async getSignatureDigest (task: SignatureTask): Promise<Uint8Array> {
+    return new TextEncoder().encode(`mock-digest-${task.signatureType}`)
   }
 }

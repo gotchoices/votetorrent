@@ -2,11 +2,10 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Image, ScrollView, StyleSheet, View } from "react-native";
 import { ChipButton } from "../../components/ChipButton";
-import { InfoCard } from "../../components/InfoCard";
 import { ThemedText } from "../../components/ThemedText";
+import { InlineError } from "../../components/InlineError";
 import type {
 	Authority,
-	Admin,
 	IAuthorityEngine,
 	INetworkEngine,
 	AdminDetails,
@@ -19,8 +18,14 @@ import type { RootStackParamList } from "../../navigation/types";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useApp } from "../../providers/AppProvider";
 import { AuthorizationSection } from "../../components/AuthorizationSection";
+import { InfoCard } from "../../components/InfoCard";
+import { CustomTextInput } from "../../components/CustomTextInput";
 import { globalStyles } from "../../theme/styles";
 import { formatDate } from "../../utils/displayUtils";
+import { OfficerCard } from "./components/OfficerCard";
+
+/** Shape the (forthcoming) real authority engine will provide for invited authorities. */
+type InvitedAuthority = { name: string; status: "sent" | "unsent" };
 
 export default function AuthorityDetailsScreen() {
 	const { t } = useTranslation();
@@ -34,8 +39,12 @@ export default function AuthorityDetailsScreen() {
 	const [adminDetails, setAdminDetails] = useState<AdminDetails | null>(null);
 	const [officerUsers, setOfficerUsers] = useState<Map<string, User>>(new Map());
 	const [officers, setOfficers] = useState<Officer[]>([]);
+	const [inviteSearch, setInviteSearch] = useState("");
+	const [invitedAuthorities, setInvitedAuthorities] = useState<InvitedAuthority[]>([]);
+	const [errorMessage, setErrorMessage] = useState("");
 
 	const handlePinToggle = async () => {
+		setErrorMessage("");
 		try {
 			if (pinned) {
 				await networkEngine?.unpinAuthority(authority.id);
@@ -44,12 +53,14 @@ export default function AuthorityDetailsScreen() {
 			}
 			setPinned(!pinned);
 		} catch (error) {
-			console.error("Error toggling authority pin:", error);
+			console.warn("Error toggling authority pin:", error);
+			setErrorMessage(error instanceof Error ? error.message : String(error));
 		}
 	};
 
 	useEffect(() => {
 		async function loadEngines() {
+			setErrorMessage("");
 			try {
 				const engine = await getEngine("network");
 				setNetworkEngine(engine as INetworkEngine);
@@ -58,7 +69,8 @@ export default function AuthorityDetailsScreen() {
 					setAuthorityEngine(authorityEngine);
 				}
 			} catch (error) {
-				console.error("Error loading engines:", error);
+				console.warn("Error loading engines:", error);
+				setErrorMessage(error instanceof Error ? error.message : String(error));
 			}
 		}
 		loadEngines();
@@ -77,9 +89,10 @@ export default function AuthorityDetailsScreen() {
 				const details = await authorityEngine.getAdminDetails();
 				setAdminDetails(details);
 			} catch (error) {
-				console.error("Error checking pinned status:", error);
+				console.warn("Error checking pinned status:", error);
 				setPinned(false);
 				setAdminDetails(null);
+				setErrorMessage(error instanceof Error ? error.message : String(error));
 			}
 		}
 		getAuthorityData();
@@ -130,13 +143,31 @@ export default function AuthorityDetailsScreen() {
 				await Promise.all(userEnginePromises);
 				setOfficerUsers(userMap);
 			} catch (error) {
-				console.error("Error fetching users:", error);
+				console.warn("Error fetching users:", error);
 				setOfficers([]);
 				setOfficerUsers(new Map());
+				setErrorMessage(error instanceof Error ? error.message : String(error));
 			}
 		}
 		getUsers();
 	}, [networkEngine, adminDetails]);
+
+	useEffect(() => {
+		// Invited authorities are supplied by the real authority engine (to be
+		// implemented). Bind defensively so this UI is ready without adding mock
+		// data — the section renders empty until the engine provides the list.
+		async function loadInvited() {
+			const fn = (authorityEngine as any)?.getInvitedAuthorities;
+			if (typeof fn !== "function") return;
+			try {
+				setInvitedAuthorities((await fn.call(authorityEngine)) ?? []);
+			} catch (error) {
+				console.warn("Error loading invited authorities:", error);
+				setErrorMessage(error instanceof Error ? error.message : String(error));
+			}
+		}
+		loadInvited();
+	}, [authorityEngine]);
 
 	useEffect(() => {
 		navigation.setOptions({
@@ -155,7 +186,8 @@ export default function AuthorityDetailsScreen() {
 	}
 
 	return (
-		<ScrollView style={styles.container}>
+		<ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 32 }}>
+			<InlineError message={errorMessage} />
 			<View style={styles.section}>
 				<View style={styles.imageContainer}>
 					<Image source={{ uri: authority.imageRef?.url }} style={styles.authorityImage} />
@@ -173,50 +205,83 @@ export default function AuthorityDetailsScreen() {
 					</ThemedText>
 				</View>
 				<View style={styles.detail}>
-					<ThemedText type="defaultSemiBold">{t("id")}: </ThemedText>
+					<ThemedText type="defaultSemiBold">{t("cid")}: </ThemedText>
 					<ThemedText numberOfLines={1} ellipsizeMode="tail">
 						{authority.id}
 					</ThemedText>
 				</View>
+				{authority.imageRef?.url ? (
+					<View style={styles.detail}>
+						<ThemedText type="defaultSemiBold">{t("imageUrl")}: </ThemedText>
+						<ThemedText numberOfLines={1} ellipsizeMode="tail">
+							{authority.imageRef.url}
+						</ThemedText>
+					</View>
+				) : null}
+				{(authority as any).address ? (
+					<View style={styles.detail}>
+						<ThemedText type="defaultSemiBold">{t("address")}: </ThemedText>
+						<ThemedText numberOfLines={1} ellipsizeMode="middle">
+							{(authority as any).address}
+						</ThemedText>
+					</View>
+				) : null}
 				<View style={styles.detail}>
-					<ThemedText type="defaultSemiBold">{t("imageUrl")}: </ThemedText>
-					<ThemedText numberOfLines={1} ellipsizeMode="tail">
-						{authority.imageRef?.url}
-					</ThemedText>
-				</View>
-				<View style={styles.detail}>
-					<ThemedText type="defaultSemiBold">{t("address")}: </ThemedText>
-					<ThemedText numberOfLines={1} ellipsizeMode="tail">
-						{authority.domainName}
-					</ThemedText>
+					<ThemedText type="defaultSemiBold">{t("signature")}: </ThemedText>
+					<ThemedText>[{t("valid")}]</ThemedText>
 				</View>
 				<CustomButton
 					title={t("reviseAuthority")}
 					icon="pencil"
 					size="thin"
 					backgroundColor={colors.accent}
-					onPress={() => {}}
+					onPress={() => navigation.navigate("NetworkRevision", { networkId: authority.id })}
 				/>
 			</View>
 
 			<View style={styles.section}>
 				<ThemedText type="title">{t("administration")}</ThemedText>
 
-				{adminDetails?.admin.signatures && (
-					<View>
-						<View style={styles.detail}>
-							<ThemedText type="defaultSemiBold">{t("handoffSignature")}: </ThemedText>
-						</View>
-						<View style={styles.subDetails}>
-							{adminDetails.admin.signatures.map((signature) => (
-								<View style={styles.detail}>
-									<ThemedText type="default">{signature.signerKey}: </ThemedText>
-									<ThemedText>{signature.signature}</ThemedText>
-								</View>
-							))}
-						</View>
+				{(adminDetails?.admin as any)?.priorId ? (
+					<View style={styles.detail}>
+						<ThemedText type="defaultSemiBold">{t("priorCid")}: </ThemedText>
+						<ThemedText numberOfLines={1} ellipsizeMode="tail">
+							{(adminDetails?.admin as any).priorId}
+						</ThemedText>
 					</View>
-				)}
+				) : null}
+
+				{(() => {
+					const adminSignatures = (adminDetails?.admin as any)?.signatures as
+						| Array<{ name?: string; signerKey?: string; valid?: boolean }>
+						| undefined;
+					if (!adminSignatures || adminSignatures.length === 0) return null;
+					return (
+						<View>
+							<View style={styles.detail}>
+								<ThemedText type="defaultSemiBold">{t("handoffSignatures")}: </ThemedText>
+							</View>
+							<View style={styles.subDetails}>
+								{adminSignatures.map((signature, idx) => (
+									<View key={signature.signerKey ?? idx} style={styles.detail}>
+										<ThemedText numberOfLines={1} ellipsizeMode="middle">
+											{signature.name ? `${signature.name} ` : ""}[{signature.signerKey}]
+										</ThemedText>
+										<ThemedText> ({t("valid")})</ThemedText>
+									</View>
+								))}
+							</View>
+						</View>
+					);
+				})()}
+				{adminDetails?.admin.id ? (
+					<View style={styles.detail}>
+						<ThemedText type="defaultSemiBold">{t("cid")}: </ThemedText>
+						<ThemedText numberOfLines={1} ellipsizeMode="tail">
+							{adminDetails.admin.id}
+						</ThemedText>
+					</View>
+				) : null}
 				<View style={styles.detail}>
 					<ThemedText type="defaultSemiBold">{t("expires")}: </ThemedText>
 					<ThemedText>{formatDate(adminDetails?.admin.effectiveAt)}</ThemedText>
@@ -224,22 +289,20 @@ export default function AuthorityDetailsScreen() {
 
 				{officers.map((officer) => {
 					const user = officerUsers.get(officer.userId);
+					// Figma frame 7: compact card (image · name · role · CID) + chevron.
 					return (
 						<InfoCard
 							key={officer.userId}
-							image={{ uri: user?.image.url || "" }}
-							title={user?.name || ""}
-							additionalInfo={[
-								{
-									label: t("title"),
-									value: officer.title,
-								},
-								{ label: t("userId"), value: officer.userId },
-							]}
+							image={(user as any)?.image?.url ? { uri: (user as any).image.url } : undefined}
+							title={user?.name || officer.userId}
+							subtitle={officer.title}
+							additionalInfo={[{ label: t("cid"), value: officer.userId }]}
 							icon="chevron-right"
 							onPress={() =>
 								navigation.navigate("OfficerDetails", {
 									officer: officer,
+									userName: user?.name,
+									authority: authority,
 								})
 							}
 						/>
@@ -252,8 +315,8 @@ export default function AuthorityDetailsScreen() {
 						icon="pencil"
 						size="thin"
 						onPress={() =>
-							navigation.navigate("ReplaceAdmin", {
-								authority: authority,
+							navigation.navigate("ProposedAdministration", {
+								authorityId: authority.id,
 							})
 						}
 					/>
@@ -264,40 +327,99 @@ export default function AuthorityDetailsScreen() {
 				<View>
 					<View style={styles.section}>
 						<ThemedText type="title">{t("proposedAdministration")}</ThemedText>
+						{adminDetails.admin.id ? (
+							<View style={styles.detail}>
+								<ThemedText type="defaultSemiBold">{t("cid")}: </ThemedText>
+								<ThemedText numberOfLines={1} ellipsizeMode="tail">
+									{adminDetails.admin.id}
+								</ThemedText>
+							</View>
+						) : null}
+						<View style={styles.detail}>
+							<ThemedText type="defaultSemiBold">{t("expires")}: </ThemedText>
+							<ThemedText>{formatDate(adminDetails.proposed.proposed.effectiveAt)}</ThemedText>
+						</View>
+						<ThemedText type="defaultSemiBold" style={styles.administratorsHeading}>
+							{t("administrators")}
+						</ThemedText>
 						{adminDetails.proposed.proposed.officers.map((officerSelection) => {
-							const officer = officerSelection.existing || {
+							const officer: Officer = officerSelection.existing || {
 								userId: "",
+								authorityId: authority.id,
 								title: officerSelection.init?.title || "",
 								scopes: officerSelection.init?.scopes || [],
-								signature: { signature: "", signerKey: "" },
 							};
 							const user = officer.userId ? officerUsers.get(officer.userId) : undefined;
+							const name = user?.name || officerSelection.init?.name || "";
+							// Frame 14: accepted entries show "Accepted - CID: <cid>" in
+							// green; pending invites show "Sent" in the warning tone.
+							const status = officerSelection.existing
+								? {
+										label: `${t("accepted")} - ${t("cid")}: ${officer.userId}`,
+										tone: "accepted" as const,
+									}
+								: { label: t("sent"), tone: "warning" as const };
+
 							return (
-								<InfoCard
+								<OfficerCard
 									key={officer.userId || officerSelection.init?.name}
+									officer={officer}
+									userName={name}
 									image={user?.image?.url ? { uri: user.image.url } : undefined}
-									title={user?.name || officerSelection.init?.name || ""}
-									additionalInfo={[
-										{
-											label: t("title"),
-											value: officer.title,
-										},
-										{ label: t("userId"), value: officer.userId || t("pending") },
-									]}
-									icon="chevron-right"
-									onPress={() =>
-										navigation.navigate("OfficerDetails", {
-											officer: officer,
+									inviteId={(officerSelection as any)?.inviteId}
+									status={status}
+									onInvite={() =>
+										navigation.navigate("AdministratorInvitation", {
+											mode: "send",
+											authority,
 										})
 									}
+									onRemove={() => {}}
 								/>
 							);
 						})}
 					</View>
 
-					<AuthorizationSection admin={adminDetails} />
+					<AuthorizationSection
+						admin={adminDetails}
+						onAdjustProposal={() =>
+							navigation.navigate("ProposedAdministration", {
+								authorityId: authority.id,
+							})
+						}
+					/>
 				</View>
 			)}
+
+			<View style={styles.section}>
+				<View style={styles.invitedHeader}>
+					<ThemedText type="title">{t("invitedAuthorities")}</ThemedText>
+					<View style={styles.invitedAction}>
+						<ChipButton
+							label={t("inviteAuthority")}
+							icon="circle-plus"
+							onPress={() => navigation.navigate("AuthorityInvitation", { mode: "send" })}
+						/>
+					</View>
+				</View>
+				<ThemedText type="defaultSemiBold" style={styles.invitedNameLabel}>
+					{t("name")}
+				</ThemedText>
+				<CustomTextInput
+					placeholder={t("name")}
+					value={inviteSearch}
+					onChangeText={setInviteSearch}
+				/>
+				{invitedAuthorities.map((invited) => (
+					<InfoCard
+						key={invited.name}
+						title={invited.name}
+						subtitle={invited.status === "sent" ? t("sent") : t("unsent")}
+						icon="chevron-right"
+						onPress={() => {}}
+					/>
+				))}
+			</View>
 		</ScrollView>
 	);
 }
@@ -320,6 +442,25 @@ const localStyles = StyleSheet.create({
 	},
 	subDetails: {
 		marginLeft: 8,
+	},
+	administratorsHeading: {
+		marginTop: 12,
+		marginBottom: 4,
+	},
+	invitedHeader: {
+		marginBottom: 8,
+	},
+	invitedAction: {
+		// 24px title + "INVITE AUTHORITY" chip don't fit on one row on a phone,
+		// so the chip drops below the heading, right-aligned — mirroring the
+		// proposed-administration "ADD ADMINISTRATOR" chip placement.
+		flexDirection: "row",
+		justifyContent: "flex-end",
+		marginTop: 8,
+	},
+	invitedNameLabel: {
+		marginTop: 8,
+		marginBottom: 4,
 	},
 });
 

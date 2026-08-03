@@ -33,7 +33,10 @@ export interface AuthorityInviteDigestArgs {
 export interface ISigningEngine {
   /** D-18: Generate a signing nonce without creating AdminSigning. Used by invite flows that must INSERT InviteSlots before AdminSigning. */
   generateSigningNonce(): string
-  sign(nonce: string, signature: Signature): Promise<boolean> // true if the threshold has been reached and an AdminSignature has been created
+  /** 39-05 (D-01 Rule-1 fix): options threaded to match SigningEngine's committed implementation
+   *  (signed-mutation.ts / signature-tasks-engine.ts already call the 3-arg form; the interface
+   *  had drifted out of sync since 42-03/999.1's ownsTransaction + isPlaceholderSignature additions). */
+  sign(nonce: string, signature: Signature, options?: { ownsTransaction?: boolean; isPlaceholderSignature?: boolean }): Promise<boolean> // true if the threshold has been reached and an AdminSignature has been created
   startSigningSession(
     authorityId: string,
     digestArgs: AdminDigestArgs | null,

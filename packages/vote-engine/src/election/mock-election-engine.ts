@@ -1,139 +1,248 @@
-import { ElectionEvent, ElectionType } from '@votetorrent/vote-core'
 import type {
-  Ballot,
-  BallotDetails,
-  BallotSummary,
-  ElectionDetails,
-  ElectionRevisionInit,
-  IElectionEngine,
-  IElectionInviteKeyholderBuilder,
-  IElectionProposeBallotBuilder,
-  IElectionProposeRevisionBuilder,
-  IElectionRevokeKeyholderBuilder,
-  KeyholderInvite,
-  Timestamp
-} from '@votetorrent/vote-core'
-import { ElectionProposeBallotBuilder } from './builders/election-propose-ballot-builder.js'
-import { ElectionProposeRevisionBuilder } from './builders/election-propose-revision-builder.js'
-import { ElectionInviteKeyholderBuilder } from './builders/election-invite-keyholder-builder.js'
-import { ElectionRevokeKeyholderBuilder } from './builders/election-revoke-keyholder-builder.js'
+	Ballot,
+	BallotDetails,
+	BallotSummary,
+	ElectionDetails,
+	ElectionRevisionInit,
+	IElectionEngine,
+	IElectionInviteKeyholderBuilder,
+	IElectionProposeBallotBuilder,
+	IElectionProposeRevisionBuilder,
+	IElectionRevokeKeyholderBuilder,
+	KeyholderInvite,
+	Signature,
+} from '@votetorrent/vote-core';
+import { ElectionEvent, ElectionType, FeatureNotAvailableError } from '@votetorrent/vote-core';
+import { ElectionInviteKeyholderBuilder } from './builders/election-invite-keyholder-builder.js';
+import { ElectionProposeBallotBuilder } from './builders/election-propose-ballot-builder.js';
+import { ElectionProposeRevisionBuilder } from './builders/election-propose-revision-builder.js';
+import { ElectionRevokeKeyholderBuilder } from './builders/election-revoke-keyholder-builder.js';
+
+// Phase 9 plan 09-01 (D-14, D-18) — seed data for the demo Timeline + Ballot
+// renderers. Anchored to "now + N days" so the Timeline's past/current/future
+// status-dot logic resolves correctly at runtime regardless of when the demo
+// is run.
+//
+// Timeline mapping (ElectionEvent enum → Phase 9 D-06 milestone labels):
+//   registrationStarts → (synthetic: revision.revisionTimestamp[0])
+//   registrationEnds   → ElectionEvent.registrationEnds   ("Registration Closes")
+//   votingStarts       → ElectionEvent.votingStarts       ("Voting Opens")
+//   votingEnds         → ElectionEvent.tallyingStarts     ("Voting Closes")
+//   revisionDeadline   → election.revisionDeadline        ("Revision Deadline")
+const MOCK_DAY_MS = 24 * 60 * 60 * 1000;
+const MOCK_NOW = Date.now();
+
+/**
+ * Shared confirmation-state object for the mock engines (D-10, 31-04).
+ *
+ * MockElectionEngine and MockSignatureTasksEngine both hold a reference to the
+ * SAME instance so that completeSignature on the tasks engine can flip the ballot
+ * from 'submitted' to 'confirmed' — mirroring the real finalize path.
+ *
+ * Usage in tests:
+ *   const confirmState = new MockBallotConfirmationState();
+ *   const electionEngine = new MockElectionEngine(confirmState);
+ *   const tasksEngine = new MockSignatureTasksEngine(electionEngine);
+ *
+ * The app's EngineFactory constructs the REAL engines; mocks are paired only in
+ * test code (compliance.spec.ts + RTL tests).
+ */
+export class MockBallotConfirmationState {
+	private state: Map<string, 'proposed' | 'submitted' | 'confirmed'> = new Map();
+
+	get(ballotId: string): 'proposed' | 'submitted' | 'confirmed' {
+		return this.state.get(ballotId) ?? 'proposed';
+	}
+
+	set(ballotId: string, value: 'proposed' | 'submitted' | 'confirmed'): void {
+		this.state.set(ballotId, value);
+	}
+}
 
 export class MockElectionEngine implements IElectionEngine {
-  async getBallotDetails (id: string): Promise<BallotDetails> {
-    throw new Error('Not implemented')
-  }
+	// Phase 9 plan 09-09 (G12) — stateful in-memory ballot store. Starts EMPTY
+	// so the ElectionDetails empty-state shows before any template is created.
+	// AppProvider caches the engine instance, so this array persists across
+	// navigations within a session (the intended persistence vehicle).
+	private ballots: Ballot[] = [];
 
-  async getBallots (): Promise<BallotSummary[]> {
-    throw new Error('Not implemented')
-  }
+	// 31-04: shared confirmation-state — injectable so MockSignatureTasksEngine
+	// can call markBallotConfirmed on the same state object.
+	private confirmationState: MockBallotConfirmationState;
 
-  async getElectionDetails (): Promise<ElectionDetails> {
-    // Mock data for Utah General Election
-    const mockElection: ElectionDetails = {
-      election: {
-        id: 'utah-general-2024',
-        authorityId: 'utah-election-authority',
-        title: 'Utah General Election 2024',
-        date: new Date('2024-11-05').getTime(), // Election Day
-        revisionDeadline: new Date('2024-10-15').getTime(), // 3 weeks before election
-        type: ElectionType.official,
-        ballotDeadline: new Date('2024-10-22').getTime() // 2 weeks before election
-      },
-      current: {
-        electionId: 'utah-general-2024',
-        revision: 1,
-        revisionTimestamp: [new Date().getTime()],
-        tags: ['general', 'state', '2024'],
-        instructions: `# Utah General Election 2024
+	constructor(confirmationState?: MockBallotConfirmationState) {
+		this.confirmationState = confirmationState ?? new MockBallotConfirmationState();
+	}
 
-This election will determine various state and local offices in Utah, including:
-- Governor
-- State Legislature
-- Congressional Representatives
-- State Supreme Court Justices
-- Local County Officials
+	async getBallotDetails(id: string): Promise<BallotDetails> {
+		// Return the stored ballot if found; fall back to a safe stub so
+		// ElectionDetails/EditBallot do not crash on stale or unknown ids.
+		return {
+			ballot: this.ballots.find((b) => b.id === id) ?? {
+				id,
+				electionId: '',
+				authorityId: '',
+				description: '',
+				districts: [],
+				questions: [],
+			},
+		};
+	}
 
-Please review all candidates and measures carefully before voting.`,
-        keyholders: [
-          {
-            invite: {
-              name: 'Dr. Sarah Chen'
-            }
-          },
-          {
-            invite: {
-              name: 'Judge Michael Rodriguez'
-            },
-            result: {
-              isAccepted: false,
-              invitationSignature: 'mock-invitation-signature-2',
-              invokedId: 'mock-invoked-id-2'
-            }
-          },
-          {
-            invite: {
-              name: 'Prof. James Wilson'
-            },
-            result: {
-              isAccepted: true,
-              invitationSignature: 'mock-invitation-signature-3',
-              invokedId: 'mock-invoked-id-3'
-            }
-          }
-        ],
-        timeline: {
-          [ElectionEvent.registrationEnds]: new Date('2024-10-25').getTime(),
-          [ElectionEvent.ballotsFinal]: new Date('2024-10-15').getTime(),
-          [ElectionEvent.votingStarts]: new Date('2024-10-22').getTime(),
-          [ElectionEvent.tallyingStarts]: new Date(
-            '2024-11-05T20:00:00'
-          ).getTime(),
-          [ElectionEvent.validation]: new Date('2024-11-06').getTime(),
-          [ElectionEvent.certificationStarts]: new Date('2024-11-07').getTime(),
-          [ElectionEvent.closed]: new Date('2024-11-08').getTime()
-        },
-        keyholderThreshold: 3
-      }
-    }
+	async getBallots(): Promise<BallotSummary[]> {
+		return this.ballots.map(({ id, electionId, authorityId }) => ({
+			id,
+			electionId,
+			authorityId,
+		}));
+	}
 
-    return Promise.resolve(mockElection)
-  }
+	async getElectionDetails(): Promise<ElectionDetails> {
+		// All 5 D-06 milestone dates are non-null. Dates anchored to MOCK_NOW so
+		// the Timeline component (Phase 9 plan 09-01) resolves past/current/future
+		// status correctly at runtime.
+		const mockElection: ElectionDetails = {
+			election: {
+				id: 'election-2',
+				authorityId: 'auth-b',
+				title: 'Test Election 2 (Future)',
+				date: MOCK_NOW + 14 * MOCK_DAY_MS,
+				revisionDeadline: MOCK_NOW + 7 * MOCK_DAY_MS,
+				type: ElectionType.official,
+				ballotDeadline: MOCK_NOW + 5 * MOCK_DAY_MS,
+			},
+			current: {
+				electionId: 'election-2',
+				revision: 1,
+				// registrationStarts (synthetic) — used by Timeline as "Registration Opens"
+				revisionTimestamp: [MOCK_NOW - 3 * MOCK_DAY_MS],
+				tags: ['general', 'demo', '2026'],
+				instructions: '# Mock Election\n\nMock seed for the Phase 9 demo.',
+				keyholders: [
+					{
+						invite: { name: 'Dr. Sarah Chen' },
+					},
+					{
+						invite: { name: 'Judge Michael Rodriguez' },
+						result: {
+							isAccepted: false,
+							invitationSignature: 'mock-invitation-signature-2',
+							invokedId: 'mock-invoked-id-2',
+						},
+					},
+					{
+						invite: { name: 'Prof. James Wilson' },
+						result: {
+							isAccepted: true,
+							invitationSignature: 'mock-invitation-signature-3',
+							invokedId: 'mock-invoked-id-3',
+						},
+					},
+				],
+				timeline: {
+					// D-06 milestones (5) — all non-null per the plan's acceptance criteria:
+					//   registrationStarts (synthetic) is sourced from revisionTimestamp above.
+					[ElectionEvent.registrationEnds]: MOCK_NOW + 2 * MOCK_DAY_MS,
+					[ElectionEvent.ballotsFinal]: MOCK_NOW + 5 * MOCK_DAY_MS,
+					[ElectionEvent.votingStarts]: MOCK_NOW + 10 * MOCK_DAY_MS,
+					// votingEnds is rendered from tallyingStarts in the Timeline mapping.
+					[ElectionEvent.tallyingStarts]: MOCK_NOW + 14 * MOCK_DAY_MS,
+					[ElectionEvent.validation]: MOCK_NOW + 15 * MOCK_DAY_MS,
+					[ElectionEvent.certificationStarts]: MOCK_NOW + 16 * MOCK_DAY_MS,
+					[ElectionEvent.closed]: MOCK_NOW + 17 * MOCK_DAY_MS,
+				},
+				keyholderThreshold: 3,
+			},
+		};
 
-  async inviteKeyholder (
-    keyholder: KeyholderInvite,
-    electionId: string
-  ): Promise<void> {
-    throw new Error('Not implemented')
-  }
+		// No `proposed` revision is seeded: a freshly created election has not been
+		// revised, so the Proposed-Revision UI must stay hidden until a real
+		// proposed revision exists. (The blanket demo seed added in 09-15 made every
+		// election show a phantom revision — removed per UAT.)
+		return Promise.resolve(mockElection);
+	}
 
-  async proposeBallot (ballot: Ballot): Promise<void> {
-    throw new Error('Not implemented')
-  }
+	async inviteKeyholder(
+		_keyholder: KeyholderInvite,
+		_electionId: string,
+		_signatureOrCallback: Signature | ((digest: Uint8Array) => Promise<Signature>),
+	): Promise<void> {
+		return Promise.resolve();
+	}
 
-  async proposeRevision (revision: ElectionRevisionInit): Promise<void> {
-    throw new Error('Not implemented')
-  }
+	async proposeBallot(ballot: Ballot): Promise<void> {
+		const idx = this.ballots.findIndex((b) => b.id === ballot.id);
+		if (idx >= 0) {
+			this.ballots[idx] = ballot;
+		} else {
+			this.ballots.push(ballot);
+		}
+	}
 
-  async revokeKeyholder (
-    keyholder: KeyholderInvite,
-    electionId: string
-  ): Promise<void> {
-    throw new Error('Not implemented')
-  }
+	async proposeRevision(_revision: ElectionRevisionInit): Promise<void> {
+		throw new FeatureNotAvailableError('proposeRevision is not available in the mock engine');
+	}
 
-  buildProposeBallot (): IElectionProposeBallotBuilder {
-    return new ElectionProposeBallotBuilder(this)
-  }
+	async revokeKeyholder(
+		_keyholder: KeyholderInvite,
+		_electionId: string,
+	): Promise<void> {
+		throw new FeatureNotAvailableError('revokeKeyholder is not available in the mock engine');
+	}
 
-  buildProposeRevision (): IElectionProposeRevisionBuilder {
-    return new ElectionProposeRevisionBuilder(this)
-  }
+	// ---------- confirm-path (D-10 mock parity, 31-04) ----------
+	// Real in-memory behavior mirroring the real engine's submit → confirm → finalize → withdraw flow.
 
-  buildInviteKeyholder (): IElectionInviteKeyholderBuilder {
-    return new ElectionInviteKeyholderBuilder(this)
-  }
+	async submitBallotForConfirmation(ballotId: string): Promise<void> {
+		const current = this.confirmationState.get(ballotId);
+		if (current === 'submitted') {
+			throw new Error(`Ballot ${ballotId} is already submitted for confirmation`);
+		}
+		if (current === 'confirmed') {
+			throw new Error(`Ballot ${ballotId} is already confirmed`);
+		}
+		// D-04 parity: ProposedBallot (this.ballots entry) is retained — only the state flag changes.
+		this.confirmationState.set(ballotId, 'submitted');
+	}
 
-  buildRevokeKeyholder (): IElectionRevokeKeyholderBuilder {
-    return new ElectionRevokeKeyholderBuilder(this)
-  }
+	async withdrawBallotConfirmation(ballotId: string): Promise<void> {
+		const current = this.confirmationState.get(ballotId);
+		if (current !== 'submitted') {
+			throw new Error(`Ballot ${ballotId} is not currently submitted (state: ${current})`);
+		}
+		this.confirmationState.set(ballotId, 'proposed');
+	}
+
+	async getBallotConfirmationState(ballotId: string): Promise<{ locked: boolean; confirmed: boolean }> {
+		const state = this.confirmationState.get(ballotId);
+		return {
+			locked: state === 'submitted',
+			confirmed: state === 'confirmed',
+		};
+	}
+
+	/**
+	 * markBallotConfirmed — called by MockSignatureTasksEngine.completeSignature
+	 * when a ballot task is accepted (simulating real finalizeBallot).
+	 * D-04: ProposedBallot is retained in this.ballots after confirm.
+	 */
+	markBallotConfirmed(ballotId: string): void {
+		this.confirmationState.set(ballotId, 'confirmed');
+	}
+
+	buildProposeBallot(): IElectionProposeBallotBuilder {
+		return new ElectionProposeBallotBuilder(this);
+	}
+
+	buildProposeRevision(): IElectionProposeRevisionBuilder {
+		return new ElectionProposeRevisionBuilder(this);
+	}
+
+	buildInviteKeyholder(): IElectionInviteKeyholderBuilder {
+		return new ElectionInviteKeyholderBuilder(this);
+	}
+
+	buildRevokeKeyholder(): IElectionRevokeKeyholderBuilder {
+		return new ElectionRevokeKeyholderBuilder(this);
+	}
 }

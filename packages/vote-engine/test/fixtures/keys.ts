@@ -9,8 +9,8 @@
 // 66-char hex encoding of the corresponding 33-byte compressed public
 // key.
 
-import { bytesToHex } from '@noble/curves/abstract/utils'
-import { secp256k1 } from '@noble/curves/secp256k1'
+import { bytesToHex } from '@noble/curves/utils.js'
+import { secp256k1 } from '@noble/curves/secp256k1.js'
 
 export interface TestKeyPair {
   /** Hex-encoded secp256k1 private key (64 chars, 32 bytes). */
