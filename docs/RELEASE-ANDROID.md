@@ -71,12 +71,23 @@ Organization secrets are **not available** on this account, so nothing in the
 workflow may rely on them — every secret must be created individually on this
 repository.
 
+> **Fastest path:** run `~/.votetorrent/release-keys/set-github-secrets.sh`. It sets
+> all eight in one go, reading the Voting credentials from `voting.env`, prompting for
+> the Authority password (never stored on disk), and proving both passwords with
+> `keytool -list` before uploading anything.
+>
+> **Setting Actions secrets requires ADMIN on the repo.** As of 2026-08-03 the
+> `aarashrestha` account has only `READ` on `gotchoices/votetorrent`, so both the
+> script and any direct `gh secret set` fail with HTTP 403. Run it from an account with
+> admin (`gh auth switch`) or hand it to the repo owner. The table below is the manual
+> fallback.
+
 | Secret | App | Source |
 |---|---|---|
-| `VOTING_KEYSTORE_BASE64` | Voting | base64 of the Voting release keystore (see section 4) |
-| `VOTING_KEYSTORE_PASSWORD` | Voting | user's password manager |
-| `VOTING_KEY_ALIAS` | Voting | keytool alias, e.g. `org.votetorrent.voting` |
-| `VOTING_KEY_PASSWORD` | Voting | user's password manager |
+| `VOTING_KEYSTORE_BASE64` | Voting | base64 of `~/.votetorrent/release-keys/voting-release.keystore` (see section 4) |
+| `VOTING_KEYSTORE_PASSWORD` | Voting | `~/.votetorrent/release-keys/voting.env` |
+| `VOTING_KEY_ALIAS` | Voting | `org.votetorrent.voting` |
+| `VOTING_KEY_PASSWORD` | Voting | `~/.votetorrent/release-keys/voting.env` (same as store password) |
 | `AUTHORITY_KEYSTORE_BASE64` | Authority | base64 of `apps/VoteTorrentAuthority/android/app/release.keystore` (rotated 2026-07-30, untracked) |
 | `AUTHORITY_KEYSTORE_PASSWORD` | Authority | user's password manager |
 | `AUTHORITY_KEY_ALIAS` | Authority | `org.votetorrent.authority` |
@@ -108,13 +119,32 @@ gh secret set AUTHORITY_KEYSTORE_BASE64 --repo gotchoices/votetorrent \
   < <(base64 -i apps/VoteTorrentAuthority/android/app/release.keystore)
 ```
 
-## 4. Creating a Voting keystore
+## 4. The Voting keystore
 
-The Voting app does not have a release keystore yet. Generate one with:
+**Already generated (2026-08-03).** It lives outside the repo at
+`~/.votetorrent/release-keys/voting-release.keystore` (PKCS12, RSA-2048, alias
+`org.votetorrent.voting`, valid to 2053-12-19, cert SHA-256
+`5C:48:5C:01:F4:2D:34:B8:A9:36:82:DF:F3:5B:99:93:A0:7B:D9:F0:73:4D:54:C8:63:30:8B:C8:28:C8:2B:4E`).
+Its password is in `~/.votetorrent/release-keys/voting.env`; see
+`~/.votetorrent/release-keys/CREDENTIALS.md` for the full record. That directory is
+mode 700 and is **not** backed up automatically — back it up.
+
+To build a signed release locally:
+
+```bash
+cd apps/VoteTorrentVoting/android
+set -a; . ~/.votetorrent/release-keys/voting.env; set +a
+export VOTETORRENT_STORE_PASSWORD="$VOTING_KEYSTORE_PASSWORD"
+./gradlew assembleRelease
+```
+
+To regenerate from scratch (only if the existing key is lost — read the warning below
+first):
 
 ```bash
 keytool -genkeypair -v \
   -keystore release.keystore \
+  -storetype PKCS12 \
   -alias org.votetorrent.voting \
   -keyalg RSA -keysize 2048 -validity 10000
 ```
