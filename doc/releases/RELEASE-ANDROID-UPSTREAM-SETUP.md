@@ -1,12 +1,21 @@
 # Setting up Android release CI on `gotchoices/votetorrent`
 
-Handoff for a repository **admin** of `gotchoices/votetorrent`. The same pipeline is
-already running and fully validated on the `inspirions/votetorrent` fork; this brings it
+Handoff for a maintainer of `gotchoices/votetorrent`. The same pipeline is already
+running and fully validated on the `inspirions/votetorrent` fork; this brings it
 upstream.
 
-Everything here needs admin rights — setting Actions secrets is admin-only, and no
-organization-level secrets are involved (they were unavailable on the account that built
-this, so the workflow deliberately depends only on repository-level secrets).
+**Most of this needs only repository write access, not admin.** Setting Actions secrets
+is gated on collaborator access, so `gh secret set` works at write level — verified
+2026-08-03 by setting and deleting a throwaway secret with a non-admin account. The
+Settings **UI** for secrets is admin-only, which is a different thing and is easy to
+mistake for the API being admin-only.
+
+Exactly one step here requires an admin: **§4**, confirming Actions is enabled and that
+no org policy caps the workflow token. `GET /actions/permissions` returns 403 below
+admin.
+
+No organization-level secrets are involved (they were unavailable on the account that
+built this, so the workflow deliberately depends only on repository-level secrets).
 
 Budget ~30 minutes, plus one ~20-minute CI build to verify.
 
@@ -25,24 +34,54 @@ uninstall and reinstall. Losing a key is unrecoverable.
 | **A. Reuse the existing keys** | You want upstream releases to be upgrade-compatible with anything already distributed from the fork, or the Authority key is already the project's real identity | Someone must transfer two keystore files + their passwords to you over a secure channel (see below) |
 | **B. Generate fresh keys** | Upstream is the canonical channel starting now, and prior fork builds were throwaway test releases | Clean separation, no key handoff — but any APK already installed from the fork cannot update to an upstream build |
 
-As of 2026-08-03 the only releases ever published from the fork are `voting-v0.1.0` and
-`authority-v0.1.0`, both first-ever CI test builds. That argues for **B** for the Voting
-app. The **Authority** key is a different matter: it was deliberately rotated on
-2026-07-30 and may already be the project's real signing identity — check with the
-maintainer before replacing it.
+> **Decided 2026-08-03: option A, reuse the fork's keys** — for both apps. Upstream
+> releases stay upgrade-compatible with the APKs already distributed from the fork, and
+> the Authority key, deliberately rotated on 2026-07-30, remains the project's signing
+> identity rather than being replaced weeks later.
 
-**If transferring keys (option A):** send the `.keystore` files and passwords through a
-password manager's secure-share, an encrypted archive over a separate channel, or in
-person. Never email, Slack, or paste them into an issue, PR, or chat. Never commit a
-keystore — `apps/*/android/.gitignore` blocks `*.keystore`, and that guard should not be
-overridden with `git add -f`.
+**Option A has a prerequisite that blocks everything downstream: the key handoff.**
+GitHub Actions secrets are write-only — once `VOTING_KEYSTORE_BASE64` is set on the fork,
+no API call, workflow, or repository admin can read it back, and a published APK carries
+only the public certificate, not the private key. There is no way to copy the fork's
+secrets to upstream through GitHub. The keystore *files* and their passwords must come
+from whoever holds them:
+
+| Credential | Held at | Holder |
+|---|---|---|
+| Voting keystore + password | `~/.votetorrent/release-keys/` (`voting-release.keystore`, `voting.env`, `CREDENTIALS.md`) | the machine that generated them on 2026-08-03 |
+| Authority keystore | `apps/VoteTorrentAuthority/android/app/release.keystore`, gitignored and untracked | same machine |
+| Authority password | password manager | the maintainer who rotated the key |
+
+Known fingerprint to verify a Voting handoff against — the received keystore must print
+this under `keytool -list -v`:
+
+```
+5C:48:5C:01:F4:2D:34:B8:A9:36:82:DF:F3:5B:99:93:A0:7B:D9:F0:73:4D:54:C8:63:30:8B:C8:28:C8:2B:4E
+```
+
+**Transferring keys:** send the `.keystore` files and passwords through a password
+manager's secure-share, an encrypted archive over a separate channel, or in person.
+Never email, Slack, or paste them into an issue, PR, or chat. Never commit a keystore —
+`apps/*/android/.gitignore` blocks `*.keystore`, and that guard should not be overridden
+with `git add -f`.
+
+If the handoff turns out to be impossible — the holder is unreachable, or the Voting key
+was genuinely throwaway — fall back to **B** and regenerate per §2, accepting that
+anyone who installed a fork APK must uninstall before they can take an upstream build.
+As of 2026-08-03 the only releases ever published from the fork are `voting-v0.1.0` and
+`authority-v0.1.0`, both first-ever CI test builds, so the installed base that would
+break is small.
 
 ---
 
 ## 1. Get the workflow into the repo
 
-The workflow does not exist upstream yet. It arrives via a PR from the fork
-(`inspirions/votetorrent`), which contains:
+**Done on `gotchoices/votetorrent` as of 2026-08-03** — landed on `develop` via #18 and
+promoted to `master` via #19. `.github/workflows/release-android.yml` is on the default
+branch and registers in the Actions tab as *"Release Android APKs"* (`state: active`),
+which also confirms Actions is enabled on the repository.
+
+The set that has to travel together, if you are doing this on another repository:
 
 ```
 .github/workflows/release-android.yml          the workflow
@@ -51,7 +90,7 @@ apps/VoteTorrentVoting/android/.gitignore       blocks committing a keystore
 doc/releases/RELEASE-ANDROID.md                         the operating runbook
 ```
 
-Merge that PR into your default branch **before** the tag push in step 5.
+Merge it into your default branch **before** the tag push in step 5.
 
 Two things to know about branch placement:
 
@@ -109,8 +148,8 @@ recovery from a lost release key.
 
 ## 3. Set the eight repository secrets
 
-All eight are **repository-level**: Settings → Secrets and variables → Actions → *New
-repository secret*. Or via `gh`:
+All eight are **repository-level**. Either Settings → Secrets and variables → Actions →
+*New repository secret* (that page needs admin), or via `gh`, which needs only write:
 
 ```bash
 REPO=gotchoices/votetorrent
@@ -165,15 +204,28 @@ rm -f /tmp/rt.keystore
 
 ---
 
-## 4. Confirm Actions is enabled
+## 4. Confirm Actions is enabled — the one admin-only step
 
 ```bash
 gh api repos/gotchoices/votetorrent/actions/permissions
 ```
 
-Expect `"enabled": true`. The workflow uses only first-party `actions/*` at major-version
-tags plus the runner's preinstalled `gh` CLI, so an `allowed_actions` policy restricted to
-GitHub-owned actions is sufficient — no third-party allowlisting needed.
+Expect `"enabled": true`. **This endpoint returns 403 below admin**, so a write-level
+maintainer cannot run it. There is a usable proxy that works at write level: once the
+workflow is on the default branch, check that it registered.
+
+```bash
+gh api repos/gotchoices/votetorrent/actions/workflows --jq '.workflows[] | {name, state}'
+```
+
+A workflow appearing with `"state": "active"` means Actions is enabled — a disabled
+repository registers nothing. On `gotchoices/votetorrent` this returned *"Release Android
+APKs"*, `active`, on 2026-08-03. What the proxy does **not** tell you is the
+`allowed_actions` policy or the workflow-token cap below; only an admin can read those.
+
+The workflow uses only first-party `actions/*` at major-version tags plus the runner's
+preinstalled `gh` CLI, so an `allowed_actions` policy restricted to GitHub-owned actions
+is sufficient — no third-party allowlisting needed.
 
 The workflow declares `permissions: contents: write`, which it needs to create releases and
 push the rolling tags. If your org sets the default `GITHUB_TOKEN` permissions to
