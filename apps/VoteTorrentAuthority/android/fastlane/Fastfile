@@ -129,7 +129,7 @@ end
 # Returns the keystore type so callers can report it.
 def verify_keystore_credentials(store_file, store_password, key_alias, key_password)
   probe = run_quietly(
-    [resolve_java, File.join(FASTLANE_DIR, "VerifyKeystore.java"), store_file, key_alias],
+    [resolve_java, File.join(REPO_ROOT, "scripts", "VerifyKeystore.java"), store_file, key_alias],
     env: { "VT_STORE_PW" => store_password, "VT_KEY_PW" => key_password }
   )
   facts = probe[:output].scan(/^([A-Z_]+)=(.*)$/).to_h

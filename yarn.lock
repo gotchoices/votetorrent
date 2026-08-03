@@ -20969,9 +20969,9 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"votetorrent-voting@workspace:apps/VoteTorrentVoting":
+"votetorrent-voter@workspace:apps/VoteTorrentVoter":
   version: 0.0.0-use.local
-  resolution: "votetorrent-voting@workspace:apps/VoteTorrentVoting"
+  resolution: "votetorrent-voter@workspace:apps/VoteTorrentVoter"
   dependencies:
     "@babel/core": "npm:^7.25.2"
     "@babel/preset-env": "npm:^7.25.3"

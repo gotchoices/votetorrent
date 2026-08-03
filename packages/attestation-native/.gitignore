@@ -1,4 +1,4 @@
-# Android/Gradle build artifacts (mirrors apps/VoteTorrentVoting/.gitignore) — this
+# Android/Gradle build artifacts (mirrors apps/VoteTorrentVoter/.gitignore) — this
 # package gained its own android/ subtree in 45-01; keep generated output untracked.
 android/build/
 android/.gradle/

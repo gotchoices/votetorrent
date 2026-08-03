@@ -4,7 +4,7 @@ on:
   push:
     tags:
       - 'v*'
-      - 'voting-v*'
+      - 'voter-v*'
       - 'authority-v*'
   workflow_dispatch:
     inputs:
@@ -13,7 +13,7 @@ on:
         type: choice
         options:
           - both
-          - voting
+          - voter
           - authority
         default: both
 
@@ -43,7 +43,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          VOTING_JSON='{"name":"voting","dir":"apps/VoteTorrentVoting","slug":"votetorrent-voting","secret_prefix":"VOTING","rolling_tag":"latest-voting","title":"Voting"}'
+          VOTER_JSON='{"name":"voter","dir":"apps/VoteTorrentVoter","slug":"votetorrent-voter","secret_prefix":"VOTER","rolling_tag":"latest-voter","title":"Voter"}'
           AUTHORITY_JSON='{"name":"authority","dir":"apps/VoteTorrentAuthority","slug":"votetorrent-authority","secret_prefix":"AUTHORITY","rolling_tag":"latest-authority","title":"Authority"}'
 
           if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
@@ -54,12 +54,12 @@ jobs:
             TAG="$REF_NAME"
             IS_TAG="true"
             # TRAP: prefixed forms MUST be tested before the bare v* branch, or
-            # 'v*' (which also matches voting-v0.1.0 / authority-v0.1.0 as a glob)
+            # 'v*' (which also matches voter-v0.1.0 / authority-v0.1.0 as a glob)
             # would misclassify a single-app release as "both".
             case "$TAG" in
-              voting-v*)
-                SELECTION="voting"
-                VERSION="${TAG#voting-v}"
+              voter-v*)
+                SELECTION="voter"
+                VERSION="${TAG#voter-v}"
                 ;;
               authority-v*)
                 SELECTION="authority"
@@ -70,7 +70,7 @@ jobs:
                 VERSION="${TAG#v}"
                 ;;
               *)
-                echo "::error::Unrecognized tag '$TAG' — expected v*, voting-v*, or authority-v*"
+                echo "::error::Unrecognized tag '$TAG' — expected v*, voter-v*, or authority-v*"
                 exit 1
                 ;;
             esac
@@ -78,16 +78,16 @@ jobs:
 
           case "$SELECTION" in
             both)
-              MATRIX="[${VOTING_JSON},${AUTHORITY_JSON}]"
+              MATRIX="[${VOTER_JSON},${AUTHORITY_JSON}]"
               ;;
-            voting)
-              MATRIX="[${VOTING_JSON}]"
+            voter)
+              MATRIX="[${VOTER_JSON}]"
               ;;
             authority)
               MATRIX="[${AUTHORITY_JSON}]"
               ;;
             *)
-              echo "::error::Unknown app selection '$SELECTION' — expected both, voting, or authority"
+              echo "::error::Unknown app selection '$SELECTION' — expected both, voter, or authority"
               exit 1
               ;;
           esac
@@ -163,69 +163,92 @@ jobs:
           yes | "$SDKMANAGER" --licenses >/dev/null || true
           "$SDKMANAGER" --install "platforms;android-35" "build-tools;35.0.0" "ndk;27.1.12297006"
 
-      # D-06 gate 1: fail loudly and immediately if a required secret is missing,
+      # Both apps' keys live in ONE keystore, so KEYSTORE_BASE64_VOTETORRENT and
+      # PASSWORD_STORE_VOTETORRENT are shared; only the key password is per-app.
+      # Secret names deliberately match the local env var names exactly (see
+      # apps/VoteTorrentAuthority/BUILD-RELEASE.md), so there is no translation
+      # layer between what you export in a shell and what CI reads.
+      #
+      # Gate 1: fail loudly and immediately if a required secret is missing,
       # rather than discovering it after a 20-minute gradle build.
       - name: Signing preflight
         env:
-          KEYSTORE_BASE64: ${{ secrets[format('{0}_KEYSTORE_BASE64', matrix.app.secret_prefix)] }}
-          KEYSTORE_PASSWORD: ${{ secrets[format('{0}_KEYSTORE_PASSWORD', matrix.app.secret_prefix)] }}
-          KEY_PASSWORD: ${{ secrets[format('{0}_KEY_PASSWORD', matrix.app.secret_prefix)] }}
+          KEYSTORE_BASE64_VOTETORRENT: ${{ secrets.KEYSTORE_BASE64_VOTETORRENT }}
+          PASSWORD_STORE_VOTETORRENT: ${{ secrets.PASSWORD_STORE_VOTETORRENT }}
+          KEY_PASSWORD: ${{ secrets[format('PASSWORD_KEY_{0}', matrix.app.secret_prefix)] }}
         run: |
           set -euo pipefail
           FAIL=0
-          if [ -z "$KEYSTORE_BASE64" ]; then
-            echo "::error::Missing repository secret ${{ matrix.app.secret_prefix }}_KEYSTORE_BASE64 — see doc/releases/RELEASE-ANDROID.md"
+          if [ -z "$KEYSTORE_BASE64_VOTETORRENT" ]; then
+            echo "::error::Missing repository secret KEYSTORE_BASE64_VOTETORRENT — see doc/releases/RELEASE-ANDROID.md"
             FAIL=1
           fi
-          if [ -z "$KEYSTORE_PASSWORD" ]; then
-            echo "::error::Missing repository secret ${{ matrix.app.secret_prefix }}_KEYSTORE_PASSWORD — see doc/releases/RELEASE-ANDROID.md"
+          if [ -z "$PASSWORD_STORE_VOTETORRENT" ]; then
+            echo "::error::Missing repository secret PASSWORD_STORE_VOTETORRENT — see doc/releases/RELEASE-ANDROID.md"
             FAIL=1
           fi
           if [ -z "$KEY_PASSWORD" ]; then
-            echo "::error::Missing repository secret ${{ matrix.app.secret_prefix }}_KEY_PASSWORD — see doc/releases/RELEASE-ANDROID.md"
+            echo "::error::Missing repository secret PASSWORD_KEY_${{ matrix.app.secret_prefix }} — see doc/releases/RELEASE-ANDROID.md"
             FAIL=1
           fi
           if [ "$FAIL" -ne 0 ]; then
             exit 1
           fi
 
-      # D-06 gate 2: prove the password/keystore pair is correct before the build.
+      # Gate 2: prove BOTH passwords open the key before the build, using the
+      # same KeyStore API the Android Gradle Plugin uses.
+      #
+      # This deliberately does NOT use `keytool`: on a PKCS12 keystore keytool
+      # discards -keypass and substitutes the store password (JDK-8008292, Won't
+      # Fix), so `keytool -list` proves nothing about the key password and can
+      # even fail outright on a keystore that gradle signs with perfectly well.
       - name: Decode and prove keystore
         env:
-          KEYSTORE_BASE64: ${{ secrets[format('{0}_KEYSTORE_BASE64', matrix.app.secret_prefix)] }}
-          STORE_PASSWORD: ${{ secrets[format('{0}_KEYSTORE_PASSWORD', matrix.app.secret_prefix)] }}
-          KEY_ALIAS: ${{ secrets[format('{0}_KEY_ALIAS', matrix.app.secret_prefix)] }}
+          KEYSTORE_BASE64_VOTETORRENT: ${{ secrets.KEYSTORE_BASE64_VOTETORRENT }}
+          VT_STORE_PW: ${{ secrets.PASSWORD_STORE_VOTETORRENT }}
+          VT_KEY_PW: ${{ secrets[format('PASSWORD_KEY_{0}', matrix.app.secret_prefix)] }}
+          KEY_ALIAS: ${{ secrets[format('KEY_ALIAS_{0}', matrix.app.secret_prefix)] }}
+          DEFAULT_ALIAS: org.votetorrent.${{ matrix.app.name }}
         run: |
           set -euo pipefail
           KEYSTORE_PATH="${{ matrix.app.dir }}/android/app/release.keystore"
-          echo "$KEYSTORE_BASE64" | base64 -d > "$KEYSTORE_PATH"
+          echo "$KEYSTORE_BASE64_VOTETORRENT" | base64 -d > "$KEYSTORE_PATH"
           if [ ! -s "$KEYSTORE_PATH" ]; then
-            echo "::error::Decoded keystore for ${{ matrix.app.name }} is empty — check the ${{ matrix.app.secret_prefix }}_KEYSTORE_BASE64 secret"
+            echo "::error::Decoded keystore is empty — check the KEYSTORE_BASE64_VOTETORRENT secret"
             exit 1
           fi
-          if [ -n "$KEY_ALIAS" ]; then
-            KEYTOOL_CMD=(keytool -list -keystore "$KEYSTORE_PATH" -storepass "$STORE_PASSWORD" -alias "$KEY_ALIAS")
-          else
-            KEYTOOL_CMD=(keytool -list -keystore "$KEYSTORE_PATH" -storepass "$STORE_PASSWORD")
+          ALIAS="${KEY_ALIAS:-$DEFAULT_ALIAS}"
+          FACTS=$(java scripts/VerifyKeystore.java "$KEYSTORE_PATH" "$ALIAS")
+          echo "$FACTS" | grep -E '^(TYPE|ALIASES)=' || true
+          if ! echo "$FACTS" | grep -q '^STORE_OK=1$'; then
+            echo "::error::Wrong PASSWORD_STORE_VOTETORRENT, or the decoded file is not a keystore"
+            exit 1
           fi
-          if ! "${KEYTOOL_CMD[@]}" >/dev/null 2>&1; then
-            echo "::error::keytool could not open the ${{ matrix.app.name }} keystore — wrong ${{ matrix.app.secret_prefix }}_KEYSTORE_PASSWORD or ${{ matrix.app.secret_prefix }}_KEY_ALIAS, see doc/releases/RELEASE-ANDROID.md"
+          if ! echo "$FACTS" | grep -q '^ALIAS_OK=1$'; then
+            echo "::error::Alias '$ALIAS' is not in the keystore — set KEY_ALIAS_${{ matrix.app.secret_prefix }}"
+            exit 1
+          fi
+          if ! echo "$FACTS" | grep -q '^KEY_OK=1$'; then
+            if echo "$FACTS" | grep -q '^KEY_OPENS_WITH_STORE_PW=1$'; then
+              echo "::error::The '$ALIAS' key is encrypted with the STORE password — set PASSWORD_KEY_${{ matrix.app.secret_prefix }} to the same value as PASSWORD_STORE_VOTETORRENT"
+            else
+              echo "::error::Wrong PASSWORD_KEY_${{ matrix.app.secret_prefix }} for alias '$ALIAS'"
+            fi
             exit 1
           fi
 
-      # D-03: both apps' key env pairs are set unconditionally to the same
-      # resolved secret values. Each gradle file reads only its own pair, and
-      # only ONE gradle file is ever invoked per matrix job, so no per-app
-      # conditional is needed here.
+      # Both apps' key env pairs are set unconditionally. Each gradle file reads
+      # only its own pair, and only ONE gradle file runs per matrix job, so no
+      # per-app conditional is needed here.
       - name: Build release APK
         working-directory: ${{ matrix.app.dir }}/android
         env:
           STORE_FILE_VOTETORRENT: release.keystore
-          PASSWORD_STORE_VOTETORRENT: ${{ secrets[format('{0}_KEYSTORE_PASSWORD', matrix.app.secret_prefix)] }}
-          KEY_ALIAS_AUTHORITY: ${{ secrets[format('{0}_KEY_ALIAS', matrix.app.secret_prefix)] }}
-          PASSWORD_KEY_AUTHORITY: ${{ secrets[format('{0}_KEY_PASSWORD', matrix.app.secret_prefix)] }}
-          KEY_ALIAS_VOTER: ${{ secrets[format('{0}_KEY_ALIAS', matrix.app.secret_prefix)] }}
-          PASSWORD_KEY_VOTER: ${{ secrets[format('{0}_KEY_PASSWORD', matrix.app.secret_prefix)] }}
+          PASSWORD_STORE_VOTETORRENT: ${{ secrets.PASSWORD_STORE_VOTETORRENT }}
+          KEY_ALIAS_AUTHORITY: ${{ secrets.KEY_ALIAS_AUTHORITY }}
+          PASSWORD_KEY_AUTHORITY: ${{ secrets.PASSWORD_KEY_AUTHORITY }}
+          KEY_ALIAS_VOTER: ${{ secrets.KEY_ALIAS_VOTER }}
+          PASSWORD_KEY_VOTER: ${{ secrets.PASSWORD_KEY_VOTER }}
         run: ./gradlew assembleRelease --no-daemon --console=plain
 
       # D-06 gate 3: never publish a debug-signed APK, even if a secret was

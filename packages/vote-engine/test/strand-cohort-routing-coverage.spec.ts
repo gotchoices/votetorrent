@@ -260,7 +260,7 @@ function resolveDbP2pNodeBase (): string | undefined {
   const candidates = [
     join(REPO_ROOT, 'packages', 'p2p-probe-host'),
     join(REPO_ROOT, 'apps', 'VoteTorrentAuthority'),
-    join(REPO_ROOT, 'apps', 'VoteTorrentVoting'),
+    join(REPO_ROOT, 'apps', 'VoteTorrentVoter'),
     REPO_ROOT,
   ]
   for (const base of candidates) {

@@ -170,7 +170,7 @@ const multiaddrConvertV12 = path.resolve(
 // CJS UMD build (`tslib/tslib.js`), which exports all helpers as plain functions on the module
 // object regardless of how the caller destructures them. Package/symbol-agnostic on purpose.
 // Do NOT delete this branch; removing it reopens the on-device crash.
-// Ported from apps/VoteTorrentVoting/metro.config.js (44-09, D-04).
+// Ported from apps/VoteTorrentVoter/metro.config.js (44-09, D-04).
 const tslibUmdPath = require.resolve("tslib/tslib.js", { paths: nodeModulesPaths });
 
 // Wrap resolveRequest to apply the @multiformats/multiaddr/convert redirect, the tslib

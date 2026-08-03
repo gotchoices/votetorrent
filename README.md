@@ -42,8 +42,8 @@ Signed Android release APKs are built by CI and published to permanent
 per-app download links — see [doc/releases/RELEASE-ANDROID.md](doc/releases/RELEASE-ANDROID.md)
 for the release process and repository secret setup.
 
-* [Voting APK (latest)](https://github.com/inspirions/votetorrent/releases/download/latest-voting/votetorrent-voting-latest.apk)
-* [Authority APK (latest)](https://github.com/inspirions/votetorrent/releases/download/latest-authority/votetorrent-authority-latest.apk)
+* [Voter APK (latest)](https://github.com/gotchoices/votetorrent/releases/download/latest-voter/votetorrent-voter-latest.apk)
+* [Authority APK (latest)](https://github.com/gotchoices/votetorrent/releases/download/latest-authority/votetorrent-authority-latest.apk)
 
 ## Contributing
 

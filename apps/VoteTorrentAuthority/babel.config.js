@@ -7,6 +7,6 @@ module.exports = {
   // packages/vote-engine/node_modules/@peculiar/utils/build/esm/encoding/index.js) —
   // a release-bundle build failure that the jest suite never exercises (own transform).
   // Listing the plugin explicitly guarantees it runs before Metro's import-export
-  // transform. Mirrors apps/VoteTorrentVoting/babel.config.js.
+  // transform. Mirrors apps/VoteTorrentVoter/babel.config.js.
   plugins: ['@babel/plugin-transform-export-namespace-from'],
 };
