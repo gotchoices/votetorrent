@@ -6,6 +6,8 @@ import { ExtendedTheme, useTheme } from "@react-navigation/native";
 interface FullButtonProps {
 	title: string;
 	icon?: string;
+	/** Optional trailing glyph pinned to the right edge (e.g. SELECT's network symbol). */
+	rightIcon?: string;
 	disabled?: boolean;
 	backgroundColor?: string;
 	forceDarkText?: boolean;
@@ -17,6 +19,7 @@ interface FullButtonProps {
 export function CustomButton({
 	title,
 	icon,
+	rightIcon,
 	disabled = false,
 	backgroundColor,
 	forceDarkText,
@@ -27,7 +30,7 @@ export function CustomButton({
 	const { colors } = useTheme() as ExtendedTheme;
 	const buttonColor = backgroundColor ?? colors.accent;
 	let textColor = forceDarkText ? colors.dark : colors.text;
-	if (backgroundColor && (backgroundColor === colors.success || backgroundColor === colors.error)) {
+	if (backgroundColor && (backgroundColor === colors.success || backgroundColor === colors.error || backgroundColor === colors.primary)) {
 		textColor = colors.light;
 	}
 
@@ -47,6 +50,11 @@ export function CustomButton({
 				{icon && <FontAwesome6 name={icon} size={20} color={textColor} />}
 				<ThemedText style={[styles.text, { color: textColor }]}>{title.toUpperCase()}</ThemedText>
 			</View>
+			{rightIcon && (
+				<View style={styles.rightIconWrap} pointerEvents="none">
+					<FontAwesome6 name={rightIcon} size={20} color={textColor} />
+				</View>
+			)}
 		</TouchableOpacity>
 	);
 }
@@ -56,23 +64,35 @@ const styles = StyleSheet.create({
 		borderRadius: 32,
 		marginVertical: 8,
 		marginHorizontal: 4,
+		alignItems: "center",
+		justifyContent: "center",
 	},
 	buttonContent: {
 		flexDirection: "row",
 		alignItems: "center",
 		justifyContent: "center",
 		gap: 12,
+		minHeight: 24,
 	},
 	disabled: {
 		opacity: 0.5,
 	},
 	flex: {
 		flex: 1,
+		alignSelf: "stretch",
 	},
 	text: {
 		fontSize: 16,
 		fontWeight: "600",
 		textAlign: "center",
+		flexShrink: 1,
+	},
+	rightIconWrap: {
+		position: "absolute",
+		right: 16,
+		top: 0,
+		bottom: 0,
+		justifyContent: "center",
 	},
 	tall: {
 		paddingVertical: 16,

@@ -2,9 +2,7 @@ import { MisuseError, QuereusError } from '@quereus/quereus'
 import type { EngineContext } from '../types.js'
 import type { IOnboardingTasksEngine, IOnboardingTasksSetOnboardingTaskCompletedBuilder } from '@votetorrent/vote-core'
 import { SetOnboardingTaskCompletedBuilder } from './builders/index.js'
-
-// Phase 05 TASK-05/06 — monotonic Tid counter for OnboardingTasksEngine.
-let nextTid = 1
+import { allocateTid } from '../database/tid-allocator.js'
 
 /**
  * OnboardingTasksEngine — Phase 05 (TASK-05, TASK-06) implementation.
@@ -52,7 +50,7 @@ export class OnboardingTasksEngine implements IOnboardingTasksEngine {
    */
   async setOnboardingTaskCompleted (taskId: string): Promise<void> {
     this.requireCtx('setOnboardingTaskCompleted')
-    const tid = nextTid++
+    const tid = await allocateTid(this.ctx!.db, 'onboarding-tasks')
     try {
       await this.ctx!.db.exec(
 				`update Task

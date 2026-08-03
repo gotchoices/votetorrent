@@ -1,0 +1,8 @@
+{
+	"extends": "@react-native/typescript-config/tsconfig.json",
+	"compilerOptions": {
+		"outDir": "dist",
+		"types": ["react-native", "jest", "node"]
+	},
+	"include": ["src"]
+}

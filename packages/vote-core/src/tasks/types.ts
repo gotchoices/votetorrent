@@ -23,6 +23,16 @@ export interface ISignatureTasksEngine {
   ): Promise<void>
   getRequestedSignatures(pending: boolean): Promise<SignatureTask[]>
   buildCompleteSignature(): ISignatureTasksCompleteSignatureBuilder
+  /**
+   * D-03 — Return the engine-authoritative digest bytes for the pending task.
+   *
+   * Looks up the `AdminSigning.Digest` (base64url sha256) for the task's
+   * `SigningNonce` and returns the decoded bytes. The screen passes these bytes
+   * to the device-signer callback and never recomputes the canonical form itself.
+   *
+   * Throws a descriptive error when no pending task or no AdminSigning row exists.
+   */
+  getSignatureDigest(task: SignatureTask): Promise<Uint8Array>
 }
 
 export interface IOnboardingTasksSetOnboardingTaskCompletedBuilder extends IBuilder<string, void> {

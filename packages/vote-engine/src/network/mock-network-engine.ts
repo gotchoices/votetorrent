@@ -216,6 +216,15 @@ export class MockNetworkEngine implements INetworkEngine {
     return [...this.pinnedAuthorities]
   }
 
+  /**
+   * D-15 (Phase 8 NETUI-05): static mock network statistics. Returns the same
+   * pair of fixed numbers regardless of network identity — UI-parity only,
+   * no real telemetry.
+   */
+  async getStatistics (): Promise<{ estimatedNodes: number; serverCount: number }> {
+    return { estimatedNodes: 42, serverCount: 12 }
+  }
+
   async getProposedElections (): Promise<Array<Proposal<ElectionInit>>> {
     throw new Error(
       'MockNetworkEngine: getProposedElections is not implemented.'
@@ -285,6 +294,23 @@ export class MockNetworkEngine implements INetworkEngine {
         'Proposing revisions is only mocked for the Utah State Network in this engine.'
       )
     }
+  }
+
+  async cancelRevision (name: string, revision: number): Promise<void> {
+    console.log(
+      'MockNetworkEngine: cancelRevision called for',
+      name,
+      revision
+    )
+  }
+
+  async resendRevision (name: string, revision: number): Promise<number> {
+    console.log(
+      'MockNetworkEngine: resendRevision called for',
+      name,
+      revision
+    )
+    return revision + 1
   }
 
   async respondToInvitation<TInvokes>(

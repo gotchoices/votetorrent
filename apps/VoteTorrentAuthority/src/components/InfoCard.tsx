@@ -4,6 +4,7 @@ import { Image, ImageSourcePropType, StyleSheet, TouchableOpacity, View } from "
 import FontAwesome6 from "react-native-vector-icons/FontAwesome6";
 import { ThemedText } from "./ThemedText";
 import { ExtendedTheme } from "@react-navigation/native";
+import { globalStyles } from "../theme/styles";
 
 interface InfoCardProps {
 	image?: ImageSourcePropType;
@@ -25,7 +26,7 @@ export function InfoCard({ image, title, subtitle, additionalInfo, icon, onPress
 			{image && <Image source={image} style={styles.image} />}
 			<View style={styles.content}>
 				{title && (
-					<ThemedText type="subtitle" numberOfLines={1}>
+					<ThemedText type="cardTitle" numberOfLines={1}>
 						{title}
 					</ThemedText>
 				)}
@@ -49,44 +50,34 @@ export function InfoCard({ image, title, subtitle, additionalInfo, icon, onPress
 						</View>
 					))}
 			</View>
-			{icon && <FontAwesome6 name={icon} size={16} color={colors.text} style={styles.icon} />}
+			{icon && <FontAwesome6 name={icon} size={20} color={colors.text} style={styles.icon} />}
 		</TouchableOpacity>
 	);
 }
 
 const styles = StyleSheet.create({
 	card: {
+		...globalStyles.cardSurface,
 		flexDirection: "row",
 		alignItems: "center",
-		padding: 12,
-		marginVertical: 8,
-		marginHorizontal: 4,
-		borderRadius: 12,
-		shadowColor: "#000",
-		shadowOffset: {
-			width: 0,
-			height: 2,
-		},
-		shadowOpacity: 0.1,
-		shadowRadius: 4,
-		elevation: 3,
 	},
 	image: {
-		width: 50,
-		height: 50,
+		width: 56,
+		height: 56,
+		borderRadius: 4,
 	},
 	content: {
 		flex: 1,
 		marginLeft: 16,
 		marginRight: 8,
-		paddingRight: 16,
+		paddingRight: 8,
 	},
 	infoText: {
 		flexDirection: "row",
 		alignItems: "center",
-		marginRight: 28,
+		marginTop: 2,
 	},
 	icon: {
-		marginLeft: 16,
+		marginLeft: 8,
 	},
 });

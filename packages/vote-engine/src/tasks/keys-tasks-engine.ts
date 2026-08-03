@@ -1,16 +1,19 @@
 import { MisuseError, QuereusError } from '@quereus/quereus'
+import { fromCanonicalDatetime, parseJsonOr, parseKeyholdersAsInviteStatus } from '../utils.js'
 import type { EngineContext } from '../types.js'
 import type {
+  ElectionCore,
   ElectionDetails,
+  ElectionEvent,
+  ElectionRevision,
+  ElectionType,
   IKeysTasksEngine,
   IKeysTasksCompleteKeyReleaseBuilder,
   NetworkReference,
   ReleaseKeyTask
 } from '@votetorrent/vote-core'
 import { CompleteKeyReleaseBuilder } from './builders/index.js'
-
-// Phase 05 TASK-01/02 — monotonic Tid counter for KeysTasksEngine batches.
-let nextTid = 1
+import { allocateTid } from '../database/tid-allocator.js'
 
 /**
  * KeysTasksEngine — Phase 05 (TASK-01, TASK-02) implementation.
@@ -32,9 +35,9 @@ export class KeysTasksEngine implements IKeysTasksEngine {
 
   /**
    * TASK-01 — query Task rows of `Type='release-key'` for the current
-   * user, joined to ReleaseKeyTaskExtension for the (electionId,
-   * electionRevision) detail. Returns an empty list when no ctx is
-   * bound (matches the mock contract).
+   * user, joined to ReleaseKeyTaskExtension and materialised with the
+   * full ElectionDetails (Election + ElectionRevision) and the network
+   * name so KeyTaskScreen can render without crashing on undefined fields.
    *
    * The `pending` flag filters on `Task.IsCompleted = false` when true,
    * mirroring the IKeysTasksEngine narrative.
@@ -44,6 +47,18 @@ export class KeysTasksEngine implements IKeysTasksEngine {
     const userId = this.ctx.user?.id ?? null
     const out: ReleaseKeyTask[] = []
     try {
+      // Resolve network name once — single Network row per DB.
+      const networkRow = await this.ctx.db
+        .prepare('select Name, Hash from Network limit 1')
+        .get({})
+      const networkRef: NetworkReference = {
+        ...this.networkRef,
+        name: (networkRow?.Name as string | undefined) ?? (this.networkRef as NetworkReference & { name?: string }).name ?? '',
+        primaryAuthorityDomainName: (this.networkRef as NetworkReference & { primaryAuthorityDomainName?: string }).primaryAuthorityDomainName ?? '',
+      }
+
+      // Collect base task rows first to avoid interleaving eval + prepare cursors.
+      const taskRows: Array<{ UserId: string; ElectionId: string; ElectionRevision: number }> = []
       for await (const row of this.ctx.db.eval(
 				`select T.UserId, R.ElectionId, R.ElectionRevision
 					from Task T join ReleaseKeyTaskExtension R on R.TaskId = T.Id
@@ -56,22 +71,91 @@ export class KeysTasksEngine implements IKeysTasksEngine {
           includeAll: pending ? 0 : 1
         }
       )) {
+        taskRows.push({
+          UserId: row.UserId as string,
+          ElectionId: row.ElectionId as string,
+          ElectionRevision: row.ElectionRevision as number,
+        })
+      }
+
+      for (const row of taskRows) {
+        // Materialise ElectionCore from Election table.
+        const elecRow = await this.ctx.db
+          .prepare(
+            `select Id, AuthorityId, Title, Date, RevisionDeadline, BallotDeadline, Type
+               from Election where Id = :id`
+          )
+          .get({ id: row.ElectionId })
+
+        // Materialise ElectionRevision from ElectionRevision table.
+        const revRow = await this.ctx.db
+          .prepare(
+            `select Revision, RevisionTimestamp, Tags, Instructions, Timeline, KeyholderThreshold, Keyholders
+               from ElectionRevision where ElectionId = :id and Revision = :revision`
+          )
+          .get({ id: row.ElectionId, revision: row.ElectionRevision })
+
+        // Build ElectionCore — fall back to minimal shape if Election row absent.
+        const electionCore: ElectionCore = elecRow
+          ? {
+              id: elecRow.Id as string,
+              authorityId: elecRow.AuthorityId as string,
+              title: elecRow.Title as string,
+              date: fromCanonicalDatetime(elecRow.Date as string),
+              revisionDeadline: fromCanonicalDatetime(elecRow.RevisionDeadline as string),
+              ballotDeadline: fromCanonicalDatetime(elecRow.BallotDeadline as string),
+              type: elecRow.Type as ElectionType,
+            }
+          : {
+              id: row.ElectionId,
+              authorityId: '',
+              title: '',
+              date: 0,
+              revisionDeadline: 0,
+              ballotDeadline: 0,
+              type: 'o' as ElectionType,
+            }
+
+        // Build ElectionRevision — fall back to empty-but-safe shape if revision absent.
+        const electionRevision: ElectionRevision = revRow
+          ? {
+              electionId: row.ElectionId,
+              revision: revRow.Revision as number,
+              revisionTimestamp: [fromCanonicalDatetime(revRow.RevisionTimestamp as string)],
+              tags: parseJsonOr<string[]>(revRow.Tags, [], 'ElectionRevision.Tags'),
+              instructions: (revRow.Instructions as string | undefined) ?? '',
+              // 39-02 D-04 Gap 2: read the persisted create-time keyholder invitees back.
+              keyholders: parseKeyholdersAsInviteStatus(revRow.Keyholders, 'ElectionRevision.Keyholders'),
+              timeline: parseJsonOr<Record<ElectionEvent, number>>(
+                revRow.Timeline,
+                {} as Record<ElectionEvent, number>,
+                'ElectionRevision.Timeline'
+              ),
+              keyholderThreshold: (revRow.KeyholderThreshold as number | undefined) ?? 1,
+            }
+          : {
+              electionId: row.ElectionId,
+              revision: row.ElectionRevision,
+              revisionTimestamp: [],
+              tags: [],
+              instructions: '',
+              // No revision row exists at all — legitimately empty (no
+              // literal hardcode; parsed via the shared helper for consistency).
+              keyholders: parseKeyholdersAsInviteStatus(undefined, 'ElectionRevision.Keyholders'),
+              timeline: {} as Record<ElectionEvent, number>,
+              keyholderThreshold: 1,
+            }
+
+        const election: ElectionDetails = {
+          election: electionCore,
+          current: electionRevision,
+        }
+
         out.push({
           type: 'release-key',
-          userId: row.UserId as string,
-          network: this.networkRef,
-          // ElectionDetails materialisation is deferred to Phase 6 / TEST-01;
-          // for now, return a minimal shape with just the election id so the
-          // task is identifiable. UI consumers should treat this as a
-          // lookup key and call ElectionEngine.getElectionDetails(id) for
-          // the full record.
-          election: {
-            election: {
-              id: row.ElectionId as string,
-              authorityId: ''
-            } as ElectionDetails['election'],
-            current: {} as ElectionDetails['current']
-          }
+          userId: row.UserId,
+          network: networkRef,
+          election,
         })
       }
       return out
@@ -90,7 +174,7 @@ export class KeysTasksEngine implements IKeysTasksEngine {
    */
   async completeKeyRelease (task: ReleaseKeyTask): Promise<void> {
     this.requireCtx('completeKeyRelease')
-    const tid = nextTid++
+    const tid = await allocateTid(this.ctx!.db, 'keys-tasks')
     try {
       await this.ctx!.db.exec(
 				`update Task
@@ -104,9 +188,11 @@ export class KeysTasksEngine implements IKeysTasksEngine {
         {
           userId: task.userId,
           electionId: task.election.election.id,
-          // The signing nonce is sourced from the AdminSignature row that
-          // gates the update. Today we forward null; Phase 6 / TEST-01
-          // tightens the API to accept it explicitly.
+          // SIGN-03: The Task.MutationValid gate is satisfied by context.IsMutationValid = true.
+          // The gating signing context (AdminSignature for the election) was verified at
+          // election-creation time and persists in AdminSignature; the release-key Task update
+          // does not need to re-present the signing nonce — the schema CHECK binds on
+          // IsMutationValid, not on a forwarded nonce.
         }
       )
     } catch (err) {

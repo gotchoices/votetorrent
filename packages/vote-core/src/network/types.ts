@@ -77,6 +77,11 @@ export interface INetworkEngine {
   getCurrentUser(): Promise<IUserEngine | undefined>
   getDetails(): Promise<NetworkDetails>
   getNetworkSummary(): Promise<NetworkSummary>
+  /**
+   * Returns network-wide statistics (D-15 / NETUI-05). Mock implementations
+   * return static values; real engines compute from live network telemetry.
+   */
+  getStatistics(): Promise<{ estimatedNodes: number; serverCount: number }>
   getPinnedAuthorities(): Promise<Authority[]>
   getProposedElections(): Promise<Array<Proposal<ElectionInit>>>
   getUser(userId: string): Promise<IUserEngine | undefined>
@@ -90,6 +95,20 @@ export interface INetworkEngine {
   ): Promise<IAuthorityEngine>
   pinAuthority(authority: Authority): Promise<void>
   proposeRevision(revision: NetworkRevision): Promise<void>
+  /**
+   * SURF-04: NON-signing. Withdraw a proposed network revision by writing an
+   * append-only `RevisionCancellation` marker keyed by (name, revision). The
+   * proposed-revision read filters cancelled proposals via `NOT EXISTS`; the
+   * `ProposedNetwork` row is never mutated or deleted (append-only audit
+   * consistency — NOT because ProposedNetwork forbids delete; it does not).
+   */
+  cancelRevision(name: string, revision: number): Promise<void>
+  /**
+   * SURF-04: NON-signing. Re-emit a fresh proposed network revision at
+   * `max(Revision)+1` for `name` (no auto-supersede — the cancelled/original
+   * proposals are untouched). Returns the new Revision number.
+   */
+  resendRevision(name: string, revision: number): Promise<number>
   respondToInvite<TInvokes>(
     invite: InviteAction<TInvokes>
   ): Promise<string>

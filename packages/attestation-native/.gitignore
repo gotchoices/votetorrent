@@ -1,0 +1,8 @@
+# Android/Gradle build artifacts (mirrors apps/VoteTorrentVoting/.gitignore) — this
+# package gained its own android/ subtree in 45-01; keep generated output untracked.
+android/build/
+android/.gradle/
+android/.cxx/
+android/local.properties
+*.iml
+.idea
