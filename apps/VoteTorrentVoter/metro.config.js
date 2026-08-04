@@ -22,9 +22,15 @@ const projectRoot = __dirname;
 const workspaceRoot = path.resolve(projectRoot, "../..");
 // The portal:./vendor/ consumption model was retired repo-wide (Phase 40) — the
 // @serfab/@optimystic packages are consumed PUBLISHED from node_modules. No vendor/
-// extraNodeModules alias is needed here. superRoot is retained only as a harmless watch
-// root for any remaining out-of-tree dev scenarios (parity with the authority app).
-const superRoot = path.resolve(projectRoot, "../../..");
+// extraNodeModules alias is needed here.
+//
+// A `superRoot` (= ../../.., i.e. the ser/ parent holding every sibling checkout) used to be
+// listed in watchFolders alongside workspaceRoot, described as "a harmless watch root". It was
+// not harmless. ser/ has no .git or .watchmanconfig, so watchman took ser/ ITSELF as the watch
+// root and crawled every sibling project — ~879k files vs ~316k for this repo alone — which
+// hung Metro at "waiting for watchman (query)". Nothing ever resolved through it (the vendor/
+// model it existed for is gone), so it is removed. Do not re-add it: if an out-of-tree package
+// is ever needed again, add that ONE directory, never the whole parent.
 const emptyShim = path.resolve(projectRoot, "polyfills/empty.js");
 
 // --- browser-field maps (load each package's `browser` field and redirect Node file
@@ -85,7 +91,7 @@ const libp2pCryptoBrowserMap = Object.assign(Object.create(null), libp2pCryptoMa
 
 const config = {
 	projectRoot,
-	watchFolders: [workspaceRoot, superRoot],
+	watchFolders: [workspaceRoot],
 	transformer: {
 		// Release (Hermes, minified) builds: PRESERVE function + class names.
 		// Terser's default mangle pass renames functions/classes, which breaks
