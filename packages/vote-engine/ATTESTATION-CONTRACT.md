@@ -2,7 +2,7 @@
 
 This document locks the exact byte/string form of the shared anti-relay binding
 value (D-06) that MUST be produced identically by the voter-app attestation
-producer (the not-yet-planned Phase-44 scope, `apps/VoteTorrentVoting`) and
+producer (the not-yet-planned Phase-44 scope, `apps/VoteTorrentVoter`) and
 consumed by this authority-side verifier (`packages/vote-engine/src/association/verifiers/*`).
 
 It resolves RESEARCH.md's Open Question 1 / Assumption A4 with a decision

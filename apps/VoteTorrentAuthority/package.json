@@ -11,6 +11,12 @@
 		"test": "jest",
 		"test:node": "jest --config jest.node.config.js",
 		"build": "bin/build.sh",
+		"verify:keystore": "cd android && bundle exec fastlane android verify_keystore",
+		"prepare:workspace": "cd android && bundle exec fastlane android prepare",
+		"build:debug": "cd android && bundle exec fastlane android build_debug",
+		"build:apk": "cd android && bundle exec fastlane android build_apk",
+		"build:apk:dev": "cd android && bundle exec fastlane android build_apk_dev",
+		"build:aab": "cd android && bundle exec fastlane android build_aab",
 		"clean": "rm -rf node_modules"
 	},
 	"dependencies": {

@@ -67,7 +67,7 @@ const REPO_ROOT = findRepoRoot()
 const CONSUMER_BASES = [
   join(REPO_ROOT, 'packages', 'p2p-probe-host'),
   join(REPO_ROOT, 'apps', 'VoteTorrentAuthority'),
-  join(REPO_ROOT, 'apps', 'VoteTorrentVoting'),
+  join(REPO_ROOT, 'apps', 'VoteTorrentVoter'),
   REPO_ROOT,
 ]
 

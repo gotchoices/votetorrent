@@ -20,7 +20,7 @@ explicitly deferred (D-10) — not blocking, not silently dropped.
 1. Sign in to the [Google Play Console](https://play.google.com/console) with
    the account that will own this app's listing.
 2. Create (or select) the app entry for the VoteTorrent voter app
-   (`apps/VoteTorrentVoting` — the voter-app producer target that will emit
+   (`apps/VoteTorrentVoter` — the voter-app producer target that will emit
    these tokens (see `ATTESTATION-CONTRACT.md` for the wire-format contract
    it must satisfy); note the
    authority side, `apps/VoteTorrentAuthority`, is the CONSUMER of the
@@ -234,13 +234,13 @@ verification deferred per D-10.
 ## 7. Voter-app producer setup (Play Integrity leg + on-device proof)
 
 This section covers what the **producer** side (the voter app,
-`apps/VoteTorrentVoting`) needs before the Pixel 8 on-device proof can pass
+`apps/VoteTorrentVoter`) needs before the Pixel 8 on-device proof can pass
 against the verifier documented in §§1-6 above. It is config + docs only —
 no verifier code changes.
 
 ### 7a. Play Console / Cloud prereqs for REAL Play Integrity
 
-The voter app (`apps/VoteTorrentVoting`, `applicationId com.votetorrentvoting`)
+The voter app (`apps/VoteTorrentVoter`, `applicationId org.votetorrent.voter`)
 must itself be registered on Play Console — on the **internal-testing
 track** — with the Play Integrity API enabled and its Cloud project linked,
 following the same flow as §1/§2 above (that registration is for the app
@@ -254,7 +254,7 @@ in §7b (deferred per D-01).
 
 An independent, `__DEV__`-gated JS proof-flag —
 `USE_STUB_PLAY_INTEGRITY`, in
-`apps/VoteTorrentVoting/src/engines/proof-flags.generated.ts` — feeds the
+`apps/VoteTorrentVoter/src/engines/proof-flags.generated.ts` — feeds the
 native `enablePlayIntegrity` gate. Committed default is `false` (real). The
 gate is `!(__DEV__ && USE_STUB_PLAY_INTEGRITY)`: a release build ALWAYS
 evaluates this to `true` regardless of the flag's committed or locally
@@ -262,7 +262,7 @@ edited value, so the flag can never weaken a release build — flipping it
 only ever affects a `__DEV__` build.
 
 This flag is **independent** of the overall `resolveAttestationProducer`
-stub gate (`apps/VoteTorrentVoting/src/engines/attestation-producer.ts`).
+stub gate (`apps/VoteTorrentVoter/src/engines/attestation-producer.ts`).
 Flipping `USE_STUB_PLAY_INTEGRITY` to `true` in a `__DEV__` build disables/
 stubs ONLY the Play Integrity leg — the hardware key-attestation leg still
 runs for real against the real Keystore/StrongBox/TEE. This is the
@@ -296,7 +296,7 @@ release build (rung 4), or a `__DEV__` build with `USE_REAL_ATTESTATION_PRODUCER
 `apps/VoteTorrentAuthority/src/engines/attestation-keys.generated.ts` pins
 the VOTER app's package name and signing-certificate digest (it is the
 producer's identity the verifier's WR-03 app-identity gate checks) — it
-MUST read `EXPECTED_APP_PACKAGE = 'com.votetorrentvoting'` with a populated
+MUST read `EXPECTED_APP_PACKAGE = 'org.votetorrent.voter'` with a populated
 `EXPECTED_APP_CERT_SHA256_DIGESTS` (not left as the Phase-43 placeholder
 `'org.votetorrent.authority'` with an empty digest array), or the Pixel 8
 proof fails the WR-03 app-identity gate before it ever reaches the
@@ -331,7 +331,7 @@ is dispositive that a stub, not real hardware, was exercised — use that
 same signature to sanity-check a proof run before trusting its result.
 
 **The recipe.** In
-`apps/VoteTorrentVoting/src/engines/proof-flags.generated.ts`, set BOTH:
+`apps/VoteTorrentVoter/src/engines/proof-flags.generated.ts`, set BOTH:
 
 ```ts
 export const USE_REAL_ATTESTATION_PRODUCER = true;
@@ -359,7 +359,7 @@ Add to §6's summary checklist:
 
 - [ ] Voter app registered on Play Console internal-testing track (§7a) —
       or deliberately deferred with `USE_STUB_PLAY_INTEGRITY` posture noted
-- [ ] `EXPECTED_APP_PACKAGE` corrected to `com.votetorrentvoting` with a
+- [ ] `EXPECTED_APP_PACKAGE` corrected to `org.votetorrent.voter` with a
       populated `EXPECTED_APP_CERT_SHA256_DIGESTS` (§7d)
 - [ ] Pinned attestation root re-fetched immediately before the Pixel 8
       proof (§7e / §4a)

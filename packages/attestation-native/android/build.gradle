@@ -40,7 +40,7 @@ android {
     lintOptions {
         abortOnError false
     }
-    // New-arch-only module (VoteTorrentVoting is newArchEnabled=true; per 45-RESEARCH
+    // New-arch-only module (VoteTorrentVoter is newArchEnabled=true; per 45-RESEARCH
     // "Alternatives Considered" we deliberately drop the oldarch/src/oldarch split
     // react-native-localize carries for broader third-party compat) — all Kotlin
     // sources live under the default main sourceSet (src/main/java), no extra dirs.
@@ -51,7 +51,7 @@ repositories {
         // All of React Native (JS, Obj-C sources, Android binaries) is installed from npm.
         // NOTE: this module is included as a Gradle subproject of the consuming app (via
         // autolinking), so $rootDir resolves to the CONSUMING APP's android/ dir at build
-        // time (e.g. apps/VoteTorrentVoting/android) — mirrors react-native-localize's own
+        // time (e.g. apps/VoteTorrentVoter/android) — mirrors react-native-localize's own
         // build.gradle verbatim, not a path relative to this package's own location.
         url("$rootDir/../node_modules/react-native/android")
     }
