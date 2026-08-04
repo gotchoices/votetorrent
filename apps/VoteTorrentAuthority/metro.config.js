@@ -25,9 +25,15 @@ const workspaceRoot = path.resolve(projectRoot, "../..");
 // (removed here) pointed at vendor/@serfab/... and vendor/@optimystic/... dirs that no longer
 // exist; a stale Metro cache reset alone would NOT have cleared this static alias, so it is
 // deleted rather than left as dead config — the real guarantee that no vendor/ path can ever
-// resolve again (T-40-07). superRoot is retained only as a harmless watch root for any
-// remaining out-of-tree dev scenarios.
-const superRoot = path.resolve(projectRoot, "../../..");
+// resolve again (T-40-07).
+//
+// A `superRoot` (= ../../.., i.e. the ser/ parent holding every sibling checkout) used to be
+// listed in watchFolders alongside workspaceRoot, described as "a harmless watch root". It was
+// not harmless. ser/ has no .git or .watchmanconfig, so watchman took ser/ ITSELF as the watch
+// root and crawled every sibling project — ~879k files vs ~316k for this repo alone — which
+// hung Metro at "waiting for watchman (query)". Nothing ever resolved through it (the vendor/
+// model it existed for is gone), so it is removed. Do not re-add it: if an out-of-tree package
+// is ever needed again, add that ONE directory, never the whole parent.
 const emptyShim = path.resolve(projectRoot, "polyfills/empty.js");
 
 // --- browser-field maps (load each package's `browser` field and redirect Node file
@@ -88,7 +94,7 @@ const libp2pCryptoBrowserMap = Object.assign(Object.create(null), libp2pCryptoMa
 
 const config = {
 	projectRoot,
-	watchFolders: [workspaceRoot, superRoot],
+	watchFolders: [workspaceRoot],
 	transformer: {
 		// Release (Hermes, minified) builds: PRESERVE function + class names.
 		// Terser's default mangle pass renames functions/classes, which breaks
@@ -170,7 +176,7 @@ const multiaddrConvertV12 = path.resolve(
 // CJS UMD build (`tslib/tslib.js`), which exports all helpers as plain functions on the module
 // object regardless of how the caller destructures them. Package/symbol-agnostic on purpose.
 // Do NOT delete this branch; removing it reopens the on-device crash.
-// Ported from apps/VoteTorrentVoting/metro.config.js (44-09, D-04).
+// Ported from apps/VoteTorrentVoter/metro.config.js (44-09, D-04).
 const tslibUmdPath = require.resolve("tslib/tslib.js", { paths: nodeModulesPaths });
 
 // Wrap resolveRequest to apply the @multiformats/multiaddr/convert redirect, the tslib

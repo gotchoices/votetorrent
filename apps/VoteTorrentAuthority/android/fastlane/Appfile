@@ -1,2 +1,4 @@
-json_key_file("play-store-credentials.json")
-package_name("org.votetorrent.authority") 
+# Path to the Google Play service-account JSON. Only needed by Play Store upload
+# lanes, which do not exist yet — leaving it unset keeps the build lanes working.
+json_key_file(ENV["GOOGLE_PLAY_API_FILE"])
+package_name("org.votetorrent.authority")

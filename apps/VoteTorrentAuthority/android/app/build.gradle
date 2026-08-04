@@ -78,6 +78,16 @@ def enableProguardInReleaseBuilds = false
  */
 def jscFlavor = 'io.github.react-native-community:jsc-android:2026004.+'
 
+/**
+ * True when the real signing environment is present. When it is absent, release
+ * builds fall back to the debug key so anyone — CI, a contractor without the
+ * keystore — can still produce and run a genuine release-mode APK.
+ */
+def hasReleaseSigningEnv = !(System.getenv("STORE_FILE_VOTETORRENT") ?: "").trim().isEmpty()
+if (!hasReleaseSigningEnv) {
+    logger.lifecycle("[signing] STORE_FILE_VOTETORRENT is not set — release builds will be signed with the DEBUG key and are NOT publishable.")
+}
+
 android {
     ndkVersion rootProject.ext.ndkVersion
     buildToolsVersion rootProject.ext.buildToolsVersion
@@ -98,11 +108,24 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
+        // Driven entirely by environment variables — see ../../BUILD-RELEASE.md.
+        // Both VoteTorrent apps share one keystore (STORE_FILE_VOTETORRENT) but hold
+        // their own key inside it, so only the key password/alias vars are per-app.
+        //
+        //   STORE_FILE_VOTETORRENT      absolute path to the shared keystore
+        //   PASSWORD_STORE_VOTETORRENT  keystore password
+        //   PASSWORD_KEY_AUTHORITY      password for this app's key
+        //   KEY_ALIAS_AUTHORITY         optional alias override
+        //
+        // Only populated when the env is present; otherwise buildTypes.release
+        // falls back to the debug config below.
         release {
-            keyAlias System.getenv("AUTHORITY_KEY_ALIAS") ?: "org.votetorrent.authority"
-            keyPassword System.getenv("AUTHORITY_KEY_PASSWORD")
-            storeFile file(System.getenv("VOTETORRENT_STORE_FILE") ?: "release.keystore")
-            storePassword System.getenv("VOTETORRENT_STORE_PASSWORD")
+            if (hasReleaseSigningEnv) {
+                keyAlias System.getenv("KEY_ALIAS_AUTHORITY") ?: "org.votetorrent.authority"
+                keyPassword System.getenv("PASSWORD_KEY_AUTHORITY")
+                storeFile file(System.getenv("STORE_FILE_VOTETORRENT"))
+                storePassword System.getenv("PASSWORD_STORE_VOTETORRENT")
+            }
         }
     }
     buildTypes {
@@ -110,7 +133,12 @@ android {
             signingConfig signingConfigs.debug
         }
         release {
-            signingConfig signingConfigs.release
+            // Without the signing env, a release build is still produced — same
+            // Metro production bundle and Hermes compile — but signed with the
+            // committed debug key so it remains installable for development.
+            // It is NOT publishable: the debug certificate is a different app
+            // identity, and `fastlane build_apk` refuses to ship one.
+            signingConfig hasReleaseSigningEnv ? signingConfigs.release : signingConfigs.debug
             minifyEnabled enableProguardInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
         }

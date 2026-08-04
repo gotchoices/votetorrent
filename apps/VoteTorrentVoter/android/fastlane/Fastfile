@@ -1,0 +1,89 @@
+# VoteTorrent Voter — Android build lanes
+#
+# Signing env (shared keystore, per-app key):
+#   STORE_FILE_VOTETORRENT      path to the shared VoteTorrent keystore (~ is expanded)
+#   PASSWORD_STORE_VOTETORRENT  keystore password
+#   PASSWORD_KEY_VOTER          password for this app's key inside that keystore
+#   KEY_ALIAS_VOTER             optional; defaults to org.votetorrent.voter
+#
+# Lanes:
+#   fastlane android verify_keystore  — prove the env/keystore without building (seconds)
+#   fastlane android prepare          — yarn install + build the workspace packages
+#   fastlane android build_debug      — debug-signed APK, needs none of the above vars
+#   fastlane android build_apk        — signed release APK with the real app id
+#   fastlane android build_apk_dev    — release-mode APK signed with the DEBUG key
+#   fastlane android build_aab        — signed release bundle for the Play Store
+#
+# The heavy lifting is shared with the Authority app — see scripts/fastlane/vt_signing.rb.
+
+default_platform(:android)
+
+FASTLANE_DIR = __dir__
+ANDROID_DIR  = File.expand_path("..", FASTLANE_DIR)
+APP_DIR      = File.expand_path("../..", FASTLANE_DIR)
+REPO_ROOT    = File.expand_path("../../../..", FASTLANE_DIR)
+
+require File.join(REPO_ROOT, "scripts", "fastlane", "vt_signing")
+
+APP = VtSigning::App.new(
+  name: "voter",
+  default_alias: "org.votetorrent.voter",
+  android_dir: ANDROID_DIR,
+  app_dir: APP_DIR,
+  repo_root: REPO_ROOT,
+)
+
+platform :android do
+  desc "Prove the signing env and keystore are usable, without running a build"
+  lane :verify_keystore do
+    config = APP.resolve_signing_config
+    UI.success("Keystore:  #{config[:store_file]}")
+    UI.success("Type:      #{config[:store_type]}")
+    UI.success("Alias:     #{config[:key_alias]}")
+    UI.success("Store and key passwords both verified against the keystore.")
+    config
+  end
+
+  desc "Install workspace dependencies and build the packages the app imports"
+  lane :prepare do
+    UI.message("Running yarn install at #{REPO_ROOT} …")
+    sh("cd #{REPO_ROOT.shellescape} && yarn install")
+    UI.message("Building workspace packages …")
+    sh("cd #{REPO_ROOT.shellescape} && yarn workspaces foreach -At --include 'packages/*' run build")
+    UI.success("Workspace ready.")
+  end
+
+  desc "Build a debug-signed APK (no release signing env required)"
+  lane :build_debug do
+    APP.require_workspace!
+    gradle(task: "assembleDebug", project_dir: ANDROID_DIR)
+    APP.report(APP.artifact_path("apk/debug/app-debug.apk"), "DEBUG APK", verify_release_signature: false)
+  end
+
+  desc "Build a signed release APK with the real application id"
+  lane :build_apk do
+    APP.apply_signing_env!
+    APP.require_workspace!
+    gradle(task: "assembleRelease", project_dir: ANDROID_DIR)
+    APP.report(APP.artifact_path("apk/release/app-release.apk"), "RELEASE APK", verify_release_signature: true)
+  end
+
+  desc "Build a release-mode APK signed with the DEBUG key (no keystore needed)"
+  lane :build_apk_dev do
+    APP.warn_if_signing_env_present!
+    APP.require_workspace!
+    # Unset so app/build.gradle takes its debug-key fallback branch.
+    ENV.delete("STORE_FILE_VOTETORRENT")
+    gradle(task: "assembleRelease", project_dir: ANDROID_DIR)
+    APP.report(APP.artifact_path("apk/release/app-release.apk"), "RELEASE-MODE APK (debug-signed)", verify_release_signature: false)
+    UI.important("Signed with the DEBUG key — installable for testing, NOT publishable.")
+  end
+
+  desc "Build a signed release App Bundle (.aab) for the Play Store"
+  lane :build_aab do
+    APP.apply_signing_env!
+    APP.require_workspace!
+    gradle(task: "bundleRelease", project_dir: ANDROID_DIR)
+    APP.report(APP.artifact_path("bundle/release/app-release.aab"), "RELEASE AAB", verify_release_signature: false)
+  end
+end

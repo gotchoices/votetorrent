@@ -30,14 +30,21 @@ export const PLAY_CONSOLE_VERIFICATION_KEY_BASE64 = '';
  * placeholder value (the authority app's own package name, pinned here in error), which
  * would fail-closed reject the real voter app's tokens/keys (WR-03).
  */
-export const EXPECTED_APP_PACKAGE = 'com.votetorrentvoting';
+export const EXPECTED_APP_PACKAGE = 'org.votetorrent.voter';
 /**
  * Lowercase-hex raw SHA-256 digests of the voter app's accepted signing certificate(s),
- * no colons. Currently the voter app's `debug.keystore` cert (androiddebugkey) — this
- * project's `apps/VoteTorrentVoting/android/app/build.gradle` also reuses the debug
- * signingConfig for release, so this single digest currently covers both build types.
- * A production release with its own dedicated keystore must append that cert's digest
- * here as an additional array element.
+ * no colons.
+ *
+ * The single entry below is the committed `debug.keystore` cert (androiddebugkey),
+ * which covers DEBUG builds only. Release builds are signed with the real VoteTorrent
+ * keystore (see apps/VoteTorrentAuthority/BUILD-RELEASE.md), whose cert digest is NOT
+ * yet listed here — so a release voter build's attestation would be rejected once the
+ * Play Console keys above are provisioned.
+ *
+ * TO ADD IT: build the voter release APK, then read the digest off it —
+ *   apksigner verify --print-certs app-release.apk | grep 'SHA-256 digest'
+ * and append it (lowercase hex, no colons) as a second array element. Keep the debug
+ * digest so debug builds keep working.
  */
 export const EXPECTED_APP_CERT_SHA256_DIGESTS: string[] = [
 	'fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c',

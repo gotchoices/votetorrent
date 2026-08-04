@@ -318,6 +318,34 @@ h1 {
   flex-direction: column; /* Allow content to stack vertically */
 }
 
+.info-box h3 {
+  margin-top: 0;
+  color: var(--primary);
+}
+
+/* Preview app downloads (join page) */
+.download-heading {
+  color: var(--primary);
+  margin-top: 2.5rem;
+}
+
+.preview-note {
+  background-color: var(--light-blue);
+  border-left: 4px solid var(--accent);
+}
+
+.app-download {
+  margin-top: auto; /* Line the buttons up at the bottom of both cards */
+  padding-top: 1rem;
+}
+
+.build-note {
+  font-size: 0.9rem;
+  color: #555;
+  margin-top: 0.75rem;
+  margin-bottom: 0;
+}
+
 /* header of home page */
 .landing-header {
   display: flex; /* Use flexbox for centering */
