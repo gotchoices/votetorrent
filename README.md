@@ -31,16 +31,19 @@ Whether transactional or storage, a stand-alone node can optionally serve as a:
 ### Use the reference app
 
 **Mobile apps coming soon:**
-* VoteTorrent Election
-* VoteTorrent Authority ([android APK](https://votetorrent.org/authority.apk))
+* VoteTorrent Voter
+* VoteTorrent Authority
 
 These will be available in the Apple App Store and Google Play Store.
 
 ### Releases
 
-Signed Android release APKs are built by CI and published to permanent
-per-app download links — see [doc/releases/RELEASE-ANDROID.md](doc/releases/RELEASE-ANDROID.md)
-for the release process and repository secret setup.
+Signed Android release APKs are built locally by the key holder and published
+to permanent per-app download links. CI builds both apps on every change to
+prove they compile and bundle, but those builds are debug-signed and are never
+published — the signing key does not leave the key holder's machine. See
+[doc/releases/RELEASE-ANDROID.md](doc/releases/RELEASE-ANDROID.md) for the
+split and the release process.
 
 * [Voter APK (latest)](https://github.com/gotchoices/votetorrent/releases/download/latest-voter/votetorrent-voter-latest.apk)
 * [Authority APK (latest)](https://github.com/gotchoices/votetorrent/releases/download/latest-authority/votetorrent-authority-latest.apk)
@@ -68,8 +71,9 @@ VoteTorrent is a Yarn 4 monorepo. Source lives in two workspace roots, `packages
 | `packages/vote-engine` | `@votetorrent/vote-engine` | Concrete implementation of the voting functionality, including the SQL/Quereus-backed engine. Library (`dist/index.js`, plus a `./rn` React Native entry). |
 | `packages/p2p-probe-host` | `p2p-probe-host` | Host-side drone used as dev tooling for the P2P dial proof. Not published. |
 | `apps/VoteTorrentAuthority` | `votetorrent-authority` | React Native reference app for setting up networks, authorities, and elections. |
+| `apps/VoteTorrentVoter` | `votetorrent-voter` | React Native reference app for voters — registration, ballots, and casting a vote. |
 
-The `vote-core` and `vote-engine` packages are published under the MIT license; the probe host and the Authority app are private workspaces.
+The `vote-core` and `vote-engine` packages are published under the MIT license; the probe host and both apps are private workspaces.
 
 ## Prerequisites
 

@@ -69,14 +69,8 @@ links in `join.html` point at
 `github.com/gotchoices/votetorrent/releases/download/...`, so an APK never
 touches the web server.
 
-Upload a locally built APK to the rolling per-app release:
-
-```bash
-gh release upload latest-voter     <path-to-voter-apk>     --clobber
-gh release upload latest-authority <path-to-authority-apk> --clobber
-```
-
-Create a rolling release first if it does not exist yet:
+Create the rolling release first if it does not exist yet — `gh release upload`
+fails against a tag that has no release behind it:
 
 ```bash
 gh release create latest-voter --prerelease --latest=false \
@@ -85,6 +79,48 @@ gh release create latest-voter --prerelease --latest=false \
 
 `--prerelease --latest=false` keeps these rolling tags from hijacking the
 "Latest" badge on the Releases page.
+
+### Rename before uploading — the filename becomes the URL
+
+A release asset carries both a `name` and a `label`. The permalink is built from
+the **name**, and `gh` takes that from the basename of the file you hand it.
+Gradle emits `app-release.apk`, so uploading that path directly publishes
+`.../download/latest-voter/app-release.apk` and leaves the documented permalink
+returning 404 — with the upload itself reporting success.
+
+Copy to the permalink's filename first:
+
+```bash
+VOTER=apps/VoteTorrentVoter/android/app/build/outputs/apk/release/app-release.apk
+AUTH=apps/VoteTorrentAuthority/android/app/build/outputs/apk/release/app-release.apk
+
+cp "$VOTER" /tmp/votetorrent-voter-latest.apk
+cp "$AUTH"  /tmp/votetorrent-authority-latest.apk
+
+gh release upload latest-voter     /tmp/votetorrent-voter-latest.apk     --clobber
+gh release upload latest-authority /tmp/votetorrent-authority-latest.apk --clobber
+```
+
+`gh`'s `file#label` syntax does not solve this — it sets the label, which is
+display text only, and leaves the name and therefore the URL unchanged.
+
+The retired CI workflow did the same copy before publishing
+(`cp "$SRC" "$STAGE_DIR/${slug}-latest.apk"`); doing it by hand is the step that
+replaces it.
+
+Then confirm the permalinks actually resolve, rather than trusting the upload:
+
+```bash
+for u in latest-voter/votetorrent-voter-latest.apk \
+         latest-authority/votetorrent-authority-latest.apk; do
+  printf '%s  %s\n' \
+    "$(curl -sIL -o /dev/null -w '%{http_code}' \
+       "https://github.com/gotchoices/votetorrent/releases/download/$u")" "$u"
+done
+```
+
+Both must print `200`. These are the exact URLs `web/join.html` links to, so a
+404 here is a dead download button on votetorrent.org.
 
 Then, only if the HTML changed:
 
