@@ -17,6 +17,7 @@
 		"build:apk": "cd android && bundle exec fastlane android build_apk",
 		"build:apk:dev": "cd android && bundle exec fastlane android build_apk_dev",
 		"build:aab": "cd android && bundle exec fastlane android build_aab",
+		"publish:apk": "./publish",
 		"clean": "rm -rf node_modules"
 	},
 	"dependencies": {

@@ -15,7 +15,8 @@
     "build:debug": "cd android && bundle exec fastlane android build_debug",
     "build:apk": "cd android && bundle exec fastlane android build_apk",
     "build:apk:dev": "cd android && bundle exec fastlane android build_apk_dev",
-    "build:aab": "cd android && bundle exec fastlane android build_aab"
+    "build:aab": "cd android && bundle exec fastlane android build_aab",
+    "publish:apk": "./publish"
   },
   "dependencies": {
     "@libp2p/circuit-relay-v2": "^4",
