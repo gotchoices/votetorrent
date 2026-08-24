@@ -1752,6 +1752,7 @@ declare schema main
 		constraint RegistrantIdValid check (exists (select 1 from Registrant R where R.Id = new.RegistrantId and R.Status = 'a')),
 		constraint RegistrantNotExpired check (exists (select 1 from Registrant R where R.Id = new.RegistrantId and R.Expiration > context.now)),
 		constraint InsertValid check on insert (
+			-- Authority path: registrar-scope admin signature (the pre-existing path).
 			exists (
 				select 1 from AdminSignature ASig join AdminSigning A on A.Nonce = ASig.SigningNonce
 					join Registrant R on R.Id = new.RegistrantId
@@ -1761,6 +1762,31 @@ declare schema main
 						and A.Digest = Digest(
 							context.Tid, new.ElectionId, new.RegistrantId
 						)
+			)
+			-- Self-service path (doc/registration.md "or the user, if permitted"): when the
+			-- election's enrollment policy allows it, the registrant's OWN associated device key
+			-- may enroll, signing the same tuple. The Association join proves the signing key is
+			-- currently bound to exactly this registrant (and the registrant is active/unexpired);
+			-- SignatureValid pins the signature to (Tid, election, registrant) so it cannot be
+			-- replayed onto another row. Dual-curve: device keys are secp256k1 today, P-256 as the
+			-- authority-app ceremony migrates (49-02 precedent).
+			or (
+				context.UserKey is not null and context.UserSignature is not null
+				and exists (
+					select 1 from ElectionEnrollmentPolicy P
+						where P.ElectionId = new.ElectionId and P.AllowSelfEnrollment = 1
+				)
+				and exists (
+					select 1 from Association A join Registrant R on R.Id = A.RegistrantId
+						where A.RegistrantId = new.RegistrantId
+							and A.DeviceKey = context.UserKey
+							and A.Expiration > context.now
+							and R.Status = 'a' and R.Expiration > context.now
+				)
+				and (
+					SignatureValid(Digest(context.Tid, new.ElectionId, new.RegistrantId), context.UserSignature, context.UserKey)
+					or SignatureValidP256(Digest(context.Tid, new.ElectionId, new.RegistrantId), context.UserSignature, context.UserKey)
+				)
 			)
 		),
 		constraint DeleteValid check on delete (
@@ -1777,7 +1803,7 @@ declare schema main
 		),
 		constraint NoUpdate check on update (false)
 	)
-		with context ( SigningNonce text, Tid int, now datetime );
+		with context ( SigningNonce text, Tid int, now datetime, UserKey text null, UserSignature text null );
 
 	index ElectionRegistrantRegistrant on ElectionRegistrant (RegistrantId);
 
@@ -2192,6 +2218,395 @@ declare schema main
 						and A.AuthorityId = E.AuthorityId
 						and A.Scope = 'mel'
 						and A.Digest = Digest(context.Tid, old.ElectionId, old.AttestationRequired, 'delete')
+			)
+		)
+	)
+		with context ( SigningNonce text, Tid int );
+
+	-- ---------------------------------------------------------------------------
+	-- VOTER-SIDE ELECTION PIPELINE (doc/election.md, doc/validations.md,
+	-- doc/architecture.md). Election threshold key material, vote casting, block
+	-- formation, tally/validation/certification records, directory discovery, and
+	-- the enrollment policy consumed by ElectionRegistrant''s self-service path.
+	--
+	-- Signature conventions: rows signed by USER/DEVICE keys use the dual-curve
+	-- SignatureValid / SignatureValidP256 pattern (secp256k1 today, P-256 as the
+	-- authority ceremony migrates — 49-02). Rows signed by authorities use the
+	-- AdminSignature/AdminSigning ''mel'' join like every other authority mutation.
+	-- Flags are integer (0/1), NEVER boolean — Quereus v4 re-attach ALTER COLUMN
+	-- landmine (see ElectionAttestationPolicy above).
+	-- ---------------------------------------------------------------------------
+
+	-- Election threshold-encryption public key. Votes are ciphertexts against this key;
+	-- decryption requires the keyholder threshold (KeyholderThreshold on ElectionRevision).
+	--
+	-- WHY A TABLE AND NOT A COLUMN ON ELECTIONRevision: adding to that table''s MutationValid
+	-- Digest tuple breaks every existing signed row AND every engine builder mirroring the
+	-- tuple in lockstep. A standalone ''mel''-signed row carries the same commitment with zero
+	-- blast radius; it can be frozen engine-side once Timeline.votingStarts passes.
+	table ElectionKey (
+		ElectionId text primary key, -- references Election.Id
+		PublicKey text, -- threshold encryption public key (serialized per the crypto scheme)
+		constraint ElectionIdValid check (exists (select 1 from Election E where E.Id = new.ElectionId)),
+		constraint PublicKeyNotEmpty check (PublicKey is not null and length(PublicKey) > 0),
+		constraint MutationValid check on insert, update (
+			exists (
+				select 1 from AdminSignature ASig join AdminSigning A on A.Nonce = ASig.SigningNonce
+					join Election E on E.Id = new.ElectionId
+					where A.Nonce = context.SigningNonce
+						and A.AuthorityId = E.AuthorityId
+						and A.Scope = 'mel'
+						and A.Digest = Digest(context.Tid, new.ElectionId, new.PublicKey)
+			)
+		)
+	)
+		with context ( SigningNonce text, Tid int );
+
+	-- A keyholder''s published private election key (or share), released during the Releasing
+	-- Keys window (doc/election.md "Election unlocked"). Signed by the keyholder''s own user
+	-- key; Tsas carries external timestamp(s) proving release timing. A row whose Tsas/
+	-- ReleasedAt falls OUTSIDE the window is the premature-disclosure ANOMALY RECORD consumed
+	-- by validation (doc/election.md "Validation Process") — the schema records evidence, the
+	-- window comparison is validation-side.
+	table ReleasedKey (
+		ElectionId text,
+		UserId text,
+		KeyMaterial text, -- released private key/share (serialized); decryptability is proven at tally time
+		ReleasedAt datetime,
+		Tsas text null, -- json array of TSA timestamp tokens
+		primary key (ElectionId, UserId),
+		constraint ElectionIdValid check (exists (select 1 from Election E where E.Id = new.ElectionId)),
+		constraint KeyholderValid check (exists (
+			select 1 from Keyholder K where K.ElectionId = new.ElectionId and K.UserId = new.UserId)),
+		constraint KeyMaterialNotEmpty check (KeyMaterial is not null and length(KeyMaterial) > 0),
+		constraint ReleasedAtValid check (isISODatetime(ReleasedAt) and like('%Z', ReleasedAt)),
+		constraint InsertValid check on insert (
+			context.UserKey is not null and context.UserSignature is not null
+			and exists (
+				select 1 from UserKey UK where UK.UserId = new.UserId and UK.Key = context.UserKey
+			)
+			and (
+				SignatureValid(Digest(context.Tid, new.ElectionId, new.UserId, new.KeyMaterial, new.ReleasedAt), context.UserSignature, context.UserKey)
+				or SignatureValidP256(Digest(context.Tid, new.ElectionId, new.UserId, new.KeyMaterial, new.ReleasedAt), context.UserSignature, context.UserKey)
+			)
+		),
+		constraint NoUpdate check on update (false),
+		constraint NoDelete check on delete (false)
+	)
+		with context ( UserKey text, UserSignature text, Tid int, now datetime );
+
+	-- Voter entry: WHO is voting, per district ballot. One row per (election, ballot,
+	-- registrant) — the PK IS the duplicate-registrant rejection of doc/validations.md.
+	-- Carries the registrant references the spec requires (public registrant key = DeviceKey
+	-- of an active Association; PublicCid/PrivateCid pinned to the Registrant''s actual CIDs),
+	-- optional location/deviceID/attestation disclosures, and the registrant device''s
+	-- signature over the entry plus the ballot-template CID (doc/election.md:99-110).
+	table VoterEntry (
+		Id text primary key, -- 32 byte random id
+		ElectionId text,
+		BallotId text,
+		RegistrantId text,
+		DeviceKey text, -- voting public key; must be an ACTIVE Association binding for this registrant
+		PublicCid text, -- must equal Registrant.PublicCid (tamper-evident copy, not free text)
+		PrivateCid text, -- must equal Registrant.PrivateCid
+		OptionalInfo text null, -- json { location?, deviceIdHash?, attestationCid? }
+		TemplateCid text, -- commitment to the district ballot template answered; cross-checked at
+			-- tally/validation. TODO: bind structurally once Ballot carries a content cid column.
+		Signature text, -- by DeviceKey over Digest(Tid, Id, ElectionId, BallotId, RegistrantId, DeviceKey, PublicCid, PrivateCid, OptionalInfo, TemplateCid)
+		constraint DuplicateRegistrantRejected check (
+			not exists (
+				select 1 from VoterEntry VE
+					where VE.ElectionId = new.ElectionId and VE.BallotId = new.BallotId
+						and VE.RegistrantId = new.RegistrantId and VE.Id != new.Id
+			)
+		),
+		constraint ElectionIdValid check (exists (select 1 from Election E where E.Id = new.ElectionId)),
+		constraint BallotBelongs check (exists (
+			select 1 from Ballot B where B.Id = new.BallotId and B.ElectionId = new.ElectionId)),
+		constraint RegistrantCidsValid check (exists (
+			select 1 from Registrant R where R.Id = new.RegistrantId and R.Status = 'a'
+				and R.Expiration > context.now and R.PublicCid = new.PublicCid and R.PrivateCid = new.PrivateCid)),
+		constraint AssociatedAndEnrolled check (
+			exists (
+				select 1 from Association A where A.RegistrantId = new.RegistrantId
+					and A.DeviceKey = new.DeviceKey and A.Expiration > context.now
+			)
+			and exists (
+				select 1 from ElectionRegistrant ER where ER.ElectionId = new.ElectionId
+					and ER.RegistrantId = new.RegistrantId
+			)
+		),
+		constraint TemplateCidNotEmpty check (TemplateCid is not null and length(TemplateCid) > 0),
+		constraint SignatureValidCheck check (
+			SignatureValid(
+				Digest(context.Tid, new.Id, new.ElectionId, new.BallotId, new.RegistrantId, new.DeviceKey, new.PublicCid, new.PrivateCid, new.OptionalInfo, new.TemplateCid),
+				new.Signature, new.DeviceKey
+			)
+			or SignatureValidP256(
+				Digest(context.Tid, new.Id, new.ElectionId, new.BallotId, new.RegistrantId, new.DeviceKey, new.PublicCid, new.PrivateCid, new.OptionalInfo, new.TemplateCid),
+				new.Signature, new.DeviceKey
+			)
+		),
+		constraint InsertOnly check on update, delete (false)
+	)
+		with context ( SigningNonce text, Tid int, now datetime );
+
+	index VoterEntryBallot on VoterEntry (BallotId);
+
+	-- Vote proper: WHAT was voted, as threshold ciphertext. Answers are encrypted to
+	-- ElectionKey.PublicKey so nobody (authority included) can read them until the keyholder
+	-- threshold releases. NonceCommitment = H(answers plaintext || vote nonce); the plaintext
+	-- nonce NEVER touches the network — the voter holds it privately and uses it to locate and
+	-- verify their entry in results (doc/election.md:97, architecture.md requirement 14).
+	table Vote (
+		Id text primary key, -- 32 byte random id
+		VoterEntryId text, -- references VoterEntry.Id (one Vote per entry: entry is already per-ballot)
+		AnswersCipher text, -- encrypted answers, split per the entry's district ballot template
+		NonceCommitment text, -- commitment binding ciphertext to the voter-held nonce
+		BlockId text null, -- set when pool negotiation forms a block ('form' message CID)
+		CreatedAt datetime,
+		constraint VoterEntryExists check (exists (select 1 from VoterEntry VE where VE.Id = new.VoterEntryId)),
+		constraint OneVotePerEntry check (not exists (
+			select 1 from Vote V where V.VoterEntryId = new.VoterEntryId)),
+		constraint AnswersCipherNotEmpty check (AnswersCipher is not null and length(AnswersCipher) > 0),
+		constraint NonceCommitmentNotEmpty check (NonceCommitment is not null and length(NonceCommitment) > 0),
+		constraint CreatedAtValid check (isISODatetime(CreatedAt) and like('%Z', CreatedAt)),
+		constraint InsertValid check on insert (
+			context.UserSignature is not null
+			and exists (
+				select 1 from VoterEntry VE where VE.Id = new.VoterEntryId
+					and (
+						SignatureValid(Digest(context.Tid, new.Id, new.VoterEntryId, new.AnswersCipher, new.NonceCommitment, new.CreatedAt), context.UserSignature, VE.DeviceKey)
+						or SignatureValidP256(Digest(context.Tid, new.Id, new.VoterEntryId, new.AnswersCipher, new.NonceCommitment, new.CreatedAt), context.UserSignature, VE.DeviceKey)
+					)
+			)
+		),
+		-- Updates may ONLY assign BlockId; the ciphertext/commitment are immutable after signing.
+		constraint BlockAssignmentOnly check on update (
+			new.BlockId is not null
+			and new.AnswersCipher = old.AnswersCipher and new.NonceCommitment = old.NonceCommitment
+			and new.CreatedAt = old.CreatedAt and new.Id = old.Id and new.VoterEntryId = old.VoterEntryId
+		),
+		constraint NoDelete check on delete (false)
+	)
+		with context ( UserSignature text, Tid int, now datetime );
+
+	index VoteBlockAssignment on Vote (BlockId);
+	index VoteEntryLookup on Vote (VoterEntryId);
+
+	-- A formed vote block: the output of pool→block negotiation (doc/election.md "Vote Block
+	-- Negotiation"). Id is the records-portion hash announced by the coordinator''s `form`
+	-- message; MerkleRoot is the deterministic accounting leaves commit to (each leaf covers a
+	-- scrambled (voter entry, vote) pair) — this root is the voter-receipt verification anchor:
+	-- a voter proves INCLUSION with (nonce-held data + Merkle path against this root) and
+	-- nothing else, satisfying "only the voter themselves should be able to prove
+	-- inclusion/exclusion". Coordinator signing is any-valid-user-key for MVP; squad-threshold
+	-- authorization of pools is deferred — fraud is caught at validation/tally, not admission.
+	table VoteBlock (
+		Id text primary key, -- hash/CID of the block's records portion (from `form`)
+		ElectionId text,
+		BallotId text,
+		MerkleRoot text,
+		RecordCount integer,
+		FormedAt datetime,
+		Tsas text null, -- json array of TSA timestamp tokens (late-block adjudication, validations note)
+		CoordinatorKey text, -- pool coordinator's public key
+		constraint ElectionBelongs check (exists (
+			select 1 from Ballot B join Election E on E.Id = B.ElectionId
+				where B.Id = new.BallotId and B.ElectionId = new.ElectionId)),
+		constraint MerkleRootNotEmpty check (MerkleRoot is not null and length(MerkleRoot) > 0),
+		constraint RecordCountValid check (typeof(new.RecordCount) = 'integer' and RecordCount >= 1),
+		constraint FormedAtValid check (isISODatetime(FormedAt) and like('%Z', FormedAt)),
+		constraint CoordinatorKeyNotEmpty check (CoordinatorKey is not null and length(CoordinatorKey) > 0),
+		constraint InsertValid check on insert (
+			context.CoordinatorKey is not null and context.UserSignature is not null
+			and context.CoordinatorKey = CoordinatorKey
+			and (
+				SignatureValid(Digest(context.Tid, new.Id, new.ElectionId, new.BallotId, new.MerkleRoot, new.RecordCount, new.FormedAt), context.UserSignature, context.CoordinatorKey)
+				or SignatureValidP256(Digest(context.Tid, new.Id, new.ElectionId, new.BallotId, new.MerkleRoot, new.RecordCount, new.FormedAt), context.UserSignature, context.CoordinatorKey)
+			)
+		),
+		constraint NoUpdate check on update (false),
+		constraint NoDelete check on delete (false)
+	)
+		with context ( CoordinatorKey text, UserSignature text, Tid int, now datetime );
+
+	index VoteBlockByBallot on VoteBlock (ElectionId, BallotId);
+
+	-- Tally tree node (doc/election.md "Election tallied"): histogram-carrying counterpart of
+	-- the block Merkle tree. Root''s published form is the raw outcome; ResultHash on
+	-- Certification commits to it (single-result guarantee, doc/election.md:225). Multi-party
+	-- co-signing of nodes is deferred — one creator signature for MVP, creators listed in Sources.
+	table TallyNode (
+		Id text primary key, -- 32 byte random id or content hash of the node payload
+		ElectionId text,
+		ParentId text null, -- null = root
+		Histogram text, -- json histogram of results at this node
+		Sources text null, -- json array of child TallyNode ids and/or covered VoteBlock ids
+		CreatedByKey text,
+		NodeSignature text,
+		Tsas text null,
+		CreatedAt datetime,
+		constraint ElectionIdValid check (exists (select 1 from Election E where E.Id = new.ElectionId)),
+		constraint ParentValid check (ParentId is null or exists (
+			select 1 from TallyNode T where T.Id = new.ParentId and T.ElectionId = new.ElectionId)),
+		constraint HistogramValid check (Histogram is not null and json_valid(Histogram)),
+		constraint CreatedByKeyNotEmpty check (CreatedByKey is not null and length(CreatedByKey) > 0),
+		constraint CreatedAtValid check (isISODatetime(CreatedAt) and like('%Z', CreatedAt)),
+		constraint InsertValid check on insert (
+			context.UserSignature is not null
+			and (
+				SignatureValid(Digest(context.Tid, new.Id, new.ElectionId, new.ParentId, new.Histogram, new.Sources, new.CreatedAt), context.UserSignature, new.CreatedByKey)
+				or SignatureValidP256(Digest(context.Tid, new.Id, new.ElectionId, new.ParentId, new.Histogram, new.Sources, new.CreatedAt), context.UserSignature, new.CreatedByKey)
+			)
+		),
+		constraint NoUpdate check on update (false),
+		constraint NoDelete check on delete (false)
+	)
+		with context ( UserSignature text, Tid int, now datetime );
+
+	index TallyNodeByElection on TallyNode (ElectionId);
+
+	view ValidationKind as
+		select 'slice' as Code, 'Voter slice-level verification' as Name
+		union all select 'comprehensive' as Code, 'Comprehensive validation' as Name
+		union all select 'anomaly' as Code, 'Validation anomaly record' as Name;
+
+	-- Validation record (doc/election.md "Validation", "Validation Process"): successful and
+	-- failed validations alike land here, failures carrying whatever proof can be given in
+	-- DetailsCid. Kind ''slice'' = optional per-voter checks; ''comprehensive'' = full block/tree
+	-- audit (doc/validations.md''s five checks); ''anomaly'' = e.g. premature key disclosure with
+	-- TSA-signed proof. Passed is nullable because anomaly records are evidence, not verdicts.
+	table ValidationRecord (
+		Id text primary key, -- 32 byte random id
+		ElectionId text,
+		Kind text, -- references ValidationKind(Code)
+		ValidatorKey text, -- public key of the validating party (voter, node, or authority)
+		Passed integer null, -- 1/0 verdict; null for anomaly/evidence-only records
+		DetailsCid text null, -- content-addressed details/proof payload
+		CreatedAt datetime,
+		Tsas text null,
+		Signature text,
+		constraint ElectionIdValid check (exists (select 1 from Election E where E.Id = new.ElectionId)),
+		constraint KindValid check (Kind in (select Code from ValidationKind)),
+		constraint ValidatorKeyNotEmpty check (ValidatorKey is not null and length(ValidatorKey) > 0),
+		constraint PassedValid check (Passed is null or Passed in (0, 1)),
+		constraint CreatedAtValid check (isISODatetime(CreatedAt) and like('%Z', CreatedAt)),
+		constraint InsertValid check on insert (
+			context.UserSignature is not null
+			and (
+				SignatureValid(Digest(context.Tid, new.Id, new.ElectionId, new.Kind, new.Passed, new.DetailsCid, new.CreatedAt), context.UserSignature, new.ValidatorKey)
+				or SignatureValidP256(Digest(context.Tid, new.Id, new.ElectionId, new.Kind, new.Passed, new.DetailsCid, new.CreatedAt), context.UserSignature, new.ValidatorKey)
+			)
+		),
+		constraint NoUpdate check on update (false),
+		constraint NoDelete check on delete (false)
+	)
+		with context ( UserSignature text, Tid int, now datetime );
+
+	index ValidationRecordByElection on ValidationRecord (ElectionId);
+
+	-- Authority certification of the outcome (doc/election.md "Certification"). Positive 0 is a
+	-- NEGATIVE certification (contested result). ResultHash is the single-result commitment the
+	-- validation chain reports against and the runoff dispute anchor (doc/election.md:211,225).
+	table Certification (
+		Id text primary key, -- 32 byte random id
+		ElectionId text,
+		AuthorityId text,
+		Positive integer not null, -- 1 = certify outcome, 0 = negative certification
+		StatementCid text null, -- content-addressed certification statement
+		ResultHash text null, -- commitment to TallyNode root (required before runoffs can be judged)
+		constraint ElectionIdValid check (exists (select 1 from Election E where E.Id = new.ElectionId)),
+		constraint AuthorityIdValid check (exists (select 1 from Authority A where A.Id = new.AuthorityId)),
+		constraint PositiveValid check (Positive in (0, 1)),
+		constraint MutationValid check on insert, update (
+			exists (
+				select 1 from AdminSignature ASig join AdminSigning A on A.Nonce = ASig.SigningNonce
+					join Election E on E.Id = new.ElectionId
+					where A.Nonce = context.SigningNonce
+						and A.AuthorityId = new.AuthorityId
+						and A.Scope = 'mel'
+						and A.Digest = Digest(context.Tid, new.Id, new.ElectionId, new.AuthorityId, new.Positive, new.StatementCid, new.ResultHash)
+			)
+		),
+		constraint DeleteValid check on delete (
+			exists (
+				select 1 from AdminSignature ASig join AdminSigning A on A.Nonce = ASig.SigningNonce
+					where A.Nonce = context.SigningNonce
+						and A.AuthorityId = old.AuthorityId
+						and A.Scope = 'mel'
+						and A.Digest = Digest(context.Tid, old.Id, 'delete')
+			)
+		)
+	)
+		with context ( SigningNonce text, Tid int );
+
+	index CertificationByElection on Certification (ElectionId);
+
+	-- Directory-discovery record for an authority (doc/election.md:16-25): geohash for the
+	-- precision-cascade search, precise GeoJson geometry for the containment pass, CA chain
+	-- for verifying the authority''s records. Deliberately a SEPARATE 1:1 table rather than
+	-- columns on Authority — directory data churns (districts change) while identity must not;
+	-- edits ride the same ''uai'' admin-signing scope as Authority updates.
+	table AuthorityDirectory (
+		AuthorityId text primary key,
+		GeoHash text null, -- coarse locator; app searches each precision level via prefix match
+		DistrictGeometry text null, -- GeoJson geometry (json) for exact point-in-district filtering
+		CaCertChain text null, -- json array of PEM certificates anchoring authority verification
+		constraint AuthorityIdValid check (exists (select 1 from Authority A where A.Id = new.AuthorityId)),
+		constraint GeoHashShape check (GeoHash is null or (length(GeoHash) >= 1 and GeoHash = lower(GeoHash))),
+		constraint DistrictGeometryJson check (DistrictGeometry is null or json_valid(DistrictGeometry)),
+		constraint CaCertChainJson check (CaCertChain is null or json_valid(CaCertChain)),
+		constraint NoDelete check on delete (false),
+		constraint MutationValid check on insert, update (
+			exists (
+				select 1 from AdminSignature ASig join AdminSigning A on A.Nonce = ASig.SigningNonce
+					where A.Nonce = context.SigningNonce
+						and A.Scope = 'uai'
+						and A.Digest = Digest(context.Tid, new.AuthorityId, new.GeoHash, new.DistrictGeometry, new.CaCertChain)
+			)
+		)
+	)
+		with context ( SigningNonce text, Tid int );
+
+	index AuthorityDirectoryGeoHash on AuthorityDirectory (GeoHash);
+
+	-- Per-election self-enrollment policy (consumed by ElectionRegistrant.InsertValid''s
+	-- self-service arm). Absence of a row = authority-enrollment only (fail-closed default,
+	-- matching the ElectionAttestationPolicy posture). Integer flag, never boolean (Quereus v4
+	-- re-attach ALTER COLUMN landmine).
+	-- Runoff configuration lives in ElectionRevision.Timeline (decision 2026-08-24): the JSON
+	-- object gains typed keys alongside the seven ElectionEvent keys —
+	--   runoffAnnounced, runoffVotingStarts   (scheduling interval, doc/election.md:206)
+	-- plus a Runoff sub-object { discrepancyMargin, accessibilityRatio, topTwo } holding the
+	-- trigger thresholds (doc/election.md:200-208). Structural Timeline validation remains the
+	-- standing TODO on both Election tables; no dedicated columns by decision.
+	--
+	-- NOTE: keep plain statements last in this declare block — a comment directly before the
+	-- closing brace trips a quereus parser bug (comment swallows the brace, "Expected '}'").
+	table ElectionEnrollmentPolicy (
+		ElectionId text primary key, -- references Election.Id
+		AllowSelfEnrollment integer default 0, -- 1 = an associated device key may self-enroll its registrant
+		constraint ElectionIdValid check (exists (select 1 from Election E where E.Id = new.ElectionId)),
+		constraint AllowSelfEnrollmentValid check (AllowSelfEnrollment in (0, 1)),
+		constraint MutationValid check on insert, update (
+			exists (
+				select 1 from AdminSignature ASig join AdminSigning A on A.Nonce = ASig.SigningNonce
+					join Election E on E.Id = new.ElectionId
+					where A.Nonce = context.SigningNonce
+						and A.AuthorityId = E.AuthorityId
+						and A.Scope = 'mel'
+						and A.Digest = Digest(context.Tid, new.ElectionId, new.AllowSelfEnrollment)
+			)
+		),
+		constraint DeleteValid check on delete (
+			exists (
+				select 1 from AdminSignature ASig join AdminSigning A on A.Nonce = ASig.SigningNonce
+					join Election E on E.Id = old.ElectionId
+					where A.Nonce = context.SigningNonce
+						and A.AuthorityId = E.AuthorityId
+						and A.Scope = 'mel'
+						and A.Digest = Digest(context.Tid, old.ElectionId, old.AllowSelfEnrollment, 'delete')
 			)
 		)
 	)
