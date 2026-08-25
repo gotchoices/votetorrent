@@ -1,0 +1,22 @@
+{
+  "name": "multipeer-gate",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Standalone Node gate for the n=4 Sereus/Optimystic multi-peer topology: 2 always-on relay drones + 2 relay-only peers. Runs five ordered legs (control mesh, relay reservation, cadre authorization, strand cohort, replication) and localizes the first blocker.",
+  "scripts": {
+    "start": "node multipeer-gate.mjs",
+    "gate": "node multipeer-gate.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@libp2p/circuit-relay-v2": "^4",
+    "@libp2p/crypto": "^5",
+    "@libp2p/websockets": "^10",
+    "@optimystic/db-p2p": "^0.24.2",
+    "@serfab/cadre-core": "^0.11.0",
+    "@serfab/strand-proto": "^0.11.0"
+  }
+}
