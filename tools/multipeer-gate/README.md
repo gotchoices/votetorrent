@@ -63,6 +63,47 @@ than a downstream symptom.
 | **L4** strand-cohort | every strand node assembles a cohort larger than itself |
 | **L5** replication | `peer-A` writes a row; `peer-B` reads it back |
 
+### The distributed-database legs (L6-L8)
+
+L1-L5 answer *"is the multi-peer path unblocked?"*. They do not answer *"is this actually
+a distributed database?"*, and the gap is not academic: **L5 passes with a replication
+factor of one**, because the writer is still up and still holds the row. A write-then-read
+check cannot tell a replicated row from a singly-held one.
+
+| leg | asserts |
+|---|---|
+| **L6** replication-factor | how many nodes actually **hold** the row — want >= `CLUSTER_SIZE` |
+| **L7** late-joiner-convergence | a peer that arrives **after** the write can read it |
+| **L8** durability | the row survives losing the node that holds it |
+
+These are **standing reproductions**: all three are red on `db-p2p@0.24.2`. They are
+recorded but excluded from the gate's verdict, so the gate stays usable as a green/red
+signal, and they do not short-circuit each other — a red L6 must not hide L7 and L8. If
+one flips to green the summary says so loudly, which is the signal to re-check the
+upstream issue and promote the leg.
+
+L8 asserts on the **census**, not on a read, and that distinction is the leg's point.
+Storage is in-memory, so a block with one holder ceases to exist when that holder stops —
+yet a read can still succeed afterwards, because the surviving nodes materialized the row
+when it propagated and answer from their own state. Measured:
+
+```
+KNOWN-RED  L8  durability — 'default/GateRow' was held by [peer-B]; after stopping peer-B
+it is held by 0/3 survivors [none]; drone-A still READS 'gate-row-x36reP37', but from its
+own materialized state — no surviving node holds the block, so a read-back check would
+call this durable when it is not
+```
+
+That is worth stating plainly: **a naive write-then-read-back test reports PASS over data
+that is no longer stored anywhere.** L5 is such a test. So is most integration coverage.
+
+L7's red is currently **not attributed**. On 0.24.2 it fails earlier than the read, while
+`peer-C` is still bringing its strand up, with `Block optimystic/schema is unavailable
+(cohort-unreachable)` — a different `AbsenceVerdict` branch from #15's
+`claimed-elsewhere`. That may be #15 reached by another route, or an addressing problem in
+the #13/#14 family. It has not been triaged, and the leg says so rather than guessing —
+mis-attributing a red is exactly how the `RELAYS=2` section below was wrong for weeks.
+
 ### Why L3 exists
 
 This is the leg people skip, and skipping it is what made this class of bug so expensive
@@ -142,9 +183,25 @@ The `ENROLL=0` arm is the negative control, and it matters: it is the exact fail
 seen in a real n=4 device run, and it proves the gate can actually fail. A green gate
 that cannot go red proves nothing.
 
-The default PASS establishes that **the n=4 topology does replicate on these versions**
-when peers are properly enrolled — so a deployment that still fails should be checked for
-a missing enrolment ceremony before anything upstream is suspected.
+The default PASS establishes that **the n=4 topology does propagate a write on these
+versions** when peers are properly enrolled — so a deployment that still fails should be
+checked for a missing enrolment ceremony before anything upstream is suspected.
+
+It does **not** establish that the data is replicated. Holder counts in the default
+config, censused across two runs:
+
+| | run 1 | run 2 |
+|---|---|---|
+| distinct blocks in the run | 33 | 33 |
+| held by exactly **one** node | 24 | 27 |
+| meeting `CLUSTER_SIZE=2` | 9 | 6 |
+| `default/GateRow` — the row L5 just passed on | **1 holder** | **1 holder** |
+| `default/CadrePeer/index/_uniq_5` — the block that fails at `RELAYS=2` | **1 holder** | **1 holder** |
+
+So the green gate is green over a replication factor of 1, and the control-DB block that
+breaks at `RELAYS=2` is singly held in the *passing* configuration too. `RELAYS=1` works
+by keeping cohort views at 2, where the corroboration floor relaxes and a lone holder's
+claim is accepted — not by replicating anything. That is what L6 now measures directly.
 
 ### Root-caused: `RELAYS=2` trips an upstream read-repair deadlock
 
@@ -200,8 +257,13 @@ write is an upstream question.
 
 ## What this does and does not prove
 
-**Does:** that the topology's addressing, authorization, cohort assembly and replication
-work when peers are reachable only through a relay.
+**Does:** that the topology's addressing, authorization, cohort assembly and write
+*propagation* work when peers are reachable only through a relay.
+
+**Does not:** prove the distributed-database properties. L6-L8 are the legs that ask, and
+on 0.24.2 all three are red: the row has one holder, a late joiner cannot read it, and
+losing that holder loses the only stored copy. A green L1-L5 says the plumbing is
+unblocked, not that the data is safe.
 
 **Does not:** prove device behaviour. Everything here is one process on loopback. A real
 NAT adds address translation and mobile schedulers add main-thread starvation; both have

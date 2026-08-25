@@ -37,6 +37,18 @@
  *   L4  strand-cohort     each strand node assembles a cohort larger than itself
  *   L5  replication       peer-A writes a row; peer-B reads it back
  *
+ * L1-L5 answer "is the multi-peer path unblocked?". They do NOT answer "is this actually
+ * a distributed database?" — L5 passes with a replication factor of ONE, because the
+ * writer is still up and still holds the row. Three further legs ask that question:
+ *
+ *   L6  replication-factor        how many nodes actually HOLD the row (want >= CLUSTER_SIZE)
+ *   L7  late-joiner-convergence   a peer that arrives AFTER the write can read it
+ *   L8  durability                the row survives losing the node that holds it
+ *
+ * All three are red on db-p2p 0.24.2. They are STANDING REPRODUCTIONS: recorded, never
+ * short-circuiting each other, and deliberately excluded from the gate's verdict so it
+ * stays usable as a green/red signal. If one flips to green that is reported loudly.
+ *
  * L3 is the one people skip. Control-network membership is the v1 authorization for the
  * strand-address RPC (`strand-addr-protocol.js`: "only this party's cadre peers may ask
  * us for a strand address"). A peer that is merely CONNECTED is addressable but not
@@ -94,6 +106,29 @@ import { webSockets } from '@libp2p/websockets';
 import { circuitRelayTransport } from '@libp2p/circuit-relay-v2';
 import { generateKeyPair } from '@libp2p/crypto/keys';
 
+// ── holder census ────────────────────────────────────────────────────────────────────
+/**
+ * L6-L8 need to know which nodes actually HOLD a block, not merely whether some read
+ * succeeded — the distinction the first five legs cannot make. `MemoryRawStorage` has no
+ * "list what I hold" surface, so wrap it and record every block id this node is asked to
+ * persist. Storage-only: it changes nothing about how the node behaves.
+ */
+const stores = new Map();          // node name -> TrackingStorage
+let currentNodeName = '?';
+class TrackingStorage extends MemoryRawStorage {
+  constructor() { super(); this.seen = new Set(); }
+  async saveMetadata(id, m) { this.seen.add(id); return super.saveMetadata(id, m); }
+  async saveRevision(id, r, a) { this.seen.add(id); return super.saveRevision(id, r, a); }
+  async saveMaterializedBlock(id, a, b) { this.seen.add(id); return super.saveMaterializedBlock(id, a, b); }
+}
+const holdersOf = (blockId, all) =>
+  all.filter(({ name }) => stores.get(name)?.seen.has(blockId)).map(({ name }) => name);
+const allBlockIds = (all) => {
+  const u = new Set();
+  for (const { name } of all) for (const id of stores.get(name)?.seen ?? []) u.add(id);
+  return u;
+};
+
 // ── configuration ────────────────────────────────────────────────────────────────────
 const PARTY_ID = 'multipeer-gate';
 const STRAND_ID = 'multipeer-gate-strand';
@@ -116,6 +151,19 @@ const COHORT_TIMEOUT_MS = T(30_000);
 const REPLICATION_TIMEOUT_MS = T(60_000);
 const POLL_MS = T(500);
 const ENROLL_ATTEMPTS = Number(process.env.ENROLL_ATTEMPTS ?? 5);
+const SETTLE_MS = T(5_000);        // let replication quiesce before counting holders
+const ISSUE_15 = 'Optimystic#15';  // singly-held blocks can never gain a second holder
+/** L7's red is real but NOT yet attributed to a specific issue — see the leg's comment. */
+const L7_NOTE = 'red on 0.24.2, cause not yet triaged — see the leg comment';
+
+/**
+ * StrandDatabase.executeSchema() wraps the DDL as `declare schema App { ... }`, so the
+ * table lands in `App` while the default schema path is `main`.
+ */
+const GATE_TABLE = 'App.GateRow';
+/** The block the table's rows live in — what L6/L8 count holders of. */
+const GATE_ROW_BLOCK = 'default/GateRow';
+let writtenRowId = null;           // set by L5, read by L7/L8
 const ENROLL_RETRY_MS = T(2_000);
 
 // A single-table schema. StrandDatabase.executeSchema() supplies the
@@ -136,8 +184,20 @@ const results = [];        // { id, title, status, detail }
 
 function record(id, title, status, detail) {
   results.push({ id, title, status, detail });
-  const badge = status === 'PASS' ? 'PASS' : status === 'SKIP' ? 'SKIP' : 'FAIL';
-  L(`${badge}  ${id}  ${title}${detail ? ` — ${detail}` : ''}`);
+  L(`${status.padEnd(9)}  ${id}  ${title}${detail ? ` — ${detail}` : ''}`);
+}
+
+/**
+ * A STANDING REPRODUCTION: a leg that is expected to be red on current upstream, kept so
+ * a fix can be verified by watching it flip. It is recorded but never fails the gate —
+ * the gate's verdict stays L1-L5, so it remains usable as a green/red signal — and if it
+ * unexpectedly PASSES that is reported loudly, because it means the defect is fixed.
+ */
+function recordStanding(id, title, ok, detail, note) {
+  record(id, title, ok ? 'FIXED' : 'KNOWN-RED',
+    ok ? `${detail} — this leg is a standing reproduction (${note}); it just went GREEN, so check whether that is fixed`
+       : `${detail} — expected red (${note})`);
+  return ok;
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────────────
@@ -185,13 +245,14 @@ function baseConfig(bootstrapNodes, privateKey) {
     // exactly as the reference drone harness does. Not a production posture.
     requireSignedSchemas: false,
     strandFilter: { mode: 'all' },
-    storage: { provider: () => new MemoryRawStorage() },
+    storage: { provider: () => { const st = new TrackingStorage(); stores.set(currentNodeName, st); return st; } },
     strandClusterSize: CLUSTER_SIZE,
     hibernation: { enabled: false },
   };
 }
 
 async function startDrone(name, bootstrapNodes) {
+  currentNodeName = name;
   const node = new CadreNode({
     ...baseConfig(bootstrapNodes, await generateKeyPair('Ed25519')),
     profile: 'storage', // turns the circuit-relay-v2 relay server ON
@@ -221,6 +282,7 @@ async function startDrone(name, bootstrapNodes) {
  * through a relay — the constraint the whole gate exists to exercise.
  */
 async function startRelayOnlyPeer(name, relayAddrs, bootstrapNodes) {
+  currentNodeName = name;
   const node = new CadreNode({
     ...baseConfig(bootstrapNodes, await generateKeyPair('Ed25519')),
     profile: 'transaction',
@@ -432,11 +494,9 @@ async function legReplication(peerA, peerB) {
     return false;
   }
 
-  // StrandDatabase.executeSchema() wraps the DDL as `declare schema App { ... }`, so the
-  // table lands in the `App` schema while the default schema path is `main`. Unqualified
-  // it resolves to nothing: "Table 'GateRow' not found in schema path: main".
-  const TABLE = 'App.GateRow';
+  const TABLE = GATE_TABLE;
   const id = `gate-row-${peerA.node.peerId.toString().slice(-8)}`;
+  writtenRowId = id;
   try {
     await dbA.exec(`insert into ${TABLE} (Id, Value) values ('${id}', 'written-by-peer-A');`);
   } catch (e) {
@@ -445,16 +505,7 @@ async function legReplication(peerA, peerB) {
   }
   V(`peer-A wrote ${id}`);
 
-  const seen = await poll(async () => {
-    try {
-      for await (const row of dbB.eval(`select Id from ${TABLE} where Id = '${id}';`)) {
-        if (row?.Id === id) return true;
-      }
-    } catch (e) {
-      V(`peer-B read retry: ${e?.message ?? e}`);
-    }
-    return false;
-  }, REPLICATION_TIMEOUT_MS, 'replication');
+  const seen = await poll(() => rowVisible(dbB, id, 'peer-B'), REPLICATION_TIMEOUT_MS, 'replication');
 
   if (!seen) {
     record('L5', 'replication', 'FAIL',
@@ -465,6 +516,149 @@ async function legReplication(peerA, peerB) {
   return true;
 }
 
+
+/** Is `id` visible in this node's strand db? Never throws — a failed read is just false. */
+async function rowVisible(db, id, who) {
+  try {
+    for await (const row of db.eval(`select Id from ${GATE_TABLE} where Id = '${id}';`)) {
+      if (row?.Id === id) return true;
+    }
+  } catch (e) {
+    V(`${who} read retry: ${e?.message ?? e}`);
+  }
+  return false;
+}
+
+// ── standing reproductions (L6-L8) ───────────────────────────────────────────────────
+// L1-L5 answer "is the multi-peer path unblocked?". They do NOT answer "is this actually
+// a distributed database?", and the difference is not academic: L5 passes with a
+// replication factor of ONE, because the writer is still up and still holds the row.
+// These three legs ask the questions L5 cannot. All three are red on current upstream
+// for the same reason (Optimystic#15), so none of them short-circuits the others.
+
+/**
+ * L6 — replication factor. L5 proves the row PROPAGATED to a live peer. It never asks
+ * how many nodes hold it. Measured on 0.24.2 in the default config the answer is one,
+ * and 24-27 of the ~33 blocks in the run are singly held — so today's green gate is
+ * green over unreplicated data.
+ */
+async function legReplicationFactor(all) {
+  await new Promise((r) => setTimeout(r, SETTLE_MS));
+  const holders = holdersOf(GATE_ROW_BLOCK, all);
+  const ids = allBlockIds(all);
+  const singly = [...ids].filter((id) => holdersOf(id, all).length === 1);
+  for (const id of [...ids].sort()) {
+    const h = holdersOf(id, all);
+    V(`${String(h.length)}/${all.length}  ${id}  [${h.join(', ')}]`);
+  }
+  return recordStanding('L6', 'replication-factor',
+    holders.length >= CLUSTER_SIZE,
+    `'${GATE_ROW_BLOCK}' held by ${holders.length}/${all.length} [${holders.join(', ') || 'nobody'}], ` +
+    `want >= CLUSTER_SIZE (${CLUSTER_SIZE}); ${singly.length}/${ids.size} blocks in this run are singly held`,
+    ISSUE_15);
+}
+
+/**
+ * L7 — late-joiner convergence. Every reader in L5 was present when the row was written.
+ * A distributed database has to serve a member that arrives afterwards, and that is
+ * exactly the case Optimystic#15 makes impossible: a block whose cohort has grown since
+ * commit is unreadable by everyone who was not there.
+ *
+ * Joining also widens every node's cohort view, which is #15's trigger — so this leg
+ * meets the defect from the direction a real deployment does: by growing.
+ *
+ * CAVEAT, because getting this wrong is how the RELAYS=2 section was wrong for weeks:
+ * on 0.24.2 this leg currently fails EARLIER than the read, while peer-C is still
+ * bringing its strand up, with `Block optimystic/schema is unavailable
+ * (cohort-unreachable)` — a different AbsenceVerdict branch from #15's
+ * `claimed-elsewhere`. That may be #15 reached by another route, or an addressing
+ * problem in the #13/#14 family. It has NOT been triaged. The leg reports the error it
+ * actually gets; do not read the red as evidence for any particular issue until someone
+ * does that work.
+ */
+async function legLateJoiner(founder, relayAddrs, bootstrapAddr, all) {
+  const name = 'peer-C';
+  let node;
+  try {
+    node = await startRelayOnlyPeer(name, relayAddrs, [bootstrapAddr]);
+    if (ENROLL) await enrol(founder, [{ name, node }]);
+    await addStrand(node, name, 'networked');
+  } catch (e) {
+    return recordStanding('L7', 'late-joiner-convergence', false,
+      `${name} could not join after the write: ${e?.message ?? e}`, L7_NOTE);
+  }
+  all.push({ name, node });
+
+  const db = strandDb(node);
+  if (!db) {
+    return recordStanding('L7', 'late-joiner-convergence', false,
+      `${name} joined but has no active strand database`, L7_NOTE);
+  }
+  const seen = await poll(() => rowVisible(db, writtenRowId, name), REPLICATION_TIMEOUT_MS, 'late-joiner');
+  return recordStanding('L7', 'late-joiner-convergence', Boolean(seen),
+    seen ? `${name} read '${writtenRowId}' after joining`
+         : `${name} joined, enrolled and never saw '${writtenRowId}' in ${REPLICATION_TIMEOUT_MS}ms`,
+    L7_NOTE);
+}
+
+/**
+ * L8 — durability. The promise that separates a distributed database from a cache:
+ * losing a node must not lose data.
+ *
+ * The assertion is on the CENSUS, not on a read, and that distinction is the leg's whole
+ * point. Storage here is in-memory, so a block held by one node ceases to exist the
+ * moment that node stops. A read can still succeed afterwards — the surviving nodes
+ * materialized the row when it propagated and will answer from their own state — which
+ * means a naive write-then-read-back check (L5, and most integration tests) reports
+ * PASS over data that is no longer stored anywhere. We stop the holder, then report both
+ * numbers so the difference is visible.
+ *
+ * Destructive, so it runs last.
+ */
+async function legDurability(all) {
+  const before = holdersOf(GATE_ROW_BLOCK, all);
+  if (before.length === 0) {
+    return recordStanding('L8', 'durability', false,
+      `nobody holds '${GATE_ROW_BLOCK}', so there is nothing to lose`, ISSUE_15);
+  }
+  const victim = all.find((n) => n.name === before[0]);
+  const survivors = all.filter((n) => n.name !== victim.name);
+
+  L(`stopping ${victim.name} — holder 1 of ${before.length} [${before.join(', ')}] ...`);
+  try {
+    await victim.node.stop();
+  } catch (e) {
+    V(`${victim.name} stop error: ${e?.message ?? e}`);
+  }
+  await new Promise((r) => setTimeout(r, SETTLE_MS));
+
+  // Does any SURVIVING node still hold the block? That is the durability question.
+  const after = holdersOf(GATE_ROW_BLOCK, survivors);
+
+  // And, separately, can anyone still read it? If yes while `after` is empty, the read is
+  // being served from memory, not from a stored replica.
+  let readableBy = null;
+  for (const sv of survivors) {
+    const db = strandDb(sv.node);
+    if (!db) continue;
+    if (await poll(() => rowVisible(db, writtenRowId, sv.name), REPLICATION_TIMEOUT_MS, `durability:${sv.name}`)) {
+      readableBy = sv.name;
+      break;
+    }
+  }
+
+  const gloss = after.length === 0 && readableBy
+    ? `; ${readableBy} still READS '${writtenRowId}', but from its own materialized state — ` +
+      'no surviving node holds the block, so a read-back check would call this durable when it is not'
+    : after.length === 0
+      ? `; and no survivor can read '${writtenRowId}' either`
+      : `; ${readableBy ?? 'nobody'} reads it back`;
+
+  return recordStanding('L8', 'durability', after.length > 0,
+    `'${GATE_ROW_BLOCK}' was held by [${before.join(', ')}]; after stopping ${victim.name} ` +
+    `it is held by ${after.length}/${survivors.length} survivors [${after.join(', ') || 'none'}]${gloss}`,
+    ISSUE_15);
+}
 
 /**
  * Owner genesis on the founder. cadre-core deliberately never runs this implicitly —
@@ -588,6 +782,14 @@ async function main() {
   if (!(await legStrandCohort(all))) return false;
   if (!(await legReplication(peers[0], peers[1]))) return false;
 
+  // L6-L8 are STANDING REPRODUCTIONS. They deliberately do not short-circuit each other
+  // and do not affect the gate's verdict — see recordStanding().
+  L('');
+  L('running the distributed-database legs (standing reproductions, expected red) ...');
+  await legReplicationFactor(all);
+  await legLateJoiner(droneA, relayAddrs, droneAAddr, all);
+  await legDurability(all);
+
   return true;
 }
 
@@ -602,15 +804,16 @@ async function shutdown() {
 }
 
 function summarize(passed) {
+  const gate = results.filter((r) => r.status === 'PASS' || r.status === 'FAIL' || r.status === 'SKIP');
+  const standing = results.filter((r) => r.status === 'KNOWN-RED' || r.status === 'FIXED');
+
   L('');
   L('──────────────────────────── SUMMARY ────────────────────────────');
-  for (const r of results) {
-    L(` ${r.status.padEnd(4)}  ${r.id}  ${r.title}`);
-  }
-  const ran = results.length;
+  for (const r of gate) L(` ${r.status.padEnd(9)}  ${r.id}  ${r.title}`);
+  const ran = gate.length;
   L('─────────────────────────────────────────────────────────────────');
   if (passed) {
-    L('MULTIPEER GATE: PASS — all 5 legs green.');
+    L(`MULTIPEER GATE: PASS — all ${ran} gate legs green.`);
     L('Necessary, not sufficient: this is loopback, so it says the blocker is not in');
     L('this layer. It does not stand in for a device run.');
   } else {
@@ -618,6 +821,21 @@ function summarize(passed) {
     L(`MULTIPEER GATE: FAIL at ${failed?.id ?? '?'} (${failed?.title ?? 'startup'}) — ${ran} leg(s) ran.`);
     L('Legs are ordered, so this is the EARLIEST broken link, not a downstream symptom.');
     L("Re-run with DEBUG='optimystic:db-p2p:*,db-p2p:*,sereus:*' for the underlying trace.");
+  }
+
+  if (standing.length) {
+    L('');
+    L('──────────── DISTRIBUTED-DATABASE LEGS (standing) ───────────────');
+    for (const r of standing) L(` ${r.status.padEnd(9)}  ${r.id}  ${r.title}`);
+    L('─────────────────────────────────────────────────────────────────');
+    const fixed = standing.filter((r) => r.status === 'FIXED');
+    if (fixed.length) {
+      L(`${fixed.length} standing reproduction(s) went GREEN: ${fixed.map((r) => r.id).join(', ')}.`);
+      L('Verify against the leg\'s own note, then promote it from standing to a real leg.');
+    } else {
+      L(`All red, as expected. A green gate above does NOT mean the data is replicated:`);
+      L(`L6 measures the replication factor and on 0.24.2 it is 1 (${ISSUE_15}).`);
+    }
   }
   return passed ? 0 : 1;
 }
