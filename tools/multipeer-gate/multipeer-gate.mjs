@@ -154,7 +154,7 @@ const ENROLL_ATTEMPTS = Number(process.env.ENROLL_ATTEMPTS ?? 5);
 const SETTLE_MS = T(5_000);        // let replication quiesce before counting holders
 const ISSUE_15 = 'Optimystic#15';  // singly-held blocks can never gain a second holder
 /** L7's red is real but NOT yet attributed to a specific issue — see the leg's comment. */
-const L7_NOTE = 'red on 0.24.2, cause not yet triaged — see the leg comment';
+const L7_NOTE = 'inbound-stream authorization denies the boot read; see the leg comment';
 
 /**
  * StrandDatabase.executeSchema() wraps the DDL as `declare schema App { ... }`, so the
@@ -567,15 +567,37 @@ async function legReplicationFactor(all) {
  * Joining also widens every node's cohort view, which is #15's trigger — so this leg
  * meets the defect from the direction a real deployment does: by growing.
  *
- * CAVEAT, because getting this wrong is how the RELAYS=2 section was wrong for weeks:
- * on 0.24.2 this leg currently fails EARLIER than the read, while peer-C is still
- * bringing its strand up, with `Block optimystic/schema is unavailable
- * (cohort-unreachable)` — a different AbsenceVerdict branch from #15's
- * `claimed-elsewhere`. That may be #15 reached by another route, or an addressing
- * problem in the #13/#14 family. It has NOT been triaged. The leg reports the error it
- * actually gets; do not read the red as evidence for any particular issue until someone
- * does that work.
- */
+ * WHY IT IS RED (triaged 2026-08-25, and it is NOT #15):
+ *
+ *   1. `late-C` starts. `CadreNode.start()` reads `optimystic/schema` from the control DB.
+ *   2. It already holds one connection — its relay/bootstrap drone — so that drone lands
+ *      in the cohort and a real consult runs (no solo-self short-circuit).
+ *   3. The drone DENIES the inbound stream:
+ *        `db-p2p:sync-service:error inbound stream denied peer=<late-C>
+ *         protocol=/optimystic/control-<party>/db-p2p/sync/1.0.0
+ *         reason=predicate returned false`
+ *      `late-C` is not an authorized cadre member yet. db-p2p supplies the mechanism
+ *      (`InboundStreamAuthorization`); cadre-core supplies the predicate.
+ *   4. A denial reaches the requester as SILENCE. `answered === 0` -> `isolated` ->
+ *      `cohort-unreachable`, and `start()` throws.
+ *   5. Enrolment can only run after `start()` returns. So the node can never join.
+ *
+ * A bootstrap ordering deadlock, not a replication defect. The evidence that rules the
+ * other candidates out: `no-quorum { responders: 0, required: 1 }` — required is 1, so the
+ * corroboration floor had already relaxed and #15 (which needs 2) is not in play; and
+ * `findCluster:done peers=2 addressless=0 selfRelayOnly=0` — every member had an address,
+ * so #13/#14 are not either.
+ *
+ * Control arm: a late joiner with its own listen addresses starts fine — but for a null
+ * reason. It had ZERO connections at read time, so the cohort was itself alone and
+ * `cluster-fetch:solo-self-skip` fired. It succeeds by being isolated, not by converging.
+ * The variable is not the profile; it is whether the node happens to hold a connection at
+ * the moment of the boot read.
+ *
+ * Worth reporting upstream separately: at the verdict level an authorization denial is
+ * indistinguishable from unreachability. This said `cohort-unreachable` — network — when
+ * the truth was permission.
+  */
 async function legLateJoiner(founder, relayAddrs, bootstrapAddr, all) {
   const name = 'peer-C';
   let node;

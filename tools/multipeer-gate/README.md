@@ -97,12 +97,44 @@ call this durable when it is not
 That is worth stating plainly: **a naive write-then-read-back test reports PASS over data
 that is no longer stored anywhere.** L5 is such a test. So is most integration coverage.
 
-L7's red is currently **not attributed**. On 0.24.2 it fails earlier than the read, while
-`peer-C` is still bringing its strand up, with `Block optimystic/schema is unavailable
-(cohort-unreachable)` — a different `AbsenceVerdict` branch from #15's
-`claimed-elsewhere`. That may be #15 reached by another route, or an addressing problem in
-the #13/#14 family. It has not been triaged, and the leg says so rather than guessing —
-mis-attributing a red is exactly how the `RELAYS=2` section below was wrong for weeks.
+L7's red is **triaged, and it is not #15**. The late joiner never reaches the read: it
+fails inside `CadreNode.start()`, because
+
+```
+db-p2p:sync-service:error inbound stream denied peer=<late-C>
+  protocol=/optimystic/control-<party>/db-p2p/sync/1.0.0
+  reason=predicate returned false
+```
+
+The joiner boots, already holds one connection (its relay/bootstrap drone), so that drone
+lands in its cohort and a real consult runs. The drone **denies the stream** — the joiner
+is not an authorized cadre member yet. db-p2p supplies the mechanism
+(`InboundStreamAuthorization`); cadre-core supplies the predicate. The denial reaches the
+requester as *silence*, so `answered === 0` → `isolated` → `cohort-unreachable`, and
+`start()` throws. Enrolment can only run after `start()` returns, so the node can never
+join. **A bootstrap ordering deadlock, not a replication defect.**
+
+What rules the other candidates out:
+
+| evidence | rules out |
+|---|---|
+| `no-quorum { responders: 0, required: 1 }` | #15 — the floor had already relaxed to 1; #15 needs `required: 2` |
+| `findCluster:done peers=2 addressless=0 selfRelayOnly=0` | #13/#14 — every cohort member had an address |
+| the denial is `predicate returned false` on an **inbound stream** | #10 — that is transaction admission (`admitMembership`), a different gate |
+
+The control arm is worth keeping in mind: a late joiner **with its own listen addresses**
+starts fine — but for a null reason. It had *zero* connections at read time, so its cohort
+was itself alone and `cluster-fetch:solo-self-skip` fired. It succeeds by being isolated,
+not by converging. The variable is not the node's profile; it is whether it happens to hold
+a connection at the moment of the boot read.
+
+Two things here are worth filing separately, and neither has been yet:
+
+1. **The ordering deadlock** (cadre-core): a joining node must read the control DB to
+   start, but cannot be authorized until after it has started.
+2. **The diagnosability gap** (db-p2p): at the verdict level an authorization denial is
+   indistinguishable from unreachability. This reported `cohort-unreachable` — a network
+   verdict — when the truth was permission.
 
 ### Why L3 exists
 
@@ -241,13 +273,24 @@ during boot with `BlockUnavailableError`.
 PASS. Until then single-relay is the only posture known to work, which is why `RELAYS` defaults
 to `1` — it works by keeping cohort views below 3, not by avoiding the bug.
 
-### Known flake, handled — same root cause
+### Known flake, handled — most likely the L7 gate, not #15
 
-The enrolment ceremony genuinely fails run-to-run: each step writes owner-signed control state
-and then reads it back, and a read issued once the writer's cohort view has widened past 2 hits
-the deadlock above. `ENROLL_ATTEMPTS` retries with linear backoff, which wins while the view is
-still narrow. This is not masking a defect — a peer that is genuinely un-enrollable exhausts
-every attempt and L3 still fails — but it is the same upstream bug, not a race.
+The enrolment ceremony fails run-to-run: each step writes owner-signed control state and
+then reads it back, and the read intermittently fails with
+`Block default/Revocation is unavailable (peers-unreachable)`. `ENROLL_ATTEMPTS` retries
+with linear backoff and usually wins.
+
+An earlier revision of this file attributed that to #15. The L7 triage makes the
+membership gate the better explanation: during the same window the drones log
+`inbound stream denied … reason=predicate returned false` against **peer-A and peer-B**,
+which are not yet authorized. Denied streams read as silent peers, and partial silence is
+exactly `peers-unreachable`. The retries win because they outlast the un-authorized
+window; `start()` has no retry, which is why L7 fails hard where the ceremony only flakes.
+
+Stated as the leading explanation rather than a settled one — the correlation is strong
+and the mechanism fits, but nobody has instrumented the ceremony read itself. This is not
+masking a defect either way: a peer that is genuinely un-enrollable exhausts every attempt
+and L3 still fails.
 
 Owner genesis is run while the founder is **still solo**, before anyone joins, because the write
 needs a quorum the joiners cannot yet serve. That is also what makes the control database singly
