@@ -33,6 +33,10 @@ MULTIPEER GATE: PASS — all 5 legs green.
 To test a candidate build, point the dependency at it (`npm install
 @optimystic/db-p2p@<version>` / `@serfab/cadre-core@<version>`) and re-run.
 
+[`repro/`](./repro/) holds the standalone reproductions for the upstream defect this gate
+found — two `node --test` files, ~200 ms, no cadre-core and no sockets. Run
+`node --test repro/*.test.mjs`.
+
 ## Topology
 
 | node | profile | addressing |
@@ -131,8 +135,8 @@ Measured on `@optimystic/db-p2p@0.24.2` / `@serfab/cadre-core@0.11.0`, macOS, No
 |---|---|
 | default (`DRONES=2 RELAYS=1 ENROLL=1`) | **PASS**, 3/3 consecutive runs |
 | `ENROLL=0` | **FAIL at L3** — `peer-A=false peer-B=false; owner lists 0 authorized member(s)` |
-| `RELAYS=2` | **FAIL at L3** — `Block default/CadrePeer is unavailable (peers-unreachable)` |
-| `DRONES=3` | **FAIL at L3** — same `peers-unreachable`, so breadth is not the cause |
+| `RELAYS=2` | **FAIL at L3** — `Block default/CadrePeer is unavailable (claimed-elsewhere)` — upstream, see below |
+| `DRONES=3` | **FAIL at L3** — same cause, so breadth is not it |
 
 The `ENROLL=0` arm is the negative control, and it matters: it is the exact failure mode
 seen in a real n=4 device run, and it proves the gate can actually fail. A green gate
@@ -142,43 +146,57 @@ The default PASS establishes that **the n=4 topology does replicate on these ver
 when peers are properly enrolled — so a deployment that still fails should be checked for
 a missing enrolment ceremony before anything upstream is suspected.
 
-### Open: `RELAYS=2` reproducibly breaks the control database
+### Root-caused: `RELAYS=2` trips an upstream read-repair deadlock
 
 Reserving on a **second** relay is enough to break control-DB reads:
 
 ```
 PASS  L2  relay-reservation — peer-A=4 addr/2 relay peer-B=4 addr/2 relay
-FAIL  L3  cadre-authorization — Block default/CadrePeer is unavailable (peers-unreachable)
+FAIL  L3  cadre-authorization — Block default/CadrePeer is unavailable (claimed-elsewhere)
 ```
 
-The reservations themselves succeed — L2 confirms two *distinct* relay identities, not
-one relay in several IP forms. What fails is the control-database block read afterwards,
-so the cadre can no longer evaluate its own membership.
+**This is not a relay bug, and not a cadre-core bug.** It is an `@optimystic/db-p2p` read-repair
+deadlock, root-caused and reproduced with no relays, no NAT and no cadre-core — see
+[`repro/`](./repro/).
 
-This is not a loopback curiosity. The same signature appeared on real hardware: widening
-a device's relay-qualified `listenAddrs` from one drone to two turned a run that reached
-the write phase into one that died during boot with
-`BlockUnavailableError … (claimed-elsewhere)`, with the drones logging
-`Block default/Revocation is unavailable (peers-unreachable)`. That change had to be
-reverted. `DRONES=3` fails identically, which rules out block-cluster breadth.
+A block held by exactly **one** cohort member can never gain a second. Read repair requires two
+distinct non-self peers to corroborate a revision before it may be restored; a sole holder
+supplies one; and both paths that would create the second holder (read-repair acquisition and
+`createReconcileBlock`) are gated by that same floor. So the block is permanently unreadable by
+every member that was not present when it was committed.
 
-`RELAYS=2` is therefore a **standing reproduction of an open defect**, kept here
-deliberately so a fix can be verified by flipping it to PASS. Until then, single-relay is
-the only posture known to work, which is why `RELAYS` defaults to `1`.
+The founder's owner-genesis write happens while it is solo, so the control database always
+begins singly held. What the second relay changes is only **visibility**: it makes every node
+see every other, which widens each joiner's cohort view from 2 to 3 — past the point where
+`corroboratorCapacity` relaxes the floor from 2 to 1.
 
-### Known flake, handled
+| relays | joiner's cohort view | corroborators required | outcome |
+|---|---|---|---|
+| 1 | 2 | 1 | the sole holder's claim is accepted — **PASS** |
+| 2 | 3 | 2 | one holder can never supply two — **FAIL, permanently** |
 
-The enrolment ceremony genuinely races: each step writes owner-signed control state and
-then reads it back, and a read issued before that state settles fails with
-`Block default/Revocation is unavailable (peers-unreachable)`. The same code path
-succeeds or fails run-to-run purely on timing. `ENROLL_ATTEMPTS` retries with linear
-backoff. This is not masking a defect — a peer that is genuinely un-enrollable exhausts
-every attempt and L3 still fails.
+`DRONES=3` fails identically for the same reason, which is why block-cluster breadth was ruled
+out. The device-side symptom is the same defect: widening a device's relay-qualified
+`listenAddrs` from one drone to two turned a run that reached the write phase into one that died
+during boot with `BlockUnavailableError`.
 
-Owner genesis is run while the founder is **still solo**, before anyone joins. Once the
-control DB is spread across a cohort, that write needs a quorum the joiners cannot yet
-serve, and it fails with the same `peers-unreachable` error — which reads like a network
-fault but is really a founding-order mistake.
+`RELAYS=2` is kept as a **standing reproduction**, so a fix can be verified by flipping it to
+PASS. Until then single-relay is the only posture known to work, which is why `RELAYS` defaults
+to `1` — it works by keeping cohort views below 3, not by avoiding the bug.
+
+### Known flake, handled — same root cause
+
+The enrolment ceremony genuinely fails run-to-run: each step writes owner-signed control state
+and then reads it back, and a read issued once the writer's cohort view has widened past 2 hits
+the deadlock above. `ENROLL_ATTEMPTS` retries with linear backoff, which wins while the view is
+still narrow. This is not masking a defect — a peer that is genuinely un-enrollable exhausts
+every attempt and L3 still fails — but it is the same upstream bug, not a race.
+
+Owner genesis is run while the founder is **still solo**, before anyone joins, because the write
+needs a quorum the joiners cannot yet serve. That is also what makes the control database singly
+held, and so what makes it vulnerable. Committing it at a cohort of 2 instead is proven to avoid
+the deadlock (`repro/probe-holders.mjs` with `GENESIS_AT=2`), but whether cadre-core can move the
+write is an upstream question.
 
 ## What this does and does not prove
 
