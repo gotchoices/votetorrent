@@ -32,21 +32,8 @@
  * lists each consumer as its own branch, so the guard sees the full surface.
  * (`--json` is NOT supported by this yarn 4.7.0 subcommand.)
  *
- * Phase 29 (SIGN-05): packages/vote-engine bumped quereus-plugin-crypto to ^0.14.0
- * (resolves to 0.14.1). Other workspace consumers (cadre-core, quereus-plugin-sereus
- * portals) still depend on 0.13.5 transitively. On the 3.3.0 tree the full surface was:
- *   @optimystic/quereus-plugin-crypto@npm:0.13.5  — portal workspaces (unchanged)
- *   @optimystic/quereus-plugin-crypto@npm:0.14.1  — vote-engine (upgraded)
- *   @optimystic/quereus-plugin-optimystic@npm:0.13.5
- * (the optimystic plugin was previously folded into cadre-core's summary and invisible;
- * the detail drill-down now surfaces it).
- *
- * Phase 33 (UPG-03): quereus bumped to 4.2.1 (64e8a4bca7 patch). The optimystic plugin
- * mismatch DISAPPEARED on the 4.x tree (its peer range is satisfied by the 4.2.1 copy).
- * KNOWN_ALLOWED updated empirically to reflect the two remaining crypto mismatches.
- *
- * To update the allow-list (e.g. when upstream @optimystic releases a clean version that
- * peers on @quereus/quereus 3.x — D-02 removal trigger):
+ * To update the allow-list (when upstream @optimystic publishes a release whose peer
+ * range is satisfied by the pinned @quereus/quereus):
  *   - Remove the resolved entry/entries from KNOWN_ALLOWED.
  *   - Also remove the `logFilters: code: YN0086` entry from .yarnrc.yml.
  *
@@ -62,37 +49,27 @@ const execAsync = promisify(exec);
 
 // ---------------------------------------------------------------------------
 // KNOWN_ALLOWED: the exact set of @optimystic/quereus-plugin-* consumer
-// descriptors that are currently expected to appear as ✘ in
+// descriptors currently expected to appear as ✘ in
 // `yarn explain peer-requirements` (across the EXPANDED detail trees).
 //
-// Phase 29 (SIGN-05): @optimystic/quereus-plugin-crypto bumped in
-// packages/vote-engine from 0.13.5 → ^0.14.0 (resolves to 0.14.1 on npm).
-// Other workspace consumers (@serfab/cadre-core, @serfab/quereus-plugin-sereus
-// portals) still depend on 0.13.5 transitively and produce their own ✘ lines.
+// The suppressed mismatch is a long-standing wart: @optimystic/quereus-plugin-crypto
+// peer-wants a @quereus/quereus range drawn from the crypto plugin's OWN internal
+// quereus-version numbering scheme, which is unrelated to the @quereus/quereus this
+// repo pins. It is cosmetic — every QSQL function executes correctly on the pinned
+// quereus and the vote-engine suite passes. See .yarnrc.yml for why the log filter
+// has to be broad and why nothing narrower works.
 //
-// Phase 33 (UPG-03): quereus bumped from 3.3.0 → 4.2.1 (64e8a4bca7 patch).
-// After the 4.x bump, @optimystic/quereus-plugin-optimystic@npm:0.13.5
-// DISAPPEARED from the observed mismatch set (its peer range is now satisfied
-// by the resolved 4.2.1 copy). Only the two crypto mismatches remained:
-//   @optimystic/quereus-plugin-crypto@npm:0.13.5  — cadre-core / quereus-plugin-sereus portals
-//   @optimystic/quereus-plugin-crypto@npm:0.14.1  — vote-engine (upgraded)
+// MAINTENANCE: entries are pinned to the RESOLVED descriptor, so this set must be
+// re-verified whenever the @optimystic/* family is bumped. To re-derive it, run
+// `yarn explain peer-requirements` against a fresh install and list what it reports.
+// The script prints an "INFO: disappeared" hint when a listed mismatch stops showing
+// up; when the set empties, also remove the logFilters block from .yarnrc.yml.
 //
-// Phase 36 (CID-01, D-01): the two vendored @serfab/* portals
-// (cadre-core, quereus-plugin-sereus) had their @optimystic/quereus-plugin-crypto
-// range widened from ^0.13.5 → ^0.14.0, so ALL consumers now resolve the single
-// 0.14.1 copy. The @npm:0.13.5 crypto mismatch DISAPPEARED entirely (confirmed:
-// `grep -c '@optimystic/quereus-plugin-crypto@npm:0.13' yarn.lock` == 0,
-// `yarn why` shows one resolved 0.14.1 copy across all consumer paths). The
-// dual-copy exception is retired; only the single crypto mismatch remains:
-//   @optimystic/quereus-plugin-crypto@npm:0.14.1  — all consumers (the pre-existing
-//     ^0.16.2 peer wart against crypto-plugin's OWN internal quereus-version scheme,
-//     unrelated to @quereus/quereus 4.2.1 — see .yarnrc.yml)
-// (Observed empirically via `yarn explain peer-requirements` after the 0.14 repin.)
+// NOTE (unverified): root package.json / yarn.lock now resolve the @optimystic/*
+// family at 0.17.0, while the entry below still names 0.16.3. This has not been
+// re-derived against an installed tree. Re-run the guard after a `yarn install` and
+// correct the entry — or drop it, if the mismatch has disappeared at 0.17.0.
 // ---------------------------------------------------------------------------
-// v4.4 bump (2026-07-28): @optimystic/* family bumped 0.14.1 → 0.16.3 (all aligned)
-// alongside cadre-core 0.9.0 + quereus 4.4.1. The crypto-plugin peer wart is the SAME
-// known-suppressed `^0.16.2` mismatch against the plugin's own internal quereus-version
-// scheme (unrelated to @quereus/quereus 4.4.1) — only the resolved version moved.
 const KNOWN_ALLOWED = new Set([
   '@optimystic/quereus-plugin-crypto@npm:0.16.3',
 ]);

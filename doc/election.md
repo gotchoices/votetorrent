@@ -193,6 +193,17 @@ Blocks are negotiated as follows, from the perspective of a given node:
 * Keys were released, and in time
 * Authorities may wish to host a number of probe transaction nodes to ensure that their notification duties (e.g. revisions, and signature release) are properly received.
 
+### Validation invariants
+
+A validating peer asserts the following. A failure of any of these is a
+validation anomaly:
+
+* Same number of voters as votes in the results.
+* If a receipt is rejected as a **duplicate registrant**, the rejected registrant must exist in the results.
+* If a receipt is rejected as **invalid**, the block must be verifiably invalid.
+* If a receipt is rejected as **inopportune**, the receipt timestamp must fall outside the voting time window.
+* If a receipt is **accepted**, the block must be verifiably valid, its timestamp inside the time window, and the voter unique.
+
 ## Runoff Elections
 
 Runoff elections are a crucial mechanism to ensure fair and accurate results in cases where the initial election outcome is uncertain or contested. The following describes the generation of runoffs and the rules governing them:

@@ -1,42 +1,38 @@
 # Codebase Architecture
 
-This document describes how the VoteTorrent **repository** is organized — its
-workspaces, the responsibilities of each package and app, the external
-dependencies that are vendored or patched, the build pipeline, and how the
-pieces compose at runtime.
+How the VoteTorrent **repository** is organized — its workspaces, the
+responsibility of each package and app, the external dependencies it builds on,
+and how the pieces compose at runtime.
 
-It is the complement to the [Technical Architecture](architecture.md) document,
-which describes the **protocol** (subsystems, networks, requirements). For
-protocol and network design see that doc; for the distributed database layer see
-[Optimystic](optimystic.md) and [Repository](repository.md); for the election
-processes see [Election Logic](election.md). This document focuses on the code.
+This is the complement to [Technical Architecture](architecture.md), which
+describes the **protocol** (subsystems, networks, requirements), and to
+[Election Logic](election.md), which describes the election processes. This
+document is about the code.
 
-## System Overview
+## System overview
 
 VoteTorrent is a TypeScript ESM monorepo managed with Yarn 4 workspaces
 (`"type": "module"`, `node >=20.19`, `yarn@4.7.0`). It produces two publishable
-libraries and one React Native reference application:
+libraries and two React Native reference applications:
 
-- A **core library** (`@votetorrent/vote-core`) that defines the shared types,
-  interfaces, and protocol primitives.
-- An **engine library** (`@votetorrent/vote-engine`) that provides the concrete
-  implementation of those interfaces, backed by a SQL engine (Quereus) over a
-  pluggable database factory.
-- A **React Native app** (`votetorrent-authority`) that wires the engine into a
-  device, supplies the platform-specific database and P2P layers, and renders
-  the administrator UI.
+- **`@votetorrent/vote-core`** — shared types, domain models, and the engine
+  *interfaces*. Also the canonical SQL schema.
+- **`@votetorrent/vote-engine`** — the concrete implementation of those
+  interfaces, backed by a Quereus SQL database over a pluggable database
+  factory.
+- **`votetorrent-voter`** — the Voter app: registration, device association,
+  ballots, casting a vote.
+- **`votetorrent-authority`** — the Authority app: networks, authorities,
+  elections, keyholding.
 
 The architectural style is a layered separation between *contract*
-(`vote-core`), *behavior* (`vote-engine`), and *platform/composition* (the app).
-The lower layers are runtime-agnostic; everything React Native-specific or
-peer-to-peer-specific is confined to the app layer. Data is modeled as SQL
+(`vote-core`), *behavior* (`vote-engine`), and *platform/composition* (the
+apps). The lower layers are runtime-agnostic: everything React Native-specific
+or peer-to-peer-specific is confined to the app layer. Data is modeled as SQL
 tables in a single declared schema and accessed through engine classes; the
 underlying storage and networking are injected at the app boundary.
 
-## Workspace Layout
-
-Source lives under two workspace roots declared in the root `package.json`:
-`packages/*` and `apps/*`.
+## Workspace layout
 
 ```
 votetorrent/
@@ -45,11 +41,12 @@ votetorrent/
 │   ├── vote-engine/        @votetorrent/vote-engine (library)
 │   └── p2p-probe-host/     p2p-probe-host           (dev-tooling drone)
 ├── apps/
-│   └── VoteTorrentAuthority/  votetorrent-authority (React Native app)
-├── vendor/                 in-repo copies of @serfab/* and @optimystic/* deps
+│   ├── VoteTorrentVoter/     votetorrent-voter      (React Native app)
+│   └── VoteTorrentAuthority/ votetorrent-authority  (React Native app)
 ├── patches/                human-readable notes for the .yarn/patches entries
 ├── .yarn/patches/          yarn patch: files applied to upstream packages
-└── scripts/                build / vendor-sync / verification tooling
+├── scripts/                guards, on-device proofs, fastlane signing
+└── web/                    votetorrent.org static site
 ```
 
 | Workspace | Package | Type | Entry |
@@ -57,30 +54,35 @@ votetorrent/
 | `packages/vote-core` | `@votetorrent/vote-core` | Published library | `dist/src/index.js` |
 | `packages/vote-engine` | `@votetorrent/vote-engine` | Published library | `dist/index.js` (+ `./rn` subpath → `dist/rn-entry.js`) |
 | `packages/p2p-probe-host` | `p2p-probe-host` | Private dev tool | `drone.mjs` |
+| `apps/VoteTorrentVoter` | `votetorrent-voter` | Private app | React Native (Metro) |
 | `apps/VoteTorrentAuthority` | `votetorrent-authority` | Private app | React Native (Metro) |
 
 The root `workspaces.nohoist` list keeps React Native, React Navigation,
-i18next, and Babel out of the hoisted root `node_modules` so the app resolves
+i18next, and Babel out of the hoisted root `node_modules` so each app resolves
 its own copies — a requirement of the Metro bundler.
 
-## Workspace Graph
+## Workspace graph
 
 ```mermaid
 graph TD
-    app[votetorrent-authority<br/>React Native app]
+    voter[votetorrent-voter<br/>React Native app]
+    auth[votetorrent-authority<br/>React Native app]
     engine[vote-engine<br/>concrete engines]
-    core[vote-core<br/>types + interfaces]
+    core[vote-core<br/>types + interfaces + schema]
     quereus[Quereus<br/>SQL engine]
     cryptoplug[optimystic<br/>quereus-plugin-crypto]
     cadre[serfab/cadre-core<br/>Sereus strands]
     dbp2p[optimystic/db-p2p<br/>libp2p key network]
     leveldb[rn-leveldb +<br/>quereus LevelDB plugin]
 
-    app --> engine
-    app --> core
-    app --> cadre
-    app --> dbp2p
-    app --> leveldb
+    voter --> engine
+    auth --> engine
+    voter --> cadre
+    auth --> cadre
+    voter --> leveldb
+    auth --> leveldb
+    voter --> dbp2p
+    auth --> dbp2p
     engine --> core
     engine --> quereus
     engine --> cryptoplug
@@ -90,243 +92,196 @@ graph TD
 
 Dependency direction is strictly downward: `vote-core` depends on nothing in the
 repo; `vote-engine` depends only on `vote-core` (plus Quereus and the crypto
-plugin); the app depends on both and adds the platform/P2P stack. Notably,
-**no React Native, Sereus, libp2p, or storage dependency enters
-`packages/vote-engine`** — those live exclusively in the app layer behind
-injected factories (see [Runtime Composition](#runtime-composition)).
+plugin); the apps depend on both and add the platform/P2P stack. Notably, **no
+React Native, Sereus, or storage dependency enters `packages/vote-engine`** —
+those live in the app layer behind injected factories (see
+[Runtime composition](#runtime-composition)).
 
 ## Packages
 
 ### `@votetorrent/vote-core` — contracts and types
 
-The core library is the source of truth for the domain model. It exports types,
-models, and the engine *interfaces* but holds no concrete engine logic. Its
-`src/index.ts` re-exports a set of domain-scoped barrels, each a folder under
-`src/`:
+The source of truth for the domain model. It exports types, models, and the
+engine *interfaces*, but holds no concrete engine logic. Its `src/index.ts`
+re-exports a set of domain-scoped barrels, each a folder under `src/`:
 
 | Module | Responsibility |
 | --- | --- |
-| `authority/` | Authorities, administrators, officers |
-| `network/` · `networks/` | A single network and the collection / recents of networks |
-| `election/` · `elections/` | A single election and the collection of elections |
+| `authority/` · `authority-config/` | Authorities, administrators, officers, and their configuration |
+| `network/` · `networks/` | A single network, and the collection / recents of networks |
+| `election/` · `elections/` | A single election, and the collection of elections |
+| `registration/` | Voter registration records and rules |
+| `association/` | Device association and attestation |
 | `signing/` | Signing sessions and signature primitives |
 | `invite/` | Authority / officer / keyholder invitations |
 | `tasks/` | Onboarding, key-release, and signature task queues |
 | `user/` | User records and keys |
 | `subscription/` | Live-query subscription interfaces |
-| `common/` | Shared primitives: `IBuilder`, cursors, signatures, image/video refs, threshold policies, `LocalStorage`, errors |
+| `common/` | Shared primitives: `IBuilder`, cursors, signatures, media refs, threshold policies, `LocalStorage`, errors |
 
-Each `types.ts` declares the `IXxxEngine` interface the engine must implement
-(for example `INetworksEngine` in `src/networks/types.ts`), and `models.ts`
-declares the plain data shapes (`NetworkInit`, `NetworkReference`, `User`, …).
-The `common/builder.ts` `IBuilder<TInput, TOutput>` contract underpins the
-form-builder pattern used throughout the UI. Runtime dependencies are minimal:
-`@libp2p/interface`, `@libp2p/peer-id`, and `uint8arrays`.
+Each module's `types.ts` declares the `IXxxEngine` interface the engine must
+implement; its `models.ts` declares the plain data shapes. The
+`common/builder.ts` `IBuilder<TInput, TOutput>` contract underpins the
+form-builder pattern used throughout both app UIs. Runtime dependencies are
+minimal: `@libp2p/interface`, `@libp2p/peer-id`, `uint8arrays`.
 
-The canonical SQL schema lives here as well, at
-`packages/vote-core/schema/votetorrent.qsql` — a single Quereus DDL file
-(`declare schema main { ... } apply schema main;`) defining all domain tables
-(`Network`, `Authority`, `Admin`, `Officer`, `User`, `UserKey`, …) and their
-constraints.
+The **canonical SQL schema** lives here too, at `schema/votetorrent.qsql` — a
+single Quereus DDL file (`declare schema main { ... } apply schema main;`)
+defining every domain table and its constraints.
 
 ### `@votetorrent/vote-engine` — concrete engines
 
-The engine library implements the `vote-core` interfaces against a Quereus
-`Database`. The structure mirrors `vote-core`: each domain folder contains an
-engine, a mock engine, and a `builders/` directory.
+Implements the `vote-core` interfaces against a Quereus `Database`. Its
+structure mirrors `vote-core`: each domain folder holds an engine, a mock
+engine, and a `builders/` directory.
 
-- **Engines** (`networks-engine.ts`, `network-engine.ts`, `elections-engine.ts`,
-  `election-engine.ts`, `signing-engine.ts`, `authority-engine.ts`,
-  `user-engine.ts`, `default-user-engine.ts`, the `tasks/*-engine.ts`, and
-  `invite/invitation-engine.ts`) implement the `IXxx` interfaces by issuing SQL
-  through a shared `EngineContext`.
-- **Mock engines** (`mock-*.ts`) provide in-memory implementations used by tests
-  and earlier UI development.
+- **Engines** implement the `IXxx` interfaces by issuing SQL through a shared
+  `EngineContext` — `networks-engine.ts`, `network-engine.ts`,
+  `elections-engine.ts`, `election-engine.ts`, `signing-engine.ts`,
+  `authority-engine.ts`, `user-engine.ts`, `registration-engine.ts`,
+  `association-engine.ts`, the `tasks/*-engine.ts`, and
+  `invite/invitation-engine.ts`.
+- **Mock engines** (`mock-*.ts`) are in-memory implementations used by tests and
+  by UI development ahead of the real path.
 - **Builders** (`*/builders/*-builder.ts`) implement the `IBuilder` contract:
-  immutable draft objects with per-setter/cross-field validators that produce a
-  validated payload and `commit()` it through an engine (for example
-  `NetworksCreateBuilder` delegates to `NetworksEngine.create`).
+  immutable drafts with per-setter and cross-field validators that produce a
+  validated payload and `commit()` it through an engine.
 
-The engine's database tier lives under `src/database/`:
+The database tier lives under `src/database/`:
 
-- `schema-sql.ts` — the schema DDL **bundled as a string constant**
-  (`VOTETORRENT_SCHEMA_SQL`), auto-generated from
-  `vote-core/schema/votetorrent.qsql`. It is a string (not a file read) so
-  `initDB` works under Hermes, which cannot parse `import.meta` and has no Node
-  `fs`.
-- `initialize.ts` — `registerDbPlugins` (registers the `@optimystic/quereus-plugin-crypto`
-  plugin plus custom `SignatureValid` / `isISODatetime` SQL functions),
-  `initDB` (executes the schema), and the schema-version / TID-sequence helpers
-  used to gate create-vs-reattach.
+- `schema-sql.ts` — the schema DDL bundled as a **string constant**
+  (`VOTETORRENT_SCHEMA_SQL`), generated from `vote-core/schema/votetorrent.qsql`.
+  A string rather than a file read because Hermes cannot parse `import.meta` and
+  has no Node `fs`.
+- `initialize.ts` — `registerDbPlugins` (the
+  `@optimystic/quereus-plugin-crypto` plugin plus custom `SignatureValid` /
+  `isISODatetime` SQL functions), `initDB`, and the schema-version helpers that
+  gate create-vs-reattach.
+- `tid-allocator.ts`, `digest-vectors.ts`, `migrations/`.
 
-Two key abstractions decouple the engine from the runtime, both defined in
-`src/types.ts`:
+Two abstractions in `src/types.ts` decouple the engine from the runtime:
 
-- `EngineContext` — `{ db: Database; user?: User }`, the per-network handle the
+- **`EngineContext`** — `{ db: Database; user?: User }`, the per-network handle
   engines operate on.
-- `DbFactory` — `(networkHash: string) => Promise<Database>`, the injected
-  factory that produces a `Database` for a given network. The engine's only
-  built-in factory is an in-memory `new Database()`; the concrete persistent and
-  P2P factories live in the app.
+- **`DbFactory`** — `(networkHash: string) => Promise<Database>`, the injected
+  factory producing a `Database` for a network. The engine's only built-in
+  factory is an in-memory `new Database()`; the persistent and P2P factories
+  live in the apps.
 
-The package has two entry points. The default `.` barrel (`src/index.ts`)
-deliberately **omits `NetworksEngine`**; the React Native subpath
+The package has **two entry points**. The default `.` barrel (`src/index.ts`)
+deliberately omits `NetworksEngine`. The React Native subpath
 `@votetorrent/vote-engine/rn` (`src/rn-entry.ts`) is the single controlled
-export path that exposes `NetworksEngine` and the other concrete engines plus
-`LocalStorageReact`, `DbFactory`/`EngineContext` types, `H16`, and
-`VOTETORRENT_SCHEMA_SQL`. This keeps `NetworksEngine` out of non-RN consumers.
+export path exposing `NetworksEngine` and the other concrete engines, plus the
+attestation verifiers, `LocalStorageReact`, and the `DbFactory` /
+`EngineContext` types.
 
-`vote-engine` builds with `tsc` directly (not aegir) and tests with Mocha. Its
-`react`/`react-native`/`@react-native-async-storage` dependencies support the
-React-backed `LocalStorageReact` adapter; they are also declared as
-`peerDependencies`.
+Device attestation has two dedicated documents:
+[`ATTESTATION-CONTRACT.md`](../packages/vote-engine/ATTESTATION-CONTRACT.md)
+(the `Digest(nonce, deviceKey)` wire format shared with the Voter app) and
+[`SETUP.md`](../packages/vote-engine/SETUP.md) (the human-only runbook for
+provisioning Play Integrity / key attestation).
 
 ### `p2p-probe-host` — dev-tooling drone
 
-A private workspace (`p2p-probe-host`) containing a host-side CadreNode "drone"
-(`drone.mjs`) used for the P2P dial proof during development. It is not
-published and not part of the app runtime; it depends on `@serfab/cadre-core`,
-`@optimystic/db-p2p`, and `@libp2p/websockets`. The shell drivers under
-`scripts/` (`run-dial-probe.sh`, `run-replication-proof.sh`,
-`run-signing-proof.sh`, `run-vtest02.sh`) coordinate these proofs.
+A private workspace containing a host-side CadreNode "drone" (`drone.mjs`) used
+by the dial and replication proofs. Not published, not part of any app runtime.
+The shell drivers under `scripts/` coordinate the proofs — see
+[Development](development.md#on-device-proofs).
 
-### `votetorrent-authority` — React Native app
+### The apps
 
-The Authority app is the reference application for setting up networks,
-authorities, and elections. It depends on both workspace libraries
-(`@votetorrent/vote-core` and `@votetorrent/vote-engine` via `workspace:*`) and
-supplies everything platform-specific. Its `src/` is organized as:
+Both apps depend on the two libraries via `workspace:*` and supply everything
+platform-specific. They share a `src/` shape:
 
 | Directory | Responsibility |
 | --- | --- |
-| `engines/` | Composition layer: `EngineFactory`, the persistent/strand `DbFactory` (`rn-db-factory.ts`), the strand key-network adapter (`key-network-strand.ts`), device user/signer, and the on-device proof runners |
-| `providers/` | React context providers: `AppProvider` (engine lifecycle), `CadreNodeProvider` (boots the Sereus CadreNode), `SettingsProvider` |
+| `engines/` | Composition layer: `EngineFactory`, the persistent `DbFactory` (`rn-db-factory.ts`), device user/signer, storage guard, and the on-device proof runners |
+| `providers/` | React context providers — app/engine lifecycle, `CadreNodeProvider` (boots the Sereus CadreNode), settings |
 | `navigation/` | React Navigation root navigator and route types |
-| `screens/` | Feature screens grouped by domain (networks, authorities, elections, ballots, tasks, users, admin, keyholder, settings) |
-| `components/` | Shared presentational components |
-| `hooks/` · `theme/` · `i18n/` · `utils/` | Cross-cutting UI concerns |
+| `screens/` | Feature screens grouped by domain |
+| `components/` · `hooks/` · `theme/` · `i18n/` · `utils/` | Shared UI and cross-cutting concerns |
 
-Outside `src/`, the app root holds the platform projects (`android/`, `ios/`),
-the Metro config (`metro.config.js`) with its polyfill bootstrap
-(`polyfills.bootstrap.js`, `polyfills/`) for the Node-style globals the P2P/SQL
-stack expects under Hermes, and the build entry (`index.js` → `App.tsx`).
+Where they differ: the **Authority** app adds `SettingsProvider` plus the
+keyholder and admin screens, and pins the Voter app's package name and signing
+certificate digest for attestation (`engines/attestation-*.generated.ts`). The
+**Voter** app adds the attestation *producer* side
+(`engines/attestation-producer.ts`), a dev seed, and the registration/ballot
+draft providers.
 
-## External & Vendored Dependencies
+Outside `src/`, each app root holds the platform projects (`android/`, `ios/`),
+`metro.config.js` with its `polyfills.bootstrap.js` / `polyfills/` for the
+Node-style globals the P2P and SQL stack expects under Hermes, and the build
+entry (`index.js` → `App.tsx`). The Metro configuration carries several
+load-bearing workarounds documented in
+[Development](development.md#react-native--hermes-constraints).
 
-VoteTorrent builds on three external technology families, several pieces of
-which are pinned into the repository rather than consumed straight from the
-registry.
+## External dependencies
 
-### The technology families
+VoteTorrent builds on three external technology families, all consumed as
+**published packages** from the registry:
 
-- **Quereus** (`@quereus/quereus`) — the embedded SQL engine. Every engine
-  operates on a Quereus `Database`. The app additionally uses
-  `@quereus/store`, `@quereus/isolation`, and
-  `@quereus/plugin-react-native-leveldb` for the on-device persistent backend.
+- **Quereus** (`@quereus/quereus`, `@quereus/store`, `@quereus/isolation`) — the
+  embedded SQL engine. Every engine operates on a Quereus `Database`. The apps
+  add `@quereus/plugin-react-native-leveldb` for the on-device persistent
+  backend.
 - **Sereus** (`@serfab/cadre-core`, `@serfab/quereus-plugin-sereus`,
   `@serfab/strand-proto`) — the P2P "strand" layer. A `CadreNode` manages
   control networks and strand participation; a strand exposes a Quereus
-  `Database` whose tables are replicated across peers.
+  `Database` whose tables replicate across peers.
 - **Optimystic** (`@optimystic/db-core`, `@optimystic/db-p2p`,
   `@optimystic/db-p2p-storage-rn`, `@optimystic/quereus-plugin-crypto`,
   `@optimystic/quereus-plugin-optimystic`) — the distributed database and key
-  network. `@optimystic/db-p2p` provides `Libp2pKeyPeerNetwork` (an
-  `IKeyNetwork` over libp2p), and `db-p2p-storage-rn` provides the React Native
-  LevelDB storage backend. See [Optimystic](optimystic.md).
-- **libp2p** — the underlying peer-to-peer transport (Kademlia DHT, WebSockets,
-  circuit relay), wired in by the Sereus and Optimystic layers.
+  network. `db-p2p` provides `Libp2pKeyPeerNetwork` (an `IKeyNetwork` over
+  libp2p); `db-p2p-storage-rn` provides the React Native LevelDB backend. The
+  design docs for this layer live in the
+  [Optimystic repository](https://github.com/gotchoices/Optimystic/tree/main/docs).
+- **libp2p** — the underlying transport (Kademlia DHT, WebSockets, circuit
+  relay), wired in by the Sereus and Optimystic layers.
 
-### Why these are vendored (`portal:` resolutions)
-
-The root `package.json` `resolutions` field redirects the `@serfab/*` and
-`@optimystic/db-*` packages to in-repo copies under `vendor/`:
-
-```
-"@serfab/cadre-core":            "portal:./vendor/@serfab/cadre-core",
-"@serfab/quereus-plugin-sereus": "portal:./vendor/@serfab/quereus-plugin-sereus",
-"@serfab/strand-proto":          "portal:./vendor/@serfab/strand-proto",
-"@optimystic/db-core":           "portal:./vendor/@optimystic/db-core",
-"@optimystic/db-p2p":            "portal:./vendor/@optimystic/db-p2p",
-"@optimystic/db-p2p-storage-rn": "portal:./vendor/@optimystic/db-p2p-storage-rn"
-```
-
-These libraries are co-developed alongside VoteTorrent (the Sereus and
-Optimystic working trees live as `../sereus` and `../Optimystic` siblings during
-active development). Vendoring serves two goals:
-
-1. **Reproducible clean-clone builds.** The vendored `dist/` is committed, so a
-   fresh clone builds without the sibling source trees present.
-2. **Version pinning of fast-moving co-dependencies.** A `portal:` resolution
-   points the whole dependency graph at one known-good copy, avoiding registry
-   drift while the upstream packages stabilize.
-
-The maintainer-only `scripts/sync-vendor.sh` rebuilds the `@serfab` `dist/` from
-the `../sereus` sibling and copies it into `vendor/@serfab/<pkg>/`; it is *not*
-needed for a clean-clone build.
+Sereus and Optimystic are co-developed alongside VoteTorrent. They were
+previously consumed as in-repo vendored `portal:` copies under `vendor/`; that
+model was retired once the upstream packages stabilized on the registry. The
+root `resolutions` now pin them to published version ranges, alongside pins that
+collapse shared low-level libraries (`uint8arrays`, `@noble/*`, `@libp2p/*`,
+`@multiformats/multiaddr`) onto a single copy each.
 
 ### Patches
 
-A few upstream packages need source-level fixes applied via `yarn patch`,
-recorded under `.yarn/patches/` and referenced from `resolutions`:
+A few upstream packages still need source-level fixes, applied via `yarn patch`,
+recorded under `.yarn/patches/` and referenced from the root `resolutions`.
+Check `package.json` for the current set and versions; human-readable rationale
+for individual patches lives under [`patches/`](../patches).
 
-- `@quereus/quereus@3.3.0` — patched (used by both `vote-engine` and the app).
-- `@optimystic/quereus-plugin-optimystic@0.13.5` — patched (composite-PK fix;
-  the human-readable rationale is in `patches/optimystic-quereus-plugin-composite-pk.md`).
-- `@serfab/cadre-core@0.7.1` — patched.
+## Build pipeline
 
-Other resolutions pin shared low-level libraries to single versions
-(`uint8arrays` → `3.1.1`, `@noble/curves`/`@noble/hashes` → `2.2.0`,
-`@libp2p/crypto`, `@multiformats/multiaddr`, etc.) so the transitive graph
-converges on one copy of each.
-
-## Build Pipeline
-
-The root `package.json` scripts fan out across all workspaces with
+Root scripts fan out across all workspaces with
 `yarn workspaces foreach -A run <script>`:
 
 | Root command | What it does |
 | --- | --- |
-| `yarn build` | Runs each workspace's `build` (`vote-core` via aegir, `vote-engine` via `tsc -p tsconfig.build.json`, the app via `bin/build.sh`) |
-| `yarn test` | Runs each workspace's `test` (`vote-core` aegir, `vote-engine` Mocha, the app Jest) |
-| `yarn lint` | Runs `scripts/check-peer-requirements.mjs`, then each workspace's `lint` |
-| `yarn clean` | Runs each workspace's `clean` |
-| `yarn start` / `android` / `ios` | Delegate to the `votetorrent-authority` workspace (Metro / React Native CLI) |
+| `yarn build` | Each workspace's `build` — `vote-core` via aegir, `vote-engine` via `tsc -p tsconfig.build.json`, apps via fastlane/Gradle |
+| `yarn test` | Each workspace's `test` — `vote-core` aegir, `vote-engine` Mocha, apps Jest |
+| `yarn lint` | `scripts/check-peer-requirements.mjs`, then each workspace's `lint` |
+| `yarn clean` | Each workspace's `clean` |
 
-The `postinstall` and `lint:peers` hooks both run
-`scripts/check-peer-requirements.mjs`, a guard that re-asserts the
-`@optimystic/quereus-plugin-*` peer-dependency signal that the broad `YN0086`
-filter in `.yarnrc.yml` would otherwise mask. `@votetorrent/vote-core` builds
-and lints with **aegir**; `@votetorrent/vote-engine` compiles with `tsc`
-directly; the app bundles through **Metro** (`metro.config.js`).
+Plus per-app shortcuts (`start`/`android`/`ios` and their `:voter` variants) and
+the release chain (`verify:keystore`, `build:apk`, `publish:apk`,
+`release:apk`). See [Development](development.md) for the guard scripts and
+[Android builds and releases](releases/RELEASE-ANDROID.md) for signing.
 
-### Vendor / portal verification scripts
-
-Three acceptance-gate scripts under `scripts/` keep the vendoring and portal
-setup honest:
-
-- **`verify-vendoring.sh`** — simulates the absence of the `../sereus` sibling
-  (clean-clone condition), runs `yarn install` plus a Metro Android bundle, and
-  asserts that `@serfab/cadre-core` resolves to the in-repo `vendor/` copy and
-  that the bundle builds. Proves reproducibility from a clean clone.
-- **`verify-portal-adoption.sh`** — runs `yarn install`, a Metro Android bundle,
-  the `vote-engine` suite, and a published/portal boundary check (no leaked
-  `@quereus/quereus` `portal:` references). Requires the sibling working trees.
-- **`check-peer-requirements.mjs`** — the peer-dependency guard described above.
-
-## Runtime Composition
+## Runtime composition
 
 At runtime the layers compose through dependency injection at the app boundary.
-The provider tree in `App.tsx` nests
-`SettingsProvider → CadreNodeProvider → AppProvider`, and the engine wiring flows
-as follows:
+The provider tree nests `Settings → CadreNode → App`, and the engine wiring
+flows as follows:
 
 ```mermaid
 graph TD
     screens[Screens / hooks] -->|getEngine| factory[EngineFactory]
-    appprov[AppProvider] --> factory
+    appprov[App provider] --> factory
     cadreprov[CadreNodeProvider] -->|CadreNode| factory
     factory --> netsEngine[NetworksEngine]
-    factory -->|builds| siblings[Network/Elections/Signing/<br/>Tasks/Invitation engines]
+    factory -->|builds| siblings[Network/Elections/Signing/Tasks/<br/>Registration/Association engines]
     netsEngine -->|DbFactory| dbf{DbFactory}
     dbf -->|solo| rnleveldb[rn-leveldb<br/>persistent Quereus DB]
     dbf -->|P2P| strand[CadreNode strand<br/>replicated Quereus DB]
@@ -334,35 +289,30 @@ graph TD
     siblings --> ctx
 ```
 
-1. **`CadreNodeProvider`** boots a Sereus `CadreNode` for the app lifetime
-   (peer-to-peer transport over libp2p WebSockets / circuit relay), persisting
-   the peer key across restarts. It is the only place `@serfab/cadre-core`,
+1. **`CadreNodeProvider`** boots a Sereus `CadreNode` for the app lifetime (P2P
+   over libp2p WebSockets / circuit relay), persisting the peer key across
+   restarts. It is the only place `@serfab/cadre-core`,
    `@optimystic/db-p2p-storage-rn`, and `rn-leveldb` are imported for the node
    lifecycle.
-2. **`AppProvider`** owns one app-lifetime `EngineFactory`, constructed with a
-   `LocalStorageReact` and the persistent `rnDbFactory`.
+2. **The app provider** owns one app-lifetime `EngineFactory`, constructed with
+   a `LocalStorageReact` and the persistent `rnDbFactory`.
 3. **`EngineFactory`** (`src/engines/engine-factory.ts`) is the single
-   construction point for all engines. It constructs one `NetworksEngine`,
-   injecting a lazy-dispatch `DbFactory` that delegates to
-   `createStrandDbFactory(node)` when a CadreNode is present (the real P2P path)
-   and falls back to the solo `rnDbFactory` (LevelDB-backed) otherwise. It then
-   lazily builds and caches the sibling engines (`network`, `elections`,
-   `signing`, `election`, the task engines, `invitations`, …), each constructed
-   from the established `EngineContext` for the current network.
-4. **`NetworksEngine`** (`vote-engine`) owns the per-network `EngineContext`
-   lifecycle: `create()` runs the schema DDL on a fresh store and writes the
+   construction point for all engines. It builds one `NetworksEngine`, injecting
+   a lazy-dispatch `DbFactory` that delegates to the strand factory when a
+   CadreNode is present (the real P2P path) and falls back to the solo
+   LevelDB-backed factory otherwise. It then lazily builds and caches the
+   sibling engines from the established `EngineContext`.
+4. **`NetworksEngine`** owns the per-network `EngineContext` lifecycle:
+   `create()` runs the schema DDL on a fresh store and writes the
    schema-version marker; `open()` is cache-first and re-attaches to an
    already-initialized store. Both route exclusively through the injected
    `DbFactory`, so the engine never imports a platform or P2P dependency
    directly.
 5. **Sibling engines** receive that `EngineContext` and issue SQL against its
-   `Database`. The app's `key-network-strand.ts` separately adapts a strand's
-   libp2p node into an Optimystic `IKeyNetwork` (`Libp2pKeyPeerNetwork`) for the
-   distributed key lookups.
+   `Database`.
 
 The result is a clean seam: the same engine code runs over an in-memory database
 in tests, a persistent LevelDB database when solo on-device, and a
 peer-replicated Sereus strand when connected — selected entirely by which
-`DbFactory` the app injects. The protocol and network design behind these
-networks is described in [architecture.md](architecture.md),
-[optimystic.md](optimystic.md), and [repository.md](repository.md).
+`DbFactory` the app injects. For the protocol design behind those networks, see
+[architecture.md](architecture.md).

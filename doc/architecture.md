@@ -59,7 +59,9 @@ Each network varies in terms of what specific information is stored and exchange
 
 The Optimystic system uses a logical transaction log combined with block-based storage to provide a distributed database system. This scheme can be used standalone or coupled with tree or other data structures, supporting both single-collection and cross-collection transactions through a multi-phase process for propagating updates, committing transactions, and checkpointing affected blocks.
 
-For details, see [optimystic](optimystic.md).
+For details, see [optimystic](https://github.com/gotchoices/Optimystic/blob/main/docs/optimystic.md)
+and [repository](https://github.com/gotchoices/Optimystic/blob/main/docs/repository.md)
+in the Optimystic repository.
 
 ## Matchmaking
 
@@ -67,7 +69,8 @@ VoteTorrent's peer-to-peer network employs a rendezvous-based matchmaking system
 
 The matchmaking process differs for active matchers and waiting workers. Active matchers generate rendezvous keys, publish their intent, search for matches, and adjust key specificity as needed to find suitable peers quickly. Workers, on the other hand, register their availability with longer Time-To-Live (TTL) values and wait for work assignments, adjusting their specificity to balance the load at rendezvous points. This flexible system can handle various scenarios, from sparse networks with few interested peers to dense networks with many participants, by dynamically adjusting the rendezvous key specificity to optimize peer discovery and work distribution.
 
-For details, see [matchmaking](matchmaking.md).
+For details, see [matchmaking](https://github.com/gotchoices/Optimystic/blob/main/docs/matchmaking.md)
+in the Optimystic repository.
 
 ## Election Logic
 
@@ -76,6 +79,9 @@ Election structures are stored using the Optimystic distributed database system.
 See [Election Logic](election.md) for details on the election processes.
 
 ## Glossary of Terms
+
+Terms below are VoteTorrent-specific. For general US election terminology, see
+the EAC's [Glossary of Election Terms](Glossary_of_Election_Terms_EAC.pdf).
 
 * **Administrator** - a person who, in combination with the other administrators, is authorized to act on behalf of an authority.
 * **Authority** - district or entity involved in the voting process
