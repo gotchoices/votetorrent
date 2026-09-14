@@ -1,0 +1,37 @@
+{
+	"name": "multipeer-gate",
+	"version": "1.0.0",
+	"private": true,
+	"type": "module",
+	"description": "Standalone Node gates for the n=4 Sereus/Optimystic multi-peer topology: 2 always-on relay drones + 2 relay-only peers. multipeer-gate runs every node in one process; multiproc-gate runs each in its own OS process (or on another host) so replication has to cross a real socket. Both run the same ordered legs -- provenance, control mesh, relay reservation, real dial, cadre authorization, strand cohort, and the distributed-database legs (bidirectional, convergence, concurrency, mutation, isolation control) -- and localize the first blocker.",
+	"scripts": {
+		"start": "node multipeer-gate.mjs",
+		"gate": "node multipeer-gate.mjs",
+		"gate:multiproc": "node multiproc-gate.mjs",
+		"gate:both": "node multipeer-gate.mjs; node multiproc-gate.mjs",
+		"test:repro": "node --test repro/*.test.mjs",
+		"selftest": "node selftest.mjs"
+	},
+	"engines": {
+		"node": ">=22"
+	},
+	"dependencies": {
+		"@libp2p/circuit-relay-v2": "^4",
+		"@libp2p/crypto": "^5",
+		"@libp2p/peer-id": "^6",
+		"@libp2p/websockets": "^10",
+		"@optimystic/db-core": "^1.0.0-beta.3",
+		"@optimystic/db-p2p": "^1.0.0-beta.3",
+		"@serfab/cadre-core": "0.13.0",
+		"@serfab/strand-proto": "^0.11.0"
+	},
+	"overrides": {
+		"@optimystic/db-p2p": "^1.0.0-beta.3",
+		"@optimystic/db-core": "^1.0.0-beta.3",
+		"@optimystic/quereus-plugin-optimystic": "^1.0.0-beta.3",
+		"@optimystic/quereus-plugin-crypto": "^1.0.0-beta.3",
+		"@quereus/quereus": "4.18.0",
+		"@quereus/store": "4.18.0",
+		"@quereus/isolation": "4.18.0"
+	}
+}
