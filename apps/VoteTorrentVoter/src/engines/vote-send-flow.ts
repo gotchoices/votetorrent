@@ -8,7 +8,8 @@
  * prompt per block). A reachability probe signed with a throwaway pool key runs before the
  * fingerprint prompt, so an unreachable network costs no prompt (R3, D-30). The probe stops when
  * the card leaves (the signal) or after PROBE_BUDGET_MS, whichever comes first, and dials no further
- * address after that (WR-02). Every dependency is injectable so the flow is tested without a device.
+ * address after that (WR-02). An unanswered consent prompt is dismissed through the native sign cancel
+ * before the next one. Every dependency is injectable so the flow is tested without a device.
  * Nothing is logged.
  */
 import {multiaddr} from '@multiformats/multiaddr';
@@ -19,6 +20,7 @@ import {
 	poolRequests,
 } from '@votetorrent/vote-engine/rn';
 import type {PoolRendezvousClient} from '@votetorrent/vote-engine/rn';
+import {cancelPendingSign} from '@votetorrent/attestation-native';
 import type {SecretWrapPrompt} from '@votetorrent/attestation-native';
 import {revealVoteReceipt} from './vote-receipt';
 import type {VoteRecordEnvelope} from './vote-record-vault';
@@ -51,6 +53,8 @@ export interface VoteSendFlowDeps {
 	readRendezvousAddrs?: () => Promise<string[]>
 	toDialTarget?: (addr: string) => unknown
 	send?: typeof sendSavedVote
+	/** dismisses the consent prompt that is showing (default: attestation-native's cancelPendingSign); test seam */
+	cancelSign?: () => Promise<unknown>
 	/** test seam: the probe's overall budget (default PROBE_BUDGET_MS) */
 	probeBudgetMs?: number
 }
@@ -142,6 +146,7 @@ export async function runVoteSendFlow(deps: VoteSendFlowDeps): Promise<VoteSendF
 			record: opened.record,
 			rendezvous,
 			signConsent,
+			cancelSign: deps.cancelSign ?? cancelPendingSign,
 			nowMs: deps.nowMs,
 			onStatus: deps.onStatus,
 			signal: deps.signal,
