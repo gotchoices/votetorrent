@@ -8,7 +8,7 @@
  */
 import React from 'react';
 import renderer from 'react-test-renderer';
-import {AppState} from 'react-native';
+import {AppState, Platform} from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {NavigationContainer, createNavigationContainerRef} from '@react-navigation/native';
 import type {ParamListBase} from '@react-navigation/native';
@@ -486,10 +486,6 @@ describe('VoteReceiptScreen', () => {
 
 	it.each([
 		['CANCELED', 'Your choices are still hidden.'],
-		[
-			'NO_BIOMETRICS_ENROLLED',
-			"Your fingerprint can't be checked right now. Make sure a fingerprint is set up on this phone, then try again.",
-		],
 		['UNWRAP_FAILED', "We couldn't open your saved vote. Try again."],
 	] as const)('S11: %s keeps choices hidden with a notice', async (code, expected) => {
 		await save(makeRecord());
@@ -500,6 +496,29 @@ describe('VoteReceiptScreen', () => {
 		expect(has('receipt-reveal')).toBe(true);
 		expect(nonceGroups(0)).toHaveLength(0);
 		expect(everything()).not.toContain('Mayor question');
+	});
+
+	describe.each([
+		['ios', "Face ID can't be checked right now. Make sure Face ID is set up on this iPhone, then try again.", "You'll be asked for Face ID."],
+		['android', "Your fingerprint can't be checked right now. Make sure a fingerprint is set up on this phone, then try again.", "You'll be asked for your fingerprint."],
+	] as const)('biometric copy on %s', (os, unavailable, hint) => {
+		const realOS = Platform.OS;
+		beforeEach(() => { Object.defineProperty(Platform, 'OS', {value: os, configurable: true}); });
+		afterEach(() => { Object.defineProperty(Platform, 'OS', {value: realOS, configurable: true}); });
+
+		it('S11b: NO_BIOMETRICS_ENROLLED notice follows the platform', async () => {
+			await save(makeRecord());
+			await mount({electionId: 'e1'});
+			wrapper.failNextCall('unwrap', 'NO_BIOMETRICS_ENROLLED');
+			await press('receipt-reveal');
+			expect(textById('receipt-reveal-notice')).toBe(unavailable);
+		});
+
+		it('S11c: the reveal hint follows the platform', async () => {
+			await save(makeRecord());
+			await mount({electionId: 'e1'});
+			expect(everything()).toContain(hint);
+		});
 	});
 
 	it('S12: renders in Spanish', async () => {

@@ -46,6 +46,7 @@ type RevealNotice = 'canceled' | 'biometric-unavailable' | 'failed';
 
 const NOTICE_KEY: Record<RevealNotice, string> = {
 	canceled: 'receipt.revealCanceled',
+	// resolved per platform at render (the biometric copy names the platform's own biometric, D-101)
 	'biometric-unavailable': 'receipt.revealBiometricUnavailable',
 	failed: 'receipt.revealFailed',
 };
@@ -55,6 +56,8 @@ export default function VoteReceiptScreen() {
 	const {getEngine, seededElectionId, nowMs} = useVoterApp();
 	const {colors, fonts, type: typeScale, radii} = useTheme() as ExtendedTheme;
 	const {t} = useTranslation('ballot');
+	// Literal keys per platform branch (D-101) so the i18n parity scan resolves every key.
+	const isIos = Platform.OS === 'ios';
 	const route = useRoute<ReceiptRoute>();
 	const navigation = useNavigation<ReceiptNavigation>();
 	useSecureScreenWhileFocused();
@@ -88,7 +91,7 @@ export default function VoteReceiptScreen() {
 			const tr = latest.current.t;
 			const result = await revealVoteReceipt(electionId, envelope, {
 				title: tr('receipt.prompt.title'),
-				subtitle: tr('receipt.prompt.subtitle'),
+				subtitle: Platform.OS === 'ios' ? tr('receipt.prompt.subtitle') : tr('receipt.prompt.subtitle.android'),
 				negativeButton: tr('receipt.prompt.negativeButton'),
 			});
 			busyRef.current = false;
@@ -275,10 +278,12 @@ export default function VoteReceiptScreen() {
 									]}>
 									<Text style={[styles.buttonLabel, {color: colors.primary}]}>{t('receipt.revealCta')}</Text>
 								</Pressable>
-								<Text style={[styles.hint, captionFont, {color: colors.textSecondary}]}>{t('receipt.revealHint')}</Text>
+								<Text style={[styles.hint, captionFont, {color: colors.textSecondary}]}>{isIos ? t('receipt.revealHint') : t('receipt.revealHint.android')}</Text>
 								{notice !== null ? (
 									<Text testID="receipt-reveal-notice" style={[styles.hint, bodyFont, {color: colors.error}]}>
-										{t(NOTICE_KEY[notice])}
+										{notice === 'biometric-unavailable'
+										? (isIos ? t('receipt.revealBiometricUnavailable') : t('receipt.revealBiometricUnavailable.android'))
+										: t(NOTICE_KEY[notice])}
 									</Text>
 								) : null}
 							</View>

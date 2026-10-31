@@ -5,6 +5,7 @@
  */
 import React from 'react';
 import renderer from 'react-test-renderer';
+import {Platform} from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {NavigationContainer} from '@react-navigation/native';
 jest.mock('../../../providers/VoterAppProvider');
@@ -51,7 +52,10 @@ beforeEach(async () => {
 	await i18n.changeLanguage('en');
 	jest.clearAllMocks();
 });
-afterEach(() => { renderer.act(() => tr?.unmount()); tr = null; });
+const realOS = Platform.OS;
+const setOS = (os: 'ios' | 'android') => Object.defineProperty(Platform, 'OS', {value: os, configurable: true});
+afterEach(() => { renderer.act(() => tr?.unmount()); tr = null; setOS(realOS as 'ios'); });
+const allText = () => JSON.stringify(tr!.toJSON());
 
 describe('SendVoteCard', () => {
 	it('shows each ballot\'s status as the flow reports it, then "sent"', async () => {
@@ -102,5 +106,43 @@ describe('SendVoteCard', () => {
 		await mount(['b1']);
 		expect(text('send-all-sent')).toBe('Your vote has been sent to the election.');
 		expect(runVoteSendFlow).not.toHaveBeenCalled();
+	});
+
+	describe.each([
+		['ios', 'ios', "You'll be asked for Face ID to open your saved vote", 'Confirm with Face ID to send.', "Face ID can't be checked right now", 'Use Face ID to send your saved vote'],
+		['android', 'android', "You'll be asked for your fingerprint to open your saved vote", 'Confirm with your fingerprint to send.', "Your fingerprint can't be checked right now", 'Use your fingerprint to send your saved vote'],
+	] as const)('biometric copy on %s', (_n, os, hint, confirming, unavailable, recordSubtitle) => {
+		beforeEach(() => { setOS(os); });
+
+		it('the hint names the platform biometric', async () => {
+			await mount(['b1']);
+			expect(allText()).toContain(hint);
+		});
+
+		it('the confirming line follows the platform', async () => {
+			(runVoteSendFlow as jest.Mock).mockImplementation(async (deps: {onStatus: (b: string, s: unknown) => void}) => {
+				deps.onStatus('b1', {phase: 'confirming'});
+				return {kind: 'canceled'};
+			});
+			await mount(['b1']);
+			await press('send-vote');
+			expect(text('send-ballot-0')).toBe(confirming);
+		});
+
+		it('the biometric-unavailable outcome follows the platform', async () => {
+			(runVoteSendFlow as jest.Mock).mockResolvedValueOnce({kind: 'biometric-unavailable'});
+			await mount(['b1']);
+			await press('send-vote');
+			expect(text('send-outcome')).toContain(unavailable);
+		});
+
+		it('the record prompt subtitle follows the platform, the consent prompt is unchanged', async () => {
+			(runVoteSendFlow as jest.Mock).mockResolvedValueOnce({kind: 'canceled'});
+			await mount(['b1']);
+			await press('send-vote');
+			const deps = (runVoteSendFlow as jest.Mock).mock.calls[0][0] as {recordPrompt: {subtitle: string}, consentPrompt: {subtitle: string}};
+			expect(deps.recordPrompt.subtitle).toBe(recordSubtitle);
+			expect(deps.consentPrompt.subtitle).toBe(i18n.t('send.consentPrompt.subtitle', {ns: 'ballot'}));
+		});
 	});
 });

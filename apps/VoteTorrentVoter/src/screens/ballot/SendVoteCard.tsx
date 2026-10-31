@@ -8,7 +8,7 @@
  * the statuses and never holds the opened record. No raw error text is ever shown.
  */
 import React, {useCallback, useEffect, useRef, useState} from 'react';
-import {Pressable, StyleSheet, Text, View} from 'react-native';
+import {Platform, Pressable, StyleSheet, Text, View} from 'react-native';
 import {useTheme} from '@react-navigation/native';
 import type {ExtendedTheme} from '@react-navigation/native';
 import {useTranslation} from 'react-i18next';
@@ -27,6 +27,7 @@ const OUTCOME_KEY: Record<Outcome, string> = {
 	// no joined address answered: reuses existing copy (D-61, no new strings)
 	'rendezvous-unreachable': 'send.failed',
 	canceled: 'send.canceled',
+	// resolved per platform at render (the biometric copy names the platform's own biometric)
 	'biometric-unavailable': 'send.biometricUnavailable',
 	unreadable: 'send.failed',
 	failed: 'send.failed',
@@ -50,6 +51,9 @@ export default function SendVoteCard({electionId, electionRevision, envelope, ba
 	const node = getNetworkNode();
 	const {colors, fonts, type: typeScale, radii} = useTheme() as ExtendedTheme;
 	const {t} = useTranslation('ballot');
+	// The biometric copy names the platform's own biometric (D-101); literal keys per branch so the
+	// i18n parity scan resolves every key.
+	const isIos = Platform.OS === 'ios';
 	const [statuses, setStatuses] = useState<Record<string, BallotSendStatus>>({});
 	const [outcome, setOutcome] = useState<Outcome | null>(null);
 	const [sending, setSending] = useState(false);
@@ -81,18 +85,23 @@ export default function SendVoteCard({electionId, electionRevision, envelope, ba
 		setOutcome(null);
 		const controller = new AbortController();
 		abort.current = controller;
-		const prompt = (k: 'consentPrompt' | 'recordPrompt') => ({
-			title: t(`send.${k}.title`),
-			subtitle: t(`send.${k}.subtitle`),
-			negativeButton: t(`send.${k}.negativeButton`),
-		});
+		const consentPrompt = {
+			title: t('send.consentPrompt.title'),
+			subtitle: t('send.consentPrompt.subtitle'),
+			negativeButton: t('send.consentPrompt.negativeButton'),
+		};
+		const recordPrompt = {
+			title: t('send.recordPrompt.title'),
+			subtitle: isIos ? t('send.recordPrompt.subtitle') : t('send.recordPrompt.subtitle.android'),
+			negativeButton: t('send.recordPrompt.negativeButton'),
+		};
 		const result = await runVoteSendFlow({
 			electionId,
 			envelope,
 			getEngine,
 			node,
-			recordPrompt: prompt('recordPrompt'),
-			consentPrompt: prompt('consentPrompt'),
+			recordPrompt,
+			consentPrompt,
 			nowMs,
 			signal: controller.signal,
 			onStatus: (ballotId, status) => {
@@ -110,7 +119,7 @@ export default function SendVoteCard({electionId, electionRevision, envelope, ba
 		} else {
 			setOutcome(result.kind);
 		}
-	}, [sending, t, electionId, envelope, getEngine, node, nowMs]);
+	}, [sending, t, isIos, electionId, envelope, getEngine, node, nowMs]);
 
 	const bodyFont = {fontFamily: fonts.regular.fontFamily, fontWeight: fonts.regular.fontWeight, fontSize: typeScale.body.fontSize, lineHeight: typeScale.body.lineHeight};
 	const captionFont = {fontFamily: fonts.regular.fontFamily, fontWeight: fonts.regular.fontWeight, fontSize: typeScale.caption.fontSize, lineHeight: typeScale.caption.lineHeight};
@@ -121,7 +130,7 @@ export default function SendVoteCard({electionId, electionRevision, envelope, ba
 		switch (status.phase) {
 			case 'waiting': return {text: t('send.waiting', {size: status.size}), tone: 'muted'};
 			case 'joined': return {text: t('send.joined'), tone: 'muted'};
-			case 'confirming': return {text: t('send.confirming'), tone: 'muted'};
+			case 'confirming': return {text: isIos ? t('send.confirming') : t('send.confirming.android'), tone: 'muted'};
 			case 'sent': return {text: t('send.sent'), tone: 'ok'};
 			case 'not-sent': return {text: t(status.reason === 'voting-closed' ? 'send.notSentClosed' : 'send.notSent'), tone: 'warn'};
 		}
@@ -161,11 +170,13 @@ export default function SendVoteCard({electionId, electionRevision, envelope, ba
 							{t(anyNotSent || outcome !== null ? 'send.retryCta' : 'send.cta')}
 						</Text>
 					</Pressable>
-					<Text style={[styles.line, captionFont, {color: colors.textSecondary}]}>{t('send.hint')}</Text>
+					<Text style={[styles.line, captionFont, {color: colors.textSecondary}]}>{isIos ? t('send.hint') : t('send.hint.android')}</Text>
 				</>
 			) : null}
 			{outcome !== null ? (
-				<Text testID="send-outcome" style={[styles.line, bodyFont, {color: colors.error}]}>{t(OUTCOME_KEY[outcome])}</Text>
+				<Text testID="send-outcome" style={[styles.line, bodyFont, {color: colors.error}]}>{outcome === 'biometric-unavailable'
+					? (isIos ? t('send.biometricUnavailable') : t('send.biometricUnavailable.android'))
+					: t(OUTCOME_KEY[outcome])}</Text>
 			) : null}
 		</View>
 	);
