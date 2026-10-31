@@ -41,6 +41,17 @@
 //     form arrives, so it answers (refuses) before the former gives up on it.
 //   * D-95: two drops at formation exclude the pool identity (peer id) only; the registrant id is
 //     excluded only for an invalid signature or a commit duplicate.
+//   * D-114: a consent that is abandoned (the D-94 bound, or the agent stopping) is aborted through the
+//     `ConsentCallControl` handed to `signConsent`; the consent queue then cancels the prompt on
+//     screen before it starts the next one. The engine stays platform-free: the cancel is injected.
+//   * D-115: a consent's deadline is the former's reply deadline (`signTimeoutMs - replyTimeoutMs`),
+//     counted from the LOCAL arrival of the form, never from a message field. The queue serves
+//     deadlines earliest first and refuses a prompt with too little window left.
+//   * D-116: a member whose consent timed out aborts it and clears it, so a re-form of the same block
+//     raises exactly one new prompt; a still-live consent for the same coordinator and digest is reused.
+//   * D-117: the former's own consent has the same deadline and abort. Unanswered is not declined:
+//     the pool is released with the reason 'the former did not answer in time' and the former keeps
+//     pooling; only an explicit decline stops it ('aborted').
 //
 // The agent owns no database and no device key: `signConsent` (the device key, a biometric prompt
 // on Android) and `commit` (one transaction, pool-block.ts `commitPoolBlock`) are handed in.
@@ -48,6 +59,7 @@
 import { sha256 } from '@noble/hashes/sha2.js'
 import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils.js'
 import { verifySigP256 } from '../database/initialize.js'
+import { isConsentAbandonedError, type ConsentCallControl } from './consent-queue.js'
 import { openPoolEnvelope, sealPoolEnvelope, ed25519PublicKeyFromPeerId, type PoolIdentity } from './pool-envelope.js'
 import { poolRequests, type PoolRendezvousClient, type CoordinatorListing, type RendezvousReply } from './pool-rendezvous.js'
 import {
@@ -82,8 +94,12 @@ export interface PoolAgentOptions {
   ballot: PoolBallot
   /** this voter's sealed vote and signed voter entry; `member` must be `identity.peerId` */
   contribution: PoolContribution
-  /** sign a consent digest with the voting key (Association.DeviceKey); returns compact low-S hex */
-  signConsent: (digest: string) => Promise<string>
+  /**
+   * Sign a consent digest with the voting key (Association.DeviceKey); returns compact low-S hex. The
+   * optional `ctl` carries an abort signal, the local deadline and an onStart hook, so a consent queue
+   * can cancel an unanswered prompt (D-114); a one-argument implementation may ignore it.
+   */
+  signConsent: (digest: string, ctl?: ConsentCallControl) => Promise<string>
   /** write the block and its voter rows in one transaction */
   commit: (block: FormedPoolBlock, signatures: ConsentSignature[]) => Promise<PoolCommitResult>
   /**
@@ -202,7 +218,9 @@ export class PoolAgent {
   /** an `already-voted` claim is being checked against the strand */
   private checkingClaim = false
   /** the consent given (or being given) for the last form: one prompt per coordinator and block */
-  private consent: { from: string, digest: string, signature: Promise<string> } | null = null
+  private consent: { from: string, digest: string, signature: Promise<string>, controller: AbortController, deadlineAt: number } | null = null
+  /** abort handle of the former's own consent while it is being asked (D-117) */
+  private ownConsent: AbortController | null = null
   /** observability: message counts by type, sent and received */
   readonly counts: Record<string, number> = {}
 
@@ -260,6 +278,9 @@ export class PoolAgent {
       }
     } finally {
       this.stopped = true
+      // D-114: no orphan prompt once the agent stops (a settled consent is unaffected)
+      this.consent?.controller.abort()
+      this.ownConsent?.abort()
       for (const [, p] of this.pending) { clearTimeout(p.timer); p.resolve(null) }
       this.pending.clear()
       for (const wake of [...this.handoverWaiters]) wake()
@@ -451,16 +472,50 @@ export class PoolAgent {
       this.o.onStatus?.({ phase: 'signing' })
       const others = this.pool.filter(c => c.member !== this.me)
       const mine = this.o.contribution
-      const [ownSignature, ...replies] = await Promise.all([
-        this.o.signConsent(consentDigest(block, this.o.ballot, mine.voterEntry.registrantId, mine.voterEntry.deviceKey)).catch(() => null),
+      // D-117: the former's own consent has the same deadline as a member's, and an abort.
+      const formAt = this.o.now()
+      const ownDeadline = formAt + this.o.signTimeoutMs - this.o.replyTimeoutMs
+      const ownController = new AbortController()
+      this.ownConsent = ownController
+      let ownTimer: ReturnType<typeof setTimeout> | undefined
+      const ownDigest = consentDigest(block, this.o.ballot, mine.voterEntry.registrantId, mine.voterEntry.deviceKey)
+      const own = async (): Promise<{ kind: 'sig', signature: string } | { kind: 'abandoned' } | { kind: 'declined' }> => {
+        const bound = new Promise<{ kind: 'abandoned' }>((resolve) => {
+          ownTimer = setTimeout(() => { ownController.abort(); resolve({ kind: 'abandoned' }) }, Math.max(0, ownDeadline - this.o.now()))
+        })
+        const answer = (async () => {
+          try {
+            const signature = await this.o.signConsent(ownDigest, { signal: ownController.signal, deadlineAt: ownDeadline, onStart: () => this.log('own-consent-start', { digest: ownDigest.slice(0, 8) }) })
+            return { kind: 'sig' as const, signature }
+          } catch (err) {
+            return isConsentAbandonedError(err) ? { kind: 'abandoned' as const } : { kind: 'declined' as const }
+          }
+        })()
+        try {
+          return await Promise.race([answer, bound])
+        } finally {
+          if (ownTimer !== undefined) clearTimeout(ownTimer)
+        }
+      }
+      const [ownResult, ...replies] = await Promise.all([
+        own(),
         ...others.map(c => this.request(c.member, { t: 'form', id: this.nextId(), topic: this.topic, block }, this.o.signTimeoutMs))
       ])
-      if (ownSignature === null) {
+      this.ownConsent = null
+      if (ownResult.kind === 'abandoned') {
+        // Unanswered is not declined (D-117): release the pool with the reason and keep pooling.
+        for (const c of others) void this.post(c.member, { t: 'outcome', topic: this.topic, committed: false, reason: 'the former did not answer in time' })
+        this.log('own-consent-timeout', { waitedMs: this.o.now() - formAt })
+        this.revertToSolo('the former did not answer in time')
+        return
+      }
+      if (ownResult.kind === 'declined') {
         // This voter declined its own consent: release the pool rather than hold it hostage.
         for (const c of others) void this.post(c.member, { t: 'outcome', topic: this.topic, committed: false, reason: 'the former declined to sign' })
         await this.abandon('aborted')
         return
       }
+      const ownSignature = ownResult.signature
       // A signature that the schema's SignatureValid CHECK would refuse fails the whole commit, so
       // check each one here and drop only its signer.
       const signedOk = (c: PoolContribution, r: PoolMessage | null): boolean =>
@@ -703,30 +758,46 @@ export class PoolAgent {
     // The same form from the same coordinator (a failover resend, a retried request) reuses the one
     // consent this voter gave or is giving, never a second prompt (WR-01). The digest binds the
     // block's cid and id, so another block always prompts.
-    if (this.consent === null || this.consent.from !== from || this.consent.digest !== digest) {
+    if (this.consent === null || this.consent.from !== from || this.consent.digest !== digest || this.consent.controller.signal.aborted) {
       this.o.onStatus?.({ phase: 'signing' })
-      this.consent = { from, digest, signature: this.o.signConsent(digest) }
+      // D-114/D-115: the consent's deadline is the former's reply deadline, from the LOCAL arrival time.
+      const controller = new AbortController()
+      const deadlineAt = formAt + this.o.signTimeoutMs - this.o.replyTimeoutMs
+      const signature = this.o.signConsent(digest, { signal: controller.signal, deadlineAt, onStart: () => this.log('consent-start', { digest: digest.slice(0, 8) }) })
+      this.consent = { from, digest, signature, controller, deadlineAt }
     }
+    const record = this.consent
     // D-94: wait for the consent at most until just before the former's request times out.
-    const consentSignature = this.consent.signature
+    const consentSignature = record.signature
     consentSignature.catch(() => undefined) // a late rejection after the bound is nobody's concern
     const waitMs = Math.max(0, this.o.signTimeoutMs - this.o.replyTimeoutMs - (this.o.now() - formAt))
     let timer: ReturnType<typeof setTimeout> | undefined
-    const expired = new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), waitMs) })
+    // D-114/D-116: at the bound the consent is aborted (the queue cancels the prompt) and cleared, so
+    // a re-form prompts exactly once; a consent that settles after this is never sent.
+    const giveUp = (): void => {
+      record.controller.abort()
+      if (this.consent === record) this.consent = null
+    }
+    const expired = new Promise<null>((resolve) => { timer = setTimeout(() => { giveUp(); resolve(null) }, waitMs) })
     let signature: string | null
+    let abandonedWhy: string | null = null
     try {
       signature = await Promise.race([consentSignature, expired])
-    } catch {
-      this.lastHeardAt = this.o.now()
-      return await this.post(from, { t: 'refuse', re: m.id, reason: 'the voter declined to sign' })
+    } catch (err) {
+      if (!isConsentAbandonedError(err)) {
+        this.lastHeardAt = this.o.now()
+        return await this.post(from, { t: 'refuse', re: m.id, reason: 'the voter declined to sign' })
+      }
+      // the queue expired it, had no time for it, or it was aborted: the same path as the bound
+      giveUp()
+      abandonedWhy = err.reason
+      signature = null
     } finally {
       if (timer !== undefined) clearTimeout(timer)
     }
     if (signature === null) {
-      // A later form prompts again; a consent that settles after this is never sent.
-      this.consent = null
       this.lastHeardAt = this.o.now()
-      this.log('consent-timeout', { waitedMs: this.o.now() - formAt })
+      this.log('consent-timeout', { waitedMs: this.o.now() - formAt, ...(abandonedWhy !== null ? { reason: abandonedWhy } : {}) })
       return await this.post(from, { t: 'refuse', re: m.id, reason: 'no answer in time' })
     }
     this.signedCid = m.block.cid
