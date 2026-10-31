@@ -112,6 +112,34 @@ describe('sendSavedVote (spike 102)', () => {
 		for (const st of statuses) expect(st.some(([, s]) => s.phase === 'confirming')).toBe(true);
 	});
 
+	it('a consent prompt that never settles does not block the voter\'s other prompts', async () => {
+		const rv = new PoolRendezvous();
+		const strand = fakeStrand(Date.now() + 12_000);
+		const voters = [0, 1, 2].map(makeVoter);
+		const stores = voters.map(() => memorySentStore());
+		const agent = {...fastAgent, signTimeoutMs: 1_500, replyTimeoutMs: 300, quietMs: 300};
+		let stall: ReturnType<typeof setTimeout> | undefined;
+		const stalled = new Promise<'stalled'>(r => { stall = setTimeout(() => r('stalled'), 20_000); });
+		const all = await Promise.race([stalled, Promise.all(voters.map((v, i) => {
+			const real = signWith(v.priv);
+			let calls = 0;
+			const sign = (digest: string) => (i === 1 && ++calls === 1) ? new Promise<string>(() => {}) : real(digest);
+			return sendSavedVote({
+				port: strand.port, sentStore: stores[i]!, record: v.record, rendezvous: clientFor(rv, v.phone),
+				signConsent: sign, nowMs: () => Date.now(), agentOptions: agent,
+			});
+		}))]);
+		clearTimeout(stall);
+		rv.close();
+		expect(all).not.toBe('stalled');
+		const results = all === 'stalled' ? [] : all;
+		for (const r of results) {
+			expect(r.ok).toBe(true);
+			if (r.ok) expect(r.ballots.map(b => b.status.phase)).toEqual(['sent', 'sent']);
+		}
+		expect(strand.commits.sort((a, b) => a.ballotId.localeCompare(b.ballotId))).toEqual([{ballotId: 'ballot-a', size: 3}, {ballotId: 'ballot-b', size: 3}]);
+	});
+
 	it('the consent signature a voter gives verifies with the schema\'s own P-256 check', async () => {
 		const v = makeVoter(9);
 		const digest = 'A'.repeat(43);
