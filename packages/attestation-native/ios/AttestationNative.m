@@ -66,6 +66,9 @@ RCT_EXTERN_METHOD(signWithRecoveryKey:(NSString *)keyAlias
                   resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 
+// Selector must match the Swift cancelPendingSign @objc name exactly (mismatch = runtime crash).
+RCT_EXTERN_METHOD(cancelPendingSign:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject)
+
 // D-42 (Phase 62 plan 08) — generic secret-wrap. Selectors must match the Swift
 // `@objc(wrapSecret:plaintextBase64:aadBase64:requireAuth:promptTitle:promptSubtitle:
 // promptNegativeButton:authWindowSeconds:resolver:rejecter:)` / `@objc(unwrapSecret:ciphertextBase64:ivBase64:

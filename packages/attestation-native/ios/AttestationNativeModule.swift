@@ -109,13 +109,16 @@ class AttestationNativeModule: NSObject {
     return key
   }
 
-  private func loadKey(tag: String) -> SecKey? {
-    let query: [String: Any] = [
+  private func loadKey(tag: String, context: LAContext? = nil) -> SecKey? {
+    var query: [String: Any] = [
       kSecClass as String: kSecClassKey,
       kSecAttrApplicationTag as String: tag.data(using: .utf8)!,
       kSecAttrKeyType as String: kSecAttrKeyTypeECSECPrimeRandom,
       kSecReturnRef as String: true
     ]
+    if let context = context {
+      query[kSecUseAuthenticationContext as String] = context
+    }
     var item: CFTypeRef?
     guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess else { return nil }
     return (item as! SecKey)
@@ -513,6 +516,29 @@ class AttestationNativeModule: NSObject {
 
   // MARK: - shared signing path
 
+  /// One pending device-key / recovery-key sign at a time (D-112). Held under `pendingSignLock`.
+  private final class PendingSign {
+    let context: LAContext
+    let done = DispatchGroup()
+    var canceled = false
+    init(context: LAContext) { self.context = context }
+  }
+
+  private let signQueue = DispatchQueue(label: "org.votetorrent.attestation.sign",
+                                        qos: .userInitiated)
+  private let pendingSignLock = NSLock()
+  private var pendingSign: PendingSign?
+
+  private enum SignOutcome {
+    case signature(String)
+    case failure(code: String, message: String, error: Error?)
+  }
+
+  /// Signs run on `signQueue` with a fresh LAContext per call (reuse duration 0), so an open
+  /// Face ID / passcode sheet never blocks the module's method queue. Only one device/recovery
+  /// sign may be pending (`PROMPT_BUSY` otherwise); `cancelPendingSign` invalidates it (D-110,
+  /// D-112, D-113; todo 2026-10-31-ios-native-sign-has-no-timeout-or-cancel). Unproven on device
+  /// until the iPhone leg.
   private func signWith(tag: String, digestBase64: String, reason: String,
                         resolve: @escaping RCTPromiseResolveBlock,
                         reject: @escaping RCTPromiseRejectBlock) {
@@ -521,58 +547,132 @@ class AttestationNativeModule: NSObject {
              "digestBase64 must be plain base64 of 32 raw digest bytes", nil)
       return
     }
-    guard let key = loadKey(tag: tag) else {
-      reject("NO_KEY_PROVISIONED", "no key under \(tag)", nil); return
+    let context = LAContext()
+    context.localizedReason = reason
+    context.touchIDAuthenticationAllowableReuseDuration = 0
+    let pending = PendingSign(context: context)
+    pendingSignLock.lock()
+    if pendingSign != nil {
+      pendingSignLock.unlock()
+      reject("PROMPT_BUSY", "another biometric sign is already pending", nil)
+      return
     }
+    pending.done.enter()
+    pendingSign = pending
+    pendingSignLock.unlock()
 
-    var error: Unmanaged<CFError>?
+    signQueue.async { [self] in
+      pendingSignLock.lock()
+      let alreadyCanceled = pending.canceled
+      pendingSignLock.unlock()
+      if alreadyCanceled {
+        finishPendingSign(pending, outcome: .failure(code: "CANCELED",
+                                                     message: "signing was cancelled", error: nil),
+                          resolve: resolve, reject: reject)
+        return
+      }
+      guard let key = loadKey(tag: tag, context: pending.context) else {
+        finishPendingSign(pending, outcome: .failure(code: "NO_KEY_PROVISIONED",
+                                                     message: "no key under \(tag)", error: nil),
+                          resolve: resolve, reject: reject)
+        return
+      }
+
+      var error: Unmanaged<CFError>?
     // `.ecdsaSignatureDigestX962SHA256` treats the input as the FINAL ECDSA hash (no internal
     // hash) = noble `prehash: false`. Android's SHA256withECDSA hashes once, so the shared JS helper
     // (nativeSignInputBytes) pre-hashes on iOS to compensate. The PoP relies on this raw behaviour:
     // do NOT switch to the `...MessageX962...` variant without changing the PoP verifier, the
     // contract doc and the pinned hardware vector together.
-    guard let sig = SecKeyCreateSignature(key, .ecdsaSignatureDigestX962SHA256,
-                                          digest as CFData, &error) as Data? else {
-      let err = error!.takeRetainedValue() as Error as NSError
-      // LAError.userCancel / .userFallback / .biometryLockout map onto the Android code table.
-      // DOMAIN FIRST — these code spaces OVERLAP, measured 2026-08-25 (spike 085 leg 7):
-      //
-      //     LAError.userFallback            = -3   (com.apple.LocalAuthentication)
-      //     key invalidated by re-enrolment = -3   (CryptoTokenKit)
-      //
-      // Matching on the raw code alone reports an INVALIDATED KEY as CANCELED — a permanent,
-      // recoverable-by-re-provisioning condition disguised as "the user tapped cancel", so the app
-      // would retry forever instead of re-provisioning. An earlier revision of this fix had exactly
-      // that bug: it checked CryptoTokenKit only in `default`, which `-3` never reached because the
-      // CANCELED case matched first. Do not collapse this back into a single switch on `err.code`.
-      let code: String
-      if err.domain == "CryptoTokenKit" {
-        // -3 is the observed invalidation code. Other CryptoTokenKit failures are token-level
-        // faults with no better mapping than the generic bucket.
-        code = err.code == -3 ? "KEY_INVALIDATED_REASSOCIATE" : "BIOMETRIC_ERROR"
-      } else {
-      switch err.code {
-      case Int(errSecUserCanceled), LAError.userCancel.rawValue, LAError.systemCancel.rawValue,
-           LAError.appCancel.rawValue, LAError.userFallback.rawValue:
-        // MEASURED: cancelling the prompt yields com.apple.LocalAuthentication code -2
-        // (LAError.userCancel) — this mapping is correct.
-        code = "CANCELED"
-      case LAError.biometryNotEnrolled.rawValue: code = "NO_BIOMETRICS_ENROLLED"
-      case LAError.biometryLockout.rawValue:     code = "LOCKOUT_PERMANENT"
-      // A genuinely absent key. Distinct from invalidation (see above) but the same recovery
-      // action, and it may be how other iOS versions surface invalidation.
-      case Int(errSecItemNotFound):              code = "KEY_INVALIDATED_REASSOCIATE"
-      default:                                   code = "BIOMETRIC_ERROR"
+      guard let sig = SecKeyCreateSignature(key, .ecdsaSignatureDigestX962SHA256,
+                                            digest as CFData, &error) as Data? else {
+        let err = error!.takeRetainedValue() as Error as NSError
+          // LAError.userCancel / .userFallback / .biometryLockout map onto the Android code table.
+          // DOMAIN FIRST — these code spaces OVERLAP, measured 2026-08-25 (spike 085 leg 7):
+          //
+          //     LAError.userFallback            = -3   (com.apple.LocalAuthentication)
+          //     key invalidated by re-enrolment = -3   (CryptoTokenKit)
+          //
+          // Matching on the raw code alone reports an INVALIDATED KEY as CANCELED — a permanent,
+          // recoverable-by-re-provisioning condition disguised as "the user tapped cancel", so the app
+          // would retry forever instead of re-provisioning. An earlier revision of this fix had exactly
+          // that bug: it checked CryptoTokenKit only in `default`, which `-3` never reached because the
+          // CANCELED case matched first. Do not collapse this back into a single switch on `err.code`.
+          let code: String
+          if err.domain == "CryptoTokenKit" {
+            // -3 is the observed invalidation code. Other CryptoTokenKit failures are token-level
+            // faults with no better mapping than the generic bucket.
+            code = err.code == -3 ? "KEY_INVALIDATED_REASSOCIATE" : "BIOMETRIC_ERROR"
+          } else {
+          switch err.code {
+          case Int(errSecUserCanceled), LAError.userCancel.rawValue, LAError.systemCancel.rawValue,
+               LAError.appCancel.rawValue, LAError.userFallback.rawValue:
+            // MEASURED: cancelling the prompt yields com.apple.LocalAuthentication code -2
+            // (LAError.userCancel) — this mapping is correct.
+            code = "CANCELED"
+          case LAError.biometryNotEnrolled.rawValue: code = "NO_BIOMETRICS_ENROLLED"
+          case LAError.biometryLockout.rawValue:     code = "LOCKOUT_PERMANENT"
+          // A genuinely absent key. Distinct from invalidation (see above) but the same recovery
+          // action, and it may be how other iOS versions surface invalidation.
+          case Int(errSecItemNotFound):              code = "KEY_INVALIDATED_REASSOCIATE"
+          default:                                   code = "BIOMETRIC_ERROR"
+          }
+          }
+        finishPendingSign(pending, outcome: .failure(code: code,
+                                                     message: err.localizedDescription, error: err),
+                          resolve: resolve, reject: reject)
+        return
       }
+      do {
+        finishPendingSign(pending, outcome: .signature(try derToCompactLowSHex(sig)),
+                          resolve: resolve, reject: reject)
+      } catch {
+        finishPendingSign(pending, outcome: .failure(code: "KEY_ERROR",
+                                                     message: error.localizedDescription, error: error),
+                          resolve: resolve, reject: reject)
       }
-      reject(code, err.localizedDescription, err)
+    }
+  }
+
+  /// Single completion path: clears the record BEFORE settling (JS may start the next sign the
+  /// moment the promise settles), settles exactly once, `done.leave()` last. A cancelled sign can
+  /// only reject CANCELED, whatever the system call returned.
+  private func finishPendingSign(_ pending: PendingSign, outcome: SignOutcome,
+                                 resolve: RCTPromiseResolveBlock,
+                                 reject: RCTPromiseRejectBlock) {
+    pendingSignLock.lock()
+    let wasCanceled = pending.canceled
+    if pendingSign === pending { pendingSign = nil }
+    pendingSignLock.unlock()
+    if wasCanceled {
+      reject("CANCELED", "signing was cancelled", nil)
+    } else {
+      switch outcome {
+      case .signature(let hex): resolve(["signatureHex": hex])
+      case .failure(let code, let message, let error): reject(code, message, error)
+      }
+    }
+    pending.done.leave()
+  }
+
+  /// Cancels the pending device-key / recovery-key sign, if any (D-110). Never touches a secret
+  /// wrap/unwrap prompt. Resolves only after the sign settled, or after a 2 s cap.
+  @objc(cancelPendingSign:rejecter:)
+  func cancelPendingSign(_ resolve: @escaping RCTPromiseResolveBlock,
+                         rejecter reject: @escaping RCTPromiseRejectBlock) {
+    pendingSignLock.lock()
+    let pending = pendingSign
+    pending?.canceled = true
+    pendingSignLock.unlock()
+    guard let pending = pending else {
+      resolve(["canceled": false])
       return
     }
-    do {
-      resolve(["signatureHex": try derToCompactLowSHex(sig)])
-    } catch {
-      reject("KEY_ERROR", error.localizedDescription, error)
+    pending.context.invalidate()
+    if pending.done.wait(timeout: .now() + .seconds(2)) == .timedOut {
+      NSLog("AttestationNative.cancelPendingSign: sign did not settle within the 2 s cap")
     }
+    resolve(["canceled": true])
   }
 
   // MARK: - Secret wrap (D-42)
