@@ -3,8 +3,8 @@
 // Named exports only. See pool-agent.ts's header for the rules and the decisions behind them.
 export { PoolAgent, POOL_MIN_BLOCK_SIZE, POOL_SIGN_TIMEOUT_MS } from './pool-agent.js'
 export type { PoolAgentOptions, PoolAgentStatus, PoolOutcome } from './pool-agent.js'
-export { createConsentQueue } from './consent-queue.js'
-export type { ConsentQueueOptions } from './consent-queue.js'
+export { createConsentQueue, ConsentAbandonedError, isConsentAbandonedError, POOL_MIN_PROMPT_MS } from './consent-queue.js'
+export type { ConsentQueueOptions, ConsentCallControl, ConsentQueue, ConsentAbandonReason } from './consent-queue.js'
 export {
   poolTopic,
   poolBlockId,

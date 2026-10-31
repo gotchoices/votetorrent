@@ -8,20 +8,52 @@
 //
 // Hermes/browser pure: no Buffer, no node:* import, no console.*; timers via setTimeout only.
 
+/** The shortest prompt window worth opening: a call with less time left than this is refused without prompting (D-115). */
+export const POOL_MIN_PROMPT_MS = 10_000
+
+export type ConsentAbandonReason = 'abandoned' | 'expired' | 'no-time'
+
+export class ConsentAbandonedError extends Error {
+  readonly reason: ConsentAbandonReason
+  constructor (reason: ConsentAbandonReason) {
+    super(`consent abandoned: ${reason}`)
+    this.name = 'ConsentAbandonedError'
+    this.reason = reason
+  }
+}
+
+export function isConsentAbandonedError (err: unknown): err is ConsentAbandonedError {
+  return err instanceof ConsentAbandonedError ||
+    (err !== null && typeof err === 'object' && (err as { name?: unknown }).name === 'ConsentAbandonedError')
+}
+
+export interface ConsentCallControl {
+  signal?: AbortSignal
+  /** in the queue's `now()` clock */
+  deadlineAt?: number
+  onStart?: () => void
+}
+
 export interface ConsentQueueOptions {
   /** release the queue this long after a call started, even if it has not settled */
   holdMs?: number
+  cancel?: () => Promise<unknown>
+  minPromptMs?: number
+  now?: () => number
+}
+
+export type ConsentQueue<A extends unknown[], R> = ((...args: A) => Promise<R>) & {
+  withControl: (ctl: ConsentCallControl | undefined, ...args: A) => Promise<R>
 }
 
 export function createConsentQueue<A extends unknown[], R> (
   fn: (...args: A) => Promise<R>,
   options?: ConsentQueueOptions
-): (...args: A) => Promise<R> {
+): ConsentQueue<A, R> {
   const holdMs = options?.holdMs
   const bounded = typeof holdMs === 'number' && Number.isFinite(holdMs) && holdMs > 0
-  // Resolves when the previous call has settled or been released; never rejects.
   let tail: Promise<void> = Promise.resolve()
-  return async (...args: A) => {
+  const run = async (...args: A): Promise<R> => {
     let release!: () => void
     const released = new Promise<void>((resolve) => { release = resolve })
     const previous = tail
@@ -36,4 +68,7 @@ export function createConsentQueue<A extends unknown[], R> (
       release()
     }
   }
+  const q = ((...args: A) => run(...args)) as ConsentQueue<A, R>
+  q.withControl = async (_ctl, ...args) => await run(...args)
+  return q
 }
