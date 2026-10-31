@@ -140,3 +140,13 @@ export function wrapCreateWithFounding<E extends object>(engine: E): E {
 	});
 	return engine;
 }
+
+/**
+ * Synchronous, NON-consuming read of the slot: 'founding' while a founding window is open, else null.
+ * Exists for the dispatcher's create check (D-98): it must learn "is this open a create?" without
+ * taking the window, because the db factory's first statement is the one-shot take. A joining
+ * window is hash-scoped and stays with `takeFounderIntent`.
+ */
+export function peekFounderIntent(): 'founding' | null {
+	return active !== null && active.kind === 'founding' ? 'founding' : null;
+}
