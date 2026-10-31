@@ -61,6 +61,13 @@ import {DEV_LIFECYCLE_CONTENT} from './devLifecycleFixtures';
  */
 export const NODE_WAIT_ESCAPE_MS = 15000;
 
+/**
+ * How long a __DEV__ dev-seed boot waits before "Continue without a network" is offered.
+ * Independent of cadre-core's 360 s first-sync budget (UAT 65: a fresh iPhone Debug install
+ * sat on Syncing for 6 minutes). Gates only the escape; the seed keeps running.
+ */
+export const DEV_SEED_ESCAPE_MS = 60_000;
+
 /** A joined network whose CadreNode failed to start (#99). Its message never reaches the screen. */
 export class NetworkNodeUnavailableError extends Error {
 	constructor() {
@@ -93,7 +100,7 @@ export function VoterAppProvider({children}: PropsWithChildren) {
 	const [initNonce, setInitNonce] = useState(0);
 	// Quick task 260928-kkf ("Syncing + escape button", locked decision, mirrors the
 	// authority app's AppProvider): flips true once the CURRENT boot's first-sync wait
-	// has rejected once with StrandAwaitingFirstSyncError (~300s budget elapsed) — the
+	// has rejected once with StrandAwaitingFirstSyncError (360 s budget elapsed) — the
 	// signal that gates the Start Fresh escape under the Syncing label. Reset to false
 	// at the start of every non-cancelled init run (see the [initNonce, node] effect).
 	const [firstSyncBudgetElapsed, setFirstSyncBudgetElapsed] = useState(false);
@@ -104,6 +111,8 @@ export function VoterAppProvider({children}: PropsWithChildren) {
 	// NODE_WAIT_ESCAPE_MS of that wait and offers the escape (the wait itself continues).
 	const [awaitingNode, setAwaitingNode] = useState(false);
 	const [nodeWaitElapsed, setNodeWaitElapsed] = useState(false);
+	// D-99: true once a __DEV__ dev-seed boot has been pending for DEV_SEED_ESCAPE_MS.
+	const [seedWaitElapsed, setSeedWaitElapsed] = useState(false);
 
 	// D-07: the dev-seeded election id, captured from seedDevNetwork's return once the boot
 	// effect resolves. Only populated in __DEV__ (undefined otherwise). 51-12 (D-09/D-20): does
@@ -290,6 +299,7 @@ export function VoterAppProvider({children}: PropsWithChildren) {
 		// stops THIS run's reaction to it.
 		let cancelled = false;
 		let nodeWaitTimer: ReturnType<typeof setTimeout> | undefined;
+		let seedWaitTimer: ReturnType<typeof setTimeout> | undefined;
 		cancelInitRunRef.current = () => {
 			cancelled = true;
 		};
@@ -370,7 +380,16 @@ export function VoterAppProvider({children}: PropsWithChildren) {
 					// resolves the SAME device signer used both as founding officer and as the
 					// registrant's own signing key (44-06).
 					try {
-						const seeded = await seedDevNetwork(networksEng);
+						seedWaitTimer = setTimeout(() => {
+							if (!cancelled) setSeedWaitElapsed(true);
+						}, DEV_SEED_ESCAPE_MS);
+						let seeded: Awaited<ReturnType<typeof seedDevNetwork>>;
+						try {
+							seeded = await seedDevNetwork(networksEng);
+						} finally {
+							clearTimeout(seedWaitTimer);
+							seedWaitTimer = undefined;
+						}
 						// A cancelled run (superseded by the escape action, unmount, or a node
 						// change) must not write hasNetwork/initError/seededElectionId, and must
 						// not print the boot-smoke PASS marker for a run that is not the one that
@@ -425,6 +444,7 @@ export function VoterAppProvider({children}: PropsWithChildren) {
 				hideSplash();
 				setAwaitingNode(false);
 				setNodeWaitElapsed(false);
+				setSeedWaitElapsed(false);
 				// Quick task 260928-kkf: a fresh run starts with no elapsed-budget escape shown.
 				setFirstSyncBudgetElapsed(false);
 			} catch (fatalError) {
@@ -437,6 +457,7 @@ export function VoterAppProvider({children}: PropsWithChildren) {
 				hideSplash();
 				setAwaitingNode(false);
 				setNodeWaitElapsed(false);
+				setSeedWaitElapsed(false);
 			}
 		}
 
@@ -445,6 +466,7 @@ export function VoterAppProvider({children}: PropsWithChildren) {
 		return () => {
 			cancelled = true;
 			if (nodeWaitTimer) clearTimeout(nodeWaitTimer);
+			if (seedWaitTimer) clearTimeout(seedWaitTimer);
 			// Unmount, a node change re-running this effect, or a superseded boot run:
 			// stop waiting on any in-flight first-sync gate so nothing keeps polling in
 			// the background.
@@ -466,6 +488,7 @@ export function VoterAppProvider({children}: PropsWithChildren) {
 		setInitError(null);
 		setAwaitingNode(false);
 		setNodeWaitElapsed(false);
+		setSeedWaitElapsed(false);
 		setIsInitialized(true);
 	}, []);
 
@@ -541,9 +564,9 @@ export function VoterAppProvider({children}: PropsWithChildren) {
 	// authority app's AppProvider): while a boot re-attach is gated on the first-sync
 	// wait, this same loading view additionally shows the localized Syncing label (as
 	// soon as syncState reports 'syncing', or once the wait's first budget has
-	// elapsed) and, ONLY once that budget has elapsed, the existing Start Fresh action
+	// elapsed) and, ONLY once that budget has elapsed (or a __DEV__ dev-seed boot has waited DEV_SEED_ESCAPE_MS), the existing Start Fresh action
 	// — reusing its exact literal copy and handler. Try Again is deliberately NOT
-	// offered here: it would just start a new ~300s wait on the same strand, which the
+	// offered here: it would just start a new 360 s wait on the same strand, which the
 	// background wait is already doing.
 	if (!isInitialized) {
 		const showSyncing = syncState === 'syncing' || firstSyncBudgetElapsed || awaitingNode;
@@ -553,7 +576,7 @@ export function VoterAppProvider({children}: PropsWithChildren) {
 				{showSyncing && (
 					<Text style={{marginTop: 16, textAlign: 'center'}}>{t('syncSyncing')}</Text>
 				)}
-				{(firstSyncBudgetElapsed || nodeWaitElapsed) && (
+				{(firstSyncBudgetElapsed || nodeWaitElapsed || seedWaitElapsed) && (
 					<TouchableOpacity
 						onPress={() => {
 							// Mark THIS boot run cancelled before startFresh() clears the
