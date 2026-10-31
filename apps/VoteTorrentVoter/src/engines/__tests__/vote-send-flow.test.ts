@@ -6,7 +6,7 @@
  * nothing answers, opens the sealed record once, signs consent with the voting key through the
  * producer, and maps every failure to a closed kind.
  */
-jest.mock('@votetorrent/attestation-native', () => ({}));
+jest.mock('@votetorrent/attestation-native', () => ({cancelPendingSign: jest.fn(async () => false)}));
 jest.mock('../vote-receipt', () => ({revealVoteReceipt: jest.fn()}));
 jest.mock('@votetorrent/vote-engine/rn', () => ({
 	createLibp2pRendezvousClient: jest.fn(),
@@ -23,6 +23,7 @@ jest.mock('../vote-sending', () => ({sendSavedVote: jest.fn()}));
 jest.mock('../vote-casting', () => ({digestBytesFromBase64Url: jest.fn(() => new Uint8Array(32).fill(7))}));
 jest.mock('../attestation-producer', () => ({resolveVoteSigningProducer: jest.fn((p: unknown) => p)}));
 
+import {cancelPendingSign} from '@votetorrent/attestation-native';
 import {revealVoteReceipt} from '../vote-receipt';
 import {createFailoverRendezvousClient, createLibp2pRendezvousClient, createPoolIdentity, poolRequests} from '@votetorrent/vote-engine/rn';
 import {sendSavedVote} from '../vote-sending';
@@ -81,6 +82,26 @@ describe('runVoteSendFlow (spike 102)', () => {
 		const signConsent = (sendSavedVote as jest.Mock).mock.calls[0][0].signConsent as (digest: string) => Promise<string>;
 		expect(await signConsent('A'.repeat(43))).toBe('sig-hex');
 		expect((d.producer as unknown as {signDeviceKeyDigest: jest.Mock}).signDeviceKeyDigest).toHaveBeenCalledWith(expect.any(Uint8Array), {prompt: d.consentPrompt});
+	});
+
+	it('passes attestation-native\'s cancelPendingSign to sending by default', async () => {
+		await runVoteSendFlow(deps());
+		expect((sendSavedVote as jest.Mock).mock.calls[0][0].cancelSign).toBe(cancelPendingSign);
+	});
+
+	it('an injected cancelSign is the one that reaches sending', async () => {
+		const fake = jest.fn(async () => true);
+		await runVoteSendFlow(deps({cancelSign: fake}));
+		expect((sendSavedVote as jest.Mock).mock.calls[0][0].cancelSign).toBe(fake);
+		expect(fake).not.toHaveBeenCalled();
+	});
+
+	it('a busy signer\'s reject reaches the agent unchanged', async () => {
+		const busy = Object.assign(new Error('busy'), {code: 'PROMPT_BUSY'});
+		const d = deps({producer: {signDeviceKeyDigest: jest.fn(async () => { throw busy; })} as never});
+		await runVoteSendFlow(d);
+		const signConsent = (sendSavedVote as jest.Mock).mock.calls[0][0].signConsent as (digest: string) => Promise<string>;
+		await expect(signConsent('A'.repeat(43))).rejects.toBe(busy);
 	});
 
 	it('refuses before any prompt with no network or no rendezvous', async () => {
