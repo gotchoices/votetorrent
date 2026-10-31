@@ -3,6 +3,8 @@
 // Named exports only. See pool-agent.ts's header for the rules and the decisions behind them.
 export { PoolAgent, POOL_MIN_BLOCK_SIZE } from './pool-agent.js'
 export type { PoolAgentOptions, PoolAgentStatus, PoolOutcome } from './pool-agent.js'
+export { createConsentQueue } from './consent-queue.js'
+export type { ConsentQueueOptions } from './consent-queue.js'
 export {
   poolTopic,
   poolBlockId,

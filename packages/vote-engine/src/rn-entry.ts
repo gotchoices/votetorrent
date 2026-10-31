@@ -260,6 +260,7 @@ export type {
 export {
 	PoolAgent,
 	POOL_MIN_BLOCK_SIZE,
+	createConsentQueue,
 	poolTopic,
 	commitPoolBlock,
 	poolIdentityFromRawKey,
@@ -276,6 +277,7 @@ export type {
 	PoolAgentOptions,
 	PoolAgentStatus,
 	PoolOutcome,
+	ConsentQueueOptions,
 	PoolContribution,
 	PoolBallot,
 	FormedPoolBlock,
