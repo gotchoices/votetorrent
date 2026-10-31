@@ -346,7 +346,13 @@ const resources = {
 			// [AUTHORED] — the retry label on the confirm/retry buttons after a failed attempt.
 			'confirmation.retryCta': 'Try Again',
 			// [AUTHORED] — shown once the requests are submitted and the authority's decision is pending.
-			'confirmation.pending': "Your registration has been submitted. We'll let you know once the authority confirms your device.",
+			// It promises no notification: the screen itself updates when the election office approves.
+			'confirmation.pending': 'Your registration has been submitted. This screen updates when the election office approves your device.',
+			// [AUTHORED] — the completed state, once the device's association is recorded.
+			'confirmation.registered': 'Your device is registered. You can vote in this election.',
+			'confirmation.doneCta': 'Done',
+			'confirmation.pendingBackCta': 'Back to registration',
+			'confirmation.pendingCheckLater': 'Still waiting for the election office. Open this screen again later to check.',
 			// Registration Confirm: the bounded wait for the decision.
 			'confirmation.waiting': 'Waiting for the election office to approve your registration, so keep this screen open.',
 			'confirmation.waitingCancel': 'Stop waiting',
@@ -829,7 +835,11 @@ const resources = {
 			'confirmation.error.intakeUnavailable': 'No pudimos enviar tu registro a la autoridad en este momento. Inténtalo más tarde.',
 			'confirmation.error.noElection': 'Todavía no hay una elección para registrarte en este teléfono.',
 			'confirmation.retryCta': 'Intentar de nuevo',
-			'confirmation.pending': 'Tu registro ha sido enviado. Te avisaremos cuando la autoridad confirme tu dispositivo.',
+			'confirmation.pending': 'Tu registro se envió. Esta pantalla se actualiza cuando la oficina electoral apruebe tu dispositivo.',
+			'confirmation.registered': 'Tu dispositivo está registrado. Puedes votar en esta elección.',
+			'confirmation.doneCta': 'Listo',
+			'confirmation.pendingBackCta': 'Volver al registro',
+			'confirmation.pendingCheckLater': 'Seguimos esperando a la oficina electoral. Vuelve a abrir esta pantalla más tarde para comprobarlo.',
 			// Ver el bloque en.
 			'confirmation.waiting': 'Esperando a que la oficina electoral apruebe tu registro, así que mantén esta pantalla abierta.',
 			'confirmation.waitingCancel': 'Dejar de esperar',

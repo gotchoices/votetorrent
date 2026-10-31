@@ -31,9 +31,7 @@ jest.mock('@react-navigation/native', () => ({
 	useFocusEffect: (cb: () => void) => {
 		latestFocusCallback = cb;
 		// eslint-disable-next-line @typescript-eslint/no-var-requires, react-hooks/rules-of-hooks
-		require('react').useEffect(() => {
-			cb();
-		}, [cb]);
+		require('react').useEffect(() => cb(), [cb]);
 	},
 	useTheme: () => ({
 		colors: {
@@ -287,6 +285,10 @@ const mockResolveVoterRequestTransports = jest.fn(
 		ownStagedRegistrationRequestIds: mockOwnStagedRegistrationRequestIds,
 	}),
 );
+const mockResolveRegistrationStatus = jest.fn(async (..._args: unknown[]) => ({kind: 'pending'}));
+jest.mock('../../../engines/registration-status', () => ({
+	resolveRegistrationStatus: (...args: unknown[]) => mockResolveRegistrationStatus(...args),
+}));
 jest.mock('../attach-voter-request-transport', () => ({
 	resolveVoterRequestTransports: (...args: unknown[]) => mockResolveVoterRequestTransports(...args),
 }));
@@ -370,11 +372,28 @@ function spyAllConsole() {
 	};
 }
 
+// D-100: a pending screen holds a 10 s outcome-poll interval; every tree is unmounted after each
+// test so none outlives it (an unmount clears the interval, so jest can exit).
+const renderedTrees: renderer.ReactTestRenderer[] = [];
+afterEach(() => {
+	while (renderedTrees.length > 0) {
+		const tr = renderedTrees.pop()!;
+		try {
+			renderer.act(() => {
+				tr.unmount();
+			});
+		} catch {
+			// already unmounted by the test
+		}
+	}
+});
+
 function renderScreen() {
 	let tr!: renderer.ReactTestRenderer;
 	renderer.act(() => {
 		tr = renderer.create(<ConfirmationScreen />);
 	});
+	renderedTrees.push(tr);
 	return tr;
 }
 
@@ -432,6 +451,8 @@ beforeEach(() => {
 	mockGetElections.mockReset();
 	mockGetElections.mockImplementation(async () => []);
 	mockPopToTop.mockClear();
+	mockResolveRegistrationStatus.mockReset();
+	mockResolveRegistrationStatus.mockImplementation(async () => ({kind: 'pending'}));
 	mockClearDraft.mockClear();
 	mockSign.mockClear();
 	mockCreateDeviceSigner.mockClear();
@@ -548,7 +569,7 @@ describe('ConfirmationScreen (D-01/D-02/D-03/D-05/D-07/D-08/D-09/D-11/D-12/D-18)
 			const ok = renderScreen();
 			await pressConfirm(ok);
 			expect(JSON.stringify(ok.toJSON())).toContain(
-				"Your registration has been submitted. We'll let you know once the authority confirms your device.",
+				'Your registration has been submitted. This screen updates when the election office approves your device.',
 			);
 
 			mockProduce.mockRejectedValueOnce({code: 'LOCKOUT'});
@@ -564,7 +585,7 @@ describe('ConfirmationScreen (D-01/D-02/D-03/D-05/D-07/D-08/D-09/D-11/D-12/D-18)
 			const ok = renderScreen();
 			await pressConfirm(ok);
 			const okText = JSON.stringify(ok.toJSON());
-			expect(okText).toContain('Tu registro ha sido enviado. Te avisaremos cuando la autoridad confirme tu dispositivo.');
+			expect(okText).toContain('Tu registro se envió. Esta pantalla se actualiza cuando la oficina electoral apruebe tu dispositivo.');
 			expect(okText).not.toContain('Your registration has been submitted');
 
 			mockProduce.mockRejectedValueOnce({code: 'LOCKOUT'});
@@ -578,6 +599,7 @@ describe('ConfirmationScreen (D-01/D-02/D-03/D-05/D-07/D-08/D-09/D-11/D-12/D-18)
 
 	it('does NOT navigate on mount (only on the deliberate press)', () => {
 		renderScreen();
+		// D-100 replacing 51-11: no popToTop until Done or Back to registration is pressed.
 		expect(mockPopToTop).not.toHaveBeenCalled();
 	});
 
@@ -617,9 +639,8 @@ describe('ConfirmationScreen (D-01/D-02/D-03/D-05/D-07/D-08/D-09/D-11/D-12/D-18)
 			const text = JSON.stringify(tr.toJSON());
 			expect(text).toContain('submitted');
 			expect(mockClearDraft).toHaveBeenCalledTimes(1);
-			// The screen intentionally does NOT pop to top on this pending outcome — see
-			// ConfirmationScreen.tsx's header comment. Popping would imply a decided success this
-			// screen cannot yet prove.
+			// D-100 (replacing 51-11's no-popToTop pin): reaching pending does not pop by itself;
+			// popToTop runs only when Done or Back to registration is pressed.
 			expect(mockPopToTop).not.toHaveBeenCalled();
 		},
 	);
@@ -697,6 +718,7 @@ describe('ConfirmationScreen (D-01/D-02/D-03/D-05/D-07/D-08/D-09/D-11/D-12/D-18)
 		expect(tr.root.findByProps({testID: 'confirmation-confirm-face-id'})).toBeDefined();
 		expect(text).toContain('Try Again');
 		expect(mockClearDraft).not.toHaveBeenCalled();
+		// D-100 replacing 51-11: no popToTop until Done or Back to registration is pressed.
 		expect(mockPopToTop).not.toHaveBeenCalled();
 	});
 
@@ -765,6 +787,7 @@ describe('ConfirmationScreen (D-01/D-02/D-03/D-05/D-07/D-08/D-09/D-11/D-12/D-18)
 		expect(text).toContain('Something went wrong verifying your device. Try again.');
 		expect(mockAssociationSubmitAttestation).not.toHaveBeenCalled();
 		expect(mockClearDraft).not.toHaveBeenCalled();
+		// D-100 replacing 51-11: no popToTop until Done or Back to registration is pressed.
 		expect(mockPopToTop).not.toHaveBeenCalled();
 	});
 
@@ -927,6 +950,7 @@ describe('ConfirmationScreen (D-01/D-02/D-03/D-05/D-07/D-08/D-09/D-11/D-12/D-18)
 			expect(text).toContain('Set up fingerprint or face unlock to continue');
 			expect(text).toContain('Set up device unlock');
 			expect(mockClearDraft).not.toHaveBeenCalled();
+			// D-100 replacing 51-11: no popToTop until Done or Back to registration is pressed.
 			expect(mockPopToTop).not.toHaveBeenCalled();
 
 			const setupCta = tr.root.findByProps({testID: 'confirmation-setup-cta'});
@@ -1952,5 +1976,105 @@ describe('ConfirmationScreen — decision-wait copy in both locales (UI-SPEC A6 
 				tr.unmount();
 			});
 		}
+	});
+});
+
+
+describe('ConfirmationScreen — outcome poll, completion and exits (D-100, UAT 65 gap 5)', () => {
+	const mounted: renderer.ReactTestRenderer[] = [];
+
+	beforeEach(() => {
+		jest.useFakeTimers({doNotFake: ['queueMicrotask']});
+	});
+	afterEach(() => {
+		while (mounted.length > 0) {
+			const tr = mounted.pop()!;
+			renderer.act(() => {
+				tr.unmount();
+			});
+		}
+		jest.useRealTimers();
+	});
+
+	const present = (tr: renderer.ReactTestRenderer, testID: string) => tr.root.findAllByProps({testID}).length > 0;
+
+	async function submitToPending() {
+		const tr = renderScreen();
+		mounted.push(tr);
+		await renderer.act(async () => {
+			tr.root.findByProps({testID: 'confirmation-confirm-face-id'}).props.onPress();
+			await flushMicrotasks(200);
+		});
+		expect(present(tr, 'confirmation-pending')).toBe(true);
+		return tr;
+	}
+
+	async function advance(ms: number) {
+		await renderer.act(async () => {
+			jest.advanceTimersByTime(ms);
+			await flushMicrotasks(30);
+		});
+	}
+
+	it('C-1 completes when a later poll reads registered; Done pops once', async () => {
+		const tr = await submitToPending();
+		mockResolveRegistrationStatus.mockImplementation(async () => ({kind: 'registered'}));
+		await advance(10_000);
+		expect(present(tr, 'confirmation-pending')).toBe(false);
+		expect(present(tr, 'confirmation-registered')).toBe(true);
+		expect(present(tr, 'confirmation-done')).toBe(true);
+		expect(mockPopToTop).not.toHaveBeenCalled();
+		renderer.act(() => {
+			tr.root.findByProps({testID: 'confirmation-done'}).props.onPress();
+		});
+		expect(mockPopToTop).toHaveBeenCalledTimes(1);
+	});
+
+	it('C-2 pending shows Back to registration, which pops once', async () => {
+		const tr = await submitToPending();
+		renderer.act(() => {
+			tr.root.findByProps({testID: 'confirmation-pending-back'}).props.onPress();
+		});
+		expect(mockPopToTop).toHaveBeenCalledTimes(1);
+	});
+
+	it('C-3 the poll stops after 10 min and the check-later line appears', async () => {
+		const tr = await submitToPending();
+		expect(present(tr, 'confirmation-pending-check-later')).toBe(false);
+		await advance(600_000);
+		await advance(10_000);
+		expect(present(tr, 'confirmation-pending-check-later')).toBe(true);
+		const calls = mockResolveRegistrationStatus.mock.calls.length;
+		await advance(60_000);
+		expect(mockResolveRegistrationStatus.mock.calls.length).toBe(calls);
+	});
+
+	it('C-4 unmount stops the poll', async () => {
+		const tr = await submitToPending();
+		renderer.act(() => {
+			tr.unmount();
+		});
+		mounted.length = 0;
+		const calls = mockResolveRegistrationStatus.mock.calls.length;
+		await advance(60_000);
+		expect(mockResolveRegistrationStatus.mock.calls.length).toBe(calls);
+	});
+
+	it('C-5 the status read uses the read-only device key lookup, never provisionDeviceKey', async () => {
+		await submitToPending();
+		mockProvisionDeviceKey.mockClear();
+		mockGetCurrentDeviceKey.mockClear();
+		const deps = mockResolveRegistrationStatus.mock.calls.at(-1)![0] as {getCurrentDeviceKey: () => Promise<unknown>};
+		await deps.getCurrentDeviceKey();
+		expect(mockGetCurrentDeviceKey).toHaveBeenCalledTimes(1);
+		expect(mockProvisionDeviceKey).not.toHaveBeenCalled();
+	});
+
+	it.each(['indeterminate', 'notRegistered', 'pending'])('C-6 a %s read keeps the pending state', async kind => {
+		const tr = await submitToPending();
+		mockResolveRegistrationStatus.mockImplementation(async () => ({kind}));
+		await advance(10_000);
+		expect(present(tr, 'confirmation-pending')).toBe(true);
+		expect(present(tr, 'confirmation-done')).toBe(false);
 	});
 });

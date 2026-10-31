@@ -39,10 +39,13 @@
  *      the attestation answer is submitted. On iOS this is where the biometric prompt fires. On
  *      Android it raises none (spike 104, R1d): a throwaway key answers the nonce and the voting key
  *      is left in place, so the answer below is signed by the SAME key that signed the request.
- *   6. Submit the self-signed attestation-answer document. The screen does NOT wait for a further
- *      approved/rejected decision — the authority's automatic driver is triggered separately (by
- *      "Sync Now" elsewhere), not by this submission — so it shows an honest PENDING state instead
- *      of claiming a success it cannot yet prove.
+ *   6. Submit the self-signed attestation-answer document. The submission itself carries no
+ *      decision, so the screen shows an honest PENDING state instead of claiming a success it cannot
+ *      yet prove. D-100 (UAT 65 gap 5, replacing 51-11's "PENDING, not a further poll"): while
+ *      pending, the screen re-reads the authoritative Association status
+ *      (`resolveRegistrationStatus`, read-only device key) on focus and every 10 s for at most
+ *      10 min, and moves to a completed state only on 'registered'. It pops the stack
+ *      (`navigation.popToTop()`) only when the voter presses Done or Back to registration.
  *
  * D-12: the voter proposes NO expiration for a record the authority signs. `RegisterInit` still
  * requires an `expiration` field on `registrant`/`private`/`selective` (the type is unchanged this
@@ -94,6 +97,7 @@ import {getOrCreateDeviceUser} from '../../engines/device-user';
 import {createDeviceSigner} from '../../engines/device-signer';
 import {resolveAttestationProducer} from '../../engines/attestation-producer';
 import {resolveCurrentElectionId} from '../../engines/election-read';
+import {resolveRegistrationStatus} from '../../engines/registration-status';
 import {
 	classifyAttestationFailure,
 	isDeviceKeyAbsent,
@@ -128,6 +132,10 @@ const IGNORED_EXPIRATION_PLACEHOLDER = new Date(0).toISOString();
 export const DECISION_WAIT_DEADLINE_MS = 180_000;
 export const DECISION_POLL_INTERVAL_MS = 2_000;
 export const DECISION_WAIT_MAX_MS = 300_000;
+
+/** D-100: the pending screen's outcome poll — every 10 s, for at most 10 min of wall clock. */
+export const OUTCOME_POLL_INTERVAL_MS = 10_000;
+export const OUTCOME_POLL_MAX_MS = 600_000;
 
 /**
  * The wait's clock. It is WALL clock (`Date.now`), so a suspended app cannot extend the deadline.
@@ -225,6 +233,7 @@ export default function ConfirmationScreen() {
 	const {seededElectionId, getEngine, createNewIdentity} = useVoterApp();
 	const {draft, clearDraft} = useRegistrationDraft();
 	const navigation = useNavigation<ConfirmationNavigationProp>();
+	const {popToTop} = navigation;
 	const {colors, fonts, type: typeScale, radii} = useTheme() as ExtendedTheme;
 	const {t} = useTranslation('registration');
 	const {t: tContinuity} = useTranslation('continuity');
@@ -237,6 +246,10 @@ export default function ConfirmationScreen() {
 	// Plan 28 (D-45): the re-showable code card's own availability read — re-resolved on every
 	// focus while pending, never cached beyond this render (59 D-23).
 	const [codeAvailability, setCodeAvailability] = useState<RegistrationCodeAvailability | null>(null);
+	// D-100: the authoritative outcome while pending; 'registered' completes the screen.
+	const [registrationOutcome, setRegistrationOutcome] = useState<'pending' | 'registered'>('pending');
+	// D-100: true once the bounded outcome poll has run out its 10 min.
+	const [outcomePollExpired, setOutcomePollExpired] = useState(false);
 
 	// WR-02: one registrantId (and, per this rewrite, one registration-request id and one
 	// association-request id) per registration attempt (this mounted ceremony) — minted once and
@@ -546,12 +559,10 @@ export default function ConfirmationScreen() {
 			throwIfStopped();
 
 			// The authority's automatic driver processes the answer separately, on its own "Sync
-			// Now" trigger — this screen has no further decision to await synchronously, and
-			// claiming success here would be a lie about what has actually happened. Show an honest
-			// pending state instead. The local draft's job (holding the answers before submission) is
-			// done regardless of the eventual decision, so it is safe to clear now; the screen itself
-			// is NOT popped — the voter stays here and sees the pending state rather than being told
-			// "you're all set" for something not yet decided.
+			// Now" trigger, so claiming success here would be a lie. Show an honest pending state; the
+			// bounded outcome poll below (D-100, replacing 51-11's no-poll decision) completes it once
+			// the Association is recorded. The draft is safe to clear now. The screen is NOT popped by
+			// itself: only the voter's Done or Back to registration pops.
 			clearDraft();
 			setIsPending(true);
 		} catch (err) {
@@ -602,6 +613,55 @@ export default function ConfirmationScreen() {
 			}
 		}
 	}
+
+	// D-100: while pending, read the authoritative registration status on focus and every 10 s for
+	// at most 10 min (wall clock). Read-only device key (never provisionDeviceKey, which rotates the
+	// Android key). Stops on 'registered', on blur and on unmount.
+	useFocusEffect(
+		useCallback(() => {
+			if (!isPending || registrationOutcome === 'registered') return;
+			let cancelled = false;
+			const startedAt = Date.now();
+			let interval: ReturnType<typeof setInterval> | null = null;
+			const stop = () => {
+				if (interval !== null) {
+					clearInterval(interval);
+					interval = null;
+				}
+			};
+			const read = async () => {
+				try {
+					const result = await resolveRegistrationStatus({
+						getEngine,
+						getCurrentDeviceKey: () => resolveAttestationProducer().getCurrentDeviceKey(),
+						electionId: electionIdRef.current ?? undefined,
+					});
+					if (cancelled) return;
+					if (result.kind === 'registered') {
+						stop();
+						setRegistrationOutcome('registered');
+					}
+				} catch {
+					// An unreadable status keeps the pending state; the next tick reads again.
+				}
+			};
+			setOutcomePollExpired(false);
+			void read();
+			interval = setInterval(() => {
+				if (Date.now() - startedAt >= OUTCOME_POLL_MAX_MS) {
+					stop();
+					if (!cancelled) setOutcomePollExpired(true);
+					return;
+				}
+				void read();
+			}, OUTCOME_POLL_INTERVAL_MS);
+			return () => {
+				cancelled = true;
+				stop();
+			};
+			// eslint-disable-next-line react-hooks/exhaustive-deps
+		}, [isPending, registrationOutcome]),
+	);
 
 	// Plan 28 (D-45): re-resolved on every focus while pending — never cached beyond this render
 	// (59 D-23). Inert before the ceremony reaches the pending state.
@@ -728,7 +788,31 @@ export default function ConfirmationScreen() {
 					{captionCopy}
 				</Text>
 			)}
-			{isPending ? (
+			{isPending && registrationOutcome === 'registered' ? (
+				<>
+					<Text
+						testID="confirmation-registered"
+						style={[
+							styles.error,
+							{
+								color: colors.text,
+								fontFamily: fonts.regular.fontFamily,
+								fontWeight: fonts.regular.fontWeight,
+								fontSize: typeScale.body.fontSize,
+								lineHeight: typeScale.body.lineHeight,
+							},
+						]}>
+						{t('confirmation.registered')}
+					</Text>
+					<Pressable
+						testID="confirmation-done"
+						accessibilityRole="button"
+						onPress={() => popToTop()}
+						style={[styles.cta, {backgroundColor: colors.primary, borderRadius: radii.pill}]}>
+						<Text style={[styles.ctaLabel, {color: colors.light}]}>{t('confirmation.doneCta')}</Text>
+					</Pressable>
+				</>
+				) : isPending ? (
 				<>
 					<Text
 						testID="confirmation-pending"
@@ -789,6 +873,29 @@ export default function ConfirmationScreen() {
 							{tContinuity('code.notAvailableOnDevice')}
 						</Text>
 					) : null}
+				{outcomePollExpired ? (
+					<Text
+						testID="confirmation-pending-check-later"
+						style={[
+							styles.body,
+							{
+								color: colors.textSecondary,
+								fontFamily: fonts.regular.fontFamily,
+								fontWeight: fonts.regular.fontWeight,
+								fontSize: typeScale.body.fontSize,
+								lineHeight: typeScale.body.lineHeight,
+							},
+						]}>
+						{t('confirmation.pendingCheckLater')}
+					</Text>
+				) : null}
+				<Pressable
+					testID="confirmation-pending-back"
+					accessibilityRole="button"
+					onPress={() => popToTop()}
+					style={[styles.retryCta, {borderColor: colors.primary, borderRadius: radii.pill}]}>
+					<Text style={[styles.ctaLabel, {color: colors.primary}]}>{t('confirmation.pendingBackCta')}</Text>
+				</Pressable>
 				</>
 			) : isWaiting ? (
 				<View testID="confirmation-waiting" style={styles.waiting}>
