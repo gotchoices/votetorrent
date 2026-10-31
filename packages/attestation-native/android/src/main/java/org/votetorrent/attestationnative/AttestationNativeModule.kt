@@ -76,6 +76,14 @@ import com.facebook.react.module.annotations.ReactModule
  *     [KeyAttestationHelper.signWithRecoveryKey]'s doc comment). TERMINAL, not routing, for the
  *     same reason as `NO_DEVICE_CREDENTIAL`: no on-device ceremony exists that this code could
  *     route the caller into.
+ *
+ * Phase 65 gap 1 adds one further class to [signWithDeviceKey] and [signWithRecoveryKey] and one
+ * method:
+ *   - `PROMPT_BUSY` (D-112): another sign is pending or a BiometricFragment is already attached.
+ *     Nothing was shown and nothing will settle later; decided BEFORE a BiometricPrompt is built.
+ *   - [cancelPendingSign] (D-110/D-111): rejects the pending sign `CANCELED`, dismisses its prompt on
+ *     the UI thread and resolves `{canceled}` once the prompt is gone (2 s cap). Never rejects and
+ *     never touches a wrap/unwrap prompt.
  */
 @ReactModule(name = AttestationNativeModule.NAME)
 class AttestationNativeModule(reactContext: ReactApplicationContext) :
@@ -415,6 +423,19 @@ class AttestationNativeModule(reactContext: ReactApplicationContext) :
 				promise.reject(code, throwable)
 			},
 		)
+	}
+
+	override fun cancelPendingSign(promise: Promise) {
+		try {
+			// A null activity is allowed: the cancel still settles the pending promise.
+			val activity = reactApplicationContext.currentActivity as? FragmentActivity
+			keyAttestationHelper.cancelPendingSign(activity) { canceled ->
+				promise.resolve(Arguments.createMap().apply { putBoolean("canceled", canceled) })
+			}
+		} catch (e: Exception) {
+			// The contract never rejects.
+			promise.resolve(Arguments.createMap().apply { putBoolean("canceled", false) })
+		}
 	}
 
 	/**
