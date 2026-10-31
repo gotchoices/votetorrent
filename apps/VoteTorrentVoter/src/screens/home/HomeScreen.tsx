@@ -12,12 +12,12 @@
  *
  * The saved-vote state (D-12, D-19) is read from the stored marker through `readSavedVoteStatus` on
  * every focus. It is never cached, needs no fingerprint, and Home never holds the record. The card
- * shows "Vote saved — not sent" with a link to the receipt, the stale line when the election
+ * shows the saved-vote line from `readSavedVoteStatus` with a link to the receipt, the stale line when the election
  * changed after the vote (D-21), or an unreadable state. Vote now is hidden while a current vote
  * is saved (a local convenience, D-20).
  */
 import React, {useCallback, useState} from 'react';
-import {Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
+import {AppState, Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
 import {useFocusEffect, useNavigation, useTheme} from '@react-navigation/native';
 import type {ExtendedTheme} from '@react-navigation/native';
 import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
@@ -85,16 +85,31 @@ export default function HomeScreen() {
 	// in. So, only in that state and only while focused, the list alone is re-checked every
 	// ELECTION_LIST_RECHECK_MS, and the election is re-read once the list names one. Home mounted
 	// before a join used to keep the dev-seed card for good (iPhone, 2026-10-29).
+	//
+	// A focused Home would otherwise keep a lifecycle snapshot past its boundary (UAT 65 gap 3, D-97),
+	// so two more re-reads run: one timer armed at the read's countdownTarget (+1 s, clamped), which
+	// re-arms from the next read, and one when the app returns to the foreground (JS timers pause in
+	// the background). Both are cleared on blur and unmount.
 	useFocusEffect(
 		useCallback(() => {
 			let live = true;
 			let recheck: ReturnType<typeof setTimeout> | undefined;
-			const read = () => {
+			let boundary: ReturnType<typeof setTimeout> | undefined;
+			const read = (): void => {
 				getElection().then(
 					result => {
 						if (live) {
 							setElection(result);
 							setUnavailable(false);
+							if (boundary !== undefined) {
+								clearTimeout(boundary);
+								boundary = undefined;
+							}
+							const target = result.countdownTarget === undefined ? NaN : Date.parse(result.countdownTarget);
+							if (Number.isFinite(target)) {
+								const delay = Math.min(2 ** 31 - 1, Math.max(0, target - nowMs() + 1000));
+								boundary = setTimeout(read, delay);
+							}
 						}
 					},
 					() => {
@@ -127,13 +142,22 @@ export default function HomeScreen() {
 					}
 				});
 			}
+			const appState = AppState.addEventListener('change', state => {
+				if (state === 'active') {
+					read();
+				}
+			});
 			return () => {
 				live = false;
+				appState.remove();
 				if (recheck !== undefined) {
 					clearTimeout(recheck);
 				}
+				if (boundary !== undefined) {
+					clearTimeout(boundary);
+				}
 			};
-		}, [getElection, getEngine, hasNetwork]),
+		}, [getElection, getEngine, hasNetwork, nowMs]),
 	);
 
 	// Re-read the marker on every focus, so returning from the receipt or from Submit shows the

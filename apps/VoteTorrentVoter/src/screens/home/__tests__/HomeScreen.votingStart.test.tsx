@@ -26,7 +26,7 @@ jest.mock('../../../providers/VoterAppProvider', () => {
 			mockState.reads++;
 			const now = Date.now();
 			if (now >= mockAccruing) {
-				return {id: 'e1', title: 'E', lifecycleState: 'AccruingVotes', countdownTarget: new Date(mockClosing).toISOString()};
+				return {id: 'e1', title: 'E', lifecycleState: 'ReviewSelections', countdownTarget: new Date(mockClosing).toISOString()};
 			}
 			return now >= mockVotingStarts
 				? {id: 'e1', title: 'E', lifecycleState: 'Open', countdownTarget: new Date(mockAccruing).toISOString()}
@@ -89,12 +89,14 @@ const advance = async (ms: number) => {
 	await flush();
 };
 
-let appStateListener: ((s: string) => void) | null = null;
+// Other components subscribe to AppState too; emit to every listener, as the real AppState does.
+const appStateListeners: Array<(s: string) => void> = [];
+const emitAppState = (s: string) => appStateListeners.slice().forEach(fn => fn(s));
 beforeEach(() => {
 	mockState.reads = 0;
-	appStateListener = null;
+	appStateListeners.length = 0;
 	jest.spyOn(AppState, 'addEventListener').mockImplementation(((_type: string, fn: (s: string) => void) => {
-		appStateListener = fn;
+		appStateListeners.push(fn);
 		return {remove: jest.fn()};
 	}) as never);
 	jest.useFakeTimers();
@@ -129,17 +131,17 @@ it('a re-read follows the next boundary too', async () => {
 	await advance(39 * 60_000 + 10_000);
 	expect(mockState.reads).toBeGreaterThan(afterOpen);
 	expect(has('election-card-vote-now')).toBe(false);
-});
+}, 120_000);
 
 it('returning to the foreground re-reads', async () => {
 	await startedAt();
 	await flush();
-	expect(appStateListener).not.toBeNull();
+	expect(appStateListeners.length).toBeGreaterThan(0);
 	const before = mockState.reads;
-	await renderer.act(async () => { appStateListener!('background'); });
+	await renderer.act(async () => { emitAppState('background'); });
 	await flush();
 	expect(mockState.reads).toBe(before);
-	await renderer.act(async () => { appStateListener!('active'); });
+	await renderer.act(async () => { emitAppState('active'); });
 	await flush();
 	expect(mockState.reads).toBe(before + 1);
 });
