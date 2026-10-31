@@ -12,6 +12,7 @@
 import React from 'react';
 import fs from 'fs';
 import path from 'path';
+import {Platform} from 'react-native';
 import renderer from 'react-test-renderer';
 import type {ReactTestInstance} from 'react-test-renderer';
 import {NavigationContainer, createNavigationContainerRef, useRoute} from '@react-navigation/native';
@@ -504,6 +505,51 @@ describe('ReviewSubmitScreen (VOTE-04)', () => {
 			expect(find(tr, 'review-submit').props.disabled).toBe(false);
 			expect(receipt.renders).toBe(0);
 		});
+	});
+
+	describe('RS12b: Face ID copy on ios, fingerprint copy on android (D-101)', () => {
+		const originalOS = Platform.OS;
+		afterEach(() => {
+			Object.defineProperty(Platform, 'OS', {value: originalOS, configurable: true});
+		});
+		const platforms: Array<['ios' | 'android', string]> = [
+			['ios', ''],
+			['android', '.android'],
+		];
+
+		it.each(platforms)('%s: record prompt subtitle', async (os, suffix) => {
+			Object.defineProperty(Platform, 'OS', {value: os, configurable: true});
+			castMock.mockReturnValue(new Promise(() => {}));
+			const {tr} = await boot();
+			await openReview(tr);
+			press(tr, 'review-submit');
+			await settle();
+			const arg = castMock.mock.calls[0][0];
+			expect(arg.recordPrompt.subtitle).toBe(en[`submit.recordPrompt.subtitle${suffix}`]);
+			expect(arg.recordPrompt.subtitle).toMatch(os === 'ios' ? /Face ID/ : /fingerprint/);
+		});
+
+		const failures: Array<[string, CastVoteResult, string]> = [
+			['sign/canceled', {ok: false, stage: 'sign', reason: 'canceled'}, 'submit.failure.canceled'],
+			['sign/biometric-unavailable', {ok: false, stage: 'sign', reason: 'biometric-unavailable'}, 'submit.failure.biometricUnavailable'],
+			['seal/canceled', {ok: false, stage: 'seal', reason: 'canceled'}, 'submit.failure.canceled'],
+			['seal/biometric-unavailable', {ok: false, stage: 'seal', reason: 'biometric-unavailable'}, 'submit.failure.biometricUnavailable'],
+			['seal/key-invalidated', {ok: false, stage: 'seal', reason: 'key-invalidated'}, 'submit.failure.keyInvalidated'],
+		];
+		for (const [os, suffix] of platforms) {
+			it.each(failures)(`${os}: %s`, async (_name, result, key) => {
+				Object.defineProperty(Platform, 'OS', {value: os, configurable: true});
+				castMock.mockResolvedValue(result);
+				const {tr} = await boot();
+				await openReview(tr);
+				press(tr, 'review-submit');
+				await settle();
+				const shown = textOf(find(tr, 'review-submit-failure'));
+				expect(shown).toBe(en[`${key}${suffix}`]);
+				expect(shown).toMatch(os === 'ios' ? /Face ID/ : /fingerprint/);
+				expect(shown).not.toMatch(os === 'ios' ? /fingerprint/ : /Face ID/);
+			});
+		}
 	});
 
 	it('RS13: a castVote ineligible stage replaces the eligibility instead of showing a failure', async () => {

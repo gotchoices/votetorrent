@@ -940,7 +940,23 @@ describe('ConfirmationScreen (D-01/D-02/D-03/D-05/D-07/D-08/D-09/D-11/D-12/D-18)
 	});
 
 	describe('D-09 three-way failure UX', () => {
+		const originalOS = Platform.OS;
+		afterEach(() => {
+			Object.defineProperty(Platform, 'OS', {value: originalOS, configurable: true});
+		});
+
+		it('NO_BIOMETRICS_ENROLLED names Face ID on ios', async () => {
+			Object.defineProperty(Platform, 'OS', {value: 'ios', configurable: true});
+			mockProduce.mockRejectedValueOnce({code: 'NO_BIOMETRICS_ENROLLED'});
+			const tr = renderScreen();
+			await pressConfirm(tr);
+			const text = JSON.stringify(tr.toJSON());
+			expect(text).toContain('Set up Face ID to continue');
+			expect(text).not.toContain('fingerprint');
+		});
+
 		it('NO_BIOMETRICS_ENROLLED renders the setup prompt + deep-link CTA, and a separate retry — no clearDraft/popToTop', async () => {
+			Object.defineProperty(Platform, 'OS', {value: 'android', configurable: true});
 			mockProduce.mockRejectedValueOnce({code: 'NO_BIOMETRICS_ENROLLED'});
 
 			const tr = renderScreen();

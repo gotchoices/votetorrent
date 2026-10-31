@@ -6,7 +6,7 @@
  */
 import React from 'react';
 import renderer from 'react-test-renderer';
-import {Keyboard, View} from 'react-native';
+import {Keyboard, Platform, View} from 'react-native';
 import '../../../i18n'; // initializes the global i18next instance useTranslation() reads from
 import {REASSOCIATION_UNRESOLVED_REGISTRANT_ID} from '@votetorrent/vote-core';
 
@@ -176,7 +176,9 @@ function renderScreen() {
 // Unmounts every tree rendered by a test (the screen registers AppState/Keyboard listeners on
 // mount, per its own pending-ceremony polling contract) — never leaving one running into the
 // next test avoids a "worker process failed to exit gracefully" warning from leaked listeners.
+const ORIGINAL_PLATFORM_OS = Platform.OS;
 afterEach(() => {
+	Object.defineProperty(Platform, 'OS', {value: ORIGINAL_PLATFORM_OS, configurable: true});
 	while (renderedTrees.length > 0) {
 		const tr = renderedTrees.pop()!;
 		renderer.act(() => {
@@ -529,7 +531,27 @@ describe('ContinueOnAnotherDeviceScreen — failures', () => {
 		expect(firstInit).toBe(secondInit);
 	});
 
+	it('a recoverable-action failure names Face ID on ios', async () => {
+		Object.defineProperty(Platform, 'OS', {value: 'ios', configurable: true});
+		mockProduce.mockRejectedValueOnce({code: 'NO_BIOMETRICS_ENROLLED'});
+		pollDecisionsImpl = async () => [{requestId: associationSubmitRequestCalls[0]?.init.id, status: 'c', challengeNonce: 'nonce-1', cursor: '1'}];
+
+		const tr = await mountAndFlush();
+		renderer.act(() => {
+			tr.root.findByProps({testID: 'continue-device-code-input'}).props.onChangeText('wwwww-wwwww');
+		});
+		await renderer.act(async () => {
+			tr.root.findByProps({testID: 'continue-device-code-submit'}).props.onPress();
+			await flush(60);
+		});
+
+		const text = JSON.stringify(tr.toJSON());
+		expect(text).toContain('Set up Face ID to continue');
+		expect(text).not.toContain('fingerprint');
+	});
+
 	it("a produce() failure classified 'recoverable-action' renders the setup prompt + setupCta and a retryButton retry", async () => {
+		Object.defineProperty(Platform, 'OS', {value: 'android', configurable: true});
 		mockProduce.mockRejectedValueOnce({code: 'NO_BIOMETRICS_ENROLLED'});
 		pollDecisionsImpl = async () => [{requestId: associationSubmitRequestCalls[0]?.init.id, status: 'c', challengeNonce: 'nonce-1', cursor: '1'}];
 
@@ -547,6 +569,7 @@ describe('ContinueOnAnotherDeviceScreen — failures', () => {
 		expect(tr.root.findByProps({testID: 'continue-device-setup-cta'})).toBeDefined();
 		expect(tr.root.findByProps({testID: 'continue-device-retry'})).toBeDefined();
 	});
+
 
 	it("an IntakeError while advancing renders the intake-unavailable copy (not device blame, not the pending heading) with a retryButton retry", async () => {
 		mockSubmitAttestation.mockRejectedValueOnce(

@@ -52,11 +52,16 @@ const REQUIRED_SUBMIT_KEYS = [
 	'submit.failure.storeFailed',
 	'submit.failure.storeUnreadable',
 	'submit.failure.unexpected',
+	// Android twins of the four biometric-named keys (base key = Face ID on iOS).
+	'submit.recordPrompt.subtitle.android',
+	'submit.failure.canceled.android',
+	'submit.failure.biometricUnavailable.android',
+	'submit.failure.keyInvalidated.android',
 ];
 
 describe('submit copy', () => {
-	it('G6: lists 37 keys and no untracked extra submit key exists', () => {
-		expect(REQUIRED_SUBMIT_KEYS).toHaveLength(37);
+	it('G6: lists 41 keys and no untracked extra submit key exists', () => {
+		expect(REQUIRED_SUBMIT_KEYS).toHaveLength(41);
 		const present = Object.keys(en).filter(k => k.startsWith('submit.')).sort();
 		expect(present).toEqual([...REQUIRED_SUBMIT_KEYS].sort());
 		const presentEs = Object.keys(es).filter(k => k.startsWith('submit.')).sort();

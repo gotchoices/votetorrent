@@ -25,7 +25,7 @@
  * and is omitted when nothing resolves (OQ10).
  */
 import React, {useCallback, useEffect, useRef, useState} from 'react';
-import {ActivityIndicator, AppState, Linking, Pressable, ScrollView, StyleSheet, Text, TextInput, View} from 'react-native';
+import {ActivityIndicator, AppState, Linking, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View} from 'react-native';
 import type {LayoutChangeEvent, ScrollViewInstance} from 'react-native';
 import {useFocusEffect, useNavigation, useTheme} from '@react-navigation/native';
 import type {ExtendedTheme} from '@react-navigation/native';
@@ -446,7 +446,9 @@ export default function ContinueOnAnotherDeviceScreen() {
 
 	const errorCopy =
 		failureClass === 'recoverable-action'
-			? tRegistration('confirmation.error.biometricNotEnrolled')
+			? Platform.OS === 'ios'
+				? tRegistration('confirmation.error.biometricNotEnrolled')
+				: tRegistration('confirmation.error.biometricNotEnrolled.android')
 			: failureClass === 'terminal'
 				? tRegistration('confirmation.error.terminal')
 				: failureClass === 'recoverable-transient'

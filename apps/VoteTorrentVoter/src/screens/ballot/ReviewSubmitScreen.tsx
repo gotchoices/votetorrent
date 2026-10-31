@@ -29,7 +29,7 @@
  * The screen never touches storage (gate K1) and never logs.
  */
 import React, {useCallback, useEffect, useRef, useState} from 'react';
-import {Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
+import {Platform, Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
 import {useFocusEffect, useNavigation, useTheme} from '@react-navigation/native';
 import type {ExtendedTheme} from '@react-navigation/native';
 import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
@@ -96,6 +96,8 @@ function ineligibleReasonText(reason: VoteIneligibleReason, t: Translate): strin
 
 /** One typed message per closed failure stage and reason; never derived from error text. */
 function castFailureText(failure: Exclude<CastVoteFailure, {stage: 'ineligible'}>, t: Translate): string {
+	// D-101: iOS reads the Face ID copy (base key), Android the '.android' sibling; literal keys per branch.
+	const isIos = Platform.OS === 'ios';
 	switch (failure.stage) {
 		case 'build':
 			switch (failure.reason) {
@@ -110,9 +112,9 @@ function castFailureText(failure: Exclude<CastVoteFailure, {stage: 'ineligible'}
 		case 'sign':
 			switch (failure.reason) {
 				case 'canceled':
-					return t('submit.failure.canceled');
+					return isIos ? t('submit.failure.canceled') : t('submit.failure.canceled.android');
 				case 'biometric-unavailable':
-					return t('submit.failure.biometricUnavailable');
+					return isIos ? t('submit.failure.biometricUnavailable') : t('submit.failure.biometricUnavailable.android');
 				case 'sign-failed':
 					return t('submit.failure.signFailed');
 				case 'signature-invalid':
@@ -126,11 +128,11 @@ function castFailureText(failure: Exclude<CastVoteFailure, {stage: 'ineligible'}
 		case 'seal':
 			switch (failure.reason) {
 				case 'canceled':
-					return t('submit.failure.canceled');
+					return isIos ? t('submit.failure.canceled') : t('submit.failure.canceled.android');
 				case 'biometric-unavailable':
-					return t('submit.failure.biometricUnavailable');
+					return isIos ? t('submit.failure.biometricUnavailable') : t('submit.failure.biometricUnavailable.android');
 				case 'key-invalidated':
-					return t('submit.failure.keyInvalidated');
+					return isIos ? t('submit.failure.keyInvalidated') : t('submit.failure.keyInvalidated.android');
 				case 'no-wrap-key':
 				case 'policy-mismatch':
 				case 'tag-mismatch':
@@ -257,7 +259,7 @@ export default function ReviewSubmitScreen() {
 		};
 		const recordPrompt: SecretWrapPrompt = {
 			title: t('submit.recordPrompt.title'),
-			subtitle: t('submit.recordPrompt.subtitle'),
+			subtitle: Platform.OS === 'ios' ? t('submit.recordPrompt.subtitle') : t('submit.recordPrompt.subtitle.android'),
 			negativeButton: t('submit.recordPrompt.negativeButton'),
 		};
 		try {

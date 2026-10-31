@@ -725,7 +725,9 @@ export default function ConfirmationScreen() {
 
 	const errorCopy =
 		failureClass === 'recoverable-action'
-			? t('confirmation.error.biometricNotEnrolled')
+			? isIos
+				? t('confirmation.error.biometricNotEnrolled')
+				: t('confirmation.error.biometricNotEnrolled.android')
 			: failureClass === 'terminal'
 				? t('confirmation.error.terminal')
 				: failureClass === 'recoverable-transient'
