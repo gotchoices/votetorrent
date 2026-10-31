@@ -125,7 +125,9 @@ describe('iOS secret-wrap read contract (unwrap never creates; reason forwarded)
 
 		it('a blank localizedReason is reported', () => {
 			const src = loadSwift()
-			const planted = src.replace(/localizedReason = reason\b/, 'localizedReason = ""')
+			// Anchored at the loader: the device-key sign path sets its own localizedReason earlier in the file.
+			const loaderAt = src.indexOf('func loadWrapKey(')
+			const planted = src.slice(0, loaderAt) + src.slice(loaderAt).replace(/localizedReason = reason\b/, 'localizedReason = ""')
 			expect(planted).not.toBe(src)
 			expect(checkIosWrapKeyRead(planted).some((p) => p.includes('localizedReason'))).toBe(true)
 		})
