@@ -164,7 +164,7 @@ export interface StrandDbFactoryOptions {
  *
  * First-sync gate (quick task 260928-kkf): since cadre-core 1.1.0, a JOINER's
  * `addStrand` can block for its configured `strandFirstSync.timeoutMs` (default
- * ~300s) and then REJECT with the retryable `StrandAwaitingFirstSyncError` — "no
+ * 360 s, cadre-core 1.19.x `DEFAULT_STRAND_FIRST_SYNC_TIMEOUT_MS = 360000`) and then REJECT with the retryable `StrandAwaitingFirstSyncError` — "no
  * sibling has been reachable since this node joined" — rather than resolving. That is
  * NOT a failure to open the network: the strand stays launched and keeps probing on
  * its own, so this catches exactly that one error (name-marker + strandId match, see

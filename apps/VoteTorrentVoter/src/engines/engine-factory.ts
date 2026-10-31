@@ -49,8 +49,10 @@ import {
 } from '@votetorrent/vote-engine/rn'
 import type { DbFactory, EngineContext, ElectionSubject } from '@votetorrent/vote-engine/rn'
 import { rnDbFactory, createStrandDbFactory } from './rn-db-factory'
-import { takeFounderIntent, wrapCreateWithFounding } from './founder-intent'
+import { takeFounderIntent, peekFounderIntent, wrapCreateWithFounding, FounderIntentBusyError } from './founder-intent'
+import { readNetworkBackend, recordNetworkBackend } from './network-backend-store'
 import type { StrandHost } from './rn-db-factory'
+type DbHandle = Awaited<ReturnType<DbFactory>>
 import { USE_LOCAL_DB_FACTORY, USE_STUB_ATTESTATION_VERIFIER } from './proof-flags.generated'
 import { selectAttestationVerifier } from './attestation-verifier'
 import { createVoterStrandPort } from './strand-port-adapter'
@@ -162,25 +164,61 @@ export class EngineFactory {
 		// node is set and the __DEV__ escape hatch USE_LOCAL_DB_FACTORY is false;
 		// otherwise falls back to the injected rnDbFactory (solo-safe / no regression).
 		// Never call createStrandDbFactory(null) — guard on this.node truthy.
+		//
+		// D-98 (UAT 65 gap 4): an iPhone Debug install launches twice. Launch 1 seeds the dev network on
+		// the SOLO store (node not up); launch 2 re-attaches it once the node is set, and a node-based
+		// dispatch would open an empty strand store as a JOINER that waits for a Header nobody can push.
+		// So the store that CREATED a network is recorded per hash and a solo-created network re-opens
+		// on the solo store. Joined networks are never created here, so they have no record and keep
+		// the node-based dispatch.
 		this.networksEngine = new NetworksEngine(localStorage, async (networkHash: string) => {
-			if (this.node && !(__DEV__ && USE_LOCAL_DB_FACTORY)) {
+			const creating = peekFounderIntent() === 'founding'
+			const useStrand = (): boolean => !!this.node && !(__DEV__ && USE_LOCAL_DB_FACTORY)
+			const openStrand = (): Promise<DbHandle> => {
+				const node = this.node as StrandHost
 				// The signal is read AT CALL TIME (not captured once) so a controller
 				// swapped in by a later cancelPendingStrandWaits() is the one this call
 				// actually waits on.
-				const db = await createStrandDbFactory(this.node, {
+				return createStrandDbFactory(node, {
 					signal: this.firstSyncAbort.signal,
 					onAwaitingFirstSync: (id) => this.firstSyncListener?.(id),
 					isJoinedNetwork: async (id) => (await readJoinedNetworkHashes()).includes(id),
 				})(networkHash)
+			}
+			const finishStrand = async (pending: Promise<DbHandle>): Promise<DbHandle> => {
+				const db = await pending
 				// D-32: mark this hash peer-backed only AFTER the strand factory resolved —
 				// never speculatively before the call.
 				this.strandBackedNetworks.add(networkHash)
 				return db
 			}
-			// D-30: the solo store has no founder flag, but this open still claims (and so frees) a
-			// founding window installed for it, exactly as the strand factory's first statement does.
-			takeFounderIntent(networkHash)
-			return this.rnDbFactory(networkHash)
+			const openSolo = (): Promise<DbHandle> => {
+				// D-30: the solo store has no founder flag, but this open still claims (and so frees) a
+				// founding window installed for it, exactly as the strand factory's first statement does.
+				takeFounderIntent(networkHash)
+				return this.rnDbFactory(networkHash)
+			}
+
+			if (creating) {
+				// Nothing is awaited before the open starts (D-30): the factory's synchronous first
+				// statement takes the founding intent. Only then is the creating store recorded, and the
+				// record lands before the open resolves, hence before create writes any network data.
+				const strand = useStrand()
+				const pending = strand ? openStrand() : openSolo()
+				try {
+					await recordNetworkBackend(networkHash, strand ? 'strand' : 'solo')
+				} catch {
+					// A failed record must not fail the open (dev-seed-only residual hole).
+				}
+				return strand ? finishStrand(pending) : pending
+			}
+
+			const backend = await readNetworkBackend(networkHash)
+			// A create started during the await above: never consume its founding window.
+			if (peekFounderIntent() === 'founding') throw new FounderIntentBusyError()
+			if (backend === 'solo') return openSolo()
+			if (useStrand()) return finishStrand(openStrand())
+			return openSolo()
 		})
 		// D-30 (the Authority's, ported): a network this factory CREATES (the __DEV__ dev seed's
 		// NetworksEngine.create) founds even while the control node holds a relay connection. A join or

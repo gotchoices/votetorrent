@@ -45,7 +45,7 @@ const AsyncStorage = asMod.default ?? asMod;
 const node = {} as never;
 
 function build() {
-	const solo = jest.fn(async (hash: string) => {
+	const solo = jest.fn(async (hash: string): Promise<unknown> => {
 		fi.takeFounderIntent(hash);
 		return {backend: 'solo'};
 	});
