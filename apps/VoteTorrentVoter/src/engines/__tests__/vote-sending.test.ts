@@ -71,6 +71,9 @@ function makeVoter(i: number) {
 	return {record, priv, deviceKey, phone: `phone-${i}`};
 }
 
+/** test seam: the consent queue's minimum prompt window, small so fast agents are not refused no-time */
+const FAST_MIN_PROMPT_MS = 100;
+
 const fastAgent = {quietMs: 300, presentIntervalMs: 50, replyTimeoutMs: 400, informAttempts: 2, signTimeoutMs: 2_000, memberTimeoutMs: 3_000, pollWaitMs: 200, formLeadMs: 0};
 
 function signWith(priv: Uint8Array, probe?: {active: number, maxActive: number}) {
@@ -96,7 +99,7 @@ describe('sendSavedVote (spike 102)', () => {
 		const statuses: Array<Array<[string, BallotSendStatus]>> = voters.map(() => []);
 		const results = await Promise.all(voters.map((v, i) => sendSavedVote({
 			port: strand.port, sentStore: stores[i]!, record: v.record, rendezvous: clientFor(rv, v.phone),
-			signConsent: signWith(v.priv, probes[i]), nowMs: () => Date.now(), agentOptions: fastAgent,
+			signConsent: signWith(v.priv, probes[i]), nowMs: () => Date.now(), agentOptions: fastAgent, minPromptMs: FAST_MIN_PROMPT_MS,
 			onStatus: (b, s) => statuses[i]!.push([b, s]),
 		})));
 		rv.close();
@@ -126,7 +129,7 @@ describe('sendSavedVote (spike 102)', () => {
 			const sign = (digest: string) => (i === 1 && ++calls === 1) ? new Promise<string>(() => {}) : real(digest);
 			return sendSavedVote({
 				port: strand.port, sentStore: stores[i]!, record: v.record, rendezvous: clientFor(rv, v.phone),
-				signConsent: sign, nowMs: () => Date.now(), agentOptions: agent,
+				signConsent: sign, nowMs: () => Date.now(), agentOptions: agent, minPromptMs: FAST_MIN_PROMPT_MS,
 			});
 		}))]);
 		clearTimeout(stall);
@@ -156,7 +159,7 @@ describe('sendSavedVote (spike 102)', () => {
 		const sign = jest.fn();
 		const result = await sendSavedVote({
 			port: strand.port, sentStore: store, record: v.record, rendezvous: clientFor(rv, v.phone),
-			signConsent: sign, nowMs: () => Date.now(), agentOptions: fastAgent,
+			signConsent: sign, nowMs: () => Date.now(), agentOptions: fastAgent, minPromptMs: FAST_MIN_PROMPT_MS,
 		});
 		rv.close();
 		expect(result).toEqual({ok: true, ballots: [{ballotId: 'ballot-a', status: {phase: 'sent', cid: 'cid-ballot-a'}}, {ballotId: 'ballot-b', status: {phase: 'sent', cid: 'cid-ballot-b'}}]});
@@ -171,7 +174,7 @@ describe('sendSavedVote (spike 102)', () => {
 		const v = makeVoter(5);
 		const result = await sendSavedVote({
 			port: strand.port, sentStore: memorySentStore(), record: v.record, rendezvous: clientFor(rv, v.phone),
-			signConsent: signWith(v.priv), nowMs: () => Date.now(), agentOptions: fastAgent,
+			signConsent: signWith(v.priv), nowMs: () => Date.now(), agentOptions: fastAgent, minPromptMs: FAST_MIN_PROMPT_MS,
 		});
 		rv.close();
 		expect(strand.commits).toEqual([]);
@@ -186,6 +189,111 @@ describe('sendSavedVote (spike 102)', () => {
 		const noKey = fakeStrand(Date.now() + 60_000);
 		expect(await sendSavedVote({...base, port: {...noKey.port, readElectionKey: async () => null}})).toEqual({ok: false, reason: 'election-key-missing'});
 		expect(await sendSavedVote({...base, port: {...noKey.port, readVotingClose: async () => null}})).toEqual({ok: false, reason: 'window-unreadable'});
+	});
+});
+
+/**
+ * A fake native signer modelled on Run 3 (androidx.biometric 1.1.0): a sign started while another is
+ * pending is silently dropped (never settles). The FIRST sign ever is the unanswered prompt: it stays
+ * pending until cancelled. cancel() rejects the pending sign with CANCELED and resolves true.
+ */
+function swallowingNative(priv: Uint8Array) {
+	const real = signWith(priv);
+	const stats = {cancelCalls: 0, swallowed: 0, maxActive: 0, active: 0, signs: 0};
+	let pending: ((e: Error) => void) | null = null;
+	const sign = (digest: string): Promise<string> => {
+		if (pending !== null) { stats.swallowed++; return new Promise<string>(() => {}); }
+		stats.signs++;
+		stats.active++; stats.maxActive = Math.max(stats.maxActive, stats.active);
+		if (stats.signs === 1) {
+			return new Promise<string>((_resolve, reject) => {
+				pending = (e) => { pending = null; stats.active--; reject(e); };
+			});
+		}
+		pending = () => undefined;
+		return real(digest).then((sig) => { pending = null; stats.active--; return sig; });
+	};
+	const cancel = async (): Promise<boolean> => {
+		stats.cancelCalls++;
+		if (pending === null) return false;
+		const reject = pending;
+		reject(Object.assign(new Error('canceled'), {code: 'CANCELED'}));
+		pending = null;
+		await new Promise(r => setTimeout(r, 50));
+		return true;
+	};
+	return {sign, cancel, stats};
+}
+
+describe('sendSavedVote native cancel (UAT 65 gap 1, Android shape)', () => {
+	jest.setTimeout(40_000);
+	const agent = {...fastAgent, signTimeoutMs: 1_500, replyTimeoutMs: 300, quietMs: 300};
+
+	async function run(opts: {closeMs: number, guardMs: number, withCancel: boolean, firstSign: 'swallow' | 'busy'}) {
+		const rv = new PoolRendezvous();
+		const strand = fakeStrand(Date.now() + opts.closeMs);
+		const voters = [0, 1, 2].map(makeVoter);
+		const stores = voters.map(() => memorySentStore());
+		const native = swallowingNative(voters[1]!.priv);
+		let busyDelivered = 0;
+		let busyFirst = true;
+		const real1 = signWith(voters[1]!.priv);
+		const busySign = async (digest: string) => {
+			if (busyFirst) { busyFirst = false; busyDelivered++; throw Object.assign(new Error('busy'), {code: 'PROMPT_BUSY'}); }
+			return real1(digest);
+		};
+		const ac = new AbortController();
+		let stall: ReturnType<typeof setTimeout> | undefined;
+		const stalled = new Promise<'stalled'>(r => { stall = setTimeout(() => r('stalled'), opts.guardMs); });
+		const all = await Promise.race([stalled, Promise.all(voters.map((v, i) => sendSavedVote({
+			port: strand.port, sentStore: stores[i]!, record: v.record, rendezvous: clientFor(rv, v.phone),
+			signConsent: i === 1 ? (opts.firstSign === 'swallow' ? native.sign : busySign) : signWith(v.priv),
+			cancelSign: i === 1 && opts.withCancel ? native.cancel : undefined,
+			minPromptMs: FAST_MIN_PROMPT_MS, nowMs: () => Date.now(), agentOptions: agent, signal: ac.signal,
+		})))]);
+		clearTimeout(stall);
+		ac.abort();
+		rv.close();
+		return {all, strand, native, busyDelivered};
+	}
+
+	it('a swallowed second sign: both ballots end sent only because cancel is called', async () => {
+		const {all, strand, native} = await run({closeMs: 12_000, guardMs: 20_000, withCancel: true, firstSign: 'swallow'});
+		expect(all).not.toBe('stalled');
+		const results = all === 'stalled' ? [] : all;
+		expect(results).toHaveLength(3);
+		for (const r of results) {
+			expect(r.ok).toBe(true);
+			if (r.ok) expect(r.ballots.map(b => b.status.phase)).toEqual(['sent', 'sent']);
+		}
+		expect(strand.commits.sort((a, b) => a.ballotId.localeCompare(b.ballotId))).toEqual([{ballotId: 'ballot-a', size: 3}, {ballotId: 'ballot-b', size: 3}]);
+		expect(native.stats.cancelCalls).toBeGreaterThanOrEqual(1);
+		expect(native.stats.swallowed).toBe(0);
+		expect(native.stats.maxActive).toBe(1);
+	});
+
+	it('the same swallowing native without cancelSign leaves that voter unsent', async () => {
+		const {all, native} = await run({closeMs: 8_000, guardMs: 11_000, withCancel: false, firstSign: 'swallow'});
+		expect(native.stats.swallowed).toBeGreaterThanOrEqual(1);
+		if (all !== 'stalled') {
+			const r = all[1]!;
+			if (r.ok) expect(r.ballots.some(b => b.status.phase === 'sent')).toBe(false);
+		}
+	});
+
+	it('a PROMPT_BUSY reject is a consent not given, never a crash or a stuck send', async () => {
+		const {all, busyDelivered} = await run({closeMs: 12_000, guardMs: 20_000, withCancel: false, firstSign: 'busy'});
+		expect(all).not.toBe('stalled');
+		if (all === 'stalled') return;
+		const r = all[1]!;
+		expect(r.ok).toBe(true);
+		if (r.ok) {
+			for (const b of r.ballots) {
+				const st = b.status;
+				expect(st.phase === 'sent' || (st.phase === 'not-sent' && st.reason === 'stopped')).toBe(true);
+			}
+		}
+		expect(busyDelivered).toBe(1);
 	});
 });
 
@@ -248,7 +356,7 @@ describe('sendSavedVote (R1 already voted, end to end)', () => {
 		const stores = voters.map(() => memorySentStore());
 		const results = await Promise.all(voters.map((v, i) => sendSavedVote({
 			port: strand.port, sentStore: stores[i]!, record: v.record, rendezvous: clientFor(rv, v.phone),
-			signConsent: signWith(v.priv), nowMs: () => Date.now(), agentOptions: fastAgent,
+			signConsent: signWith(v.priv), nowMs: () => Date.now(), agentOptions: fastAgent, minPromptMs: FAST_MIN_PROMPT_MS,
 		})));
 		rv.close();
 		return {results, stores, strand};
