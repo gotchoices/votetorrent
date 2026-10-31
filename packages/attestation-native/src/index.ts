@@ -65,6 +65,10 @@ export type { FileShareErrorCode } from './file-share'
 export { setSecureScreen, copySensitiveText } from './secure-surface'
 export type { SensitiveCopyResult } from './secure-surface'
 
+// Phase 65 gap 1 (D-110): dismiss a pending device-key or recovery-key sign. Named exports only;
+// `sign-cancel.ts` requires the TurboModule lazily and never throws.
+export { cancelPendingSign, SIGN_CANCEL_JS_CAP_MS } from './sign-cancel'
+
 // Phase 62 plan 90 (gap 2): the single definition of the bytes native signs for verifySigP256-checked
 // signatures. Pure module (no TurboModule), safe in the barrel.
 export { nativeSignInputBytes, nativeSignInputBase64 } from './native-sign-input'

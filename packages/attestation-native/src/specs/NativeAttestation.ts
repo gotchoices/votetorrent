@@ -154,7 +154,10 @@ export interface Spec extends TurboModule {
 	 * `ERROR_CANCELED`/`ERROR_USER_CANCELED`/`ERROR_NEGATIVE_BUTTON` all map here — 49-15/
 	 * Gap B), `NO_BIOMETRICS_ENROLLED`, `LOCKOUT`, `LOCKOUT_PERMANENT`, `BIOMETRIC_ERROR`,
 	 * `KEY_INVALIDATED_REASSOCIATE`, `NO_KEY_PROVISIONED`, `NO_ACTIVITY`,
-	 * `INVALID_DIGEST_ENCODING`.
+	 * `INVALID_DIGEST_ENCODING`, `PROMPT_BUSY`.
+	 *
+	 * `PROMPT_BUSY` (D-112): another biometric prompt is already showing or a sign is pending;
+	 * nothing was shown and nothing will settle later. Callers treat it as a consent not given.
 	 */
 	signWithDeviceKey(
 		keyAlias: string,
@@ -209,6 +212,9 @@ export interface Spec extends TurboModule {
 	 * OS-version check and any ceremony begins.
 	 * `RECOVERY_UNSUPPORTED_OS` (D-26a rescope) — see above.
 	 *
+	 * `PROMPT_BUSY` (D-112) applies to `signWithRecoveryKey` too: another biometric prompt is already
+	 * showing or a sign is pending; nothing was shown and nothing will settle later.
+	 *
 	 * **Unproven at runtime** — the API 30+ branch is proven by D-24 leg 3 on real hardware
 	 * (Samsung SM-M166P, API 36) in 49-14.
 	 * Compilation is not evidence of it.
@@ -220,6 +226,16 @@ export interface Spec extends TurboModule {
 		promptSubtitle: string,
 		promptNegativeButton: string,
 	): Promise<Object>
+
+	/**
+	 * D-110/D-111/D-113: dismisses a pending device-key or recovery-key sign. Resolves
+	 * `{ canceled: boolean }`: `true` only when a pending sign existed and has now settled (its own
+	 * promise rejected `CANCELED`); `false` when nothing was pending. Never rejects for "nothing
+	 * pending". Resolves only after the pending sign has settled and, on Android, its prompt is
+	 * gone, or after a 2 s native cap, whichever is first. Never cancels a wrapSecret/unwrapSecret
+	 * (vault) prompt.
+	 */
+	cancelPendingSign(): Promise<Object>
 
 	/**
 	 * D-42: wraps an arbitrary `plaintextBase64` secret (1..4096 bytes) under a generic,
