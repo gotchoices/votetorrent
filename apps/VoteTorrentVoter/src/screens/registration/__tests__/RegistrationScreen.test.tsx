@@ -70,6 +70,10 @@ const mockResolveRegistrationCodeAvailability = jest.fn(
 jest.mock('../../../engines/continuity', () => ({
 	resolveRegistrationCodeAvailability: (...args: unknown[]) => mockResolveRegistrationCodeAvailability(...args),
 }));
+const mockResolveRegistrationStatus = jest.fn(async (..._args: unknown[]): Promise<{kind: string}> => ({kind: 'notRegistered'}));
+jest.mock('../../../engines/registration-status', () => ({
+	resolveRegistrationStatus: (...args: unknown[]) => mockResolveRegistrationStatus(...args),
+}));
 jest.mock('../../../engines/attestation-producer', () => ({
 	resolveAttestationProducer: () => ({
 		provisionDeviceKey: async () => ({publicKey: 'P256_PUB'}),
@@ -127,6 +131,8 @@ describe('RegistrationScreen (REG-01/REG-05)', () => {
 		mockNavigate.mockClear();
 		mockResolveRegistrationCodeAvailability.mockClear();
 		mockResolveRegistrationCodeAvailability.mockImplementation(async () => ({kind: 'unavailable'}));
+		mockResolveRegistrationStatus.mockReset();
+		mockResolveRegistrationStatus.mockImplementation(async () => ({kind: 'notRegistered'}));
 		latestFocusCallback = null;
 	});
 
@@ -172,6 +178,66 @@ describe('RegistrationScreen (REG-01/REG-05)', () => {
 		const text = JSON.stringify(tr.toJSON());
 		expect(text).not.toContain('Open Device Attestation (dev)');
 		expect(text).not.toContain('Open Confirmation (dev)');
+	});
+});
+
+describe('RegistrationScreen — registered card follows the engine (D-100, UAT 65 gap 5)', () => {
+	beforeEach(() => {
+		mockNavigate.mockClear();
+		mockResolveRegistrationCodeAvailability.mockImplementation(async () => ({kind: 'unavailable'}));
+		mockResolveRegistrationStatus.mockReset();
+		mockResolveRegistrationStatus.mockImplementation(async () => ({kind: 'notRegistered'}));
+		latestFocusCallback = null;
+	});
+
+	async function mountAsync() {
+		setProviderState();
+		let tr!: renderer.ReactTestRenderer;
+		await renderer.act(async () => {
+			tr = renderer.create(
+				<ThemeProvider value={lightTheme}>
+					<RegistrationScreen />
+				</ThemeProvider>,
+			);
+			for (let i = 0; i < 10; i++) await Promise.resolve();
+		});
+		return tr;
+	}
+	const registeredCard = (tr: renderer.ReactTestRenderer) =>
+		tr.root.findAllByProps({testID: 'registration-card-update'}).length > 0;
+
+	it('R-1 a registered read renders the registered card', async () => {
+		mockResolveRegistrationStatus.mockImplementation(async () => ({kind: 'registered'}));
+		const tr = await mountAsync();
+		expect(registeredCard(tr)).toBe(true);
+	});
+
+	it.each(['pending', 'notRegistered', 'indeterminate'])('R-2 a %s read renders the not-registered card', async kind => {
+		mockResolveRegistrationStatus.mockImplementation(async () => ({kind}));
+		const tr = await mountAsync();
+		expect(registeredCard(tr)).toBe(false);
+		expect(tr.root.findAllByProps({testID: 'registration-card-register-now'}).length).toBeGreaterThan(0);
+	});
+
+	it('R-3 a re-focus re-reads and a later registered read flips the card', async () => {
+		const tr = await mountAsync();
+		expect(registeredCard(tr)).toBe(false);
+		mockResolveRegistrationStatus.mockImplementation(async () => ({kind: 'registered'}));
+		await renderer.act(async () => {
+			latestFocusCallback!();
+			for (let i = 0; i < 10; i++) await Promise.resolve();
+		});
+		expect(registeredCard(tr)).toBe(true);
+	});
+
+	it('R-4 the __DEV__ toggle still flips the card regardless of the read', async () => {
+		mockResolveRegistrationStatus.mockImplementation(async () => ({kind: 'registered'}));
+		const tr = await mountAsync();
+		expect(registeredCard(tr)).toBe(true);
+		flipToRegistered(tr); // effective value true -> toggles to false
+		expect(registeredCard(tr)).toBe(false);
+		flipToRegistered(tr);
+		expect(registeredCard(tr)).toBe(true);
 	});
 });
 
