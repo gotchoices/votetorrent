@@ -18,13 +18,15 @@
  *      re-reads the strand once and reports sent only when its row is there (D-12, CR-01).
  *
  * Ballots pool in parallel (each has its own topic), but consent prompts are serialized through
- * vote-engine's bounded consent queue: one at a time (Android can show only one BiometricPrompt at
- * a time), and a prompt left unanswered for the sign window no longer blocks the next one (the
- * native prompt itself is not cancelled; see todo 2026-10-31-ios-native-sign-has-no-timeout-or-cancel). A ballot whose pool is still too small when voting
- * closes stays saved on the phone, not sent. Nothing here logs or touches the sealed record's
+ * vote-engine's consent queue, one at a time. A prompt not answered by the former's reply deadline is
+ * dismissed through the injected `cancelSign` before the next prompt starts (Android shows only one
+ * BiometricPrompt and silently drops a second one), a consent abandoned before it starts never
+ * prompts, and a signer that reports another prompt showing counts as a consent not given. A ballot
+ * whose pool is still too small when voting closes stays saved on the phone, not sent. Nothing here logs or touches the sealed record's
  * storage.
  */
 import {
+	POOL_MIN_PROMPT_MS,
 	POOL_SIGN_TIMEOUT_MS,
 	PoolAgent,
 	canonicalJson,
@@ -39,6 +41,7 @@ import {
 	type PoolRendezvousClient,
 	type FormedPoolBlock,
 	type ConsentSignature,
+	type ConsentCallControl,
 } from '@votetorrent/vote-engine/rn';
 import type {VoteRecord} from './vote-record-vault';
 
@@ -77,6 +80,10 @@ export interface SendSavedVoteDeps {
 	nowMs: () => number
 	onStatus?: (ballotId: string, status: BallotSendStatus) => void
 	signal?: AbortSignal
+	/** dismiss the native consent prompt that is showing; resolves after it is gone; never rejects for "nothing pending" */
+	cancelSign?: () => Promise<unknown>
+	/** test seam: the consent queue's minimum prompt window (default POOL_MIN_PROMPT_MS) */
+	minPromptMs?: number
 	/** test seam: agent timing overrides */
 	agentOptions?: Partial<PoolAgentOptions>
 }
@@ -122,7 +129,13 @@ export async function sendSavedVote(deps: SendSavedVoteDeps): Promise<SendSavedV
 	if (deps.nowMs() >= closesAt) return {ok: false, reason: 'voting-closed'};
 
 	const sent = await deps.sentStore.read(electionId, revision);
-	const signConsent = createConsentQueue(deps.signConsent, {holdMs: deps.agentOptions?.signTimeoutMs ?? POOL_SIGN_TIMEOUT_MS});
+	const consentQueue = createConsentQueue(deps.signConsent, {
+		holdMs: deps.agentOptions?.signTimeoutMs ?? POOL_SIGN_TIMEOUT_MS,
+		cancel: deps.cancelSign,
+		minPromptMs: deps.minPromptMs ?? POOL_MIN_PROMPT_MS,
+		now: deps.nowMs,
+	});
+	const signConsent = (digest: string, ctl?: ConsentCallControl) => consentQueue.withControl(ctl, digest);
 	const report = (ballotId: string, status: BallotSendStatus) => deps.onStatus?.(ballotId, status);
 
 	const ballots = await Promise.all(record.votes.map(async (vote): Promise<{ballotId: string, status: BallotSendStatus}> => {
