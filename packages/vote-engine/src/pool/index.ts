@@ -1,7 +1,7 @@
 // pool/index.ts — vote pools (spike 102): voters negotiate one block per pool through the
 // authority's rendezvous, with every vote encrypted to the election key before it leaves the phone.
 // Named exports only. See pool-agent.ts's header for the rules and the decisions behind them.
-export { PoolAgent, POOL_MIN_BLOCK_SIZE } from './pool-agent.js'
+export { PoolAgent, POOL_MIN_BLOCK_SIZE, POOL_SIGN_TIMEOUT_MS } from './pool-agent.js'
 export type { PoolAgentOptions, PoolAgentStatus, PoolOutcome } from './pool-agent.js'
 export { createConsentQueue } from './consent-queue.js'
 export type { ConsentQueueOptions } from './consent-queue.js'

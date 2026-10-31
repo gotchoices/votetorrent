@@ -260,6 +260,7 @@ export type {
 export {
 	PoolAgent,
 	POOL_MIN_BLOCK_SIZE,
+	POOL_SIGN_TIMEOUT_MS,
 	createConsentQueue,
 	poolTopic,
 	commitPoolBlock,

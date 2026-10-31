@@ -29,6 +29,18 @@
 //     quiet rule only after one quiet window on the plain topic. The parameters are ASSUMED (D-23).
 //   * Pools order strictly by (size desc, peer id asc), so two coordinators never merge into each
 //     other at once.
+//   * D-90: a member that signed stays a member until the former's sign window ends; it never
+//     reverts to solo in the middle of a long sign wait.
+//   * D-91: a drop at formation or commit re-confirms the survivors by request; a survivor that
+//     refuses or stays silent is dropped too, so the former never keeps a stale entry.
+//   * D-92: a merge refused as "a voter is already in this pool" starts one re-confirm, after which
+//     the same sender's next merge is accepted.
+//   * D-93: after 3 consecutive refusals from the best target, a coordinator tries the next-best
+//     target that is still strictly better than its own pool.
+//   * D-94: a member waits for its own consent at most signTimeoutMs - replyTimeoutMs after the
+//     form arrives, so it answers (refuses) before the former gives up on it.
+//   * D-95: two drops at formation exclude the pool identity (peer id) only; the registrant id is
+//     excluded only for an invalid signature or a commit duplicate.
 //
 // The agent owns no database and no device key: `signConsent` (the device key, a biometric prompt
 // on Android) and `commit` (one transaction, pool-block.ts `commitPoolBlock`) are handed in.
@@ -59,6 +71,10 @@ import {
 } from './pool-discovery.js'
 
 export const POOL_MIN_BLOCK_SIZE = 3
+/** how long a former waits for a member's signature (covers a biometric prompt) */
+export const POOL_SIGN_TIMEOUT_MS = 120_000
+/** consecutive refusals from one merge target before the next-best target is tried (D-93) */
+const MERGE_REFUSALS_BEFORE_FALLBACK = 3
 
 export interface PoolAgentOptions {
   identity: PoolIdentity
@@ -167,6 +183,8 @@ export class PoolAgent {
   private lastGrowthAt: number
   private lastHeardAt = 0
   private lastMergeAttempt: { target: string, at: number, size: number } | null = null
+  /** consecutive `refuse` replies per merge target; cleared by any `merged` reply (D-93) */
+  private readonly mergeRefusals = new Map<string, number>()
   private signedCid: string | null = null
   private everSigned = false
   /** members (peer id and registrant id) this coordinator refuses from now on: an invalid signature, or dropped at formation twice */
@@ -202,7 +220,7 @@ export class PoolAgent {
       presentIntervalMs: options.presentIntervalMs ?? 1_000,
       replyTimeoutMs: options.replyTimeoutMs ?? 5_000,
       informAttempts: options.informAttempts ?? 3,
-      signTimeoutMs: options.signTimeoutMs ?? 120_000,
+      signTimeoutMs: options.signTimeoutMs ?? POOL_SIGN_TIMEOUT_MS,
       memberTimeoutMs: options.memberTimeoutMs ?? 60_000,
       pollWaitMs: options.pollWaitMs ?? 2_000,
       formLeadMs: options.formLeadMs ?? 60_000,
@@ -312,9 +330,11 @@ export class PoolAgent {
     }
     if (this.role !== 'coordinator' || this.busy) return
     const mine = { size: this.pool.length, peerId: this.me }
-    const best = list
+    const candidates = list
       .filter(c => !this.excluded.has(c.peerId) && better(c, mine) && c.size + this.pool.length <= this.o.capacity)
-      .sort((a, b) => (better(a, b) ? -1 : 1))[0]
+      .sort((a, b) => (better(a, b) ? -1 : 1))
+    // D-93: a best target that keeps refusing is skipped for the next-best one that is still strictly better.
+    const best = candidates.find(c => (this.mergeRefusals.get(c.peerId) ?? 0) < MERGE_REFUSALS_BEFORE_FALLBACK) ?? candidates[0]
     if (best !== undefined) await this.mergeInto(best.peerId)
   }
 
@@ -349,6 +369,8 @@ export class PoolAgent {
     this.lastMergeAttempt = { target, at: this.o.now(), size: this.pool.length }
     try {
       const reply = await this.request(target, { t: 'merge', id: this.nextId(), topic: this.topic, contributions: this.pool }, this.o.replyTimeoutMs)
+      if (reply?.t === 'refuse') this.mergeRefusals.set(target, (this.mergeRefusals.get(target) ?? 0) + 1)
+      if (reply?.t === 'merged') this.mergeRefusals.clear()
       if (reply?.t === 'merged' && this.role === 'coordinator') this.becomeMemberOf(target)
     } finally {
       this.busy = false
@@ -457,7 +479,9 @@ export class PoolAgent {
         refusers.forEach((c, k) => {
           const drops = (this.formationDrops.get(c.member) ?? 0) + 1
           this.formationDrops.set(c.member, drops)
-          if (reasons[k] === 'invalid signature' || drops >= 2) { this.excluded.add(c.member); this.excluded.add(c.voterEntry.registrantId) }
+          // D-95: the pool identity only; a re-pooling voter under a new identity is the restart path.
+          if (reasons[k] === 'invalid signature') { this.excluded.add(c.member); this.excluded.add(c.voterEntry.registrantId) }
+          else if (drops >= 2) this.excluded.add(c.member)
         })
         this.dropMembers(refusers, { reason: 'dropped at formation' })
         return
@@ -509,9 +533,8 @@ export class PoolAgent {
     const goneIds = gone.map(c => c.member)
     for (const c of gone) this.confirmed.delete(c.member)
     this.pool = this.pool.filter(c => !goneIds.includes(c.member))
-    for (const c of this.pool) {
-      if (c.member !== this.me) void this.post(c.member, { t: 'inform', id: this.nextId(), topic: this.topic, size: this.pool.length, hold: holdOf(c.voteCiphertext), dropped: goneIds })
-    }
+    // D-91: re-confirm the survivors by request; one that refuses or stays silent is dropped as well.
+    if (this.pool.some(c => c.member !== this.me)) void this.informAll()
     for (const g of goneIds) {
       void this.post(g, outcome.code === undefined
         ? { t: 'outcome', topic: this.topic, committed: false, reason: outcome.reason }
@@ -612,7 +635,16 @@ export class PoolAgent {
     const ids = new Set(this.pool.map(c => c.voterEntry.registrantId))
     const cts = new Set(this.pool.map(c => c.voteCiphertext))
     const fresh = m.contributions.filter(c => !ids.has(c.voterEntry.registrantId) && !cts.has(c.voteCiphertext))
-    if (fresh.length !== m.contributions.length) return await refuse('a voter is already in this pool')
+    if (fresh.length !== m.contributions.length) {
+      await refuse('a voter is already in this pool')
+      // D-92: the entry may be stale (its owner reverted to solo); re-confirm once so it is dropped
+      // and the sender's next merge is accepted. A live member acks and stays.
+      if (!this.busy && this.pendingInforms === 0 && this.pool.some(c => c.member !== this.me)) {
+        this.log('reconfirm-on-collision', { from: from.slice(-6) })
+        void this.informAll()
+      }
+      return
+    }
     this.pool.push(...fresh)
     this.lastGrowthAt = this.o.now()
     await this.post(from, { t: 'merged', re: m.id, size: this.pool.length })
@@ -658,7 +690,8 @@ export class PoolAgent {
 
   private async onForm (from: string, m: Extract<PoolMessage, { t: 'form' }>): Promise<unknown> {
     if (this.role !== 'member' || this.coordinator !== from) return await this.post(from, { t: 'refuse', re: m.id, reason: 'not my coordinator' })
-    this.lastHeardAt = this.o.now() + this.o.signTimeoutMs
+    const formAt = this.o.now()
+    this.lastHeardAt = formAt + this.o.signTimeoutMs
     const check = checkFormedPoolBlock(m.block, this.o.contribution, this.o.ballot)
     if (!check.ok) {
       this.log('refused-block', { reason: check.reason })
@@ -674,16 +707,32 @@ export class PoolAgent {
       this.o.onStatus?.({ phase: 'signing' })
       this.consent = { from, digest, signature: this.o.signConsent(digest) }
     }
-    let signature: string
+    // D-94: wait for the consent at most until just before the former's request times out.
+    const consentSignature = this.consent.signature
+    consentSignature.catch(() => undefined) // a late rejection after the bound is nobody's concern
+    const waitMs = Math.max(0, this.o.signTimeoutMs - this.o.replyTimeoutMs - (this.o.now() - formAt))
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const expired = new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), waitMs) })
+    let signature: string | null
     try {
-      signature = await this.consent.signature
+      signature = await Promise.race([consentSignature, expired])
     } catch {
       this.lastHeardAt = this.o.now()
       return await this.post(from, { t: 'refuse', re: m.id, reason: 'the voter declined to sign' })
+    } finally {
+      if (timer !== undefined) clearTimeout(timer)
+    }
+    if (signature === null) {
+      // A later form prompts again; a consent that settles after this is never sent.
+      this.consent = null
+      this.lastHeardAt = this.o.now()
+      this.log('consent-timeout', { waitedMs: this.o.now() - formAt })
+      return await this.post(from, { t: 'refuse', re: m.id, reason: 'no answer in time' })
     }
     this.signedCid = m.block.cid
     this.everSigned = true
-    this.lastHeardAt = this.o.now()
+    // D-90: a member that signed stays a member until the former's sign window ends.
+    this.lastHeardAt = Math.max(this.o.now(), formAt + this.o.signTimeoutMs)
     await this.post(from, { t: 'sign', re: m.id, signature: { registrantId: mine.registrantId, deviceKey: mine.deviceKey, signature } })
     this.status()
   }

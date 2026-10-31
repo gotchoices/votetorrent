@@ -15,12 +15,14 @@ import {
   PoolAgent,
   PoolRendezvous,
   createConsentQueue,
+  POOL_SIGN_TIMEOUT_MS,
   createInMemoryRendezvousClient,
   openPoolEnvelope,
   poolIdentityFromRawKey,
   type PoolBallot,
   type PoolContribution,
   type PoolIdentity,
+  type PoolAgentOptions,
   type RendezvousRequest
 } from '../src/pool/index.js'
 import type { VoterEntry } from '../src/voting/index.js'
@@ -78,6 +80,24 @@ describe('createConsentQueue', function () {
     try { await first } catch (e) { err = e }
     expect((err as Error).message).to.equal('declined')
     expect(await second).to.equal(2)
+  })
+
+  it('a call still open after holdMs no longer blocks the next call, and its late result reaches nobody else', async () => {
+    let resolveFirst!: (v: string) => void
+    const q = createConsentQueue(async (n: number) => {
+      if (n === 1) return await new Promise<string>((resolve) => { resolveFirst = resolve })
+      return `second-${n}`
+    }, { holdMs: 50 })
+    const first = q(1)
+    const t0 = Date.now()
+    const second = await q(2)
+    const waited = Date.now() - t0
+    expect(second).to.equal('second-2')
+    expect(waited).to.be.within(30, 400)
+    // the first caller still gets its own late result, and only that
+    resolveFirst('late-first')
+    expect(await first).to.equal('late-first')
+    expect(second).to.equal('second-2')
   })
 })
 
@@ -179,4 +199,160 @@ describe('UAT 65 gap 1: the pool stall after an unanswered group confirmation', 
       }
     })
   }
+})
+
+describe('exported default', function () {
+  it('POOL_SIGN_TIMEOUT_MS is the 120 s sign window', () => {
+    expect(POOL_SIGN_TIMEOUT_MS).to.equal(120_000)
+  })
+})
+
+// ---------------------------------------------------------------------------------------------
+// D-90 / D-91 / D-95 at small real-time timings
+
+const FAST: Partial<PoolAgentOptions> = {
+  quietMs: 100, presentIntervalMs: 20, replyTimeoutMs: 60, informAttempts: 2,
+  signTimeoutMs: 600, memberTimeoutMs: 150, pollWaitMs: 30, formLeadMs: 1_000, ladder: false
+}
+
+/** three voters with the peer ids sorted so that voters[0] (F) is the lowest and becomes the former */
+function sortedVoters (names: string[]): TV[] {
+  const raw = names.map(() => ed25519.utils.randomSecretKey())
+  const order = raw.map(k => poolIdentityFromRawKey(k)).map((id, i) => ({ id, i })).sort((a, b) => (a.id.peerId < b.id.peerId ? -1 : 1))
+  return order.map((o, k) => mk(names[k]!, raw[o.i]))
+}
+
+async function until (cond: () => boolean, limitMs: number): Promise<boolean> {
+  const end = Date.now() + limitMs
+  while (Date.now() < end) {
+    if (cond()) return true
+    await sleep(10)
+  }
+  return cond()
+}
+
+describe('pool agent fixes D-90, D-91, D-95', function () {
+  this.timeout(30_000)
+
+  it('D-90: a member that signed at once is still a member while the former is inside its sign window', async () => {
+    const rendezvous = new PoolRendezvous({ coordinatorTtlMs: 5_000, envelopeTtlMs: 20_000, maxPollWaitMs: 100 })
+    const [F, M, X] = sortedVoters(['F', 'M', 'X'])
+    const controller = new AbortController()
+    const events: string[] = []
+    let formingAt = 0
+    let mLast = ''
+    const runs = [F!, M!, X!].map(async (v) => await new PoolAgent({
+      ...FAST,
+      identity: v.identity,
+      rendezvous: createInMemoryRendezvousClient(rendezvous, `t-${v.name}`),
+      ballot,
+      contribution: v.contribution,
+      // X never answers: the former sits in its sign window
+      signConsent: v.name === 'X' ? async () => await new Promise<string>(() => {}) : async (d) => signDigestP256(d, v.priv),
+      commit: async () => ({ ok: true }),
+      findRecordedVote: async () => null,
+      log: (e, d) => {
+        if (v.name === 'F' && e === 'forming' && formingAt === 0) formingAt = Date.now()
+        if (v.name === 'M' && e === 'solo') events.push(`M solo ${JSON.stringify(d)}`)
+      },
+      onStatus: (st) => { if (v.name === 'M') mLast = st.phase }
+    }).run(controller.signal))
+    try {
+      expect(await until(() => formingAt > 0, 10_000), 'the former formed a block').to.equal(true)
+      await sleep(350) // > memberTimeoutMs (150), < signTimeoutMs (600)
+      expect(events, 'M never reverted to solo').to.deep.equal([])
+      expect(mLast).to.equal('member')
+    } finally {
+      controller.abort()
+      await Promise.all(runs)
+      rendezvous.close()
+    }
+  })
+
+  it('D-91: after a drop at formation, a survivor that went silent is dropped too', async () => {
+    const rendezvous = new PoolRendezvous({ coordinatorTtlMs: 5_000, envelopeTtlMs: 20_000, maxPollWaitMs: 100 })
+    const [F, M, X] = sortedVoters(['F', 'M', 'X'])
+    const wrongKey = makeP256TestKey().privBytes
+    const controller = new AbortController()
+    let mSigned = false
+    const dropped: Array<Record<string, unknown>> = []
+    const runs = [F!, M!, X!].map(async (v) => {
+      const inner = createInMemoryRendezvousClient(rendezvous, `t-${v.name}`)
+      const client = {
+        async call (req: RendezvousRequest, extra?: number) {
+          const reply = await inner.call(req, extra)
+          if (v.name === 'M' && mSigned && reply.t === 'envelopes') {
+            // M has gone silent for informs (a stale entry on the former's side)
+            const list = reply.list.filter((env) => {
+              try { return openPoolEnvelope<any>(M!.identity, env).body.t !== 'inform' } catch { return true }
+            })
+            return { ...reply, list }
+          }
+          return reply
+        }
+      }
+      return await new PoolAgent({
+        ...FAST,
+        identity: v.identity,
+        rendezvous: client,
+        ballot,
+        contribution: v.contribution,
+        signConsent: async (d) => {
+          if (v.name === 'M') mSigned = true
+          // X signs with a key that is not its device key: dropped at formation and excluded for good
+          return signDigestP256(d, v.name === 'X' ? wrongKey : v.priv)
+        },
+        commit: async () => ({ ok: true }),
+        findRecordedVote: async () => null,
+        log: (e, d) => { if (v.name === 'F' && e === 'dropped') dropped.push({ ...d }) }
+      }).run(controller.signal)
+    })
+    try {
+      expect(await until(() => dropped.length > 0, 10_000), 'the former dropped the silent survivor').to.equal(true)
+      expect(dropped[0]!.members).to.deep.equal([M!.identity.peerId.slice(-6)])
+      expect(dropped[0]!.size).to.equal(1)
+    } finally {
+      controller.abort()
+      await Promise.all(runs)
+      rendezvous.close()
+    }
+  })
+
+  it('D-95: a voter dropped at formation twice is refused by peer id, a new pool identity with the same registrant id commits', async () => {
+    const rendezvous = new PoolRendezvous({ coordinatorTtlMs: 5_000, envelopeTtlMs: 20_000, maxPollWaitMs: 100 })
+    const [F, M, X] = sortedVoters(['F', 'M', 'X'])
+    const controller = new AbortController()
+    const commits: string[][] = []
+    let refusedByF = 0
+    const spawn = (v: TV, decline: boolean): Promise<unknown> => new PoolAgent({
+      ...FAST,
+      identity: v.identity,
+      rendezvous: createInMemoryRendezvousClient(rendezvous, `t-${v.name}-${v.identity.peerId.slice(-4)}`),
+      ballot,
+      contribution: v.contribution,
+      signConsent: async (d) => {
+        if (decline) throw new Error('declined')
+        return signDigestP256(d, v.priv)
+      },
+      commit: async (_b, sigs) => { commits.push(sigs.map(x => x.registrantId)); return { ok: true } },
+      findRecordedVote: async () => null,
+      log: (e) => { if (v.name === 'F' && e === 'form-refused-by') refusedByF++ }
+    }).run(controller.signal)
+    const runs = [spawn(F!, false), spawn(M!, false), spawn(X!, true)]
+    try {
+      expect(await until(() => refusedByF >= 2, 15_000), 'X was dropped at formation twice').to.equal(true)
+      await sleep(100)
+      // the same registrant under a NEW pool identity (a restarted send)
+      const X2 = mk('X')
+      runs.push(spawn(X2, false))
+      expect(await until(() => commits.length > 0, 15_000), 'a block committed').to.equal(true)
+      expect(commits).to.have.length(1)
+      expect(commits[0]).to.have.length(3)
+      expect(commits[0]).to.include('reg-X')
+    } finally {
+      controller.abort()
+      await Promise.all(runs)
+      rendezvous.close()
+    }
+  })
 })
