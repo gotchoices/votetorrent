@@ -210,9 +210,13 @@ describe('exported default', function () {
 // ---------------------------------------------------------------------------------------------
 // D-90 / D-91 / D-95 at small real-time timings
 
+// The ratios follow the real defaults (quiet 20 s : member timeout 60 s : sign window 120 s, i.e. the
+// member timeout is 3x the quiet window and the sign window 2x the member timeout) with wide
+// absolute margins, so scheduler jitter at normal CPU priority cannot reorder the windows. A member
+// timeout close to the quiet window makes members go solo before the form arrives.
 const FAST: Partial<PoolAgentOptions> = {
-  quietMs: 100, presentIntervalMs: 20, replyTimeoutMs: 60, informAttempts: 2,
-  signTimeoutMs: 600, memberTimeoutMs: 150, pollWaitMs: 30, formLeadMs: 1_000, ladder: false
+  quietMs: 60, presentIntervalMs: 20, replyTimeoutMs: 80, informAttempts: 2,
+  signTimeoutMs: 2_400, memberTimeoutMs: 600, pollWaitMs: 30, formLeadMs: 5_000, ladder: false
 }
 
 /** three voters with the peer ids sorted so that voters[0] (F) is the lowest and becomes the former */
@@ -259,7 +263,7 @@ describe('pool agent fixes D-90, D-91, D-95', function () {
     }).run(controller.signal))
     try {
       expect(await until(() => formingAt > 0, 10_000), 'the former formed a block').to.equal(true)
-      await sleep(350) // > memberTimeoutMs (150), < signTimeoutMs (600)
+      await sleep(1_000) // > memberTimeoutMs (600), < signTimeoutMs (2400)
       expect(events, 'M never reverted to solo').to.deep.equal([])
       expect(mLast).to.equal('member')
     } finally {
