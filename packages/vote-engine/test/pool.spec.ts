@@ -1111,3 +1111,215 @@ describe('pool: discovery interface and ladder topics (R2)', function () {
     expect(POOL_TOPIC_MAX_CHARS).to.equal(512)
   })
 })
+
+// ---------------------------------------------------------------------------------------------
+// D-92 and D-93: one real agent against hand-driven peers
+
+describe('pool: merge collisions (D-92) and refusals from a merge target (D-93)', function () {
+  this.timeout(30_000)
+  const topic = poolTopic(ballot)
+  const sleepMs = async (ms: number): Promise<void> => await new Promise(resolve => setTimeout(resolve, ms))
+  async function waitUntil (cond: () => boolean, limitMs: number): Promise<boolean> {
+    const end = Date.now() + limitMs
+    while (Date.now() < end) { if (cond()) return true; await sleepMs(10) }
+    return cond()
+  }
+
+  /** a scripted peer whose peer id sorts above (or below) `id` */
+  function peerBeside (rv: PoolRendezvous, name: string, side: 'above' | 'below', id: string): ScriptedPeer {
+    for (let i = 0; i < 200; i++) {
+      const p = scriptedPeer(rv, name)
+      if (side === 'above' ? p.identity.peerId > id : p.identity.peerId < id) return p
+    }
+    throw new Error('no peer id on the requested side')
+  }
+
+  /** drain a scripted peer in the background and hand each message to `onMsg`, one at a time */
+  function pump (peer: ScriptedPeer, onMsg: (m: Inbound) => Promise<void>): { stop: () => Promise<void> } {
+    let live = true
+    const done = (async () => {
+      while (live) {
+        await peer.drain(100)
+        while (peer.inbox.length > 0) await onMsg(peer.inbox.shift()!)
+      }
+    })()
+    return { stop: async () => { live = false; await done } }
+  }
+
+  const contributionOf = (peer: ScriptedPeer, v: TestVoter, registrantId?: string): PoolContribution => ({
+    member: peer.identity.peerId,
+    voteCiphertext: v.contribution.voteCiphertext,
+    voterEntry: registrantId === undefined ? v.contribution.voterEntry : { ...v.contribution.voterEntry, registrantId }
+  })
+
+  function startAgent (rv: PoolRendezvous, a: TestVoter, extra: Partial<PoolAgentOptions> = {}) {
+    const logs: Array<{ event: string, detail?: Record<string, unknown> }> = []
+    const controller = new AbortController()
+    const running = new PoolAgent({
+      identity: a.identity,
+      rendezvous: createInMemoryRendezvousClient(rv, 'transport-agent'),
+      ballot,
+      contribution: a.contribution,
+      signConsent: async (digest) => signDigestP256(digest, a.priv),
+      commit: async () => ({ ok: true }),
+      log: (event, detail) => { logs.push({ event, detail }) },
+      ladder: false,
+      quietMs: 60_000,
+      presentIntervalMs: 40,
+      replyTimeoutMs: 300,
+      informAttempts: 2,
+      memberTimeoutMs: 30_000,
+      pollWaitMs: 100,
+      formLeadMs: 0,
+      deadlineAt: Date.now() + 25_000,
+      ...extra
+    }).run(controller.signal)
+    return { logs, stop: async () => { controller.abort(); await running } }
+  }
+
+  /** M1 merges into the agent; its informs are acked after `ackDelayMs` (the first `ackLimit` of them only). */
+  async function joinMember (rv: PoolRendezvous, a: TestVoter, opts: { ackDelayMs: number, ackLimit: number }) {
+    const m1 = peerBeside(rv, 'transport-m1', 'above', a.identity.peerId)
+    const v1 = makeVoter(1)
+    const seen: Inbound[] = []
+    let acked = 0
+    const p = pump(m1, async (m) => {
+      seen.push(m)
+      if (m.body.t === 'inform' && acked < opts.ackLimit) {
+        await sleepMs(opts.ackDelayMs)
+        await m1.send(a.identity.peerId, { t: 'ack', re: m.body.id })
+        acked++
+      }
+    })
+    await m1.send(a.identity.peerId, { t: 'merge', id: 'm1-merge', topic, contributions: [contributionOf(m1, v1)] })
+    expect(await waitUntil(() => seen.some(m => m.body.re === 'm1-merge' && m.body.t === 'merged'), 5_000), 'M1 was merged').to.equal(true)
+    return { m1, v1, seen, p, acked: () => acked, informs: () => seen.filter(m => m.body.t === 'inform') }
+  }
+
+  async function collider (rv: PoolRendezvous, a: TestVoter, stolenRegistrantId: string) {
+    // sorts above the agent, so an equal-size merge is not refused as "your pool is bigger"
+    const m2 = peerBeside(rv, 'transport-m2', 'above', a.identity.peerId)
+    const v2 = makeVoter(2)
+    const seen: Inbound[] = []
+    const p = pump(m2, async (m) => {
+      seen.push(m)
+      if (m.body.t === 'inform') await m2.send(a.identity.peerId, { t: 'ack', re: m.body.id }) // once merged, M2 is a live member
+    })
+    const merge = async (id: string): Promise<void> => await m2.send(a.identity.peerId, { t: 'merge', id, topic, contributions: [contributionOf(m2, v2, stolenRegistrantId)] })
+    return { m2, v2, seen, p, merge }
+  }
+
+  const sizeOfAgent = async (rv: PoolRendezvous, a: TestVoter): Promise<number | undefined> => {
+    const probe = scriptedPeer(rv, 'transport-probe')
+    const r = await probe.present(topic, 1)
+    return r.t === 'coordinators' ? r.list.find(c => c.peerId === a.identity.peerId)?.size : undefined
+  }
+
+  it('D-92: a colliding merge is refused, never replaces the entry, starts exactly one re-confirm, and a live member stays', async () => {
+    const rv = new PoolRendezvous({ coordinatorTtlMs: 120_000 })
+    const a = makeVoter(0)
+    const agent = startAgent(rv, a, { replyTimeoutMs: 1_500 })
+    const j = await joinMember(rv, a, { ackDelayMs: 500, ackLimit: 99 })
+    const c = await collider(rv, a, j.v1.contribution.voterEntry.registrantId)
+    try {
+      expect(await waitUntil(() => j.acked() >= 1, 5_000), 'the first inform was acked').to.equal(true)
+      // two colliding merges while the first re-confirm is still waiting for M1's slow ack
+      await c.merge('collide-1')
+      await sleepMs(100)
+      await c.merge('collide-2')
+      expect(await waitUntil(() => c.seen.filter(m => m.body.t === 'refuse').length >= 2, 5_000), 'both merges were refused').to.equal(true)
+      expect(await waitUntil(() => j.acked() >= 2, 5_000), 'the re-confirm reached M1 and was acked').to.equal(true)
+      await sleepMs(700) // room for any extra re-confirm
+      expect(c.seen.map(m => m.body.t)).to.deep.equal(['refuse', 'refuse'])
+      expect(c.seen.map(m => m.body.reason)).to.deep.equal(['a voter is already in this pool', 'a voter is already in this pool'])
+      expect(agent.logs.filter(l => l.event === 'reconfirm-on-collision')).to.have.length(1)
+      // merge inform + exactly one re-confirm, both naming M1's own vote (the entry was not replaced)
+      expect(j.informs()).to.have.length(2)
+      expect(j.informs().map(m => m.body.hold)).to.deep.equal([holdOfVoter(j.v1), holdOfVoter(j.v1)])
+      expect(agent.logs.some(l => l.event === 'dropped')).to.equal(false)
+      expect(await sizeOfAgent(rv, a), 'the pool is still the agent plus M1').to.equal(2)
+    } finally {
+      await c.p.stop(); await j.p.stop(); await agent.stop(); rv.close()
+    }
+  })
+
+  it('D-92: a stale entry is dropped by the re-confirm and the same sender\'s next merge is accepted', async () => {
+    const rv = new PoolRendezvous({ coordinatorTtlMs: 120_000 })
+    const a = makeVoter(0)
+    const agent = startAgent(rv, a)
+    const j = await joinMember(rv, a, { ackDelayMs: 0, ackLimit: 1 }) // M1 acks the merge inform, then goes silent
+    const c = await collider(rv, a, j.v1.contribution.voterEntry.registrantId)
+    try {
+      expect(await waitUntil(() => j.acked() >= 1, 5_000)).to.equal(true)
+      await c.merge('collide-1')
+      expect(await waitUntil(() => c.seen.some(m => m.body.re === 'collide-1' && m.body.t === 'refuse'), 5_000), 'refused while the entry stands').to.equal(true)
+      expect(await waitUntil(() => agent.logs.some(l => l.event === 'dropped'), 5_000), 'the silent entry was dropped').to.equal(true)
+      await c.merge('collide-2')
+      expect(await waitUntil(() => c.seen.some(m => m.body.re === 'collide-2' && m.body.t === 'merged'), 5_000), 'the next merge is accepted').to.equal(true)
+      expect(agent.logs.filter(l => l.event === 'reconfirm-on-collision')).to.have.length(1)
+      // the listing follows the agent's next present (every ~40 ms), so poll for it
+      let size: number | undefined
+      for (let i = 0; i < 100 && size !== 2; i++) { size = await sizeOfAgent(rv, a); if (size !== 2) await sleepMs(30) }
+      expect(size, 'the pool is the agent plus the sender').to.equal(2)
+    } finally {
+      await c.p.stop(); await j.p.stop(); await agent.stop(); rv.close()
+    }
+  })
+
+  /** targets T1 (size 3) and T2 (size 2) are strictly better than the solo agent; T3 (size 1, higher id) is not. */
+  async function withTargets (reply: (target: 'T1' | 'T2', nth: number) => 'refuse' | 'merged', extra: Partial<PoolAgentOptions> = {}) {
+    const rv = new PoolRendezvous({ coordinatorTtlMs: 120_000 })
+    const a = makeVoter(0)
+    const merges: string[] = []
+    const counts = { T1: 0, T2: 0 }
+    const mk = (name: 'T1' | 'T2' | 'T3', size: number, side: 'above' | 'below') => {
+      const peer = peerBeside(rv, `transport-${name}`, side, a.identity.peerId)
+      const p = pump(peer, async (m) => {
+        if (m.body.t !== 'merge') return
+        merges.push(name)
+        if (name === 'T3') return
+        counts[name]++
+        const verdict = reply(name, counts[name])
+        await peer.send(m.from, verdict === 'merged' ? { t: 'merged', re: m.body.id, size: 4 } : { t: 'refuse', re: m.body.id, reason: 'not coordinating' })
+      })
+      return { peer, p, size }
+    }
+    const targets = [mk('T1', 3, 'above'), mk('T2', 2, 'above'), mk('T3', 1, 'above')]
+    for (const t of targets) await t.peer.present(topic, t.size)
+    const agent = startAgent(rv, a, { replyTimeoutMs: 1_000, ...extra })
+    return {
+      merges,
+      logs: agent.logs,
+      stop: async () => { await agent.stop(); for (const t of targets) await t.p.stop(); rv.close() }
+    }
+  }
+
+  it('D-93: after 3 refusals from the best target the next-best strictly better target is tried, never a worse one', async () => {
+    const h = await withTargets((t) => (t === 'T1' ? 'refuse' : 'merged'))
+    try {
+      expect(await waitUntil(() => h.merges.length >= 4, 8_000), 'four merge attempts').to.equal(true)
+      await sleepMs(400) // the agent is a member of T2 now: nothing more is sent
+      expect(h.merges).to.deep.equal(['T1', 'T1', 'T1', 'T2'])
+    } finally { await h.stop() }
+  })
+
+  it('D-93: the per-target counter resets on any merged reply', async () => {
+    // T1 refuses twice, merges the third time (agent becomes its member, then reverts to solo), then refuses for good.
+    const h = await withTargets((t, nth) => (t === 'T1' && nth === 3 ? 'merged' : 'refuse'), { memberTimeoutMs: 300 })
+    try {
+      expect(await waitUntil(() => h.merges.includes('T2'), 15_000), 'T2 is eventually tried').to.equal(true)
+      // 3 before the merge, then (counter cleared) a full 3 more before T2; an uncleared counter would reach T2 after 5
+      expect(h.merges.slice(0, 7)).to.deep.equal(['T1', 'T1', 'T1', 'T1', 'T1', 'T1', 'T2'])
+      expect(h.logs.some(l => l.event === 'solo')).to.equal(true)
+    } finally { await h.stop() }
+  })
+
+  it('D-93: with every candidate at 3+ refusals the agent falls back to the best one and keeps trying', async () => {
+    const h = await withTargets(() => 'refuse')
+    try {
+      expect(await waitUntil(() => h.merges.length >= 10, 15_000), 'no permanent stall: attempts keep coming').to.equal(true)
+      expect(h.merges.slice(0, 10)).to.deep.equal(['T1', 'T1', 'T1', 'T2', 'T2', 'T2', 'T1', 'T1', 'T1', 'T1'])
+      expect(h.merges.includes('T3'), 'a target that is not strictly better is never tried').to.equal(false)
+    } finally { await h.stop() }
+  })
+})

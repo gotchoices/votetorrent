@@ -322,14 +322,22 @@ describe('pool agent fixes D-90, D-91, D-95', function () {
     }
   })
 
-  it('D-95: a voter dropped at formation twice is refused by peer id, a new pool identity with the same registrant id commits', async () => {
+  it('D-95: a voter dropped at formation twice is refused by peer id, a new pool identity with the same registrant id commits', async function () {
+    this.timeout(90_000)
+    // Wider windows than FAST: a 80 ms reply window let a loaded host (load ~6-9) time out the survivor's
+    // re-confirm ack, drop it, and loop the pool forever (measured: 4 parallel `yes` made 1 full-file run in 3 fail
+    // with "X was dropped at formation twice"). Same shape as FAST (member timeout >> quiet window, sign window >> member timeout), wider absolute margins.
+    const SLOW: Partial<PoolAgentOptions> = { ...FAST, quietMs: 300, presentIntervalMs: 40, replyTimeoutMs: 600, signTimeoutMs: 9_600, memberTimeoutMs: 2_400, pollWaitMs: 50 }
     const rendezvous = new PoolRendezvous({ coordinatorTtlMs: 5_000, envelopeTtlMs: 20_000, maxPollWaitMs: 100 })
     const [F, M, X] = sortedVoters(['F', 'M', 'X'])
     const controller = new AbortController()
     const commits: string[][] = []
+    let X2peer = ''
     let refusedByF = 0
+    const trace: string[] = []
+    const t0 = Date.now()
     const spawn = (v: TV, decline: boolean): Promise<unknown> => new PoolAgent({
-      ...FAST,
+      ...SLOW,
       identity: v.identity,
       rendezvous: createInMemoryRendezvousClient(rendezvous, `t-${v.name}-${v.identity.peerId.slice(-4)}`),
       ballot,
@@ -340,19 +348,27 @@ describe('pool agent fixes D-90, D-91, D-95', function () {
       },
       commit: async (_b, sigs) => { commits.push(sigs.map(x => x.registrantId)); return { ok: true } },
       findRecordedVote: async () => null,
-      log: (e) => { if (v.name === 'F' && e === 'form-refused-by') refusedByF++ }
+      log: (e, d) => {
+        if (v.name === 'F' && e === 'form-refused-by') refusedByF++
+        trace.push(`${String(Date.now() - t0).padStart(6)}ms ${v.name}${v.identity.peerId === X2peer ? '2' : ''} ${e} ${JSON.stringify(d ?? {})}`)
+      }
     }).run(controller.signal)
     const runs = [spawn(F!, false), spawn(M!, false), spawn(X!, true)]
     try {
-      expect(await until(() => refusedByF >= 2, 15_000), 'X was dropped at formation twice').to.equal(true)
+      expect(await until(() => refusedByF >= 2, 45_000), 'X was dropped at formation twice').to.equal(true)
       await sleep(100)
       // the same registrant under a NEW pool identity (a restarted send)
       const X2 = mk('X')
+      X2peer = X2.identity.peerId
       runs.push(spawn(X2, false))
-      expect(await until(() => commits.length > 0, 15_000), 'a block committed').to.equal(true)
+      expect(await until(() => commits.length > 0, 45_000), 'a block committed').to.equal(true)
       expect(commits).to.have.length(1)
       expect(commits[0]).to.have.length(3)
       expect(commits[0]).to.include('reg-X')
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.log(trace.join('\n'))
+      throw err
     } finally {
       controller.abort()
       await Promise.all(runs)

@@ -141,4 +141,63 @@ describe('EngineFactory network backend (D-98)', () => {
 			expect(await store.readNetworkBackend(`h7${path}`)).toBe(path);
 		}
 	});
+
+	// T-65-14-01: the dispatcher reads the creating store with an await. A create that starts during
+	// that await owns the founding window; a non-create open that wakes up into it must refuse, not
+	// open a store (the factory's first statement would take the window and the create would lose it).
+	it('NB-8 a non-create open that finds a founding window opened during its own await throws FounderIntentBusyError and leaves the window alone', async () => {
+		const {factory, solo, engine} = build();
+		factory.setNode(node);
+		let release: () => void = () => undefined;
+		const gate = new Promise<void>(resolve => {
+			release = resolve;
+		});
+		const getItem = jest.spyOn(AsyncStorage, 'getItem').mockImplementation(async () => {
+			await gate;
+			return null;
+		});
+		try {
+			getItem.mockClear();
+			const opening = engine.open('reopened');
+			await new Promise(r => setTimeout(r, 0));
+			// the open is now parked on its backend read, before any store is opened
+			expect(getItem).toHaveBeenCalledTimes(1);
+			expect(getItem).toHaveBeenCalledWith(`${store.NETWORK_BACKEND_KEY_PREFIX}reopened`);
+			expect(fi.peekFounderIntent()).toBeNull();
+			let outcome: unknown;
+			await fi.withFounding(async () => {
+				expect(fi.peekFounderIntent()).toBe('founding');
+				release();
+				outcome = await opening.then(
+					() => 'resolved',
+					(e: unknown) => e,
+				);
+				// the open did not consume the create's window
+				expect(fi.peekFounderIntent()).toBe('founding');
+			});
+			expect(fi.isFounderIntentBusyError(outcome)).toBe(true);
+			expect((outcome as Error).name).toBe('FounderIntentBusyError');
+			expect(mockStrandOpen).not.toHaveBeenCalled();
+			expect(solo).not.toHaveBeenCalled();
+		} finally {
+			release();
+			getItem.mockRestore();
+		}
+	});
+
+	it('NB-9 the same open with no founding window during its await opens normally', async () => {
+		const {factory, engine} = build();
+		factory.setNode(node);
+		const getItem = jest.spyOn(AsyncStorage, 'getItem').mockImplementation(async () => {
+			await Promise.resolve();
+			return null;
+		});
+		try {
+			const db = (await engine.open('reopened')) as {backend: string; intent: unknown};
+			expect(db.backend).toBe('strand');
+			expect(db.intent).toBeNull();
+		} finally {
+			getItem.mockRestore();
+		}
+	});
 });

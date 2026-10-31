@@ -14,7 +14,8 @@ const mockT0 = Date.parse('2026-10-31T13:30:00Z');
 const mockVotingStarts = Date.parse('2026-10-31T13:32:35Z');
 const mockAccruing = Date.parse('2026-10-31T14:12:00Z');
 const mockClosing = Date.parse('2026-10-31T15:00:00Z');
-const mockState = {reads: 0};
+// `targets`: countdown targets (ms) the next reads return, one per read, as an Upcoming card; empty = the fixed timeline
+const mockState = {reads: 0, targets: [] as number[]};
 
 jest.mock('../../../providers/VoterAppProvider', () => {
 	const ReactLib = require('react');
@@ -25,6 +26,10 @@ jest.mock('../../../providers/VoterAppProvider', () => {
 		const getElection = ReactLib.useCallback(async () => {
 			mockState.reads++;
 			const now = Date.now();
+			const forced = mockState.targets.shift();
+			if (forced !== undefined) {
+				return {id: 'e1', title: 'E', lifecycleState: 'Upcoming', countdownTarget: new Date(forced).toISOString()};
+			}
 			if (now >= mockAccruing) {
 				return {id: 'e1', title: 'E', lifecycleState: 'ReviewSelections', countdownTarget: new Date(mockClosing).toISOString()};
 			}
@@ -94,6 +99,7 @@ const appStateListeners: Array<(s: string) => void> = [];
 const emitAppState = (s: string) => appStateListeners.slice().forEach(fn => fn(s));
 beforeEach(() => {
 	mockState.reads = 0;
+	mockState.targets = [];
 	appStateListeners.length = 0;
 	jest.spyOn(AppState, 'addEventListener').mockImplementation(((_type: string, fn: (s: string) => void) => {
 		appStateListeners.push(fn);
@@ -154,4 +160,36 @@ it('the timer is cleared on blur', async () => {
 	const before = mockState.reads;
 	await advance(200_000);
 	expect(mockState.reads).toBe(before);
+});
+
+// T-65-13-01: the boundary delay is clamped to [0, 2^31-1] ms. A timer set above 2^31-1 fires at once
+// (so Home would re-read in a hot loop), and a negative one means the target is already past.
+const MAX_TIMEOUT = 2 ** 31 - 1;
+const armedDelays = (spy: jest.SpyInstance) => spy.mock.calls.map(c => c[1]).filter((d): d is number => typeof d === 'number');
+
+it('a past countdown target arms a 0 ms re-read (not a negative delay) and settles', async () => {
+	const spy = jest.spyOn(global, 'setTimeout');
+	mockState.targets = [mockT0 - 3_600_000]; // one hour in the past; the next read is the normal timeline
+	await startedAt();
+	await flush();
+	// the past target re-read at once: exactly one extra read, then the real boundary (votingStarts) is armed
+	expect(mockState.reads).toBe(2);
+	const delays = armedDelays(spy);
+	expect(Math.min(...delays)).toBeGreaterThanOrEqual(0);
+	expect(delays).toContain(0);
+	await advance(10_000);
+	expect(mockState.reads).toBe(2);
+});
+
+it('a far-future countdown target is clamped to 2^31-1 ms and does not re-read in a loop', async () => {
+	const spy = jest.spyOn(global, 'setTimeout');
+	mockState.targets = [mockT0 + 60 * 86_400_000]; // 60 days: 5.2e9 ms, above the timer maximum
+	await startedAt();
+	await flush();
+	const delays = armedDelays(spy);
+	expect(Math.max(...delays)).toBe(MAX_TIMEOUT);
+	expect(delays.filter(d => d > MAX_TIMEOUT)).toEqual([]);
+	// armed far out: nothing re-reads meanwhile
+	await advance(120_000);
+	expect(mockState.reads).toBe(1);
 });
