@@ -270,6 +270,14 @@ describe('ElectionCard (HOME-01/02/03)', () => {
 			}
 		});
 
+		it('EC2b: Open + sent shows the sent line and the view link, hides vote-now and the saved line', () => {
+			const tr = renderCard(electionFor('Open'), {}, {savedVote: {state: 'sent'}, onViewSavedVote: jest.fn()});
+			expect(textOf(find(tr, 'election-card-saved-vote-sent')[0])).toBe('Your vote has been sent to the election.');
+			expect(find(tr, 'election-card-saved-vote-status').length).toBe(0);
+			expect(find(tr, 'election-card-vote-now').length).toBe(0);
+			expect(find(tr, 'election-card-saved-vote-view').length).toBe(1);
+		});
+
 		it('EC2: Open + saved shows the status and the view link, hides vote-now', () => {
 			const onViewSavedVote = jest.fn();
 			const tr = renderCard(electionFor('Open'), {}, {savedVote: {state: 'saved', revisionKnown: true}, onViewSavedVote});

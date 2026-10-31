@@ -14,6 +14,7 @@ import { loadVoteReceipt, type ReceiptElection } from '../vote-receipt'
 import { readSavedVoteStatus, type SavedVoteStatus } from '../saved-vote-status'
 import { buildVoteMarker, deriveSavedVoteState, readVoteMarker, voteMarkerKey, voteRecordKey, writeVoteRecord } from '../vote-record-store'
 import * as vault from '../vote-record-vault'
+import { recordVoteSent } from '../vote-sent-store'
 import { createVoteRecordWrapProvider, setVoteRecordWrapProviderForTests } from '../vote-record-wrap'
 
 const PROMPT: SecretWrapPrompt = { title: 'Save your vote', subtitle: 'Use your fingerprint to protect your saved vote', negativeButton: 'Cancel' }
@@ -250,6 +251,56 @@ describe('readSavedVoteStatus', () => {
 		await save(makeRecord({ electionRevision: 2 }))
 		const status = await readSavedVoteStatus(deps, 1, E, reading(rev))
 		expect(status.state).toBe(deriveSavedVoteState(await readVoteMarker(E), rev))
+	})
+
+	describe('SV16: sent state (D-96)', () => {
+		it('every marker ballot sent reads sent', async () => {
+			await save(makeRecord({ electionRevision: 2 }))
+			await recordVoteSent(E, 2, 'ballot-1', 'cid-1')
+			await expect(readSavedVoteStatus(deps, 1, E, reading(2))).resolves.toEqual({ state: 'sent' })
+		})
+
+		it('only some ballots sent stays saved', async () => {
+			const record = makeRecord({ electionRevision: 2 })
+			record.votes.push({ ...record.votes[0], ballotId: 'ballot-2', nonce: randHex(32) })
+			record.voter.ballots.push({ ballotId: 'ballot-2', templateDigest: 'td' })
+			await save(record)
+			await recordVoteSent(E, 2, 'ballot-1', 'cid-1')
+			await expect(readSavedVoteStatus(deps, 1, E, reading(2))).resolves.toEqual({ state: 'saved', revisionKnown: true })
+			await recordVoteSent(E, 2, 'ballot-2', 'cid-2')
+			await expect(readSavedVoteStatus(deps, 1, E, reading(2))).resolves.toEqual({ state: 'sent' })
+		})
+
+		it('stale keeps priority over sent', async () => {
+			await save(makeRecord({ electionRevision: 2 }))
+			await recordVoteSent(E, 2, 'ballot-1', 'cid-1')
+			await expect(readSavedVoteStatus(deps, 1, E, reading(3))).resolves.toEqual({ state: 'stale', revisionKnown: true })
+		})
+
+		it('unreadable keeps priority over sent', async () => {
+			await save(makeRecord({ electionRevision: 2 }))
+			await recordVoteSent(E, 2, 'ballot-1', 'cid-1')
+			await AsyncStorage.removeItem(voteRecordKey(E))
+			await expect(readSavedVoteStatus(deps, 1, E, reading(2))).resolves.toEqual({ state: 'unreadable' })
+			await AsyncStorage.setItem(voteRecordKey(E), '{garbage')
+			await expect(readSavedVoteStatus(deps, 1, E, reading(2))).resolves.toEqual({ state: 'unreadable' })
+		})
+
+		it('a sent store for an older revision reads saved', async () => {
+			await save(makeRecord({ electionRevision: 2 }))
+			await recordVoteSent(E, 1, 'ballot-1', 'cid-1')
+			await expect(readSavedVoteStatus(deps, 1, E, reading(2))).resolves.toEqual({ state: 'saved', revisionKnown: true })
+		})
+
+		it('an empty ballotIds marker never reads sent', async () => {
+			const record = makeRecord({ electionRevision: 2 })
+			await save(record)
+			const marker = { ...buildVoteMarker(record), ballotIds: [] as string[] }
+			await AsyncStorage.setItem(voteMarkerKey(E), JSON.stringify(marker))
+			await recordVoteSent(E, 2, 'ballot-1', 'cid-1')
+			const status = await readSavedVoteStatus(deps, 1, E, reading(2))
+			expect(status.state).not.toBe('sent')
+		})
 	})
 
 	it('SV14: never logs', async () => {

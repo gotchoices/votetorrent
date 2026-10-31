@@ -10,17 +10,23 @@
  * Fail closed: a marker whose record is missing or malformed reads as unreadable (the same mapping
  * as the 63-08 guard and the receipt's `loadVoteReceipt`).
  *
+ * A vote whose every marker ballot is in the sent store (`vote-sent-store.ts`, read for the marker's
+ * own revision, no fingerprint) reads as sent, so Home and Timeline agree with the ballot screen.
+ * The marker is never rewritten: it stays saved-not-sent. Stale and unreadable keep priority.
+ *
  * No cache: every call reads fresh, and callers re-read on focus. Storage is reached only through
  * the 63-08 store functions (gate K1). No logging.
  */
 
 import type { ElectionReadDeps } from './election-read'
 import { readReceiptElection, type ReceiptElection } from './vote-receipt'
+import { readVoteSent } from './vote-sent-store'
 import { readSavedVote, readVoteMarker, type SavedVoteRead } from './vote-record-store'
 
 export type SavedVoteStatus =
 	| { state: 'none' }
 	| { state: 'unreadable' }
+	| { state: 'sent' }
 	| { state: 'saved' | 'stale'; revisionKnown: boolean }
 
 export async function readSavedVoteStatus(
@@ -51,5 +57,12 @@ export async function readSavedVoteStatus(
 	if (read.state === 'unreadable') return { state: 'unreadable' }
 	// A missing or malformed record is reported, never silently treated as a current vote.
 	if (read.envelopeState !== 'ok') return { state: 'unreadable' }
+	if (read.state === 'saved') {
+		const { ballotIds, electionRevision } = markerCls.marker
+		if (ballotIds.length > 0) {
+			const sent = await readVoteSent(electionId, electionRevision)
+			if (ballotIds.every((id) => Object.prototype.hasOwnProperty.call(sent, id))) return { state: 'sent' }
+		}
+	}
 	return { state: read.state, revisionKnown: revision !== null }
 }

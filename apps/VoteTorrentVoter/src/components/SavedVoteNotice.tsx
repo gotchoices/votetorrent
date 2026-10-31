@@ -5,7 +5,8 @@
  * Presentational: props only, no `useVoterApp`, no `useNavigation`, no storage. The status comes
  * from `readSavedVoteStatus` in the screen. One component means one source for the wording. It
  * reuses the receipt's stale, unreadable and revision-unknown keys, so the D-21 line is the same
- * everywhere it appears. The wording is plain and never promises that the vote will be sent.
+ * everywhere it appears. A fully sent vote shows the ballot screen's own sent sentence
+ * (`send.allSent`) so the surfaces read the same. The wording is plain and never promises that the vote will be sent.
  */
 import React from 'react';
 import {Pressable, StyleSheet, Text, View} from 'react-native';
@@ -33,6 +34,19 @@ export function SavedVoteNotice({status, onView, testID}: {status: SavedVoteStat
 						lineHeight: typeScale.body.lineHeight,
 					}}>
 					{t('savedVote.status')}
+				</Text>
+			) : null}
+			{status.state === 'sent' ? (
+				<Text
+					testID={`${testID}-sent`}
+					style={{
+						color: colors.text,
+						fontFamily: fonts.medium.fontFamily,
+						fontWeight: fonts.medium.fontWeight,
+						fontSize: typeScale.body.fontSize,
+						lineHeight: typeScale.body.lineHeight,
+					}}>
+					{t('send.allSent')}
 				</Text>
 			) : null}
 			{status.state === 'saved' && !status.revisionKnown ? (

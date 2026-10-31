@@ -1197,6 +1197,14 @@ describe('TimelineScreen — saved vote on the Voting Period row (D-12, D-21)', 
 		expect(hostsById(tr, 'timeline-row-vote-now-votingStarts').length).toBe(0);
 	});
 
+	it('TS3b: sent shows the sent line, no not-sent line, and hides Vote now', async () => {
+		const tr = await mountWith({state: 'sent'});
+		expect(nodeText(hostsById(tr, 'timeline-saved-vote-sent')[0])).toBe('Your vote has been sent to the election.');
+		expect(hostsById(tr, 'timeline-saved-vote-status').length).toBe(0);
+		expect(JSON.stringify(tr.toJSON())).not.toContain('Vote saved — not sent');
+		expect(railOf(tr).props.onVoteNow).toBeUndefined();
+	});
+
 	it('TS4: stale shows the exact D-21 line and keeps Vote now', async () => {
 		const tr = await mountWith({state: 'stale', revisionKnown: true});
 		expect(typeof railOf(tr).props.onVoteNow).toBe('function');

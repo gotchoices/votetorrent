@@ -146,9 +146,9 @@ export function ElectionCard({election, onVoteNow, onViewValidationDetails, onLe
 
 	const display = STATE_DISPLAY[election.lifecycleState];
 	const savedState = savedVote?.state ?? 'none';
-	// Mirrors the 63-08 guard (D-20 convenience): a saved or unreadable vote hides Vote now, and a
+	// Mirrors the 63-08 guard (D-20 convenience): a saved, sent or unreadable vote hides Vote now, and a
 	// stale one offers it again (D-21). The guard inside the submit path is the enforcement.
-	const voteBlocked = savedState === 'saved' || savedState === 'unreadable';
+	const voteBlocked = savedState === 'saved' || savedState === 'sent' || savedState === 'unreadable';
 	const fallback = SUMMARY_FALLBACK[election.lifecycleState];
 	const summaryKey = fallback && !fallback.isKnown(election) ? fallback.summaryKey : display.summaryKey;
 	// No engine source for turnout yet: the bar renders only when a progress value exists.
