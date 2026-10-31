@@ -17,14 +17,18 @@
  *      the block and the commit named its registrant) stops a ballot as already voted; that ballot
  *      re-reads the strand once and reports sent only when its row is there (D-12, CR-01).
  *
- * Ballots pool in parallel (each has its own topic), but consent prompts are serialized: Android
- * can show only one BiometricPrompt at a time. A ballot whose pool is still too small when voting
+ * Ballots pool in parallel (each has its own topic), but consent prompts are serialized through
+ * vote-engine's bounded consent queue: one at a time (Android can show only one BiometricPrompt at
+ * a time), and a prompt left unanswered for the sign window no longer blocks the next one (the
+ * native prompt itself is not cancelled; see todo 2026-10-31-ios-native-sign-has-no-timeout-or-cancel). A ballot whose pool is still too small when voting
  * closes stays saved on the phone, not sent. Nothing here logs or touches the sealed record's
  * storage.
  */
 import {
+	POOL_SIGN_TIMEOUT_MS,
 	PoolAgent,
 	canonicalJson,
+	createConsentQueue,
 	createPoolIdentity,
 	encryptVoteEntry,
 	type PoolAgentOptions,
@@ -81,16 +85,6 @@ export type SendSavedVoteResult =
 	| {ok: true, ballots: Array<{ballotId: string, status: BallotSendStatus}>}
 	| {ok: false, reason: 'election-key-missing' | 'voting-closed' | 'window-unreadable'}
 
-/** One prompt at a time, in arrival order. */
-function serialize<A extends unknown[], R>(fn: (...args: A) => Promise<R>): (...args: A) => Promise<R> {
-	let tail: Promise<unknown> = Promise.resolve();
-	return (...args: A) => {
-		const run = tail.then(() => fn(...args));
-		tail = run.catch(() => undefined);
-		return run;
-	};
-}
-
 function toStatus(s: PoolAgentStatus): BallotSendStatus | null {
 	switch (s.phase) {
 		case 'pooling': return {phase: 'waiting', size: s.size};
@@ -128,7 +122,7 @@ export async function sendSavedVote(deps: SendSavedVoteDeps): Promise<SendSavedV
 	if (deps.nowMs() >= closesAt) return {ok: false, reason: 'voting-closed'};
 
 	const sent = await deps.sentStore.read(electionId, revision);
-	const signConsent = serialize(deps.signConsent);
+	const signConsent = createConsentQueue(deps.signConsent, {holdMs: deps.agentOptions?.signTimeoutMs ?? POOL_SIGN_TIMEOUT_MS});
 	const report = (ballotId: string, status: BallotSendStatus) => deps.onStatus?.(ballotId, status);
 
 	const ballots = await Promise.all(record.votes.map(async (vote): Promise<{ballotId: string, status: BallotSendStatus}> => {
