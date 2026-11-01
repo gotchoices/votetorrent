@@ -14,7 +14,8 @@ import {
 	type PoolIdentity,
 	type PoolRendezvousClient,
 } from '@votetorrent/vote-engine/rn';
-import {sendSavedVote, statusForOutcome, type BallotSendStatus, type VoteSendingPort, type VoteSentStore} from '../vote-sending';
+import {ConsentAbandonedError} from '@votetorrent/vote-engine/rn';
+import {classifyConsentSignFailure, sendSavedVote, statusForOutcome, type BallotSendStatus, type VoteSendingPort, type VoteSentStore} from '../vote-sending';
 import type {VoteRecord} from '../vote-record-vault';
 
 const electionSecret = secp256k1.utils.randomSecretKey();
@@ -242,7 +243,7 @@ describe('sendSavedVote native cancel (UAT 65 gap 1, Android shape)', () => {
 		return [0, 1, 2].map(i => (ballotId: string) => perBallot.get(ballotId)![slot[i]!]!);
 	}
 
-	async function run(opts: {closeMs: number, guardMs: number, withCancel: boolean, firstSign: 'swallow' | 'busy', busyRole?: 'former' | 'member'}) {
+	async function run(opts: {closeMs: number, guardMs: number, withCancel: boolean, firstSign: 'swallow' | 'busy', busyRole?: 'former' | 'member', busyCode?: string}) {
 		const rv = new PoolRendezvous();
 		const strand = fakeStrand(Date.now() + opts.closeMs);
 		const voters = [0, 1, 2].map(makeVoter);
@@ -256,7 +257,7 @@ describe('sendSavedVote native cancel (UAT 65 gap 1, Android shape)', () => {
 		let lastStart1 = '';
 		let busyAt = '';
 		const busySign = async (digest: string) => {
-			if (busyFirst) { busyFirst = false; busyDelivered++; busyAt = lastStart1; throw Object.assign(new Error('busy'), {code: 'PROMPT_BUSY'}); }
+			if (busyFirst) { busyFirst = false; busyDelivered++; busyAt = lastStart1; throw Object.assign(new Error('busy'), {code: opts.busyCode ?? 'PROMPT_BUSY'}); }
 			return real1(digest);
 		};
 		const identities = opts.busyRole !== undefined ? identitiesFor(opts.busyRole) : undefined;
@@ -273,7 +274,8 @@ describe('sendSavedVote native cancel (UAT 65 gap 1, Android shape)', () => {
 			signConsent: i === 1 ? (opts.firstSign === 'swallow' ? native.sign : busySign) : signWith(v.priv),
 			cancelSign: i === 1 && opts.withCancel ? native.cancel : undefined,
 			minPromptMs: FAST_MIN_PROMPT_MS, nowMs: () => Date.now(), signal: ac.signal,
-			agentOptions: {...agent, log: log(i)},
+			// the plain topic only (no specific-then-general ladder), so every voter sees every pool at once
+			agentOptions: {...agent, log: log(i), ...(identities !== undefined ? {ladder: false} : {})},
 			poolIdentity: identities?.[i],
 		}); }))]);
 		clearTimeout(stall);
@@ -306,10 +308,15 @@ describe('sendSavedVote native cancel (UAT 65 gap 1, Android shape)', () => {
 		}
 	});
 
-	// D-112: PROMPT_BUSY means nothing was shown, so it is a consent not given, never a decline. The
-	// role is fixed (WR-05): as the former, a decline would stop the ballot 'not-sent: stopped' (CR-01).
-	it.each(['former', 'member'] as const)('a PROMPT_BUSY reject on the %s\'s consent is not a decline: every ballot ends sent', async (busyRole) => {
-		const {all, strand, busyDelivered, busyAt} = await run({closeMs: 12_000, guardMs: 20_000, withCancel: false, firstSign: 'busy', busyRole});
+	// D-112: PROMPT_BUSY means nothing was shown, so it is a consent not given, never a decline; the
+	// same for a BIOMETRIC_ERROR (no prompt could be hosted or started). The role is fixed (WR-05): as
+	// the former, a decline would stop the ballot 'not-sent: stopped' (CR-01).
+	it.each([
+		['PROMPT_BUSY', 'former'],
+		['PROMPT_BUSY', 'member'],
+		['BIOMETRIC_ERROR', 'former'],
+	] as const)('a %s reject on the %s\'s consent is not a decline: every ballot ends sent', async (busyCode, busyRole) => {
+		const {all, strand, busyDelivered, busyAt} = await run({closeMs: 12_000, guardMs: 20_000, withCancel: false, firstSign: 'busy', busyRole, busyCode});
 		// the busy reject answered the consent of the role under test
 		expect(busyAt).toBe(busyRole === 'former' ? 'own-consent-start' : 'consent-start');
 		expect(all).not.toBe('stalled');
@@ -321,6 +328,35 @@ describe('sendSavedVote native cancel (UAT 65 gap 1, Android shape)', () => {
 		}
 		expect(busyDelivered).toBe(1);
 		expect(strand.commits.sort((a, b) => a.ballotId.localeCompare(b.ballotId))).toEqual([{ballotId: 'ballot-a', size: 3}, {ballotId: 'ballot-b', size: 3}]);
+	});
+});
+
+describe('classifyConsentSignFailure (CR-01)', () => {
+	const coded = (code: unknown) => Object.assign(new Error('x'), {code});
+	it.each([
+		['PROMPT_BUSY', 'abandoned'],
+		['BIOMETRIC_ERROR', 'abandoned'],
+		['NO_ACTIVITY', 'abandoned'],
+		['CANCELED', 'declined'],
+		['KEY_INVALIDATED', 'declined'],
+		['KEY_INVALIDATED_REASSOCIATE', 'declined'],
+		['DEVICE_KEY_INVALIDATED', 'declined'],
+		['NO_BIOMETRICS_ENROLLED', 'declined'],
+		['LOCKOUT', 'declined'],
+		['LOCKOUT_PERMANENT', 'declined'],
+		['NO_KEY_PROVISIONED', 'declined'],
+		['NO_DEVICE_CREDENTIAL', 'declined'],
+		['SOMETHING_NEW', 'declined'],
+	])('%s -> %s', (code, expected) => {
+		expect(classifyConsentSignFailure(coded(code))).toBe(expected);
+	});
+	it('an abandoned consent stays abandoned; no code, a non-string code or a non-object is a decline', () => {
+		expect(classifyConsentSignFailure(new ConsentAbandonedError('abandoned'))).toBe('abandoned');
+		expect(classifyConsentSignFailure({name: 'ConsentAbandonedError'})).toBe('abandoned');
+		expect(classifyConsentSignFailure(new Error('plain'))).toBe('declined');
+		expect(classifyConsentSignFailure(coded(5))).toBe('declined');
+		expect(classifyConsentSignFailure(null)).toBe('declined');
+		expect(classifyConsentSignFailure('PROMPT_BUSY')).toBe('declined');
 	});
 });
 

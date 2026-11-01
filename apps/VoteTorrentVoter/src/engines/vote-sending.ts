@@ -21,11 +21,13 @@
  * vote-engine's consent queue, one at a time. A prompt not answered by the former's reply deadline is
  * dismissed through the injected `cancelSign` before the next prompt starts (Android shows only one
  * BiometricPrompt and silently drops a second one), a consent abandoned before it starts never
- * prompts, and a signer that reports another prompt showing counts as a consent not given. A ballot
+ * prompts, and a sign that failed without the voter declining (another prompt showing, no prompt
+ * shown) is handed to the agent as an abandoned consent, never a decline. A ballot
  * whose pool is still too small when voting closes stays saved on the phone, not sent. Nothing here logs or touches the sealed record's
  * storage.
  */
 import {
+	ConsentAbandonedError,
 	POOL_MIN_PROMPT_MS,
 	POOL_SIGN_TIMEOUT_MS,
 	PoolAgent,
@@ -33,6 +35,7 @@ import {
 	createConsentQueue,
 	createPoolIdentity,
 	encryptVoteEntry,
+	isConsentAbandonedError,
 	type PoolAgentOptions,
 	type PoolAgentStatus,
 	type PoolBallot,
@@ -76,8 +79,11 @@ export interface SendSavedVoteDeps {
 	record: VoteRecord
 	/** a transport to the authority's rendezvous */
 	rendezvous: PoolRendezvousClient
-	/** sign a consent digest with the voting key; one fingerprint prompt */
-	signConsent: (digest: string) => Promise<string>
+	/**
+	 * sign a consent digest with the voting key; one fingerprint prompt. `signal` aborts when the pool
+	 * abandons this consent: a signer that has not reached the native prompt yet should not raise it.
+	 */
+	signConsent: (digest: string, signal?: AbortSignal) => Promise<string>
 	nowMs: () => number
 	onStatus?: (ballotId: string, status: BallotSendStatus) => void
 	signal?: AbortSignal
@@ -122,6 +128,29 @@ export async function statusForOutcome(outcome: PoolOutcome, recheckRecordedVote
 	return {phase: 'not-sent', reason: 'stopped'};
 }
 
+/**
+ * Native sign codes for a consent that was not given but not declined either: nothing was shown, or
+ * the prompt failed without the voter doing anything. PROMPT_BUSY: another prompt was already
+ * showing (D-112). BIOMETRIC_ERROR: the activity could not host a prompt (app in the background), the
+ * prompt silently did not start, or another platform error. NO_ACTIVITY: no activity to host it.
+ */
+export const ABANDONED_CONSENT_SIGN_CODES: readonly string[] = ['PROMPT_BUSY', 'BIOMETRIC_ERROR', 'NO_ACTIVITY'];
+
+/**
+ * How a rejected consent sign reaches the pool agent.
+ * - 'abandoned' (released, keeps pooling): an abandoned consent, or a transient code in
+ *   ABANDONED_CONSENT_SIGN_CODES.
+ * - 'declined' (a decline stops the former's ballot): the voter's CANCELED, and every other code. That
+ *   includes the permanent ones (KEY_INVALIDATED, KEY_INVALIDATED_REASSOCIATE, NO_BIOMETRICS_ENROLLED,
+ *   LOCKOUT, LOCKOUT_PERMANENT, NO_KEY_PROVISIONED, ...): re-pooling cannot fix them and would only
+ *   raise prompt after prompt until voting closes, so the send stops and its failure line shows.
+ */
+export function classifyConsentSignFailure(err: unknown): 'abandoned' | 'declined' {
+	if (isConsentAbandonedError(err)) return 'abandoned';
+	const code = (err as {code?: unknown} | null)?.code;
+	return typeof code === 'string' && ABANDONED_CONSENT_SIGN_CODES.includes(code) ? 'abandoned' : 'declined';
+}
+
 export async function sendSavedVote(deps: SendSavedVoteDeps): Promise<SendSavedVoteResult> {
 	const {record, port} = deps;
 	const {electionId, electionRevision: revision} = record;
@@ -132,13 +161,26 @@ export async function sendSavedVote(deps: SendSavedVoteDeps): Promise<SendSavedV
 	if (deps.nowMs() >= closesAt) return {ok: false, reason: 'voting-closed'};
 
 	const sent = await deps.sentStore.read(electionId, revision);
-	const consentQueue = createConsentQueue(deps.signConsent, {
+	// The engine treats any rejection of the former's own consent other than an abandoned one as a
+	// decline that stops the ballot (CR-01), so a failure the voter did not cause is handed on as an
+	// abandoned consent: the pool is released and pooling goes on (classifyConsentSignFailure).
+	const consentSign = async (digest: string, signal?: AbortSignal): Promise<string> => {
+		try {
+			return await deps.signConsent(digest, signal);
+		} catch (err) {
+			if (classifyConsentSignFailure(err) === 'abandoned') throw isConsentAbandonedError(err) ? err : new ConsentAbandonedError('abandoned');
+			throw err;
+		}
+	};
+	const consentQueue = createConsentQueue(consentSign, {
 		holdMs: deps.agentOptions?.signTimeoutMs ?? POOL_SIGN_TIMEOUT_MS,
 		cancel: deps.cancelSign,
 		minPromptMs: deps.minPromptMs ?? POOL_MIN_PROMPT_MS,
 		now: deps.nowMs,
 	});
-	const signConsent = (digest: string, ctl?: ConsentCallControl) => consentQueue.withControl(ctl, digest);
+	// The call's own abort signal reaches the signer, so a consent abandoned before its prompt starts
+	// is never raised (WR-04).
+	const signConsent = (digest: string, ctl?: ConsentCallControl) => consentQueue.withControl(ctl, digest, ctl?.signal);
 	const report = (ballotId: string, status: BallotSendStatus) => deps.onStatus?.(ballotId, status);
 
 	const ballots = await Promise.all(record.votes.map(async (vote): Promise<{ballotId: string, status: BallotSendStatus}> => {
