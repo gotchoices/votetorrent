@@ -13,7 +13,9 @@
 // D-115: a call's `deadlineAt` (in the queue's `now()` clock) is the time its prompt may be held. The
 // running call is cancelled at its deadline (reason 'expired'); queued calls start earliest deadline
 // first (no deadline last, ties in arrival order); a call that would start with less than
-// `minPromptMs` left is rejected 'no-time' without prompting.
+// `minPromptMs` left is rejected 'no-time' without prompting. The deadline is read from the call's
+// control object until the call starts, so a caller may move it (IN-03: a re-sent form refreshes a
+// still-queued consent); once the prompt is showing, its deadline is fixed.
 //
 // `holdMs` bounds how long ONE call WITHOUT a deadline holds the queue (D-94): a prompt nobody
 // answers must not block every later prompt for ever. With no cancel hook the queue then moves on
@@ -51,7 +53,10 @@ export function isConsentAbandonedError (err: unknown): err is ConsentAbandonedE
 export interface ConsentCallControl {
   /** abort to abandon the call: skipped while queued, cancelled while its prompt is showing */
   signal?: AbortSignal
-  /** the latest time its prompt may still be held, in the queue's `now()` clock */
+  /**
+   * the latest time its prompt may still be held, in the queue's `now()` clock. Read while the call is
+   * queued (ordering, the 'no-time' check) and once when it starts; a change after the start is ignored.
+   */
   deadlineAt?: number
   /** called synchronously immediately before the prompt function is invoked */
   onStart?: () => void
@@ -75,7 +80,6 @@ interface Entry<A extends unknown[], R> {
   args: A
   ctl: ConsentCallControl
   arrival: number
-  deadlineAt: number | undefined
   resolve: (value: R) => void
   reject: (err: unknown) => void
   settled: boolean
@@ -143,11 +147,12 @@ export function createConsentQueue<A extends unknown[], R> (
 
   const start = (e: Entry<A, R>): void => {
     running = e
-    if (e.deadlineAt !== undefined || bounded) {
-      const delay = e.deadlineAt !== undefined ? Math.max(0, e.deadlineAt - now()) : holdMs!
+    const deadlineAt = e.ctl.deadlineAt
+    if (deadlineAt !== undefined || bounded) {
+      const delay = deadlineAt !== undefined ? Math.max(0, deadlineAt - now()) : holdMs!
       e.timer = setTimeout(() => {
         e.timer = undefined
-        if (!e.settled && (e.deadlineAt !== undefined || cancel !== undefined)) abandonRunning(e, 'expired')
+        if (!e.settled && (deadlineAt !== undefined || cancel !== undefined)) abandonRunning(e, 'expired')
         else release(e)
       }, delay)
     }
@@ -173,14 +178,14 @@ export function createConsentQueue<A extends unknown[], R> (
       for (let i = 1; i < waiting.length; i++) {
         const a = waiting[i]!
         const b = waiting[best]!
-        const da = a.deadlineAt ?? Infinity
-        const db = b.deadlineAt ?? Infinity
+        const da = a.ctl.deadlineAt ?? Infinity
+        const db = b.ctl.deadlineAt ?? Infinity
         if (da < db || (da === db && a.arrival < b.arrival)) best = i
       }
       const e = waiting[best]!
       waiting = waiting.filter((_, i) => i !== best)
-      if (e.deadlineAt !== undefined) {
-        const left = e.deadlineAt - now()
+      if (e.ctl.deadlineAt !== undefined) {
+        const left = e.ctl.deadlineAt - now()
         if (left <= 0 || left < minPromptMs) { reject(e, 'no-time'); continue }
       }
       start(e)
@@ -195,7 +200,6 @@ export function createConsentQueue<A extends unknown[], R> (
         args,
         ctl: control,
         arrival: arrivals++,
-        deadlineAt: control.deadlineAt,
         resolve,
         reject: rejectCaller,
         settled: false,

@@ -52,6 +52,14 @@
 //   * D-117: the former's own consent has the same deadline and abort. Unanswered is not declined:
 //     the pool is released with the reason 'the former did not answer in time' and the former keeps
 //     pooling; only an explicit decline stops it ('aborted').
+//   * WR-01 (round 2): the run's stop signal is bound to every live consent. Stopping the agent while
+//     the former's own prompt (or a member's prompt) is showing aborts that consent at once, so the
+//     queue cancels the prompt; a former stopped mid-formation releases the pool with 'aborted' and
+//     never commits, even when every signature is already in hand.
+//   * IN-03: a re-sent form for a consent that is still queued (its prompt not yet shown) moves that
+//     consent's deadline to the new form's reply deadline. A consent whose prompt is already showing
+//     keeps its first deadline: the queue fixed it when the prompt started, and answering (or
+//     refusing) early is safe, since the former waits at least that long.
 //
 // The agent owns no database and no device key: `signConsent` (the device key, a biometric prompt
 // on Android) and `commit` (one transaction, pool-block.ts `commitPoolBlock`) are handed in.
@@ -165,6 +173,18 @@ type PoolMessage =
   /** the sender (this member's coordinator) merged into `to`: accept `to`'s inform from now on */
   | { t: 'handover', topic: string, to: string }
 
+/** A member's consent for one coordinator's block, shared by re-sent forms of that block (D-116). */
+interface MemberConsent {
+  from: string
+  digest: string
+  signature: Promise<string>
+  controller: AbortController
+  /** the control handed to signConsent; a queue reads `deadlineAt` from it until the prompt starts (IN-03) */
+  ctl: ConsentCallControl & { deadlineAt: number }
+  /** started: the prompt is on screen (onStart fired); waiters: form handlers waiting on it now */
+  state: { started: boolean, waiters: number }
+}
+
 const holdOf = (voteCiphertext: string): string => bytesToHex(sha256(utf8ToBytes(voteCiphertext)))
 const better = (a: { size: number, peerId: string }, b: { size: number, peerId: string }): boolean =>
   a.size > b.size || (a.size === b.size && a.peerId < b.peerId)
@@ -218,9 +238,9 @@ export class PoolAgent {
   /** an `already-voted` claim is being checked against the strand */
   private checkingClaim = false
   /** the consent given (or being given) for the last form: one prompt per coordinator and block */
-  private consent: { from: string, digest: string, signature: Promise<string>, controller: AbortController, deadlineAt: number } | null = null
-  /** abort handle of the former's own consent while it is being asked (D-117) */
-  private ownConsent: AbortController | null = null
+  private consent: MemberConsent | null = null
+  /** the signal handed to run(): every live consent is aborted when it aborts (WR-01) */
+  private runSignal: AbortSignal | undefined
   /** observability: message counts by type, sent and received */
   readonly counts: Record<string, number> = {}
 
@@ -262,6 +282,7 @@ export class PoolAgent {
   /** Pool until this vote is in a committed block, voting closes, or `signal` aborts. */
   async run (signal?: AbortSignal): Promise<PoolOutcome> {
     this.runStartedAt = this.o.now()
+    this.runSignal = signal
     const polling = this.pollLoop()
     try {
       this.status()
@@ -278,9 +299,11 @@ export class PoolAgent {
       }
     } finally {
       this.stopped = true
-      // D-114: no orphan prompt once the agent stops (a settled consent is unaffected)
+      // D-114: no orphan prompt once the agent stops (a settled consent is unaffected). This catches a
+      // run that ends without its signal aborting (the voting deadline). The former's own consent
+      // needs no line here: form() is always awaited before this point, and it binds that consent to
+      // the run signal itself (WR-01).
       this.consent?.controller.abort()
-      this.ownConsent?.abort()
       for (const [, p] of this.pending) { clearTimeout(p.timer); p.resolve(null) }
       this.pending.clear()
       for (const wake of [...this.handoverWaiters]) wake()
@@ -476,7 +499,12 @@ export class PoolAgent {
       const formAt = this.o.now()
       const ownDeadline = formAt + this.o.signTimeoutMs - this.o.replyTimeoutMs
       const ownController = new AbortController()
-      this.ownConsent = ownController
+      // WR-01: stopping the run aborts the own consent at once (the queue cancels the prompt) and
+      // stops waiting for the members; the pool is then released with 'aborted' below, never committed.
+      let unbindStop = (): void => {}
+      const runStopped = new Promise<'stopped'>((resolve) => {
+        unbindStop = this.onRunStop(() => { ownController.abort(); resolve('stopped') })
+      })
       let ownTimer: ReturnType<typeof setTimeout> | undefined
       const ownDigest = consentDigest(block, this.o.ballot, mine.voterEntry.registrantId, mine.voterEntry.deviceKey)
       const own = async (): Promise<{ kind: 'sig', signature: string } | { kind: 'abandoned' } | { kind: 'declined' }> => {
@@ -492,16 +520,31 @@ export class PoolAgent {
           }
         })()
         try {
-          return await Promise.race([answer, bound])
+          return await Promise.race([answer, bound, runStopped.then(() => ({ kind: 'abandoned' as const }))])
         } finally {
           if (ownTimer !== undefined) clearTimeout(ownTimer)
         }
       }
-      const [ownResult, ...replies] = await Promise.all([
-        own(),
-        ...others.map(c => this.request(c.member, { t: 'form', id: this.nextId(), topic: this.topic, block }, this.o.signTimeoutMs))
-      ])
-      this.ownConsent = null
+      let ownResult: Awaited<ReturnType<typeof own>>
+      let replies: Array<PoolMessage | null>
+      try {
+        [ownResult, ...replies] = await Promise.all([
+          own(),
+          ...others.map(async c => await Promise.race([
+            this.request(c.member, { t: 'form', id: this.nextId(), topic: this.topic, block }, this.o.signTimeoutMs),
+            runStopped.then(() => null)
+          ]))
+        ])
+      } finally {
+        unbindStop()
+      }
+      if (this.runSignal?.aborted === true) {
+        // WR-01: the agent was stopped while this block was being signed. Release the pool; an answer
+        // that came in anyway (own or members') must not commit a send the voter left.
+        this.log('form-stopped', { waitedMs: this.o.now() - formAt })
+        await this.abandon('aborted')
+        return
+      }
       if (ownResult.kind === 'abandoned') {
         // Unanswered is not declined (D-117): release the pool with the reason and keep pooling.
         for (const c of others) void this.post(c.member, { t: 'outcome', topic: this.topic, committed: false, reason: 'the former did not answer in time' })
@@ -758,15 +801,23 @@ export class PoolAgent {
     // The same form from the same coordinator (a failover resend, a retried request) reuses the one
     // consent this voter gave or is giving, never a second prompt (WR-01). The digest binds the
     // block's cid and id, so another block always prompts.
+    // D-114/D-115: the consent's deadline is the former's reply deadline, from the LOCAL arrival time.
+    const deadlineAt = formAt + this.o.signTimeoutMs - this.o.replyTimeoutMs
     if (this.consent === null || this.consent.from !== from || this.consent.digest !== digest || this.consent.controller.signal.aborted) {
       this.o.onStatus?.({ phase: 'signing' })
-      // D-114/D-115: the consent's deadline is the former's reply deadline, from the LOCAL arrival time.
       const controller = new AbortController()
-      const deadlineAt = formAt + this.o.signTimeoutMs - this.o.replyTimeoutMs
-      const signature = this.o.signConsent(digest, { signal: controller.signal, deadlineAt, onStart: () => this.log('consent-start', { digest: digest.slice(0, 8) }) })
-      this.consent = { from, digest, signature, controller, deadlineAt }
+      // A queue may call onStart synchronously inside signConsent, so the state exists first.
+      const state = { started: false, waiters: 0 }
+      const ctl = { signal: controller.signal, deadlineAt, onStart: () => { state.started = true; this.log('consent-start', { digest: digest.slice(0, 8) }) } }
+      const signature = this.o.signConsent(digest, ctl)
+      this.consent = { from, digest, signature, controller, ctl, state }
+    } else if (!this.consent.state.started && deadlineAt > this.consent.ctl.deadlineAt) {
+      // IN-03: the former's reply deadline comes from THIS form. A consent still queued takes the new
+      // deadline (the queue reads it until the prompt starts); a prompt already showing keeps its own.
+      this.consent.ctl.deadlineAt = deadlineAt
     }
     const record = this.consent
+    record.state.waiters++
     // D-94: wait for the consent at most until just before the former's request times out.
     const consentSignature = record.signature
     consentSignature.catch(() => undefined) // a late rejection after the bound is nobody's concern
@@ -778,7 +829,16 @@ export class PoolAgent {
       record.controller.abort()
       if (this.consent === record) this.consent = null
     }
-    const expired = new Promise<null>((resolve) => { timer = setTimeout(() => { giveUp(); resolve(null) }, waitMs) })
+    let stopped = false
+    let resolveExpired: (v: null) => void = () => {}
+    const expired = new Promise<null>((resolve) => {
+      resolveExpired = resolve
+      // IN-03: a later form of the same block may still be waiting on this consent with a later bound;
+      // only the last waiter aborts it.
+      timer = setTimeout(() => { if (record.state.waiters <= 1) giveUp(); resolve(null) }, waitMs)
+    })
+    // WR-01: stopping the run aborts this consent at once (the queue cancels the prompt).
+    const unbindStop = this.onRunStop(() => { stopped = true; giveUp(); resolveExpired(null) })
     let signature: string | null
     let abandonedWhy: string | null = null
     try {
@@ -794,6 +854,13 @@ export class PoolAgent {
       signature = null
     } finally {
       if (timer !== undefined) clearTimeout(timer)
+      unbindStop()
+      record.state.waiters--
+    }
+    if (stopped) {
+      this.lastHeardAt = this.o.now()
+      this.log('consent-stopped', { waitedMs: this.o.now() - formAt })
+      return await this.post(from, { t: 'refuse', re: m.id, reason: 'the voter stopped pooling' })
     }
     if (signature === null) {
       this.lastHeardAt = this.o.now()
@@ -873,6 +940,18 @@ export class PoolAgent {
         this.handoverWaiters.add(wake)
       })
     }
+  }
+
+  /**
+   * Call `fn` once when the run signal aborts (at once if it already has); returns the unbind. A run
+   * without a signal never calls it.
+   */
+  private onRunStop (fn: () => void): () => void {
+    const signal = this.runSignal
+    if (signal === undefined) return () => {}
+    if (signal.aborted) { fn(); return () => {} }
+    signal.addEventListener('abort', fn, { once: true })
+    return () => signal.removeEventListener('abort', fn)
   }
 
   // Role reads through methods: TS would otherwise keep a narrowing across an await.

@@ -385,7 +385,7 @@ const holdOfVoter = (v: TV): string => bytesToHex(sha256(utf8ToBytes(v.contribut
 describe('pool agent: a member aborts an unanswered consent at the bound (D-114, D-116)', function () {
   this.timeout(30_000)
 
-  async function memberHarness (native: ReturnType<typeof fakeNative>, a: TV) {
+  async function memberHarness (native: ReturnType<typeof fakeNative>, a: TV, overrides: Partial<PoolAgentOptions> = {}) {
     const rv = new PoolRendezvous()
     const c = scriptedPeer(rv, 'transport-c')
     const topic = poolTopic(ballot)
@@ -408,7 +408,8 @@ describe('pool agent: a member aborts an unanswered consent at the bound (D-114,
       memberTimeoutMs: 30_000,
       pollWaitMs: 200,
       formLeadMs: 0,
-      deadlineAt: Date.now() + 25_000
+      deadlineAt: Date.now() + 25_000,
+      ...overrides
     })
     const running = agent.run(controller.signal)
     const merge = await c.next(m => m.body.t === 'merge')
@@ -417,7 +418,7 @@ describe('pool agent: a member aborts an unanswered consent at the bound (D-114,
     await c.send(a.identity.peerId, { t: 'inform', id: 'c-inform-1', topic, size: 5, hold: holdOfVoter(a) })
     if (await c.next(m => m.body.t === 'ack' && m.body.re === 'c-inform-1') === null) throw new Error('no ack')
     const stop = async (): Promise<PoolOutcome> => { controller.abort(); const o = await running; rv.close(); return o }
-    return { rv, c, topic, stop }
+    return { rv, c, topic, stop, q, controller, running }
   }
 
   it('the first prompt is cancelled at the bound, a refusal goes out, and a re-form raises exactly one new prompt', async () => {
@@ -463,6 +464,121 @@ describe('pool agent: a member aborts an unanswered consent at the bound (D-114,
     } finally {
       await h.stop()
     }
+  })
+
+  it('WR-01: stopping the run while a member\'s prompt is showing cancels it at once, not at the run loop\'s next turn or the bound', async () => {
+    // The run loop sleeps presentIntervalMs between turns (>= 3.75 s here) and the consent bound is
+    // ~19.6 s away, so a cancel within 1 s can only come from the run signal itself.
+    const a = mk('a')
+    const native = fakeNative(() => null, () => a.priv)
+    const h = await memberHarness(native, a, { presentIntervalMs: 5_000, signTimeoutMs: 20_000 })
+    try {
+      const block = formPoolBlock([a.contribution, mk('x').contribution, mk('y').contribution], ballot)
+      await h.c.send(a.identity.peerId, { t: 'form', id: 'f-1', topic: h.topic, block })
+      expect(await until(() => native.starts.length === 1, 3_000), 'the member prompt is showing').to.equal(true)
+      const abortAt = Date.now()
+      h.controller.abort()
+      expect(await until(() => native.stats().cancels === 1, 3_000), 'cancel called').to.equal(true)
+      const cancelledAfter = Date.now() - abortAt
+      expect(cancelledAfter, 'cancel after the stop (ms)').to.be.below(1_000)
+      const reply = await h.c.next(m => m.body.re === 'f-1', 2_000)
+      expect(reply?.body.t).to.equal('refuse')
+      expect(reply?.body.reason).to.equal('the voter stopped pooling')
+      expect(native.starts, 'one prompt only').to.have.length(1)
+      expect(h.c.inbox.some(m => m.body.t === 'sign'), 'no sign sent').to.equal(false)
+    } finally {
+      await h.stop()
+    }
+  })
+
+  it('IN-03: a re-sent form refreshes a still-queued consent to the new form\'s deadline; the first form is refused at its own bound', async () => {
+    // The phone's queue is held by another prompt past f-1's bound, and released before f-2's. One
+    // shared consent: f-1 is refused at its bound, the consent stays queued, then prompts and signs f-2.
+    const a = mk('a')
+    const native = fakeNative((n) => (n === 1 ? null : 0), () => a.priv)
+    const h = await memberHarness(native, a, { signTimeoutMs: 4_000 })
+    try {
+      const other = h.q.withControl(undefined, 'other-ballot', undefined)
+      other.catch(() => undefined)
+      expect(await until(() => native.starts.length === 1, 1_000), 'the other prompt holds the queue').to.equal(true)
+      const block = formPoolBlock([a.contribution, mk('x').contribution, mk('y').contribution], ballot)
+      await h.c.send(a.identity.peerId, { t: 'form', id: 'f-1', topic: h.topic, block })
+      await sleep(2_000)
+      await h.c.send(a.identity.peerId, { t: 'form', id: 'f-2', topic: h.topic, block })
+      const first = await h.c.next(m => m.body.re === 'f-1', 6_000)
+      expect(first?.body.t).to.equal('refuse')
+      expect(first?.body.reason).to.equal('no answer in time')
+      await sleep(300)
+      native.late[0]!('other-signature')
+      expect(await other).to.equal('other-signature')
+      const second = await h.c.next(m => m.body.re === 'f-2', 4_000)
+      expect(second?.body.t, `f-2 reply ${JSON.stringify(second?.body)}`).to.equal('sign')
+      expect(verifySigP256(consentDigest(block, ballot, a.contribution.voterEntry.registrantId, a.contribution.voterEntry.deviceKey), second!.body.signature.signature, a.pub)).to.equal(true)
+      expect(native.starts, 'the other prompt and one consent prompt').to.have.length(2)
+      expect(native.stats().cancels, 'nothing cancelled').to.equal(0)
+    } finally {
+      await h.stop()
+    }
+  })
+})
+
+describe('pool agent: stopping the run cancels the former\'s own prompt at once (WR-01)', function () {
+  this.timeout(60_000)
+
+  it('the own prompt is cancelled well before ownDeadline, the pool is released with aborted, nothing commits', async () => {
+    // signTimeoutMs 9.6 s, replyTimeoutMs 0.6 s: ownDeadline is ~9 s after the form, against a 1.5 s limit.
+    const rendezvous = new PoolRendezvous({ coordinatorTtlMs: 5_000, envelopeTtlMs: 20_000, maxPollWaitMs: 100 })
+    const [F, M, X] = sortedVoters(['F', 'M', 'X'])
+    const fStop = new AbortController()
+    const restStop = new AbortController()
+    const commits: string[][] = []
+    const events: Record<string, Array<{ e: string, d: any }>> = { F: [], M: [], X: [] }
+    let fOutcome: PoolOutcome | undefined
+    let fEndedAt: number | null = null
+    let cancels = 0
+    let cancelAt: number | null = null
+    const fQueue = createConsentQueue(async (_digest: string, signal?: AbortSignal) =>
+      await new Promise<string>((_resolve, reject) => { signal?.addEventListener('abort', () => reject(new Error('CANCELED'))) }),
+    { cancel: async () => { cancels++; cancelAt ??= Date.now(); await sleep(5) } })
+    const runs = [F!, M!, X!].map(async (v) => {
+      const outcome = await new PoolAgent({
+        quietMs: 300, presentIntervalMs: 40, replyTimeoutMs: 600, informAttempts: 2,
+        signTimeoutMs: 9_600, memberTimeoutMs: 2_400, pollWaitMs: 50, formLeadMs: 5_000, ladder: false,
+        identity: v.identity,
+        rendezvous: createInMemoryRendezvousClient(rendezvous, `t-${v.name}`),
+        ballot,
+        contribution: v.contribution,
+        signConsent: v.name === 'F'
+          ? async (d, ctl) => await fQueue.withControl(ctl, d, ctl?.signal)
+          : async (d) => signDigestP256(d, v.priv),
+        commit: async (_b, sigs) => { commits.push(sigs.map(s => s.registrantId)); return { ok: true } },
+        findRecordedVote: async () => null,
+        deadlineAt: Date.now() + 50_000,
+        log: (e, d) => { events[v.name]!.push({ e, d }) }
+      }).run(v.name === 'F' ? fStop.signal : restStop.signal)
+      if (v.name === 'F') { fOutcome = outcome; fEndedAt = Date.now() }
+      return outcome
+    })
+    try {
+      expect(await until(() => events.F!.some(x => x.e === 'own-consent-start'), 30_000), 'the former\'s own prompt is showing').to.equal(true)
+      const abortAt = Date.now()
+      fStop.abort()
+      expect(await until(() => fOutcome !== undefined, 8_000), 'the former\'s run ended').to.equal(true)
+      expect(cancels, 'cancel called once').to.equal(1)
+      expect(cancelAt! - abortAt, 'cancel after the stop (ms)').to.be.below(1_500)
+      expect(fEndedAt! - abortAt, 'run ended after the stop (ms)').to.be.below(3_000)
+      expect(fOutcome).to.deep.equal({ status: 'stopped', reason: 'aborted' })
+      expect(events.F!.some(x => x.e === 'form-stopped'), 'former logged form-stopped').to.equal(true)
+      expect(events.F!.some(x => x.e === 'own-consent-timeout'), 'not reported as a timeout').to.equal(false)
+      expect(await until(() => ['M', 'X'].every(n => events[n]!.some(x => x.e === 'solo' && String(x.d?.why).includes('aborted'))), 5_000), 'members released with aborted').to.equal(true)
+      expect(commits, 'nothing committed').to.have.length(0)
+    } finally {
+      fStop.abort()
+      restStop.abort()
+      await Promise.all(runs)
+      rendezvous.close()
+    }
+    expect(commits, 'nothing committed after the stop').to.have.length(0)
   })
 })
 
