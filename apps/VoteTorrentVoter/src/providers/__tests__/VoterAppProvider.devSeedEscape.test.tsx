@@ -235,6 +235,30 @@ describe('VoterAppProvider: dev-seed boot escape (D-99, UAT 65 gap 4)', () => {
 		expect(text(tr)).not.toContain(ESCAPE_KEY);
 	});
 
+	it('DSE-5 a run superseded after 60 s (the node arrives) starts its own 60 s wait (round-1 IN-01)', async () => {
+		mockSeedDevNetwork.mockImplementation(() => new Promise<DevSeedResult>(() => undefined));
+		const {tr} = renderProvider();
+		await settle();
+		await spin(61_000);
+		expect(text(tr)).toContain(ESCAPE_KEY);
+		// the node-change re-run (the iPhone double launch): a new, non-cancelled boot run
+		mockCadreNodeValue.node = {getControlNode: () => null};
+		renderer.act(() => {
+			tr.update(
+				<VoterAppProvider>
+					<></>
+				</VoterAppProvider>,
+			);
+		});
+		await settle();
+		expect(mockSeedDevNetwork).toHaveBeenCalledTimes(2);
+		expect(text(tr)).not.toContain(ESCAPE_KEY);
+		await spin(59_000);
+		expect(text(tr)).not.toContain(ESCAPE_KEY);
+		await spin(2_000);
+		expect(text(tr)).toContain(ESCAPE_KEY);
+	});
+
 	it('DSE-4 unmounting at 30 s leaves no timer that writes state or shows an escape', async () => {
 		mockSeedDevNetwork.mockImplementation(() => new Promise<DevSeedResult>(() => undefined));
 		const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);

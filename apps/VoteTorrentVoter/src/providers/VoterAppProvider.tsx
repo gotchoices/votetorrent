@@ -308,6 +308,9 @@ export function VoterAppProvider({children}: PropsWithChildren) {
 			// Set when this run surfaces a boot error; a run that ends without one is a successful
 			// boot and clears replacedThisSessionRef (62-REVIEW WR-03).
 			let bootFailed = false;
+			// Round-1 IN-01: the dev-seed escape belongs to the run that waited 60 s. A new run (Try
+			// Again, or the node-change re-run that supersedes a run past 60 s) starts its own wait.
+			setSeedWaitElapsed(false);
 			try {
 				const factory = engineFactoryRef.current!;
 
