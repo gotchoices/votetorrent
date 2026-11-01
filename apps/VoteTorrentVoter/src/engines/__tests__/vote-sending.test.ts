@@ -248,21 +248,21 @@ describe('sendSavedVote native cancel (UAT 65 gap 1, Android shape)', () => {
 		return [0, 1, 2].map(i => (ballotId: string) => perBallot.get(ballotId)![slot[i]!]!);
 	}
 
-	async function run(opts: {closeMs: number, guardMs: number, withCancel: boolean, firstSign: 'swallow' | 'busy', busyRole?: 'former' | 'member', busyCode?: string}) {
+	async function run(opts: {closeMs: number, guardMs: number, withCancel: boolean, firstSign: 'swallow' | 'busy', busyRole?: 'former' | 'member', busyCode?: string, busyTimes?: number}) {
 		const rv = new PoolRendezvous();
 		const strand = fakeStrand(Date.now() + opts.closeMs);
 		const voters = [0, 1, 2].map(makeVoter);
 		const stores = voters.map(() => memorySentStore());
 		const native = swallowingNative(voters[1]!.priv);
 		let busyDelivered = 0;
-		let busyFirst = true;
+		let busyLeft = opts.busyTimes ?? 1;
 		const real1 = signWith(voters[1]!.priv);
 		// which consent voter 1's busy reject answered: the queue calls onStart (logged by the agent as
 		// 'own-consent-start' for the former, 'consent-start' for a member) right before the sign
 		let lastStart1 = '';
 		let busyAt = '';
 		const busySign = async (digest: string) => {
-			if (busyFirst) { busyFirst = false; busyDelivered++; busyAt = lastStart1; throw Object.assign(new Error('busy'), {code: opts.busyCode ?? 'PROMPT_BUSY'}); }
+			if (busyLeft > 0) { busyLeft--; busyDelivered++; busyAt = lastStart1; throw Object.assign(new Error('busy'), {code: opts.busyCode ?? 'PROMPT_BUSY'}); }
 			return real1(digest);
 		};
 		const identities = opts.busyRole !== undefined ? identitiesFor(opts.busyRole) : undefined;
@@ -314,12 +314,17 @@ describe('sendSavedVote native cancel (UAT 65 gap 1, Android shape)', () => {
 	});
 
 	// D-112: PROMPT_BUSY means nothing was shown, so it is a consent not given, never a decline; the
-	// same for a BIOMETRIC_ERROR (no prompt could be hosted or started). The role is fixed (WR-05): as
-	// the former, a decline would stop the ballot 'not-sent: stopped' (CR-01).
+	// same for a BIOMETRIC_ERROR (no prompt could be hosted or started), a temporary LOCKOUT (WR-07), the
+	// OS ending the prompt (SYSTEM_CANCELED: screen lock, call, app switch; CR-01) and no activity to
+	// host it (NO_ACTIVITY). The role is fixed (WR-05): as the former, a decline would stop the ballot
+	// 'not-sent: stopped' (CR-01).
 	it.each([
 		['PROMPT_BUSY', 'former'],
 		['PROMPT_BUSY', 'member'],
 		['BIOMETRIC_ERROR', 'former'],
+		['LOCKOUT', 'former'],
+		['SYSTEM_CANCELED', 'former'],
+		['NO_ACTIVITY', 'former'],
 	] as const)('a %s reject on the %s\'s consent is not a decline: every ballot ends sent', async (busyCode, busyRole) => {
 		const {all, strand, busyDelivered, busyAt} = await run({closeMs: 12_000, guardMs: 20_000, withCancel: false, firstSign: 'busy', busyRole, busyCode});
 		// the busy reject answered the consent of the role under test
@@ -332,6 +337,23 @@ describe('sendSavedVote native cancel (UAT 65 gap 1, Android shape)', () => {
 			if (r.ok) expect(r.ballots.map(b => b.status)).toEqual(BALLOTS.map(() => expect.objectContaining({phase: 'sent'})));
 		}
 		expect(busyDelivered).toBe(1);
+		expect(strand.commits.sort((a, b) => a.ballotId.localeCompare(b.ballotId))).toEqual([{ballotId: 'ballot-a', size: 3}, {ballotId: 'ballot-b', size: 3}]);
+	});
+
+	// CR-01 / WR-02: the OS ending the prompt (or no activity to host it) is never counted toward the
+	// transient retry cap: a former backgrounded through more formations than the cap still sends.
+	it.each(['SYSTEM_CANCELED', 'NO_ACTIVITY'] as const)('a former whose sign rejects %s more often than the cap is not stopped: every ballot ends sent', async (busyCode) => {
+		// both ballots' consents draw from these rejects; 2 * cap + 1 puts more than the cap on one ballot
+		const busyTimes = 2 * CONSENT_TRANSIENT_RETRY_CAP + 1;
+		const {all, strand, busyDelivered} = await run({closeMs: 30_000, guardMs: 38_000, withCancel: false, firstSign: 'busy', busyRole: 'former', busyCode, busyTimes});
+		expect(all).not.toBe('stalled');
+		const results = all === 'stalled' ? [] : all;
+		expect(results).toHaveLength(3);
+		for (const r of results) {
+			expect(r.ok).toBe(true);
+			if (r.ok) expect(r.ballots.map(b => b.status)).toEqual(BALLOTS.map(() => expect.objectContaining({phase: 'sent'})));
+		}
+		expect(busyDelivered).toBe(busyTimes);
 		expect(strand.commits.sort((a, b) => a.ballotId.localeCompare(b.ballotId))).toEqual([{ballotId: 'ballot-a', size: 3}, {ballotId: 'ballot-b', size: 3}]);
 	});
 });
@@ -347,7 +369,7 @@ describe('sendSavedVote transient consent-sign retry cap', () => {
 		expect(CONSENT_TRANSIENT_RETRY_CAP).toBe(3);
 	});
 
-	it('a former whose sign always rejects BIOMETRIC_ERROR ends not-sent stopped after exactly 4 sign attempts', async () => {
+	it.each(['BIOMETRIC_ERROR', 'LOCKOUT', 'PROMPT_BUSY'] as const)('a former whose sign always rejects %s ends not-sent stopped after exactly 4 sign attempts', async (failCode) => {
 		const rv = new PoolRendezvous();
 		const strand = fakeStrand(Date.now() + 20_000);
 		// one ballot, so every sign attempt of voter 1 belongs to the same ballot
@@ -359,7 +381,7 @@ describe('sendSavedVote transient consent-sign retry cap', () => {
 		let attempts = 0;
 		const failing = async (): Promise<string> => {
 			attempts++;
-			throw Object.assign(new Error('biometric'), {code: 'BIOMETRIC_ERROR'});
+			throw Object.assign(new Error('transient'), {code: failCode});
 		};
 		const others = new AbortController();
 		let stall: ReturnType<typeof setTimeout> | undefined;
@@ -390,19 +412,24 @@ describe('sendSavedVote transient consent-sign retry cap', () => {
 	});
 });
 
-describe('classifyConsentSignFailure (CR-01)', () => {
+describe('classifyConsentSignFailure (CR-01, WR-02, WR-07)', () => {
 	const coded = (code: unknown) => Object.assign(new Error('x'), {code});
 	it.each([
-		['PROMPT_BUSY', 'abandoned'],
-		['BIOMETRIC_ERROR', 'abandoned'],
+		// abandoned, never counted: the voter did not decline and the app could not show the prompt
+		['SYSTEM_CANCELED', 'abandoned'],
 		['NO_ACTIVITY', 'abandoned'],
+		['ABORTED', 'abandoned'],
+		// transient device trouble: released, counted toward CONSENT_TRANSIENT_RETRY_CAP
+		['PROMPT_BUSY', 'transient'],
+		['BIOMETRIC_ERROR', 'transient'],
+		['LOCKOUT', 'transient'],
+		// a decline: the voter dismissed the prompt, a permanent failure, or an unknown code
 		['CANCELED', 'declined'],
+		['LOCKOUT_PERMANENT', 'declined'],
 		['KEY_INVALIDATED', 'declined'],
 		['KEY_INVALIDATED_REASSOCIATE', 'declined'],
 		['DEVICE_KEY_INVALIDATED', 'declined'],
 		['NO_BIOMETRICS_ENROLLED', 'declined'],
-		['LOCKOUT', 'declined'],
-		['LOCKOUT_PERMANENT', 'declined'],
 		['NO_KEY_PROVISIONED', 'declined'],
 		['NO_DEVICE_CREDENTIAL', 'declined'],
 		['SOMETHING_NEW', 'declined'],
