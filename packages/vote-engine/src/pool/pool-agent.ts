@@ -148,6 +148,13 @@ export interface PoolAgentOptions {
   now?: () => number
   log?: (event: string, detail?: Record<string, unknown>) => void
   onStatus?: (status: PoolAgentStatus) => void
+  /**
+   * Whether this phone can show a consent prompt right now (the host app is in the foreground). A
+   * coordinator that cannot does not form (it would ask every member to confirm a block it cannot
+   * confirm itself, again on every re-form); a member that cannot refuses a form without prompting.
+   * Default: always true. Pooling, merging and presenting are unaffected.
+   */
+  canPrompt?: () => boolean
 }
 
 export type PoolAgentStatus =
@@ -198,7 +205,7 @@ function isContribution (c: unknown): c is PoolContribution {
 }
 
 export class PoolAgent {
-  private readonly o: Required<Omit<PoolAgentOptions, 'deadlineAt' | 'log' | 'onStatus' | 'discovery'>> & Pick<PoolAgentOptions, 'deadlineAt' | 'log' | 'onStatus' | 'discovery'>
+  private readonly o: Required<Omit<PoolAgentOptions, 'deadlineAt' | 'log' | 'onStatus' | 'discovery' | 'canPrompt'>> & Pick<PoolAgentOptions, 'deadlineAt' | 'log' | 'onStatus' | 'discovery' | 'canPrompt'>
   private readonly me: string
   private readonly topic: string
   private readonly myHold: string
@@ -239,6 +246,8 @@ export class PoolAgent {
   private checkingClaim = false
   /** the consent given (or being given) for the last form: one prompt per coordinator and block */
   private consent: MemberConsent | null = null
+  /** set while forming is held back because this phone cannot prompt (logged once per spell) */
+  private formDeferred = false
   /** the signal handed to run(): every live consent is aborted when it aborts (WR-01) */
   private runSignal: AbortSignal | undefined
   /** observability: message counts by type, sent and received */
@@ -396,8 +405,19 @@ export class PoolAgent {
     return ladderTopic(this.topic, POOL_LADDER_RUNG_BITS[this.rungIndex]!, this.pool.map(c => holdOf(c.voteCiphertext)))
   }
 
+  /** The host's foreground check; a throwing check counts as able (never blocks a send by accident). */
+  private canPromptNow (): boolean {
+    try { return this.o.canPrompt?.() ?? true } catch { return true }
+  }
+
   private shouldForm (): boolean {
     if (this.pool.length < this.o.minSize || this.pendingInforms > 0) return false
+    if (!this.canPromptNow()) {
+      if (!this.formDeferred) this.log('form-deferred', { why: 'cannot prompt' })
+      this.formDeferred = true
+      return false
+    }
+    this.formDeferred = false
     // doc/election.md: inform, ack, then form. A member merged a moment ago has not heard from this
     // coordinator yet and would refuse the form as "not my coordinator" (measured, run product-2).
     if (!this.pool.every(c => c.member === this.me || this.confirmed.has(c.member))) return false
@@ -525,13 +545,8 @@ export class PoolAgent {
       // The voting close does the same and ends the run with 'deadline'.
       let unbindStop = (): void => {}
       let closeTimer: ReturnType<typeof setTimeout> | undefined
-      let closed = false
-      const runStopped = new Promise<'stopped'>((resolve) => {
-        unbindStop = this.onRunStop(() => { ownController.abort(); resolve('stopped') })
-        if (Number.isFinite(closeAt)) {
-          closeTimer = setTimeout(() => { closed = true; ownController.abort(); resolve('stopped') }, Math.max(0, closeAt - this.o.now()))
-        }
-      })
+      let resolveStopped: (v: 'stopped') => void = () => {}
+      const runStopped = new Promise<'stopped'>((resolve) => { resolveStopped = resolve })
       let ownTimer: ReturnType<typeof setTimeout> | undefined
       const ownDigest = consentDigest(block, this.o.ballot, mine.voterEntry.registrantId, mine.voterEntry.deviceKey)
       const own = async (): Promise<{ kind: 'sig', signature: string } | { kind: 'abandoned' } | { kind: 'declined' }> => {
@@ -555,6 +570,13 @@ export class PoolAgent {
       let ownResult: Awaited<ReturnType<typeof own>>
       let replies: Array<PoolMessage | null>
       try {
+        unbindStop = this.onRunStop(() => { ownController.abort(); resolveStopped('stopped') })
+        // Only a close inside the sign window needs a timer (a far close would also overflow
+        // setTimeout's 2^31-1 ms limit and fire at once).
+        const closeIn = closeAt - this.o.now()
+        if (closeIn <= this.o.signTimeoutMs) {
+          closeTimer = setTimeout(() => { ownController.abort(); resolveStopped('stopped') }, Math.max(0, closeIn))
+        }
         [ownResult, ...replies] = await Promise.all([
           own(),
           ...others.map(async c => await Promise.race([
@@ -566,7 +588,10 @@ export class PoolAgent {
         unbindStop()
         if (closeTimer !== undefined) clearTimeout(closeTimer)
       }
-      if (closed && this.runSignal?.aborted !== true) {
+      // Decided from the clock, not from which timer fired first: the own-consent bound and the close
+      // timer can both target the close, and either order means the voting closed.
+      // (a timer may fire a millisecond early, hence the small allowance)
+      if (this.o.now() >= closeAt - 5 && this.runSignal?.aborted !== true) {
         this.log('form-closed', { waitedMs: this.o.now() - formAt })
         await this.abandon('deadline')
         return
@@ -825,6 +850,11 @@ export class PoolAgent {
     if (this.role !== 'member' || this.coordinator !== from) return await this.post(from, { t: 'refuse', re: m.id, reason: 'not my coordinator' })
     // A stopped run never prompts: refuse before the consent is requested, not after (review WR-01).
     if (this.stopped || this.runSignal?.aborted === true) return await this.post(from, { t: 'refuse', re: m.id, reason: 'the voter stopped pooling' })
+    if (!this.canPromptNow()) {
+      this.log('refused-block', { reason: 'cannot prompt' })
+      this.lastHeardAt = this.o.now()
+      return await this.post(from, { t: 'refuse', re: m.id, reason: 'the voter cannot confirm right now' })
+    }
     const formAt = this.o.now()
     this.lastHeardAt = formAt + this.o.signTimeoutMs
     const check = checkFormedPoolBlock(m.block, this.o.contribution, this.o.ballot)

@@ -512,6 +512,30 @@ describe('pool agent: a member aborts an unanswered consent at the bound (D-114,
     }
   })
 
+  it('a member that cannot prompt (app in the background) refuses a form at once and never prompts', async () => {
+    const a = mk('a')
+    const native = fakeNative(() => 0, () => a.priv)
+    let foreground = false
+    const h = await memberHarness(native, a, { canPrompt: () => foreground })
+    try {
+      const block = formPoolBlock([a.contribution, mk('x').contribution, mk('y').contribution], ballot)
+      const sentAt = Date.now()
+      await h.c.send(a.identity.peerId, { t: 'form', id: 'f-1', topic: h.topic, block })
+      const reply = await h.c.next(m => m.body.re === 'f-1', 2_000)
+      expect(reply?.body.t).to.equal('refuse')
+      expect(reply?.body.reason).to.equal('the voter cannot confirm right now')
+      expect(Date.now() - sentAt, 'refused without waiting (ms)').to.be.below(1_000)
+      expect(native.starts, 'no prompt').to.have.length(0)
+      foreground = true
+      await h.c.send(a.identity.peerId, { t: 'form', id: 'f-2', topic: h.topic, block })
+      const signed = await h.c.next(m => m.body.re === 'f-2', 3_000)
+      expect(signed?.body.t, 'back in the foreground it signs').to.equal('sign')
+      expect(native.starts, 'one prompt').to.have.length(1)
+    } finally {
+      await h.stop()
+    }
+  })
+
   it('IN-03: a re-sent form refreshes a still-queued consent to the new form\'s deadline; the first form is refused at its own bound', async () => {
     // The phone's queue is held by another prompt past f-1's bound, and released before f-2's. One
     // shared consent: f-1 is refused at its bound, the consent stays queued, then prompts and signs f-2.
@@ -656,6 +680,47 @@ describe('pool agent: no consent prompt outlives the voting close (review WR-04)
       rendezvous.close()
     }
     expect(commits, 'nothing committed after the close').to.have.length(0)
+  })
+})
+
+describe('pool agent: a coordinator that cannot prompt does not form (review round 4 CR-01)', function () {
+  this.timeout(60_000)
+
+  it('no form, no member prompt while the former is in the background; it forms and commits once back', async () => {
+    const rendezvous = new PoolRendezvous({ coordinatorTtlMs: 5_000, envelopeTtlMs: 20_000, maxPollWaitMs: 100 })
+    const [F, M, X] = sortedVoters(['F', 'M', 'X'])
+    const stop = new AbortController()
+    const commits: string[][] = []
+    const memberPrompts: Record<string, number> = { M: 0, X: 0 }
+    const events: Array<{ e: string, d: any }> = []
+    let foreground = false
+    const runs = [F!, M!, X!].map(async (v) => await new PoolAgent({
+      quietMs: 300, presentIntervalMs: 40, replyTimeoutMs: 600, informAttempts: 2,
+      signTimeoutMs: 4_000, memberTimeoutMs: 2_400, pollWaitMs: 50, formLeadMs: 0, ladder: false,
+      identity: v.identity,
+      rendezvous: createInMemoryRendezvousClient(rendezvous, `t-${v.name}`),
+      ballot,
+      contribution: v.contribution,
+      signConsent: async (d) => { if (v.name !== 'F') memberPrompts[v.name]!++; return signDigestP256(d, v.priv) },
+      commit: async (_b, sigs) => { commits.push(sigs.map(s => s.registrantId)); return { ok: true } },
+      findRecordedVote: async () => null,
+      deadlineAt: Date.now() + 50_000,
+      ...(v.name === 'F' ? { canPrompt: () => foreground, log: (e: string, d?: Record<string, unknown>) => { events.push({ e, d }) } } : {})
+    }).run(stop.signal))
+    try {
+      expect(await until(() => events.some(x => x.e === 'form-deferred'), 15_000), 'the former held back forming').to.equal(true)
+      await sleep(2_000)
+      expect(events.some(x => x.e === 'forming'), 'no form while in the background').to.equal(false)
+      expect(memberPrompts.M! + memberPrompts.X!, 'no member was asked to confirm').to.equal(0)
+      expect(events.filter(x => x.e === 'form-deferred'), 'logged once per spell').to.have.length(1)
+      foreground = true
+      expect(await until(() => commits.length === 1, 15_000), 'it forms and commits once back').to.equal(true)
+      expect(commits[0]!, 'a block of 3').to.have.length(3)
+    } finally {
+      stop.abort()
+      await Promise.all(runs)
+      rendezvous.close()
+    }
   })
 })
 
