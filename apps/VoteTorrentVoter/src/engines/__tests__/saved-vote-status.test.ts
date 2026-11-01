@@ -283,6 +283,34 @@ describe('readSavedVoteStatus', () => {
 			await expect(readSavedVoteStatus(deps, 1, E, reading(2))).resolves.toEqual({ state: 'sent' })
 		})
 
+		it('IN-05: a failed storage read never overwrites earlier sent ballots: the write is skipped and the call rejects', async () => {
+			await recordVoteSent(E, 2, 'ballot-1', 'cid-1')
+			const readError = Object.assign(new Error('storage unavailable'), { name: 'StorageReadError' })
+			// the storage module is the jest mock: its methods are jest.fn, so one read fails once
+			;(AsyncStorage.getItem as jest.Mock).mockRejectedValueOnce(readError)
+			clearStorageSpies()
+			await expect(recordVoteSent(E, 2, 'ballot-2', 'cid-2')).rejects.toBe(readError)
+			expectNoWrites()
+			await expect(readVoteSent(E, 2)).resolves.toEqual({ 'ballot-1': 'cid-1' })
+			// the next write, with a working read, keeps both
+			await recordVoteSent(E, 2, 'ballot-2', 'cid-2')
+			await expect(readVoteSent(E, 2)).resolves.toEqual({ 'ballot-1': 'cid-1', 'ballot-2': 'cid-2' })
+		})
+
+		it('IN-05: an absent, malformed or older-revision value is still replaced', async () => {
+			const key = 'votetorrent.voteSent.' + E
+			await recordVoteSent(E, 2, 'ballot-1', 'cid-1')
+			await expect(readVoteSent(E, 2)).resolves.toEqual({ 'ballot-1': 'cid-1' })
+			await AsyncStorage.setItem(key, '{garbage')
+			await recordVoteSent(E, 2, 'ballot-2', 'cid-2')
+			await expect(readVoteSent(E, 2)).resolves.toEqual({ 'ballot-2': 'cid-2' })
+			await AsyncStorage.setItem(key, JSON.stringify({ electionRevision: 2, ballots: { x: 5 } }))
+			await recordVoteSent(E, 2, 'ballot-3', 'cid-3')
+			await expect(readVoteSent(E, 2)).resolves.toEqual({ 'ballot-3': 'cid-3' })
+			await recordVoteSent(E, 3, 'ballot-1', 'cid-r3')
+			await expect(readVoteSent(E, 3)).resolves.toEqual({ 'ballot-1': 'cid-r3' })
+		})
+
 		it('stale keeps priority over sent', async () => {
 			await save(makeRecord({ electionRevision: 2 }))
 			await recordVoteSent(E, 2, 'ballot-1', 'cid-1')

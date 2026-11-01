@@ -8,6 +8,7 @@
  * second vote.
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import {vtDebug} from './vt-debug';
 
 export const VOTE_SENT_KEY_PREFIX = 'votetorrent.voteSent.';
 
@@ -27,13 +28,21 @@ function isSentState(value: unknown): value is VoteSentState {
 		&& Object.values(v.ballots).every(cid => typeof cid === 'string' && cid.length > 0);
 }
 
+/** A stored value as the sent ballots for this revision: absent, malformed or another revision is none sent. */
+function parseSent(raw: string | null, electionRevision: number): Record<string, string> {
+	if (raw === null) return {};
+	try {
+		const parsed: unknown = JSON.parse(raw);
+		return isSentState(parsed) && parsed.electionRevision === electionRevision ? {...parsed.ballots} : {};
+	} catch {
+		return {};
+	}
+}
+
 /** The sent ballots for this election revision; an unreadable or older-revision record reads as none sent. */
 export async function readVoteSent(electionId: string, electionRevision: number): Promise<Record<string, string>> {
 	try {
-		const raw = await AsyncStorage.getItem(voteSentKey(electionId));
-		if (raw === null) return {};
-		const parsed: unknown = JSON.parse(raw);
-		return isSentState(parsed) && parsed.electionRevision === electionRevision ? {...parsed.ballots} : {};
+		return parseSent(await AsyncStorage.getItem(voteSentKey(electionId)), electionRevision);
 	} catch {
 		return {};
 	}
@@ -46,11 +55,24 @@ const writeChains = new Map<string, Promise<void>>();
  * Add one sent ballot. A read-modify-write, so writes to one election are chained: sending pools every
  * ballot in parallel, and two ballots that land together used to read the same old state, so the
  * second write dropped the first ballot and Home kept "not sent" while the ballot screen said Sent.
+ *
+ * IN-05: a storage READ that fails (AsyncStorage throws) is not an empty store: the write is skipped
+ * and the call rejects with that error, so earlier sent ballots are never overwritten by this one
+ * alone. An absent, malformed or older-revision value is replaced as before. The strand stays the
+ * authority, so a skipped write costs at most a "not sent" line until the next send re-checks it.
  */
 export async function recordVoteSent(electionId: string, electionRevision: number, ballotId: string, cid: string): Promise<void> {
 	const key = voteSentKey(electionId);
 	const write = async (): Promise<void> => {
-		const ballots = await readVoteSent(electionId, electionRevision);
+		let raw: string | null;
+		try {
+			raw = await AsyncStorage.getItem(key);
+		} catch (err) {
+			// debug only (silent unless the __DEV__ switch is on): the error class, never its text
+			vtDebug('sent-store', 'record-skipped-read-failed', {class: err instanceof Error ? err.name : typeof err});
+			throw err;
+		}
+		const ballots = parseSent(raw, electionRevision);
 		ballots[ballotId] = cid;
 		const state: VoteSentState = {electionRevision, ballots};
 		await AsyncStorage.setItem(key, JSON.stringify(state));
