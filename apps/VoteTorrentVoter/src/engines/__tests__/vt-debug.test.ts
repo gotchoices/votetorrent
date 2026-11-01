@@ -78,10 +78,42 @@ describe('sanitiseDetail', () => {
 			.toEqual({o: '<dropped>', a: '<dropped>', f: '<dropped>', n: '<dropped>', keep: 7});
 	});
 
-	it('cuts a long sentence to 48 chars', () => {
-		const s = 'the quick brown fox jumps over the lazy dog and keeps on running far away';
+	it('cuts a long run without whitespace to 48 chars', () => {
+		const s = 'the.quick.brown.fox.jumps.over.the.lazy.dog.and.keeps.on.running';
 		const out = sanitiseDetail({s}).s as string;
 		expect(out).toBe(s.slice(0, 48) + '…');
+	});
+
+	it('IN-02: free text under any key, a sentence longer than 24 chars, is <text>', () => {
+		expect(sanitiseDetail({s: 'the quick brown fox jumps over the lazy dog'})).toEqual({s: '<text>'});
+		expect(sanitiseDetail({note: 'my vote is yes please', x: 'a b'})).toEqual({note: 'my vote is yes please', x: 'a b'});
+	});
+
+	it('IN-02: a peer\'s free text under why/reason/detail/error is <text>, however short', () => {
+		// a remote former's reason reaches the pool log as solo/consent-released {why}
+		expect(sanitiseDetail({why: 'formation failed: my vote is yes'})).toEqual({why: '<text>'});
+		expect(sanitiseDetail({why: 'formation failed: x'})).toEqual({why: '<text>'});
+		expect(sanitiseDetail({reason: 'Alice: yes', detail: 'line\nbreak', error: 'SQL error near x'}))
+			.toEqual({reason: '<text>', detail: '<text>', error: '<text>'});
+	});
+
+	it('IN-02: code tokens and our own short plain phrases under a free-text key are kept', () => {
+		expect(sanitiseDetail({reason: 'voting-closed', why: 'handed over', detail: 'BIOMETRIC_ERROR', error: 'ConsentAbandonedError'}))
+			.toEqual({reason: 'voting-closed', why: 'handed over', detail: 'BIOMETRIC_ERROR', error: 'ConsentAbandonedError'});
+		expect(sanitiseDetail({why: 'coordinator went silent'})).toEqual({why: 'coordinator went silent'});
+		expect(sanitiseDetail({why: 'the former did not answer in time'})).toEqual({why: '<text>'});
+	});
+
+	it('IN-02: vtDebug writes <text> for a peer\'s why', () => {
+		const log = jest.spyOn(console, 'log').mockImplementation(() => undefined);
+		g.__VT_DEBUG__ = true;
+		try {
+			vtDebug('pool', 'solo', {ballot: 'ballot-a', why: 'formation failed: secret words here'});
+			expect(log).toHaveBeenCalledWith('[vt-pool] solo', {ballot: 'ballot-a', why: '<text>'});
+		} finally {
+			delete g.__VT_DEBUG__;
+			log.mockRestore();
+		}
 	});
 
 	it('redacts message and stack, leaves undefined out', () => {
