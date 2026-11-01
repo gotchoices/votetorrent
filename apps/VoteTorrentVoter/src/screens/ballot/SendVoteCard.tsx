@@ -59,6 +59,9 @@ export default function SendVoteCard({electionId, electionRevision, envelope, ba
 	const [statuses, setStatuses] = useState<Record<string, BallotSendStatus>>({});
 	const [outcome, setOutcome] = useState<Outcome | null>(null);
 	const [sending, setSending] = useState(false);
+	// The re-entry guard is a ref, not the state above (IN-04): two taps in one frame both see the
+	// state before it re-renders and would start two sends (two queues, two record prompts).
+	const inFlight = useRef(false);
 	const mounted = useRef(true);
 	const abort = useRef<AbortController | null>(null);
 
@@ -99,7 +102,8 @@ export default function SendVoteCard({electionId, electionRevision, envelope, ba
 	}, [outcome]);
 
 	const onSend = useCallback(async () => {
-		if (sending) return;
+		if (inFlight.current) return;
+		inFlight.current = true;
 		vtDebug('card', 'send-pressed', {ballots: ballotIds.length});
 		setSending(true);
 		setOutcome(null);
@@ -128,6 +132,7 @@ export default function SendVoteCard({electionId, electionRevision, envelope, ba
 				if (mounted.current) setStatuses(prev => ({...prev, [ballotId]: status}));
 			},
 		}).catch((): VoteSendFlowResult => ({kind: 'failed'}));
+		inFlight.current = false;
 		if (!mounted.current) return;
 		setSending(false);
 		if (result.kind === 'done') {
@@ -139,7 +144,7 @@ export default function SendVoteCard({electionId, electionRevision, envelope, ba
 		} else {
 			setOutcome(result.kind);
 		}
-	}, [sending, ballotIds.length, t, isIos, electionId, envelope, getEngine, node, nowMs]);
+	}, [ballotIds.length, t, isIos, electionId, envelope, getEngine, node, nowMs]);
 
 	const bodyFont = {fontFamily: fonts.regular.fontFamily, fontWeight: fonts.regular.fontWeight, fontSize: typeScale.body.fontSize, lineHeight: typeScale.body.lineHeight};
 	const captionFont = {fontFamily: fonts.regular.fontFamily, fontWeight: fonts.regular.fontWeight, fontSize: typeScale.caption.fontSize, lineHeight: typeScale.caption.lineHeight};

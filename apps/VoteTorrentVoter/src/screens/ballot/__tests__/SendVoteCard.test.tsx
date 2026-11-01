@@ -101,6 +101,25 @@ describe('SendVoteCard', () => {
 		expect(text('send-outcome')).not.toContain('StreamStateError');
 	});
 
+	it('two taps in one frame start one send (IN-04)', async () => {
+		let finish: (r: unknown) => void = () => undefined;
+		(runVoteSendFlow as jest.Mock).mockImplementation(() => new Promise(r => { finish = r; }));
+		await mount(['b1']);
+		const node = tr!.root.findAllByProps({testID: 'send-vote'}).find(n => typeof n.props.onPress === 'function')!;
+		// both taps land before React re-renders the disabled button
+		await renderer.act(async () => {
+			node.props.onPress();
+			node.props.onPress();
+		});
+		await flush();
+		expect(runVoteSendFlow).toHaveBeenCalledTimes(1);
+		await renderer.act(async () => { finish({kind: 'done', ballots: [{ballotId: 'b1', status: {phase: 'not-sent', reason: 'stopped'}}]}); });
+		await flush();
+		// once that send has ended, a new tap starts a new send
+		await press('send-vote');
+		expect(runVoteSendFlow).toHaveBeenCalledTimes(2);
+	});
+
 	it('already-sent ballots read as sent on open, without pressing anything', async () => {
 		await recordVoteSent('e1', 1, 'b1', 'cid-1');
 		await mount(['b1']);
