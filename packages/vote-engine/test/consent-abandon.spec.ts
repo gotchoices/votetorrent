@@ -603,6 +603,62 @@ describe('pool agent: stopping the run cancels the former\'s own prompt at once 
   })
 })
 
+describe('pool agent: no consent prompt outlives the voting close (review WR-04)', function () {
+  this.timeout(60_000)
+
+  it('the former\'s own prompt is cancelled at the close, not at ownDeadline; the run ends deadline and nothing commits', async () => {
+    // signTimeoutMs 9.6 s puts the uncapped ownDeadline ~9 s after the form; the close is ~6 s after the
+    // start, so a cancel near the close can only come from the close bound.
+    const rendezvous = new PoolRendezvous({ coordinatorTtlMs: 5_000, envelopeTtlMs: 20_000, maxPollWaitMs: 100 })
+    const [F, M, X] = sortedVoters(['F', 'M', 'X'])
+    const stop = new AbortController()
+    const commits: string[][] = []
+    const events: Record<string, Array<{ e: string, d: any }>> = { F: [], M: [], X: [] }
+    let fOutcome: PoolOutcome | undefined
+    let cancelAt: number | null = null
+    let ownStartAt: number | null = null
+    const closeAt = Date.now() + 6_000
+    const fQueue = createConsentQueue(async (_digest: string, signal?: AbortSignal) =>
+      await new Promise<string>((_resolve, reject) => { signal?.addEventListener('abort', () => reject(new Error('CANCELED'))) }),
+    { cancel: async () => { cancelAt ??= Date.now(); await sleep(5) } })
+    const runs = [F!, M!, X!].map(async (v) => {
+      const outcome = await new PoolAgent({
+        quietMs: 300, presentIntervalMs: 40, replyTimeoutMs: 600, informAttempts: 2,
+        signTimeoutMs: 9_600, memberTimeoutMs: 2_400, pollWaitMs: 50, formLeadMs: 5_500, ladder: false,
+        identity: v.identity,
+        rendezvous: createInMemoryRendezvousClient(rendezvous, `t-${v.name}`),
+        ballot,
+        contribution: v.contribution,
+        signConsent: v.name === 'F'
+          ? async (d, ctl) => await fQueue.withControl(ctl, d, ctl?.signal)
+          : async (d) => signDigestP256(d, v.priv),
+        commit: async (_b, sigs) => { commits.push(sigs.map(s => s.registrantId)); return { ok: true } },
+        findRecordedVote: async () => null,
+        deadlineAt: closeAt,
+        log: (e, d) => { if (v.name === 'F' && e === 'own-consent-start') ownStartAt ??= Date.now(); events[v.name]!.push({ e, d }) }
+      }).run(stop.signal)
+      if (v.name === 'F') fOutcome = outcome
+      return outcome
+    })
+    try {
+      expect(await until(() => fOutcome !== undefined, 15_000), 'the former\'s run ended').to.equal(true)
+      expect(ownStartAt, 'the own prompt showed').to.not.equal(null)
+      expect(ownStartAt!, 'the own prompt showed before the close').to.be.below(closeAt)
+      expect(cancelAt, 'the own prompt was cancelled').to.not.equal(null)
+      expect(cancelAt! - closeAt, 'cancelled at the close (ms after it)').to.be.within(-50, 1_500)
+      expect(cancelAt!, 'well before the uncapped ownDeadline').to.be.below(ownStartAt! + 8_000)
+      expect(fOutcome).to.deep.equal({ status: 'stopped', reason: 'deadline' })
+      expect(events.F!.some(x => x.e === 'own-consent-timeout'), 'not reported as a timeout that re-pools').to.equal(false)
+      expect(commits, 'nothing committed').to.have.length(0)
+    } finally {
+      stop.abort()
+      await Promise.all(runs)
+      rendezvous.close()
+    }
+    expect(commits, 'nothing committed after the close').to.have.length(0)
+  })
+})
+
 describe('pool agent: the former\'s own consent is bounded (D-117)', function () {
   this.timeout(90_000)
   const SLOW: Partial<PoolAgentOptions> = {

@@ -300,9 +300,10 @@ export class PoolAgent {
     } finally {
       this.stopped = true
       // D-114: no orphan prompt once the agent stops (a settled consent is unaffected). This catches a
-      // run that ends without its signal aborting (the voting deadline). The former's own consent
-      // needs no line here: form() is always awaited before this point, and it binds that consent to
-      // the run signal itself (WR-01).
+      // member's consent when the run ends without its signal aborting (the voting deadline: a
+      // member's tick returns at once). The former's own consent needs no line here: form() is
+      // always awaited before this point, and it binds that consent to the run signal and to the
+      // voting close itself (WR-01, review WR-04).
       this.consent?.controller.abort()
       for (const [, p] of this.pending) { clearTimeout(p.timer); p.resolve(null) }
       this.pending.clear()
@@ -422,7 +423,6 @@ export class PoolAgent {
   }
 
   private becomeMemberOf (coordinator: string): void {
-    if (this.consent !== null && this.consent.from !== coordinator) this.releaseMemberConsent('new coordinator')
     // The members of the pool given away learn who holds them now; nobody else can re-parent them.
     const handed = this.pool.filter(c => c.member !== this.me)
     this.confirmed.clear()
@@ -515,13 +515,22 @@ export class PoolAgent {
       const mine = this.o.contribution
       // D-117: the former's own consent has the same deadline as a member's, and an abort.
       const formAt = this.o.now()
-      const ownDeadline = formAt + this.o.signTimeoutMs - this.o.replyTimeoutMs
+      // A confirmation the voter gives after the voting close can never land (the schema refuses the
+      // commit), so no consent deadline outlives the close.
+      const closeAt = this.o.deadlineAt ?? Infinity
+      const ownDeadline = Math.min(formAt + this.o.signTimeoutMs - this.o.replyTimeoutMs, closeAt)
       const ownController = new AbortController()
       // WR-01: stopping the run aborts the own consent at once (the queue cancels the prompt) and
       // stops waiting for the members; the pool is then released with 'aborted' below, never committed.
+      // The voting close does the same and ends the run with 'deadline'.
       let unbindStop = (): void => {}
+      let closeTimer: ReturnType<typeof setTimeout> | undefined
+      let closed = false
       const runStopped = new Promise<'stopped'>((resolve) => {
         unbindStop = this.onRunStop(() => { ownController.abort(); resolve('stopped') })
+        if (Number.isFinite(closeAt)) {
+          closeTimer = setTimeout(() => { closed = true; ownController.abort(); resolve('stopped') }, Math.max(0, closeAt - this.o.now()))
+        }
       })
       let ownTimer: ReturnType<typeof setTimeout> | undefined
       const ownDigest = consentDigest(block, this.o.ballot, mine.voterEntry.registrantId, mine.voterEntry.deviceKey)
@@ -555,6 +564,12 @@ export class PoolAgent {
         ])
       } finally {
         unbindStop()
+        if (closeTimer !== undefined) clearTimeout(closeTimer)
+      }
+      if (closed && this.runSignal?.aborted !== true) {
+        this.log('form-closed', { waitedMs: this.o.now() - formAt })
+        await this.abandon('deadline')
+        return
       }
       if (this.runSignal?.aborted === true) {
         // WR-01: the agent was stopped while this block was being signed. Release the pool; an answer
@@ -787,6 +802,8 @@ export class PoolAgent {
         return
       }
       if (!this.isMember()) return
+      // Handed over: a consent the old coordinator asked for belongs to a pool that is gone.
+      if (from !== this.coordinator) this.releaseMemberConsent('handed over')
       this.coordinator = from
       this.handover = null
       this.lastHeardAt = this.o.now()
@@ -806,6 +823,8 @@ export class PoolAgent {
 
   private async onForm (from: string, m: Extract<PoolMessage, { t: 'form' }>): Promise<unknown> {
     if (this.role !== 'member' || this.coordinator !== from) return await this.post(from, { t: 'refuse', re: m.id, reason: 'not my coordinator' })
+    // A stopped run never prompts: refuse before the consent is requested, not after (review WR-01).
+    if (this.stopped || this.runSignal?.aborted === true) return await this.post(from, { t: 'refuse', re: m.id, reason: 'the voter stopped pooling' })
     const formAt = this.o.now()
     this.lastHeardAt = formAt + this.o.signTimeoutMs
     const check = checkFormedPoolBlock(m.block, this.o.contribution, this.o.ballot)
@@ -820,7 +839,7 @@ export class PoolAgent {
     // consent this voter gave or is giving, never a second prompt (WR-01). The digest binds the
     // block's cid and id, so another block always prompts.
     // D-114/D-115: the consent's deadline is the former's reply deadline, from the LOCAL arrival time.
-    const deadlineAt = formAt + this.o.signTimeoutMs - this.o.replyTimeoutMs
+    const deadlineAt = Math.min(formAt + this.o.signTimeoutMs - this.o.replyTimeoutMs, this.o.deadlineAt ?? Infinity)
     if (this.consent === null || this.consent.from !== from || this.consent.digest !== digest || this.consent.controller.signal.aborted) {
       this.o.onStatus?.({ phase: 'signing' })
       const controller = new AbortController()
@@ -839,7 +858,7 @@ export class PoolAgent {
     // D-94: wait for the consent at most until just before the former's request times out.
     const consentSignature = record.signature
     consentSignature.catch(() => undefined) // a late rejection after the bound is nobody's concern
-    const waitMs = Math.max(0, this.o.signTimeoutMs - this.o.replyTimeoutMs - (this.o.now() - formAt))
+    const waitMs = Math.max(0, deadlineAt - this.o.now())
     let timer: ReturnType<typeof setTimeout> | undefined
     // D-114/D-116: at the bound the consent is aborted (the queue cancels the prompt) and cleared, so
     // a re-form prompts exactly once; a consent that settles after this is never sent.
