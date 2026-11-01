@@ -102,7 +102,10 @@ export default function RegistrationScreen() {
 						getEngine,
 						getCurrentDeviceKey: () => resolveAttestationProducer().getCurrentDeviceKey(),
 					});
-					if (!cancelled) setEngineRegistered(result.kind === 'registered');
+					// An indeterminate read (a dangling linkage, or a failed network or strand read) is not a
+					// "no": it leaves the card as it was, like a throw. `pending` is determinate (no active
+					// association yet), so it shows the not-registered card.
+					if (!cancelled && result.kind !== 'indeterminate') setEngineRegistered(result.kind === 'registered');
 				} catch {
 					// An unreadable status leaves the card as it was.
 				}

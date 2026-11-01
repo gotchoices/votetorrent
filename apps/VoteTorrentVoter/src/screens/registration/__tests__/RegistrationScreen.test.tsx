@@ -230,6 +230,25 @@ describe('RegistrationScreen — registered card follows the engine (D-100, UAT 
 		expect(registeredCard(tr)).toBe(true);
 	});
 
+	it('R-5 a later indeterminate read keeps the registered card (round-1 WR-04)', async () => {
+		mockResolveRegistrationStatus.mockImplementation(async () => ({kind: 'registered'}));
+		const tr = await mountAsync();
+		expect(registeredCard(tr)).toBe(true);
+		mockResolveRegistrationStatus.mockImplementation(async () => ({kind: 'indeterminate'}));
+		await renderer.act(async () => {
+			latestFocusCallback!();
+			for (let i = 0; i < 10; i++) await Promise.resolve();
+		});
+		expect(registeredCard(tr)).toBe(true);
+		// a determinate not-registered read still downgrades it
+		mockResolveRegistrationStatus.mockImplementation(async () => ({kind: 'notRegistered'}));
+		await renderer.act(async () => {
+			latestFocusCallback!();
+			for (let i = 0; i < 10; i++) await Promise.resolve();
+		});
+		expect(registeredCard(tr)).toBe(false);
+	});
+
 	it('R-4 the __DEV__ toggle still flips the card regardless of the read', async () => {
 		mockResolveRegistrationStatus.mockImplementation(async () => ({kind: 'registered'}));
 		const tr = await mountAsync();
