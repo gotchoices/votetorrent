@@ -767,7 +767,7 @@ class KeyAttestationHelper(private val reactContext: ReactApplicationContext) {
 		// D-112: reserve on THIS thread before posting, so a cancel arriving between here and the UI
 		// runnable finds the record (and the runnable then shows nothing) rather than finding nothing
 		// and leaving an orphaned prompt. A second sign while one is pending never constructs a prompt.
-		val settle = SettleOnce(onResult, onKeyInvalidatedReassociate, onError)
+		val settle = SettleOnce(onResult, onError)
 		val pending = pendingSignGate.tryReserve(PendingSignKind.DEVICE, settle)
 		if (pending == null) {
 			Log.i(TAG_SIGNING_REJECT, "signWithDeviceKey mapped=PROMPT_BUSY reason=pending")
@@ -777,6 +777,14 @@ class KeyAttestationHelper(private val reactContext: ReactApplicationContext) {
 		UiThreadUtil.runOnUiThread {
 			// A cancel already settled this sign: show nothing.
 			if (!pendingSignGate.isHeld(pending)) return@runOnUiThread
+			// WR-02: an activity that cannot host a prompt makes androidx.biometric 1.1.0 return from
+			// authenticate() with no callback, which would hold the gate forever. Refuse up front.
+			if (!canHostBiometricPrompt(activity)) {
+				pendingSignGate.release(pending)
+				Log.i(TAG_SIGNING_REJECT, "signWithDeviceKey mapped=BIOMETRIC_ERROR reason=host-cannot-show")
+				settle.error("BIOMETRIC_ERROR", IllegalStateException("the activity cannot host a biometric prompt"))
+				return@runOnUiThread
+			}
 			// A BiometricFragment already attached (for example a vault prompt): constructing a
 			// BiometricPrompt would re-register that sheet's callback (androidx.biometric 1.1.0), so
 			// refuse BEFORE construction.
@@ -849,6 +857,15 @@ class KeyAttestationHelper(private val reactContext: ReactApplicationContext) {
 			)
 			pending.prompt = biometricPrompt
 			biometricPrompt.authenticate(promptInfo, cryptoObject)
+			// WR-02: 1.1.0 adds the BiometricFragment and runs executePendingTransactions() inside
+			// authenticate() (javap on the pinned AAR), and every dismissal is an async
+			// commitAllowingStateLoss, so no fragment here means authenticate() took a silent early
+			// return and no callback will ever come. Release and settle rather than hold the gate.
+			if (!isBiometricFragmentAttached(activity)) {
+				pendingSignGate.release(pending)
+				Log.i(TAG_SIGNING_REJECT, "signWithDeviceKey mapped=BIOMETRIC_ERROR reason=prompt-not-started")
+				settle.error("BIOMETRIC_ERROR", IllegalStateException("the biometric prompt was not started"))
+			}
 			} catch (e: Exception) {
 				// A throw here would leave the gate held and every later sign PROMPT_BUSY.
 				pendingSignGate.release(pending)
@@ -963,7 +980,6 @@ class KeyAttestationHelper(private val reactContext: ReactApplicationContext) {
 			promptTitle = promptTitle,
 			promptSubtitle = promptSubtitle,
 			onResult = onResult,
-			onKeyInvalidatedReassociate = onKeyInvalidatedReassociate,
 			onError = onError,
 		)
 	}
@@ -976,7 +992,6 @@ class KeyAttestationHelper(private val reactContext: ReactApplicationContext) {
 		promptTitle: String,
 		promptSubtitle: String,
 		onResult: (String) -> Unit,
-		onKeyInvalidatedReassociate: () -> Unit,
 		onError: (code: String, throwable: Throwable?) -> Unit,
 	) {
 		val cryptoObject = BiometricPrompt.CryptoObject(signature)
@@ -995,7 +1010,7 @@ class KeyAttestationHelper(private val reactContext: ReactApplicationContext) {
 		// signWithDeviceKey/regenerateAttested — construction AND authenticate() both require it.
 		//
 		// D-112: same reserve-before-post and busy checks as signWithDeviceKey.
-		val settle = SettleOnce(onResult, onKeyInvalidatedReassociate, onError)
+		val settle = SettleOnce(onResult, onError)
 		val pending = pendingSignGate.tryReserve(PendingSignKind.RECOVERY, settle)
 		if (pending == null) {
 			Log.i(TAG_SIGNING_REJECT, "signWithRecoveryKey mapped=PROMPT_BUSY reason=pending")
@@ -1004,6 +1019,12 @@ class KeyAttestationHelper(private val reactContext: ReactApplicationContext) {
 		}
 		UiThreadUtil.runOnUiThread {
 			if (!pendingSignGate.isHeld(pending)) return@runOnUiThread
+			if (!canHostBiometricPrompt(activity)) {
+				pendingSignGate.release(pending)
+				Log.i(TAG_SIGNING_REJECT, "signWithRecoveryKey mapped=BIOMETRIC_ERROR reason=host-cannot-show")
+				settle.error("BIOMETRIC_ERROR", IllegalStateException("the activity cannot host a biometric prompt"))
+				return@runOnUiThread
+			}
 			if (isBiometricFragmentAttached(activity)) {
 				pendingSignGate.release(pending)
 				Log.i(TAG_SIGNING_REJECT, "signWithRecoveryKey mapped=PROMPT_BUSY reason=prompt-showing")
@@ -1062,6 +1083,12 @@ class KeyAttestationHelper(private val reactContext: ReactApplicationContext) {
 			)
 			pending.prompt = biometricPrompt
 			biometricPrompt.authenticate(promptInfo, cryptoObject)
+			// WR-02: same silent-early-return check as signWithDeviceKey.
+			if (!isBiometricFragmentAttached(activity)) {
+				pendingSignGate.release(pending)
+				Log.i(TAG_SIGNING_REJECT, "signWithRecoveryKey mapped=BIOMETRIC_ERROR reason=prompt-not-started")
+				settle.error("BIOMETRIC_ERROR", IllegalStateException("the biometric prompt was not started"))
+			}
 			} catch (e: Exception) {
 				pendingSignGate.release(pending)
 				settle.error("BIOMETRIC_ERROR", e)
@@ -1078,6 +1105,12 @@ class KeyAttestationHelper(private val reactContext: ReactApplicationContext) {
 	 * `false` at once and touches no fragment (a lone BiometricFragment is a vault prompt, D-110).
 	 * We do not rely on 1.1.0 delivering ERROR_CANCELED after a client cancel. INFO logs only; never
 	 * digest, signature or key bytes.
+	 *
+	 * Once a record is taken, [onDone] is always called with `true`, even if posting to the UI thread
+	 * throws (review IN-04): the sign was settled, so "nothing was pending" would be false. A sign
+	 * whose UI runnable never constructed a prompt (it saw the cancel, or refused) has nothing to
+	 * wait for, so [onDone] runs without polling: any attached fragment then belongs to someone else,
+	 * such as a vault prompt (review IN-06). [onDone] may be called more than once only if it throws.
 	 */
 	fun cancelPendingSign(activity: FragmentActivity?, onDone: (Boolean) -> Unit) {
 		val p = pendingSignGate.take()
@@ -1085,9 +1118,25 @@ class KeyAttestationHelper(private val reactContext: ReactApplicationContext) {
 			onDone(false)
 			return
 		}
+		try {
+			cancelTaken(p, activity, onDone)
+		} catch (e: Exception) {
+			Log.i(TAG_SIGNING_REJECT, "cancelPendingSign kind=${p.kind} threw ${e.javaClass.simpleName}")
+			onDone(true)
+		}
+	}
+
+	private fun cancelTaken(p: PendingSign, activity: FragmentActivity?, onDone: (Boolean) -> Unit) {
 		p.settle.error("CANCELED", RuntimeException("sign canceled by the app"))
 		Log.i(TAG_SIGNING_REJECT, "cancelPendingSign kind=${p.kind} mapped=CANCELED")
 		UiThreadUtil.runOnUiThread {
+			// This runnable is posted after the sign's own UI runnable, so a null prompt means that
+			// runnable already ran and showed nothing (IN-06): do not wait on an unrelated fragment.
+			if (p.prompt == null) {
+				Log.i(TAG_SIGNING_REJECT, "cancelPendingSign kind=${p.kind} promptGone=true waitedMs=0 noPrompt=true")
+				onDone(true)
+				return@runOnUiThread
+			}
 			try {
 				p.prompt?.cancelAuthentication()
 			} catch (e: Exception) {

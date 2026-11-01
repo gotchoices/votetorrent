@@ -17,6 +17,7 @@ import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.UiThreadUtil
 import com.facebook.react.module.annotations.ReactModule
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * AttestationNativeModule — the `AttestationNative` TurboModule implementation (Phase 45-02:
@@ -426,15 +427,22 @@ class AttestationNativeModule(reactContext: ReactApplicationContext) :
 	}
 
 	override fun cancelPendingSign(promise: Promise) {
+		// Resolve once: the helper reports `true` itself once it has taken (and settled) a record,
+		// even if a later step throws (review IN-04), so this catch only answers for a throw before
+		// anything was taken.
+		val answered = AtomicBoolean(false)
+		val answer = { canceled: Boolean ->
+			if (answered.compareAndSet(false, true)) {
+				promise.resolve(Arguments.createMap().apply { putBoolean("canceled", canceled) })
+			}
+		}
 		try {
 			// A null activity is allowed: the cancel still settles the pending promise.
 			val activity = reactApplicationContext.currentActivity as? FragmentActivity
-			keyAttestationHelper.cancelPendingSign(activity) { canceled ->
-				promise.resolve(Arguments.createMap().apply { putBoolean("canceled", canceled) })
-			}
+			keyAttestationHelper.cancelPendingSign(activity) { canceled -> answer(canceled) }
 		} catch (e: Exception) {
 			// The contract never rejects.
-			promise.resolve(Arguments.createMap().apply { putBoolean("canceled", false) })
+			answer(false)
 		}
 	}
 

@@ -15,14 +15,14 @@ internal const val BIOMETRIC_FRAGMENT_TAG = "androidx.biometric.BiometricFragmen
 internal enum class PendingSignKind { DEVICE, RECOVERY }
 
 /**
- * Wraps the three terminal callbacks of one sign so only the FIRST terminal call runs (an
+ * Wraps the two terminal callbacks of one sign so only the FIRST terminal call runs (an
  * [AtomicBoolean] compareAndSet). A late `onAuthenticationSucceeded` after a cancel therefore hits an
  * already-settled record and its signature is discarded, never resolved to JS. Each method returns
- * whether it won.
+ * whether it won. Key invalidation is detected before the gate is reserved, so it settles directly
+ * and never goes through this wrapper.
  */
 internal class SettleOnce(
 	private val onResult: (String) -> Unit,
-	private val onKeyInvalidated: () -> Unit,
 	private val onError: (String, Throwable?) -> Unit,
 ) {
 	private val settled = AtomicBoolean(false)
@@ -30,12 +30,6 @@ internal class SettleOnce(
 	fun result(hex: String): Boolean {
 		if (!settled.compareAndSet(false, true)) return false
 		onResult(hex)
-		return true
-	}
-
-	fun keyInvalidated(): Boolean {
-		if (!settled.compareAndSet(false, true)) return false
-		onKeyInvalidated()
 		return true
 	}
 
@@ -94,3 +88,14 @@ internal class PendingSignGate {
 /** UI thread only. */
 internal fun isBiometricFragmentAttached(activity: FragmentActivity): Boolean =
 	activity.supportFragmentManager.findFragmentByTag(BIOMETRIC_FRAGMENT_TAG) != null
+
+/**
+ * UI thread only. False when [activity] cannot show a BiometricPrompt right now. androidx.biometric
+ * 1.1.0's `BiometricPrompt.authenticateInternal` returns with only a log line and no callback when
+ * the client fragment manager `isStateSaved()` (after `onSaveInstanceState`, for example while the
+ * app is backgrounded but `currentActivity` is still set). A sign that went ahead would hold the
+ * pending-sign gate forever and make every later sign PROMPT_BUSY (review WR-02), so the sign paths
+ * refuse up front instead.
+ */
+internal fun canHostBiometricPrompt(activity: FragmentActivity): Boolean =
+	!activity.isFinishing && !activity.isDestroyed && !activity.supportFragmentManager.isStateSaved
