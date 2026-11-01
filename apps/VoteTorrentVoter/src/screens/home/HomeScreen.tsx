@@ -16,7 +16,7 @@
  * changed after the vote (D-21), or an unreadable state. Vote now is hidden while a current vote
  * is saved (a local convenience, D-20).
  */
-import React, {useCallback, useState} from 'react';
+import React, {useCallback, useRef, useState} from 'react';
 import {AppState, Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
 import {useFocusEffect, useNavigation, useTheme} from '@react-navigation/native';
 import type {ExtendedTheme} from '@react-navigation/native';
@@ -33,7 +33,7 @@ import {ConfigFaultNotice} from '../../components/ConfigFaultNotice';
 import {InfoDialog} from '../../components/InfoDialog';
 import {InfoDetails} from '../../components/InfoDetails';
 import {readElectionInfo} from '../../engines/info-read';
-import {readSavedVoteStatus} from '../../engines/saved-vote-status';
+import {readSavedVoteStatus, readSentSinceShown} from '../../engines/saved-vote-status';
 import type {SavedVoteStatus} from '../../engines/saved-vote-status';
 import {useInfoRead} from '../../hooks/useInfoRead';
 
@@ -66,6 +66,9 @@ export default function HomeScreen() {
 	const [unavailable, setUnavailable] = useState(false);
 	const [electionInfoVisible, setElectionInfoVisible] = useState(false);
 	const [savedVote, setSavedVote] = useState<{electionId: string; status: SavedVoteStatus} | null>(null);
+	// The line on screen, for the focus read below (a ref, so the focus effect does not re-run on it).
+	const shownSavedVote = useRef(savedVote);
+	shownSavedVote.current = savedVote;
 	// The election dialog's authority-published detail, read only while the dialog is open.
 	const loadElectionInfo = useCallback(
 		() => readElectionInfo({getEngine, fallbackElectionId: __DEV__ ? seededElectionId : undefined}),
@@ -163,18 +166,37 @@ export default function HomeScreen() {
 	// Re-read the marker on every focus, so returning from the receipt or from Submit shows the
 	// fresh state. The `nowMs` identity changes with the dev clock (D-02). Nothing is cached, and a
 	// failed read fails closed to unreadable (the error is never read or logged).
+	//
+	// UAT 65 gap 2: the full read waits on the strand's election read before it looks at the sent
+	// store, and the first return to Home right after a send kept "not sent" on screen for 9 s or
+	// more. So a saved line is first checked against the sent store alone (no engine read) and turns
+	// sent at once; the full read still lands after it and has the last word.
 	const electionId = election?.id;
 	useFocusEffect(
 		useCallback(() => {
 			let live = true;
+			let fullLanded = false;
 			if (electionId) {
+				const shown = shownSavedVote.current;
+				if (shown && shown.electionId === electionId) {
+					readSentSinceShown(electionId, shown.status).then(
+						sent => {
+							if (live && !fullLanded && sent !== null) {
+								setSavedVote({electionId, status: sent});
+							}
+						},
+						() => undefined,
+					);
+				}
 				readSavedVoteStatus({getEngine, fallbackElectionId: __DEV__ ? seededElectionId : undefined}, nowMs(), electionId).then(
 					status => {
+						fullLanded = true;
 						if (live) {
 							setSavedVote({electionId, status});
 						}
 					},
 					() => {
+						fullLanded = true;
 						if (live) {
 							setSavedVote({electionId, status: {state: 'unreadable'}});
 						}

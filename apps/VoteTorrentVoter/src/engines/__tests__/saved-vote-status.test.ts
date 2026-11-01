@@ -11,7 +11,7 @@ import * as path from 'path'
 import { createInMemorySecretWrapperForTests, type InMemorySecretWrapper } from '../__fixtures__/in-memory-secret-wrapper'
 import type { ElectionReadDeps } from '../election-read'
 import { loadVoteReceipt, type ReceiptElection } from '../vote-receipt'
-import { readSavedVoteStatus, type SavedVoteStatus } from '../saved-vote-status'
+import { readSavedVoteStatus, readSentSinceShown, type SavedVoteStatus } from '../saved-vote-status'
 import { buildVoteMarker, deriveSavedVoteState, readVoteMarker, voteMarkerKey, voteRecordKey, writeVoteRecord } from '../vote-record-store'
 import * as vault from '../vote-record-vault'
 import { readVoteSent, recordVoteSent } from '../vote-sent-store'
@@ -312,6 +312,47 @@ describe('readSavedVoteStatus', () => {
 			await recordVoteSent(E, 2, 'ballot-1', 'cid-1')
 			const status = await readSavedVoteStatus(deps, 1, E, reading(2))
 			expect(status.state).not.toBe('sent')
+		})
+	})
+
+	describe('SV17: readSentSinceShown, the local half for a line on screen (gap 2)', () => {
+		const SAVED: SavedVoteStatus = { state: 'saved', revisionKnown: true }
+
+		it('a saved line whose every marker ballot is sent reads sent, with no engine read and no write', async () => {
+			await save(makeRecord({ electionRevision: 2 }))
+			await recordVoteSent(E, 2, 'ballot-1', 'cid-1')
+			clearStorageSpies()
+			await expect(readSentSinceShown(E, SAVED)).resolves.toEqual({ state: 'sent' })
+			expectNoWrites()
+		})
+
+		it('null when not all ballots are sent, the sent store is for another revision, or ballotIds is empty', async () => {
+			const record = makeRecord({ electionRevision: 2 })
+			record.votes.push({ ...record.votes[0], ballotId: 'ballot-2', nonce: randHex(32) })
+			record.voter.ballots.push({ ballotId: 'ballot-2', templateDigest: 'td' })
+			await save(record)
+			await recordVoteSent(E, 2, 'ballot-1', 'cid-1')
+			await expect(readSentSinceShown(E, SAVED)).resolves.toBeNull()
+			await AsyncStorage.clear()
+			await save(makeRecord({ electionRevision: 2 }))
+			await recordVoteSent(E, 1, 'ballot-1', 'cid-1')
+			await expect(readSentSinceShown(E, SAVED)).resolves.toBeNull()
+			await AsyncStorage.setItem(voteMarkerKey(E), JSON.stringify({ ...buildVoteMarker(makeRecord({ electionRevision: 1 })), ballotIds: [] }))
+			await expect(readSentSinceShown(E, SAVED)).resolves.toBeNull()
+		})
+
+		it('only a saved line is upgraded; stale, unreadable, none or nothing shown stay as they are', async () => {
+			await save(makeRecord({ electionRevision: 2 }))
+			await recordVoteSent(E, 2, 'ballot-1', 'cid-1')
+			for (const shown of [{ state: 'stale', revisionKnown: true }, { state: 'unreadable' }, { state: 'none' }, { state: 'sent' }, undefined] as Array<SavedVoteStatus | undefined>) {
+				await expect(readSentSinceShown(E, shown)).resolves.toBeNull()
+			}
+		})
+
+		it('no marker or a corrupt marker is null', async () => {
+			await expect(readSentSinceShown(E, SAVED)).resolves.toBeNull()
+			await AsyncStorage.setItem(voteMarkerKey(E), '{garbage')
+			await expect(readSentSinceShown(E, SAVED)).resolves.toBeNull()
 		})
 	})
 
