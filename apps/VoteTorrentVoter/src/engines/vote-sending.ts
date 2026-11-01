@@ -23,8 +23,11 @@
  * BiometricPrompt and silently drops a second one), a consent abandoned before it starts never
  * prompts, and a sign that failed without the voter declining (another prompt showing, no prompt
  * shown) is handed to the agent as an abandoned consent, never a decline. A ballot
- * whose pool is still too small when voting closes stays saved on the phone, not sent. Nothing here logs or touches the sealed record's
- * storage.
+ * whose pool is still too small when voting closes stays saved on the phone, not sent. A ballot whose
+ * consent sign keeps failing that way (more than CONSENT_TRANSIENT_RETRY_CAP times) stops as a decline.
+ * Nothing here touches the sealed record's storage. The only logging is `vtDebug` (silent unless the
+ * __DEV__ debug switch is on): state names, timings, codes and 8-char ballot prefixes, never a key,
+ * signature, ciphertext or error message text.
  */
 import {
 	ConsentAbandonedError,
@@ -48,6 +51,7 @@ import {
 	type PoolIdentity,
 } from '@votetorrent/vote-engine/rn';
 import type {VoteRecord} from './vote-record-vault';
+import {idPrefix, vtDebug} from './vt-debug';
 
 /** What sending needs from the joined network's strand; built by the engine factory, never by a screen. */
 export interface VoteSendingPort {
@@ -151,6 +155,31 @@ export function classifyConsentSignFailure(err: unknown): 'abandoned' | 'decline
 	return typeof code === 'string' && ABANDONED_CONSENT_SIGN_CODES.includes(code) ? 'abandoned' : 'declined';
 }
 
+/**
+ * How many transient consent-sign failures (a code in ABANDONED_CONSENT_SIGN_CODES) one ballot may
+ * have in one send before the next one is treated as a decline (CR-01 follow-up). BIOMETRIC_ERROR is
+ * also the native catch-all (a timeout, the hardware unavailable), so a failure that never clears
+ * would otherwise make a former release and re-form its pool again and again, spending the other
+ * voters' prompts and time until voting closes. Three releases are enough for a busy prompt or a
+ * backgrounded app to clear; the fourth failure takes the existing decline path (the former's ballot
+ * stops 'not-sent: stopped' with the existing copy; a member refuses). A ConsentAbandonedError (the
+ * pool itself let the consent go) is not a sign failure and is never counted.
+ */
+export const CONSENT_TRANSIENT_RETRY_CAP = 3;
+
+function errorCode(err: unknown): string {
+	const code = (err as {code?: unknown} | null)?.code;
+	if (typeof code === 'string') return code;
+	return err instanceof Error ? err.name : typeof err;
+}
+
+/** A pool-agent reason is logged only when it is a plain token ('deadline', 'aborted'); free text (a commit's SQL error) never is. */
+function poolLogDetail(detail: Record<string, unknown> | undefined): Record<string, unknown> {
+	if (detail === undefined) return {};
+	const reason = detail.reason;
+	return typeof reason === 'string' && !/^[a-z][a-z0-9-]{0,31}$/.test(reason) ? {...detail, reason: '<text>'} : detail;
+}
+
 export async function sendSavedVote(deps: SendSavedVoteDeps): Promise<SendSavedVoteResult> {
 	const {record, port} = deps;
 	const {electionId, electionRevision: revision} = record;
@@ -161,14 +190,33 @@ export async function sendSavedVote(deps: SendSavedVoteDeps): Promise<SendSavedV
 	if (deps.nowMs() >= closesAt) return {ok: false, reason: 'voting-closed'};
 
 	const sent = await deps.sentStore.read(electionId, revision);
+	const startedAt = deps.nowMs();
 	// The engine treats any rejection of the former's own consent other than an abandoned one as a
 	// decline that stops the ballot (CR-01), so a failure the voter did not cause is handed on as an
-	// abandoned consent: the pool is released and pooling goes on (classifyConsentSignFailure).
-	const consentSign = async (digest: string, signal?: AbortSignal): Promise<string> => {
+	// abandoned consent: the pool is released and pooling goes on (classifyConsentSignFailure), at most
+	// CONSENT_TRANSIENT_RETRY_CAP times per ballot; after that the failure is passed on as a decline.
+	const transientFailures = new Map<string, number>();
+	const consentSign = async (digest: string, signal: AbortSignal | undefined, ballotId: string): Promise<string> => {
 		try {
 			return await deps.signConsent(digest, signal);
 		} catch (err) {
-			if (classifyConsentSignFailure(err) === 'abandoned') throw isConsentAbandonedError(err) ? err : new ConsentAbandonedError('abandoned');
+			const ballot = idPrefix(ballotId);
+			if (isConsentAbandonedError(err)) {
+				vtDebug('send', 'consent-abandoned', {ballot, reason: (err as {reason?: unknown}).reason as string | undefined});
+				throw err;
+			}
+			const code = errorCode(err);
+			if (classifyConsentSignFailure(err) === 'abandoned') {
+				const n = (transientFailures.get(ballotId) ?? 0) + 1;
+				transientFailures.set(ballotId, n);
+				if (n <= CONSENT_TRANSIENT_RETRY_CAP) {
+					vtDebug('send', 'consent-sign-failed', {ballot, code, class: 'abandoned', n});
+					throw new ConsentAbandonedError('abandoned');
+				}
+				vtDebug('send', 'consent-sign-failed', {ballot, code, class: 'decline', n, capped: true});
+				throw err;
+			}
+			vtDebug('send', 'consent-sign-failed', {ballot, code, class: 'decline'});
 			throw err;
 		}
 	};
@@ -177,11 +225,22 @@ export async function sendSavedVote(deps: SendSavedVoteDeps): Promise<SendSavedV
 		cancel: deps.cancelSign,
 		minPromptMs: deps.minPromptMs ?? POOL_MIN_PROMPT_MS,
 		now: deps.nowMs,
+		// debug only (silent unless the __DEV__ switch is on): prompt start, skip, abandon, cancel, settle
+		log: (event, detail) => vtDebug('queue', event, detail),
 	});
 	// The call's own abort signal reaches the signer, so a consent abandoned before its prompt starts
-	// is never raised (WR-04).
-	const signConsent = (digest: string, ctl?: ConsentCallControl) => consentQueue.withControl(ctl, digest, ctl?.signal);
-	const report = (ballotId: string, status: BallotSendStatus) => deps.onStatus?.(ballotId, status);
+	// is never raised (WR-04). The ballot id rides along for the per-ballot retry cap.
+	const signConsentFor = (ballotId: string) => (digest: string, ctl?: ConsentCallControl) => consentQueue.withControl(ctl, digest, ctl?.signal, ballotId);
+	const report = (ballotId: string, status: BallotSendStatus) => {
+		vtDebug('send', 'status', {
+			ballot: idPrefix(ballotId),
+			phase: status.phase,
+			reason: status.phase === 'not-sent' ? status.reason : undefined,
+			size: status.phase === 'waiting' || status.phase === 'joined' ? status.size : undefined,
+			ms: deps.nowMs() - startedAt,
+		});
+		deps.onStatus?.(ballotId, status);
+	};
 
 	const ballots = await Promise.all(record.votes.map(async (vote): Promise<{ballotId: string, status: BallotSendStatus}> => {
 		const ballotId = vote.ballotId;
@@ -211,18 +270,21 @@ export async function sendSavedVote(deps: SendSavedVoteDeps): Promise<SendSavedV
 			rendezvous: deps.rendezvous,
 			ballot,
 			contribution,
-			signConsent,
+			signConsent: signConsentFor(ballotId),
 			commit: (block, signatures) => port.commit(block, ballot, signatures, deps.nowMs()),
 			findRecordedVote: () => port.findRecordedVote(electionId, ballotId, record.voter.registrantId),
 			deadlineAt: closesAt,
 			now: deps.nowMs,
 			onStatus: (s) => { const mapped = toStatus(s); if (mapped !== null) report(ballotId, mapped); },
+			// debug only (silent unless the __DEV__ switch is on); a test's agentOptions.log replaces it
+			log: (event, detail) => vtDebug('pool', event, {ballot: idPrefix(ballotId), ...poolLogDetail(detail)}),
 			...deps.agentOptions,
 		});
 		let outcome: PoolOutcome;
 		try {
 			outcome = await agent.run(deps.signal);
-		} catch {
+		} catch (err) {
+			vtDebug('send', 'agent-threw', {ballot: idPrefix(ballotId), class: errorCode(err)});
 			return done({phase: 'not-sent', reason: 'failed'});
 		}
 		const status = await statusForOutcome(outcome, () => port.findRecordedVote(electionId, ballotId, record.voter.registrantId));

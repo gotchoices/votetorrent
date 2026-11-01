@@ -15,7 +15,7 @@ import {
 	type PoolRendezvousClient,
 } from '@votetorrent/vote-engine/rn';
 import {ConsentAbandonedError} from '@votetorrent/vote-engine/rn';
-import {classifyConsentSignFailure, sendSavedVote, statusForOutcome, type BallotSendStatus, type VoteSendingPort, type VoteSentStore} from '../vote-sending';
+import {CONSENT_TRANSIENT_RETRY_CAP, classifyConsentSignFailure, sendSavedVote, statusForOutcome, type BallotSendStatus, type VoteSendingPort, type VoteSentStore} from '../vote-sending';
 import type {VoteRecord} from '../vote-record-vault';
 
 const electionSecret = secp256k1.utils.randomSecretKey();
@@ -333,6 +333,60 @@ describe('sendSavedVote native cancel (UAT 65 gap 1, Android shape)', () => {
 		}
 		expect(busyDelivered).toBe(1);
 		expect(strand.commits.sort((a, b) => a.ballotId.localeCompare(b.ballotId))).toEqual([{ballotId: 'ballot-a', size: 3}, {ballotId: 'ballot-b', size: 3}]);
+	});
+});
+
+// CR-01 follow-up: BIOMETRIC_ERROR is also the native catch-all, so a sign that fails that way for
+// ever must not make the former release and re-form its pool until voting closes. The first
+// CONSENT_TRANSIENT_RETRY_CAP failures re-pool; the next one is a decline, which stops the former.
+describe('sendSavedVote transient consent-sign retry cap', () => {
+	jest.setTimeout(40_000);
+	const agent = {...fastAgent, signTimeoutMs: 1_500, replyTimeoutMs: 300, quietMs: 300};
+
+	it('the cap is 3', () => {
+		expect(CONSENT_TRANSIENT_RETRY_CAP).toBe(3);
+	});
+
+	it('a former whose sign always rejects BIOMETRIC_ERROR ends not-sent stopped after exactly 4 sign attempts', async () => {
+		const rv = new PoolRendezvous();
+		const strand = fakeStrand(Date.now() + 20_000);
+		// one ballot, so every sign attempt of voter 1 belongs to the same ballot
+		const voters = [0, 1, 2].map(makeVoter).map(v => ({...v, record: {...v.record, votes: v.record.votes.filter(b => b.ballotId === 'ballot-a')}}));
+		const stores = voters.map(() => memorySentStore());
+		// sorted by peer id: the lowest id becomes the former, and voter 1 gets it
+		const ids = [0, 1, 2].map(() => createPoolIdentity()).sort((x, y) => (x.peerId < y.peerId ? -1 : 1));
+		const slot = [1, 0, 2];
+		let attempts = 0;
+		const failing = async (): Promise<string> => {
+			attempts++;
+			throw Object.assign(new Error('biometric'), {code: 'BIOMETRIC_ERROR'});
+		};
+		const others = new AbortController();
+		let stall: ReturnType<typeof setTimeout> | undefined;
+		const stalled = new Promise<'stalled'>(r => { stall = setTimeout(() => r('stalled'), 30_000); });
+		const runs = voters.map(async (v, i) => {
+			if (i !== 1) await new Promise(r => setTimeout(r, agent.quietMs));
+			return sendSavedVote({
+				port: strand.port, sentStore: stores[i]!, record: v.record, rendezvous: clientFor(rv, v.phone),
+				signConsent: i === 1 ? failing : signWith(v.priv),
+				minPromptMs: FAST_MIN_PROMPT_MS, nowMs: () => Date.now(),
+				signal: i === 1 ? undefined : others.signal,
+				agentOptions: {...agent, ladder: false},
+				poolIdentity: () => ids[slot[i]!]!,
+			});
+		});
+		const first = await Promise.race([stalled, runs[1]!]);
+		// the other two have nobody left to pool with: stop them rather than wait for the close
+		others.abort();
+		const all = await Promise.race([stalled, Promise.all(runs)]);
+		clearTimeout(stall);
+		rv.close();
+		expect(first).not.toBe('stalled');
+		expect(all).not.toBe('stalled');
+		expect(first).toEqual({ok: true, ballots: [{ballotId: 'ballot-a', status: {phase: 'not-sent', reason: 'stopped'}}]});
+		expect(attempts).toBe(CONSENT_TRANSIENT_RETRY_CAP + 1);
+		expect(strand.commits).toEqual([]);
+		expect(stores[1]!.data[ELECTION]).toBeUndefined();
 	});
 });
 
