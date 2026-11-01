@@ -18,6 +18,7 @@ jest.mock('@votetorrent/vote-engine/rn', () => ({
 	createFailoverRendezvousClient: jest.fn(
 		jest.requireActual('../../../../../packages/vote-engine/src/pool/pool-failover').createFailoverRendezvousClient,
 	),
+	ConsentAbandonedError: jest.requireActual('../../../../../packages/vote-engine/src/pool/consent-queue').ConsentAbandonedError,
 }));
 jest.mock('../vote-sending', () => ({sendSavedVote: jest.fn()}));
 jest.mock('../vote-casting', () => ({digestBytesFromBase64Url: jest.fn(() => new Uint8Array(32).fill(7))}));
@@ -102,6 +103,20 @@ describe('runVoteSendFlow (spike 102)', () => {
 		await runVoteSendFlow(d);
 		const signConsent = (sendSavedVote as jest.Mock).mock.calls[0][0].signConsent as (digest: string) => Promise<string>;
 		await expect(signConsent('A'.repeat(43))).rejects.toBe(busy);
+	});
+
+	it('a consent abandoned before the native sign never reaches the signer (WR-04)', async () => {
+		const d = deps();
+		await runVoteSendFlow(d);
+		const signConsent = (sendSavedVote as jest.Mock).mock.calls[0][0].signConsent as (digest: string, signal?: AbortSignal) => Promise<string>;
+		const ac = new AbortController();
+		ac.abort();
+		await expect(signConsent('A'.repeat(43), ac.signal)).rejects.toMatchObject({name: 'ConsentAbandonedError', reason: 'abandoned'});
+		const sign = (d.producer as unknown as {signDeviceKeyDigest: jest.Mock}).signDeviceKeyDigest;
+		expect(sign).not.toHaveBeenCalled();
+		// a live signal signs as before
+		expect(await signConsent('A'.repeat(43), new AbortController().signal)).toBe('sig-hex');
+		expect(sign).toHaveBeenCalledTimes(1);
 	});
 
 	it('refuses before any prompt with no network or no rendezvous', async () => {

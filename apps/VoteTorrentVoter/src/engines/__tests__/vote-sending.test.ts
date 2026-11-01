@@ -100,9 +100,11 @@ describe('sendSavedVote (spike 102)', () => {
 		const probes = voters.map(() => ({active: 0, maxActive: 0}));
 		const stores = voters.map(() => memorySentStore());
 		const statuses: Array<Array<[string, BallotSendStatus]>> = voters.map(() => []);
+		const signals: unknown[] = [];
 		const results = await Promise.all(voters.map((v, i) => sendSavedVote({
 			port: strand.port, sentStore: stores[i]!, record: v.record, rendezvous: clientFor(rv, v.phone),
-			signConsent: signWith(v.priv, probes[i]), nowMs: () => Date.now(), agentOptions: fastAgent, minPromptMs: FAST_MIN_PROMPT_MS,
+			signConsent: (d: string, signal?: AbortSignal) => { signals.push(signal instanceof AbortSignal ? signal.aborted : 'no signal'); return signWith(v.priv, probes[i])(d); },
+			nowMs: () => Date.now(), agentOptions: fastAgent, minPromptMs: FAST_MIN_PROMPT_MS,
 			onStatus: (b, s) => statuses[i]!.push([b, s]),
 		})));
 		rv.close();
@@ -116,6 +118,9 @@ describe('sendSavedVote (spike 102)', () => {
 		for (const p of probes) expect(p.maxActive).toBe(1);
 		// every voter saw itself confirm before it was sent
 		for (const st of statuses) expect(st.some(([, s]) => s.phase === 'confirming')).toBe(true);
+		// each consent sign gets its call's abort signal (WR-04), live while it is asked
+		expect(signals.length).toBeGreaterThanOrEqual(6);
+		expect(signals.every(a => a === false)).toBe(true);
 	});
 
 	it('a consent prompt that never settles does not block the voter\'s other prompts', async () => {

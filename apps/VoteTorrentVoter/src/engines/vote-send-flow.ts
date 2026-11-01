@@ -14,6 +14,7 @@
  */
 import {multiaddr} from '@multiformats/multiaddr';
 import {
+	ConsentAbandonedError,
 	createFailoverRendezvousClient,
 	createLibp2pRendezvousClient,
 	createPoolIdentity,
@@ -134,8 +135,15 @@ export async function runVoteSendFlow(deps: VoteSendFlowDeps): Promise<VoteSendF
 		return {kind: 'no-network'};
 	}
 	const producer = resolveVoteSigningProducer(deps.producer);
-	const signConsent = async (digest: string): Promise<string> => {
-		const signed = await producer.signDeviceKeyDigest(digestBytesFromBase64Url(digest), {prompt: deps.consentPrompt});
+	const signConsent = async (digest: string, signal?: AbortSignal): Promise<string> => {
+		const bytes = digestBytesFromBase64Url(digest);
+		// WR-04: a consent the pool abandoned after the queue started it, but before the native sign, is
+		// never raised (no orphan prompt). This is the last point the app controls; the window left is
+		// the producer's own work before the native call (a read-only device-key lookup on the first
+		// sign) and the bridge hop. Closing it, and making the queue's cancel match only its own sign,
+		// needs a per-sign native token.
+		if (signal?.aborted === true) throw new ConsentAbandonedError('abandoned');
+		const signed = await producer.signDeviceKeyDigest(bytes, {prompt: deps.consentPrompt});
 		return signed.signature;
 	};
 	let result: SendSavedVoteResult;
