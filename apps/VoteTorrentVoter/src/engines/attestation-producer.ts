@@ -116,8 +116,12 @@ export const StubAttestationProducer: AttestationProducer = {
 	// Plan 11 (D-02/D-18): a clearly-non-real placeholder signature — never a real cryptographic
 	// signature, and never something a schema SignatureValid check will accept. Dev-only, mirrors
 	// the other STUB_* placeholder values in this file.
-	// The stub ignores prompt copy.
-	async signDeviceKeyDigest(_digest: Uint8Array, _options?: SignDeviceKeyDigestOptions): Promise<Signature> {
+	// The stub ignores prompt copy. It honours `options.signal` like the real producer (review WR-01):
+	// an already-aborted signal rejects an AbortError with code ABORTED instead of signing.
+	async signDeviceKeyDigest(_digest: Uint8Array, options?: SignDeviceKeyDigestOptions): Promise<Signature> {
+		if (options?.signal?.aborted) {
+			throw Object.assign(new Error('signDeviceKeyDigest: abandoned before the native sign'), { name: 'AbortError', code: 'ABORTED' })
+		}
 		return {
 			signature: 'STUB_DEVICE_KEY_SIGNATURE_PLACEHOLDER_NOT_REAL',
 			signerKey: 'STUB_DEVICE_PUBLIC_KEY_PLACEHOLDER_NOT_REAL',

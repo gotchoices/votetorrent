@@ -450,6 +450,18 @@ describe('attestation-producer — D-03/D-11 producer seam', () => {
 				const withPrompt = await StubAttestationProducer.signDeviceKeyDigest!(digest, { prompt: VOTE_PROMPT })
 				expect(withPrompt).toEqual(plain)
 			})
+			it('honours signal (review WR-01): a live signal signs as before, an aborted one rejects ABORTED', async () => {
+				const digest = new Uint8Array(32)
+				const plain = await StubAttestationProducer.signDeviceKeyDigest!(digest)
+				const live = await StubAttestationProducer.signDeviceKeyDigest!(digest, { signal: new AbortController().signal })
+				expect(live).toEqual(plain)
+				const aborted = new AbortController()
+				aborted.abort()
+				await expect(StubAttestationProducer.signDeviceKeyDigest!(digest, { signal: aborted.signal })).rejects.toMatchObject({
+					name: 'AbortError',
+					code: 'ABORTED',
+				})
+			})
 		})
 	})
 })

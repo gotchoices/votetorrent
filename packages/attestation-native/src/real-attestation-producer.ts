@@ -214,6 +214,22 @@ function getPlatformOS(): string {
 export interface SignDeviceKeyDigestOptions {
 	/** Biometric prompt copy. Used whole or rejected; never merged with the defaults. */
 	prompt?: SecretWrapPrompt
+	/**
+	 * Abandons the sign before it reaches native (review WR-01). Checked once, right before the
+	 * native `signWithDeviceKey` call and after every await this method makes (the device-key
+	 * lookup), so an abort that lands while the lookup is pending never raises a prompt. An aborted
+	 * signal rejects with an `AbortError` whose `code` is `ABORTED`, and native is never called.
+	 * Once native has been called, cancel the sign with `cancelPendingSign` instead.
+	 */
+	signal?: AbortSignal
+}
+
+/** The rejection of a sign whose `signal` aborted before the native call. */
+function abortedBeforeNativeSign(): Error {
+	const err = new Error('signDeviceKeyDigest: abandoned before the native sign') as Error & { code: string }
+	err.name = 'AbortError'
+	err.code = 'ABORTED'
+	return err
 }
 
 /**
@@ -581,6 +597,8 @@ export function createRealAttestationProducer(opts: {
 		 *
 		 * `options.prompt` is display copy only: it never enters the signed bytes, and iOS shows only
 		 * the subtitle (as the LAContext reason). An invalid prompt is refused before any native call.
+		 * `options.signal`, already aborted when the native call is due, rejects `ABORTED` without
+		 * calling native (see `SignDeviceKeyDigestOptions.signal`).
 		 */
 		async signDeviceKeyDigest(digest: Uint8Array, options?: SignDeviceKeyDigestOptions): Promise<Signature> {
 			const prompt = resolveSignPrompt(options)
@@ -596,6 +614,14 @@ export function createRealAttestationProducer(opts: {
 
 			// See this method's platform-asymmetry doc comment above — iOS must pre-hash, Android must not.
 			const digestBase64 = nativeSignInputBase64(digest, getPlatformOS())
+			// Review WR-01: the last point before native, after every await above. Nothing below awaits
+			// before the native call, so an abort after this line comes after the call is issued.
+			// TurboModule calls reach native in the order they were made, and the Android sign
+			// reserves its pending-sign gate on the calling (native-modules) thread before it posts
+			// the prompt, so a `cancelPendingSign` issued after this check always finds the
+			// reservation and settles the sign CANCELED: no orphan prompt. (iOS reserves its slot
+			// synchronously in the method body too.)
+			if (options?.signal?.aborted) throw abortedBeforeNativeSign()
 			const result = (await native.signWithDeviceKey(
 				KEY_ALIAS,
 				digestBase64,

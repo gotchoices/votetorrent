@@ -691,6 +691,53 @@ describe('real-attestation-producer — D-11/D-06/D-16b (Phase 45-07 regression 
 			expect(echoedNeedles(new Error(`bad prompt ${JSON.stringify({ title: NEEDLE_TITLE })}`))).toEqual([NEEDLE_TITLE])
 		})
 
+		describe('signal (review WR-01): an abandoned sign never reaches native', () => {
+			it.each(['android', 'ios'])('%s: a signal aborted before the call rejects ABORTED and native is never called', async (os) => {
+				platformState.OS = os
+				const producer = createRealAttestationProducer({ enablePlayIntegrity: false })
+				await producer.provisionDeviceKey()
+				const ac = new AbortController()
+				ac.abort()
+				await expect(producer.signDeviceKeyDigest(digest, { prompt: VOTE_PROMPT, signal: ac.signal })).rejects.toMatchObject({
+					name: 'AbortError',
+					code: 'ABORTED',
+				})
+				expect(nativeFake.signWithDeviceKey).not.toHaveBeenCalled()
+			})
+
+			it('a signal aborted while the device-key lookup is pending: native is never called', async () => {
+				platformState.OS = 'android'
+				let releaseLookup!: () => void
+				nativeFake.getCurrentDeviceKey.mockReset().mockImplementation(
+					() =>
+						new Promise((resolve) => {
+							releaseLookup = () =>
+								resolve({ publicKeyCompressedHex: KEY_HEX, publicKeyBase64: 'fake-public-key-b64', keyAlias: 'VOTETORRENT_DEVICE_KEY_V1' })
+						}),
+				)
+				// No provisionDeviceKey(): the sign must look the key up first (the first sign of a send).
+				const producer = createRealAttestationProducer({ enablePlayIntegrity: false })
+				const ac = new AbortController()
+				const pending = producer.signDeviceKeyDigest(digest, { prompt: VOTE_PROMPT, signal: ac.signal })
+				await Promise.resolve()
+				expect(nativeFake.getCurrentDeviceKey).toHaveBeenCalledTimes(1)
+				ac.abort()
+				releaseLookup()
+				await expect(pending).rejects.toMatchObject({ name: 'AbortError', code: 'ABORTED' })
+				expect(nativeFake.signWithDeviceKey).not.toHaveBeenCalled()
+			})
+
+			it('negative control: a live signal signs exactly as without one', async () => {
+				platformState.OS = 'android'
+				const producer = createRealAttestationProducer({ enablePlayIntegrity: false })
+				await producer.provisionDeviceKey()
+				const sig = await producer.signDeviceKeyDigest(digest, { prompt: VOTE_PROMPT, signal: new AbortController().signal })
+				expect(nativeFake.signWithDeviceKey).toHaveBeenCalledTimes(1)
+				expect((nativeFake.signWithDeviceKey.mock.calls[0] as unknown[]).length).toBe(5)
+				expect(sig).toEqual({ signature: 'ab'.repeat(64), signerKey: KEY_HEX, signerUserId: '' })
+			})
+		})
+
 		it('DEFAULT_DEVICE_KEY_SIGN_PROMPT is frozen and holds the legacy strings', () => {
 			expect(DEFAULT_DEVICE_KEY_SIGN_PROMPT).toEqual({
 				title: 'Confirm this request',
