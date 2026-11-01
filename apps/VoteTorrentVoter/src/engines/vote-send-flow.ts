@@ -171,7 +171,7 @@ async function runVoteSendFlowSteps(deps: VoteSendFlowDeps): Promise<VoteSendFlo
 		// orphan prompt holding the gate). A check here could never fire: the queue starts the signer
 		// synchronously and drops calls abandoned while queued. The bridge hop itself is still open;
 		// closing it, and making the queue's cancel match only its own sign, needs a per-sign native token.
-		const options: SignDeviceKeyDigestOptions & {signal?: AbortSignal} = {prompt: deps.consentPrompt, signal};
+		const options: SignDeviceKeyDigestOptions = {prompt: deps.consentPrompt, signal};
 		try {
 			const signed = await producer.signDeviceKeyDigest(bytes, options);
 			return signed.signature;
