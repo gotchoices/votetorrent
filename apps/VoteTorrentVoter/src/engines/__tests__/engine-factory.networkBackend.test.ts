@@ -142,6 +142,39 @@ describe('EngineFactory network backend (D-98)', () => {
 		}
 	});
 
+	it('NB-7b an open that rejects while the creating store is being recorded is never an unhandled rejection (round-1 WR-03)', async () => {
+		const unhandled: unknown[] = [];
+		const onUnhandled = (reason: unknown) => { unhandled.push(reason); };
+		process.on('unhandledRejection', onUnhandled);
+		let release: () => void = () => undefined;
+		const gate = new Promise<void>(r => { release = r; });
+		// the AsyncStorage jest mock's setItem is itself a jest.fn: hold the next call, then run its own implementation
+		const setItem = AsyncStorage.setItem as jest.Mock;
+		const realImpl = setItem.getMockImplementation()!;
+		setItem.mockImplementationOnce(async (...args: unknown[]) => {
+			await gate;
+			return realImpl(...args);
+		});
+		try {
+			const {solo, engine} = build();
+			const boom = new Error('solo open failed');
+			solo.mockImplementation(async (hash: string) => {
+				fi.takeFounderIntent(hash);
+				throw boom;
+			});
+			const created = engine.create('h7b');
+			const settled = created.then(() => 'resolved', (e: unknown) => e);
+			// let the rejected open sit unobserved past a macrotask, while the record write is held
+			await new Promise(r => setTimeout(r, 20));
+			release();
+			expect(await settled).toBe(boom);
+			await new Promise(r => setTimeout(r, 20));
+			expect(unhandled).toEqual([]);
+		} finally {
+			process.off('unhandledRejection', onUnhandled);
+		}
+	});
+
 	// T-65-14-01: the dispatcher reads the creating store with an await. A create that starts during
 	// that await owns the founding window; a non-create open that wakes up into it must refuse, not
 	// open a store (the factory's first statement would take the window and the create would lose it).

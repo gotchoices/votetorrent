@@ -205,6 +205,10 @@ export class EngineFactory {
 				// record lands before the open resolves, hence before create writes any network data.
 				const strand = useStrand()
 				const pending = strand ? openStrand() : openSolo()
+				// Observed at once (round-1 WR-03): an open that rejects while the record below is being
+				// written must not be reported as an unhandled rejection. The caller still gets the
+				// rejection through the `pending` returned below.
+				void pending.catch(() => undefined)
 				try {
 					await recordNetworkBackend(networkHash, strand ? 'strand' : 'solo')
 				} catch {
