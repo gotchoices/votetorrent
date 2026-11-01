@@ -150,13 +150,27 @@ export interface Spec extends TurboModule {
 	 * only the subtitle varies (see `49-UI-SPEC.md` §"Native BiometricPrompt string
 	 * contract").
 	 *
-	 * Rejects with one of the typed codes: `CANCELED` (native
-	 * `ERROR_CANCELED`/`ERROR_USER_CANCELED`/`ERROR_NEGATIVE_BUTTON` all map here — 49-15/
-	 * Gap B), `NO_BIOMETRICS_ENROLLED`, `LOCKOUT`, `LOCKOUT_PERMANENT`, `BIOMETRIC_ERROR`,
+	 * Rejects with one of the typed codes: `CANCELED`, `SYSTEM_CANCELED`,
+	 * `NO_BIOMETRICS_ENROLLED`, `LOCKOUT`, `LOCKOUT_PERMANENT`, `BIOMETRIC_ERROR`,
 	 * `KEY_INVALIDATED_REASSOCIATE`, `NO_KEY_PROVISIONED`, `NO_ACTIVITY`,
 	 * `INVALID_DIGEST_ENCODING`, `PROMPT_BUSY`.
 	 *
-	 * `PROMPT_BUSY` (D-112): another biometric prompt is already showing or a sign is pending;
+	 * `CANCELED`: the voter dismissed the prompt (Android `ERROR_USER_CANCELED`/
+	 * `ERROR_NEGATIVE_BUTTON`; iOS `LAError.userCancel`/`.userFallback`/`errSecUserCanceled`), or
+	 * the app cancelled it through `cancelPendingSign` (always `CANCELED`, on both platforms).
+	 *
+	 * `SYSTEM_CANCELED` (Phase 65 review CR-01): the SYSTEM ended the prompt, not the voter: the
+	 * app went to the background, the screen locked, a call came in, or the HAL timed out (Android
+	 * `ERROR_CANCELED`/5; iOS `LAError.systemCancel`/`.appCancel` when the app did not cancel the
+	 * sign itself). It is not a decline. Callers with user copy show their `CANCELED` copy for it.
+	 * The vault prompts (`wrapSecret`/`unwrapSecret`) and `produceAttestation` never reject it.
+	 *
+	 * `NO_ACTIVITY`: the app has no foreground activity that can host a prompt, including (Android)
+	 * an activity whose state is already saved because the app is in the background, and a prompt
+	 * that androidx.biometric silently did not start for that reason. Nothing was shown.
+	 *
+	 * `PROMPT_BUSY` (D-112): another biometric prompt is already showing or a sign is pending (on
+	 * iOS also: an earlier sign's system call is still running after its cancel hit the 2 s cap);
 	 * nothing was shown and nothing will settle later. Callers treat it as a consent not given.
 	 */
 	signWithDeviceKey(
@@ -214,6 +228,8 @@ export interface Spec extends TurboModule {
 	 *
 	 * `PROMPT_BUSY` (D-112) applies to `signWithRecoveryKey` too: another biometric prompt is already
 	 * showing or a sign is pending; nothing was shown and nothing will settle later.
+	 * `SYSTEM_CANCELED` and `NO_ACTIVITY` mean the same as for `signWithDeviceKey`: the system, not
+	 * the voter, ended the prompt; no activity could host it.
 	 *
 	 * **Unproven at runtime** — the API 30+ branch is proven by D-24 leg 3 on real hardware
 	 * (Samsung SM-M166P, API 36) in 49-14.
@@ -236,7 +252,7 @@ export interface Spec extends TurboModule {
 	 * (vault) prompt. Either way the cancelled sign no longer holds the pending-sign slot when this
 	 * resolves. On Android a prompt that has not detached within the cap can still make the next sign
 	 * `PROMPT_BUSY`; on iOS a next sign issued while the old system call is still running (cap
-	 * expired) is not refused but waits behind it on the serial sign queue.
+	 * expired) is refused `PROMPT_BUSY` at once, never queued behind it (review WR-06).
 	 */
 	cancelPendingSign(): Promise<Object>
 

@@ -727,12 +727,12 @@ class KeyAttestationHelper(private val reactContext: ReactApplicationContext) {
 		onKeyInvalidatedReassociate: () -> Unit,
 		onError: (code: String, throwable: Throwable?) -> Unit,
 	) {
-		Log.i(TAG_SIGN, "sign start kind=DEVICE")
+		vtSignLog("sign start kind=DEVICE")
 		// 49-UI-SPEC.md's explicitly-flagged sixth condition: no key has EVER been provisioned
 		// under this alias — detected BEFORE any prompt is shown, so it must not be collapsed into
 		// BIOMETRIC_ERROR (that class implies a prompt was actually presented and failed).
 		if (!keyStore.containsAlias(keyAlias)) {
-			Log.i(TAG_SIGN, "sign refused kind=DEVICE code=NO_KEY_PROVISIONED")
+			vtSignLog("sign refused kind=DEVICE code=NO_KEY_PROVISIONED")
 			onError("NO_KEY_PROVISIONED", IllegalStateException("no key provisioned under alias $keyAlias"))
 			return
 		}
@@ -746,11 +746,11 @@ class KeyAttestationHelper(private val reactContext: ReactApplicationContext) {
 			// D-13 — caught FIRST, exactly like regenerateAttested — never falls through to the
 			// generic catch below. The device's biometric enrollment changed since this alias's key
 			// was created; route the caller to restart the D-11 provisioning ceremony.
-			Log.i(TAG_SIGN, "sign refused kind=DEVICE code=KEY_INVALIDATED_REASSOCIATE")
+			vtSignLog("sign refused kind=DEVICE code=KEY_INVALIDATED_REASSOCIATE")
 			onKeyInvalidatedReassociate()
 			return
 		} catch (e: Exception) {
-			Log.i(TAG_SIGN, "sign refused kind=DEVICE code=BIOMETRIC_ERROR class=${e.javaClass.simpleName}")
+			vtSignLog("sign refused kind=DEVICE code=BIOMETRIC_ERROR class=${e.javaClass.simpleName}")
 			onError("BIOMETRIC_ERROR", e)
 			return
 		}
@@ -778,16 +778,18 @@ class KeyAttestationHelper(private val reactContext: ReactApplicationContext) {
 			settle.error("PROMPT_BUSY", IllegalStateException("another sign is pending"))
 			return
 		}
-		Log.i(TAG_SIGN, "reserve ok kind=DEVICE")
+		vtSignLog("reserve ok kind=DEVICE")
 		UiThreadUtil.runOnUiThread {
 			// A cancel already settled this sign: show nothing.
 			if (!pendingSignGate.isHeld(pending)) return@runOnUiThread
 			// WR-02: an activity that cannot host a prompt makes androidx.biometric 1.1.0 return from
-			// authenticate() with no callback, which would hold the gate forever. Refuse up front.
+			// authenticate() with no callback, which would hold the gate forever. Refuse up front, as
+			// NO_ACTIVITY (round-3 WR-02): the app has no foreground activity that can show a prompt
+			// (typically it is in the background), which callers must tell apart from a hardware error.
 			if (!canHostBiometricPrompt(activity)) {
 				pendingSignGate.release(pending)
-				Log.i(TAG_SIGNING_REJECT, "signWithDeviceKey mapped=BIOMETRIC_ERROR reason=host-cannot-show")
-				settle.error("BIOMETRIC_ERROR", IllegalStateException("the activity cannot host a biometric prompt"))
+				Log.i(TAG_SIGNING_REJECT, "signWithDeviceKey mapped=NO_ACTIVITY reason=host-cannot-show")
+				settle.error("NO_ACTIVITY", IllegalStateException("the activity cannot host a biometric prompt"))
 				return@runOnUiThread
 			}
 			// A BiometricFragment already attached (for example a vault prompt): constructing a
@@ -837,8 +839,18 @@ class KeyAttestationHelper(private val reactContext: ReactApplicationContext) {
 						// it requires an existing provisioning AND a network User. The split/collapse
 						// difference between this site and regenerateAttested's lockout handling — not
 						// the cancellation handling — is what must not be retroactively changed.
+						// (Superseded for this site and the recovery sign by review CR-01 below;
+						// regenerateAttested still maps all three to CANCELED.)
+						//
+						// Review CR-01: ERROR_CANCELED (5) is the SYSTEM ending the prompt (the app went
+						// to the background, the screen locked, a call came in, a HAL timeout), not the
+						// voter, so it rejects SYSTEM_CANCELED. Only the voter's own dismissals
+						// (ERROR_USER_CANCELED 10, ERROR_NEGATIVE_BUTTON 13) reject CANCELED. Our own
+						// cancelPendingSign settles CANCELED through settle-once BEFORE it calls
+						// cancelAuthentication(), so the late error 5 that cancel provokes loses the
+						// settle and is dropped: an app cancel still reaches JS as CANCELED.
 						val code = when (errorCode) {
-							BiometricPrompt.ERROR_CANCELED,
+							BiometricPrompt.ERROR_CANCELED -> "SYSTEM_CANCELED"
 							BiometricPrompt.ERROR_USER_CANCELED,
 							BiometricPrompt.ERROR_NEGATIVE_BUTTON -> "CANCELED"
 							BiometricPrompt.ERROR_NO_BIOMETRICS -> "NO_BIOMETRICS_ENROLLED"
@@ -861,22 +873,24 @@ class KeyAttestationHelper(private val reactContext: ReactApplicationContext) {
 				},
 			)
 			pending.prompt = biometricPrompt
-			Log.i(TAG_SIGN, "authenticate kind=DEVICE")
+			vtSignLog("authenticate kind=DEVICE")
 			biometricPrompt.authenticate(promptInfo, cryptoObject)
 			// WR-02: 1.1.0 adds the BiometricFragment and runs executePendingTransactions() inside
 			// authenticate() (javap on the pinned AAR), and every dismissal is an async
 			// commitAllowingStateLoss, so no fragment here means authenticate() took a silent early
-			// return and no callback will ever come. Release and settle rather than hold the gate.
+			// return and no callback will ever come. Release and settle rather than hold the gate. The
+			// only known cause is an activity whose state is already saved (the app went to the
+			// background between the check above and here), so this is NO_ACTIVITY too.
 			if (!isBiometricFragmentAttached(activity)) {
 				pendingSignGate.release(pending)
-				Log.i(TAG_SIGNING_REJECT, "signWithDeviceKey mapped=BIOMETRIC_ERROR reason=prompt-not-started")
-				settle.error("BIOMETRIC_ERROR", IllegalStateException("the biometric prompt was not started"))
+				Log.i(TAG_SIGNING_REJECT, "signWithDeviceKey mapped=NO_ACTIVITY reason=prompt-not-started")
+				settle.error("NO_ACTIVITY", IllegalStateException("the biometric prompt was not started"))
 			} else {
-				Log.i(TAG_SIGN, "prompt shown kind=DEVICE")
+				vtSignLog("prompt shown kind=DEVICE")
 			}
 			} catch (e: Exception) {
 				// A throw here would leave the gate held and every later sign PROMPT_BUSY.
-				Log.i(TAG_SIGN, "prompt threw kind=DEVICE class=${e.javaClass.simpleName}")
+				vtSignLog("prompt threw kind=DEVICE class=${e.javaClass.simpleName}")
 				pendingSignGate.release(pending)
 				settle.error("BIOMETRIC_ERROR", e)
 			}
@@ -935,12 +949,12 @@ class KeyAttestationHelper(private val reactContext: ReactApplicationContext) {
 		onKeyInvalidatedReassociate: () -> Unit,
 		onError: (code: String, throwable: Throwable?) -> Unit,
 	) {
-		Log.i(TAG_SIGN, "sign start kind=RECOVERY")
+		vtSignLog("sign start kind=RECOVERY")
 		val keyguardManager = ContextCompat.getSystemService(reactContext, KeyguardManager::class.java)
 		if (keyguardManager == null || !keyguardManager.isDeviceSecure) {
 			// D-18 terminal state, checked BEFORE the OS-version check and either ceremony branch —
 			// a more specific truth than an unsupported OS version, and applicable on every API level.
-			Log.i(TAG_SIGN, "sign refused kind=RECOVERY code=NO_DEVICE_CREDENTIAL")
+			vtSignLog("sign refused kind=RECOVERY code=NO_DEVICE_CREDENTIAL")
 			onError("NO_DEVICE_CREDENTIAL", IllegalStateException("device has no screen lock configured"))
 			return
 		}
@@ -948,7 +962,7 @@ class KeyAttestationHelper(private val reactContext: ReactApplicationContext) {
 		// Same sixth-condition check as signWithDeviceKey (49-UI-SPEC.md) — the recovery alias may
 		// simply never have been provisioned yet.
 		if (!keyStore.containsAlias(keyAlias)) {
-			Log.i(TAG_SIGN, "sign refused kind=RECOVERY code=NO_KEY_PROVISIONED")
+			vtSignLog("sign refused kind=RECOVERY code=NO_KEY_PROVISIONED")
 			onError("NO_KEY_PROVISIONED", IllegalStateException("no recovery key provisioned under alias $keyAlias"))
 			return
 		}
@@ -958,7 +972,7 @@ class KeyAttestationHelper(private val reactContext: ReactApplicationContext) {
 		// the D-18 precedent — below API 30 no ceremony can ever complete (see this function's doc
 		// comment for the measured cause), so no ceremony work should be attempted at all.
 		if (Build.VERSION.SDK_INT < MIN_SDK_FOR_DEVICE_CREDENTIAL_RECOVERY) {
-			Log.i(TAG_SIGN, "sign refused kind=RECOVERY code=RECOVERY_UNSUPPORTED_OS")
+			vtSignLog("sign refused kind=RECOVERY code=RECOVERY_UNSUPPORTED_OS")
 			onError("RECOVERY_UNSUPPORTED_OS", IllegalStateException(
 				"recovery is unsupported below API $MIN_SDK_FOR_DEVICE_CREDENTIAL_RECOVERY: the " +
 					"recovery key is auth-per-use and KeyguardManager's time-bound " +
@@ -979,11 +993,11 @@ class KeyAttestationHelper(private val reactContext: ReactApplicationContext) {
 			// keys) so this should not fire from a biometric re-enrolment — but a screen-lock
 			// change already routes through the isDeviceSecure() check above, not here, and any
 			// OTHER cause of invalidation is still routed identically to signWithDeviceKey.
-			Log.i(TAG_SIGN, "sign refused kind=RECOVERY code=KEY_INVALIDATED_REASSOCIATE")
+			vtSignLog("sign refused kind=RECOVERY code=KEY_INVALIDATED_REASSOCIATE")
 			onKeyInvalidatedReassociate()
 			return
 		} catch (e: Exception) {
-			Log.i(TAG_SIGN, "sign refused kind=RECOVERY code=BIOMETRIC_ERROR class=${e.javaClass.simpleName}")
+			vtSignLog("sign refused kind=RECOVERY code=BIOMETRIC_ERROR class=${e.javaClass.simpleName}")
 			onError("BIOMETRIC_ERROR", e)
 			return
 		}
@@ -1032,13 +1046,13 @@ class KeyAttestationHelper(private val reactContext: ReactApplicationContext) {
 			settle.error("PROMPT_BUSY", IllegalStateException("another sign is pending"))
 			return
 		}
-		Log.i(TAG_SIGN, "reserve ok kind=RECOVERY")
+		vtSignLog("reserve ok kind=RECOVERY")
 		UiThreadUtil.runOnUiThread {
 			if (!pendingSignGate.isHeld(pending)) return@runOnUiThread
 			if (!canHostBiometricPrompt(activity)) {
 				pendingSignGate.release(pending)
-				Log.i(TAG_SIGNING_REJECT, "signWithRecoveryKey mapped=BIOMETRIC_ERROR reason=host-cannot-show")
-				settle.error("BIOMETRIC_ERROR", IllegalStateException("the activity cannot host a biometric prompt"))
+				Log.i(TAG_SIGNING_REJECT, "signWithRecoveryKey mapped=NO_ACTIVITY reason=host-cannot-show")
+				settle.error("NO_ACTIVITY", IllegalStateException("the activity cannot host a biometric prompt"))
 				return@runOnUiThread
 			}
 			if (isBiometricFragmentAttached(activity)) {
@@ -1072,8 +1086,11 @@ class KeyAttestationHelper(private val reactContext: ReactApplicationContext) {
 						// DEVICE_CREDENTIAL-only authenticator (it reports absent biometric
 						// enrollment, not an absent device credential; NO_DEVICE_CREDENTIAL above
 						// already covers the "nothing configured at all" case for this ceremony).
+						// Review CR-01: same split as signWithDeviceKey: a system cancel (5) rejects
+						// SYSTEM_CANCELED, the voter's own dismissal (10/13) CANCELED, and our own
+						// cancelPendingSign has already settled CANCELED so its late 5 is dropped.
 						val code = when (errorCode) {
-							BiometricPrompt.ERROR_CANCELED,
+							BiometricPrompt.ERROR_CANCELED -> "SYSTEM_CANCELED"
 							BiometricPrompt.ERROR_USER_CANCELED,
 							BiometricPrompt.ERROR_NEGATIVE_BUTTON -> "CANCELED"
 							BiometricPrompt.ERROR_LOCKOUT -> "LOCKOUT"
@@ -1098,18 +1115,18 @@ class KeyAttestationHelper(private val reactContext: ReactApplicationContext) {
 				},
 			)
 			pending.prompt = biometricPrompt
-			Log.i(TAG_SIGN, "authenticate kind=RECOVERY")
+			vtSignLog("authenticate kind=RECOVERY")
 			biometricPrompt.authenticate(promptInfo, cryptoObject)
 			// WR-02: same silent-early-return check as signWithDeviceKey.
 			if (!isBiometricFragmentAttached(activity)) {
 				pendingSignGate.release(pending)
-				Log.i(TAG_SIGNING_REJECT, "signWithRecoveryKey mapped=BIOMETRIC_ERROR reason=prompt-not-started")
-				settle.error("BIOMETRIC_ERROR", IllegalStateException("the biometric prompt was not started"))
+				Log.i(TAG_SIGNING_REJECT, "signWithRecoveryKey mapped=NO_ACTIVITY reason=prompt-not-started")
+				settle.error("NO_ACTIVITY", IllegalStateException("the biometric prompt was not started"))
 			} else {
-				Log.i(TAG_SIGN, "prompt shown kind=RECOVERY")
+				vtSignLog("prompt shown kind=RECOVERY")
 			}
 			} catch (e: Exception) {
-				Log.i(TAG_SIGN, "prompt threw kind=RECOVERY class=${e.javaClass.simpleName}")
+				vtSignLog("prompt threw kind=RECOVERY class=${e.javaClass.simpleName}")
 				pendingSignGate.release(pending)
 				settle.error("BIOMETRIC_ERROR", e)
 			}
@@ -1135,11 +1152,11 @@ class KeyAttestationHelper(private val reactContext: ReactApplicationContext) {
 	fun cancelPendingSign(activity: FragmentActivity?, onDone: (Boolean) -> Unit) {
 		val p = pendingSignGate.take()
 		if (p == null) {
-			Log.i(TAG_SIGN, "cancel start held=false")
+			vtSignLog("cancel start held=false")
 			onDone(false)
 			return
 		}
-		Log.i(TAG_SIGN, "cancel start held=true kind=${p.kind}")
+		vtSignLog("cancel start held=true kind=${p.kind}")
 		try {
 			cancelTaken(p, activity, onDone)
 		} catch (e: Exception) {
@@ -1156,7 +1173,7 @@ class KeyAttestationHelper(private val reactContext: ReactApplicationContext) {
 			// runnable already ran and showed nothing (IN-06): do not wait on an unrelated fragment.
 			if (p.prompt == null) {
 				Log.i(TAG_SIGNING_REJECT, "cancelPendingSign kind=${p.kind} promptGone=true waitedMs=0 noPrompt=true")
-				Log.i(TAG_SIGN, "cancel end kind=${p.kind} settled=true promptGone=true waitedMs=0 noPrompt=true")
+				vtSignLog("cancel end kind=${p.kind} settled=true promptGone=true waitedMs=0 noPrompt=true")
 				onDone(true)
 				return@runOnUiThread
 			}
@@ -1175,7 +1192,7 @@ class KeyAttestationHelper(private val reactContext: ReactApplicationContext) {
 					TAG_SIGNING_REJECT,
 					"cancelPendingSign kind=${p.kind} promptGone=$gone waitedMs=${SystemClock.uptimeMillis() - start}",
 				)
-				Log.i(TAG_SIGN, "cancel end kind=${p.kind} settled=true promptGone=$gone waitedMs=${SystemClock.uptimeMillis() - start}")
+				vtSignLog("cancel end kind=${p.kind} settled=true promptGone=$gone waitedMs=${SystemClock.uptimeMillis() - start}")
 				onDone(true)
 			}
 			lateinit var poll: Runnable

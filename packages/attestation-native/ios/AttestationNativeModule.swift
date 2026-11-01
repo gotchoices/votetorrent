@@ -540,14 +540,23 @@ class AttestationNativeModule: NSObject {
   /// Debug trace of the device-key / recovery-key sign lifecycle (start, busy refuse, settle, cancel):
   /// `[VtSign] ...` in the device console (Console.app / `idevicesyslog | grep VtSign`). Kinds, codes,
   /// timings and flags only: never digest, signature or key bytes, never an error message text.
-  private static func vtSignLog(_ line: String) {
-    NSLog("%@", "[VtSign] " + line)
+  /// DEBUG builds only (review WR-05): a Release build compiles the body away and never evaluates
+  /// the line (autoclosure), so no install records when or how fast a voter confirmed a sign.
+  private static func vtSignLog(_ line: @autoclosure () -> String) {
+    #if DEBUG
+    NSLog("%@", "[VtSign] " + line())
+    #endif
   }
 
   private let signQueue = DispatchQueue(label: "org.votetorrent.attestation.sign",
                                         qos: .userInitiated)
   private let pendingSignLock = NSLock()
   private var pendingSign: PendingSign?
+  /// Review WR-06: how many `SecKeyCreateSignature` calls are running on `signQueue` right now,
+  /// read and written under `pendingSignLock`. A capped cancel frees `pendingSign` while its system
+  /// call may still be running; a new sign that queued behind it would wait silently, so `signWith`
+  /// refuses `PROMPT_BUSY` while this is non-zero.
+  private var systemCallsInFlight = 0
 
   private enum SignOutcome {
     case signature(String)
@@ -557,8 +566,10 @@ class AttestationNativeModule: NSObject {
   /// Signs run on `signQueue` with a fresh LAContext per call (reuse duration 0), so an open
   /// Face ID / passcode sheet never blocks the module's method queue. Only one device/recovery
   /// sign may be pending (`PROMPT_BUSY` otherwise); `cancelPendingSign` invalidates it (D-110,
-  /// D-112, D-113; todo 2026-10-31-ios-native-sign-has-no-timeout-or-cancel). Unproven on device
-  /// until the iPhone leg.
+  /// D-112, D-113; todo 2026-10-31-ios-native-sign-has-no-timeout-or-cancel). A sign is also
+  /// refused `PROMPT_BUSY` while an earlier sign's system call is still running after its cancel
+  /// hit the cap (review WR-06): it never queues silently behind it. Unproven on device until the
+  /// iPhone leg.
   private func signWith(tag: String, digestBase64: String, reason: String,
                         resolve: @escaping RCTPromiseResolveBlock,
                         reject: @escaping RCTPromiseRejectBlock) {
@@ -575,9 +586,10 @@ class AttestationNativeModule: NSObject {
     context.touchIDAuthenticationAllowableReuseDuration = 0
     let pending = PendingSign(context: context, reject: reject, kind: kind)
     pendingSignLock.lock()
-    if pendingSign != nil {
+    if pendingSign != nil || systemCallsInFlight > 0 {
+      let stuck = pendingSign == nil
       pendingSignLock.unlock()
-      Self.vtSignLog("sign refused kind=\(kind) code=PROMPT_BUSY")
+      Self.vtSignLog("sign refused kind=\(kind) code=PROMPT_BUSY inFlight=\(stuck)")
       reject("PROMPT_BUSY", "another biometric sign is already pending", nil)
       return
     }
@@ -603,6 +615,19 @@ class AttestationNativeModule: NSObject {
         return
       }
 
+      // WR-06: count the system call as in flight, under the lock, and only if no cancel got here
+      // first (a sign cancelled while its key loaded never raises a sheet).
+      pendingSignLock.lock()
+      if pending.canceled {
+        pendingSignLock.unlock()
+        finishPendingSign(pending, outcome: .failure(code: "CANCELED",
+                                                     message: "signing was cancelled", error: nil),
+                          resolve: resolve, reject: reject)
+        return
+      }
+      systemCallsInFlight += 1
+      pendingSignLock.unlock()
+
       // The Face ID / passcode sheet is raised by this system call (the iOS analogue of Android's
       // "authenticate"); it returns once the sheet is answered, cancelled or invalidated.
       Self.vtSignLog("prompt requested kind=\(pending.kind) ms=\(pending.elapsedMs)")
@@ -612,8 +637,14 @@ class AttestationNativeModule: NSObject {
     // (nativeSignInputBytes) pre-hashes on iOS to compensate. The PoP relies on this raw behaviour:
     // do NOT switch to the `...MessageX962...` variant without changing the PoP verifier, the
     // contract doc and the pinned hardware vector together.
-      guard let sig = SecKeyCreateSignature(key, .ecdsaSignatureDigestX962SHA256,
-                                            digest as CFData, &error) as Data? else {
+      let signed = SecKeyCreateSignature(key, .ecdsaSignatureDigestX962SHA256,
+                                         digest as CFData, &error) as Data?
+      // WR-06: the system call has returned; decrement before settling, so a sign the caller starts
+      // the moment this one settles is not refused.
+      pendingSignLock.lock()
+      systemCallsInFlight -= 1
+      pendingSignLock.unlock()
+      guard let sig = signed else {
         let err = error!.takeRetainedValue() as Error as NSError
           // LAError.userCancel / .userFallback / .biometryLockout map onto the Android code table.
           // DOMAIN FIRST — these code spaces OVERLAP, measured 2026-08-25 (spike 085 leg 7):
@@ -633,11 +664,16 @@ class AttestationNativeModule: NSObject {
             code = err.code == -3 ? "KEY_INVALIDATED_REASSOCIATE" : "BIOMETRIC_ERROR"
           } else {
           switch err.code {
-          case Int(errSecUserCanceled), LAError.userCancel.rawValue, LAError.systemCancel.rawValue,
-               LAError.appCancel.rawValue, LAError.userFallback.rawValue:
+          case Int(errSecUserCanceled), LAError.userCancel.rawValue, LAError.userFallback.rawValue:
             // MEASURED: cancelling the prompt yields com.apple.LocalAuthentication code -2
             // (LAError.userCancel) — this mapping is correct.
             code = "CANCELED"
+          case LAError.systemCancel.rawValue, LAError.appCancel.rawValue:
+            // Review CR-01: the SYSTEM ended the sheet (another app came forward, the app went to
+            // the background), not the voter, so this must not read as the voter's decline. A sign
+            // that OUR cancelPendingSign invalidated also ends with appCancel, but it is marked
+            // `canceled` first and finishPendingSign rejects it CANCELED whatever this code says.
+            code = "SYSTEM_CANCELED"
           case LAError.biometryNotEnrolled.rawValue: code = "NO_BIOMETRICS_ENROLLED"
           case LAError.biometryLockout.rawValue:     code = "LOCKOUT_PERMANENT"
           // A genuinely absent key. Distinct from invalidation (see above) but the same recovery
@@ -711,9 +747,9 @@ class AttestationNativeModule: NSObject {
   /// wait (unproven on device). If the cap runs out first, the promise is rejected CANCELED here
   /// (settle-once through `settled`), and `finishPendingSign` later drops the real outcome.
   ///
-  /// Serial-queue implication: if the old system call is still running after the cap, a new
-  /// sign's block waits behind it on the serial `signQueue` (it is not refused), so its prompt
-  /// only appears once the old Face ID / passcode sheet is answered or times out.
+  /// Serial-queue implication (review WR-06): if the old system call is still running after the
+  /// cap, `systemCallsInFlight` stays non-zero until it returns, and a new sign is refused
+  /// `PROMPT_BUSY` at once rather than waiting silently behind it on the serial `signQueue`.
   @objc(cancelPendingSign:rejecter:)
   func cancelPendingSign(_ resolve: @escaping RCTPromiseResolveBlock,
                          rejecter reject: @escaping RCTPromiseRejectBlock) {

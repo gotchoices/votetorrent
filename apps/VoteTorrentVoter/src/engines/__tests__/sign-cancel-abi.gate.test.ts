@@ -12,6 +12,18 @@
  * `typecheck:ios` compiles only the Swift, never the .m, so a Swift/ObjC selector drift would be an
  * "unrecognized selector" crash on first call; this is the only check on that selector pair.
  * The vault prompts (wrap/unwrap) must stay out of the cancel path on the Kotlin side.
+ *
+ * Phase 65 review round 3 adds the reject-code contract of the two sign paths:
+ *   - CR-01: a system cancel rejects `SYSTEM_CANCELED` (Android `ERROR_CANCELED` in each sign
+ *     callback; iOS `LAError.systemCancel`/`.appCancel` in `signWith`), the voter's own dismissal
+ *     stays `CANCELED`, an app cancel still settles `CANCELED`, and the vault mappings (Kotlin
+ *     `SecretWrapHelper`, Swift `mapOSStatusOrLAError`) and `regenerateAttested` never say
+ *     `SYSTEM_CANCELED`.
+ *   - WR-02: an activity that cannot host a prompt, and a prompt that silently did not start,
+ *     settle `NO_ACTIVITY` in each Kotlin sign path.
+ *   - WR-05: every `VtSign` trace goes through one debug-gated writer per platform
+ *     (`BuildConfig.DEBUG` in Kotlin, `#if DEBUG` in Swift); no ungated line exists.
+ *   - WR-06: the Swift sign refuses `PROMPT_BUSY` while an earlier system call is still in flight.
  */
 import { existsSync, readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
@@ -27,6 +39,13 @@ const KOTLIN_DIR = join(PKG, 'android', 'src', 'main', 'java', 'org', 'votetorre
 
 /** The busy settle a Kotlin sign path must make: the literal code passed to settle-once's error. */
 const KOTLIN_BUSY_SETTLE = /\bsettle\.error\(\s*"PROMPT_BUSY"/
+/** The settle a Kotlin sign path must make when no activity can host the prompt (round-3 WR-02). */
+const KOTLIN_NO_ACTIVITY_SETTLE = /\bsettle\.error\(\s*"NO_ACTIVITY"/
+/** CR-01: the system cancel (5) has its own code; the voter's dismissals (10, 13) stay CANCELED. */
+const KOTLIN_SYSTEM_CANCEL_MAP = /BiometricPrompt\.ERROR_CANCELED\s*->\s*"SYSTEM_CANCELED"/
+const KOTLIN_USER_CANCEL_MAP = /BiometricPrompt\.ERROR_USER_CANCELED\s*,\s*BiometricPrompt\.ERROR_NEGATIVE_BUTTON\s*->\s*"CANCELED"/
+/** A `VtSign` line written directly instead of through the gated writer (WR-05). */
+const KOTLIN_RAW_SIGN_LOG = /\bLog\.[a-z]+\(\s*TAG_SIGN\s*,/
 
 interface Texts {
 	spec: string
@@ -112,6 +131,23 @@ function kotlinBusyProblems(label: string, bodies: Array<string | undefined>): s
 	return out
 }
 
+/**
+ * Problems with one Kotlin sign path's reject codes (CR-01, round-3 WR-02), read from the body that
+ * builds its prompt: the error callback maps 5 to SYSTEM_CANCELED and 10/13 to CANCELED, and both
+ * "cannot host" refusals settle NO_ACTIVITY.
+ */
+function kotlinCodeProblems(label: string, own: string | undefined): string[] {
+	if (own === undefined) return [`kotlin: the ${label} sign path body not found`]
+	const out: string[] = []
+	if (!KOTLIN_SYSTEM_CANCEL_MAP.test(own)) out.push(`kotlin: the ${label} sign path does not map ERROR_CANCELED to "SYSTEM_CANCELED"`)
+	if (!KOTLIN_USER_CANCEL_MAP.test(own)) out.push(`kotlin: the ${label} sign path does not map ERROR_USER_CANCELED/ERROR_NEGATIVE_BUTTON to "CANCELED"`)
+	const host = ifBlock(own, /if\s*\(\s*!canHostBiometricPrompt\(/)
+	if (host === undefined || !KOTLIN_NO_ACTIVITY_SETTLE.test(host)) out.push(`kotlin: the ${label} sign path does not settle "NO_ACTIVITY" when the activity cannot host a prompt`)
+	const started = ifBlock(own, /if\s*\(\s*!isBiometricFragmentAttached\(/)
+	if (started === undefined || !KOTLIN_NO_ACTIVITY_SETTLE.test(started)) out.push(`kotlin: the ${label} sign path does not settle "NO_ACTIVITY" when the prompt did not start`)
+	return out
+}
+
 export function compare(raw: Texts): string[] {
 	const t = {
 		spec: strip(raw.spec),
@@ -130,7 +166,10 @@ export function compare(raw: Texts): string[] {
 	for (const m of ['signWithDeviceKey', 'signWithRecoveryKey']) {
 		const doc = docBefore(raw.spec, m)
 		if (doc === undefined) out.push(`spec: ${m} has no doc block directly above it`)
-		else if (!doc.includes('PROMPT_BUSY')) out.push(`spec: ${m} reject list lacks PROMPT_BUSY`)
+		else {
+			if (!doc.includes('PROMPT_BUSY')) out.push(`spec: ${m} reject list lacks PROMPT_BUSY`)
+			if (!doc.includes('SYSTEM_CANCELED')) out.push(`spec: ${m} reject list lacks SYSTEM_CANCELED`)
+		}
 	}
 
 	// --- JS barrel ---
@@ -153,6 +192,20 @@ export function compare(raw: Texts): string[] {
 	if (!body(t.kotlinGate, /\bfun tryReserve\(/) && !body(t.kotlinHelper, /\bfun tryReserve\(/)) out.push('kotlin: the busy check tryReserve not found')
 	if (t.kotlinSecretWrap.includes('cancelAuthentication(')) out.push('kotlin: SecretWrapHelper calls cancelAuthentication (the cancel must never target a vault prompt)')
 	if (t.kotlinSecretWrap.includes('cancelPendingSign')) out.push('kotlin: SecretWrapHelper references cancelPendingSign (vault prompts stay out of the cancel path)')
+	// CR-01 / round-3 WR-02: reject codes of the two sign paths, and the fences around them.
+	out.push(...kotlinCodeProblems('device-key', body(t.kotlinHelper, /\bfun signWithDeviceKey\(/)))
+	out.push(...kotlinCodeProblems('recovery-key', body(t.kotlinHelper, /\bfun signRecoveryViaBiometricPrompt\(/)))
+	if (t.kotlinSecretWrap.includes('SYSTEM_CANCELED')) out.push('kotlin: SecretWrapHelper says SYSTEM_CANCELED (the vault mapping must not change)')
+	const regen = body(t.kotlinHelper, /\bfun regenerateAttested\(/)
+	if (regen === undefined) out.push('kotlin: regenerateAttested not found')
+	else if (regen.includes('SYSTEM_CANCELED')) out.push('kotlin: regenerateAttested says SYSTEM_CANCELED (only the sign paths split the cancel)')
+	const cancelTaken = body(t.kotlinHelper, /\bfun cancelTaken\(/)
+	if (cancelTaken === undefined || !/\.settle\.error\(\s*"CANCELED"/.test(cancelTaken)) out.push('kotlin: cancelTaken does not settle "CANCELED" (an app cancel must stay CANCELED)')
+	// WR-05: one gated writer; no direct VtSign line anywhere else.
+	const writer = body(t.kotlinGate, /\bfun vtSignLog\(/)
+	if (writer === undefined || !/if\s*\(\s*BuildConfig\.DEBUG\s*\)\s*Log\.i\(\s*TAG_SIGN\s*,/.test(writer)) out.push('kotlin: vtSignLog is missing or does not gate its Log.i(TAG_SIGN on BuildConfig.DEBUG')
+	const outsideWriter = [t.kotlinModule, t.kotlinHelper, writer === undefined ? t.kotlinGate : t.kotlinGate.replace(writer, '{}')]
+	if (outsideWriter.some((x) => KOTLIN_RAW_SIGN_LOG.test(x))) out.push('kotlin: a VtSign line is written outside vtSignLog (it would ship in release builds)')
 
 	// --- Swift ---
 	const sel = /@objc\((cancelPendingSign:[^)]*)\)/.exec(t.swift)?.[1]
@@ -167,7 +220,25 @@ export function compare(raw: Texts): string[] {
 			if (!(dev?.includes('"PROMPT_BUSY"') && rec?.includes('"PROMPT_BUSY"'))) out.push('swift: neither signWith nor both public sign entries reject "PROMPT_BUSY"')
 		}
 		if (!signWith.includes('LAContext(')) out.push('swift: signWith does not create an LAContext')
+		// CR-01: the system cancel has its own case; the user's cancel case does not include it.
+		if (!/case[^:]*LAError\.systemCancel\.rawValue[^:]*:\s*code\s*=\s*"SYSTEM_CANCELED"/.test(signWith)) out.push('swift: signWith does not map LAError.systemCancel to "SYSTEM_CANCELED"')
+		if (!/case[^:]*LAError\.appCancel\.rawValue[^:]*:\s*code\s*=\s*"SYSTEM_CANCELED"/.test(signWith)) out.push('swift: signWith does not map LAError.appCancel to "SYSTEM_CANCELED"')
+		const userCase = /case([^:]*LAError\.userCancel\.rawValue[^:]*):\s*code\s*=\s*"CANCELED"/.exec(signWith)
+		if (userCase === null) out.push('swift: signWith does not map LAError.userCancel to "CANCELED"')
+		else if (/systemCancel|appCancel/.test(userCase[1])) out.push('swift: signWith maps a system cancel to "CANCELED" in the userCancel case')
+		// WR-06: refuse while an earlier system call is still in flight; count it around the call.
+		if (!/if\s+pendingSign\s*!=\s*nil\s*\|\|\s*systemCallsInFlight\s*>\s*0/.test(signWith)) out.push('swift: signWith does not refuse while a system call is in flight (systemCallsInFlight)')
+		if (!signWith.includes('systemCallsInFlight += 1') || !signWith.includes('systemCallsInFlight -= 1')) out.push('swift: signWith does not count its system call in systemCallsInFlight')
 	}
+	const vault = body(t.swift, /func mapOSStatusOrLAError\(/)
+	if (vault === undefined) out.push('swift: mapOSStatusOrLAError not found')
+	else if (vault.includes('SYSTEM_CANCELED')) out.push('swift: the vault mapping says SYSTEM_CANCELED (it must not change)')
+	const finish = body(t.swift, /func finishPendingSign\(/)
+	if (finish === undefined || !/wasCanceled\s*\{[^}]*reject\(\s*"CANCELED"/.test(finish)) out.push('swift: finishPendingSign does not reject a cancelled sign "CANCELED"')
+	// WR-05: the VtSign writer is compiled only in DEBUG, and nothing else writes a VtSign line.
+	const swiftWriter = body(t.swift, /func vtSignLog\(/)
+	if (swiftWriter === undefined || !/#if DEBUG\s*NSLog\([^)]*\[VtSign\][^\n]*\n\s*#endif/.test(swiftWriter)) out.push('swift: vtSignLog is missing or its NSLog is not inside #if DEBUG')
+	if ((swiftWriter === undefined ? t.swift : t.swift.replace(swiftWriter, '{}')).includes('[VtSign]')) out.push('swift: a [VtSign] line is written outside vtSignLog (it would ship in release builds)')
 	const load_ = body(t.swift, /func loadKey\(/)
 	if (load_ === undefined || !load_.includes('kSecUseAuthenticationContext')) out.push('swift: loadKey does not pass kSecUseAuthenticationContext')
 	const cancel = body(t.swift, /func cancelPendingSign\(/)
@@ -318,5 +389,103 @@ describe('planted-mismatch self-tests: the gate can fail', () => {
 	})
 	it('ObjC extern with a drifted rejecter label', () => {
 		expect(has(plant('objc', /cancelPendingSign:\(RCTPromiseResolveBlock\)resolve rejecter:/, 'cancelPendingSign:(RCTPromiseResolveBlock)resolve rejector:'), 'objc:')).toBe(true)
+	})
+	/** Replaces the [nth] (0-based) occurrence of [from] in [k]. */
+	function plantNth(k: keyof Texts, from: string, to: string, nth: number): Texts {
+		const t = load()
+		let i = -1
+		for (let n = 0; n <= nth; n++) {
+			i = t[k].indexOf(from, i + 1)
+			if (i < 0) throw new Error(`plantNth on ${k}: occurrence ${nth} of ${from} not found`)
+		}
+		return { ...t, [k]: t[k].slice(0, i) + to + t[k].slice(i + from.length) }
+	}
+
+	// --- round 3: CR-01 SYSTEM_CANCELED ---
+	it('spec: SYSTEM_CANCELED removed from both sign reject lists', () => {
+		const t = plantAll('spec', 'SYSTEM_CANCELED', 'SYSTEM_OTHER')
+		expect(has(t, 'spec:', 'signWithDeviceKey reject list lacks SYSTEM_CANCELED')).toBe(true)
+		expect(has(t, 'spec:', 'signWithRecoveryKey reject list lacks SYSTEM_CANCELED')).toBe(true)
+	})
+	const SYS = 'BiometricPrompt.ERROR_CANCELED -> "SYSTEM_CANCELED"'
+	it('Kotlin device path: ERROR_CANCELED folded back into CANCELED', () => {
+		const planted = plantNth('kotlinHelper', SYS, 'BiometricPrompt.ERROR_CANCELED -> "CANCELED"', 0)
+		expect(has(planted, 'kotlin:', 'device-key sign path does not map ERROR_CANCELED')).toBe(true)
+		expect(has(planted, 'kotlin:', 'recovery-key sign path does not map ERROR_CANCELED')).toBe(false)
+	})
+	it('Kotlin recovery path: ERROR_CANCELED folded back into CANCELED', () => {
+		const planted = plantNth('kotlinHelper', SYS, 'BiometricPrompt.ERROR_CANCELED -> "CANCELED"', 1)
+		expect(has(planted, 'kotlin:', 'recovery-key sign path does not map ERROR_CANCELED')).toBe(true)
+		expect(has(planted, 'kotlin:', 'device-key sign path does not map ERROR_CANCELED')).toBe(false)
+	})
+	it('Kotlin device path: the voter dismissal (10/13) no longer CANCELED', () => {
+		const planted = plantNth('kotlinHelper', 'BiometricPrompt.ERROR_NEGATIVE_BUTTON -> "CANCELED"', 'BiometricPrompt.ERROR_NEGATIVE_BUTTON -> "SYSTEM_CANCELED"', 1)
+		expect(has(planted, 'kotlin:', 'device-key sign path does not map ERROR_USER_CANCELED')).toBe(true)
+	})
+	it('Kotlin vault helper starts saying SYSTEM_CANCELED', () => {
+		expect(has(plant('kotlinSecretWrap', /\n$/, '\nval x = "SYSTEM_CANCELED"\n'), 'kotlin:', 'SecretWrapHelper says SYSTEM_CANCELED')).toBe(true)
+	})
+	it('Kotlin regenerateAttested starts saying SYSTEM_CANCELED', () => {
+		const planted = plantNth('kotlinHelper', 'BiometricPrompt.ERROR_CANCELED,', 'BiometricPrompt.ERROR_CANCELED -> "SYSTEM_CANCELED"\n\t\t\t\t\t\tBiometricPrompt.ERROR_CANCELED,', 0)
+		expect(has(planted, 'kotlin:', 'regenerateAttested says SYSTEM_CANCELED')).toBe(true)
+	})
+	it('Kotlin app cancel settles something other than CANCELED', () => {
+		expect(has(plant('kotlinHelper', 'p.settle.error("CANCELED"', 'p.settle.error("SYSTEM_CANCELED"'), 'kotlin:', 'cancelTaken')).toBe(true)
+	})
+
+	// --- round 3: WR-02 NO_ACTIVITY ---
+	it('Kotlin device path: host-cannot-show back to BIOMETRIC_ERROR', () => {
+		const planted = plantNth('kotlinHelper', 'settle.error("NO_ACTIVITY", IllegalStateException("the activity cannot host', 'settle.error("BIOMETRIC_ERROR", IllegalStateException("the activity cannot host', 0)
+		expect(has(planted, 'kotlin:', 'device-key sign path does not settle "NO_ACTIVITY" when the activity cannot host')).toBe(true)
+		expect(has(planted, 'kotlin:', 'recovery-key sign path does not settle "NO_ACTIVITY"')).toBe(false)
+	})
+	it('Kotlin recovery path: prompt-not-started back to BIOMETRIC_ERROR', () => {
+		const planted = plantNth('kotlinHelper', 'settle.error("NO_ACTIVITY", IllegalStateException("the biometric prompt was not started', 'settle.error("BIOMETRIC_ERROR", IllegalStateException("the biometric prompt was not started', 1)
+		expect(has(planted, 'kotlin:', 'recovery-key sign path does not settle "NO_ACTIVITY" when the prompt did not start')).toBe(true)
+		expect(has(planted, 'kotlin:', 'device-key sign path does not settle "NO_ACTIVITY"')).toBe(false)
+	})
+
+	// --- round 3: WR-05 release gating ---
+	it('Kotlin: the VtSign writer loses its BuildConfig.DEBUG gate', () => {
+		expect(has(plant('kotlinGate', 'if (BuildConfig.DEBUG) Log.i(TAG_SIGN, line)', 'Log.i(TAG_SIGN, line)'), 'kotlin:', 'vtSignLog')).toBe(true)
+	})
+	it('Kotlin: an ungated Log.i(TAG_SIGN line planted in the helper', () => {
+		const planted = plantNth('kotlinHelper', 'vtSignLog("sign start kind=DEVICE")', 'Log.i(TAG_SIGN, "sign start kind=DEVICE")', 0)
+		expect(has(planted, 'kotlin:', 'outside vtSignLog')).toBe(true)
+	})
+	it('Kotlin: an ungated line only in a comment does not count', () => {
+		expect(has(plant('kotlinHelper', /\n$/, '\n// Log.i(TAG_SIGN, "x")\n'), 'kotlin:', 'outside vtSignLog')).toBe(false)
+	})
+	it('Swift: the VtSign writer loses its #if DEBUG', () => {
+		const t = load()
+		const planted = { ...t, swift: t.swift.replace(/#if DEBUG\n(\s*NSLog\("%@", "\[VtSign\] ")/, '$1') }
+		expect(planted.swift).not.toBe(t.swift)
+		expect(has(planted, 'swift:', 'vtSignLog')).toBe(true)
+	})
+	it('Swift: a raw [VtSign] NSLog planted outside the writer', () => {
+		expect(has(plant('swift', /\n$/, '\nfunc x() { NSLog("%@", "[VtSign] leak") }\n'), 'swift:', 'outside vtSignLog')).toBe(true)
+	})
+
+	// --- round 3: CR-01 / WR-06 Swift ---
+	it('Swift: systemCancel folded back into the userCancel case', () => {
+		const t = load()
+		const planted = { ...t, swift: t.swift.replace('LAError.userCancel.rawValue, LAError.userFallback.rawValue:', 'LAError.userCancel.rawValue, LAError.systemCancel.rawValue, LAError.userFallback.rawValue:') }
+		expect(planted.swift).not.toBe(t.swift)
+		expect(has(planted, 'swift:', 'system cancel to "CANCELED"')).toBe(true)
+	})
+	it('Swift: systemCancel mapped to CANCELED in its own case', () => {
+		expect(has(plant('swift', 'code = "SYSTEM_CANCELED"', 'code = "CANCELED"'), 'swift:', 'systemCancel to "SYSTEM_CANCELED"')).toBe(true)
+	})
+	it('Swift: the vault mapping starts saying SYSTEM_CANCELED', () => {
+		expect(has(plant('swift', 'return .code("CANCELED", "authentication cancelled")', 'return .code("SYSTEM_CANCELED", "authentication cancelled")'), 'swift:', 'vault mapping')).toBe(true)
+	})
+	it('Swift: a cancelled sign no longer forced to CANCELED', () => {
+		expect(has(plant('swift', 'reject("CANCELED", "signing was cancelled", nil)\n    } else {', 'reject("SYSTEM_CANCELED", "signing was cancelled", nil)\n    } else {'), 'swift:', 'finishPendingSign')).toBe(true)
+	})
+	it('Swift: the in-flight refusal removed', () => {
+		expect(has(plant('swift', 'if pendingSign != nil || systemCallsInFlight > 0 {', 'if pendingSign != nil {'), 'swift:', 'in flight')).toBe(true)
+	})
+	it('Swift: the in-flight counter never decremented', () => {
+		expect(has(plant('swift', 'systemCallsInFlight -= 1', 'systemCallsInFlight -= 0'), 'swift:', 'count its system call')).toBe(true)
 	})
 })

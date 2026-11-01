@@ -58,6 +58,11 @@ import java.util.concurrent.atomic.AtomicBoolean
  *     specifically so the emulator-vs-hardware question 49-13 left open (whether a real device
  *     ever delivers `ERROR_CANCELED`/5 for a negative-button/BACK dismissal, versus 10/13) stays
  *     answerable from a 49-14 hardware run.
+ *     Phase 65 review CR-01 narrows this for the two persistent-key SIGN paths
+ *     ([signWithDeviceKey], [signWithRecoveryKey]) only: there `ERROR_CANCELED`/5 (the system
+ *     ended the prompt: app backgrounded, screen locked, incoming call, HAL timeout) rejects
+ *     `SYSTEM_CANCELED`, and only 10/13 reject `CANCELED`. [produceAttestation] and the vault
+ *     prompts keep mapping all three to `CANCELED`.
  *   - `LOCKOUT_PERMANENT` is now a DISTINCT recoverable-transient entry, split out from the plain
  *     `LOCKOUT` class above (different remediation copy) — [regenerateAttested]'s own mapping is
  *     NOT retroactively changed to match; it keeps collapsing both lockout codes into `LOCKOUT`.
@@ -346,7 +351,7 @@ class AttestationNativeModule(reactContext: ReactApplicationContext) :
 	) {
 		val activity = reactApplicationContext.currentActivity as? FragmentActivity
 		if (activity == null) {
-			Log.i(TAG_SIGN, "sign refused kind=DEVICE code=NO_ACTIVITY")
+			vtSignLog("sign refused kind=DEVICE code=NO_ACTIVITY")
 			promise.reject("NO_ACTIVITY", "no current FragmentActivity available to host the BiometricPrompt")
 			return
 		}
@@ -394,7 +399,7 @@ class AttestationNativeModule(reactContext: ReactApplicationContext) :
 	) {
 		val activity = reactApplicationContext.currentActivity as? FragmentActivity
 		if (activity == null) {
-			Log.i(TAG_SIGN, "sign refused kind=RECOVERY code=NO_ACTIVITY")
+			vtSignLog("sign refused kind=RECOVERY code=NO_ACTIVITY")
 			promise.reject("NO_ACTIVITY", "no current FragmentActivity available to host the recovery ceremony")
 			return
 		}

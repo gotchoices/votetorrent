@@ -21,6 +21,18 @@ internal const val BIOMETRIC_FRAGMENT_TAG = "androidx.biometric.BiometricFragmen
  */
 internal const val TAG_SIGN = "VtSign"
 
+/**
+ * Writes one [TAG_SIGN] line, in debug builds only (review WR-05). `BuildConfig.DEBUG` is this
+ * library's own flag: Gradle builds the library's debug variant into a debug app and its release
+ * variant into a release app, and it is the same gate the debug-only software key rung relies on
+ * (KeyAttestationHelper.generateKey). Release installs therefore never record when or how fast a
+ * voter confirmed a sign. Every [TAG_SIGN] line goes through here; the older `VtSigningReject`
+ * lines are not gated by this.
+ */
+internal fun vtSignLog(line: String) {
+	if (BuildConfig.DEBUG) Log.i(TAG_SIGN, line)
+}
+
 /** Which signing ceremony a [PendingSign] belongs to. Vault wrap/unwrap prompts never enter the gate. */
 internal enum class PendingSignKind { DEVICE, RECOVERY }
 
@@ -45,20 +57,20 @@ internal class SettleOnce(
 
 	fun result(hex: String): Boolean {
 		if (!settled.compareAndSet(false, true)) {
-			Log.i(TAG_SIGN, "settle dropped kind=$label outcome=signature ms=${elapsed()}")
+			vtSignLog("settle dropped kind=$label outcome=signature ms=${elapsed()}")
 			return false
 		}
-		Log.i(TAG_SIGN, "settle ok kind=$label ms=${elapsed()}")
+		vtSignLog("settle ok kind=$label ms=${elapsed()}")
 		onResult(hex)
 		return true
 	}
 
 	fun error(code: String, t: Throwable?): Boolean {
 		if (!settled.compareAndSet(false, true)) {
-			Log.i(TAG_SIGN, "settle dropped kind=$label code=$code ms=${elapsed()}")
+			vtSignLog("settle dropped kind=$label code=$code ms=${elapsed()}")
 			return false
 		}
-		Log.i(TAG_SIGN, "settle error kind=$label code=$code ms=${elapsed()}")
+		vtSignLog("settle error kind=$label code=$code ms=${elapsed()}")
 		onError(code, t)
 		return true
 	}
