@@ -11,7 +11,7 @@
  * address after that (WR-02). An unanswered consent prompt is dismissed through the native sign cancel
  * before the next one. Every dependency is injectable so the flow is tested without a device.
  * The only logging is `vtDebug` (silent unless the __DEV__ debug switch is on): the send's start and
- * end (result kind, ballot counts, duration) and an abandoned-before-sign consent; never a record,
+ * end (result kind, ballot counts, duration) and a consent abandoned before the native sign; never a record,
  * key, signature, address or error text.
  */
 import {multiaddr} from '@multiformats/multiaddr';
@@ -24,7 +24,7 @@ import {
 } from '@votetorrent/vote-engine/rn';
 import type {PoolRendezvousClient} from '@votetorrent/vote-engine/rn';
 import {cancelPendingSign} from '@votetorrent/attestation-native';
-import type {SecretWrapPrompt} from '@votetorrent/attestation-native';
+import type {SecretWrapPrompt, SignDeviceKeyDigestOptions} from '@votetorrent/attestation-native';
 import {revealVoteReceipt} from './vote-receipt';
 import type {VoteRecordEnvelope} from './vote-record-vault';
 import {readJoinBootstrap} from './join-bootstrap';
@@ -165,17 +165,23 @@ async function runVoteSendFlowSteps(deps: VoteSendFlowDeps): Promise<VoteSendFlo
 	const producer = resolveVoteSigningProducer(deps.producer);
 	const signConsent = async (digest: string, signal?: AbortSignal): Promise<string> => {
 		const bytes = digestBytesFromBase64Url(digest);
-		// WR-04: a consent the pool abandoned after the queue started it, but before the native sign, is
-		// never raised (no orphan prompt). This is the last point the app controls; the window left is
-		// the producer's own work before the native call (a read-only device-key lookup on the first
-		// sign) and the bridge hop. Closing it, and making the queue's cancel match only its own sign,
-		// needs a per-sign native token.
-		if (signal?.aborted === true) {
-			vtDebug('send', 'consent-abandoned-before-sign');
-			throw new ConsentAbandonedError('abandoned');
+		// WR-01: the pool's abandon signal goes to the producer, which checks it after its own awaits
+		// (the device-key lookup on the first sign) and right before the native call. A consent the pool
+		// abandoned while that lookup was pending then rejects ABORTED and never raises a prompt (no
+		// orphan prompt holding the gate). A check here could never fire: the queue starts the signer
+		// synchronously and drops calls abandoned while queued. The bridge hop itself is still open;
+		// closing it, and making the queue's cancel match only its own sign, needs a per-sign native token.
+		const options: SignDeviceKeyDigestOptions & {signal?: AbortSignal} = {prompt: deps.consentPrompt, signal};
+		try {
+			const signed = await producer.signDeviceKeyDigest(bytes, options);
+			return signed.signature;
+		} catch (err) {
+			if ((err as {code?: unknown} | null)?.code === 'ABORTED') {
+				vtDebug('send', 'consent-abandoned-before-native');
+				throw new ConsentAbandonedError('abandoned');
+			}
+			throw err;
 		}
-		const signed = await producer.signDeviceKeyDigest(bytes, {prompt: deps.consentPrompt});
-		return signed.signature;
 	};
 	let result: SendSavedVoteResult;
 	try {

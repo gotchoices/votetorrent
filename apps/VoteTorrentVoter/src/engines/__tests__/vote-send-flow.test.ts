@@ -4,7 +4,7 @@
  * answers (a failover client over lazily built per-address clients), probes with a throwaway pool
  * key before the first fingerprint prompt, reports the distinct `rendezvous-unreachable` kind when
  * nothing answers, opens the sealed record once, signs consent with the voting key through the
- * producer, and maps every failure to a closed kind.
+ * producer (handing it the pool's abandon signal, WR-01), and maps every failure to a closed kind.
  */
 jest.mock('@votetorrent/attestation-native', () => ({cancelPendingSign: jest.fn(async () => false)}));
 jest.mock('../vote-receipt', () => ({revealVoteReceipt: jest.fn()}));
@@ -30,6 +30,8 @@ import {createFailoverRendezvousClient, createLibp2pRendezvousClient, createPool
 import {sendSavedVote} from '../vote-sending';
 import {runVoteSendFlow} from '../vote-send-flow';
 import type {VoteSendFlowDeps} from '../vote-send-flow';
+// the REAL consent queue, from the vote-engine source (the rn entry is mocked above)
+const {createConsentQueue} = jest.requireActual('../../../../../packages/vote-engine/src/pool/consent-queue') as typeof import('../../../../../packages/vote-engine/src/pool/consent-queue');
 
 const prompt = {title: 't', subtitle: 's', negativeButton: 'n'};
 const control = {dialProtocol: jest.fn(), handle: jest.fn()};
@@ -80,9 +82,13 @@ describe('runVoteSendFlow (spike 102)', () => {
 	it('signs consent with the voting key and the consent prompt', async () => {
 		const d = deps();
 		await runVoteSendFlow(d);
-		const signConsent = (sendSavedVote as jest.Mock).mock.calls[0][0].signConsent as (digest: string) => Promise<string>;
+		const signConsent = (sendSavedVote as jest.Mock).mock.calls[0][0].signConsent as (digest: string, signal?: AbortSignal) => Promise<string>;
 		expect(await signConsent('A'.repeat(43))).toBe('sig-hex');
-		expect((d.producer as unknown as {signDeviceKeyDigest: jest.Mock}).signDeviceKeyDigest).toHaveBeenCalledWith(expect.any(Uint8Array), {prompt: d.consentPrompt});
+		expect((d.producer as unknown as {signDeviceKeyDigest: jest.Mock}).signDeviceKeyDigest).toHaveBeenCalledWith(expect.any(Uint8Array), {prompt: d.consentPrompt, signal: undefined});
+		// the pool's abandon signal reaches the producer (WR-01)
+		const ac = new AbortController();
+		await signConsent('A'.repeat(43), ac.signal);
+		expect((d.producer as unknown as {signDeviceKeyDigest: jest.Mock}).signDeviceKeyDigest).toHaveBeenLastCalledWith(expect.any(Uint8Array), {prompt: d.consentPrompt, signal: ac.signal});
 	});
 
 	it('passes attestation-native\'s cancelPendingSign to sending by default', async () => {
@@ -105,18 +111,48 @@ describe('runVoteSendFlow (spike 102)', () => {
 		await expect(signConsent('A'.repeat(43))).rejects.toBe(busy);
 	});
 
-	it('a consent abandoned before the native sign never reaches the signer (WR-04)', async () => {
-		const d = deps();
+	it('a consent abandoned while the device-key lookup is pending never reaches the native sign (WR-01)', async () => {
+		// A producer honouring the SignDeviceKeyDigestOptions.signal contract: the first sign awaits the
+		// device-key lookup, then checks the signal right before the native call (ABORTED, no native call).
+		let lookupDone!: () => void;
+		const lookup = new Promise<void>((resolve) => { lookupDone = resolve; });
+		const nativeSign = jest.fn(async () => ({signatureHex: 'sig-hex'}));
+		const producer = {
+			signDeviceKeyDigest: jest.fn(async (_bytes: Uint8Array, options?: {signal?: AbortSignal}) => {
+				await lookup;
+				if (options?.signal?.aborted === true) throw Object.assign(new Error('aborted'), {name: 'AbortError', code: 'ABORTED'});
+				const r = await nativeSign();
+				return {signature: r.signatureHex, signerKey: 'k'};
+			}),
+		};
+		await runVoteSendFlow(deps({producer: producer as never}));
+		const signConsent = (sendSavedVote as jest.Mock).mock.calls[0][0].signConsent as (digest: string, signal?: AbortSignal) => Promise<string>;
+		// the real queue, wired the way sendSavedVote wires it: the call's signal is the signer's signal
+		let own: Promise<string> | undefined;
+		const queue = createConsentQueue((digest: string, signal?: AbortSignal) => (own = signConsent(digest, signal)), {cancel: async () => false});
+		const ac = new AbortController();
+		const caller = queue.withControl({signal: ac.signal}, 'A'.repeat(43), ac.signal);
+		const callerSettled = caller.then(() => 'resolved', (err: unknown) => err);
+		// the queue started the signer synchronously; its lookup is still pending
+		expect(producer.signDeviceKeyDigest).toHaveBeenCalledTimes(1);
+		expect(own).toBeDefined();
+		const ownSettled = own!.then(() => 'resolved', (err: unknown) => err);
+		ac.abort();
+		lookupDone();
+		expect(await callerSettled).toMatchObject({name: 'ConsentAbandonedError', reason: 'abandoned'});
+		expect(await ownSettled).toMatchObject({name: 'ConsentAbandonedError', reason: 'abandoned'});
+		expect(nativeSign).not.toHaveBeenCalled();
+		// a live call signs as before
+		expect(await queue.withControl({signal: new AbortController().signal}, 'A'.repeat(43), new AbortController().signal)).toBe('sig-hex');
+		expect(nativeSign).toHaveBeenCalledTimes(1);
+	});
+
+	it('a producer that rejects ABORTED is an abandoned consent (WR-01)', async () => {
+		const aborted = Object.assign(new Error('aborted'), {name: 'AbortError', code: 'ABORTED'});
+		const d = deps({producer: {signDeviceKeyDigest: jest.fn(async () => { throw aborted; })} as never});
 		await runVoteSendFlow(d);
 		const signConsent = (sendSavedVote as jest.Mock).mock.calls[0][0].signConsent as (digest: string, signal?: AbortSignal) => Promise<string>;
-		const ac = new AbortController();
-		ac.abort();
-		await expect(signConsent('A'.repeat(43), ac.signal)).rejects.toMatchObject({name: 'ConsentAbandonedError', reason: 'abandoned'});
-		const sign = (d.producer as unknown as {signDeviceKeyDigest: jest.Mock}).signDeviceKeyDigest;
-		expect(sign).not.toHaveBeenCalled();
-		// a live signal signs as before
-		expect(await signConsent('A'.repeat(43), new AbortController().signal)).toBe('sig-hex');
-		expect(sign).toHaveBeenCalledTimes(1);
+		await expect(signConsent('A'.repeat(43))).rejects.toMatchObject({name: 'ConsentAbandonedError', reason: 'abandoned'});
 	});
 
 	it('refuses before any prompt with no network or no rendezvous', async () => {
