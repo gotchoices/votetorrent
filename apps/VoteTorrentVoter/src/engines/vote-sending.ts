@@ -96,6 +96,8 @@ export interface SendSavedVoteDeps {
 	cancelSign?: () => Promise<unknown>
 	/** test seam: the consent queue's minimum prompt window (default POOL_MIN_PROMPT_MS) */
 	minPromptMs?: number
+	/** whether a consent prompt can be shown now (the app is in the foreground); handed to the pool agent */
+	canPrompt?: () => boolean
 	/** test seam: agent timing overrides */
 	agentOptions?: Partial<PoolAgentOptions>
 	/** test seam: the throwaway pool identity for a ballot (default: a fresh one per ballot) */
@@ -148,9 +150,9 @@ export const ABANDONED_CONSENT_SIGN_CODES: readonly string[] = ['SYSTEM_CANCELED
  * Native sign codes for transient device trouble: released like an abandoned consent, but counted
  * toward CONSENT_TRANSIENT_RETRY_CAP, because a failure that never clears would otherwise re-form the
  * pool until voting closes. PROMPT_BUSY: another prompt was already showing (D-112). BIOMETRIC_ERROR:
- * the prompt silently did not start, or another platform error (the native catch-all). LOCKOUT: the
- * temporary biometric lockout (Android ERROR_LOCKOUT, about 30 s after five failed reads; iOS
- * biometryLockout maps here too, and the cap bounds it).
+ * a platform error (the native catch-all: a timeout, the hardware unavailable). LOCKOUT: the
+ * temporary biometric lockout (Android ERROR_LOCKOUT, about 30 s after five failed reads). iOS
+ * biometryLockout reaches JS as LOCKOUT_PERMANENT (it needs the passcode) and is a decline.
  */
 export const TRANSIENT_CONSENT_SIGN_CODES: readonly string[] = ['PROMPT_BUSY', 'BIOMETRIC_ERROR', 'LOCKOUT'];
 
@@ -192,6 +194,16 @@ export function classifyConsentSignFailure(err: unknown): 'abandoned' | 'transie
  */
 export const CONSENT_TRANSIENT_RETRY_CAP = 3;
 
+/**
+ * A backstop for the uncounted SYSTEM_CANCELED / NO_ACTIVITY failures of one ballot (review round 4).
+ * The pool agent no longer forms or prompts while the app is in the background (canPrompt), so these
+ * should be rare; but a device that reports the voter's Back dismissal as the system-cancel error, or
+ * a phone whose prompt the OS keeps taking away in the foreground, would otherwise re-form forever.
+ * Past this many, the next one is passed on as a decline.
+ */
+export const SYSTEM_CANCEL_BACKSTOP = 5;
+const BACKSTOPPED_CONSENT_SIGN_CODES: readonly string[] = ['SYSTEM_CANCELED', 'NO_ACTIVITY'];
+
 function errorCode(err: unknown): string {
 	const code = (err as {code?: unknown} | null)?.code;
 	if (typeof code === 'string') return code;
@@ -223,6 +235,7 @@ export async function sendSavedVote(deps: SendSavedVoteDeps): Promise<SendSavedV
 	// at most CONSENT_TRANSIENT_RETRY_CAP times per ballot (member and former share the budget); after
 	// that the failure is passed on as a decline.
 	const transientFailures = new Map<string, number>();
+	const systemCancels = new Map<string, number>();
 	const consentSign = async (digest: string, signal: AbortSignal | undefined, ballotId: string): Promise<string> => {
 		try {
 			return await deps.signConsent(digest, signal);
@@ -235,6 +248,14 @@ export async function sendSavedVote(deps: SendSavedVoteDeps): Promise<SendSavedV
 			const code = errorCode(err);
 			const cls = classifyConsentSignFailure(err);
 			if (cls === 'abandoned') {
+				if (BACKSTOPPED_CONSENT_SIGN_CODES.includes(code)) {
+					const n = (systemCancels.get(ballotId) ?? 0) + 1;
+					systemCancels.set(ballotId, n);
+					if (n > SYSTEM_CANCEL_BACKSTOP) {
+						vtDebug('send', 'consent-sign-failed', {ballot, code, class: 'decline', n, backstop: true});
+						throw err;
+					}
+				}
 				vtDebug('send', 'consent-sign-failed', {ballot, code, class: 'abandoned'});
 				throw new ConsentAbandonedError('abandoned');
 			}
@@ -310,6 +331,7 @@ export async function sendSavedVote(deps: SendSavedVoteDeps): Promise<SendSavedV
 			onStatus: (s) => { const mapped = toStatus(s); if (mapped !== null) report(ballotId, mapped); },
 			// debug only (silent unless the __DEV__ switch is on); a test's agentOptions.log replaces it
 			log: (event, detail) => vtDebug('pool', event, {ballot: idPrefix(ballotId), ...poolLogDetail(detail)}),
+			...(deps.canPrompt !== undefined ? {canPrompt: deps.canPrompt} : {}),
 			...deps.agentOptions,
 		});
 		let outcome: PoolOutcome;

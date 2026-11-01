@@ -741,7 +741,11 @@ class AttestationNativeModule: NSObject {
   /// CANCELED, as the spec says.
   ///
   /// Like Android's `take()`, the slot is cleared under the lock at once (review WR-03), so the
-  /// next sign can never be refused PROMPT_BUSY because this one's system call is slow to return.
+  /// cancelled sign's JS promise settles and JS is answered honestly. A new sign is still refused
+  /// PROMPT_BUSY (fast, never a silent wait) for as long as the old `SecKeyCreateSignature` has not
+  /// returned (`systemCallsInFlight`, review WR-06), after a capped cancel and an uncapped one alike.
+  /// The pool's consent queue awaits the cancel and re-pools on PROMPT_BUSY; another caller signing
+  /// in that short window sees its existing sign-failed path.
   /// `canceled = true` (set in the same lock) guarantees the old sign can only reject CANCELED.
   /// `invalidate()` normally ends `SecKeyCreateSignature` with LAError.appCancel within the 2 s
   /// wait (unproven on device). If the cap runs out first, the promise is rejected CANCELED here

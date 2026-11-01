@@ -72,7 +72,8 @@ export async function readSavedVoteStatus(
  * marker and the sent store (no engine read), so a screen coming back from a send can show the new
  * line at once while the full read, which waits on the strand, is still on its way:
  * - a line shown as saved whose every marker ballot is now in the sent store reads sent;
- * - a line shown as none (or nothing shown yet, the usual path vote -> Submit -> Send -> Done -> Home)
+ * - a line shown as none (the usual path vote -> Submit -> Send -> Done -> Home; nothing shown yet, a
+ *   cold start, returns null and waits for the full read)
  *   reads sent when the marker exists and every marker ballot is in the sent store. It never upgrades
  *   none to saved: this read has not checked the election's revision, and a saved line built from it
  *   would flash the "couldn't check whether the election has changed" caption on every return,
@@ -86,7 +87,10 @@ export async function readSentSinceShown(
 	electionId: string,
 	shown: SavedVoteStatus | undefined,
 ): Promise<{ state: 'sent' } | null> {
-	const from = shown?.state ?? 'none'
+	// Nothing shown yet (a cold start, the first focus) waits for the full read: only a line this screen
+	// already showed may be upgraded, so a stale or unreadable vote never flashes sent on launch.
+	if (shown === undefined) return null
+	const from = shown.state
 	if (from !== 'saved' && from !== 'none') return null
 	try {
 		const markerCls = await readVoteMarker(electionId)

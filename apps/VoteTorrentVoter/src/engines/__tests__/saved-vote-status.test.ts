@@ -377,12 +377,12 @@ describe('readSavedVoteStatus', () => {
 			}
 		})
 
-		it('WR-03: a none line or nothing shown, with every marker ballot sent, reads sent (no engine read, no write)', async () => {
+		it('WR-03: a none line with every marker ballot sent reads sent (no engine read, no write); nothing shown yet (cold start) waits for the full read', async () => {
 			await save(makeRecord({ electionRevision: 2 }))
 			await recordVoteSent(E, 2, 'ballot-1', 'cid-1')
 			clearStorageSpies()
 			await expect(readSentSinceShown(E, { state: 'none' })).resolves.toEqual({ state: 'sent' })
-			await expect(readSentSinceShown(E, undefined)).resolves.toEqual({ state: 'sent' })
+			await expect(readSentSinceShown(E, undefined)).resolves.toBeNull()
 			expectNoWrites()
 		})
 

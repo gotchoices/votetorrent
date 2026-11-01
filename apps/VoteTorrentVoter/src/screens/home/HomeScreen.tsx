@@ -170,10 +170,11 @@ export default function HomeScreen() {
 	//
 	// UAT 65 gap 2: the full read waits on the strand's election read before it looks at the sent
 	// store, and the first return to Home right after a send kept "not sent" on screen for 9 s or
-	// more. So a saved line, and a none line or nothing shown (WR-03: the usual path vote -> Submit ->
-	// Send -> Done -> Home left Home's pre-vote line), are first checked against the marker and the
-	// sent store alone (no engine read): saved turns sent, none turns saved or sent at once. The full
-	// read still lands after it and has the last word.
+	// more. So a saved line, and a none line (WR-03: the usual path vote -> Submit -> Send -> Done ->
+	// Home left Home's pre-vote line), are first checked against the marker and the sent store alone
+	// (no engine read): either turns sent at once when every ballot is in the sent store, and nothing
+	// else changes early. Nothing shown yet (a cold start) waits for the full read, which always lands
+	// after the fast one and has the last word.
 	const electionId = election?.id;
 	useFocusEffect(
 		useCallback(() => {

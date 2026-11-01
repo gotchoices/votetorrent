@@ -96,6 +96,25 @@ describe('runVoteSendFlow (spike 102)', () => {
 		expect((sendSavedVote as jest.Mock).mock.calls[0][0].cancelSign).toBe(cancelPendingSign);
 	});
 
+	it('by default sending can prompt only while the app is in the foreground (AppState active)', async () => {
+		const {AppState} = jest.requireActual('react-native') as typeof import('react-native');
+		await runVoteSendFlow(deps());
+		const canPrompt = (sendSavedVote as jest.Mock).mock.calls[0][0].canPrompt as () => boolean;
+		expect(typeof canPrompt).toBe('function');
+		const state = AppState as unknown as {currentState: string};
+		const before = state.currentState;
+		try {
+			state.currentState = 'active';
+			expect(canPrompt()).toBe(true);
+			state.currentState = 'background';
+			expect(canPrompt()).toBe(false);
+			state.currentState = 'inactive';
+			expect(canPrompt()).toBe(false);
+		} finally {
+			state.currentState = before;
+		}
+	});
+
 	it('an injected cancelSign is the one that reaches sending', async () => {
 		const fake = jest.fn(async () => true);
 		await runVoteSendFlow(deps({cancelSign: fake}));

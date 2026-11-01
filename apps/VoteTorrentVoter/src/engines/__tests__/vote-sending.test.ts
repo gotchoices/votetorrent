@@ -15,7 +15,7 @@ import {
 	type PoolRendezvousClient,
 } from '@votetorrent/vote-engine/rn';
 import {ConsentAbandonedError} from '@votetorrent/vote-engine/rn';
-import {CONSENT_TRANSIENT_RETRY_CAP, classifyConsentSignFailure, sendSavedVote, statusForOutcome, type BallotSendStatus, type VoteSendingPort, type VoteSentStore} from '../vote-sending';
+import {CONSENT_TRANSIENT_RETRY_CAP, SYSTEM_CANCEL_BACKSTOP, classifyConsentSignFailure, sendSavedVote, statusForOutcome, type BallotSendStatus, type VoteSendingPort, type VoteSentStore} from '../vote-sending';
 import type {VoteRecord} from '../vote-record-vault';
 
 const electionSecret = secp256k1.utils.randomSecretKey();
@@ -369,7 +369,14 @@ describe('sendSavedVote transient consent-sign retry cap', () => {
 		expect(CONSENT_TRANSIENT_RETRY_CAP).toBe(3);
 	});
 
-	it.each(['BIOMETRIC_ERROR', 'LOCKOUT', 'PROMPT_BUSY'] as const)('a former whose sign always rejects %s ends not-sent stopped after exactly 4 sign attempts', async (failCode) => {
+	it.each([
+		['BIOMETRIC_ERROR', CONSENT_TRANSIENT_RETRY_CAP + 1],
+		['LOCKOUT', CONSENT_TRANSIENT_RETRY_CAP + 1],
+		['PROMPT_BUSY', CONSENT_TRANSIENT_RETRY_CAP + 1],
+		// review round 4: the uncounted system cancels have their own, larger backstop
+		['SYSTEM_CANCELED', SYSTEM_CANCEL_BACKSTOP + 1],
+		['NO_ACTIVITY', SYSTEM_CANCEL_BACKSTOP + 1],
+	] as const)('a former whose sign always rejects %s ends not-sent stopped after exactly %i sign attempts', async (failCode, expectedAttempts) => {
 		const rv = new PoolRendezvous();
 		const strand = fakeStrand(Date.now() + 20_000);
 		// one ballot, so every sign attempt of voter 1 belongs to the same ballot
@@ -406,7 +413,7 @@ describe('sendSavedVote transient consent-sign retry cap', () => {
 		expect(first).not.toBe('stalled');
 		expect(all).not.toBe('stalled');
 		expect(first).toEqual({ok: true, ballots: [{ballotId: 'ballot-a', status: {phase: 'not-sent', reason: 'stopped'}}]});
-		expect(attempts).toBe(CONSENT_TRANSIENT_RETRY_CAP + 1);
+		expect(attempts).toBe(expectedAttempts);
 		expect(strand.commits).toEqual([]);
 		expect(stores[1]!.data[ELECTION]).toBeUndefined();
 	});
