@@ -491,6 +491,27 @@ describe('pool agent: a member aborts an unanswered consent at the bound (D-114,
     }
   })
 
+  it('a former that releases the pool while the member\'s prompt is showing gets that prompt cancelled at once', async () => {
+    // The consent bound is ~19.6 s away, so a cancel within 1 s of the outcome can only come from the
+    // release itself. The member then pools alone, and the next form prompts exactly once more.
+    const a = mk('a')
+    const native = fakeNative((n) => (n === 1 ? null : 0), () => a.priv)
+    const h = await memberHarness(native, a, { signTimeoutMs: 20_000 })
+    try {
+      const block = formPoolBlock([a.contribution, mk('x').contribution, mk('y').contribution], ballot)
+      await h.c.send(a.identity.peerId, { t: 'form', id: 'f-1', topic: h.topic, block })
+      expect(await until(() => native.starts.length === 1, 3_000), 'the member prompt is showing').to.equal(true)
+      const releasedAt = Date.now()
+      await h.c.send(a.identity.peerId, { t: 'outcome', topic: h.topic, committed: false, reason: 'the former did not answer in time' })
+      expect(await until(() => native.stats().cancels === 1, 3_000), 'cancel called').to.equal(true)
+      expect(Date.now() - releasedAt, 'cancel after the release (ms)').to.be.below(1_000)
+      expect(h.c.inbox.some(m => m.body.t === 'sign'), 'no sign sent').to.equal(false)
+      expect(native.starts, 'one prompt only').to.have.length(1)
+    } finally {
+      await h.stop()
+    }
+  })
+
   it('IN-03: a re-sent form refreshes a still-queued consent to the new form\'s deadline; the first form is refused at its own bound', async () => {
     // The phone's queue is held by another prompt past f-1's bound, and released before f-2's. One
     // shared consent: f-1 is refused at its bound, the consent stays queued, then prompts and signs f-2.

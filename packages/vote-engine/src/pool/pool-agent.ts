@@ -422,6 +422,7 @@ export class PoolAgent {
   }
 
   private becomeMemberOf (coordinator: string): void {
+    if (this.consent !== null && this.consent.from !== coordinator) this.releaseMemberConsent('new coordinator')
     // The members of the pool given away learn who holds them now; nobody else can re-parent them.
     const handed = this.pool.filter(c => c.member !== this.me)
     this.confirmed.clear()
@@ -436,7 +437,24 @@ export class PoolAgent {
     this.status()
   }
 
+  /**
+   * A member's live consent belongs to the pool it was asked for. When that pool is gone (the former
+   * released it, this voter went solo, or it was handed to another former) the consent is aborted so
+   * the queue cancels a prompt that is still showing, instead of leaving it up until its bound.
+   * A consent that already settled is unaffected (aborting it is a no-op in the queue).
+   */
+  private releaseMemberConsent (why: string): void {
+    const c = this.consent
+    if (c === null) return
+    this.consent = null
+    if (!c.controller.signal.aborted) {
+      this.log('consent-released', { why, started: c.state.started })
+      c.controller.abort()
+    }
+  }
+
   private revertToSolo (why: string): void {
+    this.releaseMemberConsent(why)
     this.confirmed.clear()
     this.role = 'coordinator'
     this.coordinator = null

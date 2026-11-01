@@ -70,6 +70,11 @@ export interface ConsentQueueOptions {
   /** a call that would start with less time than this before its deadline is rejected 'no-time' (default 0) */
   minPromptMs?: number
   now?: () => number
+  /**
+   * Debug observer: start, skip, cancel and settle decisions with timings. Detail carries reasons,
+   * counts and milliseconds only, never the call's arguments. A throwing observer is ignored.
+   */
+  log?: (event: string, detail?: Record<string, unknown>) => void
 }
 
 export type ConsentQueue<A extends unknown[], R> = ((...args: A) => Promise<R>) & {
@@ -98,6 +103,9 @@ export function createConsentQueue<A extends unknown[], R> (
   const cancel = options?.cancel
   const minPromptMs = options?.minPromptMs ?? 0
   const now = options?.now ?? (() => Date.now())
+  const log = (event: string, detail?: Record<string, unknown>): void => {
+    try { options?.log?.(event, detail) } catch { /* an observer must not change the queue */ }
+  }
   let running: Entry<A, R> | null = null
   let waiting: Array<Entry<A, R>> = []
   let arrivals = 0
@@ -121,22 +129,25 @@ export function createConsentQueue<A extends unknown[], R> (
   const abandonRunning = (e: Entry<A, R>, reason: ConsentAbandonReason): void => {
     if (e.settled) return
     reject(e, reason)
+    log('queue-abandon-running', { reason, cancel: cancel !== undefined, waiting: waiting.length })
     if (cancel !== undefined) {
       clearTimer(e)
       e.cancelling = true
       let done = false
       let cap: ReturnType<typeof setTimeout> | undefined
-      const finish = (): void => {
+      const cancelAt = now()
+      const finish = (capped: boolean): void => {
         if (done) return
         done = true
         if (cap !== undefined) clearTimeout(cap)
+        log('queue-cancel-done', { ms: now() - cancelAt, capped })
         release(e)
       }
-      cap = setTimeout(finish, CANCEL_WAIT_CAP_MS)
+      cap = setTimeout(() => finish(true), CANCEL_WAIT_CAP_MS)
       try {
-        Promise.resolve(cancel()).then(finish, finish)
+        Promise.resolve(cancel()).then(() => finish(false), () => finish(false))
       } catch {
-        finish()
+        finish(false)
       }
     } else if (reason === 'expired') {
       release(e)
@@ -148,6 +159,8 @@ export function createConsentQueue<A extends unknown[], R> (
   const start = (e: Entry<A, R>): void => {
     running = e
     const deadlineAt = e.ctl.deadlineAt
+    const startedAt = now()
+    log('queue-start', { leftMs: deadlineAt !== undefined ? deadlineAt - startedAt : null, waiting: waiting.length })
     if (deadlineAt !== undefined || bounded) {
       const delay = deadlineAt !== undefined ? Math.max(0, deadlineAt - now()) : holdMs!
       e.timer = setTimeout(() => {
@@ -164,9 +177,12 @@ export function createConsentQueue<A extends unknown[], R> (
       pending = Promise.reject(err)
     }
     pending.then((value) => {
+      log('queue-settled', { ok: true, ms: now() - startedAt, late: e.settled })
       if (!e.settled) { e.settled = true; unhook(e); e.resolve(value) }
       if (!e.cancelling) release(e)
     }, (err) => {
+      const code = (err as { code?: unknown } | null)?.code
+      log('queue-settled', { ok: false, ms: now() - startedAt, late: e.settled, code: typeof code === 'string' ? code : null })
       if (!e.settled) { e.settled = true; unhook(e); e.reject(err) }
       if (!e.cancelling) release(e)
     })
@@ -186,7 +202,7 @@ export function createConsentQueue<A extends unknown[], R> (
       waiting = waiting.filter((_, i) => i !== best)
       if (e.ctl.deadlineAt !== undefined) {
         const left = e.ctl.deadlineAt - now()
-        if (left <= 0 || left < minPromptMs) { reject(e, 'no-time'); continue }
+        if (left <= 0 || left < minPromptMs) { log('queue-skip', { reason: 'no-time', leftMs: left }); reject(e, 'no-time'); continue }
       }
       start(e)
     }
@@ -212,7 +228,7 @@ export function createConsentQueue<A extends unknown[], R> (
           if (e.settled) return
           if (running === e) { abandonRunning(e, 'abandoned'); return }
           const at = waiting.indexOf(e)
-          if (at >= 0) { waiting = waiting.filter((x) => x !== e); reject(e, 'abandoned') }
+          if (at >= 0) { waiting = waiting.filter((x) => x !== e); log('queue-skip', { reason: 'abandoned' }); reject(e, 'abandoned') }
         }
         control.signal.addEventListener('abort', e.onAbort)
       }
