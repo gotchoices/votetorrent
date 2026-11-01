@@ -39,9 +39,28 @@ export async function readVoteSent(electionId: string, electionRevision: number)
 	}
 }
 
+/** the last write per election key: writes to one key run one after another */
+const writeChains = new Map<string, Promise<void>>();
+
+/**
+ * Add one sent ballot. A read-modify-write, so writes to one election are chained: sending pools every
+ * ballot in parallel, and two ballots that land together used to read the same old state, so the
+ * second write dropped the first ballot and Home kept "not sent" while the ballot screen said Sent.
+ */
 export async function recordVoteSent(electionId: string, electionRevision: number, ballotId: string, cid: string): Promise<void> {
-	const ballots = await readVoteSent(electionId, electionRevision);
-	ballots[ballotId] = cid;
-	const state: VoteSentState = {electionRevision, ballots};
-	await AsyncStorage.setItem(voteSentKey(electionId), JSON.stringify(state));
+	const key = voteSentKey(electionId);
+	const write = async (): Promise<void> => {
+		const ballots = await readVoteSent(electionId, electionRevision);
+		ballots[ballotId] = cid;
+		const state: VoteSentState = {electionRevision, ballots};
+		await AsyncStorage.setItem(key, JSON.stringify(state));
+	};
+	const next = (writeChains.get(key) ?? Promise.resolve()).then(write, write);
+	const tail = next.catch(() => undefined);
+	writeChains.set(key, tail);
+	try {
+		await next;
+	} finally {
+		if (writeChains.get(key) === tail) writeChains.delete(key);
+	}
 }

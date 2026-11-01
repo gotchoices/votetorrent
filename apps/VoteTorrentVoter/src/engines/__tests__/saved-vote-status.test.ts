@@ -14,7 +14,7 @@ import { loadVoteReceipt, type ReceiptElection } from '../vote-receipt'
 import { readSavedVoteStatus, type SavedVoteStatus } from '../saved-vote-status'
 import { buildVoteMarker, deriveSavedVoteState, readVoteMarker, voteMarkerKey, voteRecordKey, writeVoteRecord } from '../vote-record-store'
 import * as vault from '../vote-record-vault'
-import { recordVoteSent } from '../vote-sent-store'
+import { readVoteSent, recordVoteSent } from '../vote-sent-store'
 import { createVoteRecordWrapProvider, setVoteRecordWrapProviderForTests } from '../vote-record-wrap'
 
 const PROMPT: SecretWrapPrompt = { title: 'Save your vote', subtitle: 'Use your fingerprint to protect your saved vote', negativeButton: 'Cancel' }
@@ -268,6 +268,18 @@ describe('readSavedVoteStatus', () => {
 			await recordVoteSent(E, 2, 'ballot-1', 'cid-1')
 			await expect(readSavedVoteStatus(deps, 1, E, reading(2))).resolves.toEqual({ state: 'saved', revisionKnown: true })
 			await recordVoteSent(E, 2, 'ballot-2', 'cid-2')
+			await expect(readSavedVoteStatus(deps, 1, E, reading(2))).resolves.toEqual({ state: 'sent' })
+		})
+
+		it('two ballots recorded at the same moment are both kept, so the vote reads sent (lost update)', async () => {
+			// sendSavedVote pools every ballot in parallel and records each as it lands; two that land
+			// together must not overwrite each other in the sent store
+			const record = makeRecord({ electionRevision: 2 })
+			record.votes.push({ ...record.votes[0], ballotId: 'ballot-2', nonce: randHex(32) })
+			record.voter.ballots.push({ ballotId: 'ballot-2', templateDigest: 'td' })
+			await save(record)
+			await Promise.all([recordVoteSent(E, 2, 'ballot-1', 'cid-1'), recordVoteSent(E, 2, 'ballot-2', 'cid-2')])
+			await expect(readVoteSent(E, 2)).resolves.toEqual({ 'ballot-1': 'cid-1', 'ballot-2': 'cid-2' })
 			await expect(readSavedVoteStatus(deps, 1, E, reading(2))).resolves.toEqual({ state: 'sent' })
 		})
 
