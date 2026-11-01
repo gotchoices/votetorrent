@@ -2,7 +2,10 @@
  * sign-cancel-abi.gate.test.ts - the new native cancel export and the busy reject code must agree
  * across the four ABI layers (codegen spec, Kotlin override, Swift selector, ObjC extern) plus the
  * JS barrel, and both platforms' device-key and recovery-key sign paths must reach the busy
- * rejection. Sibling of review-native-abi.gate.test.ts and secret-wrap-abi.gate.test.ts; same
+ * rejection. On Kotlin that means a `settle.error("PROMPT_BUSY", ...)` call inside the path's own
+ * body, in the `if (pending == null)` block that follows `tryReserve(` and in the block that refuses
+ * when a BiometricFragment is already attached; a reservation that returns without settling (a
+ * hang) does not count (review IN-02). Sibling of review-native-abi.gate.test.ts and secret-wrap-abi.gate.test.ts; same
  * comment-stripping approach. The comparator is pure, so the planted-mismatch self-tests prove
  * the gate can fail, and a pattern that appears only in a comment never satisfies it.
  *
@@ -22,8 +25,8 @@ const REPO_ROOT = resolve(__dirname, '..', '..', '..', '..', '..')
 const PKG = join(REPO_ROOT, 'packages', 'attestation-native')
 const KOTLIN_DIR = join(PKG, 'android', 'src', 'main', 'java', 'org', 'votetorrent', 'attestationnative')
 
-/** Markers a sign path may use to reach the busy rejection: the literal, or the gate reservation 65-20 landed. */
-const KOTLIN_BUSY_MARKERS = ['"PROMPT_BUSY"', 'pendingSignGate.tryReserve(']
+/** The busy settle a Kotlin sign path must make: the literal code passed to settle-once's error. */
+const KOTLIN_BUSY_SETTLE = /\bsettle\.error\(\s*"PROMPT_BUSY"/
 
 interface Texts {
 	spec: string
@@ -81,8 +84,32 @@ function docBefore(raw: string, methodName: string): string | undefined {
 	return head.slice(start, end + 2)
 }
 
-function hasMarker(text: string): boolean {
-	return KOTLIN_BUSY_MARKERS.some((m) => text.includes(m))
+/** Brace-balanced block of the first `if (...)` matching [cond] at or after [from] in [text]. */
+function ifBlock(text: string, cond: RegExp, from = 0): string | undefined {
+	const tail = text.slice(from)
+	const m = cond.exec(tail)
+	if (!m) return undefined
+	return body(tail.slice(m.index), /^/)
+}
+
+/**
+ * Problems with one Kotlin sign path's busy handling, read from that path's own function bodies:
+ * the body that reserves the gate must settle PROMPT_BUSY in the null branch right after
+ * `tryReserve(`, and must settle PROMPT_BUSY when a fragment is already attached.
+ */
+function kotlinBusyProblems(label: string, bodies: Array<string | undefined>): string[] {
+	const own = bodies.find((b) => b?.includes('tryReserve('))
+	if (own === undefined) return [`kotlin: the ${label} sign path never reaches the busy rejection (no tryReserve( in its own body)`]
+	const out: string[] = []
+	const nullBranch = ifBlock(own, /if\s*\(\s*pending\s*==\s*null\s*\)/, own.indexOf('tryReserve('))
+	if (nullBranch === undefined || !KOTLIN_BUSY_SETTLE.test(nullBranch)) {
+		out.push(`kotlin: the ${label} sign path never reaches the busy rejection (no settle.error("PROMPT_BUSY" in the null branch after tryReserve()`)
+	}
+	const showing = ifBlock(own, /if\s*\(\s*isBiometricFragmentAttached\(/)
+	if (showing === undefined || !KOTLIN_BUSY_SETTLE.test(showing)) {
+		out.push(`kotlin: the ${label} sign path never reaches the busy rejection (no settle.error("PROMPT_BUSY" when a fragment is attached)`)
+	}
+	return out
 }
 
 export function compare(raw: Texts): string[] {
@@ -115,14 +142,14 @@ export function compare(raw: Texts): string[] {
 	if (!/override fun cancelPendingSign\(promise: Promise\)\s*\{/.test(t.kotlinModule)) out.push('kotlin: cancelPendingSign override not found')
 	if (!kAll.includes('"PROMPT_BUSY"')) out.push('kotlin: no "PROMPT_BUSY" string literal in the Kotlin sources')
 	if (!kAll.includes('cancelAuthentication(')) out.push('kotlin: cancelAuthentication( never called')
-	const devBodies = [body(t.kotlinModule, /override fun signWithDeviceKey\(/), body(t.kotlinHelper, /\bfun signWithDeviceKey\(/)].join('\n')
-	if (!hasMarker(devBodies)) out.push('kotlin: the device-key sign path never reaches the busy rejection')
-	const recBodies = [
-		body(t.kotlinModule, /override fun signWithRecoveryKey\(/),
-		body(t.kotlinHelper, /\bfun signWithRecoveryKey\(/),
-		body(t.kotlinHelper, /\bfun signRecoveryViaBiometricPrompt\(/),
-	].join('\n')
-	if (!hasMarker(recBodies)) out.push('kotlin: the recovery-key sign path never reaches the busy rejection')
+	out.push(...kotlinBusyProblems('device-key', [body(t.kotlinModule, /override fun signWithDeviceKey\(/), body(t.kotlinHelper, /\bfun signWithDeviceKey\(/)]))
+	out.push(
+		...kotlinBusyProblems('recovery-key', [
+			body(t.kotlinModule, /override fun signWithRecoveryKey\(/),
+			body(t.kotlinHelper, /\bfun signWithRecoveryKey\(/),
+			body(t.kotlinHelper, /\bfun signRecoveryViaBiometricPrompt\(/),
+		]),
+	)
 	if (!body(t.kotlinGate, /\bfun tryReserve\(/) && !body(t.kotlinHelper, /\bfun tryReserve\(/)) out.push('kotlin: the busy check tryReserve not found')
 	if (t.kotlinSecretWrap.includes('cancelAuthentication(')) out.push('kotlin: SecretWrapHelper calls cancelAuthentication (the cancel must never target a vault prompt)')
 	if (t.kotlinSecretWrap.includes('cancelPendingSign')) out.push('kotlin: SecretWrapHelper references cancelPendingSign (vault prompts stay out of the cancel path)')
@@ -224,6 +251,41 @@ describe('planted-mismatch self-tests: the gate can fail', () => {
 		const mid = t.kotlinHelper.slice(i, j).split('"PROMPT_BUSY"').join('"PROMPT_OTHER"').split('tryReserve(').join('tryReserveX(')
 		const planted = { ...t, kotlinHelper: t.kotlinHelper.slice(0, i) + mid + t.kotlinHelper.slice(j) }
 		expect(has(planted, 'kotlin:', 'device-key')).toBe(true)
+	})
+	/** Deletes the first `settle.error("PROMPT_BUSY", ...)` line after the [nth] (0-based) match of [anchor] in the helper. */
+	function deleteBusySettleAfter(anchor: string, nth = 0): Texts {
+		const t = load()
+		let a = -1
+		for (let k = 0; k <= nth; k++) a = t.kotlinHelper.indexOf(anchor, a + 1)
+		expect(a).toBeGreaterThan(0)
+		const s = t.kotlinHelper.indexOf('settle.error("PROMPT_BUSY"', a)
+		expect(s).toBeGreaterThan(a)
+		const e = t.kotlinHelper.indexOf('\n', s)
+		const planted = { ...t, kotlinHelper: t.kotlinHelper.slice(0, s) + t.kotlinHelper.slice(e) }
+		expect(planted.kotlinHelper).not.toBe(t.kotlinHelper)
+		// Only that one call is gone: tryReserve and the other busy settles are still there.
+		expect(planted.kotlinHelper.split('tryReserve(').length).toBe(t.kotlinHelper.split('tryReserve(').length)
+		expect(planted.kotlinHelper.split('settle.error("PROMPT_BUSY"').length).toBe(t.kotlinHelper.split('settle.error("PROMPT_BUSY"').length - 1)
+		return planted
+	}
+	it('device path: only the busy settle after tryReserve deleted (reserve then hang)', () => {
+		const planted = deleteBusySettleAfter('PendingSignKind.DEVICE')
+		expect(has(planted, 'kotlin:', 'device-key')).toBe(true)
+		expect(has(planted, 'kotlin:', 'recovery-key')).toBe(false)
+	})
+	it('recovery path: only the busy settle after tryReserve deleted (reserve then hang)', () => {
+		const planted = deleteBusySettleAfter('PendingSignKind.RECOVERY')
+		expect(has(planted, 'kotlin:', 'recovery-key')).toBe(true)
+		expect(has(planted, 'kotlin:', 'device-key')).toBe(false)
+	})
+	it('device path: only the busy settle for an attached fragment deleted', () => {
+		const t = load()
+		const dev = t.kotlinHelper.indexOf('\tfun signWithDeviceKey(')
+		const first = t.kotlinHelper.indexOf('if (isBiometricFragmentAttached(activity))')
+		expect(first).toBeGreaterThan(dev)
+		const planted = deleteBusySettleAfter('if (isBiometricFragmentAttached(activity))', 0)
+		expect(has(planted, 'kotlin:', 'device-key sign path never reaches the busy rejection (no settle.error("PROMPT_BUSY" when a fragment')).toBe(true)
+		expect(has(planted, 'kotlin:', 'recovery-key')).toBe(false)
 	})
 	it('cancelAuthentication call removed', () => {
 		const t = load()
