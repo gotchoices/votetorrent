@@ -516,12 +516,20 @@ class AttestationNativeModule: NSObject {
 
   // MARK: - shared signing path
 
-  /// One pending device-key / recovery-key sign at a time (D-112). Held under `pendingSignLock`.
+  /// One pending device-key / recovery-key sign at a time (D-112). `canceled` and `settled` are
+  /// read and written under `pendingSignLock`. `settled` makes the JS promise settle exactly once:
+  /// either `finishPendingSign` (the system call returned) or `cancelPendingSign` (its 2 s cap ran
+  /// out first) settles it, never both.
   private final class PendingSign {
     let context: LAContext
+    let reject: RCTPromiseRejectBlock
     let done = DispatchGroup()
     var canceled = false
-    init(context: LAContext) { self.context = context }
+    var settled = false
+    init(context: LAContext, reject: @escaping RCTPromiseRejectBlock) {
+      self.context = context
+      self.reject = reject
+    }
   }
 
   private let signQueue = DispatchQueue(label: "org.votetorrent.attestation.sign",
@@ -550,7 +558,7 @@ class AttestationNativeModule: NSObject {
     let context = LAContext()
     context.localizedReason = reason
     context.touchIDAuthenticationAllowableReuseDuration = 0
-    let pending = PendingSign(context: context)
+    let pending = PendingSign(context: context, reject: reject)
     pendingSignLock.lock()
     if pendingSign != nil {
       pendingSignLock.unlock()
@@ -636,15 +644,21 @@ class AttestationNativeModule: NSObject {
 
   /// Single completion path: clears the record BEFORE settling (JS may start the next sign the
   /// moment the promise settles), settles exactly once, `done.leave()` last. A cancelled sign can
-  /// only reject CANCELED, whatever the system call returned.
+  /// only reject CANCELED, whatever the system call returned. The identity check tolerates a slot
+  /// that `cancelPendingSign` already cleared (or that a newer sign now holds): it then leaves the
+  /// slot alone. If the cancel's cap already settled the promise, nothing is settled here.
   private func finishPendingSign(_ pending: PendingSign, outcome: SignOutcome,
                                  resolve: RCTPromiseResolveBlock,
                                  reject: RCTPromiseRejectBlock) {
     pendingSignLock.lock()
     let wasCanceled = pending.canceled
+    let alreadySettled = pending.settled
+    pending.settled = true
     if pendingSign === pending { pendingSign = nil }
     pendingSignLock.unlock()
-    if wasCanceled {
+    if alreadySettled {
+      // cancelPendingSign settled this sign CANCELED when its cap ran out; drop the outcome.
+    } else if wasCanceled {
       reject("CANCELED", "signing was cancelled", nil)
     } else {
       switch outcome {
@@ -656,13 +670,26 @@ class AttestationNativeModule: NSObject {
   }
 
   /// Cancels the pending device-key / recovery-key sign, if any (D-110). Never touches a secret
-  /// wrap/unwrap prompt. Resolves only after the sign settled, or after a 2 s cap.
+  /// wrap/unwrap prompt. Resolves `{canceled: true}` only after the sign's JS promise has rejected
+  /// CANCELED, as the spec says.
+  ///
+  /// Like Android's `take()`, the slot is cleared under the lock at once (review WR-03), so the
+  /// next sign can never be refused PROMPT_BUSY because this one's system call is slow to return.
+  /// `canceled = true` (set in the same lock) guarantees the old sign can only reject CANCELED.
+  /// `invalidate()` normally ends `SecKeyCreateSignature` with LAError.appCancel within the 2 s
+  /// wait (unproven on device). If the cap runs out first, the promise is rejected CANCELED here
+  /// (settle-once through `settled`), and `finishPendingSign` later drops the real outcome.
+  ///
+  /// Serial-queue implication: if the old system call is still running after the cap, a new
+  /// sign's block waits behind it on the serial `signQueue` (it is not refused), so its prompt
+  /// only appears once the old Face ID / passcode sheet is answered or times out.
   @objc(cancelPendingSign:rejecter:)
   func cancelPendingSign(_ resolve: @escaping RCTPromiseResolveBlock,
                          rejecter reject: @escaping RCTPromiseRejectBlock) {
     pendingSignLock.lock()
     let pending = pendingSign
     pending?.canceled = true
+    pendingSign = nil
     pendingSignLock.unlock()
     guard let pending = pending else {
       resolve(["canceled": false])
@@ -671,6 +698,13 @@ class AttestationNativeModule: NSObject {
     pending.context.invalidate()
     if pending.done.wait(timeout: .now() + .seconds(2)) == .timedOut {
       NSLog("AttestationNative.cancelPendingSign: sign did not settle within the 2 s cap")
+      pendingSignLock.lock()
+      let settleHere = !pending.settled
+      pending.settled = true
+      pendingSignLock.unlock()
+      if settleHere {
+        pending.reject("CANCELED", "signing was cancelled", nil)
+      }
     }
     resolve(["canceled": true])
   }

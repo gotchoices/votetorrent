@@ -233,7 +233,10 @@ export interface Spec extends TurboModule {
 	 * promise rejected `CANCELED`); `false` when nothing was pending. Never rejects for "nothing
 	 * pending". Resolves only after the pending sign has settled and, on Android, its prompt is
 	 * gone, or after a 2 s native cap, whichever is first. Never cancels a wrapSecret/unwrapSecret
-	 * (vault) prompt.
+	 * (vault) prompt. Either way the cancelled sign no longer holds the pending-sign slot when this
+	 * resolves. On Android a prompt that has not detached within the cap can still make the next sign
+	 * `PROMPT_BUSY`; on iOS a next sign issued while the old system call is still running (cap
+	 * expired) is not refused but waits behind it on the serial sign queue.
 	 */
 	cancelPendingSign(): Promise<Object>
 
