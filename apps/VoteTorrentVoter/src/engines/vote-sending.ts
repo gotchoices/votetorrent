@@ -42,6 +42,7 @@ import {
 	type FormedPoolBlock,
 	type ConsentSignature,
 	type ConsentCallControl,
+	type PoolIdentity,
 } from '@votetorrent/vote-engine/rn';
 import type {VoteRecord} from './vote-record-vault';
 
@@ -86,6 +87,8 @@ export interface SendSavedVoteDeps {
 	minPromptMs?: number
 	/** test seam: agent timing overrides */
 	agentOptions?: Partial<PoolAgentOptions>
+	/** test seam: the throwaway pool identity for a ballot (default: a fresh one per ballot) */
+	poolIdentity?: (ballotId: string) => PoolIdentity
 }
 
 export type SendSavedVoteResult =
@@ -150,7 +153,7 @@ export async function sendSavedVote(deps: SendSavedVoteDeps): Promise<SendSavedV
 		const ballot: PoolBallot = {electionKey: {electionId, revision, jointPublicKey}, ballotId, templateDigest: vote.templateDigest};
 		// A throwaway pool identity per ballot: the voters this phone pools with never learn its network
 		// identity, and each ballot's pool gets its own mailbox at the rendezvous.
-		const identity = createPoolIdentity();
+		const identity = deps.poolIdentity?.(ballotId) ?? createPoolIdentity();
 		let contribution: PoolContribution;
 		try {
 			contribution = {

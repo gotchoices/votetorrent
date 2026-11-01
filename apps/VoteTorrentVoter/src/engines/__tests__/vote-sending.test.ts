@@ -9,7 +9,9 @@ import {bytesToHex} from '@noble/curves/utils.js';
 import {
 	PoolRendezvous,
 	createInMemoryRendezvousClient,
+	createPoolIdentity,
 	verifySigP256,
+	type PoolIdentity,
 	type PoolRendezvousClient,
 } from '@votetorrent/vote-engine/rn';
 import {sendSavedVote, statusForOutcome, type BallotSendStatus, type VoteSendingPort, type VoteSentStore} from '../vote-sending';
@@ -229,7 +231,18 @@ describe('sendSavedVote native cancel (UAT 65 gap 1, Android shape)', () => {
 	jest.setTimeout(40_000);
 	const agent = {...fastAgent, signTimeoutMs: 1_500, replyTimeoutMs: 300, quietMs: 300};
 
-	async function run(opts: {closeMs: number, guardMs: number, withCancel: boolean, firstSign: 'swallow' | 'busy'}) {
+	/**
+	 * Pool identities per ballot, sorted by peer id: pools order by (size desc, peer id asc), so the
+	 * lowest id becomes the former (the engine spec's sortedVoters approach). `busyRole` puts voter 1
+	 * at the lowest id ('former') or the highest ('member') on every ballot.
+	 */
+	function identitiesFor(busyRole: 'former' | 'member'): Array<(ballotId: string) => PoolIdentity> {
+		const perBallot = new Map(BALLOTS.map(b => [b, [0, 1, 2].map(() => createPoolIdentity()).sort((x, y) => (x.peerId < y.peerId ? -1 : 1))]));
+		const slot = busyRole === 'former' ? [1, 0, 2] : [0, 2, 1];
+		return [0, 1, 2].map(i => (ballotId: string) => perBallot.get(ballotId)![slot[i]!]!);
+	}
+
+	async function run(opts: {closeMs: number, guardMs: number, withCancel: boolean, firstSign: 'swallow' | 'busy', busyRole?: 'former' | 'member'}) {
 		const rv = new PoolRendezvous();
 		const strand = fakeStrand(Date.now() + opts.closeMs);
 		const voters = [0, 1, 2].map(makeVoter);
@@ -238,23 +251,35 @@ describe('sendSavedVote native cancel (UAT 65 gap 1, Android shape)', () => {
 		let busyDelivered = 0;
 		let busyFirst = true;
 		const real1 = signWith(voters[1]!.priv);
+		// which consent voter 1's busy reject answered: the queue calls onStart (logged by the agent as
+		// 'own-consent-start' for the former, 'consent-start' for a member) right before the sign
+		let lastStart1 = '';
+		let busyAt = '';
 		const busySign = async (digest: string) => {
-			if (busyFirst) { busyFirst = false; busyDelivered++; throw Object.assign(new Error('busy'), {code: 'PROMPT_BUSY'}); }
+			if (busyFirst) { busyFirst = false; busyDelivered++; busyAt = lastStart1; throw Object.assign(new Error('busy'), {code: 'PROMPT_BUSY'}); }
 			return real1(digest);
 		};
+		const identities = opts.busyRole !== undefined ? identitiesFor(opts.busyRole) : undefined;
+		// The lowest id starts first, so the other two see its pool before either can merge into the
+		// other (a pool of 2 outranks a lone lower id).
+		const formerIndex = opts.busyRole === 'former' ? 1 : 0;
+		const startDelay = (i: number) => (identities !== undefined && i !== formerIndex ? new Promise(r => setTimeout(r, agent.quietMs)) : Promise.resolve());
+		const log = (i: number) => (e: string) => { if (i === 1 && (e === 'own-consent-start' || e === 'consent-start')) lastStart1 = e; };
 		const ac = new AbortController();
 		let stall: ReturnType<typeof setTimeout> | undefined;
 		const stalled = new Promise<'stalled'>(r => { stall = setTimeout(() => r('stalled'), opts.guardMs); });
-		const all = await Promise.race([stalled, Promise.all(voters.map((v, i) => sendSavedVote({
+		const all = await Promise.race([stalled, Promise.all(voters.map(async (v, i) => { await startDelay(i); return sendSavedVote({
 			port: strand.port, sentStore: stores[i]!, record: v.record, rendezvous: clientFor(rv, v.phone),
 			signConsent: i === 1 ? (opts.firstSign === 'swallow' ? native.sign : busySign) : signWith(v.priv),
 			cancelSign: i === 1 && opts.withCancel ? native.cancel : undefined,
-			minPromptMs: FAST_MIN_PROMPT_MS, nowMs: () => Date.now(), agentOptions: agent, signal: ac.signal,
-		})))]);
+			minPromptMs: FAST_MIN_PROMPT_MS, nowMs: () => Date.now(), signal: ac.signal,
+			agentOptions: {...agent, log: log(i)},
+			poolIdentity: identities?.[i],
+		}); }))]);
 		clearTimeout(stall);
 		ac.abort();
 		rv.close();
-		return {all, strand, native, busyDelivered};
+		return {all, strand, native, busyDelivered, busyAt};
 	}
 
 	it('a swallowed second sign: both ballots end sent only because cancel is called', async () => {
@@ -281,19 +306,21 @@ describe('sendSavedVote native cancel (UAT 65 gap 1, Android shape)', () => {
 		}
 	});
 
-	it('a PROMPT_BUSY reject is a consent not given, never a crash or a stuck send', async () => {
-		const {all, busyDelivered} = await run({closeMs: 12_000, guardMs: 20_000, withCancel: false, firstSign: 'busy'});
+	// D-112: PROMPT_BUSY means nothing was shown, so it is a consent not given, never a decline. The
+	// role is fixed (WR-05): as the former, a decline would stop the ballot 'not-sent: stopped' (CR-01).
+	it.each(['former', 'member'] as const)('a PROMPT_BUSY reject on the %s\'s consent is not a decline: every ballot ends sent', async (busyRole) => {
+		const {all, strand, busyDelivered, busyAt} = await run({closeMs: 12_000, guardMs: 20_000, withCancel: false, firstSign: 'busy', busyRole});
+		// the busy reject answered the consent of the role under test
+		expect(busyAt).toBe(busyRole === 'former' ? 'own-consent-start' : 'consent-start');
 		expect(all).not.toBe('stalled');
-		if (all === 'stalled') return;
-		const r = all[1]!;
-		expect(r.ok).toBe(true);
-		if (r.ok) {
-			for (const b of r.ballots) {
-				const st = b.status;
-				expect(st.phase === 'sent' || (st.phase === 'not-sent' && st.reason === 'stopped')).toBe(true);
-			}
+		const results = all === 'stalled' ? [] : all;
+		expect(results).toHaveLength(3);
+		for (const r of results) {
+			expect(r.ok).toBe(true);
+			if (r.ok) expect(r.ballots.map(b => b.status)).toEqual(BALLOTS.map(() => expect.objectContaining({phase: 'sent'})));
 		}
 		expect(busyDelivered).toBe(1);
+		expect(strand.commits.sort((a, b) => a.ballotId.localeCompare(b.ballotId))).toEqual([{ballotId: 'ballot-a', size: 3}, {ballotId: 'ballot-b', size: 3}]);
 	});
 });
 
