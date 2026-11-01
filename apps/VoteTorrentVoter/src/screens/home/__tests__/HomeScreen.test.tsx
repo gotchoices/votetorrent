@@ -345,10 +345,16 @@ describe('HomeScreen saved vote (D-12, D-19, D-21)', () => {
 		expect(has('election-card-vote-now')).toBe(false);
 	});
 
-	it('H18: from a none line, a saved but unsent vote shows saved (Vote now hidden) before the full read lands (WR-03)', async () => {
-		await voteAndSendFromNone({sent: false}, () => new Promise(() => undefined));
-		expect(textById('election-card-saved-vote-status')).toBe('Vote saved — not sent');
+	it('H18: from a none line, a saved but unsent vote keeps the line until the full read lands; no unchecked-revision caption flashes (WR-03)', async () => {
+		let land: (s: unknown) => void = () => undefined;
+		await voteAndSendFromNone({sent: false}, () => new Promise(r => { land = r; }));
 		expect(has('election-card-saved-vote-sent')).toBe(false);
+		expect(has('election-card-saved-vote-status')).toBe(false);
+		await renderer.act(async () => {
+			land({state: 'saved', revisionKnown: true});
+		});
+		await flush();
+		expect(textById('election-card-saved-vote-status')).toBe('Vote saved — not sent');
 		expect(has('election-card-vote-now')).toBe(false);
 	});
 

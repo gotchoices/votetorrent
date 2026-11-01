@@ -386,12 +386,12 @@ describe('readSavedVoteStatus', () => {
 			expectNoWrites()
 		})
 
-		it('WR-03: a none line with a marker and not every ballot sent reads saved, revision not checked', async () => {
+		it('WR-03: a none line with a marker and not every ballot sent stays as shown (null): the fast read never upgrades none to saved', async () => {
 			const record = makeRecord({ electionRevision: 2 })
 			record.votes.push({ ...record.votes[0], ballotId: 'ballot-2', nonce: randHex(32) })
 			record.voter.ballots.push({ ballotId: 'ballot-2', templateDigest: 'td' })
 			await save(record)
-			const SAVED_UNCHECKED = { state: 'saved', revisionKnown: false }
+			const SAVED_UNCHECKED = null
 			await expect(readSentSinceShown(E, { state: 'none' })).resolves.toEqual(SAVED_UNCHECKED)
 			// one of two ballots sent: still saved, never sent
 			await recordVoteSent(E, 2, 'ballot-1', 'cid-1')
