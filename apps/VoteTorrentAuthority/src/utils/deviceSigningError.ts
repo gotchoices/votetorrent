@@ -57,6 +57,10 @@ export type DeviceSigningErrorClass =
  */
 export const CODE_TO_CLASS: Record<string, DeviceSigningErrorClass> = {
 	CANCELED: 'cancellation',
+	// Phase 65 review CR-01: the native sign now tells a system cancel (Android ERROR_CANCELED/5,
+	// iOS LAError.systemCancel/.appCancel: app backgrounded, screen locked, incoming call) from the
+	// officer's own dismissal. Same silent cancellation class: no new copy.
+	SYSTEM_CANCELED: 'cancellation',
 	NO_BIOMETRICS_ENROLLED: 'no-biometrics-enrolled',
 	LOCKOUT: 'lockout',
 	LOCKOUT_PERMANENT: 'lockout-permanent',

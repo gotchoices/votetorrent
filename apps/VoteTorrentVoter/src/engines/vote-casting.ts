@@ -395,7 +395,9 @@ export function digestBytesFromBase64Url (digest: string): Uint8Array {
 
 function classifySignFailure (err: unknown): CastVoteSignFailureReason {
 	const code = (err as { code?: unknown } | null)?.code
-	if (code === 'CANCELED') return 'canceled'
+	// SYSTEM_CANCELED (review CR-01): the system, not the voter, ended the prompt (app backgrounded,
+	// screen locked). Casting is a foreground action the voter retries, so it gets the cancel copy.
+	if (code === 'CANCELED' || code === 'SYSTEM_CANCELED') return 'canceled'
 	if (
 		code === 'NO_BIOMETRICS_ENROLLED' || code === 'LOCKOUT' || code === 'LOCKOUT_PERMANENT'
 		|| code === 'BIOMETRIC_ERROR' || code === 'NO_ACTIVITY' || code === 'DEVICE_LOCKED'

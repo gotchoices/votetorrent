@@ -41,6 +41,11 @@ describe('deviceSigningError (D-13 taxonomy)', () => {
 		expect(mapDeviceSigningError({ code: 'CANCELED' })).toBe('cancellation');
 	});
 
+	test('SYSTEM_CANCELED (a system cancel, review CR-01) maps to cancellation too: no new copy', () => {
+		expect(mapDeviceSigningError({ code: 'SYSTEM_CANCELED' })).toBe('cancellation');
+		expect(DEVICE_SIGNING_ERROR_COPY_KEY[mapDeviceSigningError({ code: 'SYSTEM_CANCELED' })]).toBeUndefined();
+	});
+
 	test('DEVICE_SIGNING_ERROR_COPY_KEY has no entry for cancellation, key-invalidated, no-key-provisioned, no-device-credential, or recovery-unsupported-os', () => {
 		expect(DEVICE_SIGNING_ERROR_COPY_KEY['cancellation']).toBeUndefined();
 		expect(DEVICE_SIGNING_ERROR_COPY_KEY['key-invalidated']).toBeUndefined();
@@ -146,6 +151,8 @@ describe('recovery-key-invalidated / recovery-key-not-registered (49-14 follow-u
 // Frozen literal copy of CODE_TO_CLASS taken before the O-10 fix.
 const EXPECTED_SNAPSHOT: Record<string, string> = {
 	CANCELED: 'cancellation',
+	// Added by Phase 65 review CR-01 (after the O-10 snapshot): a system cancel, same class.
+	SYSTEM_CANCELED: 'cancellation',
 	NO_BIOMETRICS_ENROLLED: 'no-biometrics-enrolled',
 	LOCKOUT: 'lockout',
 	LOCKOUT_PERMANENT: 'lockout-permanent',

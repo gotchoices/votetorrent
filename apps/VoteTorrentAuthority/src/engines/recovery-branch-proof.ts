@@ -86,6 +86,9 @@ const PROOF_DIGEST = new Uint8Array(32).fill(0x5a);
  */
 const PRECONDITION_CODES = new Set([
 	'CANCELED',
+	// Phase 65 review CR-01: a system-ended prompt (app backgrounded, screen locked) never reached
+	// the branch either.
+	'SYSTEM_CANCELED',
 	'CANCELLED',
 	'USER_CANCELED',
 	'NEGATIVE_BUTTON',

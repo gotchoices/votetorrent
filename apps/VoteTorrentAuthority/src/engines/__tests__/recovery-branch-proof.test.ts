@@ -177,7 +177,7 @@ describe('classifyRecoveryFailure — R5c code-first classification', () => {
 		expect(classifyRecoveryFailure(err)).toBe('unsupported-os');
 	});
 
-	it.each(['CANCELED', 'CANCELLED', 'USER_CANCELED', 'NEGATIVE_BUTTON', 'KEY_INVALIDATED_REASSOCIATE'])(
+	it.each(['CANCELED', 'SYSTEM_CANCELED', 'CANCELLED', 'USER_CANCELED', 'NEGATIVE_BUTTON', 'KEY_INVALIDATED_REASSOCIATE'])(
 		'classifies code %s (with a non-matching message) as precondition-unmet',
 		(code) => {
 			const err = Object.assign(new Error('an unrelated generic message with no keywords'), { code });

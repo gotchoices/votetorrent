@@ -346,6 +346,7 @@ describe('castVote refusals and failures', () => {
 
 	it.each([
 		['CANCELED', 'canceled'],
+		['SYSTEM_CANCELED', 'canceled'],
 		['NO_BIOMETRICS_ENROLLED', 'biometric-unavailable'],
 		['LOCKOUT', 'biometric-unavailable'],
 		['LOCKOUT_PERMANENT', 'biometric-unavailable'],
