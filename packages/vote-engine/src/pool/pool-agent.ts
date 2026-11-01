@@ -248,6 +248,8 @@ export class PoolAgent {
   private consent: MemberConsent | null = null
   /** set while forming is held back because this phone cannot prompt (logged once per spell) */
   private formDeferred = false
+  /** set while this coordinator holds back (cannot prompt): no pool, no listing (logged once per spell) */
+  private heldBack = false
   /** the signal handed to run(): every live consent is aborted when it aborts (WR-01) */
   private runSignal: AbortSignal | undefined
   /** observability: message counts by type, sent and received */
@@ -339,6 +341,8 @@ export class PoolAgent {
       return
     }
     if (this.role !== 'coordinator' || this.busy) return
+    if (!this.canPromptNow()) { await this.holdBack(); return }
+    this.heldBack = false
     if (this.shouldForm()) { await this.form(); return }
     let list: CoordinatorListing[]
     const presentAt = this.o.now()
@@ -408,6 +412,23 @@ export class PoolAgent {
   /** The host's foreground check; a throwing check counts as able (never blocks a send by accident). */
   private canPromptNow (): boolean {
     try { return this.o.canPrompt?.() ?? true } catch { return true }
+  }
+
+  /**
+   * This phone cannot show a prompt now (the app is in the background). Holding a pool it cannot form
+   * would make its members wait for it, up to the voting close; so it releases them (they keep pooling
+   * elsewhere), withdraws its listings and neither presents nor merges until it can prompt again.
+   * Incoming merges are refused meanwhile (onMerge).
+   */
+  private async holdBack (): Promise<void> {
+    if (!this.heldBack) this.log('held-back', { why: 'cannot prompt', released: this.pool.length - 1 })
+    this.heldBack = true
+    const others = this.pool.filter(c => c.member !== this.me)
+    if (others.length > 0) {
+      for (const c of others) void this.post(c.member, { t: 'outcome', topic: this.topic, committed: false, reason: 'the former cannot confirm right now' })
+      this.revertToSolo('cannot prompt')
+    }
+    if (this.presentedTopics.size > 0) await this.withdraw()
   }
 
   private shouldForm (): boolean {
@@ -784,6 +805,7 @@ export class PoolAgent {
   private async onMerge (from: string, m: Extract<PoolMessage, { t: 'merge' }>): Promise<unknown> {
     const refuse = (reason: string) => this.post(from, { t: 'refuse', re: m.id, reason })
     if (this.role !== 'coordinator' || this.busy) return await refuse('not coordinating')
+    if (!this.canPromptNow()) return await refuse('cannot confirm right now')
     if (!Array.isArray(m.contributions) || m.contributions.length === 0 || !m.contributions.every(isContribution)) return await refuse('bad contributions')
     if (better({ size: m.contributions.length, peerId: from }, { size: this.pool.length, peerId: this.me })) return await refuse('your pool is bigger')
     if (this.pool.length + m.contributions.length > this.o.capacity) return await refuse('full')

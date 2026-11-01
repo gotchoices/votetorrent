@@ -513,10 +513,12 @@ describe('pool agent: a member aborts an unanswered consent at the bound (D-114,
   })
 
   it('a member that cannot prompt (app in the background) refuses a form at once and never prompts', async () => {
+    // It joined in the foreground (a phone in the background holds back and joins nobody), then left it.
     const a = mk('a')
     const native = fakeNative(() => 0, () => a.priv)
-    let foreground = false
+    let foreground = true
     const h = await memberHarness(native, a, { canPrompt: () => foreground })
+    foreground = false
     try {
       const block = formPoolBlock([a.contribution, mk('x').contribution, mk('y').contribution], ballot)
       const sentAt = Date.now()
@@ -683,38 +685,75 @@ describe('pool agent: no consent prompt outlives the voting close (review WR-04)
   })
 })
 
-describe('pool agent: a coordinator that cannot prompt does not form (review round 4 CR-01)', function () {
+describe('pool agent: a phone that cannot prompt holds no pool (review round 4 CR-01)', function () {
   this.timeout(60_000)
 
-  it('no form, no member prompt while the former is in the background; it forms and commits once back', async () => {
+  it('the lowest-id phone in the background is held back: the others form and commit without it, and nobody is prompted for it', async () => {
     const rendezvous = new PoolRendezvous({ coordinatorTtlMs: 5_000, envelopeTtlMs: 20_000, maxPollWaitMs: 100 })
-    const [F, M, X] = sortedVoters(['F', 'M', 'X'])
+    const [F, M, X, Y] = sortedVoters(['F', 'M', 'X', 'Y'])
     const stop = new AbortController()
     const commits: string[][] = []
-    const memberPrompts: Record<string, number> = { M: 0, X: 0 }
-    const events: Array<{ e: string, d: any }> = []
-    let foreground = false
-    const runs = [F!, M!, X!].map(async (v) => await new PoolAgent({
+    const fEvents: Array<{ e: string, d: any }> = []
+    let fPrompts = 0
+    const runs = [F!, M!, X!, Y!].map(async (v) => await new PoolAgent({
       quietMs: 300, presentIntervalMs: 40, replyTimeoutMs: 600, informAttempts: 2,
       signTimeoutMs: 4_000, memberTimeoutMs: 2_400, pollWaitMs: 50, formLeadMs: 0, ladder: false,
       identity: v.identity,
       rendezvous: createInMemoryRendezvousClient(rendezvous, `t-${v.name}`),
       ballot,
       contribution: v.contribution,
-      signConsent: async (d) => { if (v.name !== 'F') memberPrompts[v.name]!++; return signDigestP256(d, v.priv) },
+      signConsent: async (d) => { if (v.name === 'F') fPrompts++; return signDigestP256(d, v.priv) },
       commit: async (_b, sigs) => { commits.push(sigs.map(s => s.registrantId)); return { ok: true } },
       findRecordedVote: async () => null,
       deadlineAt: Date.now() + 50_000,
-      ...(v.name === 'F' ? { canPrompt: () => foreground, log: (e: string, d?: Record<string, unknown>) => { events.push({ e, d }) } } : {})
+      ...(v.name === 'F' ? { canPrompt: () => false, log: (e: string, d?: Record<string, unknown>) => { fEvents.push({ e, d }) } } : {})
     }).run(stop.signal))
     try {
-      expect(await until(() => events.some(x => x.e === 'form-deferred'), 15_000), 'the former held back forming').to.equal(true)
-      await sleep(2_000)
-      expect(events.some(x => x.e === 'forming'), 'no form while in the background').to.equal(false)
-      expect(memberPrompts.M! + memberPrompts.X!, 'no member was asked to confirm').to.equal(0)
-      expect(events.filter(x => x.e === 'form-deferred'), 'logged once per spell').to.have.length(1)
+      expect(await until(() => commits.length === 1, 20_000), 'the three foreground phones commit').to.equal(true)
+      expect(commits[0]!, 'a block of 3').to.have.length(3)
+      expect(commits[0]!, 'without the backgrounded phone').to.not.include(F!.contribution.voterEntry.registrantId)
+      expect(fEvents.some(x => x.e === 'held-back'), 'the backgrounded phone held back').to.equal(true)
+      expect(fEvents.filter(x => x.e === 'held-back'), 'logged once per spell').to.have.length(1)
+      expect(fEvents.some(x => x.e === 'forming'), 'it never formed').to.equal(false)
+      expect(fPrompts, 'it was never prompted').to.equal(0)
+    } finally {
+      stop.abort()
+      await Promise.all(runs)
+      rendezvous.close()
+    }
+  })
+
+  it('a coordinator holding members releases them when it can no longer prompt, and forms once it can again', async () => {
+    const rendezvous = new PoolRendezvous({ coordinatorTtlMs: 5_000, envelopeTtlMs: 20_000, maxPollWaitMs: 100 })
+    const [F, M, X] = sortedVoters(['F', 'M', 'X'])
+    const stop = new AbortController()
+    const commits: string[][] = []
+    const memberEvents: Array<{ e: string, d: any }> = []
+    let foreground = true
+    let holding = false
+    const runs = [F!, M!, X!].map(async (v) => await new PoolAgent({
+      // a long quiet window: F gathers M and X, then goes to the background before it would form
+      quietMs: 4_000, presentIntervalMs: 40, replyTimeoutMs: 600, informAttempts: 2,
+      signTimeoutMs: 4_000, memberTimeoutMs: 10_000, pollWaitMs: 50, formLeadMs: 0, ladder: false,
+      identity: v.identity,
+      rendezvous: createInMemoryRendezvousClient(rendezvous, `t-${v.name}`),
+      ballot,
+      contribution: v.contribution,
+      signConsent: async (d) => signDigestP256(d, v.priv),
+      commit: async (_b, sigs) => { commits.push(sigs.map(s => s.registrantId)); return { ok: true } },
+      findRecordedVote: async () => null,
+      deadlineAt: Date.now() + 50_000,
+      ...(v.name === 'F'
+        ? { canPrompt: () => foreground, onStatus: (st: any) => { if (st.phase === 'pooling' && st.size === 3) holding = true } }
+        : { log: (e: string, d?: Record<string, unknown>) => { memberEvents.push({ e, d }) } })
+    }).run(stop.signal))
+    try {
+      expect(await until(() => holding, 15_000), 'F holds a pool of 3').to.equal(true)
+      foreground = false
+      expect(await until(() => memberEvents.filter(x => x.e === 'solo' && String(x.d?.why).includes('cannot confirm right now')).length === 2, 5_000), 'both members released with the reason').to.equal(true)
+      expect(commits, 'nothing formed while F was in the background').to.have.length(0)
       foreground = true
-      expect(await until(() => commits.length === 1, 15_000), 'it forms and commits once back').to.equal(true)
+      expect(await until(() => commits.length === 1, 20_000), 'formed and committed once F was back').to.equal(true)
       expect(commits[0]!, 'a block of 3').to.have.length(3)
     } finally {
       stop.abort()
