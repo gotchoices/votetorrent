@@ -5,7 +5,8 @@
  * authority's rendezvous. The card shows, per ballot, whether it is waiting for voters, waiting to
  * be confirmed, sent, or not sent — and what that means for the vote (it stays saved on this phone
  * until it is sent). All work runs through `engines/vote-send-flow.ts`; this component only keeps
- * the statuses and never holds the opened record. No raw error text is ever shown.
+ * the statuses and never holds the opened record. No raw error text is ever shown. The status lines
+ * the card shows are traced through `vtDebug` (silent unless the __DEV__ debug switch is on).
  */
 import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {Platform, Pressable, StyleSheet, Text, View} from 'react-native';
@@ -18,6 +19,7 @@ import type {VoteSendFlowResult} from '../../engines/vote-send-flow';
 import type {BallotSendStatus} from '../../engines/vote-sending';
 import type {VoteRecordEnvelope} from '../../engines/vote-record-vault';
 import {readVoteSent} from '../../engines/vote-sent-store';
+import {idPrefix, vtDebug} from '../../engines/vt-debug';
 
 type Outcome = Exclude<VoteSendFlowResult, {kind: 'done'}>['kind'];
 
@@ -79,8 +81,26 @@ export default function SendVoteCard({electionId, electionRevision, envelope, ba
 	const allSent = ballotIds.length > 0 && ballotIds.every(id => statuses[id]?.phase === 'sent');
 	useEffect(() => { onAllSentChange?.(allSent); }, [allSent, onAllSentChange]);
 
+	// debug only: each change of the line a ballot shows, and the card's outcome line
+	const shownLine = useRef<Record<string, string>>({});
+	useEffect(() => {
+		for (const id of ballotIds) {
+			const st = statuses[id];
+			const line = st === undefined ? 'none' : st.phase === 'not-sent' ? `not-sent:${st.reason}` : st.phase;
+			const before = shownLine.current[id] ?? 'none';
+			if (before !== line) {
+				vtDebug('card', 'status', {ballot: idPrefix(id), from: before, to: line, size: st && (st.phase === 'waiting' || st.phase === 'joined') ? st.size : undefined, allSent});
+				shownLine.current[id] = line;
+			}
+		}
+	}, [statuses, ballotIds, allSent]);
+	useEffect(() => {
+		if (outcome !== null) vtDebug('card', 'outcome', {kind: outcome});
+	}, [outcome]);
+
 	const onSend = useCallback(async () => {
 		if (sending) return;
+		vtDebug('card', 'send-pressed', {ballots: ballotIds.length});
 		setSending(true);
 		setOutcome(null);
 		const controller = new AbortController();
@@ -119,7 +139,7 @@ export default function SendVoteCard({electionId, electionRevision, envelope, ba
 		} else {
 			setOutcome(result.kind);
 		}
-	}, [sending, t, isIos, electionId, envelope, getEngine, node, nowMs]);
+	}, [sending, ballotIds.length, t, isIos, electionId, envelope, getEngine, node, nowMs]);
 
 	const bodyFont = {fontFamily: fonts.regular.fontFamily, fontWeight: fonts.regular.fontWeight, fontSize: typeScale.body.fontSize, lineHeight: typeScale.body.lineHeight};
 	const captionFont = {fontFamily: fonts.regular.fontFamily, fontWeight: fonts.regular.fontWeight, fontSize: typeScale.caption.fontSize, lineHeight: typeScale.caption.lineHeight};

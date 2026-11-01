@@ -36,3 +36,11 @@ export const USE_REAL_ATTESTATION_PRODUCER = false;
 // restores the registered Timeline panel for manual QA; it is NEVER evidence that the registration
 // ceremony works.
 export const SEED_REGISTERED_STATE_FIXTURE = false;
+
+// Privacy-safe debug log switch for `vt-debug.ts` (`vtDebug(tag, event, detail)`): state names,
+// timings, codes and 8-char prefixes only, never keys, signatures, ciphertext, envelopes, join codes or
+// error message text. __DEV__-gated (see vt-debug.ts's vtDebugEnabled): a release build logs nothing
+// no matter what this file holds. At runtime a debug build can also switch it on over CDP with
+// `globalThis.__VT_DEBUG__ = true`. Committed default false - never commit an enabled override; the
+// device rig flips it through its scratch Metro config like the flags above.
+export const VT_DEBUG_LOGS = false;

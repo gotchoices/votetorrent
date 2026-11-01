@@ -35,6 +35,7 @@ import {InfoDetails} from '../../components/InfoDetails';
 import {readElectionInfo} from '../../engines/info-read';
 import {readSavedVoteStatus, readSentSinceShown} from '../../engines/saved-vote-status';
 import type {SavedVoteStatus} from '../../engines/saved-vote-status';
+import {idPrefix, vtDebug} from '../../engines/vt-debug';
 import {useInfoRead} from '../../hooks/useInfoRead';
 
 type HomeNavigationProp = NativeStackNavigationProp<VoteStackParamList, 'Home'>;
@@ -177,10 +178,15 @@ export default function HomeScreen() {
 			let live = true;
 			let fullLanded = false;
 			if (electionId) {
+				// debug only (silent unless the __DEV__ switch is on): states and timings, never the record
+				const readAt = Date.now();
+				const election = idPrefix(electionId);
 				const shown = shownSavedVote.current;
+				vtDebug('home', 'saved-vote-read-start', {election, shown: shown && shown.electionId === electionId ? shown.status.state : 'none'});
 				if (shown && shown.electionId === electionId) {
 					readSentSinceShown(electionId, shown.status).then(
 						sent => {
+							vtDebug('home', 'saved-vote-fast-read', {election, sent: sent !== null, applied: live && !fullLanded && sent !== null, dropped: !live, fullLanded, ms: Date.now() - readAt});
 							if (live && !fullLanded && sent !== null) {
 								setSavedVote({electionId, status: sent});
 							}
@@ -191,12 +197,14 @@ export default function HomeScreen() {
 				readSavedVoteStatus({getEngine, fallbackElectionId: __DEV__ ? seededElectionId : undefined}, nowMs(), electionId).then(
 					status => {
 						fullLanded = true;
+						vtDebug('home', 'saved-vote-full-read', {election, state: status.state, ms: Date.now() - readAt, dropped: !live});
 						if (live) {
 							setSavedVote({electionId, status});
 						}
 					},
 					() => {
 						fullLanded = true;
+						vtDebug('home', 'saved-vote-full-read', {election, state: 'unreadable', failed: true, ms: Date.now() - readAt, dropped: !live});
 						if (live) {
 							setSavedVote({electionId, status: {state: 'unreadable'}});
 						}

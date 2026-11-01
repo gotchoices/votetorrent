@@ -10,7 +10,9 @@
  * the card leaves (the signal) or after PROBE_BUDGET_MS, whichever comes first, and dials no further
  * address after that (WR-02). An unanswered consent prompt is dismissed through the native sign cancel
  * before the next one. Every dependency is injectable so the flow is tested without a device.
- * Nothing is logged.
+ * The only logging is `vtDebug` (silent unless the __DEV__ debug switch is on): the send's start and
+ * end (result kind, ballot counts, duration) and an abandoned-before-sign consent; never a record,
+ * key, signature, address or error text.
  */
 import {multiaddr} from '@multiformats/multiaddr';
 import {
@@ -33,6 +35,7 @@ import {VOTE_SENDING_PORT_ENGINE} from './vote-sending-port';
 import {sendSavedVote} from './vote-sending';
 import type {BallotSendStatus, SendSavedVoteResult, VoteSendingPort} from './vote-sending';
 import {readVoteSent, recordVoteSent} from './vote-sent-store';
+import {vtDebug} from './vt-debug';
 
 export type VoteSendFlowResult =
 	| {kind: 'done', ballots: Array<{ballotId: string, status: BallotSendStatus}>}
@@ -87,6 +90,28 @@ async function probe(call: () => Promise<unknown>, stop: AbortController, signal
 }
 
 export async function runVoteSendFlow(deps: VoteSendFlowDeps): Promise<VoteSendFlowResult> {
+	const startedAt = deps.nowMs();
+	vtDebug('send', 'flow-start', {node: deps.node !== null});
+	const result = await runVoteSendFlowSteps(deps).catch((err: unknown): never => {
+		vtDebug('send', 'flow-threw', {class: err instanceof Error ? err.name : typeof err, ms: deps.nowMs() - startedAt});
+		throw err;
+	});
+	if (result.kind === 'done') {
+		vtDebug('send', 'flow-end', {
+			kind: 'done',
+			ok: result.ballots.every(b => b.status.phase === 'sent'),
+			ballots: result.ballots.length,
+			sent: result.ballots.filter(b => b.status.phase === 'sent').length,
+			notSent: result.ballots.filter(b => b.status.phase === 'not-sent').length,
+			ms: deps.nowMs() - startedAt,
+		});
+	} else {
+		vtDebug('send', 'flow-end', {kind: result.kind, ok: false, ms: deps.nowMs() - startedAt});
+	}
+	return result;
+}
+
+async function runVoteSendFlowSteps(deps: VoteSendFlowDeps): Promise<VoteSendFlowResult> {
 	const control = deps.node?.getControlNode() ?? null;
 	if (control === null || control === undefined) return {kind: 'no-network'};
 	const addrs = await (deps.readRendezvousAddrs ?? readJoinBootstrap)();
@@ -120,12 +145,15 @@ export async function runVoteSendFlow(deps: VoteSendFlowDeps): Promise<VoteSendF
 	const rendezvous = createFailoverRendezvousClient(clients);
 	// Reachability probe: a poll signed by a throwaway pool key (never the device key, no prompt).
 	// Any reply, even an error reply, means a rendezvous answered; only a throw means none did.
+	const probeAt = deps.nowMs();
 	const reached = await probe(() => rendezvous.call(poolRequests.poll(createPoolIdentity(), 0, deps.nowMs())), probeStop, deps.signal, deps.probeBudgetMs ?? PROBE_BUDGET_MS);
+	vtDebug('send', 'probe', {reached, addrs: targets.length, ms: deps.nowMs() - probeAt});
 	// Canceled whenever the card left, whatever the probe's result.
 	if (deps.signal?.aborted === true) return {kind: 'canceled'};
 	if (!reached) return {kind: 'rendezvous-unreachable'};
 
 	const opened = await revealVoteReceipt(deps.electionId, deps.envelope, deps.recordPrompt);
+	vtDebug('send', 'record-open', {kind: opened.kind});
 	if (opened.kind !== 'ok') return {kind: opened.kind === 'canceled' || opened.kind === 'biometric-unavailable' || opened.kind === 'unreadable' ? opened.kind : 'failed'};
 
 	let port: VoteSendingPort;
@@ -142,7 +170,10 @@ export async function runVoteSendFlow(deps: VoteSendFlowDeps): Promise<VoteSendF
 		// the producer's own work before the native call (a read-only device-key lookup on the first
 		// sign) and the bridge hop. Closing it, and making the queue's cancel match only its own sign,
 		// needs a per-sign native token.
-		if (signal?.aborted === true) throw new ConsentAbandonedError('abandoned');
+		if (signal?.aborted === true) {
+			vtDebug('send', 'consent-abandoned-before-sign');
+			throw new ConsentAbandonedError('abandoned');
+		}
 		const signed = await producer.signDeviceKeyDigest(bytes, {prompt: deps.consentPrompt});
 		return signed.signature;
 	};
