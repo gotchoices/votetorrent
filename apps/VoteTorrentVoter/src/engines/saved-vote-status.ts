@@ -68,21 +68,32 @@ export async function readSavedVoteStatus(
 }
 
 /**
- * The local half of the read, for a line already on screen (UAT 65 gap 2): a vote shown as saved whose
- * every marker ballot is now in the sent store reads sent. It reads only the marker and the sent store
- * (no engine read), so a screen coming back from a send can show it at once while the full read, which
- * waits on the strand, is still on its way. The full read keeps the last word, so stale and unreadable
- * still win when it lands. Anything else, or any failure, is null: keep what is shown.
+ * The local half of the read, for a line already on screen (UAT 65 gap 2, WR-03). It reads only the
+ * marker and the sent store (no engine read), so a screen coming back from a send can show the new
+ * line at once while the full read, which waits on the strand, is still on its way:
+ * - a line shown as saved whose every marker ballot is now in the sent store reads sent;
+ * - a line shown as none (or nothing shown yet, the usual path vote -> Submit -> Send -> Done -> Home)
+ *   reads sent when the marker exists and every marker ballot is in the sent store, and otherwise saved
+ *   with the revision not yet checked (this read never looks at the election), so Vote now hides.
+ * Sent is never returned unless every marker ballot is in the sent store, read for the marker's own
+ * revision. The full read keeps the last word, so stale and unreadable still win when it lands.
+ * Anything else (a stale, unreadable or sent line, no marker, a corrupt marker, no ballot ids, any
+ * failure) is null: keep what is shown.
  */
-export async function readSentSinceShown(electionId: string, shown: SavedVoteStatus | undefined): Promise<{ state: 'sent' } | null> {
-	if (shown?.state !== 'saved') return null
+export async function readSentSinceShown(
+	electionId: string,
+	shown: SavedVoteStatus | undefined,
+): Promise<{ state: 'sent' } | { state: 'saved'; revisionKnown: false } | null> {
+	const from = shown?.state ?? 'none'
+	if (from !== 'saved' && from !== 'none') return null
 	try {
 		const markerCls = await readVoteMarker(electionId)
 		if (markerCls.kind === 'absent' || markerCls.kind === 'unreadable') return null
 		const { ballotIds, electionRevision } = markerCls.marker
 		if (ballotIds.length === 0) return null
 		const sent = await readVoteSent(electionId, electionRevision)
-		return ballotIds.every((id) => Object.prototype.hasOwnProperty.call(sent, id)) ? { state: 'sent' } : null
+		if (ballotIds.every((id) => Object.prototype.hasOwnProperty.call(sent, id))) return { state: 'sent' }
+		return from === 'none' ? { state: 'saved', revisionKnown: false } : null
 	} catch {
 		return null
 	}

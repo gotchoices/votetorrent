@@ -341,12 +341,48 @@ describe('readSavedVoteStatus', () => {
 			await expect(readSentSinceShown(E, SAVED)).resolves.toBeNull()
 		})
 
-		it('only a saved line is upgraded; stale, unreadable, none or nothing shown stay as they are', async () => {
+		it('a stale, unreadable or sent line stays as it is', async () => {
 			await save(makeRecord({ electionRevision: 2 }))
 			await recordVoteSent(E, 2, 'ballot-1', 'cid-1')
-			for (const shown of [{ state: 'stale', revisionKnown: true }, { state: 'unreadable' }, { state: 'none' }, { state: 'sent' }, undefined] as Array<SavedVoteStatus | undefined>) {
+			for (const shown of [{ state: 'stale', revisionKnown: true }, { state: 'unreadable' }, { state: 'sent' }] as SavedVoteStatus[]) {
 				await expect(readSentSinceShown(E, shown)).resolves.toBeNull()
 			}
+		})
+
+		it('WR-03: a none line or nothing shown, with every marker ballot sent, reads sent (no engine read, no write)', async () => {
+			await save(makeRecord({ electionRevision: 2 }))
+			await recordVoteSent(E, 2, 'ballot-1', 'cid-1')
+			clearStorageSpies()
+			await expect(readSentSinceShown(E, { state: 'none' })).resolves.toEqual({ state: 'sent' })
+			await expect(readSentSinceShown(E, undefined)).resolves.toEqual({ state: 'sent' })
+			expectNoWrites()
+		})
+
+		it('WR-03: a none line with a marker and not every ballot sent reads saved, revision not checked', async () => {
+			const record = makeRecord({ electionRevision: 2 })
+			record.votes.push({ ...record.votes[0], ballotId: 'ballot-2', nonce: randHex(32) })
+			record.voter.ballots.push({ ballotId: 'ballot-2', templateDigest: 'td' })
+			await save(record)
+			const SAVED_UNCHECKED = { state: 'saved', revisionKnown: false }
+			await expect(readSentSinceShown(E, { state: 'none' })).resolves.toEqual(SAVED_UNCHECKED)
+			// one of two ballots sent: still saved, never sent
+			await recordVoteSent(E, 2, 'ballot-1', 'cid-1')
+			await expect(readSentSinceShown(E, { state: 'none' })).resolves.toEqual(SAVED_UNCHECKED)
+			await expect(readSentSinceShown(E, undefined)).resolves.toEqual(SAVED_UNCHECKED)
+			// a sent store for another revision never makes it sent
+			await AsyncStorage.clear()
+			await save(makeRecord({ electionRevision: 2 }))
+			await recordVoteSent(E, 1, 'ballot-1', 'cid-1')
+			await expect(readSentSinceShown(E, { state: 'none' })).resolves.toEqual(SAVED_UNCHECKED)
+		})
+
+		it('WR-03: a none line with no marker, a corrupt marker or no ballot ids stays none (null)', async () => {
+			await expect(readSentSinceShown(E, { state: 'none' })).resolves.toBeNull()
+			await expect(readSentSinceShown(E, undefined)).resolves.toBeNull()
+			await AsyncStorage.setItem(voteMarkerKey(E), '{garbage')
+			await expect(readSentSinceShown(E, { state: 'none' })).resolves.toBeNull()
+			await AsyncStorage.setItem(voteMarkerKey(E), JSON.stringify({ ...buildVoteMarker(makeRecord({ electionRevision: 1 })), ballotIds: [] }))
+			await expect(readSentSinceShown(E, { state: 'none' })).resolves.toBeNull()
 		})
 
 		it('no marker or a corrupt marker is null', async () => {

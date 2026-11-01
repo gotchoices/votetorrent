@@ -170,8 +170,10 @@ export default function HomeScreen() {
 	//
 	// UAT 65 gap 2: the full read waits on the strand's election read before it looks at the sent
 	// store, and the first return to Home right after a send kept "not sent" on screen for 9 s or
-	// more. So a saved line is first checked against the sent store alone (no engine read) and turns
-	// sent at once; the full read still lands after it and has the last word.
+	// more. So a saved line, and a none line or nothing shown (WR-03: the usual path vote -> Submit ->
+	// Send -> Done -> Home left Home's pre-vote line), are first checked against the marker and the
+	// sent store alone (no engine read): saved turns sent, none turns saved or sent at once. The full
+	// read still lands after it and has the last word.
 	const electionId = election?.id;
 	useFocusEffect(
 		useCallback(() => {
@@ -181,19 +183,18 @@ export default function HomeScreen() {
 				// debug only (silent unless the __DEV__ switch is on): states and timings, never the record
 				const readAt = Date.now();
 				const election = idPrefix(electionId);
-				const shown = shownSavedVote.current;
-				vtDebug('home', 'saved-vote-read-start', {election, shown: shown && shown.electionId === electionId ? shown.status.state : 'none'});
-				if (shown && shown.electionId === electionId) {
-					readSentSinceShown(electionId, shown.status).then(
-						sent => {
-							vtDebug('home', 'saved-vote-fast-read', {election, sent: sent !== null, applied: live && !fullLanded && sent !== null, dropped: !live, fullLanded, ms: Date.now() - readAt});
-							if (live && !fullLanded && sent !== null) {
-								setSavedVote({electionId, status: sent});
-							}
-						},
-						() => undefined,
-					);
-				}
+				// Only this election's line counts as shown: a line read for another election is nothing shown.
+				const shownForThis = shownSavedVote.current?.electionId === electionId ? shownSavedVote.current.status : undefined;
+				vtDebug('home', 'saved-vote-read-start', {election, shown: shownForThis?.state ?? 'none'});
+				readSentSinceShown(electionId, shownForThis).then(
+					fast => {
+						vtDebug('home', 'saved-vote-fast-read', {election, state: fast?.state ?? 'keep', applied: live && !fullLanded && fast !== null, dropped: !live, fullLanded, ms: Date.now() - readAt});
+						if (live && !fullLanded && fast !== null) {
+							setSavedVote({electionId, status: fast});
+						}
+					},
+					() => undefined,
+				);
 				readSavedVoteStatus({getEngine, fallbackElectionId: __DEV__ ? seededElectionId : undefined}, nowMs(), electionId).then(
 					status => {
 						fullLanded = true;
