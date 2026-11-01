@@ -9,6 +9,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.PersistableBundle
 import android.util.Base64
+import android.util.Log
 import android.view.WindowManager
 import androidx.biometric.BiometricManager
 import androidx.fragment.app.FragmentActivity
@@ -345,6 +346,7 @@ class AttestationNativeModule(reactContext: ReactApplicationContext) :
 	) {
 		val activity = reactApplicationContext.currentActivity as? FragmentActivity
 		if (activity == null) {
+			Log.i(TAG_SIGN, "sign refused kind=DEVICE code=NO_ACTIVITY")
 			promise.reject("NO_ACTIVITY", "no current FragmentActivity available to host the BiometricPrompt")
 			return
 		}
@@ -392,6 +394,7 @@ class AttestationNativeModule(reactContext: ReactApplicationContext) :
 	) {
 		val activity = reactApplicationContext.currentActivity as? FragmentActivity
 		if (activity == null) {
+			Log.i(TAG_SIGN, "sign refused kind=RECOVERY code=NO_ACTIVITY")
 			promise.reject("NO_ACTIVITY", "no current FragmentActivity available to host the recovery ceremony")
 			return
 		}

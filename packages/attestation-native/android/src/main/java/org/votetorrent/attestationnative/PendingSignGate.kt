@@ -1,5 +1,7 @@
 package org.votetorrent.attestationnative
 
+import android.os.SystemClock
+import android.util.Log
 import androidx.biometric.BiometricPrompt
 import androidx.fragment.app.FragmentActivity
 import java.util.concurrent.atomic.AtomicBoolean
@@ -11,6 +13,14 @@ import java.util.concurrent.atomic.AtomicBoolean
  */
 internal const val BIOMETRIC_FRAGMENT_TAG = "androidx.biometric.BiometricFragment"
 
+/**
+ * Debug trace tag for the device-key / recovery-key sign lifecycle (start, reserve, prompt shown,
+ * settle, cancel): `adb logcat -s VtSign:I`. INFO only (never `Log.w`/`Log.e`, so `leg_cancel`'s
+ * `" E "` count is untouched). Kinds, codes and timings only: never digest, signature or key bytes,
+ * and never an error message text.
+ */
+internal const val TAG_SIGN = "VtSign"
+
 /** Which signing ceremony a [PendingSign] belongs to. Vault wrap/unwrap prompts never enter the gate. */
 internal enum class PendingSignKind { DEVICE, RECOVERY }
 
@@ -19,22 +29,36 @@ internal enum class PendingSignKind { DEVICE, RECOVERY }
  * [AtomicBoolean] compareAndSet). A late `onAuthenticationSucceeded` after a cancel therefore hits an
  * already-settled record and its signature is discarded, never resolved to JS. Each method returns
  * whether it won. Key invalidation is detected before the gate is reserved, so it settles directly
- * and never goes through this wrapper.
+ * and never goes through this wrapper. The winning call logs one [TAG_SIGN] line with the [label]
+ * (the sign kind), the code on an error, and the ms since this wrapper was built (the sign's start);
+ * a losing late call logs that it was dropped.
  */
 internal class SettleOnce(
 	private val onResult: (String) -> Unit,
 	private val onError: (String, Throwable?) -> Unit,
+	private val label: String = "SIGN",
 ) {
 	private val settled = AtomicBoolean(false)
+	private val startedAt = SystemClock.uptimeMillis()
+
+	private fun elapsed(): Long = SystemClock.uptimeMillis() - startedAt
 
 	fun result(hex: String): Boolean {
-		if (!settled.compareAndSet(false, true)) return false
+		if (!settled.compareAndSet(false, true)) {
+			Log.i(TAG_SIGN, "settle dropped kind=$label outcome=signature ms=${elapsed()}")
+			return false
+		}
+		Log.i(TAG_SIGN, "settle ok kind=$label ms=${elapsed()}")
 		onResult(hex)
 		return true
 	}
 
 	fun error(code: String, t: Throwable?): Boolean {
-		if (!settled.compareAndSet(false, true)) return false
+		if (!settled.compareAndSet(false, true)) {
+			Log.i(TAG_SIGN, "settle dropped kind=$label code=$code ms=${elapsed()}")
+			return false
+		}
+		Log.i(TAG_SIGN, "settle error kind=$label code=$code ms=${elapsed()}")
 		onError(code, t)
 		return true
 	}

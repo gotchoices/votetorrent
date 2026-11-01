@@ -524,12 +524,24 @@ class AttestationNativeModule: NSObject {
     let context: LAContext
     let reject: RCTPromiseRejectBlock
     let done = DispatchGroup()
+    /// "device" or "recovery", for the `[VtSign]` debug lines only
+    let kind: String
+    let startedAt = DispatchTime.now()
     var canceled = false
     var settled = false
-    init(context: LAContext, reject: @escaping RCTPromiseRejectBlock) {
+    init(context: LAContext, reject: @escaping RCTPromiseRejectBlock, kind: String) {
       self.context = context
       self.reject = reject
+      self.kind = kind
     }
+    var elapsedMs: UInt64 { (DispatchTime.now().uptimeNanoseconds - startedAt.uptimeNanoseconds) / 1_000_000 }
+  }
+
+  /// Debug trace of the device-key / recovery-key sign lifecycle (start, busy refuse, settle, cancel):
+  /// `[VtSign] ...` in the device console (Console.app / `idevicesyslog | grep VtSign`). Kinds, codes,
+  /// timings and flags only: never digest, signature or key bytes, never an error message text.
+  private static func vtSignLog(_ line: String) {
+    NSLog("%@", "[VtSign] " + line)
   }
 
   private let signQueue = DispatchQueue(label: "org.votetorrent.attestation.sign",
@@ -550,7 +562,10 @@ class AttestationNativeModule: NSObject {
   private func signWith(tag: String, digestBase64: String, reason: String,
                         resolve: @escaping RCTPromiseResolveBlock,
                         reject: @escaping RCTPromiseRejectBlock) {
+    let kind = tag == Self.recoveryKeyTag ? "recovery" : "device"
+    Self.vtSignLog("sign start kind=\(kind)")
     guard let digest = Data(base64Encoded: digestBase64), digest.count == 32 else {
+      Self.vtSignLog("sign refused kind=\(kind) code=INVALID_DIGEST_ENCODING")
       reject("INVALID_DIGEST_ENCODING",
              "digestBase64 must be plain base64 of 32 raw digest bytes", nil)
       return
@@ -558,16 +573,18 @@ class AttestationNativeModule: NSObject {
     let context = LAContext()
     context.localizedReason = reason
     context.touchIDAuthenticationAllowableReuseDuration = 0
-    let pending = PendingSign(context: context, reject: reject)
+    let pending = PendingSign(context: context, reject: reject, kind: kind)
     pendingSignLock.lock()
     if pendingSign != nil {
       pendingSignLock.unlock()
+      Self.vtSignLog("sign refused kind=\(kind) code=PROMPT_BUSY")
       reject("PROMPT_BUSY", "another biometric sign is already pending", nil)
       return
     }
     pending.done.enter()
     pendingSign = pending
     pendingSignLock.unlock()
+    Self.vtSignLog("reserve ok kind=\(kind)")
 
     signQueue.async { [self] in
       pendingSignLock.lock()
@@ -586,6 +603,9 @@ class AttestationNativeModule: NSObject {
         return
       }
 
+      // The Face ID / passcode sheet is raised by this system call (the iOS analogue of Android's
+      // "authenticate"); it returns once the sheet is answered, cancelled or invalidated.
+      Self.vtSignLog("prompt requested kind=\(pending.kind) ms=\(pending.elapsedMs)")
       var error: Unmanaged<CFError>?
     // `.ecdsaSignatureDigestX962SHA256` treats the input as the FINAL ECDSA hash (no internal
     // hash) = noble `prehash: false`. Android's SHA256withECDSA hashes once, so the shared JS helper
@@ -656,14 +676,25 @@ class AttestationNativeModule: NSObject {
     pending.settled = true
     if pendingSign === pending { pendingSign = nil }
     pendingSignLock.unlock()
+    let outcomeTag: String
+    switch outcome {
+    case .signature: outcomeTag = "signature"
+    case .failure(let code, _, _): outcomeTag = "code=" + code
+    }
     if alreadySettled {
       // cancelPendingSign settled this sign CANCELED when its cap ran out; drop the outcome.
+      Self.vtSignLog("settle dropped kind=\(pending.kind) \(outcomeTag) ms=\(pending.elapsedMs)")
     } else if wasCanceled {
+      Self.vtSignLog("settle error kind=\(pending.kind) code=CANCELED canceled=true \(outcomeTag) ms=\(pending.elapsedMs)")
       reject("CANCELED", "signing was cancelled", nil)
     } else {
       switch outcome {
-      case .signature(let hex): resolve(["signatureHex": hex])
-      case .failure(let code, let message, let error): reject(code, message, error)
+      case .signature(let hex):
+        Self.vtSignLog("settle ok kind=\(pending.kind) ms=\(pending.elapsedMs)")
+        resolve(["signatureHex": hex])
+      case .failure(let code, let message, let error):
+        Self.vtSignLog("settle error kind=\(pending.kind) code=\(code) ms=\(pending.elapsedMs)")
+        reject(code, message, error)
       }
     }
     pending.done.leave()
@@ -692,11 +723,16 @@ class AttestationNativeModule: NSObject {
     pendingSign = nil
     pendingSignLock.unlock()
     guard let pending = pending else {
+      Self.vtSignLog("cancel start held=false")
       resolve(["canceled": false])
       return
     }
+    Self.vtSignLog("cancel start held=true kind=\(pending.kind) signMs=\(pending.elapsedMs)")
+    let cancelAt = DispatchTime.now()
     pending.context.invalidate()
+    var settledBySign = true
     if pending.done.wait(timeout: .now() + .seconds(2)) == .timedOut {
+      settledBySign = false
       NSLog("AttestationNative.cancelPendingSign: sign did not settle within the 2 s cap")
       pendingSignLock.lock()
       let settleHere = !pending.settled
@@ -706,6 +742,8 @@ class AttestationNativeModule: NSObject {
         pending.reject("CANCELED", "signing was cancelled", nil)
       }
     }
+    let waitedMs = (DispatchTime.now().uptimeNanoseconds - cancelAt.uptimeNanoseconds) / 1_000_000
+    Self.vtSignLog("cancel end kind=\(pending.kind) settled=\(settledBySign) capHit=\(!settledBySign) waitedMs=\(waitedMs)")
     resolve(["canceled": true])
   }
 
