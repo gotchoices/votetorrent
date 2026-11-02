@@ -195,9 +195,12 @@ describe('no-portal / no-vendor regression (PUB-01 / PUB-02)', () => {
       // 1.20.1 (typed PromiseShortfallError / ValidityRejectedError / BlockUnavailableError, the plugin's
       // offline queue). @quereus 4.20.3 -> 4.21.1 (statement write scope). All three patches carried
       // with identical hunk bodies.
+      // 2026-11-02: @serfab 1.19.1 -> 1.20.0 (strandReactivity, StrandDatabase.watchTables) and @optimystic
+      // 1.20.1 -> 1.24.0 (cohort-topic reactivity cheaper when idle, matchmaking sessions, client signatures
+      // txsig:v3, so every machine moves together). @quereus 4.21.1 -> 4.24.0, p2p-fret 1.2.1 -> 1.3.0.
       const expectedPrefix = pkg === '@serfab/strand-proto'
         ? '0.11.'
-        : pkg.startsWith('@serfab/') ? '1.19.' : '1.20.'
+        : pkg.startsWith('@serfab/') ? '1.20.' : '1.24.'
       expect(
         distinct[0],
         `Resolved ${pkg} version must start with ${expectedPrefix}, got ${distinct[0]}`

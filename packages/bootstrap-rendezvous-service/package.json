@@ -19,7 +19,7 @@
 		"test": "TS_NODE_PROJECT=./tsconfig.test.json mocha --node-option=import=./register-ts-node.mjs --node-option=experimental-specifier-resolution=node \"test/**/*.spec.ts\""
 	},
 	"dependencies": {
-		"@optimystic/db-p2p-storage-fs": "^1.20.1",
+		"@optimystic/db-p2p-storage-fs": "^1.24.0",
 		"@votetorrent/vote-engine": "workspace:*"
 	},
 	"devDependencies": {

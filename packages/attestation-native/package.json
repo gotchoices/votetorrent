@@ -26,7 +26,7 @@
 		"typecheck:ios:app": "bash scripts/typecheck-ios-app.sh"
 	},
 	"dependencies": {
-		"@optimystic/quereus-plugin-crypto": "^1.20.1",
+		"@optimystic/quereus-plugin-crypto": "^1.24.0",
 		"@votetorrent/vote-core": "workspace:*"
 	},
 	"peerDependencies": {

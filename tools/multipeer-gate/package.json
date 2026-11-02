@@ -20,21 +20,21 @@
 		"@libp2p/crypto": "^5",
 		"@libp2p/peer-id": "^6",
 		"@libp2p/websockets": "^10",
-		"@optimystic/db-core": "1.20.1",
-		"@optimystic/db-p2p": "1.20.1",
-		"@serfab/cadre-core": "1.19.1",
+		"@optimystic/db-core": "1.24.0",
+		"@optimystic/db-p2p": "1.24.0",
+		"@serfab/cadre-core": "1.20.0",
 		"@serfab/strand-proto": "^0.11.0"
 	},
 	"overrides": {
-		"@optimystic/db-p2p": "1.20.1",
-		"@optimystic/db-core": "1.20.1",
-		"@optimystic/quereus-plugin-optimystic": "1.20.1",
-		"@optimystic/quereus-plugin-crypto": "1.20.1",
-		"@optimystic/db-p2p-storage-fs": "1.20.1",
-		"@optimystic/db-p2p-storage-web": "1.20.1",
-		"@serfab/quereus-plugin-sereus": "1.19.1",
-		"@quereus/quereus": "4.21.1",
-		"@quereus/store": "4.21.1",
-		"@quereus/isolation": "4.21.1"
+		"@optimystic/db-p2p": "1.24.0",
+		"@optimystic/db-core": "1.24.0",
+		"@optimystic/quereus-plugin-optimystic": "1.24.0",
+		"@optimystic/quereus-plugin-crypto": "1.24.0",
+		"@optimystic/db-p2p-storage-fs": "1.24.0",
+		"@optimystic/db-p2p-storage-web": "1.24.0",
+		"@serfab/quereus-plugin-sereus": "1.20.0",
+		"@quereus/quereus": "4.24.0",
+		"@quereus/store": "4.24.0",
+		"@quereus/isolation": "4.24.0"
 	}
 }

@@ -1,5 +1,5 @@
 diff --git a/dist/cadre-node.js b/dist/cadre-node.js
-index 332415bea8d986c1ef7c47ef7a04056d82495cd2..d4adbc1ff1d3b06b2fce3f8c286f186ddd6ad1a3 100644
+index 3d06e57..f1c2e10 100644
 --- a/dist/cadre-node.js
 +++ b/dist/cadre-node.js
 @@ -57,6 +57,9 @@ import { createMembershipConnectionGater, UnauthorizedReservationBudget } from '
@@ -12,7 +12,7 @@ index 332415bea8d986c1ef7c47ef7a04056d82495cd2..d4adbc1ff1d3b06b2fce3f8c286f186d
  import { DelegateAdmissionStore, extractCircuitRelayTargets, dueRelayAnnounces, prunePeerStrandKeys, peerStrandKey, recordRelayRefusals, relaysNotRefusing } from './delegate-admission.js';
  import { relayCircuitAddrs, resolveListenAddrs, resolveTransportOptions, RelayReservationFailedError } from './relay-addrs.js';
  import { selfAddressesChanged } from './self-address-update.js';
-@@ -354,6 +357,13 @@ export class CadreNode {
+@@ -355,6 +358,13 @@ export class CadreNode {
           * stops conflating control addresses with strand seeding.
           */
          this.strandAddrService = null;
@@ -26,7 +26,7 @@ index 332415bea8d986c1ef7c47ef7a04056d82495cd2..d4adbc1ff1d3b06b2fce3f8c286f186d
          /**
           * Cadre invitation redemption handler (`/sereus/cadre-invite/1.0.0`): a device holding an
           * invitation dials this machine and proves possession; the handler seats the row and
-@@ -910,6 +920,20 @@ export class CadreNode {
+@@ -918,6 +928,20 @@ export class CadreNode {
          /** `connection:close` listener: {@link onControlConnectionClosed} (teardown in {@link stopRecordRefresh}). */
          this.controlConnectionCloseHandler = null;
          this.config = config;
@@ -47,7 +47,7 @@ index 332415bea8d986c1ef7c47ef7a04056d82495cd2..d4adbc1ff1d3b06b2fce3f8c286f186d
          this.hostUnclaimedStrands = config.hostUnclaimedStrands ?? config.profile === 'storage';
          this.strandManager = new StrandInstanceManager();
          this.enrollmentService = new EnrollmentService();
-@@ -1240,6 +1264,19 @@ export class CadreNode {
+@@ -1248,6 +1272,19 @@ export class CadreNode {
                  this.pushFanoutService = this.buildPushFanout(this.config.push);
                  log('Push-wake fan-out enabled (injected notifier)');
              }
@@ -67,7 +67,7 @@ index 332415bea8d986c1ef7c47ef7a04056d82495cd2..d4adbc1ff1d3b06b2fce3f8c286f186d
              this._running = true;
              this.emit('control:connected', undefined);
              timing('[start] total: %dms', Math.round(performance.now() - tTotal));
-@@ -2088,7 +2125,12 @@ export class CadreNode {
+@@ -2096,7 +2133,12 @@ export class CadreNode {
              connectionGater: createMembershipConnectionGater({
                  admitInbound: (remotePeerId) => this.admitInboundControlConnection(remotePeerId),
                  admitRelayReservation: (remotePeerId) => this.admitControlRelayReservation(remotePeerId),
@@ -81,7 +81,7 @@ index 332415bea8d986c1ef7c47ef7a04056d82495cd2..d4adbc1ff1d3b06b2fce3f8c286f186d
              }, network?.connectionGater, ADMISSION_DECISION_TIMEOUT_MS, relayedRequestBudgetMs(network?.linkRoundTripMs)),
              // Fail-closed per-stream authorization for the four Optimystic control-DB
              // protocols — the members-only layer the connection gater's stranger
-@@ -2970,6 +3012,23 @@ export class CadreNode {
+@@ -3009,6 +3051,23 @@ export class CadreNode {
          // self-update rule is measured against, and a removal landing mid-publish re-reads as
          // absent instead of matching no rows under a 'refreshed'. The record it returns is the
          // one in the row.
@@ -105,7 +105,7 @@ index 332415bea8d986c1ef7c47ef7a04056d82495cd2..d4adbc1ff1d3b06b2fce3f8c286f186d
          const aloneBefore = this.committedAlone();
          const record = await this.controlDatabase.updateSelfPeerRecord(peerId, (current) => this.signSelfRecord(peerId, signingKey, addrs, current));
          if (record === null) {
-@@ -3989,7 +4048,47 @@ export class CadreNode {
+@@ -4029,7 +4088,47 @@ export class CadreNode {
          if (booked.length > 0) {
              return booked;
          }
@@ -154,7 +154,7 @@ index 332415bea8d986c1ef7c47ef7a04056d82495cd2..d4adbc1ff1d3b06b2fce3f8c286f186d
      }
      /**
       * A sibling's retained out-of-band dial target (see {@link bootstrapPeerStore}),
-@@ -5139,6 +5238,14 @@ export class CadreNode {
+@@ -5187,6 +5286,14 @@ export class CadreNode {
              await this.strandAddrService.shutdown();
              this.strandAddrService = null;
          }
@@ -170,7 +170,7 @@ index 332415bea8d986c1ef7c47ef7a04056d82495cd2..d4adbc1ff1d3b06b2fce3f8c286f186d
          if (this.cadreInviteHandler && this.controlNode) {
              await this.cadreInviteHandler.unregister(this.controlNode);
 diff --git a/dist/control-protocol-guard.js b/dist/control-protocol-guard.js
-index b7cf4c1dcff144d3965f7beba87de7e4bbcde1c1..43328ceb0f989480ec5e22231eb96789e2e29b30 100644
+index 75a6b86..e0c0177 100644
 --- a/dist/control-protocol-guard.js
 +++ b/dist/control-protocol-guard.js
 @@ -83,6 +83,10 @@ import { CADRE_INVITE_PROTOCOL } from './cadre-invite-protocol.js';
@@ -182,9 +182,9 @@ index b7cf4c1dcff144d3965f7beba87de7e4bbcde1c1..43328ceb0f989480ec5e22231eb96789
 +// anonymous observers it exists to serve.
 +import { STRAND_OBSERVER_PROTOCOL } from './strand-observer-protocol.js';
  import { withTimeout } from './control-stream.js';
+ import { describeThrown } from './describe-thrown.js';
  const log = debug('sereus:cadre:control-protocol-guard');
- /** The class a protocol missing from {@link controlProtocolClasses} is guarded as. */
-@@ -141,6 +145,12 @@ export function controlProtocolClasses(partyId) {
+@@ -142,6 +146,12 @@ export function controlProtocolClasses(partyId) {
          [FORMATION_PROTOCOL, 'stranger-open'],
          [CADRE_INVITE_PROTOCOL, 'stranger-open'],
          [OWNER_GRANT_PROTOCOL, 'stranger-open'],
@@ -198,10 +198,10 @@ index b7cf4c1dcff144d3965f7beba87de7e4bbcde1c1..43328ceb0f989480ec5e22231eb96789
          [STRAND_ADDR_PROTOCOL, 'members'],
          ...controlDatabaseProtocols(partyId).map((protocol) => [protocol, 'members-snapshot']),
 diff --git a/dist/index.js b/dist/index.js
-index d058ff50bf3629748222685767383289200e2589..5dc0d0111c6afae2f041fce8c7e3ec1cf6b5c2f0 100644
+index 7076f46..3760872 100644
 --- a/dist/index.js
 +++ b/dist/index.js
-@@ -165,6 +165,9 @@ export { StrandWakeService, dialWake, WAKE_PROTOCOL, DEFAULT_WAKE_DIAL_BUDGET_MS
+@@ -168,6 +168,9 @@ export { StrandWakeService, dialWake, WAKE_PROTOCOL, DEFAULT_WAKE_DIAL_BUDGET_MS
  // Strand Address (control-network strand-address RPC) — wire types come via
  // `export * from './types.js'` (StrandAddrRequest / StrandAddrResponse / StrandAddrStatus).
  export { StrandAddrService, collectStrandAddrs, STRAND_ADDR_PROTOCOL } from './strand-addr-protocol.js';
@@ -212,7 +212,7 @@ index d058ff50bf3629748222685767383289200e2589..5dc0d0111c6afae2f041fce8c7e3ec1c
  export { peerRecordSignedPayload, signPeerRecord, verifyPeerRecordSignature, isPeerRecordFresh, isSignalingAddr, orderSignalingFirst, currentMemberTrustPolicy, DEFAULT_PEER_RECORD_MAX_AGE_MS, DEFAULT_PEER_RECORD_HEARTBEAT_MS } from './peer-record.js';
  // Device-token record (self-published, signed FCM/APNs push token — CadrePeer sibling)
 diff --git a/dist/membership-connection-gater.js b/dist/membership-connection-gater.js
-index 10b8761c2f85694a904d341d01e8f0de3e719c03..d2c0147686e62940c96caaa1230c8dfc87e9a548 100644
+index 10b8761..d2c0147 100644
 --- a/dist/membership-connection-gater.js
 +++ b/dist/membership-connection-gater.js
 @@ -111,6 +111,25 @@
@@ -261,7 +261,7 @@ index 10b8761c2f85694a904d341d01e8f0de3e719c03..d2c0147686e62940c96caaa1230c8dfc
              try {
                  verdict = await decideInbound(remotePeerId);
 diff --git a/dist/peer-authorization.js b/dist/peer-authorization.js
-index 99cb99bbbfb9c0ae881d28bbb78d4757e5fa9c8f..823a27074f5eea0de93ac9ed367e2589f87d6320 100644
+index 99cb99b..823a270 100644
 --- a/dist/peer-authorization.js
 +++ b/dist/peer-authorization.js
 @@ -1,5 +1,6 @@
@@ -273,7 +273,7 @@ index 99cb99bbbfb9c0ae881d28bbb78d4757e5fa9c8f..823a27074f5eea0de93ac9ed367e2589
  import { ed25519PublicKeyB64FromPeerId } from './ed25519-key.js';
  const log = debug('sereus:cadre:peer-authorization');
 diff --git a/dist/peer-record.js b/dist/peer-record.js
-index 221330b917cec9d9bef464f5475fabccdc1453a4..0f78e5c558d6e561de6da593eaebab5184e2c667 100644
+index 221330b..0f78e5c 100644
 --- a/dist/peer-record.js
 +++ b/dist/peer-record.js
 @@ -25,7 +25,8 @@
@@ -287,7 +287,7 @@ index 221330b917cec9d9bef464f5475fabccdc1453a4..0f78e5c558d6e561de6da593eaebab51
  /**
   * Default freshness ceiling for resolved peer-address records (15 minutes).
 diff --git a/dist/strand-instance-manager.js b/dist/strand-instance-manager.js
-index fab47518989ef3bdac723539418fceab31a46bf5..f39b9a230db4571ccb43bd35171262ab23fc423d 100644
+index 1d21c32..f1150ec 100644
 --- a/dist/strand-instance-manager.js
 +++ b/dist/strand-instance-manager.js
 @@ -20,6 +20,19 @@ import { superviseRelayReservation } from './relay-reservation.js';
@@ -308,9 +308,9 @@ index fab47518989ef3bdac723539418fceab31a46bf5..f39b9a230db4571ccb43bd35171262ab
 +        && (link.code === 'NO_NETWORK_COORDINATOR' || link.code === 'NO_COORDINATOR_AVAILABLE'));
 +}
  import { declaredCohortReadDeadlineMs, optimysticDialLimits, peerJoinPushBudget, relayReservationBudgetMs, resolveLinkRoundTripMs } from './link-budget.js';
+ import { describeThrown } from './describe-thrown.js';
  const log = debug('sereus:cadre:strand-manager');
- /**
-@@ -823,7 +836,7 @@ export class StrandInstanceManager {
+@@ -825,7 +838,7 @@ export class StrandInstanceManager {
              await strandDb.initialize();
          }
          catch (error) {
@@ -321,7 +321,7 @@ index fab47518989ef3bdac723539418fceab31a46bf5..f39b9a230db4571ccb43bd35171262ab
              await this.discardDatabaseAttempt(strandId, gate);
 diff --git a/dist/strand-observer-protocol.js b/dist/strand-observer-protocol.js
 new file mode 100644
-index 0000000000000000000000000000000000000000..dbaa40b31c6ba204ffd158427e9efdbdfa8b6762
+index 0000000..dbaa40b
 --- /dev/null
 +++ b/dist/strand-observer-protocol.js
 @@ -0,0 +1,178 @@
@@ -505,7 +505,7 @@ index 0000000000000000000000000000000000000000..dbaa40b31c6ba204ffd158427e9efdbd
 +//# sourceMappingURL=strand-observer-protocol.js.map
 diff --git a/dist/verify-memo.js b/dist/verify-memo.js
 new file mode 100644
-index 0000000000000000000000000000000000000000..d7a9d7cbd66bf226f0627328ca53c92fbbd9f3e4
+index 0000000..d7a9d7c
 --- /dev/null
 +++ b/dist/verify-memo.js
 @@ -0,0 +1,29 @@
