@@ -13,6 +13,14 @@
  * it is reopened on the next call. A database with an open iterator is never closed under it, so
  * `maxOpen` is a soft cap while many iterators are open at once.
  *
+ * One name is one pooled database, however many callers open it (UAT 65 finding F4). rn-leveldb's own
+ * wrapper hands a second open of a name that is already open the SAME native handle, and a close by any
+ * holder frees it for all. Two quereus providers on one database name (a second rnDbFactory call for a
+ * network) open every store twice. As two pooled databases, the pool closed the shared handle for one and
+ * the other's next call or close hit the freed index (`leveldbClose/db-idx-out-of-bounds`), which failed a
+ * schema migration half-way. Now each opener gets a lease on the one pooled database, and the native
+ * handle is closed for good only when the last lease closes.
+ *
  * This module never imports rn-leveldb; rn-db-factory hands it the native open function.
  */
 
@@ -67,6 +75,8 @@ export class LevelDBOpenPool {
 	private readonly now: () => number;
 	/** databases holding a native handle, least recently used first */
 	private readonly lru = new Set<PooledLevelDB>();
+	/** the one pooled database per name, while any lease on it is open */
+	private readonly byName = new Map<string, PooledLevelDB>();
 	private databases = 0;
 	private nativeOpens = 0;
 	private poolCloses = 0;
@@ -78,10 +88,21 @@ export class LevelDBOpenPool {
 		this.now = options.now ?? Date.now;
 	}
 
-	/** An open function for the LevelDB plugin whose databases this pool manages. */
+	/**
+	 * An open function for the LevelDB plugin whose databases this pool manages. A name that is already
+	 * open is shared, like rn-leveldb shares its native handle: the caller gets a lease on the same
+	 * pooled database, and errorIfExists does not apply (rn-leveldb does not check it for a shared name).
+	 */
 	openFn(nativeOpen: NativeLevelDBOpenFn): NativeLevelDBOpenFn {
-		return (name, createIfMissing, errorIfExists) =>
-			new PooledLevelDB(this, nativeOpen, name, createIfMissing, errorIfExists);
+		return (name, createIfMissing, errorIfExists) => {
+			const shared = this.byName.get(name);
+			if (shared !== undefined) {
+				return shared.lease();
+			}
+			const db = new PooledLevelDB(this, nativeOpen, name, createIfMissing, errorIfExists);
+			this.byName.set(name, db);
+			return db.lease();
+		};
 	}
 
 	stats(): LevelDBOpenPoolStats {
@@ -127,9 +148,12 @@ export class LevelDBOpenPool {
 		this.syncTimer();
 	}
 
-	/** @internal the caller closed `db` */
+	/** @internal the last lease on `db` closed */
 	released(db: PooledLevelDB): void {
 		this.lru.delete(db);
+		if (this.byName.get(db.name) === db) {
+			this.byName.delete(db.name);
+		}
 		this.databases--;
 		this.syncTimer();
 	}
@@ -171,11 +195,12 @@ class PooledLevelDB implements NativeLevelDB {
 	private handle: NativeLevelDB | null;
 	private openIterators = 0;
 	private closedByCaller = false;
+	private leases = 0;
 
 	constructor(
 		private readonly pool: LevelDBOpenPool,
 		private readonly nativeOpen: NativeLevelDBOpenFn,
-		private readonly name: string,
+		readonly name: string,
 		private readonly createIfMissing: boolean,
 		errorIfExists: boolean,
 	) {
@@ -183,6 +208,35 @@ class PooledLevelDB implements NativeLevelDB {
 		pool.makeRoom();
 		this.handle = nativeOpen(name, createIfMissing, errorIfExists);
 		pool.opened(this, true);
+	}
+
+	/** One opener's view of this database: its own close, and calls refused after that close. */
+	lease(): NativeLevelDB {
+		this.leases++;
+		let open = true;
+		const live = (): PooledLevelDB => {
+			if (!open) {
+				throw new Error(`LevelDB ${this.name} is closed`);
+			}
+			return this;
+		};
+		return {
+			put: (key, value) => live().put(key, value),
+			getBuf: (key) => live().getBuf(key),
+			delete: (key) => live().delete(key),
+			write: (batch) => live().write(batch),
+			newIterator: () => live().newIterator(),
+			close: () => {
+				if (!open) {
+					return;
+				}
+				open = false;
+				this.leases--;
+				if (this.leases === 0) {
+					this.close();
+				}
+			},
+		};
 	}
 
 	put(key: ArrayBuffer | string, value: ArrayBuffer | string): void {
@@ -241,6 +295,7 @@ class PooledLevelDB implements NativeLevelDB {
 		return pooled;
 	}
 
+	/** The last lease closed: close the native handle for good and leave the pool. */
 	close(): void {
 		if (this.closedByCaller) {
 			return;

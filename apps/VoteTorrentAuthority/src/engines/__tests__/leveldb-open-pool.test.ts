@@ -139,6 +139,33 @@ class FakeDisk {
 	}
 }
 
+/**
+ * rn-leveldb's own JS wrapper (3.11.1): a second open of a name that is already open returns the SAME native
+ * handle (no LOCK error), and a close by any holder frees it for all of them. A close through a freed handle
+ * throws, as the real `leveldbClose/db-idx-out-of-bounds` does.
+ */
+const rnLevelDBSharing = (disk: FakeDisk) => {
+	const open = new Map<string, NativeLevelDB>();
+	return (name: string, createIfMissing: boolean, errorIfExists: boolean): NativeLevelDB => {
+		const held = open.get(name);
+		if (held) {
+			return held;
+		}
+		const native = disk.openFn(name, createIfMissing, errorIfExists);
+		const shared: NativeLevelDB = {
+			...native,
+			close: () => {
+				if (open.get(name) === shared) {
+					open.delete(name);
+				}
+				native.close();
+			},
+		};
+		open.set(name, shared);
+		return shared;
+	};
+};
+
 describe('LevelDBOpenPool', () => {
 	let disk: FakeDisk;
 	let clock: number;
@@ -233,6 +260,37 @@ describe('LevelDBOpenPool', () => {
 		a.close();
 		expect(() => a.getBuf(key('k'))).toThrow('LevelDB a is closed');
 		expect(pool.stats()).toMatchObject({ databases: 1, nativeOpen: 1 });
+	});
+
+	it('LP-7: two openers of one name share one native handle, and the pool never frees it under the other (F4)', () => {
+		// Two providers on one database name (a second rnDbFactory call) open every store twice, and rn-leveldb
+		// gives both the same native handle. Before the fix, the pool closed it for one opener (over the cap or
+		// idle) and the other's next call or close hit the freed handle (leveldbClose/db-idx-out-of-bounds).
+		// Both twins open at once: a cap of 2 lets them share; a third database pushes the least recently used out.
+		pool = new LevelDBOpenPool({ maxOpen: 2, idleCloseMs: 1_000, now });
+		const open = pool.openFn(rnLevelDBSharing(disk));
+		const a1 = open('a', true, false);
+		const a2 = open('a', true, false);
+		a2.put(key('k'), key('1'));
+		a1.put(key('k2'), key('2'));
+		open('b', true, false).put(key('k'), key('b'));
+		expect(text(a2.getBuf(key('k')))).toBe('1');
+		expect(text(a1.getBuf(key('k2')))).toBe('2');
+
+		// the idle sweep closes everything idle, twins included, without touching a freed handle
+		clock = 5_000;
+		jest.advanceTimersByTime(1_000);
+		expect(disk.open.size).toBe(0);
+
+		a1.close();
+		a1.close();
+		expect(() => a1.getBuf(key('k'))).toThrow('LevelDB a is closed');
+		expect(text(a2.getBuf(key('k')))).toBe('1');
+		expect(disk.open.has('a')).toBe(true);
+
+		a2.close();
+		expect(disk.open.has('a')).toBe(false);
+		expect(pool.stats()).toMatchObject({ databases: 1 });
 	});
 
 	it('LP-6: a quereus database over the pooled plugin gives the same answers with only 2 databases open', async () => {
