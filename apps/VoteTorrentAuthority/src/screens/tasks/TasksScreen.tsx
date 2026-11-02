@@ -23,6 +23,7 @@ import { PeerReadUnavailableNotice } from "../../components/PeerReadUnavailableN
 import { classifyPeerReadFailure } from "../../engines/peer-read-unavailable";
 import { isNoNetworkEstablishedError } from "../../engines/engine-factory";
 import { loadRenderableSignatureTasks, type RenderableSignatureTask } from "./renderable-signature-tasks";
+import { useStrandChanges } from "../../hooks/useStrandChanges";
 
 // Resolve the authority grouping key for a task. Falls back to the network
 // name when an authority-specific name is not accessible on the task type
@@ -109,6 +110,11 @@ export default function TasksScreen() {
 			loadTasksEngines();
 		}, [loadTasksEngines])
 	);
+
+	// A task another officer created or completed shows up while this list is on screen.
+	useStrandChanges(["App.Task"], () => {
+		loadTasksEngines();
+	}, "authority-tasks");
 
 	// Matches ElectionsScreen/AuthoritiesScreen: no network selected is an empty
 	// state, not a failure. Checked before isEmpty so the friendly prompt wins

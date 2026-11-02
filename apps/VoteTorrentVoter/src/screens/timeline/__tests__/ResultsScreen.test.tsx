@@ -46,6 +46,13 @@ const TALLIED = {
 };
 
 let mockResults: unknown = TALLIED;
+// The officer-published tally (ElectionTally) the phone reads back; an Error makes the engine unavailable.
+let mockPublication: unknown = null;
+const mockReadPublishedTally = jest.fn(async (_id: string, _rev: number, _recomputed: unknown) => mockPublication);
+const PUBLISHED = {
+	electionId: 'e', revision: 1, blockRoot: 'cd', tallyRoot: 'ab', blockCount: 1, publishedAt: '2026-11-02T10:00:00.000Z',
+	publisherUserId: 'officer-1', publisherKey: '02aa', signatureValid: true, treeCheck: {ok: true}, matchesRecomputed: true, tally: {},
+};
 let mockElections: Array<{id: string}> = [{id: ELECTION_ID}];
 const mockGetElectionResults = jest.fn(async (_id: string) => {
 	if (mockResults instanceof Error) throw mockResults;
@@ -56,6 +63,10 @@ const mockGetEngine = jest.fn(async (name: string) => {
 		return {getElections: async () => mockElections.map(e => ({...e, title: 't', authorityName: 'a', date: Date.now() + 86_400_000, type: 'adhoc'}))};
 	}
 	if (name === 'electionResults') return {getElectionResults: mockGetElectionResults};
+	if (name === 'tallyPublication') {
+		if (mockPublication instanceof Error) throw mockPublication;
+		return {readPublishedTally: mockReadPublishedTally};
+	}
 	throw new Error(`unexpected getEngine call: ${name}`);
 });
 
@@ -98,8 +109,10 @@ const has = (tr: renderer.ReactTestRenderer, testID: string) => tr.root.findAll(
 
 beforeEach(async () => {
 	mockResults = TALLIED;
+	mockPublication = null;
 	mockElections = [{id: ELECTION_ID}];
 	mockGetElectionResults.mockClear();
+	mockReadPublishedTally.mockClear();
 	await renderer.act(async () => {
 		await i18n.changeLanguage('en');
 	});
@@ -159,6 +172,46 @@ describe('ResultsScreen', () => {
 		const tr = await mount();
 		expect(has(tr, 'results-no-blocks')).toBe(true);
 		expect(has(tr, 'results-valid-total')).toBe(false);
+	});
+
+	it('says the official count is not published yet, after reading the published tally with this phone\'s own tree', async () => {
+		const tr = await mount();
+		expect(mockReadPublishedTally).toHaveBeenCalledWith((TALLIED as {electionId: string}).electionId, 1, TALLIED.tally);
+		expect(text(tr, 'results-not-published')).toBe('An election officer has not published the official count yet.');
+		expect(has(tr, 'results-published')).toBe(false);
+	});
+
+	it('says the published count matches this phone when its checks pass and its roots equal the recount', async () => {
+		mockPublication = PUBLISHED;
+		const tr = await mount();
+		expect(text(tr, 'results-published-matches')).toContain('It matches the count on this phone.');
+		expect(has(tr, 'results-not-published')).toBe(false);
+	});
+
+	it('names both block counts when the published count differs from this phone\'s', async () => {
+		mockPublication = {...PUBLISHED, blockCount: 4, matchesRecomputed: false};
+		const tr = await mount();
+		expect(text(tr, 'results-published-differs')).toBe(
+			'An election officer published a count from 4 vote blocks, and this phone counted 1. This phone may not have every vote block yet.',
+		);
+	});
+
+	it('warns not to rely on a published count whose signature or tree check fails, even if its roots match', async () => {
+		mockPublication = {...PUBLISHED, signatureValid: false};
+		let tr = await mount();
+		expect(has(tr, 'results-published-invalid')).toBe(true);
+		expect(has(tr, 'results-published-matches')).toBe(false);
+		mockPublication = {...PUBLISHED, treeCheck: {ok: false, reason: 'root-mismatch', detail: 'x'}};
+		tr = await mount();
+		expect(tr.root.findAll(n => n.props?.testID === 'results-published-invalid').length).toBeGreaterThan(0);
+	});
+
+	it('shows the results with no publication line when the published tally cannot be read', async () => {
+		mockPublication = new Error('no engine');
+		const tr = await mount();
+		expect(text(tr, 'results-valid-total')).toBe('Valid votes: 3');
+		expect(has(tr, 'results-not-published')).toBe(false);
+		expect(has(tr, 'results-published')).toBe(false);
 	});
 
 	it('renders in Spanish', async () => {

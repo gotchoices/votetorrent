@@ -516,6 +516,10 @@ const resources = {
 			'results.checkedNote': 'Counted on this phone from the vote blocks it has received so far. Tap Refresh to count again.',
 			'results.noBlocksYet': 'No vote blocks have reached this phone yet, so nothing is counted. Wait a minute, then tap Refresh.',
 			'results.refreshCta': 'Refresh',
+			'results.notPublished': 'An election officer has not published the official count yet.',
+			'results.publishedMatches': 'An election officer published the official count on {{date}}. It matches the count on this phone.',
+			'results.publishedDiffers': 'An election officer published a count from {{published}} vote blocks, and this phone counted {{local}}. This phone may not have every vote block yet.',
+			'results.publishedInvalid': 'A count was published, but it failed its signature or consistency check. Do not rely on it.',
 			'indeterminate.heading': "We can't show this election's timeline right now",
 			'indeterminate.body':
 				"The election schedule could not be read or doesn't make sense yet. Try again in a moment.",
@@ -1019,6 +1023,10 @@ const resources = {
 			'results.checkedNote': 'Contado en este teléfono con los bloques de votos que ha recibido hasta ahora. Toca Actualizar para volver a contar.',
 			'results.noBlocksYet': 'Todavía no ha llegado ningún bloque de votos a este teléfono, así que no se cuenta nada. Espera un minuto y toca Actualizar.',
 			'results.refreshCta': 'Actualizar',
+			'results.notPublished': 'Un funcionario electoral aún no ha publicado el recuento definitivo.',
+			'results.publishedMatches': 'Un funcionario electoral publicó el recuento definitivo el {{date}}. Coincide con el recuento de este teléfono.',
+			'results.publishedDiffers': 'Un funcionario electoral publicó un recuento de {{published}} bloques de votos, y este teléfono contó {{local}}. Puede que este teléfono aún no tenga todos los bloques de votos.',
+			'results.publishedInvalid': 'Se publicó un recuento, pero no superó su comprobación de firma o de coherencia. No confíes en él.',
 			'indeterminate.heading': 'No podemos mostrar el cronograma de esta elección en este momento',
 			'indeterminate.body':
 				'No se pudo leer el cronograma de la elección o aún no es válido. Inténtalo de nuevo en un momento.',

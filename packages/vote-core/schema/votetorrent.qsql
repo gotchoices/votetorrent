@@ -962,6 +962,10 @@ declare schema main
 		-- context.CtxTid on this table specifically).
 		with context ( CtxTid int, now datetime );
 
+	-- "optimystic.network_watch" (2026-11-02, @optimystic 1.24 / @serfab 1.20 strandReactivity): the tables a
+	-- screen re-reads on change carry this tag, so a commit made on ANOTHER machine wakes this machine's
+	-- Database.watch (and cadre-core watchTables) even when it stores none of the table's blocks. A tag-only
+	-- change is applied by `apply schema` as a catalog update; it changes no row, column or constraint.
 	table Election (
 		Id text primary key, -- 32 byte random id
 		AuthorityId text, -- authority that created the election
@@ -988,7 +992,7 @@ declare schema main
 						)
 			)
 		)
-	)
+	) with tags ("optimystic.network_watch" = true)
 		with context ( SigningNonce text, Tid int, now text );
 
 	table ProposedElection (
@@ -1000,7 +1004,7 @@ declare schema main
 		BallotDeadline datetime, -- deadline for adding or revising ballots to the election
 		Type text, -- references ElectionType(Code)
 		constraint UserValid check (context.IsUserValid = true)
-	)
+	) with tags ("optimystic.network_watch" = true)
 		with context ( UserId text, UserKey text, Signature text, Tid int, now datetime, IsUserValid boolean );
 
 	table ElectionRevision (
@@ -1040,7 +1044,7 @@ declare schema main
 						)
 			)
 		)
-	)
+	) with tags ("optimystic.network_watch" = true)
 		with context ( SigningNonce text, Tid int, now text );
 
 	table ProposedElectionRevision (
@@ -1062,7 +1066,7 @@ declare schema main
 					exists (select 1 from ProposedElection PE where PE.Id = new.ElectionId)
 		),
 		constraint UserValid check (context.IsUserValid = true)
-	)
+	) with tags ("optimystic.network_watch" = true)
 		with context ( UserId text, UserKey text, Signature text, Tid int, now datetime, IsUserValid boolean );
 
 	table Ballot (
@@ -1102,7 +1106,7 @@ declare schema main
 						)
 			)
 		)
-	)
+	) with tags ("optimystic.network_watch" = true)
 		with context ( SigningNonce text, Tid int, now datetime );
 
 	table ProposedBallot (
@@ -1478,7 +1482,7 @@ declare schema main
 		constraint GroupCommitmentsPresent check (new.GroupCommitments is not null and length(new.GroupCommitments) > 0),
 		constraint NoUpdate check on update (false),
 		constraint NoDelete check on delete (false)
-	);
+	) with tags ("optimystic.network_watch" = true);
 
 	-- D-13/D-17: a keyholder's PUBLICLY released signing share -- by design (D-17), release makes
 	-- the share public so ANYONE with k shares may reconstruct; this is not a partial-decryption
@@ -1554,7 +1558,7 @@ declare schema main
 					) )
 		),
 		constraint MutationValid check on insert, update (context.IsMutationValid = true)
-	)
+	) with tags ("optimystic.network_watch" = true)
 		with context ( IsMutationValid boolean, Tid int );
 
 	table ReleaseKeyTaskExtension (
@@ -2114,7 +2118,7 @@ declare schema main
 							)
 				)
 		)
-	)
+	) with tags ("optimystic.network_watch" = true)
 		-- At INSERT no signing session exists, so only Tid is meaningful -- 48-07 still binds both
 		-- declared params. Do not "fix" the insert path by inventing a ceremony, and do not add a
 		-- third context param.
@@ -2293,7 +2297,7 @@ declare schema main
 		),
 		constraint NoUpdate check on update (false),
 		constraint NoDelete check on delete (false)
-	)
+	) with tags ("optimystic.network_watch" = true)
 		with context ( now datetime );
 
 	unique index RegistrationDecisionCursor on RegistrationDecision (StrandId, Cursor);
@@ -3361,7 +3365,7 @@ declare schema main
 		),
 		constraint NoUpdate check on update (false),
 		constraint NoDelete check on delete (false)
-	)
+	) with tags ("optimystic.network_watch" = true)
 		with context ( NowMs integer );
 
 	index VoteBlockBallot on VoteBlock (ElectionId, BallotId);
@@ -3408,7 +3412,76 @@ declare schema main
 		),
 		constraint NoUpdate check on update (false),
 		constraint NoDelete check on delete (false)
-	)
+	) with tags ("optimystic.network_watch" = true)
+		with context ( now datetime );
+
+	-- The published tally of one election revision (2026-11-02; user decision: an officer's device computes it
+	-- after the key release and writes ONE signed row). TallyJson is the full vt-tally-tree/1 tree (blocks/
+	-- tally-tree.ts); TallyRoot commits to every node's histogram and BlockRoot to every block, so anyone holding
+	-- the replicated blocks recomputes both and compares (verifyTallyTree, plus a fresh buildTallyTree). The schema
+	-- checks what it can without an EC or Merkle UDF: the columns match the tree's own header fields, the keys were
+	-- released (at least Threshold shares), the publisher is an officer of the election's authority signing with
+	-- one of its UserKeys, and the row never changes. Whether the tree is CORRECT is the reader's check, by design.
+	table ElectionTally (
+		ElectionId text, -- references Election.Id
+		ElectionRevision integer, -- references ElectionRevision.Revision
+		BlockRoot text, -- 64 lowercase hex: the R5 block Merkle root
+		TallyRoot text, -- 64 lowercase hex: the R8 tally tree root
+		BlockCount integer, -- tree size = committed blocks counted
+		TallyJson text, -- the vt-tally-tree/1 tree as JSON
+		PublishedAt text, -- ISO-Z
+		PublisherUserId text,
+		PublisherKey text,
+		Signature text,
+		primary key (ElectionId, ElectionRevision),
+		constraint RootFormats check (length(new.BlockRoot) = 64 and length(new.TallyRoot) = 64 and lower(new.BlockRoot) = new.BlockRoot and lower(new.TallyRoot) = new.TallyRoot),
+		constraint BlockCountValid check (typeof(new.BlockCount) = 'integer' and new.BlockCount >= 0),
+		constraint TallyMatchesColumns check (
+			json_extract(new.TallyJson, '$.format') = 'vt-tally-tree/1'
+				and json_extract(new.TallyJson, '$.electionId') = new.ElectionId
+				and json_extract(new.TallyJson, '$.electionRevision') = new.ElectionRevision
+				and json_extract(new.TallyJson, '$.blockRoot') = new.BlockRoot
+				and json_extract(new.TallyJson, '$.root') = new.TallyRoot
+				and json_extract(new.TallyJson, '$.size') = new.BlockCount
+		),
+		constraint KeysReleased check on insert (
+			exists (select 1 from ElectionKey EK where EK.ElectionId = new.ElectionId and EK.ElectionRevision = new.ElectionRevision)
+				and (
+					select count(*) from KeyholderShareRelease R where R.ElectionId = new.ElectionId and R.ElectionRevision = new.ElectionRevision
+				) >= (
+					select EK.Threshold from ElectionKey EK where EK.ElectionId = new.ElectionId and EK.ElectionRevision = new.ElectionRevision
+				)
+		),
+		-- A CURRENT officer of the election's authority: the inline max(EffectiveAt) form bound to context.now,
+		-- as RegistrationDecision.DeciderIsOfficerWithScope (a CurrentAdmin join is non-deterministic in a CHECK).
+		constraint PublisherIsOfficer check on insert (
+			exists (
+				select 1 from Election E join Officer O on O.AuthorityId = E.AuthorityId
+					where E.Id = new.ElectionId and O.UserId = new.PublisherUserId
+						and O.AdminEffectiveAt = (
+							select max(A.EffectiveAt) from Admin A where A.AuthorityId = O.AuthorityId and A.EffectiveAt <= context.now
+						)
+			)
+		),
+		constraint PublisherKeyIsUsers check on insert (
+			exists (select 1 from UserKey K where K.UserId = new.PublisherUserId and K.PubKey = new.PublisherKey)
+		),
+		constraint SignatureValid check (
+			SignatureValid(
+				Digest('ElectionTally', new.ElectionId, new.ElectionRevision, new.BlockRoot, new.TallyRoot, new.BlockCount, new.PublishedAt, new.PublisherUserId),
+				new.Signature,
+				new.PublisherKey
+			)
+				or SignatureValidP256(
+					Digest('ElectionTally', new.ElectionId, new.ElectionRevision, new.BlockRoot, new.TallyRoot, new.BlockCount, new.PublishedAt, new.PublisherUserId),
+					new.Signature,
+					new.PublisherKey
+				)
+		),
+		constraint PublishedAtValid check (isISODatetime(new.PublishedAt) and like('%Z', new.PublishedAt)),
+		constraint NoUpdate check on update (false),
+		constraint NoDelete check on delete (false)
+	) with tags ("optimystic.network_watch" = true)
 		with context ( now datetime );
 
 	index VoteBlockVoterBlock on VoteBlockVoter (BlockCid);

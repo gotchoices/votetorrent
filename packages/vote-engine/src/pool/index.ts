@@ -36,3 +36,17 @@ export { createFailoverRendezvousClient } from './pool-failover.js'
 export type { FailoverRendezvousClient } from './pool-failover.js'
 export { rendezvousDiscovery, ladderBucket, ladderTopic, POOL_LADDER_RUNG_BITS, POOL_LADDER_DWELL_PRESENTS, POOL_LADDER_MAX_MS, POOL_TOPIC_MAX_CHARS } from './pool-discovery.js'
 export type { PoolDiscovery } from './pool-discovery.js'
+export {
+  matchmakingDiscovery,
+  mergedDiscovery,
+  encodePoolListing,
+  decodePoolListing,
+  POOL_MATCH_TOPIC_KIND,
+  POOL_MATCH_LABEL_PREFIX,
+  poolMatchTopic,
+  POOL_MATCH_LISTING_TAG,
+  POOL_MATCH_LISTING_MAX_AGE_MS,
+  POOL_MATCH_QUERY_LIMIT,
+  POOL_MATCH_COOL_OFF_MS
+} from './pool-matchmaking.js'
+export type { PoolMatchEntry, PoolMatchProvider, PoolMatchmakingPorts } from './pool-matchmaking.js'

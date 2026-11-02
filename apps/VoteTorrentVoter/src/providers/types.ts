@@ -31,7 +31,7 @@
  * fine — that is a pure type-only re-export, not a runtime dependency on vote-core).
  */
 import type {NetworkReference} from '@votetorrent/vote-core';
-import type {NetworkJoinCode, NetworkJoinResult, NetworkJoinStep} from '@votetorrent/vote-engine/rn';
+import type {NetworkJoinCode, NetworkJoinResult, NetworkJoinStep, PoolMatchmakingPorts} from '@votetorrent/vote-engine/rn';
 
 /**
  * The 7-state election lifecycle, in canonical order (D-03). Phase 40's `__DEV__` cycler steps
@@ -253,6 +253,12 @@ export interface VoterAppContextType {
 	 * the authority's rendezvous; null until the node boots. Screens hand it to engines only.
 	 */
 	getNetworkNode: () => {getControlNode(): unknown} | null;
+	/**
+	 * Optimystic matchmaking ports for the current network's strand node (engines/pool-matchmaking-ports.ts),
+	 * or null when the node, the strand or its cohort-topic substrate is not up. Optional so test doubles of
+	 * this context need not provide it.
+	 */
+	getPoolMatchmaking?: () => PoolMatchmakingPorts | null;
 	/**
 	 * The D-07 dev-seeded election's id, captured from `seedDevNetwork`'s return — pass as
 	 * `RegisterInit.electionId` (44-08) so `validateFieldPolicy` enforces the seeded policy.

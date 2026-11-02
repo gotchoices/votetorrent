@@ -20,6 +20,7 @@ import { ThemedText } from "../../components/ThemedText";
 import { InlineError } from "../../components/InlineError";
 import { PeerReadUnavailableNotice } from "../../components/PeerReadUnavailableNotice";
 import { classifyPeerReadFailure } from "../../engines/peer-read-unavailable";
+import { useStrandChanges } from "../../hooks/useStrandChanges";
 
 /**
  * ElectionsScreen — three stacked sections per Phase 9 D-13:
@@ -105,6 +106,16 @@ export const ElectionsScreen = () => {
 		}
 		initializeElectionsEngine();
 	}, [hasNetwork, loadElections, reportLoadFailure]);
+
+	// Re-load when the open strand reports a change to an election table: another officer's new election,
+	// revision or ballot appears while this list is on screen, not only on the next focus.
+	useStrandChanges(
+		["App.Election", "App.ProposedElection", "App.ElectionRevision", "App.ProposedElectionRevision", "App.Ballot"],
+		() => {
+			if (hasNetwork) loadElections().catch(reportLoadFailure);
+		},
+		"authority-elections",
+	);
 
 	// Phase 9 plan 09-15 — re-load on screen focus so a newly created election/revision
 	// appears on return (mirrors the useFocusEffect pattern from the ballot round in 09-09).

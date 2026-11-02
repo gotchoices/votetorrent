@@ -136,12 +136,12 @@ describe("ElectionDetailsScreen — Results entry", () => {
 		expect(() => tr.root.findByProps({ testID: REGISTRANTS_TESTID })).not.toThrow();
 	});
 
-	it("navigates to ElectionResults with exactly the election id and title", async () => {
+	it("navigates to ElectionResults with exactly the election id, title and authority id", async () => {
 		const tr = await renderScreen();
 		await press(tr, RESULTS_TESTID);
 		expect(mockNavigate).toHaveBeenCalledTimes(1);
 		const [routeName, params] = mockNavigate.mock.calls[0]!;
 		expect(routeName).toBe("ElectionResults");
-		expect(params).toEqual({ electionId: "election-1", electionTitle: "Test Election" });
+		expect(params).toEqual({ electionId: "election-1", electionTitle: "Test Election", authorityId: "authority-1" });
 	});
 });

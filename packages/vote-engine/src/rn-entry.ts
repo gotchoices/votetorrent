@@ -278,7 +278,12 @@ export {
 	POOL_RENDEZVOUS_PROTOCOL,
 	attachPoolRendezvous,
 	createLibp2pRendezvousClient,
-	createFailoverRendezvousClient
+	createFailoverRendezvousClient,
+	rendezvousDiscovery,
+	matchmakingDiscovery,
+	mergedDiscovery,
+	POOL_MATCH_TOPIC_KIND,
+	poolMatchTopic
 } from './pool/index.js'
 export type {
 	PoolAgentOptions,
@@ -296,8 +301,18 @@ export type {
 	PoolRendezvousClient,
 	RendezvousRequest,
 	RendezvousReply,
-	FailoverRendezvousClient
+	FailoverRendezvousClient,
+	PoolDiscovery,
+	PoolMatchEntry,
+	PoolMatchProvider,
+	PoolMatchmakingPorts
 } from './pool/index.js'
+// The published tally: an officer's device writes one signed ElectionTally row; any device reads and checks it.
+export { TallyPublicationEngine } from './tally/index.js'
+export type { TallyPublisher, PublishTallyOutcome, PublishedTally, BlockCoverage } from './tally/index.js'
+// Reactivity: screens subscribe to strand table changes (cadre-core watchTables) through one hub.
+export { StrandChangeHub, STRAND_CHANGE_BACKSTOP_MS } from './reactivity/index.js'
+export type { StrandChangeSource, StrandTableWatch, StrandChangeSubscribeOptions } from './reactivity/index.js'
 // Phase 65 Plan 09 (D-61/D-52): the block tree (R5), voter slice checks (R6), comprehensive block
 // validation (R7) and tally tree (R8), re-exported by name (never `export *`). This is the Voter's engine
 // port for these checks; no screen calls it yet. Mirrors the exact name list on src/blocks/index.ts. R6-R8

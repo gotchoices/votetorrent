@@ -37,6 +37,12 @@ import {readSavedVoteStatus, readSentSinceShown} from '../../engines/saved-vote-
 import type {SavedVoteStatus} from '../../engines/saved-vote-status';
 import {idPrefix, vtDebug} from '../../engines/vt-debug';
 import {useInfoRead} from '../../hooks/useInfoRead';
+import {useStrandChanges} from '../../hooks/useStrandChanges';
+
+/** Tables whose change means the election card may be stale (a revision, a confirmed ballot, a key). */
+const ELECTION_TABLES = ['App.Election', 'App.ElectionRevision', 'App.Ballot', 'App.ElectionKey'] as const;
+/** Tables whose change means this voter's sent line may be stale (a block naming this voter landed). */
+const VOTE_TABLES = ['App.VoteBlock', 'App.VoteBlockVoter'] as const;
 
 type HomeNavigationProp = NativeStackNavigationProp<VoteStackParamList, 'Home'>;
 
@@ -67,6 +73,13 @@ export default function HomeScreen() {
 	const [unavailable, setUnavailable] = useState(false);
 	const [electionInfoVisible, setElectionInfoVisible] = useState(false);
 	const [savedVote, setSavedVote] = useState<{electionId: string; status: SavedVoteStatus} | null>(null);
+	// Bumped when the open strand reports a change to the tables each read depends on (another officer's
+	// revision, a block another voter's phone committed). Each tick re-runs that read's focus effect, so a
+	// focused Home follows the network without waiting for a refocus or its countdown timer.
+	const [electionTick, setElectionTick] = useState(0);
+	const [voteTick, setVoteTick] = useState(0);
+	useStrandChanges(ELECTION_TABLES, () => setElectionTick(n => n + 1), 'voter-home-election');
+	useStrandChanges(VOTE_TABLES, () => setVoteTick(n => n + 1), 'voter-home-votes');
 	// The line on screen, for the focus read below (a ref, so the focus effect does not re-run on it).
 	const shownSavedVote = useRef(savedVote);
 	shownSavedVote.current = savedVote;
@@ -96,6 +109,7 @@ export default function HomeScreen() {
 	// the background). Both are cleared on blur and unmount.
 	useFocusEffect(
 		useCallback(() => {
+			void electionTick; // a strand change re-runs this read (dependency below)
 			let live = true;
 			let recheck: ReturnType<typeof setTimeout> | undefined;
 			let boundary: ReturnType<typeof setTimeout> | undefined;
@@ -161,7 +175,7 @@ export default function HomeScreen() {
 					clearTimeout(boundary);
 				}
 			};
-		}, [getElection, getEngine, hasNetwork, nowMs]),
+		}, [getElection, getEngine, hasNetwork, nowMs, electionTick]),
 	);
 
 	// Re-read the marker on every focus, so returning from the receipt or from Submit shows the
@@ -178,6 +192,7 @@ export default function HomeScreen() {
 	const electionId = election?.id;
 	useFocusEffect(
 		useCallback(() => {
+			void voteTick; // a strand change re-runs this read (dependency below)
 			let live = true;
 			let fullLanded = false;
 			if (electionId) {
@@ -216,7 +231,7 @@ export default function HomeScreen() {
 			return () => {
 				live = false;
 			};
-		}, [electionId, getEngine, seededElectionId, nowMs]),
+		}, [electionId, getEngine, seededElectionId, nowMs, voteTick]),
 	);
 	// Per-election binding: a status read for one election never decorates another.
 	const cardSavedVote = savedVote && savedVote.electionId === electionId ? savedVote.status : undefined;

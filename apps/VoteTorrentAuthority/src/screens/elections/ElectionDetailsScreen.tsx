@@ -584,6 +584,7 @@ export default function ElectionDetailsScreen() {
 						navigation.navigate("ElectionResults", {
 							electionId: election.id,
 							electionTitle: election.title,
+							authorityId: election.authorityId,
 						})
 					}
 				/>

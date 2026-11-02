@@ -1,22 +1,42 @@
-import React, {useEffect, useState} from 'react';
+import React, {useEffect, useRef, useState} from 'react';
 import {Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
 import {useTheme} from '@react-navigation/native';
 import type {ExtendedTheme} from '@react-navigation/native';
 import {useTranslation} from 'react-i18next';
 import type {IElectionsEngine} from '@votetorrent/vote-core';
-import type {ElectionResults, ElectionResultsEngine} from '@votetorrent/vote-engine/rn';
+import type {ElectionResults, ElectionResultsEngine, PublishedTally, TallyPublicationEngine} from '@votetorrent/vote-engine/rn';
 import {useVoterApp} from '../../providers/VoterAppProvider';
 import {globalStyles} from '../../theme/styles';
 import {pickElectionId} from '../../engines/election-read';
+import {strandChanges} from '../../engines/strand-changes';
 
 /**
  * ResultsScreen — the election's results, counted on this phone. After enough keyholders release their key
  * shares, vote-engine's ElectionResultsEngine rebuilds the election key from the PUBLIC shares, decrypts and
  * validates every published vote block, and tallies it. Nothing is written and the key is wiped inside the call.
  * Picks the same election as the other Timeline screens (pickElectionId).
+ *
+ * Also shows the tally an election officer published (the signed ElectionTally row): whether its signature and
+ * tree check out and whether it equals this phone's own count. Counts again, without the loading state, when a
+ * key share is released or a vote block or the published tally reaches this phone.
  */
 
-type ScreenState = {kind: 'loading'} | {kind: 'ready'; results: ElectionResults} | {kind: 'failed'};
+/** 'unknown': the published tally could not be read; nothing is shown for it. */
+type Publication = PublishedTally | null | 'unknown';
+type ScreenState = {kind: 'loading'} | {kind: 'ready'; results: ElectionResults; publication: Publication} | {kind: 'failed'};
+
+/** The tables a recount depends on (qualified, as the strand reports them). */
+const RESULTS_TABLES = ['App.KeyholderShareRelease', 'App.ElectionKey', 'App.VoteBlock', 'App.VoteBlockVoter', 'App.ElectionTally'];
+
+async function readPublication(getEngine: <T>(name: string) => Promise<T>, results: ElectionResults): Promise<Publication> {
+	if (results.status !== 'tallied') return 'unknown';
+	try {
+		const engine = await getEngine<TallyPublicationEngine>('tallyPublication');
+		return await engine.readPublishedTally(results.electionId, results.revision, results.tally);
+	} catch {
+		return 'unknown';
+	}
+}
 
 const percent = (count: number, of: number): number => (of > 0 ? Math.round((count / of) * 100) : 0);
 
@@ -26,22 +46,39 @@ export default function ResultsScreen() {
 	const {t} = useTranslation('timeline');
 	const [state, setState] = useState<ScreenState>({kind: 'loading'});
 	const [reloadNonce, setReloadNonce] = useState(0);
+	// A recount after a strand change keeps the current results on screen until the new ones are ready.
+	const quiet = useRef(false);
+
+	useEffect(
+		() =>
+			strandChanges.subscribe(
+				RESULTS_TABLES,
+				() => {
+					quiet.current = true;
+					setReloadNonce(n => n + 1);
+				},
+				{label: 'voter-results'},
+			),
+		[],
+	);
 
 	useEffect(() => {
 		let live = true;
-		setState({kind: 'loading'});
+		if (!quiet.current) setState({kind: 'loading'});
+		quiet.current = false;
 		(async () => {
 			try {
 				const electionsEngine = await getEngine<IElectionsEngine>('elections');
 				const summaries = await electionsEngine.getElections();
 				const electionId = pickElectionId(summaries, __DEV__ ? seededElectionId : undefined);
 				if (!electionId) {
-					if (live) setState({kind: 'ready', results: {status: 'no-election', electionId: ''}});
+					if (live) setState({kind: 'ready', results: {status: 'no-election', electionId: ''}, publication: 'unknown'});
 					return;
 				}
 				const engine = await getEngine<ElectionResultsEngine>('electionResults');
 				const results = await engine.getElectionResults(electionId);
-				if (live) setState({kind: 'ready', results});
+				const publication = await readPublication(getEngine, results);
+				if (live) setState({kind: 'ready', results, publication});
 			} catch {
 				if (live) setState({kind: 'failed'});
 			}
@@ -55,6 +92,8 @@ export default function ResultsScreen() {
 	const secondary = {...body, color: colors.textSecondary};
 	const heading = {...body, fontSize: typeScale.h4.fontSize, lineHeight: typeScale.h4.lineHeight};
 	const results = state.kind === 'ready' ? state.results : null;
+	const publication = state.kind === 'ready' ? state.publication : 'unknown';
+	const publishedChecksOut = publication !== null && publication !== 'unknown' && publication.signatureValid && publication.treeCheck.ok;
 
 	return (
 		<ScrollView testID="results-scroll" style={[styles.screen, {backgroundColor: colors.background}]} contentContainerStyle={styles.content}>
@@ -157,6 +196,30 @@ export default function ResultsScreen() {
 						</View>
 					))}
 				</>
+			) : null}
+
+			{results?.status === 'tallied' && publication === null ? (
+				<Text testID="results-not-published" style={secondary}>
+					{t('results.notPublished')}
+				</Text>
+			) : null}
+
+			{results?.status === 'tallied' && publication !== null && publication !== 'unknown' ? (
+				<View testID="results-published" style={[styles.card, {backgroundColor: colors.card, borderColor: colors.border}]}>
+					{!publishedChecksOut ? (
+						<Text testID="results-published-invalid" style={{...body, color: colors.error}}>
+							{t('results.publishedInvalid')}
+						</Text>
+					) : publication.matchesRecomputed === true ? (
+						<Text testID="results-published-matches" style={body}>
+							{t('results.publishedMatches', {date: new Date(publication.publishedAt).toLocaleString()})}
+						</Text>
+					) : (
+						<Text testID="results-published-differs" style={{...body, color: colors.warning}}>
+							{t('results.publishedDiffers', {published: publication.blockCount, local: results.blockCount})}
+						</Text>
+					)}
+				</View>
 			) : null}
 
 			<Pressable

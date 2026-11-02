@@ -197,6 +197,11 @@ export interface TwoNodeHarnessOptions {
    * changed at runtime via `setNodeBFounder()`. node-A always opens with founder:true.
    */
   nodeBFounder?: boolean
+  /**
+   * Extra CadreNodeConfig keys for BOTH nodes, spread last (default none). Added 2026-11-02 for the
+   * reactivity/matchmaking harness (`strandReactivity: { enabled: true }`).
+   */
+  extraConfig?: Record<string, unknown>
 }
 
 // ---------------------------------------------------------------------------
@@ -264,7 +269,7 @@ class MeshTimeoutError extends Error {}
  */
 async function attemptBringUp (
   listenAddrs: string[],
-  opts: { partyId: string; clusterSize: number; log: (line: string) => void; peerlessNodeB?: boolean }
+  opts: { partyId: string; clusterSize: number; log: (line: string) => void; peerlessNodeB?: boolean; extraConfig?: Record<string, unknown> }
 ): Promise<{
   nodeA: any
   nodeB: any
@@ -298,7 +303,8 @@ async function attemptBringUp (
       strandClusterSize: clusterSize,
       hibernation: { enabled: false },
       profile: 'storage',
-      network: { transports: [webSockets()], listenAddrs }
+      network: { transports: [webSockets()], listenAddrs },
+      ...(opts.extraConfig ?? {})
     }
   }
 
@@ -580,11 +586,11 @@ export async function startTwoNodeHarness (options: TwoNodeHarnessOptions = {}):
   const peerlessNodeB = options.peerlessNodeB === true
   let built: { nodeA: any; nodeB: any; timings: HarnessTimings }
   try {
-    built = await attemptBringUp(['/ip4/127.0.0.1/tcp/0/ws'], { partyId, clusterSize, log, peerlessNodeB })
+    built = await attemptBringUp(['/ip4/127.0.0.1/tcp/0/ws'], { partyId, clusterSize, log, peerlessNodeB, extraConfig: options.extraConfig })
   } catch (error) {
     if (error instanceof MeshTimeoutError) {
       log(`DEVIATION: control mesh did not settle on 127.0.0.1 (${(error as Error).message}); falling back to 0.0.0.0 per topology.mjs`)
-      built = await attemptBringUp(['/ip4/0.0.0.0/tcp/0/ws'], { partyId, clusterSize, log, peerlessNodeB })
+      built = await attemptBringUp(['/ip4/0.0.0.0/tcp/0/ws'], { partyId, clusterSize, log, peerlessNodeB, extraConfig: options.extraConfig })
     } else {
       throw error
     }

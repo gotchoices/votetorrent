@@ -29,6 +29,7 @@ import {
 	waitForStrandWritable,
 } from './strand-first-sync';
 import { takeFounderIntent, resolveFounderFlag } from './founder-intent';
+import { strandChanges } from './strand-changes';
 
 // cadre-core's StrandDatabase.executeSchema() wraps the sApp schema as
 // `declare schema App { ${schema} } apply schema App;`. VOTETORRENT_SCHEMA_SQL is
@@ -209,6 +210,8 @@ export function createStrandDbFactory(node: StrandHost, options?: StrandDbFactor
 		// resolution guarantees.
 		const db = strand.database!.getDatabase();
 		db.setSchemaPath(['App', 'main']); // D-14 transparency — never omit (Pitfall 2).
+		// Screens hear this strand's table changes through the app's one hub (useStrandChanges).
+		strandChanges.attach(strandId, strand.database!);
 
 		return db;
 

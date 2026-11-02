@@ -48,6 +48,9 @@ module.exports = {
     '^@quereus/plugin-react-native-leveldb$':
       '<rootDir>/node_modules/@quereus/plugin-react-native-leveldb/dist/src/index.js',
     '^@optimystic/db-p2p$': '<rootDir>/__mocks__/@optimystic/db-p2p.js',
+    // db-core is ESM-only over ESM-only deps (multiformats). pool-matchmaking-ports.ts imports its matchmaking
+    // helpers; the stand-in throws if a test reaches one (no jest node has a cohort-topic host).
+    '^@optimystic/db-core$': '<rootDir>/__mocks__/@optimystic/db-core.js',
     // Native Noise crypto, as in the Authority (spike 093). The real module needs
     // react-native-quick-crypto (Nitro/JSI), which cannot load under Jest; the mock, copied from
     // the Authority, keeps the mode contract.

@@ -381,6 +381,13 @@ export function CadreNodeProvider({ children }: PropsWithChildren) {
           //
           // Strand nodes therefore inherit `network` above (the single control relay).
           hibernation: { enabled: false },
+          // Change notifications (cadre-core 1.20 `strandReactivity`, optimystic cohort-topic substrate): every
+          // strand node announces the commits it coordinates, and tables tagged "optimystic.network_watch" get a
+          // network watch, so a screen (useStrandChanges) is woken by a commit made on ANOTHER machine instead of
+          // waiting for its focus reload or a timer. It is also what gives the strand node its matchmaking
+          // handlers (Voter: pool-matchmaking-ports.ts). Cost: one cohort-topic host per strand node (db-p2p
+          // builds it as a core host, 30 s renewals, even on a phone); measure CPU on the Redmi before release.
+          strandReactivity: { enabled: true },
         }));
 
         // node.start() is inside useEffect — never blocks initial render (D-06 / T-22-03).

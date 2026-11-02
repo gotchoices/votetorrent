@@ -49,7 +49,7 @@ export interface SendVoteCardProps {
 }
 
 export default function SendVoteCard({electionId, electionRevision, envelope, ballotIds, onAllSentChange}: SendVoteCardProps) {
-	const {getEngine, nowMs, getNetworkNode} = useVoterApp();
+	const {getEngine, nowMs, getNetworkNode, getPoolMatchmaking} = useVoterApp();
 	const node = getNetworkNode();
 	const {colors, fonts, type: typeScale, radii} = useTheme() as ExtendedTheme;
 	const {t} = useTranslation('ballot');
@@ -124,6 +124,7 @@ export default function SendVoteCard({electionId, electionRevision, envelope, ba
 			envelope,
 			getEngine,
 			node,
+			getMatchmaking: getPoolMatchmaking,
 			recordPrompt,
 			consentPrompt,
 			nowMs,
@@ -144,7 +145,7 @@ export default function SendVoteCard({electionId, electionRevision, envelope, ba
 		} else {
 			setOutcome(result.kind);
 		}
-	}, [ballotIds.length, t, isIos, electionId, envelope, getEngine, node, nowMs]);
+	}, [ballotIds.length, t, isIos, electionId, envelope, getEngine, node, nowMs, getPoolMatchmaking]);
 
 	const bodyFont = {fontFamily: fonts.regular.fontFamily, fontWeight: fonts.regular.fontWeight, fontSize: typeScale.body.fontSize, lineHeight: typeScale.body.lineHeight};
 	const captionFont = {fontFamily: fonts.regular.fontFamily, fontWeight: fonts.regular.fontWeight, fontSize: typeScale.caption.fontSize, lineHeight: typeScale.caption.lineHeight};

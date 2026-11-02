@@ -141,8 +141,9 @@ export type RootStackParamList = {
 	// resolves the live network snapshot through useApp() itself.
 	DashboardSignInCode: undefined;
 	// Election results (decrypt + validate + tally after the key release). Identifiers plus the public election
-	// title only; the screen resolves its engine from useApp().getEngine('electionResults').
-	ElectionResults: { electionId: string; electionTitle?: string };
+	// title only; the screen resolves its engine from useApp().getEngine('electionResults'). authorityId (the
+	// election's authority) lets the screen offer Publish to this authority's officers only.
+	ElectionResults: { electionId: string; electionTitle?: string; authorityId?: string };
 	// Phase 9 plan 09-01 — type entries for routes whose screens land in later
 	// plans (CreateElection in 09-02, CreateBallot in 09-04). Stack.Screen
 	// registration is deferred; only the type signature is added here so the

@@ -12,6 +12,8 @@ import {
 	createPoolIdentity,
 	verifySigP256,
 	type PoolIdentity,
+	type PoolMatchEntry,
+	type PoolMatchmakingPorts,
 	type PoolRendezvousClient,
 } from '@votetorrent/vote-engine/rn';
 import {ConsentAbandonedError} from '@votetorrent/vote-engine/rn';
@@ -548,5 +550,77 @@ describe('sendSavedVote (R1 already voted, end to end)', () => {
 			const r = results[i]!;
 			if (r.ok) expect(r.ballots.map(b => b.status.phase)).toEqual(['sent', 'sent']);
 		}
+	});
+});
+
+/** One in-memory matchmaking cohort shared by every phone: providers by topic and registering peer. */
+function fakeMatchmakingCohort() {
+	const table = new Map<string, Map<string, PoolMatchEntry>>();
+	const calls = {register: 0, query: 0, withdraw: 0};
+	const portsFor = (peerId: string): PoolMatchmakingPorts => ({
+		selfPeerId: peerId,
+		openProvider: () => {
+			let topic: string | undefined;
+			return {
+				register: async (label, reg) => {
+					calls.register++;
+					topic = label;
+					const t = table.get(label) ?? new Map<string, PoolMatchEntry>();
+					t.set(peerId, {participantId: peerId, capabilities: reg.capabilities, contactHint: reg.contactHint});
+					table.set(label, t);
+				},
+				withdraw: async () => {
+					calls.withdraw++;
+					if (topic !== undefined) table.get(topic)?.delete(peerId);
+				},
+			};
+		},
+		query: async (label) => {
+			calls.query++;
+			return [...(table.get(label)?.values() ?? [])];
+		},
+	});
+	return {portsFor, calls};
+}
+
+describe('sendSavedVote with Optimystic matchmaking (merged with the rendezvous, 2026-11-02)', () => {
+	jest.setTimeout(30_000);
+
+	it('three phones with matchmaking send both ballots; every pool registered and queried on the cohort', async () => {
+		const rv = new PoolRendezvous();
+		const strand = fakeStrand(Date.now() + 60_000);
+		const cohort = fakeMatchmakingCohort();
+		const voters = [0, 1, 2].map(makeVoter);
+		const results = await Promise.all(voters.map((v, i) => sendSavedVote({
+			port: strand.port, sentStore: memorySentStore(), record: v.record, rendezvous: clientFor(rv, v.phone),
+			signConsent: signWith(v.priv), nowMs: () => Date.now(), agentOptions: fastAgent, minPromptMs: FAST_MIN_PROMPT_MS,
+			matchmaking: cohort.portsFor(`12D3KooWphone${i}`),
+		})));
+		rv.close();
+		expect(strand.commits.map(c => c.size)).toEqual([3, 3]);
+		for (const r of results) expect(r.ok && r.ballots.every(b => b.status.phase === 'sent')).toBe(true);
+		expect(cohort.calls.register).toBeGreaterThan(0);
+		expect(cohort.calls.query).toBeGreaterThan(0);
+		// every registration withdrawn once the pools are done
+		expect(cohort.calls.withdraw).toBeGreaterThan(0);
+	});
+
+	it('a matchmaking cohort that always fails does not stop sending: the rendezvous still forms the blocks', async () => {
+		const rv = new PoolRendezvous();
+		const strand = fakeStrand(Date.now() + 60_000);
+		const broken: PoolMatchmakingPorts = {
+			selfPeerId: 'p',
+			openProvider: () => ({register: async () => { throw new Error('no cohort'); }, withdraw: async () => { throw new Error('no cohort'); }}),
+			query: async () => { throw new Error('no cohort'); },
+		};
+		const voters = [0, 1, 2].map(makeVoter);
+		const results = await Promise.all(voters.map((v) => sendSavedVote({
+			port: strand.port, sentStore: memorySentStore(), record: v.record, rendezvous: clientFor(rv, v.phone),
+			signConsent: signWith(v.priv), nowMs: () => Date.now(), agentOptions: fastAgent, minPromptMs: FAST_MIN_PROMPT_MS,
+			matchmaking: broken,
+		})));
+		rv.close();
+		expect(strand.commits.map(c => c.size)).toEqual([3, 3]);
+		for (const r of results) expect(r.ok && r.ballots.every(b => b.status.phase === 'sent')).toBe(true);
 	});
 });

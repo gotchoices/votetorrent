@@ -40,7 +40,11 @@ import {
 	createPoolIdentity,
 	encryptVoteEntry,
 	isConsentAbandonedError,
+	matchmakingDiscovery,
+	mergedDiscovery,
+	rendezvousDiscovery,
 	type PoolAgentOptions,
+	type PoolMatchmakingPorts,
 	type PoolAgentStatus,
 	type PoolBallot,
 	type PoolContribution,
@@ -102,6 +106,12 @@ export interface SendSavedVoteDeps {
 	agentOptions?: Partial<PoolAgentOptions>
 	/** test seam: the throwaway pool identity for a ballot (default: a fresh one per ballot) */
 	poolIdentity?: (ballotId: string) => PoolIdentity
+	/**
+	 * Optimystic matchmaking on this phone's strand node (pool-matchmaking-ports.ts), or null/absent when the node
+	 * has no cohort-topic substrate. When present, pools discover each other through the rendezvous AND
+	 * matchmaking, merged (user decision 2026-11-02); the mailbox always stays on the rendezvous.
+	 */
+	matchmaking?: PoolMatchmakingPorts | null
 }
 
 export type SendSavedVoteResult =
@@ -318,9 +328,16 @@ export async function sendSavedVote(deps: SendSavedVoteDeps): Promise<SendSavedV
 		} catch {
 			return done({phase: 'not-sent', reason: 'failed'});
 		}
+		const discovery = deps.matchmaking != null
+			? mergedDiscovery(
+				[rendezvousDiscovery(deps.rendezvous, identity), matchmakingDiscovery(deps.matchmaking, identity)],
+				(index) => vtDebug('pool', 'discovery-partial-failure', {ballot: idPrefix(ballotId), source: index === 0 ? 'rendezvous' : 'matchmaking'}),
+			)
+			: undefined;
 		const agent = new PoolAgent({
 			identity,
 			rendezvous: deps.rendezvous,
+			...(discovery !== undefined ? {discovery} : {}),
 			ballot,
 			contribution,
 			signConsent: signConsentFor(ballotId),

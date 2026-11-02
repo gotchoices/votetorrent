@@ -117,6 +117,16 @@ describe('runVoteSendFlow (spike 102)', () => {
 		}
 	});
 
+	it('hands the current network\'s matchmaking ports to sending; none, or a throwing getter, is null (rendezvous only)', async () => {
+		const ports = {selfPeerId: 'p', openProvider: jest.fn(), query: jest.fn()};
+		await runVoteSendFlow(deps({getMatchmaking: () => ports as never}));
+		expect((sendSavedVote as jest.Mock).mock.calls[0][0].matchmaking).toBe(ports);
+		await runVoteSendFlow(deps());
+		expect((sendSavedVote as jest.Mock).mock.calls[1][0].matchmaking).toBeNull();
+		await runVoteSendFlow(deps({getMatchmaking: () => { throw new Error('no strand'); }}));
+		expect((sendSavedVote as jest.Mock).mock.calls[2][0].matchmaking).toBeNull();
+	});
+
 	it('an injected cancelSign is the one that reaches sending', async () => {
 		const fake = jest.fn(async () => true);
 		await runVoteSendFlow(deps({cancelSign: fake}));

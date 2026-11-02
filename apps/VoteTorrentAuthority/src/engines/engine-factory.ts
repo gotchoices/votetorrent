@@ -46,6 +46,7 @@ import {
 	P2pAssociationTransport,
 	KeyholderDkgEngine,
 	ElectionResultsEngine,
+	TallyPublicationEngine,
 } from '@votetorrent/vote-engine/rn';
 import type { DbFactory, EngineContext, ElectionSubject, StagingOpener, StagingDecisionSigner } from '@votetorrent/vote-engine/rn';
 import type { BootstrapSnapshot } from '@votetorrent/vote-engine/bootstrap';
@@ -683,6 +684,13 @@ export class EngineFactory {
 				// PUBLIC released shares in memory and zero-fills it; needs no vault and no signer.
 				const ctx = this.requireEstablishedCtx();
 				return new ElectionResultsEngine(ctx);
+			}
+
+			case 'tallyPublication': {
+				// The published, officer-signed tally (ElectionTally): read it back with its checks; on an officer's
+				// device, publish the tally computed by 'electionResults'. Signs only through the caller's signer.
+				const ctx = this.requireEstablishedCtx();
+				return new TallyPublicationEngine(ctx);
 			}
 
 			case 'signatureTasksEngine': {

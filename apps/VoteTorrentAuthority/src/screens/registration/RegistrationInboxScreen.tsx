@@ -36,6 +36,7 @@ import { TransparencyStatsCard } from "./components/TransparencyStatsCard";
 import type { RootStackParamList } from "../../navigation/types";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useKeyboardInset } from "../../hooks/useKeyboardInset";
+import { useStrandChanges } from "../../hooks/useStrandChanges";
 
 // D-12: this screen previously carried a screen-local loosely-typed
 // navigation widening because RootStackParamList did not yet carry
@@ -211,6 +212,11 @@ export default function RegistrationInboxScreen() {
 			loadFirstPage();
 		}, [loadFirstPage])
 	);
+
+	// A request that arrives (or another officer's decision) while the inbox is on screen re-reads the first page.
+	useStrandChanges(["App.RegistrationRequest", "App.RegistrationDecision"], () => {
+		loadFirstPage();
+	}, "authority-registration-inbox");
 
 	const loadStats = useCallback(async () => {
 		try {

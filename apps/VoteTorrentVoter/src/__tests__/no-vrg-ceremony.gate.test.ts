@@ -180,9 +180,31 @@ function countsByToken (matches: ForbiddenMatch[]): Record<ForbiddenToken, numbe
 const VOTER_SRC_DIR = join(__dirname, '..')
 const THIS_FILE = join(__dirname, 'no-vrg-ceremony.gate.test.ts')
 
+/**
+ * Exact matches that are NOT the ceremony, each with its reason. An entry names one file (relative to
+ * `src`), one token and the exact comment-stripped, trimmed line text, so any edit to that line, or the
+ * same token anywhere else, is caught again. The test below also fails when an entry matches nothing
+ * (a stale exemption is removed, not carried).
+ */
+const NOT_THE_CEREMONY: ReadonlyArray<{ file: string; token: ForbiddenToken; text: string; why: string }> = [
+	{
+		file: 'engines/pool-matchmaking-ports.ts',
+		token: 'register(',
+		text: 'await session.register(poolMatchTopic(topicLabel), reg);',
+		why: "Optimystic's MatchmakingProviderSession.register: lists a vote pool's coordinator on a matchmaking topic, signed by the libp2p peer key. Not RegistrationEngine.register; no Registrant or AdminSigning row is written.",
+	},
+]
+
+const isNotTheCeremony = (m: ForbiddenMatch): boolean =>
+	NOT_THE_CEREMONY.some((e) => m.file === join(VOTER_SRC_DIR, e.file) && m.token === e.token && m.text === e.text)
+
 describe('no-vrg-ceremony source gate (D-09) — apps/VoteTorrentVoter/src', () => {
 	it('has zero real-code occurrences of register(/associate(/seedSignedMutation/issueAttestationChallenge, per-token counted, file:line reported', () => {
-		const matches = scanForForbiddenTokens(VOTER_SRC_DIR, new Set([THIS_FILE]))
+		const all = scanForForbiddenTokens(VOTER_SRC_DIR, new Set([THIS_FILE]))
+		for (const e of NOT_THE_CEREMONY) {
+			expect({ exemption: e.file, hits: all.filter((m) => m.file === join(VOTER_SRC_DIR, e.file) && m.token === e.token && m.text === e.text).length }).toEqual({ exemption: e.file, hits: 1 })
+		}
+		const matches = all.filter((m) => !isNotTheCeremony(m))
 		const counts = countsByToken(matches)
 		expect({ counts, detail: formatMatches(matches) }).toEqual({
 			counts: { 'register(': 0, 'associate(': 0, seedSignedMutation: 0, issueAttestationChallenge: 0 },

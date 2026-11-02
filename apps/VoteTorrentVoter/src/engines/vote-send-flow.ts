@@ -23,7 +23,7 @@ import {
 	createPoolIdentity,
 	poolRequests,
 } from '@votetorrent/vote-engine/rn';
-import type {PoolRendezvousClient} from '@votetorrent/vote-engine/rn';
+import type {PoolMatchmakingPorts, PoolRendezvousClient} from '@votetorrent/vote-engine/rn';
 import {cancelPendingSign} from '@votetorrent/attestation-native';
 import type {SecretWrapPrompt, SignDeviceKeyDigestOptions} from '@votetorrent/attestation-native';
 import {revealVoteReceipt} from './vote-receipt';
@@ -68,6 +68,11 @@ export interface VoteSendFlowDeps {
 	canPrompt?: () => boolean
 	/** test seam: the probe's overall budget (default PROBE_BUDGET_MS) */
 	probeBudgetMs?: number
+	/**
+	 * Optimystic matchmaking for the current network's strand (VoterAppProvider.getPoolMatchmaking), read once
+	 * when sending starts. Null or absent: pools are found through the rendezvous alone.
+	 */
+	getMatchmaking?: () => PoolMatchmakingPorts | null
 }
 
 /** The reachability probe gives up after this long in total, however many addresses are left. */
@@ -116,6 +121,18 @@ export async function runVoteSendFlow(deps: VoteSendFlowDeps): Promise<VoteSendF
 		vtDebug('send', 'flow-end', {kind: result.kind, ok: false, ms: deps.nowMs() - startedAt});
 	}
 	return result;
+}
+
+/** The matchmaking ports, or null when there are none or building them threw (never fails the send). */
+function readMatchmaking(deps: VoteSendFlowDeps): PoolMatchmakingPorts | null {
+	try {
+		const ports = deps.getMatchmaking?.() ?? null;
+		vtDebug('send', 'matchmaking', {available: ports !== null});
+		return ports;
+	} catch {
+		vtDebug('send', 'matchmaking', {available: false, threw: true});
+		return null;
+	}
 }
 
 async function runVoteSendFlowSteps(deps: VoteSendFlowDeps): Promise<VoteSendFlowResult> {
@@ -200,6 +217,7 @@ async function runVoteSendFlowSteps(deps: VoteSendFlowDeps): Promise<VoteSendFlo
 			signConsent,
 			cancelSign: deps.cancelSign ?? cancelPendingSign,
 			canPrompt: deps.canPrompt ?? (() => AppState.currentState !== 'background'),
+			matchmaking: readMatchmaking(deps),
 			nowMs: deps.nowMs,
 			onStatus: deps.onStatus,
 			signal: deps.signal,

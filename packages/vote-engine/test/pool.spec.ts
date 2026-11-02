@@ -53,6 +53,7 @@ import {
   ladderTopic,
   rendezvousDiscovery
 } from '../src/pool/pool-discovery.js'
+import { matchmakingDiscovery, mergedDiscovery, type PoolMatchEntry, type PoolMatchmakingPorts } from '../src/pool/pool-matchmaking.js'
 import { fromBase64url, toBase64url } from '../src/pool/pool-codec.js'
 import type { VoterEntry } from '../src/voting/index.js'
 import { makeP256TestKey, signDigestP256 } from './fixtures/p256-signer.js'
@@ -299,6 +300,8 @@ describe('pool (spike 102): agents negotiate through the rendezvous', function (
     formLeadMs?: number
     presentIntervalMs?: number
     injectDiscovery?: boolean
+    /** replaces the agent's discovery outright (the rendezvous client still carries the mailbox) */
+    discoveryFor?: (i: number, v: TestVoter, rendezvous: PoolRendezvous) => PoolDiscovery
   } = {}): Promise<Run> {
     const rendezvous = new PoolRendezvous()
     const commits: Run['commits'] = []
@@ -352,6 +355,7 @@ describe('pool (spike 102): agents negotiate through the rendezvous', function (
         identity: v.identity,
         rendezvous: recorder,
         ...(opts.injectDiscovery === true ? { discovery } : {}),
+        ...(opts.discoveryFor !== undefined ? { discovery: opts.discoveryFor(i, v, rendezvous) } : {}),
         ...(ladderOpt !== undefined ? { ladder: ladderOpt } : {}),
         ...(opts.rungDwellTicks !== undefined ? { rungDwellTicks: opts.rungDwellTicks } : {}),
         ...(opts.ladderMaxMs !== undefined ? { ladderMaxMs: opts.ladderMaxMs } : {}),
@@ -689,6 +693,74 @@ describe('pool (spike 102): agents negotiate through the rendezvous', function (
       expect(blockSizes(run)).to.deep.equal([3])
       expect(run.discoveryCalls.filter(c => c.t === 'present').length).to.be.greaterThan(0)
       expect(run.requests).to.have.length(0)
+    })
+
+    /** One in-memory matchmaking cohort shared by every agent: providers by topic and registering peer. */
+    function sharedCohort (): (selfPeerId: string) => PoolMatchmakingPorts {
+      const table = new Map<string, Map<string, PoolMatchEntry>>()
+      return (selfPeerId) => ({
+        selfPeerId,
+        openProvider: () => {
+          let topic: string | undefined
+          return {
+            register: async (label, reg) => {
+              topic = label
+              const t = table.get(label) ?? new Map<string, PoolMatchEntry>()
+              t.set(selfPeerId, { participantId: selfPeerId, capabilities: reg.capabilities, contactHint: reg.contactHint })
+              table.set(label, t)
+            },
+            withdraw: async () => { if (topic !== undefined) table.get(topic)?.delete(selfPeerId) }
+          }
+        },
+        query: async (label) => [...(table.get(label)?.values() ?? [])]
+      })
+    }
+
+    it('R2-11 matchmaking alone finds the coordinators: three agents form one block of 3 and the rendezvous only carries the mailbox', async () => {
+      const cohort = sharedCohort()
+      const run = await runAgents([0, 1, 2].map(makeVoter), { discoveryFor: (i, v) => matchmakingDiscovery(cohort(`12D3KooWnode${i}`), v.identity) })
+      expect(blockSizes(run)).to.deep.equal([3])
+      expect(run.requests).to.have.length(0)
+    })
+
+    it('R2-12 merged discovery: a matchmaking cohort that always fails still forms one block of 3 through the rendezvous', async () => {
+      const broken: PoolMatchmakingPorts = {
+        selfPeerId: 'p',
+        openProvider: () => ({ register: async () => { throw new Error('no cohort') }, withdraw: async () => { throw new Error('no cohort') } }),
+        query: async () => { throw new Error('no cohort') }
+      }
+      const run = await runAgents([0, 1, 2].map(makeVoter), {
+        discoveryFor: (i, v, rv) => mergedDiscovery([rendezvousDiscovery(createInMemoryRendezvousClient(rv, `transport-${i}`), v.identity), matchmakingDiscovery(broken, v.identity)])
+      })
+      expect(blockSizes(run)).to.deep.equal([3])
+    })
+
+    // Every agent runs the merged discovery, as the Voter does, and each source shows each agent only part of
+    // the others: agent i sees agent j through the rendezvous only when i + j is even, and through matchmaking
+    // only when it is odd. Neither source alone connects everyone (0 and 1 meet only through matchmaking, 0 and
+    // 2 only through the rendezvous); the union does, so one block of 4 forms only if the merge keeps both
+    // sources' listings. Whoever coordinates, every other agent sees it through exactly one source.
+    // Deliberately NOT tested: a split network where some agents run only one source. A bridge agent that
+    // joins a pool as a member stops presenting, so an agent that could see only the bridge is left alone, and
+    // which pool forms first decides the outcome (no fixed block size is guaranteed).
+    it('R2-13 merged discovery: each source shows each agent only half the others, and the union still forms one block of 4', async () => {
+      const cohort = sharedCohort()
+      const voters = [0, 1, 2, 3].map(makeVoter)
+      const indexOf = new Map(voters.map((v, i) => [v.identity.peerId, i] as const))
+      const showOnly = (d: PoolDiscovery, keep: (j: number) => boolean): PoolDiscovery => ({
+        present: async (topic, size, now) => (await d.present(topic, size, now)).filter((l) => {
+          const j = indexOf.get(l.peerId)
+          return j === undefined || keep(j)
+        }),
+        withdraw: async (topic, now) => { await d.withdraw(topic, now) }
+      })
+      const run = await runAgents(voters, {
+        discoveryFor: (i, v, rv) => mergedDiscovery([
+          showOnly(rendezvousDiscovery(createInMemoryRendezvousClient(rv, `transport-${i}`), v.identity), (j) => (i + j) % 2 === 0),
+          showOnly(matchmakingDiscovery(cohort(`12D3KooWnode${i}`), v.identity), (j) => (i + j) % 2 === 1)
+        ])
+      })
+      expect(blockSizes(run)).to.deep.equal([4])
     })
 
     it('R2-10 every topic presented on is withdrawn: afterwards nobody is listed on any of them', async () => {

@@ -47,6 +47,7 @@ import {
 	AssociationEngine,
 	RegistrationEngine,
 	ElectionResultsEngine,
+	TallyPublicationEngine,
 } from '@votetorrent/vote-engine/rn'
 import type { DbFactory, EngineContext, ElectionSubject } from '@votetorrent/vote-engine/rn'
 import { rnDbFactory, createStrandDbFactory } from './rn-db-factory'
@@ -147,6 +148,11 @@ export class EngineFactory {
 	 * provider's peer-count effect re-invokes `setNode` with the SAME node on every
 	 * `connectedPeers` change, and aborting then would kill a live wait for no reason.
 	 */
+	/** The strand id (== network hash) of the network engines currently open on, if any. */
+	getCurrentNetworkHash(): string | undefined {
+		return this.currentNetworkHash
+	}
+
 	setNode(node: StrandHost | null): void {
 		if (node !== this.node) {
 			this.cancelPendingStrandWaits()
@@ -425,6 +431,13 @@ export class EngineFactory {
 				// the election secret is rebuilt from the PUBLIC released shares in memory and zero-filled.
 				const ctx = this.requireEstablishedCtx()
 				return new ElectionResultsEngine(ctx)
+			}
+
+			case 'tallyPublication': {
+				// The published, officer-signed tally (ElectionTally): read it back with its checks; on an officer's
+				// device, publish the tally computed by 'electionResults'. Signs only through the caller's signer.
+				const ctx = this.requireEstablishedCtx()
+				return new TallyPublicationEngine(ctx)
 			}
 
 			case 'signatureTasksEngine': {

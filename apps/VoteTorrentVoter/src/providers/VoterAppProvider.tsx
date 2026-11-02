@@ -50,6 +50,8 @@ import {readJoinedNetworkHashes, rememberJoinedNetwork} from '../engines/join-bo
 import type {VoterJoinNode} from '../engines/voter-network-join';
 import type {NetworkJoinCode, NetworkJoinResult, NetworkJoinStep} from '@votetorrent/vote-engine/rn';
 import {useCadreNode} from './CadreNodeProvider';
+import {poolMatchmakingPorts} from '../engines/pool-matchmaking-ports';
+import type {StrandNodeSource} from '../engines/pool-matchmaking-ports';
 import {readVoterBallot, readVoterElection} from '../engines/election-read';
 import type {LifecycleState, VoterBallot, VoterElection, VoterAppContextType} from './types';
 import {DEV_LIFECYCLE_CONTENT} from './devLifecycleFixtures';
@@ -234,6 +236,11 @@ export function VoterAppProvider({children}: PropsWithChildren) {
 
 	const getNetworkNode = useCallback(
 		() => (node ?? null) as {getControlNode(): unknown} | null,
+		[node],
+	);
+
+	const getPoolMatchmaking = useCallback(
+		() => poolMatchmakingPorts(node as StrandNodeSource | null, engineFactoryRef.current?.getCurrentNetworkHash()),
 		[node],
 	);
 
@@ -640,6 +647,7 @@ export function VoterAppProvider({children}: PropsWithChildren) {
 				selectNetwork,
 				joinNetwork,
 				getNetworkNode,
+				getPoolMatchmaking,
 				seededElectionId,
 				createNewIdentity,
 			}}>
