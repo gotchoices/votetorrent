@@ -60,7 +60,11 @@ export interface VoteSendFlowDeps {
 	send?: typeof sendSavedVote
 	/** dismisses the consent prompt that is showing (default: attestation-native's cancelPendingSign); test seam */
 	cancelSign?: () => Promise<unknown>
-	/** whether a consent prompt can be shown now (default: the app is in the foreground, AppState 'active'); test seam */
+	/**
+	 * whether a consent prompt can be shown now; test seam. Default: the app is not in the background. iOS reports
+	 * 'inactive' while a Face ID sheet (our own prompt) is up, so 'inactive' counts as able to prompt; only
+	 * 'background' does not (UAT 65 Run 6: an 'active'-only check held a pool back during the vault Face ID).
+	 */
 	canPrompt?: () => boolean
 	/** test seam: the probe's overall budget (default PROBE_BUDGET_MS) */
 	probeBudgetMs?: number
@@ -195,7 +199,7 @@ async function runVoteSendFlowSteps(deps: VoteSendFlowDeps): Promise<VoteSendFlo
 			rendezvous,
 			signConsent,
 			cancelSign: deps.cancelSign ?? cancelPendingSign,
-			canPrompt: deps.canPrompt ?? (() => AppState.currentState === 'active'),
+			canPrompt: deps.canPrompt ?? (() => AppState.currentState !== 'background'),
 			nowMs: deps.nowMs,
 			onStatus: deps.onStatus,
 			signal: deps.signal,

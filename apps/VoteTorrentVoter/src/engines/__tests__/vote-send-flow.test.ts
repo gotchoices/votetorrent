@@ -96,7 +96,7 @@ describe('runVoteSendFlow (spike 102)', () => {
 		expect((sendSavedVote as jest.Mock).mock.calls[0][0].cancelSign).toBe(cancelPendingSign);
 	});
 
-	it('by default sending can prompt only while the app is in the foreground (AppState active)', async () => {
+	it('by default sending can prompt unless the app is in the background (iOS is inactive under its own Face ID sheet)', async () => {
 		const {AppState} = jest.requireActual('react-native') as typeof import('react-native');
 		await runVoteSendFlow(deps());
 		const canPrompt = (sendSavedVote as jest.Mock).mock.calls[0][0].canPrompt as () => boolean;
@@ -109,7 +109,9 @@ describe('runVoteSendFlow (spike 102)', () => {
 			state.currentState = 'background';
 			expect(canPrompt()).toBe(false);
 			state.currentState = 'inactive';
-			expect(canPrompt()).toBe(false);
+			expect(canPrompt()).toBe(true);
+			state.currentState = 'unknown';
+			expect(canPrompt()).toBe(true);
 		} finally {
 			state.currentState = before;
 		}
