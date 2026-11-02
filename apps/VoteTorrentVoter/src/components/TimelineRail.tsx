@@ -50,6 +50,7 @@ export function TimelineRail({
 	onVoteNow,
 	onViewSubmission,
 	onViewKeyholders,
+	onViewResults,
 }: TimelineRailProps) {
 	const {colors, fonts, type: typeScale} = useTheme() as ExtendedTheme;
 	const {t} = useTranslation('timeline');
@@ -169,6 +170,7 @@ export function TimelineRail({
 								onVoteNow={onVoteNow}
 								onViewSubmission={onViewSubmission}
 								onViewKeyholders={onViewKeyholders}
+								onViewResults={onViewResults}
 							/>
 						</View>
 					</View>

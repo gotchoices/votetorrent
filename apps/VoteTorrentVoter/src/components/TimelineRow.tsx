@@ -86,6 +86,7 @@ export interface TimelineRowCallbacks {
 	onVoteNow?: () => void;
 	onViewSubmission?: () => void;
 	onViewKeyholders?: () => void;
+	onViewResults?: () => void;
 }
 
 export interface TimelineRowProps extends TimelineRowCallbacks {
@@ -140,6 +141,11 @@ function buildActions(stageId: TimelineStageId, status: TimelineRowStatus, callb
 		actions.push({id: 'view-keyholders', labelKey: 'keyholders.viewCta', onPress: callbacks.onViewKeyholders, variant: 'outline'});
 	}
 
+	// Results: on tallyingStarts once that stage has begun (the keys are released by then, or the screen says how many are).
+	if (stageId === 'tallyingStarts' && (status === 'current' || status === 'past') && callbacks.onViewResults) {
+		actions.push({id: 'view-results', labelKey: 'results.viewCta', onPress: callbacks.onViewResults, variant: 'outline'});
+	}
+
 	// Universal "see details" -- every row, only once its event has passed.
 	if (status === 'past' && callbacks.onSeeDetails) {
 		const onSeeDetails = callbacks.onSeeDetails;
@@ -149,7 +155,7 @@ function buildActions(stageId: TimelineStageId, status: TimelineRowStatus, callb
 	return actions;
 }
 
-export function TimelineRow({row, panel, countdownTargetIso, nowOffsetMs = 0, onHelp, onSeeDetails, onEditRegistration, onPreviewBallot, onVoteNow, onViewSubmission, onViewKeyholders}: TimelineRowProps) {
+export function TimelineRow({row, panel, countdownTargetIso, nowOffsetMs = 0, onHelp, onSeeDetails, onEditRegistration, onPreviewBallot, onVoteNow, onViewSubmission, onViewKeyholders, onViewResults}: TimelineRowProps) {
 	const {colors, fonts, type: typeScale, radii} = useTheme() as ExtendedTheme;
 	const {t} = useTranslation('timeline');
 
@@ -181,6 +187,7 @@ export function TimelineRow({row, panel, countdownTargetIso, nowOffsetMs = 0, on
 		onVoteNow,
 		onViewSubmission,
 		onViewKeyholders,
+		onViewResults,
 	});
 
 	// Notch vertical position derives from the theme's OWN h4 line height, so it tracks a theme

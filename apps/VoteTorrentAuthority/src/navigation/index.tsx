@@ -64,6 +64,7 @@ import { BulkImportSyncScreen } from "../screens/registration/BulkImportSyncScre
 import AssociationRequestStatusScreen from "../screens/registration/AssociationRequestStatusScreen";
 // Phase 47 plan 47-21 (D-08) — the five Phase 47 screen modules.
 import RegistrantsListScreen from "../screens/registration/RegistrantsListScreen";
+import ElectionResultsScreen from "../screens/elections/ElectionResultsScreen";
 import RegistrantDetailScreen from "../screens/registration/RegistrantDetailScreen";
 import AttestationProvisioningStatusScreen from "../screens/registration/AttestationProvisioningStatusScreen";
 // Phase 49 plan 49-10 (D-14) — the officer-facing signing-key provisioning/recovery screen.
@@ -553,6 +554,12 @@ export const RootNavigator = () => {
 				name="AssociationRequestStatus"
 				component={AssociationRequestStatusScreen}
 				options={{ title: t("associationRequestStatusScreenTitle") }}
+			/>
+			{/* Election results — a non-modal push from ElectionDetails. */}
+			<Stack.Screen
+				name="ElectionResults"
+				component={ElectionResultsScreen}
+				options={{ title: t("resultsScreenTitle") }}
 			/>
 			{/* Phase 47 plan 47-21 (D-07/D-08/D-09) — the five Phase 47 routes. These are
 			    pushes from within existing modal screens, so they use the

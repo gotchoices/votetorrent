@@ -45,6 +45,7 @@ import {
 	P2pRegistrationTransport,
 	P2pAssociationTransport,
 	KeyholderDkgEngine,
+	ElectionResultsEngine,
 } from '@votetorrent/vote-engine/rn';
 import type { DbFactory, EngineContext, ElectionSubject, StagingOpener, StagingDecisionSigner } from '@votetorrent/vote-engine/rn';
 import type { BootstrapSnapshot } from '@votetorrent/vote-engine/bootstrap';
@@ -675,6 +676,13 @@ export class EngineFactory {
 				// engine ever touches lives only in that vault.
 				const ctx = this.requireEstablishedCtx();
 				return new KeyholderDkgEngine(ctx, { vault: resolveKeyholderKeyVault() });
+			}
+
+			case 'electionResults': {
+				// Decrypt + validate + tally after the key release. Read-only: reconstructs the election secret from the
+				// PUBLIC released shares in memory and zero-fills it; needs no vault and no signer.
+				const ctx = this.requireEstablishedCtx();
+				return new ElectionResultsEngine(ctx);
 			}
 
 			case 'signatureTasksEngine': {

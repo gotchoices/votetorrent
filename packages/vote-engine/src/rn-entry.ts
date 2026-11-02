@@ -174,6 +174,9 @@ export {
 	openVoteEntries
 } from './key-release/index.js'
 export type { KeyReleaseErrorCode, KeyReleaseEngineDeps } from './key-release/index.js'
+// Election results (decrypt + validate + tally after the key release), for the Authority and Voter results screens.
+export { ElectionResultsEngine, summarizeBallot } from './results/index.js'
+export type { ElectionResults, ElectionResultsEngineDeps, BallotResult, QuestionResult, OptionResult } from './results/index.js'
 export type { KeysTasksEngineDeps } from './tasks/keys-tasks-engine.js'
 // Phase 62 Plan 20: a curated DKG surface, named from `./crypto/index.js` —
 // 62-26 mints the receiving key at accept (`generateDkgReceivingKey`) and

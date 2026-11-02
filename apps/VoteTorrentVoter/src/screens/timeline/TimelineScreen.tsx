@@ -544,6 +544,7 @@ export default function TimelineScreen() {
 							: undefined
 					}
 					onViewKeyholders={() => navigation.navigate('Keyholders')}
+					onViewResults={() => navigation.navigate('Results')}
 				/>
 			</ScrollView>
 

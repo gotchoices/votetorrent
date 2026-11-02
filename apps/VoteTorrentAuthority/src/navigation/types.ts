@@ -140,6 +140,9 @@ export type RootStackParamList = {
 	// record straight out of AsyncStorage (dashboard-signin-code.ts) and
 	// resolves the live network snapshot through useApp() itself.
 	DashboardSignInCode: undefined;
+	// Election results (decrypt + validate + tally after the key release). Identifiers plus the public election
+	// title only; the screen resolves its engine from useApp().getEngine('electionResults').
+	ElectionResults: { electionId: string; electionTitle?: string };
 	// Phase 9 plan 09-01 — type entries for routes whose screens land in later
 	// plans (CreateElection in 09-02, CreateBallot in 09-04). Stack.Screen
 	// registration is deferred; only the type signature is added here so the

@@ -196,6 +196,22 @@ describe('TimelineRow (59-07)', () => {
 		);
 	});
 
+	it.each(['past', 'current'] as const)('a tallyingStarts row in %s status with onViewResults renders "View results" and calls it', status => {
+		const row = buildRowFixture({stageId: 'tallyingStarts', status});
+		const onViewResults = jest.fn();
+		const tr = renderRow({row, onViewResults});
+		const button = tr.root.findByProps({testID: 'timeline-row-view-results-tallyingStarts'});
+		renderer.act(() => button.props.onPress());
+		expect(onViewResults).toHaveBeenCalledTimes(1);
+	});
+
+	it('a future tallyingStarts row, and every other stage, never offers "View results"', () => {
+		const future = renderRow({row: buildRowFixture({stageId: 'tallyingStarts', status: 'future'}), onViewResults: jest.fn()});
+		expect(future.root.findAll(n => n.props?.testID === 'timeline-row-view-results-tallyingStarts')).toHaveLength(0);
+		const other = renderRow({row: buildRowFixture({stageId: 'releasingKeys', status: 'past'}), onViewResults: jest.fn()});
+		expect(other.root.findAll(n => typeof n.props?.testID === 'string' && n.props.testID.startsWith('timeline-row-view-results'))).toHaveLength(0);
+	});
+
 	it('an action whose callback is NOT supplied is not rendered', () => {
 		const row = buildRowFixture({stageId: 'votingStarts', status: 'current', instantMs: FIXTURE_NOW_MS - 1000});
 		const tr = renderRow({row}); // no onVoteNow

@@ -46,6 +46,7 @@ import {
 	LocalStorageReact,
 	AssociationEngine,
 	RegistrationEngine,
+	ElectionResultsEngine,
 } from '@votetorrent/vote-engine/rn'
 import type { DbFactory, EngineContext, ElectionSubject } from '@votetorrent/vote-engine/rn'
 import { rnDbFactory, createStrandDbFactory } from './rn-db-factory'
@@ -417,6 +418,13 @@ export class EngineFactory {
 				// built with NO vault and no deps. `getKeyReleaseStatus` never needs one.
 				const ctx = this.requireEstablishedCtx()
 				return new KeyReleaseEngine(ctx)
+			}
+
+			case 'electionResults': {
+				// Decrypt + validate + tally after the key release, from the replicated election data. Read-only:
+				// the election secret is rebuilt from the PUBLIC released shares in memory and zero-filled.
+				const ctx = this.requireEstablishedCtx()
+				return new ElectionResultsEngine(ctx)
 			}
 
 			case 'signatureTasksEngine': {

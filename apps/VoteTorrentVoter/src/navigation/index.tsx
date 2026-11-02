@@ -46,6 +46,7 @@ import SettingsScreen from '../screens/settings/SettingsScreen';
 import JoinNetworkScreen from '../screens/settings/JoinNetworkScreen';
 import TimelineScreen from '../screens/timeline/TimelineScreen';
 import KeyholdersScreen from '../screens/timeline/KeyholdersScreen';
+import ResultsScreen from '../screens/timeline/ResultsScreen';
 import RegistrationInfoScreen from '../screens/registration/RegistrationInfoScreen';
 import {RegistrationDraftProvider} from '../providers/RegistrationDraftProvider';
 import {BallotSelectionProvider} from '../providers/BallotSelectionProvider';
@@ -241,6 +242,11 @@ function TimelineStackNavigator() {
 				name="Keyholders"
 				component={KeyholdersScreen}
 				options={{title: tKeyholders('keyholders.screenTitle')}}
+			/>
+			<TimelineStack.Screen
+				name="Results"
+				component={ResultsScreen}
+				options={{title: tKeyholders('results.screenTitle')}}
 			/>
 		</TimelineStack.Navigator>
 	);

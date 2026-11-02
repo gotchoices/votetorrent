@@ -101,6 +101,9 @@ export type TimelineStackParamList = {
 	RegisterConfirm: undefined;
 	Confirmation: undefined;
 	Keyholders: undefined;
+	// Election results (decrypt + validate + tally after the key release); no params, the screen picks the
+	// same election the other Timeline screens show.
+	Results: undefined;
 	// Phase 62 Plan 28 (D-14 route-closure gate) — the Timeline duplicate of
 	// RegistrationStackParamList's entry above.
 	ContinueOnAnotherDevice: undefined;
