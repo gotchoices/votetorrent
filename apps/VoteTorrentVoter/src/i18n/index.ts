@@ -421,6 +421,8 @@ const resources = {
 			'error.digestMismatch':
 				"This network doesn't match the join code, so this phone did not join it. Ask your election authority for a new code.",
 			'error.openFailed': "We couldn't open the network on this phone. Try again.",
+			'error.otherCadre':
+				"This phone already belongs to another election authority's network, and it can only be in one at a time for now. Joining this one needs the app to be reinstalled.",
 			'error.generic': 'Something went wrong while joining. Try again.',
 			// Scan, camera states and the typed join-failure copy.
 			scanButton: 'Scan QR code',
@@ -944,6 +946,8 @@ const resources = {
 			'error.digestMismatch':
 				'Esta red no coincide con el código de acceso, así que este teléfono no se unió. Pide un código nuevo a tu autoridad electoral.',
 			'error.openFailed': 'No pudimos abrir la red en este teléfono. Inténtalo de nuevo.',
+			'error.otherCadre':
+				'Este teléfono ya pertenece a la red de otra autoridad electoral y, por ahora, solo puede estar en una a la vez. Para unirte a esta, hay que reinstalar la aplicación.',
 			'error.generic': 'Algo salió mal al unirse. Inténtalo de nuevo.',
 			// Ver el bloque en.
 			scanButton: 'Escanear código QR',

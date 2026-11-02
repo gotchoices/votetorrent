@@ -26,7 +26,7 @@ export interface VoterJoinNode {
 		queryCadreInviteUsages(): Promise<ReadonlyArray<any>>;
 		querySeedPeers(): Promise<ReadonlyArray<any>>;
 	} | null;
-	getTrustedOwnerStore(): {has(ownerKey: string): boolean} | null;
+	getTrustedOwnerStore(): {has(ownerKey: string): boolean; all(): ReadonlySet<string>} | null;
 	getControlNode(): {getConnections(): ReadonlyArray<any>} | null | undefined;
 	refreshMembershipGate(reason: any): Promise<unknown>;
 	reconcileControlCohort(): Promise<unknown>;
@@ -57,6 +57,28 @@ export async function isSelfAdmitted(node: VoterJoinNode): Promise<boolean> {
 	return verifyInvitationAdmission(node.partyId, self, usage, invite, (key: string) => store.has(key));
 }
 
+/**
+ * UAT 65 F1: true when this phone already joined a DIFFERENT cadre than the invitation's. Both apps
+ * run one party id ('votetorrent'), so every authority's cadre shares the control protocols and this
+ * phone's one control store: a phone that joined authority 1 would pass `isSelfAdmitted` on
+ * authority 1's rows, never redeem authority 2's invitation, and wait forever for its strand.
+ * "Different" = the trust anchor pins owner keys and NONE of them is one the invitation pins.
+ *
+ * Only the trust anchor is read: only a redemption pins keys there. The control database's
+ * OwnerKey rows are NOT evidence of a join: a fresh phone replicates them from its boot peer (a
+ * relay or member of any 'votetorrent' cadre) before it joins anything, so reading them would
+ * refuse a first join (host repro FRESH2, 2026-11-02). A phone with the anchor cleared but the
+ * control store kept is not caught here; its join ends at the sync budget instead.
+ */
+export async function belongsToOtherCadre(node: VoterJoinNode, invitation: any): Promise<boolean> {
+	const pinned: unknown = invitation?.ownerKeys;
+	if (!Array.isArray(pinned) || pinned.length === 0) {
+		return false;
+	}
+	const anchored = node.getTrustedOwnerStore()?.all() ?? new Set<string>();
+	return anchored.size > 0 && !pinned.some(key => typeof key === 'string' && anchored.has(key));
+}
+
 /** cadre-core stores `expiresAt` as a T-form UTC datetime with no zone suffix. */
 export function invitationExpiresAtMs(invitation: any): number | null {
 	const at = invitation?.invite?.expiresAt;
@@ -76,6 +98,8 @@ export async function runVoterNetworkJoin(args: {
 	user: User | undefined;
 	code: NetworkJoinCode;
 	onStep?: (step: NetworkJoinStep) => void;
+	/** UAT 65 F1: release the first-sync wait a join left pending when its budget ran out. */
+	onSyncAbandoned?: () => Promise<void> | void;
 }): Promise<NetworkJoinResult> {
 	const {node} = args;
 	let members: string[] = [];
@@ -91,6 +115,8 @@ export async function runVoterNetworkJoin(args: {
 		},
 		invitationExpiresAtMs,
 		isSelfAdmitted: () => isSelfAdmitted(node),
+		belongsToOtherCadre: (invitation: unknown) => belongsToOtherCadre(node, invitation),
+		onSyncAbandoned: args.onSyncAbandoned,
 		// What redeemCadreInvitation does after a reply, through public API (spike 100 f1-mitigate):
 		// drop the connection the lost reply rode on (it can linger half-open), merge the replicated
 		// seed peers, refresh the membership gate and reconcile the control cohort.

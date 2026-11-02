@@ -21,7 +21,7 @@ jest.mock(
 	{virtual: true},
 );
 
-import {invitationExpiresAtMs, isSelfAdmitted, runVoterNetworkJoin, type VoterJoinNode} from '../voter-network-join';
+import {belongsToOtherCadre, invitationExpiresAtMs, isSelfAdmitted, runVoterNetworkJoin, type VoterJoinNode} from '../voter-network-join';
 import {readJoinBootstrap} from '../join-bootstrap';
 
 const SELF = 'peer-self';
@@ -37,7 +37,17 @@ const CODE: NetworkJoinCode = {
 };
 const NET_REF = {hash: CODE.networkHash, relays: [], name: CODE.name, primaryAuthorityDomainName: 'example.org'};
 
-function fakeNode(opts: {selfRow?: Record<string, unknown> | null; redeem?: () => Promise<unknown>; connections?: unknown[]} = {}) {
+function fakeNode(
+	opts: {
+		selfRow?: Record<string, unknown> | null;
+		redeem?: () => Promise<unknown>;
+		connections?: unknown[];
+		/** owner keys in this phone's control database (OwnerKey rows, replicated from any peer) */
+		controlOwners?: string[];
+		/** owner keys in the persisted trust anchor */
+		anchorOwners?: string[];
+	} = {},
+) {
 	const closed: string[] = [];
 	const connections = opts.connections ?? [
 		{remotePeer: {toString: () => MEMBER_ID}, close: async () => { closed.push(MEMBER_ID); }},
@@ -47,12 +57,13 @@ function fakeNode(opts: {selfRow?: Record<string, unknown> | null; redeem?: () =
 		peerId: {toString: () => SELF},
 		redeemCadreInvitation: jest.fn(opts.redeem ?? (async () => ({peerId: MEMBER_ID}))),
 		getControlDatabase: () => ({
+			getOwnerKeys: async () => new Set(opts.controlOwners ?? []),
 			queryCadrePeers: async () => (opts.selfRow === null || opts.selfRow === undefined ? [] : [opts.selfRow]),
 			queryCadreInvites: async () => [{key: 'invite-key'}],
 			queryCadreInviteUsages: async () => [{usageStampId: 'usage-1', inviteKey: 'invite-key'}],
 			querySeedPeers: async () => [{peerId: SELF}, {peerId: MEMBER_ID}],
 		}),
-		getTrustedOwnerStore: () => ({has: () => true}),
+		getTrustedOwnerStore: () => ({has: () => true, all: () => new Set(opts.anchorOwners ?? [])}),
 		getControlNode: () => ({getConnections: () => connections}),
 		refreshMembershipGate: jest.fn(async () => undefined),
 		reconcileControlCohort: jest.fn(async () => undefined),
@@ -94,6 +105,32 @@ describe('isSelfAdmitted', () => {
 	});
 });
 
+describe('belongsToOtherCadre (UAT 65 F1)', () => {
+	const INVITATION = {ownerKeys: ['owner-b1', 'owner-b2']};
+
+	it('is false on a fresh install: this phone knows no owner yet', async () => {
+		expect(await belongsToOtherCadre(fakeNode().node, INVITATION)).toBe(false);
+	});
+
+	it('is false when an owner the anchor pins is one the invitation pins (the same authority)', async () => {
+		expect(await belongsToOtherCadre(fakeNode({anchorOwners: ['owner-x', 'owner-b2']}).node, INVITATION)).toBe(false);
+	});
+
+	it('is true when the anchor pins owners and none of them is the invitation\'s', async () => {
+		expect(await belongsToOtherCadre(fakeNode({anchorOwners: ['owner-a']}).node, INVITATION)).toBe(true);
+	});
+
+	it('ignores control-database owners: a fresh phone replicates them from its boot peer before any join', async () => {
+		expect(await belongsToOtherCadre(fakeNode({controlOwners: ['owner-a']}).node, INVITATION)).toBe(false);
+	});
+
+	it('is false for an invitation that pins no owners', async () => {
+		const {node} = fakeNode({anchorOwners: ['owner-a']});
+		expect(await belongsToOtherCadre(node, {})).toBe(false);
+		expect(await belongsToOtherCadre(node, {ownerKeys: []})).toBe(false);
+	});
+});
+
 describe('invitationExpiresAtMs', () => {
 	it('reads cadre-core\'s zone-less T-form datetime as UTC', () => {
 		expect(invitationExpiresAtMs({invite: {expiresAt: '2026-11-11T11:26:21.316'}})).toBe(Date.parse('2026-11-11T11:26:21.316Z'));
@@ -127,6 +164,7 @@ describe('runVoterNetworkJoin', () => {
 		const {node, closed} = fakeNode({redeem: async () => { throw new Error('StreamStateError'); }});
 		// Not admitted before the redeem; admitted on the first check after it threw.
 		node.getControlDatabase = () => ({
+			getOwnerKeys: async () => new Set<string>(),
 			queryCadrePeers: async () => (admittedChecks++ === 0 ? [] : [ADMITTED_ROW]),
 			queryCadreInvites: async () => [{key: 'invite-key'}],
 			queryCadreInviteUsages: async () => [{usageStampId: 'usage-1', inviteKey: 'invite-key'}],
@@ -157,6 +195,21 @@ describe('runVoterNetworkJoin', () => {
 		const result = await runVoterNetworkJoin({node, networksEngine: {joinFromStrand: jest.fn()}, user: undefined, code: CODE});
 		expect(result).toMatchObject({ok: false, reason: 'invitation-expired'});
 		expect(node.redeemCadreInvitation).not.toHaveBeenCalled();
+	});
+
+	it('a phone already in another authority\'s cadre is refused before any redemption or open (UAT 65 F1)', async () => {
+		mockDecodeCadreInvitation.mockImplementation(() => ({
+			partyId: 'votetorrent',
+			members: [MEMBER],
+			ownerKeys: ['owner-b'],
+			invite: {expiresAt: '2099-01-01T00:00:00'},
+		}));
+		const {node} = fakeNode({anchorOwners: ['owner-a'], controlOwners: ['owner-a']});
+		const joinFromStrand = jest.fn();
+		const result = await runVoterNetworkJoin({node, networksEngine: {joinFromStrand}, user: undefined, code: CODE});
+		expect(result).toEqual({ok: false, reason: 'other-cadre', detail: 'other-cadre'});
+		expect(node.redeemCadreInvitation).not.toHaveBeenCalled();
+		expect(joinFromStrand).not.toHaveBeenCalled();
 	});
 
 	it('a digest mismatch is reported as such and is not retried', async () => {

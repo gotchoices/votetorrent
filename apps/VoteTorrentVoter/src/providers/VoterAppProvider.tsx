@@ -223,6 +223,10 @@ export function VoterAppProvider({children}: PropsWithChildren) {
 				user,
 				code,
 				onStep,
+				// UAT 65 F1: a join that ran out of budget must not leave the app's indefinite first-sync wait
+				// running. The strand launch itself is kept, so a Try Again joins the sync in progress
+				// (a slow but healthy join) instead of starting over.
+				onSyncAbandoned: () => factory.cancelPendingStrandWaits(),
 			});
 			if (result.ok) {
 				await rememberJoinedNetwork(result.networkRef.hash);

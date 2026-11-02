@@ -737,9 +737,18 @@ export class NetworksEngine implements INetworksEngine {
 			return { ok: false, reason: 'no-peers', retryable: true, detail: 'join: no peer of the authority\'s network is connected yet' };
 		}
 
+		// UAT 65 F1: ONE deadline for the whole call. The strand factory is the longest await here: a
+		// joiner's strand open waits for its first sync (cadre-core's gate, 360 s, and the app then
+		// keeps waiting), so an unbounded await made the caller's budget meaningless. The open is
+		// left running (a retry finds the same launch), only this call stops waiting on it.
+		const deadline = Date.now() + (options.timeoutMs ?? 60_000);
 		let ctx: EngineContext;
 		try {
-			ctx = await this.createContext(user, hash);
+			const opened = await settleBy(this.createContext(user, hash), deadline);
+			if (opened === TIMED_OUT) {
+				return { ok: false, reason: 'not-synced', retryable: true, detail: 'join: the network\'s strand has not finished its first sync' };
+			}
+			ctx = opened;
 		} catch {
 			return { ok: false, reason: 'target-open-failed', retryable: true, detail: 'join: the network\'s database could not be opened' };
 		}
@@ -772,12 +781,16 @@ export class NetworksEngine implements INetworksEngine {
 
 		// Wait for all six founding rows to replicate. Point lookups only (readGenesisRows),
 		// so polling a strand that is still syncing never scans.
-		const deadline = Date.now() + (options.timeoutMs ?? 60_000);
 		const pollMs = options.pollMs ?? 500;
 		let rows: FoundingBundleRows | undefined;
 		for (;;) {
 			try {
-				const read = await readGenesisRows(ctx.db, anchor.genesis);
+				// UAT 65 F1: a point read on a strand whose cohort is unreachable can stay pending; the
+				// deadline is checked against the read itself, not only between reads.
+				const read = await settleBy(readGenesisRows(ctx.db, anchor.genesis), deadline);
+				if (read === TIMED_OUT) {
+					return decline('not-synced', true, 'join: the network\'s founding rows have not arrived yet');
+				}
 				if (FOUNDING_BUNDLE_TABLE_ORDER.every((table) => read[table].length > 0)) {
 					rows = read;
 					break;
@@ -1078,6 +1091,20 @@ export class NetworksEngine implements INetworksEngine {
 		const ctx: EngineContext = { db, user };
 		return ctx;
 	}
+}
+
+const TIMED_OUT: unique symbol = Symbol('networks-engine.timed-out');
+
+/** `promise`'s value, or TIMED_OUT at `deadlineMs` (epoch ms). A rejection after the race is absorbed. */
+function settleBy<T>(promise: Promise<T>, deadlineMs: number): Promise<T | typeof TIMED_OUT> {
+	promise.catch(() => undefined);
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	const expiry = new Promise<typeof TIMED_OUT>((resolve) => {
+		timer = setTimeout(() => resolve(TIMED_OUT), Math.max(0, deadlineMs - Date.now()));
+	});
+	return Promise.race([promise, expiry]).finally(() => {
+		if (timer !== undefined) clearTimeout(timer);
+	});
 }
 
 /**

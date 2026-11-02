@@ -46,6 +46,20 @@ export interface NetworkJoinOptions {
   readonly invitationExpiresAtMs?: (invitation: unknown) => number | null
   /** True once this node's OWN CadrePeer row has replicated with a verified invitation admission. */
   readonly isSelfAdmitted: () => Promise<boolean>
+  /**
+   * UAT 65 F1: true when this node's control store already belongs to ANOTHER cadre of the same party
+   * (it holds owner keys, none of them the invitation's). Checked before anything else in step 1:
+   * such a node would otherwise pass `isSelfAdmitted` on the old cadre's rows (or redeem into a
+   * store holding another cadre's history) and then wait forever on a strand whose cadre does not
+   * know it. Optional; absent means "never".
+   */
+  readonly belongsToOtherCadre?: (invitation: unknown) => Promise<boolean>
+  /**
+   * UAT 65 F1: called when the join gives up for want of time (the sync budget ran out, whether a
+   * `joinFromStrand` call was still pending or the last one failed retryably), so the app can
+   * release the first-sync waits those calls left running.
+   */
+  readonly onSyncAbandoned?: () => Promise<void> | void
   /** The steps `redeemCadreInvitation` runs after a reply, run here when admission was found instead. */
   readonly afterFallbackAdmission?: () => Promise<void>
   /** Persist the invitation's member addresses as this node's bootstrap for the next launch. */
@@ -62,6 +76,8 @@ export interface NetworkJoinOptions {
   readonly syncBudgetMs?: number
   /** Delay between joinFromStrand retries. Default 1 s. */
   readonly retryDelayMs?: number
+  /** How long past the budget a pending joinFromStrand call may run before it is abandoned. Default 5 s. */
+  readonly budgetGraceMs?: number
 }
 
 export type NetworkJoinFailureReason =
@@ -74,6 +90,7 @@ export type NetworkJoinFailureReason =
   | 'not-synced'
   | 'digest-mismatch'
   | 'open-failed'
+  | 'other-cadre'
 
 export type NetworkJoinResult =
   | {
@@ -124,6 +141,11 @@ export async function joinNetwork (options: NetworkJoinOptions): Promise<Network
 
   // ---- 1. admitting
   options.onStep?.('admitting')
+  // UAT 65 F1: a store that already belongs to another cadre cannot join this one (same party id, so the
+  // same control protocols and the same control store). Refused, never retried.
+  if (await options.belongsToOtherCadre?.(invitation).catch(() => false)) {
+    return { ok: false, reason: 'other-cadre', detail: 'other-cadre' }
+  }
   let admittedVia: 'redeemed' | 'self-admission' | 'already-member'
   if (await options.isSelfAdmitted().catch(() => false)) {
     admittedVia = 'already-member'
@@ -158,21 +180,43 @@ export async function joinNetwork (options: NetworkJoinOptions): Promise<Network
   options.onStep?.('syncing')
   const budgetEnds = now() + (options.syncBudgetMs ?? 120_000)
   const retryDelayMs = options.retryDelayMs ?? 1_000
+  const graceMs = options.budgetGraceMs ?? 5_000
   for (;;) {
     const remaining = budgetEnds - now()
-    const result = await options.networksEngine.joinFromStrand(options.code, options.user, {
+    const call = options.networksEngine.joinFromStrand(options.code, options.user, {
       getPeerCount: options.getPeerCount,
       getStrandPeerCount: options.getStrandPeerCount,
       timeoutMs: Math.max(1_000, Math.min(30_000, remaining)),
       onVerifying: () => options.onStep?.('verifying')
     })
+    // UAT 65 F1: the budget is only real if every call settles inside it. joinFromStrand's own awaits
+    // (the strand factory above all) can stay pending far longer, so the call is raced here and
+    // abandoned at the budget; it never decides the result after that.
+    const result = await settleWithin(call, Math.max(0, remaining) + graceMs)
+    if (result === TIMED_OUT) {
+      await Promise.resolve(options.onSyncAbandoned?.()).catch(() => undefined)
+      return { ok: false, reason: 'not-synced', detail: 'sync-budget-expired' }
+    }
     if (result.ok) {
       options.onStep?.('done')
       return { ok: true, outcome: result.outcome, admittedVia, networkRef: result.networkRef, fingerprint: result.fingerprint }
     }
     if (!result.retryable || now() + retryDelayMs >= budgetEnds) {
+      // UAT 65 F1: the usual way a budget runs out. Each timed-out call left its strand open
+      // waiting, so they are released here too, not only when the race above fires.
+      if (result.retryable) await Promise.resolve(options.onSyncAbandoned?.()).catch(() => undefined)
       return { ok: false, reason: result.reason === 'target-open-failed' ? 'open-failed' : result.reason, detail: result.reason }
     }
     await sleep(retryDelayMs)
   }
+}
+
+const TIMED_OUT: unique symbol = Symbol('network-join.timed-out')
+
+/** `promise`'s value, or TIMED_OUT once `ms` pass first. A rejection after the race is absorbed. */
+function settleWithin<T> (promise: Promise<T>, ms: number): Promise<T | typeof TIMED_OUT> {
+  promise.catch(() => undefined)
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const expiry = new Promise<typeof TIMED_OUT>((resolve) => { timer = setTimeout(() => resolve(TIMED_OUT), ms) })
+  return Promise.race([promise, expiry]).finally(() => { if (timer !== undefined) clearTimeout(timer) })
 }

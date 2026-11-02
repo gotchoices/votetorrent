@@ -63,6 +63,8 @@ export function joinFailureKey(reason: NetworkJoinFailureReason): string {
 			return 'error.digestMismatch';
 		case 'open-failed':
 			return 'error.openFailed';
+		case 'other-cadre':
+			return 'error.otherCadre';
 		default:
 			return 'error.generic';
 	}

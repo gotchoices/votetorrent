@@ -244,6 +244,18 @@ describe('spike 100: NetworksEngine.joinFromStrand (JS)', () => {
     expect(closed, 'the declined handle is released').to.equal(1)
   })
 
+  it('JS-7 (UAT 65 F1) a strand open that never settles ends at the call\'s deadline as not-synced (retryable)', async () => {
+    const { anchor } = await authorityAndReplica()
+    const { factory, calls } = recordingFactory(() => new Promise<Database>(() => undefined))
+    const voter = new NetworksEngine(makeDeviceLocalStorage(), factory)
+    const started = Date.now()
+    const result = await voter.joinFromStrand(anchor, undefined, { getPeerCount: () => 1, timeoutMs: 150, pollMs: 20 })
+    expect(result).to.deep.include({ ok: false, reason: 'not-synced', retryable: true })
+    expect(Date.now() - started).to.be.within(140, 2_000)
+    expect(calls).to.deep.equal([anchor.networkHash])
+    expect(await voter.getRecentNetworks()).to.deep.equal([])
+  })
+
   it('JS-5 the code names a different digest: digest-mismatch (not retryable), nothing recorded', async () => {
     const { anchor, replicaDb } = await authorityAndReplica()
     const { factory } = recordingFactory(async () => replicaDb)
@@ -277,10 +289,16 @@ describe('spike 100: joinNetwork orchestration (JN)', () => {
     decodeThrowsWith?: unknown
     code?: NetworkJoinCode
     joinFailureDetail?: string
+    /** UAT 65 F1: what belongsToOtherCadre answers (a function to throw from it) */
+    otherCadre?: boolean | (() => Promise<boolean>)
+    /** UAT 65 F1: joinFromStrand never settles */
+    joinNeverSettles?: boolean
+    syncBudgetMs?: number
+    budgetGraceMs?: number
   } = {}) {
     let clock = 1_000_000
     const steps: NetworkJoinStep[] = []
-    const calls = { redeem: 0, fallback: 0, remember: 0, join: 0, admittedChecks: 0, decode: 0 }
+    const calls = { redeem: 0, fallback: 0, remember: 0, join: 0, admittedChecks: 0, decode: 0, otherCadreChecks: 0, abandoned: 0 }
     const joinResults = [...(opts.joinResults ?? [{ ok: true, outcome: 'joined', networkRef: NET_REF, fingerprint: 'abcd abcd abcd abcd' } as JoinFromStrandResult])]
     let redeemedAt: number | null = null
     const options: NetworkJoinOptions = {
@@ -295,6 +313,7 @@ describe('spike 100: joinNetwork orchestration (JN)', () => {
       networksEngine: {
         async joinFromStrand (_anchor: NetworkJoinAnchor, _user: User | undefined, o: JoinFromStrandOptions) {
           calls.join++
+          if (opts.joinNeverSettles) return new Promise<JoinFromStrandResult>(() => undefined)
           const next = joinResults.length > 1 ? joinResults.shift()! : joinResults[0]!
           if (next.ok) o.onVerifying?.()
           return next
@@ -315,6 +334,15 @@ describe('spike 100: joinNetwork orchestration (JN)', () => {
         if (opts.admittedAfterMs === undefined || opts.admittedAfterMs === null || redeemedAt === null) return false
         return clock - redeemedAt >= opts.admittedAfterMs
       },
+      ...(opts.otherCadre === undefined
+        ? {}
+        : {
+            belongsToOtherCadre: async () => {
+              calls.otherCadreChecks++
+              return typeof opts.otherCadre === 'function' ? opts.otherCadre() : opts.otherCadre!
+            }
+          }),
+      onSyncAbandoned: () => { calls.abandoned++ },
       afterFallbackAdmission: async () => { calls.fallback++ },
       rememberBootstrap: async () => { calls.remember++ },
       getPeerCount: () => 1,
@@ -322,8 +350,9 @@ describe('spike 100: joinNetwork orchestration (JN)', () => {
       now: () => clock,
       sleep: async (ms) => { clock += ms },
       admissionTimeoutMs: 20_000,
-      syncBudgetMs: 10_000,
-      retryDelayMs: 1_000
+      syncBudgetMs: opts.syncBudgetMs ?? 10_000,
+      retryDelayMs: 1_000,
+      ...(opts.budgetGraceMs === undefined ? {} : { budgetGraceMs: opts.budgetGraceMs })
     }
     return { options, calls, steps, clock: () => clock, redeemedAtMs: () => redeemedAt }
   }
@@ -390,6 +419,7 @@ describe('spike 100: joinNetwork orchestration (JN)', () => {
     const result = await joinNetwork(h.options)
     expect(result).to.deep.include({ ok: false, reason: 'digest-mismatch', detail: 'digest-mismatch' })
     expect(h.calls.join).to.equal(1)
+    expect(h.calls.abandoned, 'a final refusal is not a lack of time').to.equal(0)
   })
 
   it('JN-9 a retryable failure that outlasts the budget ends as that failure (not-synced)', async () => {
@@ -397,11 +427,37 @@ describe('spike 100: joinNetwork orchestration (JN)', () => {
     const result = await joinNetwork(h.options)
     expect(result).to.deep.include({ ok: false, reason: 'not-synced' })
     expect(h.calls.join).to.be.within(2, 11)
+    // UAT 65 F1: the timed-out calls' strand waits are released when the budget runs out.
+    expect(h.calls.abandoned).to.equal(1)
   })
 
   it('JN-10 target-open-failed surfaces as open-failed', async () => {
     const h = harness({ joinResults: [{ ok: false, reason: 'target-open-failed', retryable: false, detail: '' }] })
     expect(await joinNetwork(h.options)).to.deep.include({ ok: false, reason: 'open-failed' })
+  })
+
+  it('JN-18 (UAT 65 F1) a node in another cadre is refused first: no admission check, redemption or open', async () => {
+    const h = harness({ otherCadre: true })
+    expect(await joinNetwork(h.options)).to.deep.equal({ ok: false, reason: 'other-cadre', detail: 'other-cadre' })
+    expect(h.calls).to.deep.include({ otherCadreChecks: 1, admittedChecks: 0, redeem: 0, join: 0, remember: 0 })
+    expect(h.steps).to.deep.equal(['admitting'])
+  })
+
+  it('JN-19 (UAT 65 F1) the same cadre, or a check that throws, joins as before', async () => {
+    expect(await joinNetwork(harness({ otherCadre: false }).options)).to.deep.include({ ok: true, admittedVia: 'redeemed' })
+    const h = harness({ otherCadre: async () => { throw new Error('control database closed') } })
+    expect(await joinNetwork(h.options)).to.deep.include({ ok: true, admittedVia: 'redeemed' })
+    expect(h.calls.otherCadreChecks).to.equal(1)
+  })
+
+  it('JN-20 (UAT 65 F1) a joinFromStrand call that never settles ends at the budget as not-synced, and is abandoned once', async () => {
+    const h = harness({ joinNeverSettles: true, syncBudgetMs: 40, budgetGraceMs: 10 })
+    const started = Date.now()
+    const result = await joinNetwork(h.options)
+    expect(result).to.deep.equal({ ok: false, reason: 'not-synced', detail: 'sync-budget-expired' })
+    expect(Date.now() - started).to.be.within(40, 2_000)
+    expect(h.calls).to.deep.include({ join: 1, abandoned: 1 })
+    expect(h.steps).to.deep.equal(['admitting', 'syncing'])
   })
 
   const DETAIL_TOKEN = /^(?:[a-z][a-z0-9]*(?:-[a-z0-9]+)*|(?:[A-Z][A-Za-z0-9]{0,58})?Error|unknown)$/
@@ -468,7 +524,9 @@ describe('spike 100: joinNetwork orchestration (JN)', () => {
       await joinNetwork(harness({ joinResults: [{ ok: false, reason: 'digest-mismatch', retryable: false, detail: 'x y z' }] }).options),
       await joinNetwork(harness({ joinResults: [{ ok: false, reason: 'target-open-failed', retryable: false, detail: 'open: boom' }] }).options),
       await joinNetwork(harness({ redeem: async () => { throw rejection('invite-spent', 'm') } }).options),
-      await joinNetwork(harness({ code: sampleCode({ invitation: btoa('{"v":1,"partyId":"p"}') }) }).options)
+      await joinNetwork(harness({ code: sampleCode({ invitation: btoa('{"v":1,"partyId":"p"}') }) }).options),
+      await joinNetwork(harness({ otherCadre: true }).options),
+      await joinNetwork(harness({ joinNeverSettles: true, syncBudgetMs: 20, budgetGraceMs: 0 }).options)
     ]
     for (const r of results) {
       expect(r.ok).to.equal(false)
