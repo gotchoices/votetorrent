@@ -109,6 +109,23 @@ class AttestationNativeModule: NSObject {
     return key
   }
 
+  /// The access control a sign must satisfy: the key's own (read from its attributes), else the
+  /// flags `createSecureEnclaveKey` gives that kind of key. nil only if neither can be had; the sign
+  /// then lets `SecKeyCreateSignature` raise the sheet itself (the pre-Run-6 path).
+  private func signingAccessControl(for key: SecKey, recovery: Bool) -> SecAccessControl? {
+    if let attrs = SecKeyCopyAttributes(key) as? [String: Any],
+       let stored = attrs[kSecAttrAccessControl as String],
+       CFGetTypeID(stored as CFTypeRef) == SecAccessControlGetTypeID() {
+      return (stored as! SecAccessControl)
+    }
+    return SecAccessControlCreateWithFlags(
+      kCFAllocatorDefault,
+      kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
+      recovery ? [.privateKeyUsage, .devicePasscode] : [.privateKeyUsage, .biometryCurrentSet],
+      nil
+    )
+  }
+
   private func loadKey(tag: String, context: LAContext? = nil) -> SecKey? {
     var query: [String: Any] = [
       kSecClass as String: kSecClassKey,
@@ -558,6 +575,13 @@ class AttestationNativeModule: NSObject {
   /// refuses `PROMPT_BUSY` while this is non-zero.
   private var systemCallsInFlight = 0
 
+  /// The LocalAuthentication evaluation's answer, written once by its reply before the semaphore
+  /// is signalled and read after the wait on `signQueue`.
+  private final class EvaluationResult: @unchecked Sendable {
+    var ok = false
+    var error: NSError?
+  }
+
   private enum SignOutcome {
     case signature(String)
     case failure(code: String, message: String, error: Error?)
@@ -568,8 +592,10 @@ class AttestationNativeModule: NSObject {
   /// sign may be pending (`PROMPT_BUSY` otherwise); `cancelPendingSign` invalidates it (D-110,
   /// D-112, D-113; todo 2026-10-31-ios-native-sign-has-no-timeout-or-cancel). A sign is also
   /// refused `PROMPT_BUSY` while an earlier sign's system call is still running after its cancel
-  /// hit the cap (review WR-06): it never queues silently behind it. Unproven on device until the
-  /// iPhone leg.
+  /// hit the cap (review WR-06): it never queues silently behind it. The sheet comes from a
+  /// LocalAuthentication evaluation of the key's access control (UAT 65 Run 6, F3), so the cancel's
+  /// `invalidate()` ends it, a "Face Not Recognized" alert included; the signature then uses the
+  /// evaluated context without a second sheet.
   private func signWith(tag: String, digestBase64: String, reason: String,
                         resolve: @escaping RCTPromiseResolveBlock,
                         reject: @escaping RCTPromiseRejectBlock) {
@@ -628,24 +654,64 @@ class AttestationNativeModule: NSObject {
       systemCallsInFlight += 1
       pendingSignLock.unlock()
 
-      // The Face ID / passcode sheet is raised by this system call (the iOS analogue of Android's
-      // "authenticate"); it returns once the sheet is answered, cancelled or invalidated.
+      // The Face ID / passcode sheet is raised by LocalAuthentication, evaluating the key's access
+      // control on this sign's context (the iOS analogue of Android's "authenticate"). UAT 65 Run 6
+      // (F3): when SecKeyCreateSignature raised the sheet itself, a failed Face ID left the system
+      // "Face Not Recognized" alert up after invalidate(), the call never returned, and every later
+      // sign was refused PROMPT_BUSY. An evaluation that LocalAuthentication owns is ended by
+      // invalidate() (LAError.appCancel), alert included. The signature below then uses the
+      // evaluated context and raises no second sheet.
       Self.vtSignLog("prompt requested kind=\(pending.kind) ms=\(pending.elapsedMs)")
+      let evaluation = EvaluationResult()
+      if let access = signingAccessControl(for: key, recovery: kind == "recovery") {
+        let answered = DispatchSemaphore(value: 0)
+        pending.context.evaluateAccessControl(access, operation: .useKeySign,
+                                              localizedReason: reason) { ok, err in
+          evaluation.ok = ok
+          evaluation.error = err as NSError?
+          answered.signal()
+        }
+        answered.wait()
+        Self.vtSignLog("evaluate end kind=\(pending.kind) ok=\(evaluation.ok) code=\(evaluation.error?.code ?? 0) ms=\(pending.elapsedMs)")
+      }
+      let evaluated = evaluation.ok
+      let evaluationError = evaluation.error
+      // A cancel that landed before or during the evaluation: no signature, settle CANCELED.
+      pendingSignLock.lock()
+      let canceledMeanwhile = pending.canceled
+      pendingSignLock.unlock()
+      // Only the answers this mapping knows end the sign here. Any other evaluation failure falls
+      // through to the direct signature, so the measured invalidated-key result (CryptoTokenKit -3
+      // from SecKeyCreateSignature, below) is reported exactly as before.
+      let knownEvaluationAnswers: Set<Int> = [
+        LAError.userCancel.rawValue, LAError.userFallback.rawValue, LAError.systemCancel.rawValue,
+        LAError.appCancel.rawValue, LAError.biometryLockout.rawValue, LAError.biometryNotEnrolled.rawValue
+      ]
       var error: Unmanaged<CFError>?
+      var signed: Data?
+      var failure: NSError?
+      if canceledMeanwhile {
+        failure = NSError(domain: LAErrorDomain, code: LAError.appCancel.rawValue)
+      } else if let evalErr = evaluationError, !evaluated, evalErr.domain == LAErrorDomain,
+                knownEvaluationAnswers.contains(evalErr.code) {
+        failure = evalErr
+      } else {
     // `.ecdsaSignatureDigestX962SHA256` treats the input as the FINAL ECDSA hash (no internal
     // hash) = noble `prehash: false`. Android's SHA256withECDSA hashes once, so the shared JS helper
     // (nativeSignInputBytes) pre-hashes on iOS to compensate. The PoP relies on this raw behaviour:
     // do NOT switch to the `...MessageX962...` variant without changing the PoP verifier, the
     // contract doc and the pinned hardware vector together.
-      let signed = SecKeyCreateSignature(key, .ecdsaSignatureDigestX962SHA256,
-                                         digest as CFData, &error) as Data?
+        signed = SecKeyCreateSignature(key, .ecdsaSignatureDigestX962SHA256,
+                                       digest as CFData, &error) as Data?
+        if signed == nil { failure = error!.takeRetainedValue() as Error as NSError }
+      }
       // WR-06: the system call has returned; decrement before settling, so a sign the caller starts
       // the moment this one settles is not refused.
       pendingSignLock.lock()
       systemCallsInFlight -= 1
       pendingSignLock.unlock()
       guard let sig = signed else {
-        let err = error!.takeRetainedValue() as Error as NSError
+        let err = failure!
           // LAError.userCancel / .userFallback / .biometryLockout map onto the Android code table.
           // DOMAIN FIRST — these code spaces OVERLAP, measured 2026-08-25 (spike 085 leg 7):
           //
@@ -747,9 +813,11 @@ class AttestationNativeModule: NSObject {
   /// The pool's consent queue awaits the cancel and re-pools on PROMPT_BUSY; another caller signing
   /// in that short window sees its existing sign-failed path.
   /// `canceled = true` (set in the same lock) guarantees the old sign can only reject CANCELED.
-  /// `invalidate()` normally ends `SecKeyCreateSignature` with LAError.appCancel within the 2 s
-  /// wait (unproven on device). If the cap runs out first, the promise is rejected CANCELED here
-  /// (settle-once through `settled`), and `finishPendingSign` later drops the real outcome.
+  /// `invalidate()` ends the sign's LocalAuthentication evaluation with LAError.appCancel within the
+  /// 2 s wait. UAT 65 Run 6 measured the earlier design, where SecKeyCreateSignature raised the
+  /// sheet itself: after a failed Face ID its "Face Not Recognized" alert outlived invalidate() and
+  /// the cap ran out. If the cap runs out, the promise is rejected CANCELED here (settle-once through
+  /// `settled`), and `finishPendingSign` later drops the real outcome.
   ///
   /// Serial-queue implication (review WR-06): if the old system call is still running after the
   /// cap, `systemCallsInFlight` stays non-zero until it returns, and a new sign is refused

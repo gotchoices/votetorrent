@@ -24,6 +24,9 @@
  *   - WR-05: every `VtSign` trace goes through one debug-gated writer per platform
  *     (`BuildConfig.DEBUG` in Kotlin, `#if DEBUG` in Swift); no ungated line exists.
  *   - WR-06: the Swift sign refuses `PROMPT_BUSY` while an earlier system call is still in flight.
+ *   - UAT 65 Run 6 (F3): the Swift sign raises its sheet through a LocalAuthentication evaluation of
+ *     the key's access control (`evaluateAccessControl(... operation: .useKeySign ...)`) before
+ *     `SecKeyCreateSignature`, so `invalidate()` ends it, a "Face Not Recognized" alert included.
  */
 import { existsSync, readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
@@ -229,6 +232,10 @@ export function compare(raw: Texts): string[] {
 		// WR-06: refuse while an earlier system call is still in flight; count it around the call.
 		if (!/if\s+pendingSign\s*!=\s*nil\s*\|\|\s*systemCallsInFlight\s*>\s*0/.test(signWith)) out.push('swift: signWith does not refuse while a system call is in flight (systemCallsInFlight)')
 		if (!signWith.includes('systemCallsInFlight += 1') || !signWith.includes('systemCallsInFlight -= 1')) out.push('swift: signWith does not count its system call in systemCallsInFlight')
+		const evalAt = signWith.search(/\.evaluateAccessControl\([^)]*operation:\s*\.useKeySign/)
+		const signAt = signWith.indexOf('SecKeyCreateSignature(')
+		if (evalAt < 0) out.push('swift: signWith does not evaluate the key access control (.useKeySign) before signing')
+		else if (signAt >= 0 && signAt < evalAt) out.push('swift: signWith calls SecKeyCreateSignature before it evaluates the key access control')
 	}
 	const vault = body(t.swift, /func mapOSStatusOrLAError\(/)
 	if (vault === undefined) out.push('swift: mapOSStatusOrLAError not found')
@@ -487,5 +494,16 @@ describe('planted-mismatch self-tests: the gate can fail', () => {
 	})
 	it('Swift: the in-flight counter never decremented', () => {
 		expect(has(plant('swift', 'systemCallsInFlight -= 1', 'systemCallsInFlight -= 0'), 'swift:', 'count its system call')).toBe(true)
+	})
+	it('Swift sign no longer evaluates the key access control (SecKeyCreateSignature would raise the sheet itself)', () => {
+		expect(has(plant('swift', 'operation: .useKeySign', 'operation: .useItem'), 'swift:', 'evaluate the key access control')).toBe(true)
+	})
+	it('Swift sign signs before it evaluates', () => {
+		const t = load()
+		const sig = t.swift.indexOf('SecKeyCreateSignature(key, .ecdsaSignatureDigestX962SHA256')
+		const ev = t.swift.indexOf('pending.context.evaluateAccessControl(')
+		expect(sig).toBeGreaterThan(ev)
+		const planted = { ...t, swift: t.swift.slice(0, ev) + 'let _early = SecKeyCreateSignature(key, .ecdsaSignatureDigestX962SHA256, digest as CFData, nil)\n' + t.swift.slice(ev) }
+		expect(has(planted, 'swift:', 'before it evaluates')).toBe(true)
 	})
 })
