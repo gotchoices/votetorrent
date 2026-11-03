@@ -24,6 +24,11 @@ const { BOOTSTRAP_PHASES, BOOTSTRAP_OUTCOME_CODES, copyKeysForOutcome } =
 		await import(moduleUrl(dashboardSrc('lifecycle', 'bootstrap.js')))
 	);
 
+const { STATUS_KINDS, CHIP_KINDS, UNPAIRED_REASONS } =
+	/** @type {typeof import('../../src/live/status.js')} */ (
+		await import(moduleUrl(dashboardSrc('live', 'status.js')))
+	);
+
 test('every BOOTSTRAP_PHASES member has a matching bootstrap.phase.<value> key in COPY, derived mechanically -- never a hand-written phase list', () => {
 	// The defect this pins: the screen rendered `{state.phase}` directly, so
 	// the officer saw the literal machine identifiers "submitting",
@@ -36,6 +41,87 @@ test('every BOOTSTRAP_PHASES member has a matching bootstrap.phase.<value> key i
 		const key = `bootstrap.phase.${phase}`;
 		assert.ok(key in COPY, `expected COPY to have a "${key}" key for BOOTSTRAP_PHASES member "${phase}"`);
 		assert.ok(t(key).length > 0);
+	}
+});
+
+// ---------------------------------------------------------------------------
+// Live-dashboard copy coupling (66-05): the keys the status reducer's lists and
+// the pairing module's failure values imply. Derived from the imported lists,
+// never from a hand-written copy of them.
+// ---------------------------------------------------------------------------
+
+test('every CHIP_KINDS member has a status.chip.<kind> key, derived mechanically from status.js', () => {
+	for (const kind of CHIP_KINDS) {
+		const key = `status.chip.${kind}`;
+		assert.ok(key in COPY, `expected COPY to have "${key}" for CHIP_KINDS member "${kind}"`);
+		assert.ok(COPY[key].length > 0);
+	}
+	assert.ok('status.chip.offline-no-update' in COPY);
+	assert.throws(() => t('status.chip.offline'), (err) => err instanceof Error && err.message.includes('time'));
+	assert.equal(t('status.chip.offline', { time: '09:41' }), 'Offline \u00b7 last update 09:41');
+});
+
+test('STATUS_KINDS minus CHIP_KINDS is exactly unpaired, which renders the pairing notice instead of a chip', () => {
+	assert.deepEqual(
+		STATUS_KINDS.filter((k) => !CHIP_KINDS.includes(k)),
+		['unpaired'],
+	);
+});
+
+test('every UNPAIRED_REASONS member has an unpaired.body.<reason> key that resolves', () => {
+	for (const reason of UNPAIRED_REASONS) {
+		const key = `unpaired.body.${reason}`;
+		assert.ok(key in COPY, `expected COPY to have "${key}" for UNPAIRED_REASONS member "${reason}"`);
+		assert.ok(t(key, { officerName: 'Alex', authorityName: 'Example Authority' }).length > 0);
+	}
+});
+
+test('the read-only action-note pair that ReadOnlyNote resolves by variant exists', () => {
+	assert.ok('panel.readOnly.short' in COPY);
+	assert.ok('panel.readOnly.long' in COPY);
+});
+
+// The pairing failure values that show a failure screen. This literal is the
+// list the pairing module will export once `src/peer/pairing.js` lands; the
+// plan that adds that export replaces this literal with an import.
+const PAIRING_FAILURE_COPY_REASONS = [
+	'malformed',
+	'old-style',
+	'expired',
+	'spent',
+	'unreachable',
+	'digest-mismatch',
+	'officer-not-valid',
+	'no-storage',
+	'unsupported',
+];
+
+test('every pairing failure reason that has a screen has a heading and a body, and the step rows exist', () => {
+	for (const reason of PAIRING_FAILURE_COPY_REASONS) {
+		assert.ok(`pairing.failed.${reason}.heading` in COPY, `missing heading for ${reason}`);
+		assert.ok(`pairing.failed.${reason}.body` in COPY, `missing body for ${reason}`);
+	}
+	for (const step of ['connecting', 'joining', 'first-sync']) {
+		assert.ok(`pairing.step.${step}` in COPY, `missing step row ${step}`);
+	}
+});
+
+const LIVE_COPY_PREFIXES = ['pairing.', 'scanner.', 'status.', 'swap.', 'forget.', 'unpaired.', 'panel.readOnly.', 'switcher.', 'shell.', 'marks.'];
+
+test('live-dashboard copy lives only in the table: no long value of the new keys appears in the live modules', () => {
+	// Positive control: the same matcher finds a known value in the table's own source.
+	const tableSource = readFileSync(uiWebSrc('copy.js'), 'utf8');
+	assert.ok(tableSource.includes('Pair this browser'));
+	const longValues = Object.keys(COPY)
+		.filter((k) => LIVE_COPY_PREFIXES.some((p) => k.startsWith(p)))
+		.map((k) => COPY[k])
+		.filter((v) => v.length >= 8);
+	assert.ok(longValues.length > 60);
+	for (const file of ['status.js', 'change-marks.js']) {
+		const src = stripComments(readFileSync(dashboardSrc('live', file), 'utf8'));
+		for (const v of longValues) {
+			assert.ok(!src.includes(v), `src/live/${file} carries user-facing copy: ${v}`);
+		}
 	}
 });
 

@@ -791,6 +791,129 @@ export const COPY = Object.freeze({
 	'public.config.malformed.title': "This page's network configuration can't be read.",
 	'public.config.malformed.body':
 		"The list of network addresses this page needs is present but couldn't be understood, so it can't look up any election right now. This is a problem with how this page is set up, not with your browser or your connection.",
+	// --- Live dashboard (66-05): pairing screen, webcam scanner, header ----
+	// --- status, officer-swap and forget dialogs, unpaired notice, panel ----
+	// --- action notes, network switcher, change marks ----------------------
+	//
+	// These keys serve the live officer dashboard and arrive ahead of the
+	// screens that mount them, under the same "named by an already-planned
+	// call site" warrant the 54-09 header amendment uses: `t()` throws on an
+	// unknown key, so each key has to exist before the screen that renders it.
+	// Every value is transcribed from the dashboard UI contract.
+	//
+	// `panel.readOnly.*` is an ACTION NOTE on pending items ("decide these in
+	// the Authority app"), not the read-only panel STATE that contract C3
+	// forbids, and neither value contains the word C3 bans.
+	//
+	// `marks.announceOne` is the derived singular partner of the spec's plural
+	// `marks.announceMany`, following this table's separate singular and plural
+	// key convention (`panelFrame.sitePill` / `panelFrame.sitesPill`).
+	'pairing.title': 'Pair this browser',
+	'pairing.intro':
+		"In the Authority app, open Paired browsers and choose Pair a browser. Paste the code it shows, or scan its QR code with this computer's camera.",
+	'pairing.cta': 'Pair this browser',
+	'pairing.scanCta': 'Scan QR code',
+	'pairing.fieldLabel': 'Pairing code',
+	'pairing.fieldHelp':
+		"Single use, valid for about 15 minutes. Keep it private until you've pasted it.",
+	'pairing.emptyHeading': 'No networks yet',
+	'pairing.emptyBody':
+		'Pair this browser from the Authority app to follow a network live. Nothing is shown here until you do.',
+	'pairing.verifying.heading': 'Checking the code',
+	'pairing.verifying.body': 'Making sure the code is genuine and still valid.',
+	'pairing.joining.heading': 'Joining {{authorityName}}',
+	'pairing.joining.body': 'This can take a minute or two the first time.',
+	'pairing.catchingUpSlow':
+		'Still catching up. The data is arriving; you can leave this page open.',
+	'pairing.step.connecting': 'Connecting to the network',
+	'pairing.step.joining': "Joining as {{officerName}}'s browser",
+	'pairing.step.first-sync': 'Catching up on the first sync',
+	'pairing.stepState.waiting': 'Waiting',
+	'pairing.stepState.inProgress': 'In progress',
+	'pairing.stepState.done': 'Done',
+	'pairing.stepState.failed': 'Failed',
+	'pairing.stop': 'Stop pairing',
+	'pairing.action.tryAgain': 'Try again',
+	'pairing.action.tryAnother': 'Try another code',
+	'pairing.action.retry': 'Retry pairing',
+	'pairing.failed.malformed.heading': "That isn't a pairing code.",
+	'pairing.failed.malformed.body':
+		'Paste the whole code from the Authority app, or scan its QR code.',
+	'pairing.failed.old-style.heading': 'This is an old sign-in code.',
+	'pairing.failed.old-style.body':
+		'This dashboard now pairs instead. In the Authority app, open Paired browsers and make a new code.',
+	'pairing.failed.expired.heading': 'That code has expired.',
+	'pairing.failed.expired.body':
+		'Codes last about 15 minutes. Make a new one in the Authority app.',
+	'pairing.failed.spent.heading': 'That code was already used.',
+	'pairing.failed.spent.body': 'Each code works once. Make a new one in the Authority app.',
+	'pairing.failed.unreachable.heading': "Couldn't reach the network.",
+	'pairing.failed.unreachable.body':
+		"The network's relay didn't answer. Check this computer's connection and try again. If it keeps happening, make a new code.",
+	'pairing.failed.digest-mismatch.heading': "This code doesn't match the network it names.",
+	'pairing.failed.digest-mismatch.body':
+		"The network's records don't match what the code promised, so nothing was saved. Make a new code from the Authority app and try again; if it happens again, contact the person who runs the network.",
+	'pairing.failed.officer-not-valid.heading': "That officer can't pair a browser.",
+	'pairing.failed.officer-not-valid.body':
+		"The officer's key in the code isn't current any more. Ask them to check their keys in the Authority app.",
+	'pairing.failed.no-storage.heading': "This browser can't store the data.",
+	'pairing.failed.no-storage.body':
+		'Allow site storage for this page (private windows often block it) and try again.',
+	'pairing.failed.unsupported.heading': "This browser isn't supported.",
+	'pairing.failed.unsupported.body': 'Use a current version of Chrome, Edge, Firefox or Safari.',
+	'scanner.asking':
+		'Allow camera access to scan the QR code. The picture stays in this browser.',
+	'scanner.denied':
+		"Camera access is blocked. Allow it in the browser's site settings, or paste the code instead.",
+	'scanner.noCamera': 'No camera found. Paste the code instead.',
+	'scanner.insecureContext':
+		'The camera needs a secure connection (https). Paste the code instead.',
+	'scanner.instruction': 'Hold the QR code inside the frame, about 30 cm from the camera.',
+	'scanner.found': 'Code found.',
+	'scanner.notPairingCode':
+		"That QR code isn't a pairing code. Keep scanning or paste the code.",
+	'scanner.close': 'Close scanner',
+	'scanner.pasteInstead': 'Paste the code instead',
+	'status.chip.live': 'Live',
+	'status.chip.catching-up': 'Catching up',
+	'status.chip.offline': 'Offline · last update {{time}}',
+	'status.chip.offline-no-update': 'Offline · no update yet',
+	'status.chip.not-live': 'Not live',
+	'status.title.live': 'Connected and up to date. Last checked at {{time}}',
+	'status.title.catching-up': 'Connected. Newer data is still arriving.',
+	'status.reconnect': 'Reconnect',
+	'status.reconnecting': 'Reconnecting…',
+	'status.followerNote':
+		"This network is open in another tab. This tab shows its last data and doesn't update.",
+	'swap.heading': 'Replace {{oldOfficer}} with {{newOfficer}} on this browser?',
+	'swap.body':
+		"This browser is paired as {{oldOfficer}} for {{authorityName}}. Continuing deletes {{oldOfficer}}'s pairing and this browser's local copy of the data, then pairs it as {{newOfficer}}. {{oldOfficer}}'s pairing may still be listed in their Authority app until they remove it.",
+	'swap.confirm': 'Replace and continue',
+	'swap.keep': 'Keep {{oldOfficer}}',
+	'forget.cta': 'Forget this network',
+	'forget.heading': 'Forget {{authorityName}} on this browser?',
+	'forget.body':
+		"This deletes this browser's pairing key and its local copy of {{authorityName}}'s data from this browser. It doesn't remove this browser from the network: do that in the Authority app under Paired browsers. Data this browser has already received may remain in other places, such as backups. Type {{authorityName}} to confirm.",
+	'forget.fieldLabel': 'Network name',
+	'unpaired.heading': 'This browser was unpaired.',
+	'unpaired.body.revoked':
+		"{{officerName}} removed it in the Authority app, so its local copy of {{authorityName}}'s data was deleted from this browser. Pair again with a new code to follow the network.",
+	'unpaired.body.removed':
+		'This browser was removed from the network, so its local copy was deleted from this browser.',
+	'unpaired.body.key-invalid':
+		"{{officerName}}'s key is no longer valid, so this browser was unpaired and its local copy deleted.",
+	'unpaired.dismiss': 'Dismiss',
+	'panel.readOnly.short': 'Taken in the Authority app.',
+	'panel.readOnly.long': 'This dashboard only shows these. Decide them in the Authority app.',
+	'switcher.rowDetail': '{{domain}} · {{officerName}}',
+	'switcher.rowDetailNotSyncing': '{{domain}} · {{officerName}} · Not syncing',
+	'switcher.opening': 'Opening {{authorityName}}…',
+	'switcher.pairAnother': '+ Pair another network',
+	'shell.openFailed':
+		'Something went wrong opening this network. Reconnect, or forget it and pair again.',
+	'marks.updated': 'updated',
+	'marks.announceOne': '{{count}} item updated in {{panel}}',
+	'marks.announceMany': '{{count}} items updated in {{panel}}',
 });
 
 /**
