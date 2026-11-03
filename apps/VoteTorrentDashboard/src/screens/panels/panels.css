@@ -134,3 +134,42 @@
 	font-weight: var(--font-body-weight);
 	line-height: var(--font-body-line-height);
 }
+
+/*
+ * In-place change mark (live/useChangeMarks.ts). A row, figure or panel
+ * header that a replication pass changed gets a 2px bar on its leading edge
+ * and a light primary tint for the mark's lifetime, plus a visually hidden
+ * word "updated".
+ *
+ * The bar is an inset box-shadow, not a border: a shadow takes no layout
+ * space, so marking a row never shifts it, where a border would reflow it.
+ *
+ * The fade runs only when the user allows motion, and its transition sits
+ * on the fading rule itself: the tint appears at once, and only its exit
+ * animates. Under reduced motion the fading class matches nothing, so tint
+ * and bar stay static until the mark is dropped at the end of its lifetime.
+ */
+.change-mark {
+	box-shadow: inset 2px 0 0 var(--primary);
+	background-color: color-mix(in srgb, var(--primary) 15%, transparent);
+}
+
+.change-mark__word,
+.change-mark-live-region {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	padding: 0;
+	margin: 0;
+	overflow: hidden;
+	clip-path: inset(50%);
+	white-space: nowrap;
+	border: 0;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+	.change-mark.change-mark--fading {
+		background-color: transparent;
+		transition: background-color 2500ms ease-out;
+	}
+}

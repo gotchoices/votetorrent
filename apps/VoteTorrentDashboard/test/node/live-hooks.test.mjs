@@ -30,6 +30,7 @@ const changeMarks = await import(moduleUrl(dashboardSrc('live', 'change-marks.js
 const MODULE_URLS = {
 	dataVersion: moduleUrl(dashboardSrc('live', 'DataVersionContext.ts')),
 	useNow: moduleUrl(dashboardSrc('live', 'useNow.ts')),
+	useChangeMarks: moduleUrl(dashboardSrc('live', 'useChangeMarks.ts')),
 };
 
 // --- behaviour harness --------------------------------------------------------
@@ -110,7 +111,69 @@ const HARNESS_FOUNDATION = [
 	'});',
 ].join('\n');
 
-const HARNESS = [HARNESS_PRELUDE, HARNESS_FOUNDATION, 'process.stdout.write(JSON.stringify(rows));'].join('\n');
+/** Task 2 rows: the change-mark pure cores, the hook's first render, the hidden word. */
+const HARNESS_MARKS = [
+	'const cm = await import(M.useChangeMarks);',
+	'const keyOf = (r) => r.key;',
+	'const sigOf = (r) => r.sig;',
+	'const view = (s) => ({ nextIndexSize: s.nextIndex.size, marked: s.marked, headerMarked: s.headerMarked, count: s.count });',
+	"const base = [{ key: 'a', sig: '1' }, { key: 'b', sig: '1' }, { key: 'c', sig: '1' }];",
+	'const idx = new Map(base.map((r) => [r.key, r.sig]));',
+	"await row('stepFirst', () => view(cm.computeMarkStep(null, [...base, { key: 'a', sig: '2' }], keyOf, sigOf, true)));",
+	"await row('stepIneligible', () => view(cm.computeMarkStep(idx, [{ key: 'a', sig: '1' }, { key: 'b', sig: '2' }, { key: 'd', sig: '1' }], keyOf, sigOf, false)));",
+	"await row('stepChanged', () => view(cm.computeMarkStep(idx, [{ key: 'a', sig: '1' }, { key: 'b', sig: '2' }, { key: 'c', sig: '1' }], keyOf, sigOf, true)));",
+	"await row('stepNew', () => view(cm.computeMarkStep(idx, [...base, { key: 'd', sig: '1' }], keyOf, sigOf, true)));",
+	"const many = Array.from({ length: 26 }, (_, i) => ({ key: 'k' + i, sig: '1' }));",
+	'const manyIdx = new Map(many.map((r) => [r.key, r.sig]));',
+	"await row('stepCap', () => view(cm.computeMarkStep(manyIdx, many.map((r) => ({ key: r.key, sig: '2' })), keyOf, sigOf, true)));",
+	"await row('stepRemoved', () => view(cm.computeMarkStep(idx, [{ key: 'a', sig: '1' }, { key: 'b', sig: '1' }], keyOf, sigOf, true)));",
+	"await row('stepRemovedChanged', () => view(cm.computeMarkStep(idx, [{ key: 'a', sig: '1' }, { key: 'b', sig: '2' }], keyOf, sigOf, true)));",
+	"await row('stepBadKey', () => {",
+	"\ttry { cm.computeMarkStep(null, [{ key: 7, sig: 'registrant-secret-key' }], keyOf, sigOf, true); return { threw: false }; }",
+	'\tcatch (err) { return { threw: true, isTypeError: err instanceof TypeError, message: String(err && err.message) }; }',
+	'});',
+	"await row('announceText', () => ({",
+	"\tzero: cm.announceText(0, 'Elections'),",
+	"\tone: cm.announceText(1, 'Elections'),",
+	"\tthree: cm.announceText(3, 'Elections'),",
+	"\toneViaT: ui.t('marks.announceOne', { count: '1', panel: 'Elections' }),",
+	'}));',
+	"await row('markClassName', () => ['none', 'fresh', 'fading'].map((p) => cm.markClassName(p)));",
+	"await row('classConstants', () => [cm.CHANGE_MARK_CLASS, cm.CHANGE_MARK_FADING_CLASS, cm.CHANGE_MARK_WORD_CLASS]);",
+	"await row('mergePassMarks', () => {",
+	'\tconst p = { version: 1, count: 2, headerMarked: false };',
+	'\treturn {',
+	'\t\tnullKeepsPost: cm.mergePassMarks(null, p) === p,',
+	'\t\tsameVersion: cm.mergePassMarks(p, { version: 1, count: 3, headerMarked: true }),',
+	'\t\tnewVersion: cm.mergePassMarks(p, { version: 2, count: 1, headerMarked: false }),',
+	'\t\tprevUntouched: p,',
+	'\t};',
+	'});',
+	"await row('mergeAnnouncement', () => {",
+	"\tconst a1 = cm.mergeAnnouncement(cm.EMPTY_ANNOUNCEMENT, 'elections', 'E1', 5);",
+	"\tconst a2 = cm.mergeAnnouncement(a1, 'registrations', 'R2', 5);",
+	"\tconst a3 = cm.mergeAnnouncement(a2, 'elections', 'E3', 5);",
+	"\tconst a4 = cm.mergeAnnouncement(a3, 'keyholders', 'K1', 6);",
+	'\treturn {',
+	'\t\ta1: a1.entries, a2: a2.entries, a3: a3.entries, a3Version: a3.version, a3Text: cm.announcementText(a3),',
+	'\t\ta4: a4.entries, a4Version: a4.version,',
+	'\t\temptyText: cm.announcementText(cm.EMPTY_ANNOUNCEMENT), emptyFrozen: Object.isFrozen(cm.EMPTY_ANNOUNCEMENT),',
+	'\t\temptyEntries: cm.EMPTY_ANNOUNCEMENT.entries.length,',
+	'\t};',
+	'});',
+	'function Probe(props) {',
+	'\tconst m = cm.useChangeMarks(props.rows, keyOf, sigOf);',
+	"\treturn createElement('span', null, [m.isMarked('a'), m.isMarked('b'), m.headerMarked, String(m.announce), JSON.stringify(m.markClass('a'))].join('|'));",
+	'}',
+	"await row('hookNoProvider', () => renderToStaticMarkup(createElement(Probe, { rows: base })));",
+	"await row('hookRowsNull', () => renderToStaticMarkup(createElement(Probe, { rows: null })));",
+	"await row('hookRowsUndefined', () => renderToStaticMarkup(createElement(Probe, { rows: undefined })));",
+	"await row('hookEligibleFirstRender', () => renderToStaticMarkup(createElement(dv.DataVersionContext.Provider, { value: { version: 2, changedTables: new Set(), markEligible: true } }, createElement(Probe, { rows: base }))));",
+	"await row('changeMarkWord', () => renderToStaticMarkup(createElement(cm.ChangeMarkWord)));",
+	"await row('contextNames', () => [cm.PanelMarkContext.displayName, cm.MarkAnnouncerContext.displayName]);",
+].join('\n');
+
+const HARNESS = [HARNESS_PRELUDE, HARNESS_FOUNDATION, HARNESS_MARKS, 'process.stdout.write(JSON.stringify(rows));'].join('\n');
 
 const child = spawnSync(
 	process.execPath,
@@ -320,4 +383,174 @@ test('panels.css: the action note is muted text with no pointer and no hover rul
 	assert.equal(topLevelRules(PANELS_CSS, '.panel-readonly-note--long').length, 1, 'expected one long-note rule');
 	assert.doesNotMatch(PANELS_CSS, /\.panel-readonly-note[\w-]*:hover/);
 	for (const body of topLevelRules(PANELS_CSS, '.panel-readonly-note--long')) assert.doesNotMatch(body, /cursor/);
+});
+
+// --- useChangeMarks: pure cores ---------------------------------------------------
+
+test('computeMarkStep: a first render (no previous index) marks nothing and indexes each unique key once', () => {
+	assert.deepEqual(rowOf('stepFirst'), { nextIndexSize: 3, marked: [], headerMarked: false, count: 0 });
+});
+
+test('computeMarkStep: an ineligible pass marks nothing and rebuilds the index from the rows', () => {
+	assert.deepEqual(rowOf('stepIneligible'), { nextIndexSize: 3, marked: [], headerMarked: false, count: 0 });
+});
+
+test('computeMarkStep: one changed signature or one new key marks exactly that row', () => {
+	assert.deepEqual(rowOf('stepChanged'), { nextIndexSize: 3, marked: ['b'], headerMarked: false, count: 1 });
+	assert.deepEqual(rowOf('stepNew'), { nextIndexSize: 4, marked: ['d'], headerMarked: false, count: 1 });
+});
+
+test('computeMarkStep: 26 changed rows mark the header, no rows, and keep the true count', () => {
+	assert.deepEqual(rowOf('stepCap'), { nextIndexSize: 26, marked: [], headerMarked: true, count: 26 });
+});
+
+test('computeMarkStep: a removed row marks the header; removed plus changed marks the changed row and the header', () => {
+	assert.deepEqual(rowOf('stepRemoved'), { nextIndexSize: 2, marked: [], headerMarked: true, count: 1 });
+	assert.deepEqual(rowOf('stepRemovedChanged'), { nextIndexSize: 2, marked: ['b'], headerMarked: true, count: 2 });
+});
+
+test('computeMarkStep: a non-string key throws a TypeError whose message carries no row value', () => {
+	const r = rowOf('stepBadKey');
+	assert.equal(r.threw, true);
+	assert.equal(r.isTypeError, true);
+	assert.ok(!r.message.includes('registrant-secret-key'), `the error message leaked a row value: ${r.message}`);
+});
+
+test('announceText: null for zero, the one-item and many-item sentences otherwise (count and title only)', () => {
+	const r = rowOf('announceText');
+	assert.equal(r.zero, null);
+	assert.equal(r.one, r.oneViaT);
+	assert.equal(r.one, '1 item updated in Elections');
+	assert.equal(r.three, '3 items updated in Elections');
+});
+
+test('markClassName and the class constants', () => {
+	assert.deepEqual(rowOf('markClassName'), ['', 'change-mark', 'change-mark change-mark--fading']);
+	assert.deepEqual(rowOf('classConstants'), ['change-mark', 'change-mark--fading', 'change-mark__word']);
+});
+
+test('mergePassMarks: null keeps the post, the same version sums counts and ORs the header, a new version replaces', () => {
+	const r = rowOf('mergePassMarks');
+	assert.equal(r.nullKeepsPost, true);
+	assert.deepEqual(r.sameVersion, { version: 1, count: 5, headerMarked: true });
+	assert.deepEqual(r.newVersion, { version: 2, count: 1, headerMarked: false });
+	assert.deepEqual(r.prevUntouched, { version: 1, count: 2, headerMarked: false });
+});
+
+test('mergeAnnouncement: same version replaces a panel in first-seen order, a new version starts over, inputs never mutate', () => {
+	const r = rowOf('mergeAnnouncement');
+	assert.deepEqual(r.a1, [['elections', 'E1']]);
+	assert.deepEqual(r.a2, [['elections', 'E1'], ['registrations', 'R2']]);
+	assert.deepEqual(r.a3, [['elections', 'E3'], ['registrations', 'R2']]);
+	assert.equal(r.a3Version, 5);
+	assert.equal(r.a3Text, 'E3 R2');
+	assert.deepEqual(r.a4, [['keyholders', 'K1']]);
+	assert.equal(r.a4Version, 6);
+	assert.equal(r.emptyText, '');
+	assert.equal(r.emptyFrozen, true);
+	assert.equal(r.emptyEntries, 0);
+});
+
+// --- useChangeMarks: the hook's first render ------------------------------------------
+
+test('useChangeMarks on first render marks nothing, with or without a provider, and tolerates rows null/undefined', () => {
+	const unmarked = '<span>false|false|false|null|&quot;&quot;</span>';
+	assert.equal(rowOf('hookNoProvider'), unmarked);
+	assert.equal(rowOf('hookRowsNull'), unmarked);
+	assert.equal(rowOf('hookRowsUndefined'), unmarked);
+	assert.equal(rowOf('hookEligibleFirstRender'), unmarked);
+	assert.deepEqual(rowOf('contextNames'), ['PanelMarkContext', 'MarkAnnouncerContext']);
+});
+
+test('ChangeMarkWord renders a space and the visually hidden word', () => {
+	assert.equal(rowOf('changeMarkWord'), ' <span class="change-mark__word">updated</span>');
+});
+
+// --- useChangeMarks: source scans ---------------------------------------------------------
+
+const MARKS_SRC = stripComments(readSrc('live', 'useChangeMarks.ts'));
+const MARK_LITERAL_RE = /\b(4_?000|2_?500)\b/;
+
+test('positive control: the lifetime-literal matcher hits a re-typed constant', () => {
+	assert.match('setTimeout(done, 4_000);', MARK_LITERAL_RE);
+	assert.match('const fade = 2500;', MARK_LITERAL_RE);
+});
+
+test('useChangeMarks.ts imports the diff and the lifetime from change-marks.js and re-types no constant', () => {
+	assert.match(MARKS_SRC, /import \{[^}]*\bdiffForMarks\b[^}]*\} from '\.\/change-marks\.js'/);
+	assert.match(MARKS_SRC, /import \{[^}]*\bMARK_LIFETIME_MS\b[^}]*\} from '\.\/change-marks\.js'/);
+	assert.match(MARKS_SRC, /setTimeout\([^;]*MARK_LIFETIME_MS/);
+	assert.match(MARKS_SRC, /requestAnimationFrame/);
+	assert.doesNotMatch(MARKS_SRC, MARK_LITERAL_RE);
+	assert.doesNotMatch(MARKS_SRC, CLOCK_PARSE_RE);
+	assert.doesNotMatch(MARKS_SRC, /PanelFrame/);
+});
+
+test('useChangeMarks.ts logs only error names', () => {
+	const consoleLines = MARKS_SRC.split('\n').filter((line) => line.includes('console.'));
+	assert.ok(consoleLines.length >= 1, 'expected the diff-failure log line');
+	for (const line of consoleLines) assert.ok(line.includes('.name'), `a console line logs more than a name: ${line.trim()}`);
+});
+
+// --- mark CSS -------------------------------------------------------------------------------
+
+/** @param {string} css @returns {{ outside: string, media: string[] }} */
+function splitMotionMedia(css) {
+	const blocks = cssBlocks(css);
+	const media = blocks.filter((b) => /^@media\s*\(prefers-reduced-motion:\s*no-preference\)$/.test(b.prelude)).map((b) => b.body);
+	const outside = blocks
+		.filter((b) => !/^@media\s*\(prefers-reduced-motion:\s*no-preference\)$/.test(b.prelude))
+		.map((b) => `${b.prelude} {${b.body}}`)
+		.join('\n');
+	return { outside, media };
+}
+
+/** @param {string} css @returns {string[]} problems with the mark's motion rules */
+function markMotionProblems(css) {
+	/** @type {string[]} */
+	const problems = [];
+	const { outside, media } = splitMotionMedia(css);
+	if (/change-mark--fading/.test(outside)) problems.push('fading rule outside the motion media block');
+	for (const body of topLevelRules(outside, '.change-mark')) {
+		if (/transition/.test(body)) problems.push('transition on .change-mark at top level');
+	}
+	return problems;
+}
+
+test('positive control: the motion checker flags a fading rule outside the media block and a top-level transition', () => {
+	assert.deepEqual(markMotionProblems('.change-mark { color: red; }\n.change-mark--fading { background-color: transparent; }'), [
+		'fading rule outside the motion media block',
+	]);
+	assert.deepEqual(markMotionProblems('.change-mark { transition: background-color 1ms; }'), ['transition on .change-mark at top level']);
+	assert.deepEqual(markMotionProblems('.change-mark { color: red; }\n@media (prefers-reduced-motion: no-preference) { .change-mark.change-mark--fading { transition: x; } }'), []);
+});
+
+test('panels.css: the mark is the inset bar plus the 15% primary tint, with no transition outside the motion block', () => {
+	const bodies = topLevelRules(PANELS_CSS, '.change-mark');
+	assert.equal(bodies.length, 1, 'expected exactly one top-level .change-mark rule');
+	assert.match(bodies[0], /box-shadow:\s*inset 2px 0 0 var\(--primary\)/);
+	assert.ok(bodies[0].includes('background-color: color-mix(in srgb, var(--primary) 15%, transparent)'));
+	assert.doesNotMatch(bodies[0], /transition/);
+	assert.deepEqual(markMotionProblems(PANELS_CSS), []);
+});
+
+test('panels.css: the fade lives only in the no-preference motion block and uses the shared fade duration', () => {
+	const { media } = splitMotionMedia(PANELS_CSS);
+	const fadingBodies = media.flatMap((body) => cssBlocks(body).filter((b) => b.prelude.includes('change-mark--fading')).map((b) => b.body));
+	assert.equal(fadingBodies.length, 1, 'expected one fading rule inside the motion media block');
+	assert.ok(fadingBodies[0].includes(`transition: background-color ${changeMarks.MARK_FADE_MS}ms`), 'the fade duration must come from MARK_FADE_MS');
+	assert.match(fadingBodies[0], /background-color:\s*transparent/);
+});
+
+test('panels.css: the hidden word and live region are visually hidden but readable', () => {
+	const bodies = topLevelRules(PANELS_CSS, '.change-mark__word,\n.change-mark-live-region');
+	assert.equal(bodies.length, 1, 'expected one shared visually-hidden rule');
+	for (const decl of ['position: absolute', 'clip-path: inset(50%)', 'width: 1px', 'height: 1px', 'overflow: hidden']) {
+		assert.ok(bodies[0].includes(decl), `visually-hidden rule is missing ${decl}`);
+	}
+});
+
+test('panels.css: no hex colour literal and no border-left bar', () => {
+	assert.doesNotMatch(PANELS_CSS, /#[0-9a-fA-F]{3,8}\b/);
+	assert.doesNotMatch(PANELS_CSS, /border-left/);
 });
