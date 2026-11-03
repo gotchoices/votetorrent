@@ -41,8 +41,10 @@
  * invitation key, row value or database text. The signer is injected by the caller: nothing here
  * creates, rotates or looks up a key.
  */
+import type { PairingRevocationSigner } from '@votetorrent/vote-engine/rn';
 import {
 	markPairedBrowserRemovalDone,
+	markPairedBrowserRevoked,
 	pairedBrowserRemoval,
 	readPairedBrowsers,
 	type PairedBrowserEntry,
@@ -80,6 +82,32 @@ export class PairedBrowsersNetworkUnavailableError extends Error {
 	constructor() {
 		super('paired browsers: the network membership could not be read');
 		this.name = 'PairedBrowsersNetworkUnavailableError';
+	}
+}
+
+export type PairedBrowserRemoveReason =
+	| 'signer-mismatch'
+	| 'key-not-current'
+	| 'refused'
+	| 'not-saved'
+	| 'unknown-entry'
+	| 'wrong-network';
+
+const REMOVE_MESSAGES: Record<PairedBrowserRemoveReason, string> = {
+	'signer-mismatch': 'paired browsers: the signer is not the officer who paired this browser',
+	'key-not-current': 'paired browsers: the signing key is not a current key of the officer',
+	refused: 'paired browsers: the network refused the revocation',
+	'not-saved': 'paired browsers: the revocation could not be saved',
+	'unknown-entry': 'paired browsers: no such pairing on this phone',
+	'wrong-network': 'paired browsers: the pairing belongs to another network',
+};
+
+export class PairedBrowserRemoveError extends Error {
+	readonly reason: PairedBrowserRemoveReason;
+	constructor(reason: PairedBrowserRemoveReason) {
+		super(REMOVE_MESSAGES[reason]);
+		this.name = 'PairedBrowserRemoveError';
+		this.reason = reason;
 	}
 }
 
@@ -198,4 +226,144 @@ export async function listPairedBrowsers(
 		}
 	}
 	return rows.sort((a, b) => b.mintedAt - a.mintedAt);
+}
+
+type VoteEngineRn = typeof import('@votetorrent/vote-engine/rn');
+type RevokeFn = VoteEngineRn['revokeDashboardPairing'];
+type RevokeContext = Parameters<RevokeFn>[0];
+
+/** Required lazily: screens import this module and several screen suites stub vote-core. */
+function voteEngine(): VoteEngineRn {
+	// eslint-disable-next-line @typescript-eslint/no-var-requires
+	return require('@votetorrent/vote-engine/rn') as VoteEngineRn;
+}
+
+export interface RemovePairedBrowserStore {
+	read(filter?: { networkHash?: string; userId?: string }): Promise<PairedBrowserEntry[]>;
+	markRevoked(nonce: string, revokedAt: number): Promise<unknown>;
+	markDone(nonce: string): Promise<unknown>;
+}
+
+export interface RemovePairedBrowserDeps {
+	revoke?: (ctx: { db: unknown }, args: { userId: string; nonce: string; signer: PairingRevocationSigner }) => Promise<void>;
+	nowMs?: () => number;
+	store?: RemovePairedBrowserStore;
+}
+
+const DEFAULT_REMOVE_STORE: RemovePairedBrowserStore = {
+	read: (filter) => readPairedBrowsers(filter),
+	markRevoked: (nonce, revokedAt) => markPairedBrowserRevoked(nonce, revokedAt),
+	markDone: (nonce) => markPairedBrowserRemovalDone(nonce),
+};
+
+/** The real revocation insert: vote-engine's `revokeDashboardPairing` with `{ db }` as the engine context. */
+async function revokeWithVoteEngine(
+	ctx: { db: unknown },
+	args: { userId: string; nonce: string; signer: PairingRevocationSigner },
+): Promise<void> {
+	await voteEngine().revokeDashboardPairing(ctx as RevokeContext, args);
+}
+
+const REVOCATION_REASONS = new Set<PairedBrowserRemoveReason>(['signer-mismatch', 'key-not-current', 'refused']);
+
+// In-flight removals by nonce (memory only, never logged).
+const inFlight = new Map<string, Promise<'removed' | 'removal-pending'>>();
+
+/** Test-only: forget in-flight removals. Never called from app code. */
+export function __resetPairedBrowsersStateForTests(): void {
+	inFlight.clear();
+}
+
+function mapRevokeError(err: unknown): unknown {
+	const e = err as { name?: unknown; reason?: unknown; code?: unknown } | null;
+	if (e && e.name === 'PairingRevocationError') {
+		const reason = e.reason as PairedBrowserRemoveReason;
+		return new PairedBrowserRemoveError(REVOCATION_REASONS.has(reason) ? reason : 'not-saved');
+	}
+	// A signer error (cancel, lockout, no key, prompt busy, invalidated key) reaches the screen's handler unchanged.
+	if (e && typeof e.code === 'string') return err;
+	return new PairedBrowserRemoveError('not-saved');
+}
+
+async function removeOnce(args: {
+	node: PairedBrowsersNode;
+	db: unknown;
+	signer: PairingRevocationSigner;
+	nonce: string;
+	networkHash?: string;
+	deps: RemovePairedBrowserDeps;
+}): Promise<'removed' | 'removal-pending'> {
+	const store = args.deps.store ?? DEFAULT_REMOVE_STORE;
+	const nowMs = args.deps.nowMs ?? Date.now;
+
+	// Checks before any prompt; the store is the source of truth.
+	const entry = (await store.read()).find((e) => e.nonce === args.nonce);
+	if (!entry) throw new PairedBrowserRemoveError('unknown-entry');
+	if (args.networkHash !== undefined && args.networkHash !== entry.networkHash) {
+		throw new PairedBrowserRemoveError('wrong-network');
+	}
+	if (args.signer.userId !== entry.userId) throw new PairedBrowserRemoveError('signer-mismatch');
+	if (pairedBrowserRemoval(entry) === 'done') return 'removed';
+
+	// The only signing step. An existing row returns without signing, so a re-run raises no prompt.
+	const revoke = args.deps.revoke ?? revokeWithVoteEngine;
+	try {
+		await revoke({ db: args.db }, { userId: entry.userId, nonce: entry.nonce, signer: args.signer });
+	} catch (err) {
+		throw mapRevokeError(err);
+	}
+
+	// The row stands; a store failure here propagates, and a re-run will not prompt for it again.
+	await store.markRevoked(entry.nonce, nowMs());
+
+	// Quick finish check, never failing: the machine may already be gone.
+	try {
+		const membership = await readMembership(args.node);
+		const usagePeerId = membership.usage.get(entry.inviteKey);
+		if (usagePeerId !== undefined && !membership.machines.has(usagePeerId)) {
+			try {
+				await store.markDone(entry.nonce);
+			} catch {
+				// The next list read derives `removed` and marks it again.
+			}
+			return 'removed';
+		}
+	} catch {
+		// Unknown for now: the row stands, the list re-derives later.
+	}
+	return 'removal-pending';
+}
+
+/**
+ * Remove one paired browser: ONE signed revocation insert (one biometric prompt on a first Remove,
+ * none on a re-run), then the local entry is marked revoked with removal pending. Resolves
+ * `'removed'` when the browser's machine is already gone from the cadre, else `'removal-pending'`.
+ * Rejects only before or during the revocation insert (`PairedBrowserRemoveError`, or a signer
+ * error carrying a string `code`, passed through unchanged) or with `PairedBrowsersUnreadableError`
+ * from the local store. Concurrent calls for one nonce share one execution. Sends nothing over the
+ * wire.
+ */
+export function removePairedBrowser(args: {
+	node: PairedBrowsersNode;
+	db: unknown;
+	signer: PairingRevocationSigner;
+	entry: Pick<PairedBrowserEntry, 'nonce'>;
+	networkHash?: string;
+	deps?: RemovePairedBrowserDeps;
+}): Promise<'removed' | 'removal-pending'> {
+	const nonce = args.entry.nonce;
+	const existing = inFlight.get(nonce);
+	if (existing) return existing;
+	const run = removeOnce({
+		node: args.node,
+		db: args.db,
+		signer: args.signer,
+		nonce,
+		networkHash: args.networkHash,
+		deps: args.deps ?? {},
+	}).finally(() => {
+		inFlight.delete(nonce);
+	});
+	inFlight.set(nonce, run);
+	return run;
 }
