@@ -455,12 +455,13 @@ test('positive control: the section split is non-vacuous (5 > 2), and a syntheti
 	);
 });
 
-// --- ElectionsPanel reads the instant from its own props, never a hook -----
+// --- ElectionsPanel compares the pill against a coarse clock -----------------
 
-test('ElectionsPanel.tsx references snapshotInstant and contains no useContext/useSnapshotInstant/phase selector', () => {
+test('ElectionsPanel.tsx reads the clock through useNow and no longer reads snapshotInstant', () => {
 	const source = STRIPPED['ElectionsPanel.tsx'];
-	assert.match(source, /snapshotInstant/);
-	assert.doesNotMatch(source, /useContext|useSnapshotInstant/);
+	assert.match(source, /const nowMs = useNow\(\)/);
+	assert.match(source, /toCanonicalDatetime\(nowMs\)/);
+	assert.doesNotMatch(source, /snapshotInstant|resolveComparisonInstant|useContext|useSnapshotInstant/);
 	assert.doesNotMatch(source, /setPhase|PHASES\b|data-phase/);
 });
 
@@ -643,3 +644,205 @@ test('BallotsQuestionsPanel imports readBallots and readQuestions, and selectAct
 // LifecyclePill's own null-phase-guard assertion moved to
 // packages/ui-web/test/shared-components.test.mjs in 53-05, alongside the
 // component itself.
+
+// --- Live panels ---------------------------------------------------------------
+//
+// The panels re-read when the replicated data version moves, keep their rows
+// on screen while they re-read, mark changed rows and figures through one
+// change-mark hook each, show the text-only action note beside items an
+// officer decides in the Authority app, and make no visibility decision of
+// their own. Every matcher below is first proven able to fire on a synthetic
+// fixture. Banned tokens are assembled from fragments so this file never
+// trips a scan of its own text.
+
+const LIVE_FILES = ['ElectionsPanel.tsx', 'BallotsQuestionsPanel.tsx'];
+
+/** @type {Record<string, string>} */
+const LIVE_RAW = {};
+/** @type {Record<string, string>} */
+const LIVE_STRIPPED = {};
+for (const file of LIVE_FILES) {
+	LIVE_RAW[file] = readFileSync(path.join(PANELS_DIR, file), 'utf8');
+	LIVE_STRIPPED[file] = stripComments(LIVE_RAW[file]);
+}
+
+const VERSION_HOOK_RE = /const \{ version \} = useDataVersion\(\)/;
+const VERSION_DEPS_RE = /\}, \[db, version\]\);/;
+
+test('live: every live panel reads the data version and lists it in its read effect dependencies', () => {
+	for (const file of LIVE_FILES) {
+		assert.match(LIVE_STRIPPED[file], VERSION_HOOK_RE, `${file} does not read the data version`);
+		assert.match(LIVE_STRIPPED[file], VERSION_DEPS_RE, `${file}'s read effect does not depend on [db, version]`);
+	}
+});
+
+test('positive control: the deps matcher misses an effect that depends on [db] alone', () => {
+	assert.doesNotMatch('\t}, [db]);', VERSION_DEPS_RE);
+	assert.match('\t}, [db, version]);', VERSION_DEPS_RE);
+});
+
+const LOADING_RESET_RE = /setState\(\{ (loading: true|status: 'loading')/;
+
+/**
+ * Lines that reset a panel to its loading state without the db-change guard.
+ * @param {string} source @returns {string[]}
+ */
+function unguardedLoadingResets(source) {
+	return source
+		.split('\n')
+		.filter((line) => LOADING_RESET_RE.test(line))
+		.filter((line) => !line.trimStart().startsWith('if (dbChanged) '));
+}
+
+test('live: a re-read keeps the rows on screen -- a loading reset happens only when the db handle changed', () => {
+	for (const file of LIVE_FILES) {
+		const source = LIVE_STRIPPED[file];
+		assert.ok(LOADING_RESET_RE.test(source), `${file}: no loading reset found, so the guard check would be vacuous`);
+		assert.deepEqual(unguardedLoadingResets(source), [], `${file} resets to loading on every re-read`);
+		assert.match(source, /readDbRef/, `${file} does not track which db handle it last read`);
+	}
+});
+
+test('positive control: an unguarded loading reset is flagged by the same helper', () => {
+	const fixture = '\t\tsetState({ loading: true, data: null });\n\t\tif (dbChanged) setState({ status: \'loading\' });';
+	assert.deepEqual(unguardedLoadingResets(fixture), ['\t\tsetState({ loading: true, data: null });']);
+});
+
+const MARK_HOOK_CALL = 'useChangeMarks(markRows, markKey, markSig)';
+const MARK_ROWS_NULL_RE = /const markRows = useMemo\(\(\) => \([^;]*(\? null :|: null\))/;
+
+test('live: one change-mark hook per panel, fed null (never an empty list) while not loaded', () => {
+	for (const file of LIVE_FILES) {
+		const source = LIVE_STRIPPED[file];
+		assert.equal(source.split(MARK_HOOK_CALL).length - 1, 1, `${file} must call ${MARK_HOOK_CALL} exactly once`);
+		assert.equal((source.match(/useChangeMarks\(/g) ?? []).length, 1, `${file} must hold exactly one change-mark hook`);
+		assert.match(source, MARK_ROWS_NULL_RE, `${file}'s markRows is not null while loading`);
+	}
+});
+
+test('positive control: the null-while-loading matcher misses a memo that yields an empty list while loading', () => {
+	assert.doesNotMatch('const markRows = useMemo(() => (state.loading ? [] : rows), [state]);', MARK_ROWS_NULL_RE);
+	assert.match('const markRows = useMemo(() => (state.loading ? null : rows), [state]);', MARK_ROWS_NULL_RE);
+});
+
+const CHROME_OWNED_RE = /headerMarked|announce|PanelMarkContext|MarkAnnouncerContext|useMarkLifetime/;
+const CHROME_MODULE = 'Panel' + 'Frame';
+
+test('live: marks are applied on elements, and the header mark and announcement stay with the chrome and grid', () => {
+	for (const file of LIVE_FILES) {
+		const source = LIVE_STRIPPED[file];
+		assert.ok(source.includes('marks.markClass('), `${file} applies no mark class`);
+		assert.ok(source.includes('<ChangeMarkWord />'), `${file} renders no hidden "updated" word`);
+		assert.doesNotMatch(source, CHROME_OWNED_RE, `${file} renders something the chrome or grid owns`);
+		assert.ok(!LIVE_RAW[file].includes(CHROME_MODULE), `${file} names the chrome module, comments included`);
+	}
+});
+
+test('positive control: the chrome-owned matcher fires on a panel rendering the announcement', () => {
+	assert.match('<p>{marks.announce}</p>', CHROME_OWNED_RE);
+	assert.ok(`import X from './${CHROME_MODULE}.js';`.includes(CHROME_MODULE));
+});
+
+const SELF_GATING_RE = /auth\/gate\.js|evaluate\(|grantedScopes|useEffectiveScopes/;
+
+test('live: no panel makes a visibility decision of its own', () => {
+	for (const file of LIVE_FILES) {
+		assert.doesNotMatch(LIVE_STRIPPED[file], SELF_GATING_RE, `${file} gates itself`);
+	}
+});
+
+test('positive control: the self-gating matcher fires on a gate import', () => {
+	assert.match(`import { evaluate } from '../../auth/gate.js';`, SELF_GATING_RE);
+});
+
+const STALE_WORD_RE = new RegExp('snap' + 'shot', 'i');
+
+test('live: no live panel names the retired frozen-instant wording, comments included', () => {
+	for (const file of LIVE_FILES) {
+		assert.doesNotMatch(LIVE_RAW[file], STALE_WORD_RE, `${file} still names the retired wording`);
+	}
+});
+
+test('positive control: the stale-wording matcher fires on the retired prop name', () => {
+	assert.match(`'${'snap' + 'shot'}Instant'`, STALE_WORD_RE);
+});
+
+const AFFORDANCE_EXTRA_RE = /cursor|role=|tabIndex/;
+
+test('live: no live panel holds a control, a cursor, a role or a tab stop', () => {
+	for (const file of LIVE_FILES) {
+		assert.doesNotMatch(LIVE_STRIPPED[file], CONTROL_RE, `${file} contains a control affordance`);
+		assert.doesNotMatch(LIVE_STRIPPED[file], AFFORDANCE_EXTRA_RE, `${file} makes something look interactive`);
+	}
+});
+
+test('positive control: the affordance matcher fires on a tab stop', () => {
+	assert.match('<span tabIndex={0}>x</span>', AFFORDANCE_EXTRA_RE);
+});
+
+const NOTE_IDENT = 'Read' + 'OnlyNote';
+const NOTE_IMPORT_LINE = `import { ${NOTE_IDENT} } from '../../live/${NOTE_IDENT}.js';`;
+const NOTE_ALIAS_RE = new RegExp(`${NOTE_IDENT} as `);
+
+/**
+ * How many lines of `source` equal the exact single-name note import.
+ * @param {string} source @returns {number}
+ */
+function exactNoteImportLines(source) {
+	return source.split('\n').filter((line) => line.trim() === NOTE_IMPORT_LINE).length;
+}
+
+test('live: Ballots/Questions imports the action note alone on its own line and shows the short note beside the pending figure', () => {
+	const raw = LIVE_RAW['BallotsQuestionsPanel.tsx'];
+	assert.equal(exactNoteImportLines(raw), 1, 'expected exactly one exact note import line');
+	assert.match(raw, new RegExp(`<${NOTE_IDENT} variant="short" \\/>`));
+	assert.doesNotMatch(raw, NOTE_ALIAS_RE, 'the note must not be imported under an alias');
+	assert.match(LIVE_STRIPPED['BallotsQuestionsPanel.tsx'], new RegExp(`pendingSigningTasks > 0 \\? <${NOTE_IDENT} variant="short" \\/> : null`));
+});
+
+test('positive control: an aliased note import is flagged and is not an exact import line', () => {
+	const fixture = `import { ${NOTE_IDENT} as Note } from '../../live/${NOTE_IDENT}.js';`;
+	assert.match(fixture, NOTE_ALIAS_RE);
+	assert.equal(exactNoteImportLines(fixture), 0);
+});
+
+const CONSOLE_SHAPE_RE = /console\.error\([^)]*\)\?\.name \?\? 'Error'\)/;
+
+test('live: each live panel has exactly one console.error, and it logs the error class only', () => {
+	for (const file of LIVE_FILES) {
+		const source = LIVE_STRIPPED[file];
+		assert.equal(source.split('console.error(').length - 1, 1, `${file} must hold exactly one console.error`);
+		assert.match(source, CONSOLE_SHAPE_RE, `${file} logs more than the error class`);
+	}
+});
+
+test('positive control: the console-shape matcher misses a message log', () => {
+	assert.doesNotMatch("console.error('X: a read failed:', err.message);", CONSOLE_SHAPE_RE);
+});
+
+test('live: data pills inside panel rows keep the default cursor', () => {
+	const css = stripComments(readFileSync(path.join(PANELS_DIR, 'election-ops.css'), 'utf8'));
+	const block = css.match(/\.eo-row \.pill\s*\{([^}]*)\}/);
+	assert.ok(block, 'election-ops.css declares no .eo-row .pill rule');
+	assert.match(block[1], /cursor:\s*default/);
+	assert.doesNotMatch(css, /cursor:\s*pointer/);
+});
+
+/** Each live panel's officer named imports, pinned: a new table read must be a deliberate edit here. @type {Record<string, string[]>} */
+const PINNED_OFFICER_IMPORTS = {
+	'ElectionsPanel.tsx': ['countElections', 'readElectionOverview', 'readElectionPolicies', 'selectActiveElection'],
+	'BallotsQuestionsPanel.tsx': [
+		'countBallotSigningTasks',
+		'parseOptionRange',
+		'readBallots',
+		'readQuestions',
+		'selectActiveElection',
+	],
+};
+
+test('live: no live panel reads a table it did not read before (officer imports pinned)', () => {
+	for (const file of LIVE_FILES) {
+		assert.ok(file in PINNED_OFFICER_IMPORTS, `${file} has no pinned import list`);
+		assert.deepEqual([...officerNamedImports(LIVE_STRIPPED[file])].sort(), PINNED_OFFICER_IMPORTS[file], `${file}'s officer imports changed`);
+	}
+});
