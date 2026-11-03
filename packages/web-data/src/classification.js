@@ -137,6 +137,10 @@ export const CLASSIFICATION = {
 	InviteCancellation: [CLASS.NEVER, 'Invite lifecycle detail', []],
 	Onboarding:         [CLASS.NEVER, 'Internal onboarding state', []],
 
+	// ── Officer-only rows added after the first classification pass.
+	DashboardPairingRevocation:[CLASS.NEVER, 'An officer-signed revocation of one dashboard browser pairing (a user id and a pairing nonce). Pairing machinery that only the officer dashboard reads, to unpair itself; nothing an anonymous reader needs, and never shown on the Public page', []],
+	ElectionTally:      [CLASS.NEVER, 'The officer-published tally row (the tally tree JSON, the publisher user id and key). It landed unclassified, so this is an INTERIM NEVER: no public or officer reader names it yet. The phase that shows results on the Public page reclassifies it deliberately and re-pins the counts', []],
+
 	// ── DRAFT: unsigned proposals. All ten stay DRAFT, and DRAFT is forbidden:
 	// rendering a draft as if it were the election is this page's worst outcome.
 	ProposedNetwork:    [CLASS.DRAFT, 'Unsigned proposal', []],
