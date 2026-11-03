@@ -5896,7 +5896,7 @@ __metadata:
 
 "@serfab/cadre-core@patch:@serfab/cadre-core@npm%3A1.20.0#~/.yarn/patches/@serfab-cadre-core-npm-1.20.0-votetorrent.patch":
   version: 1.20.0
-  resolution: "@serfab/cadre-core@patch:@serfab/cadre-core@npm%3A1.20.0#~/.yarn/patches/@serfab-cadre-core-npm-1.20.0-votetorrent.patch::version=1.20.0&hash=8e0476"
+  resolution: "@serfab/cadre-core@patch:@serfab/cadre-core@npm%3A1.20.0#~/.yarn/patches/@serfab-cadre-core-npm-1.20.0-votetorrent.patch::version=1.20.0&hash=9a1bfa"
   dependencies:
     "@libp2p/circuit-relay-v2": "npm:^4.2.13"
     "@libp2p/crypto": "npm:^5.1.23"
@@ -5917,7 +5917,7 @@ __metadata:
     debug: "npm:^4.4.3"
     libp2p: "npm:^3.3.11"
     uint8arrays: "npm:^6.1.1"
-  checksum: 10c0/ff3a3293b582188eca0af5dad0ee6b1b911a485bb00036d0e9caaa8dd0786e1071e06a9068e46fb6c6c8cb55e798a7aea0e47d12ebedb3941cc33260d1c825f6
+  checksum: 10c0/118002bd2f9ddf3db51df4b9c956a61d78cf745078882acfadd898e5531348b2f4e4b6498a4d9516b5511508c291a2c5a6a8b3ddbf932e93c2995aa45879e6fa
   languageName: node
   linkType: hard
 
@@ -22468,13 +22468,20 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "votetorrent-dashboard@workspace:apps/VoteTorrentDashboard"
   dependencies:
+    "@libp2p/crypto": "npm:5.1.23"
+    "@libp2p/websockets": "npm:10.1.25"
     "@noble/ciphers": "npm:^2"
     "@noble/hashes": "npm:^2"
+    "@optimystic/db-core": "npm:^1.24.0"
+    "@optimystic/db-p2p": "npm:^1.24.0"
+    "@optimystic/db-p2p-storage-web": "npm:^1.24.0"
     "@optimystic/quereus-plugin-crypto": "npm:^1.24.0"
     "@quereus/isolation": "npm:4.24.0"
     "@quereus/plugin-indexeddb": "npm:4.24.0"
     "@quereus/quereus": "patch:@quereus/quereus@npm%3A4.24.0#~/.yarn/patches/@quereus-quereus-npm-4.24.0-votetorrent.patch"
     "@quereus/store": "npm:4.24.0"
+    "@serfab/cadre-core": "patch:@serfab/cadre-core@npm%3A1.20.0#~/.yarn/patches/@serfab-cadre-core-npm-1.20.0-votetorrent.patch"
+    "@serfab/quereus-plugin-sereus": "npm:^1.20.0"
     "@types/node": "npm:^22.10.2"
     "@types/react": "npm:19.2.17"
     "@types/react-dom": "npm:^19.0.0"
@@ -22483,6 +22490,7 @@ __metadata:
     "@votetorrent/vote-engine": "workspace:*"
     "@votetorrent/web-data": "workspace:*"
     fake-indexeddb: "npm:^6.2.5"
+    jsqr: "npm:1.4.0"
     playwright: "npm:^1.62.1"
     react: "npm:19.0.0"
     react-dom: "npm:19.0.0"

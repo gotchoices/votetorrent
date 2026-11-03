@@ -538,3 +538,72 @@ index 0000000..d7a9d7c
 +    }
 +    return verdict;
 +}
+diff --git a/dist/strand-reactivity.d.ts b/dist/strand-reactivity.d.ts
+index 867a40f..dbed60b 100644
+--- a/dist/strand-reactivity.d.ts
++++ b/dist/strand-reactivity.d.ts
+@@ -1,3 +1,4 @@
++import type { NodeProfile } from '@optimystic/db-core';
+ /**
+  * Which strand nodes are built with Optimystic's change-notification substrate
+  * (`NodeOptions.cohortTopic` in `@optimystic/db-p2p`): a node built with it announces every
+@@ -15,6 +16,12 @@ export interface StrandReactivityConfig {
+     enabled: boolean;
+     /** Strands to enable it for, by exact strand id. Absent or empty: every strand this node runs. */
+     strandIds?: string[];
++    /**
++     * VoteTorrent patch (edge-host): `true` builds the strand node's cohort-topic host as an edge
++     * host with no willing tier (it subscribes, never forwards) and `minSigs` 1. Absent or anything
++     * but `true`: unchanged. Phones never set it.
++     */
++    edgeHost?: boolean;
+ }
+ /**
+  * The `createLibp2pNode` options slice for one strand: `{ cohortTopic: { enabled: true } }` when
+@@ -37,5 +44,9 @@ export interface StrandReactivityConfig {
+ export declare function strandCohortTopicOption(config: StrandReactivityConfig | undefined, strandId: string): {
+     cohortTopic?: {
+         enabled: true;
++        host?: {
++            profile: NodeProfile;
++            minSigs: number;
++        };
+     };
+ };
+diff --git a/dist/strand-reactivity.js b/dist/strand-reactivity.js
+index e7ce8f0..4b93ea9 100644
+--- a/dist/strand-reactivity.js
++++ b/dist/strand-reactivity.js
+@@ -1,3 +1,4 @@
++import { edgeProfile } from '@optimystic/db-core';
+ /**
+  * Which strand nodes are built with Optimystic's change-notification substrate
+  * (`NodeOptions.cohortTopic` in `@optimystic/db-p2p`): a node built with it announces every
+@@ -27,10 +28,24 @@
+  * forwarding load shows up, pass `host: { profile: edgeProfile() }` for transaction nodes, after
+  * confirming an edge host still serves its part of a tail block's root group.
+  */
++/**
++ * VoteTorrent patch (edge-host): opt-in `strandReactivity.edgeHost`. A browser member device (the
++ * officer's web dashboard) sets `edgeHost: true` so its strand node subscribes to change
++ * notifications WITHOUT forwarding them for other subscribers: its cohort-topic host is built with
++ * `edgeProfile({ willingTiers: [] })` (no willing tier) instead of db-p2p's core default. `minSigs`
++ * matches the origin cohort's threshold, as the VoteTorrent Public page's `PUBLIC_COHORT_MIN_SIGS`
++ * does (the 56-17 posture: the serving cohort is a single strand node, so db-p2p's default of 14 is
++ * unsatisfiable). Only the boolean `true` turns it on; any other value, or no `edgeHost` key,
++ * returns exactly the unpatched result. The phones never set it.
++ */
++const VOTETORRENT_EDGE_HOST_MIN_SIGS = 1;
+ export function strandCohortTopicOption(config, strandId) {
+-    return config?.enabled === true && strandSelected(config.strandIds, strandId)
+-        ? { cohortTopic: { enabled: true } }
+-        : {};
++    if (!(config?.enabled === true && strandSelected(config.strandIds, strandId))) {
++        return {};
++    }
++    return config.edgeHost === true
++        ? { cohortTopic: { enabled: true, host: { profile: edgeProfile({ willingTiers: [] }), minSigs: VOTETORRENT_EDGE_HOST_MIN_SIGS } } }
++        : { cohortTopic: { enabled: true } };
+ }
+ function strandSelected(strandIds, strandId) {
+     if (strandIds === undefined) {

@@ -135,6 +135,12 @@ export { PAIRING_DIGEST_TAG, PAIRING_REMOVE_DIGEST_TAG, verifyPairingStatement }
 export type { VerifiablePairingStatement, PairingVerifyFailure, PairingVerifyResult } from './pairing/pairing-statement.js'
 // The revocation row check: a paired browser unpairs itself once its pairing is revoked (66-14, 66-19).
 export { PAIRING_REVOKE_DIGEST_TAG, isPairingRevoked } from './pairing/pairing-revocation.js'
+// The founding rows a paired browser re-derives the founding digest from (66-14 pairing flow and
+// founding check): two read-only point-lookup names and the pure descriptor derivation. Guard G-5
+// (test/founding-bundle-guards.spec.ts, amended with the user's approval) allows exactly these two
+// lines; the replay WRITE path stays barred from every barrel.
+export { readGenesisRows, FOUNDING_BUNDLE_TABLE_ORDER } from './networks/genesis-rows.js'
+export { deriveFoundingDescriptor } from './networks/founding-bundle.js'
 
 // -----------------------------------------------------------------------
 // DELIBERATELY NOT EXPORTED (enforced by test/browser-entry-purity.spec.ts)
@@ -161,6 +167,5 @@ export { PAIRING_REVOKE_DIGEST_TAG, isPairingRevoked } from './pairing/pairing-r
 // - revokeDashboardPairing, PairingRevocationError, PairingRevocationSigner and the digest builders
 //   (pairingStatementDigest, pairingRemoveDigest, pairingRevokeDigest), plus verifyPairingRemove and
 //   isCurrentPairingOfficer — signing and owner-side paths; the browser holds no officer key (D-04).
-// - The founding-row reader, its table order and the founding descriptor derivation — guard G-5 in
-//   test/founding-bundle-guards.spec.ts keeps every barrel, this one included, off the genesis-row
-//   and founding-bundle modules. Exporting them needs a narrow, user-approved change to that guard.
+// - The genesis-row REPLAY (the write path) and every other founding-bundle function — guard G-5 allows
+//   this file exactly the two read-only founding lines above, nothing more.
