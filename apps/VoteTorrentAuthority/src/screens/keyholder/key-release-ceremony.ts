@@ -10,8 +10,9 @@
  *     KEYHOLDER's own identity key. The signer ALWAYS accompanies the completion call: a call with
  *     no signer is refused by the engine (`signer-required`), and this ceremony never uses the
  *     officer's device key.
- *  3. Prompt budget: a first release performs exactly two auth-required vault unwraps (the share,
- *     then the signing key), both under the keyholder wrap key. A repeat on an already-released
+ *  3. Prompt budget: a first release performs two auth-required vault reads (the share, then the
+ *     signing key) inside ONE keyholder session (`withKeyholderSession`): one prompt on the seat
+ *     vault (`keyholder-seat-vault.ts`), two on a plain per-alias vault. A repeat on an already-released
  *     task performs zero; a device that does not hold the task's keyholder identity performs zero
  *     and writes nothing, because the identity lookup runs before the engine or the vault is touched.
  *  4. This module never reconstructs a key (D-16): it only publishes one share.
@@ -24,6 +25,7 @@ import type { IKeysTasksEngine, ReleaseKeyTask } from '@votetorrent/vote-core';
 import type { IKeyVault } from '@votetorrent/vote-engine/rn';
 import type { KeyVaultStorage } from '../../engines/key-vault';
 import { createKeyholderSigner, getKeyholderIdentity } from '../../engines/keyholder-identity';
+import { withKeyholderSession } from '../../engines/keyholder-seat-vault';
 
 export interface KeyReleaseCeremonyDeps {
 	getEngine: <T>(engineName: string) => Promise<T>;
@@ -49,7 +51,8 @@ export async function releaseKeyholderShare(deps: KeyReleaseCeremonyDeps, task: 
 			return failed('identity-not-found');
 		}
 		const engine = await deps.getEngine<IKeysTasksEngine>('keysTasksEngine');
-		await engine.completeKeyRelease(task, createKeyholderSigner({ vault: deps.vault }, identity));
+		const signer = createKeyholderSigner({ vault: deps.vault }, identity);
+		await withKeyholderSession(deps.vault, identity.userId, () => engine.completeKeyRelease(task, signer));
 		return { kind: 'released' };
 	} catch (err) {
 		return failed(codeOf(err));

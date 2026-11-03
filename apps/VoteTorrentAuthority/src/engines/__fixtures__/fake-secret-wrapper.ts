@@ -6,7 +6,7 @@
  * `keyholder-dkg-driver.ts` tests all exercise the SAME fake wrap/unwrap behavior.
  */
 
-import type { SecretWrapOptions, SecretWrapper, SecretWrapPrompt, WrappedSecret } from '@votetorrent/attestation-native';
+import type { SealedSecret, SecretSealPrompt, SecretSealer, SecretWrapOptions, SecretWrapper, SecretWrapPrompt, WrappedSecret } from '@votetorrent/attestation-native';
 
 export interface FakeWrapCall {
 	op: 'wrap' | 'unwrap';
@@ -133,6 +133,59 @@ export function createMapStorage(): MapStorage {
 		},
 		values(): string[] {
 			return [...map.values()];
+		},
+	};
+}
+
+export interface FakeSecretSealer extends SecretSealer {
+	/** Seals never prompt; counted only to prove they happened. */
+	readonly sealCalls: number;
+	/** Every unseal is one biometric prompt. */
+	readonly unsealCalls: number;
+}
+
+export interface FakeSecretSealerOptions {
+	/** Every `sealSecret` rejects with this code (e.g. 'SEAL_UNAVAILABLE', 'NATIVE_UNAVAILABLE'). */
+	failSealCode?: string;
+	/** Every `unsealSecret` rejects with this code (e.g. 'CANCELED'). */
+	failUnsealCode?: string;
+}
+
+/**
+ * A fake public-key `SecretSealer`: the ciphertext is an opaque handle into an in-memory Map, the unseal
+ * checks the handle's key alias like a real private-key decrypt would. Jest-only.
+ */
+export function createFakeSecretSealer(options?: FakeSecretSealerOptions): FakeSecretSealer {
+	const store = new Map<string, { bytes: Uint8Array; keyAlias: string }>();
+	let counter = 0;
+	let sealCalls = 0;
+	let unsealCalls = 0;
+	return {
+		get sealCalls() {
+			return sealCalls;
+		},
+		get unsealCalls() {
+			return unsealCalls;
+		},
+		async sealSecret(keyAlias: string, plaintext: Uint8Array): Promise<SealedSecret> {
+			sealCalls++;
+			if (options?.failSealCode !== undefined) {
+				throw Object.assign(new Error('fake seal failed'), { code: options.failSealCode });
+			}
+			const handle = `fake-seal-${counter++}-${'x'.repeat(40)}`;
+			store.set(handle, { bytes: Uint8Array.from(plaintext), keyAlias });
+			return { v: 1, alg: 'RSA-OAEP-SHA256', keyAlias, ciphertextBase64: handle, securityLevel: 'test-stub' };
+		},
+		async unsealSecret(sealed: SealedSecret, _prompt: SecretSealPrompt): Promise<Uint8Array> {
+			unsealCalls++;
+			if (options?.failUnsealCode !== undefined) {
+				throw Object.assign(new Error('fake unseal failed'), { code: options.failUnsealCode });
+			}
+			const entry = store.get(sealed.ciphertextBase64);
+			if (!entry || entry.keyAlias !== sealed.keyAlias) {
+				throw Object.assign(new Error('fake: cannot unseal'), { code: 'UNSEAL_FAILED' });
+			}
+			return Uint8Array.from(entry.bytes);
 		},
 	};
 }

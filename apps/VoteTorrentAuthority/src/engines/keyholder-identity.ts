@@ -12,9 +12,12 @@
  *     keyholder key would therefore silently reuse the OFFICER's device key on iOS, violating D-21.
  *     This is the same pattern 62-08 used for the Voter identity key and 62-02's
  *     `makeKeyholderProvisioning` test fixture. Open question for 62-30/the user.
- *  3. Prompt budget: provisioning performs exactly 2 auth-required vault wraps (signing key,
- *     receiving key) and 0 unwraps. `createKeyholderSigner` performs exactly 1 auth-required
- *     unwrap per signature.
+ *  3. Prompt budget: provisioning performs 2 auth-required vault writes (signing key, receiving
+ *     key) and 0 reads, inside ONE keyholder session (`withKeyholderSession`), so on the seat vault
+ *     (`keyholder-seat-vault.ts`) they cost ONE prompt (the new seat key's wrap); on a plain
+ *     per-alias vault they cost 2. `createKeyholderSigner` reads the signing key once per
+ *     signature: one prompt per signature on its own, none extra inside a session that already
+ *     unlocked the seat.
  *  4. The identity store (`KEYHOLDER_IDENTITY_STORAGE_KEY`) holds PUBLIC material only — userId,
  *     the invite slot Cid, both public keys, the signing key's type and creation time. No private
  *     key byte, in hex, base64 or base64url, is ever written to it.
@@ -35,6 +38,7 @@ import type { IKeyVault, KeyVaultPolicy } from '@votetorrent/vote-engine/rn';
 import type { KeyholderAcceptProvisioning, KeyholderDkgSigner, Signature, UserKey } from '@votetorrent/vote-core';
 import { UserKeyType } from '@votetorrent/vote-core';
 import type { KeyVaultStorage } from './key-vault';
+import { withKeyholderSession } from './keyholder-seat-vault';
 
 /** AsyncStorage key for the public-only identity store (point 4 above). */
 export const KEYHOLDER_IDENTITY_STORAGE_KEY = 'vt.keyholder-identities.v1';
@@ -185,14 +189,17 @@ export async function provisionKeyholderIdentity(
 		await Promise.allSettled(aliases.map((alias) => vault.deleteSecret(alias)));
 	};
 	try {
-		await vault.putSecret(signingAlias, signingPriv, KEYHOLDER_SIGNING_KEY_POLICY);
+		// One session for both writes: one prompt on the seat vault (point 3).
+		await withKeyholderSession(vault, userId, async () => {
+			await vault.putSecret(signingAlias, signingPriv, KEYHOLDER_SIGNING_KEY_POLICY);
 
-		try {
-			await vault.putSecret(receivingAlias, receiving.privateKey, KEYHOLDER_DKG_RECEIVING_KEY_POLICY);
-		} catch (err) {
-			await cleanup([signingAlias]);
-			throw err;
-		}
+			try {
+				await vault.putSecret(receivingAlias, receiving.privateKey, KEYHOLDER_DKG_RECEIVING_KEY_POLICY);
+			} catch (err) {
+				await cleanup([signingAlias]);
+				throw err;
+			}
+		});
 
 		try {
 			await withStoreMutex(storage, async () => {

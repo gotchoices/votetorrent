@@ -16,8 +16,8 @@ import { keyReleaseErrorCopyKey, releaseKeyholderShare } from "./key-release-cer
 /**
  * KeyReleaseScreen — Surface 6 keyholder share release ceremony (D-17, D-20). Reached only from a
  * release-key task in the Tasks inbox, whose tasks exist only once the election has entered the key
- * release period. Pressing the button runs `releaseKeyholderShare` (two biometric prompts the first
- * time, none on a repeat). Success stays on screen with the button disabled, never hidden: a public,
+ * release period. Pressing the button runs `releaseKeyholderShare` (one biometric prompt the first
+ * time for a seat accepted since prompt batching, two for an older seat, none on a repeat). Success stays on screen with the button disabled, never hidden: a public,
  * irreversible release deserves an explicit confirmation, and the header Close returns to the inbox.
  * Every failure shows catalog copy only, never an error message.
  */

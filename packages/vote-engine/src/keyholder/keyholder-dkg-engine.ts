@@ -55,12 +55,16 @@
 // Biometric-prompt budget
 // ---------------------------------------------------------------------------
 //
-// Each round-step action reads the vault AT MOST once (`getSecret` on the
-// round-secret or receiving-key alias) and signs AT MOST once
-// (`signer.sign`) -- `KEYHOLDER_DKG_ROUND_SECRET_POLICY`/
+// Each round-step action makes 1-3 auth-required vault calls and signs
+// exactly once: R0 put + sign, R1 get + sign, R2 get + put + sign, R3 get +
+// sign, R4 get + get + put + sign, publish sign (`KEYHOLDER_DKG_ROUND_SECRET_POLICY`/
 // `KEYHOLDER_DKG_RECEIVING_KEY_POLICY`/`KEYHOLDER_SHARE_POLICY` all require
-// user auth, so a single `advanceDkg` pass never prompts a keyholder more
-// than once per round it actually advances.
+// user auth, and so does the signer's own key). On a vault that prompts per
+// call that is 2-4 prompts per round, 13-14 per 2-of-2 DKG (measured 13 on
+// the Redmi 8, 2026-10-16). This engine does not batch; the Authority app
+// does: it runs each `advanceDkg` call inside one keyholder session
+// (`keyholder-seat-vault.ts`), which costs at most ONE prompt per call.
+// A pass with nothing to do makes no auth-required call at all.
 //
 // ---------------------------------------------------------------------------
 // Two-tier residual (T-62-02-13)

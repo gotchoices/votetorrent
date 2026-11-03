@@ -350,6 +350,37 @@ export interface Spec extends TurboModule {
 	deleteWrapKey(keyAlias: string): Promise<Object>
 
 	/**
+	 * Keyholder prompt batching: seals `plaintextBase64` (1..128 bytes) to the PUBLIC half of a
+	 * hardware key pair under `keyAlias` (`^VOTETORRENT_[A-Z0-9_]+_SEAL_KEY_V[0-9]+$`), creating the
+	 * pair on first use. NEVER prompts: only the public key is used. Android: RSA-2048 AndroidKeyStore
+	 * key (StrongBox, else TEE), RSA-OAEP with SHA-256 and MGF1-SHA-1, alg `RSA-OAEP-SHA256`. iOS:
+	 * Secure Enclave P-256 key, `eciesEncryptionCofactorVariableIVX963SHA256AESGCM`, alg
+	 * `ECIES-P256-SHA256-AESGCM`. The private half is per-use, biometric-only and destroyed by a
+	 * biometric enrolment change on both platforms.
+	 *
+	 * Resolves `{ ciphertextBase64, keyAlias, securityLevel, alg }`. Rejects `INVALID_ARGUMENT`,
+	 * `INVALID_ENCODING`, `SEAL_KEY_POLICY_MISMATCH` (the alias holds a different kind of key; never
+	 * replaced), `SEAL_UNAVAILABLE` (no secure hardware for this key, e.g. the iOS Simulator) or
+	 * `SEAL_FAILED`.
+	 */
+	sealSecret(keyAlias: string, plaintextBase64: string): Promise<Object>
+
+	/**
+	 * The inverse of `sealSecret`: exactly ONE biometric prompt, then decrypts with the private half.
+	 * Never creates a key. Resolves `{ plaintextBase64 }`. Rejects `INVALID_ARGUMENT`,
+	 * `INVALID_ENCODING`, `NO_SEAL_KEY`, `SEAL_KEY_POLICY_MISMATCH`, `KEY_INVALIDATED`,
+	 * `UNSEAL_FAILED`, `NO_ACTIVITY`, or a biometric class (`CANCELED`, `NO_BIOMETRICS_ENROLLED`,
+	 * `LOCKOUT`, `LOCKOUT_PERMANENT`, `BIOMETRIC_ERROR`, iOS also `DEVICE_LOCKED`).
+	 */
+	unsealSecret(
+		keyAlias: string,
+		ciphertextBase64: string,
+		promptTitle: string,
+		promptSubtitle: string,
+		promptNegativeButton: string,
+	): Promise<Object>
+
+	/**
 	 * Phase 63 review CR-01: Android adds (`enabled` true) or clears (`false`) `FLAG_SECURE` on the
 	 * current Activity's window, on the UI thread, so the task-switcher snapshot and screenshots of a
 	 * screen showing decrypted choices are blank. Resolves `{ applied: boolean }`. Rejects

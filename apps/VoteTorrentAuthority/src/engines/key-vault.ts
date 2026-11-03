@@ -76,8 +76,8 @@ function buildAad(alias: string, requireUserAuth: boolean): Uint8Array {
 }
 
 /** Structural mapping only — never `instanceof` (survives Metro module duplication). The message
- * carries only the alias and the native code, never bytes. */
-function mapWrapError(err: unknown, alias: string, phase: 'put' | 'get'): KeyVaultError {
+ * carries only the alias and the native code, never bytes. Also used by `keyholder-seat-vault.ts`. */
+export function mapWrapError(err: unknown, alias: string, phase: 'put' | 'get'): KeyVaultError {
 	const code = (err as { code?: unknown } | undefined)?.code;
 	if (typeof code === 'string') {
 		if (AUTH_DENIED_CODES.has(code)) {

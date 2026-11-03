@@ -1146,6 +1146,140 @@ class AttestationNativeModule: NSObject {
     }
   }
 
+  // MARK: - Keyholder prompt batching: public-key seal (Secure Enclave ECIES)
+  //
+  // `sealSecret` encrypts a small secret to the PUBLIC half of a Secure Enclave P-256 key, so it
+  // never prompts. `unsealSecret` raises exactly one Face ID / Touch ID sheet (from the decrypt call
+  // itself, see the note inside) and decrypts inside the Secure Enclave. The key is
+  // `.privateKeyUsage + .biometryCurrentSet`: a biometric enrolment change destroys it.
+  // Unproven on device; the Simulator has no Secure Enclave and answers SEAL_UNAVAILABLE.
+
+  /// Must equal `SEAL_KEY_ALIAS_PATTERN` in secret-seal.ts and SecretSealHelper.kt.
+  private static let sealKeyAliasPattern = try! NSRegularExpression(pattern: "^VOTETORRENT_[A-Z0-9_]+_SEAL_KEY_V[0-9]+$")
+  /// Must equal `MAX_SEAL_PLAINTEXT_BYTES` in secret-seal.ts and SecretSealHelper.kt.
+  private static let maxSealPlaintextBytes = 128
+  private static let sealAlgorithm: SecKeyAlgorithm = .eciesEncryptionCofactorVariableIVX963SHA256AESGCM
+  private let secretSealQueue = DispatchQueue(label: "org.votetorrent.secretseal")
+
+  private static func sealKeyTag(for alias: String) -> String? {
+    let range = NSRange(alias.startIndex..<alias.endIndex, in: alias)
+    guard sealKeyAliasPattern.firstMatch(in: alias, range: range) != nil else { return nil }
+    return "org.votetorrent.sealkey." + alias
+  }
+
+  /// A key reference never prompts; only using the private key does. `interactionNotAllowed` keeps
+  /// this lookup UI-free.
+  private func lookupSealKey(tag: String) -> SecKey? {
+    let context = LAContext()
+    context.interactionNotAllowed = true
+    return loadKey(tag: tag, context: context)
+  }
+
+  @objc(sealSecret:plaintextBase64:resolver:rejecter:)
+  func sealSecret(_ keyAlias: String,
+                  plaintextBase64: String,
+                  resolver resolve: @escaping RCTPromiseResolveBlock,
+                  rejecter reject: @escaping RCTPromiseRejectBlock) {
+    secretSealQueue.async {
+      guard let tag = Self.sealKeyTag(for: keyAlias) else {
+        reject("INVALID_ARGUMENT", "invalid seal key alias: \(keyAlias)", nil); return
+      }
+      guard var plaintext = Data(base64Encoded: plaintextBase64) else {
+        reject("INVALID_ENCODING", "plaintextBase64 did not decode", nil); return
+      }
+      defer { self.zeroize(&plaintext) }
+      guard plaintext.count >= 1, plaintext.count <= Self.maxSealPlaintextBytes else {
+        reject("INVALID_ARGUMENT", "plaintext must be 1..\(Self.maxSealPlaintextBytes) bytes", nil); return
+      }
+      var key = self.lookupSealKey(tag: tag)
+      if key == nil {
+        do {
+          key = try self.createSecureEnclaveKey(tag: tag, requireBiometry: true)
+        } catch {
+          // No Secure Enclave (the Simulator) or no passcode set: the caller falls back.
+          reject("SEAL_UNAVAILABLE", error.localizedDescription, error); return
+        }
+      }
+      guard let privateKey = key, let publicKey = SecKeyCopyPublicKey(privateKey),
+            SecKeyIsAlgorithmSupported(publicKey, .encrypt, Self.sealAlgorithm) else {
+        reject("SEAL_KEY_POLICY_MISMATCH", "the key under \(keyAlias) cannot seal", nil); return
+      }
+      var error: Unmanaged<CFError>?
+      guard let ciphertext = SecKeyCreateEncryptedData(publicKey, Self.sealAlgorithm, plaintext as CFData, &error) as Data? else {
+        let err = error?.takeRetainedValue() as Error?
+        reject("SEAL_FAILED", err?.localizedDescription ?? "SecKeyCreateEncryptedData failed", err); return
+      }
+      resolve([
+        "ciphertextBase64": ciphertext.base64EncodedString(),
+        "keyAlias": keyAlias,
+        "securityLevel": "secure-enclave",
+        "alg": "ECIES-P256-SHA256-AESGCM"
+      ])
+    }
+  }
+
+  /// `promptTitle`/`promptNegativeButton` are accepted for ABI parity with Android; iOS shows
+  /// `promptSubtitle` as the sheet's reason.
+  @objc(unsealSecret:ciphertextBase64:promptTitle:promptSubtitle:promptNegativeButton:resolver:rejecter:)
+  func unsealSecret(_ keyAlias: String,
+                    ciphertextBase64: String,
+                    promptTitle: String,
+                    promptSubtitle: String,
+                    promptNegativeButton: String,
+                    resolver resolve: @escaping RCTPromiseResolveBlock,
+                    rejecter reject: @escaping RCTPromiseRejectBlock) {
+    secretSealQueue.async {
+      guard let tag = Self.sealKeyTag(for: keyAlias) else {
+        reject("INVALID_ARGUMENT", "invalid seal key alias: \(keyAlias)", nil); return
+      }
+      guard let ciphertext = Data(base64Encoded: ciphertextBase64), !ciphertext.isEmpty else {
+        reject("INVALID_ENCODING", "ciphertextBase64 did not decode", nil); return
+      }
+      let context = LAContext()
+      context.localizedReason = promptSubtitle
+      context.touchIDAuthenticationAllowableReuseDuration = 0
+      guard let key = self.loadKey(tag: tag, context: context) else {
+        reject("NO_SEAL_KEY", "no seal key under alias \(keyAlias)", nil); return
+      }
+
+      // The sheet is raised by the decrypt itself, on `context` (reason = promptSubtitle). Not a
+      // pre-evaluation as in signWith: an ECIES decrypt on a Secure Enclave key is authorized as the
+      // key's key-exchange operation, so evaluating `.useKeyDecrypt` first could cost a second sheet.
+      // signWith pre-evaluates only so cancelPendingSign can end the sheet; unseal has no cancel.
+      var failure: NSError?
+      var error: Unmanaged<CFError>?
+      let plaintext = SecKeyCreateDecryptedData(key, Self.sealAlgorithm, ciphertext as CFData, &error) as Data?
+      if plaintext == nil { failure = error?.takeRetainedValue() as Error? as NSError? }
+      guard var opened = plaintext else {
+        let err = failure ?? NSError(domain: "org.votetorrent.secretseal", code: -1)
+        // DOMAIN FIRST: CryptoTokenKit -3 (key invalidated by re-enrolment) overlaps
+        // LAError.userFallback (-3). See signWith's identical note.
+        let code: String
+        if err.domain == "CryptoTokenKit" {
+          code = err.code == -3 ? "KEY_INVALIDATED" : "BIOMETRIC_ERROR"
+        } else if err.domain == LAErrorDomain {
+          switch err.code {
+          case LAError.userCancel.rawValue, LAError.userFallback.rawValue,
+               LAError.systemCancel.rawValue, LAError.appCancel.rawValue: code = "CANCELED"
+          case LAError.biometryNotEnrolled.rawValue: code = "NO_BIOMETRICS_ENROLLED"
+          case LAError.biometryLockout.rawValue:     code = "LOCKOUT_PERMANENT"
+          default:                                   code = "BIOMETRIC_ERROR"
+          }
+        } else {
+          switch err.code {
+          case Int(errSecUserCanceled):          code = "CANCELED"
+          case Int(errSecInteractionNotAllowed): code = "DEVICE_LOCKED"
+          case Int(errSecItemNotFound):          code = "KEY_INVALIDATED"
+          default:                               code = "UNSEAL_FAILED"
+          }
+        }
+        reject(code, err.localizedDescription, err); return
+      }
+      defer { self.zeroize(&opened) }
+      resolve(["plaintextBase64": opened.base64EncodedString()])
+    }
+  }
+
   // MARK: - Phase 63 review: wrap-key replacement, secure screen, sensitive copy
 
   /// CR-02: the ONLY aliases `deleteWrapKey` may delete (the vote-record family). Must equal

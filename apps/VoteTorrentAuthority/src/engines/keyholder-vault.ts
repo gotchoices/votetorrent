@@ -7,7 +7,9 @@
  *     and is `requireAuth: true`, forever — one alias is one fixed auth policy (62-08's
  *     `WRAP_KEY_POLICY_MISMATCH` enforces this natively and in `key-vault.ts`'s own construction
  *     check). It is never reused for a `requireUserAuth: false` secret.
- *  2. Every keyholder secret this app ever holds is wrapped under this ONE alias: the fresh
+ *  2. Every keyholder secret this app ever holds is wrapped under this ONE alias (since the
+ *     prompt-batching change, directly for legacy seats and through one per-seat key for new seats,
+ *     see `keyholder-seat-vault.ts`): the fresh
  *     signing key and DKG receiving key minted at accept (`keyholder-identity.ts`), 62-17's
  *     in-progress round secrets, and the final share (`keyholderDkgShareAlias`). D-16: a device
  *     holds only ITS OWN share — nothing in this app ever reconstructs the joint election key or
@@ -22,8 +24,12 @@
  */
 
 import type { IKeyVault } from '@votetorrent/vote-engine/rn';
+import { createNativeSecretSealer, createNativeSecretWrapper } from '@votetorrent/attestation-native';
 import type { SecretWrapPrompt } from '@votetorrent/attestation-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createAuthorityKeyVault } from './key-vault';
+import type { KeyVaultStorage } from './key-vault';
+import { VOTETORRENT_AUTHORITY_KEYHOLDER_SEAT_SEAL_KEY_V1, createKeyholderSeatVault } from './keyholder-seat-vault';
 
 /** requireAuth true, forever — point 1 above. */
 export const VOTETORRENT_AUTHORITY_KEYHOLDER_SHARE_WRAP_KEY_V1 = 'VOTETORRENT_AUTHORITY_KEYHOLDER_SHARE_WRAP_KEY_V1';
@@ -57,15 +63,31 @@ export function setKeyholderKeyVaultForTests(vault: IKeyVault | undefined): void
 	testOverride = vault;
 }
 
-/** The test override if set, else a lazily-built singleton over 62-21's `createAuthorityKeyVault`
- * with this file's auth-required alias injected through the `authRequiredWrap` seam (point 3
- * above). The SAME vault instance also serves 62-21's `requireUserAuth: false` officer-encryption
- * secrets — one vault, two policies, each bound to its own alias. */
+/** The test override if set, else a lazily-built singleton: `keyholder-seat-vault.ts`'s seat vault
+ * (one prompt per keyholder session for every seat accepted from now on; new seat keys sealed to the
+ * native seal key, so an accept costs no prompt) over 62-21's
+ * `createAuthorityKeyVault` with this file's auth-required alias injected through the
+ * `authRequiredWrap` seam (point 3 above). The inner vault keeps serving 62-21's
+ * `requireUserAuth: false` officer-encryption secrets and every legacy (pre-seat) keyholder secret.
+ * Both layers share one native wrapper and one storage. */
 export function resolveKeyholderKeyVault(): IKeyVault {
 	if (testOverride !== undefined) return testOverride;
 	if (defaultVault === undefined) {
-		defaultVault = createAuthorityKeyVault({
+		const wrapper = createNativeSecretWrapper();
+		const storage = AsyncStorage as unknown as KeyVaultStorage;
+		const inner = createAuthorityKeyVault({
+			wrapper,
+			storage,
 			authRequiredWrap: { keyAlias: VOTETORRENT_AUTHORITY_KEYHOLDER_SHARE_WRAP_KEY_V1, prompt: keyholderVaultPrompt },
+		});
+		defaultVault = createKeyholderSeatVault({
+			inner,
+			wrapper,
+			storage,
+			wrapKeyAlias: VOTETORRENT_AUTHORITY_KEYHOLDER_SHARE_WRAP_KEY_V1,
+			prompt: keyholderVaultPrompt,
+			sealer: createNativeSecretSealer(),
+			sealKeyAlias: VOTETORRENT_AUTHORITY_KEYHOLDER_SEAT_SEAL_KEY_V1,
 		});
 	}
 	return defaultVault;

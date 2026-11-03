@@ -55,6 +55,19 @@ export type {
 	SecretWrapErrorCode,
 } from './secret-wrap'
 
+// Keyholder prompt batching: public-key sealing of small secrets (seal never prompts, unseal prompts
+// once). Same lazy-native rule as secret-wrap.ts.
+export {
+	SEAL_KEY_ALIAS_PATTERN,
+	MAX_SEAL_PLAINTEXT_BYTES,
+	SEAL_ALGORITHMS,
+	SECRET_SEAL_ERROR_CODES,
+	SecretSealError,
+	isValidSealKeyAlias,
+	createNativeSecretSealer,
+} from './secret-seal'
+export type { SealAlgorithm, SealSecurityLevel, SealedSecret, SecretSealPrompt, SecretSealer, SecretSealErrorCode } from './secret-seal'
+
 // Phase 62 plan 75 (D-36): write a cache file and share it AS A FILE. Named exports only — same
 // "no re-export of the TurboModule default" rule as above; `file-share.ts` requires it lazily.
 export { FileShareError, writeShareFile, shareFileAndroid, deleteCachedFile } from './file-share'

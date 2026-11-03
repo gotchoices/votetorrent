@@ -129,6 +129,22 @@ RCT_EXTERN_METHOD(setSecureScreen:(BOOL)enabled
 
 RCT_EXTERN__BLOCKING_SYNCHRONOUS_METHOD(copySensitiveText:(NSString *)text)
 
+// Keyholder prompt batching. Selectors must match the Swift `@objc(sealSecret:plaintextBase64:resolver:
+// rejecter:)` / `@objc(unsealSecret:ciphertextBase64:promptTitle:promptSubtitle:promptNegativeButton:
+// resolver:rejecter:)` EXACTLY.
+RCT_EXTERN_METHOD(sealSecret:(NSString *)keyAlias
+                  plaintextBase64:(NSString *)plaintextBase64
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
+RCT_EXTERN_METHOD(unsealSecret:(NSString *)keyAlias
+                  ciphertextBase64:(NSString *)ciphertextBase64
+                  promptTitle:(NSString *)promptTitle
+                  promptSubtitle:(NSString *)promptSubtitle
+                  promptNegativeButton:(NSString *)promptNegativeButton
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
 + (BOOL)requiresMainQueueSetup { return NO; }
 
 @end

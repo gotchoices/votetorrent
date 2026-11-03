@@ -99,6 +99,9 @@ class AttestationNativeModule(reactContext: ReactApplicationContext) :
 	private val keyAttestationHelper by lazy { KeyAttestationHelper(reactApplicationContext) }
 	private val playIntegrityHelper by lazy { PlayIntegrityHelper(reactApplicationContext) }
 	private val secretWrapHelper by lazy { SecretWrapHelper(reactApplicationContext) }
+	private val secretSealHelper by lazy { SecretSealHelper(reactApplicationContext) }
+	/** Seals run here: the first one generates an RSA-2048 Keystore key, which can take seconds. */
+	private val secretSealExecutor by lazy { java.util.concurrent.Executors.newSingleThreadExecutor() }
 
 	override fun getName(): String {
 		return NAME
@@ -620,6 +623,85 @@ class AttestationNativeModule(reactContext: ReactApplicationContext) :
 				promise.resolve(Arguments.createMap().apply {
 					putString("plaintextBase64", Base64.encodeToString(plaintext, Base64.NO_WRAP))
 				})
+			},
+			onError = { code, throwable -> promise.reject(code, throwable) },
+		)
+	}
+
+	/**
+	 * Keyholder prompt batching: seal a small secret (1..[MAX_SEAL_PLAINTEXT_BYTES] bytes) to an
+	 * RSA-2048 AndroidKeyStore key's PUBLIC key, creating the key pair on first use. Never prompts.
+	 * Resolves `{ ciphertextBase64, keyAlias, securityLevel, alg }`. See [SecretSealHelper].
+	 */
+	override fun sealSecret(keyAlias: String, plaintextBase64: String, promise: Promise) {
+		val plaintext: ByteArray
+		try {
+			plaintext = Base64.decode(plaintextBase64, Base64.NO_WRAP)
+		} catch (e: Exception) {
+			promise.reject("INVALID_ENCODING", e)
+			return
+		}
+		secretSealExecutor.execute { sealOnExecutor(keyAlias, plaintext, promise) }
+	}
+
+	private fun sealOnExecutor(keyAlias: String, plaintext: ByteArray, promise: Promise) {
+		try {
+			val (ciphertext, securityLevel) = secretSealHelper.seal(keyAlias, plaintext)
+			promise.resolve(Arguments.createMap().apply {
+				putString("ciphertextBase64", Base64.encodeToString(ciphertext, Base64.NO_WRAP))
+				putString("keyAlias", keyAlias)
+				putString("securityLevel", securityLevel)
+				putString("alg", "RSA-OAEP-SHA256")
+			})
+		} catch (e: InvalidSealKeyAliasException) {
+			promise.reject("INVALID_ARGUMENT", e)
+		} catch (e: IllegalArgumentException) {
+			promise.reject("INVALID_ARGUMENT", e)
+		} catch (e: SealKeyPolicyMismatchException) {
+			promise.reject("SEAL_KEY_POLICY_MISMATCH", e)
+		} catch (e: Exception) {
+			promise.reject("SEAL_FAILED", e)
+		} finally {
+			plaintext.fill(0)
+		}
+	}
+
+	/**
+	 * Keyholder prompt batching: the inverse of [sealSecret]. Exactly one BiometricPrompt (per-use,
+	 * BIOMETRIC_STRONG, CryptoObject-bound). Resolves `{ plaintextBase64 }`. Never creates a key.
+	 */
+	override fun unsealSecret(
+		keyAlias: String,
+		ciphertextBase64: String,
+		promptTitle: String,
+		promptSubtitle: String,
+		promptNegativeButton: String,
+		promise: Promise,
+	) {
+		val ciphertext: ByteArray
+		try {
+			ciphertext = Base64.decode(ciphertextBase64, Base64.NO_WRAP)
+		} catch (e: Exception) {
+			promise.reject("INVALID_ENCODING", e)
+			return
+		}
+		val activity = reactApplicationContext.currentActivity as? FragmentActivity
+		if (activity == null) {
+			promise.reject("NO_ACTIVITY", "no current FragmentActivity available to host the BiometricPrompt")
+			return
+		}
+		secretSealHelper.unseal(
+			alias = keyAlias,
+			ciphertext = ciphertext,
+			activity = activity,
+			promptTitle = promptTitle,
+			promptSubtitle = promptSubtitle,
+			promptNegativeButton = promptNegativeButton,
+			onResult = { plaintext ->
+				promise.resolve(Arguments.createMap().apply {
+					putString("plaintextBase64", Base64.encodeToString(plaintext, Base64.NO_WRAP))
+				})
+				plaintext.fill(0)
 			},
 			onError = { code, throwable -> promise.reject(code, throwable) },
 		)

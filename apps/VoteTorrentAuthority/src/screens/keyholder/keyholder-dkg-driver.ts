@@ -10,6 +10,9 @@
  *     (62-17). `advanceDkg` itself plans before it ever touches the vault, so a call that turns out
  *     to have nothing to do also prompts zero times — this driver's own gate is an additional,
  *     cheaper short-circuit, not a substitute for that guarantee.
+ *  2b. Batching: the `advanceDkg` call runs inside ONE keyholder session (`withKeyholderSession`), so
+ *     on the seat vault (`keyholder-seat-vault.ts`) a drive costs at most ONE prompt however many
+ *     round secrets it reads or writes and however many rows it signs (it used to be 2-5).
  *  3. D-16: this module never reconstructs a group secret or the joint election key. Each device's
  *     `advanceDkg` call leaves only ITS OWN round secret / share in ITS OWN vault.
  */
@@ -18,6 +21,7 @@ import type { KeyholderDkgStatus, DkgActionTaken, IKeyholderDkgEngine } from '@v
 import type { IKeyVault } from '@votetorrent/vote-engine/rn';
 import { getKeyholderIdentity, keyholderSigningKeyAlias, createKeyholderSigner } from '../../engines/keyholder-identity';
 import type { KeyVaultStorage } from '../../engines/key-vault';
+import { withKeyholderSession } from '../../engines/keyholder-seat-vault';
 import { classifyPeerReadFailure } from '../../engines/peer-read-unavailable';
 
 export type KeyholderDkgRowState = 'loading' | 'pending' | 'thresholdTooLow' | 'inProgress' | 'complete' | 'complaint' | 'failed';
@@ -109,7 +113,7 @@ export async function driveKeyholderDkg(
 
 		try {
 			const signer = createKeyholderSigner({ vault: deps.vault }, identity!);
-			const result = await dkg.advanceDkg(electionId, signer);
+			const result = await withKeyholderSession(deps.vault, identity!.userId, () => dkg.advanceDkg(electionId, signer));
 			return { status: result.status, advanced: true, actions: result.actions };
 		} catch (advanceErr) {
 			// advanceDkg (or building its signer) failed AFTER a successful getDkgStatus read —
