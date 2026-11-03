@@ -23,7 +23,22 @@
  * owner's clock.
  *
  * Nothing here writes a strand row: the strand database is only read through vote-engine's verifiers, and
- * the invitation lives only in the reply frame (never logged, stored or put in an error). Nothing here logs.
+ * the invitation lives only in the reply frame (never logged, stored or put in an error). The only log
+ * line is the revocation sweep's one warn per failed sweep, naming the error class only.
+ *
+ * R-D (D-27 removal enforced by the minting owner): the host also watches `DashboardPairingRevocation`
+ * (on start, on the app's strand-change signal for that table and on its 60 s backstop). It matches ONLY
+ * this owner's own approved mint-log entries, each by a `(UserId, Nonce)` primary-key point lookup on its
+ * own strand database, never a scan of other owners' pairings. A forged row cannot act: the schema's
+ * insert CHECK requires a signature by a non-expired `UserKey` of that `UserId`, and a row that matches no
+ * approved entry of this owner does nothing. A matched pairing whose invitation was redeemed has its
+ * machine (the `CadreInviteUsage` identity peer id) removed with `removeMachine`; a never-redeemed one is
+ * withdrawn (`withdrawCadreInvitation`) and stops counting as a live mint, and stays watched until its
+ * expiry plus a grace, in case a redemption raced the withdrawal. Already-gone, `not-an-owner` and `self`
+ * are final; any other failure is retried by the next sweep. Each entry is acted on once (the outcome is
+ * marked on its log entry). Not gated by the off switch. At most {@link REVOCATION_SWEEP_MAX_LOOKUPS}
+ * lookups and {@link REVOCATION_SWEEP_MAX_ACTIONS} actions per sweep, one sweep at a time. The wire
+ * `remove` op stays served (harness and owner-local use).
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type {
@@ -35,8 +50,16 @@ import type {
 	PairMintRequest,
 	PairingVerifyResult,
 } from '@votetorrent/vote-engine/rn';
-import { createPairingInvitation, PairingInviteError, voterInviteCapability, type PairingInviteNode } from './voter-invite';
-import { createPairMintLog, readPairingSwitch } from './pairing-owner-store';
+import { createPairingInvitation, inviteExpiryMs, PairingInviteError, voterInviteCapability, type PairingInviteNode } from './voter-invite';
+import {
+	createPairMintLog,
+	listRevocationCandidates,
+	markMintRevocation,
+	readPairingSwitch,
+	REVOCATION_GRACE_MS,
+	type OwnerMintLogEntry,
+	type RevocationResult,
+} from './pairing-owner-store';
 
 type VoteEngineRn = typeof import('@votetorrent/vote-engine/rn');
 type OwnDb = Parameters<VoteEngineRn['verifyPairingStatement']>[0];
@@ -52,6 +75,55 @@ function voteEngine(): VoteEngineRn {
 
 /** NetworksEngine's recent-networks key (read here, never written). */
 export const ACTIVE_NETWORKS_KEY = 'recentNetworks';
+
+/** The revocation table, qualified as the strand-change hub expects it. */
+export const REVOCATION_TABLE = 'App.DashboardPairingRevocation';
+/** The hub's backstop for the revocation subscription: the periodic tick (no timer of our own). */
+export const REVOCATION_BACKSTOP_MS = 60_000;
+/** Point lookups per sweep; the rest wait for the next sweep (round-robin cursor). */
+export const REVOCATION_SWEEP_MAX_LOOKUPS = 200;
+/** remove / withdraw calls per sweep. */
+export const REVOCATION_SWEEP_MAX_ACTIONS = 10;
+
+export type RevocationAction = { kind: 'remove'; nonce: string; peerId: string } | { kind: 'withdraw'; nonce: string; inviteKey: string };
+
+/**
+ * The R-D matching rule, pure (no I/O, no clock, no node). Per revocation row: the APPROVED mint-log entry
+ * with a key whose nonce AND officer both equal the row's. None, or one already carrying a final mark: no
+ * action. A usage row for its invitation key: remove that machine (for an unmarked entry, and for a
+ * withdrawn one until its expiry plus the grace). No usage row: withdraw an unmarked entry; nothing for a
+ * withdrawn one. One action per entry, at most `maxActions`, in row order.
+ */
+export function planRevocationActions(
+	rows: ReadonlyArray<{ userId: string; nonce: string }>,
+	mintLog: ReadonlyArray<OwnerMintLogEntry>,
+	usage: ReadonlyArray<{ inviteKey: string; peerId: string }>,
+	opts: { nowMs: number; maxActions: number },
+): RevocationAction[] {
+	const actions: RevocationAction[] = [];
+	const planned = new Set<OwnerMintLogEntry>();
+	for (const row of rows) {
+		if (actions.length >= opts.maxActions) break;
+		const entry = mintLog.find(
+			(e) => e.outcome === 'approved' && typeof e.inviteKey === 'string' && e.inviteKey.length > 0 && e.nonce === row.nonce && e.userId === row.userId,
+		);
+		if (!entry || planned.has(entry)) continue;
+		const inviteKey = entry.inviteKey as string;
+		const mark = entry.revocation?.result;
+		if (mark !== undefined && mark !== 'withdrawn') continue;
+		const redeemed = usage.find((u) => u.inviteKey === inviteKey);
+		if (mark === 'withdrawn') {
+			const expiry = inviteExpiryMs(entry.expiresAt);
+			if (!redeemed || expiry === null || expiry + REVOCATION_GRACE_MS <= opts.nowMs) continue;
+			planned.add(entry);
+			actions.push({ kind: 'remove', nonce: entry.nonce, peerId: redeemed.peerId });
+			continue;
+		}
+		planned.add(entry);
+		actions.push(redeemed ? { kind: 'remove', nonce: entry.nonce, peerId: redeemed.peerId } : { kind: 'withdraw', nonce: entry.nonce, inviteKey });
+	}
+	return actions;
+}
 
 /**
  * The hash of the network this phone's app has open: `recentNetworks[0].hash`. `NetworksEngine.open()`
@@ -96,19 +168,36 @@ export interface PairMintHostDeps {
 		verifyPairingStatement: VoteEngineRn['verifyPairingStatement'];
 		verifyPairingRemove: VoteEngineRn['verifyPairingRemove'];
 		isCurrentPairingOfficer: VoteEngineRn['isCurrentPairingOfficer'];
+		isPairingRevoked: VoteEngineRn['isPairingRevoked'];
+	};
+	/** Call `listener` when the revocation table may have changed; returns the unsubscribe. */
+	subscribeRevocations(listener: () => Promise<void>): () => void;
+	revocationStore: {
+		listRevocationCandidates: typeof listRevocationCandidates;
+		markMintRevocation: typeof markMintRevocation;
 	};
 }
 
 /** What a caller may override; nested groups merge over the defaults. */
-export type PairMintHostOverrides = Partial<Omit<PairMintHostDeps, 'verifiers'>> & {
+export type PairMintHostOverrides = Partial<Omit<PairMintHostDeps, 'verifiers' | 'revocationStore'>> & {
 	verifiers?: Partial<PairMintHostDeps['verifiers']>;
+	revocationStore?: Partial<PairMintHostDeps['revocationStore']>;
 };
 
 export interface PairMintHost {
-	/** Idempotent: removes the protocol handler and closes the service. */
+	/** Idempotent: stops the revocation watch, removes the protocol handler and closes the service. */
 	detach(): Promise<void>;
 	/** The owner's own request (its browser), with this phone's identity peer id as the caller. */
 	handleLocal(request: PairMintRequest): Promise<PairMintReply>;
+	/** One revocation sweep (single flight; a call during a sweep queues one more). Never rejects. */
+	sweepRevocations(): Promise<void>;
+}
+
+/** The app's strand-change hub, required lazily (it loads the vote-engine runtime at module top). */
+function subscribeToRevocationTable(listener: () => Promise<void>): () => void {
+	// eslint-disable-next-line @typescript-eslint/no-var-requires
+	const { strandChanges } = require('./strand-changes') as typeof import('./strand-changes');
+	return strandChanges.subscribe([REVOCATION_TABLE], listener, { label: 'pair-revocation', backstopMs: REVOCATION_BACKSTOP_MS });
 }
 
 /** The 19-char canonical UTC form vote-engine's `toCanonicalDatetime` gives for a number. */
@@ -128,6 +217,12 @@ function resolveDeps(overrides: PairMintHostOverrides): PairMintHostDeps {
 			verifyPairingStatement: overrides.verifiers?.verifyPairingStatement ?? ve.verifyPairingStatement,
 			verifyPairingRemove: overrides.verifiers?.verifyPairingRemove ?? ve.verifyPairingRemove,
 			isCurrentPairingOfficer: overrides.verifiers?.isCurrentPairingOfficer ?? ve.isCurrentPairingOfficer,
+			isPairingRevoked: overrides.verifiers?.isPairingRevoked ?? ve.isPairingRevoked,
+		},
+		subscribeRevocations: overrides.subscribeRevocations ?? subscribeToRevocationTable,
+		revocationStore: {
+			listRevocationCandidates: overrides.revocationStore?.listRevocationCandidates ?? listRevocationCandidates,
+			markMintRevocation: overrides.revocationStore?.markMintRevocation ?? markMintRevocation,
 		},
 	};
 }
@@ -247,10 +342,146 @@ export async function hostPairMint(node: PairMintHostNode, overrides: PairMintHo
 	const service = createPairMintService(ports);
 	const detachWire = await attachPairMint(control, service);
 
+	// ---- R-D revocation sweep -------------------------------------------------------------------
+	let closed = false;
+	let running: Promise<void> | null = null;
+	let rerun = false;
+	/** The last nonce looked up: the next sweep starts after it (round robin over the candidates). */
+	let cursor: string | null = null;
+
+	/** Up to the lookup bound of unmarked candidates, starting after the cursor and wrapping. */
+	function selectForLookup(unmarked: OwnerMintLogEntry[]): OwnerMintLogEntry[] {
+		const byNonce = [...unmarked].sort((a, b) => (a.nonce < b.nonce ? -1 : a.nonce > b.nonce ? 1 : 0));
+		if (byNonce.length <= REVOCATION_SWEEP_MAX_LOOKUPS) {
+			cursor = null;
+			return byNonce;
+		}
+		const after = cursor;
+		const start = after === null ? 0 : Math.max(0, byNonce.findIndex((e) => e.nonce > after));
+		const picked: OwnerMintLogEntry[] = [];
+		for (let i = 0; i < REVOCATION_SWEEP_MAX_LOOKUPS; i++) picked.push(byNonce[(start + i) % byNonce.length]);
+		cursor = picked[picked.length - 1].nonce;
+		return picked;
+	}
+
+	async function sweepOnce(): Promise<void> {
+		let failure: unknown = undefined;
+		let failed = false;
+		const note = (err: unknown) => {
+			if (!failed) failure = err;
+			failed = true;
+		};
+		try {
+			const own = await ownNetwork();
+			if (!own || closed) return;
+			const candidates = await deps.revocationStore.listRevocationCandidates(deps.now());
+			// A withdrawn candidate's row was already found: it needs no new lookup.
+			const rows = candidates.filter((e) => e.revocation?.result === 'withdrawn').map((e) => ({ userId: e.userId, nonce: e.nonce }));
+			for (const entry of selectForLookup(candidates.filter((e) => e.revocation === undefined))) {
+				if (closed) return;
+				try {
+					if ((await deps.verifiers.isPairingRevoked(own.db, { userId: entry.userId, nonce: entry.nonce })) === true) {
+						rows.push({ userId: entry.userId, nonce: entry.nonce });
+					}
+				} catch (err) {
+					note(err);
+				}
+			}
+			if (rows.length === 0 || closed) return;
+			const usage = await usageRows();
+			if (usage === null) return;
+			const actions = planRevocationActions(rows, candidates, usage, { nowMs: deps.now(), maxActions: REVOCATION_SWEEP_MAX_ACTIONS });
+			for (const action of actions) {
+				if (closed) return;
+				try {
+					const result = action.kind === 'remove' ? await removeRevoked(action.peerId, note) : await withdrawRevoked(action, candidates, note);
+					if (result !== null) await deps.revocationStore.markMintRevocation(action.nonce, { result, at: deps.now() });
+				} catch (err) {
+					note(err);
+				}
+			}
+		} catch (err) {
+			note(err);
+		} finally {
+			// One line per sweep, the error class only: never a row value or an error message.
+			if (failed) console.warn('[pair-mint] revocation sweep:', failure instanceof Error ? failure.name : 'unknown');
+		}
+	}
+
+	/** Remove a revoked browser's machine; the final mark, or null to retry next sweep. */
+	async function removeRevoked(peerId: string, note: (err: unknown) => void): Promise<RevocationResult | null> {
+		try {
+			const result = await node.removeMachine(peerId);
+			// cadre-core reports all false when no live row names the machine any more.
+			return (result as { removedPeer?: unknown } | null)?.removedPeer === false ? 'gone' : 'removed';
+		} catch (err) {
+			const code = (err as { code?: unknown } | null)?.code;
+			if (code === 'not-an-owner') return 'not-owner';
+			if (code === 'self') return 'refused';
+			note(err);
+			return null;
+		}
+	}
+
+	/** Withdraw a never-redeemed invitation; `withdrawn`, `expired` once it can no longer be redeemed, or null. */
+	async function withdrawRevoked(
+		action: { nonce: string; inviteKey: string },
+		candidates: OwnerMintLogEntry[],
+		note: (err: unknown) => void,
+	): Promise<RevocationResult | null> {
+		try {
+			// true (filed now) and false (not held here, or already withdrawn) both leave no live invitation here.
+			await node.withdrawCadreInvitation(action.inviteKey);
+			return 'withdrawn';
+		} catch (err) {
+			const entry = candidates.find((e) => e.nonce === action.nonce && e.outcome === 'approved');
+			const expiry = inviteExpiryMs(entry?.expiresAt ?? null);
+			if (expiry !== null && expiry <= deps.now()) return 'expired';
+			note(err);
+			return null;
+		}
+	}
+
+	const sweepRevocations = (): Promise<void> => {
+		if (closed) return Promise.resolve();
+		if (running) {
+			rerun = true;
+			return running;
+		}
+		running = (async () => {
+			try {
+				do {
+					rerun = false;
+					await sweepOnce();
+				} while (rerun && !closed);
+			} finally {
+				running = null;
+			}
+		})();
+		return running;
+	};
+
+	let unsubscribe: () => void;
+	try {
+		unsubscribe = deps.subscribeRevocations(() => sweepRevocations());
+	} catch (err) {
+		// No half-attached host: without the watch, take the wire down again.
+		closed = true;
+		await detachWire();
+		throw err;
+	}
+	void sweepRevocations();
+
 	let detached: Promise<void> | null = null;
 	const detach = (): Promise<void> => {
 		if (!detached) {
+			closed = true;
 			detached = (async () => {
+				try {
+					unsubscribe();
+				} catch {
+					// the hub is going away with the node
+				}
 				await detachWire();
 				await service.close();
 			})();
@@ -258,7 +489,7 @@ export async function hostPairMint(node: PairMintHostNode, overrides: PairMintHo
 		return detached;
 	};
 	const handleLocal = (request: PairMintRequest): Promise<PairMintReply> => service.handle(self, request);
-	return { detach, handleLocal };
+	return { detach, handleLocal, sweepRevocations };
 }
 
 /** Can this node author owner writes (an invitation is one)? A read that throws counts as no. */
