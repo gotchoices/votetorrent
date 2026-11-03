@@ -120,15 +120,15 @@ function isRevocationResult(v: unknown): v is RevocationResult {
 }
 
 /** The six-field check shared by appends and the stored document. */
-function entryFieldsValid(e: Record<string, unknown>): boolean {
+function entryFieldsValid(entry: Record<string, unknown>): boolean {
 	return (
-		isNonEmptyString(e.nonce) &&
-		isNonEmptyString(e.userId) &&
-		(e.inviteKey === null || typeof e.inviteKey === 'string') &&
-		typeof e.at === 'number' &&
-		Number.isFinite(e.at) &&
-		(e.expiresAt === null || typeof e.expiresAt === 'string') &&
-		isOutcome(e.outcome)
+		isNonEmptyString(entry.nonce) &&
+		isNonEmptyString(entry.userId) &&
+		(entry.inviteKey === null || typeof entry.inviteKey === 'string') &&
+		typeof entry.at === 'number' &&
+		Number.isFinite(entry.at) &&
+		(entry.expiresAt === null || typeof entry.expiresAt === 'string') &&
+		isOutcome(entry.outcome)
 	);
 }
 
@@ -325,11 +325,11 @@ export function listRevocationCandidates(nowMs: number): Promise<OwnerMintLogEnt
 	return serialized(async () =>
 		(await readEntries())
 			.map((e, i) => ({ e, i }))
-			.filter(({ e }) => {
-				if (e.outcome !== 'approved' || !isNonEmptyString(e.inviteKey)) return false;
-				if (e.revocation === undefined) return true;
-				if (e.revocation.result !== 'withdrawn') return false;
-				const exp = inviteExpiryMs(e.expiresAt);
+			.filter(({ e: entry }) => {
+				if (entry.outcome !== 'approved' || !isNonEmptyString(entry.inviteKey)) return false;
+				if (entry.revocation === undefined) return true;
+				if (entry.revocation.result !== 'withdrawn') return false;
+				const exp = inviteExpiryMs(entry.expiresAt);
 				return exp !== null && exp + REVOCATION_GRACE_MS > nowMs;
 			})
 			.sort((a, b) => a.e.at - b.e.at || a.i - b.i)
