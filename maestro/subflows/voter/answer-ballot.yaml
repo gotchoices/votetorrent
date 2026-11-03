@@ -1,0 +1,62 @@
+# From the Ballot screen: open the first office and walk every question with "Next Question",
+# tapping VOTE_PICK_1..3 wherever that candidate is on screen. The last "Next Question" replaces
+# the question screen with Review & Submit. Ends on Review with eligibility checked.
+#
+# Candidate rows are testID candidate-row-<option code>; the dev ballot's codes are in
+# apps/VoteTorrentVoter/src/engines/dev-seed.ts (DEV_SEED_BALLOT_QUESTIONS). For a real
+# election pass the codes of that election's ballot.
+# env: APP_ID, VOTE_PICK_1, VOTE_PICK_2, VOTE_PICK_3
+appId: ${APP_ID}
+---
+- extendedWaitUntil:
+    visible:
+      id: "office-row-open"
+    timeout: 60000
+- tapOn:
+    id: "office-row-open"
+    index: 0
+- extendedWaitUntil:
+    visible:
+      id: "question-next"
+    timeout: 15000
+- repeat:
+    times: 12
+    while:
+      visible:
+        id: "question-next"
+    commands:
+      - runFlow:
+          when:
+            visible:
+              id: "candidate-row-${VOTE_PICK_1}"
+          commands:
+            - tapOn:
+                id: "candidate-row-${VOTE_PICK_1}"
+      - runFlow:
+          when:
+            visible:
+              id: "candidate-row-${VOTE_PICK_2}"
+          commands:
+            - tapOn:
+                id: "candidate-row-${VOTE_PICK_2}"
+      - runFlow:
+          when:
+            visible:
+              id: "candidate-row-${VOTE_PICK_3}"
+          commands:
+            - tapOn:
+                id: "candidate-row-${VOTE_PICK_3}"
+      - tapOn:
+          id: "question-next"
+      - waitForAnimationToEnd:
+          timeout: 3000
+- extendedWaitUntil:
+    visible:
+      id: "review-submit"
+    timeout: 15000
+- extendedWaitUntil:
+    notVisible:
+      id: "review-eligibility-checking"
+    timeout: 60000
+- assertNotVisible:
+    id: "review-ineligible"

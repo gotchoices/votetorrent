@@ -1,0 +1,25 @@
+# Maestro workspace config for VoteTorrent's two React Native apps.
+#
+# `maestro test maestro/` picks up every journey flow below. Subflows live under subflows/ and
+# are NOT listed, so they only run when a journey calls them with runFlow.
+#
+# Prefer maestro/scripts/run.sh: it preps the emulator, checks Metro, runs the host fingerprint
+# helper, and runs the flows one at a time in a fixed order (the order matters: the flows that
+# register or vote change app state that the read-only flows expect). See maestro/README.md.
+flows:
+  - "voter/*"
+  - "authority/*"
+  - "multi-device/*"
+
+# Multi-device flows need a second device, a host-seeded network or an operator-supplied join
+# code, so a plain `maestro test maestro/` skips them. Run them through scripts/run.sh with
+# --flow, or scripts/run-multi-device.sh.
+excludeTags:
+  - multi-device
+
+executionOrder:
+  continueOnFailure: true
+
+platform:
+  android:
+    disableAnimations: true

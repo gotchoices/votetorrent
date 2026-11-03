@@ -1,0 +1,59 @@
+# Journey (multi-device): on a Voter that has joined a real network with an election, submit a
+# registration request and keep the Confirmation screen open until the election office decides.
+# Pair with multi-device/authority-registration-decision.yaml on the officer's device, or with a
+# host officer that auto-approves (scripts/seed-election.sh voters). Does NOT clear app data.
+# Biometrics: run through scripts/run.sh (host fingerprint helper).
+appId: ${APP_ID}
+name: "Voter: register and wait for the officer's decision"
+tags:
+  - voter
+  - multi-device
+  - registration
+  - biometric
+env:
+  APP_ID: "${typeof VOTER_APP_ID == 'undefined' ? 'org.votetorrent.voter' : VOTER_APP_ID}"
+  BOOT_TIMEOUT_MS: "${typeof BOOT_TIMEOUT_MS == 'undefined' ? '300000' : BOOT_TIMEOUT_MS}"
+  REG_FIRST_NAME: "${typeof REG_FIRST_NAME == 'undefined' ? 'Ana' : REG_FIRST_NAME}"
+  REG_LAST_NAME: "${typeof REG_LAST_NAME == 'undefined' ? 'Lee' : REG_LAST_NAME}"
+  REG_DOB_DIGITS: "${typeof REG_DOB_DIGITS == 'undefined' ? '01152000' : REG_DOB_DIGITS}"
+  REG_EMAIL: "${typeof REG_EMAIL == 'undefined' ? 'ana.lee@example.com' : REG_EMAIL}"
+  REG_PHONE: "${typeof REG_PHONE == 'undefined' ? '5550101234' : REG_PHONE}"
+  REG_ADDRESS_1: "${typeof REG_ADDRESS_1 == 'undefined' ? '12 Main St' : REG_ADDRESS_1}"
+  REG_PARTY: "${typeof REG_PARTY == 'undefined' ? 'independent' : REG_PARTY}"
+  DECISION_TIMEOUT_MS: "${typeof DECISION_TIMEOUT_MS == 'undefined' ? '900000' : DECISION_TIMEOUT_MS}"
+---
+- runFlow:
+    file: ../subflows/voter/launch.yaml
+    env:
+      CLEAR_STATE: "false"
+- runFlow:
+    file: ../subflows/voter/open-tab.yaml
+    env:
+      TAB: registration
+- extendedWaitUntil:
+    visible:
+      id: "registration-card-register-now"
+    timeout: 120000
+- tapOn:
+    id: "registration-card-register-now"
+- runFlow: ../subflows/voter/fill-registration-form.yaml
+- tapOn:
+    id: "register-submit"
+- extendedWaitUntil:
+    visible:
+      id: "confirmation-confirm-face-id"
+    timeout: 30000
+- tapOn:
+    id: "confirmation-confirm-face-id"
+- extendedWaitUntil:
+    visible:
+      id: "confirmation-(waiting|pending|registered|error|identity-lost)"
+    timeout: 180000
+- assertNotVisible:
+    id: "confirmation-(error|identity-lost)"
+- extendedWaitUntil:
+    visible:
+      id: "confirmation-registered"
+    timeout: ${DECISION_TIMEOUT_MS}
+- tapOn:
+    id: "confirmation-done"

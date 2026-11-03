@@ -1,0 +1,35 @@
+# Journey: before voting opens, Timeline > Voting Period > "Preview ballot" opens the dev
+# seed's ballot (five offices) read-only. No state changes.
+appId: ${APP_ID}
+name: "Voter: preview the ballot"
+tags:
+  - voter
+  - smoke
+  - vote
+env:
+  APP_ID: "${typeof VOTER_APP_ID == 'undefined' ? 'org.votetorrent.voter' : VOTER_APP_ID}"
+  BOOT_TIMEOUT_MS: "${typeof BOOT_TIMEOUT_MS == 'undefined' ? '300000' : BOOT_TIMEOUT_MS}"
+---
+- runFlow:
+    file: ../subflows/voter/launch.yaml
+    env:
+      CLEAR_STATE: "false"
+- runFlow:
+    file: ../subflows/voter/timeline-ready.yaml
+- scrollUntilVisible:
+    element:
+      id: "timeline-row-preview-ballot-votingStarts"
+    direction: DOWN
+    timeout: 20000
+- tapOn:
+    id: "timeline-row-preview-ballot-votingStarts"
+- extendedWaitUntil:
+    visible:
+      id: "office-row-open"
+    timeout: 60000
+- assertVisible: "U.S. Senate"
+- assertVisible:
+    id: "ballot-breadcrumb-home"
+- back
+- assertVisible:
+    id: "timeline-rail"

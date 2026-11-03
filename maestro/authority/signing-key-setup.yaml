@@ -1,0 +1,44 @@
+# Journey: the device signing ceremony's provisioning leg (what
+# scripts/run-authority-signing-ceremony.sh drives with adb): Settings > Secure Signing >
+# SET UP SECURE SIGNING > fingerprint > "Secure signing is set up on this device" (no network
+# yet) or "Signing key ready". Clears app data so the device starts with no key.
+# Biometrics: run through scripts/run.sh (host fingerprint helper). Emulator keys are
+# software-backed; hardware attestation is out of scope for an emulator.
+appId: ${APP_ID}
+name: "Authority: secure signing setup"
+tags:
+  - authority
+  - signing
+  - biometric
+env:
+  APP_ID: "${typeof AUTHORITY_APP_ID == 'undefined' ? 'org.votetorrent.authority' : AUTHORITY_APP_ID}"
+  BOOT_TIMEOUT_MS: "${typeof BOOT_TIMEOUT_MS == 'undefined' ? '300000' : BOOT_TIMEOUT_MS}"
+---
+- runFlow:
+    file: ../subflows/authority/launch.yaml
+    env:
+      CLEAR_STATE: "true"
+- runFlow:
+    file: ../subflows/authority/open-tab.yaml
+    env:
+      TAB: settings
+- scrollUntilVisible:
+    element:
+      id: "settings-signing-key-provisioning-entry"
+    direction: DOWN
+    timeout: 20000
+- tapOn:
+    id: "settings-signing-key-provisioning-entry"
+- extendedWaitUntil:
+    visible:
+      id: "signing-key-provisioning-primary-button"
+    timeout: 30000
+- tapOn:
+    id: "signing-key-provisioning-primary-button"
+- extendedWaitUntil:
+    visible: "Secure signing is set up on this device|Signing key ready"
+    timeout: 90000
+- assertVisible:
+    id: "signing-key-provisioning-continue-button"
+- tapOn:
+    id: "signing-key-provisioning-continue-button"

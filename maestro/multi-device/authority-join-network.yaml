@@ -1,0 +1,55 @@
+# Journey (multi-device): an officer's Authority device joins an existing network with a join
+# code (Networks > JOIN A NETWORK). A device that FOUNDED its own network is refused by design,
+# so run on a clean Authority (CLEAR_STATE true here).
+# Biometrics: run through scripts/run.sh (the select step may route to secure-signing setup).
+appId: ${APP_ID}
+name: "Authority: join a network with a join code"
+tags:
+  - authority
+  - multi-device
+  - join
+  - biometric
+env:
+  APP_ID: "${typeof AUTHORITY_APP_ID == 'undefined' ? 'org.votetorrent.authority' : AUTHORITY_APP_ID}"
+  BOOT_TIMEOUT_MS: "${typeof BOOT_TIMEOUT_MS == 'undefined' ? '300000' : BOOT_TIMEOUT_MS}"
+  JOIN_CODE: "${typeof JOIN_CODE == 'undefined' ? '' : JOIN_CODE}"
+  EXPECTED_NETWORK_NAME: "${typeof EXPECTED_NETWORK_NAME == 'undefined' ? '.+' : EXPECTED_NETWORK_NAME}"
+  JOIN_TIMEOUT_MS: "${typeof JOIN_TIMEOUT_MS == 'undefined' ? '300000' : JOIN_TIMEOUT_MS}"
+---
+- runFlow:
+    file: ../subflows/authority/launch.yaml
+    env:
+      CLEAR_STATE: "true"
+- runFlow: ../subflows/authority/open-networks.yaml
+- tapOn:
+    id: "networks-join-network-button"
+- extendedWaitUntil:
+    visible:
+      id: "join-network-code-input"
+    timeout: 15000
+- tapOn:
+    id: "join-network-code-input"
+- inputText: ${JOIN_CODE}
+- hideKeyboard
+- extendedWaitUntil:
+    visible:
+      id: "join-network-preview-name"
+    timeout: 20000
+- assertVisible:
+    id: "join-network-preview-name"
+    text: ${EXPECTED_NETWORK_NAME}
+- tapOn:
+    id: "join-network-submit"
+- extendedWaitUntil:
+    visible:
+      id: "join-network-joined|join-network-error|signing-key-provisioning-primary-button"
+    timeout: ${JOIN_TIMEOUT_MS}
+- runFlow: ../subflows/authority/provision-signing-key-if-asked.yaml
+- extendedWaitUntil:
+    visible:
+      id: "join-network-joined|join-network-error"
+    timeout: ${JOIN_TIMEOUT_MS}
+- assertNotVisible:
+    id: "join-network-error"
+- tapOn:
+    id: "join-network-done"

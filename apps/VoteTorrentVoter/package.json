@@ -9,6 +9,7 @@
 		"lint": "eslint .",
 		"start": "react-native start",
 		"test": "jest",
+		"test:maestro": "../../maestro/scripts/run.sh --app voter",
 		"typecheck": "tsc --noEmit",
 		"verify:keystore": "cd android && bundle exec fastlane android verify_keystore",
 		"prepare:workspace": "cd android && bundle exec fastlane android prepare",

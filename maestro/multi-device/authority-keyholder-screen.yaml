@@ -1,0 +1,38 @@
+# Journey (multi-device): keyholder screens. Elections > <ELECTION_TITLE> > keyholder card >
+# Keyholder: invite status and DKG status row. Needs an election with keyholder seats on this
+# device's network (e.g. scripts/seed-election.sh keyholders, with this device joined as an
+# officer). The keyholder card has no testID, so it is opened by KEYHOLDER_NAME text.
+appId: ${APP_ID}
+name: "Authority: keyholder screen"
+tags:
+  - authority
+  - multi-device
+  - keyholder
+env:
+  APP_ID: "${typeof AUTHORITY_APP_ID == 'undefined' ? 'org.votetorrent.authority' : AUTHORITY_APP_ID}"
+  BOOT_TIMEOUT_MS: "${typeof BOOT_TIMEOUT_MS == 'undefined' ? '300000' : BOOT_TIMEOUT_MS}"
+  ELECTION_TITLE: "${typeof ELECTION_TITLE == 'undefined' ? 'Maestro Election' : ELECTION_TITLE}"
+  KEYHOLDER_NAME: "${typeof KEYHOLDER_NAME == 'undefined' ? 'kh-a' : KEYHOLDER_NAME}"
+---
+- runFlow:
+    file: ../subflows/authority/launch.yaml
+    env:
+      CLEAR_STATE: "false"
+- runFlow:
+    file: ../subflows/authority/open-tab.yaml
+    env:
+      TAB: elections
+- extendedWaitUntil:
+    visible: "${ELECTION_TITLE}"
+    timeout: 120000
+- tapOn: "${ELECTION_TITLE}"
+- scrollUntilVisible:
+    element:
+      text: "${KEYHOLDER_NAME}.*"
+    direction: DOWN
+    timeout: 30000
+- tapOn: "${KEYHOLDER_NAME}.*"
+- extendedWaitUntil:
+    visible:
+      id: "keyholder-invite-status|keyholder-dkg-status-row"
+    timeout: 30000

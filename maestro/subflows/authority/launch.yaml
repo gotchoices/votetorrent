@@ -1,0 +1,28 @@
+# Launch the Authority debug app and wait for the tab bar.
+#
+# env (set by the calling flow): APP_ID (default org.votetorrent.authority), CLEAR_STATE
+# ("true" wipes app data: no network, no device user, no signing key), BOOT_TIMEOUT_MS.
+#
+# A fresh install has no dev seed: it lands on Elections with "Choose a network to get started".
+# A re-launch with a network re-attaches it first (spinner, "Syncing"); after the first-sync
+# budget a "Start Fresh" button appears, which this subflow never taps.
+#
+# Tab testIDs (tab-elections, tab-tasks, tab-authorities, tab-settings) come from
+# maestro/patches/authority-testids.patch: apply it before running Authority flows.
+appId: ${APP_ID}
+---
+- runFlow:
+    when:
+      true: ${CLEAR_STATE == 'true'}
+    commands:
+      - clearState: ${APP_ID}
+- launchApp:
+    appId: ${APP_ID}
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "tab-elections"
+    timeout: ${BOOT_TIMEOUT_MS}
+# Every Authority cold start logs a deliberate console.error (a bootstrap-config notice), so a
+# LogBox toast covers the tab bar on debug builds.
+- runFlow: ../common/dismiss-logbox.yaml

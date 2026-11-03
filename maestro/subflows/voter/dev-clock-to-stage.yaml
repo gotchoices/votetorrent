@@ -1,0 +1,24 @@
+# Step the __DEV__ clock-offset control on the Timeline tab until the stage named STAGE_TITLE is
+# the current stage. The control ("DEV: Clock offset <Stage> +N") cycles live -> each stage of the
+# election -> live, and shifts the one shared app clock (Home, Timeline and the vote window gate
+# all read it). Debug builds only; a release build has no such control.
+#
+# Run voter/timeline-ready.yaml first.
+# env: APP_ID, STAGE_TITLE (English stage title, e.g. "Voting Period", "Releasing Keys",
+#      "Tallying"; see the `timeline` namespace in apps/VoteTorrentVoter/src/i18n/index.ts)
+appId: ${APP_ID}
+---
+- repeat:
+    times: 14
+    while:
+      notVisible:
+        id: "timeline-dev-clock-offset-label"
+        text: "DEV: Clock offset ${STAGE_TITLE} .*"
+    commands:
+      - tapOn:
+          id: "timeline-dev-clock-offset"
+      - waitForAnimationToEnd:
+          timeout: 3000
+- assertVisible:
+    id: "timeline-dev-clock-offset-label"
+    text: "DEV: Clock offset ${STAGE_TITLE} .*"

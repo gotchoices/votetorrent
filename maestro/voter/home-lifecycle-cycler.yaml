@@ -1,0 +1,46 @@
+# Journey: the Home election card in each lifecycle state, using the __DEV__ "Dev state" cycler.
+# The cycler only forces the CARD's state (it does not move the clock); it resets on relaunch.
+appId: ${APP_ID}
+name: "Voter: Home card lifecycle (dev cycler)"
+tags:
+  - voter
+  - smoke
+  - dev
+env:
+  APP_ID: "${typeof VOTER_APP_ID == 'undefined' ? 'org.votetorrent.voter' : VOTER_APP_ID}"
+  BOOT_TIMEOUT_MS: "${typeof BOOT_TIMEOUT_MS == 'undefined' ? '300000' : BOOT_TIMEOUT_MS}"
+---
+- runFlow:
+    file: ../subflows/voter/launch.yaml
+    env:
+      CLEAR_STATE: "false"
+- assertVisible: "Dev state: live \\(tap to cycle\\)"
+# live -> Upcoming -> Open
+- tapOn:
+    id: "home-dev-lifecycle-cycler"
+- assertVisible: "Dev state: Upcoming \\(tap to cycle\\)"
+- tapOn:
+    id: "home-dev-lifecycle-cycler"
+- assertVisible: "Dev state: Open \\(tap to cycle\\)"
+- assertVisible:
+    id: "election-card-vote-now"
+# Open -> ReviewSelections -> ReleasingKeys -> Validation -> ValidationDetails
+- repeat:
+    times: 4
+    commands:
+      - tapOn:
+          id: "home-dev-lifecycle-cycler"
+- assertVisible: "Dev state: ValidationDetails \\(tap to cycle\\)"
+- assertVisible:
+    id: "election-card-view-validation-details"
+- tapOn:
+    id: "election-card-view-validation-details"
+- assertVisible: "Validation Details"
+- back
+# ValidationDetails -> Complete -> live
+- tapOn:
+    id: "home-dev-lifecycle-cycler"
+- assertVisible: "Dev state: Complete \\(tap to cycle\\)"
+- tapOn:
+    id: "home-dev-lifecycle-cycler"
+- assertVisible: "Dev state: live \\(tap to cycle\\)"

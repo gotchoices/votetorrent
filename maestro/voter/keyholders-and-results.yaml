@@ -1,0 +1,61 @@
+# Journey: Timeline > Releasing Keys > "View Keyholders", then Timeline > Tallying >
+# "View results". On the dev seed's election there are no keyholders and no votes, so this checks
+# the screens open and settle on one of their honest states, not specific counts.
+appId: ${APP_ID}
+name: "Voter: keyholders and results screens"
+tags:
+  - voter
+  - timeline
+  - keyholder
+env:
+  APP_ID: "${typeof VOTER_APP_ID == 'undefined' ? 'org.votetorrent.voter' : VOTER_APP_ID}"
+  BOOT_TIMEOUT_MS: "${typeof BOOT_TIMEOUT_MS == 'undefined' ? '300000' : BOOT_TIMEOUT_MS}"
+---
+- runFlow:
+    file: ../subflows/voter/launch.yaml
+    env:
+      CLEAR_STATE: "false"
+- runFlow:
+    file: ../subflows/voter/timeline-ready.yaml
+# "View Keyholders" shows on the Releasing Keys row in any status.
+- scrollUntilVisible:
+    element:
+      id: "timeline-row-view-keyholders-releasingKeys"
+    direction: DOWN
+    timeout: 20000
+- tapOn:
+    id: "timeline-row-view-keyholders-releasingKeys"
+- extendedWaitUntil:
+    visible:
+      id: "keyholders-(empty|list|indeterminate)"
+    timeout: 60000
+- back
+# "View results" needs Tallying to have started: move the dev clock there.
+- scrollUntilVisible:
+    element:
+      id: "timeline-dev-clock-offset"
+    direction: UP
+    timeout: 20000
+- runFlow:
+    file: ../subflows/voter/dev-clock-to-stage.yaml
+    env:
+      STAGE_TITLE: "Tallying"
+- scrollUntilVisible:
+    element:
+      id: "timeline-row-view-results-tallyingStarts"
+    direction: DOWN
+    timeout: 20000
+- tapOn:
+    id: "timeline-row-view-results-tallyingStarts"
+- extendedWaitUntil:
+    visible:
+      id: "results-(no-key|awaiting-keys|no-ballots|no-blocks|no-election|summary|failed|unavailable|not-published)"
+    timeout: 120000
+- back
+- scrollUntilVisible:
+    element:
+      id: "timeline-dev-clock-offset"
+    direction: UP
+    timeout: 20000
+- runFlow:
+    file: ../subflows/voter/dev-clock-reset.yaml

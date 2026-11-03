@@ -1,0 +1,73 @@
+# Journey: Registration > Register now > step 1 with empty and bad input. Expects the inline
+# field errors, then closes the form without submitting anything.
+# Needs an unregistered device (the "Register now" card); launch-home's clean boot gives one.
+appId: ${APP_ID}
+name: "Voter: register form validation"
+tags:
+  - voter
+  - smoke
+  - registration
+env:
+  APP_ID: "${typeof VOTER_APP_ID == 'undefined' ? 'org.votetorrent.voter' : VOTER_APP_ID}"
+  BOOT_TIMEOUT_MS: "${typeof BOOT_TIMEOUT_MS == 'undefined' ? '300000' : BOOT_TIMEOUT_MS}"
+---
+- runFlow:
+    file: ../subflows/voter/launch.yaml
+    env:
+      CLEAR_STATE: "false"
+- runFlow:
+    file: ../subflows/voter/open-tab.yaml
+    env:
+      TAB: registration
+- extendedWaitUntil:
+    visible:
+      id: "registration-card-register-now"
+    timeout: 60000
+- tapOn:
+    id: "registration-card-register-now"
+# DeviceAttestation provisions the device key, then replaces itself with step 1.
+- extendedWaitUntil:
+    visible:
+      id: "register-first-name"
+    timeout: 60000
+- scrollUntilVisible:
+    element:
+      id: "register-continue"
+    direction: DOWN
+    timeout: 10000
+- tapOn:
+    id: "register-continue"
+- scrollUntilVisible:
+    element:
+      id: "register-first-name-error"
+    direction: UP
+    timeout: 10000
+- assertVisible: "This field is required"
+- tapOn:
+    id: "register-email"
+- inputText: "not-an-email"
+- hideKeyboard
+- scrollUntilVisible:
+    element:
+      id: "register-continue"
+    direction: DOWN
+    timeout: 10000
+- tapOn:
+    id: "register-continue"
+- scrollUntilVisible:
+    element:
+      id: "register-email-error"
+    direction: UP
+    timeout: 10000
+- assertVisible: "Enter a valid email address"
+- scrollUntilVisible:
+    element:
+      id: "register-close"
+    direction: UP
+    timeout: 10000
+- tapOn:
+    id: "register-close"
+- extendedWaitUntil:
+    visible:
+      id: "registration-card-register-now"
+    timeout: 15000

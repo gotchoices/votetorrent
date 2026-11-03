@@ -1,0 +1,47 @@
+# Journey: visit every bottom tab and check each one's landmark.
+appId: ${APP_ID}
+name: "Voter: bottom tabs"
+tags:
+  - voter
+  - smoke
+env:
+  APP_ID: "${typeof VOTER_APP_ID == 'undefined' ? 'org.votetorrent.voter' : VOTER_APP_ID}"
+  BOOT_TIMEOUT_MS: "${typeof BOOT_TIMEOUT_MS == 'undefined' ? '300000' : BOOT_TIMEOUT_MS}"
+---
+- runFlow:
+    file: ../subflows/voter/launch.yaml
+    env:
+      CLEAR_STATE: "false"
+# Timeline: the rail for the dev seed's election
+- runFlow:
+    file: ../subflows/voter/timeline-ready.yaml
+# Registration: the registration card (not registered / registered) or the join entry link
+- runFlow:
+    file: ../subflows/voter/open-tab.yaml
+    env:
+      TAB: registration
+- extendedWaitUntil:
+    visible:
+      id: "registration-card-(register-now|update|identity-line)|join-network-entry-link"
+    timeout: 60000
+# Scan: still the "coming soon" placeholder
+- runFlow:
+    file: ../subflows/voter/open-tab.yaml
+    env:
+      TAB: scan
+- assertVisible:
+    text: "QR scanning coming soon"
+# Settings
+- runFlow:
+    file: ../subflows/voter/open-tab.yaml
+    env:
+      TAB: settings
+- assertVisible:
+    id: "settings-join-network-row"
+# Back to Vote
+- runFlow:
+    file: ../subflows/voter/open-tab.yaml
+    env:
+      TAB: vote
+- assertVisible:
+    id: "network-header-title"

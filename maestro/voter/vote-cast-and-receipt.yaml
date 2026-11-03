@@ -1,0 +1,61 @@
+# Journey: cast a vote on the dev seed's ballot and read the saved-vote receipt.
+#   Timeline > dev clock into the Voting Period > Vote now > answer each question > Review >
+#   Submit (biometric) > receipt.
+# Voting saves the vote on this phone; SENDING it needs a pool of 3+ voters on a live network,
+# so this flow stops at the receipt and does not tap Send.
+#
+# Choices are candidate codes from the dev ballot (apps/VoteTorrentVoter/src/engines/dev-seed.ts):
+# required offices are U.S. Senate, Governor and State Board of Education.
+# Biometrics: run through scripts/run.sh (the host fingerprint helper answers the prompt).
+# Clears app data first, so no saved vote blocks "Vote now".
+appId: ${APP_ID}
+name: "Voter: cast a vote and view the receipt"
+tags:
+  - voter
+  - vote
+  - biometric
+env:
+  APP_ID: "${typeof VOTER_APP_ID == 'undefined' ? 'org.votetorrent.voter' : VOTER_APP_ID}"
+  BOOT_TIMEOUT_MS: "${typeof BOOT_TIMEOUT_MS == 'undefined' ? '300000' : BOOT_TIMEOUT_MS}"
+  VOTE_PICK_1: "${typeof VOTE_PICK_1 == 'undefined' ? 'diana' : VOTE_PICK_1}"
+  VOTE_PICK_2: "${typeof VOTE_PICK_2 == 'undefined' ? 'priya' : VOTE_PICK_2}"
+  VOTE_PICK_3: "${typeof VOTE_PICK_3 == 'undefined' ? 'angela' : VOTE_PICK_3}"
+  SUBMIT_TIMEOUT_MS: "${typeof SUBMIT_TIMEOUT_MS == 'undefined' ? '120000' : SUBMIT_TIMEOUT_MS}"
+---
+- runFlow:
+    file: ../subflows/voter/launch.yaml
+    env:
+      CLEAR_STATE: "true"
+- runFlow:
+    file: ../subflows/voter/timeline-ready.yaml
+- runFlow:
+    file: ../subflows/voter/dev-clock-to-stage.yaml
+    env:
+      STAGE_TITLE: "Voting Period"
+- scrollUntilVisible:
+    element:
+      id: "timeline-row-vote-now-votingStarts"
+    direction: DOWN
+    timeout: 20000
+- tapOn:
+    id: "timeline-row-vote-now-votingStarts"
+- runFlow: ../subflows/voter/answer-ballot.yaml
+- assertVisible:
+    id: "review-row-.*"
+- runFlow: ../subflows/voter/submit-and-read-receipt.yaml
+- scrollUntilVisible:
+    element:
+      id: "receipt-done"
+    direction: DOWN
+    timeout: 15000
+- tapOn:
+    id: "receipt-done"
+# A saved vote hides Vote now on Home and shows the saved-vote line instead.
+- runFlow:
+    file: ../subflows/voter/open-tab.yaml
+    env:
+      TAB: vote
+- extendedWaitUntil:
+    visible:
+      id: "election-card-saved-vote"
+    timeout: 30000

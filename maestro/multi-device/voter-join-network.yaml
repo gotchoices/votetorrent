@@ -1,0 +1,76 @@
+# Journey (multi-device): the Voter joins an election authority's network with a join code.
+#   Settings > Join a network > (Paste | type the code) > check the preview > Join network >
+#   "You joined <name>" > Done.
+#
+# Where the code comes from:
+#   JOIN_VIA=paste  the code is already on THIS device's clipboard, e.g. the Authority app on the
+#                   same emulator ran authority/mint-voter-join-code.yaml (COPY JOIN CODE).
+#   JOIN_VIA=type   JOIN_CODE holds the code (from a host-seeded network, or another device's
+#                   Share sheet). Long codes type slowly; that is expected.
+# The joining Voter must reach the authority's network (relay), so this is not a single-device
+# check. A DEBUG Voter already holds its dev-seeded network; if the app refuses with the
+# "already belongs to another election authority's network" message, that is the app's
+# one-network rule, not a flow defect.
+appId: ${APP_ID}
+name: "Voter: join a network with a join code"
+tags:
+  - voter
+  - multi-device
+  - join
+env:
+  APP_ID: "${typeof VOTER_APP_ID == 'undefined' ? 'org.votetorrent.voter' : VOTER_APP_ID}"
+  BOOT_TIMEOUT_MS: "${typeof BOOT_TIMEOUT_MS == 'undefined' ? '300000' : BOOT_TIMEOUT_MS}"
+  JOIN_VIA: "${typeof JOIN_VIA == 'undefined' ? 'type' : JOIN_VIA}"
+  JOIN_CODE: "${typeof JOIN_CODE == 'undefined' ? '' : JOIN_CODE}"
+  EXPECTED_NETWORK_NAME: "${typeof EXPECTED_NETWORK_NAME == 'undefined' ? '.+' : EXPECTED_NETWORK_NAME}"
+  JOIN_TIMEOUT_MS: "${typeof JOIN_TIMEOUT_MS == 'undefined' ? '300000' : JOIN_TIMEOUT_MS}"
+---
+- runFlow:
+    file: ../subflows/voter/launch.yaml
+    env:
+      CLEAR_STATE: "false"
+- runFlow:
+    file: ../subflows/voter/open-tab.yaml
+    env:
+      TAB: settings
+- tapOn:
+    id: "settings-join-network-row"
+- extendedWaitUntil:
+    visible:
+      id: "join-network-code-input"
+    timeout: 15000
+- runFlow:
+    when:
+      true: ${JOIN_VIA == 'paste'}
+    commands:
+      - tapOn:
+          id: "join-network-paste"
+- runFlow:
+    when:
+      true: ${JOIN_VIA != 'paste'}
+    commands:
+      - tapOn:
+          id: "join-network-code-input"
+      - inputText: ${JOIN_CODE}
+      - hideKeyboard
+- extendedWaitUntil:
+    visible:
+      id: "join-network-preview-name"
+    timeout: 20000
+- assertNotVisible:
+    id: "join-network-code-error"
+- assertVisible:
+    id: "join-network-preview-name"
+    text: ${EXPECTED_NETWORK_NAME}
+- assertVisible:
+    id: "join-network-preview-fingerprint"
+- tapOn:
+    id: "join-network-submit"
+- extendedWaitUntil:
+    visible:
+      id: "join-network-joined|join-network-error"
+    timeout: ${JOIN_TIMEOUT_MS}
+- assertNotVisible:
+    id: "join-network-error"
+- tapOn:
+    id: "join-network-done"
