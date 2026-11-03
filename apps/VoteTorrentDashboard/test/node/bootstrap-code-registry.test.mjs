@@ -384,7 +384,8 @@ test('listNetworks: a syntactically valid array with a structurally wrong entry 
 
 	const goodStorage = makeFakeStorage();
 	goodStorage.setItem(NETWORKS_REGISTRY_KEY, JSON.stringify([ENTRY_A]));
-	assert.deepEqual(listNetworks(goodStorage), [ENTRY_A]);
+	// Legacy entries read back as not paired (C-8).
+	assert.deepEqual(listNetworks(goodStorage), [{ ...ENTRY_A, pairing: null }]);
 });
 
 test('upsertNetwork: appends a new networkHash and two different hashes coexist (D-08)', () => {
@@ -440,7 +441,8 @@ test('upsertNetwork: rejects a bootstrappedAt that is not 19 characters or that 
 test('findNetwork: resolves an existing entry and returns undefined for an unknown hash', () => {
 	const storage = makeFakeStorage();
 	upsertNetwork(ENTRY_A, storage);
-	assert.deepEqual(findNetwork('net-a', storage), ENTRY_A);
+	// Legacy entries read back as not paired (C-8).
+	assert.deepEqual(findNetwork('net-a', storage), { ...ENTRY_A, pairing: null });
 	assert.equal(findNetwork('net-nonexistent', storage), undefined);
 });
 
