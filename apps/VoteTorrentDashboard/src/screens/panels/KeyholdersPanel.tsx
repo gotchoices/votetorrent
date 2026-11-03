@@ -171,6 +171,7 @@ const KeyholdersPanel: PanelComponent = ({ capability, db }) => {
 				? undefined
 				: t('panels.keyholders.meter.value', { count: meter.enrolled, total: meter.threshold });
 		const meterKeys = state.rows.map(keyholderMarkKey);
+		const meterMarked = meterKeys.some((key) => marks.isMarked(key));
 		return (
 			<div className={withMark('aa-meter', sectionMarkClass(marks, meterKeys))}>
 				<Meter
@@ -180,7 +181,7 @@ const KeyholdersPanel: PanelComponent = ({ capability, db }) => {
 					variant="panel"
 					emptyCopyKey="panels.keyholders.meter.empty"
 				/>
-				{meterKeys.some((key) => marks.isMarked(key)) ? <ChangeMarkWord /> : null}
+				{meterMarked ? <ChangeMarkWord /> : null}
 			</div>
 		);
 	}
