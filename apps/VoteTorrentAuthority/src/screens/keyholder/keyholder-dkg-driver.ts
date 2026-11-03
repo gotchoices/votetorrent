@@ -21,7 +21,7 @@ import type { KeyholderDkgStatus, DkgActionTaken, IKeyholderDkgEngine } from '@v
 import type { IKeyVault } from '@votetorrent/vote-engine/rn';
 import { getKeyholderIdentity, keyholderSigningKeyAlias, createKeyholderSigner } from '../../engines/keyholder-identity';
 import type { KeyVaultStorage } from '../../engines/key-vault';
-import { withKeyholderSession } from '../../engines/keyholder-seat-vault';
+import { withKeyholderSession } from '../../engines/keyholder-session';
 import { classifyPeerReadFailure } from '../../engines/peer-read-unavailable';
 
 export type KeyholderDkgRowState = 'loading' | 'pending' | 'thresholdTooLow' | 'inProgress' | 'complete' | 'complaint' | 'failed';

@@ -47,6 +47,7 @@ import type { SealedSecret, SecretSealer, SecretWrapper, SecretWrapPrompt, Wrapp
 import { mapWrapError } from './key-vault';
 import type { KeyVaultStorage } from './key-vault';
 import { dismissKeyboardForSystemPrompt } from '../utils/dismissKeyboardForSystemPrompt';
+import type { KeyholderSessionVault } from './keyholder-session';
 
 /** Storage key of a seat's wrapped seat key = this prefix + userId. */
 export const KEYHOLDER_SEAT_KEY_STORAGE_PREFIX = 'vt.keyholder-seat-key.v1.';
@@ -68,20 +69,10 @@ export function seatUserIdOfAlias(alias: string): string | undefined {
 	return userId.length > 0 ? userId : undefined;
 }
 
-/** A vault that can batch one seat's secrets under one prompt. */
-export interface KeyholderSessionVault extends IKeyVault {
-	withKeyholderSession<T>(userId: string, fn: () => Promise<T>): Promise<T>;
-}
-
-/**
- * Runs `fn` inside one keyholder session when `vault` supports sessions, else runs it as is (the plain
- * per-alias vault every older test builds). Callers: accept (`provisionKeyholderIdentity`), the DKG driver and
- * the release ceremony.
- */
-export function withKeyholderSession<T>(vault: IKeyVault, userId: string, fn: () => Promise<T>): Promise<T> {
-	const v = vault as Partial<KeyholderSessionVault>;
-	return typeof v.withKeyholderSession === 'function' ? v.withKeyholderSession(userId, fn) : fn();
-}
+// The session seam lives in the leaf module `./keyholder-session` (Node-loadable, see its header); re-exported
+// here so existing imports of it from this file keep working.
+export { withKeyholderSession } from './keyholder-session';
+export type { KeyholderSessionVault } from './keyholder-session';
 
 /** Native alias of the hardware key pair new seat keys are sealed to (point 1b). */
 export const VOTETORRENT_AUTHORITY_KEYHOLDER_SEAT_SEAL_KEY_V1 = 'VOTETORRENT_AUTHORITY_KEYHOLDER_SEAT_SEAL_KEY_V1';

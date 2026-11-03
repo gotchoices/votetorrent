@@ -25,7 +25,7 @@ import type { IKeysTasksEngine, ReleaseKeyTask } from '@votetorrent/vote-core';
 import type { IKeyVault } from '@votetorrent/vote-engine/rn';
 import type { KeyVaultStorage } from '../../engines/key-vault';
 import { createKeyholderSigner, getKeyholderIdentity } from '../../engines/keyholder-identity';
-import { withKeyholderSession } from '../../engines/keyholder-seat-vault';
+import { withKeyholderSession } from '../../engines/keyholder-session';
 
 export interface KeyReleaseCeremonyDeps {
 	getEngine: <T>(engineName: string) => Promise<T>;

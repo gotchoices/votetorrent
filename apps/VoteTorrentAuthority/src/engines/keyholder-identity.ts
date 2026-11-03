@@ -38,7 +38,7 @@ import type { IKeyVault, KeyVaultPolicy } from '@votetorrent/vote-engine/rn';
 import type { KeyholderAcceptProvisioning, KeyholderDkgSigner, Signature, UserKey } from '@votetorrent/vote-core';
 import { UserKeyType } from '@votetorrent/vote-core';
 import type { KeyVaultStorage } from './key-vault';
-import { withKeyholderSession } from './keyholder-seat-vault';
+import { withKeyholderSession } from './keyholder-session';
 
 /** AsyncStorage key for the public-only identity store (point 4 above). */
 export const KEYHOLDER_IDENTITY_STORAGE_KEY = 'vt.keyholder-identities.v1';
