@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 # seed-election.sh - seed an all-host VoteTorrent election up to a chosen stage (2026-11-03).
 #
-# Drives the lean host rig (NOT in this repo; VT_LEAN_DIR, default ~/ILAB/VOTETORRENT/vt65-uat/rehearsal-2026-10-14/64-lean):
-# lean-part1.sh (officer founds the network, kh-a + kh-b join) and lean-part2.ts via run-lean.sh with SEED_STOP=<stage>.
-# For any stage short of "full" the host peers are HELD live after the stage (officer, kh-a, kh-b, and the host voters once
-# seeded) so you can carry on by hand (phones, dashboard). Ctrl-C releases them cleanly. Run dirs land in the rig (seed-<stamp>).
+# Drives the lean host rig in tools/lean-rig (see its README): lean-part1.sh (officer founds the network, kh-a + kh-b join) and
+# lean-part2.ts via run-lean.sh with SEED_STOP=<stage>. For any stage short of "full" the host peers are HELD live after the stage
+# (officer, kh-a, kh-b, and the host voters once seeded) so you can carry on by hand (phones, dashboard). Ctrl-C releases them cleanly.
+#
+# Machine-local inputs, both outside the repo (run dirs hold secrets):
+#   VT_LEAN_RUNS       run dirs (seed-<stamp>), default <checkout>/../vt-lean-runs
+#   VT_LEAN_RELAY_ENV  the relay to use, default $VT_LEAN_RUNS/relay.env (RELAY_MULTIADDR=, PEER_ID=, LAN_IP=, STARTED_AT=)
 #
 # Stages (each includes the ones before it):
 #   1 network     officer founds the network, mints the join code (secrets/n7-code.txt), kh-a + kh-b join
@@ -22,12 +25,11 @@
 # Env passed through to the driver: LEAN_DEBUG, SEED_HOLD_MIN (hold length override), SEED_HV_N (voters stage, default 2).
 set -u
 SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
-LEAN="${VT_LEAN_DIR:-$HOME/ILAB/VOTETORRENT/vt65-uat/rehearsal-2026-10-14/64-lean}"
-RIG="$(cd "$LEAN/.." 2>/dev/null && pwd)/64-rig"
-for f in lean-part1.sh run-lean.sh lean-part2.ts; do
-  [ -e "$LEAN/$f" ] || { echo "REFUSE: the lean rig is not at $LEAN (missing $f); set VT_LEAN_DIR"; exit 2; }
-done
-grep -q 'SEED_STOP' "$LEAN/lean-part2.ts" || { echo "REFUSE: $LEAN/lean-part2.ts has no SEED_STOP support (pre-2026-11-03 driver)"; exit 2; }
+REPO="$(cd "$(dirname "$SELF")/.." && pwd)"
+LEAN="$REPO/tools/lean-rig/lean"
+export VT_LEAN_RUNS="${VT_LEAN_RUNS:-$(dirname "$REPO")/vt-lean-runs}"
+export VT_LEAN_RELAY_ENV="${VT_LEAN_RELAY_ENV:-$VT_LEAN_RUNS/relay.env}"
+case "$VT_LEAN_RUNS/" in "$REPO/"*) echo "REFUSE: VT_LEAN_RUNS is inside the repo (run dirs hold secrets)"; exit 2 ;; esac
 cd "$LEAN" || exit 2
 
 STAGES="network election keyholders dkg voters full"
@@ -42,7 +44,7 @@ while [ $# -gt 0 ]; do
     --network) NET_NAME="${2:-}"; shift 2 ;;
     --title) TITLE="${2:-}"; shift 2 ;;
     --yes|-y) YES=1; shift ;;
-    -h|--help) sed -n '2,23p' "$SELF"; exit 0 ;;
+    -h|--help) awk 'NR > 1 && !/^#/ { exit } NR > 1' "$SELF"; exit 0 ;;
     *) STAGE="$(stage_of "$1")"; [ -n "$STAGE" ] || { echo "unknown stage: $1 (one of: $STAGES)"; exit 2; }; shift ;;
   esac
 done
@@ -53,8 +55,8 @@ if [ -n "$live" ]; then
   echo "REFUSE: another lean run is live (same party \"votetorrent\" on the relay; a second one forks the control network):"
   echo "$live"; exit 3
 fi
-[ -s "$RIG/state/relay.env" ] || { echo "REFUSE: no relay config at $RIG/state/relay.env"; exit 3; }
-relay_from="$(grep -E '^STARTED_AT=' "$RIG/state/relay.env" | cut -d= -f2-)"
+[ -s "$VT_LEAN_RELAY_ENV" ] || { echo "REFUSE: no relay config at $VT_LEAN_RELAY_ENV (see tools/lean-rig/README.md)"; exit 3; }
+relay_from="$(grep -E '^STARTED_AT=' "$VT_LEAN_RELAY_ENV" | cut -d= -f2-)"
 if [ -n "${LEAN_PHONE:-}${LEAN_PHONE_KH:-}${LEAN_PHONE_KH2:-}${LEAN_PHONE_VOTER:-}" ]; then
   echo "NOTE: LEAN_PHONE* is set - the driver will wait on phone flags (see KH2-PLAN.md). seed.sh is meant for all-host runs."
 fi
@@ -94,7 +96,8 @@ SHORT="$(date +%H%M)"
 NET_NAME="${NET_NAME:-Seed Network $SHORT}"
 TITLE="${TITLE:-seed-election-$SHORT}"
 BALLOT="seed-ballot-$STAMP"
-RD="$LEAN/seed-$STAMP"
+mkdir -p "$VT_LEAN_RUNS"; chmod 700 "$VT_LEAN_RUNS"
+RD="$VT_LEAN_RUNS/seed-$STAMP"
 HOLD_MIN="${SEED_HOLD_MIN:-}"
 [ "$STAGE" = network ] && [ -z "$HOLD_MIN" ] && HOLD_MIN=120
 # alarms: the driver (perl alarm, no cleanup) and the host voters must outlive the election + the hold
