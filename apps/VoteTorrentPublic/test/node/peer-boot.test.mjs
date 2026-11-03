@@ -53,16 +53,12 @@ function makeFakeDeps(overrides = {}) {
 
 	const subscribedTables = overrides.subscribedTables ?? ['TableA', 'TableB'];
 
-	const coordinatedRepoGet =
-		overrides.coordinatedRepoGet ??
-		(/** @param {any} blockGets */ async (blockGets) => {
-			/** @type {Record<string, any>} */
-			const out = {};
-			for (const blockId of blockGets.blockIds) {
-				out[blockId] = { block: { header: { id: blockId, type: 'header', collectionId: blockId }, headId: blockId, tailId: `${blockId}-tail-1` } };
-			}
-			return out;
-		});
+	// The strand read handle still needs the node's coordinatedRepo, but boot
+	// itself must never read through it: the watch service finds each tail.
+	const coordinatedRepoGet = async () => {
+		calls.push('coordinatedRepo.get');
+		return {};
+	};
 
 	/** @type {any} */
 	const fakeNode = overrides.omitCoordinatedRepo
@@ -79,12 +75,12 @@ function makeFakeDeps(overrides = {}) {
 	};
 
 	// A fake `db.schemaManager.getModule('optimystic').module.tables` map,
-	// mirroring the shape `resolveCollectionState` reaches into: one entry per
+	// mirroring the shape `resolveCollectionId` reaches into: one entry per
 	// subscribed table, keyed `app.<table lowercased>`, each holding a live
 	// `{ id, sync }` collection object two levels down
 	// (`vtable.collection.collection`). `overrides.missingCollectionTables`
 	// simulates a table this strand never instantiated (omit its entry
-	// entirely); `overrides.syncThrowsFor` simulates a `sync()` failure.
+	// entirely); `sync` records a call, which boot must never make.
 	const optimysticTables = new Map();
 	for (const table of subscribedTables) {
 		if (overrides.missingCollectionTables?.includes(table)) continue;
@@ -92,11 +88,9 @@ function makeFakeDeps(overrides = {}) {
 			collection: {
 				collection: {
 					id: `default/${table}`,
-					sync: overrides.syncThrowsFor?.includes(table)
-						? async () => {
-								throw new Error('sync failed');
-							}
-						: async () => {},
+					sync: async () => {
+						calls.push(`sync:${table}`);
+					},
 				},
 			},
 		});
@@ -117,6 +111,8 @@ function makeFakeDeps(overrides = {}) {
 
 	/** @type {any[]} */
 	const replicationHandles = [];
+	const fakeTails = { readTails: async () => new Map() };
+	const fakeReadRows = async () => [];
 
 	/** @type {any} */
 	const deps = {
@@ -124,14 +120,19 @@ function makeFakeDeps(overrides = {}) {
 		loadOrCreateSessionPeerKey: async () => ({ marker: 'fake-private-key' }),
 		createEdgeNode: /** @param {any} config */ async (config) => {
 			calls.push('createEdgeNode');
-			assert.equal(config.strandId, config.networkName, 'strandId must equal networkName -- strandIdForNetwork is identity');
+			assert.equal(config.networkName, `strand-${config.strandId}`, 'the Edge node must be built on the strand\'s network name (strand-<strandId>), the name every strand node and the strand read handle use');
 			return fakeEdgeNode;
 		},
 		openStrandReadHandle: async () => {
 			calls.push('openStrandReadHandle');
 			return fakeStrandReadHandle;
 		},
-		createStrandRowSource: () => ({ readRows: async () => [] }),
+		createStrandRowSource: () => ({ readRows: fakeReadRows }),
+		createPageTailReader: /** @param {any} node @param {string} networkName */ (node, networkName) => {
+			calls.push(`createPageTailReader:${networkName}`);
+			assert.equal(node, fakeNode, 'the tail reader must be built over the Edge node boot created');
+			return fakeTails;
+		},
 		openUiHandleForNetwork: async () => {
 			calls.push('openUiHandleForNetwork');
 			return fakeUiDb;
@@ -139,13 +140,15 @@ function makeFakeDeps(overrides = {}) {
 		closeNetworkDb: async () => {
 			calls.push('closeNetworkDb');
 		},
-		startPeerReplication: /** @param {any} options */ async (options) => {
-			assert.ok(options.collectionId instanceof Uint8Array, 'collectionId must be raw bytes, per ReactivitySubscriptionManagerOptions');
-			calls.push(`startPeerReplication:${new TextDecoder().decode(options.collectionId)}`);
-			const index = replicationHandles.length;
+		startPeerReplication: /** @param {any} options */ (options) => {
+			assert.equal(options.db, fakeUiDb, 'replication writes into the ui handle boot opened');
+			assert.equal(options.node, fakeNode);
+			assert.equal(options.tails, fakeTails, 'every watch shares the ONE tail reader boot built');
+			assert.equal(options.readRows, fakeReadRows, 'the SAME readRows closure serves every table');
+			calls.push(`startPeerReplication:${options.collections.map((/** @type {any} */ c) => `${c.table}=${c.collectionId}`).join(',')}`);
 			const handle = {
 				stop: async () => {
-					calls.push(`replication[${index}].stop`);
+					calls.push('replication.stop');
 				},
 			};
 			replicationHandles.push(handle);
@@ -192,7 +195,7 @@ test('CONFIG_FAULT: the "malformed" variant is propagated unchanged, verbatim', 
 // STARTED — the full happy path
 // ---------------------------------------------------------------------------
 
-test('STARTED: every step runs once per subscribed table, with the correct per-table collectionId/tailId, and the SAME readRows closure shared across every subscription', async () => {
+test('STARTED: one replication watches every subscribed table by its collection id, over one tail reader and the SAME readRows closure', async () => {
 	const { deps, calls } = makeFakeDeps({ subscribedTables: ['TableA', 'TableB', 'TableC'] });
 	const result = await startPublicPeerBoot({ networkHash: 'nh-1', electionId: 'el-1', deps });
 
@@ -203,9 +206,17 @@ test('STARTED: every step runs once per subscribed table, with the correct per-t
 
 	assert.deepEqual(
 		calls.filter((c) => c.startsWith('startPeerReplication:')),
-		['startPeerReplication:default/TableA', 'startPeerReplication:default/TableB', 'startPeerReplication:default/TableC'],
-		'one subscription per table, keyed by the default collection URI transform',
+		['startPeerReplication:TableA=default/app/TableA,TableB=default/app/TableB,TableC=default/app/TableC'],
+		'one replication, one watched collection per table, keyed by the plugin\'s default collection URI (tree://default/app/<Table>)',
 	);
+	assert.deepEqual(calls.filter((c) => c.startsWith('createPageTailReader:')), ['createPageTailReader:strand-nh-1'], 'one tail reader, over the network the node was built for');
+});
+
+test('STARTED: boot neither syncs a collection nor reads a header block -- a table that has never committed does not fail the page', async () => {
+	const { deps, calls } = makeFakeDeps({ subscribedTables: ['TableA', 'TableB'] });
+	const result = await startPublicPeerBoot({ networkHash: 'nh-1', deps });
+	assert.equal(result.status, PEER_BOOT_STATUS.STARTED);
+	assert.deepEqual(calls.filter((c) => c.startsWith('sync:') || c === 'coordinatedRepo.get'), []);
 });
 
 test('STARTED: a missing coordinatedRepo attachment on the constructed node is FAILED, naming "coordinatedRepo"', async () => {
@@ -215,14 +226,14 @@ test('STARTED: a missing coordinatedRepo attachment on the constructed node is F
 	assert.equal(result.subject, 'coordinatedRepo');
 });
 
-test('FAILED: a table with no live collection object throws PeerBootError naming the table, and boot reports FAILED with that table as the subject', async () => {
-	const { deps } = makeFakeDeps({
-		subscribedTables: ['TableA'],
-		missingCollectionTables: ['TableA'],
+test('STARTED: a table the strand read handle has not instantiated yet does not fail boot -- the collection id is computed, not looked up (mesh-read gate 2026-11-03, subject Election)', async () => {
+	const { deps, calls } = makeFakeDeps({
+		subscribedTables: ['TableA', 'TableB'],
+		missingCollectionTables: ['TableA', 'TableB'],
 	});
 	const result = await startPublicPeerBoot({ networkHash: 'nh-1', deps });
-	assert.equal(result.status, PEER_BOOT_STATUS.FAILED);
-	assert.equal(result.subject, 'TableA');
+	assert.equal(result.status, PEER_BOOT_STATUS.STARTED);
+	assert.deepEqual(calls.filter((c) => c.startsWith('startPeerReplication:')), ['startPeerReplication:TableA=default/app/TableA,TableB=default/app/TableB']);
 });
 
 test('a thrown PeerBootError\'s own subject survives to the FAILED result unchanged', async () => {
@@ -239,14 +250,14 @@ test('a thrown PeerBootError\'s own subject survives to the FAILED result unchan
 // stop() — idempotent, fixed teardown order
 // ---------------------------------------------------------------------------
 
-test('stop() tears down replications (reverse order), then the strand-read handle, then the Edge node, then the ui db -- and is idempotent', async () => {
+test('stop() tears down the replication, then the strand-read handle, then the Edge node, then the ui db -- and is idempotent', async () => {
 	const { deps, calls } = makeFakeDeps({ subscribedTables: ['TableA', 'TableB'] });
 	const result = await startPublicPeerBoot({ networkHash: 'nh-1', deps });
 	assert.equal(result.status, PEER_BOOT_STATUS.STARTED);
 
 	calls.length = 0; // only care about stop()'s own call order from here
 	await result.stop();
-	assert.deepEqual(calls, ['replication[1].stop', 'replication[0].stop', 'strandReadHandle.close', 'edgeNode.stop', 'closeNetworkDb']);
+	assert.deepEqual(calls, ['replication.stop', 'strandReadHandle.close', 'edgeNode.stop', 'closeNetworkDb']);
 
 	calls.length = 0;
 	await result.stop(); // idempotent: second call does nothing

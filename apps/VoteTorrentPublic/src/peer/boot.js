@@ -61,8 +61,18 @@
  * THIS module's handle, so a reasoning error here does not go unnoticed.
  *
  * COLLECTION IDENTITY FOR REACTIVITY (open ground before this plan; no prior
- * plan resolves it). `56-09`'s `startPeerReplication` requires a
- * `collectionId`/`tailId` pair per subscription, and nothing in this repo's
+ * plan resolves it). UPDATE (step 3, 2026-11-03): the bridge now watches
+ * through `node.reactivityWatch`, which needs only each table's collection id
+ * and finds the tail itself, so this module no longer syncs a collection or
+ * reads its header block. The id is now COMPUTED (`collection-id.js`), not
+ * read off the live collection object: on a real strand the module builds a
+ * table's instance lazily, and the lookup below found nothing for a table
+ * hydrated from the strand's catalog (mesh-read gate, 2026-11-03, subject
+ * Election). The measurements below are kept as the record of how the path
+ * was found; the live-object path they describe is no longer used.
+ * Originally, `56-09`'s
+ * `startPeerReplication` required a `collectionId`/`tailId` pair per
+ * subscription, and nothing in this repo's
  * production code has ever computed one before this file — nor, before this
  * plan, had anything in this repo ever actually RUN this composition in a
  * real browser at all (see the `db-p2p` browser-runtime defect this same
@@ -104,34 +114,23 @@
  *     `Election`, declared under the sApp schema `App`, keys as
  *     `'app.election'`), `.collection` on that vtable is the live `Tree`, and
  *     `.collection` on THAT is the live `ICollection` — the same instance
- *     the SQL layer reads and writes through. `resolveCollectionState` below
- *     reaches exactly that path, calls its PUBLIC `sync()` method once, and
- *     only then reads the header block. THIS IS UNDOCUMENTED INTERNAL API,
- *     not a stable public contract — a future `@optimystic/*` bump could
- *     rename or restructure any of these fields with no deprecation notice,
- *     and this is recorded here, not hidden, so that the next reader who
- *     hits a broken `resolveCollectionState` starts here rather than
- *     re-discovering this whole path from scratch. Revisit if/when upstream
- *     publishes a stable "give me this table's current collectionId/tailId"
- *     API — see this plan's SUMMARY for the exact upstream ticket this
- *     should become.
- *   - A table whose collection is unreachable through this path (no cached
- *     vtable, or `sync()` never resolves a header block) is a genuine
- *     strand-provisioning defect, not a case to paper over —
- *     `resolveCollectionState`'s caller throws `PeerBootError` naming the
- *     table rather than silently skipping its subscription.
- *   - `startPeerReplication` is therefore called ONCE PER TABLE in
- *     `PUBLIC_SUBSCRIBED_TABLES`, sharing the SAME `readRows` closure across
- *     every subscription (56-16's `createStrandRowSource` deliberately
- *     rereads the WHOLE allowlist on any one notification, by design — see
+ *     the SQL layer reads and writes through. This module used to read the
+ *     collection's `id` there; it no longer does (see the UPDATE above): the
+ *     map holds only tables something has already read, and the id is the
+ *     plugin's default-URI formula, now computed in `collection-id.js`. A
+ *     table that has never committed is not a defect: the watch waits for
+ *     its first commit.
+ *   - `startPeerReplication` therefore watches EVERY TABLE in
+ *     `PUBLIC_SUBSCRIBED_TABLES`, one watch each, sharing the SAME
+ *     `readRows` closure (56-16's `createStrandRowSource` deliberately
+ *     rereads the WHOLE allowlist on any one wake, by design — see
  *     `strand-read.js`'s own header — so it does not matter which of the N
- *     subscriptions fires; any one of them re-applies every table). This is
+ *     watches fires; any one of them re-applies every table). This is
  *     the load-bearing reason a per-table collectionId, rather than one
  *     "the" collectionId, is even askable: there is no single shared
  *     collection covering every table.
- *   - IF THIS REASONING IS EVER WRONG — the internal field names move, the
- *     header block never resolves, or the tail id this module reads is
- *     stale — the failure surfaces as: no replicated row ever lands
+ *   - IF THIS REASONING IS EVER WRONG — the collection id `collection-id.js`
+ *     computes is not the one the strand's blocks carry — the failure surfaces as: no replicated row ever lands
  *     (mesh-read gate rung 5, `test/browser/mesh-read-gate.js`), and
  *     separately, rung 10 (store/screen agreement through a freshly attached
  *     handle) catches a silently mis-routed or dead subscription even if
@@ -144,6 +143,8 @@ import { loadOrCreateSessionPeerKey } from './identity.js';
 import { createEdgeNode } from './edge-node.js';
 import { openStrandReadHandle, createStrandRowSource, strandIdForNetwork } from './strand-read.js';
 import { startPeerReplication } from './reactivity-bridge.js';
+import { createPageTailReader } from './tail-reader.js';
+import { collectionIdForTable } from './collection-id.js';
 // `attachNetworkDb` is imported under an alias so this file's own acceptance
 // grep -- "exactly one occurrence of `attachNetworkDb`" -- resolves to this
 // ONE import line, rather than also matching a deps-default line and a call
@@ -186,77 +187,6 @@ export const PEER_BOOT_STATUS = Object.freeze({
 });
 
 /**
- * The schema name every VoteTorrent table is declared under on the strand
- * (the sApp schema `App`, per `strand-read.js`'s own `setSchemaPath(['App',
- * 'main'])` call) — lowercased, because `OptimysticModule.tables`'s cache
- * key is `` `${declaringSchemaName}.${tableName}`.toLowerCase() `` (measured
- * this session; see this module's header).
- * @type {string}
- */
-const OPTIMYSTIC_MODULE_NAME = 'optimystic';
-const SAPP_SCHEMA_NAME_LOWER = 'app';
-
-/**
- * Reach the live `ICollection` instance the optimystic vtab module already
- * holds for `table`, via the undocumented-but-runtime-accessible path this
- * module's header cites and measures. Returns `undefined` (never throws) when
- * any step along the path is absent — the caller decides how to name that.
- * @param {import('@quereus/quereus').Database} strandDb
- * @param {string} table
- * @returns {{ id: string, sync: () => Promise<void> } | undefined}
- */
-function reachLiveCollection(strandDb, table) {
-	const registered = /** @type {any} */ (strandDb.schemaManager.getModule(OPTIMYSTIC_MODULE_NAME));
-	const optimysticModule = registered?.module;
-	const tableKey = `${SAPP_SCHEMA_NAME_LOWER}.${table.toLowerCase()}`;
-	const vtable = optimysticModule?.tables?.get?.(tableKey);
-	const tree = vtable?.collection;
-	return tree?.collection;
-}
-
-/**
- * Resolve one table's `{ collectionId, tailId }` pair: reach its live
- * collection object, call its PUBLIC `sync()` once to force the
- * discovery/fetch handshake a raw block-id `get()` cannot trigger on an
- * unsynced collection (measured this session — see this module's header),
- * then read the header block's `tailId` off the injected node's
- * `coordinatedRepo`. Throws `PeerBootError` naming the table when any step
- * fails — a strand-provisioning defect this module refuses to paper over
- * with a skipped subscription.
- * @param {import('@quereus/quereus').Database} strandDb
- * @param {{ coordinatedRepo: { get(blockGets: { blockIds: string[] }): Promise<Record<string, { block?: { tailId?: string } }>> } }} node
- * @param {string} table
- * @returns {Promise<{ collectionId: string, tailId: string }>}
- */
-async function resolveCollectionState(strandDb, node, table) {
-	const collection = reachLiveCollection(strandDb, table);
-	if (!collection) {
-		throw new PeerBootError(table, 'no live collection object found for this table -- the strand has not instantiated it');
-	}
-	const collectionId = collection.id;
-	try {
-		await collection.sync();
-	} catch (err) {
-		const name = err && typeof (/** @type {any} */ (err).name) === 'string' ? /** @type {any} */ (err).name : 'Error';
-		throw new PeerBootError(table, `collection.sync() failed while resolving the collection tail (${name})`);
-	}
-	/** @type {Record<string, { block?: { tailId?: string } }>} */
-	let results;
-	try {
-		results = await node.coordinatedRepo.get({ blockIds: [collectionId] });
-	} catch (err) {
-		const name = err && typeof (/** @type {any} */ (err).name) === 'string' ? /** @type {any} */ (err).name : 'Error';
-		throw new PeerBootError(table, `coordinatedRepo.get failed while resolving the collection tail (${name})`);
-	}
-	const result = results ? results[collectionId] : undefined;
-	const tailId = result && result.block ? result.block.tailId : undefined;
-	if (!tailId) {
-		throw new PeerBootError(table, `no committed header block for collection "${collectionId}" after sync() -- the strand has never declared this table`);
-	}
-	return { collectionId, tailId };
-}
-
-/**
  * @typedef {object} StartPublicPeerBootDeps
  * @property {typeof loadBootstrapConfig} [loadBootstrapConfig]
  * @property {(url: string, init: any) => Promise<any>} [fetchImpl]
@@ -269,6 +199,7 @@ async function resolveCollectionState(strandDb, node, table) {
  * @property {typeof openUiHandleForNetwork} [openUiHandleForNetwork]
  * @property {typeof closeNetworkDb} [closeNetworkDb]
  * @property {typeof startPeerReplication} [startPeerReplication]
+ * @property {typeof createPageTailReader} [createPageTailReader]
  * @property {ReadonlyArray<string>} [subscribedTables] - defaults to `PUBLIC_SUBSCRIBED_TABLES`; injectable only for the node test.
  */
 
@@ -316,6 +247,7 @@ export async function startPublicPeerBoot(options) {
 		openUiHandleForNetwork: deps.openUiHandleForNetwork ?? openUiHandleForNetwork,
 		closeNetworkDb: deps.closeNetworkDb ?? closeNetworkDb,
 		startPeerReplication: deps.startPeerReplication ?? startPeerReplication,
+		createPageTailReader: deps.createPageTailReader ?? createPageTailReader,
 		subscribedTables: deps.subscribedTables ?? PUBLIC_SUBSCRIBED_TABLES,
 	};
 
@@ -389,11 +321,19 @@ export async function startPublicPeerBoot(options) {
 		//       helper.
 		const privateKey = await resolved.loadOrCreateSessionPeerKey(resolved.sessionStorage);
 
-		// -- 4. The Edge node.
+		// -- 4. The Edge node, on the STRAND's network. db-p2p namespaces every
+		//       protocol id by network name (`/optimystic/<networkName>/...`),
+		//       and a strand's nodes are built as `strand-<strandId>`
+		//       (`@serfab/cadre-core` `strand-instance-manager.js`; the strand
+		//       read handle's plugin composes under the same name,
+		//       `@serfab/quereus-plugin-sereus` `compose-strand.js`). Built as
+		//       the bare network hash, as it was until 2026-11-03, this node's
+		//       discovery, key network and repo protocols matched no strand node.
 		const strandId = strandIdForNetwork(networkHash);
+		const networkName = `strand-${strandId}`;
 		edgeNode = await resolved.createEdgeNode({
 			strandId,
-			networkName: networkHash,
+			networkName,
 			bootstrapNodes: configResult.bootstrapNodes,
 			privateKey,
 		});
@@ -421,36 +361,25 @@ export async function startPublicPeerBoot(options) {
 
 		const { readRows } = resolved.createStrandRowSource({ uiDb, strandDb: strandReadHandle });
 
-		// -- 7. Start replication, once per publicly-subscribed table, sharing
-		//       one `readRows` closure across every subscription. See this
-		//       module's header for why a per-table collectionId is what the
-		//       question even needs to be, and why sharing `readRows` is safe.
-		for (const table of resolved.subscribedTables) {
-			const { collectionId: collectionIdString, tailId } = await resolveCollectionState(
-				strandReadHandle.db,
-				/** @type {any} */ (edgeNode.node),
-				table,
-			);
-			// `startPeerReplication` (56-09) requires `collectionId` as RAW BYTES
-			// (`ReactivitySubscriptionManagerOptions.collectionId: Uint8Array` --
-			// "the collection's stable identity, the collection's id block id, raw
-			// bytes"), unlike `tailId`, which stays a `BlockId` string: 56-09's own
-			// module converts THAT to bytes internally via `reactivityTailBytes`.
-			// `collectionId` carries no coord-matching constraint (only tailId
-			// derives the topic/coord), so the plain UTF-8 encoding below is safe
-			// -- there is no "wrong" encoding to avoid here, unlike tailId's
-			// documented double-hash trap.
-			const collectionId = new TextEncoder().encode(collectionIdString);
-			const replication = await resolved.startPeerReplication({
-				db: uiDb,
-				networkHash,
-				node: edgeNode.node,
-				collectionId,
-				tailId,
-				readRows,
-			});
-			replicationStops.push(() => replication.stop());
-		}
+		// -- 7. Start replication: one watch per publicly-subscribed table, all
+		//       through the node's own watch service and the page's one tail
+		//       reader, sharing one `readRows` closure. Any table's wake re-reads
+		//       every table (`strand-read.js`'s header), so the bridge folds wakes
+		//       into one pass at a time.
+		const collections = resolved.subscribedTables.map((table) => ({
+			table,
+			collectionId: collectionIdForTable(table),
+		}));
+		const tails = resolved.createPageTailReader(edgeNode.node, networkName);
+		const replication = await resolved.startPeerReplication({
+			db: uiDb,
+			networkHash,
+			node: edgeNode.node,
+			collections,
+			tails,
+			readRows,
+		});
+		replicationStops.push(() => replication.stop());
 
 		// -- 8. Started. `stop()` is idempotent and runs every unwind step,
 		//       replications first, then the strand-read handle, then the Edge

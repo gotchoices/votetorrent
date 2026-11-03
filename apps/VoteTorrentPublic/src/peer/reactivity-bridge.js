@@ -1,5 +1,5 @@
 /**
- * reactivity-bridge.js — verified peer notification -> one injected `Database`
+ * reactivity-bridge.js — a network wake (node.reactivityWatch) -> one injected `Database`
  * handle -> `notifyPeerWrite`. `56-09`'s replication seam, restated in this
  * module's own words for this module's own setting (do not import
  * `snapshot-restore.js`'s argument by analogy):
@@ -14,19 +14,22 @@
  *    signed and has no signing context for. A peer-replicated row is
  *    exactly that shape.
  *
- * 2. WHY THE TRUST POSTURE IS SATISFIED HERE. The seam's precondition is a
- *    trusted origin. In THIS flow the origin is trusted because the
- *    notification carried a THRESHOLD SIGNATURE over the commit-vote
- *    payload — verified by db-core's own delivery path
- *    (`ReactivitySubscriptionManager.onNotification`) against the cached
- *    tail-cohort `MembershipCertV1` — before `deliver` (this module's
- *    `onVerifiedNotification`) is ever called. That verification plays the
- *    role `verifySnapshot`'s out-of-band digest plays for
- *    `snapshot-restore.js`. What it buys, stated plainly: it authenticates
- *    that the SERVING COHORT COMMITTED this revision. What it does NOT buy:
- *    it does not re-check a single column value, because nothing on this
- *    path runs a CHECK, UNIQUE or FK constraint. T-56-09-03 in this plan's
- *    threat model records that residual as accepted, not overlooked.
+ * 2. WHY THE TRUST POSTURE IS SATISFIED HERE. The rows this module applies
+ *    are never taken from what woke it. Every wake -- a notification, a
+ *    landing in this node's storage, or the watch service's tick -- leads to
+ *    the same `readRows()`, which re-reads every public table through the
+ *    strand read handle's NETWORK transactor (`strand-read.js` asserts it
+ *    resolved to `'network'`), from the cohort that serves the strand. So the
+ *    rows have one provenance whatever woke the page: the serving cohort's
+ *    committed blocks. The wake is checked too, as far as a wake can be:
+ *    `node.reactivityWatch` builds one `ReactivitySubscriptionManager` per
+ *    collection, and a socket-delivered notification reaches no watcher until
+ *    that manager has verified its THRESHOLD SIGNATURE against the cached
+ *    root-group membership. A tick or a local landing that wakes the page
+ *    falsely costs one extra re-read and nothing else: a value-identical
+ *    re-apply reports no change (T-56-09-05). What none of this buys, stated
+ *    plainly: nothing on this path re-runs a CHECK, UNIQUE or FK constraint.
+ *    T-56-09-03 records that residual as accepted, not overlooked.
  *
  * 3. THE STANDING RULE AND ITS BOUNDARY. "Write through `vote-engine`,
  *    never the raw Quereus `Database` handle" governs AUTHORITY ACTIONS — a
@@ -66,222 +69,50 @@
  * paragraph deliberately does not repeat, to keep that grep meaningful
  * rather than self-tripping.
  *
- * RESEARCH OPEN QUESTION 3, ANSWERED. The two untyped `OptimysticNode`
- * attachments this module reads (`node.cohortTopicHost.service`,
- * `node.reactivitySubscribers`) are deliberately excluded from
- * `OptimysticNodeAttachments` — `optimystic-node.d.ts`'s own docstring names
- * them as node-internal wiring, not a host-facing surface. Both exist only
- * when the node was built with `cohortTopic.enabled === true` over a live
- * FRET service (`@optimystic/db-p2p` `libp2p-node-base.js:1095-1110`), so a
- * missing attachment is a NODE-CONSTRUCTION DEFECT and must surface as a
- * named error at start (`resolveCohortTopicService` /
- * `resolveSubscriberRegistry`), never as a subscription that quietly never
- * fires. RESEARCH's own Priority-Question-6 sketch — constructing a second
- * instance of db-p2p's libp2p-backed notify-transport class and calling its
- * `onNotification` — is WRONG on the transport: `createLibp2pNode` already
- * constructs one such instance, already registers the inbound protocol
- * handler against THAT instance, and already routes decoded frames into
- * `reactivitySubscribers.deliver(topicId, n)`. A
- * second transport object owns no protocol handler and would never be
- * reached. This module registers on the node-level registry instead — the
- * sanctioned Edge-side seam upstream itself says is unbuilt
- * (`libp2p-node-base.js:1197-1199`: "the Quereus `Database.watch` -> manager
- * bridge that CONSTRUCTS managers stays the backlog item
- * `optimystic-network-reactive-watch-integration-test`").
+ * THE SUBSCRIPTION IS THE NODE'S, NOT THIS MODULE'S (step 3 of the
+ * 2026-11-02 recommended order). This module used to build its own
+ * `ReactivitySubscriptionManager` per table, register it on the node's
+ * subscriber registry, retry `register()` against `CohortBackoffError` and
+ * drive its own ttl/3 renewal timer -- and the page failed to boot when the
+ * cohort never accepted. `node.reactivityWatch` (`@optimystic/db-p2p`
+ * `ReactivityCollectionWatch`, the surface `optimystic-node.d.ts` names for
+ * hosts) now does all of that: one subscription per collection, renewed at
+ * the profile's cadence, following the tail on a rotation, and retried in the
+ * background when a registration fails. It also runs a tick that reads each
+ * watched collection's committed tail, so a lost notification, a failed
+ * registration or an unannounced commit costs at most one tick of delay
+ * instead of a page that silently stops updating. The tick reads through the
+ * page's one tail reader (`tail-reader.js`). A node built without
+ * `cohortTopic.enabled` has no watch service; that is a node-construction
+ * defect and fails `startPeerReplication` by name (`resolveWatchService`),
+ * never a page that quietly never updates.
  *
- * THE OPEN SEAM THIS MODULE DOES NOT CLOSE. `NotificationV1` carries no rows
- * (`db-core` `wire.d.ts:46-87` — verified by reading it, not assumed): there
- * is no field a row could arrive in. Reading the changed collection is the
- * injected `readRows` contract. Nothing in `56-05`/`56-02` builds a browser
- * strand read path yet (see this plan's `<open_seam>`), so `readRows` is a
- * REQUIRED option with no default, no stub and no "static for now" variant:
- * `startPeerReplication` throws `PeerReplicationError` when it is absent. A
- * bridge that silently replicated nothing would be the exact failure this
- * phase exists to prevent. `56-16` owns the production `readRows`
- * implementation (`strand-read.js`); this module does not create that file.
+ * ONE RUN AT A TIME. `readRows` re-reads the whole allowlist, so a wake from
+ * any table is a wake for all of them. Wakes are folded: while a run is in
+ * progress, any number of further wakes cause exactly one more run after it.
+ *
+ * WHY `readRows` TAKES NO ARGUMENT. A wake carries no payload (the watch
+ * service's `onChange` is coarse by design), and `NotificationV1` carries no
+ * rows either (`db-core` `wire.d.ts`). Reading the changed collections is the
+ * injected `readRows` contract, which `strand-read.js` implements. It is a
+ * REQUIRED option with no default: a bridge that silently replicated nothing
+ * would be the exact failure this module exists to prevent.
  *
  * ERROR HYGIENE, same discipline as `subscribe.js` and
  * `snapshot-restore.js`: only an error's `name` is ever logged, never its
- * message and never the notification or a row.
+ * message and never a row.
  *
  * DOES NOT PROVE: the browser page re-renders (`56-11`'s liveness proof) or
  * the D-16 production-variant inversion (`56-13`, which rebuilds a
- * genuinely mutated bundle rather than transforming a source copy — see
+ * genuinely mutated bundle rather than transforming a source copy -- see
  * Task 3's isolation control). Nothing in this module is imported from
  * `main.tsx`.
- *
- * 6. THIS MODULE OWNS A RECURRING TIMER (56-17). The substrate schedules
- *    NOTHING on its own: `RegistrationHandle.renewal` is documented as "the
- *    ttl/3 ping loop" the SCHEDULER should call
- *    (`@optimystic/db-core` `dist/src/cohort-topic/registration/renewal.d.ts:38`),
- *    and nothing in `db-core` or `db-p2p` ever calls it. Without a caller
- *    driving it, every subscription silently dies one Edge TTL (60s) after
- *    `register()` — `project_stale_screen_mimics_lost_write`, at the
- *    transport layer. `startPeerReplication` therefore schedules its OWN
- *    interval, at `PEER_RENEWAL_FRACTION` (`ttl/3`) of the RESOLVED
- *    subscriber TTL (read via `subscriberTtlForProfile(profile)`, never a
- *    hard-coded `60000`/`20000` literal), calling `manager.renew()` on each
- *    tick. `stop()` clears this timer FIRST, before unregistering and
- *    withdrawing. This is the recurring OUTBOUND signal
- *    `56-17-COHORT-TOPIC-POSTURE.md` accounts for when it states what a
- *    gateway operator (and the serving cohort) can observe about a visitor —
- *    see that record for the full reasoning and the falsifiable predictions
- *    this cadence makes. It is separate from, and does not replace,
- *    `edge-node.js`'s cohort-topic HOST gossip timer, which idles while this
- *    browser's coord registry stays empty.
- *
- * 7. THIS MODULE WIRES A DIAGNOSTIC-ONLY PROBE AT THE EXHAUSTED-RETRY SITE
- *    (56-20). `fret-routing-probe.js`'s `probeFretRouting` reads the exact
- *    inputs FRET's own in-cluster branch reads -- never dials, never writes,
- *    installs no timer, and cannot change what is thrown here: the SAME
- *    `PeerReplicationError` is constructed with the SAME message immediately
- *    after the probe's one console line is emitted. This exists to turn
- *    56-19's stopping hypothesis (that this browser's own participant walk
- *    resolves its root/bootstrap coordinate back to ITSELF) into a
- *    measurement rather than a reading -- see
- *    `56-20-SELF-DISPATCH-MEASUREMENT.md` for the verdicts this measurement
- *    licenses. `56-20` authors no fix here; only `56-21` may act on it.
- *
- * 8. A SECOND, EARLIER PROBE SAMPLE (56-20 AMENDMENT). `56-20`'s own record
- *    named its unresolved question: `connectionCount: 0` on both its runs
- *    could mean either "the ring entry was never backed by a real
- *    connection" or "a real connection was open earlier and had already
- *    closed by the exhausted-retry sample, ~20s of elapsed backoff later".
- *    This module calls `probeFretRouting` a SECOND time, immediately after
- *    `registry.register(...)` and BEFORE the retry loop's very first
- *    `register()` attempt -- i.e. before any `CohortBackoffError` backoff has
- *    elapsed at all, the earliest point in this module's own control flow at
- *    which the subscription topic is known and a connectionCount reading is
- *    meaningful. Same restraints as the original call: never dials, never
- *    writes, installs no timer, wrapped in its own try/catch caught with
- *    `logFailure` (name only), and cannot change what this function throws.
- *    Emitted under its OWN prefix, `FRET_ROUTING_PROBE_EARLY_PREFIX`, never
- *    reusing the original prefix -- two lines sharing one prefix would be
- *    ambiguous to a driver grepping the log for which sample is which. See
- *    `56-20-SELF-DISPATCH-MEASUREMENT.md`'s `## Amendment` section for the
- *    grading rule this earlier sample is evaluated against.
- *
- * 9. THE CONNECTION-LIFECYCLE SNAPSHOT AND ITS CONDITIONAL BOUNDED DIAL
- *    (56-24). At the SAME exhausted-retry site as points 7 and 8, immediately
- *    after the routing-probe line, this module emits
- *    `connectionLifecycleSnapshot(node)`'s payload under
- *    `CONNECTION_LIFECYCLE_PROBE_PREFIX`. Only when that snapshot reports
- *    `openObserved === 0` -- i.e. the passive tap never saw a completed
- *    connection -- does it also fire `probeBootstrapDial`'s ONE bounded dial
- *    and emit its result under the SAME prefix: an already-connected browser
- *    is never dialled again by a diagnostic. The target peer-id string is
- *    derived from the routing-probe payload already computed at this site
- *    (the first `fretPeerIds` entry that is not `selfPeerId`), never
- *    re-derived a second way; a missing or non-array `fretPeerIds` yields a
- *    named skip reason rather than an exception. Both emissions are wrapped
- *    in their own try/catch, caught with `logFailure` (name only), and
- *    cannot change what this function throws: the SAME `PeerReplicationError`
- *    follows unconditionally, exactly as points 7 and 8 already guarantee.
- *    `56-24-CONNECTION-MEASUREMENT.md` is the record this measurement feeds.
  */
 
-import { edgeProfile, reactivityCollectionTopicId, DEFAULT_SUPER_MAJORITY_THRESHOLD, CohortBackoffError, subscriberTtlForProfile } from '@optimystic/db-core';
-import { ReactivitySubscriptionManager, reactivityTailBytes, peerIdToBytes } from '@optimystic/db-p2p';
-import { probeFretRouting, FRET_ROUTING_PROBE_PREFIX } from './fret-routing-probe.js';
-import { connectionLifecycleSnapshot, probeBootstrapDial, CONNECTION_LIFECYCLE_PROBE_PREFIX } from './connection-lifecycle-probe.js';
 import { PUBLIC_SUBSCRIBED_TABLES, STORE_MODULE_NAME, notifyPeerWrite } from '@votetorrent/web-data/public';
 
 /** The one prefix every log line in this module carries. @type {string} */
 const LOG_PREFIX = 'peer/reactivity-bridge:';
-
-/**
- * The prefix for the SECOND, EARLIER `probeFretRouting` sample (56-20
- * AMENDMENT, module header point 8) -- deliberately distinct from
- * `FRET_ROUTING_PROBE_PREFIX` so a driver grepping the captured log can tell
- * the pre-retry-loop sample apart from the original exhausted-retry sample.
- * @type {string}
- */
-const FRET_ROUTING_PROBE_EARLY_PREFIX = 'FRET_ROUTING_PROBE_EARLY=';
-
-/**
- * Bound on `register()` attempts against a `CohortBackoffError` (56-17). The
- * substrate documents this error as the expected cold-start signal — "a
- * cohort with no willing primary yet" (`@optimystic/db-core`
- * `dist/src/cohort-topic/service.d.ts:56-60`) — so seeing it once or twice on
- * boot is normal, not a fault. A cohort that NEVER produces a willing primary
- * is a misconfiguration and must surface as a named `PeerReplicationError`
- * rather than retry forever.
- * @type {5}
- */
-export const PEER_REGISTER_MAX_ATTEMPTS = 5;
-
-/**
- * The substrate's own renewal cadence: a participant pings its primary every
- * `ttl/3` (`@optimystic/db-core` `dist/src/cohort-topic/registration/renewal.d.ts:38`
- * — "the cadence the scheduler should call `pingLoop` at"). This module
- * applies the same fraction to the RESOLVED subscriber TTL to derive its own
- * renewal interval — see `startPeerReplication`'s renewal-scheduling comment
- * for which value that TTL is read from.
- * @type {number}
- */
-export const PEER_RENEWAL_FRACTION = 1 / 3;
-
-/**
- * A ceiling on any single backoff wait, independent of what a
- * `CohortBackoffError.afterMs` reports. This is this MODULE's own safety
- * bound, not a substrate value — it exists so an unusually large or
- * misbehaving `afterMs` cannot stall one register attempt (and therefore
- * page boot) for an outsized period.
- * @type {10000}
- */
-const REGISTER_BACKOFF_CEILING_MS = 10_000;
-
-/**
- * The cohort-topic want-window size actually in force for this registration attempt (56-20's
- * `fret-routing-probe.js` diagnostic ONLY — this constant is never threaded into the real
- * registration path, which never sets it either). `edge-node.js` deliberately leaves
- * `cohortTopic.wantK` unset (56-17, so both this browser and the origin resolve the SAME
- * default), and that default is db-p2p's own top-level `cohortWantK`, resolved as
- * `options.cohortTopic?.wantK ?? 16` (`@optimystic/db-p2p` `dist/src/libp2p-node-base.js:177`) —
- * NOT FRET's own internal `cfg.k` default of 15 (pre-verified fact 5,
- * `56-20-SELF-DISPATCH-MEASUREMENT.md`), which only applies when a message never carries an
- * explicit `want_k`, and `FretTopicRouter`'s messages always do. Neither value is exposed on
- * `node.services.fret` for this module to read back, so this is a measured citation into
- * installed `dist/`, not a guess -- if a future run's data contradicts it, the run wins.
- * @type {16}
- */
-const DIAGNOSTIC_COHORT_WANT_K = 16;
-
-/**
- * Bound for the one conditional bounded dial `probeBootstrapDial` performs
- * at the exhausted-retry site (56-24 module header point 9). This module's
- * OWN safety bound, independent of the substrate — mirrors
- * `REGISTER_BACKOFF_CEILING_MS`'s own reasoning: a diagnostic dial must never
- * be allowed to stall boot for an unbounded period.
- * @type {8000}
- */
-const CONNECTION_LIFECYCLE_DIAL_TIMEOUT_MS = 8000;
-
-/**
- * Derives the one dial target `probeBootstrapDial` needs from the routing
- * probe payload the exhausted-retry site already computed — the first
- * `fretPeerIds` entry that is not `selfPeerId` — never re-derived a second
- * way. Never throws: a missing or non-array `fretPeerIds`, or a routing
- * probe that itself reported `available: false`, yields a named skip reason
- * instead of an exception.
- * @param {any} routingProbe - the SAME payload already emitted under `FRET_ROUTING_PROBE_PREFIX` at this site.
- * @returns {{ targetPeerIdString: string, reason: undefined } | { targetPeerIdString: undefined, reason: string }}
- */
-function deriveDialTargetFromRoutingProbe(routingProbe) {
-	if (!routingProbe || typeof routingProbe !== 'object' || routingProbe.available !== true) {
-		return { targetPeerIdString: undefined, reason: 'routing-probe-unavailable' };
-	}
-	const fretPeerIds = routingProbe.fretPeerIds;
-	if (!Array.isArray(fretPeerIds)) {
-		return { targetPeerIdString: undefined, reason: 'fretPeerIds-not-array' };
-	}
-	const selfPeerId = routingProbe.selfPeerId;
-	const target = fretPeerIds.find((/** @type {any} */ id) => typeof id === 'string' && id !== selfPeerId);
-	if (!target) {
-		return { targetPeerIdString: undefined, reason: 'no-non-self-peer' };
-	}
-	return { targetPeerIdString: target, reason: undefined };
-}
 
 /**
  * Chunk size for `applyExternalRowChanges` batches — bounds peak memory for a
@@ -318,51 +149,6 @@ export class PeerReplicationError extends Error {
 function logFailure(err) {
 	const name = err && typeof (/** @type {any} */ (err).name) === 'string' ? /** @type {any} */ (err).name : 'Error';
 	console.error(LOG_PREFIX, name);
-}
-
-/**
- * Resolve `node.cohortTopicHost.service` — an untyped, node-internal
- * attachment `OptimysticNodeAttachments` deliberately excludes (assigned at
- * `@optimystic/db-p2p` `libp2p-node-base.js:1178`, `node.cohortTopicHost =
- * host`; the `.service` accessor is `cohort-topic/host.d.ts:414`). It exists
- * only inside the node's `options.cohortTopic?.enabled === true` branch, over
- * a live FRET service. A missing attachment is a node-construction defect and
- * must surface HERE as a named error, never as a subscription that silently
- * never fires.
- * @param {any} node
- * @returns {import('@optimystic/db-core').CohortTopicService}
- */
-export function resolveCohortTopicService(node) {
-	const service = node && node.cohortTopicHost ? node.cohortTopicHost.service : undefined;
-	if (!service) {
-		throw new PeerReplicationError(
-			'cohortTopicHost',
-			'node.cohortTopicHost.service is absent — the node was not built with cohortTopic.enabled over a live FRET service',
-		);
-	}
-	return service;
-}
-
-/**
- * Resolve `node.reactivitySubscribers` — the same class of untyped,
- * node-internal attachment as `resolveCohortTopicService`, assigned at
- * `@optimystic/db-p2p` `libp2p-node-base.js:1199`
- * (`node.reactivitySubscribers = reactivitySubscribers`). This is the
- * `topicId -> handlers` routing table socket-delivered notifications fan out
- * through; a constructed `ReactivitySubscriptionManager` registers its
- * `onNotification` here, keyed by the topic it subscribed under.
- * @param {any} node
- * @returns {import('@optimystic/db-p2p').ReactivitySubscriberRegistry}
- */
-export function resolveSubscriberRegistry(node) {
-	const registry = node ? node.reactivitySubscribers : undefined;
-	if (!registry) {
-		throw new PeerReplicationError(
-			'reactivitySubscribers',
-			'node.reactivitySubscribers is absent — the node was not built with cohortTopic.enabled over a live FRET service',
-		);
-	}
-	return registry;
 }
 
 /**
@@ -460,134 +246,101 @@ export async function applyPeerRowBatch(db, table, ops) {
 }
 
 /**
+ * Resolve `node.reactivityWatch`, the node's collection watch service. It is present exactly when the
+ * node was built with `cohortTopic.enabled` (`@optimystic/db-p2p` `optimystic-node.d.ts`); a missing
+ * one is a node-construction defect and must surface HERE as a named error, never as a page that
+ * quietly never updates.
+ * @param {any} node
+ * @returns {import('@optimystic/db-p2p').ReactivityCollectionWatch}
+ */
+export function resolveWatchService(node) {
+	const watch = node ? node.reactivityWatch : undefined;
+	if (!watch || typeof watch.watch !== 'function') {
+		throw new PeerReplicationError('reactivityWatch', 'node.reactivityWatch is absent -- the node was not built with cohortTopic.enabled');
+	}
+	return watch;
+}
+
+/**
  * @typedef {object} PeerRowBatch
  * @property {string} table
  * @property {readonly ({ op: 'upsert', row: import('@quereus/quereus').SqlValue[] } | { op: 'delete', pk: import('@quereus/quereus').SqlValue[] })[]} ops
  */
 
 /**
+ * @typedef {object} WatchedCollection
+ * @property {string} table - a member of `PUBLIC_SUBSCRIBED_TABLES`
+ * @property {string} collectionId - the table's collection id exactly as its blocks carry it
+ */
+
+/**
  * @typedef {object} StartPeerReplicationOptions
  * @property {import('@quereus/quereus').Database} db - the handle the UI reads. RECEIVED, never constructed here.
  * @property {string} networkHash
- * @property {any} node - a running `OptimysticNode`; only its `cohortTopicHost`/`reactivitySubscribers` attachments are read.
- * @property {Uint8Array} collectionId - the collection's stable identity (its id block id, raw bytes).
- * @property {import('@optimystic/db-core').BlockId} tailId - the collection's tail block id at attach time.
- * @property {(projected: { collectionId: string, revision: number, invalidation: boolean | undefined }) => Promise<ReadonlyArray<PeerRowBatch>>} readRows
- *   REQUIRED. No default, no stub, no static variant -- see the module header's "open seam" paragraph.
- * @property {import('@optimystic/db-core').NodeProfile} [profile] defaults to `edgeProfile()`.
- * @property {(ms: number) => Promise<void>} [delayFn] injectable wait used ONLY between bounded
- *   `register()` retries (56-17 Task 3); defaults to a real `setTimeout`-backed delay. Tests inject a
- *   fake that resolves immediately while recording the requested `ms`.
- * @property {(fn: () => void, ms: number) => unknown} [scheduleInterval] injectable interval primitive
- *   used ONLY for the ttl/3 renewal cadence; defaults to the real `setInterval`. Tests inject a fake
- *   that captures the callback instead of scheduling real time.
- * @property {(handle: unknown) => void} [cancelInterval] the `cancelInterval` counterpart; defaults
- *   to the real `clearInterval`.
+ * @property {any} node - a running `OptimysticNode`; only its `reactivityWatch` attachment is read.
+ * @property {ReadonlyArray<WatchedCollection>} collections - one entry per watched table; at least one.
+ * @property {import('@optimystic/db-p2p').CollectionTailReader} tails - the page's one tail reader (`tail-reader.js`).
+ * @property {() => Promise<ReadonlyArray<PeerRowBatch>>} readRows
+ *   REQUIRED. No default, no stub, no static variant -- see the module header.
  */
 
 /**
  * @typedef {object} PeerReplicationHandle
- * @property {() => Promise<void>} stop idempotent; unregisters from the subscriber registry then withdraws the subscription manager.
+ * @property {() => Promise<void>} stop idempotent; closes every watch. A run in progress finishes; no run starts after.
+ * @property {() => Promise<void>} whenIdle resolves once no run is in progress or pending.
  */
 
 /**
- * Start the peer replication bridge for one collection on one injected
- * `Database` handle. Every required option throws `PeerReplicationError`
- * naming the option when missing -- there is no partial start.
- *
- * Assembly, in the order the module header's RESEARCH section pins:
- * `tailBytes = reactivityTailBytes(tailId)` (NEVER db-core's OTHER,
- * asynchronous tail-byte conversion, which `sha256`s first and would resolve
- * a different coord, silently stranding origination) ->
- * `topicId = reactivityCollectionTopicId(collectionId)` -> construct the
- * `ReactivitySubscriptionManager` with `deliver` bound to this module's own
- * `onVerifiedNotification` -> register `manager.onNotification` on the
- * subscriber registry under `topicId` -> `await manager.register()`.
- *
- * Does NOT construct a second instance of db-p2p's libp2p-backed
- * notify-transport class -- see the module header's correction of
- * RESEARCH's Priority-Question-6 sketch.
- *
+ * Watch every collection in `options.collections` through `node.reactivityWatch`, and on any wake
+ * re-read and apply the public tables into the injected `db`. Every required option throws
+ * `PeerReplicationError` naming the option when missing -- there is no partial start. Returns at once:
+ * the watch service registers with the cohort, and retries, in the background.
  * @param {StartPeerReplicationOptions} options
- * @returns {Promise<PeerReplicationHandle>}
+ * @returns {PeerReplicationHandle}
  */
-export async function startPeerReplication(options) {
+export function startPeerReplication(options) {
 	if (!options || typeof options !== 'object') {
 		throw new PeerReplicationError('options', 'startPeerReplication: an options object is required');
 	}
-	const {
-		db,
-		networkHash,
-		node,
-		collectionId,
-		tailId,
-		readRows,
-		profile,
-		delayFn = (/** @type {number} */ ms) => new Promise((resolve) => setTimeout(resolve, ms)),
-		scheduleInterval = (/** @type {() => void} */ fn, /** @type {number} */ ms) => {
-			const timer = setInterval(fn, ms);
-			// Node timers keep the event loop alive; the renewal cadence should
-			// not pin an otherwise-idle process (mirrors db-p2p's own
-			// `timer.unref?.()` convention). Absent in a browser, where a plain
-			// numeric interval id has no `.unref()` -- the optional call is a
-			// no-op there.
-			/** @type {any} */ (timer).unref?.();
-			return timer;
-		},
-		cancelInterval = (/** @type {unknown} */ handle) => clearInterval(/** @type {any} */ (handle)),
-	} = options;
+	const { db, networkHash, node, collections, tails, readRows } = options;
 
 	if (!db) throw new PeerReplicationError('db', 'startPeerReplication: db is required -- the bridge receives its handle, it never constructs one');
 	if (!networkHash) throw new PeerReplicationError('networkHash', 'startPeerReplication: networkHash is required');
 	if (!node) throw new PeerReplicationError('node', 'startPeerReplication: node is required');
-	if (!collectionId) throw new PeerReplicationError('collectionId', 'startPeerReplication: collectionId is required');
-	if (!tailId) throw new PeerReplicationError('tailId', 'startPeerReplication: tailId is required');
+	if (!Array.isArray(collections) || collections.length === 0) {
+		throw new PeerReplicationError('collections', 'startPeerReplication: at least one collection to watch is required');
+	}
+	if (!tails || typeof tails.readTails !== 'function') {
+		throw new PeerReplicationError('tails', 'startPeerReplication: tails (a CollectionTailReader) is required');
+	}
 	if (typeof readRows !== 'function') {
 		// No default, no in-module stub, no "static for now" fallback -- see
-		// the module header's open-seam paragraph. A silently-replicating-
-		// nothing bridge is the exact failure this plan exists to prevent.
+		// the module header. A silently-replicating-nothing bridge is the exact
+		// failure this module exists to prevent.
 		throw new PeerReplicationError('readRows', 'startPeerReplication: readRows is required and has no default');
 	}
+	for (const entry of collections) {
+		if (!entry || !PUBLIC_SUBSCRIBED_TABLES.includes(entry.table)) {
+			throw new PeerReplicationError(String(entry?.table), 'startPeerReplication: a watched table must be in PUBLIC_SUBSCRIBED_TABLES');
+		}
+		if (typeof entry.collectionId !== 'string' || entry.collectionId.length === 0) {
+			throw new PeerReplicationError(entry.table, 'startPeerReplication: the table has no collectionId');
+		}
+	}
 
-	const service = resolveCohortTopicService(node);
-	const registry = resolveSubscriberRegistry(node);
-	const resolvedProfile = profile ?? edgeProfile();
-
-	// The load-bearing encoding contract: `reactivityTailBytes`, never
-	// db-core's OTHER, asynchronous tail-byte conversion (which sha256s the
-	// utf8 bytes first). That other conversion would double-hash relative to
-	// `H(tailId || "reactivity")` and resolve a DIFFERENT coord --
-	// origination would silently never reach this subscriber.
-	const tailBytes = reactivityTailBytes(tailId);
-	// @optimystic 1.10: the reactivity topic is anchored on the COLLECTION, not the tail
-	// (`H(collectionId || "reactivity")`, stable for the collection's life); the tail now only
-	// names the root group. Same derivation db-p2p's own `ReactivityCollectionWatch` registers
-	// under, so origination and this subscriber still meet on one topicId.
-	const topicId = reactivityCollectionTopicId(collectionId);
+	const watchService = resolveWatchService(node);
 
 	/**
-	 * The whole point of this module. Reads top to bottom: `readRows` once ->
-	 * apply each returned batch -> collect the DISTINCT `(table, op)` pairs
-	 * from the RETURNED EFFECTIVE changes (never from the ops submitted, so a
+	 * One replication pass. Reads top to bottom: `readRows` once -> apply each
+	 * returned batch -> collect the DISTINCT `(table, op)` pairs from the
+	 * RETURNED EFFECTIVE changes (never from the ops submitted, so a
 	 * value-identical replay announces nothing) -> one `notifyPeerWrite` call
 	 * per distinct pair.
-	 * @param {import('@optimystic/db-core').NotificationV1} n a VERIFIED notification -- `manager.onNotification` has already run
-	 *   db-core's verify/dedupe/gap-detection path before calling this.
 	 * @returns {Promise<void>}
 	 */
-	async function onVerifiedNotification(n) {
+	async function replicateOnce() {
 		try {
-			// A NEW frozen object literal with exactly three keys, read off `n` --
-			// never `n` itself, never a spread. Same rule as `subscribe.js`'s
-			// projection, applied at the other end of the pipe: `readRows` has no
-			// business seeing a signature, a signer list or a delta.
-			const projected = Object.freeze({
-				collectionId: n.collectionId,
-				revision: n.revision,
-				invalidation: n.invalidation,
-			});
-
-			const batches = await readRows(projected);
+			const batches = await readRows();
 
 			/** @type {Map<string, { table: string, op: string }>} */
 			const distinctPairs = new Map();
@@ -612,159 +365,49 @@ export async function startPeerReplication(options) {
 			}
 		} catch (err) {
 			// A throwing readRows, or a refused/failed batch: log the NAME only,
-			// fire no notice for this notification, and let the subscription stay
-			// registered for the next one.
+			// fire no notice for this pass, and keep watching for the next wake.
 			logFailure(err);
 		}
 	}
 
-	const manager = new ReactivitySubscriptionManager({
-		service,
-		collectionId,
-		tail: tailBytes,
-		// @optimystic 1.10 requires the ratio the root group's certificates are signed under; this
-		// node runs db-p2p's default consensus threshold (nothing here overrides `clusterPolicy`).
-		quorumRatio: DEFAULT_SUPER_MAJORITY_THRESHOLD,
-		profile: resolvedProfile,
-		deliver: onVerifiedNotification,
-	});
-
-	const unregister = registry.register(topicId, manager.onNotification.bind(manager));
-
-	// 56-20 AMENDMENT (module header point 8): the SECOND, EARLIER
-	// `probeFretRouting` sample -- taken HERE, before the very first
-	// `register()` attempt below and therefore before any `CohortBackoffError`
-	// backoff has elapsed, as opposed to the ORIGINAL sample further down
-	// (only reached once PEER_REGISTER_MAX_ATTEMPTS is exhausted). `topicId`
-	// is the SAME value already computed above for this registration; never
-	// re-derived a second way. Wrapped in its own try/catch, caught with
-	// `logFailure` (name only), so a probe-preparation failure here can never
-	// change whether or how registration proceeds.
-	try {
-		const earlyParticipantId = node && node.peerId ? peerIdToBytes(node.peerId) : new Uint8Array(0);
-		const earlyRoutingProbe = await probeFretRouting(node, {
-			topicId,
-			participantId: earlyParticipantId,
-			wantK: DIAGNOSTIC_COHORT_WANT_K,
-		});
-		console.error(FRET_ROUTING_PROBE_EARLY_PREFIX + JSON.stringify(earlyRoutingProbe));
-	} catch (probeErr) {
-		logFailure(probeErr);
-	}
-
-	// Bounded cold-start retry (56-17 Task 3): `CohortBackoffError` is the
-	// substrate's own documented "no willing primary right now" signal, not a
-	// fault -- see `PEER_REGISTER_MAX_ATTEMPTS`'s JSDoc. Any OTHER rejection
-	// is not retried; it propagates on the first failure, unchanged.
-	for (let attempt = 1; ; attempt += 1) {
-		try {
-			await manager.register();
-			break;
-		} catch (err) {
-			if (!(err instanceof CohortBackoffError)) {
-				throw err;
-			}
-			if (attempt >= PEER_REGISTER_MAX_ATTEMPTS) {
-				// registrySize is P1's own observable (56-17-COHORT-TOPIC-POSTURE.md: "the size of
-				// node.cohortTopicHost.registry.all() ... read from the page at any point after
-				// boot"), sampled HERE because a register() exhaustion unwinds the whole boot before
-				// any later code could read it -- a structural fact about this node's OWN coord
-				// registry, never a row value. A non-zero size here would mean this browser was
-				// dispatched an inbound RegisterV1 and instantiated a coord engine (refuting P1); this
-				// diagnostic exists to tell that apart from the walk never reaching a willing peer at
-				// all, which registrySize === 0 does not distinguish on its own.
-				const registrySize = node?.cohortTopicHost?.registry?.all?.()?.length ?? 'n/a';
-				// 56-20: a diagnostic-only measurement of the SAME in-cluster branch FRET's own
-				// `routeAct` evaluates for this walk, sampled at the exact moment `register()` gives
-				// up -- before the throw below unwinds the node. `topicId` is the SAME value already
-				// computed above for this registration; `peerIdToBytes` is the SAME encoding
-				// `@optimystic/db-p2p`'s own host uses internally for `self` (never re-derived a
-				// second way). Emitted at `console.error` because `run-mesh-read-gate.mjs` forwards
-				// every page console level into its captured log. Wrapped in its own try/catch, and
-				// caught with `logFailure` (name only), so a probe-preparation failure can never
-				// change what this function throws: the SAME `PeerReplicationError`, with the SAME
-				// subject and message, follows unconditionally.
-				let routingProbeForDialDerivation;
-				try {
-					const participantId = node && node.peerId ? peerIdToBytes(node.peerId) : new Uint8Array(0);
-					const routingProbe = await probeFretRouting(node, {
-						topicId,
-						participantId,
-						wantK: DIAGNOSTIC_COHORT_WANT_K,
-					});
-					routingProbeForDialDerivation = routingProbe;
-					console.error(FRET_ROUTING_PROBE_PREFIX + JSON.stringify(routingProbe));
-				} catch (probeErr) {
-					logFailure(probeErr);
-				}
-				// 56-24 (module header point 9): the connection-lifecycle snapshot,
-				// then -- ONLY when it observed no open connection -- the one bounded
-				// conditional dial. Wrapped in its own try/catch; cannot change what
-				// this function throws below.
-				try {
-					const lifecycleSnapshot = await connectionLifecycleSnapshot(node);
-					console.error(CONNECTION_LIFECYCLE_PROBE_PREFIX + JSON.stringify({ kind: 'snapshot', ...lifecycleSnapshot }));
-					if (lifecycleSnapshot && lifecycleSnapshot.openObserved === 0) {
-						const { targetPeerIdString, reason } = deriveDialTargetFromRoutingProbe(routingProbeForDialDerivation);
-						if (targetPeerIdString) {
-							const dialResult = await probeBootstrapDial(node, {
-								targetPeerIdString,
-								timeoutMs: CONNECTION_LIFECYCLE_DIAL_TIMEOUT_MS,
-							});
-							console.error(CONNECTION_LIFECYCLE_PROBE_PREFIX + JSON.stringify({ kind: 'dial', ...dialResult }));
-						} else {
-							console.error(
-								CONNECTION_LIFECYCLE_PROBE_PREFIX +
-									JSON.stringify({ kind: 'dial', dialAttempted: false, dialOutcome: `skipped:${reason}` }),
-							);
-						}
-					}
-				} catch (probeErr) {
-					logFailure(probeErr);
-				}
-				throw new PeerReplicationError(
-					'register',
-					`register() did not succeed after ${attempt} attempts against CohortBackoffError (last afterMs=${err.afterMs}) -- no willing primary (own registrySize=${registrySize})`,
-				);
-			}
-			await delayFn(Math.min(err.afterMs, REGISTER_BACKOFF_CEILING_MS));
-		}
-	}
-
-	// ttl/3 renewal cadence (56-17 Task 3, module header point 6): the
-	// EFFECTIVE TTL is READ BACK from the substrate via
-	// `subscriberTtlForProfile(resolvedProfile)` -- the SAME function
-	// `ReactivitySubscriptionManager` itself uses internally to resolve its
-	// own `ttlMs` when none is passed explicitly (`@optimystic/db-p2p`
-	// `dist/src/reactivity/subscription-manager.js:54`) -- never assumed as a
-	// literal `60000`. `manager.registration`/`RegistrationHandle` exposes no
-	// public `ttlMs` field to read back instead (`renewal` is typed `opaque
-	// to applications`), so the resolved PROFILE is the documented source.
-	const ttlMs = subscriberTtlForProfile(resolvedProfile);
-	const renewalIntervalMs = Math.max(1000, Math.floor(ttlMs * PEER_RENEWAL_FRACTION));
-
 	let stopped = false;
-	const renewalTimer = scheduleInterval(() => {
-		if (stopped) return;
-		manager.renew().catch(logFailure);
-	}, renewalIntervalMs);
+	/** @type {Promise<void> | null} */
+	let running = null;
+	let again = false;
 
-	/** Idempotent; neither leg throws. @returns {Promise<void>} */
+	/** Fold wakes: one run at a time, and one more after it however many wakes arrived meanwhile. */
+	const wake = () => {
+		if (stopped) return;
+		if (running) {
+			again = true;
+			return;
+		}
+		running = (async () => {
+			do {
+				again = false;
+				await replicateOnce();
+			} while (again && !stopped);
+		})().finally(() => {
+			running = null;
+		});
+	};
+
+	// Open each watch BEFORE any read it keeps fresh (the watch service's own rule): the service wakes
+	// every watcher once on its first committed-tail read, and that wake is this page's first pass.
+	/** @type {import('@optimystic/db-p2p').CollectionWatchHandle[]} */
+	const handles = collections.map(({ collectionId }) => watchService.watch({ collectionId, tails, onChange: wake }));
+
+	/** Idempotent; never throws. @returns {Promise<void>} */
 	const stop = async () => {
 		if (stopped) return;
 		stopped = true;
-		cancelInterval(renewalTimer);
-		try {
-			unregister();
-		} catch (err) {
-			logFailure(err);
-		}
-		try {
-			await manager.withdraw();
-		} catch (err) {
-			logFailure(err);
-		}
+		await Promise.all(handles.map((handle) => handle.close().catch(logFailure)));
 	};
 
-	return { stop };
+	/** @returns {Promise<void>} */
+	const whenIdle = async () => {
+		while (running) await running;
+	};
+
+	return { stop, whenIdle };
 }

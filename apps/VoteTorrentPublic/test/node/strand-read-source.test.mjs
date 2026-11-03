@@ -25,7 +25,6 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ReactivitySubscriberRegistry } from '@optimystic/db-p2p';
 import { PUBLIC_SUBSCRIBED_TABLES } from '@votetorrent/web-data/public';
 import { PeerReplicationError, startPeerReplication } from '../../src/peer/reactivity-bridge.js';
 import {
@@ -451,28 +450,9 @@ test('the readRows produced by createStrandRowSource satisfies 56-09\'s startPee
 	const { readRows } = createStrandRowSource({ uiDb, strandDb });
 
 	// Minimal fakes of startPeerReplication's OTHER required options -- see
-	// `peer-reactivity-bridge.test.mjs`'s own `makeFakeNode`/`makeFakeService`
-	// for the pattern this mirrors.
-	const registry = new ReactivitySubscriberRegistry();
-	const fakeService = {
-		register: async (/** @type {any} */ req) => ({
-			topicId: req.topicId,
-			tier: req.tier,
-			primary: new Uint8Array([1]),
-			backups: [],
-			cohortEpoch: new Uint8Array([2]),
-			cohortMembers: [],
-			renewal: {},
-		}),
-		renew: async () => undefined,
-		withdraw: async () => undefined,
-		lookup: async () => {
-			throw new Error('lookup: not exercised by this fixture');
-		},
-		cohortGossip: () => ({}),
-		verifier: () => ({ verifyMessage: async () => 'verified' }),
-	};
-	const fakeNode = { cohortTopicHost: { service: fakeService }, reactivitySubscribers: registry };
+	// `peer-reactivity-bridge.test.mjs`'s own `makeFakeWatch` for the pattern
+	// this mirrors.
+	const fakeNode = { reactivityWatch: { watch: () => ({ close: async () => undefined }) } };
 	/** @type {any} */
 	const fakeDb = {
 		schemaManager: { getModule: () => undefined, getCurrentSchemaName: () => 'main', getTable: () => ({ name: TABLE_A, columns: [] }) },
@@ -482,12 +462,12 @@ test('the readRows produced by createStrandRowSource satisfies 56-09\'s startPee
 
 	let handle;
 	try {
-		handle = await startPeerReplication({
+		handle = startPeerReplication({
 			db: fakeDb,
 			networkHash: NETWORK_HASH,
 			node: fakeNode,
-			collectionId: new TextEncoder().encode('fixture-collection-id'),
-			tailId: 'fixture-tail-block-id',
+			collections: [{ table: TABLE_A, collectionId: `default/${TABLE_A}` }],
+			tails: { readTails: async () => new Map() },
 			readRows,
 		});
 	} catch (err) {
