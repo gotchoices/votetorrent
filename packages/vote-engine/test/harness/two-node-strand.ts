@@ -42,6 +42,8 @@ import { randomUUID } from 'node:crypto'
 import { VOTETORRENT_SCHEMA_SQL } from '../../src/database/schema-sql.js'
 import { registerDbPlugins, declareViewsInMain } from '../../src/database/initialize.js'
 import type { DbFactory } from '../../src/types.js'
+import type { User } from '@votetorrent/vote-core'
+import type { EngineContext } from '../../src/types.js'
 
 // ---------------------------------------------------------------------------
 // Flag, describe wrapper
@@ -638,6 +640,389 @@ export async function startTwoNodeHarness (options: TwoNodeHarnessOptions = {}):
       stopped = true
       await stopQuietly(nodeB, log)
       await stopQuietly(nodeA, log)
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Phase 66 plan 09: owner-minted browser pairing helpers (ADDITIVE ONLY)
+//
+// Everything below is appended for `dashboard-pair-mint.harness.spec.ts`. The edge-member helpers are
+// copies of 66-01's module-local helpers in `dashboard-member-watch.harness.spec.ts` (memoryEdgePlatform,
+// startJoiner, attachJoinerStrand), which this plan may not import. Every P2P package and every test fixture
+// is reached by dynamic `import()` inside the function bodies, so the flag-off suite's import graph does
+// not change. Key material in `HarnessPairingOfficer.privBytes` is test-only and is never logged.
+// ---------------------------------------------------------------------------
+
+/** A P-256 officer seeded by seedPairingOfficers. `privBytes` is test-only key material: never log it. */
+export interface HarnessPairingOfficer {
+  user: User
+  keyPub: string
+  privBytes: Uint8Array
+}
+
+export interface HarnessPairingNetwork {
+  hash: string
+  authorityId: string
+  dbA: Database
+  dbB: Database
+  ctxA: EngineContext
+  ctxB: EngineContext
+  founder: User
+  officerB: HarnessPairingOfficer
+  formerOfficerY: HarnessPairingOfficer
+  currentAdminEffectiveAt: string
+  formerAdminEffectiveAt: string
+}
+
+const PAIRING_FOUNDER_SCOPES = ['rn', 'rad', 'vrg', 'iad', 'uai', 'mel', 'ceb']
+
+/** Officer UserId -> the canonical AdminEffectiveAt values its Officer rows carry. */
+async function officerGenerations (db: Database, authorityId: string): Promise<Map<string, Set<string>>> {
+  const { toCanonicalDatetime } = await import('../../src/utils.js')
+  const out = new Map<string, Set<string>>()
+  for await (const row of db.eval('select UserId, AdminEffectiveAt from Officer where AuthorityId = :authorityId', { authorityId } as any)) {
+    const userId = String((row as any).UserId)
+    const gen = toCanonicalDatetime((row as any).AdminEffectiveAt as string | number)
+    const set = out.get(userId) ?? new Set<string>()
+    set.add(gen)
+    out.set(userId, set)
+  }
+  return out
+}
+
+/**
+ * Found a VoteTorrent network on node-A (founding administration placed 180 s in the past), add two P-256
+ * users B and Y, promote [founder, B, Y] (gen-1, 120 s ago) and then [founder, B] (gen-2, 60 s ago), so B
+ * is a current officer and Y has an Officer row only in an earlier administration. Opens the strand on
+ * node-B and waits for B's and Y's rows there.
+ */
+export async function seedPairingOfficers (harness: TwoNodeHarness): Promise<HarnessPairingNetwork> {
+  const tc = await import('../fixtures/test-context.js')
+  const { makeP256TestKey } = await import('../fixtures/p256-signer.js')
+  const { toCanonicalDatetime, nowCanonicalDatetime } = await import('../../src/utils.js')
+
+  const net = await tc.createTestNetwork({
+    dbFactory: harness.nodeA.dbFactory,
+    network: {
+      admin: {
+        officers: [{ init: { name: 'Admin A', title: 'Chair', scopes: PAIRING_FOUNDER_SCOPES as any } }],
+        effectiveAt: Date.now() - 180_000,
+        thresholdPolicies: [{ policy: 'rad' as any, threshold: 1 }]
+      }
+    } as any
+  })
+  const auth = await tc.addTestAuthority(net)
+  const hash = net.ref.hash
+  const authorityId = auth.authority.id
+  const dbA = net.ctx.db
+
+  function p256User (name: string): HarnessPairingOfficer {
+    const k = makeP256TestKey()
+    const user: User = {
+      ...tc.makeDistinctTestUser(),
+      name,
+      activeKeys: [{ key: k.pubHex, type: 'P' as any, expiration: Date.now() + 86_400_000 }]
+    }
+    return { user, keyPub: k.pubHex, privBytes: k.privBytes }
+  }
+
+  // insertFixtureUser's shape (module-local in threshold-authority.ts): invite-bound User insert, then the
+  // FIRST UserKey with the key's own type.
+  async function insertUser (user: User): Promise<void> {
+    const { inviteSlotCid, inviteSignature } = await tc.seedUserInvite(auth, user)
+    const tid = Date.now() + Math.floor(Math.random() * 1_000_000)
+    await dbA.exec(
+      `insert into User (Id, Name, ImageRef)
+       with context SigningNonce = null, InviteSlotCid = :inviteSlotCid, InviteSignature = :inviteSignature, Tid = ${tid}
+       values (:userId, :userName, :userImageRef)`,
+      {
+        userId: user.id,
+        userName: user.name,
+        userImageRef: user.imageRef ? JSON.stringify(user.imageRef) : null,
+        inviteSlotCid,
+        inviteSignature
+      } as any
+    )
+    const key = user.activeKeys[0]!
+    await dbA.exec(
+      `insert into UserKey (UserId, Type, PubKey, Expiration)
+       with context UserKey = null, Signature = null, Tid = ${tid + 1}, now = :now, IsSignatureValid = true
+       values (:userId, :type, :pubKey, :expiration)`,
+      {
+        userId: user.id,
+        type: key.type,
+        pubKey: key.key,
+        expiration: toCanonicalDatetime(key.expiration),
+        now: nowCanonicalDatetime()
+      } as any
+    )
+  }
+
+  const officerB = p256User('Pairing Officer B')
+  const formerOfficerY = p256User('Former Officer Y')
+  await insertUser(officerB.user)
+  await insertUser(formerOfficerY.user)
+
+  const founderSign = tc.makeTestSignCallback(net.user)
+  const founderEntry = { existing: { userId: net.user.id, authorityId, title: 'Chair', scopes: PAIRING_FOUNDER_SCOPES } }
+  const bEntry = { existing: { userId: officerB.user.id, authorityId, title: 'Officer B', scopes: ['mel'] } }
+  const yEntry = { existing: { userId: formerOfficerY.user.id, authorityId, title: 'Officer Y', scopes: ['mel'] } }
+
+  async function promote (label: string, officers: unknown[], effectiveAt: number): Promise<void> {
+    await auth.authorityEngine.proposeAdmin({
+      proposed: { officers, effectiveAt, thresholdPolicies: [{ policy: 'rad', threshold: 1 }] },
+      signers: [net.user.id]
+    } as any, founderSign)
+    const outcome = (auth.authorityEngine as unknown as { lastPromotionOutcome?: { status?: string } }).lastPromotionOutcome
+    if (outcome?.status !== 'promoted') {
+      throw new Error(`seedPairingOfficers: ${label} promotion did not complete (status ${String(outcome?.status)})`)
+    }
+  }
+
+  const gen1At = Date.now() - 120_000
+  await promote('gen-1', [founderEntry, bEntry, yEntry], gen1At)
+  const gen2At = Date.now() - 60_000
+  await promote('gen-2', [founderEntry, bEntry], gen2At)
+  const formerAdminEffectiveAt = toCanonicalDatetime(gen1At)
+  const currentAdminEffectiveAt = toCanonicalDatetime(gen2At)
+
+  // Read-backs on node-A.
+  const current = await dbA.prepare('select EffectiveAt from CurrentAdmin where AuthorityId = :authorityId').get({ authorityId } as any)
+  if (current == null || toCanonicalDatetime((current as any).EffectiveAt) !== currentAdminEffectiveAt) {
+    throw new Error('seedPairingOfficers: CurrentAdmin is not the gen-2 administration on node-A')
+  }
+  const gensA = await officerGenerations(dbA, authorityId)
+  const bGens = gensA.get(officerB.user.id)
+  const yGens = gensA.get(formerOfficerY.user.id)
+  const fGens = gensA.get(net.user.id)
+  if (bGens?.has(currentAdminEffectiveAt) !== true || bGens.has(formerAdminEffectiveAt) !== true) {
+    throw new Error('seedPairingOfficers: officer B lacks a gen-1 or gen-2 Officer row on node-A')
+  }
+  if (fGens?.has(currentAdminEffectiveAt) !== true) {
+    throw new Error('seedPairingOfficers: the founder lacks a gen-2 Officer row on node-A')
+  }
+  if (yGens?.has(formerAdminEffectiveAt) !== true || yGens.has(currentAdminEffectiveAt)) {
+    throw new Error('seedPairingOfficers: officer Y is not a gen-1-only officer on node-A')
+  }
+
+  // node-B's replica.
+  const dbB = await harness.nodeB.openStrand(hash)
+  await pollUntil(
+    async () => {
+      const gens = await officerGenerations(dbB, authorityId)
+      const key = await dbB.prepare('select 1 as x from UserKey where UserId = :userId and PubKey = :pubKey')
+        .get({ userId: officerB.user.id, pubKey: officerB.keyPub } as any)
+      return {
+        b: gens.get(officerB.user.id)?.has(currentAdminEffectiveAt) === true,
+        y: gens.get(formerOfficerY.user.id)?.has(formerAdminEffectiveAt) === true,
+        key: key != null
+      }
+    },
+    (v) => v.b && v.y && v.key,
+    { timeoutMs: HARNESS_TIMEOUTS.replicationMs, label: 'seedPairingOfficers: officer rows reach node-B' }
+  )
+
+  return {
+    hash,
+    authorityId,
+    dbA,
+    dbB,
+    ctxA: net.ctx,
+    ctxB: { db: dbB, user: officerB.user },
+    founder: net.user,
+    officerB,
+    formerOfficerY,
+    currentAdminEffectiveAt,
+    formerAdminEffectiveAt
+  }
+}
+
+/** A browser-like cadre-core edge node (the dashboard's shape), created but not joined. */
+export interface HarnessEdgeMember {
+  label: string
+  edge: any
+  keyStore: any
+  removed: unknown[]
+  strandStarted: string[]
+  withdrawn: string[]
+  destroyedScopes: string[]
+  identityPeerId(): Promise<string>
+  stop(): Promise<void>
+}
+
+/**
+ * Create the edge node only (no join), on 66-01's in-memory platform: `requireSignedSchemas: false`, the
+ * `strandId` filter, the given cluster size and `strandReactivity` for that one strand. On `strand:started`
+ * it withdraws the strand's storage services (cluster and repo protocols), as the dashboard does.
+ */
+export async function startHarnessEdgeMember (opts: {
+  label: string
+  storageId: string
+  strandId: string
+  clusterSize: number
+  keyStore?: any
+  strandReactivity?: Record<string, unknown>
+}): Promise<HarnessEdgeMember> {
+  const { InMemoryKeyStore } = await import('@serfab/cadre-core')
+  // @ts-ignore -- exports-map subpath this package's moduleResolution cannot type; resolves at runtime
+  const { createEdgeNode } = await import('@serfab/cadre-core/edge-node')
+  const { MemoryRawStorage } = await import('@optimystic/db-p2p')
+  const keyStore = opts.keyStore ?? new InMemoryKeyStore()
+  const destroyedScopes: string[] = []
+  const scopes = new Map<string, any>()
+  const local = new Map<string, string>()
+  const platform: any = {
+    keyStore,
+    storage: {
+      id: opts.storageId,
+      rawStorage (scope: string) {
+        let s = scopes.get(scope)
+        if (s === undefined) {
+          s = new MemoryRawStorage()
+          scopes.set(scope, s)
+        }
+        return s
+      },
+      async destroyScope (scope: string) {
+        scopes.delete(scope)
+        destroyedScopes.push(scope)
+      },
+      nodeLocal () {
+        return {
+          get: async (key: string) => local.get(key),
+          set: async (key: string, value: string) => { local.set(key, value) },
+          flush: async () => undefined,
+          delete: async (key: string) => { local.delete(key) }
+        }
+      },
+      async close () { return undefined }
+    },
+    configure: (cfg: any) => ({
+      ...cfg,
+      requireSignedSchemas: false,
+      strandFilter: { mode: 'strandId', strandId: opts.strandId },
+      strandClusterSize: opts.clusterSize,
+      strandReactivity: { enabled: true, strandIds: [opts.strandId], ...(opts.strandReactivity ?? {}) }
+    })
+  }
+  const edge: any = createEdgeNode(platform)
+  const removed: unknown[] = []
+  const strandStarted: string[] = []
+  const withdrawn: string[] = []
+  edge.on('strand:started', ({ strandId }: { strandId: string }) => {
+    strandStarted.push(strandId)
+    try {
+      const strandNode: any = edge.node?.getStrand(strandId)?.libp2pNode
+      if (strandNode === undefined) throw new Error('no strand node at strand:started')
+      strandNode.unhandle([`/optimystic/strand-${strandId}/cluster/1.0.0`, `/optimystic/strand-${strandId}/repo/1.0.0`])
+      withdrawn.push(strandId)
+    } catch (err) {
+      console.log(`[${opts.label}] storage withdrawal failed: ${(err as Error).name}`)
+    }
+  })
+  edge.on('cadre:removed', (removal: unknown) => { removed.push(removal) })
+  let stopped = false
+  return {
+    label: opts.label,
+    edge,
+    keyStore,
+    removed,
+    strandStarted,
+    withdrawn,
+    destroyedScopes,
+    async identityPeerId () {
+      return await edge.identityPeerId()
+    },
+    async stop () {
+      if (stopped) return
+      stopped = true
+      try {
+        if (edge.status?.state !== 'removed') await edge.stop()
+      } catch { /* idempotent teardown */ }
+    }
+  }
+}
+
+/**
+ * Claim `strandId` on a joined edge member (a transaction-profile edge node hosts no unclaimed strand): no
+ * founder key, `awaitFirstSync: false`, the harness sApp. Waits for `strand:started`, the storage withdrawal
+ * and the strand database, and returns the strand libp2p node, ITS OWN peer id (not the identity peer id)
+ * and the strand's Quereus database on the `['App','main']` schema path. No crypto plugin is registered.
+ */
+export async function attachHarnessEdgeStrand (
+  member: HarnessEdgeMember,
+  strandId: string
+): Promise<{ strandNode: any; strandPeerId: string; db: Database }> {
+  const node: any = member.edge.node
+  if (node === null || node === undefined) throw new Error('attachHarnessEdgeStrand: the member has no running node')
+  try {
+    await node.addStrand({
+      strandRow: { Id: strandId, MemberPrivateKey: null, Type: 'o', FounderOwnerKey: null, FounderPeerId: null },
+      sAppConfig: { id: HARNESS_SAPP_ID, version: '1.0.0', schema: VOTETORRENT_INNER_DDL, latencyHint: 'interactive' },
+      awaitFirstSync: false
+    })
+  } catch (err) {
+    console.log(`[${member.label}] addStrand rejected (${(err as Error).name}); continuing with getStrand`)
+  }
+  await pollUntil(
+    async () => member.strandStarted.includes(strandId) && member.withdrawn.includes(strandId),
+    (v) => v === true,
+    { timeoutMs: scaled(60_000), label: `${member.label} strand started and storage withdrawn` }
+  )
+  // cadre-core sets `database` once the strand header arrives, which can trail strand:started.
+  const strandDb: any = await pollUntil(
+    async () => node.getStrand(strandId)?.database ?? null,
+    (v) => v !== null,
+    { timeoutMs: scaled(60_000), label: `${member.label} strand database present` }
+  )
+  const strandNode = node.getStrand(strandId).libp2pNode
+  const db: Database = strandDb.getDatabase()
+  db.setSchemaPath(['App', 'main'])
+  return { strandNode, strandPeerId: strandNode.peerId.toString(), db }
+}
+
+/**
+ * A CadreNode on the harness party id, bootstrapped to node-A's loopback WebSocket control address and NEVER
+ * invited or enrolled: a stranger to the cadre.
+ */
+export async function startHarnessStranger (
+  harness: TwoNodeHarness,
+  opts?: { clusterSize?: number }
+): Promise<{ node: any; peerId: string; stop(): Promise<void> }> {
+  const { CadreNode } = await import('@serfab/cadre-core')
+  const { MemoryRawStorage } = await import('@optimystic/db-p2p')
+  const { webSockets } = await import('@libp2p/websockets')
+  const { generateKeyPair } = await import('@libp2p/crypto/keys')
+  const nodeAAddr = loopbackWs((harness.nodeA.node.getControlNode()?.getMultiaddrs() ?? []).map((m: any) => m.toString()))
+  const storage = new MemoryRawStorage()
+  const node: any = new CadreNode({
+    privateKey: await generateKeyPair('Ed25519'),
+    controlNetwork: { partyId: harness.partyId, bootstrapNodes: [nodeAAddr] },
+    // Test posture only (as buildConfig above) — never a production config.
+    requireSignedSchemas: false,
+    strandFilter: { mode: 'all' },
+    storage: { provider: () => storage },
+    strandClusterSize: opts?.clusterSize ?? 2,
+    hibernation: { enabled: false },
+    profile: 'transaction',
+    network: { transports: [webSockets()], listenAddrs: ['/ip4/127.0.0.1/tcp/0/ws'] }
+  } as any)
+  const quietLog = (line: string): void => { console.log(`[p2p-harness] stranger ${line}`) }
+  try {
+    await withTimeout(node.start(), HARNESS_TIMEOUTS.startMs, 'stranger start')
+  } catch (error) {
+    await stopQuietly(node, quietLog)
+    throw error
+  }
+  let stopped = false
+  return {
+    node,
+    peerId: node.peerId.toString(),
+    async stop () {
+      if (stopped) return
+      stopped = true
+      await stopQuietly(node, quietLog)
     }
   }
 }
