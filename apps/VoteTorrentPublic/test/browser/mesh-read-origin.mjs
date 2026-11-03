@@ -261,6 +261,11 @@ async function main() {
 	for (const addr of handle.controlAddrs) {
 		console.log('ORIGIN_CONTROL_ADDR=' + addr);
 	}
+	// The strand node's own addresses: upstream's open-strand read route (sereus#23) dials a
+	// node RUNNING the strand, not the control node.
+	for (const addr of handle.strandAddrs?.[args.strandId] ?? []) {
+		if (addr.includes('/tls/ws')) console.log('ORIGIN_STRAND_ADDR=' + addr);
+	}
 	console.log('ORIGIN_TLS_SPKI=' + handle.tls.spkiSha256Base64);
 	console.log('ORIGIN_TLS_CAROOT=' + (handle.tls.caRoot ?? ''));
 
