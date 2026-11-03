@@ -46,6 +46,14 @@
 	border-bottom: none;
 }
 
+/* A field or row that can carry the brief "updated" mark. The mark draws a
+   2px bar on the element's inline-start edge; this constant padding keeps
+   that bar off the text, and because it applies whether or not the mark is
+   showing, adding or dropping the mark never moves anything. */
+.aa-markable {
+	padding-inline-start: var(--space-xs);
+}
+
 .aa-scope {
 	display: inline-flex;
 	align-items: center;
