@@ -14,8 +14,14 @@
  *   DM-4 owner removeMachine reaches the joiner as cadre:removed, and the edge node status becomes removed
  *   DM-5 single use: a second key is refused invite-spent; the admitted key's retry leaves one usage row
  *   DM-6 inviteKey -> CadreInviteUsage.peerId -> listMachines().lastPublishedAt, on the owner and a non-owner
+ *   DM-7 (66-06, D-24) a second joiner built with `strandReactivity.edgeHost: true` (the patched cadre-core
+ *        option) has an edge cohort-topic host with no willing tier, no engine on either strand node ever
+ *        records it as willing, and it still wakes on a commit; strand nodes A and B and the first joiner
+ *        (no flag) keep the core profile
+ *   DM-7a (not harness-gated) the option's truth table against the installed, patched cadre-core
  *
- * Declared order in the file: DM-1, DM-5, DM-6, DM-2, DM-3, DM-4 (DM-4 removes the joiner, so it runs last).
+ * Declared order in the file: DM-1, DM-5, DM-6, DM-2, DM-3, DM-7, DM-4 (DM-7 uses the first joiner as its
+ * negative control, and DM-4 removes that joiner, so DM-4 runs last).
  *
  * Stop rule: a red DM-1 or DM-3 is reported as a blocker; no leg is weakened or bypassed to make it green.
  *
@@ -258,7 +264,7 @@ describeP2PHarness('a joined member node (the dashboard\'s shape) on real strand
   let joinerPeerId = ''
   let strandCtx: { strandNode: any, strandPeerId: string } | undefined
 
-  async function launch (opts: { label: string, storageId: string, keyStore?: KeyStore }): Promise<Joiner> {
+  async function launch (opts: { label: string, storageId: string, keyStore?: KeyStore, strandReactivity?: Record<string, unknown> }): Promise<Joiner> {
     const j = await startJoiner(opts)
     joiners.push(j)
     return j
@@ -463,6 +469,94 @@ describeP2PHarness('a joined member node (the dashboard\'s shape) on real strand
     }
   })
 
+  it('DM-7 an edgeHost joiner subscribes but is never a forwarder; the strand nodes keep the core profile', async function () {
+    this.timeout(ms(420_000))
+    if (strandCtx === undefined) throw new Error('DM-7 needs DM-2 to have attached the first joiner (its negative control)')
+
+    // A fresh untargeted single-use invitation, as DM-1 mints it.
+    const minted7 = await harness.nodeA.node.createCadreInvitation({ uses: 1, expiresInMs: 15 * 60_000 })
+    expect(minted7.invitation.invite.peerId, 'untargeted invitation').to.equal(null)
+    expect(minted7.invitation.invite.totalUses).to.equal(1)
+    const edgeJoiner = await launch({ label: 'edge-joiner', storageId: 'dm-edge-joiner', strandReactivity: { edgeHost: true } })
+    const edgePeerId = await edgeJoiner.edge.identityPeerId()
+    await edgeJoiner.edge.joinCadre(cadre.decodeCadreInvitation(minted7.encoded), {
+      relayAddrs: [],
+      signal: AbortSignal.timeout(ms(120_000))
+    })
+    await pollUntil(
+      async () => harness.nodeA.node.isAuthorizedMember(edgePeerId),
+      (v) => v === true,
+      { timeoutMs: ms(60_000), label: 'node-A sees the edge joiner as a member' }
+    )
+    const attached = await attachJoinerStrand(edgeJoiner, strandId)
+    const edgeStrandNode = attached.strandNode
+    const edgeStrandPeerId = attached.strandPeerId
+
+    // Structural: the flag, not the edge-node platform, makes the difference.
+    const edgeProfileSeen = edgeStrandNode.cohortTopicHost?.profile
+    expect(edgeProfileSeen, 'edge joiner strand node has a cohort-topic host').to.not.equal(undefined)
+    expect(edgeProfileSeen.kind, 'edge joiner host kind').to.equal('edge')
+    expect(edgeProfileSeen.willingTiers.size, 'edge joiner willing tiers').to.equal(0)
+    const strandNodeA = harness.nodeA.node.getStrand(strandId).libp2pNode
+    const strandNodeB = harness.nodeB.node.getStrand(strandId).libp2pNode
+    for (const [w, n] of [['A', strandNodeA], ['B', strandNodeB]] as const) {
+      expect(n.cohortTopicHost?.profile?.kind, `strand node ${w} host kind`).to.equal('core')
+      expect(n.cohortTopicHost.profile.willingTiers.size, `strand node ${w} willing tiers`).to.be.greaterThan(0)
+    }
+    const control = strandCtx.strandNode.cohortTopicHost?.profile
+    expect(control?.kind, 'negative control: the first joiner (no flag) keeps the core profile').to.equal('core')
+    console.log(`[dm-7] profiles edge-joiner=${edgeProfileSeen.kind}/${edgeProfileSeen.willingTiers.size} A=${strandNodeA.cohortTopicHost.profile.kind}/${strandNodeA.cohortTopicHost.profile.willingTiers.size} B=${strandNodeB.cohortTopicHost.profile.kind}/${strandNodeB.cohortTopicHost.profile.willingTiers.size} first-joiner=${control.kind}`)
+
+    // Behavioural: sample every engine on A and B while the edge joiner watches and wakes on a commit.
+    let samples = 0
+    let maxEngines = 0
+    let enginesSeen = 0
+    const willingSightings: string[] = []
+    const sample = (): void => {
+      let engines = 0
+      for (const [w, n] of [['A', strandNodeA], ['B', strandNodeB]] as const) {
+        for (const engine of n.cohortTopicHost.registry.all()) {
+          engines++
+          const view = engine.cohortView()
+          for (const id of [edgeStrandPeerId, edgePeerId]) {
+            const willingness = view.get(id)?.willingness ?? 0
+            if (willingness !== 0) willingSightings.push(`${w}:${willingness}`)
+          }
+        }
+      }
+      samples++
+      enginesSeen += engines
+      maxEngines = Math.max(maxEngines, engines)
+    }
+    const sampler = setInterval(sample, 1000)
+
+    let wakes = 0
+    const tails = joinerTails(edgeStrandNode, `strand-${strandId}`)
+    const handle = edgeStrandNode.reactivityWatch.watch({ collectionId, tails, onChange: () => { wakes++ } })
+    try {
+      sample()
+      const t0 = Date.now()
+      await pollUntil(async () => wakes, (n) => n >= 1, { timeoutMs: ms(90_000), label: 'first committed-tail read wakes the edge joiner' })
+      console.log(`[dm-7] first wake ${Date.now() - t0} ms`)
+      const dbA = await harness.nodeA.openStrand(strandId)
+      const base = wakes
+      const t1 = Date.now()
+      await dbA.exec("insert into TidHighWater (Namespace, HighWater) values ('dm-7', 7)")
+      await pollUntil(async () => wakes, (n) => n > base, { timeoutMs: ms(2 * 20_000 + 30_000), label: 'node-A commit wakes the edge joiner' })
+      console.log(`[dm-7] commit wake ${Date.now() - t1} ms`)
+      // At least 10 samples across the window, however fast the wake came.
+      await pollUntil(async () => samples, (n) => n >= 10, { timeoutMs: ms(30_000), label: 'ten willingness samples' })
+    } finally {
+      clearInterval(sampler)
+      await handle.close()
+    }
+    console.log(`[dm-7] willingness samples=${samples} maxEngines=${maxEngines} engineReads=${enginesSeen} willingSightings=${willingSightings.length}`)
+    expect(samples, 'willingness samples').to.be.at.least(10)
+    expect(maxEngines, 'engines examined on A or B (zero would be vacuous)').to.be.at.least(1)
+    expect(willingSightings, 'no engine on A or B records the edge joiner as willing').to.deep.equal([])
+    await edgeJoiner.stop()
+  })
+
   it('DM-4 owner removeMachine reaches the joiner as cadre:removed', async function () {
     this.timeout(ms(180_000))
     if (joiner === undefined) throw new Error('DM-4 needs DM-1 to have admitted the joiner')
@@ -478,5 +572,47 @@ describeP2PHarness('a joined member node (the dashboard\'s shape) on real strand
     const machines = await harness.nodeA.node.listMachines()
     expect(machines.some((m: any) => m.peerId === joinerPeerId), 'removed machine no longer listed').to.equal(false)
     console.log(`[dm-obs] after-removal machinesA=${machines.length} machinesB=${await machineCount(harness.nodeB.node)}`)
+  })
+})
+
+// DM-7a runs in the ordinary suite (no RUN_P2P_HARNESS): the patched option's truth table against the
+// installed cadre-core copy this package resolves.
+describe('DM-7a strandReactivity.edgeHost option (patched cadre-core)', () => {
+  let option: (config: unknown, strandId: string) => any
+
+  before(async () => {
+    const cadreCore: any = await import('@serfab/cadre-core')
+    option = cadreCore.strandCohortTopicOption
+  })
+
+  it('DM-7a-1 enabled:true keeps the unpatched slice (no host key)', () => {
+    const r = option({ enabled: true }, 'y')
+    expect(r).to.deep.equal({ cohortTopic: { enabled: true } })
+    expect('host' in r.cohortTopic).to.equal(false)
+  })
+
+  it('DM-7a-2 edgeHost:false keeps the unpatched slice (no host key)', () => {
+    const r = option({ enabled: true, edgeHost: false }, 'y')
+    expect(r).to.deep.equal({ cohortTopic: { enabled: true } })
+    expect('host' in r.cohortTopic).to.equal(false)
+  })
+
+  it("DM-7a-3 a non-boolean edgeHost ('true') fails closed to the unpatched slice", () => {
+    expect(option({ enabled: true, edgeHost: 'true' }, 'y')).to.deep.equal({ cohortTopic: { enabled: true } })
+  })
+
+  it('DM-7a-4 enabled:false with edgeHost:true enables nothing', () => {
+    expect(option({ enabled: false, edgeHost: true }, 'y')).to.deep.equal({})
+  })
+
+  it('DM-7a-5 a strand outside strandIds with edgeHost:true enables nothing', () => {
+    expect(option({ enabled: true, strandIds: ['x'], edgeHost: true }, 'y')).to.deep.equal({})
+  })
+
+  it('DM-7a-6 edgeHost:true builds an edge host with no willing tier and minSigs 1', () => {
+    const host = option({ enabled: true, edgeHost: true }, 'y').cohortTopic.host
+    expect(host.profile.kind).to.equal('edge')
+    expect(host.profile.willingTiers.size).to.equal(0)
+    expect(host.minSigs).to.equal(1)
   })
 })
