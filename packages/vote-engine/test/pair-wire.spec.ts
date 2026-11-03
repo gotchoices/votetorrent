@@ -171,7 +171,7 @@ function recordingService (reply: unknown = MINTED): PairMintHandler & { calls: 
 
 /** Read one reply frame off a raw client stream. */
 async function readReply (stream: FakeStream): Promise<unknown> {
-  let buf = new Uint8Array(0)
+  let buf: Uint8Array = new Uint8Array(0)
   const it = stream[Symbol.asyncIterator]()
   for (;;) {
     if (buf.length >= 4) {
