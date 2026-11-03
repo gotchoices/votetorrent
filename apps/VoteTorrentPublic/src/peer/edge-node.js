@@ -229,6 +229,30 @@ export async function openStrandBlockStorage(strandId) {
 }
 
 /**
+ * The two protocols whose advertisement makes a peer a storage member of a
+ * network (`Libp2pKeyPeerNetwork.servesThisNetwork`).
+ * @param {string} networkName
+ * @returns {string[]}
+ */
+export function storageServiceProtocols(networkName) {
+	return [`/optimystic/${networkName}/cluster/1.0.0`, `/optimystic/${networkName}/repo/1.0.0`];
+}
+
+/**
+ * Stop serving storage on `networkName`: unregister both storage handlers so
+ * no peer counts this node into a storage group or picks it as a coordinator.
+ * @param {{ unhandle(protocols: string[]): Promise<void> }} node
+ * @param {string} networkName
+ * @returns {Promise<void>}
+ */
+export async function withdrawStorageServices(node, networkName) {
+	if (!node || typeof node.unhandle !== 'function') {
+		throw new EdgeNodeConfigError('withdrawStorageServices: the node cannot unregister protocol handlers');
+	}
+	await node.unhandle(storageServiceProtocols(networkName));
+}
+
+/**
  * @typedef {object} CreateEdgeNodeConfig
  * @property {unknown} strandId
  * @property {string} networkName
@@ -314,6 +338,26 @@ export async function createEdgeNode(config, deps) {
 			},
 		});
 	} catch (err) {
+		await db.close?.();
+		throw err;
+	}
+
+	// A READER, NOT A REPLICA (2026-11-03). `createLibp2pNode` registers this
+	// network's two storage services on every node, and a peer that advertises
+	// either is classified as serving the network (`@optimystic/db-p2p`
+	// `Libp2pKeyPeerNetwork.servesThisNetwork`), so strand nodes put this
+	// anonymous browser in their storage groups -- measured on real nodes: the
+	// collection's root group read `[strand-node, PAGE]`. The page then held
+	// blocks pushed to it, and, being half of the group the reactivity root is
+	// placed on while never willing to serve, refused or short-quorumed most of
+	// its own subscription registrations. Withdrawing both handlers makes it
+	// 'foreign' to every node (upstream's own comment calls this the defence
+	// that "keeps a future client-only node out of every cohort"); its reads are
+	// outbound and unaffected. libp2p's identify push tells connected peers.
+	try {
+		await withdrawStorageServices(node, networkName);
+	} catch (err) {
+		await node?.stop?.();
 		await db.close?.();
 		throw err;
 	}

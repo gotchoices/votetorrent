@@ -19,6 +19,7 @@ import {
 	createEdgeNode,
 	EdgeNodeConfigError,
 	PUBLIC_COHORT_MIN_SIGS,
+	storageServiceProtocols,
 } from '../../src/peer/edge-node.js';
 
 // ---------------------------------------------------------------------------
@@ -71,6 +72,9 @@ function makeFakeDeps(overrides = {}) {
 	const stubNode = {
 		stopCalls: 0,
 		async stop() { stubNode.stopCalls += 1; },
+		/** @type {string[][]} */
+		unhandleCalls: [],
+		async unhandle(/** @type {string[]} */ protocols) { stubNode.unhandleCalls.push(protocols); },
 		// 56-24: real `attachConnectionLifecycleTap` (imported by edge-node.js
 		// directly, never injected) is exercised against THIS fake node rather
 		// than mocked out -- `addEventListenerCalls` lets a test assert the tap
@@ -300,3 +304,35 @@ test('stop() is safe to call twice and swallows errors from both the node stop a
 	assert.strictEqual(stubDb.closeCalls, 1, 'stop() must be idempotent — the second call must not re-invoke db.close()');
 });
 
+
+// ---------------------------------------------------------------------------
+// A reader, not a replica (2026-11-03): the node withdraws this network's two
+// storage services, so no peer counts it into a storage group.
+// ---------------------------------------------------------------------------
+
+test('storageServiceProtocols names exactly the cluster and repo protocols of the network', () => {
+	assert.deepEqual(storageServiceProtocols('strand-abc'), ['/optimystic/strand-abc/cluster/1.0.0', '/optimystic/strand-abc/repo/1.0.0']);
+});
+
+test('createEdgeNode withdraws both storage services for the network it was built on, exactly once', async () => {
+	const { deps, stubNode } = makeFakeDeps();
+	await createEdgeNode(
+		{ strandId: VALID_STRAND_ID, networkName: 'strand-abc', bootstrapNodes: ['/dns4/gateway.example/tcp/443/wss/p2p/12D3KooWExample'], privateKey: /** @type {any} */ ({}) },
+		deps,
+	);
+	assert.deepEqual(stubNode.unhandleCalls, [storageServiceProtocols('strand-abc')]);
+});
+
+test('a node that cannot unregister handlers fails createEdgeNode, and the node and its storage are closed', async () => {
+	const { deps, stubNode, stubDb } = makeFakeDeps();
+	/** @type {any} */ (stubNode).unhandle = undefined;
+	await assert.rejects(
+		createEdgeNode(
+			{ strandId: VALID_STRAND_ID, networkName: 'strand-abc', bootstrapNodes: ['/dns4/gateway.example/tcp/443/wss/p2p/12D3KooWExample'], privateKey: /** @type {any} */ ({}) },
+			deps,
+		),
+		(/** @type {any} */ err) => err instanceof EdgeNodeConfigError,
+	);
+	assert.equal(stubNode.stopCalls, 1);
+	assert.equal(stubDb.closeCalls, 1);
+});
