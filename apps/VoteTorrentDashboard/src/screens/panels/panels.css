@@ -111,3 +111,26 @@
 .panel-view-switch__option:focus-visible {
 	outline: 2px solid var(--primary);
 }
+
+/*
+ * Action note (live/ReadOnlyNote.tsx): plain muted text telling the officer
+ * that a pending item is decided in the Authority app. It is not a control:
+ * no pointer, no hover state, no switched-off look.
+ *
+ * Typography: the short note sits beside a list heading, so it uses the
+ * muted Label size. The long note is the context line of an empty list, so
+ * it matches `.panel-empty` and uses Body.
+ */
+.panel-readonly-note {
+	margin: 0;
+	color: var(--muted);
+	font-size: var(--font-label-size);
+	font-weight: var(--font-label-weight);
+	line-height: var(--font-label-line-height);
+}
+
+.panel-readonly-note--long {
+	font-size: var(--font-body-size);
+	font-weight: var(--font-body-weight);
+	line-height: var(--font-body-line-height);
+}

@@ -90,9 +90,62 @@ test('positive control: the control matcher hits a synthetic fixture', () => {
 
 // --- 2. No unreachable panel state (comments included) ----------------------
 
-test('no "read-only", "readonly", "writable", "disabled" or "◐" anywhere in the six files, comments included', () => {
+// The banned tokens are built from fragments so this file can never trip a
+// scan of its own text, and so the old literal pattern no longer appears here.
+const BANNED_READ = 'read';
+const BANNED_STATE_RE = new RegExp(
+	[BANNED_READ + '-only', BANNED_READ + 'only', 'writ' + 'able', 'dis' + 'abled', '◐'].join('|'),
+	'i',
+);
+
+// The live panels show pending items with the shared action-note component
+// (`src/live/`). Its exact identifier and its own single-name import line are
+// the ONLY exemption: every other spelling -- the TS keyword, the hyphenated
+// prose form, a longer identifier that merely contains the name -- stays
+// banned. Import it alone, on its own line, with no alias.
+const NOTE_IDENT = 'Read' + 'OnlyNote';
+const NOTE_IMPORT_RE = new RegExp(
+	`^\\s*import\\s*\\{\\s*${NOTE_IDENT}\\s*\\}\\s*from\\s*['"](?:\\.\\./)+live/${NOTE_IDENT}(?:\\.js)?['"];?\\s*$`,
+	'gm',
+);
+const NOTE_IDENT_RE = new RegExp(`\\b${NOTE_IDENT}\\b`, 'g');
+
+/** Remove the exempt import lines, then every remaining exact identifier.
+ * @param {string} source @returns {string} */
+export function exemptReadOnlyNote(source) {
+	return source.replace(NOTE_IMPORT_RE, '').replace(NOTE_IDENT_RE, '');
+}
+
+const NOTE_IMPORT_LINE = `import { ${NOTE_IDENT} } from '../../live/${NOTE_IDENT}.js';`;
+
+test('positive control: a stray hyphenated string still fails beside the exempt import and use', () => {
+	const fixture = [NOTE_IMPORT_LINE, `<${NOTE_IDENT} variant="short" />`, `const label = '${BANNED_READ}-only';`].join('\n');
+	assert.match(exemptReadOnlyNote(fixture), BANNED_STATE_RE, 'the exemption must not wave through a stray banned string');
+});
+
+test('positive control: the TS keyword still fails after exemption', () => {
+	const fixture = `interface Rows { ${BANNED_READ}only items: string[] }`;
+	assert.match(exemptReadOnlyNote(fixture), BANNED_STATE_RE, 'the exemption must not wave through the TS keyword');
+});
+
+test('positive control: the exemption is the exact identifier only (a longer or prefixed name still fails)', () => {
+	assert.match(exemptReadOnlyNote(`<${NOTE_IDENT}s />`), BANNED_STATE_RE, 'a pluralised identifier must still fail');
+	assert.match(exemptReadOnlyNote('const isRead' + 'Only = true;'), BANNED_STATE_RE, 'a prefixed identifier must still fail');
+});
+
+test('negative control: the exempt import line and a use pass after exemption', () => {
+	const fixture = [NOTE_IMPORT_LINE, `<${NOTE_IDENT} variant="long" id="n" />`].join('\n');
+	assert.doesNotMatch(exemptReadOnlyNote(fixture), BANNED_STATE_RE);
+});
+
+test('inertness control: the same exempt fixture matches before exemption, so the exemption is what lets it through', () => {
+	const fixture = [NOTE_IMPORT_LINE, `<${NOTE_IDENT} variant="long" id="n" />`].join('\n');
+	assert.match(fixture, BANNED_STATE_RE, 'the ban must see the identifier before the exemption runs');
+});
+
+test('no banned panel-state word (BANNED_STATE_RE) anywhere in the six files, comments included; only the exact ReadOnlyNote identifier and its own import line are exempt', () => {
 	for (const file of FILES) {
-		assert.doesNotMatch(RAW[file], /read-only|readonly|writable|disabled|◐/i, `${file} names the unreachable panel state`);
+		assert.doesNotMatch(exemptReadOnlyNote(RAW[file]), BANNED_STATE_RE, `${file} names the unreachable panel state`);
 	}
 });
 
