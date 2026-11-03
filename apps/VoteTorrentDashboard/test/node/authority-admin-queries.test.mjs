@@ -14,7 +14,8 @@ import { readFileSync } from 'node:fs';
 import { Database } from '@quereus/quereus';
 import { prepareDb } from '@votetorrent/vote-engine/browser';
 
-import { dashboardSrc } from '../../../../scripts/lib/source-paths.mjs';
+import { dashboardSrc, workspacePath } from '../../../../scripts/lib/source-paths.mjs';
+import { stripComments } from '../../../../scripts/lib/strip-comments.mjs';
 
 import { seedFoundingAuthority } from '../../../../packages/web-data/test/fixtures/seed-founding-authority.js';
 import {
@@ -32,6 +33,24 @@ import {
 	fetchAdministrationOfficers,
 	fetchKeyholders,
 	fetchAuthorityInvites,
+	NETWORK_SETTINGS_TABLES,
+	AUTHORITY_PROFILE_TABLES,
+	AUTHORITY_PEERS_TABLES,
+	ADMINISTRATION_OFFICERS_TABLES,
+	KEYHOLDERS_TABLES,
+	AUTHORITY_INVITES_TABLES,
+	PANEL_READ_LOADING,
+	settlePanelRead,
+	markRowsOrNull,
+	markRowKey,
+	markRowSig,
+	networkSettingsMarkRows,
+	authorityProfileMarkRows,
+	authorityPeersMarkRows,
+	administrationOfficersMarkRows,
+	officerMarkKey,
+	authorityInvitesMarkRows,
+	isOpenInvite,
 } from '../../src/screens/panels/authority-admin-queries.js';
 
 const AUTHORITY_ID = 'a1';
@@ -296,4 +315,278 @@ test('every fetcher resolves its empty shape for db === null, none throws', asyn
 	assert.deepEqual(await fetchAdministrationOfficers(null), { admin: null, officers: [] });
 	assert.deepEqual(await fetchKeyholders(null), []);
 	assert.deepEqual(await fetchAuthorityInvites(null), []);
+});
+
+// =============================================================================
+// Live helpers for the administration panels (table lists, mark rows, the
+// open-invite rule, read settling). Titles start with `live:`.
+// =============================================================================
+
+// --- (a) drift: every *_TABLES list equals the tables its fetcher's SQL reads --
+
+const QUERIES_SOURCE = stripComments(readFileSync(dashboardSrc('screens', 'panels', 'authority-admin-queries.js'), 'utf8'));
+const SCHEMA_QSQL = readFileSync(workspacePath('packages/vote-core', 'schema', 'votetorrent.qsql'), 'utf8');
+
+const TABLE_REF_RE = /\b(?:from|join)\s+([A-Z][A-Za-z0-9_]*)/g;
+
+/** Sorted, de-duplicated identifiers named after `from` / `join`.
+ * @param {string} sql @returns {string[]} */
+function collectTableRefs(sql) {
+	return [...new Set([...sql.matchAll(TABLE_REF_RE)].map((m) => m[1]))].sort();
+}
+
+/** `view <Name> as ... ;` bodies out of the schema.
+ * @type {Map<string, string>} */
+const VIEW_BODIES = new Map();
+for (const m of SCHEMA_QSQL.matchAll(/\bview\s+([A-Z][A-Za-z0-9_]*)\s+as\b/g)) {
+	const start = (m.index ?? 0) + m[0].length;
+	const end = SCHEMA_QSQL.indexOf(';', start);
+	VIEW_BODIES.set(m[1], SCHEMA_QSQL.slice(start, end === -1 ? undefined : end));
+}
+
+/** Expand views to the base tables they read. A constant view (one that names
+ * no table, e.g. a `select 'o' as Code union all ...` code list) stays as itself.
+ * @param {string[]} names @param {Set<string>} [seen] @returns {string[]} */
+function expandViews(names, seen = new Set()) {
+	/** @type {Set<string>} */
+	const out = new Set();
+	for (const name of names) {
+		const body = VIEW_BODIES.get(name);
+		if (body === undefined || seen.has(name)) {
+			out.add(name);
+			continue;
+		}
+		const inner = collectTableRefs(body);
+		if (inner.length === 0) {
+			out.add(name);
+			continue;
+		}
+		for (const table of expandViews(inner, new Set([...seen, name]))) out.add(table);
+	}
+	return [...out].sort();
+}
+
+/** The comment-stripped body of `export async function <name>(` up to the next export.
+ * @param {string} name @returns {string} */
+function fetcherSlice(name) {
+	const marker = `export async function ${name}(`;
+	const start = QUERIES_SOURCE.indexOf(marker);
+	assert.ok(start >= 0, `${name} was not found in authority-admin-queries.js`);
+	const end = QUERIES_SOURCE.indexOf('\nexport ', start + marker.length);
+	const slice = QUERIES_SOURCE.slice(start, end === -1 ? undefined : end);
+	assert.ok(slice.length > marker.length, `the ${name} slice is empty`);
+	return slice;
+}
+
+/** The tables a fetcher reads: its own from/join names, views expanded, plus
+ * resolveAuthorityId's tables when it calls that helper.
+ * @param {string} name @returns {string[]} */
+function derivedTables(name) {
+	const body = fetcherSlice(name);
+	const refs = collectTableRefs(body);
+	if (body.includes('resolveAuthorityId(')) refs.push(...collectTableRefs(fetcherSlice('resolveAuthorityId')));
+	return expandViews(refs);
+}
+
+/** @type {Array<[string, readonly string[], string]>} */
+const DRIFT_CASES = [
+	['fetchNetworkSettings', NETWORK_SETTINGS_TABLES, 'NETWORK_SETTINGS_TABLES'],
+	['fetchAuthorityProfile', AUTHORITY_PROFILE_TABLES, 'AUTHORITY_PROFILE_TABLES'],
+	['fetchAuthorityPeers', AUTHORITY_PEERS_TABLES, 'AUTHORITY_PEERS_TABLES'],
+	['fetchAdministrationOfficers', ADMINISTRATION_OFFICERS_TABLES, 'ADMINISTRATION_OFFICERS_TABLES'],
+	['fetchKeyholders', KEYHOLDERS_TABLES, 'KEYHOLDERS_TABLES'],
+	['fetchAuthorityInvites', AUTHORITY_INVITES_TABLES, 'AUTHORITY_INVITES_TABLES'],
+];
+
+test('live: drift control -- the collector over a synthetic SQL string yields exactly its two tables', () => {
+	assert.deepEqual(collectTableRefs('select 1 from Foo F left join Bar B on 1'), ['Bar', 'Foo']);
+});
+
+test('live: drift control -- a copied list with one table removed is reported unequal', () => {
+	const derived = derivedTables('fetchAuthorityInvites');
+	const copied = AUTHORITY_INVITES_TABLES.filter((table) => table !== 'InviteCancellation');
+	assert.equal(copied.length, AUTHORITY_INVITES_TABLES.length - 1, 'the control must actually drop one table');
+	assert.throws(() => assert.deepEqual(derived, copied), assert.AssertionError);
+});
+
+test('live: drift control -- the CurrentAdmin view resolves to Admin, a constant code-list view stays itself, a resolveAuthorityId caller gains its tables', () => {
+	assert.deepEqual(expandViews(['CurrentAdmin']), ['Admin']);
+	assert.deepEqual(expandViews(['ElectionType']), ['ElectionType']);
+	assert.deepEqual(collectTableRefs(fetcherSlice('resolveAuthorityId')), ['Authority', 'Network']);
+	assert.ok(!collectTableRefs(fetcherSlice('fetchAuthorityPeers')).includes('Network'), 'Network must come from resolveAuthorityId, not the fetcher body');
+	assert.ok(derivedTables('fetchAuthorityPeers').includes('Network'));
+});
+
+for (const [fetcher, list, listName] of DRIFT_CASES) {
+	test(`live: drift -- ${listName} equals the tables ${fetcher}'s SQL reads`, () => {
+		assert.deepEqual([...list], derivedTables(fetcher));
+	});
+}
+
+test('live: every *_TABLES list is frozen, sorted and free of duplicates', () => {
+	for (const [, list, listName] of DRIFT_CASES) {
+		assert.ok(Object.isFrozen(list), `${listName} must be frozen`);
+		assert.deepEqual([...list], [...new Set(list)].sort(), `${listName} must be sorted without duplicates`);
+	}
+});
+
+// --- (b) mark rows -------------------------------------------------------------
+
+const SAMPLE_SETTINGS = {
+	Name: 'Gate County Network',
+	Hash: 'aa11networkhash',
+	PrimaryAuthorityId: 'a1',
+	Relays: ['/dns4/relay1.example/tcp/4001'],
+	TimestampAuthorities: [{ url: 'https://tsa1.example' }],
+	NumberRequiredTSAs: 1,
+	ElectionType: 'o',
+	ElectionTypeName: 'Official',
+};
+
+test('live: networkSettingsMarkRows -- keys are the seven field labels; changing only Relays changes only the Relays sig; null gives []', () => {
+	const before = networkSettingsMarkRows(SAMPLE_SETTINGS);
+	assert.deepEqual(before.map(markRowKey), ['Name', 'Hash', 'PrimaryAuthorityId', 'Relays', 'TimestampAuthorities', 'NumberRequiredTSAs', 'ElectionType']);
+	const after = networkSettingsMarkRows({ ...SAMPLE_SETTINGS, Relays: ['/dns4/relay9.example/tcp/4001'] });
+	const changed = before.filter((row, i) => markRowSig(row) !== markRowSig(after[i])).map(markRowKey);
+	assert.deepEqual(changed, ['Relays']);
+	assert.deepEqual(networkSettingsMarkRows(null), []);
+});
+
+test('live: authorityProfileMarkRows -- keys Name, DomainName, Id, ImageRef; null gives []', () => {
+	const rows = authorityProfileMarkRows({ Id: 'a1', Name: 'Gate County Elections', DomainName: null, ImageRef: null });
+	assert.deepEqual(rows.map(markRowKey), ['Name', 'DomainName', 'Id', 'ImageRef']);
+	assert.equal(rows[1].sig, 'null');
+	assert.deepEqual(authorityProfileMarkRows(null), []);
+});
+
+test('live: authorityPeersMarkRows -- keeps input order, key and sig are the peer id', () => {
+	assert.deepEqual(authorityPeersMarkRows(['p2', 'p1']), [
+		{ key: 'p2', sig: 'p2' },
+		{ key: 'p1', sig: 'p1' },
+	]);
+	assert.deepEqual(authorityPeersMarkRows(null), []);
+});
+
+test('live: administrationOfficersMarkRows -- the seeded founding db gives the two admin keys then one officer key each', async () => {
+	const db = await foundingDb();
+	await seedOfficerWithMalformedScopes(db, { authorityId: AUTHORITY_ID, userId: 'u2', title: 'Deputy Clerk', scopes: '{}' });
+	const value = await fetchAdministrationOfficers(db);
+	const rows = administrationOfficersMarkRows(value);
+	const officerKeys = value.officers.map((o) => officerMarkKey(o.UserId));
+	assert.equal(officerKeys.length, 2);
+	assert.deepEqual(rows.map(markRowKey), ['admin:EffectiveAt', 'admin:ThresholdPolicies', ...officerKeys]);
+	assert.equal(officerMarkKey('u1'), 'officer:u1');
+	assert.ok(officerKeys.includes('officer:u1') && officerKeys.includes('officer:u2'));
+
+	// Changing one officer's Title changes only that officer's sig.
+	const edited = {
+		admin: value.admin,
+		officers: value.officers.map((o) => (o.UserId === 'u2' ? { ...o, Title: 'Chief Deputy Clerk' } : o)),
+	};
+	const after = administrationOfficersMarkRows(edited);
+	const changed = rows.filter((row, i) => markRowSig(row) !== markRowSig(after[i])).map(markRowKey);
+	assert.deepEqual(changed, ['officer:u2']);
+});
+
+test('live: administrationOfficersMarkRows -- no current administration gives [] (and null gives [])', () => {
+	assert.deepEqual(administrationOfficersMarkRows({ admin: null, officers: [] }), []);
+	assert.deepEqual(administrationOfficersMarkRows(null), []);
+});
+
+test('live: authorityInvitesMarkRows -- key is the Cid; an extra property on the row object never reaches the sig', () => {
+	const invite = {
+		Cid: 'cid-1',
+		Name: 'Neighboring County Authority',
+		Type: 'au',
+		TypeName: 'Authority',
+		Expiration: '2026-06-01T00:00:00',
+		IsAccepted: null,
+		CancelledAt: null,
+		InviteKey: 'k-secret',
+	};
+	const [row] = authorityInvitesMarkRows([invite]);
+	assert.equal(row.key, 'cid-1');
+	assert.ok(!row.sig.includes('k-secret'), 'a property outside the six displayed values must never reach the sig');
+	assert.equal(row.sig, JSON.stringify(['Neighboring County Authority', 'au', 'Authority', '2026-06-01T00:00:00', null, null]));
+	assert.deepEqual(authorityInvitesMarkRows(null), []);
+});
+
+// --- (c) isOpenInvite ------------------------------------------------------------
+
+const AT_SEED = Date.parse('2026-01-15T00:00:00Z');
+const AT_EXPIRY = Date.parse('2026-06-01T00:00:00Z');
+
+/** @param {Partial<import('../../src/screens/panels/authority-admin-queries.js').AuthorityInvite>} [over] */
+function inviteRow(over = {}) {
+	return {
+		Cid: 'cid-1',
+		Name: 'Neighboring County Authority',
+		Type: 'au',
+		TypeName: 'Authority',
+		Expiration: '2026-06-01T00:00:00',
+		IsAccepted: null,
+		CancelledAt: null,
+		...over,
+	};
+}
+
+test('live: isOpenInvite -- only an unanswered, uncancelled invite with a future expiration is open', () => {
+	assert.equal(isOpenInvite(inviteRow(), AT_SEED), true);
+	assert.equal(isOpenInvite(inviteRow({ IsAccepted: false }), AT_SEED), false, 'a declined invite is answered');
+	assert.equal(isOpenInvite(inviteRow({ IsAccepted: true }), AT_SEED), false, 'an accepted invite is answered');
+	assert.equal(isOpenInvite(inviteRow({ CancelledAt: '2026-01-10T00:00:00' }), AT_SEED), false);
+	assert.equal(isOpenInvite(inviteRow(), AT_EXPIRY), false, 'an invite is closed AT its expiration');
+	assert.equal(isOpenInvite(inviteRow(), AT_EXPIRY + 1000), false);
+});
+
+test('live: isOpenInvite -- an unreadable expiration or a non-finite now is never open', () => {
+	assert.equal(isOpenInvite(inviteRow({ Expiration: 'not-a-date' }), AT_SEED), false);
+	assert.equal(isOpenInvite(inviteRow(), Number.NaN), false);
+	assert.equal(isOpenInvite(inviteRow(), Number.POSITIVE_INFINITY), false);
+});
+
+test('live: isOpenInvite -- the seeded iad invite, read through fetchAuthorityInvites: its fixture result row is a decline (closed); unanswered it is open at the seed instant and closed after expiry', async () => {
+	const db = await foundingDb();
+	await seedAuthorityInvite(db, { authorityId: AUTHORITY_ID, name: 'Neighboring County Authority', expiration: '2026-06-01T00:00:00' });
+	const [invite] = await fetchAuthorityInvites(db);
+	assert.ok(invite);
+	assert.equal(invite.IsAccepted, false);
+	assert.equal(isOpenInvite(invite, AT_SEED), false, 'the fixture seeds a declined InviteResult row');
+	const unanswered = { ...invite, IsAccepted: null };
+	assert.equal(isOpenInvite(unanswered, AT_SEED), true);
+	assert.equal(isOpenInvite(unanswered, AT_EXPIRY + 60_000), false);
+});
+
+// --- (d) read settling ------------------------------------------------------------
+
+test('live: settlePanelRead -- ok after loading is ready; not-ok after ready keeps the SAME object; not-ok after loading is an error', () => {
+	const ready = settlePanelRead(PANEL_READ_LOADING, { ok: true, data: ['p1'] });
+	assert.deepEqual(ready, { status: 'ready', data: ['p1'] });
+	assert.equal(settlePanelRead(ready, { ok: false }), ready);
+	assert.deepEqual(settlePanelRead(PANEL_READ_LOADING, { ok: false }), { status: 'error', data: null });
+	assert.ok(Object.isFrozen(PANEL_READ_LOADING));
+	assert.deepEqual(PANEL_READ_LOADING, { status: 'loading', data: null });
+});
+
+test('live: markRowsOrNull -- loading and error give null (never []); ready calls the mapper once with the data', () => {
+	let calls = 0;
+	/** @param {string[] | null} data */
+	const toRows = (data) => {
+		calls += 1;
+		return authorityPeersMarkRows(data);
+	};
+	assert.strictEqual(markRowsOrNull(PANEL_READ_LOADING, toRows), null);
+	assert.strictEqual(markRowsOrNull({ status: 'error', data: null }, toRows), null);
+	assert.equal(calls, 0);
+	const data = ['p1'];
+	/** @type {string[] | null} */
+	let seen = null;
+	const rows = markRowsOrNull({ status: 'ready', data }, (d) => {
+		calls += 1;
+		seen = d;
+		return authorityPeersMarkRows(d);
+	});
+	assert.equal(calls, 1);
+	assert.equal(seen, data);
+	assert.deepEqual(rows, [{ key: 'p1', sig: 'p1' }]);
 });
