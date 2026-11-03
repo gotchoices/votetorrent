@@ -635,3 +635,398 @@ test('10 deleteMemberStorage: deletes exactly one network\'s member databases, t
 	await settle(2);
 	await assert.rejects(deleteMemberStorage(hashA, { deps: { indexedDB: /** @type {any} */ ({}) } }), MemberNodeConfigError);
 });
+
+// ── Task 3: identity, join, resume, events, stop, hygiene ───────────────────
+
+test('11 construction creates the identity through the real cadre-core identityPeerId, before any join', async () => {
+	const inner = new InMemoryKeyStore();
+	/** @type {string[]} */
+	const keyCalls = [];
+	const recording = {
+		/** @param {string} id */
+		get: (id) => {
+			keyCalls.push(`get:${id}`);
+			return inner.get(id);
+		},
+		/** @param {string} id @param {Uint8Array} bytes */
+		set: (id, bytes) => {
+			keyCalls.push(`set:${id}`);
+			return inner.set(id, bytes);
+		},
+		/** @param {string} id */
+		delete: (id) => inner.delete(id),
+		list: () => inner.list(),
+	};
+	const member = await createMemberNode({ networkHash: uniqueHash(), keyStore: recording, relayAddrs: [RELAY], strandId: STRAND });
+	assert.equal(typeof member.peerId, 'string');
+	assert.ok(member.peerId.length > 20);
+	assert.deepEqual(await inner.list(), [DEFAULT_IDENTITY_KEY_ID]);
+	assert.ok(keyCalls.includes(`set:${DEFAULT_IDENTITY_KEY_ID}`), 'the identity was created and persisted');
+	assert.equal(member.status(), 'stopped', 'nothing started');
+	await member.stop();
+});
+
+test('12 key first: the identity is read from the key store before the invitation is redeemed', async () => {
+	/** @type {string[]} */
+	const order = [];
+	const fake = fakeEdge({ order });
+	const inner = new InMemoryKeyStore();
+	await inner.set(DEFAULT_IDENTITY_KEY_ID, new Uint8Array([8, 1, 18, 64, 9]));
+	const keyStore = {
+		/** @param {string} id */
+		get: (id) => {
+			order.push(`keyStore.get:${id}`);
+			return inner.get(id);
+		},
+		/** @param {string} id @param {Uint8Array} b */
+		set: (id, b) => inner.set(id, b),
+		/** @param {string} id */
+		delete: (id) => inner.delete(id),
+		list: () => inner.list(),
+	};
+	const member = await memberOver(fake, { keyStore });
+	const { encoded } = makeInvitation();
+	assert.equal(await member.joinCadre(encoded), 'joined');
+	const keyRead = order.indexOf(`keyStore.get:${DEFAULT_IDENTITY_KEY_ID}`);
+	const redeem = order.indexOf('edge.joinCadre');
+	assert.ok(keyRead >= 0 && redeem > keyRead, `order was ${order.join(' > ')}`);
+});
+
+/** @param {unknown} err @param {string} reason */
+function isReason(err, reason) {
+	return err instanceof MemberNodeError && err.reason === reason;
+}
+
+test('13 join reasons: malformed, not-invitation, party-mismatch, spent, invalid, unreachable, cancelled and owner-key', async () => {
+	{
+		const fake = fakeEdge();
+		const member = await memberOver(fake);
+		assert.ok(isReason(await rejection(member.joinCadre('not an invitation at all')), 'malformed'));
+		assert.ok(isReason(await rejection(member.joinCadre(/** @type {any} */ (42))), 'malformed'));
+		assert.equal(fake.calls.some(([name]) => name === 'joinCadre'), false);
+	}
+	{
+		const fake = fakeEdge();
+		const member = await memberOver(fake, { deps: { isOwnerGrant: () => true } });
+		assert.ok(isReason(await rejection(member.joinCadre(makeInvitation().encoded)), 'not-invitation'));
+		assert.equal(fake.calls.some(([name]) => name === 'joinCadre' || name === 'loadSavedStart'), false);
+	}
+	{
+		const fake = fakeEdge();
+		const member = await memberOver(fake);
+		assert.ok(isReason(await rejection(member.joinCadre(makeInvitation({ totalUses: 2 }).encoded)), 'not-invitation'));
+		assert.ok(isReason(await rejection(member.joinCadre(makeInvitation({ totalUses: null }).encoded)), 'not-invitation'));
+		assert.equal(fake.calls.some(([name]) => name === 'joinCadre'), false);
+	}
+	{
+		const fake = fakeEdge();
+		fake.state.savedStart = { options: { partyId: 'party-b', origin: 'joined', bootstrapAddrs: [], relayAddrs: [] }, autoStart: true };
+		const member = await memberOver(fake);
+		assert.ok(isReason(await rejection(member.joinCadre(makeInvitation().encoded)), 'party-mismatch'));
+		assert.equal(fake.calls.some(([name]) => name === 'joinCadre' || name === 'start'), false);
+	}
+	for (const [error, reason] of /** @type {Array<[any, string]>} */ ([
+		[new CadreInviteRejectedError('invite-spent', 'spent'), 'spent'],
+		[new CadreInviteRejectedError('invite-invalid', 'bad'), 'invalid'],
+		[new CadreInviteRejectedError('issuer-unknown', 'who'), 'unreachable'],
+		[new Error('socket closed'), 'unreachable'],
+	])) {
+		const fake = fakeEdge();
+		fake.state.joinError = error;
+		const member = await memberOver(fake);
+		assert.ok(isReason(await rejection(member.joinCadre(makeInvitation().encoded)), reason), reason);
+	}
+	{
+		const fake = fakeEdge();
+		const member = await memberOver(fake);
+		const controller = new AbortController();
+		controller.abort();
+		assert.ok(isReason(await rejection(member.joinCadre(makeInvitation().encoded, { signal: controller.signal })), 'cancelled'));
+		const racing = fakeEdge();
+		const racingMember = await memberOver(racing);
+		const later = new AbortController();
+		racing.state.joinError = new Error('aborted');
+		const original = racing.edge.joinCadre;
+		racing.edge.joinCadre = async (credential, opts) => {
+			later.abort();
+			return original.call(racing.edge, credential, opts);
+		};
+		assert.ok(isReason(await rejection(racingMember.joinCadre(makeInvitation().encoded, { signal: later.signal })), 'cancelled'));
+	}
+	{
+		const fake = fakeEdge();
+		fake.state.joinResult = { peerId: 'IdentityPeerX', redeemedAt: 1, asOwner: true };
+		const member = await memberOver(fake);
+		assert.ok(isReason(await rejection(member.joinCadre(makeInvitation().encoded)), 'owner-key'));
+		assert.ok(fake.calls.some(([name]) => name === 'stop'), 'the node is stopped after an owner join');
+	}
+	{
+		const fake = fakeEdge();
+		fake.state.ownerKey = 'b64url-owner-public-key';
+		const member = await memberOver(fake);
+		assert.ok(isReason(await rejection(member.joinCadre(makeInvitation().encoded)), 'owner-key'));
+		assert.ok(fake.calls.some(([name]) => name === 'stop'));
+	}
+	{
+		const fake = fakeEdge();
+		const keyStore = new InMemoryKeyStore();
+		const member = await memberOver(fake, { keyStore });
+		assert.ok(isReason(await rejection(member.joinCadre(makeInvitation().encoded)), 'invalid'), 'no identity in the store');
+		assert.equal(fake.calls.some(([name]) => name === 'joinCadre'), false);
+	}
+});
+
+test('14 success: joined, with the constructor relays and an onProgress that forwards { state } only', async () => {
+	const fake = fakeEdge();
+	const member = await memberOver(fake);
+	/** @type {unknown[]} */
+	const progress = [];
+	const { invitation, encoded } = makeInvitation();
+	assert.equal(await member.joinCadre(encoded, { onProgress: (p) => progress.push(p) }), 'joined');
+	const call = fake.calls.find(([name]) => name === 'joinCadre');
+	assert.ok(call);
+	assert.equal(call[1].partyId, invitation.partyId);
+	assert.deepEqual(call[2].relayAddrs, [RELAY]);
+	assert.deepEqual(progress, [{ state: 'admitted' }]);
+	assert.equal(fake.calls.some(([name]) => name === 'start'), false, 'a join starts through cadre-core\'s joinCadre, not start');
+});
+
+test('15 already member: a saved joined start of the same party resumes and answers already-member without redeeming', async () => {
+	const fake = fakeEdge();
+	fake.state.savedStart = { options: { partyId: 'party-a', origin: 'joined', bootstrapAddrs: [], relayAddrs: ['/dns4/old/tcp/1/wss/p2p/X'] }, autoStart: true };
+	fake.state.authorized = true;
+	const member = await memberOver(fake);
+	assert.equal(await member.joinCadre(makeInvitation().encoded), 'already-member');
+	const starts = fake.calls.filter(([name]) => name === 'start');
+	assert.equal(starts.length, 1);
+	assert.equal(starts[0][1].origin, 'joined');
+	assert.equal(fake.calls.some(([name]) => name === 'joinCadre'), false, 'the invitation was not consumed');
+	assert.ok(fake.calls.some(([name, peer]) => name === 'isAuthorizedMember' && peer === 'IdentityPeerX'));
+
+	const notYet = fakeEdge();
+	notYet.state.savedStart = fake.state.savedStart;
+	notYet.state.authorized = false;
+	const second = await memberOver(notYet);
+	assert.equal(await second.joinCadre(makeInvitation().encoded), 'joined');
+	assert.equal(notYet.calls.filter(([name]) => name === 'joinCadre').length, 1);
+});
+
+test('16 resume: only a saved joined start runs, always with the code\'s relays; removed reads removed', async () => {
+	{
+		const fake = fakeEdge();
+		const member = await memberOver(fake);
+		assert.equal(await member.resume(), 'not-paired');
+		assert.equal(fake.calls.some(([name]) => name === 'start'), false);
+	}
+	for (const origin of [undefined, 'founded']) {
+		const fake = fakeEdge();
+		fake.state.savedStart = { options: { partyId: 'party-a', bootstrapAddrs: [], relayAddrs: [], ...(origin ? { origin } : {}) }, autoStart: true };
+		const member = await memberOver(fake);
+		assert.equal(await member.resume(), 'not-paired');
+		assert.equal(fake.calls.some(([name]) => name === 'start'), false, `origin ${origin} never starts`);
+	}
+	{
+		const fake = fakeEdge();
+		fake.state.savedStart = {
+			options: { partyId: 'party-a', origin: 'joined', bootstrapAddrs: [], relayAddrs: ['/dns4/stale/tcp/443/wss/p2p/Old'] },
+			autoStart: false,
+		};
+		const member = await memberOver(fake);
+		assert.equal(await member.resume(), 'running');
+		const start = fake.calls.find(([name]) => name === 'start');
+		assert.ok(start);
+		assert.equal(start[1].origin, 'joined');
+		assert.deepEqual(start[1].relayAddrs, [RELAY]);
+		assert.equal(member.status(), 'running');
+		assert.equal(await member.resume(), 'running');
+		assert.equal(fake.calls.filter(([name]) => name === 'start').length, 1, 'a running node is not started twice');
+		fake.edge.fire('cadre:removed', { partyId: 'party-a', stampId: 's', signerKey: null, at: 1 });
+		assert.equal(await member.resume(), 'removed');
+	}
+	{
+		const fake = fakeEdge();
+		fake.state.savedStart = { options: { partyId: 'party-a', origin: 'joined', bootstrapAddrs: [], relayAddrs: [] }, autoStart: true };
+		fake.edge.start = async () => {
+			throw new Error('dial failed');
+		};
+		const member = await memberOver(fake);
+		assert.ok(isReason(await rejection(member.resume()), 'unreachable'));
+	}
+});
+
+test('17 events: control and removal events reach listeners, unsubscribe works, a throwing listener does not stop the next', async () => {
+	const fake = fakeEdge();
+	const member = await memberOver(fake);
+	/** @type {string[]} */
+	const heard = [];
+	const off = member.on('control:connected', () => heard.push('connected-1'));
+	member.on('control:connected', () => {
+		throw new Error('listener bug');
+	});
+	member.on('control:connected', () => heard.push('connected-3'));
+	member.on('control:disconnected', () => heard.push('disconnected'));
+	/** @type {unknown[]} */
+	const removals = [];
+	member.on('cadre:removed', (removal) => removals.push(removal));
+	const warn = console.warn;
+	console.warn = () => {};
+	try {
+		fake.edge.fire('control:connected', undefined);
+		off();
+		fake.edge.fire('control:connected', undefined);
+	} finally {
+		console.warn = warn;
+	}
+	fake.edge.fire('control:disconnected', undefined);
+	const removal = { partyId: 'party-a', stampId: 's1', signerKey: null, at: 5 };
+	fake.edge.fire('cadre:removed', removal);
+	assert.deepEqual(heard, ['connected-1', 'connected-3', 'connected-3', 'disconnected']);
+	assert.deepEqual(removals, [removal]);
+	assert.throws(() => member.on(/** @type {any} */ ('other'), () => {}), MemberNodeConfigError);
+});
+
+test('18 removal and stop: no edge stop after a removal, reconnect is a no-op, waiters reject, no database; stop is shared; reconnect reconciles', async () => {
+	{
+		const fake = fakeEdge();
+		const member = await memberOver(fake);
+		fake.state.status = { state: 'running' };
+		const instance = { libp2pNode: fakeLibp2p('StrandPeerOne'), database: { sentinel: true } };
+		fake.strands.set(STRAND, instance);
+		fake.state.addStrandError = null;
+		// A pending waiter: the strand has not started yet in the member node's eyes.
+		const pending = member.waitForStrand(STRAND);
+		fake.edge.fire('cadre:removed', { partyId: 'party-a', stampId: 's', signerKey: null, at: 1 });
+		fake.state.status = { state: 'removed' };
+		assert.ok(isReason(await rejection(pending), 'not-running'));
+		assert.equal(member.getStrandDatabase(STRAND), null, 'no database after a removal');
+		await member.reconnect();
+		await member.stop();
+		assert.equal(fake.calls.some(([name]) => name === 'stop' || name === 'start' || name === 'reconcileControlCohort'), false);
+		assert.ok(isReason(await rejection(member.joinCadre(makeInvitation().encoded)), 'removed'));
+		assert.equal(member.status(), 'removed');
+	}
+	{
+		const fake = fakeEdge();
+		const member = await memberOver(fake);
+		fake.state.status = { state: 'running' };
+		fake.strands.set(STRAND, { libp2pNode: fakeLibp2p('StrandPeerOne'), database: { sentinel: true } });
+		assert.ok(member.getStrandDatabase(STRAND));
+		await member.reconnect();
+		assert.equal(fake.calls.filter(([name]) => name === 'reconcileControlCohort').length, 1);
+		fake.state.reconcileError = new Error('cohort unreachable');
+		const warn = console.warn;
+		console.warn = () => {};
+		try {
+			await member.reconnect();
+		} finally {
+			console.warn = warn;
+		}
+		await Promise.all([member.stop(), member.stop()]);
+		assert.equal(fake.calls.filter(([name]) => name === 'stop').length, 1, 'two concurrent stops stop once');
+		fake.state.status = { state: 'running' };
+		assert.equal(member.getStrandDatabase(STRAND), null, 'no database after stop, even if the instance still has one');
+		assert.ok(isReason(await rejection(member.waitForStrand(STRAND)), 'not-running'));
+	}
+	{
+		const fake = fakeEdge();
+		fake.state.savedStart = { options: { partyId: 'party-a', origin: 'joined', bootstrapAddrs: [], relayAddrs: [] }, autoStart: false };
+		const member = await memberOver(fake);
+		await member.reconnect();
+		assert.equal(fake.calls.filter(([name]) => name === 'start').length, 1, 'a stopped node reconnects by resuming');
+		await member.stop();
+		await member.reconnect();
+		assert.equal(fake.calls.filter(([name]) => name === 'start').length, 2, 'a stopped member resumes again');
+		assert.equal(member.status(), 'running');
+	}
+});
+
+test('19 bearer and PII hygiene: no log line or error message carries the invitation, its private key, the party id or the network hash', async (t) => {
+	/** @type {unknown[][]} */
+	const lines = [];
+	for (const method of /** @type {const} */ (['warn', 'error', 'log', 'info', 'debug'])) {
+		t.mock.method(console, method, (/** @type {unknown[]} */ ...args) => lines.push(args));
+	}
+	const { invitation, encoded } = makeInvitation();
+	const secretBearingError = new Error(`refused ${encoded} ${invitation.invitePrivateKey} ${invitation.partyId} ${HASH}`);
+	/** @type {unknown[]} */
+	const errors = [];
+	const scenarios = /** @type {Array<(fake: ReturnType<typeof fakeEdge>) => void>} */ ([
+		(fake) => {
+			fake.state.joinError = secretBearingError;
+		},
+		(fake) => {
+			fake.state.joinError = new CadreInviteRejectedError('invite-spent', `spent ${encoded}`);
+		},
+		(fake) => {
+			fake.state.joinResult = { asOwner: true };
+		},
+		(fake) => {
+			fake.state.savedStart = { options: { partyId: 'party-b', origin: 'joined', bootstrapAddrs: [], relayAddrs: [] }, autoStart: true };
+		},
+		(fake) => {
+			fake.state.savedStart = { options: { partyId: 'party-a', origin: 'joined', bootstrapAddrs: [], relayAddrs: [] }, autoStart: true };
+			fake.edge.start = async () => {
+				throw secretBearingError;
+			};
+		},
+	]);
+	for (const arrange of scenarios) {
+		const fake = fakeEdge();
+		arrange(fake);
+		const member = await memberOver(fake);
+		errors.push(await rejection(member.joinCadre(encoded)));
+	}
+	{
+		const fake = fakeEdge();
+		const member = await memberOver(fake);
+		errors.push(await rejection(member.joinCadre(`${encoded}garbage`)));
+		fake.state.status = { state: 'running' };
+		fake.strands.set(STRAND, { libp2pNode: fakeLibp2p('S', { unhandle: () => Promise.reject(secretBearingError) }) });
+		const waiting = member.waitForStrand(STRAND);
+		fake.edge.fire('strand:started', { strandId: STRAND });
+		errors.push(await rejection(waiting));
+	}
+	t.mock.restoreAll();
+
+	const banned = [encoded, invitation.invitePrivateKey, invitation.partyId, HASH];
+	assert.ok(lines.length >= 4, `expected the failure cases to log, got ${lines.length}`);
+	for (const line of lines) {
+		assert.equal(line[0], LOG_PREFIX);
+		assert.ok(line.length === 2 || line.length === 3, 'prefix, error name and at most a closed code');
+		assert.match(String(line[1]), /^[A-Za-z]*Error$/);
+		if (line.length === 3) assert.ok(['invite-spent', 'invite-invalid', 'issuer-unknown'].includes(String(line[2])));
+		const text = line.map(String).join(' ');
+		for (const token of banned) assert.equal(text.includes(token), false, 'a log line carries a banned token');
+	}
+	assert.equal(errors.length, scenarios.length + 2);
+	for (const err of errors) {
+		assert.ok(err instanceof MemberNodeError);
+		for (const token of banned) assert.equal(err.message.includes(token), false, 'an error message carries a banned token');
+	}
+});
+
+test('20 source scan: joined-only start, no owner-key or owner-grant method, no founder origin, no console.log, no node globals, no StrandDatabase construction', () => {
+	const code = stripComments(readFileSync(dashboardSrc('peer', 'member-node.js'), 'utf8'));
+	const banned = [
+		"origin: 'found" + "ed'",
+		'create' + 'OwnerGrant',
+		'import' + 'OwnerKey',
+		'export' + 'OwnerKey',
+		'redeem' + 'OwnerGrant',
+		'remove' + 'Owner',
+		'dissolve' + 'FormerParty',
+		'console' + '.log',
+		'Buf' + 'fer',
+		"from 'no" + "de:",
+		'import.me' + 'ta.env',
+		'Strand' + 'ChangeHub',
+		'new Strand' + 'Database',
+	];
+	for (const token of banned) assert.equal(code.includes(token), false, `member-node.js contains a banned token (${token.length} chars)`);
+	assert.doesNotMatch(code, new RegExp('import\\s*\\{[^}]*Strand' + 'Database'));
+	assert.equal(code.split('.st' + 'art(').length - 1, 1, 'the edge node is started in exactly one place');
+	assert.match(code, /async function startJoined\([^)]*\)\s*\{[\s\S]*?edge\.start\(\{ \.\.\.options, origin: 'joined'/);
+	assert.match(code, /createEdgeNode as createCadreEdgeNode/);
+	// Positive control: the comment stripper keeps code and a banned token in code is found.
+	assert.ok(stripComments(`x.${'remove' + 'Owner'}(k); // note`).includes('remove' + 'Owner'));
+});
