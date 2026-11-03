@@ -1,0 +1,637 @@
+/**
+ * Tier-1 proof of the dashboard's member node (`src/peer/member-node.js`): the platform it hands
+ * cadre-core, the subscriber-only posture against the installed (patched) cadre-core, the
+ * per-network storage names and their deletion, the strand claim and storage withdrawal, the join
+ * reasons, resume, events, stop, log hygiene and the source bans.
+ *
+ * Honesty note: almost everything here runs over a FAKE edge node (a recorder of calls with
+ * events the test fires), so it proves what this module asks of cadre-core, not what cadre-core
+ * then does on a network. Three cases use the real installed cadre-core: the D-24
+ * `strandCohortTopicOption` case, and the construction case that reads the identity through the
+ * real `identityPeerId()`. `deleteMemberStorage` runs over `fake-indexeddb`. The real two-node
+ * behaviour (a joined edge node reaching the strand, the withdrawal on real libp2p) is proven by
+ * the vote-engine member-watch harness, and the browser behaviour by the browser gates.
+ *
+ * Sequential by design (`--test-concurrency=1`).
+ */
+import 'fake-indexeddb/auto';
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { generateKeyPairSync } from 'node:crypto';
+import { dashboardSrc, workspacePath } from '../../../../scripts/lib/source-paths.mjs';
+import { stripComments } from '../../../../scripts/lib/strip-comments.mjs';
+import {
+	InMemoryKeyStore,
+	strandCohortTopicOption,
+	encodeCadreInvitation,
+	CadreInviteRejectedError,
+	DEFAULT_IDENTITY_KEY_ID,
+} from '@serfab/cadre-core';
+import { DEFAULT_STRAND_CLUSTER_SIZE } from '@serfab/quereus-plugin-sereus';
+import { openOptimysticWebDb } from '@optimystic/db-p2p-storage-web';
+import { VOTETORRENT_SCHEMA_SQL } from '@votetorrent/vote-engine/browser';
+import {
+	LOG_PREFIX,
+	MEMBER_SAPP_CONFIG,
+	MEMBER_STRAND_CLUSTER_SIZE,
+	MemberNodeConfigError,
+	MemberNodeError,
+	MemberStorageBusyError,
+	createMemberNode,
+	createMemberPlatform,
+	deleteMemberStorage,
+	memberStorageDbName,
+	validateRelayAddrs,
+} from '../../src/peer/member-node.js';
+
+const STRAND = 'strand0abc';
+const RELAY = '/dns4/relay.example/tcp/443/wss/p2p/12D3KooWRelayPeer1';
+const HASH = 'netHash-7c1d';
+
+let caseCounter = 0;
+function uniqueHash() {
+	caseCounter += 1;
+	return `mn-${caseCounter}-${Date.now()}`;
+}
+
+/** Let queued macrotasks run (the strand:started handler is async). */
+async function settle(turns = 5) {
+	for (let i = 0; i < turns; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+function deferred() {
+	/** @type {(value?: any) => void} */
+	let resolve = () => {};
+	/** @type {(err: any) => void} */
+	let reject = () => {};
+	const promise = new Promise((res, rej) => {
+		resolve = res;
+		reject = rej;
+	});
+	return { promise, resolve, reject };
+}
+
+/**
+ * @param {string} id
+ * @param {{ unhandle?: (protocols: string[]) => Promise<void> }} [options]
+ */
+function fakeLibp2p(id, options = {}) {
+	/** @type {string[][]} */
+	const unhandleCalls = [];
+	return {
+		peerId: { toString: () => id },
+		unhandleCalls,
+		/** @type {Array<{ remotePeer: { toString(): string } }>} */
+		connections: [],
+		/** @param {string[]} protocols */
+		unhandle(protocols) {
+			unhandleCalls.push(protocols);
+			return options.unhandle ? options.unhandle(protocols) : Promise.resolve();
+		},
+		getConnections() {
+			return this.connections;
+		},
+	};
+}
+
+/**
+ * A recording fake of cadre-core's EdgeNode. `state` drives its answers; `calls` records every
+ * call in order; `fire` delivers an event to the handlers the member node registered.
+ *
+ * @param {{ order?: string[] }} [options]
+ */
+function fakeEdge(options = {}) {
+	const order = options.order ?? [];
+	/** @type {Array<[string, ...any[]]>} */
+	const calls = [];
+	/** @type {Map<string, Array<(payload: any) => void>>} */
+	const handlers = new Map();
+	/** @type {Map<string, any>} */
+	const strands = new Map();
+	const controlNode = { id: 'control-node' };
+	const state = {
+		/** @type {{ state: string }} */
+		status: { state: 'stopped' },
+		/** @type {any} */
+		savedStart: undefined,
+		authorized: false,
+		/** @type {string | null} */
+		ownerKey: null,
+		/** @type {any} */
+		joinResult: { peerId: 'IdentityPeerX', redeemedAt: 1, asOwner: false },
+		/** @type {any} */
+		joinError: null,
+		/** @type {any} */
+		addStrandError: null,
+		/** @type {any} */
+		reconcileError: null,
+		forceNode: false,
+	};
+	const node = {
+		isRunning: true,
+		/** @param {string} id */
+		getStrand: (id) => strands.get(id),
+		/** @param {any} arg */
+		async addStrand(arg) {
+			calls.push(['addStrand', arg]);
+			if (state.addStrandError) throw state.addStrandError;
+			return {};
+		},
+		getControlNode: () => controlNode,
+		/** @param {string} peerId */
+		async isAuthorizedMember(peerId) {
+			calls.push(['isAuthorizedMember', peerId]);
+			return state.authorized;
+		},
+		async reconcileControlCohort() {
+			calls.push(['reconcileControlCohort']);
+			if (state.reconcileError) throw state.reconcileError;
+			return {};
+		},
+	};
+	const edge = {
+		/** @type {any} */
+		platform: null,
+		get status() {
+			return state.status;
+		},
+		get node() {
+			return state.status.state === 'running' || state.forceNode ? node : null;
+		},
+		/** @param {string} event @param {(payload: any) => void} handler */
+		on(event, handler) {
+			handlers.set(event, [...(handlers.get(event) ?? []), handler]);
+			return () => {};
+		},
+		async identityPeerId() {
+			calls.push(['identityPeerId']);
+			return 'IdentityPeerX';
+		},
+		/** @param {any} opts */
+		async start(opts) {
+			calls.push(['start', opts]);
+			state.status = { state: 'running' };
+			return node;
+		},
+		async stop() {
+			calls.push(['stop']);
+			state.status = { state: 'stopped' };
+		},
+		async loadSavedStart() {
+			calls.push(['loadSavedStart']);
+			return state.savedStart;
+		},
+		/** @param {any} credential @param {any} opts */
+		async joinCadre(credential, opts) {
+			calls.push(['joinCadre', credential, opts]);
+			order.push('edge.joinCadre');
+			if (state.joinError) throw state.joinError;
+			opts?.onProgress?.({ state: 'admitted', asOwner: false, secret: 'not-forwarded' });
+			state.status = { state: 'running' };
+			return state.joinResult;
+		},
+		ownerPublicKey() {
+			return state.ownerKey;
+		},
+		/** @param {string} event @param {any} payload */
+		fire(event, payload) {
+			for (const handler of handlers.get(event) ?? []) handler(payload);
+		},
+	};
+	/** @param {any} platform */
+	const createEdgeNode = (platform) => {
+		edge.platform = platform;
+		return edge;
+	};
+	return { edge, node, state, calls, strands, controlNode, createEdgeNode };
+}
+
+/**
+ * @param {ReturnType<typeof fakeEdge>} fake
+ * @param {{ keyStore?: any, strandId?: string | undefined, networkHash?: string, deps?: any }} [options]
+ */
+async function memberOver(fake, options = {}) {
+	const keyStore = options.keyStore ?? new InMemoryKeyStore();
+	if (!options.keyStore) await keyStore.set(DEFAULT_IDENTITY_KEY_ID, new Uint8Array([8, 1, 18, 64, 1, 2, 3]));
+	return createMemberNode({
+		networkHash: options.networkHash ?? HASH,
+		keyStore,
+		relayAddrs: [RELAY],
+		strandId: 'strandId' in options ? options.strandId : STRAND,
+		deps: { createEdgeNode: fake.createEdgeNode, ...(options.deps ?? {}) },
+	});
+}
+
+function ed25519PublicB64() {
+	const jwk = generateKeyPairSync('ed25519').publicKey.export({ format: 'jwk' });
+	return /** @type {string} */ (jwk.x);
+}
+
+/** @param {{ partyId?: string, totalUses?: number | null }} [overrides] */
+function makeInvitation(overrides = {}) {
+	const invitation = {
+		v: /** @type {1} */ (1),
+		partyId: overrides.partyId ?? 'party-a',
+		invitePrivateKey: ed25519PublicB64(),
+		invite: {
+			key: ed25519PublicB64(),
+			peerId: null,
+			expiresAt: null,
+			totalUses: overrides.totalUses === undefined ? 1 : overrides.totalUses,
+			stampId: 'stamp-1',
+			issuerKey: ed25519PublicB64(),
+			issuerSig: 'issuer-signature',
+		},
+		ownerKeys: [ed25519PublicB64()],
+		members: ['/dns4/member.example/tcp/443/wss/p2p/12D3KooWMemberPeer'],
+	};
+	return { invitation, encoded: encodeCadreInvitation(/** @type {any} */ (invitation)) };
+}
+
+/**
+ * @param {() => unknown} fn
+ * @returns {unknown}
+ */
+function rejectionSync(fn) {
+	try {
+		fn();
+	} catch (err) {
+		return err;
+	}
+	assert.fail('expected a throw');
+}
+
+/**
+ * @param {Promise<unknown>} promise
+ * @returns {Promise<any>}
+ */
+async function rejection(promise) {
+	try {
+		await promise;
+	} catch (err) {
+		return err;
+	}
+	assert.fail('expected a rejection');
+}
+
+// ── Task 2: platform, posture, names, claim and withdrawal ──────────────────
+
+test('1 platform shape: storage id per network, browser gater kept, no transports, listen addresses, journal or owner slot', () => {
+	const platform = createMemberPlatform({ networkHash: HASH, keyStore: new InMemoryKeyStore(), relayAddrs: [RELAY], strandId: STRAND });
+	assert.equal(platform.storage.id, `vt-dashboard-${HASH}`);
+	assert.equal(platform.allowPrivateDial, false);
+	for (const key of ['transports', 'listenAddrs', 'noiseCrypto']) {
+		assert.equal(key in platform, false, `platform must not set ${key}`);
+	}
+	assert.equal('offlineJournal' in platform.storage, false);
+	assert.equal('trustedOwnerSlot' in platform.storage, false);
+});
+
+test('2 configure: keeps the profile, relaxes schema signing, filters to this strand, pins the cluster size, sets the edgeHost slice', () => {
+	const platform = createMemberPlatform({ networkHash: HASH, keyStore: new InMemoryKeyStore(), relayAddrs: [RELAY], strandId: STRAND });
+	assert.ok(platform.configure);
+	const base = /** @type {any} */ ({ profile: 'transaction', strandFilter: { mode: 'all' } });
+	const cfg = /** @type {any} */ (platform.configure(base));
+	assert.equal(cfg.profile, 'transaction');
+	assert.equal(cfg.requireSignedSchemas, false);
+	assert.deepEqual(cfg.strandFilter, { mode: 'strandId', strandId: STRAND });
+	assert.equal(cfg.strandClusterSize, MEMBER_STRAND_CLUSTER_SIZE);
+	assert.deepEqual(cfg.strandReactivity, { enabled: true, strandIds: [STRAND], edgeHost: true });
+	assert.equal(cfg.strandReactivity.edgeHost, true);
+	for (const key of ['hostUnclaimedStrands', 'privateKey', 'connectionGater']) {
+		assert.equal(key in cfg, false, `configure must not set ${key}`);
+	}
+
+	const bare = createMemberPlatform({ networkHash: HASH, keyStore: new InMemoryKeyStore(), relayAddrs: [RELAY] });
+	assert.ok(bare.configure);
+	const bareCfg = /** @type {any} */ (bare.configure(base));
+	assert.deepEqual(bareCfg.strandFilter, { mode: 'none' });
+	assert.deepEqual(bareCfg.strandReactivity, { enabled: false });
+});
+
+test('3 D-24 end to end: the patched cadre-core strandCohortTopicOption turns the configured slice into a non-forwarding edge host', () => {
+	const platform = createMemberPlatform({ networkHash: HASH, keyStore: new InMemoryKeyStore(), relayAddrs: [RELAY], strandId: STRAND });
+	assert.ok(platform.configure);
+	const cfg = /** @type {any} */ (platform.configure(/** @type {any} */ ({})));
+	const option = /** @type {any} */ (strandCohortTopicOption(cfg.strandReactivity, STRAND));
+	const host = option.cohortTopic?.host;
+	assert.ok(host, 'the patched option builds a host for edgeHost: true');
+	assert.equal(host.profile.kind, 'edge');
+	const tiers = host.profile.willingTiers;
+	assert.equal(tiers instanceof Set ? tiers.size : tiers.length, 0, 'an edge host is willing to serve no tier');
+	assert.equal(host.minSigs, 1);
+
+	const { edgeHost: _dropped, ...withoutEdgeHost } = cfg.strandReactivity;
+	const control = /** @type {any} */ (strandCohortTopicOption(withoutEdgeHost, STRAND));
+	assert.equal(control.cohortTopic?.enabled, true);
+	assert.equal('host' in control.cohortTopic, false, 'control: without edgeHost the option carries no host');
+});
+
+test('4 cluster-size parity: MEMBER_STRAND_CLUSTER_SIZE matches what the Authority and Voter providers run', () => {
+	const providers = [
+		workspacePath('apps/VoteTorrentAuthority', 'src', 'providers', 'CadreNodeProvider.tsx'),
+		workspacePath('apps/VoteTorrentVoter', 'src', 'providers', 'CadreNodeProvider.tsx'),
+	];
+	/** @type {string[]} */
+	const branches = [];
+	for (const file of providers) {
+		const code = stripComments(readFileSync(file, 'utf8'));
+		assert.match(code, /strandReactivity/, 'positive control: the provider source was read');
+		const explicit = /strandClusterSize\s*:\s*(\d+)/.exec(code);
+		if (explicit) {
+			branches.push('explicit');
+			assert.equal(MEMBER_STRAND_CLUSTER_SIZE, Number(explicit[1]));
+		} else {
+			branches.push('default');
+			assert.equal(MEMBER_STRAND_CLUSTER_SIZE, DEFAULT_STRAND_CLUSTER_SIZE);
+		}
+	}
+	assert.deepEqual(branches, ['default', 'default'], 'both providers run the cadre-core default today; a provider change must revisit this pin');
+	assert.equal(MEMBER_STRAND_CLUSTER_SIZE, 4);
+});
+
+test('5 MEMBER_SAPP_CONFIG: org.votetorrent 1.0.0, interactive, frozen, the unwrapped schema, and the Authority literal agrees', () => {
+	assert.equal(MEMBER_SAPP_CONFIG.id, 'org.votetorrent');
+	assert.equal(MEMBER_SAPP_CONFIG.version, '1.0.0');
+	assert.equal(MEMBER_SAPP_CONFIG.latencyHint, 'interactive');
+	assert.ok(Object.isFrozen(MEMBER_SAPP_CONFIG));
+	const expected = VOTETORRENT_SCHEMA_SQL.replace(/^\s*declare\s+schema\s+\w+\s*\{/, '')
+		.replace(/\}\s*apply\s+schema\s+\w+\s*;\s*$/, '')
+		.trim();
+	assert.equal(MEMBER_SAPP_CONFIG.schema, expected);
+	assert.ok(MEMBER_SAPP_CONFIG.schema.length > 1000);
+	assert.equal(/^declare\s+schema/.test(MEMBER_SAPP_CONFIG.schema), false);
+	const factory = readFileSync(workspacePath('apps/VoteTorrentAuthority', 'src', 'engines', 'rn-db-factory.ts'), 'utf8');
+	assert.ok(factory.includes("id: 'org.votetorrent'"));
+	assert.ok(factory.includes("version: '1.0.0'"));
+});
+
+test('6 names: memberStorageDbName is per network and scope, fails closed, and the platform opens only those names, lazily', async () => {
+	const shape = /^vt-member-[A-Za-z0-9_-]+-[A-Za-z0-9._~-]+-[0-9a-f]{8}$/;
+	const control = memberStorageDbName(HASH, 'control-abc');
+	assert.match(control, shape);
+	assert.match(memberStorageDbName(HASH, '~node-local'), shape);
+	assert.notEqual(control, 'optimystic');
+	assert.notEqual(memberStorageDbName('hash-one', 's1'), memberStorageDbName('hash-two', 's1'));
+	assert.notEqual(memberStorageDbName(HASH, 's1'), memberStorageDbName(HASH, 's2'));
+	assert.notEqual(memberStorageDbName('a/b', 's1'), memberStorageDbName('a_b', 's1'), 'two hashes that sanitise alike still differ');
+	for (const scope of ['node-local', '.node-local', 'node.local', '_node-local']) {
+		assert.notEqual(memberStorageDbName(HASH, '~node-local'), memberStorageDbName(HASH, scope));
+	}
+	for (const bad of [
+		() => memberStorageDbName('', 's1'),
+		() => memberStorageDbName(/** @type {any} */ (42), 's1'),
+		() => memberStorageDbName(HASH, 'a/b'),
+		() => memberStorageDbName(HASH, ''),
+	]) {
+		assert.throws(bad, MemberNodeConfigError);
+	}
+
+	/** @type {unknown[][]} */
+	const opened = [];
+	const fakeHandle = { close() {} };
+	const openSpy = /** @type {any} */ (
+		async (/** @type {unknown[]} */ ...args) => {
+			opened.push(args);
+			return fakeHandle;
+		}
+	);
+	class FakeRaw {
+		async getMetadata() {
+			return undefined;
+		}
+	}
+	class FakeKv {
+		async get() {
+			return 'value';
+		}
+		async set() {}
+		async delete() {}
+		async flush() {}
+		async close() {}
+	}
+	const platform = createMemberPlatform({
+		networkHash: HASH,
+		keyStore: new InMemoryKeyStore(),
+		relayAddrs: [RELAY],
+		strandId: STRAND,
+		deps: { openOptimysticWebDb: openSpy, IndexedDBRawStorage: /** @type {any} */ (FakeRaw), IndexedDBKVStore: /** @type {any} */ (FakeKv) },
+	});
+	const first = platform.storage.rawStorage(STRAND);
+	const second = platform.storage.rawStorage(STRAND);
+	assert.equal(first, second, 'one proxy per scope until close');
+	assert.equal(opened.length, 0, 'nothing opens before first use');
+	await first.getMetadata(/** @type {any} */ ('block-1'));
+	assert.equal(opened.length, 1);
+	assert.equal(await platform.storage.nodeLocal().get('k'), 'value');
+	assert.equal(opened.length, 2);
+	for (const args of opened) {
+		assert.ok(args.length >= 1, 'no zero-argument open');
+		assert.ok(String(args[0]).startsWith('vt-member-'));
+	}
+	assert.equal(opened[0][0], memberStorageDbName(HASH, STRAND));
+	assert.equal(opened[1][0], memberStorageDbName(HASH, '~node-local'));
+	await platform.storage.close();
+	assert.notEqual(platform.storage.rawStorage(STRAND), first, 'close drops the cached proxy');
+});
+
+test('7 relay validation: an empty or non-array list, whitespace, no peer id or a circuit address throw without echoing the entry', async () => {
+	const bad = [
+		[],
+		'not-an-array',
+		['/dns4/relay example/tcp/443/wss/p2p/12D3KooWX'],
+		['/dns4/relay.example/tcp/443/wss'],
+		['/dns4/relay.example/tcp/443/wss/p2p/12D3KooWX/p2p-circuit/p2p/12D3KooWY'],
+	];
+	for (const relayAddrs of bad) {
+		const err = /** @type {Error} */ (rejectionSync(() => validateRelayAddrs(relayAddrs)));
+		assert.ok(err instanceof MemberNodeConfigError);
+		for (const entry of Array.isArray(relayAddrs) ? relayAddrs : [relayAddrs]) {
+			assert.equal(err.message.includes(String(entry)), false, 'the message must not echo an entry');
+		}
+		const fake = fakeEdge();
+		const viaNode = await rejection(
+			createMemberNode({
+				networkHash: HASH,
+				keyStore: new InMemoryKeyStore(),
+				relayAddrs: /** @type {any} */ (relayAddrs),
+				strandId: STRAND,
+				deps: { createEdgeNode: /** @type {any} */ (fake.createEdgeNode) },
+			}),
+		);
+		assert.ok(viaNode instanceof MemberNodeConfigError);
+		assert.equal(fake.edge.platform, null, 'no edge node is built over a bad relay list');
+	}
+	assert.deepEqual(validateRelayAddrs([RELAY]), [RELAY]);
+});
+
+test('8 claim and withdrawal: addStrand without a founder flag, unhandle before anyone hears the start, again on a rebuilt node, fail closed', async (t) => {
+	const fake = fakeEdge();
+	const member = await memberOver(fake);
+	fake.state.status = { state: 'running' };
+	const gate = deferred();
+	const lib = fakeLibp2p('StrandPeerOne', { unhandle: () => gate.promise });
+	fake.strands.set(STRAND, { libp2pNode: lib });
+	/** @type {string[]} */
+	const order = [];
+	member.on('strand:started', () => order.push('listener'));
+
+	const waiting = member.waitForStrand(STRAND);
+	waiting.then(() => order.push('resolved'));
+	const addCalls = fake.calls.filter(([name]) => name === 'addStrand');
+	assert.equal(addCalls.length, 1);
+	const arg = addCalls[0][1];
+	assert.equal(arg.awaitFirstSync, false);
+	assert.equal(arg.strandRow.Type, 'o');
+	assert.equal(arg.strandRow.Id, STRAND);
+	assert.equal(arg.strandRow.MemberPrivateKey, null);
+	assert.equal(arg.strandRow.FounderOwnerKey, null);
+	assert.equal(arg.strandRow.FounderPeerId, null);
+	assert.equal(arg.sAppConfig, MEMBER_SAPP_CONFIG);
+	assert.equal('founder' in arg, false);
+
+	fake.edge.fire('strand:started', { strandId: 'another-strand' });
+	await settle();
+	assert.equal(lib.unhandleCalls.length, 0, 'another strand is ignored');
+
+	fake.edge.fire('strand:started', { strandId: STRAND });
+	await settle();
+	assert.deepEqual(lib.unhandleCalls, [[`/optimystic/strand-${STRAND}/cluster/1.0.0`, `/optimystic/strand-${STRAND}/repo/1.0.0`]]);
+	assert.deepEqual(order, [], 'nothing resolves and nobody hears the start before unhandle resolved');
+	gate.resolve();
+	assert.equal(await waiting, lib);
+	await settle();
+	assert.deepEqual([...order].sort(), ['listener', 'resolved']);
+	assert.equal(await member.waitForStrand(STRAND), lib, 'an already withdrawn strand resolves at once');
+
+	const rebuilt = fakeLibp2p('StrandPeerTwo');
+	fake.strands.set(STRAND, { libp2pNode: rebuilt });
+	fake.edge.fire('strand:started', { strandId: STRAND });
+	await settle();
+	assert.equal(rebuilt.unhandleCalls.length, 1, 'a rebuilt strand node is withdrawn again');
+
+	await assert.rejects(member.waitForStrand('another-strand'), (err) => err instanceof MemberNodeError && err.reason === 'not-configured');
+	const aborted = new AbortController();
+	fake.strands.set(STRAND, { libp2pNode: fakeLibp2p('StrandPeerThree') });
+	aborted.abort();
+	await assert.rejects(member.waitForStrand(STRAND, { signal: aborted.signal }), (err) => err instanceof MemberNodeError && err.reason === 'cancelled');
+	const later = new AbortController();
+	const pendingWait = member.waitForStrand(STRAND, { signal: later.signal });
+	later.abort();
+	await assert.rejects(pendingWait, (err) => err instanceof MemberNodeError && err.reason === 'cancelled');
+
+	// Fail closed: an unhandle that rejects stops the node and rejects the waiter.
+	const failing = fakeEdge();
+	const failingMember = await memberOver(failing);
+	failing.state.status = { state: 'running' };
+	const boom = new Error('unhandle refused /optimystic/strand-x');
+	boom.name = 'UnhandleRefusedError';
+	failing.strands.set(STRAND, { libp2pNode: fakeLibp2p('StrandPeerBad', { unhandle: () => Promise.reject(boom) }) });
+	/** @type {unknown[][]} */
+	const lines = [];
+	t.mock.method(console, 'warn', (/** @type {unknown[]} */ ...args) => lines.push(args));
+	const failingWait = failingMember.waitForStrand(STRAND);
+	failing.edge.fire('strand:started', { strandId: STRAND });
+	await assert.rejects(failingWait, (err) => err instanceof MemberNodeError && err.reason === 'withdraw-failed');
+	await settle();
+	assert.ok(failing.calls.some(([name]) => name === 'stop'), 'the node was stopped');
+	assert.deepEqual(lines, [[LOG_PREFIX, 'UnhandleRefusedError']]);
+	t.mock.restoreAll();
+});
+
+test('9a getStrandDatabase: null before the claim, null while syncing, then exactly cadre-core\'s own object; null for another strand or no node', async () => {
+	const fake = fakeEdge();
+	const member = await memberOver(fake);
+	fake.state.status = { state: 'running' };
+	assert.equal(member.getStrandDatabase(STRAND), null, 'no strand instance yet');
+	const instance = { libp2pNode: fakeLibp2p('StrandPeerOne') };
+	fake.strands.set(STRAND, instance);
+	assert.equal(member.getStrandDatabase(STRAND), null, 'syncing: libp2p node but no database');
+	const sentinel = { sentinel: 'cadre-core StrandDatabase' };
+	Object.assign(instance, { database: sentinel });
+	assert.strictEqual(member.getStrandDatabase(STRAND), sentinel);
+	fake.strands.set('another-strand', { database: { other: true } });
+	assert.equal(member.getStrandDatabase('another-strand'), null);
+	fake.state.status = { state: 'stopped' };
+	assert.equal(member.getStrandDatabase(STRAND), null, 'no running node gives null');
+});
+
+test('9 strandPeerCount counts distinct remote peers and strandPeerId is the strand node id, not the identity peer id', async () => {
+	const fake = fakeEdge();
+	const member = await memberOver(fake);
+	fake.state.status = { state: 'running' };
+	const lib = fakeLibp2p('StrandPeerOne');
+	lib.connections = [
+		{ remotePeer: { toString: () => 'PeerA' } },
+		{ remotePeer: { toString: () => 'PeerA' } },
+		{ remotePeer: { toString: () => 'PeerB' } },
+	];
+	fake.strands.set(STRAND, { libp2pNode: lib });
+	assert.equal(member.strandPeerCount(), 0, 'nothing counted before the withdrawal');
+	fake.edge.fire('strand:started', { strandId: STRAND });
+	await settle();
+	assert.equal(member.strandPeerCount(), 2);
+	assert.equal(member.strandPeerId(), 'StrandPeerOne');
+	assert.equal(member.peerId, 'IdentityPeerX');
+	assert.notEqual(member.strandPeerId(), member.peerId);
+	assert.equal(member.getStrandNode(), lib);
+	assert.equal(member.getControlNode(), fake.controlNode);
+});
+
+test('10 deleteMemberStorage: deletes exactly one network\'s member databases, twice over, and refuses a blocked delete', async (t) => {
+	const hashA = uniqueHash();
+	const hashB = `${hashA}-more`;
+	const namesA = ['control-aa11', STRAND, '~node-local'].map((scope) => memberStorageDbName(hashA, scope));
+	const namesB = ['control-aa11', STRAND].map((scope) => memberStorageDbName(hashB, scope));
+	for (const name of [...namesA, ...namesB]) (await openOptimysticWebDb(name)).close();
+	/** @param {string} name */
+	const rawCreate = (name) =>
+		new Promise((resolve, reject) => {
+			const request = indexedDB.open(name, 1);
+			request.onsuccess = () => {
+				request.result.close();
+				resolve(undefined);
+			};
+			request.onerror = () => reject(request.error);
+		});
+	await rawCreate('vt-dashboard-keys');
+	await rawCreate(`votetorrent-${hashA}`);
+	const listed = async () => (await indexedDB.databases()).map((info) => info.name);
+
+	await deleteMemberStorage(hashA);
+	const after = await listed();
+	for (const name of namesA) assert.equal(after.includes(name), false, 'network A member databases are gone');
+	for (const name of namesB) assert.ok(after.includes(name), 'a network whose hash starts with A\'s is untouched');
+	assert.ok(after.includes('vt-dashboard-keys'));
+	assert.ok(after.includes(`votetorrent-${hashA}`));
+	await deleteMemberStorage(hashA);
+
+	const held = await openOptimysticWebDb(namesA[0]);
+	const blocked = await Promise.race([
+		deleteMemberStorage(hashA).then(
+			() => 'resolved',
+			(err) => err,
+		),
+		new Promise((resolve) => setTimeout(() => resolve('timeout'), 3000)),
+	]);
+	if (blocked instanceof MemberStorageBusyError) {
+		t.diagnostic('blocked-delete path: fake-indexeddb fired onblocked for an open connection');
+	} else {
+		t.diagnostic(`blocked-delete path: injected indexedDB (fake-indexeddb gave ${String(blocked)})`);
+		/** @type {any} */
+		const injected = {
+			databases: async () => [{ name: namesA[0], version: 3 }],
+			deleteDatabase() {
+				/** @type {any} */
+				const request = {};
+				queueMicrotask(() => request.onblocked?.());
+				return request;
+			},
+		};
+		await assert.rejects(deleteMemberStorage(hashA, { deps: { indexedDB: injected } }), MemberStorageBusyError);
+	}
+	held.close();
+	await settle(2);
+	await assert.rejects(deleteMemberStorage(hashA, { deps: { indexedDB: /** @type {any} */ ({}) } }), MemberNodeConfigError);
+});
