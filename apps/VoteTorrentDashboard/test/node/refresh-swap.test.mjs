@@ -12,6 +12,8 @@
  * then 50-08's fixture module and a `Map`-backed storage double. Sequential
  * and stateful, one network hash per test, `deleteNetworkDb` at the top of
  * each.
+ *
+ * The deriveOfficerUserIdFromEnvelope and classifyRedemption classifier cases moved to `officer-swap.test.mjs`.
  */
 import 'fake-indexeddb/auto';
 import test from 'node:test';
@@ -45,9 +47,7 @@ import {
 	assertNetworkStateUnchanged,
 } from '../../src/lifecycle/refresh.js';
 import {
-	SWAP_KINDS,
 	createSingleFlightTransport,
-	deriveOfficerUserIdFromEnvelope,
 	classifyRedemption,
 	performOfficerSwap,
 } from '../../src/lifecycle/officer-swap.js';
@@ -335,72 +335,6 @@ test('createSingleFlightTransport: reset() clears the cache -- a third call afte
 
 test('createSingleFlightTransport: takes no storage argument at all -- structurally cannot persist the cache', () => {
 	assert.equal(createSingleFlightTransport.length, 1);
-});
-
-// ---------------------------------------------------------------------------
-// deriveOfficerUserIdFromEnvelope
-// ---------------------------------------------------------------------------
-
-test('deriveOfficerUserIdFromEnvelope: returns the single User row\'s Id for a well-formed envelope', () => {
-	assert.equal(deriveOfficerUserIdFromEnvelope(buildFixtureEnvelope()), 'u1');
-});
-
-test('deriveOfficerUserIdFromEnvelope: null for zero User rows', () => {
-	const envelope = buildFixtureEnvelope();
-	const zeroUsers = { ...envelope, tables: { ...envelope.tables, User: [] } };
-	assert.equal(deriveOfficerUserIdFromEnvelope(zeroUsers), null);
-});
-
-test('deriveOfficerUserIdFromEnvelope: null for two User rows', () => {
-	assert.equal(deriveOfficerUserIdFromEnvelope(withExtraUserRow(buildFixtureEnvelope())), null);
-});
-
-test('deriveOfficerUserIdFromEnvelope: null for a missing User table', () => {
-	const envelope = buildFixtureEnvelope();
-	const tables = { ...envelope.tables };
-	delete tables.User;
-	assert.equal(deriveOfficerUserIdFromEnvelope({ ...envelope, tables }), null);
-});
-
-// ---------------------------------------------------------------------------
-// classifyRedemption -- all four SWAP_KINDS
-// ---------------------------------------------------------------------------
-
-test('classifyRedemption: new-network for a hash absent from the registry', () => {
-	const envelope = buildFixtureEnvelope();
-	const storage = makeFakeStorage();
-	const classification = classifyRedemption({ envelope, storage });
-	assert.equal(classification.kind, 'new-network');
-	assert.equal(SWAP_KINDS.includes(classification.kind), true);
-	assert.equal(classification.heldOfficerUserId, null);
-	assert.equal(classification.incomingOfficerUserId, 'u1');
-});
-
-test('classifyRedemption: same-officer-refresh when the derived officer equals the held entry\'s officer', async () => {
-	const baseline = await bootstrapFixtureNetwork();
-	const classification = classifyRedemption({ envelope: baseline.envelope, storage: baseline.storage });
-	assert.equal(classification.kind, 'same-officer-refresh');
-	assert.equal(classification.heldOfficerUserId, 'u1');
-	assert.equal(classification.incomingOfficerUserId, 'u1');
-	await deleteNetworkDb(baseline.envelope.networkHash);
-});
-
-test('classifyRedemption: officer-swap when the derived officer differs from the held entry\'s officer', async () => {
-	const baseline = await bootstrapFixtureNetwork();
-	const swapEnvelope = buildSwapOfficerEnvelope(baseline.envelope);
-	const classification = classifyRedemption({ envelope: swapEnvelope, storage: baseline.storage });
-	assert.equal(classification.kind, 'officer-swap');
-	assert.equal(classification.heldOfficerUserId, 'u1');
-	assert.equal(classification.incomingOfficerUserId, 'u2');
-	assert.equal(classification.authorityName, 'Fixture County Elections');
-	await deleteNetworkDb(baseline.envelope.networkHash);
-});
-
-test('classifyRedemption: officer-indeterminate when the envelope\'s User table does not hold exactly one row', () => {
-	const envelope = withExtraUserRow(buildFixtureEnvelope());
-	const classification = classifyRedemption({ envelope, storage: makeFakeStorage() });
-	assert.equal(classification.kind, 'officer-indeterminate');
-	assert.equal(classification.incomingOfficerUserId, null);
 });
 
 // ---------------------------------------------------------------------------
