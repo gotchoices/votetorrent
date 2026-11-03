@@ -51,6 +51,8 @@ import { ElectionShell } from '../../src/screens/ElectionShell';
 import { parseElectionAddress } from '../../src/election-address.js';
 import { loadBootstrapConfig } from '../../src/peer/config.js';
 import { startPublicPeerBoot, PEER_BOOT_STATUS } from '../../src/peer/boot.js';
+import { startPeerReplication } from '../../src/peer/reactivity-bridge.js';
+import { createPageTailReader } from '../../src/peer/tail-reader.js';
 import {
 	closeNetworkDb,
 	createNetworkDb,
@@ -285,6 +287,71 @@ const address = parseElectionAddress(location.search);
 const MESH_READ_NETWORK_HASH = address.networkHash ?? '';
 const MESH_READ_ELECTION_ID = address.electionId ?? '';
 
+/**
+ * MESH_READ_DIAG (diagnostic, opt-in; the driver adds `diag=1` when its own MESH_READ_DIAG=1). Wraps the
+ * replication's `readRows` so each pass logs how many rows each table returned -- table names and counts
+ * only, never a row value -- and when it ran. Off by default: rung 4 then boots the production composition
+ * untouched.
+ */
+const MESH_READ_DIAG = new URLSearchParams(globalThis.location?.search ?? '').get('diag') === '1';
+const DIAG_T0 = Date.now();
+
+/** @returns {Record<string, unknown> | undefined} */
+function diagBootDeps() {
+	if (!MESH_READ_DIAG) return undefined;
+	return {
+		createPageTailReader: (/** @type {any} */ node, /** @type {string} */ networkName) => {
+			const reader = createPageTailReader(node, networkName);
+			return {
+				readTails: async (/** @type {any[]} */ queries, /** @type {any} */ opts) => {
+					const started = Date.now();
+					const answers = await reader.readTails(queries, opts);
+					const summary = queries
+						.map((q) => {
+							const a = /** @type {any} */ (answers.get(q.collectionId));
+							const table = String(q.collectionId).split('/').pop();
+							return `${table}=${a === undefined ? 'none' : 'error' in a ? `err:${a.error?.name ?? 'Error'}` : a.tail === undefined ? 'empty' : `r${a.tail.revision}`}`;
+						})
+						.join(' ');
+					console.log(`[gate-diag] +${started - DIAG_T0}ms readTails${opts?.skipWindowConsult ? ' (held only)' : ''} took ${Date.now() - started}ms: ${summary}`);
+					if (opts?.skipWindowConsult) {
+						// Comparison only: the same queries as an ordinary (consulting) read. Its answers are logged, never returned.
+						const fullStarted = Date.now();
+						const full = await reader.readTails(queries).catch((/** @type {any} */ err) => err);
+						const fullSummary = full instanceof Map
+							? queries.map((q) => {
+								const a = /** @type {any} */ (full.get(q.collectionId));
+								const table = String(q.collectionId).split('/').pop();
+								return `${table}=${a === undefined ? 'none' : 'error' in a ? `err:${a.error?.name ?? 'Error'}` : a.tail === undefined ? 'empty' : `r${a.tail.revision}`}`;
+							}).join(' ')
+							: `threw ${full?.name ?? 'Error'}`;
+						console.log(`[gate-diag] +${fullStarted - DIAG_T0}ms readTails (consulting, comparison) took ${Date.now() - fullStarted}ms: ${fullSummary}`);
+					}
+					return answers;
+				},
+			};
+		},
+		startPeerReplication: (/** @type {any} */ options) => {
+			console.log(`[gate-diag] +${Date.now() - DIAG_T0}ms replication starts: ${options.collections.length} collections`);
+			return startPeerReplication({
+				...options,
+				readRows: async () => {
+					const started = Date.now();
+					try {
+						const batches = await options.readRows();
+						const counts = (batches ?? []).map((/** @type {any} */ b) => `${b.table}=${b.ops?.length ?? 0}`).join(' ');
+						console.log(`[gate-diag] +${started - DIAG_T0}ms readRows took ${Date.now() - started}ms: ${counts}`);
+						return batches;
+					} catch (/** @type {any} */ err) {
+						console.log(`[gate-diag] +${started - DIAG_T0}ms readRows threw ${err?.name ?? 'Error'}`);
+						throw err;
+					}
+				},
+			});
+		},
+	};
+}
+
 /** @type {{ beforeText: string, afterText: string, navBefore: number, navAfter: number, nonceBefore: string, nonceAfter: string, peerId: string }} */
 const observed = {
 	beforeText: '',
@@ -376,7 +443,7 @@ async function main() {
 	/** @type {any} */
 	let boot = null;
 	await rung(4, 'the Edge node connects to the gateway — the SAME composition production uses', async () => {
-		boot = await startPublicPeerBoot({ networkHash: MESH_READ_NETWORK_HASH, electionId: MESH_READ_ELECTION_ID });
+		boot = await startPublicPeerBoot({ networkHash: MESH_READ_NETWORK_HASH, electionId: MESH_READ_ELECTION_ID, deps: diagBootDeps() });
 		if (boot.status !== PEER_BOOT_STATUS.STARTED) {
 			throw new Error(`startPublicPeerBoot did not start: status "${boot.status}"${boot.subject ? ` (subject "${boot.subject}")` : ''}`);
 		}

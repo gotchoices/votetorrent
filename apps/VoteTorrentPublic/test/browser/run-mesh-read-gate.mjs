@@ -119,6 +119,15 @@ export const TOTAL_RUNGS = 10;
 export const LIBP2P_DIAL_DEBUG_NAMESPACES =
 	'libp2p:bootstrap,libp2p:connection-manager,libp2p:connection-manager:dial-queue,libp2p:websockets,libp2p:websockets:connection';
 
+/**
+ * MESH_READ_DIAG=1 (diagnostic, opt-in): also arm the page's reactivity watch, subscription and
+ * cohort-topic channels (`@optimystic/db-p2p` / `db-core` `createLogger` namespaces), and pass `diag=1`
+ * to the page so it logs each replication pass by table and row count.
+ * @type {string}
+ */
+export const MESH_READ_DIAG_NAMESPACES =
+	'optimystic:db-p2p:reactivity-collection-watch*,optimystic:db-p2p:reactivity-subscription*,optimystic:db-p2p:reactivity-subscribers*,optimystic:db-core:cohort-topic:service*,optimystic:db-core:cohort-topic:registration*';
+
 /** A way this gate could certify something false, named and thrown from
  * anywhere in the run — never a bare `process.exit`, so the origin is
  * always stopped and every opened resource always closed. */
@@ -435,7 +444,7 @@ export async function runBrowserPhase(origin, strandId, options = {}) {
 				} catch {
 					// A storage-denied context must never fail this run.
 				}
-			}, LIBP2P_DIAL_DEBUG_NAMESPACES);
+			}, process.env.MESH_READ_DIAG === '1' ? `${LIBP2P_DIAL_DEBUG_NAMESPACES},${MESH_READ_DIAG_NAMESPACES}` : LIBP2P_DIAL_DEBUG_NAMESPACES);
 		} catch {
 			// addInitScript itself failing must never fail this run either.
 		}
@@ -446,7 +455,7 @@ export async function runBrowserPhase(origin, strandId, options = {}) {
 		// ONE navigation, for the whole run. No second `page.goto` and no
 		// `location.reload()` anywhere — either would prove nothing about the
 		// seam.
-		const url = `${server.url}/${entryRel}?network=${encodeURIComponent(strandId)}&election=${encodeURIComponent(origin.facts.ORIGIN_ELECTION_ID)}`;
+		const url = `${server.url}/${entryRel}?network=${encodeURIComponent(strandId)}&election=${encodeURIComponent(origin.facts.ORIGIN_ELECTION_ID)}${process.env.MESH_READ_DIAG === '1' ? '&diag=1' : ''}`;
 		console.log(`[mesh-read-gate] ${url}`);
 		await page.goto(url, { waitUntil: 'load' });
 
