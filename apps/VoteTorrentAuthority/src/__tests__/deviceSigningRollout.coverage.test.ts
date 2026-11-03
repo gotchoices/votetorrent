@@ -17,7 +17,8 @@
  *     signer), and 62-25's `screens/registration/BulkImportSyncScreen.tsx` (the registration
  *     bridge-URL save action) are all among them.
  *   - 23 of the 25 route through `useDeviceSigningErrorHandler` (8 from 49-11, 9 from 49-12,
- *     1 from 50-15's `DashboardSignInCodeScreen.tsx` — the CR-04 presence-proof gate, 1 from
+ *     1 from `screens/dashboard/PairBrowserScreen.tsx` (the browser-pairing request signer; it
+ *     replaced the dashboard sign-in code screen, so the counts are unchanged), 1 from
  *     62-11's ballot-submit signer (now `screens/ballots/EditBallotScreen.tsx` after the 62-55 move; routed count unchanged at 23), 1 from 62-23's
  *     `screens/networks/components/FoundingBundleExportCard.tsx`, and 1 from 62-25's
  *     `screens/registration/BulkImportSyncScreen.tsx`), and 2 from 62-27

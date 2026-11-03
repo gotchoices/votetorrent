@@ -263,6 +263,15 @@ const KEPT_UPLOAD_KEYS = [
 ] as const;
 
 describe("the kept upload-refusal keys", () => {
+	// The sign-in code screen and its screen-only keys are gone. These four stay only because the
+	// upload service still returns them; they go together with that service when it is removed.
+	it("they are the ONLY remaining sign-in-code-prefixed keys, in both languages", () => {
+		const prefix = /^dashboardSignInCode[A-Z]/;
+		const expected = [...KEPT_UPLOAD_KEYS].sort();
+		expect(Object.keys(enTranslation).filter((k) => prefix.test(k)).sort()).toEqual(expected);
+		expect(Object.keys(esTranslation).filter((k) => prefix.test(k)).sort()).toEqual(expected);
+	});
+
 	it.each(KEPT_UPLOAD_KEYS)("%s is present in both languages, translated", (key) => {
 		expect(typeof enTranslation[key]).toBe("string");
 		expect(enTranslation[key].trim().length).toBeGreaterThan(0);

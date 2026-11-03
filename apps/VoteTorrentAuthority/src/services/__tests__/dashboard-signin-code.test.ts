@@ -351,15 +351,6 @@ describe('the staged payload NEVER touches AsyncStorage — the CR-03 core', () 
 		expect(okResult.status).toBe('ok');
 		expect(okResult.snapshot).toEqual(snapshot);
 	});
-
-	test('clearStagedSignInCode leaves nothing behind, and the producer screen is the one caller that reaches it', () => {
-		const screenSource = fs.readFileSync(
-			path.join(__dirname, '..', '..', 'screens', 'dashboard', 'DashboardSignInCodeScreen.tsx'),
-			'utf8',
-		);
-		expect(screenSource).toContain('clearStagedSignInCode');
-		expect(screenSource).toContain('dashboardSignInCodeDiscardButton');
-	});
 });
 
 describe('registerDashboardSnapshotProvider — the regeneration fallback for a cold start', () => {
@@ -1013,16 +1004,6 @@ describe('D-13 — the ten-minute span is unchanged', () => {
 
 		const minted = await mintDashboardSignInCode(makeFixtureSnapshot());
 		expect(Date.parse(`${minted.expiresAt}Z`) - Date.parse(`${minted.mintedAt}Z`)).toBe(600_000);
-	});
-
-	test('the producer screen interpolates the constant, never a literal number', () => {
-		const screenSource = fs.readFileSync(
-			path.join(__dirname, '..', '..', 'screens', 'dashboard', 'DashboardSignInCodeScreen.tsx'),
-			'utf8',
-		);
-		expect(screenSource).toContain('DASHBOARD_SIGNIN_CODE_SPAN_MINUTES');
-		// Positive control: this is the file it thinks it is.
-		expect(screenSource).toContain('dashboardSignInCodeDiscardButton');
 	});
 });
 

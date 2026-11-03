@@ -8,6 +8,9 @@
 
 import { JOIN_CODE_FIXTURES, type JoinCodeFixtureName } from '@votetorrent/vote-engine/test/fixtures/join-code-fixtures';
 import { captureConsole, expectNoSecretInConsole, type ConsoleCapture } from '../__fixtures__/console-leak';
+import * as fs from 'fs';
+import * as path from 'path';
+import { nonLiteralConsoleFirstArgs } from '../../screens/__fixtures__/log-content-scan';
 
 type Method = 'log' | 'info' | 'warn' | 'error' | 'debug';
 
@@ -305,5 +308,148 @@ describe('console-leak helper', () => {
 			const c2 = captureConsole();
 			c2.restore();
 		});
+	});
+});
+
+// ---------------------------------------------------------------------------------------------
+// Browser pairing: the owner-side engines, the officer-side engines and the pairing screen handle
+// a bearer pairing code, an invitation and its private key. Every console call they make must be a
+// closed literal tag plus at most one error-class-name expression.
+
+const SRC_ROOT = path.join(__dirname, '..', '..');
+const PAIRING_SOURCES: readonly string[] = Object.freeze([
+	'engines/voter-invite.ts',
+	'engines/pair-mint-host.ts',
+	'engines/pairing-owner-store.ts',
+	'engines/pair-mint-client.ts',
+	'engines/dashboard-pairing.ts',
+	'engines/paired-browsers-store.ts',
+	'screens/dashboard/PairBrowserScreen.tsx',
+]);
+
+/** Source with comments removed; string and template literals are kept intact. */
+function stripComments(src: string): string {
+	let out = '';
+	let i = 0;
+	while (i < src.length) {
+		const c = src[i];
+		const n = src[i + 1];
+		if (c === '/' && n === '/') {
+			while (i < src.length && src[i] !== '\n') i++;
+			continue;
+		}
+		if (c === '/' && n === '*') {
+			const end = src.indexOf('*/', i + 2);
+			i = end < 0 ? src.length : end + 2;
+			continue;
+		}
+		if (c === '"' || c === "'" || c === '`') {
+			let j = i + 1;
+			while (j < src.length && src[j] !== c) j += src[j] === '\\' ? 2 : 1;
+			out += src.slice(i, j + 1);
+			i = j + 1;
+			continue;
+		}
+		out += c;
+		i++;
+	}
+	return out;
+}
+
+/** The top-level argument texts of every `console.<method>(...)` call in comment-free source. */
+function consoleCalls(src: string): Array<{ method: string; args: string[] }> {
+	const out: Array<{ method: string; args: string[] }> = [];
+	const re = /console\.(log|info|warn|error|debug)\(/g;
+	for (const m of src.matchAll(re)) {
+		let i = (m.index ?? 0) + m[0].length;
+		let depth = 0;
+		let cur = '';
+		const args: string[] = [];
+		for (; i < src.length; i++) {
+			const c = src[i];
+			if (c === '"' || c === "'" || c === '`') {
+				let j = i + 1;
+				while (j < src.length && src[j] !== c) j += src[j] === '\\' ? 2 : 1;
+				cur += src.slice(i, j + 1);
+				i = j;
+				continue;
+			}
+			if (c === '(' || c === '[' || c === '{') depth++;
+			if (c === ')' || c === ']' || c === '}') {
+				if (depth === 0) break;
+				depth--;
+			}
+			if (c === ',' && depth === 0) {
+				args.push(cur.trim());
+				cur = '';
+				continue;
+			}
+			cur += c;
+		}
+		if (cur.trim().length > 0) args.push(cur.trim());
+		out.push({ method: m[1], args });
+	}
+	return out;
+}
+
+const CLOSED_TAG = /^(['"])[^'"\\\n]*\1$|^`[^`$\\]*`$/;
+const CLASS_NAME_ARG = [
+	/^errorClassName\([\w$.]*\)$/,
+	/^[\w$.?() :{}]*\.name(\s*\?\?\s*(['"])Error\2)?$/,
+	/^(\w+) instanceof Error \? \1\.name : (['"])[\w -]*\2$/,
+];
+
+/** Every way a source breaks the closed-tag rule. Empty means it logs closed tags only. */
+function pairingLogViolations(raw: string): string[] {
+	const bad: string[] = [];
+	if (nonLiteralConsoleFirstArgs(raw).length > 0) bad.push('non-literal first argument');
+	const src = stripComments(raw);
+	for (const { method, args } of consoleCalls(src)) {
+		if (method === 'log' || method === 'debug') {
+			bad.push(`console.${method}`);
+			continue;
+		}
+		if (args.length === 0 || !CLOSED_TAG.test(args[0])) bad.push(`console.${method}: tag is not a closed literal`);
+		const rest = args.slice(1);
+		if (rest.length > 1) bad.push(`console.${method}: more than one argument after the tag`);
+		if (rest.length === 1 && !CLASS_NAME_ARG.some((re) => re.test(rest[0]))) {
+			bad.push(`console.${method}: argument is not an error class name`);
+		}
+	}
+	return bad;
+}
+
+describe('pairing sources log closed tags only', () => {
+	it('controls: a template-literal tag and a code variable both fail; qr-share passes', () => {
+		const tagged = 'function f(code) {\n  console.warn(`[pair] ${code}`);\n}\n';
+		expect(pairingLogViolations(tagged).length).toBeGreaterThan(0);
+		const leaked = "function f(code) {\n  console.warn('[pair] failed:', code);\n}\n";
+		expect(pairingLogViolations(leaked)).toEqual(['console.warn: argument is not an error class name']);
+		const twoArgs = "console.error('[pair] failed:', err.name, err.message);";
+		expect(pairingLogViolations(twoArgs).length).toBeGreaterThan(0);
+		const logged = "console.log('[pair] ok');";
+		expect(pairingLogViolations(logged)).toEqual(['console.log']);
+		const commented = "// console.log(code)\n/* console.warn('x', code) */\nconst a = 1;";
+		expect(pairingLogViolations(commented)).toEqual([]);
+		const ok = [
+			"console.warn('[pair] failed:', errorClassName(err));",
+			'console.warn("[pair] failed:", (error as { name?: string })?.name ?? "Error");',
+			"console.warn('[pair] sweep:', failure instanceof Error ? failure.name : 'unknown');",
+			"console.info('[pair] done');",
+		].join('\n');
+		expect(pairingLogViolations(ok)).toEqual([]);
+		const qrShare = fs.readFileSync(path.join(SRC_ROOT, 'engines', 'qr-share.ts'), 'utf8');
+		expect(consoleCalls(stripComments(qrShare)).length).toBeGreaterThan(0);
+		expect(pairingLogViolations(qrShare)).toEqual([]);
+	});
+
+	it.each(PAIRING_SOURCES)('%s logs closed tags and error class names only', (rel) => {
+		const file = path.join(SRC_ROOT, rel);
+		expect(fs.existsSync(file)).toBe(true);
+		const raw = fs.readFileSync(file, 'utf8');
+		expect(nonLiteralConsoleFirstArgs(raw)).toEqual([]);
+		const src = stripComments(raw);
+		expect((src.match(/console\.(log|debug)\(/g) ?? []).length).toBe(0);
+		expect(pairingLogViolations(raw)).toEqual([]);
 	});
 });

@@ -925,29 +925,8 @@ const resources = {
 			registrantLifecycleKeepCurrentExpiration: 'Keep Current Expiration',
 			registrantLifecycleConfirmRenewal: 'Confirm Renewal',
 			registrantLifecycleConfirmReinstatement: 'Confirm Reinstatement',
-			// 50-UI-SPEC.md § Copywriting Contract — dashboardSignInCode* group (the RN
-			// authority app's "Producer screen" copy rows, verbatim). No phase number or
-			// decision ID may appear in these strings — see the module carrying
-			// mintDashboardSignInCode for why.
-			dashboardSignInCodeTitle: 'Dashboard Sign-In Code',
-			dashboardSignInCodeBody: "Show this code to the officer signing in to the web dashboard. It's single-use and expires in {{minutes}} minutes.",
-			dashboardSignInCodeGenerateButton: 'Generate New Code',
-			dashboardSignInCodeUsed: 'This code has been used.',
-			dashboardSignInCodeExpired: 'This code has expired. Generate a new one.',
-			dashboardSignInCodeCopyButton: 'Copy Code',
-			dashboardSignInCodeCopied: 'Code copied',
-			dashboardSignInCodeCopyFailed: "Couldn't copy the code. Select it and copy it instead.",
-			dashboardSignInCodeCountdown: 'Expires in {{remaining}}',
-			dashboardSignInCodeIdle: 'Generate a code to sign an officer in to the web dashboard.',
-			dashboardSignInCodeDiscardButton: 'Discard Staged Code',
-			dashboardSignInCodeGenerateFailed: "Couldn't generate a code. Try again.",
-			dashboardSignInCodeConfirmHeading: 'Export this authority’s whole database?',
-			dashboardSignInCodeConfirmBody:
-				'Generating a code copies everything this device holds for this network — including registrant information — into a single-use export. Anyone who reads the code can pull that copy into a web browser. Only continue if you are handing the code to an officer you trust, right now.',
-			// The sealed-upload sequence. The code is shown ONLY after the sign-in
-			// service confirms it received the export, so these five strings cover
-			// the wait and the four ways it can end without a code.
-			dashboardSignInCodeUploading: 'Sealing the code and sending it to the sign-in service.',
+			// The four upload refusals the sign-in upload service still returns; they go
+			// together with that service when it is removed.
 			dashboardSignInCodeUploadFailed:
 				"Couldn't send the export to the sign-in service, so no new code was created. Check that the sign-in service is running, then try again.",
 			dashboardSignInCodeUploadRefused:
@@ -2375,28 +2354,8 @@ const resources = {
 			registrantLifecycleKeepCurrentExpiration: 'Mantener Vencimiento Actual',
 			registrantLifecycleConfirmRenewal: 'Confirmar Renovación',
 			registrantLifecycleConfirmReinstatement: 'Confirmar Reincorporación',
-			// 50-UI-SPEC.md § Copywriting Contract — dashboardSignInCode* group (the RN
-			// authority app's "Producer screen" copy rows, verbatim). No phase number or
-			// decision ID may appear in these strings — see the module carrying
-			// mintDashboardSignInCode for why.
-			dashboardSignInCodeTitle: 'Código de Inicio de Sesión del Panel',
-			dashboardSignInCodeBody: 'Muestre este código al funcionario que inicia sesión en el panel web. Es de un solo uso y vence en {{minutes}} minutos.',
-			dashboardSignInCodeGenerateButton: 'Generar Nuevo Código',
-			dashboardSignInCodeUsed: 'Este código ya ha sido usado.',
-			dashboardSignInCodeExpired: 'Este código ha vencido. Genere uno nuevo.',
-			dashboardSignInCodeCopyButton: 'Copiar Código',
-			dashboardSignInCodeCopied: 'Código copiado',
-			dashboardSignInCodeCopyFailed: 'No se pudo copiar el código. Selecciónalo y cópialo.',
-			dashboardSignInCodeCountdown: 'Vence en {{remaining}}',
-			dashboardSignInCodeIdle: 'Genere un código para iniciar sesión a un funcionario en el panel web.',
-			dashboardSignInCodeDiscardButton: 'Descartar Código Preparado',
-			dashboardSignInCodeGenerateFailed: 'No se pudo generar un código. Inténtelo de nuevo.',
-			dashboardSignInCodeConfirmHeading: '¿Exportar toda la base de datos de esta autoridad?',
-			dashboardSignInCodeConfirmBody:
-				'Generar un código copia todo lo que este dispositivo guarda de esta red — incluida la información de los registrantes — en una exportación de un solo uso. Cualquiera que lea el código puede llevar esa copia a un navegador web. Continúe solo si va a entregar el código a un funcionario de confianza, ahora mismo.',
-			// La secuencia de envío sellado. El código se muestra SOLO después de que
-			// el servicio de inicio de sesión confirme que recibió la exportación.
-			dashboardSignInCodeUploading: 'Sellando el código y enviándolo al servicio de inicio de sesión.',
+			// Los cuatro rechazos que aún devuelve el servicio de envío de inicio de sesión;
+			// se retiran junto con ese servicio.
 			dashboardSignInCodeUploadFailed:
 				'No se pudo enviar la exportación al servicio de inicio de sesión, así que no se creó ningún código nuevo. Compruebe que el servicio de inicio de sesión esté en marcha e inténtelo de nuevo.',
 			dashboardSignInCodeUploadRefused:

@@ -1,12 +1,12 @@
 /**
- * SettingsScreen.dashboardSignInCodeEntry.test.tsx — the D-09 dashboard
- * sign-in code producer entry (50-07).
+ * SettingsScreen.pairBrowserEntry.test.tsx — the "Pair a browser" entry (it
+ * replaced the dashboard sign-in code entry in the same position).
  *
  * Scaffold mirrored from `SettingsScreen.provisioningEntry.test.tsx` (itself
  * copied from Suite A's `ElectionDetailsScreen.navigation.test.tsx`): a real
  * component + a mocked `@react-navigation/native` module, pressing the REAL
  * screen's own onPress handler. The real navigator really resolving
- * `DashboardSignInCode` is proven separately by
+ * `PairBrowser` is proven separately by
  * `src/navigation/__tests__/phase50Routes.test.tsx`; this suite complements
  * that, it does not duplicate it.
  */
@@ -122,33 +122,33 @@ async function renderScreen(): Promise<renderer.ReactTestRenderer> {
 	return tr;
 }
 
-const ENTRY_TESTID = "settings-dashboard-signin-code-entry";
+const ENTRY_TESTID = "settings-pair-browser-entry";
 
 beforeEach(() => {
 	jest.clearAllMocks();
 });
 
-describe("SettingsScreen — D-09 dashboard sign-in code entry (50-07)", () => {
-	it("renders exactly once with the dashboardSignInCodeTitle key as its title", async () => {
+describe("SettingsScreen — the Pair a browser entry", () => {
+	it("renders exactly once with the dashboardPairingTitle key as its title", async () => {
 		const tr = await renderScreen();
 		expect(() => tr.root.findByProps({ testID: ENTRY_TESTID })).not.toThrow();
 		const json = JSON.stringify(tr.toJSON());
-		expect(json).toContain("dashboardSignInCodeTitle");
+		expect(json.split('"dashboardPairingTitle"').length - 1).toBeGreaterThanOrEqual(1);
+		expect(json).not.toContain("SignInCode");
 	});
 
-	it("pressing it calls navigate exactly once with DashboardSignInCode and no second argument", async () => {
+	it("pressing it calls navigate exactly once with PairBrowser and no second argument", async () => {
 		const tr = await renderScreen();
 		await press(tr, ENTRY_TESTID);
 		expect(mockNavigate).toHaveBeenCalledTimes(1);
-		expect(mockNavigate.mock.calls[0]![0]).toBe("DashboardSignInCode");
+		expect(mockNavigate.mock.calls[0]![0]).toBe("PairBrowser");
 		// The route is typed `undefined` — passing params would be a contract drift.
 		expect(mockNavigate.mock.calls[0]!.length).toBe(1);
 	});
 
-	// No scope gate, asserted as a decision: this entry exports only data the
-	// officer's own device already holds, so gating it would hide the feature
-	// from exactly the officer who needs it (mirrors 47-22's identical decision
-	// for the attestation-provisioning row).
+	// No scope gate, asserted as a decision: every officer may pair their own
+	// browser, so gating it would hide the feature from exactly the officer who
+	// needs it (mirrors the identical decision for the attestation-provisioning row).
 	it("the screen source contains no officer-scope hook", () => {
 		const source = fs.readFileSync(path.join(__dirname, "..", "SettingsScreen.tsx"), "utf8");
 		const scopeHookName = ["useCurrent", "OfficerScopes"].join("");

@@ -302,13 +302,13 @@ describe("SettingsScreen require-saved-owner-trust row", () => {
 		await unmount(r);
 	});
 
-	it("R-7: the row sits after the sign-in-code row and before the per-network block", async () => {
+	it("R-7: the row sits after the pair-a-browser row and before the per-network block", async () => {
 		mockGetEngine = async (name: unknown) =>
 			name === "network" ? { getDetails: async () => ({ network: { name: "Net One" } }) } : null;
 		const r = await mount();
 		const hs = hosts(r.toJSON());
 		const idx = (pred: (h: Json) => boolean) => hs.findIndex(pred);
-		const signIn = idx((h) => h.props.testID === "settings-dashboard-signin-code-entry");
+		const signIn = idx((h) => h.props.testID === "settings-pair-browser-entry");
 		const entry = idx((h) => h.props.testID === "settings-require-owner-trust-entry");
 		const net = idx((h) => h.type === "Text" && textOf(h) === "Net One");
 		expect(signIn).toBeGreaterThanOrEqual(0);
@@ -317,7 +317,7 @@ describe("SettingsScreen require-saved-owner-trust row", () => {
 		await unmount(r);
 
 		const src = fs.readFileSync(path.join(__dirname, "../SettingsScreen.tsx"), "utf8");
-		const a = src.indexOf("settings-dashboard-signin-code-entry");
+		const a = src.indexOf("settings-pair-browser-entry");
 		const b = src.indexOf('testID="settings-require-owner-trust"');
 		const c = src.indexOf("styles.networkTitle");
 		expect(a).toBeGreaterThan(0);
