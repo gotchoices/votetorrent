@@ -28,6 +28,18 @@
  *                       to find one.
  *   D-02-a            — no file under `src/` imports bare `'crypto'` (the one
  *                       open half of D-02 this plan closes).
+ *   BROWSER-PAIRING-a — (Phase 66, C-1) the ./browser graph reaches the pairing
+ *                       code, statement and revocation modules and the join
+ *                       code, and never pair-wire.ts or pair-mint-service.ts.
+ *   BROWSER-PAIRING-b — POSITIVE CONTROL: the same walker from rn-entry.ts DOES
+ *                       reach pair-wire.ts and pair-mint-service.ts.
+ *   BROWSER-PAIRING-c — browser-entry's names from './pairing/*' are exactly
+ *                       the pinned decode/verify set (set equality), and no
+ *                       owner-side or signing name appears among its exports.
+ *   PAIRING-BARREL-a  — src/pairing/index.ts has no export-star and re-exports
+ *                       exactly the five modules' declared names.
+ *   PAIRING-RN-a      — rn-entry re-exports exactly the barrel's names from
+ *                       './pairing/index.js', and none from another specifier.
  *   D-02-b            — POSITIVE CONTROL: `networks-engine.ts` still calls
  *                       `crypto.randomUUID()` at both surviving call sites —
  *                       proves the D-02-a fix removed only the dead import,
@@ -458,5 +470,203 @@ describe('browser-entry-purity (Phase 50 D-01/D-02/D-19)', () => {
       matches.length,
       `Expected exactly 2 occurrences of crypto.randomUUID() in networks-engine.ts, found ${matches.length} — the D-02 crypto-import deletion must remove only the dead import, not a call site`
     ).to.equal(2)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Phase 66 (C-1): the pairing exports
+// ---------------------------------------------------------------------------
+
+interface PairingExportSets { values: string[], types: string[] }
+
+const uniqSortedNames = (xs: string[]): string[] => [...new Set(xs)].sort()
+
+/** Names in `export {..}` / `export type {..}` lists, optionally only those from one specifier. */
+function namedExportsByKind (stripped: string, fromSpecifier?: (spec: string) => boolean): PairingExportSets {
+  const values: string[] = []
+  const types: string[] = []
+  for (const match of stripped.matchAll(/export\s+(type\s+)?\{([^}]*)\}(?:\s*from\s*['"]([^'"]+)['"])?/g)) {
+    if (fromSpecifier !== undefined && (match[3] === undefined || !fromSpecifier(match[3]))) continue
+    for (const part of match[2]!.split(',')) {
+      let name = part.trim()
+      if (name === '') continue
+      let isType = match[1] !== undefined
+      if (/^type\s+/.test(name)) { isType = true; name = name.replace(/^type\s+/, '') }
+      const asMatch = /\bas\s+([A-Za-z0-9_$]+)$/.exec(name)
+      if (asMatch !== null) name = asMatch[1]!
+      ;(isType ? types : values).push(name)
+    }
+  }
+  return { values: uniqSortedNames(values), types: uniqSortedNames(types) }
+}
+
+/** Every declared export of a module source (comment-stripped): declarations plus export lists. */
+function moduleDeclaredExports (stripped: string): PairingExportSets {
+  if (/export\s*\*/.test(stripped)) throw new Error('export-star found in module')
+  const values: string[] = []
+  const types: string[] = []
+  for (const m of stripped.matchAll(/^export\s+(?:declare\s+)?(?:async\s+)?function\s*\*?\s*([A-Za-z0-9_$]+)/gm)) values.push(m[1]!)
+  for (const m of stripped.matchAll(/^export\s+(?:declare\s+)?(?:const|let|var|class|enum)\s+([A-Za-z0-9_$]+)/gm)) values.push(m[1]!)
+  for (const m of stripped.matchAll(/^export\s+(?:declare\s+)?interface\s+([A-Za-z0-9_$]+)/gm)) types.push(m[1]!)
+  for (const m of stripped.matchAll(/^export\s+(?:declare\s+)?type\s+([A-Za-z0-9_$]+)/gm)) types.push(m[1]!)
+  const lists = namedExportsByKind(stripped)
+  return { values: uniqSortedNames([...values, ...lists.values]), types: uniqSortedNames([...types, ...lists.types]) }
+}
+
+/** Every from-specifier on an `export ... from` line. */
+function exportFromSpecifiers (stripped: string): string[] {
+  return [...stripped.matchAll(/export\s+(?:type\s+)?(?:\*|\{[^}]*\})\s*from\s*['"]([^'"]+)['"]/g)].map((m) => m[1]!)
+}
+
+// The owner-phone modules, spelled from fragments so this spec's own text never names a path the
+// scans below look for.
+const PAIR_WIRE_FILE = ['pair', 'wire.ts'].join('-')
+const PAIR_MINT_SERVICE_FILE = ['pair', 'mint', 'service.ts'].join('-')
+const PAIRING_MODULE_FILES = ['pairing-code.ts', 'pairing-statement.ts', PAIR_WIRE_FILE, PAIR_MINT_SERVICE_FILE, 'pairing-revocation.ts']
+const PAIRING_DIR = join(SRC_DIR, 'pairing')
+
+/** The pinned browser value names from './pairing/*' (C-1 plus PAIRING_CODE_MAX_CHARS / PAIRING_QR_BYTE_BUDGET for 66-22). */
+const BROWSER_PAIRING_VALUES = [
+  'PAIRING_CODE_PREFIX',
+  'PAIRING_CODE_MAX_CHARS',
+  'PAIRING_QR_BYTE_BUDGET',
+  'decodePairingCode',
+  'PairingCodeError',
+  'PAIRING_DIGEST_TAG',
+  'PAIRING_REMOVE_DIGEST_TAG',
+  'verifyPairingStatement',
+  'PAIRING_REVOKE_DIGEST_TAG',
+  'isPairingRevoked'
+]
+const BROWSER_PAIRING_TYPES = [
+  'PairingStatement',
+  'DecodedPairingCode',
+  'PairingCodeFailure',
+  'VerifiablePairingStatement',
+  'PairingVerifyFailure',
+  'PairingVerifyResult'
+]
+/** Owner-side, minting and signing names the browser must never carry. */
+const BROWSER_PAIRING_FORBIDDEN = [
+  ['encode', 'PairingCode'].join(''),
+  ['verify', 'PairingRemove'].join(''),
+  ['isCurrent', 'PairingOfficer'].join(''),
+  ['pairing', 'StatementDigest'].join(''),
+  ['pairing', 'RemoveDigest'].join(''),
+  ['pairing', 'RevokeDigest'].join(''),
+  ['revoke', 'DashboardPairing'].join(''),
+  ['Pairing', 'RevocationError'].join(''),
+  ['Pairing', 'RevocationSigner'].join('')
+]
+
+function readStripped (absPath: string): string {
+  return stripComments(readFileSync(absPath, 'utf8'))
+}
+
+function pairingModuleUnion (): PairingExportSets {
+  const values: string[] = []
+  const types: string[] = []
+  for (const f of PAIRING_MODULE_FILES) {
+    const d = moduleDeclaredExports(readStripped(join(PAIRING_DIR, f)))
+    values.push(...d.values)
+    types.push(...d.types)
+  }
+  return { values: uniqSortedNames(values), types: uniqSortedNames(types) }
+}
+
+/** BROWSER-PAIRING-c checker over a stripped browser-entry source. */
+function browserPairingProblems (browser: string): string[] {
+  const problems: string[] = []
+  const got = namedExportsByKind(browser, (spec) => spec.startsWith('./pairing/'))
+  if (JSON.stringify(got.values) !== JSON.stringify(uniqSortedNames(BROWSER_PAIRING_VALUES))) problems.push(`values differ: ${got.values.join(',')}`)
+  if (JSON.stringify(got.types) !== JSON.stringify(uniqSortedNames(BROWSER_PAIRING_TYPES))) problems.push(`types differ: ${got.types.join(',')}`)
+  for (const spec of exportFromSpecifiers(browser)) {
+    if (spec === './pairing/index.js' || spec.endsWith(PAIR_WIRE_FILE.replace(/\.ts$/, '.js')) || spec.endsWith(PAIR_MINT_SERVICE_FILE.replace(/\.ts$/, '.js'))) {
+      problems.push(`bad specifier ${spec}`)
+    }
+  }
+  const all = namedExportsByKind(browser)
+  for (const name of [...all.values, ...all.types]) if (BROWSER_PAIRING_FORBIDDEN.includes(name)) problems.push(`owner-side name ${name}`)
+  return problems
+}
+
+/** PAIRING-BARREL-a checker over a stripped barrel source. */
+function pairingBarrelProblems (barrel: string, union: PairingExportSets): string[] {
+  const problems: string[] = []
+  if (/export\s*\*/.test(barrel)) problems.push('export-star in barrel')
+  for (const spec of exportFromSpecifiers(barrel)) {
+    const m = /^\.\/([A-Za-z0-9_-]+)\.js$/.exec(spec)
+    if (m === null || !PAIRING_MODULE_FILES.includes(`${m[1]}.ts`)) problems.push(`bad from-specifier ${spec}`)
+  }
+  const got = namedExportsByKind(barrel)
+  if (JSON.stringify(got.values) !== JSON.stringify(union.values)) problems.push(`values ${got.values.join(',')} != ${union.values.join(',')}`)
+  if (JSON.stringify(got.types) !== JSON.stringify(union.types)) problems.push(`types ${got.types.join(',')} != ${union.types.join(',')}`)
+  return problems
+}
+
+describe('browser-entry pairing exports (Phase 66, C-1)', () => {
+  const browserEntryPath = join(SRC_DIR, 'browser-entry.ts')
+  const rnEntryPath = join(SRC_DIR, 'rn-entry.ts')
+  const rel = (abs: string): string => abs.slice(SRC_DIR.length + 1)
+
+  it('BROWSER-PAIRING-a: the ./browser graph reaches the pairing code, statement, revocation and join-code modules, and neither owner-phone module', () => {
+    const reached = new Set(collectGraph(browserEntryPath).files.map(rel))
+    for (const f of ['pairing/pairing-code.ts', 'pairing/pairing-statement.ts', 'pairing/pairing-revocation.ts', 'networks/join-code.ts']) {
+      expect(reached.has(f), `browser-entry.ts must reach ${f}`).to.equal(true)
+    }
+    for (const f of [`pairing/${PAIR_WIRE_FILE}`, `pairing/${PAIR_MINT_SERVICE_FILE}`]) {
+      expect(reached.has(f), `browser-entry.ts must NOT reach ${f}`).to.equal(false)
+    }
+  })
+
+  it('BROWSER-PAIRING-b (positive control): the same walker from rn-entry.ts reaches both owner-phone modules', () => {
+    const reached = new Set(collectGraph(rnEntryPath).files.map(rel))
+    expect(reached.has(`pairing/${PAIR_WIRE_FILE}`)).to.equal(true)
+    expect(reached.has(`pairing/${PAIR_MINT_SERVICE_FILE}`)).to.equal(true)
+  })
+
+  it("BROWSER-PAIRING-c: browser-entry's './pairing/*' names equal the pinned decode/verify set, with no owner-side name", () => {
+    expect(browserPairingProblems(readStripped(browserEntryPath))).to.deep.equal([])
+  })
+
+  it('BROWSER-PAIRING-c (positive control): the checker flags a planted encoder, a barrel import and an owner-side name', () => {
+    const base = readStripped(browserEntryPath)
+    const plantedEncoder = `${base}\nexport { ${BROWSER_PAIRING_FORBIDDEN[0]} } from './pairing/pairing-code.js'\n`
+    expect(browserPairingProblems(plantedEncoder).join(';')).to.match(/values differ/)
+    const plantedBarrel = `${base}\nexport { attachPairMint } from './pairing/index.js'\n`
+    expect(browserPairingProblems(plantedBarrel).join(';')).to.match(/bad specifier/)
+    const plantedOwner = `${base}\nexport { ${BROWSER_PAIRING_FORBIDDEN[6]} } from './somewhere-else.js'\n`
+    expect(browserPairingProblems(plantedOwner).join(';')).to.match(/owner-side name/)
+  })
+
+  it('PAIRING-BARREL-a: src/pairing/index.ts has no export-star and names exactly the five modules\' exports', () => {
+    const union = pairingModuleUnion()
+    expect(union.values.length, 'the module scan must find values').to.be.greaterThan(20)
+    expect(union.types.length, 'the module scan must find types').to.be.greaterThan(10)
+    expect(pairingBarrelProblems(readStripped(join(PAIRING_DIR, 'index.ts')), union)).to.deep.equal([])
+  })
+
+  it('PAIRING-BARREL-a (positive control): the checker flags an export-star and a missing name', () => {
+    const union = pairingModuleUnion()
+    const barrel = readStripped(join(PAIRING_DIR, 'index.ts'))
+    expect(pairingBarrelProblems(`${barrel}\nexport * from './pairing-code.js'\n`, union).join(';')).to.match(/export-star/)
+    expect(pairingBarrelProblems(barrel.replace('isPairingRevoked,', ''), union).join(';')).to.match(/values/)
+  })
+
+  it("PAIRING-RN-a: rn-entry re-exports exactly the barrel's names from './pairing/index.js', and none from another specifier", () => {
+    const rn = readStripped(rnEntryPath)
+    const barrel = namedExportsByKind(readStripped(join(PAIRING_DIR, 'index.ts')))
+    const got = namedExportsByKind(rn, (spec) => spec === './pairing/index.js')
+    expect(got).to.deep.equal(barrel)
+    expect(exportFromSpecifiers(rn).filter((spec) => spec.startsWith('./pairing/') && spec !== './pairing/index.js')).to.deep.equal([])
+    expect(/export\s*\*\s*from\s*['"]\.\/pairing/.test(rn)).to.equal(false)
+    const all = new Set([...barrel.values, ...barrel.types])
+    const clashes: string[] = []
+    for (const spec of new Set(exportFromSpecifiers(rn))) {
+      if (spec === './pairing/index.js') continue
+      const n = namedExportsByKind(rn, (s) => s === spec)
+      for (const name of [...n.values, ...n.types]) if (all.has(name)) clashes.push(`${name} from ${spec}`)
+    }
+    expect(clashes, clashes.join('; ')).to.deep.equal([])
   })
 })

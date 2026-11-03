@@ -110,6 +110,32 @@ export type {
 	BlockVoterJudgement
 } from './blocks/block-tree.js'
 
+// Phase 66 browser pairing. Every name below comes from its MODULE file, never from
+// './pairing/index.js': that barrel also reaches pair-wire.ts and pair-mint-service.ts (owner-phone
+// libp2p code), which test/browser-entry-purity.spec.ts BROWSER-PAIRING-a proves unreachable here.
+//
+// The network join code a pairing code embeds (66-14 pairing flow): decode only. It returns a result
+// union (NetworkJoinCodeDecodeFailure), it does not throw.
+export { decodeNetworkJoinCode, looksLikeJoinCode, NETWORK_JOIN_CODE_PREFIX_V2 } from './networks/join-code.js'
+export type { NetworkJoinCode, NetworkJoinCodeDecodeResult, NetworkJoinCodeDecodeFailure } from './networks/join-code.js'
+// The founding content digest the browser recomputes over its replicated founding rows (66-14).
+export { computeContentDigest } from './bootstrap/snapshot-manifest.js'
+// The pairing code (66-22 pairing screen + scanner limits, 66-14 pairing flow): decode, never encode.
+export {
+	PAIRING_CODE_PREFIX,
+	PAIRING_CODE_MAX_CHARS,
+	PAIRING_QR_BYTE_BUDGET,
+	decodePairingCode,
+	PairingCodeError
+} from './pairing/pairing-code.js'
+export type { PairingStatement, DecodedPairingCode, PairingCodeFailure } from './pairing/pairing-code.js'
+// The officer's signed pairing statement, verified against the replicated Officer and UserKey rows
+// (66-14 pairing flow and per-pass validity check).
+export { PAIRING_DIGEST_TAG, PAIRING_REMOVE_DIGEST_TAG, verifyPairingStatement } from './pairing/pairing-statement.js'
+export type { VerifiablePairingStatement, PairingVerifyFailure, PairingVerifyResult } from './pairing/pairing-statement.js'
+// The revocation row check: a paired browser unpairs itself once its pairing is revoked (66-14, 66-19).
+export { PAIRING_REVOKE_DIGEST_TAG, isPairingRevoked } from './pairing/pairing-revocation.js'
+
 // -----------------------------------------------------------------------
 // DELIBERATELY NOT EXPORTED (enforced by test/browser-entry-purity.spec.ts)
 // -----------------------------------------------------------------------
@@ -129,3 +155,12 @@ export type {
 //   dashboard's only engine-class import as UserEngine.
 // - The R6-R8 functions (slice checks, validation, tally tree) — they import election-block.ts, which
 //   reaches `@noble/curves/secp256k1.js`, outside the 7-entry allowlist, and the dashboard has no consumer.
+// - encodePairingCode — the browser never mints a pairing code; the officer's phone does.
+// - Everything in pairing/pair-wire.ts and pairing/pair-mint-service.ts — the owner phone's pair-mint
+//   protocol and service (libp2p streams, mint policy); the browser never hosts or dials pair-mint.
+// - revokeDashboardPairing, PairingRevocationError, PairingRevocationSigner and the digest builders
+//   (pairingStatementDigest, pairingRemoveDigest, pairingRevokeDigest), plus verifyPairingRemove and
+//   isCurrentPairingOfficer — signing and owner-side paths; the browser holds no officer key (D-04).
+// - The founding-row reader, its table order and the founding descriptor derivation — guard G-5 in
+//   test/founding-bundle-guards.spec.ts keeps every barrel, this one included, off the genesis-row
+//   and founding-bundle modules. Exporting them needs a narrow, user-approved change to that guard.

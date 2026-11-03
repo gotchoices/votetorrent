@@ -53,3 +53,6 @@ export * from './tally/index.js'
 // Phase 65 Plan 05 (D-50/D-51): the R5 block Merkle tree. Named-export barrel; see
 // src/blocks/index.ts. rn-entry and browser-entry exposure is decided in 65-09 (D-52).
 export * from './blocks/index.js'
+// Phase 66: browser pairing (pairing code, statement verifiers, pair-mint wire and service, revocation).
+// Named-export barrel; see src/pairing/index.ts.
+export * from './pairing/index.js'
