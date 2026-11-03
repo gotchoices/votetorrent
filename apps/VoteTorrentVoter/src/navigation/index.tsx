@@ -458,6 +458,7 @@ export function RootNavigator() {
 						// not the Tab.Navigator itself.
 						headerShown: false,
 						tabBarLabel: t('tabVote'),
+						tabBarButtonTestID: 'tab-vote',
 						tabBarIcon: ({color, size}) => (
 							<FontAwesome6 name="check-to-slot" size={size} color={color} />
 						),
@@ -475,6 +476,7 @@ export function RootNavigator() {
 					options={({route}) => ({
 						headerShown: false,
 						tabBarLabel: t('tabTimeline'),
+						tabBarButtonTestID: 'tab-timeline',
 						tabBarIcon: ({color, size}) => (
 							<FontAwesome6 name="timeline" size={size} color={color} />
 						),
@@ -489,6 +491,7 @@ export function RootNavigator() {
 					options={({route}) => ({
 						headerShown: false,
 						tabBarLabel: t('tabRegistration'),
+						tabBarButtonTestID: 'tab-registration',
 						tabBarIcon: ({color, size}) => (
 							<FontAwesome6 name="user-plus" size={size} color={color} />
 						),
@@ -502,6 +505,7 @@ export function RootNavigator() {
 					options={{
 						headerShown: false,
 						tabBarLabel: t('tabScan'),
+						tabBarButtonTestID: 'tab-scan',
 						tabBarIcon: ({color, size}) => (
 							<FontAwesome6 name="qrcode" size={size} color={color} />
 						),
@@ -513,6 +517,7 @@ export function RootNavigator() {
 					options={{
 						headerShown: false,
 						tabBarLabel: t('tabSettings'),
+						tabBarButtonTestID: 'tab-settings',
 						tabBarIcon: ({color, size}) => (
 							<FontAwesome6 name="gear" size={size} color={color} />
 						),
