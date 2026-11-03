@@ -4,7 +4,7 @@
  * method that ingests its output -- see `SEAM_TOKEN` below for the exact
  * name; it is deliberately not spelled out in this paragraph, see the
  * anti-self-trip note further down -- "built for trusted replication-style
- * writes", running NO constraint validation) may appear in exactly the two
+ * writes", running NO constraint validation) may appear in exactly the three
  * recorded production sites in this repo, pinned by a repo-wide scan rather
  * than the one-off plan-time grep `snapshot-restore.js`'s header used to cite.
  *
@@ -27,11 +27,17 @@
  *      is not counted. `subscribe.js` names the seam once, in prose inside a
  *      JSDoc block; that mention must be stripped, not counted, and the
  *      self-check group below proves the stripper does exactly that.
- *   3. The assertion below is SET EQUALITY against a frozen two-element
+ *   3. The assertion below is SET EQUALITY against a frozen three-element
  *      expectation -- never a `=== 0` or a `>= 1` count. Equality carries its
  *      own positive control: if the scan silently stopped reading files, the
  *      expected set would not be found and this test would fail loudly
  *      rather than passing on a narrowed, unverified root.
+ *
+ * WHY THREE SITES (66-13). The officer dashboard's member device replicates its
+ * officer tables from the strand the same way this page replicates the public
+ * tables, so `apps/VoteTorrentDashboard/src/peer/reactivity-bridge.js` is a
+ * third deliberate production site. The pin returns to two when the dashboard's
+ * snapshot restore (`src/lifecycle/snapshot-restore.js`) is retired (66-24).
  *
  * The token this instrument searches for is assembled from concatenated
  * fragments at runtime (below), so this file's own source never spells it
@@ -67,24 +73,30 @@ const SEAM_TOKEN_RE = new RegExp(`\\b${SEAM_TOKEN}\\b`);
 const SCAN_ROOTS = Object.freeze([publicSrc(), dashboardSrc(), webDataSrc()]);
 
 /**
- * The two, and only two, files this repo's product code is permitted to
- * invoke the seam from today. A third file appearing here means either a
+ * The three, and only three, files this repo's product code is permitted to
+ * invoke the seam from today. A fourth file appearing here means either a
  * new legitimate production site was added without updating this constant
- * (do so deliberately, with a header note explaining why a third site is
- * now correct) or an accidental widening that must be reverted.
+ * (do so deliberately, with a header note explaining why a fourth site is
+ * now correct) or an accidental widening that must be reverted. The
+ * dashboard's member replication became the third site in 66-13 (see the
+ * header note).
  * @type {ReadonlyArray<string>}
  */
 const EXPECTED_SEAM_SITES = Object.freeze(
-	[dashboardSrc('lifecycle', 'snapshot-restore.js'), publicSrc('peer', 'reactivity-bridge.js')].sort(),
+	[
+		dashboardSrc('lifecycle', 'snapshot-restore.js'),
+		dashboardSrc('peer', 'reactivity-bridge.js'),
+		publicSrc('peer', 'reactivity-bridge.js'),
+	].sort(),
 );
 
 // ---------------------------------------------------------------------------
 // 1. Sanity.
 // ---------------------------------------------------------------------------
 
-test('EXPECTED_SEAM_SITES is a frozen, two-element constant naming the two production sites by absolute path', () => {
+test('EXPECTED_SEAM_SITES is a frozen, three-element constant naming the three production sites by absolute path', () => {
 	assert.ok(Object.isFrozen(EXPECTED_SEAM_SITES));
-	assert.equal(EXPECTED_SEAM_SITES.length, 2);
+	assert.equal(EXPECTED_SEAM_SITES.length, 3);
 	assert.ok(EXPECTED_SEAM_SITES.every((f) => typeof f === 'string' && f.length > 0));
 });
 
@@ -97,6 +109,12 @@ test('self-check: comment-stripping reactivity-bridge.js still leaves its real s
 	const source = readFileSync(publicSrc('peer', 'reactivity-bridge.js'), 'utf8');
 	const stripped = stripComments(source);
 	assert.match(stripped, SEAM_TOKEN_RE, 'the comment stripper ate the real seam call in reactivity-bridge.js -- this instrument would report a false negative');
+});
+
+test('self-check: comment-stripping the dashboard reactivity-bridge.js still leaves its real seam call visible to the matcher', () => {
+	const source = readFileSync(dashboardSrc('peer', 'reactivity-bridge.js'), 'utf8');
+	const stripped = stripComments(source);
+	assert.match(stripped, SEAM_TOKEN_RE, 'the comment stripper ate the real seam call in the dashboard reactivity-bridge.js -- this instrument would report a false negative');
 });
 
 test('self-check: comment-stripping snapshot-restore.js still leaves its real seam call visible to the matcher', () => {
@@ -128,7 +146,7 @@ test('control: the SAME matcher fires on the token in CODE position, so the stri
 // 3. THE REAL SCAN. Every self-check above has already run.
 // ---------------------------------------------------------------------------
 
-test('56-09 T-corr: the external-write seam appears in EXACTLY the two recorded production sites, by set equality', () => {
+test('56-09 T-corr: the external-write seam appears in EXACTLY the three recorded production sites, by set equality', () => {
 	const files = scannedFilesFor({ roots: SCAN_ROOTS });
 	/** @type {string[]} */
 	const offenders = [];
