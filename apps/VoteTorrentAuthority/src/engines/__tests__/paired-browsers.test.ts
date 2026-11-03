@@ -8,6 +8,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as fs from 'fs';
 import * as path from 'path';
+import { createTestNetwork, makeTestSignCallback } from '@votetorrent/vote-engine/test/fixtures/test-context';
+import { isPairingRevoked } from '@votetorrent/vote-engine/rn';
 import type { PairingRevocationSigner } from '@votetorrent/vote-engine/rn';
 import {
 	PAIRED_BROWSER_UNUSED_GRACE_MS,
@@ -559,5 +561,105 @@ describe('removePairedBrowser (D-27, R-D: one prompt, nothing on the wire)', () 
 		expect(signer.signatures.length).toBeGreaterThan(0);
 		const raw = (await storedRaw()) as string;
 		for (const sig of signer.signatures) expect(raw).not.toContain(sig.slice(0, 16));
+	});
+});
+
+// ------------------------------------------------------------------------------------------------
+
+describe('real database (D-27)', () => {
+	beforeEach(() => {
+		__resetPairedBrowsersStateForTests();
+	});
+
+	async function realSetup() {
+		const net = await createTestNetwork();
+		// Start each network with an empty local list, recorded after the fixture's own storage setup.
+		await AsyncStorage.removeItem(PAIRED_BROWSERS_KEY);
+		await recordPairedBrowser({
+			nonce: 'pairNonceA1',
+			userId: net.user.id,
+			networkHash: net.ref.hash,
+			inviteKey: 'inviteKeyA1',
+			mintedAt: Date.now() - 1000,
+			expiresAt: new Date(Date.now() + 14 * 60_000).toISOString().slice(0, 19),
+			label: null,
+		});
+		const real = makeTestSignCallback(net.user);
+		const seen: string[] = [];
+		const counter = { calls: 0 };
+		const signer: PairingRevocationSigner = {
+			userId: net.user.id,
+			signingPublicKey: net.user.activeKeys[0]!.key,
+			sign: async (d: Uint8Array) => {
+				counter.calls++;
+				const s = await real(d);
+				seen.push(s.signature);
+				return s;
+			},
+		};
+		const fake = fakeNode({
+			usages: [{ inviteKey: 'inviteKeyA1', peerId: 'browserPeer1' }],
+			machines: [{ peerId: 'browserPeer1', lastPublishedAt: 5000 }],
+		});
+		return { net, signer, counter, seen, fake };
+	}
+
+	it('E2E-1..3 one prompt and the row lands; a re-run signs nothing; the machine leaving reads removed; a wrong key is refused before any prompt (LEAK-1)', async () => {
+		const capture = captureConsole();
+		const secrets: string[] = ['pairNonceA1', 'inviteKeyA1', 'browserPeer1'];
+		try {
+			// E2E-1
+			const { net, signer, counter, seen, fake } = await realSetup();
+			const db = net.ctx.db;
+			const r1 = await removePairedBrowser({ node: fake.node, db, signer, entry: { nonce: 'pairNonceA1' } });
+			expect(r1).toBe('removal-pending');
+			expect(counter.calls).toBe(1);
+			expect(await isPairingRevoked(db, { userId: net.user.id, nonce: 'pairNonceA1' })).toBe(true);
+			expect(await isPairingRevoked(db, { userId: net.user.id, nonce: 'pairNonceB2' })).toBe(false);
+			expect(pairedBrowserRemoval((await readPairedBrowsers())[0])).toBe('pending');
+
+			// E2E-2
+			__resetPairedBrowsersStateForTests();
+			const r2 = await removePairedBrowser({ node: fake.node, db, signer, entry: { nonce: 'pairNonceA1' } });
+			expect(r2).toBe('removal-pending');
+			expect(counter.calls).toBe(1);
+			fake.state.machines = [];
+			const rows = await listPairedBrowsers(fake.node, undefined, { userId: net.user.id, networkHash: net.ref.hash });
+			expect(rows).toEqual([expect.objectContaining({ nonce: 'pairNonceA1', state: 'removed' })]);
+			expect(pairedBrowserRemoval((await readPairedBrowsers())[0])).toBe('done');
+
+			// E2E-3: a fresh network, a signer key that is not one of the officer's keys.
+			const second = await realSetup();
+			const badSigner: PairingRevocationSigner & { calls: number } = {
+				userId: second.net.user.id,
+				signingPublicKey: '02' + 'cd'.repeat(32),
+				calls: 0,
+				sign: async () => {
+					badSigner.calls++;
+					throw new Error('must not sign');
+				},
+			};
+			const err = await removePairedBrowser({
+				node: second.fake.node,
+				db: second.net.ctx.db,
+				signer: badSigner,
+				entry: { nonce: 'pairNonceA1' },
+			}).catch((e: unknown) => e);
+			expect(err).toBeInstanceOf(PairedBrowserRemoveError);
+			expect((err as PairedBrowserRemoveError).reason).toBe('key-not-current');
+			expect(badSigner.calls).toBe(0);
+			expect(await isPairingRevoked(second.net.ctx.db, { userId: second.net.user.id, nonce: 'pairNonceA1' })).toBe(false);
+			expect(pairedBrowserRemoval((await readPairedBrowsers())[0])).toBe('none');
+
+			// LEAK-1
+			secrets.push(...seen);
+			expect(seen).toHaveLength(1);
+			expectNoSecretInConsole(capture, secrets);
+		} finally {
+			capture.restore();
+		}
+		const raw = (await AsyncStorage.getItem(PAIRED_BROWSERS_KEY)) as string;
+		const sigHex = secrets[secrets.length - 1];
+		for (let o = 0; o + 16 <= sigHex.length; o++) expect(raw).not.toContain(sigHex.slice(o, o + 16));
 	});
 });
