@@ -53,6 +53,17 @@ export interface INetworksEngine {
    */
   getFoundingAnchor(networkHash: string, founder: FoundingAnchorFounder): Promise<FoundingAnchor>
   /**
+   * The same anchor for a join or pairing code, built from the replicated
+   * rows alone so any officer's device can build it, also after an Admin
+   * revision. It derives the founding generation itself: the primary
+   * authority's earliest Admin generation, that generation's single Officer
+   * and that officer's key with the earliest expiration (ties by public key).
+   * Rejects with a `FoundingBundleExportError` (vote-engine):
+   * `network-not-open`, `genesis-unreadable` or `signer-key-invalid`, never
+   * `admin-revised`. `getFoundingAnchor` keeps the D-38 `admin-revised` refusal.
+   */
+  getJoinAnchor(networkHash: string): Promise<FoundingAnchor>
+  /**
    * Spike 100: a voter that was admitted to the authority's cadre opens the
    * network's strand and accepts it only when the replicated founding rows
    * hash to the join code's digest. Never writes founding rows (a voter must

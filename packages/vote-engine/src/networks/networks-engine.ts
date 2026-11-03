@@ -1,6 +1,6 @@
 import { Database, MisuseError, QuereusError } from '@quereus/quereus';
 import { NetworkEngine } from '../network/network-engine.js';
-import { H16, nowCanonicalDatetime, toCanonicalDatetime } from '../utils.js';
+import { H16, fromCanonicalDatetime, nowCanonicalDatetime, toCanonicalDatetime } from '../utils.js';
 import type { EngineContext } from '../types.js';
 import type { DbFactory } from '../types.js';
 import type {
@@ -391,6 +391,137 @@ export class NetworksEngine implements INetworksEngine {
 	 */
 	async getFoundingAnchor(networkHash: string, founder: FoundingAnchorFounder): Promise<FoundingAnchor> {
 		const { rows, genesis } = await this.readFoundingRows(networkHash, founder);
+		return this.anchorFromRows(rows, genesis);
+	}
+
+	/**
+	 * R-C (D-22): the join anchor any officer's device can build, also after
+	 * an Admin revision. It derives the founding generation from the
+	 * replicated rows (see `resolveJoinGenesis`) instead of taking the
+	 * founder's keys, and never refuses with `admin-revised` — that D-38
+	 * refusal belongs to `getFoundingAnchor` / `exportFoundingBundle` only.
+	 * Read-only: point lookups plus the shared genesis-row reader.
+	 */
+	async getJoinAnchor(networkHash: string): Promise<FoundingAnchor> {
+		const ctx = this.contexts.get(networkHash);
+		if (!ctx) throw new FoundingBundleExportError('network-not-open');
+
+		const genesis = await this.resolveJoinGenesis(ctx, networkHash);
+
+		let rows: FoundingBundleRows;
+		try {
+			rows = await readGenesisRows(ctx.db, genesis);
+		} catch {
+			throw new FoundingBundleExportError('genesis-unreadable');
+		}
+		if (rows.User.length === 0 || rows.Officer.length === 0) {
+			throw new FoundingBundleExportError('genesis-unreadable');
+		}
+		if (rows.Authority.length === 0 || rows.Admin.length === 0 || rows.Network.length === 0) {
+			throw new FoundingBundleExportError('genesis-unreadable');
+		}
+		if (rows.UserKey.length === 0) {
+			throw new FoundingBundleExportError('signer-key-invalid');
+		}
+		return this.anchorFromRows(rows, genesis);
+	}
+
+	/**
+	 * The founding generation's keys, from the replicated rows alone. The rule
+	 * (the browser's founding check mirrors it): the primary authority's Admin
+	 * row with the EARLIEST EffectiveAt; that generation's only Officer row;
+	 * that user's UserKey with the earliest Expiration, ties by PubKey
+	 * ascending. Two-key equality and single-key point predicates only (no IN
+	 * list), so the Quereus AND+IN zero-row trap cannot apply.
+	 */
+	private async resolveJoinGenesis(ctx: EngineContext, networkHash: string): Promise<GenesisRowKeys> {
+		const unreadable = () => new FoundingBundleExportError('genesis-unreadable');
+		const instant = (value: unknown): number =>
+			fromCanonicalDatetime(typeof value === 'number' ? value : String(value));
+
+		let networkRow: Record<string, unknown> | undefined;
+		try {
+			networkRow = (await ctx.db
+				.prepare(
+					'select Id, Hash, PrimaryAuthorityId, Name, ImageRef, Relays, TimestampAuthorities, NumberRequiredTSAs, ElectionType from Network',
+				)
+				.get({})) as Record<string, unknown> | undefined;
+		} catch {
+			throw unreadable();
+		}
+		if (!networkRow || networkRow.Hash !== networkHash) throw unreadable();
+		const authorityId = String(networkRow.PrimaryAuthorityId);
+
+		const adminRows: Array<{ EffectiveAt: unknown }> = [];
+		const officerRows: Array<{ UserId: unknown }> = [];
+		const keyRows: Array<{ PubKey: unknown; Expiration: unknown }> = [];
+		try {
+			for await (const row of ctx.db.eval(
+				'select EffectiveAt from Admin where AuthorityId = :authorityId',
+				{ authorityId },
+			)) {
+				adminRows.push(row as { EffectiveAt: unknown });
+			}
+		} catch {
+			throw unreadable();
+		}
+		if (adminRows.length === 0) throw unreadable();
+		let founding = adminRows[0]!;
+		let foundingAt = instant(founding.EffectiveAt);
+		for (const row of adminRows) {
+			const at = instant(row.EffectiveAt);
+			if (!Number.isFinite(at)) throw unreadable();
+			if (at < foundingAt) {
+				founding = row;
+				foundingAt = at;
+			}
+		}
+		// Bind the chosen row's own stored text so the point lookups match it.
+		const adminEffectiveAt = String(founding.EffectiveAt);
+
+		try {
+			for await (const row of ctx.db.eval(
+				'select UserId from Officer where AuthorityId = :authorityId and AdminEffectiveAt = :adminEffectiveAt',
+				{ authorityId, adminEffectiveAt },
+			)) {
+				officerRows.push(row as { UserId: unknown });
+			}
+		} catch {
+			throw unreadable();
+		}
+		// create() writes exactly one founding officer.
+		if (officerRows.length !== 1) throw unreadable();
+		const userId = String(officerRows[0]!.UserId);
+
+		try {
+			for await (const row of ctx.db.eval(
+				'select PubKey, Expiration from UserKey where UserId = :userId',
+				{ userId },
+			)) {
+				keyRows.push(row as { PubKey: unknown; Expiration: unknown });
+			}
+		} catch {
+			throw unreadable();
+		}
+		if (keyRows.length === 0) throw new FoundingBundleExportError('signer-key-invalid');
+		const ranked = keyRows.map((row) => ({ pubKey: String(row.PubKey), expiresAt: instant(row.Expiration) }));
+		if (ranked.some((row) => !Number.isFinite(row.expiresAt))) {
+			throw new FoundingBundleExportError('signer-key-invalid');
+		}
+		ranked.sort((a, b) =>
+			a.expiresAt !== b.expiresAt
+				? a.expiresAt - b.expiresAt
+				: a.pubKey < b.pubKey
+					? -1
+					: a.pubKey > b.pubKey
+						? 1
+						: 0,
+		);
+		return { userId, signerKey: ranked[0]!.pubKey, authorityId, adminEffectiveAt };
+	}
+
+	/** The anchor for a set of founding rows: what a join code embeds. */
+	private anchorFromRows(rows: FoundingBundleRows, genesis: GenesisRowKeys): FoundingAnchor {
 		const digest = computeContentDigest(rows as unknown as SnapshotTables);
 		const descriptor = deriveFoundingDescriptor(rows);
 		return {

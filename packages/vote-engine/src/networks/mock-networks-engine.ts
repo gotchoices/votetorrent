@@ -120,6 +120,11 @@ export class MockNetworksEngine implements INetworksEngine {
     throw new Error('MockNetworksEngine does not produce founding anchors')
   }
 
+  // R-C: no replicated rows to derive a join anchor from either.
+  async getJoinAnchor (_networkHash: string): Promise<FoundingAnchor> {
+    throw new Error('MockNetworksEngine does not produce join anchors')
+  }
+
   async joinFromStrand (
     _anchor: NetworkJoinAnchor,
     _user: User | undefined,
