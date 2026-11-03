@@ -18,9 +18,25 @@
  * nothing pre-fetches on its behalf. 50-09's `PanelGrid` mounts this
  * component's tree only when the officer's own scope grants `vrg`, so an
  * officer without it never runs this effect and its rows never enter the
- * DOM.
+ * DOM. The panel makes no visibility decision of its own.
+ *
+ * Live: the read effect re-runs whenever the replicated data version moves,
+ * so rows that arrive from other devices land in place with no click and no
+ * reload. A re-read keeps the rows already on screen until the new ones
+ * arrive (only a different database handle resets to the loading state), and
+ * a failed re-read keeps the last good rows. Every rendered row and figure is
+ * keyed into one live change-mark hook, so a changed value carries the mark
+ * and the hidden word "updated"; the panel chrome owns the header mark and
+ * the grid owns the screen-reader summary, so neither is rendered here. In chart view
+ * the charts take no class, so a changed status or request count marks its
+ * section heading and a changed intake bucket marks the wrapper around the
+ * intake chart; in grid view the value cells carry the mark instead, so one
+ * change is never marked twice.
+ *
+ * Registration requests are decided in the Authority app. The requests list
+ * carries the action note under its heading, never a control.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { PanelComponent } from './types.js';
 import { t } from '@votetorrent/ui-web';
 import { BarSeries, StackedBarSeries, TimeSeries } from '@votetorrent/ui-web/components';
@@ -34,6 +50,10 @@ import {
 	selectActiveElection,
 } from '@votetorrent/web-data/officer';
 import { usePanelView } from './ChartViewContext.js';
+import { useDataVersion } from '../../live/DataVersionContext.js';
+import { useChangeMarks, ChangeMarkWord } from '../../live/useChangeMarks.js';
+import type { ChangeMarks } from '../../live/useChangeMarks.js';
+import { ReadOnlyNote } from '../../live/ReadOnlyNote.js';
 import './election-ops.css';
 
 // Field labels reproduced VERBATIM from the schema (rule R1: a column name
@@ -180,12 +200,69 @@ function toIntakeData(rows: RegistrationsData['intakeSeries']) {
 	}));
 }
 
+// --- Live change marks (UI-SPEC "2. In-place change mark") -------------------
+
+type MarkRow = { key: string; sig: string };
+const markKey = (row: MarkRow) => row.key;
+const markSig = (row: MarkRow) => row.sig;
+
+/** `base` alone when there is no mark, else `base` plus the mark classes. */
+function withMark(base: string, mark: string): string {
+	return mark ? `${base} ${mark}` : base;
+}
+
+/** The mark class of the first marked key in a section, or '' when none is marked. */
+function sectionMarkClass(marks: ChangeMarks, keys: string[]): string {
+	const marked = keys.find((key) => marks.isMarked(key));
+	return marked === undefined ? '' : marks.markClass(marked);
+}
+
+const statusMarkKey = (row: RegistrationsData['statusBreakdown'][number]) => `status:${row.Code}`;
+const requestMarkKey = (row: RegistrationsData['requestBreakdown'][number]) => `request:${row.Status}-${row.IssuerType}`;
+const intakeMarkKey = (row: RegistrationsData['intakeSeries'][number]) => `intake:${row.bucketStart}`;
+const rosterMarkKey = (row: RegistrationsData['roster']['rows'][number]) => `roster:${row.Id}`;
+const surfaceMarkKey = (entry: RegistrationsData['surfaceCounts'][number]) => `surface:${entry.table}`;
+
+/** The roster figure exactly as rendered. */
+function rosterFigureOf(roster: RegistrationsData['roster']): string {
+	return `${roster.rows.length} / ${roster.total}`;
+}
+
+/** One mark row per rendered row or figure; signatures cover exactly what is displayed. Maps, never filters. */
+function buildRegistrationMarkRows(data: RegistrationsData): MarkRow[] {
+	const rows: MarkRow[] = [];
+	for (const row of data.statusBreakdown) {
+		rows.push({ key: statusMarkKey(row), sig: JSON.stringify([row.Name, row.Count]) });
+	}
+	for (const row of data.requestBreakdown) {
+		rows.push({ key: requestMarkKey(row), sig: JSON.stringify([row.StatusName, row.IssuerName, row.Count]) });
+	}
+	for (const row of data.intakeSeries) {
+		rows.push({ key: intakeMarkKey(row), sig: JSON.stringify([row.count]) });
+	}
+	for (const row of data.roster.rows) {
+		rows.push({
+			key: rosterMarkKey(row),
+			sig: JSON.stringify([row.LastName, row.FirstName, row.District, row.Status, row.Id, row.Expiration]),
+		});
+	}
+	rows.push({ key: 'rosterFigure', sig: JSON.stringify([rosterFigureOf(data.roster)]) });
+	for (const entry of data.surfaceCounts) {
+		rows.push({ key: surfaceMarkKey(entry), sig: JSON.stringify([entry.count]) });
+	}
+	return rows;
+}
+
 const RegistrationsPanel: PanelComponent = ({ capability, db }) => {
+	const { version } = useDataVersion();
+	const readDbRef = useRef<unknown>(undefined);
 	const [state, setState] = useState<RegistrationsState>({ status: 'loading' });
 	const view = usePanelView();
 
 	useEffect(() => {
 		let cancelled = false;
+		const dbChanged = readDbRef.current !== db;
+		readDbRef.current = db;
 
 		if (!db) {
 			setState({ status: 'unavailable' });
@@ -194,7 +271,9 @@ const RegistrationsPanel: PanelComponent = ({ capability, db }) => {
 			};
 		}
 
-		setState({ status: 'loading' });
+		// A version bump keeps the rows on screen until the new ones arrive;
+		// only a different database handle starts again from the loading state.
+		if (dbChanged) setState({ status: 'loading' });
 
 		const boundDb = db;
 		(async () => {
@@ -222,16 +301,20 @@ const RegistrationsPanel: PanelComponent = ({ capability, db }) => {
 				// and integer counts only.
 				// eslint-disable-next-line no-console
 				console.error('RegistrationsPanel: a read failed:', (err as { name?: string })?.name ?? 'Error');
-				if (!cancelled) {
-					setState({ status: 'failed' });
-				}
+				// A failed re-read keeps the last good rows on screen.
+				if (!cancelled) setState((prev) => (prev.status === 'ready' && !dbChanged ? prev : { status: 'failed' }));
 			}
 		})();
 
 		return () => {
 			cancelled = true;
 		};
-	}, [db]);
+	}, [db, version]);
+
+	// null for loading, unavailable and failed (never an empty list, which
+	// would read as "every row was deleted").
+	const markRows = useMemo(() => (state.status === 'ready' ? buildRegistrationMarkRows(state.data) : null), [state]);
+	const marks = useChangeMarks(markRows, markKey, markSig);
 
 	if (state.status === 'unavailable') {
 		return <p className="panel-empty">{t('panels.registrations.unavailable')}</p>;
@@ -250,28 +333,47 @@ const RegistrationsPanel: PanelComponent = ({ capability, db }) => {
 	}
 
 	const { statusBreakdown, requestBreakdown, roster, surfaceCounts, intakeSeries } = state.data;
-	const rosterFigure = `${roster.rows.length} / ${roster.total}`;
+	const rosterFigure = rosterFigureOf(roster);
+	const statusKeys = statusBreakdown.map(statusMarkKey);
+	const requestKeys = requestBreakdown.map(requestMarkKey);
+	const intakeKeys = intakeSeries.map(intakeMarkKey);
+	const statusHeadingMark = view === 'chart' ? sectionMarkClass(marks, statusKeys) : '';
+	const requestHeadingMark = view === 'chart' ? sectionMarkClass(marks, requestKeys) : '';
+	const intakeMark = sectionMarkClass(marks, intakeKeys);
 
 	return (
 		<>
 			<section className="eo-section">
-				<h4 className="eo-heading">{t('panels.registrations.statusHeading')}</h4>
+				<h4 className={withMark('eo-heading', statusHeadingMark)}>
+					{t('panels.registrations.statusHeading')}
+					{statusHeadingMark ? <ChangeMarkWord /> : null}
+				</h4>
 				{view === 'chart' ? (
 					<BarSeries data={toStatusData(statusBreakdown)} />
 				) : (
 					<div className="eo-count-grid">
-						{statusBreakdown.map((row) => (
-							<div key={row.Code}>
-								<span className="eo-datum">{row.Name}</span>
-								<span>{row.Count}</span>
-							</div>
-						))}
+						{statusBreakdown.map((row) => {
+							const key = statusMarkKey(row);
+							return (
+								<div key={row.Code}>
+									<span className="eo-datum">{row.Name}</span>
+									<span className={marks.markClass(key) || undefined}>
+										{row.Count}
+										{marks.isMarked(key) ? <ChangeMarkWord /> : null}
+									</span>
+								</div>
+							);
+						})}
 					</div>
 				)}
 			</section>
 
 			<section className="eo-section">
-				<h4 className="eo-heading">{t('panels.registrations.requestsHeading')}</h4>
+				<h4 className={withMark('eo-heading', requestHeadingMark)}>
+					{t('panels.registrations.requestsHeading')}
+					{requestHeadingMark ? <ChangeMarkWord /> : null}
+				</h4>
+				{requestBreakdown.length > 0 ? <ReadOnlyNote variant="short" /> : <ReadOnlyNote variant="long" />}
 				{view === 'chart' ? (
 					<StackedBarSeries
 						data={toRequestData(requestBreakdown)}
@@ -282,10 +384,14 @@ const RegistrationsPanel: PanelComponent = ({ capability, db }) => {
 					<div className="eo-count-grid">
 						{requestBreakdown.map((row) => {
 							const label = `${row.StatusName} / ${row.IssuerName}`;
+							const key = requestMarkKey(row);
 							return (
 								<div key={`${row.Status}-${row.IssuerType}`}>
 									<span className="eo-datum">{label}</span>
-									<span>{row.Count}</span>
+									<span className={marks.markClass(key) || undefined}>
+										{row.Count}
+										{marks.isMarked(key) ? <ChangeMarkWord /> : null}
+									</span>
 								</div>
 							);
 						})}
@@ -294,14 +400,20 @@ const RegistrationsPanel: PanelComponent = ({ capability, db }) => {
 			</section>
 
 			<section className="eo-section">
-				<TimeSeries data={toIntakeData(intakeSeries)} emptyCopyKey="panels.registrations.intakeChart.empty" />
+				<div className={intakeMark || undefined}>
+					<TimeSeries data={toIntakeData(intakeSeries)} emptyCopyKey="panels.registrations.intakeChart.empty" />
+					{intakeMark ? <ChangeMarkWord /> : null}
+				</div>
 			</section>
 
 			<section className="eo-section">
 				<h4 className="eo-heading">{t('panels.registrations.rosterHeading')}</h4>
-				<span className="eo-datum">{rosterFigure}</span>
+				<span className={withMark('eo-datum', marks.markClass('rosterFigure'))}>
+					{rosterFigure}
+					{marks.isMarked('rosterFigure') ? <ChangeMarkWord /> : null}
+				</span>
 				{roster.rows.map((row) => (
-					<div className="eo-row" key={row.Id}>
+					<div className={withMark('eo-row', marks.markClass(rosterMarkKey(row)))} key={row.Id}>
 						<span>{row.LastName}</span>
 						<span>{row.FirstName}</span>
 						<span className="eo-datum">{row.District}</span>
@@ -312,6 +424,7 @@ const RegistrationsPanel: PanelComponent = ({ capability, db }) => {
 						<span className="eo-datum" title={COL.expiration}>
 							{row.Expiration}
 						</span>
+						{marks.isMarked(rosterMarkKey(row)) ? <ChangeMarkWord /> : null}
 					</div>
 				))}
 			</section>
@@ -319,12 +432,18 @@ const RegistrationsPanel: PanelComponent = ({ capability, db }) => {
 			<section className="eo-section">
 				<h4 className="eo-heading">{t('panels.registrations.surfaceCountsHeading')}</h4>
 				<div className="eo-count-grid">
-					{surfaceCounts.map((entry) => (
-						<div key={entry.table}>
-							<span className="eo-datum">{entry.table}</span>
-							<span>{entry.count}</span>
-						</div>
-					))}
+					{surfaceCounts.map((entry) => {
+						const key = surfaceMarkKey(entry);
+						return (
+							<div key={entry.table}>
+								<span className="eo-datum">{entry.table}</span>
+								<span className={marks.markClass(key) || undefined}>
+									{entry.count}
+									{marks.isMarked(key) ? <ChangeMarkWord /> : null}
+								</span>
+							</div>
+						);
+					})}
 				</div>
 			</section>
 		</>

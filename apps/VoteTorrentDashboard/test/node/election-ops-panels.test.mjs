@@ -406,7 +406,7 @@ test('Rung C: the status and request sections carry the switch discriminant besi
 	);
 });
 
-test('Rung D: the intake, roster and surface-count sections stay unswitched, and the discriminant literal occurs exactly twice across the file', () => {
+test('Rung D: the intake, roster and surface-count sections stay unswitched; the discriminant occurs once in each switched section, twice in the chart-view heading-mark consts before the first section, and four times in the file', () => {
 	const source = STRIPPED['RegistrationsPanel.tsx'];
 	const sections = source.split('<section className="eo-section">').slice(1);
 	assert.equal(sections.length, 5, 'expected exactly five <section className="eo-section"> chunks');
@@ -436,11 +436,27 @@ test('Rung D: the intake, roster and surface-count sections stay unswitched, and
 		'the surface-count section is table-only by D-05 -- it must mount no chart primitive and carry no discriminant',
 	);
 
-	assert.equal(
-		(source.match(/view === 'chart'/g) ?? []).length,
-		2,
-		'expected the discriminant literal to occur exactly twice, in the two switched sections only',
+	assert.ok(statusChunk, 'no section mounts BarSeries');
+	assert.ok(requestChunk, 'no section mounts StackedBarSeries');
+	/** @param {string} text @returns {number} */
+	const discriminantCount = (text) => text.split(VIEW_DISCRIMINANT).length - 1;
+	assert.equal(discriminantCount(statusChunk), 1, 'the status section must carry exactly one discriminant (its ternary)');
+	assert.equal(discriminantCount(requestChunk), 1, 'the request section must carry exactly one discriminant (its ternary)');
+	assert.equal(discriminantCount(intakeChunk), 0, 'the intake section must carry no discriminant');
+	assert.equal(discriminantCount(rosterChunk), 0, 'the roster section must carry no discriminant');
+	assert.equal(discriminantCount(remaining), 0, 'the surface-count section must carry no discriminant');
+
+	// The two chart-view heading marks: charts take no class, so in chart view a
+	// changed status or request count marks its section heading instead.
+	const beforeSections = source.split('<section className="eo-section">')[0];
+	const headLines = beforeSections.split('\n').filter((line) => line.includes(VIEW_DISCRIMINANT));
+	assert.equal(headLines.length, 2, 'expected exactly two discriminant lines before the first section (the heading-mark consts)');
+	assert.ok(
+		headLines.some((line) => line.includes('sectionMarkClass(marks, statusKeys)')) &&
+			headLines.some((line) => line.includes('sectionMarkClass(marks, requestKeys)')),
+		'each discriminant before the first section must compute a heading mark',
 	);
+	assert.equal(discriminantCount(source), 4, 'expected the discriminant literal to occur exactly four times across the file');
 });
 
 test('positive control: the section split is non-vacuous (5 > 2), and a synthetic chunk naming a chart primitive beside a grid but carrying no discriminant is reported unswitched', () => {
@@ -655,7 +671,7 @@ test('BallotsQuestionsPanel imports readBallots and readQuestions, and selectAct
 // fixture. Banned tokens are assembled from fragments so this file never
 // trips a scan of its own text.
 
-const LIVE_FILES = ['ElectionsPanel.tsx', 'BallotsQuestionsPanel.tsx'];
+const LIVE_FILES = ['ElectionsPanel.tsx', 'BallotsQuestionsPanel.tsx', 'RegistrationsPanel.tsx', 'KeyholdersPanel.tsx'];
 
 /** @type {Record<string, string>} */
 const LIVE_RAW = {};
@@ -838,6 +854,16 @@ const PINNED_OFFICER_IMPORTS = {
 		'readQuestions',
 		'selectActiveElection',
 	],
+	'RegistrationsPanel.tsx': [
+		'hasAnyRegistrationData',
+		'readRegistrantRoster',
+		'readRegistrantStatusBreakdown',
+		'readRegistrationIntakeSeries',
+		'readRegistrationRequestBreakdown',
+		'readRegistrationSurfaceCounts',
+		'selectActiveElection',
+	],
+	'KeyholdersPanel.tsx': [],
 };
 
 test('live: no live panel reads a table it did not read before (officer imports pinned)', () => {
@@ -845,4 +871,74 @@ test('live: no live panel reads a table it did not read before (officer imports 
 		assert.ok(file in PINNED_OFFICER_IMPORTS, `${file} has no pinned import list`);
 		assert.deepEqual([...officerNamedImports(LIVE_STRIPPED[file])].sort(), PINNED_OFFICER_IMPORTS[file], `${file}'s officer imports changed`);
 	}
+});
+
+// --- Live panels: Registrations and Keyholders --------------------------------
+
+test('live: Registrations imports the action note alone on its own line and shows it under the requests heading, short with requests and long when empty', () => {
+	const raw = LIVE_RAW['RegistrationsPanel.tsx'];
+	assert.equal(exactNoteImportLines(raw), 1, 'expected exactly one exact note import line');
+	assert.doesNotMatch(raw, NOTE_ALIAS_RE, 'the note must not be imported under an alias');
+	const source = LIVE_STRIPPED['RegistrationsPanel.tsx'];
+	const shortNote = `<${NOTE_IDENT} variant="short" />`;
+	const longNote = `<${NOTE_IDENT} variant="long" />`;
+	assert.ok(source.includes(shortNote) && source.includes(longNote), 'expected both note forms');
+	const requestChunk = source.split('<section className="eo-section">').find((c) => c.includes('<StackedBarSeries'));
+	assert.ok(requestChunk, 'no section mounts StackedBarSeries');
+	const headingIdx = requestChunk.indexOf("t('panels.registrations.requestsHeading')");
+	assert.ok(headingIdx !== -1, 'the requests heading is not in the request section');
+	assert.ok(requestChunk.indexOf(shortNote) > headingIdx, 'the short note must follow the requests heading');
+	assert.ok(requestChunk.indexOf(longNote) > headingIdx, 'the long note must follow the requests heading');
+	assert.match(requestChunk, new RegExp(`requestBreakdown\\.length > 0 \\? <${NOTE_IDENT} variant="short" \\/> : <${NOTE_IDENT} variant="long" \\/>`));
+});
+
+test('live: chart view marks a changed chart at its section heading, its intake wrapper or its meter wrapper', () => {
+	const registrations = LIVE_STRIPPED['RegistrationsPanel.tsx'];
+	for (const call of ['sectionMarkClass(marks, statusKeys)', 'sectionMarkClass(marks, requestKeys)', 'sectionMarkClass(marks, intakeKeys)']) {
+		assert.ok(registrations.includes(call), `RegistrationsPanel.tsx does not compute ${call}`);
+	}
+	assert.match(registrations, /className=\{withMark\('eo-heading', statusHeadingMark\)\}/);
+	assert.match(registrations, /className=\{withMark\('eo-heading', requestHeadingMark\)\}/);
+	assert.ok(LIVE_STRIPPED['KeyholdersPanel.tsx'].includes("withMark('aa-meter', sectionMarkClass(marks, "), 'the Keyholders meter wrapper carries no mark');
+	for (const file of ['RegistrationsPanel.tsx', 'KeyholdersPanel.tsx']) {
+		assert.doesNotMatch(LIVE_STRIPPED[file], /sectionMarkClass[\s\S]{0,200}\.filter\(/, `${file}'s section mark must use .find(, never .filter(`);
+	}
+});
+
+// Mirrors the Authority Administration scan over this one file, so this
+// plan's own gate fails before that scan would. Tokens are assembled.
+const KH_STATE_RE = new RegExp(['read' + '-only', 'read' + 'only', 'writ' + 'able', 'dis' + 'abled'].join('|'), 'i');
+const KH_NOTE_IMPORT_RE = new RegExp(`^\\s*import\\s*\\{\\s*${NOTE_IDENT}\\s*\\}\\s*from\\s*['"](?:\\.\\./)+live/${NOTE_IDENT}(?:\\.js)?['"];?\\s*$`, 'gm');
+const KH_KEY_MATERIAL_RE = new RegExp(['User' + 'Key', 'Pub' + 'Key', 'Signer' + 'Key', 'Sig' + 'nature'].join('|'), 'i');
+
+test('live: Keyholders stays clean against the Authority Administration scan (state words, key material, tier prose, one fetch)', () => {
+	const raw = LIVE_RAW['KeyholdersPanel.tsx'];
+	const exempted = raw.replace(KH_NOTE_IMPORT_RE, '').replace(new RegExp(`\\b${NOTE_IDENT}\\b`, 'g'), '');
+	assert.doesNotMatch(exempted, KH_STATE_RE, 'KeyholdersPanel.tsx names a banned panel-state word, comments included');
+	const source = LIVE_STRIPPED['KeyholdersPanel.tsx'];
+	assert.doesNotMatch(source, KH_KEY_MATERIAL_RE, 'KeyholdersPanel.tsx names key material');
+	assert.doesNotMatch(source, /\btier\b/i, 'KeyholdersPanel.tsx restates the tier as prose');
+	assert.equal((source.match(/\bfetchKeyholders\(/g) ?? []).length, 1, 'KeyholdersPanel.tsx must call fetchKeyholders exactly once');
+});
+
+test('positive control: the Keyholders hygiene matchers fire on planted fixtures', () => {
+	assert.match('const rows: ' + 'Read' + 'onlyArray<X> = [];', KH_STATE_RE);
+	assert.match('row.' + 'Sig' + 'nature', KH_KEY_MATERIAL_RE);
+	assert.match('a tier 2 panel', /\btier\b/i);
+});
+
+test('live: Registrations and Keyholders read no table they did not read before', () => {
+	assert.deepEqual([...officerNamedImports(LIVE_STRIPPED['RegistrationsPanel.tsx'])].sort(), [
+		'hasAnyRegistrationData',
+		'readRegistrantRoster',
+		'readRegistrantStatusBreakdown',
+		'readRegistrationIntakeSeries',
+		'readRegistrationRequestBreakdown',
+		'readRegistrationSurfaceCounts',
+		'selectActiveElection',
+	]);
+	const keyholders = LIVE_STRIPPED['KeyholdersPanel.tsx'];
+	assert.deepEqual(officerNamedImports(keyholders), [], 'KeyholdersPanel.tsx must not import the officer read surface');
+	const queryImports = [...keyholders.matchAll(/import\s*\{([^}]*)\}\s*from\s*['"]\.\/authority-admin-queries\.js['"]/g)].map((m) => m[1].trim());
+	assert.deepEqual(queryImports, ['fetchKeyholders'], 'KeyholdersPanel.tsx must import fetchKeyholders alone from its query module');
 });
