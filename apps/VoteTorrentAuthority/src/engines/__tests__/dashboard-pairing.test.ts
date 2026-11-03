@@ -10,6 +10,8 @@
  * device only.
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as fs from 'fs';
+import * as path from 'path';
 
 jest.mock(
 	'@serfab/cadre-core',
@@ -61,9 +63,15 @@ import {
 	decodePairingCode,
 	PAIR_MINT_REFUSAL_CODES,
 	PAIR_MINT_WINDOW_MS,
+	PAIRING_QR_BYTE_BUDGET,
+	pairingStatementDigest,
+	encodeNetworkJoinCode,
+	encodePairingCode,
+	verifyPairingStatement,
 } from '@votetorrent/vote-engine/rn';
 import type { PairMintMintRequest, PairMintRefusalCode, PairMintReply } from '@votetorrent/vote-engine/rn';
 import type { NetworkJoinAnchor } from '@votetorrent/vote-core';
+import { createTestNetwork, makeTestSignCallback } from '@votetorrent/vote-engine/test/fixtures/test-context';
 import type { CadreInvitation } from '@serfab/cadre-core';
 import {
 	loadPairingCapabilityState,
@@ -80,7 +88,9 @@ import {
 	type ReadPairingAnchor,
 	type RequestPairingCodeDeps,
 } from '../dashboard-pairing';
-import { readPairedBrowsers } from '../paired-browsers-store';
+import { PAIRED_BROWSERS_KEY, readPairedBrowsers } from '../paired-browsers-store';
+import { captureConsole, expectNoSecretInConsole } from '../__fixtures__/console-leak';
+import { nonLiteralConsoleFirstArgs } from '../../screens/__fixtures__/log-content-scan';
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const codec = require('@serfab/cadre-core') as {
@@ -645,3 +655,205 @@ describe('requestPairingCode flows', () => {
 		expect(decodePairingCode(r.code).statement.expiresAt).toBe(r.expiresAt);
 	});
 });
+
+// ---------------------------------------------------------------------------------------------
+
+describe('real database (D-26)', () => {
+	async function realSetup() {
+		const net = await createTestNetwork();
+		const joinAnchor = await net.networksEngine.getJoinAnchor(net.ref.hash);
+		const readAnchor: ReadPairingAnchor = async () => {
+			const a = await net.networksEngine.getJoinAnchor(net.ref.hash);
+			return { ok: true, anchor: { networkHash: a.networkHash, name: a.name, genesis: a.genesis, digest: a.digest } };
+		};
+		const keyPub = net.user.activeKeys[0]!.key;
+		return { net, joinAnchor, readAnchor, keyPub };
+	}
+
+	it('E2E-1 the assembled code verifies under the schema verifier and carries the anchor and 4 members', async () => {
+		const { net, joinAnchor, readAnchor, keyPub } = await realSetup();
+		const founding = await net.networksEngine.getFoundingAnchor(net.ref.hash, { userId: net.user.id, signerKey: keyPub });
+		const { fingerprint: _f1, ...joinNoFp } = joinAnchor;
+		const { fingerprint: _f2, ...foundingNoFp } = founding;
+		expect(joinNoFp).toEqual(foundingNoFp);
+
+		const real = makeTestSignCallback(net.user);
+		const seen: Uint8Array[] = [];
+		const signer = jest.fn(async (d: Uint8Array) => {
+			seen.push(d);
+			return real(d);
+		});
+		const localMint = jest.fn(async () => mintedReply());
+		const r = await requestPairingCode({
+			node: fakeNode(),
+			db: net.ctx.db as never,
+			signer,
+			networkHash: net.ref.hash,
+			userId: net.user.id,
+			keyPub,
+			readAnchor,
+			localMint,
+		});
+		const code = okCode(r);
+		expect(signer).toHaveBeenCalledTimes(1);
+		const { statement, joinCode } = decodePairingCode(code);
+		const expectedDigest = await pairingStatementDigest(net.ctx.db as never, {
+			networkHash: net.ref.hash,
+			userId: net.user.id,
+			nonce: statement.nonce,
+			expiresAt: statement.expiresAt,
+			requesterPeerId: SELF_PEER,
+		});
+		expect(Array.from(seen[0])).toEqual(Array.from(expectedDigest));
+		const nowCanonical = new Date().toISOString().slice(0, 19);
+		await expect(
+			verifyPairingStatement(net.ctx.db as never, { networkHash: net.ref.hash, statement, nowCanonical, checkExpiry: true }),
+		).resolves.toEqual({ ok: true });
+		const inner = decodeNetworkJoinCode(joinCode);
+		if (!inner.ok) throw new Error('inner join code does not decode');
+		expect({ networkHash: inner.code.networkHash, name: inner.code.name, genesis: inner.code.genesis, digest: inner.code.digest }).toEqual(joinNoFp);
+		expect(codec.decodeCadreInvitation(inner.code.invitation).members).toHaveLength(4);
+		expect(inner.fingerprint).toBe(joinAnchor.fingerprint);
+	});
+
+	it('E2E-2 a statement with another requesterPeerId does not verify (R-A binding)', async () => {
+		const { net, readAnchor, keyPub } = await realSetup();
+		const code = okCode(
+			await requestPairingCode({
+				node: fakeNode(),
+				db: net.ctx.db as never,
+				signer: makeTestSignCallback(net.user),
+				networkHash: net.ref.hash,
+				userId: net.user.id,
+				keyPub,
+				readAnchor,
+				localMint: async () => mintedReply(),
+			}),
+		);
+		const { statement } = decodePairingCode(code);
+		const nowCanonical = new Date().toISOString().slice(0, 19);
+		await expect(
+			verifyPairingStatement(net.ctx.db as never, {
+				networkHash: net.ref.hash,
+				statement: { ...statement, requesterPeerId: OWNER_PEER },
+				nowCanonical,
+				checkExpiry: true,
+			}),
+		).resolves.toEqual({ ok: false, reason: 'bad-signature' });
+		// Control: the unchanged statement verifies.
+		await expect(
+			verifyPairingStatement(net.ctx.db as never, { networkHash: net.ref.hash, statement, nowCanonical, checkExpiry: true }),
+		).resolves.toEqual({ ok: true });
+	});
+
+	it('E2E-3 an anchor-port failure is build-failed with no prompt, no mint and nothing stored', async () => {
+		const { net, readAnchor, keyPub } = await realSetup();
+		const run = async (port: ReadPairingAnchor) => {
+			await AsyncStorage.removeItem(PAIRED_BROWSERS_KEY);
+			const signer = jest.fn(makeTestSignCallback(net.user));
+			const localMint = jest.fn(async () => mintedReply());
+			const r = await requestPairingCode({
+				node: fakeNode(),
+				db: net.ctx.db as never,
+				signer,
+				networkHash: net.ref.hash,
+				userId: net.user.id,
+				keyPub,
+				readAnchor: port,
+				localMint,
+			});
+			return { r, signer, localMint, stored: await AsyncStorage.getItem(PAIRED_BROWSERS_KEY) };
+		};
+		const a = await run(async () => {
+			throw Object.assign(new Error('genesis'), { code: 'genesis-unreadable' });
+		});
+		expect(a.r).toEqual({ ok: false, reason: 'build-failed', anchor: 'unreadable' });
+		const b = await run(async () => ({ ok: false, anchor: 'not-open' }));
+		expect(b.r).toEqual({ ok: false, reason: 'build-failed', anchor: 'not-open' });
+		for (const x of [a, b]) {
+			expect(x.signer).not.toHaveBeenCalled();
+			expect(x.localMint).not.toHaveBeenCalled();
+			expect('code' in x.r).toBe(false);
+			expect(x.stored).toBeNull();
+		}
+		// Control: the real port reaches exactly one signer call.
+		const c = await run(readAnchor);
+		expect(c.r.ok).toBe(true);
+		expect(c.signer).toHaveBeenCalledTimes(1);
+	});
+
+	it('the capability officer check uses the real mint-time rule', async () => {
+		const { net } = await realSetup();
+		const yes = await loadPairingCapabilityState({ node: null, db: net.ctx.db, networkHash: net.ref.hash, userId: net.user.id });
+		expect(yes.isCurrentOfficer).toBe(true);
+		const no = await loadPairingCapabilityState({ node: null, db: net.ctx.db, networkHash: net.ref.hash, userId: 'not-an-officer' });
+		expect(no.isCurrentOfficer).toBe(false);
+	});
+
+	it('QR-1 the worst-case code fits the QR budget only because of the trim', async () => {
+		const keyPub = '04' + 'ab'.repeat(64); // 130 hex chars
+		const derSig = '30' + 'cd'.repeat(71); // 144 hex chars
+		const userId = '6f9619ff-8b86-4d01-b42d-00c04fc964ff';
+		const peer = '12D3KooWLongestPeerIdLongestPeerIdLongestPeerIdLonge';
+		expect(peer).toHaveLength(52);
+		const signer = countingSigner({ userId, keyPub, sig: () => derSig });
+		const node = fakeNode({ peerId: { toString: () => peer } });
+		const r = await requestPairingCode(args({ node, signer, userId, keyPub, localMint: async () => mintedReply() }));
+		const code = okCode(r);
+		expect(code.length).toBeLessThanOrEqual(PAIRING_QR_BYTE_BUDGET);
+		expect(code.length).toBe(QR1_MEASURED_LENGTH);
+		// The same statement with the untrimmed (6-member) invitation is longer.
+		const { statement } = decodePairingCode(code);
+		const untrimmed = encodePairingCode({
+			statement,
+			joinCode: encodeNetworkJoinCode({ v: 2, invitation: mintedReply().invitation, ...FIXTURE_ANCHOR }),
+		});
+		expect(untrimmed.length).toBeGreaterThan(code.length);
+	});
+
+	it('LEAK-1 no bearer text in console, storage or errors', async () => {
+		const reply = mintedReply();
+		const privateKey = singleUse().invitePrivateKey;
+		const results: PairingRequestResult[] = [];
+		const capture = captureConsole();
+		let code = '';
+		try {
+			const r = await requestPairingCode(args({ localMint: async () => reply }));
+			code = okCode(r);
+			results.push(r);
+			// Failure paths after a mint and before one.
+			results.push(await requestPairingCode(args({ localMint: async () => reply, deps: baseDeps({ recordPairedBrowser: async () => { throw new Error('disk'); } }) })));
+			results.push(await requestPairingCode(args({ localMint: async () => ({ ...reply, inviteKey: 'x' }) })));
+			results.push(await requestPairingCode(args({ localMint: async () => mintedReply(singleUse({ top: { members: [] } })) })));
+			results.push(await requestPairingCode(args({ readAnchor: async () => { throw new Error('x'); } })));
+			results.push(await requestPairingCode(args({ localMint: async () => { throw new Error(reply.invitation); } })));
+			results.push(
+				await requestPairingCode(
+					args({
+						localMint: undefined,
+						deps: baseDeps({ request: (async () => { throw Object.assign(new Error(reply.invitation), { requestSent: true }); }) as never }),
+					}),
+				),
+			);
+			expectNoSecretInConsole(capture, [code, reply.invitation, privateKey]);
+			expect(capture.calls()).toHaveLength(0);
+		} finally {
+			capture.restore();
+		}
+		const stored = (await AsyncStorage.getItem(PAIRED_BROWSERS_KEY)) ?? '';
+		const failures = JSON.stringify(results.slice(1));
+		for (const secret of [code, reply.invitation, privateKey]) {
+			for (let o = 0; o + 16 <= secret.length; o++) {
+				const w = secret.slice(o, o + 16);
+				if (stored.includes(w) || failures.includes(w)) throw new Error(`LEAK-1: a 16-char window at offset ${o} leaked`);
+			}
+		}
+		for (const file of ['dashboard-pairing.ts', 'pair-mint-client.ts', 'paired-browsers-store.ts']) {
+			const src = fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
+			expect(nonLiteralConsoleFirstArgs(src)).toEqual([]);
+		}
+	});
+});
+
+/** Measured once from the deterministic worst-case inputs above (fixture member lengths are fixed). */
+const QR1_MEASURED_LENGTH = 2723;
