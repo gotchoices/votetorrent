@@ -11,11 +11,31 @@
  * panel states this frame can produce are visible and denied. See
  * 50-06-PLAN.md's inherited-spec reconciliation for the "why" behind that
  * omission.
+ *
+ * Live marks: the frame hosts the per-panel mark sink (`PanelMarkContext`)
+ * that a panel's `useChangeMarks` reports to. When a pass deletes rows or
+ * changes more rows than the cap, the frame marks its own header (same tint
+ * and bar as a row) and puts the word "updated" in the heading's accessible
+ * name. It forwards one sentence per pass ("{n} items updated in {panel}")
+ * to the grid's single live region. The sink sits inside the visible-body
+ * guard below, so a denied panel can never produce a mark or announcement.
  */
-import { useState, type ReactNode } from 'react';
+import { useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { Capability } from '../../auth/capabilities.js';
 import type { GateResult } from '../../auth/gate.js';
 import { t } from '@votetorrent/ui-web';
+import { MARK_LIFETIME_MS } from '../../live/change-marks.js';
+import {
+	announceText,
+	ChangeMarkWord,
+	MarkAnnouncerContext,
+	markClassName,
+	mergePassMarks,
+	PanelMarkContext,
+	useMarkLifetime,
+	type PanelMarkSink,
+	type PassMarks,
+} from '../../live/useChangeMarks.js';
 import { ChartViewProvider, readStoredPanelView, writeStoredPanelView, type PanelView } from './ChartViewContext.js';
 import './panels.css';
 
@@ -41,14 +61,50 @@ export function PanelFrame({ capability, evaluation, children }: PanelFrameProps
 		writeStoredPanelView(capability.id, 'grid');
 	}
 
+	const panelTitle = t(capability.titleKey);
+	const announcer = useContext(MarkAnnouncerContext);
+	const [passMarks, setPassMarks] = useState<PassMarks | null>(null);
+	const [headerToken, setHeaderToken] = useState(0);
+	const report = useCallback((post: PassMarks) => setPassMarks((prev) => mergePassMarks(prev, post)), []);
+	const sink = useMemo<PanelMarkSink>(() => ({ panelTitle, report }), [panelTitle, report]);
+
+	// One effect per merged pass: mark the header when the pass asked for it,
+	// post the panel's sentence to the grid's live region, and forget the
+	// pass after the mark lifetime so a later pass with an equal version
+	// starts a fresh count instead of adding to this one.
+	useEffect(() => {
+		if (passMarks === null) return undefined;
+		if (passMarks.headerMarked) setHeaderToken((n) => n + 1);
+		const text = announceText(passMarks.count, panelTitle);
+		if (text !== null) announcer.announce(capability.id, text, passMarks.version);
+		const timer = setTimeout(() => setPassMarks(null), MARK_LIFETIME_MS);
+		return () => clearTimeout(timer);
+	}, [passMarks]);
+
+	const headerPhase = useMarkLifetime(headerToken);
+	const headerMarked = headerPhase !== 'none';
+	const headerContent = (
+		<>
+			<span className="panel-icon" aria-hidden="true">
+				{capability.icon}
+			</span>
+			<h3 className="panel-title">
+				{panelTitle}
+				{headerMarked ? <ChangeMarkWord /> : null}
+			</h3>
+		</>
+	);
+
 	return (
 		<section className={`panel${evaluation.visible ? '' : ' panel--denied'}`}>
-			<header className="panel-header">
-				<span className="panel-icon" aria-hidden="true">
-					{capability.icon}
-				</span>
-				<h3 className="panel-title">{t(capability.titleKey)}</h3>
-			</header>
+			{/* Same element type in both branches, so React keeps the header
+			    node and only its class changes; the unmarked branch keeps the
+			    static class literal the class-coverage check reads. */}
+			{headerMarked ? (
+				<header className={'panel-header ' + markClassName(headerPhase)}>{headerContent}</header>
+			) : (
+				<header className="panel-header">{headerContent}</header>
+			)}
 			<div className="panel-pills">
 				<span className="pill pill-scope" title={capability.schemaName}>
 					{capability.scope}
@@ -109,11 +165,16 @@ export function PanelFrame({ capability, evaluation, children }: PanelFrameProps
 			 * rendered AT ALL, not merely hidden with CSS. Hiding a rendered
 			 * body would leave the officer's data in the DOM — an
 			 * information-disclosure failure this frame exists to prevent. The
-			 * view-state provider goes INSIDE this guard, never around it.
+			 * view-state provider goes INSIDE this guard, never around it, and
+			 * so does the mark sink: a denied panel mounts no body, so no
+			 * change-mark hook runs for it and it can never mark a row, mark
+			 * its header or announce anything.
 			 */}
 			{evaluation.visible ? (
 				<div className="panel-body">
-					<ChartViewProvider view={view}>{children}</ChartViewProvider>
+					<PanelMarkContext.Provider value={sink}>
+						<ChartViewProvider view={view}>{children}</ChartViewProvider>
+					</PanelMarkContext.Provider>
 				</div>
 			) : null}
 		</section>

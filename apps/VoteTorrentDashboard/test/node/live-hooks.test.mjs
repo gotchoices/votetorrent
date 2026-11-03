@@ -554,3 +554,55 @@ test('panels.css: no hex colour literal and no border-left bar', () => {
 	assert.doesNotMatch(PANELS_CSS, /#[0-9a-fA-F]{3,8}\b/);
 	assert.doesNotMatch(PANELS_CSS, /border-left/);
 });
+
+// --- threading: PanelGrid, PanelFrame, types.ts ---------------------------------------
+
+const GRID_SRC = stripComments(readSrc('screens', 'PanelGrid.tsx'));
+const FRAME_SRC = stripComments(readSrc('screens', 'panels', 'PanelFrame.tsx'));
+const TYPES_RAW = readSrc('screens', 'panels', 'types.ts');
+const PROVIDER_RE = /DataVersionContext\.Provider value=\{dataVersion \?\? DEFAULT_DATA_VERSION\}/;
+
+test('positive control: the pass-through provider matcher hits the direct form and misses a state-seeded one', () => {
+	assert.match('<DataVersionContext.Provider value={dataVersion ?? DEFAULT_DATA_VERSION}>', PROVIDER_RE);
+	assert.doesNotMatch('<DataVersionContext.Provider value={state}>', PROVIDER_RE);
+});
+
+test('PanelGrid.tsx passes dataVersion straight into the provider and provides the mark announcer', () => {
+	assert.match(GRID_SRC, PROVIDER_RE);
+	assert.match(GRID_SRC, /MarkAnnouncerContext\.Provider/);
+	assert.doesNotMatch(GRID_SRC, /useState(?:<[^>]*>)?\([^)]*dataVersion/, 'no state may be seeded from dataVersion');
+	assert.doesNotMatch(GRID_SRC, /useMemo\([^]*?dataVersion[^]*?\]\)/, 'no memo may be derived from dataVersion');
+});
+
+test('PanelGrid.tsx renders exactly one polite live region, after the grid, with no status role', () => {
+	const live = [...GRID_SRC.matchAll(/aria-live="polite"/g)];
+	assert.equal(live.length, 1, 'expected exactly one polite live region');
+	assert.match(GRID_SRC, /<div className="change-mark-live-region" aria-live="polite" aria-atomic="true">/);
+	assert.doesNotMatch(GRID_SRC, /role="status"/);
+	const gridAt = GRID_SRC.indexOf('className="panel-grid"');
+	const regionAt = GRID_SRC.indexOf('className="change-mark-live-region"');
+	assert.ok(gridAt >= 0 && regionAt > gridAt, 'the live region must come after the panel grid, never inside it as a grid item');
+});
+
+test('PanelGrid.tsx still accepts snapshotInstant but forwards it to no panel', () => {
+	assert.match(GRID_SRC, /snapshotInstant\?: string \| null/);
+	const componentJsx = GRID_SRC.match(/<Component\b[^>]*\/>/g) ?? [];
+	assert.equal(componentJsx.length, 1, 'expected the one registry component element');
+	assert.doesNotMatch(componentJsx[0], /snapshotInstant/);
+	assert.doesNotMatch(GRID_SRC, /snapshotInstant=/);
+});
+
+test('PanelFrame.tsx provides the mark sink inside the visible-body guard and renders the header mark', () => {
+	const providerAt = FRAME_SRC.indexOf('PanelMarkContext.Provider');
+	assert.ok(providerAt >= 0, 'PanelMarkContext.Provider is missing');
+	assert.ok(providerAt > FRAME_SRC.lastIndexOf('evaluation.visible ?'), 'the sink must sit inside the body guard');
+	assert.ok(providerAt > FRAME_SRC.indexOf('className="panel-body"'), 'the sink must sit inside the panel body');
+	for (const needle of ['useMarkLifetime(', 'ChangeMarkWord', 'MarkAnnouncerContext', 'ChartViewProvider', 'className="panel-header"']) {
+		assert.ok(FRAME_SRC.includes(needle), `PanelFrame.tsx is missing ${needle}`);
+	}
+});
+
+test('types.ts keeps snapshotInstant, now marked deprecated', () => {
+	assert.ok(TYPES_RAW.includes('snapshotInstant?: string | null'));
+	assert.ok(TYPES_RAW.includes('@deprecated'));
+});

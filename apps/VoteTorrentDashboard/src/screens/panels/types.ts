@@ -17,6 +17,12 @@
  * not how a Database handle was constructed. `db` is nullable because a
  * panel can mount before a network is bootstrapped; a panel that receives
  * `null` renders its own empty state.
+ *
+ * Live panels get their live inputs from `src/live/`, never through new
+ * props here, so this contract (no `evaluation` in panel props) stays as it
+ * is: they read `DataVersionContext` and re-read their rows when its
+ * `version` changes, mark changed rows and figures through
+ * `useChangeMarks`, and show pending items with `ReadOnlyNote`.
  */
 import type { FC } from 'react';
 import type { Database } from '@quereus/quereus';
@@ -33,6 +39,11 @@ export interface PanelProps {
 	 * instant is available yet, and a consumer that cares (only 50-10's
 	 * Elections lifecycle pill does) falls back to the current instant.
 	 * Eight of the nine panels ignore this prop entirely.
+	 *
+	 * @deprecated `PanelGrid` no longer forwards it, so panels receive
+	 * nothing here and the Elections pill compares against the current time;
+	 * the pill moves to `useNow`. Kept until the Elections panel stops
+	 * reading it.
 	 */
 	snapshotInstant?: string | null;
 }
