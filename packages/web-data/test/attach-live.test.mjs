@@ -102,7 +102,7 @@ test('A1: create true on an absent hash initializes the store, declares the revo
 	} finally {
 		await closeNetworkDb(db);
 		if (descriptor) Object.defineProperty(globalThis, 'localStorage', descriptor);
-		else delete globalThis.localStorage;
+		else Reflect.deleteProperty(globalThis, 'localStorage');
 	}
 });
 
@@ -189,7 +189,7 @@ test('A6: create true on an initialized store adopts its rows unchanged, twice',
 test('A7: with no IndexedDB the call rejects LiveStoreUnavailableError', async () => {
 	const saved = globalThis.indexedDB;
 	try {
-		globalThis.indexedDB = undefined;
+		/** @type {any} */ (globalThis).indexedDB = undefined;
 		await assert.rejects(attachLiveDb(H_SEEDED, { create: false }), (err) => {
 			assert.ok(err instanceof LiveStoreUnavailableError);
 			assert.equal(err.name, 'LiveStoreUnavailableError');
