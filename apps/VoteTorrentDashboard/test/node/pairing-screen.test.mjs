@@ -265,7 +265,8 @@ test('R1 idle with an empty field: the textarea attributes, a disabled CTA, the 
 		assert.ok(areaTag.includes(attr), `textarea has ${attr}`);
 	}
 	assert.match(html, /<button type="submit" class="pr-cta" disabled="">Pair this browser<\/button>/);
-	assert.ok(has(html, 'pairing.scanCta'));
+	// The Scan QR code button is commented out for this release (paste is the pairing path).
+	assert.ok(!has(html, 'pairing.scanCta'), 'no Scan QR code button');
 	assert.ok(has(html, 'pairing.emptyHeading') && has(html, 'pairing.emptyBody'));
 	assert.ok(has(html, 'pairing.title') && has(html, 'pairing.intro') && has(html, 'pairing.fieldLabel') && has(html, 'pairing.fieldHelp'));
 	const withCode = render({ code: 'vtpair1.abc' });

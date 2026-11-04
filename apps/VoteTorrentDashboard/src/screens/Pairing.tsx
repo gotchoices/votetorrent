@@ -562,9 +562,11 @@ export function PairingStateView(props: PairingStateViewProps): ReactElement {
 							<button type="submit" className="pr-cta" disabled={fieldValue.trim() === ''}>
 								{t('pairing.cta')}
 							</button>
+							{/* Hidden for this release (QR scanning cannot read real pairing codes from a webcam; paste is the pairing path).
 							<button type="button" className="pr-button" onClick={props.onScan}>
 								{t('pairing.scanCta')}
 							</button>
+							*/}
 						</div>
 					</form>
 				) : null}
@@ -908,6 +910,7 @@ export function Pairing(props: PairingProps): ReactElement {
 				onCta={onCta}
 				onDismissNotice={props.onDismissNotice}
 			/>
+			{/* Hidden for this release, with the Scan QR code button above.
 			<QrScanner
 				open={scannerOpen}
 				onFound={(text) => {
@@ -920,6 +923,7 @@ export function Pairing(props: PairingProps): ReactElement {
 					focusFieldRef.current = true;
 				}}
 			/>
+			*/}
 			{swapRequest !== null ? <SwapDialog request={swapRequest} onAnswer={answerSwap} /> : null}
 		</>
 	);
