@@ -91,8 +91,8 @@ const T1_RUNGS = [
 	'g5-one-mark-4s',
 	'g5-reduced-motion-static-mark',
 	'g6-catching-up-until-first-pass',
-	'g10-scanner-close-ends-tracks',
-	'g10-scanner-esc-ends-tracks',
+	// 'g10-scanner-close-ends-tracks', // hidden with the Scan QR code button (Pairing.tsx); restore with it
+	// 'g10-scanner-esc-ends-tracks', // hidden with the Scan QR code button (Pairing.tsx); restore with it
 	'g8-copy-mounted-keys',
 ];
 const T2_RUNGS = [
@@ -105,7 +105,9 @@ const T2_RUNGS = [
 	'tabs-follower-rereads-and-marks',
 	'tabs-follower-promotes',
 ];
-const T3_RUNGS = ['qr-n177-integer-round-trip', 'qr-n177-resampled-round-trip', 'qr-control-damaged-frame-fails', 'g10-scanner-found-ends-tracks'];
+// const T3_RUNGS = ['qr-n177-integer-round-trip', 'qr-n177-resampled-round-trip', 'qr-control-damaged-frame-fails', 'g10-scanner-found-ends-tracks'];
+// Scan QR code is hidden for this release (Pairing.tsx): the scanner legs and the resampled QR rung are commented out; restore them with the button.
+const T3_RUNGS = ['qr-n177-integer-round-trip', 'qr-control-damaged-frame-fails'];
 
 /** @type {ReadonlyArray<string>} */
 export const RUNG_IDS = Object.freeze([...T1_RUNGS, ...T2_RUNGS, ...T3_RUNGS]);
@@ -118,15 +120,17 @@ export const LEG_RUNGS = Object.freeze({
 	pairing: Object.freeze(['g4-long-code-no-overflow', 'g4-code-never-leaves-the-field']),
 	marks: Object.freeze(['g5-no-marks-first-render', 'g5-one-mark-4s', 'g5-reduced-motion-static-mark']),
 	truth: Object.freeze(['g6-catching-up-until-first-pass']),
-	scanner: Object.freeze(['g10-scanner-close-ends-tracks', 'g10-scanner-esc-ends-tracks']),
+	// scanner: Object.freeze(['g10-scanner-close-ends-tracks', 'g10-scanner-esc-ends-tracks']), // hidden with the Scan QR code button (Pairing.tsx); restore with it
 	switch: Object.freeze(['g7-switch-no-live-carry-over', 'd19-old-stops-before-new-starts', 'd19-other-rows-not-syncing']),
 	offline: Object.freeze(['d15-offline-reload-opens-local-copy', 'd20-background-retry-and-reconnect']),
 	tabs: Object.freeze(['tabs-follower-not-live', 'tabs-follower-rereads-and-marks', 'tabs-follower-promotes']),
-	qr: Object.freeze(['qr-n177-integer-round-trip', 'qr-n177-resampled-round-trip', 'qr-control-damaged-frame-fails']),
-	found: Object.freeze(['g10-scanner-found-ends-tracks']),
+	// qr: Object.freeze(['qr-n177-integer-round-trip', 'qr-n177-resampled-round-trip', 'qr-control-damaged-frame-fails']), // hidden with the Scan QR code button (Pairing.tsx); restore with it
+	qr: Object.freeze(['qr-n177-integer-round-trip', 'qr-control-damaged-frame-fails']),
+	// found: Object.freeze(['g10-scanner-found-ends-tracks']), // hidden with the Scan QR code button (Pairing.tsx); restore with it
 	copy: Object.freeze(['g8-copy-mounted-keys']),
 });
-const LEG_ORDER = Object.freeze(['shell', 'chip', 'pairing', 'marks', 'truth', 'scanner', 'switch', 'offline', 'tabs', 'qr', 'found', 'copy']);
+// const LEG_ORDER = Object.freeze(['shell', 'chip', 'pairing', 'marks', 'truth', 'scanner', 'switch', 'offline', 'tabs', 'qr', 'found', 'copy']); // hidden with the Scan QR code button (Pairing.tsx); restore with it
+const LEG_ORDER = Object.freeze(['shell', 'chip', 'pairing', 'marks', 'truth', 'switch', 'offline', 'tabs', 'qr', 'copy']);
 
 /** @type {Array<{ id: string, passed: boolean, detail: string }>} */
 const rungs = [];
@@ -1540,9 +1544,10 @@ async function legQr(env) {
 		say(`integer frame: module ${integer.m} px, decoded ${integer.decoded}, ${integer.decodedLength} bytes`);
 		const vi = evaluateQrRoundTrip({ n, ...integer });
 		record('qr-n177-integer-round-trip', vi.passed, `${vi.detail}; module ${integer.m} px`);
-		const resampled = await decode('resampled');
-		const vr = evaluateQrRoundTrip({ n, ...resampled });
-		record('qr-n177-resampled-round-trip', vr.passed, vr.detail);
+		// Hidden with the Scan QR code button (Pairing.tsx); restore with it:
+		// const resampled = await decode('resampled');
+		// const vr = evaluateQrRoundTrip({ n, ...resampled });
+		// record('qr-n177-resampled-round-trip', vr.passed, vr.detail);
 		const damaged = await decode('damaged');
 		const vd = evaluateQrRoundTrip({ n, ...damaged });
 		record('qr-control-damaged-frame-fails', !vd.passed, vd.passed ? 'the damaged frame round-tripped (control inert)' : `the damaged frame did not round-trip: ${vd.detail}`);
