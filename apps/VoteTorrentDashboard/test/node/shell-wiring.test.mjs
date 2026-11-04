@@ -805,7 +805,7 @@ test('C12 retryWipeOnce: a double click runs ONE wipe and calls onWiped once; a 
 	assert.deepEqual(r.logs, [['live/shell-live:', 'MemberStorageBusyError']]);
 });
 
-/** The wipe-failed banner JSX: from its condition to the open-failure branch that follows it. */
+/** The wipe-failed banner JSX: from its condition to the open-failure branch that follows it. @param {string} code */
 function wipeFailedBanner(code) {
 	const start = code.indexOf('wipeFailedReason !== null ? (');
 	const end = code.indexOf(') : unpairing ? null', start);
@@ -813,6 +813,7 @@ function wipeFailedBanner(code) {
 }
 
 /** The body of a named function declaration in the shell (up to the next top-level-ish `\n\t}`). */
+/** @param {string} code @param {string} name */
 function functionBody(code, name) {
 	const start = code.indexOf(`function ${name}(`);
 	if (start === -1) return null;
@@ -855,11 +856,11 @@ const WIPE_FIXTURE_GOOD = [
 	') : unpairing ? null : null}</main>',
 ].join('\n');
 
-/** Every S11 matcher, as one function over a source text; returns the failed check names. */
+/** Every S11 matcher, as one function over a source text; returns the failed check names. @param {string} code */
 function wipeFailedChecks(code) {
 	/** @type {string[]} */
 	const failed = [];
-	const check = (name, ok) => {
+	const check = (/** @type {string} */ name, /** @type {boolean} */ ok) => {
 		if (!ok) failed.push(name);
 	};
 	const forgottenAt = code.indexOf('boot.onForgotten(');
