@@ -48,10 +48,13 @@
 	flex-wrap: wrap;
 }
 
+/* The identity block keeps a real basis, so a long authority name truncates
+ * with an ellipsis instead of collapsing to nothing beside the actions. */
 .sh-identity {
 	display: flex;
 	flex-direction: column;
 	gap: var(--space-xs);
+	flex: 1 1 240px;
 	min-width: 0;
 }
 
@@ -71,28 +74,17 @@
 	color: var(--muted);
 }
 
+/* The bar wraps at every width. The "Preview as" control and the advisory
+ * note are far wider than one row, so the actions wrap onto further lines
+ * INSIDE the bar, never past its edge (a one-row bar pushed the kebab off
+ * screen). The chip and Reconnect stay single-line through their own rules. */
 .sh-topbar-actions {
 	display: flex;
 	align-items: center;
 	gap: var(--space-sm);
 	flex-wrap: wrap;
-}
-
-/* At 901 px and up the bar is one row and the authority name truncates
- * first, so the status text and Reconnect are never clipped. */
-@media (min-width: 901px) {
-	.sh-topbar {
-		flex-wrap: nowrap;
-	}
-
-	.sh-identity {
-		flex: 1 1 auto;
-	}
-
-	.sh-topbar-actions {
-		flex: 0 0 auto;
-		flex-wrap: nowrap;
-	}
+	min-width: 0;
+	max-width: 100%;
 }
 
 /* Header status ---------------------------------------------------------- */

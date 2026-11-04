@@ -224,10 +224,6 @@ function Tree({
 				db={db}
 				revealDenied={reveal}
 				onToggleReveal={() => {}}
-				// Any single phase would do as the fallback -- assertion D proves
-				// the rendered panel set is phase-invariant -- and `PHASE_IDS[0]`
-				// is chosen over a re-typed id so the choice cannot go stale.
-				snapshotInstant={SEED_PHASE_INSTANTS[phaseId] ?? SEED_PHASE_INSTANTS[PHASE_IDS[0]]}
 			/>
 		</PreviewAsProvider>
 	);

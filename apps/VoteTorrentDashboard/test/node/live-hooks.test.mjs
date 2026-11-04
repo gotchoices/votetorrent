@@ -584,8 +584,14 @@ test('PanelGrid.tsx renders exactly one polite live region, after the grid, with
 	assert.ok(gridAt >= 0 && regionAt > gridAt, 'the live region must come after the panel grid, never inside it as a grid item');
 });
 
-test('PanelGrid.tsx still accepts snapshotInstant but forwards it to no panel', () => {
-	assert.match(GRID_SRC, /snapshotInstant\?: string \| null/);
+const OLD_INSTANT_PROP_RE = /snapshotInstant\?:/;
+
+test('positive control: the old-prop matcher hits a synthetic snapshotInstant prop declaration', () => {
+	assert.match('\tsnapshotInstant?: string | null;', OLD_INSTANT_PROP_RE);
+});
+
+test('PanelGrid.tsx no longer declares snapshotInstant and forwards nothing of it to any panel', () => {
+	assert.doesNotMatch(GRID_SRC, OLD_INSTANT_PROP_RE);
 	const componentJsx = GRID_SRC.match(/<Component\b[^>]*\/>/g) ?? [];
 	assert.equal(componentJsx.length, 1, 'expected the one registry component element');
 	assert.doesNotMatch(componentJsx[0], /snapshotInstant/);

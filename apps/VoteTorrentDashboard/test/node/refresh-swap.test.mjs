@@ -14,13 +14,13 @@
  * each.
  *
  * The deriveOfficerUserIdFromEnvelope and classifyRedemption classifier cases moved to `officer-swap.test.mjs`.
+ * The shell's wiring is now pinned by `shell-wiring.test.mjs` (the live shell reads none of these modules).
  */
 import 'fake-indexeddb/auto';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { dashboardSrc } from '../../../../scripts/lib/source-paths.mjs';
-import { stripComments } from '../../../../scripts/lib/strip-comments.mjs';
 import { buildSnapshot } from '@votetorrent/vote-engine/bootstrap';
 import {
 	deleteNetworkDb,
@@ -852,85 +852,4 @@ test('inertness control: the per-hop forwarding matchers do not accept a hop tha
 		'await deleteNetworkDb(envelope.networkHash, { storage });',
 		/deleteNetworkDb\(envelope\.networkHash, \{ storage, db: handoverDb \}\)/,
 	);
-});
-
-// ---------------------------------------------------------------------------
-// WR-10 -- DashboardShell.tsx source-level wiring. `node --test` cannot
-// import `.tsx`; the same idiom `shell-wiring.test.mjs` established. Every
-// matcher here is paired with an inertness control.
-// ---------------------------------------------------------------------------
-
-const SHELL_TSX = readFileSync(dashboardSrc('screens', 'DashboardShell.tsx'), 'utf8');
-const SHELL_CODE = stripComments(SHELL_TSX);
-
-test('DashboardShell: accepts pendingSwapContext and onSwapContextConsumed, both optional', () => {
-	assert.match(SHELL_CODE, /pendingSwapContext\?: AlreadyBootstrappedContext \| null;/);
-	assert.match(SHELL_CODE, /onSwapContextConsumed\?: \(\) => void;/);
-	assert.match(SHELL_CODE, /pendingSwapContext = null,/);
-});
-
-test('inertness control: the optional-prop matcher does not accept a required prop', () => {
-	assert.doesNotMatch('pendingSwapContext: AlreadyBootstrappedContext | null;', /pendingSwapContext\?: AlreadyBootstrappedContext \| null;/);
-});
-
-test("DashboardShell: an 'officer-swap' classification populates pendingSwap (raises the existing dialog); a 'same-officer-refresh' classification calls performOfficerSwap directly, with no dialog", () => {
-	const effectBody = SHELL_CODE.slice(
-		SHELL_CODE.indexOf('if (!pendingSwapContext) return undefined;'),
-		SHELL_CODE.indexOf('if (!activeNetwork) {'),
-	);
-	assert.ok(effectBody.length > 0, 'could not locate the swap-context classification effect');
-
-	const officerSwapCase = effectBody.slice(effectBody.indexOf("case 'officer-swap':"), effectBody.indexOf("case 'same-officer-refresh':"));
-	assert.match(officerSwapCase, /setPendingSwap\(\{/);
-	assert.doesNotMatch(officerSwapCase, /await performOfficerSwap\(/, "officer-swap must raise the dialog, not swap directly");
-
-	const sameOfficerCase = effectBody.slice(effectBody.indexOf("case 'same-officer-refresh':"), effectBody.indexOf("case 'officer-indeterminate':"));
-	// The call is reached through withNetworkDbLifecycleLock (CR-04, 50-22),
-	// so this matches performOfficerSwap( itself rather than an
-	// immediately-preceding await.
-	assert.match(sameOfficerCase, /performOfficerSwap\(\{/);
-	assert.doesNotMatch(sameOfficerCase, /setPendingSwap\(/, 'same-officer-refresh must not raise the confirm dialog');
-});
-
-test('inertness control: the officer-swap-no-swap-call matcher hits a synthetic fixture that swaps directly', () => {
-	const fixture = "case 'officer-swap':\n\tawait performOfficerSwap({ networkHash });\n\tbreak;";
-	assert.match(fixture, /await performOfficerSwap\(/, 'matcher is inert');
-});
-
-test("DashboardShell: 'officer-indeterminate' and 'new-network' never call performOfficerSwap -- nothing is ever deleted on either path", () => {
-	const effectBody = SHELL_CODE.slice(
-		SHELL_CODE.indexOf('if (!pendingSwapContext) return undefined;'),
-		SHELL_CODE.indexOf('if (!activeNetwork) {'),
-	);
-	const indeterminateCase = effectBody.slice(effectBody.indexOf("case 'officer-indeterminate':"), effectBody.indexOf("case 'new-network':"));
-	const newNetworkCase = effectBody.slice(effectBody.indexOf("case 'new-network':"), effectBody.indexOf('default:'));
-	assert.doesNotMatch(indeterminateCase, /performOfficerSwap/);
-	assert.doesNotMatch(newNetworkCase, /performOfficerSwap/);
-	assert.match(indeterminateCase, /OfficerIndeterminateError/);
-});
-
-test('inertness control: the no-swap-call matcher hits a synthetic fixture that DOES call performOfficerSwap', () => {
-	assert.match("case 'officer-indeterminate':\n\tawait performOfficerSwap({});\n\tbreak;", /performOfficerSwap/, 'matcher is inert');
-});
-
-test('DashboardShell: the same-officer-refresh path hands its open handle over BEFORE calling performOfficerSwap, mirroring handleConfirmSwap', () => {
-	const sameOfficerCase = SHELL_CODE.slice(SHELL_CODE.indexOf("case 'same-officer-refresh':"), SHELL_CODE.indexOf("case 'officer-indeterminate':"));
-	const handoverAt = sameOfficerCase.indexOf('const handoverDb = dbRef.current');
-	// performOfficerSwap( itself, not an immediately-preceding await -- the
-	// call is now reached through withNetworkDbLifecycleLock (CR-04, 50-22).
-	const swapCallAt = sameOfficerCase.indexOf('performOfficerSwap(');
-	assert.ok(handoverAt >= 0 && swapCallAt >= 0, 'could not locate both the handover and the swap call in the same-officer-refresh case');
-	assert.ok(handoverAt < swapCallAt, 'the handle must be taken BEFORE the swap call');
-	assert.match(sameOfficerCase, /db: handoverDb,/);
-});
-
-test('inertness control: the handover-order matcher does not accept a close-after-swap fixture', () => {
-	const fixture = [
-		"case 'same-officer-refresh': {",
-		'const result = await performOfficerSwap({ networkHash, pastedCode, transport });',
-		'const handoverDb = dbRef.current;',
-	].join('\n');
-	const handoverAt = fixture.indexOf('const handoverDb = dbRef.current');
-	const swapCallAt = fixture.indexOf('await performOfficerSwap(');
-	assert.ok(!(handoverAt >= 0 && swapCallAt >= 0 && handoverAt < swapCallAt), 'matcher is inert');
 });
