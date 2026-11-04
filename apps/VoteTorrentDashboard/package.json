@@ -18,6 +18,8 @@
 		"gate:prove-token-missing": "node ../../packages/ui-web/scripts/run-ui-gates.mjs --app . --prove-token-missing",
 		"gate:chart-geometry": "node test/browser/run-chart-geometry-gate.mjs",
 		"gate:prove-chart-geometry-matchers": "node test/browser/run-chart-geometry-gate.mjs --prove-matchers",
+		"gate:live": "node test/browser/run-live-gate.mjs",
+		"gate:prove-live-matchers": "node test/browser/run-live-gate.mjs --prove-matchers",
 		"typecheck": "tsc --noEmit",
 		"lint": "node ../../scripts/lint-copy.mjs",
 		"assert:no-polyfills": "node scripts/assert-no-node-polyfills.mjs",
