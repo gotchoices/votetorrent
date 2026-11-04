@@ -34,6 +34,7 @@ import { REPLICATION_PROOF_ENABLED } from '../engines/proof-flags.generated';
 import { hostPoolRendezvous } from '../engines/pool-rendezvous-host';
 import { startPairMintHost, type PairMintHost } from '../engines/pair-mint-host';
 import type { PairMintReply, PairMintRequest } from '@votetorrent/vote-engine/rn';
+import { createEdgeReaderRefusal } from '@votetorrent/vote-engine/rn';
 
 // ---------------------------------------------------------------------------
 // `Promise.withResolvers` ambient augmentation (D-08/D-09).
@@ -389,6 +390,9 @@ export function CadreNodeProvider({ children }: PropsWithChildren) {
         const joinBootstrap = await readJoinBootstrap();
         const bootstrapNodes = [...new Set([...CONTROL_RELAY_ADDRS, ...joinBootstrap])];
 
+        // One edge-reader refusal per boot, created outside makeNode so the recovery rebuild reuses it.
+        const edgeReaderRefusal = createEdgeReaderRefusal();
+
         // cadre-core 1.18: keep the owner key = the identity key (engines/identity-owner-key.ts).
         const makeNode = () => withIdentityOwnerKey(new CadreNode({
           privateKey,
@@ -499,6 +503,11 @@ export function CadreNodeProvider({ children }: PropsWithChildren) {
           // handlers (Voter: pool-matchmaking-ports.ts). Cost: one cohort-topic host per strand node (db-p2p
           // builds it as a core host, 30 s renewals, even on a phone); measure CPU on the Redmi before release.
           strandReactivity: { enabled: true },
+          // Keeps strand peers that declared themselves read-only edge readers (an officer's browser dashboard,
+          // which stores nothing) out of this phone's write cohorts and coordinator choice, so a write never
+          // waits on an approval that peer cannot give. Reads are unaffected. A peer is refused only on its own
+          // identify, so no peer can get another one refused.
+          strandCohortRefusal: edgeReaderRefusal.hook,
         }), privateKey);
 
         // node.start() is inside useEffect — never blocks initial render (D-06 / T-22-03).

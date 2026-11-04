@@ -210,6 +210,45 @@ export function strandNetworkName(strandId) {
 }
 
 /**
+ * The marker protocol this strand node handles to declare itself a read-only edge reader. Phones refuse a
+ * strand peer whose own identify lists it as a member of their write cohorts. Same literal as vote-engine's
+ * `EDGE_READER_PROTOCOL` (the dashboard does not import vote-engine's `./rn`); `member-node.test.mjs` pins it.
+ */
+const EDGE_READER_PROTOCOL = '/votetorrent/edge-reader/1.0.0';
+
+/** How long the withdrawal waits for the immediate identify push before it carries on. */
+const IDENTIFY_PUSH_BOUND_MS = 5000;
+
+/**
+ * Tell connected peers at once that this node now handles the marker and no storage protocol, instead of
+ * after libp2p's 1 s debounced push. Falls back to the debounced push; bounded; a failure is logged by
+ * name and never fails the withdrawal.
+ *
+ * @param {Libp2pLike} node
+ */
+async function pushIdentifyNow(node) {
+	const pusher = node.services?.identifyPush;
+	const immediate = pusher?.sendPushMessage;
+	const debounced = pusher?.push;
+	const send =
+		typeof immediate === 'function'
+			? () => immediate.call(pusher)
+			: typeof debounced === 'function'
+				? () => debounced.call(pusher)
+				: null;
+	if (send === null) return;
+	/** @type {ReturnType<typeof setTimeout> | undefined} */
+	let bound;
+	try {
+		await Promise.race([send(), new Promise((resolve) => { bound = setTimeout(resolve, IDENTIFY_PUSH_BOUND_MS); })]);
+	} catch (err) {
+		logFailure(err);
+	} finally {
+		if (bound !== undefined) clearTimeout(bound);
+	}
+}
+
+/**
  * Validate the relay addresses from the pairing code: a non-empty array of relay multiaddrs
  * ending in a peer id (`/p2p/<id>`), none a circuit address (`/p2p-circuit`) of a member. The
  * message never echoes an entry.
@@ -466,6 +505,9 @@ export function createMemberPlatform({ networkHash, keyStore, strandId, deps }) 
 				...cfg,
 				requireSignedSchemas: false,
 				strandClusterSize: MEMBER_STRAND_CLUSTER_SIZE,
+				// A member that stores nothing must not seed other members' strand nodes: a phone that refuses
+				// this node as a cohort member but has it in its strand seed would wait on it forever.
+				withholdStrandAddrs: true,
 				...strandSlice,
 			});
 		},
@@ -530,6 +572,8 @@ export async function deleteMemberStorage(networkHash, { deps = {} } = {}) {
  * @typedef {object} Libp2pLike
  * @property {{ toString(): string }} peerId
  * @property {(protocols: string | string[]) => Promise<void>} unhandle
+ * @property {(protocol: string, handler: (stream: { abort(err: Error): void }) => void) => Promise<void>} handle
+ * @property {{ identifyPush?: { sendPushMessage?: () => Promise<void>, push?: () => Promise<void> } }} [services]
  * @property {() => Array<{ remotePeer: { toString(): string } }>} getConnections
  */
 
@@ -644,7 +688,17 @@ export async function createMemberNode({ networkHash, keyStore, relayAddrs, stra
 				node = currentStrandLibp2p();
 			}
 			if (node === null) throw new MemberNodeError('withdraw-failed');
+			// Declare the edge-reader marker BEFORE the storage protocols go, so the single identify push
+			// below carries both changes.
+			await node.handle(EDGE_READER_PROTOCOL, (stream) => {
+				try {
+					stream.abort(new Error('edge-reader marker only'));
+				} catch {
+					// already closed
+				}
+			});
 			await node.unhandle(storageServiceProtocols(strandNetworkName(started)));
+			await pushIdentifyNow(node);
 			withdrawnNode = node;
 			resolveWaiters(node);
 			notify('strand:started', { strandId: started });

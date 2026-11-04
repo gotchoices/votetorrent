@@ -79,9 +79,17 @@ function deferred() {
 function fakeLibp2p(id, options = {}) {
 	/** @type {string[][]} */
 	const unhandleCalls = [];
+	/** @type {string[]} */
+	const handleCalls = [];
 	return {
 		peerId: { toString: () => id },
 		unhandleCalls,
+		handleCalls,
+		/** @param {string} protocol */
+		handle(protocol) {
+			handleCalls.push(protocol);
+			return Promise.resolve();
+		},
 		/** @type {Array<{ remotePeer: { toString(): string } }>} */
 		connections: [],
 		/** @param {string[]} protocols */
@@ -1029,4 +1037,127 @@ test('20 source scan: joined-only start, no owner-key or owner-grant method, no 
 	assert.match(code, /createEdgeNode as createCadreEdgeNode/);
 	// Positive control: the comment stripper keeps code and a banned token in code is found.
 	assert.ok(stripComments(`x.${'remove' + 'Owner'}(k); // note`).includes('remove' + 'Owner'));
+});
+
+// ── The dashboard's strand node declares itself an edge reader and seeds nobody ──
+
+/**
+ * A strand libp2p fake that records handle/unhandle/push in one ordered log.
+ *
+ * @param {{ handle?: () => Promise<void>, push?: 'send' | 'push' | 'throw' | 'absent' | 'hang' }} [options]
+ */
+function edgeReaderLibp2p(options = {}) {
+	/** @type {string[]} */
+	const log = [];
+	/** @type {any} */
+	let marker = null;
+	const pushMode = options.push ?? 'send';
+	/** @type {any} */
+	const identifyPush = {};
+	if (pushMode === 'send') identifyPush.sendPushMessage = async () => { log.push('push:send'); };
+	if (pushMode === 'push') identifyPush.push = async () => { log.push('push:debounced'); };
+	if (pushMode === 'throw') identifyPush.sendPushMessage = async () => { log.push('push:throw'); throw new Error('push refused'); };
+	if (pushMode === 'hang') identifyPush.sendPushMessage = () => { log.push('push:hang'); return new Promise(() => {}); };
+	return {
+		log,
+		get marker() { return marker; },
+		peerId: { toString: () => 'StrandPeerEdge' },
+		services: pushMode === 'absent' ? {} : { identifyPush },
+		/** @param {string} protocol @param {any} handler */
+		handle(protocol, handler) {
+			log.push(`handle:${protocol}`);
+			marker = handler;
+			return options.handle ? options.handle() : Promise.resolve();
+		},
+		/** @param {string[]} protocols */
+		unhandle(protocols) {
+			log.push(`unhandle:${protocols.length}`);
+			return Promise.resolve();
+		},
+		getConnections() { return []; },
+	};
+}
+
+test('21 configure: the dashboard withholds its strand addresses (a member that stores nothing seeds nobody)', () => {
+	const base = /** @type {any} */ ({ profile: 'transaction' });
+	const platform = /** @type {any} */ (createMemberPlatform({ networkHash: HASH, keyStore: new InMemoryKeyStore(), relayAddrs: [RELAY], strandId: STRAND }));
+	const cfg = platform.configure(base);
+	assert.equal(cfg.withholdStrandAddrs, true);
+	const barePlatform = /** @type {any} */ (createMemberPlatform({ networkHash: HASH, keyStore: new InMemoryKeyStore(), relayAddrs: [RELAY] }));
+	const bare = barePlatform.configure(base);
+	assert.equal(bare.withholdStrandAddrs, true);
+	assert.equal('strandCohortRefusal' in cfg, false, 'the dashboard refuses nobody itself');
+});
+
+test('22 strand:started: the marker is handled before the storage protocols go, then an immediate identify push, then waiters resolve', async (t) => {
+	const fake = fakeEdge();
+	const member = await memberOver(fake);
+	fake.state.status = { state: 'running' };
+	const lib = edgeReaderLibp2p();
+	fake.strands.set(STRAND, { libp2pNode: lib });
+	/** @type {string[]} */
+	const order = [];
+	member.on('strand:started', () => order.push('listener'));
+	const waiting = member.waitForStrand(STRAND).then((n) => { order.push('resolved'); return n; });
+	fake.edge.fire('strand:started', { strandId: STRAND });
+	assert.equal(await waiting, lib);
+	await settle();
+	assert.deepEqual(lib.log, ['handle:/votetorrent/edge-reader/1.0.0', 'unhandle:2', 'push:send']);
+	assert.deepEqual([...order].sort(), ['listener', 'resolved']);
+	// The marker handler closes any stream at once.
+	let aborted = 0;
+	lib.marker({ abort: () => { aborted += 1; } });
+	assert.equal(aborted, 1);
+
+	// Falls back to the debounced push when the immediate one is not there.
+	for (const mode of /** @type {const} */ (['push', 'absent', 'throw'])) {
+		const f = fakeEdge();
+		const m = await memberOver(f, { networkHash: uniqueHash() });
+		f.state.status = { state: 'running' };
+		const l = edgeReaderLibp2p({ push: mode });
+		f.strands.set(STRAND, { libp2pNode: l });
+		/** @type {unknown[][]} */
+		const lines = [];
+		t.mock.method(console, 'warn', (/** @type {unknown[]} */ ...args) => lines.push(args));
+		const w = m.waitForStrand(STRAND);
+		f.edge.fire('strand:started', { strandId: STRAND });
+		assert.equal(await w, l, `a ${mode} push still resolves the waiters`);
+		assert.equal(l.log[0], 'handle:/votetorrent/edge-reader/1.0.0');
+		assert.equal(l.log[1], 'unhandle:2');
+		if (mode === 'push') assert.equal(l.log[2], 'push:debounced');
+		if (mode === 'throw') assert.deepEqual(lines, [[LOG_PREFIX, 'Error']], 'a failed push is logged by name only');
+		else assert.deepEqual(lines, []);
+		t.mock.restoreAll();
+	}
+});
+
+test('22b a failing marker handle stops the node and rejects withdraw-failed before anything is unhandled', async (t) => {
+	const fake = fakeEdge();
+	const member = await memberOver(fake);
+	fake.state.status = { state: 'running' };
+	const refused = new Error('handle refused');
+	refused.name = 'HandleRefusedError';
+	const lib = edgeReaderLibp2p({ handle: () => Promise.reject(refused) });
+	fake.strands.set(STRAND, { libp2pNode: lib });
+	/** @type {unknown[][]} */
+	const lines = [];
+	t.mock.method(console, 'warn', (/** @type {unknown[]} */ ...args) => lines.push(args));
+	const waiting = member.waitForStrand(STRAND);
+	fake.edge.fire('strand:started', { strandId: STRAND });
+	await assert.rejects(waiting, (err) => err instanceof MemberNodeError && err.reason === 'withdraw-failed');
+	await settle();
+	assert.deepEqual(lib.log, ['handle:/votetorrent/edge-reader/1.0.0']);
+	assert.ok(fake.calls.some(([name]) => name === 'stop'), 'the node was stopped');
+	assert.deepEqual(lines, [[LOG_PREFIX, 'HandleRefusedError']]);
+	t.mock.restoreAll();
+});
+
+test('23 parity: the marker literal equals vote-engine EDGE_READER_PROTOCOL (source text)', () => {
+	const engine = readFileSync(workspacePath('packages/vote-engine', 'src', 'network', 'edge-reader-refusal.ts'), 'utf8');
+	const expected = (engine.match(/export const EDGE_READER_PROTOCOL = '([^']+)'/) ?? [])[1];
+	assert.equal(expected, '/votetorrent/edge-reader/1.0.0');
+	const code = stripComments(readFileSync(dashboardSrc('peer', 'member-node.js'), 'utf8'));
+	const ours = (code.match(/const EDGE_READER_PROTOCOL = '([^']+)'/) ?? [])[1];
+	assert.equal(ours, expected);
+	assert.equal(code.includes('withholdStrandAddrs: true'), true);
 });

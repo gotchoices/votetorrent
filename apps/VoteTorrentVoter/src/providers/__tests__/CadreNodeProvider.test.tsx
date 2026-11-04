@@ -181,3 +181,40 @@ describe('CadreNodeProvider (Voter) — native Noise crypto (spike 093)', () => 
 		expect(network?.noiseCrypto).toEqual({__mockNoiseCrypto: 'symmetric'});
 	});
 });
+
+// Strand peers that declared themselves read-only edge readers (the officer's browser dashboard) are kept out
+// of this phone's strand write cohorts and coordinator choice: the node config carries a sticky
+// `strandCohortRefusal` hook from vote-engine's createEdgeReaderRefusal.
+describe('CadreNodeProvider (Voter) — edge-reader cohort refusal', () => {
+	type Hook = (strandId: string) => {refuses(peerId: string): boolean; attach?(node: unknown): void} | undefined;
+	const hookOf = (n: {receivedOptions: unknown}) => (n.receivedOptions as {strandCohortRefusal?: unknown}).strandCohortRefusal;
+
+	it('ER-V1 the node config carries strandCohortRefusal as a function that refuses nobody yet', async () => {
+		await bootProvider();
+		expect(mockConstructedNodes).toHaveLength(1);
+		const hook = hookOf(mockConstructedNodes[0]);
+		expect(typeof hook).toBe('function');
+		const refusal = (hook as Hook)('s1');
+		expect(refusal).toBeDefined();
+		expect(refusal!.refuses('x')).toBe(false);
+		expect((hook as Hook)('s1')).toBe(refusal);
+	});
+
+	it('ER-V2 the recovery rebuild passes the SAME hook', async () => {
+		// Every start() in this fake throws the planted error, so the rebuild's start fails too; the point here is
+		// only that the second node is built with the first node's hook.
+		mockStartError = new Error('CadreControl.Revocation could not be restored');
+		const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+		const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+		try {
+			await bootProvider();
+			expect(mockConstructedNodes).toHaveLength(2);
+			const [first, second] = mockConstructedNodes;
+			expect(typeof hookOf(first)).toBe('function');
+			expect(hookOf(second)).toBe(hookOf(first));
+		} finally {
+			warnSpy.mockRestore();
+			errorSpy.mockRestore();
+		}
+	});
+});
