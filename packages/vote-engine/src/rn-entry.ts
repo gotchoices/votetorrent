@@ -25,6 +25,10 @@ export type { NetworkJoinCode, NetworkJoinCodeDecodeResult, NetworkJoinCodeDecod
 export { joinNetwork } from './networks/network-join.js'
 export type { NetworkJoinNode, NetworkJoinOptions, NetworkJoinResult, NetworkJoinFailureReason, NetworkJoinStep } from './networks/network-join.js'
 export { NetworkEngine } from './network/network-engine.js'
+// Phones pass `createEdgeReaderRefusal().hook` as cadre-core's `strandCohortRefusal`, keeping strand peers
+// that declared themselves read-only edge readers out of write cohorts and coordinator choice.
+export { EDGE_READER_PROTOCOL, EDGE_READER_REFUSAL_MAX_PEERS, createEdgeReaderRefusal } from './network/edge-reader-refusal.js'
+export type { EdgeReaderRefusal, EdgeReaderRefusalOptions, EdgeReaderStrandRefusal } from './network/edge-reader-refusal.js'
 export { ElectionsEngine, peekNextElectionTid } from './elections/elections-engine.js'
 export { ElectionEngine } from './election/election-engine.js'
 export type { ElectionSubject } from './election/election-engine.js'

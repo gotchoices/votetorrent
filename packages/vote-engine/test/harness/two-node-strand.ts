@@ -38,6 +38,7 @@
  */
 
 import type { Database } from '@quereus/quereus'
+import type { EdgeReaderRefusal } from '../../src/network/edge-reader-refusal.js'
 import { randomUUID } from 'node:crypto'
 import { VOTETORRENT_SCHEMA_SQL } from '../../src/database/schema-sql.js'
 import { registerDbPlugins, declareViewsInMain } from '../../src/database/initialize.js'
@@ -149,6 +150,13 @@ export interface HarnessNode {
   strandPort(strandId: string): Promise<HarnessStrandPort>
   /** counts of port calls made THROUGH THIS NODE — the writer-identity tripwire */
   readonly stats: { mutateCount: number; queryCount: number }
+  /**
+   * 66-28: this node's own edge-reader refusal tracker (its `strandCohortRefusal` hook) when the harness was
+   * started with `cohortRefusal: true`; undefined otherwise. `restartHarnessNodeB` replaces node-B's.
+   */
+  cohortRefusal?: EdgeReaderRefusal
+  /** 66-28: forget the memoized strand handles (a restarted node re-opens them); returns their strand ids. */
+  resetStrandCaches?: () => string[]
 }
 
 export interface HarnessTimings {
@@ -204,6 +212,28 @@ export interface TwoNodeHarnessOptions {
    * reactivity/matchmaking harness (`strandReactivity: { enabled: true }`).
    */
   extraConfig?: Record<string, unknown>
+  /**
+   * 66-28 opt-in (default off): each node gets its OWN `createEdgeReaderRefusal()` tracker, passed as that
+   * node's `strandCohortRefusal` (A and B never share one). Off: both configs are byte-identical to today's.
+   * The trackers are exposed as `harness.nodeA.cohortRefusal` / `harness.nodeB.cohortRefusal`.
+   */
+  cohortRefusal?: boolean
+}
+
+// 66-28: `cohortRefusal` reaches `attemptBringUp` through this module-level request, set synchronously right
+// before each call and read synchronously at its top, so the existing call shape stays unchanged.
+let bringUpCohortRefusalRequest = false
+/** Tracker per hook, so a node's tracker is found from its own config (`node.config.strandCohortRefusal`). */
+const trackerByHook = new WeakMap<object, EdgeReaderRefusal>()
+function harnessCohortRefusalOf (node: any): EdgeReaderRefusal | undefined {
+  const hook = node?.config?.strandCohortRefusal
+  return typeof hook === 'function' ? trackerByHook.get(hook) : undefined
+}
+/** A fresh per-node tracker; its hook is what the node's config carries. */
+function newHarnessCohortRefusalHook (createEdgeReaderRefusal: () => EdgeReaderRefusal): EdgeReaderRefusal['hook'] {
+  const tracker = createEdgeReaderRefusal()
+  trackerByHook.set(tracker.hook, tracker)
+  return tracker.hook
 }
 
 // ---------------------------------------------------------------------------
@@ -278,11 +308,14 @@ async function attemptBringUp (
   timings: HarnessTimings
 }> {
   const { partyId, clusterSize, log } = opts
+  const cohortRefusalOn = bringUpCohortRefusalRequest
+  bringUpCohortRefusalRequest = false
 
   const { CadreNode, ed25519KeyPairFromLibp2p } = await import('@serfab/cadre-core')
   const { MemoryRawStorage } = await import('@optimystic/db-p2p')
   const { webSockets } = await import('@libp2p/websockets')
   const { generateKeyPair } = await import('@libp2p/crypto/keys')
+  const edgeReaderRefusalModule = cohortRefusalOn ? await import('../../src/network/edge-reader-refusal.js') : undefined
 
   const timings: HarnessTimings = {
     startAMs: 0,
@@ -306,6 +339,7 @@ async function attemptBringUp (
       hibernation: { enabled: false },
       profile: 'storage',
       network: { transports: [webSockets()], listenAddrs },
+      ...(edgeReaderRefusalModule ? { strandCohortRefusal: newHarnessCohortRefusalHook(edgeReaderRefusalModule.createEdgeReaderRefusal) } : {}),
       ...(opts.extraConfig ?? {})
     }
   }
@@ -566,6 +600,12 @@ function buildHarnessNode (
     dbFactory,
     openStrand,
     strandPort,
+    resetStrandCaches: () => {
+      const ids = [...new Set([...dbFactoryCache.keys(), ...openStrandCache.keys()])]
+      dbFactoryCache.clear()
+      openStrandCache.clear()
+      return ids
+    },
     stats
   }
 }
@@ -587,11 +627,13 @@ export async function startTwoNodeHarness (options: TwoNodeHarnessOptions = {}):
 
   const peerlessNodeB = options.peerlessNodeB === true
   let built: { nodeA: any; nodeB: any; timings: HarnessTimings }
+  bringUpCohortRefusalRequest = options.cohortRefusal === true
   try {
     built = await attemptBringUp(['/ip4/127.0.0.1/tcp/0/ws'], { partyId, clusterSize, log, peerlessNodeB, extraConfig: options.extraConfig })
   } catch (error) {
     if (error instanceof MeshTimeoutError) {
       log(`DEVIATION: control mesh did not settle on 127.0.0.1 (${(error as Error).message}); falling back to 0.0.0.0 per topology.mjs`)
+      bringUpCohortRefusalRequest = options.cohortRefusal === true
       built = await attemptBringUp(['/ip4/0.0.0.0/tcp/0/ws'], { partyId, clusterSize, log, peerlessNodeB, extraConfig: options.extraConfig })
     } else {
       throw error
@@ -607,6 +649,8 @@ export async function startTwoNodeHarness (options: TwoNodeHarnessOptions = {}):
   }
   const harnessNodeA = buildHarnessNode('node-A', 'founder-drone', nodeA, true, openedByA, timings, log, founderCtl)
   const harnessNodeB = buildHarnessNode('node-B', 'peer', nodeB, false, openedByA, timings, log, founderCtl)
+  harnessNodeA.cohortRefusal = harnessCohortRefusalOf(nodeA)
+  harnessNodeB.cohortRefusal = harnessCohortRefusalOf(nodeB)
 
   let stopped = false
 
@@ -863,6 +907,11 @@ export async function startHarnessEdgeMember (opts: {
   clusterSize: number
   keyStore?: any
   strandReactivity?: Record<string, unknown>
+  /**
+   * 66-28: cadre-core `withholdStrandAddrs` (default true, the dashboard's posture): this member never seeds
+   * another member's strand node. Pass false for the bootstrap control leg.
+   */
+  withholdStrandAddrs?: boolean
 }): Promise<HarnessEdgeMember> {
   const { InMemoryKeyStore } = await import('@serfab/cadre-core')
   // @ts-ignore -- exports-map subpath this package's moduleResolution cannot type; resolves at runtime
@@ -903,6 +952,7 @@ export async function startHarnessEdgeMember (opts: {
       requireSignedSchemas: false,
       strandFilter: { mode: 'strandId', strandId: opts.strandId },
       strandClusterSize: opts.clusterSize,
+      withholdStrandAddrs: opts.withholdStrandAddrs !== false,
       strandReactivity: { enabled: true, strandIds: [opts.strandId], ...(opts.strandReactivity ?? {}) }
     })
   }
@@ -912,14 +962,39 @@ export async function startHarnessEdgeMember (opts: {
   const withdrawn: string[] = []
   edge.on('strand:started', ({ strandId }: { strandId: string }) => {
     strandStarted.push(strandId)
-    try {
-      const strandNode: any = edge.node?.getStrand(strandId)?.libp2pNode
-      if (strandNode === undefined) throw new Error('no strand node at strand:started')
-      strandNode.unhandle([`/optimystic/strand-${strandId}/cluster/1.0.0`, `/optimystic/strand-${strandId}/repo/1.0.0`])
-      withdrawn.push(strandId)
-    } catch (err) {
-      console.log(`[${opts.label}] storage withdrawal failed: ${(err as Error).name}`)
-    }
+    // 66-28, as the dashboard does: declare the edge-reader marker, withdraw the storage services, then push
+    // identify at once (not libp2p's 1 s debounced push), and only then count the strand as withdrawn.
+    void (async () => {
+      try {
+        const strandNode: any = edge.node?.getStrand(strandId)?.libp2pNode
+        if (strandNode === undefined) throw new Error('no strand node at strand:started')
+        const { EDGE_READER_PROTOCOL } = await import('../../src/network/edge-reader-refusal.js')
+        await strandNode.handle(EDGE_READER_PROTOCOL, (stream: any) => {
+          try { stream.abort(new Error('edge-reader marker only')) } catch { /* already closed */ }
+        })
+        await strandNode.unhandle([`/optimystic/strand-${strandId}/cluster/1.0.0`, `/optimystic/strand-${strandId}/repo/1.0.0`])
+        const pusher: any = strandNode.services?.identifyPush
+        const send: (() => Promise<void>) | undefined =
+          typeof pusher?.sendPushMessage === 'function' ? () => pusher.sendPushMessage()
+            : typeof pusher?.push === 'function' ? () => pusher.push() : undefined
+        if (send !== undefined) {
+          let bound: ReturnType<typeof setTimeout> | undefined
+          try {
+            await Promise.race([
+              send(),
+              new Promise<void>((resolve) => { bound = setTimeout(resolve, 5_000) })
+            ])
+          } catch (err) {
+            console.log(`[${opts.label}] identify push failed: ${(err as Error).name}`)
+          } finally {
+            if (bound !== undefined) clearTimeout(bound)
+          }
+        }
+        withdrawn.push(strandId)
+      } catch (err) {
+        console.log(`[${opts.label}] storage withdrawal failed: ${(err as Error).name}`)
+      }
+    })()
   })
   edge.on('cadre:removed', (removal: unknown) => { removed.push(removal) })
   let stopped = false
@@ -1025,4 +1100,35 @@ export async function startHarnessStranger (
       await stopQuietly(node, quietLog)
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// 66-28: restart node-B with the same identity and storage (a phone app restart)
+// ---------------------------------------------------------------------------
+
+/**
+ * Stops node-B and starts the SAME CadreNode instance again (cadre-core supports stop() -> start() and keeps
+ * the resolved identity key), so node-B comes back with the same identity key and the same storage provider
+ * (the harness's MemoryRawStorage). Every strand the harness had opened on node-B is re-opened the way it was
+ * first opened (addStrand + whenStrandWritable + plugins). With `cohortRefusal: true` node-B gets a FRESH
+ * tracker first, as a restarted phone process starts with an empty set; `harness.nodeB.cohortRefusal` is
+ * updated. Returns once node-B's strands are open again.
+ */
+export async function restartHarnessNodeB (
+  harness: TwoNodeHarness,
+  opts?: { cohortRefusal?: boolean }
+): Promise<{ strandIds: string[] }> {
+  const node: any = harness.nodeB.node
+  const strandIds = harness.nodeB.resetStrandCaches?.() ?? []
+  await withTimeout(node.stop(), HARNESS_TIMEOUTS.startMs, 'node-B stop (restart)')
+  if (opts?.cohortRefusal === true) {
+    const { createEdgeReaderRefusal } = await import('../../src/network/edge-reader-refusal.js')
+    node.config.strandCohortRefusal = newHarnessCohortRefusalHook(createEdgeReaderRefusal)
+  }
+  await withTimeout(node.start(), HARNESS_TIMEOUTS.startMs, 'node-B start (restart)')
+  harness.nodeB.cohortRefusal = harnessCohortRefusalOf(node)
+  for (const strandId of strandIds) {
+    await harness.nodeB.openStrand(strandId)
+  }
+  return { strandIds }
 }
