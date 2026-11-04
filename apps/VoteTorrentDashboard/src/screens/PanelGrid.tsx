@@ -11,17 +11,16 @@
  * real defect (the provider freezing an empty real-scope set) hard to see
  * from the call site.
  *
- * `snapshotInstant` is still ACCEPTED, so the shell that passes it keeps
- * compiling, but it is IGNORED and no longer forwarded to any panel: the
- * Elections lifecycle pill falls back to the current time when it receives
- * no instant, and the live panels follow the clock instead. The live shell
- * removes the prop.
+ * The live shell keys this grid by network hash, so a switch to another
+ * network remounts it: no panel, mark or announcement from the previous
+ * network survives.
  *
  * Two providers wrap the grid, so live panels get what they need without a
  * new panel prop:
- *   - `DataVersionContext`, from the optional `dataVersion` prop, passed
- *     straight through (no state is seeded from it, so a new value always
- *     reaches the panels). With no prop the default never marks anything.
+ *   - `DataVersionContext`, from the optional `dataVersion` prop the shell
+ *     feeds from the live boot, passed straight through (no state is seeded
+ *     from it, so a new value always reaches the panels). With no prop the
+ *     default never marks anything.
  *   - `MarkAnnouncerContext`, which collects each panel's "{n} items updated
  *     in {panel}" sentence for the ONE polite live region rendered after the
  *     grid. The region is always mounted (a live region must exist before
@@ -38,8 +37,7 @@
  * behaviour, and its honest limit is the same one `src/auth/gate.js`
  * states: it is NOT enforcement. Read authorization here is advisory —
  * there is no CHECK behind it, and anyone holding this browser's
- * bootstrapped copy holds the whole database regardless of what is
- * rendered.
+ * local copy holds the whole database regardless of what is rendered.
  */
 import { useEffect, useMemo, useState } from 'react';
 import type { Database } from '@quereus/quereus';
@@ -59,12 +57,7 @@ export interface PanelGridProps {
 	db: Database | null;
 	revealDenied: boolean;
 	onToggleReveal: () => void;
-	/**
-	 * @deprecated Accepted so the current shell compiles; ignored and not
-	 * forwarded to any panel. The live shell removes it.
-	 */
-	snapshotInstant?: string | null;
-	/** The live data version; omitted means the default, which never marks. */
+	/** The live data version from the shell (memoized there); omitted means the default, which never marks. */
 	dataVersion?: DataVersion;
 }
 

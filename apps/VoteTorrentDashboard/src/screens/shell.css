@@ -1,8 +1,8 @@
 /*
- * shell.css — the dashboard shell's chrome: top bar, network switcher,
- * freshness indicator + stale banner, the secondary-styled action beside
- * "as of …", the kebab overflow, native <dialog> surfaces, the sidebar and
- * its two groups, and the transient verified toast.
+ * shell.css — the live dashboard shell's chrome: top bar, network switcher,
+ * the header status chip and its Reconnect button, the follower-tab note,
+ * the "opening" line, the kebab overflow, native <dialog> surfaces, the
+ * sidebar and its two groups, and the open-failure banner.
  *
  * Every class in this file is prefixed `sh-` — a disjoint namespace next to
  * 50-06's `panel*` classes, 50-10's `election-ops.css` and 50-11's `aa-`
@@ -78,6 +78,174 @@
 	flex-wrap: wrap;
 }
 
+/* At 901 px and up the bar is one row and the authority name truncates
+ * first, so the status text and Reconnect are never clipped. */
+@media (min-width: 901px) {
+	.sh-topbar {
+		flex-wrap: nowrap;
+	}
+
+	.sh-identity {
+		flex: 1 1 auto;
+	}
+
+	.sh-topbar-actions {
+		flex: 0 0 auto;
+		flex-wrap: nowrap;
+	}
+}
+
+/* Header status ---------------------------------------------------------- */
+
+.sh-status-region {
+	display: flex;
+	align-items: center;
+	gap: var(--space-sm);
+	flex: 0 1 auto;
+	max-width: 320px;
+	min-width: 88px;
+}
+
+.sh-status-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--space-xs);
+	box-sizing: border-box;
+	height: 32px;
+	min-width: 88px;
+	padding: 0 var(--space-sm);
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	white-space: nowrap;
+	font-size: var(--font-label-size);
+	font-weight: var(--font-label-weight);
+	line-height: var(--font-label-line-height);
+	color: var(--muted);
+}
+
+.sh-status-chip[data-kind="live"] {
+	color: var(--ok);
+	border-color: var(--ok);
+}
+
+.sh-status-chip[data-kind="catching-up"] {
+	color: var(--warn);
+	border-color: var(--warn);
+}
+
+.sh-status-chip[data-kind="offline"] {
+	color: var(--muted);
+	border-color: var(--border);
+}
+
+.sh-status-chip[data-kind="not-live"] {
+	color: var(--muted);
+	border-color: var(--muted);
+}
+
+.sh-status-dot {
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+	flex: none;
+	box-sizing: border-box;
+}
+
+.sh-status-chip[data-kind="live"] .sh-status-dot {
+	background: var(--ok);
+}
+
+.sh-status-chip[data-kind="catching-up"] .sh-status-dot {
+	background: transparent;
+	box-shadow: inset 0 0 0 1px var(--warn);
+}
+
+.sh-status-chip[data-kind="offline"] .sh-status-dot {
+	background: var(--muted);
+}
+
+.sh-status-chip[data-kind="not-live"] .sh-status-dot {
+	background: transparent;
+	box-shadow: inset 0 0 0 1px var(--muted);
+}
+
+.sh-status-word,
+.sh-status-sep,
+.sh-status-detail {
+	white-space: nowrap;
+}
+
+.sh-reconnect {
+	box-sizing: border-box;
+	height: 32px;
+	padding: 0 var(--space-sm);
+	background: transparent;
+	color: var(--text);
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	font-size: var(--font-label-size);
+	font-weight: var(--font-label-weight);
+	line-height: var(--font-label-line-height);
+	white-space: nowrap;
+	flex: none;
+}
+
+.sh-reconnect:disabled {
+	opacity: 0.5;
+}
+
+/* Follower tab: the note sits on its own line under the bar's actions. */
+.sh-follower-note {
+	flex-basis: 100%;
+	margin: 0;
+	text-align: right;
+	color: var(--warn);
+	font-size: var(--font-label-size);
+	font-weight: var(--font-label-weight);
+	line-height: var(--font-label-line-height);
+}
+
+.sh-follower-word {
+	color: var(--warn);
+}
+
+/* At 900 px and below the timestamp moves to a second line under the word,
+ * and Reconnect stays reachable at 32 px. */
+@media (max-width: 900px) {
+	.sh-status-region {
+		flex-wrap: wrap;
+		max-width: 100%;
+	}
+
+	.sh-status-chip {
+		height: auto;
+		min-height: 32px;
+		flex-wrap: wrap;
+		white-space: normal;
+	}
+
+	.sh-status-sep {
+		display: none;
+	}
+
+	.sh-status-detail {
+		display: block;
+		flex-basis: 100%;
+	}
+
+	.sh-reconnect {
+		height: 32px;
+	}
+}
+
+/* Opening a network (replaces the panel area until the local copy loads). */
+.sh-opening {
+	font-size: var(--font-body-size);
+	font-weight: var(--font-body-weight);
+	line-height: var(--font-body-line-height);
+	color: var(--muted);
+}
+
 /* Network switcher ------------------------------------------------------ */
 
 .sh-switcher {
@@ -90,6 +258,10 @@
 	border: 1px solid var(--border);
 	border-radius: var(--radius);
 	padding: var(--space-xs) var(--space-sm);
+	max-width: 200px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
 .sh-switcher-list {
@@ -98,6 +270,7 @@
 	left: 0;
 	z-index: 10;
 	min-width: 260px;
+	max-width: 360px;
 	background: var(--surface);
 	border: 1px solid var(--border);
 	border-radius: var(--radius);
@@ -119,6 +292,7 @@
 	color: var(--text);
 	text-align: left;
 	width: 100%;
+	min-width: 0;
 }
 
 .sh-switcher-row--active {
@@ -126,42 +300,41 @@
 }
 
 .sh-switcher-row-name {
-	font-size: var(--font-heading-size);
-	font-weight: var(--font-heading-weight);
+	font-size: var(--font-body-size);
+	font-weight: var(--font-body-weight);
+	line-height: var(--font-body-line-height);
+	max-width: 100%;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
 .sh-switcher-row-meta {
 	font-size: var(--font-label-size);
+	font-weight: var(--font-label-weight);
+	line-height: var(--font-label-line-height);
+	color: var(--muted);
+	max-width: 100%;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.sh-switcher-row-meta--idle {
 	color: var(--muted);
 }
 
-.sh-switcher-redeem {
-	color: var(--primary);
-	font-size: var(--font-body-size);
-}
-
-/* Freshness + stale banner --------------------------------------------- */
-
-.sh-freshness {
-	font-size: var(--font-body-size);
-	color: var(--muted);
-}
-
-.sh-stale-banner {
-	display: block;
-	color: var(--warn);
-	font-size: var(--font-label-size);
-	margin-top: var(--space-xs);
-}
-
-/* Refresh action -- accent-bordered, secondary to reading data, never a
- * filled primary. */
-.sh-refresh-cta {
+.sh-switcher-pair {
 	background: transparent;
-	color: var(--primary);
-	border: 1px solid var(--primary);
+	border: 1px solid transparent;
 	border-radius: var(--radius);
-	padding: var(--space-xs) var(--space-sm);
+	color: var(--text);
+	font-size: var(--font-body-size);
+	font-weight: var(--font-body-weight);
+	line-height: var(--font-body-line-height);
+	padding: var(--space-sm);
+	text-align: left;
+	width: 100%;
 }
 
 /* Kebab overflow --------------------------------------------------------- */
@@ -210,6 +383,11 @@
 	max-width: 420px;
 }
 
+.sh-dialog h2,
+.sh-dialog p {
+	overflow-wrap: anywhere;
+}
+
 .sh-dialog::backdrop {
 	background: rgba(0, 0, 0, 0.5);
 }
@@ -241,14 +419,6 @@
 
 .sh-dialog-cta--destructive:disabled {
 	opacity: 0.5;
-}
-
-.sh-dialog-cta--primary {
-	background: var(--primary);
-	color: var(--text);
-	border: 1px solid var(--primary);
-	border-radius: var(--radius);
-	padding: var(--space-xs) var(--space-md);
 }
 
 .sh-dialog-error {
@@ -300,21 +470,7 @@
 	border-color: var(--primary);
 }
 
-/* Verified toast ------------------------------------------------------------ */
-
-.sh-toast {
-	position: fixed;
-	bottom: var(--space-lg);
-	right: var(--space-lg);
-	background: var(--surface);
-	color: var(--ok);
-	border: 1px solid var(--ok);
-	border-radius: var(--radius);
-	padding: var(--space-sm) var(--space-md);
-	z-index: 20;
-}
-
-/* Verification / error banner ------------------------------------------------ */
+/* Open-failure banner ---------------------------------------------------------- */
 
 .sh-error-banner {
 	background: var(--surface2);
@@ -322,4 +478,15 @@
 	border-radius: var(--radius);
 	padding: var(--space-md);
 	color: var(--text);
+}
+
+.sh-error-retry {
+	background: transparent;
+	color: var(--text);
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	padding: var(--space-xs) var(--space-sm);
+	font-size: var(--font-label-size);
+	font-weight: var(--font-label-weight);
+	line-height: var(--font-label-line-height);
 }

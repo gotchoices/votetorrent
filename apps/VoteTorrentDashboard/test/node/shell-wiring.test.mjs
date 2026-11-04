@@ -431,308 +431,331 @@ test('C11 shell-live.ts: no enum, namespace, peer import, date parsing, ISO text
 		assert.ok(body.slice(0, end).includes('console.error('), 'the console.error sits outside logFailure');
 	}
 });
-
 // --- live shell wiring scans --------------------------------------------------
 
 const SHELL = readFileSync(dashboardSrc('screens', 'DashboardShell.tsx'), 'utf8');
-
 const CODE = stripComments(SHELL);
+const GRID_RAW = readFileSync(dashboardSrc('screens', 'PanelGrid.tsx'), 'utf8');
+const GRID_CODE = stripComments(GRID_RAW);
+const SHELL_CSS = readFileSync(dashboardSrc('screens', 'shell.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
 
-const ATTACH_DEPS_RE =
-	/\}, \[activeNetwork\?\.networkHash, activeNetwork\?\.officerUserId, activeNetwork\?\.bootstrappedAt\]\);/;
+/** Banned names, built from fragments so this file never spells them whole. */
+const SNAP = 'snap' + 'shot';
+const SNAPSHOT_INSTANT = SNAP + 'Instant';
 
-test('the attach effect depends on officerUserId and bootstrappedAt, not on networkHash alone', () => {
-	// A successful officer swap replaces the registry entry's officerUserId and
-	// bootstrappedAt while KEEPING the same networkHash. With a hash-only
-	// dependency the effect never re-ran, so db stayed null and grantedScopes
-	// stayed [] for the rest of the page's life -- while PanelGrid, whose
-	// remount key DOES include both, remounted around the dead handle.
-	assert.match(CODE, ATTACH_DEPS_RE);
+// S1 -- imports: the peer layer only through one dynamic import, and no snapshot-era module.
+
+const STATIC_PEER_IMPORT_RE = /import\s[^;]*?from\s*['"]\.\.\/peer\//;
+const DYNAMIC_BOOT_IMPORT_RE = /import\('\.\.\/peer\/boot\.js'\)/g;
+const RETIRED_MODULE_IMPORT_RE = new RegExp(
+	"from\\s*['\"][^'\"]*(?:fresh" + 'ness|/re' + 'fresh|officer-' + 'swap|bootstrap-transport-' + "client|\\./Boot" + "strap)(?:\\.js)?['\"]",
+);
+const RETIRED_TOKENS = [
+	SNAP + 'Freshness',
+	'sh-re' + 'fresh-cta',
+	'sh-fresh' + 'ness',
+	"t('" + SNAP + '.',
+	"t('net" + 'work.',
+	'onRedeem' + 'Another',
+	'pendingSwap' + 'Context',
+	'withNetworkDb' + 'LifecycleLock',
+	'attach' + 'NetworkDb',
+];
+
+test('S1 control: the import matchers hit a static peer import, a type-only peer import and a retired module', () => {
+	assert.match("import { startDashboardBoot } from '../peer/boot.js';", STATIC_PEER_IMPORT_RE);
+	assert.match("import type { DashboardBoot } from '../peer/boot.js';", STATIC_PEER_IMPORT_RE);
+	assert.doesNotMatch("const m = await import('../peer/boot.js');", STATIC_PEER_IMPORT_RE);
+	assert.match("import { x } from '../lifecycle/fresh" + "ness.js';", RETIRED_MODULE_IMPORT_RE);
+	assert.match("import { y } from '../lifecycle/officer-" + "swap.js';", RETIRED_MODULE_IMPORT_RE);
+	assert.match("import type { Z } from './Boot" + "strap.js';", RETIRED_MODULE_IMPORT_RE);
+	assert.doesNotMatch("import { forgetNetwork } from '../lifecycle/forget-network.js';", RETIRED_MODULE_IMPORT_RE);
 });
 
-test('inertness control: the dependency matcher does NOT accept the hash-only list', () => {
-	assert.doesNotMatch('	}, [activeNetwork?.networkHash]);', ATTACH_DEPS_RE, 'matcher is inert');
+test('S1 the shell has no static peer import, exactly one dynamic boot import and no snapshot-era import or name', () => {
+	assert.doesNotMatch(CODE, STATIC_PEER_IMPORT_RE);
+	assert.equal((CODE.match(DYNAMIC_BOOT_IMPORT_RE) ?? []).length, 1);
+	assert.doesNotMatch(CODE, RETIRED_MODULE_IMPORT_RE);
+	for (const token of RETIRED_TOKENS) assert.ok(!CODE.includes(token), `the shell still names ${token}`);
 });
 
-test('handleConfirmSwap does not also tear the session down locally -- the re-keyed effect owns it', () => {
-	const swapBody = CODE.slice(CODE.indexOf('async function handleConfirmSwap'), CODE.indexOf('function handleCancelSwap'));
-	assert.ok(swapBody.length > 0, 'could not locate handleConfirmSwap');
-	assert.doesNotMatch(swapBody, /setGrantedScopes\(\[\]\)/, 'two owners for one transition');
+// S2 -- boot wiring.
+
+test('S2 control: the interval matcher hits a synthetic setInterval call', () => {
+	assert.match('const id = setInterval(tick, 1000);', /setInterval\(/);
 });
 
-test('inertness control: the two-owners matcher hits a synthetic setGrantedScopes([]) fixture', () => {
-	assert.match('setGrantedScopes([]);', /setGrantedScopes\(\[\]\)/, 'matcher is inert');
+test('S2 the shell drives one boot controller, the live hooks, both boot callbacks and Reconnect, with no interval', () => {
+	assert.equal((CODE.match(/createShellBootController\(/g) ?? []).length, 1);
+	for (const needle of ['useLiveStatus(', 'useBootDataVersion(', 'onUnpaired(', 'onForgotten(', '.reconnect()']) {
+		assert.ok(CODE.includes(needle), `the shell is missing ${needle}`);
+	}
+	assert.doesNotMatch(CODE, /setInterval\(/);
 });
 
-const HANDOVER_RE = /const handoverDb = dbRef\.current \?\? undefined;[\s\S]{0,600}?db: handoverDb,/;
+// S3 -- the panel grid call.
 
-test('handleConfirmSwap hands its open handle to performOfficerSwap BEFORE the swap runs', () => {
-	// performOfficerSwap -> refreshNetwork -> redeemAndBootstrap({ replace:
-	// true }) deletes this exact database, and indexedDB.deleteDatabase blocks
-	// while any connection is open -- deleteNetworkDb deliberately refuses to
-	// resolve on onblocked and throws DeleteBlockedError after its timeout. The
-	// shell used to close its handle only AFTER the swap returned, so it raced
-	// its own delete and every confirmed swap failed, burning the officer's
-	// single-use code.
-	assert.match(CODE, HANDOVER_RE);
+/** One self-closing <PanelGrid .../> element; lazy, so an arrow prop (`=>`) does not end it early. */
+const PANEL_GRID_ELEMENT_RE = /<PanelGrid\b[\s\S]*?\/>/g;
+const PANEL_VERSION_MEMO_RE = /const panelVersion = useMemo\(\s*\(\) => panelDataVersion\(/;
 
-	// And the handover must precede the call, not follow it. The call is now
-	// reached through withNetworkDbLifecycleLock (CR-04), so this looks for
-	// performOfficerSwap( itself rather than an immediately-preceding await.
-	const handoverAt = CODE.indexOf('const handoverDb = dbRef.current');
-	const swapCallAt = CODE.indexOf('performOfficerSwap(', handoverAt);
-	assert.ok(handoverAt >= 0 && swapCallAt >= 0, 'could not locate both the handover and the swap call');
-	assert.ok(handoverAt < swapCallAt, 'the handle is taken AFTER the swap call -- the delete is still racing it');
+test('S3 control: the grid matchers hit a keyed element with the memoized version and miss a raw one', () => {
+	const keyed = '<PanelGrid\n\tkey={activeNetworkHash}\n\tdb={bootDb}\n\tonToggleReveal={() => setRevealDenied((value) => !value)}\n\tdataVersion={panelVersion}\n/>';
+	const raw = '<PanelGrid db={db} dataVersion={useBootDataVersion(boot)} />';
+	assert.equal((keyed.match(PANEL_GRID_ELEMENT_RE) ?? []).length, 1);
+	assert.match(keyed.match(PANEL_GRID_ELEMENT_RE)?.[0] ?? '', /dataVersion=\{panelVersion\}/, 'an arrow prop must not end the element early');
+	assert.match(keyed, /key=\{activeNetworkHash\}/);
+	assert.doesNotMatch(raw, /dataVersion=\{panelVersion\}/);
+	assert.match('const panelVersion = useMemo(\n\t() => panelDataVersion(v, o),', PANEL_VERSION_MEMO_RE);
+	assert.doesNotMatch('const panelVersion = panelDataVersion(v, o);', PANEL_VERSION_MEMO_RE);
 });
 
-test('inertness control: the handover matcher does NOT accept a close-after-the-swap fixture', () => {
-	const fixture = [
-		'const result = await performOfficerSwap({ networkHash, pastedCode, transport });',
-		'if (dbRef.current) { await closeNetworkDb(dbRef.current); dbRef.current = null; }',
-	].join('\n');
-	assert.doesNotMatch(fixture, HANDOVER_RE, 'matcher is inert');
+test('S3 the one PanelGrid is keyed by network hash with the memoized version, and the old instant prop is gone', () => {
+	const elements = CODE.match(PANEL_GRID_ELEMENT_RE) ?? [];
+	assert.equal(elements.length, 1, 'expected exactly one <PanelGrid element');
+	assert.match(elements[0], /key=\{activeNetworkHash\}/);
+	assert.match(elements[0], /dataVersion=\{panelVersion\}/);
+	assert.match(CODE, PANEL_VERSION_MEMO_RE);
+	assert.ok(!SHELL.includes(SNAPSHOT_INSTANT), 'DashboardShell.tsx names the old instant prop');
+	assert.ok(!GRID_RAW.includes(SNAPSHOT_INSTANT), 'PanelGrid.tsx names the old instant prop');
+	assert.doesNotMatch(GRID_RAW, new RegExp(SNAP, 'i'));
+	assert.match(GRID_CODE, /DataVersionContext\.Provider value=\{dataVersion \?\? DEFAULT_DATA_VERSION\}/);
 });
 
-test('every destructive call site that can hold a handle passes it: forgetNetwork and performOfficerSwap alike', () => {
-	assert.match(CODE, /forgetNetwork\(\{[\s\S]{0,200}?db: dbRef\.current \?\? undefined,/);
-	assert.match(CODE, /performOfficerSwap\(\{[\s\S]{0,200}?db: handoverDb,/);
+// S4 -- the status chip.
+
+const CHIP_OPEN_RE = /<span\s+className="sh-status-chip"[^>]*>/;
+
+/** Open minus closed (non-self-closing) span elements in a JSX slice. @param {string} jsx */
+function spanDepth(jsx) {
+	const opens = [...jsx.matchAll(/<span\b[^>]*?(\/?)>/g)].filter((m) => m[1] !== '/').length;
+	const closes = (jsx.match(/<\/span>/g) ?? []).length;
+	return opens - closes;
+}
+
+test('S4 control: the chip matcher reads the attributes of a synthetic chip and the role count bites', () => {
+	const fixture = '<span className="sh-status-chip" data-kind={k} role="status" aria-live="polite" aria-atomic="true">';
+	const open = fixture.match(CHIP_OPEN_RE);
+	assert.ok(open);
+	assert.match(open[0], /role="status"/);
+	assert.equal(('role="status" x role="status"'.match(/role="status"/g) ?? []).length, 2);
+	assert.equal(spanDepth('<span className="c" role="status"><span className="d" aria-hidden="true" /><span>w</span>'), 1);
+	assert.equal(spanDepth('<span className="c"><span className="d" /><span>w</span></span>'), 0);
 });
 
-// --- Panel console hygiene (WR-12) --------------------------------------------
+test('S4 one role=status, on the polite atomic chip; Reconnect sits after the chip, toggles its word and disables while retrying', () => {
+	assert.equal((CODE.match(/role="status"/g) ?? []).length, 1);
+	const open = CODE.match(CHIP_OPEN_RE);
+	assert.ok(open, 'the sh-status-chip element is missing');
+	for (const attr of ['role="status"', 'aria-live="polite"', 'aria-atomic="true"']) {
+		assert.ok(open[0].includes(attr), `the chip lacks ${attr}`);
+	}
+	const chipAt = CODE.indexOf(open[0]);
+	const reconnectAt = CODE.indexOf('className="sh-reconnect"');
+	assert.ok(chipAt >= 0 && reconnectAt > chipAt, 'Reconnect must render after the chip');
+	assert.equal(spanDepth(CODE.slice(chipAt, reconnectAt)), 0, 'Reconnect renders inside the status element');
+	const button = CODE.slice(CODE.lastIndexOf('<button', reconnectAt), CODE.indexOf('</button>', reconnectAt));
+	assert.match(button, /disabled=\{model\.reconnecting\}/);
+	assert.match(button, /\{model\.reconnecting \? t\('status\.reconnecting'\) : t\('status\.reconnect'\)\}/);
+});
+
+// S5 -- copy keys.
+
+/** @param {string} source @returns {string[]} the literal keys of every t('...') call */
+function literalCopyKeys(source) {
+	return [...source.matchAll(/\bt\(\s*'([^']+)'/g)].map((m) => m[1]);
+}
+/** @param {string[]} keys */
+function missingKeys(keys) {
+	return keys.filter((key) => typeof COPY[key] !== 'string');
+}
+
+test('S5 control: the key extractor finds literal keys and a fabricated key is reported missing', () => {
+	const fixture = "t('status.reconnect'); t( 'status.chip.fabricated-key', { a }); t(group.titleKey);";
+	assert.deepEqual(literalCopyKeys(fixture), ['status.reconnect', 'status.chip.fabricated-key']);
+	assert.deepEqual(missingKeys(literalCopyKeys(fixture)), ['status.chip.fabricated-key']);
+});
+
+test('S5 every literal copy key in the shell and in shell-live.ts exists, the live keys are used and no swap key is', () => {
+	const shellKeys = literalCopyKeys(CODE);
+	assert.deepEqual(missingKeys([...shellKeys, ...literalCopyKeys(SHELL_LIVE_CODE)]), []);
+	for (const key of [
+		'switcher.opening',
+		'switcher.pairAnother',
+		'switcher.rowDetail',
+		'switcher.rowDetailNotSyncing',
+		'status.followerNote',
+		'status.chip.not-live',
+		'forget.heading',
+		'forget.body',
+		'forget.fieldLabel',
+		'forget.cta',
+		'forget.failed',
+		'shell.openFailed',
+	]) {
+		assert.ok(shellKeys.includes(key), `the shell does not use ${key}`);
+	}
+	assert.ok(!CODE.includes("t('swap."), 'the shell renders a swap key');
+});
+
+// S6 -- forget.
+
+const ERROR_CLASS_RENDER_RE = /forgetError as \{ name|\.name \?\? 'error'/;
+
+test('S6 control: the error-class matcher hits the old dialog line', () => {
+	assert.match("{(forgetError as { name?: string })?.name ?? 'error'}", ERROR_CLASS_RENDER_RE);
+});
+
+test('S6 one forgetNetwork call with the typed confirmation, the exact-name rule, the re-entrancy ref and the fixed failure line', () => {
+	const calls = [...CODE.matchAll(/forgetNetwork\(\{([^}]*)\}\)/g)];
+	assert.equal((CODE.match(/forgetNetwork\(/g) ?? []).length, 1);
+	assert.equal(calls.length, 1);
+	assert.match(calls[0][1], /typedConfirmation/);
+	assert.doesNotMatch(calls[0][1], /\bdb\b/, 'forget stops the boot itself; the shell passes no handle');
+	assert.match(CODE, /forgetExpectedName\.length === 0 \|\| forgetConfirmationInput\.trim\(\) !== forgetExpectedName/);
+	assert.match(CODE, /const forgettingRef = useRef\(false\)/);
+	assert.match(CODE, /if \(!activeEntry \|\| forgettingRef\.current\) return;/);
+	assert.match(CODE, /<p className="sh-dialog-error">\{t\('forget\.failed'\)\}<\/p>/);
+	assert.doesNotMatch(CODE, ERROR_CLASS_RENDER_RE);
+});
+
+test('S6 control: the exact-name matcher rejects the old comparison that enabled the button for an empty name', () => {
+	const fixture = 'const forgetConfirmDisabled = forgetConfirmationInput.trim() !== activeNetwork.authorityName.trim();';
+	assert.doesNotMatch(fixture, /forgetExpectedName\.length === 0 \|\| forgetConfirmationInput\.trim\(\) !== forgetExpectedName/);
+});
+
+// S7 -- scopes (advisory gating stays).
+
+const SCOPES_PROVIDER_RE = /<PreviewAsProvider realScopes=\{grantedScopes\} scopesResolved=\{scopesResolved\}>/;
+const SCOPES_RESET_RE = /setGrantedScopes\(\[\]\);\s*\n\s*setScopesResolved\(false\);/;
+const VERIFIED_ID_READ_RE = /readGrantedScopes\([^,]+,\s*(?:entry|activeEntry)\.officerUserId\)/;
+
+test('S7 control: the scope matchers miss the single-prop provider, a lone reset and a read for another id', () => {
+	assert.doesNotMatch('<PreviewAsProvider realScopes={grantedScopes}>', SCOPES_PROVIDER_RE);
+	assert.doesNotMatch('setDb(null);\n\t\tsetGrantedScopes([]);\n\t\tsetAttachError(null);', SCOPES_RESET_RE);
+	assert.doesNotMatch('readGrantedScopes(db, statement.userId)', VERIFIED_ID_READ_RE);
+	assert.match('readGrantedScopes(db, activeEntry.officerUserId)', VERIFIED_ID_READ_RE);
+});
+
+test('S7 the provider gets the real scopes and the resolved flag, the reset re-closes it, and scopes follow the verified id', () => {
+	assert.match(CODE, SCOPES_PROVIDER_RE);
+	assert.match(CODE, SCOPES_RESET_RE);
+	assert.match(CODE, VERIFIED_ID_READ_RE);
+	assert.ok(!CODE.includes('UserEngine'), 'the shell reads the officer name from the registry, not the database');
+});
+
+// S8 -- officer names, and no swap dialog in the shell.
+
+const SWAP_DIALOG_RE = /OfficerSwapDialog|confirmSwap|swap\./;
+const OFFICER_LABEL_RE = /officerLabel\(\s*entry\.officerName,\s*entry\.officerUserId\s*\)/;
+
+test('S8 control: the swap matcher hits a synthetic swap dialog export, and the label matcher hits the registry call', () => {
+	assert.match('export function OfficerSwapDialog(props) {}', SWAP_DIALOG_RE);
+	assert.match('const officerName = officerLabel(entry.officerName, entry.officerUserId);', OFFICER_LABEL_RE);
+	assert.doesNotMatch('const officerName = entry.officerUserId;', OFFICER_LABEL_RE);
+});
+
+test('S8 switcher rows name the officer through officerLabel, the unpaired notice carries officerName ?? null, and no swap dialog', () => {
+	assert.match(CODE, OFFICER_LABEL_RE);
+	assert.match(CODE, /t\('switcher\.rowDetail', \{ domain: entry\.domain, officerName \}\)/);
+	assert.match(CODE, /t\('switcher\.rowDetailNotSyncing', \{ domain: entry\.domain, officerName \}\)/);
+	assert.match(CODE, /officerName: entry\?\.officerName \?\? null/);
+	const unpairedCall = CODE.slice(CODE.indexOf('boot.onUnpaired('), CODE.indexOf('boot.onForgotten('));
+	assert.match(unpairedCall, /onUnpairedRef\.current\(\{ reason, authorityName: captured\.authorityName, officerName: captured\.officerName \}\)/);
+	assert.doesNotMatch(CODE, SWAP_DIALOG_RE);
+});
+
+test('S8 "+ Pair another network" stops the active boot before handing over', () => {
+	const body = CODE.slice(CODE.indexOf('async function handlePairAnother'), CODE.indexOf('function handleReconnect'));
+	const stopAt = body.indexOf('await controller.stopActive()');
+	const handAt = body.indexOf('onPairAnotherRef.current()');
+	assert.ok(stopAt >= 0 && handAt > stopAt, 'onPairAnother must run after the boot stopped');
+});
+
+// S9 -- shell.css.
+
+/** @param {string} css @param {string} selector @returns {string} the declarations of the first rule with exactly this selector */
+function ruleBody(css, selector) {
+	const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+	const m = css.match(new RegExp('(?:^|\\n)\\s*' + escaped + '\\s*\\{([^}]*)\\}'));
+	return m ? m[1] : '';
+}
+
+test('S9 control: the rule reader finds a declaration in a synthetic rule and misses an absent selector', () => {
+	const css = '.a-x {\n\theight: 32px;\n}\n.a-y { color: red; }';
+	assert.match(ruleBody(css, '.a-x'), /height: 32px/);
+	assert.equal(ruleBody(css, '.a-z'), '');
+	assert.match('.sh-x { color: #fff; }', /#[0-9a-fA-F]{3,6}\b/);
+});
+
+test('S9 the chip, region and Reconnect geometry, the state colours, the narrow two-line rule, and no snapshot-era selector', () => {
+	const chip = ruleBody(SHELL_CSS, '.sh-status-chip');
+	for (const decl of ['height: 32px', 'min-width: 88px', 'white-space: nowrap', 'border-radius: var(--radius)', 'display: inline-flex']) {
+		assert.ok(chip.includes(decl), `.sh-status-chip lacks ${decl}`);
+	}
+	const region = ruleBody(SHELL_CSS, '.sh-status-region');
+	assert.ok(region.includes('max-width: 320px') && region.includes('flex: 0 1 auto'), '.sh-status-region geometry');
+	assert.ok(ruleBody(SHELL_CSS, '.sh-reconnect').includes('height: 32px'), '.sh-reconnect height');
+	const states = {
+		live: ['var(--ok)', 'var(--ok)'],
+		'catching-up': ['var(--warn)', 'var(--warn)'],
+		offline: ['var(--muted)', 'var(--border)'],
+		'not-live': ['var(--muted)', 'var(--muted)'],
+	};
+	for (const [kind, [color, border]] of Object.entries(states)) {
+		const body = ruleBody(SHELL_CSS, `.sh-status-chip[data-kind="${kind}"]`);
+		assert.ok(body.includes(`color: ${color}`), `${kind} text colour`);
+		assert.ok(body.includes(`border-color: ${border}`), `${kind} border colour`);
+	}
+	const statusRules = [...SHELL_CSS.matchAll(/([^{}]*\.sh-(?:status|reconnect|follower)[^{}]*)\{([^}]*)\}/g)];
+	assert.ok(statusRules.length >= 8, 'expected the status rules');
+	for (const [, , body] of statusRules) {
+		assert.ok(!body.includes('var(--fail)') && !body.includes('var(--primary)'), 'a status rule uses the destructive or accent colour');
+	}
+	const narrowAt = SHELL_CSS.indexOf('@media (max-width: 900px)', SHELL_CSS.indexOf('.sh-status-chip'));
+	assert.ok(narrowAt >= 0, 'no narrow status block');
+	const narrow = SHELL_CSS.slice(narrowAt, SHELL_CSS.indexOf('\n}\n', narrowAt));
+	assert.match(narrow, /\.sh-status-detail\s*\{[^}]*display: block/);
+	for (const gone of ['.sh-re' + 'fresh-cta', '.sh-fresh' + 'ness', '.sh-stale-' + 'banner', '.sh-to' + 'ast']) {
+		assert.ok(!SHELL_CSS.includes(gone), `shell.css still declares ${gone}`);
+	}
+	assert.doesNotMatch(SHELL_CSS, /#[0-9a-fA-F]{3,6}\b/);
+});
+
+// S10 -- pins kept from the old shell file.
 
 const PANELS_DIR = dashboardSrc('screens', 'panels');
-/** Every panel body, plus the shell -- the ten console.error call sites this app ships. */
+/** Every panel body, plus the shell. */
 const CONSOLE_SITES = readdirSync(PANELS_DIR)
 	.filter((/** @type {string} */ name) => name.endsWith('.tsx'))
 	.map((/** @type {string} */ name) => ({ name, source: readFileSync(path.join(PANELS_DIR, name), 'utf8') }))
 	.concat([{ name: 'DashboardShell.tsx', source: SHELL }]);
 
-// Widened per RF-03: the original matcher was keyed to the ternary shape
-// `err instanceof Error ? err.message : ...` and missed the shape actually
-// present at DashboardShell.tsx:623, `console.error(err.name, err.message)` --
-// a plain two-argument call with no ternary at all. Rather than enumerate
-// every call shape, this now matches ANY bare `err.message` / `error.message`
-// property read appearing inside a `console.error(...)` call's argument list
-// (single-line calls only, matching this matcher's existing `[^)]*` scope) --
-// the ternary shape is a strict subset of this (it also contains the bare
-// `err.message` token), so no case the old matcher caught is lost.
+// Any bare `err.message` / `error.message` read inside a single-line
+// `console.error(...)` argument list.
 const RAW_MESSAGE_RE = /console\.error\([^)]*\berr(or)?\.message\b/;
 
-test('no panel and not the shell logs a raw database error MESSAGE to the console', () => {
-	// `err` comes from a query against tables full of registrant information,
-	// and Quereus and its constraint layer routinely embed the offending row
-	// and column values in an error message. The browser console is a durable,
-	// exportable, screenshot-able sink.
+test('S10 no panel and not the shell logs a raw database error MESSAGE to the console', () => {
+	// Quereus and its constraint layer embed row and column values in error
+	// messages; the browser console is a durable, exportable sink.
 	const offenders = CONSOLE_SITES.filter((f) => RAW_MESSAGE_RE.test(stripComments(f.source))).map((f) => f.name);
 	assert.deepEqual(offenders, [], `these files log a raw error message: ${offenders.join(', ')}`);
 });
 
-test('inertness control: the raw-message matcher hits the exact shape all nine panels used to carry', () => {
+test('S10 control: the raw-message matcher hits the exact shape all nine panels used to carry', () => {
 	const fixture = "console.error('RegistrationsPanel: a read failed:', err instanceof Error ? err.message : String(err));";
 	assert.match(fixture, RAW_MESSAGE_RE, 'matcher is inert');
 });
 
-test('every console.error in a panel logs the error CLASS instead -- and there are nine of them', () => {
+test('S10 every console.error in a panel logs the error CLASS instead -- and there are nine of them', () => {
 	const withClassLogging = CONSOLE_SITES.filter((f) =>
 		/console\.error\([^)]*\)\?\.name \?\? 'Error'\)/.test(stripComments(f.source)),
 	);
 	assert.equal(withClassLogging.length, 9, 'expected exactly the nine panel bodies to log an error class');
 });
 
-// --- Attach-failure banner (WR-16) ---------------------------------------------
-
-test('the error banner is the DEFAULT for any attachError, and PanelGrid is reserved for a clean attach', () => {
-	// Only two error classes used to reach a banner; every other attach failure
-	// -- a corrupt row-count record, a Quereus DDL reconcile error, a quota
-	// refusal, a plugin registration error -- fell through to the grid with a
-	// null handle, and every panel then showed its own "No registrants yet."
-	// For election infrastructure, "database broken" presented as "zero
-	// registrants" is the worst available confusion.
-	assert.match(CODE, /\{attachError \? \(/);
-	assert.doesNotMatch(
-		CODE,
-		/\{attachError instanceof MissingRowCountsError \|\| attachError instanceof RowCountMismatchError \? \(\s*<div className="sh-error-banner">/,
-	);
-});
-
-test('inertness control: the old two-class-only condition would be rejected by the matcher above', () => {
-	const fixture = '{attachError instanceof MissingRowCountsError || attachError instanceof RowCountMismatchError ? (\n\t<div className="sh-error-banner">';
-	assert.doesNotMatch(fixture, /\{attachError \? \(/, 'matcher is inert');
-	assert.match(
-		fixture,
-		/\{attachError instanceof MissingRowCountsError \|\| attachError instanceof RowCountMismatchError \? \(\s*<div className="sh-error-banner">/,
-		'the old-shape matcher is inert',
-	);
-});
-
-test('an unrecognised attach failure gets its OWN copy, not the verification wording', () => {
-	// "Your data failed its checksum" is a wrong answer for a database that
-	// simply would not open.
-	assert.match(CODE, /t\('snapshot\.errorAttachHeading'\)/);
-	assert.match(CODE, /t\('snapshot\.errorAttachBody'\)/);
-	assert.match(CODE, /t\('snapshot\.errorVerificationHeading'\)/);
-});
-
-// --- Forget confirmation (WR-18) -----------------------------------------------
-
-test('the forget dialog stays disabled when there is no expected name to confirm against', () => {
-	assert.match(CODE, /forgetExpectedName\.length === 0 \|\| forgetConfirmationInput\.trim\(\) !== forgetExpectedName/);
-});
-
-test('inertness control: the old comparison, which enabled the button on open for an empty name, is rejected', () => {
-	const fixture = 'const forgetConfirmDisabled = forgetConfirmationInput.trim() !== activeNetwork.authorityName.trim();';
-	assert.doesNotMatch(
-		fixture,
-		/forgetExpectedName\.length === 0 \|\| forgetConfirmationInput\.trim\(\) !== forgetExpectedName/,
-		'matcher is inert',
-	);
-});
-
-// --- Surfaced classify() failure (CR-03) ----------------------------------------
-
-const CLASSIFY_CATCH_RE = /\} catch \(err\) \{\s*if \(!cancelled\) setSwapError\(err\);[\s\S]{0,80}?\} finally \{/;
-
-test('classify() has a catch clause that surfaces the failure via setSwapError, positioned before the finally', () => {
-	// Every throwing call inside classify() -- splitSignInCode on a malformed
-	// code, transport.redeem rejecting, classifyRedemption, and a throw from
-	// performOfficerSwap on the same-officer-refresh branch -- used to escape
-	// as an unhandled promise rejection, leaving db === null with no banner
-	// and no dialog while PanelGrid rendered nine panels each showing their
-	// own empty copy.
-	assert.match(CODE, CLASSIFY_CATCH_RE);
-});
-
-test('inertness control: the classify-catch matcher does NOT accept a bare try/finally with no catch', () => {
-	const fixture = 'try {\n\t\t\t\t// work\n\t\t\t} finally {\n\t\t\t\tif (!cancelled) onSwapContextConsumed?.();\n\t\t\t}';
-	assert.doesNotMatch(fixture, CLASSIFY_CATCH_RE, 'matcher is inert');
-});
-
-const MAIN_REGION_SWAP_ERROR_RE = /\{attachError \? \([\s\S]{0,900}?\) : swapError && !pendingSwap \? \(/;
-
-test('the main region renders a dedicated banner for a surfaced swapError only when no swap dialog is pending', () => {
-	// A classification failure must never be represented by nine panels each
-	// showing their own empty copy -- an officer whose database failed must
-	// never be told their authority has no registrants. The banner only
-	// applies when no swap dialog is open: a confirmed-swap failure belongs
-	// in the dialog the officer is already looking at.
-	assert.match(CODE, MAIN_REGION_SWAP_ERROR_RE);
-});
-
-test('inertness control: the main-region matcher does NOT accept the old attachError-or-grid-only shape', () => {
-	const fixture =
-		'{attachError ? (\n\t\t\t\t\t\t<div className="sh-error-banner">\n\t\t\t\t\t\t\tstuff\n\t\t\t\t\t\t</div>\n\t\t\t\t\t) : (\n\t\t\t\t\t\t<PanelGrid';
-	assert.doesNotMatch(fixture, MAIN_REGION_SWAP_ERROR_RE, 'matcher is inert');
-});
-
-test('the surfaced swap-error banner renders through t() with the two new copy keys', () => {
-	assert.match(CODE, /t\('network\.swapErrorHeading'\)/);
-	assert.match(CODE, /t\('network\.swapErrorBody'\)/);
-});
-
-// --- Handed-off transport cache ownership (D-14 continuity, 50-22) -------------
-
-const RESET_CALL_RE = /\.reset\(\)/g;
-
-test('the handed-off single-flight cache is reset on at least 7 terminal call sites', () => {
-	// handleCancelSwap (unchanged) + the classify catch clause + the
-	// fail-closed replay branch + officer-indeterminate + new-network + BOTH
-	// routes of same-officer-refresh + all three terminal routes of
-	// handleConfirmSwap. The one path that must NOT reset is 'officer-swap'
-	// -- the confirm dialog still needs the cached envelope.
-	const matches = CODE.match(RESET_CALL_RE) ?? [];
-	assert.ok(matches.length >= 7, `expected at least 7 .reset() call sites, found ${matches.length}`);
-});
-
-const OFFICER_SWAP_CASE_RE = /case 'officer-swap':[\s\S]*?break;/;
-
-test("the officer-swap case body resets nothing -- the confirm dialog still needs the cached envelope", () => {
-	const match = CODE.match(OFFICER_SWAP_CASE_RE);
-	assert.ok(match, 'could not locate the officer-swap case');
-	assert.doesNotMatch(match[0], /\.reset\(\)/);
-});
-
-test('inertness control: the officer-swap-no-reset matcher DOES flag a fixture with a reset call inside that case', () => {
-	const fixture = "case 'officer-swap':\n\tsetPendingSwap({ networkHash });\n\tswapContext.transport.reset();\n\tbreak;";
-	const match = fixture.match(OFFICER_SWAP_CASE_RE);
-	assert.ok(match);
-	assert.match(match[0], /\.reset\(\)/, 'matcher is inert -- it correctly flags the misplaced reset');
-});
-
-const CLASSIFY_FINALLY_RE = /\} finally \{\s*if \(!cancelled\) onSwapContextConsumed\?\.\(\);\s*\}/;
-
-test("classify()'s finally block contains no reset call -- officer-swap falls through the SAME finally and must keep its cache", () => {
-	assert.match(CODE, CLASSIFY_FINALLY_RE);
-});
-
-test('inertness control: the finally-no-reset matcher rejects a fixture where reset was moved into finally (which would break the confirm path)', () => {
-	const fixture =
-		'} finally {\n\t\t\t\tswapContext.transport.reset();\n\t\t\t\tif (!cancelled) onSwapContextConsumed?.();\n\t\t\t}';
-	assert.doesNotMatch(fixture, CLASSIFY_FINALLY_RE, 'matcher is inert');
-});
-
-// --- Every destructive db path queued onto the per-network lock (CR-04) --------
-
-const FORGET_INSIDE_LOCK_RE = /withNetworkDbLifecycleLock\([^,]+,\s*\(\) =>\s*forgetNetwork\(/;
-
-test('forgetNetwork is called only from inside withNetworkDbLifecycleLock', () => {
-	// CR-04: withNetworkDbLifecycleLock serialized exactly attachNetworkDb and
-	// closeNetworkDb. It did NOT wrap handleConfirmForget -> forgetNetwork ->
-	// deleteNetworkDbSettled -> indexedDB.deleteDatabase, one of the two most
-	// destructive open/close operations in the app against the same
-	// networkHash.
-	assert.match(CODE, FORGET_INSIDE_LOCK_RE);
-	const forgetCallCount = (CODE.match(/forgetNetwork\(/g) ?? []).length;
-	assert.equal(forgetCallCount, 1, 'expected exactly one forgetNetwork( call site');
-});
-
-test('inertness control: the forget-lock matcher rejects a bare (unwrapped) forgetNetwork call', () => {
-	const fixture = 'const result = await forgetNetwork({ networkHash, typedConfirmation, db });';
-	assert.doesNotMatch(fixture, FORGET_INSIDE_LOCK_RE, 'matcher is inert');
-});
-
-const PERFORM_OFFICER_SWAP_INSIDE_LOCK_RE = /withNetworkDbLifecycleLock\([^,]+,\s*\(\) =>\s*performOfficerSwap\(/g;
-
-test('both performOfficerSwap call sites are wrapped in withNetworkDbLifecycleLock, and there are exactly two', () => {
-	// CR-04: neither the handleConfirmSwap call site nor the classify
-	// effect's same-officer-refresh call site was queued onto the lock that
-	// already serializes attach and close for the same networkHash.
-	const wrapped = CODE.match(PERFORM_OFFICER_SWAP_INSIDE_LOCK_RE) ?? [];
-	assert.equal(wrapped.length, 2, `expected exactly 2 wrapped performOfficerSwap call sites, found ${wrapped.length}`);
-	const totalCallSites = (CODE.match(/performOfficerSwap\(/g) ?? []).length;
-	assert.equal(totalCallSites, 2, `expected exactly 2 performOfficerSwap( call sites total, found ${totalCallSites}`);
-});
-
-test('inertness control: the performOfficerSwap-lock matcher rejects a bare (unwrapped) call', () => {
-	const fixture = 'const result = await performOfficerSwap({ networkHash, pastedCode, transport, db });';
-	assert.doesNotMatch(fixture, PERFORM_OFFICER_SWAP_INSIDE_LOCK_RE, 'matcher is inert');
-});
-
-// --- scopesResolved: closing the attach-window on first attach AND every re-attach (D-18, 50-23) ---
-
-const SCOPES_RESOLVED_PROVIDER_RE = /<PreviewAsProvider realScopes=\{grantedScopes\} scopesResolved=\{scopesResolved\}>/;
-
-test('DashboardShell passes scopesResolved to PreviewAsProvider alongside realScopes', () => {
-	// PreviewAsProviderProps.scopesResolved is a REQUIRED prop (50-23 Task 1)
-	// -- a mount site that omits it fails typecheck, not just this matcher.
-	assert.match(CODE, SCOPES_RESOLVED_PROVIDER_RE);
-});
-
-test('inertness control: the provider-prop matcher does NOT accept the old single-prop opening tag', () => {
-	const fixture = '<PreviewAsProvider realScopes={grantedScopes}>';
-	assert.doesNotMatch(fixture, SCOPES_RESOLVED_PROVIDER_RE, 'matcher is inert');
-});
-
-const SCOPES_RESOLVED_RESET_RE = /setGrantedScopes\(\[\]\);\s*\n\s*setScopesResolved\(false\);/;
-
-test("the attach effect's reset block sets scopesResolved false immediately after clearing grantedScopes -- a re-attach genuinely re-closes the window", () => {
-	// Co-located with setGrantedScopes([]) rather than the effect's own
-	// `setDb(null);` line above it, so the assertion is anchored to the
-	// SAME reset block a network switch, an officer swap, or a refresh all
-	// run through -- not merely present somewhere in the file.
-	assert.match(CODE, SCOPES_RESOLVED_RESET_RE);
-});
-
-test('inertness control: the reset-block matcher does NOT accept a fixture where only setGrantedScopes([]) appears', () => {
-	const fixture = 'setDb(null);\n\t\tsetGrantedScopes([]);\n\t\tsetAttachError(null);';
-	assert.doesNotMatch(fixture, SCOPES_RESOLVED_RESET_RE, 'matcher is inert');
+test('S10 the shell names no unreachable panel state (read-only, the half-circle glyph, writable), comments included', () => {
+	const RE = new RegExp('read-' + 'only|◐|writ' + 'able', 'i');
+	assert.match('a read-' + 'only panel', RE, 'matcher is inert');
+	assert.doesNotMatch(SHELL, RE);
 });
