@@ -1705,7 +1705,7 @@ function runSelftest() {
 
     const liveEntry = 'apps/VoteTorrentAuthority/index.js';
     const liveVerifier = 'packages/vote-engine/src/association/app-attest-verifier.ts';
-    const liveStager = 'apps/VoteTorrentAuthority/src/services/dashboard-signin-code.ts';
+    const liveTestSeam = 'apps/VoteTorrentAuthority/src/engines/key-vault.ts';
 
     // 13. LIVE TRUE POSITIVE. `AppAttestVerifier` is the exact control Phase 51
     //     recorded CLOSED while nothing in the app could reach it; the wiring
@@ -1729,18 +1729,18 @@ function runSelftest() {
       }
     }
 
-    // 14. LIVE TRUE NEGATIVE. 52-CONTEXT.md's Reusable Assets section says
-    //     `stageForFilesystemBinding` "has no non-test caller". This case is
-    //     that sentence, mechanised.
+    // 14. LIVE TRUE NEGATIVE. `setAuthorityKeyVaultForTests` is a test-only
+    //     seam: key-vault.ts exports it for jest, and no production file calls
+    //     it. This case mechanises "has no non-test caller" on a live file.
     {
       total++;
       negativeTotal++;
-      const missing = [liveEntry, liveStager].filter((p) => !existsSync(path.join(REPO_ROOT, p)));
+      const missing = [liveEntry, liveTestSeam].filter((p) => !existsSync(path.join(REPO_ROOT, p)));
       if (missing.length > 0) {
         failures.push(`14 live true negative: LIVE-FIXTURE-MISSING ${missing.join(', ')}`);
       } else {
         const ctx = makeGraphContext(REPO_ROOT);
-        const reach = computeReach(path.join(REPO_ROOT, liveStager), 'stageForFilesystemBinding', liveEntry, ctx);
+        const reach = computeReach(path.join(REPO_ROOT, liveTestSeam), 'setAuthorityKeyVaultForTests', liveEntry, ctx);
         // This file names the anchor in its own live fixture. A checker naming a
         // symbol is not a caller of it, so exclude only this exact path -- never
         // `scripts/` wholesale, because a build script that calls a control IS a
@@ -1751,7 +1751,7 @@ function runSelftest() {
           negativeRejected++;
         } else {
           failures.push(
-            `14 live true negative: expected 'file-only' with only test referrers, got '${reach.token}' with non-test referrers [${nonTest.join(', ')}]. If 52-06 or 52-11 gave it a production caller this case must be replaced.`,
+            `14 live true negative: expected 'file-only' with only test referrers, got '${reach.token}' with non-test referrers [${nonTest.join(', ')}]. If it gained a production caller, replace this case.`,
           );
         }
       }

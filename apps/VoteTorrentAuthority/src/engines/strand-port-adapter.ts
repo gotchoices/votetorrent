@@ -21,7 +21,7 @@
  *     time (62-01), so this adapter is a pure pass-through with no authorization logic of its own.
  *  4. `createStrandPort` is called only from inside `EngineFactory.createPeerStagingTransports` —
  *     never from a screen or binding directly — so the raw strand Database handle never leaves the
- *     factory (the same `exportDashboardSnapshot` rule `engine-factory.ts` already documents).
+ *     factory (the factory's no-raw-handle rule, stated on `EngineFactory.createPeerStagingTransports`).
  */
 
 import type { RegistrationStrandPort, AssociationStrandPort } from '@votetorrent/vote-engine/rn';
