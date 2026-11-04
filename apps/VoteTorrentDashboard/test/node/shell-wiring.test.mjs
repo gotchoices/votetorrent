@@ -163,7 +163,7 @@ const HARNESS = [
 	"\t\t\tconst b = { networkHash: hash, db: null, failure: null, role: 'leader', stops: 0,",
 	"\t\t\t\tgetStatus() { return { kind: 'catching-up', lastPassAt: null, reconnecting: false }; },",
 	'\t\t\t\tsubscribeStatus() { return () => {}; }, getDataVersion() { return { version: 0, changedTables: new Set(), markEligible: false }; },',
-	'\t\t\t\tsubscribeData() { return () => {}; }, async reconnect() {}, onUnpaired() { return () => {}; }, onForgotten() { return () => {}; },',
+	'\t\t\t\tsubscribeData() { return () => {}; }, async reconnect() {}, onUnpaired() { return () => {}; }, onForgotten() { return () => {}; }, onWipeFailed() { return () => {}; },',
 	"\t\t\t\tasync stop() { b.stops += 1; events.push('stop:' + hash); } };",
 	'\t\t\tboots[hash] = b;',
 	'\t\t\treturn b;',
@@ -223,6 +223,34 @@ const HARNESS = [
 	'\t\tconsole.error = realError;',
 	'\t}',
 	'\treturn { sequence, overlap, stop, failed, logs };',
+	'});',
+	// C12 (66-29): the single-flight re-run of a failed wipe, guarded by a ref-shaped holder.
+	"await row('C12', async () => {",
+	'\tconst guard = { current: false };',
+	'\tlet wipes = 0;',
+	'\tlet wiped = 0;',
+	'\tlet release;',
+	'\tconst gateP = new Promise((r) => { release = r; });',
+	'\tconst wipe = async () => { wipes += 1; await gateP; };',
+	'\tconst first = L.retryWipeOnce(guard, wipe, () => { wiped += 1; });',
+	'\tconst second = await L.retryWipeOnce(guard, wipe, () => { wiped += 1; });',
+	'\trelease();',
+	'\tconst firstOutcome = await first;',
+	'\tconst third = await L.retryWipeOnce(guard, wipe, () => { wiped += 1; });',
+	'\tconst logs = [];',
+	'\tconst realError = console.error;',
+	'\tconsole.error = (...args) => { logs.push(args.map(String)); };',
+	'\tconst g2 = { current: false };',
+	'\tlet w2 = 0;',
+	'\tlet failOutcome;',
+	'\tlet okOutcome;',
+	'\ttry {',
+	"\t\tfailOutcome = await L.retryWipeOnce(g2, async () => { const e = new Error('detail-that-must-not-print'); e.name = 'MemberStorageBusyError'; throw e; }, () => { w2 += 1; });",
+	'\t\tokOutcome = await L.retryWipeOnce(g2, async () => {}, () => { w2 += 1; });',
+	'\t} finally {',
+	'\t\tconsole.error = realError;',
+	'\t}',
+	'\treturn { second, firstOutcome, third, wipes, wiped, guardAfter: guard.current, failOutcome, okOutcome, w2, logs };',
 	'});',
 	'process.stdout.write(JSON.stringify(rows));',
 ].join('\n');
@@ -758,4 +786,140 @@ test('S10 the shell names no unreachable panel state (read-only, the half-circle
 	const RE = new RegExp('read-' + 'only|◐|writ' + 'able', 'i');
 	assert.match('a read-' + 'only panel', RE, 'matcher is inert');
 	assert.doesNotMatch(SHELL, RE);
+});
+
+// S11 (66-29, DEFECT-66-26-02) -- the wipe-failed state: the forget.failed banner with ONE Forget
+// action that re-runs the wipe, and no Reconnect. (The plan calls these rows S5; S5 was taken.)
+
+test('C12 retryWipeOnce: a double click runs ONE wipe and calls onWiped once; a held guard stays held after success; a failure releases it and logs a name only', () => {
+	const r = rowOf('C12');
+	assert.equal(r.second, 'busy', 'the second click while the first runs is refused');
+	assert.equal(r.firstOutcome, 'wiped');
+	assert.equal(r.wipes, 1, 'one wipe ran');
+	assert.equal(r.wiped, 1, 'onWiped (the unpaired notice) fired once');
+	assert.equal(r.third, 'busy', 'a click after success runs nothing');
+	assert.equal(r.guardAfter, true);
+	assert.equal(r.failOutcome, 'failed');
+	assert.equal(r.okOutcome, 'wiped', 'a failed re-run released the guard, so the next click retries');
+	assert.equal(r.w2, 1);
+	assert.deepEqual(r.logs, [['live/shell-live:', 'MemberStorageBusyError']]);
+});
+
+/** The wipe-failed banner JSX: from its condition to the open-failure branch that follows it. */
+function wipeFailedBanner(code) {
+	const start = code.indexOf('wipeFailedReason !== null ? (');
+	const end = code.indexOf(') : unpairing ? null', start);
+	return start === -1 || end === -1 ? null : code.slice(start, end);
+}
+
+/** The body of a named function declaration in the shell (up to the next top-level-ish `\n\t}`). */
+function functionBody(code, name) {
+	const start = code.indexOf(`function ${name}(`);
+	if (start === -1) return null;
+	const end = code.indexOf('\n\t}\n', start);
+	return code.slice(start, end === -1 ? undefined : end);
+}
+
+const OPEN_FAILED_BANNER = [
+	'bootFailed ? (',
+	'\t\t\t\t\t\t\t<div className="sh-error-banner">',
+	"\t\t\t\t\t\t\t\t<p>{t('shell.openFailed')}</p>",
+	'\t\t\t\t\t\t\t\t<button type="button" className="sh-error-retry" onClick={handleRetryOpen}>',
+	"\t\t\t\t\t\t\t\t\t{t('status.reconnect')}",
+	'\t\t\t\t\t\t\t\t</button>',
+	'\t\t\t\t\t\t\t</div>',
+].join('\n');
+
+const WIPE_FIXTURE_GOOD = [
+	'useEffect(() => {',
+	'\tconst offForgotten = boot.onForgotten(() => {});',
+	'\tconst offWipeFailed = boot.onWipeFailed((reason) => {',
+	'\t\twipeFailedRef.current = { networkHash: boot.networkHash, authorityName: captured.authorityName, officerName: captured.officerName };',
+	'\t\tsetWipeFailedReason(reason);',
+	'\t});',
+	'\treturn () => {',
+	'\t\toffForgotten();',
+	'\t\toffWipeFailed();',
+	'\t};',
+	'});',
+	'\tasync function handleRetryWipe(): Promise<void> {',
+	'\t\tconst failed = wipeFailedRef.current;',
+	'\t\tconst reason = wipeFailedReason;',
+	'\t\tif (failed === null || reason === null) return;',
+	'\t\tawait retryWipeOnce(wipeRetryingRef, () => wipeNetwork({ networkHash: failed.networkHash, reason }), () => {',
+	'\t\t\tonUnpairedRef.current({ reason, authorityName: failed.authorityName, officerName: failed.officerName });',
+	'\t\t});',
+	'\t}',
+	'<main>{wipeFailedReason !== null ? (',
+	"<div className=\"sh-error-banner\"><p>{t('forget.failed')}</p><button type=\"button\" disabled={wipeRetrying} onClick={() => void handleRetryWipe()}>{t('forget.cta')}</button></div>",
+	') : unpairing ? null : null}</main>',
+].join('\n');
+
+/** Every S11 matcher, as one function over a source text; returns the failed check names. */
+function wipeFailedChecks(code) {
+	/** @type {string[]} */
+	const failed = [];
+	const check = (name, ok) => {
+		if (!ok) failed.push(name);
+	};
+	const forgottenAt = code.indexOf('boot.onForgotten(');
+	const wipeAt = code.indexOf('boot.onWipeFailed(');
+	check('a-subscribed-after-onForgotten', forgottenAt !== -1 && wipeAt > forgottenAt);
+	check('a-off-in-cleanup', /return \(\) => \{[^}]*offWipeFailed\(\);/.test(code));
+	check('1-hash-from-reporting-boot', /boot\.onWipeFailed\(\(reason\) => \{\s*wipeFailedRef\.current = \{ networkHash: boot\.networkHash,/.test(code));
+	const banner = wipeFailedBanner(code);
+	check('b-banner-before-unpairing-null', banner !== null);
+	if (banner !== null) {
+		check('c-forget-failed-copy', banner.includes("<p>{t('forget.failed')}</p>"));
+		check('c-one-button', (banner.match(/<button\b/g) ?? []).length === 1);
+		check('c-forget-cta-label', banner.includes("{t('forget.cta')}</button>"));
+		check('c-runs-handleRetryWipe', /onClick=\{\(\) => void handleRetryWipe\(\)\}/.test(banner));
+		check('c-disabled-while-retrying', banner.includes('disabled={wipeRetrying}'));
+		check('d-no-reconnect', !/handleRetryOpen|status\.reconnect|sh-error-retry/.test(banner));
+	}
+	const handler = functionBody(code, 'handleRetryWipe');
+	check('c-handler-exists', handler !== null);
+	if (handler !== null) {
+		check('1-handler-guarded-by-failed-state', /if \(failed === null \|\| reason === null\) return;/.test(handler));
+		check('2-ref-guard', /retryWipeOnce\(\s*wipeRetryingRef,/.test(handler));
+		check('c-wipes-reported-hash-and-reason', /wipeNetwork\(\{ networkHash: failed\.networkHash, reason \}\)/.test(handler));
+		check('c-then-unpaired-notice', /onUnpairedRef\.current\(\{ reason, authorityName: failed\.authorityName, officerName: failed\.officerName \}\)/.test(handler));
+		check('d-handler-no-reconnect', !/handleRetryOpen|openNetwork\(/.test(handler));
+	}
+	// Reachable only from the wipe-failed banner: the declaration plus exactly one call site, inside it.
+	const sites = (code.match(/handleRetryWipe\(/g) ?? []).length;
+	check('1-only-in-banner', sites === 2 && banner !== null && banner.includes('handleRetryWipe('));
+	return failed;
+}
+
+test('S11 control: every wipe-failed matcher passes a synthetic good fixture and each bites on a planted defect', () => {
+	assert.deepEqual(wipeFailedChecks(WIPE_FIXTURE_GOOD), []);
+	const planted = {
+		'a-subscribed-after-onForgotten': WIPE_FIXTURE_GOOD.replace('boot.onForgotten(() => {});', '').replace("useEffect(() => {\n", "useEffect(() => {\nboot.onForgotten(x);\n").replace('const offWipeFailed = boot.onWipeFailed(', 'const offWipeFailed = boot.onWipeFailedX(').replace("useEffect(() => {\n", "useEffect(() => {\nboot.onWipeFailed(y);\n"),
+		'd-no-reconnect': WIPE_FIXTURE_GOOD.replace("{t('forget.cta')}</button></div>", "{t('forget.cta')}</button><span className=\"sh-error-retry\" /></div>"),
+		'c-one-button': WIPE_FIXTURE_GOOD.replace('</button></div>', '</button><button type="button" onClick={handleRetryOpen}>x</button></div>'),
+		'1-only-in-banner': WIPE_FIXTURE_GOOD.replace('<main>', '<aside onClick={() => void handleRetryWipe()} /><main>'),
+		'2-ref-guard': WIPE_FIXTURE_GOOD.replace('retryWipeOnce(wipeRetryingRef,', 'retryWipeOnce({ current: wipeRetrying },'),
+		'1-hash-from-reporting-boot': WIPE_FIXTURE_GOOD.replace('networkHash: boot.networkHash,', 'networkHash: activeNetworkHash,'),
+		'c-forget-failed-copy': WIPE_FIXTURE_GOOD.replace("<p>{t('forget.failed')}</p>", "<p>{t('shell.openFailed')}</p>"),
+		'b-banner-before-unpairing-null': WIPE_FIXTURE_GOOD.replace(') : unpairing ? null', ') : bootFailed ? null'),
+	};
+	for (const [name, fixture] of Object.entries(planted)) {
+		assert.ok(wipeFailedChecks(fixture).includes(name), `the ${name} matcher is inert`);
+	}
+	assert.ok(OPEN_FAILED_BANNER.includes("t('shell.openFailed')"));
+});
+
+test('S11 the wipe-failed banner: forget.failed and ONE Forget action that re-runs wipeNetwork for the boot that reported it, then the unpaired notice; no Reconnect', () => {
+	assert.deepEqual(wipeFailedChecks(CODE), []);
+	assert.match(CODE, /const wipeRetryingRef = useRef\(false\)/, 'the re-entry guard is a ref');
+});
+
+test('S11 the open-failure banner (shell.openFailed + Reconnect) is unchanged, and the onUnpaired call text is byte-identical', () => {
+	assert.ok(CODE.includes(OPEN_FAILED_BANNER), 'the open-failure banner changed');
+	const unpairedCall = CODE.slice(CODE.indexOf('boot.onUnpaired('), CODE.indexOf('boot.onForgotten('));
+	assert.ok(
+		unpairedCall.includes('onUnpairedRef.current({ reason, authorityName: captured.authorityName, officerName: captured.officerName });'),
+		'the onUnpaired call text changed',
+	);
 });

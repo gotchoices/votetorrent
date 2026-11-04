@@ -1126,6 +1126,177 @@ test('B19 source scan: resume and no joinCadre; no whenIdle inside handleAfterPa
 });
 
 // ---------------------------------------------------------------------------
+// B20-B21 (66-29, DEFECT-66-26-02): the unpair is announced only after the wipe
+// confirmed the network gone; a failed wipe reports onWipeFailed instead. They
+// run after B18, whose log pin covers B1-B17 only (B21's negative control logs
+// the wipe's three-argument retry lines).
+// ---------------------------------------------------------------------------
+
+/** A world whose wipe rejects `MemberStorageBusyError`. @param {Record<string, any>} [opts] */
+function makeFailingWipeWorld(opts = {}) {
+	const world = makeWorld(opts);
+	world.deps.wipeNetwork = async (/** @type {any} */ o) => {
+		world.log.push(`wipe:${o.reason}`);
+		world.wipes.push(o);
+		const err = new Error(`busy ${o.networkHash} ${CANARY}`);
+		err.name = 'MemberStorageBusyError';
+		throw err;
+	};
+	return world;
+}
+
+/** @param {any} boot */
+function recordOutcomes(boot) {
+	/** @type {{ unpaired: string[], wipeFailed: string[] }} */
+	const seen = { unpaired: [], wipeFailed: [] };
+	boot.onUnpaired((/** @type {string} */ r) => seen.unpaired.push(r));
+	// Subscribed when present, so a boot without the method still shows WHAT it announces.
+	if (typeof boot.onWipeFailed === 'function') boot.onWipeFailed((/** @type {string} */ r) => seen.wipeFailed.push(r));
+	return seen;
+}
+
+test('B20 a wipe that rejects on cadre:removed never announces the unpair: onWipeFailed once, status unpaired, the boot torn down, one name-only line', async () => {
+	const world = makeFailingWipeWorld({ hash: 'net-b20' });
+	const boot = await startLeader(world);
+	const seen = recordOutcomes(boot);
+	const logStart = CONSOLE_ERRORS.length;
+	world.nodes[0].emit('cadre:removed', {});
+	for (let i = 0; i < 20 && seen.wipeFailed.length + seen.unpaired.length === 0; i += 1) await ticks();
+	assert.deepEqual(seen.unpaired, [], 'onUnpaired is never called after a failed wipe');
+	assert.equal(typeof boot.onWipeFailed, 'function', 'the boot exposes onWipeFailed');
+	assert.deepEqual(seen.wipeFailed, ['removed']);
+	assert.equal(boot.getStatus().kind, 'unpaired', 'the boot stopped showing live data');
+	assert.equal(world.replications[0].stops, 1, 'the replication stopped');
+	assert.equal(world.nodes[0].stops, 1, 'the node stopped');
+	assert.deepEqual(CONSOLE_ERRORS.slice(logStart), [['peer/boot:', 'MemberStorageBusyError']]);
+	await ticks();
+	assert.deepEqual(seen.wipeFailed, ['removed'], 'onWipeFailed called once');
+});
+
+test('B20b the same for a revocation verdict and for resume() -> removed; a resolving wipe still calls onUnpaired once and onWipeFailed never', async () => {
+	{
+		const world = makeFailingWipeWorld({ hash: 'net-b20-rv' });
+		const boot = await startLeader(world);
+		const seen = recordOutcomes(boot);
+		world.verdicts.push({ ok: false, reason: 'revoked' });
+		await runPass(world.replications[0], { at: world.clock.now() });
+		for (let i = 0; i < 20 && seen.wipeFailed.length === 0; i += 1) await ticks();
+		assert.deepEqual(seen, { unpaired: [], wipeFailed: ['revoked'] });
+	}
+	{
+		const world = makeFailingWipeWorld({ hash: 'net-b20-rs', nodeOpts: { resume: () => 'removed' } });
+		const boot = await startDashboardBoot({ networkHash: 'net-b20-rs', deps: world.deps });
+		const seen = recordOutcomes(boot);
+		for (let i = 0; i < 20 && seen.wipeFailed.length === 0; i += 1) await ticks();
+		assert.equal(boot.getStatus().kind, 'unpaired');
+		assert.deepEqual(seen, { unpaired: [], wipeFailed: ['removed'] });
+	}
+	{
+		const world = makeWorld({ hash: 'net-b20-ok' });
+		const boot = await startLeader(world);
+		const seen = recordOutcomes(boot);
+		world.nodes[0].emit('cadre:removed', {});
+		for (let i = 0; i < 20 && seen.unpaired.length === 0; i += 1) await ticks();
+		await ticks();
+		assert.deepEqual(seen, { unpaired: ['removed'], wipeFailed: [] }, 'a resolved wipe announces the unpair, once');
+	}
+	{
+		// stop() while the wipe is still running keeps the wipe-failed listeners, as it keeps onUnpaired's.
+		const world = makeFailingWipeWorld({ hash: 'net-b20-stop' });
+		/** @type {() => void} */
+		let release = () => {};
+		const gate = new Promise((resolve) => {
+			release = () => resolve(undefined);
+		});
+		const failing = world.deps.wipeNetwork;
+		world.deps.wipeNetwork = async (/** @type {any} */ o) => {
+			await gate;
+			return failing(o);
+		};
+		const boot = await startLeader(world);
+		const seen = recordOutcomes(boot);
+		assert.throws(() => boot.onWipeFailed(/** @type {any} */ ('nope')), TypeError);
+		world.nodes[0].emit('cadre:removed', {});
+		await ticks();
+		await boot.stop();
+		assert.deepEqual(seen, { unpaired: [], wipeFailed: [] }, 'nothing is announced before the wipe settles');
+		release();
+		for (let i = 0; i < 20 && seen.wipeFailed.length === 0; i += 1) await ticks();
+		assert.deepEqual(seen, { unpaired: [], wipeFailed: ['removed'] }, 'a stop during the wipe keeps the wipe-failed listener');
+	}
+});
+
+test('B21 composition, real wipeNetwork + real deleteMemberStorage: a node whose stop closes its member connection wipes cleanly with no retry; one that leaves it open ends in onWipeFailed', async (t) => {
+	const memberNode = await import(moduleUrl(dashboardSrc('peer', 'member-node.js')));
+	const keyStoreMod = await import(moduleUrl(dashboardSrc('peer', 'idb-key-store.js')));
+	const { removeNetwork } = await import('@votetorrent/web-data/officer');
+	/** @param {string} name */
+	const openConn = (name) =>
+		new Promise((resolve, reject) => {
+			const req = indexedDB.open(name);
+			req.onsuccess = () => resolve(req.result);
+			req.onerror = () => reject(req.error);
+		});
+	const memberNames = async (/** @type {string} */ h) =>
+		(await indexedDB.databases()).map((d) => String(d.name)).filter((n) => n.startsWith(`vt-member-${h}-`));
+	const retryLines = (/** @type {number} */ from) => CONSOLE_ERRORS.slice(from).filter((args) => args.includes('retry:member-storage')).length;
+
+	/** @param {string} hash @param {boolean} closesOnStop */
+	async function run(hash, closesOnStop) {
+		const world = makeWorld({ hash });
+		delete world.deps.wipeNetwork;
+		world.deps.wipeDeps = { timeoutSignal: () => new AbortController().signal };
+		(await openConn(memberNode.memberStorageDbName(hash, 'control-b21'))).close();
+		const held = /** @type {any} */ (await openConn(memberNode.memberStorageDbName(hash, '~node-local')));
+		const keys = keyStoreMod.createIdbKeyStore({ networkHash: hash });
+		await keys.set('cadre/identity', new Uint8Array(32).fill(5));
+		keys.close();
+		const boot = await startLeader(world);
+		const node = world.nodes[0];
+		const fakeStop = node.stop;
+		// Task 1's contract: stop() resolves only after the member-database connection is closed.
+		node.stop = async () => {
+			await ticks(2);
+			if (closesOnStop) held.close();
+			return fakeStop();
+		};
+		const seen = recordOutcomes(boot);
+		const logStart = CONSOLE_ERRORS.length;
+		node.emit('cadre:removed', {});
+		for (let i = 0; i < 200 && seen.unpaired.length + seen.wipeFailed.length === 0; i += 1) await ticks();
+		return { world, held, seen, retries: retryLines(logStart) };
+	}
+
+	const ok = await run('net-b21', true);
+	assert.deepEqual(ok.seen, { unpaired: ['removed'], wipeFailed: [] }, 'onUnpaired fires once, after the wipe');
+	assert.equal(findNetwork('net-b21', ok.world.storage), undefined, 'the registry entry is gone');
+	assert.deepEqual(await memberNames('net-b21'), [], 'every member database is gone');
+	const check = keyStoreMod.createIdbKeyStore({ networkHash: 'net-b21' });
+	assert.deepEqual(await check.list(), [], 'no device-key record is left');
+	check.close();
+	assert.equal(ok.retries, 0, 'no busy retry: the close came first');
+
+	const neg = await run('net-b21-neg', false);
+	try {
+		// Decided by what the wipe left on disk, never by which callback fired.
+		if (findNetwork('net-b21-neg', neg.world.storage)) {
+			t.diagnostic(`negative control: fake-indexeddb fired onblocked; ${neg.retries} bounded retries were logged before the wipe failed`);
+			assert.ok(neg.retries > 0, 'the bounded retry ran before the wipe gave up');
+			assert.deepEqual(neg.seen, { unpaired: [], wipeFailed: ['removed'] }, 'a wipe blocked by an open connection is never announced as an unpair');
+		} else {
+			t.diagnostic('negative control: fake-indexeddb did not fire onblocked for the open connection; the M-R1 handle count is the binding proof');
+		}
+	} finally {
+		// Always released: an open connection with a queued delete keeps the process alive.
+		neg.held.close();
+		await ticks();
+		await memberNode.deleteMemberStorage('net-b21-neg');
+		await keyStoreMod.deleteDeviceKeys('net-b21-neg');
+		removeNetwork('net-b21-neg', neg.world.storage);
+	}
+});
+
+// ---------------------------------------------------------------------------
 // U1-U4: the React bridge (`src/live/useLiveStatus.ts`), run in ONE child
 // process with Node's type stripping and a `.js` -> `.ts` resolve hook (the
 // mapping the bundler does). Hooks render through `react-dom/server`.
