@@ -425,7 +425,7 @@ export default function PairedBrowsersScreen() {
 					onPress={openPairBrowser}
 				/>
 			</View>
-		) : null;
+		) : undefined;
 
 	const footer =
 		rows !== null && rows.length > 0 ? (
@@ -437,7 +437,7 @@ export default function PairedBrowsersScreen() {
 					{t("pairedBrowsersLocalLabelsNote")}
 				</ThemedText>
 			</View>
-		) : null;
+		) : undefined;
 
 	return (
 		<FlatList
