@@ -28,7 +28,9 @@
  *      closed first; a blocked delete is a rejection, never a resolve).
  *   5. Delete the member node's storage (every `vt-member-...` database of
  *      THIS network, settled against `indexedDB.databases()`). Idempotent
- *      against cadre-core's own control-scope destroy after a removal.
+ *      against cadre-core's own control-scope destroy after a removal. A busy
+ *      delete is retried, bounded, and each retry is logged; the cause (this
+ *      tab's own handles) is closed in step 2, so a healthy run logs no retry.
  *   6. Delete this network's device keys (the origin wrap key and other
  *      networks' keys stay).
  *   7. `clearRowCounts` -- the legacy snapshot row-count key, cleared
@@ -609,9 +611,36 @@ async function deleteNetworkDbSettled(networkHash, options) {
 }
 
 /**
+ * One member-storage delete, retried while it rejects `MemberStorageBusyError`:
+ * at most `DELETE_SETTLE_MAX_ROUNDS` attempts, a `settleYields()` pause before
+ * each retry, and one fixed log line per retry (a store label, never a name,
+ * hash or value). The last busy error is rethrown unchanged; any other
+ * rejection propagates at once. Defence only: step 2 already closed this
+ * tab's handles, so a healthy run never retries.
+ *
+ * @param {(networkHash: string) => Promise<void>} remove
+ * @param {string} networkHash
+ * @returns {Promise<void>}
+ */
+async function removeMemberStorageRetryingBusy(remove, networkHash) {
+	for (let attempt = 1; ; attempt += 1) {
+		try {
+			await remove(networkHash);
+			return;
+		} catch (err) {
+			const busy = err instanceof Error && err.name === 'MemberStorageBusyError';
+			if (!busy || attempt >= DELETE_SETTLE_MAX_ROUNDS) throw err;
+			console.error(LOG_PREFIX, 'MemberStorageBusyError', 'retry:member-storage');
+			await settleYields();
+		}
+	}
+}
+
+/**
  * Delete every member database of the network, then settle: re-run the delete
- * while `indexedDB.databases()` still lists one of them, bounded.
- * `MemberStorageBusyError` from the delete propagates by name.
+ * while `indexedDB.databases()` still lists one of them, bounded. A busy delete
+ * is retried, bounded and logged; `MemberStorageBusyError` that outlasts the
+ * bound propagates by name.
  *
  * @param {string} networkHash
  * @param {TeardownDeps} deps
@@ -619,14 +648,14 @@ async function deleteNetworkDbSettled(networkHash, options) {
  */
 async function deleteMemberStorageSettled(networkHash, deps) {
 	const remove = await memberStorageDeleter(deps);
-	await remove(networkHash);
+	await removeMemberStorageRetryingBusy(remove, networkHash);
 	if (!canListDatabases()) return;
 	const isOurs = memberDbMatcher(networkHash, await memberNameFn(deps));
 	let remaining = (await listedDatabaseNames()).filter(isOurs);
 	let round = 0;
 	while (remaining.length > 0 && round < DELETE_SETTLE_MAX_ROUNDS) {
 		await settleYields();
-		await remove(networkHash);
+		await removeMemberStorageRetryingBusy(remove, networkHash);
 		remaining = (await listedDatabaseNames()).filter(isOurs);
 		round += 1;
 	}

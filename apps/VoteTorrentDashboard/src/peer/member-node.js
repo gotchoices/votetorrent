@@ -17,6 +17,13 @@
  * with a short digest against sanitising collisions, the withdrawal of the strand's two storage
  * services so no peer counts this browser into a storage group, and an idempotent stop.
  *
+ * REMOVAL CLOSES BEFORE THE WIPE. On `cadre:removed`, cadre-core runs its own removal transition:
+ * it shuts the node down (closing the stores), then RE-OPENS the node-local database for the saved
+ * start and the dissolve marker, and only then reports `removed` (or `failed`). The stop of a
+ * removed node waits for that report (bounded by `REMOVAL_SETTLE_MAX_MS`, a timer that lives only
+ * inside `stop()`) and then closes every member-storage handle this tab holds, so the wipe that
+ * follows deletes the databases instead of meeting this tab's own open connection.
+ *
  * THE FOUR NON-NEGOTIABLES.
  *  1. Never start with any origin but `'joined'`. `startJoined` is the only place that starts the
  *     edge node; a start with no origin means "founded" to cadre-core and would run owner genesis,
@@ -220,6 +227,16 @@ const EDGE_READER_PROTOCOL = '/votetorrent/edge-reader/1.0.0';
 const IDENTIFY_PUSH_BOUND_MS = 5000;
 
 /**
+ * How long the stop of a removed node waits for cadre-core's own removal transition to settle.
+ * That transition shuts the node down, then re-opens the node-local database to rewrite the saved
+ * start and to set and clear the dissolve marker, and finally reports `removed` or `failed`. The
+ * stop waits for that report so it can close the re-opened handle afterwards; the bound keeps a
+ * transition that never reports from hanging the wipe. The timer is created and cleared inside
+ * `stop()` only, never in the removal handler.
+ */
+export const REMOVAL_SETTLE_MAX_MS = 20_000;
+
+/**
  * Tell connected peers at once that this node now handles the marker and no storage protocol, instead of
  * after libp2p's 1 s debounced push. Falls back to the debounced push; bounded; a failure is logged by
  * name and never fails the withdrawal.
@@ -293,6 +310,7 @@ function nextMacrotask() {
  * @property {typeof IndexedDBRawStorage} [IndexedDBRawStorage]
  * @property {typeof IndexedDBKVStore} [IndexedDBKVStore]
  * @property {IDBFactory | undefined} [indexedDB] Default `globalThis.indexedDB`.
+ * @property {number} [removalSettleMs] Test only: the removal-settle bound; a positive finite number, else `REMOVAL_SETTLE_MAX_MS`.
  */
 
 /**
@@ -308,6 +326,10 @@ function resolveDeps(deps = {}) {
 		IndexedDBRawStorage: deps.IndexedDBRawStorage ?? IndexedDBRawStorage,
 		IndexedDBKVStore: deps.IndexedDBKVStore ?? IndexedDBKVStore,
 		indexedDB: 'indexedDB' in deps ? deps.indexedDB : globalThis.indexedDB,
+		removalSettleMs:
+			typeof deps.removalSettleMs === 'number' && Number.isFinite(deps.removalSettleMs) && deps.removalSettleMs > 0
+				? deps.removalSettleMs
+				: REMOVAL_SETTLE_MAX_MS,
 	};
 }
 
@@ -525,7 +547,9 @@ export function createMemberPlatform({ networkHash, keyStore, strandId, deps }) 
  * with this one's is left alone, and `vt-dashboard-keys` / `votetorrent-*` are never touched. A
  * blocked or failed delete rejects `MemberStorageBusyError`; after the deletes the list is read
  * again and any resurrected name deleted again, at most three rounds. Idempotent, including after
- * cadre-core already destroyed the control scope on a removal.
+ * cadre-core already destroyed the control scope on a removal. On a removal the member node's
+ * `stop()` has already closed this tab's handles (including the node-local database cadre-core's
+ * removal transition re-opened), so this delete meets no open connection of this tab.
  *
  * @param {string} networkHash
  * @param {{ deps?: { indexedDB?: IDBFactory | undefined } }} [options]
@@ -625,7 +649,8 @@ export async function createMemberNode({ networkHash, keyStore, relayAddrs, stra
 		throw new MemberNodeConfigError('createMemberNode: the strand id must be a non-empty string when given');
 	}
 	const d = resolveDeps(deps);
-	const edge = d.createEdgeNode(createMemberPlatform({ networkHash, keyStore, relayAddrs: relays, strandId, deps }));
+	const platform = createMemberPlatform({ networkHash, keyStore, relayAddrs: relays, strandId, deps });
+	const edge = d.createEdgeNode(platform);
 
 	/** @type {Map<MemberNodeEvent, Set<(payload: any) => void>>} */
 	const listeners = new Map(MEMBER_EVENTS.map((event) => [/** @type {MemberNodeEvent} */ (event), new Set()]));
@@ -639,6 +664,9 @@ export async function createMemberNode({ networkHash, keyStore, relayAddrs, stra
 	let halted = false;
 	/** @type {Promise<void> | null} */
 	let stopping = null;
+	/** Resolves on cadre-core's first `removed` or `failed` report after a `cadre:removed`; null before one. */
+	/** @type {(Promise<void> & { cancel?: () => void }) | null} */
+	let removalSettled = null;
 
 	/**
 	 * @param {MemberNodeEvent} event
@@ -666,6 +694,75 @@ export async function createMemberNode({ networkHash, keyStore, relayAddrs, stra
 		const pending = [...waiters];
 		waiters.clear();
 		for (const waiter of pending) waiter.resolve(node);
+	}
+
+	/** @param {unknown} status */
+	function isSettledStatus(status) {
+		const state = /** @type {{ state?: unknown } | null | undefined} */ (status)?.state;
+		return state === 'removed' || state === 'failed';
+	}
+
+	/**
+	 * Subscribe (no timer) to cadre-core's status reports and resolve on the first `removed` or
+	 * `failed`, then unsubscribe. With no `onStatus` on the edge, the promise never resolves and the
+	 * caller's bound decides. `cancel` drops the subscription.
+	 *
+	 * @returns {Promise<void> & { cancel?: () => void }}
+	 */
+	function settleWatch() {
+		/** @type {() => void} */
+		let off = () => {};
+		/** @type {Promise<void> & { cancel?: () => void }} */
+		const promise = new Promise((resolve) => {
+			if (typeof edge.onStatus !== 'function') return;
+			let done = false;
+			const unsubscribe = edge.onStatus((status) => {
+				if (done || !isSettledStatus(status)) return;
+				done = true;
+				off();
+				resolve();
+			});
+			off = () => {
+				done = true;
+				unsubscribe();
+			};
+		});
+		promise.cancel = () => off();
+		return promise;
+	}
+
+	/**
+	 * The removed path of `stop()`: wait for cadre-core's removal transition to settle (now, when the
+	 * status already reads `removed` or `failed`; else on its report, bounded), then close every
+	 * member-storage handle the platform holds. Never stops the edge node: cadre-core stopped it.
+	 */
+	async function closeAfterRemoval() {
+		if (!isSettledStatus(edge.status)) {
+			const watch = removalSettled ?? settleWatch();
+			/** @type {ReturnType<typeof setTimeout> | undefined} */
+			let bound;
+			let timedOut = false;
+			try {
+				await Promise.race([
+					watch,
+					new Promise((resolve) => {
+						bound = setTimeout(() => {
+							timedOut = true;
+							resolve(undefined);
+						}, d.removalSettleMs);
+					}),
+				]);
+			} finally {
+				if (bound !== undefined) clearTimeout(bound);
+				watch.cancel?.();
+			}
+			if (timedOut && !isSettledStatus(edge.status)) logFailure(new MemberNodeError('not-running'));
+		}
+		try {
+			await platform.storage.close();
+		} catch (err) {
+			logFailure(err);
+		}
 	}
 
 	/** The running CadreNode, or null. */
@@ -726,6 +823,7 @@ export async function createMemberNode({ networkHash, keyStore, relayAddrs, stra
 	edge.on('cadre:removed', (removal) => {
 		removed = true;
 		withdrawnNode = null;
+		if (removalSettled === null) removalSettled = settleWatch();
 		rejectWaiters('not-running');
 		notify('cadre:removed', removal);
 	});
@@ -779,7 +877,13 @@ export async function createMemberNode({ networkHash, keyStore, relayAddrs, stra
 			withdrawnNode = null;
 			rejectWaiters('not-running');
 			const state = edge.status.state;
-			if (removed || state === 'removed' || state === 'stopped') return;
+			if (removed || state === 'removed') {
+				// A mid-removal `stopped` is exactly the race: cadre-core is about to re-open the
+				// node-local database. Wait for its report, then close what this tab holds.
+				await closeAfterRemoval();
+				return;
+			}
+			if (state === 'stopped') return;
 			try {
 				await edge.stop();
 			} catch (err) {
