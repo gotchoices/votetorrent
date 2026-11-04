@@ -49,7 +49,9 @@
 	gap: var(--space-xs);
 }
 
+/* Data pills are labels, not controls; only the view switch is clickable. */
 .pill {
+	cursor: default;
 	display: inline-flex;
 	align-items: center;
 	padding: 0 var(--space-sm);

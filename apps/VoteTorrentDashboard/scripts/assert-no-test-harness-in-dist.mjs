@@ -47,7 +47,8 @@ const DIST_ASSETS = path.join(DIST, 'assets');
  * (`test/browser/gap-probe.tsx`, built to `dist-gap-probe`) and its readout
  * channel; `zero-state-legend`/`label-headroom` are the two gate drivers that
  * read it. Added by the phase-60 security audit, which found this list blind
- * to every one of them (`60-WR / T-60-WR-01`).
+ * to every one of them (`60-WR / T-60-WR-01`). `live-gate`/`__LIVE_GATE__` are
+ * 66-25's live gate entry (`test/browser/live-gate.tsx`) and its readout channel.
  *
  * ONE KNOWN BENIGN COLLISION, recorded rather than special-cased: `gap-probe`
  * also appears in a DOC COMMENT in shipped source
@@ -62,7 +63,7 @@ const DIST_ASSETS = path.join(DIST, 'assets');
  * config stops stripping comments this fires, and that is the correct thing
  * to investigate rather than a bug in the matcher. */
 const TEST_HARNESS_TOKEN_RE =
-	/(compose-gate|db-gate|shell-gate|gate-matrix|ui-gate|chart-geometry-gate|gap-probe|zero-state-legend|label-headroom|__COMPOSE_GATE__|__DB_GATE__|__SHELL_GATE__|__UI_GATE__|__CHART_GEOMETRY_GATE__|__GAP_PROBE_THROWS__|__GAP_PROBE_DONE__|__GAP_PROBE_ERROR__)/;
+	/(compose-gate|db-gate|shell-gate|gate-matrix|ui-gate|chart-geometry-gate|gap-probe|zero-state-legend|label-headroom|__COMPOSE_GATE__|__DB_GATE__|__SHELL_GATE__|__UI_GATE__|__CHART_GEOMETRY_GATE__|__GAP_PROBE_THROWS__|__GAP_PROBE_DONE__|__GAP_PROBE_ERROR__|live-gate|__LIVE_GATE__)/;
 
 /** @param {string} message */
 function fail(message) {
@@ -93,6 +94,8 @@ const POSITIVE_CONTROL_FIXTURES = [
 	'window.__GAP_PROBE_ERROR__ = null;',
 	'/test/browser/zero-state-legend-gate.js',
 	'/test/browser/label-headroom-gate.js',
+	'import { runLiveGate } from "./test/browser/live-gate.js";',
+	'window.__LIVE_GATE__ = { mounted: [], error: null };',
 ];
 for (const fixture of POSITIVE_CONTROL_FIXTURES) {
 	if (!TEST_HARNESS_TOKEN_RE.test(fixture)) {
