@@ -886,8 +886,10 @@ function initialRoute(): AppRoute {
  * Mirrors `src/main.tsx`'s `App` line for line (routing through the real
  * `routeFromRegistry`, the same `key` remount rule and the same four shell
  * callbacks), with `bootDeps` forwarded to the shell and `loadPairing` to
- * the pairing screen. `App` is not exported from `main.tsx`, so this mirror
- * is the only way to compose it with the seams (follow-up: export it).
+ * the pairing screen, and the webcam QR scanner opted in (`qrScanEnabled`,
+ * R-G16: production keeps it off) so the scanner legs still run. `App` is not
+ * exported from `main.tsx`, so this mirror is the only way to compose it with
+ * the seams (follow-up: export it).
  */
 export function GateApp({
 	bootDeps,
@@ -952,6 +954,7 @@ export function GateApp({
 			onPaired={handlePaired}
 			onCancel={handleCancel}
 			loadPairing={loadPairing}
+			qrScanEnabled
 		/>
 	);
 }
@@ -1281,7 +1284,7 @@ export async function runLiveGate(): Promise<void> {
 			root = createRoot(rootEl);
 			root.render(
 				<StrictMode>
-					<Pairing notice={notice} onDismissNotice={() => undefined} hasPairedNetworks={false} onPaired={() => undefined} loadPairing={pairing.loadPairing} />
+					<Pairing notice={notice} onDismissNotice={() => undefined} hasPairedNetworks={false} onPaired={() => undefined} loadPairing={pairing.loadPairing} qrScanEnabled />
 				</StrictMode>,
 			);
 		};

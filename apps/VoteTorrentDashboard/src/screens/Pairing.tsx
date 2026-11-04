@@ -4,8 +4,10 @@
  * restored a one-off copy of the data; a paired browser is a member device
  * that follows the network live.
  *
- * The officer pastes the `vtpair1.` code the Authority app shows, or scans its
- * QR with the webcam (QrScanner.tsx). Either path hands the whitespace-free
+ * The officer pastes the `vtpair1.` code the Authority app shows. Scanning its
+ * QR with the webcam (QrScanner.tsx) is an off-by-default capability
+ * (`qrScanEnabled`, default `QR_SCAN_ENABLED`): hidden in production for this
+ * release, enabled only by the live gate. Either path hands the whitespace-free
  * code to `pairBrowser` (src/peer/pairing.js) with the real officer strand
  * reader (src/peer/strand-read.js) as `deps.openStrandReader`. The peer layer
  * is loaded by dynamic import() only when a pairing starts, so the entry chunk
@@ -200,6 +202,15 @@ export function pairingFieldValue({
 function isFailureReason(reason: unknown): reason is PairFailureReason {
 	return typeof reason === 'string' && Object.prototype.hasOwnProperty.call(FAILURE_VIEWS, reason);
 }
+
+/**
+ * Whether the pairing screen offers the webcam QR scanner. Off for this
+ * release: the decoder cannot read real pairing QRs from a webcam
+ * (DEFECT-66-25-01), so paste is the only pairing path (R-G12, R-G16).
+ * QrScanner.tsx stays in the tree for the later fix; production main.tsx
+ * never enables it, and the live gate opts in with `qrScanEnabled`.
+ */
+export const QR_SCAN_ENABLED = false;
 
 /** The pasted or scanned text with every whitespace character removed. */
 export function normalizePairingInput(text: unknown): string {
@@ -401,6 +412,8 @@ export interface PairingStateViewProps {
 	onCodeChange?: (code: string) => void;
 	onCodePaste?: (event: ClipboardEvent<HTMLTextAreaElement>) => void;
 	onSubmit?: () => void;
+	/** Show the "Scan QR code" button. Defaults to QR_SCAN_ENABLED (off). */
+	qrScanEnabled?: boolean;
 	onScan?: () => void;
 	onStop?: () => void;
 	onCta?: (ctaKey: string) => void;
@@ -562,9 +575,11 @@ export function PairingStateView(props: PairingStateViewProps): ReactElement {
 							<button type="submit" className="pr-cta" disabled={fieldValue.trim() === ''}>
 								{t('pairing.cta')}
 							</button>
-							<button type="button" className="pr-button" onClick={props.onScan}>
-								{t('pairing.scanCta')}
-							</button>
+							{(props.qrScanEnabled ?? QR_SCAN_ENABLED) ? (
+								<button type="button" className="pr-button" onClick={props.onScan}>
+									{t('pairing.scanCta')}
+								</button>
+							) : null}
 						</div>
 					</form>
 				) : null}
@@ -657,9 +672,12 @@ export interface PairingProps {
 	onPaired: (result: { networkHash: string; handoff: PairingHandoff }) => void;
 	onCancel?: () => void;
 	loadPairing?: () => Promise<PairingModule>;
+	/** Offer the webcam QR scanner. Defaults to QR_SCAN_ENABLED (off); only the live gate enables it. */
+	qrScanEnabled?: boolean;
 }
 
 export function Pairing(props: PairingProps): ReactElement {
+	const qrScanEnabled = props.qrScanEnabled ?? QR_SCAN_ENABLED;
 	const [view, setView] = useState<PairingView>('idle');
 	const [code, setCode] = useState('');
 	const [failure, setFailure] = useState<PairFailureReason | null>(null);
@@ -903,23 +921,26 @@ export function Pairing(props: PairingProps): ReactElement {
 				onCodeChange={onCodeInput}
 				onCodePaste={onCodePaste}
 				onSubmit={() => void submit(code)}
+				qrScanEnabled={qrScanEnabled}
 				onScan={() => setScannerOpen(true)}
 				onStop={onStop}
 				onCta={onCta}
 				onDismissNotice={props.onDismissNotice}
 			/>
-			<QrScanner
-				open={scannerOpen}
-				onFound={(text) => {
-					setScannerOpen(false);
-					void submit(text);
-				}}
-				onClose={() => setScannerOpen(false)}
-				onPasteInstead={() => {
-					setScannerOpen(false);
-					focusFieldRef.current = true;
-				}}
-			/>
+			{qrScanEnabled ? (
+				<QrScanner
+					open={scannerOpen}
+					onFound={(text) => {
+						setScannerOpen(false);
+						void submit(text);
+					}}
+					onClose={() => setScannerOpen(false)}
+					onPasteInstead={() => {
+						setScannerOpen(false);
+						focusFieldRef.current = true;
+					}}
+				/>
+			) : null}
 			{swapRequest !== null ? <SwapDialog request={swapRequest} onAnswer={answerSwap} /> : null}
 		</>
 	);

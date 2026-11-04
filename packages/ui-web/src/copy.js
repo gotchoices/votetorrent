@@ -690,7 +690,7 @@ export const COPY = Object.freeze({
 	// key convention (`panelFrame.sitePill` / `panelFrame.sitesPill`).
 	'pairing.title': 'Pair this browser',
 	'pairing.intro':
-		"In the Authority app, open Paired browsers and choose Pair a browser. Paste the code it shows, or scan its QR code with this computer's camera.",
+		'In the Authority app, open Paired browsers and choose Pair a browser. Paste the code it shows.',
 	'pairing.cta': 'Pair this browser',
 	'pairing.scanCta': 'Scan QR code',
 	'pairing.fieldLabel': 'Pairing code',
@@ -718,7 +718,7 @@ export const COPY = Object.freeze({
 	'pairing.action.retry': 'Retry pairing',
 	'pairing.failed.malformed.heading': "That isn't a pairing code.",
 	'pairing.failed.malformed.body':
-		'Paste the whole code from the Authority app, or scan its QR code.',
+		'Paste the whole code from the Authority app.',
 	'pairing.failed.old-style.heading': 'This is an old sign-in code.',
 	'pairing.failed.old-style.body':
 		'This dashboard now pairs instead. In the Authority app, open Paired browsers and make a new code.',
