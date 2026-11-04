@@ -254,7 +254,7 @@ test('H8 abort after an ok result calls nothing and the adopted node stays alive
 
 // --- rendered states -------------------------------------------------------------
 
-test('R1 idle with an empty field: the textarea attributes, a disabled CTA, the scan button and the empty-networks block', () => {
+test('R1 idle with an empty field: the textarea attributes, a disabled CTA, NO scan button (R-G16) and the empty-networks block', () => {
 	const html = render({ hasPairedNetworks: false });
 	const area = html.match(/<textarea[^>]*>/);
 	assert.ok(area, 'a textarea renders');
@@ -265,12 +265,99 @@ test('R1 idle with an empty field: the textarea attributes, a disabled CTA, the 
 		assert.ok(areaTag.includes(attr), `textarea has ${attr}`);
 	}
 	assert.match(html, /<button type="submit" class="pr-cta" disabled="">Pair this browser<\/button>/);
-	assert.ok(has(html, 'pairing.scanCta'));
+	// R-G16: QR scanning is off for this release, so by default the screen offers paste only.
+	assert.ok(!has(html, 'pairing.scanCta'), 'no scan button by default');
 	assert.ok(has(html, 'pairing.emptyHeading') && has(html, 'pairing.emptyBody'));
 	assert.ok(has(html, 'pairing.title') && has(html, 'pairing.intro') && has(html, 'pairing.fieldLabel') && has(html, 'pairing.fieldHelp'));
 	const withCode = render({ code: 'vtpair1.abc' });
 	assert.match(withCode, /<button type="submit" class="pr-cta">/, 'the CTA enables once the field has text');
 	assert.ok(!has(withCode, 'pairing.emptyHeading'), 'no empty block once a network is paired');
+});
+
+/** Every intrinsic element in a returned React tree (function components are not expanded). */
+function intrinsicElements(/** @type {any} */ node, /** @type {any[]} */ out = []) {
+	if (Array.isArray(node)) {
+		for (const child of node) intrinsicElements(child, out);
+	} else if (node && typeof node === 'object' && node.props) {
+		if (typeof node.type === 'string') out.push(node);
+		intrinsicElements(node.props.children, out);
+	}
+	return out;
+}
+const SCAN_TEXT = COPY['pairing.scanCta'];
+const scanButtons = (/** @type {any} */ tree) =>
+	intrinsicElements(tree).filter((el) => el.type === 'button' && el.props.children === SCAN_TEXT);
+/** The stateful screen, server-rendered (no effects run, so the peer layer never loads). */
+const renderScreen = (/** @type {any} */ extra = {}) =>
+	renderToStaticMarkup(
+		createElement(P.Pairing, {
+			notice: null,
+			onDismissNotice: () => undefined,
+			hasPairedNetworks: false,
+			onPaired: () => undefined,
+			...extra,
+		}),
+	);
+const SCANNER_DIALOG = /<dialog[^>]*class="pr-scanner"/;
+
+test('R1b R-G16 default: QR_SCAN_ENABLED is false, and the stateful screen renders no scan button and mounts no scanner', () => {
+	assert.equal(P.QR_SCAN_ENABLED, false, 'the capability ships off');
+	// Controls: the matchers bite on planted markup.
+	assert.match('<dialog class="pr-scanner" aria-labelledby="pr-scanner-heading">', SCANNER_DIALOG);
+	assert.equal(scanButtons({ type: 'div', props: { children: [{ type: 'button', props: { children: SCAN_TEXT } }] } }).length, 1);
+
+	const html = renderScreen();
+	assert.ok(html.includes('<textarea'), 'sanity: the idle form rendered');
+	assert.ok(!has(html, 'pairing.scanCta'), 'no scan button');
+	assert.doesNotMatch(html, SCANNER_DIALOG, 'no scanner dialog mounted');
+	assert.equal(scanButtons(P.PairingStateView({ view: 'idle', code: '', hasPairedNetworks: false })).length, 0);
+	assert.equal(scanButtons(P.PairingStateView({ view: 'idle', code: '', hasPairedNetworks: false, qrScanEnabled: false })).length, 0);
+	const off = renderScreen({ qrScanEnabled: false });
+	assert.ok(!has(off, 'pairing.scanCta') && !SCANNER_DIALOG.test(off), 'an explicit false is off too');
+});
+
+test('R1c R-G16 enabled: the scan button renders, its click calls onScan, and the screen mounts the scanner that onScan opens', () => {
+	const html = render({ hasPairedNetworks: false, qrScanEnabled: true });
+	assert.ok(has(html, 'pairing.scanCta'), 'the scan button renders when enabled');
+	let scans = 0;
+	const buttons = scanButtons(P.PairingStateView({ view: 'idle', code: '', hasPairedNetworks: false, qrScanEnabled: true, onScan: () => scans++ }));
+	assert.equal(buttons.length, 1, 'exactly one scan button');
+	assert.equal(buttons[0].props.type, 'button', 'it is not a submit button');
+	buttons[0].props.onClick();
+	assert.equal(scans, 1, 'clicking it calls onScan');
+
+	const screen = renderScreen({ qrScanEnabled: true });
+	assert.ok(has(screen, 'pairing.scanCta'), 'the stateful screen shows the button');
+	assert.match(screen, SCANNER_DIALOG, 'the scanner dialog is mounted (closed until opened)');
+	// The wiring that opens it: onScan sets scannerOpen, which is the scanner's open prop.
+	const code = stripComments(readFileSync(PAIRING_PATH, 'utf8'));
+	assert.match(code, /onScan=\{\(\) => setScannerOpen\(true\)\}/);
+	assert.match(code, /<QrScanner\s+open=\{scannerOpen\}/);
+});
+
+test('R1d R-G16 production never enables the scanner: main.tsx names neither the prop nor the constant (comment-stripped)', () => {
+	const ENABLES = /\bqrScanEnabled\b|\bQR_SCAN_ENABLED\b/;
+	assert.match('<Pairing notice={n} qrScanEnabled />', ENABLES, 'control: a planted prop is caught');
+	assert.match("import { QR_SCAN_ENABLED } from './screens/Pairing';", ENABLES, 'control: a planted constant is caught');
+	assert.doesNotMatch('<Pairing notice={n} onPaired={p} />', ENABLES);
+	const main = stripComments(readFileSync(dashboardSrc('main.tsx'), 'utf8'));
+	assert.match(main, /<Pairing\b/, 'sanity: main.tsx mounts Pairing');
+	assert.doesNotMatch(main, ENABLES);
+});
+
+test('R1e R-G16 the live gate opts in: GateApp (and the notice mount) pass qrScanEnabled, so its scanner legs keep running', () => {
+	const gate = stripComments(readFileSync(dashboardRoot('test', 'browser', 'live-gate.tsx'), 'utf8'));
+	const gateApp = gate.match(/export function GateApp\([\s\S]*?\n\}\n/);
+	assert.ok(gateApp, 'sanity: GateApp found');
+	const pairing = gateApp[0].match(/<Pairing\b[\s\S]*?\/>/);
+	assert.ok(pairing, 'GateApp mounts Pairing');
+	const ENABLED = /\bqrScanEnabled(?:=\{true\})?(?=[\s/])/;
+	assert.match('<Pairing a={b} qrScanEnabled />', ENABLED, 'control: bare prop');
+	assert.match('<Pairing a={b} qrScanEnabled={true} />', ENABLED, 'control: explicit true');
+	assert.doesNotMatch('<Pairing a={b} qrScanEnabled={false} />', ENABLED, 'control: false is not enabled');
+	assert.match(pairing[0], ENABLED, 'GateApp enables the scanner');
+	const notice = gate.match(/<Pairing notice=\{notice\}[\s\S]*?\/>/);
+	assert.ok(notice && ENABLED.test(notice[0]), 'the notice mount enables it too, as before');
 });
 
 test('R2 verifying and joining replace the field; joining shows the authority, three steps and Stop pairing', () => {
