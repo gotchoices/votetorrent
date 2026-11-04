@@ -178,6 +178,25 @@ export const FAILURE_VIEWS: Readonly<Record<PairFailureReason, FailureView>> = O
 	}),
 });
 
+/**
+ * What the code field shows. After a failure that consumed the code (`keepsCode` false) the field
+ * is blank, whatever the caller passes, unless the text is fresh input the officer typed or
+ * pasted AFTER the failure: a consumed bearer code is never put back on screen, but a new one is
+ * shown so the screen stays usable without a reload.
+ */
+export function pairingFieldValue({
+	failure,
+	code,
+	freshInput,
+}: {
+	failure: PairFailureReason | null | undefined;
+	code: string;
+	freshInput?: boolean;
+}): string {
+	if (failure && !FAILURE_VIEWS[failure].keepsCode && freshInput !== true) return '';
+	return code;
+}
+
 function isFailureReason(reason: unknown): reason is PairFailureReason {
 	return typeof reason === 'string' && Object.prototype.hasOwnProperty.call(FAILURE_VIEWS, reason);
 }
@@ -368,6 +387,8 @@ export interface PairingStateViewProps {
 	view: PairingView;
 	code: string;
 	failure?: PairFailureReason | null;
+	/** True once the officer typed or pasted new text after the failure on screen. */
+	freshInput?: boolean;
 	reachedPhase?: PairPhase | null;
 	slow?: boolean;
 	otherTab?: boolean;
@@ -446,8 +467,9 @@ function FailureAlert(props: { failure: PairFailureReason; otherTab: boolean; on
 export function PairingStateView(props: PairingStateViewProps): ReactElement {
 	const { view, notice, hasPairedNetworks } = props;
 	const failure = view === 'failed' && props.failure ? props.failure : null;
-	// Defence in depth: a consumed code is never put back on screen, whatever the caller passes.
-	const fieldValue = failure !== null && !FAILURE_VIEWS[failure].keepsCode ? '' : props.code;
+	// Defence in depth: a consumed code is never put back on screen, whatever the caller passes;
+	// new input typed or pasted AFTER the failure is shown (and enables the CTA).
+	const fieldValue = pairingFieldValue({ failure, code: props.code, freshInput: props.freshInput });
 	const showForm = view === 'idle' || view === 'failed';
 	const noticeCopy = notice ? unpairedNoticeCopy(notice) : null;
 	const showFailedSteps = failure !== null && phaseIndex(props.reachedPhase) >= phaseIndex('connecting');
@@ -641,6 +663,8 @@ export function Pairing(props: PairingProps): ReactElement {
 	const [view, setView] = useState<PairingView>('idle');
 	const [code, setCode] = useState('');
 	const [failure, setFailure] = useState<PairFailureReason | null>(null);
+	// True once new text arrived after the failure on screen; reset by every submit and failure.
+	const [freshInput, setFreshInput] = useState(false);
 	const [reachedPhase, setReachedPhase] = useState<PairPhase | null>(null);
 	const [slow, setSlow] = useState(false);
 	const [otherTab, setOtherTab] = useState(false);
@@ -735,6 +759,7 @@ export function Pairing(props: PairingProps): ReactElement {
 	};
 
 	const failWith = (reason: PairFailureReason) => {
+		setFreshInput(false);
 		setFailure(reason);
 		setView('failed');
 		if (!FAILURE_VIEWS[reason].keepsCode) setCode('');
@@ -744,6 +769,7 @@ export function Pairing(props: PairingProps): ReactElement {
 		if (busyRef.current) return;
 		const next = normalizePairingInput(raw);
 		if (next === '') return;
+		setFreshInput(false);
 		setCode(next);
 		setOtherTab(false);
 		reachedRef.current = null;
@@ -819,6 +845,7 @@ export function Pairing(props: PairingProps): ReactElement {
 	};
 
 	const onCta = (ctaKey: string) => {
+		setFreshInput(false);
 		if (ctaKey === 'pairing.action.retry') {
 			void submit(code);
 			return;
@@ -834,6 +861,12 @@ export function Pairing(props: PairingProps): ReactElement {
 		if (typeof text !== 'string') return;
 		event.preventDefault();
 		setCode(normalizePairingInput(text));
+		if (failure !== null) setFreshInput(true);
+	};
+
+	const onCodeInput = (text: string) => {
+		setCode(text);
+		if (failure !== null) setFreshInput(true);
 	};
 
 	// Escape returns to the shell when there is one to return to.
@@ -857,6 +890,7 @@ export function Pairing(props: PairingProps): ReactElement {
 				view={view}
 				code={code}
 				failure={failure}
+				freshInput={freshInput}
 				reachedPhase={reachedPhase}
 				slow={slow}
 				otherTab={otherTab}
@@ -866,7 +900,7 @@ export function Pairing(props: PairingProps): ReactElement {
 				hasPairedNetworks={props.hasPairedNetworks}
 				noticeHeadingRef={noticeHeadingRef}
 				textareaRef={textareaRef}
-				onCodeChange={setCode}
+				onCodeChange={onCodeInput}
 				onCodePaste={onCodePaste}
 				onSubmit={() => void submit(code)}
 				onScan={() => setScannerOpen(true)}
