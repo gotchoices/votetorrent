@@ -858,6 +858,43 @@ export async function runLiveMeshGate(options = {}) {
 			}
 		}
 
+		// ---- 6. L1 tampered-statement control (D-26) ---------------------------------------------------
+		// L1 runs first again, as the plan ordered; DEFECT-66-26-01 is fixed in 66-29.
+		await leg('L1', ms(300_000), async () => {
+			const t0 = Date.now();
+			const wsBefore = pageLog.wsUrls.length;
+			await mint('ctl', true);
+			await pairWith('ctl');
+			const headingTexts = Object.fromEntries(Object.entries(SRC.headingKeys).map(([k, v]) => [k, t(v)]));
+			await page.waitForFunction(() => document.querySelector('.pr-alert .pr-heading') !== null, undefined, { timeout: ms(240_000), polling: 250 });
+			const heading = (await page.locator('.pr-alert .pr-heading').first().textContent())?.trim() ?? '';
+			check(heading === headingTexts['officer-not-valid'], `heading:${Object.entries(headingTexts).find(([, v]) => v === heading)?.[0] ?? 'other'}`);
+			const ms1 = Date.now() - t0;
+			const wsAlias = pageLog.wsUrls.slice(wsBefore).some((u) => new URL(u).hostname === cfg.alias);
+			check(wsAlias, 'no-websocket-to-alias');
+			await waitWiped(hash, ms(60_000));
+			const s = await status('ctl');
+			check(typeof s.usagePeer === 'string', 'no-usage-peer');
+			const removed = await hostRef.request('remove ctl', (/** @type {any} */ l) => l.startsWith('HOST_REMOVED label=ctl ') || l.startsWith('HOST_REFUSED'), ms(60_000));
+			console.log(`[lm-L1] officer-not-valid after ${ms1} ms (${removed.split(' ').pop()})`);
+			// DEFECT-66-26-01 observation (not a rung): a harmless non-code text typed into the field.
+			const field = page.getByLabel(t('pairing.fieldLabel'), { exact: true });
+			await field.fill('defect-probe').catch(() => undefined);
+			const trap = await page.evaluate(() => {
+				const area = /** @type {HTMLTextAreaElement|null} */ (document.querySelector('textarea#pr-code'));
+				const cta = /** @type {HTMLButtonElement|null} */ (document.querySelector('.pr-cta'));
+				return { fieldEmpty: area !== null && area.value === '', ctaDisabled: cta !== null && cta.disabled, alertShown: document.querySelector('.pr-alert') !== null };
+			});
+			console.log(`[lm-obs] DEFECT-66-26-01 after officer-not-valid: fieldEmpty=${trap.fieldEmpty} ctaDisabled=${trap.ctaDisabled} alertShown=${trap.alertShown}`);
+			check(
+				trap.fieldEmpty === false && trap.ctaDisabled === false && trap.alertShown === true,
+				`field-after-refusal:fieldEmpty=${trap.fieldEmpty} ctaDisabled=${trap.ctaDisabled} alertShown=${trap.alertShown}`,
+			);
+			// L2 starts from an empty field, in the same tab, with no reload.
+			await field.fill('');
+			return `officer-not-valid after ${ms1} ms`;
+		});
+
 		// ---- 7. L2 pair and Live (D-01 D-02 D-06 D-17 D-18) -----------------------------------------------
 		await leg('L2', ms(420_000), async () => {
 			const tPaste = await pageNow();
@@ -955,6 +992,8 @@ export async function runLiveMeshGate(options = {}) {
 			const s = await status('p1');
 			check(s.authorized === false && s.inMachines === false, `machine:authorized=${s.authorized} inMachines=${s.inMachines}`);
 			check(s.bAuthorized === true, 'officer-B-lost-membership');
+			// The sweep path leaves no residue either, and nothing came back since L4a's wipe.
+			await waitWiped(hash, ms(30_000));
 			console.log(`[lm-L4b] removed by sweep after ${sweepMs} ms`);
 			return `removed by sweep after ${sweepMs} ms`;
 		});
@@ -983,40 +1022,6 @@ export async function runLiveMeshGate(options = {}) {
 			check(s2.inMachines === false, 'still-in-machines');
 			console.log(`[lm-L5] live after ${liveMs} ms, unpaired(removed) after ${unpairMs} ms`);
 			return `live after ${liveMs} ms, unpaired(removed) after ${unpairMs} ms`;
-		});
-
-		// ---- 6. L1 tampered-statement control (D-26), run LAST of the legs --------------------------------
-		// Order change (66-26 run under R-G8, rungs unchanged): after an officer-not-valid failure the pairing
-		// field renders empty while the failure stays set, so the CTA stays disabled until a reload
-		// (DEFECT-66-26-01, Pairing.tsx). With ONE navigation for the run, L1 first made every later leg
-		// unreachable. L1 now follows L5 and the trap itself is observed below on every run.
-		await leg('L1', ms(300_000), async () => {
-			const t0 = Date.now();
-			const wsBefore = pageLog.wsUrls.length;
-			await mint('ctl', true);
-			await pairWith('ctl');
-			const headingTexts = Object.fromEntries(Object.entries(SRC.headingKeys).map(([k, v]) => [k, t(v)]));
-			await page.waitForFunction(() => document.querySelector('.pr-alert .pr-heading') !== null, undefined, { timeout: ms(240_000), polling: 250 });
-			const heading = (await page.locator('.pr-alert .pr-heading').first().textContent())?.trim() ?? '';
-			check(heading === headingTexts['officer-not-valid'], `heading:${Object.entries(headingTexts).find(([, v]) => v === heading)?.[0] ?? 'other'}`);
-			const ms1 = Date.now() - t0;
-			const wsAlias = pageLog.wsUrls.slice(wsBefore).some((u) => new URL(u).hostname === cfg.alias);
-			check(wsAlias, 'no-websocket-to-alias');
-			await waitWiped(hash, ms(60_000));
-			const s = await status('ctl');
-			check(typeof s.usagePeer === 'string', 'no-usage-peer');
-			const removed = await hostRef.request('remove ctl', (/** @type {any} */ l) => l.startsWith('HOST_REMOVED label=ctl ') || l.startsWith('HOST_REFUSED'), ms(60_000));
-			console.log(`[lm-L1] officer-not-valid after ${ms1} ms (${removed.split(' ').pop()})`);
-			// DEFECT-66-26-01 observation (not a rung): a harmless non-code text typed into the field.
-			const field = page.getByLabel(t('pairing.fieldLabel'), { exact: true });
-			await field.fill('defect-probe').catch(() => undefined);
-			const trap = await page.evaluate(() => {
-				const area = /** @type {HTMLTextAreaElement|null} */ (document.querySelector('textarea#pr-code'));
-				const cta = /** @type {HTMLButtonElement|null} */ (document.querySelector('.pr-cta'));
-				return { fieldEmpty: area !== null && area.value === '', ctaDisabled: cta !== null && cta.disabled, alertShown: document.querySelector('.pr-alert') !== null };
-			});
-			console.log(`[lm-obs] DEFECT-66-26-01 after officer-not-valid: fieldEmpty=${trap.fieldEmpty} ctaDisabled=${trap.ctaDisabled} alertShown=${trap.alertShown}`);
-			return `officer-not-valid after ${ms1} ms`;
 		});
 
 		// ---- 12. H1 hygiene ------------------------------------------------------------------------------
