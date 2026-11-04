@@ -610,13 +610,51 @@ async function deleteNetworkDbSettled(networkHash, options) {
 	if (remaining.includes(name)) throw deleteBlockedError();
 }
 
+/** A `MemberStorageBusyError` by name, without importing the peer layer (its message is fixed). */
+function memberStorageBusyError() {
+	const err = new Error('A member storage database could not be deleted because it is in use.');
+	err.name = 'MemberStorageBusyError';
+	return err;
+}
+
+/**
+ * A retried delete queues behind the blocked delete it retries (IndexedDB runs one request per
+ * database at a time), so while the blocking connection stays open it never settles. Bound it by
+ * one settle pause, the same MessageChannel yields, not a timer: still pending after that counts as
+ * busy. The pending delete is kept from rejecting unhandled; when it completes later it only
+ * deletes what this teardown was deleting anyway.
+ *
+ * @param {Promise<void>} pending
+ * @returns {Promise<void>}
+ */
+async function settledWithinPause(pending) {
+	let settled = false;
+	const tracked = pending.then(
+		() => {
+			settled = true;
+		},
+		(err) => {
+			settled = true;
+			throw err;
+		},
+	);
+	tracked.catch(() => undefined);
+	const pause = (async () => {
+		await settleYields();
+		if (!settled) throw memberStorageBusyError();
+	})();
+	await Promise.race([tracked, pause]);
+}
+
 /**
  * One member-storage delete, retried while it rejects `MemberStorageBusyError`:
  * at most `DELETE_SETTLE_MAX_ROUNDS` attempts, a `settleYields()` pause before
  * each retry, and one fixed log line per retry (a store label, never a name,
- * hash or value). The last busy error is rethrown unchanged; any other
- * rejection propagates at once. Defence only: step 2 already closed this
- * tab's handles, so a healthy run never retries.
+ * hash or value). Each retry is itself bounded by one more pause
+ * (`settledWithinPause`), so a delete that stays blocked ends the wipe instead
+ * of hanging it. The last busy error is rethrown by name; any other rejection
+ * propagates at once. Defence only: step 2 already closed this tab's handles,
+ * so a healthy run never retries.
  *
  * @param {(networkHash: string) => Promise<void>} remove
  * @param {string} networkHash
@@ -625,7 +663,8 @@ async function deleteNetworkDbSettled(networkHash, options) {
 async function removeMemberStorageRetryingBusy(remove, networkHash) {
 	for (let attempt = 1; ; attempt += 1) {
 		try {
-			await remove(networkHash);
+			if (attempt === 1) await remove(networkHash);
+			else await settledWithinPause(remove(networkHash));
 			return;
 		} catch (err) {
 			const busy = err instanceof Error && err.name === 'MemberStorageBusyError';
