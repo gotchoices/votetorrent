@@ -25,7 +25,9 @@
  *     two passes in a row agree (a transiently empty read must not wipe a working browser); a check
  *     that could not read anything never unpairs. The check never awaits `whenIdle()` (it runs
  *     inside the pass loop) and never awaits the wipe: the wipe runs outside the pass and stops this
- *     boot through its registered runtime.
+ *     boot through its registered runtime. The unpaired notice is announced (`onUnpaired`) only after
+ *     the wipe confirmed the network gone; a wipe that could not finish is reported through
+ *     `onWipeFailed` instead, because the local copy may still be present.
  *  7. When the relay or the strand is unreachable the boot stays on the local copy and retries the
  *     missing step, or reconnects and wakes the replication, every `BACKGROUND_RETRY_MS`.
  *  8. One live network per tab: a new boot awaits the previous boot's stop (which stops its
@@ -135,6 +137,7 @@ const INITIAL_DATA_VERSION = Object.freeze({ version: 0, changedTables: NO_TABLE
  * @property {() => Promise<void>} stop
  * @property {() => Promise<void>} whenIdle
  * @property {(cb: (reason: 'revoked' | 'removed' | 'key-invalid') => void) => () => void} onUnpaired
+ * @property {(cb: (reason: 'revoked' | 'removed' | 'key-invalid') => void) => () => void} onWipeFailed called instead of onUnpaired when the wipe could not finish; the local copy may still be present
  * @property {(cb: () => void) => () => void} onForgotten
  *
  * @typedef {object} BootDeps
@@ -276,6 +279,8 @@ function createBootRuntime(networkHash, adoptOption, d) {
 	const dataListeners = new Set();
 	/** @type {Set<(reason: any) => void>} */
 	const unpairedListeners = new Set();
+	/** @type {Set<(reason: any) => void>} */
+	const wipeFailedListeners = new Set();
 	/** @type {Set<() => void>} */
 	const forgottenListeners = new Set();
 
@@ -560,6 +565,9 @@ function createBootRuntime(networkHash, adoptOption, d) {
 		unpairing = true;
 		dispatch({ type: 'unpaired', reason });
 		void (async () => {
+			// True only once `wipeNetwork` resolved, which it does only after its own
+			// `assertNetworkForgotten` passed: the notice must never claim a deletion that did not happen.
+			let wiped = false;
 			try {
 				await d.wipeNetwork({
 					networkHash: hash,
@@ -567,11 +575,12 @@ function createBootRuntime(networkHash, adoptOption, d) {
 					storage: d.storage,
 					deps: { locks: d.locks, tabScope: scope, BroadcastChannel: d.BroadcastChannel, ...d.wipeDeps },
 				});
+				wiped = true;
 			} catch (err) {
 				logFailure(err);
 			}
 			await internalTeardown();
-			for (const cb of [...unpairedListeners]) {
+			for (const cb of [...(wiped ? unpairedListeners : wipeFailedListeners)]) {
 				try {
 					cb(reason);
 				} catch (err) {
@@ -987,7 +996,10 @@ function createBootRuntime(networkHash, adoptOption, d) {
 			statusListeners.clear();
 			dataListeners.clear();
 			forgottenListeners.clear();
-			if (!unpairing) unpairedListeners.clear();
+			if (!unpairing) {
+				unpairedListeners.clear();
+				wipeFailedListeners.clear();
+			}
 		},
 		async whenIdle() {
 			await settleInflight();
@@ -998,6 +1010,13 @@ function createBootRuntime(networkHash, adoptOption, d) {
 			unpairedListeners.add(cb);
 			return () => {
 				unpairedListeners.delete(cb);
+			};
+		},
+		onWipeFailed(cb) {
+			if (typeof cb !== 'function') throw new TypeError('onWipeFailed: the callback must be a function');
+			wipeFailedListeners.add(cb);
+			return () => {
+				wipeFailedListeners.delete(cb);
 			};
 		},
 		onForgotten(cb) {

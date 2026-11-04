@@ -76,6 +76,7 @@ export interface ShellBoot {
 	stop(): Promise<void>;
 	onUnpaired(cb: (reason: UnpairedReason) => void): () => void;
 	onForgotten(cb: () => void): () => void;
+	onWipeFailed(cb: (reason: UnpairedReason) => void): () => void;
 }
 
 /** The pairing handoff a first open may adopt. */
@@ -102,6 +103,14 @@ export interface ShellBootController {
 	getBoot(): ShellBoot | null;
 	subscribe(listener: (boot: ShellBoot | null) => void): () => void;
 }
+
+/** A ref-shaped re-entry guard (a React `useRef(false)` fits it). */
+export interface RetryGuard {
+	current: boolean;
+}
+
+/** What one press of the wipe-failed banner's Forget action did. */
+export type WipeRetryOutcome = 'wiped' | 'busy' | 'failed';
 
 const LOG_PREFIX = 'live/shell-live:';
 
@@ -369,4 +378,29 @@ export function createShellBootController(options: {
 			};
 		},
 	};
+}
+
+/**
+ * Re-run a failed wipe once at a time (the wipe-failed banner's Forget action). The guard is a
+ * ref, set before the first await, so a double click that lands before any re-render runs ONE
+ * wipe. After a confirmed wipe the guard stays held and `onWiped` (the true unpaired notice) runs
+ * once; a wipe that fails releases the guard, logs the error's name only, and leaves the banner
+ * for another try.
+ */
+export async function retryWipeOnce(
+	guard: RetryGuard,
+	wipe: () => Promise<unknown>,
+	onWiped: () => void,
+): Promise<WipeRetryOutcome> {
+	if (guard.current) return 'busy';
+	guard.current = true;
+	try {
+		await wipe();
+	} catch (err) {
+		guard.current = false;
+		logFailure(err);
+		return 'failed';
+	}
+	onWiped();
+	return 'wiped';
 }

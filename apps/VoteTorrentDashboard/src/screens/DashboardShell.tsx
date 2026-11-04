@@ -39,13 +39,14 @@ import { CAPABILITIES, PANEL_GROUPS } from '../auth/capabilities.js';
 import { readGrantedScopes } from '../auth/is-privileged.js';
 import { isLegacyEntry, listNetworks } from '@votetorrent/web-data/officer';
 import type { NetworkRegistryEntry } from '@votetorrent/web-data/officer';
-import { forgetNetwork } from '../lifecycle/forget-network.js';
+import { forgetNetwork, wipeNetwork } from '../lifecycle/forget-network.js';
 import { useBootDataVersion, useLiveStatus } from '../live/useLiveStatus.js';
 import {
 	chipModel,
 	createShellBootController,
 	officerLabel,
 	panelDataVersion,
+	retryWipeOnce,
 	stepChipDebounce,
 } from '../live/shell-live.js';
 import type {
@@ -371,11 +372,22 @@ export function DashboardShell({
 	const forgettingRef = useRef(false);
 	const [forgetting, setForgetting] = useState(false);
 
+	// The wipe-failed state: the network unpaired this browser, but its wipe could not finish, so the
+	// local copy may still be here. Set only by the boot that reported it, with that boot's hash and
+	// the names captured from its entry. The ref is the re-entry guard of the banner's one action
+	// (a double-click lands before any re-render); the state only disables the button.
+	const [wipeFailedReason, setWipeFailedReason] = useState<UnpairedReason | null>(null);
+	const wipeFailedRef = useRef<{ networkHash: string; authorityName: string; officerName: string | null } | null>(null);
+	const wipeRetryingRef = useRef(false);
+	const [wipeRetrying, setWipeRetrying] = useState(false);
+
 	useEffect(() => controller.subscribe(setBoot), [controller]);
 
 	const openNetwork = useCallback(
 		async (networkHash: string, openAdopt?: ShellAdopt | null): Promise<void> => {
 			setOpenFailed(false);
+			wipeFailedRef.current = null;
+			setWipeFailedReason(null);
 			const result = await controller.open(networkHash, { adopt: openAdopt ?? undefined });
 			if (result.stale) return;
 			if (result.loadFailed) {
@@ -435,6 +447,10 @@ export function DashboardShell({
 	// Per-boot subscriptions. The names are captured now: once the boot
 	// unpairs, the registry entry is gone.
 	useEffect(() => {
+		wipeFailedRef.current = null;
+		wipeRetryingRef.current = false;
+		setWipeFailedReason(null);
+		setWipeRetrying(false);
 		if (!boot) return undefined;
 		const entry = networksRef.current.find((candidate) => candidate.networkHash === boot.networkHash);
 		const captured = { authorityName: entry?.authorityName ?? '', officerName: entry?.officerName ?? null };
@@ -445,9 +461,14 @@ export function DashboardShell({
 			if (forgettingRef.current) return;
 			void openNextOrLeave();
 		});
+		const offWipeFailed = boot.onWipeFailed((reason) => {
+			wipeFailedRef.current = { networkHash: boot.networkHash, authorityName: captured.authorityName, officerName: captured.officerName };
+			setWipeFailedReason(reason);
+		});
 		return () => {
 			offUnpaired();
 			offForgotten();
+			offWipeFailed();
 		};
 	}, [boot, openNextOrLeave]);
 
@@ -524,6 +545,23 @@ export function DashboardShell({
 
 	function handleRetryOpen(): void {
 		if (activeNetworkHash !== undefined) void openNetwork(activeNetworkHash);
+	}
+
+	// The wipe-failed banner's one action: re-run the wipe the network already asked for, with no
+	// typed name (this browser was unpaired; `wipeNetwork` also finishes a wipe whose registry entry
+	// is already gone, which `forgetNetwork` would refuse as unknown). Only a confirmed wipe shows
+	// the unpaired notice.
+	async function handleRetryWipe(): Promise<void> {
+		const failed = wipeFailedRef.current;
+		const reason = wipeFailedReason;
+		if (failed === null || reason === null) return;
+		setWipeRetrying(true);
+		const outcome = await retryWipeOnce(wipeRetryingRef, () => wipeNetwork({ networkHash: failed.networkHash, reason }), () => {
+			wipeFailedRef.current = null;
+			setWipeFailedReason(null);
+			onUnpairedRef.current({ reason, authorityName: failed.authorityName, officerName: failed.officerName });
+		});
+		if (outcome === 'failed') setWipeRetrying(false);
 	}
 
 	function handleOpenForgetDialog(): void {
@@ -614,7 +652,12 @@ export function DashboardShell({
 					</nav>
 
 					<main>
-						{unpairing ? null : bootFailed ? (
+						{wipeFailedReason !== null ? (
+							<div className="sh-error-banner">
+								<p>{t('forget.failed')}</p>
+								<button type="button" disabled={wipeRetrying} onClick={() => void handleRetryWipe()}>{t('forget.cta')}</button>
+							</div>
+						) : unpairing ? null : bootFailed ? (
 							<div className="sh-error-banner">
 								<p>{t('shell.openFailed')}</p>
 								<button type="button" className="sh-error-retry" onClick={handleRetryOpen}>
