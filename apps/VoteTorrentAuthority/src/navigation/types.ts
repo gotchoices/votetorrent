@@ -137,6 +137,8 @@ export type RootStackParamList = {
 	AssociationRequestStatus: { authorityId: string };
 	// Pair a browser. No params: the pairing code never enters navigation state.
 	PairBrowser: undefined;
+	// The officer's own paired browsers. No params: nothing identifying a pairing enters navigation state.
+	PairedBrowsers: undefined;
 	// Election results (decrypt + validate + tally after the key release). Identifiers plus the public election
 	// title only; the screen resolves its engine from useApp().getEngine('electionResults'). authorityId (the
 	// election's authority) lets the screen offer Publish to this authority's officers only.

@@ -325,6 +325,8 @@ const PAIRING_SOURCES: readonly string[] = Object.freeze([
 	'engines/dashboard-pairing.ts',
 	'engines/paired-browsers-store.ts',
 	'screens/dashboard/PairBrowserScreen.tsx',
+	'engines/paired-browsers.ts',
+	'screens/dashboard/PairedBrowsersScreen.tsx',
 ]);
 
 /** Source with comments removed; string and template literals are kept intact. */

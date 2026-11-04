@@ -70,6 +70,7 @@ import AttestationProvisioningStatusScreen from "../screens/registration/Attesta
 // Phase 49 plan 49-10 (D-14) — the officer-facing signing-key provisioning/recovery screen.
 import ProvisionSigningKeyScreen from "../screens/users/ProvisionSigningKeyScreen";
 import PairBrowserScreen from "../screens/dashboard/PairBrowserScreen";
+import PairedBrowsersScreen from "../screens/dashboard/PairedBrowsersScreen";
 import PollingDevicesScreen from "../screens/authorities/PollingDevicesScreen";
 import AuthorityPeersScreen from "../screens/authorities/AuthorityPeersScreen";
 import { CreateElectionScreen } from "../screens/elections/CreateElectionScreen";
@@ -599,6 +600,13 @@ export const RootNavigator = () => {
 				name="PairBrowser"
 				component={PairBrowserScreen}
 				options={{ title: t("dashboardPairingTitle") }}
+			/>
+			{/* The officer's own paired browsers (pushed from their user details). The "+"
+			    header action is set by the screen itself, so the registration stays title-only. */}
+			<Stack.Screen
+				name="PairedBrowsers"
+				component={PairedBrowsersScreen}
+				options={{ title: t("pairedBrowsersTitle") }}
 			/>
 			<Stack.Screen
 				name="PollingDevices"

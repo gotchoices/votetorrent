@@ -44,6 +44,9 @@
  *   - 2026-11-02 ADDS exactly one invoker, `screens/elections/ElectionResultsScreen.tsx` (an officer
  *     publishes the signed ElectionTally row), routed through the hook, so ROLLOUT_EXEMPT is unchanged:
  *     invokers 25 -> 26, routed 23 -> 24, files referencing `device-signer` 27 -> 28.
+ *   - The paired-browsers list ADDS exactly one invoker, `screens/dashboard/PairedBrowsersScreen.tsx`
+ *     (the paired-browser Remove signer, routed through the hook), so ROLLOUT_EXEMPT is unchanged:
+ *     invokers 26 -> 27, routed 24 -> 25.
  *
  * Convention mirrors this workspace's other release-guard-style source-inspection tests (see
  * `engines/__tests__/`): reads files as TEXT rather than importing them, so it fails on what is
@@ -132,14 +135,14 @@ describe('D-09/D-13/D-14 rollout completeness: every createDeviceSigner call sit
 		.map((f) => path.relative(SRC_ROOT, f))
 		.sort();
 
-	it('the call-site inventory has exactly 26 members (fail loud, with the full list, if this drifts)', () => {
-		if (invokingFiles.length !== 26) {
+	it('the call-site inventory has exactly 27 members (fail loud, with the full list, if this drifts)', () => {
+		if (invokingFiles.length !== 27) {
 			throw new Error(
-				`Expected exactly 26 createDeviceSigner(...) call-site files, found ` +
+				`Expected exactly 27 createDeviceSigner(...) call-site files, found ` +
 					`${invokingFiles.length}:\n${invokingFiles.join('\n')}`,
 			);
 		}
-		expect(invokingFiles).toHaveLength(26);
+		expect(invokingFiles).toHaveLength(27);
 	});
 
 	it('ROLLOUT_EXEMPT has exactly 2 entries', () => {
