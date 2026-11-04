@@ -912,11 +912,18 @@ export async function startHarnessEdgeMember (opts: {
    * another member's strand node. Pass false for the bootstrap control leg.
    */
   withholdStrandAddrs?: boolean
+  /**
+   * 66-28: listen addresses for the edge node (default none: dial-only, as a browser with no relay). A deployed
+   * dashboard is reachable through its relay reservation; a loopback listener gives the harness member the same
+   * dialable strand address, which the bootstrap legs need.
+   */
+  listenAddrs?: string[]
 }): Promise<HarnessEdgeMember> {
   const { InMemoryKeyStore } = await import('@serfab/cadre-core')
   // @ts-ignore -- exports-map subpath this package's moduleResolution cannot type; resolves at runtime
   const { createEdgeNode } = await import('@serfab/cadre-core/edge-node')
   const { MemoryRawStorage } = await import('@optimystic/db-p2p')
+  const { EDGE_READER_PROTOCOL: edgeReaderProtocol } = await import('../../src/network/edge-reader-refusal.js')
   const keyStore = opts.keyStore ?? new InMemoryKeyStore()
   const destroyedScopes: string[] = []
   const scopes = new Map<string, any>()
@@ -947,12 +954,15 @@ export async function startHarnessEdgeMember (opts: {
       },
       async close () { return undefined }
     },
+    ...(opts.listenAddrs !== undefined ? { listenAddrs: () => [...opts.listenAddrs!] } : {}),
     configure: (cfg: any) => ({
       ...cfg,
       requireSignedSchemas: false,
       strandFilter: { mode: 'strandId', strandId: opts.strandId },
       strandClusterSize: opts.clusterSize,
       withholdStrandAddrs: opts.withholdStrandAddrs !== false,
+      // 66-28 R-G4: cadre-core declares the marker and drops the storage protocols before any peer connects.
+      edgeReaderProtocol,
       strandReactivity: { enabled: true, strandIds: [opts.strandId], ...(opts.strandReactivity ?? {}) }
     })
   }
@@ -969,9 +979,12 @@ export async function startHarnessEdgeMember (opts: {
         const strandNode: any = edge.node?.getStrand(strandId)?.libp2pNode
         if (strandNode === undefined) throw new Error('no strand node at strand:started')
         const { EDGE_READER_PROTOCOL } = await import('../../src/network/edge-reader-refusal.js')
-        await strandNode.handle(EDGE_READER_PROTOCOL, (stream: any) => {
-          try { stream.abort(new Error('edge-reader marker only')) } catch { /* already closed */ }
-        })
+        // R-G4: cadre-core has normally declared already (from the first identify); this stays as the fallback.
+        if (!(strandNode.getProtocols?.() ?? []).includes(EDGE_READER_PROTOCOL)) {
+          await strandNode.handle(EDGE_READER_PROTOCOL, (stream: any) => {
+            try { stream.abort(new Error('edge-reader marker only')) } catch { /* already closed */ }
+          })
+        }
         await strandNode.unhandle([`/optimystic/strand-${strandId}/cluster/1.0.0`, `/optimystic/strand-${strandId}/repo/1.0.0`])
         const pusher: any = strandNode.services?.identifyPush
         const send: (() => Promise<void>) | undefined =
@@ -1109,14 +1122,20 @@ export async function startHarnessStranger (
 /**
  * Stops node-B and starts the SAME CadreNode instance again (cadre-core supports stop() -> start() and keeps
  * the resolved identity key), so node-B comes back with the same identity key and the same storage provider
- * (the harness's MemoryRawStorage). Every strand the harness had opened on node-B is re-opened the way it was
- * first opened (addStrand + whenStrandWritable + plugins). With `cohortRefusal: true` node-B gets a FRESH
- * tracker first, as a restarted phone process starts with an empty set; `harness.nodeB.cohortRefusal` is
- * updated. Returns once node-B's strands are open again.
+ * (the harness's MemoryRawStorage). With `cohortRefusal: true` node-B gets a FRESH tracker first, as a restarted
+ * phone process starts with an empty set; `harness.nodeB.cohortRefusal` is updated.
+ *
+ * A restarted PHONE process holds no claim on its strands until its app re-claims them, and a phone does not host
+ * unclaimed strands. The harness's storage-profile node-B would instead relaunch every strand inside start(),
+ * before any sibling has connected (an empty seed). So the strands the harness had opened are released from the
+ * node's claim map and unclaimed hosting is off across the restart; `beforeReopen` (if given) runs once the node
+ * is started, and then every such strand is re-claimed the way the harness first opened it (addStrand +
+ * whenStrandWritable + plugins), which resolves a fresh seed from the siblings connected at that moment.
+ * Returns once node-B's strands are open again.
  */
 export async function restartHarnessNodeB (
   harness: TwoNodeHarness,
-  opts?: { cohortRefusal?: boolean }
+  opts?: { cohortRefusal?: boolean, beforeReopen?: () => Promise<void> }
 ): Promise<{ strandIds: string[] }> {
   const node: any = harness.nodeB.node
   const strandIds = harness.nodeB.resetStrandCaches?.() ?? []
@@ -1125,10 +1144,18 @@ export async function restartHarnessNodeB (
     const { createEdgeReaderRefusal } = await import('../../src/network/edge-reader-refusal.js')
     node.config.strandCohortRefusal = newHarnessCohortRefusalHook(createEdgeReaderRefusal)
   }
-  await withTimeout(node.start(), HARNESS_TIMEOUTS.startMs, 'node-B start (restart)')
-  harness.nodeB.cohortRefusal = harnessCohortRefusalOf(node)
-  for (const strandId of strandIds) {
-    await harness.nodeB.openStrand(strandId)
+  const hostedUnclaimed = node.hostUnclaimedStrands
+  node.hostUnclaimedStrands = false
+  for (const strandId of strandIds) node.sAppConfigs?.delete?.(strandId)
+  try {
+    await withTimeout(node.start(), HARNESS_TIMEOUTS.startMs, 'node-B start (restart)')
+    harness.nodeB.cohortRefusal = harnessCohortRefusalOf(node)
+    await opts?.beforeReopen?.()
+    for (const strandId of strandIds) {
+      await harness.nodeB.openStrand(strandId)
+    }
+  } finally {
+    node.hostUnclaimedStrands = hostedUnclaimed
   }
   return { strandIds }
 }

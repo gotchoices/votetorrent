@@ -304,7 +304,7 @@ describeP2PHarness('owner-minted browser pairing over /votetorrent/pair-mint/1.0
       if (args.some((a) => typeof a === 'string' && a.includes(PAIR_MINT_PROTOCOL))) unclassifiedWarns++
       savedWarn(...(args as any[]))
     }
-    harness = await startTwoNodeHarness({ clusterSize: CLUSTER_SIZE, extraConfig: { strandReactivity: { enabled: true } } })
+    harness = await startTwoNodeHarness({ clusterSize: CLUSTER_SIZE, extraConfig: { strandReactivity: { enabled: true } }, cohortRefusal: true })
     cadre = await import('@serfab/cadre-core')
     pn = await seedPairingOfficers(harness)
     B = pn.officerB
