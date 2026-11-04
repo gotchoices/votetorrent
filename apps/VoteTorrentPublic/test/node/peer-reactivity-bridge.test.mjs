@@ -126,7 +126,7 @@ function makeFakeStoreTable(applyImpl) {
 /**
  * A fake `Database`. `storeTable` is what `getTableForExternalWrite` returns
  * for `VALID_TABLE`; `undefined` for any other table name, mirroring
- * `snapshot-restore.js`'s own store-module contract.
+ * the dashboard's `peer/reactivity-bridge.js` store-module contract.
  * @param {{ storeTable?: any, isolationWrap?: boolean, noModule?: boolean }} [opts]
  */
 function makeFakeDb(opts = {}) {

@@ -3484,6 +3484,48 @@ declare schema main
 	) with tags ("optimystic.network_watch" = true)
 		with context ( now datetime );
 
+	-- An officer revokes ONE dashboard browser pairing: the row names the officer (UserId) and the pairing's
+	-- nonce, and a browser that sees a row for its own (UserId, Nonce) unpairs itself. Enforcement is
+	-- cooperative: the browser wipes itself, and removing the browser's machine from the network is the
+	-- network-side half. The signature and signer key travel in the insert's context, as for UserKey, and are
+	-- not stored in the row.
+	-- The digest is over TEXT columns only (UserId, Nonce), so it avoids the deferred-CHECK datetime-coercion
+	-- trap. The table carries no reactivity tag (it is not watched for live updates). Append-only: a committed
+	-- row can be neither updated nor deleted (the SEPARATE update and delete forms; the combined form does not refuse).
+	table DashboardPairingRevocation (
+		UserId text,
+		Nonce text,
+		primary key (UserId, Nonce),
+		-- No UserIdValid check: measured unreachable. InsertValid already requires a UserKey row of new.UserId,
+		-- UserKey requires that user to exist, and a User row can never be deleted.
+		-- Signed by a non-expired key of that same officer, over Digest('vt-pairing-revoke', UserId, Nonce),
+		-- with the curve chosen by the signer key's registered Type (default 'M', secp256k1).
+		constraint InsertValid check on insert (
+			exists (select 1 from UserKey K where K.UserId = new.UserId and K.PubKey = context.UserKey and K.Expiration > context.now)
+				and (
+					(
+						coalesce((select K.Type from UserKey K where K.PubKey = context.UserKey), 'M') = 'P'
+						and SignatureValidP256(
+							Digest('vt-pairing-revoke', new.UserId, new.Nonce),
+							context.Signature,
+							context.UserKey
+						)
+					)
+					or (
+						coalesce((select K.Type from UserKey K where K.PubKey = context.UserKey), 'M') <> 'P'
+						and SignatureValid(
+							Digest('vt-pairing-revoke', new.UserId, new.Nonce),
+							context.Signature,
+							context.UserKey
+						)
+					)
+				)
+		),
+		constraint CantUpdate check on update (false),
+		constraint CantDelete check on delete (false)
+	)
+		with context ( UserKey text null, Signature text null, now datetime );
+
 	index VoteBlockVoterBlock on VoteBlockVoter (BlockCid);
 }
 

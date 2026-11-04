@@ -38,10 +38,13 @@
  */
 
 import type { Database } from '@quereus/quereus'
+import type { EdgeReaderRefusal } from '../../src/network/edge-reader-refusal.js'
 import { randomUUID } from 'node:crypto'
 import { VOTETORRENT_SCHEMA_SQL } from '../../src/database/schema-sql.js'
 import { registerDbPlugins, declareViewsInMain } from '../../src/database/initialize.js'
 import type { DbFactory } from '../../src/types.js'
+import type { User } from '@votetorrent/vote-core'
+import type { EngineContext } from '../../src/types.js'
 
 // ---------------------------------------------------------------------------
 // Flag, describe wrapper
@@ -147,6 +150,13 @@ export interface HarnessNode {
   strandPort(strandId: string): Promise<HarnessStrandPort>
   /** counts of port calls made THROUGH THIS NODE — the writer-identity tripwire */
   readonly stats: { mutateCount: number; queryCount: number }
+  /**
+   * 66-28: this node's own edge-reader refusal tracker (its `strandCohortRefusal` hook) when the harness was
+   * started with `cohortRefusal: true`; undefined otherwise. `restartHarnessNodeB` replaces node-B's.
+   */
+  cohortRefusal?: EdgeReaderRefusal
+  /** 66-28: forget the memoized strand handles (a restarted node re-opens them); returns their strand ids. */
+  resetStrandCaches?: () => string[]
 }
 
 export interface HarnessTimings {
@@ -202,6 +212,28 @@ export interface TwoNodeHarnessOptions {
    * reactivity/matchmaking harness (`strandReactivity: { enabled: true }`).
    */
   extraConfig?: Record<string, unknown>
+  /**
+   * 66-28 opt-in (default off): each node gets its OWN `createEdgeReaderRefusal()` tracker, passed as that
+   * node's `strandCohortRefusal` (A and B never share one). Off: both configs are byte-identical to today's.
+   * The trackers are exposed as `harness.nodeA.cohortRefusal` / `harness.nodeB.cohortRefusal`.
+   */
+  cohortRefusal?: boolean
+}
+
+// 66-28: `cohortRefusal` reaches `attemptBringUp` through this module-level request, set synchronously right
+// before each call and read synchronously at its top, so the existing call shape stays unchanged.
+let bringUpCohortRefusalRequest = false
+/** Tracker per hook, so a node's tracker is found from its own config (`node.config.strandCohortRefusal`). */
+const trackerByHook = new WeakMap<object, EdgeReaderRefusal>()
+function harnessCohortRefusalOf (node: any): EdgeReaderRefusal | undefined {
+  const hook = node?.config?.strandCohortRefusal
+  return typeof hook === 'function' ? trackerByHook.get(hook) : undefined
+}
+/** A fresh per-node tracker; its hook is what the node's config carries. */
+function newHarnessCohortRefusalHook (createEdgeReaderRefusal: () => EdgeReaderRefusal): EdgeReaderRefusal['hook'] {
+  const tracker = createEdgeReaderRefusal()
+  trackerByHook.set(tracker.hook, tracker)
+  return tracker.hook
 }
 
 // ---------------------------------------------------------------------------
@@ -276,11 +308,14 @@ async function attemptBringUp (
   timings: HarnessTimings
 }> {
   const { partyId, clusterSize, log } = opts
+  const cohortRefusalOn = bringUpCohortRefusalRequest
+  bringUpCohortRefusalRequest = false
 
   const { CadreNode, ed25519KeyPairFromLibp2p } = await import('@serfab/cadre-core')
   const { MemoryRawStorage } = await import('@optimystic/db-p2p')
   const { webSockets } = await import('@libp2p/websockets')
   const { generateKeyPair } = await import('@libp2p/crypto/keys')
+  const edgeReaderRefusalModule = cohortRefusalOn ? await import('../../src/network/edge-reader-refusal.js') : undefined
 
   const timings: HarnessTimings = {
     startAMs: 0,
@@ -304,6 +339,7 @@ async function attemptBringUp (
       hibernation: { enabled: false },
       profile: 'storage',
       network: { transports: [webSockets()], listenAddrs },
+      ...(edgeReaderRefusalModule ? { strandCohortRefusal: newHarnessCohortRefusalHook(edgeReaderRefusalModule.createEdgeReaderRefusal) } : {}),
       ...(opts.extraConfig ?? {})
     }
   }
@@ -564,6 +600,12 @@ function buildHarnessNode (
     dbFactory,
     openStrand,
     strandPort,
+    resetStrandCaches: () => {
+      const ids = [...new Set([...dbFactoryCache.keys(), ...openStrandCache.keys()])]
+      dbFactoryCache.clear()
+      openStrandCache.clear()
+      return ids
+    },
     stats
   }
 }
@@ -585,11 +627,13 @@ export async function startTwoNodeHarness (options: TwoNodeHarnessOptions = {}):
 
   const peerlessNodeB = options.peerlessNodeB === true
   let built: { nodeA: any; nodeB: any; timings: HarnessTimings }
+  bringUpCohortRefusalRequest = options.cohortRefusal === true
   try {
     built = await attemptBringUp(['/ip4/127.0.0.1/tcp/0/ws'], { partyId, clusterSize, log, peerlessNodeB, extraConfig: options.extraConfig })
   } catch (error) {
     if (error instanceof MeshTimeoutError) {
       log(`DEVIATION: control mesh did not settle on 127.0.0.1 (${(error as Error).message}); falling back to 0.0.0.0 per topology.mjs`)
+      bringUpCohortRefusalRequest = options.cohortRefusal === true
       built = await attemptBringUp(['/ip4/0.0.0.0/tcp/0/ws'], { partyId, clusterSize, log, peerlessNodeB, extraConfig: options.extraConfig })
     } else {
       throw error
@@ -605,6 +649,8 @@ export async function startTwoNodeHarness (options: TwoNodeHarnessOptions = {}):
   }
   const harnessNodeA = buildHarnessNode('node-A', 'founder-drone', nodeA, true, openedByA, timings, log, founderCtl)
   const harnessNodeB = buildHarnessNode('node-B', 'peer', nodeB, false, openedByA, timings, log, founderCtl)
+  harnessNodeA.cohortRefusal = harnessCohortRefusalOf(nodeA)
+  harnessNodeB.cohortRefusal = harnessCohortRefusalOf(nodeB)
 
   let stopped = false
 
@@ -640,4 +686,476 @@ export async function startTwoNodeHarness (options: TwoNodeHarnessOptions = {}):
       await stopQuietly(nodeA, log)
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Phase 66 plan 09: owner-minted browser pairing helpers (ADDITIVE ONLY)
+//
+// Everything below is appended for `dashboard-pair-mint.harness.spec.ts`. The edge-member helpers are
+// copies of 66-01's module-local helpers in `dashboard-member-watch.harness.spec.ts` (memoryEdgePlatform,
+// startJoiner, attachJoinerStrand), which this plan may not import. Every P2P package and every test fixture
+// is reached by dynamic `import()` inside the function bodies, so the flag-off suite's import graph does
+// not change. Key material in `HarnessPairingOfficer.privBytes` is test-only and is never logged.
+// ---------------------------------------------------------------------------
+
+/** A P-256 officer seeded by seedPairingOfficers. `privBytes` is test-only key material: never log it. */
+export interface HarnessPairingOfficer {
+  user: User
+  keyPub: string
+  privBytes: Uint8Array
+}
+
+export interface HarnessPairingNetwork {
+  hash: string
+  authorityId: string
+  dbA: Database
+  dbB: Database
+  ctxA: EngineContext
+  ctxB: EngineContext
+  founder: User
+  officerB: HarnessPairingOfficer
+  formerOfficerY: HarnessPairingOfficer
+  currentAdminEffectiveAt: string
+  formerAdminEffectiveAt: string
+}
+
+const PAIRING_FOUNDER_SCOPES = ['rn', 'rad', 'vrg', 'iad', 'uai', 'mel', 'ceb']
+
+/** Officer UserId -> the canonical AdminEffectiveAt values its Officer rows carry. */
+async function officerGenerations (db: Database, authorityId: string): Promise<Map<string, Set<string>>> {
+  const { toCanonicalDatetime } = await import('../../src/utils.js')
+  const out = new Map<string, Set<string>>()
+  for await (const row of db.eval('select UserId, AdminEffectiveAt from Officer where AuthorityId = :authorityId', { authorityId } as any)) {
+    const userId = String((row as any).UserId)
+    const gen = toCanonicalDatetime((row as any).AdminEffectiveAt as string | number)
+    const set = out.get(userId) ?? new Set<string>()
+    set.add(gen)
+    out.set(userId, set)
+  }
+  return out
+}
+
+/**
+ * Found a VoteTorrent network on node-A (founding administration placed 180 s in the past), add two P-256
+ * users B and Y, promote [founder, B, Y] (gen-1, 120 s ago) and then [founder, B] (gen-2, 60 s ago), so B
+ * is a current officer and Y has an Officer row only in an earlier administration. Opens the strand on
+ * node-B and waits for B's and Y's rows there.
+ */
+export async function seedPairingOfficers (harness: TwoNodeHarness): Promise<HarnessPairingNetwork> {
+  const tc = await import('../fixtures/test-context.js')
+  const { makeP256TestKey } = await import('../fixtures/p256-signer.js')
+  const { toCanonicalDatetime, nowCanonicalDatetime } = await import('../../src/utils.js')
+
+  const net = await tc.createTestNetwork({
+    dbFactory: harness.nodeA.dbFactory,
+    network: {
+      admin: {
+        officers: [{ init: { name: 'Admin A', title: 'Chair', scopes: PAIRING_FOUNDER_SCOPES as any } }],
+        effectiveAt: Date.now() - 180_000,
+        thresholdPolicies: [{ policy: 'rad' as any, threshold: 1 }]
+      }
+    } as any
+  })
+  const auth = await tc.addTestAuthority(net)
+  const hash = net.ref.hash
+  const authorityId = auth.authority.id
+  const dbA = net.ctx.db
+
+  function p256User (name: string): HarnessPairingOfficer {
+    const k = makeP256TestKey()
+    const user: User = {
+      ...tc.makeDistinctTestUser(),
+      name,
+      activeKeys: [{ key: k.pubHex, type: 'P' as any, expiration: Date.now() + 86_400_000 }]
+    }
+    return { user, keyPub: k.pubHex, privBytes: k.privBytes }
+  }
+
+  // insertFixtureUser's shape (module-local in threshold-authority.ts): invite-bound User insert, then the
+  // FIRST UserKey with the key's own type.
+  async function insertUser (user: User): Promise<void> {
+    const { inviteSlotCid, inviteSignature } = await tc.seedUserInvite(auth, user)
+    const tid = Date.now() + Math.floor(Math.random() * 1_000_000)
+    await dbA.exec(
+      `insert into User (Id, Name, ImageRef)
+       with context SigningNonce = null, InviteSlotCid = :inviteSlotCid, InviteSignature = :inviteSignature, Tid = ${tid}
+       values (:userId, :userName, :userImageRef)`,
+      {
+        userId: user.id,
+        userName: user.name,
+        userImageRef: user.imageRef ? JSON.stringify(user.imageRef) : null,
+        inviteSlotCid,
+        inviteSignature
+      } as any
+    )
+    const key = user.activeKeys[0]!
+    await dbA.exec(
+      `insert into UserKey (UserId, Type, PubKey, Expiration)
+       with context UserKey = null, Signature = null, Tid = ${tid + 1}, now = :now, IsSignatureValid = true
+       values (:userId, :type, :pubKey, :expiration)`,
+      {
+        userId: user.id,
+        type: key.type,
+        pubKey: key.key,
+        expiration: toCanonicalDatetime(key.expiration),
+        now: nowCanonicalDatetime()
+      } as any
+    )
+  }
+
+  const officerB = p256User('Pairing Officer B')
+  const formerOfficerY = p256User('Former Officer Y')
+  await insertUser(officerB.user)
+  await insertUser(formerOfficerY.user)
+
+  const founderSign = tc.makeTestSignCallback(net.user)
+  const founderEntry = { existing: { userId: net.user.id, authorityId, title: 'Chair', scopes: PAIRING_FOUNDER_SCOPES } }
+  const bEntry = { existing: { userId: officerB.user.id, authorityId, title: 'Officer B', scopes: ['mel'] } }
+  const yEntry = { existing: { userId: formerOfficerY.user.id, authorityId, title: 'Officer Y', scopes: ['mel'] } }
+
+  async function promote (label: string, officers: unknown[], effectiveAt: number): Promise<void> {
+    await auth.authorityEngine.proposeAdmin({
+      proposed: { officers, effectiveAt, thresholdPolicies: [{ policy: 'rad', threshold: 1 }] },
+      signers: [net.user.id]
+    } as any, founderSign)
+    const outcome = (auth.authorityEngine as unknown as { lastPromotionOutcome?: { status?: string } }).lastPromotionOutcome
+    if (outcome?.status !== 'promoted') {
+      throw new Error(`seedPairingOfficers: ${label} promotion did not complete (status ${String(outcome?.status)})`)
+    }
+  }
+
+  const gen1At = Date.now() - 120_000
+  await promote('gen-1', [founderEntry, bEntry, yEntry], gen1At)
+  const gen2At = Date.now() - 60_000
+  await promote('gen-2', [founderEntry, bEntry], gen2At)
+  const formerAdminEffectiveAt = toCanonicalDatetime(gen1At)
+  const currentAdminEffectiveAt = toCanonicalDatetime(gen2At)
+
+  // Read-backs on node-A.
+  const current = await dbA.prepare('select EffectiveAt from CurrentAdmin where AuthorityId = :authorityId').get({ authorityId } as any)
+  if (current == null || toCanonicalDatetime((current as any).EffectiveAt) !== currentAdminEffectiveAt) {
+    throw new Error('seedPairingOfficers: CurrentAdmin is not the gen-2 administration on node-A')
+  }
+  const gensA = await officerGenerations(dbA, authorityId)
+  const bGens = gensA.get(officerB.user.id)
+  const yGens = gensA.get(formerOfficerY.user.id)
+  const fGens = gensA.get(net.user.id)
+  if (bGens?.has(currentAdminEffectiveAt) !== true || bGens.has(formerAdminEffectiveAt) !== true) {
+    throw new Error('seedPairingOfficers: officer B lacks a gen-1 or gen-2 Officer row on node-A')
+  }
+  if (fGens?.has(currentAdminEffectiveAt) !== true) {
+    throw new Error('seedPairingOfficers: the founder lacks a gen-2 Officer row on node-A')
+  }
+  if (yGens?.has(formerAdminEffectiveAt) !== true || yGens.has(currentAdminEffectiveAt)) {
+    throw new Error('seedPairingOfficers: officer Y is not a gen-1-only officer on node-A')
+  }
+
+  // node-B's replica.
+  const dbB = await harness.nodeB.openStrand(hash)
+  await pollUntil(
+    async () => {
+      const gens = await officerGenerations(dbB, authorityId)
+      const key = await dbB.prepare('select 1 as x from UserKey where UserId = :userId and PubKey = :pubKey')
+        .get({ userId: officerB.user.id, pubKey: officerB.keyPub } as any)
+      return {
+        b: gens.get(officerB.user.id)?.has(currentAdminEffectiveAt) === true,
+        y: gens.get(formerOfficerY.user.id)?.has(formerAdminEffectiveAt) === true,
+        key: key != null
+      }
+    },
+    (v) => v.b && v.y && v.key,
+    { timeoutMs: HARNESS_TIMEOUTS.replicationMs, label: 'seedPairingOfficers: officer rows reach node-B' }
+  )
+
+  return {
+    hash,
+    authorityId,
+    dbA,
+    dbB,
+    ctxA: net.ctx,
+    ctxB: { db: dbB, user: officerB.user },
+    founder: net.user,
+    officerB,
+    formerOfficerY,
+    currentAdminEffectiveAt,
+    formerAdminEffectiveAt
+  }
+}
+
+/** A browser-like cadre-core edge node (the dashboard's shape), created but not joined. */
+export interface HarnessEdgeMember {
+  label: string
+  edge: any
+  keyStore: any
+  removed: unknown[]
+  strandStarted: string[]
+  withdrawn: string[]
+  destroyedScopes: string[]
+  identityPeerId(): Promise<string>
+  stop(): Promise<void>
+}
+
+/**
+ * Create the edge node only (no join), on 66-01's in-memory platform: `requireSignedSchemas: false`, the
+ * `strandId` filter, the given cluster size and `strandReactivity` for that one strand. On `strand:started`
+ * it withdraws the strand's storage services (cluster and repo protocols), as the dashboard does.
+ */
+export async function startHarnessEdgeMember (opts: {
+  label: string
+  storageId: string
+  strandId: string
+  clusterSize: number
+  keyStore?: any
+  strandReactivity?: Record<string, unknown>
+  /**
+   * 66-28: cadre-core `withholdStrandAddrs` (default true, the dashboard's posture): this member never seeds
+   * another member's strand node. Pass false for the bootstrap control leg.
+   */
+  withholdStrandAddrs?: boolean
+  /**
+   * 66-28: listen addresses for the edge node (default none: dial-only, as a browser with no relay). A deployed
+   * dashboard is reachable through its relay reservation; a loopback listener gives the harness member the same
+   * dialable strand address, which the bootstrap legs need.
+   */
+  listenAddrs?: string[]
+}): Promise<HarnessEdgeMember> {
+  const { InMemoryKeyStore } = await import('@serfab/cadre-core')
+  // @ts-ignore -- exports-map subpath this package's moduleResolution cannot type; resolves at runtime
+  const { createEdgeNode } = await import('@serfab/cadre-core/edge-node')
+  const { MemoryRawStorage } = await import('@optimystic/db-p2p')
+  const { EDGE_READER_PROTOCOL: edgeReaderProtocol } = await import('../../src/network/edge-reader-refusal.js')
+  const keyStore = opts.keyStore ?? new InMemoryKeyStore()
+  const destroyedScopes: string[] = []
+  const scopes = new Map<string, any>()
+  const local = new Map<string, string>()
+  const platform: any = {
+    keyStore,
+    storage: {
+      id: opts.storageId,
+      rawStorage (scope: string) {
+        let s = scopes.get(scope)
+        if (s === undefined) {
+          s = new MemoryRawStorage()
+          scopes.set(scope, s)
+        }
+        return s
+      },
+      async destroyScope (scope: string) {
+        scopes.delete(scope)
+        destroyedScopes.push(scope)
+      },
+      nodeLocal () {
+        return {
+          get: async (key: string) => local.get(key),
+          set: async (key: string, value: string) => { local.set(key, value) },
+          flush: async () => undefined,
+          delete: async (key: string) => { local.delete(key) }
+        }
+      },
+      async close () { return undefined }
+    },
+    ...(opts.listenAddrs !== undefined ? { listenAddrs: () => [...opts.listenAddrs!] } : {}),
+    configure: (cfg: any) => ({
+      ...cfg,
+      requireSignedSchemas: false,
+      strandFilter: { mode: 'strandId', strandId: opts.strandId },
+      strandClusterSize: opts.clusterSize,
+      withholdStrandAddrs: opts.withholdStrandAddrs !== false,
+      // 66-28 R-G4: cadre-core declares the marker and drops the storage protocols before any peer connects.
+      edgeReaderProtocol,
+      strandReactivity: { enabled: true, strandIds: [opts.strandId], ...(opts.strandReactivity ?? {}) }
+    })
+  }
+  const edge: any = createEdgeNode(platform)
+  const removed: unknown[] = []
+  const strandStarted: string[] = []
+  const withdrawn: string[] = []
+  edge.on('strand:started', ({ strandId }: { strandId: string }) => {
+    strandStarted.push(strandId)
+    // 66-28, as the dashboard does: declare the edge-reader marker, withdraw the storage services, then push
+    // identify at once (not libp2p's 1 s debounced push), and only then count the strand as withdrawn.
+    void (async () => {
+      try {
+        const strandNode: any = edge.node?.getStrand(strandId)?.libp2pNode
+        if (strandNode === undefined) throw new Error('no strand node at strand:started')
+        const { EDGE_READER_PROTOCOL } = await import('../../src/network/edge-reader-refusal.js')
+        // R-G4: cadre-core has normally declared already (from the first identify); this stays as the fallback.
+        if (!(strandNode.getProtocols?.() ?? []).includes(EDGE_READER_PROTOCOL)) {
+          await strandNode.handle(EDGE_READER_PROTOCOL, (stream: any) => {
+            try { stream.abort(new Error('edge-reader marker only')) } catch { /* already closed */ }
+          })
+        }
+        await strandNode.unhandle([`/optimystic/strand-${strandId}/cluster/1.0.0`, `/optimystic/strand-${strandId}/repo/1.0.0`])
+        const pusher: any = strandNode.services?.identifyPush
+        const send: (() => Promise<void>) | undefined =
+          typeof pusher?.sendPushMessage === 'function' ? () => pusher.sendPushMessage()
+            : typeof pusher?.push === 'function' ? () => pusher.push() : undefined
+        if (send !== undefined) {
+          let bound: ReturnType<typeof setTimeout> | undefined
+          try {
+            await Promise.race([
+              send(),
+              new Promise<void>((resolve) => { bound = setTimeout(resolve, 5_000) })
+            ])
+          } catch (err) {
+            console.log(`[${opts.label}] identify push failed: ${(err as Error).name}`)
+          } finally {
+            if (bound !== undefined) clearTimeout(bound)
+          }
+        }
+        withdrawn.push(strandId)
+      } catch (err) {
+        console.log(`[${opts.label}] storage withdrawal failed: ${(err as Error).name}`)
+      }
+    })()
+  })
+  edge.on('cadre:removed', (removal: unknown) => { removed.push(removal) })
+  let stopped = false
+  return {
+    label: opts.label,
+    edge,
+    keyStore,
+    removed,
+    strandStarted,
+    withdrawn,
+    destroyedScopes,
+    async identityPeerId () {
+      return await edge.identityPeerId()
+    },
+    async stop () {
+      if (stopped) return
+      stopped = true
+      try {
+        if (edge.status?.state !== 'removed') await edge.stop()
+      } catch { /* idempotent teardown */ }
+    }
+  }
+}
+
+/**
+ * Claim `strandId` on a joined edge member (a transaction-profile edge node hosts no unclaimed strand): no
+ * founder key, `awaitFirstSync: false`, the harness sApp. Waits for `strand:started`, the storage withdrawal
+ * and the strand database, and returns the strand libp2p node, ITS OWN peer id (not the identity peer id)
+ * and the strand's Quereus database on the `['App','main']` schema path. No crypto plugin is registered.
+ */
+export async function attachHarnessEdgeStrand (
+  member: HarnessEdgeMember,
+  strandId: string
+): Promise<{ strandNode: any; strandPeerId: string; db: Database }> {
+  const node: any = member.edge.node
+  if (node === null || node === undefined) throw new Error('attachHarnessEdgeStrand: the member has no running node')
+  try {
+    await node.addStrand({
+      strandRow: { Id: strandId, MemberPrivateKey: null, Type: 'o', FounderOwnerKey: null, FounderPeerId: null },
+      sAppConfig: { id: HARNESS_SAPP_ID, version: '1.0.0', schema: VOTETORRENT_INNER_DDL, latencyHint: 'interactive' },
+      awaitFirstSync: false
+    })
+  } catch (err) {
+    console.log(`[${member.label}] addStrand rejected (${(err as Error).name}); continuing with getStrand`)
+  }
+  await pollUntil(
+    async () => member.strandStarted.includes(strandId) && member.withdrawn.includes(strandId),
+    (v) => v === true,
+    { timeoutMs: scaled(60_000), label: `${member.label} strand started and storage withdrawn` }
+  )
+  // cadre-core sets `database` once the strand header arrives, which can trail strand:started.
+  const strandDb: any = await pollUntil(
+    async () => node.getStrand(strandId)?.database ?? null,
+    (v) => v !== null,
+    { timeoutMs: scaled(60_000), label: `${member.label} strand database present` }
+  )
+  const strandNode = node.getStrand(strandId).libp2pNode
+  const db: Database = strandDb.getDatabase()
+  db.setSchemaPath(['App', 'main'])
+  return { strandNode, strandPeerId: strandNode.peerId.toString(), db }
+}
+
+/**
+ * A CadreNode on the harness party id, bootstrapped to node-A's loopback WebSocket control address and NEVER
+ * invited or enrolled: a stranger to the cadre.
+ */
+export async function startHarnessStranger (
+  harness: TwoNodeHarness,
+  opts?: { clusterSize?: number }
+): Promise<{ node: any; peerId: string; stop(): Promise<void> }> {
+  const { CadreNode } = await import('@serfab/cadre-core')
+  const { MemoryRawStorage } = await import('@optimystic/db-p2p')
+  const { webSockets } = await import('@libp2p/websockets')
+  const { generateKeyPair } = await import('@libp2p/crypto/keys')
+  const nodeAAddr = loopbackWs((harness.nodeA.node.getControlNode()?.getMultiaddrs() ?? []).map((m: any) => m.toString()))
+  const storage = new MemoryRawStorage()
+  const node: any = new CadreNode({
+    privateKey: await generateKeyPair('Ed25519'),
+    controlNetwork: { partyId: harness.partyId, bootstrapNodes: [nodeAAddr] },
+    // Test posture only (as buildConfig above) — never a production config.
+    requireSignedSchemas: false,
+    strandFilter: { mode: 'all' },
+    storage: { provider: () => storage },
+    strandClusterSize: opts?.clusterSize ?? 2,
+    hibernation: { enabled: false },
+    profile: 'transaction',
+    network: { transports: [webSockets()], listenAddrs: ['/ip4/127.0.0.1/tcp/0/ws'] }
+  } as any)
+  const quietLog = (line: string): void => { console.log(`[p2p-harness] stranger ${line}`) }
+  try {
+    await withTimeout(node.start(), HARNESS_TIMEOUTS.startMs, 'stranger start')
+  } catch (error) {
+    await stopQuietly(node, quietLog)
+    throw error
+  }
+  let stopped = false
+  return {
+    node,
+    peerId: node.peerId.toString(),
+    async stop () {
+      if (stopped) return
+      stopped = true
+      await stopQuietly(node, quietLog)
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 66-28: restart node-B with the same identity and storage (a phone app restart)
+// ---------------------------------------------------------------------------
+
+/**
+ * Stops node-B and starts the SAME CadreNode instance again (cadre-core supports stop() -> start() and keeps
+ * the resolved identity key), so node-B comes back with the same identity key and the same storage provider
+ * (the harness's MemoryRawStorage). With `cohortRefusal: true` node-B gets a FRESH tracker first, as a restarted
+ * phone process starts with an empty set; `harness.nodeB.cohortRefusal` is updated.
+ *
+ * A restarted PHONE process holds no claim on its strands until its app re-claims them, and a phone does not host
+ * unclaimed strands. The harness's storage-profile node-B would instead relaunch every strand inside start(),
+ * before any sibling has connected (an empty seed). So the strands the harness had opened are released from the
+ * node's claim map and unclaimed hosting is off across the restart; `beforeReopen` (if given) runs once the node
+ * is started, and then every such strand is re-claimed the way the harness first opened it (addStrand +
+ * whenStrandWritable + plugins), which resolves a fresh seed from the siblings connected at that moment.
+ * Returns once node-B's strands are open again.
+ */
+export async function restartHarnessNodeB (
+  harness: TwoNodeHarness,
+  opts?: { cohortRefusal?: boolean, beforeReopen?: () => Promise<void> }
+): Promise<{ strandIds: string[] }> {
+  const node: any = harness.nodeB.node
+  const strandIds = harness.nodeB.resetStrandCaches?.() ?? []
+  await withTimeout(node.stop(), HARNESS_TIMEOUTS.startMs, 'node-B stop (restart)')
+  if (opts?.cohortRefusal === true) {
+    const { createEdgeReaderRefusal } = await import('../../src/network/edge-reader-refusal.js')
+    node.config.strandCohortRefusal = newHarnessCohortRefusalHook(createEdgeReaderRefusal)
+  }
+  const hostedUnclaimed = node.hostUnclaimedStrands
+  node.hostUnclaimedStrands = false
+  for (const strandId of strandIds) node.sAppConfigs?.delete?.(strandId)
+  try {
+    await withTimeout(node.start(), HARNESS_TIMEOUTS.startMs, 'node-B start (restart)')
+    harness.nodeB.cohortRefusal = harnessCohortRefusalOf(node)
+    await opts?.beforeReopen?.()
+    for (const strandId of strandIds) {
+      await harness.nodeB.openStrand(strandId)
+    }
+  } finally {
+    node.hostUnclaimedStrands = hostedUnclaimed
+  }
+  return { strandIds }
 }

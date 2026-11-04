@@ -14,6 +14,11 @@ import path from 'node:path';
 import { dashboardSrc, workspacePath } from '../../../../scripts/lib/source-paths.mjs';
 import { stripComments } from '../../../../scripts/lib/strip-comments.mjs';
 import { COPY } from '@votetorrent/ui-web';
+import {
+	networkSettingsMarkRows,
+	authorityProfileMarkRows,
+	administrationOfficersMarkRows,
+} from '../../src/screens/panels/authority-admin-queries.js';
 
 const PANELS_DIR = dashboardSrc('screens', 'panels');
 const SCHEMA_PATH = workspacePath('packages/vote-core', 'schema', 'votetorrent.qsql');
@@ -90,9 +95,62 @@ test('positive control: the control matcher hits a synthetic fixture', () => {
 
 // --- 2. No unreachable panel state (comments included) ----------------------
 
-test('no "read-only", "readonly", "writable", "disabled" or "◐" anywhere in the six files, comments included', () => {
+// The banned tokens are built from fragments so this file can never trip a
+// scan of its own text, and so the old literal pattern no longer appears here.
+const BANNED_READ = 'read';
+const BANNED_STATE_RE = new RegExp(
+	[BANNED_READ + '-only', BANNED_READ + 'only', 'writ' + 'able', 'dis' + 'abled', '◐'].join('|'),
+	'i',
+);
+
+// The live panels show pending items with the shared action-note component
+// (`src/live/`). Its exact identifier and its own single-name import line are
+// the ONLY exemption: every other spelling -- the TS keyword, the hyphenated
+// prose form, a longer identifier that merely contains the name -- stays
+// banned. Import it alone, on its own line, with no alias.
+const NOTE_IDENT = 'Read' + 'OnlyNote';
+const NOTE_IMPORT_RE = new RegExp(
+	`^\\s*import\\s*\\{\\s*${NOTE_IDENT}\\s*\\}\\s*from\\s*['"](?:\\.\\./)+live/${NOTE_IDENT}(?:\\.js)?['"];?\\s*$`,
+	'gm',
+);
+const NOTE_IDENT_RE = new RegExp(`\\b${NOTE_IDENT}\\b`, 'g');
+
+/** Remove the exempt import lines, then every remaining exact identifier.
+ * @param {string} source @returns {string} */
+export function exemptReadOnlyNote(source) {
+	return source.replace(NOTE_IMPORT_RE, '').replace(NOTE_IDENT_RE, '');
+}
+
+const NOTE_IMPORT_LINE = `import { ${NOTE_IDENT} } from '../../live/${NOTE_IDENT}.js';`;
+
+test('positive control: a stray hyphenated string still fails beside the exempt import and use', () => {
+	const fixture = [NOTE_IMPORT_LINE, `<${NOTE_IDENT} variant="short" />`, `const label = '${BANNED_READ}-only';`].join('\n');
+	assert.match(exemptReadOnlyNote(fixture), BANNED_STATE_RE, 'the exemption must not wave through a stray banned string');
+});
+
+test('positive control: the TS keyword still fails after exemption', () => {
+	const fixture = `interface Rows { ${BANNED_READ}only items: string[] }`;
+	assert.match(exemptReadOnlyNote(fixture), BANNED_STATE_RE, 'the exemption must not wave through the TS keyword');
+});
+
+test('positive control: the exemption is the exact identifier only (a longer or prefixed name still fails)', () => {
+	assert.match(exemptReadOnlyNote(`<${NOTE_IDENT}s />`), BANNED_STATE_RE, 'a pluralised identifier must still fail');
+	assert.match(exemptReadOnlyNote('const isRead' + 'Only = true;'), BANNED_STATE_RE, 'a prefixed identifier must still fail');
+});
+
+test('negative control: the exempt import line and a use pass after exemption', () => {
+	const fixture = [NOTE_IMPORT_LINE, `<${NOTE_IDENT} variant="long" id="n" />`].join('\n');
+	assert.doesNotMatch(exemptReadOnlyNote(fixture), BANNED_STATE_RE);
+});
+
+test('inertness control: the same exempt fixture matches before exemption, so the exemption is what lets it through', () => {
+	const fixture = [NOTE_IMPORT_LINE, `<${NOTE_IDENT} variant="long" id="n" />`].join('\n');
+	assert.match(fixture, BANNED_STATE_RE, 'the ban must see the identifier before the exemption runs');
+});
+
+test('no banned panel-state word (BANNED_STATE_RE) anywhere in the six files, comments included; only the exact ReadOnlyNote identifier and its own import line are exempt', () => {
 	for (const file of FILES) {
-		assert.doesNotMatch(RAW[file], /read-only|readonly|writable|disabled|◐/i, `${file} names the unreachable panel state`);
+		assert.doesNotMatch(exemptReadOnlyNote(RAW[file]), BANNED_STATE_RE, `${file} names the unreachable panel state`);
 	}
 });
 
@@ -368,4 +426,258 @@ test('neither tier-2 file names "tier", "engine-delegated" or "schema CHECK" out
 	for (const file of TIER2_FILES) {
 		assert.doesNotMatch(STRIPPED[file], /\btier\b|engine-delegated|schema CHECK/i, `${file} restates tier as prose`);
 	}
+});
+
+// --- 9. Live treatment (panels B) ----------------------------------------------
+//
+// The five administration panels this section covers re-read when a completed
+// sync pass touched their tables, keep their data on screen while they do,
+// mark changed fields or rows, show the action note on open invites, make no
+// visibility decision and log only an error's class. KeyholdersPanel.tsx is
+// NOT in this list: another plan owns its live treatment. Every matcher is
+// built so the tokens it bans appear here only as fragments, and every real
+// loop has a positive control before it.
+
+/** @type {string[]} */
+const LIVE_B_FILES = [
+	'NetworkSettingsPanel.tsx',
+	'AuthorityProfilePanel.tsx',
+	'AuthorityPeersPanel.tsx',
+	'AdministrationOfficersPanel.tsx',
+	'InviteAuthoritiesPanel.tsx',
+];
+
+/** Each live panel's table-list constant (the name it passes to touchesTables).
+ * @type {Record<string, string>} */
+const LIVE_B_TABLES = {
+	'NetworkSettingsPanel.tsx': 'NETWORK_SETTINGS_TABLES',
+	'AuthorityProfilePanel.tsx': 'AUTHORITY_PROFILE_TABLES',
+	'AuthorityPeersPanel.tsx': 'AUTHORITY_PEERS_TABLES',
+	'AdministrationOfficersPanel.tsx': 'ADMINISTRATION_OFFICERS_TABLES',
+	'InviteAuthoritiesPanel.tsx': 'AUTHORITY_INVITES_TABLES',
+};
+
+const READ_DEPS_RE = /\[db, readKey(?:, now)?\]/;
+
+/** @param {string} haystack @param {string} needle @returns {number} */
+function countOccurrences(haystack, needle) {
+	return haystack.split(needle).length - 1;
+}
+
+test('L1 control: the read-dependency matcher rejects a read effect that depends on [db] alone', () => {
+	const fixture = `useEffect(() => { void fetchX(db); }, [db]);`;
+	assert.doesNotMatch(fixture, READ_DEPS_RE);
+	assert.match(`}, [db, readKey]);`, READ_DEPS_RE, 'the matcher must accept the live dependency array');
+});
+
+test('L1: each live panel reads the data version, filters it by its own table list and re-reads on [db, readKey] (Administration also on now)', () => {
+	for (const file of LIVE_B_FILES) {
+		const source = STRIPPED[file];
+		assert.ok(source.includes('useDataVersion()'), `${file} does not read the data version`);
+		assert.ok(source.includes(`touchesTables(changedTables, ${LIVE_B_TABLES[file]})`), `${file} does not filter by ${LIVE_B_TABLES[file]}`);
+		assert.match(source, READ_DEPS_RE, `${file} read effect does not depend on [db, readKey]`);
+	}
+	assert.ok(STRIPPED['AdministrationOfficersPanel.tsx'].includes('[db, readKey, now]'), 'the administration panel must also re-read on the clock tick');
+});
+
+const LOADING_RESET = 'setState(' + 'PANEL_READ_LOADING)';
+
+test('L2 control: two loading resets in one source are counted as two', () => {
+	const fixture = `${LOADING_RESET};\nif (x) ${LOADING_RESET};`;
+	assert.equal(countOccurrences(fixture, LOADING_RESET), 2);
+});
+
+test('L2: each live panel resets to loading exactly once (on a new db handle) and still calls its own fetcher exactly once', () => {
+	for (const file of LIVE_B_FILES) {
+		const source = STRIPPED[file];
+		assert.equal(countOccurrences(source, LOADING_RESET), 1, `${file} must reset to loading exactly once`);
+		const fetcherName = FETCHER_NAMES[file];
+		assert.equal([...source.matchAll(new RegExp(`\\b${fetcherName}\\(`, 'g'))].length, 1, `${file} must call ${fetcherName} exactly once`);
+	}
+});
+
+const FRAME_OWNED_RE = new RegExp(['\\bheader' + 'Marked\\b', '\\bann' + 'ounce\\b'].join('|'));
+
+test('L3 control: the frame-owned matcher catches a panel rendering the announcement', () => {
+	const fixture = `<p>{ann${'ounce'}}</p>`;
+	assert.match(fixture, FRAME_OWNED_RE);
+});
+
+test('L3: each live panel calls useChangeMarks once, puts markClass on its fields or rows, renders the visually hidden word and nothing the frame owns', () => {
+	for (const file of LIVE_B_FILES) {
+		const source = STRIPPED[file];
+		assert.equal(countOccurrences(source, 'useChangeMarks('), 1, `${file} must call useChangeMarks exactly once`);
+		assert.ok(source.includes('useChangeMarks(markRows, markRowKey, markRowSig)'), `${file} must hand the hook its mark rows`);
+		assert.ok(source.includes('markClass('), `${file} never applies markClass`);
+		assert.ok(source.includes('markable('), `${file} never applies the mark to a field or row`);
+		assert.ok(source.includes('<ChangeMarkWord />'), `${file} never renders the visually hidden word`);
+		assert.doesNotMatch(source, FRAME_OWNED_RE, `${file} renders something the frame owns`);
+	}
+});
+
+/** Literal keys in `markable('<Key>'` calls.
+ * @param {string} source @returns {string[]} */
+function markableKeys(source) {
+	return [...new Set([...source.matchAll(/markable\('([^']+)'/g)].map((m) => m[1]))].sort();
+}
+
+/** @param {string[]} a @param {string[]} b @returns {boolean} */
+function sameSet(a, b) {
+	const left = [...new Set(a)].sort();
+	const right = [...new Set(b)].sort();
+	return left.length === right.length && left.every((v, i) => v === right[i]);
+}
+
+const SAMPLE_SETTINGS = {
+	Name: 'n',
+	Hash: 'h',
+	PrimaryAuthorityId: 'a1',
+	Relays: [],
+	TimestampAuthorities: [],
+	NumberRequiredTSAs: 1,
+	ElectionType: 'o',
+	ElectionTypeName: 'Official',
+};
+const SAMPLE_PROFILE = { Id: 'a1', Name: 'n', DomainName: null, ImageRef: null };
+const SAMPLE_ADMIN = { admin: { EffectiveAt: '2026-01-01T00:00:00', ThresholdPolicies: [] }, officers: [] };
+
+test('L4 control: dropping one key from a copied key set is reported as a different set', () => {
+	const keys = markableKeys(STRIPPED['NetworkSettingsPanel.tsx']);
+	assert.ok(keys.length > 1, 'the control needs a real key set');
+	assert.equal(sameSet(keys, keys.slice(1)), false);
+	assert.equal(sameSet(keys, [...keys]), true);
+});
+
+test('L4: the marked field keys equal the <dt> labels and the mapper keys (Network settings, Authority profile), and the administration keys equal the mapper admin keys', () => {
+	const settingsSource = STRIPPED['NetworkSettingsPanel.tsx'];
+	const settingsKeys = markableKeys(settingsSource);
+	assert.equal(settingsKeys.length, 7);
+	assert.ok(sameSet(settingsKeys, extractDtLabels(settingsSource)), 'Network settings: marked keys differ from <dt> labels');
+	assert.ok(sameSet(settingsKeys, networkSettingsMarkRows(SAMPLE_SETTINGS).map((r) => r.key)), 'Network settings: marked keys differ from mapper keys');
+
+	const profileSource = STRIPPED['AuthorityProfilePanel.tsx'];
+	const profileKeys = markableKeys(profileSource);
+	assert.equal(profileKeys.length, 4);
+	assert.ok(sameSet(profileKeys, extractDtLabels(profileSource)), 'Authority profile: marked keys differ from <dt> labels');
+	assert.ok(sameSet(profileKeys, authorityProfileMarkRows(SAMPLE_PROFILE).map((r) => r.key)), 'Authority profile: marked keys differ from mapper keys');
+
+	const adminKeys = markableKeys(STRIPPED['AdministrationOfficersPanel.tsx']).filter((k) => k.startsWith('admin:'));
+	const mapperAdminKeys = administrationOfficersMarkRows(SAMPLE_ADMIN)
+		.map((r) => r.key)
+		.filter((k) => k.startsWith('admin:'));
+	assert.equal(mapperAdminKeys.length, 2);
+	assert.ok(sameSet(adminKeys, mapperAdminKeys), 'Administration: marked admin keys differ from mapper keys');
+	assert.ok(STRIPPED['AdministrationOfficersPanel.tsx'].includes("markable(officerMarkKey(officer.UserId), 'aa-row')"), 'officer rows must be marked by officerMarkKey');
+});
+
+/** The text of every `.map(` call's argument list, balanced on parentheses.
+ * @param {string} source @returns {string[]} */
+function mapBodies(source) {
+	/** @type {string[]} */
+	const out = [];
+	let from = 0;
+	for (;;) {
+		const at = source.indexOf('.map(', from);
+		if (at < 0) break;
+		let depth = 0;
+		let i = at + 4;
+		for (; i < source.length; i++) {
+			if (source[i] === '(') depth++;
+			else if (source[i] === ')') {
+				depth--;
+				if (depth === 0) break;
+			}
+		}
+		out.push(source.slice(at, i + 1));
+		from = at + 5;
+	}
+	return out;
+}
+
+/** @param {string} source @returns {boolean} */
+function noteInsideRowMap(source) {
+	return mapBodies(source).some((body) => body.includes(`<${NOTE_IDENT}`));
+}
+
+test('L5 control: a note rendered inside the row map is caught as a per-row note', () => {
+	const fixture = `{rows.map((row) => (<div key={row.Cid}><${NOTE_IDENT} variant="short" /></div>))}`;
+	assert.equal(noteInsideRowMap(fixture), true);
+	assert.equal(noteInsideRowMap(`<${NOTE_IDENT} variant="short" />{rows.map((row) => (<div key={row.Cid} />))}`), false);
+});
+
+test('L5: Invite authorities imports the note on its own line, renders the short note once above the rows, points open rows at it, and no live panel uses the long variant', () => {
+	const raw = RAW['InviteAuthoritiesPanel.tsx'];
+	assert.ok(raw.split('\n').includes(NOTE_IMPORT_LINE), 'the note import must stand alone on its own line, exactly');
+	assert.equal(countOccurrences(raw, `<${NOTE_IDENT} variant="short" id={noteId} />`), 1);
+	assert.ok(raw.includes('aria-describedby={noteId}'), 'open rows must point their accessible description at the note');
+	assert.equal(noteInsideRowMap(STRIPPED['InviteAuthoritiesPanel.tsx']), false, 'the note must not be rendered per row');
+	for (const file of LIVE_B_FILES) {
+		assert.ok(!RAW[file].includes('variant="long"'), `${file} uses the long note variant`);
+	}
+});
+
+const SELF_GATING_RE = new RegExp(
+	['auth\\/gate\\.js', 'evaluate\\(', 'granted' + 'Scopes', 'useEffective' + 'Scopes', 'Granted' + 'ScopesContext', 'Preview' + 'As'].join('|'),
+);
+
+test('L6 control: the self-gating matcher catches a panel reading the effective scopes', () => {
+	const fixture = `const s = useEffective${'Scopes'}();`;
+	assert.match(fixture, SELF_GATING_RE);
+});
+
+test('L6: no live panel makes a visibility decision of its own (no gate, no scope reading, no preview)', () => {
+	for (const file of LIVE_B_FILES) {
+		assert.doesNotMatch(STRIPPED[file], SELF_GATING_RE, `${file} makes its own visibility decision`);
+	}
+});
+
+const CSS_AFFORDANCE_RE = new RegExp(['\\bcur' + 'sor\\s*:', ':ho' + 'ver\\b', ':fo' + 'cus'].join('|'));
+
+test('L7 control: the CSS affordance matcher catches a hover rule with a pointer', () => {
+	const fixture = `.aa-row:${'hover'} { cur${'sor'}: pointer; }`;
+	assert.match(fixture, CSS_AFFORDANCE_RE);
+});
+
+test('L7: authority-admin.css declares no cursor and no hover or focus rule', () => {
+	const css = stripComments(readFileSync(path.join(PANELS_DIR, 'authority-admin.css'), 'utf8'));
+	assert.doesNotMatch(css, CSS_AFFORDANCE_RE);
+	assert.match(css, /\.aa-markable\s*\{/, 'the mark padding rule must exist');
+});
+
+/** Every `console.<method>(` call's argument text, balanced on parentheses.
+ * @param {string} source @returns {string[]} */
+function consoleCalls(source) {
+	/** @type {string[]} */
+	const out = [];
+	for (const m of source.matchAll(/\bconsole\.\w+\(/g)) {
+		const at = m.index ?? 0;
+		let depth = 0;
+		let i = at + m[0].length - 1;
+		for (; i < source.length; i++) {
+			if (source[i] === '(') depth++;
+			else if (source[i] === ')') {
+				depth--;
+				if (depth === 0) break;
+			}
+		}
+		out.push(source.slice(at, i + 1));
+	}
+	return out;
+}
+
+test('L8 control: a console call that logs the whole error is caught', () => {
+	const [call] = consoleCalls(`console.error('x', err);`);
+	assert.ok(call);
+	assert.ok(!call.includes('?.name'));
+});
+
+test('L8: every console call in the live panels logs the error class only', () => {
+	let total = 0;
+	for (const file of LIVE_B_FILES) {
+		for (const call of consoleCalls(STRIPPED[file])) {
+			total += 1;
+			assert.ok(call.includes('?.name'), `${file}: a console call logs more than the error class`);
+		}
+	}
+	assert.ok(total >= LIVE_B_FILES.length, 'expected at least one console call per live panel');
 });

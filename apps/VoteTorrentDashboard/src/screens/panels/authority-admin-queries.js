@@ -22,7 +22,17 @@
  * from the schema as JSON TEXT and are parsed HERE, not in the components —
  * so a malformed value is a tier-1-provable behaviour (an empty array, never
  * a throw) instead of a runtime crash in a browser tab.
+ *
+ * The module also holds the live helpers for these panels, appended after
+ * the fetchers: one table list per fetcher, the change-mark row mappers, the
+ * open-invite rule and two small read-settling helpers. All of them are
+ * pure; none reads or writes a row. Each `*_TABLES` list names exactly the
+ * base tables its fetcher's SQL reads (a view that reads a table counts as
+ * that table), and the drift test in `authority-admin-queries.test.mjs`
+ * proves every list against the SQL above it, so a panel's "did this pass
+ * touch my tables" check can never silently miss a table it reads.
  */
+import { toCanonicalDatetime } from '@votetorrent/vote-engine/browser';
 
 /** Parse a JSON array column. Never throws: null, a non-string, malformed
  * JSON and a well-formed-but-non-array value (e.g. `'{}'`, `'null'`) all
@@ -324,4 +334,207 @@ export async function fetchAuthorityInvites(db) {
 		});
 	}
 	return out;
+}
+
+// --- Live helpers for the administration panels ------------------------------
+//
+// Everything below is pure. A panel re-reads only when a completed sync pass
+// changed one of the tables in its list, keeps its last data on screen while
+// it re-reads, and hands the mapper rows to the shared change-mark hook so a
+// changed field or row is marked briefly.
+
+/** Tables `fetchNetworkSettings` reads. */
+export const NETWORK_SETTINGS_TABLES = Object.freeze(['ElectionType', 'Network']);
+
+/** Tables `fetchAuthorityProfile` reads (with `resolveAuthorityId`). */
+export const AUTHORITY_PROFILE_TABLES = Object.freeze(['Authority', 'Network']);
+
+/** Tables `fetchAuthorityPeers` reads (with `resolveAuthorityId`). */
+export const AUTHORITY_PEERS_TABLES = Object.freeze(['Authority', 'AuthorityPeer', 'Network']);
+
+/** Tables `fetchAdministrationOfficers` reads (with `resolveAuthorityId`; the `CurrentAdmin` view counts as `Admin`). */
+export const ADMINISTRATION_OFFICERS_TABLES = Object.freeze(['Admin', 'Authority', 'Network', 'Officer', 'User']);
+
+/** Tables `fetchKeyholders` reads. */
+export const KEYHOLDERS_TABLES = Object.freeze(['ElectionRevision', 'Keyholder', 'User']);
+
+/** Tables `fetchAuthorityInvites` reads (with `resolveAuthorityId`). */
+export const AUTHORITY_INVITES_TABLES = Object.freeze([
+	'AdminSigning',
+	'Authority',
+	'InviteCancellation',
+	'InviteResult',
+	'InviteSlot',
+	'InviteType',
+	'Network',
+]);
+
+/**
+ * One change-mark row: `key` names the field or row on screen, `sig` is the
+ * displayed value(s) as JSON. A row is marked when its `sig` differs from the
+ * previous pass's `sig` for the same `key`, or when the key is new.
+ * @typedef {{ key: string, sig: string }} MarkRow
+ */
+
+/** @param {MarkRow} row @returns {string} */
+export function markRowKey(row) {
+	return row.key;
+}
+
+/** @param {MarkRow} row @returns {string} */
+export function markRowSig(row) {
+	return row.sig;
+}
+
+/** @param {unknown} value @returns {string} */
+function sigOf(value) {
+	return JSON.stringify(value ?? null);
+}
+
+/**
+ * One row per displayed field, keys equal to the panel's field labels, in
+ * display order. Built from an explicit field list, never by walking the
+ * record, so a column added to the fetcher later never reaches a sig.
+ * @param {NetworkSettings | null} settings
+ * @returns {MarkRow[]}
+ */
+export function networkSettingsMarkRows(settings) {
+	if (settings == null) return [];
+	return [
+		{ key: 'Name', sig: sigOf(settings.Name) },
+		{ key: 'Hash', sig: sigOf(settings.Hash) },
+		{ key: 'PrimaryAuthorityId', sig: sigOf(settings.PrimaryAuthorityId) },
+		{ key: 'Relays', sig: sigOf(settings.Relays) },
+		{ key: 'TimestampAuthorities', sig: sigOf(settings.TimestampAuthorities) },
+		{ key: 'NumberRequiredTSAs', sig: sigOf(settings.NumberRequiredTSAs) },
+		{ key: 'ElectionType', sig: sigOf([settings.ElectionType, settings.ElectionTypeName]) },
+	];
+}
+
+/**
+ * @param {AuthorityProfile | null} profile
+ * @returns {MarkRow[]}
+ */
+export function authorityProfileMarkRows(profile) {
+	if (profile == null) return [];
+	return [
+		{ key: 'Name', sig: sigOf(profile.Name) },
+		{ key: 'DomainName', sig: sigOf(profile.DomainName) },
+		{ key: 'Id', sig: sigOf(profile.Id) },
+		{ key: 'ImageRef', sig: sigOf(profile.ImageRef) },
+	];
+}
+
+/**
+ * One row per peer, in input order; the peer id is both key and sig (a peer
+ * row either exists or it does not).
+ * @param {string[] | null} peerIds
+ * @returns {MarkRow[]}
+ */
+export function authorityPeersMarkRows(peerIds) {
+	if (!Array.isArray(peerIds)) return [];
+	return peerIds.map((peerId) => ({ key: String(peerId), sig: String(peerId) }));
+}
+
+/** @param {string} userId @returns {string} */
+export function officerMarkKey(userId) {
+	return 'officer:' + userId;
+}
+
+/**
+ * The two administration fields first (only when an administration is
+ * current), then one row per officer.
+ * @param {AdministrationOfficers | null} value
+ * @returns {MarkRow[]}
+ */
+export function administrationOfficersMarkRows(value) {
+	if (value == null) return [];
+	/** @type {MarkRow[]} */
+	const out = [];
+	if (value.admin != null) {
+		out.push({ key: 'admin:EffectiveAt', sig: sigOf(value.admin.EffectiveAt) });
+		out.push({ key: 'admin:ThresholdPolicies', sig: sigOf(value.admin.ThresholdPolicies) });
+	}
+	const officers = Array.isArray(value.officers) ? value.officers : [];
+	for (const officer of officers) {
+		out.push({ key: officerMarkKey(officer.UserId), sig: sigOf([officer.Name, officer.Title, officer.Scopes]) });
+	}
+	return out;
+}
+
+/**
+ * One row per invite, keyed by `Cid`. The sig is exactly the six displayed
+ * values, so no other property of the row object can ever reach it.
+ * @param {AuthorityInvite[] | null} invites
+ * @returns {MarkRow[]}
+ */
+export function authorityInvitesMarkRows(invites) {
+	if (!Array.isArray(invites)) return [];
+	return invites.map((invite) => ({
+		key: invite.Cid,
+		sig: sigOf([invite.Name, invite.Type, invite.TypeName, invite.Expiration, invite.IsAccepted, invite.CancelledAt]),
+	}));
+}
+
+const CANONICAL_DATETIME_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/;
+
+/**
+ * Whether an invite is still waiting for an answer at `nowMs`: not accepted,
+ * not declined, not cancelled, and its expiration is still ahead. Both
+ * instants are compared as 19-character canonical datetimes (text order is
+ * time order in that form). An unreadable expiration or a non-finite
+ * `nowMs` is never open.
+ * @param {AuthorityInvite} invite
+ * @param {number} nowMs epoch milliseconds
+ * @returns {boolean}
+ */
+export function isOpenInvite(invite, nowMs) {
+	if (invite == null || typeof nowMs !== 'number' || !Number.isFinite(nowMs)) return false;
+	if (invite.IsAccepted !== null || invite.CancelledAt !== null) return false;
+	if (typeof invite.Expiration !== 'string') return false;
+	const expiration = toCanonicalDatetime(invite.Expiration);
+	const now = toCanonicalDatetime(nowMs);
+	if (!CANONICAL_DATETIME_RE.test(expiration) || !CANONICAL_DATETIME_RE.test(now)) return false;
+	return expiration > now;
+}
+
+/**
+ * A panel's read state. These helpers encode two rules for live panels: keep
+ * the old data on screen while a re-read runs, and hand the change-mark hook
+ * `null` (never an empty list) while nothing has been read yet.
+ * @template T
+ * @typedef {{ status: 'loading' | 'ready' | 'error', data: T | null }} PanelReadState
+ */
+
+/** The state before the first read of a database handle. */
+export const PANEL_READ_LOADING = /** @type {{ status: 'loading', data: null }} */ (Object.freeze({ status: 'loading', data: null }));
+
+/**
+ * Fold one read outcome into the previous state. A good read replaces the
+ * data; a failed read after a good one keeps that good data (the same object)
+ * instead of falling back to the empty sentence; a failed first read is an
+ * error.
+ * @template T
+ * @param {PanelReadState<T>} prev
+ * @param {{ ok: true, data: T | null } | { ok: false }} outcome
+ * @returns {PanelReadState<T>}
+ */
+export function settlePanelRead(prev, outcome) {
+	if (outcome.ok) return { status: 'ready', data: outcome.data };
+	if (prev.status === 'ready') return prev;
+	return { status: 'error', data: null };
+}
+
+/**
+ * The mark rows for a read state: the mapper's rows once data is ready,
+ * otherwise `null` so the change-mark hook skips the diff and keeps its last
+ * index.
+ * @template T
+ * @param {PanelReadState<T>} state
+ * @param {(data: T | null) => MarkRow[]} toRows
+ * @returns {MarkRow[] | null}
+ */
+export function markRowsOrNull(state, toRows) {
+	if (state.status !== 'ready') return null;
+	return toRows(state.data);
 }

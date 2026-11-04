@@ -23,6 +23,11 @@
  *
  * Nothing here logs the invitation or the code: the invitation carries its private key, a bearer
  * credential for cadre membership.
+ *
+ * Browser pairing (D-26) uses the same mint for a different invitation: single use and 15 minutes at
+ * most, minted only on a phone that ALREADY owns its cadre (`createPairingInvitation`), never by running
+ * owner setup, because the request comes from another phone over the network. That invitation is never
+ * logged either.
  */
 import type { CadrePeerRow } from '@serfab/cadre-core';
 import type { FoundingAnchor, INetworksEngine } from '@votetorrent/vote-core';
@@ -211,4 +216,73 @@ export function inviteExpiryMs(expiresAt: string | null): number | null {
 	if (!expiresAt) return null;
 	const ms = Date.parse(/[zZ]|[+-]\d\d:?\d\d$/.test(expiresAt) ? expiresAt : `${expiresAt}Z`);
 	return Number.isFinite(ms) ? ms : null;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Browser pairing (D-26, D-22)
+// ---------------------------------------------------------------------------------------------
+
+/** A pairing invitation admits ONE machine (the officer's browser): a leaked code admits at most one. */
+export const PAIR_INVITE_USES = 1;
+
+/** A pairing invitation lives 15 minutes at most: it dies with the pairing statement it was minted for. */
+export const PAIR_INVITE_LIFETIME_MS = 15 * 60_000;
+
+/** The minting slice for pairing: the invitation row's `key` is the log's and the browser's handle on it. */
+export interface PairingInviteNode extends VoterInviteNode {
+	createCadreInvitation(options: {
+		uses?: number;
+		expiresInMs?: number;
+	}): Promise<{ encoded: string; invitation: { invite: { key: string; expiresAt: string | null } } }>;
+}
+
+/**
+ * Why a pairing invitation was refused. A separate set (and class) from {@link VoterInviteFailureReason},
+ * whose every member the voter invite card maps to copy. The pair-mint service maps `not-owner` to its
+ * `not-owner` refusal code.
+ */
+export type PairingInviteFailureReason = 'not-owner';
+
+export class PairingInviteError extends Error {
+	readonly reason: PairingInviteFailureReason;
+
+	constructor(reason: PairingInviteFailureReason) {
+		// A fixed message: callers read `reason`, never the text.
+		super('pairing-invite: refused');
+		this.name = 'PairingInviteError';
+		this.reason = reason;
+	}
+}
+
+/**
+ * Mint one single-use pairing invitation of at most {@link PAIR_INVITE_LIFETIME_MS} (`options.expiresInMs`
+ * shortens it, so the invitation dies with its statement). Only on a phone that already owns its cadre:
+ * this is reached by a REMOTE request (an officer's phone over pair-mint), and a request from the network
+ * must never make this phone an owner, so anything but capability `ready` is refused `not-owner` and owner
+ * setup (`ensureVoterInviteOwner`) is never run here. Mint failures are judged by this phone's own state,
+ * as for voter codes. The invitation is never logged and never put in an error.
+ */
+export async function createPairingInvitation(
+	node: PairingInviteNode,
+	options?: { expiresInMs?: number },
+): Promise<{ encoded: string; inviteKey: string; expiresAt: string }> {
+	const requested = options?.expiresInMs;
+	if (requested !== undefined && !(Number.isFinite(requested) && requested > 0)) {
+		throw new Error('pairing-invite: bad lifetime');
+	}
+	const lifetime = Math.min(requested ?? PAIR_INVITE_LIFETIME_MS, PAIR_INVITE_LIFETIME_MS);
+	if ((await voterInviteCapability(node)) !== 'ready') throw new PairingInviteError('not-owner');
+	let minted: Awaited<ReturnType<PairingInviteNode['createCadreInvitation']>>;
+	try {
+		minted = await node.createCadreInvitation({ uses: PAIR_INVITE_USES, expiresInMs: lifetime });
+	} catch (err) {
+		if (!hasOwnAddress(node)) throw new VoterInviteError('not-reachable');
+		throw err;
+	}
+	const inviteKey = (minted?.invitation?.invite as { key?: unknown } | undefined)?.key;
+	const expiresAt = minted?.invitation?.invite?.expiresAt;
+	if (typeof inviteKey !== 'string' || inviteKey.length === 0 || typeof expiresAt !== 'string' || expiresAt.length === 0) {
+		throw new Error('pairing-invite: mint result incomplete');
+	}
+	return { encoded: minted.encoded, inviteKey, expiresAt };
 }

@@ -32,6 +32,13 @@
  *      blocks — this package has no UI charter and must not acquire the
  *      dedupe/gate-script obligation `scripts/assert-ui-web-dedupe-and-gate.mjs`
  *      imposes on ui-web consumers.
+ *   7. The `./officer` barrel exports the whole live-store surface (the live
+ *      store open, the change-notice seam and the registry additions) and
+ *      still exports the snapshot-era attach and row-count writer, which
+ *      stay until their scheduled retirement.
+ *   8. The `./public` barrel exports NONE of the live-store names (D-04
+ *      audience split), plus a positive control: the same absence check
+ *      fires against a synthetic module object that has one of them.
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -109,4 +116,50 @@ test('rung 6: @votetorrent/ui-web appears in none of this package\'s dependency 
 			`${field} must never declare "@votetorrent/ui-web" — this package has no UI charter`,
 		);
 	}
+});
+
+/** The live-store names only the officer audience may see. */
+const OFFICER_LIVE_NAMES = Object.freeze([
+	'attachLiveDb',
+	'LiveStoreMissingError',
+	'LiveStoreUnavailableError',
+	'PAIRING_TABLES',
+	'ADMIN_PANEL_AND_GATE_TABLES',
+	'OFFICER_SUBSCRIBED_TABLES',
+	'OFFICER_CHANGE_OPS',
+	'OFFICER_CHANGE_CHANNEL_PREFIX',
+	'officerChangeChannelName',
+	'notifyOfficerPeerWrite',
+	'subscribeToOfficerChanges',
+	'isLegacyEntry',
+	'recordLastPassAt',
+	'PAIRING_RELAY_ADDRS_MAX',
+]);
+
+/**
+ * @param {object} mod
+ * @returns {string[]}
+ */
+function liveNamesExportedBy(mod) {
+	return OFFICER_LIVE_NAMES.filter((name) => Object.prototype.hasOwnProperty.call(mod, name));
+}
+
+test('rung 7: the ./officer barrel exports every live-store name and keeps the snapshot-era exports', async () => {
+	const mod = await import('@votetorrent/web-data/officer');
+	assert.deepEqual(liveNamesExportedBy(mod), [...OFFICER_LIVE_NAMES]);
+	assert.equal(typeof mod.attachLiveDb, 'function');
+	assert.equal(typeof mod.subscribeToOfficerChanges, 'function');
+	assert.equal(mod.PAIRING_RELAY_ADDRS_MAX, 16);
+	assert.equal(typeof mod.attachNetworkDb, 'function');
+	assert.equal(typeof mod.writeRowCounts, 'function');
+});
+
+test('rung 8 (positive control): the absence check fires against a synthetic module that has a live-store name', () => {
+	const synthetic = { listNetworks() {}, attachLiveDb() {} };
+	assert.deepEqual(liveNamesExportedBy(synthetic), ['attachLiveDb']);
+});
+
+test('rung 8: the ./public barrel exports none of the live-store names', async () => {
+	const mod = await import('@votetorrent/web-data/public');
+	assert.deepEqual(liveNamesExportedBy(mod), []);
 });

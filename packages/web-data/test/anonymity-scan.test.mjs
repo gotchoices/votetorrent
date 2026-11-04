@@ -140,10 +140,17 @@ const PUBLIC_SAFE_NAMES = Object.freeze(
  * counts are turnout; their rows name registrants (the block's frozen voter list, and who voted
  * in which block), so no row is ever published. Forbidden stays 33, 39 -> 41 public-safe,
  * 72 -> 74 total.
+ *
+ * 2026-11-03: +2 tables, both NEVER (the strictest class, so nothing becomes publishable). One is
+ * the officer-published tally row, which had landed unclassified and is now an interim NEVER until
+ * the phase that shows results on the public page reclassifies it. The other is the officer-signed
+ * revocation of one dashboard browser pairing (officer-only pairing machinery). Table names
+ * intentionally NOT repeated here, see the self-trip guard below. 33 -> 35 forbidden, public-safe
+ * stays 41, 74 -> 76 total.
  */
-const EXPECTED_FORBIDDEN_COUNT = 33;
+const EXPECTED_FORBIDDEN_COUNT = 35;
 const EXPECTED_PUBLIC_SAFE_COUNT = 41;
-const EXPECTED_TABLE_COUNT = 74;
+const EXPECTED_TABLE_COUNT = 76;
 
 /**
  * The size of the scanned file set, pinned the same way the table counts above
@@ -205,8 +212,16 @@ const EXPECTED_TABLE_COUNT = 74;
  * work added. Test 16 ("D-05: zero forbidden-class table names as code across
  * the public entry source set") was confirmed green over the widened 31-file
  * set before this count moved.
+ *
+ * 2026-11-03 moves this 31 -> 33, deliberately, same evidence standard. Two files landed inside
+ * the public-app scan root after this pin was last set (the dashboard-reactivity work on the
+ * public page, commit `a73b6f78`): `apps/VoteTorrentPublic/src/peer/collection-id.js` and
+ * `apps/VoteTorrentPublic/src/peer/tail-reader.js`. This control was already red on the branch
+ * point before the officer-dashboard schema work began, and that work adds no file under a scan
+ * root. Test 16 ("D-05: zero forbidden-class table names as code across the public entry source
+ * set") was confirmed green over the widened 33-file set before this count moved.
  */
-const EXPECTED_SCANNED_FILE_COUNT = 31;
+const EXPECTED_SCANNED_FILE_COUNT = 33;
 
 // The sentinel literals are ASSEMBLED, never written out, so each appears in
 // this file exactly once — as the comment that delimits the region. A checker

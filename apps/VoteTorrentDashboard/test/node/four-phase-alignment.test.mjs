@@ -189,6 +189,18 @@ test('ElectionsPanel.tsx destructures only phase and stage -- derivePhase\'s dia
 	assert.doesNotMatch(PANEL_STRIPPED, /\bfiredRule\b/, 'firedRule is a machine diagnostic');
 });
 
+// The pill and the timeline classes compare against a coarse clock, so the
+// pill crosses a deadline while the dashboard stays open.
+const AT_FROM_CLOCK_RE = /const atCanonical = toCanonicalDatetime\(nowMs\);/;
+
+test('ElectionsPanel.tsx derives the phase against the coarse clock: useNow() feeds atCanonical, and atCanonical feeds derivePhase', () => {
+	assert.match(PANEL_STRIPPED, /useNow\(\)/);
+	assert.match(PANEL_STRIPPED, AT_FROM_CLOCK_RE);
+	assert.match(PANEL_STRIPPED, /derivePhase\([\s\S]*?atCanonical/);
+	// Control: the assignment matcher misses the frozen-instant form it replaced.
+	assert.doesNotMatch('const atCanonical = resolveComparisonInstant(x);', AT_FROM_CLOCK_RE);
+});
+
 test('ElectionsPanel.tsx selects the timeline row class three ways: eo-tl--current, eo-tl--past, eo-tl--future', () => {
 	for (const cls of ['eo-tl--current', 'eo-tl--past', 'eo-tl--future']) {
 		assert.match(PANEL_STRIPPED, new RegExp(cls.replace(/-/g, '\\-')), `${cls} is not selected`);

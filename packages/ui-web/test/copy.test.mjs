@@ -39,17 +39,26 @@ import { FACT_COPY_KEYS, FACTS } from '../src/lifecycle/facts.js';
 // + one public roll-composition), and the three keys named by later 60-05/
 // 60-06 call sites (the keyholder-release meter's empty frame, the roll
 // chart's "Other" fold label, and the keyholder meter's "N of M" numeral) --
-// 155 + 22 = 177. Written as a bare literal so a future "fix" that deletes
+// 155 + 22 = 177. 66-05 then added eighty-four more: the live dashboard's pairing
+// screen, webcam scanner, header status, officer-swap and forget dialogs, unpaired
+// notice, panel action notes, network switcher and change-mark copy --
+// 177 + 84 = 261. 66-22 then added five gap keys: the unnamed joining step,
+// the unnamed-officer fallback, the other-tab no-storage line, the scanner's
+// could-not-start state and the forget dialog's failure line --
+// 261 + 5 = 266. 66-24 then removed forty: the sign-in, restore and refresh
+// copy that left with the dashboard's snapshot path (REMOVED_66_24_KEYS: 22
+// bootstrap.*, 10 snapshot.* and 8 network.* keys) -- 266 - 40 = 226.
+// Written as a bare literal so a future "fix" that deletes
 // any of them is caught by a failure message that names the reason. This
 // number is re-derived live from `Object.keys(COPY).length`, never from the
 // arithmetic in this comment.
 // ---------------------------------------------------------------------------
 
-test('COPY has exactly 177 keys (73 pre-53-07, +10 public-voice keys under D-08, +2 net from the 54-02 lifecycle rename/expansion, +61 from 54-09s fact/gap copy table, +2 from 54-12s not-held sentence, +6 from 56-12s staleness/config-fault copy, +1 from 56-14s live-update badge, +22 from 60-01s chart-visualization copy)', () => {
+test('COPY has exactly 226 keys (73 pre-53-07, +10 public-voice keys under D-08, +2 net from the 54-02 lifecycle rename/expansion, +61 from 54-09s fact/gap copy table, +2 from 54-12s not-held sentence, +6 from 56-12s staleness/config-fault copy, +1 from 56-14s live-update badge, +22 from 60-01s chart-visualization copy, +84 from 66-05s live-dashboard copy, +5 from 66-22s pairing, scanner and forget gap copy, -40 from 66-24s removal of the snapshot-era sign-in, restore and refresh copy)', () => {
 	assert.equal(
 		Object.keys(COPY).length,
-		177,
-		'expected 177 -- if this reads 155, 60-01s twenty-two chart-visualization keys (NEW_60_01_KEYS: the view ' +
+		226,
+		'expected 226 -- if this reads 266, 66-24s forty removed snapshot-era keys (REMOVED_66_24_KEYS: bootstrap.*, snapshot.* and network.*) came back; nothing mounts them any more, so they are dead copy. If this reads fewer than 226, a live key was wrongly deleted. Before 66-24 the table held 266: if it then read 261, 66-22s five gap keys (NEW_66_22_KEYS: pairing.step.joiningUnnamed, pairing.officerUnknown, pairing.failed.no-storage.otherTab, scanner.unavailable and forget.failed) were wrongly deleted; the pairing screen, the webcam scanner and the forget dialog mount them, where t() throws on them going missing. If this reads 177, 66-05s eighty-four live-dashboard keys (NEW_66_05_KEYS: pairing, scanner, status, swap, forget, unpaired, panel.readOnly, switcher, shell and marks) were wrongly deleted; they are mounted by the live dashboard screens, where t() throws on them going missing. If this reads 155, 60-01s twenty-two chart-visualization keys (NEW_60_01_KEYS: the view ' +
 			'switch, the panel-state and chart-empty keys, the section headings and the tooltip/meter templates) were ' +
 			'wrongly deleted; they are consumed starting in 60-03/60-05/60-06. If this reads 154, 56-14s ' +
 			'public.liveUpdate.badge was wrongly deleted; it is Surface 5 (D-16/D-19) ' +
@@ -295,6 +304,404 @@ const NEW_60_01_KEYS = Object.freeze([
 	'panels.keyholders.meter.value',
 ]);
 
+/**
+ * The eighty-four keys 66-05 added for the live dashboard: the pairing screen
+ * (42), the webcam scanner (9), the header status (10), the officer-swap (4) and
+ * forget (4) dialogs, the unpaired notice (5), the panel action notes (2), the
+ * network switcher (4), the shell open-failure line (1) and the change marks (3).
+ * @type {ReadonlyArray<string>}
+ */
+const NEW_66_05_KEYS = Object.freeze([
+	'pairing.title',
+	'pairing.intro',
+	'pairing.cta',
+	'pairing.scanCta',
+	'pairing.fieldLabel',
+	'pairing.fieldHelp',
+	'pairing.emptyHeading',
+	'pairing.emptyBody',
+	'pairing.verifying.heading',
+	'pairing.verifying.body',
+	'pairing.joining.heading',
+	'pairing.joining.body',
+	'pairing.catchingUpSlow',
+	'pairing.step.connecting',
+	'pairing.step.joining',
+	'pairing.step.first-sync',
+	'pairing.stepState.waiting',
+	'pairing.stepState.inProgress',
+	'pairing.stepState.done',
+	'pairing.stepState.failed',
+	'pairing.stop',
+	'pairing.action.tryAgain',
+	'pairing.action.tryAnother',
+	'pairing.action.retry',
+	'pairing.failed.malformed.heading',
+	'pairing.failed.malformed.body',
+	'pairing.failed.old-style.heading',
+	'pairing.failed.old-style.body',
+	'pairing.failed.expired.heading',
+	'pairing.failed.expired.body',
+	'pairing.failed.spent.heading',
+	'pairing.failed.spent.body',
+	'pairing.failed.unreachable.heading',
+	'pairing.failed.unreachable.body',
+	'pairing.failed.digest-mismatch.heading',
+	'pairing.failed.digest-mismatch.body',
+	'pairing.failed.officer-not-valid.heading',
+	'pairing.failed.officer-not-valid.body',
+	'pairing.failed.no-storage.heading',
+	'pairing.failed.no-storage.body',
+	'pairing.failed.unsupported.heading',
+	'pairing.failed.unsupported.body',
+	'scanner.asking',
+	'scanner.denied',
+	'scanner.noCamera',
+	'scanner.insecureContext',
+	'scanner.instruction',
+	'scanner.found',
+	'scanner.notPairingCode',
+	'scanner.close',
+	'scanner.pasteInstead',
+	'status.chip.live',
+	'status.chip.catching-up',
+	'status.chip.offline',
+	'status.chip.offline-no-update',
+	'status.chip.not-live',
+	'status.title.live',
+	'status.title.catching-up',
+	'status.reconnect',
+	'status.reconnecting',
+	'status.followerNote',
+	'swap.heading',
+	'swap.body',
+	'swap.confirm',
+	'swap.keep',
+	'forget.cta',
+	'forget.heading',
+	'forget.body',
+	'forget.fieldLabel',
+	'unpaired.heading',
+	'unpaired.body.revoked',
+	'unpaired.body.removed',
+	'unpaired.body.key-invalid',
+	'unpaired.dismiss',
+	'panel.readOnly.short',
+	'panel.readOnly.long',
+	'switcher.rowDetail',
+	'switcher.rowDetailNotSyncing',
+	'switcher.opening',
+	'switcher.pairAnother',
+	'shell.openFailed',
+	'marks.updated',
+	'marks.announceOne',
+	'marks.announceMany',
+]);
+
+/**
+ * The exact value of every NEW_66_05_KEYS entry, transcribed a second time so a
+ * silent edit to copy.js is caught.
+ * @type {Readonly<Record<string, string>>}
+ */
+const EXPECTED_66_05_VALUES = Object.freeze({
+	'pairing.title': 'Pair this browser',
+	'pairing.intro': "In the Authority app, open Paired browsers and choose Pair a browser. Paste the code it shows.",
+	'pairing.cta': 'Pair this browser',
+	'pairing.scanCta': 'Scan QR code',
+	'pairing.fieldLabel': 'Pairing code',
+	'pairing.fieldHelp': "Single use, valid for about 15 minutes. Keep it private until you've pasted it.",
+	'pairing.emptyHeading': 'No networks yet',
+	'pairing.emptyBody': 'Pair this browser from the Authority app to follow a network live. Nothing is shown here until you do.',
+	'pairing.verifying.heading': 'Checking the code',
+	'pairing.verifying.body': 'Making sure the code is genuine and still valid.',
+	'pairing.joining.heading': 'Joining {{authorityName}}',
+	'pairing.joining.body': 'This can take a minute or two the first time.',
+	'pairing.catchingUpSlow': 'Still catching up. The data is arriving; you can leave this page open.',
+	'pairing.step.connecting': 'Connecting to the network',
+	'pairing.step.joining': "Joining as {{officerName}}'s browser",
+	'pairing.step.first-sync': 'Catching up on the first sync',
+	'pairing.stepState.waiting': 'Waiting',
+	'pairing.stepState.inProgress': 'In progress',
+	'pairing.stepState.done': 'Done',
+	'pairing.stepState.failed': 'Failed',
+	'pairing.stop': 'Stop pairing',
+	'pairing.action.tryAgain': 'Try again',
+	'pairing.action.tryAnother': 'Try another code',
+	'pairing.action.retry': 'Retry pairing',
+	'pairing.failed.malformed.heading': "That isn't a pairing code.",
+	'pairing.failed.malformed.body': 'Paste the whole code from the Authority app.',
+	'pairing.failed.old-style.heading': 'This is an old sign-in code.',
+	'pairing.failed.old-style.body': 'This dashboard now pairs instead. In the Authority app, open Paired browsers and make a new code.',
+	'pairing.failed.expired.heading': 'That code has expired.',
+	'pairing.failed.expired.body': 'Codes last about 15 minutes. Make a new one in the Authority app.',
+	'pairing.failed.spent.heading': 'That code was already used.',
+	'pairing.failed.spent.body': 'Each code works once. Make a new one in the Authority app.',
+	'pairing.failed.unreachable.heading': "Couldn't reach the network.",
+	'pairing.failed.unreachable.body': "The network's relay didn't answer. Check this computer's connection and try again. If it keeps happening, make a new code.",
+	'pairing.failed.digest-mismatch.heading': "This code doesn't match the network it names.",
+	'pairing.failed.digest-mismatch.body': "The network's records don't match what the code promised, so nothing was saved. Make a new code from the Authority app and try again; if it happens again, contact the person who runs the network.",
+	'pairing.failed.officer-not-valid.heading': "That officer can't pair a browser.",
+	'pairing.failed.officer-not-valid.body': "The officer's key in the code isn't current any more. Ask them to check their keys in the Authority app.",
+	'pairing.failed.no-storage.heading': "This browser can't store the data.",
+	'pairing.failed.no-storage.body': 'Allow site storage for this page (private windows often block it) and try again.',
+	'pairing.failed.unsupported.heading': "This browser isn't supported.",
+	'pairing.failed.unsupported.body': 'Use a current version of Chrome, Edge, Firefox or Safari.',
+	'scanner.asking': 'Allow camera access to scan the QR code. The picture stays in this browser.',
+	'scanner.denied': "Camera access is blocked. Allow it in the browser's site settings, or paste the code instead.",
+	'scanner.noCamera': 'No camera found. Paste the code instead.',
+	'scanner.insecureContext': 'The camera needs a secure connection (https). Paste the code instead.',
+	'scanner.instruction': 'Hold the QR code inside the frame, about 30 cm from the camera.',
+	'scanner.found': 'Code found.',
+	'scanner.notPairingCode': "That QR code isn't a pairing code. Keep scanning or paste the code.",
+	'scanner.close': 'Close scanner',
+	'scanner.pasteInstead': 'Paste the code instead',
+	'status.chip.live': 'Live',
+	'status.chip.catching-up': 'Catching up',
+	'status.chip.offline': 'Offline · last update {{time}}',
+	'status.chip.offline-no-update': 'Offline · no update yet',
+	'status.chip.not-live': 'Not live',
+	'status.title.live': 'Connected and up to date. Last checked at {{time}}',
+	'status.title.catching-up': 'Connected. Newer data is still arriving.',
+	'status.reconnect': 'Reconnect',
+	'status.reconnecting': 'Reconnecting…',
+	'status.followerNote': "This network is open in another tab. This tab shows its last data and doesn't update.",
+	'swap.heading': 'Replace {{oldOfficer}} with {{newOfficer}} on this browser?',
+	'swap.body': "This browser is paired as {{oldOfficer}} for {{authorityName}}. Continuing deletes {{oldOfficer}}'s pairing and this browser's local copy of the data, then pairs it as {{newOfficer}}. {{oldOfficer}}'s pairing may still be listed in their Authority app until they remove it.",
+	'swap.confirm': 'Replace and continue',
+	'swap.keep': 'Keep {{oldOfficer}}',
+	'forget.cta': 'Forget this network',
+	'forget.heading': 'Forget {{authorityName}} on this browser?',
+	'forget.body': "This deletes this browser's pairing key and its local copy of {{authorityName}}'s data from this browser. It doesn't remove this browser from the network: do that in the Authority app under Paired browsers. Data this browser has already received may remain in other places, such as backups. Type {{authorityName}} to confirm.",
+	'forget.fieldLabel': 'Network name',
+	'unpaired.heading': 'This browser was unpaired.',
+	'unpaired.body.revoked': "{{officerName}} removed it in the Authority app, so its local copy of {{authorityName}}'s data was deleted from this browser. Pair again with a new code to follow the network.",
+	'unpaired.body.removed': 'This browser was removed from the network, so its local copy was deleted from this browser.',
+	'unpaired.body.key-invalid': "{{officerName}}'s key is no longer valid, so this browser was unpaired and its local copy deleted.",
+	'unpaired.dismiss': 'Dismiss',
+	'panel.readOnly.short': 'Taken in the Authority app.',
+	'panel.readOnly.long': 'This dashboard only shows these. Decide them in the Authority app.',
+	'switcher.rowDetail': '{{domain}} · {{officerName}}',
+	'switcher.rowDetailNotSyncing': '{{domain}} · {{officerName}} · Not syncing',
+	'switcher.opening': 'Opening {{authorityName}}…',
+	'switcher.pairAnother': '+ Pair another network',
+	'shell.openFailed': 'Something went wrong opening this network. Reconnect, or forget it and pair again.',
+	'marks.updated': 'updated',
+	'marks.announceOne': '{{count}} item updated in {{panel}}',
+	'marks.announceMany': '{{count}} items updated in {{panel}}',
+});
+
+const PRIOR_TO_66_05 = () => [
+	...NEW_54_09_KEYS,
+	...NEW_53_07_KEYS,
+	...PHASE_54_ADDITIONS,
+	...NEW_54_12_KEYS,
+	...NEW_56_12_KEYS,
+	...NEW_56_14_KEYS,
+	...NEW_60_01_KEYS,
+	...PRE_MOVE_KEYS,
+];
+
+/**
+ * The five keys 66-22 added for states and data the live dashboard's copy
+ * table leaves open: the unnamed joining step, the unnamed-officer fallback,
+ * the other-tab no-storage line, the scanner's could-not-start state and the
+ * forget dialog's failure line.
+ * @type {ReadonlyArray<string>}
+ */
+const NEW_66_22_KEYS = Object.freeze([
+	'pairing.step.joiningUnnamed',
+	'pairing.officerUnknown',
+	'pairing.failed.no-storage.otherTab',
+	'scanner.unavailable',
+	'forget.failed',
+]);
+
+/**
+ * The exact value of every NEW_66_22_KEYS entry, transcribed a second time so a
+ * silent edit to copy.js is caught.
+ * @type {Readonly<Record<string, string>>}
+ */
+const EXPECTED_66_22_VALUES = Object.freeze({
+	'pairing.step.joiningUnnamed': "Joining as the officer's browser",
+	'pairing.officerUnknown': 'Unnamed officer',
+	'pairing.failed.no-storage.otherTab': 'This network is open in another tab. Close that tab and try again.',
+	'scanner.unavailable': "The scanner couldn't start. Paste the code instead.",
+	'forget.failed': "Couldn't forget this network. Close any other tab that has it open, then try again.",
+});
+
+/**
+ * The forty keys 66-24 removed: the sign-in, restore and refresh copy that left
+ * with the dashboard's snapshot path (the sign-in code screen, the snapshot
+ * freshness and refresh chrome, the old forget and officer-swap dialogs). Every
+ * one is a PRE_MOVE_KEYS member; nothing in the dashboard, the public app or
+ * this package mounts any of them any more. Transcribed literally, in table
+ * order.
+ * @type {ReadonlyArray<string>}
+ */
+const REMOVED_66_24_KEYS = Object.freeze([
+	'bootstrap.heading',
+	'bootstrap.codeFieldLabel',
+	'bootstrap.cta',
+	'bootstrap.emptyNetworksHeading',
+	'bootstrap.emptyNetworksBody',
+	'bootstrap.errorInvalidCodeHeading',
+	'bootstrap.errorInvalidCodeBody',
+	'bootstrap.errorInvalidCodeCta',
+	'bootstrap.errorCodeNotRecognizedHeading',
+	'bootstrap.errorCodeNotRecognizedBody',
+	'bootstrap.errorCodeAlreadyUsedHeading',
+	'bootstrap.errorCodeAlreadyUsedBody',
+	'bootstrap.errorCodeTimedOutHeading',
+	'bootstrap.errorCodeTimedOutBody',
+	'bootstrap.errorTransportHeading',
+	'bootstrap.errorTransportBody',
+	'bootstrap.errorTransportCta',
+	'bootstrap.phase.submitting',
+	'bootstrap.phase.verifying',
+	'bootstrap.phase.applying-schema',
+	'bootstrap.phase.seeding',
+	'bootstrap.phase.success',
+	'snapshot.refreshCta',
+	'snapshot.asOf',
+	'snapshot.verifiedToast',
+	'snapshot.staleBanner',
+	'snapshot.errorVerificationHeading',
+	'snapshot.errorVerificationBody',
+	'snapshot.errorAttachHeading',
+	'snapshot.errorAttachBody',
+	'snapshot.errorSchemaMismatchHeading',
+	'snapshot.errorSchemaMismatchBody',
+	'network.redeemAnotherCta',
+	'network.forgetCta',
+	'network.forgetConfirmBody',
+	'network.swapConfirmHeading',
+	'network.swapConfirmBody',
+	'network.swapConfirmCta',
+	'network.swapErrorHeading',
+	'network.swapErrorBody',
+]);
+
+/** The two panel read-failure values 66-24 reworded; they are mounted by the dashboard, so gate 8 covers them. */
+const REWORDED_66_24_KEYS = Object.freeze(['panels.registrations.readFailed', 'panels.keyholders.readFailed']);
+
+/** Every live-dashboard key whose value the gate 8, placeholder and machine-identifier checks cover. */
+const LIVE_DASHBOARD_KEYS = Object.freeze([...NEW_66_05_KEYS, ...NEW_66_22_KEYS]);
+
+test('sanity: the 66-05 delta is 84 keys, has no duplicates and none collides with any prior delta', () => {
+	assert.equal(NEW_66_05_KEYS.length, 84);
+	assert.equal(new Set(NEW_66_05_KEYS).size, 84);
+	const priorSet = new Set(PRIOR_TO_66_05());
+	const overlap = NEW_66_05_KEYS.filter((k) => priorSet.has(k));
+	assert.deepEqual(overlap, [], `these keys are counted twice: ${overlap.join(', ')}`);
+});
+
+test('66-05: every new live-dashboard key holds its exact UI-contract value', () => {
+	assert.deepEqual(Object.keys(EXPECTED_66_05_VALUES), [...NEW_66_05_KEYS]);
+	for (const key of NEW_66_05_KEYS) {
+		assert.equal(COPY[key], EXPECTED_66_05_VALUES[key], `value drift on ${key}`);
+	}
+});
+
+test('sanity: the 66-22 delta is 5 keys, has no duplicates and none collides with any prior delta (the 66-05 delta included)', () => {
+	assert.equal(NEW_66_22_KEYS.length, 5);
+	assert.equal(new Set(NEW_66_22_KEYS).size, 5);
+	const priorSet = new Set([...PRIOR_TO_66_05(), ...NEW_66_05_KEYS]);
+	const overlap = NEW_66_22_KEYS.filter((k) => priorSet.has(k));
+	assert.deepEqual(overlap, [], `these keys are counted twice: ${overlap.join(', ')}`);
+});
+
+test('66-22: every new gap key holds its exact value', () => {
+	assert.deepEqual(Object.keys(EXPECTED_66_22_VALUES), [...NEW_66_22_KEYS]);
+	for (const key of NEW_66_22_KEYS) {
+		assert.equal(COPY[key], EXPECTED_66_22_VALUES[key], `value drift on ${key}`);
+	}
+});
+
+test('sanity: the 66-24 removal is 40 keys, has no duplicates, every member is a pre-move key, none is in any added delta, and none is still in COPY', () => {
+	assert.equal(REMOVED_66_24_KEYS.length, 40);
+	assert.equal(new Set(REMOVED_66_24_KEYS).size, 40);
+	const preMove = new Set(PRE_MOVE_KEYS);
+	assert.deepEqual(REMOVED_66_24_KEYS.filter((k) => !preMove.has(k)), [], 'every removed key must be a pre-move key');
+	const added = new Set([
+		...NEW_53_07_KEYS,
+		...PHASE_54_ADDITIONS,
+		...NEW_54_09_KEYS,
+		...NEW_54_12_KEYS,
+		...NEW_56_12_KEYS,
+		...NEW_56_14_KEYS,
+		...NEW_60_01_KEYS,
+		...NEW_66_05_KEYS,
+		...NEW_66_22_KEYS,
+	]);
+	assert.deepEqual(REMOVED_66_24_KEYS.filter((k) => added.has(k)), [], 'a removed key collides with an added delta');
+	assert.deepEqual(REMOVED_66_24_KEYS.filter((k) => k in COPY), [], 'a removed key is still in COPY');
+});
+
+// Positive control first: the same matcher list must fire on a planted string.
+const GATE_8_BANNED = [
+	/\bsnapshot\b/i,
+	/\bas of\b/i,
+	/\brefresh/i,
+	/\brestore/i,
+	/\bphase\b/i,
+	/\bD-/i,
+	/\berase/i,
+	/permanently deleted from the network/i,
+	/no longer has access to the data/i,
+];
+/** @param {string} value */
+const gate8Hits = (value) => GATE_8_BANNED.filter((re) => re.test(value));
+
+test('66-05 gate 8 positive control: the banned-word matcher fires on a planted string', () => {
+	assert.ok(gate8Hits('Refresh the snapshot as of Phase 3 (D-12)').length >= 4);
+	assert.ok(gate8Hits('We will erase it, permanently deleted from the network').length >= 2);
+	assert.deepEqual(gate8Hits('Pair this browser'), []);
+	// The old Registrations read-failure value (before 66-24 reworded it) is flagged by the same matcher.
+	assert.ok(gate8Hits("Couldn't load registrations. Try refreshing the snapshot.").length >= 2);
+});
+
+test('66-05/66-22/66-24 gate 8: no new value (nor either reworded panel read failure) uses a snapshot-era word, a phase or decision id, or an erasure promise', () => {
+	for (const key of [...LIVE_DASHBOARD_KEYS, ...REWORDED_66_24_KEYS]) {
+		assert.deepEqual(gate8Hits(COPY[key]), [], `${key} reads as banned copy: ${COPY[key]}`);
+	}
+});
+
+const PLACEHOLDER_WHITELIST = new Set(['authorityName', 'officerName', 'oldOfficer', 'newOfficer', 'time', 'domain', 'count', 'panel']);
+
+test('66-05/66-22: every placeholder in a new value is whitelisted, and every new key resolves through t() once they are supplied', () => {
+	const all = Object.fromEntries([...PLACEHOLDER_WHITELIST].map((n) => [n, `<${n}>`]));
+	for (const key of LIVE_DASHBOARD_KEYS) {
+		for (const m of COPY[key].matchAll(/\{\{\s*([^}]*?)\s*\}\}/g)) {
+			assert.ok(PLACEHOLDER_WHITELIST.has(m[1]), `${key} interpolates the non-whitelisted placeholder "${m[1]}"`);
+		}
+		assert.ok(!t(key, all).includes('{{'), `${key} leaves a placeholder unresolved`);
+	}
+});
+
+const MACHINE_IDENTIFIERS = [
+	'old-style',
+	'digest-mismatch',
+	'officer-not-valid',
+	'no-storage',
+	'catching-up',
+	'not-live',
+	'key-invalid',
+	'first-sync',
+	'offline-no-update',
+];
+/** @param {string} value */
+const machineHits = (value) => MACHINE_IDENTIFIERS.filter((id) => value.includes(id));
+
+test('66-05 machine-identifier positive control: the matcher fires on a planted string', () => {
+	assert.deepEqual(machineHits('state: catching-up, failure: digest-mismatch'), ['digest-mismatch', 'catching-up']);
+});
+
+test('66-05/66-22: no new value shows a machine identifier to the officer', () => {
+	for (const key of LIVE_DASHBOARD_KEYS) {
+		assert.deepEqual(machineHits(COPY[key]), [], `${key} leaks a machine identifier: ${COPY[key]}`);
+	}
+});
+
 test('sanity: the 54-12 delta is 2 keys and neither collides with the 54-09 delta (a collision would silently shrink the delta while every other assertion still passed)', () => {
 	assert.equal(NEW_54_12_KEYS.length, 2);
 	const priorSet = new Set([...NEW_54_09_KEYS, ...NEW_53_07_KEYS, ...PHASE_54_ADDITIONS]);
@@ -339,7 +746,7 @@ test('sanity: the 54-09 delta is 61 keys -- 50 named by facts.js FACT_COPY_KEYS 
 	assert.equal(new Set(NEW_54_09_KEYS).size, 61);
 });
 
-test('D-25/D-07/D-08/D-06/54-09/54-12/56-12/56-14/60-01: the ONLY key-set changes since 8326185d are gate.advisoryDisclosure -> advisory.authority.body, the ten NEW_53_07_KEYS additions, the PHASE_54_RENAMES rename, the PHASE_54_ADDITIONS additions, the 61 NEW_54_09_KEYS additions, the two NEW_54_12_KEYS additions, the six NEW_56_12_KEYS additions, the one NEW_56_14_KEYS addition and the twenty-two NEW_60_01_KEYS additions -- no other key added or removed', () => {
+test('D-25/D-07/D-08/D-06/54-09/54-12/56-12/56-14/60-01/66-05/66-22/66-24: the ONLY key-set changes since 8326185d are gate.advisoryDisclosure -> advisory.authority.body, the ten NEW_53_07_KEYS additions, the PHASE_54_RENAMES rename, the PHASE_54_ADDITIONS additions, the 61 NEW_54_09_KEYS additions, the two NEW_54_12_KEYS additions, the six NEW_56_12_KEYS additions, the one NEW_56_14_KEYS addition the twenty-two NEW_60_01_KEYS additions the eighty-four NEW_66_05_KEYS additions, the five NEW_66_22_KEYS additions and the forty REMOVED_66_24_KEYS removals -- no other key added or removed', () => {
 	const currentKeys = new Set(Object.keys(COPY));
 	const renameMap = new Map(PHASE_54_RENAMES);
 	const expectedKeys = new Set([
@@ -355,7 +762,10 @@ test('D-25/D-07/D-08/D-06/54-09/54-12/56-12/56-14/60-01: the ONLY key-set change
 		...NEW_56_12_KEYS,
 		...NEW_56_14_KEYS,
 		...NEW_60_01_KEYS,
+		...NEW_66_05_KEYS,
+		...NEW_66_22_KEYS,
 	]);
+	for (const k of REMOVED_66_24_KEYS) expectedKeys.delete(k);
 
 	const added = [...currentKeys].filter((k) => !expectedKeys.has(k));
 	const removed = [...expectedKeys].filter((k) => !currentKeys.has(k));
@@ -363,12 +773,12 @@ test('D-25/D-07/D-08/D-06/54-09/54-12/56-12/56-14/60-01: the ONLY key-set change
 	assert.deepEqual(
 		added,
 		[],
-		`unexpected key(s) added beyond the D-07 rename, the D-08 additions, the 54-02 lifecycle changes, the 54-09 delta, the 54-12 delta, the 56-12 delta, the 56-14 delta and the 60-01 delta: ${added.join(', ')}`,
+		`unexpected key(s) added beyond the D-07 rename, the D-08 additions, the 54-02 lifecycle changes, the 54-09 delta, the 54-12 delta, the 56-12 delta, the 56-14 delta, the 60-01 delta, the 66-05 delta, the 66-22 delta and the 66-24 removal: ${added.join(', ')}`,
 	);
 	assert.deepEqual(
 		removed,
 		[],
-		`unexpected key(s) missing beyond the D-07 rename, the D-08 additions, the 54-02 lifecycle changes, the 54-09 delta, the 54-12 delta, the 56-12 delta, the 56-14 delta and the 60-01 delta: ${removed.join(', ')}`,
+		`unexpected key(s) missing beyond the D-07 rename, the D-08 additions, the 54-02 lifecycle changes, the 54-09 delta, the 54-12 delta, the 56-12 delta, the 56-14 delta, the 60-01 delta, the 66-05 delta, the 66-22 delta and the 66-24 removal: ${removed.join(', ')}`,
 	);
 });
 
@@ -387,6 +797,7 @@ test('D-25/D-07: every key that survives unrenamed from 8326185d still carries i
 	for (const key of PRE_MOVE_KEYS) {
 		if (key === 'gate.advisoryDisclosure') continue; // the D-07 named delta
 		if (renamedKeys.has(key)) continue; // the 54-02 named deltas, checked separately below
+		if (REMOVED_66_24_KEYS.includes(key)) continue; // the 66-24 named removal
 		assert.ok(key in COPY, `expected ${key} to survive the move unchanged`);
 		assert.equal(typeof COPY[key], 'string');
 		assert.ok(COPY[key].length > 0, `expected ${key} to remain non-empty`);
@@ -420,18 +831,14 @@ test('lifecycle.closed is a VALUE CHANGE from the retired lifecycle.released ("R
 // t() and the table's own behaviour (moved verbatim from the dashboard suite).
 // ---------------------------------------------------------------------------
 
-test('t("bootstrap.cta") returns exactly "Redeem Code"', () => {
-	assert.equal(t('bootstrap.cta'), 'Redeem Code');
-});
-
 test('t("gate.badgeReal") and t("gate.badgeSimulated") return the D-18 binding wording', () => {
 	assert.equal(t('gate.badgeReal'), 'answered by the database');
 	assert.equal(t('gate.badgeSimulated'), 'simulated scope set');
 });
 
-test('t("network.forgetConfirmBody", {...}) interpolates and leaves no residual {{', () => {
-	const result = t('network.forgetConfirmBody', { authorityName: 'Acme County' });
-	assert.ok(result.includes('Acme County'), 'expected interpolated value in output');
+test('t("forget.heading", {...}) interpolates and leaves no residual {{', () => {
+	const result = t('forget.heading', { authorityName: 'Acme County' });
+	assert.equal(result, 'Forget Acme County on this browser?');
 	assert.ok(!result.includes('{{'), 'expected no residual {{ placeholder marker');
 });
 
@@ -442,9 +849,9 @@ test('t("does.not.exist") throws an Error naming the missing key', () => {
 	);
 });
 
-test('t("network.forgetConfirmBody") with no params throws naming the unresolved placeholder', () => {
+test('t("forget.heading") with no params throws naming the unresolved placeholder', () => {
 	assert.throws(
-		() => t('network.forgetConfirmBody'),
+		() => t('forget.heading'),
 		(err) => err instanceof Error && err.message.includes('authorityName'),
 	);
 });
@@ -491,120 +898,6 @@ test('panelFrame.tierPill, panelFrame.sitePill and panelFrame.sitesPill exist an
 	assert.equal(t('panelFrame.tierPill', { tier: '2' }), 'tier 2');
 	assert.equal(t('panelFrame.sitePill', { count: '1' }), '1 site');
 	assert.equal(t('panelFrame.sitesPill', { count: '3' }), '3 sites');
-});
-
-// --- Surfaced swap-failure banner (CR-03, 50-22) --------------------------------
-
-test('t("network.swapErrorHeading") and t("network.swapErrorBody") resolve to non-empty strings with no residual {{', () => {
-	const heading = t('network.swapErrorHeading');
-	const body = t('network.swapErrorBody');
-	assert.ok(heading.length > 0, 'expected a non-empty heading');
-	assert.ok(body.length > 0, 'expected a non-empty body');
-	assert.ok(!heading.includes('{{'), 'expected no residual {{ placeholder marker in heading');
-	assert.ok(!body.includes('{{'), 'expected no residual {{ placeholder marker in body');
-});
-
-// ===========================================================================
-// D-25: the three refusal families (moved -- their subject is the table).
-//
-// The defect: `bootstrap.errorInvalidCodeBody` read "It may have expired or
-// already been used. Ask the officer for a new one." -- one sentence answering
-// three distinguishable service refusals plus a locally malformed paste. Every
-// assertion below exists to keep the three genuinely apart, because "three
-// different sentences that all say ask for a new code" is the same defect with
-// more words.
-//
-// The bar is THREE DIFFERENT NEXT ACTIONS, so each family declares an action
-// TOKEN and the suite proves that token appears in its own body and in neither
-// of the other two. That makes convergence mechanical to detect rather than a
-// matter of taste.
-// ===========================================================================
-
-/** @type {ReadonlyArray<{ status: string, headingKey: string, bodyKey: string, token: string }>} */
-const REFUSAL_FAMILIES = Object.freeze([
-	{
-		status: 'unknown',
-		headingKey: 'bootstrap.errorCodeNotRecognizedHeading',
-		bodyKey: 'bootstrap.errorCodeNotRecognizedBody',
-		// Re-checking the paste is the ONLY action that is right here and wrong
-		// for the other two -- a typo produces exactly this answer.
-		token: 'typo',
-	},
-	{
-		status: 'used',
-		headingKey: 'bootstrap.errorCodeAlreadyUsedHeading',
-		bodyKey: 'bootstrap.errorCodeAlreadyUsedBody',
-		// The fact that makes retrying pointless, as opposed to merely unlucky.
-		token: 'only once',
-	},
-	{
-		status: 'expired',
-		headingKey: 'bootstrap.errorCodeTimedOutHeading',
-		bodyKey: 'bootstrap.errorCodeTimedOutBody',
-		// Promptness: for a spent code delay is irrelevant, for a timed-out one
-		// delay is the whole cause. That is the genuinely different instruction.
-		token: 'right away',
-	},
-]);
-
-test('D-25: every refusal heading and body resolves to a non-empty string carrying no residual {{', () => {
-	for (const family of REFUSAL_FAMILIES) {
-		for (const key of [family.headingKey, family.bodyKey]) {
-			const value = t(key);
-			assert.ok(value.length > 0, `expected ${key} to resolve non-empty`);
-			assert.ok(
-				!value.includes('{{'),
-				`${key} must carry no {{placeholder}} -- t() throws on an unresolved one, and this web bundle has no span value to interpolate (contract C4): "${value}"`,
-			);
-		}
-	}
-});
-
-test('D-25: the three refusal HEADINGS are pairwise different', () => {
-	const seen = new Map();
-	for (const family of REFUSAL_FAMILIES) {
-		const value = t(family.headingKey);
-		const collidesWith = seen.get(value);
-		assert.equal(
-			collidesWith,
-			undefined,
-			`${family.headingKey} and ${collidesWith} resolve to the SAME text ("${value}") -- two refusal conditions would read identically`,
-		);
-		seen.set(value, family.headingKey);
-	}
-	assert.equal(seen.size, 3, `expected 3 distinct headings, observed ${seen.size}`);
-});
-
-test('D-25: the three refusal BODIES are pairwise different', () => {
-	const seen = new Map();
-	for (const family of REFUSAL_FAMILIES) {
-		const value = t(family.bodyKey);
-		const collidesWith = seen.get(value);
-		assert.equal(
-			collidesWith,
-			undefined,
-			`${family.bodyKey} and ${collidesWith} resolve to the SAME text ("${value}") -- two refusal conditions would read identically`,
-		);
-		seen.set(value, family.bodyKey);
-	}
-	assert.equal(seen.size, 3, `expected 3 distinct bodies, observed ${seen.size}`);
-});
-
-test('D-25: each refusal body carries its OWN action token and neither of the other two -- three sentences, three next actions', () => {
-	for (const family of REFUSAL_FAMILIES) {
-		const body = t(family.bodyKey).toLowerCase();
-		assert.ok(
-			body.includes(family.token),
-			`${family.bodyKey} must name its own action token "${family.token}": "${t(family.bodyKey)}"`,
-		);
-		for (const other of REFUSAL_FAMILIES) {
-			if (other === family) continue;
-			assert.ok(
-				!body.includes(other.token),
-				`${family.bodyKey} contains "${other.token}", which belongs to ${other.bodyKey} -- the two families give the same next action`,
-			);
-		}
-	}
 });
 
 // ===========================================================================

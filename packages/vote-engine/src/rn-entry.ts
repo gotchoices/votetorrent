@@ -25,6 +25,10 @@ export type { NetworkJoinCode, NetworkJoinCodeDecodeResult, NetworkJoinCodeDecod
 export { joinNetwork } from './networks/network-join.js'
 export type { NetworkJoinNode, NetworkJoinOptions, NetworkJoinResult, NetworkJoinFailureReason, NetworkJoinStep } from './networks/network-join.js'
 export { NetworkEngine } from './network/network-engine.js'
+// Phones pass `createEdgeReaderRefusal().hook` as cadre-core's `strandCohortRefusal`, keeping strand peers
+// that declared themselves read-only edge readers out of write cohorts and coordinator choice.
+export { EDGE_READER_PROTOCOL, EDGE_READER_REFUSAL_MAX_PEERS, createEdgeReaderRefusal } from './network/edge-reader-refusal.js'
+export type { EdgeReaderRefusal, EdgeReaderRefusalOptions, EdgeReaderStrandRefusal } from './network/edge-reader-refusal.js'
 export { ElectionsEngine, peekNextElectionTid } from './elections/elections-engine.js'
 export { ElectionEngine } from './election/election-engine.js'
 export type { ElectionSubject } from './election/election-engine.js'
@@ -442,3 +446,62 @@ export type {
 	TallyVerifyFailure,
 	TallyVerifyResult
 } from './blocks/index.js'
+// Phase 66: browser pairing. The Authority's officer phone signs a pairing statement and asks an owner
+// phone to mint the browser's invitation (pair-mint); the owner phone hosts pair-mint and acts on
+// officer-signed revocation rows. Re-exported by name (never `export *`); mirrors the exact name list
+// on src/pairing/index.ts.
+export {
+	PAIRING_CODE_PREFIX,
+	PAIRING_QR_BYTE_BUDGET,
+	PAIRING_CODE_MAX_CHARS,
+	PairingCodeError,
+	encodePairingCode,
+	decodePairingCode,
+	PAIRING_DIGEST_TAG,
+	PAIRING_REMOVE_DIGEST_TAG,
+	pairingStatementDigest,
+	pairingRemoveDigest,
+	verifyPairingStatement,
+	verifyPairingRemove,
+	isCurrentPairingOfficer,
+	PAIR_MINT_PROTOCOL,
+	PAIR_MINT_MAX_FRAME_BYTES,
+	PAIR_MINT_READ_TIMEOUT_MS,
+	PAIR_MINT_REFUSAL_CODES,
+	parsePairMintRequest,
+	parsePairMintReply,
+	PairMintTransportError,
+	attachPairMint,
+	requestPairMint,
+	PAIR_MINT_WINDOW_MS,
+	PAIR_MINT_CLOCK_SKEW_MS,
+	PAIR_MINT_MAX_LIVE_PER_OFFICER,
+	PAIR_MINT_PEER_REQUESTS_PER_MINUTE,
+	createPairMintService,
+	PAIRING_REVOKE_DIGEST_TAG,
+	PairingRevocationError,
+	pairingRevokeDigest,
+	isPairingRevoked,
+	revokeDashboardPairing
+} from './pairing/index.js'
+export type {
+	PairingStatement,
+	DecodedPairingCode,
+	PairingCodeFailure,
+	VerifiablePairingStatement,
+	PairingVerifyFailure,
+	PairingVerifyResult,
+	PairMintRefusalCode,
+	PairMintMintRequest,
+	PairMintRemoveRequest,
+	PairMintRequest,
+	PairMintReply,
+	PairMintHandler,
+	PairMintLibp2pLike,
+	PairMintOutcome,
+	PairMintLogEntry,
+	PairMintPorts,
+	PairMintService,
+	PairingRevocationSigner,
+	PairingRevocationReason
+} from './pairing/index.js'

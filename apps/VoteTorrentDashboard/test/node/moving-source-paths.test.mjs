@@ -30,9 +30,8 @@
  *
  *   1. ESM import-specifier lines (`from '...'`, `from "..."`, `import(`,
  *      `new URL(`) — the real relative-specifier imports in reads.test.mjs,
- *      db.test.mjs, db-delete.test.mjs, refresh-swap.test.mjs,
- *      freshness-forget.test.mjs, snapshot-restore.test.mjs,
- *      bootstrap-redemption.test.mjs and bootstrap-code-registry.test.mjs.
+ *      db.test.mjs, db-delete.test.mjs and the other node tests that import
+ *      a dashboard module by relative path.
  *      Those are real and legitimate today; rewriting the specifier SHAPE
  *      (relative → bare @votetorrent/web-data specifier) is 54-03's
  *      semantic territory, one wave later, not this plan's. A future reader

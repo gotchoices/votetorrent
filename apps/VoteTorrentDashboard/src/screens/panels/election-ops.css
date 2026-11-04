@@ -139,3 +139,18 @@
 	font-weight: var(--font-heading-weight);
 	line-height: var(--font-heading-line-height);
 }
+
+/*
+ * Data pills in these panels (a ballot id, the Required flag, a registrant
+ * id) are values, not controls. Nothing in an Election Operations panel can
+ * be clicked, so a pill inside a row always keeps the default cursor, even if
+ * the shared pill rule ever gains a pointer.
+ *
+ * Live change marks go on VALUE elements: a `dd`, a value `span`, or a row
+ * that paints no background of its own. `.eo-count-grid > div` and
+ * `.eo-tl--current` paint their own background, which would hide the mark
+ * tint, so the mark sits on the value inside them instead.
+ */
+.eo-row .pill {
+	cursor: default;
+}

@@ -49,7 +49,6 @@ import {
 	TallyPublicationEngine,
 } from '@votetorrent/vote-engine/rn';
 import type { DbFactory, EngineContext, ElectionSubject, StagingOpener, StagingDecisionSigner } from '@votetorrent/vote-engine/rn';
-import type { BootstrapSnapshot } from '@votetorrent/vote-engine/bootstrap';
 import { createStrandDbFactory } from './rn-db-factory';
 import { wrapCreateWithFounding } from './founder-intent';
 import { isJoinedNetwork } from './joined-networks';
@@ -400,47 +399,18 @@ export class EngineFactory {
 	}
 
 	/**
-	 * 50-07 (D-07/D-09/D-13): the dashboard producer's snapshot seam. Calls
-	 * `requireEstablishedCtx()` and passes `ctx.db` — together with the
-	 * currently-established network's hash — to `exportDatabaseSnapshot`,
-	 * returning the resulting 50-02 envelope.
-	 *
-	 * Preserves the SAME security rule `isAttestationVerifierProvisioned` and every
-	 * sibling method above it already hold: the factory keeps `ctx` internal, and
-	 * the caller (ultimately `DashboardSignInCodeScreen` via `AppProvider`) receives
-	 * a snapshot VALUE, never a `Database` handle. That distinction is load-bearing
-	 * here specifically because tier-2 authorization (`iad` / `ik`) has zero schema
-	 * sites — it exists only as `context.Is*Valid` checks inside the engine layer —
-	 * so a caller holding a raw `Database` handle would silently lose it. Phase 50
-	 * makes no writes, and this read path must not become the precedent that erodes
-	 * that rule: no `getDatabase()` is added here, and `ctx` itself is never
-	 * returned.
-	 *
-	 * The producer module is imported LAZILY (dynamic `import()`, not a
-	 * top-level `import`) rather than alongside this file's other engine
-	 * imports above. `dashboard-bootstrap-producer.ts` pulls in
-	 * `@votetorrent/vote-engine/bootstrap`, whose `snapshot-codec.ts` transitively
-	 * reaches `database/initialize.ts`'s module-scope crypto-plugin registration
-	 * (`FunctionFlags.UTF8` read at import time) — harmless in the real app, but
-	 * `rn-db-factory.test.ts` virtual-mocks `@quereus/quereus` with a narrower
-	 * surface that doesn't include `FunctionFlags`, so a top-level import here
-	 * broke that PRE-EXISTING suite purely by being reachable from this file's
-	 * module graph, without this method ever being called. Deferring the import
-	 * to call time keeps every non-dashboard consumer of `EngineFactory`
-	 * byte-for-byte unaffected by Phase 50's new dependency.
-	 */
-	async exportDashboardSnapshot(): Promise<BootstrapSnapshot> {
-		const ctx = this.requireEstablishedCtx();
-		const { exportDatabaseSnapshot } = await import('../services/dashboard-bootstrap-producer');
-		return exportDatabaseSnapshot(ctx.db, this.currentNetworkHash!);
-	}
-
-	/**
 	 * D-32: constructs the two staging-only P2P transports (`PeerStagingTransports`), bound to
 	 * `strandId = currentNetworkHash` (matching `rn-db-factory.ts`'s own `strandId = networkHash`
 	 * convention). The caller receives two transports, never a Database — the port is built AND
-	 * consumed entirely inside this method, preserving the same no-raw-accessor rule
-	 * `exportDashboardSnapshot`'s doc comment states above.
+	 * consumed entirely inside this method.
+	 *
+	 * This is the factory's no-raw-handle rule, which `isAttestationVerifierProvisioned` and every
+	 * sibling method also hold: the factory keeps `ctx` internal, and callers receive values or
+	 * ready-made transports, never a `Database` handle. The rule is load-bearing because tier-2
+	 * authorization (`iad` / `ik`) has zero schema sites — it exists only as `context.Is*Valid`
+	 * checks inside the engine layer — so a caller holding a raw `Database` handle would silently
+	 * lose it. No `getDatabase()` accessor is ever added to this factory, and `ctx` itself is never
+	 * returned.
 	 *
 	 * Refuses `PeerStrandUnavailableError`:
 	 *   - `'no-network'` when no network is established;
@@ -452,8 +422,8 @@ export class EngineFactory {
 	 * Neither transport is given a `sealer` — the Authority app never submits staged requests, it
 	 * only intakes and decides them, so `computeDigest`/`computeAttestationDigest` are refusing
 	 * stubs that reject if ever called (submission is a REQUESTER-side-only operation). The strand
-	 * port is built and consumed entirely inside this method, the same no-raw-handle rule the
-	 * comment above this one already states for the dashboard snapshot seam.
+	 * port is built and consumed entirely inside this method, under the no-raw-handle rule stated
+	 * above.
 	 */
 	createPeerStagingTransports(deps: { opener: StagingOpener; decisionSigner: StagingDecisionSigner }): PeerStagingTransports {
 		if (this.currentNetworkHash === undefined) {

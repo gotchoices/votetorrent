@@ -69,7 +69,8 @@ import RegistrantDetailScreen from "../screens/registration/RegistrantDetailScre
 import AttestationProvisioningStatusScreen from "../screens/registration/AttestationProvisioningStatusScreen";
 // Phase 49 plan 49-10 (D-14) — the officer-facing signing-key provisioning/recovery screen.
 import ProvisionSigningKeyScreen from "../screens/users/ProvisionSigningKeyScreen";
-import DashboardSignInCodeScreen from "../screens/dashboard/DashboardSignInCodeScreen";
+import PairBrowserScreen from "../screens/dashboard/PairBrowserScreen";
+import PairedBrowsersScreen from "../screens/dashboard/PairedBrowsersScreen";
 import PollingDevicesScreen from "../screens/authorities/PollingDevicesScreen";
 import AuthorityPeersScreen from "../screens/authorities/AuthorityPeersScreen";
 import { CreateElectionScreen } from "../screens/elections/CreateElectionScreen";
@@ -591,14 +592,21 @@ export const RootNavigator = () => {
 				component={ProvisionSigningKeyScreen}
 				options={{ title: t("signingKeyProvisioningScreenTitle") }}
 			/>
-			{/* 50-07 (D-03/D-05/D-09) — the dashboard bearer sign-in code producer
-			    screen. Pushed from Settings, so it uses the same non-modal
-			    options={{ title }} shape as ProvisionSigningKey above, never
-			    presentation:"modal", never a CloseButton headerLeft. */}
+			{/* Pair a browser: this officer pairs their own browser. Pushed from
+			    Settings (and from the paired-browsers list), so it uses the same
+			    non-modal options={{ title }} shape as ProvisionSigningKey above,
+			    never presentation:"modal", never a CloseButton headerLeft. */}
 			<Stack.Screen
-				name="DashboardSignInCode"
-				component={DashboardSignInCodeScreen}
-				options={{ title: t("dashboardSignInCodeTitle") }}
+				name="PairBrowser"
+				component={PairBrowserScreen}
+				options={{ title: t("dashboardPairingTitle") }}
+			/>
+			{/* The officer's own paired browsers (pushed from their user details). The "+"
+			    header action is set by the screen itself, so the registration stays title-only. */}
+			<Stack.Screen
+				name="PairedBrowsers"
+				component={PairedBrowsersScreen}
+				options={{ title: t("pairedBrowsersTitle") }}
 			/>
 			<Stack.Screen
 				name="PollingDevices"

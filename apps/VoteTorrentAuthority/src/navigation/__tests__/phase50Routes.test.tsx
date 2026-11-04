@@ -1,6 +1,9 @@
 /**
- * phase50Routes.test.tsx — the real-navigator registration proof for 50-07's
- * single `DashboardSignInCode` route (D-03/D-05/D-09).
+ * phase50Routes.test.tsx — the real-navigator registration proof for the
+ * `PairBrowser` route (the officer pairs their own browser). It replaced the
+ * dashboard sign-in code route in the same position and the same non-modal
+ * shape, and this suite now also proves the old route, entry and title key are
+ * gone from the navigator, its types and Settings.
  *
  * Mirrored wholesale from `phase48Routes.test.tsx` (itself mirrored from
  * `phase47Routes.test.tsx`): "a rename or removal of a route name, a
@@ -44,23 +47,19 @@ jest.mock("../../providers/CadreNodeProvider", () => ({
 	CadreNodeProvider: ({ children }: { children: React.ReactNode }) => children,
 }));
 
-let mockDashboardSignInCodeParams: unknown = "unset";
+let mockPairBrowserParams: unknown = "unset";
 
-jest.mock("../../screens/dashboard/DashboardSignInCodeScreen", () => ({
+jest.mock("../../screens/dashboard/PairBrowserScreen", () => ({
 	__esModule: true,
-	default: function MockDashboardSignInCodeScreen() {
+	default: function MockPairBrowserScreen() {
 		// eslint-disable-next-line @typescript-eslint/no-var-requires
 		const ReactLib = require("react");
 		// eslint-disable-next-line @typescript-eslint/no-var-requires
 		const { Text } = require("react-native");
 		// eslint-disable-next-line @typescript-eslint/no-var-requires
 		const { useRoute } = require("@react-navigation/native");
-		mockDashboardSignInCodeParams = (useRoute() as any).params;
-		return ReactLib.createElement(
-			Text,
-			{ testID: "mock-dashboard-signin-code-screen" },
-			"mock-dashboard-signin-code-screen",
-		);
+		mockPairBrowserParams = (useRoute() as any).params;
+		return ReactLib.createElement(Text, { testID: "mock-pair-browser-screen" }, "mock-pair-browser-screen");
 	},
 }));
 
@@ -101,17 +100,17 @@ async function renderRootNavigatorAt(
 }
 
 beforeEach(() => {
-	mockDashboardSignInCodeParams = "unset";
+	mockPairBrowserParams = "unset";
 });
 
-describe("RootNavigator — the DashboardSignInCode route is really registered and really resolves (50-07, D-09)", () => {
-	it("resolves DashboardSignInCode to its destination marker with no params", async () => {
+describe("RootNavigator — the PairBrowser route is really registered and really resolves", () => {
+	it("the PairBrowser route is registered and resolves with no params", async () => {
 		const tr = await renderRootNavigatorAt({
 			index: 0,
-			routes: [{ name: "DashboardSignInCode" }],
+			routes: [{ name: "PairBrowser" }],
 		});
-		expect(() => tr.root.findByProps({ testID: "mock-dashboard-signin-code-screen" })).not.toThrow();
-		expect(mockDashboardSignInCodeParams).toBeUndefined();
+		expect(() => tr.root.findByProps({ testID: "mock-pair-browser-screen" })).not.toThrow();
+		expect(mockPairBrowserParams).toBeUndefined();
 	});
 });
 
@@ -123,6 +122,8 @@ describe("RootNavigator — the DashboardSignInCode route is really registered a
 // ---------------------------------------------------------------------------
 
 const NAV_INDEX_PATH = path.join(__dirname, "..", "index.tsx");
+const TYPES_PATH = path.join(__dirname, "..", "types.ts");
+const SETTINGS_PATH = path.join(__dirname, "..", "..", "screens", "settings", "SettingsScreen.tsx");
 
 /** Extracts the substring from `name="<Route>"` to the next `/>` in navigation/index.tsx. */
 function extractRegistration(source: string, routeName: string): string {
@@ -134,17 +135,17 @@ function extractRegistration(source: string, routeName: string): string {
 	return source.slice(start, end + 2);
 }
 
-describe("navigation/index.tsx — DashboardSignInCode title-binding source gate (50-07)", () => {
+describe("navigation/index.tsx — PairBrowser title-binding source gate", () => {
 	const source = fs.readFileSync(NAV_INDEX_PATH, "utf8");
 
-	it("binds component DashboardSignInCodeScreen and title key dashboardSignInCodeTitle", () => {
-		const registration = extractRegistration(source, "DashboardSignInCode");
-		expect(registration).toContain("DashboardSignInCodeScreen");
-		expect(registration).toContain('t("dashboardSignInCodeTitle")');
+	it("binds component PairBrowserScreen and title key dashboardPairingTitle", () => {
+		const registration = extractRegistration(source, "PairBrowser");
+		expect(registration).toContain("component={PairBrowserScreen}");
+		expect(registration).toContain('t("dashboardPairingTitle")');
 	});
 
 	it("carries none of presentation/CloseButton/headerLeft/headerRight", () => {
-		const registration = extractRegistration(source, "DashboardSignInCode");
+		const registration = extractRegistration(source, "PairBrowser");
 		expect(registration).not.toContain("presentation");
 		expect(registration).not.toContain("CloseButton");
 		expect(registration).not.toContain("headerLeft");
@@ -152,29 +153,44 @@ describe("navigation/index.tsx — DashboardSignInCode title-binding source gate
 	});
 });
 
-describe("i18n/index.ts — dashboardSignInCodeTitle binding gate (50-07)", () => {
+describe("i18n/index.ts — dashboardPairingTitle binding gate", () => {
 	it("the title key appears at least twice (EN and ES) — a missing key does not throw at runtime", () => {
 		const i18n = fs.readFileSync(path.join(__dirname, "..", "..", "i18n", "index.ts"), "utf8");
-		const count = (i18n.match(/\bdashboardSignInCodeTitle:/g) || []).length;
+		const count = (i18n.match(/\bdashboardPairingTitle:/g) || []).length;
 		expect(count).toBeGreaterThanOrEqual(2);
 	});
 });
 
-describe("navigation/types.ts — param-hygiene source gate (50-07)", () => {
-	it("DashboardSignInCode is typed undefined — no params", () => {
-		const source = fs.readFileSync(path.join(__dirname, "..", "types.ts"), "utf8");
-		expect(source).toContain("DashboardSignInCode: undefined;");
+describe("navigation/types.ts — param-hygiene source gate", () => {
+	it("PairBrowser is typed undefined — no params, so the code never enters navigation state", () => {
+		expect(fs.readFileSync(TYPES_PATH, "utf8")).toContain("PairBrowser: undefined;");
 	});
 });
 
-describe("SettingsScreen.tsx — entry-point source gate (50-07)", () => {
-	it("contains the dashboard sign-in code entry row, its testID, and its DashboardSignInCode navigate target", () => {
-		const source = fs.readFileSync(
-			path.join(__dirname, "..", "..", "screens", "settings", "SettingsScreen.tsx"),
-			"utf8",
-		);
-		expect(source).toContain("settings-dashboard-signin-code-entry");
-		expect(source).toContain('"DashboardSignInCode"');
-		expect(source).toContain('t("dashboardSignInCodeTitle")');
+describe("SettingsScreen.tsx — entry-point source gate", () => {
+	it("contains the pair-a-browser entry row, its testID, and its PairBrowser navigate target", () => {
+		const source = fs.readFileSync(SETTINGS_PATH, "utf8");
+		expect(source).toContain("settings-pair-browser-entry");
+		expect(source).toContain('"PairBrowser"');
+		expect(source).toContain('t("dashboardPairingTitle")');
+	});
+});
+
+describe("the retired sign-in code route is gone", () => {
+	// Built from fragments so this file never spells the retired names itself.
+	const RETIRED = ["Dashboard" + "SignInCode", "dashboard" + "SignInCode"];
+
+	it("controls: the scan finds a planted name and passes clean text", () => {
+		expect(RETIRED.some((r) => `name="${"Dashboard" + "SignInCode"}"`.includes(r))).toBe(true);
+		expect(RETIRED.some((r) => 'name="PairBrowser"'.includes(r))).toBe(false);
+	});
+
+	it.each([
+		["navigation/index.tsx", NAV_INDEX_PATH],
+		["navigation/types.ts", TYPES_PATH],
+		["SettingsScreen.tsx", SETTINGS_PATH],
+	])("%s names neither the retired route nor its copy keys", (_label, file) => {
+		const source = fs.readFileSync(file, "utf8");
+		for (const r of RETIRED) expect(source.includes(r)).toBe(false);
 	});
 });

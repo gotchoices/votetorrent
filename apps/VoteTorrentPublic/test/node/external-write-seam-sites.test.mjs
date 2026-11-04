@@ -6,14 +6,13 @@
  * anti-self-trip note further down -- "built for trusted replication-style
  * writes", running NO constraint validation) may appear in exactly the two
  * recorded production sites in this repo, pinned by a repo-wide scan rather
- * than the one-off plan-time grep `snapshot-restore.js`'s header used to cite.
+ * than a one-off plan-time grep.
  *
- * REPLACES a stale claim. `apps/VoteTorrentDashboard/src/lifecycle/
- * snapshot-restore.js`'s header used to say the seam "may appear in EXACTLY
- * ONE FILE, this one" -- true when written, false the moment `56-09` added
- * the second site. This file is the standing check that claim is now pinned
- * to, and `56-09` Task 3 also corrects that header's prose (comment-only
- * edit) to say so.
+ * REPLACES a stale claim. The dashboard's old restore module used to say the
+ * seam "may appear in EXACTLY ONE FILE, this one" -- true when written, false
+ * the moment `56-09` added the second site. This file is the standing check
+ * that claim was pinned to; that module has since left with the dashboard's
+ * snapshot path (66-24).
  *
  * ANTI-SELF-TRIP DISCIPLINE (`project_self_tripping_checker_headers`, three
  * recurrences in Phase 53):
@@ -23,8 +22,7 @@
  *   2. Comments are stripped (via the shared `stripComments` this repo's
  *      other scans already use) before matching, so a `src/` file that
  *      merely DISCUSSES the seam in a header comment -- as both
- *      `reactivity-bridge.js` and `snapshot-restore.js` now do, at length --
- *      is not counted. `subscribe.js` names the seam once, in prose inside a
+ *      `reactivity-bridge.js` files do, at length -- is not counted. `subscribe.js` names the seam once, in prose inside a
  *      JSDoc block; that mention must be stripped, not counted, and the
  *      self-check group below proves the stripper does exactly that.
  *   3. The assertion below is SET EQUALITY against a frozen two-element
@@ -32,6 +30,14 @@
  *      own positive control: if the scan silently stopped reading files, the
  *      expected set would not be found and this test would fail loudly
  *      rather than passing on a narrowed, unverified root.
+ *
+ * WHY TWO SITES (66-13, 66-24). The officer dashboard's member device replicates
+ * its officer tables from the strand the same way this page replicates the
+ * public tables, so `apps/VoteTorrentDashboard/src/peer/reactivity-bridge.js`
+ * became a deliberate production site in 66-13 (three sites for a while). The
+ * dashboard's restore site left with its snapshot path in 66-24, so the two
+ * remaining sites are both live replication: the dashboard's member replication
+ * and this app's bridge.
  *
  * The token this instrument searches for is assembled from concatenated
  * fragments at runtime (below), so this file's own source never spells it
@@ -59,7 +65,7 @@ const SEAM_TOKEN_RE = new RegExp(`\\b${SEAM_TOKEN}\\b`);
 
 /**
  * The three `src/` trees this seam could plausibly reach: the public app
- * (this plan's new site), the dashboard (the original site) and the shared
+ * (56-09's site), the dashboard (its member replication) and the shared
  * data package (D-22 forbids growing ITS external-write surface, so a future
  * violation there must also trip this instrument).
  * @type {ReadonlyArray<string>}
@@ -71,11 +77,16 @@ const SCAN_ROOTS = Object.freeze([publicSrc(), dashboardSrc(), webDataSrc()]);
  * invoke the seam from today. A third file appearing here means either a
  * new legitimate production site was added without updating this constant
  * (do so deliberately, with a header note explaining why a third site is
- * now correct) or an accidental widening that must be reverted.
+ * now correct) or an accidental widening that must be reverted. The
+ * dashboard's member replication became a site in 66-13 and its restore
+ * site left in 66-24 (see the header note).
  * @type {ReadonlyArray<string>}
  */
 const EXPECTED_SEAM_SITES = Object.freeze(
-	[dashboardSrc('lifecycle', 'snapshot-restore.js'), publicSrc('peer', 'reactivity-bridge.js')].sort(),
+	[
+		dashboardSrc('peer', 'reactivity-bridge.js'),
+		publicSrc('peer', 'reactivity-bridge.js'),
+	].sort(),
 );
 
 // ---------------------------------------------------------------------------
@@ -99,10 +110,10 @@ test('self-check: comment-stripping reactivity-bridge.js still leaves its real s
 	assert.match(stripped, SEAM_TOKEN_RE, 'the comment stripper ate the real seam call in reactivity-bridge.js -- this instrument would report a false negative');
 });
 
-test('self-check: comment-stripping snapshot-restore.js still leaves its real seam call visible to the matcher', () => {
-	const source = readFileSync(dashboardSrc('lifecycle', 'snapshot-restore.js'), 'utf8');
+test('self-check: comment-stripping the dashboard reactivity-bridge.js still leaves its real seam call visible to the matcher', () => {
+	const source = readFileSync(dashboardSrc('peer', 'reactivity-bridge.js'), 'utf8');
 	const stripped = stripComments(source);
-	assert.match(stripped, SEAM_TOKEN_RE, 'the comment stripper ate the real seam call in snapshot-restore.js -- this instrument would report a false negative');
+	assert.match(stripped, SEAM_TOKEN_RE, 'the comment stripper ate the real seam call in the dashboard reactivity-bridge.js -- this instrument would report a false negative');
 });
 
 test('self-check: a synthetic // comment mentioning the token is correctly stripped and no longer matches', () => {

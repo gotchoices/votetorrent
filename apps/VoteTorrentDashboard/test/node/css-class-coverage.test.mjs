@@ -14,12 +14,19 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync, readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { dashboardSrc, uiWebRoot, uiWebSrc } from '../../../../scripts/lib/source-paths.mjs';
-import { checkClassNameCoverage, collectMountedPackageComponentClasses } from '../../../../scripts/lib/css-class-coverage.mjs';
+import {
+	checkClassNameCoverage,
+	collectMountedPackageComponentClasses,
+	collectReachableCssFiles,
+	extractDeclaredSelectorTokens,
+	stripCssComments,
+} from '../../../../scripts/lib/css-class-coverage.mjs';
+import { stripComments } from '../../../../scripts/lib/strip-comments.mjs';
 
 const UI_WEB_ROOT_DIR = uiWebRoot();
 
@@ -191,4 +198,46 @@ test('inertness control: a mounted shared component with no CSS import for its c
 	} finally {
 		rmSync(appSrcDir, { recursive: true, force: true });
 	}
+});
+
+// ---------------------------------------------------------------------------
+// Live change-mark classes.
+// ---------------------------------------------------------------------------
+
+/**
+ * Classes applied through `markClassName` / `ChangeMarkWord` in
+ * `src/live/useChangeMarks.ts`, not through a static `className="..."`
+ * attribute, so the static extractor behind the real check above cannot see
+ * them. Each must still be a string literal in that file (reality guard) and
+ * a declared selector in this app's reachable CSS.
+ */
+const LIVE_DYNAMIC_CLASSES = ['change-mark', 'change-mark--fading', 'change-mark__word'];
+
+const USE_CHANGE_MARKS_STRIPPED = stripComments(readFileSync(dashboardSrc('live', 'useChangeMarks.ts'), 'utf8'));
+
+/** Every class selector declared in the CSS reachable from the dashboard's src/. */
+const REACHABLE_DECLARED = new Set(
+	collectReachableCssFiles(dashboardSrc(), UI_WEB_ROOT_DIR).flatMap((file) => [
+		...extractDeclaredSelectorTokens(stripCssComments(readFileSync(file, 'utf8'))),
+	]),
+);
+
+test('reality guard: each live dynamic mark class is a string literal in useChangeMarks.ts', () => {
+	for (const cls of LIVE_DYNAMIC_CLASSES) {
+		assert.ok(
+			USE_CHANGE_MARKS_STRIPPED.includes(`'${cls}'`),
+			`"${cls}" is not a string literal in useChangeMarks.ts -- the declared-selector check below would prove nothing`,
+		);
+	}
+});
+
+test('every live dynamic mark class is a declared selector in the reachable CSS', () => {
+	for (const cls of LIVE_DYNAMIC_CLASSES) {
+		assert.ok(REACHABLE_DECLARED.has(cls), `".${cls}" is applied by useChangeMarks.ts but no reachable CSS declares it`);
+	}
+});
+
+test('control: a fabricated mark modifier is not declared', () => {
+	assert.ok(REACHABLE_DECLARED.size > 0, 'sanity: the reachable declared set must be non-empty');
+	assert.ok(!REACHABLE_DECLARED.has('change-mark--bogus'), 'the declared-selector check is inert if a made-up class reads as declared');
 });

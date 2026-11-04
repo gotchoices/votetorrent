@@ -7,9 +7,14 @@
 import { decodeNetworkJoinCode } from "@votetorrent/vote-engine/rn";
 import { JOIN_CODE_FIXTURES, type JoinCodeFixtureName } from "@votetorrent/vote-engine/test/fixtures/join-code-fixtures";
 import {
+	createPairingInvitation,
 	createVoterJoinCode,
 	ensureVoterInviteOwner,
 	inviteExpiryMs,
+	PAIR_INVITE_LIFETIME_MS,
+	PAIR_INVITE_USES,
+	PairingInviteError,
+	type PairingInviteNode,
 	VOTER_INVITE_LIFETIME_MS,
 	VOTER_INVITE_USES,
 	voterInviteCapability,
@@ -60,6 +65,8 @@ function fakeNode(
 		noPeerId?: boolean;
 		alreadyWired?: boolean;
 		addrs?: string[];
+		/** Replaces the whole mint result (pairing tests). */
+		mintResult?: unknown;
 	} = {},
 ) {
 	const state = { owners: new Set(owners), wired: opts.alreadyWired === true };
@@ -93,7 +100,13 @@ function fakeNode(
 			if (state.wired) throw Object.assign(new Error("handler already registered"), { name: "DuplicateProtocolHandlerError" });
 			state.wired = true;
 		}),
-		createCadreInvitation: jest.fn(async () => ({ encoded: opts.invitation ?? MINT, invitation: { invite: { expiresAt: "2026-11-11T11:26:21.316" } } })),
+		createCadreInvitation: jest.fn(
+			async (_options?: { uses?: number; expiresInMs?: number }) =>
+				(opts.mintResult ?? {
+					encoded: opts.invitation ?? MINT,
+					invitation: { invite: { key: "inviteKeyA", expiresAt: "2026-11-11T11:26:21.316" } },
+				}) as { encoded: string; invitation: { invite: { key: string; expiresAt: string | null } } },
+		),
 	};
 	return { node: node as unknown as VoterInviteNode & typeof node, state };
 }
@@ -322,5 +335,117 @@ describe("inviteExpiryMs", () => {
 		expect(inviteExpiryMs("2026-11-11T11:26:21.316")).toBe(Date.parse("2026-11-11T11:26:21.316Z"));
 		expect(inviteExpiryMs(null)).toBeNull();
 		expect(inviteExpiryMs("later")).toBeNull();
+	});
+});
+
+describe("createPairingInvitation (pairing, D-26)", () => {
+	const PAIR_MINT = { encoded: MINT, invitation: { invite: { key: "inviteKeyA", expiresAt: "2026-11-03T10:15:00.000" } } };
+	let spies: jest.SpyInstance[] = [];
+
+	beforeEach(() => {
+		spies = (["log", "info", "warn", "error", "debug", "trace"] as const).map((m) => jest.spyOn(console, m).mockImplementation(() => undefined));
+	});
+	afterEach(() => {
+		// I-8: no console call on any pairing path.
+		for (const spy of spies) expect(spy).not.toHaveBeenCalled();
+		jest.restoreAllMocks();
+	});
+
+	function pairingNode(owners: string[], opts: Parameters<typeof fakeNode>[1] = {}) {
+		const made = fakeNode(owners, { mintResult: PAIR_MINT, ...opts });
+		return { ...made, node: made.node as unknown as PairingInviteNode & typeof made.node };
+	}
+
+	function expectNoOwnerSetup(node: ReturnType<typeof pairingNode>["node"]) {
+		expect(node.trustOwnerKeys).not.toHaveBeenCalled();
+		expect(node.initializeSeedBootstrap).not.toHaveBeenCalled();
+		const db = node.getControlDatabase.mock.results.find((r) => r.value)?.value as { ensureOwnerKey: jest.Mock } | undefined;
+		if (db) expect(db.ensureOwnerKey).not.toHaveBeenCalled();
+	}
+
+	it("I-1 pins the pairing constants and leaves the voter constants unchanged", () => {
+		expect(PAIR_INVITE_USES).toBe(1);
+		expect(PAIR_INVITE_LIFETIME_MS).toBe(900_000);
+		expect(VOTER_INVITE_USES).toBe(1000);
+		expect(VOTER_INVITE_LIFETIME_MS).toBe(30 * 24 * 60 * 60 * 1000);
+	});
+
+	it("I-2 an owner mints exactly one single-use, 15-minute invitation keyed by the invitation row", async () => {
+		const { node } = pairingNode([SELF.publicKeyB64]);
+		await expect(createPairingInvitation(node)).resolves.toEqual({ encoded: MINT, inviteKey: "inviteKeyA", expiresAt: "2026-11-03T10:15:00.000" });
+		expect(node.createCadreInvitation).toHaveBeenCalledTimes(1);
+		expect(node.createCadreInvitation.mock.calls[0]).toEqual([{ uses: 1, expiresInMs: 900_000 }]);
+		expectNoOwnerSetup(node);
+	});
+
+	it("I-3 a shorter lifetime is used, a longer one is clamped, and uses stays 1", async () => {
+		const a = pairingNode([SELF.publicKeyB64]);
+		await createPairingInvitation(a.node, { expiresInMs: 600_000 });
+		expect(a.node.createCadreInvitation.mock.calls[0]).toEqual([{ uses: 1, expiresInMs: 600_000 }]);
+		const b = pairingNode([SELF.publicKeyB64]);
+		await createPairingInvitation(b.node, { expiresInMs: 1_020_000 });
+		expect(b.node.createCadreInvitation.mock.calls[0]).toEqual([{ uses: 1, expiresInMs: 900_000 }]);
+	});
+
+	it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY])("I-3 a lifetime of %p rejects before any mint", async (bad) => {
+		const { node } = pairingNode([SELF.publicKeyB64]);
+		await expect(createPairingInvitation(node, { expiresInMs: bad })).rejects.toThrow("pairing-invite: bad lifetime");
+		expect(node.createCadreInvitation).not.toHaveBeenCalled();
+	});
+
+	it("I-4 a phone that is not an owner is refused not-owner with a fixed message", async () => {
+		const { node } = pairingNode(["other-owner"]);
+		const err = await createPairingInvitation(node).catch((e: unknown) => e);
+		expect(err).toBeInstanceOf(PairingInviteError);
+		expect((err as PairingInviteError).reason).toBe("not-owner");
+		expect((err as PairingInviteError).name).toBe("PairingInviteError");
+		expect((err as PairingInviteError).message).toBe("pairing-invite: refused");
+		expect(node.createCadreInvitation).not.toHaveBeenCalled();
+	});
+
+	it.each([
+		["an ownerless cadre (needs owner setup)", [] as string[], {}],
+		["a phone admitted by invitation", [] as string[], { selfRow: JOINED_ROW }],
+		["no control database", [SELF.publicKeyB64], { noDb: true }],
+		["an identity read that throws", [SELF.publicKeyB64], { identityThrows: true }],
+	])("I-5 %s is refused not-owner and never runs owner setup", async (_name, owners, opts) => {
+		const { node, state } = pairingNode(owners, opts);
+		const err = await createPairingInvitation(node).catch((e: unknown) => e);
+		expect(err).toBeInstanceOf(PairingInviteError);
+		expect((err as PairingInviteError).reason).toBe("not-owner");
+		expect(node.createCadreInvitation).not.toHaveBeenCalled();
+		expectNoOwnerSetup(node);
+		expect(state.owners.size).toBe(owners.length);
+	});
+
+	it("I-6 a refused mint with no own address is not-reachable; with one it is rethrown unchanged", async () => {
+		const a = pairingNode([SELF.publicKeyB64], { addrs: [] });
+		a.node.createCadreInvitation.mockImplementationOnce(async () => {
+			throw new Error("createCadreInvitation: no dialable address");
+		});
+		const errA = await createPairingInvitation(a.node).catch((e: unknown) => e);
+		expect(errA).toBeInstanceOf(VoterInviteError);
+		expect((errA as VoterInviteError).reason).toBe("not-reachable");
+
+		const b = pairingNode([SELF.publicKeyB64]);
+		const original = new Error("some other cadre-core refusal");
+		b.node.createCadreInvitation.mockImplementationOnce(async () => {
+			throw original;
+		});
+		await expect(createPairingInvitation(b.node)).rejects.toBe(original);
+	});
+
+	it.each([
+		["no key", { encoded: MINT, invitation: { invite: { expiresAt: "2026-11-03T10:15:00.000" } } }],
+		["an empty key", { encoded: MINT, invitation: { invite: { key: "", expiresAt: "2026-11-03T10:15:00.000" } } }],
+		["no expiry", { encoded: MINT, invitation: { invite: { key: "inviteKeyA", expiresAt: null } } }],
+	])("I-7 an incomplete mint result (%s) rejects without any window of the invitation", async (_name, result) => {
+		const { node } = pairingNode([SELF.publicKeyB64], { mintResult: result });
+		const err = (await createPairingInvitation(node).catch((e: unknown) => e)) as Error;
+		expect(err).toBeInstanceOf(Error);
+		expect(err.message).toBe("pairing-invite: mint result incomplete");
+		const own: Record<string, unknown> = {};
+		for (const k of Object.getOwnPropertyNames(err)) own[k] = (err as unknown as Record<string, unknown>)[k];
+		for (const text of [err.message, String(err), JSON.stringify(own)]) expect(windowHits(text, MINT)).toBe(0);
 	});
 });

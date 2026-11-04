@@ -406,7 +406,7 @@ test('Rung C: the status and request sections carry the switch discriminant besi
 	);
 });
 
-test('Rung D: the intake, roster and surface-count sections stay unswitched, and the discriminant literal occurs exactly twice across the file', () => {
+test('Rung D: the intake, roster and surface-count sections stay unswitched; the discriminant occurs once in each switched section, twice in the chart-view heading-mark consts before the first section, and four times in the file', () => {
 	const source = STRIPPED['RegistrationsPanel.tsx'];
 	const sections = source.split('<section className="eo-section">').slice(1);
 	assert.equal(sections.length, 5, 'expected exactly five <section className="eo-section"> chunks');
@@ -436,11 +436,27 @@ test('Rung D: the intake, roster and surface-count sections stay unswitched, and
 		'the surface-count section is table-only by D-05 -- it must mount no chart primitive and carry no discriminant',
 	);
 
-	assert.equal(
-		(source.match(/view === 'chart'/g) ?? []).length,
-		2,
-		'expected the discriminant literal to occur exactly twice, in the two switched sections only',
+	assert.ok(statusChunk, 'no section mounts BarSeries');
+	assert.ok(requestChunk, 'no section mounts StackedBarSeries');
+	/** @param {string} text @returns {number} */
+	const discriminantCount = (text) => text.split(VIEW_DISCRIMINANT).length - 1;
+	assert.equal(discriminantCount(statusChunk), 1, 'the status section must carry exactly one discriminant (its ternary)');
+	assert.equal(discriminantCount(requestChunk), 1, 'the request section must carry exactly one discriminant (its ternary)');
+	assert.equal(discriminantCount(intakeChunk), 0, 'the intake section must carry no discriminant');
+	assert.equal(discriminantCount(rosterChunk), 0, 'the roster section must carry no discriminant');
+	assert.equal(discriminantCount(remaining), 0, 'the surface-count section must carry no discriminant');
+
+	// The two chart-view heading marks: charts take no class, so in chart view a
+	// changed status or request count marks its section heading instead.
+	const beforeSections = source.split('<section className="eo-section">')[0];
+	const headLines = beforeSections.split('\n').filter((line) => line.includes(VIEW_DISCRIMINANT));
+	assert.equal(headLines.length, 2, 'expected exactly two discriminant lines before the first section (the heading-mark consts)');
+	assert.ok(
+		headLines.some((line) => line.includes('sectionMarkClass(marks, statusKeys)')) &&
+			headLines.some((line) => line.includes('sectionMarkClass(marks, requestKeys)')),
+		'each discriminant before the first section must compute a heading mark',
 	);
+	assert.equal(discriminantCount(source), 4, 'expected the discriminant literal to occur exactly four times across the file');
 });
 
 test('positive control: the section split is non-vacuous (5 > 2), and a synthetic chunk naming a chart primitive beside a grid but carrying no discriminant is reported unswitched', () => {
@@ -455,12 +471,13 @@ test('positive control: the section split is non-vacuous (5 > 2), and a syntheti
 	);
 });
 
-// --- ElectionsPanel reads the instant from its own props, never a hook -----
+// --- ElectionsPanel compares the pill against a coarse clock -----------------
 
-test('ElectionsPanel.tsx references snapshotInstant and contains no useContext/useSnapshotInstant/phase selector', () => {
+test('ElectionsPanel.tsx reads the clock through useNow and no longer reads snapshotInstant', () => {
 	const source = STRIPPED['ElectionsPanel.tsx'];
-	assert.match(source, /snapshotInstant/);
-	assert.doesNotMatch(source, /useContext|useSnapshotInstant/);
+	assert.match(source, /const nowMs = useNow\(\)/);
+	assert.match(source, /toCanonicalDatetime\(nowMs\)/);
+	assert.doesNotMatch(source, /snapshotInstant|resolveComparisonInstant|useContext|useSnapshotInstant/);
 	assert.doesNotMatch(source, /setPhase|PHASES\b|data-phase/);
 });
 
@@ -643,3 +660,285 @@ test('BallotsQuestionsPanel imports readBallots and readQuestions, and selectAct
 // LifecyclePill's own null-phase-guard assertion moved to
 // packages/ui-web/test/shared-components.test.mjs in 53-05, alongside the
 // component itself.
+
+// --- Live panels ---------------------------------------------------------------
+//
+// The panels re-read when the replicated data version moves, keep their rows
+// on screen while they re-read, mark changed rows and figures through one
+// change-mark hook each, show the text-only action note beside items an
+// officer decides in the Authority app, and make no visibility decision of
+// their own. Every matcher below is first proven able to fire on a synthetic
+// fixture. Banned tokens are assembled from fragments so this file never
+// trips a scan of its own text.
+
+const LIVE_FILES = ['ElectionsPanel.tsx', 'BallotsQuestionsPanel.tsx', 'RegistrationsPanel.tsx', 'KeyholdersPanel.tsx'];
+
+/** @type {Record<string, string>} */
+const LIVE_RAW = {};
+/** @type {Record<string, string>} */
+const LIVE_STRIPPED = {};
+for (const file of LIVE_FILES) {
+	LIVE_RAW[file] = readFileSync(path.join(PANELS_DIR, file), 'utf8');
+	LIVE_STRIPPED[file] = stripComments(LIVE_RAW[file]);
+}
+
+const VERSION_HOOK_RE = /const \{ version \} = useDataVersion\(\)/;
+const VERSION_DEPS_RE = /\}, \[db, version\]\);/;
+
+test('live: every live panel reads the data version and lists it in its read effect dependencies', () => {
+	for (const file of LIVE_FILES) {
+		assert.match(LIVE_STRIPPED[file], VERSION_HOOK_RE, `${file} does not read the data version`);
+		assert.match(LIVE_STRIPPED[file], VERSION_DEPS_RE, `${file}'s read effect does not depend on [db, version]`);
+	}
+});
+
+test('positive control: the deps matcher misses an effect that depends on [db] alone', () => {
+	assert.doesNotMatch('\t}, [db]);', VERSION_DEPS_RE);
+	assert.match('\t}, [db, version]);', VERSION_DEPS_RE);
+});
+
+const LOADING_RESET_RE = /setState\(\{ (loading: true|status: 'loading')/;
+
+/**
+ * Lines that reset a panel to its loading state without the db-change guard.
+ * @param {string} source @returns {string[]}
+ */
+function unguardedLoadingResets(source) {
+	return source
+		.split('\n')
+		.filter((line) => LOADING_RESET_RE.test(line))
+		.filter((line) => !line.trimStart().startsWith('if (dbChanged) '));
+}
+
+test('live: a re-read keeps the rows on screen -- a loading reset happens only when the db handle changed', () => {
+	for (const file of LIVE_FILES) {
+		const source = LIVE_STRIPPED[file];
+		assert.ok(LOADING_RESET_RE.test(source), `${file}: no loading reset found, so the guard check would be vacuous`);
+		assert.deepEqual(unguardedLoadingResets(source), [], `${file} resets to loading on every re-read`);
+		assert.match(source, /readDbRef/, `${file} does not track which db handle it last read`);
+	}
+});
+
+test('positive control: an unguarded loading reset is flagged by the same helper', () => {
+	const fixture = '\t\tsetState({ loading: true, data: null });\n\t\tif (dbChanged) setState({ status: \'loading\' });';
+	assert.deepEqual(unguardedLoadingResets(fixture), ['\t\tsetState({ loading: true, data: null });']);
+});
+
+const MARK_HOOK_CALL = 'useChangeMarks(markRows, markKey, markSig)';
+const MARK_ROWS_NULL_RE = /const markRows = useMemo\(\(\) => \([^;]*(\? null :|: null\))/;
+
+test('live: one change-mark hook per panel, fed null (never an empty list) while not loaded', () => {
+	for (const file of LIVE_FILES) {
+		const source = LIVE_STRIPPED[file];
+		assert.equal(source.split(MARK_HOOK_CALL).length - 1, 1, `${file} must call ${MARK_HOOK_CALL} exactly once`);
+		assert.equal((source.match(/useChangeMarks\(/g) ?? []).length, 1, `${file} must hold exactly one change-mark hook`);
+		assert.match(source, MARK_ROWS_NULL_RE, `${file}'s markRows is not null while loading`);
+	}
+});
+
+test('positive control: the null-while-loading matcher misses a memo that yields an empty list while loading', () => {
+	assert.doesNotMatch('const markRows = useMemo(() => (state.loading ? [] : rows), [state]);', MARK_ROWS_NULL_RE);
+	assert.match('const markRows = useMemo(() => (state.loading ? null : rows), [state]);', MARK_ROWS_NULL_RE);
+});
+
+const CHROME_OWNED_RE = /headerMarked|announce|PanelMarkContext|MarkAnnouncerContext|useMarkLifetime/;
+const CHROME_MODULE = 'Panel' + 'Frame';
+
+test('live: marks are applied on elements, and the header mark and announcement stay with the chrome and grid', () => {
+	for (const file of LIVE_FILES) {
+		const source = LIVE_STRIPPED[file];
+		assert.ok(source.includes('marks.markClass('), `${file} applies no mark class`);
+		assert.ok(source.includes('<ChangeMarkWord />'), `${file} renders no hidden "updated" word`);
+		assert.doesNotMatch(source, CHROME_OWNED_RE, `${file} renders something the chrome or grid owns`);
+		assert.ok(!LIVE_RAW[file].includes(CHROME_MODULE), `${file} names the chrome module, comments included`);
+	}
+});
+
+test('positive control: the chrome-owned matcher fires on a panel rendering the announcement', () => {
+	assert.match('<p>{marks.announce}</p>', CHROME_OWNED_RE);
+	assert.ok(`import X from './${CHROME_MODULE}.js';`.includes(CHROME_MODULE));
+});
+
+const SELF_GATING_RE = /auth\/gate\.js|evaluate\(|grantedScopes|useEffectiveScopes/;
+
+test('live: no panel makes a visibility decision of its own', () => {
+	for (const file of LIVE_FILES) {
+		assert.doesNotMatch(LIVE_STRIPPED[file], SELF_GATING_RE, `${file} gates itself`);
+	}
+});
+
+test('positive control: the self-gating matcher fires on a gate import', () => {
+	assert.match(`import { evaluate } from '../../auth/gate.js';`, SELF_GATING_RE);
+});
+
+const STALE_WORD_RE = new RegExp('snap' + 'shot', 'i');
+
+test('live: no live panel names the retired frozen-instant wording, comments included', () => {
+	for (const file of LIVE_FILES) {
+		assert.doesNotMatch(LIVE_RAW[file], STALE_WORD_RE, `${file} still names the retired wording`);
+	}
+});
+
+test('positive control: the stale-wording matcher fires on the retired prop name', () => {
+	assert.match(`'${'snap' + 'shot'}Instant'`, STALE_WORD_RE);
+});
+
+const AFFORDANCE_EXTRA_RE = /cursor|role=|tabIndex/;
+
+test('live: no live panel holds a control, a cursor, a role or a tab stop', () => {
+	for (const file of LIVE_FILES) {
+		assert.doesNotMatch(LIVE_STRIPPED[file], CONTROL_RE, `${file} contains a control affordance`);
+		assert.doesNotMatch(LIVE_STRIPPED[file], AFFORDANCE_EXTRA_RE, `${file} makes something look interactive`);
+	}
+});
+
+test('positive control: the affordance matcher fires on a tab stop', () => {
+	assert.match('<span tabIndex={0}>x</span>', AFFORDANCE_EXTRA_RE);
+});
+
+const NOTE_IDENT = 'Read' + 'OnlyNote';
+const NOTE_IMPORT_LINE = `import { ${NOTE_IDENT} } from '../../live/${NOTE_IDENT}.js';`;
+const NOTE_ALIAS_RE = new RegExp(`${NOTE_IDENT} as `);
+
+/**
+ * How many lines of `source` equal the exact single-name note import.
+ * @param {string} source @returns {number}
+ */
+function exactNoteImportLines(source) {
+	return source.split('\n').filter((line) => line.trim() === NOTE_IMPORT_LINE).length;
+}
+
+test('live: Ballots/Questions imports the action note alone on its own line and shows the short note beside the pending figure', () => {
+	const raw = LIVE_RAW['BallotsQuestionsPanel.tsx'];
+	assert.equal(exactNoteImportLines(raw), 1, 'expected exactly one exact note import line');
+	assert.match(raw, new RegExp(`<${NOTE_IDENT} variant="short" \\/>`));
+	assert.doesNotMatch(raw, NOTE_ALIAS_RE, 'the note must not be imported under an alias');
+	assert.match(LIVE_STRIPPED['BallotsQuestionsPanel.tsx'], new RegExp(`pendingSigningTasks > 0 \\? <${NOTE_IDENT} variant="short" \\/> : null`));
+});
+
+test('positive control: an aliased note import is flagged and is not an exact import line', () => {
+	const fixture = `import { ${NOTE_IDENT} as Note } from '../../live/${NOTE_IDENT}.js';`;
+	assert.match(fixture, NOTE_ALIAS_RE);
+	assert.equal(exactNoteImportLines(fixture), 0);
+});
+
+const CONSOLE_SHAPE_RE = /console\.error\([^)]*\)\?\.name \?\? 'Error'\)/;
+
+test('live: each live panel has exactly one console.error, and it logs the error class only', () => {
+	for (const file of LIVE_FILES) {
+		const source = LIVE_STRIPPED[file];
+		assert.equal(source.split('console.error(').length - 1, 1, `${file} must hold exactly one console.error`);
+		assert.match(source, CONSOLE_SHAPE_RE, `${file} logs more than the error class`);
+	}
+});
+
+test('positive control: the console-shape matcher misses a message log', () => {
+	assert.doesNotMatch("console.error('X: a read failed:', err.message);", CONSOLE_SHAPE_RE);
+});
+
+test('live: data pills inside panel rows keep the default cursor', () => {
+	const css = stripComments(readFileSync(path.join(PANELS_DIR, 'election-ops.css'), 'utf8'));
+	const block = css.match(/\.eo-row \.pill\s*\{([^}]*)\}/);
+	assert.ok(block, 'election-ops.css declares no .eo-row .pill rule');
+	assert.match(block[1], /cursor:\s*default/);
+	assert.doesNotMatch(css, /cursor:\s*pointer/);
+});
+
+/** Each live panel's officer named imports, pinned: a new table read must be a deliberate edit here. @type {Record<string, string[]>} */
+const PINNED_OFFICER_IMPORTS = {
+	'ElectionsPanel.tsx': ['countElections', 'readElectionOverview', 'readElectionPolicies', 'selectActiveElection'],
+	'BallotsQuestionsPanel.tsx': [
+		'countBallotSigningTasks',
+		'parseOptionRange',
+		'readBallots',
+		'readQuestions',
+		'selectActiveElection',
+	],
+	'RegistrationsPanel.tsx': [
+		'hasAnyRegistrationData',
+		'readRegistrantRoster',
+		'readRegistrantStatusBreakdown',
+		'readRegistrationIntakeSeries',
+		'readRegistrationRequestBreakdown',
+		'readRegistrationSurfaceCounts',
+		'selectActiveElection',
+	],
+	'KeyholdersPanel.tsx': [],
+};
+
+test('live: no live panel reads a table it did not read before (officer imports pinned)', () => {
+	for (const file of LIVE_FILES) {
+		assert.ok(file in PINNED_OFFICER_IMPORTS, `${file} has no pinned import list`);
+		assert.deepEqual([...officerNamedImports(LIVE_STRIPPED[file])].sort(), PINNED_OFFICER_IMPORTS[file], `${file}'s officer imports changed`);
+	}
+});
+
+// --- Live panels: Registrations and Keyholders --------------------------------
+
+test('live: Registrations imports the action note alone on its own line and shows it under the requests heading, short with requests and long when empty', () => {
+	const raw = LIVE_RAW['RegistrationsPanel.tsx'];
+	assert.equal(exactNoteImportLines(raw), 1, 'expected exactly one exact note import line');
+	assert.doesNotMatch(raw, NOTE_ALIAS_RE, 'the note must not be imported under an alias');
+	const source = LIVE_STRIPPED['RegistrationsPanel.tsx'];
+	const shortNote = `<${NOTE_IDENT} variant="short" />`;
+	const longNote = `<${NOTE_IDENT} variant="long" />`;
+	assert.ok(source.includes(shortNote) && source.includes(longNote), 'expected both note forms');
+	const requestChunk = source.split('<section className="eo-section">').find((c) => c.includes('<StackedBarSeries'));
+	assert.ok(requestChunk, 'no section mounts StackedBarSeries');
+	const headingIdx = requestChunk.indexOf("t('panels.registrations.requestsHeading')");
+	assert.ok(headingIdx !== -1, 'the requests heading is not in the request section');
+	assert.ok(requestChunk.indexOf(shortNote) > headingIdx, 'the short note must follow the requests heading');
+	assert.ok(requestChunk.indexOf(longNote) > headingIdx, 'the long note must follow the requests heading');
+	assert.match(requestChunk, new RegExp(`requestBreakdown\\.length > 0 \\? <${NOTE_IDENT} variant="short" \\/> : <${NOTE_IDENT} variant="long" \\/>`));
+});
+
+test('live: chart view marks a changed chart at its section heading, its intake wrapper or its meter wrapper', () => {
+	const registrations = LIVE_STRIPPED['RegistrationsPanel.tsx'];
+	for (const call of ['sectionMarkClass(marks, statusKeys)', 'sectionMarkClass(marks, requestKeys)', 'sectionMarkClass(marks, intakeKeys)']) {
+		assert.ok(registrations.includes(call), `RegistrationsPanel.tsx does not compute ${call}`);
+	}
+	assert.match(registrations, /className=\{withMark\('eo-heading', statusHeadingMark\)\}/);
+	assert.match(registrations, /className=\{withMark\('eo-heading', requestHeadingMark\)\}/);
+	assert.ok(LIVE_STRIPPED['KeyholdersPanel.tsx'].includes("withMark('aa-meter', sectionMarkClass(marks, "), 'the Keyholders meter wrapper carries no mark');
+	for (const file of ['RegistrationsPanel.tsx', 'KeyholdersPanel.tsx']) {
+		assert.doesNotMatch(LIVE_STRIPPED[file], /sectionMarkClass[\s\S]{0,200}\.filter\(/, `${file}'s section mark must use .find(, never .filter(`);
+	}
+});
+
+// Mirrors the Authority Administration scan over this one file, so this
+// plan's own gate fails before that scan would. Tokens are assembled.
+const KH_STATE_RE = new RegExp(['read' + '-only', 'read' + 'only', 'writ' + 'able', 'dis' + 'abled'].join('|'), 'i');
+const KH_NOTE_IMPORT_RE = new RegExp(`^\\s*import\\s*\\{\\s*${NOTE_IDENT}\\s*\\}\\s*from\\s*['"](?:\\.\\./)+live/${NOTE_IDENT}(?:\\.js)?['"];?\\s*$`, 'gm');
+const KH_KEY_MATERIAL_RE = new RegExp(['User' + 'Key', 'Pub' + 'Key', 'Signer' + 'Key', 'Sig' + 'nature'].join('|'), 'i');
+
+test('live: Keyholders stays clean against the Authority Administration scan (state words, key material, tier prose, one fetch)', () => {
+	const raw = LIVE_RAW['KeyholdersPanel.tsx'];
+	const exempted = raw.replace(KH_NOTE_IMPORT_RE, '').replace(new RegExp(`\\b${NOTE_IDENT}\\b`, 'g'), '');
+	assert.doesNotMatch(exempted, KH_STATE_RE, 'KeyholdersPanel.tsx names a banned panel-state word, comments included');
+	const source = LIVE_STRIPPED['KeyholdersPanel.tsx'];
+	assert.doesNotMatch(source, KH_KEY_MATERIAL_RE, 'KeyholdersPanel.tsx names key material');
+	assert.doesNotMatch(source, /\btier\b/i, 'KeyholdersPanel.tsx restates the tier as prose');
+	assert.equal((source.match(/\bfetchKeyholders\(/g) ?? []).length, 1, 'KeyholdersPanel.tsx must call fetchKeyholders exactly once');
+});
+
+test('positive control: the Keyholders hygiene matchers fire on planted fixtures', () => {
+	assert.match('const rows: ' + 'Read' + 'onlyArray<X> = [];', KH_STATE_RE);
+	assert.match('row.' + 'Sig' + 'nature', KH_KEY_MATERIAL_RE);
+	assert.match('a tier 2 panel', /\btier\b/i);
+});
+
+test('live: Registrations and Keyholders read no table they did not read before', () => {
+	assert.deepEqual([...officerNamedImports(LIVE_STRIPPED['RegistrationsPanel.tsx'])].sort(), [
+		'hasAnyRegistrationData',
+		'readRegistrantRoster',
+		'readRegistrantStatusBreakdown',
+		'readRegistrationIntakeSeries',
+		'readRegistrationRequestBreakdown',
+		'readRegistrationSurfaceCounts',
+		'selectActiveElection',
+	]);
+	const keyholders = LIVE_STRIPPED['KeyholdersPanel.tsx'];
+	assert.deepEqual(officerNamedImports(keyholders), [], 'KeyholdersPanel.tsx must not import the officer read surface');
+	const queryImports = [...keyholders.matchAll(/import\s*\{([^}]*)\}\s*from\s*['"]\.\/authority-admin-queries\.js['"]/g)].map((m) => m[1].trim());
+	assert.deepEqual(queryImports, ['fetchKeyholders'], 'KeyholdersPanel.tsx must import fetchKeyholders alone from its query module');
+});

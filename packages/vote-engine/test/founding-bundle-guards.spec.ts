@@ -95,6 +95,30 @@ function findFoundingBundleApiRefs (strippedText: string): string[] {
   return strippedText.match(re) ?? []
 }
 
+// G-5 as amended in Phase 66 (user-approved checkpoint item D): the ./browser entry may name the
+// genesis-row and founding-bundle modules ONLY in these two exact read-only re-export lines, so a
+// paired browser can re-derive the founding digest from its own replica (66-14). The replay WRITE
+// path (replayGenesisRows) stays barred from every barrel; index.ts, rn-entry.ts and
+// networks/index.ts stay fully barred.
+const BROWSER_FOUNDING_EXPORT_LINES = [
+  "export { readGenesisRows, FOUNDING_BUNDLE_TABLE_ORDER } from './networks/genesis-rows.js'",
+  "export { deriveFoundingDescriptor } from './networks/founding-bundle.js'"
+]
+
+function browserEntryFoundingProblems (strippedText: string): string[] {
+  const problems: string[] = []
+  if (/replayGenesisRows/.test(strippedText)) problems.push('names replayGenesisRows')
+  let rest = strippedText
+  for (const line of BROWSER_FOUNDING_EXPORT_LINES) {
+    const count = rest.split(line).length - 1
+    if (count > 1) problems.push(`repeats ${line}`)
+    rest = rest.split(line).join('')
+  }
+  if (/genesis-rows/.test(rest)) problems.push('names genesis-rows outside the allowed export line')
+  if (/founding-bundle/.test(rest)) problems.push('names founding-bundle outside the allowed export line')
+  return problems
+}
+
 function findRawExecNearFoundingBundle (strippedText: string): boolean {
   const mentionsFoundingBundle = /FoundingBundle/.test(strippedText)
   if (!mentionsFoundingBundle) return false
@@ -177,7 +201,7 @@ describe('founding-bundle guards (D-37, D-38, D-39)', () => {
     expect(violations, `app files mentioning FoundingBundle must not contain a raw insert/.exec(: ${violations.join(', ')}`).to.have.lengthOf(0)
   })
 
-  it('G-5: genesis-rows is imported only by networks-engine.ts and founding-bundle.ts; replayGenesisRows is called only from its own definition and networks-engine.ts; no barrel re-exports either module', () => {
+  it('G-5: genesis-rows is imported only by networks-engine.ts, founding-bundle.ts and (two read-only names) browser-entry.ts; replayGenesisRows is called only from its own definition and networks-engine.ts; no other barrel re-exports either module', () => {
     const importers: string[] = []
     const callers: string[] = []
     for (const file of ALL_SRC_FILES) {
@@ -191,16 +215,35 @@ describe('founding-bundle guards (D-37, D-38, D-39)', () => {
         callers.push(relFile)
       }
     }
-    expect(importers.sort()).to.deep.equal(['networks/founding-bundle.ts', 'networks/networks-engine.ts'].sort())
+    expect(importers.sort()).to.deep.equal(['browser-entry.ts', 'networks/founding-bundle.ts', 'networks/networks-engine.ts'].sort())
     expect(callers.sort()).to.deep.equal(['networks/genesis-rows.ts', 'networks/networks-engine.ts'].sort())
 
-    for (const barrel of ['index.ts', 'rn-entry.ts', 'browser-entry.ts', 'networks/index.ts']) {
+    for (const barrel of ['index.ts', 'rn-entry.ts', 'networks/index.ts']) {
       const full = join(VOTE_ENGINE_SRC, barrel)
       if (!existsSync(full)) continue
       const stripped = stripComments(readFileSync(full, 'utf8'))
       expect(stripped, `${barrel} must not re-export genesis-rows`).to.not.match(/genesis-rows/)
       expect(stripped, `${barrel} must not re-export founding-bundle`).to.not.match(/founding-bundle/)
+      expect(stripped, `${barrel} must not name replayGenesisRows`).to.not.match(/replayGenesisRows/)
     }
+
+    const browserEntry = stripComments(readFileSync(join(VOTE_ENGINE_SRC, 'browser-entry.ts'), 'utf8'))
+    expect(browserEntryFoundingProblems(browserEntry)).to.deep.equal([])
+  })
+
+  it('G-5b (positive control): the browser-entry matcher accepts only the two exact read-only lines and flags a planted replayGenesisRows, a widened line, an export-star and a foreign mention', () => {
+    expect(browserEntryFoundingProblems(BROWSER_FOUNDING_EXPORT_LINES.join('\n'))).to.deep.equal([])
+    expect(browserEntryFoundingProblems(stripComments(`// export { replayGenesisRows } from './networks/genesis-rows.js'`))).to.deep.equal([])
+
+    const replayName = ['replay', 'GenesisRows'].join('')
+    const plantedReplay = `export { ${replayName} } from './networks/genesis-rows.js'`
+    expect(browserEntryFoundingProblems(stripComments(plantedReplay))).to.include('names replayGenesisRows')
+    const plantedWidened = `export { readGenesisRows, FOUNDING_BUNDLE_TABLE_ORDER, ${replayName} } from './networks/genesis-rows.js'`
+    expect(browserEntryFoundingProblems(stripComments(plantedWidened))).to.include('names replayGenesisRows')
+    const plantedStar = `export * from './networks/genesis-rows.js'`
+    expect(browserEntryFoundingProblems(stripComments(plantedStar))).to.include('names genesis-rows outside the allowed export line')
+    const plantedBundle = `export { verifyFoundingBundle } from './networks/founding-bundle.js'`
+    expect(browserEntryFoundingProblems(stripComments(plantedBundle))).to.include('names founding-bundle outside the allowed export line')
   })
 
   it('G-6 (positive control): the same matcher functions flag a planted second producer line, a planted allocator call, a planted Voter importFoundingBundle, and a planted app insert next to FoundingBundle — and ignore each planted inside a comment', () => {

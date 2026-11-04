@@ -17,7 +17,8 @@
  *     signer), and 62-25's `screens/registration/BulkImportSyncScreen.tsx` (the registration
  *     bridge-URL save action) are all among them.
  *   - 23 of the 25 route through `useDeviceSigningErrorHandler` (8 from 49-11, 9 from 49-12,
- *     1 from 50-15's `DashboardSignInCodeScreen.tsx` — the CR-04 presence-proof gate, 1 from
+ *     1 from `screens/dashboard/PairBrowserScreen.tsx` (the browser-pairing request signer; it
+ *     replaced the dashboard sign-in code screen, so the counts are unchanged), 1 from
  *     62-11's ballot-submit signer (now `screens/ballots/EditBallotScreen.tsx` after the 62-55 move; routed count unchanged at 23), 1 from 62-23's
  *     `screens/networks/components/FoundingBundleExportCard.tsx`, and 1 from 62-25's
  *     `screens/registration/BulkImportSyncScreen.tsx`), and 2 from 62-27
@@ -43,6 +44,9 @@
  *   - 2026-11-02 ADDS exactly one invoker, `screens/elections/ElectionResultsScreen.tsx` (an officer
  *     publishes the signed ElectionTally row), routed through the hook, so ROLLOUT_EXEMPT is unchanged:
  *     invokers 25 -> 26, routed 23 -> 24, files referencing `device-signer` 27 -> 28.
+ *   - The paired-browsers list ADDS exactly one invoker, `screens/dashboard/PairedBrowsersScreen.tsx`
+ *     (the paired-browser Remove signer, routed through the hook), so ROLLOUT_EXEMPT is unchanged:
+ *     invokers 26 -> 27, routed 24 -> 25.
  *
  * Convention mirrors this workspace's other release-guard-style source-inspection tests (see
  * `engines/__tests__/`): reads files as TEXT rather than importing them, so it fails on what is
@@ -131,14 +135,14 @@ describe('D-09/D-13/D-14 rollout completeness: every createDeviceSigner call sit
 		.map((f) => path.relative(SRC_ROOT, f))
 		.sort();
 
-	it('the call-site inventory has exactly 26 members (fail loud, with the full list, if this drifts)', () => {
-		if (invokingFiles.length !== 26) {
+	it('the call-site inventory has exactly 27 members (fail loud, with the full list, if this drifts)', () => {
+		if (invokingFiles.length !== 27) {
 			throw new Error(
-				`Expected exactly 26 createDeviceSigner(...) call-site files, found ` +
+				`Expected exactly 27 createDeviceSigner(...) call-site files, found ` +
 					`${invokingFiles.length}:\n${invokingFiles.join('\n')}`,
 			);
 		}
-		expect(invokingFiles).toHaveLength(26);
+		expect(invokingFiles).toHaveLength(27);
 	});
 
 	it('ROLLOUT_EXEMPT has exactly 2 entries', () => {

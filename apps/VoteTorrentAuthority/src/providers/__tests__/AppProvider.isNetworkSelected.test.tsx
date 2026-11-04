@@ -28,7 +28,6 @@ jest.mock("../../engines/engine-factory", () => {
 		setGetPeerCount = jest.fn();
 		hasEngine = jest.fn(() => false);
 		isAttestationVerifierProvisioned = jest.fn(() => false);
-		exportDashboardSnapshot = jest.fn(async () => ({}));
 		setFirstSyncListener = jest.fn();
 		setNode = jest.fn();
 		getNetworksEngine() {
@@ -52,9 +51,9 @@ jest.mock("../../engines/registrant-dev-seed", () => ({
 	maybeSeedRegistrantFixtures: jest.fn(async () => undefined),
 }));
 jest.mock("../../screens/registration/attach-sync-bindings", () => ({ attachSyncBindings: jest.fn() }));
-jest.mock("../../services/dashboard-signin-code", () => ({
-	purgeLegacyStagedPayload: jest.fn(async () => "clean"),
-	registerDashboardSnapshotProvider: jest.fn(),
+const mockSweep = jest.fn(async () => "removed");
+jest.mock("../../engines/retired-dashboard-code-storage", () => ({
+	sweepRetiredDashboardCodeStorage: mockSweep,
 }));
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -95,5 +94,40 @@ describe("AppProvider.isNetworkSelected", () => {
 
 		expect(stale.isNetworkSelected()).toBe(true);
 		expect(captured.isNetworkSelected()).toBe(true);
+	});
+
+	it("A1: the sweep runs exactly once on mount and the context offers no snapshot export", async () => {
+		await renderer.act(async () => {
+			renderer.create(
+				<AppProvider>
+					<Probe />
+				</AppProvider>,
+			);
+			for (let i = 0; i < 10; i++) await Promise.resolve();
+		});
+		expect(mockSweep).toHaveBeenCalledTimes(1);
+		const retiredName = "export" + "DashboardSnapshot";
+		expect(captured).toBeDefined();
+		expect(Object.prototype.hasOwnProperty.call(captured, retiredName)).toBe(false);
+	});
+
+	it("A2: a failed sweep logs one closed literal warning and nothing else", async () => {
+		mockSweep.mockResolvedValueOnce("failed");
+		const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined);
+		try {
+			await renderer.act(async () => {
+				renderer.create(
+					<AppProvider>
+						<Probe />
+					</AppProvider>,
+				);
+				for (let i = 0; i < 10; i++) await Promise.resolve();
+			});
+			expect(mockSweep).toHaveBeenCalledTimes(1);
+			expect(warn).toHaveBeenCalledTimes(1);
+			expect(warn.mock.calls[0]).toEqual(["AppProvider: retired dashboard code storage sweep failed"]);
+		} finally {
+			warn.mockRestore();
+		}
 	});
 });

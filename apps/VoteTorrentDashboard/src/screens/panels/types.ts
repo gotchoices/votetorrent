@@ -17,6 +17,12 @@
  * not how a Database handle was constructed. `db` is nullable because a
  * panel can mount before a network is bootstrapped; a panel that receives
  * `null` renders its own empty state.
+ *
+ * Live panels get their live inputs from `src/live/`, never through new
+ * props here, so this contract (no `evaluation` in panel props) stays as it
+ * is: they read `DataVersionContext` and re-read their rows when its
+ * `version` changes, mark changed rows and figures through
+ * `useChangeMarks`, and show pending items with `ReadOnlyNote`.
  */
 import type { FC } from 'react';
 import type { Database } from '@quereus/quereus';
@@ -25,16 +31,6 @@ import type { Capability } from '../../auth/capabilities.js';
 export interface PanelProps {
 	capability: Capability;
 	db: Database | null;
-	/**
-	 * The canonical 19-character instant this browser's snapshot was taken
-	 * at. Supplied by the shell, threaded down through 50-09's `PanelGrid`
-	 * (which already holds it for the freshness indicator) — a panel never
-	 * reads it from anywhere else. Optional: its absence means no snapshot
-	 * instant is available yet, and a consumer that cares (only 50-10's
-	 * Elections lifecycle pill does) falls back to the current instant.
-	 * Eight of the nine panels ignore this prop entirely.
-	 */
-	snapshotInstant?: string | null;
 }
 
 export type PanelComponent = FC<PanelProps>;

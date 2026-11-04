@@ -19,6 +19,7 @@ import { relayOnlyAddrs } from '../config/relay-only-addrs';
 import { readJoinBootstrap } from '../engines/join-bootstrap';
 import { openBootstrapPeerStore, openTrustedOwnerStore } from '../engines/rn-durable-slot';
 import { noiseCryptoForNode } from '../engines/noise-crypto-config';
+import { createEdgeReaderRefusal } from '@votetorrent/vote-engine/rn';
 
 // ---------------------------------------------------------------------------
 // Context type
@@ -273,6 +274,8 @@ export function CadreNodeProvider({ children }: PropsWithChildren) {
           nodeHolder.current = made;
           return made;
         };
+        // One edge-reader refusal per boot, created outside makeNode so the recovery rebuild reuses it.
+        const edgeReaderRefusal = createEdgeReaderRefusal();
         const makeNode = () => track(new CadreNode({
           privateKey,
           controlNetwork: { partyId: PARTY_ID, bootstrapNodes },
@@ -388,6 +391,11 @@ export function CadreNodeProvider({ children }: PropsWithChildren) {
           // handlers (Voter: pool-matchmaking-ports.ts). Cost: one cohort-topic host per strand node (db-p2p
           // builds it as a core host, 30 s renewals, even on a phone); measure CPU on the Redmi before release.
           strandReactivity: { enabled: true },
+          // Keeps strand peers that declared themselves read-only edge readers (an officer's browser dashboard,
+          // which stores nothing) out of this phone's write cohorts and coordinator choice, so a write never
+          // waits on an approval that peer cannot give. Reads are unaffected. A peer is refused only on its own
+          // identify, so no peer can get another one refused.
+          strandCohortRefusal: edgeReaderRefusal.hook,
         }));
 
         // node.start() is inside useEffect — never blocks initial render (D-06 / T-22-03).

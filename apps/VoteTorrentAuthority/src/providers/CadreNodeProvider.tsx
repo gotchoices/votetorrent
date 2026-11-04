@@ -32,6 +32,9 @@ import {
 } from '../engines/owner-trust';
 import { REPLICATION_PROOF_ENABLED } from '../engines/proof-flags.generated';
 import { hostPoolRendezvous } from '../engines/pool-rendezvous-host';
+import { startPairMintHost, type PairMintHost } from '../engines/pair-mint-host';
+import type { PairMintReply, PairMintRequest } from '@votetorrent/vote-engine/rn';
+import { createEdgeReaderRefusal } from '@votetorrent/vote-engine/rn';
 
 // ---------------------------------------------------------------------------
 // `Promise.withResolvers` ambient augmentation (D-08/D-09).
@@ -115,6 +118,25 @@ interface CadreNodeContextType {
    * OwnerTrustUnreadableError, leaving the state unchanged, when the classification cannot be read.
    */
   refreshOwnerTrust: () => Promise<void>;
+}
+
+/** The owner phone's own pair-mint path: see {@link usePairMintLocal}. */
+export type PairMintLocal = (request: PairMintRequest) => Promise<PairMintReply>;
+
+/**
+ * Browser pairing (D-26, D-28) has its own small context, so the node context's member set stays as it is.
+ * Outside the provider the getter returns null.
+ */
+const PairMintLocalContext = createContext<() => PairMintLocal | null>(() => null);
+
+/**
+ * Returns a getter for the owner phone's own pair-mint path, for pairing this officer's browser through
+ * the same service a member's phone reaches over the wire. The getter returns null on a phone that is not
+ * an owner, before the host attached and after it detached. The request must carry this phone's identity
+ * peer id (`node.peerId.toString()`) as `requesterPeerId`, or the service refuses `requester-mismatch`.
+ */
+export function usePairMintLocal(): () => PairMintLocal | null {
+  return useContext(PairMintLocalContext);
 }
 
 const CadreNodeContext = createContext<CadreNodeContextType | null>(null);
@@ -233,6 +255,7 @@ export function CadreNodeProvider({ children }: PropsWithChildren) {
   // nodeRef holds the stable CadreNode instance (created once per mount).
   const nodeRef = useRef<AuthorityCadreNode | null>(null);
   const detachRendezvousRef = useRef<(() => Promise<void>) | null>(null);
+  const pairMintHostRef = useRef<PairMintHost | null>(null);
   // nodeState is the node instance exposed via context (set after construction).
   const [node, setNode] = useState<AuthorityCadreNode | null>(null);
   // D-08..D-11: what the boot learned about the saved owner anchor, and which store backs the node.
@@ -367,6 +390,9 @@ export function CadreNodeProvider({ children }: PropsWithChildren) {
         const joinBootstrap = await readJoinBootstrap();
         const bootstrapNodes = [...new Set([...CONTROL_RELAY_ADDRS, ...joinBootstrap])];
 
+        // One edge-reader refusal per boot, created outside makeNode so the recovery rebuild reuses it.
+        const edgeReaderRefusal = createEdgeReaderRefusal();
+
         // cadre-core 1.18: keep the owner key = the identity key (engines/identity-owner-key.ts).
         const makeNode = () => withIdentityOwnerKey(new CadreNode({
           privateKey,
@@ -477,6 +503,11 @@ export function CadreNodeProvider({ children }: PropsWithChildren) {
           // handlers (Voter: pool-matchmaking-ports.ts). Cost: one cohort-topic host per strand node (db-p2p
           // builds it as a core host, 30 s renewals, even on a phone); measure CPU on the Redmi before release.
           strandReactivity: { enabled: true },
+          // Keeps strand peers that declared themselves read-only edge readers (an officer's browser dashboard,
+          // which stores nothing) out of this phone's write cohorts and coordinator choice, so a write never
+          // waits on an approval that peer cannot give. Reads are unaffected. A peer is refused only on its own
+          // identify, so no peer can get another one refused.
+          strandCohortRefusal: edgeReaderRefusal.hook,
         }), privateKey);
 
         // node.start() is inside useEffect — never blocks initial render (D-06 / T-22-03).
@@ -518,6 +549,17 @@ export function CadreNodeProvider({ children }: PropsWithChildren) {
               else void detach();
             })
             .catch((e) => console.warn('[CadreNodeProvider] pool rendezvous not hosted:', e instanceof Error ? e.message : String(e)));
+          // D-26/D-28: an owner phone answers browser-pairing mint requests from its cadre's officer phones.
+          // Owner phones only (startPairMintHost resolves null elsewhere), best effort and never awaited, so the
+          // boot is unchanged; the log names the error class only. A phone that becomes an owner later hosts
+          // from its next launch.
+          startPairMintHost(hosted)
+            .then((host) => {
+              if (!host) return;
+              if (nodeRef.current === hosted) pairMintHostRef.current = host;
+              else void host.detach().catch(() => undefined);
+            })
+            .catch((e) => console.warn('[CadreNodeProvider] pair-mint not hosted:', e instanceof Error ? e.name : 'unknown'));
           setNode(localNode);
           // D-08/D-09: success exit — the strand backend is now the correct dispatch.
           settleNode({ status: 'ready', node: localNode });
@@ -548,6 +590,8 @@ export function CadreNodeProvider({ children }: PropsWithChildren) {
       isMounted = false;
       void detachRendezvousRef.current?.().catch(() => undefined);
       detachRendezvousRef.current = null;
+      void pairMintHostRef.current?.detach().catch(() => undefined);
+      pairMintHostRef.current = null;
       // Stop on unmount. Errors are swallowed since the component is gone.
       nodeRef.current?.stop().catch(() => undefined);
       nodeRef.current = null;
@@ -619,6 +663,9 @@ export function CadreNodeProvider({ children }: PropsWithChildren) {
     setOwnerTrust(result);
   }, []);
 
+  // The attached host's own-request path, or null (no host on this phone, or not attached yet).
+  const getPairMintLocal = useCallback((): PairMintLocal | null => pairMintHostRef.current?.handleLocal ?? null, []);
+
   return (
     <CadreNodeContext.Provider
       value={{
@@ -631,7 +678,9 @@ export function CadreNodeProvider({ children }: PropsWithChildren) {
         refreshOwnerTrust,
       }}
     >
+      <PairMintLocalContext.Provider value={getPairMintLocal}>
       {children}
+      </PairMintLocalContext.Provider>
     </CadreNodeContext.Provider>
   );
 }

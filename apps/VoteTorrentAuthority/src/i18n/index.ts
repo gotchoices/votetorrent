@@ -925,37 +925,102 @@ const resources = {
 			registrantLifecycleKeepCurrentExpiration: 'Keep Current Expiration',
 			registrantLifecycleConfirmRenewal: 'Confirm Renewal',
 			registrantLifecycleConfirmReinstatement: 'Confirm Reinstatement',
-			// 50-UI-SPEC.md § Copywriting Contract — dashboardSignInCode* group (the RN
-			// authority app's "Producer screen" copy rows, verbatim). No phase number or
-			// decision ID may appear in these strings — see the module carrying
-			// mintDashboardSignInCode for why.
-			dashboardSignInCodeTitle: 'Dashboard Sign-In Code',
-			dashboardSignInCodeBody: "Show this code to the officer signing in to the web dashboard. It's single-use and expires in {{minutes}} minutes.",
-			dashboardSignInCodeGenerateButton: 'Generate New Code',
-			dashboardSignInCodeUsed: 'This code has been used.',
-			dashboardSignInCodeExpired: 'This code has expired. Generate a new one.',
-			dashboardSignInCodeCopyButton: 'Copy Code',
-			dashboardSignInCodeCopied: 'Code copied',
-			dashboardSignInCodeCopyFailed: "Couldn't copy the code. Select it and copy it instead.",
-			dashboardSignInCodeCountdown: 'Expires in {{remaining}}',
-			dashboardSignInCodeIdle: 'Generate a code to sign an officer in to the web dashboard.',
-			dashboardSignInCodeDiscardButton: 'Discard Staged Code',
-			dashboardSignInCodeGenerateFailed: "Couldn't generate a code. Try again.",
-			dashboardSignInCodeConfirmHeading: 'Export this authority’s whole database?',
-			dashboardSignInCodeConfirmBody:
-				'Generating a code copies everything this device holds for this network — including registrant information — into a single-use export. Anyone who reads the code can pull that copy into a web browser. Only continue if you are handing the code to an officer you trust, right now.',
-			// The sealed-upload sequence. The code is shown ONLY after the sign-in
-			// service confirms it received the export, so these five strings cover
-			// the wait and the four ways it can end without a code.
-			dashboardSignInCodeUploading: 'Sealing the code and sending it to the sign-in service.',
-			dashboardSignInCodeUploadFailed:
-				"Couldn't send the export to the sign-in service, so no new code was created. Check that the sign-in service is running, then try again.",
-			dashboardSignInCodeUploadRefused:
-				'The sign-in service refused this device, so no new code was created. Check the upload token the service was set up with.',
-			dashboardSignInCodeUploadTooLarge:
-				'This authority’s data is larger than the sign-in service will accept, so no new code was created. Ask whoever runs the service to raise its limit.',
-			dashboardSignInCodeUploadNotConfigured:
-				'No sign-in service address is set on this build, so no code was created. The service address has to be set up before a code can be generated.',
+			// Browser pairing (Pair a browser screen, Paired browsers list, owner pairing log and switch).
+			// No phase number or decision id may appear in these strings.
+			dashboardPairingTitle: 'Pair a browser',
+			dashboardPairingChecking: 'Checking whether this phone can pair a browser…',
+			dashboardPairingIdleBody:
+				"Pair a computer's browser so it follows this network live. The browser can read what you can see and can't change anything.",
+			dashboardPairingRequestButton: 'Request pairing code',
+			dashboardPairingConfirmHeading: 'Request a pairing code?',
+			dashboardPairingConfirmBody:
+				'The code lets one browser follow this network as you and read everything you can see. Anyone who has it can use it once until it expires.',
+			dashboardPairingWaitingHeading: 'Asking the network owner…',
+			dashboardPairingWaitingBody: "An owner's Authority app must be open and online to make the code. Keep it open.",
+			dashboardPairingCancelButton: 'Cancel pairing request',
+			dashboardPairingReadyHeading: 'Pairing code ready',
+			// Hidden for this release with the QR (the dashboard cannot scan it):
+			// dashboardPairingReadyBody:
+			// 	"Scan this QR code with the browser's camera, or copy the code and paste it there. It works once and expires in {{minutes}} minutes.",
+			dashboardPairingReadyBody:
+				"Copy the code and paste it into the browser. It works once and expires in {{minutes}} minutes.",
+			dashboardPairingCountdown: 'Expires in {{remaining}}',
+			dashboardPairingQrHint: 'Tap the QR code to enlarge it',
+			dashboardPairingQrTileLabel: 'Pairing QR code, tap to enlarge',
+			dashboardPairingShowQrButton: 'Show QR code',
+			dashboardPairingCopyButton: 'Copy code',
+			dashboardPairingShareButton: 'Share code',
+			dashboardPairingFinishButton: 'Finish pairing',
+			dashboardPairingCopied: 'Code copied',
+			dashboardPairingCopyFailed: "Couldn't copy the code. Share it instead.",
+			dashboardPairingShareFailed: "Couldn't open the share sheet. Copy the code instead.",
+			dashboardPairingQrWarning:
+				'Anyone with this code can pair a browser as you until it expires. Show it only to your own computer.',
+			dashboardPairingQrTooLarge: 'This code is too large to show as a QR code. Copy or share it instead.',
+			dashboardPairingQrClose: 'Close',
+			dashboardPairingQrShareImage: 'Share QR image',
+			dashboardPairingQrShareFailed: "Couldn't share the image. Copy or share the code instead.",
+			dashboardPairingQrRenderFailed: "Couldn't draw the QR code. Copy or share the code instead.",
+			dashboardPairingUsed: 'This code has been used.',
+			dashboardPairingPairAnotherButton: 'Pair another browser',
+			dashboardPairingExpired: 'This code has expired. Request a new one.',
+			dashboardPairingOwnerUnreachableHeading: 'No owner is reachable.',
+			dashboardPairingOwnerUnreachableBody: "Keep the owner's Authority app open on their phone and try again.",
+			dashboardPairingRetryButton: 'Retry request',
+			dashboardPairingSwitchedOff: 'The owner has turned browser pairing off. Ask them to turn it on.',
+			dashboardPairingNotAllowed: "The owner didn't accept this request. Make sure your officer key is current.",
+			dashboardPairingUnavailable: "Pairing isn't available right now.",
+			dashboardPairingUnavailableNoNetwork: 'Join a network first.',
+			dashboardPairingUnavailableNotOfficer: 'Only officers can pair a browser.',
+			dashboardPairingUnavailableNoKey: 'Set up your signing key first.',
+			dashboardPairingBuildFailed: "Couldn't make a pairing code. Try again.",
+			pairedBrowsersTitle: 'Paired browsers',
+			pairedBrowsersIntro: 'Browsers that follow this network as you. Each can read what you can see; none can change anything.',
+			pairedBrowsersDefaultLabel: 'Browser paired {{date}}',
+			pairedBrowsersPairedAt: 'Paired {{date}}',
+			pairedBrowsersLastSeenFewMinutes: 'Last seen a few minutes ago',
+			pairedBrowsersLastSeenMinutes: 'Last seen {{n}} min ago',
+			pairedBrowsersLastSeenHours: 'Last seen {{n}} h ago',
+			pairedBrowsersLastSeenDays: 'Last seen {{n}} days ago',
+			pairedBrowsersNotSeenYet: 'Not seen yet',
+			pairedBrowsersLastSeenFootnote: 'Last seen updates about every 8 minutes.',
+			pairedBrowsersStateWaiting: 'Waiting to pair',
+			pairedBrowsersStatePaired: 'Paired',
+			pairedBrowsersStateRemovalPending: 'Removal pending',
+			pairedBrowsersStateRemoved: 'Removed',
+			pairedBrowsersRemoveButton: 'Remove',
+			pairedBrowsersRemoveConfirmHeading: 'Remove this browser?',
+			pairedBrowsersRemoveConfirmBody:
+				"The browser will delete its local copy and go back to the pairing screen. It will also lose its way into the network. Data it has already received can't be taken back, so remove a browser as soon as you stop trusting it.",
+			pairedBrowsersRemoveConfirmButton: 'Remove browser',
+			pairedBrowsersKeepButton: 'Keep browser',
+			pairedBrowsersRemovalPendingLine:
+				'Removed here. Waiting for an owner to finish removing it from the network. This will retry automatically.',
+			pairedBrowsersEmptyHeading: 'No paired browsers',
+			pairedBrowsersEmptyBody: 'Pair a computer to follow this network live.',
+			pairedBrowsersPairButton: 'Pair a browser',
+			pairedBrowsersLocalLabelsNote: 'Names and pairing times are kept on this phone only.',
+			pairedBrowsersLoadError: "Couldn't load paired browsers. Pull to retry.",
+			pairedBrowsersRemoveFailed: "Couldn't remove this browser. Try again.",
+			pairedBrowsersRemoveKeyNotCurrent: "Your signing key isn't current. Set it up again, then try removing this browser.",
+			pairingMintLogSectionTitle: 'Browser pairing',
+			pairingMintLogSwitchLabel: 'Allow officers to pair browsers',
+			pairingMintLogSwitchHelpOn:
+				'When an officer asks to pair a browser, this phone approves it automatically if their key checks out. Keep this app open for it to work.',
+			pairingMintLogSwitchHelpOff: "Officers can't pair browsers until you turn this back on. Browsers already paired keep working.",
+			pairingMintLogSwitchSaveFailed: "Couldn't save this setting. Try again.",
+			pairingMintLogTitle: 'Pairing requests',
+			pairingMintLogRow: '{{officerName}} · {{date}}',
+			pairingMintLogUnknownOfficer: 'Unknown officer',
+			pairingMintLogOutcomeApproved: 'Approved',
+			pairingMintLogOutcomeKeyNotValid: 'Refused: key not valid',
+			pairingMintLogOutcomeSwitchOff: 'Refused: switch off',
+			pairingMintLogOutcomeNotOfficer: 'Refused: not an officer',
+			pairingMintLogOutcomeRefused: 'Refused',
+			pairingMintLogOutcomeUnreachable: 'Unreachable',
+			pairingMintLogEmpty: 'No pairing requests yet.',
+			pairingMintLogFootnote: 'Showing the last {{n}} requests on this phone.',
+			pairingMintLogUnreadable: "Couldn't read the pairing requests on this phone.",
 			// Phase 47 (D-01/D-02/D-14) — registrantAccessTrail* group; copy verbatim from 47-UI-SPEC.md § Copywriting Contract.
 			registrantAccessTrailSectionTitle: 'Access History',
 			// D-01: load-bearing framing — accountability/transparency, NOT a security control. Do not paraphrase.
@@ -2282,36 +2347,107 @@ const resources = {
 			registrantLifecycleKeepCurrentExpiration: 'Mantener Vencimiento Actual',
 			registrantLifecycleConfirmRenewal: 'Confirmar Renovación',
 			registrantLifecycleConfirmReinstatement: 'Confirmar Reincorporación',
-			// 50-UI-SPEC.md § Copywriting Contract — dashboardSignInCode* group (the RN
-			// authority app's "Producer screen" copy rows, verbatim). No phase number or
-			// decision ID may appear in these strings — see the module carrying
-			// mintDashboardSignInCode for why.
-			dashboardSignInCodeTitle: 'Código de Inicio de Sesión del Panel',
-			dashboardSignInCodeBody: 'Muestre este código al funcionario que inicia sesión en el panel web. Es de un solo uso y vence en {{minutes}} minutos.',
-			dashboardSignInCodeGenerateButton: 'Generar Nuevo Código',
-			dashboardSignInCodeUsed: 'Este código ya ha sido usado.',
-			dashboardSignInCodeExpired: 'Este código ha vencido. Genere uno nuevo.',
-			dashboardSignInCodeCopyButton: 'Copiar Código',
-			dashboardSignInCodeCopied: 'Código copiado',
-			dashboardSignInCodeCopyFailed: 'No se pudo copiar el código. Selecciónalo y cópialo.',
-			dashboardSignInCodeCountdown: 'Vence en {{remaining}}',
-			dashboardSignInCodeIdle: 'Genere un código para iniciar sesión a un funcionario en el panel web.',
-			dashboardSignInCodeDiscardButton: 'Descartar Código Preparado',
-			dashboardSignInCodeGenerateFailed: 'No se pudo generar un código. Inténtelo de nuevo.',
-			dashboardSignInCodeConfirmHeading: '¿Exportar toda la base de datos de esta autoridad?',
-			dashboardSignInCodeConfirmBody:
-				'Generar un código copia todo lo que este dispositivo guarda de esta red — incluida la información de los registrantes — en una exportación de un solo uso. Cualquiera que lea el código puede llevar esa copia a un navegador web. Continúe solo si va a entregar el código a un funcionario de confianza, ahora mismo.',
-			// La secuencia de envío sellado. El código se muestra SOLO después de que
-			// el servicio de inicio de sesión confirme que recibió la exportación.
-			dashboardSignInCodeUploading: 'Sellando el código y enviándolo al servicio de inicio de sesión.',
-			dashboardSignInCodeUploadFailed:
-				'No se pudo enviar la exportación al servicio de inicio de sesión, así que no se creó ningún código nuevo. Compruebe que el servicio de inicio de sesión esté en marcha e inténtelo de nuevo.',
-			dashboardSignInCodeUploadRefused:
-				'El servicio de inicio de sesión rechazó este dispositivo, así que no se creó ningún código nuevo. Revise la clave de envío con la que se configuró el servicio.',
-			dashboardSignInCodeUploadTooLarge:
-				'Los datos de esta autoridad superan lo que el servicio de inicio de sesión acepta, así que no se creó ningún código nuevo. Pida a quien administra el servicio que aumente su límite.',
-			dashboardSignInCodeUploadNotConfigured:
-				'Esta versión no tiene configurada la dirección del servicio de inicio de sesión, así que no se creó ningún código. Hay que configurar la dirección del servicio antes de poder generar un código.',
+			// Vinculación de navegadores (pantalla, lista de navegadores vinculados, registro y ajuste del propietario).
+			// Ningún número de plan ni identificador de decisión puede aparecer en estos textos.
+			dashboardPairingTitle: 'Vincular un navegador',
+			dashboardPairingChecking: 'Comprobando si este teléfono puede vincular un navegador…',
+			dashboardPairingIdleBody:
+				'Vincule el navegador de una computadora para que siga esta red en vivo. El navegador puede leer lo que usted ve y no puede cambiar nada.',
+			dashboardPairingRequestButton: 'Solicitar código de vinculación',
+			dashboardPairingConfirmHeading: '¿Solicitar un código de vinculación?',
+			dashboardPairingConfirmBody:
+				'El código permite que un navegador siga esta red como usted y lea todo lo que usted puede ver. Cualquiera que lo tenga puede usarlo una vez hasta que venza.',
+			dashboardPairingWaitingHeading: 'Consultando al propietario de la red…',
+			dashboardPairingWaitingBody:
+				'La aplicación Authority de un propietario debe estar abierta y en línea para crear el código. Manténgala abierta.',
+			dashboardPairingCancelButton: 'Cancelar solicitud de vinculación',
+			dashboardPairingReadyHeading: 'Código de vinculación listo',
+			// Oculto en esta versión junto con el QR:
+			// dashboardPairingReadyBody:
+			// 	'Escanee este código QR con la cámara del navegador, o copie el código y péguelo allí. Funciona una vez y vence en {{minutes}} minutos.',
+			dashboardPairingReadyBody:
+				'Copie el código y péguelo en el navegador. Funciona una vez y vence en {{minutes}} minutos.',
+			dashboardPairingCountdown: 'Vence en {{remaining}}',
+			dashboardPairingQrHint: 'Toque el código QR para ampliarlo',
+			dashboardPairingQrTileLabel: 'Código QR de vinculación, toque para ampliarlo',
+			dashboardPairingShowQrButton: 'Mostrar código QR',
+			dashboardPairingCopyButton: 'Copiar código',
+			dashboardPairingShareButton: 'Compartir código',
+			dashboardPairingFinishButton: 'Terminar vinculación',
+			dashboardPairingCopied: 'Código copiado',
+			dashboardPairingCopyFailed: 'No se pudo copiar el código. Compártalo en su lugar.',
+			dashboardPairingShareFailed: 'No se pudo abrir el menú para compartir. Copie el código en su lugar.',
+			dashboardPairingQrWarning:
+				'Cualquiera que tenga este código puede vincular un navegador como usted hasta que venza. Muéstrelo solo a su propia computadora.',
+			dashboardPairingQrTooLarge: 'Este código es demasiado grande para mostrarlo como código QR. Cópielo o compártalo en su lugar.',
+			dashboardPairingQrClose: 'Cerrar',
+			dashboardPairingQrShareImage: 'Compartir imagen QR',
+			dashboardPairingQrShareFailed: 'No se pudo compartir la imagen. Copie o comparta el código en su lugar.',
+			dashboardPairingQrRenderFailed: 'No se pudo dibujar el código QR. Copie o comparta el código en su lugar.',
+			dashboardPairingUsed: 'Este código ya se usó.',
+			dashboardPairingPairAnotherButton: 'Vincular otro navegador',
+			dashboardPairingExpired: 'Este código ha vencido. Solicite uno nuevo.',
+			dashboardPairingOwnerUnreachableHeading: 'No hay ningún propietario disponible.',
+			dashboardPairingOwnerUnreachableBody:
+				'Mantenga abierta la aplicación Authority del propietario en su teléfono e inténtelo de nuevo.',
+			dashboardPairingRetryButton: 'Reintentar solicitud',
+			dashboardPairingSwitchedOff: 'El propietario desactivó la vinculación de navegadores. Pídale que la active.',
+			dashboardPairingNotAllowed: 'El propietario no aceptó esta solicitud. Asegúrese de que su clave de funcionario esté vigente.',
+			dashboardPairingUnavailable: 'La vinculación no está disponible en este momento.',
+			dashboardPairingUnavailableNoNetwork: 'Únase primero a una red.',
+			dashboardPairingUnavailableNotOfficer: 'Solo los funcionarios pueden vincular un navegador.',
+			dashboardPairingUnavailableNoKey: 'Configure primero su clave de firma.',
+			dashboardPairingBuildFailed: 'No se pudo crear un código de vinculación. Inténtelo de nuevo.',
+			pairedBrowsersTitle: 'Navegadores vinculados',
+			pairedBrowsersIntro:
+				'Navegadores que siguen esta red como usted. Cada uno puede leer lo que usted ve; ninguno puede cambiar nada.',
+			pairedBrowsersDefaultLabel: 'Navegador vinculado el {{date}}',
+			pairedBrowsersPairedAt: 'Vinculado el {{date}}',
+			pairedBrowsersLastSeenFewMinutes: 'Visto por última vez hace unos minutos',
+			pairedBrowsersLastSeenMinutes: 'Visto por última vez hace {{n}} min',
+			pairedBrowsersLastSeenHours: 'Visto por última vez hace {{n}} h',
+			pairedBrowsersLastSeenDays: 'Visto por última vez hace {{n}} días',
+			pairedBrowsersNotSeenYet: 'Aún no se ha visto',
+			pairedBrowsersLastSeenFootnote: 'La última vez visto se actualiza aproximadamente cada 8 minutos.',
+			pairedBrowsersStateWaiting: 'Esperando vinculación',
+			pairedBrowsersStatePaired: 'Vinculado',
+			pairedBrowsersStateRemovalPending: 'Retiro pendiente',
+			pairedBrowsersStateRemoved: 'Quitado',
+			pairedBrowsersRemoveButton: 'Quitar',
+			pairedBrowsersRemoveConfirmHeading: '¿Quitar este navegador?',
+			pairedBrowsersRemoveConfirmBody:
+				'El navegador descartará su copia local y volverá a la pantalla de vinculación. También perderá su acceso a la red. Los datos que ya recibió no se pueden recuperar, así que quite un navegador en cuanto deje de confiar en él.',
+			pairedBrowsersRemoveConfirmButton: 'Quitar navegador',
+			pairedBrowsersKeepButton: 'Conservar navegador',
+			pairedBrowsersRemovalPendingLine:
+				'Quitado aquí. Esperando a que un propietario termine de quitarlo de la red. Esto se reintentará automáticamente.',
+			pairedBrowsersEmptyHeading: 'No hay navegadores vinculados',
+			pairedBrowsersEmptyBody: 'Vincule una computadora para seguir esta red en vivo.',
+			pairedBrowsersPairButton: 'Vincular un navegador',
+			pairedBrowsersLocalLabelsNote: 'Los nombres y las horas de vinculación se guardan solo en este teléfono.',
+			pairedBrowsersLoadError: 'No se pudieron cargar los navegadores vinculados. Deslice hacia abajo para reintentar.',
+			pairedBrowsersRemoveFailed: 'No se pudo quitar este navegador. Inténtelo de nuevo.',
+			pairedBrowsersRemoveKeyNotCurrent:
+				'Su clave de firma no está vigente. Configúrela de nuevo y luego intente quitar este navegador.',
+			pairingMintLogSectionTitle: 'Vinculación de navegadores',
+			pairingMintLogSwitchLabel: 'Permitir que los funcionarios vinculen navegadores',
+			pairingMintLogSwitchHelpOn:
+				'Cuando un funcionario pide vincular un navegador, este teléfono lo aprueba automáticamente si su clave es válida. Mantenga esta aplicación abierta para que funcione.',
+			pairingMintLogSwitchHelpOff:
+				'Los funcionarios no pueden vincular navegadores hasta que vuelva a activar esto. Los navegadores ya vinculados siguen funcionando.',
+			pairingMintLogSwitchSaveFailed: 'No se pudo guardar este ajuste. Inténtelo de nuevo.',
+			pairingMintLogTitle: 'Solicitudes de vinculación',
+			pairingMintLogRow: '{{officerName}} · el {{date}}',
+			pairingMintLogUnknownOfficer: 'Funcionario desconocido',
+			pairingMintLogOutcomeApproved: 'Aprobada',
+			pairingMintLogOutcomeKeyNotValid: 'Rechazada: clave no válida',
+			pairingMintLogOutcomeSwitchOff: 'Rechazada: interruptor desactivado',
+			pairingMintLogOutcomeNotOfficer: 'Rechazada: no es funcionario',
+			pairingMintLogOutcomeRefused: 'Rechazada',
+			pairingMintLogOutcomeUnreachable: 'Inalcanzable',
+			pairingMintLogEmpty: 'Aún no hay solicitudes de vinculación.',
+			pairingMintLogFootnote: 'Se muestran las últimas {{n}} solicitudes en este teléfono.',
+			pairingMintLogUnreadable: 'No se pudieron leer las solicitudes de vinculación en este teléfono.',
 			// Phase 47 (D-01/D-02/D-14) — registrantAccessTrail* group; copy verbatim from 47-UI-SPEC.md § Copywriting Contract.
 			registrantAccessTrailSectionTitle: 'Historial de Acceso',
 			// D-01: load-bearing framing — accountability/transparency, NOT a security control. Do not paraphrase.

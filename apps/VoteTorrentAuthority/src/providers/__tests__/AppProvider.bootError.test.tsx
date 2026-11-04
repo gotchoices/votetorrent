@@ -133,7 +133,6 @@ jest.mock("../../engines/engine-factory", () => {
 		setGetPeerCount = jest.fn();
 		hasEngine = jest.fn(() => false);
 		isAttestationVerifierProvisioned = jest.fn(() => false);
-		exportDashboardSnapshot = jest.fn(async () => ({}));
 
 		private firstSyncListener: ((strandId: string) => void) | undefined;
 		setFirstSyncListenerCalls: Array<((strandId: string) => void) | undefined> = [];
@@ -218,11 +217,8 @@ jest.mock("../../screens/registration/attach-sync-bindings", () => ({
 	attachSyncBindings: jest.fn(),
 }));
 
-const mockPurgeLegacyStagedPayload = jest.fn(async () => "clean" as const);
-const mockRegisterDashboardSnapshotProvider = jest.fn();
-jest.mock("../../services/dashboard-signin-code", () => ({
-	purgeLegacyStagedPayload: () => mockPurgeLegacyStagedPayload(),
-	registerDashboardSnapshotProvider: (...args: unknown[]) => mockRegisterDashboardSnapshotProvider(...args),
+jest.mock("../../engines/retired-dashboard-code-storage", () => ({
+	sweepRetiredDashboardCodeStorage: jest.fn(async () => "removed"),
 }));
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
