@@ -1,5 +1,5 @@
 diff --git a/dist/cadre-node.js b/dist/cadre-node.js
-index 3d06e57..9b08041 100644
+index 3d06e57..7124416 100644
 --- a/dist/cadre-node.js
 +++ b/dist/cadre-node.js
 @@ -57,6 +57,9 @@ import { createMembershipConnectionGater, UnauthorizedReservationBudget } from '
@@ -179,17 +179,19 @@ index 3d06e57..9b08041 100644
          // Unregister the two redemption handlers, for the same reason.
          if (this.cadreInviteHandler && this.controlNode) {
              await this.cadreInviteHandler.unregister(this.controlNode);
-@@ -6544,6 +6652,9 @@ export class CadreNode {
+@@ -6544,6 +6652,11 @@ export class CadreNode {
              // are on `StartStrandConfig.servingMachines`.
              backfill: this.config.strandBackfill,
              reactivity: this.config.strandReactivity,
 +            // VoteTorrent patch (strand-cohort-refusal): forwarded only when the embedder set the key,
 +            // so a node without it starts every strand with exactly the old config.
 +            ...(this.config.strandCohortRefusal !== undefined && { cohortRefusal: this.config.strandCohortRefusal }),
++            // VoteTorrent patch (strand-edge-reader-declaration): forwarded only when the embedder set the key.
++            ...(this.config.edgeReaderProtocol !== undefined && { edgeReaderProtocol: this.config.edgeReaderProtocol }),
              revocationEnforcement: this.config.strandRevocationEnforcement,
              membershipReconciliation: this.config.strandMembershipReconciliation,
              onSelfRevoked: (revokedStrandId) => {
-@@ -7194,6 +7305,18 @@ export class CadreNode {
+@@ -7194,6 +7307,18 @@ export class CadreNode {
          }
          log('strand %s address book merged (peers=%d, merged=%d, restamped=%d, skipped=%d, failed=%d, dropped=%d)', strandId, peers, counts.merged, counts.restamped, counts.skipped, counts.failed, addrs.length - grouped);
      }
@@ -208,7 +210,7 @@ index 3d06e57..9b08041 100644
      /**
       * The local strand instance's dialable strand-network multiaddrs for the
       * strand-addr RPC, ordered signaling-first (reusing the control node's
-@@ -9792,7 +9915,8 @@ export class CadreNode {
+@@ -9792,7 +9917,8 @@ export class CadreNode {
              // Overrides any caller-supplied hook, exactly like partyId/cadrePeerAddrs: only
              // this node can say which strand-network addresses it is actually listening on,
              // and a wrong answer here seeds a joiner's mesh with addresses that reach nobody.
@@ -345,10 +347,10 @@ index 221330b..0f78e5c 100644
  /**
   * Default freshness ceiling for resolved peer-address records (15 minutes).
 diff --git a/dist/strand-instance-manager.js b/dist/strand-instance-manager.js
-index 1d21c32..b10260c 100644
+index 1d21c32..cfb8b97 100644
 --- a/dist/strand-instance-manager.js
 +++ b/dist/strand-instance-manager.js
-@@ -20,9 +20,23 @@ import { superviseRelayReservation } from './relay-reservation.js';
+@@ -20,9 +20,47 @@ import { superviseRelayReservation } from './relay-reservation.js';
  import { strandRedialTimings, superviseStrandPeerRedial } from './strand-peer-redial.js';
  import { groupAddrsByPeerId } from './peer-addr-book.js';
  import { isCohortUnreachableRead } from './control-read-retry.js';
@@ -369,10 +371,34 @@ index 1d21c32..b10260c 100644
  import { describeThrown } from './describe-thrown.js';
  const log = debug('sereus:cadre:strand-manager');
 +import { resolveStrandCohortRefusal } from './strand-cohort-refusal.js'; // VoteTorrent patch (strand-cohort-refusal)
++/**
++ * VoteTorrent patch (strand-edge-reader-declaration): the connection gate a strand node with
++ * `edgeReaderProtocol` is built behind. db-p2p registers the cluster and repo handlers inside the
++ * node's `start()`, before this module ever holds the node, so until `open()` every connection is
++ * refused, inbound and outbound, and no peer can identify the node while it still lists them.
++ * After `open()` each check is the base gater's (or allow, where the base has none). libp2p spreads
++ * the gater into its defaults, so the result is a plain object carrying the base's own keys.
++ */
++const EDGE_READER_GATED_CHECKS = ['denyDialPeer', 'denyDialMultiaddr', 'denyInboundConnection', 'denyOutboundConnection',
++    'denyInboundEncryptedConnection', 'denyOutboundEncryptedConnection', 'denyInboundUpgradedConnection',
++    'denyOutboundUpgradedConnection', 'denyInboundRelayedConnection', 'denyOutboundRelayedConnection'];
++function edgeReaderDeclarationGate(base) {
++    let opened = false;
++    const gater = { ...(base ?? {}) };
++    for (const name of EDGE_READER_GATED_CHECKS) {
++        const inner = base?.[name];
++        gater[name] = (...args) => {
++            if (!opened)
++                return true;
++            return typeof inner === 'function' ? inner.apply(base, args) : false;
++        };
++    }
++    return { connectionGater: gater, open: () => { opened = true; } };
++}
  /**
   * How often a joining launch that could not build its database, because no seed peer had
   * answered, retries the build on its running libp2p node
-@@ -513,6 +527,10 @@ export class StrandInstanceManager {
+@@ -513,6 +551,15 @@ export class StrandInstanceManager {
                  ? { connectionGater: config.network.connectionGater }
                  : {};
          const reactivityOption = strandCohortTopicOption(config.reactivity, strandId);
@@ -380,12 +406,20 @@ index 1d21c32..b10260c 100644
 +        // `strandCohortRefusal` and it returned a refusal for this strand. Resolved per build, so a
 +        // hibernation wake asks the hook again.
 +        const cohortRefusal = resolveStrandCohortRefusal(config.cohortRefusal, strandId);
++        // VoteTorrent patch (strand-edge-reader-declaration): `undefined` unless the embedder set
++        // `edgeReaderProtocol`; then the node is built behind a closed gate wrapping the gater resolved above.
++        const edgeReaderGate = typeof config.edgeReaderProtocol === 'string' && config.edgeReaderProtocol.length > 0
++            ? edgeReaderDeclarationGate(revocationGateOptions.connectionGater)
++            : undefined;
          if (reactivityOption.cohortTopic) {
              log('strand %s: change notifications on', strandId);
          }
-@@ -612,10 +630,17 @@ export class StrandInstanceManager {
+@@ -611,11 +658,38 @@ export class StrandInstanceManager {
+                 // gater plus the fail-closed per-stream revoked-peer gate (closed
                  // strands) — resolved above, before the try.
                  ...revocationGateOptions,
++                // VoteTorrent patch (strand-edge-reader-declaration): the closed gate, only with the key set.
++                ...(edgeReaderGate ? { connectionGater: edgeReaderGate.connectionGater } : {}),
                  // `{}` unless the operator enabled change notifications for this strand (`strand-reactivity.ts`).
 -                ...reactivityOption
 +                ...reactivityOption,
@@ -396,13 +430,31 @@ index 1d21c32..b10260c 100644
              });
              timing('[buildStrandRuntime:%s] createLibp2pNode: %dms', strandId, Math.round(performance.now() - t0));
              instance.libp2pNode = node;
++            // VoteTorrent patch (strand-edge-reader-declaration): no connection exists yet (the gate
++            // refused them all), so the first identify any peer gets lists the marker and no storage
++            // protocol. A throw here fails the build like any other, and the rollback stops the node.
++            if (edgeReaderGate) {
++                await node.unhandle([`${protocolPrefix}/cluster/1.0.0`, `${protocolPrefix}/repo/1.0.0`]);
++                await node.handle(config.edgeReaderProtocol, (stream) => {
++                    try {
++                        stream.abort(new Error('edge-reader marker only'));
++                    }
++                    catch {
++                        // already closed
++                    }
++                });
++                edgeReaderGate.open();
++                for (const addrs of groupAddrsByPeerId(config.bootstrapNodes ?? []).values()) {
++                    void node.dial(addrs).catch((err) => log('strand %s: edge-reader seed dial failed: %s', strandId, describeThrown(err)));
++                }
++            }
 +            // VoteTorrent patch (strand-cohort-refusal): let the refusal learn from this node's peer
 +            // events. Swallows a throw.
 +            cohortRefusal?.attach(node);
              // One reservation supervisor PER RELAY, started now so the first attempts
              // overlap the database bring-up below (the relay is never in a strand's
              // Optimystic cohort — its protocol ids are namespaced `/optimystic/strand-<id>/…`
-@@ -825,7 +850,7 @@ export class StrandInstanceManager {
+@@ -825,7 +899,7 @@ export class StrandInstanceManager {
              await strandDb.initialize();
          }
          catch (error) {
@@ -815,7 +867,7 @@ index 0000000..51c8363
 +    };
 +}
 diff --git a/dist/strand-instance-manager.d.ts b/dist/strand-instance-manager.d.ts
-index 9edda40..25ffeb7 100644
+index 9edda40..346edec 100644
 --- a/dist/strand-instance-manager.d.ts
 +++ b/dist/strand-instance-manager.d.ts
 @@ -9,6 +9,7 @@ import { type PendingMembershipInviteSource, type StrandMembershipReconciliation
@@ -826,7 +878,7 @@ index 9edda40..25ffeb7 100644
  /**
   * How often a joining launch that could not build its database, because no seed peer had
   * answered, retries the build on its running libp2p node
-@@ -149,6 +150,13 @@ export interface StartStrandConfig {
+@@ -149,6 +150,18 @@ export interface StartStrandConfig {
       * rebuilds the node with the same setting.
       */
      reactivity?: StrandReactivityConfig;
@@ -837,11 +889,16 @@ index 9edda40..25ffeb7 100644
 +     * the hook again for the same strand.
 +     */
 +    cohortRefusal?: StrandCohortRefusalHook;
++    /**
++     * VoteTorrent patch (strand-edge-reader-declaration): forwarded from
++     * {@link CadreNodeConfig.edgeReaderProtocol}, only when that key is set.
++     */
++    edgeReaderProtocol?: string;
      /**
       * Tuning for the CLOSED-strand revoked-peer gate
       * ({@link StrandRevocationEnforcer}), forwarded from
 diff --git a/dist/types.d.ts b/dist/types.d.ts
-index aa74a8c..407a643 100644
+index aa74a8c..2632104 100644
 --- a/dist/types.d.ts
 +++ b/dist/types.d.ts
 @@ -4,6 +4,7 @@ import type { IRawStorage, Libp2pConnectionMonitorInit, Libp2pTransports, NoiseC
@@ -852,7 +909,7 @@ index aa74a8c..407a643 100644
  import type { StrandRevocationEnforcementConfig } from './strand-revocation-enforcer.js';
  import type { StrandMembershipReconciliationConfig } from './strand-membership-reconciler.js';
  import type { StrandFirstSyncConfig } from './strand-first-sync-gate.js';
-@@ -836,6 +837,26 @@ export interface CadreNodeConfig {
+@@ -836,6 +837,36 @@ export interface CadreNodeConfig {
       * node never gets it.
       */
      strandReactivity?: StrandReactivityConfig;
@@ -876,6 +933,16 @@ index aa74a8c..407a643 100644
 +     * public-observer answer is not affected.
 +     */
 +    withholdStrandAddrs?: boolean;
++    /**
++     * VoteTorrent patch (strand-edge-reader-declaration): opt-in. A protocol id (the embedder's
++     * edge-reader marker). When set, every strand node this node builds handles that protocol and
++     * registers NO strand storage protocol (`cluster`, `repo`) from its very first identify: the
++     * node is built behind a gate that refuses every connection, the storage protocols are unhandled
++     * and the marker handled, and only then does the gate open and the node dial its seed. Each
++     * stream on the marker is aborted. For a member that stores nothing (the officer's browser
++     * dashboard). Absent: strand nodes are built exactly as before.
++     */
++    edgeReaderProtocol?: string;
      /**
       * Tuning for the CONTROL network's peer-join block catch-up (same module,
       * `peer-join-backfill.ts`, wired in `CadreNode.start`): when the control
