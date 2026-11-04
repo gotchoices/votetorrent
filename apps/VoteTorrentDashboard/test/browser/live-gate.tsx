@@ -518,6 +518,9 @@ export function createFakePeerLayer({
 				counts: { creates: 0, resumes: 0, reconnects: 0, passesComplete: 0, passesFailed: 0, stops: 0, watchFired: 0 },
 				createFails: false,
 			};
+			// No connection yet, so no strand read can reach a peer (a `never`
+			// network must complete no pass); `resume()` or `connect()` opens it.
+			state.image?.setReachable(false);
 			nets.set(hash, state);
 		}
 		return state;

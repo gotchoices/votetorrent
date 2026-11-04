@@ -93,9 +93,19 @@ const T1_RUNGS = [
 	'g10-scanner-esc-ends-tracks',
 	'g8-copy-mounted-keys',
 ];
+const T2_RUNGS = [
+	'g7-switch-no-live-carry-over',
+	'd19-old-stops-before-new-starts',
+	'd19-other-rows-not-syncing',
+	'd15-offline-reload-opens-local-copy',
+	'd20-background-retry-and-reconnect',
+	'tabs-follower-not-live',
+	'tabs-follower-rereads-and-marks',
+	'tabs-follower-promotes',
+];
 
 /** @type {ReadonlyArray<string>} */
-export const RUNG_IDS = Object.freeze([...T1_RUNGS]);
+export const RUNG_IDS = Object.freeze([...T1_RUNGS, ...T2_RUNGS]);
 
 /** Leg -> the rungs it records. `tokens` and isolation are recorded by every run. */
 export const LEG_RUNGS = Object.freeze({
@@ -106,9 +116,12 @@ export const LEG_RUNGS = Object.freeze({
 	marks: Object.freeze(['g5-no-marks-first-render', 'g5-one-mark-4s', 'g5-reduced-motion-static-mark']),
 	truth: Object.freeze(['g6-catching-up-until-first-pass']),
 	scanner: Object.freeze(['g10-scanner-close-ends-tracks', 'g10-scanner-esc-ends-tracks']),
+	switch: Object.freeze(['g7-switch-no-live-carry-over', 'd19-old-stops-before-new-starts', 'd19-other-rows-not-syncing']),
+	offline: Object.freeze(['d15-offline-reload-opens-local-copy', 'd20-background-retry-and-reconnect']),
+	tabs: Object.freeze(['tabs-follower-not-live', 'tabs-follower-rereads-and-marks', 'tabs-follower-promotes']),
 	copy: Object.freeze(['g8-copy-mounted-keys']),
 });
-const LEG_ORDER = Object.freeze(['shell', 'chip', 'pairing', 'marks', 'truth', 'scanner', 'copy']);
+const LEG_ORDER = Object.freeze(['shell', 'chip', 'pairing', 'marks', 'truth', 'scanner', 'switch', 'offline', 'tabs', 'copy']);
 
 /** @type {Array<{ id: string, passed: boolean, detail: string }>} */
 const rungs = [];
@@ -401,6 +414,35 @@ export function evaluateStatusTruth(m) {
 	return verdict(f, `held kinds {${[...held].join(',')}}, Live ${firstLive ? (firstLive.t - m.passCompleteT).toFixed(0) : '?'} ms after pass-complete`);
 }
 
+/**
+ * Gate 7 / D-19: after a switch, the opening line shows, no Live before the new network's
+ * first pass-complete, and the old network stopped before the new node was created.
+ * @param {{ samples: Array<{ t: number, kind: string | null }>, clickT: number, openingSeen: boolean,
+ *   events: Array<{ t: number, hash: string, ev: string }>, oldHash: string, newHash: string }} m
+ * @returns {Verdict}
+ */
+export function evaluateNoCarryOver(m) {
+	/** @type {string[]} */
+	const f = [];
+	if (!m.openingSeen) f.push('the opening line was never observed');
+	const after = m.events.filter((e) => e.t >= m.clickT);
+	const newCreate = after.find((e) => e.hash === m.newHash && e.ev === 'create');
+	const newComplete = after.find((e) => e.hash === m.newHash && e.ev === 'pass-complete');
+	const oldStopEnd = after.find((e) => e.hash === m.oldHash && e.ev === 'stop-end');
+	const oldReplStop = after.find((e) => e.hash === m.oldHash && e.ev === 'replication-stop');
+	if (!newCreate) f.push('the new network never created a node');
+	if (!oldStopEnd) f.push('the old node never stopped');
+	if (!oldReplStop) f.push('the old replication never stopped');
+	if (newCreate && oldStopEnd && !(oldStopEnd.t < newCreate.t)) f.push('the new node was created before the old node stopped');
+	if (newCreate && oldReplStop && !(oldReplStop.t < newCreate.t)) f.push('the new node was created before the old replication stopped');
+	const firstLive = m.samples.find((s) => s.t > m.clickT && s.kind === 'live');
+	if (firstLive && (!newComplete || firstLive.t <= newComplete.t)) f.push('Live shown before the new network completed a pass');
+	return verdict(
+		f,
+		`opening seen; old stop ${oldStopEnd ? (oldStopEnd.t - m.clickT).toFixed(0) : '?'} ms < new create ${newCreate ? (newCreate.t - m.clickT).toFixed(0) : '?'} ms; first Live after the new pass`,
+	);
+}
+
 /** @param {string[]} parts */
 const word = (...parts) => parts.join('');
 /** Gate 8's banned patterns, assembled from fragments (a scan of this file finds none whole). */
@@ -470,6 +512,81 @@ export function evaluateTracksEnded(m) {
 	return verdict(f, `${m.streams.length} stream(s), ${tracks.length} track(s), all ended`);
 }
 
+/**
+ * D-15 / D-20 reload: the local copy opens with zero completed passes, the chip reads the
+ * persisted last update after the grace, no blocking error, Reconnect offered, never Live.
+ * @param {{ page1Panels: number, page2Panels: number, sharedTexts: number, passesComplete: number,
+ *   chipText: string, expectedChipText: string, errorBanner: boolean, reconnectVisible: boolean, reconnectEnabled: boolean, liveSamples: number }} m
+ * @returns {Verdict}
+ */
+export function evaluateOfflineReload(m) {
+	/** @type {string[]} */
+	const f = [];
+	if (!(m.page2Panels >= 1) || m.page2Panels !== m.page1Panels) f.push(`panels ${m.page2Panels} on reload vs ${m.page1Panels} before`);
+	if (!(m.sharedTexts >= 1)) f.push('no panel text from before the reload is shown');
+	if (m.passesComplete !== 0) f.push(`${m.passesComplete} completed pass(es) while the relay is unreachable`);
+	if (norm(m.chipText) !== norm(m.expectedChipText)) f.push('the chip does not read the persisted last update');
+	if (m.errorBanner) f.push('a blocking error banner rendered');
+	if (!m.reconnectVisible || !m.reconnectEnabled) f.push('Reconnect is not offered');
+	if (m.liveSamples !== 0) f.push(`${m.liveSamples} Live sample(s) on the reload`);
+	return verdict(f, `${m.page2Panels} panels from the local copy, ${m.sharedTexts} texts shared, 0 passes, honest Offline chip`);
+}
+
+/**
+ * D-20: background retry without a click, and Reconnect's disabled "Reconnecting" state
+ * until the reconnect settles, then Live.
+ * @param {{ firstRetryMs: number | null, clickedBusy: { disabled: boolean, text: string } | null, expectedBusyText: string, liveAfter: boolean, reconnectGoneAfter: boolean }} m
+ * @returns {Verdict}
+ */
+export function evaluateReconnectFlow(m) {
+	/** @type {string[]} */
+	const f = [];
+	if (m.firstRetryMs === null) f.push('no background reconnect attempt');
+	else if (m.firstRetryMs > BACKGROUND_RETRY_WINDOW_MS) f.push(`first background attempt at ${m.firstRetryMs.toFixed(0)} ms (want <= ${BACKGROUND_RETRY_WINDOW_MS})`);
+	if (!m.clickedBusy) f.push('Reconnect never showed its busy state');
+	else {
+		if (!m.clickedBusy.disabled) f.push('Reconnect stayed enabled while reconnecting');
+		if (norm(m.clickedBusy.text) !== norm(m.expectedBusyText)) f.push('Reconnect busy text differs from the copy value');
+	}
+	if (!m.liveAfter) f.push('the chip did not return to Live');
+	if (!m.reconnectGoneAfter) f.push('Reconnect stayed after the chip returned to Live');
+	return verdict(f, `background attempt at ${m.firstRetryMs?.toFixed(0)} ms, busy state shown, Live after`);
+}
+
+/**
+ * Two tabs, one identity. `phase` names the rung.
+ * @param {{ phase: 'not-live' | 'marks' | 'promote', chipKind?: string | null, chipTextOk?: boolean, noteVisible?: boolean,
+ *   reconnectPresent?: boolean, creates?: number, panels?: number, newValueShown?: boolean, marks?: number,
+ *   createsAfter?: number, kindsAfter?: string[] }} m
+ * @returns {Verdict}
+ */
+export function evaluateFollower(m) {
+	/** @type {string[]} */
+	const f = [];
+	if (m.phase === 'not-live') {
+		if (m.chipKind !== 'not-live') f.push(`follower chip kind ${m.chipKind}`);
+		if (!m.chipTextOk) f.push('follower chip text differs from the copy value');
+		if (!m.noteVisible) f.push('no follower note');
+		if (m.reconnectPresent) f.push('the follower shows Reconnect');
+		if (m.creates !== 0) f.push(`the follower created ${m.creates} member node(s)`);
+		if (!(Number(m.panels) >= 1)) f.push('the follower shows no panel');
+		return verdict(f, `not-live, note shown, no Reconnect, 0 nodes, ${m.panels} panels`);
+	}
+	if (m.phase === 'marks') {
+		if (!m.newValueShown) f.push('the follower does not show the leader-replicated value');
+		if (m.marks !== 1) f.push(`${m.marks} mark(s) on the follower (want 1)`);
+		return verdict(f, 'the follower re-read the copy and marked one row');
+	}
+	const kinds = m.kindsAfter ?? [];
+	if (m.createsAfter !== 1) f.push(`${m.createsAfter} node(s) after the leader closed (want 1)`);
+	const ci = kinds.indexOf('catching-up');
+	const li = kinds.indexOf('live');
+	if (ci < 0) f.push('no catching-up after promotion');
+	if (li < 0) f.push('no Live after promotion');
+	if (ci >= 0 && li >= 0 && li < ci) f.push('Live before catching-up after promotion');
+	return verdict(f, `promoted: 1 node, kinds ${kinds.join(' -> ')}`);
+}
+
 // ---------------------------------------------------------------------------
 // --prove-matchers
 // ---------------------------------------------------------------------------
@@ -534,6 +651,32 @@ function matcherControls() {
 		{ t: 0, kind: 'catching-up' },
 		{ t: 5600, kind: 'live' },
 	];
+	const events = [
+		{ t: 10, hash: 'A', ev: 'replication-stop' },
+		{ t: 12, hash: 'A', ev: 'stop-end' },
+		{ t: 20, hash: 'B', ev: 'create' },
+		{ t: 900, hash: 'B', ev: 'pass-complete' },
+	];
+	const reloadBase = {
+		page1Panels: 9,
+		page2Panels: 9,
+		sharedTexts: 12,
+		passesComplete: 0,
+		chipText: 'Offline · last update 12:00',
+		expectedChipText: 'Offline · last update 12:00',
+		errorBanner: false,
+		reconnectVisible: true,
+		reconnectEnabled: true,
+		liveSamples: 0,
+	};
+	const reconnectBase = {
+		firstRetryMs: 20_500,
+		clickedBusy: { disabled: true, text: 'Reconnecting…' },
+		expectedBusyText: 'Reconnecting…',
+		liveAfter: true,
+		reconnectGoneAfter: true,
+	};
+	const followerBase = { phase: /** @type {const} */ ('not-live'), chipKind: 'not-live', chipTextOk: true, noteVisible: true, reconnectPresent: false, creates: 0, panels: 9 };
 
 	/** @type {Array<{ label: string, violating: Verdict, healthy: Verdict }>} */
 	const c = [];
@@ -581,6 +724,10 @@ function matcherControls() {
 	add('truth: Live 1ms before pass-complete', evaluateStatusTruth({ samples: [{ t: 0, kind: 'catching-up' }, { t: 4999, kind: 'live' }], heldFrom: 0, heldTo: 3000, passCompleteT: 5000, slackMs: 2000 }), okTruth);
 	add('truth: Live while held', evaluateStatusTruth({ samples: [{ t: 0, kind: 'catching-up' }, { t: 1000, kind: 'live' }], heldFrom: 0, heldTo: 3000, passCompleteT: 5000, slackMs: 2000 }), okTruth);
 	add('truth: Live too late', evaluateStatusTruth({ samples: [{ t: 0, kind: 'catching-up' }, { t: 9000, kind: 'live' }], heldFrom: 0, heldTo: 3000, passCompleteT: 5000, slackMs: 2000 }), okTruth);
+	const carry = { samples: [{ t: 0, kind: 'live' }, { t: 5, kind: null }, { t: 50, kind: 'catching-up' }, { t: 1950, kind: 'live' }], clickT: 1, openingSeen: true, events, oldHash: 'A', newHash: 'B' };
+	add('switch: Live 1ms before the new pass-complete', evaluateNoCarryOver({ ...carry, samples: [...carry.samples.slice(0, 3), { t: 899, kind: 'live' }] }), evaluateNoCarryOver(carry));
+	add('switch: create before the old stop', evaluateNoCarryOver({ ...carry, events: [{ t: 8, hash: 'B', ev: 'create' }, ...events] }), evaluateNoCarryOver(carry));
+	add('switch: no opening line', evaluateNoCarryOver({ ...carry, openingSeen: false }), evaluateNoCarryOver(carry));
 	const okCopy = evaluateCopy(copyBase);
 	for (const b of BANNED) {
 		const sample = b.name.startsWith('erasure') ? (b.name.endsWith('1') ? word('It is permanently ', 'deleted from the network') : word('It no longer has ', 'access to the data')) : b.name === word('D', '-NN') ? word('see D', '-12') : `x ${b.name} y`;
@@ -592,6 +739,22 @@ function matcherControls() {
 	const okTracks = evaluateTracksEnded({ streams: [{ tracks: [{ readyState: 'ended' }] }] });
 	add('tracks: one live track', evaluateTracksEnded({ streams: [{ tracks: [{ readyState: 'live' }] }] }), okTracks);
 	add('tracks: zero tracks', evaluateTracksEnded({ streams: [] }), okTracks);
+	const okReload = evaluateOfflineReload(reloadBase);
+	add('reload: a completed pass while unreachable', evaluateOfflineReload({ ...reloadBase, passesComplete: 1 }), okReload);
+	add('reload: wrong chip time', evaluateOfflineReload({ ...reloadBase, chipText: 'Offline · last update 12:01' }), okReload);
+	add('reload: blocking banner', evaluateOfflineReload({ ...reloadBase, errorBanner: true }), okReload);
+	add('reload: fewer panels', evaluateOfflineReload({ ...reloadBase, page2Panels: 0 }), okReload);
+	add('reload: a Live sample', evaluateOfflineReload({ ...reloadBase, liveSamples: 1 }), okReload);
+	const okReconnect = evaluateReconnectFlow(reconnectBase);
+	add('reconnect: no background attempt', evaluateReconnectFlow({ ...reconnectBase, firstRetryMs: null }), okReconnect);
+	add('reconnect: enabled while busy', evaluateReconnectFlow({ ...reconnectBase, clickedBusy: { disabled: false, text: 'Reconnecting…' } }), okReconnect);
+	add('reconnect: never Live', evaluateReconnectFlow({ ...reconnectBase, liveAfter: false }), okReconnect);
+	const okFollower = evaluateFollower(followerBase);
+	add('follower: created a node', evaluateFollower({ ...followerBase, creates: 1 }), okFollower);
+	add('follower: shows Reconnect', evaluateFollower({ ...followerBase, reconnectPresent: true }), okFollower);
+	add('follower: chip Live', evaluateFollower({ ...followerBase, chipKind: 'live' }), okFollower);
+	add('follower: zero marks', evaluateFollower({ phase: 'marks', newValueShown: true, marks: 0 }), evaluateFollower({ phase: 'marks', newValueShown: true, marks: 1 }));
+	add('follower: no promotion', evaluateFollower({ phase: 'promote', createsAfter: 0, kindsAfter: ['not-live'] }), evaluateFollower({ phase: 'promote', createsAfter: 1, kindsAfter: ['not-live', 'catching-up', 'live'] }));
 	return c;
 }
 
@@ -1142,6 +1305,194 @@ async function legScanner(env) {
 	}
 }
 
+/** @param {Env} env */
+async function legSwitch(env) {
+	const ctx = await newGateContext(env.browser, env.origin, env.iso);
+	try {
+		const page = await openGatePage(ctx, env.url, 'leg=switch&clear=1&seed=A,B&mode=A:auto,B:auto&hold=B', 'switch');
+		const A = await ctl(page, 'hashOf', 'A');
+		const B = await ctl(page, 'hashOf', 'B');
+		await waitChip(page, 'live', 60_000);
+		await page.click('.sh-switcher-button');
+		const idleExpected = t('switcher.rowDetailNotSyncing', { domain: 'clerk.gate-city.example', officerName: 'u1' });
+		const before = await page.evaluate(() => ({
+			activeCount: document.querySelectorAll('.sh-switcher-row--active').length,
+			idle: [...document.querySelectorAll('.sh-switcher-row-meta--idle')].map((el) => el.textContent ?? ''),
+		}));
+		const clickT = await page.evaluate(() => performance.now());
+		await page.click('.sh-switcher-row:has-text("Gate City Clerk")');
+		await waitChip(page, 'catching-up', 30_000);
+		await sleep(2000);
+		await ctl(page, 'releasePass', B);
+		await waitChip(page, 'live', 30_000);
+		const watched = await ctl(page, 'watchedTrace');
+		const openingText = t('switcher.opening', { authorityName: 'Gate City Clerk' });
+		const openingSeen = watched.some((/** @type {any} */ w) => w.selector === '.sh-opening' && w.t >= clickT && norm(w.text) === norm(openingText));
+		const events = await ctl(page, 'events');
+		const v = evaluateNoCarryOver({ samples: await ctl(page, 'chipTrace'), clickT, openingSeen, events, oldHash: A, newHash: B });
+		record('g7-switch-no-live-carry-over', v.passed, v.detail);
+		const order = evaluateNoCarryOver({ samples: [], clickT, openingSeen: true, events, oldHash: A, newHash: B });
+		const stopEnd = events.find((/** @type {any} */ e) => e.hash === A && e.ev === 'stop-end' && e.t >= clickT);
+		const create = events.find((/** @type {any} */ e) => e.hash === B && e.ev === 'create' && e.t >= clickT);
+		say(`A stop-end at +${stopEnd ? (stopEnd.t - clickT).toFixed(0) : '?'} ms, B create at +${create ? (create.t - clickT).toFixed(0) : '?'} ms`);
+		record('d19-old-stops-before-new-starts', order.passed, order.detail);
+		await page.click('.sh-switcher-button');
+		const after = await page.evaluate(() => [...document.querySelectorAll('.sh-switcher-row-meta--idle')].map((el) => el.textContent ?? ''));
+		const notSyncingWord = t('switcher.rowDetailNotSyncing', { domain: '', officerName: '' }).split('·').pop()?.trim() ?? '';
+		/** @type {string[]} */
+		const f = [];
+		if (before.activeCount !== 1) f.push(`${before.activeCount} active rows before the switch`);
+		if (!before.idle.some((s) => norm(s) === norm(idleExpected))) f.push("B's row did not read Not syncing before the switch");
+		if (!(after.length === 1 && norm(after[0]).endsWith(notSyncingWord))) f.push("A's row does not read Not syncing after the switch");
+		record('d19-other-rows-not-syncing', f.length === 0, f.length === 0 ? 'the non-selected row reads Not syncing, before and after' : f.join('; '));
+		await collect(page);
+	} finally {
+		await ctx.close();
+	}
+}
+
+/** @param {Env} env */
+async function legOffline(env) {
+	const ctx = await newGateContext(env.browser, env.origin, env.iso);
+	try {
+		const p1 = await openGatePage(ctx, env.url, 'leg=offline&clear=1&seed=A&mode=A:auto', 'offline-page1');
+		await waitChip(p1, 'live', 60_000);
+		const pollStart = Date.now();
+		let persisted = null;
+		while (Date.now() - pollStart < 70_000) {
+			persisted = (await ctl(p1, 'entry', 'A'))?.lastPassAt ?? null;
+			if (typeof persisted === 'number') break;
+			await sleep(250);
+		}
+		say(`lastPassAt persisted after ${Date.now() - pollStart} ms`);
+		const before = await measurePanels(p1);
+		await p1.close();
+		if (typeof persisted !== 'number') {
+			record('d15-offline-reload-opens-local-copy', false, 'lastPassAt was never persisted');
+			record('d20-background-retry-and-reconnect', false, 'not reached');
+			return;
+		}
+
+		const loadT = Date.now();
+		const p2 = await openGatePage(ctx, env.url, 'leg=offline-reload&mode=A:never', 'offline-page2');
+		const A = await ctl(p2, 'hashOf', 'A');
+		// Within 3 s of the load the panels must show the persisted rows (polled, never a fixed sleep).
+		let reload = await measurePanels(p2);
+		let shared = 0;
+		const sharedDeadline = loadT + 3_000;
+		for (;;) {
+			reload = await measurePanels(p2);
+			shared = reload.bodyTexts.filter((s) => before.bodyTexts.includes(s)).length;
+			if (shared > 0 && reload.panelCount === before.panelCount) break;
+			if (Date.now() > sharedDeadline) break;
+			await sleep(100);
+		}
+		say(`reload: ${reload.panelCount} panels, ${shared} panel texts shared with page 1, ${Date.now() - loadT} ms after navigation`);
+		await sleep(OFFLINE_GRACE_MS + CHIP_DEBOUNCE_MS + 2000);
+		const expectedChip = t('status.chip.offline', { time: hhmmUtc(persisted) });
+		say(`offline chip expected "${expectedChip}"`);
+		const state = await p2.evaluate(() => {
+			const btn = /** @type {HTMLButtonElement | null} */ (document.querySelector('.sh-reconnect'));
+			return {
+				chipText: document.querySelector('.sh-status-chip')?.textContent ?? '',
+				errorBanner: document.querySelector('.sh-error-banner') !== null,
+				reconnectVisible: btn !== null && btn.getClientRects().length > 0,
+				reconnectEnabled: btn !== null && !btn.disabled,
+			};
+		});
+		const counts = (await ctl(p2, 'counts'))[A] ?? { passesComplete: 0 };
+		const liveSamples = (await ctl(p2, 'chipTrace')).filter((/** @type {any} */ s) => s.kind === 'live').length;
+		const v = evaluateOfflineReload({ page1Panels: before.panelCount, page2Panels: reload.panelCount, sharedTexts: shared, passesComplete: counts.passesComplete, ...state, expectedChipText: expectedChip, liveSamples });
+		record('d15-offline-reload-opens-local-copy', v.passed, v.detail);
+		await collect(p2);
+
+		// D-20: a background attempt within 25 s of the load, with no click.
+		await p2
+			.waitForFunction((h) => /** @type {any} */ (window).__LIVE_GATE_CTL__.counts()[h]?.reconnects >= 1, A, { timeout: Math.max(1000, BACKGROUND_RETRY_WINDOW_MS + 5000 - (Date.now() - loadT)) })
+			.catch(() => undefined);
+		const events = await ctl(p2, 'events');
+		const firstRetry = events.find((/** @type {any} */ e) => e.hash === A && e.ev === 'reconnect');
+		const firstRetryMs = firstRetry ? firstRetry.t : null;
+		say(`background reconnects: ${(await ctl(p2, 'counts'))[A]?.reconnects ?? 0}, first at ${firstRetryMs?.toFixed(0)} ms after navigation start`);
+		await ctl(p2, 'holdReconnect', A);
+		await p2.click('.sh-reconnect');
+		const busy = await p2
+			.waitForFunction(() => /** @type {HTMLButtonElement | null} */ (document.querySelector('.sh-reconnect'))?.disabled === true, null, { timeout: 1500 })
+			.then(() => p2.evaluate(() => {
+				const b = /** @type {HTMLButtonElement} */ (document.querySelector('.sh-reconnect'));
+				return { disabled: b.disabled, text: b.textContent ?? '' };
+			}), () => null);
+		await ctl(p2, 'allowConnect', A);
+		await ctl(p2, 'releaseReconnect', A);
+		const liveAfter = await waitChip(p2, 'live', 30_000).then(() => true, () => false);
+		const gone = await p2.evaluate(() => document.querySelector('.sh-reconnect') === null);
+		const r = evaluateReconnectFlow({ firstRetryMs, clickedBusy: busy, expectedBusyText: t('status.reconnecting'), liveAfter, reconnectGoneAfter: gone });
+		record('d20-background-retry-and-reconnect', r.passed, r.detail);
+		await collect(p2);
+	} finally {
+		await ctx.close();
+	}
+}
+
+/** @param {Env} env */
+async function legTabs(env) {
+	const ctx = await newGateContext(env.browser, env.origin, env.iso);
+	try {
+		const L = await openGatePage(ctx, env.url, 'leg=tabs&clear=1&seed=A&mode=A:auto', 'tabs-leader');
+		const A = await ctl(L, 'hashOf', 'A');
+		await waitChip(L, 'live', 60_000);
+		const F = await openGatePage(ctx, env.url, 'leg=tabs-follower&mode=A:auto', 'tabs-follower');
+		await waitChip(F, 'not-live', 3_000).catch(() => undefined);
+		const fState = await F.evaluate(() => ({
+			kind: document.querySelector('.sh-status-chip')?.getAttribute('data-kind') ?? null,
+			text: document.querySelector('.sh-status-chip')?.textContent ?? '',
+			note: document.querySelector('.sh-follower-note')?.textContent ?? null,
+			reconnect: document.querySelector('.sh-reconnect') !== null,
+			panels: document.querySelectorAll('section.panel').length,
+		}));
+		const fCounts = (await ctl(F, 'counts'))[A] ?? { creates: 0 };
+		const notLive = evaluateFollower({
+			phase: 'not-live',
+			chipKind: fState.kind,
+			chipTextOk: norm(fState.text) === norm(t('status.chip.not-live')),
+			noteVisible: fState.note !== null && norm(fState.note).includes(norm(t('status.followerNote'))),
+			reconnectPresent: fState.reconnect,
+			creates: fCounts.creates,
+			panels: fState.panels,
+		});
+		record('tabs-follower-not-live', notLive.passed, notLive.detail);
+
+		const fMarksBefore = (await ctl(F, 'markTrace')).length;
+		const target = await ctl(L, 'bumpMarkTarget', A);
+		await ctl(F, 'bumpMarkTarget', A);
+		await ctl(L, 'wake', A, target.table);
+		await F.waitForFunction((n) => /** @type {any} */ (window).__LIVE_GATE_CTL__.markTrace().length > n, fMarksBefore, { timeout: 15_000 }).catch(() => undefined);
+		await sleep(500);
+		const shown = await ctl(F, 'domHasMarkTargetValue', 'A');
+		const fMarks = (await ctl(F, 'markTrace')).slice(fMarksBefore).length;
+		const marks = evaluateFollower({ phase: 'marks', newValueShown: shown, marks: fMarks });
+		record('tabs-follower-rereads-and-marks', marks.passed, marks.detail);
+
+		// Hold F's first pass after promotion: with an instant fake pass the 1 s
+		// chip debounce would never render the Catching up it passes through.
+		await ctl(F, 'holdFirstPass', A);
+		const closeT = await F.evaluate(() => performance.now());
+		await L.close();
+		await waitChip(F, 'catching-up', 20_000).catch(() => undefined);
+		await sleep(1500);
+		await ctl(F, 'releasePass', A);
+		await waitChip(F, 'live', 60_000).catch(() => undefined);
+		const kindsAfter = (await ctl(F, 'chipTrace')).filter((/** @type {any} */ s) => s.t >= closeT).map((/** @type {any} */ s) => s.kind);
+		const createsAfter = (await ctl(F, 'counts'))[A]?.creates ?? 0;
+		say(`follower creates before ${fCounts.creates}, after ${createsAfter}`);
+		const promote = evaluateFollower({ phase: 'promote', createsAfter, kindsAfter });
+		record('tabs-follower-promotes', promote.passed, promote.detail);
+		await collect(F);
+	} finally {
+		await ctx.close();
+	}
+}
+
 function legCopy() {
 	const keys = referencedCopyKeys();
 	const referencedValues = keys.map((key) => ({ key, value: String(COPY[key]) }));
@@ -1214,6 +1565,9 @@ async function main() {
 			marks: legMarks,
 			truth: legTruth,
 			scanner: legScanner,
+			switch: legSwitch,
+			offline: legOffline,
+			tabs: legTabs,
 			copy: () => legCopy(),
 		};
 		for (const leg of ordered) {
