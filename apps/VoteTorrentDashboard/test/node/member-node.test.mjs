@@ -1044,7 +1044,7 @@ test('20 source scan: joined-only start, no owner-key or owner-grant method, no 
 /**
  * A strand libp2p fake that records handle/unhandle/push in one ordered log.
  *
- * @param {{ handle?: () => Promise<void>, push?: 'send' | 'push' | 'throw' | 'absent' | 'hang' }} [options]
+ * @param {{ handle?: () => Promise<void>, push?: 'send' | 'push' | 'throw' | 'absent' | 'hang', declared?: boolean }} [options]
  */
 function edgeReaderLibp2p(options = {}) {
 	/** @type {string[]} */
@@ -1075,6 +1075,7 @@ function edgeReaderLibp2p(options = {}) {
 			return Promise.resolve();
 		},
 		getConnections() { return []; },
+		...(options.declared === true ? { getProtocols: () => ['/votetorrent/edge-reader/1.0.0'] } : {}),
 	};
 }
 
@@ -1150,6 +1151,25 @@ test('22b a failing marker handle stops the node and rejects withdraw-failed bef
 	assert.ok(fake.calls.some(([name]) => name === 'stop'), 'the node was stopped');
 	assert.deepEqual(lines, [[LOG_PREFIX, 'HandleRefusedError']]);
 	t.mock.restoreAll();
+});
+
+test('22c R-G4: configure asks cadre-core to declare the marker from the first identify, and a declared node is not handled twice', async () => {
+	const base = /** @type {any} */ ({ profile: 'transaction' });
+	const cfg = /** @type {any} */ (createMemberPlatform({ networkHash: HASH, keyStore: new InMemoryKeyStore(), relayAddrs: [RELAY], strandId: STRAND })).configure(base);
+	assert.equal(cfg.edgeReaderProtocol, '/votetorrent/edge-reader/1.0.0');
+	const bare = /** @type {any} */ (createMemberPlatform({ networkHash: HASH, keyStore: new InMemoryKeyStore(), relayAddrs: [RELAY] })).configure(base);
+	assert.equal(bare.edgeReaderProtocol, '/votetorrent/edge-reader/1.0.0');
+
+	const fake = fakeEdge();
+	const member = await memberOver(fake);
+	fake.state.status = { state: 'running' };
+	const lib = edgeReaderLibp2p({ declared: true });
+	fake.strands.set(STRAND, { libp2pNode: lib });
+	const waiting = member.waitForStrand(STRAND);
+	fake.edge.fire('strand:started', { strandId: STRAND });
+	assert.equal(await waiting, lib);
+	await settle();
+	assert.deepEqual(lib.log, ['unhandle:2', 'push:send'], 'already declared by cadre-core: no second handle');
 });
 
 test('23 parity: the marker literal equals vote-engine EDGE_READER_PROTOCOL (source text)', () => {

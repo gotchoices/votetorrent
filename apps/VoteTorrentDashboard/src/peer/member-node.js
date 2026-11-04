@@ -508,6 +508,9 @@ export function createMemberPlatform({ networkHash, keyStore, strandId, deps }) 
 				// A member that stores nothing must not seed other members' strand nodes: a phone that refuses
 				// this node as a cohort member but has it in its strand seed would wait on it forever.
 				withholdStrandAddrs: true,
+				// cadre-core builds the strand node with this marker handled and no storage protocol registered, so
+				// even the first identify a phone receives names this node an edge reader.
+				edgeReaderProtocol: EDGE_READER_PROTOCOL,
 				...strandSlice,
 			});
 		},
@@ -573,6 +576,7 @@ export async function deleteMemberStorage(networkHash, { deps = {} } = {}) {
  * @property {{ toString(): string }} peerId
  * @property {(protocols: string | string[]) => Promise<void>} unhandle
  * @property {(protocol: string, handler: (stream: { abort(err: Error): void }) => void) => Promise<void>} handle
+ * @property {() => string[]} [getProtocols]
  * @property {{ identifyPush?: { sendPushMessage?: () => Promise<void>, push?: () => Promise<void> } }} [services]
  * @property {() => Array<{ remotePeer: { toString(): string } }>} getConnections
  */
@@ -690,13 +694,17 @@ export async function createMemberNode({ networkHash, keyStore, relayAddrs, stra
 			if (node === null) throw new MemberNodeError('withdraw-failed');
 			// Declare the edge-reader marker BEFORE the storage protocols go, so the single identify push
 			// below carries both changes.
-			await node.handle(EDGE_READER_PROTOCOL, (stream) => {
-				try {
-					stream.abort(new Error('edge-reader marker only'));
-				} catch {
-					// already closed
-				}
-			});
+			// cadre-core normally declared it already, before the first connection (`edgeReaderProtocol`); this is the
+			// fallback for a node that did not.
+			if (!(typeof node.getProtocols === 'function' && node.getProtocols().includes(EDGE_READER_PROTOCOL))) {
+				await node.handle(EDGE_READER_PROTOCOL, (stream) => {
+					try {
+						stream.abort(new Error('edge-reader marker only'));
+					} catch {
+						// already closed
+					}
+				});
+			}
 			await node.unhandle(storageServiceProtocols(strandNetworkName(started)));
 			await pushIdentifyNow(node);
 			withdrawnNode = node;
