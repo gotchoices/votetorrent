@@ -117,6 +117,8 @@ function fakeEdge(options = {}) {
 	const handlers = new Map();
 	/** @type {Map<string, any>} */
 	const strands = new Map();
+	/** @type {Set<(status: any) => void>} */
+	const statusListeners = new Set();
 	const controlNode = { id: 'control-node' };
 	const state = {
 		/** @type {{ state: string }} */
@@ -206,13 +208,25 @@ function fakeEdge(options = {}) {
 		fire(event, payload) {
 			for (const handler of handlers.get(event) ?? []) handler(payload);
 		},
+		/** @param {(status: any) => void} listener */
+		onStatus(listener) {
+			statusListeners.add(listener);
+			return () => {
+				statusListeners.delete(listener);
+			};
+		},
+		/** Set the status AND notify the onStatus listeners, as cadre-core's setStatus does. @param {{ state: string }} status */
+		setStatus(status) {
+			state.status = status;
+			for (const listener of [...statusListeners]) listener(status);
+		},
 	};
 	/** @param {any} platform */
 	const createEdgeNode = (platform) => {
 		edge.platform = platform;
 		return edge;
 	};
-	return { edge, node, state, calls, strands, controlNode, createEdgeNode };
+	return { edge, node, state, calls, strands, controlNode, createEdgeNode, statusListeners };
 }
 
 /**
@@ -1180,4 +1194,181 @@ test('23 parity: the marker literal equals vote-engine EDGE_READER_PROTOCOL (sou
 	const ours = (code.match(/const EDGE_READER_PROTOCOL = '([^']+)'/) ?? [])[1];
 	assert.equal(ours, expected);
 	assert.equal(code.includes('withholdStrandAddrs: true'), true);
+});
+
+// ── 66-29: a removed member node closes its storage before the wipe (DEFECT-66-26-02) ──
+
+/**
+ * Counting web-db fakes: every handle the platform opens is tallied per name, and so is every close.
+ */
+function countingWebDb() {
+	/** @type {Map<string, number>} */
+	const opens = new Map();
+	/** @type {Map<string, number>} */
+	const closes = new Map();
+	const openOptimysticWebDb = async (/** @type {string} */ name) => {
+		opens.set(name, (opens.get(name) ?? 0) + 1);
+		let closed = false;
+		return {
+			close() {
+				if (closed) return;
+				closed = true;
+				closes.set(name, (closes.get(name) ?? 0) + 1);
+			},
+		};
+	};
+	class FakeRaw {
+		async getMetadata() {
+			return undefined;
+		}
+	}
+	class FakeKv {
+		async get() {
+			return undefined;
+		}
+		async set() {}
+		async delete() {}
+		async flush() {}
+		async close() {}
+	}
+	const total = (/** @type {Map<string, number>} */ map) => [...map.values()].reduce((a, b) => a + b, 0);
+	return {
+		opens,
+		closes,
+		openCount: () => total(opens),
+		closeCount: () => total(closes),
+		deps: { openOptimysticWebDb, IndexedDBRawStorage: FakeRaw, IndexedDBKVStore: FakeKv },
+	};
+}
+
+/**
+ * The shape of cadre-core's `forgetRemovedParty`, over a few macrotasks: `shutDown` closes the
+ * platform storage and reports `stopped`, `leaveRemovedStart` and the dissolve marker RE-OPEN the
+ * node-local database, then the status reads `removed` (unless `reachRemoved` is false).
+ *
+ * @param {ReturnType<typeof fakeEdge>} fake
+ * @param {{ reachRemoved?: boolean }} [options]
+ */
+async function cadreRemovalTransition(fake, { reachRemoved = true } = {}) {
+	const storage = fake.edge.platform.storage;
+	await settle(1);
+	await storage.close();
+	fake.edge.setStatus({ state: 'stopped' });
+	await settle(1);
+	await storage.nodeLocal().set('saved-start', new Uint8Array([1]));
+	await storage.nodeLocal().flush();
+	await settle(1);
+	if (reachRemoved) fake.edge.setStatus({ state: 'removed', partyId: 'party-a' });
+}
+
+const REMOVAL = Object.freeze({ partyId: 'party-a', stampId: 's', signerKey: null, at: 1 });
+
+test('24 M-R1 removal settle: stop() resolves only after cadre-core\'s removal reads removed, with every member handle closed', async () => {
+	const counting = countingWebDb();
+	const fake = fakeEdge();
+	const member = await memberOver(fake, { networkHash: uniqueHash(), deps: counting.deps });
+	fake.state.status = { state: 'running' };
+	const storage = fake.edge.platform.storage;
+	await storage.nodeLocal().get('k');
+	await storage.rawStorage(STRAND).getMetadata(/** @type {any} */ ('block-1'));
+	assert.equal(counting.openCount(), 2, 'the node-local view and one raw scope are open');
+
+	fake.edge.fire('cadre:removed', REMOVAL);
+	const transition = cadreRemovalTransition(fake);
+	await member.stop();
+	assert.equal(fake.edge.status.state, 'removed', 'stop() resolved only after the removal settled');
+	assert.ok(counting.openCount() >= 3, 'the transition re-opened the node-local database');
+	assert.equal(counting.closeCount(), counting.openCount(), 'every handle the platform opened is closed when stop() resolves');
+	assert.equal(fake.calls.some(([name]) => name === 'stop'), false, 'no edge stop on the removed path');
+	await transition;
+	assert.equal(fake.statusListeners.size, 0, 'the settle listener unsubscribed');
+});
+
+test('24b M-R2 removal settle over fake-indexeddb: after stop(), deleteMemberStorage resolves and lists no member database', async (t) => {
+	const hash = uniqueHash();
+	const fake = fakeEdge();
+	const member = await memberOver(fake, { networkHash: hash });
+	fake.state.status = { state: 'running' };
+	const storage = fake.edge.platform.storage;
+	await storage.nodeLocal().set('k', new Uint8Array([2]));
+	await storage.nodeLocal().flush();
+
+	fake.edge.fire('cadre:removed', REMOVAL);
+	const transition = cadreRemovalTransition(fake);
+	await member.stop();
+	/** @type {ReturnType<typeof setTimeout> | undefined} */
+	let bound;
+	const outcome = await Promise.race([
+		deleteMemberStorage(hash).then(
+			() => 'resolved',
+			(err) => err,
+		),
+		new Promise((resolve) => {
+			bound = setTimeout(() => resolve('timeout'), 2000);
+		}),
+	]);
+	clearTimeout(bound);
+	await transition;
+	if (outcome instanceof MemberStorageBusyError) t.diagnostic('fake-indexeddb fired onblocked for a connection stop() left open');
+	else if (outcome === 'timeout') t.diagnostic('fake-indexeddb queued the delete behind a connection stop() left open (no onblocked)');
+	assert.equal(outcome, 'resolved', 'the delete met no open connection of this tab');
+	const names = (await indexedDB.databases()).map((info) => info.name);
+	assert.equal(names.some((name) => typeof name === 'string' && name.startsWith(`vt-member-${hash}-`)), false, 'no member database of this hash is listed');
+});
+
+test('24c M-R3 a removal that never settles: stop() resolves within the injected bound, still closes the storage, and logs once by name', async () => {
+	const counting = countingWebDb();
+	const fake = fakeEdge();
+	const member = await memberOver(fake, { networkHash: uniqueHash(), deps: { ...counting.deps, removalSettleMs: 50 } });
+	fake.state.status = { state: 'running' };
+	await fake.edge.platform.storage.nodeLocal().get('k');
+
+	/** @type {unknown[][]} */
+	const warned = [];
+	const warn = console.warn;
+	console.warn = (/** @type {unknown[]} */ ...args) => warned.push(args);
+	const started = Date.now();
+	try {
+		fake.edge.fire('cadre:removed', REMOVAL);
+		const transition = cadreRemovalTransition(fake, { reachRemoved: false });
+		await member.stop();
+		await transition;
+	} finally {
+		console.warn = warn;
+	}
+	const elapsed = Date.now() - started;
+	assert.ok(elapsed < 1000, `stop() resolved within the injected bound (${elapsed} ms)`);
+	assert.equal(fake.edge.status.state, 'stopped', 'the transition never reached removed or failed');
+	assert.equal(counting.closeCount(), counting.openCount(), 'the storage is closed even though the removal never settled');
+	assert.deepEqual(warned, [[LOG_PREFIX, 'MemberNodeError']], 'exactly one line, by name only');
+	assert.equal(fake.statusListeners.size, 0, 'the settle listener unsubscribed');
+});
+
+test('24d M-R3b no wait: a status that already reads removed is settled now, under the production bound; a removal with no stop arms no timer', async () => {
+	const memberNodeModule = await import('../../src/peer/member-node.js');
+	assert.equal(/** @type {any} */ (memberNodeModule).REMOVAL_SETTLE_MAX_MS, 20_000, 'the production bound');
+	{
+		const counting = countingWebDb();
+		const fake = fakeEdge();
+		const member = await memberOver(fake, { networkHash: uniqueHash(), deps: counting.deps });
+		fake.state.status = { state: 'running' };
+		await fake.edge.platform.storage.nodeLocal().get('k');
+		fake.edge.fire('cadre:removed', REMOVAL);
+		fake.state.status = { state: 'removed' };
+		const started = Date.now();
+		await member.stop();
+		const elapsed = Date.now() - started;
+		assert.ok(elapsed < 200, `an already-removed status is not waited on (${elapsed} ms)`);
+		assert.ok(counting.openCount() >= 1);
+		assert.equal(counting.closeCount(), counting.openCount(), 'the platform storage is closed');
+		assert.equal(fake.calls.some(([name]) => name === 'stop'), false, 'no edge stop on the removed path');
+	}
+	{
+		const fake = fakeEdge();
+		await memberOver(fake, { networkHash: uniqueHash() });
+		fake.state.status = { state: 'running' };
+		fake.edge.fire('cadre:removed', REMOVAL);
+		// stop() is never called: the handler armed no timer, so this test (and the file) ends on its own.
+		assert.equal(fake.statusListeners.size, 1, 'the handler subscribed a status listener, not a timer');
+	}
 });

@@ -769,3 +769,36 @@ test('F19 source scan: no static peer import, exactly the three lazy peer specif
 	assert.doesNotMatch(source, timerRe);
 	assert.doesNotMatch(source, mutationRe);
 });
+
+test('F20 a busy member-storage delete is retried, bounded, with one fixed log line per retry; then the wipe finishes', async () => {
+	const hash = 'fn-member-busy-twice';
+	const { storage } = await setupNetwork(hash, 'Busy Twice Authority', null, { seed: false });
+	let attempts = 0;
+	const { deps, calls } = peerFakes({
+		deleteMemberStorage: async (/** @type {string} */ h) => {
+			attempts += 1;
+			if (attempts <= 2) {
+				const err = new Error(`busy ${h}`);
+				err.name = 'MemberStorageBusyError';
+				throw err;
+			}
+			calls.push(`member:${h}`);
+		},
+	});
+	/** @type {unknown[][]} */
+	const logged = [];
+	const original = console.error;
+	console.error = (/** @type {unknown[]} */ ...args) => logged.push(args);
+	try {
+		await wipeNetwork({ networkHash: hash, reason: 'removed', storage, deps });
+	} finally {
+		console.error = original;
+	}
+	assert.equal(attempts, 3, 'two busy attempts, then the delete that went through');
+	assert.equal(findNetwork(hash, storage), undefined, 'the registry entry is gone');
+	assert.equal(await readRowCountsRecord(hash, storage), undefined, 'the row-count record is gone');
+	assert.deepEqual(calls, [`member:${hash}`, `keys:${hash}`], 'the device keys were reached');
+	const retry = ['lifecycle/forget-network:', 'MemberStorageBusyError', 'retry:member-storage'];
+	assert.deepEqual(logged, [retry, retry], 'exactly two retry lines, a fixed store label only');
+	for (const args of logged) for (const arg of args) assert.ok(!String(arg).includes(hash), 'no hash in a retry line');
+});
