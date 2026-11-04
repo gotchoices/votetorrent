@@ -307,8 +307,8 @@ const srcDir = path.join(ROOT, 'src');
 if (existsSync(srcDir)) {
 	const srcFiles = walk(srcDir);
 	for (const f of srcFiles) {
-		// Comment lines are stripped first: `src/transport/bootstrap-transport-client.js`
-		// legitimately EXPLAINS in prose why it never reads this mechanism, and a gate
+		// Comment lines are stripped first: a src file that explains this mechanism in
+		// prose (why it never reads it) is legitimate, and a gate
 		// that punishes the explanation teaches people to delete the explanation.
 		const contents = stripCommentLines(readFileSync(f, 'utf8'));
 		const match = contents.match(ENV_READ_RE);

@@ -244,7 +244,7 @@ test('inertness control: the explicit-voice matcher does NOT accept a bare zero-
 
 const CONFINEMENT_RE = /preview|simulat|effectiveScopes|GrantedScopesContext/i;
 
-test('no file under the shared web-data package, src/transport, src/lifecycle or the shared package\'s lifecycle mentions preview, simulat, effectiveScopes or GrantedScopesContext, comment-stripped', () => {
+test('no file under the shared web-data package, the src/peer network layer, src/lifecycle or the shared package\'s lifecycle mentions preview, simulat, effectiveScopes or GrantedScopesContext, comment-stripped', () => {
 	// Comment-stripped, per this behavior group's own header -- election-
 	// phase.js documents (in prose) why it does NOT add a phase picker,
 	// using the word "simulation"; that is a design note, not a leak of
@@ -257,7 +257,10 @@ test('no file under the shared web-data package, src/transport, src/lifecycle or
 	// webDataSrc() here, or this walk would crash with ENOENT the moment
 	// src/db stopped existing (walkFiles below has no existsSync guard),
 	// rather than silently narrowing.
-	const DIRS = [webDataSrc(), dashboardSrc('transport'), dashboardSrc('lifecycle'), uiWebSrc('lifecycle')];
+	// 66-24 retired the sign-in transport directory with the snapshot path; the
+	// walk follows the network layer to src/peer (the member node, pairing,
+	// replication and strand reader), so a previewed scope can reach none of it.
+	const DIRS = [webDataSrc(), dashboardSrc('peer'), dashboardSrc('lifecycle'), uiWebSrc('lifecycle')];
 	/** @type {string[]} */
 	const offenders = [];
 	for (const abs of DIRS) {

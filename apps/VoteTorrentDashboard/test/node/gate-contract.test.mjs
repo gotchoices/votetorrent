@@ -99,8 +99,12 @@ test('module-format contract (C1): no .ts/.tsx file exists under a tier-1-reacha
 	// GOVERNED_ABS_DIRS in its place, so this C1 contract keeps covering the
 	// moved connection-layer modules rather than silently narrowing (the
 	// existsSync guard below skips a missing directory rather than failing,
-	// which is a coverage loss, not a crash -- 53-D06).
-	const GOVERNED_DIRS = ['src/transport', 'src/auth', 'src/i18n', 'src/lifecycle'];
+	// which is a coverage loss, not a crash -- 53-D06). The sign-in transport
+	// directory left with the snapshot path (66-24); `src/peer` takes its slot
+	// as the tier-1-reachable network layer (all `.js`, imported by node tests).
+	// The positive control below keeps its synthetic `src/transport` strings:
+	// the predicate is path-shape only and never reads that directory.
+	const GOVERNED_DIRS = ['src/peer', 'src/auth', 'src/i18n', 'src/lifecycle'];
 	const GOVERNED_ABS_DIRS = [uiWebSrc('lifecycle'), webDataSrc()];
 
 	/** @param {string[]} paths */

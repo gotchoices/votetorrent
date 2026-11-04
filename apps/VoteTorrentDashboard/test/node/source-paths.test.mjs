@@ -37,22 +37,22 @@ test('repoRoot is the workspace root, identified by marker not by hop count', ()
 });
 
 test('dashboardSrc resolves to real bytes, not just a plausible string', () => {
-	// The dashboard's copy table moved to packages/ui-web in 53-04 (D-11, no
-	// shim); this proof needs any real file still under this workspace's own
-	// src/, not specifically the copy table.
-	const contents = readFileSync(dashboardSrc('lifecycle', 'bootstrap.js'), 'utf8');
+	// This proof needs any real file still under this workspace's own src/;
+	// the status reducer is pure (no IndexedDB), so reading and importing it
+	// has no side effects.
+	const contents = readFileSync(dashboardSrc('live', 'status.js'), 'utf8');
 	assert.ok(
-		contents.includes('export const BOOTSTRAP_PHASES'),
-		'dashboardSrc must resolve to the real bootstrap.js, not merely a well-formed path',
+		contents.includes('export function reduceStatus'),
+		'dashboardSrc must resolve to the real status.js, not merely a well-formed path',
 	);
 });
 
 test('resolution is independent of the process working directory', () => {
 	const originalCwd = process.cwd();
 	try {
-		const before = dashboardSrc('lifecycle', 'bootstrap.js');
+		const before = dashboardSrc('live', 'status.js');
 		process.chdir(os.tmpdir());
-		const after = dashboardSrc('lifecycle', 'bootstrap.js');
+		const after = dashboardSrc('live', 'status.js');
 		assert.equal(after, before, 'resolution must not change when cwd changes');
 	} finally {
 		process.chdir(originalCwd);
@@ -100,10 +100,10 @@ test('future roots are nameable before they exist', () => {
 });
 
 test('moduleUrl produces a specifier a dynamic import actually accepts', async () => {
-	const url = moduleUrl(dashboardSrc('lifecycle', 'bootstrap.js'));
+	const url = moduleUrl(dashboardSrc('live', 'status.js'));
 	assert.ok(url.startsWith('file://'), 'moduleUrl must return a file:// href');
 	const ns = await import(url);
-	assert.ok(ns.BOOTSTRAP_PHASES, 'the dynamically imported module must expose a BOOTSTRAP_PHASES export');
+	assert.equal(typeof ns.reduceStatus, 'function', 'the dynamically imported module must expose a reduceStatus function');
 });
 
 test('containment refuses a path that escapes the repository', () => {
