@@ -69,6 +69,8 @@ export const CODE_WIDTHS = Object.freeze([
 	{ width: 375, height: 667, ctaRequired: true },
 ]);
 export const LONG_CODE_CHARS = 3000;
+/** The QR byte budget (UI-SPEC QR Geometry); qr-decode-fixture.mjs checks it against vote-engine. */
+export const FIXTURE_PAYLOAD_BYTES = 2953;
 export const SLICE_CHARS = 40;
 export const BODY_BACKGROUND = 'rgb(13, 15, 20)';
 export const PRIMARY_RGB = 'rgb(59, 130, 246)';
@@ -103,9 +105,10 @@ const T2_RUNGS = [
 	'tabs-follower-rereads-and-marks',
 	'tabs-follower-promotes',
 ];
+const T3_RUNGS = ['qr-n177-integer-round-trip', 'qr-n177-resampled-round-trip', 'qr-control-damaged-frame-fails', 'g10-scanner-found-ends-tracks'];
 
 /** @type {ReadonlyArray<string>} */
-export const RUNG_IDS = Object.freeze([...T1_RUNGS, ...T2_RUNGS]);
+export const RUNG_IDS = Object.freeze([...T1_RUNGS, ...T2_RUNGS, ...T3_RUNGS]);
 
 /** Leg -> the rungs it records. `tokens` and isolation are recorded by every run. */
 export const LEG_RUNGS = Object.freeze({
@@ -119,9 +122,11 @@ export const LEG_RUNGS = Object.freeze({
 	switch: Object.freeze(['g7-switch-no-live-carry-over', 'd19-old-stops-before-new-starts', 'd19-other-rows-not-syncing']),
 	offline: Object.freeze(['d15-offline-reload-opens-local-copy', 'd20-background-retry-and-reconnect']),
 	tabs: Object.freeze(['tabs-follower-not-live', 'tabs-follower-rereads-and-marks', 'tabs-follower-promotes']),
+	qr: Object.freeze(['qr-n177-integer-round-trip', 'qr-n177-resampled-round-trip', 'qr-control-damaged-frame-fails']),
+	found: Object.freeze(['g10-scanner-found-ends-tracks']),
 	copy: Object.freeze(['g8-copy-mounted-keys']),
 });
-const LEG_ORDER = Object.freeze(['shell', 'chip', 'pairing', 'marks', 'truth', 'scanner', 'switch', 'offline', 'tabs', 'copy']);
+const LEG_ORDER = Object.freeze(['shell', 'chip', 'pairing', 'marks', 'truth', 'scanner', 'switch', 'offline', 'tabs', 'qr', 'found', 'copy']);
 
 /** @type {Array<{ id: string, passed: boolean, detail: string }>} */
 const rungs = [];
@@ -137,6 +142,9 @@ function record(id, passed, detail) {
 function sha256Prefix(text) {
 	return createHash('sha256').update(text, 'utf8').digest('hex').slice(0, 16);
 }
+
+/** The QR fixture module, loaded only by the QR legs. */
+const qrFixture = () => import('./qr-decode-fixture.mjs');
 
 /** @param {string} message */
 function say(message) {
@@ -587,6 +595,23 @@ export function evaluateFollower(m) {
 	return verdict(f, `promoted: 1 node, kinds ${kinds.join(' -> ')}`);
 }
 
+/**
+ * D-23: the exact payload round-trips from an N=177 frame.
+ * @param {{ n: number, decoded: boolean, decodedLength: number, equal: boolean }} m
+ * @returns {Verdict}
+ */
+export function evaluateQrRoundTrip(m) {
+	/** @type {string[]} */
+	const f = [];
+	if (m.n !== 177) f.push(`N=${m.n} (want 177)`);
+	if (!m.decoded) f.push('no decode');
+	else {
+		if (m.decodedLength !== FIXTURE_PAYLOAD_BYTES) f.push(`decoded ${m.decodedLength} bytes (want ${FIXTURE_PAYLOAD_BYTES})`);
+		if (!m.equal) f.push('the decoded text differs from the payload');
+	}
+	return verdict(f, `N=${m.n}, ${m.decodedLength} bytes, exact`);
+}
+
 // ---------------------------------------------------------------------------
 // --prove-matchers
 // ---------------------------------------------------------------------------
@@ -677,6 +702,7 @@ function matcherControls() {
 		reconnectGoneAfter: true,
 	};
 	const followerBase = { phase: /** @type {const} */ ('not-live'), chipKind: 'not-live', chipTextOk: true, noteVisible: true, reconnectPresent: false, creates: 0, panels: 9 };
+	const qrBase = { n: 177, decoded: true, decodedLength: FIXTURE_PAYLOAD_BYTES, equal: true };
 
 	/** @type {Array<{ label: string, violating: Verdict, healthy: Verdict }>} */
 	const c = [];
@@ -755,6 +781,10 @@ function matcherControls() {
 	add('follower: chip Live', evaluateFollower({ ...followerBase, chipKind: 'live' }), okFollower);
 	add('follower: zero marks', evaluateFollower({ phase: 'marks', newValueShown: true, marks: 0 }), evaluateFollower({ phase: 'marks', newValueShown: true, marks: 1 }));
 	add('follower: no promotion', evaluateFollower({ phase: 'promote', createsAfter: 0, kindsAfter: ['not-live'] }), evaluateFollower({ phase: 'promote', createsAfter: 1, kindsAfter: ['not-live', 'catching-up', 'live'] }));
+	const okQr = evaluateQrRoundTrip(qrBase);
+	add('qr: one changed character', evaluateQrRoundTrip({ ...qrBase, equal: false }), okQr);
+	add('qr: null decode', evaluateQrRoundTrip({ ...qrBase, decoded: false, decodedLength: 0, equal: false }), okQr);
+	add('qr: n = 176', evaluateQrRoundTrip({ ...qrBase, n: 176 }), okQr);
 	return c;
 }
 
@@ -1493,6 +1523,73 @@ async function legTabs(env) {
 	}
 }
 
+/** @param {Env} env */
+async function legQr(env) {
+	const { assertBudgetParity, buildFixturePayload, encodeQrMatrix } = await qrFixture();
+	await assertBudgetParity();
+	const payload = buildFixturePayload();
+	const { n, modules } = encodeQrMatrix(payload);
+	const prefix = sha256Prefix(payload).slice(0, 16);
+	say(`QR fixture: n=${n}, payload ${Buffer.byteLength(payload)} bytes, sha256 ${prefix}`);
+	const ctx = await newGateContext(env.browser, env.origin, env.iso);
+	try {
+		const page = await openGatePage(ctx, env.url, 'leg=qr&clear=1&mount=none', 'qr');
+		/** @param {'integer' | 'resampled' | 'damaged'} variant */
+		const decode = (variant) => page.evaluate(([mods, nn, v, p]) => /** @type {any} */ (window).__LIVE_GATE_CTL__.decodeFrame(mods, nn, v, p), [modules, n, variant, prefix]);
+		const integer = await decode('integer');
+		say(`integer frame: module ${integer.m} px, decoded ${integer.decoded}, ${integer.decodedLength} bytes`);
+		const vi = evaluateQrRoundTrip({ n, ...integer });
+		record('qr-n177-integer-round-trip', vi.passed, `${vi.detail}; module ${integer.m} px`);
+		const resampled = await decode('resampled');
+		const vr = evaluateQrRoundTrip({ n, ...resampled });
+		record('qr-n177-resampled-round-trip', vr.passed, vr.detail);
+		const damaged = await decode('damaged');
+		const vd = evaluateQrRoundTrip({ n, ...damaged });
+		record('qr-control-damaged-frame-fails', !vd.passed, vd.passed ? 'the damaged frame round-tripped (control inert)' : `the damaged frame did not round-trip: ${vd.detail}`);
+	} finally {
+		await ctx.close();
+	}
+}
+
+/** @param {Env} env @param {string} y4mDir */
+async function legFound(env, y4mDir) {
+	const { buildFixturePayload, encodeQrMatrix, renderFrame, writeY4m } = await qrFixture();
+	const payload = buildFixturePayload();
+	const { n, modules } = encodeQrMatrix(payload);
+	const frame = renderFrame({ modules, n, variant: 'integer' });
+	const file = path.join(y4mDir, 'live-gate-qr.y4m');
+	const { bytes } = writeY4m(frame, file, { frames: 3 });
+	say(`fake camera file: ${bytes} bytes, module ${frame.m} px`);
+	const browser = await chromium.launch({
+		headless: true,
+		args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', `--use-file-for-fake-video-capture=${file}`],
+	});
+	try {
+		const ctx = await newGateContext(browser, env.origin, env.iso);
+		const page = await openGatePage(ctx, env.url, 'leg=found&clear=1', 'found');
+		await page.evaluate(() => /** @type {any} */ (window).__LIVE_GATE_CTL__.pairing.pushHold());
+		await page.click(`.pr-button:has-text("${t('pairing.scanCta')}")`);
+		const got = await page
+			.waitForFunction(() => /** @type {any} */ (window).__LIVE_GATE_CTL__.pairing.stats().calls >= 1, null, { timeout: 20_000 })
+			.then(() => true, () => false);
+		await sleep(500);
+		const tracks = evaluateTracksEnded({ streams: await ctl(page, 'streams') });
+		const received = await page.evaluate(() => /** @type {any} */ (window).__LIVE_GATE_CTL__.pairing.received());
+		/** @type {string[]} */
+		const f = [];
+		if (!got) f.push('the scanner never handed a code to pairing within 20 s');
+		if (!tracks.passed) f.push(tracks.detail);
+		if (received.count !== 1) f.push(`pairing received ${received.count} code(s) (want 1)`);
+		if (received.length !== FIXTURE_PAYLOAD_BYTES) f.push(`received length ${received.length}`);
+		if (received.sha256Prefix !== sha256Prefix(payload).slice(0, 16)) f.push('received code differs from the payload');
+		record('g10-scanner-found-ends-tracks', f.length === 0, f.length === 0 ? `found: one ${received.length}-character code, exact; ${tracks.detail}` : f.join('; '));
+		await page.evaluate(() => /** @type {any} */ (window).__LIVE_GATE_CTL__.pairing.release());
+		await ctx.close();
+	} finally {
+		await browser.close();
+	}
+}
+
 function legCopy() {
 	const keys = referencedCopyKeys();
 	const referencedValues = keys.map((key) => ({ key, value: String(COPY[key]) }));
@@ -1539,6 +1636,7 @@ async function main() {
 	const html = findFile(dist, 'live-gate.html');
 	if (!html) fail('the build holds no live-gate.html');
 	const entryRel = path.relative(dist, html).split(path.sep).join('/');
+	const y4mDir = mkdtempSync(path.join(os.tmpdir(), 'vt-live-gate-cam-'));
 
 	const server = await serveDist(dist, port);
 	const origin = new URL(server.url).origin;
@@ -1568,6 +1666,8 @@ async function main() {
 			switch: legSwitch,
 			offline: legOffline,
 			tabs: legTabs,
+			qr: legQr,
+			found: (e) => legFound(e, y4mDir),
 			copy: () => legCopy(),
 		};
 		for (const leg of ordered) {
