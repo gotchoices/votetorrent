@@ -20,6 +20,7 @@
 		"gate:prove-chart-geometry-matchers": "node test/browser/run-chart-geometry-gate.mjs --prove-matchers",
 		"gate:live": "node test/browser/run-live-gate.mjs",
 		"gate:prove-live-matchers": "node test/browser/run-live-gate.mjs --prove-matchers",
+		"gate:live-mesh": "node test/browser/run-live-mesh-gate.mjs",
 		"typecheck": "tsc --noEmit",
 		"lint": "node ../../scripts/lint-copy.mjs",
 		"assert:no-polyfills": "node scripts/assert-no-node-polyfills.mjs",
