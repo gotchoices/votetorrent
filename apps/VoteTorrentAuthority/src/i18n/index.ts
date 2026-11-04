@@ -925,16 +925,6 @@ const resources = {
 			registrantLifecycleKeepCurrentExpiration: 'Keep Current Expiration',
 			registrantLifecycleConfirmRenewal: 'Confirm Renewal',
 			registrantLifecycleConfirmReinstatement: 'Confirm Reinstatement',
-			// The four upload refusals the sign-in upload service still returns; they go
-			// together with that service when it is removed.
-			dashboardSignInCodeUploadFailed:
-				"Couldn't send the export to the sign-in service, so no new code was created. Check that the sign-in service is running, then try again.",
-			dashboardSignInCodeUploadRefused:
-				'The sign-in service refused this device, so no new code was created. Check the upload token the service was set up with.',
-			dashboardSignInCodeUploadTooLarge:
-				'This authority’s data is larger than the sign-in service will accept, so no new code was created. Ask whoever runs the service to raise its limit.',
-			dashboardSignInCodeUploadNotConfigured:
-				'No sign-in service address is set on this build, so no code was created. The service address has to be set up before a code can be generated.',
 			// Browser pairing (Pair a browser screen, Paired browsers list, owner pairing log and switch).
 			// No phase number or decision id may appear in these strings.
 			dashboardPairingTitle: 'Pair a browser',
@@ -2354,16 +2344,6 @@ const resources = {
 			registrantLifecycleKeepCurrentExpiration: 'Mantener Vencimiento Actual',
 			registrantLifecycleConfirmRenewal: 'Confirmar Renovación',
 			registrantLifecycleConfirmReinstatement: 'Confirmar Reincorporación',
-			// Los cuatro rechazos que aún devuelve el servicio de envío de inicio de sesión;
-			// se retiran junto con ese servicio.
-			dashboardSignInCodeUploadFailed:
-				'No se pudo enviar la exportación al servicio de inicio de sesión, así que no se creó ningún código nuevo. Compruebe que el servicio de inicio de sesión esté en marcha e inténtelo de nuevo.',
-			dashboardSignInCodeUploadRefused:
-				'El servicio de inicio de sesión rechazó este dispositivo, así que no se creó ningún código nuevo. Revise la clave de envío con la que se configuró el servicio.',
-			dashboardSignInCodeUploadTooLarge:
-				'Los datos de esta autoridad superan lo que el servicio de inicio de sesión acepta, así que no se creó ningún código nuevo. Pida a quien administra el servicio que aumente su límite.',
-			dashboardSignInCodeUploadNotConfigured:
-				'Esta versión no tiene configurada la dirección del servicio de inicio de sesión, así que no se creó ningún código. Hay que configurar la dirección del servicio antes de poder generar un código.',
 			// Vinculación de navegadores (pantalla, lista de navegadores vinculados, registro y ajuste del propietario).
 			// Ningún número de plan ni identificador de decisión puede aparecer en estos textos.
 			dashboardPairingTitle: 'Vincular un navegador',

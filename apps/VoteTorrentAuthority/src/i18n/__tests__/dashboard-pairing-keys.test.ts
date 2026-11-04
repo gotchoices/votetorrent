@@ -254,38 +254,11 @@ describe("browser-pairing copy keys: copy bans", () => {
 	});
 });
 
-/** The four upload-refusal keys that stay until the upload service that returns them is removed. */
-const KEPT_UPLOAD_KEYS = [
-	"dashboardSignInCodeUploadFailed",
-	"dashboardSignInCodeUploadRefused",
-	"dashboardSignInCodeUploadTooLarge",
-	"dashboardSignInCodeUploadNotConfigured",
-] as const;
-
-describe("the kept upload-refusal keys", () => {
-	// The sign-in code screen and its screen-only keys are gone. These four stay only because the
-	// upload service still returns them; they go together with that service when it is removed.
-	it("they are the ONLY remaining sign-in-code-prefixed keys, in both languages", () => {
-		const prefix = /^dashboardSignInCode[A-Z]/;
-		const expected = [...KEPT_UPLOAD_KEYS].sort();
-		expect(Object.keys(enTranslation).filter((k) => prefix.test(k)).sort()).toEqual(expected);
-		expect(Object.keys(esTranslation).filter((k) => prefix.test(k)).sort()).toEqual(expected);
-	});
-
-	it.each(KEPT_UPLOAD_KEYS)("%s is present in both languages, translated", (key) => {
-		expect(typeof enTranslation[key]).toBe("string");
-		expect(enTranslation[key].trim().length).toBeGreaterThan(0);
-		expect(typeof esTranslation[key]).toBe("string");
-		expect(esTranslation[key].trim().length).toBeGreaterThan(0);
-		expect(esTranslation[key]).not.toBe(enTranslation[key]);
-		expect(enTranslation[key]).not.toMatch(ENGINEERING_MARKER_RE);
-		expect(esTranslation[key]).not.toMatch(ENGINEERING_MARKER_RE);
-	});
-
-	it("every upload refusal states plainly that no code was created", () => {
-		for (const key of KEPT_UPLOAD_KEYS) {
-			expect(enTranslation[key]).toMatch(/no (new )?code was created/);
-			expect(esTranslation[key]).toMatch(/no se creó ningún código/);
-		}
+describe("the retired sign-in code keys", () => {
+	// The sign-in code screen, its upload service and every copy key they used are gone.
+	it("no key in EN or ES starts with dashboardSignInCode", () => {
+		const prefix = /^dashboardSignInCode/;
+		expect(Object.keys(enTranslation).filter((k) => prefix.test(k))).toEqual([]);
+		expect(Object.keys(esTranslation).filter((k) => prefix.test(k))).toEqual([]);
 	});
 });
