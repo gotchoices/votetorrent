@@ -1125,6 +1125,221 @@ test('B19 source scan: resume and no joinCadre; no whenIdle inside handleAfterPa
 	assert.equal(LAST_PASS_PERSIST_MS, 60_000);
 });
 
+// ---------------------------------------------------------------------------
+// U1-U4: the React bridge (`src/live/useLiveStatus.ts`), run in ONE child
+// process with Node's type stripping and a `.js` -> `.ts` resolve hook (the
+// mapping the bundler does). Hooks render through `react-dom/server`.
+// ---------------------------------------------------------------------------
+
+const LOADER = [
+	"import { existsSync } from 'node:fs';",
+	"import { fileURLToPath } from 'node:url';",
+	'export async function resolve(specifier, context, next) {',
+	"\tconst relative = specifier.startsWith('./') || specifier.startsWith('../');",
+	"\tconst fromTs = typeof context.parentURL === 'string' && context.parentURL.endsWith('.ts');",
+	"\tif (relative && fromTs && specifier.endsWith('.js')) {",
+	'\t\tconst jsUrl = new URL(specifier, context.parentURL);',
+	'\t\tif (!existsSync(fileURLToPath(jsUrl))) {',
+	"\t\t\tconst tsUrl = new URL(specifier.slice(0, -3) + '.ts', context.parentURL);",
+	'\t\t\tif (existsSync(fileURLToPath(tsUrl))) return next(tsUrl.href, context);',
+	'\t\t}',
+	'\t}',
+	'\treturn next(specifier, context);',
+	'}',
+].join('\n');
+
+const REGISTER = [
+	"import { register } from 'node:module';",
+	`register(${JSON.stringify('data:text/javascript,' + encodeURIComponent(LOADER))});`,
+].join('\n');
+
+const BRIDGE_URLS = {
+	useLiveStatus: moduleUrl(dashboardSrc('live', 'useLiveStatus.ts')),
+	dataVersion: moduleUrl(dashboardSrc('live', 'DataVersionContext.ts')),
+};
+
+const HARNESS = [
+	`const M = ${JSON.stringify(BRIDGE_URLS)};`,
+	'const rows = {};',
+	'async function row(name, fn) {',
+	'\ttry { rows[name] = await fn(); }',
+	"\tcatch (err) { rows[name] = { thrown: { name: (err && err.name) || 'Error', message: String((err && err.message) || '') } }; }",
+	'}',
+	"const { createElement } = await import('react');",
+	"const { renderToStaticMarkup } = await import('react-dom/server');",
+	'const live = await import(M.useLiveStatus);',
+	'const dv = await import(M.dataVersion);',
+	"const view = Object.freeze({ kind: 'offline', lastPassAt: 5, reconnecting: false });",
+	"const version = Object.freeze({ version: 3, changedTables: new Set(['Election']), markEligible: true });",
+	'const fakeBoot = { getStatus: () => view, subscribeStatus: () => () => undefined, getDataVersion: () => version, subscribeData: () => () => undefined };',
+	"await row('selectNull', () => live.selectLiveStatus(null));",
+	"await row('selectSameRef', () => live.selectLiveStatus(fakeBoot) === view);",
+	"function StatusProbe(props) { const s = live.useLiveStatus(props.boot); return createElement('span', null, s ? s.kind : 'none'); }",
+	"await row('statusFake', () => renderToStaticMarkup(createElement(StatusProbe, { boot: fakeBoot })));",
+	"await row('statusNull', () => renderToStaticMarkup(createElement(StatusProbe, { boot: null })));",
+	"function DataProbe(props) { const v = live.useBootDataVersion(props.boot); return createElement('span', null, [v.version, v.markEligible, [...v.changedTables].join(',')].join('|')); }",
+	"await row('dataFake', () => renderToStaticMarkup(createElement(DataProbe, { boot: fakeBoot })));",
+	"await row('dataNull', () => renderToStaticMarkup(createElement(DataProbe, { boot: null })));",
+	"await row('defaultVersion', () => dv.DEFAULT_DATA_VERSION.version);",
+	'process.stdout.write(JSON.stringify(rows));',
+].join('\n');
+
+/** @type {Record<string, any> | null} */
+let BRIDGE_ROWS = null;
+
+/** @returns {Record<string, any>} */
+function bridgeRows() {
+	if (BRIDGE_ROWS) return BRIDGE_ROWS;
+	const child = spawnSync(
+		process.execPath,
+		['--experimental-strip-types', '--no-warnings', '--import', 'data:text/javascript,' + encodeURIComponent(REGISTER), '--input-type=module', '-e', HARNESS],
+		{ cwd: dashboardRoot(), encoding: 'utf8', env: { ...process.env, FORCE_COLOR: '0' } },
+	);
+	try {
+		BRIDGE_ROWS = JSON.parse(child.stdout || '{}');
+	} catch {
+		BRIDGE_ROWS = {};
+	}
+	assert.ok(BRIDGE_ROWS && Object.keys(BRIDGE_ROWS).length > 0, `the harness printed no rows: ${child.stderr}`);
+	return /** @type {Record<string, any>} */ (BRIDGE_ROWS);
+}
+
+/** @param {string} name */
+function bridgeRow(name) {
+	const rows = bridgeRows();
+	assert.ok(name in rows, `harness produced no row "${name}"`);
+	const value = rows[name];
+	if (value && typeof value === 'object' && 'thrown' in value) assert.fail(`harness row "${name}" threw ${value.thrown.name}: ${value.thrown.message}`);
+	return value;
+}
+
+test('U1 selectLiveStatus: null without a boot; the boot\'s own view object by reference', () => {
+	assert.equal(bridgeRow('selectNull'), null);
+	assert.equal(bridgeRow('selectSameRef'), true);
+});
+
+test('U2 useLiveStatus: a server render shows the fake view\'s kind; null renders the null branch', () => {
+	assert.equal(bridgeRow('statusFake'), '<span>offline</span>');
+	assert.equal(bridgeRow('statusNull'), '<span>none</span>');
+});
+
+test('U3 useBootDataVersion: the default (version 0, never marks) without a boot; the boot\'s version, mark flag and tables with one', () => {
+	assert.equal(bridgeRow('defaultVersion'), 0);
+	assert.equal(bridgeRow('dataNull'), '<span>0|false|</span>');
+	assert.equal(bridgeRow('dataFake'), '<span>3|true|Election</span>');
+});
+
+test('U4 source: useSyncExternalStore; imports only react and the data-version module; no peer path, console, Date, enum or namespace', () => {
+	const raw = readFileSync(new URL(BRIDGE_URLS.useLiveStatus), 'utf8');
+	const source = stripComments(raw);
+	const specifiers = new Set([...source.matchAll(/from\s+'([^']+)'/g)].map((m) => m[1]));
+	assert.deepEqual([...specifiers].sort(), ['./DataVersionContext.js', 'react']);
+	assert.match(source, /useSyncExternalStore\(/);
+	const peerRe = new RegExp('\\.\\./' + 'peer/');
+	assert.match("import x from '../" + "peer/boot.js'", peerRe, 'positive control');
+	assert.doesNotMatch(raw, peerRe);
+	assert.doesNotMatch(source, /\bconsole\b/);
+	assert.doesNotMatch(source, /\bDate\b/);
+	assert.doesNotMatch(source, /\benum\b|\bnamespace\b/);
+});
+
+// ---------------------------------------------------------------------------
+// L1-L2: the lazy peer chunk. Markers are cadre-core protocol-id string
+// literals (they survive minification; the quote style may change).
+// ---------------------------------------------------------------------------
+
+const MARKER_RE = /["'`]\/sereus\/[a-z][a-z-]*\/1\.0\.0["'`]/g;
+
+/**
+ * Split a Vite manifest into the entry's static-import closure and the
+ * dynamic-import closure (everything reached through `dynamicImports`, with
+ * its own imports, minus the static closure).
+ *
+ * @param {Record<string, { file: string, isEntry?: boolean, imports?: string[], dynamicImports?: string[], name?: string, src?: string }>} manifest
+ */
+function manifestClosures(manifest) {
+	const entryKey = Object.keys(manifest).find((k) => manifest[k].isEntry);
+	assert.ok(entryKey, 'the manifest has an entry');
+	/** @type {Set<string>} */
+	const staticKeys = new Set();
+	/** @param {string} key */
+	const walkStatic = (key) => {
+		if (staticKeys.has(key) || !manifest[key]) return;
+		staticKeys.add(key);
+		for (const next of manifest[key].imports ?? []) walkStatic(next);
+	};
+	walkStatic(/** @type {string} */ (entryKey));
+	/** @type {Set<string>} */
+	const reached = new Set();
+	/** @param {string} key */
+	const walkDynamic = (key) => {
+		if (reached.has(key) || !manifest[key]) return;
+		reached.add(key);
+		for (const next of manifest[key].imports ?? []) walkDynamic(next);
+		for (const next of manifest[key].dynamicImports ?? []) walkDynamic(next);
+	};
+	for (const key of Object.keys(manifest)) for (const next of manifest[key].dynamicImports ?? []) walkDynamic(next);
+	const dynamicKeys = [...reached].filter((k) => !staticKeys.has(k));
+	return { entryKey: /** @type {string} */ (entryKey), staticKeys: [...staticKeys], dynamicKeys };
+}
+
+/** @param {string} code */
+function markersIn(code) {
+	return new Set([...code.matchAll(MARKER_RE)].map((m) => m[0].slice(1, -1)));
+}
+
+test('L1 matcher controls: the marker regex hits a minified literal and not a bare prefix; the closure walker separates static and dynamic chunks', () => {
+	assert.deepEqual([...markersIn('x="/sereus/cadre-invite/1.0.0",y=`/sereus/seed/1.0.0`')].sort(), ['/sereus/cadre-invite/1.0.0', '/sereus/seed/1.0.0']);
+	assert.equal(markersIn('const p = "/sereus/";').size, 0);
+	assert.equal(markersIn("'/sereus/Cadre/1.0.0'").size, 0);
+	const synthetic = {
+		'index.html': { file: 'assets/index.js', isEntry: true, imports: ['_shared.js'], dynamicImports: ['src/peer/boot.js'] },
+		'_shared.js': { file: 'assets/shared.js' },
+		'src/peer/boot.js': { file: 'assets/peer.js', imports: ['_shared.js', '_lib.js'], dynamicImports: ['_late.js'] },
+		'_lib.js': { file: 'assets/lib.js' },
+		'_late.js': { file: 'assets/late.js' },
+		'_orphan.js': { file: 'assets/orphan.js' },
+	};
+	const c = manifestClosures(synthetic);
+	assert.equal(c.entryKey, 'index.html');
+	assert.deepEqual([...c.staticKeys].sort(), ['_shared.js', 'index.html']);
+	assert.deepEqual([...c.dynamicKeys].sort(), ['_late.js', '_lib.js', 'src/peer/boot.js']);
+});
+
+const DIST = process.env.DASHBOARD_DIST_DIR;
+
+test(
+	'L2 dist proof: the entry closure carries no cadre-core marker; the dynamic closure carries at least two; a peer chunk exists outside the entry closure',
+	{ skip: DIST ? false : 'DASHBOARD_DIST_DIR is not set' },
+	(t) => {
+		const dist = /** @type {string} */ (DIST);
+		const manifestPath = path.join(dist, '.vite', 'manifest.json');
+		assert.ok(existsSync(manifestPath), 'the build wrote .vite/manifest.json');
+		const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+		const { entryKey, staticKeys, dynamicKeys } = manifestClosures(manifest);
+		/** @param {string[]} keys */
+		const closureMarkers = (keys) => {
+			/** @type {Set<string>} */
+			const all = new Set();
+			for (const key of keys) for (const m of markersIn(readFileSync(path.join(dist, manifest[key].file), 'utf8'))) all.add(m);
+			return all;
+		};
+		const staticMarkers = closureMarkers(staticKeys);
+		const dynamicMarkers = closureMarkers(dynamicKeys);
+		const staticFiles = new Set(staticKeys.map((k) => manifest[k].file));
+		const peerKeys = dynamicKeys.filter((k) => k.startsWith('src/peer/') || manifest[k].name === 'peer');
+		const peerFiles = [...new Set(peerKeys.map((k) => manifest[k].file))];
+		t.diagnostic(`entry ${entryKey} -> ${manifest[entryKey].file}; static chunks ${staticKeys.length}, dynamic chunks ${dynamicKeys.length}`);
+		t.diagnostic(`entry closure markers: ${staticMarkers.size} [${[...staticMarkers].sort().join(', ')}]`);
+		t.diagnostic(`dynamic closure markers: ${dynamicMarkers.size} [${[...dynamicMarkers].sort().join(', ')}]`);
+		for (const file of peerFiles) t.diagnostic(`peer chunk ${file} ${statSync(path.join(dist, file)).size} bytes`);
+		assert.equal(staticMarkers.size, 0, `the entry closure carries cadre-core markers: ${[...staticMarkers].join(', ')}`);
+		assert.ok(dynamicMarkers.size >= 2, `the dynamic closure carries fewer than two markers (${dynamicMarkers.size})`);
+		assert.ok(peerFiles.length > 0, 'a chunk built from src/peer exists in the dynamic closure');
+		for (const file of peerFiles) assert.ok(!staticFiles.has(file), 'the peer chunk is in the entry closure');
+	},
+);
+
 after(() => {
 	console.error = ORIGINAL_CONSOLE_ERROR;
 });

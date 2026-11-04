@@ -38,10 +38,40 @@ import react from '@vitejs/plugin-react';
 // `@quereus/quereus` means a second `Database` class identity and a second
 // `@quereus/plugin-indexeddb` module registry — plugin registration or an `instanceof`
 // boundary fails in a build that still exits 0, the same spike-089 signature one stack down.
+//
+// The lazy peer chunk. The peer layer (`src/peer/`: the member node, the strand reader, the
+// replication, pairing and the live boot) and everything it pulls in -- cadre-core, libp2p,
+// the IndexedDB block storage -- loads only through a dynamic `import()`: the pairing screen and
+// the live shell import `peer/boot.js` / `peer/pairing.js` that way, and
+// `lifecycle/forget-network.js` (statically imported by the shell) reaches
+// `peer/member-node.js` the same way, so this build already carries the peer chunk. `manualChunks`
+// names only files under `src/peer/` 'peer'; it never routes a `node_modules` package by name,
+// because a package the entry also uses (for example a crypto plugin shared with the local store)
+// would then drag the peer chunk into the entry. `onlyExplicitManualChunks` keeps the chunk to
+// exactly those files: without it Rollup also moves every dependency of a manual chunk into it,
+// shared ones included (the local store's engine, measured: the entry then imported the peer chunk
+// statically and carried all seven cadre-core protocol ids). `build.manifest` exists for the dist proof in
+// `test/node/boot.test.mjs`, which checks that the entry's static-import closure carries no
+// cadre-core protocol id while the dynamic closure does. Neither key is an alias, a define or a
+// polyfill: the D-19 rule above stands unchanged.
+const PEER_SOURCE_DIR = '/apps/VoteTorrentDashboard/src/peer/';
+
 export default defineConfig({
 	plugins: [react()],
 	resolve: { dedupe: ['react', 'react-dom', '@quereus/quereus', '@quereus/plugin-indexeddb'] },
 	server: { port: 5180, strictPort: true },
 	preview: { port: 5180, strictPort: true },
-	build: { target: 'es2022', sourcemap: true },
+	build: {
+		target: 'es2022',
+		sourcemap: true,
+		manifest: true,
+		rollupOptions: {
+			output: {
+				onlyExplicitManualChunks: true,
+				manualChunks(id: string): string | undefined {
+					return id.replace(/\\/g, '/').includes(PEER_SOURCE_DIR) ? 'peer' : undefined;
+				},
+			},
+		},
+	},
 });
