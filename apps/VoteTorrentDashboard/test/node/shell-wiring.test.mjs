@@ -1,24 +1,438 @@
 /**
- * shell-wiring.test.mjs — source-level assertions over `DashboardShell.tsx`'s
- * wiring, added by the phase-50 code-review fixes.
+ * shell-wiring.test.mjs -- the live shell's tier-1 rows.
  *
- * DECLARED LIMIT, STATED FIRST. `node --test` cannot import `.tsx`, so this
- * suite reads the file as TEXT — the same idiom `preview-control.test.mjs`,
- * `registry.test.mjs` and `authority-admin-panels.test.mjs` already use. A
- * text assertion pins the SHAPE of a fix, not its behaviour: it cannot prove
- * the effect actually re-attaches after a swap, only that the dependency list
- * names what the body reads. The composed shell has no behavioural gate at any
- * tier in this phase (nothing mounts `DashboardShell`), which is exactly the
- * gap CR-01 was found in; closing it properly needs a rung that mounts the
- * real shell, and that is recorded as outstanding rather than pretended away
- * here. Every matcher below is paired with an inertness control.
+ * Two halves:
+ *   - Behaviour rows for `src/live/shell-live.ts` (the chip model, the 1 s
+ *     render debounce, the clock formats, the panel mark gate, the officer
+ *     label and the boot controller). They run the REAL `.ts` module in ONE
+ *     spawned child under Node's type stripping, with the same `.js` -> `.ts`
+ *     resolve hook `live-hooks.test.mjs` uses, and fakes for the boot module.
+ *   - Comment-stripped source scans over the shell's wiring. `node --test`
+ *     cannot import `.tsx`, so these pin the SHAPE of the wiring, not its
+ *     behaviour; the shell itself is mounted only by the browser gate.
+ *
+ * Every matcher is proven against a synthetic fixture first.
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
-import { dashboardSrc } from '../../../../scripts/lib/source-paths.mjs';
+import { dashboardRoot, dashboardSrc, moduleUrl } from '../../../../scripts/lib/source-paths.mjs';
 import { stripComments } from '../../../../scripts/lib/strip-comments.mjs';
+import { COPY } from '@votetorrent/ui-web';
+
+// --- shell-live behaviour -----------------------------------------------------
+
+const SHELL_LIVE_URL = moduleUrl(dashboardSrc('live', 'shell-live.ts'));
+
+/** Maps `./x.js` imported from a `.ts` file to `./x.ts` when only the `.ts` exists. */
+const LOADER = [
+	"import { existsSync } from 'node:fs';",
+	"import { fileURLToPath } from 'node:url';",
+	'export async function resolve(specifier, context, next) {',
+	"\tconst relative = specifier.startsWith('./') || specifier.startsWith('../');",
+	"\tconst fromTs = typeof context.parentURL === 'string' && context.parentURL.endsWith('.ts');",
+	"\tif (relative && fromTs && specifier.endsWith('.js')) {",
+	'\t\tconst jsUrl = new URL(specifier, context.parentURL);',
+	'\t\tif (!existsSync(fileURLToPath(jsUrl))) {',
+	"\t\t\tconst tsUrl = new URL(specifier.slice(0, -3) + '.ts', context.parentURL);",
+	'\t\t\tif (existsSync(fileURLToPath(tsUrl))) return next(tsUrl.href, context);',
+	'\t\t}',
+	'\t}',
+	'\treturn next(specifier, context);',
+	'}',
+].join('\n');
+
+const REGISTER = [
+	"import { register } from 'node:module';",
+	`register(${JSON.stringify('data:text/javascript,' + encodeURIComponent(LOADER))});`,
+].join('\n');
+
+/** 2026-01-02 23:59:07 UTC: the child runs with TZ=UTC. */
+const T = Date.UTC(2026, 0, 2, 23, 59, 7);
+
+const HARNESS = [
+	`const URL_ = ${JSON.stringify(SHELL_LIVE_URL)};`,
+	`const T = ${T};`,
+	'const rows = {};',
+	'async function row(name, fn) {',
+	'\ttry { rows[name] = await fn(); }',
+	"\tcatch (err) { rows[name] = { thrown: { name: (err && err.name) || 'Error', message: String((err && err.message) || '') } }; }",
+	'}',
+	'const L = await import(URL_);',
+	'const plain = (m) => (m === null ? null : { ...m, frozen: Object.isFrozen(m) });',
+	"const view = (kind, lastPassAt, reconnecting = false, reason) => (reason ? { kind, lastPassAt, reconnecting, reason } : { kind, lastPassAt, reconnecting });",
+	// C1-C5
+	"await row('C1', () => plain(L.chipModel(view('live', T))));",
+	"await row('C2', () => plain(L.chipModel(view('catching-up', T))));",
+	"await row('C3', () => ({",
+	"\twithTime: plain(L.chipModel(view('offline', T))),",
+	"\tfullTitle: L.formatFullDateTime(T),",
+	"\tnoUpdate: plain(L.chipModel(view('offline', null))),",
+	"\treconnecting: plain(L.chipModel(view('offline', T, true))),",
+	'}));',
+	"await row('C4', () => ({",
+	"\tnotLive: plain(L.chipModel(view('not-live', T))),",
+	"\tunpaired: L.chipModel(view('unpaired', T, false, 'revoked')),",
+	'\tnone: L.chipModel(null),',
+	'}));',
+	"await row('C5', () => ({",
+	"\tplain: L.splitChipText('Live'),",
+	"\tfirstOnly: L.splitChipText('a \\u00B7 b \\u00B7 c'),",
+	"\tnoSpaces: L.splitChipText('a\\u00B7b'),",
+	'}));',
+	// C6
+	"await row('C6', () => {",
+	'\tconst S = L.stepChipDebounce;',
+	"\tconst cu = view('catching-up', 1);",
+	"\tconst cu2 = view('catching-up', 5);",
+	"\tconst live = view('live', 5);",
+	"\tconst off = view('offline', 5);",
+	"\tconst offR = view('offline', 5, true);",
+	"\tconst kind = (st) => (st.shown === null ? null : st.shown.kind);",
+	"\tconst first = S(null, cu, 0, 'k1');",
+	"\tconst sameKind = S(first.state, cu2, 10, 'k1');",
+	"\tconst toLive = S(sameKind.state, live, 100, 'k1');",
+	"\tconst early = S(toLive.state, live, 1099, 'k1');",
+	"\tconst due = S(early.state, live, 1100, 'k1');",
+	"\tconst offShown = S(null, off, 0, 'k9');",
+	"\tconst reconnectFlag = S(offShown.state, offR, 5, 'k9');",
+	"\tconst f1 = S(first.state, live, 0, 'k1');",
+	"\tconst f2 = S(f1.state, cu, 500, 'k1');",
+	"\tconst f3 = S(f2.state, live, 900, 'k1');",
+	"\tconst f4 = S(f3.state, live, 1000, 'k1');",
+	"\tconst newBoot = S(due.state, cu, 1200, 'k2');",
+	"\tconst unpaired = S(due.state, view('unpaired', 5, false, 'removed'), 1200, 'k1');",
+	"\tconst cleared = S(due.state, null, 1200, 'k1');",
+	'\treturn {',
+	'\t\tfirst: { kind: kind(first.state), wakeAt: first.wakeAt, bootKey: first.state.bootKey },',
+	'\t\tsameKind: { same: sameKind.state.shown === cu2, wakeAt: sameKind.wakeAt },',
+	'\t\ttoLive: { kind: kind(toLive.state), pending: toLive.state.pending && toLive.state.pending.kind, since: toLive.state.pendingSince, wakeAt: toLive.wakeAt },',
+	'\t\tearly: { kind: kind(early.state), wakeAt: early.wakeAt },',
+	'\t\tdue: { kind: kind(due.state), pending: due.state.pending, wakeAt: due.wakeAt },',
+	'\t\treconnectFlag: { same: reconnectFlag.state.shown === offR, wakeAt: reconnectFlag.wakeAt },',
+	'\t\tflicker: [f1, f2, f3, f4].map((s) => kind(s.state)),',
+	'\t\tflickerPending: f2.state.pending,',
+	'\t\tflickerWake: f3.wakeAt,',
+	'\t\tnewBoot: { kind: kind(newBoot.state), bootKey: newBoot.state.bootKey, wakeAt: newBoot.wakeAt },',
+	'\t\tunpaired: { kind: kind(unpaired.state), wakeAt: unpaired.wakeAt },',
+	'\t\tcleared: { shown: cleared.state.shown, wakeAt: cleared.wakeAt },',
+	'\t};',
+	'});',
+	// C7
+	"const thrownOf = (fn) => { try { fn(); return null; } catch (err) { return { name: err.name, message: err.message }; } };",
+	"await row('C7', () => ({",
+	'\tzero: [L.formatClockTime(0, false), L.formatClockTime(0, true)],',
+	'\tlate: [L.formatClockTime(T, false), L.formatClockTime(T, true)],',
+	'\tfull: L.formatFullDateTime(T),',
+	'\tthrows: [',
+	'\t\tthrownOf(() => L.formatClockTime(NaN, false)),',
+	"\t\tthrownOf(() => L.formatClockTime('12', true)),",
+	'\t\tthrownOf(() => L.formatFullDateTime(Infinity)),',
+	'\t\tthrownOf(() => L.formatFullDateTime(undefined)),',
+	'\t],',
+	'}));',
+	// C8
+	"await row('C8', () => {",
+	"\tconst tables = new Set(['Election']);",
+	'\tconst off = { version: 3, changedTables: tables, markEligible: false };',
+	'\tconst on = { version: 3, changedTables: tables, markEligible: true };',
+	'\tconst zero = { version: 0, changedTables: tables, markEligible: true };',
+	'\tconst gated = L.panelDataVersion(on, { everLive: false, follower: false });',
+	'\tconst zeroGated = L.panelDataVersion(zero, { everLive: true, follower: true });',
+	'\treturn {',
+	'\t\toffSame: L.panelDataVersion(off, { everLive: false, follower: false }) === off,',
+	'\t\tgated: { same: gated === on, frozen: Object.isFrozen(gated), markEligible: gated.markEligible, version: gated.version, tablesSame: gated.changedTables === tables },',
+	'\t\teverLiveSame: L.panelDataVersion(on, { everLive: true, follower: false }) === on,',
+	'\t\tfollowerSame: L.panelDataVersion(on, { everLive: false, follower: true }) === on,',
+	'\t\tzero: { same: zeroGated === zero, markEligible: zeroGated.markEligible },',
+	'\t};',
+	'});',
+	// C9
+	"await row('C9', () => ['Ana ', null, undefined, '', '   ', ' Bo B '].map((n) => L.officerLabel(n, 'user-7')));",
+	// C10
+	"await row('C10', async () => {",
+	'\tconst DEPS = { fake: true };',
+	'\tconst gate = () => { let open; const p = new Promise((r) => { open = r; }); return { p, open }; };',
+	'\tconst makeWorld = () => {',
+	'\t\tconst events = [];',
+	'\t\tconst gates = {};',
+	'\t\tconst boots = {};',
+	'\t\tconst makeBoot = (hash) => {',
+	"\t\t\tconst b = { networkHash: hash, db: null, failure: null, role: 'leader', stops: 0,",
+	"\t\t\t\tgetStatus() { return { kind: 'catching-up', lastPassAt: null, reconnecting: false }; },",
+	'\t\t\t\tsubscribeStatus() { return () => {}; }, getDataVersion() { return { version: 0, changedTables: new Set(), markEligible: false }; },',
+	'\t\t\t\tsubscribeData() { return () => {}; }, async reconnect() {}, onUnpaired() { return () => {}; }, onForgotten() { return () => {}; },',
+	"\t\t\t\tasync stop() { b.stops += 1; events.push('stop:' + hash); } };",
+	'\t\t\tboots[hash] = b;',
+	'\t\t\treturn b;',
+	'\t\t};',
+	'\t\tconst mod = {',
+	'\t\t\tasync startDashboardBoot(opts) {',
+	"\t\t\t\tevents.push('start:' + opts.networkHash + ':adopt=' + (opts.adopt === undefined ? 'none' : opts.adopt.tag) + ':deps=' + (opts.deps === DEPS));",
+	'\t\t\t\tif (gates[opts.networkHash]) await gates[opts.networkHash].p;',
+	'\t\t\t\treturn makeBoot(opts.networkHash);',
+	'\t\t\t},',
+	'\t\t\tasync switchDashboardBoot(current, opts) {',
+	"\t\t\t\tevents.push('switch:' + (current ? current.networkHash : 'null') + '->' + opts.networkHash + ':adoptKey=' + ('adopt' in opts) + ':deps=' + (opts.deps === DEPS));",
+	'\t\t\t\tif (current) await current.stop();',
+	'\t\t\t\tif (gates[opts.networkHash]) await gates[opts.networkHash].p;',
+	'\t\t\t\treturn makeBoot(opts.networkHash);',
+	'\t\t\t},',
+	'\t\t};',
+	'\t\tconst ctl = L.createShellBootController({ loadBootModule: async () => mod, bootDeps: DEPS });',
+	"\t\tctl.subscribe((b) => events.push('notify:' + (b ? b.networkHash : 'null')));",
+	'\t\treturn { events, gates, boots, ctl };',
+	'\t};',
+	'\tconst seq = makeWorld();',
+	"\tconst rA = await seq.ctl.open('A', { adopt: { tag: 'H', memberNode: 'm', strandReader: 's' } });",
+	'\tconst afterA = [...seq.events];',
+	"\tconst rB = await seq.ctl.open('B');",
+	'\tconst afterB = seq.events.slice(afterA.length);',
+	'\tconst sequence = { afterA, afterB, rA: { isA: rA.boot === seq.boots.A, stale: rA.stale, loadFailed: rA.loadFailed }, rB: { isB: rB.boot === seq.boots.B, stale: rB.stale }, current: seq.ctl.getBoot() && seq.ctl.getBoot().networkHash, aStops: seq.boots.A.stops };',
+	'\tconst ov = makeWorld();',
+	"\tawait ov.ctl.open('A');",
+	"\tov.gates.B = gate();",
+	"\tconst pB = ov.ctl.open('B');",
+	"\tconst pC = ov.ctl.open('C');",
+	'\tawait new Promise((r) => setTimeout(r, 5));',
+	'\tov.gates.B.open();',
+	'\tconst [oB, oC] = await Promise.all([pB, pC]);',
+	'\tconst overlap = { bStale: oB.stale, bBoot: oB.boot, cIsC: oC.boot === ov.boots.C, cStale: oC.stale, current: ov.ctl.getBoot() && ov.ctl.getBoot().networkHash, aStops: ov.boots.A.stops, bStops: ov.boots.B.stops, cStops: ov.boots.C.stops, bShown: ov.events.includes(\'notify:B\') };',
+	'\tconst st = makeWorld();',
+	"\tawait st.ctl.open('D');",
+	'\tconst beforeStop = st.events.length;',
+	'\tawait st.ctl.stopActive();',
+	'\tconst stopEvents = st.events.slice(beforeStop);',
+	"\tst.gates.E = gate();",
+	"\tconst pE = st.ctl.open('E');",
+	'\tconst pS = st.ctl.stopActive();',
+	'\tst.gates.E.open();',
+	'\tconst [rE] = await Promise.all([pE, pS]);',
+	"\tconst stop = { stopEvents, dStops: st.boots.D.stops, eStale: rE.stale, eBoot: rE.boot, eStops: st.boots.E.stops, eShown: st.events.includes('notify:E'), current: st.ctl.getBoot() };",
+	'\tconst logs = [];',
+	'\tconst realError = console.error;',
+	'\tconsole.error = (...args) => { logs.push(args.map(String)); };',
+	'\tlet failed;',
+	'\ttry {',
+	"\t\tconst ctl = L.createShellBootController({ loadBootModule: async () => { const e = new Error('detail-that-must-not-print'); e.name = 'ChunkLoadError'; throw e; } });",
+	"\t\tconst r = await ctl.open('Z');",
+	'\t\tfailed = { boot: r.boot, stale: r.stale, loadFailed: r.loadFailed, current: ctl.getBoot() };',
+	'\t} finally {',
+	'\t\tconsole.error = realError;',
+	'\t}',
+	'\treturn { sequence, overlap, stop, failed, logs };',
+	'});',
+	'process.stdout.write(JSON.stringify(rows));',
+].join('\n');
+
+const child = spawnSync(
+	process.execPath,
+	[
+		'--experimental-strip-types',
+		'--no-warnings',
+		'--import',
+		'data:text/javascript,' + encodeURIComponent(REGISTER),
+		'--input-type=module',
+		'-e',
+		HARNESS,
+	],
+	{ cwd: dashboardRoot(), encoding: 'utf8', env: { ...process.env, FORCE_COLOR: '0', TZ: 'UTC' } },
+);
+
+/** @type {Record<string, any>} */
+let ROWS = {};
+try {
+	ROWS = JSON.parse(child.stdout || '{}');
+} catch {
+	ROWS = {};
+}
+
+/** @param {string} name @returns {any} */
+function rowOf(name) {
+	assert.ok(name in ROWS, `harness produced no row "${name}"`);
+	const value = ROWS[name];
+	if (value && typeof value === 'object' && 'thrown' in value && !Array.isArray(value)) {
+		assert.fail(`harness row "${name}" threw ${value.thrown.name}: ${value.thrown.message}`);
+	}
+	return value;
+}
+
+/** @param {string} key @param {Record<string, string>} [params] */
+function copyOf(key, params = {}) {
+	assert.equal(typeof COPY[key], 'string', `COPY has no ${key}`);
+	return COPY[key].replace(/\{\{(\w+)\}\}/g, (_m, name) => params[name]);
+}
+
+test('shell-live harness: the child ran the real .ts module and exited 0', () => {
+	assert.equal(child.status, 0, `child exited ${child.status}; stderr:\n${child.stderr}`);
+	assert.ok(Object.keys(ROWS).length > 0, `child wrote no rows; stdout:\n${child.stdout}\nstderr:\n${child.stderr}`);
+});
+
+test('C1 chipModel: a live view reads Live, titled with the last pass time, with no Reconnect and no follower note', () => {
+	const m = rowOf('C1');
+	assert.equal(m.kind, 'live');
+	assert.equal(m.text, copyOf('status.chip.live'));
+	assert.equal(m.word, m.text);
+	assert.equal(m.separator, null);
+	assert.equal(m.title, copyOf('status.title.live', { time: '23:59:07' }));
+	assert.equal(m.showReconnect, false);
+	assert.equal(m.showFollowerNote, false);
+	assert.equal(m.reconnecting, false);
+	assert.equal(m.frozen, true);
+});
+
+test('C2 chipModel: catching up reads Catching up with its fixed title and no Reconnect', () => {
+	const m = rowOf('C2');
+	assert.equal(m.text, copyOf('status.chip.catching-up'));
+	assert.equal(m.title, copyOf('status.title.catching-up'));
+	assert.equal(m.showReconnect, false);
+	assert.equal(m.showFollowerNote, false);
+});
+
+test('C3 chipModel: offline shows the last update time (or no update yet), a full-date title, and Reconnect', () => {
+	const r = rowOf('C3');
+	assert.equal(r.withTime.text, copyOf('status.chip.offline', { time: '23:59' }));
+	assert.equal(r.withTime.word, 'Offline');
+	assert.equal(r.withTime.separator, ' · ');
+	assert.equal(r.withTime.detail, 'last update 23:59');
+	assert.equal(r.withTime.title, r.fullTitle);
+	assert.equal(r.withTime.showReconnect, true);
+	assert.equal(r.withTime.reconnecting, false);
+	assert.equal(r.noUpdate.text, copyOf('status.chip.offline-no-update'));
+	assert.equal(r.noUpdate.detail, 'no update yet');
+	assert.equal(r.noUpdate.title, null);
+	assert.equal(r.noUpdate.showReconnect, true);
+	assert.equal(r.reconnecting.reconnecting, true);
+	assert.equal(r.reconnecting.showReconnect, true);
+});
+
+test('C4 chipModel: not live shows the follower note and no Reconnect; unpaired and no view give no chip', () => {
+	const r = rowOf('C4');
+	assert.equal(r.notLive.text, copyOf('status.chip.not-live'));
+	assert.equal(r.notLive.showFollowerNote, true);
+	assert.equal(r.notLive.showReconnect, false);
+	assert.equal(r.notLive.title, null);
+	assert.equal(r.unpaired, null);
+	assert.equal(r.none, null);
+});
+
+test('C5 splitChipText: no separator keeps the whole text as the word; only the first separator splits', () => {
+	const r = rowOf('C5');
+	assert.deepEqual(r.plain, { word: 'Live', separator: null, detail: null });
+	assert.deepEqual(r.firstOnly, { word: 'a', separator: ' · ', detail: 'b · c' });
+	assert.deepEqual(r.noSpaces, { word: 'a·b', separator: null, detail: null });
+});
+
+test('C6 stepChipDebounce: a kind flip shows only after 1 s held, flicker never shows, and a new boot shows at once', () => {
+	const r = rowOf('C6');
+	assert.deepEqual(r.first, { kind: 'catching-up', wakeAt: null, bootKey: 'k1' });
+	assert.deepEqual(r.sameKind, { same: true, wakeAt: null });
+	assert.deepEqual(r.toLive, { kind: 'catching-up', pending: 'live', since: 100, wakeAt: 1100 });
+	assert.deepEqual(r.early, { kind: 'catching-up', wakeAt: 1100 });
+	assert.deepEqual(r.due, { kind: 'live', pending: null, wakeAt: null });
+	assert.deepEqual(r.reconnectFlag, { same: true, wakeAt: null });
+	assert.deepEqual(r.flicker, ['catching-up', 'catching-up', 'catching-up', 'catching-up'], 'live must never show inside 1 s');
+	assert.equal(r.flickerPending, null, 'returning to the shown kind clears the pending flip');
+	assert.equal(r.flickerWake, 1900, 'the hold restarts after a flicker');
+	assert.deepEqual(r.newBoot, { kind: 'catching-up', bootKey: 'k2', wakeAt: null }, 'no Live carry-over to a new boot');
+	assert.deepEqual(r.unpaired, { kind: 'unpaired', wakeAt: null });
+	assert.deepEqual(r.cleared, { shown: null, wakeAt: null });
+});
+
+test('C7 formatClockTime / formatFullDateTime: local 24-hour times, and a fixed-text TypeError on a non-finite input', () => {
+	const r = rowOf('C7');
+	assert.deepEqual(r.zero, ['00:00', '00:00:00']);
+	assert.deepEqual(r.late, ['23:59', '23:59:07']);
+	assert.ok(r.full.includes('2026'), `no year in "${r.full}"`);
+	assert.ok(r.full.includes('23:59'), `no 24-hour time in "${r.full}"`);
+	assert.deepEqual(r.throws, [
+		{ name: 'TypeError', message: 'formatClockTime: invalid time' },
+		{ name: 'TypeError', message: 'formatClockTime: invalid time' },
+		{ name: 'TypeError', message: 'formatFullDateTime: invalid time' },
+		{ name: 'TypeError', message: 'formatFullDateTime: invalid time' },
+	]);
+});
+
+test('C8 panelDataVersion: marks stay off until this boot was live once (followers excepted) and on a local-copy load', () => {
+	const r = rowOf('C8');
+	assert.equal(r.offSame, true);
+	assert.deepEqual(r.gated, { same: false, frozen: true, markEligible: false, version: 3, tablesSame: true });
+	assert.equal(r.everLiveSame, true);
+	assert.equal(r.followerSame, true);
+	assert.deepEqual(r.zero, { same: false, markEligible: false });
+});
+
+test('C9 officerLabel: a trimmed name, else the user id', () => {
+	assert.deepEqual(rowOf('C9'), ['Ana', 'user-7', 'user-7', 'user-7', 'user-7', 'Bo B']);
+});
+
+test('C10 boot controller: stop before start, stale opens stopped and never shown, a failed load logs only a name', () => {
+	const r = rowOf('C10');
+	const s = r.sequence;
+	assert.deepEqual(s.afterA, ['notify:null', 'start:A:adopt=H:deps=true', 'notify:A']);
+	assert.deepEqual(s.afterB, ['notify:null', 'switch:A->B:adoptKey=false:deps=true', 'stop:A', 'notify:B']);
+	assert.deepEqual(s.rA, { isA: true, stale: false, loadFailed: false });
+	assert.deepEqual(s.rB, { isB: true, stale: false });
+	assert.equal(s.current, 'B');
+	assert.equal(s.aStops, 1);
+	const o = r.overlap;
+	assert.equal(o.bStale, true);
+	assert.equal(o.bBoot, null);
+	assert.equal(o.cIsC, true);
+	assert.equal(o.cStale, false);
+	assert.equal(o.current, 'C');
+	assert.deepEqual([o.aStops, o.bStops, o.cStops], [1, 1, 0]);
+	assert.equal(o.bShown, false, 'a stale boot is never shown');
+	const st = r.stop;
+	assert.deepEqual(st.stopEvents, ['notify:null', 'stop:D']);
+	assert.equal(st.dStops, 1);
+	assert.equal(st.eStale, true);
+	assert.equal(st.eBoot, null);
+	assert.equal(st.eStops, 1);
+	assert.equal(st.eShown, false);
+	assert.equal(st.current, null);
+	assert.deepEqual(r.failed, { boot: null, stale: false, loadFailed: true, current: null });
+	assert.deepEqual(r.logs, [['live/shell-live:', 'ChunkLoadError']]);
+});
+
+const SHELL_LIVE_CODE = stripComments(readFileSync(dashboardSrc('live', 'shell-live.ts'), 'utf8'));
+const SHELL_LIVE_BANNED = [
+	/\benum\b/,
+	/\bnamespace\s/,
+	new RegExp('\\.\\./' + 'peer/'),
+	/Date\.parse/,
+	/toISOString/,
+	/console\.log/,
+	/setInterval/,
+];
+
+test('C11 positive control: every shell-live ban hits a synthetic fixture', () => {
+	const fixture = [
+		'enum K { A }',
+		'namespace N {}',
+		"import x from '../" + "peer/boot.js';",
+		'Date.parse(s);',
+		'd.toISOString();',
+		'console.log(1);',
+		'setInterval(f, 1);',
+	].join('\n');
+	for (const re of SHELL_LIVE_BANNED) assert.match(fixture, re, `${re} is inert`);
+});
+
+test('C11 shell-live.ts: no enum, namespace, peer import, date parsing, ISO text, console.log or interval; one console.error, inside logFailure', () => {
+	for (const re of SHELL_LIVE_BANNED) assert.doesNotMatch(SHELL_LIVE_CODE, re);
+	const errors = [...SHELL_LIVE_CODE.matchAll(/console\.error\(/g)];
+	assert.ok(errors.length <= 1, `expected at most one console.error, found ${errors.length}`);
+	if (errors.length === 1) {
+		const body = SHELL_LIVE_CODE.slice(SHELL_LIVE_CODE.indexOf('function logFailure('));
+		const end = body.indexOf('\n}');
+		assert.ok(body.slice(0, end).includes('console.error('), 'the console.error sits outside logFailure');
+	}
+});
+
+// --- live shell wiring scans --------------------------------------------------
 
 const SHELL = readFileSync(dashboardSrc('screens', 'DashboardShell.tsx'), 'utf8');
 
