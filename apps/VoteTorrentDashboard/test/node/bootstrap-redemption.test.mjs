@@ -9,13 +9,13 @@
  * `import 'fake-indexeddb/auto'` first, then `node:test` + `node:assert/strict`,
  * the Task 2 fixture, and a Map-backed storage double. Sequential, one
  * network hash per test, `deleteNetworkDb` at the top of each.
+ *
+ * The source-wiring section that read the old sign-in screen and main.tsx was
+ * removed when the pairing screen replaced it; a later cleanup deletes this file.
  */
 import 'fake-indexeddb/auto';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { dashboardSrc } from '../../../../scripts/lib/source-paths.mjs';
-import { stripComments } from '../../../../scripts/lib/strip-comments.mjs';
 import {
 	deleteNetworkDb,
 	closeNetworkDb,
@@ -573,152 +573,4 @@ test('copyKeysForOutcome: total over every non-"ok" outcome and every verify-fai
 
 test('copyKeysForOutcome: throws naming the outcome for an unmapped value', () => {
 	assert.throws(() => copyKeysForOutcome('not-a-real-outcome'), /unmapped outcome/);
-});
-
-// ---------------------------------------------------------------------------
-// 50-18 source-level wiring: `node --test` cannot import `.tsx`, so
-// `Bootstrap.tsx` and `main.tsx` are read as TEXT here -- the same idiom
-// `shell-wiring.test.mjs` and `preview-control.test.mjs` already established.
-// Every matcher below is paired with an inertness control.
-// ---------------------------------------------------------------------------
-
-const BOOTSTRAP_TSX = readFileSync(dashboardSrc('screens', 'Bootstrap.tsx'), 'utf8');
-const BOOTSTRAP_CODE = stripComments(BOOTSTRAP_TSX);
-const MAIN_TSX = readFileSync(dashboardSrc('main.tsx'), 'utf8');
-const MAIN_CODE = stripComments(MAIN_TSX);
-
-test('Bootstrap: all three new props are optional -- destructured with a default empty object, so <Bootstrap /> with no props still compiles', () => {
-	assert.match(BOOTSTRAP_CODE, /export function Bootstrap\(\{ onComplete, onAlreadyBootstrapped, createTransport \}: BootstrapProps = \{\}\)/);
-	assert.match(BOOTSTRAP_CODE, /onComplete\?:/);
-	assert.match(BOOTSTRAP_CODE, /onAlreadyBootstrapped\?:/);
-	assert.match(BOOTSTRAP_CODE, /createTransport\?:/);
-});
-
-test('inertness control: the optional-props matcher does not accept a required-props signature', () => {
-	const fixture = 'export function Bootstrap({ onComplete, onAlreadyBootstrapped, createTransport }: BootstrapProps)';
-	assert.doesNotMatch(
-		fixture,
-		/export function Bootstrap\(\{ onComplete, onAlreadyBootstrapped, createTransport \}: BootstrapProps = \{\}\)/,
-		'matcher is inert',
-	);
-});
-
-test('Bootstrap: every transport -- injected or the real REST default -- is wrapped in createSingleFlightTransport before use', () => {
-	assert.match(BOOTSTRAP_CODE, /const singleFlight = createSingleFlightTransport\(inner\);/);
-	// The wrap happens INSIDE the branch that already covers both
-	// `createTransport?.()` and the `createRestBootstrapTransport` default --
-	// assert the wrap is downstream of both, not duplicated per branch.
-	const wrapAt = BOOTSTRAP_CODE.indexOf('createSingleFlightTransport(inner)');
-	const injectedAt = BOOTSTRAP_CODE.indexOf('createTransport()');
-	const defaultAt = BOOTSTRAP_CODE.indexOf('createRestBootstrapTransport({ baseUrl: BOOTSTRAP_BASE_URL })');
-	assert.ok(wrapAt > injectedAt && injectedAt >= 0, 'the wrap must follow the injected-transport branch');
-	assert.ok(wrapAt > defaultAt && defaultAt >= 0, 'the wrap must follow the default-transport branch');
-});
-
-test('inertness control: the wrap matcher does not accept an unwrapped transport assignment', () => {
-	const fixture = 'transport = createRestBootstrapTransport({ baseUrl: BOOTSTRAP_BASE_URL });';
-	assert.doesNotMatch(fixture, /const singleFlight = createSingleFlightTransport\(inner\);/, 'matcher is inert');
-});
-
-test("Bootstrap: 'already-bootstrapped' is branched BEFORE the generic error-state mapping, and only calls onAlreadyBootstrapped when supplied", () => {
-	const alreadyBootstrappedAt = BOOTSTRAP_CODE.indexOf("result.outcome === 'already-bootstrapped'");
-	const genericErrorAt = BOOTSTRAP_CODE.indexOf('setState({\n\t\t\t\tkind:');
-	assert.ok(alreadyBootstrappedAt >= 0, 'could not locate the already-bootstrapped branch');
-	assert.match(BOOTSTRAP_CODE, /result\.outcome === 'already-bootstrapped' && onAlreadyBootstrapped/);
-	// A generic setState({ kind: 'error', ... }) call exists further down for
-	// every OTHER non-ok outcome.
-	assert.match(BOOTSTRAP_CODE, /kind: 'error',\s*outcome: result\.outcome,/);
-	const genericAt = BOOTSTRAP_CODE.indexOf("kind: 'error',\n\t\t\t\toutcome: result.outcome,");
-	assert.ok(genericAt > alreadyBootstrappedAt, 'the already-bootstrapped branch must precede the generic error mapping');
-});
-
-test('inertness control: the already-bootstrapped-guard matcher does not accept an unconditional branch', () => {
-	const fixture = "if (result.outcome === 'already-bootstrapped') {";
-	assert.doesNotMatch(fixture, /result\.outcome === 'already-bootstrapped' && onAlreadyBootstrapped/, 'matcher is inert');
-});
-
-test("Bootstrap: onComplete is called exactly once, on the 'ok' outcome, with the result", () => {
-	assert.match(BOOTSTRAP_CODE, /if \(result\.outcome === 'ok'\) \{\s*setState\(\{ kind: 'ok' \}\);\s*onComplete\?\.\(result\);/);
-});
-
-test('inertness control: the onComplete matcher does not accept a call outside the ok branch', () => {
-	const fixture = "onAlreadyBootstrapped?.(context);\nif (result.outcome === 'ok') {\n\tsetState({ kind: 'ok' });\n}";
-	assert.doesNotMatch(
-		fixture,
-		/if \(result\.outcome === 'ok'\) \{\s*setState\(\{ kind: 'ok' \}\);\s*onComplete\?\.\(result\);/,
-		'matcher is inert',
-	);
-});
-
-// ---------------------------------------------------------------------------
-// 50-20 D-14: the unmount cleanup no longer resets unconditionally -- a
-// handed-off cache belongs to its caller. Each matcher below is paired with
-// an inertness control.
-// ---------------------------------------------------------------------------
-
-test('Bootstrap: reset() is registered as an unmount cleanup GUARDED by handedOffRef, so a cancelled classification never leaves a redeemable snapshot in memory but a handed-off one survives', () => {
-	assert.match(
-		BOOTSTRAP_CODE,
-		/useEffect\(\(\) => \{\s*return \(\) => \{\s*if \(!handedOffRef\.current\) \{\s*singleFlightRef\.current\?\.reset\(\);/,
-	);
-});
-
-test('inertness control: the guarded-unmount-reset matcher rejects the OLD unconditional reset shape', () => {
-	const fixture = "useEffect(() => {\n\t\treturn () => {\n\t\t\tsingleFlightRef.current?.reset();\n\t\t};\n\t}, []);";
-	assert.doesNotMatch(
-		fixture,
-		/useEffect\(\(\) => \{\s*return \(\) => \{\s*if \(!handedOffRef\.current\) \{\s*singleFlightRef\.current\?\.reset\(\);/,
-		'matcher is inert',
-	);
-});
-
-test('Bootstrap: handedOffRef.current is set to true strictly BEFORE the onAlreadyBootstrapped( call, with no statement between them', () => {
-	const guardAt = BOOTSTRAP_CODE.indexOf('handedOffRef.current = true;');
-	const callAt = BOOTSTRAP_CODE.indexOf('onAlreadyBootstrapped({');
-	assert.ok(guardAt >= 0, 'could not locate handedOffRef.current = true;');
-	assert.ok(callAt >= 0, 'could not locate the onAlreadyBootstrapped( call');
-	assert.ok(guardAt < callAt, 'the handoff guard must be set BEFORE onAlreadyBootstrapped is called');
-	const between = BOOTSTRAP_CODE.slice(guardAt + 'handedOffRef.current = true;'.length, callAt).trim();
-	assert.equal(between, '', 'no statement may sit between the guard and the call');
-});
-
-test('inertness control: the guard-ordering matcher does not accept the guard placed AFTER the call', () => {
-	const fixture = 'onAlreadyBootstrapped({\n\tfoo: 1,\n});\nhandedOffRef.current = true;';
-	const guardAt = fixture.indexOf('handedOffRef.current = true;');
-	const callAt = fixture.indexOf('onAlreadyBootstrapped({');
-	assert.ok(!(guardAt < callAt), 'matcher is inert -- this fixture must NOT satisfy the before-ordering check');
-});
-
-test('Bootstrap: handleSubmit clears handedOffRef.current to false right after the submitting guard, so a retry after a failure is treated as fresh', () => {
-	assert.match(BOOTSTRAP_CODE, /if \(submitting\) return;\s*handedOffRef\.current = false;/);
-});
-
-test('inertness control: the handleSubmit-clear matcher does not accept a clear that precedes the submitting guard', () => {
-	const fixture = 'handedOffRef.current = false;\nif (submitting) return;';
-	assert.doesNotMatch(
-		fixture,
-		/if \(submitting\) return;\s*handedOffRef\.current = false;/,
-		'matcher is inert',
-	);
-});
-
-test('main.tsx: contains no setInterval or setTimeout, and the D-22 polling carve-out comment is gone', () => {
-	assert.equal((MAIN_CODE.match(/setInterval|setTimeout/g) ?? []).length, 0);
-	assert.doesNotMatch(MAIN_TSX, /ONE `setInterval`/);
-	assert.doesNotMatch(MAIN_TSX, /THIS IS NOT A LIVENESS MECHANISM/);
-});
-
-test('inertness control: the zero-timer matcher hits a synthetic setInterval fixture', () => {
-	assert.ok((('window.setInterval(() => {}, 500);').match(/setInterval|setTimeout/g) ?? []).length > 0, 'matcher is inert');
-});
-
-test('main.tsx: Bootstrap is rendered with onComplete and onAlreadyBootstrapped, and DashboardShell receives the resulting swap context', () => {
-	assert.match(MAIN_CODE, /<Bootstrap onComplete=\{handleBootstrapComplete\} onAlreadyBootstrapped=\{handleAlreadyBootstrapped\} \/>/);
-	assert.match(MAIN_CODE, /pendingSwapContext=\{swapContext\}/);
-	assert.match(MAIN_CODE, /onSwapContextConsumed=\{handleSwapContextConsumed\}/);
-});
-
-test('inertness control: the shell-wiring matcher does not accept the old, prop-less DashboardShell call site', () => {
-	const fixture = 'return <DashboardShell onRedeemAnother={handleRedeemAnother} />;';
-	assert.doesNotMatch(fixture, /pendingSwapContext=\{swapContext\}/, 'matcher is inert');
 });

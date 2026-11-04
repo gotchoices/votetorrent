@@ -10,6 +10,9 @@
  * own source tree.
  *
  * Browser-free, no display -- plain node:test.
+ *
+ * The three source-wiring tests that pinned the old sign-in screen were removed
+ * when the pairing screen replaced it (pairing-screen.test.mjs covers the new one).
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -362,39 +365,4 @@ test('T-52-12-01: no copy an officer can reach through copyKeysForOutcome contai
 			);
 		}
 	}
-});
-
-// ---------------------------------------------------------------------------
-// Source-level wiring for the .tsx (`node --test` cannot import it) -- the
-// idiom `bootstrap-redemption.test.mjs` already established. Both matchers are
-// paired with an inertness control.
-// ---------------------------------------------------------------------------
-
-const BOOTSTRAP_TSX_SOURCE = readFileSync(dashboardSrc('screens', 'Bootstrap.tsx'), 'utf8');
-const BOOTSTRAP_TSX_CODE = stripComments(BOOTSTRAP_TSX_SOURCE);
-
-test('D-25 wiring: Bootstrap.tsx passes the status as the THIRD argument to copyKeysForOutcome', () => {
-	// Positive control: the file really was read and really is the screen.
-	assert.ok(
-		BOOTSTRAP_TSX_CODE.includes('export function Bootstrap('),
-		'matcher is inert -- Bootstrap.tsx was not read (wrong path or empty file)',
-	);
-	assert.ok(
-		BOOTSTRAP_TSX_CODE.includes('copyKeysForOutcome(state.outcome, state.reason, state.status)'),
-		'Bootstrap.tsx must plumb the redemption status into the copy lookup -- without it every refusal renders the same family',
-	);
-});
-
-test('inertness control: the three-argument matcher does NOT accept the old two-argument call', () => {
-	const fixture = "const errorCopy = copyKeysForOutcome(state.outcome, state.reason);";
-	assert.ok(
-		!fixture.includes('copyKeysForOutcome(state.outcome, state.reason, state.status)'),
-		'matcher is inert -- it accepted the pre-plan two-argument call site',
-	);
-});
-
-test('D-25 wiring: ScreenState\'s error variant declares the optional status field', () => {
-	assert.match(BOOTSTRAP_TSX_CODE, /kind: 'error';[^}]*status\?: string/);
-	// Inertness control: a variant WITHOUT the field must not match.
-	assert.doesNotMatch("| { kind: 'error'; outcome: string; reason?: string }", /kind: 'error';[^}]*status\?: string/);
 });

@@ -11,16 +11,20 @@
  * text, and the pairing run is driven with fakes.
  *
  * Structure rows run over comment-stripped source and CSS, each matcher
- * proven on a planted fixture first.
+ * proven on a planted fixture first. The last two sections read main.tsx (the
+ * routing between pairing and the live shell) and index.html (the CSP).
  */
 import 'fake-indexeddb/auto';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import path from 'node:path';
 import { createRequire, register } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import viteReact from '@vitejs/plugin-react';
 import { COPY } from '@votetorrent/ui-web';
 import { dashboardRoot, dashboardSrc, moduleUrl } from '../../../../scripts/lib/source-paths.mjs';
 import { stripComments } from '../../../../scripts/lib/strip-comments.mjs';
@@ -427,4 +431,166 @@ test('C1 pairing.css: pr- classes only, one hex literal, the card and field geom
 		assert.ok(ok, `var(--primary) used outside the CTA and focus rules: ${selector}`);
 	}
 	assert.ok(rulesUsing(css, 'var(--primary)').includes('.pr-cta'), 'sanity: the CTA uses the accent');
+});
+
+// --- main.tsx routing ------------------------------------------------------------
+//
+// main.tsx is the entry (it renders into #root at import), so these rows read it
+// as comment-stripped source. Every matcher is proven on a planted fixture first.
+
+const MAIN_PATH = dashboardSrc('main.tsx');
+const SHELL_PATH = dashboardSrc('screens', 'DashboardShell.tsx');
+const MAIN_CODE = stripComments(readFileSync(MAIN_PATH, 'utf8'));
+
+test('M1 main.tsx: imports Pairing, the shell and the registry, routes with routeFromRegistry, and carries none of the retired sign-in path', () => {
+	const IMPORTS_PAIRING = /import\s*\{[^}]*\bPairing\b[^}]*\}\s*from\s*'\.\/screens\/Pairing'/;
+	const IMPORTS_SHELL = /import\s*\{[^}]*\bDashboardShell\b[^}]*\}\s*from\s*'\.\/screens\/DashboardShell'/;
+	const IMPORTS_REGISTRY = /import\s*\{[^}]*\blistNetworks\b[^}]*\}\s*from\s*'@votetorrent\/web-data\/officer'/;
+	// The banned names are assembled so this file's own text never matches them.
+	const BANNED = new RegExp(
+		[
+			'\\./peer/',
+			'freshness',
+			'snapshotFreshness',
+			['Boot', 'strap'].join(''),
+			'bootstrap-transport',
+			'lifecycle/bootstrap',
+			'onRedeemAnother',
+			'pendingSwapContext',
+			'setInterval',
+			'setTimeout',
+			'localStorage',
+		].join('|'),
+	);
+	// Positive controls.
+	assert.match("import { Pairing, routeFromRegistry } from './screens/Pairing';", IMPORTS_PAIRING);
+	assert.match("import { DashboardShell } from './screens/DashboardShell';", IMPORTS_SHELL);
+	assert.match("import { isLegacyEntry, listNetworks } from '@votetorrent/web-data/officer';", IMPORTS_REGISTRY);
+	assert.match("import { x } from './peer/boot.js';", BANNED);
+	assert.match('setTimeout(tick, 5)', BANNED);
+
+	assert.match(MAIN_CODE, IMPORTS_PAIRING);
+	assert.match(MAIN_CODE, IMPORTS_SHELL);
+	assert.match(MAIN_CODE, IMPORTS_REGISTRY);
+	assert.match(MAIN_CODE, /\bisLegacyEntry\b/);
+	assert.match(MAIN_CODE, /routeFromRegistry\(/);
+	const shell = MAIN_CODE.match(/<DashboardShell\b[^>]*\/>/);
+	assert.ok(shell, '<DashboardShell ... /> is rendered');
+	for (const prop of ['key=', 'initialNetworkHash=', 'adopt=', 'onPairAnother=', 'onUnpaired=', 'onNoNetworks=']) {
+		assert.ok(shell[0].includes(prop), `<DashboardShell> receives ${prop}`);
+	}
+	assert.match(MAIN_CODE, /<Pairing\b/);
+	assert.doesNotMatch(MAIN_CODE, BANNED);
+	assert.match(MAIN_CODE, /enginePreflight\(\)/, 'the preflight hook is kept');
+	assert.match(MAIN_CODE, /window\.__DASHBOARD__ = Object\.freeze\(/, 'the frozen readout hook is kept');
+});
+
+test('M2 cross-check: the shell main.tsx mounts has no snapshotFreshness call', () => {
+	const CALL = /snapshotFreshness\(/;
+	assert.match('const f = snapshotFreshness(entry);', CALL);
+	const shell = stripComments(readFileSync(SHELL_PATH, 'utf8'));
+	assert.match(shell, /export function DashboardShell\(/, 'sanity: the shell module was read');
+	assert.doesNotMatch(shell, CALL);
+});
+
+test('M3 onPaired hands the pairing result to the shell as adopt, with its network hash and a fresh mount', () => {
+	const HANDLER = /\(result: \{[^}]*\}\s*\}?\)\s*=>\s*\{\s*setRoute\(\{\s*kind: 'shell',\s*networkHash: result\.networkHash,\s*adopt: result\.handoff,\s*mount: \+\+mountSeq\s*\}\)/;
+	assert.match(
+		"(result: { networkHash: string; handoff: PairingHandoff }) => {\n\t\tsetRoute({ kind: 'shell', networkHash: result.networkHash, adopt: result.handoff, mount: ++mountSeq });",
+		HANDLER,
+	);
+	assert.match(MAIN_CODE, HANDLER);
+	assert.match(MAIN_CODE, /onPaired=\{handlePaired\}/);
+	assert.match(MAIN_CODE, /const handlePaired = useCallback\(/);
+});
+
+test('M4 the retired sign-in screen and its stylesheet are gone and nothing under src or test/node names them', () => {
+	const screenName = ['Boot', 'strap.tsx'].join('');
+	const sheetName = ['boot', 'strap.css'].join('');
+	assert.equal(existsSync(dashboardSrc('screens', 'Pairing.tsx')), true, 'sanity: existsSync sees a real file');
+	assert.equal(existsSync(dashboardSrc('screens', screenName)), false);
+	assert.equal(existsSync(dashboardSrc('screens', sheetName)), false);
+	assert.equal(existsSync(dashboardRoot('test', 'node', 'no-qr-affordance.test.mjs')), false);
+	const NEEDLE = new RegExp(`screens/${screenName.replace('.tsx', '')}|${sheetName.replace('.', '\\.')}`);
+	assert.match(`import x from './screens/${screenName}';`, NEEDLE);
+	/** @param {string} dir @returns {string[]} */
+	const walk = (dir) =>
+		readdirSync(dir, { withFileTypes: true }).flatMap((d) =>
+			d.isDirectory() ? walk(path.join(dir, d.name)) : [path.join(dir, d.name)],
+		);
+	const files = [...walk(dashboardSrc()), ...walk(dashboardRoot('test', 'node'))];
+	assert.ok(files.length > 50, `sanity: the walk visited ${files.length} files`);
+	// Code only: a comment that still names the old screen (one remains in a
+	// transport module that a later cleanup deletes) is history, not a reader.
+	/** @param {string} f */
+	const codeOf = (f) => {
+		const text = readFileSync(f, 'utf8');
+		if (f.endsWith('.css')) return stripCssComments(text);
+		return /\.(m?js|tsx?)$/.test(f) ? stripComments(text) : text;
+	};
+	assert.match(codeOf(dashboardSrc('main.tsx')), /createRoot/, 'sanity: codeOf keeps code');
+	const hits = files.filter((f) => NEEDLE.test(codeOf(f)));
+	assert.deepEqual(hits, []);
+});
+
+// --- CSP --------------------------------------------------------------------------
+
+const INDEX_HTML = readFileSync(dashboardRoot('index.html'), 'utf8');
+
+/** @param {string} policy */
+const parseCsp = (policy) =>
+	new Map(
+		policy
+			.split(';')
+			.map((d) => d.trim())
+			.filter(Boolean)
+			.map((d) => {
+				const [name, ...values] = d.split(/\s+/);
+				return [name, values];
+			}),
+	);
+
+test('P1 index.html carries one meta CSP: self scripts plus the dev-preamble hash, no inline or eval, no plugins, no base or form targets', () => {
+	const META = /<meta\s+http-equiv="Content-Security-Policy"\s+content="([^"]*)"\s*\/?>/g;
+	// Positive control.
+	assert.equal([...'<meta http-equiv="Content-Security-Policy" content="default-src \'self\'" />'.matchAll(META)].length, 1);
+	const html = INDEX_HTML.replace(/<!--[\s\S]*?-->/g, '');
+	const metas = [...html.matchAll(META)];
+	assert.equal(metas.length, 1, 'exactly one CSP meta');
+	const csp = parseCsp(metas[0][1]);
+	assert.deepEqual(parseCsp("a 'x'; b c d").get('b'), ['c', 'd'], 'sanity: the parser splits directives');
+
+	const preamble = viteReact.preambleCode.replace('__BASE__', '/');
+	assert.match(preamble, /injectIntoGlobalHook/, 'sanity: plugin-react preamble read');
+	const hash = `'sha256-${createHash('sha256').update(preamble).digest('base64')}'`;
+	const usesWasm = /import\(\s*'zxing-wasm/.test(stripComments(readFileSync(dashboardSrc('screens', 'QrScanner.tsx'), 'utf8')));
+	const expectedScript = ["'self'", hash, ...(usesWasm ? ["'wasm-unsafe-eval'"] : [])];
+
+	assert.deepEqual(csp.get('default-src'), ["'self'"]);
+	assert.deepEqual(csp.get('script-src'), expectedScript);
+	for (const bad of ["'unsafe-inline'", "'unsafe-eval'"]) {
+		assert.ok(!csp.get('script-src')?.includes(bad), `script-src has no ${bad}`);
+	}
+	assert.deepEqual(csp.get('style-src'), ["'self'", "'unsafe-inline'"]);
+	assert.deepEqual(csp.get('connect-src'), ["'self'", 'wss:', 'ws:']);
+	assert.deepEqual(csp.get('object-src'), ["'none'"]);
+	assert.deepEqual(csp.get('base-uri'), ["'none'"]);
+	assert.deepEqual(csp.get('form-action'), ["'none'"]);
+	assert.equal(csp.has('frame-ancestors'), false, 'frame-ancestors is ignored in a meta policy');
+	assert.deepEqual(
+		[...csp.keys()].sort(),
+		['base-uri', 'connect-src', 'default-src', 'form-action', 'object-src', 'script-src', 'style-src'],
+		'no directive beyond the reviewed set',
+	);
+});
+
+test('P1b the CSP meta comes before every script and stylesheet, so it governs them all', () => {
+	const html = INDEX_HTML.replace(/<!--[\s\S]*?-->/g, '');
+	const at = html.indexOf('http-equiv="Content-Security-Policy"');
+	assert.ok(at > 0);
+	for (const tag of ['<script', '<link']) {
+		const first = html.indexOf(tag);
+		assert.ok(first === -1 || first > at, `${tag} follows the CSP meta`);
+	}
+	assert.ok(html.indexOf('<meta charset') < at, 'the charset meta stays first');
 });
