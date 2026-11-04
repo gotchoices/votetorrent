@@ -215,7 +215,7 @@ function fakeEdge(options = {}) {
 				statusListeners.delete(listener);
 			};
 		},
-		/** Set the status AND notify the onStatus listeners, as cadre-core's setStatus does. @param {{ state: string }} status */
+		/** Set the status AND notify the onStatus listeners, as cadre-core's setStatus does. @param {{ state: string, [key: string]: unknown }} status */
 		setStatus(status) {
 			state.status = status;
 			for (const listener of [...statusListeners]) listener(status);

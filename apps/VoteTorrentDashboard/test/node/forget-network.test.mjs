@@ -772,7 +772,15 @@ test('F19 source scan: no static peer import, exactly the three lazy peer specif
 
 test('F20 a busy member-storage delete is retried, bounded, with one fixed log line per retry; then the wipe finishes', async () => {
 	const hash = 'fn-member-busy-twice';
-	const { storage } = await setupNetwork(hash, 'Busy Twice Authority', null, { seed: false });
+	// No store is created (the wipe's store delete of an absent database resolves): only the
+	// registry entry and the row-count record, which the wipe must remove.
+	const storage = makeFakeStorage();
+	await writeRowCounts(hash, { Authority: 0 }, storage);
+	upsertNetwork(
+		{ networkHash: hash, authorityName: 'Busy Twice Authority', domain: 'fixture.example', officerUserId: 'u1', bootstrappedAt: nowCanonicalDatetime() },
+		storage,
+	);
+	assert.ok(findNetwork(hash, storage) && (await readRowCountsRecord(hash, storage)), 'the entry and the record exist before the wipe');
 	let attempts = 0;
 	const { deps, calls } = peerFakes({
 		deleteMemberStorage: async (/** @type {string} */ h) => {
