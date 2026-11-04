@@ -100,126 +100,6 @@
  */
 /** @type {Record<string, string>} */
 export const COPY = Object.freeze({
-	// Bootstrap and networks
-	'bootstrap.heading': 'Enter your sign-in code',
-	// The FIELD label, deliberately not the page heading. Both were
-	// `bootstrap.heading` until live UAT, so the officer read "Enter your
-	// sign-in code" twice on one screen -- once as the title and again as the
-	// label under it. A label still has to exist and stay associated with the
-	// input for screen readers; it just must not restate the title.
-	'bootstrap.codeFieldLabel': 'Sign-in code',
-	'bootstrap.cta': 'Redeem Code',
-	'bootstrap.emptyNetworksHeading': 'No networks yet',
-	'bootstrap.emptyNetworksBody':
-		"Redeem a sign-in code from the authority app to bring this browser's copy of a network's data up to date.",
-	'bootstrap.errorInvalidCodeHeading': "That code isn't valid.",
-	// NARROWED to the case it now actually covers: a pasted string that failed
-	// the local shape check and NEVER LEFT THIS BROWSER. Its old value hedged
-	// across staleness and prior redemption, so it answered three service
-	// refusals as well -- and was a wrong answer for all four; see the
-	// refusal-family comment below. A code that was never sent to anything
-	// cannot have been spent or gone stale, so the only honest next action here
-	// is a local one.
-	'bootstrap.errorInvalidCodeBody':
-		'A sign-in code is two parts joined by a dot. Copy the whole code from the authority app and paste it again.',
-	'bootstrap.errorInvalidCodeCta': 'Try another code',
-	// --- The three refusal families ---------------------------------------
-	//
-	// WHAT DEFECT THIS CLOSES: one hedging sentence was the dashboard's answer
-	// to three different service refusals AND to a locally malformed paste. An
-	// officer reading it could not tell a typo from a code whose single use was
-	// already spent from one that simply sat too long, and the single action it
-	// offered -- ask for a new code -- is the wrong instruction for the first
-	// of those.
-	//
-	// WHY THIS PRECISION IS AVAILABLE AT ALL -- READ THIS BEFORE SHORTENING THE
-	// SERVICE'S RETENTION WINDOW: the rendezvous service erases a code's
-	// ciphertext as soon as it is served, but deliberately KEEPS the
-	// payload-free record for a grace window past the code's expiry. That
-	// retention is the only reason a late redemption is still answered
-	// precisely ("already redeemed" / "timed out") instead of collapsing to the
-	// weakest answer, "no record here". These three keys are what that
-	// retention buys. Shorten the window and this file quietly regresses to one
-	// hedge for every refusal -- the exact defect above -- with no test to
-	// notice, because each key would still resolve.
-	//
-	// WHY THE WORDS ARE WHAT THEY ARE: the refusal copy is walked by a test
-	// (`test/node/copy.test.mjs`) that forbids any machine identifier -- every
-	// outcome code, plus the literal status values a service can answer -- from
-	// appearing in a string an officer reads. That is why this says "not
-	// recognized", "timed out" and "already been redeemed" rather than echoing
-	// the wire vocabulary. "Redeemed" also matches `bootstrap.cta`.
-	//
-	// All three families reuse `bootstrap.errorInvalidCodeCta` as their action
-	// button; a fourth key with an identical value would buy no locale
-	// flexibility and add a drift surface.
-	'bootstrap.errorCodeNotRecognizedHeading': "That code isn't recognized.",
-	'bootstrap.errorCodeNotRecognizedBody':
-		'Check what you pasted for a typo first — a mistyped code looks exactly like this. If it matches the authority app character for character, ask the officer to generate a new code.',
-	'bootstrap.errorCodeAlreadyUsedHeading': 'That code has already been redeemed.',
-	'bootstrap.errorCodeAlreadyUsedBody':
-		'Each sign-in code works only once, so retrying this one will never succeed. Ask the officer to generate a fresh code in the authority app.',
-	'bootstrap.errorCodeTimedOutHeading': 'That code timed out.',
-	'bootstrap.errorCodeTimedOutBody':
-		'Sign-in codes stop working a few minutes after they are made. Ask the officer for a fresh code and paste it right away, or this will happen again.',
-	'bootstrap.errorTransportHeading': "Couldn't reach the authority app.",
-	'bootstrap.errorTransportBody': 'Check that the code was generated recently and try again.',
-	'bootstrap.errorTransportCta': 'Retry',
-	// One key per BOOTSTRAP_PHASES member, named `bootstrap.phase.<value>` --
-	// keyed by the EXACT machine value (`bootstrap.phase.applying-schema` and
-	// so on), so the screen looks a phase up with a mechanical template
-	// (`` `bootstrap.phase.${state.phase}` ``) rather than through a
-	// hand-maintained mapping table that could drift out of step with
-	// BOOTSTRAP_PHASES. `t()` throws on an unknown key, so a phase added
-	// without a key here is a loud error, never a machine identifier on
-	// screen.
-	'bootstrap.phase.submitting': 'Sending your code…',
-	'bootstrap.phase.verifying': 'Checking the data against your code…',
-	'bootstrap.phase.applying-schema': 'Preparing this browser…',
-	'bootstrap.phase.seeding': 'Copying the data into this browser…',
-	'bootstrap.phase.success': 'Done.',
-
-	// Snapshot freshness, refresh and verification
-	'snapshot.refreshCta': 'Refresh snapshot',
-	'snapshot.asOf': 'as of {{relativeTime}}',
-	'snapshot.verifiedToast': 'Snapshot verified and swapped.',
-	'snapshot.staleBanner':
-		'This copy of the data is more than {{threshold}} old. Refresh to bring it up to date.',
-	'snapshot.errorVerificationHeading': "Couldn't verify the new snapshot.",
-	'snapshot.errorVerificationBody':
-		"The transferred data didn't match its checksum, so nothing was replaced — your existing data is unchanged. Try refreshing again.",
-	// The banner for an attach failure this shell does NOT recognise as an
-	// integrity problem -- a corrupt row-count record, a DDL reconcile error, a
-	// storage quota refusal, a plugin registration failure. Distinct wording
-	// from the verification family on purpose: telling an officer their data
-	// failed its checksum when the database simply would not open is a
-	// different, wrong answer.
-	'snapshot.errorAttachHeading': "Couldn't open this browser's copy of the data.",
-	'snapshot.errorAttachBody':
-		'Nothing was changed. Refresh the snapshot to rebuild this browser’s copy from the authority app.',
-	'snapshot.errorSchemaMismatchHeading': 'This authority app is running a different version.',
-	'snapshot.errorSchemaMismatchBody':
-		'Update the authority app or this dashboard so both match, then try again.',
-
-	// Network lifecycle and chrome
-	'network.redeemAnotherCta': '+ Redeem another code',
-	'network.forgetCta': 'Forget this network',
-	'network.forgetConfirmBody':
-		"This deletes this browser's locally stored copy of {{authorityName}}'s data, including registrant information. There's no undo. Type {{authorityName}} to confirm.",
-	'network.swapConfirmHeading': "Replace this browser's data?",
-	'network.swapConfirmBody':
-		"A different officer's code was just redeemed for {{authorityName}}. Continuing replaces this browser's existing copy and signs you in as the new officer.",
-	'network.swapConfirmCta': 'Replace and continue',
-	// The surfaced swap-failure banner (CR-03, 50-22): renders in the main
-	// region -- not the swap dialog -- when classifying an incoming code
-	// fails before (or without) ever opening the confirm dialog, so the
-	// panel grid can never stand in for a failed replacement. Deliberately
-	// distinct from `snapshot.errorAttachHeading`/`Body`: "couldn't open
-	// this browser's copy of the data" is a wrong answer for a code that
-	// was refused.
-	'network.swapErrorHeading': "This browser's data couldn't be replaced.",
-	'network.swapErrorBody':
-		"The sign-in code couldn't be used to replace this browser's data. Ask the authority app for a new code and try again.",
 	'chrome.moreOptionsAriaLabel': 'More options',
 
 	// Authorization gate and preview control
@@ -280,7 +160,7 @@ export const COPY = Object.freeze({
 	// election; this closes that.
 	'panels.registrations.loading': 'Loading registrations…',
 	'panels.registrations.unavailable': 'No election data is loaded in this browser yet.',
-	'panels.registrations.readFailed': "Couldn't load registrations. Try refreshing the snapshot.",
+	'panels.registrations.readFailed': "Couldn't load registrations. This panel tries again when new data arrives.",
 	// Phase 60 (D-06): section headings for all four Registrations sections,
 	// authored prose rather than literal JSX text (rule R1, contract C2).
 	'panels.registrations.statusHeading': 'Registrants by status',
@@ -316,7 +196,7 @@ export const COPY = Object.freeze({
 	// group above.
 	'panels.keyholders.loading': 'Loading keyholders…',
 	'panels.keyholders.unavailable': 'No election data is loaded in this browser yet.',
-	'panels.keyholders.readFailed': "Couldn't load keyholders. Try refreshing the snapshot.",
+	'panels.keyholders.readFailed': "Couldn't load keyholders. This panel tries again when new data arrives.",
 	// Phase 60 (D-07/D-21): the threshold meter's chart-level empty frame,
 	// and its numeral template ("N of M" per 60-UI-SPEC.md).
 	'panels.keyholders.meter.empty': 'No keyholder threshold set for this election yet.',
