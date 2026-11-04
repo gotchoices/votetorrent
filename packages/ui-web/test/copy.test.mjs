@@ -42,17 +42,20 @@ import { FACT_COPY_KEYS, FACTS } from '../src/lifecycle/facts.js';
 // 155 + 22 = 177. 66-05 then added eighty-four more: the live dashboard's pairing
 // screen, webcam scanner, header status, officer-swap and forget dialogs, unpaired
 // notice, panel action notes, network switcher and change-mark copy --
-// 177 + 84 = 261. Written as a bare literal so a future "fix" that deletes
+// 177 + 84 = 261. 66-22 then added five gap keys: the unnamed joining step,
+// the unnamed-officer fallback, the other-tab no-storage line, the scanner's
+// could-not-start state and the forget dialog's failure line --
+// 261 + 5 = 266. Written as a bare literal so a future "fix" that deletes
 // any of them is caught by a failure message that names the reason. This
 // number is re-derived live from `Object.keys(COPY).length`, never from the
 // arithmetic in this comment.
 // ---------------------------------------------------------------------------
 
-test('COPY has exactly 261 keys (73 pre-53-07, +10 public-voice keys under D-08, +2 net from the 54-02 lifecycle rename/expansion, +61 from 54-09s fact/gap copy table, +2 from 54-12s not-held sentence, +6 from 56-12s staleness/config-fault copy, +1 from 56-14s live-update badge, +22 from 60-01s chart-visualization copy, +84 from 66-05s live-dashboard copy)', () => {
+test('COPY has exactly 261 keys (73 pre-53-07, +10 public-voice keys under D-08, +2 net from the 54-02 lifecycle rename/expansion, +61 from 54-09s fact/gap copy table, +2 from 54-12s not-held sentence, +6 from 56-12s staleness/config-fault copy, +1 from 56-14s live-update badge, +22 from 60-01s chart-visualization copy, +84 from 66-05s live-dashboard copy, +5 from 66-22s pairing, scanner and forget gap copy)', () => {
 	assert.equal(
 		Object.keys(COPY).length,
-		261,
-		'expected 261 -- if this reads 177, 66-05s eighty-four live-dashboard keys (NEW_66_05_KEYS: pairing, scanner, status, swap, forget, unpaired, panel.readOnly, switcher, shell and marks) were wrongly deleted; they are mounted by the live dashboard screens, where t() throws on them going missing. If this reads 155, 60-01s twenty-two chart-visualization keys (NEW_60_01_KEYS: the view ' +
+		266,
+		'expected 266 -- if this reads 261, 66-22s five gap keys (NEW_66_22_KEYS: pairing.step.joiningUnnamed, pairing.officerUnknown, pairing.failed.no-storage.otherTab, scanner.unavailable and forget.failed) were wrongly deleted; the pairing screen, the webcam scanner and the forget dialog mount them, where t() throws on them going missing. If this reads 177, 66-05s eighty-four live-dashboard keys (NEW_66_05_KEYS: pairing, scanner, status, swap, forget, unpaired, panel.readOnly, switcher, shell and marks) were wrongly deleted; they are mounted by the live dashboard screens, where t() throws on them going missing. If this reads 155, 60-01s twenty-two chart-visualization keys (NEW_60_01_KEYS: the view ' +
 			'switch, the panel-state and chart-empty keys, the section headings and the tooltip/meter templates) were ' +
 			'wrongly deleted; they are consumed starting in 60-03/60-05/60-06. If this reads 154, 56-14s ' +
 			'public.liveUpdate.badge was wrongly deleted; it is Surface 5 (D-16/D-19) ' +
@@ -495,6 +498,37 @@ const PRIOR_TO_66_05 = () => [
 	...PRE_MOVE_KEYS,
 ];
 
+/**
+ * The five keys 66-22 added for states and data the live dashboard's copy
+ * table leaves open: the unnamed joining step, the unnamed-officer fallback,
+ * the other-tab no-storage line, the scanner's could-not-start state and the
+ * forget dialog's failure line.
+ * @type {ReadonlyArray<string>}
+ */
+const NEW_66_22_KEYS = Object.freeze([
+	'pairing.step.joiningUnnamed',
+	'pairing.officerUnknown',
+	'pairing.failed.no-storage.otherTab',
+	'scanner.unavailable',
+	'forget.failed',
+]);
+
+/**
+ * The exact value of every NEW_66_22_KEYS entry, transcribed a second time so a
+ * silent edit to copy.js is caught.
+ * @type {Readonly<Record<string, string>>}
+ */
+const EXPECTED_66_22_VALUES = Object.freeze({
+	'pairing.step.joiningUnnamed': "Joining as the officer's browser",
+	'pairing.officerUnknown': 'Unnamed officer',
+	'pairing.failed.no-storage.otherTab': 'This network is open in another tab. Close that tab and try again.',
+	'scanner.unavailable': "The scanner couldn't start. Paste the code instead.",
+	'forget.failed': "Couldn't forget this network. Close any other tab that has it open, then try again.",
+});
+
+/** Every live-dashboard key whose value the gate 8, placeholder and machine-identifier checks cover. */
+const LIVE_DASHBOARD_KEYS = Object.freeze([...NEW_66_05_KEYS, ...NEW_66_22_KEYS]);
+
 test('sanity: the 66-05 delta is 84 keys, has no duplicates and none collides with any prior delta', () => {
 	assert.equal(NEW_66_05_KEYS.length, 84);
 	assert.equal(new Set(NEW_66_05_KEYS).size, 84);
@@ -507,6 +541,21 @@ test('66-05: every new live-dashboard key holds its exact UI-contract value', ()
 	assert.deepEqual(Object.keys(EXPECTED_66_05_VALUES), [...NEW_66_05_KEYS]);
 	for (const key of NEW_66_05_KEYS) {
 		assert.equal(COPY[key], EXPECTED_66_05_VALUES[key], `value drift on ${key}`);
+	}
+});
+
+test('sanity: the 66-22 delta is 5 keys, has no duplicates and none collides with any prior delta (the 66-05 delta included)', () => {
+	assert.equal(NEW_66_22_KEYS.length, 5);
+	assert.equal(new Set(NEW_66_22_KEYS).size, 5);
+	const priorSet = new Set([...PRIOR_TO_66_05(), ...NEW_66_05_KEYS]);
+	const overlap = NEW_66_22_KEYS.filter((k) => priorSet.has(k));
+	assert.deepEqual(overlap, [], `these keys are counted twice: ${overlap.join(', ')}`);
+});
+
+test('66-22: every new gap key holds its exact value', () => {
+	assert.deepEqual(Object.keys(EXPECTED_66_22_VALUES), [...NEW_66_22_KEYS]);
+	for (const key of NEW_66_22_KEYS) {
+		assert.equal(COPY[key], EXPECTED_66_22_VALUES[key], `value drift on ${key}`);
 	}
 });
 
@@ -531,17 +580,17 @@ test('66-05 gate 8 positive control: the banned-word matcher fires on a planted 
 	assert.deepEqual(gate8Hits('Pair this browser'), []);
 });
 
-test('66-05 gate 8: no new value uses a snapshot-era word, a phase or decision id, or an erasure promise', () => {
-	for (const key of NEW_66_05_KEYS) {
+test('66-05/66-22 gate 8: no new value uses a snapshot-era word, a phase or decision id, or an erasure promise', () => {
+	for (const key of LIVE_DASHBOARD_KEYS) {
 		assert.deepEqual(gate8Hits(COPY[key]), [], `${key} reads as banned copy: ${COPY[key]}`);
 	}
 });
 
 const PLACEHOLDER_WHITELIST = new Set(['authorityName', 'officerName', 'oldOfficer', 'newOfficer', 'time', 'domain', 'count', 'panel']);
 
-test('66-05: every placeholder in a new value is whitelisted, and every new key resolves through t() once they are supplied', () => {
+test('66-05/66-22: every placeholder in a new value is whitelisted, and every new key resolves through t() once they are supplied', () => {
 	const all = Object.fromEntries([...PLACEHOLDER_WHITELIST].map((n) => [n, `<${n}>`]));
-	for (const key of NEW_66_05_KEYS) {
+	for (const key of LIVE_DASHBOARD_KEYS) {
 		for (const m of COPY[key].matchAll(/\{\{\s*([^}]*?)\s*\}\}/g)) {
 			assert.ok(PLACEHOLDER_WHITELIST.has(m[1]), `${key} interpolates the non-whitelisted placeholder "${m[1]}"`);
 		}
@@ -567,8 +616,8 @@ test('66-05 machine-identifier positive control: the matcher fires on a planted 
 	assert.deepEqual(machineHits('state: catching-up, failure: digest-mismatch'), ['digest-mismatch', 'catching-up']);
 });
 
-test('66-05: no new value shows a machine identifier to the officer', () => {
-	for (const key of NEW_66_05_KEYS) {
+test('66-05/66-22: no new value shows a machine identifier to the officer', () => {
+	for (const key of LIVE_DASHBOARD_KEYS) {
 		assert.deepEqual(machineHits(COPY[key]), [], `${key} leaks a machine identifier: ${COPY[key]}`);
 	}
 });
@@ -617,7 +666,7 @@ test('sanity: the 54-09 delta is 61 keys -- 50 named by facts.js FACT_COPY_KEYS 
 	assert.equal(new Set(NEW_54_09_KEYS).size, 61);
 });
 
-test('D-25/D-07/D-08/D-06/54-09/54-12/56-12/56-14/60-01/66-05: the ONLY key-set changes since 8326185d are gate.advisoryDisclosure -> advisory.authority.body, the ten NEW_53_07_KEYS additions, the PHASE_54_RENAMES rename, the PHASE_54_ADDITIONS additions, the 61 NEW_54_09_KEYS additions, the two NEW_54_12_KEYS additions, the six NEW_56_12_KEYS additions, the one NEW_56_14_KEYS addition the twenty-two NEW_60_01_KEYS additions and the eighty-four NEW_66_05_KEYS additions -- no other key added or removed', () => {
+test('D-25/D-07/D-08/D-06/54-09/54-12/56-12/56-14/60-01/66-05/66-22: the ONLY key-set changes since 8326185d are gate.advisoryDisclosure -> advisory.authority.body, the ten NEW_53_07_KEYS additions, the PHASE_54_RENAMES rename, the PHASE_54_ADDITIONS additions, the 61 NEW_54_09_KEYS additions, the two NEW_54_12_KEYS additions, the six NEW_56_12_KEYS additions, the one NEW_56_14_KEYS addition the twenty-two NEW_60_01_KEYS additions the eighty-four NEW_66_05_KEYS additions and the five NEW_66_22_KEYS additions -- no other key added or removed', () => {
 	const currentKeys = new Set(Object.keys(COPY));
 	const renameMap = new Map(PHASE_54_RENAMES);
 	const expectedKeys = new Set([
@@ -634,6 +683,7 @@ test('D-25/D-07/D-08/D-06/54-09/54-12/56-12/56-14/60-01/66-05: the ONLY key-set 
 		...NEW_56_14_KEYS,
 		...NEW_60_01_KEYS,
 		...NEW_66_05_KEYS,
+		...NEW_66_22_KEYS,
 	]);
 
 	const added = [...currentKeys].filter((k) => !expectedKeys.has(k));
@@ -642,12 +692,12 @@ test('D-25/D-07/D-08/D-06/54-09/54-12/56-12/56-14/60-01/66-05: the ONLY key-set 
 	assert.deepEqual(
 		added,
 		[],
-		`unexpected key(s) added beyond the D-07 rename, the D-08 additions, the 54-02 lifecycle changes, the 54-09 delta, the 54-12 delta, the 56-12 delta, the 56-14 delta, the 60-01 delta and the 66-05 delta: ${added.join(', ')}`,
+		`unexpected key(s) added beyond the D-07 rename, the D-08 additions, the 54-02 lifecycle changes, the 54-09 delta, the 54-12 delta, the 56-12 delta, the 56-14 delta, the 60-01 delta, the 66-05 delta and the 66-22 delta: ${added.join(', ')}`,
 	);
 	assert.deepEqual(
 		removed,
 		[],
-		`unexpected key(s) missing beyond the D-07 rename, the D-08 additions, the 54-02 lifecycle changes, the 54-09 delta, the 54-12 delta, the 56-12 delta, the 56-14 delta, the 60-01 delta and the 66-05 delta: ${removed.join(', ')}`,
+		`unexpected key(s) missing beyond the D-07 rename, the D-08 additions, the 54-02 lifecycle changes, the 54-09 delta, the 54-12 delta, the 56-12 delta, the 56-14 delta, the 60-01 delta, the 66-05 delta and the 66-22 delta: ${removed.join(', ')}`,
 	);
 });
 

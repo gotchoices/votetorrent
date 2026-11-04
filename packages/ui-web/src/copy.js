@@ -914,6 +914,37 @@ export const COPY = Object.freeze({
 	'marks.updated': 'updated',
 	'marks.announceOne': '{{count}} item updated in {{panel}}',
 	'marks.announceMany': '{{count}} items updated in {{panel}}',
+	// --- Live dashboard gaps (66-22): states the UI contract's copy table ---
+	// --- does not cover --------------------------------------------------
+	//
+	// Five keys found missing while building the pairing screen, the webcam
+	// scanner and the forget dialog. Each fills a state or a datum the
+	// contract's table leaves open:
+	//
+	// `pairing.step.joiningUnnamed` -- the pairing code carries no officer
+	// name, so the named `pairing.step.joining` row is used only when a name
+	// is known (from an accepted officer swap); this is the unnamed row.
+	//
+	// `pairing.officerUnknown` -- the fallback for `{{officerName}}`,
+	// `{{oldOfficer}}` and `{{newOfficer}}` when the local copy holds no name
+	// for that officer.
+	//
+	// `pairing.failed.no-storage.otherTab` -- a delete blocked by another tab
+	// that holds the same network also resolves as no-storage; this extra line
+	// names that cause when the browser's lock list shows it.
+	//
+	// `scanner.unavailable` -- the camera is busy, the request was aborted, or
+	// the decoder failed to load: none of the other scanner states fits.
+	//
+	// `forget.failed` -- the forget dialog's failure line (a teardown blocked
+	// by another tab is the usual cause).
+	'pairing.step.joiningUnnamed': "Joining as the officer's browser",
+	'pairing.officerUnknown': 'Unnamed officer',
+	'pairing.failed.no-storage.otherTab':
+		'This network is open in another tab. Close that tab and try again.',
+	'scanner.unavailable': "The scanner couldn't start. Paste the code instead.",
+	'forget.failed':
+		"Couldn't forget this network. Close any other tab that has it open, then try again.",
 });
 
 /**
