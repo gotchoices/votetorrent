@@ -576,6 +576,7 @@ export default function PairBrowserScreen() {
 						<View testID="pair-browser-code-ready" style={styles.block}>
 							<ThemedText type="defaultSemiBold">{t("dashboardPairingReadyHeading")}</ThemedText>
 							<ThemedText type="default">{t("dashboardPairingReadyBody", { minutes: ready.minutes })}</ThemedText>
+							{/* Hidden for this release: the dashboard cannot scan pairing QR codes, so paste is the pairing path.
 							{thumb?.fits === false ? (
 								<ThemedText type="small" testID="pair-browser-qr-too-large" style={{ color: colors.text }}>
 									{t("dashboardPairingQrTooLarge")}
@@ -614,9 +615,11 @@ export default function PairBrowserScreen() {
 									{t("dashboardPairingQrRenderFailed")}
 								</ThemedText>
 							) : null}
+							*/}
 							<ThemedText type="small" testID="pair-browser-countdown" style={{ color: colors.textSecondary }}>
 								{t("dashboardPairingCountdown", { remaining: remainingLabel })}
 							</ThemedText>
+							{/* Hidden for this release, with the QR tile above.
 							{qrUsable ? (
 								<CustomButton
 									testID="pair-browser-qr-open"
@@ -626,6 +629,7 @@ export default function PairBrowserScreen() {
 									onPress={() => setQrOpen(true)}
 								/>
 							) : null}
+							*/}
 							<CustomButton
 								testID="pair-browser-copy"
 								icon="copy"

@@ -42,7 +42,7 @@ const EXPECTED_EN: Readonly<Record<string, string>> = Object.freeze({
 	dashboardPairingWaitingBody: "An owner's Authority app must be open and online to make the code. Keep it open.",
 	dashboardPairingCancelButton: "Cancel pairing request",
 	dashboardPairingReadyHeading: "Pairing code ready",
-	dashboardPairingReadyBody: "Scan this QR code with the browser's camera, or copy the code and paste it there. It works once and expires in {{minutes}} minutes.",
+	dashboardPairingReadyBody: "Copy the code and paste it into the browser. It works once and expires in {{minutes}} minutes.",
 	dashboardPairingCountdown: "Expires in {{remaining}}",
 	dashboardPairingQrHint: "Tap the QR code to enlarge it",
 	dashboardPairingQrTileLabel: "Pairing QR code, tap to enlarge",

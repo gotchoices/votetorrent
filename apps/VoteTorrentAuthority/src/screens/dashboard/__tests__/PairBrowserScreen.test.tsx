@@ -551,11 +551,14 @@ describe("PairBrowserScreen", () => {
 			jest.advanceTimersByTime(1_000);
 		});
 		expect(textOf(byId(tr, "pair-browser-countdown"))).toBe(T.dashboardPairingCountdown.replace("{{remaining}}", "13:59"));
-		const tile = byId(tr, "pair-browser-qr");
-		expect(tile.props.accessibilityLabel).toBe(T.dashboardPairingQrTileLabel);
-		expect(tile.props.accessibilityRole).toBe("button");
-		expect(byId(tr, "pair-browser-qr-image").props.accessible).toBe(false);
-		expect(textOf(block)).toContain(T.dashboardPairingQrHint);
+		// The QR tile and its hint are hidden for this release:
+		// const tile = byId(tr, "pair-browser-qr");
+		// expect(tile.props.accessibilityLabel).toBe(T.dashboardPairingQrTileLabel);
+		// expect(tile.props.accessibilityRole).toBe("button");
+		// expect(byId(tr, "pair-browser-qr-image").props.accessible).toBe(false);
+		// expect(textOf(block)).toContain(T.dashboardPairingQrHint);
+		expect(has(tr, "pair-browser-qr")).toBe(false);
+		expect(has(tr, "pair-browser-qr-open")).toBe(false);
 		expect(textOf(byId(tr, "pair-browser-warning"))).toBe(T.dashboardPairingQrWarning);
 
 		const order: string[] = [];
@@ -565,7 +568,8 @@ describe("PairBrowserScreen", () => {
 				order.push(id);
 			}
 		}
-		expect(order).toEqual(["pair-browser-qr-open", "pair-browser-copy", "pair-browser-share", "pair-browser-finish"]);
+		// expect(order).toEqual(["pair-browser-qr-open", "pair-browser-copy", "pair-browser-share", "pair-browser-finish"]); // with the QR
+		expect(order).toEqual(["pair-browser-copy", "pair-browser-share", "pair-browser-finish"]);
 
 		// Bearer hygiene: no Text child and no a11y / testID / nativeID prop holds any 16-char window.
 		expect(windowHits(exposedStrings(tr).join("\n"), REAL_CODE)).toBe(0);
@@ -628,89 +632,90 @@ describe("PairBrowserScreen", () => {
 		expect(textOf(byId(tr, "pair-browser-share-notice"))).toBe(T.dashboardPairingShareFailed);
 	});
 
-	it("S10 the full-screen view: Modal props, officer and network names, share image with the fingerprint, cleanup and keep-awake", async () => {
-		const tr = await toCodeReady();
-		expect(keepAwake.__keepAwakeActiveCount()).toBe(0);
-		await press(tr, "pair-browser-qr-open");
-		const modal = tr.root.findAll((n) => n.props.presentationStyle === "fullScreen", { deep: false })[0];
-		expect(modal.props.visible).toBe(true);
-		expect(modal.props.statusBarTranslucent).toBe(true);
-		expect(modal.props.navigationBarTranslucent).toBe(true);
-		expect(modal.props.animationType).toBe("fade");
-		expect(modal.props.supportedOrientations).toEqual(["portrait"]);
-		expect(has(tr, "pair-browser-qr-view")).toBe(true);
-		expect(keepAwake.__keepAwakeActiveCount()).toBe(1);
-		const officer = byId(tr, "pair-browser-qr-officer");
-		expect(textOf(officer)).toBe("Officer One");
-		const officerStyle = StyleSheet.flatten(officer.props.style) as Record<string, unknown>;
-		expect(officerStyle.fontSize).toBe(16);
-		expect(officerStyle.fontWeight).toBe("600");
-		expect(officerStyle.color).toBe("#000000");
-		const network = byId(tr, "pair-browser-qr-network");
-		expect(textOf(network)).toBe(fixture.name);
-		const networkStyle = StyleSheet.flatten(network.props.style) as Record<string, unknown>;
-		expect(networkStyle.fontSize).toBe(14);
-		expect(networkStyle.color).toBe("#000000");
-		expect(byId(tr, "pair-browser-qr-close").props.accessibilityLabel).toBe(T.dashboardPairingQrClose);
+	// S10, S11 and the S12 too-large test are commented out with the QR tile and the Show QR button (hidden for this release: the dashboard cannot scan pairing QR codes). Restore them with the QR.
+// 	it("S10 the full-screen view: Modal props, officer and network names, share image with the fingerprint, cleanup and keep-awake", async () => {
+// 		const tr = await toCodeReady();
+// 		expect(keepAwake.__keepAwakeActiveCount()).toBe(0);
+// 		await press(tr, "pair-browser-qr-open");
+// 		const modal = tr.root.findAll((n) => n.props.presentationStyle === "fullScreen", { deep: false })[0];
+// 		expect(modal.props.visible).toBe(true);
+// 		expect(modal.props.statusBarTranslucent).toBe(true);
+// 		expect(modal.props.navigationBarTranslucent).toBe(true);
+// 		expect(modal.props.animationType).toBe("fade");
+// 		expect(modal.props.supportedOrientations).toEqual(["portrait"]);
+// 		expect(has(tr, "pair-browser-qr-view")).toBe(true);
+// 		expect(keepAwake.__keepAwakeActiveCount()).toBe(1);
+// 		const officer = byId(tr, "pair-browser-qr-officer");
+// 		expect(textOf(officer)).toBe("Officer One");
+// 		const officerStyle = StyleSheet.flatten(officer.props.style) as Record<string, unknown>;
+// 		expect(officerStyle.fontSize).toBe(16);
+// 		expect(officerStyle.fontWeight).toBe("600");
+// 		expect(officerStyle.color).toBe("#000000");
+// 		const network = byId(tr, "pair-browser-qr-network");
+// 		expect(textOf(network)).toBe(fixture.name);
+// 		const networkStyle = StyleSheet.flatten(network.props.style) as Record<string, unknown>;
+// 		expect(networkStyle.fontSize).toBe(14);
+// 		expect(networkStyle.color).toBe("#000000");
+// 		expect(byId(tr, "pair-browser-qr-close").props.accessibilityLabel).toBe(T.dashboardPairingQrClose);
 
-		await press(tr, "pair-browser-qr-share-image");
-		expect(mockShareQrImage).toHaveBeenCalledTimes(1);
-		const shareArg = mockShareQrImage.mock.calls[0][0] as { code: string; fingerprint: string };
-		expect(shareArg.code === REAL_CODE).toBe(true);
-		expect(shareArg.fingerprint).toBe(FINGERPRINT);
-		mockShareQrImage.mockRejectedValueOnce(new Error("share"));
-		await press(tr, "pair-browser-qr-share-image");
-		expect(textOf(byId(tr, "pair-browser-qr-share-notice"))).toBe(T.dashboardPairingQrShareFailed);
+// 		await press(tr, "pair-browser-qr-share-image");
+// 		expect(mockShareQrImage).toHaveBeenCalledTimes(1);
+// 		const shareArg = mockShareQrImage.mock.calls[0][0] as { code: string; fingerprint: string };
+// 		expect(shareArg.code === REAL_CODE).toBe(true);
+// 		expect(shareArg.fingerprint).toBe(FINGERPRINT);
+// 		mockShareQrImage.mockRejectedValueOnce(new Error("share"));
+// 		await press(tr, "pair-browser-qr-share-image");
+// 		expect(textOf(byId(tr, "pair-browser-qr-share-notice"))).toBe(T.dashboardPairingQrShareFailed);
 
-		mockDeleteQrImage.mockClear();
-		await press(tr, "pair-browser-qr-close");
-		expect(mockDeleteQrImage).toHaveBeenCalled();
-		expect(has(tr, "pair-browser-qr-view")).toBe(false);
-		expect(keepAwake.__keepAwakeActiveCount()).toBe(0);
-		// The bearer-hygiene scan holds with the view open too.
-		await press(tr, "pair-browser-qr");
-		expect(has(tr, "pair-browser-qr-view")).toBe(true);
-		expect(windowHits(exposedStrings(tr).join("\n"), REAL_CODE)).toBe(0);
-		mockDeleteQrImage.mockClear();
-		act(() => tr.unmount());
-		expect(mockDeleteQrImage).toHaveBeenCalled();
-	});
+// 		mockDeleteQrImage.mockClear();
+// 		await press(tr, "pair-browser-qr-close");
+// 		expect(mockDeleteQrImage).toHaveBeenCalled();
+// 		expect(has(tr, "pair-browser-qr-view")).toBe(false);
+// 		expect(keepAwake.__keepAwakeActiveCount()).toBe(0);
+// 		// The bearer-hygiene scan holds with the view open too.
+// 		await press(tr, "pair-browser-qr");
+// 		expect(has(tr, "pair-browser-qr-view")).toBe(true);
+// 		expect(windowHits(exposedStrings(tr).join("\n"), REAL_CODE)).toBe(0);
+// 		mockDeleteQrImage.mockClear();
+// 		act(() => tr.unmount());
+// 		expect(mockDeleteQrImage).toHaveBeenCalled();
+// 	});
 
-	it("S10 the Share QR image button is absent when no fingerprint is known (and the network line is omitted)", async () => {
-		mockRequest.mockImplementation(async () => okResult());
-		const tr = await toCodeReady();
-		await press(tr, "pair-browser-qr-open");
-		expect(has(tr, "pair-browser-qr-view")).toBe(true);
-		expect(has(tr, "pair-browser-qr-share-image")).toBe(false);
-		expect(has(tr, "pair-browser-qr-network")).toBe(false);
-		expect(textOf(byId(tr, "pair-browser-qr-officer"))).toBe("Officer One");
-	});
+// 	it("S10 the Share QR image button is absent when no fingerprint is known (and the network line is omitted)", async () => {
+// 		mockRequest.mockImplementation(async () => okResult());
+// 		const tr = await toCodeReady();
+// 		await press(tr, "pair-browser-qr-open");
+// 		expect(has(tr, "pair-browser-qr-view")).toBe(true);
+// 		expect(has(tr, "pair-browser-qr-share-image")).toBe(false);
+// 		expect(has(tr, "pair-browser-qr-network")).toBe(false);
+// 		expect(textOf(byId(tr, "pair-browser-qr-officer"))).toBe("Officer One");
+// 	});
 
-	it("S11 geometry on a 1080 x 2400 px window: integer m >= 5, panel = m(n+8), integer lead; tile width x ratio = panelPx", async () => {
-		const tr = await toCodeReady();
-		const ratio = PixelRatio.get();
-		expect(ratio).toBe(2.625);
-		const n = REAL_N;
-		const tileImg = byId(tr, "pair-browser-qr-image");
-		const tileStyle = StyleSheet.flatten(tileImg.props.style) as { width: number; height: number };
-		const tilePanel = qrLayout(n, 160 * ratio).panelPx;
-		expect(Math.round(tileStyle.width * ratio)).toBe(tilePanel);
-		expect(Math.abs(tileStyle.width * ratio - tilePanel)).toBeLessThan(1e-6);
+// 	it("S11 geometry on a 1080 x 2400 px window: integer m >= 5, panel = m(n+8), integer lead; tile width x ratio = panelPx", async () => {
+// 		const tr = await toCodeReady();
+// 		const ratio = PixelRatio.get();
+// 		expect(ratio).toBe(2.625);
+// 		const n = REAL_N;
+// 		const tileImg = byId(tr, "pair-browser-qr-image");
+// 		const tileStyle = StyleSheet.flatten(tileImg.props.style) as { width: number; height: number };
+// 		const tilePanel = qrLayout(n, 160 * ratio).panelPx;
+// 		expect(Math.round(tileStyle.width * ratio)).toBe(tilePanel);
+// 		expect(Math.abs(tileStyle.width * ratio - tilePanel)).toBeLessThan(1e-6);
 
-		await press(tr, "pair-browser-qr-open");
-		const full = byId(tr, "pair-browser-qr-full");
-		const style = StyleSheet.flatten(full.props.style) as { width: number; height: number; marginLeft: number };
-		const panelPx = Math.round(style.width * ratio);
-		const m = panelPx / (n + 8);
-		expect(Number.isInteger(m)).toBe(true);
-		expect(m).toBeGreaterThanOrEqual(PAIRING_QR_MIN_MODULE_PX);
-		expect(panelPx).toBe(m * (n + 8));
-		expect(panelPx).toBeLessThanOrEqual(1080);
-		expect(1080 - panelPx).toBeLessThan(n + 8);
-		const lead = style.marginLeft * ratio;
-		expect(Math.abs(lead - Math.round(lead))).toBeLessThan(1e-6);
-		expect(Math.round(lead)).toBe(Math.floor((1080 - panelPx) / 2));
-	});
+// 		await press(tr, "pair-browser-qr-open");
+// 		const full = byId(tr, "pair-browser-qr-full");
+// 		const style = StyleSheet.flatten(full.props.style) as { width: number; height: number; marginLeft: number };
+// 		const panelPx = Math.round(style.width * ratio);
+// 		const m = panelPx / (n + 8);
+// 		expect(Number.isInteger(m)).toBe(true);
+// 		expect(m).toBeGreaterThanOrEqual(PAIRING_QR_MIN_MODULE_PX);
+// 		expect(panelPx).toBe(m * (n + 8));
+// 		expect(panelPx).toBeLessThanOrEqual(1080);
+// 		expect(1080 - panelPx).toBeLessThan(n + 8);
+// 		const lead = style.marginLeft * ratio;
+// 		expect(Math.abs(lead - Math.round(lead))).toBeLessThan(1e-6);
+// 		expect(Math.round(lead)).toBe(Math.floor((1080 - panelPx) / 2));
+// 	});
 
 	it(`S12 STOP RULE: the realistic code (${REAL_CODE.length} chars, n=${REAL_N}, m=${REAL_M} at 1080 px) fits one scannable QR`, () => {
 		expect(REAL_CODE.length).toBeGreaterThanOrEqual(2600);
@@ -722,15 +727,15 @@ describe("PairBrowserScreen", () => {
 		expect(pairingQrFits("")).toBe(false);
 	});
 
-	it("S12 a code too large for a QR shows the notice, no tile and no Show QR; Copy and Share remain", async () => {
-		currentCode = TOO_LARGE_CODE;
-		const tr = await toCodeReady();
-		expect(textOf(byId(tr, "pair-browser-qr-too-large"))).toBe(T.dashboardPairingQrTooLarge);
-		expect(has(tr, "pair-browser-qr")).toBe(false);
-		expect(has(tr, "pair-browser-qr-open")).toBe(false);
-		expect(has(tr, "pair-browser-copy")).toBe(true);
-		expect(has(tr, "pair-browser-share")).toBe(true);
-	});
+// 	it("S12 a code too large for a QR shows the notice, no tile and no Show QR; Copy and Share remain", async () => {
+// 		currentCode = TOO_LARGE_CODE;
+// 		const tr = await toCodeReady();
+// 		expect(textOf(byId(tr, "pair-browser-qr-too-large"))).toBe(T.dashboardPairingQrTooLarge);
+// 		expect(has(tr, "pair-browser-qr")).toBe(false);
+// 		expect(has(tr, "pair-browser-qr-open")).toBe(false);
+// 		expect(has(tr, "pair-browser-copy")).toBe(true);
+// 		expect(has(tr, "pair-browser-share")).toBe(true);
+// 	});
 
 	it("S13 past the expiry the screen shows expired with Request; Copy, Share and QR are gone", async () => {
 		const tr = await toCodeReady();
@@ -890,10 +895,11 @@ describe("PairBrowserScreen", () => {
 			await press(tr, "pair-browser-copy");
 			(Share.share as unknown as jest.Mock).mockRejectedValueOnce(new Error(REAL_CODE));
 			await press(tr, "pair-browser-share");
-			mockShareQrImage.mockRejectedValueOnce(new Error(REAL_CODE));
-			await press(tr, "pair-browser-qr-open");
-			await press(tr, "pair-browser-qr-share-image");
-			await press(tr, "pair-browser-qr-close");
+			// The QR view is hidden for this release:
+			// mockShareQrImage.mockRejectedValueOnce(new Error(REAL_CODE));
+			// await press(tr, "pair-browser-qr-open");
+			// await press(tr, "pair-browser-qr-share-image");
+			// await press(tr, "pair-browser-qr-close");
 			await press(tr, "pair-browser-finish");
 			// A hostile request failure whose message carries the code.
 			mockRequest.mockRejectedValueOnce(new Error(REAL_CODE));

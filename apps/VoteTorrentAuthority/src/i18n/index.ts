@@ -939,8 +939,11 @@ const resources = {
 			dashboardPairingWaitingBody: "An owner's Authority app must be open and online to make the code. Keep it open.",
 			dashboardPairingCancelButton: 'Cancel pairing request',
 			dashboardPairingReadyHeading: 'Pairing code ready',
+			// Hidden for this release with the QR (the dashboard cannot scan it):
+			// dashboardPairingReadyBody:
+			// 	"Scan this QR code with the browser's camera, or copy the code and paste it there. It works once and expires in {{minutes}} minutes.",
 			dashboardPairingReadyBody:
-				"Scan this QR code with the browser's camera, or copy the code and paste it there. It works once and expires in {{minutes}} minutes.",
+				"Copy the code and paste it into the browser. It works once and expires in {{minutes}} minutes.",
 			dashboardPairingCountdown: 'Expires in {{remaining}}',
 			dashboardPairingQrHint: 'Tap the QR code to enlarge it',
 			dashboardPairingQrTileLabel: 'Pairing QR code, tap to enlarge',
@@ -2359,8 +2362,11 @@ const resources = {
 				'La aplicación Authority de un propietario debe estar abierta y en línea para crear el código. Manténgala abierta.',
 			dashboardPairingCancelButton: 'Cancelar solicitud de vinculación',
 			dashboardPairingReadyHeading: 'Código de vinculación listo',
+			// Oculto en esta versión junto con el QR:
+			// dashboardPairingReadyBody:
+			// 	'Escanee este código QR con la cámara del navegador, o copie el código y péguelo allí. Funciona una vez y vence en {{minutes}} minutos.',
 			dashboardPairingReadyBody:
-				'Escanee este código QR con la cámara del navegador, o copie el código y péguelo allí. Funciona una vez y vence en {{minutes}} minutos.',
+				'Copie el código y péguelo en el navegador. Funciona una vez y vence en {{minutes}} minutos.',
 			dashboardPairingCountdown: 'Vence en {{remaining}}',
 			dashboardPairingQrHint: 'Toque el código QR para ampliarlo',
 			dashboardPairingQrTileLabel: 'Código QR de vinculación, toque para ampliarlo',
