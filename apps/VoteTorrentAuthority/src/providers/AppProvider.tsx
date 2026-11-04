@@ -1,7 +1,6 @@
 import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from "react";
 import type { PropsWithChildren } from "react";
 import type { INetworksEngine, IDefaultUserEngine, NetworkReference, User } from "@votetorrent/vote-core";
-import type { BootstrapSnapshot } from "@votetorrent/vote-engine/bootstrap";
 import { ActivityIndicator, Text, TouchableOpacity, View } from "react-native";
 import { useTranslation } from "react-i18next";
 import { hideSplash } from "react-native-splash-view";
@@ -21,7 +20,7 @@ import { maybeSeedRegistrantFixtures } from "../engines/registrant-dev-seed";
 import { classifyPeerReadFailure } from "../engines/peer-read-unavailable";
 import { attachSyncBindings } from "../screens/registration/attach-sync-bindings";
 import { attachPeerSyncBinding } from "../screens/registration/attach-peer-sync-binding";
-import { purgeLegacyStagedPayload, registerDashboardSnapshotProvider } from "../services/dashboard-signin-code";
+import { sweepRetiredDashboardCodeStorage } from "../engines/retired-dashboard-code-storage";
 import { useCadreNode, type CadreNodeSettlement } from "./CadreNodeProvider";
 
 interface AppContextType {
@@ -54,17 +53,6 @@ interface AppContextType {
 	 */
 	isNetworkSelected: () => boolean;
 	/**
-	 * 50-07 (D-07/D-09/D-13): export the whole local database, for the currently
-	 * established network, as a verified 50-02 snapshot envelope. Consumed by
-	 * `DashboardSignInCodeScreen`, which never imports `EngineFactory` directly —
-	 * this passthrough is that screen's ONLY path to a snapshot, mirroring
-	 * `isAttestationVerifierProvisioned`'s existing factory-ref passthrough shape.
-	 * Rejects with a `NoNetworkEstablishedError` (see `engine-factory.ts`) when no
-	 * network is yet selected; the screen detects that with
-	 * `isNoNetworkEstablishedError` and renders `NoNetwork`, never a raw message.
-	 */
-	exportDashboardSnapshot: () => Promise<BootstrapSnapshot>;
-	/**
 	 * 62-21 (D-04/D-28): resolves the Authority's hardware-backed device `SignCallback` ON DEMAND.
 	 * The SAME lazy-factory-thunk class already established by the `maybeSeedRegistrantFixtures`
 	 * argument in the init effect below — calling it reads the device key and may prompt, so it is
@@ -78,8 +66,8 @@ interface AppContextType {
 	/**
 	 * 62-27 (D-41/D-44/D-45): screens open the peer staging transports through this passthrough
 	 * (an officer reviewing a device change, a decide-time registration publish), mirroring
-	 * `exportDashboardSnapshot`'s factory-ref shape. It holds no key material: the caller supplies
-	 * the opener and the decision signer. Throws 62-21's `PeerStrandUnavailableError` when the
+	 * `isAttestationVerifierProvisioned`'s factory-ref passthrough shape. It holds no key material:
+	 * the caller supplies the opener and the decision signer. Throws 62-21's `PeerStrandUnavailableError` when the
 	 * established network cannot back a peer strand. Optional so existing `useApp` fakes stay valid.
 	 */
 	createPeerStagingTransports?: (deps: {
@@ -426,63 +414,15 @@ export function AppProvider({ children }: PropsWithChildren) {
 		return engineFactoryRef.current?.isAttestationVerifierProvisioned() ?? false;
 	}, []);
 
-	// 50-07: passthrough to the factory's snapshot seam (see AppContextType's doc
-	// comment above). No fallback default here — unlike the boolean probe above,
-	// there is no safe "conservative" snapshot value to return if the ref is
-	// somehow absent, so an absent factory ref surfaces as a rejected promise
-	// rather than a silently empty snapshot.
-	const exportDashboardSnapshot = useCallback(async (): Promise<BootstrapSnapshot> => {
-		// An EXPLICIT, NAMED failure rather than a non-null assertion. `!` made
-		// an absent factory ref surface as "Cannot read properties of null
-		// (reading 'exportDashboardSnapshot')" -- a message the producer screen
-		// then rendered to the officer verbatim. Named here so a caller can log
-		// the class and show its own copy.
-		const factory = engineFactoryRef.current;
-		if (!factory) {
-			const error = new Error("AppProvider: the engine factory is not ready; cannot export a dashboard snapshot");
-			error.name = "EngineFactoryUnavailableError";
-			throw error;
-		}
-		return factory.exportDashboardSnapshot();
-	}, []);
-
-	// The one-shot startup sweep of PRE-FIX staged sign-in-code records. Two of
-	// two real devices checked were still carrying a whole-database payload in
-	// AsyncStorage, ~15 hours past that code's own expiry, because nothing in
-	// the tree ever rewrites the key for an expired code nobody tries to
-	// redeem. The sweep is a byte-identical no-op on every record a current
-	// build can write and never throws, so it is safe to run unconditionally
-	// here — an empty dependency array, once, on mount.
-	//
-	// The single log line carries the closed outcome token and NOTHING else:
-	// never a record field, never a byte of the payload. It exists so the
-	// on-device evidence that the sweep ran is visible in logcat without
-	// pulling the RKStorage database off the device. The `clean` and `absent`
-	// outcomes are silent — they are the overwhelmingly common case and would
-	// only add noise to every cold start.
+	// Phones that ran older builds may still hold the retired dashboard sign-in code under two
+	// AsyncStorage keys that nothing reads any more: a bearer code secret and, on some builds, a
+	// whole-database copy. Remove both blindly, once per mount. The sweep never reads a value and
+	// never throws; a failure logs one fixed line with nothing interpolated and boot carries on.
 	useEffect(() => {
-		void purgeLegacyStagedPayload().then((outcome) => {
-			if (outcome === "legacy-payload" || outcome === "unreadable") {
-				console.warn(`AppProvider: staged sign-in-code sweep outcome: ${outcome}`);
-			}
+		void sweepRetiredDashboardCodeStorage().then((outcome) => {
+			if (outcome === "failed") console.warn("AppProvider: retired dashboard code storage sweep failed");
 		});
 	}, []);
-
-	// 50-15 (CR-03): register this callback as the redemption-time regeneration
-	// fallback, so `dashboard-signin-code.ts` never needs to have persisted the
-	// payload to answer a redemption — see `registerDashboardSnapshotProvider`'s
-	// own doc comment. Unregister on unmount so a torn-down provider is never
-	// left dangling.
-	//
-	// FILESYSTEM-BINDING PATH ONLY. This registration is NOT live wiring for
-	// the rendezvous service: on that path the phone seals and uploads at mint
-	// and holds no payload, so there is never anything to regenerate and this
-	// callback is never reached. It is retained for the filesystem binding and
-	// is harmless to leave registered.
-	useEffect(() => {
-		registerDashboardSnapshotProvider(exportDashboardSnapshot);
-		return () => registerDashboardSnapshotProvider(undefined);
-	}, [exportDashboardSnapshot]);
 
 	// Activate a network at runtime (create / picker "Select") without a reboot.
 	// Mirrors the boot re-attach block below so behavior is identical to a restart.
@@ -881,7 +821,6 @@ export function AppProvider({ children }: PropsWithChildren) {
 				hasNetwork,
 				selectNetwork,
 				isNetworkSelected,
-				exportDashboardSnapshot,
 				resolveDeviceSigner,
 				createPeerStagingTransports,
 			}}
