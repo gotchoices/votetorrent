@@ -608,7 +608,10 @@ test('PanelFrame.tsx provides the mark sink inside the visible-body guard and re
 	}
 });
 
-test('types.ts keeps snapshotInstant, now marked deprecated', () => {
-	assert.ok(TYPES_RAW.includes('snapshotInstant?: string | null'));
-	assert.ok(TYPES_RAW.includes('@deprecated'));
+const INSTANT_FIELD_RE = /snapshotInstant/;
+
+test('types.ts no longer declares snapshotInstant: PanelProps carries only capability and db (comment-stripped)', () => {
+	// Positive control FIRST: the same regex hits a synthetic declaration of the removed field.
+	assert.match('\tsnapshotInstant?: string | null;', INSTANT_FIELD_RE, 'matcher is inert');
+	assert.doesNotMatch(stripComments(TYPES_RAW), INSTANT_FIELD_RE);
 });

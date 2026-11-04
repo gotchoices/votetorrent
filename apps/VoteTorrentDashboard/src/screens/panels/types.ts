@@ -31,21 +31,6 @@ import type { Capability } from '../../auth/capabilities.js';
 export interface PanelProps {
 	capability: Capability;
 	db: Database | null;
-	/**
-	 * The canonical 19-character instant this browser's snapshot was taken
-	 * at. Supplied by the shell, threaded down through 50-09's `PanelGrid`
-	 * (which already holds it for the freshness indicator) — a panel never
-	 * reads it from anywhere else. Optional: its absence means no snapshot
-	 * instant is available yet, and a consumer that cares (only 50-10's
-	 * Elections lifecycle pill does) falls back to the current instant.
-	 * Eight of the nine panels ignore this prop entirely.
-	 *
-	 * @deprecated `PanelGrid` no longer forwards it, so panels receive
-	 * nothing here and the Elections pill compares against the current time;
-	 * the pill moves to `useNow`. Kept until the Elections panel stops
-	 * reading it.
-	 */
-	snapshotInstant?: string | null;
 }
 
 export type PanelComponent = FC<PanelProps>;
