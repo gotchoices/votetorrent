@@ -27,11 +27,56 @@ import { classifyPeerReadFailure } from "../../engines/peer-read-unavailable";
 import { OwnerTrustNotice } from "../../components/OwnerTrustNotice";
 import { ToggleRow } from "../../components/ToggleRow";
 import { readRequireOwnerTrust, writeRequireOwnerTrust } from "../../engines/owner-trust-setting";
+import { useCadreNode } from "../../providers/CadreNodeProvider";
+import { voterInviteCapability, type VoterInviteNode } from "../../engines/voter-invite";
+import {
+	readMintLog,
+	readPairingSwitch,
+	writePairingSwitch,
+	type OwnerMintLogEntry,
+} from "../../engines/pairing-owner-store";
 
 const LANGUAGES: { code: 'en' | 'es'; label: string }[] = [
 	{ code: 'en', label: 'English' },
 	{ code: 'es', label: 'Español' },
 ];
+
+/** How many of the owner's pairing requests the Browser pairing section shows (D-28). */
+export const MINT_LOG_SHOWN = 20;
+
+/**
+ * The outcome word for one pairing request (pure, total). Only an exact `approved` reads Approved;
+ * every other refusal and any value this version does not know reads the generic Refused.
+ */
+export function mintLogOutcomeKey(outcome: string): string {
+	switch (outcome) {
+		case "approved":
+			return "pairingMintLogOutcomeApproved";
+		case "refused:bad-signature":
+			return "pairingMintLogOutcomeKeyNotValid";
+		case "refused:switched-off":
+			return "pairingMintLogOutcomeSwitchOff";
+		case "refused:not-officer":
+			return "pairingMintLogOutcomeNotOfficer";
+		case "unreachable":
+			return "pairingMintLogOutcomeUnreachable";
+		default:
+			return "pairingMintLogOutcomeRefused";
+	}
+}
+
+function pad2(n: number): string {
+	return n < 10 ? "0" + n : String(n);
+}
+
+/**
+ * Local `YYYY-MM-DD HH:MM` (plain Date getters, never Intl). Duplicates the paired-browsers list's
+ * formatter on purpose, so Settings does not import that screen and its engine graph.
+ */
+function formatLogTime(ms: number): string {
+	const d = new Date(ms);
+	return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
 
 export default function SettingsScreen() {
 	const { showHelpIcons, setShowHelpIcons } = useSettings();
@@ -56,6 +101,21 @@ export default function SettingsScreen() {
 	const requireOwnerTrustTouchedRef = useRef(false);
 	const requireOwnerTrustWriteSeqRef = useRef(0);
 	const mountedRef = useRef(false);
+	// D-28: the owner-only "Browser pairing" section. Shown only when this phone's identity is a
+	// cadre owner (the same predicate that starts the pair-mint host). The switch mirrors the
+	// owner-trust row's touched-ref + write-sequence idiom; an unreadable switch shows OFF, as the
+	// mint host reads it. An unreadable log shows as unreadable, never as empty.
+	const { node } = useCadreNode();
+	const [isPairingOwner, setIsPairingOwner] = useState(false);
+	const [pairingSwitchOn, setPairingSwitchOn] = useState(true);
+	const [pairingSwitchSaveFailed, setPairingSwitchSaveFailed] = useState(false);
+	const [mintLog, setMintLog] = useState<OwnerMintLogEntry[] | null>(null);
+	const [mintLogUnreadable, setMintLogUnreadable] = useState(false);
+	const [officerNames, setOfficerNames] = useState<Record<string, string | null>>({});
+	const pairingSwitchRef = useRef(true);
+	const pairingSwitchTouchedRef = useRef(false);
+	const pairingSwitchWriteSeqRef = useRef(0);
+	const pairingLoadSeqRef = useRef(0);
 	const { colors } = useTheme() as ExtendedTheme;
 	const { t } = useTranslation();
 	const { getEngine } = useApp();
@@ -132,6 +192,98 @@ export default function SettingsScreen() {
 			});
 		},
 		[showRequireOwnerTrust]
+	);
+
+	const showPairingSwitch = useCallback((on: boolean) => {
+		if (!mountedRef.current) return;
+		pairingSwitchRef.current = on;
+		setPairingSwitchOn(on);
+	}, []);
+
+	// Re-read on every focus: the owner check, the switch (unless the owner already toggled it) and
+	// the log, then the officers' names (at most one lookup per distinct officer, at most 20).
+	useFocusEffect(
+		useCallback(() => {
+			const seq = ++pairingLoadSeqRef.current;
+			const current = () => mountedRef.current && seq === pairingLoadSeqRef.current;
+			const loadBrowserPairing = async () => {
+				if (!node) {
+					if (current()) setIsPairingOwner(false);
+					return;
+				}
+				let owner = false;
+				try {
+					owner = (await voterInviteCapability(node as unknown as VoterInviteNode)) === "ready";
+				} catch {
+					owner = false;
+				}
+				if (!current()) return;
+				setIsPairingOwner(owner);
+				if (!owner) return;
+				try {
+					const on = await readPairingSwitch();
+					if (current() && !pairingSwitchTouchedRef.current) showPairingSwitch(on);
+				} catch {
+					console.warn("[browser-pairing] switch: unreadable");
+					if (current() && !pairingSwitchTouchedRef.current) showPairingSwitch(false);
+				}
+				let entries: OwnerMintLogEntry[] | null = null;
+				try {
+					entries = await readMintLog(MINT_LOG_SHOWN);
+				} catch {
+					console.warn("[browser-pairing] log: unreadable");
+					entries = null;
+				}
+				if (!current()) return;
+				if (entries === null || !Array.isArray(entries)) {
+					setMintLog(null);
+					setMintLogUnreadable(true);
+					return;
+				}
+				setMintLog(entries);
+				setMintLogUnreadable(false);
+				const ids: string[] = [];
+				for (const entry of entries) {
+					if (ids.length >= MINT_LOG_SHOWN) break;
+					if (typeof entry.userId === "string" && !ids.includes(entry.userId)) ids.push(entry.userId);
+				}
+				const names: Record<string, string | null> = {};
+				for (const id of ids) {
+					try {
+						const officer = await networkEngine?.getUser(id);
+						const summary = officer ? await officer.getSummary() : undefined;
+						names[id] = typeof summary?.name === "string" && summary.name.length > 0 ? summary.name : null;
+					} catch {
+						names[id] = null;
+					}
+				}
+				if (current()) setOfficerNames(names);
+			};
+			void loadBrowserPairing();
+		}, [node, networkEngine, showPairingSwitch])
+	);
+
+	const handlePairingSwitchChange = useCallback(
+		(next: boolean) => {
+			pairingSwitchTouchedRef.current = true;
+			const seq = ++pairingSwitchWriteSeqRef.current;
+			showPairingSwitch(next);
+			if (mountedRef.current) setPairingSwitchSaveFailed(false);
+			writePairingSwitch(next).catch(() => {
+				console.warn("[browser-pairing] switch: write failed");
+				if (seq !== pairingSwitchWriteSeqRef.current || !mountedRef.current) return;
+				setPairingSwitchSaveFailed(true);
+				// Show what is stored, never a value that was not saved.
+				readPairingSwitch()
+					.then((on) => {
+						if (seq === pairingSwitchWriteSeqRef.current) showPairingSwitch(on);
+					})
+					.catch(() => {
+						if (seq === pairingSwitchWriteSeqRef.current) showPairingSwitch(false);
+					});
+			});
+		},
+		[showPairingSwitch]
 	);
 
 	const handleLanguageChange = async (lang: 'en' | 'es') => {
@@ -459,6 +611,62 @@ export default function SettingsScreen() {
 					</ThemedText>
 				</View>
 
+				{isPairingOwner ? (
+					<View testID="settings-browser-pairing-section" style={{ marginBottom: 16 }}>
+						<ThemedText type="subtitle" style={styles.sectionTitle}>
+							{t("pairingMintLogSectionTitle")}
+						</ThemedText>
+						<ToggleRow
+							label={t("pairingMintLogSwitchLabel")}
+							accessibilityLabel={t("pairingMintLogSwitchLabel")}
+							testID="settings-browser-pairing-switch"
+							value={pairingSwitchOn}
+							onValueChange={handlePairingSwitchChange}
+						/>
+						<ThemedText type="small" testID="settings-browser-pairing-help" style={{ color: colors.text }}>
+							{pairingSwitchOn ? t("pairingMintLogSwitchHelpOn") : t("pairingMintLogSwitchHelpOff")}
+						</ThemedText>
+						{pairingSwitchSaveFailed ? (
+							<View testID="settings-browser-pairing-save-failed">
+								<InlineError message={t("pairingMintLogSwitchSaveFailed")} />
+							</View>
+						) : null}
+						<ThemedText type="defaultSemiBold" style={{ marginTop: 16, marginBottom: 8 }}>
+							{t("pairingMintLogTitle")}
+						</ThemedText>
+						{mintLogUnreadable ? (
+							<View testID="settings-browser-pairing-log-unreadable">
+								<InlineError message={t("pairingMintLogUnreadable")} />
+							</View>
+						) : mintLog === null ? null : mintLog.length === 0 ? (
+							<ThemedText type="small" testID="settings-browser-pairing-log-empty">
+								{t("pairingMintLogEmpty")}
+							</ThemedText>
+						) : (
+							<View testID="settings-browser-pairing-log">
+								{mintLog.map((entry, index) => (
+									<View
+										key={`${index}-${entry.at}`}
+										testID="settings-browser-pairing-log-row"
+										style={styles.mintLogRow}
+									>
+										<ThemedText type="small" style={styles.mintLogRowText}>
+											{t("pairingMintLogRow", {
+												officerName: officerNames[entry.userId] ?? t("pairingMintLogUnknownOfficer"),
+												date: formatLogTime(entry.at),
+											})}
+										</ThemedText>
+										<ThemedText type="smallBold">{t(mintLogOutcomeKey(entry.outcome))}</ThemedText>
+									</View>
+								))}
+								<ThemedText type="small" testID="settings-browser-pairing-log-footnote" style={{ marginTop: 8 }}>
+									{t("pairingMintLogFootnote", { n: mintLog.length })}
+								</ThemedText>
+							</View>
+						)}
+					</View>
+				) : null}
+
 				{/* Per-network block: only shown once a network is selected. Without a
 				    network the empty subtitle left a blank gap, and "No user found for this
 				    network" repeated the "No default user found" line above. */}
@@ -570,6 +778,16 @@ const localStyles = StyleSheet.create({
 	noUserText: {
 		textAlign: "center",
 		marginTop: 16,
+	},
+	mintLogRow: {
+		flexDirection: "row",
+		alignItems: "flex-start",
+		gap: 8,
+		paddingVertical: 4,
+	},
+	mintLogRowText: {
+		flexShrink: 1,
+		flexGrow: 1,
 	},
 });
 
