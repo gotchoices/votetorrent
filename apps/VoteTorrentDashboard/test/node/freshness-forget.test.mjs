@@ -1,38 +1,15 @@
 /**
  * Tier-1 coverage of `src/lifecycle/freshness.js` (D-10's age arithmetic)
- * and `src/lifecycle/forget-network.js` (D-15's ordered delete).
+ * only. The forget cases moved to `forget-network.test.mjs` when forget and
+ * unpair became one teardown; this file goes when `freshness.js` does (the
+ * snapshot path's retirement removes both).
  *
- * HONESTY NOTE: `fake-indexeddb` cannot demonstrate genuine durability of
- * data across a real browser reload, and it cannot demonstrate that a
- * deleted network is truly gone from disk. It can prove the ORDERING this
- * module enforces and the error classes it throws. That further proof is
- * Task 4's two-page browser gate, and no test name or assertion message in
- * this file may suggest otherwise.
- *
- * `import 'fake-indexeddb/auto'` first, then `node:test` + `node:assert/strict`.
- * Sequential and stateful against one shared fake IDB, per this project's
- * tier-1 discipline: a distinct network hash per test, with `deleteNetworkDb`
- * at the top of each.
+ * `import 'fake-indexeddb/auto'` first, then `node:test` + `node:assert/strict`,
+ * per this project's tier-1 discipline.
  */
 import 'fake-indexeddb/auto';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {
-	createNetworkDb,
-	closeNetworkDb,
-	deleteNetworkDb,
-	dbNameFor,
-	attachNetworkDb,
-	readRowCounts,
-	readRowCountsRecord,
-	writeRowCounts,
-	upsertNetwork,
-	findNetwork,
-	removeNetwork,
-	listNetworks,
-} from '@votetorrent/web-data/officer';
-import { seedFoundingAuthority, SEED_TABLES } from '../../../../packages/web-data/test/fixtures/seed-founding-authority.js';
-import { nowCanonicalDatetime } from '@votetorrent/vote-engine/browser';
 import {
 	STALE_THRESHOLD_HOURS,
 	InvalidSnapshotInstantError,
@@ -43,51 +20,6 @@ import {
 	isSnapshotStale,
 	snapshotFreshness,
 } from '../../src/lifecycle/freshness.js';
-import {
-	ForgetConfirmationMismatchError,
-	UnknownNetworkError,
-	NetworkStillPresentError,
-	forgetNetwork,
-	assertNetworkForgotten,
-} from '../../src/lifecycle/forget-network.js';
-
-/** A tiny Map-backed localStorage-shaped fake -- Node 22 has no real `localStorage`. */
-function makeFakeStorage() {
-	/** @type {Map<string, string>} */
-	const map = new Map();
-	return {
-		getItem: (/** @type {string} */ key) => (map.has(key) ? /** @type {string} */ (map.get(key)) : null),
-		setItem: (/** @type {string} */ key, /** @type {string} */ value) => {
-			map.set(key, value);
-		},
-		removeItem: (/** @type {string} */ key) => {
-			map.delete(key);
-		},
-	};
-}
-
-/**
- * Seed a network directly (no full sign-in-code round trip needed here --
- * that path is 50-08's own suite) and register it, so `forgetNetwork` has
- * something real to delete.
- *
- * @param {string} hash
- * @param {string} authorityName
- */
-async function setupNetwork(hash, authorityName) {
-	await deleteNetworkDb(hash).catch(() => undefined);
-	const storage = makeFakeStorage();
-	const db = await createNetworkDb(hash);
-	await seedFoundingAuthority(db);
-	const counts = await readRowCounts(db, SEED_TABLES);
-	await writeRowCounts(hash, counts, storage);
-	upsertNetwork(
-		{ networkHash: hash, authorityName, domain: 'fixture.example', officerUserId: 'u1', bootstrappedAt: nowCanonicalDatetime() },
-		storage,
-	);
-	await closeNetworkDb(db);
-	return { storage, counts };
-}
 
 // ---------------------------------------------------------------------------
 // freshness.js — snapshotAgeMillis
@@ -213,204 +145,10 @@ test('snapshotFreshness: returns the full shape, absolute byte-identical to the 
 });
 
 // ---------------------------------------------------------------------------
-// forget-network.js — the centrepiece negative + its positive control
-// ---------------------------------------------------------------------------
-
-test('forgetNetwork: an EMPTY authorityName confirms nothing -- an empty input is refused, not satisfied', async () => {
-	// bootstrap.js derives authorityName as '' whenever the snapshot has no
-	// Authority row or a non-string Name, and the registry validator accepts
-	// ''. `'' !== ''` is false, so an empty input used to PASS the typed
-	// confirmation -- the only thing between a stray click and irreversible
-	// deletion of the officer's whole local copy.
-	const hash = 'forget-empty-expected';
-	const { storage, counts } = await setupNetwork(hash, '');
-
-	for (const typed of ['', '   ', 'anything']) {
-		// eslint-disable-next-line no-await-in-loop
-		await assert.rejects(
-			() => forgetNetwork({ networkHash: hash, typedConfirmation: typed, storage }),
-			(/** @type {any} */ err) => err instanceof ForgetConfirmationMismatchError,
-			`typedConfirmation ${JSON.stringify(typed)} was accepted against an empty expected name`,
-		);
-	}
-
-	// Measured, not inferred from the throw: everything is still here.
-	assert.ok(findNetwork(hash, storage));
-	assert.deepEqual((await readRowCountsRecord(hash, storage))?.counts, counts);
-	const reopened = await attachNetworkDb(hash, { storage });
-	assert.deepEqual(await readRowCounts(reopened, Object.keys(counts)), counts);
-	await closeNetworkDb(reopened);
-	await deleteNetworkDb(hash, { storage });
-});
-
-test('positive control: a NON-empty authorityName still forgets when typed exactly', async () => {
-	const hash = 'forget-empty-control';
-	const { storage } = await setupNetwork(hash, 'Nonempty Authority');
-	const result = await forgetNetwork({ networkHash: hash, typedConfirmation: 'Nonempty Authority', storage });
-	assert.equal(result.networkHash, hash);
-	assert.equal(findNetwork(hash, storage), undefined);
-});
-
-test('forgetNetwork: a typed confirmation that does not match authorityName throws, and the database still exists afterward -- measured, not just by the throw', async () => {
-	const hash = 'forget-mismatch';
-	const { storage, counts } = await setupNetwork(hash, 'Mismatch Authority');
-	const db = await attachNetworkDb(hash, { storage });
-
-	await assert.rejects(
-		() => forgetNetwork({ networkHash: hash, typedConfirmation: 'Wrong Name Entirely', db, storage }),
-		(/** @type {any} */ err) => {
-			assert.ok(err instanceof ForgetConfirmationMismatchError);
-			return true;
-		},
-	);
-	await closeNetworkDb(db);
-
-	// Measured: reopen and prove the database, the registry entry and the
-	// row-count record are all still exactly as they were.
-	const reopened = await attachNetworkDb(hash, { storage });
-	const live = await readRowCounts(reopened, Object.keys(counts));
-	assert.deepEqual(live, counts);
-	await closeNetworkDb(reopened);
-	assert.ok(findNetwork(hash, storage));
-	assert.deepEqual((await readRowCountsRecord(hash, storage))?.counts, counts);
-
-	await deleteNetworkDb(hash);
-});
-
-test('forgetNetwork: a matching typed confirmation deletes the database, clears the row-count record and removes the registry entry', async () => {
-	const hash = 'forget-match';
-	const { storage } = await setupNetwork(hash, 'Match Authority');
-	const db = await attachNetworkDb(hash, { storage });
-
-	const result = await forgetNetwork({ networkHash: hash, typedConfirmation: 'Match Authority', db, storage });
-
-	assert.equal(result.networkHash, hash);
-	assert.deepEqual(result.remaining, listNetworks(storage));
-	assert.equal(findNetwork(hash, storage), undefined);
-	assert.equal(await readRowCountsRecord(hash, storage), undefined);
-	await assertNetworkForgotten(hash, storage);
-});
-
-test('forgetNetwork: leading/trailing whitespace in the typed confirmation is trimmed before comparison', async () => {
-	const hash = 'forget-trim';
-	const { storage } = await setupNetwork(hash, 'Trimmed Authority');
-	const db = await attachNetworkDb(hash, { storage });
-
-	const result = await forgetNetwork({ networkHash: hash, typedConfirmation: '  Trimmed Authority  ', db, storage });
-	assert.equal(findNetwork(hash, storage), undefined);
-	assert.deepEqual(result.remaining, []);
-});
-
-// ---------------------------------------------------------------------------
-// forget-network.js — unknown network
-// ---------------------------------------------------------------------------
-
-test('forgetNetwork: an unknown network hash throws UnknownNetworkError naming the hash and deletes nothing', async () => {
-	const storage = makeFakeStorage();
-	await assert.rejects(
-		() => forgetNetwork({ networkHash: 'no-such-network', typedConfirmation: 'whatever', storage }),
-		(/** @type {any} */ err) => {
-			assert.ok(err instanceof UnknownNetworkError);
-			assert.ok(err.message.includes('no-such-network'));
-			return true;
-		},
-	);
-});
-
-// ---------------------------------------------------------------------------
-// forget-network.js — blocked delete leaves the network listed and retryable
-// ---------------------------------------------------------------------------
-
-test('forgetNetwork: a delete blocked by another open connection rejects DeleteBlockedError by name, and the registry entry and row-count record both survive', async () => {
-	const hash = 'forget-blocked';
-	const { storage, counts } = await setupNetwork(hash, 'Blocked Authority');
-	const db = await attachNetworkDb(hash, { storage });
-
-	// Hold a SECOND raw connection open across the call, per
-	// test/node/db-delete.test.mjs's idiom, to force the blocked path.
-	const blockingConn = await new Promise((resolve, reject) => {
-		const req = indexedDB.open(dbNameFor(hash));
-		req.onsuccess = () => resolve(req.result);
-		req.onerror = () => reject(req.error);
-	});
-
-	await assert.rejects(
-		() => forgetNetwork({ networkHash: hash, typedConfirmation: 'Blocked Authority', db, storage, timeoutMs: 200 }),
-		(/** @type {any} */ err) => {
-			assert.equal(err.name, 'DeleteBlockedError');
-			return true;
-		},
-	);
-
-	/** @type {any} */ (blockingConn).close();
-	await closeNetworkDb(db);
-
-	assert.ok(findNetwork(hash, storage), 'the network stays listed after a blocked delete');
-	assert.deepEqual((await readRowCountsRecord(hash, storage))?.counts, counts, 'the row-count record survives a blocked delete');
-
-	await deleteNetworkDb(hash); // clean slate for later tests
-});
-
-// ---------------------------------------------------------------------------
-// assertNetworkForgotten
-// ---------------------------------------------------------------------------
-
-test('assertNetworkForgotten: throws NetworkStillPresentError naming a surviving registry entry, paired with a fully-forgotten positive control', async () => {
-	const hash = 'assert-forgotten-registry';
-	const { storage } = await setupNetwork(hash, 'Registry Survivor Authority');
-	const db = await attachNetworkDb(hash, { storage });
-	await deleteNetworkDb(hash, { db });
-	// registry entry NOT removed -- simulate a partial state.
-
-	await assert.rejects(
-		() => assertNetworkForgotten(hash, storage),
-		(/** @type {any} */ err) => {
-			assert.ok(err instanceof NetworkStillPresentError);
-			assert.equal(err.survivor, 'registry entry');
-			return true;
-		},
-	);
-
-	// Positive control: a genuinely fully-forgotten network resolves.
-	const cleanHash = 'assert-forgotten-clean';
-	const clean = await setupNetwork(cleanHash, 'Clean Authority');
-	const cleanDb = await attachNetworkDb(cleanHash, { storage: clean.storage });
-	await forgetNetwork({ networkHash: cleanHash, typedConfirmation: 'Clean Authority', db: cleanDb, storage: clean.storage });
-	await assert.doesNotReject(() => assertNetworkForgotten(cleanHash, clean.storage));
-});
-
-test('assertNetworkForgotten: throws NetworkStillPresentError naming a surviving row-count record, paired with a fully-forgotten positive control', async () => {
-	const hash = 'assert-forgotten-rowcounts';
-	const { storage } = await setupNetwork(hash, 'Row-Count Survivor Authority');
-	const db = await attachNetworkDb(hash, { storage });
-	await deleteNetworkDb(hash, { db });
-	removeNetwork(hash, storage);
-	// Re-write the row-count record AFTER deletion and after the registry
-	// entry is removed, so only that ONE artefact survives.
-	await writeRowCounts(hash, { Authority: 1 }, storage);
-
-	await assert.rejects(
-		() => assertNetworkForgotten(hash, storage),
-		(/** @type {any} */ err) => {
-			assert.ok(err instanceof NetworkStillPresentError);
-			assert.equal(err.survivor, 'row-count record');
-			return true;
-		},
-	);
-
-	// Positive control: a genuinely fully-forgotten network resolves.
-	const cleanHash = 'assert-forgotten-clean-2';
-	const clean = await setupNetwork(cleanHash, 'Clean Authority Two');
-	const cleanDb = await attachNetworkDb(cleanHash, { storage: clean.storage });
-	await forgetNetwork({ networkHash: cleanHash, typedConfirmation: 'Clean Authority Two', db: cleanDb, storage: clean.storage });
-	await assert.doesNotReject(() => assertNetworkForgotten(cleanHash, clean.storage));
-});
-
-// ---------------------------------------------------------------------------
 // PII hygiene
 // ---------------------------------------------------------------------------
 
-test('PII-CANARY-9f3a: no thrown message from any error path in freshness.js or forget-network.js contains the marker', async () => {
+test('PII-CANARY-9f3a: no thrown message from any error path in freshness.js contains the marker', () => {
 	const CANARY = 'PII-CANARY-9f3a';
 	/** @type {string[]} */
 	const messages = [];
@@ -434,26 +172,8 @@ test('PII-CANARY-9f3a: no thrown message from any error path in freshness.js or 
 		messages.push(err.message);
 	}
 
-	const hash = 'forget-canary';
-	const { storage } = await setupNetwork(hash, CANARY);
-	const db = await attachNetworkDb(hash, { storage });
-	try {
-		await forgetNetwork({ networkHash: hash, typedConfirmation: `${CANARY}-wrong`, db, storage });
-	} catch (/** @type {any} */ err) {
-		messages.push(err.message);
-	}
-	await closeNetworkDb(db);
-
-	try {
-		await assertNetworkForgotten(hash, storage);
-	} catch (/** @type {any} */ err) {
-		messages.push(err.message);
-	}
-
-	assert.ok(messages.length >= 5, `expected every forced error path to be exercised, got ${messages.length}`);
+	assert.ok(messages.length >= 3, `expected every forced error path to be exercised, got ${messages.length}`);
 	for (const message of messages) {
 		assert.ok(!message.includes(CANARY), `error message leaked the PII canary: "${message}"`);
 	}
-
-	await deleteNetworkDb(hash);
 });
