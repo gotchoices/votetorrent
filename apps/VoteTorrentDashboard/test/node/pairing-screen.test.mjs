@@ -400,6 +400,114 @@ test('R7 source scans: the peer layer only by import(), the real strand reader w
 	}
 });
 
+// --- 66-29 (DEFECT-66-26-01): new input after any refusal ---------------------------
+
+test('R8 after ANY consuming refusal, new typed or pasted text shows in the field and enables the CTA, with the refusal copy still in role=alert', () => {
+	for (const reason of CONSUMING) {
+		const v = P.FAILURE_VIEWS[reason];
+		const html = render({ view: 'failed', failure: reason, code: 'typed-new-text', freshInput: true });
+		assert.match(html, /<textarea[^>]*>typed-new-text<\/textarea>/, `${reason}: the new text shows`);
+		const cta = html.match(/<button type="submit" class="pr-cta"[^>]*>/);
+		assert.ok(cta, `${reason}: the submit CTA renders`);
+		assert.doesNotMatch(cta[0], /disabled/, `${reason}: the CTA is enabled`);
+		const alert = html.match(/<div class="pr-alert" role="alert">([\s\S]*?)<\/div>/);
+		assert.ok(alert, `${reason}: role=alert stays`);
+		assert.ok(alert[1].includes(esc(COPY[v.headingKey])), `${reason}: heading stays`);
+		assert.ok(alert[1].includes(esc(COPY[v.bodyKey])), `${reason}: body stays`);
+	}
+});
+
+test('R8b pairingFieldValue: a consuming failure blanks the field unless the text is fresh input; a keeping failure or none shows the code', () => {
+	assert.equal(typeof P.pairingFieldValue, 'function', 'the pure helper is exported');
+	for (const failure of CONSUMING) {
+		assert.equal(P.pairingFieldValue({ failure, code: 'burned', freshInput: false }), '', `${failure} hides the consumed code`);
+		assert.equal(P.pairingFieldValue({ failure, code: 'burned' }), '', `${failure} hides it when freshInput is absent`);
+		assert.equal(P.pairingFieldValue({ failure, code: 'new', freshInput: true }), 'new', `${failure} shows fresh input`);
+	}
+	for (const failure of KEEPING) {
+		assert.equal(P.pairingFieldValue({ failure, code: 'kept', freshInput: false }), 'kept', `${failure} keeps the code`);
+	}
+	assert.equal(P.pairingFieldValue({ failure: null, code: 'idle' }), 'idle');
+});
+
+/** The body of `const <name> = ... => {` in the component, up to its closing `\n\t};`. @param {string} code @param {string} name */
+function arrowBody(code, name) {
+	const start = code.indexOf(`const ${name} = `);
+	if (start === -1) return null;
+	const end = code.indexOf('\n\t};', start);
+	return end === -1 ? null : code.slice(start, end);
+}
+
+/** Every R9 matcher over a source text; returns the failed check names. @param {string} code */
+function freshInputChecks(code) {
+	/** @type {string[]} */
+	const failed = [];
+	const check = (/** @type {string} */ name, /** @type {boolean} */ ok) => {
+		if (!ok) failed.push(name);
+	};
+	check('wired-onCodeInput', /onCodeChange=\{onCodeInput\}/.test(code));
+	check('no-bare-setCode', !/onCodeChange=\{setCode\}/.test(code));
+	check('passes-freshInput', /freshInput=\{freshInput\}/.test(code));
+	const input = arrowBody(code, 'onCodeInput');
+	check('input-sets-code', input !== null && /setCode\(text\)/.test(input));
+	check('input-sets-fresh-on-failure', input !== null && /if \(failure !== null\) setFreshInput\(true\)/.test(input));
+	const paste = arrowBody(code, 'onCodePaste');
+	check('paste-sets-fresh-on-failure', paste !== null && /if \(failure !== null\) setFreshInput\(true\)/.test(paste));
+	const fail = arrowBody(code, 'failWith');
+	check('failWith-resets', fail !== null && /setFreshInput\(false\)/.test(fail));
+	const submit = arrowBody(code, 'submit');
+	const resetAt = submit === null ? -1 : submit.indexOf('setFreshInput(false)');
+	const setCodeAt = submit === null ? -1 : submit.indexOf('setCode(next)');
+	check('submit-resets-before-setCode', resetAt !== -1 && setCodeAt !== -1 && resetAt < setCodeAt);
+	const cta = arrowBody(code, 'onCta');
+	check('onCta-resets', cta !== null && /setFreshInput\(false\)/.test(cta));
+	return failed;
+}
+
+const FRESH_FIXTURE_GOOD = [
+	'\tconst failWith = (reason: PairFailureReason) => {',
+	'\t\tsetFreshInput(false);',
+	'\t\tsetFailure(reason);',
+	'\t};',
+	'\tconst submit = async (raw: string) => {',
+	'\t\tsetFreshInput(false);',
+	'\t\tsetCode(next);',
+	'\t};',
+	'\tconst onCta = (ctaKey: string) => {',
+	'\t\tsetFreshInput(false);',
+	'\t};',
+	'\tconst onCodeInput = (text: string) => {',
+	'\t\tsetCode(text);',
+	'\t\tif (failure !== null) setFreshInput(true);',
+	'\t};',
+	'\tconst onCodePaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {',
+	'\t\tsetCode(normalizePairingInput(text));',
+	'\t\tif (failure !== null) setFreshInput(true);',
+	'\t};',
+	'<PairingStateView freshInput={freshInput} onCodeChange={onCodeInput} />',
+].join('\n');
+
+test('R9 control: every fresh-input matcher passes a synthetic good fixture and each bites on a planted defect', () => {
+	assert.deepEqual(freshInputChecks(FRESH_FIXTURE_GOOD), []);
+	const planted = {
+		'wired-onCodeInput': FRESH_FIXTURE_GOOD.replace('onCodeChange={onCodeInput}', 'onCodeChange={setCode}'),
+		'no-bare-setCode': FRESH_FIXTURE_GOOD + '\n<X onCodeChange={setCode} />',
+		'passes-freshInput': FRESH_FIXTURE_GOOD.replace('freshInput={freshInput} ', ''),
+		'input-sets-fresh-on-failure': FRESH_FIXTURE_GOOD.replace('\t\tsetCode(text);\n\t\tif (failure !== null) setFreshInput(true);', '\t\tsetCode(text);'),
+		'paste-sets-fresh-on-failure': FRESH_FIXTURE_GOOD.replace('setCode(normalizePairingInput(text));\n\t\tif (failure !== null) setFreshInput(true);', 'setCode(normalizePairingInput(text));'),
+		'failWith-resets': FRESH_FIXTURE_GOOD.replace('\t\tsetFreshInput(false);\n\t\tsetFailure(reason);', '\t\tsetFailure(reason);'),
+		'submit-resets-before-setCode': FRESH_FIXTURE_GOOD.replace('\t\tsetFreshInput(false);\n\t\tsetCode(next);', '\t\tsetCode(next);\n\t\tsetFreshInput(false);'),
+		'onCta-resets': FRESH_FIXTURE_GOOD.replace('\tconst onCta = (ctaKey: string) => {\n\t\tsetFreshInput(false);', '\tconst onCta = (ctaKey: string) => {'),
+	};
+	for (const [name, fixture] of Object.entries(planted)) {
+		assert.ok(freshInputChecks(fixture).includes(name), `the ${name} matcher is inert`);
+	}
+});
+
+test('R9 the screen wires onCodeInput, sets freshInput on typed or pasted text after a failure, and resets it on failWith, submit and onCta', () => {
+	assert.deepEqual(freshInputChecks(stripComments(readFileSync(PAIRING_PATH, 'utf8'))), []);
+});
+
 // --- stylesheet --------------------------------------------------------------------
 
 test('C1 pairing.css: pr- classes only, one hex literal, the card and field geometry, accent and fail colours where allowed', () => {
