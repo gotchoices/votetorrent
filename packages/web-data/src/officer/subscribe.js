@@ -60,12 +60,15 @@ export const PAIRING_TABLES = Object.freeze(['DashboardPairingRevocation', 'Offi
  * Both live outside this package, so this list cannot be imported from them;
  * the drift test derives the required set from both sources and fails when
  * either reads a table outside the union. A panel that starts reading a new
- * table must extend this list in the same change.
+ * table must extend this list in the same change. The `CurrentAdmin` view now
+ * also reads the administration-change cancellation table, so the advisory
+ * gate's view read requires it too.
  * @type {ReadonlyArray<string>}
  */
 export const ADMIN_PANEL_AND_GATE_TABLES = Object.freeze(
 	[
 		'Admin',
+		'AdminCancellation',
 		'AdminSigning',
 		'Authority',
 		'AuthorityPeer',

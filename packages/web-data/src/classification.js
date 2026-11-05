@@ -138,6 +138,7 @@ export const CLASSIFICATION = {
 	Onboarding:         [CLASS.NEVER, 'Internal onboarding state', []],
 
 	// ── Officer-only rows added after the first classification pass.
+	AdminCancellation:  [CLASS.NEVER, 'An officer-signed record that stops one administration change before it takes effect (the authority, the change\'s effective time and the cancelling officer\'s user id). Administration machinery that the current roster already reflects, so an anonymous reader needs nothing from it, and it is never shown on the Public page', []],
 	DashboardPairingRevocation:[CLASS.NEVER, 'An officer-signed revocation of one dashboard browser pairing (a user id and a pairing nonce). Pairing machinery that only the officer dashboard reads, to unpair itself; nothing an anonymous reader needs, and never shown on the Public page', []],
 	ElectionTally:      [CLASS.NEVER, 'The officer-published tally row (the tally tree JSON, the publisher user id and key). It landed unclassified, so this is an INTERIM NEVER: no public or officer reader names it yet. The phase that shows results on the Public page reclassifies it deliberately and re-pins the counts', []],
 

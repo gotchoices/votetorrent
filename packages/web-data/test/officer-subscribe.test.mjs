@@ -199,7 +199,8 @@ test('O3: every table the admin panels and the advisory gate read is in the subs
 	// And an unknown name is an offender, while a view resolves through its body.
 	const viewControl = resolveAgainst(['CurrentAdmin', 'NotATableOrView'], OFFICER_SUBSCRIBED_TABLES);
 	assert.deepEqual(viewControl.offenders, ['NotATableOrView']);
-	assert.deepEqual(viewControl.required, ['Admin']);
+	// The CurrentAdmin view body now names both base tables (the roster and the cancellations).
+	assert.deepEqual(viewControl.required, ['Admin', 'AdminCancellation']);
 });
 
 test('O4: a listener for network A receives one frozen table/op notice; a listener for network B receives nothing', async () => {

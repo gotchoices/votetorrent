@@ -147,10 +147,15 @@ const PUBLIC_SAFE_NAMES = Object.freeze(
  * revocation of one dashboard browser pairing (officer-only pairing machinery). Table names
  * intentionally NOT repeated here, see the self-trip guard below. 33 -> 35 forbidden, public-safe
  * stays 41, 74 -> 76 total.
+ *
+ * 2026-11-05: +1 table, NEVER (the strictest class, so nothing becomes publishable): the
+ * officer-signed cancellation of one pending administration change (administration machinery the
+ * current roster already reflects). Table name intentionally NOT repeated here, see the self-trip
+ * guard below. 35 -> 36 forbidden, public-safe stays 41, 76 -> 77 total.
  */
-const EXPECTED_FORBIDDEN_COUNT = 35;
+const EXPECTED_FORBIDDEN_COUNT = 36;
 const EXPECTED_PUBLIC_SAFE_COUNT = 41;
-const EXPECTED_TABLE_COUNT = 76;
+const EXPECTED_TABLE_COUNT = 77;
 
 /**
  * The size of the scanned file set, pinned the same way the table counts above
