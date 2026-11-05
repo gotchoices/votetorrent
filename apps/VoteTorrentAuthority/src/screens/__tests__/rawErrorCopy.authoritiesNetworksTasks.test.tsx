@@ -63,6 +63,7 @@ jest.mock("../../hooks/useMediaPin", () => ({
 }));
 jest.mock("../../engines/device-user", () => ({
 	getOrCreateDeviceUser: jest.fn(async () => ({ id: "device-user-1", name: "Device User" })),
+	getDeviceUser: jest.fn(async () => ({ id: "device-user-1", name: "Device User" })),
 }));
 jest.mock("../../engines/device-signer", () => ({
 	createDeviceSigner: jest.fn(async () => async () => ({
@@ -303,6 +304,9 @@ describe("WRITE failures show errorActionFailedGeneric", () => {
 		const Screen = require("../authorities/ProposedAdministrationScreen").default;
 		const tr = await mount(<Screen />);
 		await pressTitle(tr, "propose");
+		// D-04: the first tap only opens the confirm card; nothing is signed yet.
+		expect(authorityEngine.proposeAdmin).not.toHaveBeenCalled();
+		await pressId(tr, "admin-change-confirm");
 		expect(authorityEngine.proposeAdmin).toHaveBeenCalled();
 		expectCopy(tr, "errorActionFailedGeneric");
 	});

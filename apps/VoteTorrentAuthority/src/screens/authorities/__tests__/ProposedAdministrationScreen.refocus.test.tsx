@@ -2,6 +2,8 @@
  * ProposedAdministrationScreen.refocus.test.tsx — UAT 62: the screen read getAdminDetails once
  * per mount. EditOfficer persists an added administrator through proposeAdmin and goes back, so
  * the new invitee never appeared until the screen was rebuilt. It must re-read on every focus.
+ * 66.1: the waiting change arrives as `pending` (C2). The screen builds from the current
+ * administration and shows a pending change's roster read-only; it never reads `proposed`.
  */
 
 import React from "react";
@@ -26,6 +28,7 @@ jest.mock("../../../engines/device-signer", () => ({
 }));
 jest.mock("../../../engines/device-user", () => ({
 	getOrCreateDeviceUser: jest.fn(async () => ({ id: "user-1", name: "Device User" })),
+	getDeviceUser: jest.fn(async () => ({ id: "user-1", name: "Device User" })),
 }));
 jest.mock("../../../hooks/useDeviceSigningErrorHandler", () => ({
 	useDeviceSigningErrorHandler: () => () => ({ handled: false }),
@@ -33,6 +36,8 @@ jest.mock("../../../hooks/useDeviceSigningErrorHandler", () => ({
 
 const AUTHORITY = { id: "authority-1", name: "Test Authority", domainName: "test.example.org" };
 const FOUNDER = { userId: "user-1", authorityId: AUTHORITY.id, title: "Chair", scopes: ["rad"] };
+const BEA = { userId: "user-2", authorityId: AUTHORITY.id, title: "Clerk", scopes: ["vrg"] };
+const NAMES: Record<string, string> = { "user-1": "Founding Chair", "user-2": "Bea Two" };
 
 // Prefixed `mock` so babel-plugin-jest-hoist allows the jest.mock() factories to close over them.
 const mockFocusCallbacks: Array<() => void | (() => void)> = [];
@@ -43,7 +48,7 @@ const mockAuthorityEngine = {
 };
 const mockNetworkEngine = {
 	openAuthority: jest.fn(async () => mockAuthorityEngine),
-	getUser: jest.fn(async () => ({ getSummary: async () => ({ id: "user-1", name: "Founding Chair" }) })),
+	getUser: jest.fn(async (id: string) => ({ getSummary: async () => ({ id, name: NAMES[id] }) })),
 };
 const mockGetEngine = jest.fn(async (name: string) => (name === "network" ? mockNetworkEngine : undefined));
 
@@ -84,11 +89,11 @@ jest.mock("@react-navigation/native", () => ({
 	},
 }));
 
-function adminDetails(proposedOfficers?: unknown[]) {
+function adminDetails(pendingOfficers?: unknown[]) {
 	return {
 		admin: { id: "authority-1:2026-10-01T00:00:00", authorityId: AUTHORITY.id, effectiveAt: 0, officers: [FOUNDER], thresholdPolicies: [] },
-		proposed: proposedOfficers
-			? { proposed: { officers: proposedOfficers, effectiveAt: 1, thresholdPolicies: [] }, signers: [] }
+		pending: pendingOfficers
+			? { effectiveAt: "2026-11-05T04:57:00", officers: pendingOfficers, thresholdPolicies: [], promoted: true }
 			: undefined,
 	};
 }
@@ -120,10 +125,8 @@ describe("ProposedAdministrationScreen — reloads on focus (UAT 62)", () => {
 		await flush();
 		expect(cardTitles(tr)).toEqual(["Founding Chair"]);
 
-		// EditOfficer persisted a proposal with a new invitee, then went back.
-		mockGetAdminDetails.mockResolvedValue(
-			adminDetails([{ existing: FOUNDER }, { init: { name: "Bea Two", title: "Clerk", scopes: ["vrg"] } }]),
-		);
+		// EditOfficer signed a change adding a new administrator, then went back.
+		mockGetAdminDetails.mockResolvedValue(adminDetails([{ existing: FOUNDER }, { existing: BEA }]));
 		const callbacks = mockFocusCallbacks.splice(0);
 		await renderer.act(async () => {
 			// The latest render's callback only; an old mount-only screen registers none.
