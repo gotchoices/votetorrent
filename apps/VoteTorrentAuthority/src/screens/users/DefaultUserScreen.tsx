@@ -9,6 +9,8 @@ import { InlineError } from "../../components/InlineError";
 import { globalStyles } from "../../theme/styles";
 import type { DefaultUser } from "@votetorrent/vote-core";
 import { IDefaultUserEngine } from "@votetorrent/vote-core";
+import { KeyboardAvoidingScreen } from "../../components/KeyboardAvoidingScreen";
+import { errorCopy } from "../../utils/errorCopy";
 
 export function DefaultUserScreen() {
 	const { defaultUser, defaultUserEngine } = useRoute().params as {
@@ -30,7 +32,7 @@ export function DefaultUserScreen() {
 			navigation.goBack();
 		} catch (error) {
 			console.warn("Error saving default user:", error);
-			setErrorMessage(error instanceof Error ? error.message : String(error));
+			setErrorMessage(errorCopy(error, t, "write"));
 		}
 	};
 
@@ -48,7 +50,7 @@ export function DefaultUserScreen() {
 	};
 
 	return (
-		<View style={styles.content}>
+		<KeyboardAvoidingScreen>
 			<ScrollView style={[styles.container, { backgroundColor: colors.background }]}>
 				<CustomTextInput
 					title={t("name")}
@@ -86,7 +88,7 @@ export function DefaultUserScreen() {
 					disabled={!edited}
 				/>
 			</Footer>
-		</View>
+		</KeyboardAvoidingScreen>
 	);
 }
 

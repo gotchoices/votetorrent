@@ -34,6 +34,10 @@ declare module '@react-navigation/native' {
 			accent: string;
 			error: string;
 			warning: string;
+			/** Text-safe warning tint. `warning` is too light for text on a light card
+			 *  (~2:1 on white); use this for warning-coloured labels, keep `warning` for
+			 *  icons, borders and fills. */
+			warningText: string;
 			contrast: string;
 			success: string;
 			dark: string;
@@ -60,6 +64,7 @@ export const lightTheme: ExtendedTheme = {
 		accent: '#d9d9d9',
 		error: '#971d1d',
 		warning: '#bcb600',
+		warningText: '#806600',
 		contrast: '#262626',
 		success: '#096904',
 		important: '#e8e3ad',
@@ -85,6 +90,7 @@ export const darkTheme: ExtendedTheme = {
 		accent: '#606060',
 		error: '#FF453A',
 		warning: '#bcb600',
+		warningText: '#bcb600',
 		contrast: '#dadada',
 		success: '#89a690',
 		dark: '#000000',

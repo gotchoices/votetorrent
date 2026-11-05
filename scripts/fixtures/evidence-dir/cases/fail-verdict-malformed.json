@@ -1,0 +1,11 @@
+{
+  "base": "base-device",
+  "ops": [
+    {
+      "op": "write",
+      "path": "64-device-evidence/checks/camera-gate/attempt-2/ios/verdict.txt",
+      "content": "VERDICT: passed\nleg: ios\n"
+    }
+  ],
+  "expect": "verdict-malformed"
+}

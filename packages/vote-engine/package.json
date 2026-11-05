@@ -18,7 +18,16 @@
 		},
 		"./rn": {
 			"types": "./dist/rn-entry.d.ts",
-			"import": "./dist/rn-entry.js"
+			"import": "./dist/rn-entry.js",
+			"default": "./dist/rn-entry.js"
+		},
+		"./browser": {
+			"types": "./dist/browser-entry.d.ts",
+			"import": "./dist/browser-entry.js"
+		},
+		"./bootstrap": {
+			"types": "./dist/bootstrap/index.d.ts",
+			"import": "./dist/bootstrap/index.js"
 		}
 	},
 	"scripts": {
@@ -26,6 +35,7 @@
 		"build": "tsc -p tsconfig.build.json",
 		"lint": "aegir lint",
 		"test": "TS_NODE_PROJECT=./tsconfig.test.json mocha --node-option=import=./register-ts-node.mjs --node-option=experimental-specifier-resolution=node --require tsconfig-paths/register \"test/**/*.spec.ts\"",
+		"test:p2p-harness": "RUN_P2P_HARNESS=1 TS_NODE_PROJECT=./tsconfig.test.json mocha --node-option=import=./register-ts-node.mjs --node-option=experimental-specifier-resolution=node --require tsconfig-paths/register \"test/**/*.harness.spec.ts\"",
 		"guard:builders": "bash scripts/ci-grep-guard.sh",
 		"dep-check": "aegir dep-check"
 	},
@@ -40,9 +50,14 @@
 	"license": "MIT",
 	"peerDependencies": {
 		"@react-native-async-storage/async-storage": "^2.1.1",
-		"react-native": "0.78.0"
+		"react-native": "0.87.1"
 	},
 	"devDependencies": {
+		"@libp2p/crypto": "^5.1.13",
+		"@libp2p/websockets": "^10",
+		"@optimystic/db-p2p": "^1.24.0",
+		"@quereus/store": "^4.24.0",
+		"@serfab/cadre-core": "patch:@serfab/cadre-core@npm%3A1.20.0#~/.yarn/patches/@serfab-cadre-core-npm-1.20.0-votetorrent.patch",
 		"@types/mocha": "^10.0.10",
 		"@types/node": "^22.13.10",
 		"@types/uuid": "^11.0.0",
@@ -55,19 +70,20 @@
 		"typescript": "^5.6.3"
 	},
 	"dependencies": {
+		"@noble/ciphers": "2.2.0",
 		"@noble/curves": "2.2.0",
 		"@noble/hashes": "2.2.0",
-		"@optimystic/quereus-plugin-crypto": "^0.17.0",
+		"@optimystic/quereus-plugin-crypto": "^1.24.0",
 		"@peculiar/asn1-android": "^2.8.0",
 		"@peculiar/asn1-schema": "^2.8.0",
 		"@peculiar/x509": "^2.0.0",
-		"@quereus/quereus": "patch:@quereus/quereus@npm%3A4.4.1#~/.yarn/patches/@quereus-quereus-npm-4.4.1-9ab3363154.patch",
+		"@quereus/quereus": "patch:@quereus/quereus@npm%3A4.24.0#~/.yarn/patches/@quereus-quereus-npm-4.24.0-votetorrent.patch",
 		"@react-native-async-storage/async-storage": "^2.1.2",
 		"@votetorrent/vote-core": "^0.0.1",
 		"asn1js": "^3.0.10",
 		"jose": "^6.2.4",
-		"react": "19.0.0",
-		"react-native": "0.78.0",
+		"react": "19.2.3",
+		"react-native": "0.87.1",
 		"reflect-metadata": "^0.2.2",
 		"temporal-polyfill": "^0.3.0",
 		"uuid": "^14.0.0"

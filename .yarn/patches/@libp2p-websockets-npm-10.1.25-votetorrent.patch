@@ -1,0 +1,36 @@
+diff --git a/dist/src/index.js b/dist/src/index.js
+index 2ebb1f9d197fb564aab0bcb19a3d635d88b96fb1..eb064a7831e8ded149494817b5b1e314a0e340cf 100644
+--- a/dist/src/index.js
++++ b/dist/src/index.js
+@@ -84,6 +84,14 @@ class WebSockets {
+         catch (err) {
+             if (options.signal?.aborted) {
+                 this.metrics?.dialerEvents.increment({ abort: true });
++                // VoteTorrent patch (debug officer-address-record-content-digest-mismatch): an aborted
++                // dial threw without closing the socket it opened, so a socket that finished its
++                // handshake after the abort stayed ESTABLISHED with no libp2p connection on it (61 on
++                // a Redmi 8 against one relay). Close it as the error branch below does.
++                try {
++                    websocket.close();
++                }
++                catch { }
+                 throw new ConnectionFailedError(`Could not connect to ${uri}`);
+             }
+             else {
+diff --git a/dist/src/websocket-to-conn.js b/dist/src/websocket-to-conn.js
+index d8de3805b120e140837c446f4edfd6421ca19230..0e6c28624fdc1a5f592b70d5e723047444a5a1f7 100644
+--- a/dist/src/websocket-to-conn.js
++++ b/dist/src/websocket-to-conn.js
+@@ -56,7 +56,11 @@ class WebSocketMultiaddrConnection extends AbstractMultiaddrConnection {
+         };
+     }
+     sendReset() {
+-        this.websocket.close(1006); // abnormal closure
++        // VoteTorrent patch (debug officer-address-record-content-digest-mismatch): 1006 is reserved
++        // and must never be sent (RFC 6455 7.4.1). Browsers and React Native's OkHttp reject it
++        // ("Code 1006 is reserved"), so the reset closed nothing on a phone. 4006 is in the range
++        // for application use; the reason names what it is.
++        this.websocket.close(4006, 'reset');
+     }
+     async sendClose(options) {
+         this.websocket.close();

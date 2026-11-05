@@ -1,0 +1,13 @@
+{
+  "runs": [
+    {
+      "log": "logs/vote-engine.run-1.log",
+      "passing": 3451,
+      "failing": 8
+    }
+  ],
+  "failingTitles": [
+    "rejects associating a DeviceId already bound to a different registrant",
+    "Nonce binding refused"
+  ]
+}

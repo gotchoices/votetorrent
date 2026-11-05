@@ -60,30 +60,30 @@ function makeInactiveStrand() {
 describe('createStrandKeyNetwork — P2P-04/P2P-05', () => {
   it('returns an object exposing findCoordinator', () => {
     const strand = makeActiveStrand();
-    const kn = createStrandKeyNetwork(strand);
+    const kn = createStrandKeyNetwork(strand, 2);
     expect(typeof kn.findCoordinator).toBe('function');
   });
 
   it('returns an object exposing findCluster', () => {
     const strand = makeActiveStrand();
-    const kn = createStrandKeyNetwork(strand);
+    const kn = createStrandKeyNetwork(strand, 2);
     expect(typeof kn.findCluster).toBe('function');
   });
 
   it('does NOT expose dialProtocol (not part of current IKeyNetwork)', () => {
     const strand = makeActiveStrand();
-    const kn = createStrandKeyNetwork(strand);
+    const kn = createStrandKeyNetwork(strand, 2);
     expect((kn as Record<string, unknown>).dialProtocol).toBeUndefined();
   });
 
   it('throws "Strand libp2p node not active" when libp2pNode is falsy', () => {
     const strand = makeInactiveStrand();
-    expect(() => createStrandKeyNetwork(strand)).toThrow('Strand libp2p node not active');
+    expect(() => createStrandKeyNetwork(strand, 2)).toThrow('Strand libp2p node not active');
   });
 
   it('findCoordinator delegates to the FRET ring (resolves a PeerId-shaped value)', async () => {
     const strand = makeActiveStrand();
-    const kn = createStrandKeyNetwork(strand);
+    const kn = createStrandKeyNetwork(strand, 2);
     const key = new Uint8Array(32);
     // Expect a promise — the exact resolved value is verified by integration tests (P2P-05 RED)
     await expect(kn.findCoordinator(key)).resolves.toBeDefined();
@@ -91,7 +91,7 @@ describe('createStrandKeyNetwork — P2P-04/P2P-05', () => {
 
   it('findCluster delegates to the FRET ring (resolves a ClusterPeers-shaped value)', async () => {
     const strand = makeActiveStrand();
-    const kn = createStrandKeyNetwork(strand);
+    const kn = createStrandKeyNetwork(strand, 2);
     const key = new Uint8Array(32);
     // Expect a promise — exact shape verified by integration tests
     await expect(kn.findCluster(key)).resolves.toBeDefined();

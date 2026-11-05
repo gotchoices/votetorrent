@@ -62,3 +62,52 @@ describe('ScanScreen (SCAN-01/I18N-01, branded placeholder)', () => {
 		expect(text).not.toContain("This screen isn't built yet");
 	});
 });
+
+/**
+ * 57-17/57-18 scroll-container gap closure (mirrors
+ * apps/VoteTorrentAuthority/src/screens/settings/SettingsScreen.scrollContainer.test.tsx — the
+ * canonical model). Walks the RENDERED react-test-renderer JSON tree for a host node whose
+ * `type` is `RCTScrollView`, rather than a source-level grep.
+ */
+type TreeNode = {
+	type: string;
+	props: Record<string, unknown>;
+	children: Array<TreeNode | string> | null;
+};
+
+function findHostNodeByType(json: unknown, targetType: string): TreeNode | null {
+	if (json === null || json === undefined) return null;
+	const nodes: unknown[] = Array.isArray(json) ? json : [json];
+	for (const node of nodes) {
+		if (node === null || typeof node !== 'object') continue;
+		const typed = node as TreeNode;
+		if (typed.type === targetType) {
+			return typed;
+		}
+		if (typed.children) {
+			const found = findHostNodeByType(typed.children, targetType);
+			if (found) return found;
+		}
+	}
+	return null;
+}
+
+describe('ScanScreen — scroll container regression guard (57-17/57-18)', () => {
+	it('Test 1: renders a real RCTScrollView host node as its outermost scrollable', () => {
+		const tr = renderScreen();
+		const scrollNode = findHostNodeByType(tr.toJSON(), 'RCTScrollView');
+		expect(scrollNode).not.toBeNull();
+	});
+
+	it('Test 2 (anti-vacuity): the walker returns null against a View-only synthetic tree', () => {
+		const syntheticTree = {
+			type: 'View',
+			props: {},
+			children: [
+				{type: 'View', props: {}, children: null},
+				{type: 'View', props: {}, children: [{type: 'View', props: {}, children: null}]},
+			],
+		};
+		expect(findHostNodeByType(syntheticTree, 'RCTScrollView')).toBeNull();
+	});
+});

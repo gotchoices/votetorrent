@@ -14,6 +14,7 @@ import {
   BuilderValidationError
 } from '@votetorrent/vote-core'
 import type {
+  AdminSignatureTask,
   IKeysTasksEngine,
   ISignatureTasksEngine,
   IOnboardingTasksEngine,
@@ -31,9 +32,9 @@ import { MockOnboardingTasksEngine } from '../src/tasks/mock-onboarding-tasks-en
 import { KeysTasksEngine } from '../src/tasks/keys-tasks-engine.js'
 import { OnboardingTasksEngine } from '../src/tasks/onboarding-tasks-engine.js'
 import { SignatureTasksEngine } from '../src/tasks/signature-tasks-engine.js'
-import { createTestNetwork, addTestAuthority } from './fixtures/test-context.js'
-import { randomTestKeyPair } from './fixtures/keys.js'
+import { createTestNetwork, addTestAuthority, testKeyPairFor } from './fixtures/test-context.js'
 import { digestToBytes } from '../src/utils.js'
+import { computeRadProposalDigest, readProposedRosterJson } from '../src/authority/rad-roster-digest.js'
 
 // ---- Stub engine factories (minimal interface satisfaction) ----
 
@@ -196,7 +197,7 @@ describe('CompleteKeyReleaseBuilder', () => {
     expect(builder).to.be.instanceOf(CompleteKeyReleaseBuilder)
   })
 
-  it('REAL ENGINE equivalence smoke: engine.completeKeyRelease(task) vs builder.setTask(task).commit()', async () => {
+  it('REAL ENGINE equivalence smoke: engine.completeKeyRelease(task) vs builder.setTask(task).commit() — both reject signer-required (D-17)', async () => {
     const stubRef: NetworkReference = {
       hash: 'h'.repeat(16),
       name: 'Test Network',
@@ -204,14 +205,30 @@ describe('CompleteKeyReleaseBuilder', () => {
       primaryAuthorityDomainName: 'authority.example.com'
     }
     const task = makeReleaseKeyTask()
-    // Direct path — UPDATE is a no-op on empty Task table (no throw)
+    // 62-20 (D-17): completeKeyRelease now ALWAYS means a published share.
+    // The builder's IBuilder<ReleaseKeyTask, void> surface carries no signer
+    // slot, so BOTH the direct call and the builder path call the engine with
+    // no signer — equivalence now means they reject with the SAME KeyReleaseError
+    // code, `signer-required`, not that both silently no-op.
     const { ctx: ctx1 } = await createTestNetwork()
     const eng1 = new KeysTasksEngine(stubRef, ctx1)
-    await eng1.completeKeyRelease(task)  // no throw
-    // Builder path
+    let caught1: unknown
+    try {
+      await eng1.completeKeyRelease(task)
+    } catch (err) {
+      caught1 = err
+    }
+    expect((caught1 as { code?: string })?.code).to.equal('signer-required')
+
     const { ctx: ctx2 } = await createTestNetwork()
     const eng2 = new KeysTasksEngine(stubRef, ctx2)
-    await eng2.buildCompleteKeyRelease().setTask(task).commit()  // no throw
+    let caught2: unknown
+    try {
+      await eng2.buildCompleteKeyRelease().setTask(task).commit()
+    } catch (err) {
+      caught2 = err
+    }
+    expect((caught2 as { code?: string })?.code).to.equal('signer-required')
   })
 })
 
@@ -311,7 +328,30 @@ describe('CompleteSignatureBuilder', () => {
       relays: ['/dns4/relay.example.com/tcp/443/wss'],
       primaryAuthorityDomainName: 'authority.example.com'
     }
-    const task = makeSignatureTask()   // userId='user-1', signatureType='admin'
+    // 57-08 (Trigger B): `authority` is now read by completeSignature's 'admin'
+    // branch to construct a promoting AuthorityEngine. Its id does not need to
+    // match either seeded fixture's real authority: a mismatch just refuses at
+    // applyAdminProposal's Step 1 ('wrong-scope'), caught and warned exactly
+    // like the roster-mismatch this test's own synthetic digest already
+    // produces — never thrown.
+    // 62-13 (D-09, T-62-13-04): `completeSignature`/`getSignatureDigest` now disambiguate an
+    // admin task by (AuthorityId, AdminEffectiveAt) ONLY when BOTH `authority.id` and
+    // `administration.proposed.effectiveAt` are defined. This ONE `task` object is reused
+    // across TWO DIFFERENT seeded fixtures below (ctx1/ctx2, each its OWN real authorityId) —
+    // a single `effectiveAt` could never match both extension rows. `effectiveAt` is left
+    // `undefined` deliberately so this task keeps resolving through the pre-62-13 generic
+    // (UserId, SignatureType, IsCompleted) lookup — there is exactly one pending admin task
+    // per fresh ctx, so that lookup is unambiguous here, and the disambiguated path (and its
+    // own dedicated coverage) belongs to `threshold-rad.spec.ts`'s R11.
+    const task: AdminSignatureTask = {
+      ...makeSignatureTask(),   // userId='user-1', signatureType='admin'
+      signatureType: 'admin',
+      authority: { id: 'placeholder-authority', name: 'Placeholder Authority', domainName: 'placeholder.example.com' },
+      administration: {
+        proposed: { officers: [], effectiveAt: undefined as unknown as number, thresholdPolicies: [] },
+        signers: ['user-1'],
+      }
+    }
     // 999.1 R-02: no longer using the shared makeSignatureResult() dummy — each
     // seedPendingTask() call below builds its own real per-digest SignatureResult
     // (the schema's SignatureValid UDF now verifies these bytes for real).
@@ -349,18 +389,25 @@ describe('CompleteSignatureBuilder', () => {
         // Idempotent — ProposedAdmin already exists for this (AuthorityId, EffectiveAt) PK.
       }
 
-      // Step 2: seed AdminSigning (required by AdminSignatureTaskExtension.MutationValid).
+      // Step 2: seed AdminSigning with the full-roster 'rad' PROPOSAL digest (62-03,
+      // D-33/D-34) — Digest(AuthorityId, EffectiveAt, Officers, ThresholdPolicies), no
+      // Tid, matching AdminSignatureTaskExtension.MutationValid's recomputation exactly.
       // 999.1 R-02/R-04: this row is created BEFORE the officer actually signs (the task
       // is "pending" until completeSignature runs) — same DEBT-11 shape as
       // elections-engine.ts's debugSeedPendingTasks, so it takes the explicit
       // IsPlaceholderSignature escape hatch rather than a real signature.
+      const rosterJson = await readProposedRosterJson(ctx.db, authorityId, adminEffectiveAt as string)
+      const seedDigest = await computeRadProposalDigest(ctx.db, {
+        authorityId,
+        effectiveAt: adminEffectiveAt as string,
+        officers: rosterJson,
+        thresholdPolicies
+      })
       await ctx.db.exec(
         `insert into AdminSigning (Nonce, AuthorityId, AdminEffectiveAt, Scope, Digest, UserId, SignerKey, Signature)
          with context now = :now, IsSignerKeyValid = true, IsPlaceholderSignature = true
-         values (:nonce, :authorityId, :adminEffectiveAt, 'rad',
-                 Digest(:tid, :authorityId, :adminEffectiveAt, :thresholdPolicies),
-                 :userId, :signerKey, :sig)`,
-        { nonce: taskNonce, authorityId, adminEffectiveAt, thresholdPolicies, tid, now, userId, signerKey, sig: placeholderSig }
+         values (:nonce, :authorityId, :adminEffectiveAt, 'rad', :digest, :userId, :signerKey, :sig)`,
+        { nonce: taskNonce, authorityId, adminEffectiveAt, digest: seedDigest, now, userId, signerKey, sig: placeholderSig }
       )
 
       // Compute the REAL AdminSigning.Digest so completeSignature()'s OfficerSignature
@@ -369,11 +416,17 @@ describe('CompleteSignatureBuilder', () => {
         .prepare('select Digest from AdminSigning where Nonce = :nonce')
         .get({ nonce: taskNonce })
       const digestB64 = digestRow!.Digest as string
-      const { privateHex, publicHex } = randomTestKeyPair()
+      const { privateHex, publicHex } = testKeyPairFor(userId)
       const realSig = bytesToHex(secp256k1.sign(digestToBytes(digestB64), hexToBytes(privateHex)))
+      // 57-08 (Trigger B): the admin accept path now REQUIRES a reusable per-
+      // digest callback. This fixture's AdminSigning row does not use the real
+      // roster-covering digest formula (and `task.authority` above is a
+      // placeholder), so any promotion attempt legitimately refuses — recorded
+      // and warned, never thrown — and this callback is never actually invoked.
       const realResult: SignatureResult = {
         isAccepted: true,
-        signature: { signature: realSig, signerKey: publicHex, signerUserId: userId }
+        signature: { signature: realSig, signerKey: publicHex, signerUserId: userId },
+        sign: async (_d: Uint8Array) => ({ signature: realSig, signerKey: publicHex, signerUserId: userId })
       }
 
       // Step 3: seed Task + AdminSignatureTaskExtension in an explicit BEGIN/COMMIT

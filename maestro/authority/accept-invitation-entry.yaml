@@ -1,0 +1,32 @@
+# Journey: Settings > Accept an invitation opens the invitation paste screen (keyholder /
+# administrator / authority invites). Nothing is pasted, so nothing is accepted.
+appId: ${APP_ID}
+name: "Authority: accept-invitation screen"
+tags:
+  - authority
+  - smoke
+  - invite
+env:
+  APP_ID: "${typeof AUTHORITY_APP_ID == 'undefined' ? 'org.votetorrent.authority' : AUTHORITY_APP_ID}"
+  BOOT_TIMEOUT_MS: "${typeof BOOT_TIMEOUT_MS == 'undefined' ? '300000' : BOOT_TIMEOUT_MS}"
+---
+- runFlow:
+    file: ../subflows/authority/launch.yaml
+    env:
+      CLEAR_STATE: "false"
+- runFlow:
+    file: ../subflows/authority/open-tab.yaml
+    env:
+      TAB: settings
+- scrollUntilVisible:
+    element:
+      id: "settings-accept-invitation-entry"
+    direction: DOWN
+    timeout: 20000
+- tapOn:
+    id: "settings-accept-invitation-entry"
+- extendedWaitUntil:
+    visible:
+      id: "accept-invitation-input"
+    timeout: 15000
+- back

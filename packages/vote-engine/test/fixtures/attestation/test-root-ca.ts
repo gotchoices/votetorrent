@@ -80,11 +80,19 @@ export interface IssueCertOptions {
   ca?: boolean
   /** Extra extensions to attach — e.g. the KeyDescription attestation extension for a leaf. */
   extensions?: Extension[]
+  /**
+   * Embed a CALLER-SUPPLIED keypair as the minted cert's subject key instead
+   * of generating a fresh one (51-02: `verifyKeyAttestation`'s leaf-pubkey
+   * binding check needs the leaf's embedded public key to equal a specific,
+   * externally-known `challenge.deviceKey`). Default: generate a fresh P-256
+   * pair, unchanged behavior.
+   */
+  keyPair?: CryptoKeyPair
 }
 
 /** Mint an intermediate or leaf certificate signed by `options.issuer`. */
 export async function issueCert (options: IssueCertOptions): Promise<TestCertificate> {
-  const keys = await crypto.subtle.generateKey(KEY_GEN_ALGORITHM, true, ['sign', 'verify'])
+  const keys = options.keyPair ?? await crypto.subtle.generateKey(KEY_GEN_ALGORITHM, true, ['sign', 'verify'])
   const extensions = [...(options.extensions ?? [])]
   if (options.ca) {
     extensions.push(new BasicConstraintsExtension(true, 0, true))

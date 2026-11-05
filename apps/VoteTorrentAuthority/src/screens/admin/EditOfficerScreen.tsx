@@ -8,7 +8,7 @@ import { CustomButton } from "../../components/CustomButton";
 import { Footer } from "../../components/Footer";
 import { InfoCard } from "../../components/InfoCard";
 import type { Authority, IAuthorityEngine, INetworkEngine, IUserEngine, Officer, OfficerSelection, Scope, ThresholdPolicy, User } from "@votetorrent/vote-core";
-import { scopeDescriptions } from "@votetorrent/vote-core";
+import { OFFICER_SCOPE_CODES, scopeLabel } from "../../utils/scopeLabel";
 import { useRoute, useNavigation } from "@react-navigation/native";
 import { useApp } from "../../providers/AppProvider";
 import { useSettings } from "../../providers/SettingsProvider";
@@ -20,6 +20,9 @@ import { InlineError } from "../../components/InlineError";
 import { globalStyles } from "../../theme/styles";
 import { createDeviceSigner } from "../../engines/device-signer";
 import { getOrCreateDeviceUser } from "../../engines/device-user";
+import { useDeviceSigningErrorHandler } from "../../hooks/useDeviceSigningErrorHandler";
+import { KeyboardAvoidingScreen } from "../../components/KeyboardAvoidingScreen";
+import { errorCopy } from "../../utils/errorCopy";
 
 export default function EditOfficerScreen() {
 	const { colors } = useTheme() as ExtendedTheme;
@@ -38,6 +41,9 @@ export default function EditOfficerScreen() {
 	const [user, setUser] = useState<User | null>(null);
 	const [userEngine, setUserEngine] = useState<IUserEngine | null>(null);
 	const [errorMessage, setErrorMessage] = useState<string>("");
+	const [isSaving, setIsSaving] = useState(false);
+	const [isRemoving, setIsRemoving] = useState(false);
+	const handleDeviceSigningError = useDeviceSigningErrorHandler();
 
 	// Editing an existing administrator (vs. adding a new one). Drives the
 	// frame-35 vs frame-12 layout: edit shows the User card + REMOVE; add shows
@@ -72,7 +78,7 @@ export default function EditOfficerScreen() {
 				}
 			} catch (error) {
 				console.warn("Error loading officer:", error);
-				setErrorMessage(error instanceof Error ? error.message : String(error));
+				setErrorMessage(errorCopy(error, t, "read"));
 			}
 		}
 		loadOfficer();
@@ -80,10 +86,11 @@ export default function EditOfficerScreen() {
 
 	// ADM-01 shared persist helper: rebuilds the proposed officer set and persists
 	// it via proposeAdmin. Both handleSave and handleRemove funnel through here.
-	// D-01: private key stays app-side (createDeviceSigner closes over it).
+	// The private key lives in Android Keystore and never enters JS; the signer
+	// callback only relays the digest to Keystore's `SHA256withECDSA` and returns
+	// the signature (see `device-signer.ts`'s own header for the current contract).
 	// D-03: AdminDigest is computed ENGINE-SIDE inside proposeAdmin — the app no
 	//       longer recomputes sha256(...) independently.
-	// WR-10: secp256k1.sign v2 defaults (prehash:true) inside createDeviceSigner.
 	const persistOfficerSet = useCallback(async (updatedOfficers: OfficerSelection[]) => {
 		const networkEngine = await getEngine<INetworkEngine>("network");
 		if (!networkEngine) throw new Error("Network not available");
@@ -118,6 +125,7 @@ export default function EditOfficerScreen() {
 	// ADM-01: REMOVE drops the officer from the proposed administration officer set.
 	const handleRemove = useCallback(async () => {
 		setErrorMessage("");
+		setIsRemoving(true);
 		try {
 			const networkEngine = await getEngine<INetworkEngine>("network");
 			if (!networkEngine) {
@@ -145,17 +153,28 @@ export default function EditOfficerScreen() {
 			await persistOfficerSet(updatedOfficers);
 			navigation.goBack();
 		} catch (err) {
-			setErrorMessage(err instanceof Error ? err.message : String(err));
+			const outcome = handleDeviceSigningError(err);
+			if (outcome.handled) return;
+			setErrorMessage(outcome.message ?? errorCopy(err, t, "write"));
+		} finally {
+			setIsRemoving(false);
 		}
-	}, [authority.id, officerId, getEngine, navigation, persistOfficerSet]);
+	}, [authority.id, officerId, getEngine, navigation, persistOfficerSet, handleDeviceSigningError]);
 
 	useEffect(() => {
 		navigation.setOptions({
 			headerRight: isEditing
-				? () => <ChipButton label={t("remove")} icon="trash" onPress={handleRemove} />
+				? () => (
+						<ChipButton
+							label={isRemoving ? `${t("remove")}…` : t("remove")}
+							icon="trash"
+							onPress={handleRemove}
+							disabled={isRemoving}
+						/>
+					)
 				: undefined,
 		});
-	}, [navigation, t, isEditing, handleRemove]);
+	}, [navigation, t, isEditing, handleRemove, isRemoving]);
 
 	const handleScopeToggle = (scope: Scope) => {
 		setScopes((prev) => {
@@ -170,6 +189,7 @@ export default function EditOfficerScreen() {
 	// ADM-01: SAVE persists the edited/added officer into the proposed administration.
 	const handleSave = async () => {
 		setErrorMessage("");
+		setIsSaving(true);
 		try {
 			const networkEngine = await getEngine<INetworkEngine>("network");
 			if (!networkEngine) {
@@ -215,12 +235,16 @@ export default function EditOfficerScreen() {
 			await persistOfficerSet(updatedOfficers);
 			navigation.goBack();
 		} catch (err) {
-			setErrorMessage(err instanceof Error ? err.message : String(err));
+			const outcome = handleDeviceSigningError(err);
+			if (outcome.handled) return;
+			setErrorMessage(outcome.message ?? errorCopy(err, t, "write"));
+		} finally {
+			setIsSaving(false);
 		}
 	};
 
 	return (
-		<View style={styles.content}>
+		<KeyboardAvoidingScreen>
 			<ScrollView style={styles.container}>
 				<View style={styles.section}>
 					{isEditing ? (
@@ -255,10 +279,10 @@ export default function EditOfficerScreen() {
 					<ThemedText type="title" style={styles.sectionTitle}>
 						{t("permissions")}
 					</ThemedText>
-					{Object.entries(scopeDescriptions).map(([scope, description]) => (
+					{OFFICER_SCOPE_CODES.map((scope) => (
 						<View key={scope} style={styles.scopeRow}>
 							<View style={styles.scopeDescriptionContainer}>
-								<ThemedText>{description}</ThemedText>
+								<ThemedText>{scopeLabel(scope, t)}</ThemedText>
 								{showHelpIcons && (
 									<FontAwesome6
 										name="circle-info"
@@ -282,15 +306,15 @@ export default function EditOfficerScreen() {
 			<InlineError message={errorMessage} />
 			<Footer>
 				<CustomButton
-					title={t("save")}
+					title={isSaving ? `${t("save")}…` : t("save")}
 					icon="floppy-disk"
-					disabled={!name || !title}
+					disabled={!name || !title || isSaving}
 					backgroundColor={colors.success}
 					forceDarkText={true}
 					onPress={handleSave}
 				/>
 			</Footer>
-		</View>
+		</KeyboardAvoidingScreen>
 	);
 }
 

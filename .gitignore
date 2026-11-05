@@ -1,3 +1,6 @@
+# macOS Finder metadata
+.DS_Store
+
 # Logs
 logs
 *.log
@@ -38,6 +41,10 @@ build/Release
 
 # Dependency directories
 node_modules/
+# ...and node_modules as a SYMLINK, which the trailing-slash pattern above does
+# not match (git sees a symlink as an ordinary file). An agent worktree that
+# symlinks the installed tree in would otherwise commit the link itself.
+node_modules
 jspm_packages/
 
 # TypeScript v1 declaration files
@@ -121,3 +128,13 @@ figmaToken.txt
 
 vendor
 scratchpad/
+# D-07 StrongBox rung probe output (scripts/run-strongbox-rung-probe.sh)
+.probe-out/
+.capture
+
+# 59-11: scripts/assert-timeline-core-bundle-provenance.mjs writes these at the
+# voter app root for the duration of one run and removes them via an EXIT trap --
+# listed here so an interrupted run can never be committed as residue.
+timeline-provenance-entry.js
+timeline-provenance-control-real.js
+timeline-provenance-control-synthetic.js

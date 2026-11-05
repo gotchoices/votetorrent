@@ -26,9 +26,13 @@ import { readFileSync, appendFileSync } from 'node:fs'
  *   node decode-attestation-leaf.mjs <chain.json> <proof-log.md> <BOUND_DIGEST>
  *
  * Exit 0 ONLY if ALL THREE hold:
- *   (i)   attestationSecurityLevel  === SecurityLevel.trustedEnvironment (1)
- *   (ii)  keymasterSecurityLevel    === SecurityLevel.trustedEnvironment (1)
+ *   (i)   attestationSecurityLevel  >= SecurityLevel.trustedEnvironment (1 or 2)
+ *   (ii)  keymasterSecurityLevel    >= SecurityLevel.trustedEnvironment (1 or 2)
  *   (iii) attestationChallenge bytes === utf8(BOUND_DIGEST)
+ *
+ * (i)/(ii) admit BOTH hardware rungs. Whether the StrongBox rung (2) specifically was
+ * selected is reported separately as `strongBoxRung` and gated on by the ceremony script's
+ * `hw-strongbox-rung` leg — never inferred from this script's exit code.
  *
  * (iii) is INSIDE the exit gate on purpose. (i)+(ii) alone are satisfied by ANY genuinely
  * TEE-backed chain — including one replayed from an unrelated run or a different device.
@@ -83,9 +87,18 @@ const challengeBound =
 const last = new X509Certificate(Buffer.from(chain[chain.length - 1], 'base64'))
 const rootPresent = last.subject === last.issuer
 
+// Both hardware rungs satisfy D-07: trustedEnvironment (1) and strongBox (2). The gate is
+// `>= trustedEnvironment` rather than `=== trustedEnvironment` so a genuine StrongBox chain —
+// which reports 2 on both fields — is not scored a FAIL by a decoder written when TEE was the
+// only rung this project's fleet could reach. software (0) still fails.
+// WHICH rung was selected is a SEPARATE verdict, reported below and gated on by the ceremony
+// script's own `hw-strongbox-rung` leg; it is deliberately NOT folded into this exit code.
 const TEE = SecurityLevel.trustedEnvironment // === 1
 const pass =
-	attestationSecurityLevel === TEE && keymasterSecurityLevel === TEE && challengeBound
+	attestationSecurityLevel >= TEE && keymasterSecurityLevel >= TEE && challengeBound
+const strongBoxRung =
+	attestationSecurityLevel === SecurityLevel.strongBox &&
+	keymasterSecurityLevel === SecurityLevel.strongBox
 
 const hex = Buffer.from(challengeBytes).toString('hex')
 const utf8 = Buffer.from(challengeBytes).toString('utf8')
@@ -103,10 +116,17 @@ expected BOUND_DIGEST: ${boundDigest}
 challengeBound: ${challengeBound}
 chainLength: ${chain.length}
 rootPresent: ${rootPresent}
+strongBoxRung: ${strongBoxRung}
 
 **D-07 VERDICT: ${pass ? 'PASS' : 'FAIL'}** (exit ${pass ? 0 : 1}) — requires
-attestationSecurityLevel === 1 AND keymasterSecurityLevel === 1 AND challengeBound === true,
-in one condition. StrongBox (2) is unreachable on this hardware and is a carried-forward residual.
+attestationSecurityLevel >= 1 AND keymasterSecurityLevel >= 1 AND challengeBound === true,
+in one condition (both hardware rungs qualify; software (0) does not).
+
+**Rung selected: ${strongBoxRung ? 'strongBox (2)' : `${SecurityLevel[attestationSecurityLevel]} (${attestationSecurityLevel})`}.** ${
+	strongBoxRung
+		? 'The StrongBox-primary path executed — this is the D-27 leg 1 reopen condition.'
+		: 'NOT StrongBox — a TEE result is the expected fallback on hardware with no StrongBox chip, and it does NOT satisfy the D-27 leg 1 rung, which requires 2 on BOTH fields.'
+}
 `
 
 appendFileSync(logPath, block)

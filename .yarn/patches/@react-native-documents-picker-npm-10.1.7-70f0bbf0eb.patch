@@ -1,0 +1,13 @@
+diff --git a/android/src/main/java/com/reactnativedocumentpicker/RNDocumentPickerModule.kt b/android/src/main/java/com/reactnativedocumentpicker/RNDocumentPickerModule.kt
+index 346901ca006c0187c9479f512cd593cabd885a73..07759a4d9995d3a8e476469da17be7f7eb9a6436 100644
+--- a/android/src/main/java/com/reactnativedocumentpicker/RNDocumentPickerModule.kt
++++ b/android/src/main/java/com/reactnativedocumentpicker/RNDocumentPickerModule.kt
+@@ -102,7 +102,7 @@ class RNDocumentPickerModule(reactContext: ReactApplicationContext) :
+   }
+ 
+   override fun saveDocument(options: ReadableMap, promise: Promise) {
+-    val currentActivity = currentActivity
++    val currentActivity = reactApplicationContext.currentActivity
+     if (currentActivity == null) {
+       rejectWithNullActivity(promise)
+       return

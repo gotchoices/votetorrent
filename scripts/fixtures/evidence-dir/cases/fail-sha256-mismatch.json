@@ -1,0 +1,11 @@
+{
+  "base": "base-host",
+  "ops": [
+    {
+      "op": "append",
+      "path": "64-evidence/wall/research-2026-10-13/leg-first-shared-1.log",
+      "content": "tampered\n"
+    }
+  ],
+  "expect": "sha256-mismatch"
+}

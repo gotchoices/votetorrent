@@ -18,7 +18,13 @@ import { ElectionRevokeKeyholderBuilder } from '../src/election/builders/electio
 import { ElectionEngine } from '../src/election/election-engine.js'
 import type { ElectionSubject } from '../src/election/election-engine.js'
 import { MockElectionEngine } from '../src/election/mock-election-engine.js'
+import { InvitationEngine } from '../src/invite/invitation-engine.js'
 import { createTestNetwork, addTestAuthority, addTestElection, makeTestSignCallback } from './fixtures/test-context.js'
+// 62-02 (D-26) deviation: this spec is not in 62-02-PLAN.md's files_modified list, but
+// InvitationEngine.respondToInvite now requires provisioning for every Type 'k' accept — these two
+// REAL ENGINE tests (not named in the plan's test-update list) accept a keyholder invite and would
+// otherwise newly fail, see the SUMMARY's Deviations section.
+import { makeKeyholderProvisioning } from './fixtures/keyholder-provisioning.js'
 import type {
   Ballot,
   ElectionRevisionInit,
@@ -26,6 +32,7 @@ import type {
   KeyholderInvite,
   Question
 } from '@votetorrent/vote-core'
+import { inviteeContext, invitePrivateForSlot, mintInviteKeyPair } from './fixtures/invite-keys.js'
 
 // Shared ElectionSubject fixture for real-engine tests
 const testElectionSubject: ElectionSubject = { id: 'election-1', authorityId: 'authority-1' }
@@ -85,6 +92,9 @@ function makeElectionRevisionInit (overrides?: Partial<ElectionRevisionInit>): E
       [ElectionEvent.registrationEnds]: now + 25 * 86_400_000,
       [ElectionEvent.ballotsFinal]: now + 14 * 86_400_000,
       [ElectionEvent.votingStarts]: now + 28 * 86_400_000,
+      [ElectionEvent.accruingVotes]: now + 28 * 86_400_000 + 6 * 3_600_000,
+      [ElectionEvent.hashingVotes]: now + 28 * 86_400_000 + 12 * 3_600_000,
+      [ElectionEvent.releasingKeys]: now + 28 * 86_400_000 + 18 * 3_600_000,
       [ElectionEvent.tallyingStarts]: now + 30 * 86_400_000,
       [ElectionEvent.validation]: now + 31 * 86_400_000,
       [ElectionEvent.certificationStarts]: now + 32 * 86_400_000,
@@ -103,7 +113,7 @@ function makeKeyholderInvite (overrides?: Partial<KeyholderInvite>): KeyholderIn
     // row, so Expiration must satisfy ExpirationValid (Expiration > context.now) — the
     // pre-fix placeholder '0' is no longer schema-legal now that this path is exercised.
     expiration: new Date(Date.now() + 3_600_000).toISOString(),
-    inviteKey: 'k'.repeat(66),
+    inviteKey: mintInviteKeyPair().inviteKey,
     // Empty inviteSignature hits the documented send-side carve-out (no
     // createKeyholderInvite factory yet — see keyholderInviteSignedBytes doc comment)
     // rather than tripping real secp256k1 verification against fixture-garbage hex.
@@ -359,6 +369,9 @@ describe('ElectionProposeRevisionBuilder', () => {
         [ElectionEvent.registrationEnds]: now + 1,
         [ElectionEvent.ballotsFinal]: now + 2,
         [ElectionEvent.votingStarts]: now + 30,
+        [ElectionEvent.accruingVotes]: now + 31,
+        [ElectionEvent.hashingVotes]: now + 32,
+        [ElectionEvent.releasingKeys]: now + 33,
         [ElectionEvent.tallyingStarts]: now + 10, // BEFORE votingStarts end — wrong
         [ElectionEvent.validation]: now + 31,
         [ElectionEvent.certificationStarts]: now + 32,
@@ -368,6 +381,27 @@ describe('ElectionProposeRevisionBuilder', () => {
     const b = new ElectionProposeRevisionBuilder(stubEngine).fromPayload(rev)
     const errs = b.errors().filter(e => e.code === 'TIMELINE_ORDER')
     expect(errs.length).to.be.greaterThan(0)
+  })
+
+  // CR-02 regression: the test above only exercises the pre-59 `tallyingStarts <
+  // certificationStarts` gap. It never moved `validation` or `closed` out of order, so it
+  // could not have caught the D-09 STRICT_CHAIN's `tallyingStarts < validation <
+  // certificationStarts < closed` tail going unchecked -- the exact gap this phase's own
+  // ordering-guard extension left open at every one of the five sites the review flagged.
+  it('cross-field: validation set before tallyingStarts surfaces TIMELINE_ORDER, path-specific (CR-02 regression)', () => {
+    const rev = makeElectionRevisionInit()
+    rev.timeline[ElectionEvent.validation] = rev.timeline[ElectionEvent.tallyingStarts] - 1
+    const b = new ElectionProposeRevisionBuilder(stubEngine).fromPayload(rev)
+    const errs = b.errors().filter(e => e.code === 'TIMELINE_ORDER' && e.path === 'timeline.validation')
+    expect(errs.length).to.equal(1)
+  })
+
+  it('cross-field: closed set before certificationStarts surfaces TIMELINE_ORDER, path-specific (CR-02 regression)', () => {
+    const rev = makeElectionRevisionInit()
+    rev.timeline[ElectionEvent.closed] = rev.timeline[ElectionEvent.certificationStarts] - 1
+    const b = new ElectionProposeRevisionBuilder(stubEngine).fromPayload(rev)
+    const errs = b.errors().filter(e => e.code === 'TIMELINE_ORDER' && e.path === 'timeline.closed')
+    expect(errs.length).to.equal(1)
   })
 })
 
@@ -506,9 +540,22 @@ describe('ElectionRevokeKeyholderBuilder', () => {
   })
 
   it('REAL ENGINE: isValid===true => commit() does not throw BuilderValidationError', async () => {
-    const { ctx } = await createTestNetwork()
-    const engine = new ElectionEngine(testElectionSubject, ctx)
-    const b = new ElectionRevokeKeyholderBuilder(engine).fromPayload({ keyholder: makeKeyholderInvite(), electionId: 'election-1' })
+    // D-27 (T-62-09-01): revokeKeyholder now resolves a real target through
+    // InviteSlot/InviteResult/Keyholder, so this REAL ENGINE no-throw case
+    // needs a genuinely accepted keyholder to revoke — createTestNetwork()
+    // alone (as before) seeds none, which now correctly throws.
+    const net = await createTestNetwork()
+    const auth = await addTestAuthority(net)
+    const elec = await addTestElection(auth)
+    const kh = makeKeyholderInvite()
+    await elec.electionEngine.inviteKeyholder(kh, 'election-1', makeTestSignCallback(auth.user))
+    const slotRow = await elec.ctx.db
+      .prepare("select Cid from InviteSlot where Type = 'k' and Name = :name")
+      .get({ name: kh.name })
+    await new InvitationEngine(inviteeContext(elec.ctx)).respondToInvite(slotRow!.Cid as string, true, await invitePrivateForSlot(elec.ctx, slotRow!.Cid as string), undefined, undefined, makeKeyholderProvisioning())
+
+    const engine = new ElectionEngine({ id: 'election-1', authorityId: auth.authority.id }, elec.ctx)
+    const b = new ElectionRevokeKeyholderBuilder(engine).fromPayload({ keyholder: kh, electionId: 'election-1' })
     expect(b.isValid()).to.equal(true)
     await b.commit()
   })
@@ -524,9 +571,22 @@ describe('ElectionRevokeKeyholderBuilder', () => {
   })
 
   it('REAL ENGINE: double-commit guard throws BuilderAlreadyCommittedError', async () => {
-    const { ctx } = await createTestNetwork()
-    const engine = new ElectionEngine(testElectionSubject, ctx)
-    const b = new ElectionRevokeKeyholderBuilder(engine).fromPayload({ keyholder: makeKeyholderInvite(), electionId: 'election-1' })
+    // D-27 (T-62-09-01): the first commit() must succeed (not throw) for this
+    // to be a genuine double-commit-guard test rather than a first-commit
+    // rejection — seed a real accepted keyholder, same reasoning as the
+    // no-throw test above.
+    const net = await createTestNetwork()
+    const auth = await addTestAuthority(net)
+    const elec = await addTestElection(auth)
+    const kh = makeKeyholderInvite()
+    await elec.electionEngine.inviteKeyholder(kh, 'election-1', makeTestSignCallback(auth.user))
+    const slotRow = await elec.ctx.db
+      .prepare("select Cid from InviteSlot where Type = 'k' and Name = :name")
+      .get({ name: kh.name })
+    await new InvitationEngine(inviteeContext(elec.ctx)).respondToInvite(slotRow!.Cid as string, true, await invitePrivateForSlot(elec.ctx, slotRow!.Cid as string), undefined, undefined, makeKeyholderProvisioning())
+
+    const engine = new ElectionEngine({ id: 'election-1', authorityId: auth.authority.id }, elec.ctx)
+    const b = new ElectionRevokeKeyholderBuilder(engine).fromPayload({ keyholder: kh, electionId: 'election-1' })
     await b.commit()
     let caught: unknown
     try { b.commit() } catch (err) { caught = err }
@@ -552,17 +612,29 @@ describe('ElectionRevokeKeyholderBuilder', () => {
   })
 
   it('REAL ENGINE: equivalence smoke: engine.revokeKeyholder(payload) vs builder.fromPayload(payload).commit()', async () => {
+    // D-27 (T-62-09-01): revokeKeyholder now resolves its target through a
+    // real InviteSlot/InviteResult/Keyholder chain. Neither network here has
+    // ANY accepted keyholder, so BOTH paths must reject identically with the
+    // "no accepted keyholder" error — the prior assertion (both no-throw) was
+    // a stale artifact of the old UserId = this.ctx.user?.id delete, which
+    // always "succeeded" by deleting nothing.
     const payload = { keyholder: makeKeyholderInvite(), electionId: 'election-1' }
     const { ctx: ctx1 } = await createTestNetwork()
     const engine1 = new ElectionEngine(testElectionSubject, ctx1)
     let err1: unknown
     try { await engine1.revokeKeyholder(payload.keyholder, payload.electionId) } catch (e) { err1 = e }
-    expect(err1).to.equal(undefined)
+    expect(err1).to.be.instanceOf(Error)
+    expect((err1 as Error).message).to.include('no accepted keyholder')
+
     const { ctx: ctx2 } = await createTestNetwork()
     const engine2 = new ElectionEngine(testElectionSubject, ctx2)
     let err2: unknown
     try { await engine2.buildRevokeKeyholder().fromPayload(payload).commit() } catch (e) { err2 = e }
-    expect(err2).to.equal(undefined)
+    expect(err2).to.be.instanceOf(Error)
+    expect((err2 as Error).message).to.include('no accepted keyholder')
+
+    // Equivalence claim: both paths reject with the SAME message.
+    expect((err1 as Error).message).to.equal((err2 as Error).message)
   })
 
   it('FACT-04 parity: MockElectionEngine returns instanceof ElectionRevokeKeyholderBuilder', () => {
@@ -593,7 +665,7 @@ describe('ElectionEngine — inviteKeyholder real-path (INV-03)', () => {
       name: 'Test Keyholder',
       type: 'k',
       expiration: new Date(Date.now() + 86_400_000).toISOString(),
-      inviteKey: 'k'.repeat(66),
+      inviteKey: mintInviteKeyPair().inviteKey,
       // Empty inviteSignature hits the documented send-side carve-out (see
       // keyholderInviteSignedBytes doc comment) rather than tripping real
       // secp256k1 verification against fixture-garbage hex.

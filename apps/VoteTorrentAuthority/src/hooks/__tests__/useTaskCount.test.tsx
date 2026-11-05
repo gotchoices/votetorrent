@@ -266,4 +266,30 @@ describe('useTaskCount — VER-02 / D-06 / CR-02', () => {
     // passing without a React state-update warning proves it.
     expect(true).toBe(true); // sentinel: test reached here without crashing
   });
+
+  it("excludes 'registrant' signature tasks from the badge count (48-11/48-18)", async () => {
+    // 2 release-key tasks + 2 non-'registrant' signature tasks + 1
+    // 'registrant' signature task = 4, NOT 5. The badge and TasksScreen.tsx's
+    // renderable list must count the SAME population (T-48-18-11) — a badge
+    // reading 5 over a list rendering 4 cards would be a legibility defect.
+    mockGetKeysToRelease.mockResolvedValue([{}, {}]);
+    mockGetRequestedSignatures.mockResolvedValue([
+      { signatureType: 'admin' },
+      { signatureType: 'authority' },
+      { signatureType: 'registrant' },
+    ]);
+
+    let tr!: renderer.ReactTestRenderer;
+    await renderer.act(async () => {
+      tr = renderer.create(<CountDisplay />);
+    });
+
+    await renderer.act(async () => {
+      resolveEngines([mockKeysEngine, mockSigEngine]);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(readCount(tr)).toBe(4);
+  });
 });

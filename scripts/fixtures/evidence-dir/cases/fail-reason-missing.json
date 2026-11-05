@@ -1,0 +1,10 @@
+{
+  "base": "base-device",
+  "ops": [
+    {
+      "op": "delete",
+      "path": "64-device-evidence/checks/camera-gate/attempt-2/android/reason.txt"
+    }
+  ],
+  "expect": "reason-missing"
+}

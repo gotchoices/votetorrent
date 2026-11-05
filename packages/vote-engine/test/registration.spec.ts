@@ -21,13 +21,15 @@ import { secp256k1 } from '@noble/curves/secp256k1.js'
 import { bytesToHex, hexToBytes } from '@noble/curves/utils.js'
 import {
   BuilderAlreadyCommittedError,
-  BuilderValidationError
+  BuilderValidationError,
+  RegistrantAlreadyExistsError
 } from '@votetorrent/vote-core'
-import type { Signature, Scope } from '@votetorrent/vote-core'
+import type { Signature, Scope, RegisterInit, PrivateDetail } from '@votetorrent/vote-core'
 import { RegistrationEngine } from '../src/registration/registration-engine.js'
 import { MockRegistrationEngine } from '../src/registration/mock-registration-engine.js'
 import { RegistrationRegisterBuilder } from '../src/registration/builders/registration-register-builder.js'
-import { createTestNetwork, addTestAuthority, addTestElection, seedAuthorityInvite, seedSignedMutation as seedSignedMutationFixture } from './fixtures/test-context.js'
+import { sealRegistrantPrivateDetails } from '../src/registration/sealed-registration-content.js'
+import { createTestNetwork, addTestAuthority, addTestElection, seedAuthorityInvite, seedSignedMutation as seedSignedMutationFixture, provisionTestIntakeRecipient, testKeyPairFor } from './fixtures/test-context.js'
 import { randomTestKeyPair } from './fixtures/keys.js'
 import { digestToBytes, toCanonicalDatetime } from '../src/utils.js'
 import type { EngineContext } from '../src/types.js'
@@ -39,7 +41,7 @@ import type { TestAuthorityContext } from './fixtures/test-context.js'
 
 /** Build a real secp256k1 sign callback (@noble/curves v2 defaults — prehash:true). */
 function makeRegistrantSigner (userId: string): { sign: (digest: Uint8Array) => Promise<Signature>; publicHex: string } {
-  const { privateHex, publicHex } = randomTestKeyPair()
+  const { privateHex, publicHex } = testKeyPairFor(userId)
   const privBytes = hexToBytes(privateHex)
   const sign = async (digest: Uint8Array): Promise<Signature> => {
     const sig = secp256k1.sign(digest, privBytes) // v2 default: prehash:true
@@ -71,6 +73,10 @@ async function setupRegistrationTest (): Promise<{
 }> {
   const net = await createTestNetwork()
   const auth = await addTestAuthority(net)
+  // D-49 (62-31): several tests in this file write non-empty private details through
+  // createRegistrantPrivate/register() (now D-49-sealed) — one provisioning call here covers
+  // every one of this file's 30 setupRegistrationTest() call sites.
+  await provisionTestIntakeRecipient(auth.ctx, auth.authority.id)
   const { sign, publicHex } = makeRegistrantSigner(auth.user.id)
   const engine = new RegistrationEngine(auth.ctx)
   return { auth, engine, sign, publicHex }
@@ -108,17 +114,41 @@ async function computePublicCid (
   return row!.c as string
 }
 
-/** Mirrors RegistrationEngine's private computeRegistrantPrivateCid (see computePublicCid). */
-async function computePrivateCid (
+/** Narrow structural type for reaching `RegistrationEngine`'s private `insertRegistrantPrivateRow`
+ * — the project's established convention for exercising engine-internal state from a spec (mirrors
+ * `threshold-authority.ts`'s `lastPromotionOutcome` cast). */
+type EngineWithInsertRegistrantPrivateRow = Omit<RegistrationEngine, 'insertRegistrantPrivateRow'> & {
+  insertRegistrantPrivateRow: (
+    registrantId: string,
+    authorityId: string,
+    expiration: number,
+    storedDetails: string,
+    signatureOrCallback: (digest: Uint8Array) => Promise<Signature>
+  ) => Promise<{ cid: string }>
+}
+
+/**
+ * D-49 (62-31): seals `details` ONCE (sealing is randomized) and computes the Cid over that SAME
+ * stored text — mirrors `register()`'s own pre-BEGIN sealing, so a test driving `createRegistrant`
+ * and a private-tier insert as two SEPARATE calls (below) can still predict the parent's
+ * `PrivateCid` before the child row exists, without re-sealing (which would produce a DIFFERENT Cid
+ * and trip `RegistrantCidMatch`). Returns the sealed text and its Cid; the CALLER is responsible for
+ * `createRegistrant` (parent, carrying `cid` as `privateCid`) THEN
+ * `insertRegistrantPrivateRow(storedDetails)` (child) — Cids-before-parent order, same as
+ * `register()` and every other tier in this file.
+ */
+async function sealPrivateDetails (
   ctx: EngineContext,
+  authorityId: string,
   registrantId: string,
-  input: { expiration: number; details: Array<Record<string, unknown>> }
-): Promise<string> {
+  input: { expiration: number; details: PrivateDetail[] }
+): Promise<{ storedDetails: string; cid: string }> {
+  const storedDetails = await sealRegistrantPrivateDetails(ctx.db, { authorityId, registrantId, details: input.details })
   const expiration = new Date(input.expiration).toISOString()
   const row = await ctx.db
     .prepare('select cid(Digest(:registrantId, :expiration, :privateDetails)) as c')
-    .get({ registrantId, expiration, privateDetails: JSON.stringify(input.details) })
-  return row!.c as string
+    .get({ registrantId, expiration, privateDetails: storedDetails })
+  return { storedDetails, cid: row!.c as string }
 }
 
 /** Resolve the single Election row seeded by addTestElection() for this authority. */
@@ -314,14 +344,16 @@ describe('RegistrationEngine', () => {
       const { auth, engine, sign } = await setupRegistrationTest()
       const registrantId = nextRegistrantId()
       const ctx = (engine as unknown as { ctx: EngineContext }).ctx
-      const details = [{ name: 'ssn-last-4', value: '1234' }]
-      const privateCid = await computePrivateCid(ctx, registrantId, { expiration: FUTURE_EXPIRATION, details })
+      const details: PrivateDetail[] = [{ name: 'ssn-last-4', value: '1234' }]
+      const { storedDetails, cid: privateCid } = await sealPrivateDetails(ctx, auth.authority.id, registrantId, { expiration: FUTURE_EXPIRATION, details })
       await engine.createRegistrant(
         { id: registrantId, authorityId: auth.authority.id, privateCid, expiration: FUTURE_EXPIRATION },
         sign
       )
-      const created = await engine.createRegistrantPrivate({ registrantId, expiration: FUTURE_EXPIRATION, details }, sign)
-      expect(created.cid).to.be.a('string').with.length.greaterThan(0)
+      const created = await (engine as unknown as EngineWithInsertRegistrantPrivateRow).insertRegistrantPrivateRow(
+        registrantId, auth.authority.id, FUTURE_EXPIRATION, storedDetails, sign
+      )
+      expect(created.cid).to.equal(privateCid)
 
       const row = await engine.getRegistrantPrivate(registrantId)
       expect(row).to.not.be.undefined
@@ -332,17 +364,18 @@ describe('RegistrationEngine', () => {
       const { auth, engine, sign } = await setupRegistrationTest()
       const registrantId = nextRegistrantId()
       const ctx = (engine as unknown as { ctx: EngineContext }).ctx
-      const details = [{ name: 'ssn-last-4', value: '1234' }]
-      const privateCid = await computePrivateCid(ctx, registrantId, { expiration: FUTURE_EXPIRATION, details })
+      const details: PrivateDetail[] = [{ name: 'ssn-last-4', value: '1234' }]
+      const { storedDetails, cid: privateCid } = await sealPrivateDetails(ctx, auth.authority.id, registrantId, { expiration: FUTURE_EXPIRATION, details })
       await engine.createRegistrant(
         { id: registrantId, authorityId: auth.authority.id, privateCid, expiration: FUTURE_EXPIRATION },
         sign
       )
-      await engine.createRegistrantPrivate({ registrantId, expiration: FUTURE_EXPIRATION, details }, sign)
+      await (engine as unknown as EngineWithInsertRegistrantPrivateRow).insertRegistrantPrivateRow(registrantId, auth.authority.id, FUTURE_EXPIRATION, storedDetails, sign)
 
       let threw = false
       try {
-        await engine.createRegistrantPrivate({ registrantId, expiration: FUTURE_EXPIRATION, details }, sign)
+        // Identical pre-sealed text -> identical deterministic Cid -> PK collision.
+        await (engine as unknown as EngineWithInsertRegistrantPrivateRow).insertRegistrantPrivateRow(registrantId, auth.authority.id, FUTURE_EXPIRATION, storedDetails, sign)
       } catch {
         threw = true
       }
@@ -357,18 +390,17 @@ describe('RegistrationEngine', () => {
       const ctx = (engine as unknown as { ctx: EngineContext }).ctx
 
       const publicInput = { lastName: 'Doe' }
-      const privateDetails = [{ name: 'k', value: 'v' }]
+      const privateDetails: PrivateDetail[] = [{ name: 'k', value: 'v' }]
       const publicCid = await computePublicCid(ctx, registrantId, publicInput)
-      const privateCid = await computePrivateCid(ctx, registrantId, { expiration: FUTURE_EXPIRATION, details: privateDetails })
+      const { storedDetails, cid: privateCid } = await sealPrivateDetails(ctx, auth.authority.id, registrantId, { expiration: FUTURE_EXPIRATION, details: privateDetails })
 
       await engine.createRegistrant(
         { id: registrantId, authorityId: auth.authority.id, privateCid, publicCid, expiration: FUTURE_EXPIRATION },
         sign
       )
       await engine.createRegistrantPublic({ registrantId, ...publicInput }, sign)
-      await engine.createRegistrantPrivate(
-        { registrantId, expiration: FUTURE_EXPIRATION, details: privateDetails },
-        sign
+      await (engine as unknown as EngineWithInsertRegistrantPrivateRow).insertRegistrantPrivateRow(
+        registrantId, auth.authority.id, FUTURE_EXPIRATION, storedDetails, sign
       )
 
       const row = await ctx.db
@@ -401,6 +433,31 @@ describe('RegistrationEngine', () => {
       expect(row!.lastName).to.equal('Mock')
       expect(row!.district).to.equal('D-1')
     })
+  })
+})
+
+// ===========================================================================
+// register() idempotency — R2/D-04/D-05 (57-02)
+// ===========================================================================
+
+describe('register() idempotency (R2)', () => {
+  it('throws RegistrantAlreadyExistsError on a second register() call with the same registrant.id (D-04: RED-then-green verdict recorded in 57-02-R2-REPRO.md)', async () => {
+    const { auth, engine, sign } = await setupRegistrationTest()
+    const registrantId = nextRegistrantId()
+    const init: RegisterInit = {
+      registrant: { id: registrantId, authorityId: auth.authority.id, expiration: FUTURE_EXPIRATION },
+      private: { expiration: FUTURE_EXPIRATION, details: [] }
+    }
+
+    await engine.register(init, sign)
+
+    let threw = false
+    try {
+      await engine.register(init, sign)
+    } catch (err) {
+      threw = err instanceof RegistrantAlreadyExistsError
+    }
+    expect(threw, 'expected the second register() call to throw RegistrantAlreadyExistsError').to.be.true
   })
 })
 
@@ -886,10 +943,65 @@ describe('ElectionRegistrant roster (authority-only, D-17)', () => {
 
       await mock.enrollElectionRegistrant(electionId, registrantId, dummySign)
       await mock.removeElectionRegistrant(electionId, registrantId, dummySign)
-      // No public read method to assert against directly (getElectionRegistrants
-      // stays a [] stub, out of this plan's scope) — parity is exercised by the
-      // fact that both calls resolve without throwing (matches the real
-      // engine's insert-then-delete-succeeds shape).
+      // Phase 47/D-07: getElectionRegistrants is now a real public read (see the
+      // rewritten describe block below) — parity here is exercised by the fact
+      // that both calls resolve without throwing (matches the real engine's
+      // insert-then-delete-succeeds shape).
+    })
+  })
+
+  describe('getElectionRegistrants returns real rows (D-07 — Phase 47 replaced the Phase 46 stub)', () => {
+    // This block was a Phase 46 scope lock ("stays stubbed in Phase 46 (D-08/D-09
+    // — real read is Phase 47)") asserting getElectionRegistrants always returned
+    // `[]`, even for an enrolled registrant. Phase 47/47-05 implemented the real
+    // read; 47-06 REWRITES (not deletes) these two tests into real-rows
+    // assertions so the only automated coverage getElectionRegistrants has is
+    // updated, not destroyed.
+    it('real engine: an enrolled ElectionRegistrant row is returned by getElectionRegistrants', async () => {
+      const { auth, engine, sign } = await setupRegistrationTest()
+      const elec = await addTestElection(auth)
+      const electionId = await resolveElectionId(elec.ctx, elec.authority.id)
+      const registrantId = nextRegistrantId()
+      await engine.createRegistrant(
+        { id: registrantId, authorityId: auth.authority.id, privateCid: 'test-private-cid', expiration: FUTURE_EXPIRATION },
+        sign
+      )
+      await engine.enrollElectionRegistrant(electionId, registrantId, sign)
+
+      const ctx = (engine as unknown as { ctx: EngineContext }).ctx
+      const row = await ctx.db
+        .prepare('select count(*) as n from ElectionRegistrant where ElectionId = :electionId and RegistrantId = :registrantId')
+        .get({ electionId, registrantId })
+      expect(Number(row?.n)).to.equal(1)
+
+      const registrants = await engine.getElectionRegistrants(electionId)
+      expect(registrants).to.deep.equal([{ electionId, registrantId }])
+
+      // A second election's roster must not leak this registrant in — `[]`
+      // remains correct for a genuinely empty roster; what is no longer
+      // correct is `[]` for a populated one. (addTestElection() always seeds a
+      // fixed Election.Id, so a second REAL election would PK-collide; a plain
+      // read like getElectionRegistrants has no FK requirement on Election, so
+      // an arbitrary distinct id is sufficient to prove the isolation.)
+      const otherElectionId = `${electionId}-other`
+      const otherRegistrants = await engine.getElectionRegistrants(otherElectionId)
+      expect(otherRegistrants).to.deep.equal([])
+    })
+
+    it('mock engine parity: getElectionRegistrants returns the enrolled roster entry and drops it on remove', async () => {
+      const mock = new MockRegistrationEngine()
+      const dummySign = async (): Promise<Signature> => ({ signerUserId: 'u', signerKey: 'k', signature: 's' })
+      const electionId = 'election-mock-stub-1'
+      const registrantId = 'registrant-mock-stub-1'
+
+      await mock.enrollElectionRegistrant(electionId, registrantId, dummySign)
+
+      const registrants = await mock.getElectionRegistrants(electionId)
+      expect(registrants).to.deep.equal([{ electionId, registrantId }])
+
+      await mock.removeElectionRegistrant(electionId, registrantId, dummySign)
+      const afterRemove = await mock.getElectionRegistrants(electionId)
+      expect(afterRemove, 'the mock read tracks its own writes rather than being hardcoded').to.deep.equal([])
     })
   })
 })

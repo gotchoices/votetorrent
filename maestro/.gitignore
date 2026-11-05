@@ -1,0 +1,2 @@
+# Run artifacts written by scripts/run.sh (screenshots, logs, JUnit XML, Metro logs).
+.out/

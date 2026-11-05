@@ -1,0 +1,236 @@
+/**
+ * UAT 65 gap 4 (D-98): the dispatcher re-opens a network on the store that created it.
+ * NetworksEngine is replaced by a fake that exposes the dispatcher callback; the db factories are mocks.
+ */
+import {LocalStorageReact} from '@votetorrent/vote-engine/rn';
+
+jest.mock('../proof-flags.generated', () => ({
+	USE_LOCAL_DB_FACTORY: false,
+	USE_STUB_ATTESTATION_VERIFIER: false,
+}));
+
+const mockStrandOpen = jest.fn();
+jest.mock('../rn-db-factory', () => ({
+	rnDbFactory: jest.fn(),
+	createStrandDbFactory: jest.fn(() => (hash: string) => mockStrandOpen(hash)),
+}));
+
+jest.mock('@votetorrent/vote-engine/rn', () => {
+	const actual = jest.requireActual('@votetorrent/vote-engine/rn');
+	class FakeNetworksEngine {
+		dbFactory: (hash: string) => Promise<unknown>;
+		constructor(_ls: unknown, dbFactory: (hash: string) => Promise<unknown>) {
+			this.dbFactory = dbFactory;
+		}
+		async create(hash: string) {
+			return this.dbFactory(hash);
+		}
+		async open(hash: string) {
+			return this.dbFactory(hash);
+		}
+	}
+	return {...actual, NetworksEngine: FakeNetworksEngine};
+});
+
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const {EngineFactory} = require('../engine-factory');
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const fi = require('../founder-intent');
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const store = require('../network-backend-store');
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const asMod = require('@react-native-async-storage/async-storage');
+const AsyncStorage = asMod.default ?? asMod;
+
+const node = {} as never;
+
+function build() {
+	const solo = jest.fn(async (hash: string): Promise<unknown> => {
+		fi.takeFounderIntent(hash);
+		return {backend: 'solo'};
+	});
+	const factory = new EngineFactory(new LocalStorageReact(), solo);
+	return {factory, solo, engine: factory.getNetworksEngine()};
+}
+
+beforeEach(async () => {
+	await AsyncStorage.clear();
+	mockStrandOpen.mockReset();
+	mockStrandOpen.mockImplementation(async (hash: string) => {
+		return {backend: 'strand', intent: fi.takeFounderIntent(hash)};
+	});
+});
+
+describe('EngineFactory network backend (D-98)', () => {
+	it('NB-1 a network created while no node is set re-opens on the solo store after the node is set', async () => {
+		const {factory, solo, engine} = build();
+		await engine.create('h1');
+		expect(solo).toHaveBeenCalledTimes(1);
+		factory.setNode(node);
+		const db = await engine.open('h1');
+		expect(db).toEqual({backend: 'solo'});
+		expect(solo).toHaveBeenCalledTimes(2);
+		expect(mockStrandOpen).not.toHaveBeenCalled();
+	});
+
+	it('NB-2 a network created on the strand re-opens on the strand', async () => {
+		const {factory, solo, engine} = build();
+		factory.setNode(node);
+		await engine.create('h2');
+		await engine.open('h2');
+		expect(mockStrandOpen).toHaveBeenCalledTimes(2);
+		expect(solo).not.toHaveBeenCalled();
+	});
+
+	it('NB-3 a hash with no record keeps today\'s dispatch', async () => {
+		const {factory, solo, engine} = build();
+		factory.setNode(node);
+		await engine.open('joined');
+		expect(mockStrandOpen).toHaveBeenCalledTimes(1);
+		factory.setNode(null);
+		await engine.open('joined');
+		expect(solo).toHaveBeenCalledTimes(1);
+	});
+
+	it('NB-4 the strand factory sees the founding intent on a create', async () => {
+		const {factory, engine} = build();
+		factory.setNode(node);
+		const db = (await engine.create('h4')) as {intent: string};
+		expect(db.intent).toBe('founding');
+	});
+
+	it('NB-5 peekFounderIntent does not consume', async () => {
+		expect(fi.peekFounderIntent()).toBeNull();
+		await fi.withFounding(async () => {
+			expect(fi.peekFounderIntent()).toBe('founding');
+			expect(fi.takeFounderIntent('x')).toBe('founding');
+		});
+		await fi.withFounding(async () => {
+			expect(fi.peekFounderIntent()).toBe('founding');
+			expect(fi.peekFounderIntent()).toBe('founding');
+		});
+	});
+
+	it('NB-6 the store round-trips and fails closed', async () => {
+		expect(await store.readNetworkBackend('a')).toBeNull();
+		await store.recordNetworkBackend('a', 'solo');
+		expect(await store.readNetworkBackend('a')).toBe('solo');
+		await AsyncStorage.setItem(`${store.NETWORK_BACKEND_KEY_PREFIX}b`, 'bogus');
+		expect(await store.readNetworkBackend('b')).toBeNull();
+		expect(await AsyncStorage.getItem(`${store.NETWORK_BACKEND_KEY_PREFIX}a`)).toBe('solo');
+	});
+
+	it('NB-7 the record is on storage before the db factory resolves', async () => {
+		for (const path of ['solo', 'strand'] as const) {
+			const {factory, solo, engine} = build();
+			const never = new Promise(() => undefined);
+			if (path === 'solo') {
+				solo.mockImplementation(async (hash: string) => {
+					fi.takeFounderIntent(hash);
+					return never;
+				});
+			} else {
+				factory.setNode(node);
+				mockStrandOpen.mockImplementation((hash: string) => {
+					fi.takeFounderIntent(hash);
+					return never;
+				});
+			}
+			void engine.create(`h7${path}`);
+			await new Promise(r => setTimeout(r, 20));
+			expect(await store.readNetworkBackend(`h7${path}`)).toBe(path);
+		}
+	});
+
+	it('NB-7b an open that rejects while the creating store is being recorded is never an unhandled rejection (round-1 WR-03)', async () => {
+		const unhandled: unknown[] = [];
+		const onUnhandled = (reason: unknown) => { unhandled.push(reason); };
+		process.on('unhandledRejection', onUnhandled);
+		let release: () => void = () => undefined;
+		const gate = new Promise<void>(r => { release = r; });
+		// the AsyncStorage jest mock's setItem is itself a jest.fn: hold the next call, then run its own implementation
+		const setItem = AsyncStorage.setItem as jest.Mock;
+		const realImpl = setItem.getMockImplementation()!;
+		setItem.mockImplementationOnce(async (...args: unknown[]) => {
+			await gate;
+			return realImpl(...args);
+		});
+		try {
+			const {solo, engine} = build();
+			const boom = new Error('solo open failed');
+			solo.mockImplementation(async (hash: string) => {
+				fi.takeFounderIntent(hash);
+				throw boom;
+			});
+			const created = engine.create('h7b');
+			const settled = created.then(() => 'resolved', (e: unknown) => e);
+			// let the rejected open sit unobserved past a macrotask, while the record write is held
+			await new Promise(r => setTimeout(r, 20));
+			release();
+			expect(await settled).toBe(boom);
+			await new Promise(r => setTimeout(r, 20));
+			expect(unhandled).toEqual([]);
+		} finally {
+			process.off('unhandledRejection', onUnhandled);
+		}
+	});
+
+	// T-65-14-01: the dispatcher reads the creating store with an await. A create that starts during
+	// that await owns the founding window; a non-create open that wakes up into it must refuse, not
+	// open a store (the factory's first statement would take the window and the create would lose it).
+	it('NB-8 a non-create open that finds a founding window opened during its own await throws FounderIntentBusyError and leaves the window alone', async () => {
+		const {factory, solo, engine} = build();
+		factory.setNode(node);
+		let release: () => void = () => undefined;
+		const gate = new Promise<void>(resolve => {
+			release = resolve;
+		});
+		const getItem = jest.spyOn(AsyncStorage, 'getItem').mockImplementation(async () => {
+			await gate;
+			return null;
+		});
+		try {
+			getItem.mockClear();
+			const opening = engine.open('reopened');
+			await new Promise(r => setTimeout(r, 0));
+			// the open is now parked on its backend read, before any store is opened
+			expect(getItem).toHaveBeenCalledTimes(1);
+			expect(getItem).toHaveBeenCalledWith(`${store.NETWORK_BACKEND_KEY_PREFIX}reopened`);
+			expect(fi.peekFounderIntent()).toBeNull();
+			let outcome: unknown;
+			await fi.withFounding(async () => {
+				expect(fi.peekFounderIntent()).toBe('founding');
+				release();
+				outcome = await opening.then(
+					() => 'resolved',
+					(e: unknown) => e,
+				);
+				// the open did not consume the create's window
+				expect(fi.peekFounderIntent()).toBe('founding');
+			});
+			expect(fi.isFounderIntentBusyError(outcome)).toBe(true);
+			expect((outcome as Error).name).toBe('FounderIntentBusyError');
+			expect(mockStrandOpen).not.toHaveBeenCalled();
+			expect(solo).not.toHaveBeenCalled();
+		} finally {
+			release();
+			getItem.mockRestore();
+		}
+	});
+
+	it('NB-9 the same open with no founding window during its await opens normally', async () => {
+		const {factory, engine} = build();
+		factory.setNode(node);
+		const getItem = jest.spyOn(AsyncStorage, 'getItem').mockImplementation(async () => {
+			await Promise.resolve();
+			return null;
+		});
+		try {
+			const db = (await engine.open('reopened')) as {backend: string; intent: unknown};
+			expect(db.backend).toBe('strand');
+			expect(db.intent).toBeNull();
+		} finally {
+			getItem.mockRestore();
+		}
+	});
+});

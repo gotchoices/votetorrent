@@ -1,0 +1,2 @@
+/* Purpose shown with the Face ID prompt before a biometric-protected key signs. */
+"NSFaceIDUsageDescription" = "VoteTorrent Authority usa Face ID para confirmar que eres tú antes de firmar con tu clave de funcionario. La clave se guarda en el Secure Enclave y nunca sale de este dispositivo.";

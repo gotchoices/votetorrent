@@ -1,0 +1,33 @@
+{
+	"name": "@votetorrent/bootstrap-rendezvous-service",
+	"version": "0.0.1",
+	"private": true,
+	"type": "module",
+	"description": "Holds a sealed blob it cannot read, for at most ten minutes, and hands it over exactly once. NOT the libp2p circuit relay.",
+	"main": "dist/main.js",
+	"types": "dist/main.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/main.d.ts",
+			"import": "./dist/main.js"
+		}
+	},
+	"scripts": {
+		"clean": "rm -rf dist",
+		"build": "tsc -p tsconfig.build.json",
+		"start": "node dist/main.js",
+		"test": "TS_NODE_PROJECT=./tsconfig.test.json mocha --node-option=import=./register-ts-node.mjs --node-option=experimental-specifier-resolution=node \"test/**/*.spec.ts\""
+	},
+	"dependencies": {
+		"@optimystic/db-p2p-storage-fs": "^1.24.0",
+		"@votetorrent/vote-engine": "workspace:*"
+	},
+	"devDependencies": {
+		"@types/mocha": "^10.0.10",
+		"@types/node": "^22.13.10",
+		"chai": "^5.2.0",
+		"mocha": "^11.5.0",
+		"ts-node": "^10.8.1",
+		"typescript": "^5.6.3"
+	}
+}

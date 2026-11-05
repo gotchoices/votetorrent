@@ -1,9 +1,18 @@
 import type { Database } from '@quereus/quereus'
 import type { User } from '@votetorrent/vote-core'
+import type { IntakeOpener } from './intake/types.js'
 
 export interface EngineContext {
   db: Database
   user?: User
+  /**
+   * D-49: the signed-in officer's opener for sealed registration content (62-14 `IntakeOpener`).
+   * Set by the HOST on the established ctx (Authority engine factory, 62-27) when the device holds
+   * an officer intake key. Never set on the Voter. Never persisted, serialized or logged. Absent
+   * means every sealed `RegistrationRequest.Payload`/`RegistrantPrivate.PrivateDetails` read
+   * degrades to `'no-opener'` (`sealed-registration-content.ts`).
+   */
+  intakeOpener?: IntakeOpener
 }
 
 /**

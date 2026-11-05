@@ -25,7 +25,10 @@ import type {
   NetworkInit,
   AdminSignatureTask,
   KeyholderInvite,
-  Ballot
+  Ballot,
+  RegistrantSignatureTask,
+  RegisterInit,
+  SigningStatus
 } from '@votetorrent/vote-core'
 import type { MockElectionEngine } from '../election/mock-election-engine.js'
 
@@ -114,6 +117,9 @@ const MOCK_ELECTION_REVISION_INIT: ElectionRevisionInit = {
     [ElectionEvent.registrationEnds]: MOCK_TIMESTAMP + 86400000 * 3,
     [ElectionEvent.ballotsFinal]: MOCK_TIMESTAMP + 86400000 * 4,
     [ElectionEvent.votingStarts]: MOCK_TIMESTAMP + 86400000 * 5,
+    [ElectionEvent.accruingVotes]: MOCK_TIMESTAMP + 86400000 * 5 + 6 * 3600000,
+    [ElectionEvent.hashingVotes]: MOCK_TIMESTAMP + 86400000 * 5 + 12 * 3600000,
+    [ElectionEvent.releasingKeys]: MOCK_TIMESTAMP + 86400000 * 5 + 18 * 3600000,
     [ElectionEvent.tallyingStarts]: MOCK_TIMESTAMP + 86400000 * 6,
     [ElectionEvent.validation]: MOCK_TIMESTAMP + 86400000 * 7,
     [ElectionEvent.certificationStarts]: MOCK_TIMESTAMP + 86400000 * 8,
@@ -239,13 +245,40 @@ const MOCK_BALLOT_SIGNATURE_TASK: BallotSignatureTask = {
   ballot: MOCK_PROPOSAL_BALLOT
 }
 
+// D-05 mock parity — the seventh signature-task variant. This mock VERIFIES NO SIGNATURE and
+// ENFORCES NO CHECK; it exists for navigation and legibility only, so a passing screen test proves
+// an affordance, not a boundary.
+const MOCK_REGISTRANT_INIT: RegisterInit = {
+  registrant: {
+    id: 'mock-registrant-id',
+    authorityId: MOCK_AUTHORITY.id,
+    expiration: MOCK_TIMESTAMP + 365 * 86400000
+  },
+  private: {
+    expiration: MOCK_TIMESTAMP + 365 * 86400000,
+    details: []
+  }
+}
+
+const MOCK_REGISTRANT_SIGNATURE_TASK: RegistrantSignatureTask = {
+  type: 'signature',
+  network: MOCK_NETWORK_REFERENCE,
+  userId: MOCK_USER_ID,
+  signatureType: 'registrant',
+  requestId: 'mock-registration-request-id',
+  payload: MOCK_REGISTRANT_INIT,
+  submittedAt: new Date(MOCK_TIMESTAMP).toISOString(),
+  issuerType: 'registrant'
+}
+
 const MOCK_PENDING_SIGNATURE_TASKS: SignatureTask[] = [
   MOCK_ADMINISTRATION_SIGNATURE_TASK,
   MOCK_AUTHORITY_SIGNATURE_TASK,
   MOCK_NETWORK_SIGNATURE_TASK, // Updated to the correct structure
   MOCK_ELECTION_SIGNATURE_TASK,
   MOCK_ELECTION_REVISION_SIGNATURE_TASK,
-  MOCK_BALLOT_SIGNATURE_TASK
+  MOCK_BALLOT_SIGNATURE_TASK,
+  MOCK_REGISTRANT_SIGNATURE_TASK
 ]
 
 export class MockSignatureTasksEngine implements ISignatureTasksEngine {
@@ -314,5 +347,21 @@ export class MockSignatureTasksEngine implements ISignatureTasksEngine {
    */
   async getSignatureDigest (task: SignatureTask): Promise<Uint8Array> {
     return new TextEncoder().encode(`mock-digest-${task.signatureType}`)
+  }
+
+  /**
+   * Mock parity for `ISignatureTasksEngine.getTaskSigningStatus` (62-12, D-09/D-10/D-11).
+   * The mock world is threshold 1 throughout, so no progress note is ever shown — always null.
+   */
+  async getTaskSigningStatus (_task: SignatureTask): Promise<SigningStatus | null> {
+    return null
+  }
+
+  /**
+   * Mock parity for `ISignatureTasksEngine.getRegistrantSigningStatus` (62-27, D-11 vrg).
+   * Threshold 1 throughout in the mock world, so no progress is ever shown — always null.
+   */
+  async getRegistrantSigningStatus (_requestId: string): Promise<SigningStatus | null> {
+    return null
   }
 }

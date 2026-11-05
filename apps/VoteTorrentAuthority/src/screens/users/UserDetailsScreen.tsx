@@ -11,6 +11,7 @@ import { User, IUserEngine, UserHistory } from "@votetorrent/vote-core";
 import { ThemedText } from "../../components/ThemedText";
 import { InlineError } from "../../components/InlineError";
 import { useTranslation } from "react-i18next";
+import { errorCopy } from "../../utils/errorCopy";
 import { CustomButton } from "../../components/CustomButton";
 import { useState, useCallback } from "react";
 import { getKeyTypeDisplayName, formatDate } from "../../utils/displayUtils";
@@ -18,6 +19,7 @@ import HistoryEvent from "../../components/HistoryEvent";
 import { CollapsibleSection } from "../../components/CollapsibleSection";
 import { asyncIterableToArray } from "../../utils/dataUtils";
 import type { NavigationProp } from "../../navigation/types";
+import { getDeviceUser } from "../../engines/device-user";
 
 export function UserDetailsScreen() {
 	const { user: initialUser, userEngine } = useRoute().params as {
@@ -35,6 +37,29 @@ export function UserDetailsScreen() {
 	const [userHistoryList, setUserHistoryList] = useState<UserHistory[]>([]);
 	const [isLoadingHistory, setIsLoadingHistory] = useState(false);
 
+	// The "Paired browsers" entry is for this phone's own officer only: the list shows the browsers
+	// THIS phone paired for its device user. Read-only check (never creates a device user); any
+	// failure hides the entry silently.
+	const [isDeviceUser, setIsDeviceUser] = useState(false);
+
+	useFocusEffect(
+		useCallback(() => {
+			let active = true;
+			const checkDeviceUser = async () => {
+				try {
+					const deviceUser = await getDeviceUser();
+					if (active) setIsDeviceUser(!!deviceUser && !!initialUser?.id && deviceUser.id === initialUser.id);
+				} catch {
+					if (active) setIsDeviceUser(false);
+				}
+			};
+			checkDeviceUser();
+			return () => {
+				active = false;
+			};
+		}, [initialUser?.id])
+	);
+
 	useFocusEffect(
 		useCallback(() => {
 			const fetchUserData = async () => {
@@ -50,7 +75,7 @@ export function UserDetailsScreen() {
 					}
 				} catch (error) {
 					console.warn("Failed to fetch latest user data:", error);
-					setLoadError(error instanceof Error ? error.message : String(error));
+					setLoadError(errorCopy(error, t, "read"));
 				} finally {
 					setIsLoadingUser(false);
 				}
@@ -72,7 +97,7 @@ export function UserDetailsScreen() {
 					setUserHistoryList(historyArray);
 				} catch (error) {
 					console.warn("Failed to fetch user history:", error);
-					setLoadError(error instanceof Error ? error.message : String(error));
+					setLoadError(errorCopy(error, t, "read"));
 				} finally {
 					setIsLoadingHistory(false);
 				}
@@ -163,6 +188,16 @@ export function UserDetailsScreen() {
 						navigation.navigate("RevokeKey", { user: user, userEngine: userEngine });
 					}}
 				/>
+				{isDeviceUser ? (
+					<CustomButton
+						testID="user-details-paired-browsers-entry"
+						title={t("pairedBrowsersTitle")}
+						size="thin"
+						backgroundColor={colors.accent}
+						icon="desktop"
+						onPress={() => navigation.navigate("PairedBrowsers")}
+					/>
+				) : null}
 			</View>
 
 			<CollapsibleSection title={t("history")}>

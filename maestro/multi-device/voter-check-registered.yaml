@@ -1,0 +1,40 @@
+# Journey (multi-device, last step of the officer-approves sequence): relaunch the Voter and wait
+# until the Registration tab shows the registered card (its "Update" action). The tab re-reads on
+# focus, so the wait loop toggles tabs. Does NOT clear app data.
+appId: ${APP_ID}
+name: "Voter: registration shows as approved"
+tags:
+  - voter
+  - multi-device
+  - registration
+env:
+  APP_ID: "${typeof VOTER_APP_ID == 'undefined' ? 'org.votetorrent.voter' : VOTER_APP_ID}"
+  BOOT_TIMEOUT_MS: "${typeof BOOT_TIMEOUT_MS == 'undefined' ? '300000' : BOOT_TIMEOUT_MS}"
+---
+- runFlow:
+    file: ../subflows/voter/launch.yaml
+    env:
+      CLEAR_STATE: "false"
+- repeat:
+    times: 30
+    while:
+      notVisible:
+        id: "registration-card-update"
+    commands:
+      - runFlow:
+          file: ../subflows/voter/open-tab.yaml
+          env:
+            TAB: vote
+      - runFlow:
+          file: ../subflows/voter/open-tab.yaml
+          env:
+            TAB: registration
+      - extendedWaitUntil:
+          visible:
+            id: "registration-card-update"
+          timeout: 20000
+          optional: true
+- assertVisible:
+    id: "registration-card-update"
+- assertVisible:
+    id: "registration-card-identity-line"

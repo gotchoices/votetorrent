@@ -67,7 +67,10 @@ export class AuthoritySaveInviteWithSigningBuilder implements IAuthoritySaveInvi
 
   private static validateScope (draft: Readonly<Draft>): BuilderError[] {
     if (draft.scope === undefined || draft.scope === null) return []
-    const validScopes: string[] = ['rn', 'rad', 'vrg', 'iad', 'rnp', 'uai', 'ceb', 'mel', 'cap']
+    // Mirrors the schema's `view Scope` (schema/votetorrent.qsql:56-69) exactly.
+    // Corrected 2026-08-25: dropped `'rnp'` (never in the view) and added the
+    // missing `'ik'` (added to the view 2026-07-30).
+    const validScopes: string[] = ['rn', 'rad', 'vrg', 'iad', 'uai', 'ceb', 'mel', 'cap', 'ik']
     if (typeof draft.scope !== 'string' || !validScopes.includes(draft.scope)) {
       return [{
         path: 'scope',

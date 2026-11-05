@@ -1,0 +1,4 @@
+/* Fixture stylesheet — one declaration so the third exports subpath has a real target. */
+:root {
+	--fixture-sentinel-color: #000000;
+}

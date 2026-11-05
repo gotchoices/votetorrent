@@ -1,0 +1,13 @@
+{
+  "partyId": "votetorrent",
+  "listenHost": "127.0.0.1",
+  "publicObserverStrandIds": ["UPDATE_WITH_A_REAL_PUBLIC_ELECTION_STRAND_ID"],
+  "enableRelay": false,
+  "strandCohortTopic": {
+    "enabled": true
+  },
+  "tls": {
+    "certPath": "./certs/gateway-cert.pem",
+    "keyPath": "./certs/gateway-key.pem"
+  }
+}

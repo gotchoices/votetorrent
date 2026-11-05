@@ -1,0 +1,21 @@
+{
+  "base": "base-device",
+  "ops": [
+    {
+      "op": "write",
+      "path": "64-device-evidence/rehearsal-2026-10-20/run-2/attempt-1/join/verdict.txt",
+      "content": "VERDICT: FAIL join-timeout\n"
+    },
+    {
+      "op": "write",
+      "path": "64-device-evidence/rehearsal-2026-10-20/run-2/attempt-1/join/join.log",
+      "content": "join timed out\n"
+    },
+    {
+      "op": "write",
+      "path": "64-device-evidence/rehearsal-2026-10-20/run-2/summary.md",
+      "content": "RUN: FAIL join-timeout\n"
+    }
+  ],
+  "expect": "failure-not-indexed"
+}

@@ -18,11 +18,13 @@ import {
 	NetworkDetails,
 } from "@votetorrent/vote-core";
 import { CustomButton } from "../../components/CustomButton";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useApp } from "../../providers/AppProvider";
 import NetworkDetailsComponent from "./components/NetworkDetailsComponent";
 import { AuthorizationSection } from "../../components/AuthorizationSection";
 import type { NavigationProp } from "../../navigation/types";
+import { useRecoveryKeyRegistrationGate } from "../../hooks/useRecoveryKeyRegistrationGate";
+import { useDeviceSigningErrorHandler } from "../../hooks/useDeviceSigningErrorHandler";
 import {
 	ProposedChange,
 	ProposedChangesCard,
@@ -36,29 +38,53 @@ export function NetworkDetailsScreen() {
 	const [primaryAuthorityEngine, setPrimaryAuthorityEngine] = useState<IAuthorityEngine>();
 	const [primaryAuthorityDetails, setPrimaryAuthorityDetails] = useState<AuthorityDetails>();
 	const [primaryAuthorityAdmin, setPrimaryAuthorityAdmin] = useState<AdminDetails>();
-	const [loadError, setLoadError] = useState("");
+	// WR-R3-09: each load owns its own error, so one load clearing its error can never erase the
+	// other's, and each effect ignores a run superseded by a newer one (cancelled in cleanup).
+	const [networkLoadError, setNetworkLoadError] = useState("");
+	const [authorityLoadError, setAuthorityLoadError] = useState("");
+	const loadError = networkLoadError || authorityLoadError;
+	// Bumped by Try Again; both load effects depend on it so a retry re-runs the network load and
+	// then (through the new details) the primary-authority load.
+	const [reloadNonce, setReloadNonce] = useState(0);
 	const [selectError, setSelectError] = useState("");
-	const { getEngine, selectNetwork } = useApp();
+	const [currentUserId, setCurrentUserId] = useState<string>();
+	const [applying, setApplying] = useState(false);
+	const [applyError, setApplyError] = useState("");
+	const { getEngine, selectNetwork, resolveDeviceSigner } = useApp();
+	const handleDeviceSigningError = useDeviceSigningErrorHandler();
+	const promptRecoveryKeyRegistrationIfNeeded = useRecoveryKeyRegistrationGate();
 	const { t } = useTranslation();
 	const { colors } = useTheme() as ExtendedTheme;
 	const navigation = useNavigation<NavigationProp>();
 	const insets = useSafeAreaInsets();
 
 	useEffect(() => {
+		let cancelled = false;
 		const loadNetwork = async () => {
-			setLoadError("");
+			setNetworkLoadError("");
 			try {
 				const engine = await getEngine<INetworkEngine>("network", networkRef as NetworkReference);
+				if (cancelled) return;
 				setNetworkEngine(engine);
 				const details = await engine.getDetails();
+				if (cancelled) return;
 				setNetworkDetails(details);
+				// Which officer is looking — only their own SIGN button is live (AuthorizationSection).
+				const currentUser = await engine.getCurrentUser();
+				const currentUserSummaryId = (await currentUser?.getSummary())?.id;
+				if (cancelled) return;
+				setCurrentUserId(currentUserSummaryId);
 			} catch (error) {
-				console.warn("Failed to load network details:", error);
-				setLoadError(error instanceof Error ? error.message : String(error));
+				if (cancelled) return;
+				console.warn("Failed to load network details:", error instanceof Error ? error.name : typeof error);
+				setNetworkLoadError(t("networkDetailsLoadFailed"));
 			}
 		};
 		loadNetwork();
-	}, []);
+		return () => {
+			cancelled = true;
+		};
+	}, [reloadNonce]);
 
 	// Phase 8 plan 08-05 (D-14): compute a flat list of changed fields between
 	// the current network and the proposed revision. Each entry is rendered as
@@ -105,28 +131,37 @@ export function NetworkDetailsScreen() {
 	// "Authority not found". Pass networkDetails.network.primaryAuthorityId, and short-circuit
 	// when it is falsy so we never pass undefined into openAuthority.
 	useEffect(() => {
+		let cancelled = false;
 		const loadPrimaryAuthority = async () => {
 			if (!networkDetails) return;
 			const primaryAuthorityId = networkDetails.network.primaryAuthorityId;
 			if (!primaryAuthorityId) return;
+			setAuthorityLoadError("");
 			try {
 				const authorityEngine = await getEngine<IAuthorityEngine>(
 					"authority",
 					primaryAuthorityId
 				);
+				if (cancelled) return;
 				setPrimaryAuthorityEngine(authorityEngine);
 				const details = await authorityEngine.getDetails();
+				if (cancelled) return;
 				setPrimaryAuthorityDetails(details);
 				const administration = await authorityEngine.getAdminDetails();
+				if (cancelled) return;
 				if (__DEV__) console.info("[network-details] administration", administration);
 				setPrimaryAuthorityAdmin(administration);
 			} catch (error) {
-				console.warn("Failed to load primary authority details:", error);
-				setLoadError(error instanceof Error ? error.message : String(error));
+				if (cancelled) return;
+				console.warn("Failed to load primary authority details:", error instanceof Error ? error.name : typeof error);
+				setAuthorityLoadError(t("networkDetailsLoadFailed"));
 			}
 		};
 		loadPrimaryAuthority();
-	}, [networkEngine, networkDetails]);
+		return () => {
+			cancelled = true;
+		};
+	}, [networkEngine, networkDetails, reloadNonce]);
 
 	// Phase 16 plan 08 (item 2): make the tapped network the active/current network.
 	// Re-resolving via getEngine("network", networkRef) re-points the EngineFactory's
@@ -135,6 +170,33 @@ export function NetworkDetailsScreen() {
 	// writes the ref to the recentNetworks LocalStorage list, so no separate persistence is
 	// needed. Then return to the network home; sibling screens (Elections/Authorities/Create)
 	// resolve against the now-selected network.
+	// "Sign" on the proposed revision = approve AND apply it: applyRevision signs the revision's
+	// rn digest with this officer's device key and writes the new network row (servers, name,
+	// image, TSA policy) under that signature in one transaction. Single-approver networks only;
+	// the engine refuses (before writing) when the rn threshold needs more than one officer.
+	const handleApplyRevision = useCallback(async () => {
+		const proposal = networkDetails?.proposed?.proposed;
+		const revision = networkDetails?.proposedRevision;
+		if (!networkEngine || !proposal || revision === undefined) return;
+		setApplyError("");
+		setApplying(true);
+		try {
+			const sign = await resolveDeviceSigner();
+			await networkEngine.applyRevision(proposal.name, revision, sign);
+			setNetworkDetails(await networkEngine.getDetails());
+		} catch (error) {
+			const outcome = handleDeviceSigningError(error);
+			if (outcome.handled) return;
+			setApplyError(
+				error instanceof Error && error.name === "FeatureNotAvailableError"
+					? t("applyRevisionNeedsCoSigners")
+					: outcome.message ?? t("applyRevisionFailed"),
+			);
+		} finally {
+			setApplying(false);
+		}
+	}, [networkEngine, networkDetails, resolveDeviceSigner, handleDeviceSigningError, t]);
+
 	const handleSelectNetwork = async () => {
 		setSelectError("");
 		try {
@@ -142,10 +204,27 @@ export function NetworkDetailsScreen() {
 			// gated screens (Elections/Authorities) render immediately — previously this
 			// only re-pointed the engine, leaving hasNetwork false until the next reboot.
 			await selectNetwork(networkRef as NetworkReference);
+
+			// 49-19 (recovery-key-registration gap): the join path reaches the same dead end the
+			// create path does. ProvisionSigningKeyScreen's stage 2 registers the recovery key
+			// only once a network `User` resolves, which cannot happen before this point, and
+			// nothing previously brought the officer back to it -- leaving them one biometric
+			// enrolment from a stranded device. The ceremony is idempotent and registers only
+			// what is missing, so the gate below decides whether there is anything to do.
+			// Checked BEFORE goBack() so the officer lands on the ceremony rather than having it
+			// appear over the network home they just returned to. The ceremony replaces this
+			// screen, so its `goBack()` exit lands where ours would have, not on these details.
+			if (await promptRecoveryKeyRegistrationIfNeeded({ replaceCurrent: true })) return;
 			navigation.goBack();
 		} catch (error) {
-			console.warn("Failed to select network:", error);
-			setSelectError(error instanceof Error ? error.message : String(error));
+			// A device with no signing key (`getOrCreateDeviceUser` rejects with code
+			// NO_KEY_PROVISIONED) goes to the provisioning ceremony. Any other failure shows
+			// translated copy, never the raw error text (it carried developer prose and an internal
+			// decision id on a fresh second device).
+			const outcome = handleDeviceSigningError(error);
+			if (outcome.handled) return;
+			console.warn("Failed to select network:", error instanceof Error ? error.name : typeof error);
+			setSelectError(outcome.message ?? t("networkSelectFailed"));
 		}
 	};
 
@@ -155,6 +234,15 @@ export function NetworkDetailsScreen() {
 			contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}
 		>
 			<InlineError message={loadError} />
+			{!!loadError && (
+				<CustomButton
+					testID="network-details-retry"
+					title={t("loadRetryButton")}
+					icon="rotate"
+					size="thin"
+					onPress={() => setReloadNonce((n) => n + 1)}
+				/>
+			)}
 			<View style={styles.section}>
 				<ThemedText type="header">{networkDetails?.network.name}</ThemedText>
 				<CustomButton
@@ -228,6 +316,9 @@ export function NetworkDetailsScreen() {
 				<View style={styles.section}>
 					<AuthorizationSection
 						admin={primaryAuthorityAdmin}
+						currentUserId={currentUserId}
+						onSign={handleApplyRevision}
+						signing={applying}
 						onAdjustProposal={() => {
 							if (networkDetails) {
 								navigation.navigate("NetworkRevision", {
@@ -236,6 +327,7 @@ export function NetworkDetailsScreen() {
 							}
 						}}
 					/>
+					<InlineError message={applyError} />
 				</View>
 			)}
 		</ScrollView>

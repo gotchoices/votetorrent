@@ -1,5 +1,12 @@
 import { QuereusError, MisuseError } from '@quereus/quereus'
+import type { SqlValue } from '@quereus/quereus'
+import { bytesToHex, hexToBytes } from '@noble/curves/utils.js'
+import { secp256k1 } from '@noble/curves/secp256k1.js'
+import { sha256 } from '@noble/hashes/sha2.js'
+import { FeatureNotAvailableError, toImageRef } from '@votetorrent/vote-core'
 import { AuthorityEngine } from '../authority/authority-engine.js'
+import { readInviteChain } from '../invite/read-invite-chain.js'
+import { withInviteWriteSerial } from '../invite/invite-write-serial.js'
 import { UserEngine } from '../user/user-engine.js'
 import {
   asText,
@@ -44,13 +51,25 @@ import type {
   UserKey,
   Timestamp,
   UserKeyType,
-  User
+  User,
+  Signature
 } from '@votetorrent/vote-core'
+import { verifyUserKeyMembership } from '../user/verify-user-key.js'
+import { allocateTid } from '../database/tid-allocator.js'
+import { seedSignedMutation } from '../signing/signed-mutation.js'
+import { listCurrentScopeHolders, readAuthorityThreshold } from '../signing/threshold.js'
 import { NetworkCreateAuthorityBuilder } from './builders/network-create-authority-builder.js'
 import { NetworkPinAuthorityBuilder } from './builders/network-pin-authority-builder.js'
 import { NetworkUnpinAuthorityBuilder } from './builders/network-unpin-authority-builder.js'
 import { NetworkProposeRevisionBuilder } from './builders/network-propose-revision-builder.js'
 import { NetworkRespondToInviteBuilder } from './builders/network-respond-to-invite-builder.js'
+
+/** A fixed-message error carrying a string `code` the app maps to copy (62-102). */
+function invitationError (code: string, message: string): Error {
+  const err = new Error(message) as Error & { code: string }
+  err.code = code
+  return err
+}
 
 export class NetworkEngine implements INetworkEngine {
   constructor (
@@ -281,7 +300,7 @@ export class NetworkEngine implements INetworkEngine {
           id: row.Id as string,
           name: rowName,
           domainName: asText(row.DomainName, 'Authority.DomainName'),
-          imageRef: parseJsonOr<ImageRef | undefined>(row.ImageRef, undefined, 'Authority.ImageRef')
+          imageRef: toImageRef(parseJsonOr<unknown>(row.ImageRef, undefined, 'Authority.ImageRef'))
         })
       }
       return { buffer, firstBOF: true, lastEOF: buffer.length < PAGE_SIZE, offset: 0 }
@@ -327,11 +346,11 @@ export class NetworkEngine implements INetworkEngine {
         hash: nRow.Hash as string,
         primaryAuthorityId: nRow.PrimaryAuthorityId as string,
         name: nRow.Name as string,
-        imageRef: parseJsonOr<ImageRef | undefined>(
+        imageRef: toImageRef(parseJsonOr<unknown>(
           nRow.ImageRef,
           undefined,
           'Network.ImageRef'
-        ),
+        )),
         relays: parseJsonOr<string[]>(nRow.Relays, [], 'Network.Relays'),
         policies: {
           numberRequiredTSAs: nRow.NumberRequiredTSAs as number,
@@ -361,14 +380,15 @@ export class NetworkEngine implements INetworkEngine {
         )
         .get({ name: network.name })
       let proposedNetwork: NetworkRevision | undefined
+      const proposedRevision = pnRow ? Number(pnRow.Revision) : undefined
       if (pnRow) {
         proposedNetwork = {
           name: pnRow.Name as string,
-          imageRef: parseJsonOr<ImageRef | undefined>(
+          imageRef: toImageRef(parseJsonOr<unknown>(
             pnRow.ImageRef,
             undefined,
             'ProposedNetwork.ImageRef'
-          ),
+          )),
           relays: parseJsonOr<string[]>(
             pnRow.Relays,
             [],
@@ -403,11 +423,11 @@ export class NetworkEngine implements INetworkEngine {
         id: aRow.Id as string,
         name: aRow.Name as string,
         domainName: asText(aRow.DomainName, 'Authority.DomainName'),
-        imageRef: parseJsonOr<ImageRef | undefined>(
+        imageRef: toImageRef(parseJsonOr<unknown>(
           aRow.ImageRef,
           undefined,
           'Authority.ImageRef'
-        )
+        ))
       }
 
       return {
@@ -426,7 +446,8 @@ export class NetworkEngine implements INetworkEngine {
         },
         proposed: proposedNetwork
           ? { proposed: proposedNetwork, signers: [] }
-          : undefined
+          : undefined,
+        ...(proposedRevision !== undefined ? { proposedRevision } : {})
       }
     } catch (error) {
       // WR-05: preserve the genuine missing-row signal but stop masking every
@@ -538,11 +559,11 @@ export class NetworkEngine implements INetworkEngine {
         id: nRow.Id as string,
         hash: nRow.Hash as string,
         name: nRow.Name as string,
-        imageUrl: parseJsonOr<ImageRef | undefined>(
+        imageUrl: toImageRef(parseJsonOr<unknown>(
           aRow.ImageRef,
           undefined,
           'Authority.ImageRef'
-        )?.url,
+        ))?.url,
         primaryAuthorityDomainName: asText(
           aRow.DomainName,
           'Authority.DomainName'
@@ -557,10 +578,99 @@ export class NetworkEngine implements INetworkEngine {
     }
   }
 
+  /** Legacy device-wide pin key (before pins were per network). Read only to migrate. */
+  private static readonly LEGACY_PINS_KEY = 'pinnedAuthorities'
+
+  private get pinsKey (): string {
+    return `pinnedAuthorities:${this.init.hash}`
+  }
+
+  /** Map an Authority row exactly as openAuthority does, so the two cannot drift. */
+  private static mapAuthorityRow (row: Record<string, unknown>): Authority {
+    return {
+      id: row.Id as string,
+      name: row.Name as string,
+      domainName: asText(row.DomainName, 'Authority.DomainName'),
+      imageRef: toImageRef(parseJsonOr<unknown>(row.ImageRef, undefined, 'Authority.ImageRef'))
+    }
+  }
+
+  /** Point lookup of one authority in THIS network; undefined when the row is absent. */
+  private async lookupAuthority (id: string): Promise<Authority | undefined> {
+    const row = await this.ctx.db
+      .prepare('select Id, Name, DomainName, ImageRef from Authority where Id = :id')
+      .get({ id })
+    return row ? NetworkEngine.mapAuthorityRow(row as Record<string, unknown>) : undefined
+  }
+
+  /**
+   * Existence-only point lookup for the legacy pin migration (WR-R1-06). It reads no column, so a
+   * row that `mapAuthorityRow` cannot map (a null `DomainName`, which the schema allows) is still
+   * claimed by the network that holds it instead of failing the migration on every read.
+   */
+  private async authorityExists (id: string): Promise<boolean> {
+    const row = await this.ctx.db
+      .prepare('select 1 as x from Authority where Id = :id')
+      .get({ id })
+    return row !== undefined && row !== null
+  }
+
+  /**
+   * The raw stored pin list for this network, after claiming any legacy device-wide
+   * entries whose authority exists in this network. A lookup error is per entry
+   * (WR-R1-06): that entry stays on the legacy key for a later read, and the rest still
+   * migrate. Scoped key is written first, then the shrunken legacy list, so a crash
+   * between the two can only duplicate a pin, never lose one.
+   */
+  private async readScopedPins (): Promise<Authority[]> {
+    const scoped = (await this.localStorage.getItem<Authority[]>(this.pinsKey)) ?? []
+    const legacy = (await this.localStorage.getItem<Authority[]>(NetworkEngine.LEGACY_PINS_KEY)) ?? []
+    if (legacy.length === 0) return scoped
+    const claimed: Authority[] = []
+    const remaining: Authority[] = []
+    for (const entry of legacy) {
+      let exists: boolean
+      try {
+        exists = await this.authorityExists(entry.id)
+      } catch {
+        remaining.push(entry) // unknown: keep it legacy, retried on a later read
+        continue
+      }
+      if (exists) claimed.push(entry)
+      else remaining.push(entry)
+    }
+    if (claimed.length === 0) return scoped
+    const byId = new Map(scoped.map((a) => [a.id, a]))
+    for (const entry of claimed) if (!byId.has(entry.id)) byId.set(entry.id, entry)
+    const merged = Array.from(byId.values())
+    await this.localStorage.setItem(this.pinsKey, merged)
+    if (remaining.length === 0) await this.localStorage.removeItem(NetworkEngine.LEGACY_PINS_KEY)
+    else await this.localStorage.setItem(NetworkEngine.LEGACY_PINS_KEY, remaining)
+    return merged
+  }
+
+  /**
+   * Pinned authorities of THIS network. Pins are stored per network (key
+   * `pinnedAuthorities:<hash>`); entries saved under the old device-wide key are
+   * claimed on first read by the network whose Authority table holds them. Each pin
+   * is resolved against the Authority table: a present authority is returned with its
+   * CURRENT name/domain/image, an absent one is omitted (not deleted: a getter must
+   * not destroy data), and a lookup error returns the stored snapshot (UAT 62 test
+   * 19: a pin made on one network was listed on another and opened as "Authority
+   * not found"). Never throws because of a lookup.
+   */
   async getPinnedAuthorities (): Promise<Authority[]> {
-    return (
-      (await this.localStorage.getItem<Authority[]>('pinnedAuthorities')) ?? []
+    const stored = await this.readScopedPins()
+    const resolved = await Promise.all(
+      stored.map(async (pin): Promise<Authority | undefined> => {
+        try {
+          return await this.lookupAuthority(pin.id)
+        } catch {
+          return pin
+        }
+      })
     )
+    return resolved.filter((a): a is Authority => a !== undefined)
   }
 
   async getProposedElections (): Promise<Array<Proposal<ElectionInit>>> {
@@ -618,6 +728,9 @@ export class NetworkEngine implements INetworkEngine {
                 registrationEnds: 0,
                 ballotsFinal: 0,
                 votingStarts: 0,
+                accruingVotes: 0,
+                hashingVotes: 0,
+                releasingKeys: 0,
                 tallyingStarts: 0,
                 validation: 0,
                 certificationStarts: 0,
@@ -673,11 +786,11 @@ export class NetworkEngine implements INetworkEngine {
       const user: User = {
         id: userDB.Id as string,
         name: userDB.Name as string,
-        imageRef: parseJsonOr<ImageRef | undefined>(
+        imageRef: toImageRef(parseJsonOr<unknown>(
           userDB.ImageRef,
           undefined,
           'User.ImageRef'
-        ),
+        )),
         activeKeys
       }
       if (user) {
@@ -719,7 +832,7 @@ export class NetworkEngine implements INetworkEngine {
           id: row.Id as string,
           name: row.Name as string,
           domainName: asText(row.DomainName, 'Authority.DomainName'),
-          imageRef: parseJsonOr<ImageRef | undefined>(row.ImageRef, undefined, 'Authority.ImageRef')
+          imageRef: toImageRef(parseJsonOr<unknown>(row.ImageRef, undefined, 'Authority.ImageRef'))
         })
       }
       return { buffer, firstBOF: newOffset === 0, lastEOF: buffer.length < PAGE_SIZE, offset: newOffset }
@@ -742,24 +855,14 @@ export class NetworkEngine implements INetworkEngine {
       return new AuthorityEngine(authority, this.ctx)
     }
     try {
-      const authorityDB = await this.ctx.db
-        .prepare(
-          'select Id, Name, DomainName, ImageRef from Authority where Id = :id'
-        )
-        .get({ id: authorityId })
-      if (!authorityDB) throw new Error('Authority not found')
-      const authority: Authority = {
-        id: authorityDB.Id as string,
-        name: authorityDB.Name as string,
-        domainName: asText(authorityDB.DomainName, 'Authority.DomainName'),
-        imageRef: parseJsonOr<ImageRef | undefined>(
-          authorityDB.ImageRef,
-          undefined,
-          'Authority.ImageRef'
-        )
+      const found = await this.lookupAuthority(authorityId)
+      if (!found) {
+        throw Object.assign(new Error('Authority not found'), { code: 'authority-not-found' })
       }
+      const authority: Authority = found
       return new AuthorityEngine(authority, this.ctx)
     } catch (err) {
+      if ((err as { code?: unknown } | null)?.code === 'authority-not-found') throw err
       if (err instanceof QuereusError) {
         throw new Error(`Quereus error (code ${err.code}): ${err.message}`)
       } else if (err instanceof MisuseError) {
@@ -771,13 +874,13 @@ export class NetworkEngine implements INetworkEngine {
   }
 
   async pinAuthority (authority: Authority): Promise<void> {
-    const pinnedAuthorities = await this.getPinnedAuthorities()
+    const pinnedAuthorities = await this.readScopedPins()
     const unique = Object.fromEntries(
       pinnedAuthorities.map((authority) => [authority.id, authority])
     )
     const appended = { ...unique, [authority.id]: authority }
     await this.localStorage.setItem(
-      'pinnedAuthorities',
+      this.pinsKey,
       Object.values(appended)
     )
   }
@@ -791,11 +894,16 @@ export class NetworkEngine implements INetworkEngine {
       const timestampAuthoritiesJson = JSON.stringify(
         revision.policies.timestampAuthorities
       )
+      const userId = this.ctx.user?.id ?? null
       const userKey = this.ctx.user?.activeKeys?.[0]?.key ?? null
+      // D-21 (Class B): no Signature is available on this path — proposeRevision's
+      // own public signature carries no signature argument — so registered/unexpired
+      // UserKey membership is the WHOLE of "real IsUserValid" here, not one conjunct.
+      const membership = await verifyUserKeyMembership(this.ctx, userId, userKey)
       await this.ctx.db.exec(
 				`insert into ProposedNetwork
 					(Name, Revision, ImageRef, Relays, TimestampAuthorities, NumberRequiredTSAs, ElectionType)
-				with context UserId = :userId, UserKey = :userKey, Signature = null, Tid = 0, now = :now, IsUserValid = true
+				with context UserId = :userId, UserKey = :userKey, Signature = null, Tid = 0, now = :now, IsUserValid = :isUserValid
 				values
 					(:name, coalesce((select max(Revision) from ProposedNetwork where Name = :name), -1) + 1, :imageRef, :relays, :timestampAuthorities, :numberRequiredTSAs, :electionType)`,
 				{
@@ -805,8 +913,9 @@ export class NetworkEngine implements INetworkEngine {
 				  timestampAuthorities: timestampAuthoritiesJson,
 				  numberRequiredTSAs: revision.policies.numberRequiredTSAs,
 				  electionType: revision.policies.electionType,
-				  userId: this.ctx.user?.id ?? null,
+				  userId,
 				  userKey,
+				  isUserValid: membership.valid,
 				  now: nowCanonicalDatetime()
 				}
       )
@@ -873,11 +982,15 @@ export class NetworkEngine implements INetworkEngine {
 					`No proposed revision found for (${name}, ${revision})`
         )
       }
+      const userId = this.ctx.user?.id ?? null
       const userKey = this.ctx.user?.activeKeys?.[0]?.key ?? null
+      // D-21 (Class B): no Signature is available on this path — same rationale
+      // as proposeRevision above.
+      const membership = await verifyUserKeyMembership(this.ctx, userId, userKey)
       await this.ctx.db.exec(
 				`insert into ProposedNetwork
 					(Name, Revision, ImageRef, Relays, TimestampAuthorities, NumberRequiredTSAs, ElectionType)
-				with context UserId = :userId, UserKey = :userKey, Signature = null, Tid = 0, now = :now, IsUserValid = true
+				with context UserId = :userId, UserKey = :userKey, Signature = null, Tid = 0, now = :now, IsUserValid = :isUserValid
 				values
 					(:name, coalesce((select max(Revision) from ProposedNetwork where Name = :name), -1) + 1, :imageRef, :relays, :timestampAuthorities, :numberRequiredTSAs, :electionType)`,
 				{
@@ -887,8 +1000,9 @@ export class NetworkEngine implements INetworkEngine {
 				  timestampAuthorities: source.TimestampAuthorities as string,
 				  numberRequiredTSAs: source.NumberRequiredTSAs as number,
 				  electionType: source.ElectionType as string,
-				  userId: this.ctx.user?.id ?? null,
+				  userId,
 				  userKey,
+				  isUserValid: membership.valid,
 				  now: nowCanonicalDatetime()
 				}
       )
@@ -900,6 +1014,108 @@ export class NetworkEngine implements INetworkEngine {
       return Number(newRow?.MaxRevision)
     } catch (error) {
       throw new Error('Failed to resend revision: ' + error)
+    }
+  }
+
+  /**
+   * Apply a proposed network revision (servers/relays, name, image, TSA policy) to the live
+   * `Network` row. The schema's `Network.UpdateNetworkValid` admits the UPDATE only under a
+   * completed `rn`-scoped AdminSignature whose Digest covers the new row —
+   * `Digest(Tid, Id, Name, ImageRef, Relays, TimestampAuthorities, NumberRequiredTSAs, ElectionType)` —
+   * so this method mints exactly that signing session (the officer's `sign` callback signs the
+   * digest app-side), then updates the row under it, all in ONE transaction: a refused signature
+   * leaves neither a session nor a half-applied network.
+   *
+   * The applied proposal is then marked resolved with the existing RevisionCancellation marker, so
+   * it drops off the proposed list (the network row now carries its values).
+   *
+   * Single-approver only: when the authority's `rn` threshold is above 1 this refuses BEFORE
+   * writing anything. Co-signing needs a 'network' signature Task, and the schema's
+   * `NetworkSignatureTaskExtension.MutationValid` binds a 7-field digest without `Id` that can never
+   * equal `UpdateNetworkValid`'s 8-field digest — a schema amendment, not engine work.
+   */
+  async applyRevision (
+    name: string,
+    revision: number,
+    sign: (digest: Uint8Array) => Promise<Signature>
+  ): Promise<void> {
+    const proposal = await this.ctx.db
+      .prepare(
+        `select ImageRef, Relays, TimestampAuthorities, NumberRequiredTSAs, ElectionType
+          from ProposedNetwork P
+          where Name = :name and Revision = :revision
+            and not exists (
+              select 1 from RevisionCancellation C where C.Name = P.Name and C.Revision = P.Revision
+            )`
+      )
+      .get({ name, revision })
+    if (!proposal) {
+      throw new Error(`No open proposed revision found for (${name}, ${revision})`)
+    }
+    const network = await this.ctx.db
+      .prepare('select Id, PrimaryAuthorityId from Network where Hash = :hash limit 1')
+      .get({ hash: this.init.hash })
+    if (!network) throw new Error('Network not found')
+    const networkId = network.Id as string
+    const authorityId = network.PrimaryAuthorityId as string
+
+    const userId = this.ctx.user?.id
+    if (!userId || !(await listCurrentScopeHolders(this.ctx.db, authorityId, 'rn')).includes(userId)) {
+      throw new Error('Only a current officer of the primary authority holding the "Revise Network" scope can apply a network revision')
+    }
+    if ((await readAuthorityThreshold(this.ctx.db, authorityId, 'rn')) > 1) {
+      throw new FeatureNotAvailableError(
+        'Applying a network revision that needs more than one officer\'s approval is not supported yet'
+      )
+    }
+
+    // Values bound IDENTICALLY into the digest and the UPDATE, so UpdateNetworkValid recomputes
+    // the same bytes the officer signed.
+    const row = {
+      id: networkId,
+      name,
+      imageRef: (proposal.ImageRef as string | null) ?? null,
+      relays: proposal.Relays as string,
+      timestampAuthorities: proposal.TimestampAuthorities as string,
+      numberRequiredTSAs: Number(proposal.NumberRequiredTSAs),
+      electionType: proposal.ElectionType as string
+    }
+    const tid = await allocateTid(this.ctx.db, 'network')
+
+    await this.ctx.db.exec('BEGIN')
+    try {
+      const signingNonce = await seedSignedMutation(
+        this.ctx,
+        authorityId,
+        'rn',
+        tid,
+        'select Digest(:tid, :id, :name, :imageRef, :relays, :timestampAuthorities, :numberRequiredTSAs, :electionType) as d',
+        { tid, ...row },
+        sign,
+        { ownsTransaction: false }
+      )
+      await this.ctx.db.exec(
+        `update Network
+          with context SigningNonce = :signingNonce, Tid = ${tid}
+          set Name = :name,
+            ImageRef = :imageRef,
+            Relays = :relays,
+            TimestampAuthorities = :timestampAuthorities,
+            NumberRequiredTSAs = :numberRequiredTSAs,
+            ElectionType = :electionType
+          where Id = :id`,
+        { ...row, signingNonce }
+      )
+      await this.ctx.db.exec(
+        `insert into RevisionCancellation (Name, Revision, CancelledAt)
+          with context Tid = 0, now = :now
+          values (:name, :revision, :now)`,
+        { name, revision, now: nowCanonicalDatetime() }
+      )
+      await this.ctx.db.exec('COMMIT')
+    } catch (error) {
+      await this.ctx.db.exec('ROLLBACK')
+      throw new Error('Failed to apply revision: ' + (error instanceof Error ? error.message : String(error)))
     }
   }
 
@@ -921,14 +1137,35 @@ export class NetworkEngine implements INetworkEngine {
     //
     // The CHECK constraints (SigningValid + SignatureValid) require an
     // existing AdminSignature row for the slot and a valid signature
-    // over the digest. This method is the engine boundary; the caller
-    // supplies the already-computed signature in the InviteAction.
-    // D-05: query InviteSlot by InviteKey+Type for CID (SQL-side, not JS-computed)
-    const slotRow = await this.ctx.db
-      .prepare('SELECT Cid FROM InviteSlot WHERE InviteKey = :inviteKey AND Type = :type')
-      .get({ inviteKey: invite.invite.inviteKey, type: invite.invite.type })
-    if (!slotRow) throw new Error('InviteSlot not found for given inviteKey and type')
-    const slotCid = slotRow.Cid as string
+    // over the digest.
+    //
+    // 62-102 (gap7/IN-03): this method SIGNS the InviteResult itself with the
+    // invite's one-time private key (`invite.invitePrivate`, REQUIRED) and
+    // verifies it against the slot's InviteKey on BOTH branches, so no
+    // accepted result is ever written that the invite key did not sign. The
+    // caller's `inviteSignature` is ignored. The slot is the live head of the
+    // invite chain (cancelled, answered, expired and ambiguous chains refuse
+    // with a coded error), exactly as the app path (InvitationEngine) does.
+    const invitePrivateHex = invite.invitePrivate
+    if (typeof invitePrivateHex !== 'string' || !/^[0-9a-fA-F]{64}$/.test(invitePrivateHex)) {
+      throw invitationError('invite-key-required', 'respondToInvite: the invite private key is required')
+    }
+    const resolution = await readInviteChain(
+      this.ctx.db,
+      invite.invite.inviteKey,
+      invite.invite.type,
+      nowCanonicalDatetime()
+    )
+    if (resolution.status === 'not-found') throw invitationError('invite-not-found', 'respondToInvite: invite not found')
+    if (resolution.status === 'answered') throw invitationError('invite-already-answered', 'respondToInvite: invite already answered')
+    if (resolution.status === 'no-longer-valid') throw invitationError('invite-no-longer-valid', 'respondToInvite: invite is no longer valid')
+    if (resolution.status === 'ambiguous') throw invitationError('invite-unverifiable', 'respondToInvite: invite chain is ambiguous')
+    const slotCid = resolution.cid
+    const signInviteResult = (digestToken: string): { signature: string; valid: boolean } => {
+      const signedBytes = inviteResultSignedBytes({ slotCid, digestToken, accept: invite.isAccepted })
+      const signature = bytesToHex(secp256k1.sign(sha256(signedBytes), hexToBytes(invitePrivateHex)))
+      return { signature, valid: verifyAdHocInviteSignature(signedBytes, signature, invite.invite.inviteKey) }
+    }
     // Group B (Phase 12.3-01): for authority invites, generate the authority
     // Id at invite-response time so the SQL-side Digest() committed to
     // InviteResult.Digest matches what Authority.InsertValid recomputes when
@@ -968,6 +1205,34 @@ export class NetworkEngine implements INetworkEngine {
     const authorityImageRefJson = invokesAuthority?.imageUrl != null
       ? JSON.stringify(invokesAuthority.imageUrl)
       : null
+    // WR-R1-09 (mirrors InvitationEngine gap7/IN-04): the chain read above happens before the
+    // signing work, so a cancellation (or another answer) can land in between. The InviteResult is
+    // therefore written inside ONE transaction, serialized per database with every other invite
+    // write (cancelInvite included), whose first statement re-reads the chain and requires this
+    // slot to still be its live head.
+    const writeResultIfLive = async (sql: string, params: Record<string, SqlValue>): Promise<void> => {
+      await withInviteWriteSerial(this.ctx.db, async () => {
+        await this.ctx.db.exec('BEGIN')
+        try {
+          const live = await readInviteChain(this.ctx.db, invite.invite.inviteKey, invite.invite.type, nowCanonicalDatetime())
+          if (live.status !== 'live' || live.cid !== slotCid) {
+            if (live.status === 'answered') throw invitationError('invite-already-answered', 'respondToInvite: invite already answered')
+            if (live.status === 'no-longer-valid') throw invitationError('invite-no-longer-valid', 'respondToInvite: invite is no longer valid')
+            if (live.status === 'live') throw invitationError('invite-superseded', 'respondToInvite: invite was replaced by a newer copy')
+            throw invitationError('invite-unverifiable', 'respondToInvite: invite chain cannot be verified')
+          }
+          await this.ctx.db.exec(sql, params)
+          await this.ctx.db.exec('COMMIT')
+        } catch (innerErr) {
+          try {
+            await this.ctx.db.exec('ROLLBACK')
+          } catch {
+            // already rolled back by the failed statement; the original error is what matters.
+          }
+          throw innerErr
+        }
+      })
+    }
     try {
       if (isAuthorityInvite && invite.isAccepted) {
         // D-06 / D-09 (Phase 12.4): the engine commits a 7-arg Digest to
@@ -1008,25 +1273,41 @@ export class NetworkEngine implements INetworkEngine {
           return ua < ub ? -1 : ua > ub ? 1 : 0
         })
         const firstOfficer = sortedOfficers[0]!
-        // 999.1 R-03 — DOCUMENTED LIMITATION (not a fabricated `true`): the
-        // A1 LOCKED encoding requires digestToken = the exact value written
-        // to InviteResult.Digest, which for this branch embeds
-        // `generatedAuthorityId` — a fresh `crypto.randomUUID()` minted
-        // INSIDE this method, after `invite.inviteSignature` was already
-        // produced by the caller. No pre-image of that id can exist at
-        // signing time, so `inviteSignature` cannot cryptographically commit
-        // to it — the caller cannot know a value the engine hasn't generated
-        // yet (a genuine architectural gap in this call path, pre-existing
-        // the 999.1 phase; the previous hardcoded `context.IsSignatureValid
-        // = true` stub silently masked it). A real check here would ALWAYS
-        // reject every legitimate accept — fixing it properly needs a
-        // vote-core `InviteAction` shape change (e.g. letting the caller
-        // supply/commit the id before signing, or a sign-callback pattern
-        // like `saveInviteWithSigning`'s D-03/D-04) — out of this plan's
-        // scope (Rule 4 — architectural). Tracked in the 999.1-09 SUMMARY.
-        // The non-authority branch below has no such gap (its digestToken
-        // is fully caller-known ahead of time) and IS verified for real.
-        await this.ctx.db.exec(
+        // 62-102 (gap7/IN-03): compute the 7-argument Digest first (the exact
+        // arguments the INSERT used), sign over that very value with the
+        // invite key, verify against the slot's InviteKey and refuse on
+        // failure. The previous hard-coded true signature flag accepted
+        // an unsigned claim.
+        const digestParams = {
+          tid: 1,
+          authorityId: generatedAuthorityId,
+          authorityName: invokesAuthority?.name ?? null,
+          authorityDomainName: invokesAuthority?.domainName ?? null,
+          authorityImageRef: authorityImageRefJson,
+          adminEffectiveAt: invokesAdmin.effectiveAt,
+          adminThresholdPolicies: invokesAdmin.thresholdPolicies,
+          officerAdminEffectiveAt: firstOfficer.adminEffectiveAt,
+          officerUserId: firstOfficer.userId,
+          officerTitle: firstOfficer.title,
+          officerScopes: firstOfficer.scopes,
+        }
+        const digestRow = await this.ctx.db
+          .prepare(
+            `select Digest(:tid, :authorityId, :authorityName, :authorityDomainName, :authorityImageRef,
+              Digest(:adminEffectiveAt, :adminThresholdPolicies),
+              Digest(:officerAdminEffectiveAt, :officerUserId, :officerTitle, :officerScopes)
+            ) as d`
+          )
+          .get(digestParams)
+        const digestValue = digestRow?.d
+        if (typeof digestValue !== 'string') {
+          throw new Error('respondToInvite: could not compute the authority invite digest')
+        }
+        const signed = signInviteResult(digestValue)
+        if (!signed.valid) {
+          throw invitationError('invite-signature-invalid', 'respondToInvite: invite signature does not verify')
+        }
+        await writeResultIfLive(
 					`insert into InviteResult (
 						SlotCid,
 						IsAccepted,
@@ -1034,33 +1315,21 @@ export class NetworkEngine implements INetworkEngine {
 						InviteSignature,
 						InvokedId
 					)
-					with context IsSigningValid = true, IsSignatureValid = true
+					with context IsSigningValid = true, IsSignatureValid = :isSignatureValid
 					values (
 						:slotCid,
 						:isAccepted,
-						Digest(:tid, :authorityId, :authorityName, :authorityDomainName, :authorityImageRef,
-							Digest(:adminEffectiveAt, :adminThresholdPolicies),
-							Digest(:officerAdminEffectiveAt, :officerUserId, :officerTitle, :officerScopes)
-						),
+						:digest,
 						:inviteSignature,
 						:invokedId
 					)`,
           {
             slotCid,
             isAccepted: invite.isAccepted,
-            tid: 1,
-            authorityId: generatedAuthorityId,
-            authorityName: invokesAuthority?.name ?? null,
-            authorityDomainName: invokesAuthority?.domainName ?? null,
-            authorityImageRef: authorityImageRefJson,
-            adminEffectiveAt: invokesAdmin.effectiveAt,
-            adminThresholdPolicies: invokesAdmin.thresholdPolicies,
-            officerAdminEffectiveAt: firstOfficer.adminEffectiveAt,
-            officerUserId: firstOfficer.userId,
-            officerTitle: firstOfficer.title,
-            officerScopes: firstOfficer.scopes,
-            inviteSignature: invite.inviteSignature,
+            digest: digestValue,
+            inviteSignature: signed.signature,
             invokedId,
+            isSignatureValid: signed.valid,
           }
         )
       } else {
@@ -1075,12 +1344,13 @@ export class NetworkEngine implements INetworkEngine {
         // 999.1 R-03: same A1 LOCKED domain as the authority-accepted branch
         // above, with digestToken = the plain resultDigest (or 'null' for a
         // decline — inviteResultSignedBytes applies that coalesce).
-        const isSignatureValid = verifyAdHocInviteSignature(
-          inviteResultSignedBytes({ slotCid, digestToken: resultDigest ?? 'null', accept: invite.isAccepted }),
-          invite.inviteSignature,
-          invite.invite.inviteKey,
-        )
-        await this.ctx.db.exec(
+        // 62-102: signed engine-side with the invite key, never taken from the caller.
+        const signedResult = signInviteResult(resultDigest ?? 'null')
+        if (!signedResult.valid) {
+          throw invitationError('invite-signature-invalid', 'respondToInvite: invite signature does not verify')
+        }
+        const isSignatureValid = signedResult.valid
+        await writeResultIfLive(
 					`insert into InviteResult (
 						SlotCid,
 						IsAccepted,
@@ -1100,13 +1370,16 @@ export class NetworkEngine implements INetworkEngine {
             slotCid,
             isAccepted: invite.isAccepted,
             digest: resultDigest,
-            inviteSignature: invite.inviteSignature,
+            inviteSignature: signedResult.signature,
             invokedId,
             isSignatureValid,
           }
         )
       }
     } catch (err) {
+      // 62-102: a string `code` on the error (invite-signature-invalid, ...) survives the rewrap.
+      const code = (err as { code?: unknown } | null)?.code
+      if (typeof code === 'string' && !(err instanceof QuereusError)) throw err
       if (err instanceof QuereusError) {
         throw new Error(`Quereus error (code ${err.code}): ${err.message}`)
       } else if (err instanceof MisuseError) {
@@ -1144,11 +1417,11 @@ export class NetworkEngine implements INetworkEngine {
   }
 
   async unpinAuthority (authorityId: string): Promise<void> {
-    const pinnedAuthorities = await this.getPinnedAuthorities()
+    const pinnedAuthorities = await this.readScopedPins()
     const filtered = pinnedAuthorities.filter(
       (authority) => authority.id !== authorityId
     )
-    await this.localStorage.setItem('pinnedAuthorities', filtered)
+    await this.localStorage.setItem(this.pinsKey, filtered)
   }
 
   // ---- Builder factories (FACT-01 / FACT-04) ----

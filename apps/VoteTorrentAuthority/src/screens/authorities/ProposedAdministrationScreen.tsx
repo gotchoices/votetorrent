@@ -1,7 +1,8 @@
-import React, { useEffect, useLayoutEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { ScrollView, StyleSheet, View } from "react-native";
 import {
 	ExtendedTheme,
+	useFocusEffect,
 	useNavigation,
 	useRoute,
 	useTheme,
@@ -19,9 +20,10 @@ import type {
 	ThresholdPolicy,
 	User,
 } from "@votetorrent/vote-core";
-import { scopeDescriptions } from "@votetorrent/vote-core";
+import { scopeLabel } from "../../utils/scopeLabel";
 import { createDeviceSigner } from "../../engines/device-signer";
 import { getOrCreateDeviceUser } from "../../engines/device-user";
+import { useDeviceSigningErrorHandler } from "../../hooks/useDeviceSigningErrorHandler";
 import { useApp } from "../../providers/AppProvider";
 import { ThemedText } from "../../components/ThemedText";
 import { ChipButton } from "../../components/ChipButton";
@@ -32,26 +34,29 @@ import { InlineError } from "../../components/InlineError";
 import { ThresholdPolicyRow } from "./components/ThresholdPolicyRow";
 import { globalStyles } from "../../theme/styles";
 import type { RootStackParamList } from "../../navigation/types";
+import { errorCopy } from "../../utils/errorCopy";
 
 /**
  * Canonical Scope ordering — declaration order from
  * packages/vote-core/src/authority/models.ts:134–143. Used to render the 9
  * Threshold Policies rows in a stable order (D-03).
  *
- * Note: scopeDescriptions in vote-core defines 8/9 entries (rnp missing per
- * models.ts:145–154). The render below falls back to the t("scope_rnp")
- * i18n key when scopeDescriptions[scope] is undefined.
+ * Corrected 2026-08-25: the list now mirrors the schema's `view Scope`
+ * (votetorrent.qsql:56-69) exactly — `'rnp'` removed (never in the view, so
+ * every ThresholdPolicy this screen wrote for it was unrepresentable) and the
+ * missing `'ik'` added. NOTE this array is not cosmetic: it also drives the
+ * ThresholdPolicies payload sent to proposeAdmin below.
  */
 const SCOPE_ORDER: Scope[] = [
 	"rn",
 	"rad",
 	"vrg",
 	"iad",
-	"rnp",
 	"uai",
 	"ceb",
 	"mel",
 	"cap",
+	"ik",
 ];
 
 export default function ProposedAdministrationScreen() {
@@ -72,6 +77,8 @@ export default function ProposedAdministrationScreen() {
 	const [isLoading, setIsLoading] = useState(true);
 	const [authority, setAuthority] = useState<Authority | null>(null);
 	const [errorMessage, setErrorMessage] = useState<string>("");
+	const [isProposing, setIsProposing] = useState(false);
+	const handleDeviceSigningError = useDeviceSigningErrorHandler();
 
 	// Header title (Phase 7 D-14 inherited pattern)
 	useLayoutEffect(() => {
@@ -80,81 +87,86 @@ export default function ProposedAdministrationScreen() {
 
 	// Load proposed officers from AdminDetails (or fall back to current officers
 	// as the starting candidate set when no proposal exists yet).
-	useEffect(() => {
-		let cancelled = false;
-		async function load() {
-			try {
-				const networkEngine = await getEngine<INetworkEngine>("network");
-				if (!networkEngine) return;
-				const authorityEngine = await networkEngine.openAuthority(
-					authorityId
-				);
-				if (!authorityEngine) return;
-				const details: AdminDetails = await (
-					authorityEngine as IAuthorityEngine
-				).getAdminDetails();
-
-				// Lift the full Authority object for navigation params
-				// (gap-closure 08-07 Task 1 — see 08-UAT.md test 6).
-				const authorityDetails = await (
-					authorityEngine as IAuthorityEngine
-				).getDetails();
-				if (!cancelled) {
-					setAuthority(authorityDetails.authority);
-				}
-
-				// Prefer a live proposal's officer selections; otherwise wrap each
-				// current officer as { existing: officer } so the OfficerCard render
-				// path stays unified.
-				let selections: OfficerSelection[];
-				if (details.proposed?.proposed.officers?.length) {
-					selections = details.proposed.proposed.officers;
-				} else {
-					selections = details.admin.officers.map(
-						(o: Officer): OfficerSelection => ({ existing: o })
+	// UAT 62: re-read on every focus, not once per mount. EditOfficer persists an
+	// added/edited administrator through proposeAdmin and goes back here — a
+	// mount-only load never showed that new proposal.
+	useFocusEffect(
+		useCallback(() => {
+			let cancelled = false;
+			async function load() {
+				try {
+					const networkEngine = await getEngine<INetworkEngine>("network");
+					if (!networkEngine) return;
+					const authorityEngine = await networkEngine.openAuthority(
+						authorityId
 					);
-				}
+					if (!authorityEngine) return;
+					const details: AdminDetails = await (
+						authorityEngine as IAuthorityEngine
+					).getAdminDetails();
 
-				// Resolve user names for any "existing" officers (Officer has no
-				// `name` field — vote-core/authority/models.ts:90–102).
-				const userMap = new Map<string, User>();
-				await Promise.all(
-					selections
-						.filter((s) => s.existing)
-						.map(async (s) => {
-							try {
-								const userEngine = await networkEngine.getUser(
-									s.existing!.userId
-								);
-								const summary = await userEngine?.getSummary();
-								if (summary) {
-									userMap.set(s.existing!.userId, summary);
+					// Lift the full Authority object for navigation params
+					// (gap-closure 08-07 Task 1 — see 08-UAT.md test 6).
+					const authorityDetails = await (
+						authorityEngine as IAuthorityEngine
+					).getDetails();
+					if (!cancelled) {
+						setAuthority(authorityDetails.authority);
+					}
+
+					// Prefer a live proposal's officer selections; otherwise wrap each
+					// current officer as { existing: officer } so the OfficerCard render
+					// path stays unified.
+					let selections: OfficerSelection[];
+					if (details.proposed?.proposed.officers?.length) {
+						selections = details.proposed.proposed.officers;
+					} else {
+						selections = details.admin.officers.map(
+							(o: Officer): OfficerSelection => ({ existing: o })
+						);
+					}
+
+					// Resolve user names for any "existing" officers (Officer has no
+					// `name` field — vote-core/authority/models.ts:90–102).
+					const userMap = new Map<string, User>();
+					await Promise.all(
+						selections
+							.filter((s) => s.existing)
+							.map(async (s) => {
+								try {
+									const userEngine = await networkEngine.getUser(
+										s.existing!.userId
+									);
+									const summary = await userEngine?.getSummary();
+									if (summary) {
+										userMap.set(s.existing!.userId, summary);
+									}
+								} catch (e) {
+									console.warn(
+										"Error loading user for officer:",
+										e
+									);
 								}
-							} catch (e) {
-								console.warn(
-									"Error loading user for officer:",
-									e
-								);
-							}
-						})
-				);
+							})
+					);
 
-				if (!cancelled) {
-					setProposedOfficers(selections);
-					setOfficerUsers(userMap);
+					if (!cancelled) {
+						setProposedOfficers(selections);
+						setOfficerUsers(userMap);
+					}
+				} catch (e) {
+					console.warn("Error loading proposed administration:", e);
+					if (!cancelled) setErrorMessage(errorCopy(e, t, "read"));
+				} finally {
+					if (!cancelled) setIsLoading(false);
 				}
-			} catch (e) {
-				console.warn("Error loading proposed administration:", e);
-				if (!cancelled) setErrorMessage(e instanceof Error ? e.message : String(e));
-			} finally {
-				if (!cancelled) setIsLoading(false);
 			}
-		}
-		load();
-		return () => {
-			cancelled = true;
-		};
-	}, [getEngine, authorityId]);
+			load();
+			return () => {
+				cancelled = true;
+			};
+		}, [getEngine, authorityId])
+	);
 
 	// Initialize per-scope thresholds to 1 once we know the officer count.
 	useEffect(() => {
@@ -172,12 +184,14 @@ export default function ProposedAdministrationScreen() {
 	const sliderMax = useMemo(() => Math.max(1, officerCount), [officerCount]);
 
 	// ADM-02: PROPOSE calls proposeAdmin with a device-signer callback.
-	// D-01: private key stays app-side (createDeviceSigner closes over it).
+	// The private key lives in Android Keystore and never enters JS; the signer
+	// callback only relays the digest to Keystore's `SHA256withECDSA` and returns
+	// the signature (see `device-signer.ts`'s own header for the current contract).
 	// D-03: the admin digest is computed ENGINE-SIDE inside proposeAdmin —
 	//       the app no longer recomputes sha256(...) independently.
-	// WR-10: secp256k1.sign v2 defaults (prehash:true) inside createDeviceSigner.
 	const handlePropose = async () => {
 		setErrorMessage("");
+		setIsProposing(true);
 		try {
 			const networkEngine = await getEngine<INetworkEngine>("network");
 			if (!networkEngine) {
@@ -222,7 +236,11 @@ export default function ProposedAdministrationScreen() {
 			await authorityEngine.proposeAdmin(proposal, sign);
 			navigation.goBack();
 		} catch (err) {
-			setErrorMessage(err instanceof Error ? err.message : String(err));
+			const outcome = handleDeviceSigningError(err);
+			if (outcome.handled) return;
+			setErrorMessage(outcome.message ?? errorCopy(err, t, "write"));
+		} finally {
+			setIsProposing(false);
 		}
 	};
 
@@ -303,8 +321,7 @@ export default function ProposedAdministrationScreen() {
 							key={scope}
 							scope={scope}
 							label={
-								scopeDescriptions[scope] ??
-								t("scope_" + scope)
+								scopeLabel(scope, t)
 							}
 							value={thresholds[scope] ?? 1}
 							min={1}
@@ -324,8 +341,9 @@ export default function ProposedAdministrationScreen() {
 			<InlineError message={errorMessage} />
 			<Footer>
 				<CustomButton
-					title={t("propose")}
+					title={isProposing ? `${t("propose")}…` : t("propose")}
 					icon="floppy-disk"
+					disabled={isProposing}
 					backgroundColor={colors.success}
 					forceDarkText={true}
 					onPress={handlePropose}

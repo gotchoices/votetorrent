@@ -53,7 +53,11 @@ jest.mock('@optimystic/db-p2p-storage-rn', () => ({}), { virtual: true });
 // ---------------------------------------------------------------------------
 // Real imports (after mock declarations)
 // ---------------------------------------------------------------------------
-import { Database } from '@quereus/quereus';
+import { Database, registerPlugin } from '@quereus/quereus';
+// SPIKE 061: the real strand path registers this via connectToStrand (connect.js:14);
+// this mock StrandHost must do the same, or quereus >=4.7.0 rejects the schema's
+// `create assertion InviteSlotSigningValid` with "Function not found: digest/1".
+import cryptoPlugin from '@optimystic/quereus-plugin-crypto/plugin';
 import { VOTETORRENT_SCHEMA_SQL } from '@votetorrent/vote-engine/rn';
 import {
   createTestNetwork,
@@ -99,6 +103,7 @@ function makeMockStrandHost() {
       // Step 1: Apply full schema under 'main' (tables + views resolve with bare names).
       // VOTETORRENT_SCHEMA_SQL = 'declare schema main { ... } apply schema main;'
       const db = new Database();
+      await registerPlugin(db, cryptoPlugin, { algorithm: 'sha256', encoding: 'base64url' });
       await db.exec(VOTETORRENT_SCHEMA_SQL);
       // Step 2: Declare an empty App schema so hasDeclaredSchema('App') returns true.
       // This signals the strand path in NetworksEngine.createContext (REL-01 guard).

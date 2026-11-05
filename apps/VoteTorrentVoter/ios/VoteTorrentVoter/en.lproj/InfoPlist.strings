@@ -1,0 +1,5 @@
+/* Purpose shown with the Face ID prompt before a biometric-protected key signs. */
+"NSFaceIDUsageDescription" = "VoteTorrent uses Face ID to authorize signing with your device voting key, which is held in the Secure Enclave and never leaves this device.";
+
+/* Purpose shown with the camera permission prompt when the voter opens the QR join-code scanner. */
+"NSCameraUsageDescription" = "VoteTorrent uses the camera only to scan the QR join code from your election authority. It does not take photos or record video.";

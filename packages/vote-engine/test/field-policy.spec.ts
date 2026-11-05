@@ -19,8 +19,7 @@ import { bytesToHex, hexToBytes } from '@noble/curves/utils.js'
 import type { RegistrantTier, FieldRequirement, Signature } from '@votetorrent/vote-core'
 import { RegistrationEngine } from '../src/registration/registration-engine.js'
 import { FieldPolicyViolationError } from '../src/registration/field-policy.js'
-import { createTestNetwork, addTestAuthority, addTestElection } from './fixtures/test-context.js'
-import { randomTestKeyPair } from './fixtures/keys.js'
+import { createTestNetwork, addTestAuthority, addTestElection, provisionTestIntakeRecipient, testKeyPairFor } from './fixtures/test-context.js'
 import type { EngineContext } from '../src/types.js'
 import type { TestAuthorityContext } from './fixtures/test-context.js'
 
@@ -30,7 +29,7 @@ import type { TestAuthorityContext } from './fixtures/test-context.js'
 
 /** Build a real secp256k1 sign callback (@noble/curves v2 defaults — prehash:true). */
 function makeRegistrantSigner (userId: string): (digest: Uint8Array) => Promise<Signature> {
-  const { privateHex, publicHex } = randomTestKeyPair()
+  const { privateHex, publicHex } = testKeyPairFor(userId)
   const privBytes = hexToBytes(privateHex)
   return async (digest: Uint8Array): Promise<Signature> => {
     const sig = secp256k1.sign(digest, privBytes)
@@ -46,6 +45,10 @@ async function setupFieldPolicyTest (): Promise<{
 }> {
   const net = await createTestNetwork()
   const auth = await addTestAuthority(net)
+  // D-49 (62-31): register() below (now D-49-sealed) runs field-policy validation BEFORE sealing,
+  // so a policy-violating payload never reaches the sealer — but every test here that register()s a
+  // policy-CONFORMING payload needs a recipient, so one provisioning call here covers them all.
+  await provisionTestIntakeRecipient(auth.ctx, auth.authority.id)
   const elec = await addTestElection(auth)
   const electionId = await resolveElectionId(elec.ctx, elec.authority.id)
   const sign = makeRegistrantSigner(auth.user.id)
@@ -172,6 +175,156 @@ describe('ElectionRegistrationField CRUD', () => {
       await mock.removeElectionRegistrationField(electionId, 'district', dummySig)
       fields = await mock.getElectionRegistrationFields(electionId)
       expect(fields).to.have.length(0)
+    })
+  })
+})
+
+// ===========================================================================
+// T-46-08-01 — remove-then-add PK-collision class (real engine)
+// ===========================================================================
+//
+// Phase 46's screen edits an existing policy row as remove-then-add, because
+// `addElectionRegistrationField` / `addElectionDisclosurePolicy` are plain
+// `insert into` (registration-engine.ts:918, :1018) against
+// `primary key (ElectionId, FieldName)` (votetorrent.qsql:1668, :1717) — a bare
+// re-add on an existing row is a PK violation, not an upsert.
+//
+// That sequencing was written but never proven: `MockRegistrationEngine`'s
+// `add*` are `Map.set` upserts, so every mock-backed jest test passes whether
+// the app removes first or not, and 46-10's on-device run only ever added a
+// NEW field. These tests close that gap against the real engine, and pin the
+// mock's blindness as an asserted fact so it cannot silently drift.
+//
+// Each edit pair is deliberately a CHANGE (public/required -> selective/optional,
+// everyone -> district). The delete digest binds the row's OLD Tier/Requirement
+// (resp. Audience), so a remove leg that failed to re-read the current values
+// would be rejected by DeleteValid rather than passing vacuously.
+
+describe('T-46-08-01 — policy edit is remove-then-add (real-engine PK semantics)', () => {
+  describe('ElectionRegistrationField', () => {
+    it('a bare re-add over an existing (ElectionId, FieldName) row is REJECTED — the hazard is real', async () => {
+      const { engine, sign, electionId } = await setupFieldPolicyTest()
+      await engine.addElectionRegistrationField(
+        { electionId, fieldName: 'district', tier: 'public', requirement: 'required' },
+        sign
+      )
+
+      let threw: Error | undefined
+      try {
+        // No remove first — exactly what the app must never do.
+        await engine.addElectionRegistrationField(
+          { electionId, fieldName: 'district', tier: 'selective', requirement: 'optional' },
+          sign
+        )
+      } catch (err) {
+        threw = err as Error
+      }
+      expect(threw, 'expected a bare re-add to violate the (ElectionId, FieldName) primary key').to.not.be.undefined
+      // Pin the REASON, not just that something threw — otherwise this test
+      // could later pass vacuously on an unrelated failure (a signing error, a
+      // missing election) and stop proving the PK class at all.
+      expect(threw!.message, 'the throw must be the PK collision itself').to.match(/unique constraint failed/i)
+
+      // The original row must survive intact — the failed insert wrote nothing.
+      const ctx = (engine as unknown as { ctx: EngineContext }).ctx
+      const row = await ctx.db
+        .prepare('select count(*) as n from ElectionRegistrationField where ElectionId = :electionId and FieldName = :fieldName')
+        .get({ electionId, fieldName: 'district' })
+      expect(Number(row?.n), 'the rejected insert must not have duplicated the row').to.equal(1)
+
+      const fields = await engine.getElectionRegistrationFields(electionId)
+      expect(fields[0]!.tier, 'the rejected insert must not have mutated the stored row').to.equal('public')
+      expect(fields[0]!.requirement).to.equal('required')
+    })
+
+    it('remove-then-add edits the row in place — one row, new Tier/Requirement', async () => {
+      const { engine, sign, electionId } = await setupFieldPolicyTest()
+      await engine.addElectionRegistrationField(
+        { electionId, fieldName: 'district', tier: 'public', requirement: 'required' },
+        sign
+      )
+
+      // The sequence Phase 46's onChangeField performs.
+      await engine.removeElectionRegistrationField(electionId, 'district', sign)
+      await engine.addElectionRegistrationField(
+        { electionId, fieldName: 'district', tier: 'selective', requirement: 'optional' },
+        sign
+      )
+
+      const ctx = (engine as unknown as { ctx: EngineContext }).ctx
+      const row = await ctx.db
+        .prepare('select count(*) as n from ElectionRegistrationField where ElectionId = :electionId and FieldName = :fieldName')
+        .get({ electionId, fieldName: 'district' })
+      expect(Number(row?.n), 'an edit must leave exactly one row').to.equal(1)
+
+      const fields = await engine.getElectionRegistrationFields(electionId)
+      expect(fields).to.have.length(1)
+      expect(fields[0]!.tier).to.equal('selective')
+      expect(fields[0]!.requirement).to.equal('optional')
+    })
+  })
+
+  describe('ElectionDisclosurePolicy', () => {
+    it('a bare re-add over an existing (ElectionId, FieldName) row is REJECTED — the hazard is real', async () => {
+      const { engine, sign, electionId } = await setupFieldPolicyTest()
+      await engine.addElectionDisclosurePolicy({ electionId, fieldName: 'income', audience: 'everyone' }, sign)
+
+      let threw: Error | undefined
+      try {
+        await engine.addElectionDisclosurePolicy({ electionId, fieldName: 'income', audience: 'district' }, sign)
+      } catch (err) {
+        threw = err as Error
+      }
+      expect(threw, 'expected a bare re-add to violate the (ElectionId, FieldName) primary key').to.not.be.undefined
+      expect(threw!.message, 'the throw must be the PK collision itself').to.match(/unique constraint failed/i)
+
+      const ctx = (engine as unknown as { ctx: EngineContext }).ctx
+      const row = await ctx.db
+        .prepare('select count(*) as n from ElectionDisclosurePolicy where ElectionId = :electionId and FieldName = :fieldName')
+        .get({ electionId, fieldName: 'income' })
+      expect(Number(row?.n), 'the rejected insert must not have duplicated the row').to.equal(1)
+
+      const policies = await engine.getElectionDisclosurePolicies(electionId)
+      expect(policies[0]!.audience, 'the rejected insert must not have mutated the stored row').to.equal('everyone')
+    })
+
+    it('remove-then-add edits the row in place — one row, new Audience', async () => {
+      const { engine, sign, electionId } = await setupFieldPolicyTest()
+      await engine.addElectionDisclosurePolicy({ electionId, fieldName: 'income', audience: 'everyone' }, sign)
+
+      // The sequence Phase 46's onSetAudience performs.
+      await engine.removeElectionDisclosurePolicy(electionId, 'income', sign)
+      await engine.addElectionDisclosurePolicy({ electionId, fieldName: 'income', audience: 'district' }, sign)
+
+      const ctx = (engine as unknown as { ctx: EngineContext }).ctx
+      const row = await ctx.db
+        .prepare('select count(*) as n from ElectionDisclosurePolicy where ElectionId = :electionId and FieldName = :fieldName')
+        .get({ electionId, fieldName: 'income' })
+      expect(Number(row?.n), 'an edit must leave exactly one row').to.equal(1)
+
+      const policies = await engine.getElectionDisclosurePolicies(electionId)
+      expect(policies).to.have.length(1)
+      expect(policies[0]!.audience).to.equal('district')
+    })
+  })
+
+  describe('MockRegistrationEngine is structurally blind to this class (pinned, not assumed)', () => {
+    it('the mock ACCEPTS a bare re-add and upserts it — which is why the tests above must run against the real engine', async () => {
+      const { MockRegistrationEngine } = await import('../src/registration/mock-registration-engine.js')
+      const mock = new MockRegistrationEngine()
+      const dummySig: Signature = { signature: 'a'.repeat(128), signerKey: 'b'.repeat(66), signerUserId: 'user-1' }
+      const electionId = 'election-mock-t460801'
+
+      await mock.addElectionRegistrationField({ electionId, fieldName: 'district', tier: 'public', requirement: 'required' }, dummySig)
+      // No remove first. Against the real engine (above) this throws; the mock's
+      // Map.set silently upserts, so a mock-backed test cannot detect a missing
+      // remove leg. If this ever starts throwing, the mock gained real PK
+      // semantics and 46-VALIDATION.md's declared blind spot should be revisited.
+      await mock.addElectionRegistrationField({ electionId, fieldName: 'district', tier: 'selective', requirement: 'optional' }, dummySig)
+
+      const fields = await mock.getElectionRegistrationFields(electionId)
+      expect(fields, 'mock upserts rather than colliding').to.have.length(1)
+      expect(fields[0]!.tier).to.equal('selective')
     })
   })
 })

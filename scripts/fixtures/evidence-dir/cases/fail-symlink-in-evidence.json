@@ -1,0 +1,11 @@
+{
+  "base": "base-device",
+  "ops": [
+    {
+      "op": "symlink",
+      "path": "64-device-evidence/rehearsal-2026-10-20/failures/latest",
+      "target": "../run-1"
+    }
+  ],
+  "expect": "symlink-in-evidence"
+}

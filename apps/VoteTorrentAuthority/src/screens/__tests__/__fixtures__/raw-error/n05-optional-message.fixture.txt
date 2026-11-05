@@ -1,0 +1,2 @@
+const onFail = (err: any) => {
+  setX(err?.message ?? '');

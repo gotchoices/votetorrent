@@ -14,9 +14,11 @@ import {
 	NetworkSignatureTask,
 	ReleaseKeyTask,
 	SignatureTask,
+	SigningStatus,
 } from "@votetorrent/vote-core";
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
+import { ThresholdProgressNote } from "./ThresholdProgressNote";
 
 interface TaskCardProps {
 	task: ReleaseKeyTask | SignatureTask;
@@ -25,6 +27,20 @@ interface TaskCardProps {
 	// Phase 7 additions (07-01 D-02): task-type chip rendered above title
 	chipLabel?: string;
 	chipColor?: string;
+	// 62-12 (Surface 5, D-09/D-10/D-11): the task's own co-signing status, rendered as a caption
+	// directly under the title. Undefined/null/threshold<=1/unreachable all render nothing —
+	// release-key cards never receive this prop.
+	thresholdStatus?: SigningStatus | null;
+}
+
+/**
+ * A date renders only for a finite timestamp; never "Invalid Date" (UAT 62 gap 4 item 3).
+ * Do not invent a ballot timestamp: the engine does not carry one.
+ */
+function formatTaskDate(value: unknown): string | undefined {
+	if (value === undefined || value === null) return undefined;
+	const time = new Date(value as number | string).getTime();
+	return Number.isFinite(time) ? new Date(time).toLocaleDateString() : undefined;
 }
 
 export function TaskCard({
@@ -33,6 +49,7 @@ export function TaskCard({
 	showIndicator = true,
 	chipLabel,
 	chipColor,
+	thresholdStatus,
 }: TaskCardProps) {
 	const { colors } = useTheme() as ExtendedTheme;
 	const { t } = useTranslation();
@@ -46,7 +63,7 @@ export function TaskCard({
 		const determineInfo = () => {
 			if (task.type === "release-key") {
 				setTitle(task.election.election.title);
-				setDate(new Date(task.election.election.date).toLocaleDateString());
+				setDate(formatTaskDate(task.election.election.date));
 				setSubtitle(t("ready") + " - " + t("remaining"));
 				setImageUrl(task.network.imageUrl);
 				setNetworkName(task.network.name);
@@ -78,7 +95,7 @@ export function TaskCard({
 					case "election":
 						tempTask = task as ElectionSignatureTask;
 						setTitle(tempTask.election.proposed.election.title);
-						setDate(new Date(tempTask.election.proposed.election.date).toLocaleDateString());
+						setDate(formatTaskDate(tempTask.election.proposed.election.date));
 						setSubtitle(t("electionRevision"));
 						setImageUrl(tempTask.network.imageUrl);
 						setNetworkName(tempTask.network.name);
@@ -86,7 +103,7 @@ export function TaskCard({
 					case "election-revision":
 						tempTask = task as ElectionRevisionSignatureTask;
 						setTitle(tempTask.election.proposed.election.title);
-						setDate(new Date(tempTask.election.proposed.election.date).toLocaleDateString());
+						setDate(formatTaskDate(tempTask.election.proposed.election.date));
 						setSubtitle(t("electionRevision"));
 						setImageUrl(tempTask.network.imageUrl);
 						setNetworkName(tempTask.network.name);
@@ -94,7 +111,7 @@ export function TaskCard({
 					case "ballot":
 						tempTask = task as BallotSignatureTask;
 						setTitle(tempTask.ballot.proposed.description);
-						setDate(new Date(tempTask.ballot.proposed.timestamp).toLocaleDateString());
+						setDate(formatTaskDate((tempTask.ballot as { timestamp?: number }).timestamp));
 						setSubtitle(t("ballotRevision"));
 						setImageUrl(tempTask.network.imageUrl);
 						setNetworkName(tempTask.network.name);
@@ -108,7 +125,7 @@ export function TaskCard({
 	return (
 		<TouchableOpacity onPress={onPress} style={[styles.card, { backgroundColor: colors.card }]}>
 			{imageUrl && <Image source={{ uri: imageUrl }} style={styles.image} />}
-			<View style={styles.content}>
+			<View style={styles.content} testID="task-card-content">
 				{chipLabel && (
 					<View style={[styles.chip, { backgroundColor: chipColor ?? colors.accent }]}>
 						<ThemedText type="small">{chipLabel.toUpperCase()}</ThemedText>
@@ -117,6 +134,7 @@ export function TaskCard({
 				<ThemedText type="cardTitle" numberOfLines={1}>
 					{title}
 				</ThemedText>
+				<ThresholdProgressNote status={thresholdStatus} />
 				{date && (
 					<ThemedText type="defaultSemiBold" numberOfLines={1}>
 						{date}

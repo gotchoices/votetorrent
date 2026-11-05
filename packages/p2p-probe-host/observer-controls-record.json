@@ -1,0 +1,294 @@
+{
+  "schemaVersion": 1,
+  "timestamp": "2026-09-04T16:36:46.679Z",
+  "cadreCoreVersion": "0.12.0",
+  "cadreCorePath": "/Users/arashrestha/ILAB/VOTETORRENT/votetorrent/packages/p2p-probe-host/node_modules/@serfab/cadre-core/package.json",
+  "dbP2pVersion": "0.27.0",
+  "dbP2pPath": "/Users/arashrestha/ILAB/VOTETORRENT/votetorrent/packages/p2p-probe-host/node_modules/@optimystic/db-p2p/package.json",
+  "patchFilename": "@serfab-cadre-core-npm-0.12.0-7ac3a744da.patch",
+  "mode": "patched",
+  "relayPosture": "off",
+  "relayPostureSource": "/Users/arashrestha/ILAB/VOTETORRENT/votetorrent/packages/p2p-probe-host/wall-proof-record.json",
+  "fences": {
+    "D-05.1": "NOT claimed here. Patch-removal is 56-13's control and requires a rebuilt browser production variant.",
+    "D-05.4": "NOT claimed here. Running-gateway byte provenance against the RUNNING gateway is 56-08's control; this harness's own MODE discriminator greps its OWN resolved node_modules bytes for a different purpose (refusing to run its controls against unpatched bytes), not the deployed gateway's."
+  },
+  "complete": true,
+  "rungs": {
+    "P2": {
+      "verdict": "PASS",
+      "checks": [
+        {
+          "id": "unconditional",
+          "pass": true,
+          "observed": false
+        },
+        {
+          "id": "enrollmentWindow",
+          "pass": true,
+          "observed": 0
+        },
+        {
+          "id": "delegateAdmission",
+          "pass": true,
+          "observed": false
+        },
+        {
+          "id": "membership",
+          "pass": true,
+          "observed": {
+            "memberCount": 1,
+            "probeIsMember": false
+          }
+        },
+        {
+          "id": "outstandingInvitation",
+          "pass": true,
+          "observed": false
+        },
+        {
+          "id": "relayServerEnabled",
+          "pass": true,
+          "observed": {
+            "relayEnabled": false,
+            "expectedPosture": "off"
+          }
+        },
+        {
+          "id": "strandHosted:observer-controls-listed-a514e9af-e10d-462f-b9fe-c8c72354d227",
+          "pass": true,
+          "observed": 1
+        },
+        {
+          "id": "strandHosted:observer-controls-unlisted-3033bef0-2682-46f4-890b-48975acefeb9",
+          "pass": true,
+          "observed": 1
+        },
+        {
+          "id": "decision",
+          "pass": true,
+          "observed": "deny"
+        },
+        {
+          "id": "mode.observerProtocolExported",
+          "pass": true,
+          "observed": "/sereus/public-observer/1.0.0"
+        },
+        {
+          "id": "mode.serviceExported",
+          "pass": true,
+          "observed": "function"
+        },
+        {
+          "id": "mode.versionIs0_12_0",
+          "pass": true,
+          "observed": "0.12.0"
+        },
+        {
+          "id": "mode.pathUnderWorkspace",
+          "pass": true,
+          "observed": "/Users/arashrestha/ILAB/VOTETORRENT/votetorrent/packages/p2p-probe-host/node_modules/@serfab/cadre-core/package.json"
+        }
+      ],
+      "decision": "deny",
+      "strandCounts": {
+        "observer-controls-listed-a514e9af-e10d-462f-b9fe-c8c72354d227": 1,
+        "observer-controls-unlisted-3033bef0-2682-46f4-890b-48975acefeb9": 1
+      },
+      "gatewayPeerId": "12D3KooWN6s6QYpw2QC5KRvrkkHVY7t3Sr6Z6xUpDH7AJVYWQ2Wj"
+    },
+    "C2_OBSERVER": {
+      "verdict": "SERVED:1",
+      "raw": {
+        "strandId": "observer-controls-listed-a514e9af-e10d-462f-b9fe-c8c72354d227",
+        "multiaddrs": [
+          "/ip4/127.0.0.1/tcp/65090/ws/p2p/12D3KooWFEfBnwbzYpfRouVkpYmM24QMeEP9LgqS4s22FGSEqTEu"
+        ]
+      },
+      "admitInboundControlConnection": "deny"
+    },
+    "C2_MEMBERSONLY": {
+      "verdict": "REFUSED_EMPTY",
+      "raw": {
+        "strandId": "observer-controls-listed-a514e9af-e10d-462f-b9fe-c8c72354d227",
+        "multiaddrs": []
+      }
+    },
+    "C2_POS": {
+      "verdict": "SERVED:1",
+      "raw": {
+        "strandId": "observer-controls-listed-a514e9af-e10d-462f-b9fe-c8c72354d227",
+        "multiaddrs": [
+          "/ip4/127.0.0.1/tcp/65090/ws/p2p/12D3KooWFEfBnwbzYpfRouVkpYmM24QMeEP9LgqS4s22FGSEqTEu"
+        ]
+      }
+    },
+    "C3_LISTED": {
+      "verdict": "SERVED:1",
+      "raw": {
+        "strandId": "observer-controls-listed-a514e9af-e10d-462f-b9fe-c8c72354d227",
+        "multiaddrs": [
+          "/ip4/127.0.0.1/tcp/65090/ws/p2p/12D3KooWFEfBnwbzYpfRouVkpYmM24QMeEP9LgqS4s22FGSEqTEu"
+        ]
+      },
+      "sharedMeasurementWith": "C2_OBSERVER"
+    },
+    "C3_UNLISTED": {
+      "verdict": "REFUSED_EMPTY",
+      "raw": {
+        "strandId": "observer-controls-unlisted-3033bef0-2682-46f4-890b-48975acefeb9",
+        "multiaddrs": []
+      },
+      "hostedMultiaddrCount": 1,
+      "membersOnlyComparison": "REFUSED_EMPTY"
+    },
+    "C3_ABSENT": {
+      "verdict": "REFUSED_EMPTY",
+      "raw": {
+        "strandId": "observer-controls-absent-never-hosted-2d776dbd-8361-4830-aea2-9c7dcbc801b7",
+        "multiaddrs": []
+      },
+      "indistinguishableFromUnlisted": true,
+      "membersOnlyComparison": "REFUSED_EMPTY",
+      "note": "Byte-identical-shape empty response to RUNG_C3_UNLISTED, by construction — recorded as a mechanism property, not hidden."
+    },
+    "C3_FLIP": {
+      "verdict": "SERVED:1",
+      "raw": {
+        "strandId": "observer-controls-unlisted-3033bef0-2682-46f4-890b-48975acefeb9",
+        "multiaddrs": [
+          "/ip4/127.0.0.1/tcp/65103/ws/p2p/12D3KooWGExLdYCC1A5PThe2c491cXCrWRU4LteW4LxREJHVjGFd"
+        ]
+      },
+      "gatewayPeerId": "12D3KooWMWDyNHnZpWbpvP7hV1NM67vCvjZcfTZytRUG3zPb9apR"
+    },
+    "C3_UNCONFIGURED": {
+      "verdict": "REFUSED_CONNECTION:DENIED:closed-after-5ms(receiver-side-abort-raced-dialer-upgrade)",
+      "layer": "L1-connection",
+      "gatewayPeerId": "12D3KooWKYKnSzSPEdmN6QRsLSCgTNgSPNXfhw3YUBeoFknBXvuW"
+    },
+    "C3_UNIT": {
+      "verdict": "PASS",
+      "assertions": [
+        {
+          "label": "listed",
+          "request": {
+            "strandId": "observer-controls-listed-a514e9af-e10d-462f-b9fe-c8c72354d227"
+          },
+          "response": {
+            "strandId": "observer-controls-listed-a514e9af-e10d-462f-b9fe-c8c72354d227",
+            "multiaddrs": [
+              "/ip4/127.0.0.1/tcp/4001/ws/p2p/12D3KooWObserverUnitFixtureed67c287cd18408eb0c0"
+            ]
+          },
+          "threw": null,
+          "pass": true
+        },
+        {
+          "label": "unlisted",
+          "request": {
+            "strandId": "observer-controls-unlisted-3033bef0-2682-46f4-890b-48975acefeb9"
+          },
+          "response": {
+            "strandId": "observer-controls-unlisted-3033bef0-2682-46f4-890b-48975acefeb9",
+            "multiaddrs": []
+          },
+          "threw": null,
+          "pass": true
+        },
+        {
+          "label": "malformed:number",
+          "request": {
+            "strandId": 12345
+          },
+          "response": {
+            "strandId": "",
+            "multiaddrs": []
+          },
+          "threw": null,
+          "pass": true
+        },
+        {
+          "label": "malformed:emptyString",
+          "request": {
+            "strandId": ""
+          },
+          "response": {
+            "strandId": "",
+            "multiaddrs": []
+          },
+          "threw": null,
+          "pass": true
+        },
+        {
+          "label": "malformed:null",
+          "request": {
+            "strandId": null
+          },
+          "response": {
+            "strandId": "",
+            "multiaddrs": []
+          },
+          "threw": null,
+          "pass": true
+        },
+        {
+          "label": "malformed:undefined",
+          "request": {},
+          "response": {
+            "strandId": "",
+            "multiaddrs": []
+          },
+          "threw": null,
+          "pass": true
+        },
+        {
+          "label": "malformed:missingKey",
+          "request": {},
+          "response": {
+            "strandId": "",
+            "multiaddrs": []
+          },
+          "threw": null,
+          "pass": true
+        },
+        {
+          "label": "lenient:trailingSpace",
+          "request": {
+            "strandId": "observer-controls-listed-a514e9af-e10d-462f-b9fe-c8c72354d227 "
+          },
+          "response": {
+            "strandId": "observer-controls-listed-a514e9af-e10d-462f-b9fe-c8c72354d227 ",
+            "multiaddrs": []
+          },
+          "threw": null,
+          "pass": true
+        },
+        {
+          "label": "lenient:caseVariant",
+          "request": {
+            "strandId": "OBSERVER-CONTROLS-LISTED-A514E9AF-E10D-462F-B9FE-C8C72354D227"
+          },
+          "response": {
+            "strandId": "OBSERVER-CONTROLS-LISTED-A514E9AF-E10D-462F-B9FE-C8C72354D227",
+            "multiaddrs": []
+          },
+          "threw": null,
+          "pass": true
+        },
+        {
+          "label": "lenient:prefixOfListed",
+          "request": {
+            "strandId": "observer-controls-listed-a514e"
+          },
+          "response": {
+            "strandId": "observer-controls-listed-a514e",
+            "multiaddrs": []
+          },
+          "threw": null,
+          "pass": true
+        }
+      ]
+    }
+  }
+}

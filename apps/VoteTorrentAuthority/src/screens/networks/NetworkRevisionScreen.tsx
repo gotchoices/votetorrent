@@ -6,6 +6,7 @@ import {
 } from "@react-navigation/native";
 import { useEffect, useLayoutEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { errorCopy } from "../../utils/errorCopy";
 import {
 	Image,
 	ScrollView,
@@ -23,6 +24,8 @@ import { useApp } from "../../providers/AppProvider";
 import { globalStyles } from "../../theme/styles";
 import type { NavigationProp } from "../../navigation/types";
 import { ElectionType, type INetworkEngine } from "@votetorrent/vote-core";
+import { KeyboardAvoidingScreen } from "../../components/KeyboardAvoidingScreen";
+import { useMediaPin } from "../../hooks/useMediaPin";
 
 export default function NetworkRevisionScreen() {
 	const { colors } = useTheme() as ExtendedTheme;
@@ -34,6 +37,8 @@ export default function NetworkRevisionScreen() {
 
 	const [name, setName] = useState("");
 	const [imageUrl, setImageUrl] = useState("");
+	// "Make Permanent": records the content id of the image's bytes (useMediaPin).
+	const imagePin = useMediaPin();
 	const [electionType, setElectionType] = useState<ElectionType>(ElectionType.adhoc);
 	const [relayAddresses, setRelayAddresses] = useState<string[]>([""]);
 	const [tsaUrls, setTsaUrls] = useState<string[]>([""]);
@@ -52,6 +57,7 @@ export default function NetworkRevisionScreen() {
 				const details = await engine.getDetails();
 				setName(details.network.name);
 				setImageUrl(details.network.imageRef?.url ?? "");
+				imagePin.reset(details.network.imageRef);
 				setRelayAddresses(
 					details.network.relays.length > 0 ? details.network.relays : [""],
 				);
@@ -63,10 +69,11 @@ export default function NetworkRevisionScreen() {
 				setTsaUrls(tsas.length > 0 ? tsas.map(tsa => tsa.url) : [""]);
 			} catch (error) {
 				console.warn("Failed to load network details for revision:", error);
-				setErrorMessage(error instanceof Error ? error.message : String(error));
+				setErrorMessage(errorCopy(error, t, "read"));
 			}
 		};
 		load();
+		// eslint-disable-next-line react-hooks/exhaustive-deps -- imagePin.reset is stable
 	}, [getEngine]);
 
 	const addRelayField = () => setRelayAddresses([...relayAddresses, ""]);
@@ -95,7 +102,7 @@ export default function NetworkRevisionScreen() {
 
 	// Phase 19 plan 19-07 (SURF-04, D-10) — minimal NETOP-01 PROPOSE slice: assemble a
 	// NetworkRevision from the screen's existing form state and call the already-working,
-	// non-signing proposeRevision write. importRelays/importTsas/makePermanent stay Phase-20 stubs.
+	// non-signing proposeRevision write. importRelays/importTsas stay Phase-20 stubs.
 	const onPropose = async () => {
 		setErrorMessage("");
 		setProposing(true);
@@ -103,7 +110,12 @@ export default function NetworkRevisionScreen() {
 			const engine = await getEngine<INetworkEngine>("network");
 			await engine.proposeRevision({
 				name,
-				imageRef: imageUrl ? { url: imageUrl } : undefined,
+				imageRef: imageUrl
+					? (() => {
+							const cid = imagePin.cidFor(imageUrl);
+							return cid ? { url: imageUrl, cid } : { url: imageUrl };
+						})()
+					: undefined,
 				relays: relayAddresses.filter((address) => address.trim() !== ""),
 				policies: {
 					electionType,
@@ -116,14 +128,14 @@ export default function NetworkRevisionScreen() {
 			navigation.goBack();
 		} catch (error) {
 			console.warn("networkRevision-propose error:", error);
-			setErrorMessage(error instanceof Error ? error.message : String(error));
+			setErrorMessage(errorCopy(error, t, "write"));
 		} finally {
 			setProposing(false);
 		}
 	};
 
 	return (
-		<View style={styles.content}>
+		<KeyboardAvoidingScreen>
 			<ScrollView style={styles.container}>
 				<View style={styles.section}>
 					<CustomTextInput
@@ -137,7 +149,9 @@ export default function NetworkRevisionScreen() {
 						placeholder={t("optionalImageAddress")}
 						onChangeText={setImageUrl}
 						isImageUrlField
-						makePermanentPressed={() => { /* Phase 22: media-pin to content-addressed storage */ }}
+						makePermanentPressed={() => imagePin.pin(imageUrl)}
+						makePermanentDisabled={!imageUrl.trim() || imagePin.isPinning}
+						permanentStatus={imagePin.statusFor(imageUrl)}
 					/>
 					{imageUrl ? (
 						<Image
@@ -242,7 +256,7 @@ export default function NetworkRevisionScreen() {
 					onPress={onPropose}
 				/>
 			</Footer>
-		</View>
+		</KeyboardAvoidingScreen>
 	);
 }
 

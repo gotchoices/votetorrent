@@ -1,0 +1,28 @@
+{
+  "base": "base-device",
+  "args": [
+    "--git"
+  ],
+  "ops": [
+    {
+      "op": "git-init"
+    },
+    {
+      "op": "write",
+      "path": "64-device-evidence/checks/camera-gate/attempt-2/android/verdict.txt",
+      "content": "VERDICT: PASS\n"
+    },
+    {
+      "op": "git-commit"
+    }
+  ],
+  "knownOverwrites": [
+    {
+      "root": "64-device-evidence",
+      "rel": "checks/camera-gate/attempt-2/android/verdict.txt",
+      "beforeContent": "VERDICT: PASS\nleg: android\n",
+      "afterContent": "VERDICT: PASS\nleg: ios\n"
+    }
+  ],
+  "expect": "evidence-overwritten"
+}

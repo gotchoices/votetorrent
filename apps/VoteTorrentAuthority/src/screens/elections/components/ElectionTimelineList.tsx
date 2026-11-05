@@ -13,8 +13,12 @@ const EVENT_ORDER: ElectionEvent[] = [
 	ElectionEvent.registrationEnds,
 	ElectionEvent.ballotsFinal,
 	ElectionEvent.votingStarts,
+	ElectionEvent.accruingVotes,
+	ElectionEvent.hashingVotes,
+	ElectionEvent.releasingKeys,
 	ElectionEvent.tallyingStarts,
 	ElectionEvent.validation,
+	ElectionEvent.certificationStarts,
 	ElectionEvent.closed,
 ];
 
@@ -24,8 +28,10 @@ const EVENT_ORDER: ElectionEvent[] = [
  * Replaces the vertical-dot Timeline component on the Election Detail screen
  * per 09-PARITY-GAPS-R3 Decision 2. Renders one row per event in a fixed
  * display order: registrationEnds → ballotsFinal → votingStarts →
- * tallyingStarts → validation → closed. Rows whose timestamp is falsy/zero
- * are skipped. No dots, no lines between rows — plain bold-label + date.
+ * accruingVotes → hashingVotes → releasingKeys → tallyingStarts →
+ * validation → certificationStarts → closed. Rows whose timestamp is
+ * falsy/zero are skipped. No dots, no lines between rows — plain
+ * bold-label + date.
  */
 export function ElectionTimelineList({ timeline }: ElectionTimelineListProps) {
 	const { t } = useTranslation();

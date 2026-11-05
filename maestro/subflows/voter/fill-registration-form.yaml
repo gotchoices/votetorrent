@@ -1,0 +1,75 @@
+# Fill the Voter's three-step register form, from step 1 (RegisterPersonal) to the review step
+# (RegisterConfirm). Every input has a testID; validation rules are in
+# apps/VoteTorrentVoter/src/utils/registrationForm.ts (DOB is typed as 8 digits and masked to
+# MM/DD/YYYY, the phone needs 10+ digits, address line 1 and a party are required).
+#
+# Keep the values free of a double "r": on a debug build, two R key events in quick succession
+# outside a focused text field reload the JS bundle (RN's double-tap-R). Typing into a focused
+# field is safe, but a dropped focus is not.
+#
+# env: APP_ID, REG_FIRST_NAME, REG_LAST_NAME, REG_DOB_DIGITS, REG_EMAIL, REG_PHONE,
+#      REG_ADDRESS_1, REG_PARTY (democratic | republican | independent | other)
+appId: ${APP_ID}
+---
+- extendedWaitUntil:
+    visible:
+      id: "register-first-name"
+    timeout: 60000
+- tapOn:
+    id: "register-first-name"
+- inputText: ${REG_FIRST_NAME}
+- tapOn:
+    id: "register-last-name"
+- inputText: ${REG_LAST_NAME}
+- tapOn:
+    id: "register-dob"
+- inputText: ${REG_DOB_DIGITS}
+- tapOn:
+    id: "register-email"
+- inputText: ${REG_EMAIL}
+- scrollUntilVisible:
+    element:
+      id: "register-phone"
+    direction: DOWN
+    timeout: 10000
+- tapOn:
+    id: "register-phone"
+- inputText: ${REG_PHONE}
+- hideKeyboard
+- scrollUntilVisible:
+    element:
+      id: "register-continue"
+    direction: DOWN
+    timeout: 10000
+- tapOn:
+    id: "register-continue"
+# Step 2: address + party
+- extendedWaitUntil:
+    visible:
+      id: "register-address-1"
+    timeout: 15000
+- tapOn:
+    id: "register-address-1"
+- inputText: ${REG_ADDRESS_1}
+- hideKeyboard
+- scrollUntilVisible:
+    element:
+      id: "register-party"
+    direction: DOWN
+    timeout: 10000
+- tapOn:
+    id: "register-party"
+- tapOn:
+    id: "party-option-${REG_PARTY}"
+- scrollUntilVisible:
+    element:
+      id: "register-continue"
+    direction: DOWN
+    timeout: 10000
+- tapOn:
+    id: "register-continue"
+# Step 3: review
+- extendedWaitUntil:
+    visible:
+      id: "register-submit"
+    timeout: 15000

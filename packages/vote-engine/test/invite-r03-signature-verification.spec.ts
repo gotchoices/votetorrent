@@ -107,7 +107,8 @@ describe('999.1-09 R-03: InviteSlot/InviteResult engine-side signature verificat
         caught = err
       }
       expect(caught, 'an InviteResult signed by the wrong key must be rejected').to.not.equal(undefined)
-      expect((caught as Error).message).to.match(/SignatureValid/)
+      // 62-103: the engine now verifies the key before any write and refuses with a code.
+      expect((caught as Error & { code?: string }).code).to.equal('invite-signature-invalid')
 
       // Sanity: no InviteResult row was left behind by the rejected insert.
       const row = await auth.ctx.db

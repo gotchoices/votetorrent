@@ -17,14 +17,18 @@ import { useSettings } from "../../providers/SettingsProvider";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { bytesToHex } from "@noble/curves/utils.js";
 import { createDeviceSigner } from "../../engines/device-signer";
+import { useDeviceSigningErrorHandler } from "../../hooks/useDeviceSigningErrorHandler";
+import { errorCopy } from "../../utils/errorCopy";
 
 export function AddKeyScreen() {
 	const { user, userEngine } = useRoute().params as { user: User; userEngine: IUserEngine };
 	const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 	const [errorMessage, setErrorMessage] = useState("");
+	const [isSubmitting, setIsSubmitting] = useState(false);
 	const { t } = useTranslation();
 	const { colors } = useTheme() as ExtendedTheme;
 	const { showHelpIcons } = useSettings();
+	const handleDeviceSigningError = useDeviceSigningErrorHandler();
 
 	// External paired-device / hardware-key flow — not available yet
 	const scanDevice = () => {
@@ -38,6 +42,7 @@ export function AddKeyScreen() {
 
 	const handleGenerateAndAddKey = async () => {
 		setErrorMessage("");
+		setIsSubmitting(true);
 
 		// D-04: the device user always has one key from getOrCreateDeviceUser.
 		// first-key path only fires for a user created WITHOUT a key (e.g. in tests).
@@ -63,7 +68,11 @@ export function AddKeyScreen() {
 			await userEngine.addKey({ key: pubHex, type: UserKeyType.mobile, expiration }, signer);
 			navigation.goBack();
 		} catch (err) {
-			setErrorMessage(err instanceof Error ? err.message : String(err));
+			const outcome = handleDeviceSigningError(err);
+			if (outcome.handled) return;
+			setErrorMessage(outcome.message ?? errorCopy(err, t, "write"));
+		} finally {
+			setIsSubmitting(false);
 		}
 	};
 
@@ -128,9 +137,10 @@ export function AddKeyScreen() {
 			</ScrollView>
 			<Footer>
 				<CustomButton
-					title={t("addKey")}
+					title={isSubmitting ? `${t("addKey")}…` : t("addKey")}
 					icon="save"
 					backgroundColor={colors.success}
+					disabled={isSubmitting}
 					onPress={() => {
 						handleGenerateAndAddKey();
 					}}

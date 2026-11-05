@@ -1,0 +1,33 @@
+{
+	"name": "@votetorrent/web-data",
+	"version": "0.0.1",
+	"private": true,
+	"type": "module",
+	"description": "Shared browser data layer for the authority dashboard and the public no-login election view — the D-04 audience-split boundary over IndexedDB-backed Quereus access.",
+	"exports": {
+		"./public": "./src/public/index.js",
+		"./officer": "./src/officer/index.js"
+	},
+	"scripts": {
+		"test": "node --test --test-concurrency=1 test/*.test.mjs",
+		"typecheck": "tsc --noEmit",
+		"clean": "rm -rf node_modules"
+	},
+	"peerDependencies": {
+		"@quereus/plugin-indexeddb": "4.24.0",
+		"@quereus/quereus": "4.24.0",
+		"@votetorrent/vote-engine": "workspace:*"
+	},
+	"devDependencies": {
+		"@quereus/plugin-indexeddb": "4.24.0",
+		"@quereus/quereus": "patch:@quereus/quereus@npm%3A4.24.0#~/.yarn/patches/@quereus-quereus-npm-4.24.0-votetorrent.patch",
+		"@types/node": "^22.10.2",
+		"@votetorrent/vote-engine": "workspace:*",
+		"fake-indexeddb": "^6.2.5",
+		"typescript": "^5.6.3",
+		"vite": "^7.0.0"
+	},
+	"engines": {
+		"node": ">=20.19"
+	}
+}

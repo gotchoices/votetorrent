@@ -1,4 +1,4 @@
-import { MisuseError, QuereusError } from '@quereus/quereus'
+import { rethrow as rethrowHelper } from '../signing/ceremony-helpers.js'
 import type { EngineContext } from '../types.js'
 import type { IOnboardingTasksEngine, IOnboardingTasksSetOnboardingTaskCompletedBuilder } from '@votetorrent/vote-core'
 import { SetOnboardingTaskCompletedBuilder } from './builders/index.js'
@@ -81,16 +81,6 @@ export class OnboardingTasksEngine implements IOnboardingTasksEngine {
   }
 
   private rethrow (err: unknown, method: string): never {
-    if (err instanceof QuereusError) {
-      throw new Error(`Quereus error (code ${err.code}): ${err.message}`)
-    } else if (err instanceof MisuseError) {
-      throw new Error(`API misuse: ${err.message}`)
-    } else if (err instanceof Error) {
-      throw new Error(`OnboardingTasksEngine.${method}: ${err.message}`)
-    } else {
-      throw new Error(
-				`OnboardingTasksEngine.${method}: unknown error: ${String(err)}`
-      )
-    }
+    return rethrowHelper(err, 'OnboardingTasksEngine', method)
   }
 }

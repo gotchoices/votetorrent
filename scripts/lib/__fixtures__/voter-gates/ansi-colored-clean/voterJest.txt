@@ -1,0 +1,5 @@
+[1mTest Suites: [22m[1m[32m57 passed[39m[22m, 57 total
+[1mTests:       [22m[1m[32m749 passed[39m[22m, 749 total
+Snapshots:   0 total
+Time:        8.42 s
+Ran all test suites.

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { IKeysTasksEngine, ISignatureTasksEngine } from "@votetorrent/vote-core";
 import { useFocusEffect } from "@react-navigation/native";
 import { useApp } from "../providers/AppProvider";
+import { loadRenderableSignatureTasks } from "../screens/tasks/renderable-signature-tasks";
 
 /**
  * Return the total count of pending tasks (keys to release + requested signatures)
@@ -35,8 +36,17 @@ export function useTaskCount(): number {
 					signatureTasksEngine.getRequestedSignatures(true),
 				]);
 
+				// 48-11/48-18 / 62-12 (Surface 5, D-11): getRequestedSignatures(true) itself stays
+				// UNCHANGED — it is the idempotent pull-and-seed call the registration approval
+				// ceremony needs — but the COUNT goes through loadRenderableSignatureTasks, the
+				// ONE shared filter module TasksScreen.tsx also calls. The badge and the list are
+				// counting the SAME population deliberately: a badge reading 3 over a list
+				// rendering 2 is a legibility defect, and they can no longer drift apart because
+				// both consumers call this one function.
+				const renderableSigs = await loadRenderableSignatureTasks(signatureTasksEngine, sigs);
+
 				if (!cancelled) {
-					setCount(keys.length + sigs.length);
+					setCount(keys.length + renderableSigs.length);
 				}
 			} catch {
 				// Network may not be established yet at first render — leave count at 0

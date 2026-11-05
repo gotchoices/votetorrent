@@ -22,6 +22,8 @@ export interface RegistrationCardProps {
 	isRegistered: boolean;
 	draft: RegistrationDraft;
 	registeredAt: string | null;
+	/** The open network's name (`useNetworkName`); the `common:networkName` copy when omitted. */
+	networkName?: string;
 	onRegisterNow?: () => void;
 	onUpdateRegistration?: () => void;
 	onHelp?: () => void;
@@ -44,12 +46,14 @@ export function RegistrationCard({
 	isRegistered,
 	draft,
 	registeredAt,
+	networkName,
 	onRegisterNow,
 	onUpdateRegistration,
 	onHelp,
 }: RegistrationCardProps) {
 	const {colors, fonts, type: typeScale, radii} = useTheme() as ExtendedTheme;
 	const {t} = useTranslation('registration');
+	const network = networkName ?? t('networkName', {ns: 'common'});
 
 	if (!isRegistered) {
 		return (
@@ -78,7 +82,7 @@ export function RegistrationCard({
 							lineHeight: typeScale.body.lineHeight,
 						},
 					]}>
-					{t('notRegistered.body')}{' '}
+					{t('notRegistered.body', {network})}{' '}
 					<Text testID="registration-card-help" onPress={onHelp}>
 						<FontAwesome6 name="circle-question" size={15} color={colors.light} />
 					</Text>
@@ -134,7 +138,7 @@ export function RegistrationCard({
 							lineHeight: typeScale.body.lineHeight,
 						},
 					]}>
-					{t('registered.body')}
+					{t('registered.body', {network})}
 				</Text>
 				{hasIdentity ? (
 					<Text

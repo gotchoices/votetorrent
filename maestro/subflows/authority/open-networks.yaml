@@ -1,0 +1,10 @@
+# Open the Networks screen from the tab header's cloud icon (a11y "Choose network").
+# env: APP_ID
+appId: ${APP_ID}
+---
+- runFlow: ../common/dismiss-logbox.yaml
+- tapOn: "Choose network"
+- extendedWaitUntil:
+    visible:
+      id: "networks-join-network-button"
+    timeout: 30000

@@ -1,10 +1,11 @@
 import React, { useLayoutEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { errorCopy } from "../../utils/errorCopy";
 import { ScrollView, StyleSheet, TouchableOpacity, View } from "react-native";
 import FontAwesome6 from "react-native-vector-icons/FontAwesome6";
 import { ExtendedTheme, useNavigation, useRoute, useTheme } from "@react-navigation/native";
 import type { Authority, INetworkEngine, Officer } from "@votetorrent/vote-core";
-import { scopeDescriptions } from "@votetorrent/vote-core";
+import { scopeLabel } from "../../utils/scopeLabel";
 import { ThemedText } from "../../components/ThemedText";
 import { InfoCard } from "../../components/InfoCard";
 import { InlineError } from "../../components/InlineError";
@@ -40,7 +41,7 @@ export default function OfficerDetailsScreen() {
 			}
 		} catch (error) {
 			console.warn("Error opening user from officer detail:", error);
-			setErrorMessage(error instanceof Error ? error.message : String(error));
+			setErrorMessage(errorCopy(error, t, "read"));
 		}
 	};
 
@@ -60,7 +61,7 @@ export default function OfficerDetailsScreen() {
 
 	const displayName = userName ?? officer.userId;
 	const permissions = officer.scopes
-		.map((scope) => scopeDescriptions[scope] ?? t(`scope_${scope}`))
+		.map((scope) => scopeLabel(scope, t))
 		.join(", ");
 
 	return (

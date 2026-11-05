@@ -6,13 +6,20 @@
 #            Force-stops the app, relaunches it via adb, then polls logcat for the verdict
 #            that the in-app persistence-proof-runner.ts emits once the read phase completes.
 #
-# Usage    : ./scripts/run-vtest02.sh [--solo]
+# Usage    : ./scripts/run-vtest02.sh [--solo] [--no-reset]
 #            Bare invocation  : strand-on (default) — flips STRAND_PERSISTENCE_PROOF_ENABLED=true,
 #                                resets BOTH the votetorrent-q2-* and votetorrent-cadre-probe-persistence*
 #                                LevelDB stores, exercises the strand path (D-05b).
 #            --solo           : STRAND off — writes STRAND_PERSISTENCE_PROOF_ENABLED=false (keeps
 #                                PROOF_ENABLED=true), skips the strand-store reset, and exercises the
 #                                solo rnDbFactory path only (D-15 solo regression gate).
+#            --no-reset       : Skip the D-11 LevelDB reset entirely, preserving whatever the
+#                                stores already hold. Required for any proof whose premise is
+#                                "re-attach to a store that ALREADY holds rows" — e.g. a live-table
+#                                CHECK amendment meeting pre-amendment rows. Without this the reset
+#                                below deletes the very rows such a proof depends on, making the
+#                                "store held pre-existing rows" and "harness emitted a verdict"
+#                                conditions unsatisfiable in the same run. Flags compose in any order.
 #
 # Prerequisites:
 #   - adb must be in PATH (Android SDK Platform Tools)
@@ -29,12 +36,23 @@
 
 set -euo pipefail
 
-# 37-04 (T-37-15): parse an optional --solo first arg into STRAND_MODE. Default
+# 37-04 (T-37-15): parse an optional --solo arg into STRAND_MODE. Default
 # (bare invocation) is strand-on so the existing D-05b flow is unchanged.
+# 48-02: --no-reset added alongside it. Parsed as an order-independent loop so
+# `--solo --no-reset` and `--no-reset --solo` behave identically; the previous
+# positional `$1`-only check silently ignored a second flag.
 STRAND_MODE="on"
-if [ "${1:-}" = "--solo" ]; then
-  STRAND_MODE="off"
-fi
+RESET_STORES="yes"
+for arg in "$@"; do
+  case "$arg" in
+    --solo)     STRAND_MODE="off" ;;
+    --no-reset) RESET_STORES="no" ;;
+    *)
+      echo "[vtest02] ERROR: unknown argument '$arg' (expected --solo and/or --no-reset)" >&2
+      exit 2
+      ;;
+  esac
+done
 
 # WR-12 (17-REVIEW): every path below (FLAG_FILE) is repo-root-relative. Anchor
 # the cwd to the repo root so the script — and crucially its EXIT-trap flag
@@ -92,6 +110,10 @@ export const REPLICATION_PROOF_ENABLED = false;
 export const USE_LOCAL_DB_FACTORY = false;
 export const SIGNING_PROOF_ENABLED = false;
 export const STRAND_PERSISTENCE_PROOF_ENABLED = false;
+export const USE_STUB_ATTESTATION_VERIFIER = false;
+export const REGISTRANT_SEED_ENABLED = false;
+export const RECOVERY_BRANCH_PROOF_ENABLED = false;
+export const SEALED_PAYLOAD_PROOF_ENABLED = false;
 EOF
 }
 trap restore_flags EXIT
@@ -111,6 +133,15 @@ if [ "${STRAND_MODE}" = "off" ]; then
 else
   STRAND_FLAG="true"
 fi
+# D-16 (47-01 Task 4): fail closed on a stale BUILT vote-engine BEFORE anything is
+# bundled. The app resolves @votetorrent/vote-engine to dist/, never src/, so a
+# dist that lags votetorrent.qsql yields a VACUOUS on-device PASS against the old
+# schema (observed 2026-08-04). This MUST stay ahead of the flag write below —
+# that is the last point where aborting is still free. `set -euo pipefail` makes a
+# non-zero exit abort the run; keep this a bare call, never a soft conditional.
+echo "[vtest02] Checking built vote-engine schema freshness (D-16) ..."
+bash scripts/check-dist-freshness.sh
+
 echo "[vtest02] Writing proof-flags.generated.ts (PROOF_ENABLED=true, DIAL_PROBE_ENABLED=false, STRAND_PERSISTENCE_PROOF_ENABLED=${STRAND_FLAG}, mode=${STRAND_MODE}) ..."
 cat > "${FLAG_FILE}" << EOF
 // proof-flags.generated.ts — written by run-vtest02.sh before launch (D-18).
@@ -121,22 +152,33 @@ export const REPLICATION_PROOF_ENABLED = false;
 export const USE_LOCAL_DB_FACTORY = false;
 export const SIGNING_PROOF_ENABLED = false;
 export const STRAND_PERSISTENCE_PROOF_ENABLED = ${STRAND_FLAG};
+export const USE_STUB_ATTESTATION_VERIFIER = false;
+export const REGISTRANT_SEED_ENABLED = false;
+export const RECOVERY_BRANCH_PROOF_ENABLED = false;
+export const SEALED_PAYLOAD_PROOF_ENABLED = false;
 EOF
 
 # D-11: Fresh LevelDB reset — isolates the 4.x proof from any 3.x-written data.
 # Restart-persistence is still proven within 4.x (write → relaunch → read).
-echo "[vtest02] Resetting LevelDB stores (D-11) ..."
-adb shell run-as org.votetorrent.authority \
-  find /data/data/org.votetorrent.authority/files -name "votetorrent-q2-*" -exec rm -rf {} + 2>/dev/null || true
-
-# Phase 37 (D-05/D-06): the strand persistence proof runner boots its OWN CadreNode store
-# (votetorrent-cadre-probe-persistence) — the votetorrent-q2-* glob above does NOT cover it
-# (per project_strand_storage_per_network_isolation memory — a shared handle contaminates
-# count(*) across paths). Reset it too so the strand proof starts from a fresh slate.
-# 37-04 (T-37-15): skip in --solo mode — no strand node boots, so there is nothing to reset.
-if [ "${STRAND_MODE}" = "on" ]; then
+# 48-02: gated on --no-reset. This reset was previously unconditional and sat ABOVE the
+# STRAND_MODE guard below, so even `--solo` wiped every votetorrent-q2-* store before the
+# read phase — which silently defeats any proof premised on pre-existing rows.
+if [ "${RESET_STORES}" = "yes" ]; then
+  echo "[vtest02] Resetting LevelDB stores (D-11) ..."
   adb shell run-as org.votetorrent.authority \
-    find /data/data/org.votetorrent.authority/files -name "votetorrent-cadre-probe-persistence*" -exec rm -rf {} + 2>/dev/null || true
+    find /data/data/org.votetorrent.authority/files -name "votetorrent-q2-*" -exec rm -rf {} + 2>/dev/null || true
+
+  # Phase 37 (D-05/D-06): the strand persistence proof runner boots its OWN CadreNode store
+  # (votetorrent-cadre-probe-persistence) — the votetorrent-q2-* glob above does NOT cover it
+  # (per project_strand_storage_per_network_isolation memory — a shared handle contaminates
+  # count(*) across paths). Reset it too so the strand proof starts from a fresh slate.
+  # 37-04 (T-37-15): skip in --solo mode — no strand node boots, so there is nothing to reset.
+  if [ "${STRAND_MODE}" = "on" ]; then
+    adb shell run-as org.votetorrent.authority \
+      find /data/data/org.votetorrent.authority/files -name "votetorrent-cadre-probe-persistence*" -exec rm -rf {} + 2>/dev/null || true
+  fi
+else
+  echo "[vtest02] --no-reset: preserving existing LevelDB stores (D-11 reset skipped)."
 fi
 
 echo "[vtest02] Force-stopping ${PACKAGE} ..."

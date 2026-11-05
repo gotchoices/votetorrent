@@ -1,0 +1,17 @@
+{
+	"name": "vote-cli",
+	"version": "0.0.1",
+	"private": true,
+	"type": "module",
+	"description": "Node CLI that runs the VoteTorrent Authority and Voter app workflows against the built vote-engine, with no React Native and no Hermes. Each device is a long-lived daemon with its own CadreNode; `vt` commands drive it over local JSON-RPC.",
+	"bin": {
+		"vt": "./bin/vt.mjs"
+	},
+	"scripts": {
+		"vt": "node bin/vt.mjs",
+		"e2e": "node test/e2e.mjs"
+	},
+	"engines": {
+		"node": ">=22"
+	}
+}

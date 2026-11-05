@@ -18,6 +18,7 @@ import type { RootStackParamList } from "../../navigation/types";
 import { useBallotDraft } from "./providers/BallotDraftProvider";
 import type { Option, Question } from "@votetorrent/vote-core";
 import React, { useEffect, useState } from "react";
+import { KeyboardAvoidingScreen } from "../../components/KeyboardAvoidingScreen";
 
 type QuestionType = Question["type"];
 
@@ -208,7 +209,7 @@ export function EditQuestionScreen() {
 	};
 
 	return (
-		<View style={styles.content}>
+		<KeyboardAvoidingScreen>
 			<ScrollView
 				style={[styles.container, { backgroundColor: colors.background }]}
 				contentContainerStyle={{ paddingBottom: 24 }}>
@@ -319,7 +320,7 @@ export function EditQuestionScreen() {
 					disabled={!canSave}
 				/>
 			</Footer>
-		</View>
+		</KeyboardAvoidingScreen>
 	);
 }
 

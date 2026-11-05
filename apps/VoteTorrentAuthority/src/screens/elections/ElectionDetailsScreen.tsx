@@ -1,12 +1,15 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { View, ScrollView, StyleSheet, Share } from "react-native";
 import { ExtendedTheme, useRoute, useTheme, useNavigation, useFocusEffect } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTranslation } from "react-i18next";
+import { peerUnavailableMessage } from "../../utils/peerUnavailableMessage";
 import { ThemedText } from "../../components/ThemedText";
-import type { BallotSummary, ElectionDetails, IElectionEngine, ElectionRevisionSignatureTask, KeyholderInvite } from "@votetorrent/vote-core";
+import type { BallotSummary, ElectionDetails, IElectionEngine, ElectionRevisionSignatureTask } from "@votetorrent/vote-core";
 import { globalStyles } from "../../theme/styles";
 import { InlineError } from "../../components/InlineError";
+import { PeerReadUnavailableNotice } from "../../components/PeerReadUnavailableNotice";
+import { classifyPeerReadFailure } from "../../engines/peer-read-unavailable";
 import { ElectionDetailsBlock } from "./components/ElectionDetailsBlock";
 import { ElectionTimelineList } from "./components/ElectionTimelineList";
 import { ChipButton } from "../../components/ChipButton";
@@ -15,8 +18,8 @@ import { CustomButton } from "../../components/CustomButton";
 import { CustomTextInput } from "../../components/CustomTextInput";
 import { InfoCard } from "../../components/InfoCard";
 import { formatDate } from "../../utils/displayUtils";
-import { getLocalKeyholders } from "../../engines/local-keyholders";
 import type { NavigationProp } from "../../navigation/types";
+import { useKeyboardInset } from "../../hooks/useKeyboardInset";
 
 /**
  * ElectionDetailsScreen — Figma parity #13/#18/#19 per Phase 9 plan 09-14.
@@ -32,86 +35,199 @@ import type { NavigationProp } from "../../navigation/types";
  *       · signing rows per keyholder (SIGN accent / SHARE warning CustomButton pills)
  *       · ADJUST REVISION → EditElectionRevision
  *   6.  Ballot Templates section (one InfoCard per template with Questions subtitle)
- *   7.  More section (collapsible) + filter-authorities input
+ *   7.  Registration Policy entry (InfoCard -> RegistrationPolicy) — Phase 46 (D-01)
+ *   8.  Registrants entry (InfoCard -> RegistrantsList, election filter pre-applied) — Phase 47 plan 47-21 (D-07/D-08)
+ *   8b. Results entry (InfoCard -> ElectionResults: decrypt + validate + tally after the key release)
+ *   9.  More section (collapsible) + filter-authorities input
  */
+type BallotConfirmationState = { locked: boolean; confirmed: boolean };
+
 export default function ElectionDetailsScreen() {
 	const { t } = useTranslation();
-	const { electionEngine } = useRoute().params as { electionEngine: IElectionEngine };
+	// Read through a ref inside the load callbacks: a `t` that changes identity every render must
+	// not become a dependency (it would re-create the callbacks and re-fire the focus effects).
+	const tRef = useRef(t);
+	tRef.current = t;
+	const keyboardInset = useKeyboardInset();
+	const { electionEngine, authorityName } = useRoute().params as { electionEngine: IElectionEngine; authorityName?: string };
 	const [electionDetails, setElectionDetails] = useState<ElectionDetails | null>(null);
 	const [ballots, setBallots] = useState<BallotSummary[]>([]);
-	// D-09: confirmation state per ballot — { locked, confirmed } keyed by ballot id
-	const [ballotConfirmationStates, setBallotConfirmationStates] = useState<Record<string, { locked: boolean; confirmed: boolean }>>({});
+	// D-09: confirmation state per ballot — { locked, confirmed } keyed by ballot id. An entry is
+	// undefined when the state could not be read from the network and was never read before
+	// (WR-01): that ballot shows no badge, never "Proposed".
+	const [ballotConfirmationStates, setBallotConfirmationStates] = useState<Record<string, BallotConfirmationState | undefined>>({});
+	const ballotConfirmationStatesRef = useRef(ballotConfirmationStates);
+	ballotConfirmationStatesRef.current = ballotConfirmationStates;
+	// WR-01: the ballots read goes through the same peer-read classifier as the details read.
+	// ballotsRead: a ballots read has succeeded at least once (the notice variant is 'stale' then,
+	// 'unavailable' before).
+	const [ballotsRead, setBallotsRead] = useState(false);
+	const [ballotsPeerUnavailable, setBallotsPeerUnavailable] = useState(false);
 	const [moreOpen, setMoreOpen] = useState(false);
 	const [errorMessage, setErrorMessage] = useState("");
+	// REVIEW/IN-11: the details read's own failure. Separate from errorMessage because the ballots
+	// reload clears errorMessage at its start and would otherwise erase it, leaving a first-open
+	// failure spinning on Loading with no way out. Cleared only by a successful details read or a
+	// Try Again start.
+	const [detailsError, setDetailsError] = useState("");
+	// Gap 7: a details read that could not reach the other devices. Kept apart from errorMessage so
+	// the ballots focus effect (which clears errorMessage) cannot erase it. The notice variant is
+	// derived at render: 'stale' while the details this device last read are still shown,
+	// 'unavailable' when nothing has been read yet.
+	const [peerUnavailable, setPeerUnavailable] = useState(false);
+	// REVIEW/IN-05: everything below is the last read FOR one election. When the route moves to a
+	// different election (a different engine), the previous election's reads are dropped in the
+	// same render, so they can never show under the new one. (The route carries the election
+	// engine, not an election id; the engine is the subject.)
+	const [readSubject, setReadSubject] = useState(electionEngine);
+	if (readSubject !== electionEngine) {
+		setReadSubject(electionEngine);
+		setElectionDetails(null);
+		setBallots([]);
+		setBallotConfirmationStates({});
+		setBallotsRead(false);
+		setBallotsPeerUnavailable(false);
+		setPeerUnavailable(false);
+		setErrorMessage("");
+		setDetailsError("");
+	}
+	const mountedRef = useRef(true);
+	useEffect(() => {
+		mountedRef.current = true;
+		return () => {
+			mountedRef.current = false;
+		};
+	}, []);
+	// WR-02: a cohort-unreachable read can take a long time to fail while Try Again (or a refocus)
+	// starts another. Each read takes a sequence number and only the latest of its kind may write,
+	// so a slow earlier failure cannot re-raise the notice over fresh data, and a slow earlier
+	// success cannot overwrite a newer one.
+	const detailsReadSeqRef = useRef(0);
+	const ballotsReadSeqRef = useRef(0);
 	const { colors } = useTheme() as ExtendedTheme;
 	const navigation = useNavigation<NavigationProp>();
 	const insets = useSafeAreaInsets();
 
-	useEffect(() => {
-		const loadElectionDetails = async () => {
+	// UAT 62 M: re-read on every focus, not once per mount. The keyholder cards are derived from
+	// these details, so a send or a same-device accept that happened while this screen sat under
+	// the stack never reached them until the screen was rebuilt.
+	const loadElectionDetails = useCallback(
+		async (isCallerActive: () => boolean) => {
+			const seq = ++detailsReadSeqRef.current;
+			const isActive = () => seq === detailsReadSeqRef.current && isCallerActive();
 			try {
 				if (electionEngine) {
+					// D-27: keyholders come from the engine only — no AsyncStorage merge.
 					const details = await electionEngine.getElectionDetails();
-					// TEMP scaffold (delete with cadre P2P invite flow): the engine does
-					// not persist keyholders yet, so merge locally-stored names into the
-					// revision projections so the count + cards render. See local-keyholders.ts.
-					const names = await getLocalKeyholders(details.election.id);
-					if (names.length) {
-						// current is ElectionRevision -> InviteStatus<SentKeyholderInvite>[]
-						if (details.current.keyholders.length === 0) {
-							details.current.keyholders = names.map((name) => ({ invite: { name } }));
-						}
-						// proposed.proposed is ElectionRevisionInit -> KeyholderInvite[]
-						if (details.proposed && details.proposed.proposed.keyholders.length === 0) {
-							details.proposed.proposed.keyholders = names.map(
-								(name): KeyholderInvite => ({ name, type: "k", expiration: "0", inviteKey: "", inviteSignature: "" })
-							);
-						}
+					if (isActive()) {
+						setElectionDetails(details);
+						setPeerUnavailable(false);
+						setDetailsError("");
 					}
-					setElectionDetails(details);
 				}
 			} catch (error) {
-				console.warn("Error loading election details:", error);
-				setErrorMessage(error instanceof Error ? error.message : String(error));
+				const peerFailure = classifyPeerReadFailure(error);
+				if (peerFailure) {
+					// Gap 7 (D-23/D-39): the network could not answer, which is not the same as the
+					// election being absent. Keep what this device already read; never surface the
+					// engine message (it names block ids). Reason token only in the log.
+					console.warn("[election-details] peer read unavailable:", peerFailure.reason);
+					if (isActive()) setPeerUnavailable(true);
+					return;
+				}
+				console.warn("Error loading election details:", error instanceof Error ? error.name : typeof error);
+				if (isActive()) setDetailsError(peerUnavailableMessage(error, tRef.current, "read") ?? tRef.current("electionDetailsLoadFailed"));
 			}
-		};
+		},
+		[electionEngine]
+	);
 
-		loadElectionDetails();
-	}, [electionEngine]);
+	useFocusEffect(
+		useCallback(() => {
+			let active = true;
+			loadElectionDetails(() => active);
+			return () => {
+				active = false;
+			};
+		}, [loadElectionDetails])
+	);
+
+	const retryElectionDetails = useCallback(() => {
+		setDetailsError("");
+		loadElectionDetails(() => mountedRef.current);
+	}, [loadElectionDetails]);
 
 	// G2/G12: Refresh ballot list on every focus so newly proposed templates appear
 	// immediately on return from CreateBallot/EditBallot.
 	// D-09: Also refresh confirmation states on focus so Proposed/Confirmed badge
 	// updates when the user returns from the Tasks inbox after signing.
+	const loadBallots = useCallback(
+		async (isCallerActive: () => boolean) => {
+			const seq = ++ballotsReadSeqRef.current;
+			const isActive = () => seq === ballotsReadSeqRef.current && isCallerActive();
+			setErrorMessage(""); // clear stale error before reload so transient failures don't persist
+			try {
+				if (electionEngine) {
+					const summaries = await electionEngine.getBallots();
+					if (!isActive()) return;
+					setBallots(summaries);
+					setBallotsRead(true);
+					// D-09: fetch confirmation state for each ballot to drive the badge.
+					// WR-01: a state the network could not answer keeps the badge this device last
+					// read (or none), never the { locked: false, confirmed: false } "Proposed" default.
+					const lastRead = ballotConfirmationStatesRef.current;
+					let peerReason: string | undefined;
+					const stateEntries = await Promise.all(
+						summaries.map(async (b) => {
+							try {
+								const cs = await electionEngine.getBallotConfirmationState(b.id);
+								return [b.id, cs] as const;
+							} catch (e) {
+								const peerFailure = classifyPeerReadFailure(e);
+								if (peerFailure) {
+									peerReason = peerFailure.reason;
+									return [b.id, lastRead[b.id]] as const;
+								}
+								return [b.id, { locked: false, confirmed: false }] as const;
+							}
+						})
+					);
+					if (!isActive()) return;
+					setBallotConfirmationStates(Object.fromEntries(stateEntries));
+					if (peerReason) {
+						console.warn("[election-details] ballots peer read unavailable:", peerReason);
+					}
+					setBallotsPeerUnavailable(peerReason !== undefined);
+				}
+			} catch (error) {
+				const peerFailure = classifyPeerReadFailure(error);
+				if (peerFailure) {
+					// WR-01: keep the ballots this device already read; never surface the engine
+					// message (it names block ids). Reason token only in the log.
+					console.warn("[election-details] ballots peer read unavailable:", peerFailure.reason);
+					if (isActive()) setBallotsPeerUnavailable(true);
+					return;
+				}
+				console.warn("Error loading ballots:", error instanceof Error ? error.name : typeof error);
+				if (isActive()) setErrorMessage(peerUnavailableMessage(error, tRef.current, "read") ?? tRef.current("electionBallotsLoadFailed"));
+			}
+		},
+		[electionEngine]
+	);
+
 	useFocusEffect(
 		useCallback(() => {
-			const loadBallots = async () => {
-				setErrorMessage(""); // clear stale error before reload so transient failures don't persist
-				try {
-					if (electionEngine) {
-						const summaries = await electionEngine.getBallots();
-						setBallots(summaries);
-						// D-09: fetch confirmation state for each ballot to drive the badge.
-						const stateEntries = await Promise.all(
-							summaries.map(async (b) => {
-								try {
-									const cs = await electionEngine.getBallotConfirmationState(b.id);
-									return [b.id, cs] as const;
-								} catch {
-									return [b.id, { locked: false, confirmed: false }] as const;
-								}
-							})
-						);
-						setBallotConfirmationStates(Object.fromEntries(stateEntries));
-					}
-				} catch (error) {
-					console.warn("Error loading ballots:", error);
-					setErrorMessage(error instanceof Error ? error.message : String(error));
-				}
+			let active = true;
+			loadBallots(() => active);
+			return () => {
+				active = false;
 			};
-			loadBallots();
-		}, [electionEngine])
+		}, [loadBallots])
 	);
+
+	const retryBallots = useCallback(() => {
+		loadBallots(() => mountedRef.current);
+	}, [loadBallots]);
 
 	const handleShare = async (election: ElectionDetails["election"], proposed: ElectionDetails["proposed"], current: ElectionDetails["current"]) => {
 		try {
@@ -123,14 +239,30 @@ export default function ElectionDetailsScreen() {
 			].join("\n");
 			await Share.share({ message });
 		} catch (err) {
-			setErrorMessage(err instanceof Error ? err.message : String(err));
+			// The OS share-sheet rejection text is not ours to render.
+			setErrorMessage(tRef.current("electionShareFailed"));
 		}
 	};
 
 	if (!electionDetails) {
 		return (
 			<View style={styles.container}>
-				<ThemedText>{t("loading")}</ThemedText>
+				{peerUnavailable ? (
+					<PeerReadUnavailableNotice variant="unavailable" onRetry={retryElectionDetails} />
+				) : detailsError ? (
+					<View testID="election-details-load-error">
+						<InlineError message={detailsError} />
+						<CustomButton
+							testID="election-details-retry"
+							title={t("loadRetryButton")}
+							icon="rotate"
+							size="thin"
+							onPress={retryElectionDetails}
+						/>
+					</View>
+				) : (
+					<ThemedText>{t("loading")}</ThemedText>
+				)}
 			</View>
 		);
 	}
@@ -144,16 +276,18 @@ export default function ElectionDetailsScreen() {
 	return (
 		<ScrollView
 			style={styles.container}
-			contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}>
+			contentContainerStyle={{ paddingBottom: insets.bottom + 24 + keyboardInset }}>
 
 			{/* SC6 error state — surfaces load failures inline (D-19) */}
 			<View style={styles.section}>
 				<InlineError message={errorMessage} />
+				<InlineError message={detailsError} />
+				{peerUnavailable ? <PeerReadUnavailableNotice variant="stale" onRetry={retryElectionDetails} /> : null}
 			</View>
 
 			{/* 1. Immutable core block (title + Authority/Type/Date + Core Signature) */}
 			<View style={styles.section}>
-				<ElectionDetailsBlock electionDetails={electionDetails} />
+				<ElectionDetailsBlock electionDetails={electionDetails} authorityName={authorityName} />
 			</View>
 
 			{/* 2. Current revision section — rendered ONCE here */}
@@ -195,7 +329,7 @@ export default function ElectionDetailsScreen() {
 							navigation.navigate("EditBallot", {
 								electionId: election.id,
 								electionTitle: election.title,
-								electionDate: formatDate(election.revisionDeadline),
+								electionDate: formatDate(election.date),
 								ballotId: ballots[0].id,
 								electionEngine,
 								readOnly: true,
@@ -220,7 +354,17 @@ export default function ElectionDetailsScreen() {
 					icon="paper-plane"
 					backgroundColor={colors.accent}
 					size="thin"
-					onPress={() => navigation.navigate("KeyholderInvitation", { mode: "send", electionEngine })}
+					// UAT 62 L1: this INVITE used to open the send form with an empty Name. When exactly
+					// one keyholder has not accepted yet it is the obvious invitee, so prefill it (the
+					// accept is matched to the keyholder card by that name). Otherwise leave it blank.
+					onPress={() => {
+						const pending = current.keyholders.filter((k) => !k.result);
+						navigation.navigate("KeyholderInvitation", {
+							mode: "send",
+							electionEngine,
+							keyholder: pending.length === 1 ? pending[0] : undefined,
+						});
+					}}
 				/>
 			</View>
 
@@ -329,24 +473,34 @@ export default function ElectionDetailsScreen() {
 			{/* 6. Ballot Templates section */}
 			<View style={styles.section}>
 				<ThemedText type="title">{t("ballotTemplates")}</ThemedText>
-				{ballots.length > 0 ? (
+				{/* WR-01: a ballots read the network could not answer is not "no ballot yet". */}
+				{ballotsPeerUnavailable ? (
+					<PeerReadUnavailableNotice variant={ballotsRead ? "stale" : "unavailable"} onRetry={retryBallots} />
+				) : null}
+				{ballotsPeerUnavailable && !ballotsRead ? null : ballots.length > 0 ? (
 					ballots.map((ballot) => {
 						// D-09: render a Proposed/Confirmed status badge driven by getBallotConfirmationState.
+						// WR-01: no badge while the state is unknown (not read, network unreachable).
 						const cs = ballotConfirmationStates[ballot.id];
-						const statusLabel = cs?.confirmed
-							? t("statusConfirmed")
-							: t("statusProposed");
+						const statusLabel = !cs
+							? undefined
+							: cs.confirmed
+								? t("statusConfirmed")
+								: cs.locked
+									? t("statusAwaitingConfirmation")
+									: t("statusProposed");
 						return (
 							<InfoCard
 								key={ballot.id}
-								title={ballot.authorityId || t("ballotTemplate")}
+								// The row names the ballot, never the authority's raw id (UAT 62 gap 4 item 4).
+								title={ballot.description?.trim() || t("ballotTemplate")}
 								subtitle={statusLabel}
 								icon="chevron-right"
 								onPress={() =>
 									navigation.navigate("EditBallot", {
 										electionId: election.id,
 										electionTitle: election.title,
-										electionDate: formatDate(election.revisionDeadline),
+										electionDate: formatDate(election.date),
 										ballotId: ballot.id,
 										electionEngine,
 									} as any)
@@ -366,7 +520,7 @@ export default function ElectionDetailsScreen() {
 								navigation.navigate("CreateBallot", {
 									electionId: election.id,
 									electionTitle: election.title,
-									electionDate: formatDate(election.revisionDeadline),
+									electionDate: formatDate(election.date),
 									electionEngine,
 								} as any)
 							}
@@ -375,7 +529,68 @@ export default function ElectionDetailsScreen() {
 				)}
 			</View>
 
-			{/* 7. More section (collapsible) + filter-authorities input */}
+			{/* 7. Registration Policy entry — Phase 46 (D-01): one InfoCard placed after
+			    Ballot Templates and before More, navigating to the single RegistrationPolicy
+			    route (Fields/Disclosure/Attestation sections). */}
+			<View style={styles.section} testID="election-details-registration-policy-entry">
+				<InfoCard
+					title={t("registrationPolicyEntryTitle")}
+					icon="chevron-right"
+					onPress={() =>
+						navigation.navigate("RegistrationPolicy", {
+							electionEngine,
+							electionId: election.id,
+							authorityId: election.authorityId,
+						} as any)
+					}
+				/>
+			</View>
+
+			{/* 8. Registrants entry — Phase 47 plan 47-21 (D-07/D-08): this IS the
+			    election roster. It navigates to the same RegistrantsList route the
+			    authority-wide roster uses (AuthorityDetailsScreen), with an
+			    election-scoped filter pre-applied below. There is deliberately no
+			    second roster screen, no second engine method and no second route.
+			    Sits beside Phase 46's Registration Policy entry because both are
+			    election-scoped registration surfaces — the policy defines what is
+			    collected, the roster shows who registered under it. The election's
+			    title is passed because RegistrantsListScreen interpolates it into
+			    its header title; it is public election metadata already rendered
+			    on this screen — the ONLY non-identifier in any Phase 47 route
+			    param (T-47-21-01). */}
+			<View style={styles.section} testID="election-details-registrants-entry">
+				<InfoCard
+					title={t("registrantListScreenTitle")}
+					icon="chevron-right"
+					// NavigationProp (navigation/types.ts) already types params
+					// loosely, so the type-escape cast the two neighbouring calls
+					// carry adds nothing here — it is deliberately omitted.
+					onPress={() =>
+						navigation.navigate("RegistrantsList", {
+							authorityId: election.authorityId,
+							electionFilter: { electionId: election.id, electionTitle: election.title },
+						})
+					}
+				/>
+			</View>
+
+			{/* 8b. Results entry: decrypt + validate + tally on this device once enough keyholders have released
+			    their shares (the results screen explains the locked state before that). */}
+			<View style={styles.section} testID="election-details-results-entry">
+				<InfoCard
+					title={t("resultsEntryTitle")}
+					icon="chevron-right"
+					onPress={() =>
+						navigation.navigate("ElectionResults", {
+							electionId: election.id,
+							electionTitle: election.title,
+							authorityId: election.authorityId,
+						})
+					}
+				/>
+			</View>
+
+			{/* 9. More section (collapsible) + filter-authorities input */}
 			<View style={styles.section}>
 				<ChipButton label={t("more")} onPress={() => setMoreOpen((v) => !v)} />
 				{moreOpen && (

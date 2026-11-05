@@ -1,0 +1,30 @@
+# Dismiss React Native's LogBox in a DEBUG build.
+#
+# Why: LogBox's collapsed toast sits 20dp above the bottom of the screen, 48dp tall, so it covers
+# the bottom tab bar and any sticky footer button (the Authority's CREATE). A tap aimed at those
+# lands on the toast and opens the inspector instead. The Authority logs a deliberate
+# console.error on every cold start, so the toast is expected there.
+#
+# LogBox's own ids are `nativeID`s, which Android does not expose as resource-ids, so this matches
+# text: the toast's count badge reads "!" for a single log, and the open inspector shows
+# "Dismiss" / "Minimize" footer buttons. A badge with a NUMBER (2+ logs) is not matched here,
+# because bare digits also appear in the app; open it by hand or rely on the inspector branch.
+appId: ${APP_ID}
+---
+- runFlow:
+    when:
+      visible:
+        text: "!"
+    commands:
+      - tapOn:
+          text: "!"
+          retryTapIfNoChange: false
+- repeat:
+    times: 20
+    while:
+      visible:
+        text: "Minimize"
+    commands:
+      - tapOn:
+          text: "Dismiss"
+          retryTapIfNoChange: false

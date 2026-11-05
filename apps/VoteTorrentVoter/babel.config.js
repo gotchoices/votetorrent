@@ -7,5 +7,14 @@ module.exports = {
   // packages/vote-engine/node_modules/@peculiar/utils/build/esm/encoding/index.js) —
   // a cold-start bundle 500 that the jest suite never exercises (own transform). Listing
   // the plugin explicitly guarantees it runs before Metro's import-export transform.
-  plugins: ['@babel/plugin-transform-export-namespace-from'],
+  plugins: [
+    '@babel/plugin-transform-export-namespace-from',
+    // @optimystic/db-p2p 0.27.0 ships a static class block (`static { ... }`) in
+    // dist/src/storage/block-latch.js. @react-native/babel-preset does not enable the
+    // transform for it, so the RELEASE bundle build dies with "Static class blocks are
+    // not enabled" — `yarn build` -> :app:createBundleReleaseJsAndAssets FAILED. Nothing
+    // in the jest suite bundles node_modules, so no test sees this. Listed explicitly for
+    // the same reason as the export-namespace plugin above.
+    '@babel/plugin-transform-class-static-block',
+  ],
 };

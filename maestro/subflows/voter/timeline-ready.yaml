@@ -1,0 +1,14 @@
+# Open the Timeline tab and wait until the dev seed's election timeline is on screen.
+# env: APP_ID
+appId: ${APP_ID}
+---
+- runFlow:
+    file: open-tab.yaml
+    env:
+      TAB: timeline
+- extendedWaitUntil:
+    visible:
+      id: "timeline-header-title"
+    timeout: 120000
+- assertVisible:
+    id: "timeline-rail"

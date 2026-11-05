@@ -41,11 +41,11 @@ import { AssociationEngine } from '../src/association/association-engine.js'
 import { RegistrationEngine } from '../src/registration/registration-engine.js'
 import { PlayIntegrityVerifier } from '../src/association/play-integrity-verifier.js'
 import type { IIntegrityKeyProvider } from '../src/association/key-provider.js'
-import { createTestNetwork, addTestAuthority, addTestElection } from './fixtures/test-context.js'
-import { randomTestKeyPair } from './fixtures/keys.js'
+import { createTestNetwork, addTestAuthority, addTestElection, testKeyPairFor } from './fixtures/test-context.js'
 import { generateSyntheticJweKeyMaterial, SYNTHETIC_EXPECTED_APP_IDENTITY } from './fixtures/attestation/synthetic-jwe.js'
 import { generateTestRootCa } from './fixtures/attestation/test-root-ca.js'
 import { buildSyntheticDeviceAttestation } from './fixtures/attestation/synthetic-device-attestation.js'
+import { generateAndroidDeviceKeyPair } from './fixtures/attestation/synthetic-key-description.js'
 import type { TestAuthorityContext } from './fixtures/test-context.js'
 import type { EngineContext } from '../src/types.js'
 
@@ -56,7 +56,7 @@ import type { EngineContext } from '../src/types.js'
 
 /** Build a real secp256k1 sign callback (@noble/curves v2 defaults — prehash:true). */
 function makeRealSigner (userId: string): { sign: (digest: Uint8Array) => Promise<Signature> } {
-  const { privateHex, publicHex } = randomTestKeyPair()
+  const { privateHex, publicHex } = testKeyPairFor(userId)
   const privBytes = hexToBytes(privateHex)
   const sign = async (digest: Uint8Array): Promise<Signature> => {
     const sig = secp256k1.sign(digest, privBytes) // v2 default: prehash:true
@@ -78,7 +78,6 @@ function nextDeviceKey (): string {
 }
 
 const FUTURE_REGISTRANT_EXPIRATION = Date.now() + 365 * 86_400_000
-const FUTURE_CHALLENGE_EXPIRATION = new Date(Date.now() + 10 * 60_000).toISOString()
 
 function makeDeviceAttestation (overrides?: Partial<DeviceAttestation>): DeviceAttestation {
   deviceSeq += 1
@@ -153,7 +152,7 @@ describe('associate() — election-terms attestation policy gate (D-14c, Assumpt
 
       const engine = new AssociationEngine(auth.ctx, throwIfCalledVerifier)
       const deviceKey = nextDeviceKey()
-      const challenge = await engine.issueAttestationChallenge(registrantId, deviceKey, FUTURE_CHALLENGE_EXPIRATION, sign, electionId)
+      const challenge = await engine.issueAttestationChallenge(registrantId, deviceKey, sign, electionId)
       const attestation = makeDeviceAttestation()
 
       // Resolving (not throwing) is itself the proof — the sentinel verifier would have
@@ -174,9 +173,14 @@ describe('associate() — election-terms attestation policy gate (D-14c, Assumpt
       const { verifier, jweKeys, testRoot } = await buildRealVerifier()
 
       const engine = new AssociationEngine(auth.ctx, verifier)
-      const deviceKey = nextDeviceKey()
-      const challenge = await engine.issueAttestationChallenge(registrantId, deviceKey, FUTURE_CHALLENGE_EXPIRATION, sign, electionId)
-      const attestation = await buildSyntheticDeviceAttestation({ challenge, jweKeys, testRoot })
+      // 51-02: verifyKeyAttestation's leaf-pubkey binding check (4b-2) requires
+      // the leaf certificate's embedded public key to equal challenge.deviceKey
+      // — use a real generated keypair + its SPKI-base64 encoding, and embed
+      // that SAME keypair in the synthetic chain, rather than an opaque
+      // `nextDeviceKey()` string.
+      const { keyPair, deviceKeySpkiBase64: deviceKey } = await generateAndroidDeviceKeyPair()
+      const challenge = await engine.issueAttestationChallenge(registrantId, deviceKey, sign, electionId)
+      const attestation = await buildSyntheticDeviceAttestation({ challenge, jweKeys, testRoot, overrides: { leafKeyPair: keyPair } })
 
       await engine.associate({ registrantId, deviceKey, nonce: challenge.nonce, attestation }, sign)
 
@@ -193,7 +197,7 @@ describe('associate() — election-terms attestation policy gate (D-14c, Assumpt
 
       const engine = new AssociationEngine(auth.ctx, verifier)
       const deviceKey = nextDeviceKey()
-      const challenge = await engine.issueAttestationChallenge(registrantId, deviceKey, FUTURE_CHALLENGE_EXPIRATION, sign, electionId)
+      const challenge = await engine.issueAttestationChallenge(registrantId, deviceKey, sign, electionId)
       const attestation = await buildSyntheticDeviceAttestation({
         challenge,
         jweKeys,
@@ -217,7 +221,7 @@ describe('associate() — election-terms attestation policy gate (D-14c, Assumpt
 
       const engine = new AssociationEngine(auth.ctx, verifier)
       const deviceKey = nextDeviceKey()
-      const challenge = await engine.issueAttestationChallenge(registrantId, deviceKey, FUTURE_CHALLENGE_EXPIRATION, sign, electionId)
+      const challenge = await engine.issueAttestationChallenge(registrantId, deviceKey, sign, electionId)
       const attestation = await buildSyntheticDeviceAttestation({
         challenge,
         jweKeys,
@@ -241,7 +245,7 @@ describe('associate() — election-terms attestation policy gate (D-14c, Assumpt
 
       const engine = new AssociationEngine(auth.ctx, verifier)
       const deviceKey = nextDeviceKey()
-      const challenge = await engine.issueAttestationChallenge(registrantId, deviceKey, FUTURE_CHALLENGE_EXPIRATION, sign, electionId)
+      const challenge = await engine.issueAttestationChallenge(registrantId, deviceKey, sign, electionId)
       const attestation = await buildSyntheticDeviceAttestation({
         challenge,
         jweKeys,
@@ -266,7 +270,7 @@ describe('associate() — election-terms attestation policy gate (D-14c, Assumpt
 
       const engine = new AssociationEngine(auth.ctx, throwIfCalledVerifier)
       const deviceKey = nextDeviceKey()
-      const challenge = await engine.issueAttestationChallenge(registrantId, deviceKey, FUTURE_CHALLENGE_EXPIRATION, sign, electionId)
+      const challenge = await engine.issueAttestationChallenge(registrantId, deviceKey, sign, electionId)
       const attestation = makeDeviceAttestation()
 
       let threw = false
@@ -293,7 +297,7 @@ describe('associate() — D-14e minimal AssociationPrivate + device-uniqueness (
 
     const engine = new AssociationEngine(auth.ctx, throwIfCalledVerifier)
     const deviceKey = nextDeviceKey()
-    const challenge = await engine.issueAttestationChallenge(registrantId, deviceKey, FUTURE_CHALLENGE_EXPIRATION, sign, electionId)
+    const challenge = await engine.issueAttestationChallenge(registrantId, deviceKey, sign, electionId)
     // Non-attested attestation shape: deviceId populated, no cert-chain/platform material —
     // still all that's needed for the D-06 device-uniqueness check (keyed on DeviceId).
     const attestation = makeDeviceAttestation({ certificateChain: [], platformDetails: undefined })
@@ -325,14 +329,14 @@ describe('associate() — D-14e minimal AssociationPrivate + device-uniqueness (
     const sharedDeviceId = `assoc-policy-shared-device-${Date.now()}`
 
     const deviceKeyA = nextDeviceKey()
-    const challengeA = await engine.issueAttestationChallenge(registrantA, deviceKeyA, FUTURE_CHALLENGE_EXPIRATION, sign, electionId)
+    const challengeA = await engine.issueAttestationChallenge(registrantA, deviceKeyA, sign, electionId)
     await engine.associate(
       { registrantId: registrantA, deviceKey: deviceKeyA, nonce: challengeA.nonce, attestation: makeDeviceAttestation({ deviceId: sharedDeviceId, certificateChain: [], platformDetails: undefined }) },
       sign
     )
 
     const deviceKeyB = nextDeviceKey()
-    const challengeB = await engine.issueAttestationChallenge(registrantB, deviceKeyB, FUTURE_CHALLENGE_EXPIRATION, sign, electionId)
+    const challengeB = await engine.issueAttestationChallenge(registrantB, deviceKeyB, sign, electionId)
     let threw = false
     try {
       await engine.associate(

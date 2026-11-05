@@ -1,0 +1,1219 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VoteTorrent Public Election View — prototype</title>
+<style>
+/* ============================================================================
+   PROTOTYPE CHROME — the rail, the width picker, and the stage the app renders
+   into. Deliberately a SEPARATE stylesheet from the app's: the app renders
+   inside an <iframe> that receives only the #app-style sheet below, so no rule
+   here can reach the app surface and no app rule can restyle the rail.
+
+   The iframe is not decoration. A media query reads the VIEWPORT — clamping a
+   div's max-width would never fire one — and the chart primitives pick their
+   tick density from their own container's width (at most 4 ticks below 400px,
+   at most 6 at or above it). An iframe has a viewport of its own, so the width
+   buttons resize the real page rather than a box drawn around it.
+
+   These tokens are a COPY of the app's, for the rail's own use. The app's
+   authoritative set lives in the #app-style sheet below.
+
+   NO LIGHT THEME, ON PURPOSE. packages/ui-web/src/tokens.css declares ONE
+   :root block and nothing anywhere in the public app or ui-web reads
+   prefers-color-scheme. The page is dark in every browser, so this file has no
+   theme toggle: a light variant here would be a palette the app does not have.
+   ========================================================================= */
+:root{
+  --bg:#0d0f14; --surface:#151922; --surface2:#1b202b; --border:#2a3040;
+  --text:#e9ecf2; --muted:#8d97a8; --primary:#3b82f6;
+  --radius:10px;
+  --space-xs:4px; --space-sm:8px; --space-md:16px; --space-lg:24px;
+  --font-label-size:12px; --font-heading-size:16px;
+}
+html,body{height:100%;margin:0;padding:0}
+body{background:#050609;color:var(--text);font-size:14px;line-height:1.5;
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif}
+#proto{display:flex;min-height:100vh;align-items:stretch}
+#rail{flex:0 0 264px;background:#07080b;border-right:1px solid var(--border);
+  padding:var(--space-md);overflow-y:auto;max-height:100vh;position:sticky;top:0;box-sizing:border-box}
+#rail h1{margin:0 0 var(--space-xs);font-size:var(--font-heading-size);font-weight:600}
+#rail .sub{margin:0 0 var(--space-md);color:var(--muted);font-size:var(--font-label-size);line-height:1.4}
+#rail .grp{margin:var(--space-md) 0 var(--space-xs);color:var(--muted);
+  font-size:var(--font-label-size);text-transform:uppercase;letter-spacing:.06em}
+#rail button.r{display:block;width:100%;text-align:left;background:transparent;color:var(--text);
+  border:1px solid transparent;border-radius:var(--radius);padding:6px var(--space-sm);
+  font:inherit;font-size:13px;cursor:pointer;margin-bottom:2px}
+#rail button.r:hover{background:#12151d}
+#rail button.r[aria-current="true"]{border-color:var(--primary);background:#12151d}
+#rail .note{margin-top:var(--space-lg);padding-top:var(--space-md);border-top:1px solid var(--border);
+  color:var(--muted);font-size:11px;line-height:1.5}
+#rail .note p{margin:0 0 var(--space-sm)}
+#rail code{font-family:ui-monospace,monospace;color:var(--text);overflow-wrap:anywhere}
+#widths{display:flex;gap:var(--space-xs);margin-bottom:var(--space-sm)}
+#widths button{flex:1;background:#12151d;color:var(--muted);border:1px solid var(--border);
+  border-radius:var(--radius);font:inherit;font-size:11px;padding:4px 0;cursor:pointer}
+#widths button[aria-pressed="true"]{color:var(--primary);border-color:var(--primary)}
+#stagewrap{flex:1;min-width:0;display:flex;flex-direction:column;background:#050609;padding:var(--space-md)}
+#stagelabel{color:var(--muted);font-size:11px;margin-bottom:var(--space-sm);
+  font-family:ui-monospace,monospace;overflow-wrap:anywhere}
+#stage{flex:1;min-height:0;width:100%;margin:0 auto;display:block;background:var(--bg);
+  border:1px solid var(--border);border-radius:var(--radius);box-sizing:border-box}
+@media (max-width:820px){
+  #proto{flex-direction:column}
+  #rail{flex:none;max-height:none;position:static;border-right:0;border-bottom:1px solid var(--border)}
+  #stage{min-height:80vh}
+}
+</style>
+
+<style id="app-style">
+/* ============================================================================
+   VoteTorrent Public Election View — throwaway clickable prototype.
+
+   The no-login page any visitor opens from a shared link. Companion to
+   design/authority-dashboard-prototype.html and design/voter-app-prototype.html;
+   same idiom — ONE self-contained file, no build, tokens and class names
+   transcribed from the real source rather than reinvented.
+
+   TRANSCRIBED FROM (source of truth — if these drift, this file is wrong):
+     packages/ui-web/src/tokens.css          — every :root custom property,
+                                               including the two chart series tokens
+     packages/ui-web/src/components.css      — .pv-disclosure .lifecycle-pill
+                                               .dt-toggle-group and the .vt-chart*
+                                               rules the two public charts mount
+     apps/VoteTorrentPublic/src/app.css      — .public-app__* .election* .skeleton
+                                               .status-banner* .staleness-banner*
+                                               .live-update-badge .fact-* (incl.
+                                               .fact-card__chart) .registrant-roll*
+                                               .public-caveat* .dt-toggle .dt-body
+   Copy is verbatim from packages/ui-web/src/copy.js. The fact model, its group
+   order and its per-phase membership are transcribed from
+   packages/ui-web/src/lifecycle/facts.js — including the six gap cards, which
+   are facts the system records NOWHERE and which this page is required to show
+   as absences rather than hide. (facts.js names seven gap letters, A–G; D is
+   the key release, which is FILLED and renders as an ordinary fact card.)
+
+   TWO RULES THIS PAGE'S CSS ENCODES, PRESERVED HERE ON PURPOSE:
+   1. NO MOTION except one opt-in fade on .live-update-badge, inside a
+      prefers-reduced-motion: no-preference block. .skeleton is deliberately
+      still and dashed — a shimmer would assert a fetch that is not happening.
+      The two chart mounts add NO transition either: a public chart redraws
+      silently, and its bars are drawn with Recharts' animation switched off.
+   2. Every tone carries a WORD as well as a colour. The tone chip's text is
+      --text, not the tone colour, because the "done" tone fails 4.5:1 at 12px.
+      Chart text follows the same rule: axis text is --muted, the count label
+      is --text, and no text ever wears the series hue.
+   ========================================================================= */
+
+/* ---- tokens.css, verbatim ---- */
+:root{
+  --bg:#0d0f14; --surface:#151922; --surface2:#1b202b; --border:#2a3040;
+  --text:#e9ecf2; --muted:#8d97a8; --primary:#3b82f6;
+  --ok:#22c55e; --warn:#f59e0b; --fail:#ef4444; --done:#64748b;
+  --chart-series-1:#3987e5; --chart-series-2:#d95926;
+  --radius:10px;
+  --space-xs:4px; --space-sm:8px; --space-md:16px; --space-lg:24px;
+  --space-xl:32px; --space-2xl:48px; --space-3xl:64px;
+  --font-body-size:14px; --font-body-weight:400; --font-body-line-height:1.5;
+  --font-label-size:12px; --font-label-weight:400; --font-label-line-height:1.4;
+  --font-heading-size:16px; --font-heading-weight:600; --font-heading-line-height:1.2;
+  --font-display-size:20px; --font-display-weight:600; --font-display-line-height:1.2;
+  --font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+}
+html,body,#root{height:100%;margin:0;padding:0}
+body{
+  background:var(--bg);color:var(--text);font-family:var(--font-family);
+  font-size:var(--font-body-size);font-weight:var(--font-body-weight);
+  line-height:var(--font-body-line-height);
+}
+:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
+button,a[role="button"]{min-height:32px}
+
+/* ---- app.css: page chrome ---- */
+.public-app{display:flex;flex-direction:column;min-height:100%;padding:var(--space-md);
+  gap:var(--space-lg);background:var(--bg)}
+.public-app__header{padding:var(--space-md);background:var(--surface);border:1px solid var(--border);
+  border-radius:var(--radius);font-size:var(--font-display-size);color:var(--text)}
+.public-app__main{flex:1;display:flex;flex-direction:column;gap:var(--space-md);
+  padding:var(--space-md);color:var(--text)}
+.public-app__footer{padding:var(--space-md);color:var(--muted)}
+
+/* ---- app.css: election body ---- */
+.election,.election-unreadable{display:flex;flex-direction:column;gap:var(--space-sm)}
+.election-address{color:var(--muted);font-size:var(--font-label-size)}
+.election-unreadable{padding:var(--space-md);background:var(--surface);
+  border:1px solid var(--border);border-radius:var(--radius)}
+
+/* .skeleton is STILL, DASHED and LABELLED on purpose — never a shimmer. */
+.skeleton{display:flex;align-items:center;min-height:var(--space-xl);padding:0 var(--space-sm);
+  background:var(--bg);border:1px dashed var(--border);border-radius:var(--radius)}
+.skeleton-label{color:var(--muted);font-size:var(--font-label-size)}
+.election-title{margin:0;font-size:var(--font-heading-size);
+  font-weight:var(--font-heading-weight);color:var(--text)}
+
+/* ---- app.css: the shared DetailsToggle's two app-level rules ---- */
+.dt-toggle{background:var(--surface);color:var(--text);border:1px solid var(--border);
+  border-radius:var(--radius);padding:var(--space-sm) var(--space-md)}
+.dt-body{padding:var(--space-sm) var(--space-md);color:var(--text)}
+
+/* ---- app.css: banners ---- */
+.staleness-banner{display:flex;align-items:baseline;gap:var(--space-sm);
+  padding:var(--space-sm) var(--space-md);background:var(--surface2);
+  border:1px solid var(--warn);border-radius:var(--radius)}
+.staleness-banner__badge{padding:0 var(--space-sm);border:1px solid var(--warn);
+  border-radius:var(--radius);font-size:var(--font-label-size);font-weight:var(--font-label-weight);
+  line-height:var(--font-label-line-height);color:var(--warn)}
+.staleness-banner__text{margin:0;font-size:var(--font-body-size);color:var(--text)}
+.status-banner{display:flex;gap:var(--space-sm);align-items:baseline}
+.status-banner__headline{margin:0;font-size:var(--font-display-size);
+  font-weight:var(--font-display-weight);line-height:var(--font-display-line-height);color:var(--text)}
+.status-banner__tone{padding:0 var(--space-sm);border:1px solid var(--border);
+  border-radius:var(--radius);font-size:var(--font-label-size);font-weight:var(--font-label-weight);
+  line-height:var(--font-label-line-height);color:var(--text)}
+.status-banner--go .status-banner__tone{background:var(--surface2);
+  background:color-mix(in srgb,var(--ok) 18%,transparent);border-color:var(--ok)}
+.status-banner--wait .status-banner__tone{background:var(--surface2);
+  background:color-mix(in srgb,var(--warn) 18%,transparent);border-color:var(--warn)}
+.status-banner--done .status-banner__tone{background:var(--surface2);
+  background:color-mix(in srgb,var(--done) 18%,transparent);border-color:var(--done)}
+.status-banner--bad .status-banner__tone{background:var(--surface2);
+  background:color-mix(in srgb,var(--fail) 18%,transparent);border-color:var(--fail)}
+.live-update-badge{padding:0 var(--space-sm);border:1px solid var(--ok);border-radius:var(--radius);
+  font-size:var(--font-label-size);font-weight:var(--font-label-weight);
+  line-height:var(--font-label-line-height);color:var(--ok)}
+@media (prefers-reduced-motion:no-preference){
+  .live-update-badge{transition:opacity 200ms ease-out}
+}
+
+/* ---- app.css: facts ---- */
+.fact-section{display:flex;flex-direction:column;gap:var(--space-sm);margin-bottom:var(--space-lg)}
+.fact-section__heading{margin:0;font-size:var(--font-heading-size);
+  font-weight:var(--font-heading-weight);line-height:var(--font-heading-line-height);color:var(--text)}
+.fact-card{padding:var(--space-md);background:var(--surface);border:1px solid var(--border);
+  border-radius:var(--radius);font-size:var(--font-body-size);color:var(--text)}
+/* THREE cues, none sufficient alone: dashed border + muted colour + Label size.
+   The dashed border here means DE-EMPHASIS; .skeleton's means "left empty on
+   purpose". Same border-style, unrelated meanings — do not unify them. */
+.fact-card--gap{border-style:dashed;color:var(--muted);font-size:var(--font-label-size)}
+.fact-card__label{font-size:var(--font-label-size);color:var(--muted)}
+.fact-card__body{font-size:var(--font-body-size)}
+.fact-card--gap .fact-card__body{font-size:var(--font-label-size)}
+/* The wrapper the two public chart mounts render (the key-release meter and
+   the roll's district bars). No transition, animation or overflow here on
+   purpose — overflow belongs to the shared .vt-chart* rules. */
+.fact-card__chart{margin-top:var(--space-sm);min-width:0}
+
+/* ---- app.css: voter roll (scrolls, never clips) ---- */
+.registrant-roll{overflow-x:auto}
+.registrant-roll table{border-collapse:collapse;width:100%}
+.registrant-roll th{padding:var(--space-sm);text-align:left;
+  font-size:var(--font-label-size);color:var(--muted)}
+.registrant-roll td{padding:var(--space-sm);border-bottom:1px solid var(--border);
+  font-size:var(--font-body-size);color:var(--text)}
+.registrant-roll__note{font-size:var(--font-label-size);color:var(--muted)}
+
+/* ---- app.css: index + standing caveats ---- */
+.election-index{display:flex;flex-direction:column;gap:var(--space-sm)}
+.election-index__item{padding:var(--space-md);background:var(--surface);
+  border:1px solid var(--border);border-radius:var(--radius)}
+.public-caveats{display:flex;flex-direction:column;gap:var(--space-xs);margin-top:var(--space-lg)}
+.public-caveat{margin:0;font-size:var(--font-label-size);color:var(--muted)}
+
+/* ---- components.css ---- */
+.pv-disclosure{margin:0;color:var(--muted);font-size:var(--font-label-size);
+  font-weight:var(--font-label-weight);line-height:var(--font-label-line-height)}
+.lifecycle-pill{display:inline-flex;align-items:center;
+  padding:0 var(--space-sm);border-radius:var(--radius);background:var(--surface2);
+  border:1px solid var(--border);color:var(--muted);font-size:var(--font-label-size);
+  font-weight:var(--font-label-weight);line-height:var(--font-label-line-height)}
+.lifecycle-pill--pre{opacity:.85}
+.lifecycle-pill--voting{color:var(--text);opacity:1}
+.lifecycle-pill--settling{color:var(--warn);opacity:1}
+.lifecycle-pill--closed{opacity:.85}
+.lifecycle-pill--indeterminate{color:var(--text);opacity:.85}
+.dt-toggle-group{display:flex;flex-direction:column;gap:var(--space-xs)}
+
+/* ---- components.css: chart primitives — the rules BarSeries and Meter
+   render. Colour ONLY through tokens, zero hex literals. SVG marks take
+   fill/stroke; the meter's fill and track are HTML, so they take background.
+   (StackedBarSeries / TimeSeries rules — segment, line, dot, crosshair,
+   legend — are omitted: the public page mounts neither primitive.) ---- */
+.vt-chart{display:block}
+.vt-chart .recharts-surface{overflow:visible}
+.vt-chart__empty-frame{display:flex;align-items:center;justify-content:center;
+  border:1px solid var(--border);border-radius:var(--radius);background:var(--surface)}
+.vt-chart__empty{margin:0;color:var(--muted);font-size:var(--font-label-size);
+  font-weight:var(--font-label-weight);line-height:var(--font-label-line-height)}
+.vt-chart__axis{fill:var(--muted);font-size:var(--font-label-size);font-weight:var(--font-label-weight)}
+.vt-chart__grid{stroke:var(--border)}
+.vt-chart__label{fill:var(--text);font-size:var(--font-label-size);font-weight:var(--font-label-weight)}
+.vt-chart__bar{stroke:none}
+.vt-chart__bar--series-1{fill:var(--chart-series-1)}
+.vt-chart__bar--series-2{fill:var(--chart-series-2)}
+.vt-chart__bar--ok{fill:var(--ok)}
+.vt-chart__bar--warn{fill:var(--warn)}
+.vt-chart__bar--fail{fill:var(--fail)}
+.vt-chart__tooltip{display:flex;flex-direction:column;gap:var(--space-xs);padding:var(--space-sm);
+  border-radius:var(--radius);background:var(--surface2);border:1px solid var(--border)}
+.vt-chart__tooltip-label{color:var(--muted);font-size:var(--font-label-size);
+  font-weight:var(--font-label-weight);line-height:var(--font-label-line-height)}
+.vt-chart__tooltip-value{color:var(--text);font-size:var(--font-label-size);
+  font-weight:var(--font-label-weight);line-height:var(--font-label-line-height)}
+.vt-chart__meter{display:flex;align-items:stretch;gap:var(--space-sm)}
+.vt-chart__meter--panel{height:32px}
+.vt-chart__meter--compact{height:20px}
+.vt-chart__meter-track{flex:1;border-radius:var(--radius);background:var(--border)}
+.vt-chart__meter-fill{height:100%;border-radius:var(--radius);background:var(--chart-series-1)}
+.vt-chart__meter-value{align-self:center;white-space:nowrap;color:var(--text);
+  font-size:var(--font-display-size);font-weight:var(--font-display-weight);
+  line-height:var(--font-display-line-height)}
+.vt-chart--bar,.vt-chart--stacked-bar,.vt-chart--time-series,.vt-chart--meter{width:100%}
+
+/* ============================================================================
+   PROTOTYPE-ONLY OVERRIDES — NOT IN THE REAL CSS.
+
+   Everything above this line is transcribed. Everything below is this file's
+   own, added only so the prototype stays legible, and each is a standing note
+   about the real page rather than a fix to copy blindly:
+
+   1. NO RULE FOR NESTED ELEMENTS. app.css styles the blocks but not the
+      headings, paragraphs, links or tables inside them — .election-unreadable
+      h2/p, .election-index h2/p/a and .fact-card's own children fall back to
+      UA defaults, so a fact card's <h3> renders at the UA's h3 size with UA
+      margins, not at Label size, and an index link is the UA's blue.
+   2. NO FLOW RULE. .fact-card and .election-index__item are box-and-colour
+      rules with no display or gap; their children stack on default block flow
+      and the rhythm you see here is invented.
+   3. BUTTON TYPOGRAPHY. .dt-toggle sets no font-family and no font-size, so
+      the real "About this view" and "Why this isn't shown" buttons render in
+      the UA's default button font, not --font-family.
+   4. WRAPPING. A 43-char base64url election id has no break opportunity, and
+      a production-length surname plus district makes the roll wider than a
+      phone; .registrant-roll's own overflow-x handles the table, the address
+      line has nothing.
+   5. RECHARTS' OWN INLINE STYLES. The .recharts-* wrappers below carry the
+      sizes and positions Recharts writes inline at runtime; the bar chart is
+      hand-drawn SVG standing in for Recharts (see the BarSeries section of the
+      script). Those are not app CSS and there is no rule to transcribe.
+
+   Delete this block to see the page's own behaviour.
+   ========================================================================= */
+.election-unreadable h2{margin:0;font-size:var(--font-heading-size);font-weight:var(--font-heading-weight)}
+.election-unreadable p{margin:0}
+.election-address{overflow-wrap:anywhere}
+.staleness-banner__badge{white-space:nowrap}
+.status-banner{flex-wrap:wrap}
+.fact-card{display:flex;flex-direction:column;gap:var(--space-sm)}
+.fact-card__label{margin:0;font-weight:var(--font-label-weight)}
+.fact-card__body,.registrant-roll__note{margin:0}
+.registrant-roll th,.registrant-roll td{white-space:nowrap}
+.election-index__item{display:flex;justify-content:space-between;gap:var(--space-md);
+  align-items:baseline;flex-wrap:wrap}
+.election-index a{color:var(--primary)}
+.election-index h2{margin:0;font-size:var(--font-heading-size);font-weight:var(--font-heading-weight)}
+.election-index p{margin:0}
+.lifecycle-pill{align-self:flex-start}
+.dt-toggle-group{align-items:flex-start}
+.dt-toggle{font-size:var(--font-label-size);cursor:pointer;text-align:left}
+.dt-body{font-size:var(--font-body-size)}
+button{font-family:inherit}
+</style>
+</head>
+<body>
+<div id="proto">
+  <nav id="rail">
+    <h1>Public Election View</h1>
+    <p class="sub">Prototype of <code>apps/VoteTorrentPublic</code> — the no-login page a visitor
+      opens from a shared link. Tokens, class names, copy, the fact model, the phase derivation
+      and the roll's disclosure and district fold are transcribed from source.</p>
+    <div id="widths">
+      <button data-w="full" aria-pressed="true">Full</button>
+      <button data-w="700">700</button>
+      <button data-w="412">412</button>
+    </div>
+    <div id="railstates"></div>
+    <div class="note">
+      <p>Most fact cards render a <strong>label and nothing else</strong>. That is not an omission in
+      this prototype — it is the shipped state: in <code>facts.js</code> ten of the eighteen
+      facts carry <code>sentenceKey: null</code>. Only the voter roll, the keyholder key release
+      and the six <em>gap</em> cards have bodies today.</p>
+      <p>The phase is <strong>derived</strong>, never picked: each state hands the page an election
+      timeline and an instant, and <code>derivePhase</code> (transcribed from
+      <code>election-phase.js</code> over <code>timeline-core.js</code>) walks
+      closed → settling → voting newest-first. The bar above the page shows the derived phase,
+      its finest stage and how many timeline diagnostics the parse raised — diagnostics never
+      reach the page.</p>
+      <p>The voter roll does not collapse — there is nothing to click before it shows. Its
+      <em>disclosure</em> is the column policy in <code>roll-disclosure.js</code>, and the same
+      policy gates the district chart: withhold <code>District</code> and the chart is gone too.</p>
+      <p>The district bars are hand-drawn SVG standing in for Recharts, built to the same
+      contract: horizontal bars, single hue, 140px name band, a count label past the bar end,
+      whole-number ticks only, 4 ticks below 400px of chart width and 6 above. Hover a bar for
+      its tooltip.</p>
+      <p>No theme toggle: the app ships one dark palette and never reads
+      <code>prefers-color-scheme</code>.</p>
+    </div>
+  </nav>
+  <div id="stagewrap">
+    <div id="stagelabel"></div>
+    <iframe id="stage" title="App surface"></iframe>
+  </div>
+</div>
+
+<script>
+/* =========================================================================
+ * 1. COPY — verbatim from packages/ui-web/src/copy.js (public.* keys).
+ * ====================================================================== */
+const COPY={
+  'lifecycle.pre':'Being organized',
+  'lifecycle.voting':'Voting',
+  'lifecycle.settling':'Settling',
+  'lifecycle.closed':'Closed',
+  'lifecycle.indeterminate':'Phase unknown',
+  'advisory.public.body':"This page shows the election's own published record, exactly as this browser holds it. Every visitor whose browser holds the same record sees the same facts here, and nothing done on this page changes what the record says.",
+  'public.chrome.appName':'VoteTorrent Public Election View',
+  'public.election.addressLabel':'Election address',
+  'public.election.unreadableAddress.title':"This link's election address isn't readable.",
+  'public.election.unreadableAddress.body':"The part of this link that names an election doesn't match the expected form, so this page can't tell which election it points to. Check the link for a typo, or ask whoever shared it to send it again.",
+  'public.election.slot.title':'Election title',
+  'public.election.slot.lifecycle':'Lifecycle phase',
+  'public.election.slot.timeline':'Election timeline',
+  'public.details.summary':'About this view',
+  'public.details.body':'An election modeled here moves through four phases: being organized, voting, settling — after voting closes and before any result is final — and closed. Nobody picks the phase by hand; it follows from the dates the election itself publishes.',
+  'public.freshness.body':"This page updates automatically while it's connected to the network, and shows the last version it received when it isn't.",
+  'public.staleness.badge':'NOT CONNECTED',
+  'public.staleness.body':"This is the last version of this election your browser received. As of {{asOf}}, it isn't connected to the network.",
+  'public.liveUpdate.badge':'UPDATED',
+  'public.tone.go':'OPEN','public.tone.wait':'PENDING','public.tone.done':'CLOSED','public.tone.bad':'UNKNOWN',
+  'public.group.electionAndRules':'The election and its rules',
+  'public.group.ballot':'The ballot',
+  'public.group.electorate':'The electorate',
+  'public.group.outcome':'The outcome',
+  'public.headline.pre.registrationOpen':'Registration is open',
+  'public.headline.pre.registrationClosed':'Registration has closed — voting has not started',
+  'public.headline.pre.registrationUnknown':"Voting has not started — whether registration is still open can't be read from this election's schedule.",
+  'public.headline.voting':'Polls are open',
+  'public.headline.settling':'Voting has closed — no result is final yet',
+  'public.headline.closed':'This election is closed',
+  'public.headline.unknown':"This election's schedule can't be read, so its phase is unknown.",
+  'public.fact.identity.label':'Election',
+  'public.fact.authority.label':'Who runs this election',
+  'public.fact.governance.label':'Signed governance trail',
+  'public.fact.rules.label':'Rules and policies',
+  'public.fact.timeline.label':'Timeline',
+  'public.fact.registration.label':'Registration',
+  'public.fact.ballot.label':'Questions and options',
+  'public.fact.polls.label':'Polls',
+  'public.fact.electorate.label':'Eligible electorate',
+  'public.fact.keyholders.label':'Keyholders',
+  'public.fact.turnout.label':'Ballots cast',
+  'public.fact.receipt.label':'Checking your own ballot',
+  'public.fact.merkle.label':'Cryptographic record of the votes',
+  'public.fact.keyrelease.label':'Keyholder key release',
+  'public.fact.results.label':'Results',
+  'public.fact.validation.label':'Validation report',
+  'public.fact.certification.label':'Certification',
+  'public.gap.turnout.sentence':"How many ballots have been cast isn't shown here — there's no record of vote counts in this system yet.",
+  'public.gap.turnout.detail':"No Vote or VoteEntry table exists; vote and voter entries live in negotiated blocks the schema doesn't model (doc/election.md:95-110).",
+  'public.gap.receipt.sentence':"There's no way on this page to confirm your own ballot was received — that check depends on a private receipt only you hold.",
+  'public.gap.receipt.detail':'The vote nonce is held privately by the voter; nothing on the network can be checked against it (doc/election.md:97).',
+  'public.gap.merkle.sentence':"The cryptographic record tying votes together isn't published here.",
+  'public.gap.merkle.detail':'No Block or MerkleNode table exists yet (doc/election.md:114).',
+  'public.gap.results.sentence':"Results aren't published on this page — there's no tally recorded anywhere in the system yet.",
+  'public.gap.results.detail':'No Tally table exists (doc/election.md:124-132).',
+  'public.gap.validation.sentence':'No validation report or error-margin figure is available here.',
+  'public.gap.validation.detail':'No Validation table exists, and no error-margin statistic is recorded anywhere (doc/election.md:134-153).',
+  'public.gap.certification.sentence':"No signed certification of this election's outcome is available here.",
+  'public.gap.certification.detail':'No Certification table exists; each authority is meant to publish one, but nothing stores it (doc/election.md:155-159).',
+  'public.fact.keyrelease.sentence':'{{released}} of {{total}} keyholders have released their keys.',
+  'public.fact.keyrelease.detail':"This counts keyholders whose key-release task has completed; it doesn't show which keyholder released a key or when (doc/election.md:118-122).",
+  'public.fact.keyrelease.unreadable':"The number of keyholders who have released their keys couldn't be read, so it isn't shown here.",
+  'public.fact.keyrelease.meterEmpty':'No keyholders are recorded for this election yet.',
+  'public.registrantRoll.heading':'Voter roll',
+  'public.registrantRoll.body':'These are the people registered to vote in this election, as published by the authority.',
+  'public.registrantRoll.disclaimer':'This shows only the publicly named fields — no other registrant detail is shown or read.',
+  'public.registrantRoll.empty':'No registrants recorded yet.',
+  'public.registrantRoll.chart.tooltip':'{{district}}: {{count}} registrant(s)',
+  'public.registrantRoll.chart.otherBucket':'Other',
+  'public.caveat.timelineUnvalidated':"This election's schedule is published by its own authority and isn't independently checked here.",
+  'public.caveat.readOnly':'Nothing on this page can be changed, and nothing here asks who you are — it can only show what this browser holds.',
+  'public.rules.policyUnreadable':"One of this election's disclosure settings couldn't be read, so nothing for that field is shown.",
+  'public.index.viewElectionCta':'View election',
+  'public.index.emptyHeading':'This browser holds no elections yet.',
+  'public.index.emptyBody':'This page can only show elections whose records are already stored in this browser, and none are stored here yet.',
+  'public.index.someUnreadable':"Something stored in this browser couldn't be read, so this page may not be showing everything it holds.",
+  'public.election.notHeld.title':"This browser doesn't hold this election.",
+  'public.election.notHeld.body':'Nothing has been loaded into this browser for the election this link names, so there is nothing here to show.',
+  'public.gap.detailsSummary':"Why this isn't shown",
+  'public.fact.detailsSummary':'What this shows',
+  'public.config.missing.title':"This page can't be configured to reach the network.",
+  'public.config.missing.body':"The list of network addresses this page needs wasn't found, so it can't look up any election right now. This is a problem with how this page is set up, not with your browser or your connection.",
+  'public.config.malformed.title':"This page's network configuration can't be read.",
+  'public.config.malformed.body':"The list of network addresses this page needs is present but couldn't be understood, so it can't look up any election right now. This is a problem with how this page is set up, not with your browser or your connection.",
+};
+function t(key,params){
+  const tpl=COPY[key];
+  if(typeof tpl!=='string') throw new Error('t(): unknown copy key "'+key+'"');
+  const out=tpl.replace(/\{\{(\w+)\}\}/g,(m,n)=>(params&&n in params)?String(params[n]):m);
+  const un=out.match(/\{\{(\w+)\}\}/);
+  if(un) throw new Error('t(): unresolved placeholder "{{'+un[1]+'}}" in "'+key+'"');
+  return out;
+}
+const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+
+/* =========================================================================
+ * 2. FACT MODEL — transcribed from packages/ui-web/src/lifecycle/facts.js.
+ *    Group order and declaration order are both load-bearing: cards render
+ *    in FACT_GROUPS order, and within a group in FACTS order.
+ * ====================================================================== */
+const FACT_GROUPS=['electionAndRules','ballot','electorate','outcome'];
+const ALL_PHASES=['pre','voting','settling','closed'];
+const FACTS=[
+  {id:'identity',group:'electionAndRules',phases:ALL_PHASES,labelKey:'public.fact.identity.label',sentenceKey:null,detailKey:null,emptyKey:null,interpolates:null,gap:null},
+  {id:'authority',group:'electionAndRules',phases:ALL_PHASES,labelKey:'public.fact.authority.label',sentenceKey:null,detailKey:null,emptyKey:null,interpolates:null,gap:null},
+  {id:'governance',group:'electionAndRules',phases:ALL_PHASES,labelKey:'public.fact.governance.label',sentenceKey:null,detailKey:null,emptyKey:null,interpolates:null,gap:null},
+  {id:'rules',group:'electionAndRules',phases:ALL_PHASES,labelKey:'public.fact.rules.label',sentenceKey:null,detailKey:null,emptyKey:null,interpolates:null,gap:null},
+  {id:'timeline',group:'electionAndRules',phases:ALL_PHASES,labelKey:'public.fact.timeline.label',sentenceKey:null,detailKey:null,emptyKey:null,interpolates:null,gap:null},
+  {id:'registration',group:'electorate',phases:['pre'],labelKey:'public.fact.registration.label',sentenceKey:null,detailKey:null,emptyKey:null,interpolates:null,gap:null},
+  {id:'ballot',group:'ballot',phases:ALL_PHASES,labelKey:'public.fact.ballot.label',sentenceKey:null,detailKey:null,emptyKey:null,interpolates:null,gap:null},
+  {id:'polls',group:'ballot',phases:['voting'],labelKey:'public.fact.polls.label',sentenceKey:null,detailKey:null,emptyKey:null,interpolates:null,gap:null},
+  {id:'electorate',group:'electorate',phases:ALL_PHASES,labelKey:'public.fact.electorate.label',sentenceKey:null,detailKey:null,emptyKey:null,interpolates:null,gap:null},
+  {id:'registrantRoll',group:'electorate',phases:ALL_PHASES,labelKey:'public.registrantRoll.heading',sentenceKey:'public.registrantRoll.body',detailKey:'public.registrantRoll.disclaimer',emptyKey:'public.registrantRoll.empty',interpolates:null,gap:null},
+  {id:'keyholders',group:'outcome',phases:ALL_PHASES,labelKey:'public.fact.keyholders.label',sentenceKey:null,detailKey:null,emptyKey:null,interpolates:null,gap:null},
+  {id:'turnout',group:'outcome',phases:['voting','settling','closed'],labelKey:'public.fact.turnout.label',sentenceKey:'public.gap.turnout.sentence',detailKey:'public.gap.turnout.detail',emptyKey:null,interpolates:null,gap:'A'},
+  {id:'receipt',group:'outcome',phases:['settling','closed'],labelKey:'public.fact.receipt.label',sentenceKey:'public.gap.receipt.sentence',detailKey:'public.gap.receipt.detail',emptyKey:null,interpolates:null,gap:'B'},
+  {id:'merkle',group:'outcome',phases:['settling','closed'],labelKey:'public.fact.merkle.label',sentenceKey:'public.gap.merkle.sentence',detailKey:'public.gap.merkle.detail',emptyKey:null,interpolates:null,gap:'C'},
+  {id:'keyrelease',group:'outcome',phases:['settling'],labelKey:'public.fact.keyrelease.label',sentenceKey:'public.fact.keyrelease.sentence',detailKey:'public.fact.keyrelease.detail',emptyKey:null,interpolates:['released','total'],gap:null},
+  {id:'results',group:'outcome',phases:['settling','closed'],labelKey:'public.fact.results.label',sentenceKey:'public.gap.results.sentence',detailKey:'public.gap.results.detail',emptyKey:null,interpolates:null,gap:'E'},
+  {id:'validation',group:'outcome',phases:['settling','closed'],labelKey:'public.fact.validation.label',sentenceKey:'public.gap.validation.sentence',detailKey:'public.gap.validation.detail',emptyKey:null,interpolates:null,gap:'F'},
+  {id:'certification',group:'outcome',phases:['closed'],labelKey:'public.fact.certification.label',sentenceKey:'public.gap.certification.sentence',detailKey:'public.gap.certification.detail',emptyKey:null,interpolates:null,gap:'G'},
+];
+const factsFor=phase=>FACTS.filter(f=>f.phases.includes(phase));
+function groupFactsForPhase(phase){
+  const out=[];
+  for(const group of FACT_GROUPS){
+    const facts=factsFor(phase).filter(f=>f.group===group);
+    if(facts.length===0) continue;
+    out.push({group,headingKey:'public.group.'+group,facts});
+  }
+  return out;
+}
+function headlineKey(phase,opts){
+  const {registrationEndsCanonical=null,atCanonical=null}=opts||{};
+  const canon=v=>typeof v==='string'&&/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(v);
+  switch(phase){
+    case 'pre':
+      if(canon(atCanonical)&&canon(registrationEndsCanonical)){
+        return atCanonical<registrationEndsCanonical
+          ? {textKey:'public.headline.pre.registrationOpen',tone:'go'}
+          : {textKey:'public.headline.pre.registrationClosed',tone:'wait'};
+      }
+      return {textKey:'public.headline.pre.registrationUnknown',tone:'wait'};
+    case 'voting':   return {textKey:'public.headline.voting',tone:'go'};
+    case 'settling': return {textKey:'public.headline.settling',tone:'wait'};
+    case 'closed':   return {textKey:'public.headline.closed',tone:'done'};
+    default:         return {textKey:'public.headline.unknown',tone:'bad'};
+  }
+}
+
+/* =========================================================================
+ * 3. PHASE DERIVATION — transcribed from
+ *    packages/ui-web/src/lifecycle/timeline-core.js (the dependency-free
+ *    half: the TEN-event order, normalizeInstant, parseTimeline, finestStage,
+ *    iso) and election-phase.js (derivePhase, PHASE_OPENED_BY).
+ *
+ *    Only three events decide the phase — votingStarts, tallyingStarts,
+ *    closed — walked newest-first. The three events timeline-core added
+ *    (accruingVotes, hashingVotes, releasingKeys) refine `stage` and raise
+ *    diagnostics when absent; they never move the phase. `conflicts` are
+ *    machine diagnostics and never reach the page.
+ * ====================================================================== */
+const CANONICAL_RE=/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/;
+const ELECTION_EVENT_ORDER=['registrationEnds','ballotsFinal','votingStarts','accruingVotes','hashingVotes',
+  'releasingKeys','tallyingStarts','validation','certificationStarts','closed'];
+const STRICT_CHAIN=['votingStarts','accruingVotes','hashingVotes','releasingKeys','tallyingStarts',
+  'validation','certificationStarts','closed'];
+const PREPARATION=['registrationEnds','ballotsFinal'];
+const PHASE_OPENED_BY={voting:'votingStarts',settling:'tallyingStarts',closed:'closed'};
+function normalizeInstant(raw){
+  if(raw===undefined||raw===null) return null;
+  if(typeof raw==='number') return Number.isFinite(raw)?raw:null;
+  if(typeof raw!=='string') return null;
+  const trimmed=raw.trim();
+  if(trimmed==='') return null;
+  if(CANONICAL_RE.test(trimmed)){ const ms=Date.parse(trimmed+'Z'); return Number.isFinite(ms)?ms:null; }
+  const ms=Date.parse(trimmed);
+  return Number.isFinite(ms)?ms:null;
+}
+function iso(ms){ return ms===null||ms===undefined?'(none)':new Date(ms).toISOString().slice(0,19)+'Z'; }
+function parseTimeline(timeline){
+  const conflicts=[]; const at={};
+  let blob;
+  if(typeof timeline==='string'){
+    try{ const p=JSON.parse(timeline); blob=p!==null&&typeof p==='object'?p:{}; }catch{ blob={}; }
+  } else blob=timeline!==null&&typeof timeline==='object'?timeline:{};
+  for(const event of ELECTION_EVENT_ORDER){
+    const raw=blob[event]; const ms=normalizeInstant(raw); at[event]=ms;
+    if(ms===null) conflicts.push({code:raw===undefined||raw===null?'MISSING_EVENT':'UNPARSEABLE',event});
+  }
+  let prev=null;
+  for(const event of STRICT_CHAIN){
+    if(at[event]===null) continue;
+    if(prev!==null&&at[event]<at[prev]) conflicts.push({code:'OUT_OF_ORDER',event});
+    prev=event;
+  }
+  for(const event of PREPARATION){
+    if(at[event]===null||at.votingStarts===null) continue;
+    if(at[event]>at.votingStarts) conflicts.push({code:'OUT_OF_ORDER',event});
+  }
+  /* The Election.BallotDeadline / Election.Date cross-checks are omitted: the
+     prototype's fixtures carry no election row, which degrades to "no
+     discrepancy reported" in source too. */
+  return {at,conflicts};
+}
+function finestStage(at,nowMs){
+  let stage=null;
+  for(const event of ELECTION_EVENT_ORDER){ const ms=at[event]; if(ms!==null&&nowMs>=ms) stage=event; }
+  return stage;
+}
+function derivePhase(timeline,now){
+  const nowMs=normalizeInstant(now);
+  const {at,conflicts}=parseTimeline(timeline);
+  if(nowMs===null) return {phase:'indeterminate',stage:null,at,conflicts};
+  for(const [phase,opener] of [['closed','closed'],['settling','tallyingStarts'],['voting','votingStarts']]){
+    const boundary=at[opener];
+    if(boundary===null) return {phase:'indeterminate',stage:null,at,conflicts};
+    if(nowMs>=boundary) return {phase,stage:finestStage(at,nowMs),at,conflicts};
+  }
+  return {phase:'pre',stage:finestStage(at,nowMs),at,conflicts};
+}
+
+/* =========================================================================
+ * 4. ROLL DISCLOSURE — transcribed from
+ *    apps/VoteTorrentPublic/src/roll-disclosure.js. Which columns an
+ *    anonymous reader may see (an allow-list that fails CLOSED and says so),
+ *    and the small-district fold the roll's district chart draws from.
+ * ====================================================================== */
+const ROLL_FIELDS=['LastName','FirstName','District'];
+const DISCLOSURE_AUDIENCE_CODES=['district','everyone'];
+const ANONYMOUS_AUDIENCE='everyone';
+const ROLL_DISCLOSURE_POLICY=ROLL_FIELDS.map(field=>({field,audience:ANONYMOUS_AUDIENCE}));
+function permitsAnonymousReader(entry,field){
+  if(entry===null||typeof entry!=='object') return false;
+  if(typeof entry.field!=='string'||entry.field==='') return false;
+  if(entry.field!==field) return false;
+  if(typeof entry.audience!=='string'||entry.audience==='') return false;
+  if(!DISCLOSURE_AUDIENCE_CODES.includes(entry.audience)) return false;
+  return entry.audience===ANONYMOUS_AUDIENCE;
+}
+function resolveRollColumns(policy){
+  const entries=Array.isArray(policy)?policy:[];
+  const columns=[],unreadable=[];
+  for(const field of ROLL_FIELDS){
+    const entry=entries.find(c=>c!==null&&typeof c==='object'&&c.field===field);
+    if(permitsAnonymousReader(entry,field)) columns.push(field); else unreadable.push(field);
+  }
+  return {columns,unreadable};
+}
+const DISTRICT_FIELD='District';
+const SMALL_DISTRICT_THRESHOLD=2;
+function foldDistrictCounts(rows,policy=ROLL_DISCLOSURE_POLICY){
+  const {columns}=resolveRollColumns(policy);
+  if(!columns.includes(DISTRICT_FIELD)) return [];
+  const dataRows=Array.isArray(rows)?rows:[];
+  const named=Object.create(null); let unstated=0;
+  for(const row of dataRows){
+    const value=row!==null&&typeof row==='object'?row[DISTRICT_FIELD]:undefined;
+    if(typeof value==='string'&&value!=='') named[value]=(named[value]??0)+1; else unstated+=1;
+  }
+  const namedEntries=Object.entries(named)
+    .sort((a,b)=>(b[1]!==a[1]?b[1]-a[1]:a[0]<b[0]?-1:a[0]>b[0]?1:0))
+    .map(([name,count])=>({name,count,folded:count<SMALL_DISTRICT_THRESHOLD}));
+  let foldedGroupCount=namedEntries.filter(e=>e.folded).length+(unstated>0?1:0);
+  /* The complementary-disclosure guard: one folded group alone would let a
+     reader pair the "Other" bar back to the one district missing from the axis. */
+  while(foldedGroupCount===1){
+    let last=-1;
+    for(let i=namedEntries.length-1;i>=0;i-=1){ if(!namedEntries[i].folded){ last=i; break; } }
+    if(last===-1) break;
+    namedEntries[last].folded=true; foldedGroupCount+=1;
+  }
+  const out=[]; let otherCount=unstated; let anyFolded=unstated>0; let index=0;
+  for(const e of namedEntries){
+    if(e.folded){ anyFolded=true; otherCount+=e.count; }
+    else { out.push({key:'d'+index,label:e.name,count:e.count,folded:false}); index+=1; }
+  }
+  if(anyFolded) out.push({key:'other',label:null,count:otherCount,folded:true});
+  return out;
+}
+
+/* =========================================================================
+ * 5. FIXTURES — synthetic, production-shaped. The election address is a
+ *    43-char base64url id under ?election=, the network a 22-char H16 hash.
+ *    Roll names are production-length: a hyphenated surname and a real
+ *    district string overflow a narrow viewport, which is the point. The
+ *    default roll is balanced so the district fold is visibly SELECTIVE:
+ *    three districts keep their own bar, two one-registrant districts fold.
+ * ====================================================================== */
+const NETWORK_HASH='EtYPyYBtpTGOvjUfv6yKIw';
+const ELECTION_ID='rGLWlvy4da8mhR8_zyX22DlVjR3N2Q6bGLrskmLafkM';
+const ELECTION_TITLE='Cascade County General Election 2026';
+/* All ten ElectionEvent values, canonical 19-char (UTC, no Z). */
+const TIMELINE={
+  registrationEnds:'2026-09-15T23:59:59',
+  ballotsFinal:'2026-09-20T00:00:00',
+  votingStarts:'2026-11-03T07:00:00',
+  accruingVotes:'2026-11-03T20:00:00',
+  hashingVotes:'2026-11-03T21:00:00',
+  releasingKeys:'2026-11-04T06:00:00',
+  tallyingStarts:'2026-11-04T07:00:00',
+  validation:'2026-11-10T00:00:00',
+  certificationStarts:'2026-11-15T00:00:00',
+  closed:'2026-11-20T00:00:00',
+};
+const without=(obj,...keys)=>{ const o={...obj}; keys.forEach(k=>delete o[k]); return o; };
+const AT={pre:'2026-09-10T09:00:00',preLate:'2026-09-20T09:00:00',voting:'2026-11-03T12:15:00',
+  settling:'2026-11-04T08:00:00',closed:'2026-11-21T09:00:00'};
+const D7A='District 7 / Precinct 7A', D3C='District 3 / Precinct 3C', D1B='District 1 / Precinct 1B',
+      D3A='District 3 / Precinct 3A', DCW='Countywide (unassigned)';
+const r=(LastName,FirstName,District)=>({LastName,FirstName,District});
+const ROLL=[
+  r('Abernathy-Whitfield','Rosalind',D7A),
+  r('Okonkwo','Adaeze',D3C),
+  r('Delacroix','Marguerite',DCW),
+  r('Nakamura','Hiroshi',D1B),
+  r('Vasquez-Montenegro','Esperanza',D7A),
+  r('Hartsfield','Thomas',D3A),
+  r('Lindqvist-Barrow','Annika',D7A),
+  r('Oyelaran','Babatunde',D3C),
+  r('Castellanos','Inés',D1B),
+];
+/* Exactly ONE small district: the guard must fold the smallest named one too. */
+const ROLL_GUARD=[
+  r('Abernathy-Whitfield','Rosalind',D7A), r('Vasquez-Montenegro','Esperanza',D7A),
+  r('Lindqvist-Barrow','Annika',D7A), r('Okonkwo','Adaeze',D3C),
+  r('Oyelaran','Babatunde',D3C), r('Nakamura','Hiroshi',D1B),
+];
+/* Every district holds one registrant: everything folds into one "Other" bar. */
+const ROLL_ALL_SINGLE=[
+  r('Abernathy-Whitfield','Rosalind',D7A), r('Okonkwo','Adaeze',D3C),
+  r('Delacroix','Marguerite',DCW), r('Nakamura','Hiroshi',D1B),
+];
+/* A blank District value tallies as "unstated" and ALWAYS folds — and being
+   the only folded group, it drags the smallest named district with it. */
+const ROLL_UNSTATED=[
+  r('Abernathy-Whitfield','Rosalind',D7A), r('Vasquez-Montenegro','Esperanza',D7A),
+  r('Lindqvist-Barrow','Annika',D7A), r('Nakamura','Hiroshi',D1B), r('Castellanos','Inés',D1B),
+  r('Okonkwo','Adaeze',D3C), r('Oyelaran','Babatunde',D3C), r('Fairweather','Priya',''),
+];
+const ROLL_ONE_DISTRICT=[
+  r('Abernathy-Whitfield','Rosalind',D7A), r('Vasquez-Montenegro','Esperanza',D7A),
+  r('Lindqvist-Barrow','Annika',D7A),
+];
+const ROLL_ONE=[ r('Abernathy-Whitfield','Rosalind',D7A) ];
+const HELD_ELECTIONS=[
+  {networkHash:NETWORK_HASH,electionId:ELECTION_ID,title:ELECTION_TITLE},
+  {networkHash:NETWORK_HASH,electionId:'eKajCiVrvJ-_gMHf5eYx0iLL2D1O4_DVlQnfeak-hRY',title:'Cascade County Special Levy Election — March 2026'},
+  {networkHash:'NprVHIM0C63TA4GUZDhdUw',electionId:'TTEkN8QqkkrYj0u_KAw3Xo7hIlS5SYcgi9BOAZH5Gwc',title:'Pinegrove Township Trustee Election 2026'},
+];
+
+/* =========================================================================
+ * 6. STATE
+ * ====================================================================== */
+const S={
+  route:'voting',
+  width:'full',
+  timeline:TIMELINE,       /* the election's own Timeline column, any of its three live shapes */
+  at:AT.voting,            /* the comparison instant (canonical) */
+  addressStatus:'ok',      /* ok | malformed | missing | incomplete */
+  readState:'ready',       /* reading | ready | notHeld | unreadable */
+  connection:'up',
+  observedAt:AT.voting,    /* when this browser last received the record */
+  justUpdated:false,
+  configFault:null,        /* missing | malformed */
+  keyRelease:{released:2,total:3,keyholderCount:3},
+  roll:ROLL,               /* null = the roll couldn't be read */
+  policy:ROLL_DISCLOSURE_POLICY,
+  indexResult:null,        /* {elections, complete} when the address names no single election */
+  open:{},                 /* DetailsToggle open-state, keyed by toggle id */
+};
+/* derivePhase receives the election's timeline only when an election was
+   actually read; every other read hands it nothing, which is indeterminate. */
+const hasElection=()=>S.configFault===null&&S.addressStatus==='ok'&&S.readState==='ready';
+const phaseResult=()=>derivePhase(hasElection()?S.timeline:undefined,S.at);
+
+/* reader-instant.js's formatReaderInstant: the reader's own locale and zone. */
+function formatReaderInstant(canonical){
+  try{
+    if(typeof canonical!=='string'||!CANONICAL_RE.test(canonical.trim())) return null;
+    const ms=Date.parse(canonical.trim()+'Z'); if(!Number.isFinite(ms)) return null;
+    const f=new Intl.DateTimeFormat(undefined,{dateStyle:'medium',timeStyle:'short'});
+    const zone=f.resolvedOptions().timeZone||'UTC';
+    return {text:f.format(new Date(ms)),zone};
+  }catch{ return null; }
+}
+
+/* =========================================================================
+ * 7. COMPONENTS
+ * ====================================================================== */
+function LifecyclePill(phase){
+  const key = phase==='indeterminate' ? 'lifecycle.indeterminate'
+            : (['pre','voting','settling','closed'].includes(phase) ? 'lifecycle.'+phase : null);
+  if(key===null) return '';
+  return '<span class="lifecycle-pill lifecycle-pill--'+esc(phase)+'">'+esc(t(key))+'</span>';
+}
+function DetailsToggle(id,summary,body){
+  const open=!!S.open[id];
+  return '<div class="dt-toggle-group">'
+    +'<button type="button" class="dt-toggle" aria-expanded="'+(open?'true':'false')+'" aria-controls="dt-'+esc(id)+'" data-act="dt" data-id="'+esc(id)+'">'
+      +esc(summary)+'</button>'
+    +(open?'<div id="dt-'+esc(id)+'" class="dt-body">'+esc(body)+'</div>':'')
+  +'</div>';
+}
+function AdvisoryDisclosure(){
+  return '<p class="pv-disclosure">'+esc(t('advisory.public.body'))+'</p>';
+}
+function Skeleton(slot,labelKey){
+  return '<div class="skeleton" data-slot="'+esc(slot)+'">'
+    +'<span class="skeleton-label">'+esc(t(labelKey))+'</span></div>';
+}
+
+/* ---- chart-frame.tsx's ChartFrame: the empty frame renders its own box AND
+   explicit copy, never a blank region. ---- */
+function ChartFrame(variantClassName,height,isEmpty,emptyCopyKey,inner){
+  return '<div class="vt-chart '+variantClassName+'">'
+    +(isEmpty
+      ? '<div class="vt-chart__empty-frame" style="height:'+height+'px">'
+          +(emptyCopyKey?'<p class="vt-chart__empty">'+esc(t(emptyCopyKey))+'</p>':'')+'</div>'
+      : inner)
+  +'</div>';
+}
+/* ---- charts/Meter.tsx. Plain DOM, no Recharts. The fill's inline width is
+   the one inline style the chart directory permits. The public mount passes
+   no valueLabel, so no .vt-chart__meter-value renders. ---- */
+const METER_HEIGHT_PX=32, METER_COMPACT_HEIGHT_PX=20;
+function Meter({value,total,valueLabel,variant='panel',emptyCopyKey}){
+  const isEmpty=total==null||total<=0;
+  const height=variant==='compact'?METER_COMPACT_HEIGHT_PX:METER_HEIGHT_PX;
+  const ratio=isEmpty?0:Math.max(0,Math.min(1,value/total));
+  const mod=variant==='compact'?'vt-chart__meter--compact':'vt-chart__meter--panel';
+  return ChartFrame('vt-chart--meter',height,isEmpty,emptyCopyKey,
+    '<div class="vt-chart__meter '+mod+'">'
+      +'<div class="vt-chart__meter-track"><div class="vt-chart__meter-fill" style="width:'+(ratio*100)+'%"></div></div>'
+      +(valueLabel?'<span class="vt-chart__meter-value">'+esc(valueLabel)+'</span>':'')
+    +'</div>');
+}
+
+/* ---- charts/BarSeries.tsx, horizontal form, as FactSections.tsx mounts it.
+   Recharts cannot ship in a no-request file, so the SVG is drawn here after
+   the frame lays out, to the primitive's own contract (chart-contracts.ts):
+   bar ≤24px thick, 4px radius on the bar's top corners (Recharts' [4,4,0,0]),
+   margins {8,48,8,8}, 30px numeric axis, whole-number ticks with the domain
+   pinned to [0, max(dataMax,1)], tickCount 4 below a 400px container and 6
+   at or above, a count label 5px past each bar end, every category tick kept
+   (interval 0) and wrapped to the 140px name band. ---- */
+const MAX_BAR_THICKNESS_PX=24, DATA_END_RADIUS_PX=4, NARROW_CONTAINER_PX=400, TICKS_WIDE=6, TICKS_NARROW=4;
+const ROLL_CHART_FIXED_CHROME_PX=46, ROLL_CHART_PER_ROW_PX=40, ROLL_CHART_MAX_ROWS=6;
+const ROLL_CHART_MAX_HEIGHT_PX=ROLL_CHART_FIXED_CHROME_PX+ROLL_CHART_MAX_ROWS*ROLL_CHART_PER_ROW_PX;
+const ROLL_CHART_MIN_HEIGHT_PX=ROLL_CHART_FIXED_CHROME_PX+2*ROLL_CHART_PER_ROW_PX;
+const ROLL_CHART_CATEGORY_AXIS_PX=140;
+const BAR_FILL_BY_TONE={'series-1':'var(--chart-series-1)','series-2':'var(--chart-series-2)',ok:'var(--ok)',warn:'var(--warn)',fail:'var(--fail)'};
+let CHARTS=[];            /* specs for the post-layout SVG pass, reset each render */
+function BarSeries({data,height,categoryAxisWidth,defaultTone='series-1'}){
+  const id='c'+CHARTS.length;
+  CHARTS.push({id,data,height,categoryAxisWidth,defaultTone});
+  /* the outer div is useContainerWidth's ref; ChartFrame's ResponsiveContainer sits inside */
+  return '<div data-chart-ref="'+id+'">'
+    +ChartFrame('vt-chart--bar',height,data.length===0,null,
+      '<div class="recharts-responsive-container" style="width:100%;height:'+height+'px;min-width:0">'
+        +'<div class="recharts-wrapper" data-chart-id="'+id+'" style="position:relative;cursor:default;width:100%;height:'+height+'px"></div>'
+      +'</div>')
+  +'</div>';
+}
+function niceTicks(max,tickCount){
+  const raw=max/Math.max(1,tickCount-1);
+  const mag=Math.pow(10,Math.floor(Math.log10(raw)));
+  let step=[1,2,2.5,5,10].map(m=>m*mag).find(s=>s>=raw-1e-9)||10*mag;
+  step=Math.max(1,Math.ceil(step));                 /* allowDecimals={false} */
+  const ticks=[];
+  for(let v=0;v<max-0.99*step;v+=step) ticks.push(v);
+  ticks.push(max);
+  return ticks;
+}
+function wrapWords(ctx,text,width){
+  const words=String(text).split(/\s+/).filter(Boolean); const lines=[]; let cur='';
+  for(const w of words){
+    const next=cur?cur+' '+w:w;
+    if(cur&&ctx.measureText(next).width>width){ lines.push(cur); cur=w; } else cur=next;
+  }
+  if(cur) lines.push(cur);
+  return lines;
+}
+function drawBarChart(doc,spec){
+  const wrap=doc.querySelector('[data-chart-id="'+spec.id+'"]');
+  const ref=doc.querySelector('[data-chart-ref="'+spec.id+'"]');
+  if(!wrap||!ref) return;
+  const W=Math.floor(wrap.clientWidth), H=spec.height;
+  const tickCount=ref.clientWidth<NARROW_CONTAINER_PX?TICKS_NARROW:TICKS_WIDE;
+  const m={top:8,right:48,bottom:8,left:8}, xAxisH=30, yAxisW=spec.categoryAxisWidth;
+  const px0=m.left+yAxisW, px1=Math.max(px0+1,W-m.right), py0=m.top, py1=H-m.bottom-xAxisH;
+  const n=spec.data.length, band=(py1-py0)/n;
+  const dataMax=Math.max(0,...spec.data.map(d=>d.value)), domMax=Math.max(1,dataMax);
+  const xs=v=>px0+(v/domMax)*(px1-px0);
+  const ctx=doc.createElement('canvas').getContext('2d');
+  ctx.font='12px '+getComputedStyle(doc.body).fontFamily;
+  let svg='<svg class="recharts-surface" width="'+W+'" height="'+H+'" viewBox="0 0 '+W+' '+H+'" role="img">';
+  /* CartesianGrid vertical={false}: horizontal lines on the category bands */
+  svg+='<g class="recharts-cartesian-grid">';
+  for(let i=0;i<n;i++){ const y=py0+i*band; svg+='<line class="vt-chart__grid" x1="'+px0+'" x2="'+px1+'" y1="'+y+'" y2="'+y+'"/>'; }
+  svg+='</g>';
+  /* numeric X axis */
+  svg+='<g class="recharts-xAxis"><line class="vt-chart__grid" x1="'+px0+'" x2="'+px1+'" y1="'+py1+'" y2="'+py1+'"/>';
+  for(const v of niceTicks(domMax,tickCount)){
+    svg+='<text class="vt-chart__axis" x="'+xs(v)+'" y="'+(py1+8)+'" dy="0.71em" text-anchor="middle">'+v+'</text>';
+  }
+  svg+='</g>';
+  /* category Y axis — every tick, wrapped to the band width */
+  svg+='<g class="recharts-yAxis"><line class="vt-chart__grid" x1="'+px0+'" x2="'+px0+'" y1="'+py0+'" y2="'+py1+'"/>';
+  spec.data.forEach((d,i)=>{
+    const lines=wrapWords(ctx,d.label,yAxisW), cy=py0+i*band+band/2, tx=px0-8;
+    svg+='<text class="vt-chart__axis" x="'+tx+'" y="'+cy+'" text-anchor="end">'
+      +lines.map((ln,j)=>'<tspan x="'+tx+'" dy="'+(j===0?((1-lines.length)/2+0.355):1)+'em">'+esc(ln)+'</tspan>').join('')
+      +'</text>';
+  });
+  svg+='</g>';
+  /* bars + count labels (LabelList position="right") */
+  svg+='<g class="vt-chart__bar">';
+  spec.data.forEach((d,i)=>{
+    const tone=d.tone||spec.defaultTone, th=Math.min(MAX_BAR_THICKNESS_PX,band*0.8);
+    const y=py0+i*band+(band-th)/2, w=xs(d.value)-px0, rad=Math.min(DATA_END_RADIUS_PX,w/2,th/2);
+    if(w>0) svg+='<path class="vt-chart__bar--'+tone+'" fill="'+BAR_FILL_BY_TONE[tone]+'" d="M'+px0+','+(y+rad)
+      +' a'+rad+','+rad+' 0 0 1 '+rad+','+(-rad)+' h'+(w-2*rad)+' a'+rad+','+rad+' 0 0 1 '+rad+','+rad
+      +' v'+(th-rad)+' h'+(-w)+' Z"/>';
+    svg+='<text class="vt-chart__label" x="'+(px0+w+5)+'" y="'+(y+th/2)+'" dy="0.355em" text-anchor="start">'+d.value+'</text>';
+  });
+  svg+='</g></svg>';
+  svg+='<div class="recharts-tooltip-wrapper" style="position:absolute;top:0;left:0;pointer-events:none;visibility:hidden"></div>';
+  wrap.innerHTML=svg;
+  spec.geom={px0,px1,py0,py1,band,W,H};
+}
+function drawCharts(){ const d=appDoc(); CHARTS.forEach(spec=>drawBarChart(d,spec)); }
+
+function RegistrantRoll(rows,policy){
+  const {columns,unreadable}=resolveRollColumns(policy);
+  const hasRows=rows!==null&&rows.length>0;
+  const showTable=columns.length>0&&hasRows;
+  return '<p class="registrant-roll__note">'+esc(t('public.registrantRoll.disclaimer'))+'</p>'
+    +(showTable?'<div class="registrant-roll"><table>'
+        +'<thead><tr>'+columns.map(c=>'<th>'+esc(c)+'</th>').join('')+'</tr></thead>'
+        +'<tbody>'+rows.map(row=>'<tr>'+columns.map(c=>'<td>'+esc(typeof row[c]==='string'?row[c]:'')+'</td>').join('')+'</tr>').join('')+'</tbody>'
+      +'</table></div>':'')
+    +(hasRows?'':'<p class="registrant-roll__note">'+esc(t('public.registrantRoll.empty'))+'</p>')
+    +(unreadable.length>0?'<p class="registrant-roll__note">'+esc(t('public.rules.policyUnreadable'))+'</p>':'');
+}
+function factBody(fact){
+  if(fact.interpolates!==null&&fact.sentenceKey!==null){
+    if(S.keyRelease===null) return t('public.fact.keyrelease.unreadable');
+    /* `total:` is the PLACEHOLDER's name; keyholderCount is the value. */
+    return t(fact.sentenceKey,{released:S.keyRelease.released,total:S.keyRelease.keyholderCount});
+  }
+  if(fact.sentenceKey===null) return null;
+  return t(fact.sentenceKey);
+}
+function FactCard(fact){
+  const body=factBody(fact);
+  const rendersCollection=fact.emptyKey!==null;
+  const rendersKeyRelease=fact.interpolates!==null&&fact.sentenceKey!==null;
+  /* production passes no policy to the fold; the prototype threads its
+     policy through so a withheld District takes the chart down with it */
+  const districtBuckets=rendersCollection?foldDistrictCounts(S.roll,S.policy):[];
+  if(fact.gap!==null){
+    return '<article class="fact-card fact-card--gap" data-fact-id="'+esc(fact.id)+'" data-fact-kind="gap">'
+      +'<h3 class="fact-card__label">'+esc(t(fact.labelKey))+'</h3>'
+      +(body===null?'':'<p class="fact-card__body">'+esc(body)+'</p>')
+      +(fact.detailKey===null?'':DetailsToggle('gap-'+fact.id,t('public.gap.detailsSummary'),t(fact.detailKey)))
+    +'</article>';
+  }
+  return '<article class="fact-card" data-fact-id="'+esc(fact.id)+'" data-fact-kind="fact">'
+    +'<h3 class="fact-card__label">'+esc(t(fact.labelKey))+'</h3>'
+    +(body===null?'':'<p class="fact-card__body">'+esc(body)+'</p>')
+    +((rendersKeyRelease&&S.keyRelease!==null)?'<div class="fact-card__chart">'
+        +Meter({value:S.keyRelease.released,total:S.keyRelease.keyholderCount,variant:'compact',
+                emptyCopyKey:'public.fact.keyrelease.meterEmpty'})
+      +'</div>':'')
+    +(rendersCollection?RegistrantRoll(S.roll,S.policy):'')
+    +(districtBuckets.length>0?'<div class="fact-card__chart">'
+        +BarSeries({
+          data:districtBuckets.map(b=>{
+            const label=b.label??t('public.registrantRoll.chart.otherBucket');
+            return {key:b.key,label,value:b.count,
+                    tooltip:t('public.registrantRoll.chart.tooltip',{district:label,count:String(b.count)})};
+          }),
+          defaultTone:'series-1',
+          categoryAxisWidth:ROLL_CHART_CATEGORY_AXIS_PX,
+          height:Math.min(ROLL_CHART_MAX_HEIGHT_PX,
+            Math.max(ROLL_CHART_MIN_HEIGHT_PX,ROLL_CHART_FIXED_CHROME_PX+districtBuckets.length*ROLL_CHART_PER_ROW_PX)),
+        })
+      +'</div>':'')
+    +((fact.detailKey===null||rendersCollection)?'':DetailsToggle('fact-'+fact.id,t('public.fact.detailsSummary'),t(fact.detailKey)))
+  +'</article>';
+}
+function FactSections(phase){
+  const groups=groupFactsForPhase(phase);
+  if(groups.length===0) return '';
+  return groups.map(g=>'<section class="fact-section" data-fact-group="'+esc(g.group)+'">'
+    +'<h2 class="fact-section__heading">'+esc(t(g.headingKey))+'</h2>'
+    +g.facts.map(FactCard).join('')
+  +'</section>').join('');
+}
+function ElectionIndex(){
+  const resolved=S.indexResult;
+  const elections=resolved===null?[]:resolved.elections;
+  const indexState=resolved===null?'loading':(elections.length>0?'listed':'empty');
+  return '<section class="election-index" data-index-state="'+indexState+'" data-index-count="'+elections.length
+      +'" data-index-complete="'+(resolved===null?'unknown':String(resolved.complete))+'">'
+    +elections.map(e=>'<div class="election-index__item">'
+        +(e.title?esc(e.title):'')
+        +'<a href="?network='+encodeURIComponent(e.networkHash)+'&election='+encodeURIComponent(e.electionId)+'">'
+          +esc(t('public.index.viewElectionCta'))+'</a>'
+      +'</div>').join('')
+    +(indexState==='empty'?'<h2>'+esc(t('public.index.emptyHeading'))+'</h2>':'')
+    +(indexState==='empty'?'<p>'+esc(t('public.index.emptyBody'))+'</p>':'')
+    +((resolved!==null&&resolved.complete===false)?'<p>'+esc(t('public.index.someUnreadable'))+'</p>':'')
+  +'</section>';
+}
+
+/* =========================================================================
+ * 8. THE PAGE — mirrors ElectionShell.tsx's own branch order.
+ * ====================================================================== */
+function Body(){
+  if(S.configFault!==null){
+    return '<section class="election-unreadable">'
+      +'<h2>'+esc(t('public.config.'+S.configFault+'.title'))+'</h2>'
+      +'<p>'+esc(t('public.config.'+S.configFault+'.body'))+'</p>'
+    +'</section>';
+  }
+  if(S.addressStatus==='malformed'){
+    return '<section class="election-unreadable">'
+      +'<h2>'+esc(t('public.election.unreadableAddress.title'))+'</h2>'
+      +'<p>'+esc(t('public.election.unreadableAddress.body'))+'</p>'
+    +'</section>';
+  }
+  const pr=phaseResult();
+  const addressed=S.addressStatus==='ok';
+  const holdsNothing=addressed&&S.readState==='notHeld';
+  const showBanner=addressed&&(S.readState==='ready'||S.readState==='unreadable');
+  const showLifecycleSlot=!addressed||S.readState==='reading'||holdsNothing;
+  const formatted=formatReaderInstant(S.observedAt);
+  const showStaleness=addressed&&S.readState==='ready'&&S.connection==='down'&&formatted!==null;
+  const showLiveUpdate=addressed&&S.readState==='ready'&&S.justUpdated&&S.connection!=='down';
+  const hasElectionRow=hasElection();
+
+  const regMs=pr.at.registrationEnds??null;
+  const registrationEndsCanonical=regMs===null?null:iso(regMs).slice(0,19);
+  const {textKey,tone}=headlineKey(pr.phase,{registrationEndsCanonical,atCanonical:S.at});
+
+  return '<section class="election">'
+    +(showStaleness?'<div class="staleness-banner">'
+        +'<span class="staleness-banner__badge">'+esc(t('public.staleness.badge'))+'</span>'
+        +'<p class="staleness-banner__text">'
+          +esc(t('public.staleness.body',{asOf:formatted.text+' ('+formatted.zone+')'}))+'</p>'
+      +'</div>':'')
+    +(addressed?'<p class="election-address">'+esc(t('public.election.addressLabel'))
+        +' <code>'+esc(ELECTION_ID)+'</code></p>':'')
+    +((S.addressStatus==='missing'||S.addressStatus==='incomplete')?ElectionIndex():'')
+    +(holdsNothing?'<h2>'+esc(t('public.election.notHeld.title'))+'</h2>':'')
+    +(holdsNothing?'<p>'+esc(t('public.election.notHeld.body'))+'</p>':'')
+    +(showBanner?'<div class="status-banner status-banner--'+tone+'">'
+        +'<span class="status-banner__tone">'+esc(t('public.tone.'+tone))+'</span>'
+        +'<p class="status-banner__headline">'+esc(t(textKey))+'</p>'
+        +(showLiveUpdate?'<span class="live-update-badge">'+esc(t('public.liveUpdate.badge'))+'</span>':'')
+      +'</div>':'')
+    +LifecyclePill(pr.phase)
+    +(hasElectionRow?'<p class="election-title">'+esc(ELECTION_TITLE)+'</p>':Skeleton('title','public.election.slot.title'))
+    +(showLifecycleSlot?Skeleton('lifecycle','public.election.slot.lifecycle'):'')
+    +(hasElectionRow?'':Skeleton('timeline','public.election.slot.timeline'))
+    +FactSections(pr.phase)
+  +'</section>';
+}
+function Page(){
+  return '<div class="public-app">'
+    +'<header class="public-app__header">'+esc(t('public.chrome.appName'))+'</header>'
+    +'<main class="public-app__main">'
+      +Body()
+      +'<section class="public-caveats">'
+        +'<p class="public-caveat">'+esc(t('public.freshness.body'))+'</p>'
+        +'<p class="public-caveat">'+esc(t('public.caveat.timelineUnvalidated'))+'</p>'
+        +'<p class="public-caveat">'+esc(t('public.caveat.readOnly'))+'</p>'
+      +'</section>'
+      +AdvisoryDisclosure()
+      +DetailsToggle('about',t('public.details.summary'),t('public.details.body'))
+    +'</main>'
+    +'<footer class="public-app__footer"></footer>'
+  +'</div>';
+}
+
+/* =========================================================================
+ * 9. ROUTES — every state is a timeline + an instant + a read, never a
+ *    picked phase.
+ * ====================================================================== */
+const ph=(key)=>()=>{ S.at=AT[key]; S.observedAt=AT[key]; };
+const settling=()=>{ S.at=AT.settling; S.observedAt=AT.settling; };
+const ROUTES=[
+  {group:'The four phases'},
+  {id:'pre-open',label:'Being organized — registration open',apply:ph('pre')},
+  {id:'pre-closed',label:'Being organized — registration closed',apply:ph('preLate')},
+  {id:'pre-unknown',label:'Being organized — registration end unreadable',apply(){ph('pre')();S.timeline=without(TIMELINE,'registrationEnds');}},
+  {id:'voting',label:'Voting — polls are open',apply:ph('voting')},
+  {id:'settling',label:'Settling — 2 of 3 keys released',apply:settling},
+  {id:'closed',label:'Closed',apply:ph('closed')},
+  {id:'indeterminate',label:'Phase unknown — closing date unreadable',apply(){ph('voting')();S.timeline={...TIMELINE,closed:'to be announced'};}},
+
+  {group:'Timeline shapes'},
+  {id:'tl-rescued',label:'Settling — voting start unreadable, still decided',apply(){settling();S.timeline={...TIMELINE,votingStarts:'early November'};}},
+  {id:'tl-legacy',label:'Older seven-event timeline — phase unchanged',apply(){ph('voting')();S.timeline=without(TIMELINE,'accruingVotes','hashingVotes','releasingKeys');}},
+  {id:'tl-json-epoch',label:'Timeline stored as a JSON string of epoch ms',apply(){ph('voting')();
+    S.timeline=JSON.stringify(Object.fromEntries(Object.entries(TIMELINE).map(([k,v])=>[k,Date.parse(v+'Z')])));}},
+
+  {group:'Keyholder key release (settling)'},
+  {id:'kr-none',label:'No keys released yet — 0 of 3',apply(){settling();S.keyRelease={released:0,total:0,keyholderCount:3};}},
+  {id:'kr-all',label:'Every key released — 3 of 3',apply(){settling();S.keyRelease={released:3,total:3,keyholderCount:3};}},
+  {id:'kr-zero',label:'No keyholders recorded — empty meter',apply(){settling();S.keyRelease={released:0,total:0,keyholderCount:0};}},
+  {id:'kr-unreadable',label:'Key count unreadable — no meter',apply(){settling();S.keyRelease=null;}},
+
+  {group:'Voter roll and district chart'},
+  {id:'roll-guard',label:'One small district — a second folds with it',apply(){ph('voting')();S.roll=ROLL_GUARD;}},
+  {id:'roll-all-single',label:'Every district has one registrant — one Other bar',apply(){ph('voting')();S.roll=ROLL_ALL_SINGLE;}},
+  {id:'roll-unstated',label:'A registrant with no district stated',apply(){ph('voting')();S.roll=ROLL_UNSTATED;}},
+  {id:'roll-one-district',label:'Everyone in one district — one named bar',apply(){ph('voting')();S.roll=ROLL_ONE_DISTRICT;}},
+  {id:'roll-one',label:'A single registrant — folded',apply(){ph('voting')();S.roll=ROLL_ONE;}},
+  {id:'roll-empty',label:'Voter roll empty — no chart',apply(){ph('voting')();S.roll=[];}},
+  {id:'roll-unread',label:"Voter roll couldn't be read — same empty state",apply(){ph('voting')();S.roll=null;}},
+  {id:'roll-restricted',label:'District withheld from anonymous — no chart',apply(){ph('voting')();
+    S.policy=[{field:'LastName',audience:'everyone'},{field:'FirstName',audience:'everyone'},{field:'District',audience:'district'}];}},
+  {id:'roll-policy-bad',label:'Every column withheld — policy unreadable',apply(){ph('voting')();S.policy=null;}},
+
+  {group:'Connection and freshness'},
+  {id:'stale',label:'Not connected — last version held',apply(){ph('voting')();S.connection='down';S.observedAt='2026-11-03T11:40:00';}},
+  {id:'live',label:'Live update just arrived',apply(){ph('voting')();S.justUpdated=true;}},
+  {id:'reading',label:'Still reading — labelled empty slots',apply(){S.readState='reading';}},
+
+  {group:'Nothing to show'},
+  {id:'not-held',label:"Browser doesn't hold this election",apply(){S.readState='notHeld';}},
+  {id:'read-fault',label:'Held copy failed to read',apply(){S.readState='unreadable';}},
+
+  {group:'Bad links and bad config'},
+  {id:'address-malformed',label:"Link's address isn't readable",apply(){S.addressStatus='malformed';}},
+  {id:'index-listed',label:'No election named — index lists three',apply(){S.addressStatus='missing';S.readState='reading';S.indexResult={elections:HELD_ELECTIONS,complete:true};}},
+  {id:'index-network',label:'Only a network named — index scoped to it',apply(){S.addressStatus='incomplete';S.readState='reading';
+    S.indexResult={elections:HELD_ELECTIONS.filter(e=>e.networkHash===NETWORK_HASH),complete:true};}},
+  {id:'index-partial',label:'…index incomplete',apply(){S.addressStatus='missing';S.readState='reading';S.indexResult={elections:HELD_ELECTIONS.slice(0,1),complete:false};}},
+  {id:'index-empty',label:'…browser holds nothing',apply(){S.addressStatus='missing';S.readState='reading';S.indexResult={elections:[],complete:true};}},
+  {id:'config-missing',label:'Page config missing',apply(){S.configFault='missing';}},
+  {id:'config-malformed',label:"Page config can't be read",apply(){S.configFault='malformed';}},
+];
+const ROUTE_IDS=ROUTES.filter(r=>r.id).map(r=>r.id);
+
+function go(id){
+  if(!ROUTE_IDS.includes(id)) id='voting';
+  S.route=id;
+  S.timeline=TIMELINE; S.at=AT.voting; S.observedAt=AT.voting;
+  S.addressStatus='ok'; S.readState='ready'; S.connection='up'; S.justUpdated=false;
+  S.configFault=null; S.keyRelease={released:2,total:3,keyholderCount:3};
+  S.roll=ROLL; S.policy=ROLL_DISCLOSURE_POLICY; S.indexResult=null; S.open={};
+  ROUTES.find(r=>r.id===id).apply();
+  if(location.hash.slice(1)!==id) location.hash=id;
+  render();
+}
+
+/* =========================================================================
+ * 10. RENDER + EVENTS
+ * ====================================================================== */
+function renderRail(){
+  document.getElementById('railstates').innerHTML=ROUTES.map(r=>
+    r.group ? '<div class="grp">'+esc(r.group)+'</div>'
+            : '<button class="r" data-route="'+r.id+'" aria-current="'+(r.id===S.route?'true':'false')+'">'+esc(r.label)+'</button>'
+  ).join('');
+  document.querySelectorAll('#widths button').forEach(b=>
+    b.setAttribute('aria-pressed', b.dataset.w===S.width?'true':'false'));
+}
+/* The page renders inside an <iframe> so that its own viewport-dependent
+   behaviour is exercised for real. The frame receives ONLY the #app-style
+   sheet; the rail's stylesheet stays in this document. */
+const appDoc=()=>document.getElementById('stage').contentDocument;
+function bootFrame(){
+  const d=appDoc();
+  d.open();
+  d.write('<!doctype html><html lang="en"><meta charset="utf-8">'
+    +'<meta name="viewport" content="width=device-width, initial-scale=1">'
+    +document.getElementById('app-style').outerHTML
+    +'<div id="root"></div>');   /* #root, because tokens.css sizes html, body AND #root */
+  d.close();
+  d.addEventListener('click',onAppClick);
+  d.addEventListener('mousemove',onAppPointer);
+  d.addEventListener('mouseleave',hideTooltips);
+  d.defaultView.addEventListener('resize',drawCharts);
+}
+function render(){
+  renderRail();
+  const frame=document.getElementById('stage');
+  frame.style.maxWidth = S.width==='full' ? 'none' : (Number(S.width)+2)+'px';   /* +2: the frame's own border, so the PAGE viewport is exactly S.width */
+  const url='?network='+NETWORK_HASH+(S.addressStatus==='ok'?'&election='+ELECTION_ID
+            :(S.addressStatus==='malformed'?'&election=not-a-valid-id':''));
+  const pr=phaseResult();
+  document.getElementById('stagelabel').textContent=
+    '#'+S.route+'   ·   '+(S.width==='full'?'full width':S.width+'px')
+    +'   ·   at '+S.at+' → '+pr.phase+(pr.stage?' (stage '+pr.stage+')':'')
+    +'   ·   '+pr.conflicts.length+' timeline diagnostic'+(pr.conflicts.length===1?'':'s')
+    +'   ·   '+(S.configFault?'config '+S.configFault:url);
+  CHARTS=[];
+  appDoc().getElementById('root').innerHTML=Page();
+  drawCharts();
+}
+/* rail + width picker live in THIS document; everything else is in the frame */
+document.addEventListener('click',e=>{
+  const routeBtn=e.target.closest('#railstates button');
+  if(routeBtn){ go(routeBtn.dataset.route); return; }
+  const widthBtn=e.target.closest('#widths button');
+  if(widthBtn){ S.width=widthBtn.dataset.w; render(); }
+});
+function onAppClick(e){
+  const dt=e.target.closest('[data-act="dt"]');
+  if(dt){ const id=dt.dataset.id; S.open[id]=!S.open[id]; render(); return; }
+  const link=e.target.closest('.election-index a');
+  if(link){ e.preventDefault(); go('voting'); }
+}
+/* chart-frame.tsx's ChartTooltip: one .vt-chart__tooltip-value line holding
+   the caller's tooltip string, no label span; Recharts keeps the box inside
+   the chart (allowEscapeViewBox false), 10px off the pointer. */
+function hideTooltips(){
+  appDoc().querySelectorAll('.recharts-tooltip-wrapper').forEach(tw=>{ tw.style.visibility='hidden'; tw.innerHTML=''; });
+}
+function onAppPointer(e){
+  const wrap=e.target.closest&&e.target.closest('.recharts-wrapper[data-chart-id]');
+  const d=appDoc();
+  d.querySelectorAll('.recharts-wrapper[data-chart-id]').forEach(w=>{
+    if(w===wrap) return;
+    const tw=w.querySelector('.recharts-tooltip-wrapper'); if(tw){ tw.style.visibility='hidden'; tw.innerHTML=''; }
+  });
+  if(!wrap) return;
+  const spec=CHARTS.find(c=>c.id===wrap.dataset.chartId); if(!spec||!spec.geom) return;
+  const g=spec.geom, box=wrap.getBoundingClientRect(), x=e.clientX-box.left, y=e.clientY-box.top;
+  const tw=wrap.querySelector('.recharts-tooltip-wrapper');
+  if(x<g.px0||x>g.px1||y<g.py0||y>g.py1){ tw.style.visibility='hidden'; tw.innerHTML=''; return; }
+  const i=Math.min(spec.data.length-1,Math.floor((y-g.py0)/g.band));
+  tw.innerHTML='<div class="vt-chart__tooltip"><span class="vt-chart__tooltip-value">'+esc(spec.data[i].tooltip)+'</span></div>';
+  const tw_w=tw.offsetWidth, tw_h=tw.offsetHeight;
+  let left=x+10; if(left+tw_w>g.W) left=Math.max(0,x-10-tw_w);
+  let top=y+10;  if(top+tw_h>g.H) top=Math.max(0,y-10-tw_h);
+  tw.style.transform='translate('+left+'px,'+top+'px)';
+  tw.style.visibility='visible';
+}
+window.addEventListener('hashchange',()=>{ const h=location.hash.slice(1); if(h&&h!==S.route) go(h); });
+
+bootFrame();
+go(location.hash.slice(1)||'voting');
+</script>
+</body>
+</html>

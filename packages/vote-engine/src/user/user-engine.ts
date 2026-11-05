@@ -1,6 +1,7 @@
-import { MisuseError, QuereusError } from '@quereus/quereus'
-import { FeatureNotAvailableError, UserHistoryEvent } from '@votetorrent/vote-core'
-import { digestToBytes, fromCanonicalDatetime, nowCanonicalDatetime, parseJsonOr, toCanonicalDatetime } from '../utils.js'
+import { rethrow as rethrowHelper } from '../signing/ceremony-helpers.js'
+import { FeatureNotAvailableError, toImageRef, UserHistoryEvent, UserKeyType } from '@votetorrent/vote-core'
+import { bytesToBase64url, digestToBytes, fromCanonicalDatetime, nowCanonicalDatetime, parseJsonOr, toCanonicalDatetime } from '../utils.js'
+import { verifySig, verifySigP256 } from '../database/initialize.js'
 import { allocateTid } from '../database/tid-allocator.js'
 import type { EngineContext } from '../types.js'
 import type {
@@ -18,8 +19,7 @@ import type {
   Timestamp,
   User,
   UserHistory,
-  UserKey,
-  UserKeyType
+  UserKey
 } from '@votetorrent/vote-core'
 import {
   UserAddKeyBuilder,
@@ -221,7 +221,7 @@ export class UserEngine implements IUserEngine {
 					PubKey,
 					Expiration
 				)
-				with context UserKey = null, Signature = null, Tid = ${tid}, now = :now, IsSignatureValid = true
+				with context UserKey = null, Signature = null, Tid = ${tid}, now = :now, IsSignatureValid = :isSignatureValid
 				values (:userId, :keyType, :keyValue, :expiration);
 
 				insert into UserEvent (UserId, Tid, Sequence, Event, Timestamp, Signature, Payload)
@@ -245,6 +245,14 @@ export class UserEngine implements IUserEngine {
           expiration: toCanonicalDatetime(userInit.userKey.expiration),
           inviteSlotCid: options?.inviteSlotCid ?? null,
           inviteSignature: options?.inviteSignature ?? null,
+          // 49-05 (D-20 sweep): genuinely true (first-ever User row — there is
+          // no existing signer, no signature to verify; UserKey.SignatureValid's
+          // bootstrap OR-branch is a plain boolean short-circuit, not a crypto
+          // check, per its own schema comment). Bound as a parameter rather
+          // than inlined SQL so the codebase has zero literal
+          // `IsSignatureValid = true` hardcodes left after 49-05's revokeKey
+          // fix — every remaining bind is an honest per-branch value.
+          isSignatureValid: true,
           now: nowCanonicalDatetime(),
           // D-15: Signature written null this phase; Phase 21 fills real
           // signature content via the signing pipeline (no migration).
@@ -349,15 +357,58 @@ export class UserEngine implements IUserEngine {
       return {
         id: row.Id as string,
         name: row.Name as string,
-        imageRef: parseJsonOr<ImageRef | undefined>(
+        imageRef: toImageRef(parseJsonOr<unknown>(
           row.ImageRef,
           undefined,
           'User.ImageRef'
-        ),
+        )),
         activeKeys
       }
     } catch (err) {
       this.rethrow(err, 'getSummary')
+    }
+  }
+
+  /**
+   * O-06 (engine half): read-only inspection for the forked-device-identity repair. Reports whether
+   * `localUserId` is a network User, and which CURRENT officers (any authority) hold `pubKey` as an
+   * active UserKey, sorted. Every UserKey read is a point lookup on the `UserId` primary-key prefix
+   * (`UserId = :userId and PubKey = :pubKey`); there is no scan of UserKey. Never logs ids.
+   */
+  async inspectDeviceIdentity (
+    localUserId: string,
+    pubKey: string
+  ): Promise<{ localIsNetworkUser: boolean, officerUserIdsHoldingKey: string[] }> {
+    this.requireCtx('inspectDeviceIdentity')
+    if (typeof localUserId !== 'string' || localUserId.length === 0) {
+      throw new Error('UserEngine.inspectDeviceIdentity: localUserId must be a non-empty string')
+    }
+    if (typeof pubKey !== 'string' || pubKey.length === 0) {
+      throw new Error('UserEngine.inspectDeviceIdentity: pubKey must be a non-empty string')
+    }
+    try {
+      const db = this.ctx!.db
+      const userRow = await db.prepare('select 1 as found from User where Id = :id').get({ id: localUserId })
+      const officerUserIds: string[] = []
+      for await (const row of db.eval(
+        `select distinct O.UserId as UserId
+           from Officer O
+           join CurrentAdmin CA on CA.AuthorityId = O.AuthorityId and CA.EffectiveAt = O.AdminEffectiveAt
+          order by O.UserId`
+      )) {
+        officerUserIds.push(row.UserId as string)
+      }
+      const now = nowCanonicalDatetime()
+      const holding: string[] = []
+      for (const userId of officerUserIds) {
+        const keyRow = await db
+          .prepare('select 1 as found from UserKey where UserId = :userId and PubKey = :pubKey and Expiration > :date')
+          .get({ userId, pubKey, date: now })
+        if (keyRow != null) holding.push(userId)
+      }
+      return { localIsNetworkUser: userRow != null, officerUserIdsHoldingKey: holding.sort() }
+    } catch (err) {
+      this.rethrow(err, 'inspectDeviceIdentity')
     }
   }
 
@@ -369,10 +420,10 @@ export class UserEngine implements IUserEngine {
    * T-18-01 mitigation: userId and scope are bound ONLY via the params object
    * `{ userId, scope }` — never string-interpolated into the SQL statement.
    *
-   * NOTE: The Scope TS type includes 'rnp' but the DB Scope view does not
-   * list it (existing schema inconsistency, not introduced here). The query
-   * is correct as-is; an Officer with 'rnp' in their Scopes JSON would have
-   * failed the ScopesValid CHECK at insert time — no special handling needed.
+   * NOTE (resolved 2026-08-25): the TS Scope union previously declared 'rnp',
+   * which the DB's `view Scope` never defined. That drift has been removed —
+   * the union, `scopeDescriptions` and `view Scope` now carry the same nine
+   * codes, so no scope reaching this query can be unrepresentable in the view.
    *
    * T-18-02 mitigation: Scope match uses exact equality (json_each value = :scope,
    * not LIKE), and the join is restricted to CurrentAdmin — prevents false-positive
@@ -472,12 +523,51 @@ export class UserEngine implements IUserEngine {
   }
 
   /**
+   * D-20 (49-05) — the canonical `revokeKey` pre-image: `Digest(UserId, PubKey)`.
+   * This is the ONLY definition of the revoke digest formula in the codebase —
+   * `revokeKey` below calls this SAME method internally (rather than
+   * re-deriving the formula) so the engine and the caller can never drift.
+   * Public so the app layer signs exactly these bytes and never recomputes a
+   * canonical form itself (D-03's own stated principle, which
+   * `RevokeKeyScreen.tsx`'s prior ad hoc `revokeKey:${key}` payload violated —
+   * see 49-RESEARCH.md Pitfall 5).
+   */
+  async getRevokeKeyDigest (keyToRevoke: string): Promise<Uint8Array> {
+    this.requireCtx('getRevokeKeyDigest')
+    const digestRow = await this.ctx!.db
+      .prepare('select Digest(:userId, :pubKey) as d')
+      .get({ userId: this.user.id, pubKey: keyToRevoke })
+    if (!digestRow || digestRow.d == null) {
+      throw new Error(
+        'UserEngine.getRevokeKeyDigest: Digest() returned null — crypto plugin not registered?'
+      )
+    }
+    return digestToBytes(digestRow.d)
+  }
+
+  /**
    * USER-06 — DELETE a UserKey row by its hex pubkey. The schema's
    * `UserKey.DeleteValid` is `check on delete` and requires (a) the
-   * deleting signer's key is non-expired, and (b) it is not the last
-   * remaining key for the user. Quereus#23 currently fires `check on
-   * delete` on every operation; once that lands, this DELETE will work
-   * as the schema intends.
+   * deleting signer's key is non-expired, (b) it is not the last remaining
+   * key for the user, and (c, added 49-05/D-20) a real signature over the
+   * canonical `Digest(UserId, PubKey)` pre-image (see `getRevokeKeyDigest`
+   * above), curve-branched per 49-02 (D-02/D-03).
+   *
+   * 49-03's probe (`quereus-delete-check-semantics.spec.ts`) empirically
+   * proved, on the installed Quereus 4.11.0, that `check on delete` fires on
+   * DELETE (and only DELETE — quereus#23's `check on delete`-fires-on-INSERT
+   * stays fixed) and can safely call `SignatureValid(Digest(old...), ...)`.
+   * That is the "extend-DeleteValid" verdict this method's schema-side
+   * counterpart implements — this doc comment previously claimed quereus#23
+   * makes `check on delete` fire on every operation, which was never true.
+   *
+   * Engine-side, this method ALSO computes a REAL (not hardcoded)
+   * verification result and binds it to `context.IsSignatureValid` (999.1
+   * R-04 precedent: the field stays declared for other raw-SQL seeders'
+   * backward-compatible binding, but a producer accepting a real signature
+   * no longer asserts a fabricated `true`). The verifier is curve-dispatched
+   * by resolving the signer key's persisted `UserKey.Type`, defaulting to
+   * `verifySig` (secp256k1) when the signer key is not registered.
    */
   async revokeKey (keyToRevoke: string, signature: Signature): Promise<void> {
     this.requireCtx('revokeKey')
@@ -487,10 +577,27 @@ export class UserEngine implements IUserEngine {
     // activated (SC#7 / UKEY-02). Fall back to the subject's first active key only when
     // signerKey is absent (preserves pure-guard test path).
     const signerKey = signature.signerKey ?? this.user.activeKeys?.[0]?.key ?? null
+
+    // D-20 (49-05): compute the canonical digest once (single definition,
+    // getRevokeKeyDigest above) and a real, curve-correct verification
+    // result — this REPLACES the prior `IsSignatureValid = true` hardcode.
+    const digestBytes = await this.getRevokeKeyDigest(keyToRevoke)
+    const digestB64url = bytesToBase64url(digestBytes)
+    let signerCurve: string | null = null
+    if (signerKey != null) {
+      const signerRow = await this.ctx!.db
+        .prepare('select Type from UserKey where UserId = :userId and PubKey = :signerKey')
+        .get({ userId: this.user.id, signerKey })
+      signerCurve = (signerRow?.Type as string | undefined) ?? null
+    }
+    const isSignatureValid = signerCurve === UserKeyType.p256
+      ? verifySigP256(digestB64url, signature.signature, signerKey)
+      : verifySig(digestB64url, signature.signature, signerKey)
+
     try {
       await this.ctx!.db.exec(
 				`delete from UserKey
-				with context UserKey = :userKey, Signature = :signature, Tid = ${tid}, now = :now, IsSignatureValid = true
+				with context UserKey = :userKey, Signature = :signature, Tid = ${tid}, now = :now, IsSignatureValid = :isSignatureValid
 				where UserId = :userId and PubKey = :pubKey;
 
 				insert into UserEvent (UserId, Tid, Sequence, Event, Timestamp, Signature, Payload)
@@ -511,6 +618,7 @@ export class UserEngine implements IUserEngine {
           // UKEY-02: bind the real device Signature (replaces null) so context.Signature
           // carries a non-null value for UserKey.SignatureValid.
           signature: signature.signature,
+          isSignatureValid,
           now: nowCanonicalDatetime(),
           // D-14/D-15/D-16: append-only RevokeUserKeyHistory event in the
           // same batch (same Tid). Payload carries the revoked pubkey hex.
@@ -553,14 +661,6 @@ export class UserEngine implements IUserEngine {
   }
 
   private rethrow (err: unknown, method: string): never {
-    if (err instanceof QuereusError) {
-      throw new Error(`Quereus error (code ${err.code}): ${err.message}`)
-    } else if (err instanceof MisuseError) {
-      throw new Error(`API misuse: ${err.message}`)
-    } else if (err instanceof Error) {
-      throw new Error(`UserEngine.${method}: ${err.message}`)
-    } else {
-      throw new Error(`UserEngine.${method}: unknown error: ${String(err)}`)
-    }
+    return rethrowHelper(err, 'UserEngine', method)
   }
 }

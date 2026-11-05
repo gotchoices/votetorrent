@@ -146,6 +146,9 @@ export enum ElectionEvent {
   registrationEnds = 'registrationEnds',
   ballotsFinal = 'ballotsFinal',
   votingStarts = 'votingStarts',
+  accruingVotes = 'accruingVotes',
+  hashingVotes = 'hashingVotes',
+  releasingKeys = 'releasingKeys',
   tallyingStarts = 'tallyingStarts',
   validation = 'validation',
   certificationStarts = 'certificationStarts',
@@ -218,6 +221,9 @@ export interface BallotSummary {
 
   /** The id of the authority posting the ballot */
   authorityId: string
+
+  /** The ballot's description (finalized Ballot.Description preferred) */
+  description: string
 }
 
 export interface Option {

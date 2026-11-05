@@ -1,0 +1,37 @@
+# Journey: visit every Authority tab (works with or without a network).
+appId: ${APP_ID}
+name: "Authority: bottom tabs"
+tags:
+  - authority
+  - smoke
+env:
+  APP_ID: "${typeof AUTHORITY_APP_ID == 'undefined' ? 'org.votetorrent.authority' : AUTHORITY_APP_ID}"
+  BOOT_TIMEOUT_MS: "${typeof BOOT_TIMEOUT_MS == 'undefined' ? '300000' : BOOT_TIMEOUT_MS}"
+---
+- runFlow:
+    file: ../subflows/authority/launch.yaml
+    env:
+      CLEAR_STATE: "false"
+- runFlow:
+    file: ../subflows/authority/open-tab.yaml
+    env:
+      TAB: tasks
+- extendedWaitUntil:
+    visible: "No tasks|Choose a network to get started|RELEASE|SIGNATURE"
+    timeout: 30000
+- runFlow:
+    file: ../subflows/authority/open-tab.yaml
+    env:
+      TAB: authorities
+- runFlow:
+    file: ../subflows/authority/open-tab.yaml
+    env:
+      TAB: settings
+- extendedWaitUntil:
+    visible:
+      id: "settings-scroll"
+    timeout: 30000
+- runFlow:
+    file: ../subflows/authority/open-tab.yaml
+    env:
+      TAB: elections

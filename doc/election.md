@@ -67,10 +67,11 @@ See [Administration](./administration.md)
   * Announced via pub-sub topic on Election Network, and deep-link can be sent via traditional channels (e.g. email)
   * Typically, a keyholder will not use a personal device for this duty, but rather will use a dedicated device which is then stored in a secure location
   * Using the Authority App, the keyholder accepts by:
-    * Generating an election specific key pair (private key may not be held in hardware vault because it must be releasable)
-    * Election private key is encrypted using biometric-backed, in-hardware registration private key - unencrypted key not persisted
-    * The encrypted private key is stored on the device
-    * Keyholder record is signed using the registrant's private key
+    * On acceptance, the keyholder gets a fresh per-acceptance identity and a distributed key generation (DKG) receiving key pair, published in a keyholder-signed binding record
+    * After acceptance closes, the keyholders run a distributed key generation with no trusted dealer, so no device ever holds the full election private key
+    * Each keyholder ends with one key share, stored encrypted under a biometric-backed hardware key and never persisted in the clear
+    * The joint election public key is published
+    * The binding record is signed with the keyholder's own per-acceptance signing key
     * Keyholder record is published to the Election Network
 
 ### The election is revised
@@ -116,13 +117,14 @@ See [Administration](./administration.md)
   * Q: Where is this stored and cached?
 
 ### Election unlocked
-  * If any private keys held by a keyholder are released prior to the Releasing Keys portion of the election, a validation record is created by that party, capturing the private key and the timestamp, and is submitted as part of election validation
-  * During the Releasing Keys portion of the election, each of the keyholders must publish his or her private election key
-    * Using the Authority App, the keyholder uses biometrics to unlock the private key they hold
-    * The private key is then published to the Election Network along with timestamp(s) from TSA(s)
+  * If a key share held by a keyholder is released before the Releasing Keys portion of the election, a validation record is created by that party, capturing the key share and the timestamp, and is submitted as part of election validation
+  * During the Releasing Keys portion of the election, each keyholder publishes their key share publicly, unlocked with biometrics, with TSA timestamps
+    * Using the Authority App, the keyholder uses biometrics to unlock the key share they hold
+    * The key share is then published to the Election Network along with timestamp(s) from TSA(s)
+  * Releases from at least k keyholders (the election revision's keyholder threshold) are required before the election can be tallied
 
 ### Election tallied
-  * With all keyholders private keys released, the vote and voter records within each block are all decryptable by anyone, using the combination private keys
+  * Once at least k valid key shares are published, anyone can verify each share against the published commitments, reconstruct the election private key, confirm it matches the published election public key, and decrypt the vote and voter records within each block
   * Nodes coordinate to create a tally tree, corresponding to the Merkle tree of hashes of the blocks, but including a histogram of results at each level
   * Each node of the built tree should be signed by the nodes that created it, and be timestamped by TSAs
   * Q: How is this coordinated?

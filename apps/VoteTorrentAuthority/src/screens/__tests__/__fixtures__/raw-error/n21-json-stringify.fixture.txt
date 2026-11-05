@@ -1,0 +1,2 @@
+const onFail = (err: unknown) => {
+  setX(JSON.stringify(err));

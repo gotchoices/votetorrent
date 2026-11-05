@@ -1,0 +1,74 @@
+diff --git a/dist/src/cluster/certified-claims.js b/dist/src/cluster/certified-claims.js
+index 419e11cd19b7e7d85ceadc3ce04c86201212b8a9..9907f26e8ad521bfa3d5123505bb755937745709 100644
+--- a/dist/src/cluster/certified-claims.js
++++ b/dist/src/cluster/certified-claims.js
+@@ -1,4 +1,6 @@
+ import { verifyBlockCommitProofClaim, verifyBlockCommitProofContent } from "./commit-proof.js";
++import { sha256 } from "@noble/hashes/sha2.js";
++import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils.js";
+ import { createLogger } from "../logger.js";
+ const log = createLogger('certified-claims');
+ /**
+@@ -92,6 +94,53 @@ export function isAttributableProofFailure(failure) {
+ export function proofThresholds(superMajorityThreshold) {
+     return { superMajorityThreshold, simpleMajorityThreshold: 0.5 };
+ }
++/**
++ * VoteTorrent patch: memoize the offline verification of a claim's proof. A node re-reads the same
++ * blocks every read-repair window (cadre's membership views reload every 15 s) and every answering
++ * peer re-sends the same proof, so the same Ed25519 signatures were verified again and again: about
++ * a fifth of an idle Voter's JS time on Hermes. The verdict is a pure function of (proof, claim,
++ * thresholds), so it is keyed by a hash of their JSON, and two inputs share an entry only when their
++ * JSON is identical. An input JSON cannot represent exactly (a Map, a typed array, a non-finite
++ * number, a BigInt) is verified uncached. Anchoring still runs on every call.
++ */
++const VERDICT_CACHE_MAX = 512;
++const verdictCache = new Map();
++
++function exactJson(_key, value) {
++    if (typeof value === 'number' && !Number.isFinite(value)) {
++        throw new Error('non-finite');
++    }
++    if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
++        const proto = Object.getPrototypeOf(value);
++        if (proto !== Object.prototype && proto !== null) {
++            throw new Error('not plain JSON');
++        }
++    }
++    return value;
++}
++
++function verifyClaimCached(proof, claim, thresholds) {
++    let key;
++    try {
++        key = bytesToHex(sha256(utf8ToBytes(JSON.stringify([proof, claim, thresholds], exactJson))));
++    }
++    catch {
++        return verifyBlockCommitProofClaim(proof, claim, thresholds);
++    }
++    const hit = verdictCache.get(key);
++    if (hit !== undefined) {
++        verdictCache.delete(key);
++        verdictCache.set(key, hit);
++        return hit;
++    }
++    const verdict = verifyBlockCommitProofClaim(proof, claim, thresholds);
++    verdictCache.set(key, verdict);
++    if (verdictCache.size > VERDICT_CACHE_MAX) {
++        verdictCache.delete(verdictCache.keys().next().value);
++    }
++    return verdict;
++}
++
+ /**
+  * Certify a repair claim by its attached cohort commit proof: cap the cohort, verify offline
+  * ({@link verifyBlockCommitProofClaim}), then run the anchoring layer on success. Total on hostile
+@@ -101,7 +150,7 @@ export async function certifyClaim(proof, claim, thresholds, anchoring = {}) {
+     if (exceedsSignerCap(proof)) {
+         return { certified: false, failure: 'oversized-cohort' };
+     }
+-    const verdict = await verifyBlockCommitProofClaim(proof, claim, thresholds);
++    const verdict = await verifyClaimCached(proof, claim, thresholds);
+     if (!verdict.ok) {
+         return { certified: false, failure: verdict.reason };
+     }

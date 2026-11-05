@@ -313,6 +313,14 @@ export class MockNetworkEngine implements INetworkEngine {
     return revision + 1
   }
 
+  async applyRevision (name: string, revision: number): Promise<void> {
+    console.log(
+      'MockNetworkEngine: applyRevision called for',
+      name,
+      revision
+    )
+  }
+
   async respondToInvitation<TInvokes>(
     invitation: InviteAction<TInvokes>
   ): Promise<string> {

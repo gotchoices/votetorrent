@@ -1,13 +1,21 @@
 default_platform(:ios)
 
+# Assumption A5 (51-03 Task 2) was verified, not assumed: this file exists and both
+# lanes below (beta, release) are real publish lanes (TestFlight / App Store), so they
+# get the same D-14 App Attest release gate as the Android build_apk/build_aab lanes.
+# See scripts/fastlane/vt_appattest_release_gate.rb.
+FASTLANE_DIR = __dir__
+REPO_ROOT    = File.expand_path("../../../..", FASTLANE_DIR)
+require File.join(REPO_ROOT, "scripts", "fastlane", "vt_appattest_release_gate")
+
 platform :ios do
   desc "Push a new beta build to TestFlight"
   lane :beta do
-    setup_ci if ENV['CI']
-    
-    # Ensure we're on the latest provisioning profiles
-    get_provisioning_profile
-    
+    VtAppAttestReleaseGate.assert_releasable!(REPO_ROOT)
+
+    # Provisioning comes from Xcode automatic signing; this lane creates and
+    # downloads nothing at Apple.
+
     # Increment build number
     increment_build_number
     
@@ -27,11 +35,11 @@ platform :ios do
 
   desc "Push a new release build to the App Store"
   lane :release do
-    setup_ci if ENV['CI']
-    
-    # Ensure we're on the latest provisioning profiles
-    get_provisioning_profile
-    
+    VtAppAttestReleaseGate.assert_releasable!(REPO_ROOT)
+
+    # Provisioning comes from Xcode automatic signing; this lane creates and
+    # downloads nothing at Apple.
+
     # Increment build number
     increment_build_number
     

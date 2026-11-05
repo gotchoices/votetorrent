@@ -1,0 +1,33 @@
+# Journey: Networks > JOIN A NETWORK with a code that does not decode. Expects the inline decode
+# error and no join. Safe on any device.
+appId: ${APP_ID}
+name: "Authority: join network rejects a bad code"
+tags:
+  - authority
+  - smoke
+  - join
+env:
+  APP_ID: "${typeof AUTHORITY_APP_ID == 'undefined' ? 'org.votetorrent.authority' : AUTHORITY_APP_ID}"
+  BOOT_TIMEOUT_MS: "${typeof BOOT_TIMEOUT_MS == 'undefined' ? '300000' : BOOT_TIMEOUT_MS}"
+---
+- runFlow:
+    file: ../subflows/authority/launch.yaml
+    env:
+      CLEAR_STATE: "false"
+- runFlow: ../subflows/authority/open-networks.yaml
+- tapOn:
+    id: "networks-join-network-button"
+- extendedWaitUntil:
+    visible:
+      id: "join-network-code-input"
+    timeout: 15000
+- tapOn:
+    id: "join-network-code-input"
+- inputText: "not-a-join-code"
+- extendedWaitUntil:
+    visible:
+      id: "join-network-code-error"
+    timeout: 10000
+- assertNotVisible:
+    id: "join-network-preview"
+- back

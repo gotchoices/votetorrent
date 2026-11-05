@@ -5,7 +5,7 @@
  */
 import React from 'react';
 import renderer from 'react-test-renderer';
-import {ScrollView} from 'react-native';
+import {Keyboard, Platform, ScrollView, TextInput, View} from 'react-native';
 import '../../../i18n'; // initializes the global i18next instance useTranslation() reads from
 
 const mockNavigate = jest.fn();
@@ -96,6 +96,26 @@ describe('RegisterPersonalScreen (REG-03, Step 1)', () => {
 		expect(tr.root.findByProps({testID: 'register-phone'})).toBeDefined();
 	});
 
+	it('every text input and both header icons resolve to a >= 44dp touch target', () => {
+		const tr = renderScreen();
+		for (const testID of ['register-first-name', 'register-last-name', 'register-dob', 'register-email', 'register-phone']) {
+			// The host TextInput itself (not the FieldRow wrapper that forwards the testID).
+			const input = tr.root.findAllByType(TextInput).find(n => n.props.testID === testID);
+			const style = Object.assign({}, ...[].concat(input?.props.style ?? []));
+			expect(style.minHeight).toBeGreaterThanOrEqual(44);
+		}
+		for (const testID of ['register-back', 'register-close']) {
+			const style = Object.assign({}, ...[].concat(tr.root.findByProps({testID}).props.style ?? []));
+			expect(style.minHeight).toBeGreaterThanOrEqual(44);
+			expect(style.minWidth).toBeGreaterThanOrEqual(44);
+			// No negative margin: on Android a part pushed outside the clipping ScrollView is
+			// untappable, which shrank the effective target below the glyph's own box.
+			expect(style.marginHorizontal ?? 0).toBeGreaterThanOrEqual(0);
+			expect(style.marginLeft ?? 0).toBeGreaterThanOrEqual(0);
+			expect(style.marginRight ?? 0).toBeGreaterThanOrEqual(0);
+		}
+	});
+
 	it('firing register-first-name onChangeText calls updateField(firstName, value) — write-through', () => {
 		const tr = renderScreen();
 		renderer.act(() => {
@@ -160,5 +180,53 @@ describe('RegisterPersonalScreen (REG-03, Step 1)', () => {
 		// Continue is a sibling BELOW the ScrollView (not scrolled), so it is not found inside it.
 		expect(scrollViews[0].findAllByProps({testID: 'register-continue'}).length).toBe(0);
 		expect(tr.root.findAllByProps({testID: 'register-continue'}).length).toBeGreaterThan(0);
+	});
+});
+
+/**
+ * Android forces edge-to-edge on any app targeting SDK 35, which makes the manifest's
+ * `adjustResize` a no-op: the window is not resized for the IME, so the ScrollView's max scroll
+ * offset never grows and the pinned Continue CTA is stranded behind the keyboard. The screen has
+ * to apply the inset itself — these pin that it does, on the real tree.
+ */
+describe('RegisterPersonalScreen — keyboard inset (Android edge-to-edge)', () => {
+	const SHOW_EVENT = Platform.OS === 'ios' ? 'keyboardWillChangeFrame' : 'keyboardDidShow';
+	const HIDE_EVENT = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+
+	let handlers: Record<string, (event?: unknown) => void>;
+
+	beforeEach(() => {
+		handlers = {};
+		jest.spyOn(Keyboard, 'addListener').mockImplementation(((e: string, cb: any) => {
+			handlers[e] = cb;
+			return {remove: jest.fn()};
+		}) as any);
+	});
+
+	afterEach(() => {
+		jest.restoreAllMocks();
+	});
+
+	/** The screen's outermost View, which owns the bottom padding. */
+	function rootPadding(tr: renderer.ReactTestRenderer): number {
+		const style = tr.root.findAllByType(View)[0].props.style;
+		return Object.assign({}, ...[].concat(style).map(s => s ?? {})).paddingBottom;
+	}
+
+	it('grows the root bottom padding by the keyboard height so the form can scroll clear', () => {
+		const tr = renderScreen();
+		const resting = rootPadding(tr);
+		renderer.act(() => handlers[SHOW_EVENT]?.({endCoordinates: {height: 733}}));
+		// ADDED to the resting safe-area padding, not max'd with it — the reported height stops
+		// at the navigation bar, so max-ing leaves the CTA clipped by that much (measured 64px).
+		expect(rootPadding(tr)).toBe(resting + 733);
+	});
+
+	it('restores the resting padding when the keyboard is dismissed', () => {
+		const tr = renderScreen();
+		const resting = rootPadding(tr);
+		renderer.act(() => handlers[SHOW_EVENT]?.({endCoordinates: {height: 733}}));
+		renderer.act(() => handlers[HIDE_EVENT]?.());
+		expect(rootPadding(tr)).toBe(resting);
 	});
 });

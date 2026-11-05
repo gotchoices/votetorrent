@@ -1,3 +1,5 @@
 export * from './signing-engine.js'
 export * from './mock-signing-engine.js'
 export * from './builders/index.js'
+export * from './threshold.js'
+export * from './fan-out.js'

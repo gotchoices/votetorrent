@@ -13,6 +13,9 @@ import type { RootStackParamList } from "../../navigation/types";
 import { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { createDeviceSigner } from "../../engines/device-signer";
 import { utf8ToBytes } from "@noble/hashes/utils.js";
+import { useDeviceSigningErrorHandler } from "../../hooks/useDeviceSigningErrorHandler";
+import { KeyboardAvoidingScreen } from "../../components/KeyboardAvoidingScreen";
+import { errorCopy } from "../../utils/errorCopy";
 
 export function ReviseUserScreen() {
 	const { user, userEngine } = useRoute().params as {
@@ -27,6 +30,8 @@ export function ReviseUserScreen() {
 	const [realSignature, setRealSignature] = useState<Signature | null>(null);
 	const [edited, setEdited] = useState(false);
 	const [errorMessage, setErrorMessage] = useState<string>("");
+	const [isSigning, setIsSigning] = useState(false);
+	const handleDeviceSigningError = useDeviceSigningErrorHandler();
 
 	const handleSave = async () => {
 		setErrorMessage("");
@@ -48,7 +53,7 @@ export function ReviseUserScreen() {
 			await userEngine.revise(reviseUserHistory);
 			navigation.popTo("UserDetails", { user: userState, userEngine });
 		} catch (error) {
-			setErrorMessage(error instanceof Error ? error.message : String(error));
+			setErrorMessage(errorCopy(error, t, "write"));
 		}
 	};
 
@@ -67,6 +72,7 @@ export function ReviseUserScreen() {
 
 	const handleSign = async () => {
 		setErrorMessage("");
+		setIsSigning(true);
 		try {
 			// D-01: createDeviceSigner closes over the private key app-side —
 			// only the resulting Signature crosses into vote-engine.
@@ -80,12 +86,16 @@ export function ReviseUserScreen() {
 			const sig = await signer(payloadBytes);
 			setRealSignature(sig);
 		} catch (error) {
-			setErrorMessage(error instanceof Error ? error.message : String(error));
+			const outcome = handleDeviceSigningError(error);
+			if (outcome.handled) return;
+			setErrorMessage(outcome.message ?? errorCopy(error, t, "write"));
+		} finally {
+			setIsSigning(false);
 		}
 	};
 
 	return (
-		<View style={styles.content}>
+		<KeyboardAvoidingScreen>
 			<ScrollView style={[styles.container, { backgroundColor: colors.background }]}>
 				<View style={[styles.section, styles.detailContainer]}>
 					<ThemedText type="defaultSemiBold">{t("id")}:</ThemedText>
@@ -118,10 +128,10 @@ export function ReviseUserScreen() {
 				</View>
 				<View style={styles.section}>
 					<CustomButton
-						title={t("sign")}
+						title={isSigning ? `${t("sign")}…` : t("sign")}
 						backgroundColor={colors.important}
 						icon="signature"
-						disabled={!edited}
+						disabled={!edited || isSigning}
 						forceDarkText={true}
 						onPress={() => {
 							handleSign();
@@ -152,7 +162,7 @@ export function ReviseUserScreen() {
 					backgroundColor={colors.success}
 				/>
 			</Footer>
-		</View>
+		</KeyboardAvoidingScreen>
 	);
 }
 

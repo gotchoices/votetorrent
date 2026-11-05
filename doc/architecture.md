@@ -10,7 +10,7 @@
 * Authority may retain actual private information on voters, but any tampering will change the hash and be detected
 * The stakeholders can see public portion (if any) of voter registration
 * Voter can vote without the authority, peers, or any other party knowing for which candidate
-* Revealing election results requires all election keyholders to publish their election keys at the appointed timeframe
+* Revealing election results requires at least the election's threshold k of its n keyholders to publish their key shares during the appointed timeframe; fewer than k shares reveal nothing
 * Voter can verify presence and correctness of his or her vote
 * Stakeholders can verify that only eligible voters voted
 * Stakeholders can verify the final tally

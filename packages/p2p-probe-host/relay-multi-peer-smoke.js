@@ -259,6 +259,21 @@ async function bootDrone(name, bootstrapControlAddr, strandBootstrapAddr) {
       strandRow: { Id: STRAND_ID, MemberPrivateKey: null, Type: 'o' },
       sAppConfig: { id: SAPP_ID, version: '1.0.0', schema: MINIMAL_SCHEMA, latencyHint: 'interactive' },
       mode: 'bootstrap',
+      // Founder-ness is normally DERIVED from `strandRow.FounderOwnerKey` matching this node's
+      // owner key, and the row above is hand-built with no such provenance -- so the derivation
+      // says "joiner" even for the drone that has no upstream to sync FROM. Under cadre-core
+      // >= 1.1.0's first-sync gate that is a deadlock: a joiner is withheld its database until
+      // some member's Header reaches it, and with nobody founding, no Header ever exists. Every
+      // node then reports StrandAwaitingFirstSyncError "no member of this strand has been
+      // reachable since this machine joined" -- which reads exactly like the relay-reachability
+      // wall this harness exists to measure. The FIRST drone (no strandBootstrapAddr) founds;
+      // the cross-bootstrapped one stays a real joiner so its gating is the genuine article.
+      ...(!strandBootstrapAddr && { founder: true }),
+      // The cross-bootstrapped drone IS a joiner, and cadre-core >= 1.1.0 blocks a joiner's
+      // addStrand until its first sync completes, rejecting after 30 s. That kills this harness
+      // at bring-up before any relay leg can report, so opt out and let the strand become
+      // writable as the topology assembles. The founder above is never gated either way.
+      awaitFirstSync: false,
     }),
     ADD_STRAND_TIMEOUT_MS,
     `${name} addStrand`,

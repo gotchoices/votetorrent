@@ -1,0 +1,5 @@
+[optidbg] armed namespaces=optimystic:db-p2p:coordinator-repo:*
+[optidbg] 1789000000000 | optimystic:db-p2p:coordinator-repo:12D3KooWaaaa | cluster-tx:read-repair-triggered | {"blockId":"default/Revocation","mode":"lazy","localRev":3}
+[optidbg] 1789000000000 | optimystic:db-p2p:coordinator-repo:12D3KooWaaaa | cluster-fetch:solo-self-skip | {"blockId":"default/Revocation"}
+[optidbg] 1789000000000 | optimystic:db-p2p:coordinator-repo:12D3KooWaaaa | cluster-tx:read-repair-noop | {"blockId":"default/Revocation"}
+[optidbg] 1789000000000 | optimystic:db-p2p:coordinator-repo:12D3KooWaaaa | commit:solo-cohort | {"blockId":"default/Strand","cohortSize":1,"soleIsSelf":true}

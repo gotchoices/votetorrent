@@ -1,22 +1,26 @@
 /**
- * RevokeKeyScreen.test.tsx — UKEY-02 screen-layer per-key signing coverage.
+ * RevokeKeyScreen.test.tsx — UKEY-02 / D-20 (49-05) screen-layer per-key signing coverage.
  *
  * Backfills the automated coverage deferred in 21-15 (todo
  * sign01-ukey02-21-15-coverage / DEBT-03 D-10). The engine-side per-key binding
  * (context.UserKey = signature.signerKey) is already covered by user.spec.ts;
  * this file pins the SCREEN-layer behavior:
  *
- *   (1) handleSign previews the FIRST selected key's per-key payload
- *       (revokeKey:<firstKey>) — never a combined-keys payload.
- *   (2) handleRevoke signs EACH selected key over its own revokeKey:<key>
- *       payload and calls userEngine.revokeKey(key, perKeySignature) once per
+ *   (1) handleSign previews the FIRST selected key's canonical engine digest
+ *       (via userEngine.getRevokeKeyDigest) — never a combined-keys payload,
+ *       and never a screen-constructed payload (D-03/D-20, 49-05).
+ *   (2) handleRevoke signs EACH selected key over its own engine-computed
+ *       digest and calls userEngine.revokeKey(key, perKeySignature) once per
  *       key, with a DISTINCT signature bound to that specific key — not one
  *       combined signature reused across keys. On success it navigates back.
  *
- * The signer is mocked to echo the signed payload into the signature string
- * (`sig(<utf8 payload>)`) so the test can prove each signature is bound to that
- * key's two-segment `revokeKey:<key>` payload. Uses react-test-renderer — same
- * pattern as the other screen tests in this workspace (no @testing-library).
+ * The mock `getRevokeKeyDigest` returns a per-key deterministic digest
+ * (`digest(<key>)` utf8-encoded) and the signer echoes the signed bytes into
+ * the signature string (`sig(<utf8 digest>)`), so the test can prove each
+ * signature is bound to that key's OWN engine-supplied digest — never a
+ * screen-side `revokeKey:<key>` construction (that convention was retired in
+ * 49-05). Uses react-test-renderer — same pattern as the other screen tests
+ * in this workspace (no @testing-library).
  */
 
 import React from 'react';
@@ -31,10 +35,14 @@ const KEY_A = 'keyAAA000';
 const KEY_B = 'keyBBB111';
 let mockUser: any = null;
 const mockRevokeKey = jest.fn(async () => {});
-const mockUserEngine = { revokeKey: mockRevokeKey };
+// 49-05 (D-20): deterministic per-key digest standing in for the engine's
+// real Digest(UserId, PubKey) — distinct per key so distinct-signature
+// assertions stay meaningful.
+const mockGetRevokeKeyDigest = jest.fn(async (key: string) => Buffer.from(`digest(${key})`, 'utf8'));
+const mockUserEngine = { revokeKey: mockRevokeKey, getRevokeKeyDigest: mockGetRevokeKeyDigest };
 
-// The device signer echoes the signed payload into the signature so the test can
-// assert per-key binding: signer(utf8('revokeKey:K')) → { signature: 'sig(revokeKey:K)' }.
+// The device signer echoes the signed digest bytes into the signature so the test can
+// assert per-key binding: signer(utf8('digest(K)')) → { signature: 'sig(digest(K))' }.
 const mockSigner = jest.fn(async (bytes: Uint8Array) => {
   const payload = Buffer.from(bytes).toString('utf8');
   return {
@@ -168,23 +176,26 @@ beforeEach(() => {
   mockUser = makeUser();
 });
 
-describe('RevokeKeyScreen — UKEY-02 per-key signing (screen layer)', () => {
-  it('(1) handleSign previews the FIRST selected key over its own revokeKey:<key> payload', async () => {
+describe('RevokeKeyScreen — UKEY-02 / D-20 (49-05) per-key signing (screen layer)', () => {
+  it('(1) handleSign previews the FIRST selected key over its OWN engine-computed digest', async () => {
     const tr = await render();
     await selectBothKeysAndSign(tr);
 
-    // The preview signs exactly the first selected key's two-segment payload — once.
+    // The screen fetches the canonical digest from the engine — never constructs it itself.
+    expect(mockGetRevokeKeyDigest).toHaveBeenCalledWith(KEY_A);
+
+    // The preview signs exactly the first selected key's digest — once.
     expect(mockSigner).toHaveBeenCalledTimes(1);
     const signedPayload = Buffer.from(mockSigner.mock.calls[0][0]).toString('utf8');
-    expect(signedPayload).toBe(`revokeKey:${KEY_A}`);
+    expect(signedPayload).toBe(`digest(${KEY_A})`);
 
     // The "Signed: <signature>" row renders the first-key preview signature (not a combined payload).
     const rendered = JSON.stringify(tr.toJSON());
-    expect(rendered).toContain(`sig(revokeKey:${KEY_A})`);
+    expect(rendered).toContain(`sig(digest(${KEY_A}))`);
     expect(rendered).not.toContain(`${KEY_A},`); // never a combined-keys payload
   });
 
-  it('(2) handleRevoke signs each selected key with its OWN signature and calls revokeKey once per key, then navigates back', async () => {
+  it('(2) handleRevoke signs each selected key with its OWN engine-computed digest and calls revokeKey once per key, then navigates back', async () => {
     const tr = await render();
     await selectBothKeysAndSign(tr);
 
@@ -193,23 +204,61 @@ describe('RevokeKeyScreen — UKEY-02 per-key signing (screen layer)', () => {
       await Promise.resolve();
     });
 
-    // One revokeKey call per selected key.
+    // One revokeKey call per selected key, fed by one getRevokeKeyDigest call per key
+    // (plus the earlier preview call for KEY_A during handleSign).
     expect(mockRevokeKey).toHaveBeenCalledTimes(2);
+    expect(mockGetRevokeKeyDigest).toHaveBeenCalledWith(KEY_A);
+    expect(mockGetRevokeKeyDigest).toHaveBeenCalledWith(KEY_B);
 
-    // Each call carries a signature bound to THAT key's revokeKey:<key> payload
+    // Each call carries a signature bound to THAT key's OWN engine digest
     // (assert by key, not call order, to avoid Promise.all interleave flakiness).
     const byKey: Record<string, any> = {};
     for (const [key, sig] of mockRevokeKey.mock.calls as unknown as Array<[string, any]>) {
       byKey[key] = sig;
     }
     expect(Object.keys(byKey).sort()).toEqual([KEY_A, KEY_B].sort());
-    expect(byKey[KEY_A].signature).toBe(`sig(revokeKey:${KEY_A})`);
-    expect(byKey[KEY_B].signature).toBe(`sig(revokeKey:${KEY_B})`);
+    expect(byKey[KEY_A].signature).toBe(`sig(digest(${KEY_A}))`);
+    expect(byKey[KEY_B].signature).toBe(`sig(digest(${KEY_B}))`);
 
     // Distinct per-key signatures — not one combined signature reused across keys.
     expect(byKey[KEY_A].signature).not.toBe(byKey[KEY_B].signature);
 
     // Success path navigates back.
     expect(mockGoBack).toHaveBeenCalledTimes(1);
+  });
+
+  it('(3) a DeleteValid CHECK rejection renders the revokeKeySignatureInvalid copy, not the raw engine error', async () => {
+    mockRevokeKey.mockRejectedValueOnce(
+      new Error('Quereus error (code 275): CHECK constraint failed: DeleteValid'),
+    );
+    const tr = await render();
+    await selectBothKeysAndSign(tr);
+
+    await renderer.act(async () => {
+      await buttonByTitle(tr, 'revoke').props.onPress();
+      await Promise.resolve();
+    });
+
+    const rendered = JSON.stringify(tr.toJSON());
+    // `t` is mocked as the identity function, so the i18n KEY itself is what renders.
+    expect(rendered).toContain('revokeKeySignatureInvalid');
+    expect(rendered).not.toContain('CHECK constraint failed');
+    expect(mockGoBack).not.toHaveBeenCalled();
+  });
+
+  it('(4) every OTHER revokeKey failure renders translated generic copy, never the raw engine message', async () => {
+    mockRevokeKey.mockRejectedValueOnce(new Error('UserEngine.revokeKey: no EngineContext bound'));
+    const tr = await render();
+    await selectBothKeysAndSign(tr);
+
+    await renderer.act(async () => {
+      await buttonByTitle(tr, 'revoke').props.onPress();
+      await Promise.resolve();
+    });
+
+    const rendered = JSON.stringify(tr.toJSON());
+    expect(rendered).toContain('errorActionFailedGeneric');
+    expect(rendered).not.toContain('no EngineContext bound');
+    expect(rendered).not.toContain('revokeKeySignatureInvalid');
   });
 });

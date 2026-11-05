@@ -19,6 +19,8 @@ import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../../navigation/types";
 import { useBallotDraft } from "./providers/BallotDraftProvider";
 import type { Option } from "@votetorrent/vote-core";
+import { KeyboardAvoidingScreen } from "../../components/KeyboardAvoidingScreen";
+import { useMediaPin } from "../../hooks/useMediaPin";
 
 /**
  * EditQuestionOption — polish for BALUI-04 (Figma frame 57:740).
@@ -52,6 +54,9 @@ export function EditQuestionOption() {
 	const [infoUrl, setInfoUrl] = useState(existingOption?.infoURL ?? "");
 	const [imageUrl, setImageUrl] = useState(existingOption?.image?.url ?? "");
 	const [videoUrl, setVideoUrl] = useState(existingOption?.video?.url ?? "");
+	// "Make Permanent": each media field records the content id of its bytes (useMediaPin).
+	const imagePin = useMediaPin(existingOption?.image);
+	const videoPin = useMediaPin(existingOption?.video);
 
 	// G11: Re-seed local state when the existing option resolves (draft may load
 	// after mount). Keyed on optionCode only to avoid clobbering user edits.
@@ -63,12 +68,10 @@ export function EditQuestionOption() {
 		setInfoUrl(existingOption.infoURL ?? "");
 		setImageUrl(existingOption.image?.url ?? "");
 		setVideoUrl(existingOption.video?.url ?? "");
+		imagePin.reset(existingOption.image);
+		videoPin.reset(existingOption.video);
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [optionCode]);
-
-	const handleMakePermanent = () => {
-		// Phase 22: media-pin to content-addressed storage (CID) — not yet implemented.
-	};
 
 	// SAVE is disabled until the option has a code or title — prevents the
 	// junk "Code: o-<timestamp>" card from an all-empty save.
@@ -80,8 +83,10 @@ export function EditQuestionOption() {
 			title,
 			details: details || undefined,
 			infoURL: infoUrl || undefined,
-			image: imageUrl ? ({ url: imageUrl } as Option["image"]) : undefined,
-			video: videoUrl ? ({ url: videoUrl } as Option["video"]) : undefined,
+			image: imageUrl ? mediaRef(imageUrl, imagePin.cidFor(imageUrl)) : undefined,
+			video: videoUrl
+				? (mediaRef(videoUrl, videoPin.cidFor(videoUrl)) as Option["video"])
+				: undefined,
 		};
 		// Branch on optionCode presence: edit path uses updateOption (locates
 		// the existing option by its ORIGINAL code from route.params, even if
@@ -107,7 +112,7 @@ export function EditQuestionOption() {
 	};
 
 	return (
-		<View style={styles.content}>
+		<KeyboardAvoidingScreen>
 			<ScrollView
 				style={[styles.container, { backgroundColor: colors.background }]}
 				contentContainerStyle={{ paddingBottom: 24 }}>
@@ -141,7 +146,9 @@ export function EditQuestionOption() {
 					placeholder={t("optionalImageAddress")}
 					onChangeText={setImageUrl}
 					isImageUrlField={true}
-					makePermanentPressed={handleMakePermanent}
+					makePermanentPressed={() => imagePin.pin(imageUrl)}
+					makePermanentDisabled={!imageUrl.trim() || imagePin.isPinning}
+					permanentStatus={imagePin.statusFor(imageUrl)}
 				/>
 				{imageUrl ? (
 					<Image
@@ -156,7 +163,9 @@ export function EditQuestionOption() {
 					placeholder={t("optionalVideoAddress")}
 					onChangeText={setVideoUrl}
 					isImageUrlField={true}
-					makePermanentPressed={handleMakePermanent}
+					makePermanentPressed={() => videoPin.pin(videoUrl)}
+					makePermanentDisabled={!videoUrl.trim() || videoPin.isPinning}
+					permanentStatus={videoPin.statusFor(videoUrl)}
 				/>
 			</ScrollView>
 			<Footer>
@@ -169,8 +178,13 @@ export function EditQuestionOption() {
 					disabled={!canSave}
 				/>
 			</Footer>
-		</View>
+		</KeyboardAvoidingScreen>
 	);
+}
+
+/** `{ url, cid? }` — the cid only when the field's current URL is the one that was made permanent. */
+function mediaRef(url: string, cid: string | undefined): { url: string; cid?: string } {
+	return cid ? { url, cid } : { url };
 }
 
 const localStyles = StyleSheet.create({

@@ -1,0 +1,11 @@
+{
+  "base": "base-device",
+  "ops": [
+    {
+      "op": "write",
+      "path": "64-device-evidence/EVIDENCE-SUMMARY.md",
+      "content": "# Evidence summary\n\nNo coverage statement here.\n"
+    }
+  ],
+  "expect": "d13-missing-summary"
+}

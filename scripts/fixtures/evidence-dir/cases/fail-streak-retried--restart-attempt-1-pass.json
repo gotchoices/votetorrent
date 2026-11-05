@@ -1,0 +1,28 @@
+{
+  "base": "base-device",
+  "args": [
+    "--streak",
+    "3"
+  ],
+  "ops": [
+    {
+      "op": "move",
+      "from": "64-device-evidence/rehearsal-2026-10-20/run-1/attempt-1",
+      "to": "64-device-evidence/rehearsal-2026-10-20/run-1/attempt-2"
+    },
+    {
+      "op": "write",
+      "path": "64-device-evidence/rehearsal-2026-10-20/run-1/attempt-1/join/verdict.txt",
+      "content": "VERDICT: PASS\n"
+    },
+    {
+      "op": "write",
+      "path": "64-device-evidence/rehearsal-2026-10-20/run-1/attempt-2/reason.txt",
+      "content": "RESTART notes-19-e7: run 1 restarted on the new rig layout\n"
+    }
+  ],
+  "expect": "streak-retried",
+  "expectAlso": [
+    "retry-without-failure"
+  ]
+}

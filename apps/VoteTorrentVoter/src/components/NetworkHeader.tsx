@@ -1,6 +1,6 @@
 /**
  * NetworkHeader — the branded blue app header from the Figma Registration frames: a primary-color
- * banner (rounded bottom corners) with the network name ("Utah Network") + a chevron (network
+ * banner (rounded bottom corners) with the open network's name + a chevron (network
  * switcher affordance) on the left and a bell (notifications) in a circle on the right. Replaces
  * the plain native "Registration" header on the Registration tab root (headerShown:false there).
  *
@@ -16,11 +16,13 @@ import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import FontAwesome6 from 'react-native-vector-icons/FontAwesome6';
 
 export interface NetworkHeaderProps {
+	/** The open network's name (`useNetworkName`); the `networkName` copy when omitted. */
+	networkName?: string;
 	onPressNetwork?: () => void;
 	onPressBell?: () => void;
 }
 
-export function NetworkHeader({onPressNetwork, onPressBell}: NetworkHeaderProps) {
+export function NetworkHeader({networkName, onPressNetwork, onPressBell}: NetworkHeaderProps) {
 	const {colors, fonts, type: typeScale, radii} = useTheme() as ExtendedTheme;
 	const {t} = useTranslation('common');
 	const insets = useSafeAreaInsets();
@@ -52,7 +54,7 @@ export function NetworkHeader({onPressNetwork, onPressBell}: NetworkHeaderProps)
 							lineHeight: typeScale.h1.lineHeight,
 						},
 					]}>
-					{t('networkName')}
+					{networkName ?? t('networkName')}
 				</Text>
 				<FontAwesome6 name="chevron-down" size={20} color={colors.light} />
 			</Pressable>

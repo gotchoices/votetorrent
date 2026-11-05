@@ -1,10 +1,12 @@
 import {
   MOCK_SHARED_ADMINISTRATION_DETAILS
 } from '../mock-data.js'
+import { AdminPromotionError } from '@votetorrent/vote-core'
 import type {
   Admin,
   AdminDetails,
   AdminInit,
+  AdminPromotionResult,
   Authority,
   AuthorityDetails,
   AuthorityInit,
@@ -34,7 +36,7 @@ import {
 // Local mock data definitions (MOCK_ADMINISTRATORS, MOCK_THRESHOLD_POLICIES, etc.) are removed.
 
 export class MockAuthorityEngine implements IAuthorityEngine {
-  private readonly admin: Admin
+  private admin: Admin
   private proposedAdmin?: Proposal<AdminInit> // Can be undefined if not SLCO or no proposal made
   private readonly proposedAuthority?: Proposal<AuthorityInit> // Unused by current mock methods but part of interface/state
   // private isSlcoAuthority: boolean = false; // No longer needed
@@ -90,6 +92,10 @@ export class MockAuthorityEngine implements IAuthorityEngine {
     console.log(`MockAuthorityEngine: cancelInvite(${slotCid}) for ${this.authority.name}.`)
   }
 
+  async getPendingInviteCids (): Promise<string[]> {
+    return []
+  }
+
   async resendInvite (slotCid: string): Promise<string> {
     console.log(`MockAuthorityEngine: resendInvite(${slotCid}) for ${this.authority.name}.`)
     return `mock-resent-${slotCid}`
@@ -116,6 +122,40 @@ export class MockAuthorityEngine implements IAuthorityEngine {
     console.log(
 			`MockAuthorityEngine: Admin proposed for ${this.authority.name}.`
     )
+  }
+
+  // 57-07 (D-01 promotion half): the mock exists to satisfy the interface
+  // and preview mode, not to simulate the schema — promote the in-memory
+  // proposedAdmin into the mock's current administration and clear it.
+  async applyAdminProposal (
+    _nonce: string,
+    _sign: (digest: Uint8Array) => Promise<Signature>
+  ): Promise<AdminPromotionResult> {
+    if (!this.proposedAdmin) {
+      throw new AdminPromotionError('roster-mismatch', _nonce)
+    }
+    const proposed = this.proposedAdmin
+    this.admin = {
+      ...this.admin,
+      effectiveAt: typeof proposed.proposed.effectiveAt === 'string'
+        ? Date.parse(proposed.proposed.effectiveAt)
+        : proposed.proposed.effectiveAt,
+      thresholdPolicies: proposed.proposed.thresholdPolicies,
+      officers: proposed.proposed.officers.map((selection) => ({
+        userId: selection.existing?.userId ?? 'mock-new-officer',
+        authorityId: this.authority.id,
+        title: selection.init?.title ?? selection.existing?.title ?? '',
+        scopes: (selection.init?.scopes ?? selection.existing?.scopes ?? []) as Scope[]
+      }))
+    }
+    const officersPromoted = proposed.proposed.officers.length
+    this.proposedAdmin = undefined
+    return {
+      authorityId: this.authority.id,
+      effectiveAt: this.admin.effectiveAt,
+      officersPromoted,
+      alreadyApplied: false
+    }
   }
 
   // ---- builder factories (BUILD-AUTH-01 / FACT-04) ----

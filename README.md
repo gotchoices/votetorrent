@@ -32,6 +32,13 @@ builds are debug-signed and are never published — the signing key does not lea
 the key holder's machine. See
 [doc/releases/RELEASE-ANDROID.md](doc/releases/RELEASE-ANDROID.md).
 
+No iOS build has been published to TestFlight yet, so there is nothing to download for
+iOS at this time — see [doc/releases/RELEASE-IOS.md](doc/releases/RELEASE-IOS.md) for the
+release-process overview, and
+[apps/VoteTorrentVoter/BUILD-RELEASE-IOS.md](apps/VoteTorrentVoter/BUILD-RELEASE-IOS.md) /
+[apps/VoteTorrentAuthority/BUILD-RELEASE-IOS.md](apps/VoteTorrentAuthority/BUILD-RELEASE-IOS.md)
+for the per-app signing detail.
+
 ## Host a stand-alone node
 
 Stand-alone nodes run on any platform supporting Node.js, in one of two
@@ -165,6 +172,7 @@ Protocol and design:
 * [Election Logic](doc/election.md) — election processes end to end
 * [Administration](doc/administration.md) — authorities, administrators, officers
 * [Registration](doc/registration.md) — voter registration and device association
+* [Invitations](doc/invitations.md) — authority, officer and keyholder invitations
 * [End-user FAQ](doc/user-faq.md)
 * [Tutorials](doc/tutorials) — scripts for explainer videos
 
@@ -176,4 +184,5 @@ Developer:
 * [Development](doc/development.md) — day-to-day workflow, build pipeline, tooling
 * [Codebase Architecture](doc/codebase-architecture.md) — workspaces and runtime composition
 * [Android builds and releases](doc/releases/RELEASE-ANDROID.md)
+* [iOS builds and releases](doc/releases/RELEASE-IOS.md)
 * [Contributing](CONTRIBUTING.md)

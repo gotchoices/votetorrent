@@ -51,8 +51,16 @@ wait_for_logcat_line() {
     # logcat. A successful capture can therefore stall up to the full window
     # AFTER the target line was matched. Accepted: the capture is still
     # correct, only slower; killing adb eagerly would complicate this helper.
+    # SPIKE-073: `adb logcat -e PATTERN` emits its buffer-header separator lines
+    # ("--------- beginning of main") REGARDLESS of the filter, so on current
+    # platform-tools `head -1` captured the separator instead of the match. Every
+    # marker wait then "matched" instantly and returned garbage — run-replication-proof.sh
+    # launched both drones with STRAND_ID='---------', i.e. hosting a DIFFERENT strand
+    # than the emulators, and the run measured nothing. Silent, and indistinguishable
+    # from a healthy fast match. Drop the separators before head; --line-buffered keeps
+    # the streaming branch's first-match latency unchanged.
     set +e
-    line=$("${timeout_bin}" "${timeout_s}" adb ${adb_dev} logcat -e "${pattern}" | head -1; exit "${PIPESTATUS[0]}")
+    line=$("${timeout_bin}" "${timeout_s}" adb ${adb_dev} logcat -e "${pattern}" | grep --line-buffered -v '^--------- ' | head -1; exit "${PIPESTATUS[0]}")
     status=$?
     set -e
     if [ -z "${line}" ] && [ "${status}" -ne 124 ]; then
@@ -65,7 +73,7 @@ wait_for_logcat_line() {
     while [ "${elapsed}" -lt "${timeout_s}" ]; do
       # WR-22: an adb failure here previously degraded to silently polling nothing.
       set +e
-      line=$(adb ${adb_dev} logcat -d | grep "${pattern}" | head -1; exit "${PIPESTATUS[0]}")
+      line=$(adb ${adb_dev} logcat -d | grep -v '^--------- ' | grep "${pattern}" | head -1; exit "${PIPESTATUS[0]}")
       status=$?
       set -e
       # WR-23 (17-REVIEW): only fatal when the capture is EMPTY — mirrors the

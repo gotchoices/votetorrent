@@ -1,0 +1,177 @@
+/*
+ * panels.css — panel card / header / pill-row / body / denied-ghost styling.
+ * Built entirely from `@votetorrent/ui-web`'s tokens.css custom properties:
+ * no new hex literal, no new spacing value. The grid layout and the 900px
+ * sidebar collapse belong to the dashboard's own app.css (`.layout`,
+ * `.panel-grid`, per D-15) and are not restated here.
+ *
+ * `.panel-body` deliberately carries no CSS rule that would hide it while
+ * leaving it present in markup — a denied panel's body is not emitted to
+ * the DOM at all (the frame component's own guard), never merely hidden.
+ */
+
+.panel {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-sm);
+	background: var(--surface);
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	padding: var(--space-md);
+}
+
+.panel--denied {
+	opacity: 0.5;
+}
+
+.panel-header {
+	display: flex;
+	align-items: center;
+	gap: var(--space-sm);
+}
+
+.panel-icon {
+	font-size: var(--font-heading-size);
+	line-height: var(--font-heading-line-height);
+}
+
+.panel-title {
+	margin: 0;
+	font-size: var(--font-heading-size);
+	font-weight: var(--font-heading-weight);
+	line-height: var(--font-heading-line-height);
+	color: var(--text);
+}
+
+.panel-pills {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--space-xs);
+}
+
+/* Data pills are labels, not controls; only the view switch is clickable. */
+.pill {
+	cursor: default;
+	display: inline-flex;
+	align-items: center;
+	padding: 0 var(--space-sm);
+	border-radius: var(--radius);
+	background: var(--surface2);
+	border: 1px solid var(--border);
+	color: var(--muted);
+	font-size: var(--font-label-size);
+	font-weight: var(--font-label-weight);
+	line-height: var(--font-label-line-height);
+}
+
+.panel-body {
+	color: var(--text);
+	font-size: var(--font-body-size);
+	font-weight: var(--font-body-weight);
+	line-height: var(--font-body-line-height);
+}
+
+.panel-empty {
+	margin: 0;
+	color: var(--muted);
+}
+
+/*
+ * D-13/D-17 chart/grid view switch -- a view-state toggle, not a primary
+ * CTA, so it reuses the pill row's own typography tokens rather than any
+ * button-shaped emphasis. The accent token appears in exactly two places
+ * below (the active-state inset border and the focus outline) -- the
+ * UI-SPEC reserves that token for interactive chrome, explicitly forbidding
+ * it as the switch's inactive-state fill.
+ */
+.panel-view-switch {
+	display: flex;
+	gap: var(--space-xs);
+	margin-left: auto;
+}
+
+.panel-view-switch__option {
+	display: inline-flex;
+	align-items: center;
+	padding: 0 var(--space-sm);
+	border-radius: var(--radius);
+	border: 1px solid var(--border);
+	background: transparent;
+	color: var(--muted);
+	font-size: var(--font-label-size);
+	font-weight: var(--font-label-weight);
+	line-height: var(--font-label-line-height);
+	cursor: pointer;
+}
+
+.panel-view-switch__option--active {
+	background: var(--surface2);
+	color: var(--text);
+	box-shadow: inset 0 0 0 1px var(--primary);
+}
+
+.panel-view-switch__option:focus-visible {
+	outline: 2px solid var(--primary);
+}
+
+/*
+ * Action note (live/ReadOnlyNote.tsx): plain muted text telling the officer
+ * that a pending item is decided in the Authority app. It is not a control:
+ * no pointer, no hover state, no switched-off look.
+ *
+ * Typography: the short note sits beside a list heading, so it uses the
+ * muted Label size. The long note is the context line of an empty list, so
+ * it matches `.panel-empty` and uses Body.
+ */
+.panel-readonly-note {
+	margin: 0;
+	color: var(--muted);
+	font-size: var(--font-label-size);
+	font-weight: var(--font-label-weight);
+	line-height: var(--font-label-line-height);
+}
+
+.panel-readonly-note--long {
+	font-size: var(--font-body-size);
+	font-weight: var(--font-body-weight);
+	line-height: var(--font-body-line-height);
+}
+
+/*
+ * In-place change mark (live/useChangeMarks.ts). A row, figure or panel
+ * header that a replication pass changed gets a 2px bar on its leading edge
+ * and a light primary tint for the mark's lifetime, plus a visually hidden
+ * word "updated".
+ *
+ * The bar is an inset box-shadow, not a border: a shadow takes no layout
+ * space, so marking a row never shifts it, where a border would reflow it.
+ *
+ * The fade runs only when the user allows motion, and its transition sits
+ * on the fading rule itself: the tint appears at once, and only its exit
+ * animates. Under reduced motion the fading class matches nothing, so tint
+ * and bar stay static until the mark is dropped at the end of its lifetime.
+ */
+.change-mark {
+	box-shadow: inset 2px 0 0 var(--primary);
+	background-color: color-mix(in srgb, var(--primary) 15%, transparent);
+}
+
+.change-mark__word,
+.change-mark-live-region {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	padding: 0;
+	margin: 0;
+	overflow: hidden;
+	clip-path: inset(50%);
+	white-space: nowrap;
+	border: 0;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+	.change-mark.change-mark--fading {
+		background-color: transparent;
+		transition: background-color 2500ms ease-out;
+	}
+}

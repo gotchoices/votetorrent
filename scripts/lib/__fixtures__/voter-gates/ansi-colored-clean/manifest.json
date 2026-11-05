@@ -1,0 +1,5 @@
+{
+  "phaseFileSet": [
+    "apps/VoteTorrentVoter/src/__fixtures__/selftest-untouched.ts"
+  ]
+}

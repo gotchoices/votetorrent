@@ -14,6 +14,7 @@ import {
   makeElectionInit,
   makeTestSignature,
   seedElectionSigning,
+  testKeyPairFor,
 } from '../fixtures/test-context.js'
 
 // The Election digest expression, byte-for-byte the same shape
@@ -100,7 +101,7 @@ describe('signed-mutation', () => {
     // 999.1 R-02: sign the ACTUAL digest bytes for real (AdminSigning.SignatureValid now
     // verifies them via the UDF) — makeTestSignature's fixed dummy no longer suffices.
     let receivedDigest: Uint8Array | undefined
-    const { privateHex, publicHex } = randomTestKeyPair()
+    const { privateHex, publicHex } = testKeyPairFor(auth.user.id)
     const sign = async (digest: Uint8Array): Promise<Signature> => {
       receivedDigest = digest
       const sigHex = bytesToHex(secp256k1.sign(digest, hexToBytes(privateHex)))

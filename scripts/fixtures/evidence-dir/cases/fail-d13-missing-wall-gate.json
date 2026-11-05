@@ -1,0 +1,11 @@
+{
+  "base": "base-host",
+  "ops": [
+    {
+      "op": "write",
+      "path": "64-WALL-GATE.md",
+      "content": "VERDICT: CLEAN\n\n# Wall gate\n\nThe body has no coverage statement.\n"
+    }
+  ],
+  "expect": "d13-missing-wall-gate"
+}

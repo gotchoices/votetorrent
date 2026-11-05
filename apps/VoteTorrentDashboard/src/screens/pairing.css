@@ -1,0 +1,464 @@
+/*
+ * pairing.css -- styling for the pairing screen (the officer's first screen:
+ * the code field, its states and step list, the officer-swap confirmation and
+ * the unpaired notice) and for the webcam QR scanner dialog it opens.
+ *
+ * Built from `@votetorrent/ui-web`'s tokens.css custom properties ONLY. The
+ * allowed literals are the ones the UI contract fixes, not tokens: the white
+ * viewfinder corners `#FFFFFF` on live video (fixed, as the Authority's QR
+ * presentation), the scrims `rgba(0, 0, 0, 0.55)` / `rgba(0, 0, 0, 0.5)`
+ * (the shell's dialog backdrop precedent), the 24px corner arms, the 2px
+ * corner stroke, the 32px minimum control height, the 560px card width, the
+ * 480px swap dialog width and the 16px spinner ring.
+ *
+ * Every class selector is `pr-`-prefixed: global CSS has no module boundary
+ * and this app already carries `sh-`, `pv-`, `eo-`, `aa-` and the panel
+ * namespaces.
+ *
+ * The scanner preview is NOT mirrored: no rule here transforms the video.
+ */
+
+/* Scanner dialog ---------------------------------------------------------- */
+
+.pr-scanner {
+	box-sizing: border-box;
+	width: min(92vw, 640px);
+	max-width: 640px;
+	background: var(--surface);
+	color: var(--text);
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	padding: var(--space-md);
+}
+
+.pr-scanner::backdrop {
+	background: rgba(0, 0, 0, 0.5);
+}
+
+.pr-scanner-body {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-sm);
+}
+
+.pr-scanner-heading {
+	margin: 0;
+	font-size: var(--font-heading-size);
+	font-weight: var(--font-heading-weight);
+	line-height: var(--font-heading-line-height);
+}
+
+.pr-scanner-line {
+	margin: 0;
+	color: var(--text);
+	font-size: var(--font-label-size);
+	font-weight: var(--font-label-weight);
+	line-height: var(--font-label-line-height);
+}
+
+.pr-scanner-stage {
+	position: relative;
+	overflow: hidden;
+	aspect-ratio: 4 / 3;
+	background: var(--bg);
+	border-radius: var(--radius);
+}
+
+.pr-scanner-stage[hidden] {
+	display: none;
+}
+
+.pr-scanner-video {
+	display: block;
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+}
+
+/* The viewfinder: a centred square at 70% of the stage's shorter side (its
+ * height, at 4:3), with the scrim drawn as a huge outer shadow. */
+.pr-scanner-frame {
+	position: absolute;
+	top: 50%;
+	left: 50%;
+	height: 70%;
+	aspect-ratio: 1;
+	translate: -50% -50%;
+	box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.55);
+	pointer-events: none;
+}
+
+.pr-scanner-corner {
+	position: absolute;
+	width: 24px;
+	height: 24px;
+	border: 0 solid #FFFFFF;
+}
+
+.pr-scanner-corner--tl {
+	top: 0;
+	left: 0;
+	border-top-width: 2px;
+	border-left-width: 2px;
+}
+
+.pr-scanner-corner--tr {
+	top: 0;
+	right: 0;
+	border-top-width: 2px;
+	border-right-width: 2px;
+}
+
+.pr-scanner-corner--bl {
+	bottom: 0;
+	left: 0;
+	border-bottom-width: 2px;
+	border-left-width: 2px;
+}
+
+.pr-scanner-corner--br {
+	bottom: 0;
+	right: 0;
+	border-bottom-width: 2px;
+	border-right-width: 2px;
+}
+
+.pr-scanner-actions {
+	display: flex;
+	justify-content: flex-end;
+	align-items: center;
+	gap: var(--space-sm);
+}
+
+.pr-scanner-close {
+	min-height: 32px;
+	padding: var(--space-xs) var(--space-md);
+	background: var(--surface2);
+	color: var(--text);
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	font-family: var(--font-family);
+	font-size: var(--font-body-size);
+	line-height: var(--font-body-line-height);
+	cursor: pointer;
+}
+
+.pr-text-button {
+	min-height: 32px;
+	padding: var(--space-xs) var(--space-sm);
+	background: transparent;
+	color: var(--text);
+	border: none;
+	border-radius: var(--radius);
+	font-family: var(--font-family);
+	font-size: var(--font-body-size);
+	line-height: var(--font-body-line-height);
+	text-decoration: underline;
+	cursor: pointer;
+}
+
+.pr-scanner-close:focus-visible,
+.pr-text-button:focus-visible {
+	outline: 2px solid var(--primary);
+	outline-offset: 2px;
+}
+
+/* Pairing screen ---------------------------------------------------------- */
+
+.pr-screen {
+	box-sizing: border-box;
+	padding: 0 var(--space-md) var(--space-xl);
+}
+
+/* THE FOCAL POINT: the one raised surface on the page. */
+.pr-card {
+	box-sizing: border-box;
+	max-width: 560px;
+	margin: var(--space-3xl) auto 0;
+	padding: var(--space-lg);
+	background: var(--surface);
+	color: var(--text);
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-md);
+}
+
+@media (max-width: 599px) {
+	.pr-card {
+		margin-top: var(--space-lg);
+	}
+}
+
+.pr-title {
+	margin: 0;
+	font-size: var(--font-display-size);
+	font-weight: var(--font-display-weight);
+	line-height: var(--font-display-line-height);
+	color: var(--text);
+}
+
+.pr-intro,
+.pr-body {
+	margin: 0;
+	color: var(--text);
+	font-size: var(--font-body-size);
+	font-weight: var(--font-body-weight);
+	line-height: var(--font-body-line-height);
+}
+
+.pr-heading {
+	margin: 0;
+	color: var(--text);
+	font-size: var(--font-heading-size);
+	font-weight: var(--font-heading-weight);
+	line-height: var(--font-heading-line-height);
+}
+
+/* Red only when the code itself is bad (malformed, expired, spent, mismatch). */
+.pr-heading--fail {
+	color: var(--fail);
+}
+
+.pr-alert,
+.pr-status {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-sm);
+}
+
+.pr-slow,
+.pr-help,
+.pr-label {
+	margin: 0;
+	color: var(--muted);
+	font-size: var(--font-label-size);
+	font-weight: var(--font-label-weight);
+	line-height: var(--font-label-line-height);
+}
+
+/* The field and its buttons ------------------------------------------------ */
+
+.pr-form {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-sm);
+}
+
+/* The 2-3 KB code: wraps anywhere, never scrolls the page sideways, and
+ * stops growing at 160px so the buttons stay on screen. */
+.pr-code {
+	box-sizing: border-box;
+	width: 100%;
+	max-height: 160px;
+	overflow-y: auto;
+	resize: vertical;
+	overflow-wrap: anywhere;
+	word-break: break-all;
+	padding: var(--space-sm);
+	background: var(--surface2);
+	color: var(--text);
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	font-family: ui-monospace, Menlo, Consolas, monospace;
+	font-size: var(--font-label-size);
+	font-weight: var(--font-label-weight);
+	line-height: var(--font-label-line-height);
+	color-scheme: dark;
+}
+
+.pr-code:focus-visible {
+	outline: 2px solid var(--primary);
+	outline-offset: 1px;
+}
+
+.pr-actions {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--space-sm);
+}
+
+/* Accent fill: the pairing CTA and the swap dialog's confirm. `--bg` text on
+ * `--primary` clears 4.5:1 where `--text` does not. */
+.pr-cta {
+	min-height: 32px;
+	padding: var(--space-xs) var(--space-md);
+	background: var(--primary);
+	color: var(--bg);
+	border: 1px solid var(--primary);
+	border-radius: var(--radius);
+	font-family: var(--font-family);
+	font-size: var(--font-body-size);
+	font-weight: var(--font-heading-weight);
+	line-height: var(--font-body-line-height);
+	cursor: pointer;
+}
+
+.pr-cta:disabled {
+	opacity: 0.5;
+	cursor: default;
+}
+
+.pr-button {
+	align-self: flex-start;
+	min-height: 32px;
+	padding: var(--space-xs) var(--space-md);
+	background: var(--surface2);
+	color: var(--text);
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	font-family: var(--font-family);
+	font-size: var(--font-body-size);
+	line-height: var(--font-body-line-height);
+	cursor: pointer;
+}
+
+.pr-text-button:disabled {
+	opacity: 0.5;
+	cursor: default;
+}
+
+.pr-cta:focus-visible,
+.pr-button:focus-visible {
+	outline: 2px solid var(--primary);
+	outline-offset: 2px;
+}
+
+/* Step list ------------------------------------------------------------------ */
+
+.pr-steps {
+	margin: 0;
+	padding: 0;
+	list-style: none;
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-sm);
+}
+
+.pr-step {
+	display: flex;
+	justify-content: space-between;
+	align-items: baseline;
+	gap: var(--space-md);
+}
+
+.pr-step-label {
+	color: var(--text);
+	font-size: var(--font-body-size);
+	line-height: var(--font-body-line-height);
+}
+
+/* The state word carries the meaning; the colour repeats it. */
+.pr-step-state {
+	flex: none;
+	font-size: var(--font-label-size);
+	font-weight: var(--font-label-weight);
+	line-height: var(--font-label-line-height);
+}
+
+.pr-step-state--done {
+	color: var(--ok);
+}
+
+.pr-step-state--progress {
+	color: var(--text);
+}
+
+.pr-step-state--waiting {
+	color: var(--muted);
+}
+
+.pr-step-state--failed {
+	color: var(--fail);
+}
+
+/* Indeterminate progress: a muted arc on a border ring. It keeps spinning
+ * under reduced motion (spinners are essential). */
+.pr-spinner {
+	display: inline-block;
+	width: 16px;
+	height: 16px;
+	border: 2px solid var(--border);
+	border-top-color: var(--muted);
+	border-radius: 50%;
+	animation: pr-spin 1s linear infinite;
+}
+
+@keyframes pr-spin {
+	to {
+		rotate: 360deg;
+	}
+}
+
+/* Unpaired notice and empty state ---------------------------------------------- */
+
+/* Neutral, not red: the officer did nothing wrong. */
+.pr-notice {
+	box-sizing: border-box;
+	max-width: 560px;
+	margin: var(--space-xl) auto 0;
+	padding: var(--space-md);
+	background: var(--surface2);
+	color: var(--text);
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	display: flex;
+	flex-direction: column;
+	align-items: flex-start;
+	gap: var(--space-sm);
+}
+
+.pr-notice-heading,
+.pr-empty-heading {
+	margin: 0;
+	color: var(--text);
+	font-size: var(--font-heading-size);
+	font-weight: var(--font-heading-weight);
+	line-height: var(--font-heading-line-height);
+}
+
+.pr-notice-heading:focus-visible {
+	outline: 2px solid var(--primary);
+	outline-offset: 2px;
+}
+
+.pr-notice-body,
+.pr-empty-body {
+	margin: 0;
+	color: var(--text);
+	font-size: var(--font-body-size);
+	line-height: var(--font-body-line-height);
+}
+
+.pr-empty {
+	box-sizing: border-box;
+	max-width: 560px;
+	margin: var(--space-xl) auto 0;
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-xs);
+}
+
+/* Officer-swap dialog ---------------------------------------------------------- */
+
+.pr-dialog {
+	box-sizing: border-box;
+	max-width: 480px;
+	background: var(--surface);
+	color: var(--text);
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	padding: var(--space-lg);
+}
+
+.pr-dialog::backdrop {
+	background: rgba(0, 0, 0, 0.5);
+}
+
+.pr-dialog-body {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-md);
+}

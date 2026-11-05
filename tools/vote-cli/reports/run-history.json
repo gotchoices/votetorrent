@@ -1,0 +1,44 @@
+[
+  {
+    "ranAt": "2026-10-27T04:47:35.306Z",
+    "passed": 1,
+    "total": 18,
+    "totalMs": 4041,
+    "note": "CLI defect: the test read admin details in the wrong shape and the skip rule cascaded the failure to every later test. Fixed before run 2."
+  },
+  {
+    "ranAt": "2026-10-27T04:48:12.540Z",
+    "passed": 12,
+    "total": 18,
+    "totalMs": 386308,
+    "note": "CLI defects: `registration list` and `registrants list` read `items` instead of `rows`, so the officer approved nothing and no voter registered; `network revise` tried a rename, which the engine does not surface (recorded as a finding). Fixed before run 3."
+  },
+  {
+    "ranAt": "2026-10-27T05:05:24.640Z",
+    "passed": 18,
+    "total": 18,
+    "totalMs": 468660,
+    "note": "All tests passed."
+  },
+  {
+    "ranAt": "2026-10-27T05:06:09.111Z",
+    "passed": null,
+    "total": 18,
+    "totalMs": null,
+    "note": "Stopped during T12. K2's keyholder accept hit `invite-unverifiable` (the invitation row had not replicated to K2 yet), and the CLI kept the identity it had provisioned instead of discarding it as the app does; K2's DKG then failed `signer-key-mismatch` and K1 waited out 240 s. Fixed: accept now re-reads and discards on failure like keyholder-accept.ts, the runner re-pastes a share the device cannot verify yet, and `keyholder dkg` follows the app's driveKeyholderDkg."
+  },
+  {
+    "ranAt": "2026-10-27T05:24:44.368Z",
+    "passed": 14,
+    "total": 18,
+    "totalMs": 714766,
+    "note": "Not passed: T12, T16, T17, T18. Both keyholders accepted at once; K2's accept (after 4 not-found and 1 invite-unverifiable while the invitation replicated) committed for 22.7 s and failed `Multi-collection commit lost a stale race … Pend failed for collection UserKey`. The engine does not retry it; the runner then gave up, K2 was never seated, the DKG stayed blocked and send/release/tally had no election key. Runner changed to retry a lost race (as a keyholder tapping Accept again) and record each loss as an observation."
+  },
+  {
+    "ranAt": "2026-10-27T05:33:20.187Z",
+    "passed": 18,
+    "total": 18,
+    "totalMs": 470532,
+    "note": "All tests passed."
+  }
+]

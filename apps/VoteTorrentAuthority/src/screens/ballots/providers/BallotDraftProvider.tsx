@@ -21,7 +21,9 @@ import type { Ballot, Question, Option } from "@votetorrent/vote-core";
 
 interface BallotDraftContextType {
 	ballotDraft: Partial<Ballot>;
-	setBallotDraft: (b: Partial<Ballot>) => void;
+	// Accepts an updater: a read-modify-write must build on the LATEST draft, not a render's copy
+	// (64-53: an effect's stale spread overwrote a description typed just before it ran).
+	setBallotDraft: (b: Partial<Ballot> | ((prev: Partial<Ballot>) => Partial<Ballot>)) => void;
 	addQuestion: (q: Question) => void;
 	updateQuestion: (code: string, q: Question) => void;
 	removeQuestion: (code: string) => void;
@@ -43,7 +45,7 @@ export function useBallotDraft() {
 export function BallotDraftProvider({ children }: PropsWithChildren) {
 	const [ballotDraft, setBallotDraftState] = useState<Partial<Ballot>>({ questions: [] });
 
-	const setBallotDraft = useCallback((b: Partial<Ballot>) => {
+	const setBallotDraft = useCallback((b: Partial<Ballot> | ((prev: Partial<Ballot>) => Partial<Ballot>)) => {
 		setBallotDraftState(b);
 	}, []);
 

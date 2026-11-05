@@ -1,0 +1,52 @@
+# Journey: the Timeline tab for the dev seed's election, and the __DEV__ clock-offset control
+# moving "now" into the voting period (the Vote now row action appears), then back to live.
+appId: ${APP_ID}
+name: "Voter: election timeline"
+tags:
+  - voter
+  - smoke
+  - timeline
+env:
+  APP_ID: "${typeof VOTER_APP_ID == 'undefined' ? 'org.votetorrent.voter' : VOTER_APP_ID}"
+  BOOT_TIMEOUT_MS: "${typeof BOOT_TIMEOUT_MS == 'undefined' ? '300000' : BOOT_TIMEOUT_MS}"
+  SEEDED_ELECTION_TITLE: "${typeof SEEDED_ELECTION_TITLE == 'undefined' ? 'Dev Voter Registration Election' : SEEDED_ELECTION_TITLE}"
+---
+- runFlow:
+    file: ../subflows/voter/launch.yaml
+    env:
+      CLEAR_STATE: "false"
+- runFlow:
+    file: ../subflows/voter/timeline-ready.yaml
+- assertVisible:
+    id: "timeline-header-title"
+    text: ${SEEDED_ELECTION_TITLE}
+- assertVisible:
+    id: "timeline-row-title-registrationEnds"
+- assertVisible:
+    id: "timeline-registration-panel"
+- scrollUntilVisible:
+    element:
+      id: "timeline-row-title-closed"
+    direction: DOWN
+    timeout: 20000
+- scrollUntilVisible:
+    element:
+      id: "timeline-dev-clock-offset"
+    direction: UP
+    timeout: 20000
+- runFlow:
+    file: ../subflows/voter/dev-clock-to-stage.yaml
+    env:
+      STAGE_TITLE: "Voting Period"
+- scrollUntilVisible:
+    element:
+      id: "timeline-row-vote-now-votingStarts"
+    direction: DOWN
+    timeout: 20000
+- scrollUntilVisible:
+    element:
+      id: "timeline-dev-clock-offset"
+    direction: UP
+    timeout: 20000
+- runFlow:
+    file: ../subflows/voter/dev-clock-reset.yaml

@@ -1,0 +1,66 @@
+# Journey: signature task. Found a network (clean state), seed pending tasks with the __DEV__
+# "Seed Pending Tasks (Debug)" button in Settings, then Tasks > SIGNATURE > SIGN > fingerprint.
+#
+# The seed builds tasks from the network's real Authority and Election rows. A freshly founded
+# network has no election, so the seed may report "Seed failed: ..." and the flow then fails at
+# that assertion: that is a precondition gap, not a signing defect (see README).
+# Biometrics: run through scripts/run.sh.
+appId: ${APP_ID}
+name: "Authority: sign a seeded signature task"
+tags:
+  - authority
+  - tasks
+  - signing
+  - biometric
+  - dev
+env:
+  APP_ID: "${typeof AUTHORITY_APP_ID == 'undefined' ? 'org.votetorrent.authority' : AUTHORITY_APP_ID}"
+  BOOT_TIMEOUT_MS: "${typeof BOOT_TIMEOUT_MS == 'undefined' ? '300000' : BOOT_TIMEOUT_MS}"
+  NETWORK_NAME: "${typeof NETWORK_NAME == 'undefined' ? 'Maestro Net' : NETWORK_NAME}"
+  AUTHORITY_NAME: "${typeof AUTHORITY_NAME == 'undefined' ? 'Maestro Office' : AUTHORITY_NAME}"
+  RELAY_MULTIADDR: "${typeof RELAY_MULTIADDR == 'undefined' ? '/dns4/relay.example.invalid/tcp/443/wss' : RELAY_MULTIADDR}"
+  ADMIN_NAME: "${typeof ADMIN_NAME == 'undefined' ? 'Sam Lee' : ADMIN_NAME}"
+  ADMIN_TITLE: "${typeof ADMIN_TITLE == 'undefined' ? 'Clerk' : ADMIN_TITLE}"
+  CREATE_TIMEOUT_MS: "${typeof CREATE_TIMEOUT_MS == 'undefined' ? '180000' : CREATE_TIMEOUT_MS}"
+---
+- runFlow:
+    file: ../subflows/authority/launch.yaml
+    env:
+      CLEAR_STATE: "true"
+- runFlow: ../subflows/authority/create-network.yaml
+- back
+- runFlow:
+    file: ../subflows/authority/open-tab.yaml
+    env:
+      TAB: settings
+- scrollUntilVisible:
+    element:
+      text: "Seed Pending Tasks \\(Debug\\)"
+    direction: DOWN
+    timeout: 20000
+- tapOn: "Seed Pending Tasks \\(Debug\\)"
+- extendedWaitUntil:
+    visible: "Pending tasks seeded.*|Seed failed.*"
+    timeout: 60000
+- assertVisible: "Pending tasks seeded.*"
+- runFlow:
+    file: ../subflows/authority/open-tab.yaml
+    env:
+      TAB: tasks
+- extendedWaitUntil:
+    visible: "SIGNATURE"
+    timeout: 30000
+- tapOn:
+    text: "SIGNATURE"
+    index: 0
+- extendedWaitUntil:
+    visible:
+      id: "signature-task-footer-accept-slot"
+    timeout: 30000
+- tapOn:
+    id: "signature-task-footer-accept-slot"
+# The host helper answers the BiometricPrompt; a completed task pops back to Tasks.
+- extendedWaitUntil:
+    notVisible:
+      id: "signature-task-footer-accept-slot"
+    timeout: 90000

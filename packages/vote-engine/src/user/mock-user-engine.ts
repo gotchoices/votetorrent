@@ -118,6 +118,13 @@ export class MockUserEngine implements IUserEngine {
     this.mockHistory = [...this.mockHistory, userRevise]
   }
 
+  async getRevokeKeyDigest (keyToRevoke: string): Promise<Uint8Array> {
+    // Mock parity with UserEngine.getRevokeKeyDigest (49-05/D-20): a
+    // deterministic, per-key placeholder digest — this engine has no real
+    // DB/crypto plugin to compute an actual `Digest()` UDF result from.
+    return new TextEncoder().encode(`mock-revoke-digest:${this.mockUser.id}:${keyToRevoke}`)
+  }
+
   async revokeKey (keyToRevoke: string, _signature?: Signature): Promise<void> {
     const newActiveKeys = this.mockUser.activeKeys.filter(
       (k) => k.key !== keyToRevoke

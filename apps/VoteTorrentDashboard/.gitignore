@@ -1,0 +1,15 @@
+# The root .gitignore's bare `dist` rule matches only an entry named exactly
+# `dist` — it does not match `dist-mutant-*` (53-11, D-20). Kept app-local
+# (never added to the shared repo-root .gitignore) because that file is
+# shared with a concurrent session in this checkout, matching 53-07's own
+# precedent for apps/VoteTorrentPublic/.gitignore's `dist-gate` rule.
+dist-mutant-*
+
+# 60-07: the D-24 chart-geometry gate's build output. Same reason as
+# dist-mutant-* above — the root .gitignore's bare `dist` rule matches only
+# an entry named exactly `dist`. Kept app-local for the same reason.
+dist-chart-geometry
+
+# Nyquist gap-closure (phase 60 WR-01/WR-02/WR-03): gap-probe.tsx's build
+# output. Same reason as dist-chart-geometry above.
+dist-gap-probe

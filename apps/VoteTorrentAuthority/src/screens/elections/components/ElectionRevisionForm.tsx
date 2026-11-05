@@ -17,8 +17,10 @@ import { globalStyles } from "../../../theme/styles";
 export type ElectionRevisionFormValue = {
 	registrationEnds: string;
 	ballotsFinal: string;
-	releasingKeys: string;
 	votingStarts: string;
+	accruingVotes: string;
+	hashingVotes: string;
+	releasingKeys: string;
 	tallyingStarts: string;
 	validation: string;
 	certificationStarts: string;
@@ -44,8 +46,10 @@ interface ElectionRevisionFormProps {
  * can embed this inside its own ScrollView with its own PROPOSE footer.
  *
  * Sections (top→bottom, per Figma #15/#17):
- *   1. Timeline date-rows (registration ends, ballots final, releasing keys,
- *      voting starts, tallying starts, validation, certification starts, closed)
+ *   1. Timeline date-rows, in D-09 chronological order: registration ends,
+ *      ballots final, voting starts, accruing votes, hashing votes,
+ *      releasing keys, tallying starts, validation, certification starts,
+ *      closed
  *   2. Key holders list + trash per row + IMPORT + ADD KEY HOLDER chips
  *   3. Threshold Policy — single Stepper row + adjacent "of M" suffix
  *   4. Tags dropdown + removable chip list
@@ -86,7 +90,9 @@ export function ElectionRevisionForm({
 		const next = [...value.keyholders, ""];
 		// WR-04: keep threshold consistent with the count — once at least one keyholder
 		// exists the threshold must be at least 1 (it can be 0 only when count is 0).
-		const threshold = Math.max(value.threshold, 1);
+		// Once two or more keyholders exist the threshold is at least 2 (no single person may
+		// unlock the results alone).
+		const threshold = Math.max(value.threshold, next.length >= 2 ? 2 : 1);
 		set({ keyholders: next, threshold });
 	};
 
@@ -132,15 +138,27 @@ export function ElectionRevisionForm({
 					placeholder={t("selectDate")}
 				/>
 				<DateField
-					title={t("releasingKeys")}
-					value={value.releasingKeys}
-					onChange={(v) => set({ releasingKeys: v })}
-					placeholder={t("selectDate")}
-				/>
-				<DateField
 					title={t("votingStarts")}
 					value={value.votingStarts}
 					onChange={(v) => set({ votingStarts: v })}
+					placeholder={t("selectDate")}
+				/>
+				<DateField
+					title={t("accruingVotes")}
+					value={value.accruingVotes}
+					onChange={(v) => set({ accruingVotes: v })}
+					placeholder={t("selectDate")}
+				/>
+				<DateField
+					title={t("hashingVotes")}
+					value={value.hashingVotes}
+					onChange={(v) => set({ hashingVotes: v })}
+					placeholder={t("selectDate")}
+				/>
+				<DateField
+					title={t("releasingKeys")}
+					value={value.releasingKeys}
+					onChange={(v) => set({ releasingKeys: v })}
 					placeholder={t("selectDate")}
 				/>
 				<DateField
@@ -211,7 +229,7 @@ export function ElectionRevisionForm({
 							label={t("thresholdPolicy")}
 							value={value.threshold}
 							onChange={(n) => set({ threshold: n })}
-							min={value.keyholders.length === 0 ? 0 : 1}
+							min={value.keyholders.length === 0 ? 0 : value.keyholders.length >= 2 ? 2 : 1}
 							max={value.keyholders.length}
 						/>
 					</View>

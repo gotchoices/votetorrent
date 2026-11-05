@@ -30,6 +30,7 @@ import {
   createTestNetwork,
   addTestAuthority,
   makeElectionInit,
+  testKeyPairFor
 } from './fixtures/test-context.js'
 import { randomTestKeyPair } from './fixtures/keys.js'
 
@@ -295,7 +296,7 @@ describe('Real-seam: seedElectionSigning → createElection through InsertValid'
     const auth = await addTestAuthority(net)
     const electionsEngine = new ElectionsEngine(auth.ctx)
 
-    const { privateHex, publicHex } = randomTestKeyPair()
+    const { privateHex, publicHex } = testKeyPairFor(auth.user.id)
     auth.user.activeKeys = [
       {
         key: publicHex,

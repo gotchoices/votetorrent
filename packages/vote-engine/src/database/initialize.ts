@@ -25,6 +25,16 @@ import { allocateTid, peekTid } from './tid-allocator.js';
  * Phase 29 WR-01 encoding convention (do NOT alter — 999.1 Pitfall 6, a
  * mismatch silently fails closed): `digest` is base64url (the `Digest()` SQL
  * output), `signature` and `signerKey` are hex-encoded.
+ *
+ * 49-02 (D-02/D-03): this is the secp256k1 half of a pair with
+ * `verifySigP256` below. The pair exists because Android Keystore cannot
+ * hold a secp256k1 key (D-01) — a hardware-backed Authority-app device key
+ * is P-256, so a second, curve-pinned verifier was needed. The SQL-level
+ * branch (two thin UDFs selected by a schema CHECK disjunction) was chosen
+ * over widening this function to a 4th "curve" argument, because that would
+ * change the arity of a function seven existing CHECKs already call —
+ * registering a second function with an identical body is a strictly
+ * smaller blast radius. `verifySig`'s own body is byte-unchanged by 49-02.
  */
 export function verifySig(digest: SqlValue, signature: SqlValue, signerKey: SqlValue): boolean {
 	if (!digest || !signature || !signerKey) return false;
@@ -34,6 +44,30 @@ export function verifySig(digest: SqlValue, signature: SqlValue, signerKey: SqlV
 			String(signature),
 			String(signerKey),
 			'secp256k1',
+			'base64url', // inputEncoding — digest is base64url (Digest() output)
+			'hex', // sigEncoding — signatures are hex-encoded
+			'hex', // keyEncoding — public keys are hex-encoded
+		);
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * P-256 (secp256r1) counterpart to `verifySig` above — same body, same
+ * three encodings (base64url digest / hex signature / hex key), only the
+ * curve argument differs. See `verifySig`'s doc comment for why this is a
+ * separate function rather than a 4th argument on the existing one (49-02,
+ * D-02/D-03).
+ */
+export function verifySigP256(digest: SqlValue, signature: SqlValue, signerKey: SqlValue): boolean {
+	if (!digest || !signature || !signerKey) return false;
+	try {
+		return jsSignatureValid(
+			String(digest),
+			String(signature),
+			String(signerKey),
+			'p256',
 			'base64url', // inputEncoding — digest is base64url (Digest() output)
 			'hex', // sigEncoding — signatures are hex-encoded
 			'hex', // keyEncoding — public keys are hex-encoded
@@ -59,6 +93,27 @@ async function registerCustomFunctions(db: Database): Promise<void> {
 		(digest: SqlValue, signature: SqlValue, publicKey: SqlValue) => verifySig(digest, signature, publicKey),
 	);
 	db.registerFunction(signatureValidSchema);
+
+	// 49-02 (D-02/D-03): the P-256 counterpart to SignatureValid above,
+	// registered as its own scalar function (not a 4th arg on SignatureValid)
+	// — see verifySig/verifySigP256's doc comments for the arity-blast-radius
+	// reasoning. Consumed by the schema's curve-branched CHECKs on UserKey,
+	// AdminSigning, and OfficerSignature.
+	const signatureValidP256Schema = createScalarFunction(
+		{
+			name: 'SignatureValidP256',
+			numArgs: 3,
+			flags: FunctionFlags.DETERMINISTIC,
+			returnType: {
+				typeClass: 'scalar',
+				logicalType: BOOLEAN_TYPE,
+				nullable: false,
+				isReadOnly: true,
+			},
+		},
+		(digest: SqlValue, signature: SqlValue, publicKey: SqlValue) => verifySigP256(digest, signature, publicKey),
+	);
+	db.registerFunction(signatureValidP256Schema);
 
 	const isoDatetimeSchema = createScalarFunction(
 		{

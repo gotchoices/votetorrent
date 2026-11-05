@@ -10,7 +10,7 @@ import FontAwesome6 from "react-native-vector-icons/FontAwesome6";
 import { ExtendedTheme, useTheme } from "@react-navigation/native";
 import { useTranslation } from "react-i18next";
 import type { Officer } from "@votetorrent/vote-core";
-import { scopeDescriptions } from "@votetorrent/vote-core";
+import { scopeLabel } from "../../../utils/scopeLabel";
 import { ThemedText } from "../../../components/ThemedText";
 import { ChipButton } from "../../../components/ChipButton";
 import { globalStyles } from "../../../theme/styles";
@@ -45,9 +45,8 @@ export interface OfficerCardProps {
  * resolved name via the optional `userName` prop (sourced from a User lookup).
  * Falls back to officer.userId when userName is omitted.
  *
- * Permissions: renders bulleted scope list using scopeDescriptions, falling
- * back to the raw scope code when a description is missing (covers the
- * undefined `rnp` entry in vote-core's scopeDescriptions).
+ * Permissions: renders a bulleted scope list through utils/scopeLabel (translated `scope_<code>`
+ * keys, then vote-core's English description, then the raw code; PR-1).
  */
 export function OfficerCard({
 	officer,
@@ -76,18 +75,20 @@ export function OfficerCard({
 			{image ? <Image source={image} style={styles.officerImage} /> : null}
 			<View style={styles.detail}>
 				<ThemedText type="defaultSemiBold">{t("name")}: </ThemedText>
-				<ThemedText numberOfLines={1} ellipsizeMode="tail">
+				<ThemedText numberOfLines={1} ellipsizeMode="tail" style={styles.detailValue}>
 					{displayName}
 				</ThemedText>
 			</View>
 			<View style={styles.detail}>
 				<ThemedText type="defaultSemiBold">{t("title")}: </ThemedText>
-				<ThemedText style={styles.italicText}>{officer.title}</ThemedText>
+				<ThemedText style={[styles.detailValue, styles.italicText]}>{officer.title}</ThemedText>
 			</View>
 			{inviteId ? (
 				<View style={styles.detail}>
 					<ThemedText type="smallBold">{t("inviteId")}: </ThemedText>
-					<ThemedText type="small">{inviteId}</ThemedText>
+					<ThemedText type="small" numberOfLines={1} ellipsizeMode="middle" style={styles.detailValue}>
+						{inviteId}
+					</ThemedText>
 				</View>
 			) : null}
 			<ThemedText type="defaultSemiBold">{t("permissions")}:</ThemedText>
@@ -95,7 +96,7 @@ export function OfficerCard({
 				{officer.scopes.map((scope) => (
 					<View key={scope} style={styles.bulletRow}>
 						<ThemedText>{"• "}</ThemedText>
-						<ThemedText>{scopeDescriptions[scope] ?? scope}</ThemedText>
+						<ThemedText style={styles.detailValue}>{scopeLabel(scope, t)}</ThemedText>
 					</View>
 				))}
 			</View>
@@ -166,6 +167,12 @@ const localStyles = StyleSheet.create({
 	detail: {
 		flexDirection: "row",
 		marginVertical: 1,
+	},
+	// The value beside a "Label: " (or bullet) in a row. Yoga defaults flexShrink to 0, so
+	// without this the value measures at the full row width and the label pushes it past the
+	// right edge, clipped, instead of wrapping or ellipsizing.
+	detailValue: {
+		flexShrink: 1,
 	},
 	subDetails: {
 		marginLeft: 8,

@@ -215,7 +215,11 @@ describe('UserEngine', () => {
       const { engine, user } = await createUserEngineForExistingNetwork()
       const summary = await engine.getSummary()
       expect(summary?.id).to.equal(user.id)
-      expect(summary?.name).to.equal(user.name)
+      // 62-65: the founder's DB User.Name is the entered admin name, not the in-memory
+      // device user's name — proving the value is read from the DB row.
+      const enteredAdminName = makeNetworkInit().admin.officers[0]!.init!.name
+      expect(enteredAdminName).to.not.equal(user.name)
+      expect(summary?.name).to.equal(enteredAdminName)
     })
 
     // Needs a populated DB to assert the undefined branch is reachable via
@@ -580,9 +584,15 @@ describe('UserEngine', () => {
       // Build a real secp256k1 signature for the revoke operation (UKEY-02 impl).
       // SIGNER = FIRST key (remains after revoke); KEY BEING REVOKED = secondPub.
       // This satisfies DeleteValid: context.UserKey = firstPub which still exists after delete.
+      //
+      // 49-05 (D-20): sign the ENGINE's canonical revoke pre-image
+      // (Digest(UserId, PubKey), via getRevokeKeyDigest) rather than the old
+      // ad hoc "revokeKey" + key prefix string — this is a DELIBERATE
+      // breaking change to test-locked behavior (RESEARCH.md Pitfall 5), not
+      // a regression; do not "restore" the old format.
       const revokePrivBytes = firstPrivBytes
-      const revokePayloadBytes = new TextEncoder().encode(`revokeKey:${secondPub}`)
-      const revokeSigBytes = secp256k1.sign(sha256(revokePayloadBytes), revokePrivBytes)
+      const revokeDigestBytes = await engine.getRevokeKeyDigest(secondPub)
+      const revokeSigBytes = secp256k1.sign(revokeDigestBytes, revokePrivBytes)
       const revokeSigHex = bytesToHex(revokeSigBytes)
       const revokeSignature: Signature = {
         signature: revokeSigHex,
@@ -657,7 +667,8 @@ describe('UserEngine', () => {
         AsyncStorage,
         ctx
       )
-      const fakeInviteKey = 'k'.repeat(66)
+      const fakeInviteKeyPair = randomTestKeyPair()
+      const fakeInviteKey = fakeInviteKeyPair.publicHex
       const fakeInvite = { inviteKey: fakeInviteKey, type: 'au' as const, expiration: '0', inviteSignature: 'a'.repeat(128) }
       await ctx.db.exec(
         `INSERT INTO InviteSlot (Cid, Type, Name, Expiration, InviteKey, InviteSignature, SigningNonce)
@@ -667,6 +678,7 @@ describe('UserEngine', () => {
       )
       await networkEngine.respondToInvite({
         invite: fakeInvite,
+        invitePrivate: fakeInviteKeyPair.privateHex,
         isAccepted: true,
         invokes: { authority: { name: 'Invokee', domainName: 'inv.example' }, admin: { effectiveAt: '2026-01-01T00:00:00', thresholdPolicies: '[{"policy":"rad","threshold":1}]' }, officers: [{ adminEffectiveAt: '2026-01-01T00:00:00', userId: 'user-1', title: 'Officer', scopes: '["rad"]' }] },
         inviteSignature: 'a'.repeat(128),
@@ -708,6 +720,7 @@ describe('UserEngine', () => {
       const inviteSignature = signInviteResult(fakeInvitePrivate, slotRowForSig!.Cid as string, 'null', false)
       await networkEngine.respondToInvite({
         invite: fakeInvite,
+        invitePrivate: fakeInvitePrivate,
         isAccepted: false,
         invokes: undefined,
         inviteSignature,
@@ -831,8 +844,14 @@ describe('UserEngine', () => {
       // 4) revokeKey — Event 'RK', Sequence 3
       // UKEY-02: sign with the FIRST key (createPub) so context.UserKey = createPub,
       // which still exists in UserKey after revoking addedPub → DeleteValid passes.
+      //
+      // 49-05 (D-20): sign the ENGINE's canonical revoke pre-image
+      // (Digest(UserId, PubKey), via getRevokeKeyDigest) rather than the old
+      // ad hoc "revokeKey" + key prefix string — a DELIBERATE breaking change
+      // to test-locked behavior (RESEARCH.md Pitfall 5), not a regression.
+      const historyRevokeDigestBytes = await engine.getRevokeKeyDigest(addedPub)
       const historyRevokeSig: Signature = {
-        signature: bytesToHex(secp256k1.sign(sha256(new TextEncoder().encode(`revokeKey:${addedPub}`)), createPrivBytes)),
+        signature: bytesToHex(secp256k1.sign(historyRevokeDigestBytes, createPrivBytes)),
         signerKey: bytesToHex(secp256k1.getPublicKey(createPrivBytes)),
         signerUserId: user.id
       }
@@ -1194,6 +1213,8 @@ function makeStubUserEngine (opts?: { failOn?: 'create' | 'addKey' | 'revise' | 
     revokeKey: fail === 'revokeKey'
       ? async () => { throw new Error('stub failure') }
       : async () => undefined,
+    // 49-05 (D-20): stub parity with IUserEngine.getRevokeKeyDigest.
+    getRevokeKeyDigest: async () => new Uint8Array(32),
     connectDevice: async () => ({ multiAddress: '', token: '' }),
     getHistory: async function * () { /* empty */ },
     getSummary: async () => undefined,
@@ -1824,9 +1845,18 @@ describe('UserRevokeKeyBuilder', () => {
   it('REAL ENGINE: engine.revokeKey(payload) and engine.buildRevokeKey().fromPayload(payload).commit() produce structurally identical observable state', async () => {
     const { engine: eng1 } = await createUserEngineForExistingNetwork()
     const payload = makeFullBuilder(eng1).toEngineInput()
+    // 49-05 (D-20): sign the ENGINE's canonical revoke pre-image
+    // (Digest(UserId, PubKey)) rather than the old ad hoc "revokeKey" + key
+    // prefix string — a DELIBERATE breaking change to test-locked behavior
+    // (RESEARCH.md Pitfall 5), not a regression. `payload` ('e'.repeat(66))
+    // is not a real registered UserKey, so this delete affects 0 rows and
+    // DeleteValid never fires either way — the point of this case is
+    // structural parity between the two commit paths, not signature
+    // verification.
+    const revokeDigestBytes = await eng1.getRevokeKeyDigest(payload)
     const pairPriv = secp256k1.utils.randomSecretKey()
     const pairSig: Signature = {
-      signature: bytesToHex(secp256k1.sign(sha256(new TextEncoder().encode(`revokeKey:${payload}`)), pairPriv)),
+      signature: bytesToHex(secp256k1.sign(revokeDigestBytes, pairPriv)),
       signerKey: bytesToHex(secp256k1.getPublicKey(pairPriv)),
       signerUserId: 'parity-test-user'
     }

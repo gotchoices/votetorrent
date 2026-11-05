@@ -3,10 +3,12 @@
  * across all 7 `LifecycleState` values, driven by the `STATE_DISPLAY` lookup map (40-RESEARCH.md
  * Pattern 1) rather than a long switch embedded in JSX.
  *
- * Pure presentational (`election: MockElection` prop + optional navigation CALLBACK props) — does
+ * Pure presentational (`election: VoterElection` prop + optional navigation CALLBACK props) — does
  * NOT call `useVoterApp()` or `useNavigation()` (RESEARCH.md Anti-Patterns / SHELL-03 spirit), so
  * every state is unit-testable directly with a fixture election, no provider/navigator required.
- * `HomeScreen` owns the provider read and maps these callbacks to real navigation.
+ * The saved-vote notice (D-12) arrives from a prop too, read by the screen from the marker, never here.
+ * `HomeScreen` owns the provider read and maps these callbacks to real navigation. The `__DEV__`
+ * shared-clock offset (D-02) likewise arrives by the `nowOffsetMs` prop, matching `CountdownTimer`.
  */
 import React from 'react';
 import {Pressable, StyleSheet, Text, View} from 'react-native';
@@ -15,9 +17,11 @@ import type {ExtendedTheme} from '@react-navigation/native';
 import {useTranslation} from 'react-i18next';
 import FontAwesome6 from 'react-native-vector-icons/FontAwesome6';
 import {globalStyles} from '../theme/styles';
-import type {LifecycleState, MockElection} from '../providers/types';
+import type {LifecycleState, VoterElection} from '../providers/types';
 import {CountdownTimer} from './CountdownTimer';
 import {ProgressBar} from './ProgressBar';
+import {SavedVoteNotice} from './SavedVoteNotice';
+import type {SavedVoteStatus} from '../engines/saved-vote-status';
 
 type IconColorRole = 'muted' | 'success' | 'primary';
 
@@ -93,19 +97,62 @@ const STATE_DISPLAY: Record<LifecycleState, StateDisplay> = {
 	},
 };
 
+/**
+ * States whose summary copy interpolates counts or a certification that have no engine source
+ * yet. A real read leaves those fields absent, so the card falls back to copy that states only
+ * what is known — never "undefined/5" and never an implied "0 released". The `__DEV__` review
+ * fixture fills the fields, so the counted copy is still reviewable.
+ */
+const SUMMARY_FALLBACK: Partial<Record<LifecycleState, {isKnown: (election: VoterElection) => boolean; summaryKey: string}>> = {
+	ReleasingKeys: {
+		isKnown: election => election.keysReleased !== undefined && election.keysTotal !== undefined,
+		summaryKey: 'states.releasingKeys.pendingSummary',
+	},
+	Validation: {
+		isKnown: election => election.checksComplete !== undefined && election.checksTotal !== undefined,
+		summaryKey: 'states.validation.pendingSummary',
+	},
+	ValidationDetails: {
+		isKnown: election => election.checksComplete !== undefined && election.checksTotal !== undefined,
+		summaryKey: 'states.validation.pendingSummary',
+	},
+	Complete: {
+		isKnown: election => election.certified === true,
+		summaryKey: 'states.complete.closedSummary',
+	},
+};
+
 export interface ElectionCardProps {
-	election: MockElection;
+	election: VoterElection;
 	onVoteNow?: () => void;
 	onViewValidationDetails?: () => void;
 	onLearnAboutElection?: () => void;
-	hasVoted?: boolean;
+	/**
+	 * The saved-vote status the screen read from the marker (D-19). The card never reads it itself.
+	 */
+	savedVote?: SavedVoteStatus;
+	/** Opens the saved-vote receipt. The link renders only when this is supplied. */
+	onViewSavedVote?: () => void;
+	/**
+	 * The `__DEV__` shared-clock offset (D-02), passed by the screen and never read from a provider.
+	 * 0 by default.
+	 */
+	nowOffsetMs?: number;
 }
 
-export function ElectionCard({election, onVoteNow, onViewValidationDetails, onLearnAboutElection, hasVoted}: ElectionCardProps) {
+export function ElectionCard({election, onVoteNow, onViewValidationDetails, onLearnAboutElection, savedVote, onViewSavedVote, nowOffsetMs = 0}: ElectionCardProps) {
 	const {colors, fonts, type: typeScale, radii} = useTheme() as ExtendedTheme;
 	const {t} = useTranslation('home');
 
 	const display = STATE_DISPLAY[election.lifecycleState];
+	const savedState = savedVote?.state ?? 'none';
+	// Mirrors the 63-08 guard (D-20 convenience): a saved, sent or unreadable vote hides Vote now, and a
+	// stale one offers it again (D-21). The guard inside the submit path is the enforcement.
+	const voteBlocked = savedState === 'saved' || savedState === 'sent' || savedState === 'unreadable';
+	const fallback = SUMMARY_FALLBACK[election.lifecycleState];
+	const summaryKey = fallback && !fallback.isKnown(election) ? fallback.summaryKey : display.summaryKey;
+	// No engine source for turnout yet: the bar renders only when a progress value exists.
+	const showProgress = display.showProgress && election.progress !== undefined;
 	const percent = Math.round((election.progress ?? 0) * 100);
 
 	return (
@@ -160,7 +207,7 @@ export function ElectionCard({election, onVoteNow, onViewValidationDetails, onLe
 							lineHeight: typeScale.body.lineHeight,
 						},
 					]}>
-					{t(display.summaryKey, {
+					{t(summaryKey, {
 						released: election.keysReleased,
 						total: election.keysTotal,
 						checksComplete: election.checksComplete,
@@ -172,11 +219,11 @@ export function ElectionCard({election, onVoteNow, onViewValidationDetails, onLe
 
 			{display.showCountdown && election.countdownTarget ? (
 				<View style={styles.countdown}>
-					<CountdownTimer targetIso={election.countdownTarget} />
+					<CountdownTimer targetIso={election.countdownTarget} nowOffsetMs={nowOffsetMs} />
 				</View>
 			) : null}
 
-			{display.showProgress ? (
+			{showProgress ? (
 				<View style={styles.progress}>
 					<Text
 						style={[
@@ -195,21 +242,19 @@ export function ElectionCard({election, onVoteNow, onViewValidationDetails, onLe
 				</View>
 			) : null}
 
-			{display.showAction === 'vote' ? (
-				hasVoted ? (
-					<View
-						testID="election-card-voted"
-						style={[styles.actionButton, styles.actionButtonOutline, {backgroundColor: colors.secondaryButtonSurface, borderColor: colors.muted, borderRadius: radii.pill}]}>
-						<Text style={[styles.actionLabel, {color: colors.muted}]}>{t('votedCta')}</Text>
-					</View>
-				) : (
-					<Pressable
-						testID="election-card-vote-now"
-						onPress={onVoteNow}
-						style={[styles.actionButton, {backgroundColor: colors.primary, borderRadius: radii.pill}]}>
-						<Text style={[styles.actionLabel, {color: colors.light}]}>{t('voteNowCta')}</Text>
-					</Pressable>
-				)
+			{savedVote && savedState !== 'none' ? (
+				<View style={styles.savedVote}>
+					<SavedVoteNotice status={savedVote} onView={onViewSavedVote} testID="election-card-saved-vote" />
+				</View>
+			) : null}
+
+			{display.showAction === 'vote' && !voteBlocked ? (
+				<Pressable
+					testID="election-card-vote-now"
+					onPress={onVoteNow}
+					style={[styles.actionButton, {backgroundColor: colors.primary, borderRadius: radii.pill}]}>
+					<Text style={[styles.actionLabel, {color: colors.light}]}>{t('voteNowCta')}</Text>
+				</Pressable>
 			) : null}
 
 			{display.showAction === 'validationDetails' ? (
@@ -246,10 +291,17 @@ const styles = StyleSheet.create({
 	summary: {
 		flex: 1,
 	},
+	// D-11 deliberate divergence: this wrapper stays intentionally left-aligned (no alignItems),
+	// unlike TimelineRow's countdown wrapper, which centres. The two must not be reconciled.
+	// (The values are no longer the same either: 61-08's C1 moved TimelineRow's to marginTop 24
+	// while Home's stays 16. The contract is the ALIGNMENT, not the spacing.)
 	countdown: {
 		marginTop: 16, // md-ish spacing, matches card padding rhythm
 	},
 	progress: {
+		marginTop: 16,
+	},
+	savedVote: {
 		marginTop: 16,
 	},
 	progressLabel: {

@@ -1,0 +1,336 @@
+name: Build iOS archives (unsigned verification)
+
+# This is a VERIFICATION workflow, not a release: it holds zero signing
+# secrets and publishes nothing. See doc/releases/RELEASE-IOS.md for how the
+# admin actually ships a build (from their laptop, manually, per D-01 — the
+# same model that replaced release-android.yml with build-android.yml).
+#
+# The macOS job below produces a deliberately UNSIGNED archive
+# (CODE_SIGN_IDENTITY="", CODE_SIGNING_REQUIRED=NO, CODE_SIGNING_ALLOWED=NO,
+# together). That is not an oversight to "fix" — an unsigned archive is not
+# installable, and that is exactly what keeps "CI cannot publish" true (D-02).
+#
+# Why this file carries a `paths-ignore` when neither build-android.yml nor
+# dashboard.yml has one: dashboard.yml's own `on:` block explains that a path
+# filter was *considered and declined* there — "skip semantics are one more
+# place a verdict can be misread ('no run' silently read as 'passed')" — and
+# names its own reopen condition: "if runner-minute cost becomes the dominant
+# complaint." This workflow's macOS runner is billed at roughly 10x a Linux
+# runner, which meets that stated condition, so the filter below is justified
+# on dashboard.yml's own terms — NOT as "matching Android's exception".
+# Neither existing workflow has a docs exception; do not describe this as
+# parity with build-android.yml.
+#
+# Consequence worth naming plainly: because `ruby-gates` (below) lives in
+# this same file, it inherits this narrower trigger too — it runs on PRs to
+# master and on manual dispatch, but NOT on a direct push to master. That is
+# an accepted narrowing, not an oversight. Follow-up, out of scope for this
+# plan: moving `ruby-gates` into dashboard.yml would give it push coverage on
+# a cheap Linux runner, at zero macOS cost — dashboard.yml runs on push too
+# and dashboard.yml is outside this file's scope.
+#
+# Operational note for the admin: while this workflow's pull_request trigger
+# carries a paths-ignore, do NOT configure `ruby-gates` or `archive` as a
+# *required* status check in branch protection unless the required-check
+# targets are set up to tolerate a skipped run — a filtered-out workflow run
+# never reports a status at all, and a required check that never reports
+# blocks merges rather than passing them.
+#
+# Only the plain `pull_request` event below is used. Its target-scoped
+# sibling event (the one whose name appends "_target") is intentionally
+# absent and must stay absent: that event runs with a write-scoped token
+# against the base repo's secrets while checking out the PR head's untrusted
+# code, which would let a fork-submitted PR execute arbitrary code with
+# elevated permissions. `pull_request` checks out and runs with the fork's
+# own limited, read-only token instead. (Same reasoning as dashboard.yml.)
+#
+# This workflow has never been exercised by a real GitHub Actions run. The
+# first real run after merge is its actual proof.
+
+on:
+  pull_request:
+    branches: [master]
+    paths-ignore:
+      # scripts/** is deliberately ABSENT from this list, on purpose, and
+      # must stay absent: it is exactly what the ruby-gates job below
+      # guards, and a change there must never be able to skip these gates.
+      # This list must also never grow to cover apps/**/project.pbxproj or
+      # apps/VoteTorrentAuthority/src/** — those are what vt_team_gate and
+      # vt_appattest_release_gate read. Checked and encoded as an executable
+      # assertion in 55-05-PLAN.md task 1 (the "guarded paths" check).
+      - 'doc/**'
+      - '**/*.md'
+      - 'web/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ===========================================================================
+  # Job 1 -- ruby-gates: runs the fastlane Minitest files that, before this
+  # workflow existed, nothing in the repo ever ran (no CI job, no
+  # package.json script, no Rakefile). Also runs vt_team_gate as a CI lint.
+  # ===========================================================================
+  ruby-gates:
+    name: "Ruby fastlane gates (Linux, no Xcode, no gems)"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      # The runner's preinstalled Ruby is used directly: no ruby/setup-ruby,
+      # no bundle install, no gem install. Both test files below need only
+      # the Ruby stdlib plus the inline FastlaneCore::UI double they each
+      # define themselves.
+      - name: Ruby version receipt
+        run: ruby --version
+
+      # Deliberately one `ruby` process PER FILE, not a single process that
+      # requires them all. vt_team_gate_test.rb and
+      # vt_appattest_release_gate_test.rb each define their own top-level
+      # REPO_ROOT, GENERATED_RELATIVE and FastlaneCore::UI double -- loading
+      # both into one process collides. A collision that still exits 0 would
+      # be the same "no run misread as passed" failure the paths-ignore
+      # comment above warns about, so each file gets its own process and its
+      # own exit code.
+      - name: Run every fastlane gate test (one process per file)
+        run: |
+          set -euo pipefail
+          files=(scripts/fastlane/*_test.rb)
+          if [ "${#files[@]}" -lt 2 ]; then
+            echo "::error::Expected at least 2 scripts/fastlane/*_test.rb files, found ${#files[@]}. A rename or moved directory must fail this job, not pass it silently."
+            exit 1
+          fi
+          for f in "${files[@]}"; do
+            echo "Running $f"
+            ruby "$f" || exit 1
+          done
+
+      # A missing purpose string is a privacy-service abort on the first Face
+      # ID prompt, and no build or jest tier detects it (jest mocks the native
+      # module; Xcode builds without the key). This static gate does, and its
+      # selftest proves each failure mode is still detected. Node is
+      # preinstalled on the runner; the script has no dependencies.
+      - name: iOS usage-description gate
+        run: |
+          set -euo pipefail
+          node scripts/check-ios-usage-keys.mjs --selftest
+          node scripts/check-ios-usage-keys.mjs
+
+      # D-09's gate as a CI lint (55-03 decided this job should run it here).
+      # fastlane is deliberately not installed; this is the same inline
+      # FastlaneCore::UI double shape 55-03 proved in vt_team_gate_test.rb.
+      # This is a lint in this job, while remaining a hard gate in the real
+      # release lanes (the Voter's iOS beta/release Fastfile).
+      - name: Team consistency gate against the real checkout
+        run: |
+          set -euo pipefail
+          ruby -e '
+            module FastlaneCore
+              module UI
+                class Error < StandardError; end
+                class << self
+                  def user_error!(msg)
+                    raise Error, msg
+                  end
+                  def success(msg)
+                    puts msg
+                  end
+                end
+              end
+            end
+            require "./scripts/fastlane/vt_team_gate"
+            VtTeamGate.assert_team!(Dir.pwd)
+          '
+
+  # ===========================================================================
+  # Job 2 -- archive: an UNSIGNED device archive per app (D-02), matrixed
+  # over both apps (D-05), asserting the JS bundle landed in the built .app
+  # (D-03). Gated behind ruby-gates (fail-closed static gate before any
+  # expensive build step) -- a 10x-billed macOS matrix is exactly the trade
+  # that gating is for. dashboard.yml deliberately uses no `needs:` so each
+  # of its verdicts stands alone; that reasoning does not transfer here
+  # because both of its jobs are cheap Linux jobs, unlike this one.
+  # ===========================================================================
+  archive:
+    name: "Unsigned archive - ${{ matrix.app.name }}"
+    runs-on: macos-15
+    needs: ruby-gates
+    # Bounded deliberately: RESEARCH's Pitfall 1 warning sign for an
+    # incomplete signing-disable is a very slow archive step, and an
+    # unbounded hang on a 10x-billed runner is the expensive failure mode
+    # this timeout exists to cut off.
+    timeout-minutes: 60
+    strategy:
+      # D-05: Voter and Authority each have their own Xcode project and
+      # Podfile and can break independently -- one app's failure must not
+      # hide the other's result.
+      fail-fast: false
+      matrix:
+        app:
+          - name: voter
+            dir: apps/VoteTorrentVoter
+            scheme: VoteTorrentVoter
+          - name: authority
+            dir: apps/VoteTorrentAuthority
+            scheme: VoteTorrentAuthority
+    steps:
+      - uses: actions/checkout@v4
+
+      # Fail closed, never a silent fallback to whatever Xcode the image
+      # ships by default -- an unannounced image change becomes a loud red
+      # job with its own inventory dump, not a silent toolchain swap.
+      # [ASSUMED: Xcode 26.3 is present on the macos-15 image -- cited from
+      # the actions/runner-images macos-15 README via RESEARCH, not executed
+      # here.]
+      - name: Select Xcode
+        run: |
+          set -euo pipefail
+          XCODE_PATH="/Applications/Xcode_26.3.app/Contents/Developer"
+          if [ ! -d "$XCODE_PATH" ]; then
+            echo "::error::$XCODE_PATH not found on this runner image. Installed Xcode versions:"
+            ls -d /Applications/Xcode* || true
+            exit 1
+          fi
+          sudo xcode-select --switch "$XCODE_PATH"
+          xcodebuild -version
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          # No `cache: yarn` here, matching build-android.yml and
+          # dashboard.yml: setup-node's yarn cache shells out to
+          # `yarn cache dir` using the runner's global Yarn 1.22.22, which
+          # hard-errors against this repo's `packageManager: yarn@4.7.0` pin.
+
+      # Corepack MUST be enabled before anything invokes `yarn`.
+      - name: Enable Corepack (pinned Yarn 4.7.0)
+        run: |
+          corepack enable
+          yarn --version
+
+      - name: Cache Yarn global cache
+        uses: actions/cache@v4
+        with:
+          # .yarnrc.yml sets enableGlobalCache: true, so downloads land in
+          # the global folder rather than a per-project .yarn/cache.
+          path: ~/.yarn/berry/cache
+          key: ${{ runner.os }}-yarn-${{ hashFiles('yarn.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-yarn-
+
+      - name: Install workspace dependencies
+        run: yarn install --immutable
+
+      # Workspace packages publish their entrypoints from dist/ (e.g.
+      # @votetorrent/vote-engine exports ./rn -> ./dist/rn-entry.js), and
+      # dist/ is gitignored. A clean CI checkout therefore has no dist/, and
+      # Metro fails to resolve @votetorrent/vote-engine/rn during bundling.
+      #
+      # Scoped to packages/* on purpose: apps/* must NOT be built here,
+      # because votetorrent-authority's `build` script shells into gradle.
+      - name: Build workspace packages
+        run: yarn workspaces foreach -At --include 'packages/*' run build
+
+      # Pods/ is gitignored, so this step is mandatory. This deliberately
+      # uses the runner's preinstalled CocoaPods rather than `bundle exec`:
+      # this repo's Gemfile.lock pins BUNDLED WITH 1.17.2 against the
+      # runner's modern Ruby. `bundle exec` remains the admin's local
+      # release path. Must run after yarn install: the Podfile's first
+      # statement shells out to `node` to require.resolve
+      # react-native/scripts/react_native_pods.rb.
+      - name: CocoaPods install
+        working-directory: ${{ matrix.app.dir }}/ios
+        run: |
+          pod --version
+          pod install
+
+      # D-02: archive from the .xcworkspace (never .xcodeproj -- -project
+      # would silently omit every CocoaPods-vendored native module,
+      # including AttestationNative, and the bundle assertion below could
+      # still pass on an archive missing native functionality) with all
+      # three signing-disable settings TOGETHER. CODE_SIGNING_ALLOWED=NO
+      # alone is not reliable: both apps' project-level pbxproj carry a
+      # "CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "iPhone Developer" default
+      # that CODE_SIGNING_ALLOWED=NO does not reliably override, and the
+      # symptom is a very slow archive or an explicit "no signing
+      # certificate" error. The xcodebuild flag that auto-manages
+      # provisioning profiles via an authenticated Developer Portal call is
+      # omitted deliberately and PERMANENTLY, never added even to "help"
+      # signing along -- that authenticated call is exactly what D-01
+      # forecloses. -configuration Release is what
+      # makes the React Native bundling phase run -- that phase branches
+      # only on $CONFIGURATION/$PLATFORM_NAME, never on signing state, so a
+      # signing-disabled Release archive still bundles.
+      - name: Archive (unsigned)
+        working-directory: ${{ matrix.app.dir }}/ios
+        run: |
+          set -euo pipefail
+          xcodebuild archive \
+            -workspace "${{ matrix.app.scheme }}.xcworkspace" \
+            -scheme "${{ matrix.app.scheme }}" \
+            -configuration Release \
+            -sdk iphoneos \
+            -archivePath "$RUNNER_TEMP/${{ matrix.app.scheme }}.xcarchive" \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            | tee "$RUNNER_TEMP/xcodebuild-${{ matrix.app.name }}.log"
+
+      # D-03: fail the job if the archived .app has no JS bundle -- a
+      # release archive missing main.jsbundle would install (if it were
+      # signed) and then fail to start. Two distinct failures, both
+      # diagnosable: a missing .app dumps the archive layout (this half --
+      # where Xcode relocates the product inside the .xcarchive -- is the
+      # UNPROVEN part; see 55-05-PLAN.md <limitations_and_unproven>), and a
+      # missing main.jsbundle means Metro bundling did not run.
+      - name: Verify the archive carries the JS bundle
+        run: |
+          set -euo pipefail
+          APP="$RUNNER_TEMP/${{ matrix.app.scheme }}.xcarchive/Products/Applications/${{ matrix.app.scheme }}.app"
+          if [ ! -d "$APP" ]; then
+            echo "::error::${{ matrix.app.name }} archive layout is not what was expected -- no .app at $APP"
+            find "$RUNNER_TEMP/${{ matrix.app.scheme }}.xcarchive" -maxdepth 4
+            exit 1
+          fi
+          if [ ! -f "$APP/main.jsbundle" ]; then
+            echo "::error::${{ matrix.app.name }} archive has no JS bundle -- Metro bundling did not run"
+            exit 1
+          fi
+          echo "Bundle size: $(du -h "$APP/main.jsbundle" | cut -f1)"
+
+      # The built app must carry the Face ID purpose string in its Info.plist
+      # and both localizations; the static gate checks the sources, this
+      # checks what Xcode actually packaged.
+      - name: Verify the built app carries the Face ID purpose string
+        run: |
+          set -euo pipefail
+          APP="$RUNNER_TEMP/${{ matrix.app.scheme }}.xcarchive/Products/Applications/${{ matrix.app.scheme }}.app"
+          if ! plutil -extract NSFaceIDUsageDescription raw "$APP/Info.plist" > /dev/null; then
+            echo "::error::${{ matrix.app.name }} built app has no NSFaceIDUsageDescription -- the first Face ID prompt would abort the app"
+            exit 1
+          fi
+          for lang in en es; do
+            if [ ! -f "$APP/$lang.lproj/InfoPlist.strings" ]; then
+              echo "::error::${{ matrix.app.name }} built app has no $lang.lproj/InfoPlist.strings"
+              exit 1
+            fi
+          done
+
+      # The .xcarchive itself is deliberately NOT uploaded (unsigned and
+      # therefore not installable -- publishing it as an artifact would
+      # invite exactly the "here is the iOS build" misreading D-01 exists to
+      # prevent, and it carries dSYMs and is large). Only the xcodebuild log
+      # is kept, and only on failure, as a diagnostic.
+      - name: Upload xcodebuild log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcodebuild-${{ matrix.app.name }}-${{ github.sha }}
+          path: ${{ runner.temp }}/xcodebuild-${{ matrix.app.name }}.log
+          retention-days: 14

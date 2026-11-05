@@ -1,0 +1,506 @@
+/*
+ * VoteTorrent Public Election View — app.css.
+ *
+ * Design tokens and base/reset rules live in @votetorrent/ui-web's tokens.css
+ * (D-15) — see packages/ui-web/src/tokens.css for the token declarations, the
+ * base/reset rules, and the D-23 probe contract. This file holds only this
+ * app's own layout primitives: a page-level chrome that stacks a header, a
+ * main region and a footer vertically at full viewport height. It declares no
+ * custom property and no root-level variable block — those live in the package.
+ *
+ * `ElectionShell` mounts `AdvisoryDisclosure`, `LifecyclePill` and
+ * `DetailsToggle` (@votetorrent/ui-web/components), so this file also
+ * `@import`s `@votetorrent/ui-web/components.css` (53-CR01, the D-15
+ * revision) for those components' default rules — see
+ * packages/ui-web/src/components.css and packages/ui-web/README.md's
+ * "Shared component default styles" section. `.election-title` below is NOT
+ * one of those: it is rendered directly by `ElectionShell.tsx`, not by a
+ * shared component, so it stays this app's own rule.
+ */
+
+@import '@votetorrent/ui-web/tokens.css';
+@import '@votetorrent/ui-web/components.css';
+
+.public-app {
+	display: flex;
+	flex-direction: column;
+	min-height: 100%;
+	padding: var(--space-md);
+	gap: var(--space-lg);
+	background: var(--bg);
+}
+
+.public-app__header {
+	padding: var(--space-md);
+	background: var(--surface);
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	font-size: var(--font-display-size);
+	color: var(--text);
+}
+
+/*
+ * A flex column with its own gap, not a bare block. `ElectionShell` mounts
+ * three siblings here — the election section (or the unreadable-address
+ * section), `AdvisoryDisclosure`, and `DetailsToggle` — and the advisory MUST
+ * remain a sibling rather than a child of the section (D-16 forbids it from
+ * ever becoming conditional on anything, which nesting it inside `.election`
+ * would eventually invite). A sibling inherits none of `.election`'s own
+ * `gap`, so before this rule the advisory line rendered flush against the
+ * placeholder above it and the toggle below it — 0px on both sides — and
+ * read as one more item crammed into the placeholder stack rather than as a
+ * standing statement about the whole page.
+ *
+ * The gap belongs HERE, on the container, precisely because it must not
+ * depend on what `ElectionShell` chooses to render: any future sibling is
+ * spaced by construction, and no one has to remember to add a margin.
+ */
+.public-app__main {
+	flex: 1;
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-md);
+	padding: var(--space-md);
+	color: var(--text);
+}
+
+.public-app__footer {
+	padding: var(--space-md);
+	color: var(--muted);
+}
+
+/*
+ * ElectionShell (53-07). Uses ONLY tokens the package declares — no literal
+ * colours, so 53-08's D-23 token probe has something real to resolve
+ * against and a missing token layer stays visible rather than papered over.
+ */
+
+.election,
+.election-unreadable {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-sm);
+}
+
+.election-address {
+	color: var(--muted);
+	font-size: var(--font-label-size);
+}
+
+.election-unreadable {
+	padding: var(--space-md);
+	background: var(--surface);
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+}
+
+/*
+ * .skeleton is a STATIC, LABELLED, OBVIOUSLY-EMPTY slot (D-18). Two halves,
+ * and the second was missing until G-53-UAT-01:
+ *
+ * 1. Still. NO animation, NO animation-name, NO transition, NO @keyframes
+ *    and NO linear-gradient of any kind — a moving gradient is exactly what
+ *    a shimmer is made of, and a shimmer is the visual assertion of an
+ *    in-flight fetch that does not exist on this page.
+ * 2. Legible as deliberate. Stillness alone was never sufficient: the
+ *    previous rule painted a --surface2 FILL at a fixed height, which is the
+ *    universal loading-skeleton idiom whether or not it moves, and the
+ *    element carried no visible text at all. A human reading the shipped
+ *    page read three grey bars as content still arriving. So the fill is
+ *    gone in favour of the page ground and a DASHED outline — a dashed
+ *    border reads as "a space left empty on purpose" where a filled block
+ *    reads as "a block that has not been drawn yet" — and the element now
+ *    lays out the slot's own name, which is what actually tells the reader
+ *    what is absent.
+ *
+ * min-height, not height: the label sets the true height, and a fixed height
+ * would clip it at a narrow viewport.
+ */
+.skeleton {
+	display: flex;
+	align-items: center;
+	min-height: var(--space-xl);
+	padding: 0 var(--space-sm);
+	background: var(--bg);
+	border: 1px dashed var(--border);
+	border-radius: var(--radius);
+}
+
+/*
+ * The slot's own name, rendered as real text. It is deliberately NOT an
+ * aria-label on the block above: the shipped defect was exactly that — an
+ * aria-label on a role="presentation" div, which Chromium keeps out of the
+ * accessibility tree entirely, so the label reached sighted readers and
+ * assistive technology alike, which is to say nobody. Visible text is its
+ * own accessible name and needs no ARIA at all.
+ */
+.skeleton-label {
+	color: var(--muted);
+	font-size: var(--font-label-size);
+}
+
+/*
+ * .election-title -- rendered directly by ElectionShell.tsx (not a shared
+ * component's class), so it stays here per this file's own header.
+ */
+.election-title {
+	margin: 0;
+	font-size: var(--font-heading-size);
+	font-weight: var(--font-heading-weight);
+	color: var(--text);
+}
+
+.dt-toggle {
+	background: var(--surface);
+	color: var(--text);
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	padding: var(--space-sm) var(--space-md);
+}
+
+.dt-body {
+	padding: var(--space-sm) var(--space-md);
+	color: var(--text);
+}
+
+/* =========================================================================
+ * The public election view's own class inventory (54-09).
+ *
+ * These rules land several waves BEFORE the components that mount them, on
+ * purpose: a render plan that mounts a class with no rule fails the coverage
+ * check, and a bare element selector would be invisible to that check
+ * entirely. Every value below comes from a token the package declares --
+ * no hex literal, no rgba() literal, no new spacing step, no third font
+ * weight -- so a missing token layer stays visible instead of being papered
+ * over by a local colour.
+ *
+ * The markup contract the render plans bind to is stated once here so no
+ * plan has to guess it:
+ *   - the status banner BLOCK carries `status-banner` plus exactly one tone
+ *     modifier; the chip and the headline are its two children, and neither
+ *     may render alone -- colour with no word, or a word with no colour,
+ *     both fail the redundant-cue requirement;
+ *   - a fact section wraps one heading and its cards, groups in model order
+ *     and cards in declaration order within a group;
+ *   - a gap card carries `fact-card` AND `fact-card--gap`; the key-release
+ *     card is a FILLED card and must never carry the gap modifier;
+ *   - the voter roll wraps a plain table, whose column headers are literal
+ *     schema field names by the same precedent the elections panel already
+ *     set;
+ *   - the standing caveats and the freshness line share one class, because
+ *     the freshness line IS a caveat about the record's currency; where it
+ *     sits on the page is a render plan's choice, not a second class.
+ * ========================================================================= */
+
+/*
+ * 56-12/D-17: the staleness banner. Renders as the FIRST child of `.election`
+ * (see ElectionShell.tsx's own comment at that mount site). Tokens only —
+ * no hex, no rgba(), no new spacing step, no new font weight — same
+ * discipline as every rule in this block.
+ *
+ * TONE DECISION, measured rather than asserted: `--warn`, never `--fail`.
+ * An absence of connection is not an error — `--fail` stays reserved for a
+ * genuine data fault (`.status-banner--bad`) and for the config-fault
+ * heading, both of which answer a materially different question. The amber
+ * badge against the page ground is the same 8.93:1 contrast the `wait` tone
+ * chip already carries (see `.status-banner__tone`'s own comment above).
+ *
+ * NO MOTION OF ANY KIND: no transition, no animation, no @keyframes, no
+ * linear-gradient. `election-shell.test.mjs` scans every *.css file under
+ * src/ for exactly those, and this app's first sanctioned transition is
+ * 56-14's live-update badge, not this one.
+ */
+.staleness-banner {
+	display: flex;
+	align-items: baseline;
+	gap: var(--space-sm);
+	padding: var(--space-sm) var(--space-md);
+	background: var(--surface2);
+	border: 1px solid var(--warn);
+	border-radius: var(--radius);
+}
+
+.staleness-banner__badge {
+	padding: 0 var(--space-sm);
+	border: 1px solid var(--warn);
+	border-radius: var(--radius);
+	font-size: var(--font-label-size);
+	font-weight: var(--font-label-weight);
+	line-height: var(--font-label-line-height);
+	color: var(--warn);
+}
+
+.staleness-banner__text {
+	margin: 0;
+	font-size: var(--font-body-size);
+	color: var(--text);
+}
+
+.status-banner {
+	display: flex;
+	gap: var(--space-sm);
+	align-items: baseline;
+}
+
+.status-banner__headline {
+	margin: 0;
+	font-size: var(--font-display-size);
+	font-weight: var(--font-display-weight);
+	line-height: var(--font-display-line-height);
+	color: var(--text);
+}
+
+/*
+ * The tone chip. Its TEXT is the page text colour rather than the tone
+ * colour, and that is measured rather than stylistic: the done tone against
+ * the page background is 4.03:1, under the 4.5:1 that 12px text needs, while
+ * the other three clear it: the go tone 8.41:1, the wait tone 8.93:1, the bad
+ * tone 5.09:1. (Re-measured here rather than adopted -- the figures this plan
+ * inherited were close but not exact, and the conclusion is unchanged: the
+ * done tone is the only one that fails.)
+ *
+ * A per-tone exception would leave one chip visibly lighter than its three
+ * siblings for no reason a reader could interpret, so one uniform rule
+ * instead -- the tone colour carries the border and the background tint,
+ * where the 3:1 UI-component threshold applies and all four pass, and the
+ * chip's own word carries the meaning in greyscale.
+ */
+.status-banner__tone {
+	padding: 0 var(--space-sm);
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	font-size: var(--font-label-size);
+	font-weight: var(--font-label-weight);
+	line-height: var(--font-label-line-height);
+	color: var(--text);
+}
+
+/*
+ * The four tone modifiers attach to the BLOCK and reach the chip through a
+ * descendant selector, so a render site sets one class on one element and
+ * cannot accidentally colour the chip without marking the banner.
+ *
+ * The doubled `background` in each rule is a DELIBERATE FALLBACK, not a
+ * duplicate a tidier should collapse: a browser that cannot parse color-mix
+ * drops the second declaration and keeps the first, so the chip still lands
+ * on a surface rather than on nothing. This is also the repo's first use of
+ * color-mix anywhere, which means no browser-tier gate has yet confirmed it
+ * resolves here rather than silently falling back -- until one does, the
+ * fallback is the only thing guaranteeing a readable chip.
+ */
+.status-banner--go .status-banner__tone {
+	background: var(--surface2);
+	background: color-mix(in srgb, var(--ok) 18%, transparent);
+	border-color: var(--ok);
+}
+
+.status-banner--wait .status-banner__tone {
+	background: var(--surface2);
+	background: color-mix(in srgb, var(--warn) 18%, transparent);
+	border-color: var(--warn);
+}
+
+.status-banner--done .status-banner__tone {
+	background: var(--surface2);
+	background: color-mix(in srgb, var(--done) 18%, transparent);
+	border-color: var(--done);
+}
+
+.status-banner--bad .status-banner__tone {
+	background: var(--surface2);
+	background: color-mix(in srgb, var(--fail) 18%, transparent);
+	border-color: var(--fail);
+}
+
+/*
+ * 56-14/D-16/D-19: the live-update badge. The THIRD and LAST member of this
+ * app's one chip-shape family, after `.status-banner__tone` above and
+ * `.staleness-banner__badge`. Same padding, radius and Label sizing as its
+ * siblings; `--ok`/`--ok` where they carry `--border`/`--text` or
+ * `--warn`/`--warn`. `--ok` against the page ground is the same 8.41:1
+ * contrast the `go` tone chip already carries above — a new usage site, not
+ * a new token. Rendered CONDITIONALLY by `ElectionShell.tsx`: it is ABSENT
+ * FROM THE DOM when not showing, never `opacity: 0`, so it is never
+ * announced to assistive tech by default and never intercepts a click.
+ * Every value below is `var(--token)` -- no hex, no `rgba(`, no new spacing
+ * step, no third font weight.
+ */
+.live-update-badge {
+	padding: 0 var(--space-sm);
+	border: 1px solid var(--ok);
+	border-radius: var(--radius);
+	font-size: var(--font-label-size);
+	font-weight: var(--font-label-weight);
+	line-height: var(--font-label-line-height);
+	color: var(--ok);
+}
+
+/*
+ * This app's FIRST deliberate exception to `.skeleton`'s standing no-motion
+ * rule (app.css's own header above: "NO animation, NO animation-name, NO
+ * transition, NO @keyframes and NO linear-gradient of any kind"), and it
+ * must be narrow: exactly one declaration, on exactly this one selector.
+ * `election-shell.test.mjs` section 7 is narrowed by 56-14 to permit exactly
+ * this single `transition:` declaration, inside this single
+ * `prefers-reduced-motion: no-preference` block, and to fail on a second one
+ * or on this one moved outside the block.
+ *
+ * THE MOTION LIVES IN THE NO-PREFERENCE BLOCK, NOT CANCELLED IN A `reduce`
+ * BLOCK. `reduce` is therefore the DEFAULT (no `transition` rule applies at
+ * all, so mount/unmount is instant) and the fade is an OPT-IN enhancement,
+ * never an opt-out one a reader has to notice and disable.
+ */
+@media (prefers-reduced-motion: no-preference) {
+	.live-update-badge {
+		transition: opacity 200ms ease-out;
+	}
+}
+
+.fact-section {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-sm);
+	margin-bottom: var(--space-lg);
+}
+
+.fact-section__heading {
+	margin: 0;
+	font-size: var(--font-heading-size);
+	font-weight: var(--font-heading-weight);
+	line-height: var(--font-heading-line-height);
+	color: var(--text);
+}
+
+.fact-card {
+	padding: var(--space-md);
+	background: var(--surface);
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	font-size: var(--font-body-size);
+	color: var(--text);
+}
+
+/*
+ * The gap card: a fact the system records nowhere. THREE cues together --
+ * a dashed border, the muted colour, and a drop to Label size -- and none of
+ * the three is sufficient alone. A card that merely looks slightly different
+ * still reads as a fact; the point is that it must read as an absence
+ * without being hidden.
+ *
+ * Two things a later reader cannot infer from the declarations:
+ *   1. This rule is where the "presence is not rendering" line falls. That
+ *      these three properties are written here proves nothing about what a
+ *      browser computes; the assertion that a gap card's COMPUTED style
+ *      actually diverges from a plain fact card belongs to the browser-tier
+ *      gate, and no source scan substitutes for it.
+ *   2. The dashed border here is a DE-EMPHASIS cue and has nothing to do
+ *      with .skeleton's dashed border above, which means "a space left empty
+ *      on purpose, nothing is loading". Same border style, unrelated
+ *      meanings -- do not unify them.
+ */
+.fact-card--gap {
+	border-style: dashed;
+	color: var(--muted);
+	font-size: var(--font-label-size);
+}
+
+.fact-card__label {
+	font-size: var(--font-label-size);
+	color: var(--muted);
+}
+
+.fact-card__body {
+	font-size: var(--font-body-size);
+}
+
+.fact-card--gap .fact-card__body {
+	font-size: var(--font-label-size);
+}
+
+/*
+ * The wrapper the two public chart mounts render (C6, C7). Two things a
+ * later reader cannot infer from the declaration alone:
+ *   1. NO transition, animation or overflow declaration lives here, on
+ *      purpose. D-23 makes a public chart's redraw silent, and this file
+ *      already carries exactly one transition site (its own single
+ *      `prefers-reduced-motion` block, above) -- a second one here would
+ *      both violate D-23 and defeat that gate.
+ *   2. It must not clip a mark that spills past it, so the overflow
+ *      behaviour belongs to the shared `.vt-chart*` rules in
+ *      packages/ui-web/src/components.css, never to an app-level override
+ *      here.
+ */
+.fact-card__chart {
+	margin-top: var(--space-sm);
+	min-width: 0;
+}
+
+/*
+ * The voter roll scrolls rather than clipping. A production-length roll --
+ * real surnames, a real district column -- does not fit a narrow viewport,
+ * and this repo has twice shipped a defect that only a realistic fixture
+ * could have caught: a code clipped at 84 characters, and a screen that
+ * rendered with no styling at all, both of which passed every gate because
+ * the gates asserted PRESENCE and the fixtures were too short to overflow.
+ * Silent horizontal clipping on a page whose subject is the completeness of
+ * a record would be the same defect a third time.
+ */
+.registrant-roll {
+	overflow-x: auto;
+}
+
+.registrant-roll table {
+	border-collapse: collapse;
+	width: 100%;
+}
+
+.registrant-roll th {
+	padding: var(--space-sm);
+	text-align: left;
+	font-size: var(--font-label-size);
+	color: var(--muted);
+}
+
+.registrant-roll td {
+	padding: var(--space-sm);
+	border-bottom: 1px solid var(--border);
+	font-size: var(--font-body-size);
+	color: var(--text);
+}
+
+.registrant-roll__note {
+	font-size: var(--font-label-size);
+	color: var(--muted);
+}
+
+.election-index {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-sm);
+}
+
+.election-index__item {
+	padding: var(--space-md);
+	background: var(--surface);
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+}
+
+/*
+ * The standing voice: the two caveats and the freshness line. One class for
+ * all three, because all three are statements about the page rather than
+ * about any one election, and giving the freshness line its own class would
+ * assert a distinction the reader does not experience.
+ */
+.public-caveats {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-xs);
+	margin-top: var(--space-lg);
+}
+
+.public-caveat {
+	margin: 0;
+	font-size: var(--font-label-size);
+	color: var(--muted);
+}

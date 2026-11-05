@@ -1,0 +1,3 @@
+# logscan
+
+no secrets

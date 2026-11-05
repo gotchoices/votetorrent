@@ -1,0 +1,7 @@
+  Association
+    ok rejects associating a DeviceId already bound to a different registrant
+    ok a second registrant reusing the SAME DeviceId is rejected
+    ok Nonce binding refused
+
+  3451 passing (212s)
+  8 failing

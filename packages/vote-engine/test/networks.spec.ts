@@ -262,6 +262,31 @@ describe('NetworksEngine', () => {
     expect(row?.['PubKey'], 'UserKey.PubKey should round-trip the inserted hex').to.equal(publicHex)
   })
 
+  describe('founding User.Name comes from the entered admin name (UAT gap 4 item 5)', () => {
+    const founderName = async (adminName: string | undefined): Promise<string> => {
+      await AsyncStorage.setItem('recentNetworks', [])
+      const engine = new NetworksEngine(AsyncStorage)
+      const { publicHex } = randomTestKeyPair()
+      const user = { ...makeUser(publicHex), name: 'Device User' }
+      const init = makeNetworkInit(publicHex)
+      init.admin.officers![0].init!.name = adminName as string
+      await engine.create(init, user)
+      const recents: NetworkReference[] = (await AsyncStorage.getItem('recentNetworks')) ?? []
+      const ctx = cachedCtx(engine, recents[0]?.hash ?? '')
+      const row = await ctx!.db.prepare('select Name from User where Id = :userId').get({ userId: user.id })
+      return row?.['Name'] as string
+    }
+    it('N1: the typed admin name is stored', async () => {
+      expect(await founderName('Una Tester')).to.equal('Una Tester')
+    })
+    it('N2: a blank admin name falls back to the device user name', async () => {
+      expect(await founderName('  ')).to.equal('Device User')
+    })
+    it('N3: the admin name is trimmed', async () => {
+      expect(await founderName('  Una  ')).to.equal('Una')
+    })
+  })
+
   it('NET-02/NET-03: open() reuses the cached EngineContext.db instance from create()', async () => {
     await AsyncStorage.setItem('recentNetworks', [])
     const engine = new NetworksEngine(AsyncStorage)
@@ -296,7 +321,7 @@ describe('NetworksEngine', () => {
     const userRow = await ctxAfterOpen!.db
       .prepare(`select Name from User where Id = :userId`)
       .get({ userId: user.id })
-    expect(userRow?.['Name'], 'User.Name should round-trip from create()').to.equal(user.name)
+    expect(userRow?.['Name'], 'User.Name should round-trip from create()').to.equal('Admin A') // the entered admin name (makeNetworkInit), not user.name
   })
 
   it('NET-03: open() throws when called with an unknown ref hash', async () => {
@@ -353,7 +378,30 @@ function makeStubNetworksEngine (): INetworksEngine {
     },
     async getRecentNetworks () { return [] },
     async open () { return {} as INetworkEngine },
-    buildCreate () { return new NetworksCreateBuilder(stub) }
+    buildCreate () { return new NetworksCreateBuilder(stub) },
+    // 62-16: INetworksEngine gained exportFoundingBundle/importFoundingBundle
+    // (D-35) — this stub is a NetworksCreateBuilder-only fixture and never
+    // exercises either, so both are unreachable no-ops. 62-102 added
+    // inspectFoundingBundle, a third unreachable no-op.
+    async exportFoundingBundle () {
+      throw new Error('makeStubNetworksEngine: exportFoundingBundle not implemented')
+    },
+    async importFoundingBundle () {
+      return {
+        ok: false,
+        reason: 'target-open-failed',
+        category: 'error',
+        detail: 'makeStubNetworksEngine: importFoundingBundle not implemented'
+      }
+    },
+    async inspectFoundingBundle () {
+      return {
+        ok: false,
+        reason: 'malformed',
+        category: 'invalid-bundle',
+        detail: 'makeStubNetworksEngine: inspectFoundingBundle not implemented'
+      }
+    }
   }
   return stub
 }

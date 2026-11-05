@@ -1,0 +1,156 @@
+/*
+ * election-ops.css -- Row / key-value / timeline / count-grid styling for
+ * the three Election Operations panels, built ONLY from `@votetorrent/ui-web`'s
+ * tokens.css custom properties: no new hex literal, no new raw spacing
+ * value. Declares only what panels.css does not -- no `.panel`,
+ * `.panel-body` or `.panel--denied` rule lives here.
+ *
+ * `.lifecycle-pill` and its three modifiers (NEUTRAL tones only --
+ * `50-UI-SPEC.md` reserves --ok/--warn/--primary for named states these are
+ * not, and the accent is explicitly not for pills) moved OUT of this file at
+ * 53-CR01, into `packages/ui-web/src/components.css` -- the D-15 revision:
+ * the shared package now owns `LifecyclePill`'s default rule, not this app.
+ * The rules' text is unchanged, only their location; the dashboard's own
+ * `app.css` now `@import`s `@votetorrent/ui-web/components.css` in their
+ * place.
+ *
+ * `.eo-heading` is the Registrations panel's section-heading rule -- one of
+ * the four newly-labelled sections' `<h4>` elements, token-only, nested
+ * beneath `PanelFrame`'s own `<h3 class="panel-title">`. `.eo-section` is
+ * already a column flex with a gap, so this rule adds no spacing of its own.
+ */
+
+.eo-section {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-sm);
+	padding-top: var(--space-sm);
+	border-top: 1px solid var(--border);
+}
+
+.eo-section:first-child {
+	padding-top: 0;
+	border-top: none;
+}
+
+.eo-kv {
+	display: grid;
+	grid-template-columns: auto 1fr;
+	column-gap: var(--space-md);
+	row-gap: var(--space-xs);
+	margin: 0;
+}
+
+.eo-kv dt {
+	color: var(--muted);
+	font-size: var(--font-label-size);
+	font-weight: var(--font-label-weight);
+	line-height: var(--font-label-line-height);
+}
+
+.eo-kv dd {
+	margin: 0;
+	color: var(--text);
+}
+
+.eo-row {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: baseline;
+	gap: var(--space-sm);
+	padding: var(--space-xs) 0;
+	border-bottom: 1px solid var(--border);
+}
+
+.eo-row:last-child {
+	border-bottom: none;
+}
+
+.eo-count-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+	gap: var(--space-sm);
+}
+
+.eo-count-grid > div {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-xs);
+	padding: var(--space-sm);
+	background: var(--surface2);
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+}
+
+.eo-timeline {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-xs);
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.eo-timeline li {
+	display: flex;
+	justify-content: space-between;
+	gap: var(--space-sm);
+}
+
+.eo-tl--past {
+	color: var(--muted);
+}
+
+.eo-tl--future {
+	color: var(--text);
+}
+
+/*
+ * The newest published cut-off that has already passed. The marked row must
+ * stay legible WITHOUT colour, so the signal is deliberately split: this class
+ * carries the colour/weight/ground half, and `ElectionsPanel.tsx`'s
+ * `STAGE_MARKER` carries the text half that survives greyscale and
+ * colour-blindness. Both are required; neither alone is the cue.
+ *
+ * Four properties, so the computed style is distinct from BOTH neighbours in
+ * more than one property -- `.eo-tl--future` already uses `var(--text)`, so a
+ * colour change alone would leave this row indistinguishable from every
+ * not-yet-reached row. `font-weight` and the padding are the two that do not
+ * depend on hue at all.
+ */
+.eo-tl--current {
+	color: var(--text);
+	font-weight: var(--font-heading-weight);
+	background: var(--surface2);
+	padding: 0 var(--space-xs);
+}
+
+.eo-datum {
+	color: var(--muted);
+	font-size: var(--font-label-size);
+	font-weight: var(--font-label-weight);
+	line-height: var(--font-label-line-height);
+}
+
+.eo-heading {
+	margin: 0;
+	color: var(--text);
+	font-size: var(--font-heading-size);
+	font-weight: var(--font-heading-weight);
+	line-height: var(--font-heading-line-height);
+}
+
+/*
+ * Data pills in these panels (a ballot id, the Required flag, a registrant
+ * id) are values, not controls. Nothing in an Election Operations panel can
+ * be clicked, so a pill inside a row always keeps the default cursor, even if
+ * the shared pill rule ever gains a pointer.
+ *
+ * Live change marks go on VALUE elements: a `dd`, a value `span`, or a row
+ * that paints no background of its own. `.eo-count-grid > div` and
+ * `.eo-tl--current` paint their own background, which would hide the mark
+ * tint, so the mark sits on the value inside them instead.
+ */
+.eo-row .pill {
+	cursor: default;
+}

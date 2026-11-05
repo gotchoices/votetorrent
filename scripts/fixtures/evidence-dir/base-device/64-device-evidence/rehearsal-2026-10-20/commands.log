@@ -1,0 +1,4 @@
+adb -s emulator-5554 shell "pm disable-user --user 0 com.android.vending"
+adb -s emulator-5554 shell "pm list packages -d"
+adb -s emulator-5554 shell "dumpsys deviceidle disable"
+pgrep -fl '[j]est|[m]ocha|[t]sc|[g]radle|[x]codebuild|[m]etro|[q]emu-system'

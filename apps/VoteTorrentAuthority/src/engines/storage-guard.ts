@@ -48,18 +48,42 @@ export function assertPersistentStorage(storage: unknown, scopeId: string): void
  *   `votetorrent-strand`; dev/proof harnesses pass their own so they never touch
  *   production LevelDBs.
  */
+/**
+ * The LevelDB name `createScopedRnStorageProvider` opens for a given prefix + scope.
+ *
+ * Exported so a caller that needs to DESTROY a scope's store derives the name from the same
+ * place the provider does. They were built independently once, and drifted: the replication
+ * proof wiped `votetorrent-<strandId>` while the provider had opened
+ * `votetorrent-replication-strand-<strandId>`. `LevelDB.destroyDB` SUCCEEDS on a database
+ * that does not exist, so the wipe logged success and deleted nothing — every run silently
+ * inherited the previous boot's strand state. Verified on device: the store list holds
+ * `votetorrent-replication-strand-replication-proof-strand`, and no `votetorrent-replication-proof-strand`.
+ */
+export function scopedRnStoreName(namePrefix: string, scopeId: string): string {
+  return `${namePrefix}-${scopeId.replace(/[^a-zA-Z0-9-]/g, '_')}`;
+}
+
+export type ScopedRnStorageProvider = ((scopeId: string) => LevelDBRawStorage) & {
+  /**
+   * Close (if open) and DESTROY one scope's LevelDB, so the next `provider(scopeId)` starts it
+   * empty. Used to recreate a control store an older cadre-core wrote with constraint text the
+   * current one cannot migrate (spike 105). Never call it for a strand scope.
+   */
+  destroyScope(scopeId: string): Promise<void>;
+};
+
 export function createScopedRnStorageProvider(
   namePrefix = 'votetorrent-strand',
-): (scopeId: string) => LevelDBRawStorage {
+): ScopedRnStorageProvider {
   const dbs = new Map<string, ReturnType<typeof openOptimysticRNDb>>();
-  return (scopeId: string): LevelDBRawStorage => {
+  const provider = (scopeId: string): LevelDBRawStorage => {
     const safeId = scopeId.replace(/[^a-zA-Z0-9-]/g, '_');
     let db = dbs.get(safeId);
     if (!db) {
       db = openOptimysticRNDb({
         openFn: (n, c, e) => new LevelDB(n, c, e),
         WriteBatch: LevelDBWriteBatch,
-        name: `${namePrefix}-${safeId}`,
+        name: scopedRnStoreName(namePrefix, scopeId),
       });
       if (!db) {
         throw new Error(`[storage-guard] LevelDB failed to open for scope '${scopeId}' (${namePrefix}-${safeId})`);
@@ -70,4 +94,15 @@ export function createScopedRnStorageProvider(
     assertPersistentStorage(raw, scopeId);
     return raw;
   };
+  return Object.assign(provider, {
+    async destroyScope(scopeId: string): Promise<void> {
+      const safeId = scopeId.replace(/[^a-zA-Z0-9-]/g, '_');
+      const open = dbs.get(safeId);
+      dbs.delete(safeId);
+      if (open) await open.close();
+      // rn-leveldb refuses to destroy an open DB; `force` also clears a stale lock. The name comes
+      // from scopedRnStoreName, the same place the provider opened it (see its doc comment).
+      LevelDB.destroyDB(scopedRnStoreName(namePrefix, scopeId), true);
+    },
+  });
 }

@@ -16,6 +16,7 @@ import {
   makeTestSignCallback,
 } from './fixtures/test-context.js'
 import { nowCanonicalDatetime } from '../src/utils.js'
+import { makeKeyholderProvisioning } from './fixtures/keyholder-provisioning.js'
 import type {
   InviteStatus,
   KeyholderInvite,
@@ -23,6 +24,7 @@ import type {
   SentAuthorityInvite,
   SentKeyholderInvite,
 } from '@votetorrent/vote-core'
+import { inviteeContext, invitePrivateForSlot, mintInviteKeyPair } from './fixtures/invite-keys.js'
 
 describe('InvitationEngine', () => {
   it('getPendingOfficerInvites — returns seeded officer invites', async () => {
@@ -129,15 +131,15 @@ describe('InvitationEngine', () => {
     // INV-04: un-skipped (was BLOCKED on D-08 signing pipeline).
     // Seeds a real officer-invite InviteSlot then calls InvitationEngine.respondToInvite.
     // respondToInvite is not yet implemented in InvitationEngine (throws) — RED until plan 21-04.
-    const auth = await addTestAuthority(await createTestNetwork())
-    const newUser = makeDistinctTestUser()
-    const { inviteSlotCid } = await seedUserInvite(auth, newUser)
+    const { makeChainFixture, sendInvite } = await import('./fixtures/invite-chain.js')
+    const fx = await makeChainFixture()
+    const share = await sendInvite(fx, 'of')
+    const inviteSlotCid = share.cid
 
-    const engine = new InvitationEngine(auth.ctx)
-    await engine.respondToInvite(inviteSlotCid, true)
+    await fx.invitation.respondToInvite(inviteSlotCid, true, share.invitePrivate)
 
     // Read back the InviteResult row and assert IsAccepted is truthy.
-    const row = await auth.ctx.db
+    const row = await fx.auth.ctx.db
       .prepare('select IsAccepted from InviteResult where SlotCid = :slotCid')
       .get({ slotCid: inviteSlotCid })
     expect(row).to.not.be.undefined
@@ -236,7 +238,7 @@ describe('InvitationEngine', () => {
     // The engine must use the A1 LOCKED encoding internally when implemented.
     // For now this test proves the assertion shape (RED until 21-04).
     const engine = new InvitationEngine(auth.ctx)
-    await engine.respondToInvite(slotCid, false)
+    await engine.respondToInvite(slotCid, false, bytesToHex(invitePrivBytes))
 
     // Read back the InviteResult row.
     const row = await auth.ctx.db
@@ -357,7 +359,7 @@ describe('second-keyholder-invite-unique regression (2026-07-30)', () => {
       name,
       type: 'k',
       expiration: new Date(Date.now() + 3_600_000).toISOString(),
-      inviteKey: 'k'.repeat(66),
+      inviteKey: mintInviteKeyPair().inviteKey,
       // Empty inviteSignature hits the documented send-side carve-out (no
       // createKeyholderInvite factory yet) rather than real secp256k1
       // verification against fixture-garbage hex.
@@ -405,7 +407,7 @@ describe('second-keyholder-invite-unique regression (2026-07-30)', () => {
     const aliceCid = await keyholderSlotCid(elec.ctx, 'Alice Keyholder')
     const bobCid = await keyholderSlotCid(elec.ctx, 'Bob Keyholder')
 
-    const engine = new InvitationEngine(elec.ctx)
+    const engine = new InvitationEngine(inviteeContext(elec.ctx))
     const alice = await engine.getKeyholderInvite(aliceCid)
     const bob = await engine.getKeyholderInvite(bobCid)
 
@@ -429,8 +431,8 @@ describe('second-keyholder-invite-unique regression (2026-07-30)', () => {
     const userCountBefore = (await elec.ctx.db.prepare('select count(*) as c from User').get())!.c as number
     const keyholderCountBefore = (await elec.ctx.db.prepare('select count(*) as c from Keyholder').get())!.c as number
 
-    const engine = new InvitationEngine(elec.ctx)
-    await engine.respondToInvite(aliceCid, true)
+    const engine = new InvitationEngine(inviteeContext(elec.ctx))
+    await engine.respondToInvite(aliceCid, true, await invitePrivateForSlot(elec.ctx, aliceCid), undefined, undefined, makeKeyholderProvisioning())
 
     const userCountAfter = (await elec.ctx.db.prepare('select count(*) as c from User').get())!.c as number
     const keyholderCountAfter = (await elec.ctx.db.prepare('select count(*) as c from Keyholder').get())!.c as number
@@ -478,8 +480,8 @@ describe('second-keyholder-invite-unique regression (2026-07-30)', () => {
     await elec.electionEngine.inviteKeyholder(makeKeyholderInvite('Carol Keyholder'), ELECTION_ID, makeTestSignCallback(auth.user))
     const carolCid = await keyholderSlotCid(elec.ctx, 'Carol Keyholder')
 
-    const engine = new InvitationEngine(elec.ctx)
-    await engine.respondToInvite(carolCid, true)
+    const engine = new InvitationEngine(inviteeContext(elec.ctx))
+    await engine.respondToInvite(carolCid, true, await invitePrivateForSlot(elec.ctx, carolCid), undefined, undefined, makeKeyholderProvisioning())
 
     const khRow = await elec.ctx.db
       .prepare('select ElectionRevision from Keyholder where ElectionId = :electionId')

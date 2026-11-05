@@ -1,0 +1,98 @@
+# Create (found) a network from Networks > ADD NETWORK, handling the two first-run detours to
+# "Secure Signing Setup". Ends back on the Networks screen with the new network listed.
+#
+# Input testIDs (add-network-*) come from maestro/patches/authority-testids.patch.
+#
+# env: APP_ID, NETWORK_NAME, AUTHORITY_NAME, RELAY_MULTIADDR, ADMIN_NAME, ADMIN_TITLE,
+#      CREATE_TIMEOUT_MS
+# Requirements enforced by the form: network, authority, admin name and title non-empty; at least
+# one relay that parses as a multiaddr; SIGN toggled on. Keep the names free of a double "r"
+# (RN's double-tap-R reload trap on debug builds).
+appId: ${APP_ID}
+---
+- runFlow: open-networks.yaml
+- tapOn: "Add Network"
+- extendedWaitUntil:
+    visible:
+      id: "add-network-name"
+    timeout: 15000
+- tapOn:
+    id: "add-network-name"
+- inputText: ${NETWORK_NAME}
+- hideKeyboard
+- scrollUntilVisible:
+    element:
+      id: "add-network-authority-name"
+    direction: DOWN
+    timeout: 15000
+- tapOn:
+    id: "add-network-authority-name"
+- inputText: ${AUTHORITY_NAME}
+- hideKeyboard
+- scrollUntilVisible:
+    element:
+      id: "add-network-relay-0"
+    direction: DOWN
+    timeout: 15000
+- tapOn:
+    id: "add-network-relay-0"
+- inputText: ${RELAY_MULTIADDR}
+- hideKeyboard
+- scrollUntilVisible:
+    element:
+      id: "add-network-admin-name"
+    direction: DOWN
+    timeout: 15000
+- tapOn:
+    id: "add-network-admin-name"
+- inputText: ${ADMIN_NAME}
+- hideKeyboard
+- scrollUntilVisible:
+    element:
+      id: "add-network-admin-title"
+    direction: DOWN
+    timeout: 15000
+- tapOn:
+    id: "add-network-admin-title"
+- inputText: ${ADMIN_TITLE}
+- hideKeyboard
+- scrollUntilVisible:
+    element:
+      id: "add-network-sign"
+    direction: DOWN
+    timeout: 15000
+- tapOn:
+    id: "add-network-sign"
+- runFlow: ../common/dismiss-logbox.yaml
+- tapOn:
+    id: "add-network-create"
+# Fresh install: CREATE routes to Secure Signing Setup first (no key yet), then back here.
+- extendedWaitUntil:
+    visible:
+      id: "signing-key-provisioning-screen|networks-join-network-button|network-create-still-finishing"
+    timeout: 30000
+- runFlow:
+    when:
+      visible:
+        id: "signing-key-provisioning-primary-button"
+    commands:
+      - runFlow: provision-signing-key-if-asked.yaml
+      - extendedWaitUntil:
+          visible:
+            id: "add-network-create"
+          timeout: 30000
+      - runFlow: ../common/dismiss-logbox.yaml
+      - tapOn:
+          id: "add-network-create"
+# The commit can take ~45 s plus a late-commit wait. After it, the recovery-key gate may route
+# to Secure Signing Setup again.
+- extendedWaitUntil:
+    visible:
+      id: "signing-key-provisioning-primary-button|networks-join-network-button"
+    timeout: ${CREATE_TIMEOUT_MS}
+- runFlow: provision-signing-key-if-asked.yaml
+- extendedWaitUntil:
+    visible:
+      id: "networks-join-network-button"
+    timeout: 60000
+- assertVisible: ${NETWORK_NAME}

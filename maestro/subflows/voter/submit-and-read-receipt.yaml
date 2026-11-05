@@ -1,0 +1,33 @@
+# From Review & Submit: Submit (a BiometricPrompt the host helper answers), then wait for the
+# saved-vote receipt and make sure the choices are shown (tapping "reveal" if it is offered,
+# which is a second prompt). Ends on the receipt.
+# env: APP_ID, SUBMIT_TIMEOUT_MS
+appId: ${APP_ID}
+---
+- tapOn:
+    id: "review-submit"
+- extendedWaitUntil:
+    visible:
+      id: "receipt-status|review-submit-failure"
+    timeout: ${SUBMIT_TIMEOUT_MS}
+- assertNotVisible:
+    id: "review-submit-failure"
+- assertVisible:
+    id: "receipt-status"
+- extendedWaitUntil:
+    visible:
+      id: "receipt-ballot-0|receipt-reveal"
+    timeout: 60000
+- runFlow:
+    when:
+      visible:
+        id: "receipt-reveal"
+    commands:
+      - tapOn:
+          id: "receipt-reveal"
+      - extendedWaitUntil:
+          visible:
+            id: "receipt-ballot-0"
+          timeout: 60000
+- assertVisible:
+    id: "receipt-ballot-0"

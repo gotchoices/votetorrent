@@ -48,12 +48,22 @@ export function assertPersistentStorage(storage: unknown, scopeId: string): void
  *   `votetorrent-strand`; dev/proof harnesses pass their own so they never touch
  *   production LevelDBs.
  */
+export type ScopedRnStorageProvider = ((scopeId: string) => LevelDBRawStorage) & {
+  /**
+   * Close (if open) and DESTROY one scope's LevelDB, so the next `provider(scopeId)` starts it
+   * empty. Used to recreate a control store an older cadre-core wrote with constraint text the
+   * current one cannot migrate (spike 105). Never call it for a strand scope.
+   */
+  destroyScope(scopeId: string): Promise<void>;
+};
+
 export function createScopedRnStorageProvider(
   namePrefix = 'votetorrent-strand',
-): (scopeId: string) => LevelDBRawStorage {
+): ScopedRnStorageProvider {
   const dbs = new Map<string, ReturnType<typeof openOptimysticRNDb>>();
-  return (scopeId: string): LevelDBRawStorage => {
-    const safeId = scopeId.replace(/[^a-zA-Z0-9-]/g, '_');
+  const safe = (scopeId: string) => scopeId.replace(/[^a-zA-Z0-9-]/g, '_');
+  const provider = (scopeId: string): LevelDBRawStorage => {
+    const safeId = safe(scopeId);
     let db = dbs.get(safeId);
     if (!db) {
       db = openOptimysticRNDb({
@@ -70,4 +80,14 @@ export function createScopedRnStorageProvider(
     assertPersistentStorage(raw, scopeId);
     return raw;
   };
+  return Object.assign(provider, {
+    async destroyScope(scopeId: string): Promise<void> {
+      const safeId = safe(scopeId);
+      const open = dbs.get(safeId);
+      dbs.delete(safeId);
+      if (open) await open.close();
+      // rn-leveldb refuses to destroy an open DB; `force` also clears a stale lock.
+      LevelDB.destroyDB(`${namePrefix}-${safeId}`, true);
+    },
+  });
 }

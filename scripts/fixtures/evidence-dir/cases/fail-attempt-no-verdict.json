@@ -1,0 +1,10 @@
+{
+  "base": "base-device",
+  "ops": [
+    {
+      "op": "delete",
+      "path": "64-device-evidence/checks/camera-gate/attempt-2/ios/verdict.txt"
+    }
+  ],
+  "expect": "attempt-no-verdict"
+}

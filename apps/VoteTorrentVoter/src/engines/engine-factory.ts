@@ -13,9 +13,10 @@
  *     device-attestation verifier this phase;
  *   - a net-new `'registration'` case (RegistrationEngine — voter-app only, the
  *     authority app never builds one);
- *   - the `'association'` case UNCONDITIONALLY hardcoding `StubAttestationVerifier`
- *     (44-RESEARCH.md Open Question 2 — no real voter-side verifier exists yet;
- *     T-44-06 mitigation: this seam is explicit and reviewable, not a silent stub).
+ *   - the `'association'` case selecting its verifier through
+ *     `selectAttestationVerifier` (`attestation-verifier.ts`): the stub ONLY under
+ *     `__DEV__ && USE_STUB_ATTESTATION_VERIFIER`, otherwise a fail-closed verifier —
+ *     the voter never verifies attestations, the authority does.
  *
  * Lifecycle:
  *   - One EngineFactory instance per VoterAppProvider (useRef, app-lifetime).
@@ -38,18 +39,28 @@ import {
 	SigningEngine,
 	DefaultUserEngine,
 	KeysTasksEngine,
+	KeyReleaseEngine,
 	SignatureTasksEngine,
 	OnboardingTasksEngine,
 	InvitationEngine,
 	LocalStorageReact,
 	AssociationEngine,
-	StubAttestationVerifier,
 	RegistrationEngine,
+	ElectionResultsEngine,
+	TallyPublicationEngine,
 } from '@votetorrent/vote-engine/rn'
 import type { DbFactory, EngineContext, ElectionSubject } from '@votetorrent/vote-engine/rn'
 import { rnDbFactory, createStrandDbFactory } from './rn-db-factory'
+import { takeFounderIntent, peekFounderIntent, wrapCreateWithFounding, FounderIntentBusyError } from './founder-intent'
+import { readNetworkBackend, recordNetworkBackend } from './network-backend-store'
 import type { StrandHost } from './rn-db-factory'
-import { USE_LOCAL_DB_FACTORY } from './proof-flags.generated'
+type DbHandle = Awaited<ReturnType<DbFactory>>
+import { USE_LOCAL_DB_FACTORY, USE_STUB_ATTESTATION_VERIFIER } from './proof-flags.generated'
+import { selectAttestationVerifier } from './attestation-verifier'
+import { createVoterStrandPort } from './strand-port-adapter'
+import { createVoterRequestTransportSource, VOTER_REQUEST_TRANSPORTS_ENGINE } from './voter-request-transports'
+import { createVoteSendingPort, VOTE_SENDING_PORT_ENGINE } from './vote-sending-port'
+import { readJoinedNetworkHashes } from './join-bootstrap'
 
 export class EngineFactory {
 	private readonly networksEngine: NetworksEngine
@@ -86,8 +97,66 @@ export class EngineFactory {
 	 */
 	private node: StrandHost | null = null
 
-	/** Called by VoterAppProvider when the CadreNode boots (mirrors setGetPeerCount / D-04). */
+	/**
+	 * First-sync gate wiring (quick task 260928-kkf — mirrors the authority app's
+	 * engine-factory.ts; see strand-first-sync.ts / rn-db-factory.ts's
+	 * `createStrandDbFactory` doc comments for the full gate semantics). One
+	 * AbortController "owns" every `whenStrandWritable` wait a strand-backed
+	 * DbFactory call is currently running; replacing it cancels whatever wait was
+	 * pending, without touching future ones.
+	 */
+	private firstSyncAbort = new AbortController()
+
+	/**
+	 * D-32 (Phase 62 Plan 22): tracks which established network hashes went through the strand
+	 * path (vs. the solo/local-DB fallback) on their DbFactory call, so the `'requestTransports'`
+	 * case can pass the right `peerBacked` flag without re-deriving it from `this.node` (which may
+	 * have changed since the network was opened). Entries are added only AFTER
+	 * `createStrandDbFactory(...)(networkHash)` resolves — never speculatively — and are never
+	 * cleared: `NetworksEngine` caches each ctx for the session, so the marker stays true for the
+	 * ctx it describes even across a later `setNode(null)`.
+	 */
+	private readonly strandBackedNetworks = new Set<string>()
+	/**
+	 * Fires once per pending open, BEFORE the wait begins (never on retry), so a
+	 * caller (VoterAppProvider) can flip a "still syncing" UI flag. Registered via
+	 * `setFirstSyncListener`; cleared on unmount.
+	 */
+	private firstSyncListener: ((strandId: string) => void) | undefined
+
+	/** Registers (or, passed undefined, deregisters) the first-sync "still syncing" callback. */
+	setFirstSyncListener(listener: ((strandId: string) => void) | undefined): void {
+		this.firstSyncListener = listener
+	}
+
+	/**
+	 * Cancels any `whenStrandWritable` wait currently in flight (via the shared
+	 * AbortController) and arms a fresh controller for the NEXT strand-backed open.
+	 * Called on a genuine node change (setNode below), on clearEngineCache()
+	 * (network switch / Start Fresh), and by VoterAppProvider on unmount / a
+	 * superseded boot run.
+	 */
+	cancelPendingStrandWaits(): void {
+		this.firstSyncAbort.abort()
+		this.firstSyncAbort = new AbortController()
+	}
+
+	/**
+	 * Called by VoterAppProvider when the CadreNode boots (mirrors setGetPeerCount / D-04).
+	 *
+	 * Cancels any pending first-sync wait ONLY when `node` actually changes — the
+	 * provider's peer-count effect re-invokes `setNode` with the SAME node on every
+	 * `connectedPeers` change, and aborting then would kill a live wait for no reason.
+	 */
+	/** The strand id (== network hash) of the network engines currently open on, if any. */
+	getCurrentNetworkHash(): string | undefined {
+		return this.currentNetworkHash
+	}
+
 	setNode(node: StrandHost | null): void {
+		if (node !== this.node) {
+			this.cancelPendingStrandWaits()
+		}
 		this.node = node
 	}
 
@@ -102,12 +171,70 @@ export class EngineFactory {
 		// node is set and the __DEV__ escape hatch USE_LOCAL_DB_FACTORY is false;
 		// otherwise falls back to the injected rnDbFactory (solo-safe / no regression).
 		// Never call createStrandDbFactory(null) — guard on this.node truthy.
+		//
+		// D-98 (UAT 65 gap 4): an iPhone Debug install launches twice. Launch 1 seeds the dev network on
+		// the SOLO store (node not up); launch 2 re-attaches it once the node is set, and a node-based
+		// dispatch would open an empty strand store as a JOINER that waits for a Header nobody can push.
+		// So the store that CREATED a network is recorded per hash and a solo-created network re-opens
+		// on the solo store. Joined networks are never created here, so they have no record and keep
+		// the node-based dispatch.
 		this.networksEngine = new NetworksEngine(localStorage, async (networkHash: string) => {
-			if (this.node && !(__DEV__ && USE_LOCAL_DB_FACTORY)) {
-				return createStrandDbFactory(this.node)(networkHash)
+			const creating = peekFounderIntent() === 'founding'
+			const useStrand = (): boolean => !!this.node && !(__DEV__ && USE_LOCAL_DB_FACTORY)
+			const openStrand = (): Promise<DbHandle> => {
+				const node = this.node as StrandHost
+				// The signal is read AT CALL TIME (not captured once) so a controller
+				// swapped in by a later cancelPendingStrandWaits() is the one this call
+				// actually waits on.
+				return createStrandDbFactory(node, {
+					signal: this.firstSyncAbort.signal,
+					onAwaitingFirstSync: (id) => this.firstSyncListener?.(id),
+					isJoinedNetwork: async (id) => (await readJoinedNetworkHashes()).includes(id),
+				})(networkHash)
 			}
-			return this.rnDbFactory(networkHash)
+			const finishStrand = async (pending: Promise<DbHandle>): Promise<DbHandle> => {
+				const db = await pending
+				// D-32: mark this hash peer-backed only AFTER the strand factory resolved —
+				// never speculatively before the call.
+				this.strandBackedNetworks.add(networkHash)
+				return db
+			}
+			const openSolo = (): Promise<DbHandle> => {
+				// D-30: the solo store has no founder flag, but this open still claims (and so frees) a
+				// founding window installed for it, exactly as the strand factory's first statement does.
+				takeFounderIntent(networkHash)
+				return this.rnDbFactory(networkHash)
+			}
+
+			if (creating) {
+				// Nothing is awaited before the open starts (D-30): the factory's synchronous first
+				// statement takes the founding intent. Only then is the creating store recorded, and the
+				// record lands before the open resolves, hence before create writes any network data.
+				const strand = useStrand()
+				const pending = strand ? openStrand() : openSolo()
+				// Observed at once (round-1 WR-03): an open that rejects while the record below is being
+				// written must not be reported as an unhandled rejection. The caller still gets the
+				// rejection through the `pending` returned below.
+				void pending.catch(() => undefined)
+				try {
+					await recordNetworkBackend(networkHash, strand ? 'strand' : 'solo')
+				} catch {
+					// A failed record must not fail the open (dev-seed-only residual hole).
+				}
+				return strand ? finishStrand(pending) : pending
+			}
+
+			const backend = await readNetworkBackend(networkHash)
+			// A create started during the await above: never consume its founding window.
+			if (peekFounderIntent() === 'founding') throw new FounderIntentBusyError()
+			if (backend === 'solo') return openSolo()
+			if (useStrand()) return finishStrand(openStrand())
+			return openSolo()
 		})
+		// D-30 (the Authority's, ported): a network this factory CREATES (the __DEV__ dev seed's
+		// NetworksEngine.create) founds even while the control node holds a relay connection. A join or
+		// a re-open never calls create, so it keeps the default.
+		wrapCreateWithFounding(this.networksEngine)
 	}
 
 	/** Expose the shared NetworksEngine for initialize() in VoterAppProvider. */
@@ -123,6 +250,9 @@ export class EngineFactory {
 	clearEngineCache(): void {
 		this.engineCache.clear()
 		this.currentNetworkHash = undefined
+		// A network switch / Start Fresh must not leave a stale first-sync wait
+		// running in the background against a network the user has just left.
+		this.cancelPendingStrandWaits()
 	}
 
 	/** True if the named engine (with optional initParams) is already cached. */
@@ -198,8 +328,8 @@ export class EngineFactory {
 	 * Build a fresh engine instance for the given name.
 	 *
 	 * Covers: network, defaultUser, user, authority, elections, signing, election,
-	 * keysTasksEngine, signatureTasksEngine, onboardingTasksEngine, invitations,
-	 * association, registration.
+	 * keysTasksEngine, keyRelease, signatureTasksEngine, onboardingTasksEngine, invitations,
+	 * association, registration, requestTransports.
 	 *
 	 * For sibling engines that require a live EngineContext, call
 	 * requireEstablishedCtx() which throws if no ctx is yet established
@@ -289,6 +419,27 @@ export class EngineFactory {
 				return new KeysTasksEngine(ref, ctx)
 			}
 
+			case 'keyRelease': {
+				// Read-only release status (D-17): the Voter never holds a share, so this engine is
+				// built with NO vault and no deps. `getKeyReleaseStatus` never needs one.
+				const ctx = this.requireEstablishedCtx()
+				return new KeyReleaseEngine(ctx)
+			}
+
+			case 'electionResults': {
+				// Decrypt + validate + tally after the key release, from the replicated election data. Read-only:
+				// the election secret is rebuilt from the PUBLIC released shares in memory and zero-filled.
+				const ctx = this.requireEstablishedCtx()
+				return new ElectionResultsEngine(ctx)
+			}
+
+			case 'tallyPublication': {
+				// The published, officer-signed tally (ElectionTally): read it back with its checks; on an officer's
+				// device, publish the tally computed by 'electionResults'. Signs only through the caller's signer.
+				const ctx = this.requireEstablishedCtx()
+				return new TallyPublicationEngine(ctx)
+			}
+
 			case 'signatureTasksEngine': {
 				const ctx = this.requireEstablishedCtx()
 				const ref = { hash: this.currentNetworkHash! } as NetworkReference
@@ -312,14 +463,36 @@ export class EngineFactory {
 				return new RegistrationEngine(ctx)
 			}
 
-			case 'association': {
-				// T-44-06: no real voter-side attestation verifier exists yet this phase —
-				// hardcode StubAttestationVerifier unconditionally (44-RESEARCH.md Open
-				// Question 2). Kept as a single `verifier` local so a later __DEV__ gate
-				// (mirroring the authority app's USE_STUB_ATTESTATION_VERIFIER convention)
-				// can be re-added without restructuring this case.
+			case VOTER_REQUEST_TRANSPORTS_ENGINE: {
+				// D-28/D-32: the joined network's OWN strand database is the delivery target —
+				// strandId = currentNetworkHash (the value createStrandDbFactory passed to
+				// addStrand). The raw port never leaves this factory: the screen layer gets only
+				// the source's typed transports back from resolve(), matching this file's
+				// "screens receive only engine-shaped objects" rule.
 				const ctx = this.requireEstablishedCtx()
-				const verifier: IAttestationVerifier = new StubAttestationVerifier()
+				const hash = this.currentNetworkHash!
+				return createVoterRequestTransportSource({
+					strandId: hash,
+					port: createVoterStrandPort(ctx.db),
+					peerBacked: this.strandBackedNetworks.has(hash),
+				})
+			}
+
+			case VOTE_SENDING_PORT_ENGINE: {
+				// Spike 102: the send flow's view of the joined network's strand (election key, voting
+				// window, the one-transaction block commit, the recorded-vote lookup). Like the request
+				// transports above, the raw database never leaves this factory.
+				const ctx = this.requireEstablishedCtx()
+				return createVoteSendingPort(ctx.db)
+			}
+
+			case 'association': {
+				// The stub is selected ONLY under an explicit __DEV__ dev gate (mirroring the
+				// authority app's USE_STUB_ATTESTATION_VERIFIER convention), never a silent prod
+				// fallback. The non-stub branch fails closed — see attestation-verifier.ts for
+				// why the voter does not carry the authority's real verifier.
+				const ctx = this.requireEstablishedCtx()
+				const verifier: IAttestationVerifier = selectAttestationVerifier(__DEV__, USE_STUB_ATTESTATION_VERIFIER)
 				return new AssociationEngine(ctx, verifier)
 			}
 

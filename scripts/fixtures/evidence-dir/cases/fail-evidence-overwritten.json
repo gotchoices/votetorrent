@@ -1,0 +1,20 @@
+{
+  "base": "base-device",
+  "args": [
+    "--git"
+  ],
+  "ops": [
+    {
+      "op": "git-init"
+    },
+    {
+      "op": "write",
+      "path": "64-device-evidence/checks/camera-gate/attempt-2/android/verdict.txt",
+      "content": "VERDICT: PASS\n"
+    },
+    {
+      "op": "git-commit"
+    }
+  ],
+  "expect": "evidence-overwritten"
+}

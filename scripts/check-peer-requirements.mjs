@@ -65,13 +65,12 @@ const execAsync = promisify(exec);
 // The script prints an "INFO: disappeared" hint when a listed mismatch stops showing
 // up; when the set empties, also remove the logFilters block from .yarnrc.yml.
 //
-// NOTE (unverified): root package.json / yarn.lock now resolve the @optimystic/*
-// family at 0.17.0, while the entry below still names 0.16.3. This has not been
-// re-derived against an installed tree. Re-run the guard after a `yarn install` and
-// correct the entry — or drop it, if the mismatch has disappeared at 0.17.0.
+// Current state (@serfab 1.20.0 / @optimystic 1.24.0 / quereus 4.24.0, 2026-11-02): the
+// single crypto-plugin mismatch, re-keyed to 1.24.0. The peer range is ^4.24.0; YN0002 names
+// packages/attestation-native as the workspace that does not provide @quereus/quereus.
 // ---------------------------------------------------------------------------
 const KNOWN_ALLOWED = new Set([
-  '@optimystic/quereus-plugin-crypto@npm:0.16.3',
+  '@optimystic/quereus-plugin-crypto@npm:1.24.0',
 ]);
 
 // The ✘ marker (U+2718)

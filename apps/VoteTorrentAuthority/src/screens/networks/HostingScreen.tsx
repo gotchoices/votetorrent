@@ -5,10 +5,12 @@ import {ScrollView, StyleSheet, View, Linking} from 'react-native';
 import {ThemedText} from '../../components/ThemedText';
 import {globalStyles} from '../../theme/styles';
 import {CustomTextInput} from '../../components/CustomTextInput';
+import {useKeyboardInset} from '../../hooks/useKeyboardInset';
 
 export default function HostingScreen() {
 	const {colors} = useTheme() as ExtendedTheme;
 	const {t} = useTranslation();
+	const keyboardInset = useKeyboardInset();
 
 	const openInstructions = () => {
 		Linking.openURL('https://votetorrent.org');
@@ -16,7 +18,7 @@ export default function HostingScreen() {
 
 	return (
 		<View style={styles.container}>
-			<ScrollView>
+			<ScrollView contentContainerStyle={{paddingBottom: keyboardInset}}>
 				<View style={styles.section}>
 					<ThemedText type="title" style={styles.sectionTitle}>
 						{t('statistics')}

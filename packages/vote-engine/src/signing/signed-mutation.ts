@@ -3,6 +3,7 @@ import type { SqlValue } from '@quereus/quereus'
 import type { EngineContext } from '../types.js'
 import { digestToBytes, nowCanonicalDatetime } from '../utils.js'
 import { SigningEngine } from './signing-engine.js'
+import { adminSigningKeyValidity } from './signer-validity.js'
 
 /**
  * Generic scope/digest/tid/sign-callback-parameterized AdminSigning ceremony
@@ -44,6 +45,11 @@ import { SigningEngine } from './signing-engine.js'
  *   nested transaction (Quereus's transaction model is flat, not nested).
  *   Defaults to `true` (this function's own transaction) — every pre-42-03
  *   caller is unaffected.
+ * @param options.headerNonce - 62-07 (Finding 4.1): when set, this ceremony's AdminSignature is
+ *   written by `SigningEngine.signDerived()` instead of `sign()` — the row only reaches
+ *   AdminSignature once `headerNonce` has ALREADY reached AdminSignature, for the SAME scope and
+ *   authority. Every pre-62-07 caller omits this and is unaffected (routes through `sign()`
+ *   exactly as before).
  * @returns The signing nonce to pass to the caller's row-insert method
  *   (`with context SigningNonce = :nonce, Tid = ${tid}`).
  */
@@ -55,7 +61,7 @@ export async function seedSignedMutation (
   digestExpr: string,
   digestParams: Record<string, unknown>,
   sign: (digest: Uint8Array) => Promise<Signature>,
-  options?: { ownsTransaction?: boolean }
+  options?: { ownsTransaction?: boolean, headerNonce?: string }
 ): Promise<string> {
   // 1. Resolve CurrentAdmin.EffectiveAt for the authority.
   const adminRow = await ctx.db
@@ -85,6 +91,12 @@ export async function seedSignedMutation (
   // 5. Insert AdminSigning — embeds the SAME digestExpr so the stored Digest matches the SELECT.
   //    `scope` binds as a value (it is not part of the Digest, unlike `tid`, which stays inside
   //    digestExpr/digestParams as a bound integer per the caller's own field list).
+  const isSignerKeyValid = await adminSigningKeyValidity(ctx.db, {
+    userId: signature.signerUserId,
+    signerKey: signature.signerKey,
+    now,
+    isPlaceholderSignature: false
+  })
   await ctx.db.exec(
     `insert into AdminSigning (
       Nonce,
@@ -96,7 +108,7 @@ export async function seedSignedMutation (
       SignerKey,
       Signature
     )
-    with context now = :now, IsSignerKeyValid = true, IsPlaceholderSignature = false
+    with context now = :now, IsSignerKeyValid = :isSignerKeyValid, IsPlaceholderSignature = false
     values (
       :nonce,
       :authorityId,
@@ -117,13 +129,22 @@ export async function seedSignedMutation (
       signerKey: signature.signerKey,
       signature: signature.signature,
       now,
+      isSignerKeyValid,
     }
   )
 
   // 6. Drive OfficerSignature + AdminSignature via SigningEngine (threshold=1 -> AdminSignature auto-created).
   //    `options.ownsTransaction` propagates the caller's transaction-composability
   //    intent (Phase 42-03 register() ceremony — see SigningEngine.sign()'s doc comment).
-  await new SigningEngine(ctx).sign(nonce, signature, options)
+  //    62-07 (Finding 4.1): `options.headerNonce` routes through `signDerived` instead — this
+  //    row's AdminSignature is then gated on `headerNonce` having already reached AdminSignature
+  //    for the same scope/authority, rather than on this ceremony's own (often threshold-1,
+  //    non-holder) signer count. `headerNonce` must never leak into `SignOptions` itself.
+  if (options?.headerNonce !== undefined) {
+    await new SigningEngine(ctx).signDerived(nonce, signature, options.headerNonce, { ownsTransaction: options.ownsTransaction })
+  } else {
+    await new SigningEngine(ctx).sign(nonce, signature, { ownsTransaction: options?.ownsTransaction })
+  }
 
   // 7. Return the nonce for the caller to pass to the actual row-insert method.
   return nonce

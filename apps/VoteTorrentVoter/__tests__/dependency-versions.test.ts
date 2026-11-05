@@ -5,7 +5,7 @@
  *
  * Asserts the navigation + vector-icon dependency delta installed in this app
  * resolves to the exact same versions installed in VoteTorrentAuthority, and
- * that react-native-screens honors the root `resolutions` pin (4.10.0).
+ * that react-native-screens honors the root `resolutions` pin (4.28.0).
  * Reads both apps' `node_modules/<pkg>/package.json` `version` fields at test
  * time so the guard stays correct across future lockstep version bumps.
  */
@@ -27,11 +27,12 @@ const PARITY_PACKAGES = [
   'react-native-safe-area-context',
   'react-native-vector-icons',
   '@types/react-native-vector-icons',
+  '@react-native-clipboard/clipboard', // R-7: same resolution as the Authority (one lock entry)
 ];
 
 describe('dependency version parity (D-18)', () => {
-  it('pins react-native-screens to 4.10.0 (root resolutions pin)', () => {
-    expect(resolvedVersion(VOTING_APP_DIR, 'react-native-screens')).toBe('4.10.0');
+  it('pins react-native-screens to 4.28.0 (root resolutions pin)', () => {
+    expect(resolvedVersion(VOTING_APP_DIR, 'react-native-screens')).toBe('4.28.0');
   });
 
   it.each(PARITY_PACKAGES)(

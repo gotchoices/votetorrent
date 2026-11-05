@@ -23,6 +23,7 @@ import i18n from './src/i18n';
 import {RootNavigator} from './src/navigation';
 import {VoterAppProvider} from './src/providers/VoterAppProvider';
 import {CadreNodeProvider} from './src/providers/CadreNodeProvider';
+import {ToastProvider} from './src/components/Toast';
 import {darkTheme, lightTheme} from './src/theme/themes';
 
 function App(): React.JSX.Element {
@@ -44,7 +45,10 @@ function App(): React.JSX.Element {
 			<CadreNodeProvider>
 				<VoterAppProvider>
 					<NavigationContainer theme={isDarkMode ? darkTheme : lightTheme}>
-						<RootNavigator />
+						{/* Inside NavigationContainer: the toast reads the theme. */}
+						<ToastProvider>
+							<RootNavigator />
+						</ToastProvider>
 					</NavigationContainer>
 				</VoterAppProvider>
 			</CadreNodeProvider>

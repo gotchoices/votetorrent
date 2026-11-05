@@ -1,6 +1,11 @@
 pluginManagement { includeBuild("../node_modules/@react-native/gradle-plugin") }
 plugins { id("com.facebook.react.settings") }
-extensions.configure(com.facebook.react.ReactSettingsExtension){ ex -> ex.autolinkLibrariesFromCommand() }
+extensions.configure(com.facebook.react.ReactSettingsExtension){ ex ->
+    // @react-native-community/cli 20.x ships build/bin.js without the exec bit and Yarn 4 does not
+    // add it, so the default `npx @react-native-community/cli config` exits 126. Run the CLI through
+    // node instead — the same command RN's CocoaPods autolinking uses (scripts/cocoapods/autolinking.rb).
+    ex.autolinkLibrariesFromCommand(["node", "-e", "process.argv=['', '', 'config'];require('@react-native-community/cli').run()"])
+}
 rootProject.name = 'VoteTorrentVoter'
 include ':app'
 includeBuild('../node_modules/@react-native/gradle-plugin')

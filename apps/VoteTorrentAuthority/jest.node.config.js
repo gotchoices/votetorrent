@@ -8,15 +8,30 @@
 //      prove @serfab/cadre-core actually LOADS under plain Node (D-12), not
 //      under the RN preset's jsdom-adjacent native-mock environment.
 //
-// Scoped via testMatch to ONLY the cadre-core-node.smoke.spec.ts file so this
-// config never picks up the RN-preset specs (compliance-strand.spec.ts, etc.).
+// Scoped via testMatch to ONLY cadre-core-node.smoke.spec.ts,
+// node-config-esm-mappers.spec.ts (which guards the ESM mappers below),
+// join-code-prefix.spec.ts and owner-trust-store.spec.ts so this config never
+// picks up the RN-preset specs (compliance-strand.spec.ts, etc.). The last two
+// are Node-only real-cadre-core specs (phase 64) that jest.config.js excludes.
 module.exports = {
   testEnvironment: 'node',
-  testMatch: ['<rootDir>/src/engines/__tests__/cadre-core-node.smoke.spec.ts'],
+  testMatch: [
+    '<rootDir>/src/engines/__tests__/cadre-core-node.smoke.spec.ts',
+    '<rootDir>/src/engines/__tests__/node-config-esm-mappers.spec.ts',
+    '<rootDir>/src/engines/__tests__/join-code-prefix.spec.ts',
+    '<rootDir>/src/engines/__tests__/owner-trust-store.spec.ts',
+  ],
   // Same-style ESM transform exception as jest.config.js — @serfab/cadre-core's
   // own dependency tree (libp2p, multiformats, @quereus/*) is ESM-only.
   transformIgnorePatterns: [
-    'node_modules/(?!(@quereus|@optimystic|@votetorrent|@noble|inheritree|moat-maker|multiformats|@serfab|@libp2p|@multiformats|@chainsafe|libp2p|uint8arrays|uint8arraylist|uint8-varint|it-[^/]*|p-[^/]*|any-signal|race-signal|race-event|delay|interface-datastore|datastore-core|nanoid|main-event|progress-events|protons-runtime|get-iterator|merge-options|blockstore-core)/)',
+    // NOTE (56-04, Rule 3 auto-fix): 'jose' added — @votetorrent/vote-engine/rn
+    // has pulled it in transitively (association/verifiers/play-integrity.ts)
+    // since Phase 43, and jest.config.js's own transformIgnorePatterns comment
+    // records that fix, but this NODE config was never updated to match. It went
+    // unnoticed because nothing exercising rn-entry.ts under test:node had run
+    // since. jose has no CJS build at all in v6.x, so it needs the same ESM→CJS
+    // transform exception as every other package below.
+    'node_modules/(?!(@quereus|@optimystic|@votetorrent|@noble|inheritree|moat-maker|multiformats|@serfab|@libp2p|@multiformats|@chainsafe|libp2p|uint8arrays|uint8arraylist|uint8-varint|it-[^/]*|p-[^/]*|any-signal|race-signal|race-event|delay|interface-datastore|datastore-core|nanoid|main-event|progress-events|protons-runtime|get-iterator|merge-options|blockstore-core|jose)/)',
   ],
   moduleNameMapper: {
     // Allow importing vote-engine test fixtures from the app workspace Jest suite.
@@ -34,6 +49,15 @@ module.exports = {
     // exception in transformIgnorePatterns still applies so Babel can process it.
     '^@serfab/cadre-core$':
       '<rootDir>/node_modules/@serfab/cadre-core/dist/index.js',
+    // @serfab/quereus-plugin-sereus — transitive dep of the real @serfab/cadre-core
+    // (types.js re-exports its cluster-policy constants). Same ESM-only
+    // `exports`-map/CJS-resolver mismatch as every other mapper in this file;
+    // this one was never added because nothing had exercised this import chain
+    // under test:node before (56-04, Rule 3 auto-fix — pre-existing gap, not
+    // caused by the public-observer-protocol patch: the import is present
+    // unchanged in the pristine, unpatched 0.12.0 tarball).
+    '^@serfab/quereus-plugin-sereus$':
+      '<rootDir>/node_modules/@serfab/quereus-plugin-sereus/dist/index.js',
     // @optimystic/quereus-plugin-optimystic — transitive dep of the real
     // @serfab/cadre-core (StrandDatabase registers it internally). Same
     // exports-map/CJS-resolver mismatch as above; map both subpaths.
@@ -42,17 +66,21 @@ module.exports = {
     '^@optimystic/quereus-plugin-optimystic/plugin$':
       '<rootDir>/node_modules/@optimystic/quereus-plugin-optimystic/dist/plugin.js',
     // @optimystic/db-p2p / db-core — transitive deps of the real @serfab/cadre-core
-    // (CadreNode's libp2p/strand transport stack). db-core is portal-vendored and
-    // only hoisted to the monorepo ROOT node_modules (not the app workspace), so
-    // its mapper target points one level further up than the app-local ones above.
+    // (CadreNode's libp2p/strand transport stack).
     '^@optimystic/db-p2p$':
       '<rootDir>/node_modules/@optimystic/db-p2p/dist/src/index.js',
     '^@optimystic/db-p2p/testing$':
       '<rootDir>/node_modules/@optimystic/db-p2p/dist/src/testing/index.js',
     '^@optimystic/db-p2p/(.*)$':
       '<rootDir>/node_modules/@optimystic/db-p2p/dist/src/$1.js',
+    // 56-04 (Rule 3 auto-fix): was '<rootDir>/../../node_modules/...' (root
+    // hoist) — stale since `.yarnrc.yml`'s `nmHoistingLimits: workspaces` gives
+    // this app its OWN per-workspace copy of db-core, same as every other
+    // @optimystic/* mapper in this file. Pre-existing gap, unrelated to the
+    // public-observer-protocol patch; nothing had exercised this import chain
+    // under test:node since the hoisting behavior changed.
     '^@optimystic/db-core$':
-      '<rootDir>/../../node_modules/@optimystic/db-core/dist/src/index.js',
+      '<rootDir>/node_modules/@optimystic/db-core/dist/src/index.js',
     // @libp2p/* — transitive deps of the real @serfab/cadre-core (CadreNode's
     // libp2p transport/crypto/peer-id stack); ESM-only `exports` map, no CJS
     // condition. Generic subpath mapper covers the whole `dist/src/<sub>.js`
@@ -91,10 +119,15 @@ module.exports = {
       '<rootDir>/node_modules/@libp2p/crypto/node_modules/uint8arrays/dist/src/$1.js',
     '^uint8arraylist$':
       '<rootDir>/node_modules/uint8arraylist/dist/src/index.js',
+    // protons-runtime and uint8-varint are ESM-only (`import` condition, no
+    // `require`), so they still need a mapper even though the allowlist above
+    // lets them transform. They were once nested under @libp2p/crypto; they
+    // are now hoisted to the app level, and the old nested paths silently
+    // broke this whole config. Guarded by node-config-esm-mappers.spec.ts.
     '^protons-runtime$':
-      '<rootDir>/node_modules/@libp2p/crypto/node_modules/protons-runtime/dist/src/index.js',
+      '<rootDir>/node_modules/protons-runtime/dist/src/index.js',
     '^uint8-varint$':
-      '<rootDir>/node_modules/@libp2p/crypto/node_modules/uint8-varint/dist/src/index.js',
+      '<rootDir>/node_modules/uint8-varint/dist/src/index.js',
     // it-* — libp2p's streaming-iterable utility packages, ESM-only `exports`
     // map, no CJS condition. Generic mapper covers the whole family
     // (it-pipe, it-pushable, it-length-prefixed, it-stream-types, ...) via

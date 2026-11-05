@@ -1,6 +1,14 @@
 import type { AssociateInit, AttestationChallenge, Signature } from '@votetorrent/vote-core'
 
 /**
+ * SUPERSEDED (D-04) for register/associate, effective Phase 51:
+ * `IAssociationRequestTransport` (`association-request-transport.ts`)
+ * supersedes this seam for that flow. `local-authority-transport.ts`
+ * carries the in-process framing this seam was built on — preserved there
+ * verbatim, unreworded, because downstream agents are instructed to read
+ * it: "the authority peer runs the verifier + engine in-process, NOT as a
+ * dedicated backend service."
+ *
  * authority-transport.ts — the D-11 producer-to-authority transport seam.
  *
  * Mirrors `IAttestationVerifier`'s doc-comment convention

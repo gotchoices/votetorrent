@@ -1,0 +1,2478 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VoteTorrent Voter</title>
+<style>
+/* ============================================================================
+   Design tokens — transcribed verbatim from
+   apps/VoteTorrentVoter/src/theme/themes.ts (lightTheme / darkTheme)
+   ========================================================================= */
+:root{
+  --primary:#2196f3; --background:#fbfbfb; --surface:#fcfcfc; --card:#ffffff;
+  --text:#000000; --textSecondary:#7d7d7d; --border:#e5e5e5; --notification:#FF3B30;
+  --secondary:#000000; --accent:#d9d9d9; --error:#971d1d; --warning:#bcb600;
+  --contrast:#262626; --success:#4caf50; --dark:#000000; --light:#ffffff;
+  --important:#e8e3ad; --muted:#9e9e9e;
+  --link:#2196f3; --progressFill:#34c759; --progressTrack:#e5e5e5;
+  --secondaryButtonSurface:#f5f5f5;
+  --registerNegative:#ef5644; --registerPositive:#3ebd5d; --validBadge:#e6c200;
+  /* radii scale (theme/themes.ts `radii`) */
+  --r-sm:8px; --r-md:12px; --r-lg:16px; --r-pill:999px;
+  /* globalStyles.cardSurface boxShadow (theme/styles.ts) */
+  --cardShadow:0px 4px 16px 0px rgba(0,0,0,0.16);
+}
+:root[data-theme="dark"]{
+  --primary:#237ec7; --background:#0d0d0d; --surface:#1c1c1c; --card:#1e1e1e;
+  --text:#ebebeb; --textSecondary:#828282; --border:#333333; --notification:#ba1e15;
+  --secondary:#ebebeb; --accent:#262626; --error:#d07a7a; --warning:#ece756;
+  --contrast:#d9d9d9; --success:#699a6b; --dark:#000000; --light:#ffffff;
+  --important:#474421; --muted:#616161;
+  --link:#237ec7; --progressFill:#51b269; --progressTrack:#2a2a2a;
+  --secondaryButtonSurface:#2a2a2a;
+  --registerNegative:#ef5644; --registerPositive:#3ebd5d; --validBadge:#e6c200;
+  /* globalStyles.cardSurface uses ONE boxShadow literal for both themes. */
+  --cardShadow:0px 4px 16px 0px rgba(0,0,0,0.16);
+}
+
+/* Type scale — theme/themes.ts `type` (fontSize / lineHeight). captionSmall is the
+   countdown's shrunk label step. */
+.t-display{font-size:40px;line-height:48px}
+.t-h1{font-size:32px;line-height:40px}
+.t-h2{font-size:28px;line-height:34px}
+.t-h3{font-size:24px;line-height:30px}
+.t-h4{font-size:20px;line-height:26px}
+.t-body{font-size:16px;line-height:22px}
+.t-caption{font-size:16px;line-height:20px}
+.t-captionSmall{font-size:12px;line-height:16px}
+.w-regular{font-weight:400}.w-medium{font-weight:500}.w-bold{font-weight:700}
+
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;padding:0}
+body{
+  /* fonts.regular.fontFamily === 'System' in themes.ts */
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,system-ui,sans-serif;
+  background:#3a3a3c;color:var(--text);
+  display:flex;align-items:center;justify-content:center;
+  min-height:100vh;padding:0;
+}
+@media (min-width:900px){ body{padding:24px} }
+
+/* ---- Phone frame: Pixel 8 == 412 x 915 dp ---- */
+#device{
+  width:412px;height:915px;max-width:100vw;max-height:100vh;
+  position:relative;overflow:hidden;background:var(--background);
+  display:flex;flex-direction:column;
+  /* RN <Text> with no fontSize renders at 14 */
+  font-size:14px;
+}
+@media (min-width:900px){
+  #device{border-radius:34px;box-shadow:0 24px 70px rgba(0,0,0,.55);border:8px solid #101012;height:931px}
+}
+@media (max-width:911px){ #device{width:100vw;height:100vh;height:100dvh} }
+
+/* ---- Android status bar ---- */
+#statusbar{
+  flex:0 0 auto;height:28px;
+  display:flex;align-items:center;justify-content:space-between;
+  padding:0 16px;font-size:12px;font-weight:600;
+  position:relative;z-index:5;
+}
+#statusbar .sb-icons{display:flex;gap:5px;align-items:center}
+
+/* ---- stack area: header + body of the focused route, plus modal routes above ---- */
+#stackarea{flex:1 1 auto;position:relative;overflow:hidden;display:flex;flex-direction:column;min-height:0}
+.routeview{flex:1 1 auto;display:flex;flex-direction:column;min-height:0;background:var(--background)}
+.routebody{flex:1 1 auto;position:relative;overflow:hidden;display:flex;flex-direction:column;min-height:0}
+
+/* ---- native-stack header (@react-navigation/native-stack default, Android) ---- */
+.navheader{
+  flex:0 0 auto;min-height:56px;background:var(--card);
+  display:flex;align-items:center;gap:4px;padding:0 4px;
+  border-bottom:1px solid var(--border);position:relative;z-index:4;
+}
+.navheader .hbtn{
+  width:44px;height:44px;display:flex;align-items:center;justify-content:center;
+  border:0;background:none;color:var(--text);cursor:pointer;border-radius:50%;
+}
+.navheader .hbtn:active{background:rgba(128,128,128,.18)}
+.navheader .htitle{
+  font-size:20px;font-weight:500;color:var(--text);
+  padding-left:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0;
+}
+.navheader.has-btn .htitle{padding-left:4px}
+
+.scroll{flex:1 1 auto;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;min-height:0}
+.pad16{padding:16px}              /* globalStyles.container */
+.fill{flex:1 1 auto;display:flex;flex-direction:column;min-height:0}
+/* ScrollView contentContainerStyle {flexGrow:1, justifyContent:center, alignItems:center} */
+.centercol{min-height:100%;display:flex;flex-direction:column;justify-content:center;align-items:center}
+
+/* ---- bottom tab bar (createBottomTabNavigator) ---- */
+#tabbar{
+  flex:0 0 auto;height:62px;background:var(--card);border-top:1px solid var(--border);
+  display:flex;align-items:stretch;position:relative;z-index:4;
+}
+#tabbar.hidden{display:none}
+#tabbar .tab{
+  flex:1 1 0;min-width:0;border:0;background:none;cursor:pointer;padding:7px 0 9px;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
+  color:var(--textSecondary);font-family:inherit;
+}
+#tabbar .tab .tlabel{font-size:12px;font-weight:700;letter-spacing:.1px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#tabbar .tab.active{color:var(--primary)}
+
+/* ---- Android 3-button system navigation (prototype affordance: Back = hardware back) ---- */
+#navbar{flex:0 0 auto;height:40px;background:var(--card);display:flex;align-items:center;justify-content:space-around;z-index:4}
+#navbar button{width:64px;height:36px;border:0;background:none;cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--textSecondary);border-radius:18px}
+#navbar button:active{background:rgba(128,128,128,.18)}
+#navbar button[disabled]{cursor:default;opacity:.55}
+
+/* ---- shared surfaces ---- */
+/* globalStyles.cardSurface */
+.cardSurface{
+  border-radius:16px;padding:16px;margin:10px 4px;background:var(--card);
+  box-shadow:var(--cardShadow);
+}
+.btn{
+  border:0;cursor:pointer;font-family:inherit;font-size:14px;display:flex;align-items:center;justify-content:center;
+  text-align:center;width:100%;
+}
+.btn:active{filter:brightness(.94)}
+.btn-solid{background:var(--primary);color:var(--light);border-radius:var(--r-pill)}
+.btn-outline{
+  background:var(--secondaryButtonSurface);color:var(--primary);
+  border:1px solid var(--primary);border-radius:var(--r-pill);
+}
+.inline-btn{width:auto;display:inline-flex}
+/* buttons inherit the RN text size of their context; a type class (.t-h4 …) still wins */
+button{font-family:inherit;font-size:inherit}
+.plain{background:none;border:0;padding:0;margin:0;cursor:pointer;color:inherit;text-align:left}
+
+/* ProgressBar */
+.pbar{height:8px;border-radius:var(--r-pill);background:var(--progressTrack);overflow:hidden}
+.pbar>i{display:block;height:8px;border-radius:var(--r-pill);background:var(--progressFill)}
+
+/* breadcrumb */
+.breadcrumb{display:flex;align-items:center;gap:8px;margin-bottom:16px;flex-wrap:wrap}
+.breadcrumb .crumb{font-size:16px;line-height:20px;color:var(--textSecondary);background:none;border:0;padding:0;cursor:pointer;font-family:inherit}
+.breadcrumb .crumb.current{color:var(--text);font-weight:500;cursor:default}
+
+.ulink{color:var(--link);text-decoration:underline;background:none;border:0;padding:0;cursor:pointer;font-family:inherit;font-size:16px;line-height:20px;text-align:left}
+
+/* ---- modal / dialog layers ---- */
+/* RN <Modal> covers the app window: everything between the system status bar and the
+   system navigation bar (hardware Back stays reachable and closes it via onRequestClose). */
+#overlays{position:absolute;top:28px;left:0;right:0;bottom:40px;z-index:50;pointer-events:none}
+#overlays>*{pointer-events:auto}
+#overlays:empty{display:none}
+.overlay{position:absolute;inset:0;z-index:40;display:flex}
+.overlay.fade{animation:fade .18s ease}
+@keyframes fade{from{opacity:0}to{opacity:1}}
+/* InfoDialog backdrop */
+.dlg-backdrop{background:rgba(0,0,0,.5);align-items:center;justify-content:center;padding:0 24px}
+.dlg-card{
+  width:100%;max-width:420px;background:var(--card);border-radius:var(--r-lg);
+  padding:48px 24px 40px;display:flex;flex-direction:column;align-items:center;position:relative;
+  max-height:calc(100% - 32px);
+}
+.dlg-close{position:absolute;top:16px;right:16px;background:none;border:0;cursor:pointer;color:var(--text);padding:0}
+.dlg-title{font-size:20px;line-height:26px;font-weight:700;text-align:center;margin:0 0 16px;color:var(--text)}
+.dlg-sub{font-size:16px;line-height:22px;font-weight:500;text-align:center;margin:0 0 32px;color:var(--text)}
+.dlg-content{align-self:stretch;max-height:320px;margin-bottom:24px;overflow-y:auto;overflow-x:hidden;padding-bottom:4px}
+.dlg-body{font-size:16px;line-height:20px;text-align:center;margin:0;color:var(--textSecondary)}
+/* PartyDropdown sheet */
+.sheet-backdrop{background:rgba(0,0,0,.4);align-items:center;justify-content:center;padding:0 24px}
+.sheet{width:100%;background:var(--card);border-radius:var(--r-lg);padding:0 16px}
+.sheet .opt{
+  display:flex;align-items:center;gap:12px;min-height:52px;padding:16px 0;width:100%;
+  background:none;border:0;cursor:pointer;font:inherit;color:var(--text);text-align:left;
+}
+.sheet .opt span{flex:1;font-size:16px;line-height:22px}
+.sheet .odiv{height:1px;background:var(--border)}
+/* presentation:'modal' route — on Android native-stack this is a full-screen route that
+   slides up over the tab's own stack (the tab bar stays below it). Own header with the X. */
+.routemodal{
+  position:absolute;inset:0;z-index:30;background:var(--background);
+  overflow:hidden;display:flex;flex-direction:column;
+  animation:slideup .26s cubic-bezier(.2,.8,.2,1);
+}
+@keyframes slideup{from{transform:translateY(100%)}to{transform:translateY(0)}}
+
+/* ---- FieldGroup ---- */
+.fgcard{border:1px solid var(--border);border-radius:var(--r-lg);background:var(--card);padding:0 16px}
+.fgrow{padding:16px 0}
+.fgrow input{
+  width:100%;border:0;outline:0;background:none;padding:0;font-family:inherit;
+  font-size:16px;line-height:22px;color:var(--text);
+}
+.fgrow input::placeholder{color:var(--textSecondary)}
+.fgrow.err input::placeholder{color:var(--error)}
+.fgerr{margin-top:4px;font-size:16px;line-height:20px;color:var(--error)}
+.fgdivider{height:1px;background:var(--border)}
+
+/* ContinueOnAnotherDevice TextInput: borderWidth 1, radius 8, padding 12, minHeight 44 */
+.rninput{width:100%;border:1px solid var(--border);border-radius:8px;padding:12px;min-height:44px;
+  background:none;outline:0;font-family:inherit;font-size:16px;color:var(--text)}
+.rninput::placeholder{color:var(--textSecondary)}
+.rninput.err::placeholder{color:var(--error)}
+
+/* StepDots */
+.stepdots{display:flex;justify-content:center;align-items:center;gap:8px}
+.stepdots i{width:8px;height:8px;border-radius:var(--r-pill);background:var(--progressTrack);display:block}
+.stepdots i.on{width:24px;background:var(--primary)}
+
+/* ActivityIndicator: size small = 20, size large = 36 */
+.spinner{width:20px;height:20px;border-radius:50%;border:2.5px solid var(--primary);border-top-color:transparent;animation:spin .9s linear infinite;flex:0 0 auto}
+.spinner.lg{width:36px;height:36px;border-width:3px}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* Timeline rail (components/TimelineRail.tsx) */
+.tl-conn{position:absolute;left:21px;width:2px;display:block}
+.tl-dot{position:absolute;display:block;border-radius:50%}
+.tl-notch{position:absolute;width:0;height:0;left:-8px;top:21px;border-top:8px solid transparent;border-bottom:8px solid transparent;border-right:8px solid var(--card)}
+.tl-accent{position:absolute;left:0;width:4px;background:var(--primary)}
+
+/* ---- prototype navigator (drawer) — prototype-only affordance ---- */
+#devfab{
+  position:absolute;right:12px;bottom:112px;z-index:55;width:44px;height:44px;border-radius:50%;
+  background:#111;color:#fff;border:1px solid rgba(255,255,255,.25);cursor:pointer;
+  display:flex;align-items:center;justify-content:center;box-shadow:0 4px 14px rgba(0,0,0,.4);opacity:.88;
+}
+#devdrawer{position:absolute;inset:0;z-index:60;background:var(--background);display:none;flex-direction:column}
+#devdrawer.open{display:flex}
+#devdrawer .dhead{
+  padding:14px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;
+  justify-content:space-between;background:var(--card);gap:8px;
+}
+#devdrawer .dhead h2{margin:0;font-size:18px;font-weight:700;color:var(--text)}
+#devdrawer .dbody{flex:1;overflow-y:auto;overflow-x:hidden;padding:12px 16px 28px}
+.dgroup{margin-top:18px}
+.dgroup:first-child{margin-top:4px}
+.dgroup h3{
+  margin:0 0 8px;font-size:12px;font-weight:700;letter-spacing:.9px;text-transform:uppercase;
+  color:var(--textSecondary);
+}
+.ditem{
+  display:flex;align-items:center;gap:8px;width:100%;text-align:left;padding:11px 12px;margin-bottom:6px;
+  background:var(--card);border:1px solid var(--border);border-radius:10px;cursor:pointer;
+  font-family:inherit;font-size:15px;color:var(--text);
+}
+.ditem:active{background:var(--secondaryButtonSurface)}
+.ditem .dsub{display:block;font-size:12px;color:var(--textSecondary);margin-top:2px}
+.badge{
+  flex:0 0 auto;font-size:10px;font-weight:700;letter-spacing:.4px;padding:3px 7px;border-radius:999px;
+  background:#fde2df;color:#a02216;text-transform:uppercase;
+}
+:root[data-theme="dark"] .badge{background:#4a1b16;color:#f0a79c}
+.badge.state{background:#e3f0fd;color:#14538f}
+:root[data-theme="dark"] .badge.state{background:#14304a;color:#8ec4f5}
+.badge.dev{background:#f6f1c7;color:#5f5a00}
+:root[data-theme="dark"] .badge.dev{background:#3d3a12;color:#ece756}
+.dnote{font-size:12px;line-height:17px;color:var(--textSecondary);margin:2px 0 10px}
+.seg{display:flex;gap:8px;flex-wrap:wrap}
+.seg button{
+  flex:1;min-width:78px;min-height:38px;padding:0 12px;border-radius:var(--r-pill);cursor:pointer;
+  background:var(--secondaryButtonSurface);color:var(--textSecondary);border:1px solid var(--border);
+  font-family:inherit;font-size:14px;
+}
+.seg button.on{background:var(--primary);color:var(--light);border-color:var(--primary);font-weight:700}
+</style>
+</head>
+<body>
+
+<div id="device">
+  <div id="statusbar">
+    <span id="sb-clock">10:30</span>
+    <span class="sb-icons" id="sb-icons"></span>
+  </div>
+  <div id="stackarea"></div>
+  <div id="tabbar"></div>
+  <div id="navbar">
+    <button id="nav-back" aria-label="Back (hardware back)" title="Back (Android hardware back)"></button>
+    <button id="nav-home" aria-label="Home" disabled></button>
+    <button id="nav-recents" aria-label="Recents" disabled></button>
+  </div>
+  <!-- RN <Modal> renders above the whole app window — header + tab bar included, system bars excluded. -->
+  <div id="overlays"></div>
+  <button id="devfab" title="All screens (prototype navigator)" aria-label="All screens"></button>
+  <div id="devdrawer" role="dialog" aria-label="All screens"></div>
+</div>
+
+<script>
+"use strict";
+/* ============================================================================
+ * VoteTorrent — Voter app · interactive HTML recreation
+ *
+ * Source of truth: apps/VoteTorrentVoter/src
+ *   navigation/index.tsx + types.ts · theme/themes.ts + styles.ts · i18n/index.ts
+ *   providers/** · screens/** · components/** · timeline/** (+ packages/ui-web
+ *   src/lifecycle/timeline-core.js, ported below)
+ *
+ * Topology (navigation/index.tsx): the RootNavigator IS the bottom Tab.Navigator — five
+ * tabs in locked order Vote · Timeline · Registration · Scan · Settings. Each tab owns its
+ * own native stack; every push and every presentation:'modal' route lives INSIDE that tab's
+ * stack, so the tab bar stays visible except on the register-flow routes it is explicitly
+ * hidden for. The Timeline stack re-registers Ballot / IndividualQuestion / ReviewSubmit /
+ * RegistrationHome / RegistrationInfo / the register flow / ContinueOnAnotherDevice so a row
+ * action pushes within Timeline and Back returns to the rail. A retired device replaces the
+ * WHOLE tab navigator with DeviceRetiredNotice.
+ * ========================================================================= */
+
+/* ---------------------------------------------------------------------------
+ * 1. ICONS — FontAwesome6 glyph names used by the app, drawn as inline SVG.
+ * ------------------------------------------------------------------------ */
+const ICONS = {
+  'check-to-slot': '<path d="M6.3 11.1 2.6 7.4a1 1 0 0 1 0-1.4l1.1-1.1a1 1 0 0 1 1.4 0l1.9 1.9 5-5a1 1 0 0 1 1.4 0l1.1 1.1a1 1 0 0 1 0 1.4l-6.8 6.8a1 1 0 0 1-1.4 0z"/><path d="M3 10.4V13H1.8A1.8 1.8 0 0 0 0 14.8v6.4A1.8 1.8 0 0 0 1.8 23h20.4a1.8 1.8 0 0 0 1.8-1.8v-6.4a1.8 1.8 0 0 0-1.8-1.8H21V7.6l-2 2V13h-6.2l-2-2H5v-.6zM3.6 15h4.9a1 1 0 0 1 .7.3l1 1a1 1 0 0 0 .7.3h2.2a1 1 0 0 0 .7-.3l1-1a1 1 0 0 1 .7-.3h4.9a.6.6 0 0 1 .6.6v4.8a.6.6 0 0 1-.6.6H3.6a.6.6 0 0 1-.6-.6v-4.8a.6.6 0 0 1 .6-.6z"/>',
+  'user-plus': '<path d="M8.5 12a4.5 4.5 0 1 0 0-9 4.5 4.5 0 0 0 0 9zm-2 1.6A6.5 6.5 0 0 0 0 20.1c0 1 .8 1.9 1.9 1.9h13.2c1 0 1.9-.8 1.9-1.9a6.5 6.5 0 0 0-6.5-6.5zM20 6.5a1 1 0 0 0-1 1V10h-2.5a1 1 0 1 0 0 2H19v2.5a1 1 0 1 0 2 0V12h2.5a1 1 0 1 0 0-2H21V7.5a1 1 0 0 0-1-1z"/>',
+  'qrcode': '<path d="M0 2.5A2.5 2.5 0 0 1 2.5 0h5A2.5 2.5 0 0 1 10 2.5v5A2.5 2.5 0 0 1 7.5 10h-5A2.5 2.5 0 0 1 0 7.5zM3 3v4h4V3zM0 16.5A2.5 2.5 0 0 1 2.5 14h5a2.5 2.5 0 0 1 2.5 2.5v5A2.5 2.5 0 0 1 7.5 24h-5A2.5 2.5 0 0 1 0 21.5zM3 17v4h4v-4zM16.5 0A2.5 2.5 0 0 0 14 2.5v5A2.5 2.5 0 0 0 16.5 10h5A2.5 2.5 0 0 0 24 7.5v-5A2.5 2.5 0 0 0 21.5 0zM17 3h4v4h-4zM14 15v2h2v-2zm0 4v5h2v-5zm3-4v2h-1v2h4v-2h-1v-2zm5 0v2h2v-2zm-4 4v2h-2v3h2v-1h2v1h2v-3h-2v-2zm4 0v5h2v-5z"/>',
+  'gear': '<path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zm9.4 4c0-.5 0-1-.1-1.5l2-1.5a.7.7 0 0 0 .2-.9l-1.9-3.3a.7.7 0 0 0-.8-.3l-2.4.9a8.8 8.8 0 0 0-2.5-1.5l-.4-2.5a.7.7 0 0 0-.7-.6h-3.8a.7.7 0 0 0-.7.6l-.4 2.5a8.8 8.8 0 0 0-2.5 1.5l-2.4-.9a.7.7 0 0 0-.8.3L2.5 8.1a.7.7 0 0 0 .2.9l2 1.5a9 9 0 0 0 0 3l-2 1.5a.7.7 0 0 0-.2.9l1.9 3.3c.2.3.5.4.8.3l2.4-.9c.8.6 1.6 1.1 2.5 1.5l.4 2.5c0 .3.4.6.7.6h3.8c.3 0 .6-.3.7-.6l.4-2.5c.9-.4 1.7-.9 2.5-1.5l2.4.9c.3.1.6 0 .8-.3l1.9-3.3a.7.7 0 0 0-.2-.9l-2-1.5c.1-.5.1-1 .1-1.5z"/>',
+  'bell': '<path d="M12 2a1.6 1.6 0 0 1 1.6 1.6v.8A6.5 6.5 0 0 1 18.5 11v3.2l1.8 2.6a1 1 0 0 1-.8 1.6H4.5a1 1 0 0 1-.8-1.6l1.8-2.6V11a6.5 6.5 0 0 1 4.9-6.6v-.8A1.6 1.6 0 0 1 12 2zm0 20a3 3 0 0 1-3-3h6a3 3 0 0 1-3 3z"/>',
+  'chevron-down': '<path d="M12 16.5c-.4 0-.8-.2-1.1-.4L3.4 8.6a1.5 1.5 0 0 1 2.2-2.1L12 12.9l6.4-6.4a1.5 1.5 0 1 1 2.2 2.1l-7.5 7.5c-.3.2-.7.4-1.1.4z"/>',
+  'chevron-right': '<path d="M8.5 22a1.5 1.5 0 0 1-1.1-2.6l7.4-7.4-7.4-7.4a1.5 1.5 0 0 1 2.2-2.2l8.5 8.5c.6.6.6 1.6 0 2.2l-8.5 8.5c-.3.3-.7.4-1.1.4z"/>',
+  'chevron-left': '<path d="M15.5 22c.4 0 .8-.1 1.1-.4a1.5 1.5 0 0 0 0-2.2L9.2 12l7.4-7.4a1.5 1.5 0 0 0-2.2-2.2L5.9 10.9a1.5 1.5 0 0 0 0 2.2l8.5 8.5c.3.3.7.4 1.1.4z"/>',
+  'arrow-left': '<path d="M2.4 10.9 10.9 2.4a1.5 1.5 0 0 1 2.2 2.2L7.2 10.5H21a1.5 1.5 0 0 1 0 3H7.2l5.9 5.9a1.5 1.5 0 0 1-2.2 2.2l-8.5-8.5a1.5 1.5 0 0 1 0-2.2z"/>',
+  'xmark': '<path d="M5.5 4.1 12 10.6l6.5-6.5a1 1 0 0 1 1.4 0l.6.6a1 1 0 0 1 0 1.4L14 12.6l6.5 6.5a1 1 0 0 1 0 1.4l-.6.6a1 1 0 0 1-1.4 0L12 14.6l-6.5 6.5a1 1 0 0 1-1.4 0l-.6-.6a1 1 0 0 1 0-1.4l6.5-6.5-6.5-6.5a1 1 0 0 1 0-1.4l.6-.6a1 1 0 0 1 1.4 0z"/>',
+  'check': '<path d="M9.2 19.3.7 10.8a1.5 1.5 0 0 1 0-2.1l2.1-2.1a1.5 1.5 0 0 1 2.1 0l5.3 5.3L21.1 1a1.5 1.5 0 0 1 2.1 0l2.1 2.1z" transform="translate(-1)"/>',
+  'circle-check': '<path d="M12 0a12 12 0 1 0 0 24 12 12 0 0 0 0-24zm5.8 9.2-6.9 6.9a1.2 1.2 0 0 1-1.7 0l-3.5-3.5a1.2 1.2 0 0 1 0-1.7l.8-.8a1.2 1.2 0 0 1 1.7 0l1.9 1.9 5.2-5.2a1.2 1.2 0 0 1 1.7 0l.8.8a1.2 1.2 0 0 1 0 1.6z"/>',
+  'circle': '<path d="M12 2a10 10 0 1 1 0 20 10 10 0 0 1 0-20m0-2a12 12 0 1 0 0 24 12 12 0 0 0 0-24z"/>',
+  'square': '<path d="M3.4 0h17.2A3.4 3.4 0 0 1 24 3.4v17.2a3.4 3.4 0 0 1-3.4 3.4H3.4A3.4 3.4 0 0 1 0 20.6V3.4A3.4 3.4 0 0 1 3.4 0zm0 2.3a1.1 1.1 0 0 0-1.1 1.1v17.2a1.1 1.1 0 0 0 1.1 1.1h17.2a1.1 1.1 0 0 0 1.1-1.1V3.4a1.1 1.1 0 0 0-1.1-1.1z"/>',
+  'square-check': '<path d="M3.4 0h17.2A3.4 3.4 0 0 1 24 3.4v17.2a3.4 3.4 0 0 1-3.4 3.4H3.4A3.4 3.4 0 0 1 0 20.6V3.4A3.4 3.4 0 0 1 3.4 0zm14.3 8.9a1.2 1.2 0 0 0 0-1.7l-.9-.9a1.2 1.2 0 0 0-1.7 0l-5 5-2.2-2.2a1.2 1.2 0 0 0-1.7 0l-.9.9a1.2 1.2 0 0 0 0 1.7l3.9 4a1.2 1.2 0 0 0 1.7 0z"/>',
+  'clock': '<path d="M12 0a12 12 0 1 0 0 24 12 12 0 0 0 0-24zm2.8 16.4-4.4-3.2a.6.6 0 0 1-.2-.5V5.2c0-.3.3-.6.6-.6h1.6c.3 0 .6.3.6.6v6.3l3.4 2.5c.3.2.3.6.1.8l-.9 1.3a.6.6 0 0 1-.8.3z"/>',
+  'list-check': '<path d="M7.6 4.6 3.4 8.8 1.6 7a1 1 0 0 0-1.4 0l-.7.7a1 1 0 0 0 0 1.4l3.2 3.2a1 1 0 0 0 1.4 0l5.6-5.6a1 1 0 0 0 0-1.4l-.7-.7a1 1 0 0 0-1.4 0zM7.6 15.1l-4.2 4.2-1.8-1.8a1 1 0 0 0-1.4 0l-.7.7a1 1 0 0 0 0 1.4l3.2 3.2a1 1 0 0 0 1.4 0l5.6-5.6a1 1 0 0 0 0-1.4l-.7-.7a1 1 0 0 0-1.4 0zM13.5 6.5h9a1.5 1.5 0 0 0 0-3h-9a1.5 1.5 0 0 0 0 3zm0 11h9a1.5 1.5 0 0 0 0-3h-9a1.5 1.5 0 0 0 0 3z"/>',
+  'lock': '<path d="M6.5 8V6a5.5 5.5 0 1 1 11 0v2h.8A2.7 2.7 0 0 1 21 10.7v9.6a2.7 2.7 0 0 1-2.7 2.7H5.7A2.7 2.7 0 0 1 3 20.3v-9.6A2.7 2.7 0 0 1 5.7 8zm2.6 0h5.8V6a2.9 2.9 0 1 0-5.8 0z"/>',
+  'lock-open': '<path d="M15.5 8V6a5.5 5.5 0 1 1 11 0v2.5a1.3 1.3 0 0 1-2.6 0V6a2.9 2.9 0 1 0-5.8 0v2h.2A2.7 2.7 0 0 1 21 10.7v9.6a2.7 2.7 0 0 1-2.7 2.7H5.7A2.7 2.7 0 0 1 3 20.3v-9.6A2.7 2.7 0 0 1 5.7 8z" transform="translate(-2.5)"/>',
+  'magnifying-glass-chart': '<path d="M10 0a10 10 0 1 0 6.1 17.9l5 5a1.5 1.5 0 0 0 2.1-2.1l-5-5A10 10 0 0 0 10 0zm0 3a7 7 0 1 1 0 14 7 7 0 0 1 0-14zM6.2 12.4a.7.7 0 0 0-.7.7v1.4c0 .4.3.7.7.7h.7c.4 0 .7-.3.7-.7v-1.4a.7.7 0 0 0-.7-.7zm3.4-4.1a.7.7 0 0 0-.7.7v5.5c0 .4.3.7.7.7h.7c.4 0 .7-.3.7-.7V9a.7.7 0 0 0-.7-.7zm3.5 2a.7.7 0 0 0-.7.7v3.5c0 .4.3.7.7.7h.7c.4 0 .7-.3.7-.7V11a.7.7 0 0 0-.7-.7z"/>',
+  'shield-halved': '<path d="M11.4.2 2.7 3.8A1.9 1.9 0 0 0 1.5 5.6c0 8.2 4.7 14.6 10.5 17.8.6.3 1.4.3 2 0C19.8 20.2 24.5 13.8 24.5 5.6a1.9 1.9 0 0 0-1.2-1.8L14.6.2a4 4 0 0 0-3.2 0zM13 3.1v17.7c4.5-2.6 8.2-7.6 8.4-14.2z" transform="translate(-1)"/>',
+  'fingerprint': '<path d="M12 1.5c-2.4 0-4.6.8-6.4 2.1a1 1 0 0 0 1.2 1.6A8.8 8.8 0 0 1 12 3.5c2 0 3.8.6 5.2 1.7a1 1 0 1 0 1.2-1.6A10.7 10.7 0 0 0 12 1.5zM4 6.4a1 1 0 0 0-1.5.1A10.8 10.8 0 0 0 1.2 12c0 1.9.5 3.3 1 4.2a1 1 0 1 0 1.8-.9c-.4-.7-.8-1.8-.8-3.3 0-1.7.6-3.3 1.6-4.5A1 1 0 0 0 4 6.4zM20 6.4a1 1 0 0 0-.1 1.4A6.9 6.9 0 0 1 21.5 12c0 1.6-.2 3.4-.7 5a1 1 0 0 0 1.9.6c.5-1.8.8-3.8.8-5.6 0-2.2-.8-4.2-2.1-5.6a1 1 0 0 0-1.4 0zM12 5.8A6.2 6.2 0 0 0 5.8 12c0 1.9-.3 3.4-.8 4.6a1 1 0 1 0 1.8.8c.7-1.5 1-3.3 1-5.4a4.2 4.2 0 1 1 8.4 0c0 2.2-.2 4.1-.6 5.7a1 1 0 0 0 1.9.5c.5-1.8.7-3.9.7-6.2A6.2 6.2 0 0 0 12 5.8zm0 3.4a2.8 2.8 0 0 0-2.8 2.8c0 3.2-.6 5.9-1.7 8.1a1 1 0 0 0 1.8.9c1.2-2.5 1.9-5.5 1.9-9a.8.8 0 1 1 1.6 0c0 3.6-.4 6.5-1.2 8.8a1 1 0 1 0 1.9.6c.9-2.6 1.3-5.7 1.3-9.4A2.8 2.8 0 0 0 12 9.2z"/>',
+  'circle-question': '<path d="M12 0a12 12 0 1 0 0 24 12 12 0 0 0 0-24zm0 19a1.6 1.6 0 1 1 0-3.2 1.6 1.6 0 0 1 0 3.2zm2.3-6.6c-.8.5-1 .8-1 1.3v.2a.7.7 0 0 1-.7.7h-1.2a.7.7 0 0 1-.7-.7v-.2c0-1.7 1.2-2.5 2.2-3.1.8-.5 1.3-.8 1.3-1.5 0-.8-1-1.4-1.9-1.4-1.1 0-1.7.5-2.4 1.4a.7.7 0 0 1-1 .2l-1-.7a.7.7 0 0 1-.2-1 5 5 0 0 1 4.4-2.4c2.3 0 4.7 1.8 4.7 4.1 0 1.9-1.3 2.7-2.5 3.4z"/>',
+  'timeline': '<path d="M1 11h22v2H1z"/><circle cx="5" cy="12" r="3"/><circle cx="12" cy="12" r="3"/><circle cx="19" cy="12" r="3"/><rect x="2" y="2.5" width="7" height="4.5" rx="1"/><rect x="9" y="17" width="7" height="4.5" rx="1"/><rect x="15" y="2.5" width="7" height="4.5" rx="1"/>',
+  'triangle-exclamation': '<path fill-rule="evenodd" d="M12 1.5c.6 0 1.1.3 1.4.8l10 17.2c.6 1-.2 2.3-1.4 2.3H2c-1.2 0-2-1.3-1.4-2.3l10-17.2c.3-.5.8-.8 1.4-.8zm0 6.3c-.7 0-1.2.6-1.2 1.2v5.4c0 .7.5 1.2 1.2 1.2s1.2-.5 1.2-1.2V9c0-.6-.5-1.2-1.2-1.2zm0 12.2a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z"/>',
+  'key': '<path fill-rule="evenodd" d="M15.5 1a7.5 7.5 0 0 0-7.2 9.6l-7 7a1 1 0 0 0-.3.7V22a1 1 0 0 0 1 1h3.5a1 1 0 0 0 1-1v-1.5H8a1 1 0 0 0 1-1V18h1.5a1 1 0 0 0 .7-.3l1.2-1.2A7.5 7.5 0 1 0 15.5 1zm2 3.5a2 2 0 1 1 0 4 2 2 0 0 1 0-4z"/>',
+  'nav-back': '<path d="M17 4.5v15a1 1 0 0 1-1.5.9L4.5 12.9a1 1 0 0 1 0-1.8l11-7.5A1 1 0 0 1 17 4.5z"/>',
+  'nav-home': '<circle cx="12" cy="12" r="7"/>',
+  'nav-recents': '<rect x="5.5" y="5.5" width="13" height="13" rx="2"/>',
+};
+function icon(name, size, color, extraStyle){
+  const p = ICONS[name] || '';
+  return '<svg viewBox="0 0 24 24" width="'+size+'" height="'+size+'" fill="'+(color||'currentColor')+
+         '" aria-hidden="true" style="flex:0 0 auto;display:block;'+(extraStyle||'')+'">'+p+'</svg>';
+}
+
+/* ---------------------------------------------------------------------------
+ * 2. i18n — generated verbatim from src/i18n/index.ts `resources` (EN + ES, flat dotted
+ *    keys, keySeparator:false, fallbackLng:'en'). Every namespace is in EN/ES lockstep;
+ *    the only English that survives an ES switch is the handful of string LITERALS the
+ *    source renders without t() (listed in the drawer).
+ * ------------------------------------------------------------------------ */
+const RES = {
+ en:{
+  common:{
+   "tabVote":"Vote",
+   "tabTimeline":"Timeline",
+   "tabRegistration":"Registration",
+   "tabScan":"Scan",
+   "tabSettings":"Settings",
+   "placeholderBody":"This screen isn't built yet — check back in a future update.",
+   "close":"Close",
+   "info.unavailable":"This information isn't available right now.",
+   "info.openLink":"More information",
+   "networkName":"Utah Network",
+   "notifications":"Notifications",
+   "breadcrumb.home":"Home",
+   "breadcrumb.ballot":"Ballot",
+   "configNotConfigured":"Not configured",
+   "syncSyncing":"Syncing"
+  },
+  home:{
+   "headerTitle":"Vote",
+   "voteNowCta":"Vote now",
+   "learnAboutElection":"Learn about this election",
+   "electionInfo.title":"Election Info",
+   "electionInfo.subtitle":"Informational Page about this election",
+   "electionInfo.body":"\"The following information has been provided by the election authority\"",
+   "electionInfo.authority":"Election authority",
+   "electionInfo.date":"Election day",
+   "electionInfo.instructions":"Instructions",
+   "electionInfo.tags":"Tags",
+   "progressLabel":"{{percent}}% complete",
+   "countdown.hours":"hours",
+   "countdown.minutes":"minutes",
+   "countdown.seconds":"seconds",
+   "countdown.days":"days",
+   "validationDetailsTitle":"Validation Details",
+   "states.upcoming.summary":"Voting hasn't opened yet — check back when the polls open.",
+   "states.open.summary":"Cast your vote before the polls close.",
+   "states.reviewSelections.summary":"Continue reviewing your ballot selections.",
+   "states.releasingKeys.summary":"{{released}}/{{total}} election keys released.",
+   "states.validation.summary":"Validation status {{checksComplete}}/{{checksTotal}} checks.",
+   "states.validationDetails.summary":"Validation status {{checksComplete}}/{{checksTotal}} checks — view the full evidence.",
+   "states.validationDetails.cta":"View Validation Details",
+   "states.complete.summary":"Certified ✓",
+   "states.releasingKeys.pendingSummary":"Voting has closed. Results stay locked until the election keys are released.",
+   "states.validation.pendingSummary":"Election keys released — results are being tallied and validated.",
+   "states.complete.closedSummary":"This election is closed.",
+   "electionUnavailable":"No election is available on this network yet.",
+   "votedCta":"You voted",
+   "validationDetails.columnCheck":"Check",
+   "validationDetails.columnResult":"Result",
+   "validationDetails.columnTime":"Time",
+   "validationDetails.columnStatus":"Status",
+   "validationDetails.overallCount":"{{verified}}/{{total}} checks verified",
+   "validationDetails.fingerprintLabel":"Fingerprint",
+   "validationDetails.recordedInBlockchain":"Validation report recorded in blockchain",
+   "validationDetails.verified":"Verified",
+   "validationDetails.pending":"Pending",
+   "validationDetails.check1.name":"Search for voter record",
+   "validationDetails.check1.result":"Voter record found",
+   "validationDetails.check2.name":"Verify voter record",
+   "validationDetails.check2.result":"IDs match",
+   "validationDetails.check3.name":"Check election integrity",
+   "validationDetails.check3.result":"Adjacent blocks and tree path verified"
+  },
+  ballot:{
+   "headerTitle":"Ballot",
+   "individualQuestionTitle":"Individual Question",
+   "progressLabel":"{{completed}}/{{total}} questions completed",
+   "voteForN":"Vote for {{n}}",
+   "saveExitCta":"Save & Exit",
+   "reviewCta":"Review & Submit Ballot",
+   "continueVotingCta":"Continue Voting",
+   "nextCta":"Next Question",
+   "previousCta":"Previous Question",
+   "submitCta":"Submit",
+   "submittedConfirmation":"Your ballot was submitted",
+   "notYetAnswered":"Not yet answered",
+   "learnAboutOffice":"Learn about this office",
+   "learnAboutCandidate":"Learn about this candidate",
+   "candidateInfo.title":"Candidate Info",
+   "candidateInfo.subtitle":"Informational Page about your selected candidate",
+   "candidateInfo.body":"\"The following information has been provided by the candidate\"",
+   "officeInfo.title":"Office Info",
+   "officeInfo.subtitle":"Informational Page about this office",
+   "officeInfo.body":"\"The following information has been provided by the office\"",
+   "officeInfo.instructions":"Instructions",
+   "officeInfo.voteFor":"You may choose",
+   "officeInfo.voteForValue":"Up to {{count}}",
+   "candidateInfo.name":"Name",
+   "candidateInfo.details":"Details",
+   "reviewSubmitTitle":"Review & Submit",
+   "ballotUnavailable":"This election's ballot isn't available yet.",
+   "unsupportedQuestions_one":"{{count}} question on this ballot can't be answered in this app yet.",
+   "unsupportedQuestions_other":"{{count}} questions on this ballot can't be answered in this app yet."
+  },
+  registration:{
+   "headerTitle":"Registration",
+   "info.statusHeading":"Your registration",
+   "info.network":"Network",
+   "info.election":"Election",
+   "info.deadline":"Registration closes",
+   "info.deadlinePassed":"Registration has closed",
+   "info.noElection":"No election is open for registration on this network.",
+   "info.howHeading":"How registration works",
+   "info.step1":"Your device is checked to confirm it is genuine and secure.",
+   "info.step2":"You enter the personal details the election authority asks for.",
+   "info.step3":"You confirm the request with your device unlock (face, fingerprint or passcode).",
+   "info.step4":"The election authority reviews your request. Once approved you are registered and receive a registration code.",
+   "deviceAttestationTitle":"Verifying Your Device",
+   "confirmationTitle":"You're All Set",
+   "notRegistered.heading":"You are not registered",
+   "notRegistered.body":"To participate in the Utah Network you will need to register",
+   "notRegistered.cta":"Register now",
+   "registered.heading":"You're registered to vote",
+   "registered.body":"You have successfully registered for the Utah Network",
+   "registered.identityLine":"{{fullName}}: {{party}} {{dob}}",
+   "registered.validThrough":"Valid through {{validThrough}}",
+   "registered.updatePrompt":"Have you recently made any changes to your personal info?",
+   "registered.updateCta":"Update registration",
+   "deviceAttestation.heading":"Verifying your device...",
+   "deviceAttestation.caption":"Confirming your device is secure",
+   "deviceAttestation.terminalHeading":"This device can't be used to vote",
+   "deviceAttestation.terminalBody":"This device lacks the secure hardware required to protect a vote, so it cannot be used to register.",
+   "form.sectionTitle":"Register for the Utah Network",
+   "form.firstName":"First Name",
+   "form.lastName":"Last Name",
+   "form.dob":"Date of Birth",
+   "form.email":"Email",
+   "form.phone":"Phone Number",
+   "form.dobPlaceholder":"MM/DD/YYYY",
+   "form.continueCta":"Continue",
+   "form.backCta":"Back",
+   "form.submitCta":"Submit",
+   "form.errors.required":"This field is required",
+   "form.errors.email":"Enter a valid email address",
+   "form.errors.phone":"Enter a valid phone number",
+   "form.errors.dob":"Enter your date of birth as MM/DD/YYYY",
+   "form.errors.party":"Select your party",
+   "form.stepLabel":"Step {{step}} of 3",
+   "form.addressLine1":"Address line 1",
+   "form.addressLine2":"Address line 2 (optional)",
+   "form.addressLine3":"Address line 3 (optional)",
+   "form.selectParty":"Select Your Party",
+   "form.party.democratic":"Democratic Party",
+   "form.party.republican":"Republican Party",
+   "form.party.independent":"Independent",
+   "form.party.other":"Other",
+   "form.confirmInstruction":"Check to ensure all information is correct",
+   "form.review.fullName":"Full Name",
+   "form.review.dob":"Date of Birth",
+   "form.review.email":"Email",
+   "form.review.phone":"Phone Number",
+   "form.review.party":"Registered Party",
+   "form.review.address":"Address",
+   "confirmation.heading":"You're all set!",
+   "confirmation.body":"Confirm your registration with Face ID",
+   "confirmation.cta":"Confirm with Face ID",
+   "confirmation.caption":"Look at your device to confirm",
+   "confirmation.error.biometricNotEnrolled":"Set up fingerprint or face unlock to continue",
+   "confirmation.error.setupCta":"Set up device unlock",
+   "confirmation.error.transient":"Something went wrong verifying your device. Try again.",
+   "confirmation.error.terminal":"This device can't be used to vote",
+   "formHeaderTitle":"Register",
+   "confirmHeaderTitle":"Confirm"
+  },
+  scan:{
+   "headerTitle":"Scan",
+   "notAvailableTitle":"QR scanning coming soon",
+   "notAvailableBody":"QR code scanning isn't available yet — it's coming in a future update."
+  },
+  settings:{
+   "headerTitle":"Settings",
+   "language":"Language",
+   "languageEnglish":"English",
+   "languageSpanish":"Español"
+  },
+  timeline:{
+   "stage.registrationEnds.title":"Registration Ends",
+   "stage.ballotsFinal.title":"Ballots Finalized",
+   "stage.votingPeriod.title":"Voting Period",
+   "stage.accruingVotes.title":"Accruing Votes",
+   "stage.hashingVotes.title":"Hashing Votes",
+   "stage.releasingKeys.title":"Releasing Keys",
+   "stage.tallyingStarts.title":"Tallying",
+   "stage.validation.title":"Validation",
+   "stage.certificationStarts.title":"Certification",
+   "stage.closed.title":"Election Closed",
+   "help.accessibilityLabel":"More information about {{stage}}",
+   "subtitle.yesterday":"Yesterday",
+   "subtitle.today":"Today - {{weekday}}",
+   "subtitle.futureWeekday":"{{weekday}}",
+   "subtitle.pastDate":"{{date}}",
+   "subtitle.futureDate":"{{date}}",
+   "header.dateRange":"{{startDate}} - {{endDate}}",
+   "headerTitle":"Timeline",
+   "rail.now":"Now",
+   "registration.isRegistered":"You {{bold}} in the {{network}}",
+   "registration.isRegisteredBold":"are registered",
+   "registration.pending":"Your registration in the {{network}} is awaiting a decision.",
+   "registration.notRegistered":"You are not registered in the {{network}}.",
+   "registration.unknown":"We couldn't check your registration status right now.",
+   "registration.viewCta":"View registration",
+   "registration.editCta":"Edit registration",
+   "voting.previewBallotCta":"Preview ballot",
+   "voting.voteNowCta":"Vote now",
+   "voting.viewSubmissionCta":"View submission",
+   "row.detailsCta":"See details",
+   "keyholders.viewCta":"View Keyholders",
+   "keyholders.screenTitle":"Keyholders",
+   "keyholders.releasedCount":"{{released}} of {{total}} keys released",
+   "keyholders.emptyHeading":"No keyholders yet",
+   "keyholders.emptyBody":"This election has no keyholders assigned yet.",
+   "indeterminate.heading":"We can't show this election's timeline right now",
+   "indeterminate.body":"The election schedule could not be read or doesn't make sense yet. Try again in a moment.",
+   "indeterminate.retryCta":"Try again",
+   "dev.clockOffsetLabel":"DEV: Clock offset",
+   "dev.finalDayStop":"final day"
+  },
+  continuity:{
+   "code.heading":"Your Registration Code",
+   "code.body":"Save this code. If you ever need to continue your registration on another device, you'll enter it there.",
+   "code.copyButton":"Copy Code",
+   "code.copiedConfirm":"Copied",
+   "code.showAgainLink":"Show my registration code",
+   "code.unavailable":"Your registration code isn't available right now. Try again in a moment.",
+   "code.notAvailableOnDevice":"A registration code isn't available on this device. If you move to another device, you'll confirm your identity there instead.",
+   "newDevice.screenTitle":"Continue on This Device",
+   "newDevice.codeFieldLabel":"Registration Code",
+   "newDevice.codeFieldPlaceholder":"Enter your code",
+   "newDevice.submitButton":"Continue with Code",
+   "newDevice.lostCodeLink":"I don't have my code",
+   "newDevice.identityFallbackHeading":"Confirm Your Identity",
+   "newDevice.identityFallbackBody":"An officer will match these details to your existing registration. This may take longer than using a code.",
+   "newDevice.identityFallbackSubmitButton":"Submit for Review",
+   "newDevice.pendingHeading":"Waiting for approval",
+   "newDevice.pendingBody":"An officer needs to approve this device change before you can continue.",
+   "newDevice.approvedHeading":"Device approved",
+   "newDevice.rejectedHeading":"Request not approved",
+   "newDevice.rejectedBody":"This device change request was not approved. Contact your election authority for help.",
+   "newDevice.entryLink":"Already registered on another device?",
+   "newDevice.codeRequired":"Enter your registration code to continue.",
+   "newDevice.submitError":"Could not send your request. Check your connection and try again.",
+   "newDevice.backToCodeLink":"Use my code instead",
+   "newDevice.restartLink":"My registration is still pending",
+   "newDevice.retryButton":"Try Again",
+   "deviceRetired.heading":"This device has been retired",
+   "deviceRetired.body":"Your voting registration was moved to another device. This device can no longer be used to vote.",
+   "restart.heading":"Start a New Registration",
+   "restart.body":"Your previous registration is still pending and tied to your other device. Continuing here starts a brand-new registration from scratch on this device.",
+   "restart.confirmButton":"Start New Registration"
+  },
+ },
+ es:{
+  common:{
+   "tabVote":"Votar",
+   "tabTimeline":"Cronograma",
+   "tabRegistration":"Registro",
+   "tabScan":"Escanear",
+   "tabSettings":"Ajustes",
+   "placeholderBody":"Esta pantalla aún no está lista — vuelve a consultar más adelante.",
+   "close":"Cerrar",
+   "info.unavailable":"Esta información no está disponible en este momento.",
+   "info.openLink":"Más información",
+   "networkName":"Utah Network",
+   "notifications":"Notificaciones",
+   "breadcrumb.home":"Inicio",
+   "breadcrumb.ballot":"Papeleta",
+   "configNotConfigured":"Sin configurar",
+   "syncSyncing":"Sincronizando"
+  },
+  home:{
+   "headerTitle":"Votar",
+   "voteNowCta":"Votar ahora",
+   "learnAboutElection":"Conoce más sobre esta elección",
+   "electionInfo.title":"Información de la elección",
+   "electionInfo.subtitle":"Página informativa sobre esta elección",
+   "electionInfo.body":"\"La siguiente información ha sido proporcionada por la autoridad electoral\"",
+   "electionInfo.authority":"Autoridad electoral",
+   "electionInfo.date":"Día de la elección",
+   "electionInfo.instructions":"Instrucciones",
+   "electionInfo.tags":"Etiquetas",
+   "progressLabel":"{{percent}}% completado",
+   "countdown.hours":"horas",
+   "countdown.minutes":"minutos",
+   "countdown.seconds":"segundos",
+   "countdown.days":"días",
+   "validationDetailsTitle":"Detalles de Validación",
+   "states.upcoming.summary":"La votación aún no ha comenzado — vuelve cuando se abran las urnas.",
+   "states.open.summary":"Emite tu voto antes de que cierren las urnas.",
+   "states.reviewSelections.summary":"Continúa revisando tus selecciones de la boleta.",
+   "states.releasingKeys.summary":"{{released}}/{{total}} claves de elección liberadas.",
+   "states.validation.summary":"Estado de validación {{checksComplete}}/{{checksTotal}} verificaciones.",
+   "states.validationDetails.summary":"Estado de validación {{checksComplete}}/{{checksTotal}} verificaciones — ver toda la evidencia.",
+   "states.validationDetails.cta":"Ver Detalles de Validación",
+   "states.complete.summary":"Certificada ✓",
+   "states.releasingKeys.pendingSummary":"La votación ha cerrado. Los resultados permanecen bloqueados hasta que se liberen las claves de la elección.",
+   "states.validation.pendingSummary":"Claves de la elección liberadas — los resultados se están contando y validando.",
+   "states.complete.closedSummary":"Esta elección ha cerrado.",
+   "electionUnavailable":"Aún no hay ninguna elección disponible en esta red.",
+   "votedCta":"Ya votaste",
+   "validationDetails.columnCheck":"Verificación",
+   "validationDetails.columnResult":"Resultado",
+   "validationDetails.columnTime":"Tiempo",
+   "validationDetails.columnStatus":"Estado",
+   "validationDetails.overallCount":"{{verified}}/{{total}} verificaciones completadas",
+   "validationDetails.fingerprintLabel":"Huella digital",
+   "validationDetails.recordedInBlockchain":"Informe de validación registrado en la cadena de bloques",
+   "validationDetails.verified":"Verificado",
+   "validationDetails.pending":"Pendiente",
+   "validationDetails.check1.name":"Buscar registro de votante",
+   "validationDetails.check1.result":"Registro de votante encontrado",
+   "validationDetails.check2.name":"Verificar registro de votante",
+   "validationDetails.check2.result":"Las identificaciones coinciden",
+   "validationDetails.check3.name":"Verificar la integridad de la elección",
+   "validationDetails.check3.result":"Bloques adyacentes y ruta del árbol verificados"
+  },
+  ballot:{
+   "headerTitle":"Boleta",
+   "individualQuestionTitle":"Pregunta Individual",
+   "progressLabel":"{{completed}}/{{total}} preguntas completadas",
+   "voteForN":"Vote por {{n}}",
+   "saveExitCta":"Guardar y salir",
+   "reviewCta":"Revisar y enviar boleta",
+   "continueVotingCta":"Continuar votando",
+   "nextCta":"Siguiente pregunta",
+   "previousCta":"Pregunta anterior",
+   "submitCta":"Enviar",
+   "submittedConfirmation":"Tu boleta fue enviada",
+   "notYetAnswered":"Aún no respondido",
+   "learnAboutOffice":"Conoce más sobre este cargo",
+   "learnAboutCandidate":"Conoce más sobre este candidato",
+   "candidateInfo.title":"Información del candidato",
+   "candidateInfo.subtitle":"Página informativa sobre el candidato seleccionado",
+   "candidateInfo.body":"\"La siguiente información ha sido proporcionada por el candidato\"",
+   "officeInfo.title":"Información del cargo",
+   "officeInfo.subtitle":"Página informativa sobre este cargo",
+   "officeInfo.body":"\"La siguiente información ha sido proporcionada por el cargo\"",
+   "officeInfo.instructions":"Instrucciones",
+   "officeInfo.voteFor":"Puedes elegir",
+   "officeInfo.voteForValue":"Hasta {{count}}",
+   "candidateInfo.name":"Nombre",
+   "candidateInfo.details":"Detalles",
+   "reviewSubmitTitle":"Revisar y enviar",
+   "ballotUnavailable":"La boleta de esta elección aún no está disponible.",
+   "unsupportedQuestions_one":"{{count}} pregunta de esta boleta aún no se puede responder en esta aplicación.",
+   "unsupportedQuestions_other":"{{count}} preguntas de esta boleta aún no se pueden responder en esta aplicación."
+  },
+  registration:{
+   "headerTitle":"Registro",
+   "info.statusHeading":"Tu registro",
+   "info.network":"Red",
+   "info.election":"Elección",
+   "info.deadline":"El registro cierra",
+   "info.deadlinePassed":"El registro ha cerrado",
+   "info.noElection":"No hay ninguna elección abierta para registro en esta red.",
+   "info.howHeading":"Cómo funciona el registro",
+   "info.step1":"Se verifica tu dispositivo para confirmar que es auténtico y seguro.",
+   "info.step2":"Ingresas los datos personales que solicita la autoridad electoral.",
+   "info.step3":"Confirmas la solicitud con el desbloqueo de tu dispositivo (rostro, huella o código).",
+   "info.step4":"La autoridad electoral revisa tu solicitud. Una vez aprobada quedas registrado y recibes un código de registro.",
+   "deviceAttestationTitle":"Verificando Tu Dispositivo",
+   "confirmationTitle":"Todo Listo",
+   "notRegistered.heading":"No estás registrado",
+   "notRegistered.body":"Para participar en la Red de Utah necesitarás registrarte",
+   "notRegistered.cta":"Regístrate ahora",
+   "registered.heading":"Estás registrado para votar",
+   "registered.body":"Te has registrado exitosamente en la Red de Utah",
+   "registered.identityLine":"{{fullName}}: {{party}} {{dob}}",
+   "registered.validThrough":"Válido hasta {{validThrough}}",
+   "registered.updatePrompt":"¿Has hecho cambios recientes en tu información personal?",
+   "registered.updateCta":"Actualizar registro",
+   "deviceAttestation.heading":"Verificando tu dispositivo...",
+   "deviceAttestation.caption":"Confirmando que tu dispositivo es seguro",
+   "deviceAttestation.terminalHeading":"Este dispositivo no se puede usar para votar",
+   "deviceAttestation.terminalBody":"Este dispositivo no cuenta con el hardware seguro necesario para proteger un voto, por lo que no se puede usar para registrarte.",
+   "form.sectionTitle":"Regístrate en la Red de Utah",
+   "form.firstName":"Nombre",
+   "form.lastName":"Apellido",
+   "form.dob":"Fecha de Nacimiento",
+   "form.email":"Correo Electrónico",
+   "form.phone":"Número de Teléfono",
+   "form.dobPlaceholder":"MM/DD/AAAA",
+   "form.continueCta":"Continuar",
+   "form.backCta":"Atrás",
+   "form.submitCta":"Enviar",
+   "form.errors.required":"Este campo es obligatorio",
+   "form.errors.email":"Introduce un correo electrónico válido",
+   "form.errors.phone":"Introduce un número de teléfono válido",
+   "form.errors.dob":"Introduce tu fecha de nacimiento como MM/DD/AAAA",
+   "form.errors.party":"Selecciona tu partido",
+   "form.stepLabel":"Paso {{step}} de 3",
+   "form.addressLine1":"Dirección línea 1",
+   "form.addressLine2":"Dirección línea 2 (opcional)",
+   "form.addressLine3":"Dirección línea 3 (opcional)",
+   "form.selectParty":"Selecciona Tu Partido",
+   "form.party.democratic":"Partido Demócrata",
+   "form.party.republican":"Partido Republicano",
+   "form.party.independent":"Independiente",
+   "form.party.other":"Otro",
+   "form.confirmInstruction":"Verifica que toda la información sea correcta",
+   "form.review.fullName":"Nombre Completo",
+   "form.review.dob":"Fecha de Nacimiento",
+   "form.review.email":"Correo Electrónico",
+   "form.review.phone":"Número de Teléfono",
+   "form.review.party":"Partido Registrado",
+   "form.review.address":"Dirección",
+   "confirmation.heading":"¡Todo listo!",
+   "confirmation.body":"Confirma tu registro con Face ID",
+   "confirmation.cta":"Confirmar con Face ID",
+   "confirmation.caption":"Mira tu dispositivo para confirmar",
+   "confirmation.error.biometricNotEnrolled":"Configura el desbloqueo por huella o rostro para continuar",
+   "confirmation.error.setupCta":"Configurar desbloqueo del dispositivo",
+   "confirmation.error.transient":"Algo salió mal al verificar tu dispositivo. Inténtalo de nuevo.",
+   "confirmation.error.terminal":"Este dispositivo no se puede usar para votar",
+   "formHeaderTitle":"Registrarse",
+   "confirmHeaderTitle":"Confirmar"
+  },
+  scan:{
+   "headerTitle":"Escanear",
+   "notAvailableTitle":"Escaneo QR próximamente",
+   "notAvailableBody":"El escaneo de códigos QR aún no está disponible — llegará en una próxima actualización."
+  },
+  settings:{
+   "headerTitle":"Ajustes",
+   "language":"Idioma",
+   "languageEnglish":"English",
+   "languageSpanish":"Español"
+  },
+  timeline:{
+   "stage.registrationEnds.title":"Fin del Registro",
+   "stage.ballotsFinal.title":"Boletas Finalizadas",
+   "stage.votingPeriod.title":"Período de Votación",
+   "stage.accruingVotes.title":"Acumulando Votos",
+   "stage.hashingVotes.title":"Verificando Votos",
+   "stage.releasingKeys.title":"Liberando Claves",
+   "stage.tallyingStarts.title":"Escrutinio",
+   "stage.validation.title":"Validación",
+   "stage.certificationStarts.title":"Certificación",
+   "stage.closed.title":"Elección Cerrada",
+   "help.accessibilityLabel":"Más información sobre {{stage}}",
+   "subtitle.yesterday":"Ayer",
+   "subtitle.today":"Hoy - {{weekday}}",
+   "subtitle.futureWeekday":"{{weekday}}",
+   "subtitle.pastDate":"{{date}}",
+   "subtitle.futureDate":"{{date}}",
+   "header.dateRange":"{{startDate}} - {{endDate}}",
+   "headerTitle":"Cronograma",
+   "rail.now":"Ahora",
+   "registration.isRegistered":"{{bold}} en la {{network}}",
+   "registration.isRegisteredBold":"Estás registrado",
+   "registration.pending":"Tu registro en la {{network}} está esperando una decisión.",
+   "registration.notRegistered":"No estás registrado en la {{network}}.",
+   "registration.unknown":"No pudimos verificar tu estado de registro en este momento.",
+   "registration.viewCta":"Ver registro",
+   "registration.editCta":"Editar registro",
+   "voting.previewBallotCta":"Vista previa de la boleta",
+   "voting.voteNowCta":"Votar ahora",
+   "voting.viewSubmissionCta":"Ver mi envío",
+   "row.detailsCta":"Ver detalles",
+   "keyholders.viewCta":"Ver Custodios de Claves",
+   "keyholders.screenTitle":"Custodios de Claves",
+   "keyholders.releasedCount":"{{released}} de {{total}} claves liberadas",
+   "keyholders.emptyHeading":"Aún no hay custodios",
+   "keyholders.emptyBody":"Esta elección aún no tiene custodios asignados.",
+   "indeterminate.heading":"No podemos mostrar el cronograma de esta elección en este momento",
+   "indeterminate.body":"No se pudo leer el cronograma de la elección o aún no es válido. Inténtalo de nuevo en un momento.",
+   "indeterminate.retryCta":"Intentar de nuevo",
+   "dev.clockOffsetLabel":"DEV: Ajuste de reloj",
+   "dev.finalDayStop":"último día"
+  },
+  continuity:{
+   "code.heading":"Tu Código de Registro",
+   "code.body":"Guarda este código. Si alguna vez necesitas continuar tu registro en otro dispositivo, lo introducirás allí.",
+   "code.copyButton":"Copiar Código",
+   "code.copiedConfirm":"Copiado",
+   "code.showAgainLink":"Mostrar mi código de registro",
+   "code.unavailable":"Tu código de registro no está disponible en este momento. Inténtalo de nuevo en un momento.",
+   "code.notAvailableOnDevice":"No hay un código de registro disponible en este dispositivo. Si cambias a otro dispositivo, confirmarás tu identidad allí.",
+   "newDevice.screenTitle":"Continuar en Este Dispositivo",
+   "newDevice.codeFieldLabel":"Código de Registro",
+   "newDevice.codeFieldPlaceholder":"Introduce tu código",
+   "newDevice.submitButton":"Continuar con el código",
+   "newDevice.lostCodeLink":"No tengo mi código",
+   "newDevice.identityFallbackHeading":"Confirma tu Identidad",
+   "newDevice.identityFallbackBody":"Un funcionario comparará estos datos con tu registro existente. Esto puede tardar más que usar un código.",
+   "newDevice.identityFallbackSubmitButton":"Enviar para Revisión",
+   "newDevice.pendingHeading":"Esperando aprobación",
+   "newDevice.pendingBody":"Un funcionario debe aprobar este cambio de dispositivo antes de que puedas continuar.",
+   "newDevice.approvedHeading":"Dispositivo aprobado",
+   "newDevice.rejectedHeading":"Solicitud no aprobada",
+   "newDevice.rejectedBody":"Esta solicitud de cambio de dispositivo no fue aprobada. Contacta a tu autoridad electoral para obtener ayuda.",
+   "newDevice.entryLink":"¿Ya te registraste en otro dispositivo?",
+   "newDevice.codeRequired":"Introduce tu código de registro para continuar.",
+   "newDevice.submitError":"No se pudo enviar tu solicitud. Revisa tu conexión e inténtalo de nuevo.",
+   "newDevice.backToCodeLink":"Usar mi código en su lugar",
+   "newDevice.restartLink":"Mi registro aún está pendiente",
+   "newDevice.retryButton":"Intentar de nuevo",
+   "deviceRetired.heading":"Este dispositivo ha sido retirado",
+   "deviceRetired.body":"Tu registro de votación se trasladó a otro dispositivo. Este dispositivo ya no se puede usar para votar.",
+   "restart.heading":"Iniciar un Nuevo Registro",
+   "restart.body":"Tu registro anterior sigue pendiente y vinculado a tu otro dispositivo. Continuar aquí inicia un registro completamente nuevo desde cero en este dispositivo.",
+   "restart.confirmButton":"Iniciar Nuevo Registro"
+  },
+ },
+};
+/** t('ns','key',{vars}) — i18next with keySeparator:false, fallbackLng:'en', and the
+ *  `_one`/`_other` plural suffix when a numeric `count` is passed. */
+function t(ns,key,vars){
+  let k = key;
+  if(vars && typeof vars.count==='number'){
+    const suf = vars.count===1 ? '_one' : '_other';
+    if((RES.en[ns]||{})[key+suf]!==undefined) k = key+suf;
+  }
+  let s = ((RES[S.lang]||{})[ns]||{})[k];
+  if(s===undefined) s = (RES.en[ns]||{})[k];
+  if(s===undefined) return key;
+  if(vars) for(const v in vars) s = s.split('{{'+v+'}}').join(vars[v]===undefined?'':String(vars[v]));
+  return s;
+}
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const TY={display:[40,48],h1:[32,40],h2:[28,34],h3:[24,30],h4:[20,26],body:[16,22],caption:[16,20],captionSmall:[12,16]};
+const fs = k => 'font-size:'+TY[k][0]+'px;line-height:'+TY[k][1]+'px;';
+
+/* ---------------------------------------------------------------------------
+ * 3. FIXTURES
+ *    Election / ballot content: providers/__fixtures__/voter-fixtures.ts (identical to the
+ *    dev seed's published ballot, engines/dev-seed.ts). Lifecycle review content:
+ *    providers/devLifecycleFixtures.ts. Timeline instants: timeline/__fixtures__/
+ *    timeline-fixtures.ts CANONICAL_TIMELINE spacing, re-anchored to the moment you open
+ *    a scenario so countdowns run live. Authority-published "Learn about" detail,
+ *    keyholder names and the registration code are SAMPLE DATA (the app renders whatever
+ *    the authority published; none of it is copy).
+ * ------------------------------------------------------------------------ */
+const SEC=1000, MIN=60e3, HOUR=3600e3, DAY=86400e3;
+const BOOT=Date.now();
+const ELECTION_TITLE='Utah Network General Election';
+const LONG_ELECTION_TITLE='Salt Lake County School Board Special Election 2025';  // CANONICAL_ELECTION_TITLE
+const NETWORK_NAME='Utah Network';
+const LONG_NETWORK_NAME='Salt Lake County Unified School District Network';        // CANONICAL_NETWORK_NAME
+const FIXTURE_BALLOT={electionId:'fixture-election-1',unsupportedQuestionCount:0,offices:[
+ {id:'office-us-senate',title:'U.S. Senate',group:'Federal',voteFor:1,candidates:[
+   {id:'cand-us-senate-diana',name:'Diana Foster',party:'Democratic Party'},
+   {id:'cand-us-senate-marcus',name:'Marcus Whitfield',party:'Republican Party'},
+   {id:'cand-us-senate-elena',name:'Elena Vasquez',party:'Independent'}]},
+ {id:'office-us-house',title:'U.S. House of Representatives, District 2',group:'Federal',voteFor:1,candidates:[
+   {id:'cand-us-house-james',name:'James Okafor',party:'Democratic Party'},
+   {id:'cand-us-house-laura',name:'Laura Bennett',party:'Republican Party'}]},
+ {id:'office-governor',title:'Governor',group:'State (UT)',voteFor:1,candidates:[
+   {id:'cand-governor-priya',name:'Priya Nandan',party:'Democratic Party'},
+   {id:'cand-governor-robert',name:'Robert Kessler',party:'Republican Party'}]},
+ {id:'office-state-board-education',title:'State Board of Education',group:'State (UT)',voteFor:2,candidates:[
+   {id:'cand-sboe-angela',name:'Angela Torres',party:'Nonpartisan'},
+   {id:'cand-sboe-brian',name:'Brian Michaels',party:'Nonpartisan'},
+   {id:'cand-sboe-cynthia',name:'Cynthia Park',party:'Nonpartisan'},
+   {id:'cand-sboe-david',name:'David Nguyen',party:'Nonpartisan'}]},
+ {id:'office-state-senate',title:'State Senate, District 8',group:'State (UT)',voteFor:1,candidates:[
+   {id:'cand-state-senate-maria',name:'Maria Gutierrez',party:'Democratic Party'},
+   {id:'cand-state-senate-thomas',name:'Thomas Reyes',party:'Republican Party'}]},
+]};
+/* Sample authority-published detail for the "Learn about this …" dialogs (engines/info-read.ts shapes). */
+const SAMPLE_ELECTION_INFO={authorityName:'Utah Network Election Authority',
+  instructions:'Review every contest before you submit. Your selections are saved on this device until you submit them.',
+  tags:['general','statewide']};
+const SAMPLE_OFFICE_INSTRUCTIONS={'office-state-board-education':'Choose up to two candidates. Board members serve four-year terms.'};
+const SAMPLE_CANDIDATE_URL={'cand-us-senate-diana':'https://example.org/candidates/diana-foster'};
+const KEYHOLDER_NAMES=['Avery Thompson','Jordan Ellis','Morgan Patel','Riley Chen','Casey Nakamura'];
+const SAMPLE_CODE='7KQ2M9XH4P';                       // 10 Crockford base32 chars
+const formatRegistrationCode = c => c.slice(0,5)+'-'+c.slice(5,10);
+const REGISTRATION_CODE_ALPHABET='0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+function normalizeRegistrationCode(input){            // vote-core reassociation/registration-code.ts
+  const stripped=String(input).replace(/[\s-]/g,'').toUpperCase();
+  if(stripped.length!==10) return undefined;
+  let out=''; for(const ch of stripped){ const m=({O:'0',I:'1',L:'1'})[ch]||ch;
+    if(!REGISTRATION_CODE_ALPHABET.includes(m)) return undefined; out+=m; }
+  return out;
+}
+
+/* providers/devLifecycleFixtures.ts — DEV_LIFECYCLE_CONTENT (nowPlus() is read-time relative). */
+const VALIDATION_EVIDENCE=[
+  {nameKey:'validationDetails.check1.name',resultKey:'validationDetails.check1.result',elapsedSeconds:5.3,verified:true},
+  {nameKey:'validationDetails.check2.name',resultKey:'validationDetails.check2.result',elapsedSeconds:0.2,verified:true},
+  {nameKey:'validationDetails.check3.name',resultKey:'validationDetails.check3.result',elapsedSeconds:1.1,verified:false},
+];
+const V_DONE=VALIDATION_EVIDENCE.filter(c=>c.verified).length, V_TOTAL=VALIDATION_EVIDENCE.length;
+function devLifecycleContent(state, at){
+  return ({
+    Upcoming:{countdownTarget:at+31*HOUR},
+    Open:{countdownTarget:at+8*HOUR,progress:0.3},
+    ReviewSelections:{},
+    ReleasingKeys:{countdownTarget:at+21*MIN,keysReleased:3,keysTotal:5},
+    Validation:{countdownTarget:at+20*MIN,keysReleased:5,keysTotal:5,checksComplete:V_DONE,checksTotal:V_TOTAL},
+    ValidationDetails:{checksComplete:V_DONE,checksTotal:V_TOTAL,fingerprint:'Birddog133',evidence:VALIDATION_EVIDENCE},
+    Complete:{certified:true},
+  })[state];
+}
+const LIFECYCLE_ORDER=['Upcoming','Open','ReviewSelections','ReleasingKeys','Validation','ValidationDetails','Complete'];
+
+/* ---------------------------------------------------------------------------
+ * 4. TIMELINE DERIVATION — a port of packages/ui-web/src/lifecycle/timeline-core.js
+ *    (normalizeInstant / parseTimeline / finestStage) and src/timeline/{stages,
+ *    relative-date,derive-timeline}.ts. Same loops, same status rules.
+ * ------------------------------------------------------------------------ */
+const STAGES=['registrationEnds','ballotsFinal','votingStarts','accruingVotes','hashingVotes','releasingKeys','tallyingStarts','validation','certificationStarts','closed'];
+const STRICT_CHAIN=['votingStarts','accruingVotes','hashingVotes','releasingKeys','tallyingStarts','validation','certificationStarts','closed'];
+const PREPARATION=['registrationEnds','ballotsFinal'];
+const STAGE_TITLE_KEY={registrationEnds:'stage.registrationEnds.title',ballotsFinal:'stage.ballotsFinal.title',
+  votingStarts:'stage.votingPeriod.title',accruingVotes:'stage.accruingVotes.title',hashingVotes:'stage.hashingVotes.title',
+  releasingKeys:'stage.releasingKeys.title',tallyingStarts:'stage.tallyingStarts.title',validation:'stage.validation.title',
+  certificationStarts:'stage.certificationStarts.title',closed:'stage.closed.title'};
+function normalizeInstant(raw){
+  if(raw===undefined||raw===null) return null;
+  if(typeof raw==='number') return Number.isFinite(raw)?raw:null;
+  if(typeof raw!=='string') return null;
+  const tr=raw.trim(); if(tr==='') return null;
+  if(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(tr)){ const ms=Date.parse(tr+'Z'); return Number.isFinite(ms)?ms:null; }
+  const ms=Date.parse(tr); return Number.isFinite(ms)?ms:null;
+}
+function parseTimeline(timeline){
+  const conflicts=[], at={};
+  const blob = timeline!==null && typeof timeline==='object' ? timeline : {};
+  for(const ev of STAGES){ const raw=blob[ev], ms=normalizeInstant(raw); at[ev]=ms;
+    if(ms===null) conflicts.push({code: raw===undefined||raw===null ? 'MISSING_EVENT':'UNPARSEABLE', event:ev}); }
+  let prev=null;
+  for(const ev of STRICT_CHAIN){ if(at[ev]===null) continue;
+    if(prev!==null && at[ev]<at[prev]) conflicts.push({code:'OUT_OF_ORDER',event:ev}); prev=ev; }
+  for(const ev of PREPARATION){ if(at[ev]===null||at.votingStarts===null) continue;
+    if(at[ev]>at.votingStarts) conflicts.push({code:'OUT_OF_ORDER',event:ev}); }
+  return {at,conflicts};
+}
+function finestStage(at,nowMs){ let st=null; for(const ev of STAGES){ const m=at[ev]; if(m!==null && nowMs>=m) st=ev; } return st; }
+function dateParts(ms,language,timeZone){
+  try{
+    const parts=new Intl.DateTimeFormat(language,{timeZone,year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date(ms));
+    const get=type=>{ const f=parts.find(p=>p.type===type); if(!f) throw new Error('missing'); return Number(f.value); };
+    return {year:get('year'),month:get('month'),day:get('day')};
+  }catch(_){ const d=new Date(ms); return {year:d.getUTCFullYear(),month:d.getUTCMonth()+1,day:d.getUTCDate()}; }
+}
+function calendarDayDiff(a,b,timeZone,language){
+  const pa=dateParts(a,language,timeZone), pb=dateParts(b,language,timeZone);
+  return Math.round((Date.UTC(pa.year,pa.month-1,pa.day)-Date.UTC(pb.year,pb.month-1,pb.day))/DAY);
+}
+const pad2 = n => n<10?'0'+n:String(n);
+function formatRailDate(ms,timeZone,language){ const p=dateParts(ms,language,timeZone); return pad2(p.month)+'/'+pad2(p.day); }
+function weekdayName(ms,language,timeZone){ try{ return new Intl.DateTimeFormat(language,{timeZone,weekday:'long'}).format(new Date(ms)); }catch(_){ return null; } }
+function relativeDateSubtitle(ms,nowMs,language,timeZone){
+  const dd=calendarDayDiff(ms,nowMs,timeZone,language), wd=weekdayName(ms,language,timeZone);
+  if(wd===null) return {key: dd<0?'subtitle.pastDate':'subtitle.futureDate', params:{date:formatRailDate(ms,timeZone,language)}};
+  if(dd===0) return {key:'subtitle.today',params:{weekday:wd}};
+  if(dd===-1) return {key:'subtitle.yesterday',params:undefined};
+  if(dd>=1&&dd<=6) return {key:'subtitle.futureWeekday',params:{weekday:wd}};
+  if(dd<=-2) return {key:'subtitle.pastDate',params:{date:formatRailDate(ms,timeZone,language)}};
+  return {key:'subtitle.futureDate',params:{date:formatRailDate(ms,timeZone,language)}};
+}
+function resolveAbsentStatus(id,at,nowMs){
+  const crossed=x=>at[x]!==null&&nowMs>=at[x], notYet=x=>at[x]!==null&&nowMs<at[x];
+  if(PREPARATION.includes(id)) return STRICT_CHAIN.some(crossed)?'past':'unknown';
+  const i=STRICT_CHAIN.indexOf(id);
+  if(STRICT_CHAIN.slice(i+1).some(crossed)) return 'past';
+  if(PREPARATION.concat(STRICT_CHAIN.slice(0,i)).some(notYet)) return 'future';
+  return 'unknown';
+}
+function deriveTimeline({timeline,now,language,timeZone}){
+  language=language||'en'; timeZone=timeZone||'UTC';
+  const nowMs=normalizeInstant(now);
+  if(nowMs===null) return {indeterminate:true};
+  const {at,conflicts}=parseTimeline(timeline);
+  if(conflicts.some(c=>c.code==='UNPARSEABLE'||c.code==='OUT_OF_ORDER')) return {indeterminate:true};
+  if(STAGES.every(id=>at[id]===null)) return {indeterminate:true};
+  const cur=finestStage(at,nowMs);
+  const rows=STAGES.map(id=>{
+    const ms=at[id];
+    const status = id===cur ? 'current' : ms!==null ? (nowMs>=ms?'past':'future') : resolveAbsentStatus(id,at,nowMs);
+    const railLabel = status==='current' ? {kind:'now'} : ms!==null ? {kind:'date',text:formatRailDate(ms,timeZone,language)} : {kind:'unknown'};
+    return {stageId:id,titleKey:STAGE_TITLE_KEY[id],status,instantMs:ms,railLabel,
+      subtitle: ms!==null ? relativeDateSubtitle(ms,nowMs,language,timeZone) : null};
+  });
+  const present=STAGES.map(id=>at[id]).filter(m=>m!==null);
+  return {indeterminate:false,rows,currentStageId:cur,rangeStartMs:Math.min(...present),rangeEndMs:Math.max(...present)};
+}
+/* screens/timeline/TimelineScreen.tsx helpers */
+const DEVICE_TZ=(()=>{ try{ return Intl.DateTimeFormat().resolvedOptions().timeZone; }catch(_){ return undefined; } })();
+function calendarDayKey(ms,timeZone){
+  const parts=new Intl.DateTimeFormat('en',{timeZone,year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date(ms));
+  const g=x=>(parts.find(p=>p.type===x)||{}).value||''; return g('year')+'-'+g('month')+'-'+g('day');
+}
+function formatHeaderDay(ms,language,timeZone,dayOnly){
+  const parts=new Intl.DateTimeFormat(language, dayOnly?{timeZone,day:'numeric'}:{timeZone,month:'long',day:'numeric'}).formatToParts(new Date(ms));
+  const g=x=>(parts.find(p=>p.type===x)||{}).value||'';
+  return dayOnly ? g('day') : g('month')+' '+g('day');
+}
+function computeHeaderDateRange(a,b,language,timeZone){
+  timeZone=timeZone||'UTC';
+  const sk=calendarDayKey(a,timeZone), ek=calendarDayKey(b,timeZone);
+  if(sk===ek) return null;
+  const sameMonth=sk.slice(0,7)===ek.slice(0,7);
+  return {startDate:formatHeaderDay(a,language,timeZone,false),endDate:formatHeaderDay(b,language,timeZone,sameMonth)};
+}
+/* engines/election-read.ts — the Home card's state is derived from the SAME timeline. */
+const STAGE_LIFECYCLE={registrationEnds:'Upcoming',ballotsFinal:'Upcoming',votingStarts:'Open',accruingVotes:'ReleasingKeys',
+  hashingVotes:'ReleasingKeys',releasingKeys:'ReleasingKeys',tallyingStarts:'Validation',validation:'Validation',
+  certificationStarts:'Validation',closed:'Complete'};
+const STATE_ENDED_BY={Upcoming:'votingStarts',Open:'accruingVotes',ReleasingKeys:'tallyingStarts',Validation:'closed'};
+function lifecycleFromTimeline(view,nowMs){
+  const st = view.currentStageId===null ? 'Upcoming' : STAGE_LIFECYCLE[view.currentStageId];
+  const end=STATE_ENDED_BY[st];
+  const endRow = end ? view.rows.find(r=>r.stageId===end) : null;
+  const endMs = endRow ? endRow.instantMs : null;
+  return endMs!==null && endMs>nowMs ? {lifecycleState:st,countdownTarget:endMs} : {lifecycleState:st};
+}
+
+/* Timeline SCENARIOS — the canonical fixture's spacing (2026-03-20 → 03-26 UTC), re-anchored
+   so the chosen stage is current right now. */
+const CANON={registrationEnds:Date.UTC(2026,2,20,23),ballotsFinal:Date.UTC(2026,2,21,18),votingStarts:Date.UTC(2026,2,22,14),
+  accruingVotes:Date.UTC(2026,2,23,15),hashingVotes:Date.UTC(2026,2,23,17),releasingKeys:Date.UTC(2026,2,23,19),
+  tallyingStarts:Date.UTC(2026,2,23,21),validation:Date.UTC(2026,2,24,16),certificationStarts:Date.UTC(2026,2,25,16),
+  closed:Date.UTC(2026,2,26,0)};
+function shiftCanon(canonNow,anchor){ const sh=anchor-canonNow, b={}; STAGES.forEach(s=>b[s]=CANON[s]+sh); return b; }
+function stageScenario(id,anchor){
+  const i=STAGES.indexOf(id), next=STAGES[i+1];
+  const d = next ? Math.min(HOUR,(CANON[next]-CANON[id])/2) : HOUR;
+  return shiftCanon(CANON[id]+d,anchor);
+}
+function scenarioBlob(sc,anchor){
+  if(sc.startsWith('stage:')) return stageScenario(sc.slice(6),anchor);
+  switch(sc){
+    case 'allFuture': return shiftCanon(CANON.registrationEnds-DAY,anchor);
+    case 'sevenKey': { const b=stageScenario('votingStarts',anchor); delete b.accruingVotes; delete b.hashingVotes; delete b.releasingKeys; return b; }
+    case 'noRegEnds': { const b=stageScenario('votingStarts',anchor); delete b.registrationEnds; return b; }
+    case 'longCountdown': { const b=stageScenario('votingStarts',anchor); const nt=anchor+15494400*SEC, d=nt-b.tallyingStarts;
+      b.tallyingStarts=nt; b.validation+=d; b.certificationStarts+=d; b.closed+=d; return b; }
+    case 'devSeed': { const ed=anchor+180*DAY; return {registrationEnds:ed-52*DAY,ballotsFinal:ed-40*DAY,votingStarts:ed-31*DAY,
+      accruingVotes:ed-20*HOUR,hashingVotes:ed-16*HOUR,releasingKeys:ed-12*HOUR,tallyingStarts:ed,validation:ed+DAY,
+      certificationStarts:ed+2*DAY,closed:ed+3*DAY}; }
+    case 'nonMonotonic': { const b=stageScenario('votingStarts',anchor); const x=b.tallyingStarts; b.tallyingStarts=b.validation; b.validation=x; return b; }
+    case 'absent': return {};
+  }
+  return {};
+}
+let _blobCache={key:null,blob:null};
+function tlBlob(){ const k=S.tlScenario+'@'+S.tlAnchor; if(_blobCache.key!==k) _blobCache={key:k,blob:scenarioBlob(S.tlScenario,S.tlAnchor)}; return _blobCache.blob; }
+
+/* ---------------------------------------------------------------------------
+ * 5. APP STATE — one object standing in for every provider + screen-local state.
+ * ------------------------------------------------------------------------ */
+const EMPTY_DRAFT={firstName:'',lastName:'',dob:'',email:'',phone:'',addressLine1:'',addressLine2:'',addressLine3:'',party:''};
+const EMPTY_IDENTITY={firstName:'',lastName:'',dob:'',email:'',phone:'',addressLine1:'',addressLine2:'',addressLine3:''};
+const ROOTS={Vote:'Home',Timeline:'TimelineHome',Registration:'RegistrationHome',Scan:'ScanHome',Settings:'SettingsHome'};
+const S = {
+  theme:'light', lang:'en',
+  tab:'Vote',
+  stacks:{Vote:['Home'],Timeline:['TimelineHome'],Registration:['RegistrationHome'],Scan:['ScanHome'],Settings:['SettingsHome']},
+  dialog:null,                     // InfoDialog {kind:'election'|'office'|'candidate'|'stage', id, read:'loading'|'failed'|'ready'}
+  sheet:null,                      // PartyDropdown option sheet
+  timers:[],
+  /* VoterAppProvider / CadreNodeProvider */
+  boot:'ready',                    // 'ready' | 'loading' | 'syncing' | 'syncingElapsed' | 'error'
+  retired:false,                   // useDeviceRetired() latched true
+  configFault:false,               // bootstrap.config.json missing/malformed
+  electionRead:'ok',               // 'ok' | 'none' (no election on the network) | 'loading'
+  lifecycleOverride:null, overrideAt:BOOT,
+  keyholders:KEYHOLDER_NAMES.slice(), keysMeasured:undefined,
+  /* timeline */
+  tlScenario:'stage:votingStarts', tlAnchor:BOOT, tlRead:'ok',   // 'ok' | 'loading' | 'failed'
+  clockOffsetMs:0, clockStopIndex:0,
+  regStatus:'registered',          // resolveRegistrationStatus kind, or null while reading
+  longNames:false,
+  keyholdersRead:'ok',             // 'ok' | 'loading' | 'failed'
+  /* ballot */
+  ballotRead:'ok',                 // 'ok' | 'failed' | 'loading' | 'empty'
+  ballotVariant:'normal',          // 'normal' | 'unsupported1' | 'unsupported3' | 'ungrouped'
+  selectionMap:{}, currentQuestionIndex:0, submitted:false, hasVoted:false,
+  /* registration */
+  isRegistered:{}, registeredAt:{},                // RegistrationScreen local state, per mounted instance (tab)
+  codeAvail:'not-registered', codeRevealed:null,   // resolveRegistrationCodeAvailability kind
+  riRead:'ok',                                     // RegistrationInfo deadline read: 'ok' | 'loading' | 'none'
+  draft:Object.assign({},EMPTY_DRAFT), errors:{},
+  attestTerminal:false,
+  confirm:{failure:null,pending:false,busy:false,codeAvail:null},
+  cad:{branch:'resolving',code:'',codeError:null,submitError:null,identity:Object.assign({},EMPTY_IDENTITY),idErrors:{},failure:null},
+  scrollMem:{},
+};
+const ballot = () => {
+  const b=JSON.parse(JSON.stringify(FIXTURE_BALLOT));
+  if(S.ballotRead==='empty') b.offices=[];
+  if(S.ballotVariant==='unsupported1') b.unsupportedQuestionCount=1;
+  if(S.ballotVariant==='unsupported3') b.unsupportedQuestionCount=3;
+  if(S.ballotVariant==='ungrouped') b.offices.forEach(o=>delete o.group);
+  return b;
+};
+/* useBallot(getBallot) → {ballot, failed}. getBallot rejects with no election to read. */
+function useBallot(){
+  if(S.ballotRead==='failed' || S.electionRead==='none') return {ballot:null,failed:true};
+  if(S.ballotRead==='loading') return {ballot:null,failed:false};
+  return {ballot:ballot(),failed:false};
+}
+const electionTitle = () => S.longNames ? LONG_ELECTION_TITLE : ELECTION_TITLE;
+const networkName  = () => S.longNames ? LONG_NETWORK_NAME : NETWORK_NAME;
+/* VoterAppProvider.getElection(): real read derived from the timeline; a __DEV__ override
+   keeps id/title and overlays that state's DEV_LIFECYCLE_CONTENT. Rejects (null) with no
+   election or an indeterminate timeline. */
+function getElection(){
+  if(S.electionRead!=='ok') return null;
+  const now=Date.now();
+  const view=deriveTimeline({timeline:tlBlob(),now});      // readVoterElection passes no language/timeZone
+  if(view.indeterminate || S.tlRead==='failed') return null;
+  const base={id:'fixture-election-1',title:electionTitle()};
+  if(S.lifecycleOverride) return Object.assign(base,{lifecycleState:S.lifecycleOverride},devLifecycleContent(S.lifecycleOverride,S.overrideAt));
+  const lc=lifecycleFromTimeline(view,now);
+  Object.assign(base,lc);
+  if(S.keyholders.length>0) base.keysTotal=S.keyholders.length;
+  if(['ReleasingKeys','Validation','Complete'].includes(lc.lifecycleState) && S.keysMeasured!==undefined) base.keysReleased=S.keysMeasured;
+  return base;
+}
+
+/* --- BallotSelectionProvider (verbatim semantics) --- */
+function toggleCandidate(officeId,candidateId,voteFor){
+  const cur=S.selectionMap[officeId]||[];
+  if(voteFor===1){ S.selectionMap[officeId] = cur[0]===candidateId ? [] : [candidateId]; return; }
+  if(cur.includes(candidateId)){ S.selectionMap[officeId]=cur.filter(i=>i!==candidateId); return; }
+  if(cur.length>=voteFor) return;                 // at cap → silent no-op
+  S.selectionMap[officeId]=cur.concat([candidateId]);
+}
+function computeCompletedCount(offices){ return {completed:offices.filter(o=>(S.selectionMap[o.id]||[]).length>0).length,total:offices.length}; }
+function resolveSelectionSummary(office){
+  const ids=S.selectionMap[office.id]||[];
+  if(!ids.length) return {summary:t('ballot','notYetAnswered'),hasSelection:false};
+  return {summary:ids.map(id=>office.candidates.find(c=>c.id===id)).filter(Boolean).map(c=>c.name).join(', '),hasSelection:true};
+}
+/* --- utils/registrationForm.ts --- */
+const maskDateInput = v => { const d=v.replace(/\D/g,'').slice(0,8);
+  return d.length<=2?d : d.length<=4?d.slice(0,2)+'/'+d.slice(2) : d.slice(0,2)+'/'+d.slice(2,4)+'/'+d.slice(4); };
+const isValidEmail = v => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim());
+const isValidPhone = v => v.replace(/\D/g,'').length>=10;
+function isValidDob(v){ const m=/^(\d{2})\/(\d{2})\/(\d{4})$/.exec(v.trim()); if(!m) return false;
+  const mm=+m[1],dd=+m[2],yy=+m[3]; return !(mm<1||mm>12||dd<1||dd>31||yy<1900||yy>2100); }
+function validatePersonal(d){ const e={};
+  ['firstName','lastName','dob','email','phone'].forEach(f=>{ if(!d[f].trim()) e[f]='required'; });
+  if(!e.email && !isValidEmail(d.email)) e.email='email';
+  if(!e.phone && !isValidPhone(d.phone)) e.phone='phone';
+  if(!e.dob   && !isValidDob(d.dob))     e.dob='dob';
+  return e; }
+function validateAddressParty(d){ const e={};
+  if(!d.addressLine1.trim()) e.addressLine1='required';
+  if(!d.party) e.party='party';
+  return e; }
+function computeValidThrough(iso){ if(!iso) return '';
+  const d=new Date(iso); d.setFullYear(d.getFullYear()+1);
+  return String(d.getMonth()+1).padStart(2,'0')+'/'+String(d.getDate()).padStart(2,'0')+'/'+String(d.getFullYear()).slice(-2); }
+
+/* ---------------------------------------------------------------------------
+ * 6. NAVIGATION — per-tab nested native stacks (navigation/index.tsx)
+ * ------------------------------------------------------------------------ */
+const TABS=[
+  {name:'Vote',        labelKey:'tabVote',        glyph:'check-to-slot'},
+  {name:'Timeline',    labelKey:'tabTimeline',    glyph:'timeline'},
+  {name:'Registration',labelKey:'tabRegistration',glyph:'user-plus'},
+  {name:'Scan',        labelKey:'tabScan',        glyph:'qrcode'},
+  {name:'Settings',    labelKey:'tabSettings',    glyph:'gear'},
+];
+/** REGISTRATION_FULLSCREEN_ROUTES — hide the tab bar on the Registration AND Timeline tabs. */
+const REGISTRATION_FULLSCREEN_ROUTES=['DeviceAttestation','RegisterPersonal','RegisterAddressParty','RegisterConfirm','Confirmation','ContinueOnAnotherDevice'];
+
+const stack   = () => S.stacks[S.tab];
+const topRoute= () => { const st=stack(); return st[st.length-1]; };
+function clearTimers(){ S.timers.forEach(clearTimeout); S.timers=[]; }
+function later(ms,fn){ S.timers.push(setTimeout(fn,ms)); }
+function afterNav(){ clearTimers(); render(); }
+function enter(r){ const f=ROUTES[r]&&ROUTES[r].onEnter; if(f) f(); }
+function push(r){ clearTimers(); stack().push(r); enter(r); render(); }
+function replaceTop(r){ clearTimers(); const st=stack(); st[st.length-1]=r; enter(r); render(); }
+function canPop(){ return !(topRoute()==='ContinueOnAnotherDevice' && S.cad.branch==='pending'); }  // beforeRemove prevented
+function goBack(){ if(stack().length>1 && canPop()) stack().pop(); afterNav(); }
+function popToTop(){ if(!canPop()) return; S.stacks[S.tab]=[S.stacks[S.tab][0]]; afterNav(); }
+function switchTab(name){
+  if(name===S.tab){ popToTop(); return; }       // tabPress on the focused tab pops its stack to top
+  S.tab=name; afterNav();
+}
+/** Android hardware back. Modals (InfoDialog/PartyDropdown) take it first via onRequestClose;
+ *  then the focused stack pops; at a non-first tab's root bottom-tabs' backBehavior
+ *  'firstRoute' returns to Vote; at Vote's root the app would background (no-op here). */
+function hardwareBack(){
+  if(document.getElementById('devdrawer').classList.contains('open')){ ACTIONS['close-drawer'](); return; }
+  if(S.boot!=='ready' || S.retired) return;
+  if(S.dialog){ S.dialog=null; render(); return; }
+  if(S.sheet){ S.sheet=null; render(); return; }
+  if(stack().length>1){ goBack(); return; }
+  if(S.tab!=='Vote'){ S.tab='Vote'; afterNav(); }
+}
+
+/* ---------------------------------------------------------------------------
+ * 7. SHARED COMPONENTS
+ * ------------------------------------------------------------------------ */
+/** NetworkHeader — components/NetworkHeader.tsx (branded blue banner). */
+function NetworkHeader(onNetworkAct){
+  return '<div style="background:var(--primary);padding:16px 20px 24px;'
+    +'border-bottom-left-radius:16px;border-bottom-right-radius:16px;'
+    +'display:flex;align-items:center;justify-content:space-between;flex:0 0 auto;gap:8px">'
+    +'<button class="plain" data-act="'+(onNetworkAct||'noop')+'" style="display:flex;align-items:center;gap:8px;color:var(--light);min-width:0">'
+      +'<span class="t-h1 w-bold" style="color:var(--light)">'+esc(t('common','networkName'))+'</span>'
+      +icon('chevron-down',20,'var(--light)')
+    +'</button>'
+    +'<button data-act="noop" aria-label="'+esc(t('common','notifications'))+'" style="width:40px;height:40px;flex:0 0 40px;'
+      +'border-radius:20px;border:1.5px solid var(--light);background:none;cursor:pointer;'
+      +'display:flex;align-items:center;justify-content:center">'+icon('bell',18,'var(--light)')+'</button>'
+  +'</div>';
+}
+/** ConfigFaultNotice — components/ConfigFaultNotice.tsx (renders nothing when configFault is null). */
+function ConfigFaultNotice(){
+  if(!S.configFault) return '';
+  return '<div style="display:flex;align-items:center;gap:8px;padding:8px 16px;background:var(--card);flex:0 0 auto">'
+    +icon('triangle-exclamation',14,'var(--warning)')
+    +'<span style="color:var(--warning);font-size:16px">'+esc(t('common','configNotConfigured'))+'</span></div>';
+}
+const ProgressBar = p => '<div class="pbar"><i style="width:'+(Math.min(1,Math.max(0,p))*100)+'%"></i></div>';
+const StepDots = step => '<div class="stepdots">'+[1,2,3].map(n=>'<i class="'+(n===step?'on':'')+'"></i>').join('')+'</div>';
+const Spinner = (lg,style) => '<div class="spinner'+(lg?' lg':'')+'" style="'+(style||'')+'"></div>';
+
+/** CountdownTimer — components/CountdownTimer.tsx. Adaptive units at the 24h boundary
+ *  (days/hours/minutes ≥ 24h, else hours/minutes/seconds) and the two-step shrink: digits
+ *  display→h2 and labels caption→captionSmall when any group exceeds 2 digits OR the three
+ *  labels total more than 16 characters. */
+function countdownInner(targetMs,offsetMs){
+  if(!Number.isFinite(targetMs)) return '';
+  const ms=Math.max(0,targetMs-(Date.now()+(offsetMs||0))), tot=Math.floor(ms/1000), p=n=>String(n).padStart(2,'0');
+  const groups = tot>=86400
+    ? [[String(Math.floor(tot/86400)),'countdown.days'],[p(Math.floor((tot%86400)/3600)),'countdown.hours'],[p(Math.floor((tot%3600)/60)),'countdown.minutes']]
+    : [[p(Math.floor(tot/3600)),'countdown.hours'],[p(Math.floor((tot%3600)/60)),'countdown.minutes'],[p(tot%60),'countdown.seconds']];
+  const labels=groups.map(g=>t('home',g[1]));
+  const shrink = Math.max(...groups.map(g=>g[0].length))>2 || labels.reduce((s,l)=>s+l.length,0)>16;
+  const dig=shrink?'h2':'display', lab=shrink?'captionSmall':'caption';
+  return groups.map((g,i)=>(i>0?'<span style="'+fs(dig)+'color:var(--text);margin-top:4px">:</span>':'')
+      +'<div style="display:flex;flex-direction:column;align-items:center;margin:0 4px">'
+      +'<span style="'+fs(dig)+'color:var(--text)">'+g[0]+'</span>'
+      +'<span style="'+fs(lab)+'color:var(--textSecondary);text-transform:uppercase;letter-spacing:1px;margin-top:4px">'+esc(labels[i])+'</span></div>').join('');
+}
+function CountdownTimer(targetMs,offsetMs){
+  const inner=countdownInner(targetMs,offsetMs);
+  if(!inner) return '';
+  return '<div class="countdown" data-target="'+targetMs+'" data-offset="'+(offsetMs||0)+'" style="display:flex;align-items:flex-start">'+inner+'</div>';
+}
+
+/** ElectionCard — components/ElectionCard.tsx (STATE_DISPLAY + SUMMARY_FALLBACK). */
+const STATE_DISPLAY={
+  Upcoming:         {countdown:1,progress:0,action:null,               summaryKey:'states.upcoming.summary',         icon:'clock',                  role:'muted'},
+  Open:             {countdown:1,progress:1,action:'vote',             summaryKey:'states.open.summary',             icon:null,                     role:null},
+  ReviewSelections: {countdown:0,progress:0,action:null,               summaryKey:'states.reviewSelections.summary', icon:'list-check',             role:'muted'},
+  ReleasingKeys:    {countdown:1,progress:0,action:null,               summaryKey:'states.releasingKeys.summary',    icon:'lock',                   role:'muted'},
+  Validation:       {countdown:1,progress:0,action:null,               summaryKey:'states.validation.summary',       icon:'lock-open',              role:'success'},
+  ValidationDetails:{countdown:0,progress:0,action:'validationDetails',summaryKey:'states.validationDetails.summary',icon:'magnifying-glass-chart', role:'primary'},
+  Complete:         {countdown:0,progress:0,action:null,               summaryKey:'states.complete.summary',         icon:'circle-check',           role:'success'},
+};
+const SUMMARY_FALLBACK={
+  ReleasingKeys:    {isKnown:e=>e.keysReleased!==undefined&&e.keysTotal!==undefined,   summaryKey:'states.releasingKeys.pendingSummary'},
+  Validation:       {isKnown:e=>e.checksComplete!==undefined&&e.checksTotal!==undefined,summaryKey:'states.validation.pendingSummary'},
+  ValidationDetails:{isKnown:e=>e.checksComplete!==undefined&&e.checksTotal!==undefined,summaryKey:'states.validation.pendingSummary'},
+  Complete:         {isKnown:e=>e.certified===true,                                     summaryKey:'states.complete.closedSummary'},
+};
+function ElectionCard(e){
+  const d=STATE_DISPLAY[e.lifecycleState], fb=SUMMARY_FALLBACK[e.lifecycleState];
+  const summaryKey = fb && !fb.isKnown(e) ? fb.summaryKey : d.summaryKey;
+  const showProgress = d.progress && e.progress!==undefined;
+  const percent=Math.round((e.progress||0)*100);
+  let h='<div class="cardSurface">';
+  h+='<div class="t-h2 w-medium" style="color:var(--text);margin-bottom:8px">'+esc(e.title)+'</div>';
+  if(d.action==='vote')
+    h+='<button class="ulink" data-act="dlg-election" style="display:block;margin:2px 0 12px">'+esc(t('home','learnAboutElection'))+'</button>';
+  h+='<div style="display:flex;align-items:center;gap:8px">'
+     +(d.icon?icon(d.icon,16,'var(--'+d.role+')'):'')
+     +'<span class="t-body w-regular" style="color:var(--textSecondary);flex:1;min-width:0">'
+     +esc(t('home',summaryKey,{released:e.keysReleased,total:e.keysTotal,checksComplete:e.checksComplete,checksTotal:e.checksTotal,percent}))
+     +'</span></div>';
+  if(d.countdown && e.countdownTarget) h+='<div style="margin-top:16px">'+CountdownTimer(e.countdownTarget,0)+'</div>';
+  if(showProgress){
+    h+='<div style="margin-top:16px">'
+      +'<div class="t-h4 w-medium" style="color:var(--text);margin-bottom:8px">'+esc(t('home','progressLabel',{percent}))+'</div>'
+      +ProgressBar(e.progress)+'</div>';
+  }
+  const actBtn='margin-top:16px;min-height:44px;padding:0 24px;font-weight:600;border-radius:var(--r-pill);';
+  if(d.action==='vote'){
+    h += S.hasVoted
+      ? '<div class="btn" style="'+actBtn+'background:var(--secondaryButtonSurface);border:1px solid var(--muted);color:var(--muted)">'+esc(t('home','votedCta'))+'</div>'
+      : '<button class="btn btn-solid" data-act="vote-now" style="'+actBtn+'">'+esc(t('home','voteNowCta'))+'</button>';
+  }
+  if(d.action==='validationDetails')
+    h+='<button class="btn btn-outline" data-act="validation-details" style="'+actBtn+'">'+esc(t('home','states.validationDetails.cta'))+'</button>';
+  return h+'</div>';
+}
+
+/** OfficeRow — components/OfficeRow.tsx */
+function OfficeRow(office){
+  const {summary,hasSelection}=resolveSelectionSummary(office);
+  return '<div class="cardSurface" style="display:flex;align-items:center">'
+    +'<div style="flex:1;min-width:0">'
+      +'<button class="plain t-h4 w-medium" data-act="open-office" data-id="'+office.id+'" style="color:var(--text)">'+esc(office.title)+'</button>'
+      +'<button class="ulink" data-act="dlg-office" data-id="'+office.id+'" style="display:block;margin-top:4px">'+esc(t('ballot','learnAboutOffice'))+'</button>'
+      +(hasSelection?'<div class="t-body w-medium" style="color:var(--success);margin-top:8px">'+esc(summary)+'</div>':'')
+    +'</div>'
+    +'<button class="plain" data-act="open-office" data-id="'+office.id+'" style="margin-left:16px;display:flex;align-items:center;justify-content:center">'
+      +(hasSelection
+        ? '<span style="width:28px;height:28px;border-radius:14px;background:var(--success);display:flex;align-items:center;justify-content:center">'+icon('check',14,'var(--light)')+'</span>'
+        : icon('chevron-right',18,'var(--textSecondary)'))
+    +'</button></div>';
+}
+/** CandidateSelector — components/CandidateSelector.tsx (radio voteFor 1 / capped checkbox). */
+function CandidateSelector(office){
+  const sel=S.selectionMap[office.id]||[];
+  const atCap=office.voteFor>1 && sel.length>=office.voteFor;
+  return office.candidates.map(c=>{
+    const selected=sel.includes(c.id), dim=atCap&&!selected;
+    const glyph = office.voteFor===1 ? (selected?'circle-check':'circle') : (selected?'square-check':'square');
+    return '<div class="cardSurface" data-act="toggle-cand" data-id="'+c.id+'" role="'+(office.voteFor===1?'radio':'checkbox')+'" style="display:flex;align-items:center;gap:16px;'
+      +'min-height:44px;cursor:pointer;opacity:'+(dim?0.5:1)+'">'
+      +'<div style="flex:1;min-width:0">'
+        +'<div class="t-body w-bold" style="color:var(--text)">'+esc(c.name)+'</div>'
+        +(c.party?'<div class="t-caption" style="color:var(--textSecondary)">'+esc(c.party)+'</div>':'')
+        +'<button class="ulink" data-act="dlg-candidate" data-id="'+c.id+'" style="display:block;margin-top:6px">'+esc(t('ballot','learnAboutCandidate'))+'</button>'
+      +'</div>'
+      +icon(glyph,22,selected?'var(--success)':'var(--muted)')
+    +'</div>';
+  }).join('');
+}
+/** FieldGroupCard / FieldRow — components/FieldGroup.tsx */
+function FieldGroup(rows){ return '<div class="fgcard">'+rows.map((r,i)=>(i>0?'<div class="fgdivider"></div>':'')+r).join('')+'</div>'; }
+function FieldRow(o){
+  const err=o.error?t('registration','form.errors.'+o.error):'';
+  return '<div class="fgrow'+(err?' err':'')+'">'
+    +'<input data-field="'+o.field+'" '+(o.mask?'data-mask="date" maxlength="10" inputmode="numeric"':'')
+      +(o.type?' type="'+o.type+'"':'')
+      +' placeholder="'+esc(o.placeholder)+'" value="'+esc(o.value)+'" autocomplete="off">'
+    +(err?'<div class="fgerr">'+esc(err)+'</div>':'')+'</div>';
+}
+/** RegisterFormHeader — components/RegisterFormHeader.tsx (onBack=goBack, onClose=popToTop) */
+function RegisterFormHeader(title,subtitle,step){
+  return '<div>'
+   +'<div style="display:flex;justify-content:space-between;align-items:center;min-height:44px">'
+     +'<button class="plain" data-act="back" aria-label="'+esc(t('registration','form.backCta'))+'" style="padding:8px;margin:0 -8px;color:var(--text)">'+icon('arrow-left',22)+'</button>'
+     +'<button class="plain" data-act="pop-to-top" aria-label="'+esc(t('common','close'))+'" style="padding:8px;margin:0 -8px;color:var(--text)">'+icon('xmark',22)+'</button>'
+   +'</div>'
+   +'<div class="t-h2 w-bold" style="color:var(--text);text-align:center;margin-top:8px">'+esc(title)+'</div>'
+   +'<div class="t-body" style="color:var(--textSecondary);text-align:center;margin-top:4px">'+esc(subtitle)+'</div>'
+   +'<div style="margin-top:16px">'+StepDots(step)+'</div>'
+  +'</div>';
+}
+/** RegistrationCard — components/RegistrationCard.tsx */
+function RegistrationCard(isRegistered,registeredAt){
+  const actBtn='margin-top:20px;min-height:48px;padding:12px 24px;border-radius:var(--r-pill);font-weight:500;color:var(--light);';
+  if(!isRegistered){
+    return '<div class="cardSurface" style="background:var(--registerNegative);padding:20px">'
+      +'<div class="t-h4 w-bold" style="color:var(--light);margin-bottom:8px">'+esc(t('registration','notRegistered.heading'))+'</div>'
+      +'<div class="t-body" style="color:var(--light);margin-top:8px">'+esc(t('registration','notRegistered.body'))+' '
+        +'<span data-act="reg-help" role="button" style="cursor:pointer;display:inline-block;vertical-align:-2px">'+icon('circle-question',15,'var(--light)')+'</span></div>'
+      +'<button class="btn" data-act="register-now" style="'+actBtn+'background:rgba(255,255,255,.25)">'+esc(t('registration','notRegistered.cta'))+'</button>'
+    +'</div>';
+  }
+  const d=S.draft;
+  const fullName=(d.firstName+' '+d.lastName).trim();
+  const partyLabel=d.party?t('registration','form.party.'+d.party):'';
+  const hasIdentity=fullName.length>0||partyLabel.length>0||d.dob.length>0;
+  return '<div>'
+   +'<div class="cardSurface" style="background:var(--registerPositive);padding:20px;display:flex;flex-direction:column">'
+     +'<div class="t-h4 w-bold" style="color:var(--light);margin-bottom:8px">'+esc(t('registration','registered.heading'))+'</div>'
+     +'<div class="t-body" style="color:var(--light);margin-top:8px">'+esc(t('registration','registered.body'))+'</div>'
+     +(hasIdentity?'<div class="t-body" style="color:var(--light);margin-top:16px">'
+        +esc(t('registration','registered.identityLine',{fullName,party:partyLabel,dob:d.dob}))+'</div>':'')
+     +'<span class="t-caption w-medium" style="margin-top:16px;align-self:flex-end;background:var(--validBadge);color:var(--light);border-radius:var(--r-pill);padding:6px 14px">'
+       +esc(t('registration','registered.validThrough',{validThrough:computeValidThrough(registeredAt)}))+'</span>'
+   +'</div>'
+   +'<div class="cardSurface" style="background:var(--secondaryButtonSurface);padding:20px;margin-top:16px">'
+     +'<div style="display:flex;align-items:center;gap:12px">'
+       +'<span data-act="reg-help" role="button" style="cursor:pointer">'+icon('circle-question',22,'var(--text)')+'</span>'
+       +'<span class="t-body" style="color:var(--text);flex:1;min-width:0">'+esc(t('registration','registered.updatePrompt'))+'</span></div>'
+     +'<button class="btn btn-solid" data-act="update-registration" style="'+actBtn+'">'+esc(t('registration','registered.updateCta'))+'</button>'
+   +'</div></div>';
+}
+/** RegistrationConfirmationCodeCard — screens/registration/RegistrationConfirmationCodeCard.tsx.
+ *  Font size fitted to the MEASURED frame width: floor(width / (11 glyphs × 1.0em)), clamped [20, 40]. */
+function RegistrationCodeCard(state){
+  return '<div class="cardSurface" style="align-self:stretch">'
+    +'<div class="t-h4 w-medium" style="color:var(--text);margin-bottom:12px">'+esc(t('continuity','code.heading'))+'</div>'
+    +(state==='code'
+      ? '<div data-codefit="1" style="align-self:stretch"><div class="codeval" style="text-align:center;letter-spacing:0;color:var(--primary);user-select:text;font-size:30px;line-height:36px">'
+          +esc(formatRegistrationCode(SAMPLE_CODE))+'</div></div>'
+        +'<div class="t-body" style="color:var(--textSecondary);margin-top:12px">'+esc(t('continuity','code.body'))+'</div>'
+      : '<div class="t-body" style="color:var(--textSecondary);margin-top:12px">'+esc(t('continuity','code.unavailable'))+'</div>')
+  +'</div>';
+}
+/** InfoDetails — components/InfoDetails.tsx (loading / unavailable / labelled rows + http(s) link). */
+function InfoDetails(read,rows,link){
+  if(read==='loading') return '<div style="padding:16px 0;display:flex;justify-content:center">'+Spinner(false)+'</div>';
+  if(read==='failed') return '<div class="t-body" style="padding:16px 0;text-align:center;color:var(--textSecondary)">'+esc(t('common','info.unavailable'))+'</div>';
+  const shown=rows.filter(r=>r.value!==undefined && String(r.value).trim()!=='');
+  return '<div style="display:flex;flex-direction:column;gap:16px">'
+    +shown.map(r=>'<div style="display:flex;flex-direction:column;gap:4px">'
+       +'<div class="t-caption w-medium" style="color:var(--textSecondary)">'+esc(r.label)+'</div>'
+       +'<div class="t-body" style="color:var(--text)">'+esc(r.value)+'</div></div>').join('')
+    +(link && /^https?:\/\/\S+$/i.test(link.url) ? '<button class="plain t-body w-medium" data-act="noop" style="color:var(--primary)">'+esc(link.label)+'</button>' : '')
+  +'</div>';
+}
+
+/* ---------------------------------------------------------------------------
+ * 8. SCREENS. Each: { header:'none'|'stack'|'modal', title(), body(), onEnter() }
+ * ------------------------------------------------------------------------ */
+const sectionText = (text,style) => '<div style="'+style+'">'+esc(text)+'</div>';
+const devText = (act,label) => '<button class="plain" data-act="'+act+'" style="display:block;margin:0 auto;padding:8px 0;color:var(--muted);font-size:16px;text-align:center">'+esc(label)+'</button>';
+/* The Timeline + KeyholdersScreen indeterminate frame (never blank, never silent). */
+function IndeterminateFrame(retryAct,gap){
+  return '<div style="display:flex;flex-direction:column;align-items:center;'+(gap?'gap:24px;':'')+'">'
+    +'<div style="color:var(--error);'+fs('h4')+'">'+esc(t('timeline','indeterminate.heading'))+'</div>'
+    +'<div style="color:var(--error);'+fs('body')+'margin-top:8px">'+esc(t('timeline','indeterminate.body'))+'</div>'
+    +'<button class="plain" data-act="'+retryAct+'" style="margin-top:24px;min-height:44px;color:var(--error);'+fs('body')+'">'+esc(t('timeline','indeterminate.retryCta'))+'</button>'
+  +'</div>';
+}
+
+const ROUTES = {
+
+/* ===== VOTE STACK ===== */
+Home:{ header:'none', body(){
+  const e=getElection();
+  let inner='';
+  if(e) inner+=ElectionCard(e);
+  else if(S.electionRead!=='loading') inner+='<div class="t-body" style="color:var(--textSecondary)">'+esc(t('home','electionUnavailable'))+'</div>';
+  /* __DEV__ lifecycle cycler — live → each forced state → live. Not localized (dev-only). */
+  inner+=devText('cycle-lifecycle','Dev state: '+(S.lifecycleOverride||'live')+' (tap to cycle)');
+  return NetworkHeader('noop')+ConfigFaultNotice()+'<div class="scroll" data-scroll="home"><div class="pad16">'+inner+'</div></div>';
+}},
+
+Ballot:{ header:'stack', title(){ const e=getElection(); return e&&e.title ? e.title : t('ballot','headerTitle'); }, body(){
+  const {ballot:b,failed}=useBallot();
+  const offices=b?b.offices:[];
+  const unavailable = failed || (b!==null && offices.length===0);
+  const groups=[...new Set(offices.map(o=>o.group))];
+  const {completed,total}=computeCompletedCount(offices);
+  let h='<div class="breadcrumb"><button class="crumb" data-act="pop-to-top">'+esc(t('common','breadcrumb.home'))+'</button>'
+     +icon('chevron-right',10,'var(--textSecondary)')+'<span class="crumb current">'+esc(t('common','breadcrumb.ballot'))+'</span></div>';
+  if(unavailable){
+    h+='<div class="t-body" style="color:var(--textSecondary);margin-top:16px">'+esc(t('ballot','ballotUnavailable'))+'</div>';
+  } else {
+    h+='<button class="btn btn-solid" data-act="continue-voting" style="min-height:48px;padding:14px 24px;font-size:16px;font-weight:500">'+esc(t('ballot','continueVotingCta'))+'</button>'
+     +'<div style="margin-top:20px;display:flex;flex-direction:column;gap:8px">'+ProgressBar(total>0?completed/total:0)
+       +'<div class="t-body" style="color:var(--textSecondary)">'+esc(t('ballot','progressLabel',{completed,total}))+'</div></div>'
+     +(b && b.unsupportedQuestionCount>0 ? '<div class="t-caption" style="color:var(--textSecondary);margin-top:16px">'+esc(t('ballot','unsupportedQuestions',{count:b.unsupportedQuestionCount}))+'</div>' : '')
+     +groups.map(g=>'<div style="margin-bottom:20px">'
+        +(g?'<div class="t-h4 w-medium" style="color:var(--text);margin-bottom:16px">'+esc(g)+'</div>':'')
+        +'<div style="display:flex;flex-direction:column;gap:12px">'+offices.filter(o=>o.group===g).map(OfficeRow).join('')+'</div></div>').join('')
+     +'<div style="display:flex;flex-direction:column;gap:12px;margin-top:8px;padding-bottom:16px">'
+       +'<button class="btn btn-outline" data-act="pop-to-top" style="min-height:48px;padding:14px 24px;font-weight:600">'+esc(t('ballot','saveExitCta'))+'</button>'
+       +'<button class="btn btn-solid" data-act="go-review" style="min-height:48px;padding:14px 24px;font-weight:600">'+esc(t('ballot','reviewCta'))+'</button></div>';
+  }
+  return '<div class="scroll" data-scroll="ballot"><div class="pad16" style="min-height:100%">'+h+'</div></div>';
+}},
+
+ValidationDetails:{ header:'stack', title:()=>t('home','validationDetailsTitle'), body(){
+  const e=getElection();
+  if(!e || !e.evidence) return '<div class="pad16 fill"></div>';     // not loaded / no evidence → bare shell
+  const ev=e.evidence, verified=ev.filter(c=>c.verified).length;
+  return '<div class="scroll" data-scroll="vd"><div class="pad16">'
+   +'<div class="t-h4 w-medium" style="color:var(--text);margin-bottom:24px">'+esc(t('home','validationDetails.overallCount',{verified,total:ev.length}))+'</div>'
+   +ev.map(c=>'<div class="cardSurface" style="display:flex;justify-content:space-between;align-items:flex-start">'
+      +'<div style="flex:1;margin-right:12px;min-width:0">'
+        +'<div class="t-body" style="color:var(--text)">'+esc(t('home',c.nameKey))+'</div>'
+        +'<div class="t-body" style="color:var(--textSecondary);margin-top:4px">'+esc(t('home',c.resultKey))+'</div></div>'
+      +'<div style="display:flex;flex-direction:column;align-items:flex-end">'
+        +'<div class="t-caption" style="color:var(--textSecondary)">'+c.elapsedSeconds+'s</div>'
+        +'<div style="display:flex;align-items:center;gap:4px;margin-top:4px">'
+          +icon(c.verified?'circle-check':'circle',16,c.verified?'var(--success)':'var(--muted)')
+          +'<span class="t-caption" style="color:'+(c.verified?'var(--success)':'var(--muted)')+'">'
+            +esc(t('home',c.verified?'validationDetails.verified':'validationDetails.pending'))+'</span></div></div>'
+    +'</div>').join('')
+   +'<div style="margin-top:24px">'
+     +'<div class="t-caption" style="color:var(--textSecondary)">'+esc(t('home','validationDetails.fingerprintLabel'))+'</div>'
+     +'<div class="t-body w-medium" style="color:var(--text);margin-top:4px">'+esc(e.fingerprint)+'</div>'
+     +'<div class="t-caption" style="color:var(--textSecondary);margin-top:8px;text-align:center">'+esc(t('home','validationDetails.recordedInBlockchain'))+'</div></div>'
+  +'</div></div>';
+}},
+
+IndividualQuestion:{ header:'modal',
+  title(){ const {ballot:b}=useBallot(); const o=b&&b.offices[S.currentQuestionIndex]; return o ? o.title : t('ballot','individualQuestionTitle'); },
+  body(){
+   const {ballot:b,failed}=useBallot();
+   const offices=b?b.offices:[], o=offices[S.currentQuestionIndex];
+   if(!o) return '<div class="pad16 fill">'+(failed?'<div class="t-body" style="color:var(--textSecondary)">'+esc(t('ballot','ballotUnavailable'))+'</div>':'')+'</div>';
+   const isFirst=S.currentQuestionIndex===0;
+   return '<div class="pad16 fill">'
+    +'<div class="scroll" data-scroll="iq">'
+     +'<div class="breadcrumb">'
+       +'<button class="crumb" data-act="pop-to-top">'+esc(t('common','breadcrumb.home'))+'</button>'+icon('chevron-right',10,'var(--textSecondary)')
+       +'<button class="crumb" data-act="back">'+esc(t('common','breadcrumb.ballot'))+'</button>'+icon('chevron-right',10,'var(--textSecondary)')
+       +'<span class="crumb current">'+esc(o.title)+'</span></div>'
+     +'<div class="t-h4 w-medium" style="color:var(--text);margin-bottom:16px">'+esc(t('ballot','voteForN',{n:o.voteFor}))+'</div>'
+     +CandidateSelector(o)
+    +'</div>'
+    +'<div style="margin-top:24px;display:flex;flex-direction:column;gap:12px;flex:0 0 auto">'
+      +(isFirst?'':'<button class="btn btn-outline" data-act="prev-question" style="min-height:48px;padding:14px 24px;font-weight:600">'+esc(t('ballot','previousCta'))+'</button>')
+      +'<button class="btn btn-solid" data-act="next-question" style="min-height:48px;padding:14px 24px;font-weight:600">'+esc(t('ballot','nextCta'))+'</button>'
+    +'</div></div>';
+}},
+
+ReviewSubmit:{ header:'stack', title:()=>t('ballot','reviewSubmitTitle'), body(){
+  if(S.submitted){
+    return '<div class="pad16 fill" style="align-items:center;justify-content:center">'
+      +'<div class="t-h4 w-medium" style="color:var(--text);text-align:center">'+esc(t('ballot','submittedConfirmation'))+'</div></div>';
+  }
+  const {ballot:b,failed}=useBallot(); const offices=b?b.offices:[];
+  return '<div class="pad16 fill"><div class="scroll" data-scroll="review"><div style="margin-top:8px">'
+   +(failed?'<div class="t-body" style="color:var(--textSecondary)">'+esc(t('ballot','ballotUnavailable'))+'</div>':'')
+   +offices.map(o=>{ const {summary,hasSelection}=resolveSelectionSummary(o);
+      return '<div class="cardSurface">'
+        +'<div class="t-caption" style="color:var(--textSecondary)">'+esc(o.title)+'</div>'
+        +'<div class="t-body" style="margin-top:4px;color:'+(hasSelection?'var(--success)':'var(--textSecondary)')+'">'+esc(summary)+'</div></div>'; }).join('')
+   +'</div></div>'
+   +'<div style="display:flex;gap:16px;padding:0 20px;margin-top:24px;flex:0 0 auto">'
+     +'<button class="btn btn-outline" data-act="back" style="flex:1;min-width:0;min-height:44px;padding:12px 24px;font-weight:600">'+esc(t('ballot','continueVotingCta'))+'</button>'
+     +'<button class="btn btn-solid" data-act="submit-ballot" style="flex:1;min-width:0;min-height:44px;padding:12px 24px;font-weight:600">'+esc(t('ballot','submitCta'))+'</button></div>'
+  +'</div>';
+}},
+
+/* ===== TIMELINE STACK ===== */
+TimelineHome:{ header:'none', body(){ return TimelineBody(); }},
+
+Keyholders:{ header:'stack', title:()=>t('timeline','keyholders.screenTitle'), body(){
+  if(S.keyholdersRead==='loading') return '<div class="fill"></div>';
+  if(S.keyholdersRead==='failed' || S.electionRead==='none')
+    return '<div class="scroll"><div class="pad16 centercol" style="gap:24px">'+IndeterminateFrame('noop',true)+'</div></div>';
+  const list=S.keyholders;
+  if(list.length===0){
+    return '<div class="scroll"><div class="pad16 centercol" style="gap:24px"><div style="display:flex;flex-direction:column;align-items:center;gap:24px">'
+      +icon('key',48,'var(--muted)')
+      +'<div style="color:var(--text);'+fs('h4')+'text-align:center">'+esc(t('timeline','keyholders.emptyHeading'))+'</div>'
+      +'<div style="color:var(--textSecondary);'+fs('body')+'text-align:center">'+esc(t('timeline','keyholders.emptyBody'))+'</div>'
+    +'</div></div></div>';
+  }
+  const e=getElection();
+  const total = e && e.keysTotal!==undefined ? e.keysTotal : list.length;
+  const released = !e || e.keysReleased===undefined ? null : Math.min(e.keysReleased,total);
+  return '<div class="scroll" data-scroll="kh"><div style="padding:16px">'
+    +(released!==null?'<div style="color:var(--textSecondary);'+fs('body')+'margin-bottom:16px">'+esc(t('timeline','keyholders.releasedCount',{released,total}))+'</div>':'')
+    +list.map(n=>'<div style="margin-bottom:16px;color:var(--text);'+fs('body')+'display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">'+esc(n)+'</div>').join('')
+  +'</div></div>';
+}},
+
+/* ===== REGISTRATION STACK (also re-registered on the Timeline stack) ===== */
+RegistrationHome:{ header:'none', body(){
+  const reg=!!S.isRegistered[S.tab];
+  let code='';
+  const ca=S.codeAvail;
+  const link=(act,label)=>'<button class="plain" data-act="'+act+'" style="min-height:44px;display:flex;align-items:center;color:var(--link);font-size:16px">'+esc(label)+'</button>';
+  if(ca==='available'){
+    code='<div style="margin-top:16px">'+link('show-code',t('continuity','code.showAgainLink'))
+      +(S.codeRevealed?RegistrationCodeCard(S.codeRevealed):'')+'</div>';
+  } else if(ca==='not-registered'){
+    code='<div style="margin-top:16px">'+link('open-continue',t('continuity','newDevice.entryLink'))+'</div>';
+  } else if(ca==='not-sent'||ca==='not-holder'){
+    code='<div style="margin-top:16px;color:var(--textSecondary);font-size:16px">'+esc(t('continuity','code.notAvailableOnDevice'))+'</div>';
+  }
+  return NetworkHeader('reg-help')
+   +'<div class="scroll" data-scroll="reghome"><div class="pad16">'
+     +RegistrationCard(reg,S.registeredAt[S.tab]||null)
+     +code
+     +devText('toggle-registered','Toggle isRegistered (dev): '+String(reg))
+   +'</div></div>';
+}},
+
+RegistrationInfo:{ header:'modal', title:()=>t('registration','headerTitle'), body(){
+  const label='<div class="t-caption w-medium" style="color:var(--textSecondary)">', val='<div class="t-body" style="color:var(--text)">';
+  const card=inner=>'<div style="background:var(--card);border-radius:var(--r-lg);padding:16px;display:flex;flex-direction:column;gap:12px">'+inner+'</div>';
+  const st=S.regStatus;
+  const SENT={registered:'registration.isRegistered',pending:'registration.pending',notRegistered:'registration.notRegistered',indeterminate:'registration.unknown'};
+  const sentence = st===null ? null : st==='indeterminate' ? t('timeline',SENT.indeterminate)
+     : t('timeline',SENT[st],{bold:t('timeline','registration.isRegisteredBold'),network:networkName()});
+  const showNet = st!==null && st!=='indeterminate';
+  let dl;
+  if(S.riRead==='loading') dl=Spinner(false,'align-self:flex-start');
+  else if(S.riRead==='none' || S.electionRead==='none') dl=val+esc(t('registration','info.noElection'))+'</div>';
+  else {
+    const re=normalizeInstant(tlBlob().registrationEnds);
+    const passed = re!==null && re<=Date.now();
+    dl='<div style="display:flex;flex-direction:column;gap:4px">'+label+esc(t('registration','info.election'))+'</div>'+val+esc(electionTitle())+'</div></div>'
+      +(re!==null?'<div style="display:flex;flex-direction:column;gap:4px">'+label+esc(t('registration',passed?'info.deadlinePassed':'info.deadline'))+'</div>'
+        +val+esc(new Intl.DateTimeFormat(S.lang,{dateStyle:'long',timeStyle:'short'}).format(new Date(re)))+'</div></div>':'');
+  }
+  return '<div class="scroll" data-scroll="reginfo"><div style="padding:16px;display:flex;flex-direction:column;gap:16px">'
+    +card('<div style="color:var(--text);font-weight:700;'+fs('h4')+'">'+esc(t('registration','info.statusHeading'))+'</div>'
+      +(sentence===null?Spinner(false,'align-self:flex-start'):val+esc(sentence)+'</div>')
+      +(showNet?'<div style="display:flex;flex-direction:column;gap:4px">'+label+esc(t('registration','info.network'))+'</div>'+val+esc(networkName())+'</div></div>':''))
+    +card(dl)
+    +card('<div style="color:var(--text);font-weight:700;'+fs('h4')+'">'+esc(t('registration','info.howHeading'))+'</div>'
+      +['info.step1','info.step2','info.step3','info.step4'].map((k,i)=>'<div style="display:flex;gap:8px">'
+        +'<span class="t-body" style="color:var(--primary);min-width:20px">'+(i+1)+'.</span>'
+        +'<span class="t-body" style="color:var(--text);flex:1;min-width:0">'+esc(t('registration',k))+'</span></div>').join(''))
+  +'</div></div>';
+}},
+
+DeviceAttestation:{ header:'none', onEnter(){ S.attestTerminal=S.attestTerminal||false; }, body(){
+  const head = (k,cap) => '<div class="t-h2 w-medium" style="color:var(--text);text-align:center;margin-top:32px">'+esc(t('registration',k))+'</div>'
+     +'<div class="t-caption" style="color:var(--textSecondary);text-align:center;margin-top:8px">'+esc(t('registration',cap))+'</div>';
+  return '<div class="scroll"><div class="pad16 centercol">'+icon('shield-halved',96,'var(--primary)')
+    +(S.attestTerminal ? head('deviceAttestation.terminalHeading','deviceAttestation.terminalBody')
+       : Spinner(true,'margin-top:8px')+head('deviceAttestation.heading','deviceAttestation.caption'))
+  +'</div></div>';
+}},
+
+RegisterPersonal:{ header:'none', body(){
+  const d=S.draft,e=S.errors;
+  return '<div class="fill" style="padding:16px 16px 12px">'
+   +'<div class="scroll" data-scroll="rp">'
+     +RegisterFormHeader(t('registration','formHeaderTitle'),t('registration','form.sectionTitle'),1)
+     +'<div style="margin-top:24px">'
+       +FieldGroup([
+          FieldRow({field:'firstName',placeholder:t('registration','form.firstName'),value:d.firstName,error:e.firstName}),
+          FieldRow({field:'lastName', placeholder:t('registration','form.lastName'), value:d.lastName, error:e.lastName}),
+          FieldRow({field:'dob',      placeholder:t('registration','form.dobPlaceholder'),value:d.dob,error:e.dob,mask:1}),
+        ])
+       +'<div style="margin-top:16px">'+FieldGroup([
+          FieldRow({field:'email',placeholder:t('registration','form.email'),value:d.email,error:e.email,type:'email'}),
+          FieldRow({field:'phone',placeholder:t('registration','form.phone'),value:d.phone,error:e.phone,type:'tel'}),
+        ])+'</div>'
+     +'</div>'
+   +'</div>'
+   +'<div style="padding-top:16px;flex:0 0 auto"><button class="btn btn-solid" data-act="continue-personal" style="min-height:52px;padding:14px 24px;font-size:16px;font-weight:500">'
+     +esc(t('registration','form.continueCta'))+'</button></div></div>';
+}},
+
+RegisterAddressParty:{ header:'none', body(){
+  const d=S.draft,e=S.errors;
+  const partyErr=e.party?t('registration','form.errors.party'):'';
+  return '<div class="fill" style="padding:16px 16px 12px">'
+   +'<div class="scroll" data-scroll="rap">'
+     +RegisterFormHeader(t('registration','formHeaderTitle'),t('registration','form.sectionTitle'),2)
+     +'<div style="margin-top:24px">'
+       +FieldGroup([
+          FieldRow({field:'addressLine1',placeholder:t('registration','form.addressLine1'),value:d.addressLine1,error:e.addressLine1}),
+          FieldRow({field:'addressLine2',placeholder:t('registration','form.addressLine2'),value:d.addressLine2}),
+          FieldRow({field:'addressLine3',placeholder:t('registration','form.addressLine3'),value:d.addressLine3}),
+        ])
+       +'<div style="margin-top:16px">'
+         +'<button class="plain" data-act="open-party" style="display:flex;align-items:center;gap:12px;width:100%;min-height:52px;'
+           +'padding:14px 16px;background:var(--card);border:1px solid '+(partyErr?'var(--error)':'var(--border)')+';border-radius:var(--r-lg)">'
+           +'<span class="t-body" style="flex:1;min-width:0;color:'+(d.party?'var(--text)':(partyErr?'var(--error)':'var(--textSecondary)'))+';'
+             +'overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'
+             +esc(d.party?t('registration','form.party.'+d.party):t('registration','form.selectParty'))+'</span>'
+           +icon('chevron-down',16,'var(--textSecondary)')+'</button>'
+         +(partyErr?'<div class="fgerr">'+esc(partyErr)+'</div>':'')
+       +'</div>'
+     +'</div>'
+   +'</div>'
+   +'<div style="padding-top:16px;flex:0 0 auto"><button class="btn btn-solid" data-act="continue-address" style="min-height:52px;padding:14px 24px;font-size:16px;font-weight:500">'
+     +esc(t('registration','form.continueCta'))+'</button></div></div>';
+}},
+
+RegisterConfirm:{ header:'none', body(){
+  const d=S.draft;
+  const fullName=(d.firstName+' '+d.lastName).trim();
+  const address=[d.addressLine1,d.addressLine2,d.addressLine3].filter(x=>x.length>0).join(', ');
+  const partyLabel=d.party?t('registration','form.party.'+d.party):'';
+  const rows=[['form.review.fullName',fullName],['form.review.dob',d.dob],['form.review.email',d.email],
+              ['form.review.phone',d.phone],['form.review.address',address],['form.review.party',partyLabel]];
+  return '<div class="fill" style="padding:16px 16px 12px">'
+   +'<div class="scroll" data-scroll="rc">'
+     +RegisterFormHeader(t('registration','confirmHeaderTitle'),t('registration','form.confirmInstruction'),3)
+     +'<div style="margin-top:24px;background:var(--card);border:1px solid var(--border);border-radius:var(--r-lg);padding:16px">'
+       +rows.map((r,i)=>'<div style="display:flex;align-items:flex-start;gap:16px;'+(i>0?'margin-top:20px':'')+'">'
+          +'<span class="t-body" style="color:var(--textSecondary);flex-shrink:0">'+esc(t('registration',r[0]))+'</span>'
+          +'<span class="t-body w-medium" style="color:var(--text);flex:1;min-width:0;text-align:right;overflow-wrap:anywhere">'+esc(r[1])+'</span>'
+        +'</div>').join('')
+     +'</div>'
+   +'</div>'
+   +'<div style="padding-top:16px;flex:0 0 auto"><button class="btn btn-solid" data-act="submit-registration" style="min-height:52px;padding:14px 24px;font-size:16px;font-weight:500">'
+     +esc(t('registration','form.submitCta'))+'</button></div></div>';
+}},
+
+/* ConfirmationScreen — the voter submits SELF-SIGNED requests and then shows an honest
+   PENDING state (it never pops, never claims success). Failure UX is the three-way class. */
+Confirmation:{ header:'none', onEnter(){ S.confirm={failure:null,pending:false,busy:false,codeAvail:null}; }, body(){
+  const c=S.confirm, f=c.failure;
+  const errorCopy = f==='recoverable-action' ? t('registration','confirmation.error.biometricNotEnrolled')
+                  : f==='terminal' ? t('registration','confirmation.error.terminal')
+                  : f==='recoverable-transient' ? t('registration','confirmation.error.transient') : null;
+  const cta='margin-top:32px;min-height:44px;padding:0 24px;font-weight:600;';
+  let h='<div class="t-h2 w-medium" style="color:var(--text);text-align:center">'+esc(t('registration','confirmation.heading'))+'</div>'
+   +'<div class="t-body" style="color:var(--textSecondary);text-align:center;margin-top:16px">'+esc(t('registration','confirmation.body'))+'</div>'
+   +'<div style="margin-top:32px">'+icon('fingerprint',96,'var(--primary)')+'</div>'
+   +'<div class="t-caption" style="color:var(--textSecondary);text-align:center;margin-top:8px">'+esc(t('registration','confirmation.caption'))+'</div>';
+  if(c.pending){
+    /* literal English in source (not routed through t()) */
+    h+='<div class="t-body" style="color:var(--text);text-align:center;margin-top:16px">Your registration has been submitted. We\'ll let you know once the authority confirms your device.</div>';
+    if(c.codeAvail==='available') h+=RegistrationCodeCard('code');
+    else if(c.codeAvail==='not-sent'||c.codeAvail==='not-holder')
+      h+='<div class="t-body" style="color:var(--textSecondary);text-align:center;margin-top:16px">'+esc(t('continuity','code.notAvailableOnDevice'))+'</div>';
+  } else {
+    if(errorCopy) h+='<div class="t-body" style="color:var(--text);text-align:center;margin-top:16px">'+esc(errorCopy)+'</div>';
+    if(f==='terminal'){ /* no CTA at all */ }
+    else if(f==='recoverable-action'){
+      h+='<button class="btn btn-solid inline-btn" data-act="setup-unlock" style="'+cta+'">'+esc(t('registration','confirmation.error.setupCta'))+'</button>'
+       +'<button class="btn inline-btn" data-act="confirm-faceid" style="margin-top:16px;min-height:44px;padding:0 24px;font-weight:600;background:none;border:1px solid var(--primary);border-radius:var(--r-pill);color:var(--primary)">Try Again</button>';
+    } else {
+      h+='<button class="btn btn-solid inline-btn" data-act="confirm-faceid" '+(c.busy?'disabled ':'')+'style="'+cta+'">'+esc(errorCopy?'Try Again':t('registration','confirmation.cta'))+'</button>';
+    }
+  }
+  return '<div class="scroll" data-scroll="confirm"><div class="pad16 centercol">'+h+'</div></div>';
+}},
+
+/* ContinueOnAnotherDeviceScreen — new-device continuity: code → identity fallback → restart,
+   then a NON-DISMISSIBLE pending wait (no close X, hardware back prevented). */
+ContinueOnAnotherDevice:{ header:'none',
+  onEnter(){ S.cad={branch:'resolving',code:'',codeError:null,submitError:null,identity:Object.assign({},EMPTY_IDENTITY),idErrors:{},failure:null};
+    later(800,()=>{ if(topRoute()==='ContinueOnAnotherDevice' && S.cad.branch==='resolving'){ S.cad.branch='code'; render(); } }); },
+  body(){
+  const c=S.cad;
+  if(c.branch==='resolving') return '<div class="pad16 fill" style="align-items:center">'+Spinner(false)+'</div>';
+  const card=inner=>'<div class="cardSurface">'+inner+'</div>';
+  const heading=(k,color)=>'<div style="color:'+(color||'var(--text)')+';'+fs('h4')+'margin-bottom:8px">'+esc(t('continuity',k))+'</div>';
+  const body=(k,color)=>'<div style="color:'+(color||'var(--textSecondary)')+';font-size:16px;margin-bottom:16px">'+esc(k)+'</div>';
+  const cta=(act,label,bold)=>'<button class="btn btn-solid" data-act="'+act+'" style="margin-top:16px;min-height:44px;padding:0 24px;font-weight:'+(bold?700:600)+'">'+esc(label)+'</button>';
+  const linkRow=(act,label)=>'<button class="plain" data-act="'+act+'" style="margin-top:16px;min-height:44px;display:flex;align-items:center;color:var(--link);font-size:16px">'+esc(label)+'</button>';
+  const err=(text,size)=>'<div style="margin-top:4px;color:var(--error);font-size:16px">'+esc(text)+'</div>';
+  const idField=(f,ph,errKey)=>'<div style="margin-top:12px"><input class="rninput'+(errKey?' err':'')+'" data-cad="'+f+'" placeholder="'+esc(ph)+'" value="'+esc(c.identity[f])+'" style="border-color:'+(errKey?'var(--error)':'var(--border)')+'" autocomplete="off">'
+     +(errKey?err(t('registration','form.errors.required')):'')+'</div>';
+  let inner='';
+  if(c.branch==='code'){
+    inner=card('<div style="color:var(--textSecondary);font-size:16px;margin-bottom:8px">'+esc(t('continuity','newDevice.codeFieldLabel'))+'</div>'
+      +'<input class="rninput'+(c.codeError?' err':'')+'" data-cad="code" placeholder="'+esc(t('continuity','newDevice.codeFieldPlaceholder'))+'" value="'+esc(c.code)+'" autocapitalize="characters" style="border-color:'+(c.codeError?'var(--error)':'var(--primary)')+'" autocomplete="off">'
+      +(c.codeError?err(c.codeError):'')
+      +(c.submitError?err(c.submitError):'')
+      +cta('cad-submit-code',t('continuity','newDevice.submitButton'),true)
+      +linkRow('cad-lost-code',t('continuity','newDevice.lostCodeLink'))
+      +linkRow('cad-restart',t('continuity','newDevice.restartLink')));
+  } else if(c.branch==='identity'){
+    const r=k=>t('registration',k), e=c.idErrors;
+    inner=card(heading('newDevice.identityFallbackHeading')+body(t('continuity','newDevice.identityFallbackBody'))
+      +idField('firstName',r('form.firstName'),e.firstName)+idField('lastName',r('form.lastName'),e.lastName)
+      +idField('dob',r('form.dobPlaceholder'))+idField('email',r('form.email'))+idField('phone',r('form.phone'))
+      +idField('addressLine1',r('form.addressLine1'))+idField('addressLine2',r('form.addressLine2'))+idField('addressLine3',r('form.addressLine3'))
+      +(c.submitError?err(c.submitError):'')
+      +cta('cad-submit-identity',t('continuity','newDevice.identityFallbackSubmitButton'),true)
+      +linkRow('cad-back-to-code',t('continuity','newDevice.backToCodeLink')));
+  } else if(c.branch==='restart'){
+    inner=card(heading('restart.heading')+body(t('continuity','restart.body'))+cta('cad-restart-confirm',t('continuity','restart.confirmButton'),true));
+  } else if(c.branch==='pending'){
+    const f=c.failure;
+    const errorCopy = f==='recoverable-action' ? t('registration','confirmation.error.biometricNotEnrolled')
+                    : f==='terminal' ? t('registration','confirmation.error.terminal')
+                    : f==='recoverable-transient' ? t('registration','confirmation.error.transient') : null;
+    inner=card(errorCopy
+      ? body(errorCopy,'var(--text)')
+        +(f==='recoverable-action'?cta('setup-unlock',t('registration','confirmation.error.setupCta'),false):'')
+        +(f==='terminal'?'':'<button class="btn" data-act="cad-retry" style="margin-top:12px;min-height:44px;padding:0 24px;font-weight:600;background:none;border:1px solid var(--primary);border-radius:var(--r-pill);color:var(--primary)">'+esc(t('continuity','newDevice.retryButton'))+'</button>')
+      : heading('newDevice.pendingHeading')+body(t('continuity','newDevice.pendingBody')));
+  } else if(c.branch==='approved'){
+    inner=card(heading('newDevice.approvedHeading')+cta('pop-to-top',t('registration','form.continueCta'),true));
+  } else if(c.branch==='rejected'){
+    inner=card(heading('newDevice.rejectedHeading','var(--error)')+body(t('continuity','newDevice.rejectedBody')));
+  }
+  const showClose = c.branch!=='pending';
+  return '<div class="scroll" data-scroll="cad"><div class="pad16">'
+    +'<div style="display:flex;justify-content:flex-end;min-height:44px">'
+      +(showClose?'<button class="plain" data-act="back" aria-label="'+esc(t('common','close'))+'" style="min-width:44px;min-height:44px;display:flex;align-items:center;justify-content:center;color:var(--text)">'+icon('xmark',22)+'</button>':'')
+    +'</div>'
+    +'<div class="t-h2 w-medium" style="color:var(--text);margin-bottom:16px">'+esc(t('continuity','newDevice.screenTitle'))+'</div>'
+    +inner
+  +'</div></div>';
+}},
+
+/* ===== SCAN / SETTINGS ===== */
+ScanHome:{ header:'stack', title:()=>t('scan','headerTitle'), body(){
+  return '<div class="scroll"><div class="pad16 centercol" style="gap:24px">'
+   +icon('qrcode',48,'var(--muted)')
+   +'<div class="t-h4 w-bold" style="color:var(--text);text-align:center">'+esc(t('scan','notAvailableTitle'))+'</div>'
+   +'<div class="t-body" style="color:var(--textSecondary);text-align:center">'+esc(t('scan','notAvailableBody'))+'</div></div></div>';
+}},
+
+SettingsHome:{ header:'stack', title:()=>t('settings','headerTitle'), body(){
+  const seg=(code,label)=>{ const on=S.lang===code;
+    return '<button data-act="set-lang" data-lang="'+code+'" style="min-height:44px;padding:0 20px;cursor:pointer;border:0;'
+      +'border-radius:var(--r-pill);font-family:inherit;'+fs('body')
+      +'background:'+(on?'var(--primary)':'var(--secondaryButtonSurface)')+';'
+      +'color:'+(on?'var(--light)':'var(--textSecondary)')+';font-weight:'+(on?700:400)+'">'+esc(label)+'</button>'; };
+  return '<div class="scroll"><div class="pad16">'
+   +'<div class="t-body" style="color:var(--text);margin-bottom:12px">'+esc(t('settings','language'))+'</div>'
+   +'<div style="display:flex;gap:8px">'+seg('en',t('settings','languageEnglish'))+seg('es',t('settings','languageSpanish'))+'</div></div></div>';
+}},
+};
+
+/* ---------------------------------------------------------------------------
+ * 9. TIMELINE SCREEN — screens/timeline/TimelineScreen.tsx + components/TimelineRail.tsx +
+ *    TimelineRow.tsx + TimelineRegistrationPanel.tsx
+ * ------------------------------------------------------------------------ */
+function currentTimelineView(){
+  if(S.tlRead==='failed' || S.electionRead==='none') return {indeterminate:true};
+  return deriveTimeline({timeline:tlBlob(),now:Date.now()+S.clockOffsetMs,timeZone:DEVICE_TZ,language:S.lang});
+}
+function timelineClockStops(view){
+  const stageStops=view.rows.filter(r=>r.instantMs!==null).map(r=>({stageId:r.stageId,instantMs:r.instantMs,nowMs:r.instantMs+60000,probe:false}));
+  const ts=(view.rows.find(r=>r.stageId==='tallyingStarts')||{}).instantMs, vs=(view.rows.find(r=>r.stageId==='votingStarts')||{}).instantMs;
+  const tsMs=ts==null?null:ts, vsMs=vs==null?null:vs;
+  const probe = tsMs!==null ? tsMs-23*HOUR : null;
+  const nextAfterVs = vsMs===null ? null : view.rows.map(r=>r.instantMs).filter(x=>x!==null&&x>vsMs).reduce((m,x)=>m===null||x<m?x:m,null);
+  const valid = probe!==null && vsMs!==null && probe>vsMs && (nextAfterVs===null || probe<nextAfterVs);
+  return valid ? stageStops.concat([{stageId:'votingStarts',instantMs:tsMs,nowMs:probe,probe:true}]) : stageStops;
+}
+function TimelineBody(){
+  if(S.tlRead==='loading') return '<div class="fill"></div>';
+  const view=currentTimelineView();
+  if(view.indeterminate)
+    return '<div class="fill" style="justify-content:center;align-items:center;padding:0 24px">'+IndeterminateFrame('tl-retry',false)+'</div>';
+  const nowMs=Date.now()+S.clockOffsetMs;
+  const range=computeHeaderDateRange(view.rangeStartMs,view.rangeEndMs,S.lang,DEVICE_TZ);
+  const reRow=view.rows.find(r=>r.stageId==='registrationEnds');
+  const before = reRow.instantMs==null ? true : nowMs<reRow.instantMs;
+  /* __DEV__ clock-offset control: live → each present stage (+60 s) → the final-day probe → live */
+  const stops=timelineClockStops(view);
+  const eff = S.clockStopIndex>stops.length ? 0 : S.clockStopIndex;
+  const active = eff>0 ? stops[eff-1] : undefined;
+  const offDays=Math.round(S.clockOffsetMs/DAY);
+  const sign=n=>(n>=0?'+':'')+n;
+  const lbl = active && active.probe ? t('timeline','dev.clockOffsetLabel')+' '+t('timeline',STAGE_TITLE_KEY[active.stageId])+' '+t('timeline','dev.finalDayStop')
+    : active ? t('timeline','dev.clockOffsetLabel')+' '+t('timeline',STAGE_TITLE_KEY[active.stageId])+' '+sign(Math.round((active.instantMs-Date.now())/DAY))
+    : S.clockOffsetMs===0 ? t('timeline','dev.clockOffsetLabel')+' 0' : t('timeline','dev.clockOffsetLabel')+' '+sign(offDays);
+  return '<div class="scroll" data-scroll="tl"><div style="padding:16px">'
+    +'<button class="plain" data-act="tl-clock" style="border:1px dashed var(--warning);padding:4px 8px;margin:0 8px 8px;min-height:44px;display:flex;align-items:center;color:var(--warning);'+fs('caption')+'">'+esc(lbl)+'</button>'
+    +'<div style="padding:0 8px 16px">'
+      +'<div style="color:var(--text);'+fs('h2')+'">'+esc(electionTitle())+'</div>'
+      +(range?'<div style="color:var(--textSecondary);'+fs('body')+'margin-top:8px">'+esc(t('timeline','header.dateRange',range))+'</div>':'')
+    +'</div>'
+    +TimelineRail(view.rows, id => id==='registrationEnds' && S.regStatus!==null ? RegistrationPanel(S.regStatus,before) : '')
+  +'</div></div>';
+}
+function TimelineRail(rows,renderPanel){
+  if(rows.length!==10) return '';
+  const ci=rows.findIndex(r=>r.status==='current');
+  const eff = ci!==-1 ? ci : rows.every(r=>r.status==='past') ? rows.length-1 : -1;
+  const ts=rows.find(r=>r.stageId==='tallyingStarts');
+  const target = ts && typeof ts.instantMs==='number' && Number.isFinite(ts.instantMs) ? ts.instantMs : undefined;
+  const dotCY=16+16+TY.h4[1]/2;   // TIMELINE_CARD_MARGIN_V + card padding + h4 lineHeight/2
+  return '<div data-testid="timeline-rail">'+rows.map((row,i)=>{
+    const filled=row.status==='past'||row.status==='current', ds=row.status==='current'?24:20;
+    const above=i<=eff?'var(--primary)':'var(--border)', below=i<eff?'var(--primary)':'var(--border)';
+    const isNow=row.railLabel.kind==='now';
+    const label = isNow ? t('timeline','rail.now') : row.railLabel.kind==='date' ? row.railLabel.text : '—';
+    return '<div style="display:flex">'
+      +'<div style="width:64px;flex:0 0 64px;position:relative"><span style="position:absolute;top:'+(dotCY-TY.body[1]/2)+'px;right:8px;white-space:nowrap;'+fs('body')
+        +'font-weight:'+(isNow?700:400)+';color:'+(isNow?'var(--primary)':'var(--textSecondary)')+'">'+esc(label)+'</span></div>'
+      +'<div style="width:44px;flex:0 0 44px;position:relative">'
+        +(i>0?'<i class="tl-conn" style="top:0;height:'+dotCY+'px;background:'+above+'"></i>':'')
+        +(i<rows.length-1?'<i class="tl-conn" style="top:'+dotCY+'px;bottom:0;background:'+below+'"></i>':'')
+        +'<i class="tl-dot" style="top:'+(dotCY-ds/2)+'px;left:'+((44-ds)/2)+'px;width:'+ds+'px;height:'+ds+'px;'
+          +(filled?'border:4px solid var(--primary);background:var(--card)':'border:2px solid var(--border);background:var(--background)')+'"></i>'
+      +'</div>'
+      +'<div style="flex:1;min-width:0">'+TimelineRow(row,renderPanel(row.stageId),row.stageId==='votingStarts'?target:undefined)+'</div>'
+    +'</div>';
+  }).join('')+'</div>';
+}
+function rowActions(id,status){
+  const a=[];
+  if(id==='registrationEnds' && status!=='past') a.push({act:'tl-registration',key:'registration.editCta',v:'link'});
+  if(id==='votingStarts'){
+    if(status==='future') a.push({act:'tl-ballot',key:'voting.previewBallotCta',v:'link'});
+    else if(status==='current') a.push({act:'tl-ballot',key:'voting.voteNowCta',v:'primary'});
+    else if(status==='past') a.push({act:'tl-submission',key:'voting.viewSubmissionCta',v:'link'});
+  }
+  if(id==='releasingKeys') a.push({act:'tl-keyholders',key:'keyholders.viewCta',v:'outline'});
+  if(status==='past') a.push({act:'tl-details',key:'row.detailsCta',v:'link',details:true});
+  return a;
+}
+function TimelineRow(row,panel,countdownTarget){
+  const {stageId:id,status,subtitle}=row;
+  const de=status==='future'||status==='unknown', cur=status==='current';
+  const notchTop=16+TY.h4[1]/2-8;
+  const acts=rowActions(id,status);
+  const title=t('timeline',row.titleKey);
+  return '<div class="cardSurface" style="margin:16px 0;position:relative">'
+    +'<i class="tl-notch" style="top:'+notchTop+'px"></i>'
+    +(cur?'<i class="tl-accent" style="top:0;height:'+notchTop+'px;border-top-left-radius:16px"></i><i class="tl-accent" style="top:'+(notchTop+16)+'px;bottom:0;border-bottom-left-radius:16px"></i>':'')
+    +'<div style="display:flex;align-items:center;gap:8px">'
+      +'<span style="color:'+(de?'var(--textSecondary)':'var(--text)')+';'+fs('h4')+'min-width:0">'+esc(title)+'</span>'
+      +'<button class="plain" data-act="tl-help" data-id="'+id+'" aria-label="'+esc(t('timeline','help.accessibilityLabel',{stage:title}))+'" style="min-width:44px;min-height:44px;display:flex;align-items:center;justify-content:center;flex:0 0 auto">'
+        +icon('circle-question',16,de?'var(--textSecondary)':'var(--text)')+'</button>'
+    +'</div>'
+    +(subtitle?'<div style="color:var(--textSecondary);'+fs('body')+'">'+esc(t('timeline',subtitle.key,subtitle.params))+'</div>':'')
+    +(!de && panel ? panel : '')
+    +(id==='votingStarts' && cur && countdownTarget!==undefined ? '<div style="margin-top:24px;display:flex;flex-direction:column;align-items:center">'+CountdownTimer(countdownTarget,S.clockOffsetMs)+'</div>' : '')
+    +(acts.length?'<div style="margin-top:16px;display:flex;flex-direction:column;gap:8px;align-items:flex-start">'+acts.map(a=>{
+        const lab='font-weight:'+(a.details?400:700)+';'+fs('body');
+        if(a.v==='primary') return '<button class="btn btn-solid inline-btn" data-act="'+a.act+'" data-id="'+id+'" style="min-height:44px;padding:0 24px;'+lab+'">'+esc(t('timeline',a.key))+'</button>';
+        if(a.v==='outline') return '<button class="btn btn-outline inline-btn" data-act="'+a.act+'" data-id="'+id+'" style="min-height:44px;padding:0 24px;'+lab+'">'+esc(t('timeline',a.key))+'</button>';
+        return '<button class="plain" data-act="'+a.act+'" data-id="'+id+'" style="min-height:44px;min-width:44px;display:flex;align-items:center;color:var(--link);text-decoration:underline;'+lab+'">'+esc(t('timeline',a.key))+'</button>';
+      }).join('')+'</div>':'')
+  +'</div>';
+}
+/** TimelineRegistrationPanel — the {{bold}} sentinel split: only `registration.isRegistered`
+ *  carries the placeholder, so only "registered" renders a nested bold run. */
+function RegistrationPanel(status,before){
+  const KEY={registered:'registration.isRegistered',pending:'registration.pending',notRegistered:'registration.notRegistered',indeterminate:'registration.unknown'};
+  const SENT='\u0000BOLD\u0000';
+  const resolved = status==='indeterminate' ? t('timeline',KEY[status],{bold:SENT}) : t('timeline',KEY[status],{bold:SENT,network:networkName()});
+  const parts=resolved.split(SENT), bold=t('timeline','registration.isRegisteredBold');
+  const sentence = parts.length===2 ? esc(parts[0])+'<b style="font-weight:700">'+esc(bold)+'</b>'+esc(parts[1]) : esc(resolved);
+  return '<div style="margin-top:16px;padding:16px;background:var(--secondaryButtonSurface);border-radius:var(--r-sm)">'
+    +'<div style="color:var(--text)">'+sentence+'</div>'
+    +'<button class="plain" data-act="tl-registration" style="margin-top:8px;min-height:44px;display:flex;align-items:center;color:var(--link);font-weight:700;text-decoration:underline">'
+      +esc(t('timeline',before?'registration.editCta':'registration.viewCta'))+'</button></div>';
+}
+
+/* ---------------------------------------------------------------------------
+ * 10. RENDER
+ * ------------------------------------------------------------------------ */
+function navHeader(def,canBack,isModal){
+  const title=def.title?def.title():'';
+  let btn='';
+  if(isModal) btn='<button class="hbtn" data-act="back" aria-label="'+esc(t('common','close'))+'">'+icon('xmark',22)+'</button>';
+  else if(canBack) btn='<button class="hbtn" data-act="back" aria-label="Back">'+icon('arrow-left',22)+'</button>';
+  return '<div class="navheader'+(btn?' has-btn':'')+'">'+(btn||'<div style="width:12px"></div>')
+    +'<div class="htitle">'+esc(title)+'</div></div>';
+}
+function routeView(route,idx){
+  const def=ROUTES[route];
+  const head = def.header==='stack' ? navHeader(def,idx>0,false) : def.header==='modal' ? navHeader(def,true,true) : '';
+  return head+'<div class="routebody">'+def.body()+'</div>';
+}
+function bootView(){
+  const bg='background:'+(S.theme==='dark'?'#0d0d0d':'#fff')+';';
+  const txt='background:none;border:0;font-family:inherit;font-size:14px;color:var(--text);cursor:pointer;';
+  if(S.boot==='error')
+    return '<div class="fill" style="align-items:center;justify-content:center;'+bg+'padding:0 24px">'
+      +'<div style="margin-bottom:16px;text-align:center;font-size:14px;color:var(--text)">Failed to load network: Error: seedDevNetwork failed: no valid addresses for peer</div>'
+      +'<button data-act="boot-retry" style="margin-bottom:8px;'+txt+'">Try Again</button>'
+      +'<button data-act="boot-fresh" style="'+txt+'">Start Fresh</button></div>';
+  return '<div class="fill" style="align-items:center;justify-content:center;'+bg+'">'+Spinner(true)
+    +(S.boot==='syncing'||S.boot==='syncingElapsed'?'<div style="margin-top:16px;text-align:center;font-size:14px;color:var(--text)">'+esc(t('common','syncSyncing'))+'</div>':'')
+    +(S.boot==='syncingElapsed'?'<button data-act="boot-fresh" style="margin-top:8px;'+txt+'">Start Fresh</button>':'')
+  +'</div>';
+}
+/** DeviceRetiredNotice — replaces the WHOLE tab navigator; no CTA, nothing to navigate to. */
+function retiredView(){
+  return '<div class="fill" style="background:var(--background)"><div class="pad16"><div class="cardSurface">'
+    +'<div class="t-h4 w-medium" style="color:var(--text);margin-bottom:8px">'+esc(t('continuity','deviceRetired.heading'))+'</div>'
+    +'<div class="t-body" style="color:var(--textSecondary)">'+esc(t('continuity','deviceRetired.body'))+'</div>'
+  +'</div></div></div>';
+}
+function saveScroll(){
+  document.querySelectorAll('#stackarea [data-scroll]').forEach(el=>{ S.scrollMem[S.tab+':'+el.dataset.scroll]=el.scrollTop; });
+}
+function restoreScroll(){
+  document.querySelectorAll('#stackarea [data-scroll]').forEach(el=>{ const v=S.scrollMem[S.tab+':'+el.dataset.scroll]; if(v) el.scrollTop=v; });
+}
+function render(){
+  saveScroll();
+  document.documentElement.setAttribute('data-theme',S.theme);
+  document.documentElement.setAttribute('lang',S.lang);
+  const area=document.getElementById('stackarea'), tb=document.getElementById('tabbar');
+  let brand=false;
+  if(S.boot!=='ready'){
+    area.innerHTML='<div class="routeview">'+bootView()+'</div>'; tb.className='hidden';
+  } else if(S.retired){
+    area.innerHTML='<div class="routeview">'+retiredView()+'</div>'; tb.className='hidden';
+  } else {
+    const st=stack();
+    let base=st.length-1; while(base>0 && ROUTES[st[base]].header==='modal') base--;
+    let html='<div class="routeview">'+routeView(st[base],base)+'</div>';
+    for(let i=base+1;i<st.length;i++) html+='<div class="routemodal">'+routeView(st[i],i)+'</div>';
+    area.innerHTML=html;
+    const top=st[st.length-1];
+    const hide=(S.tab==='Registration'||S.tab==='Timeline') && REGISTRATION_FULLSCREEN_ROUTES.includes(top);
+    tb.className=hide?'hidden':'';
+    tb.innerHTML=TABS.map(x=>'<button class="tab'+(S.tab===x.name?' active':'')+'" data-tab="'+x.name+'">'
+      +icon(x.glyph,24)+'<span class="tlabel">'+esc(t('common',x.labelKey))+'</span></button>').join('');
+    brand = base===st.length-1 && (top==='Home'||top==='RegistrationHome');
+  }
+  document.getElementById('overlays').innerHTML = (S.dialog?dialogHTML():'') + (S.sheet?PartySheetHTML():'');
+  paintStatusBar(brand);
+  restoreScroll();
+  fitCodes();
+  /* DeviceAttestationScreen: provisionDeviceKey() resolves → replace('RegisterPersonal') */
+  if(S.boot==='ready' && !S.retired && topRoute()==='DeviceAttestation' && !S.attestTerminal && !S._attestArmed){
+    S._attestArmed=true;
+    later(2200,()=>{ S._attestArmed=false; if(topRoute()==='DeviceAttestation' && !S.attestTerminal) replaceTop('RegisterPersonal'); });
+  }
+  if(topRoute()!=='DeviceAttestation') S._attestArmed=false;
+}
+/** onLayout fit for the registration code (RegistrationConfirmationCodeCard). */
+function fitCodes(){
+  document.querySelectorAll('[data-codefit]').forEach(frame=>{
+    const w=frame.clientWidth; if(!w) return;
+    const size=Math.max(20,Math.min(40,Math.floor(w/11)));
+    const v=frame.querySelector('.codeval'); v.style.fontSize=size+'px'; v.style.lineHeight=Math.round(size*1.2)+'px';
+  });
+}
+function paintStatusBar(onBrand){
+  const sb=document.getElementById('statusbar');
+  sb.style.background = onBrand ? 'var(--primary)' : 'var(--card)';
+  sb.style.color      = onBrand ? '#fff' : 'var(--text)';
+  const fg = onBrand ? '#fff' : 'currentColor';
+  document.getElementById('sb-icons').innerHTML =
+     '<svg width="14" height="11" viewBox="0 0 14 11" fill="'+fg+'"><rect x="0" y="7" width="2.5" height="4" rx=".6"/>'
+    +'<rect x="3.7" y="5" width="2.5" height="6" rx=".6"/><rect x="7.4" y="2.6" width="2.5" height="8.4" rx=".6"/>'
+    +'<rect x="11.1" y="0" width="2.5" height="11" rx=".6" opacity=".45"/></svg>'
+    +'<svg width="14" height="11" viewBox="0 0 16 12" fill="'+fg+'"><path d="M8 11.2 5.6 8.6a3.4 3.4 0 0 1 4.8 0zM8 6.6a5.6 5.6 0 0 0-4 1.6L2.6 6.7a7.6 7.6 0 0 1 10.8 0L12 8.2a5.6 5.6 0 0 0-4-1.6zM8 2.4a9.8 9.8 0 0 0-6.7 2.6L0 3.6a11.8 11.8 0 0 1 16 0L14.7 5A9.8 9.8 0 0 0 8 2.4z"/></svg>'
+    +'<svg width="22" height="11" viewBox="0 0 24 12" fill="none"><rect x=".6" y=".6" width="19" height="10.8" rx="2.6" stroke="'+fg+'" stroke-width="1.2" opacity=".5"/>'
+    +'<rect x="2.2" y="2.2" width="15.8" height="7.6" rx="1.4" fill="'+fg+'"/><path d="M21.4 4v4a2.2 2.2 0 0 0 0-4z" fill="'+fg+'" opacity=".5"/></svg>';
+  const now=new Date();
+  document.getElementById('sb-clock').textContent=now.getHours()+':'+String(now.getMinutes()).padStart(2,'0');
+}
+
+/** InfoDialog — components/InfoDialog.tsx, with the InfoDetails children each screen passes. */
+function dialogHTML(){
+  const d=S.dialog;
+  let title,sub,body,children='';
+  if(d.kind==='election'){
+    title=t('home','electionInfo.title'); sub=t('home','electionInfo.subtitle'); body=t('home','electionInfo.body');
+    const view=deriveTimeline({timeline:tlBlob(),now:Date.now()});
+    const ts=view.indeterminate?null:view.rows.find(r=>r.stageId==='tallyingStarts').instantMs;
+    const day = ts===null ? undefined : new Intl.DateTimeFormat(S.lang,{timeZone:'UTC',year:'numeric',month:'long',day:'numeric'}).format(new Date(ts));
+    children=InfoDetails(d.read,[
+      {label:t('home','electionInfo.authority'),value:SAMPLE_ELECTION_INFO.authorityName},
+      {label:t('home','electionInfo.date'),value:day},
+      {label:t('home','electionInfo.instructions'),value:SAMPLE_ELECTION_INFO.instructions},
+      {label:t('home','electionInfo.tags'),value:SAMPLE_ELECTION_INFO.tags.join(', ')}]);
+  } else if(d.kind==='office'){
+    const o=FIXTURE_BALLOT.offices.find(x=>x.id===d.id)||FIXTURE_BALLOT.offices[0];
+    title=t('ballot','officeInfo.title'); sub=t('ballot','officeInfo.subtitle'); body=t('ballot','officeInfo.body');
+    children=InfoDetails(d.read,[
+      {label:t('ballot','officeInfo.instructions'),value:SAMPLE_OFFICE_INSTRUCTIONS[o.id]||''},
+      {label:t('ballot','officeInfo.voteFor'),value:t('ballot','officeInfo.voteForValue',{count:o.voteFor})}]);
+  } else if(d.kind==='candidate'){
+    let c=null; FIXTURE_BALLOT.offices.forEach(o=>o.candidates.forEach(x=>{ if(x.id===d.id) c=x; }));
+    c=c||FIXTURE_BALLOT.offices[0].candidates[0];
+    title=t('ballot','candidateInfo.title'); sub=t('ballot','candidateInfo.subtitle'); body=t('ballot','candidateInfo.body');
+    const url=SAMPLE_CANDIDATE_URL[c.id];
+    children=InfoDetails(d.read,[{label:t('ballot','candidateInfo.name'),value:c.name},{label:t('ballot','candidateInfo.details'),value:c.party}],
+      url?{label:t('common','info.openLink'),url}:undefined);
+  } else {
+    /* TimelineScreen: the row "?" and "See details" open the same InfoDialog — stage title,
+       the rail label as subtitle, the relative-date sentence as body, no children. */
+    const view=currentTimelineView();
+    const row=view.indeterminate?null:view.rows.find(r=>r.stageId===d.id);
+    title=t('timeline',STAGE_TITLE_KEY[d.id]);
+    sub = !row ? '' : row.railLabel.kind==='date' ? row.railLabel.text : row.railLabel.kind==='now' ? t('timeline','rail.now') : '';
+    body = row && row.subtitle ? t('timeline',row.subtitle.key,row.subtitle.params) : '';
+    children=null;
+  }
+  return '<div class="overlay fade dlg-backdrop" data-act="close-dialog">'
+    +'<div class="dlg-card" data-stop="1">'
+      +'<button class="dlg-close" data-act="close-dialog" aria-label="'+esc(t('common','close'))+'">'+icon('xmark',22)+'</button>'
+      +'<div class="dlg-title">'+esc(title)+'</div>'
+      +'<div class="dlg-sub">'+esc(sub)+'</div>'
+      +(children?'<div class="dlg-content">'+children+'</div>':'')
+      +'<div class="dlg-body">'+esc(body)+'</div>'
+    +'</div></div>';
+}
+/** PartyDropdown option sheet — components/PartyDropdown.tsx */
+function PartySheetHTML(){
+  const opts=['democratic','republican','independent','other'];
+  return '<div class="overlay fade sheet-backdrop" data-act="close-sheet"><div class="sheet" data-stop="1">'
+    +opts.map((k,i)=>(i>0?'<div class="odiv"></div>':'')
+      +'<button class="opt" data-act="pick-party" data-key="'+k+'">'
+      +'<span>'+esc(t('registration','form.party.'+k))+'</span>'
+      +(S.draft.party===k?icon('check',16,'var(--primary)'):'')+'</button>').join('')
+  +'</div></div>';
+}
+
+/* ---------------------------------------------------------------------------
+ * 11. INTERACTIONS
+ * ------------------------------------------------------------------------ */
+/* useInfoRead: a dialog opens in `loading` and resolves a beat later. */
+function openDialog(kind,id){ S.dialog={kind,id,read:'loading'}; render();
+  later(650,()=>{ if(S.dialog && S.dialog.kind===kind && S.dialog.read==='loading'){ S.dialog.read='ready'; render(); } }); }
+const ACTIONS={
+  noop(){},
+  back:goBack,
+  'pop-to-top':popToTop,
+
+  /* Home */
+  'cycle-lifecycle'(){ const i=S.lifecycleOverride===null?-1:LIFECYCLE_ORDER.indexOf(S.lifecycleOverride);
+    S.lifecycleOverride = i+1<LIFECYCLE_ORDER.length ? LIFECYCLE_ORDER[i+1] : null; S.overrideAt=Date.now(); render(); },
+  'vote-now'(){ push('Ballot'); },
+  'validation-details'(){ push('ValidationDetails'); },
+  'dlg-election'(){ openDialog('election'); },
+
+  /* Ballot */
+  'continue-voting'(){ const offices=ballot().offices;
+    const i=offices.findIndex(o=>!(S.selectionMap[o.id]||[]).length);
+    S.currentQuestionIndex = i>=0?i:0; push('IndividualQuestion'); },
+  'open-office'(el){ S.currentQuestionIndex=ballot().offices.findIndex(o=>o.id===el.dataset.id); push('IndividualQuestion'); },
+  'dlg-office'(el){ openDialog('office',el.dataset.id); },
+  'dlg-candidate'(el){ openDialog('candidate',el.dataset.id); },
+  'go-review'(){ S.submitted=false; push('ReviewSubmit'); },
+  'toggle-cand'(el){ const o=ballot().offices[S.currentQuestionIndex]; toggleCandidate(o.id,el.dataset.id,o.voteFor); render(); },
+  'prev-question'(){ S.currentQuestionIndex=Math.max(0,S.currentQuestionIndex-1); render(); },
+  'next-question'(){
+    const n=ballot().offices.length;
+    if(S.currentQuestionIndex===n-1){ S.submitted=false; replaceTop('ReviewSubmit'); return; }   // navigation.replace
+    S.currentQuestionIndex=Math.min(n-1,S.currentQuestionIndex+1); render(); },
+  'submit-ballot'(){ S.submitted=true; render(); },
+
+  /* Timeline */
+  'tl-retry'(){ if(S.tlRead==='failed') S.tlRead='ok'; render(); },   // re-reads; a broken timeline stays indeterminate
+  'tl-clock'(){
+    const view=currentTimelineView(); if(view.indeterminate) return;
+    const stops=timelineClockStops(view), eff=S.clockStopIndex>stops.length?0:S.clockStopIndex;
+    const next=(eff+1)%(stops.length+1);
+    if(next===0){ S.clockStopIndex=0; S.clockOffsetMs=0; render(); return; }
+    S.clockStopIndex=next; S.clockOffsetMs=stops[next-1].nowMs-Date.now(); render(); },
+  'tl-help'(el){ S.dialog={kind:'stage',id:el.dataset.id}; render(); },
+  'tl-details'(el){ S.dialog={kind:'stage',id:el.dataset.id}; render(); },
+  'tl-registration'(){ push('RegistrationHome'); },
+  'tl-ballot'(){ push('Ballot'); },
+  'tl-submission'(){ S.submitted=false; push('ReviewSubmit'); },
+  'tl-keyholders'(){ push('Keyholders'); },
+
+  /* Registration */
+  'toggle-registered'(){ const v=!S.isRegistered[S.tab]; S.isRegistered[S.tab]=v; if(v) S.registeredAt[S.tab]=new Date().toISOString(); render(); },
+  'register-now'(){ S.attestTerminal=false; push('DeviceAttestation'); },
+  'update-registration'(){ S.errors={}; push('RegisterPersonal'); },
+  'reg-help'(){ push('RegistrationInfo'); },
+  'show-code'(){ S.codeRevealed = S.codeAvail==='available' ? 'code' : 'unavailable'; render(); },
+  'open-continue'(){ push('ContinueOnAnotherDevice'); },
+  'continue-personal'(){ S.errors=validatePersonal(S.draft); if(!Object.keys(S.errors).length) push('RegisterAddressParty'); else render(); },
+  'continue-address'(){ S.errors=validateAddressParty(S.draft); if(!Object.keys(S.errors).length) push('RegisterConfirm'); else render(); },
+  'open-party'(){ S.sheet=true; render(); },
+  'pick-party'(el){ S.draft.party=el.dataset.key; delete S.errors.party; S.sheet=null; render(); },
+  'close-sheet'(){ S.sheet=null; render(); },
+  'submit-registration'(){ push('Confirmation'); },
+  'confirm-faceid'(){
+    if(S.confirm.busy) return;
+    S.confirm.busy=true; S.confirm.failure=null; render();
+    later(1100,()=>{ S.confirm.busy=false; S.confirm.pending=true; S.confirm.codeAvail='available'; S.draft=Object.assign({},EMPTY_DRAFT); render(); }); },
+  'setup-unlock'(){ /* Linking.sendIntent('android.settings.BIOMETRIC_ENROLL') — leaves the app */ },
+
+  /* Continue on another device */
+  'cad-submit-code'(){ const c=S.cad;
+    if(!normalizeRegistrationCode(c.code)){ c.codeError=t('continuity','newDevice.codeRequired'); render(); return; }
+    c.codeError=null; c.submitError=null; c.failure=null; c.branch='pending'; render(); },
+  'cad-lost-code'(){ S.cad.branch='identity'; render(); },
+  'cad-restart'(){ S.cad.branch='restart'; render(); },
+  'cad-back-to-code'(){ S.cad.branch='code'; render(); },
+  'cad-submit-identity'(){ const c=S.cad, e={};
+    if(!c.identity.firstName.trim()) e.firstName='required'; if(!c.identity.lastName.trim()) e.lastName='required';
+    c.idErrors=e; if(Object.keys(e).length){ render(); return; }
+    c.submitError=null; c.failure=null; c.branch='pending'; render(); },
+  'cad-restart-confirm'(){ S.attestTerminal=false; push('DeviceAttestation'); },
+  'cad-retry'(){ S.cad.failure=null; render(); },
+
+  /* dialogs */
+  'close-dialog'(){ S.dialog=null; render(); },
+  /* Settings */
+  'set-lang'(el){ S.lang=el.dataset.lang; render(); },
+  /* boot gates */
+  'boot-retry'(){ S.boot='loading'; render(); later(1400,()=>{ S.boot='ready'; render(); }); },
+  'boot-fresh'(){ S.boot='ready'; render(); },
+};
+
+document.addEventListener('click',ev=>{
+  const stop=ev.target.closest('[data-stop]');
+  const holder=ev.target.closest('[data-act]');
+  if(holder){
+    if(stop && holder.contains(stop)) return;      // inner Pressable swallows taps on the card
+    const fn=ACTIONS[holder.dataset.act];
+    if(fn){ ev.preventDefault(); fn(holder); return; }
+  }
+  const tab=ev.target.closest('[data-tab]');
+  if(tab){ switchTab(tab.dataset.tab); return; }
+  const dev=ev.target.closest('[data-dev]');
+  if(dev){ devGo(dev.dataset.dev); return; }
+});
+document.getElementById('nav-back').addEventListener('click',hardwareBack);
+document.getElementById('nav-back').innerHTML=icon('nav-back',18);
+document.getElementById('nav-home').innerHTML=icon('nav-home',18);
+document.getElementById('nav-recents').innerHTML=icon('nav-recents',18);
+/* write-through bindings (RegistrationDraftProvider / ContinueOnAnotherDevice local state) */
+document.addEventListener('input',ev=>{
+  const cadEl=ev.target.closest('[data-cad]');
+  if(cadEl){ const f=cadEl.dataset.cad;
+    if(f==='code'){ S.cad.code=cadEl.value; if(S.cad.codeError){ S.cad.codeError=null; rerenderKeepFocus('[data-cad="code"]'); } }
+    else { S.cad.identity[f]=cadEl.value; if(S.cad.idErrors[f]){ delete S.cad.idErrors[f]; rerenderKeepFocus('[data-cad="'+f+'"]'); } }
+    return; }
+  const el=ev.target.closest('[data-field]'); if(!el) return;
+  const f=el.dataset.field; let v=el.value;
+  if(el.dataset.mask==='date'){ v=maskDateInput(v); el.value=v; }
+  S.draft[f]=v;
+  if(S.errors[f]){ delete S.errors[f]; rerenderKeepFocus('[data-field="'+f+'"]'); }
+});
+function rerenderKeepFocus(sel){
+  const cur=document.querySelector(sel), pos=cur?cur.selectionStart:null; render();
+  const again=document.querySelector(sel); if(again){ again.focus(); try{ again.setSelectionRange(pos,pos); }catch(_){} }
+}
+/* live countdown tick (CountdownTimer's 1 s interval) */
+setInterval(()=>{
+  document.querySelectorAll('.countdown').forEach(node=>{
+    const html=countdownInner(+node.dataset.target,+node.dataset.offset);
+    if(node.innerHTML!==html) node.innerHTML=html;
+  });
+  const c=document.getElementById('sb-clock'), n=new Date();
+  if(c) c.textContent=n.getHours()+':'+String(n.getMinutes()).padStart(2,'0');
+},1000);
+
+/* ---------------------------------------------------------------------------
+ * 12. PROTOTYPE NAVIGATOR — reaches every route and every state branch, including the
+ *     ones no happy path produces. Each entry resets prototype state, then sets it up.
+ * ------------------------------------------------------------------------ */
+const SAMPLE_DRAFT={firstName:'Alex',lastName:'Rivera',dob:'04/17/1988',email:'alex.rivera@example.com',
+  phone:'(801) 555-0142',addressLine1:'482 Canyon Rd',addressLine2:'Apt 3B',addressLine3:'Salt Lake City, UT 84103',party:'independent'};
+function resetProto(){
+  clearTimers();
+  Object.assign(S,{dialog:null,sheet:null,errors:{},boot:'ready',retired:false,configFault:false,electionRead:'ok',
+    lifecycleOverride:null,overrideAt:Date.now(),keyholders:KEYHOLDER_NAMES.slice(),keysMeasured:undefined,
+    tlScenario:'stage:votingStarts',tlAnchor:Date.now(),tlRead:'ok',clockOffsetMs:0,clockStopIndex:0,regStatus:'registered',
+    longNames:false,keyholdersRead:'ok',ballotRead:'ok',ballotVariant:'normal',submitted:false,hasVoted:false,
+    codeAvail:'not-registered',codeRevealed:null,riRead:'ok',attestTerminal:false,_attestArmed:false,scrollMem:{}});
+  S.isRegistered={}; S.registeredAt={};
+  Object.keys(ROOTS).forEach(k=>{ S.stacks[k]=[ROOTS[k]]; });
+  S.confirm={failure:null,pending:false,busy:false,codeAvail:null};
+}
+function nav(tab,routes){ S.tab=tab; S.stacks[tab]=routes.slice(); }
+const VOTE=r=>nav('Vote',['Home'].concat(r||[]));
+const TL=r=>nav('Timeline',['TimelineHome'].concat(r||[]));
+const REG=r=>nav('Registration',['RegistrationHome'].concat(r||[]));
+const allAnswered=()=>{ S.selectionMap={}; FIXTURE_BALLOT.offices.forEach(o=>{ S.selectionMap[o.id]=o.candidates.slice(0,o.voteFor).map(c=>c.id); }); };
+const cadAt=(branch,extra)=>{ REG(['ContinueOnAnotherDevice']); S.cad={branch,code:'',codeError:null,submitError:null,identity:Object.assign({},EMPTY_IDENTITY),idErrors:{},failure:null}; Object.assign(S.cad,extra||{}); };
+const confirmAt=extra=>{ S.draft=Object.assign({},SAMPLE_DRAFT); REG(['RegisterPersonal','RegisterAddressParty','RegisterConfirm','Confirmation']); Object.assign(S.confirm,extra||{}); };
+const stageScen=id=>()=>{ S.tlScenario='stage:'+id; TL(); };
+
+const DEV_GROUPS=[
+ {title:'App shell',note:'VoterAppProvider gates render before any navigator mounts; they sit outside the themed NavigationContainer. The copy here is English literals in source (not t()), except the localized Syncing label.',items:[
+  {id:'boot-loading', label:'Boot · loading spinner', badge:'state', go(){ S.boot='loading'; }},
+  {id:'boot-syncing', label:'Boot · Syncing', sub:'first-sync wait in progress (syncState syncing)', badge:'state', go(){ S.boot='syncing'; }},
+  {id:'boot-syncing-elapsed', label:'Boot · Syncing + Start Fresh', sub:'first-sync budget (~300 s) elapsed; Try Again is deliberately not offered', badge:'state', go(){ S.boot='syncingElapsed'; }},
+  {id:'boot-error', label:'Boot · failed to load network', sub:'Try Again / Start Fresh', badge:'state', go(){ S.boot='error'; }},
+  {id:'device-retired', label:'Device retired', sub:'replaces the whole tab navigator; no CTA, no tab bar', badge:'state', go(){ S.retired=true; }},
+  {id:'config-fault', label:'Home · configuration fault notice', sub:'bootstrap.config.json missing or malformed', badge:'state', go(){ S.configFault=true; VOTE(); }},
+ ]},
+ {title:'Vote tab · Home',note:'Live state is derived from the election timeline (engines/election-read.ts). Counts with no engine source (progress, checks, certification) are absent in a live read, so the card falls back to copy that states only what is known.',items:[
+  {id:'Home', label:'Home · live (voting open)', sub:'NetworkHeader + ElectionCard, no progress bar in a live read', go(){ VOTE(); }},
+  {id:'home-upcoming-live', label:'Home · live · upcoming', sub:'countdown to voting start', badge:'state', go(){ S.tlScenario='allFuture'; VOTE(); }},
+  {id:'home-devseed', label:'Home · live · dev seed timeline', sub:'149 days out: 3-digit days shrink the countdown', badge:'state', go(){ S.tlScenario='devSeed'; VOTE(); }},
+  {id:'home-releasing-pending', label:'Home · live · keys releasing (count unknown)', sub:'pendingSummary fallback', badge:'state', go(){ S.tlScenario='stage:hashingVotes'; VOTE(); }},
+  {id:'home-releasing-measured', label:'Home · live · keys releasing (3 of 5 measured)', badge:'state', go(){ S.tlScenario='stage:releasingKeys'; S.keysMeasured=3; VOTE(); }},
+  {id:'home-validation-live', label:'Home · live · validation', sub:'pendingSummary fallback, countdown to close', badge:'state', go(){ S.tlScenario='stage:validation'; VOTE(); }},
+  {id:'home-complete-live', label:'Home · live · closed', sub:'closedSummary fallback (no certification source)', badge:'state', go(){ S.tlScenario='stage:closed'; VOTE(); }},
+  {id:'home-unavailable', label:'Home · election unavailable', sub:'no election on the network, or an indeterminate timeline', badge:'state', go(){ S.electionRead='none'; VOTE(); }},
+  {id:'home-loading', label:'Home · still reading', sub:'card area blank until the read resolves', badge:'state', go(){ S.electionRead='loading'; VOTE(); }},
+  {id:'dlg-election', label:'Learn about this election', sub:'InfoDialog + authority detail', badge:'state', go(){ VOTE(); S.dialog={kind:'election',read:'ready'}; }},
+  {id:'dlg-election-loading', label:'Learn about this election · loading', badge:'state', go(){ VOTE(); S.dialog={kind:'election',read:'loading'}; }},
+  {id:'dlg-election-failed', label:'Learn about this election · unavailable', badge:'state', go(){ VOTE(); S.dialog={kind:'election',read:'failed'}; }},
+  {id:'voted', label:'Open · "You voted"', sub:'hasVoted is local state that nothing ever sets true', badge:'unreachable', go(){ S.lifecycleOverride='Open'; S.hasVoted=true; VOTE(); }},
+ ]},
+ {title:'Vote tab · Home · dev lifecycle cycler',note:'The __DEV__ cycler (live → each state → live) forces a card state and overlays its review fixture. Release builds stay live.',items:
+   LIFECYCLE_ORDER.map(s=>({id:'override:'+s,label:'Dev state: '+s,badge:'dev',go(){ S.lifecycleOverride=s; S.overrideAt=Date.now(); VOTE(); }}))},
+ {title:'Vote tab · Ballot',items:[
+  {id:'Ballot', label:'Ballot', sub:'header = election title; sections per published group', go(){ VOTE(['Ballot']); }},
+  {id:'ballot-full', label:'Ballot · all questions answered', badge:'state', go(){ allAnswered(); VOTE(['Ballot']); }},
+  {id:'ballot-loading', label:'Ballot · still reading', sub:'0/0 progress, no sections', badge:'state', go(){ S.ballotRead='loading'; VOTE(['Ballot']); }},
+  {id:'ballot-unavailable', label:'Ballot · unavailable', sub:'read failed, or no answerable questions', badge:'state', go(){ S.ballotRead='failed'; VOTE(['Ballot']); }},
+  {id:'ballot-unsupported-1', label:'Ballot · 1 unsupported question', sub:'singular plural form', badge:'state', go(){ S.ballotVariant='unsupported1'; VOTE(['Ballot']); }},
+  {id:'ballot-unsupported-3', label:'Ballot · 3 unsupported questions', badge:'state', go(){ S.ballotVariant='unsupported3'; VOTE(['Ballot']); }},
+  {id:'ballot-ungrouped', label:'Ballot · ungrouped questions', sub:'a section with no header', badge:'state', go(){ S.ballotVariant='ungrouped'; VOTE(['Ballot']); }},
+  {id:'dlg-office', label:'Learn about this office', badge:'state', go(){ VOTE(['Ballot']); S.dialog={kind:'office',id:'office-state-board-education',read:'ready'}; }},
+  {id:'dlg-office-loading', label:'Learn about this office · loading', badge:'state', go(){ VOTE(['Ballot']); S.dialog={kind:'office',id:'office-us-senate',read:'loading'}; }},
+  {id:'dlg-office-failed', label:'Learn about this office · unavailable', badge:'state', go(){ VOTE(['Ballot']); S.dialog={kind:'office',id:'office-us-senate',read:'failed'}; }},
+  {id:'IndividualQuestion', label:'Individual Question', sub:"presentation:'modal' · radio (vote for 1)", go(){ S.currentQuestionIndex=0; VOTE(['Ballot','IndividualQuestion']); }},
+  {id:'question-checkbox', label:'Individual Question · vote for 2', sub:'capped checkbox variant', badge:'state', go(){ S.selectionMap['office-state-board-education']=[]; S.currentQuestionIndex=3; VOTE(['Ballot','IndividualQuestion']); }},
+  {id:'question-at-cap', label:'Individual Question · at cap', sub:'unselected rows dim but stay tappable', badge:'state', go(){ S.selectionMap['office-state-board-education']=['cand-sboe-angela','cand-sboe-brian']; S.currentQuestionIndex=3; VOTE(['Ballot','IndividualQuestion']); }},
+  {id:'question-loading', label:'Individual Question · still reading', sub:'bare shell', badge:'state', go(){ S.ballotRead='loading'; VOTE(['Ballot','IndividualQuestion']); }},
+  {id:'question-unavailable', label:'Individual Question · unavailable', badge:'state', go(){ S.ballotRead='failed'; VOTE(['Ballot','IndividualQuestion']); }},
+  {id:'dlg-candidate', label:'Learn about this candidate · with link', sub:'"More information" (http(s) only)', badge:'state', go(){ S.currentQuestionIndex=0; VOTE(['Ballot','IndividualQuestion']); S.dialog={kind:'candidate',id:'cand-us-senate-diana',read:'ready'}; }},
+  {id:'dlg-candidate-nolink', label:'Learn about this candidate · no link', badge:'state', go(){ S.currentQuestionIndex=0; VOTE(['Ballot','IndividualQuestion']); S.dialog={kind:'candidate',id:'cand-us-senate-marcus',read:'ready'}; }},
+  {id:'dlg-candidate-failed', label:'Learn about this candidate · unavailable', badge:'state', go(){ S.currentQuestionIndex=0; VOTE(['Ballot','IndividualQuestion']); S.dialog={kind:'candidate',id:'cand-us-senate-elena',read:'failed'}; }},
+  {id:'ReviewSubmit', label:'Review & Submit', go(){ VOTE(['Ballot','ReviewSubmit']); }},
+  {id:'review-unavailable', label:'Review & Submit · unavailable', sub:'footer still offered', badge:'state', go(){ S.ballotRead='failed'; VOTE(['Ballot','ReviewSubmit']); }},
+  {id:'submitted', label:'Review & Submit · submitted', badge:'state', go(){ S.submitted=true; VOTE(['Ballot','ReviewSubmit']); }},
+  {id:'ValidationDetails', label:'Validation Details', sub:'evidence exists only under the dev review override', badge:'dev', go(){ S.lifecycleOverride='ValidationDetails'; S.overrideAt=Date.now(); VOTE(['ValidationDetails']); }},
+  {id:'validation-empty', label:'Validation Details · no evidence', sub:'live read: renders an empty shell', badge:'state', go(){ VOTE(['ValidationDetails']); }},
+ ]},
+ {title:'Timeline tab',note:'Ten stage rows derived from the election timeline. Instants follow the canonical fixture spacing, re-anchored so the named stage is current now. The dashed DEV clock control at the top works: tap it to step through every present stage and the final-day probe.',items:[
+  {id:'TimelineHome', label:'Timeline · voting period current', sub:'Vote now + countdown (≥24 h: days)', go(){ TL(); }},
+  {id:'tl-all-future', label:'Timeline · nothing has happened yet', sub:'no current row, hollow dots, Preview ballot', badge:'state', go(){ S.tlScenario='allFuture'; TL(); }},
+  {id:'tl-stage-registrationEnds', label:'Timeline · registration ends current', sub:'panel + row "Edit registration"', badge:'state', go: stageScen('registrationEnds')},
+  {id:'tl-stage-ballotsFinal', label:'Timeline · ballots finalized current', badge:'state', go: stageScen('ballotsFinal')},
+  {id:'tl-stage-accruingVotes', label:'Timeline · accruing votes current', sub:'View submission on the voting row', badge:'state', go: stageScen('accruingVotes')},
+  {id:'tl-stage-hashingVotes', label:'Timeline · hashing votes current', badge:'state', go: stageScen('hashingVotes')},
+  {id:'tl-stage-releasingKeys', label:'Timeline · releasing keys current', sub:'View Keyholders outline button', badge:'state', go: stageScen('releasingKeys')},
+  {id:'tl-stage-tallyingStarts', label:'Timeline · tallying current', badge:'state', go: stageScen('tallyingStarts')},
+  {id:'tl-stage-validation', label:'Timeline · validation current', badge:'state', go: stageScen('validation')},
+  {id:'tl-stage-certificationStarts', label:'Timeline · certification current', badge:'state', go: stageScen('certificationStarts')},
+  {id:'tl-stage-closed', label:'Timeline · election closed', sub:'every row past, See details on each', badge:'state', go: stageScen('closed')},
+  {id:'tl-seven-key', label:'Timeline · 7 of 10 instants published', sub:'three rows unknown: em-dash, no subtitle', badge:'state', go(){ S.tlScenario='sevenKey'; TL(); }},
+  {id:'tl-no-regends', label:'Timeline · no registration deadline published', sub:'panel offers Edit registration', badge:'state', go(){ S.tlScenario='noRegEnds'; TL(); }},
+  {id:'tl-long-countdown', label:'Timeline · 179-day countdown', sub:'3-digit days: shrink step (h2 / captionSmall)', badge:'state', go(){ S.tlScenario='longCountdown'; TL(); }},
+  {id:'tl-final-day', label:'Timeline · final day of voting (<24 h)', sub:'hours/minutes/seconds — label budget forces the shrink', badge:'dev', go(){ TL(); const v=currentTimelineView(); const st=timelineClockStops(v); const i=st.findIndex(s=>s.probe); S.clockStopIndex=i+1; S.clockOffsetMs=st[i].nowMs-Date.now(); }},
+  {id:'tl-devseed', label:'Timeline · dev seed timeline', sub:'what a fresh dev build shows: all future', badge:'state', go(){ S.tlScenario='devSeed'; TL(); }},
+  {id:'tl-long-names', label:'Timeline · production-length title + network', badge:'state', go(){ S.longNames=true; S.tlScenario='stage:registrationEnds'; TL(); }},
+  {id:'tl-panel-pending', label:'Registration panel · pending', badge:'state', go(){ S.regStatus='pending'; S.tlScenario='stage:registrationEnds'; TL(); }},
+  {id:'tl-panel-not', label:'Registration panel · not registered', badge:'state', go(){ S.regStatus='notRegistered'; S.tlScenario='stage:registrationEnds'; TL(); }},
+  {id:'tl-panel-unknown', label:'Registration panel · couldn\'t check', badge:'state', go(){ S.regStatus='indeterminate'; S.tlScenario='stage:registrationEnds'; TL(); }},
+  {id:'tl-panel-reading', label:'Registration panel · still reading', sub:'no panel at all (never a guessed status)', badge:'state', go(){ S.regStatus=null; S.tlScenario='stage:registrationEnds'; TL(); }},
+  {id:'tl-help', label:'Row help (?) dialog', sub:'stage title · rail label · relative date', badge:'state', go(){ TL(); S.dialog={kind:'stage',id:'votingStarts'}; }},
+  {id:'tl-details', label:'See details dialog (past row)', badge:'state', go(){ TL(); S.dialog={kind:'stage',id:'ballotsFinal'}; }},
+  {id:'tl-loading', label:'Timeline · still reading', sub:'blank — neither rail nor error frame', badge:'state', go(){ S.tlRead='loading'; TL(); }},
+  {id:'tl-indeterminate', label:'Timeline · can\'t show the timeline', sub:'out-of-order instants → explicit indeterminate frame', badge:'state', go(){ S.tlScenario='nonMonotonic'; TL(); }},
+  {id:'tl-read-failed', label:'Timeline · read failed', sub:'Try again re-reads', badge:'state', go(){ S.tlRead='failed'; TL(); }},
+  {id:'tl-ballot', label:'Ballot pushed from Timeline', sub:'Timeline tab stays highlighted; Back returns to the rail', badge:'state', go(){ TL(['Ballot']); }},
+  {id:'tl-register', label:'Register flow from Timeline', sub:'tab bar hidden on the same routes', badge:'state', go(){ S.draft=Object.assign({},EMPTY_DRAFT); TL(['RegistrationHome','RegisterPersonal']); }},
+ ]},
+ {title:'Timeline tab · Keyholders',items:[
+  {id:'Keyholders', label:'Keyholders · names only', sub:'released count hidden: nothing measured', go(){ TL(['Keyholders']); }},
+  {id:'kh-count', label:'Keyholders · with released count', badge:'state', go(){ S.tlScenario='stage:releasingKeys'; S.keysMeasured=3; TL(['Keyholders']); }},
+  {id:'kh-empty', label:'Keyholders · none assigned yet', badge:'state', go(){ S.keyholders=[]; TL(['Keyholders']); }},
+  {id:'kh-loading', label:'Keyholders · still reading', badge:'state', go(){ S.keyholdersRead='loading'; TL(['Keyholders']); }},
+  {id:'kh-indeterminate', label:'Keyholders · read failed', sub:'never a false "no keyholders yet"', badge:'state', go(){ S.keyholdersRead='failed'; TL(['Keyholders']); }},
+ ]},
+ {title:'Registration tab',items:[
+  {id:'RegistrationHome', label:'Registration home', sub:'not-registered card + "Already registered on another device?"', go(){ REG(); }},
+  {id:'registered', label:'Registration home · registered', sub:'dev toggle: green card + Valid through + update block', badge:'dev', go(){ S.draft=Object.assign({},SAMPLE_DRAFT); S.isRegistered.Registration=true; S.registeredAt.Registration=new Date().toISOString(); REG(); }},
+  {id:'code-available', label:'Code available · "Show my registration code"', badge:'state', go(){ S.codeAvail='available'; REG(); }},
+  {id:'code-revealed', label:'Code revealed', sub:'fit-to-width code card', badge:'state', go(){ S.codeAvail='available'; S.codeRevealed='code'; REG(); }},
+  {id:'code-revealed-unavailable', label:'Code revealed · unavailable', sub:'re-read failed on tap', badge:'state', go(){ S.codeAvail='available'; S.codeRevealed='unavailable'; REG(); }},
+  {id:'code-not-on-device', label:'Code not available on this device', sub:'not-sent / not-holder', badge:'state', go(){ S.codeAvail='not-sent'; REG(); }},
+  {id:'code-none', label:'Code read unavailable / still reading', sub:'nothing rendered below the card', badge:'state', go(){ S.codeAvail=null; REG(); }},
+  {id:'RegistrationInfo', label:'Registration info (?)', sub:"presentation:'modal' · live status + deadline + how it works", go(){ REG(['RegistrationInfo']); }},
+  {id:'ri-pending', label:'Registration info · pending', badge:'state', go(){ S.regStatus='pending'; REG(['RegistrationInfo']); }},
+  {id:'ri-not', label:'Registration info · not registered', badge:'state', go(){ S.regStatus='notRegistered'; REG(['RegistrationInfo']); }},
+  {id:'ri-unknown', label:'Registration info · couldn\'t check', sub:'no network row', badge:'state', go(){ S.regStatus='indeterminate'; REG(['RegistrationInfo']); }},
+  {id:'ri-deadline-future', label:'Registration info · deadline ahead', sub:'"Registration closes"', badge:'state', go(){ S.tlScenario='allFuture'; REG(['RegistrationInfo']); }},
+  {id:'ri-no-deadline', label:'Registration info · no deadline published', badge:'state', go(){ S.tlScenario='noRegEnds'; REG(['RegistrationInfo']); }},
+  {id:'ri-no-election', label:'Registration info · no election', badge:'state', go(){ S.riRead='none'; REG(['RegistrationInfo']); }},
+  {id:'ri-loading', label:'Registration info · still reading', badge:'state', go(){ S.regStatus=null; S.riRead='loading'; REG(['RegistrationInfo']); }},
+  {id:'DeviceAttestation', label:'Device Attestation', sub:'capability probe → replaces itself with Step 1', go(){ REG(['DeviceAttestation']); }},
+  {id:'attest-terminal', label:'Device Attestation · terminal wall', sub:'release-only capability failure, no retry', badge:'state', go(){ S.attestTerminal=true; REG(['DeviceAttestation']); }},
+  {id:'RegisterPersonal', label:'Register · Step 1 Personal', go(){ S.draft=Object.assign({},EMPTY_DRAFT); REG(['RegisterPersonal']); }},
+  {id:'errors-personal', label:'Step 1 · inline field errors', badge:'state', go(){ S.draft=Object.assign({},EMPTY_DRAFT,{email:'not-an-email',phone:'123'}); S.errors=validatePersonal(S.draft); REG(['RegisterPersonal']); }},
+  {id:'RegisterAddressParty', label:'Register · Step 2 Address + Party', go(){ S.draft=Object.assign({},SAMPLE_DRAFT,{addressLine1:'',addressLine2:'',addressLine3:'',party:''}); REG(['RegisterPersonal','RegisterAddressParty']); }},
+  {id:'errors-address', label:'Step 2 · inline field errors', badge:'state', go(){ S.draft=Object.assign({},SAMPLE_DRAFT,{addressLine1:'',party:''}); S.errors=validateAddressParty(S.draft); REG(['RegisterPersonal','RegisterAddressParty']); }},
+  {id:'party-sheet', label:'Step 2 · party dropdown sheet', badge:'state', go(){ S.draft=Object.assign({},SAMPLE_DRAFT); S.sheet=true; REG(['RegisterPersonal','RegisterAddressParty']); }},
+  {id:'RegisterConfirm', label:'Register · Step 3 Confirm', go(){ S.draft=Object.assign({},SAMPLE_DRAFT); REG(['RegisterPersonal','RegisterAddressParty','RegisterConfirm']); }},
+  {id:'Confirmation', label:'Confirmation (Face ID)', go(){ confirmAt(); }},
+  {id:'confirm-action', label:'Confirmation · biometric not enrolled', sub:'setup CTA + Try Again', badge:'state', go(){ confirmAt({failure:'recoverable-action'}); }},
+  {id:'confirm-transient', label:'Confirmation · transient failure', badge:'state', go(){ confirmAt({failure:'recoverable-transient'}); }},
+  {id:'confirm-terminal', label:'Confirmation · terminal (no retry)', badge:'state', go(){ confirmAt({failure:'terminal'}); }},
+  {id:'confirm-pending-code', label:'Confirmation · pending + registration code', sub:'honest pending state; never pops, never claims success', badge:'state', go(){ confirmAt({pending:true,codeAvail:'available'}); }},
+  {id:'confirm-pending-nocode', label:'Confirmation · pending, code not on this device', badge:'state', go(){ confirmAt({pending:true,codeAvail:'not-sent'}); }},
+  {id:'confirm-pending', label:'Confirmation · pending (code read unavailable)', badge:'state', go(){ confirmAt({pending:true,codeAvail:null}); }},
+ ]},
+ {title:'Registration tab · Continue on this device',note:'Reached from "Already registered on another device?". Pending is non-dismissible: no close X, and hardware Back is swallowed (try the ◁ key).',items:[
+  {id:'ContinueOnAnotherDevice', label:'Continue · resolving', sub:'provisions the device key, resumes from replicated rows', go(){ cadAt('resolving'); }},
+  {id:'cad-code', label:'Continue · enter code', badge:'state', go(){ cadAt('code'); }},
+  {id:'cad-code-error', label:'Continue · code required', badge:'state', go(){ cadAt('code',{codeError:t('continuity','newDevice.codeRequired')}); }},
+  {id:'cad-submit-error', label:'Continue · could not send', badge:'state', go(){ cadAt('code',{code:'7KQ2M-9XH4P',submitError:t('continuity','newDevice.submitError')}); }},
+  {id:'cad-identity', label:'Continue · confirm identity (no code)', badge:'state', go(){ cadAt('identity'); }},
+  {id:'cad-identity-errors', label:'Continue · identity field errors', badge:'state', go(){ cadAt('identity',{idErrors:{firstName:'required',lastName:'required'}}); }},
+  {id:'cad-restart', label:'Continue · start a new registration', badge:'state', go(){ cadAt('restart'); }},
+  {id:'cad-pending', label:'Continue · waiting for approval', badge:'state', go(){ cadAt('pending'); }},
+  {id:'cad-pending-action', label:'Continue · pending · biometric not enrolled', badge:'state', go(){ cadAt('pending',{failure:'recoverable-action'}); }},
+  {id:'cad-pending-transient', label:'Continue · pending · transient failure', badge:'state', go(){ cadAt('pending',{failure:'recoverable-transient'}); }},
+  {id:'cad-pending-terminal', label:'Continue · pending · terminal', sub:'no retry, no close', badge:'state', go(){ cadAt('pending',{failure:'terminal'}); }},
+  {id:'cad-approved', label:'Continue · device approved', badge:'state', go(){ cadAt('approved'); }},
+  {id:'cad-rejected', label:'Continue · request not approved', badge:'state', go(){ cadAt('rejected'); }},
+ ]},
+ {title:'Scan · Settings',items:[
+  {id:'ScanHome', label:'Scan', sub:'branded "coming soon" placeholder', go(){ nav('Scan',['ScanHome']); }},
+  {id:'SettingsHome', label:'Settings', sub:'EN / ES language toggle', go(){ nav('Settings',['SettingsHome']); }},
+ ]},
+];
+const DEV_INDEX={}; DEV_GROUPS.forEach(g=>g.items.forEach(i=>{ DEV_INDEX[i.id]=i; }));
+function buildDrawer(){
+  const d=document.getElementById('devdrawer');
+  const badge=b=>b?'<span class="badge '+(b==='state'?'state':b==='dev'?'dev':'')+'">'+(b==='state'?'state':b==='dev'?'dev only':'unreachable')+'</span>':'';
+  d.innerHTML='<div class="dhead"><h2>All screens</h2>'
+    +'<button data-act="close-drawer" aria-label="Close" style="background:none;border:0;cursor:pointer;color:var(--text);padding:6px">'+icon('xmark',20)+'</button></div>'
+   +'<div class="dbody">'
+     +'<div class="dgroup"><h3>Appearance</h3><div class="seg">'
+       +'<button data-dev="theme:light" class="'+(S.theme==='light'?'on':'')+'">Light</button>'
+       +'<button data-dev="theme:dark" class="'+(S.theme==='dark'?'on':'')+'">Dark</button>'
+       +'<button data-dev="lang:en" class="'+(S.lang==='en'?'on':'')+'">English</button>'
+       +'<button data-dev="lang:es" class="'+(S.lang==='es'?'on':'')+'">Español</button>'
+     +'</div>'
+     +'<div class="dnote" style="margin-top:10px">Every i18n namespace (common, home, ballot, registration, scan, settings, timeline, continuity) is complete in Spanish, so nothing falls back to English through t(). '
+       +'English that remains under Español is English in the app too: string literals the source renders without t() — the Confirmation "Try Again" button and pending sentence, the boot screen\'s error / Try Again / Start Fresh, and the dev-only cycler and toggle labels. '
+       +'Ballot text, names and the "Learn about" detail are authority-published data and are never translated.</div>'
+     +'<div class="dnote">The ◁ key in the bar under the tabs is Android hardware Back: dialogs close first, then the focused stack pops, then a non-first tab returns to Vote.</div></div>'
+     +DEV_GROUPS.map(g=>'<div class="dgroup"><h3>'+esc(g.title)+'</h3>'
+        +(g.note?'<div class="dnote">'+esc(g.note)+'</div>':'')
+        +g.items.map(i=>'<button class="ditem" data-dev="'+i.id+'"><span style="flex:1;min-width:0">'+esc(i.label)
+          +(i.sub?'<span class="dsub">'+esc(i.sub)+'</span>':'')+'</span>'+badge(i.badge)+'</button>').join('')
+      +'</div>').join('')
+     +'<div class="dgroup"><h3>Removed from the app</h3><div class="dnote">The ElectionInfo / OfficeInfo / CandidateInfo routes and the shared PlaceholderModal are gone from source: '
+       +'"Learn about this …" is an in-place InfoDialog carrying the authority-published detail, and RegistrationInfo is now a real screen.</div></div>'
+   +'</div>';
+}
+ACTIONS['close-drawer']=()=>{ document.getElementById('devdrawer').classList.remove('open'); };
+document.getElementById('devfab').addEventListener('click',()=>{ buildDrawer(); document.getElementById('devdrawer').classList.add('open'); });
+document.getElementById('devfab').innerHTML=icon('list-check',18,'#fff');
+
+function devGo(id){
+  if(id.startsWith('theme:')){ S.theme=id.split(':')[1]; buildDrawer(); render(); return; }
+  if(id.startsWith('lang:')){ S.lang=id.split(':')[1]; buildDrawer(); render(); return; }
+  const entry=DEV_INDEX[id]; if(!entry) return;
+  document.getElementById('devdrawer').classList.remove('open');
+  resetProto();
+  entry.go();
+  const r=topRoute();
+  if(r==='ContinueOnAnotherDevice' && S.cad.branch==='resolving') enter(r);
+  render();
+}
+/* Hooks for the verification script (scratch, not used by the page itself). */
+window.__proto={ids:()=>Object.keys(DEV_INDEX),go:devGo,set(theme,lang){ S.theme=theme; S.lang=lang; render(); }};
+
+/* boot */
+render();
+</script>
+</body>
+</html>

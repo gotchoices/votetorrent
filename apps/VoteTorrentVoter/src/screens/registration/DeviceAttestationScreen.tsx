@@ -20,7 +20,7 @@
  * the screen has left focus/unmounted (Pitfall 4), and it never fires more than once per focus.
  */
 import React, {useCallback, useState} from 'react';
-import {ActivityIndicator, StyleSheet, Text, View} from 'react-native';
+import {ActivityIndicator, ScrollView, StyleSheet, Text} from 'react-native';
 import {useFocusEffect, useNavigation, useTheme} from '@react-navigation/native';
 import type {ExtendedTheme} from '@react-navigation/native';
 import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
@@ -83,47 +83,12 @@ export default function DeviceAttestationScreen() {
 
 	if (isTerminal) {
 		return (
-			<View style={[globalStyles.container, styles.screen, {backgroundColor: colors.background}]}>
-				<View style={styles.centerColumn}>
-					<FontAwesome6 name="shield-halved" size={96} color={colors.primary} />
-					<Text
-						testID="device-attestation-terminal-heading"
-						style={[
-							styles.heading,
-							{
-								color: colors.text,
-								fontFamily: fonts.medium.fontFamily,
-								fontWeight: fonts.medium.fontWeight,
-								fontSize: typeScale.h2.fontSize,
-								lineHeight: typeScale.h2.lineHeight,
-							},
-						]}>
-						{t('deviceAttestation.terminalHeading')}
-					</Text>
-					<Text
-						style={[
-							styles.caption,
-							{
-								color: colors.textSecondary,
-								fontFamily: fonts.regular.fontFamily,
-								fontWeight: fonts.regular.fontWeight,
-								fontSize: typeScale.caption.fontSize,
-								lineHeight: typeScale.caption.lineHeight,
-							},
-						]}>
-						{t('deviceAttestation.terminalBody')}
-					</Text>
-				</View>
-			</View>
-		);
-	}
-
-	return (
-		<View style={[globalStyles.container, styles.screen, {backgroundColor: colors.background}]}>
-			<View style={styles.centerColumn}>
+			<ScrollView
+				style={[styles.screen, {backgroundColor: colors.background}]}
+				contentContainerStyle={[globalStyles.container, styles.centerColumn]}>
 				<FontAwesome6 name="shield-halved" size={96} color={colors.primary} />
-				<ActivityIndicator size="large" color={colors.primary} style={styles.spinner} />
 				<Text
+					testID="device-attestation-terminal-heading"
 					style={[
 						styles.heading,
 						{
@@ -134,7 +99,7 @@ export default function DeviceAttestationScreen() {
 							lineHeight: typeScale.h2.lineHeight,
 						},
 					]}>
-					{t('deviceAttestation.heading')}
+					{t('deviceAttestation.terminalHeading')}
 				</Text>
 				<Text
 					style={[
@@ -147,10 +112,45 @@ export default function DeviceAttestationScreen() {
 							lineHeight: typeScale.caption.lineHeight,
 						},
 					]}>
-					{t('deviceAttestation.caption')}
+					{t('deviceAttestation.terminalBody')}
 				</Text>
-			</View>
-		</View>
+			</ScrollView>
+		);
+	}
+
+	return (
+		<ScrollView
+			style={[styles.screen, {backgroundColor: colors.background}]}
+			contentContainerStyle={[globalStyles.container, styles.centerColumn]}>
+			<FontAwesome6 name="shield-halved" size={96} color={colors.primary} />
+			<ActivityIndicator size="large" color={colors.primary} style={styles.spinner} />
+			<Text
+				style={[
+					styles.heading,
+					{
+						color: colors.text,
+						fontFamily: fonts.medium.fontFamily,
+						fontWeight: fonts.medium.fontWeight,
+						fontSize: typeScale.h2.fontSize,
+						lineHeight: typeScale.h2.lineHeight,
+					},
+				]}>
+				{t('deviceAttestation.heading')}
+			</Text>
+			<Text
+				style={[
+					styles.caption,
+					{
+						color: colors.textSecondary,
+						fontFamily: fonts.regular.fontFamily,
+						fontWeight: fonts.regular.fontWeight,
+						fontSize: typeScale.caption.fontSize,
+						lineHeight: typeScale.caption.lineHeight,
+					},
+				]}>
+				{t('deviceAttestation.caption')}
+			</Text>
+		</ScrollView>
 	);
 }
 
@@ -159,7 +159,7 @@ const styles = StyleSheet.create({
 		flex: 1,
 	},
 	centerColumn: {
-		flex: 1,
+		flexGrow: 1,
 		justifyContent: 'center',
 		alignItems: 'center',
 	},

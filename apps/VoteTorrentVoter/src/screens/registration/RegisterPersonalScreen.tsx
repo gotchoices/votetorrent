@@ -20,7 +20,9 @@ import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
 import {useTranslation} from 'react-i18next';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {useVoterApp} from '../../providers/VoterAppProvider';
+import {useNetworkName} from '../../hooks/useNetworkName';
 import {useRegistrationDraft} from '../../providers/RegistrationDraftProvider';
+import {useKeyboardInset} from '../../hooks/useKeyboardInset';
 import {RegisterFormHeader} from '../../components/RegisterFormHeader';
 import {FieldGroupCard, FieldRow} from '../../components/FieldGroup';
 import {globalStyles} from '../../theme/styles';
@@ -45,7 +47,9 @@ export default function RegisterPersonalScreen() {
 	const navigation = useNavigation<RegisterPersonalNavigationProp>();
 	const {colors, fonts, type: typeScale, radii} = useTheme() as ExtendedTheme;
 	const {t} = useTranslation('registration');
+	const networkName = useNetworkName();
 	const insets = useSafeAreaInsets();
+	const keyboardInset = useKeyboardInset();
 
 	const [errors, setErrors] = useState<Partial<Record<PersonalField, FieldError>>>({});
 
@@ -72,13 +76,18 @@ export default function RegisterPersonalScreen() {
 				{
 					backgroundColor: colors.background,
 					paddingTop: insets.top + 16,
-					paddingBottom: insets.bottom + 12,
+					// Under Android's forced edge-to-edge the IME does not resize the window, so
+					// pad past it ourselves — this is what lets the ScrollView scroll and keeps the
+					// pinned Continue CTA above the keyboard. Added to the safe-area inset, not
+					// max'd with it: the reported height stops at the navigation bar. See
+					// useKeyboardInset.
+					paddingBottom: insets.bottom + 12 + keyboardInset,
 				},
 			]}>
 			<ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
 				<RegisterFormHeader
 					title={t('formHeaderTitle')}
-					subtitle={t('form.sectionTitle')}
+					subtitle={t('form.sectionTitle', {network: networkName})}
 					step={1}
 					onBack={() => navigation.goBack()}
 					onClose={() => navigation.popToTop()}

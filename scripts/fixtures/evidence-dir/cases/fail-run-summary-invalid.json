@@ -1,0 +1,10 @@
+{
+  "base": "base-device",
+  "ops": [
+    {
+      "op": "delete",
+      "path": "64-device-evidence/rehearsal-2026-10-20/run-3/summary.md"
+    }
+  ],
+  "expect": "run-summary-invalid"
+}

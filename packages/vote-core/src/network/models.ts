@@ -45,6 +45,9 @@ export interface NetworkDetails {
 
   /** The proposed revision of the network */
   proposed?: Proposal<NetworkRevision>
+
+  /** `ProposedNetwork.Revision` of `proposed` — the key `applyRevision`/`cancelRevision` take. */
+  proposedRevision?: number
 }
 
 export interface NetworkPolicies {
@@ -85,6 +88,10 @@ export interface NetworkInit {
    * This is a url not an ImageRef because you can't reference a cid from outside the network
    */
   imageUrl?: string
+
+  /** Content id of the bytes at `imageUrl` when the creator made it permanent (see vote-engine's
+   *  `fingerprintMedia`); stored alongside the url so readers can detect a swapped image. */
+  imageCid?: string
 
   /** The name of the network */
   name: string

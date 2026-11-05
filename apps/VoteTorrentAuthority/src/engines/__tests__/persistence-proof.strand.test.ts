@@ -102,7 +102,6 @@ jest.mock(
 // Sibling local imports (persistence-proof.ts imports device-user + device-signer)
 jest.mock('../device-user', () => ({
   getOrCreateDeviceUser: jest.fn().mockResolvedValue({ activeKeys: [] }),
-  getDevicePrivKeyHex: jest.fn().mockResolvedValue('aabbcc'),
 }));
 
 jest.mock('../device-signer', () => ({

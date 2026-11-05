@@ -1,3 +1,25 @@
 {
-  "extends": "@react-native/typescript-config/tsconfig.json"
+  "extends": "@react-native/typescript-config",
+  "compilerOptions": {
+    // Phase 59 plan 59-02 (D-21): `@votetorrent/ui-web/lifecycle-core` is a
+    // plain-JS, JSDoc-typed module with no `.d.ts` and no build step (D-19 --
+    // it ships as source, deliberately with zero imports). Under this app's
+    // inherited `moduleResolution: "bundler"`, a package resolved through
+    // `node_modules` (even a workspace symlink) is treated as an external
+    // library: TypeScript's default `maxNodeModuleJsDepth` of 0 means it
+    // will NOT read that file's JSDoc for type inference, and fails closed
+    // with TS7016 ("implicitly has an 'any' type") under `strict`, even
+    // though `allowJs` is already on. `maxNodeModuleJsDepth: 1` is the
+    // standard, narrowly-scoped TS option for exactly this case (a JSDoc-typed
+    // JS library consumed with no declaration file) -- it does not enable
+    // `checkJs` (this project's own `.js` files are still unchecked) and does
+    // not affect the type of any relative import. Verified this is not a
+    // silent `any`: an incomplete `Record<TimelineStageId, number>` literal
+    // in `__tests__/timeline-core-resolution.test.ts` still fails to compile
+    // with a named-property TS2741 error. Measured side effect: this also
+    // fixes four pre-existing TS7016 errors on the unrelated userland `path`
+    // npm package (a different node_modules-resolved plain-JS module with no
+    // declarations) -- a net improvement, not a masked regression.
+    "maxNodeModuleJsDepth": 1
+  }
 }

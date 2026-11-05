@@ -1,0 +1,25 @@
+{
+  "base": "base-host",
+  "args": [
+    "--git"
+  ],
+  "ops": [
+    {
+      "op": "git-init"
+    },
+    {
+      "op": "append",
+      "path": "64-evidence/dkg-host/members0-check.log",
+      "content": "MEMBERS0 run=2 ok=true\n"
+    },
+    {
+      "op": "git-commit"
+    },
+    {
+      "op": "append",
+      "path": "64-evidence/dkg-host/members0-check.log",
+      "content": "MEMBERS0 run=3 ok=true\n"
+    }
+  ],
+  "expect": "PASS"
+}

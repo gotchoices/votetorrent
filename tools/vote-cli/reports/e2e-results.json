@@ -1,0 +1,1242 @@
+{
+  "ranAt": "2026-10-27T05:33:20.187Z",
+  "totalMs": 470532,
+  "host": {
+    "platform": "Darwin 24.6.0 arm64",
+    "cpus": 10,
+    "cpuModel": "Apple M1 Pro",
+    "memGb": 16,
+    "node": "v22.15.0"
+  },
+  "config": {
+    "votingStartsMin": 4,
+    "votingMin": 3,
+    "stepSeconds": 15
+  },
+  "git": "ref: refs/heads/feat/VoterConnectNetwork",
+  "runDir": "/Users/arashrestha/ILAB/VOTETORRENT/votetorrent/tools/vote-cli/runs/2026-10-27T05-25-29-651Z",
+  "tests": [
+    {
+      "id": "T01",
+      "name": "Start the device daemons (1 authority, 2 keyholder devices, 4 voters)",
+      "app": "both",
+      "kind": "test",
+      "status": "passed",
+      "steps": [
+        {
+          "device": "V3",
+          "command": "vt daemon start --role voter --name \"Voter V3\"",
+          "ok": true,
+          "wallMs": 1659,
+          "daemonMs": 1614,
+          "startedAtMs": 6
+        },
+        {
+          "device": "K1",
+          "command": "vt daemon start --role authority --profile transaction --name \"Keyholder K1\"",
+          "ok": true,
+          "wallMs": 1663,
+          "daemonMs": 1616,
+          "startedAtMs": 3
+        },
+        {
+          "device": "K2",
+          "command": "vt daemon start --role authority --profile transaction --name \"Keyholder K2\"",
+          "ok": true,
+          "wallMs": 1662,
+          "daemonMs": 1616,
+          "startedAtMs": 3
+        },
+        {
+          "device": "A",
+          "command": "vt daemon start --role authority --name \"Alice Officer\"",
+          "ok": true,
+          "wallMs": 1664,
+          "daemonMs": 1616,
+          "startedAtMs": 1
+        },
+        {
+          "device": "V2",
+          "command": "vt daemon start --role voter --name \"Voter V2\"",
+          "ok": true,
+          "wallMs": 1672,
+          "daemonMs": 1627,
+          "startedAtMs": 4
+        },
+        {
+          "device": "V1",
+          "command": "vt daemon start --role voter --name \"Voter V1\"",
+          "ok": true,
+          "wallMs": 1674,
+          "daemonMs": 1625,
+          "startedAtMs": 4
+        },
+        {
+          "device": "VX",
+          "command": "vt daemon start --role voter --name \"Voter VX\"",
+          "ok": true,
+          "wallMs": 1672,
+          "daemonMs": 1623,
+          "startedAtMs": 7
+        }
+      ],
+      "checks": [
+        {
+          "name": "all 7 daemons started",
+          "pass": true
+        }
+      ],
+      "startedAtMs": 1,
+      "durationMs": 1678
+    },
+    {
+      "id": "T02",
+      "name": "Authority founds a network (Add Network screen)",
+      "app": "authority",
+      "kind": "test",
+      "status": "passed",
+      "steps": [
+        {
+          "device": "A",
+          "command": "vt network create --name \"E2E Network\" --authority-name \"E2E Election Authority\" --domain e2e.votetorrent.local",
+          "ok": true,
+          "wallMs": 2412,
+          "daemonMs": 2366,
+          "startedAtMs": 1679
+        },
+        {
+          "device": "A",
+          "command": "vt network show",
+          "ok": true,
+          "wallMs": 54,
+          "daemonMs": 5,
+          "startedAtMs": 4092
+        },
+        {
+          "device": "A",
+          "command": "vt admin show",
+          "ok": true,
+          "wallMs": 64,
+          "daemonMs": 18,
+          "startedAtMs": 4146
+        }
+      ],
+      "checks": [
+        {
+          "name": "network created with a primary authority",
+          "pass": true,
+          "detail": "{\"hash\":\"a11bbfd756f6756b4d4d5161828f30cf\"}"
+        },
+        {
+          "name": "network details read back",
+          "pass": true,
+          "detail": "E2E Network"
+        },
+        {
+          "name": "the founder is the sole officer with all 9 founding scopes",
+          "pass": true,
+          "detail": "[\"rn\",\"rad\",\"vrg\",\"iad\",\"uai\",\"ceb\",\"mel\",\"cap\",\"ik\"]"
+        }
+      ],
+      "startedAtMs": 1679,
+      "durationMs": 2531
+    },
+    {
+      "id": "T03",
+      "name": "Officer registers an intake encryption key",
+      "app": "authority",
+      "kind": "test",
+      "status": "passed",
+      "steps": [
+        {
+          "device": "A",
+          "command": "vt intake-key register",
+          "ok": true,
+          "wallMs": 76,
+          "daemonMs": 34,
+          "startedAtMs": 4210
+        }
+      ],
+      "checks": [
+        {
+          "name": "intake key published and current",
+          "pass": true,
+          "detail": "{\"userId\":\"cc2dfb71-80ab-4ddd-b87c-5ee8526ddec6\",\"authorityId\":\"71dffc8d-90be-419d-aed9-92fa232c9379\",\"hasLocalKey\":true,\"localPublicKey\":\"0246282114086370285feb4f8bd147d44646668cc96780564d22ea809331e7005f\",\"published\":true,\"isCurrent\":true,\"isIntakeRecipient\":true,\"isContested\":false,\"stranded\":false}"
+        }
+      ],
+      "startedAtMs": 4210,
+      "durationMs": 77
+    },
+    {
+      "id": "T04",
+      "name": "Authority mints a join code (Invite voters card)",
+      "app": "authority",
+      "kind": "test",
+      "status": "passed",
+      "steps": [
+        {
+          "device": "A",
+          "command": "vt network join-code",
+          "ok": true,
+          "wallMs": 116,
+          "daemonMs": 73,
+          "startedAtMs": 4287
+        }
+      ],
+      "checks": [
+        {
+          "name": "vtjoin2 code minted and fits one QR (<= 2953 chars)",
+          "pass": true,
+          "detail": "1319 chars, fingerprint 1ae1 640e 6cd8 bfa6"
+        }
+      ],
+      "startedAtMs": 4287,
+      "durationMs": 116
+    },
+    {
+      "id": "T05",
+      "name": "A forged join code (wrong anchor digest) is refused",
+      "app": "voter",
+      "kind": "test",
+      "status": "passed",
+      "steps": [
+        {
+          "device": "VX",
+          "command": "vt network join \"vtjoin2.eyJ2IjoyLCJpbnZpdGF0aW9uIjp7InYiOjEsInBhcnR5SWQiO...\"",
+          "ok": true,
+          "wallMs": 912,
+          "daemonMs": 862,
+          "startedAtMs": 4668
+        },
+        {
+          "device": "VX",
+          "command": "vt status",
+          "ok": true,
+          "wallMs": 50,
+          "daemonMs": 0,
+          "startedAtMs": 5581
+        }
+      ],
+      "checks": [
+        {
+          "name": "join refused with digest-mismatch",
+          "pass": true,
+          "detail": "{\"ok\":false,\"reason\":\"digest-mismatch\",\"detail\":\"digest-mismatch\",\"steps\":[\"admitting\",\"syncing\",\"verifying\"]}"
+        },
+        {
+          "name": "the forged network was not opened or recorded",
+          "pass": true,
+          "detail": "[]"
+        }
+      ],
+      "startedAtMs": 4403,
+      "durationMs": 1227
+    },
+    {
+      "id": "T06",
+      "name": "Keyholder devices join the network (Authority app, Join Network)",
+      "app": "authority",
+      "kind": "test",
+      "status": "passed",
+      "steps": [
+        {
+          "device": "K1",
+          "command": "vt network join \"vtjoin2.eyJ2IjoyLCJpbnZpdGF0aW9uIjp7InYiOjEsInBhcnR5SWQiO...\"",
+          "ok": true,
+          "wallMs": 2970,
+          "daemonMs": 2920,
+          "startedAtMs": 5630
+        },
+        {
+          "device": "K2",
+          "command": "vt network join \"vtjoin2.eyJ2IjoyLCJpbnZpdGF0aW9uIjp7InYiOjEsInBhcnR5SWQiO...\"",
+          "ok": true,
+          "wallMs": 3289,
+          "daemonMs": 3236,
+          "startedAtMs": 5631
+        }
+      ],
+      "checks": [
+        {
+          "name": "K1 joined (redeemed)",
+          "pass": true,
+          "detail": "admitting>syncing>verifying>done"
+        },
+        {
+          "name": "K2 joined (redeemed)",
+          "pass": true,
+          "detail": "admitting>syncing>verifying>done"
+        },
+        {
+          "name": "keyholders see the same fingerprint as the authority",
+          "pass": true
+        }
+      ],
+      "startedAtMs": 5630,
+      "durationMs": 3290
+    },
+    {
+      "id": "T07",
+      "name": "Voters join the network from the join code (Voter app, Join Network)",
+      "app": "voter",
+      "kind": "test",
+      "status": "passed",
+      "steps": [
+        {
+          "device": "V1",
+          "command": "vt network join \"vtjoin2.eyJ2IjoyLCJpbnZpdGF0aW9uIjp7InYiOjEsInBhcnR5SWQiO...\"",
+          "ok": true,
+          "wallMs": 7776,
+          "daemonMs": 7720,
+          "startedAtMs": 8920
+        },
+        {
+          "device": "V2",
+          "command": "vt network join \"vtjoin2.eyJ2IjoyLCJpbnZpdGF0aW9uIjp7InYiOjEsInBhcnR5SWQiO...\"",
+          "ok": true,
+          "wallMs": 8490,
+          "daemonMs": 8436,
+          "startedAtMs": 8921
+        },
+        {
+          "device": "V3",
+          "command": "vt network join \"vtjoin2.eyJ2IjoyLCJpbnZpdGF0aW9uIjp7InYiOjEsInBhcnR5SWQiO...\"",
+          "ok": true,
+          "wallMs": 8912,
+          "daemonMs": 8859,
+          "startedAtMs": 8921
+        },
+        {
+          "device": "V1",
+          "command": "vt network show",
+          "ok": true,
+          "wallMs": 184,
+          "daemonMs": 137,
+          "startedAtMs": 17833
+        }
+      ],
+      "checks": [
+        {
+          "name": "V1 joined (redeemed)",
+          "pass": true,
+          "detail": "admitting>syncing>verifying>done"
+        },
+        {
+          "name": "V2 joined (redeemed)",
+          "pass": true,
+          "detail": "admitting>syncing>verifying>done"
+        },
+        {
+          "name": "V3 joined (redeemed)",
+          "pass": true,
+          "detail": "admitting>syncing>verifying>done"
+        },
+        {
+          "name": "a voter reads the network's primary authority from the replicated strand",
+          "pass": true
+        }
+      ],
+      "startedAtMs": 8920,
+      "durationMs": 9097
+    },
+    {
+      "id": "T08",
+      "name": "Network revision: propose and apply a relay change (rn threshold 1)",
+      "app": "authority",
+      "kind": "test",
+      "status": "passed",
+      "steps": [
+        {
+          "device": "A",
+          "command": "vt network revise --relay \"/ip4/127.0.0.1/tcp/57195/ws/p2p/12D3KooWGeLkqyboeTifMGgxE...\" --relay /dns4/relay.e2e.votetorrent.local/tcp/443/wss",
+          "ok": true,
+          "wallMs": 299,
+          "daemonMs": 251,
+          "startedAtMs": 18018
+        },
+        {
+          "device": "V1",
+          "command": "vt network show",
+          "ok": true,
+          "wallMs": 62,
+          "daemonMs": 19,
+          "startedAtMs": 18317
+        },
+        {
+          "device": "A",
+          "command": "vt network revise --name \"E2E Network (renamed)\"",
+          "ok": false,
+          "wallMs": 97,
+          "daemonMs": 54,
+          "startedAtMs": 18379,
+          "error": {
+            "name": "Error",
+            "code": "no-proposal",
+            "message": "the proposal renames the network (\"E2E Network (renamed)\"), and getDetails only surfaces proposals under the current name"
+          }
+        }
+      ],
+      "checks": [
+        {
+          "name": "revision applied on the authority with both relays",
+          "pass": true,
+          "detail": "{\"applied\":true,\"revision\":0,\"name\":\"E2E Network\",\"relays\":[\"/ip4/127.0.0.1/tcp/57195/ws/p2p/12D3KooWGeLkqyboeTifMGgxEv24B2R3p3bq3zspduFG2z1XG28y\",\"/dns4/relay.e2e.votetorrent.local/tcp/443/wss\"]}"
+        },
+        {
+          "name": "a voter sees the revised relay list (replicated)",
+          "pass": true
+        },
+        {
+          "name": "a rename proposal is not surfaced by getDetails (engine behavior, recorded)",
+          "pass": true,
+          "detail": "the proposal renames the network (\"E2E Network (renamed)\"), and getDetails only surfaces proposals under the current name"
+        }
+      ],
+      "startedAtMs": 18018,
+      "durationMs": 459
+    },
+    {
+      "id": "T09",
+      "name": "Officer invitation is created and accepted by a second Authority device",
+      "app": "authority",
+      "kind": "test",
+      "status": "passed",
+      "steps": [
+        {
+          "device": "A",
+          "command": "vt officer invite --name \"Kim Deputy\" --title Deputy --scopes vrg,mel",
+          "ok": true,
+          "wallMs": 227,
+          "daemonMs": 184,
+          "startedAtMs": 18477
+        },
+        {
+          "device": "K1",
+          "command": "vt invite accept \"{\\\"invitePrivate\\\":\\\"dae591e96f82d7582ee3e191053e618782b57be...\" --type of",
+          "ok": true,
+          "wallMs": 127,
+          "daemonMs": 85,
+          "startedAtMs": 18704
+        }
+      ],
+      "checks": [
+        {
+          "name": "officer invitation share created",
+          "pass": true
+        },
+        {
+          "name": "K1 accepted the officer invitation",
+          "pass": true,
+          "detail": "{\"slotCid\":\"bafkreifs7m24coi3lfy62o6bosfqyek3tpbsxxr6pfxmj3blnqdqp2jp5m\",\"accepted\":true}"
+        }
+      ],
+      "startedAtMs": 18477,
+      "durationMs": 355
+    },
+    {
+      "id": "T10",
+      "name": "Authority creates an election (Create Election screen)",
+      "app": "authority",
+      "kind": "test",
+      "status": "passed",
+      "steps": [
+        {
+          "device": "A",
+          "command": "vt election create --title \"E2E Election\" --voting-starts 2026-10-27T05:29:48.484Z --registration-ends 2026-10-27T05:29:48.484Z --ballots-final 2026-10-27T05:29:47.484Z --voting-minutes 3 --step-seconds 15 --threshold 2 --keyholders Kim,Kai",
+          "ok": true,
+          "wallMs": 367,
+          "daemonMs": 320,
+          "startedAtMs": 18832
+        },
+        {
+          "device": "A",
+          "command": "vt election show",
+          "ok": true,
+          "wallMs": 87,
+          "daemonMs": 36,
+          "startedAtMs": 19199
+        },
+        {
+          "device": "V2",
+          "command": "vt election show",
+          "ok": true,
+          "wallMs": 113,
+          "daemonMs": 62,
+          "startedAtMs": 19285
+        }
+      ],
+      "checks": [
+        {
+          "name": "election created with a 10-event timeline and threshold 2",
+          "pass": true,
+          "detail": "{\"registrationEnds\":\"2026-10-27T05:29:48.484Z\",\"ballotsFinal\":\"2026-10-27T05:29:47.484Z\",\"votingStarts\":\"2026-10-27T05:29:48.484Z\",\"accruingVotes\":\"2026-10-27T05:32:48.484Z\",\"hashingVotes\":\"2026-10-27T05:33:03.484Z\",\"releasingKeys\":\"2026-10-27T05:33:18.484Z\",\"tallyingStarts\":\"2026-10-27T05:33:33.484Z\",\"validation\":\"2026-10-27T05:33:48.484Z\",\"certificationStarts\":\"2026-10-27T05:34:03.484Z\",\"closed\":\"2026-10-27T05:34:18.484Z\"}"
+        },
+        {
+          "name": "authority reads the election as Upcoming",
+          "pass": true,
+          "detail": "Upcoming"
+        },
+        {
+          "name": "a voter sees the election (replicated) as Upcoming",
+          "pass": true,
+          "detail": "Upcoming"
+        }
+      ],
+      "startedAtMs": 18831,
+      "durationMs": 567
+    },
+    {
+      "id": "T11",
+      "name": "Ballot: propose, submit for confirmation, sign the ballot task",
+      "app": "authority",
+      "kind": "test",
+      "status": "passed",
+      "steps": [
+        {
+          "device": "A",
+          "command": "vt ballot propose --description \"General ballot\" --question mayor|Mayor|ada,bo,cy --question \"measure-a|Measure A|yes,no\"",
+          "ok": true,
+          "wallMs": 131,
+          "daemonMs": 80,
+          "startedAtMs": 19398
+        },
+        {
+          "device": "A",
+          "command": "vt tasks list",
+          "ok": true,
+          "wallMs": 87,
+          "daemonMs": 40,
+          "startedAtMs": 19529
+        },
+        {
+          "device": "A",
+          "command": "vt ballot confirm --ballot 944d5ff4-5038-49a1-8386-b593078cde77",
+          "ok": true,
+          "wallMs": 1270,
+          "daemonMs": 1222,
+          "startedAtMs": 19616
+        },
+        {
+          "device": "V3",
+          "command": "vt ballot show",
+          "ok": true,
+          "wallMs": 100,
+          "daemonMs": 54,
+          "startedAtMs": 20887
+        }
+      ],
+      "checks": [
+        {
+          "name": "ballot confirmed by the officer signature",
+          "pass": true,
+          "detail": "{\"ballotId\":\"944d5ff4-5038-49a1-8386-b593078cde77\",\"locked\":false,\"confirmed\":true,\"canWithdraw\":false,\"ownTaskOpen\":false}"
+        },
+        {
+          "name": "the confirmation went through a signature task",
+          "pass": true
+        },
+        {
+          "name": "a voter sees the confirmed ballot with both questions",
+          "pass": true,
+          "detail": "[\"mayor\",\"measure-a\"]"
+        }
+      ],
+      "startedAtMs": 19398,
+      "durationMs": 1589
+    },
+    {
+      "id": "T12",
+      "name": "Keyholders: invite, accept on keyholder devices, run the DKG to an election key",
+      "app": "authority",
+      "kind": "test",
+      "status": "passed",
+      "steps": [
+        {
+          "device": "A",
+          "command": "vt keyholder invite --name Kim",
+          "ok": true,
+          "wallMs": 211,
+          "daemonMs": 165,
+          "startedAtMs": 20987
+        },
+        {
+          "device": "A",
+          "command": "vt keyholder invite --name Kai",
+          "ok": true,
+          "wallMs": 240,
+          "daemonMs": 177,
+          "startedAtMs": 21198
+        },
+        {
+          "device": "K1",
+          "command": "vt keyholder accept \"{\\\"invitePrivate\\\":\\\"ab25d63f97dbab8d216b6f99cead00e4873e20b...\"",
+          "ok": true,
+          "wallMs": 257,
+          "daemonMs": 208,
+          "startedAtMs": 21438
+        },
+        {
+          "device": "K2",
+          "command": "vt keyholder accept \"{\\\"invitePrivate\\\":\\\"4ad777e38fd5af270b147e153df5b9aff398d6c...\"",
+          "ok": true,
+          "wallMs": 632,
+          "daemonMs": 584,
+          "startedAtMs": 21439
+        },
+        {
+          "device": "K2",
+          "command": "vt keyholder dkg --until-done --timeout 240",
+          "ok": true,
+          "wallMs": 4379,
+          "daemonMs": 4334,
+          "startedAtMs": 22071
+        },
+        {
+          "device": "K1",
+          "command": "vt keyholder dkg --until-done --timeout 240",
+          "ok": true,
+          "wallMs": 5681,
+          "daemonMs": 5636,
+          "startedAtMs": 22071
+        },
+        {
+          "device": "A",
+          "command": "vt keyholder status",
+          "ok": true,
+          "wallMs": 123,
+          "daemonMs": 79,
+          "startedAtMs": 27752
+        }
+      ],
+      "checks": [
+        {
+          "name": "K1 accepted its keyholder seat",
+          "pass": true,
+          "detail": "baf8d5f6-c79f-4b7a-82c7-738ba63ec82f (attempt 1)"
+        },
+        {
+          "name": "K2 accepted its keyholder seat",
+          "pass": true,
+          "detail": "93af291b-c304-4139-9872-196fada25e7f (attempt 1)"
+        },
+        {
+          "name": "K1 finished the DKG",
+          "pass": true,
+          "detail": "4 driver passes; actions: posted-round-0, posted-round-1, posted-round-2, posted-round-3-ack, posted-round-4"
+        },
+        {
+          "name": "K2 finished the DKG",
+          "pass": true,
+          "detail": "3 driver passes; actions: posted-round-0, posted-round-1, posted-round-2, posted-round-3-ack, posted-round-4, published-election-key"
+        },
+        {
+          "name": "both keyholders derived the same joint public key",
+          "pass": true
+        },
+        {
+          "name": "the authority sees the election key",
+          "pass": true
+        }
+      ],
+      "startedAtMs": 20987,
+      "durationMs": 6888
+    },
+    {
+      "id": "T13",
+      "name": "Voter registration ceremony + officer review (sync, approve, associate)",
+      "app": "both",
+      "kind": "test",
+      "status": "passed",
+      "steps": [
+        {
+          "device": "A",
+          "command": "vt registration sync",
+          "ok": true,
+          "wallMs": 227,
+          "daemonMs": 178,
+          "startedAtMs": 27876
+        },
+        {
+          "device": "A",
+          "command": "vt registration list --status p",
+          "ok": true,
+          "wallMs": 93,
+          "daemonMs": 40,
+          "startedAtMs": 28103
+        },
+        {
+          "device": "A",
+          "command": "vt registrants list",
+          "ok": true,
+          "wallMs": 80,
+          "daemonMs": 33,
+          "startedAtMs": 28197
+        },
+        {
+          "device": "A",
+          "command": "vt registration sync",
+          "ok": true,
+          "wallMs": 572,
+          "daemonMs": 479,
+          "startedAtMs": 31278
+        },
+        {
+          "device": "A",
+          "command": "vt registration list --status p",
+          "ok": true,
+          "wallMs": 79,
+          "daemonMs": 35,
+          "startedAtMs": 31851
+        },
+        {
+          "device": "A",
+          "command": "vt registration approve --request 346a824c-bb69-428e-bfd9-4657fcb7a245",
+          "ok": true,
+          "wallMs": 1058,
+          "daemonMs": 1015,
+          "startedAtMs": 31930
+        },
+        {
+          "device": "A",
+          "command": "vt registration approve --request b78f111d-dd14-4a7a-82d2-c072001f0260",
+          "ok": true,
+          "wallMs": 693,
+          "daemonMs": 651,
+          "startedAtMs": 32988
+        },
+        {
+          "device": "A",
+          "command": "vt registration approve --request 5e9ec669-a5a5-4cd5-b852-8e3c6cbe17e4",
+          "ok": true,
+          "wallMs": 681,
+          "daemonMs": 635,
+          "startedAtMs": 33681
+        },
+        {
+          "device": "A",
+          "command": "vt registrants list",
+          "ok": true,
+          "wallMs": 64,
+          "daemonMs": 22,
+          "startedAtMs": 34363
+        },
+        {
+          "device": "V3",
+          "command": "vt register --first Cy --last Young --email v3@example.org --timeout 240",
+          "ok": true,
+          "wallMs": 10510,
+          "daemonMs": 10460,
+          "startedAtMs": 27876
+        },
+        {
+          "device": "A",
+          "command": "vt registration sync",
+          "ok": true,
+          "wallMs": 2058,
+          "daemonMs": 1975,
+          "startedAtMs": 37428
+        },
+        {
+          "device": "A",
+          "command": "vt registration list --status p",
+          "ok": true,
+          "wallMs": 64,
+          "daemonMs": 19,
+          "startedAtMs": 39487
+        },
+        {
+          "device": "A",
+          "command": "vt registrants list",
+          "ok": true,
+          "wallMs": 71,
+          "daemonMs": 27,
+          "startedAtMs": 39551
+        },
+        {
+          "device": "V1",
+          "command": "vt register --first Ada --last Lovelace --email v1@example.org --timeout 240",
+          "ok": true,
+          "wallMs": 12510,
+          "daemonMs": 12460,
+          "startedAtMs": 27875
+        },
+        {
+          "device": "V2",
+          "command": "vt register --first Bo --last Diddley --email v2@example.org --timeout 240",
+          "ok": true,
+          "wallMs": 12563,
+          "daemonMs": 12513,
+          "startedAtMs": 27876
+        },
+        {
+          "device": "A",
+          "command": "vt registration sync",
+          "ok": true,
+          "wallMs": 1536,
+          "daemonMs": 1482,
+          "startedAtMs": 42624
+        },
+        {
+          "device": "A",
+          "command": "vt registration list --status p",
+          "ok": true,
+          "wallMs": 61,
+          "daemonMs": 18,
+          "startedAtMs": 44160
+        },
+        {
+          "device": "A",
+          "command": "vt registrants list",
+          "ok": true,
+          "wallMs": 64,
+          "daemonMs": 21,
+          "startedAtMs": 44220
+        },
+        {
+          "device": "V1",
+          "command": "vt registration status --wait --timeout 120",
+          "ok": true,
+          "wallMs": 97,
+          "daemonMs": 47,
+          "startedAtMs": 44284
+        },
+        {
+          "device": "V2",
+          "command": "vt registration status --wait --timeout 120",
+          "ok": true,
+          "wallMs": 97,
+          "daemonMs": 46,
+          "startedAtMs": 44285
+        },
+        {
+          "device": "V3",
+          "command": "vt registration status --wait --timeout 120",
+          "ok": true,
+          "wallMs": 97,
+          "daemonMs": 49,
+          "startedAtMs": 44285
+        }
+      ],
+      "checks": [
+        {
+          "name": "V1 submitted, got the challenge and answered it",
+          "pass": true,
+          "detail": "{\"registrationSubmittedMs\":93,\"associationSubmittedMs\":104,\"challengeWaitMs\":12157,\"attestationSubmittedMs\":70}"
+        },
+        {
+          "name": "V2 submitted, got the challenge and answered it",
+          "pass": true,
+          "detail": "{\"registrationSubmittedMs\":200,\"associationSubmittedMs\":80,\"challengeWaitMs\":12106,\"attestationSubmittedMs\":64}"
+        },
+        {
+          "name": "V3 submitted, got the challenge and answered it",
+          "pass": true,
+          "detail": "{\"registrationSubmittedMs\":140,\"associationSubmittedMs\":106,\"challengeWaitMs\":10072,\"attestationSubmittedMs\":101}"
+        },
+        {
+          "name": "officer approved all 3 registration requests",
+          "pass": true,
+          "detail": "3 approved"
+        },
+        {
+          "name": "all 3 registrants have a device association",
+          "pass": true,
+          "detail": "{\"associated\":3,\"challenges\":3}"
+        },
+        {
+          "name": "V1 sees itself registered",
+          "pass": true,
+          "detail": "registered"
+        },
+        {
+          "name": "V2 sees itself registered",
+          "pass": true,
+          "detail": "registered"
+        },
+        {
+          "name": "V3 sees itself registered",
+          "pass": true,
+          "detail": "registered"
+        }
+      ],
+      "startedAtMs": 27875,
+      "durationMs": 16507
+    },
+    {
+      "id": "T14",
+      "name": "Casting before voting opens is refused",
+      "app": "voter",
+      "kind": "test",
+      "status": "passed",
+      "steps": [
+        {
+          "device": "V1",
+          "command": "vt vote cast --select mayor=ada --select measure-a=yes",
+          "ok": false,
+          "wallMs": 144,
+          "daemonMs": 98,
+          "startedAtMs": 44382,
+          "error": {
+            "name": "Error",
+            "code": "window-closed",
+            "message": "voting is not open (lifecycle state Upcoming)"
+          }
+        }
+      ],
+      "checks": [
+        {
+          "name": "refused with window-closed",
+          "pass": true,
+          "detail": "{\"name\":\"Error\",\"code\":\"window-closed\",\"message\":\"voting is not open (lifecycle state Upcoming)\"}"
+        }
+      ],
+      "startedAtMs": 44382,
+      "durationMs": 144
+    },
+    {
+      "id": "W1",
+      "name": "Wait for votingStarts (timeline, not work)",
+      "kind": "wait",
+      "app": "-",
+      "status": "waited",
+      "steps": [],
+      "checks": [],
+      "durationMs": 214307,
+      "startedAtMs": 258833
+    },
+    {
+      "id": "T15",
+      "name": "Voters cast their votes (Review & Submit), read the receipt",
+      "app": "voter",
+      "kind": "test",
+      "status": "passed",
+      "steps": [
+        {
+          "device": "V1",
+          "command": "vt vote cast --select mayor=ada --select measure-a=yes",
+          "ok": true,
+          "wallMs": 194,
+          "daemonMs": 141,
+          "startedAtMs": 258833
+        },
+        {
+          "device": "V3",
+          "command": "vt vote cast --select mayor=ada --select measure-a=no",
+          "ok": true,
+          "wallMs": 246,
+          "daemonMs": 198,
+          "startedAtMs": 258835
+        },
+        {
+          "device": "V2",
+          "command": "vt vote cast --select mayor=bo --select measure-a=yes",
+          "ok": true,
+          "wallMs": 248,
+          "daemonMs": 200,
+          "startedAtMs": 258834
+        },
+        {
+          "device": "V2",
+          "command": "vt vote receipt",
+          "ok": true,
+          "wallMs": 49,
+          "daemonMs": 6,
+          "startedAtMs": 259082
+        },
+        {
+          "device": "V1",
+          "command": "vt vote cast --select mayor=ada --select measure-a=yes",
+          "ok": false,
+          "wallMs": 100,
+          "daemonMs": 57,
+          "startedAtMs": 259131,
+          "error": {
+            "name": "Error",
+            "code": "already-saved",
+            "message": "a vote is already saved for this election (use --replace to re-cast before sending)"
+          }
+        }
+      ],
+      "checks": [
+        {
+          "name": "V1 saved a signed, sealed vote",
+          "pass": true,
+          "detail": "2026-10-27T05:29:48.672Z"
+        },
+        {
+          "name": "V2 saved a signed, sealed vote",
+          "pass": true,
+          "detail": "2026-10-27T05:29:48.729Z"
+        },
+        {
+          "name": "V3 saved a signed, sealed vote",
+          "pass": true,
+          "detail": "2026-10-27T05:29:48.725Z"
+        },
+        {
+          "name": "the receipt opens and holds exactly the selections",
+          "pass": true,
+          "detail": "{\"mayor\":\"bo\",\"measure-a\":\"yes\"}"
+        },
+        {
+          "name": "a second cast is refused (already-saved)",
+          "pass": true,
+          "detail": "{\"name\":\"Error\",\"code\":\"already-saved\",\"message\":\"a vote is already saved for this election (use --replace to re-cast before sending)\"}"
+        }
+      ],
+      "startedAtMs": 258833,
+      "durationMs": 399
+    },
+    {
+      "id": "T16",
+      "name": "Voters send their votes through a pool (min 3) via the authority rendezvous",
+      "app": "voter",
+      "kind": "test",
+      "status": "passed",
+      "steps": [
+        {
+          "device": "V2",
+          "command": "vt vote send",
+          "ok": true,
+          "wallMs": 24397,
+          "daemonMs": 24348,
+          "startedAtMs": 259232
+        },
+        {
+          "device": "V1",
+          "command": "vt vote send",
+          "ok": true,
+          "wallMs": 24577,
+          "daemonMs": 24525,
+          "startedAtMs": 259232
+        },
+        {
+          "device": "V3",
+          "command": "vt vote send",
+          "ok": true,
+          "wallMs": 24595,
+          "daemonMs": 24547,
+          "startedAtMs": 259233
+        }
+      ],
+      "checks": [
+        {
+          "name": "V1 vote sent in a committed block",
+          "pass": true,
+          "detail": "[{\"ballotId\":\"944d5ff4-5038-49a1-8386-b593078cde77\",\"status\":\"sent\",\"cid\":\"bafkreibsp7r3pygy6w33mgokdmc5bsxxfivycmudnqxl2xvatg7cepcso4\"}]"
+        },
+        {
+          "name": "V2 vote sent in a committed block",
+          "pass": true,
+          "detail": "[{\"ballotId\":\"944d5ff4-5038-49a1-8386-b593078cde77\",\"status\":\"sent\",\"cid\":\"bafkreibsp7r3pygy6w33mgokdmc5bsxxfivycmudnqxl2xvatg7cepcso4\"}]"
+        },
+        {
+          "name": "V3 vote sent in a committed block",
+          "pass": true,
+          "detail": "[{\"ballotId\":\"944d5ff4-5038-49a1-8386-b593078cde77\",\"status\":\"sent\",\"cid\":\"bafkreibsp7r3pygy6w33mgokdmc5bsxxfivycmudnqxl2xvatg7cepcso4\"}]"
+        },
+        {
+          "name": "all three votes landed in ONE block",
+          "pass": true,
+          "detail": "[\"bafkreibsp7r3pygy6w33mgokdmc5bsxxfivycmudnqxl2xvatg7cepcso4\"]"
+        }
+      ],
+      "startedAtMs": 259232,
+      "durationMs": 24596
+    },
+    {
+      "id": "T17",
+      "name": "Keyholders release their key shares once releasingKeys opens",
+      "app": "authority",
+      "kind": "test",
+      "status": "passed",
+      "steps": [
+        {
+          "device": "K1",
+          "command": "vt keys release",
+          "ok": true,
+          "wallMs": 437,
+          "daemonMs": 358,
+          "startedAtMs": 469833
+        },
+        {
+          "device": "K2",
+          "command": "vt keys release",
+          "ok": true,
+          "wallMs": 519,
+          "daemonMs": 443,
+          "startedAtMs": 469835
+        }
+      ],
+      "checks": [
+        {
+          "name": "K1 released its share",
+          "pass": true,
+          "detail": "{\"electionId\":\"election-1793078748526\",\"revision\":0,\"releasingKeysAt\":1793079198484,\"hasEnteredReleasingKeys\":true,\"phase\":\"reconstructable\",\"threshold\":2,\"participants\":2,\"releasedCount\":2,\"releasedUserIds\":[\"93af291b-c304-4139-9872-196fada25e7f\",\"baf8d5f6-c79f-4b7a-82c7-738ba63ec82f\"],\"awaitingUserIds\":[],\"rejectedReleases\":[],\"electionKey\":{\"electionId\":\"election-1793078748526\",\"revision\":0,\"attempt\":1,\"jointPublicKey\":\"0278962d8e78ba12772455191b08e4aa0140c26b69e7b73a6c15c3a8e30a18a24b\",\"groupCommitments\":[\"0278962d8e78ba12772455191b08e4aa0140c26b69e7b73a6c15c3a8e30a18a24b\",\"03aff82780a79ba5a6c407f906fec74c3e89d3cf14aed8c4c4fb38aef934ac0894\"],\"threshold\":2,\"participants\":2,\"publishedAt\":\"2026-10-27T05:25:55.927Z\",\"publisherUserId\":\"93af291b-c304-4139-9872-196fada25e7f\"},\"self\":{\"userId\":\"baf8d5f6-c79f-4b7a-82c7-738ba63ec82f\",\"isParticipant\":true,\"hasReleased\":true,\"hasShare\":false}}"
+        },
+        {
+          "name": "K2 released its share",
+          "pass": true,
+          "detail": "{\"electionId\":\"election-1793078748526\",\"revision\":0,\"releasingKeysAt\":1793079198484,\"hasEnteredReleasingKeys\":true,\"phase\":\"reconstructable\",\"threshold\":2,\"participants\":2,\"releasedCount\":2,\"releasedUserIds\":[\"93af291b-c304-4139-9872-196fada25e7f\",\"baf8d5f6-c79f-4b7a-82c7-738ba63ec82f\"],\"awaitingUserIds\":[],\"rejectedReleases\":[],\"electionKey\":{\"electionId\":\"election-1793078748526\",\"revision\":0,\"attempt\":1,\"jointPublicKey\":\"0278962d8e78ba12772455191b08e4aa0140c26b69e7b73a6c15c3a8e30a18a24b\",\"groupCommitments\":[\"0278962d8e78ba12772455191b08e4aa0140c26b69e7b73a6c15c3a8e30a18a24b\",\"03aff82780a79ba5a6c407f906fec74c3e89d3cf14aed8c4c4fb38aef934ac0894\"],\"threshold\":2,\"participants\":2,\"publishedAt\":\"2026-10-27T05:25:55.927Z\",\"publisherUserId\":\"93af291b-c304-4139-9872-196fada25e7f\"},\"self\":{\"userId\":\"93af291b-c304-4139-9872-196fada25e7f\",\"isParticipant\":true,\"hasReleased\":true,\"hasShare\":false}}"
+        }
+      ],
+      "startedAtMs": 283828,
+      "waitMs": 186002,
+      "durationMs": 186527
+    },
+    {
+      "id": "T18",
+      "name": "Election results: reconstruct the key, open the block, tally",
+      "app": "authority",
+      "kind": "test",
+      "status": "passed",
+      "steps": [
+        {
+          "device": "A",
+          "command": "vt election results",
+          "ok": true,
+          "wallMs": 127,
+          "daemonMs": 84,
+          "startedAtMs": 470355
+        }
+      ],
+      "checks": [
+        {
+          "name": "one block with 3 entries opened",
+          "pass": true,
+          "detail": "[{\"blockCid\":\"bafkreibsp7r3pygy6w33mgokdmc5bsxxfivycmudnqxl2xvatg7cepcso4\",\"ballotId\":\"944d5ff4-5038-49a1-8386-b593078cde77\",\"entries\":3,\"opened\":3}]"
+        },
+        {
+          "name": "tally matches the votes cast (mayor: ada 2, bo 1; measure-a: yes 2, no 1)",
+          "pass": true,
+          "detail": "{\"944d5ff4-5038-49a1-8386-b593078cde77/mayor\":{\"bo\":1,\"ada\":2},\"944d5ff4-5038-49a1-8386-b593078cde77/measure-a\":{\"yes\":2,\"no\":1}}"
+        },
+        {
+          "name": "3 voter rows recorded",
+          "pass": true,
+          "detail": "3"
+        }
+      ],
+      "startedAtMs": 470355,
+      "durationMs": 127
+    },
+    {
+      "id": "T19",
+      "name": "Stop all daemons",
+      "app": "both",
+      "kind": "teardown",
+      "status": "passed",
+      "steps": [
+        {
+          "device": "V3",
+          "command": "vt daemon stop",
+          "ok": true,
+          "wallMs": 47,
+          "daemonMs": 0,
+          "startedAtMs": 470484
+        },
+        {
+          "device": "A",
+          "command": "vt daemon stop",
+          "ok": true,
+          "wallMs": 49,
+          "daemonMs": 0,
+          "startedAtMs": 470482
+        },
+        {
+          "device": "K1",
+          "command": "vt daemon stop",
+          "ok": true,
+          "wallMs": 49,
+          "daemonMs": 0,
+          "startedAtMs": 470483
+        },
+        {
+          "device": "V1",
+          "command": "vt daemon stop",
+          "ok": true,
+          "wallMs": 48,
+          "daemonMs": 0,
+          "startedAtMs": 470484
+        },
+        {
+          "device": "V2",
+          "command": "vt daemon stop",
+          "ok": true,
+          "wallMs": 48,
+          "daemonMs": 0,
+          "startedAtMs": 470484
+        },
+        {
+          "device": "K2",
+          "command": "vt daemon stop",
+          "ok": true,
+          "wallMs": 49,
+          "daemonMs": 0,
+          "startedAtMs": 470483
+        },
+        {
+          "device": "VX",
+          "command": "vt daemon stop",
+          "ok": true,
+          "wallMs": 48,
+          "daemonMs": 0,
+          "startedAtMs": 470484
+        }
+      ],
+      "checks": [
+        {
+          "name": "all daemons stopped",
+          "pass": true
+        }
+      ],
+      "startedAtMs": 470482,
+      "durationMs": 50
+    }
+  ],
+  "observations": [],
+  "history": [
+    {
+      "ranAt": "2026-10-27T04:47:35.306Z",
+      "passed": 1,
+      "total": 18,
+      "totalMs": 4041,
+      "note": "CLI defect: the test read admin details in the wrong shape and the skip rule cascaded the failure to every later test. Fixed before run 2."
+    },
+    {
+      "ranAt": "2026-10-27T04:48:12.540Z",
+      "passed": 12,
+      "total": 18,
+      "totalMs": 386308,
+      "note": "CLI defects: `registration list` and `registrants list` read `items` instead of `rows`, so the officer approved nothing and no voter registered; `network revise` tried a rename, which the engine does not surface (recorded as a finding). Fixed before run 3."
+    },
+    {
+      "ranAt": "2026-10-27T05:05:24.640Z",
+      "passed": 18,
+      "total": 18,
+      "totalMs": 468660,
+      "note": "All tests passed."
+    },
+    {
+      "ranAt": "2026-10-27T05:06:09.111Z",
+      "passed": null,
+      "total": 18,
+      "totalMs": null,
+      "note": "Stopped during T12. K2's keyholder accept hit `invite-unverifiable` (the invitation row had not replicated to K2 yet), and the CLI kept the identity it had provisioned instead of discarding it as the app does; K2's DKG then failed `signer-key-mismatch` and K1 waited out 240 s. Fixed: accept now re-reads and discards on failure like keyholder-accept.ts, the runner re-pastes a share the device cannot verify yet, and `keyholder dkg` follows the app's driveKeyholderDkg."
+    },
+    {
+      "ranAt": "2026-10-27T05:24:44.368Z",
+      "passed": 14,
+      "total": 18,
+      "totalMs": 714766,
+      "note": "Not passed: T12, T16, T17, T18. Both keyholders accepted at once; K2's accept (after 4 not-found and 1 invite-unverifiable while the invitation replicated) committed for 22.7 s and failed `Multi-collection commit lost a stale race … Pend failed for collection UserKey`. The engine does not retry it; the runner then gave up, K2 was never seated, the DKG stayed blocked and send/release/tally had no election key. Runner changed to retry a lost race (as a keyholder tapping Accept again) and record each loss as an observation."
+    },
+    {
+      "ranAt": "2026-10-27T05:33:20.187Z",
+      "passed": 18,
+      "total": 18,
+      "totalMs": 470532,
+      "note": "All tests passed."
+    }
+  ]
+}

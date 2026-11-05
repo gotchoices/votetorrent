@@ -125,6 +125,29 @@ library's `dist/` is rebuilt. A typical loop:
 5. Restart Metro with `yarn start --reset-cache` so the app re-bundles the new
    `dist/`.
 
+## Yarn patches
+
+A few upstream packages carry fixes that are not released yet. Each is a
+`yarn patch` under `.yarn/patches/`, wired in through the root `resolutions` and
+the consumer's `patch:` descriptor — read the version off the filename or the
+descriptor. What each one carries, which neither file says:
+
+| Package | What the patch carries |
+| --- | --- |
+| `@serfab/cadre-core` | The public-observer protocol that lets the no-login election view join a public strand (rationale in `patches/serfab-cadre-core-public-observer.md`), plus opt-in strand edge hosting and strand-address withholding. Phones never turn the opt-ins on. |
+| `@optimystic/db-p2p` | Memoizes the offline verification of a claim's proof in `cluster/certified-claims.js`; re-verifying the same signatures every read-repair window cost about a fifth of an idle Voter's JS time on Hermes. |
+| `@quereus/quereus` | Coerces datetime values before immediate CHECK constraints run. |
+| `@libp2p/websockets` | Closes an aborted dial's socket, and never sends the reserved close code 1006. |
+| `react-native-nitro-modules` | `JSICache` drops released references when its vectors fill; unpatched, every value passed to a native method leaked until the runtime was torn down. Guarded by `apps/VoteTorrentVoter/__tests__/nitro-jsicache-prune.test.ts`. Native: needs an app rebuild. |
+| `rn-leveldb` | All databases share one 32 MB block cache and keep a 1 MB write buffer (Quereus opens one database per table and index). Native: needs an app rebuild. |
+| `@react-native-documents/picker` | Reads `currentActivity` from the React context, for React Native 0.87. |
+
+To change a patch, run `yarn patch <pkg>@npm:<version>`, edit the extracted
+copy, and `yarn patch-commit`. On a version bump, dry-run the old patch against
+the new tarball first (`patch -p1 --dry-run`) and re-base only the hunks that
+fail. `packages/vote-engine/test/no-portal-vendor-regression.spec.ts` fails if a
+`portal:` or `./vendor/` resolution comes back.
+
 ## React Native / Hermes constraints
 
 The P2P and SQL stack was written for Node and runs here on Hermes. Several

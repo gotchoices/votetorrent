@@ -35,12 +35,25 @@ export interface IElectionEngine {
     keyholder: KeyholderInvite,
     electionId: string
   ): Promise<void>
-  /** D-03: Creates the ballot SignatureTask (+ BallotSignatureTaskExtension + unsigned AdminSigning) so officers can sign the proposed ballot. */
-  submitBallotForConfirmation(ballotId: string): Promise<void>
+  /**
+   * D-03/D-08: Creates the ballot SignatureTask (+ BallotSignatureTaskExtension + unsigned
+   * AdminSigning) so officers can sign the proposed ballot.
+   *
+   * `sign` is OPTIONAL and is invoked ONLY when the authority's `ceb` threshold is above 1 — to
+   * record the submitting officer's own signature at submit time (D-08), before any sibling Task
+   * is created. At threshold 1 the callback is never invoked, matching the pre-62-11 behavior
+   * byte-for-byte (no signature collected at submit, self-confirm via D-06).
+   */
+  submitBallotForConfirmation(ballotId: string, sign?: (digest: Uint8Array) => Promise<Signature>): Promise<void>
   /** D-05: Deletes the pending Task + BallotSignatureTaskExtension, unlocking the proposed ballot for editing. */
   withdrawBallotConfirmation(ballotId: string): Promise<void>
-  /** D-05 / D-09: Returns the edit-lock state (locked = pending Task exists) and confirmation state (confirmed = finalized Ballot exists). */
-  getBallotConfirmationState(ballotId: string): Promise<{ locked: boolean; confirmed: boolean }>
+  /**
+   * D-05 / D-09: Returns the edit-lock state (locked = pending Task exists) and confirmation state
+   * (confirmed = finalized Ballot exists). `canWithdraw` = an unreached open session whose
+   * AdminSigning.UserId is the caller (the same rule withdrawBallotConfirmation enforces).
+   * `ownTaskOpen` = an open ballot Task for this ballot whose UserId is the caller.
+   */
+  getBallotConfirmationState(ballotId: string): Promise<{ locked: boolean; confirmed: boolean; canWithdraw: boolean; ownTaskOpen: boolean }>
   buildProposeBallot(): IElectionProposeBallotBuilder
   buildProposeRevision(): IElectionProposeRevisionBuilder
   buildInviteKeyholder(): IElectionInviteKeyholderBuilder

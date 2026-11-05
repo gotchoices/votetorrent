@@ -1,7 +1,14 @@
-import { MisuseError, QuereusError } from '@quereus/quereus'
+import { findDuplicateKeyholderName } from '../election/keyholder-names.js'
+import { rethrow as rethrowHelper } from '../signing/ceremony-helpers.js'
 import { ElectionEngine } from '../election/election-engine.js'
 import { digestToBytes, fromCanonicalDatetime, nowCanonicalDatetime, parseJsonOr, toCanonicalDatetime } from '../utils.js'
 import { allocateTid } from '../database/tid-allocator.js'
+import { verifyUserKeyMembership } from '../user/verify-user-key.js'
+import {
+  adminSignatureTaskExtensionInserter,
+  computeRadProposalDigest,
+  readProposedRosterJson
+} from '../authority/rad-roster-digest.js'
 import type { Database } from '@quereus/quereus'
 import type { EngineContext } from '../types.js'
 import type {
@@ -22,6 +29,7 @@ import type {
 import { ElectionsCreateElectionBuilder } from './builders/elections-create-election-builder.js'
 import { ElectionsAdjustElectionBuilder } from './builders/elections-adjust-election-builder.js'
 import { SigningEngine } from '../signing/signing-engine.js'
+import { adminSigningKeyValidity } from '../signing/signer-validity.js'
 
 // Phase 999.1 D-01/D-02/D-03 — Tids for ElectionsEngine batches are allocated
 // through the shared durable, peer-safe allocator (`tid-allocator.ts`,
@@ -125,9 +133,14 @@ export class ElectionsEngine implements IElectionsEngine {
   /**
    * ELEC-05 (narrative) / `adjustElection` (interface) — UPSERT the
    * ProposedElection + ProposedElectionRevision pair for an election. The
-   * schema's ProposedElection.UserValid CHECK gates on an Officer with scope
-   * 'mel', a non-expired UserKey matching `context.UserKey`, and a
-   * SignatureValid call over the row digest.
+   * schema's ProposedElection.UserValid / ProposedElectionRevision.UserValid
+   * CHECKs are a dumb `context.IsUserValid` gate the engine computes into.
+   * D-21 (Class B): this path carries no `Signature` argument, so
+   * `IsUserValid` is bound to registered/unexpired UserKey membership only,
+   * via `verifyUserKeyMembership` — resolved ONCE per invocation and reused
+   * across all four `with context` clauses below (two branches x two
+   * tables), not a signature verification. See `election-engine.ts`'s
+   * `proposeRevision`/`proposeBallot` for the same treatment.
    *
    * A proposal is a *pending* amendment keyed by `ProposedElection.Id`
    * (primary key), so re-proposing for the same election REPLACES the
@@ -138,6 +151,11 @@ export class ElectionsEngine implements IElectionsEngine {
    */
   async adjustElection (election: ElectionInit): Promise<void> {
     this.requireCtx('adjustElection')
+    // 62-104 (IN-06): a keyholder slot binds to its invitee by name, so names are unique per election.
+    // Refused before any Tid is reserved or row written.
+    if (findDuplicateKeyholderName((election.revision?.keyholders ?? []).map(k => k.name ?? '')) !== undefined) {
+      throw Object.assign(new Error('Two keyholders on one election cannot share a name'), { code: 'duplicate-keyholder-name' })
+    }
     const tid = await allocateTid(this.ctx!.db, 'elections')
     const e = election.election
     // IN-24 (17-REVIEW): the revision row belongs to THIS proposal — a
@@ -149,7 +167,13 @@ export class ElectionsEngine implements IElectionsEngine {
 				`ElectionsEngine.adjustElection: revision.electionId (${election.revision.electionId}) does not match election.id (${e.id})`
       )
     }
+    const userId = this.ctx!.user?.id ?? null
     const signerKey = this.ctx!.user?.activeKeys?.[0]?.key ?? null
+    // D-21 (Class B): resolved ONCE per invocation and reused across all four
+    // `with context` clauses below — no Signature is available on this path,
+    // so registered/unexpired UserKey membership is the whole of real
+    // IsUserValid here.
+    const membership = await verifyUserKeyMembership(this.ctx!, userId, signerKey)
     try {
       // WR-24 (17-REVIEW): the ProposedElection + ProposedElectionRevision
       // inserts must be atomic — a second-insert failure would otherwise
@@ -167,7 +191,7 @@ export class ElectionsEngine implements IElectionsEngine {
       await this.ctx!.db.exec(
         existingCore
 					? `update ProposedElection
-						with context UserId = :userId, UserKey = :userKey, Signature = :signature, Tid = ${tid}, now = :now, IsUserValid = true
+						with context UserId = :userId, UserKey = :userKey, Signature = :signature, Tid = ${tid}, now = :now, IsUserValid = :isUserValid
 						set
 							AuthorityId = :authorityId,
 							Title = :title,
@@ -185,7 +209,7 @@ export class ElectionsEngine implements IElectionsEngine {
 					BallotDeadline,
 					Type
 				)
-				with context UserId = :userId, UserKey = :userKey, Signature = :signature, Tid = ${tid}, now = :now, IsUserValid = true
+				with context UserId = :userId, UserKey = :userKey, Signature = :signature, Tid = ${tid}, now = :now, IsUserValid = :isUserValid
 				values (
 					:id,
 					:authorityId,
@@ -205,13 +229,14 @@ export class ElectionsEngine implements IElectionsEngine {
           revisionDeadline: e.revisionDeadline,
           ballotDeadline: e.ballotDeadline,
           type: e.type,
-          userId: this.ctx!.user?.id ?? null,
+          userId,
           userKey: signerKey,
           // No application-level signature is carried on ElectionInit; the
           // caller pre-signs via the signing engine and binds the signature
           // through the AdminSigning/AdminSignature pipeline. Phase 6 /
           // TEST-01 will tighten this contract to require a Signature here.
           signature: null,
+          isUserValid: membership.valid,
           now: nowCanonicalDatetime()
         }
       )
@@ -230,7 +255,7 @@ export class ElectionsEngine implements IElectionsEngine {
       await this.ctx!.db.exec(
         existingRev
 					? `update ProposedElectionRevision
-						with context UserId = :userId, UserKey = :userKey, Signature = :signature, Tid = ${revTid}, now = :now, IsUserValid = true
+						with context UserId = :userId, UserKey = :userKey, Signature = :signature, Tid = ${revTid}, now = :now, IsUserValid = :isUserValid
 						set
 							Revision = :revision,
 							RevisionTimestamp = :revisionTimestamp,
@@ -250,7 +275,7 @@ export class ElectionsEngine implements IElectionsEngine {
 					KeyholderThreshold,
 					Keyholders
 				)
-				with context UserId = :userId, UserKey = :userKey, Signature = :signature, Tid = ${revTid}, now = :now, IsUserValid = true
+				with context UserId = :userId, UserKey = :userKey, Signature = :signature, Tid = ${revTid}, now = :now, IsUserValid = :isUserValid
 				values (
 					:electionId,
 					:revision,
@@ -275,9 +300,10 @@ export class ElectionsEngine implements IElectionsEngine {
           // this write, keyholders edited on a revision were silently
           // dropped by the engine (the app compensated with a local cache).
           keyholders: JSON.stringify(r.keyholders ?? []),
-          userId: this.ctx!.user?.id ?? null,
+          userId,
           userKey: signerKey,
           signature: null,
+          isUserValid: membership.valid,
           now: nowCanonicalDatetime()
         }
       )
@@ -321,6 +347,11 @@ export class ElectionsEngine implements IElectionsEngine {
    */
   async createElection (election: ElectionInit, options?: { signingNonce?: string; revisionSigningNonce?: string }): Promise<void> {
     this.requireCtx('createElection')
+    // 62-104 (IN-06): a keyholder slot binds to its invitee by name, so names are unique per election.
+    // Refused before any Tid is reserved or row written.
+    if (findDuplicateKeyholderName((election.revision?.keyholders ?? []).map(k => k.name ?? '')) !== undefined) {
+      throw Object.assign(new Error('Two keyholders on one election cannot share a name'), { code: 'duplicate-keyholder-name' })
+    }
     // D-03: consume the T/T+1 pair reserved as ONE count=2 block (either the
     // pending reservation a prior peekNextElectionTid/seedElectionSigning
     // already made — the common byte-alignment-contract path, see the deviation
@@ -683,6 +714,12 @@ export class ElectionsEngine implements IElectionsEngine {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const nonce: string = (globalThis as any).crypto.randomUUID()
     const now = nowCanonicalDatetime()
+    const isSignerKeyValid = await adminSigningKeyValidity(ctx.db, {
+      userId: signature.signerUserId,
+      signerKey: signature.signerKey,
+      now,
+      isPlaceholderSignature: false
+    })
 
     await ctx.db.exec(
       `insert into AdminSigning (
@@ -695,7 +732,7 @@ export class ElectionsEngine implements IElectionsEngine {
         SignerKey,
         Signature
       )
-      with context now = :now, IsSignerKeyValid = true, IsPlaceholderSignature = false
+      with context now = :now, IsSignerKeyValid = :isSignerKeyValid, IsPlaceholderSignature = false
       values (
         :nonce,
         :authorityId,
@@ -721,6 +758,7 @@ export class ElectionsEngine implements IElectionsEngine {
         signerKey: signature.signerKey,
         signature: signature.signature,
         now,
+        isSignerKeyValid,
       }
     )
 
@@ -834,6 +872,12 @@ export class ElectionsEngine implements IElectionsEngine {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const nonce: string = (globalThis as any).crypto.randomUUID()
     const now = nowCanonicalDatetime()
+    const isSignerKeyValid = await adminSigningKeyValidity(ctx.db, {
+      userId: signature.signerUserId,
+      signerKey: signature.signerKey,
+      now,
+      isPlaceholderSignature: false
+    })
 
     await ctx.db.exec(
       `insert into AdminSigning (
@@ -846,7 +890,7 @@ export class ElectionsEngine implements IElectionsEngine {
         SignerKey,
         Signature
       )
-      with context now = :now, IsSignerKeyValid = true, IsPlaceholderSignature = false
+      with context now = :now, IsSignerKeyValid = :isSignerKeyValid, IsPlaceholderSignature = false
       values (
         :nonce,
         :authorityId,
@@ -873,6 +917,7 @@ export class ElectionsEngine implements IElectionsEngine {
         signerKey: signature.signerKey,
         signature: signature.signature,
         now,
+        isSignerKeyValid,
       }
     )
 
@@ -962,6 +1007,15 @@ export class ElectionsEngine implements IElectionsEngine {
       //    The Digest in step 4 is computed using adminThresholdPolicies read from Admin, NOT from
       //    ProposedAdmin — so the Digest is correct regardless of what ProposedAdmin.ThresholdPolicies
       //    contains (the values should match, but we don't rely on ProposedAdmin being fresh here).
+      // 49-08 (D-21) exemption, D-11-style: this is the SAME debug-only seed helper
+      // documented above (never calls sign() — placeholderKey/placeholderSig, no real
+      // crypto). authority-engine.ts's proposeAdmin now computes a real, verified
+      // IsUserValid for every production caller; this raw-SQL ProposedAdmin insert
+      // stays hardcoded IsUserValid = true on purpose, exactly like its sibling
+      // IsPlaceholderSignature = true a few lines below. Confirmed __DEV__-only via
+      // its sole call site (SettingsScreen.tsx's debug seed button, gated by
+      // `{__DEV__ && (...)}`) — never reachable from a release build. Do not "finish
+      // the job" here; leave this bound to the placeholder.
       try {
         await ctx.db.exec(
           `insert into ProposedAdmin (AuthorityId, EffectiveAt, ThresholdPolicies)
@@ -975,17 +1029,31 @@ export class ElectionsEngine implements IElectionsEngine {
       }
 
       // 4. Insert a fresh AdminSigning row with a NEW nonce.
-      //    Digest uses the same thresholdPolicies value as AdminSignatureTaskExtension.MutationValid
-      //    will look up from ProposedAdmin — they must match byte-for-byte.
+      //    62-03 (D-33/D-34): the Digest now uses the SAME full-roster 'rad' PROPOSAL
+      //    formula AdminSignatureTaskExtension.MutationValid (Trigger B) recomputes —
+      //    Digest(AuthorityId, EffectiveAt, Officers, ThresholdPolicies), no Tid. The
+      //    ThresholdPolicies and roster are RE-READ from ProposedAdmin/ProposedOfficer
+      //    themselves (the exact source the schema CHECK reads), not assumed to match
+      //    `adminThresholdPolicies` (the live Admin table's value) — the ProposedAdmin
+      //    row may already have existed from a prior seed call.
       //    Do NOT call sign() here: AdminSigning must stay unsigned (no AdminSignature) so that
       //    MutationValid's "not exists AdminSignature for uncompleted task" gate passes.
+      const proposedAdminRow = await ctx.db
+        .prepare('select ThresholdPolicies from ProposedAdmin where AuthorityId = :authorityId and EffectiveAt = :adminEffectiveAt')
+        .get({ authorityId, adminEffectiveAt })
+      const proposedThresholdPolicies = (proposedAdminRow?.ThresholdPolicies as string | null) ?? adminThresholdPolicies
+      const rosterJson = await readProposedRosterJson(ctx.db, authorityId, adminEffectiveAt)
+      const digest = await computeRadProposalDigest(ctx.db, {
+        authorityId,
+        effectiveAt: adminEffectiveAt,
+        officers: rosterJson,
+        thresholdPolicies: proposedThresholdPolicies
+      })
       await ctx.db.exec(
         `insert into AdminSigning (Nonce, AuthorityId, AdminEffectiveAt, Scope, Digest, UserId, SignerKey, Signature)
          with context now = :now, IsSignerKeyValid = true, IsPlaceholderSignature = true
-         values (:nonce, :authorityId, :adminEffectiveAt, 'rad',
-                 Digest(:tid, :authorityId, :adminEffectiveAt, :thresholdPolicies),
-                 :userId, :signerKey, :signature)`,
-        { nonce, authorityId, adminEffectiveAt, thresholdPolicies: adminThresholdPolicies, tid, now, userId, signerKey: placeholderKey, signature: placeholderSig }
+         values (:nonce, :authorityId, :adminEffectiveAt, 'rad', :digest, :userId, :signerKey, :signature)`,
+        { nonce, authorityId, adminEffectiveAt, digest, now, userId, signerKey: placeholderKey, signature: placeholderSig }
       )
 
       // 5. Insert Task + AdminSignatureTaskExtension in a single atomic transaction.
@@ -993,6 +1061,9 @@ export class ElectionsEngine implements IElectionsEngine {
       //    within-transaction state is visible to the next statement's inline checks.
       //    The deferred ExtensionExists (on Task) and TaskIdValid (on AdminSignatureTaskExtension)
       //    are both evaluated at COMMIT time when both rows are present.
+      //    62-03: the extension insert now runs through the shared
+      //    adminSignatureTaskExtensionInserter helper (same inserter fanOutSignatureTasks uses).
+      const insertExtension = adminSignatureTaskExtensionInserter(ctx.db, authorityId, adminEffectiveAt, tid)
       await ctx.db.exec('BEGIN')
       try {
         await ctx.db.exec(
@@ -1001,12 +1072,7 @@ export class ElectionsEngine implements IElectionsEngine {
            values (:id, :userId, 'signature', 'admin', :nonce, 0)`,
           { id: signatureTaskId, userId, nonce, tid }
         )
-        await ctx.db.exec(
-          `insert into AdminSignatureTaskExtension (TaskId, AuthorityId, AdminEffectiveAt)
-           with context Tid = :tid
-           values (:taskId, :authorityId, :adminEffectiveAt)`,
-          { taskId: signatureTaskId, authorityId, adminEffectiveAt, tid }
-        )
+        await insertExtension(signatureTaskId as string, userId)
         await ctx.db.exec('COMMIT')
       } catch (err) {
         await ctx.db.exec('ROLLBACK')
@@ -1097,14 +1163,6 @@ export class ElectionsEngine implements IElectionsEngine {
   }
 
   private rethrow (err: unknown, method: string): never {
-    if (err instanceof QuereusError) {
-      throw new Error(`Quereus error (code ${err.code}): ${err.message}`)
-    } else if (err instanceof MisuseError) {
-      throw new Error(`API misuse: ${err.message}`)
-    } else if (err instanceof Error) {
-      throw new Error(`ElectionsEngine.${method}: ${err.message}`)
-    } else {
-      throw new Error(`ElectionsEngine.${method}: unknown error: ${String(err)}`)
-    }
+    return rethrowHelper(err, 'ElectionsEngine', method)
   }
 }

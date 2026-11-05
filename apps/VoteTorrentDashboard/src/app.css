@@ -1,0 +1,44 @@
+/*
+ * VoteTorrent Authority Dashboard — app.css.
+ *
+ * Design tokens and base/reset rules moved to @votetorrent/ui-web's
+ * tokens.css per D-15 — see packages/ui-web/src/tokens.css for the token
+ * declarations, the base/reset rules, and the D-23 probe contract. This
+ * file keeps only the dashboard's own layout primitives: the two-column
+ * grid (carried forward from spike 078, proven not reinvented), its 900px
+ * sidebar collapse, and the panel grid. These are dashboard-specific
+ * layout that the public app (apps/VoteTorrentPublic) must not inherit.
+ *
+ * The dashboard mounts `AdvisoryDisclosure`, `LifecyclePill` and
+ * `DetailsToggle` (via `PreviewAsControl`/`ElectionsPanel`), so it also
+ * imports `@votetorrent/ui-web/components.css` (53-CR01, the D-15 revision)
+ * for those components' default rules — see
+ * packages/ui-web/src/components.css and packages/ui-web/README.md's
+ * "Shared component default styles" section. `.pv-disclosure` and
+ * `.lifecycle-pill` (+ modifiers) used to be declared a second time, here,
+ * in `preview-as.css`/`election-ops.css`; those duplicates were removed in
+ * the same commit that added this import (verified byte-identical rules,
+ * relocated not redesigned — see that plan's SUMMARY).
+ */
+
+@import '@votetorrent/ui-web/tokens.css';
+@import '@votetorrent/ui-web/components.css';
+
+.layout {
+	display: grid;
+	grid-template-columns: 264px 1fr;
+	gap: var(--space-md);
+	padding: var(--space-md);
+}
+
+@media (max-width: 900px) {
+	.layout {
+		grid-template-columns: 1fr;
+	}
+}
+
+.panel-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+	gap: var(--space-md);
+}

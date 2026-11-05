@@ -31,6 +31,22 @@
  *      MessageStream` has no `.source`/`.sink`, so `it-pipe`'s structural duplex check fails and
  *      every outbound gossipsub stream throws `fns.shift(...) is not a function`.
  *
+ * BLOCKER 1 RESOLVED 2026-08-05 (db-p2p 0.18.0). The mechanism worked as designed: the bump turned
+ * the blocker-1 assertions RED, which is this spec's success condition, not a failure. 0.17's
+ * `configuredClusterSize` yardstick (the replication factor, which a genesis cluster definitionally
+ * cannot meet) was replaced by `assumedClusterSize` — "the smallest cohort this deployment can
+ * genuinely field" — defaulting to `minAbsoluteClusterSize` (2) so that, per db-p2p's own
+ * `cluster-policy.ts` prose, "an unconfigured two-node mesh must still be able to transact". The
+ * `allowUnvalidatedSmallCluster` escape also moved from `libp2p-node-base.js` into the new
+ * `cluster/cluster-policy.js` and still defaults false, which keeps issue 2 load-bearing.
+ * Corroborated on device: the 2026-08-03 n=4 run on 0.18.0 logged 0 occurrences of
+ * `membership-not-admitted:low-confidence-downsize`, previously the dominant signal.
+ * Issue draft `db-p2p-membership-gate-blocks-cluster-genesis.md` is closed accordingly.
+ * The blocker-1 assertions are INVERTED rather than deleted, so a regression to a
+ * replication-factor yardstick fails here instead of silently reopening the deadlock.
+ * SCOPE: this closes blocker 1 ONLY. P2P-11 stays open — the same device run still ended
+ * `strandPeers=0` for unrelated reasons. Blockers 2 and 3 below are untouched and still RED-locked.
+ *
  * WHAT THIS SPEC IS FOR. These are UNPATCHED upstream defects — there is no local hunk to guard.
  * So, unlike the earlier patch-presence specs, these assertions lock the DEFECT SIGNATURES in the
  * installed dist. Each assertion is written to FAIL when the defect is fixed upstream, with a message
@@ -99,9 +115,14 @@ const MEMBERSHIP_NOT_ADMITTED_CONST_MARKER = "MEMBERSHIP_NOT_ADMITTED = " + "'me
 const LOW_CONFIDENCE_DOWNSIZE_SUFFIX_MARKER = ':' + 'low-confidence-downsize'
 /** The reason string as it reaches the wire (what the device logs showed) — for messages only. */
 const LOW_CONFIDENCE_DOWNSIZE_WIRE = 'membership-not-admitted' + ':' + 'low-confidence-downsize'
-// The fail-closed branch's only two approve escapes.
-const CONFIGURED_SIZE_UNDEFINED_ESCAPE = 'this.configuredClusterSize === undefined'
-const DECLARED_GTE_CONFIGURED_ESCAPE = 'declared.length >= this.configuredClusterSize'
+// RESOLVED 2026-08-05 in db-p2p 0.18.0 — the 0.17 yardstick `configuredClusterSize` (the
+// replication factor) was replaced by `assumedClusterSize` (the operator's asserted cohort size),
+// which DEFAULTS to a permissive 2. That is the genesis exemption this blocker tracked as missing.
+const DB_P2P_CLUSTER_POLICY = ['@optimystic', 'db-p2p', 'dist', 'src', 'cluster', 'cluster-policy.js']
+const ASSUMED_SIZE_UNDEFINED_ESCAPE = 'this.assumedClusterSize === undefined'
+const ASSUMED_SIZE_YARDSTICK = 'this.admissionFloor(this.' + 'assumedClusterSize' + ')'
+const MIN_ABSOLUTE_CLUSTER_SIZE_DECL = 'minAbsoluteClusterSize' + ' = 2'
+const PERMISSIVE_DEFAULT_MARKER = 'assumedClusterSize: declaredCohortSize ?? ' + 'minAbsoluteClusterSize'
 // Confidence is sourced solely from FRET, which is cold at genesis.
 const FRET_CONFIDENCE_MARKER = 'getNetworkSizeEstimate' + '()' + '.confidence'
 // The escape hatch and its fail-closed default.
@@ -118,9 +139,6 @@ const CLUSTER_POLICY_KEY_MARKER = 'clusterPolicy'
 
 // ── Issue 3 markers — gossipsub / libp2p-3 Stream incompatibility ───────────────────────────────
 const GOSSIPSUB_PKG = ['@chainsafe', 'libp2p-gossipsub', 'package.json']
-const GOSSIPSUB_NESTED_IFACE = [
-  '@chainsafe', 'libp2p-gossipsub', 'node_modules', '@libp2p', 'interface', 'package.json',
-]
 const HOST_IFACE_STREAM_DTS = ['@libp2p', 'interface', 'dist', 'src', 'stream.d.ts']
 const MESSAGE_STREAM_MARKER = 'interface Stream extends ' + 'MessageStream'
 const DUPLEX_STREAM_MARKER = 'interface Stream extends ' + 'Duplex'
@@ -147,29 +165,51 @@ describe('post-peerId-patch blocker 1: db-p2p membership admission gate deadlock
     expect(src.includes(LOW_CONFIDENCE_DOWNSIZE_SUFFIX_MARKER), staleMessage).to.equal(true)
   })
 
-  it('the fail-closed branch still offers no genesis escape (only undefined-size or already-full-size)', () => {
-    const p = resolveInstalled(...DB_P2P_CLUSTER_REPO)
-    const src = stripComments(readFileSync(p as string, 'utf8'))
+  it('RESOLVED in 0.18.0: the fail-closed branch now measures against a permissively-defaulted assumedClusterSize', () => {
+    // INVERTED 2026-08-05 (was: 'the fail-closed branch still offers no genesis escape').
+    //
+    // This assertion did its job — it went RED on the 0.18.0 bump, which is the "GOOD NEWS" case
+    // this spec's header describes. 0.17's `configuredClusterSize` yardstick is gone (0 occurrences);
+    // 0.18 measures the low-confidence branch against `assumedClusterSize`, "the smallest cohort
+    // this deployment can genuinely field", which defaults to `minAbsoluteClusterSize` (2)
+    // precisely so — in db-p2p's own words — "an unconfigured two-node mesh must still be able to
+    // transact". A genesis cluster is no longer rejected by the replication factor it cannot yet
+    // meet, so `membership-not-admitted:low-confidence-downsize` no longer fires at genesis.
+    //
+    // Corroborated on device: the 2026-08-03 n=4 run on 0.18.0 observed 0 occurrences of that
+    // reject reason (it was the dominant signal beforehand). P2P-11 remains open for unrelated
+    // reasons — `strandPeers=0` persisted — so only THIS blocker is closed, not the umbrella.
+    //
+    // The assertion is kept, inverted, so a regression back to a replication-factor yardstick (or a
+    // default that is not permissive) fails here rather than silently reopening the deadlock.
+    const repoSrc = stripComments(readFileSync(resolveInstalled(...DB_P2P_CLUSTER_REPO) as string, 'utf8'))
 
-    // Both known escapes are present, and BOTH are unreachable at genesis for a consumer that sets
-    // clusterSize (cadre-core sets 3): the size is defined, and the declared set is below it.
     expect(
-      src.includes(CONFIGURED_SIZE_UNDEFINED_ESCAPE),
-      'Expected the `' + CONFIGURED_SIZE_UNDEFINED_ESCAPE + '` legacy-approve escape in admitMembership',
+      repoSrc.includes(ASSUMED_SIZE_YARDSTICK),
+      'Expected the low-confidence branch to measure against `' + ASSUMED_SIZE_YARDSTICK + '`. ' +
+      'If this reverted to the replication factor, the genesis deadlock is BACK — re-open ' +
+      '.planning/quick/260731-fm3-file-upstream-issues-for-post-peerid-pat/issues/' +
+      'db-p2p-membership-gate-blocks-cluster-genesis.md and re-run the device n=4 proof.',
     ).to.equal(true)
     expect(
-      src.includes(DECLARED_GTE_CONFIGURED_ESCAPE),
-      'Expected the `' + DECLARED_GTE_CONFIGURED_ESCAPE + '` full-size escape in admitMembership',
+      repoSrc.includes(ASSUMED_SIZE_UNDEFINED_ESCAPE),
+      'Expected the legacy-approve escape `' + ASSUMED_SIZE_UNDEFINED_ESCAPE + '` to survive the rename',
     ).to.equal(true)
 
-    // No third, genesis-shaped escape has appeared.
-    const found = GENESIS_EXEMPTION_TOKENS.filter((t) => src.includes(t))
+    const policyPath = resolveInstalled(...DB_P2P_CLUSTER_POLICY)
+    expect(policyPath, 'Expected db-p2p 0.18+ dist cluster/cluster-policy.js to be installed').to.not.equal(undefined)
+    const policySrc = stripComments(readFileSync(policyPath as string, 'utf8'))
+
     expect(
-      found,
-      'A genesis-shaped exemption token ' + JSON.stringify(found) + ' appeared in db-p2p\'s ' +
-      'admitMembership path. If upstream added a genesis exemption, this blocker may be FIXED — ' +
-      're-run the device n=4 proof and close the db-p2p-membership-gate issue draft.',
-    ).to.deep.equal([])
+      policySrc.includes(MIN_ABSOLUTE_CLUSTER_SIZE_DECL),
+      'Expected `' + MIN_ABSOLUTE_CLUSTER_SIZE_DECL + '` — the permissive floor that makes genesis admissible',
+    ).to.equal(true)
+    expect(
+      policySrc.includes(PERMISSIVE_DEFAULT_MARKER),
+      'Expected the unconfigured default to fall back to the permissive floor (`' +
+      PERMISSIVE_DEFAULT_MARKER + '`). If this now defaults to the replication factor, an ' +
+      'unconfigured mesh cannot transact at genesis and the deadlock is back.',
+    ).to.equal(true)
   })
 
   it('admission confidence is still sourced solely from FRET (cold at genesis) and fails closed', () => {
@@ -186,16 +226,21 @@ describe('post-peerId-patch blocker 1: db-p2p membership admission gate deadlock
       're-verification before filing.',
     ).to.equal(true)
 
-    // The escape hatch exists but defaults false — this is what makes issue 2 (cadre-core not
-    // forwarding it) load-bearing rather than cosmetic.
+    // RELOCATED 2026-08-05: the escape hatch still exists and still defaults false, but 0.18.0
+    // extracted it from `libp2p-node-base.js` into the dedicated `cluster/cluster-policy.js`
+    // module — so reading it from the node base could no longer find it. Assert it where it lives
+    // now. It stays fail-closed by default, which is what keeps issue 2 (cadre-core not forwarding
+    // it) load-bearing rather than cosmetic; genesis is unblocked by the permissive
+    // `assumedClusterSize` default instead, asserted above.
+    const policySrc = stripComments(readFileSync(resolveInstalled(...DB_P2P_CLUSTER_POLICY) as string, 'utf8'))
     expect(
-      src.includes(ALLOW_SMALL_CLUSTER_KEY),
-      'Expected db-p2p to expose the `' + ALLOW_SMALL_CLUSTER_KEY + '` cluster-policy option',
+      policySrc.includes(ALLOW_SMALL_CLUSTER_KEY),
+      'Expected db-p2p to expose the `' + ALLOW_SMALL_CLUSTER_KEY + '` cluster-policy option in ' +
+      'cluster/cluster-policy.js (moved there in 0.18.0 from libp2p-node-base.js)',
     ).to.equal(true)
     expect(
-      new RegExp(ALLOW_SMALL_CLUSTER_KEY + '[^\\n]*\\?\\?\\s*false').test(src),
-      'Expected `' + ALLOW_SMALL_CLUSTER_KEY + '` to still default to false (fail-closed) in db-p2p. ' +
-      'If the default flipped to true, the genesis deadlock may be gone — re-run the device proof.',
+      new RegExp(ALLOW_SMALL_CLUSTER_KEY + '[^\\n]*\\?\\?\\s*false').test(policySrc),
+      'Expected `' + ALLOW_SMALL_CLUSTER_KEY + '` to still default to false (fail-closed) in db-p2p.',
     ).to.equal(true)
   })
 })
@@ -250,75 +295,53 @@ describe('post-peerId-patch blocker 2: cadre-core hardcodes clusterSize and drop
   })
 })
 
-describe('post-peerId-patch blocker 3: db-p2p pairs libp2p 3.x with a gossipsub built for libp2p 2.x', () => {
-  it('gossipsub still depends on a @libp2p/interface major older than the host copy', () => {
-    const gossipPkgPath = resolveInstalled(...GOSSIPSUB_PKG)
-    expect(gossipPkgPath, 'Expected @chainsafe/libp2p-gossipsub to be installed').to.not.equal(undefined)
-    const gossipPkg = JSON.parse(readFileSync(gossipPkgPath as string, 'utf8')) as {
+describe('post-peerId-patch blocker 3 CLOSED: db-p2p no longer ships gossipsub at all', () => {
+  // Was: db-p2p paired `@chainsafe/libp2p-gossipsub@14` (compiled against the libp2p-2 duplex
+  // `Stream`) with `libp2p@3` (whose `Stream extends MessageStream` has no .source/.sink), so every
+  // outbound gossipsub stream threw `fns.shift(...) is not a function`. Filed as
+  // gotchoices/Optimystic#9.
+  //
+  // RESOLVED not by re-pairing but by REMOVAL: `@optimystic/db-p2p@0.25.1` dropped the gossipsub
+  // dependency outright, and with it the 21 packages it dragged in. The three assertions below used
+  // to prove the skew still existed; they now prove it cannot come back silently. A failure here
+  // means gossipsub re-entered the tree — re-read Optimystic#9 before assuming that is safe.
+  it('db-p2p declares no @chainsafe/libp2p-gossipsub dependency', () => {
+    const dbP2pPkgPath = resolveInstalled('@optimystic', 'db-p2p', 'package.json')
+    expect(dbP2pPkgPath, 'Expected @optimystic/db-p2p to be installed').to.not.equal(undefined)
+    const pkg = JSON.parse(readFileSync(dbP2pPkgPath as string, 'utf8')) as {
+      version: string
       dependencies?: Record<string, string>
     }
-    const gossipIfaceRange = gossipPkg.dependencies?.['@libp2p/interface']
-    expect(gossipIfaceRange, 'Expected gossipsub to declare an @libp2p/interface dependency').to.not.equal(undefined)
+    const deps = pkg.dependencies ?? {}
 
-    const hostIfacePath = resolveInstalled('@libp2p', 'interface', 'package.json')
-    expect(hostIfacePath, 'Expected a host @libp2p/interface copy to be installed').to.not.equal(undefined)
-    const hostIfaceVersion = (JSON.parse(readFileSync(hostIfacePath as string, 'utf8')) as { version: string }).version
-
+    expect(deps.libp2p, 'Expected db-p2p to still depend on libp2p').to.not.equal(undefined)
+    expect(majorOf(deps.libp2p as string) >= 3, 'Expected db-p2p to still be on libp2p 3.x or later').to.equal(true)
     expect(
-      majorOf(gossipIfaceRange as string) < majorOf(hostIfaceVersion),
-      'gossipsub\'s @libp2p/interface range (' + String(gossipIfaceRange) + ') is no longer behind the ' +
-      'host copy (' + hostIfaceVersion + '). The major skew may be resolved — re-run the device n=4 ' +
-      'proof, confirm the `fns.shift(...) is not a function` errors are gone from the drone logs, and ' +
-      'close .planning/quick/260731-fm3-file-upstream-issues-for-post-peerid-pat/issues/' +
-      'db-p2p-gossipsub-libp2p3-stream-incompatibility.md.',
-    ).to.equal(true)
+      deps['@chainsafe/libp2p-gossipsub'],
+      'db-p2p ' + pkg.version + ' has re-introduced a @chainsafe/libp2p-gossipsub dependency. That is the ' +
+      'exact pairing gotchoices/Optimystic#9 documents as broken under libp2p 3 — verify the new range is ' +
+      'libp2p-3 aware before accepting it, and restore the skew assertions this block replaced.',
+    ).to.equal(undefined)
   })
 
-  it('the host Stream is a MessageStream while gossipsub\'s nested copy still expects a Duplex', () => {
+  it('no @chainsafe/libp2p-gossipsub copy is installed anywhere in the tree', () => {
+    expect(
+      resolveInstalled(...GOSSIPSUB_PKG),
+      'A @chainsafe/libp2p-gossipsub copy is installed again. Nothing in the stack should pull it since ' +
+      'db-p2p 0.25.1 dropped it; find the new dependant before trusting this tree.',
+    ).to.equal(undefined)
+  })
+
+  it('the host @libp2p/interface still defines the libp2p-3 MessageStream shape that made the pairing impossible', () => {
+    // Kept as the anchor for WHY the removal was the fix: if the host Stream ever goes back to a
+    // duplex, the original pairing stops being incompatible and this whole block needs re-deriving.
     const hostStreamDts = resolveInstalled(...HOST_IFACE_STREAM_DTS)
     expect(hostStreamDts, 'Expected @libp2p/interface dist/src/stream.d.ts to be installed').to.not.equal(undefined)
     const hostSrc = readFileSync(hostStreamDts as string, 'utf8')
     expect(
       hostSrc.includes(MESSAGE_STREAM_MARKER),
-      'Expected the host @libp2p/interface to define `' + MESSAGE_STREAM_MARKER + '` (the libp2p-3 ' +
-      'shape with no .source/.sink). If this changed, re-verify the gossipsub issue draft\'s mechanism.',
-    ).to.equal(true)
-
-    // The nested v2 copy is the one gossipsub was compiled against — a Duplex with .source/.sink.
-    const nestedPkg = resolveInstalled(...GOSSIPSUB_NESTED_IFACE)
-    if (nestedPkg === undefined) {
-      // No nested copy => the skew is gone. That is the fixed state, not the tracked defect.
-      expect.fail(
-        'gossipsub no longer carries a nested @libp2p/interface copy — the major skew appears resolved. ' +
-        'Re-run the device n=4 proof and close the db-p2p-gossipsub-libp2p3-stream-incompatibility.md draft.',
-      )
-    }
-    const nestedConnDts = join(dirname(nestedPkg as string), 'dist', 'src', 'connection.d.ts')
-    expect(existsSync(nestedConnDts), 'Expected the nested @libp2p/interface connection.d.ts').to.equal(true)
-    expect(
-      readFileSync(nestedConnDts, 'utf8').includes(DUPLEX_STREAM_MARKER),
-      'Expected gossipsub\'s nested @libp2p/interface to define `' + DUPLEX_STREAM_MARKER + '` — the ' +
-      'libp2p-2 duplex shape whose absence at runtime causes `fns.shift(...) is not a function`.',
-    ).to.equal(true)
-  })
-
-  it('db-p2p still declares the incompatible pairing in its own manifest', () => {
-    const dbP2pPkgPath = resolveInstalled('@optimystic', 'db-p2p', 'package.json')
-    expect(dbP2pPkgPath, 'Expected @optimystic/db-p2p to be installed').to.not.equal(undefined)
-    const pkg = JSON.parse(readFileSync(dbP2pPkgPath as string, 'utf8')) as {
-      dependencies?: Record<string, string>
-    }
-    const deps = pkg.dependencies ?? {}
-    const libp2pRange = deps.libp2p
-    const gossipRange = deps['@chainsafe/libp2p-gossipsub']
-
-    expect(libp2pRange, 'Expected db-p2p to depend on libp2p').to.not.equal(undefined)
-    expect(gossipRange, 'Expected db-p2p to depend on @chainsafe/libp2p-gossipsub').to.not.equal(undefined)
-    expect(
-      majorOf(libp2pRange as string) >= 3 && majorOf(gossipRange as string) <= 14,
-      'db-p2p\'s libp2p (' + String(libp2pRange) + ') / gossipsub (' + String(gossipRange) + ') pairing ' +
-      'changed. If gossipsub moved past 14 (libp2p-3 aware) or was dropped, this blocker is likely ' +
-      'FIXED — close the db-p2p-gossipsub-libp2p3-stream-incompatibility.md draft.',
+      'Expected the host @libp2p/interface to define `' + MESSAGE_STREAM_MARKER + '`. If the host Stream ' +
+      'reverted to `' + DUPLEX_STREAM_MARKER + '`, re-derive this block from Optimystic#9.',
     ).to.equal(true)
   })
 })

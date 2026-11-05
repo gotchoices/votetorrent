@@ -39,7 +39,7 @@ type Callbacks = Partial<{
 }>;
 
 function renderCard(
-	props: {isRegistered: boolean; draft: RegistrationDraft; registeredAt: string | null},
+	props: {isRegistered: boolean; draft: RegistrationDraft; registeredAt: string | null; networkName?: string},
 	callbacks: Callbacks = {},
 ) {
 	let tr!: renderer.ReactTestRenderer;
@@ -69,6 +69,25 @@ describe('RegistrationCard (REG-01/REG-05)', () => {
 			const tr = renderCard({isRegistered: false, draft: EMPTY_DRAFT, registeredAt: null});
 			expect(tr.root.findAllByProps({testID: 'registration-card-identity-line'}).length).toBe(0);
 			expect(tr.root.findAllByProps({testID: 'registration-card-update'}).length).toBe(0);
+		});
+	});
+
+	describe('network name', () => {
+		it('names the open network in both bodies, never the Utah fallback', () => {
+			const notRegistered = JSON.stringify(
+				renderCard({isRegistered: false, draft: EMPTY_DRAFT, registeredAt: null, networkName: 'Lean Network'}).toJSON(),
+			);
+			expect(notRegistered).toContain('To participate in the Lean Network you will need to register');
+			const registered = JSON.stringify(
+				renderCard({isRegistered: true, draft: REGISTERED_DRAFT, registeredAt: FIXED_REGISTERED_AT, networkName: 'Lean Network'}).toJSON(),
+			);
+			expect(registered).toContain('You have successfully registered for the Lean Network');
+			expect(notRegistered + registered).not.toContain('Utah');
+		});
+
+		it('falls back to the common network name when none is open', () => {
+			const text = JSON.stringify(renderCard({isRegistered: false, draft: EMPTY_DRAFT, registeredAt: null}).toJSON());
+			expect(text).toContain('To participate in the Utah Network you will need to register');
 		});
 	});
 

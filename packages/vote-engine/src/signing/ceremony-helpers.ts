@@ -84,6 +84,35 @@ export function reZuluDatetime (stored: string): string {
 }
 
 /**
+ * 48-11/48-12: reconstructs (ENGINE-WRITTEN values only; a SUBMITTER-signed SubmittedAt must use `resolveSignedSubmittedAt` in signed-submitted-at.ts — UAT 62 gap 2) the EXACT canonical `toIsoZDatetime` byte form (a trailing 'Z' and
+ * fixed 3-digit milliseconds) from a value that has been through a Quereus plain-SELECT
+ * round-trip — which strips the trailing 'Z' AND drops trailing zero fractional digits
+ * (T-42-06). Engine-written `datetime` columns (e.g. ReceivedAt) go through
+ * `toIsoZDatetime`, which (for a numeric `Timestamp`) always emits EXACTLY 3 fractional
+ * digits via `Date.prototype.toISOString()` — so Quereus's "minimal precision" stripping only
+ * ever REMOVES trailing zeros, never changes a non-zero digit. Padding back up to 3 digits is
+ * therefore a byte-exact reconstruction, not a guess.
+ *
+ * Hoisted here (from a `signature-tasks-engine.ts`-local function, 48-11) because ANY partial
+ * `UPDATE RegistrationRequest` — not only `finalizeRegistrantApproval`'s accept path — must
+ * explicitly rebind `SubmittedAt`/`ReceivedAt` with this exact reconstruction or Quereus's
+ * unqualified `SubmittedAtValid`/`ReceivedAtValid`/`SignatureValid` CHECKs evaluate a
+ * Z-stripped, precision-truncated snapshot of the row and fail. `reZuluDatetime` alone is
+ * insufficient — it restores the 'Z' but not the dropped precision digits. Shared here so
+ * `RegistrationEngine.rejectRegistrationRequest` (48-12) and
+ * `SignatureTasksEngine.finalizeRegistrantApproval` (48-11) use ONE copy instead of two
+ * independently-drifting ones (the exact WR-01 failure mode this module's header warns about).
+ */
+export function restoreCanonicalDatetime (stored: string): string {
+  const withZ = stored.endsWith('Z') ? stored.slice(0, -1) : stored
+  const dot = withZ.indexOf('.')
+  if (dot < 0) return `${withZ}.000Z`
+  const fraction = withZ.slice(dot + 1)
+  const padded = (fraction + '000').slice(0, 3)
+  return `${withZ.slice(0, dot)}.${padded}Z`
+}
+
+/**
  * Guard that an EngineContext is bound before a DB-backed method runs.
  * `engineName` personalizes the error so a misuse points at the right engine.
  */
@@ -109,7 +138,12 @@ export function rethrow (err: unknown, engineName: string, method: string): neve
   } else if (err instanceof MisuseError) {
     throw new Error(`API misuse: ${err.message}`)
   } else if (err instanceof Error) {
-    throw new Error(`${engineName}.${method}: ${err.message}`)
+    const wrapped = new Error(`${engineName}.${method}: ${err.message}`)
+    // The app routes engine/signer refusals by `code` (e.g. KEY_INVALIDATED_REASSOCIATE), never by
+    // message text — carry it across the boundary, only when the source actually has a string one.
+    const code = (err as { code?: unknown }).code
+    if (typeof code === 'string') Object.assign(wrapped, { code })
+    throw wrapped
   } else {
     throw new Error(`${engineName}.${method}: unknown error: ${String(err)}`)
   }

@@ -26,6 +26,9 @@ export interface AuthorityInit {
 
   /** Image url for the authority */
   imageUrl?: string
+
+  /** Content id of the bytes at `imageUrl` when it was made permanent (see `NetworkInit.imageCid`). */
+  imageCid?: string
 }
 
 export interface AuthorityDetails {
@@ -96,6 +99,54 @@ export interface AdminDetails {
   proposed?: Proposal<AdminInit>
 }
 
+/**
+ * 57-07 (D-01 promotion half): result of `IAuthorityEngine.applyAdminProposal`.
+ */
+export interface AdminPromotionResult {
+  /** The authority whose administration was promoted (or already-applied). */
+  authorityId: string
+
+  /** The effective date of the promoted (or already-live) administration. */
+  effectiveAt: Timestamp
+
+  /** Number of Officer rows written by THIS call — 0 when `alreadyApplied`. */
+  officersPromoted: number
+
+  /**
+   * True when a live Admin row already existed for (authorityId, effectiveAt)
+   * before this call — the idempotent-replay path (T-57-07-06). No write
+   * occurred; `officersPromoted` is 0.
+   */
+  alreadyApplied: boolean
+}
+
+/**
+ * 57-07 (D-01 promotion half): the single reason-coded error class
+ * `applyAdminProposal` throws. Callers/tests assert on `reason`, never on
+ * message text — the message stays free to improve.
+ */
+export type AdminPromotionErrorReason =
+  | 'wrong-scope'
+  | 'not-signed'
+  | 'roster-mismatch'
+  | 'unresolvable-officer'
+  | 'no-rad-officer'
+
+export class AdminPromotionError extends Error {
+  readonly reason: AdminPromotionErrorReason
+  readonly nonce: string
+  readonly proposedName?: string
+
+  constructor (reason: AdminPromotionErrorReason, nonce: string, proposedName?: string) {
+    const detail = proposedName ? ` (ProposedName "${proposedName}")` : ''
+    super(`applyAdminProposal refused nonce "${nonce}"${detail}: ${reason}`)
+    this.name = 'AdminPromotionError'
+    this.reason = reason
+    this.nonce = nonce
+    this.proposedName = proposedName
+  }
+}
+
 /** ********* Officer ***********/
 export interface Officer {
   /** ID of the officer's user */
@@ -151,13 +202,20 @@ export type SentOfficerInvite = OfficerInit & {
   type: 'of'
 }
 
-/** Scope codes representing different officer privileges */
+/**
+ * Scope codes representing different officer privileges.
+ *
+ * This union MUST stay identical to the schema's `view Scope`
+ * (schema/votetorrent.qsql:56-69) and to `scopeDescriptions` below.
+ * `Officer.ScopesValid` / `ProposedOfficer.ScopesValid` reject any code the
+ * view does not define, so a union-only code type-checks and fails at runtime
+ * (this is what happened to `'rnp'`, removed 2026-08-25).
+ */
 export type Scope =
  | 'rn'
  | 'rad'
  | 'vrg'
  | 'iad'
- | 'rnp'
  | 'uai'
  | 'ceb'
  | 'mel'

@@ -1,0 +1,4 @@
+# 56-08: key material and host-specific runtime state never enter git.
+certs/
+gateway.config.json
+gateway-runtime.json

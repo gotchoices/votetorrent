@@ -20,6 +20,12 @@ export interface IUserEngine {
   isPrivileged(scope: Scope, userId: string): Promise<boolean>
   revise(user: ReviseUserHistory): Promise<void>
   revokeKey(key: string, signature: Signature): Promise<void>
+  /**
+   * D-20 (49-05) — the canonical `revokeKey` pre-image (`Digest(UserId,
+   * PubKey)`), computed engine-side so the caller signs exactly these bytes
+   * and never recomputes a canonical digest form itself (D-03).
+   */
+  getRevokeKeyDigest(key: string): Promise<Uint8Array>
   buildCreate(): IUserCreateBuilder
   buildAddKey(): IUserAddKeyBuilder
   buildRevise(): IUserReviseBuilder

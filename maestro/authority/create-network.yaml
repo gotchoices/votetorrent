@@ -1,0 +1,30 @@
+# Journey: found a new network (Networks > ADD NETWORK > fill > SIGN > CREATE), including the
+# first-run secure-signing setup the app routes through on a fresh install.
+# Clears app data first. Biometrics: run through scripts/run.sh.
+#
+# RELAY_MULTIADDR must parse as a multiaddr; the default is a placeholder that only satisfies the
+# form. Pass your real relay with -e RELAY_MULTIADDR=... when the network must be reachable by
+# another device. Never commit a real relay address into these flows.
+appId: ${APP_ID}
+name: "Authority: create a network"
+tags:
+  - authority
+  - network
+  - biometric
+env:
+  APP_ID: "${typeof AUTHORITY_APP_ID == 'undefined' ? 'org.votetorrent.authority' : AUTHORITY_APP_ID}"
+  BOOT_TIMEOUT_MS: "${typeof BOOT_TIMEOUT_MS == 'undefined' ? '300000' : BOOT_TIMEOUT_MS}"
+  NETWORK_NAME: "${typeof NETWORK_NAME == 'undefined' ? 'Maestro Net' : NETWORK_NAME}"
+  AUTHORITY_NAME: "${typeof AUTHORITY_NAME == 'undefined' ? 'Maestro Office' : AUTHORITY_NAME}"
+  RELAY_MULTIADDR: "${typeof RELAY_MULTIADDR == 'undefined' ? '/dns4/relay.example.invalid/tcp/443/wss' : RELAY_MULTIADDR}"
+  ADMIN_NAME: "${typeof ADMIN_NAME == 'undefined' ? 'Sam Lee' : ADMIN_NAME}"
+  ADMIN_TITLE: "${typeof ADMIN_TITLE == 'undefined' ? 'Clerk' : ADMIN_TITLE}"
+  CREATE_TIMEOUT_MS: "${typeof CREATE_TIMEOUT_MS == 'undefined' ? '180000' : CREATE_TIMEOUT_MS}"
+---
+- runFlow:
+    file: ../subflows/authority/launch.yaml
+    env:
+      CLEAR_STATE: "true"
+- runFlow: ../subflows/authority/create-network.yaml
+- assertVisible:
+    id: "voter-invite-entry-.*"

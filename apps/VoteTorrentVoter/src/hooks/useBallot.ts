@@ -10,26 +10,36 @@
  * (`__tests__/no-inline-mock-imports.test.ts`). A screen-invisible `useVoterApp()` call buried
  * inside this hook would silently fail that gate.
  *
- * Also gives future engine-swap work (D-01 swap-fidelity) a single place to add loading/error
- * state later, without touching every screen.
+ * `getBallot` is a real engine read and rejects when there is no election to read, so the hook
+ * also reports `failed` — screens render an unavailable state instead of an empty ballot that
+ * looks like a loading one forever.
  */
 import {useEffect, useState} from 'react';
-import type {MockBallot} from '../providers/types';
+import type {VoterBallot} from '../providers/types';
 
-export function useBallot(getBallot: () => Promise<MockBallot>): {ballot: MockBallot | null} {
-	const [ballot, setBallot] = useState<MockBallot | null>(null);
+export function useBallot(getBallot: () => Promise<VoterBallot>): {ballot: VoterBallot | null; failed: boolean} {
+	const [ballot, setBallot] = useState<VoterBallot | null>(null);
+	const [failed, setFailed] = useState(false);
 
 	useEffect(() => {
 		let live = true;
-		getBallot().then(result => {
-			if (live) {
-				setBallot(result);
-			}
-		});
+		setFailed(false);
+		getBallot().then(
+			result => {
+				if (live) {
+					setBallot(result);
+				}
+			},
+			() => {
+				if (live) {
+					setFailed(true);
+				}
+			},
+		);
 		return () => {
 			live = false;
 		};
 	}, [getBallot]);
 
-	return {ballot};
+	return {ballot, failed};
 }

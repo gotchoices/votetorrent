@@ -1,0 +1,62 @@
+# Journey (multi-device): on a registered Voter in a real election, wait (real clock, no dev
+# offset) until Home offers "Vote now", vote, read the receipt, then Send the vote to the pool.
+# Sending needs a pool of 3+ voters on the network (e.g. scripts/seed-election.sh voters holds
+# 2 host voters); the flow passes when every ballot reports sent.
+# Biometrics: run through scripts/run.sh. Home only re-reads the election on focus, so the wait
+# loop toggles tabs to refocus it.
+appId: ${APP_ID}
+name: "Voter: vote in a live election and send it"
+tags:
+  - voter
+  - multi-device
+  - vote
+  - biometric
+env:
+  APP_ID: "${typeof VOTER_APP_ID == 'undefined' ? 'org.votetorrent.voter' : VOTER_APP_ID}"
+  BOOT_TIMEOUT_MS: "${typeof BOOT_TIMEOUT_MS == 'undefined' ? '300000' : BOOT_TIMEOUT_MS}"
+  VOTE_PICK_1: "${typeof VOTE_PICK_1 == 'undefined' ? 'diana' : VOTE_PICK_1}"
+  VOTE_PICK_2: "${typeof VOTE_PICK_2 == 'undefined' ? 'priya' : VOTE_PICK_2}"
+  VOTE_PICK_3: "${typeof VOTE_PICK_3 == 'undefined' ? 'angela' : VOTE_PICK_3}"
+  SUBMIT_TIMEOUT_MS: "${typeof SUBMIT_TIMEOUT_MS == 'undefined' ? '120000' : SUBMIT_TIMEOUT_MS}"
+  SEND_TIMEOUT_MS: "${typeof SEND_TIMEOUT_MS == 'undefined' ? '900000' : SEND_TIMEOUT_MS}"
+---
+- runFlow:
+    file: ../subflows/voter/launch.yaml
+    env:
+      CLEAR_STATE: "false"
+- repeat:
+    times: 60
+    while:
+      notVisible:
+        id: "election-card-vote-now"
+    commands:
+      - runFlow:
+          file: ../subflows/voter/open-tab.yaml
+          env:
+            TAB: timeline
+      - runFlow:
+          file: ../subflows/voter/open-tab.yaml
+          env:
+            TAB: vote
+      - extendedWaitUntil:
+          visible:
+            id: "election-card-vote-now"
+          timeout: 30000
+          optional: true
+- tapOn:
+    id: "election-card-vote-now"
+- runFlow: ../subflows/voter/answer-ballot.yaml
+- runFlow: ../subflows/voter/submit-and-read-receipt.yaml
+- scrollUntilVisible:
+    element:
+      id: "send-vote"
+    direction: DOWN
+    timeout: 15000
+- tapOn:
+    id: "send-vote"
+- extendedWaitUntil:
+    visible:
+      id: "send-all-sent|send-outcome"
+    timeout: ${SEND_TIMEOUT_MS}
+- assertVisible:
+    id: "send-all-sent"

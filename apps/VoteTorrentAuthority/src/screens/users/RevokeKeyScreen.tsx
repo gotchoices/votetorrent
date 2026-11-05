@@ -16,7 +16,9 @@ import { CustomButton } from "../../components/CustomButton";
 import { Footer } from "../../components/Footer";
 import { createDeviceSigner } from "../../engines/device-signer";
 import { getOrCreateDeviceUser } from "../../engines/device-user";
-import { utf8ToBytes } from "@noble/hashes/utils.js";
+import { useDeviceSigningErrorHandler } from "../../hooks/useDeviceSigningErrorHandler";
+import { KeyboardAvoidingScreen } from "../../components/KeyboardAvoidingScreen";
+import { errorCopy } from "../../utils/errorCopy";
 
 export function RevokeKeyScreen() {
 	const { user, userEngine } = useRoute().params as { user: User; userEngine: IUserEngine };
@@ -28,7 +30,10 @@ export function RevokeKeyScreen() {
 	const [isSigned, setIsSigned] = useState(false);
 	const [realSignature, setRealSignature] = useState<Signature | null>(null);
 	const [errorMessage, setErrorMessage] = useState<string>("");
+	const [isSigning, setIsSigning] = useState(false);
+	const [isRevoking, setIsRevoking] = useState(false);
 	const navigation = useNavigation();
+	const handleDeviceSigningError = useDeviceSigningErrorHandler();
 
 	const toggleKeySelection = (keyId: string) => {
 		setSelectedKeys((prevSelectedKeys) => {
@@ -58,6 +63,7 @@ export function RevokeKeyScreen() {
 
 	const handleSign = async () => {
 		setErrorMessage("");
+		setIsSigning(true);
 		try {
 			// WR-02: only the device user can revoke their own keys. Verify subject == device
 			// user before producing any signature, so the device signer's signerKey is always
@@ -80,48 +86,73 @@ export function RevokeKeyScreen() {
 			// only the resulting Signature crosses into vote-engine.
 			// WR-10: secp256k1.sign called with v2 defaults (prehash:true) inside signer.
 			// CR-05/UKEY-02: do NOT precompute a single combined-keys signature here —
-			// each key is signed at revoke time over its own revokeKey:key payload (two-segment
-			// canonical form matching user.spec.ts:464) so the signature is bound to that
-			// specific key. We only validate the device signer is available and gate the
-			// confirmation UX. For the "Signed: <signature>" display we sign the FIRST selected
-			// key's per-key payload (two-segment form), never a combined-keys payload.
+			// each key is signed at revoke time over its OWN canonical digest (D-20 / 49-05:
+			// UserEngine.getRevokeKeyDigest -- Digest(UserId, PubKey), the engine's single
+			// definition of the revoke pre-image; the screen never recomputes a canonical
+			// form itself, per D-03) so the signature is bound to that specific key. We only
+			// validate the device signer is available and gate the confirmation UX. For the
+			// "Signed: <signature>" display we sign the FIRST selected key's digest, never a
+			// combined-keys payload.
 			const signer = await createDeviceSigner(user.name);
-			const previewBytes = utf8ToBytes(`revokeKey:${firstKey}`);
-			const previewSig = await signer(previewBytes);
+			const previewDigest = await userEngine.getRevokeKeyDigest(firstKey);
+			const previewSig = await signer(previewDigest);
 			setRealSignature(previewSig);
 			setIsSigned(true);
 		} catch (error) {
-			setErrorMessage(error instanceof Error ? error.message : String(error));
+			const outcome = handleDeviceSigningError(error);
+			if (outcome.handled) return;
+			setErrorMessage(outcome.message ?? errorCopy(error, t, "write"));
+		} finally {
+			setIsSigning(false);
 		}
 	};
 
 	const handleRevoke = async () => {
 		setErrorMessage("");
+		setIsRevoking(true);
 		try {
 			if (!isSigned) {
 				setErrorMessage("Signature is required — please sign before revoking.");
 				return;
 			}
-			// CR-05/UKEY-02: sign each key at revoke time over revokeKey:${key} (two-segment
-			// canonical form matching the engine test's revokeKey:${secondPub} / revokeKey:${addedPub}
-			// in user.spec.ts:464,680) so every revocation carries its OWN signature bound to
-			// that specific key — never a single combined-key signature reused across keys.
+			// CR-05/UKEY-02: sign each key at revoke time over its OWN canonical digest
+			// (D-20 / 49-05: UserEngine.getRevokeKeyDigest -- Digest(UserId, PubKey)) so every
+			// revocation carries its OWN signature bound to that specific key — never a single
+			// combined-key signature reused across keys. The screen never constructs the signed
+			// bytes itself (D-03); it only ever signs exactly what the engine hands back.
 			const signer = await createDeviceSigner(user.name);
 			await Promise.all(
 				Array.from(selectedKeys).map(async (key) => {
-					const payloadBytes = utf8ToBytes(`revokeKey:${key}`);
-					const perKeySignature = await signer(payloadBytes);
+					const digest = await userEngine.getRevokeKeyDigest(key);
+					const perKeySignature = await signer(digest);
 					await userEngine.revokeKey(key, perKeySignature);
 				})
 			);
 			navigation.goBack();
 		} catch (error) {
-			setErrorMessage(error instanceof Error ? error.message : String(error));
+			// D-20 / 49-05: a rejected revoke (forged or wrong signature) surfaces as the
+			// UserKey.DeleteValid CHECK constraint failing — match on the constraint identifier
+			// (not free-text English) so this narrow branch renders a real, actionable message
+			// instead of the raw Quereus error string. This is evaluated FIRST, before the
+			// device-signing handler: a schema CHECK rejection carries no native `code`, so
+			// isDeviceSigningError would classify it as "not mine" and the handler would pass
+			// it through regardless — but keeping the ordering explicit here avoids a future
+			// reader reversing it. Every other revokeKey failure mode goes through the
+			// shared handler below and then errorCopy: translated copy, never the raw message.
+			if (error instanceof Error && error.message.includes("DeleteValid")) {
+				setErrorMessage(t("revokeKeySignatureInvalid"));
+				return;
+			}
+			const outcome = handleDeviceSigningError(error);
+			if (outcome.handled) return;
+			setErrorMessage(outcome.message ?? errorCopy(error, t, "write"));
+		} finally {
+			setIsRevoking(false);
 		}
 	};
 
 	return (
-		<View style={styles.content}>
+		<KeyboardAvoidingScreen>
 			<ScrollView style={styles.container}>
 				<View style={[styles.section, styles.detailContainer]}>
 					<View style={styles.detail}>
@@ -204,11 +235,11 @@ export function RevokeKeyScreen() {
 					onChangeText={(text) => checkConfirmText(text)}
 				/>
 				<CustomButton
-					title={t("sign")}
+					title={isSigning ? `${t("sign")}…` : t("sign")}
 					icon={"signature"}
 					backgroundColor={colors.important}
 					onPress={() => handleSign()}
-					disabled={!readyToSign || selectedKeys.size === 0}
+					disabled={!readyToSign || selectedKeys.size === 0 || isSigning}
 				/>
 				{isSigned && realSignature && (
 					<View style={styles.detail}>
@@ -226,14 +257,14 @@ export function RevokeKeyScreen() {
 			</ScrollView>
 			<Footer>
 				<CustomButton
-					title={t("revoke")}
+					title={isRevoking ? `${t("revoke")}…` : t("revoke")}
 					icon={"trash"}
 					backgroundColor={colors.success}
 					onPress={() => handleRevoke()}
-					disabled={!isSigned || selectedKeys.size === 0}
+					disabled={!isSigned || selectedKeys.size === 0 || isRevoking}
 				/>
 			</Footer>
-		</View>
+		</KeyboardAvoidingScreen>
 	);
 }
 

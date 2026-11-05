@@ -1,0 +1,6 @@
+packages/vote-engine/test/synthetic-synthetic0.ts(1,1): error TS1000: synthetic error for selftest
+packages/vote-engine/test/synthetic-synthetic1.ts(2,1): error TS1001: synthetic error for selftest
+packages/vote-engine/test/synthetic-synthetic2.ts(3,1): error TS1002: synthetic error for selftest
+packages/vote-engine/test/synthetic-synthetic3.ts(4,1): error TS1003: synthetic error for selftest
+packages/vote-engine/test/synthetic-synthetic4.ts(5,1): error TS1004: synthetic error for selftest
+TSC-RAN exit=2

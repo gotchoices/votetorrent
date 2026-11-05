@@ -37,7 +37,7 @@ import { NetworksEngine, ElectionsEngine, ElectionEngine, peekNextElectionTid, H
 import type { DbFactory } from '@votetorrent/vote-engine/rn';
 import { rnDbFactory, createStrandDbFactory } from './rn-db-factory';
 import type { StrandHost } from './rn-db-factory';
-import { getOrCreateDeviceUser, getDevicePrivKeyHex } from './device-user';
+import { getOrCreateDeviceUser } from './device-user';
 import { createDeviceSigner } from './device-signer';
 
 // ---------------------------------------------------------------------------
@@ -197,21 +197,21 @@ export async function runFullChainWritePhase(
     type: ElectionType.adhoc,
   };
 
-  // T-16-14 mitigation: use the REAL device private key — never the fake PROOF_USER key.
-  const privKeyHex = await getDevicePrivKeyHex();
-  if (!privKeyHex) {
-    throw new Error('[proof] full-chain write: device private key not found — call getOrCreateDeviceUser first');
-  }
+  // T-16-14 mitigation: use the REAL device user's key — never the fake PROOF_USER key.
+  // Phase 49: the private key itself is no longer readable from JS at all (hardware-backed,
+  // Keystore-resident) — this precondition now checks only that `user` (REAL, from
+  // getOrCreateDeviceUser) actually carries an active key, which is the same "is this device
+  // provisioned" signal the old privKeyHex existence check was standing in for.
   const signerKey = user.activeKeys?.[0]?.key;
   if (!signerKey) {
-    throw new Error('[proof] full-chain write: user has no active key');
+    throw new Error('[proof] full-chain write: user has no active key — call getOrCreateDeviceUser first');
   }
 
   // D-01 key boundary: the engine signing seams take an app-layer `sign` callback —
-  // the device private key NEVER crosses into vote-engine. createDeviceSigner closes
-  // over the stored key and calls secp256k1.sign with @noble v2 defaults (prehash:true,
-  // WR-10). (Earlier proof-harness builds passed privKeyHex positionally, which the
-  // post-Phase-21 callback signature interprets as the `sign` arg — "sign is not a
+  // the device private key NEVER crosses into vote-engine, and (Phase 49) never crosses into
+  // JS at all. createDeviceSigner closes over the hardware-backed signing seam and signs via
+  // the native `signWithDeviceKey` TurboModule. (Earlier proof-harness builds passed privKeyHex
+  // positionally, which the post-Phase-21 callback signature interprets as the `sign` arg — "sign is not a
   // function".) The signature's signerUserId/signerKey are derived inside the callback.
   const sign = await createDeviceSigner('Proof Runner');
 
@@ -239,6 +239,9 @@ export async function runFullChainWritePhase(
       registrationEnds: now + 2 * 86400000,
       ballotsFinal: now + 5 * 86400000,
       votingStarts: now + 10 * 86400000,
+      accruingVotes: now + 11 * 86400000,
+      hashingVotes: now + 12 * 86400000,
+      releasingKeys: now + 13 * 86400000,
       tallyingStarts: now + 14 * 86400000,
       validation: now + 15 * 86400000,
       certificationStarts: now + 16 * 86400000,
@@ -609,13 +612,12 @@ export async function runTidReissueRecheckPhase(
     throw new Error('[proof] TID-REISSUE recheck: no captured db handle after open()');
   }
 
-  const privKeyHex = await getDevicePrivKeyHex();
-  if (!privKeyHex) {
-    throw new Error('[proof] TID-REISSUE recheck: device private key not found — call getOrCreateDeviceUser first');
-  }
+  // Phase 49: see runFullChainWritePhase's identical comment — the private key is no longer
+  // readable from JS, so the active-key check on `user` (REAL, from getOrCreateDeviceUser) is
+  // now the sole "is this device provisioned" precondition.
   const signerKey = user.activeKeys?.[0]?.key;
   if (!signerKey) {
-    throw new Error('[proof] TID-REISSUE recheck: user has no active key');
+    throw new Error('[proof] TID-REISSUE recheck: user has no active key — call getOrCreateDeviceUser first');
   }
   const sign = await createDeviceSigner('Proof Runner (TID-REISSUE)');
   const electionsEngine = new ElectionsEngine(ctx);
@@ -651,6 +653,9 @@ export async function runTidReissueRecheckPhase(
       registrationEnds: now + 2 * 86400000,
       ballotsFinal: now + 5 * 86400000,
       votingStarts: now + 10 * 86400000,
+      accruingVotes: now + 11 * 86400000,
+      hashingVotes: now + 12 * 86400000,
+      releasingKeys: now + 13 * 86400000,
       tallyingStarts: now + 14 * 86400000,
       validation: now + 15 * 86400000,
       certificationStarts: now + 16 * 86400000,

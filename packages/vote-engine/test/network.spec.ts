@@ -9,7 +9,7 @@ import { expect } from 'chai';
 import { secp256k1 } from '@noble/curves/secp256k1.js';
 import { bytesToHex, hexToBytes } from '@noble/curves/utils.js';
 import { prepareDb } from '../src/database/initialize';
-import { nowCanonicalDatetime, digestToBytes, toCanonicalDatetime } from '../src/utils.js';
+import { nowCanonicalDatetime, digestToBytes, toCanonicalDatetime, inviteResultSignedBytes, verifyAdHocInviteSignature } from '../src/utils.js';
 import { NetworkEngine } from '../src/network/network-engine';
 import { MockNetworkEngine } from '../src/network/mock-network-engine';
 import { NetworkCreateAuthorityBuilder } from '../src/network/builders/network-create-authority-builder';
@@ -20,7 +20,7 @@ import { NetworkRespondToInviteBuilder } from '../src/network/builders/network-r
 import { NetworksEngine } from '../src/networks/networks-engine';
 import { ElectionsEngine } from '../src/elections/elections-engine';
 import type { EngineContext } from '../src/types.js';
-import { createTestNetwork, addTestAuthority, addTestElection, seedAuthorityInvite, seedUserInvite, signInviteResult, makeElectionInit } from './fixtures/test-context.js';
+import { createTestNetwork, addTestAuthority, addTestElection, seedAuthorityInvite, seedUserInvite, signInviteResult, makeElectionInit, makeTestSignCallback } from './fixtures/test-context.js';
 import { randomTestKeyPair } from './fixtures/keys.js';
 import { AsyncStorage } from './shims/react-native';
 import type {
@@ -1303,86 +1303,200 @@ describe('NetworkEngine', () => {
 	});
 
 	// -----------------------------------------------------------------------
-	// 7. Pinned Authorities (local storage) — pure LocalStorage tests
+	// 7. Pinned Authorities (local storage) — 62-91: per network, filtered to
+	// the network's own Authority rows. The previous tests pinned FAKE ids on a
+	// schema-only db; with the Authority-table filter those would read empty, so
+	// they are deliberately rewritten on real networks (real primaryAuthorityId).
 	// -----------------------------------------------------------------------
 	describe('pinAuthority / unpinAuthority', () => {
-		it('should start with an empty list of pinned authorities', async () => {
-			await AsyncStorage.clear();
-			const { engine } = await makeDbOnlyNetworkEngine();
-			const pinned = await engine.getPinnedAuthorities();
-			expect(pinned).to.deep.equal([]);
-		});
-
-		it('should add an authority to pinned list via pinAuthority', async () => {
-			await AsyncStorage.clear();
-			const { engine } = await makeDbOnlyNetworkEngine();
-			const auth: Authority = {
-				id: 'aid-1',
-				name: 'AuthorityOne',
-				domainName: 'one.example.com',
+		type Net = { engine: INetworkEngine; ref: NetworkReference; authority: Authority };
+		async function makeNet(): Promise<Net> {
+			const { engine, ref } = await createNetworkEngine();
+			const details = await engine.getDetails();
+			const authority: Authority = {
+				id: details.network.primaryAuthorityId,
+				name: 'Stale Name',
+				domainName: 'stale.example.com',
 			};
-			await engine.pinAuthority(auth);
-			const pinned = await engine.getPinnedAuthorities();
-			expect(pinned).to.have.length(1);
-			expect(pinned[0]?.id).to.equal('aid-1');
-		});
+			return { engine, ref, authority };
+		}
+		/** Two real networks sharing ONE localStorage (createNetworkEngine clears it, so pin AFTER both exist). */
+		async function twoNets(): Promise<{ a: Net; b: Net }> {
+			const a = await makeNet();
+			const b = await makeNet();
+			return { a, b };
+		}
+		const scopedKey = (ref: NetworkReference): string => `pinnedAuthorities:${ref.hash}`;
 
-		it('should deduplicate when pinning the same authority twice', async () => {
-			await AsyncStorage.clear();
-			const { engine } = await makeDbOnlyNetworkEngine();
-			const auth: Authority = {
-				id: 'aid-dup',
-				name: 'Dup',
-				domainName: 'dup.example.com',
-			};
-			await engine.pinAuthority(auth);
-			await engine.pinAuthority(auth);
+		it('P-6: starts empty, pins, dedupes by id, unpin of unknown id is a no-op', async () => {
+			const { engine, authority } = await makeNet();
+			expect(await engine.getPinnedAuthorities()).to.deep.equal([]);
+			await engine.pinAuthority(authority);
+			await engine.pinAuthority(authority);
 			const pinned = await engine.getPinnedAuthorities();
 			expect(pinned).to.have.length(1);
-		});
-
-		it('should remove an authority from pinned list via unpinAuthority', async () => {
-			await AsyncStorage.clear();
-			const { engine } = await makeDbOnlyNetworkEngine();
-			const auth: Authority = {
-				id: 'aid-rm',
-				name: 'Removable',
-				domainName: 'rm.example.com',
-			};
-			await engine.pinAuthority(auth);
-			await engine.unpinAuthority(auth.id);
-			const pinned = await engine.getPinnedAuthorities();
-			expect(pinned).to.deep.equal([]);
-		});
-
-		it('should be a no-op when unpinning an authority that is not pinned', async () => {
-			await AsyncStorage.clear();
-			const { engine } = await makeDbOnlyNetworkEngine();
-			const auth: Authority = {
-				id: 'aid-real',
-				name: 'Real',
-				domainName: 'real.example.com',
-			};
-			await engine.pinAuthority(auth);
+			expect(pinned[0]?.id).to.equal(authority.id);
 			await engine.unpinAuthority('aid-ghost');
-			const pinned = await engine.getPinnedAuthorities();
-			expect(pinned).to.have.length(1);
-			expect(pinned[0]?.id).to.equal('aid-real');
+			expect(await engine.getPinnedAuthorities()).to.have.length(1);
+			await engine.unpinAuthority(authority.id);
+			expect(await engine.getPinnedAuthorities()).to.deep.equal([]);
 		});
 
-		it('should persist pinned authorities across engine instances via localStorage', async () => {
-			await AsyncStorage.clear();
-			const first = await makeDbOnlyNetworkEngine();
-			const auth: Authority = {
-				id: 'aid-persist',
-				name: 'Persistent',
-				domainName: 'p.example.com',
-			};
-			await first.engine.pinAuthority(auth);
-			const second = await makeDbOnlyNetworkEngine();
-			const pinned = await second.engine.getPinnedAuthorities();
-			expect(pinned).to.have.length(1);
-			expect(pinned[0]?.id).to.equal('aid-persist');
+		it('P-6: pin order is preserved and pins persist across engine instances', async () => {
+			const { engine, ref, authority } = await makeNet();
+			await engine.pinAuthority(authority);
+			const again = new NetworkEngine(ref, AsyncStorage, (engine as unknown as { ctx: EngineContext }).ctx);
+			const pinned = await again.getPinnedAuthorities();
+			expect(pinned.map((p) => p.id)).to.deep.equal([authority.id]);
+		});
+
+		it('P-1: a pin made on network A is not listed on network B (shared localStorage)', async () => {
+			const { a, b } = await twoNets();
+			expect(a.ref.hash).to.not.equal(b.ref.hash);
+			await a.engine.pinAuthority(a.authority);
+			expect((await a.engine.getPinnedAuthorities()).map((p) => p.id)).to.deep.equal([a.authority.id]);
+			expect(await b.engine.getPinnedAuthorities()).to.deep.equal([]);
+		});
+
+		it("P-2: an entry for a foreign authority written into B's scoped key is not returned by B", async () => {
+			const { a, b } = await twoNets();
+			await AsyncStorage.setItem(scopedKey(b.ref), [a.authority]);
+			expect(await b.engine.getPinnedAuthorities()).to.deep.equal([]);
+		});
+
+		it('P-2: a pinned authority that vanished from the network is not listed (real engine, fresh db)', async () => {
+			const { engine, ref, authority } = await makeNet();
+			await engine.pinAuthority(authority);
+			const db = new Database();
+			await prepareDb(db);
+			const second = new NetworkEngine(ref, AsyncStorage, { db, user: makeUser() });
+			expect(await second.getPinnedAuthorities()).to.deep.equal([]);
+			// a getter must not destroy data: the stored entry is still there
+			expect(await AsyncStorage.getItem<Authority[]>(scopedKey(ref))).to.have.length(1);
+		});
+
+		it("P-3: a returned pin carries the row's CURRENT name/domain, not the stored snapshot", async () => {
+			const { engine, authority } = await makeNet();
+			await engine.pinAuthority(authority);
+			const pinned = await engine.getPinnedAuthorities();
+			expect(pinned[0]?.name).to.not.equal('Stale Name');
+			expect(pinned[0]?.domainName).to.not.equal('stale.example.com');
+			expect(pinned[0]?.name).to.be.a('string').with.length.greaterThan(0);
+		});
+
+		it('P-4: a failing Authority lookup returns the stored snapshot and writes nothing', async () => {
+			const { engine, ref, authority } = await makeNet();
+			await engine.pinAuthority(authority);
+			const realCtx = (engine as unknown as { ctx: EngineContext }).ctx;
+			const failingDb = new Proxy(realCtx.db, {
+				get(target, prop) {
+					const v = Reflect.get(target, prop, target) as unknown;
+					if (prop === 'prepare') {
+						return (sql: string, ...rest: unknown[]) => {
+							if (/from Authority where Id = :id/.test(sql)) throw new Error('lookup boom');
+							return (v as (...a: unknown[]) => unknown).call(target, sql, ...rest);
+						};
+					}
+					return typeof v === 'function' ? (v as (...a: unknown[]) => unknown).bind(target) : v;
+				},
+			});
+			const before = JSON.stringify(await AsyncStorage.getItem(scopedKey(ref)));
+			const flaky = new NetworkEngine(ref, AsyncStorage, { db: failingDb, user: realCtx.user });
+			const pinned = await flaky.getPinnedAuthorities();
+			expect(pinned.map((p) => p.id)).to.deep.equal([authority.id]);
+			expect(pinned[0]?.name).to.equal('Stale Name');
+			expect(JSON.stringify(await AsyncStorage.getItem(scopedKey(ref)))).to.equal(before);
+		});
+
+		it('P-5: legacy device-wide pins migrate lazily into the network that owns them', async () => {
+			const { a, b } = await twoNets();
+			await AsyncStorage.setItem('pinnedAuthorities', [a.authority, b.authority]);
+			expect((await a.engine.getPinnedAuthorities()).map((p) => p.id)).to.deep.equal([a.authority.id]);
+			expect((await AsyncStorage.getItem<Authority[]>(scopedKey(a.ref)))?.map((p) => p.id)).to.deep.equal([a.authority.id]);
+			expect((await AsyncStorage.getItem<Authority[]>('pinnedAuthorities'))?.map((p) => p.id)).to.deep.equal([b.authority.id]);
+			expect((await b.engine.getPinnedAuthorities()).map((p) => p.id)).to.deep.equal([b.authority.id]);
+			expect(await AsyncStorage.getItem('pinnedAuthorities')).to.equal(undefined);
+		});
+
+		it('P-5: a lookup error during migration leaves the legacy key exactly as it was', async () => {
+			const { engine, ref, authority } = await makeNet();
+			const legacy = [authority];
+			await AsyncStorage.setItem('pinnedAuthorities', legacy);
+			const realCtx = (engine as unknown as { ctx: EngineContext }).ctx;
+			const failingDb = new Proxy(realCtx.db, {
+				get(target, prop) {
+					const v = Reflect.get(target, prop, target) as unknown;
+					if (prop === 'prepare') {
+						return (sql: string, ...rest: unknown[]) => {
+							if (/from Authority where Id = :id/.test(sql)) throw new Error('lookup boom');
+							return (v as (...a: unknown[]) => unknown).call(target, sql, ...rest);
+						};
+					}
+					return typeof v === 'function' ? (v as (...a: unknown[]) => unknown).bind(target) : v;
+				},
+			});
+			const flaky = new NetworkEngine(ref, AsyncStorage, { db: failingDb, user: realCtx.user });
+			await flaky.getPinnedAuthorities();
+			expect(await AsyncStorage.getItem('pinnedAuthorities')).to.deep.equal(legacy);
+			expect(await AsyncStorage.getItem(scopedKey(ref))).to.equal(undefined);
+		});
+
+		it('P-5 (WR-R1-06): a lookup error on ONE legacy entry keeps only that entry legacy; the others still migrate', async () => {
+			const { engine, ref, authority } = await makeNet();
+			const ghost: Authority = { ...authority, id: 'aid-lookup-throws', name: 'Ghost' };
+			await AsyncStorage.setItem('pinnedAuthorities', [ghost, authority]);
+			const realCtx = (engine as unknown as { ctx: EngineContext }).ctx;
+			const failingDb = new Proxy(realCtx.db, {
+				get(target, prop) {
+					const v = Reflect.get(target, prop, target) as unknown;
+					if (prop === 'prepare') {
+						return (sql: string, ...rest: unknown[]) => {
+							const stmt = (v as (...a: unknown[]) => { get: (p: Record<string, unknown>) => Promise<unknown> }).call(target, sql, ...rest);
+							if (!/from Authority where Id = :id/.test(sql)) return stmt;
+							return {
+								get: async (params: Record<string, unknown>) => {
+									if (params.id === ghost.id) throw new Error('lookup boom');
+									return await stmt.get(params);
+								},
+							};
+						};
+					}
+					return typeof v === 'function' ? (v as (...a: unknown[]) => unknown).bind(target) : v;
+				},
+			});
+			const flaky = new NetworkEngine(ref, AsyncStorage, { db: failingDb, user: realCtx.user });
+			expect((await flaky.getPinnedAuthorities()).map((p) => p.id)).to.deep.equal([authority.id]);
+			expect((await AsyncStorage.getItem<Authority[]>(scopedKey(ref)))?.map((p) => p.id)).to.deep.equal([authority.id]);
+			expect((await AsyncStorage.getItem<Authority[]>('pinnedAuthorities'))?.map((p) => p.id)).to.deep.equal([ghost.id]);
+		});
+
+		it('P-5 (WR-R1-06): a legacy pin whose Authority row has a null DomainName still migrates and is listed', async () => {
+			const { engine, ref, authority } = await makeNet();
+			await AsyncStorage.setItem('pinnedAuthorities', [authority]);
+			const realCtx = (engine as unknown as { ctx: EngineContext }).ctx;
+			// DomainName is `text null` in the schema; the row mapper (asText) cannot map null.
+			const nullDomainDb = new Proxy(realCtx.db, {
+				get(target, prop) {
+					const v = Reflect.get(target, prop, target) as unknown;
+					if (prop === 'prepare') {
+						return (sql: string, ...rest: unknown[]) => {
+							const stmt = (v as (...a: unknown[]) => { get: (p: Record<string, unknown>) => Promise<Record<string, unknown> | undefined> }).call(target, sql, ...rest);
+							if (!/DomainName/.test(sql) || !/from Authority where Id = :id/.test(sql)) return stmt;
+							return {
+								get: async (params: Record<string, unknown>) => {
+									const row = await stmt.get(params);
+									return row ? { ...row, DomainName: null } : row;
+								},
+							};
+						};
+					}
+					return typeof v === 'function' ? (v as (...a: unknown[]) => unknown).bind(target) : v;
+				},
+			});
+			const nullDomain = new NetworkEngine(ref, AsyncStorage, { db: nullDomainDb, user: realCtx.user });
+			expect((await nullDomain.getPinnedAuthorities()).map((p) => p.id)).to.deep.equal([authority.id]);
+			expect((await AsyncStorage.getItem<Authority[]>(scopedKey(ref)))?.map((p) => p.id)).to.deep.equal([authority.id]);
+			expect(await AsyncStorage.getItem('pinnedAuthorities')).to.equal(undefined);
 		});
 	});
 
@@ -1412,6 +1526,33 @@ describe('NetworkEngine', () => {
 				caught = err;
 			}
 			expect((caught as Error)?.message).to.include('Authority not found');
+		});
+
+		it('O-1: a missing authority rejects with exactly "Authority not found" and code authority-not-found', async () => {
+			const { engine } = await makeDbOnlyNetworkEngine();
+			let caught: unknown;
+			try {
+				await engine.openAuthority('never-existed-authority');
+			} catch (err) {
+				caught = err;
+			}
+			expect((caught as Error)?.message).to.equal('Authority not found');
+			expect((caught as { code?: string }).code).to.equal('authority-not-found');
+		});
+
+		it('O-2: other failures keep the generic wrapping', async () => {
+			const { engine, ctx } = await makeDbOnlyNetworkEngine();
+			(engine as unknown as { ctx: unknown }).ctx = {
+				...ctx,
+				db: { prepare: () => { throw new Error('weird'); } },
+			};
+			let caught: unknown;
+			try {
+				await engine.openAuthority('x');
+			} catch (err) {
+				caught = err;
+			}
+			expect((caught as Error)?.message).to.include('Unknown error opening authority');
 		});
 
 		it('should return an AuthorityEngine when given a valid authorityId', async () => {
@@ -1733,7 +1874,8 @@ describe('NetworkEngine', () => {
 		it('inserts an InviteResult row for an accepted invite', async () => {
 			const { engine } = await createNetworkEngine();
 			const ctx = (engine as unknown as { ctx: EngineContext }).ctx;
-			const fakeInviteKey = 'k'.repeat(66);
+			const fakeInviteKeyPair = randomTestKeyPair();
+			const fakeInviteKey = fakeInviteKeyPair.publicHex;
 			const fakeInvite = { inviteKey: fakeInviteKey, type: 'au' as const, expiration: '0', inviteSignature: 'a'.repeat(128) };
 			await ctx.db.exec(
 				`INSERT INTO InviteSlot (Cid, Type, Name, Expiration, InviteKey, InviteSignature, SigningNonce)
@@ -1744,6 +1886,7 @@ describe('NetworkEngine', () => {
 			await engine.respondToInvite({
 				invite: fakeInvite,
 				isAccepted: true,
+				invitePrivate: fakeInviteKeyPair.privateHex,
 				invokes: { authority: { name: 'Invokee', domainName: 'inv.example' }, admin: { effectiveAt: '2026-01-01T00:00:00', thresholdPolicies: '[{"policy":"rad","threshold":1}]' }, officers: [{ adminEffectiveAt: '2026-01-01T00:00:00', userId: 'user-1', title: 'Officer', scopes: '["rad"]' }] },
 				inviteSignature: 'a'.repeat(128),
 				userId: undefined,
@@ -1769,7 +1912,8 @@ describe('NetworkEngine', () => {
 			// /IsSignatureValid context-gated insert path).
 			const { engine } = await createNetworkEngine();
 			const ctx = (engine as unknown as { ctx: EngineContext }).ctx;
-			const fakeInviteKey = 'm'.repeat(66);
+			const fakeInviteKeyPair = randomTestKeyPair();
+			const fakeInviteKey = fakeInviteKeyPair.publicHex;
 			const fakeInvite = { inviteKey: fakeInviteKey, type: 'au' as const, expiration: '0', inviteSignature: 'a'.repeat(128) };
 			await ctx.db.exec(
 				`INSERT INTO InviteSlot (Cid, Type, Name, Expiration, InviteKey, InviteSignature, SigningNonce)
@@ -1789,6 +1933,7 @@ describe('NetworkEngine', () => {
 			await engine.respondToInvite({
 				invite: fakeInvite,
 				isAccepted: true,
+				invitePrivate: fakeInviteKeyPair.privateHex,
 				invokes: {
 					authority: { name: 'MultiInvokee', domainName: 'mi.example' },
 					admin: { effectiveAt: '2026-01-01T00:00:00', thresholdPolicies: '[{"policy":"rad","threshold":1}]' },
@@ -1825,6 +1970,7 @@ describe('NetworkEngine', () => {
 			await engine.respondToInvite({
 				invite: fakeInvite,
 				isAccepted: false,
+				invitePrivate: fakeInvitePrivate,
 				invokes: undefined,
 				inviteSignature,
 				userId: undefined,
@@ -1838,6 +1984,130 @@ describe('NetworkEngine', () => {
 				.get({ c: slotRow!.Cid as string });
 			expect(Boolean(row?.IsAccepted)).to.equal(false);
 			expect(row?.Digest).to.equal(null);
+		});
+
+		// 62-102 (gap7/IN-03): keyed, live-head respondToInvite.
+		describe('62-102: live head, invite key, engine-side signing', () => {
+			const officerInvokes = {
+				authority: { name: 'Invokee', domainName: 'inv.example' },
+				admin: { effectiveAt: '2026-01-01T00:00:00', thresholdPolicies: '[{"policy":"rad","threshold":1}]' },
+				officers: [{ adminEffectiveAt: '2026-01-01T00:00:00', userId: 'user-1', title: 'Officer', scopes: '["rad"]' }],
+			};
+
+			async function seedRealInvite () {
+				const net = await createTestNetwork();
+				const auth = (await addTestAuthority(net)).authorityEngine;
+				const share = auth.createAuthorityInvite('Seeded');
+				await auth.saveInviteWithSigning(share, 'iad', makeTestSignCallback(net.user));
+				return { net, auth, share };
+			}
+
+			async function code (p: Promise<unknown>): Promise<string | undefined> {
+				try { await p; return undefined; } catch (err) { return (err as { code?: string }).code ?? `no-code:${String(err)}`; }
+			}
+
+			async function resultCount (net: { ctx: EngineContext }): Promise<number> {
+				const row = await net.ctx.db.prepare('select count(*) as n from InviteResult').get({});
+				return Number(row?.n);
+			}
+
+			it('a cancelled slot is refused with invite-no-longer-valid and writes no InviteResult', async () => {
+				const { net, auth, share } = await seedRealInvite();
+				const slot = await net.ctx.db.prepare('select Cid from InviteSlot where InviteKey = :k').get({ k: share.inviteKey });
+				await auth.cancelInvite(slot!.Cid as string);
+				const c = await code(net.networkEngine.respondToInvite({ invite: share, invitePrivate: share.invitePrivate, isAccepted: true, invokes: officerInvokes, inviteSignature: 'x' } as never));
+				expect(c).to.equal('invite-no-longer-valid');
+				expect(await resultCount(net)).to.equal(0);
+			});
+
+			it('WR-R1-09: a cancellation landing between the chain read and the insert is refused inside the transaction and writes no InviteResult', async () => {
+				const { net, auth, share } = await seedRealInvite();
+				const slot = await net.ctx.db.prepare('select Cid from InviteSlot where InviteKey = :k').get({ k: share.inviteKey });
+				const engineCtx = (net.networkEngine as unknown as { ctx: EngineContext }).ctx;
+				const db = engineCtx.db as unknown as { prepare: (sql: string, ...rest: unknown[]) => { get: (p?: unknown) => Promise<unknown> } };
+				const realPrepare = db.prepare.bind(db);
+				let cancelled = false;
+				// The au-accept branch computes its Digest AFTER the chain read and BEFORE the insert:
+				// withdraw the invitation exactly there, as an officer on another screen would.
+				db.prepare = (sql: string, ...rest: unknown[]) => {
+					const stmt = realPrepare(sql, ...rest);
+					if (cancelled || !/select Digest\(:tid/.test(sql)) return stmt;
+					return new Proxy(stmt, {
+						get(target, prop, receiver) {
+							if (prop !== 'get') return Reflect.get(target, prop, receiver);
+							return async (params?: unknown) => {
+								cancelled = true;
+								await auth.cancelInvite(slot!.Cid as string);
+								return await target.get(params);
+							};
+						},
+					});
+				};
+				try {
+					const c = await code(net.networkEngine.respondToInvite({ invite: share, invitePrivate: share.invitePrivate, isAccepted: true, invokes: officerInvokes, inviteSignature: 'x' } as never));
+					expect(cancelled, `the cancellation was injected mid-call (code=${c})`).to.equal(true);
+					expect(c).to.equal('invite-no-longer-valid');
+					expect(await resultCount(net)).to.equal(0);
+				} finally {
+					db.prepare = realPrepare;
+				}
+			});
+
+			it('on a resend chain the InviteResult is written for the HEAD Cid, never the original', async () => {
+				const { net, auth, share } = await seedRealInvite();
+				const original = await net.ctx.db.prepare('select Cid from InviteSlot where InviteKey = :k').get({ k: share.inviteKey });
+				const headCid = await auth.resendInvite(original!.Cid as string);
+				expect(headCid).to.not.equal(original!.Cid);
+				await net.networkEngine.respondToInvite({ invite: share, invitePrivate: share.invitePrivate, isAccepted: false, invokes: undefined, inviteSignature: 'x' } as never);
+				const rows: string[] = [];
+				for await (const r of net.ctx.db.eval('select SlotCid from InviteResult', {})) rows.push(r.SlotCid as string);
+				expect(rows).to.deep.equal([headCid]);
+			});
+
+			it('an InviteAction with no invitePrivate is refused with invite-key-required and writes nothing', async () => {
+				const { net, share } = await seedRealInvite();
+				const c = await code(net.networkEngine.respondToInvite({ invite: share, isAccepted: true, invokes: officerInvokes, inviteSignature: 'a'.repeat(128) } as never));
+				expect(c).to.equal('invite-key-required');
+				expect(await resultCount(net)).to.equal(0);
+			});
+
+			it('au-accept signs the InviteResult with the invite key: the stored signature verifies against the slot InviteKey', async () => {
+				const { net, share } = await seedRealInvite();
+				await net.networkEngine.respondToInvite({ invite: share, invitePrivate: share.invitePrivate, isAccepted: true, invokes: officerInvokes, inviteSignature: 'ignored' } as never);
+				const slot = await net.ctx.db.prepare('select Cid from InviteSlot where InviteKey = :k').get({ k: share.inviteKey });
+				const row = await net.ctx.db.prepare('select Digest, InviteSignature from InviteResult where SlotCid = :c').get({ c: slot!.Cid as string });
+				const ok = verifyAdHocInviteSignature(
+					inviteResultSignedBytes({ slotCid: slot!.Cid as string, digestToken: String(row!.Digest), accept: true }),
+					row!.InviteSignature as string,
+					share.inviteKey,
+				);
+				expect(ok).to.equal(true);
+			});
+
+			it('a WRONG invitePrivate is refused with invite-signature-invalid and writes nothing (accept and decline)', async () => {
+				const { net, share } = await seedRealInvite();
+				const wrong = randomTestKeyPair().privateHex;
+				expect(await code(net.networkEngine.respondToInvite({ invite: share, invitePrivate: wrong, isAccepted: true, invokes: officerInvokes, inviteSignature: 'x' } as never))).to.equal('invite-signature-invalid');
+				expect(await code(net.networkEngine.respondToInvite({ invite: share, invitePrivate: wrong, isAccepted: false, invokes: undefined, inviteSignature: 'x' } as never))).to.equal('invite-signature-invalid');
+				expect(await resultCount(net)).to.equal(0);
+			});
+
+			it('a decline signs over digestToken null and verifies; an already-answered slot is invite-already-answered', async () => {
+				const { net, share } = await seedRealInvite();
+				await net.networkEngine.respondToInvite({ invite: share, invitePrivate: share.invitePrivate, isAccepted: false, invokes: undefined, inviteSignature: 'ignored' } as never);
+				const slot = await net.ctx.db.prepare('select Cid from InviteSlot where InviteKey = :k').get({ k: share.inviteKey });
+				const row = await net.ctx.db.prepare('select Digest, InviteSignature from InviteResult where SlotCid = :c').get({ c: slot!.Cid as string });
+				expect(row!.Digest).to.equal(null);
+				expect(verifyAdHocInviteSignature(inviteResultSignedBytes({ slotCid: slot!.Cid as string, digestToken: 'null', accept: false }), row!.InviteSignature as string, share.inviteKey)).to.equal(true);
+				expect(await code(net.networkEngine.respondToInvite({ invite: share, invitePrivate: share.invitePrivate, isAccepted: false, invokes: undefined, inviteSignature: 'x' } as never))).to.equal('invite-already-answered');
+			});
+
+			it('an unknown invite key is invite-not-found', async () => {
+				const { net } = await seedRealInvite();
+				const stranger = randomTestKeyPair();
+				const c = await code(net.networkEngine.respondToInvite({ invite: { type: 'au', expiration: '0', inviteKey: stranger.publicHex, inviteSignature: 'a' }, invitePrivate: stranger.privateHex, isAccepted: false, invokes: undefined, inviteSignature: 'a' } as never));
+				expect(c).to.equal('invite-not-found');
+			});
 		});
 	});
 
@@ -3423,7 +3693,8 @@ describe('NetworkRespondToInviteBuilder', () => {
 	it('REAL ENGINE: isValid===true => commit() does not throw BuilderValidationError', async () => {
 		const { networkEngine: engine } = await createTestNetwork();
 		const ctx = (engine as unknown as { ctx: EngineContext }).ctx;
-		const fakeInviteKey = 'r'.repeat(66);
+		const fakeInviteKeyPair = randomTestKeyPair();
+		const fakeInviteKey = fakeInviteKeyPair.publicHex;
 		await ctx.db.exec(
 			`INSERT INTO InviteSlot (Cid, Type, Name, Expiration, InviteKey, InviteSignature, SigningNonce)
 			 WITH CONTEXT Tid = 1, IsSignatureValid = true, IsInsertValid = true, now = datetime('now', '-1 day')
@@ -3433,6 +3704,7 @@ describe('NetworkRespondToInviteBuilder', () => {
 		const invite: InviteAction<unknown> = {
 			invite: { type: 'au', expiration: '2099-01-01T00:00:00Z', inviteKey: fakeInviteKey, inviteSignature: 'r'.repeat(128), digest: null },
 			isAccepted: true,
+			invitePrivate: fakeInviteKeyPair.privateHex,
 			inviteSignature: 'r'.repeat(128),
 			invokes: { authority: { name: 'Invokee', domainName: 'inv.example' }, admin: { effectiveAt: '2026-01-01T00:00:00', thresholdPolicies: '[{"policy":"rad","threshold":1}]' }, officers: [{ adminEffectiveAt: '2026-01-01T00:00:00', userId: 'user-1', title: 'Officer', scopes: '["rad"]' }] },
 			userInit: undefined,
@@ -3440,7 +3712,22 @@ describe('NetworkRespondToInviteBuilder', () => {
 		} as InviteAction<unknown>;
 		const b = new NetworkRespondToInviteBuilder(engine).setInvite(invite);
 		expect(b.isValid()).to.equal(true);
-		await b.commit();
+		// WR-R2-06: toEngineInput now carries invitePrivate, so the builder commits like the direct path.
+		let caught: unknown;
+		let result: string | undefined;
+		try { result = await b.commit(); } catch (err) { caught = err; }
+		expect(caught, String(caught)).to.equal(undefined);
+		expect(result).to.be.a('string').with.length.greaterThan(0);
+	});
+
+	it('WR-R2-06: toEngineInput and fromPayload carry invitePrivate; toJSON never serializes it', () => {
+		const stub = makeStubNetworkEngine();
+		const secret = 'ab'.repeat(32);
+		const b = new NetworkRespondToInviteBuilder(stub).setInvite({ ...makeInviteAction(), invitePrivate: secret });
+		expect(b.toEngineInput().invitePrivate).to.equal(secret);
+		expect(new NetworkRespondToInviteBuilder(stub).fromPayload({ ...makeInviteAction(), invitePrivate: secret }).toEngineInput().invitePrivate).to.equal(secret);
+		expect(JSON.stringify(b.toJSON())).to.not.include(secret);
+		expect(b.toJSON().draft).to.not.have.property('invitePrivate');
 	});
 
 	it('round-trip serialization and fromJSON kind/version rejection', () => {
@@ -3460,7 +3747,8 @@ describe('NetworkRespondToInviteBuilder', () => {
 	it('REAL ENGINE: double-commit guard throws BuilderAlreadyCommittedError', async () => {
 		const { networkEngine: engine } = await createTestNetwork();
 		const ctx = (engine as unknown as { ctx: EngineContext }).ctx;
-		const fakeInviteKey = 's'.repeat(66);
+		const fakeInviteKeyPair = randomTestKeyPair();
+		const fakeInviteKey = fakeInviteKeyPair.publicHex;
 		await ctx.db.exec(
 			`INSERT INTO InviteSlot (Cid, Type, Name, Expiration, InviteKey, InviteSignature, SigningNonce)
 			 WITH CONTEXT Tid = 1, IsSignatureValid = true, IsInsertValid = true, now = datetime('now', '-1 day')
@@ -3470,13 +3758,16 @@ describe('NetworkRespondToInviteBuilder', () => {
 		const invite: InviteAction<unknown> = {
 			invite: { type: 'au', expiration: '2099-01-01T00:00:00Z', inviteKey: fakeInviteKey, inviteSignature: 's'.repeat(128), digest: null },
 			isAccepted: true,
+			invitePrivate: fakeInviteKeyPair.privateHex,
 			inviteSignature: 's'.repeat(128),
 			invokes: { authority: { name: 'Invokee', domainName: 'inv.example' }, admin: { effectiveAt: '2026-01-01T00:00:00', thresholdPolicies: '[{"policy":"rad","threshold":1}]' }, officers: [{ adminEffectiveAt: '2026-01-01T00:00:00', userId: 'user-1', title: 'Officer', scopes: '["rad"]' }] },
 			userInit: undefined,
 			userId: undefined,
 		} as InviteAction<unknown>;
 		const b = new NetworkRespondToInviteBuilder(engine).setInvite(invite);
-		await b.commit();
+		// WR-R2-06: the first commit must itself succeed (its outcome is asserted, not discarded).
+		const first = await b.commit();
+		expect(first).to.be.a('string').with.length.greaterThan(0);
 		let caught: unknown;
 		try { b.commit(); } catch (err) { caught = err; }
 		expect(caught).to.be.instanceOf(BuilderAlreadyCommittedError);
@@ -3515,7 +3806,8 @@ describe('NetworkRespondToInviteBuilder', () => {
 		// Direct path
 		const { networkEngine: eng1 } = await createTestNetwork();
 		const ctx1 = (eng1 as unknown as { ctx: EngineContext }).ctx;
-		const fakeInviteKey1 = 't'.repeat(66);
+		const fakeInviteKey1Pair = randomTestKeyPair();
+		const fakeInviteKey1 = fakeInviteKey1Pair.publicHex;
 		await ctx1.db.exec(
 			`INSERT INTO InviteSlot (Cid, Type, Name, Expiration, InviteKey, InviteSignature, SigningNonce)
 			 WITH CONTEXT Tid = 1, IsSignatureValid = true, IsInsertValid = true, now = datetime('now', '-1 day')
@@ -3525,6 +3817,7 @@ describe('NetworkRespondToInviteBuilder', () => {
 		const invite1: InviteAction<unknown> = {
 			invite: { type: 'au', expiration: '2099-01-01T00:00:00Z', inviteKey: fakeInviteKey1, inviteSignature: 't'.repeat(128), digest: null },
 			isAccepted: true,
+			invitePrivate: fakeInviteKey1Pair.privateHex,
 			inviteSignature: 't'.repeat(128),
 			invokes: { authority: { name: 'Invokee', domainName: 'inv.example' }, admin: { effectiveAt: '2026-01-01T00:00:00', thresholdPolicies: '[{"policy":"rad","threshold":1}]' }, officers: [{ adminEffectiveAt: '2026-01-01T00:00:00', userId: 'user-1', title: 'Officer', scopes: '["rad"]' }] },
 			userInit: undefined,
@@ -3535,7 +3828,8 @@ describe('NetworkRespondToInviteBuilder', () => {
 		// Builder path
 		const { networkEngine: eng2 } = await createTestNetwork();
 		const ctx2 = (eng2 as unknown as { ctx: EngineContext }).ctx;
-		const fakeInviteKey2 = 'u'.repeat(66);
+		const fakeInviteKey2Pair = randomTestKeyPair();
+		const fakeInviteKey2 = fakeInviteKey2Pair.publicHex;
 		await ctx2.db.exec(
 			`INSERT INTO InviteSlot (Cid, Type, Name, Expiration, InviteKey, InviteSignature, SigningNonce)
 			 WITH CONTEXT Tid = 1, IsSignatureValid = true, IsInsertValid = true, now = datetime('now', '-1 day')
@@ -3545,13 +3839,24 @@ describe('NetworkRespondToInviteBuilder', () => {
 		const invite2: InviteAction<unknown> = {
 			invite: { type: 'au', expiration: '2099-01-01T00:00:00Z', inviteKey: fakeInviteKey2, inviteSignature: 'u'.repeat(128), digest: null },
 			isAccepted: true,
+			invitePrivate: fakeInviteKey2Pair.privateHex,
 			inviteSignature: 'u'.repeat(128),
 			invokes: { authority: { name: 'Invokee', domainName: 'inv.example' }, admin: { effectiveAt: '2026-01-01T00:00:00', thresholdPolicies: '[{"policy":"rad","threshold":1}]' }, officers: [{ adminEffectiveAt: '2026-01-01T00:00:00', userId: 'user-1', title: 'Officer', scopes: '["rad"]' }] },
 			userInit: undefined,
 			userId: undefined,
 		} as InviteAction<unknown>;
+		// WR-R2-06: parity restored -- the builder path carries invitePrivate and writes the same
+		// shape of InviteResult as the direct path (each on its own network and slot).
 		const builderResult = await eng2.buildRespondToInvite().fromPayload(invite2).commit();
-		expect(builderResult).to.not.equal(undefined);
+		expect(typeof builderResult).to.equal(typeof directResult);
+		const shape = async (ctx: EngineContext): Promise<unknown> => {
+			const rows: unknown[] = [];
+			for await (const r of ctx.db.eval('select IsAccepted, InvokedId is not null as HasInvokedId, Digest is not null as HasDigest from InviteResult', {})) rows.push({ ...r });
+			return rows;
+		};
+		const directShape = await shape(ctx1);
+		expect(directShape).to.have.length(1);
+		expect(await shape(ctx2)).to.deep.equal(directShape);
 	});
 
 	it('FACT-04 parity: MockNetworkEngine.buildRespondToInvite() returns instanceof NetworkRespondToInviteBuilder', () => {
