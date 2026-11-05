@@ -1,5 +1,5 @@
 /**
- * AuthorityDetailsScreen.pending.test.tsx — 66.1 (D-04, D-05, D-08): a change waiting for its hour
+ * AuthorityDetailsScreen.pending.test.tsx — 66.1 (D-04, D-05, D-08): a change waiting for its time
  * shows as the pending card with its local time; Revise Administration is hidden while it waits;
  * Cancel change is offered only to a current rad holder and costs one signer and one engine call,
  * then the screen re-reads; refusals render only translated copy; returning to the screen re-reads.

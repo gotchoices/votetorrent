@@ -1,5 +1,5 @@
 /**
- * The confirm-age rule: a confirm card left open more than five minutes after the tap is stale, so
+ * The confirm-age rule: a confirm card left open more than one minute after the tap is stale, so
  * the screens recompute the effective time and show the card again instead of signing a time that
  * has already passed or nearly passed. Unreadable input fails closed (stale).
  */
@@ -13,45 +13,49 @@ import { ADMIN_CHANGE_CONFIRM_MAX_AGE_MS, isAdminChangeConfirmStale } from "../d
 
 const T0 = Date.UTC(2026, 10, 5, 3, 57, 0);
 const AT = adminChangeEffectiveAt(T0);
-const SIX_MIN = T0 + 360_000;
-const TWO_H = T0 + 7_200_000;
-const NINETY_S = T0 + 90_000;
+const SIXTY_ONE_S = T0 + 61_000;
+const TEN_MIN = T0 + 600_000;
+const THIRTY_S = T0 + 30_000;
 const BOUNDARY = T0 + ADMIN_CHANGE_CONFIRM_MAX_AGE_MS;
-const LATER_AT = adminChangeEffectiveAt(TWO_H);
+const LATER_AT = adminChangeEffectiveAt(TEN_MIN);
 
 describe("isAdminChangeConfirmStale", () => {
-	it("pins the five-minute age and the one-hour delay", () => {
-		expect(ADMIN_CHANGE_CONFIRM_MAX_AGE_MS).toBe(300_000);
-		expect(ADMIN_CHANGE_DELAY_MS).toBe(3_600_000);
-		expect(AT).toBe("2026-11-05T04:57:00");
+	it("pins the one-minute age and the five-minute delay", () => {
+		expect(ADMIN_CHANGE_CONFIRM_MAX_AGE_MS).toBe(60_000);
+		expect(ADMIN_CHANGE_DELAY_MS).toBe(300_000);
+		expect(AT).toBe("2026-11-05T04:02:00");
 	});
 
-	it("is fresh right after the tap and 90 seconds later", () => {
+	it("is fresh right after the tap and 30 seconds later", () => {
 		expect(isAdminChangeConfirmStale(AT, T0)).toBe(false);
-		expect(isAdminChangeConfirmStale(AT, NINETY_S)).toBe(false);
+		expect(isAdminChangeConfirmStale(AT, THIRTY_S)).toBe(false);
 	});
 
-	it("is still fresh at exactly five minutes and stale one millisecond later", () => {
+	it("is still fresh at exactly one minute and stale one millisecond later", () => {
 		expect(isAdminChangeConfirmStale(AT, BOUNDARY)).toBe(false);
 		expect(isAdminChangeConfirmStale(AT, BOUNDARY + 1)).toBe(true);
 	});
 
-	it("is stale six minutes and two hours after the tap", () => {
-		expect(isAdminChangeConfirmStale(AT, SIX_MIN)).toBe(true);
-		expect(isAdminChangeConfirmStale(AT, TWO_H)).toBe(true);
-		// Control: two hours on, the shown time has already passed.
-		expect(Date.parse(AT + "Z") < TWO_H).toBe(true);
+	it("a card signed at the last fresh instant still leaves four minutes before the time", () => {
+		expect(Date.parse(AT + "Z") - BOUNDARY).toBe(240_000);
+	});
+
+	it("is stale 61 seconds and ten minutes after the tap", () => {
+		expect(isAdminChangeConfirmStale(AT, SIXTY_ONE_S)).toBe(true);
+		expect(isAdminChangeConfirmStale(AT, TEN_MIN)).toBe(true);
+		// Control: ten minutes on, the shown time has already passed.
+		expect(Date.parse(AT + "Z") < TEN_MIN).toBe(true);
 	});
 
 	it("a time recomputed at the later instant is fresh", () => {
-		expect(isAdminChangeConfirmStale(LATER_AT, TWO_H)).toBe(false);
+		expect(isAdminChangeConfirmStale(LATER_AT, TEN_MIN)).toBe(false);
 	});
 
 	it("reads every accepted form as the same UTC instant, in any zone", () => {
-		const forms = ["2026-11-05T04:57:00", "2026-11-05 04:57:00", "2026-11-05T04:57:00.123", "2026-11-05T04:57:00Z"];
+		const forms = ["2026-11-05T04:02:00", "2026-11-05 04:02:00", "2026-11-05T04:02:00.123", "2026-11-05T04:02:00Z"];
 		for (const form of forms) {
 			expect(isAdminChangeConfirmStale(form, T0)).toBe(isAdminChangeConfirmStale(AT, T0));
-			expect(isAdminChangeConfirmStale(form, SIX_MIN)).toBe(isAdminChangeConfirmStale(AT, SIX_MIN));
+			expect(isAdminChangeConfirmStale(form, SIXTY_ONE_S)).toBe(isAdminChangeConfirmStale(AT, SIXTY_ONE_S));
 		}
 	});
 

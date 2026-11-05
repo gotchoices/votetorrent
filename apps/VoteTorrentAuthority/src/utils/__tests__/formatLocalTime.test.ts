@@ -44,8 +44,8 @@ describe("formatLocalTime (any zone)", () => {
 	it("round-trips the shared effective-time helper's canonical form", () => {
 		const T0 = Date.UTC(2026, 10, 5, 3, 57, 0);
 		const canonical = adminChangeEffectiveAt(T0);
-		expect(canonical).toBe("2026-11-05T04:57:00");
-		expect(formatLocalTime(canonical)).toBe(formatLocalTime("2026-11-05T04:57:00"));
+		expect(canonical).toBe("2026-11-05T04:02:00");
+		expect(formatLocalTime(canonical)).toBe(formatLocalTime("2026-11-05T04:02:00"));
 	});
 });
 

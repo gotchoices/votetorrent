@@ -246,7 +246,7 @@ describe('cancellation exclusion drift scan (C5)', () => {
 // Real-wait reader proof: shared helpers (private to this file).
 // ---------------------------------------------------------------------------
 
-/** D-02: the test injects a 5 s delay in place of the shipped hour. */
+/** D-02: the test injects a 5 s delay in place of the shipped five minutes. */
 const INJECTED_DELAY_MS = 5_000
 const FULL_SCOPES: Scope[] = ['rn', 'rad', 'vrg', 'iad', 'uai', 'mel', 'ceb'] as Scope[]
 

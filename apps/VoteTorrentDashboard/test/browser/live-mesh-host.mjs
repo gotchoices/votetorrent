@@ -79,7 +79,7 @@ const AUTHORITY_NAME = 'Live Mesh Authority';
 const FOUNDER_NAME = 'Live Mesh Founder';
 const OFFICER_NAME = 'Live Mesh Officer B';
 /**
- * 66.1 (D-02): the shipped administration-change delay is one hour (vote-core ADMIN_CHANGE_DELAY_MS).
+ * 66.1 (D-02): the shipped administration-change delay is five minutes (vote-core ADMIN_CHANGE_DELAY_MS).
  * This harness injects 5 s as the proposal's effectiveAt, as the vote-engine specs do; nothing switches it.
  */
 const OFFICER_CHANGE_TEST_DELAY_MS = 5_000;

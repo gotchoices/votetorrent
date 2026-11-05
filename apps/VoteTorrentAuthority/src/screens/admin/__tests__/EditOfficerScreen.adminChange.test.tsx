@@ -2,7 +2,7 @@
  * EditOfficerScreen.adminChange.test.tsx (66.1-07; D-04, D-06, D-07, D-08, D-12).
  *
  * Edit, add and remove on the Edit Administrator screen take their effective time from the shared
- * one-hour rule, show it in the confirm card before the one signing prompt, and sign exactly the
+ * five-minute rule, show it in the confirm card before the one signing prompt, and sign exactly the
  * time shown. Every change starts from the current administration. A pending change is shown and
  * blocks a second change before any prompt. Add offers only accepted invitees, as existing
  * officers. The real confirm and pending cards, formatLocalTime and the refusal mapper run here.
@@ -18,7 +18,8 @@ import { formatLocalTime } from "../../../utils/displayUtils";
 import { OFFICER_SCOPE_CODES } from "../../../utils/scopeLabel";
 
 const FIXED_NOW = Date.UTC(2026, 10, 5, 4, 0, 0);
-const LATER = FIXED_NOW + 2 * 60 * 60 * 1000;
+// 90 s: past the one-minute confirm age, so the card is stale (it would still be fresh under a longer age).
+const LATER = FIXED_NOW + 90_000;
 
 const AUTHORITY = { id: "auth-1", name: "Test Authority", domainName: "test.example.org" };
 const O1 = { userId: "o1", authorityId: AUTHORITY.id, title: "Chair", scopes: ["rad"] };
@@ -247,9 +248,9 @@ afterEach(() => {
 	jest.useRealTimers();
 });
 
-describe("EditOfficerScreen - edit uses the shared one-hour time, shown == signed (D-04, D-06)", () => {
-	it("Save shows the confirm card one hour out; Confirm 90 s later signs the card's time on the current roster", async () => {
-		expect(ADMIN_CHANGE_DELAY_MS).toBe(3_600_000);
+describe("EditOfficerScreen - edit uses the shared five-minute time, shown == signed (D-04, D-06)", () => {
+	it("Save shows the confirm card five minutes out; Confirm 30 s later signs the card's time on the current roster", async () => {
+		expect(ADMIN_CHANGE_DELAY_MS).toBe(300_000);
 		const tr = await mount();
 		await enterTitle(tr, "Vice Chair");
 		await pressSave(tr);
@@ -263,7 +264,7 @@ describe("EditOfficerScreen - edit uses the shared one-hour time, shown == signe
 		expect(mockProposeAdmin).not.toHaveBeenCalled();
 		expect(mockCreateDeviceSigner).not.toHaveBeenCalled();
 
-		jest.setSystemTime(FIXED_NOW + 90_000);
+		jest.setSystemTime(FIXED_NOW + 30_000);
 		await pressConfirm(tr);
 
 		expect(mockProposeAdmin).toHaveBeenCalledTimes(1);
@@ -501,7 +502,7 @@ describe("EditOfficerScreen - locked inputs while the confirm card shows (D-04)"
 });
 
 describe("EditOfficerScreen - stale confirm signs nothing (D-01, D-04)", () => {
-	it("stale-confirm: a card older than five minutes re-shows a fresh time with the notice; the next Confirm signs it", async () => {
+	it("stale-confirm: a card older than one minute re-shows a fresh time with the notice; the next Confirm signs it", async () => {
 		const tr = await mount();
 		await pressSave(tr);
 		expect(confirmCards(tr)[0].props.effectiveAt).toBe(adminChangeEffectiveAt(FIXED_NOW));

@@ -16,8 +16,8 @@
  * - `cancelAdminChange` costs exactly one sign call for any current `rad` holder, a repeat cancel costs none, a
  *   cancelled change never becomes current, and the cancel service's refusal codes reach the caller unchanged (D-05).
  *
- * D-02: the short delay is only passed as the second argument of `adminChangeEffectiveAt`. The shipped delay (one
- * hour) is pinned by admin-change-constant.spec.ts; nothing here switches it.
+ * D-02: the short delay is only passed as the second argument of `adminChangeEffectiveAt`. The shipped delay (five
+ * minutes) is pinned by admin-change-constant.spec.ts; nothing here switches it.
  */
 
 import { expect } from 'chai'

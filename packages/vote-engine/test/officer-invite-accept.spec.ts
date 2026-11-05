@@ -5,7 +5,7 @@
  * getAcceptedOfficerInvitees and builds an { existing } selection that promotion resolves.
  *
  * D-02: the end-to-end group injects a 5 s delay as the second argument of adminChangeEffectiveAt. There is
- * no switch; the shipped one-hour constant is not touched here.
+ * no switch; the shipped five-minute constant is not touched here.
  */
 import { expect } from 'chai'
 import { secp256k1 } from '@noble/curves/secp256k1.js'

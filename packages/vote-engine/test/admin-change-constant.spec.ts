@@ -1,7 +1,7 @@
 /**
  * admin-change-constant.spec.ts — Phase 66.1 Plan 02 Task 3
  *
- * Pins the shipped administration-change delay at one hour (D-01) and proves no app-level switch
+ * Pins the shipped administration-change delay at five minutes (D-01) and proves no app-level switch
  * can change it (D-02): the shorter test delay exists only as an argument to the helper.
  *
  *   - shipped delay: the constant, the canonical effective-time form, the injected test delay
@@ -196,13 +196,13 @@ const T0 = Date.UTC(2026, 10, 5, 4, 0, 0)
 
 describe('admin-change-constant (66.1-02)', () => {
   describe('shipped delay (D-01, D-02)', () => {
-    it('the shipped delay is exactly one hour', () => {
-      expect(ADMIN_CHANGE_DELAY_MS).to.equal(3_600_000)
+    it('the shipped delay is exactly five minutes', () => {
+      expect(ADMIN_CHANGE_DELAY_MS).to.equal(300_000)
     })
 
-    it('the effective time is the canonical 19-char UTC form, one hour after now', () => {
+    it('the effective time is the canonical 19-char UTC form, five minutes after now', () => {
       const at = adminChangeEffectiveAt(T0)
-      expect(at).to.equal('2026-11-05T05:00:00')
+      expect(at).to.equal('2026-11-05T04:05:00')
       expect(at).to.have.length(19)
       expect(at).to.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/)
       expect(at).to.not.include('Z')

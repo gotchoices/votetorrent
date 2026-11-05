@@ -1,8 +1,8 @@
 /**
  * ProposedAdministrationScreen.effective.test.tsx — 66.1 (D-04..D-08): the Proposed Administration
  * change uses the one shared delay helper. The first Propose tap signs nothing and shows the local
- * time one hour later; Confirm signs exactly that string, even when the clock moved, unless the card
- * was left open more than five minutes (then it re-shows a fresh time and signs nothing). Every
+ * time five minutes later; Confirm signs exactly that string, even when the clock moved, unless the card
+ * was left open more than one minute (then it re-shows a fresh time and signs nothing). Every
  * change starts from the CURRENT administration (C2, F4), a pending change locks the screen and
  * offers Cancel change to a rad holder, and refusals render only translated copy.
  *
@@ -55,9 +55,9 @@ const NAMES: Record<string, string> = { "user-1": "Founding Chair", "user-2": "S
 const SIGNATURE = { signerUserId: "user-1", signerKey: "k", signature: "s" };
 const SCOPE_ORDER = ["rn", "rad", "vrg", "iad", "uai", "ceb", "mel", "cap", "ik"];
 
-// 03:57 UTC; one hour later is 04:57 UTC, which is 10:42 in Asia/Kathmandu (UTC+05:45).
+// 03:57 UTC; five minutes later is 04:02 UTC, which is 09:47 in Asia/Kathmandu (UTC+05:45).
 const T0 = Date.UTC(2026, 10, 5, 3, 57, 0);
-const PENDING_AT = "2026-11-05T04:57:00";
+const PENDING_AT = "2026-11-05T04:02:00";
 const IN_NEPAL = new Date(T0).getTimezoneOffset() === -345;
 const pad2 = (n: number) => (n < 10 ? "0" + n : "" + n);
 /** Local HH:MM of an instant, from the Date getters (independent of formatLocalTime). */
@@ -256,7 +256,7 @@ afterEach(() => {
 });
 
 describe("confirm step (D-04, D-06)", () => {
-	it("the first Propose tap signs nothing and shows the local time one hour after the tap", async () => {
+	it("the first Propose tap signs nothing and shows the local time five minutes after the tap", async () => {
 		const tr = await renderScreen();
 		await pressPropose(tr);
 		expect(has(tr, "admin-change-confirm-card")).toBe(true);
@@ -304,23 +304,23 @@ describe("confirm step (D-04, D-06)", () => {
 	it("signs exactly the time the card showed, even when the clock moved before Confirm", async () => {
 		const tr = await renderScreen();
 		await pressPropose(tr);
-		jest.setSystemTime(T0 + 90_000);
+		jest.setSystemTime(T0 + 30_000);
 		await pressId(tr, "admin-change-confirm");
 		expect(mockAuthorityEngine.proposeAdmin).toHaveBeenCalledTimes(1);
 		const proposal = lastProposal();
 		const effectiveAt = proposal.proposed.effectiveAt as string;
 		expect(effectiveAt).toBe(adminChangeEffectiveAt(T0));
-		expect(effectiveAt).not.toBe(adminChangeEffectiveAt(T0 + 90_000));
+		expect(effectiveAt).not.toBe(adminChangeEffectiveAt(T0 + 30_000));
 		expect(Date.parse(effectiveAt + "Z") - T0).toBe(ADMIN_CHANGE_DELAY_MS);
-		expect(Date.parse(effectiveAt + "Z") - T0).toBe(60 * 60 * 1000);
+		expect(Date.parse(effectiveAt + "Z") - T0).toBe(5 * 60 * 1000);
 		expect(mockCreateDeviceSigner).toHaveBeenCalledTimes(1);
 		expect(proposal.signers).toEqual(["user-1"]);
 	});
 
-	(IN_NEPAL ? it : it.skip)("Asia/Kathmandu: the confirm card reads 10:42", async () => {
+	(IN_NEPAL ? it : it.skip)("Asia/Kathmandu: the confirm card reads 09:47", async () => {
 		const tr = await renderScreen();
 		await pressPropose(tr);
-		expect(allText(tr)).toContain("adminChangeConfirm:10:42");
+		expect(allText(tr)).toContain("adminChangeConfirm:09:47");
 	});
 
 	it("Go back closes the card with nothing signed; a later tap shows the time from the new tap", async () => {
@@ -359,8 +359,8 @@ describe("confirm step (D-04, D-06)", () => {
 		await flush();
 	});
 
-	it("a card left open two hours signs nothing, re-shows a fresh time with the notice, then signs that time", async () => {
-		const LATER = T0 + 2 * 60 * 60 * 1000;
+	it("a card left open 90 s (past the one-minute age) signs nothing, re-shows a fresh time with the notice, then signs that time", async () => {
+		const LATER = T0 + 90_000;
 		const tr = await renderScreen();
 		await pressPropose(tr);
 		const opensBefore = mockNetworkEngine.openAuthority.mock.calls.length;
