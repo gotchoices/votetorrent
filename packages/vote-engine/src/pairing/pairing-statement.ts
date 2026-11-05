@@ -190,7 +190,8 @@ export async function verifyPairingRemove (
  * Mint-time officer test: true only when an Officer row for `userId` belongs to its authority's
  * administration in effect at `nowCanonical`. It mirrors the `CurrentAdmin` view with the owner's
  * clock bound in, and it is for mint time only. It fails closed: a malformed input, a missing
- * Admin row or a failed query is false.
+ * Admin row or a failed query is false. Like the view, it skips an administration change that was cancelled
+ * before it took effect, so a cancelled officer can never pass the mint-time check.
  */
 export async function isCurrentPairingOfficer (
   db: Database,
@@ -199,7 +200,7 @@ export async function isCurrentPairingOfficer (
   if (!idOk(args?.userId) || !matches(CANONICAL_RE, args.nowCanonical)) return false
   try {
     const row = await db
-      .prepare('select 1 as x from Officer O where O.UserId = :pairUserId and O.AdminEffectiveAt = (select max(A.EffectiveAt) from Admin A where A.AuthorityId = O.AuthorityId and A.EffectiveAt <= :nowAt)')
+      .prepare('select 1 as x from Officer O where O.UserId = :pairUserId and O.AdminEffectiveAt = (select max(A.EffectiveAt) from Admin A where A.AuthorityId = O.AuthorityId and A.EffectiveAt <= :nowAt and not exists (select 1 from AdminCancellation C where C.AuthorityId = A.AuthorityId and C.AdminEffectiveAt = A.EffectiveAt))')
       .get({ pairUserId: args.userId, nowAt: args.nowCanonical })
     return row !== undefined && row !== null
   } catch {
