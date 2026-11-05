@@ -352,8 +352,9 @@ export const AUTHORITY_PROFILE_TABLES = Object.freeze(['Authority', 'Network']);
 /** Tables `fetchAuthorityPeers` reads (with `resolveAuthorityId`). */
 export const AUTHORITY_PEERS_TABLES = Object.freeze(['Authority', 'AuthorityPeer', 'Network']);
 
-/** Tables `fetchAdministrationOfficers` reads (with `resolveAuthorityId`; the `CurrentAdmin` view counts as `Admin`). */
-export const ADMINISTRATION_OFFICERS_TABLES = Object.freeze(['Admin', 'Authority', 'Network', 'Officer', 'User']);
+/** Tables `fetchAdministrationOfficers` reads (with `resolveAuthorityId`; the `CurrentAdmin` view counts as `Admin` plus
+ * `AdminCancellation`, so a cancelled change re-reads the panel). */
+export const ADMINISTRATION_OFFICERS_TABLES = Object.freeze(['Admin', 'AdminCancellation', 'Authority', 'Network', 'Officer', 'User']);
 
 /** Tables `fetchKeyholders` reads. */
 export const KEYHOLDERS_TABLES = Object.freeze(['ElectionRevision', 'Keyholder', 'User']);

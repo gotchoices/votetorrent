@@ -409,8 +409,8 @@ test('live: drift control -- a copied list with one table removed is reported un
 	assert.throws(() => assert.deepEqual(derived, copied), assert.AssertionError);
 });
 
-test('live: drift control -- the CurrentAdmin view resolves to Admin, a constant code-list view stays itself, a resolveAuthorityId caller gains its tables', () => {
-	assert.deepEqual(expandViews(['CurrentAdmin']), ['Admin']);
+test('live: drift control -- the CurrentAdmin view resolves to Admin and AdminCancellation, a constant code-list view stays itself, a resolveAuthorityId caller gains its tables', () => {
+	assert.deepEqual(expandViews(['CurrentAdmin']), ['Admin', 'AdminCancellation']);
 	assert.deepEqual(expandViews(['ElectionType']), ['ElectionType']);
 	assert.deepEqual(collectTableRefs(fetcherSlice('resolveAuthorityId')), ['Authority', 'Network']);
 	assert.ok(!collectTableRefs(fetcherSlice('fetchAuthorityPeers')).includes('Network'), 'Network must come from resolveAuthorityId, not the fetcher body');
