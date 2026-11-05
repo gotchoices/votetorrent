@@ -21,6 +21,9 @@ import type {
   OfficerAcceptProvisioning,
 } from '@votetorrent/vote-core'
 
+/** 66.1 (D-12): the fixed, identifier-free message behind code `officer-provisioning-required`. */
+const OFFICER_PROVISIONING_MESSAGE = 'Accepting an officer invitation needs this device\'s identity and signing key'
+
 /** An Error carrying a stable string `code` the app routes on (rethrow keeps it across the engine boundary). */
 function coded (message: string, code: string): Error {
   return Object.assign(new Error(message), { code })
@@ -93,9 +96,48 @@ export class InvitationEngine implements IInvitationEngine {
     }
   }
 
-  // Satisfies IInvitationEngine until 66.1-05 replaces it with the real listing.
+  /**
+   * 66.1 (D-12): the owner's Add Administrator source. One entry per accepted officer invitee:
+   * `{ slotCid, name, userId }` where `name` is the InviteSlot's Name (the User's Name when the slot
+   * Name is blank) and `userId` is the InviteResult's InvokedId.
+   *
+   * Included only when the slot is Type 'of', its InviteResult is accepted (0/1 and boolean
+   * normalised), InvokedId is not null, and a User row with Id = InvokedId exists on THIS database
+   * (on the owner's phone: the officer's identity has replicated). Sorted by name, then slotCid;
+   * deduplicated by userId (first entry kept).
+   *
+   * Same scoping as getPendingOfficerInvites: every 'of' slot in the network database, NOT filtered
+   * by authority, slot expiration or the current roster. Callers drop entries whose userId is
+   * already an officer. Build the selection with vote-core's `officerSelectionFromInvitee`.
+   */
   async getAcceptedOfficerInvitees (): Promise<AcceptedOfficerInvitee[]> {
-    throw coded('Listing accepted officer invitations is not available in this build', 'not-implemented')
+    try {
+      const found: AcceptedOfficerInvitee[] = []
+      for await (const row of this.ctx.db.eval(
+        `SELECT S.Cid, S.Name, IR.IsAccepted, IR.InvokedId, U.Name AS UserName
+         FROM InviteSlot S
+         JOIN InviteResult IR ON IR.SlotCid = S.Cid
+         JOIN User U ON U.Id = IR.InvokedId
+         WHERE S.Type = 'of' AND IR.InvokedId IS NOT NULL`
+      )) {
+        // WR-02: boolean columns come back as 0/1 on the on-device path.
+        const isAccepted = row.IsAccepted === true || (row.IsAccepted as unknown) === 1
+        const userId = row.InvokedId as string | null
+        if (!isAccepted || typeof userId !== 'string' || userId.length === 0) continue
+        const slotName = typeof row.Name === 'string' ? row.Name : ''
+        const name = slotName.trim().length > 0 ? slotName : (typeof row.UserName === 'string' ? row.UserName : '')
+        found.push({ slotCid: row.Cid as string, name, userId })
+      }
+      found.sort((a, b) => a.name.localeCompare(b.name) || (a.slotCid < b.slotCid ? -1 : a.slotCid > b.slotCid ? 1 : 0))
+      const seen = new Set<string>()
+      return found.filter((entry) => {
+        if (seen.has(entry.userId)) return false
+        seen.add(entry.userId)
+        return true
+      })
+    } catch (err) {
+      this.rethrow(err, 'getAcceptedOfficerInvitees')
+    }
   }
 
   /**
@@ -301,10 +343,22 @@ export class InvitationEngine implements IInvitationEngine {
    * SigningNonce) is ctx.user is refused with code `self-invite`, before the binding signature and
    * again inside the transaction (user decision 8b: no override). Residuals - a colluding officer
    * with a second device, and co-signing officers (only the initiator is checked) - are recorded in
-   * 62-SECURITY.md. Decline and every non-'k' accept are UNCHANGED (single InviteResult write, no
-   * transaction). INTERIM STATE: the Authority keyholder-accept screen does not yet pass
+   * 62-SECURITY.md. Decline and every accept other than 'k' and 'of' are UNCHANGED (single
+   * InviteResult write in its own transaction). INTERIM STATE: the Authority keyholder-accept screen does not yet pass
    * provisioning (62-26 wires it), so a real keyholder accept in the app fails closed with the
    * message thrown below — by design, not a bug.
+   *
+   * 66.1 (D-12): a Type 'of' (officer) ACCEPT is ATOMIC and requires `officer` provisioning. The
+   * `InviteResult` (InvokedId = officer.userId, which is the device user id), the officer's `User`,
+   * its `UserKey` (the provisioned signing key) and a 'C' `UserEvent` are written inside ONE
+   * `BEGIN`/`COMMIT`; a failed accept leaves none of them behind. An absent or malformed provisioning
+   * (or an `invokedId` that differs from `officer.userId`) is refused with code
+   * `officer-provisioning-required` after the invite-key and liveness checks and before any write.
+   * There is no signing prompt: the slot's own InviteSignature authorises the User row
+   * (`User.InsertValid`). When a User with that id already exists, the accept is admitted only for
+   * the engine's own session user presenting one of its live registered keys, and then writes the
+   * InviteResult alone; any other existing id is refused with the same code. `officer` is ignored
+   * for a decline and for every other invite type.
    */
   async respondToInvite (
     invitationId: string,
@@ -313,7 +367,7 @@ export class InvitationEngine implements IInvitationEngine {
     digest?: string,
     invokedId?: string,
     keyholder?: KeyholderAcceptProvisioning,
-    _officer?: OfficerAcceptProvisioning,
+    officer?: OfficerAcceptProvisioning,
   ): Promise<void> {
     // invitationId is the InviteSlot Cid in the thin IInvitationEngine surface
     // (as used by the accept/decline screens per D-06 paste flow).
@@ -398,6 +452,32 @@ export class InvitationEngine implements IInvitationEngine {
         throw coded('The invitation key does not match this invitation', 'invite-signature-invalid')
       }
       const isSignatureValid = true
+
+      // 66.1 (D-12): an officer accept needs valid provisioning, checked after the invite-key and
+      // liveness checks above and before any write. An already-present User with the provisioned id
+      // is admitted only as the engine's own session user presenting a live registered key.
+      const isOfficerAccept = accept && slotRow.Type === 'of'
+      let officerWrite: { provisioning: OfficerAcceptProvisioning, reuseIdentity: boolean } | undefined
+      if (isOfficerAccept) {
+        const provisioning = this.validateOfficerProvisioning(officer, invokedId)
+        const existingUser = await this.ctx.db
+          .prepare('SELECT Id FROM User WHERE Id = :userId')
+          .get({ userId: provisioning.userId })
+        let reuseIdentity = false
+        if (existingUser) {
+          if (this.ctx.user?.id !== provisioning.userId) {
+            throw coded(OFFICER_PROVISIONING_MESSAGE, 'officer-provisioning-required')
+          }
+          const liveKey = await this.ctx.db
+            .prepare('SELECT 1 AS x FROM UserKey WHERE UserId = :userId AND PubKey = :keyValue AND Expiration > :now')
+            .get({ userId: provisioning.userId, keyValue: provisioning.signingKey.key, now: nowCanonicalDatetime() })
+          if (!liveKey) {
+            throw coded(OFFICER_PROVISIONING_MESSAGE, 'officer-provisioning-required')
+          }
+          reuseIdentity = true
+        }
+        officerWrite = { provisioning, reuseIdentity }
+      }
 
       // 62-02 (D-21, D-26): a Type 'k' accept needs provisioning validated and its binding
       // digest signed BEFORE anything is written — never hold a transaction open across a
@@ -494,6 +574,11 @@ export class InvitationEngine implements IInvitationEngine {
         inviteSignature,
         invokedId: mintedUserId ?? invokedId ?? null,
         isSignatureValid,
+      }
+
+      if (officerWrite) {
+        await this.writeOfficerAccept(slotRow, inviteResultSql, inviteResultParams, officerWrite.provisioning, officerWrite.reuseIdentity)
+        return
       }
 
       if (!keyholderWrite) {
@@ -652,6 +737,110 @@ export class InvitationEngine implements IInvitationEngine {
   }
 
   // ---------- helpers ----------
+
+  /**
+   * 66.1 (D-12): returns the officer provisioning when it is complete and well formed, else throws
+   * code `officer-provisioning-required` with a fixed, identifier-free message.
+   */
+  private validateOfficerProvisioning (officer: OfficerAcceptProvisioning | undefined, invokedId: string | undefined): OfficerAcceptProvisioning {
+    const refuse = () => coded(OFFICER_PROVISIONING_MESSAGE, 'officer-provisioning-required')
+    if (!officer || typeof officer !== 'object') throw refuse()
+    if (typeof officer.userId !== 'string' || officer.userId.length === 0) throw refuse()
+    if (invokedId !== undefined && invokedId !== officer.userId) throw refuse()
+    const key = officer.signingKey
+    if (!key || typeof key !== 'object') throw refuse()
+    if (key.type !== 'M' && key.type !== 'P') throw refuse()
+    if (typeof key.key !== 'string' || !/^[0-9a-fA-F]{64,}$/.test(key.key)) throw refuse()
+    if (typeof key.expiration !== 'number' || !Number.isFinite(key.expiration) || key.expiration <= Date.now()) throw refuse()
+    return officer
+  }
+
+  /**
+   * 66.1 (D-12) atomic officer accept: InviteResult (InvokedId = userId) + User + UserKey + 'C'
+   * UserEvent in ONE BEGIN/COMMIT under the per-database invite write serial, with the live-head
+   * re-check inside. With `reuseIdentity` (the session user's own identity is already here) only the
+   * InviteResult is written. Any error rolls the whole accept back.
+   */
+  private async writeOfficerAccept (
+    slotRow: { Cid: string, InviteKey: string, Type: string, Name: string, InviteSignature: string | null, SigningNonce: string },
+    inviteResultSql: string,
+    inviteResultParams: Record<string, unknown>,
+    officer: OfficerAcceptProvisioning,
+    reuseIdentity: boolean,
+  ): Promise<void> {
+    const userId = officer.userId
+    const trimmedName = typeof officer.name === 'string' ? officer.name.trim() : ''
+    const userName = trimmedName.length > 0 ? trimmedName : slotRow.Name
+    const tid = reuseIdentity ? undefined : await allocateTid(this.ctx.db, `user:${userId}`)
+    await withInviteWriteSerial(this.ctx.db, async () => {
+      await this.ctx.db.exec('BEGIN')
+      try {
+        await this.assertSlotIsLiveHead(slotRow)
+        await this.ctx.db.exec(inviteResultSql, { ...inviteResultParams, invokedId: userId })
+        if (tid !== undefined) {
+          const now = nowCanonicalDatetime()
+          await this.ctx.db.exec(
+            `insert into User (
+              Id,
+              Name,
+              ImageRef
+            )
+            with context SigningNonce = null, InviteSlotCid = :inviteSlotCid, InviteSignature = :userInviteSignature, Tid = ${tid}
+            values (:userId, :userName, null)`,
+            { inviteSlotCid: slotRow.Cid, userInviteSignature: slotRow.InviteSignature, userId, userName }
+          )
+          await this.ctx.db.exec(
+            `insert into UserKey (
+              UserId,
+              Type,
+              PubKey,
+              Expiration
+            )
+            with context UserKey = null, Signature = null, Tid = ${tid}, now = :now, IsSignatureValid = true
+            values (:userId, :keyType, :keyValue, :expiration)`,
+            {
+              userId,
+              keyType: officer.signingKey.type,
+              keyValue: officer.signingKey.key,
+              expiration: toCanonicalDatetime(officer.signingKey.expiration),
+              now,
+            }
+          )
+          await this.ctx.db.exec(
+            `insert into UserEvent (UserId, Tid, Sequence, Event, Timestamp, Signature, Payload)
+            with context CtxTid = ${tid}, now = :now
+            values (
+              :userId,
+              ${tid},
+              coalesce((select max(Sequence) from UserEvent where UserId = :userId), -1) + 1,
+              'C',
+              :now,
+              null,
+              :payload
+            )`,
+            {
+              userId,
+              now,
+              // Same Payload shape as UserEngine.create: expiration is the raw epoch-ms number.
+              payload: JSON.stringify({
+                name: userName,
+                imageRef: null,
+                userKey: { key: officer.signingKey.key, type: officer.signingKey.type, expiration: officer.signingKey.expiration },
+              }),
+            }
+          )
+        }
+        await this.ctx.db.exec('COMMIT')
+      } catch (innerErr) {
+        try {
+          await this.ctx.db.exec('ROLLBACK')
+        } catch {
+          // already rolled back by the failed statement — ignore, the original error is what matters.
+        }
+        throw innerErr
+      }
+    })
+  }
 
   /** The officer who started the signing session behind a slot (AdminSigning.UserId), if known. */
   private async invitedBy (signingNonce: string): Promise<string | undefined> {
