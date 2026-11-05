@@ -464,7 +464,7 @@ describe('rest-registration-transport: shipped-code constraints', () => {
     // 44's @peculiar device-boot wall) and a single JSON round-trip does
     // not justify an HTTP client package — RESEARCH's Package Legitimacy
     // Audit records zero proposed packages for this phase. The walk skips
-    // node_modules (and dist/.git/.yarn/vendor) so it asserts intent (what
+    // node_modules (and dist/.git/.yarn/vendor, plus native build output) so it asserts intent (what
     // this repo's OWN packages declare), not npm's transitive closure, and
     // resolves the repo root by walking up so it passes whether mocha is
     // invoked from the workspace root or from the package directory.
@@ -504,7 +504,10 @@ function findRepoRoot (startDir: string): string {
 }
 
 function collectPackageJsonFiles (root: string): string[] {
-  const SKIP_DIRS = new Set(['node_modules', 'dist', '.git', '.yarn', 'vendor'])
+  // Native build output (CocoaPods, Xcode/Gradle build trees, CMake caches) is generated, gitignored and holds no
+  // package of this repo, but on a machine that has built the apps it is ~16k directories: walking it pushed this
+  // synchronous test past mocha's 2 s timeout. No tracked package.json lives under any of these names.
+  const SKIP_DIRS = new Set(['node_modules', 'dist', '.git', '.yarn', 'vendor', 'Pods', 'build', '.gradle', '.cxx', 'DerivedData'])
   const results: string[] = []
   const stack: string[] = [root]
   while (stack.length > 0) {
