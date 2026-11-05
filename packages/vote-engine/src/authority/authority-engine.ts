@@ -1519,6 +1519,11 @@ export class AuthorityEngine implements IAuthorityEngine {
 		}
 	}
 
+	// Satisfies IAuthorityEngine until 66.1-09 wires insertAdminCancellation.
+	async cancelAdminChange(_target: { effectiveAt: string; userId: string }, _sign: (digest: Uint8Array) => Promise<Signature>): Promise<void> {
+		throw Object.assign(new Error('Cancelling an administration change is not available in this build'), { code: 'not-implemented' });
+	}
+
 	/**
 	 * SURF-03 (D-05/D-07): re-emit a pending invitation as a FRESH InviteSlot.
 	 * NON-signing (A2): reuses the original slot's already-approved SigningNonce

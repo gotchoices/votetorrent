@@ -8,6 +8,7 @@ import { allocateTid } from '../database/tid-allocator.js'
 import { readInviteChain } from './read-invite-chain.js'
 import { withInviteWriteSerial } from './invite-write-serial.js'
 import type {
+  AcceptedOfficerInvitee,
   IInvitationEngine,
   InviteSlotResolution,
   InviteStatus,
@@ -17,6 +18,7 @@ import type {
   KeyholderAcceptProvisioning,
   KeyholderSlotSeat,
   InviteType,
+  OfficerAcceptProvisioning,
 } from '@votetorrent/vote-core'
 
 /** An Error carrying a stable string `code` the app routes on (rethrow keeps it across the engine boundary). */
@@ -89,6 +91,11 @@ export class InvitationEngine implements IInvitationEngine {
     } catch (err) {
       this.rethrow(err, 'getPendingOfficerInvites')
     }
+  }
+
+  // Satisfies IInvitationEngine until 66.1-05 replaces it with the real listing.
+  async getAcceptedOfficerInvitees (): Promise<AcceptedOfficerInvitee[]> {
+    throw coded('Listing accepted officer invitations is not available in this build', 'not-implemented')
   }
 
   /**
@@ -306,6 +313,7 @@ export class InvitationEngine implements IInvitationEngine {
     digest?: string,
     invokedId?: string,
     keyholder?: KeyholderAcceptProvisioning,
+    _officer?: OfficerAcceptProvisioning,
   ): Promise<void> {
     // invitationId is the InviteSlot Cid in the thin IInvitationEngine surface
     // (as used by the accept/decline screens per D-06 paste flow).

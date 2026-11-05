@@ -1,4 +1,5 @@
 import type {
+  AcceptedOfficerInvitee,
   IInvitationEngine,
   InviteSlotResolution,
   InviteStatus,
@@ -6,7 +7,9 @@ import type {
   SentAuthorityInvite,
   SentKeyholderInvite,
   InviteType,
-  KeyholderSlotSeat
+  KeyholderAcceptProvisioning,
+  KeyholderSlotSeat,
+  OfficerAcceptProvisioning
 } from '@votetorrent/vote-core'
 
 /**
@@ -45,6 +48,9 @@ const MOCK_PENDING_AUTHORITY_INVITES: Array<InviteStatus<SentAuthorityInvite>> =
 ]
 
 export class MockInvitationEngine implements IInvitationEngine {
+  // 66.1 (D-12): officer accepts recorded by respondToInvite, listed by getAcceptedOfficerInvitees.
+  private readonly acceptedOfficers: AcceptedOfficerInvitee[] = []
+
   // The mock seeds no slots, so every share is honestly not-found.
   async resolveInviteSlot (_inviteKey: string, _type: InviteType): Promise<InviteSlotResolution> {
     return { status: 'not-found' }
@@ -57,6 +63,10 @@ export class MockInvitationEngine implements IInvitationEngine {
 
   async getPendingOfficerInvites (): Promise<Array<InviteStatus<SentOfficerInvite>>> {
     return MOCK_PENDING_OFFICER_INVITES
+  }
+
+  async getAcceptedOfficerInvitees (): Promise<AcceptedOfficerInvitee[]> {
+    return this.acceptedOfficers.map((entry) => ({ ...entry }))
   }
 
   async getPendingAuthorityInvites (): Promise<Array<InviteStatus<SentAuthorityInvite>>> {
@@ -82,9 +92,22 @@ export class MockInvitationEngine implements IInvitationEngine {
     return undefined
   }
 
-  async respondToInvite (invitationId: string, accept: boolean, invitePrivate: string, _digest?: string, _invokedId?: string): Promise<void> {
+  async respondToInvite (
+    invitationId: string,
+    accept: boolean,
+    invitePrivate: string,
+    _digest?: string,
+    _invokedId?: string,
+    _keyholder?: KeyholderAcceptProvisioning,
+    officer?: OfficerAcceptProvisioning
+  ): Promise<void> {
     if (typeof invitePrivate !== 'string' || !/^[0-9a-fA-F]{64}$/.test(invitePrivate)) {
       throw Object.assign(new Error('An invitation key is required to answer an invitation'), { code: 'invite-key-required' })
+    }
+    // The mock seeds no slots, so it cannot know a slot's type and never raises
+    // officer-provisioning-required; that refusal belongs to the real engine.
+    if (accept && officer !== undefined && !this.acceptedOfficers.some((entry) => entry.slotCid === invitationId)) {
+      this.acceptedOfficers.push({ slotCid: invitationId, name: officer.name, userId: officer.userId })
     }
     console.log(`MockInvitationEngine: ${accept ? 'accepted' : 'declined'} invitation ${invitationId}`)
   }
