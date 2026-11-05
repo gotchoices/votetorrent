@@ -26,6 +26,8 @@ import type { RootStackParamList } from "../../navigation/types";
 import { useApp } from "../../providers/AppProvider";
 import { createDeviceSigner } from "../../engines/device-signer";
 import { getOrCreateDeviceUser } from "../../engines/device-user";
+import { getOfficerAcceptProvisioning } from "../../engines/officer-accept-provisioning";
+import { adminChangeErrorKey } from "../../utils/adminChangeErrors";
 import { globalStyles } from "../../theme/styles";
 import { FOUNDING_OFFICER_SCOPES } from "../../utils/foundingOfficerScopes";
 import { useDeviceSigningErrorHandler } from "../../hooks/useDeviceSigningErrorHandler";
@@ -219,17 +221,29 @@ export default function AdministratorInvitationScreen() {
 		setIsResponding(true);
 		setErrorMessage("");
 		try {
+			// 66.1-07 (D-12): an accept carries the phone's own user id, name and current signing key, read
+			// BEFORE any engine call so a phone with no key goes straight to secure signing setup. Decline
+			// never reads it, so declining never needs a signing key.
+			const officer = accept ? await getOfficerAcceptProvisioning() : undefined;
 			const engine = await getEngine<IInvitationEngine>("invitations");
 			// gap7/WR-01: always re-resolve at press time so a resend made while the screen was open is
 			// answered on the live head, not the Cid captured at mount.
 			const target = await resolveInviteFromShare(engine, pastedInvite, "of");
 			// T-21-11-03: accept and decline both call the SIGNED respondToInvite path (D-09).
-			await engine.respondToInvite(target.slotCid, accept, target.invitePrivate);
+			if (officer) {
+				// invokedId equals officer.userId (66.1-05 refuses a mismatch).
+				await engine.respondToInvite(target.slotCid, true, target.invitePrivate, undefined, officer.userId, undefined, officer);
+			} else {
+				await engine.respondToInvite(target.slotCid, false, target.invitePrivate);
+			}
 			// GAP-2: navigate ONLY on success - the InviteResult is now written.
 			navigation.goBack();
 		} catch (error) {
 			console.warn("Error responding to invite:", error instanceof Error ? error.name : "unknown");
-			setErrorMessage(mapAcceptError(error));
+			const outcome = handleDeviceSigningError(error);
+			if (outcome.handled) return;
+			const key = adminChangeErrorKey(error);
+			setErrorMessage(key ? t(key) : mapAcceptError(error));
 		} finally {
 			respondingRef.current = false;
 			setIsResponding(false);

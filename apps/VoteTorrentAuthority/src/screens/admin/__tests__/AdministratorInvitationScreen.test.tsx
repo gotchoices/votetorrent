@@ -150,6 +150,17 @@ jest.mock('../../../engines/device-signer', () => ({
 jest.mock('../../../engines/device-user', () => ({
   getOrCreateDeviceUser: jest.fn(async () => ({ id: 'user-1', name: 'Device User' })),
 }));
+// 66.1-07 (D-12): the officer accept sends the device user's id, name and current signing key.
+// userId is the SAME id the device-user mock above returns.
+const MOCK_PROVISIONING = {
+  userId: 'user-1',
+  name: 'Device User',
+  signingKey: { key: '02' + 'cd'.repeat(32), type: 'P', expiration: 2_100_000_000_000 },
+};
+const mockGetOfficerAcceptProvisioning = jest.fn(async (): Promise<any> => MOCK_PROVISIONING);
+jest.mock('../../../engines/officer-accept-provisioning', () => ({
+  getOfficerAcceptProvisioning: (...a: unknown[]) => (mockGetOfficerAcceptProvisioning as any)(...a),
+}));
 
 jest.mock('@react-navigation/native', () => ({
   useTheme: () => ({
@@ -217,6 +228,9 @@ beforeEach(() => {
   });
   mockSaveInviteWithSigning.mockResolvedValue(undefined);
   mockRespondToInvite.mockResolvedValue(undefined);
+  // clearAllMocks keeps implementations; re-apply so a one-off rejection never leaks into the next case.
+  mockGetOfficerAcceptProvisioning.mockReset();
+  mockGetOfficerAcceptProvisioning.mockImplementation(async () => MOCK_PROVISIONING);
 });
 
 describe('AdministratorInvitationScreen — INV-02 (send mode real invitePrivate sharing)', () => {
@@ -432,8 +446,66 @@ describe('AdministratorInvitationScreen - accept mode resolves the slot from the
       await buttonByTitle(tr, 'accept').props.onPress();
       await Promise.resolve();
     });
-    expect(mockRespondToInvite).toHaveBeenCalledWith(SLOT, true, share.invitePrivate);
+    expect(mockRespondToInvite).toHaveBeenCalledWith(SLOT, true, share.invitePrivate, undefined, 'user-1', undefined, MOCK_PROVISIONING);
     expect(mockGoBack).toHaveBeenCalledTimes(1);
+  });
+
+  it('D-12: accept sends the device user id as invokedId and the provisioning as the 7th argument', async () => {
+    const tr = await render();
+    await renderer.act(async () => {
+      await buttonByTitle(tr, 'accept').props.onPress();
+      await Promise.resolve();
+    });
+    expect(mockGetOfficerAcceptProvisioning).toHaveBeenCalledTimes(1);
+    expect(mockRespondToInvite).toHaveBeenCalledTimes(1);
+    const args = (mockRespondToInvite.mock.calls[0] as unknown[]);
+    expect(args).toHaveLength(7);
+    const officer = args[6] as typeof MOCK_PROVISIONING;
+    expect(officer).toEqual(MOCK_PROVISIONING);
+    expect(officer.userId).toBe('user-1');
+    expect(args[4]).toBe(officer.userId);
+    expect(mockGoBack).toHaveBeenCalledTimes(1);
+  });
+
+  it('D-12: decline never reads the provisioning and keeps the three-argument call', async () => {
+    const tr = await render();
+    await renderer.act(async () => {
+      await buttonByTitle(tr, 'reject').props.onPress();
+      await Promise.resolve();
+    });
+    expect(mockGetOfficerAcceptProvisioning).not.toHaveBeenCalled();
+    expect(mockRespondToInvite.mock.calls[0]).toEqual([SLOT, false, share.invitePrivate]);
+  });
+
+  it('D-12: a phone with no signing key goes to secure signing setup before any engine call', async () => {
+    mockGetOfficerAcceptProvisioning.mockRejectedValueOnce(Object.assign(new Error('x'), { code: 'NO_KEY_PROVISIONED' }));
+    const tr = await render();
+    const resolvesBefore = mockResolveInviteSlot.mock.calls.length;
+    await renderer.act(async () => {
+      await buttonByTitle(tr, 'accept').props.onPress();
+      await Promise.resolve();
+    });
+    expect(mockRespondToInvite).not.toHaveBeenCalled();
+    expect(mockResolveInviteSlot.mock.calls.length).toBe(resolvesBefore);
+    expect(mockNavigate).toHaveBeenCalledWith('ProvisionSigningKey', { reason: 'first-run' });
+    const errorWrap = tr.root.findByProps({ testID: 'administrator-invitation-error' });
+    expect(errorWrap.findAll((n) => typeof n.props?.message === 'string' && n.props.message !== '')).toHaveLength(0);
+    expect(JSON.stringify(tr.toJSON())).not.toContain('invitationAcceptFailed');
+    expect(mockGoBack).not.toHaveBeenCalled();
+  });
+
+  it('D-12: an engine officer-provisioning-required refusal shows the set-up-signing copy, no engine text', async () => {
+    mockRespondToInvite.mockRejectedValueOnce(Object.assign(new Error('InvitationEngine: officer provisioning engine text'), { code: 'officer-provisioning-required' }));
+    const tr = await render();
+    await renderer.act(async () => {
+      await buttonByTitle(tr, 'accept').props.onPress();
+      await Promise.resolve();
+    });
+    const rendered = JSON.stringify(tr.toJSON());
+    expect(rendered).toContain('adminChangeAcceptNeedsSigningKey');
+    expect(rendered).not.toContain('InvitationEngine');
+    expect(rendered).not.toContain('engine text');
+    expect(mockGoBack).not.toHaveBeenCalled();
   });
 
   it('decline signs with the resolved Cid and navigates back', async () => {
@@ -587,7 +659,7 @@ describe('AdministratorInvitationScreen - hardened accept (masked share, press-t
     mockResolveInviteSlot.mockResolvedValueOnce({ status: 'live', cid: 'head-A' }).mockResolvedValue({ status: 'live', cid: 'head-B' });
     const tr = await render();
     await press(tr, 'accept');
-    expect(mockRespondToInvite).toHaveBeenCalledWith('head-B', true, share.invitePrivate);
+    expect(mockRespondToInvite).toHaveBeenCalledWith('head-B', true, share.invitePrivate, undefined, 'user-1', undefined, MOCK_PROVISIONING);
   });
 
   it.each([
