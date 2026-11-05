@@ -27,7 +27,8 @@ import {
 	openOfficerStrandReader,
 	StrandReadError,
 	STRAND_READ_ROW_LIMIT,
-	STRAND_DB_WAIT_MS,
+	STRAND_DB_STALL_MS,
+	STRAND_DB_CAP_MS,
 	primaryKeyIdentity,
 } from '../../src/peer/strand-read.js';
 
@@ -148,7 +149,7 @@ function fastDeps(/** @type {Record<string, any>} */ extra = {}) {
 			clock += ms;
 		},
 		now: () => clock,
-		waitMs: 2_000,
+		stallMs: 2_000,
 		pollMs: 500,
 		registerDbPlugins: async () => undefined,
 		...extra,
@@ -363,7 +364,8 @@ test('O1: the open resolves once the strand database is published (third poll), 
 	assert.equal(polls, 3);
 	assert.deepEqual(fake.setSchemaPath.calls, [[['App', 'main']]]);
 	assert.equal(reader.db, fake.database);
-	assert.equal(STRAND_DB_WAIT_MS, 120_000);
+	assert.equal(STRAND_DB_STALL_MS, 60_000);
+	assert.equal(STRAND_DB_CAP_MS, 600_000);
 });
 
 test('O2: the open refuses by name on timeout, abort, a missing accessor and an empty strand id', async () => {
@@ -558,4 +560,229 @@ test('O6: the comment-stripped source reads only through the accessor and names 
 		assert.ok(stripped.includes(token), 'a required token is missing from the source');
 	}
 	assert.doesNotMatch(stripped, /\b(insert\s+into|update\s+\S+\s+set|delete\s+from)\b/i);
+});
+
+// ---------------------------------------------------------------------------
+// G-3: the progress-aware wait for the strand database (stall window + hard cap)
+// ---------------------------------------------------------------------------
+
+const REPO_PROTOCOL = `/optimystic/strand-${STRAND_ID}/repo/1.0.0`;
+const PING_PROTOCOL = `/optimystic/strand-${STRAND_ID}/fret/1.0.0/ping`;
+
+/**
+ * A fake libp2p stream: a real EventTarget with a protocol. `finish(error)` fires its one `close` event,
+ * with `error` set the way libp2p's StreamCloseEvent carries it for an abort or a reset.
+ * @param {string} protocol
+ */
+function fakeStream(protocol) {
+	const stream = /** @type {any} */ (new EventTarget());
+	stream.protocol = protocol;
+	stream.finish = (/** @type {Error | undefined} */ error) => {
+		const event = /** @type {any} */ (new Event('close'));
+		if (error) event.error = error;
+		stream.dispatchEvent(event);
+	};
+	return stream;
+}
+
+/**
+ * A strand node the build is talking to. Each exchange is one stream that is open for one poll and then
+ * closes (cleanly unless `closeWith` says otherwise); `push()` lands a block through the store's feed.
+ * @param {{ protocol?: string, closeWith?: () => Error | undefined }} [opts]
+ */
+function makeStrandWire(opts = {}) {
+	/** @type {any[]} */
+	let open = [];
+	/** @type {Set<() => void>} */
+	const feed = new Set();
+	const node = {
+		getConnections: () => [{ streams: [...open] }],
+		storageRepo: {
+			onAnyCollectionChange: (/** @type {() => void} */ cb) => {
+				feed.add(cb);
+				return () => feed.delete(cb);
+			},
+		},
+	};
+	return {
+		node,
+		feed,
+		/** Close what is open (each one exchange done), then open the next request. */
+		exchange() {
+			for (const stream of open) stream.finish(opts.closeWith?.());
+			open = [fakeStream(opts.protocol ?? REPO_PROTOCOL)];
+		},
+		push() {
+			for (const cb of [...feed]) cb();
+		},
+		get open() {
+			return open;
+		},
+	};
+}
+
+/**
+ * A fake clock world. `script(clockMs)` runs after every poll's sleep; the database appears at `dbAtMs`.
+ * @param {{ dbAtMs?: number, script?: (clock: number, wire: ReturnType<typeof makeStrandWire>) => void, wire?: ReturnType<typeof makeStrandWire> | null, deps?: Record<string, any> }} opts
+ */
+function makeWaitWorld({ dbAtMs = Number.POSITIVE_INFINITY, script = () => undefined, wire = makeStrandWire(), deps = {} }) {
+	const fake = makeFakeStrandDb(new Map());
+	const world = { clock: 0, sleeps: 0 };
+	const memberNode = {
+		getStrandDatabase: (/** @type {string} */ id) => (id === STRAND_ID && world.clock >= dbAtMs ? fake.strandDatabase : null),
+		...(wire ? { getStrandNode: () => wire.node } : {}),
+	};
+	const open = () =>
+		openOfficerStrandReader({
+			memberNode,
+			strandId: STRAND_ID,
+			deps: {
+				sleep: async (/** @type {number} */ ms) => {
+					world.clock += ms;
+					world.sleeps += 1;
+					if (wire) script(world.clock, wire);
+				},
+				now: () => world.clock,
+				pollMs: 500,
+				registerDbPlugins: async () => undefined,
+				...deps,
+			},
+		});
+	return { world, fake, open, wire };
+}
+
+/** @param {() => Promise<any>} fn @param {RegExp} reason */
+async function rejectsTimeout(fn, reason) {
+	await assert.rejects(fn, (/** @type {any} */ err) => {
+		assert.ok(err instanceof StrandReadError, 'not a StrandReadError');
+		assert.equal(err.subject, 'strandDatabase');
+		assert.equal(err.code, 'timeout');
+		assert.match(err.reason, reason);
+		return true;
+	});
+}
+
+/** Test (1)'s world: a build answering one block request every 2 s, its database published at 300 s. */
+function slowBuildWorld(/** @type {Record<string, any>} */ deps = {}) {
+	return makeWaitWorld({ dbAtMs: 300_000, script: (clock, wire) => clock % 2_000 === 0 && wire.exchange(), deps });
+}
+
+test('W1 (G-3): a build that keeps receiving data is waited for past 120 s, and opens when its database appears', async () => {
+	const { world, fake, open } = slowBuildWorld();
+	const reader = await open();
+	assert.equal(reader.db, fake.database);
+	assert.ok(world.clock > 120_000, 'the wait did not run past the old fixed 120 s');
+	assert.equal(world.clock, 300_000);
+});
+
+test('W1 positive control: the old fixed 120 s deadline (stall window = cap = 120 s) refuses the same build', async () => {
+	const { world, open } = slowBuildWorld({ stallMs: 120_000, capMs: 120_000 });
+	await rejectsTimeout(open, /hard cap/);
+	assert.equal(world.clock, 120_000);
+});
+
+test('W1b (G-3): blocks landing through the store feed alone are progress too', async () => {
+	const { world, open } = makeWaitWorld({ dbAtMs: 250_000, script: (clock, wire) => clock % 5_000 === 0 && wire.push() });
+	await open();
+	assert.equal(world.clock, 250_000);
+});
+
+test('W2 (G-3): a build that stops receiving fails at the stall window after its last progress, by name', async () => {
+	const { world, open, wire } = makeWaitWorld({ script: (clock, w) => clock <= 100_000 && clock % 2_000 === 0 && w.exchange() });
+	await rejectsTimeout(open, /stall window/);
+	// The exchange at 100 s closed the request opened at 98 s (the last progress) and opened one that never
+	// closes; the stall window runs from 100 s.
+	assert.equal(world.clock, 100_000 + STRAND_DB_STALL_MS);
+	assert.equal(wire?.feed.size, 0, 'the store feed is still subscribed after the wait ended');
+});
+
+test('W2b (G-3): no strand node, unanswered requests and liveness pings are not progress; each fails at the stall window', async () => {
+	const none = makeWaitWorld({ wire: null });
+	await rejectsTimeout(none.open, /stall window/);
+	assert.equal(none.world.clock, STRAND_DB_STALL_MS);
+
+	const timedOut = makeWaitWorld({
+		wire: makeStrandWire({ closeWith: () => new Error('response timeout') }),
+		script: (clock, w) => clock % 2_000 === 0 && w.exchange(),
+	});
+	await rejectsTimeout(timedOut.open, /stall window/);
+	assert.equal(timedOut.world.clock, STRAND_DB_STALL_MS);
+
+	const pings = makeWaitWorld({ wire: makeStrandWire({ protocol: PING_PROTOCOL }), script: (clock, w) => clock % 2_000 === 0 && w.exchange() });
+	await rejectsTimeout(pings.open, /stall window/);
+	assert.equal(pings.world.clock, STRAND_DB_STALL_MS);
+});
+
+test('W3 (G-3): the hard cap ends a wait that only trickles, however steadily', async () => {
+	// A request opened at the first poll, then one answered every 50 s: always inside the 60 s stall
+	// window, never a database.
+	const { world, open } = makeWaitWorld({ script: (clock, w) => (clock === 500 || clock % 50_000 === 0) && w.exchange() });
+	await rejectsTimeout(open, /hard cap/);
+	assert.equal(world.clock, STRAND_DB_CAP_MS);
+});
+
+test('W3b (G-3): the stall window and the cap are injectable through deps', async () => {
+	const stall = makeWaitWorld({ deps: { stallMs: 5_000 } });
+	await rejectsTimeout(stall.open, /stall window/);
+	assert.equal(stall.world.clock, 5_000);
+	const cap = makeWaitWorld({ script: (clock, w) => w.exchange(), deps: { capMs: 7_000 } });
+	await rejectsTimeout(cap.open, /hard cap/);
+	assert.equal(cap.world.clock, 7_000);
+});
+
+test('W4 (G-3): the open resolves on the first poll that finds the database, with no further sleep', async () => {
+	const { world, open } = makeWaitWorld({ dbAtMs: 200_250, script: (clock, w) => clock % 2_000 === 0 && w.exchange() });
+	await open();
+	assert.equal(world.clock, 200_500, 'not the first poll at or after the database appeared');
+	assert.equal(world.sleeps, 200_500 / 500);
+	const published = makeWaitWorld({ dbAtMs: 0 });
+	await published.open();
+	assert.equal(published.world.sleeps, 0, 'a published database still slept');
+	assert.equal(published.wire?.feed.size, 0, 'a published database still subscribed the store feed');
+});
+
+test('W5 (G-3): no timer, store subscription or counting outlives the wait (real timers)', async () => {
+	const timers = () => process.getActiveResourcesInfo().filter((r) => r === 'Timeout').length;
+	const before = timers();
+	const fake = makeFakeStrandDb(new Map());
+	/** @param {{ dbAfterMs?: number, signal?: AbortSignal }} opts */
+	const run = async ({ dbAfterMs = Number.POSITIVE_INFINITY, signal }) => {
+		const wire = makeStrandWire();
+		wire.exchange();
+		const started = Date.now();
+		const memberNode = {
+			getStrandDatabase: () => (Date.now() - started >= dbAfterMs ? fake.strandDatabase : null),
+			getStrandNode: () => wire.node,
+		};
+		const outcome = openOfficerStrandReader({
+			memberNode,
+			strandId: STRAND_ID,
+			signal,
+			deps: { stallMs: 120, capMs: 2_000, pollMs: 10, registerDbPlugins: async () => undefined },
+		}).then(
+			(reader) => ({ ok: true, reader }),
+			(err) => ({ ok: false, err }),
+		);
+		return { wire, outcome };
+	};
+
+	const success = await run({ dbAfterMs: 40 });
+	assert.equal((await success.outcome).ok, true);
+	const stalled = await run({});
+	const stalledOutcome = /** @type {any} */ (await stalled.outcome);
+	assert.equal(stalledOutcome.ok, false);
+	assert.equal(stalledOutcome.err.code, 'timeout');
+	const controller = new AbortController();
+	const cancelled = await run({ signal: controller.signal });
+	setTimeout(() => controller.abort(), 30);
+	const cancelledOutcome = /** @type {any} */ (await cancelled.outcome);
+	assert.equal(cancelledOutcome.err.subject, 'signal');
+
+	await new Promise((resolve) => setImmediate(resolve));
+	assert.equal(timers(), before, 'a timer outlived the wait');
+	for (const { wire } of [success, stalled, cancelled]) {
+		assert.equal(wire.feed.size, 0, 'the store feed is still subscribed');
+		// A stream still open when the wait ended closes later: its listener must neither throw nor count.
+		assert.doesNotThrow(() => wire.exchange());
+	}
 });

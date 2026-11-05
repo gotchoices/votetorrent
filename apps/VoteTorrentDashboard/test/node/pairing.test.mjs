@@ -43,6 +43,7 @@ import {
 	PAIR_REDEEM_ATTEMPTS,
 	PAIR_REDEEM_RETRY_DELAY_MS,
 	PAIR_FIRST_SYNC_TIMEOUT_MS,
+	PAIR_AFTER_STRAND_DB_MS,
 	PAIR_SYNC_POLL_MS,
 	PairingCheckUnavailableError,
 	checkPairingStillValid,
@@ -695,8 +696,9 @@ function makeWorld(opts = {}) {
 			if (next === 'joined' || next === 'already-member') return next;
 			throw new MemberNodeError(next);
 		},
-		async waitForStrand() {
+		async waitForStrand(/** @type {string} */ _id, /** @type {any} */ options) {
 			log.push('waitForStrand');
+			world.waitForStrandSignal = options?.signal ?? null;
 			if (opts.waitForStrandThrows) throw opts.waitForStrandThrows;
 		},
 		async stop() {
@@ -723,6 +725,9 @@ function makeWorld(opts = {}) {
 			log.push('openStrandReader');
 			world.readerArgs = args;
 			if (opts.openStrandReaderThrows) throw opts.openStrandReaderThrows;
+			// A first build that publishes the strand database late: the reader's own wait runs the clock on.
+			if (opts.readerOpensAtMs !== undefined) clock = Math.max(clock, opts.readerOpensAtMs);
+			if (typeof opts.onReaderOpen === 'function') opts.onReaderOpen(args);
 			return reader;
 		},
 		readGenesisRows: async (/** @type {any} */ db, /** @type {any} */ keys) => {
@@ -846,6 +851,8 @@ function makeWorld(opts = {}) {
 		joinInvitations: [],
 		/** @type {any} */
 		readerArgs: null,
+		/** @type {AbortSignal | null} */
+		waitForStrandSignal: null,
 		/** @type {any} */
 		memberNodeArgs: null,
 		/** @type {any} */
@@ -1129,6 +1136,49 @@ test('P9 founding rows that arrive before the deadline are waited for', async ()
 	const { result } = await runPair(world, { code: pairing.code });
 	assert.equal(result.ok, true);
 	assert.ok(world.log.filter((n) => n === 'readGenesisRows').length >= 5);
+});
+
+test('P9b (G-3) a strand database that opens after the first-sync deadline still pairs: the founding check gets its own window', async () => {
+	// The reader's progress-aware wait opened the database at +400 s, well past the 180 s deadline; the
+	// founding rows arrive 5 s later. With the deadline fixed at the pairing instant + 180 s (the code
+	// before G-3) the first empty read is already past it and the pairing fails unreachable.
+	const pairing = buildPairing();
+	const opensAt = T0 + 400_000;
+	const world = makeWorld({ replicaRows: pairing.rows, readerOpensAtMs: opensAt, rowsReadyAtMs: opensAt + 5_000 });
+	const { result } = await runPair(world, { code: pairing.code });
+	assert.equal(result.ok, true);
+	assert.ok(world.log.filter((n) => n === 'readGenesisRows').length > 1, 'the late rows were not waited for');
+	assert.equal(PAIR_AFTER_STRAND_DB_MS, 120_000);
+});
+
+test('P9c (G-3) the window after a late database is bounded: rows still missing PAIR_AFTER_STRAND_DB_MS later are unreachable', async () => {
+	const pairing = buildPairing();
+	const opensAt = T0 + 400_000;
+	const world = makeWorld({ replicaRows: pairing.rows, readerOpensAtMs: opensAt, rowsReadyAtMs: opensAt + PAIR_AFTER_STRAND_DB_MS + 1_000 });
+	const { result } = await runPair(world, { code: pairing.code });
+	assert.deepEqual(result, { ok: false, reason: 'unreachable' });
+	assert.ok(world.log.includes('deleteDeviceKeys'));
+});
+
+test('P9d (G-3) the reader is not under the strand deadline\'s signal, and a user stop still reaches it', async () => {
+	const pairing = buildPairing();
+	const controller = new AbortController();
+	/** @type {boolean[]} */
+	const seen = [];
+	const world = makeWorld({
+		replicaRows: pairing.rows,
+		onReaderOpen: (/** @type {any} */ args) => {
+			seen.push(args.signal.aborted);
+			controller.abort();
+			seen.push(args.signal.aborted);
+		},
+	});
+	const { result } = await runPair(world, { code: pairing.code, signal: controller.signal });
+	assert.deepEqual(result, { ok: false, reason: 'cancelled' });
+	assert.ok(world.waitForStrandSignal instanceof AbortSignal);
+	assert.ok(world.readerArgs.signal instanceof AbortSignal);
+	assert.notEqual(world.readerArgs.signal, world.waitForStrandSignal, 'the reader shares the strand deadline signal');
+	assert.deepEqual(seen, [false, true], 'a user stop did not reach the reader');
 });
 
 // ---------------------------------------------------------------------------

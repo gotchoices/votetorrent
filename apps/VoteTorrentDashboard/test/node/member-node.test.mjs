@@ -42,8 +42,13 @@ import {
 	createMemberPlatform,
 	deleteMemberStorage,
 	memberStorageDbName,
+	storageServiceProtocols,
+	strandNetworkName,
 	validateRelayAddrs,
 } from '../../src/peer/member-node.js';
+import { RepoService, StorageRepo, MemoryRawStorage, buildBlockTransferProtocol, buildSyncProtocol } from '@optimystic/db-p2p';
+import { streamPair } from '@libp2p/utils';
+import { strandDataProtocols, watchStrandProgress } from '../../src/peer/strand-progress.js';
 
 const STRAND = 'strand0abc';
 const RELAY = '/dns4/relay.example/tcp/443/wss/p2p/12D3KooWRelayPeer1';
@@ -1371,4 +1376,94 @@ test('24d M-R3b no wait: a status that already reads removed is settled now, und
 		// stop() is never called: the handler armed no timer, so this test (and the file) ends on its own.
 		assert.equal(fake.statusListeners.size, 1, 'the handler subscribed a status listener, not a timer');
 	}
+});
+
+// ---------------------------------------------------------------------------
+// G-3: pins for the strand progress adapter (src/peer/strand-progress.js). Each reads the REAL dependency,
+// so a bump that renames a protocol, drops the store feed or reshapes a stream's close goes red here.
+// ---------------------------------------------------------------------------
+
+/**
+ * Type-level pins, checked by the dashboard typecheck: the adapter reads exactly these members of the
+ * public libp2p interface.
+ * @type {(c: import('@libp2p/interface').Connection) => import('@libp2p/interface').Stream[]}
+ */
+const streamsOf = (c) => c.streams;
+/** @type {(s: import('@libp2p/interface').Stream) => string} */
+const protocolOf = (s) => s.protocol;
+/** @type {(e: import('@libp2p/interface').StreamCloseEvent) => Error | undefined} */
+const closeErrorOf = (e) => e.error;
+/** @type {(n: import('@optimystic/db-p2p').StorageRepo) => (listener: () => void) => () => void} */
+const feedOf = (n) => (listener) => n.onAnyCollectionChange(listener);
+
+test('G3-1 progress adapter: the data protocols are db-p2p\'s own repo, block-transfer and sync names under the strand prefix', () => {
+	const prefix = `/optimystic/${strandNetworkName(STRAND)}`;
+	// `protocol` is private in RepoService's types; the value is what its handler registers under.
+	const repo = /** @type {any} */ (new RepoService(/** @type {any} */ ({ repo: {} }), { protocolPrefix: prefix })).protocol;
+	assert.deepEqual([...strandDataProtocols(STRAND)], [repo, buildBlockTransferProtocol(prefix), buildSyncProtocol(prefix)]);
+	// The same repo name the member node withdraws as a storage service.
+	assert.ok(storageServiceProtocols(strandNetworkName(STRAND)).includes(repo));
+	assert.equal(typeof streamsOf, 'function');
+	assert.equal(typeof protocolOf, 'function');
+	assert.equal(typeof closeErrorOf, 'function');
+	assert.equal(typeof feedOf, 'function');
+});
+
+test('G3-2 progress adapter: a block landing in a REAL StorageRepo counts once through its change feed, and stop unsubscribes', async () => {
+	const storageRepo = new StorageRepo(new MemoryRawStorage());
+	const watch = watchStrandProgress({ strandId: STRAND });
+	const node = { storageRepo, getConnections: () => [] };
+	assert.equal(watch.sample(node), 0);
+	await storageRepo.saveReplicatedBlock('g3-block-1', /** @type {any} */ ({ header: { id: 'g3-block-1', type: 'T', collectionId: 'g3-c' } }), { rev: 1, actionId: 'g3-a1' });
+	assert.equal(watch.sample(node), 1);
+	watch.stop();
+	await storageRepo.saveReplicatedBlock('g3-block-2', /** @type {any} */ ({ header: { id: 'g3-block-2', type: 'T', collectionId: 'g3-c' } }), { rev: 1, actionId: 'g3-a2' });
+	assert.equal(watch.sample(node), 1, 'a block after stop still counted');
+	// Control: a fresh watch over the same repo hears the next block, so the feed itself still fires.
+	const control = watchStrandProgress({ strandId: STRAND });
+	control.sample(node);
+	await storageRepo.saveReplicatedBlock('g3-block-3', /** @type {any} */ ({ header: { id: 'g3-block-3', type: 'T', collectionId: 'g3-c' } }), { rev: 1, actionId: 'g3-a3' });
+	assert.equal(control.sample(node), 1);
+	control.stop();
+});
+
+test('G3-3 progress adapter: over REAL libp2p streams a clean close of a data stream counts; an abort and a ping do not', async () => {
+	const [repoProtocol] = strandDataProtocols(STRAND);
+	const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
+	const [answered, answeredRemote] = await streamPair();
+	const [lazy, lazyRemote] = await streamPair();
+	const [timedOut] = await streamPair();
+	const [ping, pingRemote] = await streamPair();
+	answered.protocol = repoProtocol;
+	timedOut.protocol = repoProtocol;
+	ping.protocol = `/optimystic/${strandNetworkName(STRAND)}/fret/1.0.0/ping`;
+	// `lazy` has no protocol yet when sampled; it is negotiated to the repo protocol before it closes.
+	const watch = watchStrandProgress({ strandId: STRAND });
+	const node = { getConnections: () => [{ streams: [answered, lazy, timedOut, ping] }] };
+	assert.equal(watch.sample(node), 0);
+	lazy.protocol = repoProtocol;
+
+	await Promise.all([answered.close(), answeredRemote.close()]);
+	await settle();
+	assert.equal(watch.sample(node), 1, 'a cleanly closed repo stream did not count');
+	await Promise.all([lazy.close(), lazyRemote.close()]);
+	await settle();
+	assert.equal(watch.sample(node), 2, 'a stream negotiated after the sample did not count');
+	timedOut.abort(new Error('response timeout'));
+	await settle();
+	assert.equal(watch.sample(node), 2, 'an aborted stream counted');
+	await Promise.all([ping.close(), pingRemote.close()]);
+	await settle();
+	assert.equal(watch.sample(node), 2, 'a liveness ping counted');
+	watch.stop();
+
+	// After stop, a clean close counts nothing.
+	const [late, lateRemote] = await streamPair();
+	late.protocol = repoProtocol;
+	const after = watchStrandProgress({ strandId: STRAND });
+	after.sample({ getConnections: () => [{ streams: [late] }] });
+	after.stop();
+	await Promise.all([late.close(), lateRemote.close()]);
+	await settle();
+	assert.equal(after.sample({ getConnections: () => [] }), 0);
 });

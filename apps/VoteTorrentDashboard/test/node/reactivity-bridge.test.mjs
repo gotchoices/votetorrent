@@ -722,7 +722,7 @@ async function startEndToEnd() {
 				clock += ms;
 			},
 			now: () => clock,
-			waitMs: 1_000,
+			stallMs: 1_000,
 			pollMs: 500,
 			registerDbPlugins: async () => undefined,
 		},
