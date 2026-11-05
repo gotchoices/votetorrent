@@ -2,7 +2,7 @@ import { Database } from '@quereus/quereus'
 import { bytesToHex, hexToBytes } from '@noble/curves/utils.js'
 import { secp256k1 } from '@noble/curves/secp256k1.js'
 import { sha256 } from '@noble/hashes/sha2.js'
-import { ElectionType, UserKeyType } from '@votetorrent/vote-core'
+import { ADMIN_CHANGE_ERROR_CODES, ElectionType, UserKeyType } from '@votetorrent/vote-core'
 import { expect } from 'chai'
 import { AuthorityEngine } from '../src/authority/authority-engine'
 // 57-01 (D-02): namespace import, deliberately NOT `import { sortRosterEntries }`.
@@ -537,6 +537,10 @@ async function primeUserForRename (auth: TestAuthorityContext, user: User, effec
     applyAdminProposal?: (nonce: string, sign: (digest: Uint8Array) => Promise<Signature>) => Promise<unknown>
   }
   await engine.applyAdminProposal!(nonce, sig)
+  // 66.1 (D-08): a promoted future generation is a pending change and would refuse the next proposal, so
+  // the priming generation is cancelled. It was never current in this test anyway; its Officer row (what
+  // the rename's User.UserValid needs) stays.
+  await auth.authorityEngine.cancelAdminChange({ effectiveAt: toCanonicalDatetime(effectiveAt), userId: auth.user.id }, sig)
 }
 
 // ===========================================================================
@@ -831,9 +835,12 @@ describe('AuthorityEngine', () => {
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
       const sig = makeRealSignCallback('user-1')
       const effectiveAt = Date.now() + 60_000
+      // 66.1 (D-07 hardening): a rad threshold above the roster's rad holders is now refused before any
+      // write, so the one-rad-holder roster carries rad 1; the two policies still differ, so the JSON
+      // round trip is still distinguishable from a default.
       const policies = [
-        { policy: 'rad' as Scope, threshold: 2 },
-        { policy: 'iad' as Scope, threshold: 1 }
+        { policy: 'rad' as Scope, threshold: 1 },
+        { policy: 'iad' as Scope, threshold: 2 }
       ]
       await authorityEngine.proposeAdmin(
         {
@@ -2067,9 +2074,13 @@ describe('AuthorityEngine', () => {
       expect(Number(adminRow?.n), 'N3 must roll back — zero Admin rows for this EffectiveAt').to.equal(0)
     })
 
-    it('N4: refuses a roster with no rad-scoped officer — reason "no-rad-officer", zero writes', async () => {
+    it('N4a: proposeAdmin refuses a roster with no rad-scoped officer — code admin-no-rad-holder, no sign call, zero writes', async () => {
+      // 66.1 (D-07): a rad-less roster is now refused by proposeAdmin itself, before the digest and the
+      // sign callback. N4b below keeps promotion Step 5's own refusal covered as defence in depth.
       const { auth, secondUser } = await createPromotionFixture()
-      const sig = makeTestSignCallback(auth.user)
+      const inner = makeTestSignCallback(auth.user)
+      let signCalls = 0
+      const sig = async (digest: Uint8Array): Promise<Signature> => { signCalls++; return inner(digest) }
       const effectiveAt = Date.now() + 60_000
       const proposal: Proposal<AdminInit> = {
         proposed: {
@@ -2082,11 +2093,69 @@ describe('AuthorityEngine', () => {
         },
         signers: [auth.user.id]
       }
-      await auth.authorityEngine.proposeAdmin(proposal, sig)
-      const nonceRow = await auth.ctx.db
-        .prepare("select Nonce from AdminSigning where AuthorityId = :id and Scope = 'rad' and not exists (select 1 from InviteSlot where SigningNonce = AdminSigning.Nonce) order by Nonce desc limit 1")
-        .get({ id: auth.authority.id })
-      const nonce = nonceRow!.Nonce as string
+      const counts = async (): Promise<number[]> => {
+        const id = auth.authority.id
+        const proposedAdmin = await auth.ctx.db.prepare('select count(*) as n from ProposedAdmin where AuthorityId = :id').get({ id })
+        const proposedOfficer = await auth.ctx.db.prepare('select count(*) as n from ProposedOfficer where AuthorityId = :id').get({ id })
+        const adminSigning = await auth.ctx.db.prepare('select count(*) as n from AdminSigning where AuthorityId = :id').get({ id })
+        return [Number(proposedAdmin?.n), Number(proposedOfficer?.n), Number(adminSigning?.n)]
+      }
+      const before = await counts()
+
+      let caught: unknown
+      try {
+        await auth.authorityEngine.proposeAdmin(proposal, sig)
+      } catch (err) {
+        caught = err
+      }
+      expect((caught as { code?: string })?.code, 'N4a must refuse with code admin-no-rad-holder').to.equal(ADMIN_CHANGE_ERROR_CODES.noRadHolder)
+      expect(signCalls, 'N4a: the sign callback must not run').to.equal(0)
+      expect(await counts(), 'N4a: ProposedAdmin/ProposedOfficer/AdminSigning counts unchanged').to.deep.equal(before)
+    })
+
+    it('N4b: refuses a roster with no rad-scoped officer — reason "no-rad-officer", zero writes', async () => {
+      // 66.1 (D-07): proposeAdmin no longer accepts a rad-less roster (N4a), so the proposal under test is
+      // seeded outside it: raw ProposedAdmin + ProposedOfficer rows (the P4 pattern) and a 'rad' session
+      // over the same roster digest proposeAdmin would sign, started with the founder's signature.
+      const { auth, secondUser } = await createPromotionFixture()
+      const sig = makeTestSignCallback(auth.user)
+      const { SigningEngine } = await import('../src/signing/signing-engine.js')
+      const effectiveAt = Date.now() + 60_000
+      const effectiveAtCanon = toCanonicalDatetime(effectiveAt)
+      const thresholdPolicies = JSON.stringify([{ policy: 'uai', threshold: 1 }])
+      const tid = Date.now()
+      const seedNow = nowCanonicalDatetime()
+      await auth.ctx.db.exec(
+        `insert into ProposedAdmin (AuthorityId, EffectiveAt, ThresholdPolicies)
+         with context IsUserValid = true, Tid = :tid, now = :now, UserId = null, UserKey = null, Signature = null
+         values (:authorityId, :effectiveAt, :thresholdPolicies)`,
+        { authorityId: auth.authority.id, effectiveAt: effectiveAtCanon, thresholdPolicies, tid, now: seedNow }
+      )
+      const roster = [
+        { name: await founderDisplayName(auth), userId: auth.user.id, title: 'Chair', scopes: ['uai'] },
+        { name: secondUser.name, userId: secondUser.id, title: 'Clerk', scopes: ['vrg'] }
+      ]
+      for (const officer of roster) {
+        await auth.ctx.db.exec(
+          `insert into ProposedOfficer (AuthorityId, AdminEffectiveAt, ProposedName, Title, Scopes, UserId)
+           with context IsUserValid = true, Tid = :tid, now = :now, UserId = null, UserKey = null, Signature = null
+           values (:authorityId, :effectiveAt, :proposedName, :title, :scopes, :userId)`,
+          {
+            authorityId: auth.authority.id, effectiveAt: effectiveAtCanon, proposedName: officer.name,
+            title: officer.title, scopes: JSON.stringify(officer.scopes), userId: officer.userId, tid, now: seedNow
+          }
+        )
+      }
+      const digestArgs = {
+        authorityId: auth.authority.id,
+        effectiveAt: effectiveAtCanon,
+        officers: await readProposedRosterJson(auth.ctx.db, auth.authority.id, effectiveAtCanon),
+        thresholdPolicies
+      }
+      const digest = await computeRadProposalDigest(auth.ctx.db, digestArgs)
+      const { nonce } = await new SigningEngine(auth.ctx).startSigningSession(
+        auth.authority.id, digestArgs, 'rad', await sig(digestToBytes(digest))
+      )
 
       let caught: unknown
       try {
@@ -2097,7 +2166,7 @@ describe('AuthorityEngine', () => {
       expect((caught as { reason?: string })?.reason, 'N4 must refuse with reason "no-rad-officer"').to.equal('no-rad-officer')
       const adminRow = await auth.ctx.db
         .prepare('select count(*) as n from Admin where AuthorityId = :id and EffectiveAt = :e')
-        .get({ id: auth.authority.id, e: toCanonicalDatetime(effectiveAt) })
+        .get({ id: auth.authority.id, e: effectiveAtCanon })
       expect(Number(adminRow?.n)).to.equal(0)
     })
 

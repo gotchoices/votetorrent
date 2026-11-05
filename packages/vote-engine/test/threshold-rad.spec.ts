@@ -10,7 +10,7 @@
 import { expect } from 'chai'
 import type { Database, SqlValue } from '@quereus/quereus'
 import type { AdminInit, AdminSignatureTask, Proposal, Scope, Signature, ThresholdPolicy } from '@votetorrent/vote-core'
-import { AdminPromotionError } from '@votetorrent/vote-core'
+import { ADMIN_CHANGE_ERROR_CODES, AdminPromotionError } from '@votetorrent/vote-core'
 import { SignatureTasksEngine } from '../src/tasks/signature-tasks-engine.js'
 import { AuthorityEngine } from '../src/authority/authority-engine.js'
 import {
@@ -27,6 +27,7 @@ import { allocateTid } from '../src/database/tid-allocator.js'
 import { digestToBytes, toCanonicalDatetime } from '../src/utils.js'
 import { SigningEngine } from '../src/signing/signing-engine.js'
 import { sortRosterEntries } from '../src/authority/authority-engine.js'
+import { addTestAuthority, createTestNetwork, makeTestSignCallback } from './fixtures/test-context.js'
 
 function makeNetworkRef () {
   return {
@@ -347,21 +348,70 @@ describe('rad Trigger A: proposeAdmin fan-out (D-08, D-12)', function () {
   })
 
   it('R6 (unreachable at birth): a threshold exceeding the holder count is refused before any write or callback', async () => {
-    const fx = await createThresholdAuthority({ holderCount: 4, thresholdPolicies: [{ policy: 'rad' as Scope, threshold: 5 }] })
-    const db = fx.elec.ctx.db
+    // 66.1 (D-07 hardening): proposeAdmin now refuses a generation whose rad threshold exceeds its own rad
+    // holders, so the fixture can no longer promote one. The over-threshold CURRENT generation is therefore
+    // minted as the founding generation (outside proposeAdmin): one rad holder at rad threshold 5. The
+    // 62-13 current-threshold refusal under test stays as defence against generations written elsewhere.
+    const net = await createTestNetwork({
+      network: {
+        admin: {
+          officers: [{ init: { name: 'Admin A', title: 'Chair', scopes: ['rn', 'rad', 'vrg', 'iad', 'uai', 'mel', 'ceb'] as Scope[] } }],
+          effectiveAt: Date.now() - 120_000,
+          thresholdPolicies: [{ policy: 'rad' as Scope, threshold: 5 }],
+        },
+      },
+    })
+    const auth = await addTestAuthority(net)
+    const db = auth.ctx.db
     const effectiveAt = Date.now() + 3_600_000
+    const founderSign = makeTestSignCallback(auth.user)
+    let callbackCalls = 0
+    const countingCallback = async (digest: Uint8Array): Promise<Signature> => {
+      callbackCalls++
+      return founderSign(digest)
+    }
+
+    const before = await snapshotCounts(db, auth.authority.id)
+
+    let caught: unknown
+    try {
+      await auth.authorityEngine.proposeAdmin(
+        {
+          proposed: {
+            officers: [{ existing: { userId: auth.user.id, authorityId: auth.authority.id, title: 'Chair', scopes: ['rad'] as Scope[] } }],
+            effectiveAt,
+            thresholdPolicies: [{ policy: 'rad' as Scope, threshold: 1 }],
+          },
+          signers: [auth.user.id],
+        },
+        countingCallback
+      )
+    } catch (err) {
+      caught = err
+    }
+    expect(caught, 'R6: proposeAdmin must reject').to.be.instanceOf(Error)
+    expect((caught as Error).message, 'R6: error text names the threshold').to.include('needs 5 approvals')
+    expect((caught as Error).message, 'R6: error text names the actual holder count').to.include('only 1 officers')
+    expect(callbackCalls, 'R6: the callback must be invoked 0 times').to.equal(0)
+
+    const after = await snapshotCounts(db, auth.authority.id)
+    expect(after, 'R6: row counts unchanged from before the call').to.deep.equal(before)
+  })
+
+  it('R6b (66.1 hardening): a proposed rad threshold above the new roster\'s rad holders is refused before any write or callback', async () => {
+    const fx = await createThresholdAuthority({ thresholdPolicies: RAD_THRESHOLD_2 })
+    const db = fx.elec.ctx.db
     let callbackCalls = 0
     const countingCallback = async (digest: Uint8Array): Promise<Signature> => {
       callbackCalls++
       return fx.holders[0]!.sign(digest)
     }
-
     const before = await snapshotCounts(db, fx.authorityId)
 
     let caught: unknown
     try {
       await proposeAdminRoster(fx, {
-        effectiveAt,
+        effectiveAt: Date.now() + 3_600_000,
         rosterHolders: fx.holders.slice(0, 3),
         thresholdPolicies: [{ policy: 'rad' as Scope, threshold: 5 }],
         initiatorUserId: fx.holders[0]!.user.id,
@@ -370,12 +420,9 @@ describe('rad Trigger A: proposeAdmin fan-out (D-08, D-12)', function () {
     } catch (err) {
       caught = err
     }
-    expect(caught, 'R6: proposeAdmin must reject').to.be.instanceOf(Error)
-    expect((caught as Error).message, 'R6: error text names the threshold and the actual holder count').to.include('only 4 officers')
-    expect(callbackCalls, 'R6: the callback must be invoked 0 times').to.equal(0)
-
-    const after = await snapshotCounts(db, fx.authorityId)
-    expect(after, 'R6: row counts unchanged from before the call').to.deep.equal(before)
+    expect((caught as { code?: string })?.code, 'R6b: refused with admin-no-rad-holder').to.equal(ADMIN_CHANGE_ERROR_CODES.noRadHolder)
+    expect(callbackCalls, 'R6b: the callback must be invoked 0 times').to.equal(0)
+    expect(await snapshotCounts(db, fx.authorityId), 'R6b: row counts unchanged from before the call').to.deep.equal(before)
   })
 
   it('R7 (spoof): a signature whose signer differs from admin.signers[0] is refused before any write', async () => {
@@ -468,6 +515,13 @@ describe('rad Trigger A: proposeAdmin fan-out (D-08, D-12)', function () {
       { id: fx.authorityId, e: effectiveAtCanon1 }
     )
     expect(proposedAdminCount, 'R8: ProposedAdmin IS present (pre-existing behaviour)').to.equal(1)
+
+    // 66.1 (D-08, R-33): that committed future ProposedAdmin is a pending change (never promoted) and would
+    // refuse the next proposal, so it is shown as pending and cancelled before the second proposal.
+    const pendingAfterFault = (await fx.elec.authorityEngine.getAdminDetails()).pending
+    expect(pendingAfterFault?.effectiveAt, 'R8: the faulted proposal is the pending change').to.equal(effectiveAtCanon1)
+    expect(pendingAfterFault?.promoted, 'R8: the faulted proposal is not promoted').to.equal(false)
+    await fx.elec.authorityEngine.cancelAdminChange({ effectiveAt: effectiveAtCanon1, userId: fx.holders[0]!.user.id }, fx.holders[0]!.sign)
 
     const effectiveAt2 = effectiveAt1 + 60_000
     await proposeAdminRoster(fx, {
@@ -1055,6 +1109,10 @@ describe('rad Trigger B: co-sign end to end (D-08..D-12, D-33)', function () {
       signature: await fx.holders[1]!.sign(digest1),
       sign: fx.holders[1]!.sign,
     })
+
+    // 66.1 (D-08): P1 is now a promoted future generation, a pending change that would refuse P2, so
+    // holders[0] cancels it first. P1's open sibling tasks stay open, so the disambiguation is still exercised.
+    await fx.elec.authorityEngine.cancelAdminChange({ effectiveAt: effectiveAtCanon1, userId: fx.holders[0]!.user.id }, fx.holders[0]!.sign)
 
     // P2: a second proposal, a new EffectiveAt.
     const { effectiveAtCanon: effectiveAtCanon2, nonce: nonce2 } = await setupStandardProposal(fx, effectiveAt2)
