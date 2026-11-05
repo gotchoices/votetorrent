@@ -51,6 +51,7 @@ import type { EngineContext } from '../types.js';
 // reserve-before-use / D-10 per-namespace serialization rationale that
 // replaces the WR-16/WR-25 heuristic this module used to carry.
 import { AdminPromotionError } from '@votetorrent/vote-core';
+import { ADMIN_CHANGE_ERROR_CODES } from '@votetorrent/vote-core';
 import type {
 	AdminDetails,
 	AdminDigestArgs,
@@ -79,6 +80,7 @@ import type {
 	ThresholdPolicy,
 	OfficerSelection,
 	ImageRef,
+	PendingAdminChange,
 } from '@votetorrent/vote-core';
 import {
 	AuthorityCreateOfficerInviteBuilder,
@@ -86,6 +88,8 @@ import {
 	AuthorityProposeAdminBuilder,
 	AuthoritySaveInviteWithSigningBuilder,
 } from './builders/index.js';
+// 66.1 (R-38): the cancel service is imported by path; it is not in any barrel.
+import { insertAdminCancellation } from './admin-cancellation.js';
 
 /** Stable code on the refusal of cancelling or re-sending an answered invitation; the app maps it by code, never by message. */
 const INVITE_ALREADY_ANSWERED = 'invite-already-answered';
@@ -355,6 +359,9 @@ export class AuthorityEngine implements IAuthorityEngine {
 					'Admin.ThresholdPolicies',
 				),
 			};
+			// 66.1 (D-04, C2): one `now` for the whole read, so `pending` and `proposed` agree.
+			const nowCanon = nowCanonicalDatetime();
+			const pending = await this.readPendingAdminChange(nowCanon);
 			// UAT 62: ProposedAdmin rows are never deleted, so an unordered `.get()`
 			// returned the EARLIEST proposal (on device: an older empty one). Read the
 			// LATEST proposal that no Admin has reached yet. Promotion
@@ -362,54 +369,39 @@ export class AuthorityEngine implements IAuthorityEngine {
 			// `A.EffectiveAt >= P.EffectiveAt` excludes a promoted proposal AND any older
 			// one a later promotion superseded. Proven against a real Quereus DB in
 			// test/authority.spec.ts (getAdminDetails / UAT 62).
-			const proposedAdminDB = await this.ctx.db
-				.prepare(
-					`select P.EffectiveAt, P.ThresholdPolicies
-						from ProposedAdmin P
-					where P.AuthorityId = :id
-						and not exists (
-							select 1 from Admin A
-							where A.AuthorityId = P.AuthorityId and A.EffectiveAt >= P.EffectiveAt
-						)
-					order by P.EffectiveAt desc
-					limit 1`,
-				)
-				.get({ id: this.authority.id });
-			if (!proposedAdminDB) {
-				return { admin, proposed: undefined };
-			}
-			const proposedOfficersDB: OfficerSelection[] = [];
-			for await (const officer of this.ctx.db.eval(
-				'select * from ProposedOfficer where AuthorityId = :id and AdminEffectiveAt = :effectiveAt',
-				{
-					id: this.authority.id,
-					effectiveAt: proposedAdminDB.EffectiveAt as string,
-				},
+			// 66.1 (F3, F4): stale proposals (EffectiveAt at or before now) and cancelled
+			// ones are hidden too, so a stale refused `{ init }` proposal no longer poisons
+			// later changes. Rows are collected first; the cancellation lookup runs after
+			// the cursor has closed (no nested db call inside an open `eval`).
+			const proposedCandidates: Array<{ effectiveAt: string; thresholdPolicies: unknown }> = [];
+			for await (const row of this.ctx.db.eval(
+				`select P.EffectiveAt as EffectiveAt, P.ThresholdPolicies as ThresholdPolicies
+					from ProposedAdmin P
+				where P.AuthorityId = :id
+					and P.EffectiveAt > :now
+					and not exists (
+						select 1 from Admin A
+						where A.AuthorityId = P.AuthorityId and A.EffectiveAt >= P.EffectiveAt
+					)
+				order by P.EffectiveAt desc`,
+				{ id: this.authority.id, now: nowCanon },
 			)) {
-				const scopes = parseJsonOr<Scope[]>(officer.Scopes, [], 'Officer.Scopes');
-				// UAT 62: a row with a UserId (57-13) is an EXISTING officer; only a
-				// null-UserId row is a not-yet-joined `.init` invitee. Mapping both to
-				// `.init` dropped the identity and gave every proposed officer an Invite.
-				const userId = officer.UserId as string | null | undefined;
-				proposedOfficersDB.push(
-					userId
-						? {
-								existing: {
-									userId,
-									authorityId: this.authority.id,
-									title: officer.Title as string,
-									scopes,
-								},
-							}
-						: {
-								init: {
-									name: officer.ProposedName as string,
-									title: officer.Title as string,
-									scopes,
-								},
-							},
-				);
+				proposedCandidates.push({
+					effectiveAt: toCanonicalDatetime(row.EffectiveAt as string),
+					thresholdPolicies: row.ThresholdPolicies,
+				});
 			}
+			let proposedAdminDB: { effectiveAt: string; thresholdPolicies: unknown } | undefined;
+			for (const candidate of proposedCandidates) {
+				if (!(await this.isAdminChangeCancelled(candidate.effectiveAt))) {
+					proposedAdminDB = candidate;
+					break;
+				}
+			}
+			if (!proposedAdminDB) {
+				return { admin, proposed: undefined, pending };
+			}
+			const proposedOfficersDB = await this.readProposedOfficerSelections(proposedAdminDB.effectiveAt);
 			// AUTH-05 / D-22: populate signers from the most recent AdminSigning
 			// for scope 'rad' (admin-proposal scope) joined via OfficerSignature.
 			// IN-18 (17-REVIEW): Nonce desc tiebreaker — multiple signings can
@@ -434,17 +426,16 @@ export class AuthorityEngine implements IAuthorityEngine {
 				proposed: {
 					proposed: {
 						officers: proposedOfficersDB,
-						effectiveAt: fromCanonicalDatetime(
-							proposedAdminDB.EffectiveAt as string,
-						),
+						effectiveAt: fromCanonicalDatetime(proposedAdminDB.effectiveAt),
 						thresholdPolicies: parseJsonOr<ThresholdPolicy[]>(
-							proposedAdminDB.ThresholdPolicies,
+							proposedAdminDB.thresholdPolicies,
 							[],
 							'Admin.ThresholdPolicies',
 						),
 					},
 					signers,
 				},
+				pending,
 			};
 		} catch (err) {
 			if (err instanceof QuereusError) {
@@ -455,6 +446,102 @@ export class AuthorityEngine implements IAuthorityEngine {
 				throw new Error(`Unknown error getting admin details: ${err}`);
 			}
 		}
+	}
+
+	/**
+	 * 66.1 (C4): has this administration change been cancelled? The 66.1-04 point lookup on
+	 * AdminCancellation's primary key, with `effectiveAt` bound as the canonical string. Every
+	 * reader of "cancelled" in this engine goes through here.
+	 */
+	private async isAdminChangeCancelled(effectiveAtCanon: string): Promise<boolean> {
+		const row = await this.ctx.db
+			.prepare('select 1 as x from AdminCancellation where AuthorityId = :authorityId and AdminEffectiveAt = :effectiveAt')
+			.get({ authorityId: this.authority.id, effectiveAt: effectiveAtCanon });
+		return row !== undefined && row !== null;
+	}
+
+	/**
+	 * 66.1 (C2, D-08): the ONE implementation of "pending": the latest ProposedAdmin for this
+	 * authority with EffectiveAt after `nowCanon` and no AdminCancellation at that time,
+	 * promoted or not, refused promotion or not (R-33). Stale rows never qualify. Returns the
+	 * canonical EffectiveAt, or undefined. Rows are collected before any lookup runs, so no
+	 * nested db call is issued while the `eval` cursor holds the exec mutex.
+	 */
+	private async findLivePendingEffectiveAt(nowCanon: string): Promise<string | undefined> {
+		const candidates: string[] = [];
+		for await (const row of this.ctx.db.eval(
+			'select P.EffectiveAt as EffectiveAt from ProposedAdmin P where P.AuthorityId = :id and P.EffectiveAt > :now order by P.EffectiveAt desc',
+			{ id: this.authority.id, now: nowCanon },
+		)) {
+			candidates.push(toCanonicalDatetime(row.EffectiveAt as string));
+		}
+		for (const effectiveAtCanon of candidates) {
+			if (!(await this.isAdminChangeCancelled(effectiveAtCanon))) {
+				return effectiveAtCanon;
+			}
+		}
+		return undefined;
+	}
+
+	/** 66.1 (C2): `getAdminDetails().pending`, read at `nowCanon`. */
+	private async readPendingAdminChange(nowCanon: string): Promise<PendingAdminChange | undefined> {
+		const effectiveAt = await this.findLivePendingEffectiveAt(nowCanon);
+		if (!effectiveAt) {
+			return undefined;
+		}
+		const proposalRow = await this.ctx.db
+			.prepare('select ThresholdPolicies from ProposedAdmin where AuthorityId = :id and EffectiveAt = :e')
+			.get({ id: this.authority.id, e: effectiveAt });
+		const promotedRow = await this.ctx.db
+			.prepare('select 1 as x from Admin where AuthorityId = :id and EffectiveAt = :e')
+			.get({ id: this.authority.id, e: effectiveAt });
+		return {
+			effectiveAt,
+			officers: await this.readProposedOfficerSelections(effectiveAt),
+			thresholdPolicies: parseJsonOr<ThresholdPolicy[]>(
+				proposalRow?.ThresholdPolicies,
+				[],
+				'ProposedAdmin.ThresholdPolicies',
+			),
+			promoted: promotedRow !== undefined && promotedRow !== null,
+		};
+	}
+
+	/** The ProposedOfficer rows of one proposal as OfficerSelections (shared by `proposed` and `pending`). */
+	private async readProposedOfficerSelections(effectiveAtCanon: string): Promise<OfficerSelection[]> {
+		const selections: OfficerSelection[] = [];
+		for await (const officer of this.ctx.db.eval(
+			'select * from ProposedOfficer where AuthorityId = :id and AdminEffectiveAt = :effectiveAt',
+			{
+				id: this.authority.id,
+				effectiveAt: effectiveAtCanon,
+			},
+		)) {
+			const scopes = parseJsonOr<Scope[]>(officer.Scopes, [], 'Officer.Scopes');
+			// UAT 62: a row with a UserId (57-13) is an EXISTING officer; only a
+			// null-UserId row is a not-yet-joined `.init` invitee. Mapping both to
+			// `.init` dropped the identity and gave every proposed officer an Invite.
+			const userId = officer.UserId as string | null | undefined;
+			selections.push(
+				userId
+					? {
+							existing: {
+								userId,
+								authorityId: this.authority.id,
+								title: officer.Title as string,
+								scopes,
+							},
+						}
+					: {
+							init: {
+								name: officer.ProposedName as string,
+								title: officer.Title as string,
+								scopes,
+							},
+						},
+			);
+		}
+		return selections;
 	}
 
 	async getAuthorityInvites(): Promise<
@@ -652,6 +739,17 @@ export class AuthorityEngine implements IAuthorityEngine {
 		const effectiveAtCanon = toCanonicalDatetime(admin.proposed.effectiveAt);
 		const tid = await allocateTid(this.ctx.db, 'authority');
 		try {
+			// 66.1 (D-08): at most one pending administration change. Refused before any write
+			// and before the sign callback. Cancelled and elapsed changes do not count; a future
+			// proposal whose promotion was refused does (R-33), until a rad holder cancels it.
+			// This is a cooperative check: under eventual consistency two phones proposing at the
+			// same moment can both pass it (accepted residual, T-66.1-09-03).
+			if (await this.findLivePendingEffectiveAt(nowCanonicalDatetime())) {
+				throw Object.assign(new Error('Another administration change is still waiting to take effect'), {
+					code: ADMIN_CHANGE_ERROR_CODES.pending,
+				});
+			}
+
 			// 62-13 (D-08, T-62-13-05): pre-write threshold decision — runs BEFORE the roster
 			// digest and the sign callback, so a proposal that could never reach its own rad
 			// threshold is refused before any write and before any biometric prompt is spent.
@@ -674,6 +772,29 @@ export class AuthorityEngine implements IAuthorityEngine {
 			const rosterEntries = sortRosterEntries(
 				await this.resolveAdminRoster(admin.proposed.officers),
 			);
+
+			// 66.1 (D-07): refuse a change that would leave nobody able to revise the
+			// administration, before the digest and the sign callback. A rad holder is counted
+			// by the same rule promotion Step 5 applies (`.init` entries count, so the engine still
+			// accepts them, R-03). The threshold half is the outline's locked hardening: a new rad
+			// threshold above the new roster's rad holders also means nobody could revise it, so it
+			// shares the code and copy. Promotion Step 5 stays as defence in depth.
+			const radHolderKeys = new Set<string>();
+			for (const entry of rosterEntries) {
+				if (entry.scopes.includes('rad' as Scope)) {
+					radHolderKeys.add(entry.userId ?? `init:${entry.proposedName}`);
+				}
+			}
+			const proposedRadPolicy = (admin.proposed.thresholdPolicies ?? []).find((p) => p.policy === 'rad');
+			const proposedRadThreshold = Number(proposedRadPolicy?.threshold);
+			const newRadThreshold =
+				Number.isInteger(proposedRadThreshold) && proposedRadThreshold > 0 ? proposedRadThreshold : 1;
+			if (radHolderKeys.size === 0 || newRadThreshold > radHolderKeys.size) {
+				throw Object.assign(new Error('This change would leave nobody able to revise the administration'), {
+					code: ADMIN_CHANGE_ERROR_CODES.noRadHolder,
+				});
+			}
+
 			const officersJson = JSON.stringify(rosterEntries);
 
 			// D-03/D-04: resolve the canonical digest ENGINE-SIDE first — needed both to
@@ -1519,9 +1640,20 @@ export class AuthorityEngine implements IAuthorityEngine {
 		}
 	}
 
-	// Satisfies IAuthorityEngine until 66.1-09 wires insertAdminCancellation.
-	async cancelAdminChange(_target: { effectiveAt: string; userId: string }, _sign: (digest: Uint8Array) => Promise<Signature>): Promise<void> {
-		throw Object.assign(new Error('Cancelling an administration change is not available in this build'), { code: 'not-implemented' });
+	/**
+	 * 66.1 (D-05, C3): cancel a pending administration change. Any current `rad` holder may
+	 * cancel, with exactly one sign call (one biometric prompt). Idempotent: an already
+	 * cancelled change resolves without calling `sign`. Refusals, with their codes passed
+	 * through unchanged from the 66.1-06 service: `admin-cancel-not-authorized` and
+	 * `admin-cancel-not-pending` (both before any prompt), `admin-cancel-refused` (the schema
+	 * refused the insert). `target.userId` is passed as given; the service checks the
+	 * signature belongs to that user.
+	 */
+	async cancelAdminChange(
+		target: { effectiveAt: string; userId: string },
+		sign: (digest: Uint8Array) => Promise<Signature>,
+	): Promise<void> {
+		return insertAdminCancellation(this.ctx, { authorityId: this.authority.id, effectiveAt: target.effectiveAt, userId: target.userId, sign });
 	}
 
 	/**
