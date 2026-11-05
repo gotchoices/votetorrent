@@ -1,5 +1,5 @@
-import { ExtendedTheme, useTheme } from "@react-navigation/native";
-import React, { useCallback, useEffect, useState } from "react";
+import { ExtendedTheme, useFocusEffect, useTheme } from "@react-navigation/native";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ScrollView, StyleSheet, View, Switch } from "react-native";
 import { ThemedText } from "../../components/ThemedText";
@@ -7,7 +7,22 @@ import { ChipButton } from "../../components/ChipButton";
 import { CustomButton } from "../../components/CustomButton";
 import { Footer } from "../../components/Footer";
 import { InfoCard } from "../../components/InfoCard";
-import type { Authority, IAuthorityEngine, INetworkEngine, IUserEngine, Officer, OfficerSelection, Scope, ThresholdPolicy, User } from "@votetorrent/vote-core";
+import { adminChangeEffectiveAt, officerSelectionFromInvitee } from "@votetorrent/vote-core";
+import type {
+	AcceptedOfficerInvitee,
+	AdminDetails,
+	Authority,
+	IAuthorityEngine,
+	IInvitationEngine,
+	INetworkEngine,
+	IUserEngine,
+	Officer,
+	OfficerSelection,
+	PendingAdminChange,
+	Scope,
+	ThresholdPolicy,
+	User,
+} from "@votetorrent/vote-core";
 import { OFFICER_SCOPE_CODES, scopeLabel } from "../../utils/scopeLabel";
 import { useRoute, useNavigation } from "@react-navigation/native";
 import { useApp } from "../../providers/AppProvider";
@@ -17,12 +32,45 @@ import type { RootStackParamList } from "../../navigation/types";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { CustomTextInput } from "../../components/CustomTextInput";
 import { InlineError } from "../../components/InlineError";
+import { AdminChangeConfirmCard } from "../../components/AdminChangeConfirmCard";
+import { PendingAdminChangeCard } from "../../components/PendingAdminChangeCard";
 import { globalStyles } from "../../theme/styles";
 import { createDeviceSigner } from "../../engines/device-signer";
 import { getOrCreateDeviceUser } from "../../engines/device-user";
 import { useDeviceSigningErrorHandler } from "../../hooks/useDeviceSigningErrorHandler";
 import { KeyboardAvoidingScreen } from "../../components/KeyboardAvoidingScreen";
 import { errorCopy } from "../../utils/errorCopy";
+import { adminChangeErrorKey, promotionWasRefused } from "../../utils/adminChangeErrors";
+import { isAdminChangeConfirmStale } from "../../utils/displayUtils";
+
+/**
+ * The change the confirm card describes: computed once on the first Save or Remove tap and signed
+ * exactly as stored (shown == signed, D-04).
+ */
+type ConfirmingChange = {
+	effectiveAt: string;
+	officers: OfficerSelection[];
+	thresholdPolicies: ThresholdPolicy[];
+};
+
+/**
+ * The one place this screen takes an effective time: one hour from now, from the shared vote-core
+ * rule (D-06). Called on the first tap and again only when a confirm card went stale.
+ */
+function freshEffectiveAt(): string {
+	return adminChangeEffectiveAt(Date.now());
+}
+
+/**
+ * The base of every change: the CURRENT administration's officers and policies. A proposal that
+ * was refused, cancelled or went stale is never a base (F4).
+ */
+function currentRoster(details: AdminDetails): { officers: OfficerSelection[]; thresholdPolicies: ThresholdPolicy[] } {
+	return {
+		officers: details.admin.officers.map((o: Officer): OfficerSelection => ({ existing: o })),
+		thresholdPolicies: details.admin.thresholdPolicies,
+	};
+}
 
 export default function EditOfficerScreen() {
 	const { colors } = useTheme() as ExtendedTheme;
@@ -43,24 +91,49 @@ export default function EditOfficerScreen() {
 	const [errorMessage, setErrorMessage] = useState<string>("");
 	const [isSaving, setIsSaving] = useState(false);
 	const [isRemoving, setIsRemoving] = useState(false);
+	const [pending, setPending] = useState<PendingAdminChange | undefined>(undefined);
+	const [invitees, setInvitees] = useState<AcceptedOfficerInvitee[]>([]);
+	const [selectedInvitee, setSelectedInvitee] = useState<AcceptedOfficerInvitee | undefined>(undefined);
+	const [confirming, setConfirming] = useState<ConfirmingChange | undefined>(undefined);
+	const [confirmNotice, setConfirmNotice] = useState("");
+	const seededRef = useRef(false);
+	const confirmInFlightRef = useRef(false);
 	const handleDeviceSigningError = useDeviceSigningErrorHandler();
 
 	// Editing an existing administrator (vs. adding a new one). Drives the
 	// frame-35 vs frame-12 layout: edit shows the User card + REMOVE; add shows
-	// the Name input with the "name on invitation" placeholder.
+	// the accepted-invitee chooser.
 	const isEditing = !!officerId;
+	// While the confirm card shows, every input is locked so the card can never describe a change
+	// the screen no longer shows (D-04).
+	const locked = confirming !== undefined;
 
-	useEffect(() => {
-		async function loadOfficer() {
-			if (!officerId) return;
-			try {
-				const networkEngine = await getEngine<INetworkEngine>("network");
-				const authorityEngine = await networkEngine.openAuthority(authority.id);
-				const admin = await authorityEngine.getAdminDetails();
-				const foundOfficer = admin.admin.officers.find((o) => o.userId === officerId);
+	const openAuthorityEngine = useCallback(async (): Promise<IAuthorityEngine> => {
+		const networkEngine = await getEngine<INetworkEngine>("network");
+		return (await networkEngine.openAuthority(authority.id)) as IAuthorityEngine;
+	}, [getEngine, authority.id]);
+
+	// Re-read on every focus (returning from Send Invitation or UserDetails must show a new pending
+	// change and new accepted invitees). The form is seeded on the FIRST successful load only, so a
+	// later focus never discards what the officer has already entered.
+	const load = useCallback(async () => {
+		try {
+			const networkEngine = await getEngine<INetworkEngine>("network");
+			const authorityEngine = await networkEngine.openAuthority(authority.id);
+			const details = await authorityEngine.getAdminDetails();
+			setPending(details.pending);
+			if (!isEditing) {
+				const invitationEngine = await getEngine<IInvitationEngine>("invitations");
+				const accepted = await invitationEngine.getAcceptedOfficerInvitees();
+				// The list is network-wide; drop people who are already officers here (R-25).
+				const officerIds = new Set(details.admin.officers.map((o) => o.userId));
+				setInvitees(accepted.filter((i) => !officerIds.has(i.userId)));
+			}
+			if (!seededRef.current) {
+				const foundOfficer = isEditing ? details.admin.officers.find((o) => o.userId === officerId) : undefined;
 				if (foundOfficer) {
 					setOfficer(foundOfficer);
-					// Officer has no `name` field (vote-core/authority/models.ts:90-102).
+					// Officer has no `name` field (vote-core/authority/models.ts).
 					// Source the display name from the User join via networkEngine.getUser()
 					// (Phase 7 D-15 opportunistic fix; preferred Option A from 08-04 plan).
 					try {
@@ -76,90 +149,71 @@ export default function EditOfficerScreen() {
 					setTitle(foundOfficer.title);
 					setScopes(foundOfficer.scopes);
 				}
-			} catch (error) {
-				console.warn("Error loading officer:", error);
-				setErrorMessage(errorCopy(error, t, "read"));
+				seededRef.current = true;
 			}
+		} catch (error) {
+			console.warn("Error loading officer:", error);
+			setErrorMessage(errorCopy(error, t, "read"));
 		}
-		loadOfficer();
-	}, [getEngine, authority.id, officerId]);
+		// The form state is deliberately absent: typing must never trigger a reload.
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [getEngine, authority.id, officerId, isEditing]);
 
-	// ADM-01 shared persist helper: rebuilds the proposed officer set and persists
-	// it via proposeAdmin. Both handleSave and handleRemove funnel through here.
-	// The private key lives in Android Keystore and never enters JS; the signer
-	// callback only relays the digest to Keystore's `SHA256withECDSA` and returns
-	// the signature (see `device-signer.ts`'s own header for the current contract).
-	// D-03: AdminDigest is computed ENGINE-SIDE inside proposeAdmin — the app no
-	//       longer recomputes sha256(...) independently.
-	const persistOfficerSet = useCallback(async (updatedOfficers: OfficerSelection[]) => {
-		const networkEngine = await getEngine<INetworkEngine>("network");
-		if (!networkEngine) throw new Error("Network not available");
-		const authorityEngine = await networkEngine.openAuthority(authority.id) as IAuthorityEngine;
-		const adminDetails = await authorityEngine.getAdminDetails();
+	useFocusEffect(
+		useCallback(() => {
+			void load();
+		}, [load])
+	);
 
-		// Preserve existing thresholdPolicies + effectiveAt when a proposal exists;
-		// fall back to admin thresholdPolicies (wrap with 'policy' field per ThresholdPolicy).
-		const existingPolicies: ThresholdPolicy[] = adminDetails.proposed?.proposed.thresholdPolicies
-			?? adminDetails.admin.thresholdPolicies;
-		const effectiveAtMs = Date.now() + 365 * 24 * 60 * 60 * 1000;
-		const effectiveAtStr = new Date(effectiveAtMs).toISOString().slice(0, 19);
+	// One catch shape for starting and confirming a change (R-16). Coded refusals map to their
+	// copy; nothing reads the error's own text.
+	const handleChangeError = (err: unknown) => {
+		setConfirming(undefined);
+		setConfirmNotice("");
+		const outcome = handleDeviceSigningError(err);
+		if (outcome.handled) return;
+		const key = adminChangeErrorKey(err);
+		setErrorMessage(key ? t(key) : outcome.message ?? errorCopy(err, t, "write"));
+	};
 
-		// Resolve the device user id for the signers array. The callback provides
-		// the full Signature once the engine computes the canonical digest internally.
-		const deviceUser = await getOrCreateDeviceUser(user?.name ?? "Authority Administrator");
-
-		// D-03: engine computes digest; sign callback signs those exact bytes.
-		const sign = await createDeviceSigner(user?.name ?? "Authority Administrator");
-
-		const proposal = {
-			proposed: {
-				officers: updatedOfficers,
-				effectiveAt: effectiveAtStr,
-				thresholdPolicies: existingPolicies,
-			},
-			signers: [deviceUser.id],
-		};
-		await authorityEngine.proposeAdmin(proposal, sign);
-	}, [authority.id, getEngine, user]);
-
-	// ADM-01: REMOVE drops the officer from the proposed administration officer set.
-	const handleRemove = useCallback(async () => {
+	// First tap of Save or Remove: re-read, refuse locally while a change is pending (D-08, before
+	// any prompt), build the change from the current roster, and take its time ONCE (D-04, D-06).
+	const beginChange = async (build: (roster: OfficerSelection[]) => Promise<OfficerSelection[]> | OfficerSelection[]) => {
 		setErrorMessage("");
-		setIsRemoving(true);
 		try {
-			const networkEngine = await getEngine<INetworkEngine>("network");
-			if (!networkEngine) {
-				setErrorMessage("Network not available");
+			const authorityEngine = await openAuthorityEngine();
+			const details = await authorityEngine.getAdminDetails();
+			if (details.pending) {
+				setPending(details.pending);
+				setErrorMessage(t("adminChangePendingRefusal"));
 				return;
 			}
-			const authorityEngine = await networkEngine.openAuthority(authority.id) as IAuthorityEngine;
-			const adminDetails = await authorityEngine.getAdminDetails();
-
-			// Build the current proposed officer set (or fall back to current admin officers).
-			let currentSelections: OfficerSelection[];
-			if (adminDetails.proposed?.proposed.officers?.length) {
-				currentSelections = adminDetails.proposed.proposed.officers;
-			} else {
-				currentSelections = adminDetails.admin.officers.map(
-					(o: Officer): OfficerSelection => ({ existing: o })
-				);
-			}
-
-			// Drop the officer whose existing.userId matches officerId.
-			const updatedOfficers = currentSelections.filter(
-				(s) => s.existing?.userId !== officerId
-			);
-
-			await persistOfficerSet(updatedOfficers);
-			navigation.goBack();
+			const roster = currentRoster(details);
+			const officers = await build(roster.officers);
+			const effectiveAt = freshEffectiveAt();
+			setConfirming({ effectiveAt, officers, thresholdPolicies: roster.thresholdPolicies });
+			setConfirmNotice("");
 		} catch (err) {
-			const outcome = handleDeviceSigningError(err);
-			if (outcome.handled) return;
-			setErrorMessage(outcome.message ?? errorCopy(err, t, "write"));
+			handleChangeError(err);
+		}
+	};
+
+	// ADM-01: REMOVE drops the officer from the current administration.
+	const handleRemove = async () => {
+		if (confirming || isRemoving) return;
+		setIsRemoving(true);
+		try {
+			await beginChange((roster) => roster.filter((s) => s.existing?.userId !== officerId));
 		} finally {
 			setIsRemoving(false);
 		}
-	}, [authority.id, officerId, getEngine, navigation, persistOfficerSet, handleDeviceSigningError]);
+	};
+	// The header chip keeps one stable press handler that always runs the latest handleRemove.
+	const removeRef = useRef(handleRemove);
+	removeRef.current = handleRemove;
+	const onRemovePress = useCallback(() => {
+		void removeRef.current();
+	}, []);
 
 	useEffect(() => {
 		navigation.setOptions({
@@ -168,15 +222,16 @@ export default function EditOfficerScreen() {
 						<ChipButton
 							label={isRemoving ? `${t("remove")}…` : t("remove")}
 							icon="trash"
-							onPress={handleRemove}
-							disabled={isRemoving}
+							onPress={onRemovePress}
+							disabled={isRemoving || confirming !== undefined}
 						/>
 					)
 				: undefined,
 		});
-	}, [navigation, t, isEditing, handleRemove, isRemoving]);
+	}, [navigation, t, isEditing, onRemovePress, isRemoving, confirming]);
 
 	const handleScopeToggle = (scope: Scope) => {
+		if (confirming) return;
 		setScopes((prev) => {
 			if (prev.includes(scope)) {
 				return prev.filter((id) => id !== scope);
@@ -186,66 +241,96 @@ export default function EditOfficerScreen() {
 		});
 	};
 
-	// ADM-01: SAVE persists the edited/added officer into the proposed administration.
+	const handleTitleChange = (text: string) => {
+		if (locked) return;
+		setTitle(text);
+	};
+
+	// ADM-01: SAVE edits an officer's title and permissions, or adds an accepted invitee.
 	const handleSave = async () => {
-		setErrorMessage("");
+		if (confirming || isSaving) return;
 		setIsSaving(true);
 		try {
-			const networkEngine = await getEngine<INetworkEngine>("network");
-			if (!networkEngine) {
-				setErrorMessage("Network not available");
-				return;
-			}
-			const authorityEngine = await networkEngine.openAuthority(authority.id) as IAuthorityEngine;
-			const adminDetails = await authorityEngine.getAdminDetails();
-
-			// Build the current proposed officer set (or fall back to current admin officers).
-			let currentSelections: OfficerSelection[];
-			if (adminDetails.proposed?.proposed.officers?.length) {
-				currentSelections = adminDetails.proposed.proposed.officers;
-			} else {
-				currentSelections = adminDetails.admin.officers.map(
-					(o: Officer): OfficerSelection => ({ existing: o })
-				);
-			}
-
-			let updatedOfficers: OfficerSelection[];
-			if (isEditing && officerId) {
-				// Update the matching existing officer's title and scopes.
-				updatedOfficers = currentSelections.map((s) => {
-					if (s.existing?.userId === officerId) {
-						return {
-							existing: {
-								...s.existing,
-								title,
-								scopes,
-							},
-						};
-					}
-					return s;
-				});
-			} else {
-				// Add a new officer via init shape (name/title/scopes).
-				updatedOfficers = [
-					...currentSelections,
-					{ init: { name, title, scopes } },
-				];
-			}
-
-			await persistOfficerSet(updatedOfficers);
-			navigation.goBack();
-		} catch (err) {
-			const outcome = handleDeviceSigningError(err);
-			if (outcome.handled) return;
-			setErrorMessage(outcome.message ?? errorCopy(err, t, "write"));
+			await beginChange(async (roster) => {
+				if (isEditing) {
+					return roster.map((s) =>
+						s.existing && s.existing.userId === officerId ? { existing: { ...s.existing, title, scopes } } : s
+					);
+				}
+				// D-12: only someone who accepted an administrator invitation, re-read at tap time, and
+				// never someone who is already an officer. The selection is bound to their user id.
+				const invitationEngine = await getEngine<IInvitationEngine>("invitations");
+				const accepted = await invitationEngine.getAcceptedOfficerInvitees();
+				const currentIds = new Set(roster.map((s) => s.existing?.userId));
+				const fresh = accepted.filter((i) => !currentIds.has(i.userId));
+				setInvitees(fresh);
+				const found = fresh.find((i) => i.userId === selectedInvitee?.userId);
+				if (!found) setSelectedInvitee(undefined);
+				return [...roster, officerSelectionFromInvitee(found, authority.id, title, scopes)];
+			});
 		} finally {
 			setIsSaving(false);
 		}
 	};
 
+	// The card's Confirm: a stale card signs nothing and comes back with a fresh time (D-01, D-04);
+	// otherwise the stored change is signed exactly as shown, on ONE engine instance.
+	const confirmChange = async () => {
+		if (!confirming || confirmInFlightRef.current) return;
+		if (isAdminChangeConfirmStale(confirming.effectiveAt, Date.now())) {
+			setConfirming({ ...confirming, effectiveAt: freshEffectiveAt() });
+			setConfirmNotice(t("adminChangeConfirmTimeUpdated"));
+			return;
+		}
+		confirmInFlightRef.current = true;
+		setIsSaving(true);
+		try {
+			// openAuthority returns a fresh engine per call: the promotion outcome is read from the
+			// same instance proposeAdmin ran on.
+			const authorityEngine = await openAuthorityEngine();
+			// Resolve the device user id for the signers array. The private key lives in the
+			// hardware keystore and never enters JS; the engine computes the digest (D-03).
+			const deviceUser = await getOrCreateDeviceUser(user?.name ?? "Authority Administrator");
+			const sign = await createDeviceSigner(user?.name ?? "Authority Administrator");
+			await authorityEngine.proposeAdmin(
+				{
+					proposed: {
+						officers: confirming.officers,
+						effectiveAt: confirming.effectiveAt,
+						thresholdPolicies: confirming.thresholdPolicies,
+					},
+					signers: [deviceUser.id],
+				},
+				sign
+			);
+			if (promotionWasRefused(authorityEngine)) {
+				setConfirming(undefined);
+				setConfirmNotice("");
+				setErrorMessage(t("adminChangeNotApplied"));
+				await load();
+				return;
+			}
+			navigation.goBack();
+		} catch (err) {
+			handleChangeError(err);
+		} finally {
+			confirmInFlightRef.current = false;
+			setIsSaving(false);
+		}
+	};
+
+	const backFromConfirm = () => {
+		setConfirming(undefined);
+		setConfirmNotice("");
+	};
+
 	return (
 		<KeyboardAvoidingScreen>
 			<ScrollView style={styles.container}>
+				{pending ? (
+					// Cancel lives on Proposed Administration and Authority details; never a second path here.
+					<PendingAdminChangeCard pending={pending} canCancel={false} onCancel={() => undefined} />
+				) : null}
 				<View style={styles.section}>
 					{isEditing ? (
 						<InfoCard
@@ -260,18 +345,50 @@ export default function EditOfficerScreen() {
 							}
 						/>
 					) : (
-						<CustomTextInput
-							title={t("name")}
-							placeholder={t("nameOnInvitation")}
-							value={name}
-							onChangeText={setName}
-						/>
+						<View>
+							<ThemedText type="defaultSemiBold">{t("adminChangeChooseInvitee")}</ThemedText>
+							{invitees.map((invitee) => (
+								<View key={invitee.slotCid} testID={"edit-officer-invitee-" + invitee.slotCid}>
+									<InfoCard
+										title={invitee.name}
+										additionalInfo={[{ label: t("sid"), value: invitee.userId }]}
+										icon={selectedInvitee?.userId === invitee.userId ? "circle-check" : "circle"}
+										onPress={
+											locked
+												? undefined
+												: () => {
+														setSelectedInvitee(invitee);
+														setName(invitee.name);
+													}
+										}
+									/>
+								</View>
+							))}
+							{invitees.length === 0 ? (
+								<ThemedText testID="edit-officer-no-invitees">{t("adminChangeNoAcceptedInvitees")}</ThemedText>
+							) : null}
+							{/* Init officers are gone, so this is the owner's way to invite a new officer. */}
+							<CustomButton
+								testID="edit-officer-send-invitation"
+								title={t("sendInvitation")}
+								icon="paper-plane"
+								disabled={locked}
+								onPress={() =>
+									navigation.navigate("AdministratorInvitation", {
+										mode: "send",
+										authority,
+										officerInit: { name: "", title },
+									})
+								}
+							/>
+						</View>
 					)}
 					<CustomTextInput
 						title={t("title")}
 						placeholder={t("officialTitle")}
 						value={title}
-						onChangeText={setTitle}
+						editable={!locked}
+						onChangeText={handleTitleChange}
 					/>
 				</View>
 
@@ -295,6 +412,7 @@ export default function EditOfficerScreen() {
 							<Switch
 								value={scopes.includes(scope as Scope)}
 								onValueChange={() => handleScopeToggle(scope as Scope)}
+								disabled={locked}
 								trackColor={{ false: colors.accent, true: colors.primary }}
 								thumbColor={colors.card}
 							/>
@@ -305,14 +423,24 @@ export default function EditOfficerScreen() {
 
 			<InlineError message={errorMessage} />
 			<Footer>
-				<CustomButton
-					title={isSaving ? `${t("save")}…` : t("save")}
-					icon="floppy-disk"
-					disabled={!name || !title || isSaving}
-					backgroundColor={colors.success}
-					forceDarkText={true}
-					onPress={handleSave}
-				/>
+				{confirming ? (
+					<AdminChangeConfirmCard
+						effectiveAt={confirming.effectiveAt}
+						onConfirm={confirmChange}
+						onBack={backFromConfirm}
+						busy={isSaving}
+						notice={confirmNotice}
+					/>
+				) : (
+					<CustomButton
+						title={isSaving ? `${t("save")}…` : t("save")}
+						icon="floppy-disk"
+						disabled={(isEditing ? !title : !selectedInvitee || !title) || isSaving || isRemoving}
+						backgroundColor={colors.success}
+						forceDarkText={true}
+						onPress={handleSave}
+					/>
+				)}
 			</Footer>
 		</KeyboardAvoidingScreen>
 	);
