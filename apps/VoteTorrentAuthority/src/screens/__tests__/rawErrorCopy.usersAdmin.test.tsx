@@ -126,8 +126,10 @@ describe("EditOfficerScreen", () => {
 		expectGeneric(allText(tr), "errorLoadFailedGeneric");
 	});
 
+	// 66.1-07: Save now opens the confirm card first; the add path needs an accepted invitee (covered
+	// by EditOfficerScreen.adminChange.test.tsx), so this case runs in edit mode.
 	it("U-1 save failure shows errorActionFailedGeneric", async () => {
-		mockRouteParams = { authority };
+		mockRouteParams = { authority, officerId: "o1" };
 		const proposeAdmin = jest.fn(async () => { throw rawErr(); });
 		mockEngines = {
 			network: {
@@ -135,12 +137,37 @@ describe("EditOfficerScreen", () => {
 					getAdminDetails: async () => adminDetails,
 					proposeAdmin,
 				})),
+				getUser: jest.fn(async () => undefined),
 			},
 		};
 		const S = Screen();
 		const tr = await mount(<S />);
 		await press(byTitle(tr, "save"));
+		await press(byTitle(tr, "adminChangeConfirmButton"));
 		expect(proposeAdmin).toHaveBeenCalled();
+		expectGeneric(allText(tr), "errorActionFailedGeneric");
+	});
+
+	it("U-1 a press-time read failure on save shows errorActionFailedGeneric", async () => {
+		mockRouteParams = { authority, officerId: "o1" };
+		let reads = 0;
+		const getAdminDetails = jest.fn(async () => {
+			reads += 1;
+			if (reads > 1) throw rawErr();
+			return adminDetails;
+		});
+		const proposeAdmin = jest.fn(async () => undefined);
+		mockEngines = {
+			network: {
+				openAuthority: jest.fn(async () => ({ getAdminDetails, proposeAdmin })),
+				getUser: jest.fn(async () => undefined),
+			},
+		};
+		const S = Screen();
+		const tr = await mount(<S />);
+		await press(byTitle(tr, "save"));
+		expect(getAdminDetails).toHaveBeenCalledTimes(2);
+		expect(proposeAdmin).not.toHaveBeenCalled();
 		expectGeneric(allText(tr), "errorActionFailedGeneric");
 	});
 
@@ -162,6 +189,7 @@ describe("EditOfficerScreen", () => {
 		expect(typeof mockHeaderRight).toBe("function");
 		const chip = mockHeaderRight();
 		await press({ props: { onPress: chip.props.onPress } });
+		await press(byTitle(tr, "adminChangeConfirmButton"));
 		expect(proposeAdmin).toHaveBeenCalled();
 		expectGeneric(allText(tr), "errorActionFailedGeneric");
 	});
