@@ -946,3 +946,232 @@ index aa74a8c..2632104 100644
      /**
       * Tuning for the CONTROL network's peer-join block catch-up (same module,
       * `peer-join-backfill.ts`, wired in `CadreNode.start`): when the control
+diff --git a/dist/relay-reservation.js b/dist/relay-reservation.js
+index f3f0899..7943d10 100644
+--- a/dist/relay-reservation.js
++++ b/dist/relay-reservation.js
+@@ -560,14 +560,15 @@ async function requestReservation(node, connected, deadline, signal) {
+  * gains a way to fill these slots, also end this wait on the store's
+  * `relay:found-enough-relays` event while this relay holds no reservation. The real
+  * fix — `#checkReservationCount` aborting queued jobs instead of clearing them —
+- * belongs to js-libp2p.
++ * belongs to js-libp2p. The supervisor's periodic refresh ({@link DEFAULT_RELAY_REFRESH_MS},
++ * votetorrent patch) re-sends a lapsed one within one refresh interval either way.
+  */
+-async function requestOneReservation(store, relay, deadline, signal) {
++async function requestOneReservation(store, relay, deadline, signal, type = 'discovered') {
+     const waitOver = new AbortController();
+     const unlink = linkAbort(signal, waitOver);
+     try {
+         const outcome = await Promise.race([
+-            store.addRelay(relay.peerId, 'discovered'),
++            store.addRelay(relay.peerId, type),
+             delay(Math.max(0, deadline - Date.now()), waitOver.signal).then(() => WAIT_OVER)
+         ]);
+         if (outcome !== WAIT_OVER) {
+@@ -651,6 +652,72 @@ export const DEFAULT_RELAY_CHECK_MS = 5000;
+ export const DEFAULT_RELAY_MIN_BACKOFF_MS = 2000;
+ /** Ceiling the backoff doubles up to. */
+ export const DEFAULT_RELAY_MAX_BACKOFF_MS = 60000;
++/**
++ * Gap between forced RESERVE refreshes while a reservation is held (votetorrent patch, gap G-2).
++ *
++ * WHY. "Held" is judged from this node's OWN circuit addrs ({@link circuitMultiaddrsVia}), and
++ * those come from the local reservation record, not from the relay. A relay can drop a
++ * reservation while the connection stays open (measured 2026-11-05 against a deployed relay: the
++ * phone kept a future-expiry record and its `/p2p-circuit` addr, the relay answered every CONNECT
++ * for it with NO_RESERVATION). Nothing on this side notices, so the liveness check alone never
++ * re-drives, and libp2p's own refresh comes only 5 min before the record's expiry (up to ~1 h 55
++ * min at the 2 h TTL). Re-sending RESERVE is a refresh at the relay (`reserve()` resets an existing
++ * reservation's TTL, or creates it again when it was dropped), so it is idempotent and repairs the
++ * drop within one interval.
++ */
++export const DEFAULT_RELAY_REFRESH_MS = 300000;
++/** +/- fraction of {@link DEFAULT_RELAY_REFRESH_MS} each refresh is spread by, so supervisors sharing one reservation store (a strand node's, one per relay) do not queue behind each other. */
++const RELAY_REFRESH_JITTER = 0.1;
++/** Logged once per process: the reservation-record seam {@link refreshOneReservation} needs is missing. */
++let reportedRefreshSeamMissing = false;
++/**
++ * Re-send RESERVE for `addr`'s relay through libp2p's OWN in-place refresh path, and return `null`
++ * on success or the reason it failed. Never throws.
++ *
++ * `addRelay` on a still-connected reservation that does not expire within its 10 min refresh
++ * window returns WITHOUT asking the relay, so the record's `expire` is set to now for the call:
++ * that takes libp2p's refresh branch, which keeps the circuit addr advertised while the request is
++ * in flight, reuses the reservation's slot id, records the relay's new expiry and re-arms its own
++ * refresh timer. A refresh the relay refuses lands in libp2p's catch, which removes the local
++ * reservation, so the addr goes and the liveness check re-drives it. When the call did not replace
++ * the record (a timeout, a cancellation, a job dropped by the store's `Queue.clear()`), the original
++ * expiry is put back, so a still-queued job that runs later sees the record as it was and returns
++ * early instead of reserving behind a supervisor that has moved on.
++ *
++ * Reaches through `store.reservations` (libp2p internal, like `relayFilter`); a store without it
++ * gets no refresh and one log line, never a throw.
++ */
++async function refreshOneReservation(store, addr, timeoutMs, signal) {
++    const raw = relayPeerIdOf(addr);
++    if (raw === null) {
++        // Cannot be attributed to a relay peer, so there is no record to refresh.
++        return null;
++    }
++    const peerId = peerIdFromString(raw);
++    if (!store.hasReservation(peerId)) {
++        // Nothing held locally: the liveness check and the drive own that case.
++        return null;
++    }
++    const record = typeof store.reservations?.get === 'function' ? store.reservations.get(peerId) : undefined;
++    const held = record?.reservation;
++    if (typeof held?.expire !== 'bigint') {
++        if (!reportedRefreshSeamMissing) {
++            reportedRefreshSeamMissing = true;
++            log('Reservation store has no readable reservation record; relay reservations are not refreshed');
++        }
++        return null;
++    }
++    const original = held.expire;
++    held.expire = BigInt(Math.floor(Date.now() / 1000));
++    try {
++        return await requestOneReservation(store, { addr, peerId }, Date.now() + timeoutMs, signal, record.type === 'configured' ? 'configured' : 'discovered');
++    }
++    finally {
++        if (store.reservations.get(peerId) === record) {
++            held.expire = original;
++        }
++    }
++}
+ /**
+  * Keep asking for a relay reservation until one is held, then keep watching that
+  * it still is — the thing that makes a lost reservation recover on its own.
+@@ -664,6 +731,12 @@ export const DEFAULT_RELAY_MAX_BACKOFF_MS = 60000;
+  * Per tick:
+  *  - a reservation is held → reset the backoff, clear the error, re-check in
+  *    `checkMs`. No drive: a healthy node must not re-request every few seconds.
++ *    Once every `refreshMs` (default {@link DEFAULT_RELAY_REFRESH_MS}, jittered) the
++ *    held reservation is re-sent to its relay first ({@link refreshOneReservation}),
++ *    because the relay can drop it without this node's addrs changing (votetorrent
++ *    patch, gap G-2). A failed refresh is logged and tried again on the next tick;
++ *    the tick itself is the only actor, so there is never more than one request in
++ *    flight per supervisor, and `stop()` cancels a refresh exactly like a drive.
+  *  - otherwise → un-poison the reservation store's relay filter (see
+  *    {@link clearRelayFilterEntry}) and run ONE {@link driveRelayReservation}.
+  *    If that lands a reservation, rejoin the healthy path above; if not, sleep
+@@ -745,6 +818,10 @@ class RelayReservationLoop {
+         this.minBackoffMs = Math.max(1, opts.minBackoffMs ?? DEFAULT_RELAY_MIN_BACKOFF_MS);
+         this.maxBackoffMs = Math.max(this.minBackoffMs, opts.maxBackoffMs ?? DEFAULT_RELAY_MAX_BACKOFF_MS);
+         this.backoffMs = this.minBackoffMs;
++        // Not clamped to a floor beyond 1 ms: specs shorten it, production takes the default.
++        this.refreshMs = Math.max(1, opts.refreshMs ?? DEFAULT_RELAY_REFRESH_MS);
++        /** Epoch ms the held reservation is next re-sent to its relay; `null` while none is held. */
++        this.refreshDueAtMs = null;
+         this.firstAttempt = new Promise((resolve) => {
+             this.settleFirstAttempt = resolve;
+         });
+@@ -780,9 +857,20 @@ class RelayReservationLoop {
+         }
+         this.nextTickAtMs = null;
+         if (this.reservationHeld()) {
+-            this.onReservationHeld();
+-            return;
++            await this.refreshIfDue();
++            if (this.stopped) {
++                return;
++            }
++            // A refresh the relay refused removes the local reservation, so ask again: a lost
++            // one falls through to the drive below in this same tick.
++            if (this.reservationHeld()) {
++                this.onReservationHeld();
++                return;
++            }
+         }
++        // Lost (or never held): the drive is a fresh RESERVE, so the refresh clock restarts
++        // from the reservation it lands.
++        this.refreshDueAtMs = null;
+         await this.driveOnce();
+         if (this.stopped) {
+             return;
+@@ -806,9 +894,56 @@ class RelayReservationLoop {
+     onReservationHeld() {
+         this.backoffMs = this.minBackoffMs;
+         this.failure = null;
++        if (this.refreshDueAtMs === null) {
++            this.refreshDueAtMs = this.nextRefreshDueAtMs();
++        }
+         this.settleFirst();
+         this.schedule(this.checkMs);
+     }
++    nextRefreshDueAtMs() {
++        const spread = this.refreshMs * RELAY_REFRESH_JITTER;
++        return Date.now() + this.refreshMs - spread + Math.random() * 2 * spread;
++    }
++    /**
++     * Re-send RESERVE for every relay of this loop that holds a reservation, when the refresh is
++     * due. Never throws. A failure is logged and leaves the refresh due, so the next tick
++     * (`checkMs` later) tries again; a success pushes it a jittered `refreshMs` out.
++     */
++    async refreshIfDue() {
++        if (this.refreshDueAtMs === null || Date.now() < this.refreshDueAtMs) {
++            return;
++        }
++        const timeoutMs = this.opts.timeoutMs ?? DEFAULT_RELAY_RESERVE_TIMEOUT_MS;
++        let failed = false;
++        try {
++            const transport = findCircuitRelayTransport(this.node);
++            for (const addr of transport === null ? [] : this.addrs) {
++                if (this.stopped) {
++                    return;
++                }
++                const failure = await refreshOneReservation(transport.reservationStore, addr, timeoutMs, this.cancel.signal);
++                if (this.stopped) {
++                    // A cancelled refresh is a teardown artifact, not a relay failure.
++                    return;
++                }
++                if (failure === null) {
++                    log('Relay reservation refreshed (%s)', addr);
++                }
++                else {
++                    failed = true;
++                    log('Relay reservation refresh failed (%s), retrying on the next check: %s', addr, failure);
++                }
++            }
++        }
++        catch (err) {
++            // `refreshOneReservation` is fail-soft by contract; the loop survives a broken one anyway.
++            failed = true;
++            log('Relay reservation refresh threw, which it should not: %s', describeThrown(err));
++        }
++        if (!this.stopped) {
++            this.refreshDueAtMs = failed ? Date.now() : this.nextRefreshDueAtMs();
++        }
++    }
+     async driveOnce() {
+         this.inFlight = true;
+         try {
+diff --git a/dist/relay-reservation.d.ts b/dist/relay-reservation.d.ts
+index b6bd584..5e8ce6a 100644
+--- a/dist/relay-reservation.d.ts
++++ b/dist/relay-reservation.d.ts
+@@ -289,6 +289,11 @@ export declare const DEFAULT_RELAY_CHECK_MS = 5000;
+ export declare const DEFAULT_RELAY_MIN_BACKOFF_MS = 2000;
+ /** Ceiling the backoff doubles up to. */
+ export declare const DEFAULT_RELAY_MAX_BACKOFF_MS = 60000;
++/**
++ * Gap between forced RESERVE refreshes while a reservation is held (votetorrent patch, gap G-2):
++ * a relay can drop a reservation while the connection and this node's circuit addr stay up.
++ */
++export declare const DEFAULT_RELAY_REFRESH_MS = 300000;
+ /**
+  * Everything one drive takes, minus its `signal`, plus the loop's own cadence.
+  *
+@@ -305,6 +310,12 @@ export interface RelayReservationSupervisorOptions extends Omit<RelayReserveOpti
+     minBackoffMs?: number;
+     /** Backoff ceiling. Default 60_000. */
+     maxBackoffMs?: number;
++    /**
++     * Gap between re-sending RESERVE to each relay while a reservation is held, spread +/-10%.
++     * Default {@link DEFAULT_RELAY_REFRESH_MS} (5 min). Production callers leave it unset; specs
++     * shorten it (votetorrent patch, gap G-2).
++     */
++    refreshMs?: number;
+     /**
+      * Awaited before every drive AFTER the first — never before the first attempt,
+      * which the caller has typically prepared for already. A hook that throws or
