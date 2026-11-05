@@ -110,6 +110,9 @@ module.exports = {
     // The package exports field blocks subpath access; this mapper resolves the TS source directly.
     '^@votetorrent/vote-engine/test/fixtures/test-context$':
       '<rootDir>/../../packages/vote-engine/test/fixtures/test-context.ts',
+    // 66.1 D-12: a real officer accept provisioning (user id, name, public signing key).
+    '^@votetorrent/vote-engine/test/fixtures/officer-provisioning$':
+      '<rootDir>/../../packages/vote-engine/test/fixtures/officer-provisioning.ts',
     // Phase 64 (planning notes 4.3): the real-encoder join-code fixtures that plan 64-04 generates.
     // Pure data with no imports.
     '^@votetorrent/vote-engine/test/fixtures/join-code-fixtures$':
