@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { IAuthorityEngine, Officer, PendingAdminChange, Scope } from "@votetorrent/vote-core";
-import { createDeviceSigner } from "../../engines/device-signer";
 import { getDeviceUser, getOrCreateDeviceUser } from "../../engines/device-user";
 import { useDeviceSigningErrorHandler } from "../../hooks/useDeviceSigningErrorHandler";
 import { adminChangeErrorKey } from "../../utils/adminChangeErrors";
@@ -22,7 +21,13 @@ import { errorCopy } from "../../utils/errorCopy";
  * patches administration data itself. A refusal shows translated copy by code and never the
  * engine's text. The hook reads only `pending.effectiveAt`, so a refused-promotion change
  * (not promoted) is cancelled exactly like a promoted one.
+ *
+ * The device-signer module is required inside `cancel`, not at the top: it loads the app's i18n
+ * instance at import time, and Authority Details is rendered by many screen tests that mock
+ * react-i18next without that instance's plugin. Requiring it on the tap keeps importing this hook
+ * free of that side effect. Same lazy-require shape as device-signer's own native lookup.
  */
+type DeviceSignerModule = typeof import("../../engines/device-signer");
 export interface AdminChangeCancelArgs {
 	pending: PendingAdminChange | undefined;
 	currentOfficers: Officer[] | undefined;
@@ -91,6 +96,7 @@ export function useAdminChangeCancel({
 			const engine = await openEngine();
 			if (!engine) return;
 			const deviceUser = await getOrCreateDeviceUser(signerName);
+			const { createDeviceSigner } = require("../../engines/device-signer") as DeviceSignerModule;
 			const sign = await createDeviceSigner(signerName);
 			await engine.cancelAdminChange(
 				{ effectiveAt: pending.effectiveAt, userId: deviceUser.id },

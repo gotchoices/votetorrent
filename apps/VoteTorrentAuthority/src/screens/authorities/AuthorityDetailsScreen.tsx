@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Image, ScrollView, StyleSheet, View } from "react-native";
 import { ChipButton } from "../../components/ChipButton";
@@ -14,7 +14,7 @@ import type {
 	User,
 	Officer,
 } from "@votetorrent/vote-core";
-import { ExtendedTheme, useNavigation, useRoute, useTheme } from "@react-navigation/native";
+import { ExtendedTheme, useFocusEffect, useNavigation, useRoute, useTheme } from "@react-navigation/native";
 import { CustomButton } from "../../components/CustomButton";
 import type { RootStackParamList } from "../../navigation/types";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
@@ -27,6 +27,8 @@ import { formatDate } from "../../utils/displayUtils";
 import { OfficerCard } from "./components/OfficerCard";
 import { PendingInvitationsSection } from "./components/PendingInvitationsSection";
 import { useKeyboardInset } from "../../hooks/useKeyboardInset";
+import { PendingAdminChangeCard } from "../../components/PendingAdminChangeCard";
+import { useAdminChangeCancel } from "./useAdminChangeCancel";
 
 /** Shape the (forthcoming) real authority engine will provide for invited authorities. */
 type InvitedAuthority = { name: string; status: "sent" | "unsent" };
@@ -84,7 +86,7 @@ export default function AuthorityDetailsScreen() {
 	const officerUsersRef = useRef(officerUsers);
 	officerUsersRef.current = officerUsers;
 
-	const handlePinToggle = async () => {
+	const handlePinToggle = useCallback(async () => {
 		setErrorMessage("");
 		try {
 			if (pinned) {
@@ -97,7 +99,7 @@ export default function AuthorityDetailsScreen() {
 			console.warn("Error toggling authority pin:", error);
 			setErrorMessage(tRef.current("authorityPinFailed"));
 		}
-	};
+	}, [pinned, networkEngine, authority]);
 
 	useEffect(() => {
 		// WR-R3-01: an open that lands after the route moved to another authority (or after Try Again
@@ -216,6 +218,13 @@ export default function AuthorityDetailsScreen() {
 					});
 				}
 
+				// Add the pending change's administrators (66.1, C2)
+				adminDetails.pending?.officers.forEach((officerSelection) => {
+					if (officerSelection.existing) {
+						userIds.add(officerSelection.existing.userId);
+					}
+				});
+
 				// Fetch all users. A user read that could not reach the other devices keeps the
 				// summary this device last read for that user (gap 7) instead of failing the list.
 				let peerFailureReason: string | undefined;
@@ -295,6 +304,32 @@ export default function AuthorityDetailsScreen() {
 					),
 		});
 	}, [pinned, notFound, navigation, t, handlePinToggle]);
+
+	// 66.1 (stale-screen trap): re-read the administration whenever the officer comes back, so a
+	// change signed on EditOfficer or Proposed Administration shows here as pending. The first focus
+	// is skipped: the mount read above already covers it, and the mount read counts are pinned.
+	const focusedOnceRef = useRef(false);
+	useFocusEffect(
+		useCallback(() => {
+			if (!focusedOnceRef.current) {
+				focusedOnceRef.current = true;
+				return;
+			}
+			setReloadNonce((n) => n + 1);
+		}, [])
+	);
+
+	// D-05: Cancel change for a current rad holder, one prompt. Success re-reads through the
+	// latest-read guard above; the administration is never patched locally.
+	const cancelState = useAdminChangeCancel({
+		pending: adminDetails?.pending,
+		currentOfficers: adminDetails?.admin.officers,
+		openEngine: async () => authorityEngine,
+		signerName: authority.name ?? "Authority Administrator",
+		onSettled: () => setReloadNonce((n) => n + 1),
+	});
+	// The roster waiting to take effect: a live proposal's, else the pending change's.
+	const waitingRoster = adminDetails?.proposed?.proposed.officers ?? adminDetails?.pending?.officers;
 
 	// WR-R3-03: the network engine itself failed to open. Without this block the screen returned
 	// null and neither the error copy nor the Try Again (which re-runs loadEngines) was reachable.
@@ -484,17 +519,34 @@ export default function AuthorityDetailsScreen() {
 							);
 						})}
 
-						{!adminDetails?.proposed && (
-							<CustomButton
-								title={t("reviseAdministration")}
-								icon="pencil"
-								size="thin"
-								onPress={() =>
-									navigation.navigate("ProposedAdministration", {
-										authorityId: authority.id,
-									})
-								}
+						{/* D-04/D-08: while a change is pending, show it (with Cancel for a rad holder)
+						    and offer no way to build a second change. */}
+						{adminDetails?.pending ? (
+							<PendingAdminChangeCard
+								pending={adminDetails.pending}
+								canCancel={cancelState.canCancel}
+								onCancel={cancelState.cancel}
+								busy={cancelState.cancelling}
+								error={cancelState.cancelError}
 							/>
+						) : (
+							<>
+								{cancelState.cancelled ? (
+									<ThemedText testID="admin-change-cancelled">{t("adminChangeCancelled")}</ThemedText>
+								) : null}
+								{!adminDetails?.proposed && (
+									<CustomButton
+										title={t("reviseAdministration")}
+										icon="pencil"
+										size="thin"
+										onPress={() =>
+											navigation.navigate("ProposedAdministration", {
+												authorityId: authority.id,
+											})
+										}
+									/>
+								)}
+							</>
 						)}
 					</>
 				)}
@@ -503,20 +555,24 @@ export default function AuthorityDetailsScreen() {
 			</View>
 			)}
 
-			{adminDetails?.proposed && (
+			{adminDetails && waitingRoster && (
 				<View>
 					<View style={styles.section}>
 						<ThemedText type="title">{t("proposedAdministration")}</ThemedText>
 						{/* UAT 62: no CID row here. It showed the CURRENT administration's id, and a
-						    proposal (Proposal<AdminInit>) carries no id of its own until promoted. */}
-						<View style={styles.detail}>
-							<ThemedText type="defaultSemiBold">{t("effective")}: </ThemedText>
-							<ThemedText>{formatDate(adminDetails.proposed.proposed.effectiveAt)}</ThemedText>
-						</View>
+						    proposal (Proposal<AdminInit>) carries no id of its own until promoted.
+						    66.1: while a change is pending its time shows only on the pending card,
+						    read as UTC; formatDate would read the canonical no-Z string as local. */}
+						{adminDetails?.proposed && !adminDetails?.pending ? (
+							<View style={styles.detail}>
+								<ThemedText type="defaultSemiBold">{t("effective")}: </ThemedText>
+								<ThemedText>{formatDate(adminDetails.proposed.proposed.effectiveAt)}</ThemedText>
+							</View>
+						) : null}
 						<ThemedText type="defaultSemiBold" style={styles.administratorsHeading}>
 							{t("administrators")}
 						</ThemedText>
-						{adminDetails.proposed.proposed.officers.map((officerSelection) => {
+						{waitingRoster.map((officerSelection) => {
 							const officer: Officer = officerSelection.existing || {
 								userId: "",
 								authorityId: authority.id,
@@ -560,15 +616,17 @@ export default function AuthorityDetailsScreen() {
 						})}
 					</View>
 
-					<AuthorizationSection
-						admin={adminDetails}
-						signedOfficerIds={adminDetails.proposed.signers}
-						onAdjustProposal={() =>
-							navigation.navigate("ProposedAdministration", {
-								authorityId: authority.id,
-							})
-						}
-					/>
+					{adminDetails.proposed ? (
+						<AuthorizationSection
+							admin={adminDetails}
+							signedOfficerIds={adminDetails.proposed.signers}
+							onAdjustProposal={() =>
+								navigation.navigate("ProposedAdministration", {
+									authorityId: authority.id,
+								})
+							}
+						/>
+					) : null}
 				</View>
 			)}
 

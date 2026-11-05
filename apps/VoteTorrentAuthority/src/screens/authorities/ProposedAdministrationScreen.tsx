@@ -89,6 +89,9 @@ function seedThresholds(policies: ThresholdPolicy[], officerCount: number): Reco
 
 export default function ProposedAdministrationScreen() {
 	const { t } = useTranslation();
+	// The focus read uses the latest t without re-running when its identity changes.
+	const tRef = useRef(t);
+	tRef.current = t;
 	const { colors } = useTheme() as ExtendedTheme;
 	const navigation =
 		useNavigation<NativeStackNavigationProp<RootStackParamList>>();
@@ -197,7 +200,7 @@ export default function ProposedAdministrationScreen() {
 			}
 		} catch (e) {
 			console.warn("Error loading proposed administration:", e);
-			if (isLatest()) setErrorMessage(errorCopy(e, t, "read"));
+			if (isLatest()) setErrorMessage(errorCopy(e, tRef.current, "read"));
 		} finally {
 			if (isLatest()) setIsLoading(false);
 		}
@@ -205,7 +208,7 @@ export default function ProposedAdministrationScreen() {
 
 	useFocusEffect(
 		useCallback(() => {
-			void loadDetails();
+			loadDetails();
 			return () => {
 				loadSeqRef.current++;
 			};

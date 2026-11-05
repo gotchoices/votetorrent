@@ -311,6 +311,37 @@ describe("WRITE failures show errorActionFailedGeneric", () => {
 		expectCopy(tr, "errorActionFailedGeneric");
 	});
 
+	it("AuthorityDetailsScreen cancel change", async () => {
+		mockRouteParams = { authority: { id: "auth-1", name: "A", domainName: "a.example.org" } };
+		const authorityEngine = {
+			getAdminDetails: async () => ({
+				admin: {
+					id: "auth-1:2026-10-01T00:00:00",
+					authorityId: "auth-1",
+					effectiveAt: 0,
+					officers: [{ userId: "device-user-1", authorityId: "auth-1", title: "Chair", scopes: ["rad"] }],
+					thresholdPolicies: [],
+				},
+				pending: { effectiveAt: "2026-11-05T04:57:00", officers: [], thresholdPolicies: [], promoted: true },
+			}),
+			getPendingInviteCids: async () => [],
+			cancelAdminChange: rejecting(),
+		};
+		mockEngines = {
+			network: {
+				openAuthority: async () => authorityEngine,
+				getPinnedAuthorities: async () => [],
+				getUser: async () => undefined,
+			},
+			invitations: { getOfficerInvite: async () => undefined },
+		};
+		const Screen = require("../authorities/AuthorityDetailsScreen").default;
+		const tr = await mount(<Screen />);
+		await pressId(tr, "admin-change-cancel");
+		expect(authorityEngine.cancelAdminChange).toHaveBeenCalled();
+		expectCopy(tr, "errorActionFailedGeneric");
+	});
+
 	it("AuthorityPeersScreen add", async () => {
 		mockRouteParams = { authorityId: "auth-1" };
 		const addAuthorityPeer = rejecting();

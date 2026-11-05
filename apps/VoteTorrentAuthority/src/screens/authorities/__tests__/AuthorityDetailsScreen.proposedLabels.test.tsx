@@ -3,6 +3,10 @@
  * their effectiveAt "Expires" (it is the START date), and the Proposed Administration section
  * showed the CURRENT administration's CID as if it were the proposal's. Mock scaffold mirrors
  * AuthorityDetailsScreen.longIds.test.tsx.
+ *
+ * 66.1 (C2): a live unpromoted proposal is also `pending`. While pending, its time shows only on
+ * the pending card (read as UTC), so the proposal's own Effective row is hidden; a proposal with no
+ * pending (past its time, awaiting co-signers) keeps the row.
  */
 
 import React from "react";
@@ -60,21 +64,29 @@ jest.mock("@react-navigation/native", () => ({
 	},
 }));
 
+jest.mock("../../../engines/device-user", () => ({
+	getDeviceUser: jest.fn(async () => ({ id: "user-1", name: "Device User" })),
+	getOrCreateDeviceUser: jest.fn(async () => ({ id: "user-1", name: "Device User" })),
+}));
+
 const ADMIN_ID = "authority-1:2026-10-01T00:00:00";
 const AUTHORITY_FIXTURE = { id: "authority-1", name: "Test Authority", domainName: "test.example.org", imageRef: undefined };
 const FOUNDER = { userId: "user-1", authorityId: "authority-1", title: "Chair", scopes: ["rad"] };
 
-function makeAdminDetails() {
+const PROPOSED_OFFICERS = [{ existing: FOUNDER }, { init: { name: "Bea Two", title: "Clerk", scopes: ["vrg"] } }];
+
+function makeAdminDetails(): Record<string, unknown> {
 	return {
 		admin: { id: ADMIN_ID, authorityId: "authority-1", officers: [FOUNDER], effectiveAt: Date.UTC(2026, 9, 1), thresholdPolicies: [] },
 		proposed: {
 			proposed: {
-				officers: [{ existing: FOUNDER }, { init: { name: "Bea Two", title: "Clerk", scopes: ["vrg"] } }],
+				officers: PROPOSED_OFFICERS,
 				effectiveAt: Date.UTC(2027, 9, 1),
 				thresholdPolicies: [],
 			},
 			signers: ["user-1"],
 		},
+		pending: { effectiveAt: "2027-10-01T00:00:00", officers: PROPOSED_OFFICERS, thresholdPolicies: [], promoted: false },
 	};
 }
 
@@ -127,7 +139,21 @@ beforeEach(() => {
 });
 
 describe("AuthorityDetailsScreen — administration dates and the proposed CID (UAT 62)", () => {
-	it("labels both administrations' effectiveAt as Effective, never Expires", async () => {
+	it("while the proposal is pending, its time shows only on the pending card; never Expires", async () => {
+		const tr = await renderScreen();
+		const texts = leafTexts(tr);
+		expect(texts.filter((s) => s === "effective: ")).toHaveLength(1);
+		expect(texts.some((s) => s.startsWith("expires"))).toBe(false);
+		expect(tr.root.findAll((n) => n.props?.testID === "admin-change-pending-card", { deep: false })).toHaveLength(1);
+		expect(tr.root.findAll((n) => n.props?.title === "reviseAdministration")).toHaveLength(0);
+	});
+
+	it("labels both administrations' effectiveAt as Effective, never Expires (proposal awaiting co-signers)", async () => {
+		mockGetAdminDetails.mockImplementationOnce(async () => {
+			const details = makeAdminDetails();
+			delete details.pending;
+			return details;
+		});
 		const tr = await renderScreen();
 		const texts = leafTexts(tr);
 		expect(texts.filter((s) => s === "effective: ")).toHaveLength(2);
