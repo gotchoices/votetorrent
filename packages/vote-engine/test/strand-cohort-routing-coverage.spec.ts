@@ -168,7 +168,7 @@ const DB_P2P_PATCH_PREFIX = '@optimystic-db-p2p-npm-'
 // The one deliberate db-p2p yarn-patch (outer 94857f7b, 2026-10-28): it memoizes commit-proof claim
 // verification so a node stops re-verifying the same Ed25519 signatures on every read-repair. Any
 // OTHER db-p2p patch file is still a silent re-add and fails the assertions below.
-const ALLOWED_DB_P2P_PATCH = '@optimystic-db-p2p-npm-1.24.0-votetorrent.patch'
+const ALLOWED_DB_P2P_PATCH = '@optimystic-db-p2p-npm-1.25.0-votetorrent.patch'
 const ALLOWED_DB_P2P_PATCH_MARKER = 'VoteTorrent patch: ' + 'memoize'
 // A GSD phase-plan number as it would appear in an emitted string (e.g. 41-04).
 const GSD_PLAN_NUMBER = /\b\d{2,3}-\d{2,3}\b/

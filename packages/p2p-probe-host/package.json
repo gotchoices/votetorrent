@@ -16,8 +16,8 @@
 		"@libp2p/crypto": "^5",
 		"@libp2p/peer-id": "^6.0.0",
 		"@libp2p/websockets": "^10",
-		"@optimystic/db-p2p": "^1.24.0",
-		"@serfab/cadre-core": "patch:@serfab/cadre-core@npm%3A1.20.0#~/.yarn/patches/@serfab-cadre-core-npm-1.20.0-votetorrent.patch",
+		"@optimystic/db-p2p": "^1.25.0",
+		"@serfab/cadre-core": "patch:@serfab/cadre-core@npm%3A1.21.0#~/.yarn/patches/@serfab-cadre-core-npm-1.21.0-votetorrent.patch",
 		"@serfab/strand-proto": "^0.11.0"
 	}
 }

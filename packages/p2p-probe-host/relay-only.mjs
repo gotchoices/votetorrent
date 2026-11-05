@@ -203,9 +203,9 @@ function stackPreflight() {
 	})();
 	out('RELAY_STACK ' + JSON.stringify({ node: process.versions.node, versions, patch }));
 	const ok =
-		versions['@serfab/cadre-core'] === '1.20.0' &&
+		versions['@serfab/cadre-core'] === '1.21.0' &&
 		patch &&
-		versions['@optimystic/db-p2p'] === '1.24.0' &&
+		versions['@optimystic/db-p2p'] === '1.25.0' &&
 		versions['main-event'] === '1.0.5' &&
 		nodeOk;
 	if (!ok) refuse('stack');
