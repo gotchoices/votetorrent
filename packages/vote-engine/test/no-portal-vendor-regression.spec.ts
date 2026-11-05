@@ -198,9 +198,12 @@ describe('no-portal / no-vendor regression (PUB-01 / PUB-02)', () => {
       // 2026-11-02: @serfab 1.19.1 -> 1.20.0 (strandReactivity, StrandDatabase.watchTables) and @optimystic
       // 1.20.1 -> 1.24.0 (cohort-topic reactivity cheaper when idle, matchmaking sessions, client signatures
       // txsig:v3, so every machine moves together). @quereus 4.21.1 -> 4.24.0, p2p-fret 1.2.1 -> 1.3.0.
+      // 2026-11-05: @serfab 1.20.0 -> 1.21.0 (a relay reservation re-dials after a dropped dial; a refused app
+      // schema change keeps the earlier schema) and @optimystic 1.24.0 -> 1.25.0 (adapts to quereus 4.25's
+      // unwound schema commit). @quereus 4.24.0 -> 4.26.0. cadre-core and db-p2p patches carried byte-identical.
       const expectedPrefix = pkg === '@serfab/strand-proto'
         ? '0.11.'
-        : pkg.startsWith('@serfab/') ? '1.20.' : '1.24.'
+        : pkg.startsWith('@serfab/') ? '1.21.' : '1.25.'
       expect(
         distinct[0],
         `Resolved ${pkg} version must start with ${expectedPrefix}, got ${distinct[0]}`

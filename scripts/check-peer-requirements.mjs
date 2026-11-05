@@ -230,8 +230,12 @@ const execAsync = promisify(exec);
 //
 // @serfab 1.19.1 -> 1.20.0 + @optimystic 1.20.1 -> 1.24.0 bump (2026-11-02, quereus 4.21.1 -> 4.24.0):
 // same single mismatch expected, re-keyed (the peer range moved to ^4.24.0). Re-confirm after install.
+//
+// @serfab 1.20.0 -> 1.21.0 + @optimystic 1.24.0 -> 1.25.0 bump (2026-11-05, quereus 4.24.0 -> 4.26.0):
+// same single mismatch, re-keyed. The peer range moved to ^4.25.0; YN0002 still names
+// packages/attestation-native.
 const KNOWN_ALLOWED = new Set([
-  '@optimystic/quereus-plugin-crypto@npm:1.24.0',
+  '@optimystic/quereus-plugin-crypto@npm:1.25.0',
 ]);
 
 // The ✘ marker (U+2718)
