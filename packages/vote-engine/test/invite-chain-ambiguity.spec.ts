@@ -12,6 +12,7 @@ import type { EngineContext } from '../src/types.js'
 import { nowCanonicalDatetime } from '../src/utils.js'
 import { makeChainFixture, sendInvite, insertRawChainRow, writeRawMarker, resultRows } from './fixtures/invite-chain.js'
 import type { ChainFixture, SentShare } from './fixtures/invite-chain.js'
+import { makeOfficerProvisioning } from './fixtures/officer-provisioning.js'
 
 async function expectLive (fx: ChainFixture, s: SentShare): Promise<void> {
   expect(await fx.invitation.resolveInviteSlot(s.inviteKey, 'of')).to.deep.equal({ status: 'live', cid: s.cid })
@@ -94,7 +95,7 @@ describe('readInviteChain fail-closed branches (WR-08)', () => {
     const a = await insertRawChainRow(fx, s, { resendSalt: salt, name: 'Twin one' })
     const b = await insertRawChainRow(fx, s, { resendSalt: salt, name: 'Twin two' })
     let caught: unknown
-    try { await fx.invitation.respondToInvite(a, true, s.invitePrivate) } catch (err) { caught = err }
+    try { await fx.invitation.respondToInvite(a, true, s.invitePrivate, undefined, undefined, undefined, makeOfficerProvisioning()) } catch (err) { caught = err }
     expect(caught).to.be.instanceOf(Error)
     expect((caught as Error).message).to.match(/cannot be verified on this device/)
     expect(await resultRows(fx, [s.cid, a, b])).to.equal(0)
@@ -112,11 +113,11 @@ describe('unscoped chain read reports ambiguity before answers (WR-06)', () => {
       nonce: bytesToHex(secp256k1.utils.randomSecretKey()),
     })
     // The planted copy is answered (its own nonce-scoped chain is live, so the answer is accepted).
-    await fx.invitation.respondToInvite(planted, true, s.invitePrivate)
+    await fx.invitation.respondToInvite(planted, true, s.invitePrivate, undefined, undefined, undefined, makeOfficerProvisioning())
     expect(await resultRows(fx, [planted])).to.equal(1)
     await expectAmbiguous(fx, s)
     // The victim's own slot is NOT refused as answered: its nonce-scoped chain is live.
-    await fx.invitation.respondToInvite(s.cid, true, s.invitePrivate)
+    await fx.invitation.respondToInvite(s.cid, true, s.invitePrivate, undefined, undefined, undefined, makeOfficerProvisioning())
     expect(await resultRows(fx, [s.cid])).to.equal(1)
   })
 })

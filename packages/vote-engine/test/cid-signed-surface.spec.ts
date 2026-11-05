@@ -72,6 +72,7 @@ import { createTestNetwork, addTestAuthority, makeTestSignCallback } from './fix
 import type { TestAuthorityContext } from './fixtures/test-context.js'
 import { InvitationEngine } from '../src/invite/invitation-engine.js'
 import { DIGEST_VECTORS } from './fixtures/digest-vectors.js'
+import { makeOfficerProvisioning } from './fixtures/officer-provisioning.js'
 import type { Scope } from '@votetorrent/vote-core'
 
 // ---------------------------------------------------------------------------
@@ -193,7 +194,7 @@ describe('CID-03: signed surface embedding a real CIDv1 Cid (Phase 36 Plan 03)',
 
     let errorThrown: Error | undefined
     try {
-      await invitationEngine.respondToInvite(slotCid, true, officerInvite.invitePrivate, digestValue)
+      await invitationEngine.respondToInvite(slotCid, true, officerInvite.invitePrivate, digestValue, undefined, undefined, makeOfficerProvisioning())
     } catch (e) {
       errorThrown = e as Error
     }

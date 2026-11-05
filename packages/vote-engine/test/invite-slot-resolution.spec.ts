@@ -11,6 +11,7 @@ import { nowCanonicalDatetime } from '../src/utils.js'
 import { InvitationEngine } from '../src/invite/invitation-engine.js'
 import { MockInvitationEngine } from '../src/invite/mock-invitation-engine.js'
 import { makeKeyholderProvisioning } from './fixtures/keyholder-provisioning.js'
+import { makeOfficerProvisioning } from './fixtures/officer-provisioning.js'
 import { makeChainFixture, sendInvite, insertExpiredSlot, writeRawMarker, resendTime, dayAfter, markerRows, resultRows, insertRawChainRow, countRows } from './fixtures/invite-chain.js'
 import { createTestNetwork, addTestAuthority, addTestElection, makeTestSignCallback } from './fixtures/test-context.js'
 import { inviteeContext } from './fixtures/invite-keys.js'
@@ -105,7 +106,7 @@ describe('resend chain and liveness (CR-01, CR-02)', () => {
     const s = await sendInvite(fx, 'of')
     const head = await fx.authority.resendInvite(s.cid)
     expect((await fx.invitation.resolveInviteSlot(s.inviteKey, 'of')).status).to.equal('live')
-    await fx.invitation.respondToInvite(head, true, s.invitePrivate)
+    await fx.invitation.respondToInvite(head, true, s.invitePrivate, undefined, undefined, undefined, makeOfficerProvisioning())
     expect(await fx.invitation.resolveInviteSlot(s.inviteKey, 'of')).to.deep.equal({ status: 'answered', cid: head })
     expect(await fx.invitation.resolveInviteSlotCid(s.inviteKey, 'of')).to.equal(undefined)
   })
@@ -284,7 +285,7 @@ describe('an answered invitation is closed on the officer side (CR-01)', () => {
     const before = await fx.authority.getPendingInviteCids()
     expect(before).to.include(head)
     expect(before).to.not.include(s.cid)
-    await fx.invitation.respondToInvite(head, true, s.invitePrivate)
+    await fx.invitation.respondToInvite(head, true, s.invitePrivate, undefined, undefined, undefined, makeOfficerProvisioning())
     const after = await fx.authority.getPendingInviteCids()
     expect(after).to.not.include(s.cid)
     expect(after).to.not.include(head)
@@ -313,7 +314,7 @@ describe('an answered invitation is closed on the officer side (CR-01)', () => {
     const fx = await makeChainFixture()
     const s = await sendInvite(fx, 'of')
     expect(await fx.authority.getPendingInviteCids()).to.include(s.cid)
-    await fx.invitation.respondToInvite(s.cid, true, s.invitePrivate)
+    await fx.invitation.respondToInvite(s.cid, true, s.invitePrivate, undefined, undefined, undefined, makeOfficerProvisioning())
     expect(await fx.authority.getPendingInviteCids()).to.not.include(s.cid)
     await expectAnsweredRefusal(fx.authority.cancelInvite(s.cid))
     expect(await markerRows(fx, [s.cid])).to.equal(0)
@@ -345,7 +346,7 @@ describe('an answered invitation is closed on the officer side (CR-01)', () => {
     const pending = await fx.authority.getPendingInviteCids()
     expect(pending).to.include(head)
     expect(pending).to.not.include(s.cid)
-    await fx.invitation.respondToInvite(head, true, s.invitePrivate)
+    await fx.invitation.respondToInvite(head, true, s.invitePrivate, undefined, undefined, undefined, makeOfficerProvisioning())
     expect(await resultRows(fx, [s.cid, head])).to.equal(1)
     const after = await fx.authority.getPendingInviteCids()
     expect(after).to.not.include(head)
@@ -356,7 +357,7 @@ describe('an answered invitation is closed on the officer side (CR-01)', () => {
     const fx = await makeChainFixture()
     const a = await sendInvite(fx, 'of')
     const b = await sendInvite(fx, 'of')
-    await fx.invitation.respondToInvite(a.cid, true, a.invitePrivate)
+    await fx.invitation.respondToInvite(a.cid, true, a.invitePrivate, undefined, undefined, undefined, makeOfficerProvisioning())
     const pending = await fx.authority.getPendingInviteCids()
     expect(pending.filter(c => c === b.cid)).to.have.length(1)
     expect(pending).to.not.include(a.cid)

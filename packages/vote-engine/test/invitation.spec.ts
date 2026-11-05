@@ -17,6 +17,7 @@ import {
 } from './fixtures/test-context.js'
 import { nowCanonicalDatetime } from '../src/utils.js'
 import { makeKeyholderProvisioning } from './fixtures/keyholder-provisioning.js'
+import { makeOfficerProvisioning } from './fixtures/officer-provisioning.js'
 import type {
   InviteStatus,
   KeyholderInvite,
@@ -136,7 +137,7 @@ describe('InvitationEngine', () => {
     const share = await sendInvite(fx, 'of')
     const inviteSlotCid = share.cid
 
-    await fx.invitation.respondToInvite(inviteSlotCid, true, share.invitePrivate)
+    await fx.invitation.respondToInvite(inviteSlotCid, true, share.invitePrivate, undefined, undefined, undefined, makeOfficerProvisioning())
 
     // Read back the InviteResult row and assert IsAccepted is truthy.
     const row = await fx.auth.ctx.db

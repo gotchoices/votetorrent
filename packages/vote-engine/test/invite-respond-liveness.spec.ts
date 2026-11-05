@@ -8,6 +8,7 @@ import { secp256k1 } from '@noble/curves/secp256k1.js'
 import { bytesToHex } from '@noble/curves/utils.js'
 import type { KeyholderInvite, Signature } from '@votetorrent/vote-core'
 import { makeKeyholderProvisioning } from './fixtures/keyholder-provisioning.js'
+import { makeOfficerProvisioning } from './fixtures/officer-provisioning.js'
 import { makeChainFixture, sendInvite, insertRawChainRow, insertExpiredSlot, writeRawMarker, resendTime, dayAfter, resultRows, countRows } from './fixtures/invite-chain.js'
 import { addTestElection, makeTestSignCallback } from './fixtures/test-context.js'
 import type { ChainFixture } from './fixtures/invite-chain.js'
@@ -48,7 +49,7 @@ describe('respondToInvite liveness (CR-02)', () => {
   it('live officer slot with no resend accepts (positive control)', async () => {
     const fx = await makeChainFixture()
     const s = await sendInvite(fx, 'of')
-    await fx.invitation.respondToInvite(s.cid, true, s.invitePrivate)
+    await fx.invitation.respondToInvite(s.cid, true, s.invitePrivate, undefined, undefined, undefined, makeOfficerProvisioning())
     expect(await resultRows(fx, [s.cid])).to.equal(1)
   })
 
@@ -57,7 +58,7 @@ describe('respondToInvite liveness (CR-02)', () => {
     const s = await sendInvite(fx, 'of')
     expect((await fx.invitation.resolveInviteSlot(s.inviteKey, 'of')).status).to.equal('live')
     await fx.authority.cancelInvite(s.cid)
-    await expectRefusal(fx.invitation.respondToInvite(s.cid, true, s.invitePrivate), WITHDRAWN)
+    await expectRefusal(fx.invitation.respondToInvite(s.cid, true, s.invitePrivate, undefined, undefined, undefined, makeOfficerProvisioning()), WITHDRAWN)
     expect(await resultRows(fx, [s.cid])).to.equal(0)
   })
 
@@ -73,9 +74,9 @@ describe('respondToInvite liveness (CR-02)', () => {
     const fx = await makeChainFixture()
     const live = await sendInvite(fx, 'of')
     const expired = await insertExpiredSlot(fx)
-    await expectRefusal(fx.invitation.respondToInvite(expired.cid, true, expired.invitePrivate), WITHDRAWN)
+    await expectRefusal(fx.invitation.respondToInvite(expired.cid, true, expired.invitePrivate, undefined, undefined, undefined, makeOfficerProvisioning()), WITHDRAWN)
     expect(await resultRows(fx, [expired.cid])).to.equal(0)
-    await fx.invitation.respondToInvite(live.cid, true, live.invitePrivate)
+    await fx.invitation.respondToInvite(live.cid, true, live.invitePrivate, undefined, undefined, undefined, makeOfficerProvisioning())
     expect(await resultRows(fx, [live.cid])).to.equal(1)
   })
 
@@ -111,7 +112,7 @@ describe('respondToInvite liveness (CR-02)', () => {
     const head = await fx.authority.resendInvite(s.cid)
     expect(await fx.invitation.resolveInviteSlot(s.inviteKey, 'of')).to.deep.equal({ status: 'live', cid: head })
     await fx.authority.cancelInvite(s.cid)
-    await expectRefusal(fx.invitation.respondToInvite(head, true, s.invitePrivate), WITHDRAWN)
+    await expectRefusal(fx.invitation.respondToInvite(head, true, s.invitePrivate, undefined, undefined, undefined, makeOfficerProvisioning()), WITHDRAWN)
     expect(await resultRows(fx, [s.cid, head])).to.equal(0)
   })
 
@@ -121,7 +122,7 @@ describe('respondToInvite liveness (CR-02)', () => {
     const head = await fx.authority.resendInvite(s.cid)
     expect((await fx.invitation.resolveInviteSlot(s.inviteKey, 'of')).status).to.equal('live')
     await fx.authority.cancelInvite(head)
-    await expectRefusal(fx.invitation.respondToInvite(s.cid, true, s.invitePrivate), WITHDRAWN)
+    await expectRefusal(fx.invitation.respondToInvite(s.cid, true, s.invitePrivate, undefined, undefined, undefined, makeOfficerProvisioning()), WITHDRAWN)
     expect(await resultRows(fx, [s.cid, head])).to.equal(0)
   })
 
@@ -130,7 +131,7 @@ describe('respondToInvite liveness (CR-02)', () => {
     const s = await sendInvite(fx, 'of')
     await fx.authority.cancelInvite(s.cid)
     const head = await fx.authority.resendInvite(s.cid)
-    await fx.invitation.respondToInvite(head, true, s.invitePrivate)
+    await fx.invitation.respondToInvite(head, true, s.invitePrivate, undefined, undefined, undefined, makeOfficerProvisioning())
     expect(await resultRows(fx, [s.cid, head])).to.equal(1)
   })
 
@@ -140,7 +141,7 @@ describe('respondToInvite liveness (CR-02)', () => {
     const head = await fx.authority.resendInvite(s.cid)
     expect((await fx.invitation.resolveInviteSlot(s.inviteKey, 'of')).status).to.equal('live')
     await writeRawMarker(fx, s.cid, dayAfter(await resendTime(fx, head)))
-    await expectRefusal(fx.invitation.respondToInvite(head, true, s.invitePrivate), WITHDRAWN)
+    await expectRefusal(fx.invitation.respondToInvite(head, true, s.invitePrivate, undefined, undefined, undefined, makeOfficerProvisioning()), WITHDRAWN)
     expect(await resultRows(fx, [s.cid, head])).to.equal(0)
   })
 
@@ -148,9 +149,9 @@ describe('respondToInvite liveness (CR-02)', () => {
     const fx = await makeChainFixture()
     const s = await sendInvite(fx, 'of')
     const head = await fx.authority.resendInvite(s.cid)
-    await expectRefusal(fx.invitation.respondToInvite(s.cid, true, s.invitePrivate), /replaced by a newer copy/)
+    await expectRefusal(fx.invitation.respondToInvite(s.cid, true, s.invitePrivate, undefined, undefined, undefined, makeOfficerProvisioning()), /replaced by a newer copy/)
     expect(await resultRows(fx, [s.cid, head])).to.equal(0)
-    await fx.invitation.respondToInvite(head, true, s.invitePrivate)
+    await fx.invitation.respondToInvite(head, true, s.invitePrivate, undefined, undefined, undefined, makeOfficerProvisioning())
     expect(await resultRows(fx, [s.cid, head])).to.equal(1)
   })
 
@@ -158,9 +159,9 @@ describe('respondToInvite liveness (CR-02)', () => {
     const fx = await makeChainFixture()
     const s = await sendInvite(fx, 'of')
     const head = await fx.authority.resendInvite(s.cid)
-    await fx.invitation.respondToInvite(head, true, s.invitePrivate)
-    await expectRefusal(fx.invitation.respondToInvite(s.cid, true, s.invitePrivate), /already been answered/)
-    await expectRefusal(fx.invitation.respondToInvite(head, true, s.invitePrivate), /already been answered/)
+    await fx.invitation.respondToInvite(head, true, s.invitePrivate, undefined, undefined, undefined, makeOfficerProvisioning())
+    await expectRefusal(fx.invitation.respondToInvite(s.cid, true, s.invitePrivate, undefined, undefined, undefined, makeOfficerProvisioning()), /already been answered/)
+    await expectRefusal(fx.invitation.respondToInvite(head, true, s.invitePrivate, undefined, undefined, undefined, makeOfficerProvisioning()), /already been answered/)
     expect(await resultRows(fx, [s.cid, head])).to.equal(1)
   })
 
@@ -241,7 +242,7 @@ describe('respondToInvite requires the invite key (WR-05) and refusals carry cod
   it('malformed key: refused invite-key-required', async () => {
     const fx = await makeChainFixture()
     const s = await sendInvite(fx, 'of')
-    await expectCode(fx.invitation.respondToInvite(s.cid, true, 'zz'), 'invite-key-required')
+    await expectCode(fx.invitation.respondToInvite(s.cid, true, 'zz', undefined, undefined, undefined, makeOfficerProvisioning()), 'invite-key-required')
     expect(await resultRows(fx, [s.cid])).to.equal(0)
   })
 
@@ -249,10 +250,10 @@ describe('respondToInvite requires the invite key (WR-05) and refusals carry cod
     const fx = await makeChainFixture()
     const s = await sendInvite(fx, 'of')
     const other = bytesToHex(secp256k1.utils.randomSecretKey())
-    await expectCode(fx.invitation.respondToInvite(s.cid, true, other), 'invite-signature-invalid')
+    await expectCode(fx.invitation.respondToInvite(s.cid, true, other, undefined, undefined, undefined, makeOfficerProvisioning()), 'invite-signature-invalid')
     await expectCode(fx.invitation.respondToInvite(s.cid, false, other), 'invite-signature-invalid')
     expect(await resultRows(fx, [s.cid])).to.equal(0)
-    await fx.invitation.respondToInvite(s.cid, true, s.invitePrivate)
+    await fx.invitation.respondToInvite(s.cid, true, s.invitePrivate, undefined, undefined, undefined, makeOfficerProvisioning())
     expect(await resultRows(fx, [s.cid])).to.equal(1)
   })
 
@@ -269,22 +270,22 @@ describe('respondToInvite requires the invite key (WR-05) and refusals carry cod
   it('answered -> invite-already-answered', async () => {
     const fx = await makeChainFixture()
     const s = await sendInvite(fx, 'of')
-    await fx.invitation.respondToInvite(s.cid, true, s.invitePrivate)
-    await expectCode(fx.invitation.respondToInvite(s.cid, true, s.invitePrivate), 'invite-already-answered')
+    await fx.invitation.respondToInvite(s.cid, true, s.invitePrivate, undefined, undefined, undefined, makeOfficerProvisioning())
+    await expectCode(fx.invitation.respondToInvite(s.cid, true, s.invitePrivate, undefined, undefined, undefined, makeOfficerProvisioning()), 'invite-already-answered')
   })
 
   it('withdrawn -> invite-no-longer-valid', async () => {
     const fx = await makeChainFixture()
     const s = await sendInvite(fx, 'of')
     await fx.authority.cancelInvite(s.cid)
-    await expectCode(fx.invitation.respondToInvite(s.cid, true, s.invitePrivate), 'invite-no-longer-valid')
+    await expectCode(fx.invitation.respondToInvite(s.cid, true, s.invitePrivate, undefined, undefined, undefined, makeOfficerProvisioning()), 'invite-no-longer-valid')
   })
 
   it('superseded -> invite-superseded', async () => {
     const fx = await makeChainFixture()
     const s = await sendInvite(fx, 'of')
     await fx.authority.resendInvite(s.cid)
-    await expectCode(fx.invitation.respondToInvite(s.cid, true, s.invitePrivate), 'invite-superseded')
+    await expectCode(fx.invitation.respondToInvite(s.cid, true, s.invitePrivate, undefined, undefined, undefined, makeOfficerProvisioning()), 'invite-superseded')
   })
 
   it('ambiguous chain -> invite-unverifiable', async () => {
@@ -293,6 +294,6 @@ describe('respondToInvite requires the invite key (WR-05) and refusals carry cod
     const salt = `resend|999999104|2030-01-01T00:00:00`
     const a = await insertRawChainRow(fx, s, { resendSalt: salt, name: 'Twin one' })
     await insertRawChainRow(fx, s, { resendSalt: salt, name: 'Twin two' })
-    await expectCode(fx.invitation.respondToInvite(a, true, s.invitePrivate), 'invite-unverifiable')
+    await expectCode(fx.invitation.respondToInvite(a, true, s.invitePrivate, undefined, undefined, undefined, makeOfficerProvisioning()), 'invite-unverifiable')
   })
 })

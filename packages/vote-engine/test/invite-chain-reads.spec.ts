@@ -10,6 +10,7 @@ import type { EngineContext } from '../src/types.js'
 import { nowCanonicalDatetime } from '../src/utils.js'
 import { makeChainFixture, sendInvite, resultRows, markerRows } from './fixtures/invite-chain.js'
 import type { ChainFixture } from './fixtures/invite-chain.js'
+import { makeOfficerProvisioning } from './fixtures/officer-provisioning.js'
 
 type Db = EngineContext['db']
 
@@ -104,7 +105,7 @@ describe('respondToInvite writes in one serialized transaction (IN-04)', () => {
           return async (sql: string, params?: unknown) => {
             if (/^\s*BEGIN/i.test(sql) && triggered === 0) {
               triggered += 1
-              await fx.invitation.respondToInvite(s.cid, true, s.invitePrivate)
+              await fx.invitation.respondToInvite(s.cid, true, s.invitePrivate, undefined, undefined, undefined, makeOfficerProvisioning())
             }
             return (value as Function).call(target, sql, params)
           }
@@ -114,7 +115,7 @@ describe('respondToInvite writes in one serialized transaction (IN-04)', () => {
     }) as Db
     const racing = new InvitationEngine({ ...fx.auth.ctx, db: wrapped } as EngineContext)
     let caught: unknown
-    try { await racing.respondToInvite(s.cid, true, s.invitePrivate) } catch (err) { caught = err }
+    try { await racing.respondToInvite(s.cid, true, s.invitePrivate, undefined, undefined, undefined, makeOfficerProvisioning()) } catch (err) { caught = err }
     expect(triggered, 'the officer respond must open a transaction').to.equal(1)
     expect(caught).to.be.instanceOf(Error)
     expect((caught as { code?: string }).code).to.equal('invite-already-answered')
