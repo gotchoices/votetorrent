@@ -124,8 +124,20 @@ export const JOIN_FAILURE_TO_PAIR_FAILURE = Object.freeze(
 export const PAIR_REDEEM_ATTEMPTS = 2;
 /** The wait before the second redemption. */
 export const PAIR_REDEEM_RETRY_DELAY_MS = 3_000;
-/** The deadline, from the pairing instant, for the first sync, the founding check and the statement. */
+/**
+ * The deadline, from the pairing instant, for the strand to come up (`waitForStrand`), and for the
+ * founding check and the statement once the strand database is open. The wait for that database is NOT
+ * under it: the strand reader ends that wait on its own stall window or hard cap (`strand-read.js`), so a
+ * slow first build that is still receiving data is not cut off here (gap G-3).
+ */
 export const PAIR_FIRST_SYNC_TIMEOUT_MS = 180_000;
+/**
+ * The least time the founding check and the statement get after the strand database opened. Only a
+ * database that opened late (after the first minute) is affected: until then the 180 s deadline above is
+ * the later one. Why 120 s: on the fast rig those two steps took about 10 s after the database appeared,
+ * and the slow-phone diagnostic answered about 5x slower, so about 50 s; 120 s clears that by more than 2x.
+ */
+export const PAIR_AFTER_STRAND_DB_MS = 120_000;
 /** The interval between reads while waiting for replicated rows. */
 export const PAIR_SYNC_POLL_MS = 500;
 
@@ -788,20 +800,30 @@ async function runPairing({ code, onProgress, confirmSwap, signal, openStrandRea
 		}
 		emit('joining');
 
-		// 7. First sync: the strand, then the reader the caller handed in.
+		// 7. First sync: the strand, under the first-sync deadline, then the reader the caller handed in,
+		// whose wait for the strand database ends on its own stall window or hard cap rather than this
+		// deadline: a first build over the relay can run for minutes while it is still receiving data.
 		emit('first-sync');
-		const deadlineMs = pairingInstantMs + PAIR_FIRST_SYNC_TIMEOUT_MS;
+		const strandDeadlineMs = pairingInstantMs + PAIR_FIRST_SYNC_TIMEOUT_MS;
 		const syncAbort = new AbortController();
 		const forwardAbort = () => syncAbort.abort();
 		signal?.addEventListener('abort', forwardAbort, { once: true });
-		const syncTimer = setTimeout(forwardAbort, Math.max(0, deadlineMs - d.now()));
+		const syncTimer = setTimeout(forwardAbort, Math.max(0, strandDeadlineMs - d.now()));
 		try {
 			await stage('unreachable', () => memberNode.waitForStrand(strandId, { signal: syncAbort.signal }));
-			strandReader = await stage('unreachable', () => openStrandReader({ memberNode, strandId, signal: syncAbort.signal }));
 		} finally {
 			clearTimeout(syncTimer);
 			signal?.removeEventListener('abort', forwardAbort);
 		}
+		const readerAbort = new AbortController();
+		const forwardReaderAbort = () => readerAbort.abort();
+		signal?.addEventListener('abort', forwardReaderAbort, { once: true });
+		try {
+			strandReader = await stage('unreachable', () => openStrandReader({ memberNode, strandId, signal: readerAbort.signal }));
+		} finally {
+			signal?.removeEventListener('abort', forwardReaderAbort);
+		}
+		const deadlineMs = Math.max(strandDeadlineMs, d.now() + PAIR_AFTER_STRAND_DB_MS);
 
 		// 8. Founding anchor, before the statement.
 		/** @type {any} */

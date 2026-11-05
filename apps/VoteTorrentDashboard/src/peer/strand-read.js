@@ -37,6 +37,15 @@
  * pairing checks read through this reader and need them, so the reader runs vote-engine's
  * `registerDbPlugins` once per Database object it prepares.
  *
+ * A PROGRESS-AWARE WAIT (gap G-3). cadre-core publishes the strand database only when a joining
+ * machine's first build is done, and over the relay to slow phones that build was measured running for
+ * minutes while it fetched block after block. A fixed deadline refused it while it was still working. So
+ * the wait for the database ends on a STALL, `STRAND_DB_STALL_MS` with no progress, or at a HARD CAP,
+ * `STRAND_DB_CAP_MS` in all, whichever comes first. Progress is what the strand node receives, as
+ * `strand-progress.js` counts it (answered data streams, blocks landing in its store). A strand node that
+ * receives nothing fails at the stall window, sooner than the old fixed wait did. Both endings throw the
+ * same `StrandReadError` (subject `strandDatabase`, code `'timeout'`); the reason text says which.
+ *
  * NO IMPORT-TIME WORK. The pairing code reaches this module through a lazy `import()`. Module scope
  * holds only imports, constants, the error class and function declarations.
  *
@@ -55,12 +64,13 @@
 
 import { OFFICER_SUBSCRIBED_TABLES } from '@votetorrent/web-data/officer';
 import { registerDbPlugins as realRegisterDbPlugins } from '@votetorrent/vote-engine/browser';
+import { watchStrandProgress } from './strand-progress.js';
 
 /**
  * A strand-read failure naming a table, an option or a limit, never a row value.
  * `code` is a closed tag for the cases a caller may act on: `'unavailable'` (the strand database is
  * not published right now), `'rebuilt'` (cadre-core replaced it; `await reader.current()` prepares
- * the new one), `'timeout'` (not published within the wait), or null.
+ * the new one), `'timeout'` (not published before the stall window or the hard cap ran out), or null.
  */
 export class StrandReadError extends Error {
 	/**
@@ -85,11 +95,28 @@ export class StrandReadError extends Error {
 export const STRAND_READ_ROW_LIMIT = 50_000;
 
 /**
- * How long the reader waits for cadre-core to publish the strand database (it is unset until the
- * strand header arrives, which can be after `waitForStrand` resolved).
- * @type {120000}
+ * The stall window: the wait for cadre-core to publish the strand database (it is unset until the
+ * joining machine's first build is done, which can be long after `waitForStrand` resolved) gives up when
+ * the strand node has received nothing for this long.
+ *
+ * Why 60 s: in the G-3 diagnostic (fresh, slow phones over the relay) the build answered a block request
+ * at least every few seconds, and the longest gap between two of its index trees opening was 26 s, so a
+ * build that is working clears 60 s by more than 2x. One cohort read at the supported 3 s link round trip
+ * takes about 6 s (cadre-core's first-sync measurements), so 60 s is about ten of them with nothing back.
+ * A strand node that receives nothing at all is refused at 60 s, where the old fixed wait took 120 s.
+ * @type {60000}
  */
-export const STRAND_DB_WAIT_MS = 120_000;
+export const STRAND_DB_STALL_MS = 60_000;
+
+/**
+ * The hard cap: the wait gives up after this long in all, however steadily data arrives.
+ *
+ * Why 10 min: cadre-core's own first-sync budget is 360 s, sized at 3x its worst harness attach (105.9 s);
+ * the slowest device sample it records is a Galaxy S7 joining through a relay in 178 s. 600 s clears that
+ * device sample by more than 3x and cadre-core's budget by 1.6x, and still ends a pairing that only trickles.
+ * @type {600000}
+ */
+export const STRAND_DB_CAP_MS = 600_000;
 
 /** How often the reader looks again while waiting. */
 const STRAND_DB_POLL_MS = 500;
@@ -166,7 +193,8 @@ function toUiOrderedRow(uiTableSchema, strandRow) {
  * @typedef {object} StrandReaderDeps
  * @property {(ms: number, signal?: AbortSignal) => Promise<void>} [sleep]
  * @property {() => number} [now]
- * @property {number} [waitMs]
+ * @property {number} [stallMs] - the stall window, `STRAND_DB_STALL_MS` by default
+ * @property {number} [capMs] - the hard cap, `STRAND_DB_CAP_MS` by default
  * @property {number} [pollMs]
  * @property {(db: any) => Promise<void>} [registerDbPlugins]
  */
@@ -264,8 +292,23 @@ async function resolveCurrent(memberNode, strandId, state, deps) {
 }
 
 /**
- * Poll `resolveCurrent` until the strand database is published, the wait runs out or `signal` aborts.
- * Only "not available" is retried; every other refusal is final.
+ * The member node's strand libp2p node, or null when it has none (or no accessor).
+ * @param {any} memberNode
+ * @returns {any}
+ */
+function strandNodeOf(memberNode) {
+	if (typeof memberNode.getStrandNode !== 'function') return null;
+	try {
+		return memberNode.getStrandNode() ?? null;
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Poll `resolveCurrent` until the strand database is published, `signal` aborts, the strand node has
+ * received nothing for the stall window, or the hard cap runs out. Only "not available" is retried;
+ * every other refusal is final. The progress watch lives for this one wait and is stopped on every exit.
  *
  * @param {any} memberNode
  * @param {string} strandId
@@ -277,20 +320,44 @@ async function resolveCurrent(memberNode, strandId, state, deps) {
 async function waitForCurrent(memberNode, strandId, state, deps, signal) {
 	const now = deps.now ?? Date.now;
 	const sleep = deps.sleep ?? defaultSleep;
-	const waitMs = deps.waitMs ?? STRAND_DB_WAIT_MS;
+	const stallMs = deps.stallMs ?? STRAND_DB_STALL_MS;
+	const capMs = deps.capMs ?? STRAND_DB_CAP_MS;
 	const pollMs = deps.pollMs ?? STRAND_DB_POLL_MS;
-	const started = now();
-	for (;;) {
-		if (signal?.aborted) throw new StrandReadError('signal', 'the wait for the strand database was cancelled');
-		try {
-			return await resolveCurrent(memberNode, strandId, state, deps);
-		} catch (err) {
-			if (!(err instanceof StrandReadError) || err.code !== 'unavailable') throw err;
+	if (signal?.aborted) throw new StrandReadError('signal', 'the wait for the strand database was cancelled');
+	// The fast path, taken by every read of a published database, starts no watch.
+	try {
+		return await resolveCurrent(memberNode, strandId, state, deps);
+	} catch (err) {
+		if (!(err instanceof StrandReadError) || err.code !== 'unavailable') throw err;
+	}
+	const progress = watchStrandProgress({ strandId });
+	try {
+		const started = now();
+		let lastProgressAt = started;
+		let seen = progress.sample(strandNodeOf(memberNode));
+		for (;;) {
+			const count = progress.sample(strandNodeOf(memberNode));
+			const at = now();
+			if (count !== seen) {
+				seen = count;
+				lastProgressAt = at;
+			}
+			if (at - started >= capMs) {
+				throw new StrandReadError('strandDatabase', 'the strand database was not published within the hard cap', 'timeout');
+			}
+			if (at - lastProgressAt >= stallMs) {
+				throw new StrandReadError('strandDatabase', 'the strand database was not published and the strand node received nothing for the stall window', 'timeout');
+			}
+			await sleep(pollMs, signal);
+			if (signal?.aborted) throw new StrandReadError('signal', 'the wait for the strand database was cancelled');
+			try {
+				return await resolveCurrent(memberNode, strandId, state, deps);
+			} catch (err) {
+				if (!(err instanceof StrandReadError) || err.code !== 'unavailable') throw err;
+			}
 		}
-		if (now() - started >= waitMs) {
-			throw new StrandReadError('strandDatabase', 'the strand database was not published in time', 'timeout');
-		}
-		await sleep(pollMs, signal);
+	} finally {
+		progress.stop();
 	}
 }
 
