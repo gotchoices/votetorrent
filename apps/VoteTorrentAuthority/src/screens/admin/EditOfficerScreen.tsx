@@ -82,10 +82,8 @@ export default function EditOfficerScreen() {
 	};
 	const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 	const { getEngine } = useApp();
-	const [name, setName] = useState("");
 	const [title, setTitle] = useState("");
 	const [scopes, setScopes] = useState<Scope[]>([]);
-	const [officer, setOfficer] = useState<Officer | null>(null);
 	const [user, setUser] = useState<User | null>(null);
 	const [userEngine, setUserEngine] = useState<IUserEngine | null>(null);
 	const [errorMessage, setErrorMessage] = useState<string>("");
@@ -132,7 +130,6 @@ export default function EditOfficerScreen() {
 			if (!seededRef.current) {
 				const foundOfficer = isEditing ? details.admin.officers.find((o) => o.userId === officerId) : undefined;
 				if (foundOfficer) {
-					setOfficer(foundOfficer);
 					// Officer has no `name` field (vote-core/authority/models.ts).
 					// Source the display name from the User join via networkEngine.getUser()
 					// (Phase 7 D-15 opportunistic fix; preferred Option A from 08-04 plan).
@@ -141,10 +138,8 @@ export default function EditOfficerScreen() {
 						const u = await ue?.getSummary();
 						setUserEngine(ue ?? null);
 						setUser(u ?? null);
-						setName(u?.name ?? "");
 					} catch (userError) {
 						console.warn("Error loading user for officer:", userError);
-						setName("");
 					}
 					setTitle(foundOfficer.title);
 					setScopes(foundOfficer.scopes);
@@ -161,7 +156,7 @@ export default function EditOfficerScreen() {
 
 	useFocusEffect(
 		useCallback(() => {
-			void load();
+			load();
 		}, [load])
 	);
 
@@ -212,7 +207,7 @@ export default function EditOfficerScreen() {
 	const removeRef = useRef(handleRemove);
 	removeRef.current = handleRemove;
 	const onRemovePress = useCallback(() => {
-		void removeRef.current();
+		removeRef.current();
 	}, []);
 
 	useEffect(() => {
@@ -358,7 +353,6 @@ export default function EditOfficerScreen() {
 												? undefined
 												: () => {
 														setSelectedInvitee(invitee);
-														setName(invitee.name);
 													}
 										}
 									/>

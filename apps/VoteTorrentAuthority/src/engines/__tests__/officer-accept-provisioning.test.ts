@@ -18,7 +18,6 @@ jest.mock('../device-user', () => ({
 	isRecoveryInProgress: (...a: unknown[]) => mockIsRecoveryInProgress(...a),
 }))
 
-// eslint-disable-next-line @typescript-eslint/no-var-requires
 const { getOfficerAcceptProvisioning } = require('../officer-accept-provisioning')
 
 const KEY = '02' + 'ab'.repeat(32)

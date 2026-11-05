@@ -86,12 +86,10 @@ jest.mock("@react-navigation/native", () => ({
 	// Run the callback once on mount (a first focus) and record it so a test can re-focus.
 	useFocusEffect: (cb: () => void | (() => void)) => {
 		mockFocusCallbacks.push(cb);
-		// eslint-disable-next-line @typescript-eslint/no-var-requires
 		const ReactLib = require("react");
 		ReactLib.useEffect(() => {
 			const cleanup = cb();
 			return typeof cleanup === "function" ? cleanup : undefined;
-			// eslint-disable-next-line react-hooks/exhaustive-deps
 		}, []);
 	},
 }));
@@ -106,7 +104,6 @@ jest.mock("../../../engines/device-signer", () => ({
 	createDeviceSigner: (name: string) => mockCreateDeviceSigner(name),
 }));
 
-// eslint-disable-next-line @typescript-eslint/no-var-requires
 const EditOfficerScreen = require("../EditOfficerScreen").default;
 
 const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => undefined);
