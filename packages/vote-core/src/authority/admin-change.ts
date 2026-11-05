@@ -2,13 +2,13 @@ import type { OfficerSelection, Scope } from './models.js'
 import type { AcceptedOfficerInvitee } from '../invite/models.js'
 
 /**
- * How long an administration change waits before it takes effect: one hour.
+ * How long an administration change waits before it takes effect: five minutes.
  *
  * This is the only place the delay is declared. It has no setter and no switch of any kind: nothing
  * in the build, the environment or the bootstrap configuration can change it. Tests that need a
  * short wait pass a shorter delay as the second argument of `adminChangeEffectiveAt`.
  */
-export const ADMIN_CHANGE_DELAY_MS = 3_600_000
+export const ADMIN_CHANGE_DELAY_MS = 300_000
 
 /**
  * The moment a change made at `nowMs` takes effect, as the canonical 19-character UTC string

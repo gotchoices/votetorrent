@@ -54,7 +54,7 @@ type ConfirmingChange = {
 };
 
 /**
- * The one place this screen takes an effective time: one hour from now, from the shared vote-core
+ * The one place this screen takes an effective time: five minutes from now, from the shared vote-core
  * rule (D-06). Called on the first tap and again only when a confirm card went stale.
  */
 function freshEffectiveAt(): string {

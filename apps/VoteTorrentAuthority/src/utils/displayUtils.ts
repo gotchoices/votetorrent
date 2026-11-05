@@ -48,11 +48,15 @@ export const formatLocalTime = (canonical: string): string => {
 	return pad2(d.getHours()) + ':' + pad2(d.getMinutes());
 };
 
-/** How long a confirm card may stay open before its effective time must be recomputed: five minutes. */
-export const ADMIN_CHANGE_CONFIRM_MAX_AGE_MS = 300_000;
+/**
+ * How long a confirm card may stay open before its effective time must be recomputed: one minute.
+ * It is kept well under the five-minute change delay, so a signed time is always at least four
+ * minutes away and the cancel window is never used up while the card sits open.
+ */
+export const ADMIN_CHANGE_CONFIRM_MAX_AGE_MS = 60_000;
 
 /**
- * True when a confirm card has been open for more than five minutes since the tap that produced
+ * True when a confirm card has been open for more than one minute since the tap that produced
  * `confirmAt` (the effective time the card shows), or when `confirmAt` cannot be read. A stale
  * card is never signed: the screens recompute the time and show the card again, so the officer
  * always gets the full pending window. The engine accepts past times on purpose (fixtures, the

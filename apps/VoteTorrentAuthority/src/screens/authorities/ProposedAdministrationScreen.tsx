@@ -69,7 +69,7 @@ const SCOPE_ORDER: Scope[] = [
 
 /**
  * D-04/D-06: the effective time of an administration change, from the one shared vote-core helper
- * (one hour after now). Called on the first Propose tap and when a stale confirm card is
+ * (five minutes after now). Called on the first Propose tap and when a stale confirm card is
  * refreshed; never at sign time, so the signed string is the one the card showed.
  */
 function freshEffectiveAt(): string {
@@ -253,8 +253,8 @@ export default function ProposedAdministrationScreen() {
 	//       the app no longer recomputes sha256(...) independently.
 	const handleConfirm = async () => {
 		if (proposingRef.current || !confirmAt) return;
-		// D-01/D-04: a card left open more than five minutes is never signed. The engine accepts
-		// any time on purpose, so the app must not sign one whose pending hour has run down.
+		// D-01/D-04: a card left open more than one minute is never signed. The engine accepts
+		// any time on purpose, so the app must not sign one whose pending five minutes have run down.
 		if (isAdminChangeConfirmStale(confirmAt, Date.now())) {
 			setConfirmAt(freshEffectiveAt());
 			setConfirmNotice(t("adminChangeConfirmTimeUpdated"));
