@@ -1352,7 +1352,11 @@ describe('AuthorityEngine', () => {
 
       // Force the promotion attempt to fail with something that is NOT an
       // AdminPromotionError, NOT a QuereusError and NOT a MisuseError.
-      ;(authorityEngine as unknown as { applyAdminProposal: unknown }).applyAdminProposal =
+      // G-1 (66.1): a promotable threshold-1 proposal now promotes through the
+      // one-signature path, which writes the promotion with the private
+      // writeAdminPromotion (applyAdminProposal uses the same helper), so the
+      // failure is injected there.
+      ;(authorityEngine as unknown as { writeAdminPromotion: unknown }).writeAdminPromotion =
         async () => { throw new PromotionBoom() }
 
       const effectiveAt = Date.now() + 60_000
@@ -2287,26 +2291,31 @@ describe('AuthorityEngine', () => {
         { proposedName: secondUser.name, userId: secondUser.id, title: 'Clerk', scopes: ['vrg'] }
       ])
       const officersJson = JSON.stringify(rebuiltRoster)
-      const recomputedRow = await auth.ctx.db
-        .prepare('select Digest(:authorityId, :effectiveAt, :officers, :thresholdPolicies) as d')
+
+      // G-1 (66.1): at rad threshold 1 a promotable proposal is signed ONCE, over the
+      // promotion digest Digest(Tid, AuthorityId, Digest(EffectiveAt, ThresholdPolicies),
+      // roster). The promotion Tid is the last one the 'authority' allocator handed out
+      // (its persisted high-water), so the exact signed bytes are still recomputable from
+      // the exported sorter. Look the session up by that digest (Nonce is a random UUID).
+      const highWaterRow = await auth.ctx.db
+        .prepare(`select HighWater from TidHighWater where Namespace = 'authority'`)
+        .get({})
+      const promotionRow = await auth.ctx.db
+        .prepare('select Digest(:tid, :authorityId, Digest(:effectiveAt, :thresholdPolicies), :officers) as d')
         .get({
+          tid: Number(highWaterRow?.HighWater),
           authorityId: auth.authority.id,
           effectiveAt: toCanonicalDatetime(effectiveAt),
-          officers: officersJson,
-          thresholdPolicies: JSON.stringify(thresholdPolicies)
+          thresholdPolicies: JSON.stringify(thresholdPolicies),
+          officers: officersJson
         })
-
-      // 57-08 (Trigger A): look up the session by the recomputed Digest, not
-      // "order by Nonce desc limit 1" — Trigger A auto-promotes this
-      // (perfectly valid, resolvable) roster, minting ADDITIONAL 'rad'
-      // AdminSigning rows (Admin-side/officer-side) under fresh, randomly-
-      // ordered nonces. Nonce is a random UUID, not chronological, so the
-      // old ordering query can no longer reliably pick the ORIGINAL
-      // roster-covering session.
       const sessionRow = await auth.ctx.db
-        .prepare('select Digest from AdminSigning where AuthorityId = :id and Digest = :digest')
-        .get({ id: auth.authority.id, digest: recomputedRow?.d as string })
-      expect(recomputedRow?.d, 'the exported sortRosterEntries must reproduce the exact signed Digest').to.equal(sessionRow?.Digest)
+        .prepare(`select Digest from AdminSigning where AuthorityId = :id and Scope = 'rad' and Digest = :digest`)
+        .get({ id: auth.authority.id, digest: promotionRow?.d as string })
+      expect(sessionRow, 'a rad session signed over the recomputed promotion digest exists').to.not.equal(undefined)
+      expect(promotionRow?.d, 'the exported sortRosterEntries must reproduce the exact signed Digest').to.equal(sessionRow?.Digest)
+      // The same bytes are what the promotion CHECKs read back from ProposedOfficer.
+      expect(await readProposedRosterJson(auth.ctx.db, auth.authority.id, toCanonicalDatetime(effectiveAt)), 'the schema roster equals the exported sorter output').to.equal(officersJson)
     })
   })
 

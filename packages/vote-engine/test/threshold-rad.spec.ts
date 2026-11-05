@@ -537,7 +537,7 @@ describe('rad Trigger A: proposeAdmin fan-out (D-08, D-12)', function () {
     expect(openUsers2.length, 'R8: a second proposeAdmin with a NEW EffectiveAt fans out to 3').to.equal(3)
   })
 
-  it('R12 (threshold 1 unchanged): proposeAdmin promotes immediately, invoking the callback exactly twice, with no Task created', async () => {
+  it('R12 (threshold 1, G-1): proposeAdmin promotes immediately, invoking the callback exactly once, with no Task created', async () => {
     const fx = await createThresholdAuthority()
     const db = fx.elec.ctx.db
     const effectiveAt = Date.now() + 3_600_000
@@ -562,12 +562,17 @@ describe('rad Trigger A: proposeAdmin fan-out (D-08, D-12)', function () {
       { id: fx.authorityId, e: effectiveAtCanon }
     )
     expect(adminCount, 'R12: the Admin row must exist').to.equal(1)
-    expect(callbackCalls, 'R12: the callback must be invoked exactly twice').to.equal(2)
+    // G-1 (66.1): one sign call is one biometric prompt in the Authority app. The proposal and
+    // its promotion used to cost two; the one signature now covers the promotion digest.
+    expect(callbackCalls, 'R12: the callback must be invoked exactly once').to.equal(1)
 
-    const outcome = (fx.elec.authorityEngine as unknown as { lastPromotionOutcome?: { status: string } }).lastPromotionOutcome
+    const outcome = (fx.elec.authorityEngine as unknown as { lastPromotionOutcome?: { status: string; nonce: string } }).lastPromotionOutcome
     expect(outcome?.status, 'R12: lastPromotionOutcome.status').to.equal('promoted')
 
-    const nonce = await proposalNonce(db, fx.authorityId, effectiveAtCanon, thresholdPolicies)
+    // The one 'rad' session of this change is the promotion session (no separate proposal session at threshold 1).
+    const nonce = outcome!.nonce
+    const sessionCount = await countRows(db, `select count(*) as n from AdminSigning where Nonce = :nonce and Scope = 'rad'`, { nonce })
+    expect(sessionCount, 'R12: the outcome nonce is a rad AdminSigning session').to.equal(1)
     const taskCount = await countRows(db, 'select count(*) as n from Task where SigningNonce = :nonce', { nonce })
     expect(taskCount, 'R12: 0 Task rows exist for the nonce').to.equal(0)
   })

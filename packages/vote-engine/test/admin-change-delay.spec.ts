@@ -69,8 +69,9 @@ async function propose (
   await fx.elec.authorityEngine.proposeAdmin(proposal, sign)
 }
 
-/** Counts sign calls. A refusal must show 0. An accepted threshold-1 proposal signs twice (proposal, then the
- *  automatic promotion), so accepted proposals assert at least 1; a cancel asserts exactly 1. */
+/** Counts sign calls. One call is one biometric prompt in the Authority app. A refusal must show 0. An accepted
+ *  proposal shows exactly 1, promoted or not (G-1: the one signature covers the promotion digest). A cancel shows
+ *  exactly 1, a repeat cancel 0. */
 function countingSign (base: SignFn): CountingSign {
   const wrapped = (async (digest: Uint8Array): Promise<Signature> => {
     wrapped.calls++
@@ -217,7 +218,7 @@ describe('admin change delay and rules (66.1)', function () {
     const c = await distinctSecond(a)
     const allowed = countingSign(fx.holders[0]!.sign)
     await propose(fx, await rosterFromCurrent(fx), c, allowed)
-    expect(allowed.calls, 'a proposal after A elapsed is signed').to.be.at.least(1)
+    expect(allowed.calls, 'a proposal after A elapsed is signed').to.equal(1)
     expect((await fx.elec.authorityEngine.getAdminDetails()).pending?.effectiveAt).to.equal(c)
   })
 
@@ -237,7 +238,7 @@ describe('admin change delay and rules (66.1)', function () {
     const b = await distinctSecond(a)
     const sign = countingSign(fx.holders[0]!.sign)
     await propose(fx, await rosterFromCurrent(fx), b, sign)
-    expect(sign.calls).to.be.at.least(1)
+    expect(sign.calls).to.equal(1)
     expect((await fx.elec.authorityEngine.getAdminDetails()).pending?.effectiveAt, 'pending is B').to.equal(b)
   })
 
@@ -272,7 +273,7 @@ describe('admin change delay and rules (66.1)', function () {
 
     const next = countingSign(fx.holders[0]!.sign)
     await propose(fx, await rosterFromCurrent(fx), await distinctSecond(a), next)
-    expect(next.calls).to.be.at.least(1)
+    expect(next.calls).to.equal(1)
   })
 
   it('F4: a stale (past) refused proposal is neither pending nor proposed and does not block', async () => {
@@ -288,7 +289,7 @@ describe('admin change delay and rules (66.1)', function () {
     const a = adminChangeEffectiveAt(Date.now(), INJECTED_DELAY_MS)
     const sign = countingSign(fx.holders[0]!.sign)
     await propose(fx, await rosterFromCurrent(fx), a, sign)
-    expect(sign.calls).to.be.at.least(1)
+    expect(sign.calls).to.equal(1)
     expect((await fx.elec.authorityEngine.getAdminDetails()).pending?.effectiveAt).to.equal(a)
   })
 
@@ -335,7 +336,7 @@ describe('admin change delay and rules (66.1)', function () {
       ))
       const sign = countingSign(fx.holders[0]!.sign)
       await propose(fx, roster, adminChangeEffectiveAt(Date.now(), INJECTED_DELAY_MS), sign)
-      expect(sign.calls).to.be.at.least(1)
+      expect(sign.calls).to.equal(1)
     })
 
     it('hardening: a rad threshold above the new roster\'s rad holders is refused; at the holder count it resolves', async () => {
@@ -360,7 +361,7 @@ describe('admin change delay and rules (66.1)', function () {
       // Positive control: threshold 4 with 4 holders resolves (it leaves a pending change; the test ends here).
       const okSign = countingSign(fx.holders[0]!.sign)
       await propose(fx, roster, adminChangeEffectiveAt(Date.now(), INJECTED_DELAY_MS), okSign, withRad(4))
-      expect(okSign.calls).to.be.at.least(1)
+      expect(okSign.calls).to.equal(1)
     })
 
     it('order: with a change pending, a rad-less proposal is refused as pending, not as no-rad-holder', async () => {
@@ -374,6 +375,81 @@ describe('admin change delay and rules (66.1)', function () {
       const err = await rejection(propose(fx, radless, await distinctSecond(a), sign))
       expectRefusal(err, ADMIN_CHANGE_ERROR_CODES.pending, 'pending first')
       expect(sign.calls).to.equal(0)
+    })
+  })
+
+  describe('G-1: one Confirm is one sign call', function () {
+    /** Records every digest handed to the callback, base64url, in call order. */
+    function capturingSign (base: SignFn): CountingSign & { digests: string[] } {
+      const wrapped = (async (digest: Uint8Array): Promise<Signature> => {
+        wrapped.calls++
+        wrapped.digests.push(Buffer.from(digest).toString('base64url'))
+        return base(digest)
+      }) as CountingSign & { digests: string[] }
+      wrapped.calls = 0
+      wrapped.digests = []
+      return wrapped
+    }
+
+    it('a promoted change signs once, over the digest of its one rad promotion session, and every row lands', async () => {
+      const fx = await createThresholdAuthority()
+      const db = fx.elec.ctx.db
+      const before = await snapshot(db, fx.authorityId)
+      const roster = await rosterFromCurrent(fx, withOutsider(fx))
+      const a = adminChangeEffectiveAt(Date.now(), INJECTED_DELAY_MS)
+      const sign = capturingSign(fx.holders[0]!.sign)
+      await propose(fx, roster, a, sign)
+
+      // The 2-prompt defect (66.1 UAT tests 4, 9, 15) is exactly this count being 2.
+      expect(sign.calls, 'one sign call for the proposal and its promotion').to.equal(1)
+      const outcome = (fx.elec.authorityEngine as unknown as { lastPromotionOutcome?: { status?: string, nonce?: string } })
+        .lastPromotionOutcome
+      expect(outcome?.status).to.equal('promoted')
+
+      const after = await snapshot(db, fx.authorityId)
+      expect(after.proposedAdmin - before.proposedAdmin, 'one ProposedAdmin').to.equal(1)
+      expect(after.proposedOfficer - before.proposedOfficer, 'the whole roster is proposed').to.equal(roster.length)
+      expect(after.admin - before.admin, 'one Admin').to.equal(1)
+      expect(after.officer - before.officer, 'every officer of the roster').to.equal(roster.length)
+      expect(after.radAdminSigning - before.radAdminSigning, 'one rad session').to.equal(1)
+      expect(after.radOfficerSignature - before.radOfficerSignature, 'one rad officer signature').to.equal(1)
+
+      // The one session is the one the Admin and Officer CHECKs verified (they admit only a session whose Digest is the
+      // promotion digest), it carries the signed digest, the founder's signature and its AdminSignature.
+      const session = await db
+        .prepare(`select Nonce, Digest, UserId, Signature from AdminSigning where Nonce = :nonce and Scope = 'rad'`)
+        .get({ nonce: outcome!.nonce! })
+      expect(session, 'the outcome nonce is the rad session').to.not.equal(undefined)
+      expect(session!.Digest, 'the signed digest is the session digest').to.equal(sign.digests[0])
+      expect(session!.UserId).to.equal(fx.holders[0]!.user.id)
+      const officerSig = await db
+        .prepare('select UserId, Signature from OfficerSignature where SigningNonce = :nonce')
+        .get({ nonce: outcome!.nonce! })
+      expect(officerSig?.UserId).to.equal(fx.holders[0]!.user.id)
+      expect(officerSig?.Signature, 'the officer signature is the one signature').to.equal(session!.Signature)
+      expect(await countOf(db, 'select count(*) as n from AdminSignature where SigningNonce = :nonce', { nonce: outcome!.nonce! }))
+        .to.equal(1)
+
+      const pending = (await fx.elec.authorityEngine.getAdminDetails()).pending
+      expect(pending?.effectiveAt).to.equal(a)
+      expect(pending?.promoted).to.equal(true)
+    })
+
+    it('a change whose promotion is refused also signs once (the proposal digest), and stays pending unpromoted', async () => {
+      const fx = await createThresholdAuthority()
+      const db = fx.elec.ctx.db
+      const before = await snapshot(db, fx.authorityId)
+      const a = adminChangeEffectiveAt(Date.now(), INJECTED_DELAY_MS)
+      const sign = capturingSign(fx.holders[0]!.sign)
+      await propose(fx, await rosterFromCurrent(fx, (o) => [...o, NOBODY]), a, sign)
+      expect(lastOutcome(fx)?.status).to.equal('refused')
+      expect(sign.calls, 'one sign call').to.equal(1)
+      const after = await snapshot(db, fx.authorityId)
+      expect(after.radAdminSigning - before.radAdminSigning, 'the proposal session only').to.equal(1)
+      expect(after.admin - before.admin, 'nothing promoted').to.equal(0)
+      expect(await countOf(db, `select count(*) as n from AdminSigning where Scope = 'rad' and Digest = :d`, { d: sign.digests[0]! }))
+        .to.equal(1)
+      expect((await fx.elec.authorityEngine.getAdminDetails()).pending?.promoted).to.equal(false)
     })
   })
 

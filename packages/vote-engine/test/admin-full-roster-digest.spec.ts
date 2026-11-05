@@ -148,7 +148,9 @@ describe('Full-roster admin promotion digest (D-33b)', () => {
     await fx.elec.authorityEngine.proposeAdmin(proposal, countingCallback)
     const outcome = (fx.elec.authorityEngine as unknown as { lastPromotionOutcome?: { status?: string, reason?: string } }).lastPromotionOutcome
     expect(outcome?.status, `F2 setup: expected 'promoted', got status=${outcome?.status} reason=${outcome?.reason}`).to.equal('promoted')
-    expect(signCallCount, 'F2: the callback was invoked exactly 2 times (1 proposal + 1 promotion, down from 3 pre-62-03)').to.equal(2)
+    // G-1 (66.1): 3 calls before 62-03, 2 after it (proposal + promotion), 1 now: the one signature covers the
+    // full-roster promotion digest, so a threshold-1 Confirm is one biometric prompt in the Authority app.
+    expect(signCallCount, 'F2: the callback was invoked exactly once (the promotion digest; was 2 before G-1, 3 before 62-03)').to.equal(1)
   })
 
   describe('F3, tier-1 negatives (hand-built promotion, threshold 1)', () => {
