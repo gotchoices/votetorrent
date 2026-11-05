@@ -31,6 +31,20 @@ export interface IAuthorityEngine {
    */
   cancelInvite(slotCid: string): Promise<void>
   /**
+   * Stop an administration change that has not taken effect yet (D-05).
+   *
+   * - Any current officer holding 'rad' may cancel.
+   * - Exactly one `sign` call (one biometric prompt), whatever threshold approved the change.
+   * - Idempotent: resolves without calling `sign` when a cancellation for this authority and
+   *   `target.effectiveAt` already exists.
+   * - Refusals before the prompt carry the codes 'admin-cancel-not-authorized' (the caller holds no
+   *   current 'rad' seat) and 'admin-cancel-not-pending' (no pending change at `target.effectiveAt`).
+   * - A schema refusal of the cancellation insert carries 'admin-cancel-refused'.
+   * - The signature's `signerUserId` must equal `target.userId`, and its `signerKey` must be a live
+   *   UserKey of that user.
+   */
+  cancelAdminChange(target: { effectiveAt: string; userId: string }, sign: (digest: Uint8Array) => Promise<Signature>): Promise<void>
+  /**
    * The officer-reachable pending list (H-5): the Cids of this authority's officer ('of') invitations
    * whose share chain is still live (neither answered, withdrawn nor expired). One Cid per share, the
    * live head.

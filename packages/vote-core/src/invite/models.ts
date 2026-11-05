@@ -23,6 +23,35 @@ export interface KeyholderAcceptProvisioning {
 	sign: (digest: Uint8Array) => Promise<Signature>;
 }
 
+/**
+ * 66.1 (D-12): what the app provides to `IInvitationEngine.respondToInvite` for a Type 'of'
+ * (officer) accept. Required for an officer ACCEPT.
+ *
+ * - `userId`: MUST be the device user id (`getOrCreateDeviceUser().id`) and is never randomised,
+ *   because the Authority app finds the signed-in officer by matching `o.userId === deviceUser.id`.
+ * - `name`: the officer's display name for the User row.
+ * - `signingKey`: the device's provisioned signing key (type 'P' on the hardware seat).
+ *
+ * The engine writes the InviteResult (InvokedId = userId), the User row and the UserKey row in one
+ * transaction. There is no `sign` callback: the invite slot's own signature authorises the officer's
+ * User row (`User.InsertValid`).
+ */
+export interface OfficerAcceptProvisioning {
+	userId: string;
+	name: string;
+	signingKey: UserKey;
+}
+
+/**
+ * 66.1 (D-12): an officer ('of') invitation slot with an accepted InviteResult whose InvokedId has a
+ * replicated User row. The owner's Add Administrator list.
+ */
+export interface AcceptedOfficerInvitee {
+	slotCid: string;
+	name: string;
+	userId: string;
+}
+
 export interface Invite {
 	/** The type of the invitation */
 	type: InviteType;

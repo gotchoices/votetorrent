@@ -97,6 +97,32 @@ export interface AdminDetails {
 
   /** The proposed changes to the administration */
   proposed?: Proposal<AdminInit>
+
+  /**
+   * The administration change still waiting to take effect, if any. Screens build every new change
+   * from `admin` (the current administration), never from this, and show the pending card while
+   * `pending` is present.
+   */
+  pending?: PendingAdminChange
+}
+
+/**
+ * An administration change that has not taken effect yet: the latest ProposedAdmin whose EffectiveAt
+ * is after now and that has no cancellation at that EffectiveAt, whether it has been promoted or not.
+ * Read by `getAdminDetails`.
+ */
+export interface PendingAdminChange {
+  /** When the change takes effect: canonical 19-character UTC string (`YYYY-MM-DDTHH:MM:SS`, no zone suffix) */
+  effectiveAt: string
+
+  /** The officers of the incoming administration */
+  officers: OfficerSelection[]
+
+  /** The threshold policies of the incoming administration */
+  thresholdPolicies: ThresholdPolicy[]
+
+  /** True when an Admin row already exists at `effectiveAt` (the change was promoted and is waiting for its time) */
+  promoted: boolean
 }
 
 /**

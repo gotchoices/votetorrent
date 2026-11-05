@@ -1,4 +1,11 @@
-import type { InviteSlotResolution, InviteStatus, InviteType, KeyholderAcceptProvisioning } from './models.js';
+import type {
+	AcceptedOfficerInvitee,
+	InviteSlotResolution,
+	InviteStatus,
+	InviteType,
+	KeyholderAcceptProvisioning,
+	OfficerAcceptProvisioning,
+} from './models.js';
 import type { SentOfficerInvite, SentAuthorityInvite } from '../authority/models.js';
 import type { SentKeyholderInvite } from '../election/models.js';
 
@@ -15,6 +22,12 @@ export interface KeyholderSlotSeat {
  */
 export interface IInvitationEngine {
 	getPendingOfficerInvites(): Promise<Array<InviteStatus<SentOfficerInvite>>>;
+	/**
+	 * 66.1 (D-12): officer ('of') slots with an accepted result whose invoked user is replicated,
+	 * scoped the same as `getPendingOfficerInvites`. No arguments. This is the owner's Add
+	 * Administrator list; build the selection with `officerSelectionFromInvitee`.
+	 */
+	getAcceptedOfficerInvitees(): Promise<AcceptedOfficerInvitee[]>;
 	getPendingAuthorityInvites(): Promise<Array<InviteStatus<SentAuthorityInvite>>>;
 	getOfficerInvite(id: string): Promise<InviteStatus<SentOfficerInvite> | undefined>;
 	getAuthorityInvite(id: string): Promise<InviteStatus<SentAuthorityInvite> | undefined>;
@@ -52,6 +65,10 @@ export interface IInvitationEngine {
 	 * @param keyholder     - 62-02 (D-21, D-26): REQUIRED for a Type 'k' (keyholder) accept — absent
 	 *                        means the engine throws before any write. Ignored for every other
 	 *                        invite type. See `KeyholderAcceptProvisioning`'s doc comment.
+	 * @param officer       - 66.1 (D-12): required for a Type 'of' (officer) accept. Once 66.1-05 lands,
+	 *                        an absent value raises code `officer-provisioning-required` before any
+	 *                        write or prompt. Ignored for every other invite type. See
+	 *                        `OfficerAcceptProvisioning`'s doc comment.
 	 */
 	respondToInvite(
 		invitationId: string,
@@ -60,6 +77,7 @@ export interface IInvitationEngine {
 		digest?: string,
 		invokedId?: string,
 		keyholder?: KeyholderAcceptProvisioning,
+		officer?: OfficerAcceptProvisioning,
 	): Promise<void>;
 	/**
 	 * Seat facts for a keyholder ('k') slot: its election and whether the calling officer sent it.
