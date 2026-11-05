@@ -1,6 +1,6 @@
 # p2p-probe-host
 
-Host-side CadreNode drone for the P2P dial proof. Internal dev tooling — private (`"private": true`), version `0.0.1`, not published.
+Host-side CadreNode drone for the P2P dial and replication proofs. Internal dev tooling — private (`"private": true`), version `0.0.1`, not published.
 
 Part of the [VoteTorrent](https://github.com/gotchoices/votetorrent) monorepo.
 

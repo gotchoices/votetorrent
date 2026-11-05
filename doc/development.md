@@ -1,283 +1,241 @@
 # Development
 
-This document is the day-to-day developer guide for working **inside** the
-VoteTorrent monorepo: which commands to run where, how the build pipeline is
-wired, how linting and the peer-requirements guard work, how the in-repo
-vendoring and patching is maintained, and how to run the on-device proof
-scripts.
+Day-to-day guide for working **inside** the VoteTorrent monorepo: which commands
+to run where, how the build pipeline is wired, what the guard scripts enforce,
+and how to run the on-device proofs.
 
-For how the repository is laid out and how the packages compose at runtime, see
-[Codebase Architecture](codebase-architecture.md). For toolchain and config
-values, see [Configuration](configuration.md). For the test suites and how to
-run them in isolation, see [Testing](testing.md).
+Prerequisites and first install are in the [README](../README.md#prerequisites).
+For how the packages compose at runtime, see
+[Codebase Architecture](codebase-architecture.md).
 
-## Local setup
-
-Prerequisites:
-
-- **Node `>=20.19`** (root `package.json` `engines`). The repo pins
-  `22.15.0` in `.nvmrc`; `nvm use` selects it. The proof scripts and the Metro
-  bundle steps in particular are validated under Node 22 — Node `<20.19` may
-  fail to resolve the `portal:` dependencies.
-- **Yarn `4.7.0`** (root `package.json` `packageManager`). It is invoked through
-  the repo's Yarn shim, so once enabled via `corepack` no separate install is
-  needed.
-
-First-time setup is a single install at the repo root:
-
-```bash
-nvm use            # selects Node 22.15.0 from .nvmrc
-yarn install
-```
-
-`yarn install` runs `scripts/check-peer-requirements.mjs` automatically through
-the root `postinstall` hook (see [Peer-requirements guard](#peer-requirements-guard)
-below). A clean clone builds with **no sibling checkout present** — the
-`@serfab/*` and `@optimystic/db-*` dependencies are vendored in-repo under
-`vendor/` and resolved through `portal:` entries in the root `resolutions`. You
-do **not** need a `../sereus` or `../Optimystic` working tree to install or
-build.
+This document covers what you cannot get by reading a config file. Where a
+tracked file already explains itself — `metro.config.js` in particular carries
+extensive rationale in comments — this points at the file rather than
+transcribing it.
 
 ## Working in the monorepo
 
-The workspaces are declared in the root `package.json` (`packages/*` and
-`apps/*`):
-
-| Workspace | Package name | Role |
-|-----------|--------------|------|
-| `packages/vote-core` | `@votetorrent/vote-core` | Shared types / protocol contracts (library) |
-| `packages/vote-engine` | `@votetorrent/vote-engine` | Concrete engine implementation (library) |
-| `packages/p2p-probe-host` | `p2p-probe-host` | Host-side dev drone for the dial proof |
-| `apps/VoteTorrentAuthority` | `votetorrent-authority` | React Native reference app |
-
-There are two ways to drive scripts.
-
-**Across all workspaces** — the root scripts fan out with
-`yarn workspaces foreach -A run <script>`:
+Workspaces are declared in the root `package.json` (`packages/*` and `apps/*`).
+Target one by **package name**, not directory:
 
 ```bash
-yarn build     # build every workspace
-yarn test      # test every workspace
-yarn clean     # clean every workspace
-yarn lint      # peer-requirements guard, then lint every workspace
+yarn workspace @votetorrent/vote-core build
+yarn workspace @votetorrent/vote-engine test
+yarn workspace votetorrent-voter lint
 ```
 
-**One workspace at a time** — target a single workspace by name (the package
-`name`, not the directory):
+Root convenience scripts for the apps:
 
-```bash
-yarn workspace @votetorrent/vote-engine build
-yarn workspace @votetorrent/vote-core test
-yarn workspace votetorrent-authority start
-```
+| Authority | Voter |
+| --- | --- |
+| `yarn start` | `yarn start:voter` |
+| `yarn android` | `yarn android:voter` |
+| `yarn ios` | `yarn ios:voter` |
+| `yarn all` | `yarn all:voter` |
 
-A few app-targeted shortcuts are exposed at the root for convenience:
+Release scripts run across **both** apps: `yarn verify:keystore`,
+`yarn build:apk`, `yarn publish:apk`, and `yarn release:apk` (all three in
+order). See [Android builds and releases](releases/RELEASE-ANDROID.md).
 
-```bash
-yarn start      # = yarn workspace votetorrent-authority start  (Metro)
-yarn android    # = yarn workspace votetorrent-authority android
-yarn ios        # = yarn workspace votetorrent-authority ios
-```
-
-Note `yarn build` runs `foreach -A`, which is unordered. When you have just
-edited `vote-core` and want `vote-engine` to pick up the change, build the
-dependency first, then the dependent (see
-[Editing across packages](#editing-across-packages)).
+Note that root `yarn build` runs `foreach -A`, which is **unordered**. During a
+cross-package edit loop, build the specific workspaces in dependency order
+instead — see [Editing across packages](#editing-across-packages).
 
 ## Build pipeline
 
-Each library workspace has its own `build`/`clean`/`lint`/`test` scripts; the
-root simply fans them out. The two libraries are built differently.
+Each workspace owns its own `build`/`clean`/`lint`/`test`; the root only fans
+them out. The two libraries build differently, on purpose:
 
-**`@votetorrent/vote-core`** uses **aegir** for everything:
+**`@votetorrent/vote-core`** uses **aegir** for build, clean, lint, and test.
+aegir compiles `src/` to `dist/` per `tsconfig.build.json`, matching the
+package's `exports` map (`dist/src/index.js`). It runs without a checked-in
+`.aegir.*` config — defaults plus the package `tsconfig`.
 
-```bash
-yarn workspace @votetorrent/vote-core build     # aegir build
-yarn workspace @votetorrent/vote-core clean     # aegir clean
-```
+**`@votetorrent/vote-engine`** builds with **`tsc` directly**, not aegir, so it
+can emit the dual `.` / `./rn` entry points its `exports` map declares
+(`dist/index.js` and `dist/rn-entry.js`). It tests with **Mocha** under
+`ts-node/esm` (`register-ts-node.mjs` + `tsconfig.test.json`).
 
-aegir compiles `src/` to `dist/` per `tsconfig.build.json` and the package's
-`exports` map (`dist/src/index.js`, `dist/src/index.d.ts`).
+**The apps** bundle through **Metro** and test with **Jest**.
 
-**`@votetorrent/vote-engine`** builds with **`tsc` directly** (not aegir) so it
-can emit the dual `.` / `./rn` entry points its `exports` map declares:
+## Guards
 
-```bash
-yarn workspace @votetorrent/vote-engine build   # tsc -p tsconfig.build.json
-yarn workspace @votetorrent/vote-engine clean    # rm -rf dist
-```
+Three grep/assert guards enforce invariants a type checker cannot. All are wired
+into CI-facing scripts, so a violation fails the build rather than merely being
+discouraged.
 
-`tsconfig.build.json` extends `tsconfig.json`, emits declarations + source maps,
-and uses `module: ESNext` / `moduleResolution: Bundler`. Output lands in
-`dist/` with the package root entry at `dist/index.js` and the React Native
-entry at `dist/rn-entry.js`. The `files` array publishes `src` and `dist` but
-excludes `dist/test` and `*.tsbuildinfo`.
+### Peer requirements — `yarn lint:peers`
 
-aegir runs without a checked-in `.aegir.*` config — it uses its defaults plus
-each package's `tsconfig`.
+`scripts/check-peer-requirements.mjs`. Runs as the root `postinstall` and as the
+first step of root `lint`.
 
-## Linting, formatting, and the peer-requirements guard
+Why it exists: under Yarn 4 with `nodeLinker: node-modules`, the unmet-peer
+summary (`YN0086`) is a generic project-wide line naming no package, so it
+cannot be filtered narrowly. `.yarnrc.yml` therefore discards `YN0086`
+globally — which would also hide a *real* new mismatch. This guard restores that
+signal for the surface the discard could mask: it runs
+`yarn explain peer-requirements`, drills into each folded detail tree (the
+summary folds multiple consumers into one line, hiding some), and **fails
+closed** on any `@optimystic/quereus-plugin-*` mismatch outside its
+`KNOWN_ALLOWED` set.
 
-### Lint / format
+The allowed set lives in the script. When you intentionally introduce a mismatch
+(bumping a plugin, say), update it there. When upstream publishes a clean
+version, remove the entry **and** drop the `logFilters: YN0086` block from
+`.yarnrc.yml` — the script prints an `INFO: disappeared` hint when a known
+mismatch stops showing up.
 
-- **`@votetorrent/vote-core`** and **`@votetorrent/vote-engine`** lint with
-  **aegir** (`aegir lint`, which wraps ESLint with `eslint-plugin-n`).
-- **`votetorrent-authority`** lints with the React Native ESLint config
-  (`eslint .`) and formats with **Prettier 2.8.8** (both are devDependencies of
-  the app).
+### SQL bind keys — `yarn workspace @votetorrent/vote-engine guard:builders`
 
-Run lint for one workspace or all of them:
+`packages/vote-engine/scripts/ci-grep-guard.sh` greps `src/**/builders/*.ts` and
+rejects colon-prefixed SQL bind keys (a quoted `':userId'`, for example).
+Quereus' colon-prefix parameter-binding quirk must stay contained at the engine
+layer: builders construct **domain objects**, never SQL bind objects. Run it
+after touching anything under a `builders/` directory.
 
-```bash
-yarn workspace @votetorrent/vote-engine lint
-yarn lint        # runs the peer guard first, then lints every workspace
-```
+### Stub handlers — `yarn lint:stubs`
 
-Editor style is enforced by `.editorconfig` at the repo root: **tabs**,
-`indent_size = 2`, final newline, trimmed trailing whitespace, and single quotes
-for `.ts`. Markdown is the exception (spaces, no max line length). The only
-recommended VS Code extension is `EditorConfig.EditorConfig` (`.vscode/extensions.json`).
+`scripts/lint-stubs.sh` fails if any app screen still has a placeholder
+`console.log` inside a press handler — any prop whose name ends in
+`Press`/`Pressed`. Intentional diagnostics use `console.info`/`warn`/`error`,
+which are allowed. This is what keeps unwired buttons from silently shipping.
 
-`aegir dep-check` is available in both libraries (`yarn workspace <name> dep-check`)
-to catch unused / undeclared dependencies.
+## Lint and format
 
-### Peer-requirements guard
+* `vote-core` and `vote-engine` lint with **aegir** (`aegir lint`, ESLint plus
+  `eslint-plugin-n`). Both also expose `dep-check` for unused/undeclared deps.
+* Both apps lint with the React Native ESLint config (`eslint .`) and format
+  with **Prettier**.
 
-`scripts/check-peer-requirements.mjs` is wired into the root `package.json` two
-ways:
+Editor style comes from `.editorconfig`: **tabs**, `indent_size = 2`, final
+newline, trimmed trailing whitespace, single quotes in `.ts`. Markdown is the
+exception — spaces, no max line length. The only recommended VS Code extension
+is `EditorConfig.EditorConfig`.
 
-- as the `postinstall` hook (runs on every `yarn install`), and
-- as the first step of root `lint`, and on its own as `yarn lint:peers`.
+## Editing across packages
 
-```bash
-yarn lint:peers      # node scripts/check-peer-requirements.mjs
-```
+Dependency direction is `vote-core` -> `vote-engine` -> apps. The apps consume
+the libraries through `workspace:*`, so they pick up local changes once the
+library's `dist/` is rebuilt. A typical loop:
 
-Why it exists: under Yarn 4 with `nodeLinker: node-modules`, an unmet-peer
-summary (`YN0086`) is emitted project-wide. `.yarnrc.yml` discards `YN0086`
-globally so the **known-allowed** `@optimystic/quereus-plugin-*` peer mismatches
-(which are expected, because those plugins target a different `@quereus/quereus`
-range than the pinned `3.3.0`) stay quiet. Because that discard is broad, this
-guard restores the signal for the one surface it could mask: it runs
-`yarn explain peer-requirements`, drills into each folded detail tree, and
-fails closed if it sees an `@optimystic/quereus-plugin-*` mismatch that is not
-in its `KNOWN_ALLOWED` set. The currently-allowed set is:
+1. Edit `packages/vote-core/src/...`.
+2. Rebuild the dependency: `yarn workspace @votetorrent/vote-core build`.
+3. Rebuild the dependent: `yarn workspace @votetorrent/vote-engine build`.
+4. If a `builders/` file changed, run `guard:builders`.
+5. Restart Metro with `yarn start --reset-cache` so the app re-bundles the new
+   `dist/`.
 
-- `@optimystic/quereus-plugin-crypto@npm:0.13.5`
-- `@optimystic/quereus-plugin-crypto@npm:0.14.1`
-- `@optimystic/quereus-plugin-optimystic@npm:0.13.5`
+## Yarn patches
 
-If you intentionally introduce a new mismatch (e.g. bumping a plugin), update
-`KNOWN_ALLOWED` in that script. If upstream publishes a clean version, remove
-the entry **and** drop the matching `logFilters: YN0086` line from `.yarnrc.yml`
-(the script prints an `INFO: disappeared` hint when a known mismatch stops
-showing up).
+A few upstream packages carry fixes that are not released yet. Each is a
+`yarn patch` under `.yarn/patches/`, wired in through the root `resolutions` and
+the consumer's `patch:` descriptor — read the version off the filename or the
+descriptor. What each one carries, which neither file says:
 
-## Vendoring and patching
-
-Nothing is vendored. `@serfab/*` and `@optimystic/*` come from npm; edits that
-are not upstream yet are yarn patches under `.yarn/patches/`, referenced from
-the root `resolutions` and each consumer's manifest. Current inventory:
-
-| Package | Patch | What it carries |
-|---------|-------|-----------------|
-| `@serfab/cadre-core@1.14.0` | `@serfab-cadre-core-npm-1.14.0-votetorrent.patch` | The public-observer protocol (`patches/serfab-cadre-core-public-observer.md`). The strand cohort topic patch is retired: cadre-core 1.12+ ships `strandReactivity` (`patches/serfab-cadre-core-strand-cohort-topic.md`) |
-| `@optimystic/db-p2p@1.9.0` | `@optimystic-db-p2p-npm-1.9.0-votetorrent.patch` | `.unref?.()` guards in `cluster-repo.js`, whose timers return plain numbers on React Native and in browsers |
-| `@quereus/quereus@4.20.0` | `@quereus-quereus-npm-4.20.0-6fd16bc9e5.patch` | The datetime immediate-CHECK fix |
-| `react-native-quick-base64@3.0.1` | `react-native-quick-base64-npm-3.0.1-f6009a6514.patch` | |
-| `react-native-nitro-modules@0.37.1` | `react-native-nitro-modules-npm-0.37.1-votetorrent.patch` | `JSICache` drops released references when its vectors fill (`WeakReferenceCache.hpp`); unpatched, every value passed to a native method leaked ~100 bytes until the runtime was torn down. Guarded by `apps/VoteTorrentVoter/__tests__/nitro-jsicache-prune.test.ts`. Needs a native rebuild of both apps |
+| Package | What the patch carries |
+| --- | --- |
+| `@serfab/cadre-core` | The public-observer protocol that lets the no-login election view join a public strand (rationale in `patches/serfab-cadre-core-public-observer.md`), plus opt-in strand edge hosting and strand-address withholding. Phones never turn the opt-ins on. |
+| `@optimystic/db-p2p` | Memoizes the offline verification of a claim's proof in `cluster/certified-claims.js`; re-verifying the same signatures every read-repair window cost about a fifth of an idle Voter's JS time on Hermes. |
+| `@quereus/quereus` | Coerces datetime values before immediate CHECK constraints run. |
+| `@libp2p/websockets` | Closes an aborted dial's socket, and never sends the reserved close code 1006. |
+| `react-native-nitro-modules` | `JSICache` drops released references when its vectors fill; unpatched, every value passed to a native method leaked until the runtime was torn down. Guarded by `apps/VoteTorrentVoter/__tests__/nitro-jsicache-prune.test.ts`. Native: needs an app rebuild. |
+| `rn-leveldb` | All databases share one 32 MB block cache and keep a 1 MB write buffer (Quereus opens one database per table and index). Native: needs an app rebuild. |
+| `@react-native-documents/picker` | Reads `currentActivity` from the React context, for React Native 0.87. |
 
 To change a patch, run `yarn patch <pkg>@npm:<version>`, edit the extracted
 copy, and `yarn patch-commit`. On a version bump, dry-run the old patch against
 the new tarball first (`patch -p1 --dry-run`) and re-base only the hunks that
-fail.
+fail. `packages/vote-engine/test/no-portal-vendor-regression.spec.ts` fails if a
+`portal:` or `./vendor/` resolution comes back.
 
-### Verifying the vendor / portal wiring
+## React Native / Hermes constraints
 
-`scripts/verify-vendoring.sh`, `scripts/verify-portal-adoption.sh` and
-`scripts/sync-vendor.sh` belong to the retired `vendor/` model and assert
-things that are no longer true (a `vendor/` copy of `@serfab/cadre-core`). The
-live guard is `packages/vote-engine/test/no-portal-vendor-regression.spec.ts`.
+The P2P and SQL stack was written for Node and runs here on Hermes. Several
+non-obvious workarounds hold that together. Each is commented in place — read
+the file before changing any of them, and do not remove one because it looks
+inert:
 
-## vote-engine build guard
+| Where | Constraint |
+| --- | --- |
+| `apps/*/metro.config.js` — `minifierConfig` | `keep_fnames` + `keep_classnames`. Quereus resolves SQL UDFs and CHECK constraints *by function name*, as does libp2p. Without this the app boots fine and network creation silently fails, **release builds only** (debug does not minify). |
+| `apps/*/metro.config.js` — `resolveRequest` | Forces every `tslib` request to the CJS UMD build, redirects `@multiformats/multiaddr/convert` to a v12 alias (v13 dropped the subpath gossipsub still imports), and rewrites `@libp2p/crypto` / `@chainsafe/libp2p-noise` to their browser-field variants. The browser maps are mandatory — config load throws if either cannot be resolved. |
+| `apps/*/metro.config.js` — `extraNodeModules` | Shims the Node builtins the stack pulls transitively: `os`/`crypto` to local polyfills, `stream` to `readable-stream`, `buffer` to `buffer`, and `net`/`tls`/`http2` to an empty stub. Metro must statically resolve every module reachable via `import()` — including code paths that never execute on-device. |
+| `apps/*/index.js` | Imports `./polyfills.bootstrap` **before** any libp2p / Optimystic / Quereus import. Order is load-bearing. |
+| `vote-engine` `src/database/schema-sql.ts` | The schema DDL is bundled as a **string constant**, generated from `vote-core/schema/votetorrent.qsql`. It is not a file read because Hermes cannot parse `import.meta` and has no Node `fs`. Regenerate it when the `.qsql` changes. |
+| root `package.json` `workspaces.nohoist` | Keeps React Native, React Navigation, i18next, and Babel inside each workspace rather than hoisted, which the Metro resolver requires. |
 
-`@votetorrent/vote-engine` has an extra guard script:
+## Known development-only relaxations
 
-```bash
-yarn workspace @votetorrent/vote-engine guard:builders   # bash scripts/ci-grep-guard.sh
-```
+These are deliberate, and must be tightened before any production deployment:
 
-`scripts/ci-grep-guard.sh` greps the `src/**/builders/*.ts` files and **rejects
-colon-prefix SQL bind keys** (e.g. a quoted `':userId'`). The Quereus
-colon-prefix parameter-binding quirk must stay contained at the engine layer —
-builders construct domain objects, never SQL bind objects. It scans only files
-inside `builders/` subdirectories by default (override with `BUILDERS_DIR=`),
-exits `0` when clean and `1` on a violation. Run it after touching anything
-under a `builders/` directory.
+* **Permissive libp2p connection gater.** Both apps set
+  `connectionGater: { denyDialMultiaddr: async () => false }` in
+  `src/providers/CadreNodeProvider.tsx`, so the node will dial any multiaddr.
+  This is what lets an emulator reach the host alias `10.0.2.2` and local
+  drones. The proof runners set the same thing.
+* **Mock engines.** `vote-engine` ships `mock-*.ts` in-memory engines used by
+  tests and by UI work ahead of the real path. Screens must not reach a mock
+  engine on a real build.
 
-## Editing across packages
+## On-device proofs
 
-The dependency direction is `vote-core` → `vote-engine` → `votetorrent-authority`.
-The app consumes the libraries through `workspace:*`, so it picks up local
-changes once the library's `dist/` is rebuilt.
-
-A typical cross-package edit loop:
-
-1. Edit `packages/vote-core/src/...`.
-2. Rebuild the dependency first:
-   `yarn workspace @votetorrent/vote-core build`.
-3. Rebuild the dependent:
-   `yarn workspace @votetorrent/vote-engine build`.
-4. If a `builders/` file changed, run
-   `yarn workspace @votetorrent/vote-engine guard:builders`.
-5. Restart Metro (`yarn start --reset-cache`) so the app re-bundles the updated
-   `dist/`.
-
-Because `yarn build` at the root is unordered, prefer building the specific
-workspaces in order during an edit loop rather than relying on a single root
-`yarn build`.
-
-## On-device proof scripts
-
-`scripts/run-*.sh` are runnable proofs that exercise the app on a connected
-Android device/emulator (via `adb`) and parse `logcat` for a verdict line. They
-are dev/CI tooling, not part of the app build. Each is self-documented in its
-header; all anchor their working directory to the repo root and restore any
-temporary state on exit.
+`scripts/run-*.sh` and `scripts/voter-boot-smoke.sh` are runnable proofs that
+exercise an app on a connected Android device/emulator over `adb` and parse
+`logcat` for a verdict line. They are dev/CI tooling, not part of the app build.
+Each is self-documented in its header, anchors its working directory to the repo
+root, and restores temporary state on exit.
 
 | Script | What it proves |
-|--------|----------------|
-| `scripts/run-dial-probe.sh` | A device→host WebSocket dial completes with no "connection gater denied" — validates the cadre-core `connectionGater` patch. Needs the `p2p-probe-host` drone running first (`cd packages/p2p-probe-host && node drone.mjs`) and `CONTROL_ADDR` set in the app. |
-| `scripts/run-replication-proof.sh` | Symmetric P2P replication across two emulators (`emulator-5554` + `emulator-5556`): both must emit `REPLICATION VERDICT: PASS`, peerId is stable across a relaunch, and peer count ≥ 1. The drone launch is automated. |
-| `scripts/run-signing-proof.sh` | An on-device signing round-trip (`SIGNING VERDICT: PASS`) on initial boot **and** after a force-stop/relaunch, and that the pre-fix `sign is not a function` FATAL does not reproduce. Invoke as `SERIAL=emulator-5554 ./scripts/run-signing-proof.sh`. |
-| `scripts/run-vtest02.sh` | Full-chain restart persistence: force-stops and relaunches the app, then polls for `FULL-CHAIN VERDICT: PASS` from the in-app persistence-proof runner (requires the app to have completed its write phase once). |
+| --- | --- |
+| `run-dial-probe.sh` | A device→host WebSocket dial completes with no "connection gater denied". Needs the probe-host drone running first. |
+| `run-replication-proof.sh` | Symmetric P2P replication across two emulators (`emulator-5554` + `emulator-5556`): both emit `REPLICATION VERDICT: PASS`, peerId is stable across relaunch, peer count ≥ 1. Launches the drone itself. |
+| `run-signing-proof.sh` | On-device signing round-trip on first boot **and** after force-stop/relaunch. Invoke as `SERIAL=emulator-5554 ./scripts/run-signing-proof.sh`. |
+| `run-vtest02.sh` | Full-chain restart persistence — force-stops, relaunches, polls for `FULL-CHAIN VERDICT: PASS`. Requires the app to have completed its write phase once. |
+| `voter-boot-smoke.sh` | The Voter app's real-engine register path **bundles and boots on Hermes** — the defect class Jest is structurally blind to, because it mocks `@peculiar`/`@noble`/`multiformats`. |
 
-Common prerequisites: `adb` on `PATH` (Android SDK Platform Tools), the app
-(`org.votetorrent.authority`) installed on a connected device/AVD, and (for the
-replication and signing proofs) `nvm` with Node 22. The signing and persistence
-proofs flip a generated flag file and restore it with `git checkout` on exit, so
-keep your working tree clean before running them. The shared logcat
-wait/poll helper lives in `scripts/lib/logcat-wait.sh`.
+Common prerequisites: `adb` on `PATH`, the app installed on a connected
+device/AVD, and (for replication and signing) `nvm` with Node 22. The shared
+logcat wait/poll helper is `scripts/lib/logcat-wait.sh`.
 
-## Editor / debugging
+Several proofs flip `apps/*/src/engines/proof-flags.generated.ts` before
+bundling and restore it in an exit trap. That file is **tracked**, and every
+flag must stay `false` in a commit. If a run is interrupted, restore it:
 
-`.vscode/launch.json` ships three launch configurations:
+```bash
+git checkout -- apps/VoteTorrentAuthority/src/engines/proof-flags.generated.ts
+```
 
-- **Mocha – Current test file (vote-engine)** — debugs the open `*.spec.ts`
-  under `register-ts-node.mjs`.
-- **Mocha – All tests (vote-engine)** — debugs the whole `vote-engine` suite.
-- **Debug Core Tests** — an aegir test debug config.
+### Probe-host drone
 
-`.vscode/settings.json` configures the PlantUML export targets (`doc/figures`)
-and a project `cSpell` word list.
+`packages/p2p-probe-host` is a storage-profile node that listens on an ephemeral
+WebSocket address so an emulator can dial it. It is a normal workspace, so its
+dependencies are already installed:
 
-## Where to go next
+```bash
+cd packages/p2p-probe-host && node drone.mjs
+```
 
-- [Testing](testing.md) — the `vote-core` / `vote-engine` suites and how to run
-  a single file.
-- [Codebase Architecture](codebase-architecture.md) — workspace layout and
-  runtime composition.
-- [Configuration](configuration.md) — toolchain, resolutions, and environment
-  variables.
-- `vendor/VENDOR.md` — vendored-package provenance and the published/vendored
-  boundary.
+It prints its control `peerId` and WebSocket multiaddr, then stays alive until
+`Ctrl-C`. `STRAND_ID` selects the strand it joins; unset, it falls back to a
+placeholder.
+
+## Environment variables
+
+Very little of the codebase reads the environment directly:
+
+| Variable | Read by | Effect |
+| --- | --- | --- |
+| `STRAND_ID` | `packages/p2p-probe-host/drone.mjs` | Strand the drone joins. Falls back to a placeholder. |
+| `DRONE_BOOTSTRAP_CONTROL_ADDR` / `DRONE_BOOTSTRAP_STRAND_ADDR` | same | Optional bootstrap multiaddrs. |
+| `STORE_FILE_VOTETORRENT`, `PASSWORD_STORE_VOTETORRENT`, `PASSWORD_KEY_AUTHORITY`, `PASSWORD_KEY_VOTER` | `apps/*/android/app/build.gradle`, fastlane | Real release signing. Unset, the build falls back to the committed debug key and is unpublishable by design. |
+| `NVM_DIR` | the verification scripts | Locates an existing nvm install. |
+
+`.gitignore` ignores `.env`, but no `.env` loader exists — application code does
+not read one.
+
+## Editor and debugging
+
+`.vscode/launch.json` ships three configurations: **Mocha – Current test file
+(vote-engine)**, **Mocha – All tests (vote-engine)**, and **Debug Core Tests**
+(aegir). `.vscode/settings.json` configures PlantUML export to `doc/figures` and
+a project `cSpell` word list.

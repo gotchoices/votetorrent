@@ -22,6 +22,7 @@
 		"build:aab": "cd android && bundle exec fastlane android build_aab",
 		"release:ios:beta": "cd ios && bundle exec fastlane ios beta",
 		"release:ios:release": "cd ios && bundle exec fastlane ios release",
+		"publish:apk": "./publish",
 		"clean": "rm -rf node_modules"
 	},
 	"dependencies": {

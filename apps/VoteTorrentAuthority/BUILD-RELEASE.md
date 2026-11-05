@@ -153,7 +153,7 @@ Given final block not properly padded.
 `getEntry(alias, PasswordProtection(keyPassword))` and never go through keytool's
 policy check. A keytool failure here does *not* mean your keystore is broken.
 
-That is why `verify_keystore` uses [`fastlane/VerifyKeystore.java`](android/fastlane/VerifyKeystore.java)
+That is why `verify_keystore` uses [`scripts/VerifyKeystore.java`](../../scripts/VerifyKeystore.java)
 — the same `KeyStore` API path AGP uses — rather than shelling out to `keytool`.
 A pass is a genuine prediction that the build will sign.
 

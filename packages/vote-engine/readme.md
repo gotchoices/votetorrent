@@ -25,7 +25,7 @@ Two abstractions in `src/types.ts` decouple the engine from its runtime:
 ## Relationship to the rest of the repo
 
 - **`@votetorrent/vote-core`** — the upstream dependency. `vote-engine` implements its interfaces and consumes its types; the canonical schema (`votetorrent.qsql`) also lives in `vote-core`.
-- **The app** — composes `vote-engine` behind its own platform layer. The app supplies the concrete persistent / P2P `DbFactory` and consumes the React Native entry point.
+- **The apps** (Voter and Authority) — compose `vote-engine` behind their own platform layer. Each supplies the concrete persistent / P2P `DbFactory` and consumes the React Native entry point.
 
 ## Entry points
 

@@ -15,8 +15,8 @@ the repository.
 - **`@votetorrent/vote-core`** (this package) defines the contracts.
 - **`@votetorrent/vote-engine`** implements those interfaces against a Quereus
   database and the libp2p network. It depends on `vote-core`.
-- The reference **app** consumes the `vote-core` types and the `vote-engine`
-  implementation to drive the UI.
+- The reference **apps** (Voter and Authority) consume the `vote-core` types and
+  the `vote-engine` implementation to drive the UI.
 
 Dependency direction is strictly downward, so `vote-core` is the foundation the
 other packages build on. See
@@ -67,9 +67,11 @@ the model types are the plain data shapes passed across that boundary.
 
 | Module | Responsibility |
 | --- | --- |
-| `authority/` | Authorities, administrators, officers, and their invites |
+| `authority/` · `authority-config/` | Authorities, administrators, officers, and their configuration |
 | `network/` · `networks/` | A single network, and the collection / recents of networks |
 | `election/` · `elections/` | A single election, and the collection of elections |
+| `registration/` | Voter registration records and rules |
+| `association/` | Device association and attestation |
 | `signing/` | Signing sessions and signature primitives |
 | `invite/` | Authority / officer / keyholder invitations |
 | `tasks/` | Onboarding, key-release, and signature task queues |

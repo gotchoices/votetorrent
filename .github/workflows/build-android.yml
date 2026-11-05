@@ -1,7 +1,8 @@
 name: Build Android APKs
 
-# Runs on every push and pull request. This is a VERIFICATION build, not a
-# release: no signing secrets are used and nothing is published.
+# Runs on pull requests, and on pushes to the long-lived branches. This is a
+# VERIFICATION build, not a release: no signing secrets are used and nothing is
+# published.
 #
 # It deliberately builds the RELEASE variant rather than debug, because the
 # release path is where this project's bugs have actually lived — the Metro
@@ -15,9 +16,22 @@ name: Build Android APKs
 # which is a different app identity — it is NOT publishable. Publishing is done
 # locally by the key holder; see apps/VoteTorrentAuthority/BUILD-RELEASE.md.
 
+# A bare `push:` alongside `pull_request:` builds every PR-branch commit twice:
+# once for each event. They do not cancel each other, because the concurrency
+# group keys on github.ref, which is refs/heads/<branch> for push but
+# refs/pull/<n>/merge for pull_request. Restricting push to the long-lived
+# branches leaves exactly one build per commit — via pull_request while a branch
+# is in review, via push once it lands.
+#
+# paths-ignore skips the run only when EVERY changed path matches, so a commit
+# touching both a doc and a source file still builds. Safe to skip runs here
+# because no branch protection requires this check.
 on:
   push:
+    branches: [master, develop]
+    paths-ignore: ['**.md', 'doc/**', 'web/**', 'design/**']
   pull_request:
+    paths-ignore: ['**.md', 'doc/**', 'web/**', 'design/**']
   workflow_dispatch:
 
 permissions:

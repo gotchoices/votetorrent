@@ -18,7 +18,8 @@
 		"build:apk:dev": "cd android && bundle exec fastlane android build_apk_dev",
 		"build:aab": "cd android && bundle exec fastlane android build_aab",
 		"release:ios:beta": "cd ios && bundle exec fastlane ios beta",
-		"release:ios:release": "cd ios && bundle exec fastlane ios release"
+		"release:ios:release": "cd ios && bundle exec fastlane ios release",
+		"publish:apk": "./publish"
 	},
 	"dependencies": {
 		"@craftzdog/react-native-buffer": "^6.1.2",
