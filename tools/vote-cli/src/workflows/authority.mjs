@@ -166,7 +166,12 @@ export async function respondToInvite (device, p) {
   const invitations = device.invitations()
   const { slotCid, invitePrivate } = await resolveShare(invitations, requireString(p.share, 'share'), type)
   const accept = p.decline !== true
-  await invitations.respondToInvite(slotCid, accept, invitePrivate)
+  if (type === 'of' && accept) {
+    // 66.1 (D-12): the officer accept creates this device user's identity on the network.
+    await invitations.respondToInvite(slotCid, accept, invitePrivate, undefined, undefined, undefined, { userId: device.user.id, name: device.user.name, signingKey: device.user.activeKeys[0] })
+  } else {
+    await invitations.respondToInvite(slotCid, accept, invitePrivate)
+  }
   return { slotCid, accepted: accept }
 }
 
@@ -185,7 +190,7 @@ export async function adminSetScopes (device, p) {
   const officers = details.admin.officers.map((o) => {
     const target = p.user ? o.userId === p.user : o.userId === device.user.id
     const scopes = target && p.scopes ? String(p.scopes).split(',').map((s) => s.trim()).filter(Boolean) : o.scopes
-    return { userId: o.userId, name: o.name, title: target && p.title ? p.title : o.title, scopes }
+    return { existing: { userId: o.userId, authorityId: o.authorityId, title: target && p.title ? p.title : o.title, scopes } }
   })
   await authority.proposeAdmin({
     proposed: { officers, effectiveAt: Date.now(), thresholdPolicies: details.admin.thresholdPolicies },

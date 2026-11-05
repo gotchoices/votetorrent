@@ -78,6 +78,11 @@ const FOUNDING_OFFICER_SCOPES = ['rn', 'rad', 'vrg', 'iad', 'uai', 'ceb', 'mel',
 const AUTHORITY_NAME = 'Live Mesh Authority';
 const FOUNDER_NAME = 'Live Mesh Founder';
 const OFFICER_NAME = 'Live Mesh Officer B';
+/**
+ * 66.1 (D-02): the shipped administration-change delay is one hour (vote-core ADMIN_CHANGE_DELAY_MS).
+ * This harness injects 5 s as the proposal's effectiveAt, as the vote-engine specs do; nothing switches it.
+ */
+const OFFICER_CHANGE_TEST_DELAY_MS = 5_000;
 const NETWORK_NAME = 'Live Mesh Network';
 const LABEL_RE = /^[a-z0-9-]{1,16}$/;
 const ALIAS_RE = /^[a-z0-9-]+(\.[a-z0-9-]+)+$/;
@@ -676,23 +681,29 @@ async function main() {
 			'officer-slot',
 		);
 		const slotCid = resolution.cid;
-		// ASSUMPTION (66-26 draft A-6): the officer's own User row is bound to the slot through
-		// UserEngine.create's invite context (the schema's User.InsertValid invite branch), then the
-		// officer answers the invite. Re-check the order against the engine in phase 2.
-		await new VE.UserEngine(B.user, ctxB).create(
-			{ event: 'C', timestamp: Date.now(), name: B.user.name, imageRef: B.user.imageRef, userKey: B.user.activeKeys[0] },
-			{ inviteSlotCid: slotCid, inviteSignature: inviteShare.inviteSignature },
-		);
 		const invitePrivate = inviteShare.invitePrivate;
-		await invitationsB.respondToInvite(slotCid, true, invitePrivate, undefined, B.user.id);
+		// 66.1 (D-12): the engine writes the officer's User, UserKey and InviteResult in one transaction (no hand-written rows, Phase 66 planning risk l.290).
+		await invitationsB.respondToInvite(slotCid, true, invitePrivate, undefined, undefined, undefined, { userId: B.user.id, name: B.user.name, signingKey: B.user.activeKeys[0] });
 	}
-	await pollUntil(() => first(dbA, 'select 1 as x from User where Id = :id', { id: B.user.id }), (/** @type {any} */ r) => r != null, ms(60_000), 'officer-user-replica');
+	const invitationsA = new VE.InvitationEngine(ctxA);
+	const accepted = await pollUntil(
+		() => invitationsA.getAcceptedOfficerInvitees(),
+		(/** @type {any} */ list) => Array.isArray(list) && list.some((/** @type {any} */ i) => i.userId === B.user.id),
+		ms(60_000),
+		'officer-accepted-invitee',
+	);
+	const invitee = accepted.find((/** @type {any} */ i) => i.userId === B.user.id);
 	if (!(await VE.isCurrentPairingOfficer(dbA, { userId: B.user.id, nowCanonical: canonical(Date.now()) }))) {
+		if (!invitee) throw new HostFatal('officer-not-accepted');
 		const admin = (await authorityA.getAdminDetails()).admin;
 		const officers = admin.officers.map((/** @type {any} */ o) => ({ existing: { userId: o.userId, authorityId, title: o.title, scopes: o.scopes } }));
-		officers.push({ existing: { userId: B.user.id, authorityId, title: 'Officer', scopes: ['iad', 'mel'] } });
-		await authorityA.proposeAdmin({ proposed: { officers, effectiveAt: Date.now(), thresholdPolicies: admin.thresholdPolicies }, signers: [F.user.id] }, F.sign);
+		// Mirrors vote-core's officerSelectionFromInvitee (vote-core is not resolvable from this workspace).
+		officers.push({ existing: { userId: invitee.userId, authorityId, title: 'Officer', scopes: ['iad', 'mel'] } });
+		const effectiveAt = canonical(Date.now() + OFFICER_CHANGE_TEST_DELAY_MS);
+		await authorityA.proposeAdmin({ proposed: { officers, effectiveAt, thresholdPolicies: admin.thresholdPolicies }, signers: [F.user.id] }, F.sign);
 		if (authorityA.lastPromotionOutcome?.status !== 'promoted') throw new HostFatal('officer-not-promoted');
+		const futureRow = await first(dbA, 'select count(*) as n from Admin where AuthorityId = :authorityId and EffectiveAt = :eff', { authorityId, eff: effectiveAt });
+		if (Number(futureRow?.n ?? 0) !== 1) throw new HostFatal('officer-not-future-dated');
 	}
 	const officerCurrent = await pollUntil(
 		async () => {

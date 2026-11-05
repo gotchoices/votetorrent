@@ -11,7 +11,7 @@ import { expect } from 'chai'
 import { secp256k1 } from '@noble/curves/secp256k1.js'
 import { bytesToHex } from '@noble/curves/utils.js'
 import { adminChangeEffectiveAt, officerSelectionFromInvitee } from '@votetorrent/vote-core'
-import type { AdminInit, KeyholderInvite, OfficerAcceptProvisioning, OfficerSelection, Proposal, Scope } from '@votetorrent/vote-core'
+import type { AdminDetails, AdminInit, KeyholderInvite, OfficerAcceptProvisioning, OfficerSelection, Proposal, Scope } from '@votetorrent/vote-core'
 import { InvitationEngine } from '../src/invite/invitation-engine.js'
 import { isCurrentPairingOfficer } from '../src/pairing/pairing-statement.js'
 import { nowCanonicalDatetime } from '../src/utils.js'
@@ -442,5 +442,99 @@ describe('officer invite accept (66.1 D-12)', () => {
       const officers = (await fx.authority.getAdminDetails()).admin.officers.map((o) => o.userId)
       expect(officers).to.include(officer.userId)
     })
+  })
+})
+
+/**
+ * R-62 (66.1-09 finding F-09-4): MIRROR of the officers mapping in
+ * tools/vote-cli/src/workflows/authority.mjs adminSetScopes. vote-cli has no unit harness and that module
+ * loads the built vote-engine dist and the CadreNode device, so the mapping is copied here verbatim (the
+ * `const target`, `const scopes` and `return` lines are byte-identical to the shipped ones) instead of
+ * calling adminSetScopes. `device` stands in for the vote-cli device so those lines stay identical.
+ */
+function adminSetScopesOfficers (details: AdminDetails, p: { user?: string; title?: string; scopes?: string }, deviceUserId: string): OfficerSelection[] {
+  const device = { user: { id: deviceUserId } }
+  return details.admin.officers.map((o) => {
+    const target = p.user ? o.userId === p.user : o.userId === device.user.id
+    const scopes = target && p.scopes ? String(p.scopes).split(',').map((s) => s.trim()).filter(Boolean) : o.scopes
+    return { existing: { userId: o.userId, authorityId: o.authorityId, title: target && p.title ? p.title : o.title, scopes } }
+  }) as OfficerSelection[]
+}
+
+type RosterProbe = { resolveAdminRoster (o: OfficerSelection[]): Promise<Array<{ userId: string | null; title: string; scopes: string[] }>> }
+
+async function setScopesInput (fx: ChainFixture) {
+  const details = await fx.authority.getAdminDetails()
+  const founder = details.admin.officers.find((o) => o.userId === fx.auth.user.id)
+  expect(founder, 'the founder is a current officer').to.not.equal(undefined)
+  const founderScopes: string[] = [...founder!.scopes]
+  const drop = founderScopes.findIndex((sc) => sc !== 'rad')
+  const reduced = drop >= 0 ? founderScopes.filter((_sc, i) => i !== drop) : founderScopes
+  const p = { title: 'Chair', scopes: reduced.join(',') }
+  return { details, p, reduced, officers: adminSetScopesOfficers(details, p, fx.auth.user.id) }
+}
+
+describe('vote-cli adminSetScopes roster shape (R-62)', () => {
+  it("maps every officer to { existing } with the admin's authorityId", async () => {
+    const fx = await makeChainFixture()
+    const { details, officers } = await setScopesInput(fx)
+    expect(officers.length).to.equal(details.admin.officers.length)
+    expect(officers.length).to.be.at.least(1)
+    for (const o of officers) {
+      expect(o.existing, 'every entry is an existing selection').to.not.equal(undefined)
+      expect(o.init, 'no entry is an init selection').to.equal(undefined)
+      expect(o.existing!.authorityId).to.equal(details.admin.authorityId)
+      expect(o.existing!.authorityId).to.equal(fx.auth.authority.id)
+    }
+  })
+
+  it('resolveAdminRoster keeps every officer and its scopes; the pre-fix bare shape resolves to []', async () => {
+    const fx = await makeChainFixture()
+    const { details, officers, reduced } = await setScopesInput(fx)
+    const probe = fx.authority as unknown as RosterProbe
+    const roster = await probe.resolveAdminRoster(officers)
+    expect(roster.length).to.equal(officers.length)
+    for (const o of officers) {
+      const entry = roster.find((r) => r.userId === o.existing!.userId)
+      expect(entry, `roster entry for ${o.existing!.userId}`).to.not.equal(undefined)
+      expect(entry!.title).to.equal(o.existing!.title)
+      expect(entry!.scopes).to.deep.equal(o.existing!.scopes)
+    }
+    const founderEntry = roster.find((r) => r.userId === fx.auth.user.id)
+    expect(founderEntry!.title).to.equal('Chair')
+    expect(founderEntry!.scopes).to.deep.equal(reduced)
+
+    // Negative control: the pre-fix bare shape is skipped by resolveAdminRoster (the empty-roster bug).
+    const bare = details.admin.officers.map((o) => ({ userId: o.userId, name: undefined, title: o.title, scopes: o.scopes })) as unknown as OfficerSelection[]
+    expect(await probe.resolveAdminRoster(bare)).to.deep.equal([])
+  })
+
+  it('proposeAdmin promotes the mapped roster', async () => {
+    const fx = await makeChainFixture()
+    const { details, officers } = await setScopesInput(fx)
+    // D-02: 5 s injected as an argument; never the founding admin's second (R-64).
+    const effectiveAt = adminChangeEffectiveAt(Date.now(), 5_000)
+    await fx.authority.proposeAdmin({
+      proposed: { officers, effectiveAt, thresholdPolicies: details.admin.thresholdPolicies },
+      signers: [fx.auth.user.id],
+    }, makeTestSignCallback(fx.auth.user))
+    const outcome = (fx.authority as unknown as { lastPromotionOutcome?: { status?: string, reason?: string } }).lastPromotionOutcome
+    expect(outcome?.status, `expected 'promoted', got status=${outcome?.status} reason=${outcome?.reason}`).to.equal('promoted')
+
+    const rows: Array<{ UserId: string, Title: string, Scopes: string }> = []
+    for await (const row of fx.auth.ctx.db.eval(
+      'select UserId, Title, Scopes from Officer where AuthorityId = :authorityId and AdminEffectiveAt = :eff',
+      { authorityId: fx.auth.authority.id, eff: effectiveAt }
+    )) {
+      rows.push({ UserId: row.UserId as string, Title: row.Title as string, Scopes: row.Scopes as string })
+    }
+    expect(rows.length).to.equal(officers.length)
+    for (const o of officers) {
+      const row = rows.find((r) => r.UserId === o.existing!.userId)
+      expect(row, `Officer row for ${o.existing!.userId}`).to.not.equal(undefined)
+      expect(row!.Title).to.equal(o.existing!.title)
+      // The engine persists scopes in sorted canonical order.
+      expect([...JSON.parse(row!.Scopes)].sort()).to.deep.equal([...o.existing!.scopes].sort())
+    }
   })
 })
