@@ -112,6 +112,7 @@ import {globalStyles} from '../../theme/styles';
 import {errorClassName} from '../../utils/errorClassName';
 import {IdentityRecoveryView} from '../../components/IdentityRecoveryView';
 import type {RegistrationStackParamList} from '../../navigation/types';
+import {trackCommits, useActionShareState, useCommitShareTracker} from '../../hooks/useCommitShare';
 
 type ConfirmationNavigationProp = NativeStackNavigationProp<RegistrationStackParamList, 'Confirmation'>;
 
@@ -243,6 +244,10 @@ export default function ConfirmationScreen() {
 	const [isPending, setIsPending] = useState(false);
 	// 64 D-27 / UI-SPEC A3: true only while the first Confirm waits for the officer's decision.
 	const [isWaiting, setIsWaiting] = useState(false);
+	// The request this phone submitted is attributed to `registration:<registrantId>`, so the waiting and
+	// pending views can say when it has not reached the election network (todo 2026-09-11-optimystic-
+	// commit-success-hides-unresolvable-cohort): an office cannot approve a request it never received.
+	const commitTracker = useCommitShareTracker();
 	// Plan 28 (D-45): the re-showable code card's own availability read — re-resolved on every
 	// focus while pending, never cached beyond this render (59 D-23).
 	const [codeAvailability, setCodeAvailability] = useState<RegistrationCodeAvailability | null>(null);
@@ -256,6 +261,7 @@ export default function ConfirmationScreen() {
 	// reused on every "Try Again" retry, exactly as before. A brand-new registration is a fresh
 	// mount, so the refs reset naturally without leaking the prior attempt's ids.
 	const registrantIdRef = useRef<string | null>(null);
+	const shareState = useActionShareState(registrantIdRef.current ? `registration:${registrantIdRef.current}` : null);
 	const associationRequestIdRef = useRef<string | null>(null);
 	// Phase 62 Plan 22 (D-28/D-32): the FULL init objects (not just their ids) are also minted once
 	// and reused byte-identical on every retry. 62-15's P2P transports treat an identical
@@ -467,11 +473,15 @@ export default function ConfirmationScreen() {
 				throwIfStopped();
 			}
 			if (transports.registrationRoute === 'peer') {
-				await transports.registrationTransport.submitRequest(registrationRequestInit, deviceUserKey, deviceSign, {
-					registrationCode: registrationCodeRef.current as string,
-				});
+				await trackCommits(commitTracker, `registration:${registrantId}`, () =>
+					transports.registrationTransport.submitRequest(registrationRequestInit, deviceUserKey, deviceSign, {
+						registrationCode: registrationCodeRef.current as string,
+					}),
+				);
 			} else {
-				await transports.registrationTransport.submitRequest(registrationRequestInit, deviceUserKey, deviceSign);
+				await trackCommits(commitTracker, `registration:${registrantId}`, () =>
+					transports.registrationTransport.submitRequest(registrationRequestInit, deviceUserKey, deviceSign),
+				);
 			}
 			throwIfStopped();
 
@@ -500,7 +510,9 @@ export default function ConfirmationScreen() {
 				}
 				return producer.signDeviceKeyDigest(digest);
 			};
-			await transports.associationTransport.submitRequest(associationRequestInit, p256DeviceKey, associationSign);
+			await trackCommits(commitTracker, `registration:${registrantId}`, () =>
+				transports.associationTransport.submitRequest(associationRequestInit, p256DeviceKey, associationSign),
+			);
 			throwIfStopped();
 
 			// (3) Obtain the challenge nonce from a challenge-issued decision notice — never call the
@@ -830,6 +842,23 @@ export default function ConfirmationScreen() {
 						]}>
 						{t('confirmation.pending')}
 					</Text>
+					{shareState === 'waiting' ? (
+						<Text
+							testID="confirmation-not-shared"
+							accessibilityLiveRegion="polite"
+							style={[
+								styles.waitingText,
+								{
+									color: colors.textSecondary,
+									fontFamily: fonts.regular.fontFamily,
+									fontWeight: fonts.regular.fontWeight,
+									fontSize: typeScale.body.fontSize,
+									lineHeight: typeScale.body.lineHeight,
+								},
+							]}>
+							{t('confirmation.notShared')}
+						</Text>
+					) : null}
 					{/* UI-SPEC Screen Composition Reference: appended, never replacing the pending
 					    content above (D-45). */}
 					{codeAvailability?.kind === 'available' ? (
@@ -917,6 +946,23 @@ export default function ConfirmationScreen() {
 						]}>
 						{t('confirmation.waiting')}
 					</Text>
+					{shareState === 'waiting' ? (
+						<Text
+							testID="confirmation-not-shared"
+							accessibilityLiveRegion="polite"
+							style={[
+								styles.waitingText,
+								{
+									color: colors.textSecondary,
+									fontFamily: fonts.regular.fontFamily,
+									fontWeight: fonts.regular.fontWeight,
+									fontSize: typeScale.body.fontSize,
+									lineHeight: typeScale.body.lineHeight,
+								},
+							]}>
+							{t('confirmation.notShared')}
+						</Text>
+					) : null}
 					<Pressable
 						testID="confirmation-waiting-cancel"
 						accessibilityRole="button"

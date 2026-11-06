@@ -29,6 +29,7 @@ const resources = {
 			'breadcrumb.home': 'Home',
 			'breadcrumb.ballot': 'Ballot',
 			configNotConfigured: 'Not configured',
+			unsharedChanges: 'Saved on this phone, not yet on the election network: {{count}}',
 			// Quick task 260928-kkf — the boot re-attach's "still syncing" label, shown
 			// under the loading spinner while a joiner waits on cadre-core's first-sync
 			// gate (mirrors the authority app's SyncChip copy, `syncSyncing`).
@@ -371,6 +372,8 @@ const resources = {
 			// Registration Confirm: the bounded wait for the decision.
 			'confirmation.waiting': 'Waiting for the election office to approve your registration, so keep this screen open.',
 			'confirmation.waitingCancel': 'Stop waiting',
+			'confirmation.notShared':
+				'Your request is saved on this phone only, so far. The election office cannot see it until it reaches the election network, so keep the app open and connected.',
 			'confirmation.error.decisionTimeout': "The election office hasn't answered yet, so tap Try Again after they approve your registration.",
 			'confirmation.error.waitStopped': 'You stopped waiting, so tap Try Again when the election office has approved your registration.',
 			// [AUTHORED] — native-stack header titles for the form-step routes (41-08).
@@ -604,6 +607,7 @@ const resources = {
 			'breadcrumb.home': 'Inicio',
 			'breadcrumb.ballot': 'Papeleta',
 			configNotConfigured: 'Sin configurar',
+			unsharedChanges: 'Guardado en este teléfono, aún no en la red electoral: {{count}}',
 			syncSyncing: 'Sincronizando',
 			'bootError.generic': 'No pudimos abrir la red de votación en este teléfono.',
 			'bootError.tryAgain': 'Intentar de nuevo',
@@ -899,6 +903,8 @@ const resources = {
 			// Ver el bloque en.
 			'confirmation.waiting': 'Esperando a que la oficina electoral apruebe tu registro, así que mantén esta pantalla abierta.',
 			'confirmation.waitingCancel': 'Dejar de esperar',
+			'confirmation.notShared':
+				'Por ahora tu solicitud solo está guardada en este teléfono. La oficina electoral no puede verla hasta que llegue a la red electoral, así que mantén la aplicación abierta y conectada.',
 			'confirmation.error.decisionTimeout': 'La oficina electoral aún no ha respondido, así que toca Intentar de nuevo cuando apruebe tu registro.',
 			'confirmation.error.waitStopped': 'Dejaste de esperar, así que toca Intentar de nuevo cuando la oficina electoral haya aprobado tu registro.',
 			formHeaderTitle: 'Registrarse',

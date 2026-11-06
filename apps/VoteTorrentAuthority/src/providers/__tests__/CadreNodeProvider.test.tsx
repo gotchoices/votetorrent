@@ -358,6 +358,40 @@ describe('CadreNodeProvider — P2P-02 boot invariants', () => {
     expect(captured.value!.syncState).toBe('connected');
   });
 
+  // todo 2026-09-11-optimystic-commit-success-hides-unresolvable-cohort: the provider's tracker (the REAL
+  // vote-engine CommitDurabilityTracker) listens to the live node and feeds useUnsharedCommitCount.
+  it('feeds the not-shared count from strand:commit-durability / strand:commit-held on the live node', async () => {
+    const { useUnsharedCommitCount } = require('../../hooks/useCommitShare');
+    const seen: { count: number } = { count: -1 };
+    function CountProbe() {
+      seen.count = useUnsharedCommitCount();
+      return null;
+    }
+    let tr!: renderer.ReactTestRenderer;
+    renderer.act(() => {
+      tr = renderer.create(
+        <CadreNodeProvider>
+          <CountProbe />
+        </CadreNodeProvider>,
+      );
+    });
+    await flushBoot();
+    const node = mockConstructedNodes[0];
+    expect(node.hasListener('strand:commit-durability')).toBe(true);
+    expect(node.hasListener('strand:commit-held')).toBe(true);
+    expect(seen.count).toBe(0);
+
+    renderer.act(() => {
+      node.emit('strand:commit-durability', { strandId: 'net1', transactionId: 'tx1', heldElsewhere: false, followed: true });
+    });
+    expect(seen.count).toBe(1);
+    renderer.act(() => {
+      node.emit('strand:commit-held', { strandId: 'net1', transactionId: 'tx1' });
+    });
+    expect(seen.count).toBe(0);
+    renderer.act(() => tr.unmount());
+  });
+
   it('removes its event listeners on unmount (cleanup via off())', async () => {
     const { tr } = renderProvider();
     await flushBoot();

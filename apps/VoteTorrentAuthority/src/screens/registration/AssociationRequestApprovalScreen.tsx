@@ -15,6 +15,7 @@ import { useApp } from "../../providers/AppProvider";
 import { createDeviceSigner } from "../../engines/device-signer";
 import { useDeviceSigningErrorHandler } from "../../hooks/useDeviceSigningErrorHandler";
 import { useCurrentOfficerScopes } from "../../hooks/useCurrentOfficerScopes";
+import { trackCommits, useCommitShareTracker } from "../../hooks/useCommitShare";
 import { truncateId } from "./registrant-display";
 import { truncateDeviceKey } from "./components/AssociationsSection";
 import { LifecycleConfirmCard } from "./components/LifecycleConfirmCard";
@@ -71,6 +72,8 @@ const BANNER_KEY: Record<Exclude<ReassociationEvidenceView, "code-matched">, str
 
 export default function AssociationRequestApprovalScreen() {
 	const { requestId, authorityId } = useRoute().params as { requestId: string; authorityId: string };
+	// Writes this decision makes are attributed to it (todo 2026-09-11-optimystic-commit-success-hides-unresolvable-cohort).
+	const commitTracker = useCommitShareTracker();
 	const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 	const { t } = useTranslation();
 	const handleDeviceSigningError = useDeviceSigningErrorHandler();
@@ -177,9 +180,11 @@ export default function AssociationRequestApprovalScreen() {
 			const signer = await createDeviceSigner("Device User");
 			if (kind === "approve") {
 				if (!registrantId) throw new Error("AssociationRequestApprovalScreen: no registrant resolved");
-				await engine.approveReassociation(requestId, { registrantId }, signer, session.association, session.opener);
+				await trackCommits(commitTracker, `decision:${requestId}`, () =>
+					engine.approveReassociation(requestId, { registrantId }, signer, session.association, session.opener),
+				);
 			} else {
-				await engine.rejectReassociation(requestId, signer, session.association);
+				await trackCommits(commitTracker, `decision:${requestId}`, () => engine.rejectReassociation(requestId, signer, session.association));
 			}
 			navigation.goBack();
 		} catch (err) {

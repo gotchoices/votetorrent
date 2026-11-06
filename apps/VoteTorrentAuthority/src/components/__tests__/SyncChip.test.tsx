@@ -225,3 +225,46 @@ describe('SyncChip — configFault precedence (D-14)', () => {
     expect(treeStr).toContain('syncNotConfigured');
   });
 });
+
+// todo 2026-09-11-optimystic-commit-success-hides-unresolvable-cohort: writes on this phone that no
+// other member holds yet. A minimal tracker double -- the hooks read only these members.
+describe('SyncChip — writes not shared yet', () => {
+  const { CommitShareProvider } = require('../../hooks/useCommitShare');
+  function fakeTracker(unsharedCount: number) {
+    return { unsharedCount, subscribe: () => () => undefined, actionState: () => 'unknown', waitingActionCount: () => 0 };
+  }
+  function renderWith(unsharedCount: number): string {
+    let tr!: renderer.ReactTestRenderer;
+    renderer.act(() => {
+      tr = renderer.create(
+        <CommitShareProvider tracker={fakeTracker(unsharedCount) as never}>
+          <SyncChip />
+        </CommitShareProvider>,
+      );
+    });
+    return JSON.stringify(tr.toJSON());
+  }
+  afterEach(() => jest.clearAllMocks());
+
+  it('connected with unshared writes shows the not-shared presentation instead of Connected', () => {
+    (useCadreNode as jest.Mock).mockReturnValue({ syncState: 'connected', configFault: null, node: null, connectedPeers: jest.fn() });
+    const out = renderWith(3);
+    expect(out).toMatch(/cloud-arrow-up/);
+    expect(out).toMatch(/syncUnshared/);
+    expect(out).not.toMatch(/syncConnected/);
+  });
+
+  it('control: zero unshared writes keeps the plain Connected chip', () => {
+    (useCadreNode as jest.Mock).mockReturnValue({ syncState: 'connected', configFault: null, node: null, connectedPeers: jest.fn() });
+    const out = renderWith(0);
+    expect(out).toMatch(/syncConnected/);
+    expect(out).not.toMatch(/cloud-arrow-up/);
+  });
+
+  it('offline and a config fault both take precedence over unshared writes', () => {
+    (useCadreNode as jest.Mock).mockReturnValue({ syncState: 'offline', configFault: null, node: null, connectedPeers: jest.fn() });
+    expect(renderWith(2)).toMatch(/syncOffline/);
+    (useCadreNode as jest.Mock).mockReturnValue({ syncState: 'connected', configFault: { kind: 'missing', reason: 'empty-address-list' }, node: null, connectedPeers: jest.fn() });
+    expect(renderWith(2)).toMatch(/syncNotConfigured/);
+  });
+});

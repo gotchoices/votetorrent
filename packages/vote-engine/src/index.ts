@@ -56,3 +56,5 @@ export * from './blocks/index.js'
 // Phase 66: browser pairing (pairing code, statement verifiers, pair-mint wire and service, revocation).
 // Named-export barrel; see src/pairing/index.ts.
 export * from './pairing/index.js'
+// Which of this phone's writes no other member holds yet (todo 2026-09-11-optimystic-commit-success-hides-unresolvable-cohort).
+export * from './durability/index.js'

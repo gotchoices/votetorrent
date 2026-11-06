@@ -1638,6 +1638,57 @@ describe('ConfirmationScreen — waiting for the decision (D-27, UI-SPEC A3)', (
 		expect(mockPollDecisions).toHaveBeenCalledTimes(1);
 	});
 
+	// todo 2026-09-11-optimystic-commit-success-hides-unresolvable-cohort: an office cannot approve a
+	// request it never received, so the waiting state says when the request is held only on this phone.
+	function mountTracked(state: 'waiting' | 'shared') {
+		const tracked: string[] = [];
+		const tracker = {
+			unsharedCount: state === 'waiting' ? 1 : 0,
+			subscribe: () => () => undefined,
+			waitingActionCount: () => 0,
+			actionState: (key: string) => (tracked.includes(key) ? state : 'unknown'),
+			track: async (key: string, fn: () => Promise<unknown>) => {
+				tracked.push(key);
+				return fn();
+			},
+		};
+		const {CommitShareProvider} = require('../../../hooks/useCommitShare');
+		let tr!: renderer.ReactTestRenderer;
+		renderer.act(() => {
+			tr = renderer.create(
+				<CommitShareProvider tracker={tracker as never}>
+					<ConfirmationScreen />
+				</CommitShareProvider>,
+			);
+		});
+		renderedTrees.push(tr);
+		mounted.push(tr);
+		return {tr, tracked};
+	}
+
+	it('(1b) a request held only on this phone says so in the waiting state; both submits are attributed to it', async () => {
+		scriptPolls([]);
+		const {tr, tracked} = mountTracked('waiting');
+		await press(tr);
+
+		expect(present(tr, 'confirmation-waiting')).toBe(true);
+		const notice = tr.root.findByProps({testID: 'confirmation-not-shared'});
+		expect(notice.props.children).toBe(tReg()('confirmation.notShared'));
+		expect(notice.props.children).not.toBe('confirmation.notShared');
+		// The registration and association submits, both under ONE registration key.
+		expect(tracked.length).toBe(2);
+		expect(new Set(tracked).size).toBe(1);
+		expect(tracked[0]).toMatch(/^registration:/);
+	});
+
+	it('(1c) control: once the request is shared, the waiting state shows no such notice', async () => {
+		scriptPolls([]);
+		const {tr} = mountTracked('shared');
+		await press(tr);
+		expect(present(tr, 'confirmation-waiting')).toBe(true);
+		expect(present(tr, 'confirmation-not-shared')).toBe(false);
+	});
+
 	it('(2) the officer approves inside the window: the first Confirm finishes with no Try Again', async () => {
 		scriptPolls([() => [], () => [], () => [], () => [decision('c')]]);
 		const tr = mount();

@@ -20,6 +20,8 @@ import { readJoinBootstrap } from '../engines/join-bootstrap';
 import { openBootstrapPeerStore, openTrustedOwnerStore } from '../engines/rn-durable-slot';
 import { noiseCryptoForNode } from '../engines/noise-crypto-config';
 import { createEdgeReaderRefusal } from '@votetorrent/vote-engine/rn';
+import { CommitDurabilityTracker } from '@votetorrent/vote-engine/rn';
+import { CommitShareProvider } from '../hooks/useCommitShare';
 
 // ---------------------------------------------------------------------------
 // Context type
@@ -490,6 +492,19 @@ export function CadreNodeProvider({ children }: PropsWithChildren) {
     };
   }, [node]);
 
+  // Which of this phone's writes no other member holds yet (todo 2026-09-11-optimystic-commit-
+  // success-hides-unresolvable-cohort). One tracker per provider mount, attached to whichever node
+  // is live; screens read it through CommitShareContext (hooks/useCommitShare). Created defensively:
+  // a test that mocks '@votetorrent/vote-engine/rn' without the class gets no tracker, not a throw.
+  const [commitTracker] = useState<CommitDurabilityTracker | null>(() =>
+    typeof CommitDurabilityTracker === 'function' ? new CommitDurabilityTracker() : null,
+  );
+  useEffect(() => {
+    if (!node || !commitTracker) return;
+    commitTracker.attach(node);
+    return () => commitTracker.detach();
+  }, [node, commitTracker]);
+
   // connectedPeers reads live data from the StrandInstance (no polling — D-10).
   const connectedPeers = useCallback(
     (strandId: string): number => {
@@ -509,7 +524,7 @@ export function CadreNodeProvider({ children }: PropsWithChildren) {
         connectedPeers,
         refreshJoinBootstrap,
       }}>
-      {children}
+      {commitTracker ? <CommitShareProvider tracker={commitTracker}>{children}</CommitShareProvider> : children}
     </CadreNodeContext.Provider>
   );
 }

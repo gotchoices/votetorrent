@@ -25,7 +25,7 @@ const BOOT_FLUSH_TURNS = 20;
 let mockRelayFirstAttemptMisses = false;
 let mockStartGate: Promise<void> | null = null;
 let mockStartError: Error | null = null;
-const mockConstructedNodes: Array<{ receivedOptions: unknown; stop: jest.Mock }> = [];
+const mockConstructedNodes: Array<{ receivedOptions: unknown; stop: jest.Mock; listeners: Map<string, Set<(e: unknown) => void>>; emit: (event: string, e: unknown) => void }> = [];
 
 jest.mock(
 	'@serfab/cadre-core',
@@ -51,8 +51,19 @@ jest.mock(
 				this.receivedOptions = opts;
 				mockConstructedNodes.push(this);
 			}
-			on() {}
-			off() {}
+			// Listeners are recorded (not invoked by anything but a test's emit) so the commit-share
+			// test below can drive strand:commit-durability through the provider's real tracker.
+			public listeners = new Map<string, Set<(e: unknown) => void>>();
+			on(event: string, l: (e: unknown) => void) {
+				if (!this.listeners.has(event)) this.listeners.set(event, new Set());
+				this.listeners.get(event)!.add(l);
+			}
+			off(event: string, l: (e: unknown) => void) {
+				this.listeners.get(event)?.delete(l);
+			}
+			emit(event: string, e: unknown) {
+				for (const l of [...(this.listeners.get(event) ?? [])]) l(e);
+			}
 		}
 		const controlStorageScope = (partyId: string) => 'control-' + Buffer.from(partyId).toString('hex');
 		return {CadreNode: FakeCadreNode, controlStorageScope};
@@ -216,5 +227,35 @@ describe('CadreNodeProvider (Voter) — edge-reader cohort refusal', () => {
 			warnSpy.mockRestore();
 			errorSpy.mockRestore();
 		}
+	});
+});
+
+// todo 2026-09-11-optimystic-commit-success-hides-unresolvable-cohort: the provider's REAL tracker
+// listens to the live node and feeds useUnsharedCommitCount (Home's UnsharedChangesNotice).
+describe('CadreNodeProvider (Voter) — writes not shared yet', () => {
+	it('counts a commit no other member holds, and clears it when it is held', async () => {
+		const {useUnsharedCommitCount} = require('../../hooks/useCommitShare');
+		const seen = {count: -1};
+		function CountProbe() {
+			seen.count = useUnsharedCommitCount();
+			return null;
+		}
+		await renderer.act(async () => {
+			renderer.create(
+				<CadreNodeProvider>
+					<CountProbe />
+				</CadreNodeProvider>,
+			);
+			for (let i = 0; i < BOOT_FLUSH_TURNS; i++) {
+				await Promise.resolve();
+			}
+		});
+		const node = mockConstructedNodes[mockConstructedNodes.length - 1];
+		expect(node.listeners.get('strand:commit-durability')?.size).toBe(1);
+		expect(seen.count).toBe(0);
+		renderer.act(() => node.emit('strand:commit-durability', {strandId: 's', transactionId: 't', heldElsewhere: false, followed: true}));
+		expect(seen.count).toBe(1);
+		renderer.act(() => node.emit('strand:commit-held', {strandId: 's', transactionId: 't'}));
+		expect(seen.count).toBe(0);
 	});
 });
