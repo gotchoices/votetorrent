@@ -30,6 +30,7 @@ import { ElectionsCreateElectionBuilder } from './builders/elections-create-elec
 import { ElectionsAdjustElectionBuilder } from './builders/elections-adjust-election-builder.js'
 import { SigningEngine } from '../signing/signing-engine.js'
 import { adminSigningKeyValidity } from '../signing/signer-validity.js'
+import { assertTimelineAcceptable } from '../election/timeline-rules.js'
 
 // Phase 999.1 D-01/D-02/D-03 — Tids for ElectionsEngine batches are allocated
 // through the shared durable, peer-safe allocator (`tid-allocator.ts`,
@@ -151,6 +152,9 @@ export class ElectionsEngine implements IElectionsEngine {
    */
   async adjustElection (election: ElectionInit): Promise<void> {
     this.requireCtx('adjustElection')
+    // A timeline the Voter would refuse is refused here, before any Tid or write
+    // (todo 2026-10-29-engine-timeline-validation; rules in election/timeline-rules.ts).
+    assertTimelineAcceptable(election.revision?.timeline, election.election, 'adjustElection')
     // 62-104 (IN-06): a keyholder slot binds to its invitee by name, so names are unique per election.
     // Refused before any Tid is reserved or row written.
     if (findDuplicateKeyholderName((election.revision?.keyholders ?? []).map(k => k.name ?? '')) !== undefined) {
@@ -347,6 +351,9 @@ export class ElectionsEngine implements IElectionsEngine {
    */
   async createElection (election: ElectionInit, options?: { signingNonce?: string; revisionSigningNonce?: string }): Promise<void> {
     this.requireCtx('createElection')
+    // A timeline the Voter would refuse is refused here, before any Tid or write
+    // (todo 2026-10-29-engine-timeline-validation; rules in election/timeline-rules.ts).
+    if (election.revision) assertTimelineAcceptable(election.revision.timeline, election.election, 'createElection')
     // 62-104 (IN-06): a keyholder slot binds to its invitee by name, so names are unique per election.
     // Refused before any Tid is reserved or row written.
     if (findDuplicateKeyholderName((election.revision?.keyholders ?? []).map(k => k.name ?? '')) !== undefined) {

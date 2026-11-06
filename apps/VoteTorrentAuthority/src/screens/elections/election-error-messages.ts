@@ -39,6 +39,16 @@ function friendlyBuilderError(e: BuilderErrorLike, t: Translate): string {
 			return t("errThresholdExceedsKeyholders");
 		case "TIMELINE_ORDER":
 			return t("errTimelineOrder");
+		case "TIMELINE_PREPARATION_AFTER_VOTING":
+			return t("errTimelinePreparationAfterVoting");
+		case "TIMELINE_BALLOTS_FINAL_AFTER_DEADLINE":
+			return t("errTimelineBallotsFinalAfterDeadline");
+		case "TIMELINE_AFTER_ELECTION_DAY":
+			return t("errTimelineAfterElectionDay");
+		case "TIMELINE_CLOSED_BEFORE_ELECTION_DATE":
+			return t("errTimelineClosedBeforeElectionDate");
+		case "TIMELINE_UNPARSEABLE":
+			return t("errTimelineUnreadable");
 		case "EMPTY":
 		case "MISSING":
 		case "INVALID":
@@ -56,7 +66,39 @@ function friendlyBuilderError(e: BuilderErrorLike, t: Translate): string {
  * user-friendly string. Falls back to a generic save message — never leaks a raw
  * SQL constraint name or stack to the UI.
  */
+/** The engine's `timeline-invalid` refusal (vote-engine TimelineInvalidError), duck-typed like the builder error. */
+function timelineConflictsOf(err: unknown): Array<{ code: string; event: string }> | null {
+	if (typeof err !== "object" || err === null) return null;
+	const e = err as { code?: unknown; conflicts?: unknown };
+	if (e.code !== "timeline-invalid" || !Array.isArray(e.conflicts)) return null;
+	return e.conflicts as Array<{ code: string; event: string }>;
+}
+
+/** One engine timeline conflict to its copy key. Preparation events out of order get their own message. */
+function timelineConflictKey(c: { code: string; event: string }): string {
+	switch (c.code) {
+		case "OUT_OF_ORDER":
+			return c.event === "registrationEnds" || c.event === "ballotsFinal"
+				? "errTimelinePreparationAfterVoting"
+				: "errTimelineOrder";
+		case "BALLOTS_FINAL_AFTER_DEADLINE":
+			return "errTimelineBallotsFinalAfterDeadline";
+		case "EVENT_AFTER_ELECTION_DATE":
+			return "errTimelineAfterElectionDay";
+		case "CLOSED_BEFORE_ELECTION_DATE":
+			return "errTimelineClosedBeforeElectionDate";
+		case "UNPARSEABLE":
+			return "errTimelineUnreadable";
+		default:
+			return "errTimelineOrder";
+	}
+}
+
 export function mapElectionError(err: unknown, t: Translate): string {
+	const timelineConflicts = timelineConflictsOf(err);
+	if (timelineConflicts !== null && timelineConflicts.length > 0) {
+		return [...new Set(timelineConflicts.map((c) => t(timelineConflictKey(c))))].join("\n");
+	}
 	if (isBuilderValidationError(err)) {
 		// De-dupe so repeated codes (e.g. two date paths) don't show twice.
 		const seen = new Set<string>();

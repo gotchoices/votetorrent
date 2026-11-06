@@ -90,7 +90,9 @@ function makeElectionRevisionInit (overrides?: Partial<ElectionRevisionInit>): E
     keyholders: [],
     timeline: {
       [ElectionEvent.registrationEnds]: now + 25 * 86_400_000,
-      [ElectionEvent.ballotsFinal]: now + 14 * 86_400_000,
+      // A day inside the election's ballot deadline (addTestElection: its own now + 14 d, taken EARLIER
+      // than this now): "now + 14 d" here lands after the stored deadline, which the Voter refuses.
+      [ElectionEvent.ballotsFinal]: now + 13 * 86_400_000,
       [ElectionEvent.votingStarts]: now + 28 * 86_400_000,
       [ElectionEvent.accruingVotes]: now + 28 * 86_400_000 + 6 * 3_600_000,
       [ElectionEvent.hashingVotes]: now + 28 * 86_400_000 + 12 * 3_600_000,
@@ -623,15 +625,18 @@ describe('ElectionRevokeKeyholderBuilder', () => {
     const engine1 = new ElectionEngine(testElectionSubject, ctx1)
     let err1: unknown
     try { await engine1.revokeKeyholder(payload.keyholder, payload.electionId) } catch (e) { err1 = e }
+    // The subject names 'authority-1', which is not this network's authority, so the caller holds no
+    // 'ik' there and the permission check (todo 2026-10-02-keyholder-delete-...) refuses BEFORE target
+    // resolution. The "no accepted keyholder" path is pinned in keyholder-identity.spec.ts.
     expect(err1).to.be.instanceOf(Error)
-    expect((err1 as Error).message).to.include('no accepted keyholder')
+    expect((err1 as { code?: string }).code).to.equal('not-authorized')
 
     const { ctx: ctx2 } = await createTestNetwork()
     const engine2 = new ElectionEngine(testElectionSubject, ctx2)
     let err2: unknown
     try { await engine2.buildRevokeKeyholder().fromPayload(payload).commit() } catch (e) { err2 = e }
     expect(err2).to.be.instanceOf(Error)
-    expect((err2 as Error).message).to.include('no accepted keyholder')
+    expect((err2 as { code?: string }).code).to.equal('not-authorized')
 
     // Equivalence claim: both paths reject with the SAME message.
     expect((err1 as Error).message).to.equal((err2 as Error).message)

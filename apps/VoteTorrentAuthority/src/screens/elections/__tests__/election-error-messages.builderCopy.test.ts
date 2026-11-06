@@ -51,4 +51,32 @@ describe("mapElectionError builder validation copy", () => {
 		expect(mapElectionError(new Error("tallyingStarts"), t)).toBe("errTimelineOrder");
 		expect(mapElectionError(new Error("boom"), t)).toBe("errCouldNotSaveElection");
 	});
+
+	it("engine timeline check: each builder code names its own fix", () => {
+		const cases: Array<[string, string]> = [
+			["TIMELINE_PREPARATION_AFTER_VOTING", "errTimelinePreparationAfterVoting"],
+			["TIMELINE_BALLOTS_FINAL_AFTER_DEADLINE", "errTimelineBallotsFinalAfterDeadline"],
+			["TIMELINE_AFTER_ELECTION_DAY", "errTimelineAfterElectionDay"],
+			["TIMELINE_CLOSED_BEFORE_ELECTION_DATE", "errTimelineClosedBeforeElectionDate"],
+			["TIMELINE_UNPARSEABLE", "errTimelineUnreadable"],
+		];
+		for (const [code, key] of cases) {
+			expect(mapElectionError(builderErr([{ path: "revision.timeline.x", code, message: "m" }]), t)).toBe(key);
+		}
+	});
+
+	it("engine timeline check: the engine's timeline-invalid refusal maps by conflict, deduplicated", () => {
+		const refusal = Object.assign(new Error("createElection: the election timeline would make voters' apps refuse"), {
+			code: "timeline-invalid",
+			conflicts: [
+				{ code: "OUT_OF_ORDER", event: "registrationEnds", detail: "d" },
+				{ code: "OUT_OF_ORDER", event: "ballotsFinal", detail: "d" },
+				{ code: "OUT_OF_ORDER", event: "closed", detail: "d" },
+				{ code: "EVENT_AFTER_ELECTION_DATE", event: "votingStarts", detail: "d" },
+			],
+		});
+		expect(mapElectionError(refusal, t)).toBe(
+			["errTimelinePreparationAfterVoting", "errTimelineOrder", "errTimelineAfterElectionDay"].join("\n"),
+		);
+	});
 });

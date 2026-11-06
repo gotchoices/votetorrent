@@ -246,7 +246,10 @@ export function makeTestNetworkInit (overrides?: Partial<NetworkInit>): NetworkI
             // makes the fixture officer a LEGITIMATELY authorized one; it does not weaken any
             // assertion, and the negative case (an officer WITHOUT `'vrg'`) is covered explicitly
             // in registrant-seeding-scope.spec.ts.
-            scopes: ['rn', 'rad', 'vrg', 'iad', 'uai', 'mel', 'ceb'] as Scope[],
+            // 'cap' and 'ik' added with the revokeKeyholder permission check: the app's founding
+            // officer holds all nine codes (FOUNDING_OFFICER_SCOPES), and revoking a keyholder
+            // needs 'ik', the scope that invites keyholders.
+            scopes: ['rn', 'rad', 'vrg', 'iad', 'uai', 'mel', 'ceb', 'cap', 'ik'] as Scope[],
           },
         },
       ],
@@ -268,6 +271,12 @@ export function makeTestNetworkInit (overrides?: Partial<NetworkInit>): NetworkI
  */
 export function makeElectionInit (overrides?: Partial<ElectionInit['election']>): ElectionInit {
   const now = Date.now()
+  // The timeline follows the election's own dates, so overriding `date` or `ballotDeadline`
+  // still yields a timeline the Voter (and the engine's timeline check) accepts. With no
+  // override these are the same values the fixture always produced.
+  const date = typeof overrides?.date === 'number' ? overrides.date : now + 30 * 86_400_000
+  const ballotDeadline = typeof overrides?.ballotDeadline === 'number' ? overrides.ballotDeadline : now + 14 * 86_400_000
+  const votingStarts = date - 2 * 86_400_000
   return {
     election: {
       id: 'election-1',
@@ -287,16 +296,19 @@ export function makeElectionInit (overrides?: Partial<ElectionInit['election']>)
       instructions: '# Test Election',
       keyholders: [],
       timeline: {
-        [ElectionEvent.registrationEnds]: now + 25 * 86_400_000,
-        [ElectionEvent.ballotsFinal]: now + 14 * 86_400_000,
-        [ElectionEvent.votingStarts]: now + 28 * 86_400_000,
-        [ElectionEvent.accruingVotes]: now + 28 * 86_400_000 + 6 * 3_600_000,
-        [ElectionEvent.hashingVotes]: now + 28 * 86_400_000 + 12 * 3_600_000,
-        [ElectionEvent.releasingKeys]: now + 28 * 86_400_000 + 18 * 3_600_000,
-        [ElectionEvent.tallyingStarts]: now + 30 * 86_400_000,
-        [ElectionEvent.validation]: now + 31 * 86_400_000,
-        [ElectionEvent.certificationStarts]: now + 32 * 86_400_000,
-        [ElectionEvent.closed]: now + 33 * 86_400_000,
+        [ElectionEvent.registrationEnds]: date - 5 * 86_400_000,
+        // Floored to the second: Election.BallotDeadline is stored at second precision, so a
+        // millisecond-precise ballotsFinal "equal" to it would read up to 999 ms AFTER the stored
+        // deadline, and the Voter (and the engine check) would refuse the revision.
+        [ElectionEvent.ballotsFinal]: Math.floor(Math.min(ballotDeadline, date - 16 * 86_400_000) / 1000) * 1000,
+        [ElectionEvent.votingStarts]: votingStarts,
+        [ElectionEvent.accruingVotes]: votingStarts + 6 * 3_600_000,
+        [ElectionEvent.hashingVotes]: votingStarts + 12 * 3_600_000,
+        [ElectionEvent.releasingKeys]: votingStarts + 18 * 3_600_000,
+        [ElectionEvent.tallyingStarts]: date,
+        [ElectionEvent.validation]: date + 1 * 86_400_000,
+        [ElectionEvent.certificationStarts]: date + 2 * 86_400_000,
+        [ElectionEvent.closed]: date + 3 * 86_400_000,
       },
       keyholderThreshold: 1,
     },
