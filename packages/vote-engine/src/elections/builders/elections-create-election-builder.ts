@@ -5,6 +5,7 @@
  * ElectionsEngine.createElection.
  */
 
+import { timelineBuilderErrors } from '../../election/timeline-rules.js'
 import type {
   BuilderError,
   ElectionCoreInit,
@@ -135,6 +136,8 @@ export class ElectionsCreateElectionBuilder implements IElectionsCreateElectionB
           })
         }
       }
+      // The rest of what the Voter refuses (engine timeline check, election/timeline-rules.ts).
+      errors.push(...timelineBuilderErrors(r.timeline, draft.election ?? {}, errors))
     }
     return errors
   }

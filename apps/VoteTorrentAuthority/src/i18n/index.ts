@@ -140,6 +140,15 @@ const resources = {
 				'The election date is too soon for the ballot deadline. Please choose a later election date.',
 			errTimelineOrder:
 				'Please order the timeline so voting starts before tallying, and tallying before certification.',
+			// Engine timeline check (the same rules the Voter applies): each names the one fix the officer can make.
+			errTimelinePreparationAfterVoting:
+				'Registration must end and ballots must be final before voting starts.',
+			errTimelineBallotsFinalAfterDeadline:
+				'The ballots-final date is after the ballot deadline. Choose an earlier ballots-final date.',
+			errTimelineAfterElectionDay:
+				'Registration end, ballots final and voting start must fall on or before the election date.',
+			errTimelineClosedBeforeElectionDate: 'The election cannot close before the election date.',
+			errTimelineUnreadable: 'One of the timeline dates could not be read. Please enter it again.',
 			errThresholdExceedsKeyholders:
 				'The signing threshold cannot be more than the number of key holders.',
 			errCouldNotSaveElection:
@@ -1605,6 +1614,14 @@ const resources = {
 				'La fecha de la elección es demasiado pronto para la fecha límite de boletas. Elija una fecha de elección posterior.',
 			errTimelineOrder:
 				'Ordene el cronograma para que la votación comience antes del recuento, y el recuento antes de la certificación.',
+			errTimelinePreparationAfterVoting:
+				'El registro debe cerrar y las boletas deben quedar finales antes de que comience la votación.',
+			errTimelineBallotsFinalAfterDeadline:
+				'La fecha de boletas finales es posterior a la fecha límite de boletas. Elija una fecha anterior.',
+			errTimelineAfterElectionDay:
+				'El cierre del registro, las boletas finales y el inicio de la votación deben ser el día de la elección o antes.',
+			errTimelineClosedBeforeElectionDate: 'La elección no puede cerrarse antes de la fecha de la elección.',
+			errTimelineUnreadable: 'No se pudo leer una de las fechas del cronograma. Vuelva a ingresarla.',
 			errThresholdExceedsKeyholders:
 				'El umbral de firmas no puede ser mayor que el número de custodios.',
 			errCouldNotSaveElection:

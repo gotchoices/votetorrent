@@ -239,6 +239,10 @@ export function CreateElectionScreen() {
 					timeline: resolvedTimeline,
 					keyholderThreshold: Math.max(0, Math.trunc(revision.threshold)),
 				});
+			// Validate BEFORE either signature: build() throws the builder's errors, including the
+			// engine's timeline check (the rules the Voter applies), so an election the Voter would
+			// refuse costs the officer no biometric prompt and leaves no signed AdminSigning rows.
+			const payload = builder.build();
 
 			// Drive the engine signing seam — seam owns tid + Digest computation (D-03);
 			// the signer callback closes over the device private key app-side (D-01).
@@ -286,7 +290,7 @@ export function CreateElectionScreen() {
 
 			// Call createElection directly (not via builder.commit()) so both nonces are forwarded —
 			// ElectionsCreateElectionBuilder.commit() does NOT forward signingNonce (RESEARCH FQ3 option a).
-			const payload = builder.build();
+			// `payload` was built (and validated) above, before signing.
 			// D-27: no local scaffold persistence — createElection already persists
 			// ElectionRevision.Keyholders, and the engine is the single source.
 			await electionsEngine.createElection(payload, { signingNonce, revisionSigningNonce });

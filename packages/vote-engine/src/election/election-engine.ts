@@ -38,6 +38,7 @@ import { verifyUserKeyMembership } from '../user/verify-user-key.js'
 import { SigningEngine } from '../signing/signing-engine.js'
 import { fanOutSignatureTasks } from '../signing/fan-out.js'
 import { readAuthorityThreshold, listCurrentScopeHolders } from '../signing/threshold.js'
+import { assertTimelineAcceptable } from './timeline-rules.js'
 
 /**
  * Fixed ballot-header Tid for the `AdminSigning` digest at submit time.
@@ -510,6 +511,12 @@ export class ElectionEngine implements IElectionEngine {
     if (findDuplicateKeyholderName((revision.keyholders ?? []).map(k => k.name ?? '')) !== undefined) {
       throw Object.assign(new Error('Two keyholders on one election cannot share a name'), { code: 'duplicate-keyholder-name' })
     }
+    // A timeline the Voter would refuse is refused before any Tid or write, cross-checked
+    // against this election's schema-enforced dates (todo 2026-10-29-engine-timeline-validation).
+    const dates = await this.ctx.db
+      .prepare('select Date, BallotDeadline from Election where Id = :id')
+      .get({ id: revision.electionId })
+    assertTimelineAcceptable(revision.timeline, { date: dates?.Date, ballotDeadline: dates?.BallotDeadline }, 'proposeRevision')
     const tid = await allocateTid(this.ctx.db, 'election')
     const userId = this.ctx.user?.id ?? null
     const signerKey = this.ctx.user?.activeKeys?.[0]?.key ?? null
@@ -938,17 +945,28 @@ export class ElectionEngine implements IElectionEngine {
    * invitees, no inviteKey supplied) throws "ambiguous…" — in both cases
    * nothing is deleted. `this.ctx.user` never appears in this method.
    *
-   * Tier note (T-62-09-02, accepted — not mitigated by this plan): `Keyholder`
-   * has no `check on delete` constraint, so once a target is resolved the
-   * DELETE itself carries no schema-level authorization. Any strand writer
-   * could already issue the raw DELETE before this fix too; this method only
-   * fixes WHICH row is targeted, not WHO is allowed to target it. Tier-1
-   * delete authorization belongs to the Keyholder schema region (62-02).
+   * Who may revoke (todo 2026-10-02-keyholder-delete-has-no-check-and-revoke-checks-no-permission):
+   * the caller must be a CURRENT officer of this election's authority holding `ik`, the scope
+   * that issues keyholder invitations (`INVITE_ISSUING_SCOPE.k`). Refused with
+   * `code: 'not-authorized'` before the target is resolved, before any Tid, before any write.
+   *
+   * Tier note: this is a tier-2 (engine) check. `Keyholder` still has no `check on delete`, so
+   * a client writing to the raw database handle can still issue the DELETE. The schema CHECK is
+   * held back with the rest of the schema amendments (todo
+   * 2026-10-07-on-device-reattach-harness-and-schema-amendment-batch).
    */
   async revokeKeyholder (
     keyholder: KeyholderInvite,
     electionId: string
   ): Promise<void> {
+    const callerId = this.ctx.user?.id
+    const ikHolders = await listCurrentScopeHolders(this.ctx.db, this.election.authorityId, 'ik')
+    if (typeof callerId !== 'string' || callerId.length === 0 || !ikHolders.includes(callerId)) {
+      throw Object.assign(
+        new Error(`revokeKeyholder: only a current officer holding 'ik' may revoke a keyholder on election ${electionId}`),
+        { code: 'not-authorized' }
+      )
+    }
     try {
       const candidateParams: Record<string, SqlValue> = { electionId, name: keyholder.name }
       let inviteKeyFilter = ''
