@@ -5,6 +5,7 @@ import {useTranslation} from 'react-i18next';
 import {ExtendedTheme, useTheme} from '@react-navigation/native';
 import {ThemedText} from './ThemedText';
 import {useCadreNode} from '../providers/CadreNodeProvider';
+import {useUnsharedCommitCount} from '../hooks/useCommitShare';
 
 /**
  * SyncChip — P2P-07 + D-14 config-fault precedence (56-10)
@@ -23,6 +24,9 @@ import {useCadreNode} from '../providers/CadreNodeProvider';
  *   'connected'         → green  'wifi'                 icon + Connected label
  *   'syncing'           → orange 'rotate'                icon + Syncing label
  *   'offline'           → red    'link-slash'            icon + Offline label
+ *   unshared > 0        → orange 'cloud-arrow-up'        icon + Not shared: N label
+ *     (after configFault and 'offline', before 'syncing'/'connected': N writes on this phone that
+ *     no other member holds yet -- todo 2026-09-11-optimystic-commit-success-hides-unresolvable-cohort)
  *
  * Note: icon names must exist in the FontAwesome6 *Free* glyphmap — 'wifi-slash'
  * is Pro-only and renders as a tofu "?" glyph, so 'link-slash' is used for offline;
@@ -32,9 +36,12 @@ export function SyncChip() {
 	const {colors} = useTheme() as ExtendedTheme;
 	const {t} = useTranslation();
 	const {syncState, configFault} = useCadreNode();
+	const unshared = useUnsharedCommitCount();
 
 	const presentation = configFault
 		? {icon: 'triangle-exclamation', color: colors.warning, textColor: colors.warningText, label: t('syncNotConfigured')}
+		: syncState !== 'offline' && unshared > 0
+		? {icon: 'cloud-arrow-up', color: colors.warning, textColor: colors.warningText, label: t('syncUnshared', {count: unshared})}
 		: {
 				connected: {icon: 'wifi', color: colors.success, textColor: colors.success, label: t('syncConnected')},
 				syncing: {icon: 'rotate', color: colors.warning, textColor: colors.warningText, label: t('syncSyncing')},

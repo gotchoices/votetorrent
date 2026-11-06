@@ -142,6 +142,13 @@ let mockRouteParams: { authorityId: string } = { authorityId: "fixture-authority
 // ---------------------------------------------------------------------------
 
 jest.mock("react-native-vector-icons/FontAwesome6", () => "FontAwesome6");
+// todo 2026-09-11-optimystic-commit-success-hides-unresolvable-cohort: how many decisions made on
+// this phone no other member holds yet. 0 (no banner) unless a test sets it.
+let mockWaitingDecisions = 0;
+jest.mock("../../../hooks/useCommitShare", () => ({
+	...jest.requireActual("../../../hooks/useCommitShare"),
+	useWaitingActionCount: (prefix: string) => (prefix === "decision:" ? mockWaitingDecisions : 0),
+}));
 
 jest.mock("react-native-safe-area-context", () => ({
 	useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
@@ -1202,4 +1209,23 @@ describe("RegistrationInboxScreen — D-03/D-09/D-12 (48-18)", () => {
 	// unresolvable cursor yields an empty page and never page 1 — are owned by
 	// packages/vote-engine/test/registration-request-read.spec.ts, and this
 	// comment says so rather than implying the branches are covered.
+});
+
+describe("RegistrationInboxScreen — decisions not shared yet", () => {
+	afterEach(() => {
+		mockWaitingDecisions = 0;
+	});
+
+	it("shows the not-shared banner with the count while decisions made here have not reached the network", async () => {
+		mockWaitingDecisions = 2;
+		const tr = await renderScreen();
+		const banners = tr.root.findAll((n) => n.props.testID === "registration-inbox-decisions-not-shared" && typeof n.type === "string");
+		expect(banners.length).toBe(1);
+		expect(JSON.stringify(tr.toJSON())).toContain("decisionsNotShared|count=2");
+	});
+
+	it("control: no banner when every decision is shared", async () => {
+		const tr = await renderScreen();
+		expect(JSON.stringify(tr.toJSON())).not.toContain("registration-inbox-decisions-not-shared");
+	});
 });

@@ -35,6 +35,8 @@ import { hostPoolRendezvous } from '../engines/pool-rendezvous-host';
 import { startPairMintHost, type PairMintHost } from '../engines/pair-mint-host';
 import type { PairMintReply, PairMintRequest } from '@votetorrent/vote-engine/rn';
 import { createEdgeReaderRefusal } from '@votetorrent/vote-engine/rn';
+import { CommitDurabilityTracker } from '@votetorrent/vote-engine/rn';
+import { CommitShareProvider } from '../hooks/useCommitShare';
 
 // ---------------------------------------------------------------------------
 // `Promise.withResolvers` ambient augmentation (D-08/D-09).
@@ -644,6 +646,19 @@ export function CadreNodeProvider({ children }: PropsWithChildren) {
     };
   }, [node]);
 
+  // Which of this phone's writes no other member holds yet (todo 2026-09-11-optimystic-commit-
+  // success-hides-unresolvable-cohort). One tracker per provider mount, attached to whichever node
+  // is live; screens read it through CommitShareContext (hooks/useCommitShare). Created defensively:
+  // a test that mocks '@votetorrent/vote-engine/rn' without the class gets no tracker, not a throw.
+  const [commitTracker] = useState<CommitDurabilityTracker | null>(() =>
+    typeof CommitDurabilityTracker === 'function' ? new CommitDurabilityTracker() : null,
+  );
+  useEffect(() => {
+    if (!node || !commitTracker) return;
+    commitTracker.attach(node);
+    return () => commitTracker.detach();
+  }, [node, commitTracker]);
+
   // connectedPeers reads live data from the StrandInstance (no polling — D-10).
   const connectedPeers = useCallback(
     (strandId: string): number => {
@@ -679,7 +694,7 @@ export function CadreNodeProvider({ children }: PropsWithChildren) {
       }}
     >
       <PairMintLocalContext.Provider value={getPairMintLocal}>
-      {children}
+      {commitTracker ? <CommitShareProvider tracker={commitTracker}>{children}</CommitShareProvider> : children}
       </PairMintLocalContext.Provider>
     </CadreNodeContext.Provider>
   );

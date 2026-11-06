@@ -54,6 +54,7 @@ import { RejectReasonCard } from "./components/RejectReasonCard";
 import { pillStyles, tintPill } from "./components/pill";
 import type { RootStackParamList } from "../../navigation/types";
 import { peerUnavailableMessage } from "../../utils/peerUnavailableMessage";
+import { trackCommits, useCommitShareTracker } from "../../hooks/useCommitShare";
 
 /**
  * A local failure carried by code only. The code is the whole message: it never holds a request id or a
@@ -264,6 +265,10 @@ type ApprovalMode = "loading" | "pending" | "approved" | "rejected";
 
 export default function RegistrationRequestApprovalScreen() {
 	const { requestId, authorityId } = useRoute().params as { requestId: string; authorityId: string };
+	// Writes this decision makes are attributed to it, so the inbox can say when one has not reached
+	// the network yet (todo 2026-09-11-optimystic-commit-success-hides-unresolvable-cohort).
+	const commitTracker = useCommitShareTracker();
+	const trackDecision = <T,>(fn: () => Promise<T>): Promise<T> => trackCommits(commitTracker, `decision:${requestId}`, fn);
 	const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 	const { t } = useTranslation();
 	// Effects read the translator through a ref so a language change does not re-run the load.
@@ -525,15 +530,17 @@ export default function RegistrationRequestApprovalScreen() {
 			// covered by nothing. `decision.checklist` is the SAME array instance
 			// `VerificationChecklist` rendered, so what the officer sees and what
 			// the officer signs cannot diverge.
-			await engine.completeSignature(task, {
-				isAccepted: true,
-				signature,
-				sign: signer,
-				decision: { checklist: checked },
-			});
+			await trackDecision(() =>
+				engine.completeSignature(task, {
+					isAccepted: true,
+					signature,
+					sign: signer,
+					decision: { checklist: checked },
+				}),
+			);
 			// D-44: publish right after the decision resolves. Never throws, and a failure here
 			// is never reported as a failed decision: 62-25's drain publishes it later.
-			const published = await publishRegistrationDecisionAfterDecide(buildReviewDeps(), requestId, closesRequestId());
+			const published = await trackDecision(() => publishRegistrationDecisionAfterDecide(buildReviewDeps(), requestId, closesRequestId()));
 			if (thresholdAboveOne && published.kind === "still-pending") {
 				// Below threshold: the vote is recorded, the request is still pending.
 				setReloadNonce((n) => n + 1);
@@ -601,7 +608,7 @@ export default function RegistrationRequestApprovalScreen() {
 			const signer = await createDeviceSigner("Device User");
 			// `reason` arrives already trimmed from RejectReasonCard — not
 			// re-trimmed here.
-			await reg.rejectRegistrationRequest(requestId, { checklist: checked, rejectionReason: reason }, signer);
+			await trackDecision(() => reg.rejectRegistrationRequest(requestId, { checklist: checked, rejectionReason: reason }, signer));
 			// WR-14: past this line the rejection IS RECORDED — permanently, signed, and
 			// `NoDelete`. The two steps below are therefore NOT part of the same atomic act and
 			// must not be reported as one.
@@ -640,7 +647,7 @@ export default function RegistrationRequestApprovalScreen() {
 			//
 			// WR-14 (62-27): publishing is a third, separately failing act whose failure is never
 			// reported as a failed refusal. It never throws.
-			await publishRegistrationDecisionAfterDecide(buildReviewDeps(), requestId, closesRequestId());
+			await trackDecision(() => publishRegistrationDecisionAfterDecide(buildReviewDeps(), requestId, closesRequestId()));
 			navigation.goBack();
 		} catch (err) {
 			if (isClosedAsDuplicateError(err)) {

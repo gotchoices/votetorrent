@@ -36,6 +36,10 @@ const resources = {
 			syncSyncing: 'Syncing',
 			syncOffline: 'Offline',
 			syncNotConfigured: 'Not configured',
+			// Writes on this phone that no other member of the network holds yet (count).
+			syncUnshared: 'Not shared: {{count}}',
+			decisionsNotShared:
+				'{{count}} decision(s) saved on this phone have not reached the network yet. Keep the app open and connected.',
 			invalidBootstrapAddress: 'Invalid bootstrap address',
 			joinFailed: 'Could not join network',
 			qrScanUnavailable: 'QR scanning is not available yet',
@@ -1510,6 +1514,9 @@ const resources = {
 			syncSyncing: 'Sincronizando',
 			syncOffline: 'Sin conexión',
 			syncNotConfigured: 'Sin configurar',
+			syncUnshared: 'Sin compartir: {{count}}',
+			decisionsNotShared:
+				'{{count}} decisión(es) guardada(s) en este teléfono aún no llegan a la red. Mantén la aplicación abierta y conectada.',
 			invalidBootstrapAddress: 'Dirección de bootstrap no válida',
 			joinFailed: 'No se pudo unir a la red',
 			qrScanUnavailable: 'El escaneo de QR aún no está disponible',

@@ -37,6 +37,7 @@ import type { RootStackParamList } from "../../navigation/types";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useKeyboardInset } from "../../hooks/useKeyboardInset";
 import { useStrandChanges } from "../../hooks/useStrandChanges";
+import { useWaitingActionCount } from "../../hooks/useCommitShare";
 
 // D-12: this screen previously carried a screen-local loosely-typed
 // navigation widening because RootStackParamList did not yet carry
@@ -67,6 +68,9 @@ export default function RegistrationInboxScreen() {
 	const { t } = useTranslation();
 	const keyboardInset = useKeyboardInset();
 	const { colors } = useTheme() as ExtendedTheme;
+	// Decisions made on this phone (approval screens track them as "decision:<requestId>") that no
+	// other member holds yet (todo 2026-09-11-optimystic-commit-success-hides-unresolvable-cohort).
+	const unsharedDecisions = useWaitingActionCount("decision:");
 	const insets = useSafeAreaInsets();
 	const { getEngine } = useApp();
 	const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
@@ -329,6 +333,17 @@ export default function RegistrationInboxScreen() {
 			<View style={styles.section} testID="registration-inbox-error">
 				<InlineError message={errorMessage} />
 			</View>
+
+			{unsharedDecisions > 0 ? (
+				<View style={styles.section}>
+					<View testID="registration-inbox-decisions-not-shared" style={localStyles.banner} accessibilityLiveRegion="polite">
+						<FontAwesome6 name="cloud-arrow-up" size={14} color={colors.warning} />
+						<ThemedText type="small" style={{ color: colors.warningText ?? colors.text, flexShrink: 1 }}>
+							{t("decisionsNotShared", { count: unsharedDecisions })}
+						</ThemedText>
+					</View>
+				</View>
+			) : null}
 
 			{/* Two-branch scope-gate banner — a UI legibility affordance ONLY,
 			    NEVER a security boundary (AdminSigning.SignerKeyValid /

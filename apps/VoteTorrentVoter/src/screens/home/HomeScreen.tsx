@@ -30,6 +30,7 @@ import type {VoteStackParamList} from '../../navigation/types';
 import {ElectionCard} from '../../components/ElectionCard';
 import {NetworkHeader} from '../../components/NetworkHeader';
 import {ConfigFaultNotice} from '../../components/ConfigFaultNotice';
+import {UnsharedChangesNotice} from '../../components/UnsharedChangesNotice';
 import {InfoDialog} from '../../components/InfoDialog';
 import {InfoDetails} from '../../components/InfoDetails';
 import {readElectionInfo} from '../../engines/info-read';
@@ -248,6 +249,7 @@ export default function HomeScreen() {
 		<View style={[styles.screen, {backgroundColor: colors.background}]}>
 			<NetworkHeader networkName={networkName} />
 			<ConfigFaultNotice />
+			<UnsharedChangesNotice />
 
 			<ScrollView contentContainerStyle={styles.content}>
 				{isInitialized && election ? (

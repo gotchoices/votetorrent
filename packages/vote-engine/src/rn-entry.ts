@@ -505,3 +505,8 @@ export type {
 	PairingRevocationSigner,
 	PairingRevocationReason
 } from './pairing/index.js'
+
+// Which of this phone's writes no other member holds yet (todo 2026-09-11-optimystic-commit-success-hides-
+// unresolvable-cohort): fed by CadreNode's strand:commit-durability / strand:commit-held events. By name.
+export { CommitDurabilityTracker } from './durability/index.js'
+export type { ActionShareState, CommitDurabilityReport, CommitEventSource, CommitHeldReport } from './durability/index.js'
