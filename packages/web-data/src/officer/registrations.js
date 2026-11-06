@@ -194,14 +194,13 @@ export async function readRegistrationSurfaceCounts(db, electionId) {
  * Registrations panel -- so that decision lives here, not in the
  * component.
  *
- * @param {import('@quereus/quereus').Database} db
- * @returns {Promise<boolean>}
- */
-/**
  * Phase 62 Plan 25 (62-01's open question, answered): an `AuthorityIntakePolicy` row alone makes
  * this return true, exactly as `RegistrationBridgeKey` already does. Both are configuration rows,
  * not registrant data, but an officer who saved a bridge URL or a re-association mode must see
  * that row reflected in the panel's surface counts, not an "empty" placeholder that hides it.
+ *
+ * @param {import('@quereus/quereus').Database} db
+ * @returns {Promise<boolean>}
  */
 export async function hasAnyRegistrationData(db) {
 	const row = await db
