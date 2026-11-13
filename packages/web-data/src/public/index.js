@@ -75,6 +75,8 @@ export { readRegistrantRoll, TABLES_READ as ROLL_TABLES_READ } from './read-regi
 export { readKeyReleaseProgress, TABLES_READ as KEYRELEASE_TABLES_READ } from './read-keyrelease.js';
 // 56-30: the published results (ElectionTally reclassified PUBLIC by user decision 2026-11-13).
 export { readPublishedResults, TallyUnreadableError, TABLES_READ as TALLY_TABLES_READ } from './read-tally.js';
+// 56-31: ballots cast so far, counted on the network (run against the strand read handle; never replicated).
+export { readNetworkTurnout, TABLES_READ as TURNOUT_TABLES_READ } from './read-turnout.js';
 
 // D-27's live-read seam (54-15). ADDITIVE: nothing above changed. The
 // allowlist it exports is DERIVED from the three read modules' own

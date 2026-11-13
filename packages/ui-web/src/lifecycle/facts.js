@@ -295,20 +295,22 @@ export const FACTS = Object.freeze([
 	// table. 088's literal "why" prose is moved into a comment here -- it is
 	// the provenance a code reader wants and exactly the renderable English
 	// this module must not carry (only `sentenceKey`/`detailKey` render).
-	// Gap A (087): no Vote or VoteEntry table exists -- vote and voter
-	// entries live in negotiated blocks the schema does not model.
+	// Gap A (087), FILLED (56-31, user decision 2026-11-13 "Count on the
+	// network"): VoteBlock is AGGREGATE; the page counts committed blocks and
+	// the votes in them on the strand (two numbers, no rows stored). No
+	// sentence of its own: the card body is the count, selected on the data.
 	fact({
 		id: 'turnout',
 		group: 'outcome',
 		phases: ['voting', 'settling', 'closed'],
 		labelKey: 'public.fact.turnout.label',
-		sentenceKey: 'public.gap.turnout.sentence',
-		detailKey: 'public.gap.turnout.detail',
+		sentenceKey: null,
+		detailKey: 'public.fact.turnout.detail',
 		emptyKey: null,
 		interpolates: null,
-		gap: 'A',
-		filledGap: null,
-		source: null,
+		gap: null,
+		filledGap: 'A',
+		source: 'VoteBlock count(*) and sum(EntryCount), counted on the network (56-31)',
 	}),
 	// Gap B (087): the vote nonce is held privately by the voter; there is
 	// nothing on the network to check it against.

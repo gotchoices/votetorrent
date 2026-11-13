@@ -151,7 +151,8 @@ import { collectionIdForTable } from './collection-id.js';
 // See this module's header ("THIS MODULE CREATES THE UI STORE") for when it
 // is called; `openUiHandleForNetwork` is this file's own name for that single
 // import, used everywhere below.
-import { attachLiveDb as openUiHandleForNetwork, closeNetworkDb, PUBLIC_SUBSCRIBED_TABLES } from '@votetorrent/web-data/public';
+import { attachLiveDb as openUiHandleForNetwork, closeNetworkDb, PUBLIC_SUBSCRIBED_TABLES, readNetworkTurnout } from '@votetorrent/web-data/public';
+import { registerTurnoutReader } from './turnout-source.js';
 
 /** The one read that proves the addressed election exists on the network.
  * A named bind, the convention `@votetorrent/web-data/public`'s read modules
@@ -242,6 +243,8 @@ export const PEER_BOOT_STATUS = Object.freeze({
  * @property {typeof startPeerReplication} [startPeerReplication]
  * @property {typeof createPageTailReader} [createPageTailReader]
  * @property {ReadonlyArray<string>} [subscribedTables] - defaults to `PUBLIC_SUBSCRIBED_TABLES`; injectable only for the node test.
+ * @property {typeof registerTurnoutReader} [registerTurnoutReader] - 56-31
+ * @property {typeof readNetworkTurnout} [readNetworkTurnout] - 56-31
  */
 
 /**
@@ -292,6 +295,8 @@ export async function startPublicPeerBoot(options) {
 		startPeerReplication: deps.startPeerReplication ?? startPeerReplication,
 		createPageTailReader: deps.createPageTailReader ?? createPageTailReader,
 		subscribedTables: deps.subscribedTables ?? PUBLIC_SUBSCRIBED_TABLES,
+		registerTurnoutReader: deps.registerTurnoutReader ?? registerTurnoutReader,
+		readNetworkTurnout: deps.readNetworkTurnout ?? readNetworkTurnout,
 	};
 
 	// -- 1. No usable address: the root, election-less page must not open a
@@ -317,12 +322,22 @@ export async function startPublicPeerBoot(options) {
 	let uiDb = null;
 	/** @type {Array<() => Promise<void>>} */
 	const replicationStops = [];
+	/** 56-31: removes this boot's turnout reader; runs FIRST in the unwind. @type {(() => void) | null} */
+	let unregisterTurnout = null;
 
 	/** Idempotent-safe teardown of everything acquired so far, in the fixed
 	 * order this function's own contract promises. Every leg swallows its own
 	 * error so one failed teardown never blocks the rest.
 	 * @returns {Promise<void>} */
 	const unwind = async () => {
+		if (unregisterTurnout) {
+			try {
+				unregisterTurnout();
+			} catch {
+				// Swallowed.
+			}
+			unregisterTurnout = null;
+		}
 		for (let i = replicationStops.length - 1; i >= 0; i -= 1) {
 			try {
 				await replicationStops[i]();
@@ -436,6 +451,14 @@ export async function startPublicPeerBoot(options) {
 			readRows,
 		});
 		replicationStops.push(() => replication.stop());
+
+		// -- 7b. 56-31: ballots cast so far are counted on the strand through
+		//        this boot's read handle (two numbers, no rows stored). The
+		//        page asks through `turnout-source.js`.
+		const turnoutHandle = strandReadHandle;
+		unregisterTurnout = resolved.registerTurnoutReader(networkHash, (/** @type {string} */ id) =>
+			resolved.readNetworkTurnout(turnoutHandle.db, id),
+		);
 
 		// -- 8. Started. `stop()` is idempotent and runs every unwind step,
 		//       replications first, then the strand-read handle, then the Edge

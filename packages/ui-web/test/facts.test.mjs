@@ -181,24 +181,26 @@ test('rung 5b: no entry carries the letter H, and no entry id is "runoff" -- run
 // Rung 6: keyrelease is filled, never gapped (D-14/D-12)
 // ===========================================================================
 
-test('rung 6: exactly two entries have a non-null filledGap -- keyrelease (D, interpolates [released, total]) and, since 56-30, results (E, no sentence, no interpolation) -- both with gap: null', () => {
+test('rung 6: exactly three entries have a non-null filledGap -- turnout (A, 56-31), keyrelease (D, interpolates [released, total]) and results (E, 56-30) -- all with gap: null', () => {
 	const filled = FACTS.filter((f) => f.filledGap !== null);
-	assert.deepEqual(filled.map((f) => [f.id, f.filledGap]), [['keyrelease', 'D'], ['results', 'E']], 'expected exactly the two filled entries');
+	assert.deepEqual(filled.map((f) => [f.id, f.filledGap]), [['turnout', 'A'], ['keyrelease', 'D'], ['results', 'E']], 'expected exactly the three filled entries');
 	for (const f of filled) assert.equal(f.gap, null);
-	assert.deepEqual(filled[0].interpolates, ['released', 'total']);
-	// 56-30: the results card is selected by `filledGap !== null && interpolates === null`; its body is the results view.
-	assert.equal(filled[1].interpolates, null);
-	assert.equal(filled[1].sentenceKey, null);
-	assert.equal(typeof filled[1].detailKey, 'string');
+	assert.deepEqual(filled[1].interpolates, ['released', 'total']);
+	// 56-30/56-31: the results and turnout cards have no sentence and no interpolation; their bodies are selected by the filled letter.
+	for (const f of [filled[0], filled[2]]) {
+		assert.equal(f.interpolates, null);
+		assert.equal(f.sentenceKey, null);
+		assert.equal(typeof f.detailKey, 'string');
+	}
 
 	const withInterpolates = FACTS.filter((f) => f.interpolates !== null);
 	assert.equal(withInterpolates.length, 1, 'keyrelease must be the only entry with non-null interpolates');
 	assert.equal(withInterpolates[0].id, 'keyrelease');
 });
 
-test('rung 6b: exactly five entries carry a non-null gap (56-30 filled E), and each has both a sentenceKey and a detailKey (D-12)', () => {
+test('rung 6b: exactly four entries carry a non-null gap (56-30 filled E, 56-31 filled A), and each has both a sentenceKey and a detailKey (D-12)', () => {
 	const gapped = FACTS.filter((f) => f.gap !== null);
-	assert.equal(gapped.length, 5, `expected 5 gap entries, got ${gapped.length}`);
+	assert.equal(gapped.length, 4, `expected 4 gap entries, got ${gapped.length}`);
 	for (const f of gapped) {
 		assert.equal(typeof f.sentenceKey, 'string', `gap entry "${f.id}" must have a sentenceKey`);
 		assert.equal(typeof f.detailKey, 'string', `gap entry "${f.id}" must have a detailKey`);

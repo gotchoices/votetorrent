@@ -100,10 +100,12 @@ const FIXTURES = Object.freeze({
 	/** The four group names, in UI-SPEC top-to-bottom order. */
 	groupOrder: Object.freeze(['electionAndRules', 'ballot', 'electorate', 'outcome']),
 	/** The five gapped fact ids (56-30 filled results) and the key-release filled id (D-16). */
-	gappedIds: Object.freeze(['turnout', 'receipt', 'merkle', 'validation', 'certification']),
+	gappedIds: Object.freeze(['receipt', 'merkle', 'validation', 'certification']),
 	filledGapId: 'keyrelease',
 	/** 56-30: the second filled entry, the results card. */
 	resultsId: 'results',
+	/** 56-31: the third filled entry, ballots cast so far. */
+	turnoutId: 'turnout',
 	/** The eighth gap that must never exist, and the letter that would carry it. */
 	forbiddenGapId: 'runoff',
 	forbiddenGapLetter: 'H',
@@ -308,8 +310,11 @@ test('3b. the whole-page flatten is exact for the three phases where cross-group
 //    Turnout must sit next to polls, not in an appendix.
 // ---------------------------------------------------------------------------
 
-test('4. at least one returned group holds BOTH a gapped and a non-gapped fact, for voting and for settling', () => {
-	for (const phase of ['voting', 'settling']) {
+test('4. at least one returned group holds BOTH a gapped and a non-gapped fact, for settling (and voting has no gap at all since 56-31 filled turnout, its only one)', () => {
+	// 56-31 (deliberate pin move): voting's only gap was turnout. The property this rung protects -- gaps are
+	// never sectioned off from facts -- still holds wherever a gap exists.
+	assert.equal(groupFactsForPhase('voting').flatMap((g) => g.facts).filter((f) => f.gap !== null).length, 0);
+	for (const phase of ['settling']) {
 		const mixed = groupFactsForPhase(phase).filter(
 			(g) => g.facts.some((f) => f.gap !== null) && g.facts.some((f) => f.gap === null),
 		);
@@ -373,12 +378,12 @@ test('6. groupFactList throws a named FactGroupingError, naming the offending id
 //    keeps an eighth gap out when a later reader "notices it is missing".
 // ---------------------------------------------------------------------------
 
-test('7. exactly five gapped entries, exactly two filled-gap entries (keyrelease, and results since 56-30; gap null), no runoff and no eighth letter', () => {
+test('7. exactly four gapped entries, exactly three filled-gap entries (turnout 56-31, keyrelease, results 56-30; gap null), no runoff and no eighth letter', () => {
 	const gapped = FACTS.filter((f) => f.gap !== null).map((f) => f.id);
-	assert.deepEqual([...gapped].sort(), [...FIXTURES.gappedIds].sort(), 'the gap set is not the five left after 56-30');
+	assert.deepEqual([...gapped].sort(), [...FIXTURES.gappedIds].sort(), 'the gap set is not the four left after 56-31');
 
 	const filled = FACTS.filter((f) => f.filledGap !== null);
-	assert.deepEqual(filled.map((f) => f.id), [FIXTURES.filledGapId, FIXTURES.resultsId], 'expected exactly the two filled-gap entries');
+	assert.deepEqual(filled.map((f) => f.id), [FIXTURES.turnoutId, FIXTURES.filledGapId, FIXTURES.resultsId], 'expected exactly the three filled-gap entries');
 	assert.equal(filled[0].gap, null, 'the key-release entry carries a gap — it would render on the GAP branch, contradicting D-14');
 
 	assert.ok(!FACTS.some((f) => f.id === FIXTURES.forbiddenGapId), 'a runoff entry was invented');
@@ -847,8 +852,13 @@ test('56-30 positive control: the text-position extractor finds a planted id and
 	assert.deepEqual(found, ['ballot.ballotId', "t('public.fact.results.blank', { count: 1 })"]);
 });
 
-test('56-30: FactSections selects the results card on the data (filled gap, no interpolation), never on the id', () => {
-	assert.match(SECTIONS_TSX_56_30, /const rendersResults = fact\.filledGap !== null && fact\.interpolates === null;/);
+test('56-30/56-31: FactSections selects the results and turnout cards on the data (their filled letters), never on the id', () => {
+	assert.match(SECTIONS_TSX_56_30, /const rendersResults = fact\.filledGap === 'E';/);
+	assert.match(SECTIONS_TSX_56_30, /const rendersTurnout = fact\.filledGap === 'A';/);
+	for (const state of ['counted', 'counting', 'unavailable']) {
+		assert.match(SECTIONS_TSX_56_30, new RegExp(`rendersTurnout && turnout\\.state === '${state}'`), `the ${state} turnout branch is missing`);
+	}
+	assert.doesNotMatch(SECTIONS_TSX_56_30, /fact\.id\s*===\s*'turnout'/);
 	assert.match(SECTIONS_TSX_56_30, /\{rendersResults \? <PublishedResults results=\{results\} \/> : null\}/);
 	assert.doesNotMatch(SECTIONS_TSX_56_30, /fact\.id\s*===\s*'results'/);
 	// Control: the id matcher fires on a planted id check.

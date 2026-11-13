@@ -270,6 +270,14 @@ export interface PublishedResultsValue {
 
 const RESULTS_UNREADABLE: PublicResultsReading = Object.freeze({ state: 'unreadable' });
 
+/** 56-31: ballots cast so far, counted on the network. `counting` while the
+ * page's connection is starting or the first count is in flight;
+ * `unavailable` once the connection failed or the count could not be taken. */
+export type PublicTurnoutReading =
+	| { state: 'counted'; votes: number; blocks: number }
+	| { state: 'counting' }
+	| { state: 'unavailable' };
+
 /** Structural, not imported: `use-public-election.ts` is the only TypeScript
  * file on this path and the read seam is plain JSDoc `.js`. */
 export interface KeyReleaseProgress {

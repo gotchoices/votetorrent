@@ -432,6 +432,14 @@ export const COPY = Object.freeze({
 	'public.fact.electorate.label': 'Eligible electorate',
 	'public.fact.keyholders.label': 'Keyholders',
 	'public.fact.turnout.label': 'Ballots cast',
+	// 56-31 (gap A filled): ballots cast so far, counted on the network.
+	// Three states like the results card; the detail says what is and is
+	// not read (counts only, nothing about who voted or how).
+	'public.fact.turnout.detail':
+		'Counted on the network from the vote blocks committed for this election, and checked again every 30 seconds while this page is connected. Ballots in a block that is still forming are counted once that block is committed. Nothing about who voted or how is read.',
+	'public.fact.turnout.counted': 'Ballots cast so far: {{votes}}. Vote blocks committed: {{blocks}}.',
+	'public.fact.turnout.counting': 'Counting the ballots cast on the network.',
+	'public.fact.turnout.unavailable': "This page couldn't count the ballots cast on the network.",
 	'public.fact.receipt.label': 'Checking your own ballot',
 	'public.fact.merkle.label': 'Cryptographic record of the votes',
 	'public.fact.keyrelease.label': 'Keyholder key release',
@@ -469,10 +477,6 @@ export const COPY = Object.freeze({
 	// not here, not in a heading, not in a detail. A reader has no way to
 	// resolve a letter to a meaning, so it is an identifier leaking out of
 	// the source, not information.
-	'public.gap.turnout.sentence':
-		"How many ballots have been cast isn't shown here — there's no record of vote counts in this system yet.",
-	'public.gap.turnout.detail':
-		"No Vote or VoteEntry table exists; vote and voter entries live in negotiated blocks the schema doesn't model (doc/election.md:95-110).",
 	'public.gap.receipt.sentence':
 		"There's no way on this page to confirm your own ballot was received — that check depends on a private receipt only you hold.",
 	'public.gap.receipt.detail':

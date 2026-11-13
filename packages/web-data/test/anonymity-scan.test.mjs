@@ -246,8 +246,12 @@ const EXPECTED_TABLE_COUNT = 77;
  * exported from `./public`, and (same plan) `apps/VoteTorrentPublic/src/screens/PublishedResults.tsx`,
  * the results card, is new in the public app: 35 -> 37. Test 16 confirmed green over the 37-file set
  * in the same run.
+ *
+ * 2026-11-13 moves this 37 -> 39 (56-31): `packages/web-data/src/public/read-turnout.js` (ballots cast so far,
+ * counted on the network) and `apps/VoteTorrentPublic/src/peer/turnout-source.js` (the boot-to-page hand-off)
+ * are new. Test 16 confirmed green over the 39-file set in the same run.
  */
-const EXPECTED_SCANNED_FILE_COUNT = 37;
+const EXPECTED_SCANNED_FILE_COUNT = 39;
 
 // The sentinel literals are ASSEMBLED, never written out, so each appears in
 // this file exactly once — as the comment that delimits the region. A checker

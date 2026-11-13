@@ -79,6 +79,8 @@ const EXPECTED_PUBLIC_SQL_CONSTANTS = Object.freeze([
 	'PUBLIC_OPTION_LABELS_SQL',
 	'PUBLIC_QUESTION_LABELS_SQL',
 	'PUBLIC_TALLY_SQL',
+	// 56-31: ballots cast so far (read-turnout.js), counted on the network; aggregates only.
+	'PUBLIC_TURNOUT_SQL',
 	'REGISTRANT_ROLL_SQL',
 ]);
 

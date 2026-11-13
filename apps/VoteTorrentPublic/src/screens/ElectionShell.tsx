@@ -7,6 +7,7 @@ import { AppChrome } from './AppChrome';
 import { ElectionIndex } from './ElectionIndex';
 import { FactSections } from './FactSections';
 import { usePublicElection } from './use-public-election';
+import type { PublicTurnoutReading } from './use-public-election';
 import { parseElectionAddress } from '../election-address.js';
 import { formatReaderInstant } from '../reader-instant.js';
 
@@ -72,6 +73,9 @@ export interface ElectionShellProps {
 	 * sees a byte-identical page -- which is what keeps the existing browser
 	 * gates green. */
 	peerFeed?: Parameters<typeof usePublicElection>[0]['peerFeed'];
+	/** 56-31: ballots cast so far, counted on the network by `PublicApp`.
+	 * Absent on every gate mount, which renders the honest "couldn't count". */
+	turnout?: PublicTurnoutReading;
 }
 
 /**
@@ -129,7 +133,7 @@ export interface ElectionShellProps {
  * closure therefore lives in `use-public-election.ts`, whose own header
  * records the same constraint from the other side.
  */
-export function ElectionShell({ search, at = null, election = null, source, configFault = null, peerFeed }: ElectionShellProps) {
+export function ElectionShell({ search, at = null, election = null, source, configFault = null, peerFeed, turnout }: ElectionShellProps) {
 	const address = parseElectionAddress(search ?? window.location.search);
 
 	// Called UNCONDITIONALLY, above the address branch, for the same reason
@@ -352,7 +356,7 @@ export function ElectionShell({ search, at = null, election = null, source, conf
 				    the published voter roll (D-18), read by the same seam for
 				    the same reason; `null` means it could not be read, and the
 				    card renders its honest empty state rather than an error. */}
-				<FactSections phase={phaseResult.phase} keyRelease={read.keyRelease} roll={read.roll} results={read.results} />
+				<FactSections phase={phaseResult.phase} keyRelease={read.keyRelease} roll={read.roll} results={read.results} turnout={turnout} />
 			</section>
 		);
 	}

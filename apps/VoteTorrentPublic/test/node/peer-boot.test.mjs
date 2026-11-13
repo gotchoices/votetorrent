@@ -454,3 +454,60 @@ test('src/screens/PublicApp.tsx names startPublicPeerBoot exactly once (the alia
 	});
 	assert.deepEqual(thirdFileOffenders, [], `a third file under src/ names startPublicPeerBoot: ${thirdFileOffenders.join(', ')}`);
 });
+
+// ---------------------------------------------------------------------------
+// 56-31: ballots cast so far are counted through this boot's strand handle.
+// ---------------------------------------------------------------------------
+
+test('56-31: a STARTED boot registers one turnout reader for its network that counts on the strand handle, and stop() removes it first', async () => {
+	const { countTurnout } = await import('../../src/peer/turnout-source.js');
+	const { deps, calls } = makeFakeDeps();
+	/** @type {any[]} */
+	const reads = [];
+	const result = await startPublicPeerBoot({
+		networkHash: 'nh-31',
+		electionId: 'el-1',
+		deps: {
+			...deps,
+			readNetworkTurnout: async (/** @type {any} */ db, /** @type {string} */ id) => {
+				reads.push([db, id]);
+				return { votes: 5, blocks: 2 };
+			},
+		},
+	});
+	assert.equal(result.status, PEER_BOOT_STATUS.STARTED);
+	assert.deepEqual(await countTurnout('nh-31', 'el-1'), { state: 'counted', votes: 5, blocks: 2 });
+	assert.equal(reads.length, 1);
+	assert.ok(reads[0][0] !== undefined, 'the reader was not handed the strand handle db');
+	assert.deepEqual(await countTurnout('other-network', 'el-1'), { state: 'unavailable', errorName: null }, 'a reader for another network was used');
+	await /** @type {any} */ (result).stop();
+	assert.deepEqual(await countTurnout('nh-31', 'el-1'), { state: 'unavailable', errorName: null }, 'the reader outlived stop()');
+	assert.ok(calls.length > 0);
+});
+
+test('56-31: a boot that fails before replication registers no turnout reader', async () => {
+	const { countTurnout } = await import('../../src/peer/turnout-source.js');
+	const { deps } = makeFakeDeps();
+	const result = await startPublicPeerBoot({
+		networkHash: 'nh-31-fail',
+		electionId: 'el-1',
+		deps: { ...deps, probeAddressedElection: async () => ({ found: false, attempts: 3, lastErrorName: null }) },
+	});
+	assert.equal(result.status, PEER_BOOT_STATUS.FAILED);
+	assert.deepEqual(await countTurnout('nh-31-fail', 'el-1'), { state: 'unavailable', errorName: null });
+});
+
+test('56-31: countTurnout reports a throwing or malformed reader as unavailable by error name only', async () => {
+	const { registerTurnoutReader, countTurnout } = await import('../../src/peer/turnout-source.js');
+	const off = registerTurnoutReader('nh-x', async () => {
+		throw Object.assign(new Error('row values must not leak'), { name: 'QuereusError' });
+	});
+	const r = await countTurnout('nh-x', 'el');
+	assert.deepEqual(r, { state: 'unavailable', errorName: 'QuereusError' });
+	off();
+	const off2 = registerTurnoutReader('nh-x', async () => ({ votes: -1, blocks: 0 }));
+	assert.deepEqual(await countTurnout('nh-x', 'el'), { state: 'unavailable', errorName: 'TurnoutShapeError' });
+	assert.deepEqual(await countTurnout('nh-x', ''), { state: 'unavailable', errorName: null });
+	off2();
+	off();
+});

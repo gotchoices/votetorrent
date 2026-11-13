@@ -10,7 +10,8 @@ import { CONFIG_FAULT, loadBootstrapConfig } from '../peer/config.js';
 import { startPublicPeerBoot as bootPeerLayer, PEER_BOOT_STATUS } from '../peer/boot.js';
 import { parseElectionAddress } from '../election-address.js';
 import { ElectionShell } from './ElectionShell';
-import type { PublicPeerFeedState } from './use-public-election';
+import type { PublicPeerFeedState, PublicTurnoutReading } from './use-public-election';
+import { countTurnout } from '../peer/turnout-source.js';
 
 /**
  * PublicApp.tsx — the production composition (56-12, D-13's fault-UI half).
@@ -225,6 +226,56 @@ export function usePeerFeedStatus({ boot = bootPeerLayer, networkHash, electionI
 	return peerFeed;
 }
 
+/** 56-31: how often ballots cast so far are counted again while connected. */
+export const TURNOUT_REFRESH_MS = 30_000;
+
+/**
+ * 56-31. Ballots cast so far, counted on the network through the reader the
+ * peer boot registered (`peer/turnout-source.js`). `counting` until the boot
+ * is running and the first count answered; `unavailable` once the boot
+ * stopped or a count failed; then counted again every `TURNOUT_REFRESH_MS`.
+ * One timer at a time, cleared on unmount and whenever the inputs change.
+ */
+export function useNetworkTurnout({
+	networkHash,
+	electionId,
+	peerFeed,
+	count = countTurnout,
+}: {
+	networkHash: string | null | undefined;
+	electionId: string | null | undefined;
+	peerFeed: PublicPeerFeedState;
+	count?: typeof countTurnout;
+}): PublicTurnoutReading {
+	const [turnout, setTurnout] = useState<PublicTurnoutReading>({ state: 'counting' });
+
+	useEffect(() => {
+		if (peerFeed === 'stopped') {
+			setTurnout({ state: 'unavailable' });
+			return undefined;
+		}
+		if (peerFeed !== 'running' || typeof networkHash !== 'string' || typeof electionId !== 'string') {
+			setTurnout({ state: 'counting' });
+			return undefined;
+		}
+		let cancelled = false;
+		let timer: ReturnType<typeof setTimeout> | null = null;
+		const tick = async () => {
+			const r = await count(networkHash, electionId);
+			if (cancelled) return;
+			setTurnout(r.state === 'counted' ? { state: 'counted', votes: r.votes, blocks: r.blocks } : { state: 'unavailable' });
+			timer = setTimeout(() => void tick(), TURNOUT_REFRESH_MS);
+		};
+		void tick();
+		return () => {
+			cancelled = true;
+			if (timer !== null) clearTimeout(timer);
+		};
+	}, [peerFeed, networkHash, electionId, count]);
+
+	return turnout;
+}
+
 /**
  * The production entry `main.tsx` mounts in place of a bare `<ElectionShell
  * />`. Resolves the config once at boot, boots the peer layer once at boot,
@@ -241,8 +292,9 @@ export function PublicApp() {
 	const fault = useBootstrapConfigFault();
 	const address = parseElectionAddress(window.location.search);
 	const peerFeed = usePeerFeedStatus({ networkHash: address.networkHash, electionId: address.electionId });
+	const turnout = useNetworkTurnout({ networkHash: address.networkHash, electionId: address.electionId, peerFeed });
 	if (fault === 'pending') return null;
-	return <ElectionShell configFault={fault} peerFeed={peerFeed} />;
+	return <ElectionShell configFault={fault} peerFeed={peerFeed} turnout={turnout} />;
 }
 
 export default PublicApp;
