@@ -140,13 +140,13 @@ test("t('advisory.nosuchvariant.body') throws naming the exact missing key -- D-
 // This file is not one 54-09 set out to touch. It carries a SECOND pin on
 // the table's total, so the count lives in two places; updating only the
 // one in copy.test.mjs would have left this suite red. The count is left in
-// both deliberately rather than deleted here (66-05 moved both pins 177 -> 261: +84 from 66-05's live-dashboard copy; 66-22 moved both 261 -> 266: +5 from 66-22's pairing, scanner and forget gap keys; 66-24 moved both 266 -> 226: -40, the snapshot-era bootstrap.*, snapshot.* and network.* keys) -- this suite's subject is the
+// both deliberately rather than deleted here (66-05 moved both pins 177 -> 261: +84 from 66-05's live-dashboard copy; 66-22 moved both 261 -> 266: +5 from 66-22's pairing, scanner and forget gap keys; 66-24 moved both 266 -> 226: -40, the snapshot-era bootstrap.*, snapshot.* and network.* keys; 56-28 moved both 226 -> 228: +2, the public page's still-looking sentence public.election.fetching.title/.body) -- this suite's subject is the
 // shared components' relationship to the table, and "the table did not
 // silently change size under me" is part of that.
 // ===========================================================================
 
-test('COPY holds exactly 226 keys, and three spot-checked untouched keys still hold their exact values', () => {
-	assert.equal(Object.keys(COPY).length, 226);
+test('COPY holds exactly 228 keys, and three spot-checked untouched keys still hold their exact values', () => {
+	assert.equal(Object.keys(COPY).length, 228);
 	// lifecycle.organizing was RENAMED to lifecycle.pre by 54-02 (D-06/I-12),
 	// carrying its exact pre-move value across the rename -- see copy.test.mjs's
 	// own dedicated value-carry test for the full rationale.

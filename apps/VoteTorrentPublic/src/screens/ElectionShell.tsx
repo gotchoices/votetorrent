@@ -184,6 +184,13 @@ export function ElectionShell({ search, at = null, election = null, source, conf
 	// is the only gate that can see a slot silently disappear.
 	const addressed = address.status === 'ok';
 	const holdsNothing = addressed && read.state === 'notHeld';
+	// 56-28. "Doesn't hold" is false while this page's own network connection
+	// is still starting ('unobserved') or has started and is filling the store
+	// ('running'): the browser is fetching the election, so it says so. Only a
+	// connection that FAILED ('stopped') leaves the not-held sentence true. An
+	// absent `peerFeed` (every gate that mounts the shell without a boot) is
+	// not a connection in progress, so it keeps the not-held sentence.
+	const stillLooking = holdsNothing && (peerFeed === 'unobserved' || peerFeed === 'running');
 	const showBanner = addressed && (read.state === 'ready' || read.state === 'unreadable');
 	const showLifecycleSlot = !addressed || read.state === 'reading' || holdsNothing;
 	// 56-12/D-17: never on 'reading' (nothing to be stale yet), never on
@@ -284,8 +291,10 @@ export function ElectionShell({ search, at = null, election = null, source, conf
 				    a red gate — an unclassed element inherits the section's
 				    own type and colour instead. 54-13 may give it a class
 				    TOGETHER WITH its selector. */}
-				{holdsNothing ? <h2>{t('public.election.notHeld.title')}</h2> : null}
-				{holdsNothing ? <p>{t('public.election.notHeld.body')}</p> : null}
+				{holdsNothing && !stillLooking ? <h2>{t('public.election.notHeld.title')}</h2> : null}
+				{holdsNothing && !stillLooking ? <p>{t('public.election.notHeld.body')}</p> : null}
+				{stillLooking ? <h2>{t('public.election.fetching.title')}</h2> : null}
+				{stillLooking ? <p>{t('public.election.fetching.body')}</p> : null}
 				{/* The status banner: the tone chip and the headline sentence,
 				    and NEITHER MAY RENDER ALONE (app.css's own markup
 				    contract). Colour without a word fails colour-blindness and

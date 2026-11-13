@@ -1079,7 +1079,8 @@ test('T-54-12-07: no line in ElectionShell.tsx that names derivePhase or its cro
 // these keys are proven independently of whether some other plan's keys are
 // outstanding (this plan's <interfaces> section 5).
 
-const OWNED_KEY_PREFIXES = Object.freeze(['public.headline.', 'public.tone.', 'public.election.notHeld.']);
+// 56-28 adds the still-looking pair, mounted beside the not-held pair.
+const OWNED_KEY_PREFIXES = Object.freeze(['public.headline.', 'public.tone.', 'public.election.notHeld.', 'public.election.fetching.']);
 
 test("54-12's own copy keys are mounted and declared in both directions, computed independently of the rest of case 9", () => {
 	const declaredKeys = new Set(Object.keys(COPY).filter((k) => PUBLIC_VOICE_KEY_RE.test(k)));
@@ -1153,10 +1154,15 @@ test('D-02/D-21: notHeld now SHARES its scaffolding with reading and ready — t
 
 	// notHeld: two unclassed elements, gated on `holdsNothing`, which is
 	// itself gated on the address naming an election. A link that names NO
-	// election is not a browser that fails to hold one.
+	// election is not a browser that fails to hold one. 56-28 (deliberate pin
+	// move): the not-held pair now also requires `!stillLooking`, and the
+	// still-looking pair renders in its place while the page's own
+	// connection has not failed; see the 56-28 cases below.
 	assert.match(SHELL_SOURCE, /const holdsNothing = addressed && read\.state === 'notHeld'/);
-	assert.match(SHELL_SOURCE, /\{holdsNothing \? <h2>\{t\('public\.election\.notHeld\.title'\)\}<\/h2> : null\}/);
-	assert.match(SHELL_SOURCE, /\{holdsNothing \? <p>\{t\('public\.election\.notHeld\.body'\)\}<\/p> : null\}/);
+	assert.match(SHELL_SOURCE, /\{holdsNothing && !stillLooking \? <h2>\{t\('public\.election\.notHeld\.title'\)\}<\/h2> : null\}/);
+	assert.match(SHELL_SOURCE, /\{holdsNothing && !stillLooking \? <p>\{t\('public\.election\.notHeld\.body'\)\}<\/p> : null\}/);
+	assert.match(SHELL_SOURCE, /\{stillLooking \? <h2>\{t\('public\.election\.fetching\.title'\)\}<\/h2> : null\}/);
+	assert.match(SHELL_SOURCE, /\{stillLooking \? <p>\{t\('public\.election\.fetching\.body'\)\}<\/p> : null\}/);
 
 	// ...it still renders NO banner: we did not fail to read a schedule, we
 	// hold no election, and a `bad` / phase-unknown banner here would be a
@@ -1189,4 +1195,48 @@ test('54-11 ElectionIndex mount survives: still imported, still one guarded JSX 
 	const sectionClose = SHELL_SOURCE.indexOf('</section>', sectionOpen);
 	const mountAt = SHELL_SOURCE.indexOf('<ElectionIndex');
 	assert.ok(sectionOpen !== -1 && sectionClose !== -1 && mountAt > sectionOpen && mountAt < sectionClose, 'the ElectionIndex mount moved outside the .election section');
+});
+
+// -- 56-28. "Still looking" replaces "doesn't hold" while the page's own
+//    connection has not failed. The predicate is EXTRACTED from the real
+//    source and EXECUTED over every peer-feed value, never re-typed here.
+
+/** @param {string} source @returns {string} */
+function extractStillLooking(source) {
+	const m = source.match(/const stillLooking = ([^;]+);/);
+	if (!m) throw new Error('extractStillLooking: no `const stillLooking = ...;` in ElectionShell.tsx');
+	return m[1];
+}
+
+/** @param {string} expr @param {boolean} holdsNothing @param {unknown} peerFeed */
+function evalStillLooking(expr, holdsNothing, peerFeed) {
+	return new Function('holdsNothing', 'peerFeed', `return (${expr});`)(holdsNothing, peerFeed);
+}
+
+test('56-28 positive control: the extractor throws on a fixture without the predicate, and the evaluator tells a wrong predicate apart', () => {
+	assert.throws(() => extractStillLooking('const other = 1;'));
+	const wrong = extractStillLooking("const stillLooking = holdsNothing && peerFeed !== 'running';");
+	assert.equal(evalStillLooking(wrong, true, 'running'), false, 'fixture sanity');
+});
+
+test("56-28: the page says it is still looking exactly while it holds nothing and its connection is starting or running; a failed or absent connection keeps the not-held sentence", () => {
+	const expr = extractStillLooking(SHELL_SOURCE);
+	/** @type {Array<[boolean, string | undefined, boolean]>} */
+	const rows = [
+		[true, 'unobserved', true],
+		[true, 'running', true],
+		[true, 'stopped', false],
+		[true, undefined, false],
+		[false, 'unobserved', false],
+		[false, 'running', false],
+		[false, 'stopped', false],
+		[false, undefined, false],
+	];
+	for (const [holds, feed, expected] of rows) {
+		assert.equal(evalStillLooking(expr, holds, feed), expected, `holdsNothing=${holds} peerFeed=${String(feed)}`);
+	}
+	// Exactly one of the two pairs can render: the not-held pair is gated on
+	// `!stillLooking`, the still-looking pair on `stillLooking`.
+	assert.equal((SHELL_SOURCE.match(/public\.election\.fetching\./g) ?? []).length, 2);
+	assert.equal((SHELL_SOURCE.match(/public\.election\.notHeld\./g) ?? []).length, 2);
 });

@@ -642,6 +642,17 @@ export const COPY = Object.freeze({
 	'public.election.notHeld.body':
 		'Nothing has been loaded into this browser for the election this link names, so there is nothing here to show.',
 
+	// 56-28. The page's own network connection is still starting, or has
+	// started and is fetching the election this link names: the true
+	// sentence is "looking", not "doesn't hold". Shown ONLY while that
+	// connection has not failed; once it fails the page falls back to the
+	// not-held pair above. No error voice and no remedy, for the same reasons
+	// as that pair; the one promise ("will appear") is kept by the page
+	// itself, which re-reads on the first write.
+	'public.election.fetching.title': 'Looking for this election on the network.',
+	'public.election.fetching.body':
+		"This browser hasn't stored a copy of this election yet, so it is fetching one from the network now. It will appear here when it arrives.",
+
 	// The two details-toggle summary labels. TWO KEYS ON PURPOSE, and a
 	// later merge of them into one is the regression the copy test's
 	// pairwise-difference assertion exists to catch. A gap card's detail
