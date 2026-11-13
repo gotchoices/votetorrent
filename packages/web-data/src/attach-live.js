@@ -2,6 +2,15 @@
  * attach-live.js -- open a network's local IndexedDB store as a LIVE copy
  * (contract C-7).
  *
+ * SHARED BY BOTH AUDIENCES since 56-26 (2026-11-13; moved here from
+ * `src/officer/`). The Public page's own peer boot creates its UI store with
+ * `create: true` only after the strand has returned the addressed election,
+ * and its read path checks `hasLiveStore` before any open. A public visitor's
+ * browser was never "bootstrapped" by anyone, so the snapshot-era attach
+ * (`../reattach.js`: registry entry + marker + row-count record) could never
+ * succeed for one. Only this file's open path is shared; the pairing, change
+ * channel and registry helpers stay officer-only.
+ *
  * WHY THIS EXISTS. The live dashboard's local copy is fed by the strand: every
  * completed replication pass inserts, updates and deletes rows. The
  * snapshot-era open path re-declares the schema, checks the schema-init marker
@@ -40,7 +49,7 @@
  * No console call: errors propagate, and callers log the error name only.
  */
 
-import { openStoreHandle, closeNetworkDb, dbNameFor } from '../open-db.js';
+import { openStoreHandle, closeNetworkDb, dbNameFor } from './open-db.js';
 import { registerDbPlugins, initDB, isSchemaInitialized, markSchemaInitialized } from '@votetorrent/vote-engine/browser';
 
 /**
@@ -70,6 +79,30 @@ export class LiveStoreUnavailableError extends Error {
 		super('attachLiveDb: IndexedDB is not available in this environment');
 		this.name = 'LiveStoreUnavailableError';
 	}
+}
+
+/**
+ * Whether this browser holds a local store for `networkHash`, decided from
+ * `indexedDB.databases()` alone, with NO open: opening a name that does not
+ * exist would create it, so this never opens. Throws
+ * `LiveStoreUnavailableError` when IndexedDB or `databases()` is missing, so a
+ * caller can report "could not be established" rather than "absent" (and never
+ * falls through to an open the way `attachLiveDb` does in that case).
+ *
+ * @param {string} networkHash
+ * @returns {Promise<boolean>}
+ */
+export async function hasLiveStore(networkHash) {
+	if (typeof networkHash !== 'string' || networkHash.length === 0) {
+		throw new TypeError('hasLiveStore: networkHash must be a non-empty string');
+	}
+	const idb = globalThis.indexedDB;
+	if (typeof idb === 'undefined' || typeof idb.databases !== 'function') {
+		throw new LiveStoreUnavailableError();
+	}
+	const name = dbNameFor(networkHash);
+	const known = await idb.databases();
+	return known.some((entry) => entry.name === name);
 }
 
 /**

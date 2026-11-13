@@ -17,6 +17,7 @@ import {
 	startPublicPeerBoot,
 	strandIdForNetwork,
 	PEER_BOOT_STATUS,
+	probeAddressedElection,
 	PeerBootError,
 } from '../../src/peer/boot.js';
 
@@ -133,9 +134,14 @@ function makeFakeDeps(overrides = {}) {
 			assert.equal(node, fakeNode, 'the tail reader must be built over the Edge node boot created');
 			return fakeTails;
 		},
-		openUiHandleForNetwork: async () => {
-			calls.push('openUiHandleForNetwork');
+		openUiHandleForNetwork: /** @param {string} hash @param {any} options */ async (hash, options) => {
+			calls.push(`openUiHandleForNetwork:${hash}:create=${options?.create}`);
 			return fakeUiDb;
+		},
+		probeAddressedElection: /** @param {any} handle @param {string} electionId */ async (handle, electionId) => {
+			calls.push(`probeAddressedElection:${electionId}`);
+			assert.equal(handle, fakeStrandReadHandle, 'the probe reads through the strand handle boot opened');
+			return overrides.probeResult ?? { found: true, attempts: 1, lastErrorName: null };
 		},
 		closeNetworkDb: async () => {
 			calls.push('closeNetworkDb');
@@ -179,14 +185,14 @@ test('NO_ADDRESS: an empty/null/undefined networkHash short-circuits before any 
 
 test('CONFIG_FAULT: the "missing" variant is propagated unchanged, verbatim', async () => {
 	const { deps } = makeFakeDeps({ configResult: { ok: false, fault: 'missing', reason: 'fetch failed: boom' } });
-	const result = await startPublicPeerBoot({ networkHash: 'nh-1', deps });
+	const result = await startPublicPeerBoot({ networkHash: 'nh-1', electionId: 'el-1', deps });
 	assert.equal(result.status, PEER_BOOT_STATUS.CONFIG_FAULT);
 	assert.equal(result.fault, 'missing');
 });
 
 test('CONFIG_FAULT: the "malformed" variant is propagated unchanged, verbatim', async () => {
 	const { deps } = makeFakeDeps({ configResult: { ok: false, fault: 'malformed', reason: 'bootstrapNodes is empty' } });
-	const result = await startPublicPeerBoot({ networkHash: 'nh-1', deps });
+	const result = await startPublicPeerBoot({ networkHash: 'nh-1', electionId: 'el-1', deps });
 	assert.equal(result.status, PEER_BOOT_STATUS.CONFIG_FAULT);
 	assert.equal(result.fault, 'malformed');
 });
@@ -214,16 +220,110 @@ test('STARTED: one replication watches every subscribed table by its collection 
 
 test('STARTED: boot neither syncs a collection nor reads a header block -- a table that has never committed does not fail the page', async () => {
 	const { deps, calls } = makeFakeDeps({ subscribedTables: ['TableA', 'TableB'] });
-	const result = await startPublicPeerBoot({ networkHash: 'nh-1', deps });
+	const result = await startPublicPeerBoot({ networkHash: 'nh-1', electionId: 'el-1', deps });
 	assert.equal(result.status, PEER_BOOT_STATUS.STARTED);
 	assert.deepEqual(calls.filter((c) => c.startsWith('sync:') || c === 'coordinatedRepo.get'), []);
 });
 
 test('STARTED: a missing coordinatedRepo attachment on the constructed node is FAILED, naming "coordinatedRepo"', async () => {
 	const { deps } = makeFakeDeps({ omitCoordinatedRepo: true });
-	const result = await startPublicPeerBoot({ networkHash: 'nh-1', deps });
+	const result = await startPublicPeerBoot({ networkHash: 'nh-1', electionId: 'el-1', deps });
 	assert.equal(result.status, PEER_BOOT_STATUS.FAILED);
 	assert.equal(result.subject, 'coordinatedRepo');
+});
+
+// ---------------------------------------------------------------------------
+// 56-26: the UI store is created only after the network proves the election.
+// ---------------------------------------------------------------------------
+
+test('56-26 NO_ADDRESS: a network hash with no electionId starts nothing -- there is no election to prove', async () => {
+	for (const bad of ['', null, undefined]) {
+		const { deps, calls } = makeFakeDeps();
+		const result = await startPublicPeerBoot({ networkHash: 'nh-1', electionId: bad, deps });
+		assert.equal(result.status, PEER_BOOT_STATUS.NO_ADDRESS);
+		assert.deepEqual(calls, [], `no dep may be called for electionId=${JSON.stringify(bad)}`);
+	}
+});
+
+test('56-26 STARTED: the probe runs on the strand handle BEFORE the store opens, and the store opens with create:true for the network hash', async () => {
+	const { deps, calls } = makeFakeDeps({ subscribedTables: ['TableA'] });
+	const result = await startPublicPeerBoot({ networkHash: 'nh-1', electionId: 'el-1', deps });
+	assert.equal(result.status, PEER_BOOT_STATUS.STARTED);
+	const probeAt = calls.indexOf('probeAddressedElection:el-1');
+	const openAt = calls.indexOf('openUiHandleForNetwork:nh-1:create=true');
+	assert.ok(probeAt >= 0, 'the probe ran');
+	assert.ok(openAt > probeAt, 'the store opened, and only after the probe');
+	assert.equal(calls.filter((c) => c.startsWith('openUiHandleForNetwork:')).length, 1);
+	await result.stop();
+});
+
+test('56-26 anti-planting: a probe miss is FAILED "election-not-on-network", the store opener is NEVER called, and the node and strand handle are torn down', async () => {
+	const { deps, calls } = makeFakeDeps({ subscribedTables: ['TableA'], probeResult: { found: false, attempts: 3, lastErrorName: null } });
+	const result = await startPublicPeerBoot({ networkHash: 'nh-1', electionId: 'el-1', deps });
+	assert.equal(result.status, PEER_BOOT_STATUS.FAILED);
+	assert.equal(result.subject, 'election-not-on-network');
+	assert.equal(calls.filter((c) => c.startsWith('openUiHandleForNetwork')).length, 0, 'a miss must create no UI store');
+	assert.equal(calls.filter((c) => c.startsWith('startPeerReplication')).length, 0);
+	assert.ok(calls.includes('strandReadHandle.close'), 'the strand handle is closed on the miss');
+	assert.ok(calls.includes('edgeNode.stop'), 'the Edge node is stopped on the miss');
+	assert.equal(calls.includes('closeNetworkDb'), false, 'nothing was opened, so nothing is closed');
+});
+
+test('56-26 control: the SAME fakes with a probe hit DO call the opener -- so the zero-call assertion above discriminates', async () => {
+	const { deps, calls } = makeFakeDeps({ subscribedTables: ['TableA'], probeResult: { found: true, attempts: 1, lastErrorName: null } });
+	const result = await startPublicPeerBoot({ networkHash: 'nh-1', electionId: 'el-1', deps });
+	assert.equal(result.status, PEER_BOOT_STATUS.STARTED);
+	assert.equal(calls.filter((c) => c.startsWith('openUiHandleForNetwork')).length, 1);
+	await result.stop();
+});
+
+/** A strand handle whose eval yields per attempt from a script: 'row', 'empty' or 'throw'. */
+function scriptedStrandHandle(/** @type {string[]} */ script) {
+	/** @type {any[]} */
+	const seen = [];
+	let i = 0;
+	return {
+		seen,
+		db: {
+			eval(/** @type {string} */ sql, /** @type {any} */ params) {
+				seen.push({ sql, params });
+				const step = script[Math.min(i, script.length - 1)];
+				i += 1;
+				return (async function* () {
+					if (step === 'throw') {
+						const err = new Error('row text that must never surface');
+						err.name = 'StrandReadFault';
+						throw err;
+					}
+					if (step === 'row') yield { Id: params.electionId };
+				})();
+			},
+		},
+	};
+}
+
+test('56-26 probeAddressedElection: a throw then a row is found on attempt 2, with a named :electionId bind and one sleep', async () => {
+	const handle = scriptedStrandHandle(['throw', 'row']);
+	/** @type {number[]} */
+	const sleeps = [];
+	const r = await probeAddressedElection(/** @type {any} */ (handle), 'el-9', { attempts: 3, delayMs: 7, sleep: async (ms) => void sleeps.push(ms) });
+	assert.deepEqual(r, { found: true, attempts: 2, lastErrorName: null });
+	assert.deepEqual(sleeps, [7]);
+	assert.match(handle.seen[0].sql, /from Election where Id = :electionId$/);
+	assert.deepEqual(handle.seen[0].params, { electionId: 'el-9' });
+});
+
+test('56-26 probeAddressedElection: empty every time is not found after exactly N attempts, keeping only the last error NAME', async () => {
+	const handle = scriptedStrandHandle(['empty', 'throw', 'empty']);
+	/** @type {number[]} */
+	const sleeps = [];
+	const r = await probeAddressedElection(/** @type {any} */ (handle), 'el-9', { attempts: 3, delayMs: 5, sleep: async (ms) => void sleeps.push(ms) });
+	assert.equal(r.found, false);
+	assert.equal(r.attempts, 3);
+	assert.equal(handle.seen.length, 3);
+	assert.deepEqual(sleeps, [5, 5], 'no sleep after the last attempt');
+	assert.equal(r.lastErrorName, 'StrandReadFault');
+	assert.equal(JSON.stringify(r).includes('must never surface'), false, 'an error message never leaves the probe');
 });
 
 test('STARTED: a table the strand read handle has not instantiated yet does not fail boot -- the collection id is computed, not looked up (mesh-read gate 2026-11-03, subject Election)', async () => {
@@ -231,7 +331,7 @@ test('STARTED: a table the strand read handle has not instantiated yet does not 
 		subscribedTables: ['TableA', 'TableB'],
 		missingCollectionTables: ['TableA', 'TableB'],
 	});
-	const result = await startPublicPeerBoot({ networkHash: 'nh-1', deps });
+	const result = await startPublicPeerBoot({ networkHash: 'nh-1', electionId: 'el-1', deps });
 	assert.equal(result.status, PEER_BOOT_STATUS.STARTED);
 	assert.deepEqual(calls.filter((c) => c.startsWith('startPeerReplication:')), ['startPeerReplication:TableA=default/app/TableA,TableB=default/app/TableB']);
 });
@@ -241,7 +341,7 @@ test('a thrown PeerBootError\'s own subject survives to the FAILED result unchan
 	deps.createEdgeNode = async () => {
 		throw new PeerBootError('bootstrapNodes', 'synthetic failure for this test');
 	};
-	const result = await startPublicPeerBoot({ networkHash: 'nh-1', deps });
+	const result = await startPublicPeerBoot({ networkHash: 'nh-1', electionId: 'el-1', deps });
 	assert.equal(result.status, PEER_BOOT_STATUS.FAILED);
 	assert.equal(result.subject, 'bootstrapNodes');
 });
@@ -252,7 +352,7 @@ test('a thrown PeerBootError\'s own subject survives to the FAILED result unchan
 
 test('stop() tears down the replication, then the strand-read handle, then the Edge node, then the ui db -- and is idempotent', async () => {
 	const { deps, calls } = makeFakeDeps({ subscribedTables: ['TableA', 'TableB'] });
-	const result = await startPublicPeerBoot({ networkHash: 'nh-1', deps });
+	const result = await startPublicPeerBoot({ networkHash: 'nh-1', electionId: 'el-1', deps });
 	assert.equal(result.status, PEER_BOOT_STATUS.STARTED);
 
 	calls.length = 0; // only care about stop()'s own call order from here
@@ -266,7 +366,7 @@ test('stop() tears down the replication, then the strand-read handle, then the E
 
 test('stop() swallows a throwing teardown leg and still runs the rest', async () => {
 	const { deps, calls } = makeFakeDeps({ subscribedTables: ['TableA'] });
-	const result = await startPublicPeerBoot({ networkHash: 'nh-1', deps });
+	const result = await startPublicPeerBoot({ networkHash: 'nh-1', electionId: 'el-1', deps });
 	assert.equal(result.status, PEER_BOOT_STATUS.STARTED);
 
 	// Monkey-patch one of the fakes' close/stop to throw, after boot already
@@ -305,11 +405,12 @@ test('src/peer/boot.js contains zero references to the persisted browser-key hel
 	assert.equal((stripped.match(/loadOrCreateBrowserPeerKey/g) ?? []).length, 0);
 });
 
-test('src/peer/boot.js contains exactly one occurrence of attachNetworkDb, and zero of openStoreHandle / new Database (comment-stripped)', () => {
+test('src/peer/boot.js contains exactly one occurrence of attachLiveDb, none of attachNetworkDb, and zero of openStoreHandle / new Database (comment-stripped)', () => {
 	const source = readFileSync(path.join(APP_ROOT, 'src', 'peer', 'boot.js'), 'utf8');
 	const stripped = stripCommentLines(source);
-	const attachLines = stripped.split('\n').filter((line) => line.includes('attachNetworkDb'));
+	const attachLines = stripped.split('\n').filter((line) => line.includes('attachLiveDb'));
 	assert.equal(attachLines.length, 1);
+	assert.equal((stripped.match(/attachNetworkDb/g) ?? []).length, 0, '56-26: boot no longer attaches a pre-bootstrapped store');
 	assert.equal((stripped.match(/openStoreHandle/g) ?? []).length, 0);
 	assert.equal((stripped.match(/new Database/g) ?? []).length, 0);
 });

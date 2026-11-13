@@ -98,8 +98,8 @@ const ROLL_ROWS = Object.freeze([
 /** @param {Partial<Record<string, any>>} [over] */
 function makeDeps(over = {}) {
 	return {
-		findNetwork: spy(() => ({ networkHash: OK_ADDRESS.networkHash })),
-		attachNetworkDb: spy(async () => HANDLE),
+		findLocalCopy: spy(() => ({ networkHash: OK_ADDRESS.networkHash })),
+		attachLocalCopy: spy(async () => HANDLE),
 		closeNetworkDb: spy(() => undefined),
 		readPublicElection: spy(async () => ({ Id: OK_ADDRESS.electionId, Title: 'A Real Stored Title' })),
 		readPublicElectionRevision: spy(async () => ({ Revision: 1, Timeline: '{"votingStarts":"2026-03-01T00:00:00"}' })),
@@ -136,9 +136,9 @@ test('DEFAULT_PUBLIC_SOURCE is frozen, has all eight members, and every one is a
 	// than in a second hook, because this module owns the handle's lifetime
 	// and the shell is held to zero effects (see the module header, point 7).
 	const expected = [
-		'attachNetworkDb',
+		'attachLocalCopy',
 		'closeNetworkDb',
-		'findNetwork',
+		'findLocalCopy',
 		// 56-12/D-17 added the seventh: the OBSERVATION clock, injectable
 		// through this same seam so a harness can capture a fixed instant
 		// rather than the real one.
@@ -161,24 +161,24 @@ test('DEFAULT_PUBLIC_SOURCE is frozen, has all eight members, and every one is a
 // 2. THE REGISTRY GATE — T-54-12-02. The load-bearing assertion in this file.
 // ---------------------------------------------------------------------------
 
-test('T-54-12-02: an unregistered network hash resolves notHeld and NEVER reaches attachNetworkDb — the URL cannot name a store this browser was not already holding', () => {
-	return readAddressedElection(OK_ADDRESS, makeDeps({ findNetwork: spy(() => undefined) })).then((result) => {
+test('T-54-12-02: an unregistered network hash resolves notHeld and NEVER reaches attachLocalCopy — the URL cannot name a store this browser was not already holding', () => {
+	return readAddressedElection(OK_ADDRESS, makeDeps({ findLocalCopy: spy(() => undefined) })).then((result) => {
 		assert.equal(result.state, 'notHeld');
 		assert.equal(result.db, null);
 	});
 });
 
-test('T-54-12-02, measured on the spy: zero attachNetworkDb calls for an unregistered hash', async () => {
-	const deps = makeDeps({ findNetwork: spy(() => undefined) });
+test('T-54-12-02, measured on the spy: zero attachLocalCopy calls for an unregistered hash', async () => {
+	const deps = makeDeps({ findLocalCopy: spy(() => undefined) });
 	await readAddressedElection(OK_ADDRESS, deps);
-	assert.equal(deps.attachNetworkDb.calls.length, 0, 'an unregistered hash reached a database call — the gate is not gating');
+	assert.equal(deps.attachLocalCopy.calls.length, 0, 'an unregistered hash reached a database call — the gate is not gating');
 });
 
 test('control: the SAME spy records exactly one call when the registry DOES hold the hash — so the zero-call assertion above discriminates rather than passing because nothing ever attaches', async () => {
 	const deps = makeDeps();
 	await readAddressedElection(OK_ADDRESS, deps);
-	assert.equal(deps.attachNetworkDb.calls.length, 1);
-	assert.equal(deps.attachNetworkDb.calls[0][0], OK_ADDRESS.networkHash);
+	assert.equal(deps.attachLocalCopy.calls.length, 1);
+	assert.equal(deps.attachLocalCopy.calls[0][0], OK_ADDRESS.networkHash);
 });
 
 test('an address that does not name BOTH a network and an election resolves notHeld and reaches neither the registry nor a database', async () => {
@@ -192,8 +192,8 @@ test('an address that does not name BOTH a network and an election resolves notH
 		const deps = makeDeps();
 		const result = await readAddressedElection(address, deps);
 		assert.equal(result.state, 'notHeld', `expected notHeld for ${JSON.stringify(address)}`);
-		assert.equal(deps.findNetwork.calls.length, 0);
-		assert.equal(deps.attachNetworkDb.calls.length, 0);
+		assert.equal(deps.findLocalCopy.calls.length, 0);
+		assert.equal(deps.attachLocalCopy.calls.length, 0);
 	}
 });
 
@@ -201,25 +201,27 @@ test('an address that does not name BOTH a network and an election resolves notH
 // 3. A fault is not a fact.
 // ---------------------------------------------------------------------------
 
-test('a corrupt registry (findNetwork throws) is unreadable, NEVER notHeld — a fault and an absence are different answers', async () => {
+test('a corrupt registry (findLocalCopy throws) is unreadable, NEVER notHeld — a fault and an absence are different answers', async () => {
 	const deps = makeDeps({
-		findNetwork: spy(() => {
+		findLocalCopy: spy(() => {
 			throw namedError('InvalidNetworkRegistryError');
 		}),
 	});
 	const result = await readAddressedElection(OK_ADDRESS, deps);
 	assert.equal(result.state, 'unreadable');
-	assert.equal(deps.attachNetworkDb.calls.length, 0, 'a corrupt registry must not be followed by a database call either');
+	assert.equal(deps.attachLocalCopy.calls.length, 0, 'a corrupt registry must not be followed by a database call either');
 });
 
 // ---------------------------------------------------------------------------
 // 4. Attach-failure discrimination, by constructor name.
 // ---------------------------------------------------------------------------
 
-test('each of the three typed attach errors resolves notHeld — each one means "this browser has no usable copy", which is D-02 sentence, not an error', async () => {
-	for (const name of ['NotBootstrappedError', 'MissingRowCountsError', 'RowCountMismatchError']) {
+test('the typed missing-store attach error resolves notHeld — each one means "this browser has no usable copy", which is D-02 sentence, not an error', async () => {
+	// 56-26: the read path opens with attachLiveDb(create:false); its missing-store
+	// error is the one "no usable copy" answer.
+	for (const name of ['LiveStoreMissingError']) {
 		const deps = makeDeps({
-			attachNetworkDb: spy(async () => {
+			attachLocalCopy: spy(async () => {
 				throw namedError(name);
 			}),
 		});
@@ -231,7 +233,7 @@ test('each of the three typed attach errors resolves notHeld — each one means 
 
 test('an unrelated attach failure (TypeError) resolves unreadable — the mapping is a closed list, not a catch-all', async () => {
 	const deps = makeDeps({
-		attachNetworkDb: spy(async () => {
+		attachLocalCopy: spy(async () => {
 			throw new TypeError('cannot read properties of undefined');
 		}),
 	});
@@ -345,8 +347,8 @@ test('a revision row carrying no numeric Revision yields a null aggregate and re
 	assert.equal(deps.readKeyReleaseProgress.calls.length, 0, 'the aggregate was read with a non-numeric revision');
 });
 
-test('T-54-12-02 extended: an unregistered hash reaches the key-release read no more than it reaches attachNetworkDb', async () => {
-	const deps = makeDeps({ findNetwork: spy(() => undefined) });
+test('T-54-12-02 extended: an unregistered hash reaches the key-release read no more than it reaches attachLocalCopy', async () => {
+	const deps = makeDeps({ findLocalCopy: spy(() => undefined) });
 	await readAddressedElection(OK_ADDRESS, deps);
 	assert.equal(deps.readKeyReleaseProgress.calls.length, 0, 'the registry gate does not cover the aggregate read');
 });
@@ -423,11 +425,11 @@ test('D-23 applied to the roll: a THROWING roll read leaves the election ready w
 	assert.deepEqual({ ...result.keyRelease }, { released: 3, total: 4, keyholderCount: 5 }, 'the other card read must be unaffected');
 });
 
-test('T-54-12-02 extended again: an unregistered hash reaches the roll read no more than it reaches attachNetworkDb', async () => {
-	const deps = makeDeps({ findNetwork: spy(() => undefined) });
+test('T-54-12-02 extended again: an unregistered hash reaches the roll read no more than it reaches attachLocalCopy', async () => {
+	const deps = makeDeps({ findLocalCopy: spy(() => undefined) });
 	await readAddressedElection(OK_ADDRESS, deps);
 	assert.equal(deps.readRegistrantRoll.calls.length, 0, 'the registry gate does not cover the roll read');
-	assert.equal(deps.attachNetworkDb.calls.length, 0, 'sanity: the gate is not covering the attach either');
+	assert.equal(deps.attachLocalCopy.calls.length, 0, 'sanity: the gate is not covering the attach either');
 });
 
 // ---------------------------------------------------------------------------
@@ -569,7 +571,7 @@ test('positive control: both forbidden import forms are detected by the matchers
 	assert.match(plantedOfficer, OFFICER_SUBPATH_RE, 'the officer-subpath matcher is inert');
 	assert.match(plantedDeep, DEEP_WEB_DATA_PATH_RE, 'the deep-path matcher is inert');
 	// And they discriminate: neither fires on the sanctioned form.
-	const sanctioned = `import { findNetwork } from '${PUBLIC_SUBPATH}';`;
+	const sanctioned = `import { findLocalCopy } from '${PUBLIC_SUBPATH}';`;
 	assert.doesNotMatch(sanctioned, OFFICER_SUBPATH_RE);
 	assert.doesNotMatch(sanctioned, DEEP_WEB_DATA_PATH_RE);
 });

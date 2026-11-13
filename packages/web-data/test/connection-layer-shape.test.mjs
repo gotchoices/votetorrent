@@ -286,7 +286,7 @@ const EXPECTED_NONSQL_INTERPOLATING_TEMPLATES = 22;
 
 test('the scanned set is exactly the top-level connection-layer modules, not the officer or public subtrees', () => {
 	const { files } = scanConnectionLayer(webDataSrc());
-	assert.deepEqual(files, ['classification.js', 'networks-registry.js', 'open-db.js', 'reattach.js']);
+	assert.deepEqual(files, ['attach-live.js', 'classification.js', 'networks-registry.js', 'open-db.js', 'reattach.js']);
 	for (const file of files) {
 		assert.ok(!file.includes('/'), `${file}: topLevelJsFiles must never descend into a subdirectory`);
 	}

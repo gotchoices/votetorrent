@@ -93,7 +93,7 @@ export const STALE_INSTANT = new Date(Date.now() - STALE_OFFSET_MS).toISOString(
 const STALE_SOURCE: PublicSourceDeps = Object.freeze({
 	...DEFAULT_PUBLIC_SOURCE,
 	/**
-	 * Awaits the real `attachNetworkDb`, then wraps the resolved handle in a
+	 * Awaits the real `attachLocalCopy` (56-26; was `attachNetworkDb`), then wraps the resolved handle in a
 	 * `Proxy` whose `get` trap returns `undefined` for the change-channel
 	 * method name (`onDataChange`) and otherwise forwards through
 	 * `Reflect.get`, binding functions to the target so engine methods keep
@@ -102,8 +102,8 @@ const STALE_SOURCE: PublicSourceDeps = Object.freeze({
 	 * line already describe — a handle exposing no change channel — not a
 	 * planted UI state.
 	 */
-	attachNetworkDb: async (networkHash: string, options?: unknown) => {
-		const real = await DEFAULT_PUBLIC_SOURCE.attachNetworkDb(networkHash, options as never);
+	attachLocalCopy: async (networkHash: string) => {
+		const real = await DEFAULT_PUBLIC_SOURCE.attachLocalCopy(networkHash);
 		return new Proxy(real, {
 			get(target: object, prop: string | symbol, receiver: unknown) {
 				if (prop === 'onDataChange') return undefined;

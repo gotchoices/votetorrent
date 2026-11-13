@@ -225,8 +225,14 @@ const EXPECTED_TABLE_COUNT = 77;
  * point before the officer-dashboard schema work began, and that work adds no file under a scan
  * root. Test 16 ("D-05: zero forbidden-class table names as code across the public entry source
  * set") was confirmed green over the widened 33-file set before this count moved.
+ *
+ * 2026-11-13 moves this 33 -> 34, deliberately, same evidence standard (56-26, user decision):
+ * `packages/web-data/src/attach-live.js` moved out of `src/officer/` and the `./public` barrel
+ * re-exports it, so it is now inside the public closure. Test 16 was confirmed green over the
+ * widened 34-file set in the same run, with the untracked Finder `.DS_Store` files moved aside
+ * (they trip the unknown-extension controls on their own and are not this change).
  */
-const EXPECTED_SCANNED_FILE_COUNT = 33;
+const EXPECTED_SCANNED_FILE_COUNT = 34;
 
 // The sentinel literals are ASSEMBLED, never written out, so each appears in
 // this file exactly once — as the comment that delimits the region. A checker

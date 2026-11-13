@@ -40,7 +40,8 @@ function makeNode(transports, extra = {}) {
 	return createLibp2p({
 		transports,
 		connectionEncrypters: [noise()],
-		streamMuxers: [yamux()],
+		// Cast: the hoisted yamux's StreamMuxer typing skews from libp2p's by a minor version; runtime-compatible.
+		streamMuxers: [/** @type {any} */ (yamux())],
 		connectionGater: allowAll,
 		...extra,
 		services: { identify: identify(), ...(extra.services ?? {}) },

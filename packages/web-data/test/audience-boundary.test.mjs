@@ -143,6 +143,10 @@ const PERMITTED_OUTSIDE_PUBLIC = Object.freeze([
 		module: 'networks-registry.js',
 		why: 'audience-neutral network registry, stored OUTSIDE the database in the storage adapter. It is how an anonymous reader finds which local replica to attach.',
 	}),
+	Object.freeze({
+		module: 'attach-live.js',
+		why: '56-26 (user decision 2026-11-13): the live-store open path, moved out of src/officer/ so both barrels can use it. Opens (or, with create:true, creates and marks) a peer-fed local copy and checks for one via indexedDB.databases(); selects no application table and reads no registry, pairing or change-channel state, which stay officer-only.',
+	}),
 ]);
 
 // ───────────────────────────────────────────────────────────────────────────

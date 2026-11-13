@@ -1,5 +1,5 @@
 /**
- * attach-live.test.mjs -- tier-1 suite for `src/officer/attach-live.js`, the
+ * attach-live.test.mjs -- tier-1 suite for `src/attach-live.js`, the
  * live-copy store open (contract C-7).
  *
  * What it proves: a live store opens with the schema re-declared and the
@@ -21,7 +21,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { VOTETORRENT_SCHEMA_SQL, isSchemaInitialized } from '@votetorrent/vote-engine/browser';
-import { attachLiveDb, LiveStoreMissingError, LiveStoreUnavailableError } from '../src/officer/attach-live.js';
+import { attachLiveDb, hasLiveStore, LiveStoreMissingError, LiveStoreUnavailableError } from '../src/attach-live.js';
 import { closeNetworkDb, dbNameFor, deleteNetworkDb } from '../src/open-db.js';
 import {
 	attachNetworkDb,
@@ -209,7 +209,7 @@ test('A8: invalid arguments reject TypeError', async () => {
 });
 
 test('A9: the module source carries no row-count call or import and keeps the marker gate', () => {
-	const source = stripComments(readFileSync(webDataSrc('officer', 'attach-live.js'), 'utf8'));
+	const source = stripComments(readFileSync(webDataSrc('attach-live.js'), 'utf8'));
 	const banned = [
 		['write', 'Row', 'Counts'],
 		['read', 'Row', 'Counts', 'Record'],
@@ -228,6 +228,29 @@ test('A9: the module source carries no row-count call or import and keeps the ma
 	// Matcher control: the same token list does fire on a source that has one.
 	const control = 'const x = ' + banned[0] + '(h, c);';
 	assert.equal(banned.filter((token) => control.includes(token)).length >= 1, true);
+});
+
+test('A10 (56-26): hasLiveStore answers from indexedDB.databases() and never opens -- present true, absent false and still unlisted', async () => {
+	const seeded = await attachLiveDb(H_SEEDED, { create: true });
+	await closeNetworkDb(seeded);
+	assert.equal(await hasLiveStore(H_SEEDED), true);
+	assert.equal(await isListed(dbNameFor(H_ABSENT)), false);
+	assert.equal(await hasLiveStore(H_ABSENT), false);
+	assert.equal(await isListed(dbNameFor(H_ABSENT)), false, 'hasLiveStore created the store it was asked about');
+});
+
+test('A11 (56-26): hasLiveStore throws LiveStoreUnavailableError when databases() is missing or IndexedDB is absent -- "cannot tell", never false', async () => {
+	const real = globalThis.indexedDB;
+	try {
+		/** @type {any} */ (globalThis).indexedDB = { open: real.open.bind(real) };
+		await assert.rejects(hasLiveStore(H_SEEDED), (err) => /** @type {any} */ (err).name === 'LiveStoreUnavailableError');
+		/** @type {any} */ (globalThis).indexedDB = undefined;
+		await assert.rejects(hasLiveStore(H_SEEDED), (err) => /** @type {any} */ (err).name === 'LiveStoreUnavailableError');
+	} finally {
+		globalThis.indexedDB = real;
+	}
+	assert.equal(typeof globalThis.indexedDB, 'object');
+	await assert.rejects(hasLiveStore(''), TypeError);
 });
 
 test('cleanup: delete every store this suite created', async () => {

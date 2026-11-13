@@ -75,7 +75,7 @@ export {
 	PAIRING_RELAY_ADDRS_MAX,
 } from '../networks-registry.js';
 
-export { attachLiveDb, LiveStoreMissingError, LiveStoreUnavailableError } from './attach-live.js';
+export { attachLiveDb, LiveStoreMissingError, LiveStoreUnavailableError } from '../attach-live.js';
 
 export {
 	PAIRING_TABLES,

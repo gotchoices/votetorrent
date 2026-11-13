@@ -1,5 +1,5 @@
 /**
- * public-election-source.js — the read seam behind D-01: registry gate ->
+ * public-election-source.js — the read seam behind D-01: local-copy gate ->
  * attach -> read the addressed election -> hand back one of four explicit
  * states. It NEVER THROWS and it NEVER LOGS A ROW VALUE.
  *
@@ -30,24 +30,26 @@
  *    `reading` to the obvious word turns that case red for a reason the diff
  *    would not explain — hence this paragraph.
  *
- * 3. THE REGISTRY GATE IS A SECURITY CONTROL, NOT AN OPTIMISATION
- *    (T-54-12-02). `attachNetworkDb` reaches the data package's store-opening
- *    helper, and that helper CREATES a browser store it cannot find rather
- *    than refusing one. The network hash on this page comes out of the URL
- *    (D-33), so an unguarded attach would let any link author plant an empty
- *    database in a stranger's browser — a WRITE, once per crafted link, on a
- *    page whose entire premise is anonymous read-only viewing. The networks
- *    registry is the only record of the networks this browser was
- *    legitimately bootstrapped into, so registry membership — never the URL —
- *    is what authorises a store name. The gate therefore runs BEFORE any
- *    database call, and `attachNetworkDb` is unreachable without it.
+ * 3. THE LOCAL-COPY GATE IS A SECURITY CONTROL, NOT AN OPTIMISATION
+ *    (T-54-12-02, amended by 56-26 on the user's decision, 2026-11-13). The
+ *    network hash on this page comes out of the URL (D-33), and opening an
+ *    IndexedDB name that does not exist CREATES it, so an unguarded open
+ *    would let any link author plant an empty database in a stranger's
+ *    browser. This module therefore NEVER creates: `findLocalCopy`
+ *    (`hasLiveStore`) asks `indexedDB.databases()` whether the store exists,
+ *    with no open, BEFORE any database call, and `attachLocalCopy`
+ *    (`attachLiveDb` with `create: false`) is unreachable without a yes. The
+ *    only thing that creates the store is the page's own peer boot, and only
+ *    after the strand has returned the addressed election
+ *    (`src/peer/boot.js`). Until 56-26 the gate was membership of the
+ *    dashboard's networks registry, which nothing on a public origin ever
+ *    writes, so no real visitor could ever pass it.
  *
- * 4. A FAULT IS NOT A FACT. `findNetwork` walks `listNetworks`, which fails
- *    SOFT (an empty registry) on an absent or cleared origin and fails HARD
- *    (throws, naming the offending field) on a structurally corrupt stored
- *    entry — a real input on a shared origin. Those are DIFFERENT ANSWERS.
- *    An absent entry is `notHeld`: a settled finding, and D-02's sentence. A
- *    throw is `unreadable`: this browser's holdings could not be established.
+ * 4. A FAULT IS NOT A FACT. `findLocalCopy` answers `false` when the store
+ *    is not listed, and THROWS (`LiveStoreUnavailableError`) when this browser
+ *    cannot list its databases at all. Those are DIFFERENT ANSWERS. An absent
+ *    store is `notHeld`: a settled finding, and D-02's sentence. A throw is
+ *    `unreadable`: this browser's holdings could not be established.
  *    Telling a reader "this browser doesn't hold that election" because a
  *    read threw is a false statement, which is the D-28 failure class this
  *    whole phase exists to correct.
@@ -123,8 +125,8 @@
  */
 
 import {
-	findNetwork,
-	attachNetworkDb,
+	hasLiveStore,
+	attachLiveDb,
 	closeNetworkDb,
 	readPublicElection,
 	readPublicElectionRevision,
@@ -187,8 +189,8 @@ export const PUBLIC_ELECTION_STATE = Object.freeze({
 
 /**
  * @typedef {object} PublicSourceDeps
- * @property {(networkHash: string, storage?: any) => any} findNetwork
- * @property {(networkHash: string, options?: any) => Promise<any>} attachNetworkDb
+ * @property {(networkHash: string) => boolean | Promise<boolean>} findLocalCopy  56-26: is a store listed for this hash (no open)?
+ * @property {(networkHash: string) => Promise<any>} attachLocalCopy  56-26: open an existing, initialized store; never creates
  * @property {(db: any) => any} closeNetworkDb
  * @property {(db: any, electionId: string) => Promise<any>} readPublicElection
  * @property {(db: any, electionId: string) => Promise<any>} readPublicElectionRevision
@@ -226,8 +228,8 @@ function nowCanonical() {
  * @type {Readonly<PublicSourceDeps>}
  */
 export const DEFAULT_PUBLIC_SOURCE = Object.freeze({
-	findNetwork,
-	attachNetworkDb,
+	findLocalCopy: hasLiveStore,
+	attachLocalCopy: (/** @type {string} */ networkHash) => attachLiveDb(networkHash, { create: false }),
 	closeNetworkDb,
 	readPublicElection,
 	readPublicElectionRevision,
@@ -237,16 +239,15 @@ export const DEFAULT_PUBLIC_SOURCE = Object.freeze({
 });
 
 /**
- * The three typed failures `attachNetworkDb` raises that each mean exactly
- * "this browser has no usable copy of that network" — D-02's sentence, not an
- * error. Matched by the constructor `name` STRING (header point 5).
+ * The typed failure `attachLocalCopy` raises that means exactly "this browser
+ * has no usable copy of that network" — D-02's sentence, not an error: the
+ * store vanished between the check and the open, or it exists but the peer
+ * boot has not marked it initialized yet. Matched by the constructor `name`
+ * STRING (header point 5). `LiveStoreUnavailableError` is deliberately NOT
+ * here: no IndexedDB means the holdings could not be established.
  * @type {ReadonlyArray<string>}
  */
-const NOT_HELD_ERROR_NAMES = Object.freeze([
-	'NotBootstrappedError',
-	'MissingRowCountsError',
-	'RowCountMismatchError',
-]);
+const NOT_HELD_ERROR_NAMES = Object.freeze(['LiveStoreMissingError']);
 
 /**
  * Does this pair of inputs warrant a read at all?
@@ -371,28 +372,29 @@ export async function readAddressedElection(address, deps = DEFAULT_PUBLIC_SOURC
 			return freezeResult(PUBLIC_ELECTION_STATE.NOT_HELD, null, null);
 		}
 
-		// -- 2. THE REGISTRY GATE (header point 3, T-54-12-02, I-15). Runs
-		//       BEFORE any database call, so an unregistered hash reaches none
-		//       at all. A THROW here is a corrupt registry, which is a fault
-		//       (header point 4) and must never be reported as an absence.
+		// -- 2. THE LOCAL-COPY GATE (header point 3, T-54-12-02 as amended
+		//       by 56-26, I-15). Runs BEFORE any database call, so a hash with
+		//       no store reaches none at all. A THROW here means this browser
+		//       cannot list its databases, which is a fault (header point 4)
+		//       and must never be reported as an absence.
 		/** @type {any} */
-		let entry;
+		let held;
 		try {
-			entry = deps.findNetwork(networkHash);
+			held = await deps.findLocalCopy(networkHash);
 		} catch (err) {
 			logFailure(err);
 			return freezeResult(PUBLIC_ELECTION_STATE.UNREADABLE, null, null);
 		}
-		if (entry === undefined || entry === null) {
+		if (!held) {
 			return freezeResult(PUBLIC_ELECTION_STATE.NOT_HELD, null, null);
 		}
 
-		// -- 3. Attach. The three typed failures each mean "no usable copy";
+		// -- 3. Attach. The typed missing-store failure means "no usable copy";
 		//       anything else means the finding could not be established. A
 		//       failed attach closes its own handle before throwing and hands
 		//       back nothing, which is why `db` is still null in that branch.
 		try {
-			db = await deps.attachNetworkDb(networkHash);
+			db = await deps.attachLocalCopy(networkHash);
 		} catch (err) {
 			logFailure(err);
 			const name = err && typeof (/** @type {any} */ (err).name) === 'string' ? /** @type {any} */ (err).name : '';

@@ -25,25 +25,25 @@
  * `resolveBootstrapNodes` records: the whole module must be exercisable under
  * `node --test`, with no browser, no DOM and no socket.
  *
- * WHY `attachNetworkDb` AND NOT `openStoreHandle` OR `new Database`.
- * `public-election-source.js`'s own header (point 3) states the reason this
- * file must not re-derive: the networks registry — never the URL — is what
- * authorises a store name, because the network hash on this page comes
- * straight out of the URL (D-33) and an unguarded attach would let any link
- * author plant an empty database in a stranger's browser. `attachNetworkDb`
- * is the ONLY connection-layer entry point that is unreachable without a
- * pre-existing registry entry, so this module calls it exactly once and
- * NEVER calls `openStoreHandle`/`createNetworkDb`/`new Database` itself —
- * this module does not register a network. A visitor whose browser was never
- * legitimately bootstrapped into this network sees `attachNetworkDb` fail
- * (any of its three typed errors), and that failure is surfaced here as
- * `PEER_BOOT_STATUS.FAILED`, not silently upgraded into a fresh empty store.
- * Test setup (the mesh-read gate; `live-read-gate.js` before it) registers a
- * network the same way a real prior legitimate bootstrap would, through the
- * data package's own `createNetworkDb`/`writeRowCounts`/`upsertNetwork` —
- * that registration is gate-owned setup, never something this module, or any
- * production code reachable from `main.tsx`, performs on this browser's
- * behalf.
+ * THIS MODULE CREATES THE UI STORE — BUT ONLY AFTER THE NETWORK HAS PROVEN
+ * THE ELECTION (56-26, user decision 2026-11-13). Until then this file only
+ * ever ATTACHED a store a prior "legitimate bootstrap" had made (registry
+ * entry + schema-init marker + C5 row-count record), to stop a link author
+ * planting an empty database in a stranger's browser (T-54-12-02). Nothing in
+ * production ever performed that bootstrap — only test gates did — so on a
+ * real network every visitor failed here with `NotBootstrappedError`
+ * (56-25 Task 4). Now: step 6 first reads the ADDRESSED election's row
+ * through the strand read handle (`probeAddressedElection`, bounded); only
+ * if the network returns it does boot open the store with
+ * `attachLiveDb(networkHash, { create: true })` (Phase 66 C-7: schema
+ * re-declare + init marker, no row-count record, never wipes). A link whose
+ * network is unreachable or holds no such election creates nothing, so a
+ * crafted link can no longer plant an EMPTY store; at most it makes the
+ * browser hold public rows of a real network that serves the election it
+ * names. Without an `electionId` there is nothing to prove, so boot does not
+ * start at all (NO_ADDRESS). This module still never calls
+ * `openStoreHandle`/`createNetworkDb`/`new Database` itself, and registers
+ * nothing in the dashboard's networks registry.
  *
  * `openStoreHandle` mints a NEW `Database` per call, and every handle it
  * produces calls `db.setDefaultVtabName('store')` (`packages/web-data/src
@@ -145,14 +145,54 @@ import { openStrandReadHandle, createStrandRowSource, strandIdForNetwork } from 
 import { startPeerReplication } from './reactivity-bridge.js';
 import { createPageTailReader } from './tail-reader.js';
 import { collectionIdForTable } from './collection-id.js';
-// `attachNetworkDb` is imported under an alias so this file's own acceptance
-// grep -- "exactly one occurrence of `attachNetworkDb`" -- resolves to this
-// ONE import line, rather than also matching a deps-default line and a call
-// line. See this module's header ("WHY attachNetworkDb AND NOT
-// openStoreHandle OR new Database") for what the identifier itself means;
-// `openUiHandleForNetwork` is this file's own name for that single import,
-// used everywhere below.
-import { attachNetworkDb as openUiHandleForNetwork, closeNetworkDb, PUBLIC_SUBSCRIBED_TABLES } from '@votetorrent/web-data/public';
+// `attachLiveDb` is imported under an alias so this file's own acceptance
+// grep -- "exactly one occurrence of `attachLiveDb`" -- resolves to this ONE
+// import line, rather than also matching a deps-default line and a call line.
+// See this module's header ("THIS MODULE CREATES THE UI STORE") for when it
+// is called; `openUiHandleForNetwork` is this file's own name for that single
+// import, used everywhere below.
+import { attachLiveDb as openUiHandleForNetwork, closeNetworkDb, PUBLIC_SUBSCRIBED_TABLES } from '@votetorrent/web-data/public';
+
+/** The one read that proves the addressed election exists on the network.
+ * A named bind, the convention `@votetorrent/web-data/public`'s read modules
+ * use; `:electionId` is not one of Quereus's reserved bind names. */
+const ADDRESSED_ELECTION_PROBE_SQL = 'select Id from Election where Id = :electionId';
+
+/** Attempts and spacing for the probe: a first strand read on a fresh node can
+ * race the coordinator lookup, so a miss is retried a bounded number of times
+ * before boot gives up having created nothing. */
+export const ELECTION_PROBE_ATTEMPTS = 3;
+export const ELECTION_PROBE_DELAY_MS = 2000;
+
+/**
+ * Whether the strand returns a row for `electionId`. Never throws; a read
+ * that throws counts as a miss for that attempt (its error name only is kept,
+ * never its message: a strand row can carry PII). Bounded by
+ * `ELECTION_PROBE_ATTEMPTS`.
+ *
+ * @param {{ db: { eval(sql: string, params?: any): AsyncIterable<any> } }} strandHandle
+ * @param {string} electionId
+ * @param {{ attempts?: number, delayMs?: number, sleep?: (ms: number) => Promise<void> }} [options]
+ * @returns {Promise<{ found: boolean, attempts: number, lastErrorName: string | null }>}
+ */
+export async function probeAddressedElection(strandHandle, electionId, options = {}) {
+	const attempts = options.attempts ?? ELECTION_PROBE_ATTEMPTS;
+	const delayMs = options.delayMs ?? ELECTION_PROBE_DELAY_MS;
+	const sleep = options.sleep ?? ((/** @type {number} */ ms) => new Promise((r) => setTimeout(r, ms)));
+	/** @type {string | null} */
+	let lastErrorName = null;
+	for (let attempt = 1; attempt <= attempts; attempt += 1) {
+		try {
+			for await (const _row of strandHandle.db.eval(ADDRESSED_ELECTION_PROBE_SQL, { electionId })) {
+				return { found: true, attempts: attempt, lastErrorName: null };
+			}
+		} catch (err) {
+			lastErrorName = err && typeof (/** @type {any} */ (err).name) === 'string' ? /** @type {any} */ (err).name : 'Error';
+		}
+		if (attempt < attempts) await sleep(delayMs);
+	}
+	return { found: false, attempts, lastErrorName };
+}
 
 export { strandIdForNetwork };
 
@@ -197,6 +237,7 @@ export const PEER_BOOT_STATUS = Object.freeze({
  * @property {typeof openStrandReadHandle} [openStrandReadHandle]
  * @property {typeof createStrandRowSource} [createStrandRowSource]
  * @property {typeof openUiHandleForNetwork} [openUiHandleForNetwork]
+ * @property {typeof probeAddressedElection} [probeAddressedElection]
  * @property {typeof closeNetworkDb} [closeNetworkDb]
  * @property {typeof startPeerReplication} [startPeerReplication]
  * @property {typeof createPageTailReader} [createPageTailReader]
@@ -206,7 +247,7 @@ export const PEER_BOOT_STATUS = Object.freeze({
 /**
  * @typedef {object} StartPublicPeerBootOptions
  * @property {string | null | undefined} networkHash
- * @property {string | null | undefined} [electionId] - carried for the caller's own readout; no step below branches on it.
+ * @property {string | null | undefined} [electionId] - the addressed election (56-26): boot does not start without one, and creates the UI store only after the strand returns its row.
  * @property {StartPublicPeerBootDeps} [deps]
  */
 
@@ -230,6 +271,7 @@ export async function startPublicPeerBoot(options) {
 	/** @type {StartPublicPeerBootOptions} */
 	const opts = options && typeof options === 'object' ? options : { networkHash: null };
 	const networkHash = typeof opts.networkHash === 'string' ? opts.networkHash : '';
+	const electionId = typeof opts.electionId === 'string' ? opts.electionId : '';
 	/** @type {StartPublicPeerBootDeps} */
 	const deps = opts.deps && typeof opts.deps === 'object' ? opts.deps : {};
 
@@ -245,6 +287,7 @@ export async function startPublicPeerBoot(options) {
 		openStrandReadHandle: deps.openStrandReadHandle ?? openStrandReadHandle,
 		createStrandRowSource: deps.createStrandRowSource ?? createStrandRowSource,
 		openUiHandleForNetwork: deps.openUiHandleForNetwork ?? openUiHandleForNetwork,
+		probeAddressedElection: deps.probeAddressedElection ?? probeAddressedElection,
 		closeNetworkDb: deps.closeNetworkDb ?? closeNetworkDb,
 		startPeerReplication: deps.startPeerReplication ?? startPeerReplication,
 		createPageTailReader: deps.createPageTailReader ?? createPageTailReader,
@@ -253,7 +296,11 @@ export async function startPublicPeerBoot(options) {
 
 	// -- 1. No usable address: the root, election-less page must not open a
 	//       socket, fetch a config or touch storage of any kind.
-	if (networkHash === '') {
+	//       56-26: an address with no election is the same: boot can only
+	//       create the UI store after the strand returns the ADDRESSED
+	//       election, so without one there is nothing to prove and nothing to
+	//       start.
+	if (networkHash === '' || electionId === '') {
 		return { status: PEER_BOOT_STATUS.NO_ADDRESS };
 	}
 
@@ -355,9 +402,18 @@ export async function startPublicPeerBoot(options) {
 			coordinatedRepo: /** @type {any} */ (nodeWithRepo.coordinatedRepo),
 		});
 
-		// -- 6. The browser store. See this module's header for why this is
-		//       the security-gated attach, and only ever this, once.
-		uiDb = await resolved.openUiHandleForNetwork(networkHash);
+		// -- 6. The browser store, created ONLY after the network proves the
+		//       addressed election (56-26; this module's header). A miss creates
+		//       nothing: the FAILED result names the subject, the unwind closes
+		//       the strand handle and the Edge node, and no store was opened.
+		const probe = await resolved.probeAddressedElection(strandReadHandle, electionId);
+		if (!probe || probe.found !== true) {
+			throw new PeerBootError(
+				'election-not-on-network',
+				`the strand returned no row for the addressed election after ${Number(probe?.attempts) || 0} attempt(s) (last error: ${typeof probe?.lastErrorName === 'string' ? probe.lastErrorName : 'none'}) -- no UI store created`,
+			);
+		}
+		uiDb = await resolved.openUiHandleForNetwork(networkHash, { create: true });
 
 		const { readRows } = resolved.createStrandRowSource({ uiDb, strandDb: strandReadHandle });
 

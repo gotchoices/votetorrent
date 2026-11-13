@@ -150,7 +150,7 @@ const SEARCH = `?${NETWORK_ADDRESS_PARAM}=${networkHash}&${ELECTION_ADDRESS_PARA
 // The module-constant `source` (56-12/D-17's own precedent). A MODULE
 // constant, never a per-render object literal: `source` is one of
 // `use-public-election.ts`'s own effect dependencies, and a fresh object
-// every render would re-run the read on every commit. `attachNetworkDb`
+// every render would re-run the read on every commit. `attachLocalCopy`
 // awaits the REAL one and RECORDS the resolved handle -- the whole reason
 // this gate can be honest: `notifyPeerWrite` dispatches to `REMOTE_SINKS`
 // keyed by the `db` OBJECT, so a notice sent against any other handle would
@@ -161,8 +161,8 @@ let recordedHandle: import('@quereus/quereus').Database | null = null;
 
 const source: PublicSourceDeps = Object.freeze({
 	...DEFAULT_PUBLIC_SOURCE,
-	attachNetworkDb: async (attachHash: string, options?: unknown) => {
-		const real = await DEFAULT_PUBLIC_SOURCE.attachNetworkDb(attachHash, options as never);
+	attachLocalCopy: async (attachHash: string) => {
+		const real = await DEFAULT_PUBLIC_SOURCE.attachLocalCopy(attachHash);
 		recordedHandle = real as unknown as import('@quereus/quereus').Database;
 		return real;
 	},
@@ -231,8 +231,10 @@ async function seedLivenessElection(db: import('@quereus/quereus').Database): Pr
 /**
  * Seed the same public surface `test/offline/offline-gate.tsx` and
  * `test/browser/election-shell-gate.tsx` each seed — same recipe, same
- * reason: this branch's read path is `findNetwork` -> `attachNetworkDb`, and
- * `attachNetworkDb` refuses a handle with no persisted row-count record.
+ * reason: this branch's read path WAS `findNetwork` -> `attachNetworkDb`, and
+ * `attachNetworkDb` refused a handle with no persisted row-count record.
+ * Since 56-26 it is `findLocalCopy` -> `attachLocalCopy` (store listed +
+ * init marker, no row-count check); the row-count seeding stays harmless.
  * Unlike `offline-gate.tsx`'s 'stale' branch, this gate's `source` wraps the
  * handle UNCHANGED (no channel-hiding Proxy) -- the whole point here is a
  * REAL change channel that a real notice can travel through. Additionally
@@ -280,7 +282,7 @@ async function seedFixtureSurface(): Promise<void> {
 
 /** @returns the current full `Election` row, keyed by column name. */
 async function currentElectionRow(): Promise<Record<string, unknown>> {
-	if (recordedHandle === null) throw new Error('no handle recorded yet -- attachNetworkDb has not resolved');
+	if (recordedHandle === null) throw new Error('no handle recorded yet -- attachLocalCopy has not resolved');
 	const row = await recordedHandle.prepare('select * from Election where Id = :electionId').get({ electionId });
 	if (!row) throw new Error(`no Election row found for id "${electionId}"`);
 	return row as Record<string, unknown>;
@@ -294,7 +296,7 @@ async function currentElectionRow(): Promise<Record<string, unknown>> {
  * module's private helper).
  */
 function electionRowWithTitle(row: Record<string, unknown>, newTitle: string): unknown[] {
-	if (recordedHandle === null) throw new Error('no handle recorded yet -- attachNetworkDb has not resolved');
+	if (recordedHandle === null) throw new Error('no handle recorded yet -- attachLocalCopy has not resolved');
 	const schemaName = recordedHandle.schemaManager.getCurrentSchemaName();
 	const tableSchema = recordedHandle.schemaManager.getTable(schemaName, 'Election');
 	if (!tableSchema) throw new Error('the recorded handle declares no schema for Election');
@@ -345,7 +347,7 @@ async function applyLocalWrite(title: string): Promise<void> {
 	await applyPeerRowBatch(recordedHandle as unknown as Parameters<typeof applyPeerRowBatch>[0], 'Election', [
 		{ op: 'upsert', row: ordered as never },
 	]);
-	if (recordedHandle === null) throw new Error('no handle recorded yet -- attachNetworkDb has not resolved');
+	if (recordedHandle === null) throw new Error('no handle recorded yet -- attachLocalCopy has not resolved');
 	await recordedHandle.exec(
 		'delete from Keyholder where ElectionId = :electionId and ElectionRevision = :revision and UserId = :userId',
 		{ electionId, revision: FIXTURE_REVISION, userId: LOCAL_WRITE_KEYHOLDER_USER_ID },

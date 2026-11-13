@@ -118,6 +118,14 @@ test('rung 6: @votetorrent/ui-web appears in none of this package\'s dependency 
 	}
 });
 
+/**
+ * The live-store open path both audiences may see (56-26, user decision
+ * 2026-11-13): the Public page creates its own store after the strand returns
+ * the addressed election, and checks `hasLiveStore` before any read-side open.
+ * These live at `src/attach-live.js`, outside `src/officer/`.
+ */
+const SHARED_LIVE_NAMES = Object.freeze(['attachLiveDb', 'hasLiveStore', 'LiveStoreMissingError', 'LiveStoreUnavailableError']);
+
 /** The live-store names only the officer audience may see. */
 const OFFICER_LIVE_NAMES = Object.freeze([
 	'attachLiveDb',
@@ -159,7 +167,11 @@ test('rung 8 (positive control): the absence check fires against a synthetic mod
 	assert.deepEqual(liveNamesExportedBy(synthetic), ['attachLiveDb']);
 });
 
-test('rung 8: the ./public barrel exports none of the live-store names', async () => {
+test('rung 8: the ./public barrel exports the shared live-store open path and none of the officer-only live names (56-26)', async () => {
 	const mod = await import('@votetorrent/web-data/public');
-	assert.deepEqual(liveNamesExportedBy(mod), []);
+	const officerOnly = liveNamesExportedBy(mod).filter((name) => !SHARED_LIVE_NAMES.includes(name));
+	assert.deepEqual(officerOnly, []);
+	for (const name of SHARED_LIVE_NAMES) {
+		assert.ok(Object.prototype.hasOwnProperty.call(mod, name), `./public must export ${name}`);
+	}
 });
