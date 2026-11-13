@@ -527,3 +527,70 @@ export function enableChangePropagation(db, networkHash) {
 		},
 	};
 }
+
+/**
+ * 56-27. Wake a caller that holds NO handle when any handle in this origin
+ * writes to a public table of `networkHash` -- the peer replication's own
+ * `notifyPeerWrite`, or a sibling tab's `enableChangePropagation`.
+ *
+ * WHY IT EXISTS. On a fresh browser the Public page's read runs before its own
+ * peer boot has filled the store: it finds no election, reports "not held" and
+ * keeps no handle, so `subscribeToPublicChanges` has nothing to attach to. The
+ * boot's first replication pass then announces its rows on this channel, and
+ * without a listener nothing re-reads until a reload (56-26 Task 4, 2 of 2
+ * fresh-profile loads).
+ *
+ * WHAT IT CARRIES: nothing. The message is validated exactly as
+ * `dispatchRemoteNotice` validates one (this module's kind, a table in
+ * `PUBLIC_SUBSCRIBED_TABLES`), and `onChange` is then called with NO
+ * argument: neither the table nor the type leaves this module through it. The
+ * caller's only response is to read again through the normal read path.
+ *
+ * NEVER THROWS: a non-function callback, an unusable network hash or no
+ * `BroadcastChannel` each yield `{ active: false }` and an idempotent no-op
+ * `stop`.
+ *
+ * @param {string} networkHash
+ * @param {() => void} onChange
+ * @returns {ChangePropagation}
+ */
+export function watchNetworkChanges(networkHash, onChange) {
+	const inactive = { active: false, stop: () => {} };
+	if (typeof onChange !== 'function' || typeof BroadcastChannel === 'undefined') return inactive;
+
+	/** @type {any} */
+	let channel;
+	try {
+		channel = new BroadcastChannel(CHANGE_CHANNEL_PREFIX + dbNameFor(networkHash));
+	} catch (err) {
+		logFailure(err);
+		return inactive;
+	}
+
+	let stopped = false;
+	channel.onmessage = (/** @type {any} */ event) => {
+		if (stopped) return;
+		const message = event?.data;
+		if (!message || typeof message !== 'object' || message.kind !== CHANGE_MESSAGE_KIND) return;
+		if (!isSubscribed(message.table)) return;
+		try {
+			onChange();
+		} catch (err) {
+			logFailure(err);
+		}
+	};
+
+	return {
+		active: true,
+		stop: () => {
+			if (stopped) return;
+			stopped = true;
+			try {
+				channel.onmessage = null;
+				channel.close();
+			} catch (err) {
+				logFailure(err);
+			}
+		},
+	};
+}

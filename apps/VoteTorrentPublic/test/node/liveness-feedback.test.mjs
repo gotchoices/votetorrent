@@ -273,3 +273,58 @@ test('the .live-update-badge rule contains no hex literal and no rgba( literal',
 	assert.doesNotMatch(ruleMatch[0], /#[0-9a-fA-F]{3,8}\b/, '.live-update-badge contains a hex colour literal');
 	assert.doesNotMatch(ruleMatch[0], /rgba\(/, '.live-update-badge contains an rgba( literal');
 });
+
+// ---------------------------------------------------------------------------
+// 56-27: the handle-less watcher. A fresh browser reads "not held" before its
+// own peer boot has filled the store; the boot's first replication pass must
+// make the page read again without a reload (56-26 Task 4, 2 of 2 loads stuck).
+// ---------------------------------------------------------------------------
+
+/**
+ * Every way the watcher wiring can be wrong, as a list of named violations
+ * (empty = correct). Runs on comment-stripped hook source.
+ * @param {string} source
+ * @returns {string[]}
+ */
+function watcherViolations(source) {
+	/** @type {string[]} */
+	const out = [];
+	const start = source.search(/let\s+watcher\b[^\n]{0,80}?=\s*watchNetworkChanges\(\s*networkKey\s*,/);
+	const read = source.indexOf('readAddressedElection(');
+	if (start < 0) out.push('no watchNetworkChanges(networkKey, ...) assignment to watcher');
+	if (read < 0) out.push('no readAddressedElection( call');
+	if (start >= 0 && read >= 0 && start > read) out.push('the watcher starts AFTER the read');
+	if (start >= 0) {
+		const cb = source.slice(start, source.indexOf('});', start));
+		if (!/if\s*\(\s*!cancelled\s*\)\s*bumpDataVersion\(\s*\)/.test(cb)) out.push('the watcher callback does not call bumpDataVersion() with no argument, guarded by !cancelled');
+	}
+	const held = source.search(/if\s*\(\s*next\.db\s*!==\s*null\s*&&\s*next\.db\s*!==\s*undefined\s*\)\s*\{\s*watcher\?\.stop\(\);/);
+	if (held < 0) out.push('the held-handle branch does not stop the watcher first');
+	const cleanup = source.lastIndexOf('return () => {');
+	if (cleanup < 0 || !/watcher\?\.stop\(\);/.test(source.slice(cleanup, source.indexOf('};', cleanup)))) {
+		out.push('the effect cleanup does not stop the watcher');
+	}
+	return out;
+}
+
+test('56-27: positive control -- the watcher matcher names each planted violation', () => {
+	const real = HOOK_SOURCE;
+	const plants = [
+		[real.replace(/watchNetworkChanges\(\s*networkKey/, 'watchNetworkChanges(networkKeyX'), 'no watchNetworkChanges'],
+		[real.replace(/if\s*\(\s*!cancelled\s*\)\s*bumpDataVersion\(\s*\)/, 'bumpDataVersion()'), 'callback'],
+		[real.replace(/(next\.db\s*!==\s*undefined\s*\)\s*\{\s*)watcher\?\.stop\(\);/, '$1'), 'held-handle branch'],
+		[real.slice(0, real.lastIndexOf('return () => {')) + real.slice(real.lastIndexOf('return () => {')).replace(/watcher\?\.stop\(\);/, ''), 'cleanup'],
+	];
+	for (const [fixture, expected] of plants) {
+		assert.notEqual(fixture, real, `the plant for "${expected}" did not change the source`);
+		const found = watcherViolations(fixture);
+		assert.ok(found.some((v) => v.includes(expected)), `planted "${expected}" not detected; got ${JSON.stringify(found)}`);
+	}
+	// Order: move the watcher after the read.
+	const moved = 'readAddressedElection(x); let watcher = watchNetworkChanges(networkKey, () => { if (!cancelled) bumpDataVersion(); });';
+	assert.ok(watcherViolations(moved).includes('the watcher starts AFTER the read'));
+});
+
+test('56-27: the read effect starts a handle-less watcher before its read, stops it once it holds a handle and in its cleanup', () => {
+	assert.deepEqual(watcherViolations(HOOK_SOURCE), []);
+});

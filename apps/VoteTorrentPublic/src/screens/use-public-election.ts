@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { enableChangePropagation, subscribeToPublicChanges } from '@votetorrent/web-data/public';
+import { enableChangePropagation, subscribeToPublicChanges, watchNetworkChanges } from '@votetorrent/web-data/public';
 import {
 	PUBLIC_ELECTION_STATE,
 	DEFAULT_PUBLIC_SOURCE,
@@ -303,6 +303,17 @@ export function usePublicElection({
 		 * see the module header. */
 		let subscription: { live: boolean; unsubscribe: () => void } | null = null;
 		let propagation: { active: boolean; stop: () => void } | null = null;
+		/** 56-27. Started BEFORE the read, so a write that lands while the read
+		 * is in flight is not missed. While this effect holds no handle (a fresh
+		 * browser whose own peer boot is still filling the store reads "not
+		 * held" first), the boot's first replication pass is the only thing
+		 * that can tell this page to read again; this handle-less listener
+		 * hears it and bumps `dataVersion`. It is stopped the moment the read
+		 * holds a handle (that handle's own subscription takes over) and in the
+		 * cleanup below. Its callback receives nothing -- no table, no row. */
+		let watcher: { active: boolean; stop: () => void } | null = watchNetworkChanges(networkKey, () => {
+			if (!cancelled) bumpDataVersion();
+		});
 
 		readAddressedElection({ status: 'ok', networkHash: networkKey, electionId: electionKey }, source)
 			.then((next) => {
@@ -328,6 +339,8 @@ export function usePublicElection({
 				let connection: PublicConnectionState = 'unknown';
 				let observedAt: string | null = null;
 				if (next.db !== null && next.db !== undefined) {
+					watcher?.stop();
+					watcher = null;
 					// D-27. Propagation FIRST, so the bridge is listening before
 					// the subscription that consumes it exists; both are started
 					// against the handle this effect owns and released together
@@ -383,6 +396,7 @@ export function usePublicElection({
 			// throw.
 			subscription?.unsubscribe();
 			propagation?.stop();
+			watcher?.stop();
 			void closeQuietly(source, handle);
 		};
 	}, [reads, networkKey, electionKey, source, dataVersion, bumpDataVersion, peerFeed]);

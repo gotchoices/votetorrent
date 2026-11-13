@@ -64,7 +64,7 @@ import { TABLES_READ as KEYRELEASE_TABLES } from '../src/public/read-keyrelease.
 // Resolved through `webDataSrc` rather than hand-derived, so a relocation of
 // the source tree moves a call argument here instead of a `'..', '..'` hop
 // count (D-03).
-const { PUBLIC_SUBSCRIBED_TABLES, subscribeToPublicChanges, enableChangePropagation, notifyPeerWrite } = await import(
+const { PUBLIC_SUBSCRIBED_TABLES, subscribeToPublicChanges, enableChangePropagation, notifyPeerWrite, watchNetworkChanges } = await import(
 	moduleUrl(webDataSrc('public', 'subscribe.js'))
 );
 
@@ -621,4 +621,77 @@ test('S6: with both a local subscription AND an active enableChangePropagation o
 	sub.unsubscribe();
 	propagation.stop();
 	propagation.stop();
+});
+
+// ---------------------------------------------------------------------------
+// S7 (56-27): the handle-less watcher. A page that read "not held" while its
+// own peer boot is still filling the store holds no handle, so it cannot use
+// subscribeToPublicChanges; it must still hear the boot's first write.
+// ---------------------------------------------------------------------------
+
+test('S7: watchNetworkChanges hears a notifyPeerWrite from another handle on the same network, and its callback receives NO argument', async () => {
+	assert.equal(typeof watchNetworkChanges, 'function', 'subscribe.js exports watchNetworkChanges');
+	const hash = `s7-hear-${Math.random().toString(36).slice(2)}`;
+	/** @type {unknown[][]} */
+	const calls = [];
+	const watcher = watchNetworkChanges(hash, (/** @type {unknown[]} */ ...args) => calls.push(args));
+	assert.equal(watcher.active, true, 'watcher did not start — BroadcastChannel is unavailable in this runtime');
+
+	assert.equal(notifyPeerWrite(fakeHandle(), hash, PUBLIC_SUBSCRIBED_TABLES[0], 'insert'), true);
+	await pastBroadcastDelivery();
+
+	assert.equal(calls.length, 1, `expected one wake, got ${calls.length}`);
+	assert.equal(calls[0].length, 0, 'the callback must receive no argument: no table, no type, no row');
+	watcher.stop();
+});
+
+test('S7: watchNetworkChanges ignores another network, a foreign message kind and a table outside the allowlist', async () => {
+	const hash = `s7-filter-${Math.random().toString(36).slice(2)}`;
+	let calls = 0;
+	const watcher = watchNetworkChanges(hash, () => {
+		calls += 1;
+	});
+	assert.equal(watcher.active, true);
+	assert.ok(!PUBLIC_SUBSCRIBED_TABLES.includes(FORBIDDEN_TABLE), `${FORBIDDEN_TABLE} must be outside the allowlist`);
+
+	notifyPeerWrite(fakeHandle(), `${hash}-other`, PUBLIC_SUBSCRIBED_TABLES[0], 'insert');
+	const raw = new BroadcastChannel(TEST_CHANGE_CHANNEL_PREFIX + dbNameFor(hash));
+	raw.postMessage({ kind: 'not-a-public-change', table: PUBLIC_SUBSCRIBED_TABLES[0], type: 'insert' });
+	raw.postMessage({ kind: 'public-change', table: FORBIDDEN_TABLE, type: 'insert' });
+	raw.postMessage(null);
+	await pastBroadcastDelivery();
+	assert.equal(calls, 0, `expected no wake, got ${calls}`);
+
+	// Control: the same raw channel, a well-formed message, does wake it.
+	raw.postMessage({ kind: 'public-change', table: PUBLIC_SUBSCRIBED_TABLES[0], type: 'update' });
+	await pastBroadcastDelivery();
+	assert.equal(calls, 1, 'the well-formed control message did not wake the watcher; the filters above prove nothing');
+
+	raw.close();
+	watcher.stop();
+});
+
+test('S7: after stop() the watcher hears nothing, and stop() is idempotent', async () => {
+	const hash = `s7-stop-${Math.random().toString(36).slice(2)}`;
+	let calls = 0;
+	const watcher = watchNetworkChanges(hash, () => {
+		calls += 1;
+	});
+	watcher.stop();
+	watcher.stop();
+	notifyPeerWrite(fakeHandle(), hash, PUBLIC_SUBSCRIBED_TABLES[0], 'insert');
+	await pastBroadcastDelivery();
+	assert.equal(calls, 0);
+});
+
+test('S7: an unusable network hash or a non-function callback yields an inactive watcher and never throws', () => {
+	for (const [hash, cb] of [['', () => {}], [/** @type {any} */ (null), () => {}], ['s7-cb', /** @type {any} */ (null)]]) {
+		/** @type {any} */
+		let watcher;
+		assert.doesNotThrow(() => {
+			watcher = watchNetworkChanges(hash, cb);
+		});
+		assert.equal(watcher.active, false);
+		assert.doesNotThrow(() => watcher.stop());
+	}
 });

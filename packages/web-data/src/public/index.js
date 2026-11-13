@@ -83,6 +83,7 @@ export {
 	subscribeToPublicChanges,
 	enableChangePropagation,
 	notifyPeerWrite,
+	watchNetworkChanges,
 } from './subscribe.js';
 
 /**
