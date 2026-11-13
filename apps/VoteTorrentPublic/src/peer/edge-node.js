@@ -69,12 +69,27 @@
  *  5. `strandFilter: { mode: 'all' }` — `StrandFilter` governs which
  *     strands a node PARTICIPATES in and is explicitly NOT D-03's
  *     observability allowlist. Left unset.
- *  6. `circuitRelayTransport(...)`, `network.relayAddrs`, `relay`,
- *     `listenAddrs`, `port`/`wsPort`, `hibernation`, `connectionGater`,
- *     `controlNetwork`, `PARTY_ID`, `CONTROL_ADDR`, and the
- *     `UPDATE_AFTER_DRONE_RESTART` sentinel. A browser dials out and does
- *     not listen. Bootstrap addresses arrive as a parameter from `56-06`'s
- *     config mechanism — this module does not fetch `config.json` itself.
+ *  6. `network.relayAddrs`, `relay`, `listenAddrs` (including a
+ *     `/p2p-circuit` listen, i.e. a relay RESERVATION), `port`/`wsPort`,
+ *     `hibernation`, `connectionGater`, `controlNetwork`, `PARTY_ID`,
+ *     `CONTROL_ADDR`, and the `UPDATE_AFTER_DRONE_RESTART` sentinel. A
+ *     browser dials out and does not listen. Bootstrap addresses arrive as a
+ *     parameter from `56-06`'s config mechanism — this module does not fetch
+ *     `config.json` itself.
+ *
+ *     `circuitRelayTransport()` DOES carry, and only as a DIALER (56-25,
+ *     2026-11-13). Until then this point listed it with the listen-side
+ *     items above, which mixed up the relay's two halves. On a real network
+ *     every strand node is a phone or NATed peer reachable ONLY as
+ *     `/.../p2p/<relay>/p2p-circuit/p2p/<peer>`; without the circuit
+ *     transport libp2p drops that address (`NoValidAddressesError`), the page
+ *     connects only to the relay, and `findCoordinator` reports the relay as
+ *     foreign to the strand. Passing `transports` at all replaces
+ *     `@optimystic/db-p2p`'s defaults wholesale (`libp2p-node-base.js`
+ *     `options.transports ?? defaults.transports`), which is why it must be
+ *     named here. Loopback harnesses hid this: their gateway is directly
+ *     dialable. Same trap and fix as `packages/p2p-probe-host/drone.mjs`.
+ *     Proven by `test/node/edge-circuit-dial.test.mjs`.
  *
  * WHAT DOES CARRY: `createEdgeNode` returns a `stop()` that is idempotent,
  * safe after a partial or failed start, and swallows errors from both the
@@ -139,6 +154,7 @@
 import { openOptimysticWebDb, IndexedDBRawStorage } from '@optimystic/db-p2p-storage-web';
 import { createLibp2pNode } from '@optimystic/db-p2p/rn';
 import { webSockets } from '@libp2p/websockets';
+import { circuitRelayTransport } from '@libp2p/circuit-relay-v2';
 import { edgeProfile } from '@optimystic/db-core';
 import { attachConnectionLifecycleTap } from './connection-lifecycle-probe.js';
 
@@ -253,6 +269,21 @@ export async function withdrawStorageServices(node, networkName) {
 }
 
 /**
+ * The Edge node's transport list: websockets, plus the DIALER half of
+ * circuit-relay-v2 so a strand node reachable only through a relay
+ * reservation can be dialed (header point 6). Nothing here listens: the node
+ * is built with no listen addresses, so the circuit transport never makes a
+ * reservation and the page stays unreachable.
+ * @param {{ webSockets?: typeof webSockets, circuitRelayTransport?: typeof circuitRelayTransport }} [deps]
+ * @returns {any[]}
+ */
+export function edgeTransports(deps) {
+	const ws = deps?.webSockets ?? webSockets;
+	const circuit = deps?.circuitRelayTransport ?? circuitRelayTransport;
+	return [ws(), circuit()];
+}
+
+/**
  * @typedef {object} CreateEdgeNodeConfig
  * @property {unknown} strandId
  * @property {string} networkName
@@ -264,12 +295,13 @@ export async function withdrawStorageServices(node, networkName) {
  * @typedef {object} CreateEdgeNodeDeps
  * @property {typeof createLibp2pNode} [createLibp2pNode]
  * @property {typeof webSockets} [webSockets]
+ * @property {typeof circuitRelayTransport} [circuitRelayTransport]
  * @property {typeof openStrandBlockStorage} [openStrandBlockStorage]
  */
 
 /**
- * Constructs a browser Edge-tier libp2p node: exactly one transport
- * (`webSockets()`), `fretProfile` set to `'edge'`, the caller's injected
+ * Constructs a browser Edge-tier libp2p node: `edgeTransports()` (websockets
+ * plus the circuit-relay dialer), `fretProfile` set to `'edge'`, the caller's injected
  * `privateKey` and `bootstrapNodes`, and a per-strand IndexedDB block
  * store. `deps` defaults to the real implementations and exists so a test
  * can observe the constructed options object without booting a real node.
@@ -292,6 +324,7 @@ export async function createEdgeNode(config, deps) {
 	const resolvedDeps = {
 		createLibp2pNode: deps?.createLibp2pNode ?? createLibp2pNode,
 		webSockets: deps?.webSockets ?? webSockets,
+		circuitRelayTransport: deps?.circuitRelayTransport ?? circuitRelayTransport,
 		openStrandBlockStorage: deps?.openStrandBlockStorage ?? openStrandBlockStorage,
 	};
 
@@ -315,7 +348,7 @@ export async function createEdgeNode(config, deps) {
 	let node;
 	try {
 		node = await resolvedDeps.createLibp2pNode({
-			transports: [resolvedDeps.webSockets()],
+			transports: edgeTransports(resolvedDeps),
 			storage,
 			bootstrapNodes,
 			networkName,

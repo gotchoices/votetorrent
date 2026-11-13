@@ -100,6 +100,12 @@ function makeFakeDeps(overrides = {}) {
 	/** @type {import('../../src/peer/edge-node.js').CreateEdgeNodeDeps['webSockets']} */
 	const fakeWebSockets = /** @type {any} */ (() => websocketsSentinel);
 
+	// 56-25: the circuit-relay DIALER. Without it a strand node reachable only
+	// through a relay reservation cannot be dialed (edge-circuit-dial.test.mjs).
+	const circuitSentinel = { sentinel: 'circuitRelayTransport' };
+	/** @type {import('../../src/peer/edge-node.js').CreateEdgeNodeDeps['circuitRelayTransport']} */
+	const fakeCircuitRelayTransport = /** @type {any} */ (() => circuitSentinel);
+
 	/** @type {import('../../src/peer/edge-node.js').CreateEdgeNodeDeps['openStrandBlockStorage']} */
 	const fakeOpenStrandBlockStorage = /** @type {any} */ (async (/** @type {unknown} */ strandId) => ({
 		dbName: strandStorageDbName(strandId),
@@ -111,6 +117,7 @@ function makeFakeDeps(overrides = {}) {
 		deps: {
 			createLibp2pNode: recordingCreateLibp2pNode,
 			webSockets: fakeWebSockets,
+			circuitRelayTransport: fakeCircuitRelayTransport,
 			openStrandBlockStorage: fakeOpenStrandBlockStorage,
 		},
 		createLibp2pNodeCalls,
@@ -118,6 +125,7 @@ function makeFakeDeps(overrides = {}) {
 		stubDb,
 		stubNode,
 		websocketsSentinel,
+		circuitSentinel,
 		addEventListenerCalls,
 	};
 }
@@ -145,7 +153,7 @@ test('createEdgeNode with an empty bootstrapNodes array rejects with EdgeNodeCon
 });
 
 test('createEdgeNode with a valid config calls the injected createLibp2pNode exactly once, with the Edge shape and none of the RN non-carries', async () => {
-	const { deps, createLibp2pNodeCalls, stubStorage, websocketsSentinel } = makeFakeDeps();
+	const { deps, createLibp2pNodeCalls, stubStorage, websocketsSentinel, circuitSentinel } = makeFakeDeps();
 	const injectedPrivateKey = { publicKey: { raw: new Uint8Array([9, 9, 9]) } };
 	const injectedBootstrapNodes = ['/dns4/gateway.example/tcp/443/wss/p2p/12D3KooWExample'];
 
@@ -164,8 +172,9 @@ test('createEdgeNode with a valid config calls the injected createLibp2pNode exa
 
 	// The twelve conditions, asserted individually so a single wrong field
 	// names itself in the failure output.
-	assert.strictEqual(/** @type {unknown[]} */ (options.transports).length, 1);
+	assert.strictEqual(/** @type {unknown[]} */ (options.transports).length, 2);
 	assert.strictEqual(/** @type {unknown[]} */ (options.transports)[0], websocketsSentinel);
+	assert.strictEqual(/** @type {unknown[]} */ (options.transports)[1], circuitSentinel);
 	assert.strictEqual(options.fretProfile, 'edge');
 	assert.strictEqual(options.privateKey, injectedPrivateKey);
 	assert.deepStrictEqual(options.bootstrapNodes, injectedBootstrapNodes);

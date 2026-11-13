@@ -45,6 +45,7 @@
 		"clean": "rm -rf dist dist-gate node_modules"
 	},
 	"dependencies": {
+		"@libp2p/circuit-relay-v2": "^4",
 		"@libp2p/crypto": "5.1.23",
 		"@libp2p/websockets": "10.1.25",
 		"@optimystic/db-core": "^1.27.0",
