@@ -360,20 +360,23 @@ export const FACTS = Object.freeze([
 		filledGap: 'D',
 		source: 'Task ⋈ ReleaseKeyTaskExtension (IsCompleted counts only, D-14/D-15, I-07)',
 	}),
-	// Gap E (087): no Tally table exists; doc/election.md still asks "How is
-	// this coordinated?".
+	// Gap E (087), FILLED (56-30, user decision 2026-11-13): the officer-
+	// published tally row is now PUBLIC and the page shows its root
+	// histogram. No sentence of its own: the card body is the results view,
+	// selected by the data (`filledGap` set, `interpolates` null), which
+	// renders "published", "none published yet" or "couldn't be read".
 	fact({
 		id: 'results',
 		group: 'outcome',
 		phases: ['settling', 'closed'],
 		labelKey: 'public.fact.results.label',
-		sentenceKey: 'public.gap.results.sentence',
-		detailKey: 'public.gap.results.detail',
+		sentenceKey: null,
+		detailKey: 'public.fact.results.detail',
 		emptyKey: null,
 		interpolates: null,
-		gap: 'E',
-		filledGap: null,
-		source: null,
+		gap: null,
+		filledGap: 'E',
+		source: 'ElectionTally root histogram (officer-published tally tree; totals only, 56-30)',
 	}),
 	// Gap F (087): no Validation table, and no error-margin statistic
 	// anywhere.

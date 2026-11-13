@@ -99,9 +99,11 @@ const FIXTURES = Object.freeze({
 	plantedRawQuery: 'const r = await db.eval(SQL, {}); return r.rows;',
 	/** The four group names, in UI-SPEC top-to-bottom order. */
 	groupOrder: Object.freeze(['electionAndRules', 'ballot', 'electorate', 'outcome']),
-	/** The six gapped fact ids and the one filled key-release id (D-16). */
-	gappedIds: Object.freeze(['turnout', 'receipt', 'merkle', 'results', 'validation', 'certification']),
+	/** The five gapped fact ids (56-30 filled results) and the key-release filled id (D-16). */
+	gappedIds: Object.freeze(['turnout', 'receipt', 'merkle', 'validation', 'certification']),
 	filledGapId: 'keyrelease',
+	/** 56-30: the second filled entry, the results card. */
+	resultsId: 'results',
 	/** The eighth gap that must never exist, and the letter that would carry it. */
 	forbiddenGapId: 'runoff',
 	forbiddenGapLetter: 'H',
@@ -371,13 +373,12 @@ test('6. groupFactList throws a named FactGroupingError, naming the offending id
 //    keeps an eighth gap out when a later reader "notices it is missing".
 // ---------------------------------------------------------------------------
 
-test('7. exactly six gapped entries, exactly one filled-gap entry (keyrelease, gap null), no runoff and no eighth letter', () => {
+test('7. exactly five gapped entries, exactly two filled-gap entries (keyrelease, and results since 56-30; gap null), no runoff and no eighth letter', () => {
 	const gapped = FACTS.filter((f) => f.gap !== null).map((f) => f.id);
-	assert.deepEqual([...gapped].sort(), [...FIXTURES.gappedIds].sort(), 'the gap set is not the six D-16 admits');
+	assert.deepEqual([...gapped].sort(), [...FIXTURES.gappedIds].sort(), 'the gap set is not the five left after 56-30');
 
 	const filled = FACTS.filter((f) => f.filledGap !== null);
-	assert.equal(filled.length, 1, 'expected exactly one filled-gap entry');
-	assert.equal(filled[0].id, FIXTURES.filledGapId);
+	assert.deepEqual(filled.map((f) => f.id), [FIXTURES.filledGapId, FIXTURES.resultsId], 'expected exactly the two filled-gap entries');
 	assert.equal(filled[0].gap, null, 'the key-release entry carries a gap — it would render on the GAP branch, contradicting D-14');
 
 	assert.ok(!FACTS.some((f) => f.id === FIXTURES.forbiddenGapId), 'a runoff entry was invented');
@@ -822,4 +823,57 @@ test('32a. the chart wrapper class is static and reachable: exactly two fact-car
 	assert.equal(FACT_SECTIONS.split(FIXTURES.chartWrapperClassAttr).length - 1, 2, 'expected exactly two fact-card__chart wrapper mounts — one per chart');
 	const tokens = extractStaticClassNameTokens(FACT_SECTIONS);
 	assert.ok(tokens.has('fact-card__chart'), 'css-class-coverage cannot see the chart wrapper class in the real source');
+});
+
+// ---------------------------------------------------------------------------
+// 56-30: the results card (gap E filled). Selected on the data, three states,
+// and nothing but copy and authority-supplied titles reaches a text node.
+// ---------------------------------------------------------------------------
+
+const RESULTS_TSX = stripComments(readFileSync(publicSrc('screens', 'PublishedResults.tsx'), 'utf8'));
+const SECTIONS_TSX_56_30 = stripComments(readFileSync(publicSrc('screens', 'FactSections.tsx'), 'utf8'));
+
+/** @param {string} source @returns {string[]} */
+function textExpressions56_30(source) {
+	const out = [];
+	const re = />\s*\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}\s*</g;
+	let m;
+	while ((m = re.exec(source))) out.push(m[1].trim());
+	return out;
+}
+
+test('56-30 positive control: the text-position extractor finds a planted id and a planted copy call', () => {
+	const found = textExpressions56_30("<p>{ballot.ballotId}</p><li>{t('public.fact.results.blank', { count: 1 })}</li>");
+	assert.deepEqual(found, ['ballot.ballotId', "t('public.fact.results.blank', { count: 1 })"]);
+});
+
+test('56-30: FactSections selects the results card on the data (filled gap, no interpolation), never on the id', () => {
+	assert.match(SECTIONS_TSX_56_30, /const rendersResults = fact\.filledGap !== null && fact\.interpolates === null;/);
+	assert.match(SECTIONS_TSX_56_30, /\{rendersResults \? <PublishedResults results=\{results\} \/> : null\}/);
+	assert.doesNotMatch(SECTIONS_TSX_56_30, /fact\.id\s*===\s*'results'/);
+	// Control: the id matcher fires on a planted id check.
+	assert.match("if (fact.id === 'results') {}", /fact\.id\s*===\s*'results'/);
+});
+
+test('56-30: PublishedResults renders none and unreadable as their own sentences, and published as copy plus titles only -- no id, code, root or hash in a text node', () => {
+	assert.match(RESULTS_TSX, /results\.state === 'none'\) return <p>\{t\('public\.fact\.results\.none'\)\}<\/p>/);
+	assert.match(RESULTS_TSX, /results\.state !== 'published'\) return <p>\{t\('public\.fact\.results\.unreadable'\)\}<\/p>/);
+	// A conditional that wraps JSX is judged by the text nodes inside it.
+	/** @param {string} e @returns {string[]} */
+	const flatten = (e) => {
+		const inner = /<\w/.test(e) ? textExpressions56_30(e) : [];
+		return inner.length > 0 ? inner.flatMap(flatten) : [e];
+	};
+	const exprs = textExpressions56_30(RESULTS_TSX).flatMap(flatten);
+	assert.deepEqual(flatten("c ? <h4>{x.title}</h4> : null"), ['x.title'], 'flatten control');
+	assert.ok(exprs.length >= 6, `expected the copy calls and titles in text position, found ${exprs.length}`);
+	for (const expr of exprs) {
+		const isCopy = /^t\('public\.fact\.results\.[\w]+'/.test(expr);
+		const isTitle = /^(?:ballot\.description|question\.title)$/.test(expr);
+		assert.ok(isCopy || isTitle, `a text-producing expression is neither copy nor an authority title: "${expr}"`);
+		for (const forbidden of ['ballotId', 'Root', 'root', 'hash', 'revision']) {
+			assert.ok(!expr.includes(forbidden), `a text expression names ${forbidden}: "${expr}"`);
+		}
+	}
+	assert.doesNotMatch(RESULTS_TSX, /dangerouslySetInnerHTML|className=/, 'the view must stay unclassed and escape-hatch free');
 });

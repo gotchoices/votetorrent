@@ -65,6 +65,12 @@ export const CLASSIFICATION = {
 	Ballot:             [CLASS.PUBLIC, 'Ballot definition per district', ['pre','voting','settling','closed']],
 	Question:           [CLASS.PUBLIC, 'Ballot questions', ['pre','voting','settling','closed']],
 	Option:             [CLASS.PUBLIC, 'Ballot options', ['pre','voting','settling','closed']],
+	// 56-30, USER DECISION 2026-11-13 ("Public, show totals"): was an interim NEVER that named this phase as its
+	// owner. The row carries the tally tree (counts only: no vote entry, nonce, registrant id or key, per
+	// tally-tree.ts), the roots, the block count, the publication time and the publisher's user id, key and
+	// signature. The whole row replicates to a visitor's browser like every PUBLIC table; the public read
+	// (public/read-tally.js) selects no user id and renders only the totals.
+	ElectionTally:      [CLASS.PUBLIC, 'The officer-published results of an election revision: the tally tree (vote counts per ballot, question and option, per block and in total), its block and tally roots, block count and publication time, plus the publisher id, key and signature. Results are what a public election view is FOR once counting is done', ['settling','closed']],
 	Keyholder:          [CLASS.PUBLIC, 'WHO holds election keys. PUBLIC as a COUNT and as a roster the authority already publishes — but a per-row join to User is an identity graph, which is why that query lives under src/officer/ (D-04) and the anonymous audience gets counts only (D-14)', ['pre','voting','settling','closed']],
 	ElectionKey:        [CLASS.PUBLIC, '62-02 (D-13, D-16): the joint public key voters encrypt ballots to — publishing it is the whole point; it holds only public material (Y and commitments), never a private share', ['pre','voting','settling','closed']],
 	KeyholderShareRelease:[CLASS.PUBLIC,'62-02 (D-13, D-17): by design, a released signing share is PUBLIC once released — anyone with k shares may reconstruct (D-17); visible only once the election has reached settling/closed, when release legitimately happens', ['settling','closed']],
@@ -140,7 +146,6 @@ export const CLASSIFICATION = {
 	// ── Officer-only rows added after the first classification pass.
 	AdminCancellation:  [CLASS.NEVER, 'An officer-signed record that stops one administration change before it takes effect (the authority, the change\'s effective time and the cancelling officer\'s user id). Administration machinery that the current roster already reflects, so an anonymous reader needs nothing from it, and it is never shown on the Public page', []],
 	DashboardPairingRevocation:[CLASS.NEVER, 'An officer-signed revocation of one dashboard browser pairing (a user id and a pairing nonce). Pairing machinery that only the officer dashboard reads, to unpair itself; nothing an anonymous reader needs, and never shown on the Public page', []],
-	ElectionTally:      [CLASS.NEVER, 'The officer-published tally row (the tally tree JSON, the publisher user id and key). It landed unclassified, so this is an INTERIM NEVER: no public or officer reader names it yet. The phase that shows results on the Public page reclassifies it deliberately and re-pins the counts', []],
 
 	// ── DRAFT: unsigned proposals. All ten stay DRAFT, and DRAFT is forbidden:
 	// rendering a draft as if it were the election is this page's worst outcome.

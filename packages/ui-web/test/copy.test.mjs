@@ -54,11 +54,11 @@ import { FACT_COPY_KEYS, FACTS } from '../src/lifecycle/facts.js';
 // arithmetic in this comment.
 // ---------------------------------------------------------------------------
 
-test('COPY has exactly 231 keys (73 pre-53-07, +10 public-voice keys under D-08, +2 net from the 54-02 lifecycle rename/expansion, +61 from 54-09s fact/gap copy table, +2 from 54-12s not-held sentence, +6 from 56-12s staleness/config-fault copy, +1 from 56-14s live-update badge, +22 from 60-01s chart-visualization copy, +84 from 66-05s live-dashboard copy, +5 from 66-22s pairing, scanner and forget gap copy, -40 from 66-24s removal of the snapshot-era sign-in, restore and refresh copy, +2 from 56-28s still-looking sentence, +3 from 56-29s network-index sentences)', () => {
+test('COPY has exactly 237 keys (73 pre-53-07, +10 public-voice keys under D-08, +2 net from the 54-02 lifecycle rename/expansion, +61 from 54-09s fact/gap copy table, +2 from 54-12s not-held sentence, +6 from 56-12s staleness/config-fault copy, +1 from 56-14s live-update badge, +22 from 60-01s chart-visualization copy, +84 from 66-05s live-dashboard copy, +5 from 66-22s pairing, scanner and forget gap copy, -40 from 66-24s removal of the snapshot-era sign-in, restore and refresh copy, +2 from 56-28s still-looking sentence, +3 from 56-29s network-index sentences, +6 net from 56-30s results card: +8 results keys, -2 retired gap-E keys)', () => {
 	assert.equal(
 		Object.keys(COPY).length,
-		231,
-		'expected 231 -- if this reads 228, 56-29s public.index.lookingOnNetwork/networkEmpty/networkUnreachable (NEW_56_29_KEYS) were wrongly deleted; ElectionIndex.tsx mounts them for a link that names a network. Before 56-29 the table held 228: if it then read 226, 56-28s public.election.fetching.title/.body (NEW_56_28_KEYS) were wrongly deleted; ElectionShell.tsx mounts them while the page is still fetching an election, where t() throws on either going missing. Before 56-28 the table held 226: if it then read 266, 66-24s forty removed snapshot-era keys (REMOVED_66_24_KEYS: bootstrap.*, snapshot.* and network.*) came back; nothing mounts them any more, so they are dead copy. If this reads fewer than 226, a live key was wrongly deleted. Before 66-24 the table held 266: if it then read 261, 66-22s five gap keys (NEW_66_22_KEYS: pairing.step.joiningUnnamed, pairing.officerUnknown, pairing.failed.no-storage.otherTab, scanner.unavailable and forget.failed) were wrongly deleted; the pairing screen, the webcam scanner and the forget dialog mount them, where t() throws on them going missing. If this reads 177, 66-05s eighty-four live-dashboard keys (NEW_66_05_KEYS: pairing, scanner, status, swap, forget, unpaired, panel.readOnly, switcher, shell and marks) were wrongly deleted; they are mounted by the live dashboard screens, where t() throws on them going missing. If this reads 155, 60-01s twenty-two chart-visualization keys (NEW_60_01_KEYS: the view ' +
+		237,
+		'expected 237 -- if this reads 229, 56-30s results-card keys (public.fact.results.detail plus NEW_56_30_KEYS) were wrongly deleted; FactSections/PublishedResults mount them. If it reads 239, the retired gap-E sentence/detail came back as dead copy. Before 56-30 the table held 231: if it then read 228, 56-29s public.index.lookingOnNetwork/networkEmpty/networkUnreachable (NEW_56_29_KEYS) were wrongly deleted; ElectionIndex.tsx mounts them for a link that names a network. Before 56-29 the table held 228: if it then read 226, 56-28s public.election.fetching.title/.body (NEW_56_28_KEYS) were wrongly deleted; ElectionShell.tsx mounts them while the page is still fetching an election, where t() throws on either going missing. Before 56-28 the table held 226: if it then read 266, 66-24s forty removed snapshot-era keys (REMOVED_66_24_KEYS: bootstrap.*, snapshot.* and network.*) came back; nothing mounts them any more, so they are dead copy. If this reads fewer than 226, a live key was wrongly deleted. Before 66-24 the table held 266: if it then read 261, 66-22s five gap keys (NEW_66_22_KEYS: pairing.step.joiningUnnamed, pairing.officerUnknown, pairing.failed.no-storage.otherTab, scanner.unavailable and forget.failed) were wrongly deleted; the pairing screen, the webcam scanner and the forget dialog mount them, where t() throws on them going missing. If this reads 177, 66-05s eighty-four live-dashboard keys (NEW_66_05_KEYS: pairing, scanner, status, swap, forget, unpaired, panel.readOnly, switcher, shell and marks) were wrongly deleted; they are mounted by the live dashboard screens, where t() throws on them going missing. If this reads 155, 60-01s twenty-two chart-visualization keys (NEW_60_01_KEYS: the view ' +
 			'switch, the panel-state and chart-empty keys, the section headings and the tooltip/meter templates) were ' +
 			'wrongly deleted; they are consumed starting in 60-03/60-05/60-06. If this reads 154, 56-14s ' +
 			'public.liveUpdate.badge was wrongly deleted; it is Surface 5 (D-16/D-19) ' +
@@ -282,6 +282,14 @@ const NEW_56_28_KEYS = Object.freeze(['public.election.fetching.title', 'public.
  * Mounted in the same change by ElectionIndex.tsx.
  * @type {ReadonlyArray<string>}
  */
+/**
+ * The seven render keys 56-30 added for the results card (gap E filled), beyond
+ * `public.fact.results.detail`, which `FACT_COPY_KEYS` already names. The
+ * retired gap-E sentence/detail left `FACT_COPY_KEYS` in the same change.
+ * @type {ReadonlyArray<string>}
+ */
+const NEW_56_30_KEYS = Object.freeze(['public.fact.results.none', 'public.fact.results.unreadable', 'public.fact.results.blocks', 'public.fact.results.ballotTotals', 'public.fact.results.optionCount', 'public.fact.results.blank', 'public.fact.results.unsupported']);
+
 const NEW_56_29_KEYS = Object.freeze(['public.index.lookingOnNetwork', 'public.index.networkEmpty', 'public.index.networkUnreachable']);
 
 /**
@@ -754,13 +762,13 @@ test('sanity: the 60-01 delta is 22 keys and none collides with any prior delta 
 	assert.deepEqual(overlap, [], `these keys are counted twice: ${overlap.join(', ')}`);
 });
 
-test('sanity: the 54-09 delta is 61 keys -- 50 named by facts.js FACT_COPY_KEYS plus 11 non-fact keys, with no overlap between the two (an overlap would silently shrink the delta while every other assertion still passed)', () => {
-	assert.equal(FACT_COPY_KEYS.length, 50, 'facts.js FACT_COPY_KEYS must still publish 50 keys');
+test('sanity: the 54-09 delta is 60 keys (61 until 56-30) -- 49 named by facts.js FACT_COPY_KEYS (50 until 56-30 filled gap E: the results card lost its gap sentence and gap detail and gained one fact detail) plus 11 non-fact keys, with no overlap between the two (an overlap would silently shrink the delta while every other assertion still passed)', () => {
+	assert.equal(FACT_COPY_KEYS.length, 49, 'facts.js FACT_COPY_KEYS must publish 49 keys (56-30)');
 	assert.equal(NEW_54_09_NON_FACT_KEYS.length, 11);
 	const factSet = new Set(FACT_COPY_KEYS);
 	const overlap = NEW_54_09_NON_FACT_KEYS.filter((k) => factSet.has(k));
 	assert.deepEqual(overlap, [], `these keys are counted twice: ${overlap.join(', ')}`);
-	assert.equal(new Set(NEW_54_09_KEYS).size, 61);
+	assert.equal(new Set(NEW_54_09_KEYS).size, 60);
 });
 
 test('D-25/D-07/D-08/D-06/54-09/54-12/56-12/56-14/60-01/66-05/66-22/66-24: the ONLY key-set changes since 8326185d are gate.advisoryDisclosure -> advisory.authority.body, the ten NEW_53_07_KEYS additions, the PHASE_54_RENAMES rename, the PHASE_54_ADDITIONS additions, the 61 NEW_54_09_KEYS additions, the two NEW_54_12_KEYS additions, the six NEW_56_12_KEYS additions, the one NEW_56_14_KEYS addition the twenty-two NEW_60_01_KEYS additions the eighty-four NEW_66_05_KEYS additions, the five NEW_66_22_KEYS additions and the forty REMOVED_66_24_KEYS removals -- no other key added or removed', () => {
@@ -783,6 +791,7 @@ test('D-25/D-07/D-08/D-06/54-09/54-12/56-12/56-14/60-01/66-05/66-22/66-24: the O
 		...NEW_66_22_KEYS,
 		...NEW_56_28_KEYS,
 		...NEW_56_29_KEYS,
+		...NEW_56_30_KEYS,
 	]);
 	for (const k of REMOVED_66_24_KEYS) expectedKeys.delete(k);
 
@@ -1305,4 +1314,15 @@ test('sanity: the 56-29 delta is 3 keys, collides with no earlier delta, and car
 		COPY['public.index.networkUnreachable'],
 		"This page couldn't reach the network named in this link, so only elections already stored in this browser are listed.",
 	);
+});
+
+test('sanity: the 56-30 delta is 7 render keys plus one fact detail, collides with no earlier delta, and the two retired gap-E keys are gone', () => {
+	assert.equal(NEW_56_30_KEYS.length, 7);
+	const prior = new Set([...PRE_MOVE_KEYS, ...NEW_53_07_KEYS, ...PHASE_54_ADDITIONS, ...NEW_54_09_KEYS, ...NEW_54_12_KEYS, ...NEW_56_12_KEYS, ...NEW_56_14_KEYS, ...NEW_60_01_KEYS, ...NEW_66_05_KEYS, ...NEW_66_22_KEYS, ...NEW_56_28_KEYS, ...NEW_56_29_KEYS]);
+	assert.deepEqual(NEW_56_30_KEYS.filter((k) => prior.has(k)), []);
+	assert.ok(FACT_COPY_KEYS.includes('public.fact.results.detail'));
+	for (const retired of ['public.gap.results.sentence', 'public.gap.results.detail']) {
+		assert.ok(!(retired in COPY), `${retired} is dead copy after 56-30`);
+	}
+	assert.equal(COPY['public.fact.results.none'], 'No results have been published for this election yet.');
 });

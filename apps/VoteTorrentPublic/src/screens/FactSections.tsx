@@ -4,6 +4,8 @@ import { groupFactsForPhase } from '../fact-groups.js';
 import { foldDistrictCounts } from '../roll-disclosure.js';
 import { RegistrantRoll } from './RegistrantRoll';
 import type { RegistrantRollRow } from './RegistrantRoll';
+import { PublishedResults } from './PublishedResults';
+import type { PublicResultsReading } from './use-public-election';
 
 /**
  * FactSections.tsx — the body of the public election page: the facts, and,
@@ -117,6 +119,8 @@ interface FactEntryView {
 	emptyKey: string | null;
 	interpolates: ReadonlyArray<string> | null;
 	gap: string | null;
+	/** 56-30: read as a branch predicate only (the results card); never rendered. */
+	filledGap: string | null;
 }
 
 export interface FactSectionsProps {
@@ -131,7 +135,12 @@ export interface FactSectionsProps {
 	 * database was opened. Passed straight through to the roll card, which
 	 * renders the same honest empty state for both. */
 	roll: ReadonlyArray<RegistrantRollRow> | null;
+	/** 56-30: the published results (or why there are none). Optional so a
+	 * mount that predates it (a gate) renders the honest "couldn't be read". */
+	results?: PublicResultsReading;
 }
+
+const RESULTS_UNREADABLE: PublicResultsReading = Object.freeze({ state: 'unreadable' });
 
 /**
  * The card's body text. Returns `null` for a label-only fact, which renders a
@@ -188,10 +197,12 @@ function FactCard({
 	fact,
 	keyRelease,
 	roll,
+	results,
 }: {
 	fact: FactEntryView;
 	keyRelease: KeyReleaseProgress | null;
 	roll: ReadonlyArray<RegistrantRollRow> | null;
+	results: PublicResultsReading;
 }) {
 	const body = factBody(fact, keyRelease);
 	// Header point 7: a collection card owns its own detail sentence and its
@@ -202,6 +213,9 @@ function FactCard({
 	// introduces no new state branch.
 	const rendersKeyRelease = fact.interpolates !== null && fact.sentenceKey !== null;
 	const districtBuckets = rendersCollection ? foldDistrictCounts(roll) : [];
+	// 56-30, header point 5 extended: a FILLED gap with no interpolation is
+	// the results card. Selected on the data, never on the id.
+	const rendersResults = fact.filledGap !== null && fact.interpolates === null;
 
 	if (fact.gap !== null) {
 		return (
@@ -230,6 +244,7 @@ function FactCard({
 				</div>
 			) : null}
 			{rendersCollection ? <RegistrantRoll rows={roll} /> : null}
+			{rendersResults ? <PublishedResults results={results} /> : null}
 			{districtBuckets.length > 0 ? (
 				<div className="fact-card__chart">
 					<BarSeries
@@ -272,7 +287,7 @@ function FactCard({
  * has no loading semantics of its own, and the shell is already held to that
  * rule one file over.
  */
-export function FactSections({ phase, keyRelease, roll }: FactSectionsProps) {
+export function FactSections({ phase, keyRelease, roll, results = RESULTS_UNREADABLE }: FactSectionsProps) {
 	const groups = groupFactsForPhase(phase);
 	if (groups.length === 0) return null;
 
@@ -282,7 +297,7 @@ export function FactSections({ phase, keyRelease, roll }: FactSectionsProps) {
 				<section className="fact-section" key={group.group} data-fact-group={group.group}>
 					<h2 className="fact-section__heading">{t(group.headingKey)}</h2>
 					{group.facts.map((fact: FactEntryView) => (
-						<FactCard fact={fact} keyRelease={keyRelease} roll={roll} key={fact.id} />
+						<FactCard fact={fact} keyRelease={keyRelease} roll={roll} results={results} key={fact.id} />
 					))}
 				</section>
 			))}

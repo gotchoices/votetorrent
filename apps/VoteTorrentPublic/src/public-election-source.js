@@ -131,6 +131,7 @@ import {
 	readPublicElection,
 	readPublicElectionRevision,
 	readKeyReleaseProgress,
+	readPublishedResults,
 	readRegistrantRoll,
 } from '@votetorrent/web-data/public';
 import { ROLL_FIELDS } from './roll-disclosure.js';
@@ -175,6 +176,15 @@ export const PUBLIC_ELECTION_STATE = Object.freeze({
  * @property {any} db  the OPEN handle on `ready`, else null — header point 6.
  * @property {KeyReleaseProgressCounts | null} keyRelease  D-14's three numbers, or null when they could not be read — header point 7.
  * @property {ReadonlyArray<Readonly<Record<string, string | null>>> | null} roll  the published voter roll, or null when it could not be read — header point 8.
+ * @property {PublicResultsReading} results  56-30: the published results, or why there are none to show.
+ */
+
+/**
+ * 56-30 (gap E filled). Three states, kept apart for the same reason
+ * `notHeld` and `unreadable` are: "nothing published yet" is a finding,
+ * "couldn't read it" is a fault, and only `published` carries numbers. Every
+ * path that opens no database, or reads no revision, is `unreadable`.
+ * @typedef {{ state: 'published', value: any } | { state: 'none' } | { state: 'unreadable' }} PublicResultsReading
  */
 
 /**
@@ -196,6 +206,7 @@ export const PUBLIC_ELECTION_STATE = Object.freeze({
  * @property {(db: any, electionId: string) => Promise<any>} readPublicElectionRevision
  * @property {(db: any, electionId: string, revision: number) => Promise<any>} readKeyReleaseProgress
  * @property {(db: any, electionId: string) => Promise<any>} readRegistrantRoll
+ * @property {(db: any, electionId: string, revision: number) => Promise<any>} [readPublishedResults]  56-30
  * @property {() => string} nowCanonical  56-12/D-17's OBSERVATION clock -- see
  *   `nowCanonical`'s own header comment below for why this is a third,
  *   distinct clock from `resolveComparisonInstant` and `formatReaderInstant`.
@@ -235,6 +246,7 @@ export const DEFAULT_PUBLIC_SOURCE = Object.freeze({
 	readPublicElectionRevision,
 	readKeyReleaseProgress,
 	readRegistrantRoll,
+	readPublishedResults,
 	nowCanonical,
 });
 
@@ -305,11 +317,17 @@ function logFailure(err) {
  * @param {any} db
  * @param {KeyReleaseProgressCounts | null} [keyRelease]
  * @param {ReadonlyArray<Readonly<Record<string, string | null>>> | null} [roll]
+ * @param {PublicResultsReading} [results]
  * @returns {Readonly<AddressedElectionResult>}
  */
-function freezeResult(state, election, db, keyRelease = null, roll = null) {
-	return Object.freeze({ state, election, db, keyRelease, roll });
+function freezeResult(state, election, db, keyRelease = null, roll = null, results = RESULTS_UNREADABLE) {
+	return Object.freeze({ state, election, db, keyRelease, roll, results });
 }
+
+/** @type {Readonly<{ state: 'unreadable' }>} */
+const RESULTS_UNREADABLE = Object.freeze({ state: 'unreadable' });
+/** @type {Readonly<{ state: 'none' }>} */
+const RESULTS_NONE = Object.freeze({ state: 'none' });
 
 /**
  * Rebuild one roll row from the published field set and nothing else. The
@@ -467,6 +485,21 @@ export async function readAddressedElection(address, deps = DEFAULT_PUBLIC_SOURC
 			}
 		}
 
+		// -- 4d. 56-30: the published results, card-local like 4b and 4c. A
+		//        missing row is `none` (a finding); a throw is `unreadable`;
+		//        either way the election itself stays `ready`.
+		/** @type {PublicResultsReading} */
+		let results = RESULTS_UNREADABLE;
+		if (revisionNumber !== null && typeof deps.readPublishedResults === 'function') {
+			try {
+				const published = await deps.readPublishedResults(db, electionId, revisionNumber);
+				results = published === null || published === undefined ? RESULTS_NONE : Object.freeze({ state: 'published', value: published });
+			} catch (err) {
+				logFailure(err);
+				results = RESULTS_UNREADABLE;
+			}
+		}
+
 		// -- 5. Shape the result. `Title` normalised to null when it is not a
 		//       string, so an absent column still reports the election rather
 		//       than dropping it. `Timeline` is passed through UNTOUCHED --
@@ -478,7 +511,7 @@ export async function readAddressedElection(address, deps = DEFAULT_PUBLIC_SOURC
 
 		// -- 6. The handle stays OPEN here (header point 6). The caller owns
 		//       closing it.
-		return freezeResult(PUBLIC_ELECTION_STATE.READY, facts, db, keyRelease, roll);
+		return freezeResult(PUBLIC_ELECTION_STATE.READY, facts, db, keyRelease, roll, results);
 	} catch (err) {
 		// Unreachable by construction today: every step above is already
 		// guarded. It exists because a future edit could reintroduce a throw,

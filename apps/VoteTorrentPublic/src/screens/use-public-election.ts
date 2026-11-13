@@ -209,6 +209,9 @@ export interface UsePublicElectionResult {
 	 * both; see `public-election-source.js` header point 8 for why this read
 	 * lives beside the election read rather than in a second hook. */
 	roll: ReadonlyArray<Readonly<Record<string, string | null>>> | null;
+	/** 56-30: the published results, or why there are none to show.
+	 * `unreadable` on every path that opens no database at all. */
+	results: PublicResultsReading;
 	/** 56-12/D-17: the change-channel signal, promoted to rendered state. See
 	 * this module's own header for what it can and cannot see. */
 	connection: PublicConnectionState;
@@ -225,6 +228,47 @@ export interface UsePublicElectionResult {
 	 * guard for the one place this is rendered. */
 	justUpdated: boolean;
 }
+
+/** 56-30. Structural, like `KeyReleaseProgress` below: the three states
+ * `public-election-source.js` produces. `value` is `read-tally.js`'s
+ * `PublicResults`. */
+export type PublicResultsReading =
+	| { state: 'published'; value: PublishedResultsValue }
+	| { state: 'none' }
+	| { state: 'unreadable' };
+
+export interface PublishedOptionCount {
+	code: string;
+	title: string;
+	count: number;
+}
+export interface PublishedQuestionResult {
+	code: string;
+	title: string;
+	answered: number;
+	blank: number;
+	options: ReadonlyArray<PublishedOptionCount>;
+}
+export interface PublishedBallotResult {
+	ballotId: string;
+	description: string | null;
+	votes: number;
+	valid: number;
+	invalid: number;
+	excluded: number;
+	questions: ReadonlyArray<PublishedQuestionResult>;
+	unsupported: ReadonlyArray<{ code: string; title: string; answered: number }>;
+}
+export interface PublishedResultsValue {
+	revision: number;
+	blockCount: number;
+	blockRoot: string;
+	tallyRoot: string;
+	publishedAt: string | null;
+	ballots: ReadonlyArray<PublishedBallotResult>;
+}
+
+const RESULTS_UNREADABLE: PublicResultsReading = Object.freeze({ state: 'unreadable' });
 
 /** Structural, not imported: `use-public-election.ts` is the only TypeScript
  * file on this path and the read seam is plain JSDoc `.js`. */
@@ -366,6 +410,7 @@ export function usePublicElection({
 					db: next.db,
 					keyRelease: next.keyRelease ?? null,
 					roll: next.roll ?? null,
+					results: next.results ?? RESULTS_UNREADABLE,
 					connection,
 					observedAt,
 				});
@@ -383,6 +428,7 @@ export function usePublicElection({
 						db: null,
 						keyRelease: null,
 						roll: null,
+						results: RESULTS_UNREADABLE,
 						connection: 'unknown',
 						observedAt: null,
 					});
@@ -409,8 +455,8 @@ export function usePublicElection({
 		// both -- neither branch ever wires `bumpDataVersion` to anything, so
 		// no notice could ever have been observed here either.
 		return election !== null && election !== undefined
-			? { state: PUBLIC_ELECTION_STATE.READY, election, db: null, keyRelease: null, roll: null, connection: 'unknown', observedAt: null, justUpdated: false }
-			: { state: PUBLIC_ELECTION_STATE.NOT_HELD, election: null, db: null, keyRelease: null, roll: null, connection: 'unknown', observedAt: null, justUpdated: false };
+			? { state: PUBLIC_ELECTION_STATE.READY, election, db: null, keyRelease: null, roll: null, results: RESULTS_UNREADABLE, connection: 'unknown', observedAt: null, justUpdated: false }
+			: { state: PUBLIC_ELECTION_STATE.NOT_HELD, election: null, db: null, keyRelease: null, roll: null, results: RESULTS_UNREADABLE, connection: 'unknown', observedAt: null, justUpdated: false };
 	}
 
 	if (resolved === null) {
@@ -423,6 +469,7 @@ export function usePublicElection({
 			db: null,
 			keyRelease: null,
 			roll: null,
+			results: RESULTS_UNREADABLE,
 			connection: 'unknown',
 			observedAt: null,
 			justUpdated: false,

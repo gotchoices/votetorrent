@@ -89,6 +89,7 @@ import { dbNameFor } from '../open-db.js';
 import { TABLES_READ as ELECTION_TABLES } from './read-election.js';
 import { TABLES_READ as ROLL_TABLES } from './read-registrant-roll.js';
 import { TABLES_READ as KEYRELEASE_TABLES } from './read-keyrelease.js';
+import { TABLES_READ as TALLY_TABLES } from './read-tally.js';
 
 /** @type {'public/subscribe.js'} */
 const MODULE_LABEL = 'public/subscribe.js';
@@ -101,7 +102,7 @@ const MODULE_LABEL = 'public/subscribe.js';
  * @type {ReadonlyArray<string>}
  */
 export const PUBLIC_SUBSCRIBED_TABLES = Object.freeze(
-	[...new Set([...ELECTION_TABLES, ...ROLL_TABLES, ...KEYRELEASE_TABLES])].sort(),
+	[...new Set([...ELECTION_TABLES, ...ROLL_TABLES, ...KEYRELEASE_TABLES, ...TALLY_TABLES])].sort(),
 );
 
 // Module-scope guard. A member that ever stops being public-safe is an import

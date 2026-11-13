@@ -436,6 +436,20 @@ export const COPY = Object.freeze({
 	'public.fact.merkle.label': 'Cryptographic record of the votes',
 	'public.fact.keyrelease.label': 'Keyholder key release',
 	'public.fact.results.label': 'Results',
+	// 56-30 (gap E filled): the results card. "none" is a finding and
+	// "unreadable" a fault, kept apart like notHeld/unreadable. Totals are
+	// shown as published; the detail says plainly that this page does not
+	// recount them (no "verified" claim: the page does not check the
+	// signature). Placeholders carry numbers and authority-supplied titles.
+	'public.fact.results.detail':
+		'These are the totals published for this election once the keyholders had released its key. This page shows them as published and does not recount them.',
+	'public.fact.results.none': 'No results have been published for this election yet.',
+	'public.fact.results.unreadable': "This election's published results couldn't be read.",
+	'public.fact.results.blocks': 'Vote blocks counted: {{blocks}}',
+	'public.fact.results.ballotTotals': 'Votes: {{votes}}. Valid: {{valid}}. Invalid: {{invalid}}. Excluded: {{excluded}}.',
+	'public.fact.results.optionCount': '{{option}}: {{count}}',
+	'public.fact.results.blank': 'No answer: {{count}}',
+	'public.fact.results.unsupported': "{{question}}: {{count}} answered. This page can't show counts for this kind of question yet.",
 	'public.fact.validation.label': 'Validation report',
 	'public.fact.certification.label': 'Certification',
 
@@ -465,9 +479,6 @@ export const COPY = Object.freeze({
 		'The vote nonce is held privately by the voter; nothing on the network can be checked against it (doc/election.md:97).',
 	'public.gap.merkle.sentence': "The cryptographic record tying votes together isn't published here.",
 	'public.gap.merkle.detail': 'No Block or MerkleNode table exists yet (doc/election.md:114).',
-	'public.gap.results.sentence':
-		"Results aren't published on this page — there's no tally recorded anywhere in the system yet.",
-	'public.gap.results.detail': 'No Tally table exists (doc/election.md:124-132).',
 	'public.gap.validation.sentence': 'No validation report or error-margin figure is available here.',
 	'public.gap.validation.detail':
 		'No Validation table exists, and no error-margin statistic is recorded anywhere (doc/election.md:134-153).',

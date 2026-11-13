@@ -352,7 +352,7 @@ export function ElectionShell({ search, at = null, election = null, source, conf
 				    the published voter roll (D-18), read by the same seam for
 				    the same reason; `null` means it could not be read, and the
 				    card renders its honest empty state rather than an error. */}
-				<FactSections phase={phaseResult.phase} keyRelease={read.keyRelease} roll={read.roll} />
+				<FactSections phase={phaseResult.phase} keyRelease={read.keyRelease} roll={read.roll} results={read.results} />
 			</section>
 		);
 	}

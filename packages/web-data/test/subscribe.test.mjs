@@ -60,6 +60,7 @@ import { dbNameFor } from '../src/open-db.js';
 import { TABLES_READ as ELECTION_TABLES } from '../src/public/read-election.js';
 import { TABLES_READ as ROLL_TABLES } from '../src/public/read-registrant-roll.js';
 import { TABLES_READ as KEYRELEASE_TABLES } from '../src/public/read-keyrelease.js';
+import { TABLES_READ as TALLY_TABLES } from '../src/public/read-tally.js';
 
 // Resolved through `webDataSrc` rather than hand-derived, so a relocation of
 // the source tree moves a call argument here instead of a `'..', '..'` hop
@@ -136,8 +137,8 @@ function fakeHandle() {
 // S3 — the derived allowlist, and its drift case.
 // ---------------------------------------------------------------------------
 
-test('S3: PUBLIC_SUBSCRIBED_TABLES is the frozen, sorted, de-duplicated union of the three read modules TABLES_READ — recomputed independently here', () => {
-	const recomputed = [...new Set([...ELECTION_TABLES, ...ROLL_TABLES, ...KEYRELEASE_TABLES])].sort();
+test('S3: PUBLIC_SUBSCRIBED_TABLES is the frozen, sorted, de-duplicated union of the four read modules TABLES_READ (56-30 adds read-tally) — recomputed independently here', () => {
+	const recomputed = [...new Set([...ELECTION_TABLES, ...ROLL_TABLES, ...KEYRELEASE_TABLES, ...TALLY_TABLES])].sort();
 	assert.deepEqual(
 		[...PUBLIC_SUBSCRIBED_TABLES],
 		recomputed,

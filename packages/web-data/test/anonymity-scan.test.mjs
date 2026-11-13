@@ -152,9 +152,14 @@ const PUBLIC_SAFE_NAMES = Object.freeze(
  * officer-signed cancellation of one pending administration change (administration machinery the
  * current roster already reflects). Table name intentionally NOT repeated here, see the self-trip
  * guard below. 35 -> 36 forbidden, public-safe stays 41, 76 -> 77 total.
+ *
+ * 2026-11-13 (56-30, USER DECISION "Public, show totals"): one table moves NEVER -> PUBLIC, the
+ * officer-published results row of an election revision, which was an interim NEVER that named the
+ * results work as its owner. Its public read selects no user id. Table name intentionally NOT
+ * repeated here (self-trip guard). 36 -> 35 forbidden, 41 -> 42 public-safe, total stays 77.
  */
-const EXPECTED_FORBIDDEN_COUNT = 36;
-const EXPECTED_PUBLIC_SAFE_COUNT = 41;
+const EXPECTED_FORBIDDEN_COUNT = 35;
+const EXPECTED_PUBLIC_SAFE_COUNT = 42;
 const EXPECTED_TABLE_COUNT = 77;
 
 /**
@@ -236,8 +241,13 @@ const EXPECTED_TABLE_COUNT = 77;
  * `apps/VoteTorrentPublic/src/peer/network-index.js` is new and the index screen imports it (a
  * link naming only a network lists that network's elections). Test 16 was confirmed green over
  * the 35-file set in the same run, `.DS_Store` files moved aside.
+ *
+ * 2026-11-13 moves this 35 -> 37 (56-30): `packages/web-data/src/public/read-tally.js` is new and
+ * exported from `./public`, and (same plan) `apps/VoteTorrentPublic/src/screens/PublishedResults.tsx`,
+ * the results card, is new in the public app: 35 -> 37. Test 16 confirmed green over the 37-file set
+ * in the same run.
  */
-const EXPECTED_SCANNED_FILE_COUNT = 35;
+const EXPECTED_SCANNED_FILE_COUNT = 37;
 
 // The sentinel literals are ASSEMBLED, never written out, so each appears in
 // this file exactly once — as the comment that delimits the region. A checker

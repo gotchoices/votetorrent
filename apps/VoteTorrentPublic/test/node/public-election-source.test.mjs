@@ -130,7 +130,7 @@ test('PUBLIC_ELECTION_STATE is frozen and carries exactly the four state strings
 	assert.deepEqual([...Object.values(PUBLIC_ELECTION_STATE)].sort(), ['notHeld', 'reading', 'ready', 'unreadable']);
 });
 
-test('DEFAULT_PUBLIC_SOURCE is frozen, has all eight members, and every one is a real function (a stub default is 53-D07 failure mode)', () => {
+test('DEFAULT_PUBLIC_SOURCE is frozen, has all nine members, and every one is a real function (a stub default is 53-D07 failure mode)', () => {
 	assert.ok(Object.isFrozen(DEFAULT_PUBLIC_SOURCE));
 	// 54-13 added the sixth: D-14's counts-only aggregate is read HERE rather
 	// than in a second hook, because this module owns the handle's lifetime
@@ -146,6 +146,9 @@ test('DEFAULT_PUBLIC_SOURCE is frozen, has all eight members, and every one is a
 		'readKeyReleaseProgress',
 		'readPublicElection',
 		'readPublicElectionRevision',
+		// 56-30 added the ninth: the published results, read beside the other
+		// card-local reads for the same handle-lifetime reason.
+		'readPublishedResults',
 		// 54-14 added the eighth, for the reason recorded at module header
 		// point 8: the published roll joins the reads that already own the
 		// handle's lifetime rather than becoming a second hook.
@@ -613,4 +616,63 @@ test('D-26 drift fence: reader-instant.js is the only file under src/ that forma
 		'D-26 has ONE sanctioned reader-local formatter so the zone label and the explicit-UTC parse cannot drift apart ' +
 			`across four render plans. Route the displayed instant through formatReaderInstant instead. Found: ${formatters.join(', ')}`,
 	);
+});
+
+// ---------------------------------------------------------------------------
+// 56-30: the published-results read (step 4d). Card-local: none of its three
+// outcomes moves the election out of `ready`.
+// ---------------------------------------------------------------------------
+
+/** @param {Record<string, any>} over */
+function resultsDeps(over) {
+	return {
+		findLocalCopy: async () => true,
+		attachLocalCopy: async () => ({ fake: 'db' }),
+		closeNetworkDb: async () => {},
+		readPublicElection: async () => ({ Id: 'el-1', Title: 'T' }),
+		readPublicElectionRevision: async () => ({ Revision: 3, Timeline: null }),
+		readKeyReleaseProgress: async () => ({ released: 0, total: 0, keyholderCount: 0 }),
+		readRegistrantRoll: async () => [],
+		nowCanonical: () => '2026-11-13T00:00:00',
+		...over,
+	};
+}
+
+const RESULTS_ADDRESS = { status: 'ok', networkHash: 'abc', electionId: 'el-1' };
+
+test('56-30: a published tally is passed through as { state: published, value }, read for the election revision', async () => {
+	/** @type {any[]} */
+	const calls = [];
+	const value = { revision: 3, ballots: [] };
+	const r = await readAddressedElection(
+		RESULTS_ADDRESS,
+		/** @type {any} */ (resultsDeps({ readPublishedResults: async (/** @type {any[]} */ ...a) => (calls.push(a.slice(1)), value) })),
+	);
+	assert.equal(r.state, PUBLIC_ELECTION_STATE.READY);
+	assert.deepEqual(calls, [['el-1', 3]]);
+	assert.equal(/** @type {any} */ (r).results.state, 'published');
+	assert.equal(/** @type {any} */ (r).results.value, value);
+});
+
+test('56-30: no published tally is the finding none; a throwing read is unreadable; the election stays ready either way', async () => {
+	const none = await readAddressedElection(RESULTS_ADDRESS, /** @type {any} */ (resultsDeps({ readPublishedResults: async () => null })));
+	assert.equal(none.state, PUBLIC_ELECTION_STATE.READY);
+	assert.deepEqual(/** @type {any} */ (none).results, { state: 'none' });
+	const bad = await readAddressedElection(
+		RESULTS_ADDRESS,
+		/** @type {any} */ (resultsDeps({ readPublishedResults: async () => { throw Object.assign(new Error('x'), { name: 'TallyUnreadableError' }); } })),
+	);
+	assert.equal(bad.state, PUBLIC_ELECTION_STATE.READY);
+	assert.deepEqual(/** @type {any} */ (bad).results, { state: 'unreadable' });
+});
+
+test('56-30: every path that holds no election reports results unreadable, never none', async () => {
+	const notHeld = await readAddressedElection(RESULTS_ADDRESS, /** @type {any} */ (resultsDeps({ findLocalCopy: async () => false })));
+	assert.equal(notHeld.state, PUBLIC_ELECTION_STATE.NOT_HELD);
+	assert.deepEqual(/** @type {any} */ (notHeld).results, { state: 'unreadable' });
+	const noRevision = await readAddressedElection(
+		RESULTS_ADDRESS,
+		/** @type {any} */ (resultsDeps({ readPublicElectionRevision: async () => null, readPublishedResults: async () => null })),
+	);
+	assert.deepEqual(/** @type {any} */ (noRevision).results, { state: 'unreadable' }, 'without a revision there is nothing to look the tally up by');
 });
