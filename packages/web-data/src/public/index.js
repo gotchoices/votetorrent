@@ -61,7 +61,7 @@ export {
 // `src/attach-live.js`, not under `src/officer/`, so D-04 still holds). The
 // page's peer boot creates its store with it once the strand has returned the
 // addressed election; the read path checks `hasLiveStore` before any open.
-export { attachLiveDb, hasLiveStore, LiveStoreMissingError, LiveStoreUnavailableError } from '../attach-live.js';
+export { attachLiveDb, hasLiveStore, listLiveStoreNetworks, LiveStoreMissingError, LiveStoreUnavailableError } from '../attach-live.js';
 
 export {
 	readPublicElection,

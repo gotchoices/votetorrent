@@ -231,8 +231,13 @@ const EXPECTED_TABLE_COUNT = 77;
  * re-exports it, so it is now inside the public closure. Test 16 was confirmed green over the
  * widened 34-file set in the same run, with the untracked Finder `.DS_Store` files moved aside
  * (they trip the unknown-extension controls on their own and are not this change).
+ *
+ * 2026-11-13 moves this 34 -> 35, deliberately, same evidence standard (56-29):
+ * `apps/VoteTorrentPublic/src/peer/network-index.js` is new and the index screen imports it (a
+ * link naming only a network lists that network's elections). Test 16 was confirmed green over
+ * the 35-file set in the same run, `.DS_Store` files moved aside.
  */
-const EXPECTED_SCANNED_FILE_COUNT = 34;
+const EXPECTED_SCANNED_FILE_COUNT = 35;
 
 // The sentinel literals are ASSEMBLED, never written out, so each appears in
 // this file exactly once — as the comment that delimits the region. A checker

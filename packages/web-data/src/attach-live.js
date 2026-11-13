@@ -49,7 +49,7 @@
  * No console call: errors propagate, and callers log the error name only.
  */
 
-import { openStoreHandle, closeNetworkDb, dbNameFor } from './open-db.js';
+import { openStoreHandle, closeNetworkDb, dbNameFor, DB_NAME_PREFIX } from './open-db.js';
 import { registerDbPlugins, initDB, isSchemaInitialized, markSchemaInitialized } from '@votetorrent/vote-engine/browser';
 
 /**
@@ -103,6 +103,39 @@ export async function hasLiveStore(networkHash) {
 	const name = dbNameFor(networkHash);
 	const known = await idb.databases();
 	return known.some((entry) => entry.name === name);
+}
+
+/**
+ * 56-29. Every network this browser holds a local store for, decided from
+ * `indexedDB.databases()` alone, with NO open (same reason as `hasLiveStore`).
+ * Only names this module's own `dbNameFor` produces count (`votetorrent-`
+ * prefix); the page's strand cache and anything else on the origin are
+ * skipped. Sorted by hash so the result never depends on the browser's
+ * listing order. Each entry carries the hash and nothing else.
+ *
+ * Throws `LiveStoreUnavailableError` when IndexedDB or `databases()` is
+ * missing: "cannot tell" must never read as "holds nothing".
+ *
+ * Holding a store is not the same as holding a usable one: a caller still
+ * attaches each with `create: false`, which refuses an uninitialized store.
+ *
+ * @returns {Promise<Array<{ networkHash: string }>>}
+ */
+export async function listLiveStoreNetworks() {
+	const idb = globalThis.indexedDB;
+	if (typeof idb === 'undefined' || typeof idb.databases !== 'function') {
+		throw new LiveStoreUnavailableError();
+	}
+	const known = await idb.databases();
+	/** @type {string[]} */
+	const hashes = [];
+	for (const entry of known) {
+		const name = entry && typeof entry.name === 'string' ? entry.name : '';
+		if (name.startsWith(DB_NAME_PREFIX) && name.length > DB_NAME_PREFIX.length) {
+			hashes.push(name.slice(DB_NAME_PREFIX.length));
+		}
+	}
+	return [...new Set(hashes)].sort().map((networkHash) => ({ networkHash }));
 }
 
 /**

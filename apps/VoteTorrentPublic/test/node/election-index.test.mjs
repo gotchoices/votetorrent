@@ -1,5 +1,8 @@
 /**
- * election-index.test.mjs — tier-1 proof of D-34's registry-walking read seam,
+ * election-index.test.mjs — tier-1 proof of D-34's index read seam,
+ * (56-29: the held-network list now comes from the browser's own local stores
+ * via `listHeldNetworks`, not the officer registry; "registry" in the cases
+ * below means that list, and every rule is unchanged),
  * driven entirely through INJECTED dependencies: no browser, no IndexedDB, no
  * localStorage. The subject is `src/election-index-source.js`, imported
  * directly by relative path (the D-25 idiom for a module this file EXECUTES
@@ -52,26 +55,19 @@ function makeDeps(spec) {
 	const record = { attachArgs: [], closeCount: 0, listNetworksCalls: 0 };
 
 	const deps = {
-		/** @param {unknown} _storage */
-		listNetworks(_storage) {
+		async listHeldNetworks() {
 			record.listNetworksCalls += 1;
 			if (spec.registryThrows) {
-				// The shape `networks-registry.js` really throws: a structurally
-				// corrupt stored ENTRY, naming the offending FIELD only.
-				const err = new Error('networks-registry: field "bootstrappedAt" is invalid -- must be a string');
-				err.name = 'InvalidNetworkRegistryError';
+				// The shape `listLiveStoreNetworks` really throws when this
+				// browser cannot list its databases: "cannot tell", not "none".
+				const err = new Error('attachLiveDb: IndexedDB is not available in this environment');
+				err.name = 'LiveStoreUnavailableError';
 				throw err;
 			}
-			return networks.map((networkHash) => ({
-				networkHash,
-				authorityName: 'A',
-				domain: 'd',
-				officerUserId: 'u',
-				bootstrappedAt: '2026-01-01T00:00:00',
-			}));
+			return networks.map((networkHash) => ({ networkHash }));
 		},
-		/** @param {string} networkHash @param {unknown} _options */
-		async attachNetworkDb(networkHash, _options) {
+		/** @param {string} networkHash */
+		async attachHeldNetwork(networkHash) {
 			record.attachArgs.push(networkHash);
 			if (attachFails.has(networkHash)) {
 				// attachNetworkDb closes its own handle before throwing, so a
@@ -415,7 +411,7 @@ test('loadHeldElections never throws across every option shape, including hostil
 
 test('DEFAULT_INDEX_DEPS is frozen and holds the four real functions — the deps parameter is a test SEAM over the real modules, never a fixture that ships', () => {
 	assert.ok(Object.isFrozen(DEFAULT_INDEX_DEPS));
-	for (const name of ['listNetworks', 'attachNetworkDb', 'closeNetworkDb', 'listPublicElections']) {
+	for (const name of ['listHeldNetworks', 'attachHeldNetwork', 'closeNetworkDb', 'listPublicElections']) {
 		assert.equal(typeof (/** @type {Record<string, unknown>} */ (DEFAULT_INDEX_DEPS)[name]), 'function', `DEFAULT_INDEX_DEPS.${name} is not a function`);
 	}
 });
@@ -644,7 +640,8 @@ test('the ONLY text-producing expressions in ElectionIndex.tsx are the t() calls
 	assert.ok(expressions.length >= 4, `expected at least the four copy calls in text position, found ${expressions.length}`);
 
 	const copyCalls = expressions.filter((expr) => /^t\('public\.index\.[\w.]+'\)$/.test(expr));
-	assert.equal(copyCalls.length, 4, `expected exactly four copy calls in text position, found ${copyCalls.length}: ${copyCalls.join(' | ')}`);
+	// 56-29 (deliberate pin move, 4 -> 7): lookingOnNetwork, networkEmpty and networkUnreachable.
+	assert.equal(copyCalls.length, 7, `expected exactly seven copy calls in text position, found ${copyCalls.length}: ${copyCalls.join(' | ')}`);
 
 	const others = expressions.filter((expr) => !/^t\('public\.index\.[\w.]+'\)$/.test(expr));
 	for (const expr of others) {
@@ -679,4 +676,85 @@ test('the index mount is gated on the address NOT resolving to one election, by 
 		"the mount guard drifted. Inside the shell's non-malformed branch the status can only be 'ok', 'missing' or " +
 			"'incomplete', so a negated guard naming 'malformed' would carry a clause that can never be false.",
 	);
+});
+
+// ---------------------------------------------------------------------------
+// 56-29: the real defaults list the browser's own stores and never create one.
+// ---------------------------------------------------------------------------
+
+test('56-29: DEFAULT_INDEX_DEPS lists held networks with listLiveStoreNetworks and attaches with the live attach, create:false, never the registry or the snapshot attach', async () => {
+	const webData = await import('@votetorrent/web-data/public');
+	assert.equal(DEFAULT_INDEX_DEPS.listHeldNetworks, webData.listLiveStoreNetworks);
+	assert.match(SEAM_STRIPPED, /attachHeldNetwork:\s*\([^)]*\)\s*=>\s*attachLiveDb\(networkHash,\s*\{\s*create:\s*false\s*\}\)/);
+	assert.doesNotMatch(SEAM_STRIPPED, /create:\s*true/, 'the index must never create a store');
+	for (const retired of ['listNetworks', 'attachNetworkDb']) {
+		assert.doesNotMatch(SEAM_STRIPPED, new RegExp(`\\b${retired}\\b`), `the index still reaches ${retired}`);
+	}
+});
+
+test('56-29: combineIndexElections puts network rows first in date order, keeps every held entry the network did not return, lists each pair once, and is pure', async () => {
+	const { combineIndexElections } = await import('../../src/election-index-source.js');
+	const held = Object.freeze([
+		Object.freeze({ networkHash: 'n1', electionId: 'e-held-only', title: 'Held' }),
+		Object.freeze({ networkHash: 'n1', electionId: 'e-both', title: 'Both (held copy)' }),
+	]);
+	const networkRows = [
+		{ networkHash: 'n1', electionId: 'e-both', title: 'Both', date: '2026-01-01' },
+		{ networkHash: 'n1', electionId: 'e-new', title: 'New', date: '2026-06-01' },
+	];
+	const out = combineIndexElections(held, networkRows);
+	assert.deepEqual(
+		out.map((e) => e.electionId),
+		['e-new', 'e-both', 'e-held-only'],
+	);
+	assert.equal(out.find((e) => e.electionId === 'e-both')?.title, 'Both', 'the network row wins for a pair both sources list');
+	for (const e of out) assert.deepEqual(Object.keys(e).sort(), ['electionId', 'networkHash', 'title'], 'a date leaked into the rendered shape');
+	assert.ok(Object.isFrozen(out));
+	assert.deepEqual(combineIndexElections(held, []).map((e) => e.electionId), ['e-held-only', 'e-both']);
+	assert.deepEqual(combineIndexElections([], networkRows).map((e) => e.electionId), ['e-new', 'e-both']);
+});
+
+// ---------------------------------------------------------------------------
+// 56-29: the network-scoped states. The real `indexState` expression is
+// extracted from the stripped source and EXECUTED; the three new sentences'
+// guards are pinned.
+// ---------------------------------------------------------------------------
+
+/** @param {string} source */
+function extractIndexState(source) {
+	const m = source.match(/const indexState =([\s\S]*?);\n/);
+	if (!m) throw new Error('no `const indexState = ...;` in ElectionIndex.tsx');
+	return m[1];
+}
+
+test('56-29 positive control: the indexState extractor throws on a fixture without it and returns the planted expression', () => {
+	assert.throws(() => extractIndexState('const other = 1;\n'));
+	assert.equal(extractIndexState("const indexState = 'x';\n").trim(), "'x'");
+});
+
+test('56-29: indexState -- held rows or network rows list; nothing yet while the network is asked is still loading; an answered-empty network is networkEmpty; otherwise the browser-empty state', () => {
+	const expr = extractIndexState(INDEX_TSX_STRIPPED);
+	const run = (/** @type {any} */ resolved, /** @type {number} */ count, /** @type {boolean} */ pending, /** @type {boolean} */ listed) =>
+		new Function('resolved', 'elections', 'networkPending', 'networkListed', `return (${expr});`)(
+			resolved,
+			Array.from({ length: count }),
+			pending,
+			listed,
+		);
+	const held = { elections: [], complete: true };
+	assert.equal(run(null, 0, true, false), 'loading');
+	assert.equal(run(held, 2, true, false), 'listed', 'held rows show while the network is still asked');
+	assert.equal(run(held, 0, true, false), 'loading', 'an empty browser must not claim "no elections" while the network is being asked');
+	assert.equal(run(held, 0, false, true), 'networkEmpty');
+	assert.equal(run(held, 3, false, true), 'listed');
+	assert.equal(run(held, 0, false, false), 'empty', 'no network asked, or the network unreachable: the browser-empty state');
+});
+
+test('56-29: each new sentence has exactly one guard -- looking on networkPending, networkEmpty on its own state, unreachable on networkUnreachable -- and the network lookup is gated on a named network and stands down for an injected result', () => {
+	assert.match(INDEX_TSX_STRIPPED, /\{networkPending \? <p>\{t\('public\.index\.lookingOnNetwork'\)\}<\/p> : null\}/);
+	assert.match(INDEX_TSX_STRIPPED, /\{indexState === 'networkEmpty' \? <h2>\{t\('public\.index\.networkEmpty'\)\}<\/h2> : null\}/);
+	assert.match(INDEX_TSX_STRIPPED, /\{networkUnreachable \? <p>\{t\('public\.index\.networkUnreachable'\)\}<\/p> : null\}/);
+	assert.match(INDEX_TSX_STRIPPED, /const asksNetwork = typeof networkHash === 'string' && networkHash !== '' && !injected;/);
+	assert.match(INDEX_TSX_STRIPPED, /if \(asksNetwork\) \{/);
+	assert.match(INDEX_TSX_STRIPPED, /networkUnreachable =\s*answer !== null && \(answer\.status === NETWORK_LIST_STATUS\.FAILED \|\| answer\.status === NETWORK_LIST_STATUS\.CONFIG_FAULT\)/);
 });

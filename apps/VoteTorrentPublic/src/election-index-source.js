@@ -1,7 +1,19 @@
 /**
- * election-index-source.js — the registry-walking read seam behind D-34's
- * index: registry -> attach -> list -> close, never throwing, reporting both
- * WHAT it found and WHETHER the finding is complete.
+ * election-index-source.js — the read seam behind D-34's index: held stores
+ * -> attach -> list -> close, never throwing, reporting both WHAT it found and
+ * WHETHER the finding is complete.
+ *
+ * 56-29 (2026-11-13): THE LIST OF HELD NETWORKS NOW COMES FROM THE BROWSER'S
+ * OWN LOCAL STORES (`listLiveStoreNetworks`, read from
+ * `indexedDB.databases()` without opening anything), not from the officer
+ * dashboard's networks registry. Since 56-26 a visitor's browser creates its
+ * own store once the network proves an election, and nothing on a public
+ * origin ever writes that registry, so the registry-walking index was empty
+ * for every visitor. Each held store is opened with the live attach
+ * (`create: false`), which refuses an uninitialized store and never creates
+ * one. Where the points below say "registry", read "the list of held stores":
+ * every rule carries over unchanged (I-15 in particular: the URL only
+ * SELECTS among held stores and is never itself handed to an attach).
  *
  * Plain JavaScript with JSDoc, no JSX and no React — a pure module beside the
  * screens, the same placement `election-address.js` uses.
@@ -56,7 +68,7 @@
  * consumer of the package; it must not be the one that collapses it.
  */
 
-import { listNetworks, attachNetworkDb, closeNetworkDb, listPublicElections } from '@votetorrent/web-data/public';
+import { attachLiveDb, closeNetworkDb, listLiveStoreNetworks, listPublicElections } from '@votetorrent/web-data/public';
 
 /**
  * @typedef {object} HeldElection
@@ -88,8 +100,8 @@ import { listNetworks, attachNetworkDb, closeNetworkDb, listPublicElections } fr
 
 /**
  * @typedef {object} IndexDeps
- * @property {(storage?: any) => any} listNetworks
- * @property {(networkHash: string, options?: any) => Promise<any>} attachNetworkDb
+ * @property {() => Promise<ReadonlyArray<{ networkHash: string }>> | ReadonlyArray<{ networkHash: string }>} listHeldNetworks
+ * @property {(networkHash: string) => Promise<any>} attachHeldNetwork
  * @property {(db: any) => any} closeNetworkDb
  * @property {(db: any) => Promise<any>} listPublicElections
  */
@@ -97,13 +109,12 @@ import { listNetworks, attachNetworkDb, closeNetworkDb, listPublicElections } fr
 /**
  * @typedef {object} LoadHeldElectionsOptions
  * @property {string | null} [networkHash] the address's network, used ONLY to select among held entries.
- * @property {any} [storage] the `StorageAdapter` injection idiom `networks-registry.js` established.
  */
 
 /** The real import surface, and the default. @type {Readonly<IndexDeps>} */
 export const DEFAULT_INDEX_DEPS = Object.freeze({
-	listNetworks,
-	attachNetworkDb,
+	listHeldNetworks: listLiveStoreNetworks,
+	attachHeldNetwork: (/** @type {string} */ networkHash) => attachLiveDb(networkHash, { create: false }),
 	closeNetworkDb,
 	listPublicElections,
 });
@@ -183,7 +194,6 @@ function freezeResult(elections, networksAttempted, networksUnreadable, registry
 export async function loadHeldElections(options = {}, deps = DEFAULT_INDEX_DEPS) {
 	try {
 		const opts = options ?? {};
-		const storage = opts.storage;
 		const requested = typeof opts.networkHash === 'string' && opts.networkHash !== '' ? opts.networkHash : null;
 
 		// -- 1. The registry read, and the soft/hard asymmetry (header point 2).
@@ -191,7 +201,7 @@ export async function loadHeldElections(options = {}, deps = DEFAULT_INDEX_DEPS)
 		let entries = [];
 		let registryRead = true;
 		try {
-			const listed = deps.listNetworks(storage);
+			const listed = await deps.listHeldNetworks();
 			entries = Array.isArray(listed) ? listed : [];
 		} catch {
 			entries = [];
@@ -227,7 +237,7 @@ export async function loadHeldElections(options = {}, deps = DEFAULT_INDEX_DEPS)
 			/** @type {any} */
 			let db = null;
 			try {
-				db = await deps.attachNetworkDb(hash, { storage });
+				db = await deps.attachHeldNetwork(hash);
 				const rows = await deps.listPublicElections(db);
 				perNetworkRows.push(toIndexRows(hash, rows));
 			} catch {
@@ -284,4 +294,24 @@ function toIndexRows(networkHash, rows) {
 		});
 	}
 	return out;
+}
+
+/**
+ * 56-29. One list from the two sources a network-scoped index has: the rows
+ * the NETWORK returned (`peer/network-index.js`, carrying a date) and what
+ * this browser already HOLDS (`loadHeldElections`, already merged and
+ * date-free). Network rows come first, in `mergeHeldElections` order; held
+ * entries the network did not return follow in their own order, so nothing
+ * held is ever dropped. A pair (networkHash, electionId) appears once. Every
+ * ordering key is a property of the data (header point 4). Pure.
+ *
+ * @param {ReadonlyArray<HeldElection>} held
+ * @param {ReadonlyArray<IndexRow>} networkRows
+ * @returns {ReadonlyArray<HeldElection>}
+ */
+export function combineIndexElections(held, networkRows) {
+	const fromNetwork = mergeHeldElections([Array.isArray(networkRows) ? networkRows : []]);
+	const seen = new Set(fromNetwork.map((e) => `${e.networkHash}\u0000${e.electionId}`));
+	const rest = (Array.isArray(held) ? held : []).filter((e) => !seen.has(`${e.networkHash}\u0000${e.electionId}`));
+	return Object.freeze([...fromNetwork, ...rest.map((e) => Object.freeze({ networkHash: e.networkHash, electionId: e.electionId, title: e.title }))]);
 }

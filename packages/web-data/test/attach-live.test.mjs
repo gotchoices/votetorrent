@@ -21,7 +21,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { VOTETORRENT_SCHEMA_SQL, isSchemaInitialized } from '@votetorrent/vote-engine/browser';
-import { attachLiveDb, hasLiveStore, LiveStoreMissingError, LiveStoreUnavailableError } from '../src/attach-live.js';
+import { attachLiveDb, hasLiveStore, listLiveStoreNetworks, LiveStoreMissingError, LiveStoreUnavailableError } from '../src/attach-live.js';
 import { closeNetworkDb, dbNameFor, deleteNetworkDb } from '../src/open-db.js';
 import {
 	attachNetworkDb,
@@ -251,6 +251,50 @@ test('A11 (56-26): hasLiveStore throws LiveStoreUnavailableError when databases(
 	}
 	assert.equal(typeof globalThis.indexedDB, 'object');
 	await assert.rejects(hasLiveStore(''), TypeError);
+});
+
+test('A12 (56-29): listLiveStoreNetworks lists the network hash of every votetorrent- store from indexedDB.databases(), skips every other database, and opens nothing', async () => {
+	const seeded = await attachLiveDb(H_SEEDED, { create: true });
+	await closeNetworkDb(seeded);
+	// Two foreign databases on the same origin: the page's own strand cache and an unrelated one.
+	for (const name of ['vt-edge-strand-abc-123', 'unrelated-db']) {
+		await new Promise((resolve, reject) => {
+			const req = indexedDB.open(name);
+			req.onsuccess = () => {
+				req.result.close();
+				resolve(undefined);
+			};
+			req.onerror = () => reject(req.error);
+		});
+	}
+	const before = (await indexedDB.databases()).map((d) => d.name).sort();
+	const listed = await listLiveStoreNetworks();
+	const after = (await indexedDB.databases()).map((d) => d.name).sort();
+	assert.deepEqual(after, before, 'listing changed the set of databases');
+	const hashes = listed.map((e) => e.networkHash);
+	assert.ok(hashes.includes(H_SEEDED), 'the seeded store is not listed');
+	assert.ok(!hashes.includes(H_ABSENT));
+	assert.ok(!hashes.some((h) => h.includes('edge-strand') || h.includes('unrelated')), `a foreign database was listed: ${hashes}`);
+	assert.deepEqual([...hashes].sort(), hashes, 'the listing is not in a stable (sorted) order');
+	for (const entry of listed) assert.deepEqual(Object.keys(entry), ['networkHash']);
+	for (const name of ['vt-edge-strand-abc-123', 'unrelated-db']) {
+		await new Promise((resolve) => {
+			const req = indexedDB.deleteDatabase(name);
+			req.onsuccess = req.onerror = () => resolve(undefined);
+		});
+	}
+});
+
+test('A13 (56-29): listLiveStoreNetworks throws LiveStoreUnavailableError when databases() is missing or IndexedDB is absent -- "cannot tell", never an empty list', async () => {
+	const real = globalThis.indexedDB;
+	try {
+		/** @type {any} */ (globalThis).indexedDB = { open: real.open.bind(real) };
+		await assert.rejects(listLiveStoreNetworks(), (err) => /** @type {any} */ (err).name === 'LiveStoreUnavailableError');
+		/** @type {any} */ (globalThis).indexedDB = undefined;
+		await assert.rejects(listLiveStoreNetworks(), (err) => /** @type {any} */ (err).name === 'LiveStoreUnavailableError');
+	} finally {
+		globalThis.indexedDB = real;
+	}
 });
 
 test('cleanup: delete every store this suite created', async () => {

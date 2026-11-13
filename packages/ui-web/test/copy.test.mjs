@@ -54,11 +54,11 @@ import { FACT_COPY_KEYS, FACTS } from '../src/lifecycle/facts.js';
 // arithmetic in this comment.
 // ---------------------------------------------------------------------------
 
-test('COPY has exactly 228 keys (73 pre-53-07, +10 public-voice keys under D-08, +2 net from the 54-02 lifecycle rename/expansion, +61 from 54-09s fact/gap copy table, +2 from 54-12s not-held sentence, +6 from 56-12s staleness/config-fault copy, +1 from 56-14s live-update badge, +22 from 60-01s chart-visualization copy, +84 from 66-05s live-dashboard copy, +5 from 66-22s pairing, scanner and forget gap copy, -40 from 66-24s removal of the snapshot-era sign-in, restore and refresh copy, +2 from 56-28s still-looking sentence)', () => {
+test('COPY has exactly 231 keys (73 pre-53-07, +10 public-voice keys under D-08, +2 net from the 54-02 lifecycle rename/expansion, +61 from 54-09s fact/gap copy table, +2 from 54-12s not-held sentence, +6 from 56-12s staleness/config-fault copy, +1 from 56-14s live-update badge, +22 from 60-01s chart-visualization copy, +84 from 66-05s live-dashboard copy, +5 from 66-22s pairing, scanner and forget gap copy, -40 from 66-24s removal of the snapshot-era sign-in, restore and refresh copy, +2 from 56-28s still-looking sentence, +3 from 56-29s network-index sentences)', () => {
 	assert.equal(
 		Object.keys(COPY).length,
-		228,
-		'expected 228 -- if this reads 226, 56-28s public.election.fetching.title/.body (NEW_56_28_KEYS) were wrongly deleted; ElectionShell.tsx mounts them while the page is still fetching an election, where t() throws on either going missing. Before 56-28 the table held 226: if it then read 266, 66-24s forty removed snapshot-era keys (REMOVED_66_24_KEYS: bootstrap.*, snapshot.* and network.*) came back; nothing mounts them any more, so they are dead copy. If this reads fewer than 226, a live key was wrongly deleted. Before 66-24 the table held 266: if it then read 261, 66-22s five gap keys (NEW_66_22_KEYS: pairing.step.joiningUnnamed, pairing.officerUnknown, pairing.failed.no-storage.otherTab, scanner.unavailable and forget.failed) were wrongly deleted; the pairing screen, the webcam scanner and the forget dialog mount them, where t() throws on them going missing. If this reads 177, 66-05s eighty-four live-dashboard keys (NEW_66_05_KEYS: pairing, scanner, status, swap, forget, unpaired, panel.readOnly, switcher, shell and marks) were wrongly deleted; they are mounted by the live dashboard screens, where t() throws on them going missing. If this reads 155, 60-01s twenty-two chart-visualization keys (NEW_60_01_KEYS: the view ' +
+		231,
+		'expected 231 -- if this reads 228, 56-29s public.index.lookingOnNetwork/networkEmpty/networkUnreachable (NEW_56_29_KEYS) were wrongly deleted; ElectionIndex.tsx mounts them for a link that names a network. Before 56-29 the table held 228: if it then read 226, 56-28s public.election.fetching.title/.body (NEW_56_28_KEYS) were wrongly deleted; ElectionShell.tsx mounts them while the page is still fetching an election, where t() throws on either going missing. Before 56-28 the table held 226: if it then read 266, 66-24s forty removed snapshot-era keys (REMOVED_66_24_KEYS: bootstrap.*, snapshot.* and network.*) came back; nothing mounts them any more, so they are dead copy. If this reads fewer than 226, a live key was wrongly deleted. Before 66-24 the table held 266: if it then read 261, 66-22s five gap keys (NEW_66_22_KEYS: pairing.step.joiningUnnamed, pairing.officerUnknown, pairing.failed.no-storage.otherTab, scanner.unavailable and forget.failed) were wrongly deleted; the pairing screen, the webcam scanner and the forget dialog mount them, where t() throws on them going missing. If this reads 177, 66-05s eighty-four live-dashboard keys (NEW_66_05_KEYS: pairing, scanner, status, swap, forget, unpaired, panel.readOnly, switcher, shell and marks) were wrongly deleted; they are mounted by the live dashboard screens, where t() throws on them going missing. If this reads 155, 60-01s twenty-two chart-visualization keys (NEW_60_01_KEYS: the view ' +
 			'switch, the panel-state and chart-empty keys, the section headings and the tooltip/meter templates) were ' +
 			'wrongly deleted; they are consumed starting in 60-03/60-05/60-06. If this reads 154, 56-14s ' +
 			'public.liveUpdate.badge was wrongly deleted; it is Surface 5 (D-16/D-19) ' +
@@ -275,6 +275,14 @@ const NEW_56_14_KEYS = Object.freeze(['public.liveUpdate.badge']);
  * @type {ReadonlyArray<string>}
  */
 const NEW_56_28_KEYS = Object.freeze(['public.election.fetching.title', 'public.election.fetching.body']);
+
+/**
+ * The three keys 56-29 added: the index sentences for a link that names a
+ * network -- looking, the network has none, the network could not be reached.
+ * Mounted in the same change by ElectionIndex.tsx.
+ * @type {ReadonlyArray<string>}
+ */
+const NEW_56_29_KEYS = Object.freeze(['public.index.lookingOnNetwork', 'public.index.networkEmpty', 'public.index.networkUnreachable']);
 
 /**
  * The twenty-two keys 60-01 added, serving D-06, D-13, D-17, D-21 and D-22:
@@ -774,6 +782,7 @@ test('D-25/D-07/D-08/D-06/54-09/54-12/56-12/56-14/60-01/66-05/66-22/66-24: the O
 		...NEW_66_05_KEYS,
 		...NEW_66_22_KEYS,
 		...NEW_56_28_KEYS,
+		...NEW_56_29_KEYS,
 	]);
 	for (const k of REMOVED_66_24_KEYS) expectedKeys.delete(k);
 
@@ -1284,4 +1293,16 @@ test('sanity: the 56-28 delta is 2 keys, collides with no earlier delta and no p
 	);
 	// It must not say the thing it replaces.
 	for (const key of NEW_56_28_KEYS) assert.ok(!/doesn't hold/i.test(COPY[key]), `${key} repeats the not-held sentence`);
+});
+
+test('sanity: the 56-29 delta is 3 keys, collides with no earlier delta, and carries its exact values', () => {
+	assert.equal(NEW_56_29_KEYS.length, 3);
+	const prior = new Set([...PRE_MOVE_KEYS, ...NEW_53_07_KEYS, ...PHASE_54_ADDITIONS, ...NEW_54_09_KEYS, ...NEW_54_12_KEYS, ...NEW_56_12_KEYS, ...NEW_56_14_KEYS, ...NEW_60_01_KEYS, ...NEW_66_05_KEYS, ...NEW_66_22_KEYS, ...NEW_56_28_KEYS]);
+	assert.deepEqual(NEW_56_29_KEYS.filter((k) => prior.has(k)), []);
+	assert.equal(COPY['public.index.lookingOnNetwork'], 'Looking for elections on the network named in this link.');
+	assert.equal(COPY['public.index.networkEmpty'], 'No elections were found on the network named in this link.');
+	assert.equal(
+		COPY['public.index.networkUnreachable'],
+		"This page couldn't reach the network named in this link, so only elections already stored in this browser are listed.",
+	);
 });

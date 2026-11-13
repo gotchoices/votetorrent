@@ -1,13 +1,26 @@
 import { useEffect, useState } from 'react';
 import { t } from '@votetorrent/ui-web';
 import { ELECTION_ADDRESS_PARAM, NETWORK_ADDRESS_PARAM } from '../election-address.js';
-import { loadHeldElections } from '../election-index-source.js';
+import { loadHeldElections, combineIndexElections } from '../election-index-source.js';
 import type { HeldElectionsResult } from '../election-index-source.js';
+import { listNetworkElections, NETWORK_LIST_STATUS } from '../peer/network-index.js';
+import type { NetworkListResult } from '../peer/network-index.js';
 
 /**
  * ElectionIndex.tsx — D-34's index of the elections THIS BROWSER holds, D-02's
  * explicit no-data label, and the incomplete-holdings qualifier that keeps
  * that label honest.
+ *
+ * 56-29: when the link names a NETWORK (but no election), the index also asks
+ * that network for its elections (`peer/network-index.js`, which stores
+ * nothing) and lists them ahead of what this browser holds. Three more
+ * sentences, each with its own condition: "looking" while the network is
+ * asked (the list counts as still loading if nothing is held yet);
+ * `networkEmpty` when the network answered with none -- a fourth
+ * `indexState`, so the browser-empty pair below keeps meaning "this browser
+ * holds nothing" and keeps its emptiness-alone gate; and `networkUnreachable`
+ * when the network could not be asked, which qualifies the browser-only list
+ * the way the completeness qualifier does.
  *
  * THE GOVERNING INVARIANT, and the thing a later editor is most likely to
  * break by "simplifying" one of the two conditions:
@@ -55,6 +68,10 @@ export interface ElectionIndexProps {
 	 * production passes nothing and the effect below loads; tests pass a value
 	 * and the effect stands down. */
 	result?: HeldElectionsResult | null;
+	/** 56-29: the injected network answer, same seam as `result`. An injected
+	 * `result` stands the network lookup down; this value is then used as the
+	 * network's answer (`null` = the link named no network). */
+	networkResult?: NetworkListResult | null;
 }
 
 /** The shape the catch branch below falls back to: nothing found, and the
@@ -66,9 +83,11 @@ const UNESTABLISHED: HeldElectionsResult = Object.freeze({
 	complete: false,
 });
 
-export function ElectionIndex({ networkHash = null, result = null }: ElectionIndexProps) {
+export function ElectionIndex({ networkHash = null, result = null, networkResult = null }: ElectionIndexProps) {
 	const [loaded, setLoaded] = useState<HeldElectionsResult | null>(null);
+	const [network, setNetwork] = useState<NetworkListResult | null>(null);
 	const injected = result !== null;
+	const asksNetwork = typeof networkHash === 'string' && networkHash !== '' && !injected;
 
 	useEffect(() => {
 		if (injected) return;
@@ -89,16 +108,39 @@ export function ElectionIndex({ networkHash = null, result = null }: ElectionInd
 				// browser that holds nothing.
 				if (!cancelled) setLoaded(UNESTABLISHED);
 			});
+		// 56-29. `listNetworkElections` never rejects and releases its own node
+		// and read handle; a superseded mount only discards the answer.
+		if (asksNetwork) {
+			setNetwork(null);
+			void listNetworkElections({ networkHash }).then((next) => {
+				if (!cancelled) setNetwork(next);
+			});
+		}
 		return () => {
 			cancelled = true;
 		};
-	}, [networkHash, injected]);
+	}, [networkHash, injected, asksNetwork]);
 
 	const resolved: HeldElectionsResult | null = result ?? loaded;
-	const elections = resolved === null ? [] : resolved.elections;
+	const answer: NetworkListResult | null = injected ? networkResult : network;
+	const networkPending = asksNetwork && answer === null;
+	const networkListed = answer !== null && answer.status === NETWORK_LIST_STATUS.LISTED;
+	const networkUnreachable =
+		answer !== null && (answer.status === NETWORK_LIST_STATUS.FAILED || answer.status === NETWORK_LIST_STATUS.CONFIG_FAULT);
+	const elections =
+		resolved === null ? [] : combineIndexElections(resolved.elections, networkListed && answer !== null ? answer.elections : []);
 
 	// Every attribute below is DERIVED, never hard-coded.
-	const indexState = resolved === null ? 'loading' : elections.length > 0 ? 'listed' : 'empty';
+	const indexState =
+		resolved === null
+			? 'loading'
+			: elections.length > 0
+				? 'listed'
+				: networkPending
+					? 'loading'
+					: networkListed
+						? 'networkEmpty'
+						: 'empty';
 	const indexComplete = resolved === null ? 'unknown' : String(resolved.complete);
 
 	return (
@@ -118,9 +160,12 @@ export function ElectionIndex({ networkHash = null, result = null }: ElectionInd
 					</a>
 				</div>
 			))}
+			{networkPending ? <p>{t('public.index.lookingOnNetwork')}</p> : null}
+			{indexState === 'networkEmpty' ? <h2>{t('public.index.networkEmpty')}</h2> : null}
 			{indexState === 'empty' ? <h2>{t('public.index.emptyHeading')}</h2> : null}
 			{indexState === 'empty' ? <p>{t('public.index.emptyBody')}</p> : null}
 			{resolved !== null && resolved.complete === false ? <p>{t('public.index.someUnreadable')}</p> : null}
+			{networkUnreachable ? <p>{t('public.index.networkUnreachable')}</p> : null}
 		</section>
 	);
 }

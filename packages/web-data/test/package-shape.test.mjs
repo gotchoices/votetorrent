@@ -124,7 +124,8 @@ test('rung 6: @votetorrent/ui-web appears in none of this package\'s dependency 
  * the addressed election, and checks `hasLiveStore` before any read-side open.
  * These live at `src/attach-live.js`, outside `src/officer/`.
  */
-const SHARED_LIVE_NAMES = Object.freeze(['attachLiveDb', 'hasLiveStore', 'LiveStoreMissingError', 'LiveStoreUnavailableError']);
+// 56-29 adds listLiveStoreNetworks (the public index lists the stores this browser holds).
+const SHARED_LIVE_NAMES = Object.freeze(['attachLiveDb', 'hasLiveStore', 'listLiveStoreNetworks', 'LiveStoreMissingError', 'LiveStoreUnavailableError']);
 
 /** The live-store names only the officer audience may see. */
 const OFFICER_LIVE_NAMES = Object.freeze([

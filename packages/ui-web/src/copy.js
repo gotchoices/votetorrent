@@ -618,6 +618,17 @@ export const COPY = Object.freeze({
 	'public.index.someUnreadable':
 		"Something stored in this browser couldn't be read, so this page may not be showing everything it holds.",
 
+	// 56-29. A link that names a network but no election: the page now asks
+	// that network for its elections (and stores nothing). Three sentences,
+	// none in an error voice and none offering a remedy, for the reasons the
+	// keys above record. `networkEmpty` is NOT the browser-empty pair above:
+	// "this browser holds no elections" stays true there and is a different
+	// fact from "the network named in this link has none".
+	'public.index.lookingOnNetwork': 'Looking for elections on the network named in this link.',
+	'public.index.networkEmpty': 'No elections were found on the network named in this link.',
+	'public.index.networkUnreachable':
+		"This page couldn't reach the network named in this link, so only elections already stored in this browser are listed.",
+
 	// --- D-02's addressed-but-not-held sentence (54-12) --------------------
 	//
 	// These two answer a DIFFERENT question from the three `public.index.empty*`
