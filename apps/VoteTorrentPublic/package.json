@@ -24,6 +24,7 @@
 		"test:live-read": "node test/browser/run-live-read-gate.mjs",
 		"gate:prove-frozen": "node test/browser/run-live-read-gate.mjs --prove-frozen",
 		"test:mesh-read": "node test/browser/run-mesh-read-gate.mjs",
+		"test:unlinkability": "node test/browser/run-unlinkability-gate.mjs",
 		"test:public-assets": "node test/browser/run-public-assets-gate.mjs",
 		"gate:prove-public-assets-absent": "node test/browser/run-public-assets-gate.mjs --prove-absent",
 		"typecheck": "tsc --noEmit",
