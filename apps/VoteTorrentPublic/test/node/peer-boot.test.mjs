@@ -124,6 +124,11 @@ function makeFakeDeps(overrides = {}) {
 			assert.equal(config.networkName, `strand-${config.strandId}`, 'the Edge node must be built on the strand\'s network name (strand-<strandId>), the name every strand node and the strand read handle use');
 			return fakeEdgeNode;
 		},
+		waitForFirstConnection: /** @param {any} node */ async (node) => {
+			calls.push('waitForFirstConnection');
+			assert.equal(node, fakeNode, 'the wait watches the Edge node boot created');
+			return overrides.firstConnection ?? { connected: true };
+		},
 		openStrandReadHandle: async () => {
 			calls.push('openStrandReadHandle');
 			return fakeStrandReadHandle;
@@ -510,4 +515,24 @@ test('56-31: countTurnout reports a throwing or malformed reader as unavailable 
 	assert.deepEqual(await countTurnout('nh-x', ''), { state: 'unavailable', errorName: null });
 	off2();
 	off();
+});
+
+test('first connection: boot waits for it after building the node and before opening the strand handle', async () => {
+	const { deps, calls } = makeFakeDeps({ subscribedTables: ['TableA'] });
+	const result = await startPublicPeerBoot({ networkHash: 'nh-1', electionId: 'el-1', deps });
+	assert.equal(result.status, PEER_BOOT_STATUS.STARTED);
+	const nodeAt = calls.indexOf('createEdgeNode');
+	assert.equal(calls[nodeAt + 1], 'waitForFirstConnection', `order: ${calls}`);
+	assert.equal(calls[nodeAt + 2], 'openStrandReadHandle', `order: ${calls}`);
+	await result.stop();
+});
+
+test('first connection: none in time is FAILED "no-peer-connected"; the strand is never read, no store is created, the node is stopped', async () => {
+	const { deps, calls } = makeFakeDeps({ subscribedTables: ['TableA'], firstConnection: { connected: false } });
+	const result = await startPublicPeerBoot({ networkHash: 'nh-1', electionId: 'el-1', deps });
+	assert.equal(result.status, PEER_BOOT_STATUS.FAILED);
+	assert.equal(result.subject, 'no-peer-connected');
+	assert.equal(calls.includes('openStrandReadHandle'), false, 'the strand was read with no peer connected');
+	assert.equal(calls.filter((c) => c.startsWith('probeAddressedElection') || c.startsWith('openUiHandleForNetwork')).length, 0);
+	assert.ok(calls.includes('edgeNode.stop'), 'the Edge node is stopped');
 });

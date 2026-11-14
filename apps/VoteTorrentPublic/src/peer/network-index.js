@@ -35,6 +35,10 @@ import { loadOrCreateSessionPeerKey } from './identity.js';
 import { createEdgeNode } from './edge-node.js';
 import { openStrandReadHandle, strandIdForNetwork } from './strand-read.js';
 import { listPublicElections } from '@votetorrent/web-data/public';
+import { waitForFirstConnection } from './first-connection.js';
+
+/** The error name a FAILED result carries when no peer connected in time. */
+export const NO_PEER_CONNECTED = 'NoPeerConnected';
 
 export const NETWORK_LIST_ATTEMPTS = 3;
 export const NETWORK_LIST_DELAY_MS = 2000;
@@ -118,6 +122,7 @@ export async function listNetworkElections(options) {
 		createEdgeNode: deps.createEdgeNode ?? createEdgeNode,
 		openStrandReadHandle: deps.openStrandReadHandle ?? openStrandReadHandle,
 		listPublicElections: deps.listPublicElections ?? listPublicElections,
+		waitForFirstConnection: deps.waitForFirstConnection ?? waitForFirstConnection,
 		attempts: typeof deps.attempts === 'number' ? deps.attempts : NETWORK_LIST_ATTEMPTS,
 		sleep: deps.sleep ?? ((/** @type {number} */ ms) => new Promise((done) => setTimeout(done, ms))),
 	};
@@ -139,6 +144,12 @@ export async function listNetworkElections(options) {
 			privateKey,
 		});
 		const node = edgeNode && edgeNode.node;
+		// Bounded wait for the first peer connection; reading the strand before
+		// any dial lands fails at once (`first-connection.js`).
+		const firstConnection = await r.waitForFirstConnection(node);
+		if (!firstConnection || firstConnection.connected !== true) {
+			return result(NETWORK_LIST_STATUS.FAILED, [], NO_PEER_CONNECTED);
+		}
 		strandHandle = await r.openStrandReadHandle({ networkHash, node, coordinatedRepo: node && node.coordinatedRepo });
 
 		/** @type {string | null} */

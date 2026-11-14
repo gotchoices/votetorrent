@@ -15,6 +15,7 @@ import {
 	listNetworkElections,
 	NETWORK_LIST_STATUS,
 	NETWORK_LIST_ATTEMPTS,
+	NO_PEER_CONNECTED,
 } from '../../src/peer/network-index.js';
 
 const HASH = 'abc123def456';
@@ -24,6 +25,7 @@ const HASH = 'abc123def456';
  *   config?: any,
  *   nodeThrows?: boolean,
  *   handleThrows?: boolean,
+ *   noPeer?: boolean,
  *   results?: Array<'throw' | Array<any>>,
  * }} spec
  */
@@ -52,6 +54,10 @@ function makeDeps(spec = {}) {
 					calls.push('node.stop');
 				},
 			};
+		},
+		async waitForFirstConnection() {
+			calls.push('wait');
+			return { connected: spec.noPeer !== true };
 		},
 		async openStrandReadHandle() {
 			calls.push('handle');
@@ -182,4 +188,21 @@ test('the module creates nothing in the browser: no store opener, no create:true
 	assert.match(src, /import \{[^}]*\blistPublicElections\b[^}]*\} from '@votetorrent\/web-data\/public'/);
 	// Matcher control: the same scan does fire on a planted line.
 	assert.ok(/\battachLiveDb\b/.test("import { attachLiveDb } from 'x';"));
+});
+
+test('no peer connects in time: FAILED with NoPeerConnected, the strand is never read, the node is released', async () => {
+	const { deps, calls } = makeDeps({ noPeer: true });
+	const out = await listNetworkElections({ networkHash: HASH, deps });
+	assert.equal(out.status, NETWORK_LIST_STATUS.FAILED);
+	assert.equal(out.errorName, NO_PEER_CONNECTED);
+	assert.deepEqual(out.elections, []);
+	assert.ok(!calls.includes('handle') && !calls.includes('list'), `the strand was read with no peer connected: ${calls}`);
+	assert.ok(calls.includes('node.stop'), 'the node was not released');
+});
+
+test('the wait sits between building the node and opening the strand handle', async () => {
+	const { deps, calls } = makeDeps();
+	await listNetworkElections({ networkHash: HASH, deps });
+	const node = calls.findIndex((c) => c.startsWith('node:'));
+	assert.ok(node >= 0 && calls[node + 1] === 'wait' && calls[node + 2] === 'handle', `order: ${calls}`);
 });

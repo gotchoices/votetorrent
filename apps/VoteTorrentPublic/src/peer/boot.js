@@ -153,6 +153,7 @@ import { collectionIdForTable } from './collection-id.js';
 // import, used everywhere below.
 import { attachLiveDb as openUiHandleForNetwork, closeNetworkDb, PUBLIC_SUBSCRIBED_TABLES, readNetworkTurnout } from '@votetorrent/web-data/public';
 import { registerTurnoutReader } from './turnout-source.js';
+import { waitForFirstConnection } from './first-connection.js';
 
 /** The one read that proves the addressed election exists on the network.
  * A named bind, the convention `@votetorrent/web-data/public`'s read modules
@@ -245,6 +246,7 @@ export const PEER_BOOT_STATUS = Object.freeze({
  * @property {ReadonlyArray<string>} [subscribedTables] - defaults to `PUBLIC_SUBSCRIBED_TABLES`; injectable only for the node test.
  * @property {typeof registerTurnoutReader} [registerTurnoutReader] - 56-31
  * @property {typeof readNetworkTurnout} [readNetworkTurnout] - 56-31
+ * @property {typeof waitForFirstConnection} [waitForFirstConnection] - the bounded wait before the first strand read
  */
 
 /**
@@ -297,6 +299,7 @@ export async function startPublicPeerBoot(options) {
 		subscribedTables: deps.subscribedTables ?? PUBLIC_SUBSCRIBED_TABLES,
 		registerTurnoutReader: deps.registerTurnoutReader ?? registerTurnoutReader,
 		readNetworkTurnout: deps.readNetworkTurnout ?? readNetworkTurnout,
+		waitForFirstConnection: deps.waitForFirstConnection ?? waitForFirstConnection,
 	};
 
 	// -- 1. No usable address: the root, election-less page must not open a
@@ -410,6 +413,14 @@ export async function startPublicPeerBoot(options) {
 		const nodeWithRepo = /** @type {{ coordinatedRepo?: unknown }} */ (edgeNode.node);
 		if (!nodeWithRepo || !nodeWithRepo.coordinatedRepo) {
 			throw new PeerBootError('coordinatedRepo', 'the Edge node carries no coordinatedRepo attachment -- 56-05 always attaches one to a node it builds');
+		}
+		// -- 5a. Wait (bounded) for the first peer connection. Opening the
+		//        strand read handle before any bootstrap dial lands fails at once
+		//        ("No coordinator available"), and the unwind then aborts the
+		//        dial that was about to land (`first-connection.js`).
+		const firstConnection = await resolved.waitForFirstConnection(edgeNode.node);
+		if (!firstConnection || firstConnection.connected !== true) {
+			throw new PeerBootError('no-peer-connected', 'no bootstrap peer connected within the first-connection wait -- the strand was not read');
 		}
 		strandReadHandle = await resolved.openStrandReadHandle({
 			networkHash,
