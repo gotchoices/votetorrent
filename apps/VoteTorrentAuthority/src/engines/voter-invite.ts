@@ -46,6 +46,11 @@ export interface VoterInviteNode {
 	readonly peerId?: { toString(): string };
 	/** This machine's own addresses; empty on a phone until a relay grants it a reservation. */
 	getMultiaddrs(): string[];
+	/**
+	 * The control libp2p node, whose peer store says which members declared themselves edge readers (an
+	 * officer's browser dashboard). Optional: a node without it mints exactly as before.
+	 */
+	getControlNode?(): unknown;
 	getIdentityOwnerKey(): { publicKeyB64: string; privateKeyB64: string };
 	getControlDatabase(): {
 		getOwnerKeys(): Promise<ReadonlySet<string>>;
@@ -146,6 +151,37 @@ export class VoterInviteError extends Error {
 	}
 }
 
+/**
+ * Drop the members this node has identified as edge readers (a paired browser dashboard) from a minted
+ * invitation, so a joiner never redeems at, or keeps as a dial hint, a browser that serves nothing. cadre-core
+ * names connected members first, and the dashboard is connected to the officer's phone, so without this it was
+ * named ahead of the phones that serve the network (2026-11-13: a voter code listed the browser). The
+ * invitation is re-encoded only when something was dropped; `members` is an unsigned dial hint. Never logs it.
+ */
+async function withoutEdgeReaders<M extends { encoded: string; invitation: unknown }>(
+	node: VoterInviteNode,
+	minted: M,
+	encode?: (invitation: unknown) => string,
+): Promise<M> {
+	let controlNode: unknown = null;
+	try {
+		controlNode = node.getControlNode?.() ?? null;
+	} catch {
+		controlNode = null;
+	}
+	if (controlNode === null) return minted;
+	// Required lazily, like the join-code encoder below (screens import this module).
+	// eslint-disable-next-line @typescript-eslint/no-var-requires
+	const { excludeEdgeReaderMembers } = require('@votetorrent/vote-engine/rn') as typeof import('@votetorrent/vote-engine/rn');
+	const encoder =
+		encode ??
+		((invitation: unknown) =>
+			// eslint-disable-next-line @typescript-eslint/no-var-requires
+			(require('@serfab/cadre-core') as { encodeCadreInvitation(i: unknown): string }).encodeCadreInvitation(invitation));
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	return (await excludeEdgeReaderMembers(minted as any, controlNode, encoder)) as unknown as M;
+}
+
 /** Does this phone have an address of its own? A read that throws counts as none. */
 function hasOwnAddress(node: VoterInviteNode): boolean {
 	try {
@@ -176,6 +212,8 @@ export async function createVoterJoinCode(args: {
 	networksEngine: Pick<INetworksEngine, 'getFoundingAnchor'>;
 	networkHash: string;
 	founder: { userId: string; signerKey: string };
+	/** Test seam: cadre-core's `encodeCadreInvitation`, used only when an edge reader was dropped. */
+	encodeInvitation?: (invitation: unknown) => string;
 }): Promise<VoterJoinCodeResult> {
 	let anchor: FoundingAnchor;
 	try {
@@ -196,6 +234,7 @@ export async function createVoterJoinCode(args: {
 		if (!hasOwnAddress(args.node)) throw new VoterInviteError('not-reachable');
 		throw err;
 	}
+	minted = await withoutEdgeReaders(args.node, minted, args.encodeInvitation);
 	// Required lazily, like the other engine-only paths in this app: screens import this module, and
 	// several screen suites stub vote-core to an empty module that vote-engine's barrel cannot load.
 	// eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -264,7 +303,7 @@ export class PairingInviteError extends Error {
  */
 export async function createPairingInvitation(
 	node: PairingInviteNode,
-	options?: { expiresInMs?: number },
+	options?: { expiresInMs?: number; encodeInvitation?: (invitation: unknown) => string },
 ): Promise<{ encoded: string; inviteKey: string; expiresAt: string }> {
 	const requested = options?.expiresInMs;
 	if (requested !== undefined && !(Number.isFinite(requested) && requested > 0)) {
@@ -279,6 +318,7 @@ export async function createPairingInvitation(
 		if (!hasOwnAddress(node)) throw new VoterInviteError('not-reachable');
 		throw err;
 	}
+	minted = await withoutEdgeReaders(node, minted, options?.encodeInvitation);
 	const inviteKey = (minted?.invitation?.invite as { key?: unknown } | undefined)?.key;
 	const expiresAt = minted?.invitation?.invite?.expiresAt;
 	if (typeof inviteKey !== 'string' || inviteKey.length === 0 || typeof expiresAt !== 'string' || expiresAt.length === 0) {
