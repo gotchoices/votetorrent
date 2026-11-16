@@ -214,7 +214,8 @@ export interface TwoNodeHarnessOptions {
   extraConfig?: Record<string, unknown>
   /**
    * 66-28 opt-in (default off): each node gets its OWN `createEdgeReaderRefusal()` tracker, passed as that
-   * node's `strandCohortRefusal` (A and B never share one). Off: both configs are byte-identical to today's.
+   * node's `strandCohortRefusal` and its `control` refusal as `controlCohortRefusal` (2026-11-13, the Authority
+   * provider's shape; A and B never share one). Off: both configs are byte-identical to today's.
    * The trackers are exposed as `harness.nodeA.cohortRefusal` / `harness.nodeB.cohortRefusal`.
    */
   cohortRefusal?: boolean
@@ -234,6 +235,11 @@ function newHarnessCohortRefusalHook (createEdgeReaderRefusal: () => EdgeReaderR
   const tracker = createEdgeReaderRefusal()
   trackerByHook.set(tracker.hook, tracker)
   return tracker.hook
+}
+/** The node config keys for a fresh per-node tracker: its strand hook and its control refusal (Authority shape). */
+function harnessCohortRefusalConfig (createEdgeReaderRefusal: () => EdgeReaderRefusal): { strandCohortRefusal: EdgeReaderRefusal['hook'], controlCohortRefusal: EdgeReaderRefusal['control'] } {
+  const hook = newHarnessCohortRefusalHook(createEdgeReaderRefusal)
+  return { strandCohortRefusal: hook, controlCohortRefusal: trackerByHook.get(hook)!.control }
 }
 
 // ---------------------------------------------------------------------------
@@ -339,7 +345,8 @@ async function attemptBringUp (
       hibernation: { enabled: false },
       profile: 'storage',
       network: { transports: [webSockets()], listenAddrs },
-      ...(edgeReaderRefusalModule ? { strandCohortRefusal: newHarnessCohortRefusalHook(edgeReaderRefusalModule.createEdgeReaderRefusal) } : {}),
+      // 2026-11-13: the tracker's control refusal too, exactly as the Authority provider passes both.
+      ...(edgeReaderRefusalModule ? harnessCohortRefusalConfig(edgeReaderRefusalModule.createEdgeReaderRefusal) : {}),
       ...(opts.extraConfig ?? {})
     }
   }
@@ -1142,7 +1149,9 @@ export async function restartHarnessNodeB (
   await withTimeout(node.stop(), HARNESS_TIMEOUTS.startMs, 'node-B stop (restart)')
   if (opts?.cohortRefusal === true) {
     const { createEdgeReaderRefusal } = await import('../../src/network/edge-reader-refusal.js')
-    node.config.strandCohortRefusal = newHarnessCohortRefusalHook(createEdgeReaderRefusal)
+    const cfg = harnessCohortRefusalConfig(createEdgeReaderRefusal)
+    node.config.strandCohortRefusal = cfg.strandCohortRefusal
+    node.config.controlCohortRefusal = cfg.controlCohortRefusal
   }
   const hostedUnclaimed = node.hostUnclaimedStrands
   node.hostUnclaimedStrands = false

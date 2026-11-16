@@ -440,8 +440,9 @@ async function main() {
 			storage: { provider: scopedProvider(MemoryRawStorage) },
 			hibernation: { enabled: false },
 			strandReactivity: { enabled: true },
-			// One tracker per node (66-28), never shared between A and B.
-			strandCohortRefusal: VE.createEdgeReaderRefusal().hook,
+			// One tracker per node (66-28), never shared between A and B; its control refusal too (2026-11-13), as the
+			// Authority provider passes both.
+			...((tracker) => ({ strandCohortRefusal: tracker.hook, controlCohortRefusal: tracker.control }))(VE.createEdgeReaderRefusal()),
 			network: {
 				controlCohort: { strandAddrRefreshMs: 30_000 },
 				transports: [webSockets(), circuitRelayTransport({ reservationConcurrency: 1 })],

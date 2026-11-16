@@ -1234,4 +1234,25 @@ describe('CadreNodeProvider — edge-reader cohort refusal', () => {
     expect(hookOf(second)).toBe(hookOf(first));
     warnSpy.mockRestore();
   });
+
+  // 2026-11-13: a paired dashboard is a cadre member and the control cohort is every member, so the control
+  // network needs the same refusal (VoteTorrent cadre-core patch `controlCohortRefusal`).
+  it('ER-A3 the node config carries controlCohortRefusal: the tracker\'s control refusal, refusing nobody yet, the same on a rebuild', async () => {
+    mockStartErrors.push(new Error('CadreControl.Revocation could not be restored'));
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    renderProvider();
+    await flushBoot();
+    expect(mockConstructedNodes).toHaveLength(2);
+    const [first, second] = mockConstructedNodes;
+    const ctl = (n: FakeCadreNode) => (n.receivedOptions as { controlCohortRefusal?: { refuses(p: string): boolean; attach?: unknown } }).controlCohortRefusal;
+    expect(ctl(first)).toBeDefined();
+    expect(typeof ctl(first)!.refuses).toBe('function');
+    expect(typeof ctl(first)!.attach).toBe('function');
+    expect(ctl(first)!.refuses('x')).toBe(false);
+    expect(ctl(second)).toBe(ctl(first));
+    // it is the control key of the same tracker the strand hook belongs to, never a strand's refusal
+    expect((hookOf(first) as Hook)('#control')).toBe(ctl(first));
+    expect((hookOf(first) as Hook)('s1')).not.toBe(ctl(first));
+    warnSpy.mockRestore();
+  });
 });

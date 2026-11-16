@@ -13,6 +13,7 @@ import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
+  EDGE_READER_CONTROL_KEY,
   EDGE_READER_PROTOCOL,
   EDGE_READER_REFUSAL_MAX_PEERS,
   createEdgeReaderRefusal,
@@ -56,6 +57,20 @@ const settle = () => new Promise((resolve) => setImmediate(resolve))
 const OTHER = '/optimystic/strand-s/repo/1.0.0'
 
 describe('edge-reader refusal tracker (ER)', () => {
+  it('ER-C1 control: one sticky refusal under the control key, learning from the attached node like a strand one', async () => {
+    const tracker = createEdgeReaderRefusal()
+    expect(tracker.control).to.equal(tracker.hook(EDGE_READER_CONTROL_KEY))
+    expect(tracker.control).to.not.equal(tracker.hook('s'))
+    const node = fakeNode()
+    tracker.control.attach(node)
+    const marked = fakePeerId(7)
+    expect(tracker.control.refuses(marked.toString())).to.equal(false)
+    peerIdentify(node, marked, [EDGE_READER_PROTOCOL])
+    expect(tracker.control.refuses(marked.toString())).to.equal(true)
+    expect(tracker.hook('s')!.refuses(marked.toString()), 'a strand refusal does not share the control set').to.equal(false)
+    expect(tracker.refused(EDGE_READER_CONTROL_KEY)).to.deep.equal([marked.toString()])
+  })
+
   it('ER-0 constants: the marker protocol and the per-strand cap', () => {
     expect(EDGE_READER_PROTOCOL).to.equal('/votetorrent/edge-reader/1.0.0')
     expect(EDGE_READER_REFUSAL_MAX_PEERS).to.equal(256)
@@ -378,5 +393,56 @@ describe('ER-TT strandCohortRefusal + withholdStrandAddrs (installed patched cad
     peerUpdate(node, marked, [EDGE_READER_PROTOCOL])
     expect(resolved.isNetworkMember(marked.toString())).to.equal(false)
     expect(resolved.isNetworkMember(other.toString())).to.equal(true)
+  })
+  // 2026-11-13 (control-cohort-refusal): a paired dashboard is a cadre member, so it was in every CONTROL write
+  // cohort (16/16 sampled keys on the host) and an unresponsive one held each control write 84-105 s.
+  it('ER-TT-10 control: an edge reader the control refusal learned is never a control cohort member; an admitting device is kept; no refusal is the old predicate', () => {
+    const tracker = createEdgeReaderRefusal()
+    const isMember = CadreNode.prototype.isControlCohortMember
+    expect(typeof isMember, 'the live class has the predicate').to.equal('function')
+    const node = fakeNode()
+    const refusal = resolveFn(() => tracker.control, 'party')
+    refusal.attach(node)
+    const browser = fakePeerId(50).toString()
+    const phone = fakePeerId(51).toString()
+    peerIdentify(node, fakePeerId(50), [OTHER, EDGE_READER_PROTOCOL])
+    const self = (cr: unknown, admitting: string[] = []) => ({ isControlNetworkMember: () => true, admittingDevices: new Map(admitting.map((a) => [a, 1])), controlCohortRefusal: cr })
+    expect(isMember.call(self(refusal), browser), 'a declared edge reader is refused').to.equal(false)
+    expect(isMember.call(self(refusal), phone), 'any other member is kept').to.equal(true)
+    expect(isMember.call(self(refusal, [browser]), browser), 'a device being admitted is kept').to.equal(true)
+    expect(isMember.call(self(null), browser), 'no refusal: the old predicate').to.equal(true)
+    expect(isMember.call(self(resolveFn(() => ({ refuses: () => { throw new Error('x') } }), 'party')), browser), 'a throw admits').to.equal(true)
+    expect(isMember.call({ ...self(refusal), isControlNetworkMember: () => false }, phone), 'a non-member stays out').to.equal(false)
+    expect(tracker.has(EDGE_READER_CONTROL_KEY, browser)).to.equal(true)
+  })
+
+  it('ER-TT-11 control source: start() declares the marker on the control node and attaches the refusal right after the protocol guard, before the control database exists; only the predicate and removeMachine read it', () => {
+    const cn = strip(readFileSync(join(cadreDist, 'cadre-node.js'), 'utf8'))
+    const guard = cn.indexOf('this.installControlProtocolGuard(this.controlNode);')
+    const handle = cn.indexOf('await this.controlNode.handle(this.config.edgeReaderProtocol,')
+    const resolve = cn.indexOf('this.controlCohortRefusal = this.config.controlCohortRefusal === undefined')
+    const attach = cn.indexOf('this.controlCohortRefusal?.attach(this.controlNode);')
+    const db = cn.indexOf('this.controlDatabase = new ControlDatabase(')
+    expect(guard).to.be.greaterThan(0)
+    expect(handle > guard && resolve > handle && attach > resolve && db > attach, 'guard < marker < resolve < attach < control database').to.equal(true)
+    expect(cn.slice(guard, handle)).to.match(/if \(typeof this\.config\.edgeReaderProtocol === 'string' && this\.config\.edgeReaderProtocol\.length > 0\) \{\s*$/)
+    expect(cn).to.not.match(/this\.controlNode\.unhandle\(/)
+    const readers = (cn.match(/this\.controlCohortRefusal\?\.isNetworkMember\(/g) ?? []).length
+    expect(readers, 'read only by isControlCohortMember and removeMachine (ER-TT-12)').to.equal(2)
+    expect(blockAt(cn, cn.indexOf('isControlCohortMember(remotePeerId) {'))).to.include('this.controlCohortRefusal?.isNetworkMember(remotePeerId) !== false')
+  })
+
+  it('ER-TT-12 control removal: removeMachine catches a refused machine up and counts it into its own removal write, released after; a failed catch-up still removes', () => {
+    const cn = strip(readFileSync(join(cadreDist, 'cadre-node.js'), 'utf8'))
+    const body = blockAt(cn, cn.indexOf('async removeMachine(peerId) {'))
+    const gate = body.indexOf('if (this.controlCohortRefusal?.isNetworkMember(peerId) === false) {')
+    const admit = body.indexOf('releaseRemoved = await this.admitRedeemingDevice(peerId);')
+    const write = body.indexOf('writes = await service.removeMachine(')
+    const release = body.indexOf('releaseRemoved?.();')
+    expect(gate > 0 && admit > gate && write > admit && release > write, 'refused? < catch-up < write < release').to.equal(true)
+    expect(body.slice(write, release)).to.match(/\}\s*finally\s*\{\s*$/)
+    // the catch-up's failure is caught and logged, never rethrown: an unreachable browser is still removed
+    expect(blockAt(body, gate)).to.match(/catch \(error\) \{\s*log\(/)
+    expect((body.match(/service\.removeMachine\(/g) ?? []).length).to.equal(1)
   })
 })
