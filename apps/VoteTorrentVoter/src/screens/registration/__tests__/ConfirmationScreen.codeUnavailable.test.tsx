@@ -5,6 +5,7 @@
 import React from 'react';
 import renderer from 'react-test-renderer';
 import {Linking, Platform} from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import i18n from '../../../i18n'; // initializes the global i18next instance useTranslation() reads from
 
 const mockPopToTop = jest.fn();
@@ -343,6 +344,12 @@ function findHostNodeByType(json: unknown, targetType: string): TreeNode | null 
 	}
 	return null;
 }
+
+// The ceremony stores its in-flight attempt (registration-attempt-store.ts) so a remount resumes it;
+// every test starts with no stored attempt, as a fresh install does.
+beforeEach(async () => {
+	await AsyncStorage.clear();
+});
 
 beforeEach(() => {
 	mockGetElections.mockReset();

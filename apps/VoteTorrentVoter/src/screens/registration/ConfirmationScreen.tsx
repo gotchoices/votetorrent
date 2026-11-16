@@ -23,9 +23,11 @@
  *      the identity wrap alias is `requireAuth: false`.
  *   1. `provisionDeviceKey()` — resolves the hardware-backed P-256 public key BEFORE any request is
  *      submitted. Does NOT prompt biometric. ONCE per attempt (spike 104): on Android it regenerates
- *      the key, so "Try Again" reuses the attempt's key (read back, never re-provisioned) — the cached
- *      association request names it. Only a key that is gone or changed starts a new association
- *      request for a newly provisioned key.
+ *      the key, so "Try Again" — and a press on a fresh mount that resumes the stored attempt —
+ *      reuses the attempt's key (read back with `getCurrentDeviceKey`, never re-provisioned); the
+ *      cached association request names it. Only a key that is gone or changed starts a new
+ *      association request for a newly provisioned key. The key is resolved after the network
+ *      details and the stored attempt are read, so a resume never provisions.
  *   2. Map the shared draft onto `RegisterInit` tiers (unchanged tier mapping / WR-04).
  *   3. Submit a self-signed registration-request document through the joined network's transports
  *      (`attach-voter-request-transport.ts`), signed under the voter's OWN secp256k1 device
@@ -52,12 +54,21 @@
  * phase); a clearly-named placeholder is passed and IGNORED — the authority's approval path
  * overrides it with its own policy-derived value before ever creating the Registrant record.
  *
- * D-32/D-05: both inits (not just their ids) are minted once per mounted attempt and reused
+ * D-32/D-05: both inits (not just their ids) are minted once per attempt and reused
  * byte-identical on every "Try Again" retry — a P2P re-submit of an identical Digest + RequesterKey
  * is idempotent, but a fresh `submittedAt` would change the Digest and be refused forever as
  * 'duplicate-request-id'. The decision wait is bounded by wall clock (64 D-27) and ends on a
  * timeout, a Stop or an unmount; a timeout or a Stop is recovered by "Try Again", which re-submits
  * idempotently and waits again.
+ *
+ * An attempt outlives its mount (registration-attempt-store.ts): the ids, the association init, the
+ * device key and the registration's `submittedAt` — never the payload — are stored before the first
+ * submit, and a press on a fresh mount (navigation back and forth, an app restart, a Fast Refresh)
+ * resumes them, so a wait that ends before the officer's manual approval never forks the request
+ * into a second registrant. The stored attempt ends when the answer is staged (an answer already
+ * staged by an earlier press counts), when the authority closes the registration request, or when
+ * it belongs to another identity, authority or election; a refused association request is replaced
+ * by a new one for the same registrant.
  *
  * On any thrown step, `classifyAttestationFailure(err)` (D-09) drives the failure UX exactly as
  * before: `'recoverable-action'` renders a setup prompt + retry reusing the same `registrantId`
@@ -105,6 +116,12 @@ import {
 	type AttestationFailureClass,
 } from '../../engines/attestation-failure';
 import {mintRegistrationCodeForSubmit, resolveRegistrationCodeAvailability} from '../../engines/continuity';
+import {
+	clearRegistrationAttempt,
+	readRegistrationAttempt,
+	writeRegistrationAttempt,
+} from '../../engines/registration-attempt-store';
+import {vtDebug} from '../../engines/vt-debug';
 import type {RegistrationCodeAvailability} from '../../engines/continuity';
 import {resolveVoterRequestTransports} from './attach-voter-request-transport';
 import {RegistrationConfirmationCodeCard} from './RegistrationConfirmationCodeCard';
@@ -228,6 +245,39 @@ export async function pollForNotice<T extends DecisionNoticeLike>(
 	}
 }
 
+/**
+ * True when the authority has closed this registration request ('r', which also carries D-44's
+ * closed-as-duplicate). Best-effort: a read that fails, or a transport with no decision read, says
+ * "not closed" and the ceremony carries on exactly as before.
+ */
+async function isRegistrationRequestClosed(
+	transport: {pollDecisions?: (sinceCursor?: string) => Promise<Array<{requestId: string; status: string}>>},
+	requestId: string,
+): Promise<boolean> {
+	if (typeof transport.pollDecisions !== 'function') {
+		return false;
+	}
+	try {
+		const notices = await transport.pollDecisions();
+		return notices.some(notice => notice.requestId === requestId && notice.status === 'r');
+	} catch {
+		return false;
+	}
+}
+
+/** The P2P staging refusal for a request id that already holds a different staged row. */
+function isDuplicateStagedRequest(err: unknown): boolean {
+	const e = err as {name?: unknown; code?: unknown} | null | undefined;
+	return e?.name === 'P2pStagingError' && e.code === 'duplicate-request-id';
+}
+
+/** A closed code token or a numeric status code, for the debug line; anything else is dropped. */
+function errorCodeOf(err: unknown): string | number | undefined {
+	const code = (err as {code?: unknown} | null | undefined)?.code;
+	if (typeof code === 'number' && Number.isFinite(code)) return code;
+	return typeof code === 'string' && /^[A-Za-z][A-Za-z0-9_-]{0,47}$/.test(code) ? code : undefined;
+}
+
 export default function ConfirmationScreen() {
 	// WR-02: `createNewIdentity` is the provider's explicit, user-confirmed identity replacement —
 	// reached ONLY from the recovery view's confirm step below (never the officer signer).
@@ -257,9 +307,9 @@ export default function ConfirmationScreen() {
 	const [outcomePollExpired, setOutcomePollExpired] = useState(false);
 
 	// WR-02: one registrantId (and, per this rewrite, one registration-request id and one
-	// association-request id) per registration attempt (this mounted ceremony) — minted once and
-	// reused on every "Try Again" retry, exactly as before. A brand-new registration is a fresh
-	// mount, so the refs reset naturally without leaking the prior attempt's ids.
+	// association-request id) per registration attempt — minted once and reused on every "Try
+	// Again" retry, exactly as before. A fresh mount starts with empty refs and fills them from the
+	// stored attempt (`resumeStoredAttempt`) when one is pending, so a remount never starts over.
 	const registrantIdRef = useRef<string | null>(null);
 	const shareState = useActionShareState(registrantIdRef.current ? `registration:${registrantIdRef.current}` : null);
 	const associationRequestIdRef = useRef<string | null>(null);
@@ -276,6 +326,13 @@ export default function ConfirmationScreen() {
 	// on Android `provisionDeviceKey` mints a NEW key every call, which would leave the reused
 	// association request above naming a key the phone no longer holds.
 	const deviceKeyRef = useRef<string | null>(null);
+	// The registration request's `submittedAt`, kept apart from its init so a resumed attempt
+	// (registration-attempt-store.ts) can rebuild a byte-identical init from the in-memory draft
+	// without the payload ever being stored.
+	const registrationSubmittedAtRef = useRef<string | null>(null);
+	// True once this attempt's registration request is known to be staged: a resumed attempt then
+	// skips the registration submit instead of rebuilding an init it no longer needs.
+	const registrationStagedRef = useRef(false);
 	// 64 D-28: one election id per mounted attempt. Both inits and the challenge embed it, and Try
 	// Again reuses the inits byte-identical, so the id is resolved once and never re-read.
 	const electionIdRef = useRef<string | null>(null);
@@ -333,6 +390,67 @@ export default function ConfirmationScreen() {
 		return publicKey;
 	}
 
+	/** Forgets every id and init of this attempt (the device key and election are kept). */
+	function resetAttempt() {
+		registrantIdRef.current = null;
+		associationRequestIdRef.current = null;
+		registrationRequestInitRef.current = null;
+		associationRequestInitRef.current = null;
+		registrationCodeRef.current = null;
+		registrationSubmittedAtRef.current = null;
+		registrationStagedRef.current = false;
+	}
+
+	/**
+	 * A press with no attempt in memory (a fresh mount: navigation back and forth, an app restart, a
+	 * Fast Refresh) takes up the stored attempt when it belongs to this identity, authority and
+	 * election, so the second Confirm waits on the SAME request with the SAME device key instead of
+	 * provisioning a new key and filing a second request. A stored attempt that does not match is
+	 * dropped. Returns whether an attempt was resumed.
+	 */
+	async function resumeStoredAttempt(identityKey: string, authorityId: string, electionId: string): Promise<boolean> {
+		if (registrantIdRef.current !== null) {
+			return false;
+		}
+		const stored = await readRegistrationAttempt();
+		if (stored === null) {
+			return false;
+		}
+		if (stored.identityKey !== identityKey || stored.authorityId !== authorityId || stored.electionId !== electionId) {
+			await clearRegistrationAttempt();
+			return false;
+		}
+		registrantIdRef.current = stored.registrantId;
+		registrationSubmittedAtRef.current = stored.registrationSubmittedAt;
+		registrationStagedRef.current = stored.registrationStaged;
+		deviceKeyRef.current = stored.deviceKey;
+		if (stored.association !== null) {
+			associationRequestIdRef.current = stored.association.id;
+			associationRequestInitRef.current = stored.association;
+		}
+		return true;
+	}
+
+	/** Stores this attempt as it now stands (best-effort, never throws). */
+	async function storeAttempt(identityKey: string, authorityId: string, electionId: string, deviceKey: string) {
+		const registrantId = registrantIdRef.current;
+		const submittedAt = registrationSubmittedAtRef.current;
+		if (registrantId === null || submittedAt === null) {
+			return;
+		}
+		await writeRegistrationAttempt({
+			version: 1,
+			identityKey,
+			authorityId,
+			electionId,
+			registrantId,
+			registrationSubmittedAt: submittedAt,
+			registrationStaged: registrationStagedRef.current,
+			deviceKey,
+			association: associationRequestInitRef.current,
+		});
+	}
+
 	async function onConfirm() {
 		if (isSubmitting) {
 			return;
@@ -342,6 +460,8 @@ export default function ConfirmationScreen() {
 		const attempt: CeremonyAttempt = {cancelled: false, stopRequested: false, wake: null};
 		attemptRef.current = attempt;
 		const isStopped = (): boolean => attempt.cancelled || attempt.stopRequested;
+		// Which step of the ceremony was running, for the debug-only failure line below.
+		let step = 'identity';
 		const throwIfStopped = (): void => {
 			if (isStopped()) {
 				throw decisionWaitError('DecisionWaitStoppedError');
@@ -367,6 +487,7 @@ export default function ConfirmationScreen() {
 			const deviceSign = await createDeviceSigner('Device User');
 			throwIfStopped();
 
+			step = 'election';
 			// WR-03: the registration request's payload only enforces field policy when
 			// init.electionId is set. Fail closed rather than submit with policy unenforced. 64 D-28:
 			// the election is the joined network's current one; the dev seed stands in only for an
@@ -385,14 +506,13 @@ export default function ConfirmationScreen() {
 				electionIdRef.current = resolved;
 			}
 
-			// D-11: resolve the producer once and provision the hardware P-256 key BEFORE any
-			// request is submitted — does NOT prompt biometric.
+			// D-11: resolve the producer once. The hardware P-256 key is resolved below, after the
+			// stored attempt is read and still BEFORE any request is submitted — it never prompts.
 			const producer = resolveAttestationProducer();
-			const p256DeviceKey = await resolveAttemptDeviceKey(producer);
-			throwIfStopped();
 
 			// The seeded network's authority — resolved from the already-established network
 			// context, never hand-rolled.
+			step = 'network';
 			const networkEngine = await getEngine<INetworkEngine>('network');
 			const details = await networkEngine.getDetails();
 			throwIfStopped();
@@ -401,10 +521,48 @@ export default function ConfirmationScreen() {
 			// D-28/D-29/D-32: reach the authority through the joined network's own strand — P2P by
 			// default, or the authority-configured REST bridge for registration only. Unreachable
 			// (no delivery path at all) is a user-visible condition, never a crash.
+			step = 'transports';
 			const transports = await resolveVoterRequestTransports({getEngine, authorityId});
 			throwIfStopped();
 			if (!transports) {
 				throw new Error('Cannot reach the authority right now — please try again later.');
+			}
+
+			// A fresh mount takes up this phone's stored attempt (registration-attempt-store.ts)
+			// instead of starting a second one: same registrant, same requests, same device key.
+			step = 'resume';
+			const resumed = await resumeStoredAttempt(deviceUserKey, authorityId, electionId);
+			throwIfStopped();
+			const isRetry = registrantIdRef.current !== null;
+
+			// Spike 104: this attempt's P-256 voting key — read back (never re-provisioned) when the
+			// attempt already has one, provisioned only for a new attempt or a key that is gone.
+			step = 'device-key';
+			const p256DeviceKey = await resolveAttemptDeviceKey(producer);
+			throwIfStopped();
+
+			// A request the authority has closed can never be approved, so waiting on it again would
+			// time out forever: the attempt is dropped and the next press starts a new one.
+			if (isRetry && registrantIdRef.current !== null) {
+				step = 'registration-check';
+				const closed = await isRegistrationRequestClosed(transports.registrationTransport, registrantIdRef.current);
+				throwIfStopped();
+				if (closed) {
+					resetAttempt();
+					await clearRegistrationAttempt();
+					throw Object.assign(new Error('The authority closed the registration request.'), {name: 'RegistrationRequestClosedError'});
+				}
+			}
+			// A resumed attempt whose registration request is already on the strand needs no
+			// rebuilt init (and no draft) — the staging row is immutable and already the officer's.
+			if (resumed && !registrationStagedRef.current && registrantIdRef.current !== null) {
+				try {
+					const own = await transports.ownStagedRegistrationRequestIds(deviceUserKey);
+					registrationStagedRef.current = own.includes(registrantIdRef.current);
+				} catch {
+					// Unknown: the init is rebuilt and re-submitted (idempotent when byte-identical).
+				}
+				throwIfStopped();
 			}
 
 			// WR-02: mint each id once per attempt and reuse it on retry.
@@ -421,73 +579,54 @@ export default function ConfirmationScreen() {
 				associationRequestIdRef.current = associationRequestId;
 			}
 
-			// Pattern 4 tier mapping — name -> public, contact/dob/address -> private, party ->
-			// selective. WR-04: only furnish details that actually have a value. Furnishing an empty
-			// {name, value:''} entry would satisfy the engine's name-presence check for a
-			// policy-required private field (e.g. a blank required email), letting a blank required
-			// field slip past field-policy enforcement.
-			const privateDetails: PrivateDetail[] = [
-				{name: 'dob', value: draft.dob},
-				{name: 'email', value: draft.email},
-				{name: 'phone', value: draft.phone},
-				{name: 'addressLine1', value: draft.addressLine1},
-				{name: 'addressLine2', value: draft.addressLine2},
-				{name: 'addressLine3', value: draft.addressLine3},
-			].filter(detail => detail.value !== '');
-
-			const init: RegisterInit = {
-				electionId,
-				registrant: {id: registrantId, authorityId, expiration: IGNORED_EXPIRATION_PLACEHOLDER},
-				public: {firstName: draft.firstName, lastName: draft.lastName},
-				private: {expiration: IGNORED_EXPIRATION_PLACEHOLDER, details: privateDetails},
-				// D-13: an absent/empty selective payload means no RegistrantSelective row at all —
-				// only enter this branch when the voter actually picked a party.
-				selective: draft.party
-					? {expiration: IGNORED_EXPIRATION_PLACEHOLDER, details: [{name: 'party', value: draft.party}]}
-					: undefined,
-			};
-
-			// (1) Submit the self-signed registration request document — never a direct write, and
-			// never the officer signer. Reuses the registrantId as the request document's own id (no
+			// (1) The self-signed registration request document — never a direct write, and never
+			// the officer signer. Reuses the registrantId as the request document's own id (no
 			// cross-table uniqueness constraint requires otherwise, and it keeps a single id to reuse
 			// on retry). D-05/D-32: the whole init (including submittedAt) is minted ONCE and reused
 			// byte-identical on every retry, so a P2P re-submit after a timeout is idempotent instead
-			// of a permanent 'duplicate-request-id'.
+			// of a permanent 'duplicate-request-id'. A resumed attempt rebuilds it from the draft with
+			// the stored submittedAt, unless the request is already staged.
 			let registrationRequestInit = registrationRequestInitRef.current;
-			if (registrationRequestInit === null) {
+			if (registrationRequestInit === null && !registrationStagedRef.current) {
+				// Pattern 4 tier mapping — name -> public, contact/dob/address -> private, party ->
+				// selective. WR-04: only furnish details that actually have a value. Furnishing an empty
+				// {name, value:''} entry would satisfy the engine's name-presence check for a
+				// policy-required private field (e.g. a blank required email), letting a blank required
+				// field slip past field-policy enforcement.
+				const privateDetails: PrivateDetail[] = [
+					{name: 'dob', value: draft.dob},
+					{name: 'email', value: draft.email},
+					{name: 'phone', value: draft.phone},
+					{name: 'addressLine1', value: draft.addressLine1},
+					{name: 'addressLine2', value: draft.addressLine2},
+					{name: 'addressLine3', value: draft.addressLine3},
+				].filter(detail => detail.value !== '');
+
+				const init: RegisterInit = {
+					electionId,
+					registrant: {id: registrantId, authorityId, expiration: IGNORED_EXPIRATION_PLACEHOLDER},
+					public: {firstName: draft.firstName, lastName: draft.lastName},
+					private: {expiration: IGNORED_EXPIRATION_PLACEHOLDER, details: privateDetails},
+					// D-13: an absent/empty selective payload means no RegistrantSelective row at all —
+					// only enter this branch when the voter actually picked a party.
+					selective: draft.party
+						? {expiration: IGNORED_EXPIRATION_PLACEHOLDER, details: [{name: 'party', value: draft.party}]}
+						: undefined,
+				};
+				const submittedAt = registrationSubmittedAtRef.current ?? new Date().toISOString();
+				registrationSubmittedAtRef.current = submittedAt;
 				registrationRequestInit = {
 					id: registrantId,
 					authorityId,
 					payload: init,
-					submittedAt: new Date().toISOString(),
+					submittedAt,
 				};
 				registrationRequestInitRef.current = registrationRequestInit;
 			}
-			// D-45: mint the registration code on the P2P route ONLY — the REST bridge cannot carry
-			// `extras` at all (62-15's own constraint), so a registration submitted over it never
-			// gets a code (the identity fallback is the only later re-association path for it).
-			// Minted once per attempt, from the SAME identity-key signer that signs the request
-			// itself — never a raw key.
-			if (transports.registrationRoute === 'peer' && registrationCodeRef.current === null) {
-				registrationCodeRef.current = await mintRegistrationCodeForSubmit(getEngine, registrantId, deviceSign);
-				throwIfStopped();
-			}
-			if (transports.registrationRoute === 'peer') {
-				await trackCommits(commitTracker, `registration:${registrantId}`, () =>
-					transports.registrationTransport.submitRequest(registrationRequestInit, deviceUserKey, deviceSign, {
-						registrationCode: registrationCodeRef.current as string,
-					}),
-				);
-			} else {
-				await trackCommits(commitTracker, `registration:${registrantId}`, () =>
-					transports.registrationTransport.submitRequest(registrationRequestInit, deviceUserKey, deviceSign),
-				);
-			}
-			throwIfStopped();
 
-			// (2) Submit the self-signed association-request document, bound to the P-256 device
-			// key. The requester key MUST equal the device key (the authority's engine enforces this
-			// with a pre-flight guard) — both are p256DeviceKey. Reused byte-identical on retry, same
+			// (2) The self-signed association-request init, bound to the P-256 device key. The
+			// requester key MUST equal the device key (the authority's engine enforces this with a
+			// pre-flight guard) — both are p256DeviceKey. Reused byte-identical on retry, same
 			// idempotency rationale as the registration init above.
 			let associationRequestInit = associationRequestInitRef.current;
 			if (associationRequestInit === null) {
@@ -501,6 +640,42 @@ export default function ConfirmationScreen() {
 				};
 				associationRequestInitRef.current = associationRequestInit;
 			}
+
+			// Stored BEFORE the first submit, so an app killed mid-submit resumes this attempt.
+			await storeAttempt(deviceUserKey, authorityId, electionId, p256DeviceKey);
+			throwIfStopped();
+
+			if (registrationRequestInit !== null) {
+				// D-45: mint the registration code on the P2P route ONLY — the REST bridge cannot carry
+				// `extras` at all (62-15's own constraint), so a registration submitted over it never
+				// gets a code (the identity fallback is the only later re-association path for it).
+				// Minted once per attempt, from the SAME identity-key signer that signs the request
+				// itself — never a raw key.
+				step = 'registration-submit';
+				if (transports.registrationRoute === 'peer' && registrationCodeRef.current === null) {
+					registrationCodeRef.current = await mintRegistrationCodeForSubmit(getEngine, registrantId, deviceSign);
+					throwIfStopped();
+				}
+				const registrationInit = registrationRequestInit;
+				if (transports.registrationRoute === 'peer') {
+					await trackCommits(commitTracker, `registration:${registrantId}`, () =>
+						transports.registrationTransport.submitRequest(registrationInit, deviceUserKey, deviceSign, {
+							registrationCode: registrationCodeRef.current as string,
+						}),
+					);
+				} else {
+					await trackCommits(commitTracker, `registration:${registrantId}`, () =>
+						transports.registrationTransport.submitRequest(registrationInit, deviceUserKey, deviceSign),
+					);
+				}
+				throwIfStopped();
+				if (!registrationStagedRef.current) {
+					registrationStagedRef.current = true;
+					await storeAttempt(deviceUserKey, authorityId, electionId, p256DeviceKey);
+					throwIfStopped();
+				}
+			}
+
 			// The association-request self-signature must verify directly against the P-256 device
 			// key (the schema checks the signature against that exact public key, not against any
 			// registered identity) — `signDeviceKeyDigest` is the producer seam for that.
@@ -510,14 +685,17 @@ export default function ConfirmationScreen() {
 				}
 				return producer.signDeviceKeyDigest(digest);
 			};
+			step = 'association-submit';
+			const associationInit = associationRequestInit;
 			await trackCommits(commitTracker, `registration:${registrantId}`, () =>
-				transports.associationTransport.submitRequest(associationRequestInit, p256DeviceKey, associationSign),
+				transports.associationTransport.submitRequest(associationInit, p256DeviceKey, associationSign),
 			);
 			throwIfStopped();
 
 			// (3) Obtain the challenge nonce from a challenge-issued decision notice — never call the
 			// authority's challenge-issuing engine method directly. 64 D-27: wait for the officer's
 			// decision, bounded by wall clock, cancelled by Stop or unmount (UI-SPEC A3).
+			step = 'decision-wait';
 			setIsWaiting(true);
 			const decisionNotice = await pollForNotice(
 				transports.associationTransport.pollDecisions.bind(transports.associationTransport),
@@ -538,6 +716,11 @@ export default function ConfirmationScreen() {
 			throwIfStopped();
 			setIsWaiting(false);
 			if (decisionNotice.status === 'r') {
+				// This association request is closed for good: the next press makes a new one for the
+				// same registrant instead of waiting on a refused request forever.
+				associationRequestIdRef.current = null;
+				associationRequestInitRef.current = null;
+				await storeAttempt(deviceUserKey, authorityId, electionId, p256DeviceKey);
 				throw new Error('The authority rejected the association request.');
 			}
 			if (!decisionNotice.challengeNonce) {
@@ -557,6 +740,7 @@ export default function ConfirmationScreen() {
 			};
 			// On iOS `produce` raises Face ID: it never runs for a stopped or unmounted attempt.
 			throwIfStopped();
+			step = 'produce';
 			const attestation = await producer.produce(challenge);
 			throwIfStopped();
 
@@ -567,8 +751,20 @@ export default function ConfirmationScreen() {
 				nonce: decisionNotice.challengeNonce,
 				attestation,
 			};
-			await transports.associationTransport.submitAttestation(answer, p256DeviceKey, associationSign);
+			step = 'attestation-submit';
+			try {
+				await transports.associationTransport.submitAttestation(answer, p256DeviceKey, associationSign);
+			} catch (err) {
+				// An answer for this request is already staged — an earlier press whose write landed
+				// after it reported a failure. A fresh attestation never re-digests identically, so the
+				// re-submit is refused; the request is answered all the same, and is pending.
+				if (!isDuplicateStagedRequest(err)) {
+					throw err;
+				}
+			}
 			throwIfStopped();
+			// The attempt is answered: nothing is left to resume, and the outcome poll below takes over.
+			await clearRegistrationAttempt();
 
 			// The authority's automatic driver processes the answer separately, on its own "Sync
 			// Now" trigger, so claiming success here would be a lie. Show an honest pending state; the
@@ -594,6 +790,14 @@ export default function ConfirmationScreen() {
 				return;
 			}
 			console.error('ConfirmationScreen: registration ceremony failed:', errorClassName(err));
+			// Off unless the __DEV__ debug switch is on: the step, the class, a code and the cause's
+			// class name — never a message, key, id or code value beyond a closed token.
+			vtDebug('registration', 'ceremony-failed', {
+				step,
+				class: errorClassName(err),
+				code: errorCodeOf(err),
+				cause: errorClassName((err as {cause?: unknown} | null | undefined)?.cause),
+			});
 			// D-09/T-45-06-04: classify to a generic UX class — raw reject codes / internal
 			// error messages never reach the UI.
 			setFailureClass(classifyAttestationFailure(err));
