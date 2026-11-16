@@ -73,6 +73,7 @@ import { encryptVoteEntry } from '../../../packages/vote-engine/src/key-release/
 import { PoolAgent, createLibp2pRendezvousClient, createPoolIdentity, commitPoolBlock } from '../../../packages/vote-engine/src/pool/index.js'
 import { digestToBytes } from '../../../packages/vote-engine/src/utils.js'
 import { VOTETORRENT_SCHEMA_SQL } from '../../../packages/vote-engine/src/database/schema-sql.js'
+import { createEdgeReaderRefusal } from '../../../packages/vote-engine/src/network/edge-reader-refusal.js'
 import { makeP256TestKey, signDigestP256 } from '../../../packages/vote-engine/test/fixtures/p256-signer.js'
 import { randomTestKeyPair } from '../../../packages/vote-engine/test/fixtures/keys.js'
 
@@ -695,8 +696,11 @@ async function main (): Promise<void> {
         relayAddrs: [RELAY],
         connectionGater: { denyDialMultiaddr: async () => false }
       },
-      hibernation: { enabled: false }
-    })
+      hibernation: { enabled: false },
+      // mirrors apps/VoteTorrentVoter/src/providers/CadreNodeProvider.tsx: a paired browser dashboard (edge reader) is kept
+      // out of this phone's strand write cohorts (2026-11-13: the rig never configured it, unlike the Voter app)
+      strandCohortRefusal: createEdgeReaderRefusal().hook
+    } as any)
     nodeHolder.current = node
     await node.start()
     started.push(node)
