@@ -20,7 +20,11 @@ import {
 	EdgeNodeConfigError,
 	PUBLIC_COHORT_MIN_SIGS,
 	storageServiceProtocols,
+	EDGE_READER_PROTOCOL,
+	EDGE_DECLARATION_GATED_CHECKS,
+	edgeDeclarationGate,
 } from '../../src/peer/edge-node.js';
+import { readFileSync } from 'node:fs';
 
 // ---------------------------------------------------------------------------
 // strandStorageDbName
@@ -74,7 +78,15 @@ function makeFakeDeps(overrides = {}) {
 		async stop() { stubNode.stopCalls += 1; },
 		/** @type {string[][]} */
 		unhandleCalls: [],
-		async unhandle(/** @type {string[]} */ protocols) { stubNode.unhandleCalls.push(protocols); },
+		async unhandle(/** @type {string[]} */ protocols) { stubNode.unhandleCalls.push(protocols); stubNode.order.push('unhandle'); },
+		/** @type {string[]} */
+		order: [],
+		/** @type {Array<{ protocol: string, handler: (stream: any) => void }>} */
+		handleCalls: [],
+		async handle(/** @type {string} */ protocol, /** @type {(stream: any) => void} */ handler) {
+			stubNode.handleCalls.push({ protocol, handler });
+			stubNode.order.push(`handle:${protocol}`);
+		},
 		// 56-24: real `attachConnectionLifecycleTap` (imported by edge-node.js
 		// directly, never injected) is exercised against THIS fake node rather
 		// than mocked out -- `addEventListenerCalls` lets a test assert the tap
@@ -344,4 +356,96 @@ test('a node that cannot unregister handlers fails createEdgeNode, and the node 
 	);
 	assert.equal(stubNode.stopCalls, 1);
 	assert.equal(stubDb.closeCalls, 1);
+});
+
+// ---------------------------------------------------------------------------
+// 2026-11-16: the read-only visitor declaration. The node is built behind a
+// closed gate, withdraws storage and declares EDGE_READER_PROTOCOL, and only
+// then lets any connection through.
+// ---------------------------------------------------------------------------
+
+const DECL_CONFIG = { strandId: VALID_STRAND_ID, networkName: 'strand-abc', bootstrapNodes: ['/dns4/gateway.example/tcp/443/wss/p2p/12D3KooWExample'], privateKey: /** @type {any} */ ({}) };
+
+/** @param {any} gater */
+const allClosed = (gater) => EDGE_DECLARATION_GATED_CHECKS.every((name) => gater[name]() === true);
+/** @param {any} gater */
+const allOpen = (gater) => EDGE_DECLARATION_GATED_CHECKS.every((name) => gater[name]() === false);
+
+test('declaration: the node is built behind a gate that refuses every gated check during the build and allows them all once createEdgeNode returns', async () => {
+	/** @type {any} */
+	let gaterSeenAtBuild = null;
+	let closedDuringBuild = false;
+	const { deps, stubNode } = makeFakeDeps({
+		createLibp2pNodeImpl: async (/** @type {any} */ options) => {
+			gaterSeenAtBuild = options.connectionGater;
+			closedDuringBuild = allClosed(options.connectionGater);
+			return stubNode;
+		},
+	});
+	await createEdgeNode(DECL_CONFIG, deps);
+	assert.ok(gaterSeenAtBuild, 'createLibp2pNode received no connectionGater');
+	assert.equal(closedDuringBuild, true, 'a gated check allowed a connection while the node was being built');
+	assert.equal(allOpen(gaterSeenAtBuild), true, 'the gate is still closed after createEdgeNode returned');
+});
+
+test('declaration: the gate leaves denyDialMultiaddr unset, so libp2p\'s browser default (no plain ws, no private address) still applies', () => {
+	const { connectionGater } = edgeDeclarationGate();
+	assert.equal('denyDialMultiaddr' in connectionGater, false);
+	assert.deepEqual(Object.keys(connectionGater).sort(), [...EDGE_DECLARATION_GATED_CHECKS].sort());
+	assert.ok(EDGE_DECLARATION_GATED_CHECKS.includes('denyDialPeer') && EDGE_DECLARATION_GATED_CHECKS.includes('denyOutboundConnection') && EDGE_DECLARATION_GATED_CHECKS.includes('denyInboundConnection'));
+});
+
+test('declaration: storage is withdrawn, then the marker is declared, both while the gate is closed', async () => {
+	/** @type {any} */
+	let gater = null;
+	/** @type {boolean[]} */
+	const closedAt = [];
+	const { deps, stubNode } = makeFakeDeps({
+		createLibp2pNodeImpl: async (/** @type {any} */ options) => {
+			gater = options.connectionGater;
+			return stubNode;
+		},
+	});
+	const realUnhandle = stubNode.unhandle;
+	stubNode.unhandle = async (/** @type {string[]} */ p) => { closedAt.push(allClosed(gater)); return realUnhandle(p); };
+	const realHandle = stubNode.handle;
+	stubNode.handle = async (/** @type {string} */ p, /** @type {any} */ h) => { closedAt.push(allClosed(gater)); return realHandle(p, h); };
+	await createEdgeNode(DECL_CONFIG, deps);
+	assert.deepEqual(stubNode.order, ['unhandle', `handle:${EDGE_READER_PROTOCOL}`]);
+	assert.deepEqual(closedAt, [true, true], 'a declaration step ran with the gate open');
+	assert.deepEqual(stubNode.handleCalls.map((c) => c.protocol), [EDGE_READER_PROTOCOL], 'exactly one handler, the marker');
+});
+
+test('declaration: the marker handler serves nothing -- it aborts every stream, and a stream that throws on abort is swallowed', async () => {
+	const { deps, stubNode } = makeFakeDeps();
+	await createEdgeNode(DECL_CONFIG, deps);
+	const { handler } = stubNode.handleCalls[0];
+	let aborted = 0;
+	handler({ abort: () => { aborted += 1; } });
+	assert.equal(aborted, 1);
+	assert.doesNotThrow(() => handler({ abort: () => { throw new Error('already closed'); } }));
+});
+
+test('declaration: a node that cannot register a handler fails createEdgeNode, the gate never opens, and the node and its storage are closed', async () => {
+	/** @type {any} */
+	let gater = null;
+	const { deps, stubNode, stubDb } = makeFakeDeps({
+		createLibp2pNodeImpl: async (/** @type {any} */ options) => {
+			gater = options.connectionGater;
+			return stubNode;
+		},
+	});
+	/** @type {any} */ (stubNode).handle = undefined;
+	await assert.rejects(createEdgeNode(DECL_CONFIG, deps), (/** @type {any} */ err) => err instanceof EdgeNodeConfigError);
+	assert.equal(allClosed(gater), true, 'the gate opened for a node that never declared the marker');
+	assert.equal(stubNode.stopCalls, 1);
+	assert.equal(stubDb.closeCalls, 1);
+});
+
+test('declaration parity: EDGE_READER_PROTOCOL is the literal vote-engine\'s refusal and the dashboard look for (source text)', () => {
+	assert.equal(EDGE_READER_PROTOCOL, '/votetorrent/edge-reader/1.0.0');
+	const engine = readFileSync(new URL('../../../../packages/vote-engine/src/network/edge-reader-refusal.ts', import.meta.url), 'utf8');
+	assert.equal((engine.match(/export const EDGE_READER_PROTOCOL = '([^']+)'/) ?? [])[1], EDGE_READER_PROTOCOL);
+	const dashboard = readFileSync(new URL('../../../VoteTorrentDashboard/src/peer/member-node.js', import.meta.url), 'utf8');
+	assert.equal((dashboard.match(/const EDGE_READER_PROTOCOL = '([^']+)'/) ?? [])[1], EDGE_READER_PROTOCOL);
 });
