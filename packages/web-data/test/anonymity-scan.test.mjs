@@ -255,8 +255,13 @@ const EXPECTED_TABLE_COUNT = 77;
  * wait for the Edge node's first peer connection, imported by boot.js and network-index.js) is new. It was
  * added in 5f25ea38 without this pin moving -- a miss, caught by another session. Test 16 confirmed green
  * over the 40-file set in the same run.
+ *
+ * 2026-11-16 moves this 40 -> 41: `apps/VoteTorrentPublic/src/peer/coordinator-wait.js` (the bounded retry
+ * around opening the strand read handle while no connected peer is yet confirmed to serve the strand,
+ * imported by boot.js and network-index.js) is new. Test 16 confirmed green over the 41-file set in the
+ * same run.
  */
-const EXPECTED_SCANNED_FILE_COUNT = 40;
+const EXPECTED_SCANNED_FILE_COUNT = 41;
 
 // The sentinel literals are ASSEMBLED, never written out, so each appears in
 // this file exactly once — as the comment that delimits the region. A checker

@@ -26,6 +26,7 @@ const HASH = 'abc123def456';
  *   nodeThrows?: boolean,
  *   handleThrows?: boolean,
  *   noPeer?: boolean,
+ *   coordinatorMisses?: number,
  *   results?: Array<'throw' | Array<any>>,
  * }} spec
  */
@@ -62,6 +63,10 @@ function makeDeps(spec = {}) {
 		async openStrandReadHandle() {
 			calls.push('handle');
 			if (spec.handleThrows) throw Object.assign(new Error('no handle'), { name: 'StrandReadError' });
+			if (spec.coordinatorMisses && spec.coordinatorMisses > 0) {
+				spec.coordinatorMisses -= 1;
+				throw Object.assign(new Error('No coordinator available for key'), { name: 'FindCoordinatorError', code: 'NO_NETWORK_COORDINATOR' });
+			}
 			return {
 				db: {},
 				async close() {
@@ -205,4 +210,28 @@ test('the wait sits between building the node and opening the strand handle', as
 	await listNetworkElections({ networkHash: HASH, deps });
 	const node = calls.findIndex((c) => c.startsWith('node:'));
 	assert.ok(node >= 0 && calls[node + 1] === 'wait' && calls[node + 2] === 'handle', `order: ${calls}`);
+});
+
+test('a relay-first network: the strand open is retried past coordinator misses, then the list is read', async () => {
+	const { openWhenCoordinatorFound } = await import('../../src/peer/coordinator-wait.js');
+	const { deps, calls } = makeDeps({ coordinatorMisses: 2 });
+	/** @type {any} */ (deps).openWhenCoordinatorFound = (/** @type {() => Promise<any>} */ open) =>
+		openWhenCoordinatorFound(open, { sleep: async () => {} });
+	const out = await listNetworkElections({ networkHash: HASH, deps });
+	assert.equal(out.status, NETWORK_LIST_STATUS.LISTED);
+	assert.equal(out.elections.length, 1);
+	assert.equal(calls.filter((c) => c === 'handle').length, 3, `calls: ${calls}`);
+});
+
+test('no coordinator within the bound: FAILED with NoCoordinatorError, the list is never read, the node is released', async () => {
+	const { openWhenCoordinatorFound } = await import('../../src/peer/coordinator-wait.js');
+	const { deps, calls } = makeDeps({ coordinatorMisses: 100 });
+	let t = 0;
+	/** @type {any} */ (deps).openWhenCoordinatorFound = (/** @type {() => Promise<any>} */ open) =>
+		openWhenCoordinatorFound(open, { now: () => t, sleep: async (ms) => void (t += ms) });
+	const out = await listNetworkElections({ networkHash: HASH, deps });
+	assert.equal(out.status, NETWORK_LIST_STATUS.FAILED);
+	assert.equal(out.errorName, 'NoCoordinatorError');
+	assert.ok(!calls.includes('list'), `the list was read: ${calls}`);
+	assert.ok(calls.includes('node.stop'));
 });

@@ -36,6 +36,7 @@ import { createEdgeNode } from './edge-node.js';
 import { openStrandReadHandle, strandIdForNetwork } from './strand-read.js';
 import { listPublicElections } from '@votetorrent/web-data/public';
 import { waitForFirstConnection } from './first-connection.js';
+import { openWhenCoordinatorFound } from './coordinator-wait.js';
 
 /** The error name a FAILED result carries when no peer connected in time. */
 export const NO_PEER_CONNECTED = 'NoPeerConnected';
@@ -123,6 +124,7 @@ export async function listNetworkElections(options) {
 		openStrandReadHandle: deps.openStrandReadHandle ?? openStrandReadHandle,
 		listPublicElections: deps.listPublicElections ?? listPublicElections,
 		waitForFirstConnection: deps.waitForFirstConnection ?? waitForFirstConnection,
+		openWhenCoordinatorFound: deps.openWhenCoordinatorFound ?? openWhenCoordinatorFound,
 		attempts: typeof deps.attempts === 'number' ? deps.attempts : NETWORK_LIST_ATTEMPTS,
 		sleep: deps.sleep ?? ((/** @type {number} */ ms) => new Promise((done) => setTimeout(done, ms))),
 	};
@@ -150,7 +152,11 @@ export async function listNetworkElections(options) {
 		if (!firstConnection || firstConnection.connected !== true) {
 			return result(NETWORK_LIST_STATUS.FAILED, [], NO_PEER_CONNECTED);
 		}
-		strandHandle = await r.openStrandReadHandle({ networkHash, node, coordinatedRepo: node && node.coordinatedRepo });
+		// Retried while no connected peer is yet confirmed to serve the strand
+		// (the first connection is often the relay; `coordinator-wait.js`).
+		strandHandle = await r.openWhenCoordinatorFound(() =>
+			r.openStrandReadHandle({ networkHash, node, coordinatedRepo: node && node.coordinatedRepo }),
+		);
 
 		/** @type {string | null} */
 		let lastErrorName = null;

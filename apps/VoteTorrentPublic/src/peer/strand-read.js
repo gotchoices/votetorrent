@@ -265,7 +265,17 @@ export async function openStrandReadHandle(options, deps) {
 		founder: false,
 	});
 
-	await strandDatabase.initialize();
+	try {
+		await strandDatabase.initialize();
+	} catch (err) {
+		// Release the half-built database before rethrowing, so a caller that
+		// retries (`coordinator-wait.js`) does not leave one behind per attempt.
+		// The injected node is not stopped: `connectToStrand` never stops a node
+		// it was given (`@serfab/cadre-core` `dist/strand-database.js`), the same
+		// close-and-rebuild cadre-core's own joiner build does on one node.
+		await strandDatabase.close().catch(() => undefined);
+		throw err;
+	}
 
 	const db = strandDatabase.getDatabase();
 

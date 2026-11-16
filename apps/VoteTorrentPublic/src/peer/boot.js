@@ -154,6 +154,7 @@ import { collectionIdForTable } from './collection-id.js';
 import { attachLiveDb as openUiHandleForNetwork, closeNetworkDb, PUBLIC_SUBSCRIBED_TABLES, readNetworkTurnout } from '@votetorrent/web-data/public';
 import { registerTurnoutReader } from './turnout-source.js';
 import { waitForFirstConnection } from './first-connection.js';
+import { openWhenCoordinatorFound } from './coordinator-wait.js';
 
 /** The one read that proves the addressed election exists on the network.
  * A named bind, the convention `@votetorrent/web-data/public`'s read modules
@@ -247,6 +248,7 @@ export const PEER_BOOT_STATUS = Object.freeze({
  * @property {typeof registerTurnoutReader} [registerTurnoutReader] - 56-31
  * @property {typeof readNetworkTurnout} [readNetworkTurnout] - 56-31
  * @property {typeof waitForFirstConnection} [waitForFirstConnection] - the bounded wait before the first strand read
+ * @property {typeof openWhenCoordinatorFound} [openWhenCoordinatorFound] - the bounded retry around opening the strand read handle
  */
 
 /**
@@ -300,6 +302,7 @@ export async function startPublicPeerBoot(options) {
 		registerTurnoutReader: deps.registerTurnoutReader ?? registerTurnoutReader,
 		readNetworkTurnout: deps.readNetworkTurnout ?? readNetworkTurnout,
 		waitForFirstConnection: deps.waitForFirstConnection ?? waitForFirstConnection,
+		openWhenCoordinatorFound: deps.openWhenCoordinatorFound ?? openWhenCoordinatorFound,
 	};
 
 	// -- 1. No usable address: the root, election-less page must not open a
@@ -422,11 +425,17 @@ export async function startPublicPeerBoot(options) {
 		if (!firstConnection || firstConnection.connected !== true) {
 			throw new PeerBootError('no-peer-connected', 'no bootstrap peer connected within the first-connection wait -- the strand was not read');
 		}
-		strandReadHandle = await resolved.openStrandReadHandle({
-			networkHash,
-			node: edgeNode.node,
-			coordinatedRepo: /** @type {any} */ (nodeWithRepo.coordinatedRepo),
-		});
+		// -- 5b. Open the strand read handle, retrying (bounded) while no
+		//        connected peer is yet confirmed to serve the strand. The first
+		//        connection is often the relay the strand member is dialled
+		//        through, which serves no strand (`coordinator-wait.js`).
+		strandReadHandle = await resolved.openWhenCoordinatorFound(() =>
+			resolved.openStrandReadHandle({
+				networkHash,
+				node: edgeNode.node,
+				coordinatedRepo: /** @type {any} */ (nodeWithRepo.coordinatedRepo),
+			}),
+		);
 
 		// -- 6. The browser store, created ONLY after the network proves the
 		//       addressed election (56-26; this module's header). A miss creates

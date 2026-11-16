@@ -301,6 +301,24 @@ test('openStrandReadHandle.close() calls the underlying StrandDatabase.close() e
 	assert.equal(instances[0].closeCallCount, 1);
 });
 
+test('openStrandReadHandle closes a StrandDatabase whose initialize() threw, then rethrows the same error (a retry must not leak one per attempt)', async () => {
+	const miss = Object.assign(new Error('No coordinator available for key'), { name: 'FindCoordinatorError', code: 'NO_NETWORK_COORDINATOR' });
+	const { FakeStrandDatabase, instances } = makeFakeStrandDatabaseCtor({
+		initializeImpl: () => {
+			throw miss;
+		},
+		closeImpl: () => {
+			throw new Error('close also failed');
+		},
+	});
+	await assert.rejects(
+		openStrandReadHandle({ networkHash: NETWORK_HASH, node: FAKE_NODE, coordinatedRepo: FAKE_REPO }, /** @type {any} */ ({ StrandDatabase: FakeStrandDatabase })),
+		(/** @type {any} */ err) => err === miss,
+	);
+	assert.equal(instances.length, 1);
+	assert.equal(instances[0].closeCallCount, 1, 'the half-built StrandDatabase was not closed');
+});
+
 // ---------------------------------------------------------------------------
 // createStrandRowSource / readRows
 // ---------------------------------------------------------------------------

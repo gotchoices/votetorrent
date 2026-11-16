@@ -11,6 +11,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
+import { openWhenCoordinatorFound } from '../../src/peer/coordinator-wait.js';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -131,6 +132,9 @@ function makeFakeDeps(overrides = {}) {
 		},
 		openStrandReadHandle: async () => {
 			calls.push('openStrandReadHandle');
+			// `openFailures`: errors thrown by the first opens, in order (a relay-first network).
+			const failure = overrides.openFailures?.shift();
+			if (failure) throw failure;
 			return fakeStrandReadHandle;
 		},
 		createStrandRowSource: () => ({ readRows: fakeReadRows }),
@@ -535,4 +539,41 @@ test('first connection: none in time is FAILED "no-peer-connected"; the strand i
 	assert.equal(calls.includes('openStrandReadHandle'), false, 'the strand was read with no peer connected');
 	assert.equal(calls.filter((c) => c.startsWith('probeAddressedElection') || c.startsWith('openUiHandleForNetwork')).length, 0);
 	assert.ok(calls.includes('edgeNode.stop'), 'the Edge node is stopped');
+});
+
+/** @param {string} code */
+const coordinatorMiss = (code = 'NO_NETWORK_COORDINATOR') =>
+	Object.assign(new Error('No coordinator available for key on network /optimystic/strand-x'), { name: 'FindCoordinatorError', code });
+
+test('coordinator wait: a relay-first network (two misses, then the member) still STARTS, through the real retry', async () => {
+	const { deps, calls } = makeFakeDeps({ subscribedTables: ['TableA'], openFailures: [coordinatorMiss(), coordinatorMiss('NO_COORDINATOR_AVAILABLE')] });
+	/** @type {number[]} */
+	const sleeps = [];
+	deps.openWhenCoordinatorFound = (/** @type {() => Promise<any>} */ open) =>
+		openWhenCoordinatorFound(open, { sleep: async (ms) => void sleeps.push(ms) });
+	const result = await startPublicPeerBoot({ networkHash: 'nh-1', electionId: 'el-1', deps });
+	assert.equal(result.status, PEER_BOOT_STATUS.STARTED, `calls: ${calls}`);
+	assert.equal(calls.filter((c) => c === 'openStrandReadHandle').length, 3);
+	assert.deepEqual(sleeps, [1_000, 1_000]);
+	assert.equal(calls.includes('edgeNode.stop'), false, 'the node was stopped between attempts');
+	await result.stop();
+});
+
+test('coordinator wait: no coordinator within the bound is FAILED "no-coordinator"; no store is created, the node is stopped', async () => {
+	const { deps, calls } = makeFakeDeps({ subscribedTables: ['TableA'], openFailures: Array.from({ length: 50 }, () => coordinatorMiss()) });
+	let t = 0;
+	deps.openWhenCoordinatorFound = (/** @type {() => Promise<any>} */ open) =>
+		openWhenCoordinatorFound(open, { now: () => t, sleep: async (ms) => void (t += ms) });
+	const result = await startPublicPeerBoot({ networkHash: 'nh-1', electionId: 'el-1', deps });
+	assert.equal(result.status, PEER_BOOT_STATUS.FAILED);
+	assert.equal(result.subject, 'no-coordinator');
+	assert.equal(calls.filter((c) => c === 'openStrandReadHandle').length, 21, 'attempts at 0..20 s');
+	assert.equal(calls.filter((c) => c.startsWith('probeAddressedElection') || c.startsWith('openUiHandleForNetwork')).length, 0);
+	assert.ok(calls.includes('edgeNode.stop'), 'the Edge node is stopped');
+});
+
+test('coordinator wait: production boot routes the strand open through openWhenCoordinatorFound', () => {
+	const src = readFileSync(path.join(APP_ROOT, 'src/peer/boot.js'), 'utf8');
+	assert.match(src, /strandReadHandle = await resolved\.openWhenCoordinatorFound\(\(\) =>\s*resolved\.openStrandReadHandle\(/);
+	assert.match(src, /openWhenCoordinatorFound: deps\.openWhenCoordinatorFound \?\? openWhenCoordinatorFound,/);
 });
