@@ -672,12 +672,25 @@ export const COPY = Object.freeze({
 	// started and is fetching the election this link names: the true
 	// sentence is "looking", not "doesn't hold". Shown ONLY while that
 	// connection has not failed; once it fails the page falls back to the
-	// not-held pair above. No error voice and no remedy, for the same reasons
+	// not-held pair above, or (56-34) to one of the two failure pairs below. No error voice and no remedy, for the same reasons
 	// as that pair; the one promise ("will appear") is kept by the page
 	// itself, which re-reads on the first write.
 	'public.election.fetching.title': 'Looking for this election on the network.',
 	'public.election.fetching.body':
 		"This browser hasn't stored a copy of this election yet, so it is fetching one from the network now. It will appear here when it arrives.",
+
+	// 56-34 (user decision 2026-11-16). The page's own network connection
+	// FAILED and this browser holds no copy: "doesn't hold" is true but hides
+	// the real fact, which the boot's failure subject tells apart. `unreachable`
+	// is a connection that never found a peer serving the election's network;
+	// `notOnNetwork` is a network that answered and returned no such election.
+	// The not-held pair above stays for a failure of any other kind and for a
+	// shell mounted without a boot. No remedy, same as every pair here; the
+	// unreachable title echoes `public.index.networkUnreachable`.
+	'public.election.unreachable.title': "This page couldn't reach the network named in this link.",
+	'public.election.unreachable.body': "This election can't be shown right now, and nothing from it has been stored in this browser.",
+	'public.election.notOnNetwork.title': "This election wasn't found on the network named in this link.",
+	'public.election.notOnNetwork.body': 'The network answered, but it returned no election matching this link, so there is nothing here to show.',
 
 	// The two details-toggle summary labels. TWO KEYS ON PURPOSE, and a
 	// later merge of them into one is the regression the copy test's

@@ -76,7 +76,16 @@ export interface ElectionShellProps {
 	/** 56-31: ballots cast so far, counted on the network by `PublicApp`.
 	 * Absent on every gate mount, which renders the honest "couldn't count". */
 	turnout?: PublicTurnoutReading;
+	/** 56-34: what a FAILED boot means to the reader (`bootFailureKind` in
+	 * `peer/boot.js`), read only when `peerFeed` is `'stopped'`. Absent or
+	 * `null` keeps the plain not-held sentence, so every gate mount that
+	 * omits it sees a byte-identical page. */
+	bootFailure?: PublicBootFailure;
 }
+
+/** 56-34: the two failed-connection sentences an addressed page can say
+ * instead of "doesn't hold"; `null` says the not-held sentence. */
+export type PublicBootFailure = 'unreachable' | 'notOnNetwork' | null;
 
 /**
  * The public election view: chrome words, genuine mounts of the three shared
@@ -133,7 +142,7 @@ export interface ElectionShellProps {
  * closure therefore lives in `use-public-election.ts`, whose own header
  * records the same constraint from the other side.
  */
-export function ElectionShell({ search, at = null, election = null, source, configFault = null, peerFeed, turnout }: ElectionShellProps) {
+export function ElectionShell({ search, at = null, election = null, source, configFault = null, peerFeed, turnout, bootFailure = null }: ElectionShellProps) {
 	const address = parseElectionAddress(search ?? window.location.search);
 
 	// Called UNCONDITIONALLY, above the address branch, for the same reason
@@ -195,6 +204,12 @@ export function ElectionShell({ search, at = null, election = null, source, conf
 	// absent `peerFeed` (every gate that mounts the shell without a boot) is
 	// not a connection in progress, so it keeps the not-held sentence.
 	const stillLooking = holdsNothing && (peerFeed === 'unobserved' || peerFeed === 'running');
+	// 56-34. A connection that FAILED says why when the boot could tell:
+	// it never reached a peer serving the election's network, or the network
+	// answered and returned no such election. Any other failure, and a shell
+	// mounted without a boot, keeps the not-held sentence, which stays true.
+	const failedKind = holdsNothing && !stillLooking && peerFeed === 'stopped' ? bootFailure : null;
+	const saysNotHeld = holdsNothing && !stillLooking && failedKind === null;
 	const showBanner = addressed && (read.state === 'ready' || read.state === 'unreadable');
 	const showLifecycleSlot = !addressed || read.state === 'reading' || holdsNothing;
 	// 56-12/D-17: never on 'reading' (nothing to be stale yet), never on
@@ -295,8 +310,12 @@ export function ElectionShell({ search, at = null, election = null, source, conf
 				    a red gate — an unclassed element inherits the section's
 				    own type and colour instead. 54-13 may give it a class
 				    TOGETHER WITH its selector. */}
-				{holdsNothing && !stillLooking ? <h2>{t('public.election.notHeld.title')}</h2> : null}
-				{holdsNothing && !stillLooking ? <p>{t('public.election.notHeld.body')}</p> : null}
+				{saysNotHeld ? <h2>{t('public.election.notHeld.title')}</h2> : null}
+				{saysNotHeld ? <p>{t('public.election.notHeld.body')}</p> : null}
+				{failedKind === 'unreachable' ? <h2>{t('public.election.unreachable.title')}</h2> : null}
+				{failedKind === 'unreachable' ? <p>{t('public.election.unreachable.body')}</p> : null}
+				{failedKind === 'notOnNetwork' ? <h2>{t('public.election.notOnNetwork.title')}</h2> : null}
+				{failedKind === 'notOnNetwork' ? <p>{t('public.election.notOnNetwork.body')}</p> : null}
 				{stillLooking ? <h2>{t('public.election.fetching.title')}</h2> : null}
 				{stillLooking ? <p>{t('public.election.fetching.body')}</p> : null}
 				{/* The status banner: the tone chip and the headline sentence,

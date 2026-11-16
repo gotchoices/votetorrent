@@ -316,7 +316,7 @@ test('56-26 probeAddressedElection: a throw then a row is found on attempt 2, wi
 	/** @type {number[]} */
 	const sleeps = [];
 	const r = await probeAddressedElection(/** @type {any} */ (handle), 'el-9', { attempts: 3, delayMs: 7, sleep: async (ms) => void sleeps.push(ms) });
-	assert.deepEqual(r, { found: true, attempts: 2, lastErrorName: null });
+	assert.deepEqual(r, { found: true, attempts: 2, lastErrorName: null, anyRead: true });
 	assert.deepEqual(sleeps, [7]);
 	assert.match(handle.seen[0].sql, /from Election where Id = :electionId$/);
 	assert.deepEqual(handle.seen[0].params, { electionId: 'el-9' });

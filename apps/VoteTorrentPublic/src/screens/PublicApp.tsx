@@ -8,9 +8,11 @@ import { CONFIG_FAULT, loadBootstrapConfig } from '../peer/config.js';
 // other paragraph below describes it as "the peer boot composition" rather
 // than repeating the exported name.
 import { startPublicPeerBoot as bootPeerLayer, PEER_BOOT_STATUS } from '../peer/boot.js';
+import { bootFailureKind } from '../peer/boot.js';
 import { parseElectionAddress } from '../election-address.js';
 import { ElectionShell } from './ElectionShell';
 import type { PublicPeerFeedState, PublicTurnoutReading } from './use-public-election';
+import type { PublicBootFailure } from './ElectionShell';
 import { countTurnout } from '../peer/turnout-source.js';
 
 /**
@@ -183,6 +185,14 @@ export interface UsePeerFeedStatusOptions {
 	electionId?: string | null | undefined;
 }
 
+/** The observed peer-feed status, plus (56-34) what a FAILED boot means to
+ * the reader: `bootFailureKind` of its subject, or `null` for any other
+ * status and for a failure with no sentence of its own. */
+export interface PeerFeedStatus {
+	peerFeed: PublicPeerFeedState;
+	bootFailure: PublicBootFailure;
+}
+
 /**
  * Own the one production call site of the peer boot composition under
  * `src/`, and map its result union to the `connection` predicate's second
@@ -203,8 +213,8 @@ export interface UsePeerFeedStatusOptions {
  * resolved -- otherwise a slow boot outliving a fast unmount would leak a
  * running Edge node with nothing left to stop it.
  */
-export function usePeerFeedStatus({ boot = bootPeerLayer, networkHash, electionId }: UsePeerFeedStatusOptions): PublicPeerFeedState {
-	const [peerFeed, setPeerFeed] = useState<PublicPeerFeedState>('unobserved');
+export function usePeerFeedStatus({ boot = bootPeerLayer, networkHash, electionId }: UsePeerFeedStatusOptions): PeerFeedStatus {
+	const [status, setStatus] = useState<PeerFeedStatus>({ peerFeed: 'unobserved', bootFailure: null });
 
 	useEffect(() => {
 		let cancelled = false;
@@ -215,7 +225,10 @@ export function usePeerFeedStatus({ boot = bootPeerLayer, networkHash, electionI
 				return;
 			}
 			if (result.status === PEER_BOOT_STATUS.STARTED) stopFn = result.stop;
-			setPeerFeed(PEER_FEED_STATUS_MAP[result.status]);
+			setStatus({
+				peerFeed: PEER_FEED_STATUS_MAP[result.status],
+				bootFailure: result.status === PEER_BOOT_STATUS.FAILED ? bootFailureKind(result.subject) : null,
+			});
 		});
 		return () => {
 			cancelled = true;
@@ -223,7 +236,7 @@ export function usePeerFeedStatus({ boot = bootPeerLayer, networkHash, electionI
 		};
 	}, [boot, networkHash, electionId]);
 
-	return peerFeed;
+	return status;
 }
 
 /** 56-31: how often ballots cast so far are counted again while connected. */
@@ -291,10 +304,10 @@ export function useNetworkTurnout({
 export function PublicApp() {
 	const fault = useBootstrapConfigFault();
 	const address = parseElectionAddress(window.location.search);
-	const peerFeed = usePeerFeedStatus({ networkHash: address.networkHash, electionId: address.electionId });
+	const { peerFeed, bootFailure } = usePeerFeedStatus({ networkHash: address.networkHash, electionId: address.electionId });
 	const turnout = useNetworkTurnout({ networkHash: address.networkHash, electionId: address.electionId, peerFeed });
 	if (fault === 'pending') return null;
-	return <ElectionShell configFault={fault} peerFeed={peerFeed} turnout={turnout} />;
+	return <ElectionShell configFault={fault} peerFeed={peerFeed} turnout={turnout} bootFailure={bootFailure} />;
 }
 
 export default PublicApp;

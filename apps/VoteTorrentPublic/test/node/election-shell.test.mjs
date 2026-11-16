@@ -1159,8 +1159,12 @@ test('D-02/D-21: notHeld now SHARES its scaffolding with reading and ready — t
 	// still-looking pair renders in its place while the page's own
 	// connection has not failed; see the 56-28 cases below.
 	assert.match(SHELL_SOURCE, /const holdsNothing = addressed && read\.state === 'notHeld'/);
-	assert.match(SHELL_SOURCE, /\{holdsNothing && !stillLooking \? <h2>\{t\('public\.election\.notHeld\.title'\)\}<\/h2> : null\}/);
-	assert.match(SHELL_SOURCE, /\{holdsNothing && !stillLooking \? <p>\{t\('public\.election\.notHeld\.body'\)\}<\/p> : null\}/);
+	// 56-34: the not-held guard is now `saysNotHeld`, which is
+	// `holdsNothing && !stillLooking` minus a failed connection whose reason
+	// has its own sentence (boot-failure-copy.test.mjs pins those).
+	assert.match(SHELL_SOURCE, /const saysNotHeld = holdsNothing && !stillLooking && failedKind === null;/);
+	assert.match(SHELL_SOURCE, /\{saysNotHeld \? <h2>\{t\('public\.election\.notHeld\.title'\)\}<\/h2> : null\}/);
+	assert.match(SHELL_SOURCE, /\{saysNotHeld \? <p>\{t\('public\.election\.notHeld\.body'\)\}<\/p> : null\}/);
 	assert.match(SHELL_SOURCE, /\{stillLooking \? <h2>\{t\('public\.election\.fetching\.title'\)\}<\/h2> : null\}/);
 	assert.match(SHELL_SOURCE, /\{stillLooking \? <p>\{t\('public\.election\.fetching\.body'\)\}<\/p> : null\}/);
 

@@ -171,12 +171,14 @@ export const ELECTION_PROBE_DELAY_MS = 2000;
  * Whether the strand returns a row for `electionId`. Never throws; a read
  * that throws counts as a miss for that attempt (its error name only is kept,
  * never its message: a strand row can carry PII). Bounded by
- * `ELECTION_PROBE_ATTEMPTS`.
+ * `ELECTION_PROBE_ATTEMPTS`. `anyRead` is true when at least one attempt
+ * completed (returned zero rows rather than throwing): only then did the
+ * network actually answer "no such election" (56-34).
  *
  * @param {{ db: { eval(sql: string, params?: any): AsyncIterable<any> } }} strandHandle
  * @param {string} electionId
  * @param {{ attempts?: number, delayMs?: number, sleep?: (ms: number) => Promise<void> }} [options]
- * @returns {Promise<{ found: boolean, attempts: number, lastErrorName: string | null }>}
+ * @returns {Promise<{ found: boolean, attempts: number, lastErrorName: string | null, anyRead: boolean }>}
  */
 export async function probeAddressedElection(strandHandle, electionId, options = {}) {
 	const attempts = options.attempts ?? ELECTION_PROBE_ATTEMPTS;
@@ -184,17 +186,47 @@ export async function probeAddressedElection(strandHandle, electionId, options =
 	const sleep = options.sleep ?? ((/** @type {number} */ ms) => new Promise((r) => setTimeout(r, ms)));
 	/** @type {string | null} */
 	let lastErrorName = null;
+	let anyRead = false;
 	for (let attempt = 1; attempt <= attempts; attempt += 1) {
 		try {
 			for await (const _row of strandHandle.db.eval(ADDRESSED_ELECTION_PROBE_SQL, { electionId })) {
-				return { found: true, attempts: attempt, lastErrorName: null };
+				return { found: true, attempts: attempt, lastErrorName: null, anyRead: true };
 			}
+			anyRead = true;
 		} catch (err) {
 			lastErrorName = err && typeof (/** @type {any} */ (err).name) === 'string' ? /** @type {any} */ (err).name : 'Error';
 		}
 		if (attempt < attempts) await sleep(delayMs);
 	}
-	return { found: false, attempts, lastErrorName };
+	return { found: false, attempts, lastErrorName, anyRead };
+}
+
+/**
+ * What a FAILED boot means to a reader of an addressed election page (56-34),
+ * from its `subject`. Two kinds have their own sentence; any other failure
+ * (a build defect, a replication fault) is `null`, and the page keeps the
+ * plain not-held sentence, which stays true for it.
+ * @type {Readonly<{ UNREACHABLE: 'unreachable', NOT_ON_NETWORK: 'notOnNetwork' }>}
+ */
+export const BOOT_FAILURE_KIND = Object.freeze({ UNREACHABLE: 'unreachable', NOT_ON_NETWORK: 'notOnNetwork' });
+
+/** Subjects of a boot that never got an answer from a peer serving the election's network. */
+const UNREACHABLE_SUBJECTS = Object.freeze([
+	'no-peer-connected', // no connection at all within the first-connection wait
+	'no-coordinator', // connected, but no peer confirmed to serve the strand (coordinator-wait.js)
+	'election-read-failed', // the handle opened, but every probe read threw
+	'FindCoordinatorError', // a coordinator miss raised outside the retried open
+	'BlockUnavailableError', // the cohort holding a block could not be asked
+]);
+
+/**
+ * @param {unknown} subject - a FAILED boot result's `subject`
+ * @returns {'unreachable' | 'notOnNetwork' | null}
+ */
+export function bootFailureKind(subject) {
+	if (subject === 'election-not-on-network') return BOOT_FAILURE_KIND.NOT_ON_NETWORK;
+	if (typeof subject === 'string' && UNREACHABLE_SUBJECTS.includes(subject)) return BOOT_FAILURE_KIND.UNREACHABLE;
+	return null;
 }
 
 export { strandIdForNetwork };
@@ -443,8 +475,10 @@ export async function startPublicPeerBoot(options) {
 		//       the strand handle and the Edge node, and no store was opened.
 		const probe = await resolved.probeAddressedElection(strandReadHandle, electionId);
 		if (!probe || probe.found !== true) {
+			// 56-34: "not on the network" only when a read actually completed;
+			// a probe whose every read threw never heard the network's answer.
 			throw new PeerBootError(
-				'election-not-on-network',
+				probe && probe.anyRead === false ? 'election-read-failed' : 'election-not-on-network',
 				`the strand returned no row for the addressed election after ${Number(probe?.attempts) || 0} attempt(s) (last error: ${typeof probe?.lastErrorName === 'string' ? probe.lastErrorName : 'none'}) -- no UI store created`,
 			);
 		}

@@ -61,5 +61,5 @@ test('56-31: TURNOUT_REFRESH_MS is 30 s, the interval the turnout detail copy pr
 
 test('56-31: PublicApp feeds the shell the counted turnout', () => {
 	assert.match(APP, /const turnout = useNetworkTurnout\(\{ networkHash: address\.networkHash, electionId: address\.electionId, peerFeed \}\);/);
-	assert.match(APP, /<ElectionShell configFault=\{fault\} peerFeed=\{peerFeed\} turnout=\{turnout\} \/>/);
+	assert.match(APP, /<ElectionShell configFault=\{fault\} peerFeed=\{peerFeed\} turnout=\{turnout\} bootFailure=\{bootFailure\} \/>/);
 });
