@@ -19,6 +19,7 @@
 import React from 'react';
 import renderer from 'react-test-renderer';
 import {Linking, Platform, Text} from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import i18n from '../../../i18n'; // initializes the global i18next instance useTranslation() reads from
 
 const mockPopToTop = jest.fn();
@@ -446,6 +447,12 @@ function findHostNodeByType(json: unknown, targetType: string): TreeNode | null 
 	}
 	return null;
 }
+
+// The ceremony stores its in-flight attempt (registration-attempt-store.ts) so a remount resumes it;
+// every test starts with no stored attempt, as a fresh install does.
+beforeEach(async () => {
+	await AsyncStorage.clear();
+});
 
 beforeEach(() => {
 	mockGetElections.mockReset();
@@ -1392,6 +1399,274 @@ describe('ConfirmationScreen — current election on a joined network (D-28)', (
 		expect(mockProduce.mock.calls[1][0]).toMatchObject({electionId: 'first-election'});
 		expect(registrationRequestInits[1]).toBe(registrationRequestInits[0]);
 		expect(associationSubmitRequestCalls[1].init).toBe(associationSubmitRequestCalls[0].init);
+	});
+});
+
+/**
+ * 2026-11-13 emulator run: the decision wait ran out before the officer challenged the request, and
+ * a remount of the screen (a Fast Refresh there; navigation back and forth or an app restart do the
+ * same) made the next Confirm provision a NEW Android key and file a second request + registrant.
+ * A real officer approves by hand, so the wait ending must never fork the request: a fresh mount
+ * resumes the stored attempt.
+ */
+describe('ConfirmationScreen — a remount resumes the pending attempt (registration-attempt-store)', () => {
+	const {REGISTRATION_ATTEMPT_KEY} = require('../../../engines/registration-attempt-store');
+
+	/** Android: every provisionDeviceKey call mints a new key, and the lookup reads the newest. */
+	function installRotatingDeviceKey() {
+		let current: string | null = null;
+		let minted = 0;
+		mockProvisionDeviceKey.mockImplementation(async () => {
+			callOrder.push('provisionDeviceKey');
+			minted += 1;
+			current = `P256_ROTATED_${minted}`;
+			return {publicKey: current};
+		});
+		mockGetCurrentDeviceKey.mockImplementation(async () => {
+			callOrder.push('getCurrentDeviceKey');
+			if (current === null) {
+				throw Object.assign(new Error('absent'), {code: 'DEVICE_KEY_ABSENT'});
+			}
+			return {publicKey: current};
+		});
+		return () => current;
+	}
+
+	const challengeFor = (requestId: string | undefined) => [{requestId, status: 'c', challengeNonce: CHALLENGE_NONCE, cursor: 'cursor-1'}];
+
+	/** One Confirm press whose decision wait runs out (instant virtual clock). */
+	async function pressAndTimeOut(tr: renderer.ReactTestRenderer) {
+		looseMockPollDecisions.mockImplementation(async () => []);
+		const restore = installInstantDecisionWait();
+		try {
+			const before = mockPollDecisions.mock.calls.length;
+			await renderer.act(async () => {
+				tr.root.findByProps({testID: 'confirmation-confirm-face-id'}).props.onPress();
+				await flushUntil(
+					() => mockPollDecisions.mock.calls.length - before >= Math.ceil(DECISION_WAIT_DEADLINE_MS / DECISION_POLL_INTERVAL_MS),
+				);
+				await flushMicrotasks(60);
+			});
+		} finally {
+			restore();
+		}
+		expect(tr.root.findByProps({testID: 'confirmation-error'}).props.children).toBe(
+			i18n.getFixedT('en', 'registration')('confirmation.error.decisionTimeout'),
+		);
+	}
+
+	function remount(tr: renderer.ReactTestRenderer) {
+		renderer.act(() => {
+			tr.unmount();
+		});
+		return renderScreen();
+	}
+
+	it('a timeout, a remount, then Confirm: the SAME request and key are answered — no new key, request or registrant', async () => {
+		const currentKey = installRotatingDeviceKey();
+		const first = renderScreen();
+		await pressAndTimeOut(first);
+		expect(mockProvisionDeviceKey).toHaveBeenCalledTimes(1);
+		const firstAssociation = associationSubmitRequestCalls[0].init;
+		const registrantId = registrationRequestInits[0].id;
+
+		// The officer challenges the first request while the phone is away; the screen remounts.
+		looseMockPollDecisions.mockImplementation(async () => challengeFor(firstAssociation.id));
+		const second = remount(first);
+		await pressConfirm(second);
+
+		expect(second.root.findByProps({testID: 'confirmation-pending'})).toBeDefined();
+		// The key is read back, never re-provisioned (Android would rotate it).
+		expect(mockProvisionDeviceKey).toHaveBeenCalledTimes(1);
+		expect(currentKey()).toBe(firstAssociation.deviceKey);
+		// The same association request, byte-identical — never a second one.
+		expect(associationSubmitRequestCalls).toHaveLength(2);
+		expect(associationSubmitRequestCalls[1].init).toEqual(firstAssociation);
+		expect(associationSubmitRequestCalls[1].requesterKey).toBe(firstAssociation.deviceKey);
+		// The registration request was staged by the first press: no second registration request.
+		expect(registrationRequestInits).toHaveLength(1);
+		// The challenge is answered for the first registrant, by the first key.
+		expect(mockProduce.mock.calls[0][0]).toMatchObject({registrantId, deviceKey: firstAssociation.deviceKey});
+		expect(associationSubmitAttestationCalls).toHaveLength(1);
+		expect(associationSubmitAttestationCalls[0].answer.requestId).toBe(firstAssociation.id);
+		// Answered: nothing is left to resume.
+		expect(await AsyncStorage.getItem(REGISTRATION_ATTEMPT_KEY)).toBeNull();
+	});
+
+	it('the stored attempt carries no registration payload (D-22): no name, contact, address or party', async () => {
+		const tr = renderScreen();
+		await pressAndTimeOut(tr);
+		const stored = await AsyncStorage.getItem(REGISTRATION_ATTEMPT_KEY);
+		expect(stored).not.toBeNull();
+		for (const value of Object.values(sampleDraft).filter(v => v !== '')) {
+			expect(stored).not.toContain(value);
+		}
+		expect(JSON.parse(stored as string)).toEqual({
+			version: 1,
+			identityKey: DEVICE_IDENTITY_PUBLIC_KEY,
+			authorityId: 'authority-1',
+			electionId: SEEDED_ELECTION_ID,
+			registrantId: registrationRequestInits[0].id,
+			registrationSubmittedAt: registrationRequestInits[0].submittedAt,
+			registrationStaged: true,
+			deviceKey: P256_PUB,
+			association: associationSubmitRequestCalls[0].init,
+		});
+	});
+
+	it('a registration submit that failed before a remount is rebuilt byte-identical from the draft (same id and submittedAt)', async () => {
+		installRotatingDeviceKey();
+		mockRegistrationSubmitRequest.mockRejectedValueOnce(new Error('transient'));
+		const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+		try {
+			const first = renderScreen();
+			await pressConfirm(first);
+			expect(JSON.stringify(first.toJSON())).toContain('Try Again');
+
+			const second = remount(first);
+			await pressConfirm(second);
+
+			expect(second.root.findByProps({testID: 'confirmation-pending'})).toBeDefined();
+			// The rejected first call records nothing in `registrationRequestInits`: read the mock's calls.
+			const [[failedInit], [resumedInit]] = mockRegistrationSubmitRequest.mock.calls;
+			expect(mockRegistrationSubmitRequest).toHaveBeenCalledTimes(2);
+			expect(resumedInit).toEqual(failedInit);
+			expect(mockProvisionDeviceKey).toHaveBeenCalledTimes(1);
+			expect(associationSubmitRequestCalls).toHaveLength(1);
+			expect(associationSubmitRequestCalls[0].init.registrantId).toBe(failedInit.id);
+		} finally {
+			errorSpy.mockRestore();
+		}
+	});
+
+	it('a resume whose registration row is already on the strand skips the registration submit', async () => {
+		mockRegistrationSubmitRequest.mockImplementationOnce(async (init: {id: string}) => {
+			// The write landed, but the phone saw a failure.
+			registrationRequestInits.push(init);
+			throw new Error('ack lost');
+		});
+		const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+		try {
+			const first = renderScreen();
+			await pressConfirm(first);
+			const registrantId = registrationRequestInits[0].id;
+			mockOwnStagedRegistrationRequestIds.mockImplementation(async () => [registrantId]);
+
+			const second = remount(first);
+			await pressConfirm(second);
+
+			expect(mockOwnStagedRegistrationRequestIds).toHaveBeenCalledWith(DEVICE_IDENTITY_PUBLIC_KEY);
+			expect(registrationRequestInits).toHaveLength(1);
+			expect(associationSubmitRequestCalls[0].init.registrantId).toBe(registrantId);
+			expect(second.root.findByProps({testID: 'confirmation-pending'})).toBeDefined();
+		} finally {
+			mockOwnStagedRegistrationRequestIds.mockImplementation(async () => []);
+			errorSpy.mockRestore();
+		}
+	});
+
+	it('a stored attempt for another election is dropped and a new attempt starts', async () => {
+		const first = renderScreen();
+		await pressAndTimeOut(first);
+		const stale = JSON.parse((await AsyncStorage.getItem(REGISTRATION_ATTEMPT_KEY)) as string);
+		await AsyncStorage.setItem(REGISTRATION_ATTEMPT_KEY, JSON.stringify({...stale, electionId: 'another-election'}));
+
+		looseMockPollDecisions.mockImplementation(async () => challengeFor(capturedAssociationRequestId));
+		const second = remount(first);
+		await pressConfirm(second);
+
+		expect(registrationRequestInits).toHaveLength(2);
+		expect(registrationRequestInits[1].id).not.toBe(stale.registrantId);
+		expect(mockProvisionDeviceKey).toHaveBeenCalledTimes(2);
+		expect(second.root.findByProps({testID: 'confirmation-pending'})).toBeDefined();
+	});
+
+	it('a malformed stored attempt reads as none', async () => {
+		await AsyncStorage.setItem(REGISTRATION_ATTEMPT_KEY, '{"version":1,"registrantId":""}');
+		const tr = renderScreen();
+		await pressConfirm(tr);
+		expect(mockProvisionDeviceKey).toHaveBeenCalledTimes(1);
+		expect(tr.root.findByProps({testID: 'confirmation-pending'})).toBeDefined();
+	});
+
+	it('a registration request the authority closed is dropped: Try Again shows the failure, the next press starts a new attempt', async () => {
+		const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+		try {
+			const tr = renderScreen();
+			await pressAndTimeOut(tr);
+			const registrantId = registrationRequestInits[0].id;
+			mockRegistrationTransport.pollDecisions.mockImplementation(
+				(async () => [{requestId: registrantId, status: 'r', cursor: 'cursor-r'}]) as never,
+			);
+
+			await pressConfirm(tr); // Try Again: the request is closed
+			expect(JSON.stringify(tr.toJSON())).toContain('Something went wrong verifying your device. Try again.');
+			expect(registrationRequestInits).toHaveLength(1);
+			expect(associationSubmitRequestCalls).toHaveLength(1);
+			expect(await AsyncStorage.getItem(REGISTRATION_ATTEMPT_KEY)).toBeNull();
+			expect(errorSpy).toHaveBeenCalledWith('ConfirmationScreen: registration ceremony failed:', 'RegistrationRequestClosedError');
+
+			mockRegistrationTransport.pollDecisions.mockImplementation((async () => []) as never);
+			looseMockPollDecisions.mockImplementation(async () => challengeFor(capturedAssociationRequestId));
+			await pressConfirm(tr); // a new attempt
+			expect(registrationRequestInits).toHaveLength(2);
+			expect(registrationRequestInits[1].id).not.toBe(registrantId);
+			expect(tr.root.findByProps({testID: 'confirmation-pending'})).toBeDefined();
+		} finally {
+			mockRegistrationTransport.pollDecisions.mockImplementation((async () => []) as never);
+			errorSpy.mockRestore();
+		}
+	});
+
+	it('a refused association request is not waited on again: Try Again makes a new one for the same registrant', async () => {
+		const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+		try {
+			looseMockPollDecisions.mockImplementation(async () => [
+				{requestId: capturedAssociationRequestId, status: 'r', cursor: 'cursor-r'},
+			]);
+			const tr = renderScreen();
+			await pressConfirm(tr);
+			expect(JSON.stringify(tr.toJSON())).toContain('Something went wrong verifying your device. Try again.');
+			const refused = associationSubmitRequestCalls[0].init;
+
+			looseMockPollDecisions.mockImplementation(async () => challengeFor(capturedAssociationRequestId));
+			await pressConfirm(tr);
+
+			const renewed = associationSubmitRequestCalls[1].init;
+			expect(renewed.id).not.toBe(refused.id);
+			expect(renewed.registrantId).toBe(refused.registrantId);
+			expect(renewed.deviceKey).toBe(refused.deviceKey);
+			expect(associationSubmitAttestationCalls[0].answer.requestId).toBe(renewed.id);
+			expect(tr.root.findByProps({testID: 'confirmation-pending'})).toBeDefined();
+		} finally {
+			errorSpy.mockRestore();
+		}
+	});
+
+	it('an answer already staged for the request (duplicate-request-id) reads as answered: pending, nothing left to resume', async () => {
+		mockAssociationSubmitAttestation.mockRejectedValueOnce(
+			Object.assign(new Error('a staged attestation already exists'), {name: 'P2pStagingError', code: 'duplicate-request-id'}),
+		);
+		const tr = renderScreen();
+		await pressConfirm(tr);
+		expect(tr.root.findByProps({testID: 'confirmation-pending'})).toBeDefined();
+		expect(mockClearDraft).toHaveBeenCalledTimes(1);
+		expect(await AsyncStorage.getItem(REGISTRATION_ATTEMPT_KEY)).toBeNull();
+	});
+
+	it('any other attestation refusal still fails the attempt and keeps it for a retry', async () => {
+		const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+		try {
+			mockAssociationSubmitAttestation.mockRejectedValueOnce(
+				Object.assign(new Error('refused'), {name: 'P2pStagingError', code: 'rejected'}),
+			);
+			const tr = renderScreen();
+			await pressConfirm(tr);
+			expect(JSON.stringify(tr.toJSON())).toContain('Try Again');
+			expect(await AsyncStorage.getItem(REGISTRATION_ATTEMPT_KEY)).not.toBeNull();
+		} finally {
+			errorSpy.mockRestore();
+		}
 	});
 });
 

@@ -4,7 +4,8 @@
  * and coordinator choice.
  *
  * Phones (the Authority and Voter apps) create ONE tracker per CadreNode and pass `tracker.hook` as
- * cadre-core's `strandCohortRefusal`. cadre-core calls the hook once per strand-node build and turns the
+ * cadre-core's `strandCohortRefusal` (and `tracker.control` as the patched `controlCohortRefusal`, which keeps the
+ * dashboard out of CONTROL write cohorts the same way). cadre-core calls the hook once per strand-node build and turns the
  * returned object into that strand node's Optimystic `isNetworkMember` predicate; it then calls `attach`
  * with the built libp2p node.
  *
@@ -25,6 +26,12 @@
 /** The marker protocol a read-only edge reader's strand node handles (and closes at once). */
 export const EDGE_READER_PROTOCOL = '/votetorrent/edge-reader/1.0.0'
 
+/**
+ * The key the CONTROL network's refusal is kept under (`tracker.control`; `has`/`refused` read it like a strand
+ * id). Not a valid strand id, so it never collides with one.
+ */
+export const EDGE_READER_CONTROL_KEY = '#control'
+
 /** The most refused peers remembered per strand; the oldest is evicted first. */
 export const EDGE_READER_REFUSAL_MAX_PEERS = 256
 
@@ -44,6 +51,12 @@ export interface EdgeReaderRefusalOptions {
 export interface EdgeReaderRefusal {
   /** Pass as cadre-core `CadreNodeConfig.strandCohortRefusal`. */
   hook: (strandId: string) => EdgeReaderStrandRefusal | undefined
+  /**
+   * Pass as cadre-core `CadreNodeConfig.controlCohortRefusal` (VoteTorrent patch): the same refusal for the
+   * CONTROL network, learned from the control node's identify events (a dashboard's control node handles the
+   * marker too). Kept under {@link EDGE_READER_CONTROL_KEY}.
+   */
+  control: EdgeReaderStrandRefusal
   has(strandId: string, peerId: string): boolean
   refused(strandId: string): readonly string[]
   /** Total refused peers across all strands. */
@@ -158,6 +171,7 @@ export function createEdgeReaderRefusal(options?: EdgeReaderRefusalOptions): Edg
 
   return {
     hook,
+    control: hook(EDGE_READER_CONTROL_KEY) as EdgeReaderStrandRefusal,
     has: (strandId, peerId) => sets.get(strandId)?.has(peerId) ?? false,
     refused: (strandId) => [...(sets.get(strandId) ?? [])],
     size: () => {

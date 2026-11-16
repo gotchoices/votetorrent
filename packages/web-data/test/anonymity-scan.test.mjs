@@ -250,8 +250,13 @@ const EXPECTED_TABLE_COUNT = 77;
  * 2026-11-13 moves this 37 -> 39 (56-31): `packages/web-data/src/public/read-turnout.js` (ballots cast so far,
  * counted on the network) and `apps/VoteTorrentPublic/src/peer/turnout-source.js` (the boot-to-page hand-off)
  * are new. Test 16 confirmed green over the 39-file set in the same run.
+ *
+ * 2026-11-16 moves this 39 -> 40 (56-32): `apps/VoteTorrentPublic/src/peer/first-connection.js` (the bounded
+ * wait for the Edge node's first peer connection, imported by boot.js and network-index.js) is new. It was
+ * added in 5f25ea38 without this pin moving -- a miss, caught by another session. Test 16 confirmed green
+ * over the 40-file set in the same run.
  */
-const EXPECTED_SCANNED_FILE_COUNT = 39;
+const EXPECTED_SCANNED_FILE_COUNT = 40;
 
 // The sentinel literals are ASSEMBLED, never written out, so each appears in
 // this file exactly once — as the comment that delimits the region. A checker

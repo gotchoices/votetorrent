@@ -93,6 +93,7 @@ export async function buildRoleNode (stateDir: string, role: Role, relayAddr: st
   })())
   const bootstrapNodes = [...new Set([relayAddr, ...joinAddrs])]
 
+  const edgeReaderRefusal = rnEntry.createEdgeReaderRefusal()
   const node = identityOwner.withIdentityOwnerKey(new cadre.CadreNode({
     privateKey,
     controlNetwork: { partyId, bootstrapNodes },
@@ -114,7 +115,12 @@ export async function buildRoleNode (stateDir: string, role: Role, relayAddr: st
         denyOutboundEncryptedConnection: async (p: any) => isolated.has(id(p)) || dialRefused.has(id(p))
       }
     },
-    hibernation: { enabled: false }
+    hibernation: { enabled: false },
+    // mirrors apps/VoteTorrentAuthority/src/providers/CadreNodeProvider.tsx: a paired browser dashboard (edge reader) is
+    // kept out of this node's strand AND control write cohorts (2026-11-13: without these the rig's officer and keyholders
+    // counted the browser into every write cohort, which the Authority app never does).
+    strandCohortRefusal: edgeReaderRefusal.hook,
+    controlCohortRefusal: edgeReaderRefusal.control
   } as any), privateKey)
   return { node, peerId, isolated, dialRefused, destroyScope, closeStores }
 }

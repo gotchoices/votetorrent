@@ -1,18 +1,32 @@
 diff --git a/dist/cadre-node.js b/dist/cadre-node.js
-index 2cc6366..fe51340 100644
+index 2cc6366..c92c304 100644
 --- a/dist/cadre-node.js
 +++ b/dist/cadre-node.js
-@@ -60,6 +60,9 @@ import { createMembershipConnectionGater, UnauthorizedReservationBudget } from '
+@@ -60,6 +60,11 @@ import { createMembershipConnectionGater, UnauthorizedReservationBudget } from '
  import { controlNetworkName, installControlProtocolGuard, servesControlDatabase } from './control-protocol-guard.js';
  import { StrandWakeService, dialWake } from './strand-wake-protocol.js';
  import { StrandAddrService, collectStrandAddrs, nextStrandAddrAsk } from './strand-addr-protocol.js';
 +// VoteTorrent patch (public-observer-protocol): unauthenticated strand-address
 +// resolution for a node-local, operator-configured observable allowlist.
 +import { StrandObserverService } from './strand-observer-protocol.js';
++// VoteTorrent patch (control-cohort-refusal): the strand hook's resolver, reused for the control node.
++import { resolveStrandCohortRefusal } from './strand-cohort-refusal.js';
  import { DelegateAdmissionStore, extractCircuitRelayTargets, dueRelayAnnounces, prunePeerStrandKeys, peerStrandKey, recordRelayRefusals, relaysNotRefusing } from './delegate-admission.js';
  import { relayCircuitAddrs, resolveListenAddrs, resolveTransportOptions, RelayReservationFailedError } from './relay-addrs.js';
  import { selfAddressesChanged } from './self-address-update.js';
-@@ -340,6 +343,13 @@ export class CadreNode {
+@@ -312,6 +317,11 @@ export class CadreNode {
+          * window only ({@link admitRedeemingDevice}); the per-stream gate never does.
+          */
+         this.admittingDevices = new Map();
++        /**
++         * VoteTorrent patch (control-cohort-refusal): `null` unless the embedder set
++         * `controlCohortRefusal`; resolved on each start, right after the control node is built.
++         */
++        this.controlCohortRefusal = null;
+         this.strandWatcher = null;
+         this.seedBootstrapService = null;
+         /**
+@@ -340,6 +350,13 @@ export class CadreNode {
           * stops conflating control addresses with strand seeding.
           */
          this.strandAddrService = null;
@@ -26,7 +40,7 @@ index 2cc6366..fe51340 100644
          /**
           * Cadre invitation redemption handler (`/sereus/cadre-invite/1.0.0`): a device holding an
           * invitation dials this machine and proves possession; the handler seats the row and
-@@ -959,6 +969,20 @@ export class CadreNode {
+@@ -959,6 +976,20 @@ export class CadreNode {
          /** `connection:close` listener: {@link onControlConnectionClosed} (teardown in {@link stopRecordRefresh}). */
          this.controlConnectionCloseHandler = null;
          this.config = config;
@@ -47,7 +61,33 @@ index 2cc6366..fe51340 100644
          this.hostUnclaimedStrands = config.hostUnclaimedStrands ?? config.profile === 'storage';
          this.strandManager = new StrandInstanceManager();
          this.enrollmentService = new EnrollmentService();
-@@ -1283,7 +1307,8 @@ export class CadreNode {
+@@ -1157,6 +1188,25 @@ export class CadreNode {
+             // Before anything else can happen on the node: the quiet period above holds every
+             // connection off, so no stream can arrive ahead of the guard.
+             this.installControlProtocolGuard(this.controlNode);
++            // VoteTorrent patch (control-cohort-refusal): still inside the quiet period, so no peer has
++            // identified this node yet. A node with `edgeReaderProtocol` (the officer's browser
++            // dashboard) handles that marker on its CONTROL node too, so the first identify any member
++            // gets names it an edge reader; only the marker is added, every control protocol stays.
++            // A node with `controlCohortRefusal` resolves it and attaches it to this node's peer events.
++            if (typeof this.config.edgeReaderProtocol === 'string' && this.config.edgeReaderProtocol.length > 0) {
++                await this.controlNode.handle(this.config.edgeReaderProtocol, (stream) => {
++                    try {
++                        stream.abort(new Error('edge-reader marker only'));
++                    }
++                    catch {
++                        // already closed
++                    }
++                });
++            }
++            this.controlCohortRefusal = this.config.controlCohortRefusal === undefined
++                ? null
++                : resolveStrandCohortRefusal(() => this.config.controlCohortRefusal, this.config.controlNetwork.partyId);
++            this.controlCohortRefusal?.attach(this.controlNode);
+             // Extract coordinatedRepo from the node (attached by createLibp2pNode)
+             const coordinatedRepo = this.controlNode.coordinatedRepo;
+             if (!coordinatedRepo) {
+@@ -1283,7 +1333,8 @@ export class CadreNode {
              // we record an admission grant so our connection gate (and thus our relay
              // server, when enabled) admits it — see delegate-admission.ts.
              this.strandAddrService = new StrandAddrService({
@@ -57,7 +97,7 @@ index 2cc6366..fe51340 100644
                  onDelegateAnnounce: (announcer, strandId, delegate) => this.grantDelegateAdmission(announcer, strandId, delegate),
              });
              await this.strandAddrService.initialize(this.controlNode);
-@@ -1323,6 +1348,19 @@ export class CadreNode {
+@@ -1323,6 +1374,19 @@ export class CadreNode {
                  this.pushFanoutService = this.buildPushFanout(this.config.push);
                  log('Push-wake fan-out enabled (injected notifier)');
              }
@@ -77,7 +117,7 @@ index 2cc6366..fe51340 100644
              this._running = true;
              this.emit('control:connected', undefined);
              timing('[start] total: %dms', Math.round(performance.now() - tTotal));
-@@ -2171,7 +2209,12 @@ export class CadreNode {
+@@ -2171,7 +2235,12 @@ export class CadreNode {
              connectionGater: createMembershipConnectionGater({
                  admitInbound: (remotePeerId) => this.admitInboundControlConnection(remotePeerId),
                  admitRelayReservation: (remotePeerId) => this.admitControlRelayReservation(remotePeerId),
@@ -91,7 +131,20 @@ index 2cc6366..fe51340 100644
              }, network?.connectionGater, ADMISSION_DECISION_TIMEOUT_MS, relayedRequestBudgetMs(network?.linkRoundTripMs)),
              // Fail-closed per-stream authorization for the four Optimystic control-DB
              // protocols — the members-only layer the connection gater's stranger
-@@ -3084,6 +3127,23 @@ export class CadreNode {
+@@ -2499,7 +2568,11 @@ export class CadreNode {
+      * ({@link admittingDevices}), which must hold the rows that admit it.
+      */
+     isControlCohortMember(remotePeerId) {
+-        return this.isControlNetworkMember(remotePeerId) || this.admittingDevices.has(remotePeerId);
++        // VoteTorrent patch (control-cohort-refusal): a member the refusal refuses (only a literal
++        // `true` from its `refuses`; a throw admits) is never a control cohort member or coordinator,
++        // and never counts as a reachable sibling. A device being admitted is kept regardless.
++        return (this.isControlNetworkMember(remotePeerId) && this.controlCohortRefusal?.isNetworkMember(remotePeerId) !== false)
++            || this.admittingDevices.has(remotePeerId);
+     }
+     /**
+      * Per-stream authorization for the protocol guard's `members-snapshot` class
+@@ -3084,6 +3157,23 @@ export class CadreNode {
          // self-update rule is measured against, and a removal landing mid-publish re-reads as
          // absent instead of matching no rows under a 'refreshed'. The record it returns is the
          // one in the row.
@@ -115,7 +168,7 @@ index 2cc6366..fe51340 100644
          const aloneBefore = this.committedAlone();
          const record = await this.controlDatabase.updateSelfPeerRecord(peerId, (current) => this.signSelfRecord(peerId, signingKey, addrs, current));
          if (record === null) {
-@@ -4106,7 +4166,47 @@ export class CadreNode {
+@@ -4106,7 +4196,47 @@ export class CadreNode {
          if (booked.length > 0) {
              return booked;
          }
@@ -164,7 +217,7 @@ index 2cc6366..fe51340 100644
      }
      /**
       * A sibling's retained out-of-band dial target (see {@link bootstrapPeerStore}),
-@@ -5292,6 +5392,14 @@ export class CadreNode {
+@@ -5292,6 +5422,14 @@ export class CadreNode {
              await this.strandAddrService.shutdown();
              this.strandAddrService = null;
          }
@@ -179,7 +232,7 @@ index 2cc6366..fe51340 100644
          // Unregister the two redemption handlers, for the same reason.
          if (this.cadreInviteHandler && this.controlNode) {
              await this.cadreInviteHandler.unregister(this.controlNode);
-@@ -6763,6 +6871,11 @@ export class CadreNode {
+@@ -6763,6 +6901,11 @@ export class CadreNode {
              // are on `StartStrandConfig.servingMachines`.
              backfill: this.config.strandBackfill,
              reactivity: this.config.strandReactivity,
@@ -191,7 +244,7 @@ index 2cc6366..fe51340 100644
              revocationEnforcement: this.config.strandRevocationEnforcement,
              membershipReconciliation: this.config.strandMembershipReconciliation,
              onSelfRevoked: (revokedStrandId) => {
-@@ -7429,6 +7542,18 @@ export class CadreNode {
+@@ -7429,6 +7572,18 @@ export class CadreNode {
          }
          log('strand %s address book merged (peers=%d, merged=%d, restamped=%d, skipped=%d, failed=%d, dropped=%d)', strandId, peers, counts.merged, counts.restamped, counts.skipped, counts.failed, addrs.length - grouped);
      }
@@ -210,7 +263,36 @@ index 2cc6366..fe51340 100644
      /**
       * The local strand instance's dialable strand-network multiaddrs for the
       * strand-addr RPC, ordered signaling-first (reusing the control node's
-@@ -10501,7 +10626,8 @@ export class CadreNode {
+@@ -9235,7 +9390,27 @@ export class CadreNode {
+         }
+         const recipients = this.pendingPartyKeyRecipients(machines, peerId);
+         const pendingPartyKeys = await Promise.all(plan.strands.map((strand) => this.mintPendingPartyKey(strand.strandId, recipients)));
+-        const writes = await service.removeMachine({ peerId, inviteKeys: plan.invitations, pendingPartyKeys });
++        // VoteTorrent patch (control-cohort-refusal): a machine this node's control refusal keeps out of the
++        // cohorts (a paired browser dashboard) holds no replica of the writes made since it connected, so
++        // it would never see the tombstone that removes it and never report `cadre:removed`. Catch it up
++        // and count it in for this one write, as a redeeming device is for its admission. A failed
++        // catch-up (an unreachable or frozen browser) removes it without that, as before the refusal.
++        let releaseRemoved = null;
++        if (this.controlCohortRefusal?.isNetworkMember(peerId) === false) {
++            try {
++                releaseRemoved = await this.admitRedeemingDevice(peerId);
++            }
++            catch (error) {
++                log('removeMachine(%s): catch-up of the refused machine before its removal failed; removing it without its replica: %o', peerId, error);
++            }
++        }
++        let writes;
++        try {
++            writes = await service.removeMachine({ peerId, inviteKeys: plan.invitations, pendingPartyKeys });
++        }
++        finally {
++            releaseRemoved?.();
++        }
+         if (writes.removedPeer) {
+             // Track + loudly flag a delete that committed local-only (security-relevant).
+             this.noteControlWrite(peerId, 'remove');
+@@ -10501,7 +10676,8 @@ export class CadreNode {
              // Overrides any caller-supplied hook, exactly like partyId/cadrePeerAddrs: only
              // this node can say which strand-network addresses it is actually listening on,
              // and a wrong answer here seeds a joiner's mesh with addresses that reach nobody.
@@ -1094,7 +1176,7 @@ index e7ce8f0..4b93ea9 100644
  function strandSelected(strandIds, strandId) {
      if (strandIds === undefined) {
 diff --git a/dist/types.d.ts b/dist/types.d.ts
-index 9b1260f..b1c0f65 100644
+index 9b1260f..8a0a5da 100644
 --- a/dist/types.d.ts
 +++ b/dist/types.d.ts
 @@ -4,6 +4,7 @@ import type { IRawStorage, Libp2pConnectionMonitorInit, Libp2pTransports, NoiseC
@@ -1105,7 +1187,7 @@ index 9b1260f..b1c0f65 100644
  import type { StrandRevocationEnforcementConfig } from './strand-revocation-enforcer.js';
  import type { StrandMembershipReconciliationConfig } from './strand-membership-reconciler.js';
  import type { StrandFirstSyncConfig } from './strand-first-sync-gate.js';
-@@ -850,6 +851,36 @@ export interface CadreNodeConfig {
+@@ -850,6 +851,46 @@ export interface CadreNodeConfig {
       * node never gets it.
       */
      strandReactivity?: StrandReactivityConfig;
@@ -1130,13 +1212,23 @@ index 9b1260f..b1c0f65 100644
 +     */
 +    withholdStrandAddrs?: boolean;
 +    /**
++     * VoteTorrent patch (control-cohort-refusal): opt-in, the control network's counterpart of
++     * {@link strandCohortRefusal}. Attached to the control node right after it is built (on every
++     * start); a member it refuses (only a literal `true` from `refuses`; a throw admits) is never
++     * in this node's control write cohorts or coordinator choice and never counts for
++     * `hasReachableControlSibling()`. A device whose redemption is being written is kept. Reads and
++     * the control catch-up push are not gated. Absent: exactly the old predicate.
++     */
++    controlCohortRefusal?: import('./strand-cohort-refusal.js').StrandCohortRefusal;
++    /**
 +     * VoteTorrent patch (strand-edge-reader-declaration): opt-in. A protocol id (the embedder's
 +     * edge-reader marker). When set, every strand node this node builds handles that protocol and
 +     * registers NO strand storage protocol (`cluster`, `repo`) from its very first identify: the
 +     * node is built behind a gate that refuses every connection, the storage protocols are unhandled
 +     * and the marker handled, and only then does the gate open and the node dial its seed. Each
 +     * stream on the marker is aborted. For a member that stores nothing (the officer's browser
-+     * dashboard). Absent: strand nodes are built exactly as before.
++     * dashboard). The CONTROL node handles the marker too (control-cohort-refusal), before any peer
++     * connects; it keeps every control protocol. Absent: nodes are built exactly as before.
 +     */
 +    edgeReaderProtocol?: string;
      /**

@@ -482,6 +482,98 @@ function makeSign (user: any, privateHex: string): (digest: Uint8Array) => Promi
 }
 const trailingPeer = (addr: string): string => addr.split('/p2p/').pop() ?? ''
 
+// DASHBOARD (2026-11-13): LEAN_DASHBOARD=1 lets the two web dashboards watch the run. The host officer is the cadre owner and a
+// current officer, so it serves the SHIPPED Authority pair-mint host on its control node (engines/pair-mint-host.ts, owner
+// branch) and builds owner-local pairing codes through the SHIPPED requestPairingCode (engines/dashboard-pairing.ts), exactly
+// as an owner phone's Pair a browser screen does. Each code goes to <SEC>/dash-code.txt (0600, replaced on each mint); a code
+// works once and lasts ~14 min, so touching <SEC>/flag-dash-mint mints a fresh one. <SEC>/public-info.json (network hash,
+// election id, the officer's strand node addresses) feeds the Public page's config.json and address; it is rewritten after
+// the election leg and on <SEC>/flag-public-info. Unset = unchanged.
+const DASHBOARD = process.env.LEAN_DASHBOARD === '1'
+async function startDashboardPairing (off: RoleState): Promise<void> {
+  // The two Authority modules load vote-engine (and dashboard-pairing.ts cadre-core) through a lazy CommonJS require(), which
+  // an ES module run has no binding for. Hand them the copies this driver already loaded (the src rn entry hr5-hooks maps).
+  const veRn: any = await import(VEs('rn-entry.ts'))
+  const prevReq = (globalThis as any).require
+  ;(globalThis as any).require = (id: string): any => {
+    if (id === '@votetorrent/vote-engine/rn') return veRn
+    if (id === '@serfab/cadre-core') return cadre
+    if (typeof prevReq === 'function') return prevReq(id)
+    throw new Error(`lean dashboard require shim: no module ${id}`)
+  }
+  const pairHost: any = await import(AUTH('engines/pair-mint-host.ts'))
+  const pairing: any = await import(AUTH('engines/dashboard-pairing.ts'))
+  const entries: any[] = []
+  const expiryMs = (s: string | null): number => (s === null ? 0 : Date.parse(/[zZ]|[+-]\d\d:?\d\d$/.test(s) ? s : `${s}Z`))
+  const mintLog = {
+    async hasNonce (nonce: string) { return entries.some((e) => e.nonce === nonce) },
+    async record (entry: any) { entries.push({ ...entry }) },
+    async findByNonce (nonce: string) { const f = entries.filter((e) => e.nonce === nonce); return f.find((e) => e.outcome === 'approved') ?? f[f.length - 1] ?? null },
+    async liveMintsFor (userId: string, nowMs: number) { return entries.filter((e) => e.userId === userId && e.outcome === 'approved' && expiryMs(e.expiresAt) > nowMs && e.withdrawn !== true) }
+  }
+  const host = await pairHost.hostPairMint(off.node, { readOwnNetworkHash: async () => N7, isEnabled: async () => true, mintLog, subscribeRevocations: () => () => {} })
+  ;(S_ as any).dashDetach = host.detach
+  const codeFile = join(SEC, 'dash-code.txt')
+  const step = (s: string): void => leanNote(`dash-step ${s}`)
+  const errName = (e: unknown): string => `${String((e as any)?.name ?? 'Error')}:${redact(String((e as any)?.message ?? '')).slice(0, 120)}`
+  const mint = async (): Promise<void> => {
+    const t0 = Date.now()
+    try {
+      const keyPub = String(off.user.activeKeys?.[0]?.key ?? '')
+      step(`inputs peerId=${typeof off.node.peerId?.toString() === 'string'} control=${off.node.getControlNode() != null} keyPubLen=${keyPub.length} partyId=${typeof off.node.partyId}`)
+      const res = await pairing.requestPairingCode({
+        node: off.node, db: off.ctx.db, networkHash: N7, userId: off.user.id, keyPub,
+        signer: async (d: Uint8Array) => { const s = await off.sign(d); step(`signed sigLen=${String(s?.signature?.length)} keyMatch=${s?.signerKey === keyPub}`); return s },
+        readAnchor: async () => {
+          try { const a = await off.engine.getJoinAnchor(N7); step('anchor ok'); return { ok: true, anchor: { networkHash: a.networkHash, name: a.name, genesis: a.genesis, digest: a.digest } } } catch (e: any) { step(`anchor THREW ${errName(e)}`); return { ok: false, anchor: e?.code === 'network-not-open' ? 'not-open' : 'unreadable' } }
+        },
+        localMint: async (r: any) => { try { const rep = await host.handleLocal(r); step(`reply t=${String(rep?.t)} code=${String(rep?.code ?? '')}`); return rep } catch (e) { step(`localMint THREW ${errName(e)}`); throw e } },
+        label: null,
+        deps: {
+          pairingStatementDigest: async (db: any, f: any) => { try { return await veRn.pairingStatementDigest(db, f) } catch (e) { step(`digest THREW ${errName(e)}`); throw e } },
+          invitationCodec: {
+            decodeCadreInvitation: (s: string) => { const inv = cadre.decodeCadreInvitation(s); step(`invitation uses=${String(inv?.invite?.totalUses)} peerNull=${inv?.invite?.peerId === null} party=${inv?.partyId === off.node.partyId} owners=${String(inv?.ownerKeys?.length)} members=${String(inv?.members?.length)}`); return inv },
+            encodeCadreInvitation: (i: any) => cadre.encodeCadreInvitation(i)
+          },
+          // the owner phone's local "paired browsers" list (AsyncStorage) has no host counterpart; the rig keeps none
+          recordPairedBrowser: async () => {}
+        }
+      })
+      if (res.ok) {
+        secret(res.code)
+        rmSync(codeFile, { force: true })
+        writeFileSync(codeFile, res.code, { flag: 'wx', mode: 0o600 })
+        leanNote(`dash-code written chars=${res.code.length} expiresAt=${res.expiresAt} ms=${Date.now() - t0}`)
+      } else leanNote(`dash-mint FAILED reason=${String(res.reason)} refusal=${String(res.refusal ?? '')} anchor=${String(res.anchor ?? '')}`)
+    } catch (e) { recordError('dash.mint', e, 'hidden'); leanNote(`dash-mint THREW ${String((e as any)?.name ?? 'Error')}`) }
+  }
+  await mint()
+  let busy = false
+  setInterval(() => {
+    if (busy) return
+    const mf = join(SEC, 'flag-dash-mint'); const pf = join(SEC, 'flag-public-info')
+    if (existsSync(mf)) { rmSync(mf, { force: true }); busy = true; void mint().finally(() => { busy = false }) }
+    if (existsSync(pf)) { rmSync(pf, { force: true }); writePublicInfo(off) }
+  }, 2000).unref()
+}
+function writePublicInfo (off: RoleState): void {
+  try {
+    const strands: any[] = []
+    const ids = new Set<string>([N7])
+    try { for (const s of (off.node.listStrands?.() ?? [])) ids.add(String(s?.id ?? s?.strandId ?? s)) } catch { /* optional accessor */ }
+    for (const id of ids) {
+      const inst: any = off.node.getStrand?.(id)
+      const lp: any = inst?.libp2pNode
+      if (!lp) continue
+      strands.push({ id, peerId: lp.peerId.toString(), addrs: lp.getMultiaddrs().map((m: any) => m.toString()) })
+    }
+    const control = off.node.getControlNode()
+    const info = { networkHash: N7, electionId: S_.electionId, strands, control: { peerId: control.peerId.toString(), addrs: control.getMultiaddrs().map((m: any) => m.toString()) }, at: new Date().toISOString() }
+    writeFileSync(join(SEC, 'public-info.json'), JSON.stringify(info, null, 2), { mode: 0o600 })
+    leanNote(`public-info written strands=${strands.length} election=${S_.electionId !== ''}`)
+  } catch (e) { recordError('dash.public-info', e, 'hidden'); leanNote(`public-info THREW ${String((e as any)?.name ?? 'Error')}`) }
+}
+
 // ----------------------------------------------------------------------------------------------------------------
 // leg: reopen
 // ----------------------------------------------------------------------------------------------------------------
@@ -562,6 +654,10 @@ async function legReopen (L: LegCtx): Promise<void> {
   const off = roles.get('officer')!
   S_.rendezvousDetach = await hostPoolRendezvous(off.node)
   L.check('O7', 'the officer hosts the pool rendezvous', typeof S_.rendezvousDetach === 'function')
+  if (DASHBOARD) {
+    try { await startDashboardPairing(off) } catch (e) { recordError('dash.start', e, 'hidden'); leanNote(`dash-start THREW ${String((e as any)?.name ?? 'Error')}: ${redact(String((e as any)?.message ?? '')).slice(0, 160)}`) }
+    writePublicInfo(off)
+  }
   if (PHONE_KH2) {
     // both phones join with the multi-use n7 code (part 1 without with-khb spends one use on the host witness)
     L.need('phone-join', 'O8a', 'the phone Authority for seat hr5-kh-a joined n7 (orchestrator read-back flag)', await waitFlag('phone-kh-a-joined'))
@@ -593,6 +689,7 @@ async function legElection (L: LegCtx): Promise<void> {
 
   const electionId = `election-${Date.now()}`
   S_.electionId = electionId
+  if (DASHBOARD) writePublicInfo(off)
   const electionsEngine = new ElectionsEngine(ctx)
   const init: any = makeElectionInit({ authorityId: AUTHORITY_ID, id: electionId, title: process.env.LEAN_TITLE ?? 'hr5-election', ...(process.env.LEAN_DATE_DAYS ? { date: Date.now() + Number(process.env.LEAN_DATE_DAYS) * 86_400_000 } : {}) })
   init.revision.keyholderThreshold = 2
@@ -825,7 +922,9 @@ async function legDkg (L: LegCtx): Promise<void> {
       if (officerKey) break
     }
     if (nonAdv >= 2) await sleep(PHONE_KH ? 5000 : 2000)
-    else if (PHONE_KH && out.actions.length === 0) await sleep(3000)
+    // driveKeyholderDkg reports advanced=true while it only waits for the peer's round to replicate, so an action-less
+    // drive must pause in the all-host run too, or 30 drives burn in ~1 s (2026-11-13 seed-20261113-131901 D1 FAIL)
+    else if (out.actions.length === 0) await sleep(PHONE_KH ? 3000 : 1500)
   }
   dkgRes.ms = Date.now() - sDkg
   khs.forEach((k: any, i: number) => { k.dkgUnwraps = k.vault.authPromptCount - before[i] })
@@ -865,9 +964,14 @@ async function legVoters (L: LegCtx): Promise<void> {
   // mirrors voter-invite.ts:134-160
   const anchor = await off.engine.getFoundingAnchor(N7, { userId: off.user.id, signerKey: off.user.activeKeys[0].key })
   await ensureVoterInviteOwner(off.node)
-  const minted = await off.node.createCadreInvitation({ uses: VOTER_INVITE_USES, expiresInMs: VOTER_INVITE_LIFETIME_MS })
+  // mirrors voter-invite.ts withoutEdgeReaders (2026-11-13): a paired dashboard is never named as a member
+  const edgeMembers: any = await import(VEs('network/edge-reader-members.ts'))
+  const minted0 = await off.node.createCadreInvitation({ uses: VOTER_INVITE_USES, expiresInMs: VOTER_INVITE_LIFETIME_MS })
+  const minted: any = await edgeMembers.excludeEdgeReaderMembers(minted0, off.node.getControlNode(), (i: any) => cadre.encodeCadreInvitation(i))
+  leanNote(`voter-code members minted=${String(minted0.invitation?.members?.length)} droppedEdgeReaders=${String(minted.droppedEdgeReaders)}`)
   const codeText = secret(encodeNetworkJoinCode({ v: 2, invitation: minted.encoded, networkHash: anchor.networkHash, name: anchor.name, genesis: anchor.genesis, digest: anchor.digest } as any), { windows: true })
   secret(minted.encoded, { windows: true })
+  secret(minted0.encoded, { windows: true })
   secret(minted.invitation?.invitePrivateKey, { windows: true })
   S_.codePath = join(SEC, 'hr5-code.txt')
   writeFileSync(S_.codePath, codeText, { flag: 'wx', mode: 0o600 })

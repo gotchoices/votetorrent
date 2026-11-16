@@ -27,8 +27,10 @@ export type { NetworkJoinNode, NetworkJoinOptions, NetworkJoinResult, NetworkJoi
 export { NetworkEngine } from './network/network-engine.js'
 // Phones pass `createEdgeReaderRefusal().hook` as cadre-core's `strandCohortRefusal`, keeping strand peers
 // that declared themselves read-only edge readers out of write cohorts and coordinator choice.
-export { EDGE_READER_PROTOCOL, EDGE_READER_REFUSAL_MAX_PEERS, createEdgeReaderRefusal } from './network/edge-reader-refusal.js'
+export { EDGE_READER_PROTOCOL, EDGE_READER_CONTROL_KEY, EDGE_READER_REFUSAL_MAX_PEERS, createEdgeReaderRefusal } from './network/edge-reader-refusal.js'
 export type { EdgeReaderRefusal, EdgeReaderRefusalOptions, EdgeReaderStrandRefusal } from './network/edge-reader-refusal.js'
+// A minted cadre invitation never names a dashboard as a member to redeem at (edge-reader-members.ts).
+export { excludeEdgeReaderMembers, withoutEdgeReaderMembers, edgeReaderPeerIds, memberAddressPeerId } from './network/edge-reader-members.js'
 export { ElectionsEngine, peekNextElectionTid } from './elections/elections-engine.js'
 export { ElectionEngine } from './election/election-engine.js'
 export type { ElectionSubject } from './election/election-engine.js'

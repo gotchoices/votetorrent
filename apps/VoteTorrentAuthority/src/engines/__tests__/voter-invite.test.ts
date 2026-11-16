@@ -449,3 +449,86 @@ describe("createPairingInvitation (pairing, D-26)", () => {
 		for (const text of [err.message, String(err), JSON.stringify(own)]) expect(windowHits(text, MINT)).toBe(0);
 	});
 });
+
+// 2026-11-13: cadre-core names connected members first, and an officer's phone is connected to its paired browser
+// dashboard, so a voter code listed the browser as a place to redeem. A member whose control-node identify lists
+// the edge-reader marker is dropped from `members`, and the invitation is re-encoded only then.
+describe("minted invitations never name a paired dashboard (edge reader) as a member", () => {
+	const MARKER = "/votetorrent/edge-reader/1.0.0";
+	const OWN = "/dns4/relay.example/tcp/443/wss/p2p/relay/p2p-circuit/p2p/self-peer";
+	const BROWSER = "/dns4/relay.example/tcp/443/wss/p2p/relay/p2p-circuit/p2p/browser-peer";
+	const PHONE = "/dns4/relay.example/tcp/443/wss/p2p/relay/p2p-circuit/p2p/phone-peer";
+	const invite = { key: "inviteKeyA", expiresAt: "2026-11-11T11:26:21.316" };
+	// cadre-core's encoding (`sereus-invite:1.` + base64url JSON), over the real fixture mint with our members.
+	const enc = (inv: unknown) => `sereus-invite:1.${Buffer.from(JSON.stringify(inv)).toString("base64url")}`;
+	const dec = (text: string) => JSON.parse(Buffer.from(text.slice("sereus-invite:1.".length), "base64url").toString());
+	const realInvitation = (members: string[]) => ({ ...dec(MINT), members });
+	function controlNode(edge: string[]) {
+		return {
+			peerStore: {
+				all: async () => [
+					{ id: { toString: () => "browser-peer" }, protocols: edge.includes("browser-peer") ? ["/ipfs/id/1.0.0", MARKER] : ["/ipfs/id/1.0.0"] },
+					{ id: { toString: () => "phone-peer" }, protocols: ["/ipfs/id/1.0.0"] },
+				],
+			},
+		};
+	}
+	function edgeNode(edge: string[], members = [OWN, BROWSER, PHONE]) {
+		const inv = realInvitation(members);
+		const made = fakeNode([SELF.publicKeyB64], { mintResult: { encoded: enc(inv), invitation: inv } });
+		const node = Object.assign(made.node, { getControlNode: jest.fn(() => controlNode(edge)) });
+		return node as unknown as PairingInviteNode & typeof made.node;
+	}
+	const run = async (node: VoterInviteNode, encode: jest.Mock) =>
+		createVoterJoinCode({
+			node,
+			networksEngine: { getFoundingAnchor: jest.fn(async () => ANCHOR) },
+			networkHash: ANCHOR.networkHash,
+			founder: { userId: "officer", signerKey: "officer-key" },
+			encodeInvitation: encode,
+		});
+
+	it("EM-1 a voter code drops the identified dashboard, keeps order, and carries the re-encoded invitation", async () => {
+		const encode = jest.fn(enc);
+		const result = await run(edgeNode(["browser-peer"]), encode);
+		expect(encode).toHaveBeenCalledTimes(1);
+		const passed = encode.mock.calls[0][0] as { members: string[]; invite: unknown };
+		expect(passed.members).toEqual([OWN, PHONE]);
+		expect(passed.invite).toEqual(dec(MINT).invite);
+		const decoded = decodeNetworkJoinCode(result.code);
+		expect(decoded.ok).toBe(true);
+		const carried = decoded.ok ? decoded.code.invitation : "";
+		expect(carried).toBe(encode.mock.results[0].value);
+		expect(dec(carried).members).toEqual([OWN, PHONE]);
+	});
+
+	it("EM-2 with no edge reader identified the minted invitation is used byte-for-byte (no re-encode)", async () => {
+		const encode = jest.fn(() => "never");
+		const result = await run(edgeNode([]), encode);
+		expect(encode).not.toHaveBeenCalled();
+		const decoded = decodeNetworkJoinCode(result.code);
+		expect(decoded.ok && decoded.code.invitation).toBe(enc(realInvitation([OWN, BROWSER, PHONE])));
+	});
+
+	it("EM-3 a node without a control node (or one that throws) mints exactly as before", async () => {
+		const encode = jest.fn(() => "never");
+		const plain = fakeNode([SELF.publicKeyB64], { mintResult: { encoded: MINT, invitation: { invite, members: [OWN, BROWSER] } } }).node;
+		expect(decodeNetworkJoinCode((await run(plain, encode)).code).ok).toBe(true);
+		const throwing = Object.assign(fakeNode([SELF.publicKeyB64], { mintResult: { encoded: MINT, invitation: { invite, members: [OWN, BROWSER] } } }).node, {
+			getControlNode: () => {
+				throw new Error("not started");
+			},
+		});
+		const decoded = decodeNetworkJoinCode((await run(throwing, encode)).code);
+		expect(decoded.ok && decoded.code.invitation).toBe(MINT);
+		expect(encode).not.toHaveBeenCalled();
+	});
+
+	it("EM-4 a browser pairing invitation drops an already-paired dashboard too", async () => {
+		const encode = jest.fn(enc);
+		const out = await createPairingInvitation(edgeNode(["browser-peer"]), { encodeInvitation: encode });
+		expect((encode.mock.calls[0][0] as { members: string[] }).members).toEqual([OWN, PHONE]);
+		expect(out.encoded).toBe(encode.mock.results[0].value);
+		expect(out.inviteKey).toBe(dec(MINT).invite.key);
+	});
+});

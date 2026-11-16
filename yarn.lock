@@ -5887,7 +5887,7 @@ __metadata:
 
 "@serfab/cadre-core@patch:@serfab/cadre-core@npm%3A1.23.0#~/.yarn/patches/@serfab-cadre-core-npm-1.23.0-votetorrent.patch":
   version: 1.23.0
-  resolution: "@serfab/cadre-core@patch:@serfab/cadre-core@npm%3A1.23.0#~/.yarn/patches/@serfab-cadre-core-npm-1.23.0-votetorrent.patch::version=1.23.0&hash=50f87f"
+  resolution: "@serfab/cadre-core@patch:@serfab/cadre-core@npm%3A1.23.0#~/.yarn/patches/@serfab-cadre-core-npm-1.23.0-votetorrent.patch::version=1.23.0&hash=4d7003"
   dependencies:
     "@libp2p/circuit-relay-v2": "npm:^4.2.13"
     "@libp2p/crypto": "npm:^5.1.23"
@@ -5909,7 +5909,7 @@ __metadata:
     debug: "npm:^4.4.3"
     libp2p: "npm:^3.3.11"
     uint8arrays: "npm:^6.1.1"
-  checksum: 10c0/f5b4c7386006d78f995bd1be3cce29bd4ed07520c6f0063a5fa3832b6075fb377a8d80511bc931ccbf38e5e6761c49e71ae2a7c053ef823a194d8108536d2045
+  checksum: 10c0/598828115fc39dec48bdae94cc57e3b048440afed7190cbf9294c4e742f6d3bd2e4dfa79f8b37ecd975ebd1793b528d787af7a028b68d1517b8941acb157ca68
   languageName: node
   linkType: hard
 

@@ -398,6 +398,10 @@ export function CadreNodeProvider({ children }: PropsWithChildren) {
           // waits on an approval that peer cannot give. Reads are unaffected. A peer is refused only on its own
           // identify, so no peer can get another one refused.
           strandCohortRefusal: edgeReaderRefusal.hook,
+          // The same refusal for the CONTROL network (VoteTorrent cadre-core patch): a paired dashboard is a
+          // cadre member and the control cohort is every member, so without it this phone's own control
+          // writes (self-record refresh, StrandPeer) could wait on an unresponsive browser. Reads are unaffected.
+          controlCohortRefusal: edgeReaderRefusal.control,
         }));
 
         // node.start() is inside useEffect — never blocks initial render (D-06 / T-22-03).
