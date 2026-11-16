@@ -1,5 +1,5 @@
 diff --git a/dist/cadre-node.js b/dist/cadre-node.js
-index d414539..68d0e4d 100644
+index 2cc6366..fe51340 100644
 --- a/dist/cadre-node.js
 +++ b/dist/cadre-node.js
 @@ -60,6 +60,9 @@ import { createMembershipConnectionGater, UnauthorizedReservationBudget } from '
@@ -210,7 +210,7 @@ index d414539..68d0e4d 100644
      /**
       * The local strand instance's dialable strand-network multiaddrs for the
       * strand-addr RPC, ordered signaling-first (reusing the control node's
-@@ -10474,7 +10599,8 @@ export class CadreNode {
+@@ -10501,7 +10626,8 @@ export class CadreNode {
              // Overrides any caller-supplied hook, exactly like partyId/cadrePeerAddrs: only
              // this node can say which strand-network addresses it is actually listening on,
              // and a wrong answer here seeds a joiner's mesh with addresses that reach nobody.
@@ -691,7 +691,7 @@ index 0000000..51c8363
 +    };
 +}
 diff --git a/dist/strand-instance-manager.d.ts b/dist/strand-instance-manager.d.ts
-index 24825b6..1002435 100644
+index a92b730..32bb27f 100644
 --- a/dist/strand-instance-manager.d.ts
 +++ b/dist/strand-instance-manager.d.ts
 @@ -10,6 +10,7 @@ import type { PartyStrandPeer, PartyStrandPeerSource } from './strand-party-peer
@@ -722,7 +722,7 @@ index 24825b6..1002435 100644
       * Tuning for the CLOSED-strand revoked-peer gate
       * ({@link StrandRevocationEnforcer}), forwarded from
 diff --git a/dist/strand-instance-manager.js b/dist/strand-instance-manager.js
-index 6102a89..f48611c 100644
+index bfe6c71..f277d09 100644
 --- a/dist/strand-instance-manager.js
 +++ b/dist/strand-instance-manager.js
 @@ -21,9 +21,47 @@ import { superviseRelayReservation } from './relay-reservation.js';
@@ -773,7 +773,7 @@ index 6102a89..f48611c 100644
  /**
   * How often a joining launch that could not build its database, because no seed peer had
   * answered, retries the build on its running libp2p node
-@@ -534,6 +572,15 @@ export class StrandInstanceManager {
+@@ -542,6 +580,15 @@ export class StrandInstanceManager {
                  ? { connectionGater: config.network.connectionGater }
                  : {};
          const reactivityOption = strandCohortTopicOption(config.reactivity, strandId);
@@ -789,7 +789,7 @@ index 6102a89..f48611c 100644
          if (reactivityOption.cohortTopic) {
              log('strand %s: change notifications on', strandId);
          }
-@@ -656,11 +703,40 @@ export class StrandInstanceManager {
+@@ -664,11 +711,40 @@ export class StrandInstanceManager {
                  // gater plus the fail-closed per-stream revoked-peer gate (closed
                  // strands) — resolved above, before the try.
                  ...revocationGateOptions,
@@ -831,7 +831,7 @@ index 6102a89..f48611c 100644
              // This machine's statement of its peer id in the strand, for the party's control
              // database (`StrandPeer`): a background write that never fails or delays the launch.
              // The seam defers it while a write could fork the party and retries it on cohort
-@@ -867,7 +943,7 @@ export class StrandInstanceManager {
+@@ -875,7 +951,7 @@ export class StrandInstanceManager {
              await strandDb.initialize();
          }
          catch (error) {
@@ -1094,7 +1094,7 @@ index e7ce8f0..4b93ea9 100644
  function strandSelected(strandIds, strandId) {
      if (strandIds === undefined) {
 diff --git a/dist/types.d.ts b/dist/types.d.ts
-index be9aa27..c2be4f0 100644
+index 9b1260f..b1c0f65 100644
 --- a/dist/types.d.ts
 +++ b/dist/types.d.ts
 @@ -4,6 +4,7 @@ import type { IRawStorage, Libp2pConnectionMonitorInit, Libp2pTransports, NoiseC

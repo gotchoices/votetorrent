@@ -210,9 +210,13 @@ describe('no-portal / no-vendor regression (PUB-01 / PUB-02)', () => {
       // LIMIT, a fully connected cohort skips the 10 s read-repair consult; engine id quereus@5.4.0, so every
       // machine moves together). @quereus 5.0.0 -> 5.4.0, forced by the plugins' ^5.4.0 peer range. @serfab
       // stays 1.22.0 (no newer release). db-p2p and quereus patches carried byte-identical.
+      // 2026-11-16: @serfab 1.22.0 -> 1.23.0 (a claimed storage replica whose app schema the strand's rows
+      // refuse falls back to the replica; PendingPartyKeyRotation gains `sealedTo`). cadre-core patch carried
+      // with identical hunk bodies. @optimystic stays 1.27.0 (latest). @quereus HELD at 5.4.0: 5.5.0 removed
+      // the getTypeOrDefault export that @optimystic/quereus-plugin-optimystic 1.27.0 imports.
       const expectedPrefix = pkg === '@serfab/strand-proto'
         ? '0.11.'
-        : pkg.startsWith('@serfab/') ? '1.22.' : '1.27.'
+        : pkg.startsWith('@serfab/') ? '1.23.' : '1.27.'
       expect(
         distinct[0],
         `Resolved ${pkg} version must start with ${expectedPrefix}, got ${distinct[0]}`

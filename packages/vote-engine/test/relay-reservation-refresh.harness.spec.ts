@@ -9,7 +9,7 @@
  * addr, cadre-core's reservation supervisor judges "held" from those local addrs only, so it never
  * re-reserved, and a browser (which reaches phones only through the relay) got NO_RESERVATION.
  *
- * THE FIX (`.yarn/patches/@serfab-cadre-core-npm-1.22.0-votetorrent.patch`, dist/relay-reservation.js):
+ * THE FIX (`.yarn/patches/@serfab-cadre-core-npm-1.23.0-votetorrent.patch`, dist/relay-reservation.js):
  * the supervisor re-sends RESERVE to each relay every `refreshMs` (default 5 min, jittered) while
  * a reservation is held. A repeat RESERVE is a refresh at the relay, so it recreates a dropped one.
  *
