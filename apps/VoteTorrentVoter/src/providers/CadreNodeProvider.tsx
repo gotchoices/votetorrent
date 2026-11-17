@@ -19,7 +19,7 @@ import { relayOnlyAddrs } from '../config/relay-only-addrs';
 import { readJoinBootstrap } from '../engines/join-bootstrap';
 import { openBootstrapPeerStore, openTrustedOwnerStore } from '../engines/rn-durable-slot';
 import { noiseCryptoForNode } from '../engines/noise-crypto-config';
-import { createEdgeReaderRefusal } from '@votetorrent/vote-engine/rn';
+import { createEdgeReaderRefusal, EDGE_READER_PROTOCOL } from '@votetorrent/vote-engine/rn';
 import { CommitDurabilityTracker } from '@votetorrent/vote-engine/rn';
 import { CommitShareProvider } from '../hooks/useCommitShare';
 
@@ -402,6 +402,13 @@ export function CadreNodeProvider({ children }: PropsWithChildren) {
           // cadre member and the control cohort is every member, so without it this phone's own control
           // writes (self-record refresh, StrandPeer) could wait on an unresponsive browser. Reads are unaffected.
           controlCohortRefusal: edgeReaderRefusal.control,
+          // A phone approves nothing (user decision 2026-11-16; doc/architecture.md "Transaction only"): it declares
+          // itself an edge reader, so every machine's refusal keeps it out of their control and strand write cohorts
+          // and coordinator picks, and its strand node withdraws the storage services (cluster/repo) and stores
+          // nothing. Without it a phone asleep held every write in the network for ~20 s per round (db-p2p waits on
+          // every cohort member): release 298 s and publish 77.6 s with the emulator Voter, 1.5 s / 0.18 s without.
+          // Its own writes still land through the authority's machines (voter-approval-exclusion.harness.spec.ts).
+          edgeReaderProtocol: EDGE_READER_PROTOCOL,
         }));
 
         // node.start() is inside useEffect — never blocks initial render (D-06 / T-22-03).

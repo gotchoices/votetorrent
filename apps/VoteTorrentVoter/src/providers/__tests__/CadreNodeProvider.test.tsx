@@ -211,6 +211,16 @@ describe('CadreNodeProvider (Voter) — edge-reader cohort refusal', () => {
 		expect((hook as Hook)('s1')).toBe(refusal);
 	});
 
+	it('ER-V3 the node declares itself an edge reader, so no machine puts this phone in a write cohort', async () => {
+		const {EDGE_READER_PROTOCOL} = require('@votetorrent/vote-engine/rn');
+		await bootProvider();
+		expect(mockConstructedNodes).toHaveLength(1);
+		const opts = mockConstructedNodes[0].receivedOptions as {edgeReaderProtocol?: unknown; profile?: unknown};
+		expect(opts.edgeReaderProtocol).toBe(EDGE_READER_PROTOCOL);
+		expect(opts.edgeReaderProtocol).toBe('/votetorrent/edge-reader/1.0.0');
+		expect(opts.profile).toBe('transaction');
+	});
+
 	it('ER-V2 the recovery rebuild passes the SAME hook', async () => {
 		// Every start() in this fake throws the planted error, so the rebuild's start fails too; the point here is
 		// only that the second node is built with the first node's hook.
