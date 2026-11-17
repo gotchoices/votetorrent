@@ -1,5 +1,5 @@
 diff --git a/dist/cadre-node.js b/dist/cadre-node.js
-index 2cc6366..c92c304 100644
+index 2cc63667b41b994119fedbd9355b25b959a911da..3f3ec97c09092d3b7131ebc96a53a78925dfc10c 100644
 --- a/dist/cadre-node.js
 +++ b/dist/cadre-node.js
 @@ -60,6 +60,11 @@ import { createMembershipConnectionGater, UnauthorizedReservationBudget } from '
@@ -14,7 +14,20 @@ index 2cc6366..c92c304 100644
  import { DelegateAdmissionStore, extractCircuitRelayTargets, dueRelayAnnounces, prunePeerStrandKeys, peerStrandKey, recordRelayRefusals, relaysNotRefusing } from './delegate-admission.js';
  import { relayCircuitAddrs, resolveListenAddrs, resolveTransportOptions, RelayReservationFailedError } from './relay-addrs.js';
  import { selfAddressesChanged } from './self-address-update.js';
-@@ -312,6 +317,11 @@ export class CadreNode {
+@@ -72,6 +77,12 @@ import { summarizeConnectionPaths } from './diagnostics/connection-path.js';
+ import { timedStep } from './timed-step.js';
+ import { describeThrown, toError } from './describe-thrown.js';
+ const log = debug('sereus:cadre:node');
++/**
++ * VoteTorrent patch (control-sibling-dial-concurrency): how many control siblings one reconcile
++ * pass dials at once, unless `network.controlCohort.dialConcurrency` says otherwise (1 = the old serial loop). A handful, so one unanswering sibling no longer holds up the rest, while a
++ * pass still opens only a few relayed dials (relay slots, libp2p dial limits) at a time.
++ */
++const CONTROL_SIBLING_DIAL_CONCURRENCY = 4;
+ const timing = debug('sereus:cadre:timing');
+ /**
+  * How often a running strand re-asks each connected sibling that last answered WITH
+@@ -312,6 +323,11 @@ export class CadreNode {
           * window only ({@link admitRedeemingDevice}); the per-stream gate never does.
           */
          this.admittingDevices = new Map();
@@ -26,7 +39,7 @@ index 2cc6366..c92c304 100644
          this.strandWatcher = null;
          this.seedBootstrapService = null;
          /**
-@@ -340,6 +350,13 @@ export class CadreNode {
+@@ -340,6 +356,13 @@ export class CadreNode {
           * stops conflating control addresses with strand seeding.
           */
          this.strandAddrService = null;
@@ -40,7 +53,7 @@ index 2cc6366..c92c304 100644
          /**
           * Cadre invitation redemption handler (`/sereus/cadre-invite/1.0.0`): a device holding an
           * invitation dials this machine and proves possession; the handler seats the row and
-@@ -959,6 +976,20 @@ export class CadreNode {
+@@ -959,6 +982,20 @@ export class CadreNode {
          /** `connection:close` listener: {@link onControlConnectionClosed} (teardown in {@link stopRecordRefresh}). */
          this.controlConnectionCloseHandler = null;
          this.config = config;
@@ -61,7 +74,7 @@ index 2cc6366..c92c304 100644
          this.hostUnclaimedStrands = config.hostUnclaimedStrands ?? config.profile === 'storage';
          this.strandManager = new StrandInstanceManager();
          this.enrollmentService = new EnrollmentService();
-@@ -1157,6 +1188,25 @@ export class CadreNode {
+@@ -1157,6 +1194,25 @@ export class CadreNode {
              // Before anything else can happen on the node: the quiet period above holds every
              // connection off, so no stream can arrive ahead of the guard.
              this.installControlProtocolGuard(this.controlNode);
@@ -87,7 +100,7 @@ index 2cc6366..c92c304 100644
              // Extract coordinatedRepo from the node (attached by createLibp2pNode)
              const coordinatedRepo = this.controlNode.coordinatedRepo;
              if (!coordinatedRepo) {
-@@ -1283,7 +1333,8 @@ export class CadreNode {
+@@ -1283,7 +1339,8 @@ export class CadreNode {
              // we record an admission grant so our connection gate (and thus our relay
              // server, when enabled) admits it — see delegate-admission.ts.
              this.strandAddrService = new StrandAddrService({
@@ -97,7 +110,7 @@ index 2cc6366..c92c304 100644
                  onDelegateAnnounce: (announcer, strandId, delegate) => this.grantDelegateAdmission(announcer, strandId, delegate),
              });
              await this.strandAddrService.initialize(this.controlNode);
-@@ -1323,6 +1374,19 @@ export class CadreNode {
+@@ -1323,6 +1380,19 @@ export class CadreNode {
                  this.pushFanoutService = this.buildPushFanout(this.config.push);
                  log('Push-wake fan-out enabled (injected notifier)');
              }
@@ -117,7 +130,7 @@ index 2cc6366..c92c304 100644
              this._running = true;
              this.emit('control:connected', undefined);
              timing('[start] total: %dms', Math.round(performance.now() - tTotal));
-@@ -2171,7 +2235,12 @@ export class CadreNode {
+@@ -2171,7 +2241,12 @@ export class CadreNode {
              connectionGater: createMembershipConnectionGater({
                  admitInbound: (remotePeerId) => this.admitInboundControlConnection(remotePeerId),
                  admitRelayReservation: (remotePeerId) => this.admitControlRelayReservation(remotePeerId),
@@ -131,7 +144,7 @@ index 2cc6366..c92c304 100644
              }, network?.connectionGater, ADMISSION_DECISION_TIMEOUT_MS, relayedRequestBudgetMs(network?.linkRoundTripMs)),
              // Fail-closed per-stream authorization for the four Optimystic control-DB
              // protocols — the members-only layer the connection gater's stranger
-@@ -2499,7 +2568,11 @@ export class CadreNode {
+@@ -2499,7 +2574,11 @@ export class CadreNode {
       * ({@link admittingDevices}), which must hold the rows that admit it.
       */
      isControlCohortMember(remotePeerId) {
@@ -144,7 +157,7 @@ index 2cc6366..c92c304 100644
      }
      /**
       * Per-stream authorization for the protocol guard's `members-snapshot` class
-@@ -3084,6 +3157,23 @@ export class CadreNode {
+@@ -3084,6 +3163,23 @@ export class CadreNode {
          // self-update rule is measured against, and a removal landing mid-publish re-reads as
          // absent instead of matching no rows under a 'refreshed'. The record it returns is the
          // one in the row.
@@ -168,7 +181,60 @@ index 2cc6366..c92c304 100644
          const aloneBefore = this.committedAlone();
          const record = await this.controlDatabase.updateSelfPeerRecord(peerId, (current) => this.signSelfRecord(peerId, signingKey, addrs, current));
          if (record === null) {
-@@ -4106,7 +4196,47 @@ export class CadreNode {
+@@ -3860,20 +3956,39 @@ export class CadreNode {
+         //    redial wake (armReconcileWake); a sibling with nothing to dial does not.
+         const dialed = [];
+         let unconnected = false;
+-        for (const sibling of dials) {
+-            if (!this._running || !this.controlNode) {
+-                return { dialed, unconnected: false };
+-            }
+-            if (connected.has(sibling.peerId)) {
+-                continue;
+-            }
+-            const outcome = await this.dialControlSibling(sibling, resolved.get(sibling.peerId) ?? []);
+-            if (outcome === 'connected') {
+-                dialed.push(sibling.peerId);
+-            }
+-            else if (outcome === 'failed') {
+-                unconnected = true;
++        // VoteTorrent patch (control-sibling-dial-concurrency): dial up to
++        // CONTROL_SIBLING_DIAL_CONCURRENCY siblings at once instead of one after another. Each dial
++        // may take its whole relayed budget (21.5 s per address) when the sibling cannot answer (a
++        // paired dashboard browser, a sleeping phone, a stale address), and in a serial loop every
++        // sibling after it waited that long, on every pass. dialControlSibling never throws.
++        const pendingDials = dials.filter((sibling) => !connected.has(sibling.peerId));
++        let nextDial = 0;
++        let stoppedMidPass = false;
++        const dialWorker = async () => {
++            while (nextDial < pendingDials.length) {
++                if (!this._running || !this.controlNode) {
++                    stoppedMidPass = true;
++                    return;
++                }
++                const sibling = pendingDials[nextDial++];
++                const outcome = await this.dialControlSibling(sibling, resolved.get(sibling.peerId) ?? []);
++                if (outcome === 'connected') {
++                    dialed.push(sibling.peerId);
++                }
++                else if (outcome === 'failed') {
++                    unconnected = true;
++                }
+             }
++        };
++        const configuredConcurrency = this.config.network?.controlCohort?.dialConcurrency;
++        // A non-number (e.g. a string from a JSON config) would make Math.min NaN and start no workers, so a pass
++        // would dial nobody and report nothing unconnected: fall back to the default instead.
++        const dialConcurrency = typeof configuredConcurrency === 'number' && Number.isFinite(configuredConcurrency) && configuredConcurrency >= 1
++            ? Math.floor(configuredConcurrency)
++            : CONTROL_SIBLING_DIAL_CONCURRENCY;
++        await Promise.all(Array.from({ length: Math.min(dialConcurrency, pendingDials.length) }, dialWorker));
++        if (stoppedMidPass) {
++            return { dialed, unconnected: false };
+         }
+         log('reconcileControlCohort: pass complete (siblings=%d, selected=%d, dialed=%d, unconnected=%s)', siblings.length, dials.length, dialed.length, unconnected);
+         return { dialed, unconnected };
+@@ -4106,7 +4221,47 @@ export class CadreNode {
          if (booked.length > 0) {
              return booked;
          }
@@ -217,7 +283,7 @@ index 2cc6366..c92c304 100644
      }
      /**
       * A sibling's retained out-of-band dial target (see {@link bootstrapPeerStore}),
-@@ -5292,6 +5422,14 @@ export class CadreNode {
+@@ -5292,6 +5447,14 @@ export class CadreNode {
              await this.strandAddrService.shutdown();
              this.strandAddrService = null;
          }
@@ -232,7 +298,7 @@ index 2cc6366..c92c304 100644
          // Unregister the two redemption handlers, for the same reason.
          if (this.cadreInviteHandler && this.controlNode) {
              await this.cadreInviteHandler.unregister(this.controlNode);
-@@ -6763,6 +6901,11 @@ export class CadreNode {
+@@ -6763,6 +6926,11 @@ export class CadreNode {
              // are on `StartStrandConfig.servingMachines`.
              backfill: this.config.strandBackfill,
              reactivity: this.config.strandReactivity,
@@ -244,7 +310,7 @@ index 2cc6366..c92c304 100644
              revocationEnforcement: this.config.strandRevocationEnforcement,
              membershipReconciliation: this.config.strandMembershipReconciliation,
              onSelfRevoked: (revokedStrandId) => {
-@@ -7429,6 +7572,18 @@ export class CadreNode {
+@@ -7429,6 +7597,18 @@ export class CadreNode {
          }
          log('strand %s address book merged (peers=%d, merged=%d, restamped=%d, skipped=%d, failed=%d, dropped=%d)', strandId, peers, counts.merged, counts.restamped, counts.skipped, counts.failed, addrs.length - grouped);
      }
@@ -263,7 +329,7 @@ index 2cc6366..c92c304 100644
      /**
       * The local strand instance's dialable strand-network multiaddrs for the
       * strand-addr RPC, ordered signaling-first (reusing the control node's
-@@ -9235,7 +9390,27 @@ export class CadreNode {
+@@ -9235,7 +9415,27 @@ export class CadreNode {
          }
          const recipients = this.pendingPartyKeyRecipients(machines, peerId);
          const pendingPartyKeys = await Promise.all(plan.strands.map((strand) => this.mintPendingPartyKey(strand.strandId, recipients)));
@@ -292,7 +358,7 @@ index 2cc6366..c92c304 100644
          if (writes.removedPeer) {
              // Track + loudly flag a delete that committed local-only (security-relevant).
              this.noteControlWrite(peerId, 'remove');
-@@ -10501,7 +10676,8 @@ export class CadreNode {
+@@ -10501,7 +10701,8 @@ export class CadreNode {
              // Overrides any caller-supplied hook, exactly like partyId/cadrePeerAddrs: only
              // this node can say which strand-network addresses it is actually listening on,
              // and a wrong answer here seeds a joiner's mesh with addresses that reach nobody.
@@ -303,7 +369,7 @@ index 2cc6366..c92c304 100644
              // instance's database and this party's `StrandPartyKey` identity, and a wrong
              // issuer here would admit joiners under someone else's authority.
 diff --git a/dist/control-protocol-guard.js b/dist/control-protocol-guard.js
-index 75a6b86..e0c0177 100644
+index 75a6b8695dc7915d3c920b897ee7894a3d0ea3fd..e0c0177b3f8086a43ba2c54db519f4ef29a2046c 100644
 --- a/dist/control-protocol-guard.js
 +++ b/dist/control-protocol-guard.js
 @@ -83,6 +83,10 @@ import { CADRE_INVITE_PROTOCOL } from './cadre-invite-protocol.js';
@@ -331,7 +397,7 @@ index 75a6b86..e0c0177 100644
          [STRAND_ADDR_PROTOCOL, 'members'],
          ...controlDatabaseProtocols(partyId).map((protocol) => [protocol, 'members-snapshot']),
 diff --git a/dist/index.d.ts b/dist/index.d.ts
-index cb41ab3..965990f 100644
+index cb41ab341bcba98dbe2b6750724751f69c9da5ee..965990f2e22bb80310b6e5b8386fcf49c3a696cd 100644
 --- a/dist/index.d.ts
 +++ b/dist/index.d.ts
 @@ -38,6 +38,7 @@ export { StrandInstanceManager, type StartStrandConfig, type ResumeStrandOverrid
@@ -343,7 +409,7 @@ index cb41ab3..965990f 100644
  export { StrandMembershipReconciler, DEFAULT_MEMBERSHIP_RECONCILE_INTERVAL_MS, IDLE_PASSES_BEFORE_ESCALATION, INITIAL_JOIN_RETRY_INTERVAL_MS, type StrandMembershipReconcilerDeps, type StrandMembershipReconciliationConfig, type PendingMembershipInviteSource } from './strand-membership-reconciler.js';
  export { partitionPartyStrandPeers, type PartyStrandPeer, type PartyStrandPeers, type PartyStrandPeerSource, type PendingPartyKeyState } from './strand-party-peers.js';
 diff --git a/dist/index.js b/dist/index.js
-index 8ea8b96..84ac75b 100644
+index 8ea8b96ce5ab47188ce6fd9afa95739d6b6edb1a..84ac75b1df0580c5d6427ff431e1e6687bba0fd8 100644
 --- a/dist/index.js
 +++ b/dist/index.js
 @@ -118,6 +118,8 @@ export { PeerJoinBackfill, DEFAULT_PEER_JOIN_BACKFILL, PEER_JOIN_BACKFILL_WARN_A
@@ -366,7 +432,7 @@ index 8ea8b96..84ac75b 100644
  export { peerRecordSignedPayload, signPeerRecord, verifyPeerRecordSignature, isPeerRecordFresh, isSignalingAddr, orderSignalingFirst, currentMemberTrustPolicy, DEFAULT_PEER_RECORD_MAX_AGE_MS, DEFAULT_PEER_RECORD_HEARTBEAT_MS } from './peer-record.js';
  // Device-token record (self-published, signed FCM/APNs push token — CadrePeer sibling)
 diff --git a/dist/membership-connection-gater.js b/dist/membership-connection-gater.js
-index bf5e1b1..0097a2c 100644
+index bf5e1b1645bcee366418f0dc4cd2051e2cabcb19..0097a2cc80f873ac8af9b9c5df0c252783cbcdba 100644
 --- a/dist/membership-connection-gater.js
 +++ b/dist/membership-connection-gater.js
 @@ -111,6 +111,25 @@
@@ -415,7 +481,7 @@ index bf5e1b1..0097a2c 100644
              try {
                  verdict = await decideInbound(remotePeerId);
 diff --git a/dist/peer-authorization.js b/dist/peer-authorization.js
-index a9f4ccf..e71c858 100644
+index a9f4ccf222788be5e0327c7faa5d81edfc673f26..e71c858019c729069cb8d70251c544405fb654a4 100644
 --- a/dist/peer-authorization.js
 +++ b/dist/peer-authorization.js
 @@ -1,5 +1,6 @@
@@ -427,7 +493,7 @@ index a9f4ccf..e71c858 100644
  import { ed25519PublicKeyB64FromPeerId } from './ed25519-key.js';
  const log = debug('sereus:cadre:peer-authorization');
 diff --git a/dist/peer-record.js b/dist/peer-record.js
-index 221330b..0f78e5c 100644
+index 221330b917cec9d9bef464f5475fabccdc1453a4..0f78e5c558d6e561de6da593eaebab5184e2c667 100644
 --- a/dist/peer-record.js
 +++ b/dist/peer-record.js
 @@ -25,7 +25,8 @@
@@ -441,7 +507,7 @@ index 221330b..0f78e5c 100644
  /**
   * Default freshness ceiling for resolved peer-address records (15 minutes).
 diff --git a/dist/relay-reservation.d.ts b/dist/relay-reservation.d.ts
-index b6bd584..5e8ce6a 100644
+index b6bd584a8ee2ba84a7a8dbf963075c826816fbbe..5e8ce6a7c04e8fdfdabbcaa61752f3f32deba49f 100644
 --- a/dist/relay-reservation.d.ts
 +++ b/dist/relay-reservation.d.ts
 @@ -289,6 +289,11 @@ export declare const DEFAULT_RELAY_CHECK_MS = 5000;
@@ -470,7 +536,7 @@ index b6bd584..5e8ce6a 100644
       * Awaited before every drive AFTER the first — never before the first attempt,
       * which the caller has typically prepared for already. A hook that throws or
 diff --git a/dist/relay-reservation.js b/dist/relay-reservation.js
-index f3f0899..7943d10 100644
+index f3f08999d20dab8126a31cfc3d7f0e361dc51bfa..7943d10285fab6a0c040a23944253bea9b5ef735 100644
 --- a/dist/relay-reservation.js
 +++ b/dist/relay-reservation.js
 @@ -560,14 +560,15 @@ async function requestReservation(node, connected, deadline, signal) {
@@ -671,7 +737,7 @@ index f3f0899..7943d10 100644
          try {
 diff --git a/dist/strand-cohort-refusal.d.ts b/dist/strand-cohort-refusal.d.ts
 new file mode 100644
-index 0000000..124989c
+index 0000000000000000000000000000000000000000..124989c79f1b8357dc77413684f779d940f3efd8
 --- /dev/null
 +++ b/dist/strand-cohort-refusal.d.ts
 @@ -0,0 +1,25 @@
@@ -702,7 +768,7 @@ index 0000000..124989c
 +};
 diff --git a/dist/strand-cohort-refusal.js b/dist/strand-cohort-refusal.js
 new file mode 100644
-index 0000000..51c8363
+index 0000000000000000000000000000000000000000..51c8363f20cd4081c9bdc5dedb209ee10d3e3a19
 --- /dev/null
 +++ b/dist/strand-cohort-refusal.js
 @@ -0,0 +1,66 @@
@@ -773,7 +839,7 @@ index 0000000..51c8363
 +    };
 +}
 diff --git a/dist/strand-instance-manager.d.ts b/dist/strand-instance-manager.d.ts
-index a92b730..32bb27f 100644
+index a92b730ba1356d24ca11f09fd851b208fc66ef0d..32bb27fcc9bc723b392bc418fa869003bcb34728 100644
 --- a/dist/strand-instance-manager.d.ts
 +++ b/dist/strand-instance-manager.d.ts
 @@ -10,6 +10,7 @@ import type { PartyStrandPeer, PartyStrandPeerSource } from './strand-party-peer
@@ -804,12 +870,14 @@ index a92b730..32bb27f 100644
       * Tuning for the CLOSED-strand revoked-peer gate
       * ({@link StrandRevocationEnforcer}), forwarded from
 diff --git a/dist/strand-instance-manager.js b/dist/strand-instance-manager.js
-index bfe6c71..f277d09 100644
+index bfe6c71437e5a7105150b3d4b7178aab22d36c0a..e87237e675154ec17b1d439e0aef4da10c3d2cb1 100644
 --- a/dist/strand-instance-manager.js
 +++ b/dist/strand-instance-manager.js
-@@ -21,9 +21,47 @@ import { superviseRelayReservation } from './relay-reservation.js';
+@@ -20,10 +20,83 @@ import { strandCohortTopicOption } from './strand-reactivity.js';
+ import { superviseRelayReservation } from './relay-reservation.js';
  import { strandRedialTimings, superviseStrandPeerRedial } from './strand-peer-redial.js';
  import { groupAddrsByPeerId } from './peer-addr-book.js';
++import { SelfRelayOnlyError, dialPeerAddrs } from './peer-dial.js'; // VoteTorrent patch (edge-reader-seed-retry)
  import { isCohortUnreachableRead } from './control-read-retry.js';
 +import { causeChain } from './control-retry.js';
 +/**
@@ -839,6 +907,40 @@ index bfe6c71..f277d09 100644
 +const EDGE_READER_GATED_CHECKS = ['denyDialPeer', 'denyDialMultiaddr', 'denyInboundConnection', 'denyOutboundConnection',
 +    'denyInboundEncryptedConnection', 'denyOutboundEncryptedConnection', 'denyInboundUpgradedConnection',
 +    'denyOutboundUpgradedConnection', 'denyInboundRelayedConnection', 'denyOutboundRelayedConnection'];
++/**
++ * VoteTorrent patch (edge-reader-seed-retry): attempts per seed peer, and the step of the linear
++ * backoff between them (2, 4, 6, 8 s), for the dials an edge-reader strand node makes when its
++ * declaration gate opens. Bounded so a seed that is really gone costs a few dials, after which the
++ * strand redial loop owns it as before.
++ */
++const EDGE_READER_SEED_DIAL_ATTEMPTS = 5;
++const EDGE_READER_SEED_DIAL_BACKOFF_MS = 2000;
++async function dialEdgeReaderSeed(node, strandId, seedPeerId, addrs, budget) {
++    for (let attempt = 1; attempt <= EDGE_READER_SEED_DIAL_ATTEMPTS; attempt++) {
++        if (node.status !== 'started') {
++            return;
++        }
++        if (node.getConnections().some((connection) => connection.remotePeer.toString() === seedPeerId)) {
++            return;
++        }
++        try {
++            // Like the strand redial loop: direct addresses before relayed ones, each on its own budget, so a dead
++            // direct address cannot use up the attempt before the relay circuit is tried.
++            await dialPeerAddrs(node, seedPeerId, addrs, budget, `strand ${strandId} edge-reader seed ${seedPeerId}`);
++            log('strand %s: edge-reader seed dial %d/%d to %s connected', strandId, attempt, EDGE_READER_SEED_DIAL_ATTEMPTS, seedPeerId);
++            return;
++        }
++        catch (err) {
++            log('strand %s: edge-reader seed dial %d/%d to %s failed: %s', strandId, attempt, EDGE_READER_SEED_DIAL_ATTEMPTS, seedPeerId, describeThrown(err));
++            if (err instanceof SelfRelayOnlyError) {
++                return;
++            }
++        }
++        if (attempt < EDGE_READER_SEED_DIAL_ATTEMPTS) {
++            await new Promise((resolve) => setTimeout(resolve, EDGE_READER_SEED_DIAL_BACKOFF_MS * attempt));
++        }
++    }
++}
 +function edgeReaderDeclarationGate(base) {
 +    let opened = false;
 +    const gater = { ...(base ?? {}) };
@@ -855,7 +957,7 @@ index bfe6c71..f277d09 100644
  /**
   * How often a joining launch that could not build its database, because no seed peer had
   * answered, retries the build on its running libp2p node
-@@ -542,6 +580,15 @@ export class StrandInstanceManager {
+@@ -542,6 +615,15 @@ export class StrandInstanceManager {
                  ? { connectionGater: config.network.connectionGater }
                  : {};
          const reactivityOption = strandCohortTopicOption(config.reactivity, strandId);
@@ -871,7 +973,7 @@ index bfe6c71..f277d09 100644
          if (reactivityOption.cohortTopic) {
              log('strand %s: change notifications on', strandId);
          }
-@@ -664,11 +711,40 @@ export class StrandInstanceManager {
+@@ -664,11 +746,46 @@ export class StrandInstanceManager {
                  // gater plus the fail-closed per-stream revoked-peer gate (closed
                  // strands) — resolved above, before the try.
                  ...revocationGateOptions,
@@ -903,8 +1005,14 @@ index bfe6c71..f277d09 100644
 +                    }
 +                });
 +                edgeReaderGate.open();
-+                for (const addrs of groupAddrsByPeerId(config.bootstrapNodes ?? []).values()) {
-+                    void node.dial(addrs).catch((err) => log('strand %s: edge-reader seed dial failed: %s', strandId, describeThrown(err)));
++                // VoteTorrent patch (edge-reader-seed-retry): every dial libp2p made while the gate was
++                // closed was refused, so these seed dials are this node's first route to the strand. One
++                // failed attempt (a relay connection cut mid-dial) used to leave the joiner on the strand
++                // redial loop, which backs off at least a relayed dial budget (21.5 s) after a failed
++                // round. Retry each seed a few times, sooner, until it is connected or the node stops.
++                const seedDialBudget = strandRedialTimings(config.network?.linkRoundTripMs).budget;
++                for (const [seedPeerId, addrs] of groupAddrsByPeerId(config.bootstrapNodes ?? [])) {
++                    void dialEdgeReaderSeed(node, strandId, seedPeerId, addrs, seedDialBudget);
 +                }
 +            }
 +            // VoteTorrent patch (strand-cohort-refusal): let the refusal learn from this node's peer
@@ -913,7 +1021,7 @@ index bfe6c71..f277d09 100644
              // This machine's statement of its peer id in the strand, for the party's control
              // database (`StrandPeer`): a background write that never fails or delays the launch.
              // The seam defers it while a write could fork the party and retries it on cohort
-@@ -875,7 +951,7 @@ export class StrandInstanceManager {
+@@ -875,7 +992,7 @@ export class StrandInstanceManager {
              await strandDb.initialize();
          }
          catch (error) {
@@ -924,7 +1032,7 @@ index bfe6c71..f277d09 100644
              await this.discardDatabaseAttempt(strandId, gate);
 diff --git a/dist/strand-observer-protocol.js b/dist/strand-observer-protocol.js
 new file mode 100644
-index 0000000..dbaa40b
+index 0000000000000000000000000000000000000000..dbaa40b31c6ba204ffd158427e9efdbdfa8b6762
 --- /dev/null
 +++ b/dist/strand-observer-protocol.js
 @@ -0,0 +1,178 @@
@@ -1107,7 +1215,7 @@ index 0000000..dbaa40b
 +}
 +//# sourceMappingURL=strand-observer-protocol.js.map
 diff --git a/dist/strand-reactivity.d.ts b/dist/strand-reactivity.d.ts
-index 867a40f..dbed60b 100644
+index 867a40f01d035a433b5bd6390cc50e293e6181ab..dbed60b4c1a73a7036873390ed3a774b255cb40c 100644
 --- a/dist/strand-reactivity.d.ts
 +++ b/dist/strand-reactivity.d.ts
 @@ -1,3 +1,4 @@
@@ -1139,7 +1247,7 @@ index 867a40f..dbed60b 100644
      };
  };
 diff --git a/dist/strand-reactivity.js b/dist/strand-reactivity.js
-index e7ce8f0..4b93ea9 100644
+index e7ce8f042bc50b92843ab2d22cd916b5db5ca5c6..4b93ea92e3e1973927c80f6372431d8702f79ef0 100644
 --- a/dist/strand-reactivity.js
 +++ b/dist/strand-reactivity.js
 @@ -1,3 +1,4 @@
@@ -1176,7 +1284,7 @@ index e7ce8f0..4b93ea9 100644
  function strandSelected(strandIds, strandId) {
      if (strandIds === undefined) {
 diff --git a/dist/types.d.ts b/dist/types.d.ts
-index 9b1260f..8a0a5da 100644
+index 9b1260fbe386c94eebefeea3461229ec137d3c8d..ac7107c8b2a0816ef46e778d3c29cf7584502e3c 100644
 --- a/dist/types.d.ts
 +++ b/dist/types.d.ts
 @@ -4,6 +4,7 @@ import type { IRawStorage, Libp2pConnectionMonitorInit, Libp2pTransports, NoiseC
@@ -1187,7 +1295,19 @@ index 9b1260f..8a0a5da 100644
  import type { StrandRevocationEnforcementConfig } from './strand-revocation-enforcer.js';
  import type { StrandMembershipReconciliationConfig } from './strand-membership-reconciler.js';
  import type { StrandFirstSyncConfig } from './strand-first-sync-gate.js';
-@@ -850,6 +851,46 @@ export interface CadreNodeConfig {
+@@ -601,6 +602,11 @@ export interface NetworkConfig {
+          * relay's and the called machine's admission decisions (`relayedDialBudgetMs`).
+          */
+         perAddressDialTimeoutMs?: number;
++        /**
++         * VoteTorrent patch (control-sibling-dial-concurrency): how many siblings one reconcile pass
++         * dials at once. Default 4; 1 restores the serial loop.
++         */
++        dialConcurrency?: number;
+         /**
+          * How long a running strand waits, after a sibling answers its strand-addr
+          * RPC with addresses, before asking that sibling again for its strand-network
+@@ -850,6 +856,46 @@ export interface CadreNodeConfig {
       * node never gets it.
       */
      strandReactivity?: StrandReactivityConfig;
@@ -1236,7 +1356,7 @@ index 9b1260f..8a0a5da 100644
       * `peer-join-backfill.ts`, wired in `CadreNode.start`): when the control
 diff --git a/dist/verify-memo.js b/dist/verify-memo.js
 new file mode 100644
-index 0000000..d7a9d7c
+index 0000000000000000000000000000000000000000..d7a9d7cbd66bf226f0627328ca53c92fbbd9f3e4
 --- /dev/null
 +++ b/dist/verify-memo.js
 @@ -0,0 +1,29 @@
