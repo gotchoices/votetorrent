@@ -1342,6 +1342,12 @@ async function legRelease (L: LegCtx): Promise<void> {
       { found: khRead !== null, signatureValid: khRead?.signatureValid, treeOk: khRead?.treeCheck?.ok, matches: khRead?.matchesRecomputed, blockCount: khRead?.blockCount, reads: khReads, waitedMs: Date.now() - sKh })
     key('HR5P2-PUBLISH', `first=${first?.outcome} second=${second?.outcome} rows=${rows} khMatches=${khRead?.matchesRecomputed} at=${firstAt}`)
   }
+  // LEAN_POST_PUBLISH_HOLD_MS (2026-11-16): keep the host peers live after the publish so a web page can read the published
+  // results; touching <SEC>/flag-post-publish ends the hold early. Unset = unchanged (no wait).
+  if (Number(process.env.LEAN_POST_PUBLISH_HOLD_MS ?? 0) > 0) {
+    const go = await waitFlag('post-publish', Number(process.env.LEAN_POST_PUBLISH_HOLD_MS))
+    leanNote(`post-publish hold ended flag=${go}`)
+  }
   // N1 (mirrors spike 108 864-867)
   const ids = await listKeyholderIdentities(S_.founderStore)
   const signers = await Promise.all([...khs.map((k: any) => k.userId), ...(PHONE_KH2 ? ((S_ as any).remoteKhs ?? []) : PHONE_KH ? [(S_ as any).remoteKhb] : [])].map((u: string) => S_.founderVault.hasSecret(keyholderSigningKeyAlias(u))))
