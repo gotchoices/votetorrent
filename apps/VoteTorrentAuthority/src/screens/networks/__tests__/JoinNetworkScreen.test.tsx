@@ -710,7 +710,8 @@ describe("B: behaviour", () => {
 		expect(mockNavigate).toHaveBeenCalledTimes(1);
 		expect(mockNavigate).toHaveBeenCalledWith("ProvisionSigningKey", { reason: "first-run" });
 		expect(textById(tr, "join-network-error")).toBe(tx("en", "joinNetworkErrorGeneric"));
-		expect(errSpy.mock.calls).toEqual([["JoinNetworkScreen: select failed:", "Error"]]);
+		// Routed to the ceremony: the designed first-run path, logged as info, never as an error.
+		expect(errSpy.mock.calls).toEqual([]);
 		const result = await mockRun.mock.results[0].value;
 		mockComplete.mockResolvedValueOnce({ trustSaved: true });
 		await refocus();

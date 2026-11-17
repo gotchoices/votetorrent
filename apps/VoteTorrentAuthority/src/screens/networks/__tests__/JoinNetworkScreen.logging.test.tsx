@@ -94,7 +94,12 @@ const REASONS = [
 	"open-failed",
 	"founder-cannot-join",
 ];
-const TOKENS = ["JoinNetworkScreen: join refused:", "JoinNetworkScreen: join failed:", "JoinNetworkScreen: select failed:"];
+const TOKENS = [
+	"JoinNetworkScreen: join refused:",
+	"JoinNetworkScreen: join failed:",
+	"JoinNetworkScreen: select failed:",
+	"JoinNetworkScreen: select routed to the signing ceremony:",
+];
 const FIXTURES = ["v2-1-member", "v2-6-members", "v2-non-ascii-name", "v1-legacy-1-member"] as const;
 
 type Inst = renderer.ReactTestInstance;
@@ -240,11 +245,14 @@ describe("L-1: no console call carries a secret, across every flow", () => {
 			expect(TOKENS).toContain(tag);
 			if (tag === TOKENS[0]) expect([...REASONS]).toContain(arg);
 			else if (tag === TOKENS[1]) expect(arg === "no-engine" || /^[A-Za-z]+$/.test(arg)).toBe(true);
+			else if (tag === TOKENS[3]) expect(/^[a-z-]+$/.test(arg)).toBe(true);
 			else expect(/^[A-Za-z]+$/.test(arg)).toBe(true);
 		}
 		expect(calls.filter((x) => x[0] === TOKENS[0])).toHaveLength(REASONS.length);
 		expect(calls.filter((x) => x[0] === TOKENS[1])).toEqual([[TOKENS[1], "FounderIntentBusyError"]]);
-		expect(calls.filter((x) => x[0] === TOKENS[2])).toEqual([[TOKENS[2], "Error"]]);
+		// A first-run NO_KEY_PROVISIONED select is routed to the ceremony: info, not "select failed".
+		expect(calls.filter((x) => x[0] === TOKENS[2])).toEqual([]);
+		expect(calls.filter((x) => x[0] === TOKENS[3])).toEqual([[TOKENS[3], "no-key-provisioned"]]);
 		// L-4 (collected above): the accessibility tree.
 		expect(treeHits).toEqual([]);
 		// N-1: navigation.
@@ -277,10 +285,11 @@ describe("L-2 / N-1 anti-vacuity", () => {
 });
 
 describe("L-3: the screen's console calls are closed tokens (static)", () => {
-	it("has only literal first arguments, exactly the three tokens, and safe second arguments", () => {
+	it("has only literal first arguments, exactly the three warn/error tokens, and safe second arguments", () => {
 		expect(SOURCE.length).toBeGreaterThan(3000);
 		expect(nonLiteralConsoleFirstArgs(SOURCE)).toEqual([]);
-		expect([...consoleTags(SOURCE)].sort()).toEqual([...TOKENS].sort());
+		// The scanner reads warn/error calls only; the routed-select line is console.info.
+		expect([...consoleTags(SOURCE)].sort()).toEqual(TOKENS.slice(0, 3).sort());
 		const second = [...SOURCE.matchAll(/console\.(?:warn|error)\("[^"]*",\s*([^)]*\)?)\)/g)].map((m) => m[1].trim());
 		expect(second.length).toBeGreaterThanOrEqual(5);
 		for (const arg of second) {

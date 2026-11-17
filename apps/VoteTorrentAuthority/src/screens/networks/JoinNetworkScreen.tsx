@@ -171,17 +171,26 @@ export default function JoinNetworkScreen(): React.JSX.Element {
 			});
 			if (mountedRef.current) setPhase({ kind: "joined", name: networkRef.name, trustSaved });
 		} catch (error) {
-			console.error("JoinNetworkScreen: select failed:", errorClassName(error));
-			if (!mountedRef.current) return;
+			if (!mountedRef.current) {
+				console.error("JoinNetworkScreen: select failed:", errorClassName(error));
+				return;
+			}
 			let message: string | undefined;
+			let routed = false;
 			if (mayRoute) {
 				const outcome = handleSigningRef.current(error);
 				if (outcome.handled && mapDeviceSigningError(error) !== "cancellation") {
 					// The hook has navigated to the ceremony; its CONTINUE pops back here.
 					retryOnFocusRef.current = { node: joinNode, networkRef };
+					routed = true;
 				}
 				message = outcome.message;
 			}
+			// A first-run joiner has no signing key yet (NO_KEY_PROVISIONED): routing it to the ceremony is
+			// the designed path, not a failure, so it is logged as info (2026-11-17: the error line was
+			// mistaken for a broken join on the Redmi).
+			if (routed) console.info("JoinNetworkScreen: select routed to the signing ceremony:", mapDeviceSigningError(error));
+			else console.error("JoinNetworkScreen: select failed:", errorClassName(error));
 			setPhase({ kind: "failed", key: "joinNetworkErrorGeneric", message });
 		}
 	}
