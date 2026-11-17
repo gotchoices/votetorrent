@@ -10,7 +10,7 @@ import { secp256k1 } from '@noble/curves/secp256k1.js';
 import { bytesToHex, hexToBytes } from '@noble/curves/utils.js';
 import { prepareDb } from '../src/database/initialize';
 import { nowCanonicalDatetime, digestToBytes, toCanonicalDatetime, inviteResultSignedBytes, verifyAdHocInviteSignature } from '../src/utils.js';
-import { NetworkEngine } from '../src/network/network-engine';
+import { NetworkEngine, isUserNotFoundError } from '../src/network/network-engine';
 import { MockNetworkEngine } from '../src/network/mock-network-engine';
 import { NetworkCreateAuthorityBuilder } from '../src/network/builders/network-create-authority-builder';
 import { NetworkPinAuthorityBuilder } from '../src/network/builders/network-pin-authority-builder';
@@ -1587,6 +1587,7 @@ describe('NetworkEngine', () => {
 				caught = err;
 			}
 			expect((caught as Error)?.message).to.include('User not found');
+			expect(isUserNotFoundError(caught)).to.equal(true);
 		});
 
 		it('should return a UserEngine for a valid userId', async () => {

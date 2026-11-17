@@ -24,6 +24,7 @@ import { InlineError } from "../../components/InlineError";
 import { isNoNetworkEstablishedError } from "../../engines/engine-factory";
 import { PeerReadUnavailableNotice } from "../../components/PeerReadUnavailableNotice";
 import { classifyPeerReadFailure } from "../../engines/peer-read-unavailable";
+import { isUserNotFoundError } from "../../engines/user-not-found";
 import { OwnerTrustNotice } from "../../components/OwnerTrustNotice";
 import { ToggleRow } from "../../components/ToggleRow";
 import { readRequireOwnerTrust, writeRequireOwnerTrust } from "../../engines/owner-trust-setting";
@@ -367,6 +368,12 @@ export default function SettingsScreen() {
 					setUserEngine(null);
 				}
 			} catch (error) {
+				if (isUserNotFoundError(error)) {
+					// No User row on this network (an invited keyholder has none): the "no user" state.
+					console.info("Settings: no user on this network");
+					setUserEngine(null);
+					return;
+				}
 				console.warn("Failed to get current user engine:", error);
 				reportSettingsError(error);
 				setUserEngine(null);

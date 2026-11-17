@@ -106,3 +106,58 @@ describe("AppProvider.selectNetwork DefaultUser parity", () => {
 		expect(mockDefaultUserSet).not.toHaveBeenCalled();
 	});
 });
+
+// 2026-11-17 Redmi join: the joiner's select ran seconds after its strand attached, open() hit an
+// unreachable cohort, and the join screen showed "select failed" while a restart opened it fine.
+function peerError(): Error {
+	return Object.assign(new Error("Block b1 is unavailable (cohort-unreachable)"), {
+		name: "BlockUnavailableError",
+		reason: "cohort-unreachable",
+	});
+}
+
+describe("openWithPeerRetry", () => {
+	// eslint-disable-next-line @typescript-eslint/no-var-requires
+	const { openWithPeerRetry } = require("../AppProvider");
+	const noSleep = jest.fn(async (_ms: number) => undefined);
+
+	it("R-1: retries a peer-unavailable open after each delay, then resolves", async () => {
+		const open = jest.fn().mockRejectedValueOnce(peerError()).mockRejectedValueOnce(peerError()).mockResolvedValue(undefined);
+		await openWithPeerRetry(open, [5000, 15000], noSleep);
+		expect(open).toHaveBeenCalledTimes(3);
+		expect(noSleep.mock.calls).toEqual([[5000], [15000]]);
+	});
+
+	it("R-2: gives up after the last delay with the peer error", async () => {
+		const open = jest.fn().mockRejectedValue(peerError());
+		await expect(openWithPeerRetry(open, [5000, 15000], noSleep)).rejects.toThrow("cohort-unreachable");
+		expect(open).toHaveBeenCalledTimes(3);
+	});
+
+	it("R-3: control - any other rejection is not retried", async () => {
+		const open = jest.fn().mockRejectedValue(new Error("schema mismatch"));
+		await expect(openWithPeerRetry(open, [5000, 15000], noSleep)).rejects.toThrow("schema mismatch");
+		expect(open).toHaveBeenCalledTimes(1);
+	});
+});
+
+describe("AppProvider.selectNetwork peer-unavailable open", () => {
+	// Real timers: the first retry delay is 5 s.
+	it("R-4: a first open that hits an unreachable cohort is retried and the select succeeds", async () => {
+		mockDefaultUserGet.mockResolvedValue({ name: "Device User" });
+		await renderer.act(async () => {
+			renderer.create(
+				<AppProvider>
+					<Probe />
+				</AppProvider>,
+			);
+			for (let i = 0; i < 10; i++) await Promise.resolve();
+		});
+		mockOpen.mockReset();
+		mockOpen.mockRejectedValueOnce(peerError()).mockResolvedValue(undefined);
+		await renderer.act(async () => {
+			await captured!.selectNetwork({ hash: "h", name: "n", primaryAuthorityDomainName: "d", relays: [] });
+		});
+		expect(mockOpen).toHaveBeenCalledTimes(2);
+	}, 15000);
+});

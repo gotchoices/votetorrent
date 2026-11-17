@@ -71,6 +71,28 @@ function invitationError (code: string, message: string): Error {
   return err
 }
 
+/**
+ * `getUser` found no User row for the id. Expected on a device that joined as an invited keyholder
+ * (it has no User row on that network), so callers can tell it from a failed read. Checked
+ * structurally (`isUserNotFoundError`), not with instanceof, so it survives module duplication.
+ */
+export class UserNotFoundError extends Error {
+  readonly userNotFound = true as const
+
+  constructor () {
+    super('User not found')
+    this.name = 'UserNotFoundError'
+  }
+}
+
+export function isUserNotFoundError (error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    (error as { userNotFound?: unknown }).userNotFound === true
+  )
+}
+
 export class NetworkEngine implements INetworkEngine {
   constructor (
     public readonly init: NetworkReference,
@@ -771,7 +793,7 @@ export class NetworkEngine implements INetworkEngine {
       const userDB = await this.ctx.db
         .prepare('select Id, Name, ImageRef from User where Id = :id')
         .get({ id: userId })
-      if (!userDB) throw new Error('User not found')
+      if (!userDB) throw new UserNotFoundError()
       const activeKeys: UserKey[] = []
       for await (const key of this.ctx.db.eval(
         'select PubKey, Type, Expiration from UserKey where UserId = :id and Expiration > :date',
@@ -798,7 +820,9 @@ export class NetworkEngine implements INetworkEngine {
       }
       return undefined
     } catch (err) {
-      if (err instanceof QuereusError) {
+      if (isUserNotFoundError(err)) {
+        throw err
+      } else if (err instanceof QuereusError) {
         throw new Error(`Quereus error (code ${err.code}): ${err.message}`)
       } else if (err instanceof MisuseError) {
         throw new Error(`API misuse: ${err.message}`)

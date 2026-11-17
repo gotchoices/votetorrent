@@ -118,6 +118,40 @@ describe("SettingsScreen peer-unavailable reads (62-96)", () => {
 		expect(allText(tr)).not.toContain("secret-table");
 	});
 
+	// 2026-11-17 Redmi run: a device that joined as an invited keyholder has no User row, so
+	// getEngine("user") rejects with vote-engine's UserNotFoundError. That is the "no user" state.
+	function engines(userResult: () => Promise<unknown>) {
+		const networkEngine = { getDetails: jest.fn(async () => ({ network: { name: "Net A" } })) };
+		const defaultUserEngine = { get: jest.fn(async () => ({ name: "Device User" })) };
+		return jest.fn(async (name: string) => {
+			if (name === "network") return networkEngine;
+			if (name === "defaultUser") return defaultUserEngine;
+			if (name === "user") return userResult();
+			return null;
+		});
+	}
+
+	it("S-4: a missing User row shows noUserFound, not settingsLoadFailed", async () => {
+		mockGetEngine = engines(async () => {
+			throw Object.assign(new Error("User not found"), { name: "UserNotFoundError", userNotFound: true });
+		});
+		const tr = await renderScreen();
+		expect(mockGetEngine).toHaveBeenCalledWith("user");
+		expect(allText(tr)).toContain("Net A");
+		expect(allText(tr)).toContain("noUserFound");
+		expect(allText(tr)).not.toContain("settingsLoadFailed");
+		expect(noticeCount(tr)).toBe(0);
+	});
+
+	it("S-5: control - any other user-load failure still shows settingsLoadFailed", async () => {
+		mockGetEngine = engines(async () => {
+			throw new Error("Unknown error getting user: disk");
+		});
+		const tr = await renderScreen();
+		expect(mockGetEngine).toHaveBeenCalledWith("user");
+		expect(allText(tr)).toContain("settingsLoadFailed");
+	});
+
 	it("S-3: no-network stays silent", async () => {
 		// eslint-disable-next-line @typescript-eslint/no-var-requires
 		const { NoNetworkEstablishedError } = require("../../../engines/engine-factory");

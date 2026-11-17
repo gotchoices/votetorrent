@@ -378,7 +378,6 @@ const resources = {
 			'confirmation.waitingCancel': 'Stop waiting',
 			'confirmation.notShared':
 				'Your request is saved on this phone only, so far. The election office cannot see it until it reaches the election network, so keep the app open and connected.',
-			'confirmation.error.decisionTimeout': "The election office hasn't answered yet, so tap Try Again after they approve your registration.",
 			'confirmation.error.waitStopped': 'You stopped waiting, so tap Try Again when the election office has approved your registration.',
 			// [AUTHORED] — native-stack header titles for the form-step routes (41-08).
 			formHeaderTitle: 'Register',
@@ -912,7 +911,6 @@ const resources = {
 			'confirmation.waitingCancel': 'Dejar de esperar',
 			'confirmation.notShared':
 				'Por ahora tu solicitud solo está guardada en este teléfono. La oficina electoral no puede verla hasta que llegue a la red electoral, así que mantén la aplicación abierta y conectada.',
-			'confirmation.error.decisionTimeout': 'La oficina electoral aún no ha respondido, así que toca Intentar de nuevo cuando apruebe tu registro.',
 			'confirmation.error.waitStopped': 'Dejaste de esperar, así que toca Intentar de nuevo cuando la oficina electoral haya aprobado tu registro.',
 			formHeaderTitle: 'Registrarse',
 			confirmHeaderTitle: 'Confirmar',

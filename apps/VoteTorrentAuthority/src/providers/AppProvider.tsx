@@ -185,6 +185,30 @@ type BootError = { kind: "peer-unavailable"; reason: string } | { kind: "update-
 const PEER_RETRY_DELAYS_MS = [5000, 15000];
 
 /**
+ * selectNetwork's open, with the same bounded peer-unavailable retry the boot re-attach gives its
+ * open (openWithRetry below). A joiner selects the network seconds after its strand attaches, before
+ * the cohort answers; without the retry the join screen showed "select failed" while a restart opened
+ * the same network fine (2026-11-17 Redmi join). Any other rejection, or the last one, propagates.
+ */
+export async function openWithPeerRetry(
+	open: () => Promise<unknown>,
+	delaysMs: readonly number[] = PEER_RETRY_DELAYS_MS,
+	sleep: (ms: number) => Promise<void> = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+): Promise<void> {
+	for (let attempt = 0; ; attempt++) {
+		try {
+			await open();
+			return;
+		} catch (openError) {
+			const peer = classifyPeerReadFailure(openError);
+			if (attempt >= delaysMs.length || !peer) throw openError;
+			console.info("[select-network] open: peer unavailable, retrying:", peer.reason, attempt + 1);
+			await sleep(delaysMs[attempt]);
+		}
+	}
+}
+
+/**
  * WR-R4-04: how long boot / select waits for the identity repair's READS (the inspection and the
  * other-network checks, which on a joiner can go through an unreachable cohort for minutes). Past
  * it the caller goes on without the repair and the repair is abandoned before it writes anything;
@@ -429,22 +453,34 @@ export function AppProvider({ children }: PropsWithChildren) {
 	// Mirrors the boot re-attach block below so behavior is identical to a restart.
 	const selectNetwork = useCallback(async (networkRef: NetworkReference) => {
 		const factory = engineFactoryRef.current!;
-		const defaultUserEng = await factory.getEngine<IDefaultUserEngine>("defaultUser");
-		const defaultUser = await defaultUserEng.get();
-		let user = await getOrCreateDeviceUser(defaultUser?.name ?? "Device User");
-		// Same D-19 rationale as the boot re-attach block below: Settings reads DefaultUser via
-		// defaultUserEngine.get(), so a first create (which never goes through boot) must persist
-		// one too or Settings reads "No default user found" until a restart. Write only when
-		// absent, and set ONLY { name } -- never overwrite a user's edited name.
-		if (defaultUser === undefined) {
-			await defaultUserEng.set({ name: user.name });
+		// Closed-token step for the failure line below: callers log only the error class.
+		let step = "default-user";
+		try {
+			const defaultUserEng = await factory.getEngine<IDefaultUserEngine>("defaultUser");
+			const defaultUser = await defaultUserEng.get();
+			step = "device-user";
+			let user = await getOrCreateDeviceUser(defaultUser?.name ?? "Device User");
+			// Same D-19 rationale as the boot re-attach block below: Settings reads DefaultUser via
+			// defaultUserEngine.get(), so a first create (which never goes through boot) must persist
+			// one too or Settings reads "No default user found" until a restart. Write only when
+			// absent, and set ONLY { name } -- never overwrite a user's edited name.
+			if (defaultUser === undefined) {
+				await defaultUserEng.set({ name: user.name });
+			}
+			factory.setCurrentUser(user);
+			// open() is cache-first (D-06): a just-created network hits the cache; a recent
+			// network re-attaches. It also writes networkRef to the recentNetworks list.
+			step = "open";
+			const networksEngine = factory.getNetworksEngine();
+			await openWithPeerRetry(() => networksEngine.open(networkRef, user));
+			step = "network-engine";
+			await factory.getEngine("network", networkRef);
+			step = "identity-repair";
+			user = (await repairForkedIdentityAfterOpen(factory, networkRef, user)) ?? user;
+		} catch (error) {
+			console.warn("[select-network] failed:", step, classifyPeerReadFailure(error)?.reason ?? "other");
+			throw error;
 		}
-		factory.setCurrentUser(user);
-		// open() is cache-first (D-06): a just-created network hits the cache; a recent
-		// network re-attaches. It also writes networkRef to the recentNetworks list.
-		await factory.getNetworksEngine().open(networkRef, user);
-		await factory.getEngine("network", networkRef);
-		user = (await repairForkedIdentityAfterOpen(factory, networkRef, user)) ?? user;
 		setHasNetwork(true);
 	}, [setHasNetwork]);
 

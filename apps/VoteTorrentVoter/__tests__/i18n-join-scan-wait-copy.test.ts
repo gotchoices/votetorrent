@@ -37,7 +37,6 @@ const EXPECTED_JOIN: readonly Row[] = [
 const EXPECTED_REGISTRATION: readonly Row[] = [
 	['confirmation.waiting', 'Waiting for the election office to approve your registration, so keep this screen open.', 'Esperando a que la oficina electoral apruebe tu registro, así que mantén esta pantalla abierta.'],
 	['confirmation.waitingCancel', 'Stop waiting', 'Dejar de esperar'],
-	['confirmation.error.decisionTimeout', "The election office hasn't answered yet, so tap Try Again after they approve your registration.", 'La oficina electoral aún no ha respondido, así que toca Intentar de nuevo cuando apruebe tu registro.'],
 	['confirmation.error.waitStopped', 'You stopped waiting, so tap Try Again when the election office has approved your registration.', 'Dejaste de esperar, así que toca Intentar de nuevo cuando la oficina electoral haya aprobado tu registro.'],
 ];
 
@@ -46,7 +45,6 @@ const FAILURE_KEYS: readonly (readonly [string, string])[] = [
 	['join', 'notJoinCode'],
 	['join', 'error.invitationUsedUp'],
 	['join', 'scanNotJoinCode'],
-	['registration', 'confirmation.error.decisionTimeout'],
 	['registration', 'confirmation.error.waitStopped'],
 ];
 
@@ -80,11 +78,11 @@ const ALL: readonly (readonly [string, Row])[] = [
 ];
 
 describe('Voter scan, join-failure and registration-wait copy contract', () => {
-	it('(a) the tables have 19 and 4 distinct keys', () => {
+	it('(a) the tables have 19 and 3 distinct keys', () => {
 		expect(new Set(EXPECTED_JOIN.map((r) => r[0])).size).toBe(19);
 		expect(EXPECTED_JOIN).toHaveLength(19);
-		expect(new Set(EXPECTED_REGISTRATION.map((r) => r[0])).size).toBe(4);
-		expect(EXPECTED_REGISTRATION).toHaveLength(4);
+		expect(new Set(EXPECTED_REGISTRATION.map((r) => r[0])).size).toBe(3);
+		expect(EXPECTED_REGISTRATION).toHaveLength(3);
 	});
 
 	describe('(b) every key resolves to its exact en and es text', () => {
@@ -212,5 +210,12 @@ describe('Voter scan, join-failure and registration-wait copy contract', () => {
 			expect(found).toHaveLength(2);
 			expect(found).toEqual([`es:join:${EXPECTED_JOIN[3][0]}`, 'es:join:notARealKey64']);
 		});
+	});
+});
+
+// 2026-11-17: the Confirm wait has no deadline any more, so its timeout copy is gone from both locales.
+describe('retired decision-timeout copy', () => {
+	it('confirmation.error.decisionTimeout is no longer declared', () => {
+		expect(SOURCE).not.toContain('confirmation.error.decisionTimeout');
 	});
 });

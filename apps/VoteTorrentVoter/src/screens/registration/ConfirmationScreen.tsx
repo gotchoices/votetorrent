@@ -143,11 +143,12 @@ type ConfirmationNavigationProp = NativeStackNavigationProp<RegistrationStackPar
 const IGNORED_EXPIRATION_PLACEHOLDER = new Date(0).toISOString();
 
 /**
- * 64 D-27: how long the first Confirm press waits for the officer's decision. 180 s, a 2 s poll
- * interval and a 300 s ceiling are the UI-SPEC A3 author's choice (RESEARCH C1). The rehearsal may
- * revise `DECISION_WAIT_DEADLINE_MS` once (64-28), never above `DECISION_WAIT_MAX_MS`.
+ * 64 D-27, revised 2026-11-17: the Confirm press waits for the officer's decision with NO deadline,
+ * polling every 2 s until the officer answers or the voter presses Stop or leaves the screen. The old
+ * 180 s deadline ran out before a busy officer challenged (about 9.5 min on the 2026-11-17 Redmi run),
+ * and each Try Again cost the voter another fingerprint. `DECISION_WAIT_MAX_MS` caps only a caller
+ * that passes a numeric deadline to `pollForNotice`.
  */
-export const DECISION_WAIT_DEADLINE_MS = 180_000;
 export const DECISION_POLL_INTERVAL_MS = 2_000;
 export const DECISION_WAIT_MAX_MS = 300_000;
 
@@ -183,7 +184,7 @@ interface DecisionNoticeLike {
 }
 
 /** File-local: the failure classes of the attestation ceremony plus the two ends of the wait. */
-type ConfirmationFailureClass = AttestationFailureClass | 'decision-timeout' | 'wait-stopped';
+type ConfirmationFailureClass = AttestationFailureClass | 'wait-stopped';
 
 /** File-local: one Confirm press. Stop and unmount flip its flags; `wake` ends a sleeping wait at once. */
 interface CeremonyAttempt {
@@ -195,11 +196,12 @@ interface CeremonyAttempt {
 /**
  * Waits until a notice for `requestId` reaches one of `terminalStatuses` (64 D-27), forwarding the
  * cursor between reads. The first read is immediate; each later read follows a sleep of at most
- * `DECISION_POLL_INTERVAL_MS`, clamped to the time left. The wait is bounded by wall clock
- * (`options.deadlineMs`, itself capped at `DECISION_WAIT_MAX_MS`; a non-finite or non-positive
- * value falls to the cap) and rejects with `DecisionWaitTimeoutError`, or with
- * `DecisionWaitStoppedError` as soon as `shouldStop()` holds (a notice read after that is
- * discarded). A clock jump past the deadline ends the wait at the next tick with no further read.
+ * `DECISION_POLL_INTERVAL_MS`, clamped to the time left. `options.deadlineMs: null` means no
+ * deadline: the wait ends only on the notice or on `shouldStop()` (the Confirmation screen's mode).
+ * A numeric deadline bounds the wait by wall clock (capped at `DECISION_WAIT_MAX_MS`; a non-finite
+ * or non-positive value falls to the cap) and rejects with `DecisionWaitTimeoutError`; a clock jump
+ * past it ends the wait at the next tick with no further read. Either way the wait rejects with
+ * `DecisionWaitStoppedError` as soon as `shouldStop()` holds (a notice read after that is discarded).
  *
  * Every tick is a fresh `pollDecisions` cursor read, never a cached list. A timeout therefore says
  * nothing about whether the requests were written: they were already staged, and Try Again
@@ -209,12 +211,14 @@ export async function pollForNotice<T extends DecisionNoticeLike>(
 	poll: (sinceCursor?: string) => Promise<T[]>,
 	requestId: string,
 	terminalStatuses: ReadonlySet<string>,
-	options: {now: () => number; sleep: (ms: number) => Promise<void>; deadlineMs: number; shouldStop: () => boolean},
+	options: {now: () => number; sleep: (ms: number) => Promise<void>; deadlineMs: number | null; shouldStop: () => boolean},
 ): Promise<T> {
 	const bound =
-		Number.isFinite(options.deadlineMs) && options.deadlineMs > 0
-			? Math.min(options.deadlineMs, DECISION_WAIT_MAX_MS)
-			: DECISION_WAIT_MAX_MS;
+		options.deadlineMs === null
+			? Infinity
+			: Number.isFinite(options.deadlineMs) && options.deadlineMs > 0
+				? Math.min(options.deadlineMs, DECISION_WAIT_MAX_MS)
+				: DECISION_WAIT_MAX_MS;
 	const deadlineAt = options.now() + bound;
 	let cursor: string | undefined;
 	for (;;) {
@@ -694,7 +698,7 @@ export default function ConfirmationScreen() {
 
 			// (3) Obtain the challenge nonce from a challenge-issued decision notice — never call the
 			// authority's challenge-issuing engine method directly. 64 D-27: wait for the officer's
-			// decision, bounded by wall clock, cancelled by Stop or unmount (UI-SPEC A3).
+			// decision with no deadline (revised 2026-11-17), ended only by Stop or unmount (UI-SPEC A3).
 			step = 'decision-wait';
 			setIsWaiting(true);
 			const decisionNotice = await pollForNotice(
@@ -709,7 +713,7 @@ export default function ConfirmationScreen() {
 							attempt.wake = resolve;
 							decisionWaitClock.sleep(ms).then(resolve, resolve);
 						}),
-					deadlineMs: DECISION_WAIT_DEADLINE_MS,
+					deadlineMs: null,
 					shouldStop: isStopped,
 				},
 			);
@@ -779,11 +783,6 @@ export default function ConfirmationScreen() {
 				return;
 			}
 			// 64 D-27: closed literal tokens only, never an id, nonce or cursor.
-			if (err instanceof Error && err.name === 'DecisionWaitTimeoutError') {
-				console.info('ConfirmationScreen: decision wait: timed-out');
-				setFailureClass('decision-timeout');
-				return;
-			}
 			if (err instanceof Error && err.name === 'DecisionWaitStoppedError') {
 				console.info('ConfirmationScreen: decision wait: stopped');
 				setFailureClass('wait-stopped');
@@ -952,11 +951,9 @@ export default function ConfirmationScreen() {
 						? t('confirmation.error.intakeUnavailable')
 						: failureClass === 'no-election'
 							? t('confirmation.error.noElection')
-							: failureClass === 'decision-timeout'
-								? t('confirmation.error.decisionTimeout')
-								: failureClass === 'wait-stopped'
-									? t('confirmation.error.waitStopped')
-									: null; // includes 'identity-lost': IdentityRecoveryView above, never error copy
+							: failureClass === 'wait-stopped'
+								? t('confirmation.error.waitStopped')
+								: null; // includes 'identity-lost': IdentityRecoveryView above, never error copy
 
 	return (
 		<ScrollView
