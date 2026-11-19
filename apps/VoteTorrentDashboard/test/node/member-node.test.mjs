@@ -30,7 +30,7 @@ import {
 } from '@serfab/cadre-core';
 import { DEFAULT_STRAND_CLUSTER_SIZE } from '@serfab/quereus-plugin-sereus';
 import { openOptimysticWebDb } from '@optimystic/db-p2p-storage-web';
-import { VOTETORRENT_SCHEMA_SQL } from '@votetorrent/vote-engine/browser';
+import { VOTETORRENT_SCHEMA_SQL, registerVoteTorrentFunctions } from '@votetorrent/vote-engine/browser';
 import {
 	LOG_PREFIX,
 	MEMBER_SAPP_CONFIG,
@@ -46,7 +46,7 @@ import {
 	strandNetworkName,
 	validateRelayAddrs,
 } from '../../src/peer/member-node.js';
-import { RepoService, StorageRepo, MemoryRawStorage, buildBlockTransferProtocol, buildSyncProtocol } from '@optimystic/db-p2p';
+import { BlockStorage, RepoService, StorageRepo, MemoryRawStorage, buildBlockTransferProtocol, buildSyncProtocol } from '@optimystic/db-p2p';
 import { streamPair } from '@libp2p/utils';
 import { strandDataProtocols, watchStrandProgress } from '../../src/peer/strand-progress.js';
 
@@ -326,6 +326,10 @@ test('2 configure: keeps the profile, relaxes schema signing, filters to this st
 	assert.equal(cfg.strandClusterSize, MEMBER_STRAND_CLUSTER_SIZE);
 	assert.deepEqual(cfg.strandReactivity, { enabled: true, strandIds: [STRAND], edgeHost: true });
 	assert.equal(cfg.strandReactivity.edgeHost, true);
+	// quereus 5.6 refuses a CHECK calling an unregistered function at CREATE TABLE, and cadre-core applies the sApp
+	// schema inside the strand build: VoteTorrent's functions go in first (patched cadre-core `strandDatabaseSetup`).
+	assert.equal(typeof registerVoteTorrentFunctions, 'function');
+	assert.equal(cfg.strandDatabaseSetup, registerVoteTorrentFunctions);
 	for (const key of ['hostUnclaimedStrands', 'privateKey', 'connectionGater']) {
 		assert.equal(key in cfg, false, `configure must not set ${key}`);
 	}
@@ -461,6 +465,33 @@ test('6 names: memberStorageDbName is per network and scope, fails closed, and t
 	assert.equal(opened[1][0], memberStorageDbName(HASH, '~node-local'));
 	await platform.storage.close();
 	assert.notEqual(platform.storage.rawStorage(STRAND), first, 'close drops the cached proxy');
+});
+
+test('6b commit proofs: the real lazy proxy over real IndexedDB storage carries the four commit-proof methods db-p2p 1.28 calls', async () => {
+	// @optimystic/db-p2p 1.28.0 stores a commit proof once, by message hash, and calls getProofEntry /
+	// saveProofEntry / getCommitProof / saveCommitProof on the storage unconditionally. cadre-core 1.23.0's
+	// lazyRawStorage proxy lacked all four, so BlockStorage.hasBlockProof threw `getProofEntry is not a
+	// function` on this node's storage. The cadre-core yarn patch adds them; this pins it.
+	const hash = 'net-6b';
+	const platform = createMemberPlatform({
+		networkHash: hash,
+		keyStore: new InMemoryKeyStore(),
+		relayAddrs: [RELAY],
+		strandId: STRAND,
+	});
+	const raw = /** @type {any} */ (platform.storage.rawStorage(STRAND));
+	for (const m of ['getProofEntry', 'saveProofEntry', 'getCommitProof', 'saveCommitProof']) {
+		assert.equal(typeof raw[m], 'function', `the proxy forwards ${m}`);
+	}
+	const proof = { messageHash: 'zMemberNode6b', blockIds: ['block-6b'], signatures: [] };
+	await raw.saveBlockProof('block-6b', 1, proof);
+	assert.deepEqual(await raw.getBlockProof('block-6b', 1), proof);
+	assert.deepEqual(await raw.getProofEntry('block-6b', 1), { proofRef: 'zMemberNode6b' });
+	assert.deepEqual(await raw.getCommitProof('zMemberNode6b'), proof);
+	assert.equal(await new BlockStorage(/** @type {any} */ ('block-6b'), raw).hasBlockProof(1), true);
+	assert.equal(await new BlockStorage(/** @type {any} */ ('block-6b'), raw).hasBlockProof(2), false);
+	await platform.storage.close();
+	await deleteMemberStorage(hash);
 });
 
 test('7 relay validation: an empty or non-array list, whitespace, no peer id or a circuit address throw without echoing the entry', async () => {

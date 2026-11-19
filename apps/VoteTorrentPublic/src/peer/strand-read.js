@@ -96,7 +96,7 @@
 
 import { StrandDatabase } from '@serfab/cadre-core';
 import { PUBLIC_SUBSCRIBED_TABLES } from '@votetorrent/web-data/public';
-import { VOTETORRENT_SCHEMA_SQL } from '@votetorrent/vote-engine/browser';
+import { VOTETORRENT_SCHEMA_SQL, registerVoteTorrentFunctions } from '@votetorrent/vote-engine/browser';
 
 /**
  * A strand-read failure naming a table, an option or a limit — NEVER a row
@@ -251,6 +251,9 @@ export async function openStrandReadHandle(options, deps) {
 	const strandDatabase = new StrandDatabaseCtor({
 		strandId,
 		sAppConfig: publicSAppConfig(),
+		// The schema's CHECKs call VoteTorrent's own SQL functions; quereus 5.6 refuses such a CHECK at CREATE
+		// TABLE unless they are registered first (VoteTorrent cadre-core patch: strand-database-setup).
+		databaseSetup: registerVoteTorrentFunctions,
 		libp2pNode: node,
 		coordinatedRepo,
 		// 'o' (open): every VoteTorrent network's control-network strand row is

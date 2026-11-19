@@ -41,7 +41,7 @@ import type { Database } from '@quereus/quereus'
 import type { EdgeReaderRefusal } from '../../src/network/edge-reader-refusal.js'
 import { randomUUID } from 'node:crypto'
 import { VOTETORRENT_SCHEMA_SQL } from '../../src/database/schema-sql.js'
-import { registerDbPlugins, declareViewsInMain } from '../../src/database/initialize.js'
+import { registerDbPlugins, declareViewsInMain, registerVoteTorrentFunctions } from '../../src/database/initialize.js'
 import type { DbFactory } from '../../src/types.js'
 import type { User } from '@votetorrent/vote-core'
 import type { EngineContext } from '../../src/types.js'
@@ -345,6 +345,8 @@ async function attemptBringUp (
       hibernation: { enabled: false },
       profile: 'storage',
       network: { transports: [webSockets()], listenAddrs },
+      // As the Authority and Voter providers: VoteTorrent's SQL functions before the sApp schema applies (quereus 5.6).
+      strandDatabaseSetup: registerVoteTorrentFunctions,
       // 2026-11-13: the tracker's control refusal too, exactly as the Authority provider passes both.
       ...(edgeReaderRefusalModule ? harnessCohortRefusalConfig(edgeReaderRefusalModule.createEdgeReaderRefusal) : {}),
       ...(opts.extraConfig ?? {})
@@ -970,6 +972,7 @@ export async function startHarnessEdgeMember (opts: {
       withholdStrandAddrs: opts.withholdStrandAddrs !== false,
       // 66-28 R-G4: cadre-core declares the marker and drops the storage protocols before any peer connects.
       edgeReaderProtocol,
+      strandDatabaseSetup: registerVoteTorrentFunctions,
       strandReactivity: { enabled: true, strandIds: [opts.strandId], ...(opts.strandReactivity ?? {}) }
     })
   }
@@ -1101,7 +1104,8 @@ export async function startHarnessStranger (
     strandClusterSize: opts?.clusterSize ?? 2,
     hibernation: { enabled: false },
     profile: 'transaction',
-    network: { transports: [webSockets()], listenAddrs: ['/ip4/127.0.0.1/tcp/0/ws'] }
+    network: { transports: [webSockets()], listenAddrs: ['/ip4/127.0.0.1/tcp/0/ws'] },
+    strandDatabaseSetup: registerVoteTorrentFunctions
   } as any)
   const quietLog = (line: string): void => { console.log(`[p2p-harness] stranger ${line}`) }
   try {

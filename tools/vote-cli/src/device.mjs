@@ -200,7 +200,9 @@ export class Device {
         listenAddrs: this.opts.listen ?? ['/ip4/127.0.0.1/tcp/0/ws'],
         // The Voter app publishes relay-circuit addresses only (user decision 2026-10-12).
         ...(transaction ? { inviteAddressResolver: async () => relayOnlyAddrs((nodeRef.current?.getMultiaddrs?.() ?? []).map(String)) } : {})
-      }
+      },
+      // As both apps: VoteTorrent's SQL functions before the sApp schema applies (quereus 5.6 CHECK gate).
+      strandDatabaseSetup: VE.registerVoteTorrentFunctions
     })
     nodeRef.current = this.node
     // identity-owner-key.ts withIdentityOwnerKey: the node's cadre owner key is derived from its

@@ -1,5 +1,5 @@
 diff --git a/dist/src/runtime/emit/dml-executor.js b/dist/src/runtime/emit/dml-executor.js
-index 8cd4e97..c3b27d7 100644
+index 8cd4e977b238b6826d028f5edca101f4dc0c3913..c3b27d75df0612456b5b1184ca9b6dd39f0c74d7 100644
 --- a/dist/src/runtime/emit/dml-executor.js
 +++ b/dist/src/runtime/emit/dml-executor.js
 @@ -653,12 +653,15 @@ export function emitDmlExecutor(plan, ctx) {
@@ -51,7 +51,7 @@ index 8cd4e97..c3b27d7 100644
              writeScope,
          };
 diff --git a/dist/src/runtime/emit/insert.js b/dist/src/runtime/emit/insert.js
-index 0b76a92..5fef457 100644
+index 0b76a9275292239d2405534bd4eff42a8b96097f..5fef4571f854e947aedd7fadd842fc9e525576e6 100644
 --- a/dist/src/runtime/emit/insert.js
 +++ b/dist/src/runtime/emit/insert.js
 @@ -22,8 +22,23 @@ export function emitInsert(plan, ctx) {
@@ -81,7 +81,7 @@ index 0b76a92..5fef457 100644
          for await (const sourceRow of sourceValue) {
              // Convert source row to flat OLD/NEW format
 diff --git a/dist/src/runtime/emit/update.js b/dist/src/runtime/emit/update.js
-index c202892..af52c56 100644
+index c2028920c89b76bf6ca275761b0234d3cb189f33..af52c56c16d7cf8686eb2b6eb554c09cff3a89e8 100644
 --- a/dist/src/runtime/emit/update.js
 +++ b/dist/src/runtime/emit/update.js
 @@ -48,12 +48,18 @@ export function emitUpdate(plan, ctx) {
@@ -124,7 +124,7 @@ index c202892..af52c56 100644
      // so tearing the phase-2 context down does not evict the streaming source slot (the
      // context map is keyed by descriptor identity).
 diff --git a/dist/src/runtime/emit/write-coercion.js b/dist/src/runtime/emit/write-coercion.js
-index 512ab1c..9065049 100644
+index 512ab1ccd1722e8cbba5ce95f52ca410660fa9ae..906504978b692cb4b9b9bcf5dfbee743cf5584d4 100644
 --- a/dist/src/runtime/emit/write-coercion.js
 +++ b/dist/src/runtime/emit/write-coercion.js
 @@ -6,7 +6,26 @@ export function buildWriteCoercionSpec(plan) {
@@ -156,7 +156,7 @@ index 512ab1c..9065049 100644
      return {
          operands: [plan.operand],
 diff --git a/dist/src/runtime/row-constraints.js b/dist/src/runtime/row-constraints.js
-index 26506b8..500c1b5 100644
+index e7ccd27d439adf05c6e62679398ddb8d5f7ecde6..0453db287341fa1c671e155fce241d84962135c3 100644
 --- a/dist/src/runtime/row-constraints.js
 +++ b/dist/src/runtime/row-constraints.js
 @@ -4,6 +4,8 @@ import { ConflictResolution } from '../common/constants.js';
@@ -168,7 +168,7 @@ index 26506b8..500c1b5 100644
  /**
   * The violation message for a failing constraint — single source of truth for the
   * immediate (row-time) and deferred (commit-time) paths, which must report a row
-@@ -227,7 +229,7 @@ async function checkCheckConstraints(rctx, scope, tableSchema, constraintMetadat
+@@ -240,7 +242,7 @@ async function checkCheckConstraints(rctx, scope, tableSchema, constraintMetadat
                  }
                  return result ?? null;
              };
@@ -177,13 +177,10 @@ index 26506b8..500c1b5 100644
              continue;
          }
          // Resolve without a per-row microtask hop (see runtime/async-util.ts).
-@@ -245,4 +247,37 @@ async function checkCheckConstraints(rctx, scope, tableSchema, constraintMetadat
-     }
+@@ -259,3 +261,36 @@ async function checkCheckConstraints(rctx, scope, tableSchema, constraintMetadat
      return { skip: false };
  }
--//# sourceMappingURL=row-constraints.js.map
-\ No newline at end of file
-+//# sourceMappingURL=row-constraints.js.map
+ //# sourceMappingURL=row-constraints.js.map
 +
 +/**
 + * VoteTorrent patch (datetime-immediate-check-coercion), part 2 of 2.

@@ -18,6 +18,8 @@ export { verifySigP256 } from './database/initialize.js'
 // the P2P-11 replication proof opens its strand handle directly through the DbFactory, so it must
 // run it too — without it, the first signed insert fails `Function not found: SignatureValidP256/3`.
 export { registerDbPlugins } from './database/initialize.js'
+// cadre-core `strandDatabaseSetup`: VoteTorrent's SQL functions on each strand database before its schema applies.
+export { registerVoteTorrentFunctions } from './database/initialize.js'
 export { NetworksEngine } from './networks/networks-engine.js'
 // Spike 100: a voter joins an authority's network from a join code.
 export { NETWORK_JOIN_CODE_PREFIX, NETWORK_JOIN_CODE_PREFIX_V2, CADRE_INVITATION_PREFIX_EXPECTED, encodeNetworkJoinCode, decodeNetworkJoinCode, looksLikeJoinCode } from './networks/join-code.js'

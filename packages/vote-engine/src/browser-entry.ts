@@ -38,6 +38,8 @@ export { UserEngine } from './user/user-engine.js'
 // re-attach gate.
 export {
 	registerDbPlugins,
+	// cadre-core `strandDatabaseSetup` / `StrandDatabase` `databaseSetup` (quereus 5.6 CHECK function gate).
+	registerVoteTorrentFunctions,
 	initDB,
 	prepareDb,
 	isSchemaInitialized,

@@ -57,7 +57,7 @@ import { bytesToHex } from '@noble/curves/utils.js'
 import { NetworksEngine } from '../../../packages/vote-engine/src/networks/networks-engine.js'
 import { decodeNetworkJoinCode } from '../../../packages/vote-engine/src/networks/join-code.js'
 import { joinNetwork, type NetworkJoinStep } from '../../../packages/vote-engine/src/networks/network-join.js'
-import { registerDbPlugins, declareViewsInMain, verifySigP256 } from '../../../packages/vote-engine/src/database/initialize.js'
+import { registerDbPlugins, declareViewsInMain, verifySigP256, registerVoteTorrentFunctions } from '../../../packages/vote-engine/src/database/initialize.js'
 import { NetworkEngine } from '../../../packages/vote-engine/src/network/network-engine.js'
 import { ElectionsEngine } from '../../../packages/vote-engine/src/elections/elections-engine.js'
 import { AssociationEngine } from '../../../packages/vote-engine/src/association/association-engine.js'
@@ -702,7 +702,9 @@ async function main (): Promise<void> {
       ...((tracker) => ({ strandCohortRefusal: tracker.hook, controlCohortRefusal: tracker.control }))(createEdgeReaderRefusal()),
       // mirrors the Voter app (2026-11-16): a phone approves nothing, so it declares itself an edge reader and no machine
       // puts it in a write cohort. HV_EDGE_READER=0 runs the old posture (an approving voter) for an A/B.
-      ...(env.HV_EDGE_READER === '0' ? {} : { edgeReaderProtocol: EDGE_READER_PROTOCOL })
+      ...(env.HV_EDGE_READER === '0' ? {} : { edgeReaderProtocol: EDGE_READER_PROTOCOL }),
+      // mirrors the Voter app: VoteTorrent's SQL functions before the sApp schema applies (quereus 5.6 CHECK gate)
+      strandDatabaseSetup: registerVoteTorrentFunctions
     } as any)
     nodeHolder.current = node
     await node.start()
