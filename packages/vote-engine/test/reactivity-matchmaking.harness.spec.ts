@@ -8,8 +8,10 @@
  *   RM-3 the upstream matchmaking calls the Voter's pool-matchmaking-ports.ts makes. MEASURED 2026-11-02 on
  *        optimystic 1.24: a provider registration needs a cohort threshold signature of DEFAULT_MIN_SIGS (14) of
  *        wantK (16) members, so on two nodes it is refused with CohortBackoffError ("no willing primary") for as
- *        long as we retried (2 min). This test pins that refusal (flip-on-fix): if it starts passing a
- *        registration, the cohort minimum changed and the find-each-other leg below should be enabled.
+ *        long as we retried (2 min). FLIPPED 2026-11-19 on optimystic 1.28.0 (GitHub #67): a topic's cohort now
+ *        admits a registration at a majority of the members it has (one at one machine, two at two or three), so
+ *        RM-3 now asserts the 2-node registration is accepted and runs the find-each-other leg. A cohort below
+ *        minSigs still cannot threshold-sign certificates; registration and query do not need that.
  */
 
 import { expect } from 'chai'
@@ -62,7 +64,7 @@ describeP2PHarness('reactivity + matchmaking on two real strand nodes (strandRea
     }
   })
 
-  it('RM-3 matchmaking on a 2-node cohort: a registration is refused, CohortBackoffError (needs 14 of 16 signers); flip-on-fix to the find-each-other leg', async function () {
+  it('RM-3 matchmaking on a 2-node cohort: a registration is accepted (optimystic 1.28 majority admission), and the two providers find each other', async function () {
     this.timeout(180_000)
     const p2p: any = await import('@optimystic/db-p2p')
     const dbc: any = await import('@optimystic/db-core')
@@ -100,15 +102,14 @@ describeP2PHarness('reactivity + matchmaking on two real strand nodes (strandRea
       }, (ok) => ok, { timeoutMs: 120_000, intervalMs: 1_500, label: `register ${p.selfPeerId.slice(-6)}` })
       return attempts
     }
-    // Flip-on-fix: today every registration on a 2-node cohort is refused (see header).
+    // Flipped on optimystic 1.28.0 (see header): before it, every registration on a 2-node cohort was refused.
     let refusal: unknown
     try {
       await a.session.register(topic, { capabilities: ['vtpool1:from-A'], capacityBudget: 1, contactHint: a.selfPeerId })
     } catch (err) {
       refusal = err
     }
-    expect((refusal as Error | undefined)?.name, 'a 2-node cohort refuses a matchmaking registration (needs 14 signers)').to.equal('CohortBackoffError')
-    if (refusal !== undefined) return
+    expect(refusal, `a 2-node cohort accepts a matchmaking registration (optimystic 1.28 majority admission), got ${(refusal as Error | undefined)?.name}: ${(refusal as Error | undefined)?.message}`).to.equal(undefined)
     const attemptsA = await register(a, 'vtpool1:from-A')
     const attemptsB = await register(b, 'vtpool1:from-B')
     console.log(`[rm-3] register attempts A=${attemptsA} B=${attemptsB}`)

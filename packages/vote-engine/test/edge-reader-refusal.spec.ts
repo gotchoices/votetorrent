@@ -299,7 +299,8 @@ describe('ER-TT strandCohortRefusal + withholdStrandAddrs (installed patched cad
         const unhandle = at('await node.unhandle([`${protocolPrefix}/cluster/1.0.0`, `${protocolPrefix}/repo/1.0.0`]);')
         const handle = at('await node.handle(config.edgeReaderProtocol,')
         const open = at('edgeReaderGate.open();')
-        const dial = at('node.dial(addrs)')
+        // 5aec21fb (edge-reader-seed-retry) replaced the single `node.dial(addrs)` with a retried dial per seed peer.
+        const dial = at('void dialEdgeReaderSeed(node, strandId, seedPeerId, addrs, seedDialBudget);')
         if (!(unhandle >= 0 && handle > unhandle && open > handle && dial > open)) fail.push('unhandle<handle<open<dial')
         if ((block.match(/\bawait\b/g) ?? []).length !== 2) fail.push('only-two-awaits-in-block')
         if (block.includes('cohortRefusal')) fail.push('block-never-names-cohortRefusal')

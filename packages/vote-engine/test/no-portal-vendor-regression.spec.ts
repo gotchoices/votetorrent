@@ -214,9 +214,14 @@ describe('no-portal / no-vendor regression (PUB-01 / PUB-02)', () => {
       // refuse falls back to the replica; PendingPartyKeyRotation gains `sealedTo`). cadre-core patch carried
       // with identical hunk bodies. @optimystic stays 1.27.0 (latest). @quereus HELD at 5.4.0: 5.5.0 removed
       // the getTypeOrDefault export that @optimystic/quereus-plugin-optimystic 1.27.0 imports.
+      // 2026-11-19: @optimystic 1.27.0 -> 1.28.0 (client nodes, a silent member no longer holds up a write,
+      // commit proofs stored once by message hash (a new store; no downgrade), matchmaking on 1-3 machines,
+      // relay reservations renewed; engine id quereus@5.6.0, so every machine moves together). @quereus
+      // 5.4.0 -> 5.6.0, forced by the plugins' ^5.6.0 peer range. @serfab stays 1.23.0 (no newer release);
+      // the cadre-core patch gains the four commit-proof methods on lazyRawStorage, which 1.28.0 calls.
       const expectedPrefix = pkg === '@serfab/strand-proto'
         ? '0.11.'
-        : pkg.startsWith('@serfab/') ? '1.23.' : '1.27.'
+        : pkg.startsWith('@serfab/') ? '1.23.' : '1.28.'
       expect(
         distinct[0],
         `Resolved ${pkg} version must start with ${expectedPrefix}, got ${distinct[0]}`

@@ -26,6 +26,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { PUBLIC_SUBSCRIBED_TABLES } from '@votetorrent/web-data/public';
+import { registerVoteTorrentFunctions } from '@votetorrent/vote-engine/browser';
 import { PeerReplicationError, startPeerReplication } from '../../src/peer/reactivity-bridge.js';
 import {
 	StrandReadError,
@@ -277,6 +278,10 @@ test('openStrandReadHandle passes strandId === networkHash, sAppConfig from publ
 	assert.equal(config.coordinatedRepo, fakeRepo);
 	assert.equal(config.strandType, 'o');
 	assert.equal(config.founder, false);
+	// quereus 5.6 refuses a CHECK calling an unregistered function at CREATE TABLE, and StrandDatabase applies the
+	// sApp schema while it initializes: VoteTorrent's functions go in first (patched cadre-core `databaseSetup`).
+	assert.equal(typeof registerVoteTorrentFunctions, 'function');
+	assert.equal(config.databaseSetup, registerVoteTorrentFunctions);
 });
 
 test('openStrandReadHandle asserts the RESOLVED transactor is "network" and rejects (naming the resolved value) when it is not', async () => {

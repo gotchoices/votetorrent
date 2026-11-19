@@ -8,8 +8,10 @@
  * marker, withdraws its storage protocols, pushes identify at once and withholds its strand addresses) joins
  * through an owner invitation and attaches the strand.
  *
- *   CR-0  hook off (control): once C's own stream puts the cluster protocol back into its record on A and B, the
- *         writer counts C as a write-cohort member or coordinator; insert outcomes are logged (R-G5)
+ *   CR-0  hook off: C's own storage stream no longer puts the cluster protocol back into its record on A and B
+ *         (optimystic 1.28 `filterStorageClaimMerges`), so no node counts C as a write-cohort member or coordinator
+ *         even without the hook; insert outcomes are logged (R-G5). Before 1.28 this leg was the control that
+ *         showed the writer DID count C after the re-merge (cr-diag3/4, 66-09 G-66-W3a).
  *   CR-1  hook on: C is in no sampled cluster or coordinator choice from attach through the 20 s re-entry window
  *         and after the same re-merge; every insert lands; both trackers hold C's strand peer id; C still reads
  *         the revocation row through its own strand database and still wakes on a commit on A
@@ -300,7 +302,13 @@ describeP2PHarness('an attached edge reader stays out of strand write cohorts (c
     return out
   }
 
-  /** C's strand node opens (and aborts) a stream on `protocol` to each target, then the target's record for C must list it. */
+  /**
+   * C's strand node opens (and aborts) a stream on `protocol` to each target. Before optimystic 1.28 libp2p merged
+   * that stream's protocol into the target's record for C, which made C look like a storage peer (the re-merge every
+   * CR leg used to set up). 1.28 drops that recording for the network's repo and cluster protocols
+   * (`filterStorageClaimMerges`, "a request no longer makes the receiver think the sender stores data"), so the
+   * target's record for C must NOT list it: sampled for 3 s after the stream, never present.
+   */
   async function remerge (leg: Leg, protocol: 'cluster' | 'repo', targets: Array<'A' | 'B'>): Promise<void> {
     const proto = `/optimystic/strand-${leg.pn.hash}/${protocol}/1.0.0`
     for (const which of targets) {
@@ -308,15 +316,15 @@ describeP2PHarness('an attached edge reader stays out of strand write cohorts (c
       const addrs = target.getMultiaddrs()
       const stream: any = await leg.cStrandNode.dialProtocol(addrs, proto, { signal: AbortSignal.timeout(ms(20_000)) })
       try { stream.abort(new Error('cohort-refusal remerge')) } catch { /* already closed */ }
-      await pollUntil(
-        async () => {
-          const rec: any = await target.peerStore.get(leg.cStrandNode.peerId)
-          return (rec?.protocols ?? []) as string[]
-        },
-        (p) => p.includes(proto),
-        { timeoutMs: ms(10_000), intervalMs: 50, label: `${leg.label}: node-${which}'s record for C lists ${protocol} (merge not throttled)` }
-      )
-      console.log(`[cr-obs] ${leg.label} remerge ${protocol} on node-${which} confirmed`)
+      const deadline = Date.now() + ms(3_000)
+      let samples = 0
+      while (Date.now() < deadline) {
+        const rec: any = await target.peerStore.get(leg.cStrandNode.peerId).catch(() => undefined)
+        samples++
+        expect((rec?.protocols ?? []) as string[], `${leg.label}: node-${which}'s record for C lists ${protocol} after C's own stream (optimystic 1.28 filters that merge)`).to.not.include(proto)
+        await sleep(50)
+      }
+      console.log(`[cr-obs] ${leg.label} remerge ${protocol} on node-${which}: not recorded (${samples} samples)`)
     }
   }
 
@@ -359,14 +367,14 @@ describeP2PHarness('an attached edge reader stays out of strand write cohorts (c
     return r.ok ? 'ok' : `${r.name}${r.shortfall === true ? '(shortfall)' : ''}`
   }
 
-  it('CR-0 hook off (control): after a stream re-merge the edge reader is counted as a write-cohort member or coordinator on the writer\'s side', async function () {
+  it('CR-0 hook off: after C\'s own storage stream no node counts the edge reader as a write-cohort member or coordinator (optimystic 1.28)', async function () {
     this.timeout(ms(600_000))
-    // R-G5 (user ruling): the control asserts what reproduces every time. With no hook, once C's own stream puts
-    // the cluster protocol back into its record on the writer (node-B, officer B's phone), the writer counts C as a
-    // write-cohort member or coordinator. Whether a given insert then falls short depends on which node
-    // coordinates it and on that node's own view, which C's next identify resets (cr-diag4/5), so the insert
-    // outcome is logged as an observation only. The shortfall itself is evidenced by cr-diag3 and cr-diag4
-    // build 4 (`PromiseShortfallError` with C in the writer's cohort) and by 66-09's G-66-W3a FINDING (pm-diag).
+    // Until optimystic 1.28 this was the control (R-G5): with no hook, once C's own stream put the cluster protocol
+    // back into its record on the writer, the writer counted C as a write-cohort member or coordinator (cr-diag3,
+    // cr-diag4 build 4, 66-09 G-66-W3a). 1.28's `filterStorageClaimMerges` stops that recording, so the same
+    // stimulus now leaves C out of every view even without the hook. The refusal hook stays: it also covers a peer
+    // whose own identify still lists a storage protocol, and machines on an older optimystic. Insert outcomes are
+    // still logged as an observation only.
     const leg = await setupLeg('cr0', { cohortRefusal: false })
     try {
       expect(leg.harness.nodeA.cohortRefusal, 'no tracker on node-A').to.equal(undefined)
@@ -389,7 +397,9 @@ describeP2PHarness('an attached edge reader stays out of strand write cohorts (c
         await sleep(SAMPLE_INTERVAL_MS)
       }
       console.log(`[cr-0] pre-remerge in-view A=${pre.A} B=${pre.B}; after re-merge samples 20: writer (node-B) hits ${writerHits}, any-node hits ${anyHits} (cluster-key hits ${clusterHits}, coordinator hits ${coordHits}) errors ${errors}`)
-      expect(writerHits, 'the writer counts C as a write-cohort member or coordinator after the re-merge').to.be.at.least(1)
+      expect(pre.A || pre.B, 'before the stream C is in no view (R-G4)').to.equal(false)
+      expect(writerHits, 'the writer does not count C after C\'s own storage stream (optimystic 1.28)').to.equal(0)
+      expect(anyHits, 'no node counts C after C\'s own storage stream (optimystic 1.28)').to.equal(0)
 
       // Observation only (R-G5): officer B's inserts with the hook off. Each is bounded: with C silent in its cohort
       // a write can keep retrying for minutes (cr-g4-2 ran past the 600 s leg timeout), and an observation must not

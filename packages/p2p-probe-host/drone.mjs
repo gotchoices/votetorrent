@@ -31,6 +31,7 @@
  */
 import { mkdirSync, readdirSync, readFileSync } from 'node:fs';
 import { CadreNode, decodeCadreInvitation, ed25519KeyPairFromLibp2p } from '@serfab/cadre-core';
+import { registerVoteTorrentFunctions } from '@votetorrent/vote-engine/browser';
 import { resolveStrandRole, strandFounderOption } from './strand-role.mjs';
 import { MemoryRawStorage } from '@optimystic/db-p2p';
 import { webSockets } from '@libp2p/websockets';
@@ -73,6 +74,9 @@ const DRONE_BOOTSTRAP_STRAND_ADDR = process.env.DRONE_BOOTSTRAP_STRAND_ADDR ?? '
 
 const identityKey = await generateKeyPair('Ed25519');
 const node = new CadreNode({
+  // VoteTorrent's SQL functions before the sApp schema applies: quereus 5.6 refuses a CHECK that calls an
+  // unregistered function at CREATE TABLE (VoteTorrent cadre-core patch: strand-database-setup).
+  strandDatabaseSetup: registerVoteTorrentFunctions,
   // Supply the identity key explicitly instead of letting libp2p mint an ephemeral one:
   // `getIdentityOwnerKey()` — which owner genesis needs — THROWS on an ephemeral key
   // ("node identity not resolved"), because that key is internal to libp2p and never

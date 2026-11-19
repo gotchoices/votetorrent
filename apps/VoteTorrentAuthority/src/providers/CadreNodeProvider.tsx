@@ -34,7 +34,7 @@ import { REPLICATION_PROOF_ENABLED } from '../engines/proof-flags.generated';
 import { hostPoolRendezvous } from '../engines/pool-rendezvous-host';
 import { startPairMintHost, type PairMintHost } from '../engines/pair-mint-host';
 import type { PairMintReply, PairMintRequest } from '@votetorrent/vote-engine/rn';
-import { createEdgeReaderRefusal } from '@votetorrent/vote-engine/rn';
+import { createEdgeReaderRefusal, registerVoteTorrentFunctions } from '@votetorrent/vote-engine/rn';
 import { CommitDurabilityTracker } from '@votetorrent/vote-engine/rn';
 import { CommitShareProvider } from '../hooks/useCommitShare';
 
@@ -510,6 +510,10 @@ export function CadreNodeProvider({ children }: PropsWithChildren) {
           // waits on an approval that peer cannot give. Reads are unaffected. A peer is refused only on its own
           // identify, so no peer can get another one refused.
           strandCohortRefusal: edgeReaderRefusal.hook,
+          // VoteTorrent's SQL functions on each strand database before cadre-core applies the schema (patched
+          // cadre-core `strandDatabaseSetup`): quereus 5.6 refuses a CHECK calling an unregistered function at
+          // CREATE TABLE, so registering them after the strand opened (registerDbPlugins) is too late.
+          strandDatabaseSetup: registerVoteTorrentFunctions,
           // The same refusal for the CONTROL network (VoteTorrent cadre-core patch): a paired dashboard is a
           // cadre member, and the control cohort is every member, so without it every control write (a
           // voter's admission, a join code, a record refresh) waited on the browser; with the browser

@@ -19,7 +19,7 @@ import { relayOnlyAddrs } from '../config/relay-only-addrs';
 import { readJoinBootstrap } from '../engines/join-bootstrap';
 import { openBootstrapPeerStore, openTrustedOwnerStore } from '../engines/rn-durable-slot';
 import { noiseCryptoForNode } from '../engines/noise-crypto-config';
-import { createEdgeReaderRefusal, EDGE_READER_PROTOCOL } from '@votetorrent/vote-engine/rn';
+import { createEdgeReaderRefusal, EDGE_READER_PROTOCOL, registerVoteTorrentFunctions } from '@votetorrent/vote-engine/rn';
 import { CommitDurabilityTracker } from '@votetorrent/vote-engine/rn';
 import { CommitShareProvider } from '../hooks/useCommitShare';
 
@@ -398,6 +398,10 @@ export function CadreNodeProvider({ children }: PropsWithChildren) {
           // waits on an approval that peer cannot give. Reads are unaffected. A peer is refused only on its own
           // identify, so no peer can get another one refused.
           strandCohortRefusal: edgeReaderRefusal.hook,
+          // VoteTorrent's SQL functions on each strand database before cadre-core applies the schema (patched
+          // cadre-core `strandDatabaseSetup`): quereus 5.6 refuses a CHECK calling an unregistered function at
+          // CREATE TABLE, so registering them after the strand opened (registerDbPlugins) is too late.
+          strandDatabaseSetup: registerVoteTorrentFunctions,
           // The same refusal for the CONTROL network (VoteTorrent cadre-core patch): a paired dashboard is a
           // cadre member and the control cohort is every member, so without it this phone's own control
           // writes (self-record refresh, StrandPeer) could wait on an unresponsive browser. Reads are unaffected.

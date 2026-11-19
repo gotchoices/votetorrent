@@ -57,6 +57,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { X509Certificate, createHash } from 'node:crypto';
 import { CadreNode, PROVISIONAL_ADMISSION_DEADLINE_MS, PROVISIONAL_ADMISSION_CLOSE_TIMEOUT_MS, ed25519KeyPairFromLibp2p } from '@serfab/cadre-core';
+import { registerVoteTorrentFunctions } from '@votetorrent/vote-engine/browser';
 import { webSockets } from '@libp2p/websockets';
 import { generateKeyPair } from '@libp2p/crypto/keys';
 import { peerIdFromPrivateKey } from '@libp2p/peer-id';
@@ -781,6 +782,9 @@ export async function startGateway(options = {}) {
 
   const identityKey = await generateKeyPair('Ed25519');
   const node = new CadreNode({
+    // VoteTorrent's SQL functions before the sApp schema applies: quereus 5.6 refuses a CHECK that calls an
+    // unregistered function at CREATE TABLE (VoteTorrent cadre-core patch: strand-database-setup).
+    strandDatabaseSetup: registerVoteTorrentFunctions,
     // Explicit privateKey: an ephemeral libp2p key makes getIdentityOwnerKey() throw
     // ("node identity not resolved") — drone.mjs:63-72's stated reason, inherited here.
     privateKey: identityKey,

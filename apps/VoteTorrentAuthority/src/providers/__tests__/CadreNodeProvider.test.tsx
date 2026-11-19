@@ -1207,6 +1207,24 @@ describe('CadreNodeProvider — a first relay reservation that misses its budget
 // out of this phone's strand write cohorts and coordinator choice: the node config carries a sticky
 // `strandCohortRefusal` hook from vote-engine's createEdgeReaderRefusal.
 // ---------------------------------------------------------------------------
+// Quereus 5.6 refuses a CHECK that calls an unregistered function at CREATE TABLE, and cadre-core applies the
+// sApp schema inside the strand build: VoteTorrent's functions must be on that database first (patched
+// cadre-core `strandDatabaseSetup`). Without the key, creating or joining any network fails.
+describe('CadreNodeProvider — strand database setup', () => {
+  it('SDS-A1 the node config carries vote-engine registerVoteTorrentFunctions as strandDatabaseSetup', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { registerVoteTorrentFunctions } = require('@votetorrent/vote-engine/rn');
+    renderProvider();
+    await flushBoot();
+    expect(mockConstructedNodes).toHaveLength(1);
+    expect(typeof registerVoteTorrentFunctions).toBe('function');
+    // This file's module registry can hand the test a second instance of vote-engine/rn, so compare by name.
+    const setup = (mockConstructedNodes[0].receivedOptions as { strandDatabaseSetup?: unknown }).strandDatabaseSetup;
+    expect(typeof setup).toBe('function');
+    expect((setup as { name: string }).name).toBe(registerVoteTorrentFunctions.name);
+  });
+});
+
 describe('CadreNodeProvider — edge-reader cohort refusal', () => {
   type Hook = (strandId: string) => { refuses(peerId: string): boolean; attach?(node: unknown): void } | undefined;
   const hookOf = (n: FakeCadreNode) => (n.receivedOptions as { strandCohortRefusal?: unknown }).strandCohortRefusal;

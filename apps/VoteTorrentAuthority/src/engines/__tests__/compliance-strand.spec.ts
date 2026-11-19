@@ -58,7 +58,7 @@ import { Database, registerPlugin } from '@quereus/quereus';
 // this mock StrandHost must do the same, or quereus >=4.7.0 rejects the schema's
 // `create assertion InviteSlotSigningValid` with "Function not found: digest/1".
 import cryptoPlugin from '@optimystic/quereus-plugin-crypto/plugin';
-import { VOTETORRENT_SCHEMA_SQL } from '@votetorrent/vote-engine/rn';
+import { VOTETORRENT_SCHEMA_SQL, registerVoteTorrentFunctions } from '@votetorrent/vote-engine/rn';
 import {
   createTestNetwork,
   addTestAuthority,
@@ -103,6 +103,9 @@ function makeMockStrandHost() {
       // Step 1: Apply full schema under 'main' (tables + views resolve with bare names).
       // VOTETORRENT_SCHEMA_SQL = 'declare schema main { ... } apply schema main;'
       const db = new Database();
+      // As the real seam (patched cadre-core `strandDatabaseSetup`, which the Authority provider sets): quereus 5.6
+      // refuses a CHECK calling an unregistered function at CREATE TABLE, so VoteTorrent's functions come first.
+      await registerVoteTorrentFunctions(db);
       await registerPlugin(db, cryptoPlugin, { algorithm: 'sha256', encoding: 'base64url' });
       await db.exec(VOTETORRENT_SCHEMA_SQL);
       // Step 2: Declare an empty App schema so hasDeclaredSchema('App') returns true.

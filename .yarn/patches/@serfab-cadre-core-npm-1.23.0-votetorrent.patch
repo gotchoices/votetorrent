@@ -1,5 +1,5 @@
 diff --git a/dist/cadre-node.js b/dist/cadre-node.js
-index 2cc63667b41b994119fedbd9355b25b959a911da..3f3ec97c09092d3b7131ebc96a53a78925dfc10c 100644
+index 2cc63667b41b994119fedbd9355b25b959a911da..29b38b28dbdf1997d1e1f21b40421f514efb989c 100644
 --- a/dist/cadre-node.js
 +++ b/dist/cadre-node.js
 @@ -60,6 +60,11 @@ import { createMembershipConnectionGater, UnauthorizedReservationBudget } from '
@@ -298,7 +298,7 @@ index 2cc63667b41b994119fedbd9355b25b959a911da..3f3ec97c09092d3b7131ebc96a53a789
          // Unregister the two redemption handlers, for the same reason.
          if (this.cadreInviteHandler && this.controlNode) {
              await this.cadreInviteHandler.unregister(this.controlNode);
-@@ -6763,6 +6926,11 @@ export class CadreNode {
+@@ -6763,6 +6926,13 @@ export class CadreNode {
              // are on `StartStrandConfig.servingMachines`.
              backfill: this.config.strandBackfill,
              reactivity: this.config.strandReactivity,
@@ -307,10 +307,12 @@ index 2cc63667b41b994119fedbd9355b25b959a911da..3f3ec97c09092d3b7131ebc96a53a789
 +            ...(this.config.strandCohortRefusal !== undefined && { cohortRefusal: this.config.strandCohortRefusal }),
 +            // VoteTorrent patch (strand-edge-reader-declaration): forwarded only when the embedder set the key.
 +            ...(this.config.edgeReaderProtocol !== undefined && { edgeReaderProtocol: this.config.edgeReaderProtocol }),
++            // VoteTorrent patch (strand-database-setup): forwarded only when the embedder set the key.
++            ...(this.config.strandDatabaseSetup !== undefined && { databaseSetup: this.config.strandDatabaseSetup }),
              revocationEnforcement: this.config.strandRevocationEnforcement,
              membershipReconciliation: this.config.strandMembershipReconciliation,
              onSelfRevoked: (revokedStrandId) => {
-@@ -7429,6 +7597,18 @@ export class CadreNode {
+@@ -7429,6 +7599,18 @@ export class CadreNode {
          }
          log('strand %s address book merged (peers=%d, merged=%d, restamped=%d, skipped=%d, failed=%d, dropped=%d)', strandId, peers, counts.merged, counts.restamped, counts.skipped, counts.failed, addrs.length - grouped);
      }
@@ -329,7 +331,7 @@ index 2cc63667b41b994119fedbd9355b25b959a911da..3f3ec97c09092d3b7131ebc96a53a789
      /**
       * The local strand instance's dialable strand-network multiaddrs for the
       * strand-addr RPC, ordered signaling-first (reusing the control node's
-@@ -9235,7 +9415,27 @@ export class CadreNode {
+@@ -9235,7 +9417,27 @@ export class CadreNode {
          }
          const recipients = this.pendingPartyKeyRecipients(machines, peerId);
          const pendingPartyKeys = await Promise.all(plan.strands.map((strand) => this.mintPendingPartyKey(strand.strandId, recipients)));
@@ -358,7 +360,7 @@ index 2cc63667b41b994119fedbd9355b25b959a911da..3f3ec97c09092d3b7131ebc96a53a789
          if (writes.removedPeer) {
              // Track + loudly flag a delete that committed local-only (security-relevant).
              this.noteControlWrite(peerId, 'remove');
-@@ -10501,7 +10701,8 @@ export class CadreNode {
+@@ -10501,7 +10703,8 @@ export class CadreNode {
              // Overrides any caller-supplied hook, exactly like partyId/cadrePeerAddrs: only
              // this node can say which strand-network addresses it is actually listening on,
              // and a wrong answer here seeds a joiner's mesh with addresses that reach nobody.
@@ -396,6 +398,33 @@ index 75a6b8695dc7915d3c920b897ee7894a3d0ea3fd..e0c0177b3f8086a43ba2c54db519f4ef
          [WAKE_PROTOCOL, 'members'],
          [STRAND_ADDR_PROTOCOL, 'members'],
          ...controlDatabaseProtocols(partyId).map((protocol) => [protocol, 'members-snapshot']),
+diff --git a/dist/edge-node/lazy-raw-storage.js b/dist/edge-node/lazy-raw-storage.js
+index 19493b0955d4af2a37c06c74ce5910a01265e065..66d7f4dec82e848a427507e49af88425b928e8c3 100644
+--- a/dist/edge-node/lazy-raw-storage.js
++++ b/dist/edge-node/lazy-raw-storage.js
+@@ -94,6 +94,22 @@ class LazyRawStorage {
+     async saveBlockProof(blockId, rev, proof) {
+         return (await this.storage()).saveBlockProof(blockId, rev, proof);
+     }
++    // VoteTorrent patch (lazy-raw-storage-commit-proofs): @optimystic/db-p2p 1.28.0 made these four
++    // IRawStorage members required (commit proofs stored once, by message hash; GitHub #60) and calls
++    // them unconditionally (BlockStorage.hasBlockProof, CachedStoreDriver). cadre-core 1.23.0 was built
++    // against 1.27.0, so without them this proxy throws `getProofEntry is not a function`.
++    async getProofEntry(blockId, rev) {
++        return (await this.storage()).getProofEntry(blockId, rev);
++    }
++    async saveProofEntry(blockId, rev, entry) {
++        return (await this.storage()).saveProofEntry(blockId, rev, entry);
++    }
++    async getCommitProof(messageHash) {
++        return (await this.storage()).getCommitProof(messageHash);
++    }
++    async saveCommitProof(messageHash, proof) {
++        return (await this.storage()).saveCommitProof(messageHash, proof);
++    }
+     async getMaterializedBlock(blockId, actionId) {
+         return (await this.storage()).getMaterializedBlock(blockId, actionId);
+     }
 diff --git a/dist/index.d.ts b/dist/index.d.ts
 index cb41ab341bcba98dbe2b6750724751f69c9da5ee..965990f2e22bb80310b6e5b8386fcf49c3a696cd 100644
 --- a/dist/index.d.ts
@@ -838,8 +867,43 @@ index 0000000000000000000000000000000000000000..51c8363f20cd4081c9bdc5dedb209ee1
 +        }
 +    };
 +}
+diff --git a/dist/strand-database.d.ts b/dist/strand-database.d.ts
+index 1ffa0885716efda62b172ac001d5341318fca43a..31f4bc225493076c2be00cd605c7e9cfcafab08d 100644
+--- a/dist/strand-database.d.ts
++++ b/dist/strand-database.d.ts
+@@ -18,6 +18,12 @@ export interface StrandDatabaseConfig extends StrandCommitListeners {
+      * schema is applied, and such a database can never found (see {@link founderSApp}).
+      */
+     sAppConfig?: SAppConfig;
++    /**
++     * VoteTorrent patch (strand-database-setup): called with the strand's fresh `Database`
++     * before anything is registered or applied on it, so the sApp schema's CHECKs can call
++     * the embedder's own functions. A throw fails the build.
++     */
++    databaseSetup?: (db: Database) => void | Promise<void>;
+     /** Libp2p node for the strand network */
+     libp2pNode: Libp2p;
+     /** Coordinated repo from the libp2p node */
+diff --git a/dist/strand-database.js b/dist/strand-database.js
+index 3ed9b93767fd03c083c13d0db4a077ffb10f7d47..091452c3eff5b2bb287d1d3a6e568ab981446db2 100644
+--- a/dist/strand-database.js
++++ b/dist/strand-database.js
+@@ -62,6 +62,13 @@ export class StrandDatabase {
+         const offline = this.config.offline && { journal: await this.config.offline.journal() };
+         const cohortReachability = this.config.offline?.cohortReachability;
+         this.db = new Database();
++        // VoteTorrent patch (strand-database-setup): the embedder's functions must exist before
++        // `connectToStrand` applies the sApp schema. Quereus 5.6 refuses a CHECK that calls an
++        // unregistered function when the table is created, so registering them after the strand
++        // opens (as every embedder could before) now fails the apply. A throw fails the build.
++        if (this.config.databaseSetup) {
++            await this.config.databaseSetup(this.db);
++        }
+         // Delegate to the shared composition. The node is injected, so:
+         //  - `connectToStrand` never creates or stops a node; `StrandInstanceManager`
+         //    owns the node lifecycle;
 diff --git a/dist/strand-instance-manager.d.ts b/dist/strand-instance-manager.d.ts
-index a92b730ba1356d24ca11f09fd851b208fc66ef0d..32bb27fcc9bc723b392bc418fa869003bcb34728 100644
+index a92b730ba1356d24ca11f09fd851b208fc66ef0d..45fd6c952bfc3e2d2bd834e7838f1f6274aed2c8 100644
 --- a/dist/strand-instance-manager.d.ts
 +++ b/dist/strand-instance-manager.d.ts
 @@ -10,6 +10,7 @@ import type { PartyStrandPeer, PartyStrandPeerSource } from './strand-party-peer
@@ -850,7 +914,7 @@ index a92b730ba1356d24ca11f09fd851b208fc66ef0d..32bb27fcc9bc723b392bc418fa869003
  /**
   * How often a joining launch that could not build its database, because no seed peer had
   * answered, retries the build on its running libp2p node
-@@ -150,6 +151,18 @@ export interface StartStrandConfig {
+@@ -150,6 +151,24 @@ export interface StartStrandConfig {
       * rebuilds the node with the same setting.
       */
      reactivity?: StrandReactivityConfig;
@@ -866,11 +930,17 @@ index a92b730ba1356d24ca11f09fd851b208fc66ef0d..32bb27fcc9bc723b392bc418fa869003
 +     * {@link CadreNodeConfig.edgeReaderProtocol}, only when that key is set.
 +     */
 +    edgeReaderProtocol?: string;
++    /**
++     * VoteTorrent patch (strand-database-setup): forwarded from
++     * {@link CadreNodeConfig.strandDatabaseSetup}, only when that key is set. Retained with the
++     * launch config, so a hibernation wake runs it again on the rebuilt database.
++     */
++    databaseSetup?: (db: import('@quereus/quereus').Database) => void | Promise<void>;
      /**
       * Tuning for the CLOSED-strand revoked-peer gate
       * ({@link StrandRevocationEnforcer}), forwarded from
 diff --git a/dist/strand-instance-manager.js b/dist/strand-instance-manager.js
-index bfe6c71437e5a7105150b3d4b7178aab22d36c0a..e87237e675154ec17b1d439e0aef4da10c3d2cb1 100644
+index bfe6c71437e5a7105150b3d4b7178aab22d36c0a..a755f01ceb649310a57e5652fdeeb578ec8846b1 100644
 --- a/dist/strand-instance-manager.js
 +++ b/dist/strand-instance-manager.js
 @@ -20,10 +20,83 @@ import { strandCohortTopicOption } from './strand-reactivity.js';
@@ -1021,7 +1091,16 @@ index bfe6c71437e5a7105150b3d4b7178aab22d36c0a..e87237e675154ec17b1d439e0aef4da1
              // This machine's statement of its peer id in the strand, for the party's control
              // database (`StrandPeer`): a background write that never fails or delays the launch.
              // The seam defers it while a write could fork the party and retries it on cohort
-@@ -875,7 +992,7 @@ export class StrandInstanceManager {
+@@ -834,6 +951,8 @@ export class StrandInstanceManager {
+         const strandDb = new StrandDatabase({
+             strandId,
+             sAppConfig: config.sAppConfig,
++            // VoteTorrent patch (strand-database-setup): absent unless the embedder set the key.
++            ...(config.databaseSetup !== undefined && { databaseSetup: config.databaseSetup }),
+             libp2pNode: node,
+             coordinatedRepo: node.coordinatedRepo,
+             // Founder bootstrap inputs: the strand's type drives which membership rows
+@@ -875,7 +994,7 @@ export class StrandInstanceManager {
              await strandDb.initialize();
          }
          catch (error) {
@@ -1284,7 +1363,7 @@ index e7ce8f042bc50b92843ab2d22cd916b5db5ca5c6..4b93ea92e3e1973927c80f6372431d87
  function strandSelected(strandIds, strandId) {
      if (strandIds === undefined) {
 diff --git a/dist/types.d.ts b/dist/types.d.ts
-index 9b1260fbe386c94eebefeea3461229ec137d3c8d..ac7107c8b2a0816ef46e778d3c29cf7584502e3c 100644
+index 9b1260fbe386c94eebefeea3461229ec137d3c8d..d1ef77d9077b05c1a651bcf9d9b1233d3f33fc84 100644
 --- a/dist/types.d.ts
 +++ b/dist/types.d.ts
 @@ -4,6 +4,7 @@ import type { IRawStorage, Libp2pConnectionMonitorInit, Libp2pTransports, NoiseC
@@ -1307,7 +1386,7 @@ index 9b1260fbe386c94eebefeea3461229ec137d3c8d..ac7107c8b2a0816ef46e778d3c29cf75
          /**
           * How long a running strand waits, after a sibling answers its strand-addr
           * RPC with addresses, before asking that sibling again for its strand-network
-@@ -850,6 +856,46 @@ export interface CadreNodeConfig {
+@@ -850,6 +856,53 @@ export interface CadreNodeConfig {
       * node never gets it.
       */
      strandReactivity?: StrandReactivityConfig;
@@ -1320,6 +1399,13 @@ index 9b1260fbe386c94eebefeea3461229ec137d3c8d..ac7107c8b2a0816ef46e778d3c29cf75
 +     * `strand-cohort-refusal.d.ts`.
 +     */
 +    strandCohortRefusal?: StrandCohortRefusalHook;
++    /**
++     * VoteTorrent patch (strand-database-setup): opt-in. Called with each strand's fresh Quereus
++     * `Database` before the sApp schema is applied (on every build, so again after a hibernation
++     * wake). Register the functions the sApp schema's CHECKs call here: Quereus 5.6 refuses a CHECK
++     * that calls an unregistered function at CREATE TABLE. A throw fails the strand's build.
++     */
++    strandDatabaseSetup?: (db: import('@quereus/quereus').Database) => void | Promise<void>;
 +    /**
 +     * VoteTorrent patch (strand-addr-withhold): `true` (the boolean, nothing else) makes this node
 +     * answer `[]` wherever a sibling or a joiner would seed its strand node from this node's strand

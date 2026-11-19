@@ -157,7 +157,7 @@ async function attemptNoPeerRead(strandId, bootstrapNodes) {
 			// an empty catalog. That is the 'error' outcome class, not a test failure.
 			let handle;
 			try {
-				handle = await openStrandReadHandle({ networkHash: strandId, node: edge.node, coordinatedRepo: edge.node.coordinatedRepo });
+				handle = await openStrandReadHandle({ networkHash: strandId, node: edge.node, coordinatedRepo: /** @type {import('@optimystic/db-p2p').OptimysticNode} */ (edge.node).coordinatedRepo });
 			} catch (err) {
 				const name = err && typeof (/** @type {any} */ (err).name) === 'string' ? /** @type {any} */ (err).name : 'Error';
 				return { kind: /** @type {const} */ ('error'), name };

@@ -195,7 +195,7 @@ test(
 			strandId,
 			sAppConfig: { id: 'org.votetorrent', version: '1.0.0', schema: INNER_DDL, latencyHint: 'interactive' },
 			libp2pNode: edge.node,
-			coordinatedRepo: edge.node.coordinatedRepo,
+			coordinatedRepo: /** @type {import('@optimystic/db-p2p').OptimysticNode} */ (edge.node).coordinatedRepo,
 			strandType: 'o',
 			founder: false,
 		});

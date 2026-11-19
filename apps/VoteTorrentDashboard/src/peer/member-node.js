@@ -48,7 +48,7 @@ import { createEdgeNode as createCadreEdgeNode, lazyRawStorage, isOwnerGrant } f
 import { decodeCadreInvitation, CadreInviteRejectedError, DEFAULT_IDENTITY_KEY_ID } from '@serfab/cadre-core';
 import { DEFAULT_STRAND_CLUSTER_SIZE } from '@serfab/quereus-plugin-sereus';
 import { openOptimysticWebDb, IndexedDBRawStorage, IndexedDBKVStore } from '@optimystic/db-p2p-storage-web';
-import { VOTETORRENT_SCHEMA_SQL } from '@votetorrent/vote-engine/browser';
+import { VOTETORRENT_SCHEMA_SQL, registerVoteTorrentFunctions } from '@votetorrent/vote-engine/browser';
 
 /** The fixed prefix of every log line this module writes. */
 export const LOG_PREFIX = '[vt-dashboard/member-node]';
@@ -533,6 +533,9 @@ export function createMemberPlatform({ networkHash, keyStore, strandId, deps }) 
 				// cadre-core builds the strand node with this marker handled and no storage protocol registered, so
 				// even the first identify a phone receives names this node an edge reader.
 				edgeReaderProtocol: EDGE_READER_PROTOCOL,
+				// The schema's CHECKs call VoteTorrent's own SQL functions; quereus 5.6 refuses such a CHECK at CREATE
+				// TABLE unless they are registered before cadre-core applies it (VoteTorrent cadre-core patch).
+				strandDatabaseSetup: registerVoteTorrentFunctions,
 				...strandSlice,
 			});
 		},

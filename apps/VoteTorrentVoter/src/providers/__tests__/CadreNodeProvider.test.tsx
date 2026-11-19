@@ -196,6 +196,19 @@ describe('CadreNodeProvider (Voter) — native Noise crypto (spike 093)', () => 
 // Strand peers that declared themselves read-only edge readers (the officer's browser dashboard) are kept out
 // of this phone's strand write cohorts and coordinator choice: the node config carries a sticky
 // `strandCohortRefusal` hook from vote-engine's createEdgeReaderRefusal.
+// Quereus 5.6 refuses a CHECK that calls an unregistered function at CREATE TABLE, and cadre-core applies the
+// sApp schema inside the strand build: VoteTorrent's functions must be on that database first (patched
+// cadre-core `strandDatabaseSetup`). Without the key, creating or joining any network fails.
+describe('CadreNodeProvider (Voter) — strand database setup', () => {
+	it('SDS-V1 the node config carries vote-engine registerVoteTorrentFunctions as strandDatabaseSetup', async () => {
+		const {registerVoteTorrentFunctions} = require('@votetorrent/vote-engine/rn');
+		await bootProvider();
+		expect(mockConstructedNodes).toHaveLength(1);
+		expect(typeof registerVoteTorrentFunctions).toBe('function');
+		expect((mockConstructedNodes[0].receivedOptions as {strandDatabaseSetup?: unknown}).strandDatabaseSetup).toBe(registerVoteTorrentFunctions);
+	});
+});
+
 describe('CadreNodeProvider (Voter) — edge-reader cohort refusal', () => {
 	type Hook = (strandId: string) => {refuses(peerId: string): boolean; attach?(node: unknown): void} | undefined;
 	const hookOf = (n: {receivedOptions: unknown}) => (n.receivedOptions as {strandCohortRefusal?: unknown}).strandCohortRefusal;
