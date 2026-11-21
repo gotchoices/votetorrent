@@ -79,6 +79,8 @@ describeP2PHarness('reactivity + matchmaking on two real strand nodes (strandRea
       const serveOwn = p2p.createMatchmakingQueryHandler({ registry: host.registry, addressing: dbc.createTierAddressing(dbc.createRingHash()), sign })
       const transport = p2p.createLibp2pMatchmakingTransport({
         node: raw, fret: raw.services.fret, selfPeerId, key, wantK: 16,
+        // Required since optimystic 1.29: a walk of a topic this node holds a registration for must not replace it.
+        localRegistrations: host.service,
         selfServe: { query: async (q: any) => { const f = await serveOwn(dbc.encodeQueryV1(q), raw.peerId); return f === undefined ? undefined : dbc.decodeQueryReplyV1(f) } }
       })
       const topicId = anchor.topicId(topic.kind, topic.label)
