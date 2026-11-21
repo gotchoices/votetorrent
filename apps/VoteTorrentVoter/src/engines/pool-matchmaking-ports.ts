@@ -88,6 +88,9 @@ export function poolMatchmakingPorts(source: StrandNodeSource | null | undefined
 		fret: fret as Parameters<typeof createLibp2pMatchmakingTransport>[0]['fret'],
 		selfPeerId,
 		key,
+		// Required since optimystic 1.29: a walk of a topic this node holds a provider registration for looks without
+		// registering, so the voter's own pool offer is not replaced and withdrawn when its search ends.
+		localRegistrations: service,
 		wantK: POOL_MATCH_WANT_K,
 		selfServe: {
 			query: async (q: QueryV1) => {

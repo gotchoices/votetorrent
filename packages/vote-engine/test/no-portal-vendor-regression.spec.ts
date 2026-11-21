@@ -219,9 +219,13 @@ describe('no-portal / no-vendor regression (PUB-01 / PUB-02)', () => {
       // relay reservations renewed; engine id quereus@5.6.0, so every machine moves together). @quereus
       // 5.4.0 -> 5.6.0, forced by the plugins' ^5.6.0 peer range. @serfab stays 1.23.0 (no newer release);
       // the cadre-core patch gains the four commit-proof methods on lazyRawStorage, which 1.28.0 calls.
+      // 2026-11-21: @optimystic 1.28.0 -> 1.29.0 (native blobs, IndexedDB version 5, a commit proof crosses
+      // the wire once, reservations of a vanished writer lapse after 5 min; engine id quereus@5.6.1, so every
+      // machine moves together). @quereus 5.6.0 -> 5.6.1, forced by the plugins' ^5.6.1 peer range. @serfab
+      // stays 1.23.0 (no newer release). db-p2p and quereus patch target files byte-identical: renamed only.
       const expectedPrefix = pkg === '@serfab/strand-proto'
         ? '0.11.'
-        : pkg.startsWith('@serfab/') ? '1.23.' : '1.28.'
+        : pkg.startsWith('@serfab/') ? '1.23.' : '1.29.'
       expect(
         distinct[0],
         `Resolved ${pkg} version must start with ${expectedPrefix}, got ${distinct[0]}`
