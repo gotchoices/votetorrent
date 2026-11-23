@@ -56,7 +56,7 @@ export { VOTETORRENT_SCHEMA_VERSION } from './database/schema-version.js'
 // 19-character, no-`Z` canonical datetime format.
 export { H16, toCanonicalDatetime, nowCanonicalDatetime, fromCanonicalDatetime } from './utils.js'
 
-export type { DbFactory, EngineContext } from './types.js'
+export type { DbFactory, DbFactoryOptions, EngineContext } from './types.js'
 
 // The R5 block Merkle tree: SHA-256 over public VoteBlock columns, for the dashboard's recomputation
 // of the root. A Cid that several rows name is resolved by consent authentication (T-65-05-03), with the

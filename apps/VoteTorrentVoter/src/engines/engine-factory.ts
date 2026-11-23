@@ -49,7 +49,7 @@ import {
 	ElectionResultsEngine,
 	TallyPublicationEngine,
 } from '@votetorrent/vote-engine/rn'
-import type { DbFactory, EngineContext, ElectionSubject } from '@votetorrent/vote-engine/rn'
+import type { DbFactory, DbFactoryOptions, EngineContext, ElectionSubject } from '@votetorrent/vote-engine/rn'
 import { rnDbFactory, createStrandDbFactory } from './rn-db-factory'
 import { takeFounderIntent, peekFounderIntent, wrapCreateWithFounding, FounderIntentBusyError } from './founder-intent'
 import { readNetworkBackend, recordNetworkBackend } from './network-backend-store'
@@ -178,7 +178,7 @@ export class EngineFactory {
 		// So the store that CREATED a network is recorded per hash and a solo-created network re-opens
 		// on the solo store. Joined networks are never created here, so they have no record and keep
 		// the node-based dispatch.
-		this.networksEngine = new NetworksEngine(localStorage, async (networkHash: string) => {
+		this.networksEngine = new NetworksEngine(localStorage, async (networkHash: string, dbOptions?: DbFactoryOptions) => {
 			const creating = peekFounderIntent() === 'founding'
 			const useStrand = (): boolean => !!this.node && !(__DEV__ && USE_LOCAL_DB_FACTORY)
 			const openStrand = (): Promise<DbHandle> => {
@@ -190,7 +190,7 @@ export class EngineFactory {
 					signal: this.firstSyncAbort.signal,
 					onAwaitingFirstSync: (id) => this.firstSyncListener?.(id),
 					isJoinedNetwork: async (id) => (await readJoinedNetworkHashes()).includes(id),
-				})(networkHash)
+				})(networkHash, dbOptions)
 			}
 			const finishStrand = async (pending: Promise<DbHandle>): Promise<DbHandle> => {
 				const db = await pending

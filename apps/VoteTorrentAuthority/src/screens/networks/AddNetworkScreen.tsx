@@ -250,8 +250,8 @@ export default function AddNetworkScreen() {
 			// malformed paste can never trigger a biometric/device-key ceremony. Mirrors
 			// NetworksScreen.tsx:36's "parsed/validated BEFORE any use" rule (T-22-09 DoS
 			// mitigation, Security V5) on the JOIN path, extended here to CREATE. The validated
-			// address is still NOT threaded into the rn-db-factory bootstrap-dial call — see
-			// relayAddressValidation.ts's header comment for why that boundary stays closed.
+			// addresses seed the network's strand bootstrap on every later re-attach, not on this
+			// create — see relayAddressValidation.ts's header comment and engines/strand-relay-seed.ts.
 			const relays = normalizeRelayAddresses(relayAddresses);
 			const invalidRelay = findInvalidRelayAddress(relays);
 			if (invalidRelay !== undefined) {

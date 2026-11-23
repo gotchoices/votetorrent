@@ -48,7 +48,7 @@ import {
 	ElectionResultsEngine,
 	TallyPublicationEngine,
 } from '@votetorrent/vote-engine/rn';
-import type { DbFactory, EngineContext, ElectionSubject, StagingOpener, StagingDecisionSigner } from '@votetorrent/vote-engine/rn';
+import type { DbFactory, DbFactoryOptions, EngineContext, ElectionSubject, StagingOpener, StagingDecisionSigner } from '@votetorrent/vote-engine/rn';
 import { createStrandDbFactory } from './rn-db-factory';
 import { wrapCreateWithFounding } from './founder-intent';
 import { isJoinedNetwork } from './joined-networks';
@@ -297,7 +297,7 @@ export class EngineFactory {
 		// node is set and the __DEV__ escape hatch USE_LOCAL_DB_FACTORY is false;
 		// otherwise falls back to the injected rnDbFactory (solo-safe / SC1 no regression).
 		// RESEARCH Pitfall 1: never call createStrandDbFactory(null) — guard on this.node truthy.
-		this.networksEngine = new NetworksEngine(localStorage, async (networkHash: string) => {
+		this.networksEngine = new NetworksEngine(localStorage, async (networkHash: string, dbOptions?: DbFactoryOptions) => {
 			if (this.node && !(__DEV__ && USE_LOCAL_DB_FACTORY)) {
 				// The signal is read AT CALL TIME (not captured once) so a controller
 				// swapped in by a later cancelPendingStrandWaits() is the one this call
@@ -307,7 +307,7 @@ export class EngineFactory {
 					signal: this.firstSyncAbort.signal,
 					onAwaitingFirstSync: (id) => this.firstSyncListener?.(id),
 					isJoinedNetwork: (strandId) => isJoinedNetwork(strandId),
-				})(networkHash);
+				})(networkHash, dbOptions);
 			}
 			this.strandBackedNetworkHashes.delete(networkHash);
 			return this.rnDbFactory(networkHash);

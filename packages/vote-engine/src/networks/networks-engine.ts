@@ -2,7 +2,7 @@ import { Database, MisuseError, QuereusError } from '@quereus/quereus';
 import { NetworkEngine } from '../network/network-engine.js';
 import { H16, fromCanonicalDatetime, nowCanonicalDatetime, toCanonicalDatetime } from '../utils.js';
 import type { EngineContext } from '../types.js';
-import type { DbFactory } from '../types.js';
+import type { DbFactory, DbFactoryOptions } from '../types.js';
 import type {
 	LocalStorage,
 	INetworkEngine,
@@ -1049,7 +1049,12 @@ export class NetworksEngine implements INetworksEngine {
 		// D-13: hard fail — do NOT fall back to new Database() on a factory open error.
 		let db: Database;
 		try {
-			db = await this.dbFactory(ref.hash);
+			// The stored reference's relays ride along so a strand-backed factory can seed the strand
+			// with them. Only this RE-ATTACH path passes them: create, import and join (createContext)
+			// pass none, because a strand founded with a seed it cannot reach never becomes writable
+			// (see the apps' strand-relay-seed.ts).
+			const dbOptions: DbFactoryOptions = { relays: [...(ref.relays ?? [])] };
+			db = await this.dbFactory(ref.hash, dbOptions);
 		} catch (error) {
 			// `cause` keeps the original error's type (e.g. cadre-core's AppSchemaRefusedError, when
 			// this build's schema cannot be applied to the network's data) for the apps' boot-error

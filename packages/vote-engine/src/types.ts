@@ -24,4 +24,17 @@ export interface EngineContext {
  * RN factory lives in the app layer (Plan 02). The default in-memory factory
  * (`async (_hash) => new Database()`) keeps all existing tests passing unchanged.
  */
-export type DbFactory = (networkHash: string) => Promise<Database>
+export type DbFactory = (networkHash: string, options?: DbFactoryOptions) => Promise<Database>
+
+/**
+ * What NetworksEngine knows about the network it is opening, handed to the factory beside the
+ * hash. A factory that has no use for it ignores it (the in-memory and solo LevelDB factories do).
+ */
+export interface DbFactoryOptions {
+  /**
+   * The network's stored relay multiaddrs (`NetworkReference.relays`), passed by `open()`'s
+   * re-attach only — never on create, import or join. The apps' strand-backed factories feed
+   * them into the strand's bootstrap seed.
+   */
+  relays?: readonly string[]
+}

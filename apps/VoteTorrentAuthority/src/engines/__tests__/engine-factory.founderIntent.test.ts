@@ -323,3 +323,26 @@ describe('64-08 D-30: EngineFactory founding window (EF)', () => {
 		});
 	});
 });
+
+describe('EngineFactory forwards the re-attach relays to the strand factory', () => {
+	let info: jest.SpyInstance;
+	beforeEach(() => {
+		info = jest.spyOn(console, 'info').mockImplementation(() => undefined);
+	});
+	afterEach(() => info.mockRestore());
+
+	it('RF-1 DbFactoryOptions.relays reach recordCarriedStrandAddrs for that strand, before addStrand', async () => {
+		const relay = '/dns4/relay.example.org/tcp/443/wss/p2p/12D3KooWLWM7y6gkEz3mNygZ3oERGZT1RyH9XaKQ6Ag3X1RpEXR6';
+		const node = {
+			...makeFakeNode(0),
+			getCarriedStrandAddrs: jest.fn(() => []),
+			recordCarriedStrandAddrs: jest.fn(async () => undefined),
+		};
+		const factory = new EngineFactory(new rn.LocalStorageReact(), jest.fn(async () => ({})));
+		factory.setNode(node);
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		await (factory.getNetworksEngine() as any).dbFactory('relayed', { relays: [relay] });
+		expect(node.recordCarriedStrandAddrs).toHaveBeenCalledWith('relayed', [relay]);
+		expect(node.recordCarriedStrandAddrs.mock.invocationCallOrder[0]).toBeLessThan(node.addStrand.mock.invocationCallOrder[0]);
+	});
+});

@@ -12,7 +12,7 @@ jest.mock('../proof-flags.generated', () => ({
 const mockStrandOpen = jest.fn();
 jest.mock('../rn-db-factory', () => ({
 	rnDbFactory: jest.fn(),
-	createStrandDbFactory: jest.fn(() => (hash: string) => mockStrandOpen(hash)),
+	createStrandDbFactory: jest.fn(() => (hash: string, options?: unknown) => mockStrandOpen(hash, options)),
 }));
 
 jest.mock('@votetorrent/vote-engine/rn', () => {
@@ -97,6 +97,15 @@ describe('EngineFactory network backend (D-98)', () => {
 		factory.setNode(node);
 		const db = (await engine.create('h4')) as {intent: string};
 		expect(db.intent).toBe('founding');
+	});
+
+	it('NB-10 the dispatcher forwards the re-attach relays (DbFactoryOptions) to the strand factory', async () => {
+		const {factory, engine} = build();
+		factory.setNode(node);
+		const relays = ['/dns4/relay.example.org/tcp/443/wss/p2p/12D3KooWLWM7y6gkEz3mNygZ3oERGZT1RyH9XaKQ6Ag3X1RpEXR6'];
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		await (engine as any).dbFactory('relayed', {relays});
+		expect(mockStrandOpen).toHaveBeenCalledWith('relayed', {relays});
 	});
 
 	it('NB-5 peekFounderIntent does not consume', async () => {

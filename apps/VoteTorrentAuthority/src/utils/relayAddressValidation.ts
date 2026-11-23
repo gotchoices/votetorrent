@@ -8,12 +8,12 @@ import { multiaddr } from "@multiformats/multiaddr";
  * `relayAddresses.filter(Boolean)`, so a malformed paste was carried straight into `NetworkInit`
  * and only discovered far deeper in the create path.
  *
- * D-11 boundary (deliberate, not an oversight): the validated address is still NOT threaded into
- * `rn-db-factory`'s `addStrand()`. Wiring a real bootstrap peer reactivates `findCoordinator`'s
- * ~1000ms-per-block retry window, which against a many-block schema apply would reintroduce
- * something indistinguishable from the hang the rest of this phase removes. A later reader must
- * not "finish the job" by passing these addresses to `addStrand()` without re-opening that
- * decision.
+ * Where the validated addresses go (decided 2026-11-23: the relay field feeds strand bootstrap).
+ * They are stored in `Network.Relays` and in the network's reference, and every later re-attach of
+ * the network merges them into its strand's bootstrap seed before `addStrand()` — see
+ * `engines/strand-relay-seed.ts`. The founding create itself still launches unseeded: a founder
+ * given a seed it cannot reach never becomes writable (measured there), which is the create hang
+ * the old boundary here guarded against.
  *
  * Whitespace-only entries are normalized away (treated as ABSENT, not INVALID) specifically so
  * the engine's own `networkInit.relays` validation error — and therefore `errRelayRequired` —

@@ -20,7 +20,7 @@ import { leveldbOpenPool } from './leveldb-open-pool';
 import { createIsolatedStoreModule } from '@quereus/store';
 import { Database } from '@quereus/quereus';
 import { VOTETORRENT_SCHEMA_SQL, VOTETORRENT_SCHEMA_VERSION } from '@votetorrent/vote-engine/rn';
-import type { DbFactory } from '@votetorrent/vote-engine';
+import type { DbFactory, DbFactoryOptions } from '@votetorrent/vote-engine';
 import type { StrandConfig, StrandInstance } from '@serfab/cadre-core';
 import {
 	failOnStrandError,
@@ -30,6 +30,7 @@ import {
 } from './strand-first-sync';
 import { takeFounderIntent, resolveFounderFlag } from './founder-intent';
 import { strandChanges } from './strand-changes';
+import { normalizeRelaySeed, seedStrandWithRelays, type RelaySeedOutcome, type StrandSeedHost } from './strand-relay-seed';
 
 // cadre-core's StrandDatabase.executeSchema() wraps the sApp schema as
 // `declare schema App { ${schema} } apply schema App;`. VOTETORRENT_SCHEMA_SQL is
@@ -98,7 +99,7 @@ export const rnDbFactory: DbFactory = async (networkHash: string) => {
  * strand-backed factory is unit-testable with a fake node. CadreNode's
  * `getControlNode()` returns `Libp2p | null`; we only read `getConnections()`.
  */
-export interface StrandHost {
+export interface StrandHost extends StrandSeedHost {
 	addStrand(config: StrandConfig): Promise<StrandInstance>;
 	getControlNode(): { getConnections(): readonly unknown[] } | null;
 	whenStrandWritable(strandId: string, options?: { timeoutMs?: number }): Promise<StrandInstance>;
@@ -175,7 +176,7 @@ export interface StrandDbFactoryOptions {
  * doc comment for the full class-identity-detection and indefinite-wait rationale.
  */
 export function createStrandDbFactory(node: StrandHost, options?: StrandDbFactoryOptions): DbFactory {
-	return async (networkHash: string) => {
+	return async (networkHash: string, dbOptions?: DbFactoryOptions) => {
 		// D-05: the network hash is already unique per network — use it as the strandId.
 		const strandId = networkHash;
 
@@ -192,6 +193,13 @@ export function createStrandDbFactory(node: StrandHost, options?: StrandDbFactor
 		} catch {
 			// An unreadable joined-list must not make a joiner a founder: refuse to open instead.
 			throw new Error('could not read the joined-network list; not opening the network as its founder');
+		}
+
+		// The network's stored relays join this strand's bootstrap seed (strand-relay-seed.ts), never
+		// on a founding create. Awaited only when there are relays, so a call without them keeps its timing.
+		if (normalizeRelaySeed(dbOptions?.relays).length > 0) {
+			const relaySeed: RelaySeedOutcome = await seedStrandWithRelays(node, strandId, dbOptions?.relays, intent === 'founding');
+			console.info('[strand-factory] relay seed', { relaySeed });
 		}
 
 		let strand: StrandInstance;
