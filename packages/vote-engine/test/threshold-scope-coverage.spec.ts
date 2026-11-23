@@ -88,7 +88,8 @@ describe('D-12 threshold scope coverage audit', () => {
     while ((match = tableRe.exec(qsql)) !== null) {
       tableStarts.push({ name: match[1]!, index: match.index })
     }
-    expect(tableStarts.length, 'A2: expected 7 *SignatureTaskExtension tables').to.equal(7)
+    // Schema version 2 added AssociationSignatureTaskExtension (co-signed association decisions).
+    expect(tableStarts.length, 'A2: expected 8 *SignatureTaskExtension tables').to.equal(8)
 
     const extractedMap: Record<string, { signatureType: string; scope: string }> = {}
     for (let i = 0; i < tableStarts.length; i++) {
@@ -110,6 +111,7 @@ describe('D-12 threshold scope coverage audit', () => {
       ElectionRevisionSignatureTaskExtension: { signatureType: 'election-revision', scope: 'mel' },
       BallotSignatureTaskExtension: { signatureType: 'ballot', scope: 'ceb' },
       RegistrantSignatureTaskExtension: { signatureType: 'registrant', scope: 'vrg' },
+      AssociationSignatureTaskExtension: { signatureType: 'association', scope: 'vrg' },
     }
     expect(extractedMap, 'A2: extension-table-to-scope map').to.deep.equal(expectedMap)
 

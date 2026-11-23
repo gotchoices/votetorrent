@@ -17,6 +17,7 @@ import type { Database } from '@quereus/quereus'
 import type { AdminInit, OfficerSelection, Proposal, Scope, Signature, ThresholdPolicy, User } from '@votetorrent/vote-core'
 import { BALLOT_HEADER_TID } from '../../src/election/election-engine.js'
 import { nowCanonicalDatetime, toCanonicalDatetime } from '../../src/utils.js'
+import type { DbFactory } from '../../src/types.js'
 import {
   addTestAuthority,
   addTestElection,
@@ -40,6 +41,8 @@ export interface ThresholdAuthorityOptions {
   holderScopes?: Scope[]
   thresholdPolicies?: ThresholdPolicy[]
   nonHolderScopes?: Scope[]
+  /** Open the network through this factory (e.g. a harness strand) instead of the in-memory default. */
+  dbFactory?: DbFactory
 }
 
 export interface ThresholdAuthorityFixture {
@@ -133,6 +136,7 @@ export async function createThresholdAuthority (opts?: ThresholdAuthorityOptions
 
   const foundingEffectiveAt = Date.now() - 120_000
   const net = await createTestNetwork({
+    ...(opts?.dbFactory ? { dbFactory: opts.dbFactory } : {}),
     network: {
       admin: {
         officers: [
