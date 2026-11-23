@@ -654,8 +654,10 @@ export function DashboardShell({
 					<main>
 						{wipeFailedReason !== null ? (
 							<div className="sh-error-banner">
-								<p>{t('forget.failed')}</p>
-								<button type="button" disabled={wipeRetrying} onClick={() => void handleRetryWipe()}>{t('forget.cta')}</button>
+								<p>{t('wipe.failed')}</p>
+								<button type="button" className="sh-error-retry" disabled={wipeRetrying} onClick={() => void handleRetryWipe()}>
+									{t('wipe.retry')}
+								</button>
 							</div>
 						) : unpairing ? null : bootFailed ? (
 							<div className="sh-error-banner">

@@ -619,6 +619,8 @@ test('S5 every literal copy key in the shell and in shell-live.ts exists, the li
 		'forget.fieldLabel',
 		'forget.cta',
 		'forget.failed',
+		'wipe.failed',
+		'wipe.retry',
 		'shell.openFailed',
 	]) {
 		assert.ok(shellKeys.includes(key), `the shell does not use ${key}`);
@@ -788,8 +790,11 @@ test('S10 the shell names no unreachable panel state (read-only, the half-circle
 	assert.doesNotMatch(SHELL, RE);
 });
 
-// S11 (66-29, DEFECT-66-26-02) -- the wipe-failed state: the forget.failed banner with ONE Forget
-// action that re-runs the wipe, and no Reconnect. (The plan calls these rows S5; S5 was taken.)
+// S11 (66-29, DEFECT-66-26-02) -- the wipe-failed state: a banner with ONE styled action that
+// re-runs the wipe, and no Reconnect. (The plan calls these rows S5; S5 was taken.) 2026-11-23
+// todo: the banner said "Couldn't forget this network" and offered "Forget this network" when the
+// officer never asked to forget, and its button had no class (browser-default styling). It now
+// carries its own wipe.failed / wipe.retry copy and the shell's sh-error-retry button style.
 
 test('C12 retryWipeOnce: a double click runs ONE wipe and calls onWiped once; a held guard stays held after success; a failure releases it and logs a name only', () => {
 	const r = rowOf('C12');
@@ -852,7 +857,7 @@ const WIPE_FIXTURE_GOOD = [
 	'\t\t});',
 	'\t}',
 	'<main>{wipeFailedReason !== null ? (',
-	"<div className=\"sh-error-banner\"><p>{t('forget.failed')}</p><button type=\"button\" disabled={wipeRetrying} onClick={() => void handleRetryWipe()}>{t('forget.cta')}</button></div>",
+	"<div className=\"sh-error-banner\"><p>{t('wipe.failed')}</p><button type=\"button\" className=\"sh-error-retry\" disabled={wipeRetrying} onClick={() => void handleRetryWipe()}>{t('wipe.retry')}</button></div>",
 	') : unpairing ? null : null}</main>',
 ].join('\n');
 
@@ -871,12 +876,14 @@ function wipeFailedChecks(code) {
 	const banner = wipeFailedBanner(code);
 	check('b-banner-before-unpairing-null', banner !== null);
 	if (banner !== null) {
-		check('c-forget-failed-copy', banner.includes("<p>{t('forget.failed')}</p>"));
+		check('c-wipe-failed-copy', banner.includes("<p>{t('wipe.failed')}</p>"));
+		check('c-no-forget-copy', !banner.includes("t('forget."));
 		check('c-one-button', (banner.match(/<button\b/g) ?? []).length === 1);
-		check('c-forget-cta-label', banner.includes("{t('forget.cta')}</button>"));
+		check('c-styled-button', /<button type="button" className="sh-error-retry"/.test(banner));
+		check('c-wipe-retry-label', /\{t\('wipe\.retry'\)\}\s*<\/button>/.test(banner));
 		check('c-runs-handleRetryWipe', /onClick=\{\(\) => void handleRetryWipe\(\)\}/.test(banner));
 		check('c-disabled-while-retrying', banner.includes('disabled={wipeRetrying}'));
-		check('d-no-reconnect', !/handleRetryOpen|status\.reconnect|sh-error-retry/.test(banner));
+		check('d-no-reconnect', !/handleRetryOpen|status\.reconnect/.test(banner));
 	}
 	const handler = functionBody(code, 'handleRetryWipe');
 	check('c-handler-exists', handler !== null);
@@ -897,12 +904,15 @@ test('S11 control: every wipe-failed matcher passes a synthetic good fixture and
 	assert.deepEqual(wipeFailedChecks(WIPE_FIXTURE_GOOD), []);
 	const planted = {
 		'a-subscribed-after-onForgotten': WIPE_FIXTURE_GOOD.replace('boot.onForgotten(() => {});', '').replace("useEffect(() => {\n", "useEffect(() => {\nboot.onForgotten(x);\n").replace('const offWipeFailed = boot.onWipeFailed(', 'const offWipeFailed = boot.onWipeFailedX(').replace("useEffect(() => {\n", "useEffect(() => {\nboot.onWipeFailed(y);\n"),
-		'd-no-reconnect': WIPE_FIXTURE_GOOD.replace("{t('forget.cta')}</button></div>", "{t('forget.cta')}</button><span className=\"sh-error-retry\" /></div>"),
+		'd-no-reconnect': WIPE_FIXTURE_GOOD.replace("{t('wipe.retry')}</button></div>", "{t('wipe.retry')}</button><span>{t('status.reconnect')}</span></div>"),
+		'c-no-forget-copy': WIPE_FIXTURE_GOOD.replace("{t('wipe.retry')}</button>", "{t('forget.cta')}</button>"),
+		'c-wipe-retry-label': WIPE_FIXTURE_GOOD.replace("{t('wipe.retry')}</button>", "{t('forget.cta')}</button>"),
+		'c-styled-button': WIPE_FIXTURE_GOOD.replace(' className=\"sh-error-retry\" disabled', ' disabled'),
 		'c-one-button': WIPE_FIXTURE_GOOD.replace('</button></div>', '</button><button type="button" onClick={handleRetryOpen}>x</button></div>'),
 		'1-only-in-banner': WIPE_FIXTURE_GOOD.replace('<main>', '<aside onClick={() => void handleRetryWipe()} /><main>'),
 		'2-ref-guard': WIPE_FIXTURE_GOOD.replace('retryWipeOnce(wipeRetryingRef,', 'retryWipeOnce({ current: wipeRetrying },'),
 		'1-hash-from-reporting-boot': WIPE_FIXTURE_GOOD.replace('networkHash: boot.networkHash,', 'networkHash: activeNetworkHash,'),
-		'c-forget-failed-copy': WIPE_FIXTURE_GOOD.replace("<p>{t('forget.failed')}</p>", "<p>{t('shell.openFailed')}</p>"),
+		'c-wipe-failed-copy': WIPE_FIXTURE_GOOD.replace("<p>{t('wipe.failed')}</p>", "<p>{t('forget.failed')}</p>"),
 		'b-banner-before-unpairing-null': WIPE_FIXTURE_GOOD.replace(') : unpairing ? null', ') : bootFailed ? null'),
 	};
 	for (const [name, fixture] of Object.entries(planted)) {
@@ -911,7 +921,7 @@ test('S11 control: every wipe-failed matcher passes a synthetic good fixture and
 	assert.ok(OPEN_FAILED_BANNER.includes("t('shell.openFailed')"));
 });
 
-test('S11 the wipe-failed banner: forget.failed and ONE Forget action that re-runs wipeNetwork for the boot that reported it, then the unpaired notice; no Reconnect', () => {
+test('S11 the wipe-failed banner: wipe.failed and ONE styled Delete-the-local-copy action that re-runs wipeNetwork for the boot that reported it, then the unpaired notice; no Reconnect', () => {
 	assert.deepEqual(wipeFailedChecks(CODE), []);
 	assert.match(CODE, /const wipeRetryingRef = useRef\(false\)/, 'the re-entry guard is a ref');
 });

@@ -882,6 +882,14 @@ export const COPY = Object.freeze({
 	'scanner.unavailable': "The scanner couldn't start. Paste the code instead.",
 	'forget.failed':
 		"Couldn't forget this network. Close any other tab that has it open, then try again.",
+	// --- Wipe-failed banner (2026-11-23 todo) --------------------------------
+	//
+	// The network unpaired this browser and the wipe of its local copy could not finish. The
+	// officer never asked to forget anything, so the banner no longer borrows `forget.failed`
+	// and `forget.cta`: it says what happened and offers to finish deleting the local copy.
+	'wipe.failed':
+		"This browser was unpaired, but its local copy of this network's data couldn't be deleted. Close any other tab that has this network open, then try again.",
+	'wipe.retry': 'Delete the local copy',
 });
 
 /**

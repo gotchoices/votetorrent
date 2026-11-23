@@ -54,11 +54,11 @@ import { FACT_COPY_KEYS, FACTS } from '../src/lifecycle/facts.js';
 // arithmetic in this comment.
 // ---------------------------------------------------------------------------
 
-test('COPY has exactly 243 keys (73 pre-53-07, +10 public-voice keys under D-08, +2 net from the 54-02 lifecycle rename/expansion, +61 from 54-09s fact/gap copy table, +2 from 54-12s not-held sentence, +6 from 56-12s staleness/config-fault copy, +1 from 56-14s live-update badge, +22 from 60-01s chart-visualization copy, +84 from 66-05s live-dashboard copy, +5 from 66-22s pairing, scanner and forget gap copy, -40 from 66-24s removal of the snapshot-era sign-in, restore and refresh copy, +2 from 56-28s still-looking sentence, +3 from 56-29s network-index sentences, +6 net from 56-30s results card: +8 results keys, -2 retired gap-E keys, +2 net from 56-31s turnout card: +4 turnout keys, -2 retired gap-A keys)', () => {
+test('COPY has exactly 245 keys (73 pre-53-07, +10 public-voice keys under D-08, +2 net from the 54-02 lifecycle rename/expansion, +61 from 54-09s fact/gap copy table, +2 from 54-12s not-held sentence, +6 from 56-12s staleness/config-fault copy, +1 from 56-14s live-update badge, +22 from 60-01s chart-visualization copy, +84 from 66-05s live-dashboard copy, +5 from 66-22s pairing, scanner and forget gap copy, -40 from 66-24s removal of the snapshot-era sign-in, restore and refresh copy, +2 from 56-28s still-looking sentence, +3 from 56-29s network-index sentences, +6 net from 56-30s results card: +8 results keys, -2 retired gap-E keys, +2 net from 56-31s turnout card: +4 turnout keys, -2 retired gap-A keys, +4 from 56-34s connection-failure copy, +2 from the dashboard wipe-failed banner)', () => {
 	assert.equal(
 		Object.keys(COPY).length,
-		243,
-		'expected 243 -- if this reads 239, 56-34s public.election.unreachable/notOnNetwork title/body (NEW_56_34_KEYS) were wrongly deleted; ElectionShell.tsx mounts them when the page\'s network connection failed. Before 56-34 the table held 239: if it then read 235, 56-31s turnout-card keys (public.fact.turnout.detail plus NEW_56_31_KEYS) were wrongly deleted. Before 56-31 the table held 237: if it then read 229, 56-30s results-card keys (public.fact.results.detail plus NEW_56_30_KEYS) were wrongly deleted; FactSections/PublishedResults mount them. If it reads 239, the retired gap-E sentence/detail came back as dead copy. Before 56-30 the table held 231: if it then read 228, 56-29s public.index.lookingOnNetwork/networkEmpty/networkUnreachable (NEW_56_29_KEYS) were wrongly deleted; ElectionIndex.tsx mounts them for a link that names a network. Before 56-29 the table held 228: if it then read 226, 56-28s public.election.fetching.title/.body (NEW_56_28_KEYS) were wrongly deleted; ElectionShell.tsx mounts them while the page is still fetching an election, where t() throws on either going missing. Before 56-28 the table held 226: if it then read 266, 66-24s forty removed snapshot-era keys (REMOVED_66_24_KEYS: bootstrap.*, snapshot.* and network.*) came back; nothing mounts them any more, so they are dead copy. If this reads fewer than 226, a live key was wrongly deleted. Before 66-24 the table held 266: if it then read 261, 66-22s five gap keys (NEW_66_22_KEYS: pairing.step.joiningUnnamed, pairing.officerUnknown, pairing.failed.no-storage.otherTab, scanner.unavailable and forget.failed) were wrongly deleted; the pairing screen, the webcam scanner and the forget dialog mount them, where t() throws on them going missing. If this reads 177, 66-05s eighty-four live-dashboard keys (NEW_66_05_KEYS: pairing, scanner, status, swap, forget, unpaired, panel.readOnly, switcher, shell and marks) were wrongly deleted; they are mounted by the live dashboard screens, where t() throws on them going missing. If this reads 155, 60-01s twenty-two chart-visualization keys (NEW_60_01_KEYS: the view ' +
+		245,
+		'expected 245 -- if this reads 243, the dashboard wipe-failed banner keys (NEW_WIPE_FAILED_KEYS: wipe.failed, wipe.retry) were wrongly deleted; DashboardShell.tsx mounts them when an unpairing wipe could not finish. Before them the table held 243: if it then read 239, 56-34s public.election.unreachable/notOnNetwork title/body (NEW_56_34_KEYS) were wrongly deleted; ElectionShell.tsx mounts them when the page\'s network connection failed. Before 56-34 the table held 239: if it then read 235, 56-31s turnout-card keys (public.fact.turnout.detail plus NEW_56_31_KEYS) were wrongly deleted. Before 56-31 the table held 237: if it then read 229, 56-30s results-card keys (public.fact.results.detail plus NEW_56_30_KEYS) were wrongly deleted; FactSections/PublishedResults mount them. If it reads 239, the retired gap-E sentence/detail came back as dead copy. Before 56-30 the table held 231: if it then read 228, 56-29s public.index.lookingOnNetwork/networkEmpty/networkUnreachable (NEW_56_29_KEYS) were wrongly deleted; ElectionIndex.tsx mounts them for a link that names a network. Before 56-29 the table held 228: if it then read 226, 56-28s public.election.fetching.title/.body (NEW_56_28_KEYS) were wrongly deleted; ElectionShell.tsx mounts them while the page is still fetching an election, where t() throws on either going missing. Before 56-28 the table held 226: if it then read 266, 66-24s forty removed snapshot-era keys (REMOVED_66_24_KEYS: bootstrap.*, snapshot.* and network.*) came back; nothing mounts them any more, so they are dead copy. If this reads fewer than 226, a live key was wrongly deleted. Before 66-24 the table held 266: if it then read 261, 66-22s five gap keys (NEW_66_22_KEYS: pairing.step.joiningUnnamed, pairing.officerUnknown, pairing.failed.no-storage.otherTab, scanner.unavailable and forget.failed) were wrongly deleted; the pairing screen, the webcam scanner and the forget dialog mount them, where t() throws on them going missing. If this reads 177, 66-05s eighty-four live-dashboard keys (NEW_66_05_KEYS: pairing, scanner, status, swap, forget, unpaired, panel.readOnly, switcher, shell and marks) were wrongly deleted; they are mounted by the live dashboard screens, where t() throws on them going missing. If this reads 155, 60-01s twenty-two chart-visualization keys (NEW_60_01_KEYS: the view ' +
 			'switch, the panel-state and chart-empty keys, the section headings and the tooltip/meter templates) were ' +
 			'wrongly deleted; they are consumed starting in 60-03/60-05/60-06. If this reads 154, 56-14s ' +
 			'public.liveUpdate.badge was wrongly deleted; it is Surface 5 (D-16/D-19) ' +
@@ -309,6 +309,14 @@ const NEW_56_34_KEYS = Object.freeze([
 	'public.election.notOnNetwork.title',
 	'public.election.notOnNetwork.body',
 ]);
+
+/**
+ * The two keys the dashboard's wipe-failed banner mounts (2026-11-23 todo): the network unpaired
+ * this browser and the local wipe could not finish. Before them the banner borrowed the forget
+ * dialog's failure line and button, which talk about a forget the officer never asked for.
+ * @type {ReadonlyArray<string>}
+ */
+const NEW_WIPE_FAILED_KEYS = Object.freeze(['wipe.failed', 'wipe.retry']);
 
 const NEW_56_29_KEYS = Object.freeze(['public.index.lookingOnNetwork', 'public.index.networkEmpty', 'public.index.networkUnreachable']);
 
@@ -814,6 +822,7 @@ test('D-25/D-07/D-08/D-06/54-09/54-12/56-12/56-14/60-01/66-05/66-22/66-24: the O
 		...NEW_56_30_KEYS,
 		...NEW_56_31_KEYS,
 		...NEW_56_34_KEYS,
+		...NEW_WIPE_FAILED_KEYS,
 	]);
 	for (const k of REMOVED_66_24_KEYS) expectedKeys.delete(k);
 
@@ -1366,6 +1375,15 @@ test('sanity: the 56-34 delta is 4 keys, collides with nothing earlier, carries 
 	assert.equal(COPY['public.election.notOnNetwork.title'], "This election wasn't found on the network named in this link.");
 	assert.equal(COPY['public.election.notOnNetwork.body'], 'The network answered, but it returned no election matching this link, so there is nothing here to show.');
 	for (const key of NEW_56_34_KEYS) assert.ok(!/doesn't hold/i.test(COPY[key]), `${key} repeats the not-held sentence`);
+});
+
+test('sanity: the wipe-failed delta is 2 keys, collides with nothing earlier, carries its exact values, and never talks about forgetting', () => {
+	assert.equal(NEW_WIPE_FAILED_KEYS.length, 2);
+	const prior = new Set([...PRE_MOVE_KEYS, ...NEW_53_07_KEYS, ...PHASE_54_ADDITIONS, ...NEW_54_09_KEYS, ...NEW_54_12_KEYS, ...NEW_56_12_KEYS, ...NEW_56_14_KEYS, ...NEW_60_01_KEYS, ...NEW_66_05_KEYS, ...NEW_66_22_KEYS, ...NEW_56_28_KEYS, ...NEW_56_29_KEYS, ...NEW_56_30_KEYS, ...NEW_56_31_KEYS, ...NEW_56_34_KEYS]);
+	assert.deepEqual(NEW_WIPE_FAILED_KEYS.filter((k) => prior.has(k)), []);
+	assert.equal(COPY['wipe.failed'], "This browser was unpaired, but its local copy of this network's data couldn't be deleted. Close any other tab that has this network open, then try again.");
+	assert.equal(COPY['wipe.retry'], 'Delete the local copy');
+	for (const key of NEW_WIPE_FAILED_KEYS) assert.doesNotMatch(COPY[key], /forget/i, `${key} talks about forgetting`);
 });
 
 // 2026-11-23 todo: the public page's gap and key-release details ended with a repo path
