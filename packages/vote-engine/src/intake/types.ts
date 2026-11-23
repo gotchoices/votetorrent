@@ -21,7 +21,6 @@
 
 import type { Signature } from '@votetorrent/vote-core'
 import type { EnvelopeBinding, EnvelopeOpenFailureReason, EnvelopeRecipient } from '../crypto/envelope-types.js'
-import type { IntakePolicyProposalView } from './cosign.js'
 
 /**
  * Every refusal this module can throw as an `IntakeError`. Messages built
@@ -168,4 +167,22 @@ export interface AuthorityIntakePolicyInput {
   readonly restBridgeUrl?: string | null
   readonly reassociationMode?: ReassociationMode
   readonly expectedRevision?: number
+}
+
+/** One pending (or reached but not yet applied) policy change. */
+export interface IntakePolicyProposalView {
+  readonly authorityId: string
+  /** The revision the change takes effect as. */
+  readonly revision: number
+  readonly restBridgeUrl: string | null
+  readonly reassociationMode: ReassociationMode
+  readonly setAt: string
+  readonly signingNonce: string
+  readonly threshold: number
+  readonly signatures: number
+  readonly reached: boolean
+  /** Too few holders can still sign for the threshold to be reached. */
+  readonly unreachable: boolean
+  /** The effective row for this revision exists. */
+  readonly applied: boolean
 }

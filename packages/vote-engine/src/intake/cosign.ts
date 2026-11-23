@@ -11,26 +11,12 @@
 import type { Database, SqlValue } from '@quereus/quereus'
 import { ConstraintError } from '@quereus/quereus'
 import type { IntakeQueryPort } from './query-port.js'
-import { REASSOCIATION_MODES, type ReassociationMode } from './types.js'
+import { REASSOCIATION_MODES, type IntakePolicyProposalView, type ReassociationMode } from './types.js'
 import { computeSigningStatus } from '../signing/threshold.js'
 
-/** One pending (or reached but not yet applied) policy change. */
-export interface IntakePolicyProposalView {
-  readonly authorityId: string
-  /** The revision the change takes effect as. */
-  readonly revision: number
-  readonly restBridgeUrl: string | null
-  readonly reassociationMode: ReassociationMode
-  readonly setAt: string
-  readonly signingNonce: string
-  readonly threshold: number
-  readonly signatures: number
-  readonly reached: boolean
-  /** Too few holders can still sign for the threshold to be reached. */
-  readonly unreachable: boolean
-  /** The effective row for this revision exists. */
-  readonly applied: boolean
-}
+// Defined in types.ts so the intake types never import this module (the ./browser purity walker
+// follows type imports too, and this module reaches the transports through query-port).
+export type { IntakePolicyProposalView } from './types.js'
 
 interface RawProposalRow {
   readonly AuthorityId: unknown
