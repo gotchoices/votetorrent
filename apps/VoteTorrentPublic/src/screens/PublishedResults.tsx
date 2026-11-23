@@ -17,7 +17,13 @@ import type { PublicResultsReading } from './use-public-election';
  * type the tally cannot histogram is listed with its answered count and a
  * plain sentence. No id, code, root or hash reaches a text node; titles are
  * authority-supplied text rendered as JSX text (React's escaping is the
- * control). Every element is unclassed, so this view needs no new CSS.
+ * control).
+ *
+ * Headings sit under the card's own h3 label: the ballot description is an h4
+ * and each question title the next level down (h5 under a ballot description,
+ * h4 when no description heading is shown for its ballot). Each
+ * carries its own class (app.css) so the two never render as the same bare
+ * browser-default heading.
  */
 export function PublishedResults({ results }: { results: PublicResultsReading }) {
 	if (results.state === 'none') return <p>{t('public.fact.results.none')}</p>;
@@ -28,33 +34,40 @@ export function PublishedResults({ results }: { results: PublicResultsReading })
 	return (
 		<div>
 			<p>{t('public.fact.results.blocks', { blocks: value.blockCount })}</p>
-			{value.ballots.map((ballot) => (
-				<section key={ballot.ballotId}>
-					{manyBallots && ballot.description !== null && ballot.description !== '' ? <h4>{ballot.description}</h4> : null}
-					<p>
-						{t('public.fact.results.ballotTotals', {
-							votes: ballot.votes,
-							valid: ballot.valid,
-							invalid: ballot.invalid,
-							excluded: ballot.excluded,
-						})}
-					</p>
-					{ballot.questions.map((question) => (
-						<div key={question.code}>
-							<h4>{question.title}</h4>
-							<ul>
-								{question.options.map((option) => (
-									<li key={option.code}>{t('public.fact.results.optionCount', { option: option.title, count: option.count })}</li>
-								))}
-								<li>{t('public.fact.results.blank', { count: question.blank })}</li>
-							</ul>
-						</div>
-					))}
-					{ballot.unsupported.map((question) => (
-						<p key={question.code}>{t('public.fact.results.unsupported', { question: question.title, count: question.answered })}</p>
-					))}
-				</section>
-			))}
+			{value.ballots.map((ballot) => {
+				const ballotHeading = manyBallots && ballot.description !== null && ballot.description !== '';
+				return (
+					<section key={ballot.ballotId}>
+						{ballotHeading ? <h4 className="results-ballot__title">{ballot.description}</h4> : null}
+						<p>
+							{t('public.fact.results.ballotTotals', {
+								votes: ballot.votes,
+								valid: ballot.valid,
+								invalid: ballot.invalid,
+								excluded: ballot.excluded,
+							})}
+						</p>
+						{ballot.questions.map((question) => (
+							<div key={question.code}>
+								{ballotHeading ? (
+									<h5 className="results-question__title">{question.title}</h5>
+								) : (
+									<h4 className="results-question__title">{question.title}</h4>
+								)}
+								<ul>
+									{question.options.map((option) => (
+										<li key={option.code}>{t('public.fact.results.optionCount', { option: option.title, count: option.count })}</li>
+									))}
+									<li>{t('public.fact.results.blank', { count: question.blank })}</li>
+								</ul>
+							</div>
+						))}
+						{ballot.unsupported.map((question) => (
+							<p key={question.code}>{t('public.fact.results.unsupported', { question: question.title, count: question.answered })}</p>
+						))}
+					</section>
+				);
+			})}
 		</div>
 	);
 }
