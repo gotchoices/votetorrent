@@ -204,6 +204,34 @@ test('H7 detectUnsupportedBrowser: true when any needed browser feature is missi
 	assert.equal(P.detectUnsupportedBrowser(undefined), true);
 });
 
+// 2026-11-23 todo: every submit reset the officer name to null, so a Try again of the same code
+// after an accepted officer swap lost the name the swap dialog had supplied. The code carries the
+// officer's id but no name, so the name is kept only for the same officer on the same network.
+test('H9 namesForSubmit keeps a known officer name for the same officer and network, and starts unnamed otherwise', () => {
+	const known = { authorityName: 'Nepal Votes', officerName: 'Asha', officerUserId: 'u-1', networkHash: 'n-1' };
+	const same = { networkHash: 'n-1', authorityName: 'Nepal Votes', officerUserId: 'u-1' };
+	assert.deepEqual(P.namesForSubmit(known, same), known, 'a retry of the same officer keeps the name');
+	assert.equal(P.namesForSubmit(known, { ...same, officerUserId: 'u-2' }).officerName, null, 'another officer starts unnamed');
+	assert.equal(P.namesForSubmit(known, { ...same, networkHash: 'n-2' }).officerName, null, 'another network starts unnamed');
+	assert.deepEqual(
+		P.namesForSubmit(known, { networkHash: null, authorityName: '', officerUserId: null }),
+		{ authorityName: '', officerName: null, officerUserId: null, networkHash: null },
+		'an undecodable code starts unnamed',
+	);
+	const fresh = { authorityName: '', officerName: null, officerUserId: null, networkHash: null };
+	assert.equal(P.namesForSubmit(fresh, same).officerName, null, 'a first pairing has no name to keep');
+	assert.equal(P.namesForSubmit(fresh, same).officerUserId, 'u-1', 'the officer id is recorded for the next submit');
+});
+
+test('H9 the screen routes every submit through namesForSubmit and records the swapped-in officer id with its name', () => {
+	const code = stripComments(readFileSync(PAIRING_PATH, 'utf8'));
+	const RESET = /setKnownNames\(\{[^}]*officerName: null/;
+	assert.match('setKnownNames({ authorityName: peek.authorityName, officerName: null });', RESET, 'control: the old reset is caught');
+	assert.doesNotMatch(code, RESET, 'a submit no longer blanks the officer name');
+	assert.match(code, /setKnownNames\(\(names\) => namesForSubmit\(names, peek\)\)/);
+	assert.match(code, /officerName: request\.incoming\.name, officerUserId: request\.incoming\.userId/);
+});
+
 test('H8 abort after an ok result calls nothing and the adopted node stays alive (control: an in-flight run does abort)', async () => {
 	/** @param {any} result */
 	const makeFake = (result) => {

@@ -369,16 +369,47 @@ async function heldByAnotherTab(networkHash: string): Promise<boolean> {
 	}
 }
 
-/** The decoded code's network hash and display name, or nulls. Never throws. */
-function peekCode(code: string): { networkHash: string | null; authorityName: string } {
+export type CodePeek = { networkHash: string | null; authorityName: string; officerUserId: string | null };
+
+/** The decoded code's network hash, display name and officer id, or nulls. Never throws. */
+function peekCode(code: string): CodePeek {
 	try {
 		const decoded = decodePairingCode(code);
 		const join = decodeNetworkJoinCode(decoded.joinCode);
-		if (join.ok) return { networkHash: join.code.networkHash, authorityName: join.code.name };
+		if (join.ok) {
+			return { networkHash: join.code.networkHash, authorityName: join.code.name, officerUserId: decoded.statement.userId };
+		}
 	} catch {
 		// pairBrowser judges the code; this peek only labels the screen.
 	}
-	return { networkHash: null, authorityName: '' };
+	return { networkHash: null, authorityName: '', officerUserId: null };
+}
+
+export type KnownNames = {
+	authorityName: string;
+	officerName: string | null;
+	officerUserId: string | null;
+	networkHash: string | null;
+};
+
+/**
+ * The names the screen shows for a new submit. The code carries the officer's id but no name, so
+ * a name is known only once something supplied it (an accepted officer swap). A re-submit of a
+ * code for the SAME officer on the SAME network (a Try again after a failure) keeps that name
+ * until the pairing ends; any other code starts unnamed.
+ */
+export function namesForSubmit(previous: KnownNames, peek: CodePeek): KnownNames {
+	const sameOfficer =
+		peek.officerUserId !== null &&
+		peek.networkHash !== null &&
+		peek.officerUserId === previous.officerUserId &&
+		peek.networkHash === previous.networkHash;
+	return {
+		authorityName: peek.authorityName,
+		officerName: sameOfficer ? previous.officerName : null,
+		officerUserId: peek.officerUserId,
+		networkHash: peek.networkHash,
+	};
 }
 
 // --- pure views -----------------------------------------------------------------------
@@ -670,9 +701,11 @@ export function Pairing(props: PairingProps): ReactElement {
 	const [otherTab, setOtherTab] = useState(false);
 	const [scannerOpen, setScannerOpen] = useState(false);
 	const [swapRequest, setSwapRequest] = useState<SwapRequest | null>(null);
-	const [knownNames, setKnownNames] = useState<{ authorityName: string; officerName: string | null }>({
+	const [knownNames, setKnownNames] = useState<KnownNames>({
 		authorityName: '',
 		officerName: null,
+		officerUserId: null,
+		networkHash: null,
 	});
 
 	const propsRef = useRef(props);
@@ -753,7 +786,7 @@ export function Pairing(props: PairingProps): ReactElement {
 		swapResolverRef.current = null;
 		setSwapRequest(null);
 		if (replace && request) {
-			setKnownNames((names) => ({ ...names, officerName: request.incoming.name }));
+			setKnownNames((names) => ({ ...names, officerName: request.incoming.name, officerUserId: request.incoming.userId }));
 		}
 		resolve?.(replace);
 	};
@@ -788,7 +821,7 @@ export function Pairing(props: PairingProps): ReactElement {
 		setSlow(false);
 		setView('verifying');
 		const peek = peekCode(next);
-		setKnownNames({ authorityName: peek.authorityName, officerName: null });
+		setKnownNames((names) => namesForSubmit(names, peek));
 		try {
 			let mod: PairingModule;
 			try {
