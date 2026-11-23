@@ -1195,7 +1195,7 @@ describe("RegistrationRequestApprovalScreen — Group I (48-26 gap 4: footer sta
 // and its six existing entries are unchanged.
 
 describe("RegistrationRequestApprovalScreen — Group G (SignatureTaskScreen.tsx titleKey map)", () => {
-	it("23. SignatureTaskScreen.tsx's titleKey record has exactly six entries and none of them is 'registrant' — asserted at the source level, since react-test-renderer cannot see a sibling file", () => {
+	it("23. SignatureTaskScreen.tsx's titleKey record has exactly eight entries (six plus the two co-signer tasks) and none of them is 'registrant' — asserted at the source level, since react-test-renderer cannot see a sibling file", () => {
 		const filePath = path.join(__dirname, "..", "..", "tasks", "SignatureTaskScreen.tsx");
 		const source = fs.readFileSync(filePath, "utf8");
 
@@ -1203,7 +1203,7 @@ describe("RegistrationRequestApprovalScreen — Group G (SignatureTaskScreen.tsx
 		expect(titleKeyMatch).not.toBeNull();
 		const mapBody = titleKeyMatch![1];
 		const entryCount = (mapBody.match(/^\s*"?[a-zA-Z-]+"?:\s*"[^"]+",?\s*$/gm) ?? []).length;
-		expect(entryCount).toBe(6);
+		expect(entryCount).toBe(8);
 		expect(/^\s*"?registrant"?:/m.test(mapBody)).toBe(false);
 	});
 });

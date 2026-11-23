@@ -137,6 +137,7 @@ const GROUPS: readonly Group[] = [
 			"associationApprovalEnteredFieldsHeading",
 			"associationApprovalRegistrantRecordHeading",
 			"associationApprovalCoSignRequired",
+			"associationApprovalReviewPending",
 		],
 	],
 	[
@@ -160,6 +161,7 @@ const GROUPS: readonly Group[] = [
 			"signatureTaskThresholdReached",
 			"signatureTaskThresholdVoteRecorded",
 			"signatureTaskThresholdUnreachable",
+			"signatureTaskThresholdCoSignSubtitle",
 		],
 	],
 	[
@@ -274,8 +276,8 @@ describe("multipeer-continuity-keys (62-10, D-31/D-36/D-41/D-43/D-45/D-46/D-49/D
 		});
 	});
 
-	test("the total catalog is 116 keys per locale (94 + keyholderDkgStatusThresholdTooLow, UAT 62, + 5 founding-export file-handoff keys, + 14 invitation/security keys, + keyholderDkgStatusFailed, + officerIntakeKeySupersededBody)", () => {
-		expect(ALL_CATALOG_KEYS).toHaveLength(116);
+	test("the total catalog is 118 keys per locale (94 + keyholderDkgStatusThresholdTooLow, UAT 62, + 5 founding-export file-handoff keys, + 14 invitation/security keys, + keyholderDkgStatusFailed, + officerIntakeKeySupersededBody, + associationApprovalReviewPending and signatureTaskThresholdCoSignSubtitle for co-signing)", () => {
+		expect(ALL_CATALOG_KEYS).toHaveLength(118);
 	});
 
 	test.each(ALL_CATALOG_KEYS)("%s: non-empty value in both locales, EN !== ES", (key) => {
