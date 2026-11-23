@@ -24,7 +24,7 @@ import type { NavigationProp } from "./types";
 import AddNetworkScreen from "../screens/networks/AddNetworkScreen";
 import HostingScreen from "../screens/networks/HostingScreen";
 import ImportFoundingBundleScreen from "../screens/networks/ImportFoundingBundleScreen";
-import JoinNetworkScreen from "../screens/networks/JoinNetworkScreen";
+import JoinNetworkScreen, { JoinNetworkByScanScreen } from "../screens/networks/JoinNetworkScreen";
 import { useApp } from "../providers/AppProvider";
 import { useTaskCount } from "../hooks/useTaskCount";
 import EditOfficerScreen from "../screens/admin/EditOfficerScreen";
@@ -334,6 +334,11 @@ export const RootNavigator = () => {
 			<Stack.Screen
 				name="JoinNetwork"
 				component={JoinNetworkScreen}
+				options={{ title: t("joinNetworkTitle") }}
+			/>
+			<Stack.Screen
+				name="JoinNetworkByScan"
+				component={JoinNetworkByScanScreen}
 				options={{ title: t("joinNetworkTitle") }}
 			/>
 			<Stack.Screen

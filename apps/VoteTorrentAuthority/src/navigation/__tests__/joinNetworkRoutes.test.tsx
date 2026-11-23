@@ -40,6 +40,16 @@ jest.mock("../../screens/networks/JoinNetworkScreen", () => ({
 		mockJoinNetworkParams = (useRoute() as any).params;
 		return ReactLib.createElement(Text, { testID: "mock-join-network-screen" }, "mock-join-network-screen");
 	},
+	JoinNetworkByScanScreen: function MockJoinNetworkByScanScreen() {
+		// eslint-disable-next-line @typescript-eslint/no-var-requires
+		const ReactLib = require("react");
+		// eslint-disable-next-line @typescript-eslint/no-var-requires
+		const { Text } = require("react-native");
+		// eslint-disable-next-line @typescript-eslint/no-var-requires
+		const { useRoute } = require("@react-navigation/native");
+		mockJoinNetworkParams = (useRoute() as any).params;
+		return ReactLib.createElement(Text, { testID: "mock-join-network-by-scan-screen" }, "mock-join-network-by-scan-screen");
+	},
 }));
 
 const trees: renderer.ReactTestRenderer[] = [];
@@ -99,6 +109,12 @@ describe("RootNavigator - the JoinNetwork route is really registered and really 
 		expect(() => tr.root.findByProps({ testID: "mock-join-network-screen" })).not.toThrow();
 		expect(mockJoinNetworkParams).toBeUndefined();
 	});
+
+	it("J-5: resolves JoinNetworkByScan (the Networks screen's Scan) to its own marker with params undefined", async () => {
+		const tr = await renderRootNavigatorAt({ index: 0, routes: [{ name: "JoinNetworkByScan" }] });
+		expect(() => tr.root.findByProps({ testID: "mock-join-network-by-scan-screen" })).not.toThrow();
+		expect(mockJoinNetworkParams).toBeUndefined();
+	});
 });
 
 const NAV_INDEX_PATH = path.join(__dirname, "..", "index.tsx");
@@ -124,6 +140,15 @@ describe("navigation/index.tsx - JoinNetwork registration source gate (D-26)", (
 		const at = source.indexOf('name="JoinNetwork"');
 		expect(at).toBeGreaterThan(source.indexOf('name="ImportFoundingBundle"'));
 		expect(at).toBeLessThan(source.indexOf('name="AssociationRequestApproval"'));
+	});
+
+	it("J-6: JoinNetworkByScan binds JoinNetworkByScanScreen and the same title, with no initialParams", () => {
+		const registration = extractRegistration(source, "JoinNetworkByScan");
+		expect(registration).toContain("component={JoinNetworkByScanScreen}");
+		expect(registration).toContain('t("joinNetworkTitle")');
+		expect(registration).not.toContain("initialParams");
+		const types = fs.readFileSync(path.join(__dirname, "..", "types.ts"), "utf8");
+		expect(types.match(/\bJoinNetworkByScan: undefined;/g) ?? []).toHaveLength(1);
 	});
 });
 

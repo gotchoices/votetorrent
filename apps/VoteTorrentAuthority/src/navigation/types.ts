@@ -21,8 +21,10 @@ export type RootStackParamList = {
 	Hosting: undefined;
 	// Phase 62 plan 62-23 — D-35/D-36 founding-bundle import (Surface 2)
 	ImportFoundingBundle: undefined;
-	// D-26 Join a network: paste screen; no params, so the join code never enters navigation state (UI-SPEC A1)
+	// D-26 Join a network: scan or paste screen; no params, so the join code never enters navigation state (UI-SPEC A1)
 	JoinNetwork: undefined;
+	// The Networks screen's Scan button: the same Join screen with the camera scanner open on arrival; no params either
+	JoinNetworkByScan: undefined;
 	// Phase 62 plan 62-27 — D-41/D-45 device-change review (Surface 4)
 	AssociationRequestApproval: { requestId: string; authorityId: string };
 	// Phase 62 plan 62-29 — D-17/D-20 key release ceremony (Surface 6), reached from a release-key task; the param is the public task object (ids and election metadata), never key material

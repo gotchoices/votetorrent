@@ -107,11 +107,9 @@ export default function NetworksScreen() {
 		}
 	}, [bootstrapAddr, node, t]);
 
-	// QR scanning is not yet wired (no camera dependency — see Plan 05). Honest
-	// placeholder: surface an inline note rather than a console stub.
-	const handleScanQr = useCallback(() => {
-		setJoinError(t("qrScanUnavailable"));
-	}, [t]);
+	// Scan QR code opens the camera straight away: the Join a network screen with its scanner
+	// already open. The scanned code stays in that screen's state; it never enters navigation params.
+	const handleScanQr = useCallback(() => navigation.navigate("JoinNetworkByScan"), [navigation]);
 
 	// Open Settings from the owner-trust notice: Home > Settings is where the "Require saved owner
 	// trust" row lives. The same navigation call the app already uses for the Settings tab.
@@ -262,7 +260,7 @@ export default function NetworksScreen() {
 
 			<View style={styles.section}>
 				<ThemedText type="title">{t("scanQrCode")}</ThemedText>
-				<CustomButton title={t("scan")} icon="qrcode" onPress={handleScanQr} />
+				<CustomButton title={t("scan")} icon="qrcode" testID="networks-scan-qr-button" onPress={handleScanQr} />
 			</View>
 
 			<View style={styles.section}>
