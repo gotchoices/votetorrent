@@ -752,6 +752,52 @@ test('S9 the chip, region and Reconnect geometry, the state colours, the narrow 
 	assert.doesNotMatch(SHELL_CSS, /#[0-9a-fA-F]{3,6}\b/);
 });
 
+// S9b (2026-11-23 todo) -- narrow widths. The shell had no side gutter, and the switcher list was
+// anchored to the switcher button with left: 0 and a 260-360px width, so wherever the wrapping
+// actions put the button the open list ran past the viewport (measured in Chromium: right edge
+// 369 at 320/360px wide, 1386 at 1280px). The list now hangs from the top bar's right edge and
+// never exceeds the bar; at 900px and below it spans the bar. The panel grid's 340px column
+// minimum would overflow a phone inside the gutter, so it is capped at the content box.
+
+/** Every S9b matcher over a shell.css and app.css text pair; returns the failed check names. @param {string} shell @param {string} app */
+function narrowChecks(shell, app) {
+	/** @type {string[]} */
+	const failed = [];
+	const check = (/** @type {string} */ name, /** @type {boolean} */ ok) => {
+		if (!ok) failed.push(name);
+	};
+	check('gutter', /padding: var\(--space-md\)/.test(ruleBody(shell, '.sh-layout')));
+	check('bar-anchors-list', /position: relative/.test(ruleBody(shell, '.sh-topbar')));
+	check('switcher-not-anchor', !/position: relative/.test(ruleBody(shell, '.sh-switcher')));
+	const list = ruleBody(shell, '.sh-switcher-list');
+	check('list-right-anchored', /\bright: 0/.test(list) && !/\bleft: 0/.test(list));
+	check('list-capped-to-bar', /max-width: min\(360px, 100%\)/.test(list) && /min-width: min\(260px, 100%\)/.test(list));
+	const narrowAt = shell.indexOf('@media (max-width: 900px) {\n\t.sh-switcher-list');
+	const narrow = narrowAt === -1 ? '' : shell.slice(narrowAt, shell.indexOf('\n}\n', narrowAt));
+	check('narrow-list-spans-bar', /left: 0/.test(narrow) && /max-width: none/.test(narrow));
+	const grid = ruleBody(app.replace(/\/\*[\s\S]*?\*\//g, ''), '.panel-grid');
+	check('grid-column-capped', /minmax\(min\(340px, 100%\), 1fr\)/.test(grid));
+	return failed;
+}
+
+const APP_CSS = readFileSync(dashboardSrc('app.css'), 'utf8');
+
+test('S9b control: the narrow-width matchers pass the shipped CSS shape and each bites on the old rule', () => {
+	assert.deepEqual(narrowChecks(SHELL_CSS, APP_CSS), [], 'the shipped CSS fails a narrow-width matcher');
+	const oldList = '.sh-switcher-list {\n\tposition: absolute;\n\tleft: 0;\n\tmin-width: 260px;\n\tmax-width: 360px;\n}';
+	const planted = narrowChecks(
+		'.sh-layout {\n\tgap: var(--space-md);\n}\n.sh-topbar {\n\tdisplay: flex;\n}\n.sh-switcher {\n\tposition: relative;\n}\n' + oldList,
+		'.panel-grid {\n\tgrid-template-columns: repeat(auto-fill, minmax(340px, 1fr));\n}',
+	);
+	for (const name of ['gutter', 'bar-anchors-list', 'switcher-not-anchor', 'list-right-anchored', 'list-capped-to-bar', 'narrow-list-spans-bar', 'grid-column-capped']) {
+		assert.ok(planted.includes(name), `the ${name} matcher is inert`);
+	}
+});
+
+test('S9b the shell has a 16px gutter, the switcher list stays inside the top bar at every width, and one panel column fits a phone', () => {
+	assert.deepEqual(narrowChecks(SHELL_CSS, APP_CSS), []);
+});
+
 // S10 -- pins kept from the old shell file.
 
 const PANELS_DIR = dashboardSrc('screens', 'panels');

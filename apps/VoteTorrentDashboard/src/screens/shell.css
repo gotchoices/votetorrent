@@ -20,6 +20,9 @@
 	display: flex;
 	flex-direction: column;
 	gap: var(--space-md);
+	/* The shell is the page root, so it carries the 16px side gutter itself. */
+	padding: var(--space-md);
+	min-width: 0;
 }
 
 .sh-body {
@@ -37,6 +40,9 @@
 /* Top bar ------------------------------------------------------------- */
 
 .sh-topbar {
+	/* The switcher list is positioned against the bar, not the switcher button: the button sits
+	 * wherever the wrapping actions put it, and a list anchored to it ran past the viewport. */
+	position: relative;
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
@@ -241,7 +247,7 @@
 /* Network switcher ------------------------------------------------------ */
 
 .sh-switcher {
-	position: relative;
+	position: static;
 }
 
 .sh-switcher-button {
@@ -259,10 +265,11 @@
 .sh-switcher-list {
 	position: absolute;
 	top: calc(100% + var(--space-xs));
-	left: 0;
+	right: 0;
 	z-index: 10;
-	min-width: 260px;
-	max-width: 360px;
+	box-sizing: border-box;
+	min-width: min(260px, 100%);
+	max-width: min(360px, 100%);
 	background: var(--surface);
 	border: 1px solid var(--border);
 	border-radius: var(--radius);
@@ -270,6 +277,15 @@
 	display: flex;
 	flex-direction: column;
 	gap: var(--space-xs);
+}
+
+/* At 900 px and below the actions wrap under the identity, so the open list spans the bar. */
+@media (max-width: 900px) {
+	.sh-switcher-list {
+		left: 0;
+		min-width: 0;
+		max-width: none;
+	}
 }
 
 .sh-switcher-row {
