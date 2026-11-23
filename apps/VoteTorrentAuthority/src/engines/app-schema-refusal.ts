@@ -21,7 +21,15 @@
 
 const MAX_CAUSE_DEPTH = 5;
 
-/** True when `err`, or one of its first five causes, is cadre-core's `AppSchemaRefusedError`. Never throws. */
+/**
+ * Both refusals have the same remedy, update the app:
+ *  - `AppSchemaRefusedError`: this build's schema cannot be applied to the network's data.
+ *  - `AppSchemaOutdatedError`: the network records a higher App schema version than this build
+ *    declares (`VOTETORRENT_SCHEMA_VERSION`), because another member already runs a newer build.
+ */
+const REFUSAL_NAMES: ReadonlySet<unknown> = new Set(["AppSchemaRefusedError", "AppSchemaOutdatedError"]);
+
+/** True when `err`, or one of its first five causes, is cadre-core's `AppSchemaRefusedError` or `AppSchemaOutdatedError`. Never throws. */
 export function isAppSchemaRefusal(err: unknown): boolean {
 	const visited = new Set<unknown>();
 	let current: unknown = err;
@@ -29,7 +37,7 @@ export function isAppSchemaRefusal(err: unknown): boolean {
 		if (current === null || typeof current !== "object" || visited.has(current)) return false;
 		visited.add(current);
 		try {
-			if ((current as { name?: unknown }).name === "AppSchemaRefusedError") return true;
+			if (REFUSAL_NAMES.has((current as { name?: unknown }).name)) return true;
 			current = (current as { cause?: unknown }).cause;
 		} catch {
 			return false;

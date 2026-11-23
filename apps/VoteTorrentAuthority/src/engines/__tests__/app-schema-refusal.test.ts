@@ -7,6 +7,13 @@ function refusal(): Error {
 }
 
 describe("isAppSchemaRefusal", () => {
+	it("matches the outdated-version refusal (the network records a newer App schema version), also through cause", () => {
+		const outdated = new Error("App schema version 1 is below the version 2 this strand records");
+		outdated.name = "AppSchemaOutdatedError";
+		expect(isAppSchemaRefusal(outdated)).toBe(true);
+		expect(isAppSchemaRefusal(new Error("outer", { cause: outdated }))).toBe(true);
+	});
+
 	it("matches the refusal itself and through vote-engine's open() wrapper (cause)", () => {
 		expect(isAppSchemaRefusal(refusal())).toBe(true);
 		const wrapped = new Error("Network not opened in this session — use create() first: x", { cause: refusal() });
