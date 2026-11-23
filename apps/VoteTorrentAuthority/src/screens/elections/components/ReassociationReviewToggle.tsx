@@ -171,7 +171,7 @@ export function ReassociationReviewToggle({
 						<FontAwesome6
 							name={isSelected ? "circle-dot" : "circle"}
 							size={20}
-							color={isSelected ? colors.accent : colors.textSecondary}
+							color={isSelected ? colors.primary : colors.textSecondary}
 						/>
 						<ThemedText type="default" style={localStyles.optionLabel}>
 							{t(labelKey)}
