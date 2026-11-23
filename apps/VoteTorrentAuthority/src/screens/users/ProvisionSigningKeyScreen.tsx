@@ -764,7 +764,7 @@ export default function ProvisionSigningKeyScreen() {
 				</ThemedText>
 				{phase === "success" && intakeRenewalFailed && (
 					<View testID="signing-key-intake-renewal-failed">
-						<ThemedText type="small" style={[localStyles.body, { color: colors.warning }]}>
+						<ThemedText type="small" style={[localStyles.body, { color: colors.warningText }]}>
 							{t("officerIntakeRenewalFailedBody")}
 						</ThemedText>
 					</View>

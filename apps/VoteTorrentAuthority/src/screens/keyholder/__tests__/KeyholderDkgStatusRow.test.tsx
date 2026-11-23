@@ -30,6 +30,7 @@ jest.mock('react-native-vector-icons/FontAwesome6', () => 'FontAwesome6');
 const SENTINEL_COLORS = {
   success: '#00FF00',
   warning: '#FFA500',
+  warningText: '#806600',
   error: '#FF0000',
   textSecondary: '#888888',
 };
@@ -71,7 +72,7 @@ describe('KeyholderDkgStatusRow (Surface 6)', () => {
     const tr = render('thresholdTooLow');
     const node = findByTestID(tr, 'keyholder-dkg-status-thresholdTooLow');
     expect(node.props.children).toBe(resources.en.translation.keyholderDkgStatusThresholdTooLow);
-    expect(StyleSheet.flatten(node.props.style).color).toBe(SENTINEL_COLORS.warning);
+    expect(StyleSheet.flatten(node.props.style).color).toBe(SENTINEL_COLORS.warningText);
     const icon = tr.root.findByType(require('react-native-vector-icons/FontAwesome6'));
     expect(icon.props.name).toBe('triangle-exclamation');
     expect(typeof resources.es.translation.keyholderDkgStatusThresholdTooLow).toBe('string');
@@ -99,7 +100,7 @@ describe('KeyholderDkgStatusRow (Surface 6)', () => {
     const tr = render('complaint');
     const node = findByTestID(tr, 'keyholder-dkg-status-complaint');
     expect(node.props.children).toBe(resources.en.translation.keyholderDkgStatusComplaint);
-    expect(StyleSheet.flatten(node.props.style).color).toBe(SENTINEL_COLORS.warning);
+    expect(StyleSheet.flatten(node.props.style).color).toBe(SENTINEL_COLORS.warningText);
     const icon = tr.root.findByType(require('react-native-vector-icons/FontAwesome6'));
     expect(icon.props.name).toBe('triangle-exclamation');
   });
@@ -109,7 +110,7 @@ describe('KeyholderDkgStatusRow (Surface 6)', () => {
     const node = findByTestID(tr, 'keyholder-dkg-status-failed');
     expect(node.props.children).toBe(resources.en.translation.keyholderDkgStatusFailed);
     expect(node.props.children).not.toBe(resources.en.translation.closed);
-    expect(StyleSheet.flatten(node.props.style).color).toBe(SENTINEL_COLORS.warning);
+    expect(StyleSheet.flatten(node.props.style).color).toBe(SENTINEL_COLORS.warningText);
     const icon = tr.root.findByType(require('react-native-vector-icons/FontAwesome6'));
     expect(icon.props.name).toBe('circle-xmark');
     expect(icon.props.color).not.toBe(SENTINEL_COLORS.error);

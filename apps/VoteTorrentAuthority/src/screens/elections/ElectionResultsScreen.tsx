@@ -284,7 +284,7 @@ export default function ElectionResultsScreen() {
 
 				{results?.status === "tallied" && results.blockCount === 0 ? (
 					<View testID="results-no-blocks" style={[styles.cardSurface, { backgroundColor: colors.card }]}>
-						<ThemedText type="defaultSemiBold" style={{ color: colors.warning }}>
+						<ThemedText type="defaultSemiBold" style={{ color: colors.warningText }}>
 							{t("resultsNoBlocksYet")}
 						</ThemedText>
 					</View>
@@ -298,12 +298,12 @@ export default function ElectionResultsScreen() {
 							</ThemedText>
 							<ThemedText type="small">{t("resultsBlocks", { count: results.blockCount })}</ThemedText>
 							{results.totals.invalid > 0 ? (
-								<ThemedText type="small" testID="results-invalid-total" style={{ color: colors.warning }}>
+								<ThemedText type="small" testID="results-invalid-total" style={{ color: colors.warningText }}>
 									{t("resultsInvalidVotes", { count: results.totals.invalid })}
 								</ThemedText>
 							) : null}
 							{results.totals.excluded > 0 ? (
-								<ThemedText type="small" testID="results-excluded-total" style={{ color: colors.warning }}>
+								<ThemedText type="small" testID="results-excluded-total" style={{ color: colors.warningText }}>
 									{t("resultsExcludedVotes", { count: results.totals.excluded })}
 								</ThemedText>
 							) : null}
@@ -346,7 +346,7 @@ export default function ElectionResultsScreen() {
 								{t("resultsPublishedMatches", { date: new Date(publication.published.publishedAt).toLocaleString() })}
 							</ThemedText>
 						) : (
-							<ThemedText testID="results-published-differs" style={{ color: colors.warning }}>
+							<ThemedText testID="results-published-differs" style={{ color: colors.warningText }}>
 								{t("resultsPublishedDiffers", { published: publication.published.blockCount, local: tallied.blockCount })}
 							</ThemedText>
 						)}
@@ -362,7 +362,7 @@ export default function ElectionResultsScreen() {
 							</ThemedText>
 						) : null}
 						{officer === "yes" && !coverageReady ? (
-							<ThemedText type="small" testID="results-publish-waiting" style={{ color: colors.warning }}>
+							<ThemedText type="small" testID="results-publish-waiting" style={{ color: colors.warningText }}>
 								{t("resultsPublishWaitingForBlocks")}
 							</ThemedText>
 						) : null}
