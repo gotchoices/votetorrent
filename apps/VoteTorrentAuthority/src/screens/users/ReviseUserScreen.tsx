@@ -45,7 +45,8 @@ export function ReviseUserScreen() {
 				event: UserHistoryEvent.revise,
 				info: {
 					name: userState.name,
-					image: userState.image as ImageRef,
+					// Carry the stored image forward: a missing imageRef writes a null ImageRef over it.
+					imageRef: userState.imageRef as ImageRef,
 				},
 				timestamp: Date.now(),
 				signature: realSignature,
@@ -57,11 +58,10 @@ export function ReviseUserScreen() {
 		}
 	};
 
+	// `imageRef` is the field vote-core's User declares and the engine stores (was `image`, read by
+	// nothing: an entered URL was dropped and a stored one never showed).
 	const handleImageUrlChange = (text: string) => {
-		setUserState({ ...userState, image: { url: text } });
-		if (text.startsWith("http")) {
-			setUserState({ ...userState, image: { url: text } });
-		}
+		setUserState({ ...userState, imageRef: { url: text } });
 		setEdited(true);
 	};
 
@@ -110,7 +110,7 @@ export function ReviseUserScreen() {
 					/>
 					<CustomTextInput
 						title={t("imageUrl")}
-						value={userState.image?.url}
+						value={userState.imageRef?.url}
 						onChangeText={handleImageUrlChange}
 						isImageUrlField={true}
 						makePermanentPressed={() => {}}
@@ -118,9 +118,9 @@ export function ReviseUserScreen() {
 						keyboardType="url"
 						autoCapitalize="none"
 					/>
-					{userState.image?.url && (
+					{userState.imageRef?.url && (
 						<Image
-							source={{ uri: userState.image.url }}
+							source={{ uri: userState.imageRef.url }}
 							style={styles.image}
 							resizeMode="contain"
 						/>

@@ -36,11 +36,10 @@ export function DefaultUserScreen() {
 		}
 	};
 
+	// `imageRef` is the field vote-core's DefaultUser declares and the engine stores; the screen used
+	// `image`, which nothing reads, so an entered URL was dropped and a stored one never showed.
 	const handleImageUrlChange = (text: string) => {
-		setDefaultUserState({ ...defaultUserState, image: { url: text } });
-		if (text.startsWith("http")) {
-			setDefaultUserState({ ...defaultUserState, image: { url: text } });
-		}
+		setDefaultUserState({ ...defaultUserState, imageRef: { url: text } });
 		setEdited(true);
 	};
 
@@ -60,7 +59,7 @@ export function DefaultUserScreen() {
 				/>
 				<CustomTextInput
 					title={t("imageUrl")}
-					value={defaultUserState.image?.url}
+					value={defaultUserState.imageRef?.url}
 					onChangeText={handleImageUrlChange}
 					isImageUrlField={true}
 					makePermanentPressed={() => {}}
@@ -69,9 +68,9 @@ export function DefaultUserScreen() {
 					autoCapitalize="none"
 				/>
 
-				{defaultUserState.image?.url && (
+				{defaultUserState.imageRef?.url && (
 					<Image
-						source={{ uri: defaultUserState.image.url }}
+						source={{ uri: defaultUserState.imageRef.url }}
 						style={styles.image}
 						resizeMode="contain"
 					/>
