@@ -35,6 +35,9 @@ export function computeValidThrough(registeredAt: string | null): string {
 		return '';
 	}
 	const validThrough = new Date(registeredAt);
+	if (Number.isNaN(validThrough.getTime())) {
+		return '';
+	}
 	validThrough.setFullYear(validThrough.getFullYear() + 1);
 	const mm = String(validThrough.getMonth() + 1).padStart(2, '0');
 	const dd = String(validThrough.getDate()).padStart(2, '0');
@@ -156,26 +159,30 @@ export function RegistrationCard({
 						{t('registered.identityLine', {fullName, party: partyLabel, dob: draft.dob})}
 					</Text>
 				) : null}
-				<View
-					style={[
-						styles.validThroughBadge,
-						{backgroundColor: colors.validBadge, borderRadius: radii.pill},
-					]}>
-					<Text
-						testID="registration-card-valid-through"
+				{/* A registration approved on the device has no registeredAt here, so there is no date to show:
+				    the badge is left out rather than reading "Valid through" with nothing after it. */}
+				{validThrough ? (
+					<View
 						style={[
-							styles.validThroughText,
-							{
-								color: colors.light,
-								fontFamily: fonts.medium.fontFamily,
-								fontWeight: fonts.medium.fontWeight,
-								fontSize: typeScale.caption.fontSize,
-								lineHeight: typeScale.caption.lineHeight,
-							},
+							styles.validThroughBadge,
+							{backgroundColor: colors.validBadge, borderRadius: radii.pill},
 						]}>
-						{t('registered.validThrough', {validThrough})}
-					</Text>
-				</View>
+						<Text
+							testID="registration-card-valid-through"
+							style={[
+								styles.validThroughText,
+								{
+									color: colors.light,
+									fontFamily: fonts.medium.fontFamily,
+									fontWeight: fonts.medium.fontWeight,
+									fontSize: typeScale.caption.fontSize,
+									lineHeight: typeScale.caption.lineHeight,
+								},
+							]}>
+							{t('registered.validThrough', {validThrough})}
+						</Text>
+					</View>
+				) : null}
 			</View>
 
 			<View style={[globalStyles.cardSurface, styles.updateBlock, {backgroundColor: colors.secondaryButtonSurface}]}>

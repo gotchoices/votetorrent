@@ -119,6 +119,15 @@ describe('RegistrationCard (REG-01/REG-05)', () => {
 			expect(onUpdateRegistration).toHaveBeenCalledTimes(1);
 		});
 
+		// todo 2026-11-23-voter-valid-through-blank-for-device-approved: an approved registration with no date
+		// (the engine-read path passes registeredAt null) must not show "Valid through" with an empty value.
+		it.each([[null], ['not-a-date']])('leaves the valid-through badge out when registeredAt is %p', registeredAt => {
+			const tr = renderCard({isRegistered: true, draft: REGISTERED_DRAFT, registeredAt});
+			expect(tr.root.findAllByProps({testID: 'registration-card-valid-through'})).toHaveLength(0);
+			expect(JSON.stringify(tr.toJSON())).not.toMatch(/Valid through|NaN/);
+			expect(tr.root.findAllByProps({testID: 'registration-card-update'}).length).toBeGreaterThan(0);
+		});
+
 		// Manual-QA gap-closure (Phase 41 re-verification): party is a stable KEY resolved via
 		// t('form.party.' + key) at this display site — with no party selected (''), the guard
 		// must render an empty value rather than the broken t('form.party.') string.
