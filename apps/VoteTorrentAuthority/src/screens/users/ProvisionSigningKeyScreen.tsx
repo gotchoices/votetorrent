@@ -123,7 +123,34 @@ type ScreenPhase =
 	| "awaiting-network"
 	| "no-recovery"
 	| "network-user-unresolved"
+	| "identity-unrecoverable"
 	| "recovery-unsupported-os";
+
+/**
+ * Whether this device's signing key is a registered key of the user, read WITHOUT a prompt and
+ * without touching the Keystore (`getCurrentDeviceKey`, read-only). `false` only on evidence: the
+ * key is invalidated, absent, or readable but not among the user's active keys (a desync).
+ * `undefined` when it cannot be told (a read failure, an older native module): the caller must not
+ * claim the device is unrecoverable without evidence.
+ */
+async function signingKeyRegistration(
+	native: NativeAttestationSpec,
+	activeKeys: ReadonlyArray<{ key: string }>,
+): Promise<boolean | undefined> {
+	try {
+		const current = (await native.getCurrentDeviceKey(SIGNING_KEY_ALIAS)) as
+			| { publicKeyCompressedHex?: unknown }
+			| null
+			| undefined;
+		const hex = current?.publicKeyCompressedHex;
+		if (typeof hex !== "string" || hex.length === 0) return undefined;
+		return activeKeys.some((k) => k.key === hex);
+	} catch (err) {
+		const code = (err as { code?: unknown } | null | undefined)?.code;
+		if (code === "DEVICE_KEY_INVALIDATED" || code === "DEVICE_KEY_ABSENT") return false;
+		return undefined;
+	}
+}
 
 /**
  * A native-module rejection carries a string `code` (CODE_TO_CLASS's codes, BIOMETRIC_ERROR, or one
@@ -501,6 +528,20 @@ export default function ProvisionSigningKeyScreen() {
 				(k) => k.key === recoveryKey.publicKeyCompressedHex,
 			);
 			if (!recoveryKeyRegistered) {
+				// The set-up-first copy below only helps while the signing key can still sign the
+				// recovery key's registration. When it cannot either, nothing on this device can sign
+				// for this user and that setup's addKey is bound to fail SignatureValid: say so
+				// (terminal), instead of sending the officer round a loop whose only exit is
+				// clearing the app's data.
+				if ((await signingKeyRegistration(native, beforeSummary?.activeKeys ?? [])) === false) {
+					throw Object.assign(
+						new Error(
+							"ProvisionSigningKeyScreen.handleRecovery: neither the recovery key nor this device's signing " +
+								"key is a registered, active UserKey on this network — nothing on this device can sign for this user.",
+						),
+						{ code: "SIGNING_IDENTITY_UNRECOVERABLE" },
+					);
+				}
 				throw Object.assign(
 					new Error(
 						"ProvisionSigningKeyScreen.handleRecovery: recovery key is not a registered, " +
@@ -689,6 +730,10 @@ export default function ProvisionSigningKeyScreen() {
 			setPhase("recovery-unsupported-os");
 			return;
 		}
+		if (cls === "signing-identity-unrecoverable") {
+			setPhase("identity-unrecoverable");
+			return;
+		}
 		setErrorClass(cls);
 		setPhase("idle");
 	}
@@ -794,6 +839,25 @@ export default function ProvisionSigningKeyScreen() {
 				</ThemedText>
 				<ThemedText type="small" style={[localStyles.body, { color: colors.text }]}>
 					{t("signingKeyProvisioningNoRecoveryBody")}
+				</ThemedText>
+			</ScrollView>
+		);
+	}
+
+	// Terminal: neither the recovery key nor this device's signing key can sign for the user (see
+	// `signingKeyRegistration`). Same zero-button shape as the two terminal states around it.
+	if (phase === "identity-unrecoverable") {
+		return (
+			<ScrollView
+				testID="signing-key-provisioning-screen"
+				style={styles.container}
+				contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
+			>
+				<ThemedText type="defaultSemiBold" style={[localStyles.heading, { color: colors.error }]}>
+					{t("signingKeyProvisioningIdentityUnrecoverableHeading")}
+				</ThemedText>
+				<ThemedText type="small" style={[localStyles.body, { color: colors.text }]}>
+					{t("signingKeyProvisioningIdentityUnrecoverableBody")}
 				</ThemedText>
 			</ScrollView>
 		);

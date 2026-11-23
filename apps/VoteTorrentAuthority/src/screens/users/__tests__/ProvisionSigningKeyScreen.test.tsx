@@ -145,6 +145,7 @@ jest.mock("react-native", () => {
 		produceAttestation: jest.fn(),
 		signWithDeviceKey: jest.fn(),
 		signWithRecoveryKey: jest.fn(),
+		getCurrentDeviceKey: jest.fn(),
 	};
 	const actualTurboModuleRegistry = actual.TurboModuleRegistry as { getEnforcing: (name: string) => unknown };
 	const turboModuleRegistryProxy = new Proxy(actualTurboModuleRegistry, {
@@ -186,6 +187,7 @@ const { __attestationNativeFake: nativeFake, __setPlatformOS: setPlatformOS } = 
 		produceAttestation: jest.Mock;
 		signWithDeviceKey: jest.Mock;
 		signWithRecoveryKey: jest.Mock;
+		getCurrentDeviceKey: jest.Mock;
 	};
 };
 
@@ -1073,3 +1075,101 @@ describe("ProvisionSigningKeyScreen — engine faults are never shown as a biome
 		});
 	});
 });
+
+// 2026-08-18 todo (interrupted handleRecovery unrecoverable in-app): when the recovery key was never
+// registered AND the device's signing key cannot sign for this user either (invalidated, absent, or
+// no longer the registered key), nothing on this device can sign: the old copy sent the officer to a
+// Secure Signing setup whose addKey is bound to fail SignatureValid, a loop with `pm clear` as the
+// only exit. The screen now says so in a terminal state.
+describe("ProvisionSigningKeyScreen — recovery when nothing on the device can sign", () => {
+	beforeEach(() => {
+		mockRouteParams = { reason: "invalidated" };
+		mockGetSummary.mockResolvedValue({
+			id: "user-1",
+			name: "Officer One",
+			activeKeys: [{ key: OLD_SIGNING_KEY_HEX, type: "P", expiration: Date.now() + 1000 }],
+		});
+		nativeFake.provisionRecoveryKey.mockResolvedValue({ publicKeyBase64: "R", publicKeyCompressedHex: RECOVERY_KEY_HEX });
+		nativeFake.getCurrentDeviceKey.mockReset();
+		jest.spyOn(console, "warn").mockImplementation(() => undefined);
+	});
+	afterEach(() => jest.restoreAllMocks());
+
+	function expectNothingMutated() {
+		expect(nativeFake.provisionDeviceKey).not.toHaveBeenCalled();
+		expect(mockMarkRecoveryInProgress).not.toHaveBeenCalled();
+		expect(mockRevokeKey).not.toHaveBeenCalled();
+		expect(mockAddKey).not.toHaveBeenCalled();
+	}
+
+	function expectTerminal(tr: renderer.ReactTestRenderer) {
+		const json = JSON.stringify(tr.toJSON());
+		expect(json).toContain("signingKeyProvisioningIdentityUnrecoverableHeading");
+		expect(json).toContain("signingKeyProvisioningIdentityUnrecoverableBody");
+		expect(json).not.toContain("deviceSigningErrorRecoveryKeyNotRegistered");
+		expect(tr.root.findAll((n) => n.props?.testID === "signing-key-provisioning-primary-button")).toHaveLength(0);
+	}
+
+	it("signing key invalidated: terminal state, no Keystore or network write", async () => {
+		nativeFake.getCurrentDeviceKey.mockRejectedValue(Object.assign(new Error("x"), { code: "DEVICE_KEY_INVALIDATED" }));
+		const tr = await renderScreen();
+		await press(tr, primaryButton(tr));
+		expect(nativeFake.getCurrentDeviceKey).toHaveBeenCalledWith("VOTETORRENT_AUTHORITY_SIGNING_KEY_V1");
+		expectNothingMutated();
+		expectTerminal(tr);
+	});
+
+	it("signing key absent: terminal state", async () => {
+		nativeFake.getCurrentDeviceKey.mockRejectedValue(Object.assign(new Error("x"), { code: "DEVICE_KEY_ABSENT" }));
+		const tr = await renderScreen();
+		await press(tr, primaryButton(tr));
+		expectNothingMutated();
+		expectTerminal(tr);
+	});
+
+	it("signing key readable but not a registered key of this user (desync): terminal state", async () => {
+		nativeFake.getCurrentDeviceKey.mockResolvedValue({ publicKeyCompressedHex: NEW_SIGNING_KEY_HEX });
+		const tr = await renderScreen();
+		await press(tr, primaryButton(tr));
+		expectNothingMutated();
+		expectTerminal(tr);
+	});
+
+	it("signing key still registered: the existing set-up-first copy, inline", async () => {
+		nativeFake.getCurrentDeviceKey.mockResolvedValue({ publicKeyCompressedHex: OLD_SIGNING_KEY_HEX });
+		const tr = await renderScreen();
+		await press(tr, primaryButton(tr));
+		expectNothingMutated();
+		const json = JSON.stringify(tr.toJSON());
+		expect(json).toContain("deviceSigningErrorRecoveryKeyNotRegistered");
+		expect(json).not.toContain("signingKeyProvisioningIdentityUnrecoverableHeading");
+	});
+
+	it("the signing key cannot be read: no claim without evidence, the existing copy", async () => {
+		nativeFake.getCurrentDeviceKey.mockRejectedValue(Object.assign(new Error("x"), { code: "DEVICE_KEY_READ_FAILED" }));
+		const tr = await renderScreen();
+		await press(tr, primaryButton(tr));
+		expectNothingMutated();
+		const json = JSON.stringify(tr.toJSON());
+		expect(json).toContain("deviceSigningErrorRecoveryKeyNotRegistered");
+		expect(json).not.toContain("signingKeyProvisioningIdentityUnrecoverableHeading");
+	});
+
+	it("a registered recovery key never consults the signing key", async () => {
+		mockGetSummary.mockResolvedValue({
+			id: "user-1",
+			name: "Officer One",
+			activeKeys: [
+				{ key: OLD_SIGNING_KEY_HEX, type: "P", expiration: Date.now() + 1000 },
+				{ key: RECOVERY_KEY_HEX, type: "P", expiration: Date.now() + 1000 },
+			],
+		});
+		nativeFake.provisionDeviceKey.mockResolvedValue({ publicKeyBase64: "N", publicKeyCompressedHex: NEW_SIGNING_KEY_HEX });
+		nativeFake.signWithRecoveryKey.mockResolvedValue({ signatureHex: "cafebabe" });
+		const tr = await renderScreen();
+		await press(tr, primaryButton(tr));
+		expect(nativeFake.getCurrentDeviceKey).not.toHaveBeenCalled();
+		expect(JSON.stringify(tr.toJSON())).toContain("signingKeyProvisioningSuccessHeading");
+	});
+});
+

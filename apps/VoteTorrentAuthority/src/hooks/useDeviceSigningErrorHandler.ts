@@ -105,6 +105,7 @@ export function useDeviceSigningErrorHandler(): (err: unknown) => DeviceSigningE
 					navigation.navigate('ProvisionSigningKey', { reason: 'invalidated' });
 					return { handled: true };
 
+				case 'signing-identity-unrecoverable':
 				case 'recovery-unsupported-os':
 					// Same shape as `no-device-credential` above: a terminal class that
 					// deliberately has NO entry in DEVICE_SIGNING_ERROR_COPY_KEY and is not

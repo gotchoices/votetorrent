@@ -325,6 +325,9 @@ const resources = {
 			signingKeyProvisioningNoRecoveryHeading: 'This device no longer has a screen lock',
 			signingKeyProvisioningNoRecoveryBody:
 				'Both your signing key and its recovery key were protected by your device\'s screen lock, which has been removed. They cannot be recovered on this device — ask an officer to invite this device again.',
+			signingKeyProvisioningIdentityUnrecoverableHeading: "This device can't sign for you any more",
+			signingKeyProvisioningIdentityUnrecoverableBody:
+				"The signing key on this device no longer matches your account on this network, and the recovery key was never registered, so the key can't be replaced here and Secure Signing setup can't finish. Ask an officer to invite this device again.",
 			signingKeyProvisioningRecoveryUnsupportedOsHeading: "Recovery isn't available on this Android version",
 			signingKeyProvisioningRecoveryUnsupportedOsBody:
 				"Replacing a signing key requires Android 11 or newer. This device runs an older version, so its signing key can't be replaced here — ask an officer to invite this device again.",
@@ -1794,6 +1797,9 @@ const resources = {
 			signingKeyProvisioningNoRecoveryHeading: 'Este dispositivo ya no tiene bloqueo de pantalla',
 			signingKeyProvisioningNoRecoveryBody:
 				'Tanto tu clave de firma como su clave de recuperación estaban protegidas por el bloqueo de pantalla de tu dispositivo, que fue eliminado. No se pueden recuperar en este dispositivo — pídele a un funcionario que invite a este dispositivo nuevamente.',
+			signingKeyProvisioningIdentityUnrecoverableHeading: 'Este dispositivo ya no puede firmar por ti',
+			signingKeyProvisioningIdentityUnrecoverableBody:
+				'La clave de firma de este dispositivo ya no coincide con tu cuenta en esta red y la clave de recuperación nunca se registró, así que la clave no se puede reemplazar aquí y la configuración de Firma Segura no puede terminar. Pide a un funcionario que vuelva a invitar este dispositivo.',
 			signingKeyProvisioningRecoveryUnsupportedOsHeading: 'La recuperación no está disponible en esta versión de Android',
 			signingKeyProvisioningRecoveryUnsupportedOsBody:
 				'Reemplazar una clave de firma requiere Android 11 o una versión más reciente. Este dispositivo usa una versión anterior, por lo que su clave de firma no se puede reemplazar aquí — pídele a un funcionario que invite a este dispositivo nuevamente.',
