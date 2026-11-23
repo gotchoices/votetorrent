@@ -192,7 +192,7 @@ export default function SendVoteCard({electionId, electionRevision, envelope, ba
 						disabled={sending}
 						onPress={() => { void onSend(); }}
 						style={[styles.button, {backgroundColor: colors.primary, borderRadius: radii.pill, opacity: sending ? 0.5 : 1}]}>
-						<Text style={[styles.buttonLabel, {color: colors.background}]}>
+						<Text testID="send-vote-label" style={[styles.buttonLabel, {color: colors.light}]}>
 							{t(anyNotSent || outcome !== null ? 'send.retryCta' : 'send.cta')}
 						</Text>
 					</Pressable>

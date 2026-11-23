@@ -5,7 +5,7 @@
  */
 import React from 'react';
 import renderer from 'react-test-renderer';
-import {Platform} from 'react-native';
+import {Platform, StyleSheet} from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {NavigationContainer} from '@react-navigation/native';
 jest.mock('../../../providers/VoterAppProvider');
@@ -15,7 +15,7 @@ import {VoterAppProvider} from '../../../providers/VoterAppProvider';
 import {runVoteSendFlow} from '../../../engines/vote-send-flow';
 import {recordVoteSent} from '../../../engines/vote-sent-store';
 import SendVoteCard from '../SendVoteCard';
-import {lightTheme} from '../../../theme/themes';
+import {darkTheme, lightTheme} from '../../../theme/themes';
 import i18n from '../../../i18n';
 
 let tr: renderer.ReactTestRenderer | null = null;
@@ -26,10 +26,10 @@ async function flush() {
 		await renderer.act(async () => { await new Promise<void>(r => setTimeout(r, 0)); });
 	}
 }
-async function mount(ballotIds = ['b1', 'b2']) {
+async function mount(ballotIds = ['b1', 'b2'], theme = lightTheme) {
 	await renderer.act(async () => {
 		tr = renderer.create(
-			<NavigationContainer theme={lightTheme}>
+			<NavigationContainer theme={theme}>
 				<VoterAppProvider>
 					<SendVoteCard electionId="e1" electionRevision={1} envelope={{} as never} ballotIds={ballotIds} onAllSentChange={onAllSent} />
 				</VoterAppProvider>
@@ -58,6 +58,18 @@ afterEach(() => { renderer.act(() => tr?.unmount()); tr = null; setOS(realOS as 
 const allText = () => JSON.stringify(tr!.toJSON());
 
 describe('SendVoteCard', () => {
+	// todo 2026-11-23-voter-send-vote-label-dark-mode-contrast: the label sits on the primary fill, so it takes
+	// the fixed on-fill token `light` (as every other primary CTA does), never `background`, which is
+	// near-black in dark mode.
+	it.each([['light', lightTheme], ['dark', darkTheme]] as const)('the Send label uses the on-fill colour in the %s theme', async (_name, theme) => {
+		await mount(['b1'], theme);
+		const button = hosts('send-vote')[0]!;
+		expect(StyleSheet.flatten(button.props.style).backgroundColor).toBe(theme.colors.primary);
+		const label = hosts('send-vote-label')[0]!;
+		expect(StyleSheet.flatten(label.props.style).color).toBe(theme.colors.light);
+		expect(StyleSheet.flatten(label.props.style).color).not.toBe(theme.colors.background);
+	});
+
 	it('shows each ballot\'s status as the flow reports it, then "sent"', async () => {
 		(runVoteSendFlow as jest.Mock).mockImplementation(async (deps: {onStatus: (b: string, s: unknown) => void}) => {
 			deps.onStatus('b1', {phase: 'waiting', size: 2});
