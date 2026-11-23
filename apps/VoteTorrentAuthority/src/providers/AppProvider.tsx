@@ -75,6 +75,16 @@ interface AppContextType {
 		opener: StagingOpener;
 		decisionSigner: StagingDecisionSigner;
 	}) => PeerStagingTransports;
+	/**
+	 * Re-bind this session to the device user as it is stored NOW. Called after a signing-key
+	 * replacement commits: the replacement rewrites the stored device user, but the factory's
+	 * current user, the open network's ctx.user and every cached engine still hold the key minted
+	 * before it, so a write that binds `ctx.user.activeKeys[0]` (Propose ballot) failed `UserValid`
+	 * until a relaunch. Reads the stored user, binds it into the factory, re-opens the active
+	 * network with it and rebuilds the cached engines. Rejects when the re-open fails; the caller
+	 * decides what that means. Optional so existing `useApp` fakes stay valid.
+	 */
+	rebindDeviceUser?: () => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType | null>(null);
@@ -229,6 +239,24 @@ export const IDENTITY_REPAIR_BUDGET_MS = 5000;
  * 'network' / 'user' / ... engines captured the OLD user, so `clearEngineCache()` (its existing
  * public API) drops them and `getEngine("network", ref)` rebuilds against the repaired user.
  */
+/**
+ * Re-bind a session to `user` on an already-open network: bind the user into the factory, re-open
+ * the network with it (cache-first: `NetworksEngine.open` writes the user back into the cached ctx
+ * every sibling reads), then drop the cached engines, which captured the previous ctx, and rebuild
+ * the network engine. The same sequence the forked-identity repair uses after a repair commits.
+ */
+export async function rebindSessionUser(
+	factory: EngineFactory,
+	network: NetworkReference | undefined,
+	user: User,
+): Promise<void> {
+	factory.setCurrentUser(user);
+	if (!network) return;
+	await factory.getNetworksEngine().open(network, user);
+	factory.clearEngineCache();
+	await factory.getEngine("network", network);
+}
+
 async function repairForkedIdentityAfterOpen(
 	factory: EngineFactory,
 	network: NetworkReference,
@@ -332,6 +360,8 @@ export function AppProvider({ children }: PropsWithChildren) {
 		setHasNetworkState(value);
 	}, []);
 	const isNetworkSelected = useCallback(() => hasNetworkRef.current, []);
+	// The network this session last opened (boot re-attach or selectNetwork), for rebindDeviceUser.
+	const activeNetworkRef = useRef<NetworkReference | undefined>(undefined);
 	const [networksEngine, setNetworksEngine] = useState<INetworksEngine | null>(null);
 	// Classified boot failure. The raw error object (engine messages carry block ids and
 	// table names) never reaches state or render; only the closed kind does.
@@ -475,6 +505,7 @@ export function AppProvider({ children }: PropsWithChildren) {
 			await openWithPeerRetry(() => networksEngine.open(networkRef, user));
 			step = "network-engine";
 			await factory.getEngine("network", networkRef);
+			activeNetworkRef.current = networkRef;
 			step = "identity-repair";
 			user = (await repairForkedIdentityAfterOpen(factory, networkRef, user)) ?? user;
 		} catch (error) {
@@ -483,6 +514,16 @@ export function AppProvider({ children }: PropsWithChildren) {
 		}
 		setHasNetwork(true);
 	}, [setHasNetwork]);
+
+	// See AppContextType.rebindDeviceUser. The name only matters when no device user is stored,
+	// which cannot happen after a committed replacement; it mirrors selectNetwork's resolution.
+	const rebindDeviceUser = useCallback(async (): Promise<void> => {
+		const factory = engineFactoryRef.current!;
+		const defaultUserEng = await factory.getEngine<IDefaultUserEngine>("defaultUser");
+		const defaultUser = await defaultUserEng.get();
+		const user = await getOrCreateDeviceUser(defaultUser?.name ?? "Device User");
+		await rebindSessionUser(factory, activeNetworkRef.current, user);
+	}, []);
 
 	// ENG-05: register the CadreNode live peer-count source with the factory so
 	// NetworkEngine.getStatistics reports connected peers. connectedPeers is keyed
@@ -661,6 +702,7 @@ export function AppProvider({ children }: PropsWithChildren) {
 						factory.setCurrentUser(user);
 						await openWithRetry(networksEng, network, user);
 						await factory.getEngine("network", network);
+						activeNetworkRef.current = network;
 						// O-06: repair a forked device identity. Bounded (IDENTITY_REPAIR_BUDGET_MS) and
 						// abandoned before any write once this run is cancelled.
 						user = (await repairForkedIdentityAfterOpen(factory, network, user, () => cancelled)) ?? user;
@@ -875,6 +917,7 @@ export function AppProvider({ children }: PropsWithChildren) {
 				isNetworkSelected,
 				resolveDeviceSigner,
 				createPeerStagingTransports,
+				rebindDeviceUser,
 			}}
 		>
 			{children}

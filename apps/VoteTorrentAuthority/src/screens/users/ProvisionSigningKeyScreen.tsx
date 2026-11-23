@@ -129,7 +129,7 @@ export default function ProvisionSigningKeyScreen() {
 	const { colors } = useTheme() as ExtendedTheme;
 	const { t } = useTranslation();
 	const navigation = useNavigation<NavigationProp>();
-	const { getEngine, resolveDeviceSigner } = useApp();
+	const { getEngine, resolveDeviceSigner, rebindDeviceUser } = useApp();
 	const { reason } = useRoute().params as { reason: ProvisionReason };
 
 	const [phase, setPhase] = useState<ScreenPhase>("idle");
@@ -604,10 +604,21 @@ export default function ProvisionSigningKeyScreen() {
 			const noticeTimer = setTimeout(() => {
 				if (mountedRef.current) setIntakeRenewalFailed(true);
 			}, INTAKE_RENEWAL_NOTICE_TIMEOUT_MS);
-			void renewOfficerIntakeKeyAfterKeyReplacement({
-				getEngine,
-				createSigner: resolveDeviceSigner,
-			})
+			// The open network ctx and every cached engine still hold the key minted before this
+			// replacement; without a re-bind, writes that bind ctx.user's key (Propose ballot) fail
+			// UserValid until a relaunch. Re-bind first so the renewal below already runs on the new
+			// key. A failed re-bind never undoes the recovery (the stored identity is already right
+			// and the next launch binds it); it is logged with a fixed token only.
+			const rebound = (rebindDeviceUser?.() ?? Promise.resolve()).catch(() => {
+				console.warn("[key-replacement] outcome=rebind-failed");
+			});
+			void rebound
+				.then(() =>
+					renewOfficerIntakeKeyAfterKeyReplacement({
+						getEngine,
+						createSigner: resolveDeviceSigner,
+					}),
+				)
 				.catch(() => "failed" as const)
 				.then((renewal) => {
 					clearTimeout(noticeTimer);

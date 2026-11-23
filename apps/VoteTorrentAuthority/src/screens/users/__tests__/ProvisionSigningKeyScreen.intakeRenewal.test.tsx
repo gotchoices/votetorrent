@@ -88,8 +88,13 @@ jest.mock("../../registration/officer-intake-key", () => ({
 	renewOfficerIntakeKeyAfterKeyReplacement: (deps: unknown) => mockRenew(deps),
 }));
 
+const mockRebindDeviceUser = jest.fn<Promise<void>, []>();
 jest.mock("../../../providers/AppProvider", () => ({
-	useApp: () => ({ getEngine: mockGetEngine, resolveDeviceSigner: mockResolveDeviceSigner }),
+	useApp: () => ({
+		getEngine: mockGetEngine,
+		resolveDeviceSigner: mockResolveDeviceSigner,
+		rebindDeviceUser: () => mockRebindDeviceUser(),
+	}),
 }));
 
 const mockPersistProvisionedDeviceUser = jest.fn(async (_displayName: string, publicKeyCompressedHex: string, _options?: { userId?: string }) => ({
@@ -232,6 +237,7 @@ beforeEach(() => {
 	mockDeviceUserFixture = undefined;
 	mockProvisioningRecordFixture = undefined;
 	mockRenew.mockResolvedValue("not-needed");
+	mockRebindDeviceUser.mockResolvedValue(undefined);
 });
 
 describe("ProvisionSigningKeyScreen intake renewal after key replacement (A4)", () => {
@@ -341,5 +347,86 @@ describe("ProvisionSigningKeyScreen intake renewal after key replacement (A4)", 
 		expect(mockPersistProvisionedDeviceUser).toHaveBeenCalled();
 		expect(JSON.stringify(tr.toJSON())).toContain("signingKeyProvisioningSuccessHeading");
 		expect(mockRenew).not.toHaveBeenCalled();
+	});
+});
+
+// The replacement rewrites the STORED device user only; the open network ctx and the cached engines
+// kept the key minted before it, so Propose ballot failed UserValid until a relaunch (62 session 1,
+// observation 1). The screen re-binds the session once the replacement has committed.
+describe("ProvisionSigningKeyScreen re-binds the session after key replacement", () => {
+	it("re-binds once, after the persisted identity and the marker clear, and before the renewal", async () => {
+		seedRecovery();
+		const tr = await renderScreen();
+		await runRecovery(tr);
+		expect(JSON.stringify(tr.toJSON())).toContain("signingKeyProvisioningSuccessHeading");
+		expect(mockRebindDeviceUser).toHaveBeenCalledTimes(1);
+		const rebindAt = mockRebindDeviceUser.mock.invocationCallOrder[0]!;
+		expect(rebindAt).toBeGreaterThan(mockPersistProvisionedDeviceUser.mock.invocationCallOrder[0]!);
+		expect(rebindAt).toBeGreaterThan(mockClearRecoveryInProgress.mock.invocationCallOrder[0]!);
+		expect(mockRenew).toHaveBeenCalledTimes(1);
+		expect(mockRenew.mock.invocationCallOrder[0]!).toBeGreaterThan(rebindAt);
+	});
+
+	it("the renewal waits for the re-bind to settle", async () => {
+		seedRecovery();
+		let settle!: () => void;
+		mockRebindDeviceUser.mockImplementation(
+			() =>
+				new Promise<void>((resolve) => {
+					settle = resolve;
+				}),
+		);
+		const tr = await renderScreen();
+		await runRecovery(tr);
+		expect(JSON.stringify(tr.toJSON())).toContain("signingKeyProvisioningSuccessHeading");
+		expect(mockRebindDeviceUser).toHaveBeenCalledTimes(1);
+		expect(mockRenew).not.toHaveBeenCalled();
+		await renderer.act(async () => {
+			settle();
+		});
+		await flush();
+		expect(mockRenew).toHaveBeenCalledTimes(1);
+	});
+
+	it("a failed re-bind keeps the success screen, still renews, and logs a fixed token", async () => {
+		const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => undefined);
+		try {
+			seedRecovery();
+			mockRebindDeviceUser.mockRejectedValue(new Error("open failed: block abc"));
+			const tr = await renderScreen();
+			await runRecovery(tr);
+			expect(JSON.stringify(tr.toJSON())).toContain("signingKeyProvisioningSuccessHeading");
+			expect(mockRenew).toHaveBeenCalledTimes(1);
+			expect(warnSpy).toHaveBeenCalledWith("[key-replacement] outcome=rebind-failed");
+			expect(mockClearRecoveryInProgress).toHaveBeenCalledTimes(1);
+		} finally {
+			warnSpy.mockRestore();
+		}
+	});
+
+	it("a recovery that fails before committing never re-binds", async () => {
+		const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => undefined);
+		try {
+			seedRecovery();
+			mockAddKey.mockRejectedValueOnce(new Error("CHECK constraint failed: SignatureValid"));
+			const tr = await renderScreen();
+			await runRecovery(tr);
+			expect(mockAddKey).toHaveBeenCalled();
+			expect(JSON.stringify(tr.toJSON())).not.toContain("signingKeyProvisioningSuccessHeading");
+			expect(mockRebindDeviceUser).not.toHaveBeenCalled();
+		} finally {
+			warnSpy.mockRestore();
+		}
+	});
+
+	it("first-run provisioning never re-binds", async () => {
+		mockRouteParams = { reason: "first-run" };
+		nativeFake.provisionDeviceKey.mockResolvedValue({ publicKeyBase64: "N", publicKeyCompressedHex: NEW_KEY });
+		nativeFake.provisionRecoveryKey.mockResolvedValue({ publicKeyBase64: "R", publicKeyCompressedHex: REC_KEY });
+		nativeFake.produceAttestation.mockResolvedValue({ certificateChainBase64: ["l"], publicKeyCompressedHex: NEW_KEY });
+		const tr = await renderScreen();
+		await runRecovery(tr);
+		expect(JSON.stringify(tr.toJSON())).toContain("signingKeyProvisioningSuccessHeading");
+		expect(mockRebindDeviceUser).not.toHaveBeenCalled();
 	});
 });
