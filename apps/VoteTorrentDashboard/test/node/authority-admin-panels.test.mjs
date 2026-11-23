@@ -9,7 +9,7 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { dashboardSrc, workspacePath } from '../../../../scripts/lib/source-paths.mjs';
 import { stripComments } from '../../../../scripts/lib/strip-comments.mjs';
@@ -680,4 +680,29 @@ test('L8: every console call in the live panels logs the error class only', () =
 		}
 	}
 	assert.ok(total >= LIVE_B_FILES.length, 'expected at least one console call per live panel');
+});
+
+// 2026-11-23 todo: the panel and its query said no keyholder invite ceremony exists and the empty
+// state was unreachable. The Authority app has one (KeyholderInvitationScreen, keyholder-accept.ts),
+// so those comments steered a reader away from a real data path.
+const STALE_KEYHOLDER_CLAIM = /no keyholder\s+(?:\*\s+)?invite ceremony exists|keyholder invite ceremony (?:is|are both) out of scope|populated result is UNREACHABLE/i;
+
+test('control: the stale keyholder-ceremony matcher catches the old wording across a comment line break', () => {
+	assert.match('and no keyholder\n * invite ceremony exists yet', STALE_KEYHOLDER_CLAIM);
+	assert.match(' * A populated result is UNREACHABLE in Phase 50', STALE_KEYHOLDER_CLAIM);
+	assert.doesNotMatch('the keyholder accept writes the Keyholder row', STALE_KEYHOLDER_CLAIM);
+});
+
+test('the Keyholders panel and fetchKeyholders no longer say the keyholder invite does not exist, and name where rows come from', () => {
+	const panel = readFileSync(path.join(PANELS_DIR, 'KeyholdersPanel.tsx'), 'utf8');
+	const queries = readFileSync(path.join(PANELS_DIR, 'authority-admin-queries.js'), 'utf8');
+	const keyholderDoc = queries.slice(queries.indexOf('@typedef {object} KeyholderRow'), queries.indexOf('export async function fetchKeyholders'));
+	assert.doesNotMatch(panel, STALE_KEYHOLDER_CLAIM);
+	assert.doesNotMatch(keyholderDoc, STALE_KEYHOLDER_CLAIM);
+	for (const text of [panel, keyholderDoc]) {
+		assert.match(text, /KeyholderInvitationScreen/);
+		assert.match(text, /keyholder-accept\.ts/);
+	}
+	assert.ok(existsSync(workspacePath('apps', 'VoteTorrentAuthority', 'src', 'screens', 'keyholder', 'KeyholderInvitationScreen.tsx')), 'the named screen exists');
+	assert.ok(existsSync(workspacePath('apps', 'VoteTorrentAuthority', 'src', 'screens', 'keyholder', 'keyholder-accept.ts')), 'the named module exists');
 });
