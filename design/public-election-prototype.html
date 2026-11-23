@@ -297,6 +297,12 @@ button,a[role="button"]{min-height:32px}
       hand-drawn SVG standing in for Recharts (see the BarSeries section of the
       script). Those are not app CSS and there is no rule to transcribe.
 
+   6. THE RESULTS CARD IS UNCLASSED ON PURPOSE. PublishedResults.tsx renders
+      bare <div>/<section>/<h4>/<ul>/<li>/<p> so it needs no new CSS; they
+      render at UA defaults on the real page and here alike (no rule below
+      touches them). The ballot-description and question-title <h4>s are
+      therefore UA-bold at body size, with UA margins.
+
    Delete this block to see the page's own behaviour.
    ========================================================================= */
 .election-unreadable h2{margin:0;font-size:var(--font-heading-size);font-weight:var(--font-heading-weight)}
@@ -335,9 +341,17 @@ button{font-family:inherit}
     <div id="railstates"></div>
     <div class="note">
       <p>Most fact cards render a <strong>label and nothing else</strong>. That is not an omission in
-      this prototype — it is the shipped state: in <code>facts.js</code> ten of the eighteen
-      facts carry <code>sentenceKey: null</code>. Only the voter roll, the keyholder key release
-      and the six <em>gap</em> cards have bodies today.</p>
+      this prototype — it is the shipped state: in <code>facts.js</code> twelve of the eighteen
+      facts carry <code>sentenceKey: null</code>. Only the voter roll, the keyholder key release,
+      the four remaining <em>gap</em> cards, and the two filled gaps — <em>Ballots cast</em>
+      (counted on the network) and <em>Results</em> (the published totals) — have bodies today.
+      Those two have no sentence of their own: the card body is chosen by the data.</p>
+      <p>The results card shows the totals <strong>as published</strong>. It does not recount
+      them and makes no "verified" claim; its detail toggle says so.</p>
+      <p>A link the browser holds no copy of no longer just says "doesn't hold": while the page's
+      own network connection is starting or fetching it says it is looking, and a failed
+      connection says why when it can tell. The bar above the page shows the peer-boot state
+      each route assumes.</p>
       <p>The phase is <strong>derived</strong>, never picked: each state hands the page an election
       timeline and an instant, and <code>derivePhase</code> (transcribed from
       <code>election-phase.js</code> over <code>timeline-core.js</code>) walks
@@ -385,7 +399,10 @@ const COPY={
   'public.staleness.badge':'NOT CONNECTED',
   'public.staleness.body':"This is the last version of this election your browser received. As of {{asOf}}, it isn't connected to the network.",
   'public.liveUpdate.badge':'UPDATED',
-  'public.tone.go':'OPEN','public.tone.wait':'PENDING','public.tone.done':'CLOSED','public.tone.bad':'UNKNOWN',
+  'public.tone.go':'OPEN',
+  'public.tone.wait':'PENDING',
+  'public.tone.done':'CLOSED',
+  'public.tone.bad':'UNKNOWN',
   'public.group.electionAndRules':'The election and its rules',
   'public.group.ballot':'The ballot',
   'public.group.electorate':'The electorate',
@@ -408,20 +425,28 @@ const COPY={
   'public.fact.electorate.label':'Eligible electorate',
   'public.fact.keyholders.label':'Keyholders',
   'public.fact.turnout.label':'Ballots cast',
+  'public.fact.turnout.detail':'Counted on the network from the vote blocks committed for this election, and checked again every 30 seconds while this page is connected. Ballots in a block that is still forming are counted once that block is committed. Nothing about who voted or how is read.',
+  'public.fact.turnout.counted':'Ballots cast so far: {{votes}}. Vote blocks committed: {{blocks}}.',
+  'public.fact.turnout.counting':'Counting the ballots cast on the network.',
+  'public.fact.turnout.unavailable':"This page couldn't count the ballots cast on the network.",
   'public.fact.receipt.label':'Checking your own ballot',
   'public.fact.merkle.label':'Cryptographic record of the votes',
   'public.fact.keyrelease.label':'Keyholder key release',
   'public.fact.results.label':'Results',
+  'public.fact.results.detail':'These are the totals published for this election once the keyholders had released its key. This page shows them as published and does not recount them.',
+  'public.fact.results.none':'No results have been published for this election yet.',
+  'public.fact.results.unreadable':"This election's published results couldn't be read.",
+  'public.fact.results.blocks':'Vote blocks counted: {{blocks}}',
+  'public.fact.results.ballotTotals':'Votes: {{votes}}. Valid: {{valid}}. Invalid: {{invalid}}. Excluded: {{excluded}}.',
+  'public.fact.results.optionCount':'{{option}}: {{count}}',
+  'public.fact.results.blank':'No answer: {{count}}',
+  'public.fact.results.unsupported':"{{question}}: {{count}} answered. This page can't show counts for this kind of question yet.",
   'public.fact.validation.label':'Validation report',
   'public.fact.certification.label':'Certification',
-  'public.gap.turnout.sentence':"How many ballots have been cast isn't shown here — there's no record of vote counts in this system yet.",
-  'public.gap.turnout.detail':"No Vote or VoteEntry table exists; vote and voter entries live in negotiated blocks the schema doesn't model (doc/election.md:95-110).",
   'public.gap.receipt.sentence':"There's no way on this page to confirm your own ballot was received — that check depends on a private receipt only you hold.",
   'public.gap.receipt.detail':'The vote nonce is held privately by the voter; nothing on the network can be checked against it (doc/election.md:97).',
   'public.gap.merkle.sentence':"The cryptographic record tying votes together isn't published here.",
   'public.gap.merkle.detail':'No Block or MerkleNode table exists yet (doc/election.md:114).',
-  'public.gap.results.sentence':"Results aren't published on this page — there's no tally recorded anywhere in the system yet.",
-  'public.gap.results.detail':'No Tally table exists (doc/election.md:124-132).',
   'public.gap.validation.sentence':'No validation report or error-margin figure is available here.',
   'public.gap.validation.detail':'No Validation table exists, and no error-margin statistic is recorded anywhere (doc/election.md:134-153).',
   'public.gap.certification.sentence':"No signed certification of this election's outcome is available here.",
@@ -443,8 +468,17 @@ const COPY={
   'public.index.emptyHeading':'This browser holds no elections yet.',
   'public.index.emptyBody':'This page can only show elections whose records are already stored in this browser, and none are stored here yet.',
   'public.index.someUnreadable':"Something stored in this browser couldn't be read, so this page may not be showing everything it holds.",
+  'public.index.lookingOnNetwork':'Looking for elections on the network named in this link.',
+  'public.index.networkEmpty':'No elections were found on the network named in this link.',
+  'public.index.networkUnreachable':"This page couldn't reach the network named in this link, so only elections already stored in this browser are listed.",
   'public.election.notHeld.title':"This browser doesn't hold this election.",
   'public.election.notHeld.body':'Nothing has been loaded into this browser for the election this link names, so there is nothing here to show.',
+  'public.election.fetching.title':'Looking for this election on the network.',
+  'public.election.fetching.body':"This browser hasn't stored a copy of this election yet, so it is fetching one from the network now. It will appear here when it arrives.",
+  'public.election.unreachable.title':"This page couldn't reach the network named in this link.",
+  'public.election.unreachable.body':"This election can't be shown right now, and nothing from it has been stored in this browser.",
+  'public.election.notOnNetwork.title':"This election wasn't found on the network named in this link.",
+  'public.election.notOnNetwork.body':'The network answered, but it returned no election matching this link, so there is nothing here to show.',
   'public.gap.detailsSummary':"Why this isn't shown",
   'public.fact.detailsSummary':'What this shows',
   'public.config.missing.title':"This page can't be configured to reach the network.",
@@ -470,24 +504,24 @@ const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'
 const FACT_GROUPS=['electionAndRules','ballot','electorate','outcome'];
 const ALL_PHASES=['pre','voting','settling','closed'];
 const FACTS=[
-  {id:'identity',group:'electionAndRules',phases:ALL_PHASES,labelKey:'public.fact.identity.label',sentenceKey:null,detailKey:null,emptyKey:null,interpolates:null,gap:null},
-  {id:'authority',group:'electionAndRules',phases:ALL_PHASES,labelKey:'public.fact.authority.label',sentenceKey:null,detailKey:null,emptyKey:null,interpolates:null,gap:null},
-  {id:'governance',group:'electionAndRules',phases:ALL_PHASES,labelKey:'public.fact.governance.label',sentenceKey:null,detailKey:null,emptyKey:null,interpolates:null,gap:null},
-  {id:'rules',group:'electionAndRules',phases:ALL_PHASES,labelKey:'public.fact.rules.label',sentenceKey:null,detailKey:null,emptyKey:null,interpolates:null,gap:null},
-  {id:'timeline',group:'electionAndRules',phases:ALL_PHASES,labelKey:'public.fact.timeline.label',sentenceKey:null,detailKey:null,emptyKey:null,interpolates:null,gap:null},
-  {id:'registration',group:'electorate',phases:['pre'],labelKey:'public.fact.registration.label',sentenceKey:null,detailKey:null,emptyKey:null,interpolates:null,gap:null},
-  {id:'ballot',group:'ballot',phases:ALL_PHASES,labelKey:'public.fact.ballot.label',sentenceKey:null,detailKey:null,emptyKey:null,interpolates:null,gap:null},
-  {id:'polls',group:'ballot',phases:['voting'],labelKey:'public.fact.polls.label',sentenceKey:null,detailKey:null,emptyKey:null,interpolates:null,gap:null},
-  {id:'electorate',group:'electorate',phases:ALL_PHASES,labelKey:'public.fact.electorate.label',sentenceKey:null,detailKey:null,emptyKey:null,interpolates:null,gap:null},
-  {id:'registrantRoll',group:'electorate',phases:ALL_PHASES,labelKey:'public.registrantRoll.heading',sentenceKey:'public.registrantRoll.body',detailKey:'public.registrantRoll.disclaimer',emptyKey:'public.registrantRoll.empty',interpolates:null,gap:null},
-  {id:'keyholders',group:'outcome',phases:ALL_PHASES,labelKey:'public.fact.keyholders.label',sentenceKey:null,detailKey:null,emptyKey:null,interpolates:null,gap:null},
-  {id:'turnout',group:'outcome',phases:['voting','settling','closed'],labelKey:'public.fact.turnout.label',sentenceKey:'public.gap.turnout.sentence',detailKey:'public.gap.turnout.detail',emptyKey:null,interpolates:null,gap:'A'},
-  {id:'receipt',group:'outcome',phases:['settling','closed'],labelKey:'public.fact.receipt.label',sentenceKey:'public.gap.receipt.sentence',detailKey:'public.gap.receipt.detail',emptyKey:null,interpolates:null,gap:'B'},
-  {id:'merkle',group:'outcome',phases:['settling','closed'],labelKey:'public.fact.merkle.label',sentenceKey:'public.gap.merkle.sentence',detailKey:'public.gap.merkle.detail',emptyKey:null,interpolates:null,gap:'C'},
-  {id:'keyrelease',group:'outcome',phases:['settling'],labelKey:'public.fact.keyrelease.label',sentenceKey:'public.fact.keyrelease.sentence',detailKey:'public.fact.keyrelease.detail',emptyKey:null,interpolates:['released','total'],gap:null},
-  {id:'results',group:'outcome',phases:['settling','closed'],labelKey:'public.fact.results.label',sentenceKey:'public.gap.results.sentence',detailKey:'public.gap.results.detail',emptyKey:null,interpolates:null,gap:'E'},
-  {id:'validation',group:'outcome',phases:['settling','closed'],labelKey:'public.fact.validation.label',sentenceKey:'public.gap.validation.sentence',detailKey:'public.gap.validation.detail',emptyKey:null,interpolates:null,gap:'F'},
-  {id:'certification',group:'outcome',phases:['closed'],labelKey:'public.fact.certification.label',sentenceKey:'public.gap.certification.sentence',detailKey:'public.gap.certification.detail',emptyKey:null,interpolates:null,gap:'G'},
+  {id:'identity',group:'electionAndRules',phases:ALL_PHASES,labelKey:'public.fact.identity.label',sentenceKey:null,detailKey:null,emptyKey:null,interpolates:null,gap:null,filledGap:null},
+  {id:'authority',group:'electionAndRules',phases:ALL_PHASES,labelKey:'public.fact.authority.label',sentenceKey:null,detailKey:null,emptyKey:null,interpolates:null,gap:null,filledGap:null},
+  {id:'governance',group:'electionAndRules',phases:ALL_PHASES,labelKey:'public.fact.governance.label',sentenceKey:null,detailKey:null,emptyKey:null,interpolates:null,gap:null,filledGap:null},
+  {id:'rules',group:'electionAndRules',phases:ALL_PHASES,labelKey:'public.fact.rules.label',sentenceKey:null,detailKey:null,emptyKey:null,interpolates:null,gap:null,filledGap:null},
+  {id:'timeline',group:'electionAndRules',phases:ALL_PHASES,labelKey:'public.fact.timeline.label',sentenceKey:null,detailKey:null,emptyKey:null,interpolates:null,gap:null,filledGap:null},
+  {id:'registration',group:'electorate',phases:['pre'],labelKey:'public.fact.registration.label',sentenceKey:null,detailKey:null,emptyKey:null,interpolates:null,gap:null,filledGap:null},
+  {id:'ballot',group:'ballot',phases:ALL_PHASES,labelKey:'public.fact.ballot.label',sentenceKey:null,detailKey:null,emptyKey:null,interpolates:null,gap:null,filledGap:null},
+  {id:'polls',group:'ballot',phases:['voting'],labelKey:'public.fact.polls.label',sentenceKey:null,detailKey:null,emptyKey:null,interpolates:null,gap:null,filledGap:null},
+  {id:'electorate',group:'electorate',phases:ALL_PHASES,labelKey:'public.fact.electorate.label',sentenceKey:null,detailKey:null,emptyKey:null,interpolates:null,gap:null,filledGap:null},
+  {id:'registrantRoll',group:'electorate',phases:ALL_PHASES,labelKey:'public.registrantRoll.heading',sentenceKey:'public.registrantRoll.body',detailKey:'public.registrantRoll.disclaimer',emptyKey:'public.registrantRoll.empty',interpolates:null,gap:null,filledGap:null},
+  {id:'keyholders',group:'outcome',phases:ALL_PHASES,labelKey:'public.fact.keyholders.label',sentenceKey:null,detailKey:null,emptyKey:null,interpolates:null,gap:null,filledGap:null},
+  {id:'turnout',group:'outcome',phases:['voting','settling','closed'],labelKey:'public.fact.turnout.label',sentenceKey:null,detailKey:'public.fact.turnout.detail',emptyKey:null,interpolates:null,gap:null,filledGap:'A'},
+  {id:'receipt',group:'outcome',phases:['settling','closed'],labelKey:'public.fact.receipt.label',sentenceKey:'public.gap.receipt.sentence',detailKey:'public.gap.receipt.detail',emptyKey:null,interpolates:null,gap:'B',filledGap:null},
+  {id:'merkle',group:'outcome',phases:['settling','closed'],labelKey:'public.fact.merkle.label',sentenceKey:'public.gap.merkle.sentence',detailKey:'public.gap.merkle.detail',emptyKey:null,interpolates:null,gap:'C',filledGap:null},
+  {id:'keyrelease',group:'outcome',phases:['settling'],labelKey:'public.fact.keyrelease.label',sentenceKey:'public.fact.keyrelease.sentence',detailKey:'public.fact.keyrelease.detail',emptyKey:null,interpolates:['released','total'],gap:null,filledGap:'D'},
+  {id:'results',group:'outcome',phases:['settling','closed'],labelKey:'public.fact.results.label',sentenceKey:null,detailKey:'public.fact.results.detail',emptyKey:null,interpolates:null,gap:null,filledGap:'E'},
+  {id:'validation',group:'outcome',phases:['settling','closed'],labelKey:'public.fact.validation.label',sentenceKey:'public.gap.validation.sentence',detailKey:'public.gap.validation.detail',emptyKey:null,interpolates:null,gap:'F',filledGap:null},
+  {id:'certification',group:'outcome',phases:['closed'],labelKey:'public.fact.certification.label',sentenceKey:'public.gap.certification.sentence',detailKey:'public.gap.certification.detail',emptyKey:null,interpolates:null,gap:'G',filledGap:null},
 ];
 const factsFor=phase=>FACTS.filter(f=>f.phases.includes(phase));
 function groupFactsForPhase(phase){
@@ -718,6 +752,47 @@ const HELD_ELECTIONS=[
   {networkHash:'NprVHIM0C63TA4GUZDhdUw',electionId:'TTEkN8QqkkrYj0u_KAw3Xo7hIlS5SYcgi9BOAZH5Gwc',title:'Pinegrove Township Trustee Election 2026'},
 ];
 
+/* What the network returns for a network-only link (peer/network-index.js):
+   rows carry a date, which orders them; one election here is not held. */
+const NETWORK_ROWS=[
+  {networkHash:NETWORK_HASH,electionId:ELECTION_ID,title:ELECTION_TITLE,date:'2026-11-03'},
+  {networkHash:NETWORK_HASH,electionId:'eKajCiVrvJ-_gMHf5eYx0iLL2D1O4_DVlQnfeak-hRY',title:'Cascade County Special Levy Election — March 2026',date:'2026-03-10'},
+  {networkHash:NETWORK_HASH,electionId:'Wq3n0bZ9xVhR2kL7cTgPu5eJmY1sAiDoF8EtXrNzK4Q',title:'Cascade County School Board Recall Election 2027',date:'2027-02-16'},
+];
+/* Ballots cast so far (turnout-source.js: VoteBlock count(*) and
+   sum(EntryCount), counted on the network). Numbers are interpolated raw. */
+const TURNOUT_VOTING={state:'counted',votes:412,blocks:12};
+const TURNOUT_FINAL={state:'counted',votes:1284,blocks:37};
+/* Published results — read-tally.js's PublicResults shape: the root
+   histogram of the officer-published tally tree. Per question,
+   options + blank = valid; votes = valid + invalid + excluded. */
+const RESULTS_NONE={state:'none'};
+const RESULTS_UNREADABLE={state:'unreadable'};
+const COUNTY_BALLOT={
+  ballotId:'b1',description:'Cascade County ballot',votes:1284,valid:1271,invalid:9,excluded:4,
+  questions:[
+    {code:'q1',title:'County Commissioner, District 7',answered:1254,blank:17,options:[
+      {code:'o1',title:'Rosalind Abernathy-Whitfield',count:612},
+      {code:'o2',title:'Hiroshi Nakamura',count:455},
+      {code:'o3',title:'Babatunde Oyelaran',count:187}]},
+    {code:'q2',title:'Proposition 12: Library Levy',answered:1229,blank:42,options:[
+      {code:'o1',title:'Yes',count:731},
+      {code:'o2',title:'No',count:498}]},
+  ],
+  unsupported:[],
+};
+const RESULTS_PUBLISHED={state:'published',value:{revision:3,blockCount:37,publishedAt:'2026-11-20T00:00:00',ballots:[COUNTY_BALLOT]}};
+const RESULTS_MANY={state:'published',value:{revision:3,blockCount:37,publishedAt:'2026-11-20T00:00:00',ballots:[
+  COUNTY_BALLOT,
+  {ballotId:'b2',description:'Pinegrove Township ballot',votes:318,valid:315,invalid:2,excluded:1,
+   questions:[
+     {code:'q1',title:'Township Trustee',answered:301,blank:14,options:[
+       {code:'o1',title:'Esperanza Vasquez-Montenegro',count:176},
+       {code:'o2',title:'Thomas Hartsfield',count:125}]},
+   ],
+   unsupported:[{code:'q2',title:'Library Board (ranked choice)',answered:288}]},
+]}};
+
 /* =========================================================================
  * 6. STATE
  * ====================================================================== */
@@ -736,6 +811,12 @@ const S={
   roll:ROLL,               /* null = the roll couldn't be read */
   policy:ROLL_DISCLOSURE_POLICY,
   indexResult:null,        /* {elections, complete} when the address names no single election */
+  indexNetworkNamed:false, /* an 'incomplete' link that names the network (so the index asks it) */
+  networkResult:null,      /* the network's answer to that ask; null = still asking */
+  peerFeed:'running',      /* the page's own peer boot: unobserved | running | stopped */
+  bootFailure:null,        /* a stopped boot's reader-facing kind: unreachable | notOnNetwork | null */
+  turnout:TURNOUT_VOTING,  /* counted | counting | unavailable (PublicApp's useNetworkTurnout) */
+  results:RESULTS_NONE,    /* published | none | unreadable (public-election-source.js step 4d) */
   open:{},                 /* DetailsToggle open-state, keyed by toggle id */
 };
 /* derivePhase receives the election's timeline only when an election was
@@ -912,6 +993,34 @@ function RegistrantRoll(rows,policy){
     +(hasRows?'':'<p class="registrant-roll__note">'+esc(t('public.registrantRoll.empty'))+'</p>')
     +(unreadable.length>0?'<p class="registrant-roll__note">'+esc(t('public.rules.policyUnreadable'))+'</p>':'');
 }
+/* ---- PublishedResults.tsx: the results card's body. Three states, never
+   collapsed — `published` shows the totals as published (no recount, no
+   "verified" claim), `none` is a finding, `unreadable` a fault. Ballot
+   descriptions only when the election has more than one ballot; options in
+   the ballot's own order; a blank line per question; a question type the
+   tally can't histogram gets one plain sentence. Every element is unclassed,
+   so the view adds no CSS (see override 6 below the transcribed sheet). ---- */
+function PublishedResults(results){
+  if(results.state==='none') return '<p>'+esc(t('public.fact.results.none'))+'</p>';
+  if(results.state!=='published') return '<p>'+esc(t('public.fact.results.unreadable'))+'</p>';
+  const value=results.value;
+  const manyBallots=value.ballots.length>1;
+  return '<div>'
+    +'<p>'+esc(t('public.fact.results.blocks',{blocks:value.blockCount}))+'</p>'
+    +value.ballots.map(ballot=>'<section>'
+        +((manyBallots&&ballot.description!==null&&ballot.description!=='')?'<h4>'+esc(ballot.description)+'</h4>':'')
+        +'<p>'+esc(t('public.fact.results.ballotTotals',{votes:ballot.votes,valid:ballot.valid,invalid:ballot.invalid,excluded:ballot.excluded}))+'</p>'
+        +ballot.questions.map(q=>'<div>'
+            +'<h4>'+esc(q.title)+'</h4>'
+            +'<ul>'
+              +q.options.map(o=>'<li>'+esc(t('public.fact.results.optionCount',{option:o.title,count:o.count}))+'</li>').join('')
+              +'<li>'+esc(t('public.fact.results.blank',{count:q.blank}))+'</li>'
+            +'</ul>'
+          +'</div>').join('')
+        +ballot.unsupported.map(q=>'<p>'+esc(t('public.fact.results.unsupported',{question:q.title,count:q.answered}))+'</p>').join('')
+      +'</section>').join('')
+  +'</div>';
+}
 function factBody(fact){
   if(fact.interpolates!==null&&fact.sentenceKey!==null){
     if(S.keyRelease===null) return t('public.fact.keyrelease.unreadable');
@@ -928,6 +1037,11 @@ function FactCard(fact){
   /* production passes no policy to the fold; the prototype threads its
      policy through so a withheld District takes the chart down with it */
   const districtBuckets=rendersCollection?foldDistrictCounts(S.roll,S.policy):[];
+  /* The two filled gaps without interpolation, told apart by their filled
+     letter (E results, A turnout) — selected on the data, never on the id;
+     the letter is never rendered. */
+  const rendersResults=fact.filledGap==='E';
+  const rendersTurnout=fact.filledGap==='A';
   if(fact.gap!==null){
     return '<article class="fact-card fact-card--gap" data-fact-id="'+esc(fact.id)+'" data-fact-kind="gap">'
       +'<h3 class="fact-card__label">'+esc(t(fact.labelKey))+'</h3>'
@@ -943,6 +1057,11 @@ function FactCard(fact){
                 emptyCopyKey:'public.fact.keyrelease.meterEmpty'})
       +'</div>':'')
     +(rendersCollection?RegistrantRoll(S.roll,S.policy):'')
+    +(rendersResults?PublishedResults(S.results):'')
+    +((rendersTurnout&&S.turnout.state==='counted')?'<p class="fact-card__body">'
+        +esc(t('public.fact.turnout.counted',{votes:S.turnout.votes,blocks:S.turnout.blocks}))+'</p>':'')
+    +((rendersTurnout&&S.turnout.state==='counting')?'<p class="fact-card__body">'+esc(t('public.fact.turnout.counting'))+'</p>':'')
+    +((rendersTurnout&&S.turnout.state==='unavailable')?'<p class="fact-card__body">'+esc(t('public.fact.turnout.unavailable'))+'</p>':'')
     +(districtBuckets.length>0?'<div class="fact-card__chart">'
         +BarSeries({
           data:districtBuckets.map(b=>{
@@ -967,10 +1086,36 @@ function FactSections(phase){
     +g.facts.map(FactCard).join('')
   +'</section>').join('');
 }
+/* election-index-source.js's combineIndexElections: the NETWORK's rows first
+   (they carry a date) in mergeHeldElections order — date descending, then
+   electionId, then networkHash — then held entries the network didn't
+   return, in their own order. A (networkHash, electionId) pair appears once. */
+function combineIndexElections(held,networkRows){
+  const cmp=(x,y)=>(x===y?0:x<y?-1:1);
+  const fromNetwork=(Array.isArray(networkRows)?networkRows:[]).slice()
+    .sort((a,b)=>-cmp(String(a.date??''),String(b.date??''))||cmp(a.electionId,b.electionId)||cmp(a.networkHash,b.networkHash));
+  const seen=new Set(fromNetwork.map(e=>e.networkHash+'\u0000'+e.electionId));
+  const rest=(Array.isArray(held)?held:[]).filter(e=>!seen.has(e.networkHash+'\u0000'+e.electionId));
+  return [...fromNetwork,...rest];
+}
+/* ElectionIndex.tsx. When the link names a NETWORK but no election, the
+   index also asks that network for its elections (peer/network-index.js,
+   which stores nothing): `S.networkResult` is null while the ask is in
+   flight, else {status:'LISTED',elections} | {status:'FAILED'} |
+   {status:'CONFIG_FAULT'}. A link with no network asks nothing. */
 function ElectionIndex(){
   const resolved=S.indexResult;
-  const elections=resolved===null?[]:resolved.elections;
-  const indexState=resolved===null?'loading':(elections.length>0?'listed':'empty');
+  const asksNetwork=S.addressStatus==='incomplete'&&S.indexNetworkNamed;
+  const answer=asksNetwork?S.networkResult:null;
+  const networkPending=asksNetwork&&answer===null;
+  const networkListed=answer!==null&&answer.status==='LISTED';
+  const networkUnreachable=answer!==null&&(answer.status==='FAILED'||answer.status==='CONFIG_FAULT');
+  const elections=resolved===null?[]:combineIndexElections(resolved.elections,networkListed?answer.elections:[]);
+  const indexState=resolved===null?'loading'
+    :elections.length>0?'listed'
+    :networkPending?'loading'
+    :networkListed?'networkEmpty'
+    :'empty';
   return '<section class="election-index" data-index-state="'+indexState+'" data-index-count="'+elections.length
       +'" data-index-complete="'+(resolved===null?'unknown':String(resolved.complete))+'">'
     +elections.map(e=>'<div class="election-index__item">'
@@ -978,9 +1123,12 @@ function ElectionIndex(){
         +'<a href="?network='+encodeURIComponent(e.networkHash)+'&election='+encodeURIComponent(e.electionId)+'">'
           +esc(t('public.index.viewElectionCta'))+'</a>'
       +'</div>').join('')
+    +(networkPending?'<p>'+esc(t('public.index.lookingOnNetwork'))+'</p>':'')
+    +(indexState==='networkEmpty'?'<h2>'+esc(t('public.index.networkEmpty'))+'</h2>':'')
     +(indexState==='empty'?'<h2>'+esc(t('public.index.emptyHeading'))+'</h2>':'')
     +(indexState==='empty'?'<p>'+esc(t('public.index.emptyBody'))+'</p>':'')
     +((resolved!==null&&resolved.complete===false)?'<p>'+esc(t('public.index.someUnreadable'))+'</p>':'')
+    +(networkUnreachable?'<p>'+esc(t('public.index.networkUnreachable'))+'</p>':'')
   +'</section>';
 }
 
@@ -1003,6 +1151,14 @@ function Body(){
   const pr=phaseResult();
   const addressed=S.addressStatus==='ok';
   const holdsNothing=addressed&&S.readState==='notHeld';
+  /* "Doesn't hold" is false while the page's own network connection is still
+     starting ('unobserved') or is filling the store ('running'): the browser
+     is fetching the election, so it says so. Only a FAILED connection
+     ('stopped') says why, when the boot could tell (bootFailureKind), or
+     falls back to the not-held pair. */
+  const stillLooking=holdsNothing&&(S.peerFeed==='unobserved'||S.peerFeed==='running');
+  const failedKind=(holdsNothing&&!stillLooking&&S.peerFeed==='stopped')?S.bootFailure:null;
+  const saysNotHeld=holdsNothing&&!stillLooking&&failedKind===null;
   const showBanner=addressed&&(S.readState==='ready'||S.readState==='unreadable');
   const showLifecycleSlot=!addressed||S.readState==='reading'||holdsNothing;
   const formatted=formatReaderInstant(S.observedAt);
@@ -1023,8 +1179,14 @@ function Body(){
     +(addressed?'<p class="election-address">'+esc(t('public.election.addressLabel'))
         +' <code>'+esc(ELECTION_ID)+'</code></p>':'')
     +((S.addressStatus==='missing'||S.addressStatus==='incomplete')?ElectionIndex():'')
-    +(holdsNothing?'<h2>'+esc(t('public.election.notHeld.title'))+'</h2>':'')
-    +(holdsNothing?'<p>'+esc(t('public.election.notHeld.body'))+'</p>':'')
+    +(saysNotHeld?'<h2>'+esc(t('public.election.notHeld.title'))+'</h2>':'')
+    +(saysNotHeld?'<p>'+esc(t('public.election.notHeld.body'))+'</p>':'')
+    +(failedKind==='unreachable'?'<h2>'+esc(t('public.election.unreachable.title'))+'</h2>':'')
+    +(failedKind==='unreachable'?'<p>'+esc(t('public.election.unreachable.body'))+'</p>':'')
+    +(failedKind==='notOnNetwork'?'<h2>'+esc(t('public.election.notOnNetwork.title'))+'</h2>':'')
+    +(failedKind==='notOnNetwork'?'<p>'+esc(t('public.election.notOnNetwork.body'))+'</p>':'')
+    +(stillLooking?'<h2>'+esc(t('public.election.fetching.title'))+'</h2>':'')
+    +(stillLooking?'<p>'+esc(t('public.election.fetching.body'))+'</p>':'')
     +(showBanner?'<div class="status-banner status-banner--'+tone+'">'
         +'<span class="status-banner__tone">'+esc(t('public.tone.'+tone))+'</span>'
         +'<p class="status-banner__headline">'+esc(t(textKey))+'</p>'
@@ -1058,16 +1220,24 @@ function Page(){
  * 9. ROUTES — every state is a timeline + an instant + a read, never a
  *    picked phase.
  * ====================================================================== */
-const ph=(key)=>()=>{ S.at=AT[key]; S.observedAt=AT[key]; };
-const settling=()=>{ S.at=AT.settling; S.observedAt=AT.settling; };
+/* An instant also sets the turnout the network would count by then, and a
+   closed election has its results published; a route overrides either. */
+const ph=(key)=>()=>{ S.at=AT[key]; S.observedAt=AT[key];
+  S.turnout=key==='voting'?TURNOUT_VOTING:TURNOUT_FINAL;
+  S.results=key==='closed'?RESULTS_PUBLISHED:RESULTS_NONE; };
+const settling=ph('settling');
+const closed=ph('closed');
+const heldOnNetwork=()=>HELD_ELECTIONS.filter(e=>e.networkHash===NETWORK_HASH);
+const networkOnly=(held,answer)=>{ S.addressStatus='incomplete'; S.indexNetworkNamed=true; S.readState='reading';
+  S.indexResult={elections:held,complete:true}; S.networkResult=answer; };
 const ROUTES=[
   {group:'The four phases'},
   {id:'pre-open',label:'Being organized — registration open',apply:ph('pre')},
   {id:'pre-closed',label:'Being organized — registration closed',apply:ph('preLate')},
   {id:'pre-unknown',label:'Being organized — registration end unreadable',apply(){ph('pre')();S.timeline=without(TIMELINE,'registrationEnds');}},
-  {id:'voting',label:'Voting — polls are open',apply:ph('voting')},
-  {id:'settling',label:'Settling — 2 of 3 keys released',apply:settling},
-  {id:'closed',label:'Closed',apply:ph('closed')},
+  {id:'voting',label:'Voting — polls are open, 412 ballots cast',apply:ph('voting')},
+  {id:'settling',label:'Settling — 2 of 3 keys released, no results yet',apply:settling},
+  {id:'closed',label:'Closed — results published',apply:closed},
   {id:'indeterminate',label:'Phase unknown — closing date unreadable',apply(){ph('voting')();S.timeline={...TIMELINE,closed:'to be announced'};}},
 
   {group:'Timeline shapes'},
@@ -1075,6 +1245,15 @@ const ROUTES=[
   {id:'tl-legacy',label:'Older seven-event timeline — phase unchanged',apply(){ph('voting')();S.timeline=without(TIMELINE,'accruingVotes','hashingVotes','releasingKeys');}},
   {id:'tl-json-epoch',label:'Timeline stored as a JSON string of epoch ms',apply(){ph('voting')();
     S.timeline=JSON.stringify(Object.fromEntries(Object.entries(TIMELINE).map(([k,v])=>[k,Date.parse(v+'Z')])));}},
+
+  {group:'Ballots cast (counted on the network)'},
+  {id:'turnout-counting',label:'Still counting — connection starting',apply(){ph('voting')();S.peerFeed='unobserved';S.connection='unknown';S.turnout={state:'counting'};}},
+  {id:'turnout-unavailable',label:"Count failed — couldn't count",apply(){ph('voting')();S.turnout={state:'unavailable'};}},
+
+  {group:'Published results'},
+  {id:'results-many',label:'Two ballots, one question with no counts',apply(){closed();S.results=RESULTS_MANY;}},
+  {id:'results-none',label:'Closed — no results published yet',apply(){closed();S.results=RESULTS_NONE;}},
+  {id:'results-unreadable',label:"Results couldn't be read",apply(){closed();S.results=RESULTS_UNREADABLE;}},
 
   {group:'Keyholder key release (settling)'},
   {id:'kr-none',label:'No keys released yet — 0 of 3',apply(){settling();S.keyRelease={released:0,total:0,keyholderCount:3};}},
@@ -1095,21 +1274,33 @@ const ROUTES=[
   {id:'roll-policy-bad',label:'Every column withheld — policy unreadable',apply(){ph('voting')();S.policy=null;}},
 
   {group:'Connection and freshness'},
-  {id:'stale',label:'Not connected — last version held',apply(){ph('voting')();S.connection='down';S.observedAt='2026-11-03T11:40:00';}},
+  {id:'stale',label:'Not connected — last version held',apply(){ph('voting')();S.peerFeed='stopped';S.connection='down';S.observedAt='2026-11-03T11:40:00';S.turnout={state:'unavailable'};}},
   {id:'live',label:'Live update just arrived',apply(){ph('voting')();S.justUpdated=true;}},
   {id:'reading',label:'Still reading — labelled empty slots',apply(){S.readState='reading';}},
 
-  {group:'Nothing to show'},
-  {id:'not-held',label:"Browser doesn't hold this election",apply(){S.readState='notHeld';}},
+  {group:'No copy in this browser'},
+  {id:'fetching',label:'Fetching it from the network',apply(){S.readState='notHeld';S.peerFeed='running';}},
+  {id:'fetching-starting',label:'…connection still starting — same sentence',apply(){S.readState='notHeld';S.peerFeed='unobserved';}},
+  {id:'unreachable',label:"Connection failed — network couldn't be reached",apply(){S.readState='notHeld';S.peerFeed='stopped';S.bootFailure='unreachable';}},
+  {id:'not-on-network',label:'Network answered — no such election',apply(){S.readState='notHeld';S.peerFeed='stopped';S.bootFailure='notOnNetwork';}},
+  {id:'not-held',label:"Connection failed otherwise — doesn't hold",apply(){S.readState='notHeld';S.peerFeed='stopped';S.bootFailure=null;}},
   {id:'read-fault',label:'Held copy failed to read',apply(){S.readState='unreadable';}},
+
+  {group:'Index — no election named'},
+  {id:'index-listed',label:'No link query — index lists three held',apply(){S.addressStatus='missing';S.readState='reading';S.indexResult={elections:HELD_ELECTIONS,complete:true};}},
+  {id:'index-partial',label:'…index incomplete',apply(){S.addressStatus='missing';S.readState='reading';S.indexResult={elections:HELD_ELECTIONS.slice(0,1),complete:false};}},
+  {id:'index-empty',label:'…browser holds nothing',apply(){S.addressStatus='missing';S.readState='reading';S.indexResult={elections:[],complete:true};}},
+
+  {group:'Index — only a network named'},
+  {id:'index-network',label:'Network answered — its elections first',apply(){networkOnly(heldOnNetwork(),{status:'LISTED',elections:NETWORK_ROWS});}},
+  {id:'index-network-looking',label:'Asking the network — held ones listed',apply(){networkOnly(heldOnNetwork(),null);}},
+  {id:'index-network-looking-empty',label:'Asking the network — nothing held',apply(){networkOnly([],null);}},
+  {id:'index-network-empty',label:'Network answered with none',apply(){networkOnly([],{status:'LISTED',elections:[]});}},
+  {id:'index-network-unreachable',label:"Network couldn't be reached — held only",apply(){networkOnly(heldOnNetwork(),{status:'FAILED'});}},
+  {id:'index-network-unreachable-empty',label:"…and nothing held",apply(){networkOnly([],{status:'FAILED'});}},
 
   {group:'Bad links and bad config'},
   {id:'address-malformed',label:"Link's address isn't readable",apply(){S.addressStatus='malformed';}},
-  {id:'index-listed',label:'No election named — index lists three',apply(){S.addressStatus='missing';S.readState='reading';S.indexResult={elections:HELD_ELECTIONS,complete:true};}},
-  {id:'index-network',label:'Only a network named — index scoped to it',apply(){S.addressStatus='incomplete';S.readState='reading';
-    S.indexResult={elections:HELD_ELECTIONS.filter(e=>e.networkHash===NETWORK_HASH),complete:true};}},
-  {id:'index-partial',label:'…index incomplete',apply(){S.addressStatus='missing';S.readState='reading';S.indexResult={elections:HELD_ELECTIONS.slice(0,1),complete:false};}},
-  {id:'index-empty',label:'…browser holds nothing',apply(){S.addressStatus='missing';S.readState='reading';S.indexResult={elections:[],complete:true};}},
   {id:'config-missing',label:'Page config missing',apply(){S.configFault='missing';}},
   {id:'config-malformed',label:"Page config can't be read",apply(){S.configFault='malformed';}},
 ];
@@ -1122,6 +1313,8 @@ function go(id){
   S.addressStatus='ok'; S.readState='ready'; S.connection='up'; S.justUpdated=false;
   S.configFault=null; S.keyRelease={released:2,total:3,keyholderCount:3};
   S.roll=ROLL; S.policy=ROLL_DISCLOSURE_POLICY; S.indexResult=null; S.open={};
+  S.indexNetworkNamed=false; S.networkResult=null; S.peerFeed='running'; S.bootFailure=null;
+  S.turnout=TURNOUT_VOTING; S.results=RESULTS_NONE;
   ROUTES.find(r=>r.id===id).apply();
   if(location.hash.slice(1)!==id) location.hash=id;
   render();
@@ -1159,14 +1352,17 @@ function render(){
   renderRail();
   const frame=document.getElementById('stage');
   frame.style.maxWidth = S.width==='full' ? 'none' : (Number(S.width)+2)+'px';   /* +2: the frame's own border, so the PAGE viewport is exactly S.width */
-  const url='?network='+NETWORK_HASH+(S.addressStatus==='ok'?'&election='+ELECTION_ID
+  const url=S.addressStatus==='missing'?'(no query)'
+            :'?network='+NETWORK_HASH+(S.addressStatus==='ok'?'&election='+ELECTION_ID
             :(S.addressStatus==='malformed'?'&election=not-a-valid-id':''));
+  const feed=(S.addressStatus==='ok'&&S.configFault===null)
+            ?'   ·   peer boot '+S.peerFeed+(S.bootFailure?' ('+S.bootFailure+')':''):'';
   const pr=phaseResult();
   document.getElementById('stagelabel').textContent=
     '#'+S.route+'   ·   '+(S.width==='full'?'full width':S.width+'px')
     +'   ·   at '+S.at+' → '+pr.phase+(pr.stage?' (stage '+pr.stage+')':'')
     +'   ·   '+pr.conflicts.length+' timeline diagnostic'+(pr.conflicts.length===1?'':'s')
-    +'   ·   '+(S.configFault?'config '+S.configFault:url);
+    +'   ·   '+(S.configFault?'config '+S.configFault:url)+feed;
   CHARTS=[];
   appDoc().getElementById('root').innerHTML=Page();
   drawCharts();
