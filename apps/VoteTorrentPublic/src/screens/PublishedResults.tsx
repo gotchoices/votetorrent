@@ -1,5 +1,6 @@
 import { t } from '@votetorrent/ui-web';
 import type { PublicResultsReading } from './use-public-election';
+import { formatCount } from '../format-count.js';
 
 /**
  * PublishedResults.tsx -- the body of the results card (56-30, gap E filled).
@@ -33,7 +34,7 @@ export function PublishedResults({ results }: { results: PublicResultsReading })
 	const manyBallots = value.ballots.length > 1;
 	return (
 		<div>
-			<p>{t('public.fact.results.blocks', { blocks: value.blockCount })}</p>
+			<p>{t('public.fact.results.blocks', { blocks: formatCount(value.blockCount) })}</p>
 			{value.ballots.map((ballot) => {
 				const ballotHeading = manyBallots && ballot.description !== null && ballot.description !== '';
 				return (
@@ -41,10 +42,10 @@ export function PublishedResults({ results }: { results: PublicResultsReading })
 						{ballotHeading ? <h4 className="results-ballot__title">{ballot.description}</h4> : null}
 						<p>
 							{t('public.fact.results.ballotTotals', {
-								votes: ballot.votes,
-								valid: ballot.valid,
-								invalid: ballot.invalid,
-								excluded: ballot.excluded,
+								votes: formatCount(ballot.votes),
+								valid: formatCount(ballot.valid),
+								invalid: formatCount(ballot.invalid),
+								excluded: formatCount(ballot.excluded),
 							})}
 						</p>
 						{ballot.questions.map((question) => (
@@ -56,14 +57,14 @@ export function PublishedResults({ results }: { results: PublicResultsReading })
 								)}
 								<ul>
 									{question.options.map((option) => (
-										<li key={option.code}>{t('public.fact.results.optionCount', { option: option.title, count: option.count })}</li>
+										<li key={option.code}>{t('public.fact.results.optionCount', { option: option.title, count: formatCount(option.count) })}</li>
 									))}
-									<li>{t('public.fact.results.blank', { count: question.blank })}</li>
+									<li>{t('public.fact.results.blank', { count: formatCount(question.blank) })}</li>
 								</ul>
 							</div>
 						))}
 						{ballot.unsupported.map((question) => (
-							<p key={question.code}>{t('public.fact.results.unsupported', { question: question.title, count: question.answered })}</p>
+							<p key={question.code}>{t('public.fact.results.unsupported', { question: question.title, count: formatCount(question.answered) })}</p>
 						))}
 					</section>
 				);
