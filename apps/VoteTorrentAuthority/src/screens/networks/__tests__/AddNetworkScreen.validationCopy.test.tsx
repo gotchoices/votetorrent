@@ -238,3 +238,10 @@ describe("AddNetworkScreen builder validation copy", () => {
 		expect(logged).not.toContain("networkInit.name");
 	});
 });
+
+// The duplicate-create gate keeps in-flight creates in module state (it must outlive one screen);
+// a commit a spec leaves pending must not refuse the next spec's create of the same network.
+beforeEach(() => {
+	// eslint-disable-next-line @typescript-eslint/no-var-requires
+	require("../networkCreateOutcome").resetNetworkCreatesInFlightForTests();
+});

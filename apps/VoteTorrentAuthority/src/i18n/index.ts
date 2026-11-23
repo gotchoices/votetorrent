@@ -127,6 +127,10 @@ const resources = {
 				'Still creating the network on this phone. Keep this screen open; on some phones this takes a few minutes.',
 			networkCreateUnconfirmed:
 				'Could not confirm whether the network was created. It may still be finishing — check your networks list before creating it again, so you do not create it twice.',
+			networkCreateDuplicateInFlight:
+				'A network with this name and primary authority domain is still being created on this phone. Wait for it to finish, then check your networks list.',
+			networkCreateDuplicateConfirm:
+				'Your networks list already has a network with this name and primary authority domain. Press Create again only if you mean to create a second one.',
 			errRelayRequired:
 				'Add at least one relay address under Relays before creating the network.',
 			errRelayInvalid:
@@ -1609,6 +1613,10 @@ const resources = {
 				'Todavía se está creando la red en este teléfono. Mantenga esta pantalla abierta; en algunos teléfonos tarda unos minutos.',
 			networkCreateUnconfirmed:
 				'No se pudo confirmar si la red fue creada. Puede que aún se esté completando: revise su lista de redes antes de volver a crearla, para no crearla dos veces.',
+			networkCreateDuplicateInFlight:
+				'Todavía se está creando en este teléfono una red con este nombre y dominio de autoridad principal. Espere a que termine y luego revise su lista de redes.',
+			networkCreateDuplicateConfirm:
+				'Su lista de redes ya tiene una red con este nombre y dominio de autoridad principal. Pulse Crear otra vez solo si quiere crear una segunda.',
 			errRelayRequired:
 				'Agregue al menos una dirección de relay en Relays antes de crear la red.',
 			errRelayInvalid:

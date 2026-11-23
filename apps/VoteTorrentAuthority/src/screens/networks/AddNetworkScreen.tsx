@@ -29,6 +29,10 @@ import {
 	createStepTimeoutError,
 	timedOutStep,
 	findLandedNetwork,
+	findDuplicateNetwork,
+	isNetworkCreateInFlight,
+	markNetworkCreateInFlight,
+	networkCreateKey,
 } from "./networkCreateOutcome";
 import { normalizeRelayAddresses, findInvalidRelayAddress } from "../../utils/relayAddressValidation";
 
@@ -65,6 +69,9 @@ export default function AddNetworkScreen() {
 	const [creating, setCreating] = useState(false);
 	// Neutral status shown while a commit that missed its 45 s deadline is still being awaited.
 	const [stillFinishing, setStillFinishing] = useState(false);
+	// Duplicate-create gate: the name+domain key the officer was warned about. Pressing CREATE again
+	// with the same key is the confirmation; a changed name or domain gets its own warning.
+	const [duplicateAckKey, setDuplicateAckKey] = useState<string | undefined>(undefined);
 	// A late commit can land after the officer left this screen. When the session has NO selected
 	// network it is selected then (and the recovery-key gate runs); when another network is already
 	// selected it is left alone for the officer to pick from Networks. Either way nothing may
@@ -336,13 +343,44 @@ export default function AddNetworkScreen() {
 				recentsSnapshot = undefined;
 			}
 
+			// Duplicate-create gate (2026-09-09 todo). A create with the same name and primary
+			// authority domain whose commit is still running is refused outright: its network has
+			// not reached recents yet, and a second commit would mint a second network. A network
+			// already in recents with that pair needs one more press of CREATE to confirm.
+			const createKey = networkCreateKey(networkName, domainName);
+			if (isNetworkCreateInFlight(createKey)) {
+				console.info("[network-create] duplicate: a create for this network is still running");
+				setErrorMessage(t("networkCreateDuplicateInFlight"));
+				return;
+			}
+			const duplicate = findDuplicateNetwork(recentsSnapshot, {
+				name: networkName,
+				primaryAuthorityDomainName: domainName,
+			});
+			if (duplicate && duplicateAckKey !== createKey) {
+				console.info("[network-create] duplicate: already in recents, asking to confirm");
+				setDuplicateAckKey(createKey);
+				setErrorMessage(t("networkCreateDuplicateConfirm"));
+				return;
+			}
+
 			// network-create-release-hang: instrument each create step so on-device logcat
 			// pinpoints where a real-device hang occurs (console.info is allowed by the VER-01
 			// stub guard). Race against a timeout so an indefinite stall surfaces an error.
 			console.info("[network-create] commit() start", { network: networkName });
 			let networkRef: NetworkReference;
 			// Held un-raced: after the 45 s deadline the SAME promise is handed to awaitLateCommit.
-			const commitPromise = builder.commit();
+			// In flight until the ORIGINAL commit settles, however long that takes and whether or not
+			// this screen is still mounted.
+			const releaseInFlight = markNetworkCreateInFlight(createKey);
+			let commitPromise: ReturnType<typeof builder.commit>;
+			try {
+				commitPromise = builder.commit();
+			} catch (syncErr) {
+				releaseInFlight();
+				throw syncErr;
+			}
+			void commitPromise.then(releaseInFlight, releaseInFlight);
 			try {
 				const networkEngine = await withTimeout(commitPromise, "commit");
 				console.info("[network-create] commit() done");

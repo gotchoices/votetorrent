@@ -114,3 +114,58 @@ export async function awaitLateCommit<T>(
 		if (timer !== undefined) clearTimeout(timer);
 	}
 }
+
+/**
+ * Duplicate-create gate (2026-09-09 todo): a retried CREATE after a "could not confirm" outcome, or
+ * a new create started after leaving this screen while the first commit still runs, could mint a
+ * second network with the same name and primary authority domain. The identity key is that pair:
+ * the name as typed (trimmed) and the domain case-insensitively.
+ */
+export function networkCreateKey(name: string, primaryAuthorityDomainName: string): string {
+	return `${name.trim()}\u0000${primaryAuthorityDomainName.trim().toLowerCase()}`;
+}
+
+/** The first recents entry with the same name and primary authority domain, or `undefined`. */
+export function findDuplicateNetwork(
+	recents: NetworkReference[] | undefined,
+	expected: { name: string; primaryAuthorityDomainName: string },
+): NetworkReference | undefined {
+	if (!Array.isArray(recents)) return undefined;
+	const key = networkCreateKey(expected.name, expected.primaryAuthorityDomainName);
+	return recents.find(
+		(ref) =>
+			typeof ref?.name === "string" &&
+			networkCreateKey(ref.name, typeof ref.primaryAuthorityDomainName === "string" ? ref.primaryAuthorityDomainName : "") ===
+				key,
+	);
+}
+
+/**
+ * Creates whose `commit()` has not settled, by `networkCreateKey`. Module-scoped on purpose: it must
+ * outlive the screen, because the officer can leave Add Network while a slow commit keeps running
+ * and start the same create again from a fresh screen, before the first one reaches recents.
+ */
+const createsInFlight = new Map<string, number>();
+
+/** Marks a create in flight; the returned function releases it (idempotent). */
+export function markNetworkCreateInFlight(key: string): () => void {
+	createsInFlight.set(key, (createsInFlight.get(key) ?? 0) + 1);
+	let released = false;
+	return () => {
+		if (released) return;
+		released = true;
+		const left = (createsInFlight.get(key) ?? 1) - 1;
+		if (left <= 0) createsInFlight.delete(key);
+		else createsInFlight.set(key, left);
+	};
+}
+
+export function isNetworkCreateInFlight(key: string): boolean {
+	return (createsInFlight.get(key) ?? 0) > 0;
+}
+
+/** Test-only: forget every in-flight create (module state outlives one test). */
+export function resetNetworkCreatesInFlightForTests(): void {
+	createsInFlight.clear();
+}
+
