@@ -66,6 +66,34 @@ export class RegistrationDuplicateError extends Error {
 }
 
 /**
+ * The typed refusal of `IRegistrationEngine.closeStaleRegistrationRequest`, thrown before any write.
+ * `availableAt` (ISO-8601 with `Z`) is set for `'too-early'`. Messages carry the request id and the
+ * code only.
+ */
+export type RegistrationStaleCloseErrorCode =
+  | 'request-not-found'
+  | 'not-pending'
+  | 'threshold-is-one'
+  | 'session-reached'
+  | 'too-early'
+  | 'not-authorized'
+  | 'reason-required'
+
+export class RegistrationStaleCloseError extends Error {
+  readonly code: RegistrationStaleCloseErrorCode
+  readonly requestId: string
+  readonly availableAt?: string
+
+  constructor (code: RegistrationStaleCloseErrorCode, requestId: string, message: string, availableAt?: string) {
+    super(message)
+    this.name = 'RegistrationStaleCloseError'
+    this.code = code
+    this.requestId = requestId
+    this.availableAt = availableAt
+  }
+}
+
+/**
  * D-49 (Phase 62 Plan 31): every `RegistrationContentAccess` value except the two READABLE ones.
  * `RegistrationContentAccess` itself lives in `registration/models.ts` (not re-imported here, to
  * avoid a cross-file type-only import loop in this barrel-exported module) — this type is

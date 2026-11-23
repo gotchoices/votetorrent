@@ -44,6 +44,8 @@ import type {
   RegistrationRequestRead,
   RegistrationRequestStatus,
   RegistrationTransparencyStats,
+  RegistrationStaleCloseAvailability,
+  RegistrationStaleCloseInput,
   SelectiveLeaf,
   Signature
 } from '@votetorrent/vote-core'
@@ -822,6 +824,15 @@ export class MockRegistrationEngine implements IRegistrationEngine {
   async rejectRegistrationRequest (_requestId: string, _decision: RegistrationRequestDecision, _signatureOrCallback: SignatureOrCallback): Promise<void> {
     // CONTRACT STUB — replaced by 48-12 (rejection)
     throw new Error('rejectRegistrationRequest is not implemented')
+  }
+
+  async getStaleCloseAvailability (_requestId: string): Promise<RegistrationStaleCloseAvailability | undefined> {
+    // The mock holds no 'vrg' sessions or thresholds: nothing is ever closable on its own.
+    return undefined
+  }
+
+  async closeStaleRegistrationRequest (_requestId: string, _input: RegistrationStaleCloseInput, _signatureOrCallback: SignatureOrCallback): Promise<void> {
+    throw new Error('closeStaleRegistrationRequest is not implemented')
   }
 
   // ---------- D-44 duplicate detection and closure (Phase 62 Plan 19) ----------

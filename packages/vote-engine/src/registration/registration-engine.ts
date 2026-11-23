@@ -1,7 +1,8 @@
 import { setDisclose } from '@optimystic/quereus-plugin-crypto'
 import { digestToBytes, nowCanonicalDatetime, parseJsonOr, asText, asNumberOr, SEQUENCE_ALLOCATION_ATTEMPTS } from '../utils.js'
 import { seedSignedMutation } from '../signing/signed-mutation.js'
-import { readAuthorityThreshold } from '../signing/threshold.js'
+import { listCurrentScopeHolders, readAuthorityThreshold } from '../signing/threshold.js'
+import { readStaleCloseFacts } from './stale-close.js'
 import { allocateTid } from '../database/tid-allocator.js'
 import { resolveSignedSubmittedAt } from '../signing/signed-submitted-at.js'
 import { toIsoZDatetime, toDeferredCheckDatetime, reZuluDatetime, restoreCanonicalDatetime, resolveSign as resolveSignHelper, requireCtx as requireCtxHelper, rethrow as rethrowHelper } from '../signing/ceremony-helpers.js'
@@ -40,7 +41,9 @@ import {
   verificationCid as computeVerificationCidFor,
   RegistrantAlreadyExistsError,
   RegistrationDuplicateError,
-  RequesterSignatureUnverifiableError
+  RegistrationStaleCloseError,
+  RequesterSignatureUnverifiableError,
+  VERIFICATION_CHECKLIST_NONE_ITEM
 } from '@votetorrent/vote-core'
 import type { SqlValue } from '@quereus/quereus'
 import type { EngineContext } from '../types.js'
@@ -86,6 +89,8 @@ import type {
   RegistrationRequestListRow,
   RegistrationRequestRead,
   RegistrationRequestStatus,
+  RegistrationStaleCloseAvailability,
+  RegistrationStaleCloseInput,
   RegistrationTransparencyStats,
   RegistrationVerificationChecklistItem,
   SelectiveLeaf,
@@ -185,8 +190,17 @@ const CHECKLIST_GATE_VALID_CANDIDATES: RegistrationVerificationChecklistItem[][]
  * later Phase-42 plans extend this SAME class, not because they're silently
  * dropped.
  */
+/** Engine options. `now` is the clock the stale-close timeout is measured against (tests inject one). */
+export interface RegistrationEngineOptions {
+  now?: () => number
+}
+
 export class RegistrationEngine implements IRegistrationEngine {
-  constructor (private readonly ctx?: EngineContext) {}
+  private readonly now: () => number
+
+  constructor (private readonly ctx?: EngineContext, options?: RegistrationEngineOptions) {
+    this.now = options?.now ?? (() => Date.now())
+  }
 
   // ---------- signing helpers ----------
 
@@ -3045,6 +3059,55 @@ export class RegistrationEngine implements IRegistrationEngine {
    */
   async rejectRegistrationRequest (requestId: string, decision: RegistrationRequestDecision, signatureOrCallback: SignatureOrCallback): Promise<void> {
     this.requireCtx('rejectRegistrationRequest')
+    await this.writeRejection(requestId, decision, signatureOrCallback, false)
+  }
+
+  async getStaleCloseAvailability (requestId: string): Promise<RegistrationStaleCloseAvailability | undefined> {
+    this.requireCtx('getStaleCloseAvailability')
+    const facts = await readStaleCloseFacts(this.ctx!.db, requestId, this.now())
+    if (facts === undefined || facts.status !== 'p') return undefined
+    return facts.availability
+  }
+
+  async closeStaleRegistrationRequest (requestId: string, input: RegistrationStaleCloseInput, signatureOrCallback: SignatureOrCallback): Promise<void> {
+    this.requireCtx('closeStaleRegistrationRequest')
+    const ctx = this.ctx!
+    const facts = await readStaleCloseFacts(ctx.db, requestId, this.now())
+    if (facts === undefined) {
+      throw new RegistrationStaleCloseError('request-not-found', requestId, `closeStaleRegistrationRequest: no RegistrationRequest ${requestId}`)
+    }
+    if (facts.status !== 'p') {
+      throw new RegistrationStaleCloseError('not-pending', requestId, `closeStaleRegistrationRequest: RegistrationRequest ${requestId} is already decided`)
+    }
+    const { availability } = facts
+    if (availability.threshold <= 1) {
+      throw new RegistrationStaleCloseError('threshold-is-one', requestId, `closeStaleRegistrationRequest: RegistrationRequest ${requestId} needs one approval; reject it instead`)
+    }
+    if (facts.sessionReached) {
+      throw new RegistrationStaleCloseError('session-reached', requestId, `closeStaleRegistrationRequest: the session behind RegistrationRequest ${requestId} has reached its threshold`)
+    }
+    if (!availability.available) {
+      throw new RegistrationStaleCloseError('too-early', requestId, `closeStaleRegistrationRequest: RegistrationRequest ${requestId} can be closed from ${availability.availableAt}`, availability.availableAt)
+    }
+    const userId = ctx.user?.id
+    const holders = await listCurrentScopeHolders(ctx.db, facts.authorityId, 'vrg')
+    if (typeof userId !== 'string' || !holders.includes(userId)) {
+      throw new RegistrationStaleCloseError('not-authorized', requestId, `closeStaleRegistrationRequest: the caller does not hold 'vrg' at the request's authority`)
+    }
+    const rejectionReason = (input?.rejectionReason ?? '').trim()
+    if (!rejectionReason) {
+      throw new RegistrationStaleCloseError('reason-required', requestId, 'closeStaleRegistrationRequest: a reason is required')
+    }
+    // The closing officer asserts no verification: the signed checklist says so ('none').
+    await this.writeRejection(requestId, { checklist: [VERIFICATION_CHECKLIST_NONE_ITEM], rejectionReason }, signatureOrCallback, true)
+  }
+
+  /**
+   * The rejection ceremony shared by `rejectRegistrationRequest` and `closeStaleRegistrationRequest`.
+   * `staleClose` is set only by the latter, after its own timeout and holder checks: above a 'vrg'
+   * threshold of 1 it lets this one officer's signature complete the decision's session.
+   */
+  private async writeRejection (requestId: string, decision: RegistrationRequestDecision, signatureOrCallback: SignatureOrCallback, staleClose: boolean): Promise<void> {
     const ctx = this.ctx!
     try {
       // SubmittedAt/ReceivedAt are read here too, mirroring
@@ -3131,7 +3194,7 @@ export class RegistrationEngine implements IRegistrationEngine {
       // SignatureTasksEngine.completeSignature({isAccepted:false, ...}), which records no
       // OfficerSignature and advances nothing (D-11's no-veto derivation).
       const rejectThreshold = await readAuthorityThreshold(ctx.db, authorityId, 'vrg')
-      if (rejectThreshold > 1) {
+      if (rejectThreshold > 1 && !staleClose) {
         // 62-19 crossnote (claimed): the previous text pointed the officer at a screen it cannot
         // reach — registrant tasks are filtered out of TasksScreen (62-12). The corrected text
         // below states what actually happened and how the request IS decided (every officer's
@@ -3190,7 +3253,7 @@ export class RegistrationEngine implements IRegistrationEngine {
         decidingOfficerUserId,
         rejectionReason
       }
-      const nonce = await seedSignedMutation(ctx, authorityId, 'vrg', tid, digestExpr, digestParams, this.resolveSign(signatureOrCallback))
+      const nonce = await seedSignedMutation(ctx, authorityId, 'vrg', tid, digestExpr, digestParams, this.resolveSign(signatureOrCallback), staleClose && rejectThreshold > 1 ? { singleOfficer: true } : undefined)
 
       await ctx.db.exec(
         // SubmittedAt/ReceivedAt are explicitly rebound (restoreCanonicalDatetime,
@@ -3219,7 +3282,7 @@ export class RegistrationEngine implements IRegistrationEngine {
       )
     } catch (err) {
       if (err instanceof RegistrationDuplicateError || err instanceof RequesterSignatureUnverifiableError) throw err
-      this.rethrow(err, 'rejectRegistrationRequest')
+      this.rethrow(err, staleClose ? 'closeStaleRegistrationRequest' : 'rejectRegistrationRequest')
     }
   }
 

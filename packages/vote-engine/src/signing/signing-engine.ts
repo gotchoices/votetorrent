@@ -20,8 +20,18 @@ import {
 	countQualifyingSignatures,
 	computeSigningStatus,
 	DerivedSigningError,
+	listCurrentScopeHolders,
 	readSessionThreshold,
 } from './threshold.js';
+
+/**
+ * Engine-internal sign options. `singleOfficer` completes the session on this one signature (the
+ * signer must be a current holder of the session's scope). Only an engine method that enforces its
+ * own policy for it may pass it; it is not part of the vote-core `SignOptions` contract.
+ */
+export interface EngineSignOptions extends SignOptions {
+	singleOfficer?: boolean;
+}
 
 export class SigningEngine implements ISigningEngine {
 	constructor(private readonly ctx: EngineContext) {}
@@ -52,7 +62,7 @@ export class SigningEngine implements ISigningEngine {
 	async signWithOutcome(
 		nonce: string,
 		signature: Signature,
-		options?: SignOptions,
+		options?: EngineSignOptions,
 	): Promise<SignOutcome> {
 		// Phase 42-03: Quereus's transaction model is FLAT (a nested explicit
 		// BEGIN inside an already-explicit transaction throws "Cannot begin
@@ -178,7 +188,16 @@ export class SigningEngine implements ISigningEngine {
 				const scope = sessionRes?.Scope as Scope;
 				const authorityId = sessionRes?.AuthorityId as string;
 
-				const threshold = await readSessionThreshold(this.ctx.db, nonce, scope);
+				// A single-officer close (EngineSignOptions.singleOfficer) completes the session on this
+				// one signature, but only for a CURRENT holder of the session's scope: the caller owns the
+				// policy that allows it (for example the registration close after its timeout).
+				if (options?.singleOfficer === true) {
+					const holders = await listCurrentScopeHolders(this.ctx.db, authorityId, scope);
+					if (!holders.includes(signature.signerUserId)) {
+						throw new Error(`SigningEngine.signWithOutcome: a single-officer close needs a current '${scope}' holder`);
+					}
+				}
+				const threshold = options?.singleOfficer === true ? 1 : await readSessionThreshold(this.ctx.db, nonce, scope);
 				const signatureCount = await countQualifyingSignatures(this.ctx.db, nonce, authorityId, scope, threshold);
 
 				const thresholdMet = signatureCount >= threshold;

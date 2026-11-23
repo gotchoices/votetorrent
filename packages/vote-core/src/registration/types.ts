@@ -31,6 +31,8 @@ import type {
   RegistrationRequestListPage,
   RegistrationRequestListResult,
   RegistrationRequestRead,
+  RegistrationStaleCloseAvailability,
+  RegistrationStaleCloseInput,
   RegistrationTransparencyStats
 } from './models.js'
 
@@ -245,6 +247,22 @@ export interface IRegistrationEngine {
    * reject UI gates on a non-empty trimmed reason).
    */
   rejectRegistrationRequest(requestId: string, decision: RegistrationRequestDecision, signatureOrCallback: SignatureOrCallback): Promise<void>
+
+  /**
+   * Whether the caller may close `requestId` as rejected on their own; `undefined` when the request
+   * does not exist or is no longer pending. See `RegistrationStaleCloseAvailability`.
+   */
+  getStaleCloseAvailability(requestId: string): Promise<RegistrationStaleCloseAvailability | undefined>
+
+  /**
+   * Above a 'vrg' threshold of 1, any single officer holding 'vrg' closes a pending request as
+   * rejected once its session has been open for `REGISTRATION_STALE_CLOSE_TIMEOUT_MS`, recording
+   * `input.rejectionReason`. The signed decision records the checklist `['none']`: the closing
+   * officer asserts no verification. Refuses (`RegistrationStaleCloseError`) before any write when
+   * the request is not pending, the threshold is 1 (use `rejectRegistrationRequest`), the session has
+   * already reached its threshold, the timeout has not passed, or the caller does not hold 'vrg'.
+   */
+  closeStaleRegistrationRequest(requestId: string, input: RegistrationStaleCloseInput, signatureOrCallback: SignatureOrCallback): Promise<void>
 
   // ---------- D-44 duplicate detection and closure (Phase 62 Plan 19) ----------
 
