@@ -202,14 +202,17 @@ button{font-family:inherit;font-size:inherit}
 
 /* ---- FieldGroup ---- */
 .fgcard{border:1px solid var(--border);border-radius:var(--r-lg);background:var(--card);padding:0 16px}
-.fgrow{padding:16px 0}
+/* row paddingVertical 3 + the INPUT's own 44dp min height (the touch target); an error line
+   carries marginBottom 13 (components/FieldGroup.tsx) */
+.fgrow{padding:3px 0}
 .fgrow input{
   width:100%;border:0;outline:0;background:none;padding:0;font-family:inherit;
-  font-size:16px;line-height:22px;color:var(--text);
+  font-size:16px;line-height:22px;min-height:44px;color:var(--text);
 }
 .fgrow input::placeholder{color:var(--textSecondary)}
 .fgrow.err input::placeholder{color:var(--error)}
 .fgerr{margin-top:4px;font-size:16px;line-height:20px;color:var(--error)}
+.fgrow .fgerr{margin-top:0;margin-bottom:13px}
 .fgdivider{height:1px;background:var(--border)}
 
 /* ContinueOnAnotherDevice TextInput: borderWidth 1, radius 8, padding 12, minHeight 44 */
@@ -315,9 +318,11 @@ button{font-family:inherit;font-size:inherit}
  * own native stack; every push and every presentation:'modal' route lives INSIDE that tab's
  * stack, so the tab bar stays visible except on the register-flow routes it is explicitly
  * hidden for. The Timeline stack re-registers Ballot / IndividualQuestion / ReviewSubmit /
- * RegistrationHome / RegistrationInfo / the register flow / ContinueOnAnotherDevice so a row
- * action pushes within Timeline and Back returns to the rail. A retired device replaces the
- * WHOLE tab navigator with DeviceRetiredNotice.
+ * VoteReceipt / RegistrationHome / RegistrationInfo / the register flow / ContinueOnAnotherDevice /
+ * JoinNetwork so a row action pushes within Timeline and Back returns to the rail, and adds
+ * Keyholders and Results. VoteReceipt lives on the Vote stack too; JoinNetwork on the Settings and
+ * Registration stacks too. A retired device replaces the WHOLE tab navigator with
+ * DeviceRetiredNotice. A ToastProvider wraps the navigator (one app-wide toast).
  * ========================================================================= */
 
 /* ---------------------------------------------------------------------------
@@ -350,6 +355,10 @@ const ICONS = {
   'timeline': '<path d="M1 11h22v2H1z"/><circle cx="5" cy="12" r="3"/><circle cx="12" cy="12" r="3"/><circle cx="19" cy="12" r="3"/><rect x="2" y="2.5" width="7" height="4.5" rx="1"/><rect x="9" y="17" width="7" height="4.5" rx="1"/><rect x="15" y="2.5" width="7" height="4.5" rx="1"/>',
   'triangle-exclamation': '<path fill-rule="evenodd" d="M12 1.5c.6 0 1.1.3 1.4.8l10 17.2c.6 1-.2 2.3-1.4 2.3H2c-1.2 0-2-1.3-1.4-2.3l10-17.2c.3-.5.8-.8 1.4-.8zm0 6.3c-.7 0-1.2.6-1.2 1.2v5.4c0 .7.5 1.2 1.2 1.2s1.2-.5 1.2-1.2V9c0-.6-.5-1.2-1.2-1.2zm0 12.2a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z"/>',
   'key': '<path fill-rule="evenodd" d="M15.5 1a7.5 7.5 0 0 0-7.2 9.6l-7 7a1 1 0 0 0-.3.7V22a1 1 0 0 0 1 1h3.5a1 1 0 0 0 1-1v-1.5H8a1 1 0 0 0 1-1V18h1.5a1 1 0 0 0 .7-.3l1.2-1.2A7.5 7.5 0 1 0 15.5 1zm2 3.5a2 2 0 1 1 0 4 2 2 0 0 1 0-4z"/>',
+  'cloud-arrow-up': '<path d="M5.5 21A5.5 5.5 0 0 1 4.6 10.1 7 7 0 0 1 18.2 8.5 6.3 6.3 0 0 1 18 21zm7.2-12.7a1 1 0 0 0-1.4 0l-3.2 3.2a1 1 0 0 0 1.4 1.4l1.5-1.5V16a1 1 0 1 0 2 0v-4.6l1.5 1.5a1 1 0 0 0 1.4-1.4z"/>',
+  'circle-exclamation': '<path d="M12 0a12 12 0 1 0 0 24 12 12 0 0 0 0-24zm0 6a1.3 1.3 0 0 1 1.3 1.3v5.4a1.3 1.3 0 0 1-2.6 0V7.3A1.3 1.3 0 0 1 12 6zm0 12.4a1.6 1.6 0 1 1 0-3.2 1.6 1.6 0 0 1 0 3.2z"/>',
+  /* iOS system Face ID glyph (the prompt is OS chrome, not an app asset) */
+  'face-id': '<path d="M2 7V4.5A2.5 2.5 0 0 1 4.5 2H7v1.6H4.5a.9.9 0 0 0-.9.9V7zm15-5h2.5A2.5 2.5 0 0 1 22 4.5V7h-1.6V4.5a.9.9 0 0 0-.9-.9H17zM2 17h1.6v2.5c0 .5.4.9.9.9H7V22H4.5A2.5 2.5 0 0 1 2 19.5zm18.4 0H22v2.5a2.5 2.5 0 0 1-2.5 2.5H17v-1.6h2.5c.5 0 .9-.4.9-.9zM7.6 8.4h1.6v2.2H7.6zm7.2 0h1.6v2.2h-1.6zM12.8 8.4v4.8a1.4 1.4 0 0 1-1.4 1.4h-.6V13h.6V8.4zM8.3 16.1a5.3 5.3 0 0 0 7.4 0l1.1 1.1a6.9 6.9 0 0 1-9.6 0z"/>',
   'nav-back': '<path d="M17 4.5v15a1 1 0 0 1-1.5.9L4.5 12.9a1 1 0 0 1 0-1.8l11-7.5A1 1 0 0 1 17 4.5z"/>',
   'nav-home': '<circle cx="12" cy="12" r="7"/>',
   'nav-recents': '<rect x="5.5" y="5.5" width="13" height="13" rx="2"/>',
@@ -362,9 +371,9 @@ function icon(name, size, color, extraStyle){
 
 /* ---------------------------------------------------------------------------
  * 2. i18n — generated verbatim from src/i18n/index.ts `resources` (EN + ES, flat dotted
- *    keys, keySeparator:false, fallbackLng:'en'). Every namespace is in EN/ES lockstep;
- *    the only English that survives an ES switch is the handful of string LITERALS the
- *    source renders without t() (listed in the drawer).
+ *    keys, keySeparator:false, fallbackLng:'en'). Nine namespaces (common, home, ballot,
+ *    registration, scan, settings, join, timeline, continuity), all in EN/ES lockstep; the
+ *    only English that survives an ES switch is the dev-only cycler / toggle labels.
  * ------------------------------------------------------------------------ */
 const RES = {
  en:{
@@ -383,7 +392,20 @@ const RES = {
    "breadcrumb.home":"Home",
    "breadcrumb.ballot":"Ballot",
    "configNotConfigured":"Not configured",
-   "syncSyncing":"Syncing"
+   "unsharedChanges":"Saved on this phone, not yet on the election network: {{count}}",
+   "syncSyncing":"Syncing",
+   "bootError.generic":"We couldn't open the voting network on this phone.",
+   "bootError.updateNeeded.title":"Update VoteTorrent to open this voting network",
+   "bootError.updateNeeded.body":"This voting network has data that this version of the app can't open. Install the latest version, then try again. Nothing on this phone has been deleted.",
+   "bootError.tryAgain":"Try Again",
+   "bootError.continueWithoutNetwork":"Continue without a network",
+   "bootError.identityLost.title":"This phone's voter identity can't be unlocked",
+   "bootError.identityLost.body":"The key that protects your voter identity on this phone is gone. This can happen after restoring a backup or resetting the phone's security. It cannot be recovered.",
+   "bootError.identityLost.create":"Create a new identity",
+   "bootError.identityLost.confirmBody":"Create a new identity on this phone? The old one cannot be recovered. You will need to register again, or ask your authority to approve this phone.",
+   "bootError.identityLost.confirm":"Confirm",
+   "bootError.identityLost.cancel":"Cancel",
+   "bootError.identityLost.replaceFailed":"We couldn't create a new identity. Try again."
   },
   home:{
    "headerTitle":"Vote",
@@ -414,7 +436,6 @@ const RES = {
    "states.validation.pendingSummary":"Election keys released — results are being tallied and validated.",
    "states.complete.closedSummary":"This election is closed.",
    "electionUnavailable":"No election is available on this network yet.",
-   "votedCta":"You voted",
    "validationDetails.columnCheck":"Check",
    "validationDetails.columnResult":"Result",
    "validationDetails.columnTime":"Time",
@@ -442,7 +463,6 @@ const RES = {
    "nextCta":"Next Question",
    "previousCta":"Previous Question",
    "submitCta":"Submit",
-   "submittedConfirmation":"Your ballot was submitted",
    "notYetAnswered":"Not yet answered",
    "learnAboutOffice":"Learn about this office",
    "learnAboutCandidate":"Learn about this candidate",
@@ -460,7 +480,109 @@ const RES = {
    "reviewSubmitTitle":"Review & Submit",
    "ballotUnavailable":"This election's ballot isn't available yet.",
    "unsupportedQuestions_one":"{{count}} question on this ballot can't be answered in this app yet.",
-   "unsupportedQuestions_other":"{{count}} questions on this ballot can't be answered in this app yet."
+   "unsupportedQuestions_other":"{{count}} questions on this ballot can't be answered in this app yet.",
+   "receipt.title":"Vote saved",
+   "receipt.loading":"Loading your saved vote…",
+   "receipt.status":"Your vote is saved on this phone. It has not been sent to the election yet.",
+   "receipt.statusSent":"Your vote has been sent to the election. A copy is still saved on this phone.",
+   "receipt.loss":"Your vote exists only on this phone. Clearing this app's data or reinstalling the app deletes it.",
+   "receipt.stale":"The election changed after you voted. Please vote again.",
+   "receipt.revisionUnknown":"We couldn't check whether the election has changed since you voted.",
+   "receipt.none":"No vote is saved on this phone for this election.",
+   "receipt.unreadable":"Your saved vote can't be read on this phone.",
+   "receipt.revealCta":"Show my choices and vote codes",
+   "receipt.revealHint":"You'll be asked for Face ID.",
+   "receipt.revealHint.android":"You'll be asked for your fingerprint.",
+   "receipt.revealCanceled":"Your choices are still hidden.",
+   "receipt.revealBiometricUnavailable":"Face ID can't be checked right now. Make sure Face ID is set up on this iPhone, then try again.",
+   "receipt.revealBiometricUnavailable.android":"Your fingerprint can't be checked right now. Make sure a fingerprint is set up on this phone, then try again.",
+   "receipt.revealFailed":"We couldn't open your saved vote. Try again.",
+   "receipt.choicesHeading":"Your choices",
+   "receipt.leftBlank":"Left blank",
+   "receipt.nonceLabel":"Your vote code",
+   "receipt.copyCta":"Copy code",
+   "receipt.copyWarning":"Anyone with this code can find how you voted.",
+   "receipt.copied":"Copied",
+   "receipt.copyFailed":"Copying isn't available on this phone.",
+   "receipt.doneCta":"Done",
+   "receipt.prompt.title":"Show your saved vote",
+   "receipt.prompt.subtitle":"Use Face ID to see your choices and vote codes",
+   "receipt.prompt.subtitle.android":"Use your fingerprint to see your choices and vote codes",
+   "receipt.prompt.negativeButton":"Cancel",
+   "send.heading":"Send your vote",
+   "send.explain":"Your vote is sent together with the votes of at least 2 other voters, so nobody can tell which vote is yours. It is encrypted on this phone first.",
+   "send.cta":"Send my vote",
+   "send.retryCta":"Try again",
+   "send.hint":"You'll be asked for Face ID to open your saved vote, and again to confirm each group it is sent in.",
+   "send.hint.android":"You'll be asked for your fingerprint to open your saved vote, and again to confirm each group it is sent in.",
+   "send.waiting":"Waiting for other voters ({{size}} so far, 3 needed)…",
+   "send.joined":"Joined a group of voters. Waiting for it to fill…",
+   "send.confirming":"Confirm with Face ID to send.",
+   "send.confirming.android":"Confirm with your fingerprint to send.",
+   "send.sent":"Sent to the election.",
+   "send.allSent":"Your vote has been sent to the election.",
+   "send.notSentClosed":"Not sent: voting closed before enough voters were ready. Your vote is still saved on this phone.",
+   "send.notSent":"Not sent yet. Your vote is still saved on this phone; try again later.",
+   "send.noNetwork":"This phone isn't connected to an election network yet. Join your election's network first.",
+   "send.noRendezvous":"This phone doesn't know how to reach your election's network. Join it again from Settings.",
+   "send.votingClosed":"Voting has closed. Your vote was not sent.",
+   "send.keyMissing":"The election isn't ready to receive votes yet. Try again later.",
+   "send.windowUnreadable":"We couldn't read when voting closes. Try again later.",
+   "send.canceled":"Sending was cancelled. Your vote is still saved.",
+   "send.biometricUnavailable":"Face ID can't be checked right now. Make sure Face ID is set up on this iPhone, then try again.",
+   "send.biometricUnavailable.android":"Your fingerprint can't be checked right now. Make sure a fingerprint is set up on this phone, then try again.",
+   "send.failed":"We couldn't send your vote. It is still saved on this phone; try again.",
+   "send.ballotLabel":"Ballot {{index}}",
+   "send.consentPrompt.title":"Send your vote",
+   "send.consentPrompt.subtitle":"Confirm you are sending your vote in this group",
+   "send.consentPrompt.negativeButton":"Cancel",
+   "send.recordPrompt.title":"Open your saved vote",
+   "send.recordPrompt.subtitle":"Use Face ID to send your saved vote",
+   "send.recordPrompt.subtitle.android":"Use your fingerprint to send your saved vote",
+   "send.recordPrompt.negativeButton":"Cancel",
+   "submit.signPrompt.title":"Confirm your vote",
+   "submit.signPrompt.subtitle":"Sign your vote with your device key",
+   "submit.signPrompt.negativeButton":"Cancel",
+   "submit.recordPrompt.title":"Save your vote",
+   "submit.recordPrompt.subtitle":"Use Face ID to protect your saved vote",
+   "submit.recordPrompt.subtitle.android":"Use your fingerprint to protect your saved vote",
+   "submit.recordPrompt.negativeButton":"Cancel",
+   "submit.checking":"Checking whether you can vote…",
+   "submit.saving":"Saving your vote…",
+   "submit.localNote":"Submitting saves your vote only on this phone. It isn't sent to the election yet.",
+   "submit.blankHeading":"You left these questions blank:",
+   "submit.blankRequiredTag":"Required",
+   "submit.allBlank":"Every question is blank. Your vote will be saved with no choices.",
+   "submit.staleReplace":"The election changed after you voted. Please vote again. Your new vote replaces the one saved earlier.",
+   "submit.reason.electionUnavailable":"This election can't be read on this phone right now, so your vote can't be saved.",
+   "submit.reason.windowClosed":"Voting isn't open for this election right now.",
+   "submit.reason.ballotUnconfirmed":"This ballot hasn't been confirmed by the election authority yet, so it can't be voted.",
+   "submit.reason.noBallots":"This election has no ballot to vote on yet.",
+   "submit.reason.unsupportedQuestion":"This ballot has a question this app can't show yet, so it can't be voted here.",
+   "submit.reason.dependentQuestion":"This ballot has a question that depends on another answer, which this app can't handle yet, so it can't be voted here.",
+   "submit.reason.selectionInvalid":"Some of your choices don't match this ballot. Go back and check your answers.",
+   "submit.reason.requiredUnanswered":"Answer every required question before you submit.",
+   "submit.reason.belowMinimum":"Some questions need more choices. Go back and choose at least the minimum number.",
+   "submit.reason.deviceCheckFailed":"We couldn't check this phone's voting key. Try again.",
+   "submit.reason.notRegistered":"This phone is not registered to vote in this election, or its voting key has changed. Register this phone again.",
+   "submit.reason.registrationAmbiguous":"This phone is linked to more than one registration for this election, so it can't tell which one should vote.",
+   "submit.reason.unreadableKey":"This phone's voting key can't be read, so your vote can't be signed.",
+   "submit.reason.alreadySaved":"A vote is already saved on this phone for this election.",
+   "submit.failure.canceled":"Your vote was not saved. The Face ID check was canceled.",
+   "submit.failure.canceled.android":"Your vote was not saved. The fingerprint check was canceled.",
+   "submit.failure.biometricUnavailable":"Your vote was not saved. Face ID can't be checked right now. Make sure Face ID is set up on this iPhone, then try again.",
+   "submit.failure.biometricUnavailable.android":"Your vote was not saved. Your fingerprint can't be checked right now. Make sure a fingerprint is set up on this phone, then try again.",
+   "submit.failure.signFailed":"Your vote was not saved. It couldn't be signed on this phone. Try again.",
+   "submit.failure.signatureInvalid":"Your vote was not saved. This phone's voting key didn't match its registration. Register this phone again.",
+   "submit.failure.buildFailed":"Your vote was not saved. It couldn't be prepared. Try again.",
+   "submit.failure.keyInvalidated":"Your vote was not saved. The Face ID settings on this iPhone changed, so the vote couldn't be protected.",
+   "submit.failure.keyInvalidated.android":"Your vote was not saved. The fingerprint settings on this phone changed, so the vote couldn't be protected.",
+   "submit.failure.sealFailed":"Your vote was not saved. It couldn't be protected on this phone. Try again.",
+   "submit.failure.storeFailed":"Your vote was not saved. This phone couldn't store it. Try again.",
+   "submit.failure.storeUnreadable":"Your vote was not saved. A vote already on this phone can't be read, so a new one can't replace it.",
+   "submit.failure.unexpected":"Your vote was not saved. Something went wrong. Try again.",
+   "savedVote.status":"Vote saved — not sent",
+   "savedVote.viewCta":"View saved vote"
   },
   registration:{
    "headerTitle":"Registration",
@@ -478,10 +600,10 @@ const RES = {
    "deviceAttestationTitle":"Verifying Your Device",
    "confirmationTitle":"You're All Set",
    "notRegistered.heading":"You are not registered",
-   "notRegistered.body":"To participate in the Utah Network you will need to register",
+   "notRegistered.body":"To participate in the {{network}} you will need to register",
    "notRegistered.cta":"Register now",
    "registered.heading":"You're registered to vote",
-   "registered.body":"You have successfully registered for the Utah Network",
+   "registered.body":"You have successfully registered for the {{network}}",
    "registered.identityLine":"{{fullName}}: {{party}} {{dob}}",
    "registered.validThrough":"Valid through {{validThrough}}",
    "registered.updatePrompt":"Have you recently made any changes to your personal info?",
@@ -490,7 +612,7 @@ const RES = {
    "deviceAttestation.caption":"Confirming your device is secure",
    "deviceAttestation.terminalHeading":"This device can't be used to vote",
    "deviceAttestation.terminalBody":"This device lacks the secure hardware required to protect a vote, so it cannot be used to register.",
-   "form.sectionTitle":"Register for the Utah Network",
+   "form.sectionTitle":"Register for the {{network}}",
    "form.firstName":"First Name",
    "form.lastName":"Last Name",
    "form.dob":"Date of Birth",
@@ -525,10 +647,26 @@ const RES = {
    "confirmation.body":"Confirm your registration with Face ID",
    "confirmation.cta":"Confirm with Face ID",
    "confirmation.caption":"Look at your device to confirm",
-   "confirmation.error.biometricNotEnrolled":"Set up fingerprint or face unlock to continue",
+   "confirmation.body.android":"Confirm your registration with your fingerprint or face unlock",
+   "confirmation.cta.android":"Confirm with biometrics",
+   "confirmation.caption.android":"Follow the prompt on your device to confirm",
+   "confirmation.error.biometricNotEnrolled":"Set up Face ID to continue",
+   "confirmation.error.biometricNotEnrolled.android":"Set up fingerprint or face unlock to continue",
    "confirmation.error.setupCta":"Set up device unlock",
    "confirmation.error.transient":"Something went wrong verifying your device. Try again.",
    "confirmation.error.terminal":"This device can't be used to vote",
+   "confirmation.error.intakeUnavailable":"We couldn't send your registration to the authority right now. Try again later.",
+   "confirmation.error.noElection":"There is no election to register for on this phone yet.",
+   "confirmation.retryCta":"Try Again",
+   "confirmation.pending":"Your registration has been submitted. This screen updates when the election office approves your device.",
+   "confirmation.registered":"Your device is registered. You can vote in this election.",
+   "confirmation.doneCta":"Done",
+   "confirmation.pendingBackCta":"Back to registration",
+   "confirmation.pendingCheckLater":"Still waiting for the election office. Open this screen again later to check.",
+   "confirmation.waiting":"Waiting for the election office to approve your registration, so keep this screen open.",
+   "confirmation.waitingCancel":"Stop waiting",
+   "confirmation.notShared":"Your request is saved on this phone only, so far. The election office cannot see it until it reaches the election network, so keep the app open and connected.",
+   "confirmation.error.waitStopped":"You stopped waiting, so tap Try Again when the election office has approved your registration.",
    "formHeaderTitle":"Register",
    "confirmHeaderTitle":"Confirm"
   },
@@ -541,7 +679,53 @@ const RES = {
    "headerTitle":"Settings",
    "language":"Language",
    "languageEnglish":"English",
-   "languageSpanish":"Español"
+   "languageSpanish":"Español",
+   "joinNetworkRow":"Join a network"
+  },
+  join:{
+   "headerTitle":"Join a network",
+   "entryLink":"Join your election authority's network",
+   "intro":"Scan the QR code your election authority showed you, or paste the join code. It connects this phone to the authority's voting network.",
+   "codeLabel":"Join code",
+   "codePlaceholder":"Paste the join code",
+   "pasteButton":"Paste",
+   "invalidCode":"This isn't a valid join code. Check that you copied all of it, or ask your election authority for a new one.",
+   "newerCode":"This join code needs a newer version of the app. Update the app and try again.",
+   "previewNetwork":"Network",
+   "previewFingerprint":"Network fingerprint",
+   "previewCheck":"Before you join, check that this fingerprint matches the one your election authority published.",
+   "joinButton":"Join network",
+   "step.admitting":"Joining the election authority's network…",
+   "step.syncing":"Downloading the network…",
+   "step.verifying":"Checking the network matches the code…",
+   "step.done":"Joined",
+   "joinedTitle":"You joined {{name}}",
+   "doneButton":"Done",
+   "error.invitationExpired":"This join code has expired. Ask your election authority for a new one.",
+   "error.notAdmitted":"The election authority's network did not accept this code. It may have been used up or withdrawn. Ask your election authority for a new one.",
+   "error.noPeers":"We couldn't reach the election authority's network. Check your connection and try again.",
+   "error.notSynced":"The network is taking too long to download. Check your connection and try again.",
+   "error.digestMismatch":"This network doesn't match the join code, so this phone did not join it. Ask your election authority for a new code.",
+   "error.openFailed":"We couldn't open the network on this phone. Try again.",
+   "error.otherCadre":"This phone already belongs to another election authority's network, and it can only be in one at a time for now. Joining this one needs the app to be reinstalled.",
+   "error.generic":"Something went wrong while joining. Try again.",
+   "scanButton":"Scan QR code",
+   "scanTitle":"Scan the join code",
+   "scanInstruction":"Point the camera at the QR code from your election authority.",
+   "scanSlow":"Hold the phone steady and move closer until the whole QR code fills the frame, or paste the code instead.",
+   "scanStarting":"Starting the camera…",
+   "scanClose":"Close scanner",
+   "scanPasteInstead":"Paste instead",
+   "scannedNotice":"Code scanned. Check the network name and fingerprint below, then tap Join network.",
+   "scanNotJoinCode":"That QR code isn't a VoteTorrent join code, so scan the one from your election authority or paste the code instead.",
+   "cameraDenied":"Camera access was not allowed, so this phone can't scan. Try again, or paste the join code instead.",
+   "cameraBlocked":"Camera access is turned off for VoteTorrent. Turn it on in Settings, or paste the join code instead.",
+   "cameraNone":"This phone has no camera to scan with. Paste the join code instead.",
+   "cameraFailed":"The camera could not start. Close other apps that use the camera and try again, or paste the join code instead.",
+   "openSettings":"Open Settings",
+   "olderCode":"This join code was made by an older version of VoteTorrent, so ask your election authority for a new one.",
+   "notJoinCode":"This isn't a VoteTorrent join code, so paste the one from your election authority or scan their QR code.",
+   "error.invitationUsedUp":"This join code can no longer be used, so ask the election office for a new one."
   },
   timeline:{
    "stage.registrationEnds.title":"Registration Ends",
@@ -572,13 +756,37 @@ const RES = {
    "registration.editCta":"Edit registration",
    "voting.previewBallotCta":"Preview ballot",
    "voting.voteNowCta":"Vote now",
-   "voting.viewSubmissionCta":"View submission",
+   "voting.viewSubmissionCta":"View saved vote",
    "row.detailsCta":"See details",
    "keyholders.viewCta":"View Keyholders",
    "keyholders.screenTitle":"Keyholders",
    "keyholders.releasedCount":"{{released}} of {{total}} keys released",
    "keyholders.emptyHeading":"No keyholders yet",
    "keyholders.emptyBody":"This election has no keyholders assigned yet.",
+   "results.viewCta":"View results",
+   "results.screenTitle":"Results",
+   "results.computing":"Decrypting and counting the votes on this phone…",
+   "results.loadFailed":"The results couldn't be read on this phone. Try again in a moment.",
+   "results.noElection":"There is no election on this phone yet.",
+   "results.lockedTitle":"Results are locked",
+   "results.lockedBody":"The votes stay encrypted until enough keyholders release their keys.",
+   "results.releasedCount":"{{released}} of {{needed}} needed keys released",
+   "results.noKey":"The keyholders haven't finished creating the election key yet.",
+   "results.unavailableTitle":"The results couldn't be worked out",
+   "results.unavailableReason":"Reason: {{reason}}",
+   "results.validVotes":"Valid votes: {{count}}",
+   "results.notCountedVotes":"Votes not counted: {{count}}",
+   "results.optionCount":"{{count}} ({{percent}}%)",
+   "results.blank":"Left blank: {{count}}",
+   "results.questionNotCounted":"This question type isn't counted yet.",
+   "results.noBallots":"No confirmed ballot was found for this election.",
+   "results.checkedNote":"Counted on this phone from the vote blocks it has received so far. Tap Refresh to count again.",
+   "results.noBlocksYet":"No vote blocks have reached this phone yet, so nothing is counted. Wait a minute, then tap Refresh.",
+   "results.refreshCta":"Refresh",
+   "results.notPublished":"An election officer has not published the official count yet.",
+   "results.publishedMatches":"An election officer published the official count on {{date}}. It matches the count on this phone.",
+   "results.publishedDiffers":"An election officer published a count from {{published}} vote blocks, and this phone counted {{local}}. This phone may not have every vote block yet.",
+   "results.publishedInvalid":"A count was published, but it failed its signature or consistency check. Do not rely on it.",
    "indeterminate.heading":"We can't show this election's timeline right now",
    "indeterminate.body":"The election schedule could not be read or doesn't make sense yet. Try again in a moment.",
    "indeterminate.retryCta":"Try again",
@@ -592,6 +800,7 @@ const RES = {
    "code.copiedConfirm":"Copied",
    "code.showAgainLink":"Show my registration code",
    "code.unavailable":"Your registration code isn't available right now. Try again in a moment.",
+   "code.checking":"Checking your registration…",
    "code.notAvailableOnDevice":"A registration code isn't available on this device. If you move to another device, you'll confirm your identity there instead.",
    "newDevice.screenTitle":"Continue on This Device",
    "newDevice.codeFieldLabel":"Registration Code",
@@ -612,12 +821,16 @@ const RES = {
    "newDevice.backToCodeLink":"Use my code instead",
    "newDevice.restartLink":"My registration is still pending",
    "newDevice.retryButton":"Try Again",
+   "code.retryButton":"Try Again",
+   "newDevice.checkBackLaterButton":"Check Back Later",
+   "newDevice.checkBackLaterBody":"Your request stays with the authority. Come back to this screen to see whether it was approved.",
+   "newDevice.backToRegistrationButton":"Back to Registration",
    "deviceRetired.heading":"This device has been retired",
    "deviceRetired.body":"Your voting registration was moved to another device. This device can no longer be used to vote.",
    "restart.heading":"Start a New Registration",
    "restart.body":"Your previous registration is still pending and tied to your other device. Continuing here starts a brand-new registration from scratch on this device.",
    "restart.confirmButton":"Start New Registration"
-  },
+  }
  },
  es:{
   common:{
@@ -630,12 +843,25 @@ const RES = {
    "close":"Cerrar",
    "info.unavailable":"Esta información no está disponible en este momento.",
    "info.openLink":"Más información",
-   "networkName":"Utah Network",
+   "networkName":"Red de Utah",
    "notifications":"Notificaciones",
    "breadcrumb.home":"Inicio",
    "breadcrumb.ballot":"Papeleta",
    "configNotConfigured":"Sin configurar",
-   "syncSyncing":"Sincronizando"
+   "unsharedChanges":"Guardado en este teléfono, aún no en la red electoral: {{count}}",
+   "syncSyncing":"Sincronizando",
+   "bootError.generic":"No pudimos abrir la red de votación en este teléfono.",
+   "bootError.updateNeeded.title":"Actualiza VoteTorrent para abrir esta red de votación",
+   "bootError.updateNeeded.body":"Esta red de votación tiene datos que esta versión de la aplicación no puede abrir. Instala la versión más reciente y vuelve a intentarlo. No se ha borrado nada de este teléfono.",
+   "bootError.tryAgain":"Intentar de nuevo",
+   "bootError.continueWithoutNetwork":"Continuar sin red",
+   "bootError.identityLost.title":"No se puede desbloquear la identidad de votante de este teléfono",
+   "bootError.identityLost.body":"La clave que protege tu identidad de votante en este teléfono ya no existe. Esto puede ocurrir al restaurar una copia de seguridad o restablecer la seguridad del teléfono. No se puede recuperar.",
+   "bootError.identityLost.create":"Crear una nueva identidad",
+   "bootError.identityLost.confirmBody":"¿Crear una nueva identidad en este teléfono? La anterior no se puede recuperar. Tendrás que registrarte de nuevo o pedir a tu autoridad que apruebe este teléfono.",
+   "bootError.identityLost.confirm":"Confirmar",
+   "bootError.identityLost.cancel":"Cancelar",
+   "bootError.identityLost.replaceFailed":"No pudimos crear una nueva identidad. Inténtalo de nuevo."
   },
   home:{
    "headerTitle":"Votar",
@@ -666,7 +892,6 @@ const RES = {
    "states.validation.pendingSummary":"Claves de la elección liberadas — los resultados se están contando y validando.",
    "states.complete.closedSummary":"Esta elección ha cerrado.",
    "electionUnavailable":"Aún no hay ninguna elección disponible en esta red.",
-   "votedCta":"Ya votaste",
    "validationDetails.columnCheck":"Verificación",
    "validationDetails.columnResult":"Resultado",
    "validationDetails.columnTime":"Tiempo",
@@ -694,7 +919,6 @@ const RES = {
    "nextCta":"Siguiente pregunta",
    "previousCta":"Pregunta anterior",
    "submitCta":"Enviar",
-   "submittedConfirmation":"Tu boleta fue enviada",
    "notYetAnswered":"Aún no respondido",
    "learnAboutOffice":"Conoce más sobre este cargo",
    "learnAboutCandidate":"Conoce más sobre este candidato",
@@ -712,7 +936,109 @@ const RES = {
    "reviewSubmitTitle":"Revisar y enviar",
    "ballotUnavailable":"La boleta de esta elección aún no está disponible.",
    "unsupportedQuestions_one":"{{count}} pregunta de esta boleta aún no se puede responder en esta aplicación.",
-   "unsupportedQuestions_other":"{{count}} preguntas de esta boleta aún no se pueden responder en esta aplicación."
+   "unsupportedQuestions_other":"{{count}} preguntas de esta boleta aún no se pueden responder en esta aplicación.",
+   "receipt.title":"Voto guardado",
+   "receipt.loading":"Cargando tu voto guardado…",
+   "receipt.status":"Tu voto está guardado en este teléfono. Todavía no se ha enviado a la elección.",
+   "receipt.statusSent":"Tu voto se envió a la elección. Una copia sigue guardada en este teléfono.",
+   "receipt.loss":"Tu voto existe solo en este teléfono. Si borras los datos de esta aplicación o la reinstalas, se elimina.",
+   "receipt.stale":"La elección cambió después de que votaste. Vota de nuevo.",
+   "receipt.revisionUnknown":"No pudimos comprobar si la elección cambió desde que votaste.",
+   "receipt.none":"No hay ningún voto guardado en este teléfono para esta elección.",
+   "receipt.unreadable":"Tu voto guardado no se puede leer en este teléfono.",
+   "receipt.revealCta":"Mostrar mis opciones y códigos de voto",
+   "receipt.revealHint":"Se te pedirá Face ID.",
+   "receipt.revealHint.android":"Se te pedirá tu huella digital.",
+   "receipt.revealCanceled":"Tus opciones siguen ocultas.",
+   "receipt.revealBiometricUnavailable":"Face ID no se puede comprobar ahora. Asegúrate de que Face ID esté configurado en este iPhone y vuelve a intentarlo.",
+   "receipt.revealBiometricUnavailable.android":"No podemos comprobar tu huella digital ahora. Asegúrate de tener una huella configurada en este teléfono e inténtalo de nuevo.",
+   "receipt.revealFailed":"No pudimos abrir tu voto guardado. Inténtalo de nuevo.",
+   "receipt.choicesHeading":"Tus opciones",
+   "receipt.leftBlank":"En blanco",
+   "receipt.nonceLabel":"Tu código de voto",
+   "receipt.copyCta":"Copiar código",
+   "receipt.copyWarning":"Cualquier persona con este código puede saber cómo votaste.",
+   "receipt.copied":"Copiado",
+   "receipt.copyFailed":"Copiar no está disponible en este teléfono.",
+   "receipt.doneCta":"Listo",
+   "receipt.prompt.title":"Mostrar tu voto guardado",
+   "receipt.prompt.subtitle":"Usa Face ID para ver tus opciones y códigos de voto",
+   "receipt.prompt.subtitle.android":"Usa tu huella digital para ver tus opciones y códigos de voto",
+   "receipt.prompt.negativeButton":"Cancelar",
+   "send.heading":"Enviar tu voto",
+   "send.explain":"Tu voto se envía junto con los votos de al menos otras 2 personas, para que nadie sepa cuál es el tuyo. Primero se cifra en este teléfono.",
+   "send.cta":"Enviar mi voto",
+   "send.retryCta":"Intentar de nuevo",
+   "send.hint":"Se te pedirá Face ID para abrir tu voto guardado, y otra vez para confirmar cada grupo en el que se envía.",
+   "send.hint.android":"Se te pedirá tu huella digital para abrir tu voto guardado y otra vez para confirmar cada grupo en el que se envía.",
+   "send.waiting":"Esperando a otros votantes ({{size}} hasta ahora, se necesitan 3)…",
+   "send.joined":"Te uniste a un grupo de votantes. Esperando a que se complete…",
+   "send.confirming":"Confirma con Face ID para enviar.",
+   "send.confirming.android":"Confirma con tu huella digital para enviar.",
+   "send.sent":"Enviado a la elección.",
+   "send.allSent":"Tu voto se envió a la elección.",
+   "send.notSentClosed":"No enviado: la votación cerró antes de que hubiera suficientes votantes. Tu voto sigue guardado en este teléfono.",
+   "send.notSent":"Aún no enviado. Tu voto sigue guardado en este teléfono; inténtalo más tarde.",
+   "send.noNetwork":"Este teléfono aún no está conectado a una red electoral. Primero únete a la red de tu elección.",
+   "send.noRendezvous":"Este teléfono no sabe cómo llegar a la red de tu elección. Vuelve a unirte desde Ajustes.",
+   "send.votingClosed":"La votación cerró. Tu voto no se envió.",
+   "send.keyMissing":"La elección aún no puede recibir votos. Inténtalo más tarde.",
+   "send.windowUnreadable":"No pudimos leer cuándo cierra la votación. Inténtalo más tarde.",
+   "send.canceled":"Se canceló el envío. Tu voto sigue guardado.",
+   "send.biometricUnavailable":"Face ID no se puede comprobar ahora. Asegúrate de que Face ID esté configurado en este iPhone y vuelve a intentarlo.",
+   "send.biometricUnavailable.android":"No se puede comprobar tu huella digital ahora. Asegúrate de tener una huella configurada en este teléfono e inténtalo de nuevo.",
+   "send.failed":"No pudimos enviar tu voto. Sigue guardado en este teléfono; inténtalo de nuevo.",
+   "send.ballotLabel":"Boleta {{index}}",
+   "send.consentPrompt.title":"Enviar tu voto",
+   "send.consentPrompt.subtitle":"Confirma que envías tu voto en este grupo",
+   "send.consentPrompt.negativeButton":"Cancelar",
+   "send.recordPrompt.title":"Abrir tu voto guardado",
+   "send.recordPrompt.subtitle":"Usa Face ID para enviar tu voto guardado",
+   "send.recordPrompt.subtitle.android":"Usa tu huella digital para enviar tu voto guardado",
+   "send.recordPrompt.negativeButton":"Cancelar",
+   "submit.signPrompt.title":"Confirma tu voto",
+   "submit.signPrompt.subtitle":"Firma tu voto con la clave de tu dispositivo",
+   "submit.signPrompt.negativeButton":"Cancelar",
+   "submit.recordPrompt.title":"Guarda tu voto",
+   "submit.recordPrompt.subtitle":"Usa Face ID para proteger tu voto guardado",
+   "submit.recordPrompt.subtitle.android":"Usa tu huella digital para proteger tu voto guardado",
+   "submit.recordPrompt.negativeButton":"Cancelar",
+   "submit.checking":"Comprobando si puedes votar…",
+   "submit.saving":"Guardando tu voto…",
+   "submit.localNote":"Tu voto se guardará solo en este teléfono. Todavía no se enviará a la elección.",
+   "submit.blankHeading":"Dejaste estas preguntas en blanco:",
+   "submit.blankRequiredTag":"Obligatoria",
+   "submit.allBlank":"Todas las preguntas están en blanco. Tu voto se guardará sin opciones.",
+   "submit.staleReplace":"La elección cambió después de que votaste. Vota de nuevo. Tu nuevo voto reemplaza al que guardaste antes.",
+   "submit.reason.electionUnavailable":"No se puede leer esta elección en este teléfono ahora, así que tu voto no se puede guardar.",
+   "submit.reason.windowClosed":"La votación no está abierta para esta elección en este momento.",
+   "submit.reason.ballotUnconfirmed":"La autoridad electoral aún no ha confirmado esta boleta, así que todavía no se puede votar.",
+   "submit.reason.noBallots":"Esta elección aún no tiene una boleta para votar.",
+   "submit.reason.unsupportedQuestion":"Esta boleta tiene una pregunta que esta aplicación aún no puede mostrar, así que no se puede votar aquí.",
+   "submit.reason.dependentQuestion":"Esta boleta tiene una pregunta que depende de otra respuesta, algo que esta aplicación aún no puede manejar, así que no se puede votar aquí.",
+   "submit.reason.selectionInvalid":"Algunas de tus opciones no coinciden con esta boleta. Regresa y revisa tus respuestas.",
+   "submit.reason.requiredUnanswered":"Responde todas las preguntas obligatorias antes de enviar tu voto.",
+   "submit.reason.belowMinimum":"Algunas preguntas necesitan más opciones. Regresa y elige al menos el mínimo indicado.",
+   "submit.reason.deviceCheckFailed":"No pudimos comprobar la clave de voto de este teléfono. Inténtalo de nuevo.",
+   "submit.reason.notRegistered":"Este teléfono no está registrado para votar en esta elección, o su clave de voto cambió. Registra este teléfono de nuevo.",
+   "submit.reason.registrationAmbiguous":"Este teléfono está vinculado a más de un registro para esta elección, así que no puede saber cuál debe votar.",
+   "submit.reason.unreadableKey":"La clave de voto de este teléfono no se puede leer, así que tu voto no se puede firmar.",
+   "submit.reason.alreadySaved":"Ya hay un voto guardado en este teléfono para esta elección.",
+   "submit.failure.canceled":"Tu voto no se guardó. Se canceló la comprobación de Face ID.",
+   "submit.failure.canceled.android":"Tu voto no se guardó. Se canceló la comprobación de huella digital.",
+   "submit.failure.biometricUnavailable":"Tu voto no se guardó. Face ID no se puede comprobar ahora. Asegúrate de que Face ID esté configurado en este iPhone y vuelve a intentarlo.",
+   "submit.failure.biometricUnavailable.android":"Tu voto no se guardó. No podemos comprobar tu huella digital ahora. Asegúrate de tener una huella configurada en este teléfono e inténtalo de nuevo.",
+   "submit.failure.signFailed":"Tu voto no se guardó. No se pudo firmar en este teléfono. Inténtalo de nuevo.",
+   "submit.failure.signatureInvalid":"Tu voto no se guardó. La clave de voto de este teléfono no coincidió con su registro. Registra este teléfono de nuevo.",
+   "submit.failure.buildFailed":"Tu voto no se guardó. No se pudo preparar. Inténtalo de nuevo.",
+   "submit.failure.keyInvalidated":"Tu voto no se guardó. Cambió la configuración de Face ID en este iPhone, así que el voto no se pudo proteger.",
+   "submit.failure.keyInvalidated.android":"Tu voto no se guardó. La configuración de huellas de este teléfono cambió, así que el voto no se pudo proteger.",
+   "submit.failure.sealFailed":"Tu voto no se guardó. No se pudo proteger en este teléfono. Inténtalo de nuevo.",
+   "submit.failure.storeFailed":"Tu voto no se guardó. Este teléfono no pudo almacenarlo. Inténtalo de nuevo.",
+   "submit.failure.storeUnreadable":"Tu voto no se guardó. Un voto que ya está en este teléfono no se puede leer, así que no se puede reemplazar.",
+   "submit.failure.unexpected":"Tu voto no se guardó. Algo salió mal. Inténtalo de nuevo.",
+   "savedVote.status":"Voto guardado — no enviado",
+   "savedVote.viewCta":"Ver voto guardado"
   },
   registration:{
    "headerTitle":"Registro",
@@ -730,10 +1056,10 @@ const RES = {
    "deviceAttestationTitle":"Verificando Tu Dispositivo",
    "confirmationTitle":"Todo Listo",
    "notRegistered.heading":"No estás registrado",
-   "notRegistered.body":"Para participar en la Red de Utah necesitarás registrarte",
+   "notRegistered.body":"Para participar en la {{network}} necesitarás registrarte",
    "notRegistered.cta":"Regístrate ahora",
    "registered.heading":"Estás registrado para votar",
-   "registered.body":"Te has registrado exitosamente en la Red de Utah",
+   "registered.body":"Te has registrado exitosamente en la {{network}}",
    "registered.identityLine":"{{fullName}}: {{party}} {{dob}}",
    "registered.validThrough":"Válido hasta {{validThrough}}",
    "registered.updatePrompt":"¿Has hecho cambios recientes en tu información personal?",
@@ -742,7 +1068,7 @@ const RES = {
    "deviceAttestation.caption":"Confirmando que tu dispositivo es seguro",
    "deviceAttestation.terminalHeading":"Este dispositivo no se puede usar para votar",
    "deviceAttestation.terminalBody":"Este dispositivo no cuenta con el hardware seguro necesario para proteger un voto, por lo que no se puede usar para registrarte.",
-   "form.sectionTitle":"Regístrate en la Red de Utah",
+   "form.sectionTitle":"Regístrate en la {{network}}",
    "form.firstName":"Nombre",
    "form.lastName":"Apellido",
    "form.dob":"Fecha de Nacimiento",
@@ -777,10 +1103,26 @@ const RES = {
    "confirmation.body":"Confirma tu registro con Face ID",
    "confirmation.cta":"Confirmar con Face ID",
    "confirmation.caption":"Mira tu dispositivo para confirmar",
-   "confirmation.error.biometricNotEnrolled":"Configura el desbloqueo por huella o rostro para continuar",
+   "confirmation.body.android":"Confirma tu registro con tu huella o desbloqueo facial",
+   "confirmation.cta.android":"Confirmar con biometría",
+   "confirmation.caption.android":"Sigue las indicaciones de tu dispositivo para confirmar",
+   "confirmation.error.biometricNotEnrolled":"Configura Face ID para continuar",
+   "confirmation.error.biometricNotEnrolled.android":"Configura el desbloqueo por huella o rostro para continuar",
    "confirmation.error.setupCta":"Configurar desbloqueo del dispositivo",
    "confirmation.error.transient":"Algo salió mal al verificar tu dispositivo. Inténtalo de nuevo.",
    "confirmation.error.terminal":"Este dispositivo no se puede usar para votar",
+   "confirmation.error.intakeUnavailable":"No pudimos enviar tu registro a la autoridad en este momento. Inténtalo más tarde.",
+   "confirmation.error.noElection":"Todavía no hay una elección para registrarte en este teléfono.",
+   "confirmation.retryCta":"Intentar de nuevo",
+   "confirmation.pending":"Tu registro se envió. Esta pantalla se actualiza cuando la oficina electoral apruebe tu dispositivo.",
+   "confirmation.registered":"Tu dispositivo está registrado. Puedes votar en esta elección.",
+   "confirmation.doneCta":"Listo",
+   "confirmation.pendingBackCta":"Volver al registro",
+   "confirmation.pendingCheckLater":"Seguimos esperando a la oficina electoral. Vuelve a abrir esta pantalla más tarde para comprobarlo.",
+   "confirmation.waiting":"Esperando a que la oficina electoral apruebe tu registro, así que mantén esta pantalla abierta.",
+   "confirmation.waitingCancel":"Dejar de esperar",
+   "confirmation.notShared":"Por ahora tu solicitud solo está guardada en este teléfono. La oficina electoral no puede verla hasta que llegue a la red electoral, así que mantén la aplicación abierta y conectada.",
+   "confirmation.error.waitStopped":"Dejaste de esperar, así que toca Intentar de nuevo cuando la oficina electoral haya aprobado tu registro.",
    "formHeaderTitle":"Registrarse",
    "confirmHeaderTitle":"Confirmar"
   },
@@ -793,7 +1135,53 @@ const RES = {
    "headerTitle":"Ajustes",
    "language":"Idioma",
    "languageEnglish":"English",
-   "languageSpanish":"Español"
+   "languageSpanish":"Español",
+   "joinNetworkRow":"Unirse a una red"
+  },
+  join:{
+   "headerTitle":"Unirse a una red",
+   "entryLink":"Unirte a la red de tu autoridad electoral",
+   "intro":"Escanea el código QR que te mostró tu autoridad electoral o pega el código de acceso. Conecta este teléfono a la red de votación de la autoridad.",
+   "codeLabel":"Código de acceso",
+   "codePlaceholder":"Pega el código de acceso",
+   "pasteButton":"Pegar",
+   "invalidCode":"Este no es un código de acceso válido. Comprueba que lo copiaste completo o pide uno nuevo a tu autoridad electoral.",
+   "newerCode":"Este código de acceso necesita una versión más reciente de la aplicación. Actualiza la aplicación e inténtalo de nuevo.",
+   "previewNetwork":"Red",
+   "previewFingerprint":"Huella de la red",
+   "previewCheck":"Antes de unirte, comprueba que esta huella coincide con la que publicó tu autoridad electoral.",
+   "joinButton":"Unirse a la red",
+   "step.admitting":"Uniéndote a la red de la autoridad electoral…",
+   "step.syncing":"Descargando la red…",
+   "step.verifying":"Comprobando que la red coincide con el código…",
+   "step.done":"Unido",
+   "joinedTitle":"Te uniste a {{name}}",
+   "doneButton":"Listo",
+   "error.invitationExpired":"Este código de acceso ha caducado. Pide uno nuevo a tu autoridad electoral.",
+   "error.notAdmitted":"La red de la autoridad electoral no aceptó este código. Puede que se haya agotado o retirado. Pide uno nuevo a tu autoridad electoral.",
+   "error.noPeers":"No pudimos conectar con la red de la autoridad electoral. Revisa tu conexión e inténtalo de nuevo.",
+   "error.notSynced":"La red está tardando demasiado en descargarse. Revisa tu conexión e inténtalo de nuevo.",
+   "error.digestMismatch":"Esta red no coincide con el código de acceso, así que este teléfono no se unió. Pide un código nuevo a tu autoridad electoral.",
+   "error.openFailed":"No pudimos abrir la red en este teléfono. Inténtalo de nuevo.",
+   "error.otherCadre":"Este teléfono ya pertenece a la red de otra autoridad electoral y, por ahora, solo puede estar en una a la vez. Para unirte a esta, hay que reinstalar la aplicación.",
+   "error.generic":"Algo salió mal al unirse. Inténtalo de nuevo.",
+   "scanButton":"Escanear código QR",
+   "scanTitle":"Escanea el código de acceso",
+   "scanInstruction":"Apunta la cámara al código QR de tu autoridad electoral.",
+   "scanSlow":"Sostén el teléfono firme y acércalo hasta que todo el código QR llene el marco, o pega el código.",
+   "scanStarting":"Iniciando la cámara…",
+   "scanClose":"Cerrar escáner",
+   "scanPasteInstead":"Pegar el código",
+   "scannedNotice":"Código escaneado. Revisa el nombre y la huella de la red que aparecen abajo y toca Unirse a la red.",
+   "scanNotJoinCode":"Ese código QR no es un código de acceso de VoteTorrent, así que escanea el de tu autoridad electoral o pega el código.",
+   "cameraDenied":"No se permitió el acceso a la cámara, así que este teléfono no puede escanear. Inténtalo de nuevo o pega el código de acceso.",
+   "cameraBlocked":"El acceso a la cámara está desactivado para VoteTorrent. Actívalo en Ajustes o pega el código de acceso.",
+   "cameraNone":"Este teléfono no tiene cámara para escanear. Pega el código de acceso.",
+   "cameraFailed":"No se pudo iniciar la cámara. Cierra otras aplicaciones que usen la cámara e inténtalo de nuevo, o pega el código de acceso.",
+   "openSettings":"Abrir Ajustes",
+   "olderCode":"Este código de acceso lo creó una versión anterior de VoteTorrent, así que pide uno nuevo a tu autoridad electoral.",
+   "notJoinCode":"Este no es un código de acceso de VoteTorrent, así que pega el de tu autoridad electoral o escanea su código QR.",
+   "error.invitationUsedUp":"Este código de acceso ya no se puede usar, así que pide uno nuevo a la oficina electoral."
   },
   timeline:{
    "stage.registrationEnds.title":"Fin del Registro",
@@ -824,13 +1212,37 @@ const RES = {
    "registration.editCta":"Editar registro",
    "voting.previewBallotCta":"Vista previa de la boleta",
    "voting.voteNowCta":"Votar ahora",
-   "voting.viewSubmissionCta":"Ver mi envío",
+   "voting.viewSubmissionCta":"Ver voto guardado",
    "row.detailsCta":"Ver detalles",
    "keyholders.viewCta":"Ver Custodios de Claves",
    "keyholders.screenTitle":"Custodios de Claves",
    "keyholders.releasedCount":"{{released}} de {{total}} claves liberadas",
    "keyholders.emptyHeading":"Aún no hay custodios",
    "keyholders.emptyBody":"Esta elección aún no tiene custodios asignados.",
+   "results.viewCta":"Ver resultados",
+   "results.screenTitle":"Resultados",
+   "results.computing":"Descifrando y contando los votos en este teléfono…",
+   "results.loadFailed":"No se pudieron leer los resultados en este teléfono. Inténtalo de nuevo en un momento.",
+   "results.noElection":"Aún no hay ninguna elección en este teléfono.",
+   "results.lockedTitle":"Los resultados están bloqueados",
+   "results.lockedBody":"Los votos siguen cifrados hasta que suficientes custodios liberen sus claves.",
+   "results.releasedCount":"{{released}} de {{needed}} claves necesarias liberadas",
+   "results.noKey":"Los custodios aún no han terminado de crear la clave de la elección.",
+   "results.unavailableTitle":"No se pudieron calcular los resultados",
+   "results.unavailableReason":"Motivo: {{reason}}",
+   "results.validVotes":"Votos válidos: {{count}}",
+   "results.notCountedVotes":"Votos no contados: {{count}}",
+   "results.optionCount":"{{count}} ({{percent}}%)",
+   "results.blank":"En blanco: {{count}}",
+   "results.questionNotCounted":"Este tipo de pregunta aún no se cuenta.",
+   "results.noBallots":"No se encontró ninguna boleta confirmada para esta elección.",
+   "results.checkedNote":"Contado en este teléfono con los bloques de votos que ha recibido hasta ahora. Toca Actualizar para volver a contar.",
+   "results.noBlocksYet":"Todavía no ha llegado ningún bloque de votos a este teléfono, así que no se cuenta nada. Espera un minuto y toca Actualizar.",
+   "results.refreshCta":"Actualizar",
+   "results.notPublished":"Un funcionario electoral aún no ha publicado el recuento definitivo.",
+   "results.publishedMatches":"Un funcionario electoral publicó el recuento definitivo el {{date}}. Coincide con el recuento de este teléfono.",
+   "results.publishedDiffers":"Un funcionario electoral publicó un recuento de {{published}} bloques de votos, y este teléfono contó {{local}}. Puede que este teléfono aún no tenga todos los bloques de votos.",
+   "results.publishedInvalid":"Se publicó un recuento, pero no superó su comprobación de firma o de coherencia. No confíes en él.",
    "indeterminate.heading":"No podemos mostrar el cronograma de esta elección en este momento",
    "indeterminate.body":"No se pudo leer el cronograma de la elección o aún no es válido. Inténtalo de nuevo en un momento.",
    "indeterminate.retryCta":"Intentar de nuevo",
@@ -844,6 +1256,7 @@ const RES = {
    "code.copiedConfirm":"Copiado",
    "code.showAgainLink":"Mostrar mi código de registro",
    "code.unavailable":"Tu código de registro no está disponible en este momento. Inténtalo de nuevo en un momento.",
+   "code.checking":"Comprobando tu registro…",
    "code.notAvailableOnDevice":"No hay un código de registro disponible en este dispositivo. Si cambias a otro dispositivo, confirmarás tu identidad allí.",
    "newDevice.screenTitle":"Continuar en Este Dispositivo",
    "newDevice.codeFieldLabel":"Código de Registro",
@@ -864,13 +1277,17 @@ const RES = {
    "newDevice.backToCodeLink":"Usar mi código en su lugar",
    "newDevice.restartLink":"Mi registro aún está pendiente",
    "newDevice.retryButton":"Intentar de nuevo",
+   "code.retryButton":"Intentar de nuevo",
+   "newDevice.checkBackLaterButton":"Volver más tarde",
+   "newDevice.checkBackLaterBody":"Tu solicitud sigue con la autoridad. Vuelve a esta pantalla para ver si fue aprobada.",
+   "newDevice.backToRegistrationButton":"Volver al registro",
    "deviceRetired.heading":"Este dispositivo ha sido retirado",
    "deviceRetired.body":"Tu registro de votación se trasladó a otro dispositivo. Este dispositivo ya no se puede usar para votar.",
    "restart.heading":"Iniciar un Nuevo Registro",
    "restart.body":"Tu registro anterior sigue pendiente y vinculado a tu otro dispositivo. Continuar aquí inicia un registro completamente nuevo desde cero en este dispositivo.",
    "restart.confirmButton":"Iniciar Nuevo Registro"
-  },
- },
+  }
+ }
 };
 /** t('ns','key',{vars}) — i18next with keySeparator:false, fallbackLng:'en', and the
  *  `_one`/`_other` plural suffix when a numeric `count` is passed. */
@@ -886,6 +1303,10 @@ function t(ns,key,vars){
   if(vars) for(const v in vars) s = s.split('{{'+v+'}}').join(vars[v]===undefined?'':String(vars[v]));
   return s;
 }
+/** Platform.OS branch (D-101): iOS reads the Face ID copy (the base key), Android the '.android'
+ *  sibling. Only call it for keys that HAVE an '.android' sibling. */
+const IOS = () => S.platform==='ios';
+const tp = (ns,key,vars) => t(ns, IOS()?key:key+'.android', vars);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const TY={display:[40,48],h1:[32,40],h2:[28,34],h3:[24,30],h4:[20,26],body:[16,22],caption:[16,20],captionSmall:[12,16]};
 const fs = k => 'font-size:'+TY[k][0]+'px;line-height:'+TY[k][1]+'px;';
@@ -907,22 +1328,22 @@ const LONG_ELECTION_TITLE='Salt Lake County School Board Special Election 2025';
 const NETWORK_NAME='Utah Network';
 const LONG_NETWORK_NAME='Salt Lake County Unified School District Network';        // CANONICAL_NETWORK_NAME
 const FIXTURE_BALLOT={electionId:'fixture-election-1',unsupportedQuestionCount:0,offices:[
- {id:'office-us-senate',title:'U.S. Senate',group:'Federal',voteFor:1,candidates:[
+ {id:'office-us-senate',title:'U.S. Senate',group:'Federal',voteFor:1,required:true,candidates:[
    {id:'cand-us-senate-diana',name:'Diana Foster',party:'Democratic Party'},
    {id:'cand-us-senate-marcus',name:'Marcus Whitfield',party:'Republican Party'},
    {id:'cand-us-senate-elena',name:'Elena Vasquez',party:'Independent'}]},
- {id:'office-us-house',title:'U.S. House of Representatives, District 2',group:'Federal',voteFor:1,candidates:[
+ {id:'office-us-house',title:'U.S. House of Representatives, District 2',group:'Federal',voteFor:1,required:false,candidates:[
    {id:'cand-us-house-james',name:'James Okafor',party:'Democratic Party'},
    {id:'cand-us-house-laura',name:'Laura Bennett',party:'Republican Party'}]},
- {id:'office-governor',title:'Governor',group:'State (UT)',voteFor:1,candidates:[
+ {id:'office-governor',title:'Governor',group:'State (UT)',voteFor:1,required:true,candidates:[
    {id:'cand-governor-priya',name:'Priya Nandan',party:'Democratic Party'},
    {id:'cand-governor-robert',name:'Robert Kessler',party:'Republican Party'}]},
- {id:'office-state-board-education',title:'State Board of Education',group:'State (UT)',voteFor:2,candidates:[
+ {id:'office-state-board-education',title:'State Board of Education',group:'State (UT)',voteFor:2,required:true,candidates:[
    {id:'cand-sboe-angela',name:'Angela Torres',party:'Nonpartisan'},
    {id:'cand-sboe-brian',name:'Brian Michaels',party:'Nonpartisan'},
    {id:'cand-sboe-cynthia',name:'Cynthia Park',party:'Nonpartisan'},
    {id:'cand-sboe-david',name:'David Nguyen',party:'Nonpartisan'}]},
- {id:'office-state-senate',title:'State Senate, District 8',group:'State (UT)',voteFor:1,candidates:[
+ {id:'office-state-senate',title:'State Senate, District 8',group:'State (UT)',voteFor:1,required:false,candidates:[
    {id:'cand-state-senate-maria',name:'Maria Gutierrez',party:'Democratic Party'},
    {id:'cand-state-senate-thomas',name:'Thomas Reyes',party:'Republican Party'}]},
 ]};
@@ -1111,6 +1532,50 @@ function tlBlob(){ const k=S.tlScenario+'@'+S.tlAnchor; if(_blobCache.key!==k) _
 /* ---------------------------------------------------------------------------
  * 5. APP STATE — one object standing in for every provider + screen-local state.
  * ------------------------------------------------------------------------ */
+/* Saved vote, receipt, send and results SAMPLE DATA. The ballot description is the dev seed's
+   (engines/dev-seed.ts); the vote code is a 64-hex nonce shown as 16 groups of 4 (engines/
+   vote-receipt.ts formatNonceGroups); the tallies are invented counts over the fixture ballot. */
+const BALLOT_DESCRIPTION='Dev-seeded ballot for local voter testing.';
+const SAMPLE_NONCES=['9b42e07d1fa3c8658e61a4f2c93d07b5e2a8164c0d9f73b1a6e5c48f2b07d913',
+                     'c41e07a9d25f8b3360e4a19c7f02d58b4a6e13f97c20b5d8e19a4f6c03b7d2e5'];
+const formatNonceGroups = n => /^[0-9a-f]{64}$/.test(n) ? Array.from({length:16},(_,i)=>n.slice(i*4,i*4+4)) : null;
+/* A join code is a bearer credential; this is a shape-only placeholder (vtjoin2.<base64url>),
+   and the fingerprint is foundingBundleFingerprint's 4 x 4 hex groups. */
+const SAMPLE_JOIN_CODE='vtjoin2.eyJ2IjoyLCJuYW1lIjoiVXRhaCBOZXR3b3JrIiwiaW52aXRhdGlvbiI6InNlcmV1cy1pbnZpdGU6MS4uLiJ9';
+const SAMPLE_OLDER_CODE='vtjoin1.eyJ2IjoxLCJuYW1lIjoiVXRhaCBOZXR3b3JrIiwiaW52aXRhdGlvbiI6Im9sZCJ9';
+const SAMPLE_FINGERPRINT='3f9a 1c02 b7e4 55d0';
+/* decodeNetworkJoinCode (vote-engine networks/join-code.ts), shape-level port: whitespace is
+   ignored; no vtjoin<N>. prefix -> not-join-code; N other than 1 or 2 -> unsupported-version. */
+function decodeJoinCode(text){
+  const c=String(text).replace(/\s+/g,'');
+  const m=/^vtjoin(\d+)\./.exec(c);
+  if(!m) return {ok:false,reason:'not-join-code'};
+  if(m[1]!=='1'&&m[1]!=='2') return {ok:false,reason:'unsupported-version'};
+  if(c===SAMPLE_OLDER_CODE) return {ok:false,reason:'invitation-older-version'};
+  if(c===SAMPLE_JOIN_CODE) return {ok:true,code:{name:NETWORK_NAME},fingerprint:SAMPLE_FINGERPRINT};
+  return {ok:false,reason:'malformed'};
+}
+const JOIN_DECODE_KEY={'not-join-code':'notJoinCode','unsupported-version':'newerCode','invitation-older-version':'olderCode','malformed':'invalidCode'};
+const JOIN_FAILURE_KEY={'invitation-malformed':'invalidCode','invitation-expired':'error.invitationExpired','invitation-older-version':'olderCode',
+  'invitation-used-up':'error.invitationUsedUp','not-admitted':'error.notAdmitted','no-peers':'error.noPeers','not-synced':'error.notSynced',
+  'digest-mismatch':'error.digestMismatch','open-failed':'error.openFailed','other-cadre':'error.otherCadre','generic':'error.generic'};
+function sampleResults(){
+  const q=(code,title,counts,blank)=>({code,title,counted:true,blank:blank||0,
+    options:counts.map(([c,tt,n])=>({code:c,title:tt,count:n}))});
+  return {status:'tallied',electionId:'fixture-election-1',blockCount:3,totals:{valid:7,invalid:1,excluded:0},ballots:[{ballotId:'fixture-ballot-1',description:BALLOT_DESCRIPTION,questions:[
+    q('us-senate','U.S. Senate',[['diana','Diana Foster',4],['marcus','Marcus Whitfield',2],['elena','Elena Vasquez',1]]),
+    q('us-house','U.S. House of Representatives, District 2',[['james','James Okafor',3],['laura','Laura Bennett',2]],2),
+    q('governor','Governor',[['priya','Priya Nandan',3],['robert','Robert Kessler',4]]),
+    q('state-board-education','State Board of Education',[['angela','Angela Torres',5],['brian','Brian Michaels',3],['cynthia','Cynthia Park',4],['david','David Nguyen',2]]),
+    {code:'state-senate',title:'State Senate, District 8',counted:false,blank:0,options:[]},
+  ]}]};
+}
+/* Screen-local state factories (reset by every drawer jump). */
+const freshConfirm = () => ({failure:null,pending:false,waiting:false,busy:false,codeAvail:null,outcome:'pending',pollExpired:false,notShared:false});
+const freshReceipt = () => ({load:'saved',revealed:false,notice:null,busy:false,revealOnOpen:false});
+const freshSend = () => ({statuses:{},outcome:null,sending:false});
+const freshJoin = () => ({text:'',phase:'idle',step:'admitting',failKey:null,joinedName:'',availability:'ready',scanNotice:null,
+  scanner:null});   // scanner: null | {phase:'starting'|'scanning', slow:false, banner:false}
 const EMPTY_DRAFT={firstName:'',lastName:'',dob:'',email:'',phone:'',addressLine1:'',addressLine2:'',addressLine3:'',party:''};
 const EMPTY_IDENTITY={firstName:'',lastName:'',dob:'',email:'',phone:'',addressLine1:'',addressLine2:'',addressLine3:''};
 const ROOTS={Vote:'Home',Timeline:'TimelineHome',Registration:'RegistrationHome',Scan:'ScanHome',Settings:'SettingsHome'};
@@ -1137,16 +1602,36 @@ const S = {
   /* ballot */
   ballotRead:'ok',                 // 'ok' | 'failed' | 'loading' | 'empty'
   ballotVariant:'normal',          // 'normal' | 'unsupported1' | 'unsupported3' | 'ungrouped'
-  selectionMap:{}, currentQuestionIndex:0, submitted:false, hasVoted:false,
+  selectionMap:{}, currentQuestionIndex:0,
   /* registration */
   isRegistered:{}, registeredAt:{},                // RegistrationScreen local state, per mounted instance (tab)
   codeAvail:'not-registered', codeRevealed:null,   // resolveRegistrationCodeAvailability kind
   riRead:'ok',                                     // RegistrationInfo deadline read: 'ok' | 'loading' | 'none'
   draft:Object.assign({},EMPTY_DRAFT), errors:{},
   attestTerminal:false,
-  confirm:{failure:null,pending:false,busy:false,codeAvail:null},
+  confirm:freshConfirm(),
   cad:{branch:'resolving',code:'',codeError:null,submitError:null,identity:Object.assign({},EMPTY_IDENTITY),idErrors:{},failure:null},
   scrollMem:{},
+  /* platform copy: the biometric strings name Face ID on iOS (base keys) and the fingerprint
+     on Android (the '.android' siblings). The frame stays the Pixel 8 chrome. */
+  platform:'ios',
+  /* network */
+  hasNetwork:true, netName:NETWORK_NAME, unshared:0,
+  /* saved vote (engines/saved-vote-status.ts SavedVoteStatus) */
+  savedVote:{state:'none'},
+  savedChoices:null,
+  /* Review & Submit */
+  elig:'ready', reviewReason:null, reviewFailure:null, reviewPending:false,
+  /* VoteReceipt + SendVoteCard */
+  receipt:freshReceipt(), send:freshSend(), receiptBallots:['fixture-ballot-1'],
+  /* Results */
+  results:'tallied', publication:'matches',
+  /* Join a network */
+  join:freshJoin(),
+  /* boot error variants + identity recovery view */
+  bootErr:'generic', idRec:{confirming:false,busy:false,failed:false},
+  /* app-wide overlays */
+  toast:null, bio:null,
 };
 const ballot = () => {
   const b=JSON.parse(JSON.stringify(FIXTURE_BALLOT));
@@ -1154,6 +1639,7 @@ const ballot = () => {
   if(S.ballotVariant==='unsupported1') b.unsupportedQuestionCount=1;
   if(S.ballotVariant==='unsupported3') b.unsupportedQuestionCount=3;
   if(S.ballotVariant==='ungrouped') b.offices.forEach(o=>delete o.group);
+  if(S.reviewAllOptional) b.offices.forEach(o=>{ o.required=false; });
   return b;
 };
 /* useBallot(getBallot) → {ballot, failed}. getBallot rejects with no election to read. */
@@ -1163,13 +1649,18 @@ function useBallot(){
   return {ballot:ballot(),failed:false};
 }
 const electionTitle = () => S.longNames ? LONG_ELECTION_TITLE : ELECTION_TITLE;
-const networkName  = () => S.longNames ? LONG_NETWORK_NAME : NETWORK_NAME;
+/* useNetworkName(): Network.Name of the open network, else the common:networkName copy (no
+   network open yet, or its name not read yet). */
+const networkName  = () => S.longNames ? LONG_NETWORK_NAME : (S.hasNetwork && S.netName ? S.netName : t('common','networkName'));
+/* VoterAppProvider.nowMs(): the one clock every election-window read uses. The __DEV__ clock
+   offset is SHARED by Home and Timeline (the dashed control on the Timeline drives both). */
+const nowMs = () => Date.now()+S.clockOffsetMs;
 /* VoterAppProvider.getElection(): real read derived from the timeline; a __DEV__ override
    keeps id/title and overlays that state's DEV_LIFECYCLE_CONTENT. Rejects (null) with no
    election or an indeterminate timeline. */
 function getElection(){
   if(S.electionRead!=='ok') return null;
-  const now=Date.now();
+  const now=nowMs();
   const view=deriveTimeline({timeline:tlBlob(),now});      // readVoterElection passes no language/timeZone
   if(view.indeterminate || S.tlRead==='failed') return null;
   const base={id:'fixture-election-1',title:electionTitle()};
@@ -1237,7 +1728,7 @@ function afterNav(){ clearTimers(); render(); }
 function enter(r){ const f=ROUTES[r]&&ROUTES[r].onEnter; if(f) f(); }
 function push(r){ clearTimers(); stack().push(r); enter(r); render(); }
 function replaceTop(r){ clearTimers(); const st=stack(); st[st.length-1]=r; enter(r); render(); }
-function canPop(){ return !(topRoute()==='ContinueOnAnotherDevice' && S.cad.branch==='pending'); }  // beforeRemove prevented
+function canPop(){ return !(topRoute()==='ContinueOnAnotherDevice' && S.cad.branch==='pending' && S.cad.failure===null && !S.cad.allowLeave); }  // beforeRemove prevented
 function goBack(){ if(stack().length>1 && canPop()) stack().pop(); afterNav(); }
 function popToTop(){ if(!canPop()) return; S.stacks[S.tab]=[S.stacks[S.tab][0]]; afterNav(); }
 function switchTab(name){
@@ -1249,6 +1740,8 @@ function switchTab(name){
  *  'firstRoute' returns to Vote; at Vote's root the app would background (no-op here). */
 function hardwareBack(){
   if(document.getElementById('devdrawer').classList.contains('open')){ ACTIONS['close-drawer'](); return; }
+  if(S.bio){ ACTIONS['bio-cancel'](); return; }
+  if(S.join.scanner){ ACTIONS['scan-close'](); return; }     // Modal onRequestClose
   if(S.boot!=='ready' || S.retired) return;
   if(S.dialog){ S.dialog=null; render(); return; }
   if(S.sheet){ S.sheet=null; render(); return; }
@@ -1265,7 +1758,7 @@ function NetworkHeader(onNetworkAct){
     +'border-bottom-left-radius:16px;border-bottom-right-radius:16px;'
     +'display:flex;align-items:center;justify-content:space-between;flex:0 0 auto;gap:8px">'
     +'<button class="plain" data-act="'+(onNetworkAct||'noop')+'" style="display:flex;align-items:center;gap:8px;color:var(--light);min-width:0">'
-      +'<span class="t-h1 w-bold" style="color:var(--light)">'+esc(t('common','networkName'))+'</span>'
+      +'<span class="t-h1 w-bold" style="color:var(--light)">'+esc(networkName())+'</span>'
       +icon('chevron-down',20,'var(--light)')
     +'</button>'
     +'<button data-act="noop" aria-label="'+esc(t('common','notifications'))+'" style="width:40px;height:40px;flex:0 0 40px;'
@@ -1279,6 +1772,29 @@ function ConfigFaultNotice(){
   return '<div style="display:flex;align-items:center;gap:8px;padding:8px 16px;background:var(--card);flex:0 0 auto">'
     +icon('triangle-exclamation',14,'var(--warning)')
     +'<span style="color:var(--warning);font-size:16px">'+esc(t('common','configNotConfigured'))+'</span></div>';
+}
+/** UnsharedChangesNotice — components/UnsharedChangesNotice.tsx: writes on this phone that no other
+ *  member of the election network holds yet. Renders nothing at 0. Shown on Home only. */
+function UnsharedChangesNotice(){
+  if(!(S.unshared>0)) return '';
+  return '<div style="display:flex;align-items:center;gap:8px;padding:8px 16px;background:var(--card);flex:0 0 auto">'
+    +icon('cloud-arrow-up',14,'var(--warning)')
+    +'<span style="color:var(--warning);'+fs('caption')+'flex-shrink:1">'+esc(t('common','unsharedChanges',{count:S.unshared}))+'</span></div>';
+}
+/** SavedVoteNotice — components/SavedVoteNotice.tsx, shared by the Home card and the Timeline voting
+ *  panel. Reuses the receipt's stale / unreadable / revision-unknown keys; a fully sent vote shows
+ *  send.allSent. The "View saved vote" link renders only when the caller passes an action. */
+function SavedVoteNotice(sv,viewAct){
+  if(sv.state==='none') return '';
+  const med='font-weight:500;'+fs('body');
+  let h='';
+  if(sv.state==='saved') h+='<div style="color:var(--text);'+med+'">'+esc(t('ballot','savedVote.status'))+'</div>';
+  if(sv.state==='sent') h+='<div style="color:var(--text);'+med+'">'+esc(t('ballot','send.allSent'))+'</div>';
+  if(sv.state==='saved' && !sv.revisionKnown) h+='<div style="color:var(--textSecondary);'+fs('caption')+'margin-top:4px">'+esc(t('ballot','receipt.revisionUnknown'))+'</div>';
+  if(sv.state==='stale') h+='<div style="color:var(--error);'+med+'">'+esc(t('ballot','receipt.stale'))+'</div>';
+  if(sv.state==='unreadable') h+='<div style="color:var(--error);'+med+'">'+esc(t('ballot','receipt.unreadable'))+'</div>';
+  if(viewAct) h+='<button class="plain" data-act="'+viewAct+'" style="min-height:44px;min-width:44px;display:flex;align-items:center;color:var(--link);font-weight:700;'+fs('body')+'text-decoration:underline">'+esc(t('ballot','savedVote.viewCta'))+'</button>';
+  return '<div>'+h+'</div>';
 }
 const ProgressBar = p => '<div class="pbar"><i style="width:'+(Math.min(1,Math.max(0,p))*100)+'%"></i></div>';
 const StepDots = step => '<div class="stepdots">'+[1,2,3].map(n=>'<i class="'+(n===step?'on':'')+'"></i>').join('')+'</div>';
@@ -1338,18 +1854,18 @@ function ElectionCard(e){
      +'<span class="t-body w-regular" style="color:var(--textSecondary);flex:1;min-width:0">'
      +esc(t('home',summaryKey,{released:e.keysReleased,total:e.keysTotal,checksComplete:e.checksComplete,checksTotal:e.checksTotal,percent}))
      +'</span></div>';
-  if(d.countdown && e.countdownTarget) h+='<div style="margin-top:16px">'+CountdownTimer(e.countdownTarget,0)+'</div>';
+  if(d.countdown && e.countdownTarget) h+='<div style="margin-top:16px">'+CountdownTimer(e.countdownTarget,S.clockOffsetMs)+'</div>';
   if(showProgress){
     h+='<div style="margin-top:16px">'
       +'<div class="t-h4 w-medium" style="color:var(--text);margin-bottom:8px">'+esc(t('home','progressLabel',{percent}))+'</div>'
       +ProgressBar(e.progress)+'</div>';
   }
   const actBtn='margin-top:16px;min-height:44px;padding:0 24px;font-weight:600;border-radius:var(--r-pill);';
-  if(d.action==='vote'){
-    h += S.hasVoted
-      ? '<div class="btn" style="'+actBtn+'background:var(--secondaryButtonSurface);border:1px solid var(--muted);color:var(--muted)">'+esc(t('home','votedCta'))+'</div>'
-      : '<button class="btn btn-solid" data-act="vote-now" style="'+actBtn+'">'+esc(t('home','voteNowCta'))+'</button>';
-  }
+  /* A saved, sent or unreadable vote hides Vote now; a stale one offers it again. */
+  const sv=S.savedVote.state, voteBlocked = sv==='saved'||sv==='sent'||sv==='unreadable';
+  if(sv!=='none') h+='<div style="margin-top:16px">'+SavedVoteNotice(S.savedVote,'open-saved-vote')+'</div>';
+  if(d.action==='vote' && !voteBlocked)
+    h+='<button class="btn btn-solid" data-act="vote-now" style="'+actBtn+'">'+esc(t('home','voteNowCta'))+'</button>';
   if(d.action==='validationDetails')
     h+='<button class="btn btn-outline" data-act="validation-details" style="'+actBtn+'">'+esc(t('home','states.validationDetails.cta'))+'</button>';
   return h+'</div>';
@@ -1402,8 +1918,8 @@ function FieldRow(o){
 function RegisterFormHeader(title,subtitle,step){
   return '<div>'
    +'<div style="display:flex;justify-content:space-between;align-items:center;min-height:44px">'
-     +'<button class="plain" data-act="back" aria-label="'+esc(t('registration','form.backCta'))+'" style="padding:8px;margin:0 -8px;color:var(--text)">'+icon('arrow-left',22)+'</button>'
-     +'<button class="plain" data-act="pop-to-top" aria-label="'+esc(t('common','close'))+'" style="padding:8px;margin:0 -8px;color:var(--text)">'+icon('xmark',22)+'</button>'
+     +'<button class="plain" data-act="back" aria-label="'+esc(t('registration','form.backCta'))+'" style="min-width:44px;min-height:44px;display:flex;align-items:center;justify-content:flex-start;color:var(--text)">'+icon('arrow-left',22)+'</button>'
+     +'<button class="plain" data-act="pop-to-top" aria-label="'+esc(t('common','close'))+'" style="min-width:44px;min-height:44px;display:flex;align-items:center;justify-content:flex-end;color:var(--text)">'+icon('xmark',22)+'</button>'
    +'</div>'
    +'<div class="t-h2 w-bold" style="color:var(--text);text-align:center;margin-top:8px">'+esc(title)+'</div>'
    +'<div class="t-body" style="color:var(--textSecondary);text-align:center;margin-top:4px">'+esc(subtitle)+'</div>'
@@ -1416,7 +1932,7 @@ function RegistrationCard(isRegistered,registeredAt){
   if(!isRegistered){
     return '<div class="cardSurface" style="background:var(--registerNegative);padding:20px">'
       +'<div class="t-h4 w-bold" style="color:var(--light);margin-bottom:8px">'+esc(t('registration','notRegistered.heading'))+'</div>'
-      +'<div class="t-body" style="color:var(--light);margin-top:8px">'+esc(t('registration','notRegistered.body'))+' '
+      +'<div class="t-body" style="color:var(--light);margin-top:8px">'+esc(t('registration','notRegistered.body',{network:networkName()}))+' '
         +'<span data-act="reg-help" role="button" style="cursor:pointer;display:inline-block;vertical-align:-2px">'+icon('circle-question',15,'var(--light)')+'</span></div>'
       +'<button class="btn" data-act="register-now" style="'+actBtn+'background:rgba(255,255,255,.25)">'+esc(t('registration','notRegistered.cta'))+'</button>'
     +'</div>';
@@ -1428,7 +1944,7 @@ function RegistrationCard(isRegistered,registeredAt){
   return '<div>'
    +'<div class="cardSurface" style="background:var(--registerPositive);padding:20px;display:flex;flex-direction:column">'
      +'<div class="t-h4 w-bold" style="color:var(--light);margin-bottom:8px">'+esc(t('registration','registered.heading'))+'</div>'
-     +'<div class="t-body" style="color:var(--light);margin-top:8px">'+esc(t('registration','registered.body'))+'</div>'
+     +'<div class="t-body" style="color:var(--light);margin-top:8px">'+esc(t('registration','registered.body',{network:networkName()}))+'</div>'
      +(hasIdentity?'<div class="t-body" style="color:var(--light);margin-top:16px">'
         +esc(t('registration','registered.identityLine',{fullName,party:partyLabel,dob:d.dob}))+'</div>':'')
      +'<span class="t-caption w-medium" style="margin-top:16px;align-self:flex-end;background:var(--validBadge);color:var(--light);border-radius:var(--r-pill);padding:6px 14px">'
@@ -1471,6 +1987,24 @@ function InfoDetails(read,rows,link){
  * ------------------------------------------------------------------------ */
 const sectionText = (text,style) => '<div style="'+style+'">'+esc(text)+'</div>';
 const devText = (act,label) => '<button class="plain" data-act="'+act+'" style="display:block;margin:0 auto;padding:8px 0;color:var(--muted);font-size:16px;text-align:center">'+esc(label)+'</button>';
+/** styles.retryCta: marginTop 16, minHeight 44, borderWidth 1 primary, pill. */
+const outlineBtn = (act,label) => '<button class="btn" data-act="'+act+'" style="margin-top:16px;min-height:44px;padding:0 24px;font-weight:600;background:none;border:1px solid var(--primary);border-radius:var(--r-pill);color:var(--primary)">'+esc(label)+'</button>';
+/** IdentityRecoveryView — components/IdentityRecoveryView.tsx. The identity key is gone for good:
+ *  Create a new identity → Confirm / Cancel → (busy) → re-boot; a failed create shows the failure
+ *  line and Try Again. Unthemed RN Text, like the boot screens. Shared by the boot gate,
+ *  Confirmation and Continue on this device. */
+function IdentityRecoveryView(retryAct){
+  const r=S.idRec, tx='color:var(--text);text-align:center;';
+  const btn=(act,label)=>'<button data-act="'+act+'" style="min-height:44px;padding:0 16px;background:none;border:0;cursor:pointer;font-family:inherit;font-size:14px;color:var(--text)">'+esc(label)+'</button>';
+  let h='<div style="font-size:18px;font-weight:600;margin-bottom:12px;'+tx+'">'+esc(t('common','bootError.identityLost.title'))+'</div>'
+    +'<div style="margin-bottom:16px;'+tx+'">'+esc(t('common','bootError.identityLost.body'))+'</div>'
+    +(r.failed?'<div style="margin-bottom:16px;'+tx+'">'+esc(t('common','bootError.identityLost.replaceFailed'))+'</div>':'');
+  if(r.busy) h+=Spinner(true);
+  else if(r.confirming) h+='<div style="margin-bottom:16px;'+tx+'">'+esc(t('common','bootError.identityLost.confirmBody'))+'</div>'
+    +btn('idrec-confirm',t('common','bootError.identityLost.confirm'))+btn('idrec-cancel',t('common','bootError.identityLost.cancel'));
+  else h+=btn('idrec-create',t('common','bootError.identityLost.create'))+(r.failed?btn(retryAct,t('common','bootError.tryAgain')):'');
+  return '<div class="fill" style="align-items:center;justify-content:center;padding:24px">'+h+'</div>';
+}
 /* The Timeline + KeyholdersScreen indeterminate frame (never blank, never silent). */
 function IndeterminateFrame(retryAct,gap){
   return '<div style="display:flex;flex-direction:column;align-items:center;'+(gap?'gap:24px;':'')+'">'
@@ -1478,6 +2012,132 @@ function IndeterminateFrame(retryAct,gap){
     +'<div style="color:var(--error);'+fs('body')+'margin-top:8px">'+esc(t('timeline','indeterminate.body'))+'</div>'
     +'<button class="plain" data-act="'+retryAct+'" style="margin-top:24px;min-height:44px;color:var(--error);'+fs('body')+'">'+esc(t('timeline','indeterminate.retryCta'))+'</button>'
   +'</div>';
+}
+
+/* ---- Review & Submit (screens/ballot/ReviewSubmitScreen.tsx + engines/vote-casting.ts) ---- */
+/** One plain message per closed ineligibility reason; not-registered and device-key-rotated share one. */
+const REASON_KEY={'election-unavailable':'submit.reason.electionUnavailable','window-closed':'submit.reason.windowClosed',
+  'ballot-unconfirmed':'submit.reason.ballotUnconfirmed','no-ballots':'submit.reason.noBallots','unsupported-question':'submit.reason.unsupportedQuestion',
+  'dependent-question':'submit.reason.dependentQuestion','selection-invalid':'submit.reason.selectionInvalid','required-unanswered':'submit.reason.requiredUnanswered',
+  'below-minimum':'submit.reason.belowMinimum','device-check-failed':'submit.reason.deviceCheckFailed','not-registered':'submit.reason.notRegistered',
+  'device-key-rotated':'submit.reason.notRegistered','registration-ambiguous':'submit.reason.registrationAmbiguous','unreadable-key':'submit.reason.unreadableKey',
+  'already-saved':'submit.reason.alreadySaved'};
+/** The reasons whose refusal names questions (the screen lists each by its displayed title). */
+const REASON_QUESTIONS={'selection-invalid':['office-us-senate'],'below-minimum':['office-state-board-education'],
+  'unsupported-question':['office-state-senate'],'dependent-question':['office-governor']};
+function reviewEligibility(offices,failed){
+  if(S.elig==='checking') return null;
+  if(failed) return {eligible:false,reason:'election-unavailable',questions:[]};
+  if(S.reviewReason) return {eligible:false,reason:S.reviewReason,questions:(REASON_QUESTIONS[S.reviewReason]||[]).map(id=>offices.find(o=>o.id===id)).filter(Boolean)};
+  const sv=S.savedVote.state;
+  if(sv==='saved'||sv==='sent'||sv==='unreadable') return {eligible:false,reason:'already-saved',questions:[]};
+  const missing=offices.filter(o=>o.required && !(S.selectionMap[o.id]||[]).length);
+  if(missing.length) return {eligible:false,reason:'required-unanswered',questions:missing};
+  return {eligible:true,replacesStale:sv==='stale'};
+}
+/** One typed message per closed failure stage and reason (castFailureText); never error text. */
+const FAILURE_COPY={'build-failed':['submit.failure.buildFailed'],'sign-canceled':['submit.failure.canceled',1],
+  'sign-biometric-unavailable':['submit.failure.biometricUnavailable',1],'sign-failed':['submit.failure.signFailed'],
+  'signature-invalid':['submit.failure.signatureInvalid'],'seal-canceled':['submit.failure.canceled',1],
+  'seal-key-invalidated':['submit.failure.keyInvalidated',1],'seal-failed':['submit.failure.sealFailed'],
+  'store-already-saved':['submit.reason.alreadySaved'],'store-unreadable':['submit.failure.storeUnreadable'],
+  'store-failed':['submit.failure.storeFailed'],'unexpected':['submit.failure.unexpected']};
+function castFailureText(f){ const c=FAILURE_COPY[f]||FAILURE_COPY.unexpected; return c[1]?tp('ballot',c[0]):t('ballot',c[0]); }
+
+/* ---- Vote receipt + SendVoteCard (screens/ballot/SendVoteCard.tsx, engines/vote-send-flow.ts) ---- */
+/** A fully sent vote's statuses come back from the sent store on mount (readVoteSent). */
+function sendStatuses(){
+  if(S.savedVote.state==='sent'){ const o={}; S.receiptBallots.forEach(id=>o[id]={phase:'sent'}); return o; }
+  return S.send.statuses;
+}
+function sendAllSent(){ const st=sendStatuses(), ids=S.receiptBallots; return ids.length>0 && ids.every(id=>st[id]&&st[id].phase==='sent'); }
+const OUTCOME_KEY={'no-network':'send.noNetwork','no-rendezvous':'send.noRendezvous','rendezvous-unreachable':'send.failed',
+  canceled:'send.canceled','biometric-unavailable':'send.biometricUnavailable',unreadable:'send.failed',failed:'send.failed',
+  'voting-closed':'send.votingClosed','election-key-missing':'send.keyMissing','window-unreadable':'send.windowUnreadable'};
+function SendVoteCard(){
+  const st=sendStatuses(), ids=S.receiptBallots, sd=S.send, body=fs('body'), cap=fs('caption'), med='font-weight:500;';
+  const allSent=sendAllSent();
+  const lineFor=s=>{ if(!s) return null; switch(s.phase){
+    case 'waiting': return {text:t('ballot','send.waiting',{size:s.size}),tone:'var(--textSecondary)'};
+    case 'joined': return {text:t('ballot','send.joined'),tone:'var(--textSecondary)'};
+    case 'confirming': return {text:tp('ballot','send.confirming'),tone:'var(--textSecondary)'};
+    case 'sent': return {text:t('ballot','send.sent'),tone:'var(--success)'};
+    case 'not-sent': return {text:t('ballot',s.reason==='voting-closed'?'send.notSentClosed':'send.notSent'),tone:'var(--error)'};
+  } return null; };
+  const anyNotSent=ids.some(id=>st[id]&&st[id].phase==='not-sent');
+  let h='<div style="margin-top:16px"><div style="color:var(--text);'+body+med+'">'+esc(t('ballot','send.heading'))+'</div>';
+  h+= allSent ? '<div style="margin-top:8px;color:var(--success);'+body+med+'">'+esc(t('ballot','send.allSent'))+'</div>'
+              : '<div style="margin-top:8px;color:var(--textSecondary);'+cap+'">'+esc(t('ballot','send.explain'))+'</div>';
+  if(ids.length>1 || Object.keys(st).length>0)
+    h+=ids.map((id,i)=>{ const l=lineFor(st[id]); return l===null?'' : '<div style="margin-top:8px;color:'+l.tone+';'+body+'">'
+      +esc((ids.length>1?t('ballot','send.ballotLabel',{index:i+1})+': ':'')+l.text)+'</div>'; }).join('');
+  if(!allSent){
+    /* the label colour is colors.background in source, not colors.light */
+    h+='<button class="btn" data-act="send-vote" '+(sd.sending?'disabled ':'')+'style="margin-top:12px;min-height:44px;padding:12px 24px;font-weight:600;background:var(--primary);color:var(--background);border-radius:var(--r-pill);opacity:'+(sd.sending?0.5:1)+'">'
+       +esc(t('ballot',anyNotSent||sd.outcome!==null?'send.retryCta':'send.cta'))+'</button>'
+      +'<div style="margin-top:8px;color:var(--textSecondary);'+cap+'">'+esc(tp('ballot','send.hint'))+'</div>';
+  }
+  if(sd.outcome!==null) h+='<div style="margin-top:8px;color:var(--error);'+body+'">'
+    +esc(sd.outcome==='biometric-unavailable'?tp('ballot','send.biometricUnavailable'):t('ballot',OUTCOME_KEY[sd.outcome]))+'</div>';
+  return h+'</div>';
+}
+/** buildReceiptBallots: rows follow the ballot's question order; a blank question says "Left blank". */
+function receiptViews(){
+  const choices=S.savedChoices||{}, offices=FIXTURE_BALLOT.offices, two=S.receiptBallots.length>1;
+  return S.receiptBallots.map((id,i)=>{
+    const qs=offices.filter(o=>!two || (i===0?o.group==='Federal':o.group!=='Federal'));
+    return {ballotId:id,description:BALLOT_DESCRIPTION,nonceGroups:formatNonceGroups(S.receipt.badNonce&&i===0?'not-a-nonce':SAMPLE_NONCES[i%2]),
+      questions:qs.map(o=>{ const ids=choices[o.id]||[]; return {title:o.title,blank:ids.length===0,
+        choices:ids.map(c=>(o.candidates.find(x=>x.id===c)||{}).name).filter(Boolean)}; })};
+  });
+}
+/** A completed choice set over the fixture (one optional question left blank). */
+function sampleChoices(){ const m={}; FIXTURE_BALLOT.offices.forEach(o=>{ if(o.id!=='office-us-house') m[o.id]=o.candidates.slice(0,o.voteFor).map(c=>c.id); }); return m; }
+
+/* ---- Results (screens/timeline/ResultsScreen.tsx) ---- */
+const pct=(n,of)=>of>0?Math.round(n/of*100):0;
+function ResultsBody(){
+  const body=fs('body'), h4=fs('h4');
+  const card=(inner,extra)=>'<div style="border:1px solid var(--border);border-radius:8px;padding:16px;background:var(--card);display:flex;flex-direction:column;gap:8px;'+(extra||'')+'">'+inner+'</div>';
+  const txt=(s,c,x)=>'<div style="color:'+(c||'var(--text)')+';'+body+(x||'')+'">'+esc(s)+'</div>';
+  const R=S.results; let h='';
+  if(R==='loading') h+=txt(t('timeline','results.computing'),'var(--textSecondary)');
+  if(R==='failed') h+=txt(t('timeline','results.loadFailed'),'var(--error)');
+  if(R==='no-election') h+=txt(t('timeline','results.noElection'));
+  if(R==='awaiting-keys'||R==='awaiting-nokey')
+    h+=card('<div style="color:var(--text);'+h4+'">'+esc(t('timeline','results.lockedTitle'))+'</div>'+txt(t('timeline','results.lockedBody'))
+      +(R==='awaiting-keys'?txt(t('timeline','results.releasedCount',{released:1,needed:3})):txt(t('timeline','results.noKey'),'var(--textSecondary)')));
+  if(R==='unavailable')
+    h+=card('<div style="color:var(--error);'+h4+'">'+esc(t('timeline','results.unavailableTitle'))+'</div>'
+      +txt(t('timeline','results.unavailableReason',{reason:'election-key-inconsistent'}),'var(--textSecondary)'));
+  if(R==='no-blocks') h+=card(txt(t('timeline','results.noBlocksYet'),'var(--warning)'));
+  if(R==='tallied'||R==='no-ballots'){
+    const res=sampleResults(); if(R==='no-ballots') res.ballots=[];
+    const nc=res.totals.invalid+res.totals.excluded;
+    h+=card('<div style="color:var(--text);'+h4+'">'+esc(t('timeline','results.validVotes',{count:res.totals.valid}))+'</div>'
+      +(nc>0?txt(t('timeline','results.notCountedVotes',{count:nc}),'var(--warning)'):'')
+      +txt(t('timeline','results.checkedNote'),'var(--textSecondary)'));
+    if(res.ballots.length===0) h+=txt(t('timeline','results.noBallots'));
+    h+=res.ballots.map(b=>card((b.description?'<div style="color:var(--text);'+h4+'">'+esc(b.description)+'</div>':'')
+      +b.questions.map(q=>{ const tot=q.options.reduce((n,o)=>n+o.count,0);
+        return '<div style="margin-top:8px;display:flex;flex-direction:column;gap:6px">'+txt(q.title,null,'font-weight:700;')
+          +(q.counted ? q.options.map(o=>'<div style="display:flex;flex-direction:column;gap:4px">'
+              +'<div style="display:flex;justify-content:space-between;gap:8px"><span style="color:var(--text);'+body+'flex-shrink:1;min-width:0">'+esc(o.title)+'</span>'
+              +'<span style="color:var(--text);'+body+'white-space:nowrap">'+esc(t('timeline','results.optionCount',{count:o.count,percent:pct(o.count,tot)}))+'</span></div>'
+              +'<div style="height:8px;border-radius:4px;overflow:hidden;background:var(--progressTrack)"><div style="height:8px;border-radius:4px;background:var(--progressFill);width:'+pct(o.count,tot)+'%"></div></div></div>').join('')
+            : txt(t('timeline','results.questionNotCounted'),'var(--textSecondary)'))
+          +(q.counted&&q.blank>0?txt(t('timeline','results.blank',{count:q.blank}),'var(--textSecondary)'):'')+'</div>'; }).join(''))).join('');
+  }
+  /* the published tally shows under any tallied result, the zero-block one included */
+  if(R==='tallied'||R==='no-ballots'||R==='no-blocks'){
+    const P=S.publication;
+    if(P==='none') h+=txt(t('timeline','results.notPublished'),'var(--textSecondary)');
+    if(P==='matches') h+=card(txt(t('timeline','results.publishedMatches',{date:new Date(S.tlAnchor-2*HOUR).toLocaleString(S.lang)})));
+    if(P==='differs') h+=card(txt(t('timeline','results.publishedDiffers',{published:2,local:3}),'var(--warning)'));
+    if(P==='invalid') h+=card(txt(t('timeline','results.publishedInvalid'),'var(--error)'));
+  }
+  h+='<button class="plain" data-act="results-refresh" '+(R==='loading'?'disabled ':'')+'style="min-height:44px;display:flex;align-items:center;justify-content:center;width:100%;color:var(--link);'+body+'">'+esc(t('timeline','results.refreshCta'))+'</button>';
+  return '<div class="scroll" data-scroll="results"><div style="padding:16px;display:flex;flex-direction:column;gap:16px">'+h+'</div></div>';
 }
 
 const ROUTES = {
@@ -1490,7 +2150,7 @@ Home:{ header:'none', body(){
   else if(S.electionRead!=='loading') inner+='<div class="t-body" style="color:var(--textSecondary)">'+esc(t('home','electionUnavailable'))+'</div>';
   /* __DEV__ lifecycle cycler — live → each forced state → live. Not localized (dev-only). */
   inner+=devText('cycle-lifecycle','Dev state: '+(S.lifecycleOverride||'live')+' (tap to cycle)');
-  return NetworkHeader('noop')+ConfigFaultNotice()+'<div class="scroll" data-scroll="home"><div class="pad16">'+inner+'</div></div>';
+  return NetworkHeader('noop')+ConfigFaultNotice()+UnsharedChangesNotice()+'<div class="scroll" data-scroll="home"><div class="pad16">'+inner+'</div></div>';
 }},
 
 Ballot:{ header:'stack', title(){ const e=getElection(); return e&&e.title ? e.title : t('ballot','headerTitle'); }, body(){
@@ -1564,22 +2224,93 @@ IndividualQuestion:{ header:'modal',
     +'</div></div>';
 }},
 
-ReviewSubmit:{ header:'stack', title:()=>t('ballot','reviewSubmitTitle'), body(){
-  if(S.submitted){
-    return '<div class="pad16 fill" style="align-items:center;justify-content:center">'
-      +'<div class="t-h4 w-medium" style="color:var(--text);text-align:center">'+esc(t('ballot','submittedConfirmation'))+'</div></div>';
-  }
+/* ReviewSubmitScreen — the real local Submit. Eligibility is evaluated on every focus (the
+   "Checking…" line), so a closed reason shows before any prompt. Submit signs with the device
+   key (prompt 1) and seals the record (prompt 2), then opens VoteReceipt with revealOnOpen. */
+ReviewSubmit:{ header:'stack', title:()=>t('ballot','reviewSubmitTitle'),
+  onEnter(){ S.elig='checking'; S.reviewFailure=null; later(700,()=>{ if(topRoute()==='ReviewSubmit'){ S.elig='ready'; render(); } }); },
+  body(){
   const {ballot:b,failed}=useBallot(); const offices=b?b.offices:[];
-  return '<div class="pad16 fill"><div class="scroll" data-scroll="review"><div style="margin-top:8px">'
+  const el=reviewEligibility(offices,failed);
+  const body=fs('body'), cap=fs('caption');
+  const blanks=offices.filter(o=>!(S.selectionMap[o.id]||[]).length);
+  const submitDisabled = !(el && el.eligible) || S.reviewPending;
+  let h='<div style="margin-top:8px">'
    +(failed?'<div class="t-body" style="color:var(--textSecondary)">'+esc(t('ballot','ballotUnavailable'))+'</div>':'')
    +offices.map(o=>{ const {summary,hasSelection}=resolveSelectionSummary(o);
       return '<div class="cardSurface">'
         +'<div class="t-caption" style="color:var(--textSecondary)">'+esc(o.title)+'</div>'
         +'<div class="t-body" style="margin-top:4px;color:'+(hasSelection?'var(--success)':'var(--textSecondary)')+'">'+esc(summary)+'</div></div>'; }).join('')
-   +'</div></div>'
+   +'</div>';
+  if(offices.length>0 && blanks.length>0)
+    h+='<div style="margin-top:12px"><div style="color:var(--text);'+body+'">'+esc(t('ballot','submit.blankHeading'))+'</div>'
+      +blanks.map(o=>'<div><div style="color:var(--textSecondary);'+body+'">'+esc(o.title)+'</div>'
+        +(o.required?'<div style="color:var(--error);'+cap+'">'+esc(t('ballot','submit.blankRequiredTag'))+'</div>':'')+'</div>').join('')+'</div>';
+  if(offices.length>0 && el && el.eligible && blanks.length===offices.length)
+    h+='<div style="margin-top:12px;color:var(--text);'+body+'">'+esc(t('ballot','submit.allBlank'))+'</div>';
+  if(el && !el.eligible) h+=el.questions.map(o=>'<div style="margin-top:12px;color:var(--textSecondary);'+body+'">'+esc(o.title)+'</div>').join('');
+  let status='';
+  if(el===null) status+='<div style="color:var(--textSecondary);'+body+'">'+esc(t('ballot','submit.checking'))+'</div>';
+  if(el && !el.eligible) status+='<div style="color:var(--error);'+body+'">'+esc(t('ballot',REASON_KEY[el.reason]))+'</div>';
+  if(el && el.eligible && el.replacesStale) status+='<div style="color:var(--text);'+body+'">'+esc(t('ballot','submit.staleReplace'))+'</div>';
+  if(S.reviewFailure) status+='<div style="color:var(--error);'+body+'">'+esc(castFailureText(S.reviewFailure))+'</div>';
+  status+='<div style="color:var(--textSecondary);'+cap+'">'+esc(t('ballot','submit.localNote'))+'</div>';
+  return '<div class="pad16 fill"><div class="scroll" data-scroll="review">'+h+'</div>'
+   +'<div style="margin-top:12px;display:flex;flex-direction:column;gap:4px;flex:0 0 auto">'+status+'</div>'
    +'<div style="display:flex;gap:16px;padding:0 20px;margin-top:24px;flex:0 0 auto">'
-     +'<button class="btn btn-outline" data-act="back" style="flex:1;min-width:0;min-height:44px;padding:12px 24px;font-weight:600">'+esc(t('ballot','continueVotingCta'))+'</button>'
-     +'<button class="btn btn-solid" data-act="submit-ballot" style="flex:1;min-width:0;min-height:44px;padding:12px 24px;font-weight:600">'+esc(t('ballot','submitCta'))+'</button></div>'
+     +'<button class="btn btn-outline" data-act="back" '+(S.reviewPending?'disabled ':'')+'style="flex:1;min-width:0;min-height:44px;padding:12px 24px;font-weight:600">'+esc(t('ballot','continueVotingCta'))+'</button>'
+     +'<button class="btn btn-solid" data-act="submit-ballot" '+(submitDisabled?'disabled ':'')+'style="flex:1;min-width:0;min-height:44px;padding:12px 24px;font-weight:600;opacity:'+(submitDisabled?0.5:1)+'">'
+       +esc(S.reviewPending?t('ballot','submit.saving'):t('ballot','submitCta'))+'</button></div>'
+  +'</div>';
+}},
+
+/* VoteReceiptScreen — "Vote saved". Status and loss lines render from the non-secret marker with
+   no prompt; choices and vote codes appear only after a reveal (Face ID / fingerprint), which
+   Review & Submit's revealOnOpen triggers once. Re-hidden on blur. Copy shows a toast. */
+VoteReceipt:{ header:'stack', title:()=>t('ballot','receipt.title'),
+  onEnter(){ if(S.receipt.revealOnOpen && ['saved','stale'].includes(S.savedVote.state)){ S.receipt.revealOnOpen=false; later(450,()=>{ if(topRoute()==='VoteReceipt') ACTIONS['receipt-reveal'](); }); } },
+  body(){
+  const r=S.receipt, sv=S.savedVote, body=fs('body'), cap=fs('caption'), med='font-weight:500;';
+  const load = r.load==='loading' ? 'loading' : sv.state==='none' ? 'none' : sv.state==='unreadable' ? 'unreadable' : 'saved';
+  let h='';
+  if(load==='loading') h+='<div style="color:var(--textSecondary);'+body+'">'+esc(t('ballot','receipt.loading'))+'</div>';
+  if(load==='none') h+='<div style="color:var(--text);'+body+'">'+esc(t('ballot','receipt.none'))+'</div>';
+  if(load==='unreadable') h+='<div style="color:var(--error);'+body+med+'">'+esc(t('ballot','receipt.unreadable'))+'</div>'
+    +'<div style="margin-top:16px;color:var(--textSecondary);'+body+'">'+esc(t('ballot','receipt.loss'))+'</div>';
+  if(load==='saved'){
+    const kind = sv.state==='stale' ? 'stale' : 'saved';
+    const revisionKnown = sv.state==='sent' ? true : sv.revisionKnown!==false;
+    const allSent = sendAllSent();
+    h+='<div style="color:var(--text);'+body+med+'">'+esc(t('ballot',allSent?'receipt.statusSent':'receipt.status'))+'</div>';
+    if(kind==='stale') h+='<div style="margin-top:16px;color:var(--error);'+body+med+'">'+esc(t('ballot','receipt.stale'))+'</div>';
+    if(!revisionKnown) h+='<div style="margin-top:16px;color:var(--textSecondary);'+body+'">'+esc(t('ballot','receipt.revisionUnknown'))+'</div>';
+    h+='<div style="margin-top:16px;color:var(--textSecondary);'+body+'">'+esc(t('ballot','receipt.loss'))+'</div>';
+    if(kind==='saved' && revisionKnown) h+=SendVoteCard();
+    if(!r.revealed){
+      h+='<div style="margin-top:16px">'
+        +'<button class="btn btn-outline" data-act="receipt-reveal" '+(r.busy?'disabled ':'')+'style="min-height:44px;padding:12px 24px;font-weight:600;opacity:'+(r.busy?0.5:1)+'">'+esc(t('ballot','receipt.revealCta'))+'</button>'
+        +'<div style="margin-top:8px;color:var(--textSecondary);'+cap+'">'+esc(tp('ballot','receipt.revealHint'))+'</div>'
+        +(r.notice?'<div style="margin-top:8px;color:var(--error);'+body+'">'+esc(r.notice==='biometric-unavailable'?tp('ballot','receipt.revealBiometricUnavailable'):t('ballot',r.notice==='canceled'?'receipt.revealCanceled':'receipt.revealFailed'))+'</div>':'')
+      +'</div>';
+    } else {
+      h+='<div style="margin-top:16px"><div style="color:var(--text);'+body+med+'">'+esc(t('ballot','receipt.choicesHeading'))+'</div>'
+        +receiptViews().map((v,i)=>'<div class="cardSurface" style="margin-top:12px">'
+          +(v.description!==null?'<div style="color:var(--text);'+body+med+'">'+esc(v.description)+'</div>':'')
+          +v.questions.map(q=>'<div style="margin-top:8px"><div style="color:var(--textSecondary);'+cap+'">'+esc(q.title)+'</div>'
+            +'<div style="color:'+(q.blank?'var(--textSecondary)':'var(--success)')+';'+body+'">'+esc(q.blank?t('ballot','receipt.leftBlank'):q.choices.join(', '))+'</div></div>').join('')
+          +'<div style="margin-top:12px;color:var(--textSecondary);'+cap+'">'+esc(t('ballot','receipt.nonceLabel'))+'</div>'
+          +(v.nonceGroups===null
+            ? '<div style="color:var(--error);'+body+'">'+esc(t('ballot','receipt.unreadable'))+'</div>'
+            : '<div style="display:flex;flex-wrap:wrap;margin-top:4px">'+v.nonceGroups.map(g=>'<span style="margin-right:8px;color:var(--text);'+body+'font-family:ui-monospace,Menlo,monospace">'+g+'</span>').join('')+'</div>'
+              +'<div style="display:flex;align-items:center;flex-wrap:wrap;margin-top:8px">'
+                +'<button class="btn btn-outline inline-btn" data-act="receipt-copy" style="min-height:44px;padding:8px 20px;margin-right:12px;font-weight:600">'+esc(t('ballot','receipt.copyCta'))+'</button>'
+                +'<span style="flex:1;min-width:0;color:var(--error);'+cap+med+'">'+esc(t('ballot','receipt.copyWarning'))+'</span></div>')
+        +'</div>').join('')+'</div>';
+    }
+  }
+  return '<div class="pad16 fill"><div class="scroll" data-scroll="receipt">'+h+'</div>'
+   +'<div style="display:flex;padding:0 20px;margin-top:24px;flex:0 0 auto">'
+     +'<button class="btn btn-solid" data-act="pop-to-top" style="flex:1;min-height:44px;padding:12px 24px;font-weight:600">'+esc(t('ballot','receipt.doneCta'))+'</button></div>'
   +'</div>';
 }},
 
@@ -1607,23 +2338,39 @@ Keyholders:{ header:'stack', title:()=>t('timeline','keyholders.screenTitle'), b
   +'</div></div>';
 }},
 
+/* ResultsScreen — counted on THIS phone after the key release (decrypt + validate + tally), plus the
+   tally an officer published and whether it matches. Pushed from the Tallying row's View results. */
+Results:{ header:'stack', title:()=>t('timeline','results.screenTitle'), body(){ return ResultsBody(); }},
+
 /* ===== REGISTRATION STACK (also re-registered on the Timeline stack) ===== */
+/* RegistrationScreen — the card reads the authoritative status (resolveRegistrationStatus) on
+   every focus; the __DEV__ toggle overrides it for the session. An engine-derived registration
+   carries no date, so the Valid-through badge renders with an empty date. */
 RegistrationHome:{ header:'none', body(){
-  const reg=!!S.isRegistered[S.tab];
+  const ov=S.isRegistered[S.tab];
+  const reg = ov===undefined ? S.regEngine : !!ov;
+  const regAt = ov===true ? (S.registeredAt[S.tab]||null) : null;
   let code='';
   const ca=S.codeAvail;
   const link=(act,label)=>'<button class="plain" data-act="'+act+'" style="min-height:44px;display:flex;align-items:center;color:var(--link);font-size:16px">'+esc(label)+'</button>';
+  const note=k=>'<div style="color:var(--textSecondary);font-size:16px">'+esc(t('continuity',k))+'</div>';
   if(ca==='available'){
     code='<div style="margin-top:16px">'+link('show-code',t('continuity','code.showAgainLink'))
       +(S.codeRevealed?RegistrationCodeCard(S.codeRevealed):'')+'</div>';
   } else if(ca==='not-registered'){
     code='<div style="margin-top:16px">'+link('open-continue',t('continuity','newDevice.entryLink'))+'</div>';
-  } else if(ca==='not-sent'||ca==='not-holder'){
-    code='<div style="margin-top:16px;color:var(--textSecondary);font-size:16px">'+esc(t('continuity','code.notAvailableOnDevice'))+'</div>';
+  } else if(ca==='read-failed'||ca==='read-failed-unknown'){
+    code='<div style="margin-top:16px">'+note('code.unavailable')+link('code-retry',t('continuity','code.retryButton'))
+      +(ca==='read-failed-unknown'?link('open-continue',t('continuity','newDevice.entryLink')):'')+'</div>';
+  } else if(ca==='not-sent'||ca==='not-holder'||ca==='unavailable'){
+    code='<div style="margin-top:16px">'+note('code.notAvailableOnDevice')+'</div>';
+  } else if(ca===null){
+    code='<div style="margin-top:16px">'+note('code.checking')+'</div>';
   }
   return NetworkHeader('reg-help')
    +'<div class="scroll" data-scroll="reghome"><div class="pad16">'
-     +RegistrationCard(reg,S.registeredAt[S.tab]||null)
+     +(!S.hasNetwork?'<button class="plain" data-act="open-join" style="min-height:44px;display:flex;align-items:center;color:var(--link);font-size:16px">'+esc(t('join','entryLink'))+'</button>':'')
+     +RegistrationCard(reg,regAt)
      +code
      +devText('toggle-registered','Toggle isRegistered (dev): '+String(reg))
    +'</div></div>';
@@ -1672,7 +2419,7 @@ RegisterPersonal:{ header:'none', body(){
   const d=S.draft,e=S.errors;
   return '<div class="fill" style="padding:16px 16px 12px">'
    +'<div class="scroll" data-scroll="rp">'
-     +RegisterFormHeader(t('registration','formHeaderTitle'),t('registration','form.sectionTitle'),1)
+     +RegisterFormHeader(t('registration','formHeaderTitle'),t('registration','form.sectionTitle',{network:networkName()}),1)
      +'<div style="margin-top:24px">'
        +FieldGroup([
           FieldRow({field:'firstName',placeholder:t('registration','form.firstName'),value:d.firstName,error:e.firstName}),
@@ -1694,7 +2441,7 @@ RegisterAddressParty:{ header:'none', body(){
   const partyErr=e.party?t('registration','form.errors.party'):'';
   return '<div class="fill" style="padding:16px 16px 12px">'
    +'<div class="scroll" data-scroll="rap">'
-     +RegisterFormHeader(t('registration','formHeaderTitle'),t('registration','form.sectionTitle'),2)
+     +RegisterFormHeader(t('registration','formHeaderTitle'),t('registration','form.sectionTitle',{network:networkName()}),2)
      +'<div style="margin-top:24px">'
        +FieldGroup([
           FieldRow({field:'addressLine1',placeholder:t('registration','form.addressLine1'),value:d.addressLine1,error:e.addressLine1}),
@@ -1737,32 +2484,51 @@ RegisterConfirm:{ header:'none', body(){
      +esc(t('registration','form.submitCta'))+'</button></div></div>';
 }},
 
-/* ConfirmationScreen — the voter submits SELF-SIGNED requests and then shows an honest
-   PENDING state (it never pops, never claims success). Failure UX is the three-way class. */
-Confirmation:{ header:'none', onEnter(){ S.confirm={failure:null,pending:false,busy:false,codeAvail:null}; }, body(){
+/* ConfirmationScreen — the voter submits SELF-SIGNED requests, waits (bounded) for the office's
+   challenge with a Stop control, answers it (iOS: the Face ID prompt fires here), then shows an
+   honest PENDING state that re-reads the Association status every 10 s for at most 10 min and
+   moves to "registered" only when the office has approved. It pops only on Done / Back. */
+Confirmation:{ header:'none', onEnter(){ S.confirm=freshConfirm(); }, body(){
   const c=S.confirm, f=c.failure;
-  const errorCopy = f==='recoverable-action' ? t('registration','confirmation.error.biometricNotEnrolled')
+  if(f==='identity-lost' && !c.pending) return IdentityRecoveryView('confirm-faceid');
+  const errorCopy = f==='recoverable-action' ? tp('registration','confirmation.error.biometricNotEnrolled')
                   : f==='terminal' ? t('registration','confirmation.error.terminal')
-                  : f==='recoverable-transient' ? t('registration','confirmation.error.transient') : null;
+                  : f==='recoverable-transient' ? t('registration','confirmation.error.transient')
+                  : f==='intake-unavailable' ? t('registration','confirmation.error.intakeUnavailable')
+                  : f==='no-election' ? t('registration','confirmation.error.noElection')
+                  : f==='wait-stopped' ? t('registration','confirmation.error.waitStopped') : null;
   const cta='margin-top:32px;min-height:44px;padding:0 24px;font-weight:600;';
+  const outline=(act,label,mt)=>'<button class="btn inline-btn" data-act="'+act+'" style="margin-top:'+(mt||16)+'px;min-height:44px;padding:0 24px;font-weight:600;background:none;border:1px solid var(--primary);border-radius:var(--r-pill);color:var(--primary)">'+esc(label)+'</button>';
+  const line=(s,color,mt)=>'<div class="t-body" style="color:'+(color||'var(--text)')+';text-align:center;margin-top:'+(mt||16)+'px">'+esc(s)+'</div>';
   let h='<div class="t-h2 w-medium" style="color:var(--text);text-align:center">'+esc(t('registration','confirmation.heading'))+'</div>'
-   +'<div class="t-body" style="color:var(--textSecondary);text-align:center;margin-top:16px">'+esc(t('registration','confirmation.body'))+'</div>'
+   +'<div class="t-body" style="color:var(--textSecondary);text-align:center;margin-top:16px">'+esc(tp('registration','confirmation.body'))+'</div>'
    +'<div style="margin-top:32px">'+icon('fingerprint',96,'var(--primary)')+'</div>'
-   +'<div class="t-caption" style="color:var(--textSecondary);text-align:center;margin-top:8px">'+esc(t('registration','confirmation.caption'))+'</div>';
-  if(c.pending){
-    /* literal English in source (not routed through t()) */
-    h+='<div class="t-body" style="color:var(--text);text-align:center;margin-top:16px">Your registration has been submitted. We\'ll let you know once the authority confirms your device.</div>';
+   +(c.waiting?'':'<div class="t-caption" style="color:var(--textSecondary);text-align:center;margin-top:8px">'+esc(tp('registration','confirmation.caption'))+'</div>');
+  if(c.pending && c.outcome==='registered'){
+    h+=line(t('registration','confirmation.registered'))
+      +'<button class="btn btn-solid inline-btn" data-act="pop-to-top" style="'+cta+'">'+esc(t('registration','confirmation.doneCta'))+'</button>';
+  } else if(c.pending){
+    h+=line(t('registration','confirmation.pending'));
+    if(c.notShared) h+=line(t('registration','confirmation.notShared'),'var(--textSecondary)');
     if(c.codeAvail==='available') h+=RegistrationCodeCard('code');
+    else if(c.codeAvail==='read-failed') h+=line(t('continuity','code.unavailable'),'var(--textSecondary)')+outline('confirm-code-retry',t('continuity','code.retryButton'));
     else if(c.codeAvail==='not-sent'||c.codeAvail==='not-holder')
-      h+='<div class="t-body" style="color:var(--textSecondary);text-align:center;margin-top:16px">'+esc(t('continuity','code.notAvailableOnDevice'))+'</div>';
+      h+=line(t('continuity','code.notAvailableOnDevice'),'var(--textSecondary)');
+    if(c.pollExpired) h+=line(t('registration','confirmation.pendingCheckLater'),'var(--textSecondary)');
+    h+=outline('pop-to-top',t('registration','confirmation.pendingBackCta'));
+  } else if(c.waiting){
+    h+='<div style="margin-top:24px;display:flex;flex-direction:column;align-items:center">'+Spinner(true)
+      +line(t('registration','confirmation.waiting'))
+      +(c.notShared?line(t('registration','confirmation.notShared'),'var(--textSecondary)'):'')
+      +'<button class="btn inline-btn" data-act="confirm-stop" style="margin-top:24px;min-height:44px;padding:0 24px;font-weight:700;'+fs('body')+'background:none;border:1px solid var(--primary);border-radius:var(--r-pill);color:var(--primary)">'+esc(t('registration','confirmation.waitingCancel'))+'</button></div>';
   } else {
-    if(errorCopy) h+='<div class="t-body" style="color:var(--text);text-align:center;margin-top:16px">'+esc(errorCopy)+'</div>';
-    if(f==='terminal'){ /* no CTA at all */ }
+    if(errorCopy) h+=line(errorCopy);
+    if(f==='terminal'||f==='no-election'){ /* no CTA at all */ }
     else if(f==='recoverable-action'){
       h+='<button class="btn btn-solid inline-btn" data-act="setup-unlock" style="'+cta+'">'+esc(t('registration','confirmation.error.setupCta'))+'</button>'
-       +'<button class="btn inline-btn" data-act="confirm-faceid" style="margin-top:16px;min-height:44px;padding:0 24px;font-weight:600;background:none;border:1px solid var(--primary);border-radius:var(--r-pill);color:var(--primary)">Try Again</button>';
+       +outline('confirm-faceid',t('registration','confirmation.retryCta'));
     } else {
-      h+='<button class="btn btn-solid inline-btn" data-act="confirm-faceid" '+(c.busy?'disabled ':'')+'style="'+cta+'">'+esc(errorCopy?'Try Again':t('registration','confirmation.cta'))+'</button>';
+      h+='<button class="btn btn-solid inline-btn" data-act="confirm-faceid" '+(c.busy?'disabled ':'')+'style="'+cta+'">'+esc(errorCopy?t('registration','confirmation.retryCta'):tp('registration','confirmation.cta'))+'</button>';
     }
   }
   return '<div class="scroll" data-scroll="confirm"><div class="pad16 centercol">'+h+'</div></div>';
@@ -1776,6 +2542,9 @@ ContinueOnAnotherDevice:{ header:'none',
   body(){
   const c=S.cad;
   if(c.branch==='resolving') return '<div class="pad16 fill" style="align-items:center">'+Spinner(false)+'</div>';
+  if(c.failure==='identity-lost')
+    return '<div class="fill">'+IdentityRecoveryView('cad-retry')
+      +'<div style="display:flex;justify-content:center;padding-bottom:24px">'+outlineBtn('cad-leave',t('continuity','newDevice.backToRegistrationButton'))+'</div></div>';
   const card=inner=>'<div class="cardSurface">'+inner+'</div>';
   const heading=(k,color)=>'<div style="color:'+(color||'var(--text)')+';'+fs('h4')+'margin-bottom:8px">'+esc(t('continuity',k))+'</div>';
   const body=(k,color)=>'<div style="color:'+(color||'var(--textSecondary)')+';font-size:16px;margin-bottom:16px">'+esc(k)+'</div>';
@@ -1806,20 +2575,24 @@ ContinueOnAnotherDevice:{ header:'none',
     inner=card(heading('restart.heading')+body(t('continuity','restart.body'))+cta('cad-restart-confirm',t('continuity','restart.confirmButton'),true));
   } else if(c.branch==='pending'){
     const f=c.failure;
-    const errorCopy = f==='recoverable-action' ? t('registration','confirmation.error.biometricNotEnrolled')
+    const errorCopy = f==='recoverable-action' ? tp('registration','confirmation.error.biometricNotEnrolled')
                     : f==='terminal' ? t('registration','confirmation.error.terminal')
-                    : f==='recoverable-transient' ? t('registration','confirmation.error.transient') : null;
+                    : f==='recoverable-transient' ? t('registration','confirmation.error.transient')
+                    : f==='intake-unavailable' ? t('registration','confirmation.error.intakeUnavailable') : null;
     inner=card(errorCopy
       ? body(errorCopy,'var(--text)')
         +(f==='recoverable-action'?cta('setup-unlock',t('registration','confirmation.error.setupCta'),false):'')
-        +(f==='terminal'?'':'<button class="btn" data-act="cad-retry" style="margin-top:12px;min-height:44px;padding:0 24px;font-weight:600;background:none;border:1px solid var(--primary);border-radius:var(--r-pill);color:var(--primary)">'+esc(t('continuity','newDevice.retryButton'))+'</button>')
-      : heading('newDevice.pendingHeading')+body(t('continuity','newDevice.pendingBody')));
+        +(f==='terminal'?'':outlineBtn('cad-retry',t('continuity','newDevice.retryButton')))
+        +(f==='terminal'?outlineBtn('cad-leave',t('continuity','newDevice.backToRegistrationButton')):'')
+      : heading('newDevice.pendingHeading')+body(t('continuity','newDevice.pendingBody'))+body(t('continuity','newDevice.checkBackLaterBody'))
+        +outlineBtn('cad-leave',t('continuity','newDevice.checkBackLaterButton')));
   } else if(c.branch==='approved'){
     inner=card(heading('newDevice.approvedHeading')+cta('pop-to-top',t('registration','form.continueCta'),true));
   } else if(c.branch==='rejected'){
     inner=card(heading('newDevice.rejectedHeading','var(--error)')+body(t('continuity','newDevice.rejectedBody')));
   }
-  const showClose = c.branch!=='pending';
+  /* pending is non-dismissible unless it carries a failure; the explicit buttons always leave */
+  const showClose = c.branch!=='pending' || c.failure!==null;
   return '<div class="scroll" data-scroll="cad"><div class="pad16">'
     +'<div style="display:flex;justify-content:flex-end;min-height:44px">'
       +(showClose?'<button class="plain" data-act="back" aria-label="'+esc(t('common','close'))+'" style="min-width:44px;min-height:44px;display:flex;align-items:center;justify-content:center;color:var(--text)">'+icon('xmark',22)+'</button>':'')
@@ -1845,7 +2618,64 @@ SettingsHome:{ header:'stack', title:()=>t('settings','headerTitle'), body(){
       +'color:'+(on?'var(--light)':'var(--textSecondary)')+';font-weight:'+(on?700:400)+'">'+esc(label)+'</button>'; };
   return '<div class="scroll"><div class="pad16">'
    +'<div class="t-body" style="color:var(--text);margin-bottom:12px">'+esc(t('settings','language'))+'</div>'
-   +'<div style="display:flex;gap:8px">'+seg('en',t('settings','languageEnglish'))+seg('es',t('settings','languageSpanish'))+'</div></div></div>';
+   +'<div style="display:flex;gap:8px">'+seg('en',t('settings','languageEnglish'))+seg('es',t('settings','languageSpanish'))+'</div>'
+   /* join an election authority's network from its join code */
+   +'<button class="plain" data-act="open-join" style="margin-top:24px;min-height:44px;display:flex;align-items:center;color:var(--link);'+fs('body')+'">'+esc(t('settings','joinNetworkRow'))+'</button>'
+   +'</div></div>';
+}},
+
+/* JoinNetworkScreen — on the Settings, Registration and Timeline stacks; it only ever goes back.
+   Paste or scan the authority's join code, compare the fingerprint with the one the authority
+   published, then tap Join. A scan only FILLS the field; only the Join tap joins. Every failure
+   is translated copy picked by the typed reason, never engine text. */
+JoinNetwork:{ header:'stack', title:()=>t('join','headerTitle'), body(){
+  const j=S.join, body=fs('body'), cap=fs('caption');
+  const sec='color:var(--textSecondary);'+body, txt='color:var(--text);'+body;
+  if(j.phase==='joined')
+    return '<div class="scroll"><div class="pad16">'
+      +'<div style="'+txt+'font-weight:700;margin-bottom:16px">'+esc(t('join','joinedTitle',{name:j.joinedName}))+'</div>'
+      +'<button class="btn btn-solid" data-act="back" style="margin-top:16px;min-height:44px;padding:0 24px;font-weight:700">'+esc(t('join','doneButton'))+'</button></div></div>';
+  const decoded = j.text.trim().length===0 ? null : decodeJoinCode(j.text);
+  const busy = j.phase==='joining';
+  const scanDisabled = busy || j.availability!=='ready';
+  const scannedOk = j.scanNotice==='scanned' && decoded && decoded.ok;
+  const statusKind = j.availability==='none' ? 'none' : j.availability==='blocked' ? 'blocked' : scannedOk ? 'scanned'
+    : (j.scanNotice==='denied'||j.scanNotice==='failed') ? j.scanNotice : null;
+  let h='<div style="'+sec+'margin-bottom:16px">'+esc(t('join','intro'))+'</div><div class="cardSurface">';
+  h+='<button class="plain" data-act="join-scan" '+(scanDisabled?'disabled ':'')+'style="width:100%;min-height:44px;margin-bottom:16px;display:flex;align-items:center;justify-content:center;padding:0 16px;'
+    +'background:var(--secondaryButtonSurface);border:1px solid '+(scanDisabled?'var(--border)':'var(--primary)')+';border-radius:var(--r-md);'
+    +'color:'+(scanDisabled?'var(--textSecondary)':'var(--primary)')+';font-weight:700;font-size:16px;line-height:22px">'
+    +icon('qrcode',16,'currentColor','margin-right:4px')+esc(t('join','scanButton'))+'</button>';
+  h+='<div style="display:flex;justify-content:space-between;align-items:center">'
+    +'<span style="'+sec+'margin-bottom:8px">'+esc(t('join','codeLabel'))+'</span>'
+    +'<button class="plain" data-act="join-paste" '+(busy?'disabled ':'')+'style="min-height:44px;min-width:44px;display:flex;align-items:center;justify-content:flex-end;color:var(--link);font-size:16px">'+esc(t('join','pasteButton'))+'</button></div>';
+  h+='<textarea data-join="text" '+(busy?'disabled ':'')+'placeholder="'+esc(t('join','codePlaceholder'))+'" autocapitalize="none" spellcheck="false" '
+    +'style="width:100%;min-height:96px;border:1px solid '+(decoded&&!decoded.ok?'var(--error)':'var(--primary)')+';border-radius:8px;padding:12px;'
+    +'background:none;outline:0;resize:none;font-family:inherit;'+cap+'color:var(--text);word-break:break-all">'+esc(j.text)+'</textarea>';
+  if(decoded && !decoded.ok) h+='<div style="margin-top:8px;color:var(--error);'+cap+'">'+esc(t('join',JOIN_DECODE_KEY[decoded.reason]))+'</div>';
+  if(statusKind){
+    h+='<div style="margin-top:8px">';
+    if(statusKind==='scanned') h+='<div style="display:flex;align-items:flex-start">'+icon('circle-check',16,'var(--text)','margin:3px 8px 0 0')
+      +'<span style="'+txt+'flex-shrink:1">'+esc(t('join','scannedNotice'))+'</span></div>';
+    else h+='<div role="alert" style="display:flex;align-items:flex-start;background:var(--card);border:1px solid var(--warning);border-radius:var(--r-sm);padding:16px">'
+      +icon('triangle-exclamation',16,'var(--warning)','margin:3px 8px 0 0')
+      +'<span style="'+txt+'flex-shrink:1">'+esc(t('join',{none:'cameraNone',blocked:'cameraBlocked',denied:'cameraDenied',failed:'cameraFailed'}[statusKind]))+'</span></div>'
+      +(statusKind==='blocked'?'<button class="plain" data-act="noop" style="min-height:44px;display:flex;align-items:center;color:var(--link);font-size:16px">'+esc(t('join','openSettings'))+'</button>':'');
+    h+='</div>';
+  }
+  if(decoded && decoded.ok)
+    h+='<div style="margin-top:16px"><div style="'+sec+'">'+esc(t('join','previewNetwork'))+'</div>'
+      +'<div style="'+txt+'font-weight:700;margin-bottom:12px">'+esc(decoded.code.name)+'</div>'
+      +'<div style="'+sec+'">'+esc(t('join','previewFingerprint'))+'</div>'
+      +'<div style="'+txt+'font-weight:700;margin-bottom:12px;user-select:text">'+esc(decoded.fingerprint)+'</div>'
+      +'<div style="'+sec+'margin-bottom:16px">'+esc(t('join','previewCheck'))+'</div></div>';
+  if(j.phase==='failed') h+='<div style="margin-top:8px;color:var(--error);'+body+'">'+esc(t('join',j.failKey))+'</div>';
+  if(busy) h+='<div style="margin-top:16px;display:flex;align-items:center;min-height:44px">'+Spinner(false)
+      +'<span style="'+sec+'margin-left:12px;flex-shrink:1">'+esc(t('join','step.'+j.step))+'</span></div>';
+  else { const ok=decoded&&decoded.ok;
+    h+='<button class="btn" data-act="join-submit" '+(ok?'':'disabled ')+'style="margin-top:16px;min-height:44px;padding:0 24px;font-weight:700;border-radius:var(--r-pill);'
+      +'background:'+(ok?'var(--primary)':'var(--secondaryButtonSurface)')+';color:'+(ok?'var(--light)':'var(--textSecondary)')+'">'+esc(t('join','joinButton'))+'</button>'; }
+  return '<div class="scroll" data-scroll="join"><div class="pad16">'+h+'</div></div></div>';
 }},
 };
 
@@ -1890,7 +2720,8 @@ function TimelineBody(){
       +'<div style="color:var(--text);'+fs('h2')+'">'+esc(electionTitle())+'</div>'
       +(range?'<div style="color:var(--textSecondary);'+fs('body')+'margin-top:8px">'+esc(t('timeline','header.dateRange',range))+'</div>':'')
     +'</div>'
-    +TimelineRail(view.rows, id => id==='registrationEnds' && S.regStatus!==null ? RegistrationPanel(S.regStatus,before) : '')
+    +TimelineRail(view.rows, id => id==='registrationEnds' && S.regStatus!==null ? RegistrationPanel(S.regStatus,before)
+        : id==='votingStarts' && S.savedVote.state!=='none' ? SavedVoteNotice(S.savedVote,null) : '')
   +'</div></div>';
 }
 function TimelineRail(rows,renderPanel){
@@ -1921,12 +2752,19 @@ function TimelineRail(rows,renderPanel){
 function rowActions(id,status){
   const a=[];
   if(id==='registrationEnds' && status!=='past') a.push({act:'tl-registration',key:'registration.editCta',v:'link'});
+  /* Saved and unreadable (and sent) hide Vote now; stale offers it again. A saved vote is linked
+     ("View saved vote") from the current row as well as the past one. */
+  const sv=S.savedVote.state, canVote = sv==='none'||sv==='stale', hasSaved = sv!=='none';
   if(id==='votingStarts'){
     if(status==='future') a.push({act:'tl-ballot',key:'voting.previewBallotCta',v:'link'});
-    else if(status==='current') a.push({act:'tl-ballot',key:'voting.voteNowCta',v:'primary'});
-    else if(status==='past') a.push({act:'tl-submission',key:'voting.viewSubmissionCta',v:'link'});
+    else if(status==='current'){
+      if(canVote) a.push({act:'tl-ballot',key:'voting.voteNowCta',v:'primary'});
+      if(hasSaved) a.push({act:'tl-submission',key:'voting.viewSubmissionCta',v:'link'});
+    }
+    else if(status==='past' && hasSaved) a.push({act:'tl-submission',key:'voting.viewSubmissionCta',v:'link'});
   }
   if(id==='releasingKeys') a.push({act:'tl-keyholders',key:'keyholders.viewCta',v:'outline'});
+  if(id==='tallyingStarts' && (status==='current'||status==='past')) a.push({act:'tl-results',key:'results.viewCta',v:'outline'});
   if(status==='past') a.push({act:'tl-details',key:'row.detailsCta',v:'link',details:true});
   return a;
 }
@@ -1988,14 +2826,20 @@ function routeView(route,idx){
 function bootView(){
   const bg='background:'+(S.theme==='dark'?'#0d0d0d':'#fff')+';';
   const txt='background:none;border:0;font-family:inherit;font-size:14px;color:var(--text);cursor:pointer;';
+  const ct='text-align:center;font-size:14px;color:var(--text);';
+  if(S.boot==='error' && S.bootErr==='identityLost')
+    return '<div class="fill" style="'+bg+'">'+IdentityRecoveryView('boot-retry')+'</div>';
   if(S.boot==='error')
     return '<div class="fill" style="align-items:center;justify-content:center;'+bg+'padding:0 24px">'
-      +'<div style="margin-bottom:16px;text-align:center;font-size:14px;color:var(--text)">Failed to load network: Error: seedDevNetwork failed: no valid addresses for peer</div>'
-      +'<button data-act="boot-retry" style="margin-bottom:8px;'+txt+'">Try Again</button>'
-      +'<button data-act="boot-fresh" style="'+txt+'">Start Fresh</button></div>';
+      +(S.bootErr==='updateNeeded'
+        ? '<div style="margin-bottom:8px;font-weight:700;'+ct+'">'+esc(t('common','bootError.updateNeeded.title'))+'</div>'
+          +'<div style="margin-bottom:16px;'+ct+'">'+esc(t('common','bootError.updateNeeded.body'))+'</div>'
+        : '<div style="margin-bottom:16px;'+ct+'">'+esc(t('common','bootError.generic'))+'</div>')
+      +'<button data-act="boot-retry" style="margin-bottom:8px;min-height:44px;'+txt+'">'+esc(t('common','bootError.tryAgain'))+'</button>'
+      +'<button data-act="boot-fresh" style="min-height:44px;'+txt+'">'+esc(t('common','bootError.continueWithoutNetwork'))+'</button></div>';
   return '<div class="fill" style="align-items:center;justify-content:center;'+bg+'">'+Spinner(true)
-    +(S.boot==='syncing'||S.boot==='syncingElapsed'?'<div style="margin-top:16px;text-align:center;font-size:14px;color:var(--text)">'+esc(t('common','syncSyncing'))+'</div>':'')
-    +(S.boot==='syncingElapsed'?'<button data-act="boot-fresh" style="margin-top:8px;'+txt+'">Start Fresh</button>':'')
+    +(S.boot==='syncing'||S.boot==='syncingElapsed'?'<div style="margin-top:16px;'+ct+'">'+esc(t('common','syncSyncing'))+'</div>':'')
+    +(S.boot==='syncingElapsed'?'<button data-act="boot-fresh" style="margin-top:8px;'+txt+'">'+esc(t('common','bootError.continueWithoutNetwork'))+'</button>':'')
   +'</div>';
 }
 /** DeviceRetiredNotice — replaces the WHOLE tab navigator; no CTA, nothing to navigate to. */
@@ -2034,7 +2878,8 @@ function render(){
       +icon(x.glyph,24)+'<span class="tlabel">'+esc(t('common',x.labelKey))+'</span></button>').join('');
     brand = base===st.length-1 && (top==='Home'||top==='RegistrationHome');
   }
-  document.getElementById('overlays').innerHTML = (S.dialog?dialogHTML():'') + (S.sheet?PartySheetHTML():'');
+  document.getElementById('overlays').innerHTML = (S.dialog?dialogHTML():'') + (S.sheet?PartySheetHTML():'')
+    + (S.join.scanner?ScannerHTML():'') + (S.toast?ToastHTML():'') + (S.bio?BioPromptHTML():'');
   paintStatusBar(brand);
   restoreScroll();
   fitCodes();
@@ -2115,6 +2960,58 @@ function dialogHTML(){
       +'<div class="dlg-body">'+esc(body)+'</div>'
     +'</div></div>';
 }
+/** Toast — components/Toast.tsx: one app-wide toast, bottom-centre, colors.text on colors.background
+ *  inverted, pill, never takes touches. 2.5 s visible + 150 ms fade. */
+function ToastHTML(){
+  return '<div style="position:absolute;inset:0;pointer-events:none;display:flex;align-items:flex-end;justify-content:center;padding:0 24px 64px">'
+    +'<div class="fade" style="max-width:360px;padding:12px 20px;border-radius:var(--r-pill);background:var(--text);color:var(--background);'
+    +'font-weight:500;'+fs('body')+'text-align:center;box-shadow:0 2px 6px rgba(0,0,0,.2);animation:fade .15s ease">'+esc(S.toast.message)+'</div></div>';
+}
+/** JoinCodeScanner — a full-screen portrait Modal over the camera: scrim around a square viewfinder
+ *  (32 inset, 32 x 4 corners), title, close, instruction (or "Starting the camera…"), the slow hint
+ *  after 8 s, the not-a-join-code banner (4 s), and Paste instead. Fixed colours (they sit on video). */
+function ScannerHTML(){
+  const sc=S.join.scanner, W=412, side=W-64, top=110;
+  const ink='#FFFFFF', scrim='rgba(0,0,0,0.55)';
+  const corner=(pos)=>'<i style="position:absolute;width:32px;height:32px;border-color:'+ink+';border-style:solid;border-width:0;border-radius:4px;'+pos+'"></i>';
+  const waiting=sc.phase==='starting';
+  return '<div class="overlay" style="background:#000;display:block;overflow:hidden">'
+    /* a stand-in for the live camera preview */
+    +(waiting?'':'<div style="position:absolute;inset:0;background:radial-gradient(circle at 50% 38%,#4a4f55 0,#23272b 55%,#111 100%)"></div>')
+    +'<div style="position:absolute;top:0;left:0;right:0;height:'+top+'px;background:'+scrim+'"></div>'
+    +'<div style="position:absolute;top:'+(top+side)+'px;left:0;right:0;bottom:0;background:'+scrim+'"></div>'
+    +'<div style="position:absolute;top:'+top+'px;left:0;width:32px;height:'+side+'px;background:'+scrim+'"></div>'
+    +'<div style="position:absolute;top:'+top+'px;right:0;width:32px;height:'+side+'px;background:'+scrim+'"></div>'
+    +'<div data-act="scan-accept" title="Tap to read the authority\'s QR (prototype)" style="position:absolute;top:'+top+'px;left:32px;width:'+side+'px;height:'+side+'px;cursor:pointer">'
+      +corner('top:0;left:0;border-top-width:4px;border-left-width:4px')+corner('top:0;right:0;border-top-width:4px;border-right-width:4px')
+      +corner('bottom:0;left:0;border-bottom-width:4px;border-left-width:4px')+corner('bottom:0;right:0;border-bottom-width:4px;border-right-width:4px')+'</div>'
+    +'<div style="position:absolute;top:8px;left:72px;right:72px;height:48px;display:flex;align-items:center;justify-content:center;color:'+ink+';font-size:20px;line-height:26px;font-weight:700;text-align:center">'+esc(t('join','scanTitle'))+'</div>'
+    +'<button data-act="scan-close" aria-label="'+esc(t('join','scanClose'))+'" style="position:absolute;top:8px;left:16px;width:48px;height:48px;border-radius:24px;border:0;background:'+scrim+';cursor:pointer;display:flex;align-items:center;justify-content:center">'+icon('xmark',24,ink)+'</button>'
+    +'<div style="position:absolute;top:'+(top+side+24)+'px;left:58px;width:296px;display:flex;justify-content:center;text-align:center;color:'+ink+';font-size:16px;line-height:22px">'
+      +(waiting?'<div style="display:flex;align-items:center;justify-content:center"><div class="spinner" style="border-color:'+ink+';border-top-color:transparent"></div><span style="margin-left:12px">'+esc(t('join','scanStarting'))+'</span></div>'
+               :esc(t('join',sc.slow?'scanSlow':'scanInstruction')))+'</div>'
+    +(sc.banner?'<div role="alert" style="position:absolute;left:16px;right:16px;bottom:76px;display:flex;align-items:center;background:rgba(0,0,0,0.75);border-radius:8px;padding:16px">'
+       +icon('circle-exclamation',16,ink)+'<span style="flex:1;margin-left:12px;color:'+ink+';font-size:16px;line-height:22px">'+esc(t('join','scanNotJoinCode'))+'</span></div>':'')
+    +'<button data-act="scan-close" style="position:absolute;left:0;right:0;bottom:16px;min-height:44px;background:none;border:0;cursor:pointer;color:'+ink+';font-weight:700;font-size:16px;line-height:22px">'+esc(t('join','scanPasteInstead'))+'</button>'
+  +'</div>';
+}
+/** The OS biometric prompt — PROTOTYPE STAND-IN, not app UI. Android: BiometricPrompt bottom sheet
+ *  with the SecretWrapPrompt title / subtitle / negative button (tap the sensor to pass). iOS: the
+ *  Face ID sheet (tap it to pass, tap outside to cancel). */
+function BioPromptHTML(){
+  const b=S.bio;
+  if(IOS())
+    return '<div class="overlay fade" data-act="bio-cancel" style="background:rgba(0,0,0,.25);align-items:center;justify-content:center">'
+      +'<div data-act="bio-ok" title="Face ID (tap to pass)" style="width:150px;height:150px;border-radius:24px;background:rgba(242,242,247,.96);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;cursor:pointer;color:#1c1c1e">'
+        +icon('face-id',64,'#1c1c1e')+'<span style="font-size:15px;font-weight:600">Face ID</span></div></div>';
+  return '<div class="overlay fade" style="background:rgba(0,0,0,.4);align-items:flex-end">'
+    +'<div style="width:100%;background:#f3eff4;color:#1d1b20;border-radius:28px 28px 0 0;padding:28px 24px 20px;display:flex;flex-direction:column;align-items:center">'
+      +(b.title?'<div style="font-size:22px;line-height:28px;text-align:center">'+esc(b.title)+'</div>':'')
+      +(b.subtitle?'<div style="font-size:14px;line-height:20px;margin-top:8px;text-align:center;color:#49454f">'+esc(b.subtitle)+'</div>':'')
+      +'<button data-act="bio-ok" title="Touch the sensor (tap to pass)" style="margin:28px 0 24px;width:64px;height:64px;border-radius:32px;border:0;background:#d8e2ff;cursor:pointer;display:flex;align-items:center;justify-content:center">'+icon('fingerprint',36,'#2c56b8')+'</button>'
+      +(b.negative?'<button data-act="bio-cancel" style="align-self:flex-start;background:none;border:0;color:#2c56b8;font-size:14px;font-weight:500;padding:10px 12px;cursor:pointer">'+esc(b.negative)+'</button>':'')
+    +'</div></div>';
+}
 /** PartyDropdown option sheet — components/PartyDropdown.tsx */
 function PartySheetHTML(){
   const opts=['democratic','republican','independent','other'];
@@ -2151,14 +3048,63 @@ const ACTIONS={
   'open-office'(el){ S.currentQuestionIndex=ballot().offices.findIndex(o=>o.id===el.dataset.id); push('IndividualQuestion'); },
   'dlg-office'(el){ openDialog('office',el.dataset.id); },
   'dlg-candidate'(el){ openDialog('candidate',el.dataset.id); },
-  'go-review'(){ S.submitted=false; push('ReviewSubmit'); },
+  'go-review'(){ push('ReviewSubmit'); },
   'toggle-cand'(el){ const o=ballot().offices[S.currentQuestionIndex]; toggleCandidate(o.id,el.dataset.id,o.voteFor); render(); },
   'prev-question'(){ S.currentQuestionIndex=Math.max(0,S.currentQuestionIndex-1); render(); },
   'next-question'(){
     const n=ballot().offices.length;
-    if(S.currentQuestionIndex===n-1){ S.submitted=false; replaceTop('ReviewSubmit'); return; }   // navigation.replace
+    if(S.currentQuestionIndex===n-1){ replaceTop('ReviewSubmit'); return; }   // navigation.replace
     S.currentQuestionIndex=Math.min(n-1,S.currentQuestionIndex+1); render(); },
-  'submit-ballot'(){ S.submitted=true; render(); },
+  /* castVote: sign with the device key (prompt 1), seal the record (prompt 2), store, then
+     clear the selections and open the receipt with revealOnOpen. */
+  'submit-ballot'(){
+    const {ballot:b,failed}=useBallot(); const el=reviewEligibility(b?b.offices:[],failed);
+    if(!(el&&el.eligible) || S.reviewPending) return;
+    S.reviewPending=true; S.reviewFailure=null; render();
+    const fail=k=>{ S.reviewPending=false; S.reviewFailure=k; render(); };
+    bioPrompt('ballot','submit.signPrompt',false,()=>{
+      bioPrompt('ballot','submit.recordPrompt',true,()=>{
+        later(700,()=>{
+          S.savedChoices=JSON.parse(JSON.stringify(S.selectionMap)); S.selectionMap={}; S.currentQuestionIndex=0;
+          S.savedVote={state:'saved',revisionKnown:true}; S.reviewPending=false;
+          S.receipt=freshReceipt(); S.receipt.revealOnOpen=true; S.send=freshSend(); S.receiptBallots=['fixture-ballot-1'];
+          push('VoteReceipt');
+        });
+      },()=>fail('seal-canceled'));
+    },()=>fail('sign-canceled'));
+  },
+  /* VoteReceipt */
+  'open-saved-vote'(){ S.receipt=freshReceipt(); push('VoteReceipt'); },
+  'receipt-reveal'(){
+    if(S.receipt.busy) return; S.receipt.busy=true; render();
+    bioPrompt('ballot','receipt.prompt',true,()=>{ S.receipt.busy=false; S.receipt.revealed=true; S.receipt.notice=null; if(!S.savedChoices) S.savedChoices=sampleChoices(); render(); },
+      ()=>{ S.receipt.busy=false; S.receipt.notice='canceled'; render(); });
+  },
+  'receipt-copy'(){ showToast(t('ballot',S.copyUnavailable?'receipt.copyFailed':'receipt.copied')); },
+  /* SendVoteCard → runVoteSendFlow: reach the rendezvous, open the record (prompt), join a pool,
+     wait for it to fill (3 needed), confirm the group (prompt), sent. */
+  'send-vote'(){
+    const sd=S.send; if(sd.sending) return;
+    sd.sending=true; sd.outcome=null; render();
+    const ids=S.receiptBallots, setAll=st=>{ ids.forEach(id=>sd.statuses[id]=Object.assign({},st)); render(); };
+    const cancel=()=>{ sd.sending=false; sd.outcome='canceled'; render(); };
+    later(700,()=>bioPrompt('ballot','send.recordPrompt',true,()=>{
+      setAll({phase:'waiting',size:1});
+      later(1300,()=>{ setAll({phase:'waiting',size:2});
+        later(1300,()=>{ setAll({phase:'joined',size:3});
+          later(1100,()=>{ setAll({phase:'confirming'});
+            bioPrompt('ballot','send.consentPrompt',false,()=>{
+              later(600,()=>{ setAll({phase:'sent'}); sd.sending=false; S.savedVote={state:'sent'}; render(); });
+            },cancel);
+          });
+        });
+      });
+    },cancel));
+  },
+  /* biometric system prompt (prototype stand-in for the OS sheet) */
+  'bio-ok'(){ const b=S.bio; S.bio=null; render(); if(b&&b.ok) b.ok(); },
+  'bio-cancel'(){ const b=S.bio; S.bio=null; render(); if(b&&b.cancel) b.cancel(); },
+  'close-toast'(){ S.toast=null; render(); },
 
   /* Timeline */
   'tl-retry'(){ if(S.tlRead==='failed') S.tlRead='ok'; render(); },   // re-reads; a broken timeline stays indeterminate
@@ -2172,11 +3118,32 @@ const ACTIONS={
   'tl-details'(el){ S.dialog={kind:'stage',id:el.dataset.id}; render(); },
   'tl-registration'(){ push('RegistrationHome'); },
   'tl-ballot'(){ push('Ballot'); },
-  'tl-submission'(){ S.submitted=false; push('ReviewSubmit'); },
+  'tl-submission'(){ S.receipt=freshReceipt(); push('VoteReceipt'); },
   'tl-keyholders'(){ push('Keyholders'); },
+  'tl-results'(){ push('Results'); },
+  'results-refresh'(){ const keep=S.results; S.results='loading'; render(); later(900,()=>{ S.results=keep==='loading'?'tallied':keep; render(); }); },
+
+  /* Join a network */
+  'open-join'(){ S.join=freshJoin(); push('JoinNetwork'); },
+  'join-paste'(){ const j=S.join; j.text=SAMPLE_JOIN_CODE; j.phase='idle'; j.scanNotice=null; render(); },
+  'join-scan'(){ const j=S.join; if(j.phase==='joining'||j.availability!=='ready') return; j.scanNotice=null;
+    j.scanner={phase:'starting',slow:false,banner:false}; render();
+    later(900,()=>{ if(S.join.scanner){ S.join.scanner.phase='scanning'; render(); } }); },
+  'scan-close'(){ S.join.scanner=null; render(); },
+  /* prototype affordance: tap the viewfinder to "read" the authority's QR */
+  'scan-accept'(){ const j=S.join; j.text=SAMPLE_JOIN_CODE; j.phase='idle'; j.scanner=null; j.scanNotice='scanned'; render(); },
+  'join-submit'(){
+    const j=S.join, d=decodeJoinCode(j.text); if(!d.ok || j.phase==='joining') return;
+    j.phase='joining'; j.step='admitting'; render();
+    later(1100,()=>{ j.step='syncing'; render();
+      later(1300,()=>{ j.step='verifying'; render();
+        later(900,()=>{ j.phase='joined'; j.joinedName=d.code.name; S.hasNetwork=true; S.netName=d.code.name; render(); }); }); });
+  },
 
   /* Registration */
-  'toggle-registered'(){ const v=!S.isRegistered[S.tab]; S.isRegistered[S.tab]=v; if(v) S.registeredAt[S.tab]=new Date().toISOString(); render(); },
+  'toggle-registered'(){ const ov=S.isRegistered[S.tab], cur= ov===undefined ? S.regEngine : !!ov, v=!cur;
+    S.isRegistered[S.tab]=v; if(v) S.registeredAt[S.tab]=new Date().toISOString(); render(); },
+  'code-retry'(){ S.codeAvail='available'; render(); },
   'register-now'(){ S.attestTerminal=false; push('DeviceAttestation'); },
   'update-registration'(){ S.errors={}; push('RegisterPersonal'); },
   'reg-help'(){ push('RegistrationInfo'); },
@@ -2188,11 +3155,26 @@ const ACTIONS={
   'pick-party'(el){ S.draft.party=el.dataset.key; delete S.errors.party; S.sheet=null; render(); },
   'close-sheet'(){ S.sheet=null; render(); },
   'submit-registration'(){ push('Confirmation'); },
+  /* submit the self-signed requests → wait for the office's challenge (Stop waiting) → answer
+     it (iOS raises Face ID here; Android raises none) → honest pending. */
   'confirm-faceid'(){
-    if(S.confirm.busy) return;
-    S.confirm.busy=true; S.confirm.failure=null; render();
-    later(1100,()=>{ S.confirm.busy=false; S.confirm.pending=true; S.confirm.codeAvail='available'; S.draft=Object.assign({},EMPTY_DRAFT); render(); }); },
+    const c=S.confirm; if(c.busy) return;
+    c.busy=true; c.failure=null; S.idRec={confirming:false,busy:false,failed:false}; render();
+    later(600,()=>{ c.waiting=true; render();
+      later(2200,()=>{ if(!S.confirm.waiting) return;
+        const done=()=>{ c.busy=false; c.waiting=false; c.pending=true; c.codeAvail='available'; S.draft=Object.assign({},EMPTY_DRAFT); render(); };
+        if(IOS()) bioPrompt(null,null,false,done,()=>{ c.busy=false; c.waiting=false; c.failure='recoverable-transient'; render(); });
+        else done(); }); }); },
+  'confirm-stop'(){ const c=S.confirm; clearTimers(); c.busy=false; c.waiting=false; c.failure='wait-stopped'; render(); },
+  'confirm-code-retry'(){ S.confirm.codeAvail='available'; render(); },
   'setup-unlock'(){ /* Linking.sendIntent('android.settings.BIOMETRIC_ENROLL') — leaves the app */ },
+  /* IdentityRecoveryView */
+  'idrec-create'(){ S.idRec.confirming=true; render(); },
+  'idrec-cancel'(){ S.idRec.confirming=false; render(); },
+  'idrec-confirm'(){ S.idRec={confirming:false,busy:true,failed:false}; render();
+    later(1200,()=>{ S.idRec={confirming:false,busy:false,failed:false};
+      /* createNewIdentity re-runs the boot (re-mounts the app tree) */
+      S.boot='loading'; S.confirm=freshConfirm(); S.cad.failure=null; render(); later(1000,()=>{ S.boot='ready'; Object.keys(ROOTS).forEach(k=>{ S.stacks[k]=[ROOTS[k]]; }); render(); }); }); },
 
   /* Continue on another device */
   'cad-submit-code'(){ const c=S.cad;
@@ -2206,7 +3188,9 @@ const ACTIONS={
     c.idErrors=e; if(Object.keys(e).length){ render(); return; }
     c.submitError=null; c.failure=null; c.branch='pending'; render(); },
   'cad-restart-confirm'(){ S.attestTerminal=false; push('DeviceAttestation'); },
-  'cad-retry'(){ S.cad.failure=null; render(); },
+  'cad-retry'(){ S.cad.failure=null; S.idRec={confirming:false,busy:false,failed:false}; render(); },
+  /* Check Back Later / Back to Registration: an explicit leave, allowed past the pending guard */
+  'cad-leave'(){ S.cad.allowLeave=true; S.stacks[S.tab]=[S.stacks[S.tab][0]]; afterNav(); },
 
   /* dialogs */
   'close-dialog'(){ S.dialog=null; render(); },
@@ -2214,8 +3198,21 @@ const ACTIONS={
   'set-lang'(el){ S.lang=el.dataset.lang; render(); },
   /* boot gates */
   'boot-retry'(){ S.boot='loading'; render(); later(1400,()=>{ S.boot='ready'; render(); }); },
-  'boot-fresh'(){ S.boot='ready'; render(); },
+  /* "Continue without a network": startFresh — boots with no network open */
+  'boot-fresh'(){ S.boot='ready'; S.hasNetwork=false; render(); },
 };
+/** A prompt from the OS (BiometricPrompt on Android, the Face ID sheet on iOS). The copy is the
+ *  SecretWrapPrompt the screen passes; `ns,key` name the `.title/.subtitle/.negativeButton` triple
+ *  (`android` = the subtitle has an '.android' sibling). The attestation answer passes none. */
+function bioPrompt(ns,key,android,ok,cancel){
+  S.bio = key ? {title:t(ns,key+'.title'),subtitle:android?tp(ns,key+'.subtitle'):t(ns,key+'.subtitle'),negative:t(ns,key+'.negativeButton'),ok,cancel}
+              : {title:'',subtitle:'',negative:'',ok,cancel};
+  render();
+}
+function showToast(message){
+  S.toast={message,id:(S.toast?S.toast.id:0)+1}; const id=S.toast.id; render();
+  setTimeout(()=>{ if(S.toast&&S.toast.id===id){ S.toast=null; render(); } },2650);   // TOAST_VISIBLE_MS + FADE_MS
+}
 
 document.addEventListener('click',ev=>{
   const stop=ev.target.closest('[data-stop]');
@@ -2229,6 +3226,8 @@ document.addEventListener('click',ev=>{
   if(tab){ switchTab(tab.dataset.tab); return; }
   const dev=ev.target.closest('[data-dev]');
   if(dev){ devGo(dev.dataset.dev); return; }
+  const plat=ev.target.closest('[data-plat]');
+  if(plat){ S.platform=plat.dataset.plat; buildDrawer(); render(); return; }
 });
 document.getElementById('nav-back').addEventListener('click',hardwareBack);
 document.getElementById('nav-back').innerHTML=icon('nav-back',18);
@@ -2236,6 +3235,8 @@ document.getElementById('nav-home').innerHTML=icon('nav-home',18);
 document.getElementById('nav-recents').innerHTML=icon('nav-recents',18);
 /* write-through bindings (RegistrationDraftProvider / ContinueOnAnotherDevice local state) */
 document.addEventListener('input',ev=>{
+  const joinEl=ev.target.closest('[data-join]');
+  if(joinEl){ const j=S.join; j.text=joinEl.value; j.scanNotice=null; if(j.phase==='failed') j.phase='idle'; rerenderKeepFocus('[data-join="text"]'); return; }
   const cadEl=ev.target.closest('[data-cad]');
   if(cadEl){ const f=cadEl.dataset.cad;
     if(f==='code'){ S.cad.code=cadEl.value; if(S.cad.codeError){ S.cad.codeError=null; rerenderKeepFocus('[data-cad="code"]'); } }
@@ -2272,11 +3273,17 @@ function resetProto(){
   Object.assign(S,{dialog:null,sheet:null,errors:{},boot:'ready',retired:false,configFault:false,electionRead:'ok',
     lifecycleOverride:null,overrideAt:Date.now(),keyholders:KEYHOLDER_NAMES.slice(),keysMeasured:undefined,
     tlScenario:'stage:votingStarts',tlAnchor:Date.now(),tlRead:'ok',clockOffsetMs:0,clockStopIndex:0,regStatus:'registered',
-    longNames:false,keyholdersRead:'ok',ballotRead:'ok',ballotVariant:'normal',submitted:false,hasVoted:false,
-    codeAvail:'not-registered',codeRevealed:null,riRead:'ok',attestTerminal:false,_attestArmed:false,scrollMem:{}});
+    longNames:false,keyholdersRead:'ok',ballotRead:'ok',ballotVariant:'normal',
+    codeAvail:'not-registered',codeRevealed:null,riRead:'ok',attestTerminal:false,_attestArmed:false,scrollMem:{},
+    selectionMap:{},currentQuestionIndex:0,regEngine:false,
+    hasNetwork:true,netName:NETWORK_NAME,unshared:0,savedVote:{state:'none'},savedChoices:null,
+    elig:'ready',reviewReason:null,reviewFailure:null,reviewPending:false,reviewAllOptional:false,
+    receipt:freshReceipt(),send:freshSend(),receiptBallots:['fixture-ballot-1'],copyUnavailable:false,
+    results:'tallied',publication:'matches',join:freshJoin(),bootErr:'generic',
+    idRec:{confirming:false,busy:false,failed:false},toast:null,bio:null});
   S.isRegistered={}; S.registeredAt={};
   Object.keys(ROOTS).forEach(k=>{ S.stacks[k]=[ROOTS[k]]; });
-  S.confirm={failure:null,pending:false,busy:false,codeAvail:null};
+  S.confirm=freshConfirm();
 }
 function nav(tab,routes){ S.tab=tab; S.stacks[tab]=routes.slice(); }
 const VOTE=r=>nav('Vote',['Home'].concat(r||[]));
@@ -2286,15 +3293,27 @@ const allAnswered=()=>{ S.selectionMap={}; FIXTURE_BALLOT.offices.forEach(o=>{ S
 const cadAt=(branch,extra)=>{ REG(['ContinueOnAnotherDevice']); S.cad={branch,code:'',codeError:null,submitError:null,identity:Object.assign({},EMPTY_IDENTITY),idErrors:{},failure:null}; Object.assign(S.cad,extra||{}); };
 const confirmAt=extra=>{ S.draft=Object.assign({},SAMPLE_DRAFT); REG(['RegisterPersonal','RegisterAddressParty','RegisterConfirm','Confirmation']); Object.assign(S.confirm,extra||{}); };
 const stageScen=id=>()=>{ S.tlScenario='stage:'+id; TL(); };
+/** The receipt as Review & Submit leaves it (Home → Ballot → Review & Submit → Vote saved). */
+const rcpt=sv=>{ S.savedVote=sv||{state:'saved',revisionKnown:true}; S.savedChoices=sampleChoices(); VOTE(['Ballot','ReviewSubmit','VoteReceipt']); };
+const resAt=(state,pub)=>{ S.results=state; S.publication=pub||'unknown'; S.savedVote={state:'sent'}; S.tlScenario='stage:tallyingStarts'; TL(['Results']); };
+const joinAt=extra=>{ nav('Settings',['SettingsHome','JoinNetwork']); Object.assign(S.join,extra||{}); };
+const sendAt=(st,sending)=>{ S.send.statuses={'fixture-ballot-1':st}; S.send.sending=!!sending; };
 
 const DEV_GROUPS=[
- {title:'App shell',note:'VoterAppProvider gates render before any navigator mounts; they sit outside the themed NavigationContainer. The copy here is English literals in source (not t()), except the localized Syncing label.',items:[
+ {title:'App shell',note:'VoterAppProvider gates render before any navigator mounts; they sit outside the themed NavigationContainer (unthemed RN Text). All of this copy is now localized (common: syncSyncing, bootError.*).',items:[
   {id:'boot-loading', label:'Boot · loading spinner', badge:'state', go(){ S.boot='loading'; }},
-  {id:'boot-syncing', label:'Boot · Syncing', sub:'first-sync wait in progress (syncState syncing)', badge:'state', go(){ S.boot='syncing'; }},
-  {id:'boot-syncing-elapsed', label:'Boot · Syncing + Start Fresh', sub:'first-sync budget (~300 s) elapsed; Try Again is deliberately not offered', badge:'state', go(){ S.boot='syncingElapsed'; }},
-  {id:'boot-error', label:'Boot · failed to load network', sub:'Try Again / Start Fresh', badge:'state', go(){ S.boot='error'; }},
+  {id:'boot-syncing', label:'Boot · Syncing', sub:'first sync in progress, or a joined network waiting for its node', badge:'state', go(){ S.boot='syncing'; }},
+  {id:'boot-syncing-elapsed', label:'Boot · Syncing + Continue without a network', sub:'first-sync budget, node wait (15 s) or dev-seed wait (60 s) elapsed; Try Again is not offered', badge:'state', go(){ S.boot='syncingElapsed'; }},
+  {id:'boot-error', label:'Boot · couldn\'t open the voting network', sub:'Try Again / Continue without a network', badge:'state', go(){ S.boot='error'; S.bootErr='generic'; }},
+  {id:'boot-update-needed', label:'Boot · update needed', sub:'the network\'s schema refuses this build (app-schema refusal)', badge:'state', go(){ S.boot='error'; S.bootErr='updateNeeded'; }},
+  {id:'boot-identity-lost', label:'Boot · voter identity can\'t be unlocked', sub:'IdentityRecoveryView: Create a new identity', badge:'state', go(){ S.boot='error'; S.bootErr='identityLost'; }},
+  {id:'idrec-confirm', label:'Identity recovery · confirm', sub:'Confirm / Cancel', badge:'state', go(){ S.boot='error'; S.bootErr='identityLost'; S.idRec.confirming=true; }},
+  {id:'idrec-busy', label:'Identity recovery · creating', badge:'state', go(){ S.boot='error'; S.bootErr='identityLost'; S.idRec.busy=true; }},
+  {id:'idrec-failed', label:'Identity recovery · create failed', sub:'failure line + Try Again', badge:'state', go(){ S.boot='error'; S.bootErr='identityLost'; S.idRec.failed=true; }},
   {id:'device-retired', label:'Device retired', sub:'replaces the whole tab navigator; no CTA, no tab bar', badge:'state', go(){ S.retired=true; }},
   {id:'config-fault', label:'Home · configuration fault notice', sub:'bootstrap.config.json missing or malformed', badge:'state', go(){ S.configFault=true; VOTE(); }},
+  {id:'unshared', label:'Home · unshared changes notice', sub:'writes on this phone no other network member holds yet', badge:'state', go(){ S.unshared=2; VOTE(); }},
+  {id:'toast', label:'Toast', sub:'app-wide, bottom-centre; the receipt\'s copy result', badge:'state', go(){ VOTE(['Ballot','ReviewSubmit','VoteReceipt']); S.savedVote={state:'saved',revisionKnown:true}; S.savedChoices=sampleChoices(); S.receipt.revealed=true; S.toast={message:t('ballot','receipt.copied'),id:1}; }},
  ]},
  {title:'Vote tab · Home',note:'Live state is derived from the election timeline (engines/election-read.ts). Counts with no engine source (progress, checks, certification) are absent in a live read, so the card falls back to copy that states only what is known.',items:[
   {id:'Home', label:'Home · live (voting open)', sub:'NetworkHeader + ElectionCard, no progress bar in a live read', go(){ VOTE(); }},
@@ -2309,7 +3328,14 @@ const DEV_GROUPS=[
   {id:'dlg-election', label:'Learn about this election', sub:'InfoDialog + authority detail', badge:'state', go(){ VOTE(); S.dialog={kind:'election',read:'ready'}; }},
   {id:'dlg-election-loading', label:'Learn about this election · loading', badge:'state', go(){ VOTE(); S.dialog={kind:'election',read:'loading'}; }},
   {id:'dlg-election-failed', label:'Learn about this election · unavailable', badge:'state', go(){ VOTE(); S.dialog={kind:'election',read:'failed'}; }},
-  {id:'voted', label:'Open · "You voted"', sub:'hasVoted is local state that nothing ever sets true', badge:'unreachable', go(){ S.lifecycleOverride='Open'; S.hasVoted=true; VOTE(); }},
+  {id:'home-no-network', label:'Home · no network open', sub:'header falls back to the networkName copy; no election', badge:'state', go(){ S.hasNetwork=false; S.electionRead='none'; VOTE(); }},
+ ]},
+ {title:'Vote tab · Home · saved vote',note:'Read from the stored marker on every focus (no prompt). A saved, sent or unreadable vote hides Vote now; a stale one offers it again. "View saved vote" opens the receipt WITHOUT revealOnOpen, so it asks for Face ID / the fingerprint again.',items:[
+  {id:'home-saved', label:'Home · vote saved, not sent', sub:'"Vote saved — not sent" + View saved vote; Vote now hidden', badge:'state', go(){ S.savedVote={state:'saved',revisionKnown:true}; VOTE(); }},
+  {id:'home-saved-revunknown', label:'Home · saved · revision unknown', sub:'couldn\'t check whether the election changed', badge:'state', go(){ S.savedVote={state:'saved',revisionKnown:false}; VOTE(); }},
+  {id:'home-sent', label:'Home · vote sent', sub:'send.allSent line', badge:'state', go(){ S.savedVote={state:'sent'}; VOTE(); }},
+  {id:'home-stale', label:'Home · election changed after the vote', sub:'stale line; Vote now offered again', badge:'state', go(){ S.savedVote={state:'stale',revisionKnown:true}; VOTE(); }},
+  {id:'home-unreadable', label:'Home · saved vote unreadable', badge:'state', go(){ S.savedVote={state:'unreadable'}; VOTE(); }},
  ]},
  {title:'Vote tab · Home · dev lifecycle cycler',note:'The __DEV__ cycler (live → each state → live) forces a card state and overlays its review fixture. Release builds stay live.',items:
    LIFECYCLE_ORDER.map(s=>({id:'override:'+s,label:'Dev state: '+s,badge:'dev',go(){ S.lifecycleOverride=s; S.overrideAt=Date.now(); VOTE(); }}))},
@@ -2332,18 +3358,60 @@ const DEV_GROUPS=[
   {id:'dlg-candidate', label:'Learn about this candidate · with link', sub:'"More information" (http(s) only)', badge:'state', go(){ S.currentQuestionIndex=0; VOTE(['Ballot','IndividualQuestion']); S.dialog={kind:'candidate',id:'cand-us-senate-diana',read:'ready'}; }},
   {id:'dlg-candidate-nolink', label:'Learn about this candidate · no link', badge:'state', go(){ S.currentQuestionIndex=0; VOTE(['Ballot','IndividualQuestion']); S.dialog={kind:'candidate',id:'cand-us-senate-marcus',read:'ready'}; }},
   {id:'dlg-candidate-failed', label:'Learn about this candidate · unavailable', badge:'state', go(){ S.currentQuestionIndex=0; VOTE(['Ballot','IndividualQuestion']); S.dialog={kind:'candidate',id:'cand-us-senate-elena',read:'failed'}; }},
-  {id:'ReviewSubmit', label:'Review & Submit', go(){ VOTE(['Ballot','ReviewSubmit']); }},
-  {id:'review-unavailable', label:'Review & Submit · unavailable', sub:'footer still offered', badge:'state', go(){ S.ballotRead='failed'; VOTE(['Ballot','ReviewSubmit']); }},
-  {id:'submitted', label:'Review & Submit · submitted', badge:'state', go(){ S.submitted=true; VOTE(['Ballot','ReviewSubmit']); }},
   {id:'ValidationDetails', label:'Validation Details', sub:'evidence exists only under the dev review override', badge:'dev', go(){ S.lifecycleOverride='ValidationDetails'; S.overrideAt=Date.now(); VOTE(['ValidationDetails']); }},
   {id:'validation-empty', label:'Validation Details · no evidence', sub:'live read: renders an empty shell', badge:'state', go(){ VOTE(['ValidationDetails']); }},
  ]},
+ {title:'Vote tab · Review & Submit',note:'Eligibility is checked on every focus, so a closed reason shows before any prompt. Submit signs with the device key and seals the record (two OS prompts — tap the prompt to pass, Cancel / outside to fail), then opens the receipt and asks once more to reveal it. The local note is always shown: Submit saves on this phone only.',items:[
+  {id:'ReviewSubmit', label:'Review & Submit · ready', sub:'all answered, one optional question blank — try Submit', go(){ S.selectionMap=sampleChoices(); VOTE(['Ballot','ReviewSubmit']); }},
+  {id:'review-checking', label:'Review & Submit · checking', sub:'"Checking whether you can vote…", Submit disabled', badge:'state', go(){ S.selectionMap=sampleChoices(); VOTE(['Ballot','ReviewSubmit']); S.elig='checking'; }},
+  {id:'review-required', label:'Review & Submit · required questions blank', sub:'blank list with Required tags + the reason, Submit disabled', badge:'state', go(){ VOTE(['Ballot','ReviewSubmit']); }},
+  {id:'review-all-blank', label:'Review & Submit · every question blank (allowed)', sub:'an all-optional ballot: the all-blank sentence', badge:'state', go(){ VOTE(['Ballot','ReviewSubmit']); S.reviewAllOptional=true; }},
+  {id:'review-stale', label:'Review & Submit · replaces a stale vote', sub:'the election changed after the saved vote', badge:'state', go(){ S.selectionMap=sampleChoices(); S.savedVote={state:'stale',revisionKnown:true}; VOTE(['Ballot','ReviewSubmit']); }},
+  {id:'review-saving', label:'Review & Submit · saving', sub:'"Saving your vote…", both buttons disabled', badge:'state', go(){ S.selectionMap=sampleChoices(); S.reviewPending=true; VOTE(['Ballot','ReviewSubmit']); }},
+  {id:'review-unavailable', label:'Review & Submit · ballot unavailable', sub:'read failed: election-unavailable reason', badge:'state', go(){ S.ballotRead='failed'; VOTE(['Ballot','ReviewSubmit']); }},
+  {id:'prompt-sign', label:'OS prompt · Confirm your vote', sub:'device-key signature (submit.signPrompt)', badge:'state', go(){ S.selectionMap=sampleChoices(); VOTE(['Ballot','ReviewSubmit']); S.reviewPending=true; S.bio={title:t('ballot','submit.signPrompt.title'),subtitle:t('ballot','submit.signPrompt.subtitle'),negative:t('ballot','submit.signPrompt.negativeButton'),ok:()=>{},cancel:()=>{ S.reviewPending=false; }}; }},
+  {id:'prompt-record', label:'OS prompt · Save your vote', sub:'sealing the record (submit.recordPrompt)', badge:'state', go(){ S.selectionMap=sampleChoices(); VOTE(['Ballot','ReviewSubmit']); S.reviewPending=true; S.bio={title:t('ballot','submit.recordPrompt.title'),subtitle:tp('ballot','submit.recordPrompt.subtitle'),negative:t('ballot','submit.recordPrompt.negativeButton'),ok:()=>{},cancel:()=>{ S.reviewPending=false; }}; }},
+ ]},
+ {title:'Vote tab · Review & Submit · refusal reasons',note:'One plain message per closed reason (not-registered and a rotated device key share one line). Reasons that name questions list them by title.',items:
+   Object.keys(REASON_KEY).filter(r=>r!=='device-key-rotated'&&r!=='required-unanswered'&&r!=='election-unavailable').map(r=>({id:'reason:'+r,label:'Reason · '+r,badge:'state',
+     go(){ S.selectionMap=sampleChoices(); S.reviewReason=r; VOTE(['Ballot','ReviewSubmit']); }}))},
+ {title:'Vote tab · Review & Submit · save failures',note:'The vote was NOT saved; the selections stay. One typed message per stage and reason, never the error text.',items:
+   Object.keys(FAILURE_COPY).map(f=>({id:'failure:'+f,label:'Failure · '+f,badge:'state',
+     go(){ S.selectionMap=sampleChoices(); S.reviewFailure=f; VOTE(['Ballot','ReviewSubmit']); }}))},
+ {title:'Vote tab · Vote saved (receipt)',note:'Status and loss lines come from the non-secret marker with no prompt. Choices and vote codes appear only after a reveal; Review & Submit\'s revealOnOpen does that once, every later visit needs the tap. Done pops to Home.',items:[
+  {id:'VoteReceipt', label:'Vote saved · hidden', sub:'status + loss + Send your vote + Show my choices', go(){ rcpt(); }},
+  {id:'receipt-revealed', label:'Vote saved · choices and vote codes', sub:'16 groups of 4 hex per ballot, Copy code + warning', badge:'state', go(){ rcpt(); S.receipt.revealed=true; }},
+  {id:'receipt-copied', label:'Vote saved · Copied toast', badge:'state', go(){ rcpt(); S.receipt.revealed=true; S.toast={message:t('ballot','receipt.copied'),id:1}; }},
+  {id:'receipt-copy-failed', label:'Vote saved · copying unavailable toast', badge:'state', go(){ rcpt(); S.receipt.revealed=true; S.copyUnavailable=true; S.toast={message:t('ballot','receipt.copyFailed'),id:1}; }},
+  {id:'receipt-bad-nonce', label:'Vote saved · a vote code that isn\'t 64 hex', sub:'the code area says unreadable', badge:'state', go(){ rcpt(); S.receipt.revealed=true; S.receipt.badNonce=true; }},
+  {id:'prompt-reveal', label:'OS prompt · Show your saved vote', sub:'receipt.prompt', badge:'state', go(){ rcpt(); S.receipt.busy=true; S.bio={title:t('ballot','receipt.prompt.title'),subtitle:tp('ballot','receipt.prompt.subtitle'),negative:t('ballot','receipt.prompt.negativeButton'),ok:()=>{ S.receipt.busy=false; S.receipt.revealed=true; },cancel:()=>{ S.receipt.busy=false; S.receipt.notice='canceled'; }}; }},
+  {id:'receipt-canceled', label:'Vote saved · reveal canceled', badge:'state', go(){ rcpt(); S.receipt.notice='canceled'; }},
+  {id:'receipt-bio-unavailable', label:'Vote saved · biometric unavailable', badge:'state', go(){ rcpt(); S.receipt.notice='biometric-unavailable'; }},
+  {id:'receipt-reveal-failed', label:'Vote saved · reveal failed', badge:'state', go(){ rcpt(); S.receipt.notice='failed'; }},
+  {id:'receipt-sent', label:'Vote saved · sent', sub:'statusSent + "Your vote has been sent to the election."', badge:'state', go(){ rcpt({state:'sent'}); }},
+  {id:'receipt-stale', label:'Vote saved · election changed', sub:'stale line; no send card', badge:'state', go(){ rcpt({state:'stale',revisionKnown:true}); }},
+  {id:'receipt-revunknown', label:'Vote saved · revision unknown', sub:'no send card', badge:'state', go(){ rcpt({state:'saved',revisionKnown:false}); }},
+  {id:'receipt-loading', label:'Vote saved · loading', badge:'state', go(){ rcpt(); S.receipt.load='loading'; }},
+  {id:'receipt-none', label:'Vote saved · nothing saved', badge:'state', go(){ rcpt({state:'none'}); }},
+  {id:'receipt-unreadable', label:'Vote saved · unreadable', badge:'state', go(){ rcpt({state:'unreadable'}); }},
+ ]},
+ {title:'Vote tab · Send your vote',note:'The vote goes out in a pool with at least 2 other voters through the authority\'s rendezvous, encrypted on this phone first. Tap Send my vote to walk it: open the saved vote (prompt) → waiting for voters → joined → confirm the group (prompt) → sent. Per-ballot lines show once any ballot has a status (labelled only when there are several ballots).',items:[
+  {id:'send-waiting-1', label:'Send · waiting (1 so far)', badge:'state', go(){ rcpt(); sendAt({phase:'waiting',size:1},true); }},
+  {id:'send-waiting-2', label:'Send · waiting (2 so far)', badge:'state', go(){ rcpt(); sendAt({phase:'waiting',size:2},true); }},
+  {id:'send-joined', label:'Send · joined a group', badge:'state', go(){ rcpt(); sendAt({phase:'joined',size:3},true); }},
+  {id:'send-confirming', label:'Send · confirm to send', sub:'with the consent prompt up', badge:'state', go(){ rcpt(); sendAt({phase:'confirming'},true); S.bio={title:t('ballot','send.consentPrompt.title'),subtitle:t('ballot','send.consentPrompt.subtitle'),negative:t('ballot','send.consentPrompt.negativeButton'),ok:()=>{},cancel:()=>{}}; }},
+  {id:'prompt-send-record', label:'OS prompt · Open your saved vote', sub:'send.recordPrompt', badge:'state', go(){ rcpt(); S.send.sending=true; S.bio={title:t('ballot','send.recordPrompt.title'),subtitle:tp('ballot','send.recordPrompt.subtitle'),negative:t('ballot','send.recordPrompt.negativeButton'),ok:()=>{},cancel:()=>{ S.send.sending=false; }}; }},
+  {id:'send-sent', label:'Send · sent', sub:'all ballots sent: the card collapses to the sent sentence', badge:'state', go(){ rcpt({state:'sent'}); }},
+  {id:'send-not-sent', label:'Send · not sent yet', sub:'Try again', badge:'state', go(){ rcpt(); sendAt({phase:'not-sent',reason:'failed'}); }},
+  {id:'send-not-sent-closed', label:'Send · not sent, voting closed', badge:'state', go(){ rcpt(); sendAt({phase:'not-sent',reason:'voting-closed'}); }},
+  {id:'send-two-ballots', label:'Send · two ballots, one sent', sub:'"Ballot 1: …" / "Ballot 2: …"', badge:'state', go(){ rcpt(); S.receiptBallots=['fixture-ballot-1','fixture-ballot-2']; S.send.statuses={'fixture-ballot-1':{phase:'sent'},'fixture-ballot-2':{phase:'waiting',size:2}}; S.send.sending=true; }},
+ ].concat(Object.keys(OUTCOME_KEY).filter(o=>o!=='rendezvous-unreachable'&&o!=='unreadable').map(o=>({id:'outcome:'+o,label:'Send · '+o,badge:'state',go(){ rcpt(); S.send.outcome=o; }})))},
  {title:'Timeline tab',note:'Ten stage rows derived from the election timeline. Instants follow the canonical fixture spacing, re-anchored so the named stage is current now. The dashed DEV clock control at the top works: tap it to step through every present stage and the final-day probe.',items:[
   {id:'TimelineHome', label:'Timeline · voting period current', sub:'Vote now + countdown (≥24 h: days)', go(){ TL(); }},
   {id:'tl-all-future', label:'Timeline · nothing has happened yet', sub:'no current row, hollow dots, Preview ballot', badge:'state', go(){ S.tlScenario='allFuture'; TL(); }},
   {id:'tl-stage-registrationEnds', label:'Timeline · registration ends current', sub:'panel + row "Edit registration"', badge:'state', go: stageScen('registrationEnds')},
   {id:'tl-stage-ballotsFinal', label:'Timeline · ballots finalized current', badge:'state', go: stageScen('ballotsFinal')},
-  {id:'tl-stage-accruingVotes', label:'Timeline · accruing votes current', sub:'View submission on the voting row', badge:'state', go: stageScen('accruingVotes')},
+  {id:'tl-stage-accruingVotes', label:'Timeline · accruing votes current', sub:'no saved vote: the voting row offers nothing', badge:'state', go: stageScen('accruingVotes')},
   {id:'tl-stage-hashingVotes', label:'Timeline · hashing votes current', badge:'state', go: stageScen('hashingVotes')},
   {id:'tl-stage-releasingKeys', label:'Timeline · releasing keys current', sub:'View Keyholders outline button', badge:'state', go: stageScen('releasingKeys')},
   {id:'tl-stage-tallyingStarts', label:'Timeline · tallying current', badge:'state', go: stageScen('tallyingStarts')},
@@ -2367,6 +3435,30 @@ const DEV_GROUPS=[
   {id:'tl-read-failed', label:'Timeline · read failed', sub:'Try again re-reads', badge:'state', go(){ S.tlRead='failed'; TL(); }},
   {id:'tl-ballot', label:'Ballot pushed from Timeline', sub:'Timeline tab stays highlighted; Back returns to the rail', badge:'state', go(){ TL(['Ballot']); }},
   {id:'tl-register', label:'Register flow from Timeline', sub:'tab bar hidden on the same routes', badge:'state', go(){ S.draft=Object.assign({},EMPTY_DRAFT); TL(['RegistrationHome','RegisterPersonal']); }},
+  {id:'tl-join', label:'Join a network from Timeline', sub:'route closure: registered on the Timeline stack too', badge:'state', go(){ TL(['RegistrationHome','JoinNetwork']); }},
+ ]},
+ {title:'Timeline tab · saved vote + results',note:'The Voting Period panel shows the same saved-vote line as Home (no link there); the row links "View saved vote" from the current row as well as the past one. Tallying (current or past) offers View results.',items:[
+  {id:'tl-saved', label:'Timeline · vote saved, voting open', sub:'panel line + View saved vote; Vote now hidden', badge:'state', go(){ S.savedVote={state:'saved',revisionKnown:true}; TL(); }},
+  {id:'tl-sent', label:'Timeline · vote sent', badge:'state', go(){ S.savedVote={state:'sent'}; TL(); }},
+  {id:'tl-stale', label:'Timeline · election changed after the vote', sub:'Vote now offered again + View saved vote', badge:'state', go(){ S.savedVote={state:'stale',revisionKnown:true}; TL(); }},
+  {id:'tl-unreadable', label:'Timeline · saved vote unreadable', badge:'state', go(){ S.savedVote={state:'unreadable'}; TL(); }},
+  {id:'tl-saved-past', label:'Timeline · voting closed with a saved vote', sub:'View saved vote on the past row', badge:'state', go(){ S.savedVote={state:'sent'}; S.tlScenario='stage:accruingVotes'; TL(); }},
+  {id:'tl-receipt', label:'Vote saved pushed from Timeline', sub:'Done pops back to the rail', badge:'state', go(){ S.savedVote={state:'saved',revisionKnown:true}; S.savedChoices=sampleChoices(); TL(['VoteReceipt']); }},
+  {id:'tl-results-row', label:'Timeline · tallying current', sub:'View results outline button', badge:'state', go(){ S.savedVote={state:'sent'}; S.tlScenario='stage:tallyingStarts'; TL(); }},
+ ]},
+ {title:'Timeline tab · Results',note:'Counted on this phone from the public key shares and the vote blocks it has received; nothing is written. Recounts quietly when a share, block or the published tally arrives; Refresh counts again with the loading line.',items:[
+  {id:'Results', label:'Results · counted, published + matches', sub:'valid votes, not counted, bars per option, the officer\'s matching count', go(){ resAt('tallied','matches'); }},
+  {id:'results-not-published', label:'Results · counted, not published yet', badge:'state', go(){ resAt('tallied','none'); }},
+  {id:'results-differs', label:'Results · published count differs', sub:'this phone may not have every vote block yet', badge:'state', go(){ resAt('tallied','differs'); }},
+  {id:'results-invalid', label:'Results · published count fails its checks', badge:'state', go(){ resAt('tallied','invalid'); }},
+  {id:'results-no-blocks', label:'Results · no vote blocks yet', badge:'state', go(){ resAt('no-blocks','none'); }},
+  {id:'results-no-ballots', label:'Results · no confirmed ballot', badge:'state', go(){ resAt('no-ballots','unknown'); }},
+  {id:'results-awaiting', label:'Results · locked, 1 of 3 keys released', badge:'state', go(){ resAt('awaiting-keys'); }},
+  {id:'results-no-key', label:'Results · locked, no election key yet', badge:'state', go(){ resAt('awaiting-nokey'); }},
+  {id:'results-unavailable', label:'Results · couldn\'t be worked out', sub:'shows the raw reason code', badge:'state', go(){ resAt('unavailable'); }},
+  {id:'results-loading', label:'Results · counting', badge:'state', go(){ resAt('loading'); }},
+  {id:'results-failed', label:'Results · couldn\'t be read', badge:'state', go(){ resAt('failed'); }},
+  {id:'results-no-election', label:'Results · no election on this phone', badge:'state', go(){ resAt('no-election'); }},
  ]},
  {title:'Timeline tab · Keyholders',items:[
   {id:'Keyholders', label:'Keyholders · names only', sub:'released count hidden: nothing measured', go(){ TL(['Keyholders']); }},
@@ -2377,12 +3469,16 @@ const DEV_GROUPS=[
  ]},
  {title:'Registration tab',items:[
   {id:'RegistrationHome', label:'Registration home', sub:'not-registered card + "Already registered on another device?"', go(){ REG(); }},
-  {id:'registered', label:'Registration home · registered', sub:'dev toggle: green card + Valid through + update block', badge:'dev', go(){ S.draft=Object.assign({},SAMPLE_DRAFT); S.isRegistered.Registration=true; S.registeredAt.Registration=new Date().toISOString(); REG(); }},
+  {id:'reg-no-network', label:'Registration home · no network open', sub:'"Join your election authority\'s network" above the card', badge:'state', go(){ S.hasNetwork=false; REG(); }},
+  {id:'registered', label:'Registration home · registered (engine read)', sub:'the office approved this device: no date, so "Valid through" is blank', badge:'state', go(){ S.regEngine=true; S.codeAvail='available'; REG(); }},
+  {id:'registered-dev', label:'Registration home · registered (dev toggle)', sub:'identity line + dated Valid through + update block', badge:'dev', go(){ S.draft=Object.assign({},SAMPLE_DRAFT); S.isRegistered.Registration=true; S.registeredAt.Registration=new Date().toISOString(); REG(); }},
   {id:'code-available', label:'Code available · "Show my registration code"', badge:'state', go(){ S.codeAvail='available'; REG(); }},
   {id:'code-revealed', label:'Code revealed', sub:'fit-to-width code card', badge:'state', go(){ S.codeAvail='available'; S.codeRevealed='code'; REG(); }},
   {id:'code-revealed-unavailable', label:'Code revealed · unavailable', sub:'re-read failed on tap', badge:'state', go(){ S.codeAvail='available'; S.codeRevealed='unavailable'; REG(); }},
   {id:'code-not-on-device', label:'Code not available on this device', sub:'not-sent / not-holder', badge:'state', go(){ S.codeAvail='not-sent'; REG(); }},
-  {id:'code-none', label:'Code read unavailable / still reading', sub:'nothing rendered below the card', badge:'state', go(){ S.codeAvail=null; REG(); }},
+  {id:'code-read-failed', label:'Code read failed', sub:'"…isn\'t available right now" + Try Again', badge:'state', go(){ S.codeAvail='read-failed'; REG(); }},
+  {id:'code-read-failed-unknown', label:'Code read failed before the registration was known', sub:'+ the continue-on-this-device entry, never a dead end', badge:'state', go(){ S.codeAvail='read-failed-unknown'; REG(); }},
+  {id:'code-none', label:'Code · checking', sub:'"Checking your registration…" (unsettled read)', badge:'state', go(){ S.codeAvail=null; REG(); }},
   {id:'RegistrationInfo', label:'Registration info (?)', sub:"presentation:'modal' · live status + deadline + how it works", go(){ REG(['RegistrationInfo']); }},
   {id:'ri-pending', label:'Registration info · pending', badge:'state', go(){ S.regStatus='pending'; REG(['RegistrationInfo']); }},
   {id:'ri-not', label:'Registration info · not registered', badge:'state', go(){ S.regStatus='notRegistered'; REG(['RegistrationInfo']); }},
@@ -2399,15 +3495,25 @@ const DEV_GROUPS=[
   {id:'errors-address', label:'Step 2 · inline field errors', badge:'state', go(){ S.draft=Object.assign({},SAMPLE_DRAFT,{addressLine1:'',party:''}); S.errors=validateAddressParty(S.draft); REG(['RegisterPersonal','RegisterAddressParty']); }},
   {id:'party-sheet', label:'Step 2 · party dropdown sheet', badge:'state', go(){ S.draft=Object.assign({},SAMPLE_DRAFT); S.sheet=true; REG(['RegisterPersonal','RegisterAddressParty']); }},
   {id:'RegisterConfirm', label:'Register · Step 3 Confirm', go(){ S.draft=Object.assign({},SAMPLE_DRAFT); REG(['RegisterPersonal','RegisterAddressParty','RegisterConfirm']); }},
-  {id:'Confirmation', label:'Confirmation (Face ID)', go(){ confirmAt(); }},
+  {id:'Confirmation', label:'Confirmation (Face ID)', sub:'tap Confirm: submit → wait for the office → Face ID → pending', go(){ confirmAt(); }},
+  {id:'confirm-waiting', label:'Confirmation · waiting for the election office', sub:'spinner + Stop waiting; the caption is hidden', badge:'state', go(){ confirmAt({waiting:true,busy:true}); }},
+  {id:'confirm-waiting-notshared', label:'Confirmation · waiting, request not on the network yet', badge:'state', go(){ confirmAt({waiting:true,busy:true,notShared:true}); }},
+  {id:'confirm-wait-stopped', label:'Confirmation · stopped waiting', sub:'Try Again re-submits idempotently', badge:'state', go(){ confirmAt({failure:'wait-stopped'}); }},
+  {id:'confirm-pending-code', label:'Confirmation · pending + registration code', sub:'re-reads the status every 10 s; Back to registration', badge:'state', go(){ confirmAt({pending:true,codeAvail:'available'}); }},
+  {id:'confirm-pending-notshared', label:'Confirmation · pending, request not on the network yet', badge:'state', go(){ confirmAt({pending:true,codeAvail:'available',notShared:true}); }},
+  {id:'confirm-pending-nocode', label:'Confirmation · pending, code not on this device', badge:'state', go(){ confirmAt({pending:true,codeAvail:'not-sent'}); }},
+  {id:'confirm-pending-readfailed', label:'Confirmation · pending, code read failed', sub:'code.unavailable + Try Again', badge:'state', go(){ confirmAt({pending:true,codeAvail:'read-failed'}); }},
+  {id:'confirm-pending', label:'Confirmation · pending (code still reading)', badge:'state', go(){ confirmAt({pending:true,codeAvail:null}); }},
+  {id:'confirm-pending-expired', label:'Confirmation · pending, 10-min poll ran out', sub:'"Still waiting… Open this screen again later"', badge:'state', go(){ confirmAt({pending:true,codeAvail:'available',pollExpired:true}); }},
+  {id:'confirm-registered', label:'Confirmation · registered', sub:'the office approved: "Your device is registered." + Done', badge:'state', go(){ confirmAt({pending:true,outcome:'registered'}); }},
   {id:'confirm-action', label:'Confirmation · biometric not enrolled', sub:'setup CTA + Try Again', badge:'state', go(){ confirmAt({failure:'recoverable-action'}); }},
   {id:'confirm-transient', label:'Confirmation · transient failure', badge:'state', go(){ confirmAt({failure:'recoverable-transient'}); }},
+  {id:'confirm-intake', label:'Confirmation · couldn\'t reach the authority', sub:'intake unavailable + Try Again', badge:'state', go(){ confirmAt({failure:'intake-unavailable'}); }},
+  {id:'confirm-no-election', label:'Confirmation · no election to register for', sub:'no CTA', badge:'state', go(){ confirmAt({failure:'no-election'}); }},
   {id:'confirm-terminal', label:'Confirmation · terminal (no retry)', badge:'state', go(){ confirmAt({failure:'terminal'}); }},
-  {id:'confirm-pending-code', label:'Confirmation · pending + registration code', sub:'honest pending state; never pops, never claims success', badge:'state', go(){ confirmAt({pending:true,codeAvail:'available'}); }},
-  {id:'confirm-pending-nocode', label:'Confirmation · pending, code not on this device', badge:'state', go(){ confirmAt({pending:true,codeAvail:'not-sent'}); }},
-  {id:'confirm-pending', label:'Confirmation · pending (code read unavailable)', badge:'state', go(){ confirmAt({pending:true,codeAvail:null}); }},
+  {id:'confirm-identity-lost', label:'Confirmation · identity can\'t be unlocked', sub:'the recovery view replaces the screen', badge:'state', go(){ confirmAt({failure:'identity-lost'}); }},
  ]},
- {title:'Registration tab · Continue on this device',note:'Reached from "Already registered on another device?". Pending is non-dismissible: no close X, and hardware Back is swallowed (try the ◁ key).',items:[
+ {title:'Registration tab · Continue on this device',note:'Reached from "Already registered on another device?". Pending without a failure is non-dismissible: no close X and hardware Back is swallowed (try the ◁ key); Check Back Later is the explicit way out.',items:[
   {id:'ContinueOnAnotherDevice', label:'Continue · resolving', sub:'provisions the device key, resumes from replicated rows', go(){ cadAt('resolving'); }},
   {id:'cad-code', label:'Continue · enter code', badge:'state', go(){ cadAt('code'); }},
   {id:'cad-code-error', label:'Continue · code required', badge:'state', go(){ cadAt('code',{codeError:t('continuity','newDevice.codeRequired')}); }},
@@ -2415,17 +3521,40 @@ const DEV_GROUPS=[
   {id:'cad-identity', label:'Continue · confirm identity (no code)', badge:'state', go(){ cadAt('identity'); }},
   {id:'cad-identity-errors', label:'Continue · identity field errors', badge:'state', go(){ cadAt('identity',{idErrors:{firstName:'required',lastName:'required'}}); }},
   {id:'cad-restart', label:'Continue · start a new registration', badge:'state', go(){ cadAt('restart'); }},
-  {id:'cad-pending', label:'Continue · waiting for approval', badge:'state', go(){ cadAt('pending'); }},
-  {id:'cad-pending-action', label:'Continue · pending · biometric not enrolled', badge:'state', go(){ cadAt('pending',{failure:'recoverable-action'}); }},
+  {id:'cad-pending', label:'Continue · waiting for approval', sub:'+ Check Back Later', badge:'state', go(){ cadAt('pending'); }},
+  {id:'cad-pending-action', label:'Continue · pending · biometric not enrolled', sub:'close X returns with the failure', badge:'state', go(){ cadAt('pending',{failure:'recoverable-action'}); }},
   {id:'cad-pending-transient', label:'Continue · pending · transient failure', badge:'state', go(){ cadAt('pending',{failure:'recoverable-transient'}); }},
-  {id:'cad-pending-terminal', label:'Continue · pending · terminal', sub:'no retry, no close', badge:'state', go(){ cadAt('pending',{failure:'terminal'}); }},
+  {id:'cad-pending-intake', label:'Continue · pending · couldn\'t reach the authority', badge:'state', go(){ cadAt('pending',{failure:'intake-unavailable'}); }},
+  {id:'cad-pending-terminal', label:'Continue · pending · terminal', sub:'no retry; Back to Registration', badge:'state', go(){ cadAt('pending',{failure:'terminal'}); }},
+  {id:'cad-identity-lost', label:'Continue · identity can\'t be unlocked', sub:'recovery view + Back to Registration', badge:'state', go(){ cadAt('pending',{failure:'identity-lost'}); }},
   {id:'cad-approved', label:'Continue · device approved', badge:'state', go(){ cadAt('approved'); }},
   {id:'cad-rejected', label:'Continue · request not approved', badge:'state', go(){ cadAt('rejected'); }},
  ]},
  {title:'Scan · Settings',items:[
   {id:'ScanHome', label:'Scan', sub:'branded "coming soon" placeholder', go(){ nav('Scan',['ScanHome']); }},
-  {id:'SettingsHome', label:'Settings', sub:'EN / ES language toggle', go(){ nav('Settings',['SettingsHome']); }},
+  {id:'SettingsHome', label:'Settings', sub:'EN / ES language toggle + Join a network', go(){ nav('Settings',['SettingsHome']); }},
  ]},
+ {title:'Join a network',note:'On the Settings, Registration and Timeline stacks. Paste fills the field with a sample code (the clipboard is the OS\'s); Scan opens the camera modal — tap the viewfinder to read the authority\'s QR. A scan only fills the field: joining is always the separate Join tap.',items:[
+  {id:'JoinNetwork', label:'Join a network · empty', sub:'Scan QR code, Paste, Join disabled', go(){ joinAt(); }},
+  {id:'join-preview', label:'Join · code pasted, fingerprint preview', sub:'network name + fingerprint + "check it matches"', badge:'state', go(){ joinAt({text:SAMPLE_JOIN_CODE}); }},
+  {id:'join-scanned', label:'Join · code scanned', sub:'"Code scanned. Check the network name and fingerprint below…"', badge:'state', go(){ joinAt({text:SAMPLE_JOIN_CODE,scanNotice:'scanned'}); }},
+  {id:'join-invalid', label:'Join · not a valid join code', sub:'a vtjoin code with a broken body', badge:'state', go(){ joinAt({text:'vtjoin2.eyJ2IjoyLCJuYW1l'}); }},
+  {id:'join-not-join-code', label:'Join · not a VoteTorrent join code', badge:'state', go(){ joinAt({text:'https://example.org/some-link'}); }},
+  {id:'join-newer', label:'Join · needs a newer app', badge:'state', go(){ joinAt({text:'vtjoin3.eyJ2IjozfQ'}); }},
+  {id:'join-older', label:'Join · made by an older version', badge:'state', go(){ joinAt({text:SAMPLE_OLDER_CODE}); }},
+].concat(['admitting','syncing','verifying'].map(s=>({id:'join-step:'+s,label:'Join · joining · '+s,badge:'state',go(){ joinAt({text:SAMPLE_JOIN_CODE,phase:'joining',step:s}); }})))
+ .concat([
+  {id:'join-joined', label:'Join · joined', sub:'"You joined …" + Done', badge:'state', go(){ joinAt({phase:'joined',joinedName:NETWORK_NAME}); }},
+  {id:'join-camera-none', label:'Join · no camera', sub:'Scan disabled', badge:'state', go(){ joinAt({availability:'none'}); }},
+  {id:'join-camera-blocked', label:'Join · camera access turned off', sub:'Scan disabled + Open Settings', badge:'state', go(){ joinAt({availability:'blocked'}); }},
+  {id:'join-camera-denied', label:'Join · camera access not allowed', badge:'state', go(){ joinAt({scanNotice:'denied'}); }},
+  {id:'join-camera-failed', label:'Join · camera could not start', badge:'state', go(){ joinAt({scanNotice:'failed'}); }},
+  {id:'scan-starting', label:'Scanner · starting the camera', badge:'state', go(){ joinAt({scanner:{phase:'starting',slow:false,banner:false}}); }},
+  {id:'scan-scanning', label:'Scanner · scanning', sub:'tap the viewfinder to accept a code', badge:'state', go(){ joinAt({scanner:{phase:'scanning',slow:false,banner:false}}); }},
+  {id:'scan-slow', label:'Scanner · slow (after 8 s)', badge:'state', go(){ joinAt({scanner:{phase:'scanning',slow:true,banner:false}}); }},
+  {id:'scan-not-join-code', label:'Scanner · not a join code banner', badge:'state', go(){ joinAt({scanner:{phase:'scanning',slow:false,banner:true}}); }},
+ ]).concat(Object.keys(JOIN_FAILURE_KEY).filter(k=>k!=='invitation-malformed'&&k!=='invitation-older-version').map(k=>({id:'join-fail:'+k,label:'Join · refused · '+k,badge:'state',
+   go(){ joinAt({text:SAMPLE_JOIN_CODE,phase:'failed',failKey:JOIN_FAILURE_KEY[k]}); }})))},
 ];
 const DEV_INDEX={}; DEV_GROUPS.forEach(g=>g.items.forEach(i=>{ DEV_INDEX[i.id]=i; }));
 function buildDrawer(){
@@ -2440,17 +3569,23 @@ function buildDrawer(){
        +'<button data-dev="lang:en" class="'+(S.lang==='en'?'on':'')+'">English</button>'
        +'<button data-dev="lang:es" class="'+(S.lang==='es'?'on':'')+'">Español</button>'
      +'</div>'
-     +'<div class="dnote" style="margin-top:10px">Every i18n namespace (common, home, ballot, registration, scan, settings, timeline, continuity) is complete in Spanish, so nothing falls back to English through t(). '
-       +'English that remains under Español is English in the app too: string literals the source renders without t() — the Confirmation "Try Again" button and pending sentence, the boot screen\'s error / Try Again / Start Fresh, and the dev-only cycler and toggle labels. '
+     +'<div class="seg" style="margin-top:8px">'
+       +'<button data-plat="ios" class="'+(S.platform==='ios'?'on':'')+'">iOS copy (Face ID)</button>'
+       +'<button data-plat="android" class="'+(S.platform==='android'?'on':'')+'">Android copy</button>'
+     +'</div>'
+     +'<div class="dnote" style="margin-top:10px">Every i18n namespace (common, home, ballot, registration, scan, settings, join, timeline, continuity) is complete in Spanish, so nothing falls back to English through t(). '
+       +'The boot screens, the Confirmation buttons and the pending sentence are localized now; the only English left under Español is the dev-only cycler and toggle labels. '
        +'Ballot text, names and the "Learn about" detail are authority-published data and are never translated.</div>'
-     +'<div class="dnote">The ◁ key in the bar under the tabs is Android hardware Back: dialogs close first, then the focused stack pops, then a non-first tab returns to Vote.</div></div>'
+     +'<div class="dnote">The platform switch picks the biometric copy only (Platform.OS): the base keys name Face ID, the \'.android\' siblings the fingerprint. The OS prompt is drawn as a stand-in — tap the Face ID square or the fingerprint sensor to pass, Cancel or outside to cancel. The frame stays the Pixel 8 chrome.</div>'
+     +'<div class="dnote">The ◁ key in the bar under the tabs is Android hardware Back: an OS prompt or the scanner closes first, then dialogs, then the focused stack pops, then a non-first tab returns to Vote.</div></div>'
      +DEV_GROUPS.map(g=>'<div class="dgroup"><h3>'+esc(g.title)+'</h3>'
         +(g.note?'<div class="dnote">'+esc(g.note)+'</div>':'')
         +g.items.map(i=>'<button class="ditem" data-dev="'+i.id+'"><span style="flex:1;min-width:0">'+esc(i.label)
           +(i.sub?'<span class="dsub">'+esc(i.sub)+'</span>':'')+'</span>'+badge(i.badge)+'</button>').join('')
       +'</div>').join('')
      +'<div class="dgroup"><h3>Removed from the app</h3><div class="dnote">The ElectionInfo / OfficeInfo / CandidateInfo routes and the shared PlaceholderModal are gone from source: '
-       +'"Learn about this …" is an in-place InfoDialog carrying the authority-published detail, and RegistrationInfo is now a real screen.</div></div>'
+       +'"Learn about this …" is an in-place InfoDialog carrying the authority-published detail, and RegistrationInfo is now a real screen. '
+       +'Review & Submit\'s mock "submitted" view and the Home card\'s "You voted" button are gone too: a saved vote lands on the Vote saved receipt, and the card shows the saved-vote line instead.</div></div>'
    +'</div>';
 }
 ACTIONS['close-drawer']=()=>{ document.getElementById('devdrawer').classList.remove('open'); };
