@@ -131,3 +131,90 @@ describe("ElectionsScreen peer-unavailable reads (62-96)", () => {
 		expect(allText(tr)).not.toContain("TidHighWater");
 	});
 });
+
+// 62 session 1 observation 3: on a cohort-unreachable network the tab said "No current elections".
+// The empty copy rendered before any load had succeeded, and an older load that settled after a newer
+// one overwrote its outcome (mount, focus and strand-change loads all race).
+describe("ElectionsScreen never claims an empty list it has not loaded", () => {
+	beforeEach(() => {
+		mockHasNetwork = true;
+		mockGetElections = jest.fn();
+	});
+
+	function deferred<T>() {
+		let resolve!: (v: T) => void;
+		let reject!: (e: unknown) => void;
+		const promise = new Promise<T>((res, rej) => {
+			resolve = res;
+			reject = rej;
+		});
+		return { promise, resolve, reject };
+	}
+
+	const EMPTY_KEYS = ["noCurrentElections", "noProposedElectionsCurrently", "noHistoryFound"];
+
+	it("E-5: a cohort-unreachable first load shows the notice and no empty-list copy", async () => {
+		mockGetElections.mockRejectedValue(peerError());
+		const tr = await renderScreen();
+		expect(noticeCount(tr)).toBeGreaterThan(0);
+		for (const key of EMPTY_KEYS) expect(allText(tr)).not.toContain(key);
+	});
+
+	it("E-6: a generic first-load failure shows the error and no empty-list copy", async () => {
+		mockGetElections.mockRejectedValue(new Error("constraint exploded: secret-table"));
+		const tr = await renderScreen();
+		expect(allText(tr)).toContain("electionsLoadFailed");
+		for (const key of EMPTY_KEYS) expect(allText(tr)).not.toContain(key);
+	});
+
+	it("E-7: while the first load is pending, no empty-list copy", async () => {
+		mockGetElections.mockImplementation(() => new Promise(() => undefined));
+		const tr = await renderScreen();
+		for (const key of EMPTY_KEYS) expect(allText(tr)).not.toContain(key);
+	});
+
+	it("E-8: a successful empty load shows the empty-list copy", async () => {
+		mockGetElections.mockResolvedValue([]);
+		const tr = await renderScreen();
+		expect(allText(tr)).toContain("noCurrentElections");
+		expect(allText(tr)).toContain("noProposedElectionsCurrently");
+		expect(noticeCount(tr)).toBe(0);
+	});
+
+	it("E-9: an older load that succeeds after a newer peer failure does not clear the notice", async () => {
+		const first = deferred<unknown[]>();
+		const second = deferred<unknown[]>();
+		mockGetElections.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+		const tr = await renderScreen();
+		expect(mockGetElections).toHaveBeenCalledTimes(2); // mount load + focus load
+		await renderer.act(async () => {
+			second.reject(peerError());
+		});
+		await flush();
+		expect(noticeCount(tr)).toBeGreaterThan(0);
+		await renderer.act(async () => {
+			first.resolve([]);
+		});
+		await flush();
+		expect(noticeCount(tr)).toBeGreaterThan(0);
+		expect(allText(tr)).not.toContain("noCurrentElections");
+	});
+
+	it("E-10: an older load that fails after a newer success does not raise the notice", async () => {
+		const first = deferred<unknown[]>();
+		const second = deferred<unknown[]>();
+		mockGetElections.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+		const tr = await renderScreen();
+		await renderer.act(async () => {
+			second.resolve([]);
+		});
+		await flush();
+		await renderer.act(async () => {
+			first.reject(peerError());
+		});
+		await flush();
+		expect(noticeCount(tr)).toBe(0);
+		expect(allText(tr)).toContain("noCurrentElections");
+	});
+});
+
