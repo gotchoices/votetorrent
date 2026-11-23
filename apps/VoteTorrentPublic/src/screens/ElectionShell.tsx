@@ -303,20 +303,18 @@ export function ElectionShell({ search, at = null, election = null, source, conf
 				{/* D-02's addressed-but-not-held sentence. Distinct from the
 				    index's own empty label, which answers "this browser holds
 				    no elections AT ALL"; this one answers "this browser holds
-				    no copy of the election you asked for". Deliberately
-				    UNCLASSED: 54-09 declared no selector for this block, and
-				    css-class-coverage reports every rendered class with no
-				    matching selector as missing, so an invented name would be
-				    a red gate — an unclassed element inherits the section's
-				    own type and colour instead. 54-13 may give it a class
-				    TOGETHER WITH its selector. */}
-				{saysNotHeld ? <h2>{t('public.election.notHeld.title')}</h2> : null}
+				    no copy of the election you asked for". The bodies are
+				    unclassed text; the four failure/looking titles below
+				    carry `.election-notice__title` (app.css), which sizes them
+				    under the election title instead of at the browser's
+				    default h2 size, larger than the title itself. */}
+				{saysNotHeld ? <h2 className="election-notice__title">{t('public.election.notHeld.title')}</h2> : null}
 				{saysNotHeld ? <p>{t('public.election.notHeld.body')}</p> : null}
-				{failedKind === 'unreachable' ? <h2>{t('public.election.unreachable.title')}</h2> : null}
+				{failedKind === 'unreachable' ? <h2 className="election-notice__title">{t('public.election.unreachable.title')}</h2> : null}
 				{failedKind === 'unreachable' ? <p>{t('public.election.unreachable.body')}</p> : null}
-				{failedKind === 'notOnNetwork' ? <h2>{t('public.election.notOnNetwork.title')}</h2> : null}
+				{failedKind === 'notOnNetwork' ? <h2 className="election-notice__title">{t('public.election.notOnNetwork.title')}</h2> : null}
 				{failedKind === 'notOnNetwork' ? <p>{t('public.election.notOnNetwork.body')}</p> : null}
-				{stillLooking ? <h2>{t('public.election.fetching.title')}</h2> : null}
+				{stillLooking ? <h2 className="election-notice__title">{t('public.election.fetching.title')}</h2> : null}
 				{stillLooking ? <p>{t('public.election.fetching.body')}</p> : null}
 				{/* The status banner: the tone chip and the headline sentence,
 				    and NEITHER MAY RENDER ALONE (app.css's own markup
