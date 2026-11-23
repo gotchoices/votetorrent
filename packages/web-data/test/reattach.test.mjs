@@ -244,6 +244,26 @@ test('attachNetworkDb: explicit expectedCounts below live attach, and leave the 
 	assert.deepEqual((await readRowCountsRecord(HASH, storage))?.counts, stale);
 });
 
+test('attachNetworkDb: a grown table still attaches when storage refuses to raise the floor (best-effort rewrite)', async () => {
+	const storage = makeFakeStorage();
+	const stale = { ...EXPECTED_COUNTS, Officer: 0 };
+	await writeRowCounts(HASH, stale, storage);
+	let setAttempts = 0;
+	const refusing = {
+		...storage,
+		setItem: () => {
+			setAttempts += 1;
+			throw new Error('QuotaExceededError (simulated)');
+		},
+	};
+	const db = await attachNetworkDb(HASH, { storage: refusing });
+	assert.deepEqual(await readRowCounts(db, SEED_TABLES), EXPECTED_COUNTS);
+	await closeNetworkDb(db);
+	assert.equal(setAttempts, 1, 'the raise is attempted exactly once');
+	// The old, lower floor still stands.
+	assert.deepEqual((await readRowCountsRecord(HASH, storage))?.counts, stale);
+});
+
 test('assertRowCounts: a grown table passes and returns the live count; a shrunk table throws', async () => {
 	const db = await attachNetworkDb(HASH, { expectedCounts: EXPECTED_COUNTS });
 	try {
