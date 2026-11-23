@@ -468,9 +468,11 @@ export const COPY = Object.freeze({
 	// human sentence: what is missing, and enough of why that a reader who
 	// stops here is not misled.
 	// `.detail` renders only after a reader opens the details toggle. It
-	// carries the technical reason and the specification citation, which is
-	// why a schema table name may appear in a `.detail` value and appears in
-	// no `.sentence` and no `.label`.
+	// carries the technical reason, which is why a schema table name may
+	// appear in a `.detail` value and appears in no `.sentence` and no
+	// `.label`. The specification citation for each detail is the comment
+	// beside it, never the value: a visitor cannot open the repo, so a path
+	// like doc/election.md:97 on the page is noise (2026-11-23).
 	//
 	// The internal enumeration these gaps come from letters them A through
 	// G. No letter appears in any key name or any value in this table --
@@ -479,16 +481,20 @@ export const COPY = Object.freeze({
 	// the source, not information.
 	'public.gap.receipt.sentence':
 		"There's no way on this page to confirm your own ballot was received — that check depends on a private receipt only you hold.",
+	// Spec: doc/election.md:97.
 	'public.gap.receipt.detail':
-		'The vote nonce is held privately by the voter; nothing on the network can be checked against it (doc/election.md:97).',
+		'The vote nonce is held privately by the voter; nothing on the network can be checked against it.',
 	'public.gap.merkle.sentence': "The cryptographic record tying votes together isn't published here.",
-	'public.gap.merkle.detail': 'No Block or MerkleNode table exists yet (doc/election.md:114).',
+	// Spec: doc/election.md:114.
+	'public.gap.merkle.detail': 'No Block or MerkleNode table exists yet.',
 	'public.gap.validation.sentence': 'No validation report or error-margin figure is available here.',
+	// Spec: doc/election.md:134-153.
 	'public.gap.validation.detail':
-		'No Validation table exists, and no error-margin statistic is recorded anywhere (doc/election.md:134-153).',
+		'No Validation table exists, and no error-margin statistic is recorded anywhere.',
 	'public.gap.certification.sentence': "No signed certification of this election's outcome is available here.",
+	// Spec: doc/election.md:155-159.
 	'public.gap.certification.detail':
-		'No Certification table exists; each authority is meant to publish one, but nothing stores it (doc/election.md:155-159).',
+		'No Certification table exists; each authority is meant to publish one, but nothing stores it.',
 
 	// Key release -- the one entry in the outcome group that is FILLED
 	// rather than gapped, and the only fact on this page carrying live data
@@ -518,8 +524,9 @@ export const COPY = Object.freeze({
 	// the call site to pass the read's `.total` reintroduces the "0 of 0"
 	// defect, and this comment is what stands between them and it.
 	'public.fact.keyrelease.sentence': '{{released}} of {{total}} keyholders have released their keys.',
+	// Spec: doc/election.md:118-122.
 	'public.fact.keyrelease.detail':
-		"This counts keyholders whose key-release task has completed; it doesn't show which keyholder released a key or when (doc/election.md:118-122).",
+		"This counts keyholders whose key-release task has completed; it doesn't show which keyholder released a key or when.",
 	// Fail-closed disclosure for the aggregate above, bound by name at its
 	// render site (it cannot be the entry's `emptyKey`: that field is null
 	// on this fact and `facts.js` is a landed file, so this key sits outside

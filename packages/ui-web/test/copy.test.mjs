@@ -1367,3 +1367,17 @@ test('sanity: the 56-34 delta is 4 keys, collides with nothing earlier, carries 
 	assert.equal(COPY['public.election.notOnNetwork.body'], 'The network answered, but it returned no election matching this link, so there is nothing here to show.');
 	for (const key of NEW_56_34_KEYS) assert.ok(!/doesn't hold/i.test(COPY[key]), `${key} repeats the not-held sentence`);
 });
+
+// 2026-11-23 todo: the public page's gap and key-release details ended with a repo path
+// ("(doc/election.md:114)"). A visitor cannot open the repo; the citation belongs in a comment.
+const REPO_PATH = /\b(?:doc|docs|src|packages|apps|scripts)\/[\w./-]+|\b[\w-]+\.(?:md|tsx?|mjs|js|qsql)(?::\d+(?:-\d+)?)?\b/;
+
+test('no copy value cites a repo path (a visitor cannot open the repo)', () => {
+	assert.match('No Block table exists yet (doc/election.md:114).', REPO_PATH, 'control: a doc citation is caught');
+	assert.match('see src/screens/Pairing.tsx', REPO_PATH, 'control: a source path is caught');
+	assert.doesNotMatch("The cryptographic record tying votes together isn't published here.", REPO_PATH, 'control: plain prose passes');
+	const offenders = Object.entries(COPY)
+		.filter(([, v]) => typeof v === 'string' && REPO_PATH.test(v))
+		.map(([k]) => k);
+	assert.deepEqual(offenders, []);
+});
