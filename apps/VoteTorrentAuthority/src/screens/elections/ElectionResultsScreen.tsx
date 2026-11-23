@@ -20,6 +20,7 @@ import { getDeviceUser } from "../../engines/device-user";
 import { useDeviceSigningErrorHandler } from "../../hooks/useDeviceSigningErrorHandler";
 import { useCurrentOfficerScopes } from "../../hooks/useCurrentOfficerScopes";
 import { useStrandChanges } from "../../hooks/useStrandChanges";
+import { unavailableCopyKey } from "./results-unavailable";
 
 /**
  * ElectionResultsScreen — decrypts, validates and tallies the election after the keyholders release their key
@@ -131,6 +132,8 @@ export default function ElectionResultsScreen() {
 			try {
 				const engine = await getEngine<ElectionResultsEngine>("electionResults");
 				const results = await engine.getElectionResults(electionId);
+				// The engine's reason code goes to the log only; the screen shows plain copy for it.
+				if (results.status === "unavailable") console.warn("[results] unavailable:", results.reason);
 				const publication = await readPublication(getEngine, results);
 				if (active.current) setLoad({ kind: "done", results, publication });
 			} catch {
@@ -277,7 +280,7 @@ export default function ElectionResultsScreen() {
 							{t("resultsUnavailableTitle")}
 						</ThemedText>
 						<ThemedText type="small" testID="results-unavailable-reason">
-							{t("resultsUnavailableReason", { reason: results.reason })}
+							{t(unavailableCopyKey(results.reason))}
 						</ThemedText>
 					</View>
 				) : null}

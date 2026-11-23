@@ -232,10 +232,23 @@ describe("ElectionResultsScreen", () => {
 		expect(has(tr, "results-no-key")).toBe(true);
 	});
 
-	it("shows the refusal reason when the results cannot be computed", async () => {
-		const { tr } = await render({ status: "unavailable", electionId: "election-1", reason: "group-key-mismatch", detail: "x" });
-		expect(textOf(tr, "results-unavailable-reason")).toBe('resultsUnavailableReason:{"reason":"group-key-mismatch"}');
+	it.each([
+		["group-key-mismatch", "resultsUnavailableKeyMismatch"],
+		["election-key-inconsistent", "resultsUnavailableKeyMismatch"],
+		["insufficient-shares", "resultsUnavailableKeyNotRebuilt"],
+		["no-timeline", "resultsUnavailableElectionIncomplete"],
+		["malformed-row", "resultsUnavailableVoteDataFailed"],
+		["read-failed", "resultsUnavailableReadFailed"],
+		["some-future-code", "resultsUnavailableGeneral"],
+	])("explains refusal %s in plain copy (%s) and never shows the reason code", async (reason, key) => {
+		const warn = jest.spyOn(console, "warn").mockImplementation(() => {});
+		const { tr } = await render({ status: "unavailable", electionId: "election-1", reason, detail: "x" });
+		expect(textOf(tr, "results-unavailable-reason")).toBe(key);
+		expect(textOf(tr, "results-unavailable-reason")).not.toContain(reason);
+		expect(warn).toHaveBeenCalledWith("[results] unavailable:", reason);
+		warn.mockRestore();
 	});
+
 
 	it("shows a load failure when the engine throws, and Refresh computes again", async () => {
 		const { tr, engine } = await render(new Error("no network"));

@@ -9,6 +9,8 @@ import {useVoterApp} from '../../providers/VoterAppProvider';
 import {globalStyles} from '../../theme/styles';
 import {pickElectionId} from '../../engines/election-read';
 import {strandChanges} from '../../engines/strand-changes';
+import {vtDebug} from '../../engines/vt-debug';
+import {unavailableCopyKey} from './results-unavailable';
 
 /**
  * ResultsScreen — the election's results, counted on this phone. After enough keyholders release their key
@@ -78,6 +80,8 @@ export default function ResultsScreen() {
 				const engine = await getEngine<ElectionResultsEngine>('electionResults');
 				const results = await engine.getElectionResults(electionId);
 				const publication = await readPublication(getEngine, results);
+				// The engine's reason code goes to the log only; the screen shows plain copy for it.
+				if (results.status === 'unavailable') vtDebug('results', 'unavailable', {reason: results.reason});
 				if (live) setState({kind: 'ready', results, publication});
 			} catch {
 				if (live) setState({kind: 'failed'});
@@ -135,7 +139,7 @@ export default function ResultsScreen() {
 				<View testID="results-unavailable" style={[styles.card, {backgroundColor: colors.card, borderColor: colors.border}]}>
 					<Text style={{...heading, color: colors.error}}>{t('results.unavailableTitle')}</Text>
 					<Text testID="results-unavailable-reason" style={secondary}>
-						{t('results.unavailableReason', {reason: results.reason})}
+						{t(unavailableCopyKey(results.reason))}
 					</Text>
 				</View>
 			) : null}
