@@ -253,7 +253,7 @@ export class Device {
       const founder = this.foundingIntent === true || (!joined && this.peerCount() === 0)
       await this.node.addStrand({
         strandRow: { Id: hash, MemberPrivateKey: null, Type: 'o', FounderOwnerKey: null, FounderPeerId: null },
-        sAppConfig: { id: SAPP_ID, version: '1.0.0', schema: VOTETORRENT_INNER_DDL, schemaVersion: 1, latencyHint: 'interactive' },
+        sAppConfig: { id: SAPP_ID, version: '1.0.0', schema: VOTETORRENT_INNER_DDL, schemaVersion: VE.VOTETORRENT_SCHEMA_VERSION, latencyHint: 'interactive' },
         founder,
         ...(founder ? { awaitFirstSync: false } : {})
       }).catch(async (e) => {
