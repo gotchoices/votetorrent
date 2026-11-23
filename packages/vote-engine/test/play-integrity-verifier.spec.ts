@@ -31,7 +31,7 @@ import { digestFields, resolveHasher, resolveOutputEncoder } from '@optimystic/q
 import type { AttestationChallenge, DeviceAttestation } from '@votetorrent/vote-core'
 // Wave-3 target — does not exist yet. This import failing IS the RED gate.
 import { verifyPlayIntegrity } from '../src/association/verifiers/play-integrity.js'
-import { PlayIntegrityVerifier } from '../src/association/play-integrity-verifier.js'
+import { PlayIntegrityVerifier, PLAY_INTEGRITY_HALF_SKIPPED_REASON } from '../src/association/play-integrity-verifier.js'
 import type { IIntegrityKeyProvider } from '../src/association/key-provider.js'
 import { generateTestRootCa } from './fixtures/attestation/test-root-ca.js'
 import { buildSyntheticDeviceAttestation } from './fixtures/attestation/synthetic-device-attestation.js'
@@ -417,3 +417,86 @@ describe('PlayIntegrityVerifier — two-chain Android form (spike 104, R1d)', ()
   })
 })
 
+
+// The debug-only "skip the Play Integrity half" option. The Authority computes it as
+// `__DEV__ && SKIP_PLAY_INTEGRITY_HALF` (its release-path test lives in the Authority app); this
+// block locks what the verifier does with it. Mutation locks: reading the option as truthy rather
+// than `=== true` turns (s5) RED; dropping the skip reason turns (s1) RED; letting the skip also
+// bypass the Android platform gate turns (s3) RED; skipping the key attestation half too turns (s2) RED.
+describe('PlayIntegrityVerifier — skipPlayIntegrityHalf (debug-only switch)', () => {
+  async function build (opts: { keysProvisioned: boolean, skip?: unknown, identity?: typeof SYNTHETIC_EXPECTED_APP_IDENTITY }) {
+    const jweKeys = await generateSyntheticJweKeyMaterial()
+    const testRoot = await generateTestRootCa()
+    const keyProvider: IIntegrityKeyProvider = {
+      getDecryptionKey: async () => jweKeys.decryptionKey,
+      getVerificationKey: async () => jweKeys.verificationPublicKey
+    }
+    const verifier = new PlayIntegrityVerifier(
+      keyProvider,
+      [new Uint8Array(testRoot.cert.rawData)],
+      opts.identity ?? SYNTHETIC_EXPECTED_APP_IDENTITY,
+      new Set<string>(),
+      opts.keysProvisioned,
+      { skipPlayIntegrityHalf: opts.skip as boolean }
+    )
+    const { keyPair, deviceKeySpkiBase64 } = await generateAndroidDeviceKeyPair()
+    const challenge = makeChallenge({ deviceKey: deviceKeySpkiBase64 })
+    const attestation = await buildSyntheticDeviceAttestation({ challenge, jweKeys, testRoot, overrides: { leafKeyPair: keyPair } })
+    return { verifier, challenge, attestation }
+  }
+
+  /** The same attestation with a Play Integrity token that could never verify. */
+  function withGarbageToken (attestation: DeviceAttestation): DeviceAttestation {
+    const details = attestation.platformDetails as Extract<NonNullable<DeviceAttestation['platformDetails']>, { type: 'Android' }>
+    return { ...attestation, platformDetails: { ...details, safetyNetAttestation: 'not-a-play-integrity-token' } }
+  }
+
+  it('(s1) skipped + UNPROVISIONED keys: reaches key attestation, passes, and says only that half ran', async () => {
+    const { verifier, challenge, attestation } = await build({ keysProvisioned: false, skip: true })
+    const result = await verifier.verify(challenge, withGarbageToken(attestation))
+    expect(result.ok, result.reason).to.equal(true)
+    expect(result.reason).to.equal(PLAY_INTEGRITY_HALF_SKIPPED_REASON)
+    expect(result.reason).to.match(/SKIPPED/)
+  })
+
+  it('(s2) skipped: the key attestation half still enforces the app-identity certificate pin (a wrong digest fails)', async () => {
+    const wrongPin = { ...SYNTHETIC_EXPECTED_APP_IDENTITY, certificateSha256Digests: ['00'.repeat(32)] }
+    const { verifier, challenge, attestation } = await build({ keysProvisioned: false, skip: true, identity: wrongPin })
+    const result = await verifier.verify(challenge, withGarbageToken(attestation))
+    expect(result.ok).to.equal(false)
+    expect(result.reason).to.match(/signing-certificate digest/)
+  })
+
+  it('(s3) skipped: the Android-only platform gate is unchanged — an iOS attestation is still refused', async () => {
+    const { verifier, challenge } = await build({ keysProvisioned: false, skip: true })
+    const ios: DeviceAttestation = {
+      publicKey: 'synthetic-device-voting-pubkey',
+      deviceId: 'synthetic-device-ios-1',
+      attestationTime: Date.now(),
+      certificateChain: [],
+      // Only the discriminant matters to the gate; the rest of the iOS shape is irrelevant here.
+      platformDetails: { type: 'iOS', secureEnclavePublicKey: 'synthetic-secure-enclave-pubkey' } as unknown as DeviceAttestation['platformDetails']
+    }
+    const result = await verifier.verify(challenge, ios)
+    expect(result.ok).to.equal(false)
+    expect(result.reason).to.match(/no Android platform details/)
+  })
+
+  it('(s4) NOT skipped (explicit false): byte-identical to today — unprovisioned keys still report not provisioned first', async () => {
+    const { verifier, challenge, attestation } = await build({ keysProvisioned: false, skip: false })
+    const result = await verifier.verify(challenge, attestation)
+    expect(result).to.deep.equal({ ok: false, reason: 'Play Console key material is not provisioned — see SETUP.md' })
+  })
+
+  it('(s5) only a boolean true skips: a truthy non-boolean runs both halves (the garbage token is refused)', async () => {
+    const { verifier, challenge, attestation } = await build({ keysProvisioned: true, skip: 'yes' })
+    const result = await verifier.verify(challenge, withGarbageToken(attestation))
+    expect(result.ok).to.equal(false)
+  })
+
+  it('(s6) NOT skipped + provisioned: a full pass carries no reason, so it cannot be confused with a skipped pass', async () => {
+    const { verifier, challenge, attestation } = await build({ keysProvisioned: true, skip: false })
+    const result = await verifier.verify(challenge, attestation)
+    expect(result).to.deep.equal({ ok: true })
+  })
+})

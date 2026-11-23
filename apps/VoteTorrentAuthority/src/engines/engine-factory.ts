@@ -57,7 +57,7 @@ import { createStrandPort } from './strand-port-adapter';
 import type { StrandSqlDatabase } from './strand-port-adapter';
 import { resolveKeyholderKeyVault } from './keyholder-vault';
 import { resolveAuthorityKeyVault } from './key-vault';
-import { USE_LOCAL_DB_FACTORY, USE_STUB_ATTESTATION_VERIFIER } from './proof-flags.generated';
+import { USE_LOCAL_DB_FACTORY, USE_STUB_ATTESTATION_VERIFIER, SKIP_PLAY_INTEGRITY_HALF } from './proof-flags.generated';
 import { PINNED_HARDWARE_ROOTS_DER } from './attestation-roots.generated';
 import { REVOKED_ATTESTATION_SERIALS } from './attestation-status.generated';
 import {
@@ -72,6 +72,26 @@ import {
 	APP_ATTEST_ENVIRONMENT,
 	APP_ATTEST_PROVISIONED,
 } from './appattest-keys.generated';
+
+/**
+ * The single source of truth for the debug-only "skip the Play Integrity half" switch:
+ * `__DEV__ && SKIP_PLAY_INTEGRITY_HALF`. A release build evaluates `__DEV__` to `false`, so the
+ * `&&` short-circuits to `false` whatever the committed (or a locally edited) flag holds, and the
+ * release verifier is the full two-half verifier, byte-for-byte as before the switch existed.
+ * Mirrors the Voter's `resolveRealProducerForced()`. `engine-factory.association.test.ts` locks the
+ * release direction: deleting the `__DEV__ &&` conjunct turns it RED.
+ */
+export function resolveSkipPlayIntegrityHalf(): boolean {
+	// Widened from the committed literal `false` so the strict `=== true` type-checks; anything but a
+	// boolean true (a missing export in a stale heredoc copy, say) keeps both halves running.
+	return __DEV__ && (SKIP_PLAY_INTEGRITY_HALF as boolean) === true;
+}
+
+/** Logged every time an association engine is built with the Play Integrity half skipped. */
+export const PLAY_INTEGRITY_SKIP_WARNING =
+	'[attestation] !!! DEBUG SWITCH ON: SKIP_PLAY_INTEGRITY_HALF — Android attestation runs the hardware ' +
+	'key attestation half ONLY; the Play Integrity half is NOT verified. A pass is NOT a full attestation pass. ' +
+	'Debug builds only; never commit the flag enabled. !!!';
 
 /**
  * Thrown when an engine is requested before any network has been opened.
@@ -719,12 +739,22 @@ export class EngineFactory {
 				// and `rootsProvisioned` (Phase 51) each default to `true`. This is why
 				// engine-factory.association.test.ts asserts the argument COUNT on both,
 				// not just its value.
+				//
+				// The debug-only Play Integrity skip (`resolveSkipPlayIntegrityHalf`, false in every
+				// release build) rides in as the 6th argument. It skips ONLY the Play Integrity half:
+				// the verifier's Android-only platform gate and its key attestation half (with the
+				// certificate pin) still run, and a pass says the Play Integrity half was skipped.
+				const skipPlayIntegrityHalf = resolveSkipPlayIntegrityHalf();
+				if (skipPlayIntegrityHalf) {
+					console.warn(PLAY_INTEGRITY_SKIP_WARNING);
+				}
 				const androidVerifier: IAttestationVerifier = new PlayIntegrityVerifier(
 					this.integrityKeyProvider,
 					PINNED_HARDWARE_ROOTS_DER,
 					this.expectedAppIdentity,
 					REVOKED_ATTESTATION_SERIALS,
-					this.playConsoleKeysProvisioned
+					this.playConsoleKeysProvisioned,
+					{ skipPlayIntegrityHalf }
 				);
 				// `NO_PRIOR_ASSERTIONS` is the AppAttestVerifier default for the
 				// counter store and is correct here: this is a pure association-time
