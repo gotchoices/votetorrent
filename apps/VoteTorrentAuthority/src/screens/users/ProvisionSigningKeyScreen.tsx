@@ -24,7 +24,8 @@ import {
 	persistProvisionedDeviceUser,
 } from "../../engines/device-user";
 import { SIGNING_KEY_ALIAS, RECOVERY_KEY_ALIAS } from "../../engines/device-signer";
-import { mapDeviceSigningError, DEVICE_SIGNING_ERROR_COPY_KEY } from "../../utils/deviceSigningError";
+import { mapDeviceSigningError, isDeviceSigningError, DEVICE_SIGNING_ERROR_COPY_KEY } from "../../utils/deviceSigningError";
+import { errorCopy } from "../../utils/errorCopy";
 import type { DeviceSigningErrorClass } from "../../utils/deviceSigningError";
 
 /**
@@ -124,6 +125,17 @@ type ScreenPhase =
 	| "network-user-unresolved"
 	| "recovery-unsupported-os";
 
+/**
+ * A native-module rejection carries a string `code` (CODE_TO_CLASS's codes, BIOMETRIC_ERROR, or one
+ * not yet mapped). Engine errors do not: Quereus codes are numbers and the engine's rethrow keeps
+ * none. A builder validation error is never a native rejection.
+ */
+function hasNativeRejectCode(err: unknown): boolean {
+	if (typeof err !== "object" || err === null) return false;
+	if ((err as { name?: unknown }).name === "BuilderValidationError") return false;
+	return typeof (err as { code?: unknown }).code === "string";
+}
+
 export default function ProvisionSigningKeyScreen() {
 	const insets = useSafeAreaInsets();
 	const { colors } = useTheme() as ExtendedTheme;
@@ -134,6 +146,9 @@ export default function ProvisionSigningKeyScreen() {
 
 	const [phase, setPhase] = useState<ScreenPhase>("idle");
 	const [errorClass, setErrorClass] = useState<DeviceSigningErrorClass | undefined>(undefined);
+	// A ceremony failure that is not a device-signing rejection (an engine CHECK, a storage or peer
+	// failure): translated copy from errorCopy, never the biometric message.
+	const [engineErrorMessage, setEngineErrorMessage] = useState<string | undefined>(undefined);
 	const [intakeRenewalFailed, setIntakeRenewalFailed] = useState(false);
 	// WR-R3-06: the intake-key renewal runs after the success screen is shown and may settle after
 	// the officer has left it; only a mounted screen records its outcome.
@@ -303,6 +318,7 @@ export default function ProvisionSigningKeyScreen() {
 
 	async function handleFirstRun(): Promise<void> {
 		setErrorClass(undefined);
+		setEngineErrorMessage(undefined);
 		setPhase("pending");
 		try {
 			const native = getNative();
@@ -445,6 +461,7 @@ export default function ProvisionSigningKeyScreen() {
 
 	async function handleRecovery(): Promise<void> {
 		setErrorClass(undefined);
+		setEngineErrorMessage(undefined);
 		setPhase("pending");
 		try {
 			const native = getNative();
@@ -648,6 +665,17 @@ export default function ProvisionSigningKeyScreen() {
 	 * button.
 	 */
 	function handleCeremonyError(err: unknown): void {
+		// T-49-USER-7: only a device-signing rejection is classified as one. A recognized code, or any
+		// other string code from the native module (BIOMETRIC_ERROR, a future code), takes the signing
+		// taxonomy; an error without one (an engine CHECK such as SignatureValid or DeleteValid, a
+		// storage or peer failure) shows errorCopy's write copy. Before this, every such fault read
+		// "Couldn't verify your biometrics" although the biometric step had already succeeded.
+		if (!isDeviceSigningError(err) && !hasNativeRejectCode(err)) {
+			setErrorClass(undefined);
+			setEngineErrorMessage(errorCopy(err, t, "write"));
+			setPhase("idle");
+			return;
+		}
 		const cls = mapDeviceSigningError(err);
 		if (cls === "cancellation") {
 			setPhase("idle");
@@ -803,7 +831,7 @@ export default function ProvisionSigningKeyScreen() {
 	const errorMessage =
 		errorClass !== undefined
 			? t(DEVICE_SIGNING_ERROR_COPY_KEY[errorClass] ?? DEVICE_SIGNING_ERROR_COPY_KEY["biometric-error"]!)
-			: undefined;
+			: engineErrorMessage;
 
 	return (
 		<ScrollView

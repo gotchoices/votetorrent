@@ -981,3 +981,95 @@ describe.each(["ios", "android"] as const)("ProvisionSigningKeyScreen native sig
 		expect(digests).toHaveLength(2);
 	});
 });
+
+// 2026-08-18 todo (generic biometric error masks real faults, T-49-USER-7): on hardware the generic
+// "Couldn't verify your biometrics" copy hid three engine rejections (SignatureValid, DeleteValid)
+// that happened AFTER the biometric step had succeeded. Only a native rejection takes the signing
+// taxonomy now; an engine error shows the translated write copy.
+describe("ProvisionSigningKeyScreen — engine faults are never shown as a biometric failure", () => {
+	const engineError = () => new Error("Quereus error (code 19): CHECK constraint failed: SignatureValid");
+
+	beforeEach(() => {
+		jest.spyOn(console, "warn").mockImplementation(() => undefined);
+	});
+	afterEach(() => jest.restoreAllMocks());
+
+	it("first-run stage 2: an addKey CHECK rejection shows the write copy, not the biometric copy", async () => {
+		mockDeviceUserFixture = { id: "user-1", name: "Officer One", activeKeys: [{ key: POST_ATTESTATION_SIGNING_HEX }] };
+		mockProvisioningRecordFixture = { recoveryPublicKeyCompressedHex: RECOVERY_HEX };
+		mockGetSummary.mockResolvedValue({
+			id: "user-1",
+			name: "Officer One",
+			activeKeys: [{ key: POST_ATTESTATION_SIGNING_HEX, type: "P", expiration: Date.now() }],
+		});
+		nativeFake.signWithDeviceKey.mockResolvedValue({ signatureHex: "deadbeef" });
+		mockAddKey.mockRejectedValueOnce(engineError());
+
+		const tr = await renderScreen();
+		await press(tr, primaryButton(tr));
+
+		expect(mockAddKey).toHaveBeenCalledTimes(1);
+		const json = JSON.stringify(tr.toJSON());
+		expect(json).toContain("errorActionFailedGeneric");
+		expect(json).not.toContain("deviceSigningErrorGeneric");
+		expect(json).not.toContain("SignatureValid");
+	});
+
+	describe("recovery", () => {
+		beforeEach(() => {
+			mockRouteParams = { reason: "invalidated" };
+			mockGetSummary.mockResolvedValue({
+				id: "user-1",
+				name: "Officer One",
+				activeKeys: [
+					{ key: OLD_SIGNING_KEY_HEX, type: "P", expiration: Date.now() + 1000 },
+					{ key: RECOVERY_KEY_HEX, type: "P", expiration: Date.now() + 1000 },
+				],
+			});
+			nativeFake.provisionRecoveryKey.mockResolvedValue({ publicKeyBase64: "R", publicKeyCompressedHex: RECOVERY_KEY_HEX });
+			nativeFake.provisionDeviceKey.mockResolvedValue({ publicKeyBase64: "N", publicKeyCompressedHex: NEW_SIGNING_KEY_HEX });
+			nativeFake.signWithRecoveryKey.mockResolvedValue({ signatureHex: "cafebabe" });
+		});
+
+		it("a revokeKey DeleteValid rejection shows the write copy, not the biometric copy", async () => {
+			mockRevokeKey.mockRejectedValueOnce(new Error("Quereus error (code 19): CHECK constraint failed: DeleteValid"));
+			const tr = await renderScreen();
+			await press(tr, primaryButton(tr));
+			expect(mockRevokeKey).toHaveBeenCalledTimes(1);
+			const json = JSON.stringify(tr.toJSON());
+			expect(json).toContain("errorActionFailedGeneric");
+			expect(json).not.toContain("deviceSigningErrorGeneric");
+			expect(json).not.toContain("DeleteValid");
+		});
+
+		it("an addKey SignatureValid rejection shows the write copy, not the biometric copy", async () => {
+			mockAddKey.mockRejectedValueOnce(engineError());
+			const tr = await renderScreen();
+			await press(tr, primaryButton(tr));
+			expect(mockAddKey).toHaveBeenCalledTimes(1);
+			const json = JSON.stringify(tr.toJSON());
+			expect(json).toContain("errorActionFailedGeneric");
+			expect(json).not.toContain("deviceSigningErrorGeneric");
+		});
+
+		it("a native BIOMETRIC_ERROR rejection still shows the biometric copy", async () => {
+			nativeFake.signWithRecoveryKey.mockRejectedValueOnce(
+				Object.assign(new Error("biometric hardware error"), { code: "BIOMETRIC_ERROR" }),
+			);
+			const tr = await renderScreen();
+			await press(tr, primaryButton(tr));
+			const json = JSON.stringify(tr.toJSON());
+			expect(json).toContain("deviceSigningErrorGeneric");
+			expect(json).not.toContain("errorActionFailedGeneric");
+		});
+
+		it("a native LOCKOUT rejection keeps its own copy", async () => {
+			nativeFake.signWithRecoveryKey.mockRejectedValueOnce(Object.assign(new Error("locked"), { code: "LOCKOUT" }));
+			const tr = await renderScreen();
+			await press(tr, primaryButton(tr));
+			const json = JSON.stringify(tr.toJSON());
+			expect(json).toContain("deviceSigningErrorLockout");
+			expect(json).not.toContain("errorActionFailedGeneric");
+		});
+	});
+});
