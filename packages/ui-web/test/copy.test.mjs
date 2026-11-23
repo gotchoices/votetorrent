@@ -467,7 +467,8 @@ const EXPECTED_66_05_VALUES = Object.freeze({
 	'pairing.emptyBody': 'Pair this browser from the Authority app to follow a network live. Nothing is shown here until you do.',
 	'pairing.verifying.heading': 'Checking the code',
 	'pairing.verifying.body': 'Making sure the code is genuine and still valid.',
-	'pairing.joining.heading': 'Joining {{authorityName}}',
+	// Reworded 2026-11-23: the pairing code carries the network's name, not the Authority's.
+	'pairing.joining.heading': 'Joining the {{networkName}} network',
 	'pairing.joining.body': 'This can take a minute or two the first time.',
 	'pairing.catchingUpSlow': 'Still catching up. The data is arriving; you can leave this page open.',
 	'pairing.step.connecting': 'Connecting to the network',
@@ -719,7 +720,8 @@ test('66-05/66-22/66-24 gate 8: no new value (nor either reworded panel read fai
 	}
 });
 
-const PLACEHOLDER_WHITELIST = new Set(['authorityName', 'officerName', 'oldOfficer', 'newOfficer', 'time', 'domain', 'count', 'panel']);
+// networkName: the pairing heading's network name, which is what the pairing code carries (2026-11-23).
+const PLACEHOLDER_WHITELIST = new Set(['authorityName', 'networkName', 'officerName', 'oldOfficer', 'newOfficer', 'time', 'domain', 'count', 'panel']);
 
 test('66-05/66-22: every placeholder in a new value is whitelisted, and every new key resolves through t() once they are supplied', () => {
 	const all = Object.fromEntries([...PLACEHOLDER_WHITELIST].map((n) => [n, `<${n}>`]));

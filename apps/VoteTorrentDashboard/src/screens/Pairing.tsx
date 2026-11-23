@@ -369,24 +369,28 @@ async function heldByAnotherTab(networkHash: string): Promise<boolean> {
 	}
 }
 
-export type CodePeek = { networkHash: string | null; authorityName: string; officerUserId: string | null };
+export type CodePeek = { networkHash: string | null; networkName: string; officerUserId: string | null };
 
-/** The decoded code's network hash, display name and officer id, or nulls. Never throws. */
+/**
+ * The decoded code's network hash, network name and officer id, or nulls. Never throws. The join
+ * code names the NETWORK; the Authority's own name is read from the strand only once the pairing
+ * has synced, so the joining heading names the network.
+ */
 function peekCode(code: string): CodePeek {
 	try {
 		const decoded = decodePairingCode(code);
 		const join = decodeNetworkJoinCode(decoded.joinCode);
 		if (join.ok) {
-			return { networkHash: join.code.networkHash, authorityName: join.code.name, officerUserId: decoded.statement.userId };
+			return { networkHash: join.code.networkHash, networkName: join.code.name, officerUserId: decoded.statement.userId };
 		}
 	} catch {
 		// pairBrowser judges the code; this peek only labels the screen.
 	}
-	return { networkHash: null, authorityName: '', officerUserId: null };
+	return { networkHash: null, networkName: '', officerUserId: null };
 }
 
 export type KnownNames = {
-	authorityName: string;
+	networkName: string;
 	officerName: string | null;
 	officerUserId: string | null;
 	networkHash: string | null;
@@ -405,7 +409,7 @@ export function namesForSubmit(previous: KnownNames, peek: CodePeek): KnownNames
 		peek.officerUserId === previous.officerUserId &&
 		peek.networkHash === previous.networkHash;
 	return {
-		authorityName: peek.authorityName,
+		networkName: peek.networkName,
 		officerName: sameOfficer ? previous.officerName : null,
 		officerUserId: peek.officerUserId,
 		networkHash: peek.networkHash,
@@ -423,7 +427,8 @@ export interface PairingStateViewProps {
 	reachedPhase?: PairPhase | null;
 	slow?: boolean;
 	otherTab?: boolean;
-	authorityName?: string;
+	/** The network name the pairing code carries (the joining heading). */
+	networkName?: string;
 	officerName?: string | null;
 	notice?: UnpairedNotice | null;
 	hasPairedNetworks: boolean;
@@ -539,8 +544,8 @@ export function PairingStateView(props: PairingStateViewProps): ReactElement {
 				{view === 'joining' || view === 'stopping' ? (
 					<div className="pr-status" aria-live="polite">
 						<h2 className="pr-heading">
-							{props.authorityName
-								? t('pairing.joining.heading', { authorityName: props.authorityName })
+							{props.networkName
+								? t('pairing.joining.heading', { networkName: props.networkName })
 								: t('pairing.title')}
 						</h2>
 						<StepList rows={stepRows(props.reachedPhase, { failed: false })} officerName={props.officerName} />
@@ -702,7 +707,7 @@ export function Pairing(props: PairingProps): ReactElement {
 	const [scannerOpen, setScannerOpen] = useState(false);
 	const [swapRequest, setSwapRequest] = useState<SwapRequest | null>(null);
 	const [knownNames, setKnownNames] = useState<KnownNames>({
-		authorityName: '',
+		networkName: '',
 		officerName: null,
 		officerUserId: null,
 		networkHash: null,
@@ -927,7 +932,7 @@ export function Pairing(props: PairingProps): ReactElement {
 				reachedPhase={reachedPhase}
 				slow={slow}
 				otherTab={otherTab}
-				authorityName={knownNames.authorityName}
+				networkName={knownNames.networkName}
 				officerName={knownNames.officerName}
 				notice={props.notice}
 				hasPairedNetworks={props.hasPairedNetworks}

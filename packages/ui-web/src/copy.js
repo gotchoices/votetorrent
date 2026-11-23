@@ -758,7 +758,8 @@ export const COPY = Object.freeze({
 		'Pair this browser from the Authority app to follow a network live. Nothing is shown here until you do.',
 	'pairing.verifying.heading': 'Checking the code',
 	'pairing.verifying.body': 'Making sure the code is genuine and still valid.',
-	'pairing.joining.heading': 'Joining {{authorityName}}',
+	// The pairing code names the network, not the Authority (2026-11-23 todo): the heading says so.
+	'pairing.joining.heading': 'Joining the {{networkName}} network',
 	'pairing.joining.body': 'This can take a minute or two the first time.',
 	'pairing.catchingUpSlow':
 		'Still catching up. The data is arriving; you can leave this page open.',
