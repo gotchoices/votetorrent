@@ -2410,6 +2410,37 @@ describe('ConfirmationScreen — outcome poll, completion and exits (D-100, UAT 
 		expect(mockPopToTop).toHaveBeenCalledTimes(1);
 	});
 
+	// todo 2026-11-23-voter-confirmation-faceid-copy-persists: the Face ID step's heading, prompt and caption
+	// belong to that step only; pending and registered must not still tell the voter to confirm.
+	it('the Face ID step copy shows before the confirm and is gone on pending and registered', async () => {
+		const STEP = ['confirmation-heading', 'confirmation-body', 'confirmation-caption'];
+		const tEn = i18n.getFixedT('en', 'registration');
+		const os = (key: string) => tEn(Platform.OS === 'ios' ? key : `${key}.android`);
+		const fresh = renderScreen();
+		mounted.push(fresh);
+		expect(JSON.stringify(fresh.toJSON())).toContain(tEn('confirmation.heading'));
+		expect(JSON.stringify(fresh.toJSON())).toContain(os('confirmation.caption'));
+		fresh.unmount();
+		mounted.pop();
+
+		const tr = await submitToPending();
+		expect(JSON.stringify(tr.toJSON())).not.toContain(tEn('confirmation.heading'));
+		expect(JSON.stringify(tr.toJSON())).not.toContain(os('confirmation.body'));
+		expect(JSON.stringify(tr.toJSON())).not.toContain(os('confirmation.caption'));
+		for (const id of STEP) expect(present(tr, id)).toBe(false);
+
+		mockResolveRegistrationStatus.mockImplementation(async () => ({kind: 'registered'}));
+		await advance(10_000);
+		expect(present(tr, 'confirmation-registered')).toBe(true);
+		for (const id of STEP) expect(present(tr, id)).toBe(false);
+	});
+
+	it('the Face ID step heading, prompt and caption carry their testIDs before the confirm', () => {
+		const fresh = renderScreen();
+		mounted.push(fresh);
+		for (const id of ['confirmation-heading', 'confirmation-body', 'confirmation-caption']) expect(present(fresh, id)).toBe(true);
+	});
+
 	it('C-2 pending shows Back to registration, which pops once', async () => {
 		const tr = await submitToPending();
 		renderer.act(() => {

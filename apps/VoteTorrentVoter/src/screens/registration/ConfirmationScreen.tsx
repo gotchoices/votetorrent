@@ -923,6 +923,7 @@ export default function ConfirmationScreen() {
 	const isIos = Platform.OS === 'ios';
 	const bodyCopy = isIos ? t('confirmation.body') : t('confirmation.body.android');
 	const captionCopy = isIos ? t('confirmation.caption') : t('confirmation.caption.android');
+	const confirmStepCurrent = !isPending && !isWaiting;
 	const ctaCopy = isIos ? t('confirmation.cta') : t('confirmation.cta.android');
 
 	// WR-02: a permanently lost identity can never succeed on retry. In release the boot never
@@ -959,50 +960,57 @@ export default function ConfirmationScreen() {
 		<ScrollView
 			style={[styles.screen, {backgroundColor: colors.background}]}
 			contentContainerStyle={[globalStyles.container, styles.centerColumn]}>
-			<Text
-				style={[
-					styles.heading,
-					{
-						color: colors.text,
-						fontFamily: fonts.medium.fontFamily,
-						fontWeight: fonts.medium.fontWeight,
-						fontSize: typeScale.h2.fontSize,
-						lineHeight: typeScale.h2.lineHeight,
-					},
-				]}>
-				{t('confirmation.heading')}
-			</Text>
-			<Text
-				style={[
-					styles.body,
-					{
-						color: colors.textSecondary,
-						fontFamily: fonts.regular.fontFamily,
-						fontWeight: fonts.regular.fontWeight,
-						fontSize: typeScale.body.fontSize,
-						lineHeight: typeScale.body.lineHeight,
-					},
-				]}>
-				{bodyCopy}
-			</Text>
-			<View style={styles.iconWrap}>
-				<FontAwesome6 name="fingerprint" size={96} color={colors.primary} />
-			</View>
-			{isWaiting ? null : (
-				<Text
-					style={[
-						styles.caption,
-						{
-							color: colors.textSecondary,
-							fontFamily: fonts.regular.fontFamily,
-							fontWeight: fonts.regular.fontWeight,
-							fontSize: typeScale.caption.fontSize,
-							lineHeight: typeScale.caption.lineHeight,
-						},
-					]}>
-					{captionCopy}
-				</Text>
-			)}
+			{/* The Face ID step's heading, prompt, glyph and caption show only while that step is current: once the
+			    confirm succeeds (waiting, pending, registered) they would still tell the voter to confirm. */}
+			{confirmStepCurrent ? (
+				<>
+					<Text
+						testID="confirmation-heading"
+						style={[
+							styles.heading,
+							{
+								color: colors.text,
+								fontFamily: fonts.medium.fontFamily,
+								fontWeight: fonts.medium.fontWeight,
+								fontSize: typeScale.h2.fontSize,
+								lineHeight: typeScale.h2.lineHeight,
+							},
+						]}>
+						{t('confirmation.heading')}
+					</Text>
+					<Text
+						testID="confirmation-body"
+						style={[
+							styles.body,
+							{
+								color: colors.textSecondary,
+								fontFamily: fonts.regular.fontFamily,
+								fontWeight: fonts.regular.fontWeight,
+								fontSize: typeScale.body.fontSize,
+								lineHeight: typeScale.body.lineHeight,
+							},
+						]}>
+						{bodyCopy}
+					</Text>
+					<View style={styles.iconWrap}>
+						<FontAwesome6 name="fingerprint" size={96} color={colors.primary} />
+					</View>
+					<Text
+						testID="confirmation-caption"
+						style={[
+							styles.caption,
+							{
+								color: colors.textSecondary,
+								fontFamily: fonts.regular.fontFamily,
+								fontWeight: fonts.regular.fontWeight,
+								fontSize: typeScale.caption.fontSize,
+								lineHeight: typeScale.caption.lineHeight,
+							},
+						]}>
+						{captionCopy}
+					</Text>
+				</>
+			) : null}
 			{isPending && registrationOutcome === 'registered' ? (
 				<>
 					<Text
