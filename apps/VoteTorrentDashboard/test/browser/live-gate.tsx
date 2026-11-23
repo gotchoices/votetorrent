@@ -70,7 +70,7 @@ import type {
 	SwapRequest,
 	UnpairedNotice,
 } from '../../src/screens/Pairing.js';
-import { adaptDecoderModule } from '../../src/screens/QrScanner.js';
+import { adaptDecoderModule, SCAN_SCALE_LADDER } from '../../src/screens/QrScanner.js';
 import { SCOPE_CODES } from '../../src/auth/capabilities.js';
 import { seedFoundingAuthority } from '../../../../packages/web-data/test/fixtures/seed-founding-authority.js';
 import { seedElectionSurface } from '../../../../packages/web-data/test/fixtures/seed-election-surface.js';
@@ -1129,6 +1129,10 @@ function drawMatrix(ctx: CanvasRenderingContext2D, modules: readonly string[], n
  * `renderFrame` does, decode it through the production `adaptDecoderModule`
  * over the decoder module the scanner loads (`import('jsqr')`), and compare
  * the result with the expected SHA-256 in-page. No payload text returns.
+ *
+ * Like the scanner, each attempt draws the frame at the next scale of the
+ * production `SCAN_SCALE_LADDER` (smoothed, as the scanner's canvas draws the
+ * video); the first scale that yields text is the result.
  */
 export async function decodeFrame(
 	modules: readonly string[],
@@ -1177,9 +1181,22 @@ export async function decodeFrame(
 			ctx.fillRect(x0 + 4 * m, y0 + 4 * m, 8 * m, 8 * m);
 		}
 	}
-	const imageData = ctx.getImageData(0, 0, W, H);
 	const decode = adaptDecoderModule(await import('jsqr'));
-	const text = await decode({ data: imageData.data, width: W, height: H });
+	let text: string | null = null;
+	for (const scale of SCAN_SCALE_LADDER) {
+		const sw = Math.max(1, Math.round(W * scale));
+		const sh = Math.max(1, Math.round(H * scale));
+		const scaled = document.createElement('canvas');
+		scaled.width = sw;
+		scaled.height = sh;
+		const sctx = scaled.getContext('2d', { willReadFrequently: true });
+		if (!sctx) throw new Error('live-gate: no 2d context');
+		sctx.imageSmoothingEnabled = true;
+		sctx.drawImage(canvas, 0, 0, sw, sh);
+		const imageData = sctx.getImageData(0, 0, sw, sh);
+		text = await decode({ data: imageData.data, width: sw, height: sh });
+		if (typeof text === 'string') break;
+	}
 	if (typeof text !== 'string') return { decoded: false, decodedLength: 0, equal: false, sha256Prefix: '', m };
 	const prefix = await sha256Prefix(text);
 	return { decoded: true, decodedLength: new TextEncoder().encode(text).length, equal: prefix === expectedSha256Prefix, sha256Prefix: prefix, m };

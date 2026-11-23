@@ -19,6 +19,15 @@
  * to decode. The preview is not mirrored (a mirrored preview makes people
  * misjudge distance and direction).
  *
+ * A SCALE LADDER. jsQR misreads a dense code at some fractional module sizes:
+ * the version 40 pairing-size code failed at 3.46, 4.32 and 4.76 px/module
+ * (66-25), and a camera frame is always resampled, so a real webcam never
+ * read a real pairing code (66-27). Each decode attempt therefore draws the
+ * whole frame at the next scale of SCAN_SCALE_LADDER (the canvas resamples
+ * it), so one of a few attempts lands the code on a module size jsQR reads.
+ * One decode per attempt, as before; the ladder costs time to first read, not
+ * work per frame.
+ *
  * THE DECODER IS LAZY. `jsqr` (the package approved at the dependency
  * checkpoint; plain JavaScript, so the page needs no wasm allowance) is loaded
  * by dynamic import() only when the scanner opens, which keeps it out of the
@@ -46,6 +55,15 @@ export const SCANNER_HIDDEN_STOP_MS = 60_000;
 
 /** At most one decode per this many milliseconds. */
 export const SCAN_INTERVAL_MS = 200;
+
+/**
+ * The scale each successive decode attempt draws the frame at, in turn. 1 first
+ * (the frame as the camera gives it). Chosen by measurement: on a resampled,
+ * noisy frame jsQR missed 20 of 75 (size x module-size) cells at scale 1,
+ * 1 + 1.15 left one, 1 + 1.15 + 0.9 none (sizes 1000-2953 bytes, 2.75-9
+ * px/module); 1.2 and 0.7 add margin for frames the measurement did not model.
+ */
+export const SCAN_SCALE_LADDER: readonly number[] = Object.freeze([1, 1.15, 0.9, 1.2, 0.7]);
 
 /**
  * The getUserMedia requests, tried in order. Only an OverconstrainedError
@@ -277,8 +295,10 @@ export function createScannerSession(deps: ScannerDeps): ScannerSession {
 	let hiddenTimer: unknown = null;
 	let lastDecodeAt = Number.NEGATIVE_INFINITY;
 	let decoding = false;
-	let canvas: CanvasLike | null = null;
-	let context: ContextLike | null = null;
+	// One canvas per drawn size (the ladder cycles through a few), so a scan does not allocate a
+	// full-frame canvas on every attempt.
+	const canvases = new Map<string, { canvas: CanvasLike; context: ContextLike | null }>();
+	let attempt = 0;
 	let logged = false;
 	const listeners: Array<[ListenerTarget, string, () => void]> = [];
 
@@ -349,15 +369,23 @@ export function createScannerSession(deps: ScannerDeps): ScannerSession {
 			return;
 		}
 		lastDecodeAt = now;
+		const scale = SCAN_SCALE_LADDER[attempt % SCAN_SCALE_LADDER.length] ?? 1;
+		attempt += 1;
+		const drawWidth = Math.max(1, Math.round(width * scale));
+		const drawHeight = Math.max(1, Math.round(height * scale));
 		let imageData: ImageDataLike;
 		try {
-			if (canvas === null || context === null || canvas.width !== width || canvas.height !== height) {
-				canvas = deps.createCanvas(width, height);
-				context = canvas.getContext('2d', { willReadFrequently: true });
+			const sizeKey = `${drawWidth}x${drawHeight}`;
+			let slot = canvases.get(sizeKey);
+			if (slot === undefined || slot.context === null) {
+				const canvas = deps.createCanvas(drawWidth, drawHeight);
+				slot = { canvas, context: canvas.getContext('2d', { willReadFrequently: true }) };
+				canvases.set(sizeKey, slot);
 			}
+			const context = slot.context;
 			if (context === null) throw new TypeError('no 2d context');
-			context.drawImage(deps.video, 0, 0, width, height);
-			imageData = context.getImageData(0, 0, width, height);
+			context.drawImage(deps.video, 0, 0, drawWidth, drawHeight);
+			imageData = context.getImageData(0, 0, drawWidth, drawHeight);
 		} catch (err) {
 			logOnce(err);
 			schedule();
