@@ -116,6 +116,17 @@ describe('D-12 threshold scope coverage audit', () => {
     expect(extractedMap, 'A2: extension-table-to-scope map').to.deep.equal(expectedMap)
 
     for (const [signatureType, scope] of Object.entries(SIGNATURE_TYPE_SCOPE)) {
+      if (signatureType === 'intake-policy') {
+        // Schema version 2: this type's extension is the AuthorityIntakePolicy proposal row itself,
+        // joined by SigningNonce in Task.ExtensionExists; the proposal's session must be 'vrg'.
+        expect(qsql, "A2: Task.ExtensionExists must join the intake-policy proposal row").to.include(
+          "SignatureType = 'intake-policy' and exists (select 1 from AuthorityIntakePolicy P where P.SigningNonce = new.SigningNonce and P.Revision <= -1)"
+        )
+        const policyBlock = qsql.slice(qsql.indexOf('table AuthorityIntakePolicy ('), qsql.indexOf('index AuthorityIntakePolicySigningNonce'))
+        expect(policyBlock, "A2: the intake-policy proposal must be signed under 'vrg'").to.match(/new\.Revision <= -1 and exists \(\s*select 1 from AdminSigning A[\s\S]*?A\.Scope = 'vrg'/)
+        expect(scope).to.equal('vrg')
+        continue
+      }
       const extName = Object.keys(expectedMap).find((n) => expectedMap[n]!.signatureType === signatureType)
       expect(extName, `A2: no extension table found for SIGNATURE_TYPE_SCOPE['${signatureType}']`).to.not.be.undefined
       expect(expectedMap[extName!]!.scope, `A2: schema scope for '${signatureType}' must equal the helper's scope`).to.equal(scope)

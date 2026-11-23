@@ -40,3 +40,6 @@ export { createIntakeSealer, createIntakeOpener } from './sealing.js'
 export { isValidRestBridgeUrl, normalizeIntakePolicyRow, readIntakePolicyFrom, reassociationRouteFor } from './policy.js'
 
 export { IntakeEngine } from './intake-engine.js'
+
+export { applyReachedIntakePolicyProposal, listIntakePolicyProposals, readIntakePolicyProposalByNonce } from './cosign.js'
+export type { IntakePolicyProposalView } from './cosign.js'

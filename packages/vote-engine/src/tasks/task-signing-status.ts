@@ -90,10 +90,48 @@ export async function findRegistrantSessionNonce (
   return nonces.length === 1 ? nonces[0] : undefined
 }
 
+/**
+ * Schema version 2: the caller's own pending task of `signatureType` for the session `signingNonce`
+ * ('intake-policy' and 'association' tasks carry their session on the task). Never throws.
+ */
+export async function findPendingTaskRowByNonce (
+  db: Database,
+  userId: string,
+  signatureType: string,
+  signingNonce: string
+): Promise<{ Id: string; SigningNonce: string } | undefined> {
+  return await db
+    .prepare(
+      `select Id, SigningNonce from Task
+        where UserId = :userId
+          and Type = 'signature'
+          and SignatureType = :signatureType
+          and SigningNonce = :signingNonce
+          and IsCompleted = 0
+        limit 1`
+    )
+    .get({ userId, signatureType, signingNonce }) as { Id: string; SigningNonce: string } | undefined
+}
+
+/** The session a schema-version-2 task names, or `undefined` for every other task type. */
+export function taskSigningNonce (task: SignatureTask): string | undefined {
+  if (task.signatureType === 'intake-policy' || task.signatureType === 'association') {
+    const nonce = (task as SignatureTask & { signingNonce?: unknown }).signingNonce
+    return typeof nonce === 'string' && nonce.length > 0 ? nonce : undefined
+  }
+  return undefined
+}
+
 export async function findPendingTaskNonce (
   db: Database,
   task: SignatureTask
 ): Promise<string | undefined> {
+  if (task.signatureType === 'intake-policy' || task.signatureType === 'association') {
+    const nonce = taskSigningNonce(task)
+    if (nonce === undefined) return undefined
+    return (await findPendingTaskRowByNonce(db, task.userId, task.signatureType, nonce))?.SigningNonce
+  }
+
   if (task.signatureType === 'admin') {
     const authorityId = (task as AdminSignatureTask).authority?.id
     const adminEffectiveAt = (task as AdminSignatureTask).administration?.proposed?.effectiveAt

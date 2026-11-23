@@ -27,6 +27,8 @@ export type SignatureTask = Task & {
   | 'election-revision'
   | 'network'
   | 'registrant'
+  | 'intake-policy'
+  | 'association'
 }
 
 export type AdminSignatureTask = SignatureTask & {
@@ -83,6 +85,41 @@ export type RegistrantSignatureTask = SignatureTask & {
    * authoritative issuer signal (D-03).
    */
   bridgeLabel?: string
+}
+
+/**
+ * Schema version 2: a co-signer task for a proposed change to an authority's intake policy (the
+ * REST bridge URL and the re-association mode) above a 'vrg' threshold of 1. Accepting signs the
+ * proposal's session; the change takes effect when the session reaches its threshold.
+ */
+export type IntakePolicySignatureTask = SignatureTask & {
+  signatureType: 'intake-policy'
+  authorityId: string
+  /** The proposal's session; one officer may hold several pending proposals. */
+  signingNonce: string
+  proposal: {
+    /** The revision the change takes effect as. */
+    revision: number
+    restBridgeUrl: string | null
+    reassociationMode: 'manual' | 'automatic'
+    setAt: string
+  }
+}
+
+/**
+ * Schema version 2: a co-signer task for an officer's decision on a pending association request
+ * (approve as `registrantId`, or reject) above a 'vrg' threshold of 1. The decision is carried out
+ * once its session reaches the threshold.
+ */
+export type AssociationSignatureTask = SignatureTask & {
+  signatureType: 'association'
+  signingNonce: string
+  requestId: string
+  authorityId: string
+  deviceKey: string
+  decision: 'a' | 'r'
+  /** Set for an approval: the registrant the request is approved as. */
+  registrantId?: string
 }
 
 export interface SignatureResult {

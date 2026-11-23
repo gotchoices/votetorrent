@@ -5,7 +5,8 @@ import { adminSigningKeyValidity } from '../signing/signer-validity.js'
 import { readSessionThreshold } from '../signing/threshold.js'
 import { fanOutSignatureTasks } from '../signing/fan-out.js'
 import { drainDeferredChecks } from '../database/drain-deferred-checks.js'
-import { findPendingAdminTaskRow, findPendingTaskNonce, findRegistrantSessionNonce } from './task-signing-status.js'
+import { findPendingAdminTaskRow, findPendingTaskNonce, findPendingTaskRowByNonce, findRegistrantSessionNonce, taskSigningNonce } from './task-signing-status.js'
+import { applyReachedIntakePolicyProposal, readIntakePolicyProposalByNonce } from '../intake/cosign.js'
 import { resolveSignedSubmittedAt } from '../signing/signed-submitted-at.js'
 import { toIsoZDatetime, toDeferredCheckDatetime, restoreCanonicalDatetime, reZuluDatetime, rethrow as rethrowHelper } from '../signing/ceremony-helpers.js'
 import { digestToBytes, formatPgRange, formatScoreRange, nowCanonicalDatetime, parseJsonOr } from '../utils.js'
@@ -22,6 +23,7 @@ import type {
   AdminSignatureTask,
   BallotSignatureTask,
   RegistrantSignatureTask,
+  IntakePolicySignatureTask,
   Authority,
   ThresholdPolicy,
   AdminInit,
@@ -270,6 +272,26 @@ export class SignatureTasksEngine implements ISignatureTasksEngine {
             out.push(ballotTask)
           } else {
             // Extension or ProposedBallot row missing — fall back to base task
+            out.push(base)
+          }
+        } else if (signatureType === 'intake-policy') {
+          // Schema version 2: the proposal row is the task's extension (joined by SigningNonce).
+          const proposal = await readIntakePolicyProposalByNonce(this.ctx.db, row.SigningNonce)
+          if (proposal) {
+            const intakeTask: IntakePolicySignatureTask = {
+              ...base,
+              signatureType: 'intake-policy',
+              authorityId: proposal.authorityId,
+              signingNonce: row.SigningNonce,
+              proposal: {
+                revision: proposal.revision,
+                restBridgeUrl: proposal.restBridgeUrl,
+                reassociationMode: proposal.reassociationMode,
+                setAt: proposal.setAt,
+              },
+            }
+            out.push(intakeTask)
+          } else {
             out.push(base)
           }
         } else if (signatureType === 'registrant') {
@@ -704,7 +726,16 @@ export class SignatureTasksEngine implements ISignatureTasksEngine {
     // tasks the correct task row (and therefore the correct AdminSigning
     // digest) is resolved — not an arbitrary LIMIT-1 row.
     let taskRow: { Id: string; SigningNonce: string } | undefined
-    if (task.signatureType === 'ballot') {
+    if (task.signatureType === 'intake-policy' || task.signatureType === 'association') {
+      // Schema version 2: these tasks name their session; one officer may hold several.
+      const signingNonce = taskSigningNonce(task)
+      taskRow = signingNonce === undefined ? undefined : await findPendingTaskRowByNonce(this.ctx!.db, task.userId, task.signatureType, signingNonce)
+      if (!taskRow) {
+        throw new Error(
+          `SignatureTasksEngine.completeSignature: no pending ${task.signatureType} task for user=${task.userId}`
+        )
+      }
+    } else if (task.signatureType === 'ballot') {
       const ballotId = (task as BallotSignatureTask).ballot.proposed.id
       taskRow = await this.ctx!.db
         .prepare(
@@ -1056,6 +1087,17 @@ export class SignatureTasksEngine implements ISignatureTasksEngine {
           }
           this.rethrow(err, 'completeSignature (finalize registrant)')
         }
+      }
+    }
+
+    // Schema version 2: a co-signed intake-policy change takes effect once its session has reached
+    // the threshold. Applied on the crossing accept, and again (idempotently) on any later accept,
+    // so a crash between the two is repaired by the next co-signer. Never on a rejection.
+    if (result.isAccepted && task.signatureType === 'intake-policy' && signOutcome?.thresholdReached === true) {
+      try {
+        await applyReachedIntakePolicyProposal(this.ctx!.db, nonce)
+      } catch (err) {
+        this.rethrow(err, 'completeSignature (apply intake policy)')
       }
     }
 
@@ -1928,7 +1970,16 @@ export class SignatureTasksEngine implements ISignatureTasksEngine {
     // tasks the correct AdminSigning.Digest is returned — not an arbitrary
     // LIMIT-1 row.
     let taskRow: { Id: string; SigningNonce: string } | undefined
-    if (task.signatureType === 'ballot') {
+    if (task.signatureType === 'intake-policy' || task.signatureType === 'association') {
+      // Schema version 2: these tasks name their session; one officer may hold several.
+      const signingNonce = taskSigningNonce(task)
+      taskRow = signingNonce === undefined ? undefined : await findPendingTaskRowByNonce(this.ctx!.db, task.userId, task.signatureType, signingNonce)
+      if (!taskRow) {
+        throw new Error(
+          `SignatureTasksEngine.getSignatureDigest: no pending ${task.signatureType} task for user=${task.userId}`
+        )
+      }
+    } else if (task.signatureType === 'ballot') {
       const ballotId = (task as BallotSignatureTask).ballot.proposed.id
       taskRow = await this.ctx!.db
         .prepare(

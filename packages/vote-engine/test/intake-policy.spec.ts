@@ -161,14 +161,13 @@ describe('src/intake/policy.ts — AuthorityIntakePolicy reader/writer (D-29, D-
         )
       })
 
-      it('a fixture at the default vrg threshold (2) gives threshold-requires-co-sign', async () => {
+      it('a fixture at the default vrg threshold (2) proposes the change for co-signing instead of refusing', async () => {
         const thresholdFx = await createThresholdAuthority()
-        await expectRefusal(
-          thresholdFx,
-          { authorityId: thresholdFx.authorityId, restBridgeUrl: 'https://bridge.example' },
-          thresholdFx.holders[0]!.sign,
-          'threshold-requires-co-sign'
-        )
+        const view = await new IntakeEngine({ db: thresholdFx.elec.ctx.db, user: thresholdFx.holders[0]!.user })
+          .setIntakePolicy({ authorityId: thresholdFx.authorityId, restBridgeUrl: 'https://bridge.example' }, thresholdFx.holders[0]!.sign)
+        expect(view.isDefault).to.equal(true)
+        expect(view.pendingProposal?.revision).to.equal(1)
+        expect(view.pendingProposal?.restBridgeUrl).to.equal('https://bridge.example')
       })
     })
 

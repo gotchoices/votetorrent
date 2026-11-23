@@ -21,6 +21,7 @@
 
 import type { Signature } from '@votetorrent/vote-core'
 import type { EnvelopeBinding, EnvelopeOpenFailureReason, EnvelopeRecipient } from '../crypto/envelope-types.js'
+import type { IntakePolicyProposalView } from './cosign.js'
 
 /**
  * Every refusal this module can throw as an `IntakeError`. Messages built
@@ -35,6 +36,7 @@ export type IntakeErrorCode =
   | 'not-authorized'
   | 'vault-error'
   | 'invalid-policy'
+  /** No longer thrown: above a 'vrg' threshold of 1 a change is proposed for co-signing instead. Kept so older readers type-check. */
   | 'threshold-requires-co-sign'
   | 'policy-revision-conflict'
 
@@ -153,6 +155,11 @@ export interface AuthorityIntakePolicyView {
   readonly reassociationMode: ReassociationMode
   readonly setAt: string | null
   readonly isDefault: boolean
+  /**
+   * Set only on `setIntakePolicy`'s result above a 'vrg' threshold of 1: the change was PROPOSED and
+   * waits for the other 'vrg' officers' signatures; the rest of this view is still the policy in force.
+   */
+  readonly pendingProposal?: IntakePolicyProposalView
 }
 
 /** An omitted field keeps the current (or default) value. A present `expectedRevision` must equal the current revision. */
