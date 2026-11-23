@@ -7,7 +7,8 @@
  * M1/M3/M4/M5 use fakes.
  */
 
-import { IntakeEngine } from '@votetorrent/vote-engine/rn';
+import { IntakeEngine, SignatureTasksEngine } from '@votetorrent/vote-engine/rn';
+import type { IntakePolicySignatureTask } from '@votetorrent/vote-core';
 import type { Signature, User } from '@votetorrent/vote-core';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyDb = any;
@@ -67,6 +68,38 @@ describe('registration-bridge-config.ts — real schema (M2)', () => {
 	});
 });
 
+describe('registration-bridge-config.ts — real schema at a vrg threshold of 2 (M6)', () => {
+	it('M6: the save is proposed (co-sign-required, nothing in force); a co-signer task carries the URL; its signature puts the URL in force', async () => {
+		// eslint-disable-next-line @typescript-eslint/no-var-requires
+		const { createThresholdAuthority } = require('@votetorrent/vote-engine/test/fixtures/threshold-authority') as {
+			createThresholdAuthority: () => Promise<{
+				elec: { ctx: { db: AnyDb } };
+				authorityId: string;
+				holders: Array<{ user: User; sign: (digest: Uint8Array) => Promise<Signature> }>;
+			}>;
+		};
+		const fx = await createThresholdAuthority();
+		const db = fx.elec.ctx.db;
+		const depsFor = (i: number): RegistrationBridgeConfigDeps => ({
+			getEngine: async <T>() => new IntakeEngine({ db, user: fx.holders[i]!.user } as never) as unknown as T,
+		});
+
+		const result = await saveRegistrationBridgeUrl(depsFor(0), fx.authorityId, 'https://bridge.example/intake', fx.holders[0]!.sign, 0);
+		expect(result).toEqual({ outcome: 'co-sign-required', config: { savedUrl: null, revision: 0 } });
+		expect(await readRegistrationBridgeConfig(depsFor(0), fx.authorityId)).toEqual({ savedUrl: null, revision: 0 });
+
+		const net = { hash: 'bridge-cosign', name: 'Bridge co-sign', relays: [] as string[], primaryAuthorityDomainName: 'x.example' };
+		const tasksEngine = new SignatureTasksEngine(net as never, { db, user: fx.holders[1]!.user } as never);
+		const tasks = (await tasksEngine.getRequestedSignatures(true)).filter((t) => t.signatureType === 'intake-policy') as IntakePolicySignatureTask[];
+		expect(tasks).toHaveLength(1);
+		expect(tasks[0]!.proposal.restBridgeUrl).toBe('https://bridge.example/intake');
+
+		const digest = await tasksEngine.getSignatureDigest(tasks[0]!);
+		await tasksEngine.completeSignature(tasks[0]!, { isAccepted: true, signature: await fx.holders[1]!.sign(digest) });
+		expect(await readRegistrationBridgeConfig(depsFor(0), fx.authorityId)).toEqual({ savedUrl: 'https://bridge.example/intake', revision: 1 });
+	}, 120_000);
+});
+
 describe('registration-bridge-config.ts — fakes (M3-M5)', () => {
 	it('M3: an invalid URL refuses before any engine or sign call', async () => {
 		const getEngine = jest.fn();
@@ -124,6 +157,28 @@ describe('registration-bridge-config.ts — fakes (M3-M5)', () => {
 			0,
 		);
 		expect(result.outcome).toBe('failed');
+	});
+
+	it('M4b: a proposed save (pendingProposal set) reports co-sign-required with the URL still in force, never saved', async () => {
+		const setIntakePolicy = jest.fn(async () => ({
+			authorityId: 'auth-1',
+			revision: 2,
+			restBridgeUrl: 'https://old.example',
+			reassociationMode: 'manual',
+			setAt: '2026-11-01T00:00:00Z',
+			isDefault: false,
+			pendingProposal: { revision: 3, restBridgeUrl: 'https://new.example', reassociationMode: 'manual', threshold: 2, signatures: 1, reached: false, applied: false },
+		}));
+		const getEngine = jest.fn(async () => ({ setIntakePolicy, readIntakePolicy: jest.fn() }));
+		const result = await saveRegistrationBridgeUrl(
+			// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			{ getEngine: getEngine as any },
+			'auth-1',
+			'https://new.example',
+			jest.fn(),
+			2,
+		);
+		expect(result).toEqual({ outcome: 'co-sign-required', config: { savedUrl: 'https://old.example', revision: 2 } });
 	});
 
 	it('M5: a rejecting getEngine on read gives { savedUrl: null, revision: undefined }', async () => {

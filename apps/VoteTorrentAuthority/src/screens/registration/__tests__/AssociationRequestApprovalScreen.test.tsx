@@ -411,6 +411,45 @@ describe("AssociationRequestApprovalScreen — S5/S6/S7 decisions and failures",
 		expect(mockApproveReassociation).toHaveBeenCalledTimes(1);
 	});
 
+	it("S6b. above a vrg threshold of 1 an approval awaiting co-signers stays on the screen, says so, and disables both buttons", async () => {
+		mockApproveReassociation.mockResolvedValue({ requestId: "arq-1", registrantId: "reg-1", devicesToRetire: [], outcome: "awaiting-co-signers" });
+		const tr = await renderScreen();
+		await pressAsync(tr, "association-approval-approve");
+		await pressAsync(tr, "association-approval-confirm-confirm");
+		expect(mockApproveReassociation).toHaveBeenCalledTimes(1);
+		expect(mockGoBack).not.toHaveBeenCalled();
+		expect(textOf(tr, "association-approval-error")).toBe(EN.associationApprovalCoSignRequired);
+		expect(exists(tr, "association-approval-confirm-card")).toBe(false);
+		expect(isDisabled(tr, "association-approval-approve")).toBe(true);
+		expect(isDisabled(tr, "association-approval-reject")).toBe(true);
+	});
+
+	it("S6c. a rejection awaiting co-signers stays on the screen and says so; a plain rejected result goes back", async () => {
+		mockRejectReassociation.mockResolvedValueOnce({ requestId: "arq-1", reason: "", outcome: "awaiting-co-signers" });
+		const tr = await renderScreen();
+		await pressAsync(tr, "association-approval-reject");
+		expect(mockGoBack).not.toHaveBeenCalled();
+		expect(textOf(tr, "association-approval-error")).toBe(EN.associationApprovalCoSignRequired);
+		expect(isDisabled(tr, "association-approval-reject")).toBe(true);
+
+		mockRejectReassociation.mockResolvedValueOnce({ requestId: "arq-1", reason: "", outcome: "rejected" });
+		const tr2 = await renderScreen();
+		await pressAsync(tr2, "association-approval-reject");
+		expect(mockGoBack).toHaveBeenCalledTimes(1);
+	});
+
+	it("S6d. review-pending (another officer's decision is being co-signed) points to the tasks, never the engine message", async () => {
+		mockApproveReassociation.mockRejectedValue({ name: "ReassociationError", code: "review-pending", message: "M-SECRET-MSG" });
+		const tr = await renderScreen();
+		await pressAsync(tr, "association-approval-approve");
+		await pressAsync(tr, "association-approval-confirm-confirm");
+		expect(textOf(tr, "association-approval-error")).toBe(EN.associationApprovalReviewPending);
+		expect(whole(tr)).not.toContain("M-SECRET-MSG");
+		expect(isDisabled(tr, "association-approval-approve")).toBe(true);
+		expect(isDisabled(tr, "association-approval-reject")).toBe(true);
+		expect(mockGoBack).not.toHaveBeenCalled();
+	});
+
 	it("S7. other failures show the decision error and re-enable both buttons; a device-signing error goes to the hook; not-pending reloads", async () => {
 		mockRejectReassociation.mockRejectedValueOnce(new Error("boom"));
 		const tr = await renderScreen();

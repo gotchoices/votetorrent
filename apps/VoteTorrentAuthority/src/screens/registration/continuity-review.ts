@@ -219,6 +219,14 @@ export function isThresholdCoSignRefusal(e: unknown): boolean {
 	);
 }
 
+/**
+ * Above a 'vrg' threshold of 1, a co-signed review of this device change is already open: another
+ * officer's decision waits for signatures, so this officer co-signs it from their tasks instead.
+ */
+export function isReviewPendingRefusal(e: unknown): boolean {
+	return hasNameAndCode(e) && e.name === 'ReassociationError' && e.code === 'review-pending';
+}
+
 export type ReassociationEvidenceView = 'code-matched' | 'identity' | 'code-unmatched' | 'code-unverifiable' | 'no-evidence';
 
 export function classifyReassociationEvidence(review: ReassociationReview): ReassociationEvidenceView {

@@ -18,9 +18,9 @@ import { isSaveableBridgeUrl } from "../registration-bridge-config";
  *     is reserved elsewhere by the UI-SPEC and is never used here, including for 'saved'. Invalid
  *     and save-error lines use `colors.error`.
  *   - The co-sign state is TERMINAL for this mount: once `notice === 'co-sign-required'`, Save
- *     stays disabled and the field stays non-editable for the rest of the mount — the write is
- *     not supported at this authority's threshold, and nothing here should invite a retry that
- *     would just refuse identically again.
+ *     stays disabled and the field stays non-editable for the rest of the mount — above a vrg
+ *     threshold of 1 the save was proposed and waits for other officers' signatures, and a second
+ *     save would only stack a second proposal on the first.
  *   - Controls are disabled, never hidden, and `disabled`/the scope gate are legibility controls
  *     only — the real boundary is the signed ceremony `setIntakePolicy` enforces downstream.
  *   - No line-clamp prop on any message Text, and no ancestor up to the card root fixes height,

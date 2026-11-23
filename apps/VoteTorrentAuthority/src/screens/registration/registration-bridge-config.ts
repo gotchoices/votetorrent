@@ -11,10 +11,10 @@ import type { Signature } from "@votetorrent/vote-core";
  * and the Voter (62-22) read the SAME value through `IntakeEngine.readIntakePolicy`. There is no
  * local, device-only configuration of any kind.
  *
- * A `'vrg'` threshold above 1 refuses with `IntakeError('threshold-requires-co-sign')` (62-14/
- * 62-13 GAP: this table has no co-sign Task path yet). This module reports that refusal as
- * `'co-sign-required'` — a TERMINAL outcome for the mount, never a retryable failure — so the UI
- * never offers a "Try again" that would just refuse identically again.
+ * Above a `'vrg'` threshold of 1 the save is a PROPOSAL: `setIntakePolicy` returns the policy
+ * still in force with `pendingProposal` set, and the other vrg officers get a task to sign it. This
+ * module reports that as `'co-sign-required'` with the config still in force (the old URL) — a
+ * TERMINAL outcome for the mount, so the UI never stacks a second proposal on the first.
  *
  * The stored URL is world-readable (CLASS.PUBLIC, 62-01) — it is a sync endpoint, not a secret.
  *
@@ -133,6 +133,8 @@ export async function saveRegistrationBridgeUrl(
 			},
 			sign,
 		);
+		// Above a vrg threshold of 1 the URL was proposed for co-signing; the saved URL is still the old one.
+		if (view.pendingProposal !== undefined) return { outcome: "co-sign-required", config: toConfig(view) };
 		return { outcome: "saved", config: toConfig(view) };
 	} catch (err) {
 		return { outcome: mapOutcome(err) };

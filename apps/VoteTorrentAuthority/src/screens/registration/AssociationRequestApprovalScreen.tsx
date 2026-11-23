@@ -21,6 +21,7 @@ import { truncateDeviceKey } from "./components/AssociationsSection";
 import { LifecycleConfirmCard } from "./components/LifecycleConfirmCard";
 import {
 	classifyReassociationEvidence,
+	isReviewPendingRefusal,
 	isThresholdCoSignRefusal,
 	openPeerReviewSession,
 	readOnlyReviewSign,
@@ -51,16 +52,22 @@ import type { RootStackParamList } from "../../navigation/types";
  * (5) The scope gate (`useCurrentOfficerScopes`) is UI legibility only. The 'vrg' AdminSigning
  * CHECK and `Association.DeleteValid` enforce; Approve and Reject are disabled, never hidden.
  *
+ * (6) Above a 'vrg' threshold of 1 a decision opens a co-signed review: the engine resolves
+ * `outcome: 'awaiting-co-signers'`, the screen stays put with both buttons disabled and says the
+ * decision waits for other officers' signatures (from their tasks). A second decision while a
+ * review is open refuses `review-pending`, which points the officer to their tasks.
+ *
  * The peer review session is opened read-only (its decision signer always rejects): the approve
  * and reject ceremonies sign through the engine call's own `signatureOrCallback`.
  */
 
-type Notice = "none" | "load-error" | "decision-error" | "co-sign";
+type Notice = "none" | "load-error" | "decision-error" | "co-sign" | "review-pending";
 
 const NOTICE_KEY: Record<Exclude<Notice, "none">, string> = {
 	"load-error": "associationApprovalLoadError",
 	"decision-error": "associationApprovalDecisionError",
 	"co-sign": "associationApprovalCoSignRequired",
+	"review-pending": "associationApprovalReviewPending",
 };
 
 const BANNER_KEY: Record<Exclude<ReassociationEvidenceView, "code-matched">, string> = {
@@ -178,13 +185,25 @@ export default function AssociationRequestApprovalScreen() {
 			const session = await sessionPromiseRef.current!;
 			const engine = await getEngine<IReassociationEngine>("association");
 			const signer = await createDeviceSigner("Device User");
+			let outcome: string | undefined;
 			if (kind === "approve") {
 				if (!registrantId) throw new Error("AssociationRequestApprovalScreen: no registrant resolved");
-				await trackCommits(commitTracker, `decision:${requestId}`, () =>
+				const result = await trackCommits(commitTracker, `decision:${requestId}`, () =>
 					engine.approveReassociation(requestId, { registrantId }, signer, session.association, session.opener),
 				);
+				outcome = result?.outcome;
 			} else {
-				await trackCommits(commitTracker, `decision:${requestId}`, () => engine.rejectReassociation(requestId, signer, session.association));
+				const result = await trackCommits(commitTracker, `decision:${requestId}`, () => engine.rejectReassociation(requestId, signer, session.association));
+				outcome = result?.outcome;
+			}
+			if (outcome === "awaiting-co-signers") {
+				// Above a vrg threshold of 1: the decision is recorded and waits for other officers.
+				if (!unmountedRef.current) {
+					setRefused(true);
+					setNotice("co-sign");
+					setShowConfirm(false);
+				}
+				return;
 			}
 			navigation.goBack();
 		} catch (err) {
@@ -193,6 +212,11 @@ export default function AssociationRequestApprovalScreen() {
 					// Never the engine message, and never "try again": retrying cannot succeed.
 					setRefused(true);
 					setNotice("co-sign");
+					setShowConfirm(false);
+				} else if (isReviewPendingRefusal(err)) {
+					// Another officer's decision is already being co-signed: this one goes through the task.
+					setRefused(true);
+					setNotice("review-pending");
 					setShowConfirm(false);
 				} else {
 					const outcome = handleDeviceSigningError(err);
