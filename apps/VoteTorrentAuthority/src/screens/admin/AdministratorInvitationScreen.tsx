@@ -14,12 +14,10 @@ import type {
 } from "@votetorrent/vote-core";
 import { scopeLabel } from "../../utils/scopeLabel";
 import { ThemedText } from "../../components/ThemedText";
-import { ChipButton } from "../../components/ChipButton";
 import { CustomButton } from "../../components/CustomButton";
 import { CustomTextInput } from "../../components/CustomTextInput";
 import { InviteShareBlock } from "../invitations/InviteShareBlock";
 import { Footer } from "../../components/Footer";
-import { InfoCard } from "../../components/InfoCard";
 import { InlineError } from "../../components/InlineError";
 import { SignatureTaskFooter } from "../../components/SignatureTaskFooter";
 import type { RootStackParamList } from "../../navigation/types";
@@ -321,32 +319,8 @@ export default function AdministratorInvitationScreen() {
 								<ThemedText style={styles.permissionsText}>{permissions}</ThemedText>
 							</View>
 
-							{/* Create a new user, OR sign with the existing profile (Figma frame 32) */}
-							<ChipButton
-								label={t("createUser")}
-								icon="circle-plus"
-								fullWidth
-								onPress={() => {}}
-							/>
-							<ThemedText type="defaultSemiBold" style={styles.orText}>
-								{t("or")}
-							</ThemedText>
-							<InfoCard
-								additionalInfo={[
-									{ label: t("user"), value: seedInvite.name },
-									{ label: t("sid"), value: (seedInvite as any).userId },
-								]}
-								icon="chevron-right"
-								onPress={() => {}}
-							/>
-							<CustomButton
-								title={t("sign")}
-								icon="signature"
-								backgroundColor={colors.important}
-								forceDarkText={true}
-								size="thin"
-								onPress={() => {}}
-							/>
+							{/* Figma frame 32 also drew Create User / user card / SIGN here. None of them did anything:
+							    Accept below signs with this phone's own user and key (getOfficerAcceptProvisioning). */}
 						</>
 					) : !parsed ? (
 						<ThemedText>{t("invitationAcceptPasteHint")}</ThemedText>
@@ -388,10 +362,6 @@ const localStyles = StyleSheet.create({
 	permissionsText: {
 		flex: 1,
 		flexWrap: "wrap",
-	},
-	orText: {
-		textAlign: "center",
-		marginVertical: 8,
 	},
 	scopesSection: {
 		marginTop: 16,
