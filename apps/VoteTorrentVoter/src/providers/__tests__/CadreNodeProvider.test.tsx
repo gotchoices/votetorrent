@@ -228,7 +228,7 @@ describe('CadreNodeProvider (Voter) — edge-reader cohort refusal', () => {
 		const {EDGE_READER_PROTOCOL} = require('@votetorrent/vote-engine/rn');
 		await bootProvider();
 		expect(mockConstructedNodes).toHaveLength(1);
-		const opts = mockConstructedNodes[0].receivedOptions as {edgeReaderProtocol?: unknown; profile?: unknown};
+		const opts = mockConstructedNodes[0].receivedOptions as {edgeReaderProtocol?: unknown; nodeClass?: unknown};
 		expect(opts.edgeReaderProtocol).toBe(EDGE_READER_PROTOCOL);
 		expect(opts.edgeReaderProtocol).toBe('/votetorrent/edge-reader/1.0.0');
 		expect(opts.nodeClass).toBe('device');
