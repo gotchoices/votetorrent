@@ -514,13 +514,11 @@ export default function ProvisionSigningKeyScreen() {
 			await markRecoveryInProgress();
 
 			// Revoke the invalidated key FIRST, authorized by the recovery key's own signature
-			// (revokeKey binds context.UserKey from `signature.signerKey` directly — unlike
-			// addKey, it does not depend on array order). This collapses the user down to exactly
-			// one active key (the recovery key) BEFORE the signed add below, so that add's
-			// context.UserKey — bound from the engine snapshot's activeKeys[0] — is unambiguously
-			// the recovery key, regardless of how UserKey rows happen to sort when read back.
-			// Legal per UserKey.DeleteValid: this is never the user's LAST key while the recovery
-			// key remains registered.
+			// (revokeKey binds context.UserKey from `signature.signerKey` directly, and addKey now
+			// does the same, so neither depends on array order). This collapses the user down to
+			// exactly one active key (the recovery key) BEFORE the signed add below. Legal per
+			// UserKey.DeleteValid: this is never the user's LAST key while the recovery key remains
+			// registered.
 			if (oldKey !== undefined) {
 				const revokeDigest = await before.getRevokeKeyDigest(oldKey);
 				const revokeResult = (await native.signWithRecoveryKey(
