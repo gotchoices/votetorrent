@@ -212,6 +212,28 @@ describe('ResultsScreen', () => {
 		expect(has(tr, 'results-not-published')).toBe(false);
 	});
 
+	// todo 2026-11-23-voter-results-date-follows-phone-locale: the published date follows the app's language,
+	// never the phone's locale (stubbed here so a device-locale format would show up as DEVICE-LOCALE).
+	it.each([
+		['en', 'November'],
+		['es', 'noviembre'],
+	])('formats the published date in the app language (%s)', async (lng, month) => {
+		const deviceLocale = jest.spyOn(Date.prototype, 'toLocaleString').mockReturnValue('DEVICE-LOCALE');
+		try {
+			await renderer.act(async () => {
+				await i18n.changeLanguage(lng);
+			});
+			mockPublication = PUBLISHED;
+			const tr = await mount();
+			const line = text(tr, 'results-published-matches');
+			expect(line).toContain(month);
+			expect(line).toContain('2026');
+			expect(line).not.toContain('DEVICE-LOCALE');
+		} finally {
+			deviceLocale.mockRestore();
+		}
+	});
+
 	it('names both block counts when the published count differs from this phone\'s', async () => {
 		mockPublication = {...PUBLISHED, blockCount: 4, matchesRecomputed: false};
 		const tr = await mount();
