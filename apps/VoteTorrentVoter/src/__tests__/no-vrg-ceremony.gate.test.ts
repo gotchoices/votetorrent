@@ -59,10 +59,10 @@
  *      actually stops a real end-user request — is a voter identity that was never inserted into
  *      `Officer` at all, which is what every real (non-dev-seed) voter is. This test proves that.
  *
- *   5. SCHEMA GATE (D-05/D-06) — `votetorrent.qsql`, comment-stripped, carries no `'association'`
- *      member in `view SignatureType` and no `'association'` pairing in `Task.ExtensionExists`.
- *      `48-CONTEXT.md` names `Task.ExtensionExists` the highest-risk schema change across phases
- *      46-48; this gate is what keeps it unamended.
+ *   5. SCHEMA GATE (D-05/D-06) — `votetorrent.qsql`, comment-stripped: any `'association'` member
+ *      of `view SignatureType` and pairing in `Task.ExtensionExists` is the officers' co-signer task
+ *      (App schema version 2), whose extension table is written only under an officer's 'vrg'
+ *      session. Before version 2 the gate forbade both outright.
  */
 
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
@@ -476,18 +476,40 @@ describe('no-association schema gate (D-05/D-06) — packages/vote-core/schema/v
 
 	const strippedSchema = stripSqlLineComments(readFileSync(schemaPath, 'utf8'))
 
-	it('view SignatureType carries no \'association\' member', () => {
+	// App schema version 2 (user decision 2026-11-23: co-signing above a vrg threshold of 1) brings
+	// back an 'association' signature type, but as the OFFICERS' co-signer task on a device change
+	// decision, never a voter-side ceremony. The two checks below used to forbid the member and the
+	// pairing outright; they now pin what D-05/D-06 protects: the only 'association' pairing is the
+	// officer co-signer extension, and that extension is written only under an officer's 'vrg'
+	// session. A voter has no 'vrg' AdminSigning, so it can never open or sign one.
+	function associationExtensionTable (): string {
+		const tableMatch = strippedSchema.match(/table\s+AssociationSignatureTaskExtension\s*\(([\s\S]*?)\n\t\)/)
+		if (!tableMatch) throw new Error('table AssociationSignatureTaskExtension not found — schema gate regex is stale, fix the gate')
+		return tableMatch[1]
+	}
+
+	it('view SignatureType\'s \'association\' member exists only with the officer co-signer extension table', () => {
 		const viewMatch = strippedSchema.match(/view\s+SignatureType\s+as[\s\S]*?;/)
 		if (!viewMatch) throw new Error('view SignatureType not found — schema gate regex is stale, fix the gate')
 		const body = viewMatch[0]
-		expect(body).not.toContain("'association'")
+		if (body.includes("'association'")) {
+			expect(associationExtensionTable()).toMatch(/constraint\s+MutationValid\s+check\s+on\s+insert,\s*update\s*\(/)
+		}
 	})
 
-	it('Task.ExtensionExists carries no \'association\' pairing', () => {
+	it('Task.ExtensionExists pairs \'association\' only with AssociationSignatureTaskExtension, which requires an officer \'vrg\' session', () => {
 		const extMatch = strippedSchema.match(/constraint\s+ExtensionExists\s+check\s*\(([\s\S]*?)\n\t\tconstraint\s+MutationValid/)
 		if (!extMatch) throw new Error('Task.ExtensionExists not found — schema gate regex is stale, fix the gate')
 		const body = extMatch[1]
-		expect(body).not.toContain("'association'")
+		const pairings = body.split('\n').filter((line) => line.includes("'association'"))
+		for (const line of pairings) {
+			expect(line).toMatch(/SignatureType\s*=\s*'association'\s+and\s+exists\s*\(select 1 from AssociationSignatureTaskExtension\b/)
+		}
+		if (pairings.length > 0) {
+			const table = associationExtensionTable()
+			expect(table).toMatch(/join\s+AdminSigning\s+A\s+on\s+A\.Nonce\s*=\s*T\.SigningNonce\s+and\s+A\.Scope\s*=\s*'vrg'/)
+			expect(table).toMatch(/T\.SignatureType\s*=\s*'association'/)
+		}
 	})
 
 	// MUTATION PROOF, schema half: this file's `<files_modified>` is limited to
