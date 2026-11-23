@@ -203,7 +203,7 @@ function stackPreflight() {
 	})();
 	out('RELAY_STACK ' + JSON.stringify({ node: process.versions.node, versions, patch }));
 	const ok =
-		versions['@serfab/cadre-core'] === '1.23.0' &&
+		versions['@serfab/cadre-core'] === '1.24.0' &&
 		patch &&
 		versions['@optimystic/db-p2p'] === '1.29.0' &&
 		versions['main-event'] === '1.0.5' &&
@@ -301,7 +301,7 @@ async function serve(opts) {
 	const node = new CadreNode({
 		privateKey,
 		controlNetwork: { partyId: RELAY_PARTY, bootstrapNodes: [] },
-		profile: 'storage',
+		nodeClass: 'server',
 		strandFilter: { mode: 'none' },
 		requireSignedSchemas: false,
 		storage: { provider: scopedProvider() },
@@ -465,7 +465,7 @@ async function probeClient(opts) {
 	const node = new CadreNode({
 		privateKey: await generateKeyPair('Ed25519'),
 		controlNetwork: { partyId: CLIENT_PARTY, bootstrapNodes: [relayAddr] },
-		profile: 'transaction',
+		nodeClass: 'device',
 		requireSignedSchemas: false,
 		strandFilter: { mode: 'all' },
 		storage: { provider: scopedProvider() },

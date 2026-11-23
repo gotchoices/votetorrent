@@ -142,7 +142,7 @@ async function main() {
   // redemption is signed with the key behind the joiner's peer id.
   joiner = new CadreNode({
     controlNetwork: { partyId: PARTY_ID, bootstrapNodes: [droneAddr] },
-    profile: 'transaction',
+    nodeClass: 'device',
     requireSignedSchemas: false,
     strandFilter: { mode: 'all' },
     network: { transports: [webSockets()], listenAddrs: [] },

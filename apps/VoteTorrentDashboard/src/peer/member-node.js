@@ -48,7 +48,7 @@ import { createEdgeNode as createCadreEdgeNode, lazyRawStorage, isOwnerGrant } f
 import { decodeCadreInvitation, CadreInviteRejectedError, DEFAULT_IDENTITY_KEY_ID } from '@serfab/cadre-core';
 import { DEFAULT_STRAND_CLUSTER_SIZE } from '@serfab/quereus-plugin-sereus';
 import { openOptimysticWebDb, IndexedDBRawStorage, IndexedDBKVStore } from '@optimystic/db-p2p-storage-web';
-import { VOTETORRENT_SCHEMA_SQL, registerVoteTorrentFunctions } from '@votetorrent/vote-engine/browser';
+import { VOTETORRENT_SCHEMA_SQL, VOTETORRENT_SCHEMA_VERSION, registerVoteTorrentFunctions } from '@votetorrent/vote-engine/browser';
 
 /** The fixed prefix of every log line this module writes. */
 export const LOG_PREFIX = '[vt-dashboard/member-node]';
@@ -142,12 +142,13 @@ const VOTETORRENT_INNER_DDL = VOTETORRENT_SCHEMA_SQL.replace(/^\s*declare\s+sche
  * The sApp configuration this node claims the strand with: the schema from this bundle, never
  * from the network.
  *
- * @type {Readonly<{ id: 'org.votetorrent', version: '1.0.0', schema: string, latencyHint: 'interactive' }>}
+ * @type {Readonly<{ id: 'org.votetorrent', version: '1.0.0', schema: string, schemaVersion: number, latencyHint: 'interactive' }>}
  */
 export const MEMBER_SAPP_CONFIG = Object.freeze({
 	id: /** @type {'org.votetorrent'} */ ('org.votetorrent'),
 	version: /** @type {'1.0.0'} */ ('1.0.0'),
 	schema: VOTETORRENT_INNER_DDL,
+	schemaVersion: VOTETORRENT_SCHEMA_VERSION,
 	latencyHint: /** @type {'interactive'} */ ('interactive'),
 });
 

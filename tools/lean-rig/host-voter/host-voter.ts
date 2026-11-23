@@ -55,6 +55,7 @@ import { p256 } from '@noble/curves/nist.js'
 import { secp256k1 } from '@noble/curves/secp256k1.js'
 import { bytesToHex } from '@noble/curves/utils.js'
 import { NetworksEngine } from '../../../packages/vote-engine/src/networks/networks-engine.js'
+import { VOTETORRENT_SCHEMA_VERSION } from '../../../packages/vote-engine/src/database/schema-version.js'
 import { decodeNetworkJoinCode } from '../../../packages/vote-engine/src/networks/join-code.js'
 import { joinNetwork, type NetworkJoinStep } from '../../../packages/vote-engine/src/networks/network-join.js'
 import { registerDbPlugins, declareViewsInMain, verifySigP256, registerVoteTorrentFunctions } from '../../../packages/vote-engine/src/database/initialize.js'
@@ -685,7 +686,7 @@ async function main (): Promise<void> {
       controlNetwork: { partyId: PARTY_ID, bootstrapNodes: [RELAY] },
       trustedOwners: { store: await PersistentTrustedOwnerStore.open(mapSlot(disk, 'trustedOwners'), PARTY_ID) },
       bootstrapPeers: { store: await PersistentBootstrapPeerStore.open(mapSlot(disk, 'bootstrapPeers'), PARTY_ID) },
-      profile: 'transaction',
+      nodeClass: 'device',
       requireSignedSchemas: false,
       strandFilter: { mode: 'all' },
       storage: { provider: scopedMemoryProvider(MemoryRawStorage) },
@@ -730,6 +731,7 @@ async function main (): Promise<void> {
               id: 'org.votetorrent',
               version: '1.0.0',
               schema: VOTETORRENT_SCHEMA_SQL.replace(/^\s*declare\s+schema\s+\w+\s*\{/, '').replace(/\}\s*apply\s+schema\s+\w+\s*;\s*$/, '').trim(),
+              schemaVersion: VOTETORRENT_SCHEMA_VERSION,
               latencyHint: 'interactive'
             },
             founder

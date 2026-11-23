@@ -45,6 +45,7 @@ import { registerDbPlugins, declareViewsInMain, registerVoteTorrentFunctions } f
 import type { DbFactory } from '../../src/types.js'
 import type { User } from '@votetorrent/vote-core'
 import type { EngineContext } from '../../src/types.js'
+import { VOTETORRENT_SCHEMA_VERSION } from '../../src/database/schema-version.js'
 
 // ---------------------------------------------------------------------------
 // Flag, describe wrapper
@@ -343,7 +344,7 @@ async function attemptBringUp (
       storage: { provider: () => storage },
       strandClusterSize: clusterSize,
       hibernation: { enabled: false },
-      profile: 'storage',
+      nodeClass: 'server',
       network: { transports: [webSockets()], listenAddrs },
       // As the Authority and Voter providers: VoteTorrent's SQL functions before the sApp schema applies (quereus 5.6).
       strandDatabaseSetup: registerVoteTorrentFunctions,
@@ -520,7 +521,7 @@ function buildHarnessNode (
     const started = Date.now()
     const addStrandConfig: any = {
       strandRow: { Id: strandId, MemberPrivateKey: null, Type: 'o', FounderOwnerKey: null, FounderPeerId: null },
-      sAppConfig: { id: HARNESS_SAPP_ID, version: '1.0.0', schema: VOTETORRENT_INNER_DDL, latencyHint: 'interactive' },
+      sAppConfig: { id: HARNESS_SAPP_ID, version: '1.0.0', schema: VOTETORRENT_INNER_DDL, schemaVersion: VOTETORRENT_SCHEMA_VERSION, latencyHint: 'interactive' },
       // awaitFirstSync: false — mirrors topology.mjs strandConfig(): cadre-core >= 1.1.0
       // defaults a JOINER's addStrand to block on first sync; opting out lets the strand
       // launch immediately and this harness awaits whenStrandWritable itself.
@@ -1057,7 +1058,7 @@ export async function attachHarnessEdgeStrand (
   try {
     await node.addStrand({
       strandRow: { Id: strandId, MemberPrivateKey: null, Type: 'o', FounderOwnerKey: null, FounderPeerId: null },
-      sAppConfig: { id: HARNESS_SAPP_ID, version: '1.0.0', schema: VOTETORRENT_INNER_DDL, latencyHint: 'interactive' },
+      sAppConfig: { id: HARNESS_SAPP_ID, version: '1.0.0', schema: VOTETORRENT_INNER_DDL, schemaVersion: VOTETORRENT_SCHEMA_VERSION, latencyHint: 'interactive' },
       awaitFirstSync: false
     })
   } catch (err) {
@@ -1103,7 +1104,7 @@ export async function startHarnessStranger (
     storage: { provider: () => storage },
     strandClusterSize: opts?.clusterSize ?? 2,
     hibernation: { enabled: false },
-    profile: 'transaction',
+    nodeClass: 'device',
     network: { transports: [webSockets()], listenAddrs: ['/ip4/127.0.0.1/tcp/0/ws'] },
     strandDatabaseSetup: registerVoteTorrentFunctions
   } as any)

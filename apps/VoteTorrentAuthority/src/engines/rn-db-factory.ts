@@ -16,7 +16,7 @@ import { ReactNativeLevelDBProvider } from '@quereus/plugin-react-native-leveldb
 import { leveldbOpenPool } from './leveldb-open-pool';
 import { createIsolatedStoreModule } from '@quereus/store';
 import { Database } from '@quereus/quereus';
-import { VOTETORRENT_SCHEMA_SQL } from '@votetorrent/vote-engine/rn';
+import { VOTETORRENT_SCHEMA_SQL, VOTETORRENT_SCHEMA_VERSION } from '@votetorrent/vote-engine/rn';
 import type { DbFactory } from '@votetorrent/vote-engine';
 import type { StrandConfig, StrandInstance } from '@serfab/cadre-core';
 import {
@@ -241,6 +241,7 @@ export function createStrandDbFactory(node: StrandHost, options?: StrandDbFactor
 						id: 'org.votetorrent',
 						version: '1.0.0',
 						schema: VOTETORRENT_INNER_DDL,
+						schemaVersion: VOTETORRENT_SCHEMA_VERSION,
 						latencyHint: 'interactive',
 					},
 					founder,

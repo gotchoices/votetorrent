@@ -58,3 +58,4 @@ export * from './blocks/index.js'
 export * from './pairing/index.js'
 // Which of this phone's writes no other member holds yet (todo 2026-09-11-optimystic-commit-success-hides-unresolvable-cohort).
 export * from './durability/index.js'
+export { VOTETORRENT_SCHEMA_VERSION } from './database/schema-version.js'

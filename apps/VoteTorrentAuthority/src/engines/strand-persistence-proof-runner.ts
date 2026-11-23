@@ -85,7 +85,7 @@ export async function runStrandPersistenceProof(): Promise<void> {
       // D-06: bootstrap/solo ONLY — never inject CONTROL_ADDR/STRAND_BOOTSTRAP_ADDR
       // placeholders here; cross-peer is explicitly out of scope for this proof.
       controlNetwork: { partyId: 'votetorrent', bootstrapNodes: [] },
-      profile: 'transaction',
+      nodeClass: 'device',
       // 40-03 (PUB-03): published @serfab/cadre-core@0.8.1 added a fail-closed sApp-schema
       // signature policy (requireSignedSchemas defaults true) — an unsigned sAppConfig is
       // rejected at strand bring-up with SchemaVerificationError('missing signature'). This

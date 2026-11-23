@@ -92,7 +92,7 @@ function buildNode({ privateKey, provider, trustedOwnerStore, bootstrapNodes, co
     storage: { provider },
     trustedOwners: { store: trustedOwnerStore },
     hibernation: { enabled: false },
-    profile: 'transaction',
+    nodeClass: 'device',
     network: {
       transports: [webSockets()],
       listenAddrs: ['/ip4/127.0.0.1/tcp/0/ws'],

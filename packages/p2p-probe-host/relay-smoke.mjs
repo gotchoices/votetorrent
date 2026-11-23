@@ -52,7 +52,7 @@ async function main() {
   // (RESEARCH.md "P2P-08 — Relay Wiring" point 5 / Assumption A2).
   server = new CadreNode({
     controlNetwork: { partyId: PARTY_ID, bootstrapNodes: [] },
-    profile: 'storage',
+    nodeClass: 'server',
     strandFilter: { mode: 'all' },
     storage: { provider: () => new MemoryRawStorage() },
     network: {
@@ -88,7 +88,7 @@ async function main() {
   // bootstrapped to the relay-server's control multiaddr.
   client = new CadreNode({
     controlNetwork: { partyId: PARTY_ID, bootstrapNodes: [serverBootstrapAddr] },
-    profile: 'transaction',
+    nodeClass: 'device',
     strandFilter: { mode: 'all' },
     storage: { provider: () => new MemoryRawStorage() },
     network: {

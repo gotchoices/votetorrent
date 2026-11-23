@@ -474,7 +474,7 @@ export async function runReplicationProof(): Promise<void> {
       privateKey,
       controlNetwork: { partyId: 'votetorrent', bootstrapNodes: BOOTSTRAP_NODES },
       strandNetworkState: { store: strandNetworkStateStore },
-      profile: 'transaction',
+      nodeClass: 'device',
       // Published @serfab/cadre-core@0.8.1 added a fail-closed sApp-schema signature
       // policy (requireSignedSchemas defaults true): an unsigned sAppConfig is rejected
       // at strand bring-up with SchemaVerificationError('missing signature'). This proof

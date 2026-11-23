@@ -80,7 +80,7 @@ async function main() {
   // --- drone-A: first bootstrap peer, no upstream ---
   droneA = new CadreNode({
     controlNetwork: { partyId: 'votetorrent-two-drone-smoke', bootstrapNodes: [] },
-    profile: 'storage',
+    nodeClass: 'server',
     strandFilter: { mode: 'all' },
     storage: { provider: () => new MemoryRawStorage() },
     network: {
@@ -96,7 +96,7 @@ async function main() {
   await withTimeout(
     droneA.addStrand({
       strandRow: { Id: STRAND_ID, MemberPrivateKey: null, Type: 'o' },
-      sAppConfig: { id: SAPP_ID, version: '1.0.0', schema: MINIMAL_SCHEMA, latencyHint: 'interactive' },
+      sAppConfig: { id: SAPP_ID, version: '1.0.0', schema: MINIMAL_SCHEMA, schemaVersion: 1, latencyHint: 'interactive' },
       mode: 'bootstrap',
     }),
     ADD_STRAND_TIMEOUT_MS,
@@ -115,7 +115,7 @@ async function main() {
   const droneAControlAddr = pickLoopbackWs(droneAControlAddrs);
   droneB = new CadreNode({
     controlNetwork: { partyId: 'votetorrent-two-drone-smoke', bootstrapNodes: [droneAControlAddr] },
-    profile: 'storage',
+    nodeClass: 'server',
     strandFilter: { mode: 'all' },
     storage: { provider: () => new MemoryRawStorage() },
     network: {
@@ -131,7 +131,7 @@ async function main() {
   await withTimeout(
     droneB.addStrand({
       strandRow: { Id: STRAND_ID, MemberPrivateKey: null, Type: 'o' },
-      sAppConfig: { id: SAPP_ID, version: '1.0.0', schema: MINIMAL_SCHEMA, latencyHint: 'interactive' },
+      sAppConfig: { id: SAPP_ID, version: '1.0.0', schema: MINIMAL_SCHEMA, schemaVersion: 1, latencyHint: 'interactive' },
       mode: 'bootstrap',
     }),
     ADD_STRAND_TIMEOUT_MS,
@@ -154,7 +154,7 @@ async function main() {
       partyId: 'votetorrent-two-drone-smoke',
       bootstrapNodes: [droneAControlAddr, pickLoopbackWs(droneB.getControlNode().getMultiaddrs().map((m) => m.toString()))],
     },
-    profile: 'transaction',
+    nodeClass: 'device',
     strandFilter: { mode: 'all' },
     storage: { provider: () => new MemoryRawStorage() },
     network: {
@@ -170,7 +170,7 @@ async function main() {
   await withTimeout(
     solo.addStrand({
       strandRow: { Id: STRAND_ID, MemberPrivateKey: null, Type: 'o' },
-      sAppConfig: { id: SAPP_ID, version: '1.0.0', schema: MINIMAL_SCHEMA, latencyHint: 'interactive' },
+      sAppConfig: { id: SAPP_ID, version: '1.0.0', schema: MINIMAL_SCHEMA, schemaVersion: 1, latencyHint: 'interactive' },
       // mode omitted -> defaults to 'networked' (StrandDatabase: transactor='network')
     }),
     ADD_STRAND_TIMEOUT_MS,

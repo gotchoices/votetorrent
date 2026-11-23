@@ -1,8 +1,8 @@
 diff --git a/dist/cadre-node.js b/dist/cadre-node.js
-index 2cc63667b41b994119fedbd9355b25b959a911da..29b38b28dbdf1997d1e1f21b40421f514efb989c 100644
+index 5f2fdf291b7c893300c4845b86680856a8e62aa8..5635dcbe3bd748c8a80decd10c3f27f1b53103f7 100644
 --- a/dist/cadre-node.js
 +++ b/dist/cadre-node.js
-@@ -60,6 +60,11 @@ import { createMembershipConnectionGater, UnauthorizedReservationBudget } from '
+@@ -62,6 +62,11 @@ import { createMembershipConnectionGater, UnauthorizedReservationBudget } from '
  import { controlNetworkName, installControlProtocolGuard, servesControlDatabase } from './control-protocol-guard.js';
  import { StrandWakeService, dialWake } from './strand-wake-protocol.js';
  import { StrandAddrService, collectStrandAddrs, nextStrandAddrAsk } from './strand-addr-protocol.js';
@@ -12,9 +12,9 @@ index 2cc63667b41b994119fedbd9355b25b959a911da..29b38b28dbdf1997d1e1f21b40421f51
 +// VoteTorrent patch (control-cohort-refusal): the strand hook's resolver, reused for the control node.
 +import { resolveStrandCohortRefusal } from './strand-cohort-refusal.js';
  import { DelegateAdmissionStore, extractCircuitRelayTargets, dueRelayAnnounces, prunePeerStrandKeys, peerStrandKey, recordRelayRefusals, relaysNotRefusing } from './delegate-admission.js';
- import { relayCircuitAddrs, resolveListenAddrs, resolveTransportOptions, RelayReservationFailedError } from './relay-addrs.js';
+ import { relayCircuitAddrs, resolveListenAddrs, resolveTransportOptions, listenTransportNodeOptions, RelayReservationFailedError } from './relay-addrs.js';
  import { selfAddressesChanged } from './self-address-update.js';
-@@ -72,6 +77,12 @@ import { summarizeConnectionPaths } from './diagnostics/connection-path.js';
+@@ -75,6 +80,12 @@ import { summarizeConnectionPaths } from './diagnostics/connection-path.js';
  import { timedStep } from './timed-step.js';
  import { describeThrown, toError } from './describe-thrown.js';
  const log = debug('sereus:cadre:node');
@@ -27,7 +27,7 @@ index 2cc63667b41b994119fedbd9355b25b959a911da..29b38b28dbdf1997d1e1f21b40421f51
  const timing = debug('sereus:cadre:timing');
  /**
   * How often a running strand re-asks each connected sibling that last answered WITH
-@@ -312,6 +323,11 @@ export class CadreNode {
+@@ -322,6 +333,11 @@ export class CadreNode {
           * window only ({@link admitRedeemingDevice}); the per-stream gate never does.
           */
          this.admittingDevices = new Map();
@@ -39,7 +39,7 @@ index 2cc63667b41b994119fedbd9355b25b959a911da..29b38b28dbdf1997d1e1f21b40421f51
          this.strandWatcher = null;
          this.seedBootstrapService = null;
          /**
-@@ -340,6 +356,13 @@ export class CadreNode {
+@@ -350,6 +366,13 @@ export class CadreNode {
           * stops conflating control addresses with strand seeding.
           */
          this.strandAddrService = null;
@@ -53,7 +53,7 @@ index 2cc63667b41b994119fedbd9355b25b959a911da..29b38b28dbdf1997d1e1f21b40421f51
          /**
           * Cadre invitation redemption handler (`/sereus/cadre-invite/1.0.0`): a device holding an
           * invitation dials this machine and proves possession; the handler seats the row and
-@@ -959,6 +982,20 @@ export class CadreNode {
+@@ -971,6 +994,20 @@ export class CadreNode {
          /** `connection:close` listener: {@link onControlConnectionClosed} (teardown in {@link stopRecordRefresh}). */
          this.controlConnectionCloseHandler = null;
          this.config = config;
@@ -71,10 +71,10 @@ index 2cc63667b41b994119fedbd9355b25b959a911da..29b38b28dbdf1997d1e1f21b40421f51
 +        this.publicObserverStrandIds = new Set(Array.isArray(config.publicObserverStrandIds)
 +            ? config.publicObserverStrandIds.filter((id) => typeof id === 'string' && id.length > 0)
 +            : []);
-         this.hostUnclaimedStrands = config.hostUnclaimedStrands ?? config.profile === 'storage';
+         this.roles = resolveNodeRoles(config.nodeClass, config.roles);
+         this.hostUnclaimedStrands = resolveHostUnclaimedStrands(config.hostUnclaimedStrands, this.roles);
          this.strandManager = new StrandInstanceManager();
-         this.enrollmentService = new EnrollmentService();
-@@ -1157,6 +1194,25 @@ export class CadreNode {
+@@ -1170,6 +1207,25 @@ export class CadreNode {
              // Before anything else can happen on the node: the quiet period above holds every
              // connection off, so no stream can arrive ahead of the guard.
              this.installControlProtocolGuard(this.controlNode);
@@ -100,7 +100,7 @@ index 2cc63667b41b994119fedbd9355b25b959a911da..29b38b28dbdf1997d1e1f21b40421f51
              // Extract coordinatedRepo from the node (attached by createLibp2pNode)
              const coordinatedRepo = this.controlNode.coordinatedRepo;
              if (!coordinatedRepo) {
-@@ -1283,7 +1339,8 @@ export class CadreNode {
+@@ -1296,7 +1352,8 @@ export class CadreNode {
              // we record an admission grant so our connection gate (and thus our relay
              // server, when enabled) admits it — see delegate-admission.ts.
              this.strandAddrService = new StrandAddrService({
@@ -110,7 +110,7 @@ index 2cc63667b41b994119fedbd9355b25b959a911da..29b38b28dbdf1997d1e1f21b40421f51
                  onDelegateAnnounce: (announcer, strandId, delegate) => this.grantDelegateAdmission(announcer, strandId, delegate),
              });
              await this.strandAddrService.initialize(this.controlNode);
-@@ -1323,6 +1380,19 @@ export class CadreNode {
+@@ -1336,6 +1393,19 @@ export class CadreNode {
                  this.pushFanoutService = this.buildPushFanout(this.config.push);
                  log('Push-wake fan-out enabled (injected notifier)');
              }
@@ -130,7 +130,7 @@ index 2cc63667b41b994119fedbd9355b25b959a911da..29b38b28dbdf1997d1e1f21b40421f51
              this._running = true;
              this.emit('control:connected', undefined);
              timing('[start] total: %dms', Math.round(performance.now() - tTotal));
-@@ -2171,7 +2241,12 @@ export class CadreNode {
+@@ -2227,7 +2297,12 @@ export class CadreNode {
              connectionGater: createMembershipConnectionGater({
                  admitInbound: (remotePeerId) => this.admitInboundControlConnection(remotePeerId),
                  admitRelayReservation: (remotePeerId) => this.admitControlRelayReservation(remotePeerId),
@@ -142,9 +142,9 @@ index 2cc63667b41b994119fedbd9355b25b959a911da..29b38b28dbdf1997d1e1f21b40421f51
 +                // without one — the pre-patch branch is unchanged in that case.
 +                admitPublicObservers: () => this.publicObserverStrandIds.size > 0
              }, network?.connectionGater, ADMISSION_DECISION_TIMEOUT_MS, relayedRequestBudgetMs(network?.linkRoundTripMs)),
-             // Fail-closed per-stream authorization for the four Optimystic control-DB
+             // Fail-closed per-stream authorization for the five Optimystic control-DB
              // protocols — the members-only layer the connection gater's stranger
-@@ -2499,7 +2574,11 @@ export class CadreNode {
+@@ -2555,7 +2630,11 @@ export class CadreNode {
       * ({@link admittingDevices}), which must hold the rows that admit it.
       */
      isControlCohortMember(remotePeerId) {
@@ -157,7 +157,7 @@ index 2cc63667b41b994119fedbd9355b25b959a911da..29b38b28dbdf1997d1e1f21b40421f51
      }
      /**
       * Per-stream authorization for the protocol guard's `members-snapshot` class
-@@ -3084,6 +3163,23 @@ export class CadreNode {
+@@ -3150,6 +3229,23 @@ export class CadreNode {
          // self-update rule is measured against, and a removal landing mid-publish re-reads as
          // absent instead of matching no rows under a 'refreshed'. The record it returns is the
          // one in the row.
@@ -181,7 +181,7 @@ index 2cc63667b41b994119fedbd9355b25b959a911da..29b38b28dbdf1997d1e1f21b40421f51
          const aloneBefore = this.committedAlone();
          const record = await this.controlDatabase.updateSelfPeerRecord(peerId, (current) => this.signSelfRecord(peerId, signingKey, addrs, current));
          if (record === null) {
-@@ -3860,20 +3956,39 @@ export class CadreNode {
+@@ -3940,20 +4036,39 @@ export class CadreNode {
          //    redial wake (armReconcileWake); a sibling with nothing to dial does not.
          const dialed = [];
          let unconnected = false;
@@ -234,7 +234,7 @@ index 2cc63667b41b994119fedbd9355b25b959a911da..29b38b28dbdf1997d1e1f21b40421f51
          }
          log('reconcileControlCohort: pass complete (siblings=%d, selected=%d, dialed=%d, unconnected=%s)', siblings.length, dials.length, dialed.length, unconnected);
          return { dialed, unconnected };
-@@ -4106,7 +4221,47 @@ export class CadreNode {
+@@ -4186,7 +4301,47 @@ export class CadreNode {
          if (booked.length > 0) {
              return booked;
          }
@@ -283,7 +283,7 @@ index 2cc63667b41b994119fedbd9355b25b959a911da..29b38b28dbdf1997d1e1f21b40421f51
      }
      /**
       * A sibling's retained out-of-band dial target (see {@link bootstrapPeerStore}),
-@@ -5292,6 +5447,14 @@ export class CadreNode {
+@@ -5430,6 +5585,14 @@ export class CadreNode {
              await this.strandAddrService.shutdown();
              this.strandAddrService = null;
          }
@@ -298,7 +298,7 @@ index 2cc63667b41b994119fedbd9355b25b959a911da..29b38b28dbdf1997d1e1f21b40421f51
          // Unregister the two redemption handlers, for the same reason.
          if (this.cadreInviteHandler && this.controlNode) {
              await this.cadreInviteHandler.unregister(this.controlNode);
-@@ -6763,6 +6926,13 @@ export class CadreNode {
+@@ -6914,6 +7077,13 @@ export class CadreNode {
              // are on `StartStrandConfig.servingMachines`.
              backfill: this.config.strandBackfill,
              reactivity: this.config.strandReactivity,
@@ -312,7 +312,7 @@ index 2cc63667b41b994119fedbd9355b25b959a911da..29b38b28dbdf1997d1e1f21b40421f51
              revocationEnforcement: this.config.strandRevocationEnforcement,
              membershipReconciliation: this.config.strandMembershipReconciliation,
              onSelfRevoked: (revokedStrandId) => {
-@@ -7429,6 +7599,18 @@ export class CadreNode {
+@@ -7581,6 +7751,18 @@ export class CadreNode {
          }
          log('strand %s address book merged (peers=%d, merged=%d, restamped=%d, skipped=%d, failed=%d, dropped=%d)', strandId, peers, counts.merged, counts.restamped, counts.skipped, counts.failed, addrs.length - grouped);
      }
@@ -330,8 +330,8 @@ index 2cc63667b41b994119fedbd9355b25b959a911da..29b38b28dbdf1997d1e1f21b40421f51
 +    }
      /**
       * The local strand instance's dialable strand-network multiaddrs for the
-      * strand-addr RPC, ordered signaling-first (reusing the control node's
-@@ -9235,7 +9417,27 @@ export class CadreNode {
+      * strand-addr RPC, ordered relayed-first and WebRTC last (reusing the control
+@@ -9387,7 +9569,27 @@ export class CadreNode {
          }
          const recipients = this.pendingPartyKeyRecipients(machines, peerId);
          const pendingPartyKeys = await Promise.all(plan.strands.map((strand) => this.mintPendingPartyKey(strand.strandId, recipients)));
@@ -360,7 +360,7 @@ index 2cc63667b41b994119fedbd9355b25b959a911da..29b38b28dbdf1997d1e1f21b40421f51
          if (writes.removedPeer) {
              // Track + loudly flag a delete that committed local-only (security-relevant).
              this.noteControlWrite(peerId, 'remove');
-@@ -10501,7 +10703,8 @@ export class CadreNode {
+@@ -10661,7 +10863,8 @@ export class CadreNode {
              // Overrides any caller-supplied hook, exactly like partyId/cadrePeerAddrs: only
              // this node can say which strand-network addresses it is actually listening on,
              // and a wrong answer here seeds a joiner's mesh with addresses that reach nobody.
@@ -371,7 +371,7 @@ index 2cc63667b41b994119fedbd9355b25b959a911da..29b38b28dbdf1997d1e1f21b40421f51
              // instance's database and this party's `StrandPartyKey` identity, and a wrong
              // issuer here would admit joiners under someone else's authority.
 diff --git a/dist/control-protocol-guard.js b/dist/control-protocol-guard.js
-index 75a6b8695dc7915d3c920b897ee7894a3d0ea3fd..e0c0177b3f8086a43ba2c54db519f4ef29a2046c 100644
+index 70b67dff8e1047c2204bdd9824ab4ea7ca90fd16..006e0df7b6a243cc04569d6cdb483dd49fb8f4f0 100644
 --- a/dist/control-protocol-guard.js
 +++ b/dist/control-protocol-guard.js
 @@ -83,6 +83,10 @@ import { CADRE_INVITE_PROTOCOL } from './cadre-invite-protocol.js';
@@ -382,10 +382,10 @@ index 75a6b8695dc7915d3c920b897ee7894a3d0ea3fd..e0c0177b3f8086a43ba2c54db519f4ef
 +// node, so it needs a class here or this guard treats it as members-snapshot and refuses the very
 +// anonymous observers it exists to serve.
 +import { STRAND_OBSERVER_PROTOCOL } from './strand-observer-protocol.js';
+ import { WEBRTC_SIGNALING_PROTOCOL } from './webrtc-upgrade.js';
  import { withTimeout } from './control-stream.js';
  import { describeThrown } from './describe-thrown.js';
- const log = debug('sereus:cadre:control-protocol-guard');
-@@ -142,6 +146,12 @@ export function controlProtocolClasses(partyId) {
+@@ -143,6 +147,12 @@ export function controlProtocolClasses(partyId) {
          [FORMATION_PROTOCOL, 'stranger-open'],
          [CADRE_INVITE_PROTOCOL, 'stranger-open'],
          [OWNER_GRANT_PROTOCOL, 'stranger-open'],
@@ -398,38 +398,11 @@ index 75a6b8695dc7915d3c920b897ee7894a3d0ea3fd..e0c0177b3f8086a43ba2c54db519f4ef
          [WAKE_PROTOCOL, 'members'],
          [STRAND_ADDR_PROTOCOL, 'members'],
          ...controlDatabaseProtocols(partyId).map((protocol) => [protocol, 'members-snapshot']),
-diff --git a/dist/edge-node/lazy-raw-storage.js b/dist/edge-node/lazy-raw-storage.js
-index 19493b0955d4af2a37c06c74ce5910a01265e065..66d7f4dec82e848a427507e49af88425b928e8c3 100644
---- a/dist/edge-node/lazy-raw-storage.js
-+++ b/dist/edge-node/lazy-raw-storage.js
-@@ -94,6 +94,22 @@ class LazyRawStorage {
-     async saveBlockProof(blockId, rev, proof) {
-         return (await this.storage()).saveBlockProof(blockId, rev, proof);
-     }
-+    // VoteTorrent patch (lazy-raw-storage-commit-proofs): @optimystic/db-p2p 1.28.0 made these four
-+    // IRawStorage members required (commit proofs stored once, by message hash; GitHub #60) and calls
-+    // them unconditionally (BlockStorage.hasBlockProof, CachedStoreDriver). cadre-core 1.23.0 was built
-+    // against 1.27.0, so without them this proxy throws `getProofEntry is not a function`.
-+    async getProofEntry(blockId, rev) {
-+        return (await this.storage()).getProofEntry(blockId, rev);
-+    }
-+    async saveProofEntry(blockId, rev, entry) {
-+        return (await this.storage()).saveProofEntry(blockId, rev, entry);
-+    }
-+    async getCommitProof(messageHash) {
-+        return (await this.storage()).getCommitProof(messageHash);
-+    }
-+    async saveCommitProof(messageHash, proof) {
-+        return (await this.storage()).saveCommitProof(messageHash, proof);
-+    }
-     async getMaterializedBlock(blockId, actionId) {
-         return (await this.storage()).getMaterializedBlock(blockId, actionId);
-     }
 diff --git a/dist/index.d.ts b/dist/index.d.ts
-index cb41ab341bcba98dbe2b6750724751f69c9da5ee..965990f2e22bb80310b6e5b8386fcf49c3a696cd 100644
+index 7a7ab59baabfa781077a18e90bf3efb528ca4443..0448f859d07dafe9d77e1d512df561f207939d73 100644
 --- a/dist/index.d.ts
 +++ b/dist/index.d.ts
-@@ -38,6 +38,7 @@ export { StrandInstanceManager, type StartStrandConfig, type ResumeStrandOverrid
+@@ -40,6 +40,7 @@ export { StrandInstanceManager, type StartStrandConfig, type ResumeStrandOverrid
  export { StrandAwaitingFirstSyncError, DEFAULT_STRAND_FIRST_SYNC_TIMEOUT_MS, DEFAULT_STRAND_FIRST_SYNC_BACKSTOP_MS, type StrandFirstSyncConfig } from './strand-first-sync-gate.js';
  export { PeerJoinBackfill, DEFAULT_PEER_JOIN_BACKFILL, PEER_JOIN_BACKFILL_WARN_AFTER_FAILURES, type PeerJoinBackfillConfig, type PeerJoinBackfillDeps, type PeerJoinBackfillResult, type PeerJoinBackfillPushClient } from './peer-join-backfill.js';
  export { strandCohortTopicOption, type StrandReactivityConfig } from './strand-reactivity.js';
@@ -438,10 +411,10 @@ index cb41ab341bcba98dbe2b6750724751f69c9da5ee..965990f2e22bb80310b6e5b8386fcf49
  export { StrandMembershipReconciler, DEFAULT_MEMBERSHIP_RECONCILE_INTERVAL_MS, IDLE_PASSES_BEFORE_ESCALATION, INITIAL_JOIN_RETRY_INTERVAL_MS, type StrandMembershipReconcilerDeps, type StrandMembershipReconciliationConfig, type PendingMembershipInviteSource } from './strand-membership-reconciler.js';
  export { partitionPartyStrandPeers, type PartyStrandPeer, type PartyStrandPeers, type PartyStrandPeerSource, type PendingPartyKeyState } from './strand-party-peers.js';
 diff --git a/dist/index.js b/dist/index.js
-index 8ea8b96ce5ab47188ce6fd9afa95739d6b6edb1a..84ac75b1df0580c5d6427ff431e1e6687bba0fd8 100644
+index 0208acb481c342e1e7a1492d47f29c44031d1db9..382db8e04af775bc8e55f1a7353565e45eee2150 100644
 --- a/dist/index.js
 +++ b/dist/index.js
-@@ -118,6 +118,8 @@ export { PeerJoinBackfill, DEFAULT_PEER_JOIN_BACKFILL, PEER_JOIN_BACKFILL_WARN_A
+@@ -124,6 +124,8 @@ export { PeerJoinBackfill, DEFAULT_PEER_JOIN_BACKFILL, PEER_JOIN_BACKFILL_WARN_A
  // Operator opt-in to Optimystic change notifications on chosen strand nodes
  // (`CadreNodeConfig.strandReactivity`).
  export { strandCohortTopicOption } from './strand-reactivity.js';
@@ -450,7 +423,7 @@ index 8ea8b96ce5ab47188ce6fd9afa95739d6b6edb1a..84ac75b1df0580c5d6427ff431e1e668
  // Closed-strand revoked-peer enforcement (deny the network nodes of removed
  // members at the stream and connection layers, and hang up the sessions they
  // already hold — see the module doc for the settled deny-list design, the
-@@ -180,6 +182,9 @@ export { StrandWakeService, dialWake, WAKE_PROTOCOL, DEFAULT_WAKE_DIAL_BUDGET_MS
+@@ -186,6 +188,9 @@ export { StrandWakeService, dialWake, WAKE_PROTOCOL, DEFAULT_WAKE_DIAL_BUDGET_MS
  // Strand Address (control-network strand-address RPC) — wire types come via
  // `export * from './types.js'` (StrandAddrRequest / StrandAddrResponse / StrandAddrStatus).
  export { StrandAddrService, collectStrandAddrs, STRAND_ADDR_PROTOCOL } from './strand-addr-protocol.js';
@@ -458,15 +431,15 @@ index 8ea8b96ce5ab47188ce6fd9afa95739d6b6edb1a..84ac75b1df0580c5d6427ff431e1e668
 +// RPC gated on a node-local observable-strand allowlist rather than membership.
 +export { StrandObserverService, STRAND_OBSERVER_PROTOCOL } from './strand-observer-protocol.js';
  // Peer-address record (self-published, signed, freshness-stamped CadrePeer row)
- export { peerRecordSignedPayload, signPeerRecord, verifyPeerRecordSignature, isPeerRecordFresh, isSignalingAddr, orderSignalingFirst, currentMemberTrustPolicy, DEFAULT_PEER_RECORD_MAX_AGE_MS, DEFAULT_PEER_RECORD_HEARTBEAT_MS } from './peer-record.js';
+ export { peerRecordSignedPayload, signPeerRecord, verifyPeerRecordSignature, isPeerRecordFresh, isSignalingAddr, orderRelayedFirst, currentMemberTrustPolicy, DEFAULT_PEER_RECORD_MAX_AGE_MS, DEFAULT_PEER_RECORD_HEARTBEAT_MS } from './peer-record.js';
  // Device-token record (self-published, signed FCM/APNs push token — CadrePeer sibling)
 diff --git a/dist/membership-connection-gater.js b/dist/membership-connection-gater.js
-index bf5e1b1645bcee366418f0dc4cd2051e2cabcb19..0097a2cc80f873ac8af9b9c5df0c252783cbcdba 100644
+index fd7d7e97e8ce52d244bb106a7f8e959e49d7b26c..455f3a1ee4267643a838413cecfa2ff9efcaa0c4 100644
 --- a/dist/membership-connection-gater.js
 +++ b/dist/membership-connection-gater.js
 @@ -111,6 +111,25 @@
-  * `isNetworkMember`). FRET's ring still counts it: `docs/architecture.md` →
-  * "Per-stream protocol guard" → "What it does not cover".
+  * `isNetworkMember`). FRET's ring still counts it: `docs/cadre/control-security.md` →
+  * "Limits and accepted tradeoffs".
   *
 + * VoteTorrent patch (public-observer-protocol): there is one further
 + * connection-level carve-out beyond the two above, also NOT a protocol
@@ -510,7 +483,7 @@ index bf5e1b1645bcee366418f0dc4cd2051e2cabcb19..0097a2cc80f873ac8af9b9c5df0c2527
              try {
                  verdict = await decideInbound(remotePeerId);
 diff --git a/dist/peer-authorization.js b/dist/peer-authorization.js
-index a9f4ccf222788be5e0327c7faa5d81edfc673f26..e71c858019c729069cb8d70251c544405fb654a4 100644
+index cba198cf9e16dfb975b8474c566c231d2b40be08..90773ae69a292056d49ebd1523f3b753c310caa9 100644
 --- a/dist/peer-authorization.js
 +++ b/dist/peer-authorization.js
 @@ -1,5 +1,6 @@
@@ -522,21 +495,21 @@ index a9f4ccf222788be5e0327c7faa5d81edfc673f26..e71c858019c729069cb8d70251c54440
  import { ed25519PublicKeyB64FromPeerId } from './ed25519-key.js';
  const log = debug('sereus:cadre:peer-authorization');
 diff --git a/dist/peer-record.js b/dist/peer-record.js
-index 221330b917cec9d9bef464f5475fabccdc1453a4..0f78e5c558d6e561de6da593eaebab5184e2c667 100644
+index 82a3b6cc66711faf6b8e694b058ea212c1ecd4ed..e9ae2daf147099b50f3d547ceed28193d34f9d82 100644
 --- a/dist/peer-record.js
 +++ b/dist/peer-record.js
-@@ -25,7 +25,8 @@
-  * signature is verified *with* (so a signature already commits to exactly one
+@@ -26,7 +26,8 @@
   * key), and its binding to `peerId` is checked separately at resolve time.
   */
+ import { multiaddr } from '@multiformats/multiaddr';
 -import { digest, sign, verify } from '@optimystic/quereus-plugin-crypto';
 +import { digest, sign } from '@optimystic/quereus-plugin-crypto';
 +import { memoVerify as verify } from './verify-memo.js'; // VoteTorrent patch: remembered verdicts
  import { controlAuthorizationFields } from './control-authorization.js';
+ import { addrKindOfComponents } from './peer-dial.js';
  /**
-  * Default freshness ceiling for resolved peer-address records (15 minutes).
 diff --git a/dist/relay-reservation.d.ts b/dist/relay-reservation.d.ts
-index b6bd584a8ee2ba84a7a8dbf963075c826816fbbe..5e8ce6a7c04e8fdfdabbcaa61752f3f32deba49f 100644
+index 0b49862a01c774284d445ddb28925d0d7425dc20..e12ae52c60dcc5aa3dd882b83b0fa039da098623 100644
 --- a/dist/relay-reservation.d.ts
 +++ b/dist/relay-reservation.d.ts
 @@ -289,6 +289,11 @@ export declare const DEFAULT_RELAY_CHECK_MS = 5000;
@@ -565,7 +538,7 @@ index b6bd584a8ee2ba84a7a8dbf963075c826816fbbe..5e8ce6a7c04e8fdfdabbcaa61752f3f3
       * Awaited before every drive AFTER the first — never before the first attempt,
       * which the caller has typically prepared for already. A hook that throws or
 diff --git a/dist/relay-reservation.js b/dist/relay-reservation.js
-index f3f08999d20dab8126a31cfc3d7f0e361dc51bfa..7943d10285fab6a0c040a23944253bea9b5ef735 100644
+index a23ff8b3cc645947ee6d4cc98c2a7ec97112936e..ef87955708f2946efc7c9ce0487fd5b8e813d8ff 100644
 --- a/dist/relay-reservation.js
 +++ b/dist/relay-reservation.js
 @@ -560,14 +560,15 @@ async function requestReservation(node, connected, deadline, signal) {
@@ -868,7 +841,7 @@ index 0000000000000000000000000000000000000000..51c8363f20cd4081c9bdc5dedb209ee1
 +    };
 +}
 diff --git a/dist/strand-database.d.ts b/dist/strand-database.d.ts
-index 1ffa0885716efda62b172ac001d5341318fca43a..31f4bc225493076c2be00cd605c7e9cfcafab08d 100644
+index f4dca2ae9817ee56bd37842d070fb488e60099bc..bc49cd5c44dc26ed768ce18c28f32312903420ff 100644
 --- a/dist/strand-database.d.ts
 +++ b/dist/strand-database.d.ts
 @@ -18,6 +18,12 @@ export interface StrandDatabaseConfig extends StrandCommitListeners {
@@ -883,12 +856,12 @@ index 1ffa0885716efda62b172ac001d5341318fca43a..31f4bc225493076c2be00cd605c7e9cf
 +    databaseSetup?: (db: Database) => void | Promise<void>;
      /** Libp2p node for the strand network */
      libp2pNode: Libp2p;
-     /** Coordinated repo from the libp2p node */
+     /**
 diff --git a/dist/strand-database.js b/dist/strand-database.js
-index 3ed9b93767fd03c083c13d0db4a077ffb10f7d47..091452c3eff5b2bb287d1d3a6e568ab981446db2 100644
+index 6ef7a5b4d732513f5e411f5ca9d5f3f3cfc64605..df97d5bcc87d1cf0bd69f8520bbd409e1a39aa22 100644
 --- a/dist/strand-database.js
 +++ b/dist/strand-database.js
-@@ -62,6 +62,13 @@ export class StrandDatabase {
+@@ -63,6 +63,13 @@ export class StrandDatabase {
          const offline = this.config.offline && { journal: await this.config.offline.journal() };
          const cohortReachability = this.config.offline?.cohortReachability;
          this.db = new Database();
@@ -903,18 +876,18 @@ index 3ed9b93767fd03c083c13d0db4a077ffb10f7d47..091452c3eff5b2bb287d1d3a6e568ab9
          //  - `connectToStrand` never creates or stops a node; `StrandInstanceManager`
          //    owns the node lifecycle;
 diff --git a/dist/strand-instance-manager.d.ts b/dist/strand-instance-manager.d.ts
-index a92b730ba1356d24ca11f09fd851b208fc66ef0d..45fd6c952bfc3e2d2bd834e7838f1f6274aed2c8 100644
+index 872c9937e46e2f53d43dfec923f6ca4bd2f29959..557bdf7387dd1f19fddf647da12695f0b8414cbb 100644
 --- a/dist/strand-instance-manager.d.ts
 +++ b/dist/strand-instance-manager.d.ts
-@@ -10,6 +10,7 @@ import type { PartyStrandPeer, PartyStrandPeerSource } from './strand-party-peer
- import { type StrandFirstSyncConfig } from './strand-first-sync-gate.js';
- import type { StrandInstance, StrandRow, StorageConfig, NetworkConfig, LatencyHint, NodeProfile, SAppConfig } from './types.js';
+@@ -11,6 +11,7 @@ import { type StrandFirstSyncConfig } from './strand-first-sync-gate.js';
+ import type { StrandInstance, StrandRow, StorageConfig, NetworkConfig, LatencyHint, SAppConfig } from './types.js';
+ import type { NodeRoles } from './node-roles.js';
  import { type StrandReactivityConfig } from './strand-reactivity.js';
 +import type { StrandCohortRefusalHook } from './strand-cohort-refusal.js';
  /**
-  * How often a joining launch that could not build its database, because no seed peer had
-  * answered, retries the build on its running libp2p node
-@@ -150,6 +151,24 @@ export interface StartStrandConfig {
+  * How often a launch that could not build its database, because no machine that can answer for
+  * the strand's blocks was reachable, retries the build on its running libp2p node
+@@ -159,6 +160,24 @@ export interface StartStrandConfig {
       * rebuilds the node with the same setting.
       */
      reactivity?: StrandReactivityConfig;
@@ -940,29 +913,16 @@ index a92b730ba1356d24ca11f09fd851b208fc66ef0d..45fd6c952bfc3e2d2bd834e7838f1f62
       * Tuning for the CLOSED-strand revoked-peer gate
       * ({@link StrandRevocationEnforcer}), forwarded from
 diff --git a/dist/strand-instance-manager.js b/dist/strand-instance-manager.js
-index bfe6c71437e5a7105150b3d4b7178aab22d36c0a..a755f01ceb649310a57e5652fdeeb578ec8846b1 100644
+index d223e253e404dbbde0b2b69f34acf03f45ba1353..b4da6a25985f932a82e83d7b8f1d6e3d90c4b7ed 100644
 --- a/dist/strand-instance-manager.js
 +++ b/dist/strand-instance-manager.js
-@@ -20,10 +20,83 @@ import { strandCohortTopicOption } from './strand-reactivity.js';
+@@ -22,10 +22,70 @@ import { strandCohortTopicOption } from './strand-reactivity.js';
  import { superviseRelayReservation } from './relay-reservation.js';
  import { strandRedialTimings, superviseStrandPeerRedial } from './strand-peer-redial.js';
  import { groupAddrsByPeerId } from './peer-addr-book.js';
 +import { SelfRelayOnlyError, dialPeerAddrs } from './peer-dial.js'; // VoteTorrent patch (edge-reader-seed-retry)
- import { isCohortUnreachableRead } from './control-read-retry.js';
-+import { causeChain } from './control-retry.js';
-+/**
-+ * Whether a joiner's strand read failed because db-p2p's `findCoordinator` found no member it is
-+ * connected to and has confirmed (`NO_NETWORK_COORDINATOR`, `NO_COORDINATOR_AVAILABLE`). On a cold
-+ * start that is the same situation as `cohort-unreachable` — the restored serving peers are not
-+ * connected yet and the redial loop is still reaching them — so the build waits for a seed peer
-+ * rather than releasing the runtime and its redial loop. Matched by name and code, since the typed
-+ * class may come from a second loaded copy of db-p2p.
-+ */
-+function isJoinerCoordinatorMiss(error) {
-+    return causeChain(error).some(link => link.name === 'FindCoordinatorError'
-+        && (link.code === 'NO_NETWORK_COORDINATOR' || link.code === 'NO_COORDINATOR_AVAILABLE'));
-+}
- import { declaredCohortReadDeadlineMs, optimysticDialLimits, peerJoinPushBudget, relayReservationBudgetMs, resolveLinkRoundTripMs } from './link-budget.js';
+ import { isCohortUnreachableRead, isNoCoordinatorResolved } from './control-read-retry.js';
+ import { declaredCohortReadDeadlineMs, optimysticDialLimits, peerJoinPushBudget, relayReservationBudgetMs, resolveLinkRoundTripMs, webrtcUpgradeDialBudgetMs } from './link-budget.js';
  import { describeThrown } from './describe-thrown.js';
  const log = debug('sereus:cadre:strand-manager');
 +import { resolveStrandCohortRefusal } from './strand-cohort-refusal.js'; // VoteTorrent patch (strand-cohort-refusal)
@@ -1025,12 +985,12 @@ index bfe6c71437e5a7105150b3d4b7178aab22d36c0a..a755f01ceb649310a57e5652fdeeb578
 +    return { connectionGater: gater, open: () => { opened = true; } };
 +}
  /**
-  * How often a joining launch that could not build its database, because no seed peer had
-  * answered, retries the build on its running libp2p node
-@@ -542,6 +615,15 @@ export class StrandInstanceManager {
+  * How often a launch that could not build its database, because no machine that can answer for
+  * the strand's blocks was reachable, retries the build on its running libp2p node
+@@ -576,6 +636,15 @@ export class StrandInstanceManager {
                  ? { connectionGater: config.network.connectionGater }
                  : {};
-         const reactivityOption = strandCohortTopicOption(config.reactivity, strandId);
+         const reactivityOption = strandCohortTopicOption(config.reactivity, strandId, config.roles.reactivity);
 +        // VoteTorrent patch (strand-cohort-refusal): `null` unless the embedder set
 +        // `strandCohortRefusal` and it returned a refusal for this strand. Resolved per build, so a
 +        // hibernation wake asks the hook again.
@@ -1041,9 +1001,9 @@ index bfe6c71437e5a7105150b3d4b7178aab22d36c0a..a755f01ceb649310a57e5652fdeeb578
 +            ? edgeReaderDeclarationGate(revocationGateOptions.connectionGater)
 +            : undefined;
          if (reactivityOption.cohortTopic) {
-             log('strand %s: change notifications on', strandId);
+             log('strand %s: change notifications on, as %s', strandId, config.roles.reactivity);
          }
-@@ -664,11 +746,46 @@ export class StrandInstanceManager {
+@@ -712,11 +781,46 @@ export class StrandInstanceManager {
                  // gater plus the fail-closed per-stream revoked-peer gate (closed
                  // strands) — resolved above, before the try.
                  ...revocationGateOptions,
@@ -1091,24 +1051,15 @@ index bfe6c71437e5a7105150b3d4b7178aab22d36c0a..a755f01ceb649310a57e5652fdeeb578
              // This machine's statement of its peer id in the strand, for the party's control
              // database (`StrandPeer`): a background write that never fails or delays the launch.
              // The seam defers it while a write could fork the party and retries it on cohort
-@@ -834,6 +951,8 @@ export class StrandInstanceManager {
+@@ -907,6 +1011,8 @@ export class StrandInstanceManager {
          const strandDb = new StrandDatabase({
              strandId,
              sAppConfig: config.sAppConfig,
 +            // VoteTorrent patch (strand-database-setup): absent unless the embedder set the key.
 +            ...(config.databaseSetup !== undefined && { databaseSetup: config.databaseSetup }),
              libp2pNode: node,
+             // Absent on a client, which coordinates no writes; the database then connects without one.
              coordinatedRepo: node.coordinatedRepo,
-             // Founder bootstrap inputs: the strand's type drives which membership rows
-@@ -875,7 +994,7 @@ export class StrandInstanceManager {
-             await strandDb.initialize();
-         }
-         catch (error) {
--            if (!isCohortUnreachableRead(error)) {
-+            if (!isCohortUnreachableRead(error) && !(config.founder !== true && isJoinerCoordinatorMiss(error))) {
-                 throw error;
-             }
-             await this.discardDatabaseAttempt(strandId, gate);
 diff --git a/dist/strand-observer-protocol.js b/dist/strand-observer-protocol.js
 new file mode 100644
 index 0000000000000000000000000000000000000000..dbaa40b31c6ba204ffd158427e9efdbdfa8b6762
@@ -1294,15 +1245,10 @@ index 0000000000000000000000000000000000000000..dbaa40b31c6ba204ffd158427e9efdbd
 +}
 +//# sourceMappingURL=strand-observer-protocol.js.map
 diff --git a/dist/strand-reactivity.d.ts b/dist/strand-reactivity.d.ts
-index 867a40f01d035a433b5bd6390cc50e293e6181ab..dbed60b4c1a73a7036873390ed3a774b255cb40c 100644
+index 06d72a7ae5ec2b1fb486fc2d4ab8b3bd75de7778..471fadcc5552a038b2ce7909938b3b4f566fd987 100644
 --- a/dist/strand-reactivity.d.ts
 +++ b/dist/strand-reactivity.d.ts
-@@ -1,3 +1,4 @@
-+import type { NodeProfile } from '@optimystic/db-core';
- /**
-  * Which strand nodes are built with Optimystic's change-notification substrate
-  * (`NodeOptions.cohortTopic` in `@optimystic/db-p2p`): a node built with it announces every
-@@ -15,6 +16,12 @@ export interface StrandReactivityConfig {
+@@ -19,6 +19,12 @@ export interface StrandReactivityConfig {
      enabled: boolean;
      /** Strands to enable it for, by exact strand id. Absent or empty: every strand this node runs. */
      strandIds?: string[];
@@ -1314,29 +1260,23 @@ index 867a40f01d035a433b5bd6390cc50e293e6181ab..dbed60b4c1a73a7036873390ed3a774b
 +    edgeHost?: boolean;
  }
  /**
-  * The `createLibp2pNode` options slice for one strand: `{ cohortTopic: { enabled: true } }` when
-@@ -37,5 +44,9 @@ export interface StrandReactivityConfig {
- export declare function strandCohortTopicOption(config: StrandReactivityConfig | undefined, strandId: string): {
-     cohortTopic?: {
+  * The `createLibp2pNode` options slice for one strand: `{ cohortTopic: { enabled: true, host } }`
+@@ -39,6 +45,8 @@ export declare function strandCohortTopicOption(config: StrandReactivityConfig |
          enabled: true;
-+        host?: {
-+            profile: NodeProfile;
-+            minSigs: number;
-+        };
+         host: {
+             profile: NodeProfile;
++            /** VoteTorrent patch (edge-host): set only on the `edgeHost: true` path. */
++            minSigs?: number;
+         };
      };
  };
 diff --git a/dist/strand-reactivity.js b/dist/strand-reactivity.js
-index e7ce8f042bc50b92843ab2d22cd916b5db5ca5c6..4b93ea92e3e1973927c80f6372431d8702f79ef0 100644
+index 15d0172a58d813a82eb7c66aa7587e1d7e4a4917..a7147a45dbfbb3236caaa4ccf1f8598c034d5e25 100644
 --- a/dist/strand-reactivity.js
 +++ b/dist/strand-reactivity.js
-@@ -1,3 +1,4 @@
-+import { edgeProfile } from '@optimystic/db-core';
- /**
-  * Which strand nodes are built with Optimystic's change-notification substrate
-  * (`NodeOptions.cohortTopic` in `@optimystic/db-p2p`): a node built with it announces every
-@@ -27,10 +28,24 @@
-  * forwarding load shows up, pass `host: { profile: edgeProfile() }` for transaction nodes, after
-  * confirming an edge host still serves its part of a tail block's root group.
+@@ -26,10 +26,25 @@ import { coreProfile, edgeProfile } from '@optimystic/db-core';
+  * wide), verified at the consensus super-majority, and neither option governs it; the tiers
+  * below the root keep db-p2p's defaults.
   */
 +/**
 + * VoteTorrent patch (edge-host): opt-in `strandReactivity.edgeHost`. A browser member device (the
@@ -1346,24 +1286,25 @@ index e7ce8f042bc50b92843ab2d22cd916b5db5ca5c6..4b93ea92e3e1973927c80f6372431d87
 + * matches the origin cohort's threshold, as the VoteTorrent Public page's `PUBLIC_COHORT_MIN_SIGS`
 + * does (the 56-17 posture: the serving cohort is a single strand node, so db-p2p's default of 14 is
 + * unsatisfiable). Only the boolean `true` turns it on; any other value, or no `edgeHost` key,
-+ * returns exactly the unpatched result. The phones never set it.
++ * returns exactly the unpatched result. The phones never set it. (1.24's `reactivity: 'subscriber'`
++ * role is not the same: it keeps db-p2p's default willing tiers and minSigs.)
 + */
 +const VOTETORRENT_EDGE_HOST_MIN_SIGS = 1;
- export function strandCohortTopicOption(config, strandId) {
+ export function strandCohortTopicOption(config, strandId, reactivity) {
 -    return config?.enabled === true && strandSelected(config.strandIds, strandId)
--        ? { cohortTopic: { enabled: true } }
+-        ? { cohortTopic: { enabled: true, host: { profile: hostProfile(reactivity) } } }
 -        : {};
 +    if (!(config?.enabled === true && strandSelected(config.strandIds, strandId))) {
 +        return {};
 +    }
 +    return config.edgeHost === true
 +        ? { cohortTopic: { enabled: true, host: { profile: edgeProfile({ willingTiers: [] }), minSigs: VOTETORRENT_EDGE_HOST_MIN_SIGS } } }
-+        : { cohortTopic: { enabled: true } };
++        : { cohortTopic: { enabled: true, host: { profile: hostProfile(reactivity) } } };
  }
- function strandSelected(strandIds, strandId) {
-     if (strandIds === undefined) {
+ /**
+  * The cohort-topic node profile a reactivity role is built with. `'forwarder'` passes
 diff --git a/dist/types.d.ts b/dist/types.d.ts
-index 9b1260fbe386c94eebefeea3461229ec137d3c8d..d1ef77d9077b05c1a651bcf9d9b1233d3f33fc84 100644
+index ee1cec21d50f0346123906753d95741c18fb68f0..8ecdb691e7bc3b8dc4692b2bd03eafb7ed3eb92b 100644
 --- a/dist/types.d.ts
 +++ b/dist/types.d.ts
 @@ -4,6 +4,7 @@ import type { IRawStorage, Libp2pConnectionMonitorInit, Libp2pTransports, NoiseC
@@ -1374,7 +1315,7 @@ index 9b1260fbe386c94eebefeea3461229ec137d3c8d..d1ef77d9077b05c1a651bcf9d9b1233d
  import type { StrandRevocationEnforcementConfig } from './strand-revocation-enforcer.js';
  import type { StrandMembershipReconciliationConfig } from './strand-membership-reconciler.js';
  import type { StrandFirstSyncConfig } from './strand-first-sync-gate.js';
-@@ -601,6 +602,11 @@ export interface NetworkConfig {
+@@ -624,6 +625,11 @@ export interface NetworkConfig {
           * relay's and the called machine's admission decisions (`relayedDialBudgetMs`).
           */
          perAddressDialTimeoutMs?: number;
@@ -1386,7 +1327,7 @@ index 9b1260fbe386c94eebefeea3461229ec137d3c8d..d1ef77d9077b05c1a651bcf9d9b1233d
          /**
           * How long a running strand waits, after a sibling answers its strand-addr
           * RPC with addresses, before asking that sibling again for its strand-network
-@@ -850,6 +856,53 @@ export interface CadreNodeConfig {
+@@ -889,6 +895,53 @@ export interface CadreNodeConfig {
       * node never gets it.
       */
      strandReactivity?: StrandReactivityConfig;

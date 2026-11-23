@@ -399,7 +399,7 @@ async function main() {
 	const relay = new CadreNode({
 		privateKey: await generateKeyPair('Ed25519'),
 		controlNetwork: { partyId: RELAY_PARTY, bootstrapNodes: [] },
-		profile: 'storage',
+		nodeClass: 'server',
 		strandFilter: { mode: 'none' },
 		requireSignedSchemas: false,
 		storage: { provider: scopedProvider(MemoryRawStorage) },
@@ -433,7 +433,7 @@ async function main() {
 		return {
 			privateKey,
 			controlNetwork: { partyId: PARTY_ID, bootstrapNodes: [relayAddr] },
-			profile: 'transaction',
+			nodeClass: 'device',
 			requireSignedSchemas: false,
 			strandFilter: { mode: 'all' },
 			strandClusterSize: clusterSize,
@@ -502,7 +502,7 @@ async function main() {
 				await node
 					.addStrand({
 						strandRow: { Id: hash, MemberPrivateKey: null, Type: 'o', FounderOwnerKey: null, FounderPeerId: null },
-						sAppConfig: { id: SAPP_ID, version: '1.0.0', schema: innerDdl(VE.VOTETORRENT_SCHEMA_SQL), latencyHint: 'interactive' },
+						sAppConfig: { id: SAPP_ID, version: '1.0.0', schema: innerDdl(VE.VOTETORRENT_SCHEMA_SQL), schemaVersion: VE.VOTETORRENT_SCHEMA_VERSION, latencyHint: 'interactive' },
 						founder,
 						...(founder ? { awaitFirstSync: false } : {}),
 					})

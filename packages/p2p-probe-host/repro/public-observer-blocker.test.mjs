@@ -218,7 +218,7 @@ async function buildGateway({ publicObserverStrandIds } = {}) {
   const node = new CadreNode({
     privateKey,
     controlNetwork: { partyId: PARTY_ID, bootstrapNodes: [] },
-    profile: 'storage',
+    nodeClass: 'server',
     requireSignedSchemas: false,
     strandFilter: { mode: 'all' },
     network: {
@@ -238,6 +238,7 @@ async function buildGateway({ publicObserverStrandIds } = {}) {
       id: 'org.votetorrent',
       version: '1.0.0',
       schema: VOTETORRENT_QSQL,
+      schemaVersion: 1,
       latencyHint: 'interactive',
     },
     // `mode: 'bootstrap'` was deleted from StrandConfig in cadre-core 0.11 and has been ignored

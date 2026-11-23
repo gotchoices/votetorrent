@@ -99,7 +99,7 @@ export async function buildRoleNode (stateDir: string, role: Role, relayAddr: st
     controlNetwork: { partyId, bootstrapNodes },
     strandNetworkState: { store: strandNetworkStateStore },
     trustedOwners: { store: trustedOwnerStore },
-    profile: 'transaction',
+    nodeClass: 'device',
     requireSignedSchemas: false,
     strandFilter: { mode: 'all' },
     storage: { provider },

@@ -89,7 +89,7 @@ export function baseConfig({ partyId = PARTY_ID, bootstrapNodes, privateKey, clu
 export function droneOptions({ bootstrapNodes, privateKey, clusterSize, storage, partyId }) {
   return {
     ...baseConfig({ partyId, bootstrapNodes, privateKey, clusterSize, storage }),
-    profile: 'storage', // turns the circuit-relay-v2 relay server ON
+    nodeClass: 'server', // turns the circuit-relay-v2 relay server ON
     network: {
       transports: [webSockets()],
       listenAddrs: ['/ip4/0.0.0.0/tcp/0/ws'], // ephemeral — avoids EADDRINUSE
@@ -121,7 +121,7 @@ export function droneOptions({ bootstrapNodes, privateKey, clusterSize, storage,
 export function relayOnlyPeerOptions({ relayAddrs, bootstrapNodes, privateKey, clusterSize, storage, partyId, direct = false }) {
   return {
     ...baseConfig({ partyId, bootstrapNodes, privateKey, clusterSize, storage }),
-    profile: 'transaction',
+    nodeClass: 'device',
     network: {
       transports: [
         webSockets(),
@@ -160,7 +160,7 @@ export { generateKeyPair };
 export function strandConfig({ strandId = STRAND_ID, sAppId = SAPP_ID, schema = SCHEMA, mode, founder }) {
   return {
     strandRow: { Id: strandId, MemberPrivateKey: null, Type: 'o' },
-    sAppConfig: { id: sAppId, version: '1.0.0', schema, latencyHint: 'interactive' },
+    sAppConfig: { id: sAppId, version: '1.0.0', schema, schemaVersion: 1, latencyHint: 'interactive' },
     mode,
     // Founder-ness is normally DERIVED from `strandRow.FounderOwnerKey` matching the node's own
     // owner key. The row above is hand-built and carries no such provenance, so the derivation
