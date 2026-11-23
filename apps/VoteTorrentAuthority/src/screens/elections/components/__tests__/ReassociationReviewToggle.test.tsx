@@ -202,6 +202,27 @@ describe("ReassociationReviewToggle (D-46)", () => {
 		expect(mockSetIntakePolicy).toHaveBeenCalledTimes(1);
 	});
 
+	test("T6b: above a vrg threshold of 1 the write is proposed: the mode in force stays selected, the co-sign copy shows, and both options lock", async () => {
+		mockSetIntakePolicy.mockResolvedValue(
+			view({
+				pendingProposal: { revision: 1, restBridgeUrl: null, reassociationMode: "automatic", threshold: 2, signatures: 1, reached: false, applied: false },
+			}),
+		);
+		const tr = await mount();
+		await flush();
+		await act(async () => {
+			option(tr, "automatic").props.onPress();
+		});
+		await flush();
+		expect(option(tr, "manual").props.accessibilityState).toEqual({ selected: true, disabled: true });
+		expect(option(tr, "automatic").props.accessibilityState).toEqual({ selected: false, disabled: true });
+		expect(textOf(tr.root.findByProps({ testID: `${PREFIX}-notice` }))).toBe(EN.registrationPolicyReassociationCoSignRequired);
+		await act(async () => {
+			option(tr, "automatic").props.onPress();
+		});
+		expect(mockSetIntakePolicy).toHaveBeenCalledTimes(1);
+	});
+
 	test("T7: other failures show the save error and keep the selection; a revision conflict re-reads; a device error is routed to the hook", async () => {
 		mockSetIntakePolicy.mockRejectedValueOnce(new Error("boom"));
 		const tr = await mount();

@@ -24,6 +24,10 @@ import { digestToBytes } from '../utils.js'
 import { requireCtx as requireCtxHelper, rethrow as rethrowHelper } from '../signing/ceremony-helpers.js'
 import { seedSignedMutation } from '../signing/signed-mutation.js'
 import { readAuthorityThreshold } from '../signing/threshold.js'
+import { fanOutSignatureTasks } from '../signing/fan-out.js'
+import { drainDeferredChecks } from '../database/drain-deferred-checks.js'
+import { listIntakePolicyProposals, nextIntakePolicyRevision, readIntakePolicyProposalByNonce } from './cosign.js'
+import type { IntakePolicyProposalView } from './cosign.js'
 import { allocateTid } from '../database/tid-allocator.js'
 import type { EngineContext } from '../types.js'
 import { intakeQueryPortFromDb } from './query-port.js'
@@ -385,6 +389,12 @@ export class IntakeEngine {
     return readIntakePolicyFrom(intakeQueryPortFromDb(this.ctx!.db), authorityId)
   }
 
+  /** Proposed changes for `authorityId` (above a 'vrg' threshold of 1), oldest first. Read-only. */
+  async listIntakePolicyProposals (authorityId: string): Promise<IntakePolicyProposalView[]> {
+    this.requireCtx('listIntakePolicyProposals')
+    return listIntakePolicyProposals(this.ctx!.db, authorityId)
+  }
+
   /**
    * D-29: an officer holding `'vrg'` sets the authority's REST bridge URL
    * and/or re-association mode as a new revision, under a `'vrg'`
@@ -418,16 +428,7 @@ export class IntakeEngine {
       throw new IntakeError('not-authorized', "setIntakePolicy: caller does not hold 'vrg' at this authority")
     }
 
-    // Like registerBridgeKey, this table has no co-sign Task path, and
-    // adding one needs a schema change frozen after 62-03 (D-22). Refusing
-    // before any write leaves no orphan ceremony.
     const threshold = await readAuthorityThreshold(ctx.db, authorityId, 'vrg' as Scope)
-    if (threshold > 1) {
-      throw new IntakeError(
-        'threshold-requires-co-sign',
-        "setIntakePolicy: the 'vrg' threshold at this authority is above 1 — co-sign is not yet supported for this table"
-      )
-    }
 
     const current = await readIntakePolicyFrom(intakeQueryPortFromDb(ctx.db), authorityId)
     if (input.expectedRevision !== undefined && input.expectedRevision !== current.revision) {
@@ -442,6 +443,10 @@ export class IntakeEngine {
 
     if (!current.isDefault && nextUrl === current.restBridgeUrl && nextMode === current.reassociationMode) {
       return current
+    }
+
+    if (threshold > 1) {
+      return this.proposeIntakePolicy(authorityId, userId, nextUrl, nextMode, current, sign)
     }
 
     const revision = current.revision + 1
@@ -485,5 +490,66 @@ export class IntakeEngine {
     }
 
     return readIntakePolicyFrom(intakeQueryPortFromDb(ctx.db), authorityId)
+  }
+
+  /**
+   * Above a 'vrg' threshold of 1: the caller signs the change as a PROPOSAL (schema version 2's
+   * negative-revision row), and every other current 'vrg' holder gets an 'intake-policy' signature
+   * Task, all in one transaction. The change takes effect when a co-signer's signature reaches the
+   * threshold (SignatureTasksEngine.completeSignature applies it). Returns the policy still in force
+   * with `pendingProposal` set.
+   */
+  private async proposeIntakePolicy (
+    authorityId: string,
+    userId: string,
+    restBridgeUrl: string | null,
+    reassociationMode: string,
+    current: AuthorityIntakePolicyView,
+    sign: IntakeSignCallback
+  ): Promise<AuthorityIntakePolicyView> {
+    const ctx = this.ctx!
+    const port = intakeQueryPortFromDb(ctx.db)
+    const revision = await nextIntakePolicyRevision(port, authorityId)
+    const setAt = new Date().toISOString()
+    const tid = await allocateTid(ctx.db, 'registration-request')
+    const digestExpr = "select Digest(:tid, 'AuthorityIntakePolicy', :rowAuthorityId, :revision, :restBridgeUrl, :reassociationMode, :setAt) as d"
+    const digestParams = { tid, rowAuthorityId: authorityId, revision, restBridgeUrl, reassociationMode, setAt }
+    let nonce: string
+    await ctx.db.exec('BEGIN')
+    try {
+      nonce = await seedSignedMutation(ctx, authorityId, 'vrg' as Scope, tid, digestExpr, digestParams, sign, { ownsTransaction: false })
+      await ctx.db.exec(
+        `insert into AuthorityIntakePolicy (AuthorityId, Revision, RestBridgeUrl, ReassociationMode, SetAt, SigningNonce, SigningTid)
+         with context SigningNonce = null, Tid = null
+         values (:rowAuthorityId, :proposalRevision, :restBridgeUrl, :reassociationMode, :setAt, :signingNonce, :signingTid)`,
+        { rowAuthorityId: authorityId, proposalRevision: -revision, restBridgeUrl, reassociationMode, setAt, signingNonce: nonce, signingTid: tid }
+      )
+      await drainDeferredChecks(ctx.db)
+      await fanOutSignatureTasks(ctx, {
+        authorityId,
+        scope: 'vrg' as Scope,
+        nonce,
+        initiatorUserId: userId,
+        signatureType: 'intake-policy',
+        taskTid: tid,
+        // The proposal row IS the extension (Task.ExtensionExists joins it by SigningNonce).
+        insertExtension: async () => {}
+      }, { ownsTransaction: false })
+      await ctx.db.exec('COMMIT')
+    } catch (err) {
+      try {
+        await ctx.db.exec('ROLLBACK')
+      } catch {
+        // The original error is what the caller needs.
+      }
+      if (err instanceof IntakeError) throw err
+      const reread = await nextIntakePolicyRevision(port, authorityId)
+      if (reread > revision) {
+        throw new IntakeError('policy-revision-conflict', 'setIntakePolicy: a concurrent proposal won the revision race')
+      }
+      this.rethrow(err, 'setIntakePolicy')
+    }
+    const pendingProposal = await readIntakePolicyProposalByNonce(ctx.db, nonce!)
+    return { ...current, ...(pendingProposal ? { pendingProposal } : {}) }
   }
 }

@@ -158,6 +158,13 @@ export interface HarnessNode {
   cohortRefusal?: EdgeReaderRefusal
   /** 66-28: forget the memoized strand handles (a restarted node re-opens them); returns their strand ids. */
   resetStrandCaches?: () => string[]
+  /**
+   * Schema-upgrade instrument: the sApp schema (inner DDL) and schemaVersion this node's NEXT addStrand
+   * declares. `undefined` restores the shipped VOTETORRENT_INNER_DDL / VOTETORRENT_SCHEMA_VERSION.
+   */
+  setAppSchema?: (app: { schema: string, schemaVersion: number } | undefined) => void
+  /** Schema-upgrade instrument: stop this node's strand, forget its handles, and open it again (an app restart). */
+  reopenStrand?: (strandId: string) => Promise<Database>
 }
 
 export interface HarnessTimings {
@@ -510,6 +517,7 @@ function buildHarnessNode (
   const dbFactoryCache = new Map<string, Promise<Database>>()
   const openStrandCache = new Map<string, Promise<Database>>()
   const stats = { mutateCount: 0, queryCount: 0 }
+  let appSchema: { schema: string, schemaVersion: number } | undefined
 
   function assertOrdering (strandId: string): void {
     if (!isNodeA && !founderCtl.bypassOrdering && !openedByA.has(strandId)) {
@@ -521,7 +529,13 @@ function buildHarnessNode (
     const started = Date.now()
     const addStrandConfig: any = {
       strandRow: { Id: strandId, MemberPrivateKey: null, Type: 'o', FounderOwnerKey: null, FounderPeerId: null },
-      sAppConfig: { id: HARNESS_SAPP_ID, version: '1.0.0', schema: VOTETORRENT_INNER_DDL, schemaVersion: VOTETORRENT_SCHEMA_VERSION, latencyHint: 'interactive' },
+      sAppConfig: {
+        id: HARNESS_SAPP_ID,
+        version: '1.0.0',
+        schema: appSchema?.schema ?? VOTETORRENT_INNER_DDL,
+        schemaVersion: appSchema?.schemaVersion ?? VOTETORRENT_SCHEMA_VERSION,
+        latencyHint: 'interactive'
+      },
       // awaitFirstSync: false — mirrors topology.mjs strandConfig(): cadre-core >= 1.1.0
       // defaults a JOINER's addStrand to block on first sync; opting out lets the strand
       // launch immediately and this harness awaits whenStrandWritable itself.
@@ -615,6 +629,14 @@ function buildHarnessNode (
       dbFactoryCache.clear()
       openStrandCache.clear()
       return ids
+    },
+    setAppSchema: (app) => { appSchema = app },
+    reopenStrand: async (strandId: string) => {
+      if (node.getStrand(strandId)) await withTimeout(node.stopStrand(strandId), HARNESS_TIMEOUTS.addStrandMs, `${name} stopStrand(${strandId})`)
+      node.sAppConfigs?.delete?.(strandId)
+      dbFactoryCache.delete(strandId)
+      openStrandCache.delete(strandId)
+      return openStrand(strandId)
     },
     stats
   }

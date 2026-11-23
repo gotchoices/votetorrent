@@ -1624,6 +1624,9 @@ declare schema main
 							or ( SignatureType = 'election-revision' and exists (select 1 from ElectionRevisionSignatureTaskExtension ER where ER.TaskId = new.Id))
 							or ( SignatureType = 'ballot' and exists (select 1 from BallotSignatureTaskExtension B where B.TaskId = new.Id))
 							or ( SignatureType = 'registrant' and exists (select 1 from RegistrantSignatureTaskExtension R where R.TaskId = new.Id))
+							-- Schema version 2: an intake-policy co-signer task's extension is the proposal row itself.
+							or ( SignatureType = 'intake-policy' and exists (select 1 from AuthorityIntakePolicy P where P.SigningNonce = new.SigningNonce and P.Revision <= -1))
+							or ( SignatureType = 'association' and exists (select 1 from AssociationSignatureTaskExtension AS2 where AS2.TaskId = new.Id))
 					) )
 		),
 		constraint MutationValid check on insert, update (context.IsMutationValid = true)
@@ -1897,6 +1900,47 @@ declare schema main
 
 	index RegistrantSignatureTaskRequest on RegistrantSignatureTaskExtension (RequestId);
 
+	-- Schema version 2: a co-signer task for an officer's decision on a pending AssociationRequest
+	-- (approve as RegistrantId, or reject) above a 'vrg' threshold of 1. The decision's 'vrg' session
+	-- signs Digest(ReviewTid, 'AssociationReview', request Id, AuthorityId, DeviceKey, RegistrantId,
+	-- Decision); the writes that carry the decision out are derived from that session once it reaches
+	-- the threshold (signDerived), so no single officer can carry one out alone.
+	table AssociationSignatureTaskExtension (
+		TaskId text primary key, -- references Task.Id
+		RequestId text, -- references AssociationRequest.Id
+		RegistrantId text null, -- the registrant the request is approved as; null when rejecting
+		Decision text, -- 'a' approve, 'r' reject
+		ReviewTid integer, -- the Tid the session digest binds
+		constraint TaskIdValid check (exists (select 1 from Task T where T.Id = new.TaskId and T.Type = 'signature' and T.SignatureType = 'association')),
+		constraint RequestIdValid check (exists (select 1 from AssociationRequest R where R.Id = new.RequestId)),
+		constraint DecisionValid check (
+			(new.Decision = 'a' and new.RegistrantId is not null) or (new.Decision = 'r' and new.RegistrantId is null)
+		),
+		constraint MutationValid check on insert, update (
+			exists (
+				select 1 from Task T join AdminSigning A on A.Nonce = T.SigningNonce and A.Scope = 'vrg'
+					join AssociationRequest R on R.Id = new.RequestId and R.AuthorityId = A.AuthorityId
+						where T.Id = new.TaskId and T.Type = 'signature' and T.SignatureType = 'association'
+							and T.IsCompleted = false
+							and A.Digest = Digest(
+								new.ReviewTid, 'AssociationReview', R.Id, R.AuthorityId, R.DeviceKey, new.RegistrantId, new.Decision
+							)
+			)
+			and not exists (
+				select 1 from Task T join AdminSigning A on A.Nonce = T.SigningNonce
+					join AdminSignature ASig on ASig.SigningNonce = A.Nonce
+						where T.Id = new.TaskId and T.IsCompleted = false
+			)
+		),
+		constraint DeleteValid check on delete (
+			not exists (select 1 from Task T where T.Id = old.TaskId)
+				or exists (select 1 from Task T where T.Id = old.TaskId and T.IsCompleted = true)
+		)
+	)
+		with context ( Tid int );
+
+	index AssociationSignatureTaskRequest on AssociationSignatureTaskExtension (RequestId);
+
 	table OnboardingTaskExtension (
 		TaskId text primary key, -- references Task.Id
 		OnboardingId text, -- references Onboarding.Id
@@ -1924,7 +1968,9 @@ declare schema main
 		union all select 'election' as Code
 		union all select 'election-revision' as Code
 		union all select 'ballot' as Code
-		union all select 'registrant' as Code;
+		union all select 'registrant' as Code
+		union all select 'intake-policy' as Code
+		union all select 'association' as Code;
 
 	-- ═══════════════════════════════════════════════════════════════════════
 	-- Registration
@@ -2009,23 +2055,42 @@ declare schema main
 	-- this table governs only the registration-code-matched path. The reader takes the GREATEST
 	-- Revision; a 'vrg' threshold above 1 leaves a policy change pending co-sign exactly like
 	-- RegistrationBridgeKey.MutationValid above (same ceremony idiom, mirrored field for field).
+	--
+	-- Schema version 2: co-signing above a 'vrg' threshold of 1. A PROPOSED change is a row with a
+	-- NEGATIVE Revision (-N proposes revision N) that carries the 'vrg' session it was signed under
+	-- (SigningNonce) and the Tid its digest binds (SigningTid). The other 'vrg' holders get an
+	-- 'intake-policy' signature Task for that session; once it reaches the threshold, the officer
+	-- whose signature crossed it inserts the EFFECTIVE row (Revision N, the same values, SigningNonce
+	-- and SigningTid null) through the unchanged positive-revision ceremony branch below. Readers take
+	-- the greatest Revision, so they never pick a proposal: a build on schema version 1 reads a
+	-- proposal as the default policy (normalizeIntakePolicyRow refuses Revision < 1), never as the
+	-- policy in force. Every row a version-1 build can write still satisfies these CHECKs.
 	table AuthorityIntakePolicy (
 		AuthorityId text,
 		Revision integer,
 		RestBridgeUrl text null,
 		ReassociationMode text, -- references ReassociationMode(Code)
 		SetAt text,
+		SigningNonce text null, -- proposals only: references AdminSigning.Nonce
+		SigningTid integer null, -- proposals only: the Tid the proposal's digest binds
 		primary key (AuthorityId, Revision),
 		constraint AuthorityIdValid check (exists (select 1 from Authority A where A.Id = new.AuthorityId)),
-		constraint RevisionValid check (new.Revision >= 1),
+		constraint RevisionValid check (
+			(new.Revision >= 1 and new.SigningNonce is null and new.SigningTid is null)
+				or (new.Revision <= -1 and new.SigningNonce is not null and new.SigningTid is not null)
+		),
 		constraint ReassociationModeValid check (new.ReassociationMode in (select Code from ReassociationMode)),
 		-- D-29: https-only, with a sane length bound.
 		constraint RestBridgeUrlValid check (
 			new.RestBridgeUrl is null or (like('https://%', new.RestBridgeUrl) and length(new.RestBridgeUrl) <= 2048)
 		),
 		constraint SetAtValid check (isISODatetime(new.SetAt) and like('%Z', new.SetAt)),
+		-- An effective row needs the session to have reached the threshold (AdminSignature), as in
+		-- version 1. A proposal needs only the initiator's signed session over the SAME digest the
+		-- effective row will be checked against (target revision -new.Revision, SigningTid), so the
+		-- values co-signers see are the values that take effect.
 		constraint MutationValid check on insert (
-			exists (
+			(new.Revision >= 1 and exists (
 				select 1 from AdminSignature ASig join AdminSigning A on A.Nonce = ASig.SigningNonce
 					where A.Nonce = context.SigningNonce
 						and A.AuthorityId = new.AuthorityId
@@ -2033,12 +2098,23 @@ declare schema main
 						and A.Digest = Digest(
 							context.Tid, 'AuthorityIntakePolicy', new.AuthorityId, new.Revision, new.RestBridgeUrl, new.ReassociationMode, new.SetAt
 						)
-			)
+			))
+			or (new.Revision <= -1 and exists (
+				select 1 from AdminSigning A
+					where A.Nonce = new.SigningNonce
+						and A.AuthorityId = new.AuthorityId
+						and A.Scope = 'vrg'
+						and A.Digest = Digest(
+							new.SigningTid, 'AuthorityIntakePolicy', new.AuthorityId, 0 - new.Revision, new.RestBridgeUrl, new.ReassociationMode, new.SetAt
+						)
+			))
 		),
 		constraint NoUpdate check on update (false),
 		constraint NoDelete check on delete (false)
 	)
 		with context ( SigningNonce text, Tid int );
+
+	index AuthorityIntakePolicySigningNonce on AuthorityIntakePolicy (SigningNonce);
 
 	-- D-02/D-03/D-06/D-07 intake row. Authorized on INSERT SOLELY by the requester's own
 	-- signature (SignatureValid below) -- NO User FK, NO IsUserValid gate (D-02/D-04). This is

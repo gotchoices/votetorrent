@@ -108,6 +108,13 @@ export function TaskCard({
 						setImageUrl(tempTask.network.imageUrl);
 						setNetworkName(tempTask.network.name);
 						break;
+					case "intake-policy":
+					case "association":
+						setTitle(t(task.signatureType === "intake-policy" ? "intakePolicyTaskTitle" : "associationTaskTitle"));
+						setSubtitle(t("signatureTaskThresholdCoSignSubtitle"));
+						setImageUrl(task.network.imageUrl);
+						setNetworkName(task.network.name);
+						break;
 					case "ballot":
 						tempTask = task as BallotSignatureTask;
 						setTitle(tempTask.ballot.proposed.description);

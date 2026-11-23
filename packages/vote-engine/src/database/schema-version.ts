@@ -6,4 +6,4 @@
  * for an app with a lower one (AppSchemaOutdatedError), so a phone on an older build is told to
  * update rather than dropping a column a newer build added.
  */
-export const VOTETORRENT_SCHEMA_VERSION = 1
+export const VOTETORRENT_SCHEMA_VERSION = 2

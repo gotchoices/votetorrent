@@ -1297,7 +1297,7 @@ const resources = {
 			registrationBridgeConfigUnsetHint: 'Save a bridge URL above to turn on REST sync.',
 			registrationBridgeConfigSaveError: 'Could not save the bridge URL. Try again.',
 			registrationBridgeConfigCoSignRequired:
-				'This authority requires more than one officer to approve this change. Saving the bridge URL is not supported at that setting, so nothing was saved.',
+				'This authority needs more than one officer to approve this change. Your signature is recorded, and the new bridge URL takes effect once enough officers sign it from their tasks.',
 			// 62-UI-SPEC Surface 2 — networkFounding* group (D-36). Consumer: 62-23.
 			networkFoundingExportButton: 'Share Network',
 			networkFoundingExportConfirmHeading: 'Share this network with another device?',
@@ -1362,7 +1362,9 @@ const resources = {
 			associationApprovalEnteredFieldsHeading: 'Entered by the voter',
 			associationApprovalRegistrantRecordHeading: "Registrant's record",
 			associationApprovalCoSignRequired:
-				'This authority needs more than one officer to approve device changes, and co-signing is not available for them yet.',
+				'This authority needs more than one officer to decide device changes. Your decision is recorded and is carried out once enough officers sign it from their tasks.',
+			associationApprovalReviewPending:
+				'Other officers are already signing a decision on this request. Sign or decline it from your tasks.',
 			// 62-UI-SPEC Surface 4 settings toggle — registrationPolicyReassociation* group (D-46). Consumer: 62-27.
 			registrationPolicyReassociationHeading: 'Device Change Requests',
 			registrationPolicyReassociationManual: 'Review each one manually',
@@ -1370,7 +1372,17 @@ const resources = {
 			registrationPolicyReassociationDefaultNote: 'Manual review is recommended and is the default.',
 			registrationPolicyReassociationSaveError: 'Could not save this setting. Try again.',
 			registrationPolicyReassociationCoSignRequired:
-				'This authority needs more than one officer to change this setting, and co-signing is not available for it yet.',
+				'This authority needs more than one officer to change this setting. Your signature is recorded, and the change takes effect once enough officers sign it from their tasks.',
+			// Co-signer tasks above a vrg threshold of 1.
+			intakePolicyTaskTitle: 'Registration Settings Change',
+			intakePolicyTaskBody: 'Another officer proposed these registration settings. They take effect once enough officers sign.',
+			intakePolicyTaskBridgeLabel: 'REST bridge',
+			intakePolicyTaskNoBridge: 'No REST bridge',
+			associationTaskTitle: 'Device Change Decision',
+			associationTaskApproveBody: 'Another officer approved this device change for registrant {{registrant}}. It is carried out once enough officers sign.',
+			associationTaskRejectBody: 'Another officer rejected this device change. It is carried out once enough officers sign.',
+			associationTaskDeviceLabel: 'New device key',
+			signatureTaskThresholdCoSignSubtitle: 'Needs your signature',
 			registrationPolicyReassociationLoadError: 'Could not read this setting. Try again later.',
 			// 62-UI-SPEC Surface 5 — signatureTaskThreshold* group. Consumers: 62-12, 62-27.
 			signatureTaskThresholdProgress: '{{signed}} of {{threshold}} signatures',
@@ -2783,7 +2795,7 @@ const resources = {
 			registrationBridgeConfigUnsetHint: 'Guarda una URL del puente arriba para activar la sincronización REST.',
 			registrationBridgeConfigSaveError: 'No se pudo guardar la URL del puente. Inténtalo de nuevo.',
 			registrationBridgeConfigCoSignRequired:
-				'Esta autoridad requiere que más de un funcionario apruebe este cambio. Guardar la URL del puente no es compatible con esa configuración, así que no se guardó nada.',
+				'Esta autoridad necesita a más de un funcionario para aprobar este cambio. Tu firma quedó registrada, y la nueva URL del puente entra en vigor cuando suficientes funcionarios la firmen desde sus tareas.',
 			// 62-UI-SPEC Surface 2 — networkFounding* group (D-36). Consumer: 62-23.
 			networkFoundingExportButton: 'Compartir Red',
 			networkFoundingExportConfirmHeading: '¿Compartir esta red con otro dispositivo?',
@@ -2848,7 +2860,9 @@ const resources = {
 			associationApprovalEnteredFieldsHeading: 'Introducido por el votante',
 			associationApprovalRegistrantRecordHeading: 'Registro del registrante',
 			associationApprovalCoSignRequired:
-				'Esta autoridad necesita a más de un funcionario para aprobar cambios de dispositivo, y la firma conjunta aún no está disponible para ellos.',
+				'Esta autoridad necesita a más de un funcionario para decidir cambios de dispositivo. Tu decisión quedó registrada y se aplica cuando suficientes funcionarios la firmen desde sus tareas.',
+			associationApprovalReviewPending:
+				'Otros funcionarios ya están firmando una decisión sobre esta solicitud. Fírmala o recházala desde tus tareas.',
 			// 62-UI-SPEC Surface 4 settings toggle — registrationPolicyReassociation* group (D-46). Consumer: 62-27.
 			registrationPolicyReassociationHeading: 'Solicitudes de Cambio de Dispositivo',
 			registrationPolicyReassociationManual: 'Revisar cada una manualmente',
@@ -2856,7 +2870,17 @@ const resources = {
 			registrationPolicyReassociationDefaultNote: 'Se recomienda la revisión manual y es la opción predeterminada.',
 			registrationPolicyReassociationSaveError: 'No se pudo guardar esta configuración. Inténtalo de nuevo.',
 			registrationPolicyReassociationCoSignRequired:
-				'Esta autoridad necesita a más de un funcionario para cambiar esta configuración, y la firma conjunta aún no está disponible para ella.',
+				'Esta autoridad necesita a más de un funcionario para cambiar esta configuración. Tu firma quedó registrada, y el cambio entra en vigor cuando suficientes funcionarios lo firmen desde sus tareas.',
+			// Co-signer tasks above a vrg threshold of 1.
+			intakePolicyTaskTitle: 'Cambio de Configuración de Registro',
+			intakePolicyTaskBody: 'Otro funcionario propuso esta configuración de registro. Entra en vigor cuando suficientes funcionarios la firmen.',
+			intakePolicyTaskBridgeLabel: 'Puente REST',
+			intakePolicyTaskNoBridge: 'Sin puente REST',
+			associationTaskTitle: 'Decisión de Cambio de Dispositivo',
+			associationTaskApproveBody: 'Otro funcionario aprobó este cambio de dispositivo para el registrante {{registrant}}. Se aplica cuando suficientes funcionarios lo firmen.',
+			associationTaskRejectBody: 'Otro funcionario rechazó este cambio de dispositivo. Se aplica cuando suficientes funcionarios lo firmen.',
+			associationTaskDeviceLabel: 'Clave del nuevo dispositivo',
+			signatureTaskThresholdCoSignSubtitle: 'Necesita tu firma',
 			registrationPolicyReassociationLoadError: 'No se pudo leer esta configuración. Inténtalo más tarde.',
 			// 62-UI-SPEC Surface 5 — signatureTaskThreshold* group. Consumers: 62-12, 62-27.
 			signatureTaskThresholdProgress: '{{signed}} de {{threshold}} firmas',

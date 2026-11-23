@@ -10,6 +10,8 @@ import type {
 	ElectionSignatureTask,
 	ElectionRevisionSignatureTask,
 	BallotSignatureTask,
+	IntakePolicySignatureTask,
+	AssociationSignatureTask,
 	ISignatureTasksEngine,
 	SigningStatus,
 } from "@votetorrent/vote-core";
@@ -19,6 +21,7 @@ import { NetworkSignatureTaskDetails } from "./components/NetworkSignatureTaskDe
 import { ElectionSignatureTaskDetails } from "./components/ElectionSignatureTaskDetails";
 import { ElectionRevisionSignatureTaskDetails } from "./components/ElectionRevisionSignatureTaskDetails";
 import { BallotSignatureTaskDetails } from "./components/BallotSignatureTaskDetails";
+import { AssociationSignatureTaskDetails, IntakePolicySignatureTaskDetails } from "./components/CoSignTaskDetails";
 import { SignatureTaskFooter } from "../../components/SignatureTaskFooter";
 import { ThemedText } from "../../components/ThemedText";
 import { InlineError } from "../../components/InlineError";
@@ -43,6 +46,8 @@ const titleKey: Record<Exclude<SignatureTask["signatureType"], "registrant">, st
 	election: "election",
 	"election-revision": "electionRevision",
 	ballot: "ballotRevision",
+	"intake-policy": "intakePolicyTaskTitle",
+	association: "associationTaskTitle",
 };
 
 export default function SignatureTaskScreen() {
@@ -188,6 +193,12 @@ export default function SignatureTaskScreen() {
 				)}
 				{task.signatureType === "ballot" && (
 					<BallotSignatureTaskDetails task={task as BallotSignatureTask} />
+				)}
+				{task.signatureType === "intake-policy" && (
+					<IntakePolicySignatureTaskDetails task={task as IntakePolicySignatureTask} />
+				)}
+				{task.signatureType === "association" && (
+					<AssociationSignatureTaskDetails task={task as AssociationSignatureTask} />
 				)}
 			</ScrollView>
 			<InlineError message={errorMessage} />

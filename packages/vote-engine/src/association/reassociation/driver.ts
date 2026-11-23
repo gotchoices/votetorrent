@@ -43,6 +43,8 @@ import type {
 } from '@votetorrent/vote-core'
 import { intakeQueryPortFromDb, readIntakePolicyFrom, reassociationRouteFor } from '../../intake/index.js'
 import { readAuthorityThreshold } from '../../signing/threshold.js'
+import { resolveSign } from '../../signing/ceremony-helpers.js'
+import { listAssociationReviews, liveReview, openAssociationReview, reachedReview } from '../association-review.js'
 import type { EngineContext } from '../../types.js'
 import { asText } from '../../utils.js'
 import {
@@ -122,6 +124,11 @@ export interface ReassociationHost {
   getAssociation (registrantId: string, deviceKey: string): Promise<Association | undefined>
   getAssociations (registrantId: string): Promise<Association[]>
   getAssociationsByDeviceKey (deviceKey: string): Promise<Association[]>
+  /**
+   * Schema version 2: a host whose every 'vrg' write derives from the reached review session
+   * `headerNonce` (co-signed decisions above a 'vrg' threshold of 1). Short-lived; one decision.
+   */
+  withVrgHeader (headerNonce: string): ReassociationHost
 }
 
 interface SentinelRequestRow {
@@ -496,11 +503,48 @@ export async function processPendingReassociations (
 
   const r1Approved = await listApprovedRegistrations(host.ctx.db, authorityId, opener)
   const r1CodeCache = new Map<string, OpenedCode>()
+  const threshold = await readAuthorityThreshold(host.ctx.db, authorityId, 'vrg')
 
   for (const row of pendingRows) {
     try {
+      if (threshold > 1) {
+        // Above a 'vrg' threshold of 1 every decision is a co-signed review. A reached review is
+        // carried out here, by a host whose 'vrg' writes all derive from it.
+        const reviews = await listAssociationReviews(host.ctx.db, row.id)
+        const reached = reachedReview(reviews)
+        if (reached !== undefined) {
+          const derived = host.withVrgHeader(reached.nonce)
+          if (reached.decision === 'a' && reached.registrantId !== undefined) {
+            const challenge = await derived.issueAttestationChallenge(reached.registrantId, row.deviceKey, signatureOrCallback, row.electionId)
+            await derived.writeChallengeTransition(row.id, authorityId, challenge.nonce, signatureOrCallback)
+            challengesIssued++
+            try {
+              await intake.publishDecision({ requestId: row.id, status: 'c', challengeNonce: challenge.nonce, decidedAt: new Date().toISOString() })
+            } catch {
+              publishFailures++
+            }
+          } else {
+            await derived.rejectPendingRequest(
+              { id: row.id, authorityId: row.authorityId, registrantId: row.registrantId, deviceKey: row.deviceKey },
+              REASSOCIATION_NOT_APPROVED_REASON,
+              signatureOrCallback,
+              intake
+            )
+            rejected++
+          }
+          continue
+        }
+        if (liveReview(reviews) !== undefined) {
+          awaitingReview++
+          continue
+        }
+      }
       const review = await buildReview(host, authorityId, row, intake, opener, r1Approved, r1CodeCache)
-      if (review.route === 'automatic' && review.matchMethod === 'code' && review.resolvedRegistrantId !== undefined) {
+      if (threshold > 1 && review.route === 'automatic' && review.matchMethod === 'code' && review.resolvedRegistrantId !== undefined) {
+        // The automatic route above threshold 1: this officer proposes the approval; the others co-sign.
+        await openAssociationReview(host.ctx, row, 'a', review.resolvedRegistrantId, resolveSign(signatureOrCallback))
+        awaitingReview++
+      } else if (review.route === 'automatic' && review.matchMethod === 'code' && review.resolvedRegistrantId !== undefined) {
         const challenge = await host.issueAttestationChallenge(review.resolvedRegistrantId, row.deviceKey, signatureOrCallback, row.electionId)
         await host.writeChallengeTransition(row.id, authorityId, challenge.nonce, signatureOrCallback)
         challengesIssued++
@@ -535,6 +579,13 @@ export async function processPendingReassociations (
     if (challengeNonce === undefined || challengeNonce.startsWith(REASSOCIATION_REJECTION_NONCE_PREFIX)) continue
 
     try {
+      // Above a 'vrg' threshold of 1 the writes below derive from the request's reached review.
+      let writer: ReassociationHost = host
+      if (threshold > 1) {
+        const reached = reachedReview(await listAssociationReviews(host.ctx.db, doc.requestId))
+        if (reached === undefined) continue
+        writer = host.withVrgHeader(reached.nonce)
+      }
       let validated: { registrantId: string; deviceKey: string }
       try {
         const loaded = await host.validateStagedAttestationAnswer(doc.answer, doc.requesterKey, doc.signature)
@@ -574,7 +625,7 @@ export async function processPendingReassociations (
 
       let prepared: unknown
       try {
-        prepared = await host.prepareAssociation({
+        prepared = await writer.prepareAssociation({
           registrantId,
           deviceKey: validated.deviceKey,
           deviceHash: doc.answer.deviceHash,
@@ -582,7 +633,7 @@ export async function processPendingReassociations (
           attestation: doc.answer.attestation
         })
       } catch {
-        const decidedAt = await host.writeTerminalTransition(doc.requestId, authorityId, 'r', 'attestation-verification-failed', signatureOrCallback)
+        const decidedAt = await writer.writeTerminalTransition(doc.requestId, authorityId, 'r', 'attestation-verification-failed', signatureOrCallback)
         rejected++
         try {
           await intake.publishDecision({ requestId: doc.requestId, status: 'r', reason: 'attestation-verification-failed', decidedAt })
@@ -593,7 +644,7 @@ export async function processPendingReassociations (
       }
 
       try {
-        await host.commitPreparedAssociation(prepared, signatureOrCallback, { registrantId, deviceKeys: devicesToRetire })
+        await writer.commitPreparedAssociation(prepared, signatureOrCallback, { registrantId, deviceKeys: devicesToRetire })
       } catch {
         const stillAssociated = await host.getAssociation(registrantId, validated.deviceKey)
         if (stillAssociated === undefined) continue
@@ -601,7 +652,7 @@ export async function processPendingReassociations (
         // 'a' below, same as the existing driver's own documented recovery.
       }
 
-      const decidedAt = await host.writeTerminalTransition(doc.requestId, authorityId, 'a', null, signatureOrCallback)
+      const decidedAt = await writer.writeTerminalTransition(doc.requestId, authorityId, 'a', null, signatureOrCallback)
       associated++
       try {
         await intake.publishDecision({
@@ -666,8 +717,8 @@ export async function approveReassociation (
   }
 
   const threshold = await readAuthorityThreshold(host.ctx.db, row.authorityId, 'vrg')
-  if (threshold > 1) {
-    throw new ReassociationError('threshold-requires-co-sign', `approveReassociation: 'vrg' threshold at authority ${row.authorityId} is above 1`)
+  if (threshold > 1 && liveReview(await listAssociationReviews(host.ctx.db, requestId)) !== undefined) {
+    throw new ReassociationError('review-pending', `approveReassociation: a co-signed review of requestId=${requestId} is already open`)
   }
 
   const raw = await rawEvidenceFor(requestId, intake)
@@ -686,6 +737,13 @@ export async function approveReassociation (
 
   const existingDevices = await host.getAssociations(input.registrantId)
   const devicesToRetire = existingDevices.map((a) => a.deviceKey).sort()
+
+  if (threshold > 1) {
+    // Above a 'vrg' threshold of 1: this officer's approval opens a co-signed review; the challenge
+    // is issued by the sync driver once enough 'vrg' officers have signed it.
+    await openAssociationReview(host.ctx, row, 'a', input.registrantId, resolveSign(signatureOrCallback))
+    return { requestId, registrantId: input.registrantId, matchMethod, devicesToRetire, outcome: 'awaiting-co-signers' }
+  }
 
   const challenge = await host.issueAttestationChallenge(input.registrantId, row.deviceKey, signatureOrCallback, row.electionId)
   await host.writeChallengeTransition(requestId, row.authorityId, challenge.nonce, signatureOrCallback)
@@ -726,7 +784,12 @@ export async function rejectReassociation (
 
   const threshold = await readAuthorityThreshold(host.ctx.db, row.authorityId, 'vrg')
   if (threshold > 1) {
-    throw new ReassociationError('threshold-requires-co-sign', `rejectReassociation: 'vrg' threshold at authority ${row.authorityId} is above 1`)
+    // A rejection above threshold 1 is a co-signed review too (no single-officer veto).
+    if (liveReview(await listAssociationReviews(host.ctx.db, requestId)) !== undefined) {
+      throw new ReassociationError('review-pending', `rejectReassociation: a co-signed review of requestId=${requestId} is already open`)
+    }
+    await openAssociationReview(host.ctx, row, 'r', null, resolveSign(signatureOrCallback))
+    return { requestId, reason: REASSOCIATION_NOT_APPROVED_REASON, outcome: 'awaiting-co-signers' }
   }
 
   await host.rejectPendingRequest(

@@ -35,6 +35,7 @@ export type IntakeErrorCode =
   | 'not-authorized'
   | 'vault-error'
   | 'invalid-policy'
+  /** No longer thrown: above a 'vrg' threshold of 1 a change is proposed for co-signing instead. Kept so older readers type-check. */
   | 'threshold-requires-co-sign'
   | 'policy-revision-conflict'
 
@@ -153,6 +154,11 @@ export interface AuthorityIntakePolicyView {
   readonly reassociationMode: ReassociationMode
   readonly setAt: string | null
   readonly isDefault: boolean
+  /**
+   * Set only on `setIntakePolicy`'s result above a 'vrg' threshold of 1: the change was PROPOSED and
+   * waits for the other 'vrg' officers' signatures; the rest of this view is still the policy in force.
+   */
+  readonly pendingProposal?: IntakePolicyProposalView
 }
 
 /** An omitted field keeps the current (or default) value. A present `expectedRevision` must equal the current revision. */
@@ -161,4 +167,22 @@ export interface AuthorityIntakePolicyInput {
   readonly restBridgeUrl?: string | null
   readonly reassociationMode?: ReassociationMode
   readonly expectedRevision?: number
+}
+
+/** One pending (or reached but not yet applied) policy change. */
+export interface IntakePolicyProposalView {
+  readonly authorityId: string
+  /** The revision the change takes effect as. */
+  readonly revision: number
+  readonly restBridgeUrl: string | null
+  readonly reassociationMode: ReassociationMode
+  readonly setAt: string
+  readonly signingNonce: string
+  readonly threshold: number
+  readonly signatures: number
+  readonly reached: boolean
+  /** Too few holders can still sign for the threshold to be reached. */
+  readonly unreachable: boolean
+  /** The effective row for this revision exists. */
+  readonly applied: boolean
 }

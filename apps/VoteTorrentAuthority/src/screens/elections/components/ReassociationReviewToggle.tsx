@@ -23,9 +23,10 @@ import { isThresholdCoSignRefusal } from "../../registration/continuity-review";
  *
  * Per-authority, written as a signed `AuthorityIntakePolicy` row through
  * `IntakeEngine.setIntakePolicy` (62-14), carrying `expectedRevision` so a concurrent change is
- * refused rather than overwritten. The write refuses `threshold-requires-co-sign` above a vrg
- * threshold of 1 (the 62-13 GAP): the control claims no multi-officer support, and renders that
- * refusal through its own copy with both options disabled.
+ * refused rather than overwritten. Above a vrg threshold of 1 the write is a PROPOSAL: the result
+ * is the mode still in force with `pendingProposal` set, the other vrg officers get a task to sign
+ * it, and the control says so with both options disabled for the rest of the mount (a second
+ * press would only stack a second proposal).
  *
  * The scope gate (`canWrite`) is UI legibility only; the 'vrg' AdminSigning CHECK enforces it.
  * Disabled, never hidden.
@@ -125,7 +126,14 @@ export function ReassociationReviewToggle({
 				{ authorityId, reassociationMode: next, expectedRevision: view.revision },
 				signer,
 			);
-			if (!unmountedRef.current) setView(written);
+			if (!unmountedRef.current) {
+				setView(written);
+				// Above a vrg threshold of 1 the change was proposed: the mode shown stays the one in force.
+				if (written.pendingProposal !== undefined) {
+					setRefused(true);
+					setNotice("co-sign");
+				}
+			}
 		} catch (err) {
 			if (unmountedRef.current) return;
 			if (isThresholdCoSignRefusal(err)) {

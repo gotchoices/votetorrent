@@ -16,7 +16,9 @@ import { deriveRegistrationCodeWith } from './reassociation/registration-code.js
 import * as reassociationDriver from './reassociation/driver.js'
 import type { ReassociationHost } from './reassociation/driver.js'
 import type { EngineContext } from '../types.js'
-import { REASSOCIATION_REJECTION_NONCE_PREFIX, REASSOCIATION_UNRESOLVED_REGISTRANT_ID, REGISTRANT_HAS_ACTIVE_DEVICE_REASON } from '@votetorrent/vote-core'
+import { REASSOCIATION_NOT_APPROVED_REASON, REASSOCIATION_REJECTION_NONCE_PREFIX, REASSOCIATION_UNRESOLVED_REGISTRANT_ID, REGISTRANT_HAS_ACTIVE_DEVICE_REASON } from '@votetorrent/vote-core'
+import { readAuthorityThreshold } from '../signing/threshold.js'
+import { listAssociationReviews, liveReview, openAssociationReview, reachedReview } from './association-review.js'
 // 51-09 Task 2: `IAssociationRequestIntake`/`StagedAttestation` are declared in the FILESYSTEM
 // transport module (deliberately, per that file's own doc comment — "transport-agnostic despite
 // living in the filesystem module for now"). This is a TYPE-ONLY import of that shared interface,
@@ -195,12 +197,35 @@ export class AssociationEngine implements IAssociationEngine, IReassociationEngi
    * which `commitPreparedAssociation` treats as "use the shipped default"). */
   private readonly reassociationWriteMode?: ReassociationWriteMode
 
+  /**
+   * Schema version 2: the reached 'vrg' review session (a co-signed association decision) every
+   * 'vrg' write of THIS instance derives from (signDerived). Set only on the short-lived instance
+   * `reassociationHost().withVrgHeader(nonce)` builds for carrying out that one decision; never on a
+   * shared engine, so no other request's write can inherit it.
+   */
+  private readonly vrgHeaderNonce?: string
+
   constructor (
     private readonly ctx?: EngineContext,
     private readonly verifier: IAttestationVerifier = new StubAttestationVerifier(),
-    options?: { reassociationWriteMode?: ReassociationWriteMode }
+    options?: { reassociationWriteMode?: ReassociationWriteMode, vrgHeaderNonce?: string }
   ) {
     this.reassociationWriteMode = options?.reassociationWriteMode
+    this.vrgHeaderNonce = options?.vrgHeaderNonce
+  }
+
+  /** A short-lived engine whose every 'vrg' write derives from the reached review session `headerNonce`. */
+  private derivedFrom (headerNonce: string): AssociationEngine {
+    return new AssociationEngine(this.ctx, this.verifier, { reassociationWriteMode: this.reassociationWriteMode, vrgHeaderNonce: headerNonce })
+  }
+
+  /** Every 'vrg' ceremony of this engine goes through here, so a header-bound instance derives them all. */
+  private seedVrgMutation (...args: Parameters<typeof seedSignedMutation>): Promise<string> {
+    const [ctx, authorityId, scope, tid, digestExpr, digestParams, sign, options] = args
+    const headerOptions = this.vrgHeaderNonce !== undefined && scope === 'vrg'
+      ? { ...(options ?? {}), headerNonce: this.vrgHeaderNonce }
+      : options
+    return seedSignedMutation(ctx, authorityId, scope, tid, digestExpr, digestParams, sign, headerOptions)
   }
 
   /** Normalizes the Signature|callback union into a single callback shape (WR-04: shared). */
@@ -298,7 +323,7 @@ export class AssociationEngine implements IAssociationEngine, IReassociationEngi
       // every insert.
       const digestExpr = 'select Digest(:tid, :challengeNonce, :challengeAuthorityId, :registrantId, :deviceKey, :electionId) as d'
       const digestParams = { tid, challengeNonce: nonce, challengeAuthorityId: authorityId, registrantId, deviceKey, electionId: electionIdValue }
-      const signingNonce = await seedSignedMutation(ctx, authorityId, 'vrg', tid, digestExpr, digestParams, this.resolveSign(signatureOrCallback))
+      const signingNonce = await this.seedVrgMutation(ctx, authorityId, 'vrg', tid, digestExpr, digestParams, this.resolveSign(signatureOrCallback))
 
       await ctx.db.exec(
         `insert into AttestationChallenge (Nonce, AuthorityId, RegistrantId, DeviceKey, ElectionId)
@@ -337,7 +362,7 @@ export class AssociationEngine implements IAssociationEngine, IReassociationEngi
       // NOTE: `challengeNonce` (not `nonce`) — avoids the seedSignedMutation reserved-bind collision (see issueAttestationChallenge).
       const digestExpr = "select Digest(:tid, :challengeNonce, 'delete') as d"
       const digestParams = { tid, challengeNonce: nonce }
-      const signingNonce = await seedSignedMutation(ctx, authorityId, 'vrg', tid, digestExpr, digestParams, this.resolveSign(signatureOrCallback))
+      const signingNonce = await this.seedVrgMutation(ctx, authorityId, 'vrg', tid, digestExpr, digestParams, this.resolveSign(signatureOrCallback))
 
       // D-10 (51-05): the `with context` clause's `now` param is GONE — `context.now` was used
       // by nothing in this table except the removed `ExpirationFuture` CHECK.
@@ -634,7 +659,7 @@ export class AssociationEngine implements IAssociationEngine, IReassociationEngi
           const deleteTid = await allocateTid(ctx.db, 'association')
           const deleteDigestExpr = "select Digest(:tid, :registrantId, :deviceKey, 'delete') as d"
           const deleteDigestParams = { tid: deleteTid, registrantId: revoke!.registrantId, deviceKey: oldDeviceKey }
-          const deleteSigningNonce = await seedSignedMutation(
+          const deleteSigningNonce = await this.seedVrgMutation(
             ctx,
             challenge.authorityId,
             'vrg',
@@ -684,7 +709,7 @@ export class AssociationEngine implements IAssociationEngine, IReassociationEngi
         rowSignorKey: rowSignature.signerKey,
         rowSignature: rowSignature.signature
       }
-      const associationNonce = await seedSignedMutation(
+      const associationNonce = await this.seedVrgMutation(
         ctx,
         challenge.authorityId,
         'vrg',
@@ -729,7 +754,7 @@ export class AssociationEngine implements IAssociationEngine, IReassociationEngi
         attestationDetails: attestationDetailsJson,
         expirationDeferred
       }
-      const privateNonce = await seedSignedMutation(
+      const privateNonce = await this.seedVrgMutation(
         ctx,
         challenge.authorityId,
         'vrg',
@@ -791,7 +816,7 @@ export class AssociationEngine implements IAssociationEngine, IReassociationEngi
     // collision (see issueAttestationChallenge's doc comment).
     const consumeDigestExpr = "select Digest(:tid, :challengeNonce, 'delete') as d"
     const consumeDigestParams = { tid: consumeTid, challengeNonce: nonce }
-    const consumeNonce = await seedSignedMutation(
+    const consumeNonce = await this.seedVrgMutation(
       ctx,
       challenge.authorityId,
       'vrg',
@@ -963,7 +988,7 @@ export class AssociationEngine implements IAssociationEngine, IReassociationEngi
 
       const digestExpr = "select Digest(:tid, :registrantId, :deviceKey, 'delete') as d"
       const digestParams = { tid, registrantId, deviceKey }
-      const signingNonce = await seedSignedMutation(ctx, authorityId, 'vrg', tid, digestExpr, digestParams, this.resolveSign(signatureOrCallback))
+      const signingNonce = await this.seedVrgMutation(ctx, authorityId, 'vrg', tid, digestExpr, digestParams, this.resolveSign(signatureOrCallback))
 
       await ctx.db.exec(
         `delete from Association
@@ -1458,7 +1483,7 @@ export class AssociationEngine implements IAssociationEngine, IReassociationEngi
     // TransitionValid's challenge-echo clause, field for field: Digest(context.Tid, new.Id, new.Status, new.ChallengeNonce).
     const digestExpr = 'select Digest(:tid, :requestId, :status, :challengeNonce) as d'
     const digestParams = { tid, requestId, status: 'c', challengeNonce }
-    const signingNonce = await seedSignedMutation(ctx, authorityId, 'vrg', tid, digestExpr, digestParams, this.resolveSign(signatureOrCallback))
+    const signingNonce = await this.seedVrgMutation(ctx, authorityId, 'vrg', tid, digestExpr, digestParams, this.resolveSign(signatureOrCallback))
 
     await ctx.db.exec(
       `update AssociationRequest
@@ -1503,7 +1528,7 @@ export class AssociationEngine implements IAssociationEngine, IReassociationEngi
     // TransitionValid's decision clause, field for field: Digest(context.Tid, new.Id, new.Status, new.DecidedAt, new.RejectionReason).
     const digestExpr = 'select Digest(:tid, :requestId, :status, :decidedAtDeferred, :rejectionReason) as d'
     const digestParams = { tid, requestId, status, decidedAtDeferred, rejectionReason }
-    const signingNonce = await seedSignedMutation(ctx, authorityId, 'vrg', tid, digestExpr, digestParams, this.resolveSign(signatureOrCallback))
+    const signingNonce = await this.seedVrgMutation(ctx, authorityId, 'vrg', tid, digestExpr, digestParams, this.resolveSign(signatureOrCallback))
 
     await ctx.db.exec(
       `update AssociationRequest
@@ -1653,6 +1678,10 @@ export class AssociationEngine implements IAssociationEngine, IReassociationEngi
     let associated = 0
     let rejected = 0
     try {
+      // Schema version 2: above a 'vrg' threshold of 1 every decision below is a co-signed review.
+      // This officer proposes it; the writes that carry it out derive from the reached review.
+      const vrgThreshold = await readAuthorityThreshold(ctx.db, authorityId, 'vrg')
+
       // ---------------- R0 (62-18, D-41): finish any interrupted synthetic rejection first ----------------
       rejected += await this.completeInterruptedRejections(authorityId, signatureOrCallback, intake)
 
@@ -1690,9 +1719,47 @@ export class AssociationEngine implements IAssociationEngine, IReassociationEngi
         const conflictingAssociationRow = await ctx.db
           .prepare('select DeviceKey from Association where RegistrantId = :registrantId and DeviceKey <> :deviceKey limit 1')
           .get({ registrantId: row.registrantId, deviceKey: row.deviceKey })
+
+        // eslint-disable-next-line @typescript-eslint/no-this-alias
+        let writer: AssociationEngine = this
+        if (vrgThreshold > 1) {
+          const reviews = await listAssociationReviews(ctx.db, row.id)
+          const reached = reachedReview(reviews)
+          if (reached === undefined) {
+            if (liveReview(reviews) === undefined) {
+              try {
+                await openAssociationReview(
+                  ctx,
+                  { id: row.id, authorityId, deviceKey: row.deviceKey },
+                  conflictingAssociationRow ? 'r' : 'a',
+                  conflictingAssociationRow ? null : row.registrantId,
+                  this.resolveSign(signatureOrCallback)
+                )
+              } catch (reviewErr) {
+                console.warn(
+                  `AssociationEngine.processPendingAssociationRequests: could not open a co-signed review for requestId=${row.id}; the row is left 'p' for a later sync`,
+                  reviewErr instanceof Error ? reviewErr.message : String(reviewErr)
+                )
+              }
+            }
+            continue
+          }
+          writer = this.derivedFrom(reached.nonce)
+          if (reached.decision === 'r' && !conflictingAssociationRow) {
+            await writer.rejectPendingRequest(
+              { id: row.id, authorityId, registrantId: row.registrantId, deviceKey: row.deviceKey },
+              REASSOCIATION_NOT_APPROVED_REASON,
+              signatureOrCallback,
+              intake
+            )
+            rejected++
+            continue
+          }
+        }
+
         if (conflictingAssociationRow) {
           try {
-            await this.rejectPendingRequest(
+            await writer.rejectPendingRequest(
               { id: row.id, authorityId, registrantId: row.registrantId, deviceKey: row.deviceKey },
               REGISTRANT_HAS_ACTIVE_DEVICE_REASON,
               signatureOrCallback,
@@ -1727,11 +1794,11 @@ export class AssociationEngine implements IAssociationEngine, IReassociationEngi
         // batch-fatal — `AdminSigning.UserIdValid` failing structurally is one of this phase's
         // own asserted properties, and swallowing it per-row would turn a security-relevant
         // misconfiguration into a silent no-op sync.
-        const challenge = await this.issueAttestationChallenge(row.registrantId, row.deviceKey, signatureOrCallback, row.electionId)
+        const challenge = await writer.issueAttestationChallenge(row.registrantId, row.deviceKey, signatureOrCallback, row.electionId)
 
         try {
           // 62-18 Task 2: same SQL/digest/rebinding as before, now the shared helper.
-          await this.writeChallengeTransition(row.id, authorityId, challenge.nonce, signatureOrCallback)
+          await writer.writeChallengeTransition(row.id, authorityId, challenge.nonce, signatureOrCallback)
 
           await intake.publishDecision({ requestId: row.id, status: 'c', challengeNonce: challenge.nonce, decidedAt: toIsoZDatetime(Date.now()) })
           challengesIssued++
@@ -1754,7 +1821,7 @@ export class AssociationEngine implements IAssociationEngine, IReassociationEngi
             stillPending = statusRow?.Status === 'p'
           } catch { /* cannot tell — leave the challenge alone, the conservative choice */ }
           if (stillPending) {
-            await this.removeAttestationChallenge(challenge.nonce, signatureOrCallback).catch(() => {})
+            await writer.removeAttestationChallenge(challenge.nonce, signatureOrCallback).catch(() => {})
           }
           console.warn(
             `AssociationEngine.processPendingAssociationRequests: LEG 1 failed for requestId=${row.id} after the challenge was issued (orphan retracted: ${String(stillPending)}); the batch continues`,
@@ -1786,6 +1853,15 @@ export class AssociationEngine implements IAssociationEngine, IReassociationEngi
           // synthetic rejection in progress is owned by `completeInterruptedRejections` above —
           // this LEG never calls `associate()` for either.
           continue
+        }
+
+        // Above a 'vrg' threshold of 1 the association writes derive from the request's reached review.
+        // eslint-disable-next-line @typescript-eslint/no-this-alias
+        let answerWriter: AssociationEngine = this
+        if (vrgThreshold > 1) {
+          const reached = reachedReview(await listAssociationReviews(ctx.db, doc.requestId))
+          if (reached === undefined) continue
+          answerWriter = this.derivedFrom(reached.nonce)
         }
 
         // LEG 2 MANDATORY GATE (T-51-08-09/T-51-09-10): route every staged answer through 51-08's
@@ -1851,7 +1927,7 @@ export class AssociationEngine implements IAssociationEngine, IReassociationEngi
           try {
             // THE DRIVER CALLS THIS UNCHANGED — no reimplementation of verification, verdict
             // recording, the two-row write, or D-11's challenge consumption.
-            await this.associate(associateInit, signatureOrCallback)
+            await answerWriter.associate(associateInit, signatureOrCallback)
           } catch (associateErr) {
             // WR-05 (51-REVIEW): `associate()` is DELIBERATELY two sequential transactions — the
             // Association/AssociationPrivate write commits, and only then does D-11's challenge
@@ -1902,7 +1978,7 @@ export class AssociationEngine implements IAssociationEngine, IReassociationEngi
         const rejectionReasonBind = rejectionReason ?? null
 
         // 62-18 Task 2: same SQL/digest/rebinding as before, now the shared helper.
-        const decidedAt = await this.writeTerminalTransition(doc.requestId, authorityId, finalStatus, rejectionReasonBind, signatureOrCallback)
+        const decidedAt = await answerWriter.writeTerminalTransition(doc.requestId, authorityId, finalStatus, rejectionReasonBind, signatureOrCallback)
 
         if (finalStatus === 'a') {
           await intake.publishDecision({ requestId: doc.requestId, status: 'a', decidedAt })
@@ -2095,7 +2171,9 @@ export class AssociationEngine implements IAssociationEngine, IReassociationEngi
       completeInterruptedRejections: (authorityId, sig, intake) => this.completeInterruptedRejections(authorityId, sig, intake),
       getAssociation: (registrantId, deviceKey) => this.getAssociation(registrantId, deviceKey),
       getAssociations: (registrantId) => this.getAssociations(registrantId),
-      getAssociationsByDeviceKey: (deviceKey) => this.getAssociationsByDeviceKey(deviceKey)
+      getAssociationsByDeviceKey: (deviceKey) => this.getAssociationsByDeviceKey(deviceKey),
+      withVrgHeader: (headerNonce) =>
+        new AssociationEngine(ctx, this.verifier, { reassociationWriteMode: this.reassociationWriteMode, vrgHeaderNonce: headerNonce }).reassociationHost()
     }
   }
 }

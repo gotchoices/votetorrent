@@ -28,12 +28,15 @@ import { listCurrentScopeHolders, readSessionThreshold, computeSigningStatus } f
  * helper's). It never logs bound values — user ids and nonces are security-relevant (T-62-07-08).
  */
 
-export type FanOutSignatureType = 'ballot' | 'registrant' | 'admin'
+export type FanOutSignatureType = 'ballot' | 'registrant' | 'admin' | 'intake-policy' | 'association'
 
 export const SIGNATURE_TYPE_SCOPE: Readonly<Record<FanOutSignatureType, Scope>> = Object.freeze({
   ballot: 'ceb',
   registrant: 'vrg',
   admin: 'rad',
+  // Schema version 2: co-signed intake-policy changes and association decisions.
+  'intake-policy': 'vrg',
+  association: 'vrg',
 })
 
 export interface FanOutSpec {
