@@ -192,15 +192,17 @@ describe("NetworksScreen Join a network entry", () => {
 		await unmount(r);
 	});
 
-	it("E-5: the Scan button still only sets its inline note and navigates nowhere", async () => {
+	it("E-5: the Scan button opens the camera: it navigates to JoinNetworkByScan with no params", async () => {
 		const r = await mount({});
 		const el = r.root.findAll((n) => n.props.accessibilityLabel === tr("en", "scan") && typeof n.props.onPress === "function");
 		expect(el.length).toBeGreaterThan(0);
 		await act(async () => {
 			el[0].props.onPress();
 		});
-		expect(JSON.stringify(r.toJSON())).toContain(tr("en", "qrScanUnavailable"));
-		expect(mockNavigate).not.toHaveBeenCalled();
+		expect(mockNavigate.mock.calls).toEqual([["JoinNetworkByScan"]]);
+		// The dead "not available yet" note is gone from the screen and the catalogue.
+		expect(Object.keys(resources.en.translation)).not.toContain("qrScanUnavailable");
+		expect(Object.keys(resources.es.translation)).not.toContain("qrScanUnavailable");
 		await unmount(r);
 	});
 });

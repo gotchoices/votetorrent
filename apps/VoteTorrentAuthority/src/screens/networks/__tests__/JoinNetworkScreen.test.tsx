@@ -317,7 +317,10 @@ describe("K: the pure key maps and the source (D-06)", () => {
 			const body = code.slice(start, end);
 			expect(body).not.toMatch(/detail|message|\bt\(/);
 		}
-		expect(code).not.toMatch(/numberOfLines|setParams|setOptions|\.navigate\(|require\(["']@serfab|vision-camera|Camera/);
+		// 2026-11-23: the screen gained a camera scanner, but only through ./JoinCodeScanner, which owns
+		// the VisionCamera hooks; the screen itself never imports the camera package.
+		expect(code).not.toMatch(/numberOfLines|setParams|setOptions|\.navigate\(|require\(["']@serfab|vision-camera|useCamera/);
+		expect(code.match(/from "\.\/JoinCodeScanner"/g) ?? []).toHaveLength(1);
 		expect(code.match(/goBack\(/g) ?? []).toHaveLength(1);
 		expect(code.match(/<ScrollView/g)?.length ?? 0).toBeGreaterThanOrEqual(1);
 		expect(code.match(/"founder-cannot-join"/g) ?? []).toHaveLength(2);

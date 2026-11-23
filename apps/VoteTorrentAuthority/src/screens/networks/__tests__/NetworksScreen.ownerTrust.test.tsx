@@ -207,7 +207,7 @@ describe("NetworksScreen owner-trust notice", () => {
 		expect(code).not.toContain("AcceptInvitation");
 	});
 
-	it.each(STATES)("N-6: %s persists after the Scan button sets its inline note", async (state) => {
+	it.each(STATES)("N-6: %s persists after the Scan button is pressed", async (state) => {
 		const r = await mount({ ownerTrust: state });
 		const scanLabel = tr("en", "scan");
 		const el = r.root.findAll((n) => n.props.accessibilityLabel === scanLabel && typeof n.props.onPress === "function");
@@ -216,8 +216,8 @@ describe("NetworksScreen owner-trust notice", () => {
 			el[0].props.onPress();
 		});
 		const json = r.toJSON();
-		// The inline note proves the press took effect.
-		expect(JSON.stringify(json)).toContain(tr("en", "qrScanUnavailable"));
+		// The navigation call proves the press took effect.
+		expect(mockNavigate.mock.calls).toEqual([["JoinNetworkByScan"]]);
 		expect(hosts(json).filter((h) => h.props.testID === "owner-trust-notice")).toHaveLength(1);
 		expect(underScroll(json).filter((h) => typeof h.props.testID === "string")[0].props.testID).toBe("owner-trust-notice");
 		const notice = hosts(json).find((h) => h.props.testID === "owner-trust-notice") as Json;

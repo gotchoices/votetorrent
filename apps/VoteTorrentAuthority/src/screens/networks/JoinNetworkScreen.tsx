@@ -1,12 +1,19 @@
 /**
- * JoinNetworkScreen.tsx - the Authority's "Join a network" paste screen (D-26).
+ * JoinNetworkScreen.tsx - the Authority's "Join a network" screen (D-26).
  *
- * D-26: a paste screen. The officer pastes (or types) the join code the election office gave them,
- * sees the network's name and fingerprint, compares the fingerprint with the one the office
- * published, and taps Join. There is no camera. A paste or a typed text only decodes; only the Join
- * tap starts a join.
+ * D-26: the officer scans, pastes or types the join code the election office gave them, sees the
+ * network's name and fingerprint, compares the fingerprint with the one the office published, and
+ * taps Join. A scan, a paste or a typed text only decodes; only the Join tap starts a join.
  *
- * UI-SPEC A1: a root-stack route with no params. The code lives only in this screen's state; it is
+ * Scan: D-26 first shipped this screen paste-only, with no camera. The user ruled on 2026-11-23 to
+ * add the camera, so an officer or keyholder can join by scanning the office's join-code QR. The Scan
+ * entry opens `JoinCodeScanner` (a Modal that owns the camera permission and device). An accepted
+ * scan fills the field exactly as a paste would, so the network name and fingerprint show with Join
+ * ready; the Join tap is still required. Each camera state the scanner reports shows a plain sentence
+ * that points to paste. The Networks screen's Scan button opens the `JoinNetworkByScan` route, which
+ * is this screen with the scanner open on arrival (`openScannerOnMount`).
+ *
+ * UI-SPEC A1: root-stack routes with no params. The code lives only in this screen's state; it is
  * never passed to `navigate`, `setParams` or `setOptions`, and navigation state is not persisted.
  *
  * D-09: the needs-reinvite notice's action lands here. A join runs the glue (`runAuthorityNetworkJoin`),
@@ -32,10 +39,23 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import {
+	AccessibilityInfo,
+	ActivityIndicator,
+	Linking,
+	Platform,
+	Pressable,
+	ScrollView,
+	StyleSheet,
+	Text,
+	TextInput,
+	View,
+	type HostInstance,
+} from "react-native";
 import { ExtendedTheme, useFocusEffect, useNavigation, useTheme } from "@react-navigation/native";
 import { useTranslation } from "react-i18next";
 import Clipboard from "@react-native-clipboard/clipboard";
+import FontAwesome6 from "react-native-vector-icons/FontAwesome6";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { decodeNetworkJoinCode } from "@votetorrent/vote-engine/rn";
 import type { NetworkJoinCodeDecodeFailure, NetworkJoinFailureReason, NetworkJoinStep } from "@votetorrent/vote-engine/rn";
@@ -52,6 +72,7 @@ import { mapDeviceSigningError } from "../../utils/deviceSigningError";
 import { errorClassName } from "../../utils/errorClassName";
 import { globalStyles } from "../../theme/styles";
 import type { NavigationProp } from "../../navigation/types";
+import JoinCodeScanner, { type JoinScanCameraState } from "./JoinCodeScanner";
 
 /** The translated sentence for each way a join can fail, chosen by the typed reason only. */
 export function joinNetworkFailureKey(reason: NetworkJoinFailureReason | "founder-cannot-join"): string {
@@ -107,6 +128,9 @@ export function joinNetworkStepKey(step: NetworkJoinStep): string {
 	}
 }
 
+type ScanNotice = "scanned" | "denied" | "failed";
+type ScanAvailability = "ready" | "blocked" | "none";
+
 type Phase =
 	| { kind: "idle" }
 	| { kind: "joining"; step: NetworkJoinStep }
@@ -125,7 +149,12 @@ function loadJoinGlue(): typeof import("../../engines/authority-network-join") {
 	return require("../../engines/authority-network-join") as typeof import("../../engines/authority-network-join");
 }
 
-export default function JoinNetworkScreen(): React.JSX.Element {
+export interface JoinNetworkScreenProps {
+	/** True on the `JoinNetworkByScan` route: the scanner opens as the screen arrives. */
+	openScannerOnMount?: boolean;
+}
+
+export default function JoinNetworkScreen({ openScannerOnMount = false }: JoinNetworkScreenProps = {}): React.JSX.Element {
 	const { colors, dark } = useTheme() as ExtendedTheme;
 	const { t } = useTranslation();
 	const navigation = useNavigation<NavigationProp>();
@@ -137,6 +166,13 @@ export default function JoinNetworkScreen(): React.JSX.Element {
 
 	const [text, setText] = useState("");
 	const [phase, setPhase] = useState<Phase>({ kind: "idle" });
+	const [scannerOpen, setScannerOpen] = useState(openScannerOnMount);
+	const [availability, setAvailability] = useState<ScanAvailability>("ready");
+	const [scanNotice, setScanNotice] = useState<ScanNotice | null>(null);
+	const [scanCount, setScanCount] = useState(0);
+	const scanButtonRef = useRef<HostInstance>(null);
+	const wasScannerOpenRef = useRef(false);
+	const announcedCountRef = useRef(0);
 
 	const mountedRef = useRef(true);
 	const inFlightRef = useRef(false);
@@ -158,6 +194,23 @@ export default function JoinNetworkScreen(): React.JSX.Element {
 	}, []);
 
 	const decoded = useMemo(() => (text.trim().length === 0 ? null : decodeNetworkJoinCode(text)), [text]);
+
+	// Focus returns to the Scan button when the scanner closes.
+	useEffect(() => {
+		if (wasScannerOpenRef.current && !scannerOpen && scanButtonRef.current) {
+			AccessibilityInfo.sendAccessibilityEvent(scanButtonRef.current, "focus");
+		}
+		wasScannerOpenRef.current = scannerOpen;
+	}, [scannerOpen]);
+
+	// iOS has no live regions, so a scan that decodes ok is announced once.
+	const scannedOk = scanNotice === "scanned" && decoded?.ok === true;
+	useEffect(() => {
+		if (scanCount > announcedCountRef.current && scannedOk && Platform.OS === "ios") {
+			announcedCountRef.current = scanCount;
+			AccessibilityInfo.announceForAccessibility(t("joinScanScanned"));
+		}
+	}, [scanCount, scannedOk, t]);
 
 	async function finishJoin(joinNode: AuthorityJoinNode, networkRef: NetworkReference, mayRoute: boolean): Promise<void> {
 		const { completeAuthorityJoin } = loadJoinGlue();
@@ -216,6 +269,7 @@ export default function JoinNetworkScreen(): React.JSX.Element {
 
 	function onChangeText(value: string): void {
 		setText(value);
+		setScanNotice(null);
 		setPhase((p) => (p.kind === "failed" ? { kind: "idle" } : p));
 		retryOnFocusRef.current = null;
 	}
@@ -226,9 +280,43 @@ export default function JoinNetworkScreen(): React.JSX.Element {
 			.then((value) => {
 				if (!value || !mountedRef.current) return;
 				setText(value);
+				setScanNotice(null);
 				setPhase({ kind: "idle" });
 				retryOnFocusRef.current = null;
 			});
+	}
+
+	function onScanPress(): void {
+		if (phase.kind === "joining" || availability !== "ready") return;
+		setScanNotice(null);
+		setScannerOpen(true);
+	}
+
+	// A scan only fills the field, exactly as a paste would. Joining stays a separate tap.
+	function onScanAccept(scanned: string): void {
+		setText(scanned);
+		setPhase({ kind: "idle" });
+		retryOnFocusRef.current = null;
+		setScannerOpen(false);
+		setScanNotice("scanned");
+		setScanCount((count) => count + 1);
+	}
+
+	function onScanClose(): void {
+		setScannerOpen(false);
+	}
+
+	function onCameraState(state: JoinScanCameraState): void {
+		if (state === "ready" || state === "blocked" || state === "none") setAvailability(state);
+		if (state === "denied" || state === "failed") setScanNotice(state);
+		if (state !== "ready") setScannerOpen(false);
+	}
+
+	function onOpenSettings(): void {
+		Linking.openSettings().catch(() => {
+			// The rejection (it can carry anything) is never read.
+			console.info("[join] scan: open-settings-failed");
+		});
 	}
 
 	async function onJoin(): Promise<void> {
@@ -285,8 +373,23 @@ export default function JoinNetworkScreen(): React.JSX.Element {
 
 	const busy = phase.kind === "joining";
 	const decodeError = decoded !== null && !decoded.ok ? decoded : null;
+	const scanDisabled = busy || availability !== "ready";
+	let statusKind: "none" | "blocked" | "scanned" | "denied" | "failed" | null = null;
+	if (availability === "none") statusKind = "none";
+	else if (availability === "blocked") statusKind = "blocked";
+	else if (scannedOk) statusKind = "scanned";
+	else if (scanNotice === "denied" || scanNotice === "failed") statusKind = scanNotice;
+	const cameraSentenceKey =
+		statusKind === "none"
+			? "joinScanCameraNone"
+			: statusKind === "blocked"
+				? "joinScanCameraBlocked"
+				: statusKind === "denied"
+					? "joinScanCameraDenied"
+					: "joinScanCameraFailed";
 
 	return (
+		<>
 		<ScrollView
 			testID="join-network-screen"
 			style={globalStyles.container}
@@ -317,6 +420,14 @@ export default function JoinNetworkScreen(): React.JSX.Element {
 							{ backgroundColor: colors.card, borderColor: dark ? colors.accent : colors.border },
 						]}
 					>
+						<CustomButton
+							ref={scanButtonRef}
+							testID="join-network-scan"
+							title={t("joinScanButton")}
+							icon="qrcode"
+							disabled={scanDisabled}
+							onPress={onScanPress}
+						/>
 						<View style={styles.labelRow}>
 							<ThemedText type="defaultSemiBold">{t("joinNetworkCodeLabel")}</ThemedText>
 							<Pressable
@@ -347,6 +458,36 @@ export default function JoinNetworkScreen(): React.JSX.Element {
 							<ThemedText type="small" testID="join-network-code-error" style={{ color: colors.error }}>
 								{t(joinNetworkDecodeErrorKey(decodeError.reason))}
 							</ThemedText>
+						) : null}
+						{statusKind ? (
+							<View testID="join-network-scan-status" style={styles.stack}>
+								{statusKind === "scanned" ? (
+									<View style={styles.noticeRow}>
+										<FontAwesome6 name="circle-check" size={16} color={colors.text} style={styles.noticeIcon} />
+										<ThemedText accessibilityLiveRegion="polite" style={{ color: colors.text, flexShrink: 1 }}>
+											{t("joinScanScanned")}
+										</ThemedText>
+									</View>
+								) : (
+									<View
+										accessibilityRole="alert"
+										style={[styles.noticeRow, styles.noticeShell, { backgroundColor: colors.card, borderColor: colors.warning }]}
+									>
+										<FontAwesome6 name="triangle-exclamation" size={16} color={colors.warning} style={styles.noticeIcon} />
+										<ThemedText style={{ color: colors.text, flexShrink: 1 }}>{t(cameraSentenceKey)}</ThemedText>
+									</View>
+								)}
+								{statusKind === "blocked" ? (
+									<Pressable
+										testID="join-network-scan-open-settings"
+										accessibilityRole="button"
+										onPress={onOpenSettings}
+										style={styles.openSettings}
+									>
+										<Text style={{ color: colors.primary, fontSize: 16, fontWeight: "400" }}>{t("joinScanOpenSettings")}</Text>
+									</Pressable>
+								) : null}
+							</View>
 						) : null}
 						{decoded && decoded.ok ? (
 							<View testID="join-network-preview" style={styles.stack}>
@@ -398,7 +539,20 @@ export default function JoinNetworkScreen(): React.JSX.Element {
 				</>
 			)}
 		</ScrollView>
+		<JoinCodeScanner
+			visible={scannerOpen && phase.kind !== "joined"}
+			onAccept={onScanAccept}
+			onClose={onScanClose}
+			onPasteInstead={onScanClose}
+			onCameraState={onCameraState}
+		/>
+		</>
 	);
+}
+
+/** The `JoinNetworkByScan` route: the same screen, with the scanner open as it arrives. */
+export function JoinNetworkByScanScreen(): React.JSX.Element {
+	return <JoinNetworkScreen openScannerOnMount />;
 }
 
 const styles = StyleSheet.create({
@@ -434,5 +588,22 @@ const styles = StyleSheet.create({
 		flexDirection: "row",
 		alignItems: "center",
 		gap: 12,
+	},
+	noticeRow: {
+		flexDirection: "row",
+		alignItems: "flex-start",
+	},
+	noticeShell: {
+		borderWidth: 1,
+		borderRadius: 8,
+		padding: 16,
+	},
+	noticeIcon: {
+		marginRight: 8,
+		marginTop: 3,
+	},
+	openSettings: {
+		minHeight: 44,
+		justifyContent: "center",
 	},
 });

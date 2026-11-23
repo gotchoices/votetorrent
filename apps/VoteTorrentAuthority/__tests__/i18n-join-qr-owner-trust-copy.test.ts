@@ -34,7 +34,8 @@ const EXPECTED: readonly Row[] = [
 	['settingsRequireOwnerTrustHelp', 'When on, this phone will not connect to the network if it cannot load its saved trusted owners. When off, it connects and shows a warning. Takes effect the next time the app starts.', 'Si está activado, este teléfono no se conectará a la red si no puede cargar sus propietarios de confianza guardados. Si está desactivado, se conecta y muestra una advertencia. Se aplica la próxima vez que se inicie la aplicación.'],
 	['joinNetworkButton', 'Join a network', 'Unirse a una red'],
 	['joinNetworkTitle', 'Join a network', 'Unirse a una red'],
-	['joinNetworkIntro', "Paste the join code the election office gave you. It connects this phone to that network and lets it trust the network's owners.", 'Pega el código de acceso que te dio la oficina electoral. Conecta este teléfono a esa red y le permite confiar en los propietarios de la red.'],
+	// 2026-11-23: "Paste" became "Scan or paste" when the user ruled to give the Authority a camera.
+	['joinNetworkIntro', "Scan or paste the join code the election office gave you. It connects this phone to that network and lets it trust the network's owners.", 'Escanea o pega el código de acceso que te dio la oficina electoral. Conecta este teléfono a esa red y le permite confiar en los propietarios de la red.'],
 	['joinNetworkCodeLabel', 'Join code', 'Código de acceso'],
 	['joinNetworkCodePlaceholder', 'Paste the join code', 'Pega el código de acceso'],
 	['joinNetworkPaste', 'Paste', 'Pegar'],
