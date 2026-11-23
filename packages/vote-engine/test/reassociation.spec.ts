@@ -55,7 +55,7 @@ import { createThresholdAuthority } from './fixtures/threshold-authority.js'
 import { addSiblingAuthority } from './fixtures/test-context.js'
 import { InMemoryTestKeyVault } from '../src/crypto/vault.js'
 import { OFFICER_ENCRYPTION_KEY_POLICY, officerEncryptionKeyAlias } from '../src/crypto/index.js'
-import type { RegistrantSignatureTask, RegisterInit, RegistrationRequestInit, RegistrationVerificationChecklistItem } from '@votetorrent/vote-core'
+import type { AssociationSignatureTask, RegistrantSignatureTask, RegisterInit, RegistrationRequestInit, RegistrationVerificationChecklistItem } from '@votetorrent/vote-core'
 
 /** Deterministic callback signer — @noble/curves v2 defaults (prehash:true, no extraEntropy), so
  * two signs over the identical digest produce byte-identical signatures. */
@@ -823,16 +823,15 @@ describe('re-association driver (62-18 Task 3, D-40/D-41/D-45/D-46)', function (
   // Threshold refusal (self-contained — a SEPARATE vrg-threshold-2 authority)
   // -----------------------------------------------------------------------------------------
 
-  describe('threshold gate (vrg > 1)', () => {
-    it("approveReassociation and rejectReassociation both refuse threshold-requires-co-sign before any write", async () => {
+  describe('co-signed decisions (vrg > 1)', () => {
+    const NET = { hash: 'reassoc-thresh-hash', name: 'Reassoc Thresh Network', relays: [] as string[], primaryAuthorityDomainName: 'reassoc-thresh.example' }
+
+    /** A vrg:2 authority with one REAL active registrant (approved through its own co-sign flow) and a sentinel request. */
+    async function setup () {
       const threshAuth = await createThresholdAuthority()
       const authorityId = threshAuth.authorityId
       const ctx = threshAuth.elec.ctx
       await provisionTestIntakeRecipient(ctx, authorityId)
-
-      // Get a REAL active registrant under this vrg:2 authority through the full co-sign flow
-      // (createRegistrant's own single-signer ceremony is threshold-1-only and cannot be used
-      // directly against a vrg:2 roster — see threshold-vrg.spec.ts's identical pattern).
       const voter = randomTestKeyPair()
       const registrantId = `reassoc-thresh-registrant-${crypto.randomUUID()}`
       const regInit: RegistrationRequestInit = {
@@ -845,70 +844,161 @@ describe('re-association driver (62-18 Task 3, D-40/D-41/D-45/D-46)', function (
         submittedAt: toIsoZDatetime(Date.now())
       }
       await new RegistrationEngine(ctx).submitRegistrationRequest(regInit, voter.publicHex, makeCallbackSigner(voter))
-      const threshNetworkRef = { hash: 'reassoc-thresh-hash', name: 'Reassoc Thresh Network', relays: [], primaryAuthorityDomainName: 'reassoc-thresh.example' }
       for (const holder of [threshAuth.holders[0]!, threshAuth.holders[1]!]) {
-        // D-49 (62-31): every holder reads through the SAME provisioned opener (ctx.intakeOpener,
-        // set by provisionTestIntakeRecipient against the founder above) — this test is not about
-        // D-49, it needs a real RegistrantSignatureTask (with requestId) to find and sign.
-        const tasksEngine = new SignatureTasksEngine(threshNetworkRef, { db: ctx.db, user: holder.user, intakeOpener: ctx.intakeOpener })
+        const tasksEngine = new SignatureTasksEngine(NET, { db: ctx.db, user: holder.user, intakeOpener: ctx.intakeOpener })
         const tasks = await tasksEngine.getRequestedSignatures(true)
         const task = tasks.find((t) => t.signatureType === 'registrant' && (t as RegistrantSignatureTask).requestId === regInit.id) as RegistrantSignatureTask | undefined
-        if (task === undefined) throw new Error(`threshold gate test: no pending registrant task for holder=${holder.user.id}`)
+        if (task === undefined) throw new Error(`co-signed decisions: no pending registrant task for holder=${holder.user.id}`)
         const digest = await tasksEngine.getSignatureDigest(task)
         await tasksEngine.completeSignature(task, { isAccepted: true, signature: await holder.sign(digest), sign: holder.sign, decision: { checklist: ['id'] as RegistrationVerificationChecklistItem[] } })
       }
       const registrantRow = await ctx.db.prepare('select Status from Registrant where Id = :id').get({ id: registrantId })
-      expect(registrantRow?.Status, 'the registrant must be real and active before the threshold gate is even reached').to.equal('a')
+      expect(registrantRow?.Status, 'the registrant must be real and active').to.equal('a')
 
       const engine = new AssociationEngine(ctx)
-      const deviceKeyPair = randomTestKeyPair()
+      const device = randomTestKeyPair()
       const requestId = crypto.randomUUID()
-      const init: AssociationRequestInit = {
-        id: requestId,
-        authorityId,
-        registrantId: REASSOCIATION_UNRESOLVED_REGISTRANT_ID,
-        deviceKey: deviceKeyPair.publicHex,
-        submittedAt: toIsoZDatetime(Date.now())
-      }
-      await engine.submitAssociationRequest(init, deviceKeyPair.publicHex, makeCallbackSigner(deviceKeyPair))
-
-      const fakeIntake: ReassociationIntake = {
+      await engine.submitAssociationRequest(
+        { id: requestId, authorityId, registrantId: REASSOCIATION_UNRESOLVED_REGISTRANT_ID, deviceKey: device.publicHex, submittedAt: toIsoZDatetime(Date.now()) },
+        device.publicHex,
+        makeCallbackSigner(device)
+      )
+      const published: Array<{ requestId: string; status: string; reason?: string }> = []
+      const staged: any[] = []
+      const intake: ReassociationIntake = {
         async readStagedRequests () { return [] },
-        async readStagedAttestations () { return [] },
-        async publishDecision () { throw new Error('fakeIntake.publishDecision must never be called for a threshold-refused approval') }
+        async readStagedAttestations () { return staged },
+        async publishDecision (d: any) { published.push({ requestId: d.requestId, status: d.status, reason: d.reason }); return 'cursor' }
       }
-      const fakeOpener: ReassociationOpener = {
-        async open () { return { ok: false, reason: 'not-a-recipient', detail: 'fakeOpener never opens' } }
+      const opener: ReassociationOpener = {
+        async open () { return { ok: false, reason: 'not-a-recipient', detail: 'never opens' } }
       }
+      return { threshAuth, authorityId, ctx, registrantId, engine, device, requestId, published, staged, intake, opener }
+    }
 
-      const before = await (async () => {
-        const row = await ctx.db.prepare("select count(*) as n from AdminSigning where Scope = 'vrg'").get({})
-        return Number(row?.n ?? 0)
-      })()
+    async function associationTaskFor (fx: Awaited<ReturnType<typeof setup>>, holderIndex: number) {
+      const holder = fx.threshAuth.holders[holderIndex]!
+      const tasksEngine = new SignatureTasksEngine(NET, { db: fx.ctx.db, user: holder.user })
+      const tasks = await tasksEngine.getRequestedSignatures(true)
+      const task = tasks.find((t) => t.signatureType === 'association' && (t as AssociationSignatureTask).requestId === fx.requestId) as AssociationSignatureTask | undefined
+      return { tasksEngine, task, holder }
+    }
 
-      let approveErr: ReassociationError | undefined
+    async function status (fx: Awaited<ReturnType<typeof setup>>): Promise<string> {
+      const row = await fx.ctx.db.prepare('select Status from AssociationRequest where Id = :id').get({ id: fx.requestId })
+      return String(row?.Status)
+    }
+
+    it('an approval opens a review; a co-signer completes it; the next sync issues the challenge and the answer associates the device', async () => {
+      const fx = await setup()
+      const approval = await fx.engine.approveReassociation(fx.requestId, { registrantId: fx.registrantId }, fx.threshAuth.holders[0]!.sign, fx.intake, fx.opener)
+      expect(approval.outcome).to.equal('awaiting-co-signers')
+      expect(approval.challengeNonce).to.equal(undefined)
+      expect(await status(fx)).to.equal('p')
+
+      // A second decision while the review is open is refused; the officer votes on the task instead.
+      let pending: ReassociationError | undefined
       try {
-        await engine.approveReassociation(requestId, { registrantId }, threshAuth.holders[0]!.sign, fakeIntake, fakeOpener)
+        await fx.engine.rejectReassociation(fx.requestId, fx.threshAuth.holders[2]!.sign, fx.intake)
       } catch (err) {
-        approveErr = err as ReassociationError
+        pending = err as ReassociationError
       }
-      expect(approveErr).to.be.instanceOf(ReassociationError)
-      expect(approveErr!.code).to.equal('threshold-requires-co-sign')
+      expect(pending?.code).to.equal('review-pending')
 
-      let rejectErr: ReassociationError | undefined
-      try {
-        await engine.rejectReassociation(requestId, threshAuth.holders[0]!.sign, fakeIntake)
-      } catch (err) {
-        rejectErr = err as ReassociationError
-      }
-      expect(rejectErr).to.be.instanceOf(ReassociationError)
-      expect(rejectErr!.code).to.equal('threshold-requires-co-sign')
+      // Below the threshold the sync carries nothing out.
+      const early = await fx.engine.processPendingReassociations(fx.authorityId, fx.threshAuth.holders[0]!.sign, fx.intake, fx.opener)
+      expect(early.challengesIssued).to.equal(0)
+      expect(early.awaitingReview).to.equal(1)
+      expect(await status(fx)).to.equal('p')
 
-      const after = await (async () => {
-        const row = await ctx.db.prepare("select count(*) as n from AdminSigning where Scope = 'vrg'").get({})
-        return Number(row?.n ?? 0)
-      })()
-      expect(after).to.equal(before)
+      const { tasksEngine, task, holder } = await associationTaskFor(fx, 1)
+      expect(task, 'holder 1 has the co-signer task').to.not.equal(undefined)
+      expect(task!.decision).to.equal('a')
+      expect(task!.registrantId).to.equal(fx.registrantId)
+      expect(task!.deviceKey).to.equal(fx.device.publicHex)
+      expect((await associationTaskFor(fx, 0)).task, 'the initiator has no task').to.equal(undefined)
+      await tasksEngine.completeSignature(task!, { isAccepted: true, signature: await holder.sign(await tasksEngine.getSignatureDigest(task!)) })
+
+      const summary = await fx.engine.processPendingReassociations(fx.authorityId, fx.threshAuth.holders[0]!.sign, fx.intake, fx.opener)
+      expect(summary.challengesIssued).to.equal(1)
+      expect(await status(fx)).to.equal('c')
+      expect(fx.published.map((d) => d.status)).to.deep.equal(['c'])
+      const challenge = await fx.ctx.db.prepare('select RegistrantId from AttestationChallenge where DeviceKey = :k').get({ k: fx.device.publicHex })
+      expect(challenge?.RegistrantId).to.equal(fx.registrantId)
+
+      // The device answers; the association write derives from the same reached review.
+      const nonceRow = await fx.ctx.db.prepare('select ChallengeNonce from AssociationRequest where Id = :id').get({ id: fx.requestId })
+      const answer = { requestId: fx.requestId, nonce: String(nonceRow!.ChallengeNonce), attestation: makeDeviceAttestation() }
+      fx.staged.push({ version: 1, requestId: fx.requestId, answer, requesterKey: fx.device.publicHex, signature: makeCallbackSigner(fx.device), stagedAt: toIsoZDatetime(Date.now()), cursor: '1' })
+      const done = await fx.engine.processPendingReassociations(fx.authorityId, fx.threshAuth.holders[0]!.sign, fx.intake, fx.opener)
+      expect(done.associated).to.equal(1)
+      expect(await status(fx)).to.equal('a')
+      expect(await fx.engine.getAssociation(fx.registrantId, fx.device.publicHex)).to.not.equal(undefined)
+    })
+
+    it('a rejection opens a review and is carried out only once co-signed; a single co-signer rejection vote applies nothing', async () => {
+      const fx = await setup()
+      const rejection = await fx.engine.rejectReassociation(fx.requestId, fx.threshAuth.holders[0]!.sign, fx.intake)
+      expect(rejection.outcome).to.equal('awaiting-co-signers')
+      expect(await status(fx)).to.equal('p')
+
+      const vote = await associationTaskFor(fx, 1)
+      expect(vote.task!.decision).to.equal('r')
+      await vote.tasksEngine.completeSignature(vote.task!, { isAccepted: false, signature: { signature: '', signerKey: '', signerUserId: '' } })
+      await fx.engine.processPendingReassociations(fx.authorityId, fx.threshAuth.holders[0]!.sign, fx.intake, fx.opener)
+      expect(await status(fx), 'a vote against the rejection carries nothing out').to.equal('p')
+
+      const second = await associationTaskFor(fx, 2)
+      await second.tasksEngine.completeSignature(second.task!, { isAccepted: true, signature: await second.holder.sign(await second.tasksEngine.getSignatureDigest(second.task!)) })
+      const summary = await fx.engine.processPendingReassociations(fx.authorityId, fx.threshAuth.holders[0]!.sign, fx.intake, fx.opener)
+      expect(summary.rejected).to.equal(1)
+      expect(await status(fx)).to.equal('r')
+      expect(fx.published.some((d) => d.status === 'r')).to.equal(true)
+    })
+
+    it('a first association is proposed by the sync, co-signed, then challenged and associated', async () => {
+      const fx = await setup()
+      const device = randomTestKeyPair()
+      const requestId = crypto.randomUUID()
+      await fx.engine.submitAssociationRequest(
+        { id: requestId, authorityId: fx.authorityId, registrantId: fx.registrantId, deviceKey: device.publicHex, submittedAt: toIsoZDatetime(Date.now()) },
+        device.publicHex,
+        makeCallbackSigner(device)
+      )
+      const intake = fx.intake as any
+      const statusOf = async () => String((await fx.ctx.db.prepare('select Status from AssociationRequest where Id = :id').get({ id: requestId }))?.Status)
+
+      const first = await fx.engine.processPendingAssociationRequests(fx.authorityId, fx.threshAuth.holders[0]!.sign, intake)
+      expect(first.challengesIssued).to.equal(0)
+      expect(await statusOf()).to.equal('p')
+
+      const holder = fx.threshAuth.holders[1]!
+      const tasksEngine = new SignatureTasksEngine(NET, { db: fx.ctx.db, user: holder.user })
+      const task = (await tasksEngine.getRequestedSignatures(true)).find((t) => t.signatureType === 'association' && (t as AssociationSignatureTask).requestId === requestId) as AssociationSignatureTask | undefined
+      expect(task?.decision).to.equal('a')
+      expect(task?.registrantId).to.equal(fx.registrantId)
+      await tasksEngine.completeSignature(task!, { isAccepted: true, signature: await holder.sign(await tasksEngine.getSignatureDigest(task!)) })
+
+      const second = await fx.engine.processPendingAssociationRequests(fx.authorityId, fx.threshAuth.holders[0]!.sign, intake)
+      expect(second.challengesIssued).to.equal(1)
+      expect(await statusOf()).to.equal('c')
+
+      const nonceRow = await fx.ctx.db.prepare('select ChallengeNonce from AssociationRequest where Id = :id').get({ id: requestId })
+      const answer = { requestId, nonce: String(nonceRow!.ChallengeNonce), attestation: makeDeviceAttestation() }
+      fx.staged.push({ version: 1, requestId, answer, requesterKey: device.publicHex, signature: makeCallbackSigner(device), stagedAt: toIsoZDatetime(Date.now()), cursor: '1' })
+      const third = await fx.engine.processPendingAssociationRequests(fx.authorityId, fx.threshAuth.holders[0]!.sign, intake)
+      expect(third.associated).to.equal(1)
+      expect(await statusOf()).to.equal('a')
+      expect(await fx.engine.getAssociation(fx.registrantId, device.publicHex)).to.not.equal(undefined)
+    })
+
+    it('no write carries out a decision before its review reaches the threshold', async () => {
+      const fx = await setup()
+      const before = await fx.ctx.db.prepare("select count(*) as n from AttestationChallenge").get({})
+      await fx.engine.approveReassociation(fx.requestId, { registrantId: fx.registrantId }, fx.threshAuth.holders[0]!.sign, fx.intake, fx.opener)
+      const after = await fx.ctx.db.prepare("select count(*) as n from AttestationChallenge").get({})
+      expect(Number(after?.n)).to.equal(Number(before?.n))
+      expect(fx.published).to.have.length(0)
     })
   })
 

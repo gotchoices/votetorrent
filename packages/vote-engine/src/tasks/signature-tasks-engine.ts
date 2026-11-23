@@ -24,6 +24,7 @@ import type {
   BallotSignatureTask,
   RegistrantSignatureTask,
   IntakePolicySignatureTask,
+  AssociationSignatureTask,
   Authority,
   ThresholdPolicy,
   AdminInit,
@@ -272,6 +273,31 @@ export class SignatureTasksEngine implements ISignatureTasksEngine {
             out.push(ballotTask)
           } else {
             // Extension or ProposedBallot row missing — fall back to base task
+            out.push(base)
+          }
+        } else if (signatureType === 'association') {
+          // Schema version 2: a co-signed decision on a pending association request.
+          const aExtRow = await this.ctx.db
+            .prepare(
+              `select E.RequestId, E.RegistrantId, E.Decision, R.AuthorityId, R.DeviceKey
+                 from AssociationSignatureTaskExtension E
+                   join AssociationRequest R on R.Id = E.RequestId
+                 where E.TaskId = :taskId`
+            )
+            .get({ taskId: row.Id })
+          if (aExtRow) {
+            const associationTask: AssociationSignatureTask = {
+              ...base,
+              signatureType: 'association',
+              signingNonce: row.SigningNonce,
+              requestId: aExtRow.RequestId as string,
+              authorityId: aExtRow.AuthorityId as string,
+              deviceKey: aExtRow.DeviceKey as string,
+              decision: aExtRow.Decision === 'a' ? 'a' : 'r',
+              ...(aExtRow.RegistrantId == null ? {} : { registrantId: aExtRow.RegistrantId as string }),
+            }
+            out.push(associationTask)
+          } else {
             out.push(base)
           }
         } else if (signatureType === 'intake-policy') {

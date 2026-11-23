@@ -51,8 +51,11 @@ export type ReassociationErrorCode =
   | 'registrant-not-active'
   | 'registrant-authority-mismatch'
   | 'code-registrant-mismatch'
+  /** No longer thrown: above a 'vrg' threshold of 1 a decision opens a co-signed review instead. Kept so older readers type-check. */
   | 'threshold-requires-co-sign'
   | 'non-deterministic-signer'
+  /** A co-signed review of this request is already open (or reached): co-sign it through its task instead. */
+  | 'review-pending'
 
 /**
  * Every refusal in this module is a `ReassociationError`, never a bare `Error`. Its `message`
@@ -132,13 +135,20 @@ export interface ReassociationApprovalResult {
   /** D-41: the registrant's old device keys that approval will retire once the new device
    * attests — sorted, possibly empty for a true first association. */
   readonly devicesToRetire: readonly string[]
-  readonly challengeNonce: string
-  readonly outcome: 'awaiting-device-attestation'
+  /** Set once the challenge is issued; absent while the decision awaits co-signers. */
+  readonly challengeNonce?: string
+  /**
+   * `'awaiting-co-signers'` above a 'vrg' threshold of 1: the approval opened a co-signed review and
+   * is carried out (challenge issued) once enough officers sign it.
+   */
+  readonly outcome: 'awaiting-device-attestation' | 'awaiting-co-signers'
 }
 
 export interface ReassociationRejectionResult {
   readonly requestId: string
   readonly reason: string
+  /** `'awaiting-co-signers'` above a 'vrg' threshold of 1; absent (rejected now) otherwise. */
+  readonly outcome?: 'rejected' | 'awaiting-co-signers'
 }
 
 /** The old device's own read of whether it has been retired by a completed re-association. */
