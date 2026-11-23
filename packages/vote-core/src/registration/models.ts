@@ -575,6 +575,34 @@ export interface RegistrationRequestDecision {
 }
 
 /**
+ * How long a registration request's 'vrg' session may stay open before any single officer holding
+ * 'vrg' may close it as rejected: 7 days. Above a 'vrg' threshold of 1 a request whose co-signers
+ * never act would otherwise stay pending forever, and the requester would never be told.
+ */
+export const REGISTRATION_STALE_CLOSE_TIMEOUT_MS = 7 * 24 * 60 * 60 * 1000
+
+/**
+ * Whether one officer may close a pending request as rejected on their own (`closeStaleRegistrationRequest`).
+ * `openedAt` is when the request's session opened: the later of the requester's signed `SubmittedAt`
+ * and the authority's `ReceivedAt` (an officer cannot move it earlier than the requester signed).
+ * `availableAt` is `openedAt` plus `REGISTRATION_STALE_CLOSE_TIMEOUT_MS`. `available` is true only for a
+ * pending request above a 'vrg' threshold of 1 whose session has not reached its threshold, once
+ * `availableAt` has passed. All instants are ISO-8601 with a trailing `Z`.
+ */
+export interface RegistrationStaleCloseAvailability {
+  requestId: string
+  threshold: number
+  openedAt: string
+  availableAt: string
+  available: boolean
+}
+
+/** The officer's reason for closing a stale request as rejected (stored and published with the decision). */
+export interface RegistrationStaleCloseInput {
+  rejectionReason: string
+}
+
+/**
  * Filter dimensions for `listRegistrationRequests` (mirrors
  * `RegistrantListFilter`'s discipline). Every field is OPTIONAL and ANDed
  * with the others. `authorityId` is optional even though every UI caller

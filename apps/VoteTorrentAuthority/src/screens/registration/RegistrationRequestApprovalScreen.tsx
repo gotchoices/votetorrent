@@ -12,10 +12,11 @@ import type {
 	RegistrantSignatureTask,
 	RegistrationDuplicateClosure,
 	RegistrationRequestRead,
+	RegistrationStaleCloseAvailability,
 	RegistrationVerificationChecklistItem,
 	SigningStatus,
 } from "@votetorrent/vote-core";
-import { isChecklistGateMet } from "@votetorrent/vote-core";
+import { isChecklistGateMet, REGISTRATION_STALE_CLOSE_TIMEOUT_MS } from "@votetorrent/vote-core";
 import { ThemedText } from "../../components/ThemedText";
 import { CustomButton } from "../../components/CustomButton";
 import { Footer } from "../../components/Footer";
@@ -312,6 +313,10 @@ export default function RegistrationRequestApprovalScreen() {
 	const [checked, setChecked] = useState<RegistrationVerificationChecklistItem[]>([]);
 	const [gateMet, setGateMet] = useState(false);
 	const [showRejectCard, setShowRejectCard] = useState(false);
+	// Above a vrg threshold of 1: whether this officer may close the request as rejected on their own
+	// (its session has been open for the stale-close timeout). Engine-owned; a failed read hides it.
+	const [staleClose, setStaleClose] = useState<RegistrationStaleCloseAvailability | undefined>(undefined);
+	const [showStaleCloseCard, setShowStaleCloseCard] = useState(false);
 	const [errorMessage, setErrorMessage] = useState("");
 	const [loading, setLoading] = useState(true);
 
@@ -360,6 +365,7 @@ export default function RegistrationRequestApprovalScreen() {
 			setClosure(undefined);
 			setClosureUnavailable(false);
 			setSigningStatus(null);
+			setStaleClose(undefined);
 			try {
 				const reg = await getEngine<IRegistrationEngine>("registration");
 				const r = await reg.getRegistrationRequest(requestId);
@@ -430,6 +436,12 @@ export default function RegistrationRequestApprovalScreen() {
 					} catch {
 						if (!unmountedRef.current) setSigningStatus(null);
 					}
+					try {
+						const availability = await reg.getStaleCloseAvailability(requestId);
+						if (!unmountedRef.current) setStaleClose(availability);
+					} catch {
+						if (!unmountedRef.current) setStaleClose(undefined);
+					}
 				}
 			} catch (err) {
 				if (!unmountedRef.current) {
@@ -473,6 +485,9 @@ export default function RegistrationRequestApprovalScreen() {
 	// 62-31 degrades an unread registrant task to the base task, so a missing own task does not
 	// mean the officer voted.
 	const voteRecorded = mode === "pending" && thresholdAboveOne && !task && !unreachable && contentReadable;
+	// Close as Rejected: offered to a vrg officer once the engine reports the request closable, in the
+	// unreachable state too (that is the request it exists for).
+	const staleCloseOffered = mode === "pending" && staleClose?.available === true && canDecide && !closedAsDuplicate;
 
 	function buildReviewDeps() {
 		return {
@@ -711,6 +726,44 @@ export default function RegistrationRequestApprovalScreen() {
 		}
 	}
 
+	// Close as Rejected (stale close): one officer closes a request whose co-signers did not decide in
+	// time. The engine re-checks the timeout and the officer's 'vrg' scope and records the checklist
+	// 'none'. The decision is then published so the requester is told; as with handleReject, a failed
+	// task completion or publish is never reported as a failed close.
+	async function handleStaleClose(reason: string): Promise<void> {
+		setErrorMessage("");
+		try {
+			const reg = await getEngine<IRegistrationEngine>("registration");
+			const signer = await createDeviceSigner("Device User");
+			await trackDecision(() => reg.closeStaleRegistrationRequest(requestId, { rejectionReason: reason }, signer));
+			if (task) {
+				try {
+					const tasksEngine = await getEngine<ISignatureTasksEngine>("signatureTasksEngine");
+					await tasksEngine.completeSignature(task, {
+						isAccepted: false,
+						signature: { signature: "", signerKey: "", signerUserId: "" },
+					});
+				} catch {
+					// Cosmetic: the close is recorded; a stale open task is not a failed close.
+				}
+			}
+			await trackDecision(() => publishRegistrationDecisionAfterDecide(buildReviewDeps(), requestId, null));
+			navigation.goBack();
+		} catch (err) {
+			if (isStaleCloseError(err)) {
+				setErrorMessage(t(err.code === "too-early" ? "registrationRequestStaleCloseNotYet" : "registrationRequestStaleCloseFailed"));
+				if (err.code !== "too-early") setReloadNonce((n) => n + 1);
+			} else {
+				const outcome = handleDeviceSigningError(err);
+				if (!outcome.handled) {
+					setErrorMessage(outcome.message ?? t("registrationRequestStaleCloseFailed"));
+				}
+			}
+			// Re-thrown so the card's submit latch returns to idle for a retry.
+			throw err;
+		}
+	}
+
 	const summaryRows = read ? buildRequestSummaryRows(read) : [];
 	const rejectedMeta = REGISTRATION_REQUEST_STATUS_META.r;
 
@@ -735,7 +788,7 @@ export default function RegistrationRequestApprovalScreen() {
 				    testID prop, so its absence is otherwise unassertable — the
 				    wrapping View is what makes presence/absence testable. */}
 				{/* One error surface at a time: while the reject card is open it shows the failure itself. */}
-				{errorMessage && !(mode === "pending" && showRejectCard && read) ? (
+				{errorMessage && !(mode === "pending" && (showRejectCard || showStaleCloseCard) && read) ? (
 					<View testID="registration-request-approval-error">
 						<InlineError message={errorMessage} />
 					</View>
@@ -811,6 +864,26 @@ export default function RegistrationRequestApprovalScreen() {
 								<ThemedText type="small" testID="registration-request-approval-unreachable-text">
 									{t("signatureTaskThresholdUnreachable")}
 								</ThemedText>
+							</View>
+						) : null}
+
+						{staleCloseOffered && !showStaleCloseCard ? (
+							<View testID="registration-request-approval-stale-close-block" style={localStyles.stateBlock}>
+								<ThemedText type="small" testID="registration-request-approval-stale-close-note">
+									{t("registrationRequestStaleCloseNote", { days: Math.round(REGISTRATION_STALE_CLOSE_TIMEOUT_MS / 86_400_000) })}
+								</ThemedText>
+								<View testID="registration-request-approval-stale-close">
+									<CustomButton
+										title={t("registrationRequestStaleCloseButton")}
+										icon="xmark"
+										backgroundColor={colors.error}
+										disabled={submitting}
+										onPress={() => {
+											setShowRejectCard(false);
+											setShowStaleCloseCard(true);
+										}}
+									/>
+								</View>
 							</View>
 						) : null}
 
@@ -939,7 +1012,7 @@ export default function RegistrationRequestApprovalScreen() {
 			</ScrollView>
 
 			{/* Neither decided mode renders a footer of any kind. */}
-			{mode === "pending" && !unreachable && !showRejectCard ? (
+			{mode === "pending" && !unreachable && !showRejectCard && !showStaleCloseCard ? (
 				<View testID="registration-request-approval-footer">
 					{/* Approve needs the officer's own task at every threshold; without one the engine can only refuse. */}
 					{!loading && canDecide && !task && !voteRecorded ? (
@@ -1028,7 +1101,39 @@ export default function RegistrationRequestApprovalScreen() {
 				/>
 				</View>
 			) : null}
+			{mode === "pending" && showStaleCloseCard && read ? (
+				<View
+					testID="registration-request-approval-stale-close-card-host"
+					style={{ paddingBottom: keyboardInset > 0 ? 0 : insets.bottom }}
+				>
+					<RejectReasonCard
+						testIDPrefix="stale-close"
+						titleKey="registrationRequestStaleCloseTitle"
+						bodyKey="registrationRequestStaleCloseBody"
+						confirmKey="registrationRequestStaleCloseConfirmButton"
+						decisionGateMet={canDecide}
+						errorMessage={errorMessage}
+						requesterName={registrationRequestDisplayName({
+							requestId,
+							lastName: read.payload.public?.lastName,
+							firstName: read.payload.public?.firstName,
+							requesterKey: read.requesterKey,
+						})}
+						onConfirm={handleStaleClose}
+						onDismiss={() => setShowStaleCloseCard(false)}
+					/>
+				</View>
+			) : null}
 		</KeyboardAvoidingScreen>
+	);
+}
+
+function isStaleCloseError(err: unknown): err is { name: "RegistrationStaleCloseError"; code: string } {
+	return (
+		typeof err === "object" &&
+		err !== null &&
+		(err as { name?: unknown }).name === "RegistrationStaleCloseError" &&
+		typeof (err as { code?: unknown }).code === "string"
 	);
 }
 

@@ -50,6 +50,8 @@ import { adminSigningKeyValidity } from './signer-validity.js'
  *   AdminSignature once `headerNonce` has ALREADY reached AdminSignature, for the SAME scope and
  *   authority. Every pre-62-07 caller omits this and is unaffected (routes through `sign()`
  *   exactly as before).
+ * @param options.singleOfficer - Completes the session on the initiator's signature alone (the initiator
+ *   must hold `scope`). Only for a caller that enforces its own policy for it; see `EngineSignOptions`.
  * @returns The signing nonce to pass to the caller's row-insert method
  *   (`with context SigningNonce = :nonce, Tid = ${tid}`).
  */
@@ -61,7 +63,7 @@ export async function seedSignedMutation (
   digestExpr: string,
   digestParams: Record<string, unknown>,
   sign: (digest: Uint8Array) => Promise<Signature>,
-  options?: { ownsTransaction?: boolean, headerNonce?: string }
+  options?: { ownsTransaction?: boolean, headerNonce?: string, singleOfficer?: boolean }
 ): Promise<string> {
   // 1. Resolve CurrentAdmin.EffectiveAt for the authority.
   const adminRow = await ctx.db
@@ -142,6 +144,9 @@ export async function seedSignedMutation (
   //    non-holder) signer count. `headerNonce` must never leak into `SignOptions` itself.
   if (options?.headerNonce !== undefined) {
     await new SigningEngine(ctx).signDerived(nonce, signature, options.headerNonce, { ownsTransaction: options.ownsTransaction })
+  } else if (options?.singleOfficer === true) {
+    // The caller enforces the policy that lets one officer complete this session (see EngineSignOptions).
+    await new SigningEngine(ctx).signWithOutcome(nonce, signature, { ownsTransaction: options.ownsTransaction, singleOfficer: true })
   } else {
     await new SigningEngine(ctx).sign(nonce, signature, { ownsTransaction: options?.ownsTransaction })
   }

@@ -1228,6 +1228,16 @@ const resources = {
 			registrationRequestRejectChecklistRequired: 'Complete the verification checklist before rejecting.',
 			registrationRequestRejectFailed: 'Could not record the rejection. Try again.',
 			registrationRequestUnverifiable: "This request's signature can't be verified, so it can't be approved or rejected here. No signature of yours was used.",
+			// Closing a stale request: above a vrg threshold of 1, after the session has been open 7 days.
+			registrationRequestStaleCloseNote:
+				'No decision after {{days}} days. Any officer can now close this request as rejected, and the requester will be told.',
+			registrationRequestStaleCloseButton: 'Close as Rejected',
+			registrationRequestStaleCloseTitle: 'Close this request as rejected?',
+			registrationRequestStaleCloseBody:
+				"The other officers did not decide on {{name}}'s request in time. Closing it records a rejection with your name and reason attached, and {{name}} will be told.",
+			registrationRequestStaleCloseConfirmButton: 'Close as Rejected',
+			registrationRequestStaleCloseFailed: 'Could not close this request. Try again.',
+			registrationRequestStaleCloseNotYet: 'This request cannot be closed yet. Try again later.',
 			// Phase 48 (D-03) — bridgeSource* group; copy verbatim from 48-UI-SPEC.md § Copywriting Contract.
 			bridgeSourceBadgeLabel: 'Bridge Import',
 			bridgeSourceCalloutHeading: 'Submitted by an import bridge',
@@ -2706,6 +2716,16 @@ const resources = {
 			registrationRequestRejectChecklistRequired: 'Completa la lista de verificación antes de rechazar.',
 			registrationRequestRejectFailed: 'No se pudo registrar el rechazo. Inténtalo de nuevo.',
 			registrationRequestUnverifiable: 'La firma de esta solicitud no se puede verificar, así que no se puede aprobar ni rechazar aquí. No se usó ninguna firma tuya.',
+			// Closing a stale request: above a vrg threshold of 1, after the session has been open 7 days.
+			registrationRequestStaleCloseNote:
+				'Sin decisión tras {{days}} días. Cualquier funcionario puede ahora cerrar esta solicitud como rechazada, y se avisará a quien la envió.',
+			registrationRequestStaleCloseButton: 'Cerrar como Rechazada',
+			registrationRequestStaleCloseTitle: '¿Cerrar esta solicitud como rechazada?',
+			registrationRequestStaleCloseBody:
+				'Los demás funcionarios no decidieron a tiempo sobre la solicitud de {{name}}. Al cerrarla se registra un rechazo con tu nombre y tu motivo, y se avisará a {{name}}.',
+			registrationRequestStaleCloseConfirmButton: 'Cerrar como Rechazada',
+			registrationRequestStaleCloseFailed: 'No se pudo cerrar esta solicitud. Inténtalo de nuevo.',
+			registrationRequestStaleCloseNotYet: 'Esta solicitud aún no se puede cerrar. Inténtalo más tarde.',
 			// Phase 48 (D-03) — bridgeSource* group; copy verbatim from 48-UI-SPEC.md § Copywriting Contract.
 			bridgeSourceBadgeLabel: 'Importación por Puente',
 			bridgeSourceCalloutHeading: 'Enviada por un puente de importación',

@@ -102,6 +102,13 @@ export interface RejectReasonCardProps {
 	 * only displays what it is given; it never derives copy from a caught error.
 	 */
 	errorMessage?: string;
+	/**
+	 * Copy keys for the title, body (interpolates `{{name}}`) and confirm button. Default to the
+	 * reject copy; the stale close (Close as Rejected) passes its own.
+	 */
+	titleKey?: string;
+	bodyKey?: string;
+	confirmKey?: string;
 }
 
 export function RejectReasonCard({
@@ -111,6 +118,9 @@ export function RejectReasonCard({
 	decisionGateMet,
 	testIDPrefix = "reject-reason",
 	errorMessage,
+	titleKey = "registrationRequestRejectTitle",
+	bodyKey = "registrationRequestRejectBody",
+	confirmKey = "registrationRequestRejectConfirmButton",
 }: RejectReasonCardProps) {
 	const { colors } = useTheme() as ExtendedTheme;
 	const { t } = useTranslation();
@@ -176,7 +186,7 @@ export function RejectReasonCard({
 			style={[styles.cardSurface, { backgroundColor: colors.card, borderLeftWidth: 4, borderLeftColor: colors.error }]}
 		>
 			<ThemedText type="defaultSemiBold" testID={`${testIDPrefix}-title`}>
-				{t("registrationRequestRejectTitle")}
+				{t(titleKey)}
 			</ThemedText>
 			{/*
 			 * D-06's actual purpose, not a generic "are you sure": this body
@@ -186,7 +196,7 @@ export function RejectReasonCard({
 			 * would defeat the decision it implements.
 			 */}
 			<ThemedText type="default" testID={`${testIDPrefix}-body`}>
-				{t("registrationRequestRejectBody", { name: requesterName })}
+				{t(bodyKey, { name: requesterName })}
 			</ThemedText>
 			<CustomTextInput
 				testID={`${testIDPrefix}-reason-input`}
@@ -243,7 +253,7 @@ export function RejectReasonCard({
 					<CustomButton
 						size="thin"
 						flex
-						title={t("registrationRequestRejectConfirmButton")}
+						title={t(confirmKey)}
 						backgroundColor={colors.error}
 						disabled={!canConfirm}
 						onPress={canConfirm ? handleConfirm : NOOP}
