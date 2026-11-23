@@ -140,10 +140,34 @@ describe('ResultsScreen', () => {
 		expect(text(tr, 'results-released-count')).toBe('1 of 2 needed keys released');
 	});
 
-	it('shows the refusal reason when the results cannot be worked out', async () => {
+	it('explains a refusal in plain words and never shows the engine reason code', async () => {
 		mockResults = {status: 'unavailable', electionId: ELECTION_ID, reason: 'secret-mismatch', detail: 'x'};
 		const tr = await mount();
-		expect(text(tr, 'results-unavailable-reason')).toBe('Reason: secret-mismatch');
+		expect(text(tr, 'results-unavailable-reason')).toBe("The released key shares don't match this election's key, so the votes can't be decrypted.");
+		expect(text(tr, 'results-unavailable-reason')).not.toContain('secret-mismatch');
+	});
+
+	it.each([
+		['election-key-inconsistent', "The released key shares don't match this election's key, so the votes can't be decrypted."],
+		['insufficient-shares', "The election key couldn't be rebuilt from the key shares this phone has received."],
+		['no-timeline', "This phone doesn't have the current version of the election yet. Wait a minute, then tap Refresh."],
+		['duplicate-block', "Some of the vote data on this phone didn't pass its checks, so it can't be counted."],
+		['read-failed', "This phone couldn't read the election data. Try again in a moment."],
+		['some-future-code', "The votes can't be counted on this phone right now."],
+	])('maps reason %s to plain copy', async (reason, copy) => {
+		mockResults = {status: 'unavailable', electionId: ELECTION_ID, reason, detail: 'x'};
+		const tr = await mount();
+		expect(text(tr, 'results-unavailable-reason')).toBe(copy);
+		expect(text(tr, 'results-unavailable-reason')).not.toContain(reason);
+	});
+
+	it('every plain-copy key exists in English and Spanish', () => {
+		for (const k of ['keyMismatch', 'keyNotRebuilt', 'electionIncomplete', 'voteDataFailed', 'readFailed', 'general']) {
+			const key = `results.unavailable.${k}`;
+			expect(i18n.getResource('en', 'timeline', key)).toEqual(expect.any(String));
+			expect(i18n.getResource('es', 'timeline', key)).toEqual(expect.any(String));
+			expect(i18n.getResource('es', 'timeline', key)).not.toBe(i18n.getResource('en', 'timeline', key));
+		}
 	});
 
 	it('says there is no election when the phone has none, without computing anything', async () => {
@@ -186,6 +210,28 @@ describe('ResultsScreen', () => {
 		const tr = await mount();
 		expect(text(tr, 'results-published-matches')).toContain('It matches the count on this phone.');
 		expect(has(tr, 'results-not-published')).toBe(false);
+	});
+
+	// todo 2026-11-23-voter-results-date-follows-phone-locale: the published date follows the app's language,
+	// never the phone's locale (stubbed here so a device-locale format would show up as DEVICE-LOCALE).
+	it.each([
+		['en', 'November'],
+		['es', 'noviembre'],
+	])('formats the published date in the app language (%s)', async (lng, month) => {
+		const deviceLocale = jest.spyOn(Date.prototype, 'toLocaleString').mockReturnValue('DEVICE-LOCALE');
+		try {
+			await renderer.act(async () => {
+				await i18n.changeLanguage(lng);
+			});
+			mockPublication = PUBLISHED;
+			const tr = await mount();
+			const line = text(tr, 'results-published-matches');
+			expect(line).toContain(month);
+			expect(line).toContain('2026');
+			expect(line).not.toContain('DEVICE-LOCALE');
+		} finally {
+			deviceLocale.mockRestore();
+		}
 	});
 
 	it('names both block counts when the published count differs from this phone\'s', async () => {

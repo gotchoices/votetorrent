@@ -66,17 +66,34 @@ export const ElectionsScreen = () => {
 		[]
 	);
 
+	// Mount, focus and strand-change loads overlap. A load's outcome (rows, or the failure its caller
+	// reports) applies only when no load started after it has already applied, so an older read that
+	// settles late never overwrites a newer one: a late empty success used to clear the
+	// can't-reach notice and leave "No current elections" on a network nothing could be read from.
+	// A superseded failure resolves silently instead of rejecting.
+	const startedLoadRef = useRef(0);
+	const appliedLoadRef = useRef(0);
 	const loadElections = useCallback(async () => {
-		const engine = await getEngine<IElectionsEngine>("elections");
+		const seq = ++startedLoadRef.current;
+		const claim = (): boolean => {
+			if (seq < appliedLoadRef.current) return false;
+			appliedLoadRef.current = seq;
+			return true;
+		};
+		let rows: [ElectionSummary[], Proposal<ElectionInit>[], ElectionSummary[]];
+		let engine: IElectionsEngine;
+		try {
+			engine = await getEngine<IElectionsEngine>("elections");
+			rows = await Promise.all([engine.getElections(), engine.getProposedElections(), engine.getElectionHistory()]);
+		} catch (error) {
+			if (!claim()) return;
+			throw error;
+		}
+		if (!claim()) return;
 		setElectionsEngine(engine);
-		const [activeElections, proposed, history] = await Promise.all([
-			engine.getElections(),
-			engine.getProposedElections(),
-			engine.getElectionHistory(),
-		]);
-		setElections(activeElections);
-		setProposedElections(proposed);
-		setElectionHistory(history);
+		setElections(rows[0]);
+		setProposedElections(rows[1]);
+		setElectionHistory(rows[2]);
 		setHasLoaded(true);
 		setPeerUnavailable(false);
 		setLoadError("");
@@ -168,9 +185,9 @@ export const ElectionsScreen = () => {
 							}}
 						/>
 					))
-				) : (
+				) : hasLoaded ? (
 					<ThemedText style={styles.emptyText}>{t("noCurrentElections")}</ThemedText>
-				)}
+				) : null}
 				<View style={styles.buttonContainer}>
 					<ChipButton
 						label={t("createElection")}
@@ -193,9 +210,9 @@ export const ElectionsScreen = () => {
 							}}
 						/>
 					))
-				) : (
+				) : hasLoaded ? (
 					<ThemedText style={styles.emptyHint}>{t("noProposedElectionsCurrently")}</ThemedText>
-				)}
+				) : null}
 			</View>
 
 			{/* Section 3: Election History — CollapsibleSection per D-13 */}
@@ -210,9 +227,9 @@ export const ElectionsScreen = () => {
 							}}
 						/>
 					))
-				) : (
+				) : hasLoaded ? (
 					<ThemedText style={styles.emptyText}>{t("noHistoryFound")}</ThemedText>
-				)}
+				) : null}
 			</CollapsibleSection>
 		</ScrollView>
 	);

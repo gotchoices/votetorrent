@@ -885,5 +885,40 @@ test('56-30: PublishedResults renders none and unreadable as their own sentences
 			assert.ok(!expr.includes(forbidden), `a text expression names ${forbidden}: "${expr}"`);
 		}
 	}
-	assert.doesNotMatch(RESULTS_TSX, /dangerouslySetInnerHTML|className=/, 'the view must stay unclassed and escape-hatch free');
+	assert.doesNotMatch(RESULTS_TSX, /dangerouslySetInnerHTML/, 'the view must stay escape-hatch free');
+});
+
+// The ballot description and a question title are different things and must not
+// render as the same bare browser-default heading (2026-11-23 todo).
+const APP_CSS = readFileSync(publicSrc('app.css'), 'utf8');
+
+/** @param {string} css @param {string} cls @returns {Record<string, string> | null} */
+function cssRule(css, cls) {
+	const m = new RegExp(`(?:^|\\n)\\.${cls}\\s*\\{([^}]*)\\}`).exec(css);
+	if (!m) return null;
+	/** @type {Record<string, string>} */
+	const decls = {};
+	for (const part of m[1].split(';')) {
+		const i = part.indexOf(':');
+		if (i > 0) decls[part.slice(0, i).trim()] = part.slice(i + 1).trim();
+	}
+	return decls;
+}
+
+test('results headings: no bare heading, ballot description and question title carry distinct classes', () => {
+	assert.doesNotMatch(RESULTS_TSX, /<h[1-6]>/, 'a results heading renders with no class');
+	assert.match('<h4>{ballot.description}</h4>', /<h[1-6]>/, 'control: the bare-heading matcher fires');
+	assert.match(RESULTS_TSX, /<h4 className="results-ballot__title">\{ballot\.description\}<\/h4>/);
+	assert.match(RESULTS_TSX, /<h5 className="results-question__title">\{question\.title\}<\/h5>/);
+	assert.match(RESULTS_TSX, /<h4 className="results-question__title">\{question\.title\}<\/h4>/);
+});
+
+test('results headings: the two classes have rules with different font sizes', () => {
+	const ballot = cssRule(APP_CSS, 'results-ballot__title');
+	const question = cssRule(APP_CSS, 'results-question__title');
+	assert.ok(ballot, 'app.css has no .results-ballot__title rule');
+	assert.ok(question, 'app.css has no .results-question__title rule');
+	assert.ok(ballot['font-size'] && question['font-size'], 'both rules set a font size');
+	assert.notEqual(ballot['font-size'], question['font-size'], 'the two headings render at the same size');
+	assert.deepEqual(cssRule('.a {\n\tfont-size: 1px;\n}', 'a'), { 'font-size': '1px' }, 'control: the rule reader parses a planted rule');
 });

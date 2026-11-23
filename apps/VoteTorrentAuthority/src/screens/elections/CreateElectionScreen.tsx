@@ -317,7 +317,7 @@ export function CreateElectionScreen() {
 				<View style={styles.section}>
 					<View style={localStyles.contextRow}>
 						<ThemedText type="defaultSemiBold">{t("authority")}: </ThemedText>
-						<ThemedText type="default" testID="create-election-authority" numberOfLines={1} ellipsizeMode="middle" style={{ flexShrink: 1 }}>{authorityName || "Loading..."}</ThemedText>
+						<ThemedText type="default" testID="create-election-authority" numberOfLines={1} ellipsizeMode="middle" style={{ flexShrink: 1 }}>{authorityName || t("loading")}</ThemedText>
 					</View>
 
 					{/* EUI-02 (D-05): radio control replaces read-only "{t("official")}" row */}

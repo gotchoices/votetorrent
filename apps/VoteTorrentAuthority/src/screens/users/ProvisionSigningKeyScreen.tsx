@@ -24,7 +24,8 @@ import {
 	persistProvisionedDeviceUser,
 } from "../../engines/device-user";
 import { SIGNING_KEY_ALIAS, RECOVERY_KEY_ALIAS } from "../../engines/device-signer";
-import { mapDeviceSigningError, DEVICE_SIGNING_ERROR_COPY_KEY } from "../../utils/deviceSigningError";
+import { mapDeviceSigningError, isDeviceSigningError, DEVICE_SIGNING_ERROR_COPY_KEY } from "../../utils/deviceSigningError";
+import { errorCopy } from "../../utils/errorCopy";
 import type { DeviceSigningErrorClass } from "../../utils/deviceSigningError";
 
 /**
@@ -122,18 +123,59 @@ type ScreenPhase =
 	| "awaiting-network"
 	| "no-recovery"
 	| "network-user-unresolved"
+	| "identity-unrecoverable"
 	| "recovery-unsupported-os";
+
+/**
+ * Whether this device's signing key is a registered key of the user, read WITHOUT a prompt and
+ * without touching the Keystore (`getCurrentDeviceKey`, read-only). `false` only on evidence: the
+ * key is invalidated, absent, or readable but not among the user's active keys (a desync).
+ * `undefined` when it cannot be told (a read failure, an older native module): the caller must not
+ * claim the device is unrecoverable without evidence.
+ */
+async function signingKeyRegistration(
+	native: NativeAttestationSpec,
+	activeKeys: ReadonlyArray<{ key: string }>,
+): Promise<boolean | undefined> {
+	try {
+		const current = (await native.getCurrentDeviceKey(SIGNING_KEY_ALIAS)) as
+			| { publicKeyCompressedHex?: unknown }
+			| null
+			| undefined;
+		const hex = current?.publicKeyCompressedHex;
+		if (typeof hex !== "string" || hex.length === 0) return undefined;
+		return activeKeys.some((k) => k.key === hex);
+	} catch (err) {
+		const code = (err as { code?: unknown } | null | undefined)?.code;
+		if (code === "DEVICE_KEY_INVALIDATED" || code === "DEVICE_KEY_ABSENT") return false;
+		return undefined;
+	}
+}
+
+/**
+ * A native-module rejection carries a string `code` (CODE_TO_CLASS's codes, BIOMETRIC_ERROR, or one
+ * not yet mapped). Engine errors do not: Quereus codes are numbers and the engine's rethrow keeps
+ * none. A builder validation error is never a native rejection.
+ */
+function hasNativeRejectCode(err: unknown): boolean {
+	if (typeof err !== "object" || err === null) return false;
+	if ((err as { name?: unknown }).name === "BuilderValidationError") return false;
+	return typeof (err as { code?: unknown }).code === "string";
+}
 
 export default function ProvisionSigningKeyScreen() {
 	const insets = useSafeAreaInsets();
 	const { colors } = useTheme() as ExtendedTheme;
 	const { t } = useTranslation();
 	const navigation = useNavigation<NavigationProp>();
-	const { getEngine, resolveDeviceSigner } = useApp();
+	const { getEngine, resolveDeviceSigner, rebindDeviceUser } = useApp();
 	const { reason } = useRoute().params as { reason: ProvisionReason };
 
 	const [phase, setPhase] = useState<ScreenPhase>("idle");
 	const [errorClass, setErrorClass] = useState<DeviceSigningErrorClass | undefined>(undefined);
+	// A ceremony failure that is not a device-signing rejection (an engine CHECK, a storage or peer
+	// failure): translated copy from errorCopy, never the biometric message.
+	const [engineErrorMessage, setEngineErrorMessage] = useState<string | undefined>(undefined);
 	const [intakeRenewalFailed, setIntakeRenewalFailed] = useState(false);
 	// WR-R3-06: the intake-key renewal runs after the success screen is shown and may settle after
 	// the officer has left it; only a mounted screen records its outcome.
@@ -303,6 +345,7 @@ export default function ProvisionSigningKeyScreen() {
 
 	async function handleFirstRun(): Promise<void> {
 		setErrorClass(undefined);
+		setEngineErrorMessage(undefined);
 		setPhase("pending");
 		try {
 			const native = getNative();
@@ -445,6 +488,7 @@ export default function ProvisionSigningKeyScreen() {
 
 	async function handleRecovery(): Promise<void> {
 		setErrorClass(undefined);
+		setEngineErrorMessage(undefined);
 		setPhase("pending");
 		try {
 			const native = getNative();
@@ -484,6 +528,20 @@ export default function ProvisionSigningKeyScreen() {
 				(k) => k.key === recoveryKey.publicKeyCompressedHex,
 			);
 			if (!recoveryKeyRegistered) {
+				// The set-up-first copy below only helps while the signing key can still sign the
+				// recovery key's registration. When it cannot either, nothing on this device can sign
+				// for this user and that setup's addKey is bound to fail SignatureValid: say so
+				// (terminal), instead of sending the officer round a loop whose only exit is
+				// clearing the app's data.
+				if ((await signingKeyRegistration(native, beforeSummary?.activeKeys ?? [])) === false) {
+					throw Object.assign(
+						new Error(
+							"ProvisionSigningKeyScreen.handleRecovery: neither the recovery key nor this device's signing " +
+								"key is a registered, active UserKey on this network — nothing on this device can sign for this user.",
+						),
+						{ code: "SIGNING_IDENTITY_UNRECOVERABLE" },
+					);
+				}
 				throw Object.assign(
 					new Error(
 						"ProvisionSigningKeyScreen.handleRecovery: recovery key is not a registered, " +
@@ -514,13 +572,11 @@ export default function ProvisionSigningKeyScreen() {
 			await markRecoveryInProgress();
 
 			// Revoke the invalidated key FIRST, authorized by the recovery key's own signature
-			// (revokeKey binds context.UserKey from `signature.signerKey` directly — unlike
-			// addKey, it does not depend on array order). This collapses the user down to exactly
-			// one active key (the recovery key) BEFORE the signed add below, so that add's
-			// context.UserKey — bound from the engine snapshot's activeKeys[0] — is unambiguously
-			// the recovery key, regardless of how UserKey rows happen to sort when read back.
-			// Legal per UserKey.DeleteValid: this is never the user's LAST key while the recovery
-			// key remains registered.
+			// (revokeKey binds context.UserKey from `signature.signerKey` directly, and addKey now
+			// does the same, so neither depends on array order). This collapses the user down to
+			// exactly one active key (the recovery key) BEFORE the signed add below. Legal per
+			// UserKey.DeleteValid: this is never the user's LAST key while the recovery key remains
+			// registered.
 			if (oldKey !== undefined) {
 				const revokeDigest = await before.getRevokeKeyDigest(oldKey);
 				const revokeResult = (await native.signWithRecoveryKey(
@@ -604,10 +660,21 @@ export default function ProvisionSigningKeyScreen() {
 			const noticeTimer = setTimeout(() => {
 				if (mountedRef.current) setIntakeRenewalFailed(true);
 			}, INTAKE_RENEWAL_NOTICE_TIMEOUT_MS);
-			void renewOfficerIntakeKeyAfterKeyReplacement({
-				getEngine,
-				createSigner: resolveDeviceSigner,
-			})
+			// The open network ctx and every cached engine still hold the key minted before this
+			// replacement; without a re-bind, writes that bind ctx.user's key (Propose ballot) fail
+			// UserValid until a relaunch. Re-bind first so the renewal below already runs on the new
+			// key. A failed re-bind never undoes the recovery (the stored identity is already right
+			// and the next launch binds it); it is logged with a fixed token only.
+			const rebound = (rebindDeviceUser?.() ?? Promise.resolve()).catch(() => {
+				console.warn("[key-replacement] outcome=rebind-failed");
+			});
+			void rebound
+				.then(() =>
+					renewOfficerIntakeKeyAfterKeyReplacement({
+						getEngine,
+						createSigner: resolveDeviceSigner,
+					}),
+				)
 				.catch(() => "failed" as const)
 				.then((renewal) => {
 					clearTimeout(noticeTimer);
@@ -639,6 +706,17 @@ export default function ProvisionSigningKeyScreen() {
 	 * button.
 	 */
 	function handleCeremonyError(err: unknown): void {
+		// T-49-USER-7: only a device-signing rejection is classified as one. A recognized code, or any
+		// other string code from the native module (BIOMETRIC_ERROR, a future code), takes the signing
+		// taxonomy; an error without one (an engine CHECK such as SignatureValid or DeleteValid, a
+		// storage or peer failure) shows errorCopy's write copy. Before this, every such fault read
+		// "Couldn't verify your biometrics" although the biometric step had already succeeded.
+		if (!isDeviceSigningError(err) && !hasNativeRejectCode(err)) {
+			setErrorClass(undefined);
+			setEngineErrorMessage(errorCopy(err, t, "write"));
+			setPhase("idle");
+			return;
+		}
 		const cls = mapDeviceSigningError(err);
 		if (cls === "cancellation") {
 			setPhase("idle");
@@ -650,6 +728,10 @@ export default function ProvisionSigningKeyScreen() {
 		}
 		if (cls === "recovery-unsupported-os") {
 			setPhase("recovery-unsupported-os");
+			return;
+		}
+		if (cls === "signing-identity-unrecoverable") {
+			setPhase("identity-unrecoverable");
 			return;
 		}
 		setErrorClass(cls);
@@ -682,7 +764,7 @@ export default function ProvisionSigningKeyScreen() {
 				</ThemedText>
 				{phase === "success" && intakeRenewalFailed && (
 					<View testID="signing-key-intake-renewal-failed">
-						<ThemedText type="small" style={[localStyles.body, { color: colors.warning }]}>
+						<ThemedText type="small" style={[localStyles.body, { color: colors.warningText }]}>
 							{t("officerIntakeRenewalFailedBody")}
 						</ThemedText>
 					</View>
@@ -762,6 +844,25 @@ export default function ProvisionSigningKeyScreen() {
 		);
 	}
 
+	// Terminal: neither the recovery key nor this device's signing key can sign for the user (see
+	// `signingKeyRegistration`). Same zero-button shape as the two terminal states around it.
+	if (phase === "identity-unrecoverable") {
+		return (
+			<ScrollView
+				testID="signing-key-provisioning-screen"
+				style={styles.container}
+				contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
+			>
+				<ThemedText type="defaultSemiBold" style={[localStyles.heading, { color: colors.error }]}>
+					{t("signingKeyProvisioningIdentityUnrecoverableHeading")}
+				</ThemedText>
+				<ThemedText type="small" style={[localStyles.body, { color: colors.text }]}>
+					{t("signingKeyProvisioningIdentityUnrecoverableBody")}
+				</ThemedText>
+			</ScrollView>
+		);
+	}
+
 	// D-26a rescope terminal state (49-19/49-21): recovery is unsupported on this device's Android
 	// version. Distinct from `no-recovery` above — same zero-button shape, different cause and
 	// therefore different copy (see the `ScreenPhase` union comment). No icon, no button.
@@ -794,7 +895,7 @@ export default function ProvisionSigningKeyScreen() {
 	const errorMessage =
 		errorClass !== undefined
 			? t(DEVICE_SIGNING_ERROR_COPY_KEY[errorClass] ?? DEVICE_SIGNING_ERROR_COPY_KEY["biometric-error"]!)
-			: undefined;
+			: engineErrorMessage;
 
 	return (
 		<ScrollView

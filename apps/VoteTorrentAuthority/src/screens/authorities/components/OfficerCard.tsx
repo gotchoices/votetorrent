@@ -65,7 +65,7 @@ export function OfficerCard({
 		status?.tone === "accepted"
 			? colors.success
 			: status?.tone === "warning"
-				? colors.warning
+				? colors.warningText
 				: colors.textSecondary;
 
 	const displayName = userName ?? officer.userId;

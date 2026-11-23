@@ -44,7 +44,7 @@ export function KeyholderDkgStatusRow({ state }: KeyholderDkgStatusRowProps) {
 		case 'thresholdTooLow':
 			glyph = 'triangle-exclamation';
 			glyphColor = colors.warning;
-			textColor = colors.warning;
+			textColor = colors.warningText;
 			text = t('keyholderDkgStatusThresholdTooLow');
 			break;
 		case 'inProgress':
@@ -59,13 +59,13 @@ export function KeyholderDkgStatusRow({ state }: KeyholderDkgStatusRowProps) {
 		case 'complaint':
 			glyph = 'triangle-exclamation';
 			glyphColor = colors.warning;
-			textColor = colors.warning;
+			textColor = colors.warningText;
 			text = t('keyholderDkgStatusComplaint');
 			break;
 		case 'failed':
 			glyph = 'circle-xmark';
 			glyphColor = colors.warning;
-			textColor = colors.warning;
+			textColor = colors.warningText;
 			text = t('keyholderDkgStatusFailed');
 			break;
 	}

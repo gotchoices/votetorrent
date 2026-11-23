@@ -2,6 +2,7 @@ import { t } from '@votetorrent/ui-web';
 import { BarSeries, DetailsToggle, Meter } from '@votetorrent/ui-web/components';
 import { groupFactsForPhase } from '../fact-groups.js';
 import { foldDistrictCounts } from '../roll-disclosure.js';
+import { formatCount } from '../format-count.js';
 import { RegistrantRoll } from './RegistrantRoll';
 import type { RegistrantRollRow } from './RegistrantRoll';
 import { PublishedResults } from './PublishedResults';
@@ -254,7 +255,7 @@ function FactCard({
 			{rendersCollection ? <RegistrantRoll rows={roll} /> : null}
 			{rendersResults ? <PublishedResults results={results} /> : null}
 			{rendersTurnout && turnout.state === 'counted' ? (
-				<p className="fact-card__body">{t('public.fact.turnout.counted', { votes: turnout.votes, blocks: turnout.blocks })}</p>
+				<p className="fact-card__body">{t('public.fact.turnout.counted', { votes: formatCount(turnout.votes), blocks: formatCount(turnout.blocks) })}</p>
 			) : null}
 			{rendersTurnout && turnout.state === 'counting' ? <p className="fact-card__body">{t('public.fact.turnout.counting')}</p> : null}
 			{rendersTurnout && turnout.state === 'unavailable' ? <p className="fact-card__body">{t('public.fact.turnout.unavailable')}</p> : null}
@@ -267,7 +268,7 @@ function FactCard({
 								key: bucket.key,
 								label,
 								value: bucket.count,
-								tooltip: t('public.registrantRoll.chart.tooltip', { district: label, count: String(bucket.count) }),
+								tooltip: t('public.registrantRoll.chart.tooltip', { district: label, count: formatCount(bucket.count) }),
 							};
 						})}
 						orientation="horizontal"

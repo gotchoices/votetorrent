@@ -369,16 +369,51 @@ async function heldByAnotherTab(networkHash: string): Promise<boolean> {
 	}
 }
 
-/** The decoded code's network hash and display name, or nulls. Never throws. */
-function peekCode(code: string): { networkHash: string | null; authorityName: string } {
+export type CodePeek = { networkHash: string | null; networkName: string; officerUserId: string | null };
+
+/**
+ * The decoded code's network hash, network name and officer id, or nulls. Never throws. The join
+ * code names the NETWORK; the Authority's own name is read from the strand only once the pairing
+ * has synced, so the joining heading names the network.
+ */
+function peekCode(code: string): CodePeek {
 	try {
 		const decoded = decodePairingCode(code);
 		const join = decodeNetworkJoinCode(decoded.joinCode);
-		if (join.ok) return { networkHash: join.code.networkHash, authorityName: join.code.name };
+		if (join.ok) {
+			return { networkHash: join.code.networkHash, networkName: join.code.name, officerUserId: decoded.statement.userId };
+		}
 	} catch {
 		// pairBrowser judges the code; this peek only labels the screen.
 	}
-	return { networkHash: null, authorityName: '' };
+	return { networkHash: null, networkName: '', officerUserId: null };
+}
+
+export type KnownNames = {
+	networkName: string;
+	officerName: string | null;
+	officerUserId: string | null;
+	networkHash: string | null;
+};
+
+/**
+ * The names the screen shows for a new submit. The code carries the officer's id but no name, so
+ * a name is known only once something supplied it (an accepted officer swap). A re-submit of a
+ * code for the SAME officer on the SAME network (a Try again after a failure) keeps that name
+ * until the pairing ends; any other code starts unnamed.
+ */
+export function namesForSubmit(previous: KnownNames, peek: CodePeek): KnownNames {
+	const sameOfficer =
+		peek.officerUserId !== null &&
+		peek.networkHash !== null &&
+		peek.officerUserId === previous.officerUserId &&
+		peek.networkHash === previous.networkHash;
+	return {
+		networkName: peek.networkName,
+		officerName: sameOfficer ? previous.officerName : null,
+		officerUserId: peek.officerUserId,
+		networkHash: peek.networkHash,
+	};
 }
 
 // --- pure views -----------------------------------------------------------------------
@@ -392,7 +427,8 @@ export interface PairingStateViewProps {
 	reachedPhase?: PairPhase | null;
 	slow?: boolean;
 	otherTab?: boolean;
-	authorityName?: string;
+	/** The network name the pairing code carries (the joining heading). */
+	networkName?: string;
 	officerName?: string | null;
 	notice?: UnpairedNotice | null;
 	hasPairedNetworks: boolean;
@@ -508,8 +544,8 @@ export function PairingStateView(props: PairingStateViewProps): ReactElement {
 				{view === 'joining' || view === 'stopping' ? (
 					<div className="pr-status" aria-live="polite">
 						<h2 className="pr-heading">
-							{props.authorityName
-								? t('pairing.joining.heading', { authorityName: props.authorityName })
+							{props.networkName
+								? t('pairing.joining.heading', { networkName: props.networkName })
 								: t('pairing.title')}
 						</h2>
 						<StepList rows={stepRows(props.reachedPhase, { failed: false })} officerName={props.officerName} />
@@ -562,11 +598,9 @@ export function PairingStateView(props: PairingStateViewProps): ReactElement {
 							<button type="submit" className="pr-cta" disabled={fieldValue.trim() === ''}>
 								{t('pairing.cta')}
 							</button>
-							{/* Hidden for this release (QR scanning cannot read real pairing codes from a webcam; paste is the pairing path).
 							<button type="button" className="pr-button" onClick={props.onScan}>
 								{t('pairing.scanCta')}
 							</button>
-							*/}
 						</div>
 					</form>
 				) : null}
@@ -672,9 +706,11 @@ export function Pairing(props: PairingProps): ReactElement {
 	const [otherTab, setOtherTab] = useState(false);
 	const [scannerOpen, setScannerOpen] = useState(false);
 	const [swapRequest, setSwapRequest] = useState<SwapRequest | null>(null);
-	const [knownNames, setKnownNames] = useState<{ authorityName: string; officerName: string | null }>({
-		authorityName: '',
+	const [knownNames, setKnownNames] = useState<KnownNames>({
+		networkName: '',
 		officerName: null,
+		officerUserId: null,
+		networkHash: null,
 	});
 
 	const propsRef = useRef(props);
@@ -755,7 +791,7 @@ export function Pairing(props: PairingProps): ReactElement {
 		swapResolverRef.current = null;
 		setSwapRequest(null);
 		if (replace && request) {
-			setKnownNames((names) => ({ ...names, officerName: request.incoming.name }));
+			setKnownNames((names) => ({ ...names, officerName: request.incoming.name, officerUserId: request.incoming.userId }));
 		}
 		resolve?.(replace);
 	};
@@ -790,7 +826,7 @@ export function Pairing(props: PairingProps): ReactElement {
 		setSlow(false);
 		setView('verifying');
 		const peek = peekCode(next);
-		setKnownNames({ authorityName: peek.authorityName, officerName: null });
+		setKnownNames((names) => namesForSubmit(names, peek));
 		try {
 			let mod: PairingModule;
 			try {
@@ -896,7 +932,7 @@ export function Pairing(props: PairingProps): ReactElement {
 				reachedPhase={reachedPhase}
 				slow={slow}
 				otherTab={otherTab}
-				authorityName={knownNames.authorityName}
+				networkName={knownNames.networkName}
 				officerName={knownNames.officerName}
 				notice={props.notice}
 				hasPairedNetworks={props.hasPairedNetworks}
@@ -910,7 +946,6 @@ export function Pairing(props: PairingProps): ReactElement {
 				onCta={onCta}
 				onDismissNotice={props.onDismissNotice}
 			/>
-			{/* Hidden for this release, with the Scan QR code button above.
 			<QrScanner
 				open={scannerOpen}
 				onFound={(text) => {
@@ -923,7 +958,6 @@ export function Pairing(props: PairingProps): ReactElement {
 					focusFieldRef.current = true;
 				}}
 			/>
-			*/}
 			{swapRequest !== null ? <SwapDialog request={swapRequest} onAnswer={answerSwap} /> : null}
 		</>
 	);

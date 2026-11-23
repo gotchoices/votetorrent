@@ -9,6 +9,8 @@ import {useVoterApp} from '../../providers/VoterAppProvider';
 import {globalStyles} from '../../theme/styles';
 import {pickElectionId} from '../../engines/election-read';
 import {strandChanges} from '../../engines/strand-changes';
+import {vtDebug} from '../../engines/vt-debug';
+import {unavailableCopyKey} from './results-unavailable';
 
 /**
  * ResultsScreen — the election's results, counted on this phone. After enough keyholders release their key
@@ -40,10 +42,17 @@ async function readPublication(getEngine: <T>(name: string) => Promise<T>, resul
 
 const percent = (count: number, of: number): number => (of > 0 ? Math.round((count / of) * 100) : 0);
 
+/** The published-tally time in the app's language, not the phone's locale (a phone set to English shows a Spanish date when the app is in Spanish). */
+export function formatPublishedAt(iso: string, language: string): string {
+	const ms = Date.parse(iso);
+	if (Number.isNaN(ms)) return iso;
+	return new Intl.DateTimeFormat(language, {dateStyle: 'long', timeStyle: 'short'}).format(new Date(ms));
+}
+
 export default function ResultsScreen() {
 	const {getEngine, seededElectionId} = useVoterApp();
 	const {colors, fonts, type: typeScale} = useTheme() as ExtendedTheme;
-	const {t} = useTranslation('timeline');
+	const {t, i18n} = useTranslation('timeline');
 	const [state, setState] = useState<ScreenState>({kind: 'loading'});
 	const [reloadNonce, setReloadNonce] = useState(0);
 	// A recount after a strand change keeps the current results on screen until the new ones are ready.
@@ -78,6 +87,8 @@ export default function ResultsScreen() {
 				const engine = await getEngine<ElectionResultsEngine>('electionResults');
 				const results = await engine.getElectionResults(electionId);
 				const publication = await readPublication(getEngine, results);
+				// The engine's reason code goes to the log only; the screen shows plain copy for it.
+				if (results.status === 'unavailable') vtDebug('results', 'unavailable', {reason: results.reason});
 				if (live) setState({kind: 'ready', results, publication});
 			} catch {
 				if (live) setState({kind: 'failed'});
@@ -135,7 +146,7 @@ export default function ResultsScreen() {
 				<View testID="results-unavailable" style={[styles.card, {backgroundColor: colors.card, borderColor: colors.border}]}>
 					<Text style={{...heading, color: colors.error}}>{t('results.unavailableTitle')}</Text>
 					<Text testID="results-unavailable-reason" style={secondary}>
-						{t('results.unavailableReason', {reason: results.reason})}
+						{t(unavailableCopyKey(results.reason))}
 					</Text>
 				</View>
 			) : null}
@@ -212,7 +223,7 @@ export default function ResultsScreen() {
 						</Text>
 					) : publication.matchesRecomputed === true ? (
 						<Text testID="results-published-matches" style={body}>
-							{t('results.publishedMatches', {date: new Date(publication.publishedAt).toLocaleString()})}
+							{t('results.publishedMatches', {date: formatPublishedAt(publication.publishedAt, i18n.language)})}
 						</Text>
 					) : (
 						<Text testID="results-published-differs" style={{...body, color: colors.warning}}>

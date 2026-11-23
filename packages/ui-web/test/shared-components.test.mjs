@@ -140,13 +140,13 @@ test("t('advisory.nosuchvariant.body') throws naming the exact missing key -- D-
 // This file is not one 54-09 set out to touch. It carries a SECOND pin on
 // the table's total, so the count lives in two places; updating only the
 // one in copy.test.mjs would have left this suite red. The count is left in
-// both deliberately rather than deleted here (66-05 moved both pins 177 -> 261: +84 from 66-05's live-dashboard copy; 66-22 moved both 261 -> 266: +5 from 66-22's pairing, scanner and forget gap keys; 66-24 moved both 266 -> 226: -40, the snapshot-era bootstrap.*, snapshot.* and network.* keys; 56-28 moved both 226 -> 228: +2, the public page's still-looking sentence public.election.fetching.title/.body; 56-29 moved both 228 -> 231: +3, the network-index sentences public.index.lookingOnNetwork/networkEmpty/networkUnreachable; 56-30 moved both 231 -> 237: +8 results-card keys, -2 retired gap-E keys; 56-31 moved both 237 -> 239: +4 turnout keys, -2 retired gap-A keys; 56-34 moved both 239 -> 243: +4, the failed-connection pairs public.election.unreachable.* and notOnNetwork.*) -- this suite's subject is the
+// both deliberately rather than deleted here (66-05 moved both pins 177 -> 261: +84 from 66-05's live-dashboard copy; 66-22 moved both 261 -> 266: +5 from 66-22's pairing, scanner and forget gap keys; 66-24 moved both 266 -> 226: -40, the snapshot-era bootstrap.*, snapshot.* and network.* keys; 56-28 moved both 226 -> 228: +2, the public page's still-looking sentence public.election.fetching.title/.body; 56-29 moved both 228 -> 231: +3, the network-index sentences public.index.lookingOnNetwork/networkEmpty/networkUnreachable; 56-30 moved both 231 -> 237: +8 results-card keys, -2 retired gap-E keys; 56-31 moved both 237 -> 239: +4 turnout keys, -2 retired gap-A keys; 56-34 moved both 239 -> 243: +4, the failed-connection pairs public.election.unreachable.* and notOnNetwork.*; the dashboard wipe-failed banner moved both 243 -> 245: +2, wipe.failed and wipe.retry) -- this suite's subject is the
 // shared components' relationship to the table, and "the table did not
 // silently change size under me" is part of that.
 // ===========================================================================
 
-test('COPY holds exactly 243 keys, and three spot-checked untouched keys still hold their exact values', () => {
-	assert.equal(Object.keys(COPY).length, 243);
+test('COPY holds exactly 245 keys, and three spot-checked untouched keys still hold their exact values', () => {
+	assert.equal(Object.keys(COPY).length, 245);
 	// lifecycle.organizing was RENAMED to lifecycle.pre by 54-02 (D-06/I-12),
 	// carrying its exact pre-move value across the rename -- see copy.test.mjs's
 	// own dedicated value-carry test for the full rationale.

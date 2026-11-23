@@ -779,7 +779,7 @@ export default function RegistrationRequestApprovalScreen() {
 						{closedAsDuplicate ? (
 							<View testID="registration-request-approval-duplicate-closed-block" style={localStyles.stateBlock}>
 								<View style={[pillStyles.pill, { backgroundColor: tintPill(colors.warning) }]}>
-									<ThemedText type="smallBold" style={{ color: colors.warning }}>
+									<ThemedText type="smallBold" style={{ color: colors.warningText }}>
 										{t("possibleDuplicateClosedLabel")}
 									</ThemedText>
 								</View>

@@ -150,6 +150,20 @@
 	color: var(--text);
 }
 
+/*
+ * .election-notice__title -- the not-held, unreachable, not-on-network and
+ * still-looking titles in ElectionShell.tsx. Unclassed, they rendered at the
+ * browser's default h2 size, larger than .election-title. They sit a step
+ * below it: body size, heading weight.
+ */
+.election-notice__title {
+	margin: var(--space-sm) 0 0;
+	font-size: var(--font-body-size);
+	font-weight: var(--font-heading-weight);
+	line-height: var(--font-heading-line-height);
+	color: var(--text);
+}
+
 .dt-toggle {
 	background: var(--surface);
 	color: var(--text);
@@ -433,6 +447,30 @@
 .fact-card__chart {
 	margin-top: var(--space-sm);
 	min-width: 0;
+}
+
+/*
+ * The results card's two heading levels (PublishedResults.tsx). Both were bare
+ * h4s at the browser default, so a ballot's description and a question title
+ * read as the same thing. The ballot description is the larger, separated one;
+ * a question title is body size, bold, directly above its counts.
+ */
+.results-ballot__title {
+	margin: var(--space-md) 0 var(--space-xs);
+	padding-top: var(--space-sm);
+	border-top: 1px solid var(--border);
+	font-size: var(--font-heading-size);
+	font-weight: var(--font-heading-weight);
+	line-height: var(--font-heading-line-height);
+	color: var(--text);
+}
+
+.results-question__title {
+	margin: var(--space-sm) 0 var(--space-xs);
+	font-size: var(--font-body-size);
+	font-weight: var(--font-heading-weight);
+	line-height: var(--font-body-line-height);
+	color: var(--text);
 }
 
 /*

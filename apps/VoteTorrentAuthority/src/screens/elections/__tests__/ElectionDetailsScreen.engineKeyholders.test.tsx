@@ -32,7 +32,9 @@ jest.mock("react-native-safe-area-context", () => ({
 }));
 
 jest.mock("react-i18next", () => ({
-	useTranslation: () => ({ t: (key: string) => key }),
+	useTranslation: () => ({
+		t: (key: string, opts?: Record<string, unknown>) => (opts ? `${key}:${JSON.stringify(opts)}` : key),
+	}),
 }));
 
 const mockNavigate = jest.fn();
@@ -134,13 +136,19 @@ function textOf(node: ReturnType<renderer.ReactTestRenderer["root"]["findAllByTy
 	return ([] as unknown[]).concat(node.props.children as unknown).join("");
 }
 
-/** Find the single "<threshold> of <count>" keyholder-policy ThemedText node. */
+/**
+ * The keyholder-policy value, read back as "<threshold> of <count>" from its i18n call (todo
+ * 2026-11-23-authority-hardcoded-english-threshold-loading: it was built in code, in English only).
+ */
 function policyText(tr: renderer.ReactTestRenderer): string {
-	const match = tr.root.findAllByType(ThemedText).map(textOf).find((text) => /^\d+ of \d+$/.test(text));
+	const texts = tr.root.findAllByType(ThemedText).map(textOf);
+	expect(texts.some((text) => /^\d+ of \d+$/.test(text))).toBe(false);
+	const match = texts.find((text) => text.startsWith("keyholderPolicyValue:"));
 	if (match === undefined) {
-		throw new Error("policyText: no ThemedText node matched the '<n> of <n>' keyholder-policy shape");
+		throw new Error("policyText: no ThemedText node rendered t('keyholderPolicyValue')");
 	}
-	return match;
+	const { threshold, count } = JSON.parse(match.slice("keyholderPolicyValue:".length)) as { threshold: number; count: number };
+	return `${threshold} of ${count}`;
 }
 
 beforeEach(async () => {

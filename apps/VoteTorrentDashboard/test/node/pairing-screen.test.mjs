@@ -204,6 +204,34 @@ test('H7 detectUnsupportedBrowser: true when any needed browser feature is missi
 	assert.equal(P.detectUnsupportedBrowser(undefined), true);
 });
 
+// 2026-11-23 todo: every submit reset the officer name to null, so a Try again of the same code
+// after an accepted officer swap lost the name the swap dialog had supplied. The code carries the
+// officer's id but no name, so the name is kept only for the same officer on the same network.
+test('H9 namesForSubmit keeps a known officer name for the same officer and network, and starts unnamed otherwise', () => {
+	const known = { networkName: 'Nepal Votes', officerName: 'Asha', officerUserId: 'u-1', networkHash: 'n-1' };
+	const same = { networkHash: 'n-1', networkName: 'Nepal Votes', officerUserId: 'u-1' };
+	assert.deepEqual(P.namesForSubmit(known, same), known, 'a retry of the same officer keeps the name');
+	assert.equal(P.namesForSubmit(known, { ...same, officerUserId: 'u-2' }).officerName, null, 'another officer starts unnamed');
+	assert.equal(P.namesForSubmit(known, { ...same, networkHash: 'n-2' }).officerName, null, 'another network starts unnamed');
+	assert.deepEqual(
+		P.namesForSubmit(known, { networkHash: null, networkName: '', officerUserId: null }),
+		{ networkName: '', officerName: null, officerUserId: null, networkHash: null },
+		'an undecodable code starts unnamed',
+	);
+	const fresh = { networkName: '', officerName: null, officerUserId: null, networkHash: null };
+	assert.equal(P.namesForSubmit(fresh, same).officerName, null, 'a first pairing has no name to keep');
+	assert.equal(P.namesForSubmit(fresh, same).officerUserId, 'u-1', 'the officer id is recorded for the next submit');
+});
+
+test('H9 the screen routes every submit through namesForSubmit and records the swapped-in officer id with its name', () => {
+	const code = stripComments(readFileSync(PAIRING_PATH, 'utf8'));
+	const RESET = /setKnownNames\(\{[^}]*officerName: null/;
+	assert.match('setKnownNames({ authorityName: peek.authorityName, officerName: null });', RESET, 'control: the old reset is caught');
+	assert.doesNotMatch(code, RESET, 'a submit no longer blanks the officer name');
+	assert.match(code, /setKnownNames\(\(names\) => namesForSubmit\(names, peek\)\)/);
+	assert.match(code, /officerName: request\.incoming\.name, officerUserId: request\.incoming\.userId/);
+});
+
 test('H8 abort after an ok result calls nothing and the adopted node stays alive (control: an in-flight run does abort)', async () => {
 	/** @param {any} result */
 	const makeFake = (result) => {
@@ -265,8 +293,7 @@ test('R1 idle with an empty field: the textarea attributes, a disabled CTA, the 
 		assert.ok(areaTag.includes(attr), `textarea has ${attr}`);
 	}
 	assert.match(html, /<button type="submit" class="pr-cta" disabled="">Pair this browser<\/button>/);
-	// The Scan QR code button is commented out for this release (paste is the pairing path).
-	assert.ok(!has(html, 'pairing.scanCta'), 'no Scan QR code button');
+	assert.ok(has(html, 'pairing.scanCta'));
 	assert.ok(has(html, 'pairing.emptyHeading') && has(html, 'pairing.emptyBody'));
 	assert.ok(has(html, 'pairing.title') && has(html, 'pairing.intro') && has(html, 'pairing.fieldLabel') && has(html, 'pairing.fieldHelp'));
 	const withCode = render({ code: 'vtpair1.abc' });
@@ -281,9 +308,11 @@ test('R2 verifying and joining replace the field; joining shows the authority, t
 	assert.match(verifying, /aria-live="polite"/);
 	assert.match(verifying, /class="pr-spinner"/);
 
-	const joining = render({ view: 'joining', reachedPhase: 'joining', authorityName: 'Nepal Votes', code: 'vtpair1.abc' });
+	const joining = render({ view: 'joining', reachedPhase: 'joining', networkName: 'Nepal Votes', code: 'vtpair1.abc' });
 	assert.doesNotMatch(joining, /<textarea|class="pr-cta"/);
-	assert.ok(joining.includes('Joining Nepal Votes'));
+	// 2026-11-23 todo: the code carries the network's name, so the heading names a network.
+	assert.ok(joining.includes('Joining the Nepal Votes network'));
+	assert.ok(!render({ view: 'joining', reachedPhase: 'joining', authorityName: 'Nepal Votes' }).includes('Nepal Votes'), 'an authority name is not what the heading shows');
 	assert.equal((joining.match(/<li class="pr-step">/g) ?? []).length, 3);
 	assert.ok(joining.includes(esc(COPY['pairing.step.joiningUnnamed'])), 'no officer name: the unnamed step label');
 	assert.ok(joining.includes('pr-step-state pr-step-state--done">Done'));
@@ -293,13 +322,13 @@ test('R2 verifying and joining replace the field; joining shows the authority, t
 	assert.match(joining, /<button type="button" class="pr-text-button">Stop pairing<\/button>/);
 	assert.ok(!has(joining, 'pairing.catchingUpSlow'));
 
-	const named = render({ view: 'joining', reachedPhase: 'joining', authorityName: 'N', officerName: 'Asha' });
+	const named = render({ view: 'joining', reachedPhase: 'joining', networkName: 'N', officerName: 'Asha' });
 	assert.ok(named.includes(esc("Joining as Asha's browser")));
-	const slow = render({ view: 'joining', reachedPhase: 'first-sync', authorityName: 'N', slow: true });
+	const slow = render({ view: 'joining', reachedPhase: 'first-sync', networkName: 'N', slow: true });
 	assert.ok(has(slow, 'pairing.catchingUpSlow'));
-	const stopping = render({ view: 'stopping', reachedPhase: 'joining', authorityName: 'N' });
+	const stopping = render({ view: 'stopping', reachedPhase: 'joining', networkName: 'N' });
 	assert.match(stopping, /<button type="button" class="pr-text-button" disabled="">Stop pairing<\/button>/);
-	const unnamedAuthority = render({ view: 'joining', reachedPhase: 'connecting', authorityName: '' });
+	const unnamedAuthority = render({ view: 'joining', reachedPhase: 'connecting', networkName: '' });
 	assert.doesNotMatch(unnamedAuthority, /Joining \{\{|Joining <\/h2>/);
 });
 
@@ -338,7 +367,7 @@ test('R4 bearer: the code appears only as the field value, and never after a con
 		assert.equal(count(render({ view: 'failed', failure: reason, code: SENTINEL })), 0, `${reason} shows no code`);
 	}
 	for (const view of ['verifying', 'joining', 'stopping']) {
-		assert.equal(count(render({ view, code: SENTINEL, reachedPhase: 'joining', authorityName: 'N' })), 0, view);
+		assert.equal(count(render({ view, code: SENTINEL, reachedPhase: 'joining', networkName: 'N' })), 0, view);
 	}
 	for (const h of [idle, render({ view: 'failed', failure: 'malformed', code: SENTINEL })]) {
 		assert.doesNotMatch(h, new RegExp(`(title|aria-label)="[^"]*${SENTINEL}`));

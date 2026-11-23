@@ -308,7 +308,7 @@ export default function ElectionDetailsScreen() {
 
 				<View style={styles.detail}>
 					<ThemedText type="defaultSemiBold">{t("keyholderPolicy")}: </ThemedText>
-					<ThemedText>{current.keyholderThreshold} of {current.keyholders.length}</ThemedText>
+					<ThemedText>{t("keyholderPolicyValue", { threshold: current.keyholderThreshold, count: current.keyholders.length })}</ThemedText>
 				</View>
 
 				{revisionSignature ? (
@@ -407,7 +407,7 @@ export default function ElectionDetailsScreen() {
 
 					<View style={styles.detail}>
 						<ThemedText type="defaultSemiBold">{t("keyholderPolicy")}: </ThemedText>
-						<ThemedText>{proposed!.proposed.keyholderThreshold} of {proposed!.proposed.keyholders.length}</ThemedText>
+						<ThemedText>{t("keyholderPolicyValue", { threshold: proposed!.proposed.keyholderThreshold, count: proposed!.proposed.keyholders.length })}</ThemedText>
 					</View>
 
 					{/* Signing rows — one per proposed keyholder */}

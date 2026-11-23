@@ -30,7 +30,7 @@ export function KeyholderDkgOverdueNotice({ labels, hours }: KeyholderDkgOverdue
 		<View testID="keyholder-dkg-overdue-notice" style={localStyles.row}>
 			<FontAwesome6 name="triangle-exclamation" size={16} color={colors.warning} />
 			<View style={localStyles.column}>
-				<ThemedText testID="keyholder-dkg-overdue-names" type="small" style={{ color: colors.warning }}>
+				<ThemedText testID="keyholder-dkg-overdue-names" type="small" style={{ color: colors.warningText }}>
 					{t("dkgOverdueNotice", { hours, names: labels.join(", ") })}
 				</ThemedText>
 				<ThemedText testID="keyholder-dkg-overdue-help" type="small" style={{ color: colors.textSecondary }}>

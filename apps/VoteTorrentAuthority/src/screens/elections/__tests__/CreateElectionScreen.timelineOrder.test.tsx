@@ -329,6 +329,17 @@ describe("CreateElectionScreen — authority header", () => {
     expect(JSON.stringify(tree.toJSON())).not.toContain("Test Network");
   });
 
+  // todo 2026-11-23-authority-hardcoded-english-threshold-loading: the pending state was a literal "Loading...".
+  it("shows the translated loading copy while the authority lookup is pending", async () => {
+    mockNetworkEngine.getAuthoritiesByName.mockReturnValueOnce(new Promise(() => {}));
+    let tree!: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(<CreateElectionScreen />);
+    });
+    expect(authorityText(tree)).toBe("loading");
+    expect(JSON.stringify(tree.toJSON())).not.toContain("Loading...");
+  });
+
   it("falls back to the authority id when the authority lookup fails", async () => {
     mockNetworkEngine.getAuthoritiesByName.mockRejectedValueOnce(new Error("offline"));
     let tree!: renderer.ReactTestRenderer;

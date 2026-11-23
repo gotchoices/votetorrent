@@ -280,13 +280,13 @@ export default function AssociationRequestApprovalScreen() {
 									style={[
 										styles.cardSurface,
 										localStyles.candidateRow,
-										{ backgroundColor: colors.card, borderColor: selected ? colors.accent : colors.border },
+										{ backgroundColor: colors.card, borderColor: selected ? colors.primary : colors.border },
 									]}
 								>
 									<FontAwesome6
 										name={selected ? "circle-dot" : "circle"}
 										size={18}
-										color={selected ? colors.accent : colors.textSecondary}
+										color={selected ? colors.primary : colors.textSecondary}
 									/>
 									<View style={localStyles.grow}>
 										<ThemedText type="default">

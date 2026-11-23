@@ -468,9 +468,11 @@ export const COPY = Object.freeze({
 	// human sentence: what is missing, and enough of why that a reader who
 	// stops here is not misled.
 	// `.detail` renders only after a reader opens the details toggle. It
-	// carries the technical reason and the specification citation, which is
-	// why a schema table name may appear in a `.detail` value and appears in
-	// no `.sentence` and no `.label`.
+	// carries the technical reason, which is why a schema table name may
+	// appear in a `.detail` value and appears in no `.sentence` and no
+	// `.label`. The specification citation for each detail is the comment
+	// beside it, never the value: a visitor cannot open the repo, so a path
+	// like doc/election.md:97 on the page is noise (2026-11-23).
 	//
 	// The internal enumeration these gaps come from letters them A through
 	// G. No letter appears in any key name or any value in this table --
@@ -479,16 +481,20 @@ export const COPY = Object.freeze({
 	// the source, not information.
 	'public.gap.receipt.sentence':
 		"There's no way on this page to confirm your own ballot was received — that check depends on a private receipt only you hold.",
+	// Spec: doc/election.md:97.
 	'public.gap.receipt.detail':
-		'The vote nonce is held privately by the voter; nothing on the network can be checked against it (doc/election.md:97).',
+		'The vote nonce is held privately by the voter; nothing on the network can be checked against it.',
 	'public.gap.merkle.sentence': "The cryptographic record tying votes together isn't published here.",
-	'public.gap.merkle.detail': 'No Block or MerkleNode table exists yet (doc/election.md:114).',
+	// Spec: doc/election.md:114.
+	'public.gap.merkle.detail': 'No Block or MerkleNode table exists yet.',
 	'public.gap.validation.sentence': 'No validation report or error-margin figure is available here.',
+	// Spec: doc/election.md:134-153.
 	'public.gap.validation.detail':
-		'No Validation table exists, and no error-margin statistic is recorded anywhere (doc/election.md:134-153).',
+		'No Validation table exists, and no error-margin statistic is recorded anywhere.',
 	'public.gap.certification.sentence': "No signed certification of this election's outcome is available here.",
+	// Spec: doc/election.md:155-159.
 	'public.gap.certification.detail':
-		'No Certification table exists; each authority is meant to publish one, but nothing stores it (doc/election.md:155-159).',
+		'No Certification table exists; each authority is meant to publish one, but nothing stores it.',
 
 	// Key release -- the one entry in the outcome group that is FILLED
 	// rather than gapped, and the only fact on this page carrying live data
@@ -518,8 +524,9 @@ export const COPY = Object.freeze({
 	// the call site to pass the read's `.total` reintroduces the "0 of 0"
 	// defect, and this comment is what stands between them and it.
 	'public.fact.keyrelease.sentence': '{{released}} of {{total}} keyholders have released their keys.',
+	// Spec: doc/election.md:118-122.
 	'public.fact.keyrelease.detail':
-		"This counts keyholders whose key-release task has completed; it doesn't show which keyholder released a key or when (doc/election.md:118-122).",
+		"This counts keyholders whose key-release task has completed; it doesn't show which keyholder released a key or when.",
 	// Fail-closed disclosure for the aggregate above, bound by name at its
 	// render site (it cannot be the entry's `emptyKey`: that field is null
 	// on this fact and `facts.js` is a landed file, so this key sits outside
@@ -739,10 +746,8 @@ export const COPY = Object.freeze({
 	// `marks.announceMany`, following this table's separate singular and plural
 	// key convention (`panelFrame.sitePill` / `panelFrame.sitesPill`).
 	'pairing.title': 'Pair this browser',
-	// Hidden for this release with the Scan QR code button:
-	// 'pairing.intro':
-	// 	"In the Authority app, open Paired browsers and choose Pair a browser. Paste the code it shows, or scan its QR code with this computer's camera.",
-	'pairing.intro': 'In the Authority app, open Paired browsers and choose Pair a browser. Paste the code it shows.',
+	'pairing.intro':
+		"In the Authority app, open Paired browsers and choose Pair a browser. Paste the code it shows, or scan its QR code with this computer's camera.",
 	'pairing.cta': 'Pair this browser',
 	'pairing.scanCta': 'Scan QR code',
 	'pairing.fieldLabel': 'Pairing code',
@@ -753,7 +758,8 @@ export const COPY = Object.freeze({
 		'Pair this browser from the Authority app to follow a network live. Nothing is shown here until you do.',
 	'pairing.verifying.heading': 'Checking the code',
 	'pairing.verifying.body': 'Making sure the code is genuine and still valid.',
-	'pairing.joining.heading': 'Joining {{authorityName}}',
+	// The pairing code names the network, not the Authority (2026-11-23 todo): the heading says so.
+	'pairing.joining.heading': 'Joining the {{networkName}} network',
 	'pairing.joining.body': 'This can take a minute or two the first time.',
 	'pairing.catchingUpSlow':
 		'Still catching up. The data is arriving; you can leave this page open.',
@@ -769,10 +775,8 @@ export const COPY = Object.freeze({
 	'pairing.action.tryAnother': 'Try another code',
 	'pairing.action.retry': 'Retry pairing',
 	'pairing.failed.malformed.heading': "That isn't a pairing code.",
-	// Hidden for this release with the Scan QR code button:
-	// 'pairing.failed.malformed.body':
-	// 	'Paste the whole code from the Authority app, or scan its QR code.',
-	'pairing.failed.malformed.body': 'Paste the whole code from the Authority app.',
+	'pairing.failed.malformed.body':
+		'Paste the whole code from the Authority app, or scan its QR code.',
 	'pairing.failed.old-style.heading': 'This is an old sign-in code.',
 	'pairing.failed.old-style.body':
 		'This dashboard now pairs instead. In the Authority app, open Paired browsers and make a new code.',
@@ -879,6 +883,14 @@ export const COPY = Object.freeze({
 	'scanner.unavailable': "The scanner couldn't start. Paste the code instead.",
 	'forget.failed':
 		"Couldn't forget this network. Close any other tab that has it open, then try again.",
+	// --- Wipe-failed banner (2026-11-23 todo) --------------------------------
+	//
+	// The network unpaired this browser and the wipe of its local copy could not finish. The
+	// officer never asked to forget anything, so the banner no longer borrows `forget.failed`
+	// and `forget.cta`: it says what happened and offers to finish deleting the local copy.
+	'wipe.failed':
+		"This browser was unpaired, but its local copy of this network's data couldn't be deleted. Close any other tab that has this network open, then try again.",
+	'wipe.retry': 'Delete the local copy',
 });
 
 /**

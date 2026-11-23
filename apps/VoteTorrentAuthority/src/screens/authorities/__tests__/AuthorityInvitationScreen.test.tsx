@@ -379,6 +379,22 @@ describe('AuthorityInvitationScreen - accept mode resolves the slot from the pas
     mockGetAuthorityInvite.mockResolvedValue({ invite: { name: 'Invitee' } });
   });
 
+  // todo 2026-11-23-authority-invitation-accept-dead-controls: the Figma frame's Create User chip, user card and
+  // SIGN button had empty handlers. Accept / Reject in the footer is the only answer, so none of them render
+  // and no control on the accept screen is a no-op.
+  it('accept mode has no Create User, user card or SIGN control, and no pressable with an empty handler', async () => {
+    const tr = await render();
+    const json = JSON.stringify(tr.toJSON());
+    expect(json).not.toContain('createUser');
+    expect(json).not.toContain('"sign"');
+    expect(tr.root.findAll((n) => n.props.title === 'sign')).toHaveLength(0);
+    const EMPTY = /^\s*(function\s*\w*\s*\(\)\s*\{\s*\}|\(\)\s*=>\s*\{\s*\})\s*$/;
+    const dead = tr.root.findAll((n) => typeof n.props.onPress === 'function' && EMPTY.test(String(n.props.onPress)));
+    expect(dead).toHaveLength(0);
+    expect(buttonByTitle(tr, 'accept')).toBeDefined();
+    expect(buttonByTitle(tr, 'reject')).toBeDefined();
+  });
+
   it('resolves by (InviteKey, au), loads the invite from the resolved Cid, and accept signs with it', async () => {
     const tr = await render();
     expect(mockResolveInviteSlot).toHaveBeenCalledWith(expect.any(String), 'au');

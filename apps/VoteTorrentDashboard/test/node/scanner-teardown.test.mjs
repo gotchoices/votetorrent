@@ -300,6 +300,7 @@ function setup(opts = {}) {
 		/** @param {number} w @param {number} h */
 		createCanvas(w, h) {
 			canvasCalls.push(['create', w, h]);
+			if (opts.createCanvas) return opts.createCanvas(w, h);
 			return {
 				width: w,
 				height: h,
@@ -728,3 +729,94 @@ test('S15 source scans: lazy decoder only, dialog wiring, no storage or payload 
 	assert.ok(videoRule, 'sanity: the video rule exists');
 	assert.doesNotMatch(videoRule[0], /transform/);
 });
+
+// --- scale ladder (2026-11-04 todo: Scan QR cannot read a real pairing QR) -----------------------
+//
+// jsQR misreads a dense code at some fractional module sizes (66-25: the N=177 code fails at 3.46,
+// 4.32 and 4.76 px/module, and a camera frame is always resampled). Each decode attempt therefore
+// draws the frame at the next scale of SCAN_SCALE_LADDER; one of them lands the code on a module size
+// jsQR reads.
+
+/** Bilinear resize of an RGBA frame (stands in for the canvas's smoothed drawImage). */
+function resizeRgba(/** @type {Uint8ClampedArray} */ rgba, /** @type {number} */ w, /** @type {number} */ h, /** @type {number} */ W, /** @type {number} */ H) {
+	if (W === w && H === h) return rgba;
+	const out = new Uint8ClampedArray(W * H * 4);
+	const fx = w / W;
+	const fy = h / H;
+	for (let y = 0; y < H; y++) {
+		const sy = Math.min(h - 1.001, Math.max(0, (y + 0.5) * fy - 0.5));
+		const y0 = Math.floor(sy);
+		const dy = sy - y0;
+		for (let x = 0; x < W; x++) {
+			const sx = Math.min(w - 1.001, Math.max(0, (x + 0.5) * fx - 0.5));
+			const x0 = Math.floor(sx);
+			const dx = sx - x0;
+			const i00 = (y0 * w + x0) * 4;
+			const i01 = i00 + 4;
+			const i10 = i00 + w * 4;
+			const i11 = i10 + 4;
+			const o = (y * W + x) * 4;
+			for (let k = 0; k < 3; k++) {
+				out[o + k] = rgba[i00 + k] * (1 - dx) * (1 - dy) + rgba[i01 + k] * dx * (1 - dy) + rgba[i10 + k] * (1 - dx) * dy + rgba[i11 + k] * dx * dy;
+			}
+			out[o + 3] = 255;
+		}
+	}
+	return out;
+}
+
+test('S16 scale ladder: successive decodes draw the whole frame at each SCAN_SCALE_LADDER scale in turn, starting at 1', async () => {
+	assert.ok(Array.isArray(Q.SCAN_SCALE_LADDER) && Q.SCAN_SCALE_LADDER.length >= 2, 'a ladder exists');
+	assert.equal(Q.SCAN_SCALE_LADDER[0], 1, 'the first attempt is the frame as the camera gives it');
+	const ladder = Q.SCAN_SCALE_LADDER;
+	const { env } = await scanning({ decode: new Array(ladder.length + 1).fill(null) });
+	for (let i = 0; i <= ladder.length; i++) {
+		env.runFrames();
+		await flush();
+		env.advance(Q.SCAN_INTERVAL_MS);
+	}
+	const expected = [...ladder, ladder[0]].map((s) => ({ width: Math.round(1280 * s), height: Math.round(720 * s) }));
+	assert.deepEqual(env.decodeInputs, expected);
+	const draws = env.canvasCalls.filter((/** @type {any[]} */ c) => c[0] === 'drawImage');
+	assert.deepEqual(
+		draws.map((/** @type {any[]} */ c) => [c[4], c[5]]),
+		expected.map((e) => [e.width, e.height]),
+		'the source video is drawn whole, scaled into the canvas',
+	);
+});
+
+test('S17 a resampled N=177 pairing-size frame (3.46 px/module, the 66-25 rung) is found by the real controller and the real decoder', async () => {
+	const fixture = await import('../browser/qr-decode-fixture.mjs');
+	const payload = fixture.buildFixturePayload();
+	const { n, modules } = fixture.encodeQrMatrix(payload);
+	const frame = fixture.renderFrame({ modules, n, variant: 'resampled' });
+	// Control: the frame as the camera gives it does not decode (the defect this row is about).
+	const plain = Q.adaptDecoderModule(await import('jsqr'));
+	assert.equal(await plain({ data: frame.rgba, width: frame.width, height: frame.height }), null, 'control: jsQR alone misses the frame at scale 1');
+
+	const createCanvas = (/** @type {number} */ w, /** @type {number} */ h) => ({
+		width: w,
+		height: h,
+		getContext: () => {
+			/** @type {Uint8ClampedArray | null} */
+			let pixels = null;
+			return {
+				drawImage(/** @type {any} */ _src, /** @type {number} */ _x, /** @type {number} */ _y, /** @type {number} */ ww, /** @type {number} */ hh) {
+					pixels = resizeRgba(frame.rgba, frame.width, frame.height, ww, hh);
+				},
+				getImageData(/** @type {number} */ _x, /** @type {number} */ _y, /** @type {number} */ ww, /** @type {number} */ hh) {
+					return { data: /** @type {Uint8ClampedArray} */ (pixels), width: ww, height: hh };
+				},
+			};
+		},
+	});
+	const { env } = await scanning({ createCanvas, loadDecoder: async () => plain });
+	for (let i = 0; i < 12 && env.found.length === 0; i++) {
+		env.runFrames();
+		await flush();
+		env.advance(Q.SCAN_INTERVAL_MS);
+	}
+	assert.equal(env.found.length, 1, 'found within the ladder');
+	assert.equal(env.found[0] === payload, true, 'the decoded text is the fixture payload');
+});
+

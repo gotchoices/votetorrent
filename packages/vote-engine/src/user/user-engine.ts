@@ -70,8 +70,9 @@ export class UserEngine implements IUserEngine {
    * - `sign` callback provided → signed subsequent-key path (UKEY-03 / D-14).
    *   The engine computes a SQL `Digest(userId, newPubKey, keyType, expirationCanon)`,
    *   converts to bytes via the shared `digestToBytes`, calls the callback with
-   *   those bytes, then binds `context.UserKey = existing active pubkey` (NOT the
-   *   new key — RESEARCH §Pitfall 5) and `context.Signature = real signature` so
+   *   those bytes, then binds `context.UserKey = the signer's key` (the returned
+   *   `signature.signerKey`, an existing key, NOT the new key — RESEARCH §Pitfall 5)
+   *   and `context.Signature = real signature` so
    *   `UserKey.SignatureValid`'s real branch (999.1 R-02/D-11) verifies it via the
    *   shared `SignatureValid` UDF.
    *
@@ -87,9 +88,13 @@ export class UserEngine implements IUserEngine {
   async addKey (key: UserKey, sign?: (digest: Uint8Array) => Promise<Signature>): Promise<void> {
     this.requireCtx('addKey')
     const tid = await allocateTid(this.ctx!.db, 'user')
-    // EXISTING active pubkey — bound to context.UserKey in BOTH paths.
-    // Per RESEARCH §Pitfall 5: this MUST be the EXISTING key, never key.key.
-    const signerKey = this.user.activeKeys?.[0]?.key ?? null
+    // EXISTING pubkey bound to context.UserKey in BOTH paths. Per RESEARCH §Pitfall 5 this MUST be
+    // an existing key, never key.key. Unsigned path: the snapshot's first active key. Signed path:
+    // the key that actually produced the signature (`signature.signerKey`, below), the same rule
+    // revokeKey follows. A user can hold several active keys in any order (a founder lists the
+    // recovery key first), so activeKeys[0] is not necessarily the signer: binding it failed
+    // SignatureValid on every Add Key signed by the device key (62 session 1, observation 2).
+    let signerKey = this.user.activeKeys?.[0]?.key ?? null
 
     let boundSignature: string | null = null
     let evtSignature: string | null = null
@@ -127,6 +132,12 @@ export class UserEngine implements IUserEngine {
 
       const digestBytes: Uint8Array = digestToBytes(digestRow.d)
       const signature = await sign(digestBytes)
+      signerKey = signature.signerKey ?? signerKey
+      if (signerKey === key.key) {
+        throw new Error(
+          'UserEngine.addKey: the existing active key cannot sign its own re-insertion (T-21-07-01)'
+        )
+      }
       boundSignature = signature.signature
       evtSignature = signature.signature
     }
@@ -158,9 +169,10 @@ export class UserEngine implements IUserEngine {
           keyType: key.type,
           keyValue: key.key,
           expiration: toCanonicalDatetime(key.expiration),
-          // context.UserKey is ALWAYS the EXISTING active pubkey (never key.key).
+          // context.UserKey is ALWAYS an EXISTING pubkey (never key.key).
           // When sign is absent: signerKey may be null (first-key path).
-          // When sign is present: signerKey is the existing authorized signer (guard above).
+          // When sign is present: signerKey is the key that signed (guards above); the
+          // schema's InsertValid still requires it to be a registered, unexpired key of this user.
           userKey: signerKey,
           // Without sign callback: null (no-callback bootstrap path).
           // With sign callback: real secp256k1 hex signature from the existing active key.

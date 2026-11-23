@@ -127,6 +127,10 @@ const resources = {
 				'Still creating the network on this phone. Keep this screen open; on some phones this takes a few minutes.',
 			networkCreateUnconfirmed:
 				'Could not confirm whether the network was created. It may still be finishing — check your networks list before creating it again, so you do not create it twice.',
+			networkCreateDuplicateInFlight:
+				'A network with this name and primary authority domain is still being created on this phone. Wait for it to finish, then check your networks list.',
+			networkCreateDuplicateConfirm:
+				'Your networks list already has a network with this name and primary authority domain. Press Create again only if you mean to create a second one.',
 			errRelayRequired:
 				'Add at least one relay address under Relays before creating the network.',
 			errRelayInvalid:
@@ -325,6 +329,9 @@ const resources = {
 			signingKeyProvisioningNoRecoveryHeading: 'This device no longer has a screen lock',
 			signingKeyProvisioningNoRecoveryBody:
 				'Both your signing key and its recovery key were protected by your device\'s screen lock, which has been removed. They cannot be recovered on this device — ask an officer to invite this device again.',
+			signingKeyProvisioningIdentityUnrecoverableHeading: "This device can't sign for you any more",
+			signingKeyProvisioningIdentityUnrecoverableBody:
+				"The signing key on this device no longer matches your account on this network, and the recovery key was never registered, so the key can't be replaced here and Secure Signing setup can't finish. Ask an officer to invite this device again.",
 			signingKeyProvisioningRecoveryUnsupportedOsHeading: "Recovery isn't available on this Android version",
 			signingKeyProvisioningRecoveryUnsupportedOsBody:
 				"Replacing a signing key requires Android 11 or newer. This device runs an older version, so its signing key can't be replaced here — ask an officer to invite this device again.",
@@ -384,6 +391,8 @@ const resources = {
 			tags: 'Tags',
 			timeline: 'Timeline',
 			keyholderThreshold: 'Keyholder Threshold',
+			// The keyholder policy value on Election Details: how many of the keyholders must release a share.
+			keyholderPolicyValue: '{{threshold}} of {{count}}',
 			keyholderPolicy: 'Keyholder Policy',
 			official: 'Official',
 			adhoc: 'Ad-hoc',
@@ -510,7 +519,7 @@ const resources = {
 			// Slug fallback: FrameN per plan contingency (semantic rename deferred — see 07-05-SUMMARY)
 			screenScaffoldsDebugTitle: 'Onboarding Debug',
 			screenScaffoldsDebugIntro:
-				'Direct entry points for the six onboarding screens. Temporary dev route per D-12; replaced by real callers in phases 8–10.',
+				'Direct entry points for the six onboarding screens. A temporary route for development.',
 			// Phase 8 gap-closure 08-07 — interim accept/send-mode invitation entries
 			debugAdministratorInvitationAccept: 'Administrator Invitation (Accept)',
 			debugAuthorityInvitationSend: 'Authority Invitation (Send)',
@@ -955,11 +964,8 @@ const resources = {
 			dashboardPairingWaitingBody: "An owner's Authority app must be open and online to make the code. Keep it open.",
 			dashboardPairingCancelButton: 'Cancel pairing request',
 			dashboardPairingReadyHeading: 'Pairing code ready',
-			// Hidden for this release with the QR (the dashboard cannot scan it):
-			// dashboardPairingReadyBody:
-			// 	"Scan this QR code with the browser's camera, or copy the code and paste it there. It works once and expires in {{minutes}} minutes.",
 			dashboardPairingReadyBody:
-				"Copy the code and paste it into the browser. It works once and expires in {{minutes}} minutes.",
+				"Scan this QR code with the browser's camera, or copy the code and paste it there. It works once and expires in {{minutes}} minutes.",
 			dashboardPairingCountdown: 'Expires in {{remaining}}',
 			dashboardPairingQrHint: 'Tap the QR code to enlarge it',
 			dashboardPairingQrTileLabel: 'Pairing QR code, tap to enlarge',
@@ -1379,7 +1385,12 @@ const resources = {
 			resultsNoElectionKey: 'The keyholders have not finished generating the election key yet.',
 			resultsReleaseFrom: 'Keyholders can release their shares from {{date}}.',
 			resultsUnavailableTitle: 'The results could not be computed',
-			resultsUnavailableReason: 'Reason: {{reason}}',
+			resultsUnavailableKeyMismatch: "The released key shares don't match this election's key, so the votes can't be decrypted.",
+			resultsUnavailableKeyNotRebuilt: 'The election key could not be rebuilt from the key shares this device has received.',
+			resultsUnavailableElectionIncomplete: 'This device does not have the current version of the election yet. Sync, then tap Refresh.',
+			resultsUnavailableVoteDataFailed: 'Some of the vote data on this device did not pass its checks, so it cannot be counted.',
+			resultsUnavailableReadFailed: 'This device could not read the election data. Tap Refresh to try again.',
+			resultsUnavailableGeneral: 'The votes cannot be counted on this device right now.',
 			resultsValidVotes: 'Valid votes: {{count}}',
 			resultsBlocks: 'Vote blocks: {{count}}',
 			resultsInvalidVotes: 'Invalid votes (not counted): {{count}}',
@@ -1606,6 +1617,10 @@ const resources = {
 				'Todavía se está creando la red en este teléfono. Mantenga esta pantalla abierta; en algunos teléfonos tarda unos minutos.',
 			networkCreateUnconfirmed:
 				'No se pudo confirmar si la red fue creada. Puede que aún se esté completando: revise su lista de redes antes de volver a crearla, para no crearla dos veces.',
+			networkCreateDuplicateInFlight:
+				'Todavía se está creando en este teléfono una red con este nombre y dominio de autoridad principal. Espere a que termine y luego revise su lista de redes.',
+			networkCreateDuplicateConfirm:
+				'Su lista de redes ya tiene una red con este nombre y dominio de autoridad principal. Pulse Crear otra vez solo si quiere crear una segunda.',
 			errRelayRequired:
 				'Agregue al menos una dirección de relay en Relays antes de crear la red.',
 			errRelayInvalid:
@@ -1794,6 +1809,9 @@ const resources = {
 			signingKeyProvisioningNoRecoveryHeading: 'Este dispositivo ya no tiene bloqueo de pantalla',
 			signingKeyProvisioningNoRecoveryBody:
 				'Tanto tu clave de firma como su clave de recuperación estaban protegidas por el bloqueo de pantalla de tu dispositivo, que fue eliminado. No se pueden recuperar en este dispositivo — pídele a un funcionario que invite a este dispositivo nuevamente.',
+			signingKeyProvisioningIdentityUnrecoverableHeading: 'Este dispositivo ya no puede firmar por ti',
+			signingKeyProvisioningIdentityUnrecoverableBody:
+				'La clave de firma de este dispositivo ya no coincide con tu cuenta en esta red y la clave de recuperación nunca se registró, así que la clave no se puede reemplazar aquí y la configuración de Firma Segura no puede terminar. Pide a un funcionario que vuelva a invitar este dispositivo.',
 			signingKeyProvisioningRecoveryUnsupportedOsHeading: 'La recuperación no está disponible en esta versión de Android',
 			signingKeyProvisioningRecoveryUnsupportedOsBody:
 				'Reemplazar una clave de firma requiere Android 11 o una versión más reciente. Este dispositivo usa una versión anterior, por lo que su clave de firma no se puede reemplazar aquí — pídele a un funcionario que invite a este dispositivo nuevamente.',
@@ -1851,6 +1869,7 @@ const resources = {
 			tags: 'Etiquetas',
 			timeline: 'Cronograma',
 			keyholderThreshold: 'Umbral de Custodios', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			keyholderPolicyValue: '{{threshold}} de {{count}}',
 			keyholderPolicy: 'Política de Custodios', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
 			official: 'Oficial',
 			adhoc: 'Ad-hoc',
@@ -1946,7 +1965,7 @@ const resources = {
 			// Phase 7 onboarding keys (07-05) — Phase 11 plan 11-01 (D-11) — Spanish backfill.
 			screenScaffoldsDebugTitle: 'Depuración de Incorporación', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
 			screenScaffoldsDebugIntro:
-				'Puntos de entrada directos a las seis pantallas de incorporación. Ruta temporal de desarrollo; reemplazada por llamadas reales en las fases 8–10.', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+				'Puntos de entrada directos a las seis pantallas de incorporación. Una ruta temporal para desarrollo.', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
 			// Phase 8 gap-closure 08-07 — interim accept/send-mode invitation entries
 			debugAdministratorInvitationAccept: 'Invitación de administrador (aceptar)',
 			debugAuthorityInvitationSend: 'Invitación de autoridad (enviar)',
@@ -2410,11 +2429,8 @@ const resources = {
 				'La aplicación Authority de un propietario debe estar abierta y en línea para crear el código. Manténgala abierta.',
 			dashboardPairingCancelButton: 'Cancelar solicitud de vinculación',
 			dashboardPairingReadyHeading: 'Código de vinculación listo',
-			// Oculto en esta versión junto con el QR:
-			// dashboardPairingReadyBody:
-			// 	'Escanee este código QR con la cámara del navegador, o copie el código y péguelo allí. Funciona una vez y vence en {{minutes}} minutos.',
 			dashboardPairingReadyBody:
-				'Copie el código y péguelo en el navegador. Funciona una vez y vence en {{minutes}} minutos.',
+				'Escanee este código QR con la cámara del navegador, o copie el código y péguelo allí. Funciona una vez y vence en {{minutes}} minutos.',
 			dashboardPairingCountdown: 'Vence en {{remaining}}',
 			dashboardPairingQrHint: 'Toque el código QR para ampliarlo',
 			dashboardPairingQrTileLabel: 'Código QR de vinculación, toque para ampliarlo',
@@ -2830,7 +2846,12 @@ const resources = {
 			resultsNoElectionKey: 'Los custodios aún no han terminado de generar la clave de la elección.',
 			resultsReleaseFrom: 'Los custodios pueden liberar sus partes desde {{date}}.',
 			resultsUnavailableTitle: 'No se pudieron calcular los resultados',
-			resultsUnavailableReason: 'Motivo: {{reason}}',
+			resultsUnavailableKeyMismatch: 'Las partes de la clave liberadas no coinciden con la clave de esta elección, así que los votos no se pueden descifrar.',
+			resultsUnavailableKeyNotRebuilt: 'No se pudo reconstruir la clave de la elección con las partes de la clave que ha recibido este dispositivo.',
+			resultsUnavailableElectionIncomplete: 'Este dispositivo aún no tiene la versión actual de la elección. Sincroniza y toca Actualizar.',
+			resultsUnavailableVoteDataFailed: 'Parte de los datos de votación de este dispositivo no pasó sus comprobaciones, así que no se puede contar.',
+			resultsUnavailableReadFailed: 'Este dispositivo no pudo leer los datos de la elección. Toca Actualizar para intentarlo de nuevo.',
+			resultsUnavailableGeneral: 'Los votos no se pueden contar en este dispositivo ahora mismo.',
 			resultsValidVotes: 'Votos válidos: {{count}}',
 			resultsBlocks: 'Bloques de votos: {{count}}',
 			resultsInvalidVotes: 'Votos inválidos (no contados): {{count}}',

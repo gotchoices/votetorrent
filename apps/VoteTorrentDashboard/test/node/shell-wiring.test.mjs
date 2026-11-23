@@ -619,6 +619,8 @@ test('S5 every literal copy key in the shell and in shell-live.ts exists, the li
 		'forget.fieldLabel',
 		'forget.cta',
 		'forget.failed',
+		'wipe.failed',
+		'wipe.retry',
 		'shell.openFailed',
 	]) {
 		assert.ok(shellKeys.includes(key), `the shell does not use ${key}`);
@@ -750,6 +752,52 @@ test('S9 the chip, region and Reconnect geometry, the state colours, the narrow 
 	assert.doesNotMatch(SHELL_CSS, /#[0-9a-fA-F]{3,6}\b/);
 });
 
+// S9b (2026-11-23 todo) -- narrow widths. The shell had no side gutter, and the switcher list was
+// anchored to the switcher button with left: 0 and a 260-360px width, so wherever the wrapping
+// actions put the button the open list ran past the viewport (measured in Chromium: right edge
+// 369 at 320/360px wide, 1386 at 1280px). The list now hangs from the top bar's right edge and
+// never exceeds the bar; at 900px and below it spans the bar. The panel grid's 340px column
+// minimum would overflow a phone inside the gutter, so it is capped at the content box.
+
+/** Every S9b matcher over a shell.css and app.css text pair; returns the failed check names. @param {string} shell @param {string} app */
+function narrowChecks(shell, app) {
+	/** @type {string[]} */
+	const failed = [];
+	const check = (/** @type {string} */ name, /** @type {boolean} */ ok) => {
+		if (!ok) failed.push(name);
+	};
+	check('gutter', /padding: var\(--space-md\)/.test(ruleBody(shell, '.sh-layout')));
+	check('bar-anchors-list', /position: relative/.test(ruleBody(shell, '.sh-topbar')));
+	check('switcher-not-anchor', !/position: relative/.test(ruleBody(shell, '.sh-switcher')));
+	const list = ruleBody(shell, '.sh-switcher-list');
+	check('list-right-anchored', /\bright: 0/.test(list) && !/\bleft: 0/.test(list));
+	check('list-capped-to-bar', /max-width: min\(360px, 100%\)/.test(list) && /min-width: min\(260px, 100%\)/.test(list));
+	const narrowAt = shell.indexOf('@media (max-width: 900px) {\n\t.sh-switcher-list');
+	const narrow = narrowAt === -1 ? '' : shell.slice(narrowAt, shell.indexOf('\n}\n', narrowAt));
+	check('narrow-list-spans-bar', /left: 0/.test(narrow) && /max-width: none/.test(narrow));
+	const grid = ruleBody(app.replace(/\/\*[\s\S]*?\*\//g, ''), '.panel-grid');
+	check('grid-column-capped', /minmax\(min\(340px, 100%\), 1fr\)/.test(grid));
+	return failed;
+}
+
+const APP_CSS = readFileSync(dashboardSrc('app.css'), 'utf8');
+
+test('S9b control: the narrow-width matchers pass the shipped CSS shape and each bites on the old rule', () => {
+	assert.deepEqual(narrowChecks(SHELL_CSS, APP_CSS), [], 'the shipped CSS fails a narrow-width matcher');
+	const oldList = '.sh-switcher-list {\n\tposition: absolute;\n\tleft: 0;\n\tmin-width: 260px;\n\tmax-width: 360px;\n}';
+	const planted = narrowChecks(
+		'.sh-layout {\n\tgap: var(--space-md);\n}\n.sh-topbar {\n\tdisplay: flex;\n}\n.sh-switcher {\n\tposition: relative;\n}\n' + oldList,
+		'.panel-grid {\n\tgrid-template-columns: repeat(auto-fill, minmax(340px, 1fr));\n}',
+	);
+	for (const name of ['gutter', 'bar-anchors-list', 'switcher-not-anchor', 'list-right-anchored', 'list-capped-to-bar', 'narrow-list-spans-bar', 'grid-column-capped']) {
+		assert.ok(planted.includes(name), `the ${name} matcher is inert`);
+	}
+});
+
+test('S9b the shell has a 16px gutter, the switcher list stays inside the top bar at every width, and one panel column fits a phone', () => {
+	assert.deepEqual(narrowChecks(SHELL_CSS, APP_CSS), []);
+});
+
 // S10 -- pins kept from the old shell file.
 
 const PANELS_DIR = dashboardSrc('screens', 'panels');
@@ -788,8 +836,11 @@ test('S10 the shell names no unreachable panel state (read-only, the half-circle
 	assert.doesNotMatch(SHELL, RE);
 });
 
-// S11 (66-29, DEFECT-66-26-02) -- the wipe-failed state: the forget.failed banner with ONE Forget
-// action that re-runs the wipe, and no Reconnect. (The plan calls these rows S5; S5 was taken.)
+// S11 (66-29, DEFECT-66-26-02) -- the wipe-failed state: a banner with ONE styled action that
+// re-runs the wipe, and no Reconnect. (The plan calls these rows S5; S5 was taken.) 2026-11-23
+// todo: the banner said "Couldn't forget this network" and offered "Forget this network" when the
+// officer never asked to forget, and its button had no class (browser-default styling). It now
+// carries its own wipe.failed / wipe.retry copy and the shell's sh-error-retry button style.
 
 test('C12 retryWipeOnce: a double click runs ONE wipe and calls onWiped once; a held guard stays held after success; a failure releases it and logs a name only', () => {
 	const r = rowOf('C12');
@@ -852,7 +903,7 @@ const WIPE_FIXTURE_GOOD = [
 	'\t\t});',
 	'\t}',
 	'<main>{wipeFailedReason !== null ? (',
-	"<div className=\"sh-error-banner\"><p>{t('forget.failed')}</p><button type=\"button\" disabled={wipeRetrying} onClick={() => void handleRetryWipe()}>{t('forget.cta')}</button></div>",
+	"<div className=\"sh-error-banner\"><p>{t('wipe.failed')}</p><button type=\"button\" className=\"sh-error-retry\" disabled={wipeRetrying} onClick={() => void handleRetryWipe()}>{t('wipe.retry')}</button></div>",
 	') : unpairing ? null : null}</main>',
 ].join('\n');
 
@@ -871,12 +922,14 @@ function wipeFailedChecks(code) {
 	const banner = wipeFailedBanner(code);
 	check('b-banner-before-unpairing-null', banner !== null);
 	if (banner !== null) {
-		check('c-forget-failed-copy', banner.includes("<p>{t('forget.failed')}</p>"));
+		check('c-wipe-failed-copy', banner.includes("<p>{t('wipe.failed')}</p>"));
+		check('c-no-forget-copy', !banner.includes("t('forget."));
 		check('c-one-button', (banner.match(/<button\b/g) ?? []).length === 1);
-		check('c-forget-cta-label', banner.includes("{t('forget.cta')}</button>"));
+		check('c-styled-button', /<button type="button" className="sh-error-retry"/.test(banner));
+		check('c-wipe-retry-label', /\{t\('wipe\.retry'\)\}\s*<\/button>/.test(banner));
 		check('c-runs-handleRetryWipe', /onClick=\{\(\) => void handleRetryWipe\(\)\}/.test(banner));
 		check('c-disabled-while-retrying', banner.includes('disabled={wipeRetrying}'));
-		check('d-no-reconnect', !/handleRetryOpen|status\.reconnect|sh-error-retry/.test(banner));
+		check('d-no-reconnect', !/handleRetryOpen|status\.reconnect/.test(banner));
 	}
 	const handler = functionBody(code, 'handleRetryWipe');
 	check('c-handler-exists', handler !== null);
@@ -897,12 +950,15 @@ test('S11 control: every wipe-failed matcher passes a synthetic good fixture and
 	assert.deepEqual(wipeFailedChecks(WIPE_FIXTURE_GOOD), []);
 	const planted = {
 		'a-subscribed-after-onForgotten': WIPE_FIXTURE_GOOD.replace('boot.onForgotten(() => {});', '').replace("useEffect(() => {\n", "useEffect(() => {\nboot.onForgotten(x);\n").replace('const offWipeFailed = boot.onWipeFailed(', 'const offWipeFailed = boot.onWipeFailedX(').replace("useEffect(() => {\n", "useEffect(() => {\nboot.onWipeFailed(y);\n"),
-		'd-no-reconnect': WIPE_FIXTURE_GOOD.replace("{t('forget.cta')}</button></div>", "{t('forget.cta')}</button><span className=\"sh-error-retry\" /></div>"),
+		'd-no-reconnect': WIPE_FIXTURE_GOOD.replace("{t('wipe.retry')}</button></div>", "{t('wipe.retry')}</button><span>{t('status.reconnect')}</span></div>"),
+		'c-no-forget-copy': WIPE_FIXTURE_GOOD.replace("{t('wipe.retry')}</button>", "{t('forget.cta')}</button>"),
+		'c-wipe-retry-label': WIPE_FIXTURE_GOOD.replace("{t('wipe.retry')}</button>", "{t('forget.cta')}</button>"),
+		'c-styled-button': WIPE_FIXTURE_GOOD.replace(' className=\"sh-error-retry\" disabled', ' disabled'),
 		'c-one-button': WIPE_FIXTURE_GOOD.replace('</button></div>', '</button><button type="button" onClick={handleRetryOpen}>x</button></div>'),
 		'1-only-in-banner': WIPE_FIXTURE_GOOD.replace('<main>', '<aside onClick={() => void handleRetryWipe()} /><main>'),
 		'2-ref-guard': WIPE_FIXTURE_GOOD.replace('retryWipeOnce(wipeRetryingRef,', 'retryWipeOnce({ current: wipeRetrying },'),
 		'1-hash-from-reporting-boot': WIPE_FIXTURE_GOOD.replace('networkHash: boot.networkHash,', 'networkHash: activeNetworkHash,'),
-		'c-forget-failed-copy': WIPE_FIXTURE_GOOD.replace("<p>{t('forget.failed')}</p>", "<p>{t('shell.openFailed')}</p>"),
+		'c-wipe-failed-copy': WIPE_FIXTURE_GOOD.replace("<p>{t('wipe.failed')}</p>", "<p>{t('forget.failed')}</p>"),
 		'b-banner-before-unpairing-null': WIPE_FIXTURE_GOOD.replace(') : unpairing ? null', ') : bootFailed ? null'),
 	};
 	for (const [name, fixture] of Object.entries(planted)) {
@@ -911,7 +967,7 @@ test('S11 control: every wipe-failed matcher passes a synthetic good fixture and
 	assert.ok(OPEN_FAILED_BANNER.includes("t('shell.openFailed')"));
 });
 
-test('S11 the wipe-failed banner: forget.failed and ONE Forget action that re-runs wipeNetwork for the boot that reported it, then the unpaired notice; no Reconnect', () => {
+test('S11 the wipe-failed banner: wipe.failed and ONE styled Delete-the-local-copy action that re-runs wipeNetwork for the boot that reported it, then the unpaired notice; no Reconnect', () => {
 	assert.deepEqual(wipeFailedChecks(CODE), []);
 	assert.match(CODE, /const wipeRetryingRef = useRef\(false\)/, 'the re-entry guard is a ref');
 });

@@ -284,7 +284,7 @@ describe("DefaultUserScreen", () => {
 	it("U-1 save failure shows errorActionFailedGeneric, not the storage error", async () => {
 		const set = jest.fn(async () => { throw rawErr(); });
 		mockRouteParams = {
-			defaultUser: { name: "D", image: { url: "" } },
+			defaultUser: { name: "D", imageRef: { url: "" } },
 			defaultUserEngine: { set },
 		};
 		const { DefaultUserScreen } = require("../users/DefaultUserScreen");

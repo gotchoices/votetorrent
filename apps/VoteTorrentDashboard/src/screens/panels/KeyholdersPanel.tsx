@@ -27,12 +27,13 @@
  * become, exposure of the share itself. The panel's own name invites that
  * confusion, which is exactly why this comment exists.
  *
- * The empty state here is EXPECTED on every real network today, not an
- * unfinished panel: a `Keyholder` row needs an `Election`, an
- * `ElectionRevision` and an accepted keyholder invite, and no keyholder
- * invite ceremony exists yet (see `authority-admin-queries.js`'s
- * `fetchKeyholders` JSDoc for the full reasoning). Do not "fix" this by
- * inventing a way to populate it.
+ * Rows arrive through the Authority app's keyholder invite: an officer
+ * invites a keyholder (KeyholderInvitationScreen) and the keyholder's accept
+ * writes the `Keyholder` row with its fresh identity
+ * (`keyholder-accept.ts`, through the engine's `respondToInvite`). So the
+ * empty state means no keyholder has accepted for any election on this
+ * network yet. An invite that is still waiting is not a `Keyholder` row and
+ * is not listed here; this panel shows accepted keyholders only.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { PanelComponent } from './types.js';

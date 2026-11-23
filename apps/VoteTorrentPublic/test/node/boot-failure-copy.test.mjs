@@ -147,10 +147,10 @@ test('ElectionShell: each of the three pairs renders under its own one guard, ti
 		["failedKind === 'notOnNetwork'", 'public.election.notOnNetwork'],
 	];
 	for (const [guard, prefix] of pairs) {
-		for (const [part, tag] of [['title', 'h2'], ['body', 'p']]) {
+		for (const [part, open, tag] of [['title', 'h2 className="election-notice__title"', 'h2'], ['body', 'p', 'p']]) {
 			const key = `${prefix}.${part}`;
 			assert.ok(key in COPY, `${key} is not in COPY`);
-			const line = `{${guard} ? <${tag}>{t('${key}')}</${tag}> : null}`;
+			const line = `{${guard} ? <${open}>{t('${key}')}</${tag}> : null}`;
 			assert.ok(SHELL.includes(line), `missing: ${line}`);
 			const mounts = SHELL.split(`t('${key}')`).length - 1;
 			assert.equal(mounts, 1, `${key} mounted ${mounts} times`);
@@ -180,4 +180,25 @@ test('PublicApp: the boot failure kind comes from bootFailureKind of a FAILED re
 	assert.match(APP, /bootFailure: result\.status === PEER_BOOT_STATUS\.FAILED \? bootFailureKind\(result\.subject\) : null,/);
 	assert.match(APP, /const \{ peerFeed, bootFailure \} = usePeerFeedStatus\(/);
 	assert.match(APP, /bootFailure=\{bootFailure\}/);
+});
+
+// The failure and still-looking titles were bare h2s, which render at the
+// browser default (larger than the election title). They carry one class whose
+// rule sits below .election-title (2026-11-23 todo).
+test('ElectionShell: no guarded election notice title is a bare h2, and .election-notice__title is smaller than .election-title', () => {
+	const BARE = /\? <h2>\{t\('public\.election\./;
+	assert.doesNotMatch(SHELL, BARE, 'a notice title is a bare h2, which renders at the browser default size');
+	assert.match("{stillLooking ? <h2>{t('public.election.fetching.title')}</h2> : null}", BARE, 'control: the bare-h2 matcher fires');
+	const css = readFileSync(publicSrc('app.css'), 'utf8');
+	/** @param {string} cls @returns {string | null} */
+	const fontSizeToken = (cls) => {
+		const m = new RegExp(`(?:^|\\n)\\.${cls}\\s*\\{[^}]*font-size:\\s*var\\(--font-([a-z]+)-size\\)`).exec(css);
+		return m ? m[1] : null;
+	};
+	const ORDER = ['label', 'body', 'heading', 'display'];
+	const title = fontSizeToken('election-title');
+	const notice = fontSizeToken('election-notice__title');
+	assert.ok(title !== null && notice !== null, `font-size tokens: title=${title}, notice=${notice}`);
+	assert.ok(ORDER.indexOf(notice) < ORDER.indexOf(title), `.election-notice__title (${notice}) is not smaller than .election-title (${title})`);
+	assert.equal(fontSizeToken.call(null, 'nope'), null, 'control: an absent rule reads as null');
 });

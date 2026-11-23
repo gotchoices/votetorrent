@@ -43,6 +43,7 @@ export type DeviceSigningErrorClass =
 	| 'no-device-credential' // D-18 terminal — no recovery possible
 	| 'recovery-key-invalidated' // 49-14 follow-up — the D-16 FAIL signal, inline-rendered
 	| 'recovery-key-not-registered' // 49-14 follow-up — DeleteValid precondition unmet, inline-rendered
+	| 'signing-identity-unrecoverable' // terminal — neither the recovery key nor the signing key can sign
 	| 'recovery-unsupported-os'; // 49-19, D-26a rescope terminal state — recovery is supported on
 	// API 30+ and explicitly unsupported below it; sibling in shape to 'no-device-credential'
 	// (both terminal, both absent from the copy map), distinct in cause (OS version, not device
@@ -87,6 +88,12 @@ export const CODE_TO_CLASS: Record<string, DeviceSigningErrorClass> = {
 	// an auth-per-use key (measured n=2 on a Redmi 8 / API 29 — see
 	// .planning/todos/pending/2026-08-19-d26-keyguard-fallback-cannot-authorize-per-use-key.md).
 	RECOVERY_UNSUPPORTED_OS: 'recovery-unsupported-os',
+	// JS-thrown by ProvisionSigningKeyScreen.tsx's handleRecovery, never a native code: the recovery
+	// key was never registered on the network AND this device's signing key cannot sign for the user
+	// either (invalidated, absent, or no longer the registered key). Nothing on the device can sign,
+	// so neither recovery nor Secure Signing setup can succeed. A terminal state like
+	// recovery-unsupported-os: absent from the copy map, not a navigation class.
+	SIGNING_IDENTITY_UNRECOVERABLE: 'signing-identity-unrecoverable',
 };
 
 /**

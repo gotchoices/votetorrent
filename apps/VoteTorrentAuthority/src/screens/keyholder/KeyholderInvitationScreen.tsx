@@ -454,7 +454,7 @@ function RadioRow({
 			onPress={onPress}
 			style={localStyles.option}
 		>
-			<FontAwesome6 name={selected ? "circle-dot" : "circle"} size={20} color={selected ? colors.accent : colors.textSecondary} />
+			<FontAwesome6 name={selected ? "circle-dot" : "circle"} size={20} color={selected ? colors.primary : colors.textSecondary} />
 			<ThemedText type="default" style={localStyles.optionLabel}>
 				{label}
 			</ThemedText>

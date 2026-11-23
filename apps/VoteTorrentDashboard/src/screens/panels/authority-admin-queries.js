@@ -249,11 +249,11 @@ export async function fetchAdministrationOfficers(db) {
  * would add one. Naming who holds a key share is a governance fact about the
  * election; it is not, and must never become, exposure of the share itself.
  *
- * A populated result is UNREACHABLE in Phase 50: a `Keyholder` row needs an
- * `Election`, an `ElectionRevision` and an accepted `k` (keyholder) invite,
- * and the keyholder invite ceremony is out of scope (D-01). The empty state
- * this resolves in every real Phase 50 snapshot is the true state, not a
- * stub waiting to be filled in.
+ * A `Keyholder` row needs an `Election`, an `ElectionRevision` and an
+ * accepted `k` (keyholder) invite. The Authority app issues that invite
+ * (KeyholderInvitationScreen) and the keyholder's accept writes the row
+ * (`keyholder-accept.ts`), so an empty result means nobody has accepted yet.
+ * A waiting invite has no `Keyholder` row and is not returned.
  *
  * @param {import('@quereus/quereus').Database | null} db
  * @returns {Promise<KeyholderRow[]>}

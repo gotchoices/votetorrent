@@ -162,6 +162,8 @@ const EXPECTED_SNAPSHOT: Record<string, string> = {
 	RECOVERY_KEY_INVALIDATED: 'recovery-key-invalidated',
 	RECOVERY_KEY_NOT_REGISTERED: 'recovery-key-not-registered',
 	RECOVERY_UNSUPPORTED_OS: 'recovery-unsupported-os',
+	// Added after the O-10 snapshot: JS-thrown by handleRecovery (2026-08-18 todo), a new terminal class.
+	SIGNING_IDENTITY_UNRECOVERABLE: 'signing-identity-unrecoverable',
 };
 
 describe('own-property code lookup (O-10)', () => {
@@ -187,3 +189,18 @@ describe('own-property code lookup (O-10)', () => {
 		}
 	});
 });
+
+// 2026-08-18 todo: JS-thrown by handleRecovery when neither the recovery key nor the device's signing
+// key can sign for the user. A terminal class: no inline copy, not a navigation class.
+describe('signing-identity-unrecoverable', () => {
+	test('SIGNING_IDENTITY_UNRECOVERABLE maps to signing-identity-unrecoverable', () => {
+		expect(mapDeviceSigningError({ code: 'SIGNING_IDENTITY_UNRECOVERABLE' })).toBe('signing-identity-unrecoverable');
+		expect(isDeviceSigningError({ code: 'SIGNING_IDENTITY_UNRECOVERABLE' })).toBe(true);
+	});
+
+	test('it renders a terminal screen, never InlineError, and is not a navigation class', () => {
+		expect(DEVICE_SIGNING_ERROR_COPY_KEY['signing-identity-unrecoverable']).toBeUndefined();
+		expect(isNavigationClass('signing-identity-unrecoverable')).toBe(false);
+	});
+});
+

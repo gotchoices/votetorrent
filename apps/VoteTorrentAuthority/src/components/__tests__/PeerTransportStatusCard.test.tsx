@@ -30,6 +30,7 @@ const SENTINEL_COLORS = {
   success: '#SUCCES0',
   error: '#ERROR00',
   warning: '#WARN000',
+  warningText: '#WARNTX0',
   textSecondary: '#MUTED00',
   card: '#CARD000',
   text: '#TEXT000',
@@ -97,7 +98,8 @@ describe('PeerTransportStatusCard — N1 caveat, always', () => {
     it(`renders the warning-colored caveat and heading in counts state: ${state.name}`, () => {
       const tr = renderCard(<PeerTransportStatusCard counts={state.counts} onTrySync={jest.fn()} />);
       const body = findByTestID(tr.root, 'transport-status-p2p-body')[0]!;
-      expect(flatten(body.props.style).color).toBe(SENTINEL_COLORS.warning);
+      // Text takes the text-safe warning tint; the fill colour is for the icon and border.
+      expect(flatten(body.props.style).color).toBe(SENTINEL_COLORS.warningText);
       expect(serializeSubtree(body)).toContain('peerSyncCardCaveat');
 
       const heading = findByTestID(tr.root, 'transport-status-p2p-heading')[0]!;

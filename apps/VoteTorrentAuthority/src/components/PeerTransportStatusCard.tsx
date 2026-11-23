@@ -56,7 +56,7 @@ export function PeerTransportStatusCard({ counts, disabled = false, onTrySync }:
 			{/* Unconditional — no surrounding conditional of any kind, in any counts state. */}
 			<ThemedText
 				type="small"
-				style={[localStyles.bodyText, { color: colors.warning }]}
+				style={[localStyles.bodyText, { color: colors.warningText }]}
 				testID="transport-status-p2p-body"
 			>
 				{t("peerSyncCardCaveat")}

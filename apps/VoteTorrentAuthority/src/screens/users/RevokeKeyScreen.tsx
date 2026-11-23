@@ -181,7 +181,7 @@ export function RevokeKeyScreen() {
 								const isSelected = selectedKeys.has(key.key);
 								const revokeTextStyle = isSelected
 									? { color: colors.error }
-									: { color: colors.warning };
+									: { color: colors.warningText };
 								const revokeText = isSelected ? t("revoke") : t("unchanged");
 								const iconName = isSelected ? "square-check" : "square";
 
