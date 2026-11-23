@@ -236,8 +236,11 @@ describeP2PHarness('two-node concurrent staging (D-23, deferred from the single-
 
       const submitA = async (): Promise<string> => transportA.submitRequest(initA, signerA.publicHex, sigA)
       const submitB = async (): Promise<string> => transportB.submitRequest(initB, signerB.publicHex, sigB)
-      const resA = await attemptSubmit(submitA)
-      const resB = await attemptSubmit(submitB)
+      // Concurrently, like F-1: both transports insert through a 2-party barrier, so awaiting A
+      // before starting B held A at the barrier until its timeout and the leg could never finish
+      // inside its budget (the 90 s mocha timeout on every run since the barrier landed).
+      const [resA, resB] = await Promise.all([attemptSubmit(submitA), attemptSubmit(submitB)])
+      console.log(`P2P_RACE F-2 settled a=${JSON.stringify(resA)} b=${JSON.stringify(resB)} cursors=${cursorA},${cursorB}`)
 
       expect(cursorA ?? cursorB, 'F-2: race was exercised').to.not.equal(undefined)
 
