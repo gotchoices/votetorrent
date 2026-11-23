@@ -517,7 +517,7 @@ const resources = {
 			// Slug fallback: FrameN per plan contingency (semantic rename deferred — see 07-05-SUMMARY)
 			screenScaffoldsDebugTitle: 'Onboarding Debug',
 			screenScaffoldsDebugIntro:
-				'Direct entry points for the six onboarding screens. Temporary dev route per D-12; replaced by real callers in phases 8–10.',
+				'Direct entry points for the six onboarding screens. A temporary route for development.',
 			// Phase 8 gap-closure 08-07 — interim accept/send-mode invitation entries
 			debugAdministratorInvitationAccept: 'Administrator Invitation (Accept)',
 			debugAuthorityInvitationSend: 'Authority Invitation (Send)',
@@ -1957,7 +1957,7 @@ const resources = {
 			// Phase 7 onboarding keys (07-05) — Phase 11 plan 11-01 (D-11) — Spanish backfill.
 			screenScaffoldsDebugTitle: 'Depuración de Incorporación', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
 			screenScaffoldsDebugIntro:
-				'Puntos de entrada directos a las seis pantallas de incorporación. Ruta temporal de desarrollo; reemplazada por llamadas reales en las fases 8–10.', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+				'Puntos de entrada directos a las seis pantallas de incorporación. Una ruta temporal para desarrollo.', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
 			// Phase 8 gap-closure 08-07 — interim accept/send-mode invitation entries
 			debugAdministratorInvitationAccept: 'Invitación de administrador (aceptar)',
 			debugAuthorityInvitationSend: 'Invitación de autoridad (enviar)',
